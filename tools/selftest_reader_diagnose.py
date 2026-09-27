@@ -43,6 +43,12 @@ def main():
     check(s({"rolle": "kind", "pid": "1; drop"})[1]["pid"] is None and s({"rolle": "hacker"}) == (None, None) and s(None) == (None, None),
           "Kind-Paket: Zahlen nur als Zahl; falsche Rolle/Unsinn abgewiesen")
 
+    r3, d3 = s({"rolle": "kind", "port_pids": [5120, 7344, "x", True], "tick_kerzen_5min": 240, "sperre": True,
+                "beendet": ["Reader-Baum 100"] * 9, "einzel_meldung": "alte(n) Reader beendet"})
+    check(r3 == "kind" and d3["port_pids"] == [5120, 7344] and d3["tick_kerzen_5min"] == 240 and d3["sperre"] is True
+          and len(d3["beendet"]) == 6 and d3["einzel_meldung"] == "alte(n) Reader beendet",
+          "0.9.8-Felder: Port-Lauscher nur Zahlen, Tick-Updates, Sperre, hoechstens 6 Beendete")
+
     print("\nALLES GRUEN" if ok else "\nFEHLER")
     return 0 if ok else 1
 

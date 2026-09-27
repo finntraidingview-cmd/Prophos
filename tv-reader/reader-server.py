@@ -65,7 +65,7 @@ PORT = 8790
 # < 0.7.0 (Tampermonkey prueft nur taeglich). Ab jetzt sagt jede Antwort, welcher Server und
 # welches Script wirklich laufen; die Bruecke schreibt beides nach echoplus_live, der Markt-
 # Kopf zeigt es. Bei JEDER Aenderung an dieser Datei mitbumpen.
-READER_VERSION = "0.9.7"
+READER_VERSION = "0.9.8"
 HIER = os.path.dirname(os.path.abspath(__file__))
 DATEI = os.path.join(HIER, "positions.json")
 AUS_FLAG = os.path.join(HIER, "reader_aus.flag")   # Datei vorhanden = pausiert
@@ -1011,6 +1011,7 @@ class Handler(BaseHTTPRequestHandler):
                             _kerzen, ok = _tick_kerze_in_ring(_kerzen, w, k.get("symbol_text") or w, k.get("preis"), jetzt)
                             if ok:
                                 _kerzen_s = jetzt
+                                _tick_zeiten.append(jetzt)       # 0.9.8: Zaehler fuer die Kind-Diagnose (letzte 5 min)
             if daten.get("reload_grund"):
                 _reload_grund = str(daten.get("reload_grund"))[:120]
                 _reload_s = time.time()
@@ -1338,6 +1339,192 @@ def reader_kennung(hier=None, host=None):
     return "host-" + (h or "unbekannt")
 
 
+# ── Einzelinstanz (0.9.8, 26./27.09.2026, Auftrag Koordination B15) ────────────────────────────────────────────────
+# Befund pc-usq1i6: nach Finns Neustart 19:39 liefen ZWEI Reader. Der alte hielt Port 8790 und schrieb weiter Schein-Kerzen
+# (ticks 240 = alte 250-ms-Stichproben), der neue 0.9.7 meldete sich einmal als 'kind', kam aber nie an die Anfragen —
+# ThreadingHTTPServer bindet mit allow_reuse_address; unter Windows (SO_REUSEADDR) duerfen dann ZWEI Sockets denselben
+# Port halten, ohne Fehler. Deshalb scheiterte auch jeder Update-Beweis (/positions meldete die alte Version) und die
+# Datei wurde zurueckgerollt. Jetzt:
+#  - Sperrdatei %LOCALAPPDATA%/prophos-reader.lock (msvcrt-Lock, gilt fuer den ganzen PC-Nutzer): nur EIN Server-Kind.
+#  - Wer die Sperre bekommt, beendet jeden anderen Reader-Baum (start-reader.bat-Fenster + Aufsicht + Kind, erkannt an
+#    der Befehlszeile 'reader-server.py' / 'start-reader.bat'), ausser der eigenen Ahnenkette, und jeden fremden
+#    Prozess, der noch auf 8790 lauscht. Dann bindet er EXKLUSIV (SO_EXCLUSIVEADDRUSE) — ein zweiter Server scheitert laut.
+#  - Wer die Sperre NICHT bekommt, ist der zweite: er meldet das und beendet seinen eigenen Baum (Fenster zu).
+#  - Das Kind meldet sich alle 5 min (rolle 'kind'): Port-Lauscher, Tick-Kerzen der letzten 5 min, Sperre, Beendete.
+_tick_zeiten = []                 # Zeitpunkte geschriebener Tick-Kerzen (Diagnose)
+_EINZEL = {"lock": None, "beendet": [], "meldung": "", "lauscher": [], "gesperrt": False}
+
+
+def netstat_lauscher(text, port=PORT):
+    """REIN RECHNEND (testbar): PIDs, die laut 'netstat -ano -p TCP' auf 127.0.0.1/0.0.0.0:<port> lauschen (Sprache egal:
+    Lausch-Zeilen haben als Gegenstelle 0.0.0.0:0)."""
+    pids = set()
+    for z in str(text or "").splitlines():
+        t = z.split()
+        if len(t) >= 5 and t[0].upper() == "TCP" and t[1].endswith(f":{port}") and t[2] in ("0.0.0.0:0", "[::]:0"):
+            try:
+                pids.add(int(t[-1]))
+            except ValueError:
+                pass
+    return sorted(pids)
+
+
+def reader_prozesse_parsen(roh):
+    """REIN RECHNEND (testbar): JSON aus PowerShell Get-CimInstance Win32_Process → [{pid, ppid, name, cmd}]."""
+    try:
+        d = json.loads(roh) if roh else []
+    except ValueError:
+        return []
+    if isinstance(d, dict):
+        d = [d]
+    out = []
+    for x in d if isinstance(d, list) else []:
+        try:
+            out.append({"pid": int(x.get("ProcessId")), "ppid": int(x.get("ParentProcessId") or 0),
+                        "name": str(x.get("Name") or ""), "cmd": str(x.get("CommandLine") or "")})
+        except (TypeError, ValueError, AttributeError):
+            continue
+    return out
+
+
+def _ist_reader_prozess(p):
+    """Nur Python-/cmd-Prozesse zaehlen — ein Editor mit reader-server.py in der Befehlszeile wird nie beendet."""
+    c, n = str(p.get("cmd") or "").lower(), str(p.get("name") or "").lower()
+    if n and n not in ("python.exe", "pythonw.exe", "py.exe", "cmd.exe", "python3.exe"):
+        return False
+    return "reader-server.py" in c or "start-reader.bat" in c
+
+
+def fremde_reader_wurzeln(prozesse, eigene_pid):
+    """REIN RECHNEND (testbar): Wurzel-PIDs aller Reader-Baeume ausser dem eigenen. Eigener Baum = eigene PID und alle
+    Reader-Ahnen (Aufsicht, Batch). Wurzel = oberster Reader-Vorfahr eines Reader-Prozesses."""
+    je = {p["pid"]: p for p in prozesse or [] if _ist_reader_prozess(p)}
+    eigen, x = set(), eigene_pid
+    while x in je or x == eigene_pid:
+        eigen.add(x)
+        nxt = je[x]["ppid"] if x in je else None
+        if not nxt or nxt in eigen:
+            break
+        x = nxt
+    wurzeln = set()
+    for pid in je:
+        if pid in eigen:
+            continue
+        w, gesehen = pid, set()
+        while je.get(w, {}).get("ppid") in je and je[w]["ppid"] not in eigen and w not in gesehen:
+            gesehen.add(w)
+            w = je[w]["ppid"]
+        wurzeln.add(w)
+    return sorted(wurzeln), sorted(eigen)
+
+
+def eigene_wurzel(prozesse, eigene_pid):
+    """REIN RECHNEND (testbar): oberster Reader-Vorfahr des eigenen Prozesses (Batch-Fenster) — zum Beenden des eigenen Baums."""
+    je = {p["pid"]: p for p in prozesse or [] if _ist_reader_prozess(p)}
+    w, gesehen = eigene_pid, set()
+    while je.get(w, {}).get("ppid") in je and w not in gesehen:
+        gesehen.add(w)
+        w = je[w]["ppid"]
+    return w
+
+
+def _win_prozesse():
+    if os.name != "nt":
+        return []
+    try:
+        r = subprocess.run(["powershell", "-NoProfile", "-Command",
+                            "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'reader-server\\.py|start-reader\\.bat' } "
+                            "| Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress"],
+                           capture_output=True, text=True, timeout=25, errors="replace")
+        return reader_prozesse_parsen((r.stdout or "").strip())
+    except Exception:
+        return []
+
+
+def _win_lauscher():
+    if os.name != "nt":
+        return []
+    try:
+        r = subprocess.run(["netstat", "-ano", "-p", "TCP"], capture_output=True, text=True, timeout=15, errors="replace")
+        return netstat_lauscher(r.stdout)
+    except Exception:
+        return []
+
+
+def _win_baum_beenden(pid):
+    try:
+        subprocess.run(["taskkill", "/PID", str(int(pid)), "/T", "/F"], capture_output=True, text=True, timeout=15)
+        return True
+    except Exception:
+        return False
+
+
+def _sperre_holen():
+    """Exklusive Sperre fuer den ganzen PC-Nutzer. -> True (gehoert uns) | False (ein anderer Reader hat sie) | None (kein Windows)."""
+    if os.name != "nt":
+        return None
+    try:
+        import msvcrt
+        pfad = os.path.join(os.environ.get("LOCALAPPDATA") or HIER, "prophos-reader.lock")
+        f = open(pfad, "a+")
+        try:
+            msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError:
+            f.close()
+            return False
+        _EINZEL["lock"] = f            # offen halten = Sperre halten, bis der Prozess endet
+        return True
+    except Exception:
+        return None
+
+
+def einzelinstanz_sichern():
+    """Vor dem Binden: Sperre holen; als Sieger fremde Reader beenden; als Zweiter den eigenen Baum beenden."""
+    sperre = _sperre_holen()
+    if sperre is False:
+        _EINZEL.update(gesperrt=True, meldung="zweiter Reader — es laeuft schon einer; dieses Fenster wird beendet")
+        print(f"\n[{time.strftime('%H:%M:%S')}] {_EINZEL['meldung']}", flush=True)
+        _diagnose_senden("kind")
+        w = eigene_wurzel(_win_prozesse(), os.getpid())
+        _win_baum_beenden(w)
+        os._exit(3)
+    wurzeln, eigen = fremde_reader_wurzeln(_win_prozesse(), os.getpid())
+    for w in wurzeln:
+        if _win_baum_beenden(w):
+            _EINZEL["beendet"].append(f"Reader-Baum {w}")
+    for pid in _win_lauscher():
+        if pid > 4 and pid not in eigen and pid != os.getpid() and _win_baum_beenden(pid):
+            _EINZEL["beendet"].append(f"Port-{PORT}-Halter {pid}")
+    if _EINZEL["beendet"]:
+        _EINZEL["meldung"] = "alte(n) Reader beendet: " + ", ".join(_EINZEL["beendet"])[:200]
+        print(f"\n[{time.strftime('%H:%M:%S')}] {_EINZEL['meldung']}", flush=True)
+        time.sleep(1.5)                  # Port freigeben lassen (kein Puls-Pfad, keine Jitter-Regel noetig)
+
+
+class ExklusiverServer(ThreadingHTTPServer):
+    """0.9.8: nie zwei Server auf demselben Port — Windows: SO_EXCLUSIVEADDRUSE, sonst ohne SO_REUSEADDR."""
+    allow_reuse_address = False
+
+    def server_bind(self):
+        import socket as _so
+        if os.name == "nt" and hasattr(_so, "SO_EXCLUSIVEADDRUSE"):
+            self.socket.setsockopt(_so.SOL_SOCKET, _so.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
+def _kind_diagnose_schleife(schlafen=time.sleep):
+    """0.9.8: das Kind meldet sich alle 5 min (Port-Lauscher, Tick-Kerzen der letzten 5 min, Sperre, Beendete)."""
+    while True:
+        try:
+            _EINZEL["lauscher"] = _win_lauscher()
+            grenze = time.time() - 600
+            _tick_zeiten[:] = [t for t in _tick_zeiten if t >= grenze]
+        except Exception:
+            pass
+        _diagnose_senden("kind")
+        schlafen(300)
+
+
 def reader_diagnose_paket(rolle, status, jetzt=None):
     """REIN RECHNEND (testbar): Paket fuer POST /reader-diagnose/<kennung>."""
     import platform
@@ -1347,7 +1534,12 @@ def reader_diagnose_paket(rolle, status, jetzt=None):
             "system": (platform.system() + " " + platform.release())[:40], "markt_offen": cme_offen(jetzt or time.time()),
             "letzter_check": st.get("letzter_check"), "sha": st.get("sha"), "sha_fehler": st.get("sha_fehler") or "",
             "wartend": st.get("wartend"), "schlecht": list(st.get("schlecht") or [])[-6:], "tausch": st.get("tausch"),
-            "fehler": st.get("fehler") or "", "meldungen": list(st.get("meldungen") or [])[-8:]}
+            "fehler": st.get("fehler") or "", "meldungen": list(st.get("meldungen") or [])[-8:],
+            # 0.9.8 (Einzelinstanz): wer lauscht auf dem Port, wie viele Tick-Kerzen in 5 min, Sperre, beendete alte Reader
+            "port_pids": list(_EINZEL.get("lauscher") or [])[:5],
+            "tick_kerzen_5min": sum(1 for t in _tick_zeiten if (jetzt or time.time()) - t <= 300),
+            "sperre": None if _EINZEL.get("lock") is None and not _EINZEL.get("gesperrt") else (not _EINZEL.get("gesperrt")),
+            "beendet": list(_EINZEL.get("beendet") or [])[:6], "einzel_meldung": _EINZEL.get("meldung") or ""}
 
 
 def _diagnose_senden(rolle):
@@ -1525,9 +1717,10 @@ elif __name__ == "__main__":
     print(f"Schreibt den Stand nach {DATEI}")
     print(f"Reader ist {'AN' if _an else 'PAUSIERT (reader_aus.flag liegt)'}")
     print("Warte auf Daten vom Tampermonkey-Reader … (Strg+C zum Beenden)\n")
-    # 0.9.7: der Server meldet sich einmal selbst — fehlt daneben die Zeile „aufsicht", laeuft keine Aufsicht (kein Updater)
-    threading.Thread(target=_diagnose_senden, args=("kind",), daemon=True).start()
+    # 0.9.8: Einzelinstanz — Sperre, fremde Reader beenden, dann EXKLUSIV binden; Kind meldet sich alle 5 min
+    einzelinstanz_sichern()
+    threading.Thread(target=_kind_diagnose_schleife, daemon=True).start()
     try:
-        ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+        ExklusiverServer(("127.0.0.1", PORT), Handler).serve_forever()
     except KeyboardInterrupt:
         print("\nbeendet.")

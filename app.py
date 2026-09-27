@@ -8841,7 +8841,14 @@ def reader_diagnose_saeubern(d):
            "tausch": {"sha": txt(t.get("sha"), 40), "version": txt(t.get("version"), 16), "at": zahl(t.get("at")),
                       "bewiesen": bool(t.get("bewiesen"))} if t else None,
            "schlecht": [txt(x, 40) for x in (d.get("schlecht") or [])][:6] if isinstance(d.get("schlecht"), list) else [],
-           "meldungen": [txt(x, 220) for x in (d.get("meldungen") or [])][-8:] if isinstance(d.get("meldungen"), list) else []}
+           "meldungen": [txt(x, 220) for x in (d.get("meldungen") or [])][-8:] if isinstance(d.get("meldungen"), list) else [],
+           # Reader 0.9.8 (B15, Einzelinstanz): Port-Lauscher, Tick-Updates der letzten 5 min, Sperre, beendete alte Reader
+           "port_pids": [x for x in (d.get("port_pids") or []) if isinstance(x, int) and not isinstance(x, bool)][:5]
+           if isinstance(d.get("port_pids"), list) else [],
+           "tick_kerzen_5min": zahl(d.get("tick_kerzen_5min")),
+           "sperre": d.get("sperre") if isinstance(d.get("sperre"), bool) else None,
+           "beendet": [txt(x, 60) for x in (d.get("beendet") or [])][:6] if isinstance(d.get("beendet"), list) else [],
+           "einzel_meldung": txt(d.get("einzel_meldung"), 220)}
     if len(json.dumps(out, ensure_ascii=False)) > READER_DIAGNOSE_MAX:
         return None, None
     return d["rolle"], out

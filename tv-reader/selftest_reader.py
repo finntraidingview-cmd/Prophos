@@ -406,6 +406,59 @@ def main():
     finally:
         rs._UPD_STATUS.clear(); rs._UPD_STATUS.update(alt_st)
 
+    # 0.9.8: Einzelinstanz (B15)
+    ns_txt = """
+Aktive Verbindungen
+
+  Proto  Lokale Adresse         Remoteadresse          Status           PID
+  TCP    0.0.0.0:135            0.0.0.0:0              ABHÖREN          1100
+  TCP    127.0.0.1:8790         0.0.0.0:0              ABHÖREN          5120
+  TCP    127.0.0.1:8790         0.0.0.0:0              LISTENING        7344
+  TCP    127.0.0.1:8790         127.0.0.1:53211        HERGESTELLT      5120
+  TCP    127.0.0.1:18790        0.0.0.0:0              LISTENING        999
+"""
+    check(rs.netstat_lauscher(ns_txt) == [5120, 7344], "netstat: zwei Lauscher auf 8790 erkannt (deutsch + englisch), Verbindungen/andere Ports nicht")
+    pj = _j9.dumps([
+        {"ProcessId": 100, "ParentProcessId": 1, "Name": "cmd.exe", "CommandLine": 'cmd /c ""C:\\tv-reader\\start-reader.bat""'},
+        {"ProcessId": 101, "ParentProcessId": 100, "Name": "python.exe", "CommandLine": "python reader-server.py"},
+        {"ProcessId": 102, "ParentProcessId": 101, "Name": "python.exe", "CommandLine": "C:\\Python\\python.exe C:\\tv-reader\\reader-server.py"},
+        {"ProcessId": 200, "ParentProcessId": 1, "Name": "cmd.exe", "CommandLine": 'cmd /c ""C:\\tv-reader\\start-reader.bat""'},
+        {"ProcessId": 201, "ParentProcessId": 200, "Name": "python.exe", "CommandLine": "python reader-server.py"},
+        {"ProcessId": 202, "ParentProcessId": 201, "Name": "python.exe", "CommandLine": "python reader-server.py"},
+        {"ProcessId": 300, "ParentProcessId": 1, "Name": "notepad.exe", "CommandLine": "notepad reader-server.py"}])
+    pr = rs.reader_prozesse_parsen(pj)
+    check(len(pr) == 7 and pr[0] == {"pid": 100, "ppid": 1, "name": "cmd.exe", "cmd": 'cmd /c ""C:\\tv-reader\\start-reader.bat""'}
+          and rs.reader_prozesse_parsen("kaputt") == [] and len(rs.reader_prozesse_parsen(_j9.dumps(pj and _j9.loads(pj)[0]))) == 1,
+          "Prozessliste: JSON-Liste, einzelnes Objekt, kaputt → leer")
+    w, eig = rs.fremde_reader_wurzeln(pr, 202)
+    check(w == [100] and eig == [200, 201, 202], "neues Kind 202: fremder Baum = altes Fenster 100 (samt Aufsicht+Kind), eigener Baum bleibt")
+    w2, _e2 = rs.fremde_reader_wurzeln(pr, 102)
+    check(w2 == [200], "gespiegelt: Kind 102 beendet Baum 200")
+    check(rs.eigene_wurzel(pr, 202) == 200 and rs.eigene_wurzel(pr, 102) == 100, "eigene Wurzel = eigenes Batch-Fenster")
+    check(300 not in [p_["pid"] for p_ in pr if rs._ist_reader_prozess(p_)], "Editor mit reader-server.py in der Befehlszeile wird nie beendet")
+    import socket as _so9
+    s1 = _so9.socket(); s1.bind(("127.0.0.1", 0)); port9 = s1.getsockname()[1]; s1.close()
+    srv1 = rs.ExklusiverServer(("127.0.0.1", port9), rs.Handler)
+    try:
+        zweiter = False
+        try:
+            rs.ExklusiverServer(("127.0.0.1", port9), rs.Handler).server_close()
+            zweiter = True
+        except OSError:
+            pass
+        check(not zweiter, "exklusiv gebunden: ein zweiter Server auf demselben Port scheitert laut")
+    finally:
+        srv1.server_close()
+    alt_z = list(rs._tick_zeiten); alt_e = dict(rs._EINZEL)
+    try:
+        rs._tick_zeiten[:] = [_t("2026-09-26T19:40:00") - 30, _t("2026-09-26T19:40:00") - 100, _t("2026-09-26T19:40:00") - 400]
+        rs._EINZEL.update(lauscher=[5120, 7344], beendet=["Reader-Baum 100"], meldung="alte(n) Reader beendet: Reader-Baum 100")
+        pk9 = rs.reader_diagnose_paket("kind", {}, _t("2026-09-26T19:40:00"))
+        check(pk9["port_pids"] == [5120, 7344] and pk9["tick_kerzen_5min"] == 2 and pk9["beendet"] == ["Reader-Baum 100"]
+              and pk9["einzel_meldung"].startswith("alte(n) Reader beendet"), "Kind-Diagnose: Port-Lauscher, Tick-Updates 5 min, Beendete")
+    finally:
+        rs._tick_zeiten[:] = alt_z; rs._EINZEL.clear(); rs._EINZEL.update(alt_e)
+
     print("\n" + ("alle Tests bestanden" if ok else "FEHLER"))
     return 0 if ok else 1
 
