@@ -1846,6 +1846,7 @@ def main():
     results.append(test_tsx_order())
     results.append(test_tsx_login())
     results.append(test_puls_heim())
+    results.append(test_tv_tp_orders())
     results.append(test_hedge_bereit())
     results.append(test_quickedit())
 
@@ -3302,6 +3303,42 @@ def test_puls_heim():
         ob._PULS_HEIM.update(w=None, gewechselt=False, aus=False)
     if ok:
         print("✓ Puls-Heim: Prophos-Tab (links der Mitte) oder Fenster, nur nach eigenem Wechsel, einmal je Lauf, nie im Zwischenschritt")
+    return ok
+
+
+
+def test_tv_tp_orders():
+    """Master 28.09.2026 (Chris 79633d2e): TP-Limit aus dem Reiter „Orders", wenn der Toast-Stapel zu bleibt — Limit-Order mit
+    Wurzel, Gegenseite und Menge, nicht gefüllt; Reiter mit Zähler („Orders 1") erkannt."""
+    import order_bot as ob
+    ok = True
+
+    def chk(name, bed):
+        nonlocal ok
+        if not bed:
+            print("✗ TV-TP-Orders: " + name); ok = False
+
+    tab = ("Orders 1", (160, 1200, 240, 1220), "TabItem")
+    kopf = [("Symbol", 60), ("Side", 200), ("Type", 300), ("Qty", 400), ("Limit Price", 480), ("Stop Price", 600),
+            ("Fill Price", 720), ("Status", 840)]
+    roh = [tab, ("Positions 1", (60, 1200, 150, 1220), "TabItem")] + [(n, (x, 1240, x + 90, 1258), "Text") for n, x in kopf]
+
+    def zeile(y, werte):
+        return [(v, (x, y, x + 90, y + 18), "Text") for v, (_n, x) in zip(werte, kopf) if v]
+    roh += zeile(1270, ["MNQZ6", "Sell", "Limit", "4", "30,760.75", "", "", "Working"])
+    roh += zeile(1300, ["MNQZ6", "Sell", "Market", "4", "", "", "30,794.75", "Filled"])
+    k = ob.tv_tabelle_kopf_unter(roh, tab[1])
+    w = ob.tv_tp_order_waehlen(roh, k, "MNQZ6", "buy", 4)
+    chk(f"BUY 4 → Sell-Limit 30760.75 ({w})", w is not None and w["preis"] == 30760.75)
+    chk("falsche Menge → None", ob.tv_tp_order_waehlen(roh, k, "MNQZ6", "buy", 2) is None)
+    chk("gleiche Seite → None", ob.tv_tp_order_waehlen(roh, k, "MNQZ6", "sell", 4) is None)
+    chk("andere Wurzel → None", ob.tv_tp_order_waehlen(roh, k, "ESZ6", "buy", 4) is None)
+    roh2 = roh + zeile(1330, ["MNQZ6", "Sell", "Limit", "4", "30,770.00", "", "", "Working"])
+    chk("zwei passende Limit → None", ob.tv_tp_order_waehlen(roh2, ob.tv_tabelle_kopf_unter(roh2, tab[1]), "MNQZ6", "buy", 4) is None)
+    chk("Reiter mit Zähler", ob.TV_RX_ORDERS_TAB_N.search("Orders 1") and ob.TV_RX_POS_TAB_N.search("Positions 1")
+        and ob.TV_RX_POS_TAB_N.search("Positions") and not ob.TV_RX_ORDERS_TAB_N.search("Order History"))
+    if ok:
+        print("✓ TV-TP-Orders: Limit-Order Wurzel/Gegenseite/Menge, eindeutig, Reiter mit Zähler")
     return ok
 
 

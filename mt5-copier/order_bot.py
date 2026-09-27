@@ -6236,7 +6236,12 @@ def tv_order_schritt(w, cmd, trail, erg=None):
                 trail.append(f"Avg Fill nach der Meldung: {einstieg_ or 'nicht lesbar (1,2 s)'}"
                              + (f" [{diag_}]" if (diag_ and not einstieg_) else ""))
             if m_tp is not None:
-                erg["tp_limit"] = m_tp
+                erg["tp_limit"], erg["tp_limit_quelle"] = m_tp, "tv_toast"
+            elif plan["tp"]:
+                # Master 28.09.2026: Toast-Stapel zu, TP fehlt → Reiter 'Orders' (Limit-Order), danach zurück auf Positions
+                tpo = _tv_tp_aus_orders(w, trail, cmd.get("symbol"), plan["richtung"], plan["menge"])
+                if tpo:
+                    erg["tp_limit"], erg["tp_limit_quelle"] = tpo, "tv_orders"
             erg.update(bestaetigt=True, menge=float(plan["menge"]), einstieg=einstieg_, tv_symbol=sym_)
             return True, (f"Order platziert: {plan['richtung'].upper()} {plan['menge']} {sym_ or cmd.get('symbol')}"
                           + (f" @ {einstieg_}" if einstieg_ else "") + f" · {tpsl} "
@@ -6278,9 +6283,13 @@ def tv_order_schritt(w, cmd, trail, erg=None):
                     treffer = dict(treffer, einstieg=str(m_["fill"]))
                     erg["einstieg_quelle"] = "fill_toast"
                 if m_["tp"] is not None:
-                    erg["tp_limit"] = m_["tp"]
+                    erg["tp_limit"], erg["tp_limit_quelle"] = m_["tp"], "tv_toast"
             except Exception:
                 pass
+            if erg.get("tp_limit") is None and plan["tp"]:
+                tpo = _tv_tp_aus_orders(w, trail, cmd.get("symbol"), plan["richtung"], plan["menge"])
+                if tpo:
+                    erg["tp_limit"], erg["tp_limit_quelle"] = tpo, "tv_orders"
             erg.update(bestaetigt=True, menge=zuwachs, einstieg=treffer.get("einstieg"), tv_symbol=treffer.get("symbol"))
             trail.append(f"Position bestaetigt ({quelle}): +{zuwachs:g}")
             return True, (f"Order platziert: {plan['richtung'].upper()} {plan['menge']} "
@@ -6397,7 +6406,7 @@ def modus_tvkette(cmd):
             res["gesendet"] = True
             res["retry_ok"] = False
             res["bestaetigt"] = bool(erg.get("bestaetigt"))
-            for _k in ("menge", "einstieg", "tv_symbol", "einstieg_quelle", "tp_limit", "order_klick_ms", "meldung_roh"):
+            for _k in ("menge", "einstieg", "tv_symbol", "einstieg_quelle", "tp_limit", "tp_limit_quelle", "order_klick_ms", "meldung_roh"):
                 res[_k] = erg.get(_k)
     res["konto_msg"] = res.get("msg")
     res["ok"] = bool(ok)
@@ -7408,6 +7417,109 @@ def _tv_reiter_klick(w, roh, muster, name, trail):
     r = eindeutig[0][1]
     ok, _f = _tv_uia_klick({"punkt": ((r[0] + r[2]) // 2, (r[1] + r[3]) // 2)}, f"Reiter {name}", trail)
     return bool(ok)
+
+
+# TP-LIMIT AUS DEM REITER „ORDERS" (Master 28.09.2026 nach Chris 79633d2e: der Toast-Stapel blieb trotz 'Show more' zu, der TP fehlte).
+# Tradovate-Panel zeigt die Reiter mit Zähler („Positions 1", „Orders 1") — deshalb eigene Muster mit optionaler Zahl.
+TV_RX_POS_TAB_N = re.compile(r"^position(s|en)?(\s*\(?\d+\)?)?$", re.I)
+TV_RX_ORDERS_TAB_N = re.compile(r"^(orders?|auftr(ä|ae)ge)(\s*\(?\d+\)?)?$", re.I)
+TV_RX_ORD_LIMIT = re.compile(r"^(limit\s*price|limit|limitpreis|limit-preis)$", re.I)
+
+
+def tv_tp_order_waehlen(roh, kopf, symbol, richtung, menge):
+    """REIN RECHNEND (testbar): TP-Limit-Order aus der Orders-Tabelle — Typ Limit, gleiche Wurzel, GEGENSEITE, gleiche Menge (falls
+    lesbar), nicht gefüllt/storniert/abgelehnt; Preis aus der Spalte 'Limit Price'. Genau EINE, sonst None.
+    -> {'preis', 'zeile'} | None"""
+    if not kopf:
+        return None
+    zeilen = tv_orders_lesen(roh, kopf)
+    sp = tv_orders_spalten(roh, kopf)
+    # Limit-Spalte selbst suchen (tv_orders_spalten kennt sie nicht): Kopfzelle in derselben Zeile wie 'Symbol'
+    my = lambda r: (r[1] + r[3]) // 2
+    band = None
+    koepfe = sorted([(" ".join(str(e[0]).split()), tuple(e[1])) for e in roh or () if e[1] and abs(my(e[1]) - sp["y"]) <= 14
+                     and e[1][0] >= sp["symbol"][0]], key=lambda k: k[1][0])
+    for i, (n, r) in enumerate(koepfe):
+        if TV_RX_ORD_LIMIT.match(n):
+            rechts = (koepfe[i + 1][1][0] - 12) if i + 1 < len(koepfe) else r[2] + 200
+            band = (r[0] - 12, rechts)
+            break
+    if not band:
+        return None
+    gegen = "sell" if str(richtung).lower() == "buy" else "buy"
+    wurzel = tv_symbol_root(symbol)
+    treffer = []
+    for z in zeilen:
+        if tv_symbol_root(z.get("symbol")) != wurzel:
+            continue
+        sz = str(z.get("seite") or "").strip().lower()      # Orders-Tabelle: Buy/Sell (Positions: Long/Short)
+        if not (sz.startswith(gegen) or tv_seite_passt(sz, gegen) or (gegen == "buy" and sz.startswith("kauf"))
+                or (gegen == "sell" and sz.startswith("verkauf"))):
+            continue
+        if "limit" not in str(z.get("typ") or "").lower():
+            continue
+        if re.search(r"fill|cancel|reject|storn|abgelehnt|ausgef", str(z.get("status") or ""), re.I):
+            continue
+        mz = tv_zahl_lesen(z.get("menge")) if z.get("menge") else None
+        if menge and mz and abs(float(mz) - float(menge)) > 1e-9:
+            continue
+        zellen = [(" ".join(str(e[0]).split()), e[1]) for e in roh or () if e[1] and abs(my(e[1]) - z["y"]) <= 12
+                  and band[0] <= (e[1][0] + e[1][2]) / 2 <= band[1]]
+        preis = next((tv_zahl_lesen(n) for n, _r in zellen if tv_zahl_lesen(n)), None)
+        if preis and preis > 1000:
+            treffer.append({"preis": preis, "zeile": z})
+    return treffer[0] if len(treffer) == 1 else None
+
+
+def _tv_tp_aus_orders(w, trail, symbol, richtung, menge):
+    """Reiter 'Orders' (genau einer) → TP-Limit lesen → IMMER zurück auf 'Positions' (genau einer, sonst gar nicht erst
+    hin). Nichts schließen, nichts ändern. -> preis | None"""
+    klick_orders = False
+    try:
+        roh0 = _tv_uia_roh(w, TV_UIA_LESEN_TYPEN)
+        eind = lambda rx: [e for e in roh0 if e[1] and rx.search(" ".join(str(e[0]).split()))
+                           and (len(e) < 3 or e[2] in ("TabItem", "Button", "Text", ""))]
+        def zahl(ls):
+            u = []
+            for e in ls:
+                if not any(abs(e[1][0] - x[1][0]) <= 4 and abs(e[1][1] - x[1][1]) <= 4 for x in u):
+                    u.append(e)
+            return u
+        pos_t, ord_t = zahl(eind(TV_RX_POS_TAB_N)), zahl(eind(TV_RX_ORDERS_TAB_N))
+        if len(pos_t) != 1 or len(ord_t) != 1:
+            trail.append(f"TP aus Orders: Reiter nicht eindeutig (Positions {len(pos_t)}, Orders {len(ord_t)}) — nicht angefasst")
+            return None
+        if not _tv_reiter_klick(w, roh0, TV_RX_ORDERS_TAB_N, "Orders", trail):
+            return None
+        klick_orders = True
+        kopf, roh, t_bis = None, [], time.time() + 3.0
+        while time.time() < t_bis:
+            _warte(0.4, 0.3)
+            roh = _tv_uia_roh(w, TV_UIA_LESEN_TYPEN)
+            tabs = [e[1] for e in roh if e[1] and TV_RX_ORDERS_TAB_N.search(" ".join(str(e[0]).split()))]
+            kopf = tv_tabelle_kopf_unter(roh, min(tabs, key=lambda r: r[1]) if tabs else None)
+            if kopf:
+                break
+        if not kopf:
+            trail.append("TP aus Orders: keine Kopfzeile 'Symbol' unter dem Reiter")
+            return None
+        t = tv_tp_order_waehlen(roh, kopf, symbol, richtung, menge)
+        trail.append(f"TP aus Orders: {t['preis'] if t else 'keine eindeutige Limit-Order'} "
+                     f"(Köpfe: {', '.join(tv_orders_spalten(roh, kopf)['koepfe'][:10])})")
+        return t["preis"] if t else None
+    except Exception as e:
+        trail.append(f"TP aus Orders fehlgeschlagen ({type(e).__name__})")
+        return None
+    finally:
+        if klick_orders:
+            try:
+                roh2 = _tv_uia_roh(w, TV_UIA_LESEN_TYPEN)
+                if _tv_reiter_klick(w, roh2, TV_RX_POS_TAB_N, "Positions", trail):
+                    _warte(0.3, 0.2)
+                else:
+                    trail.append("TP aus Orders: zurück auf Positions nicht eindeutig — Reiter Orders bleibt offen")
+            except Exception:
+                pass
 
 
 def _tv_exit_fill_lesen(w, trail, symbol, richtung):
