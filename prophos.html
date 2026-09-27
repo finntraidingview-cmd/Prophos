@@ -23060,7 +23060,7 @@
           <span class="mwd-status">${st}</span>
         </div>
         <div class="wdl-level">
-          <div><small>Einstieg</small><b>${f2(e)}</b></div>
+          <div title="${t.einstieg_quelle === 'reader_klick' ? 'Kein Fill aus TopstepX — Reader-Kurs direkt nach dem Klick (F28)' : ''}"><small>Einstieg${t.einstieg_quelle === 'reader_klick' ? ' · Kurs beim Klick' : ''}</small><b>${f2(e)}</b></div>
           <div><small>TP-Level${num(t.master_tp) != null ? ' · ' + f0(t.master_tp) + ' $' : ''}</small><b style="color:#0E9757">${f2(tp)}</b>${offen && tp != null ? `<small data-wdl-lv="tp">${LT.tp}</small>` : ''}</div>
           <div title="${escapeHtml(String(t.liq_regel || ''))}"><small>Liquidation${num(t.liq_balance) != null ? ' · bei ' + f0(t.liq_balance) + ' $' : ''}</small><b style="color:#D92D20">${lq != null ? f2(lq) : '–'}</b>${lq == null && t.liq_regel ? `<small>${escapeHtml(String(t.liq_regel))}</small>` : offen && lq != null ? `<small data-wdl-lv="lq">${LT.lq}</small>` : ''}</div>
           <div><small>Kurs jetzt</small><b data-wdl-lv="kp">${offen ? LT.kp : '–'}</b></div>
@@ -34488,7 +34488,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.706'
+  const OS_TAB_BUILD = '2026-09-22.708'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
