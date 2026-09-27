@@ -12297,7 +12297,8 @@
     }
     function admPayoutCalc(r){
       const firm = r.account_firm || r.firm_raw || r.firm || ''
-      const size = admAccGroesse(r.account_name || r.name || '', r.balance)
+      // Topstep Express startet bei 0 $ (F27) — Rechenbasis 0, sonst die Größe aus dem Namen
+      const size = kontoIstTopstepExpress(r) ? 0 : admAccGroesse(r.account_name || r.name || '', r.balance)
       const bal = r.balance == null ? null : Number(r.balance)
       const pct = r.payout_pct == null ? admPayoutPctDefault(firm) : Number(r.payout_pct)
       const profit = (size != null && bal != null) ? bal - size : null
@@ -12763,9 +12764,9 @@
       k.className = 'af-karte' + (r.im_trade ? ' is-trade' : heute ? ' is-heute' : '') + (r.archived ? ' is-arch' : '')
       const ccy = r.balance_ccy || 'USD'
       const size = r.size > 0 ? Number(r.size) : admAccGroesse(r.name, r.balance)
-      const start = r.start > 0 ? Number(r.start) : size
+      const start = kontoIstTopstepExpress(r) ? 0 : (r.start > 0 ? Number(r.start) : size)   // Topstep Express: Basis 0 (F27)
       const bal = r.balance == null ? null : Number(r.balance)
-      const pl = (bal != null && start) ? bal - start : null
+      const pl = (bal != null && (start || kontoIstTopstepExpress(r))) ? bal - start : null
       const tr = r.im_trade
       const seit = tr && tr.seit ? new Date(tr.seit) : null
       const seitTxt = seit && !isNaN(seit) ? (seit.toDateString() === new Date().toDateString()
@@ -34424,7 +34425,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.689'
+  const OS_TAB_BUILD = '2026-09-22.691'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -37277,8 +37278,9 @@
      */
     function tpFormatDelta(a, bal){
       // Delta zur Kontogröße (starting_balance, sonst Name „150k") statt zur manuellen Balance (F9, 26.09.2026)
-      const groesse = (a && Number(a.startingBalance) > 0) ? Number(a.startingBalance) : (a && typeof tpKontoGroesseAusName === 'function' ? tpKontoGroesseAusName(a.name) : 0)
-      if(!a || !(groesse > 0) || !isFinite(bal.val)) return ''
+      const express = kontoIstTopstepExpress(a)   // F27: Basis 0
+      const groesse = express ? 0 : (a && Number(a.startingBalance) > 0) ? Number(a.startingBalance) : (a && typeof tpKontoGroesseAusName === 'function' ? tpKontoGroesseAusName(a.name) : 0)
+      if(!a || !(groesse > 0 || express) || !isFinite(bal.val)) return ''
       // Nur sinnvoll wenn Live-Daten vorliegen, sonst ist Delta immer 0
       if(bal.src === 'init') return ''
       const delta = bal.val - groesse
@@ -38910,6 +38912,20 @@
   }
   // Startbalance: DB-Feld, sonst Kontogröße aus dem Namen („150k Apex …" → 150000). 23.09.2026: bei fast
   // allen Fundeds steht balance = 0 in der DB (nie gepflegt), Puffer = Live − 0 + DD war dann 158.425 $.
+  /* TOPSTEP EXPRESS (27.09.2026, F27, Finn am Admin-Block „Wert in Funded-Accounts": Mikes EXPRESS-V2-682437-57131691 mit 11.079,66 $
+   * zählte nicht mit). Topstep-Express-Konten (TopstepX „$150K EXPRESS", Kennung EXPRESS-V2-…) starten mit Balance 0 $ — der Gewinn IST
+   * die Balance. Für Gewinn-Rechnungen („Balance − Größe") ist die Basis deshalb 0; die Anzeige „150k" bleibt. Combines (150KTC-…)
+   * starten mit 150.000 $ (Mike 154.5xx $) und bleiben bei der Größe. Erkennung: Firma Topstep UND (Kennung/Name EXPRESS ODER Typ
+   * funded/winning_days). Nimmt Konto-Objekte aus Frontend (firm, externalId, name, type) und Backend (firm_raw, ext, account_name, …). */
+  function kontoIstTopstepExpress(k){
+    if(!k) return false
+    const firm = String(k.firm_raw || k.account_firm || k.firm || '')
+    if(!/topstep/i.test(firm)) return false
+    const ext = String(k.ext || k.externalId || k.external_id || ''), name = String(k.account_name || k.name || '')
+    const typ = String(k.type || k.account_type || '')
+    return /^EXPRESS/i.test(ext.trim()) || /express/i.test(name) || typ === 'funded' || typ === 'winning_days'
+  }
+  window._kontoIstTopstepExpress = kontoIstTopstepExpress   // Test-Haken
   function tpKontoGroesseAusName(name){ const m = /(\d{2,3})\s*k\b/i.exec(String(name || '')); return m ? (+m[1]) * 1000 : 0 }
   function tpVorplanSlaveWaehrung(eur, slaveCurrency, fxUsdEur){
     return Math.round((slaveCurrency !== '€' ? eur / (fxUsdEur || 0.85) : eur) * 100) / 100
@@ -38940,10 +38956,11 @@
     if(funded){
       // Kontogröße aus starting_balance, sonst aus dem Namen — accounts.balance (manuelle Balance) wird nicht mehr gelesen (F9, 26.09.2026)
       const startRoh = Number(acc.startingBalance) || 0
-      groesse = startRoh > 0 ? startRoh : tpKontoGroesseAusName(acc.name)
+      const express = kontoIstTopstepExpress(acc)   // Topstep Express: Stand über 0 $ = die Balance selbst (F27)
+      groesse = express ? 0 : startRoh > 0 ? startRoh : tpKontoGroesseAusName(acc.name)
       live = (typeof o.live === 'number' && isFinite(o.live)) ? o.live : null
       if(live == null){ plus = 0; hinweis = 'kein Live-Stand — kleinste Stufe' }
-      else if(!(groesse > 0)){ plus = 0; hinweis = 'Kontogröße unbekannt („150k" in den Namen) — kleinste Stufe' }
+      else if(!(groesse > 0) && !express){ plus = 0; hinweis = 'Kontogröße unbekannt („150k" in den Namen) — kleinste Stufe' }
       else plus = Math.round(live - groesse)
       puffer = plus   // alter Feldname, bleibt für Anzeigen, die ihn noch lesen
       // Staffel je Firma (23.09.2026, Finn: „jede Prop soll ihre eigene Tabelle haben"): regeln.staffelFirma[firma], sonst Standard
@@ -40224,9 +40241,10 @@
       const tpFeld = sperren ? `<span class="mono">${tpWert ? '$' + de(tpWert) : '—'}</span>` : `<input type="number" class="input mono vp-in wd-in" data-wd-tp="${escapeHtml(String(k.id))}" value="${tpWert ? escapeHtml(String(tpWert)) : ''}" placeholder="${k.tpVon != null ? escapeHtml(de(k.tpVon) + '–' + de(k.tpBis)) : ''}" title="TP in $ — leer = zufällig aus der Firmen-Spanne">`
       const slFeld = sperren ? `<span class="mono">${slWert ? '$' + de(slWert) : '—'}</span>` : `<input type="number" class="input mono vp-in wd-in" data-wd-sl="${escapeHtml(String(k.id))}" value="${slWert ? escapeHtml(String(slWert)) : ''}" placeholder="—" title="SL in $ — leer = kein SL">`
       const live = kd.live_balance != null ? kd.live_balance : (k.live != null ? k.live : null)
-      const groesse = kd.starting_balance > 0 ? kd.starting_balance : tpKontoGroesseAusName(k.name)   // nie die manuelle Balance (F9)
-      const plus = live != null && groesse > 0 ? Math.round(live - groesse) : (k.plus != null ? k.plus : null)
-      const bal = live != null ? `$${de(live)}${plus != null ? `<div class="kf" style="color:${plus >= 0 ? '#2a9d5c' : 'var(--danger)'}">${plus >= 0 ? '+' : ''}${de(plus)} über ${groesse ? de(groesse) : '?'}</div>` : ''}` : '<span class="kf">kein Live-Stand</span>'
+      const express = kontoIstTopstepExpress({ firm: kd.firm, ext: kd.ext, name: kd.name || k.name, type: kd.type })   // F27: Basis 0
+      const groesse = express ? 0 : kd.starting_balance > 0 ? kd.starting_balance : tpKontoGroesseAusName(k.name)   // nie die manuelle Balance (F9)
+      const plus = live != null && (groesse > 0 || express) ? Math.round(live - groesse) : (k.plus != null ? k.plus : null)
+      const bal = live != null ? `$${de(live)}${plus != null ? `<div class="kf" style="color:${plus >= 0 ? '#2a9d5c' : 'var(--danger)'}">${plus >= 0 ? '+' : ''}${de(plus)} über ${express ? '0 (Express)' : groesse ? de(groesse) : '?'}</div>` : ''}` : '<span class="kf">kein Live-Stand</span>'
       const dd = kd.max_drawdown ? `$${de(kd.max_drawdown)}` : '—'
       const slave = (k.slave != null) ? `${escapeHtml(k.waehrung || '€')}${de(k.slave)}` : (wdAktiv(k) ? '<span class="kf">nach Staffel</span>' : '—')
       const wd = kd.winning_days != null ? `${kd.winning_days}${kd.goal_target ? `<span class="kf"> / ${kd.goal_target}</span>` : ''}` : '—'
