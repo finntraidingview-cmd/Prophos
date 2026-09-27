@@ -22157,30 +22157,18 @@
       return
     }
     if(_mklLw.skalaSig){ _mklLw.skalaSig = ''; try{ _mklLw.serie.applyOptions({ autoscaleInfoProvider: orig => orig() }) }catch(_){} }
-    /* MARKIERTE LINIEN (28.09.2026, Finn über den Master: „Entry, TP und SL dick markiert, jeweils mit dem Preis rechts an der Achse —
-     * 1:1 mit Tradovate/TradingView vergleichen"). Angeklickter Trade (mkl.wd.aktiv, auch gerade beendet): Entry blau, TP grün, SL/Liq
-     * rot, durchgezogen 2–3 px, Titel mit exaktem Preis (de-DE, 2 Nachkommastellen) + Einstiegs-Quelle; dazu dünn violett gestrichelt
-     * „Fusion zu". Nicht angeklickte laufende Trades wie bisher dünn (Entry in Personenfarbe), TP + Fusion-zu mit Preis an der Achse. */
-    const pz = v => Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    const quelleKurz = pw => { const q = String((pw.hedge && pw.hedge.einstieg_quelle) || (pw.tv && pw.tv.einstieg_quelle) || pw.einstieg_quelle || '')
-      return (pw.hedge && pw.hedge.tp_quelle === 'hand') && !q ? 'hand' : /hand/i.test(q) ? 'hand' : /^feed/i.test(q) ? 'feed' : /fill|^tv$|^hedge$/i.test(q) ? 'fill' : (q || '–') }
-    for(const pw of ((mkl.wd && mkl.wd.plaene) || []).filter(x => x && Number(x.einstieg_nq) > 0 && (x.status === 'open' || mkl.wd.aktiv === String(x.id)))){
-      const hervor = mkl.wd.aktiv === String(pw.id), farbe = mklWdFarbe(pw), kurz = mklWdKurz(pw)
-      const linie = (v, col, titel, style, w, achse) => { if(!(Number(v) > 0)) return; try{ _mklLw.wdLinien.push(_mklLw.serie.createPriceLine({ price: Number(v), color: col, lineWidth: w, lineStyle: style, axisLabelVisible: achse, title: titel })) }catch(_){} }
-      const hOffen = !!(pw.hedge && pw.status === 'open' && !['geschlossen', 'fehler', 'abgelehnt', 'zu'].includes(String(pw.hedge.status || '')) && mklWdSchliesstBei(pw) > 0)   // Fusion zu, solange der Hedge nicht zu ist
-      const slTxt = pw.sl_art === 'liquidation' ? 'SL/Liq' : 'SL'
-      if(hervor){
-        linie(pw.einstieg_nq, '#2563EB', `Entry ${pz(pw.einstieg_nq)} · ${quelleKurz(pw)}`, 0, 3, true)
-        const tq = String((pw.hedge && pw.hedge.tp_quelle) || ''), tqTxt = { tv_toast: 'TV-Meldung', tv_orders: 'TV-Orders', tv_limit: 'TV-Limit', hand: 'Hand', entry_hand: 'aus Entry (Hand)', fill_nachtrag: 'aus Fill', fill_rechnung: 'aus Fill' }[tq] || ''
-        linie(pw.tp_level_nq, '#15803d', `TP ${pz(pw.tp_level_nq)}${tqTxt ? ' · ' + tqTxt : ''}`, 0, 2, true)
-        linie(pw.sl_level_nq, '#b91c1c', `${slTxt} ${pz(pw.sl_level_nq)}`, 0, 2, true)
-        if(hOffen) linie(mklWdSchliesstBei(pw), '#7C3AED', `Fusion zu ${pz(mklWdSchliesstBei(pw))}`, 2, 1, true)
-      } else {
-        linie(pw.einstieg_nq, '#2563EB', `Entry ${pz(pw.einstieg_nq)} ${kurz}`, 0, 2, true)   // einheitlich: Entry blau, TP grün, SL/Liq rot, Fusion violett (28.09.2026)   // Preis an der Achse auch ohne Klick (Finn 28.09.2026: „bei den Entrys auch Zahlen hinschreiben“)
-        linie(pw.tp_level_nq, '#15803d', `TP ${pz(pw.tp_level_nq)} ${kurz}`, 2, 1, true)
-        if(hOffen) linie(mklWdSchliesstBei(pw), '#7C3AED', `Fusion zu ${pz(mklWdSchliesstBei(pw))} ${kurz}`, 2, 1, true)
-        linie(pw.sl_level_nq, '#b91c1c', `${slTxt} ${kurz}`, 2, 1, false)   // WD: Liquidation statt SL (F22)
-      }
+    /* LINIEN NUR FÜR DEN AUSGEWÄHLTEN TRADE (28.09.2026, Finn über den Master: „zu voll" — ohne Auswahl nur der Chart). Auswahl =
+     * mkl.wd.aktiv (Klick in „Läuft gerade", auf die Karte oder eine Abhak-Zeile; zweiter Klick hebt auf). Entry blau 3 px, TP grün,
+     * SL/Liq rot je 2 px durchgezogen, Fusion zu violett gestrichelt (solange der Hedge nicht zu ist). An der Achse NUR der Preis —
+     * die Farbe sagt, was es ist; Quelle/Konto stehen auf der Karte. */
+    const pw = mkl.wd.aktiv ? ((mkl.wd && mkl.wd.plaene) || []).find(x => x && String(x.id) === String(mkl.wd.aktiv) && Number(x.einstieg_nq) > 0) : null
+    if(pw){
+      const linie = (v, col, style, w) => { if(!(Number(v) > 0)) return; try{ _mklLw.wdLinien.push(_mklLw.serie.createPriceLine({ price: Number(v), color: col, lineWidth: w, lineStyle: style, axisLabelVisible: true, title: '' })) }catch(_){} }
+      const hOffen = !!(pw.hedge && pw.status === 'open' && !['geschlossen', 'fehler', 'abgelehnt', 'zu'].includes(String(pw.hedge.status || '')) && mklWdSchliesstBei(pw) > 0)
+      linie(pw.einstieg_nq, '#2563EB', 0, 3)
+      linie(pw.tp_level_nq, '#15803d', 0, 2)
+      linie(pw.sl_level_nq, '#b91c1c', 0, 2)
+      if(hOffen) linie(mklWdSchliesstBei(pw), '#7C3AED', 2, 2)
     }
   }
   function mklOrdersRender(){
@@ -23597,7 +23585,8 @@
     return m
   }
   const wdlTid = t => String(t.id || t.plan_id || '')
-  const wdlLinienAn = t => { const o = wdl.linien.get(wdlTid(t)); return o != null ? o : t.status === 'open' }
+  // 28.09.2026 (Finn: „zu voll"): Linien nur für den EINEN ausgewählten Trade (wdl.auswahl), ohne Auswahl nur der Chart
+  const wdlLinienAn = t => !!wdl.auswahl && wdl.auswahl === wdlTid(t)
   const wdlPasst = t => !wdl.person || String(t.user_id || t.person || '') === wdl.person
   function wdlFarben(){
     const trades = (wdl.daten && wdl.daten.trades) || []
@@ -23609,14 +23598,11 @@
     const out = [], num = v => (v == null || v === '' || !isFinite(Number(v)) || !(Number(v) > 0)) ? null : Number(v)
     for(const t of ((wdl.daten && wdl.daten.trades) || [])){
       if(!wdlPasst(t) || !wdlLinienAn(t)) continue
-      const farbe = (wdl.tFarbe && wdl.tFarbe.get(wdlTid(t))) || '#667085', wer = String(t.person || '?').split(/\s+/)[0]
-      const l = (v, art, name, breite) => { const p = num(v); if(p != null) out.push({ preis: p, farbe, art, breite, titel: `${wer} ${name}` }) }
-      const pz = v => Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })   // Preis als Zahl (28.09.2026, Vergleich mit TV)
-      // 28.09.2026: alle Level 2 px mit exaktem Preis (Vergleich mit Tradovate/TradingView)
-      if(num(t.einstieg_nq) != null) l(t.einstieg_nq, 0, 'Entry ' + pz(t.einstieg_nq), 2); if(num(t.tp_level_nq) != null) l(t.tp_level_nq, 2, 'TP ' + pz(t.tp_level_nq), 2)
-      if(num(t.liq_level_nq) != null) l(t.liq_level_nq, 1, 'Liq ' + pz(t.liq_level_nq), 2); if(num(t.sl_level_nq) != null) l(t.sl_level_nq, 3, 'SL ' + pz(t.sl_level_nq), 2)
+      // feste Farben wie im Winning-Days-Chart, an der Achse nur der Preis (Titel leer)
+      const l = (v, farbe, art, breite) => { const p = num(v); if(p != null) out.push({ preis: p, farbe, art, breite, titel: '' }) }
+      l(t.einstieg_nq, '#2563EB', 0, 3); l(t.tp_level_nq, '#15803d', 0, 2); l(t.liq_level_nq, '#b91c1c', 0, 2); l(t.sl_level_nq, '#b91c1c', 0, 2)
       const h = t.hedge || {}, sb = num(t.schliesst_bei_nq) != null ? num(t.schliesst_bei_nq) : num(h.schliesst_bei_nq)
-      if(sb != null && ['offen', 'schliesst', 'oeffnet', 'wartet'].includes(String(h.status || ''))) out.push({ preis: sb, farbe: '#7C3AED', art: 1, breite: 1, titel: `${wer} Fusion zu ${pz(sb)}` })
+      if(sb != null && t.status === 'open' && h.status && !['geschlossen', 'fehler', 'abgelehnt', 'zu'].includes(String(h.status))) l(sb, '#7C3AED', 2, 2)
     }
     return out
   }
@@ -23715,7 +23701,7 @@
     const lauf = trades.filter(t => t.status === 'open'), geplant = trades.filter(t => t.status === 'planned'), zu = trades.filter(t => t.status === 'review' || t.status === 'completed')
     const demoTp = trades.filter(t => t.demo && t.demo.status === 'tp').length, demoLiq = trades.filter(t => t.demo && t.demo.status === 'liquidiert').length
     const plSumme = trades.reduce((a, t) => a + (num(t.pl_balance) || 0), 0), plN = trades.filter(t => num(t.pl_balance) != null).length
-    const legende = `<div class="wdl-legende"><span><i></i>Entry</span><span><i style="border-top-style:dashed"></i>TP</span><span><i style="border-top-style:dotted"></i>Liquidation</span><span><i style="border-top-style:dashed;border-top-width:3px"></i>SL</span><span>· Farbe = Trade (Punkt an der Karte), Klick auf die Karte blendet seine Linien ein/aus</span></div>`
+    const legende = `<div class="wdl-legende"><span><i></i>Entry</span><span><i style="border-top-style:dashed"></i>TP</span><span><i style="border-top-style:dotted"></i>Liquidation</span><span><i style="border-top-style:dashed;border-top-width:3px"></i>SL</span><span>· Klick auf eine Karte zeigt ihre Level im Chart (blau Entry, grün TP, rot Liq/SL, violett Fusion zu), zweiter Klick blendet aus</span></div>`
     kopf.innerHTML = `<div class="mwj-kopf">${trades.some(t => t.route === 'tsv2') ? 'Orbit V2 · Topstep V2' : 'Orbit V2'} <span>${lauf.length} laufen · ${geplant.length} geplant · ${zu.length} beendet · Demo: ${demoTp} TP, ${demoLiq} liquidiert${plN ? ` · P&L aus Balance ${sig(plSumme, '$', 0)} (${plN} Trades)` : ''} · Kurs ${kp != null ? f2(kp) + ' ' + escapeHtml(kurs.wurzel || '') : 'kein frischer Reader-Kurs'}${wdl.fehler ? ` · <span style="color:#B45309">${escapeHtml(wdl.fehler)}</span>` : ''}</span></div>` + legende
     const karte = t => {
       const farbe = (wdl.tFarbe && wdl.tFarbe.get(wdlTid(t))) || '#667085'   // Trade-Farbe = Farbe seiner Linien im Chart (F6)
@@ -23770,7 +23756,7 @@
   document.getElementById('wdl-liste')?.addEventListener('click', ev => {
     const c = ev.target.closest('[data-wdl-trade]'); if(!c) return
     const id = c.getAttribute('data-wdl-trade'), t = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === id); if(!t) return
-    wdl.linien.set(id, !wdlLinienAn(t)); wdlRender()
+    wdl.auswahl = wdl.auswahl === id ? null : id; wdlRender()   // zweiter Klick hebt die Auswahl auf
   })
   // Chart umhängen: #mkl-wrap wohnt in „Markt live"; Live Trades leiht ihn aus (kein zweiter Chart). Heimat = Platz vor #mkl-wd.
   const _mklHeimat = (() => { const w = document.getElementById('mkl-wrap'); return w ? { parent: w.parentNode, next: w.nextElementSibling } : null })()
@@ -35195,7 +35181,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.734'
+  const OS_TAB_BUILD = '2026-09-22.735'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
