@@ -7043,7 +7043,9 @@ def _wd_heute_zeile(p, acc, disp, vorher=None):
         # die user_id; das Frontend hasht wie gehabt
         "farbe_key": uid,
         "konto": {"name": (acc or {}).get("name") or p.get("master_name") or "", "firma": (acc or {}).get("firm") or p.get("master_firm") or "",
-                  "groesse": _wd_konto_groesse(acc), "kontonr_ende": ext[-4:] if ext else "", "external_id": ext},
+                  "groesse": _wd_konto_groesse(acc), "kontonr_ende": ext[-4:] if ext else "", "external_id": ext,
+                  # B25: Start-Balance eines frischen Kontos — Topstep Express 0 $, sonst die Größe
+                  "basis_balance": konto_basis_balance(acc), "topstep_express": ist_topstep_express(acc)},
         "route": p.get("route"), "richtung": richtung or None, "kt": kt, "kontrakte": kt, "symbol_root": root or None,
         "master_tp": tp_usd, "master_sl": sl_usd, "status": p.get("status"),
         "start_um": p.get("start_um"), "started_at": p.get("started_at"), "ended_at": p.get("ended_at"),
@@ -7211,11 +7213,27 @@ def admin_wd_heute():
 LT_WD_BLOW_PLUS = 100.0
 
 
+def ist_topstep_express(acc):
+    """REIN RECHNEND (testbar, B25, 27.09.2026): Topstep-Express-Konto (XFA, Kennung EXPRESS-V2-…). Startet bei 0 $ Balance,
+    nicht bei der Kontogröße (Mike Express: 11.079,66 $ = Gewinn) — „Größe + 100 $" als Liquidation wäre dort Unsinn."""
+    a = acc or {}
+    firm = str(a.get("firm") or "").lower()
+    kenn = (str(a.get("external_id") or "") + " " + str(a.get("name") or "")).upper()
+    return "topstep" in firm and ("EXPRESS" in kenn or "XFA" in kenn)
+
+
+def konto_basis_balance(acc):
+    """REIN RECHNEND (testbar, B25): Balance, bei der ein frisches Konto startet — Topstep Express 0 $, sonst die Kontogröße
+    (starting_balance, sonst „150k" aus dem Namen). None = unbekannt."""
+    return 0.0 if ist_topstep_express(acc) else _wd_konto_groesse(acc)
+
+
 def _lt_liq_balance(acc, plan, balance_start):
-    """REIN RECHNEND (testbar): Balance, bei der das Konto blowt → (wert, regel) oder (None, grund)."""
+    """REIN RECHNEND (testbar): Balance, bei der das Konto blowt → (wert, regel) oder (None, grund).
+    B25: Topstep Express startet bei 0 $ — dort nie „Kontogröße + 100", sondern wie jedes andere Konto Max-Drawdown."""
     typ = str((acc or {}).get("account_type") or "").lower()
     wd = typ == "winning_days" or str(plan.get("konto_typ") or "") == "winning_days" or (_wd_num(plan.get("hedge_eur")) or 0) > 0
-    if wd:
+    if wd and not ist_topstep_express(acc):
         g = _wd_konto_groesse(acc)
         return (g + LT_WD_BLOW_PLUS, f"Winning Day: Kontogröße {g:,.0f} + {LT_WD_BLOW_PLUS:,.0f} $".replace(",", ".")) if g else (None, "Kontogröße unbekannt")
     dd = _wd_num((acc or {}).get("max_drawdown"))
@@ -7232,7 +7250,7 @@ def _lt_liq(acc, plan, balance_start, einstieg, richtung, ppl, kt):
     liq_bal, regel = _lt_liq_balance(acc, plan, balance_start)
     typ = str((acc or {}).get("account_type") or "").lower()
     wd = typ == "winning_days" or str(plan.get("konto_typ") or "") == "winning_days" or (_wd_num(plan.get("hedge_eur")) or 0) > 0
-    if wd:
+    if wd and not ist_topstep_express(acc):
         level = None
         if balance_start is not None and liq_bal is not None and balance_start > liq_bal:
             level = _wd_level(einstieg, richtung, balance_start - liq_bal, ppl, kt, False)

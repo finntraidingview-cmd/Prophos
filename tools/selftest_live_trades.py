@@ -25,7 +25,8 @@ def lade():
     def const(name):
         return re.search(rf"^{name} = .*$", src, re.M).group(0)
     exec("\n".join([const("LT_WD_BLOW_PLUS"), const("WD_HEUTE_PPL")]
-                   + [block(f) for f in ("_wd_num", "_wd_level", "_wd_konto_groesse", "_lt_liq_balance", "_lt_liq", "_lt_demo")]), ns)
+                   + [block(f) for f in ("_wd_num", "_wd_level", "_wd_konto_groesse", "ist_topstep_express", "konto_basis_balance",
+                                           "_lt_liq_balance", "_lt_liq", "_lt_demo")]), ns)
     return ns
 
 
@@ -64,6 +65,17 @@ def main():
     check(r["level"] is None and r["balance"] == 150100.0, "Winning Day ohne Start-Balance → kein Level (wie bisher)")
     r = liq(wd, {"konto_typ": "winning_days"}, 152100.0, 30000.0, "buy", ppl["NQ"], 2)
     check(r["level"] == 29950.0 and r["pl_usd"] == -2000.0, "Winning Day mit Start-Balance → Level aus Kontogröße + 100 $")
+    # B25: Topstep Express (XFA) startet bei 0 $ — nie „Größe + 100", sondern Max-Drawdown
+    xfa = {"account_type": "winning_days", "firm": "Topstep", "external_id": "EXPRESS-V2-682437-57131691",
+           "name": "$150K EXPRESS", "starting_balance": 150000, "max_drawdown": 4500}
+    r = liq(xfa, {"konto_typ": "winning_days"}, 11079.66, 30000.0, "buy", ppl["NQ"], 1)
+    check(r["level"] == 29775.0 and r["balance"] == 6579.66 and r["pl_usd"] == -4500 and "Max-Drawdown" in r["regel"],
+          "Topstep Express als WD: Max-Drawdown statt Größe + 100 (Balance 11.079,66 − 4.500)")
+    check(a["ist_topstep_express"](xfa) and not a["ist_topstep_express"](dict(xfa, external_id="150KTC-SKU-V2-682437-58370042", name="$150K TRADING COMBINE"))
+          and not a["ist_topstep_express"](dict(xfa, firm="Apex")), "Express-Erkennung: Topstep + EXPRESS/XFA, Combine nicht, andere Firma nicht")
+    check(a["konto_basis_balance"](xfa) == 0.0 and a["konto_basis_balance"]({"starting_balance": 150000}) == 150000.0,
+          "Basis-Balance: Express 0 $, sonst Kontogröße")
+
     # Demo gegen Kerzen: das neue Level liquidiert
     k = [{"minute": "2026-09-26T10:00:00+00:00", "h": 30010, "l": 29990}, {"minute": "2026-09-26T10:01:00+00:00", "h": 30000, "l": 29770}]
     d = a["_lt_demo"]("buy", 30300.0, 29775.0, k, "2026-09-26T10:00:20+00:00")
