@@ -22286,9 +22286,9 @@
       const k = t.konto, kurz = `${String(k.firm || '?').trim().split(/\s+/)[0]}${k.ext ? ' …' + String(k.ext).slice(-4) : ''}`
       const buy = t.richtung === 'buy', sell = t.richtung === 'sell'
       // mehrere Konten einer ID laufen über die Warteschlange ihres PCs nacheinander (tpStartUmTick)
-      const startSub = t.n > 1 && t.nr > 1 ? `#${t.nr} in der Warteschlange` : 'Dubai'
+      const startSub = t.n > 1 && t.nr > 1 ? `#${t.nr} danach` : 'Dubai'
       const wer = t.nr === 1 ? `<b>${escapeHtml(t.name)}</b><small>${escapeHtml(kurz)}</small>` : `<b style="font-weight:400;color:var(--sub-2)">↳</b><small>${escapeHtml(kurz)}</small>`
-      return `<div class="mwj-zeile" style="--mwd-farbe:${farbe};cursor:default${t.nr > 1 ? ';margin-top:-2px' : ''}" title="${escapeHtml(t.name + ' · ' + (k.name || kurz))}">
+      return `<div class="mwj-zeile" style="--mwd-farbe:${farbe};cursor:default${t.nr > 1 ? ';margin-top:-2px' : ''}" title="${escapeHtml(t.name + ' · ' + (k.name || kurz) + (t.n > 1 ? ` · Konto ${t.nr} von ${t.n} — läuft über die Warteschlange des PCs nacheinander` : ''))}">
           <span class="mwj-wer">${wer}</span>
           <span class="mwd-chip ${buy ? 'mwd-buy' : sell ? 'mwd-sell' : ''}">${buy ? 'BUY' : sell ? 'SELL' : '?'}</span>
           <span class="mwj-zelle">${a ? escapeHtml(wdHhmm(t.start_um)) : '—:—'}<small>${escapeHtml(startSub)}</small></span>
@@ -34614,7 +34614,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.712'
+  const OS_TAB_BUILD = '2026-09-22.713'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
