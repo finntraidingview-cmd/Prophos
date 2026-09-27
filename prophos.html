@@ -20263,7 +20263,7 @@
       : hedgeSchliesstBei(plan.richtung, tpLevel, echterTp ? hedgePuffer() : hedgePuffer() + hedgePufferOhneFill())
     // Herkunft am Hedge festhalten (Nachweis für den ersten echten Lauf): Klickzeit, Fill-Quelle von Puls, roher TP-Preis aus TV
     const herkunft = { order_klick_at: klickMs ? new Date(klickMs).toISOString() : null, einstieg_fill_quelle: (r && r.einstieg_quelle) || null,
-      tp_limit_tv: (tpPreisTv > 0) ? tpPreisTv : null, tp_quelle: handTp ? handAlt.tp_quelle : tpVonOrder ? 'tv_limit' : (quelle === 'fill' ? 'fill_rechnung' : null),   // fill_rechnung = Fill ± TP-Distanz (normaler Puffer)
+      tp_limit_tv: (tpPreisTv > 0) ? tpPreisTv : null, tp_quelle: handTp ? handAlt.tp_quelle : tpVonOrder ? (/^(tv_toast|tv_orders)$/.test(String((r && r.tp_limit_quelle) || '')) ? r.tp_limit_quelle : 'tv_limit') : (quelle === 'fill' ? 'fill_rechnung' : null),   // Backend .733: tv_toast | tv_orders   // fill_rechnung = Fill ± TP-Distanz (normaler Puffer)
       einstieg_klick_abstand_ms: feedKlick ? feedKlick.abstand_ms : null, tv_meldung_roh: (r && Array.isArray(r.meldung_roh)) ? r.meldung_roh.slice(0, 14) : null }
     // Winning Day (F22): zweites Level = Liquidation des Masters (Kontogröße + 100 $) statt Master-SL
     const liqWd = hedgeIstWd(plan) ? hedgeLiqLevel(plan, einstieg, ppl, kt) : null
@@ -20423,7 +20423,7 @@
   function hedgePufferFuer(h, tpL){
     const sb = Number(h && h.schliesst_bei_nq), tp = Number(tpL || (h && h.tp_level_nq))
     if(sb > 0 && tp > 0){ const d = Math.abs(sb - tp); if(d <= 60) return d }
-    const feed = /^feed/.test(String((h && h.einstieg_quelle) || '')) && !/hand|tv_limit/.test(String((h && h.tp_quelle) || ''))   // feed_klick zählt als Feed; Hand/Limit-TP ohne Zuschlag (28.09.2026)
+    const feed = /^feed/.test(String((h && h.einstieg_quelle) || '')) && !/hand|tv_limit|tv_toast|tv_orders/.test(String((h && h.tp_quelle) || ''))   // feed_klick zählt als Feed; Hand/Limit-TP ohne Zuschlag (28.09.2026)
     return hedgePuffer() + (feed ? hedgePufferOhneFill() : 0)
   }
   window._hedgePufferFuer = hedgePufferFuer   // Test-Haken
@@ -20546,10 +20546,10 @@
       const pkt = Number(h.punkte), slp = Number(h.sl_punkte), plus = plan.richtung === 'buy' ? 1 : -1
       if(!/hand/.test(String(h.tp_quelle || '')) && pkt > 0 && !['geschlossen', 'fehler'].includes(String(h.status || ''))){   // 'hand'/'entry_hand' bleiben (28.09.2026)
         // TP aus TradingViews TP-Limit-Order (tp_quelle 'tv_limit', 28.09.2026) ist schon der echte Preis — bleibt stehen
-        const tpFest = h.tp_quelle === 'tv_limit' && Number(h.tp_level_nq) > 0
+        const tpFest = /^(tv_limit|tv_toast|tv_orders)$/.test(String(h.tp_quelle || '')) && Number(h.tp_level_nq) > 0   // TP-Limit aus TV (Meldung/Orders) bleibt
         const tpNeu = tpFest ? Number(h.tp_level_nq) : Math.round((fill + plus * pkt) * 100) / 100
         Object.assign(upd, { tp_level_feed_vorher: h.tp_level_nq ?? null, schliesst_bei_feed_vorher: h.schliesst_bei_nq ?? null, tp_level_nq: tpNeu,
-          schliesst_bei_nq: hedgeSchliesstBei(plan.richtung, tpNeu, hedgePuffer()), puffer_punkte: hedgePuffer(), puffer_ohne_fill: null, tp_quelle: tpFest ? 'tv_limit' : 'fill_nachtrag' })
+          schliesst_bei_nq: hedgeSchliesstBei(plan.richtung, tpNeu, hedgePuffer()), puffer_punkte: hedgePuffer(), puffer_ohne_fill: null, tp_quelle: tpFest ? h.tp_quelle : 'fill_nachtrag' })
         if(slp > 0) Object.assign(upd, { sl_level_feed_vorher: h.sl_level_nq ?? null, sl_level_nq: Math.round((fill - plus * slp) * 100) / 100 })
       }
       await baselinePatchIn(plan.id, 'hedge', upd)
@@ -22171,7 +22171,8 @@
       const slTxt = pw.sl_art === 'liquidation' ? 'SL/Liq' : 'SL'
       if(hervor){
         linie(pw.einstieg_nq, '#2563EB', `Entry ${pz(pw.einstieg_nq)} · ${quelleKurz(pw)}`, 0, 3, true)
-        linie(pw.tp_level_nq, '#15803d', `TP ${pz(pw.tp_level_nq)}`, 0, 2, true)
+        const tq = String((pw.hedge && pw.hedge.tp_quelle) || ''), tqTxt = { tv_toast: 'TV-Meldung', tv_orders: 'TV-Orders', tv_limit: 'TV-Limit', hand: 'Hand', entry_hand: 'aus Entry (Hand)', fill_nachtrag: 'aus Fill', fill_rechnung: 'aus Fill' }[tq] || ''
+        linie(pw.tp_level_nq, '#15803d', `TP ${pz(pw.tp_level_nq)}${tqTxt ? ' · ' + tqTxt : ''}`, 0, 2, true)
         linie(pw.sl_level_nq, '#b91c1c', `${slTxt} ${pz(pw.sl_level_nq)}`, 0, 2, true)
         if(hOffen) linie(mklWdSchliesstBei(pw), '#7C3AED', `Fusion zu ${pz(mklWdSchliesstBei(pw))}`, 2, 1, true)
       } else {
@@ -22874,7 +22875,7 @@
             ${(offen && kp != null) ? `<span class="mwd-kurs" style="left:${pct(kp)}%" title="Kurs jetzt"><b>${f2(kp)}</b><i></i></span>` : ''}
           </div>
           <div class="mwd-level-txt mono">${offen ? (kp != null
-              ? `Kurs ${f2(kp)}${dTp != null ? ` · <span class="${Math.abs(dTp) <= 5 ? 'mwd-nah' : ''}">TP in ${f0(Math.abs(dTp))} Pkt${dTp < 0 ? ' (überschritten)' : ''}</span>` : ''}${dSl != null ? ` · ${pw.sl_art === 'liquidation' ? 'Liq' : 'SL'} in ${f0(Math.abs(dSl))} Pkt${dSl < 0 ? ' (unterschritten)' : ''}` : ''}`
+              ? `Kurs ${f2(kp)}${dTp != null ? ` · <span class="${Math.abs(dTp) <= 5 ? 'mwd-nah' : ''}">TP in ${f0(Math.abs(dTp))} Pkt${dTp < 0 ? ' (überschritten)' : ''}${(() => { const q = { tv_toast: 'TV-Meldung', tv_orders: 'TV-Orders', tv_limit: 'TV-Limit', hand: 'Hand' }[String((h && h.tp_quelle) || '')]; return q ? ' · TP aus ' + q : '' })()}</span>` : ''}${dSl != null ? ` · ${pw.sl_art === 'liquidation' ? 'Liq' : 'SL'} in ${f0(Math.abs(dSl))} Pkt${dSl < 0 ? ' (unterschritten)' : ''}` : ''}`
               : 'kein frischer Kurs — Abstände folgen mit dem Feed') : `${tp != null ? 'TP ' + f2(tp) : ''}${sl != null ? (pw.sl_art === 'liquidation' ? ' · Liq ' : ' · SL ') + f2(sl) : ''} · Entry ${f2(entry)}`}${pw.sl_art === 'liquidation' && num(pw.liq_balance) != null ? ` <span style="color:var(--sub-2)" title="Liquidations-Level: Balance ${f0(pw.liq_balance)} $ (Kontogröße + 100 $)${h && h.liq_quelle ? ' · Start-Balance aus ' + (h.liq_quelle === 'balance_start' ? 'der Lesung beim Platzieren' : 'dem Konto (letzte Lesung)') : ''}">· Liq bei ${f0(pw.liq_balance)} $</span>` : ''}${pw.sl_hinweis ? ` <span style="color:#B45309">· ${escapeHtml(String(pw.sl_hinweis))}</span>` : ''}</div>
         </div>`
       } else {
@@ -35194,7 +35195,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.732'
+  const OS_TAB_BUILD = '2026-09-22.734'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
