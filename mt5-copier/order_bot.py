@@ -5495,6 +5495,49 @@ def tv_meldung_preise(roh, symbol, richtung, menge=None, vorher=()):
 TV_RX_SHOW_MORE = re.compile(r"\b(show more|mehr anzeigen)\b", re.I)
 
 
+TV_RX_SHOW_LESS = re.compile(r"\b(show less|weniger anzeigen)\b", re.I)
+
+
+def tv_stapel_offen(roh):
+    """REIN RECHNEND (testbar, Live-Befund Chris 79633d2e 28.09.2026 23:07 UTC: 'Show more' geklickt @467,946, danach stand
+    weiter 'Show more' und nur EIN Toast — der Klick hatte den Stapel nicht aufgeklappt). Offen = 'Show less' sichtbar oder
+    mindestens zwei Meldungs-Titel. -> bool"""
+    namen = [" ".join(str(e[0] or "").split()) for e in roh or () if len(e) > 1 and e[1]]
+    if any(TV_RX_SHOW_LESS.search(n) and len(n) <= 30 for n in namen):
+        return True
+    return sum(1 for n in namen if len(n) <= 90 and tv_meldung_art(n) is not None) >= 2
+
+
+def _tv_show_more_invoke(w, punkt, trail):
+    """Zweiter Weg, wenn der Maus-Klick den Stapel nicht öffnet: InvokePattern am 'Show more'-Knopf, der dem geklickten Punkt am
+    nächsten liegt (nie 'Show less', nie ein X). -> bool"""
+    try:
+        kand = []
+        for b in w.descendants(control_type="Button"):
+            try:
+                n = " ".join((b.window_text() or "").split())
+                if not n or len(n) > 30 or not TV_RX_SHOW_MORE.search(n) or TV_RX_SHOW_LESS.search(n):
+                    continue
+                r = b.rectangle()
+                d = abs((r.left + r.right) / 2 - punkt[0]) + abs((r.top + r.bottom) / 2 - punkt[1])
+                kand.append((d, b, n, (r.left, r.top, r.right, r.bottom)))
+            except Exception:
+                continue
+        if not kand:
+            trail.append("Show more: per Invoke kein Knopf gefunden")
+            return False
+        d, b, n, r = min(kand, key=lambda k: k[0])
+        if d > 120:
+            trail.append(f"Show more: nächster Knopf {int(d)} px weg — kein Invoke")
+            return False
+        b.invoke()
+        trail.append(f"Show more per Invoke ({n} @{r})")
+        return True
+    except Exception as e:
+        trail.append(f"Show more Invoke fehlgeschlagen ({type(e).__name__})")
+        return False
+
+
 def tv_show_more_knopf(roh):
     """Der Knopf 'Show more' am Meldungs-Stapel (Finns Screenshots 28.09.2026 00:34, Jacob-PC: nach dem Order-Klick liegen 3 Meldungen
     gestapelt — 'Market order placed', 'Market order executed … Buy 1 at 30,807.25', 'Take Profit order placed … Sell 1 at 30,812.75' —,
@@ -6097,9 +6140,21 @@ def tv_order_schritt(w, cmd, trail, erg=None):
                     k_ = tv_show_more_knopf(roh_)
                     if k_:
                         _tv_uia_klick(k_, "Meldungen 'Show more'", trail)
-                        ende_m = max(ende_m, time.time() + 1.5)
-                        _warte(0.35, 0.15)
-                        roh_ = _tv_uia_roh(w, typen)
+                        ende_m = max(ende_m, time.time() + 2.5)
+                        # Live-Befund Chris 23:07 UTC: der Maus-Klick traf, der Stapel blieb zu — Aufklappen beweisen, sonst Invoke
+                        offen_ = False
+                        t_off = time.time() + 1.0
+                        while time.time() < t_off:
+                            _warte(0.3, 0.15)
+                            roh_ = _tv_uia_roh(w, typen)
+                            if tv_stapel_offen(roh_):
+                                offen_ = True
+                                break
+                        if not offen_ and _tv_show_more_invoke(w, k_["punkt"], trail):
+                            _warte(0.5, 0.2)
+                            roh_ = _tv_uia_roh(w, typen)
+                            offen_ = tv_stapel_offen(roh_)
+                        trail.append(f"Meldungs-Stapel nach 'Show more': {'offen' if offen_ else 'weiter zu'}")
                         continue
                     trail.append("Meldungen: kein 'Show more' am Stapel")
                 except Exception:
