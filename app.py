@@ -6712,6 +6712,24 @@ WD_PATCH_FELDER = {"start_um", "richtung", "master_tp", "master_sl", "slave_risk
                    "master_contracts"}     # B39 (28.09.2026): „Plan heute Nacht bearbeiten" (F33) ändert die Kontrakte
 
 
+def wd_plan_wegraeumbar(start_um, jetzt=None):
+    """REIN RECHNEND (testbar). VORFALL 28.09.2026 22:47 UTC (Front end im API-Log): der Admin-Farmer lud Tag 2026-09-29 —
+    das Aufräumen „Farmer-Plan eines früheren Tages, nie gestartet" löschte Chris' Plan 79633d2e (planned_for 2026-09-28,
+    Start 23:30 UTC), 43 min VOR seinem Start. Ein alter Plan darf nur weg, wenn er KEINEN start_um hat oder sein Start
+    länger als 2 h her ist — nie einer, dessen Start noch bevorsteht oder < 2 h zurückliegt. -> bool"""
+    from datetime import timedelta
+    if not start_um:
+        return True
+    try:
+        t = datetime.fromisoformat(str(start_um).replace("Z", "+00:00"))
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return False                                  # unlesbar = lieber stehen lassen
+    jetzt = jetzt or datetime.now(timezone.utc)
+    return t < jetzt - timedelta(hours=2)
+
+
 def wd_kontrakte_pruefen(v):
     """REIN RECHNEND (testbar, B39): master_contracts aus dem PATCH — ganze Zahl ≥ 1 (auch „3" / 3.0), sonst Fehler.
     -> (int, None) | (None, fehler)"""
@@ -7708,7 +7726,8 @@ def admin_wd_plaene():
                     mid = str(o.get("master_account_id") or "")
                     farmer = (o.get("notes") or "") == "Winning-Day-Farmer"
                     alt_tag = str(o.get("planned_for") or "")
-                    if farmer and o.get("status") == "planned" and not o.get("start_um_gestartet_at") and alt_tag and alt_tag < tag:
+                    if (farmer and o.get("status") == "planned" and not o.get("start_um_gestartet_at") and alt_tag and alt_tag < tag
+                            and wd_plan_wegraeumbar(o.get("start_um"))):          # Vorfall 28.09.2026: nie vor/kurz nach dem Start
                         try:
                             requests.delete(f"{SUPABASE_URL}/rest/v1/trade_plans",
                                             params={"id": f"eq.{o['id']}", "status": "eq.planned", "start_um_gestartet_at": "is.null"},
@@ -7743,7 +7762,7 @@ def admin_wd_plaene():
                 acc = sb_select("accounts", {"select": "id,user_id,firm", "id": f"eq.{mid}"})
                 if not acc or str(acc[0].get("user_id")) != uid:
                     uebersprungen.append({"master_account_id": mid, "grund": "Konto gehört nicht zu dieser ID"}); continue
-                offen = sb_select("trade_plans", {"select": "id,status,notes,planned_for,start_um_gestartet_at", "master_account_id": f"eq.{mid}",
+                offen = sb_select("trade_plans", {"select": "id,status,notes,planned_for,start_um,start_um_gestartet_at", "master_account_id": f"eq.{mid}",
                                                   "status": "in.(planned,open)", "limit": "5"})
                 # 23.09.2026 (Finn: „alle Accounts sind einfach off — hat schon einen Plan"): ein Farmer-Plan eines
                 # FRUEHEREN Tages, der nie gestartet ist (Farmer AUS), blockiert sonst jeden Folgetag → weg damit.
@@ -7754,7 +7773,8 @@ def admin_wd_plaene():
                 for o in offen:
                     farmer = (o.get("notes") or "") == "Winning-Day-Farmer"
                     alt_tag = str(o.get("planned_for") or "")
-                    if farmer and o.get("status") == "planned" and not o.get("start_um_gestartet_at") and alt_tag and neu_tag and alt_tag < neu_tag:
+                    if (farmer and o.get("status") == "planned" and not o.get("start_um_gestartet_at") and alt_tag and neu_tag and alt_tag < neu_tag
+                            and wd_plan_wegraeumbar(o.get("start_um"))):          # Vorfall 28.09.2026: nie vor/kurz nach dem Start
                         try:
                             requests.delete(f"{SUPABASE_URL}/rest/v1/trade_plans",
                                             params={"id": f"eq.{o['id']}", "status": "eq.planned", "start_um_gestartet_at": "is.null"},
