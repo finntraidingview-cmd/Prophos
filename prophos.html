@@ -22798,6 +22798,8 @@
           + knopf('ende', 'Beendet', 'Master ist schon zu (von Hand) — Plan als beendet setzen, danach Master- und Fusion-P&L eintragen')
           // echter TP aus TradingView (28.09.2026, Vorfall Jacob): Level von Hand setzen, der Wächter schließt dann bei TP ± Puffer
           + ((h && ['offen', 'schliesst', 'oeffnet', 'wartet'].includes(String(h.status || ''))) ? `<button type="button" class="btn btn-ghost mwd-btn" data-mwd-tp="${escapeHtml(String(pw.id))}" title="Echten TP aus TradingView (Sell-/Buy-Limit-Linie, NQ-Preis) eintragen — Fusion schließt dann bei TP ± ${hedgePufferTicks()} Ticks">✎ TP aus TV</button>` : '')
+          // echter Entry aus TradingView (28.09.2026, Finn: Feed-Einstieg 30.818,75 statt Fill 30.819,50): Einstieg setzen, Level neu rechnen
+          + `<button type="button" class="btn btn-ghost mwd-btn" data-mwd-entry="${escapeHtml(String(pw.id))}" title="Echten Einstieg (Avg Fill Price der Position in TradingView/Tradovate) eintragen — TP, SL/Liq und Fusion-zu werden daraus neu gerechnet (ein von Hand gesetzter TP bleibt)">✎ Entry aus TV</button>`
           + `</span>`
       }
       const fuss = `<div class="mwd-fuss"><span>${pw.quelle === 'farmer' ? 'Farmer' : 'manuell'}</span>${pw.started_at ? `<span>gestartet ${uhr(pw.started_at)}</span>` : pw.start_um ? `<span>Start ${uhr(pw.start_um)}</span>` : ''}${num(pw.master_tp) != null ? `<span>TP ${f0(pw.master_tp)} $</span>` : ''}${num(pw.master_sl) != null ? `<span>SL ${f0(pw.master_sl)} $</span>` : ''}${chip ? `<span class="mwd-fuss-chip">${chip}</span>` : ''}${fehlerTxt}${aktionen}</div>`
@@ -22817,6 +22819,7 @@
       ${feedWacheZeile()}${leerZeile}<div class="mwd-liste">${karten.join('')}</div>${mklWdPlanHtml()}${mklWdAbhakenHtml()}`
     el.querySelectorAll('[data-mwd-aktion]').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); mklWdAktion(b.dataset.mwdPlan, b.dataset.mwdAktion) }))
     el.querySelectorAll('[data-mwd-tp]').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); mklWdTpVonHand(b.dataset.mwdTp) }))
+    el.querySelectorAll('[data-mwd-entry]').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); mklWdEntryVonHand(b.dataset.mwdEntry) }))
     // Gerade beendete Trades (Abhak-Liste) markieren ebenfalls ihre Linien im Chart (28.09.2026) — Klick außerhalb der Felder/Knöpfe
     el.querySelectorAll('[data-mwd-abh]').forEach(z => z.addEventListener('click', ev => {
       if(ev.target.closest('input, button, a, select, textarea')) return
@@ -23242,6 +23245,39 @@
   /* ECHTER TP AUS TV (28.09.2026, Master nach Vorfall Jacob c28a7639): tp_level_nq = Wert, schliesst_bei_nq = Wert ± hedge_puffer,
    * tp_quelle 'hand' (der Fill-Nachtrag überschreibt ihn nicht mehr). Schreiben über mt5_baseline_patch_in — die RPC folgt der RLS,
    * also nur für EIGENE Pläne; fremde IDs brauchen eine Backend-Route (per SQL wie bei Jacob 8ae97242). */
+  /* ECHTER ENTRY AUS TV (28.09.2026, Finn: „der Entry stimmt noch nicht" — Puls lieferte keinen Fill, einstieg_nq kam aus dem Feed).
+   * Setzt den Einstieg auf den Avg-Fill-Preis und rechnet die Level genau wie hedgeEinstiegNachtragen: TP = Entry ± h.punkte (außer
+   * tp_quelle 'hand'), SL/Liq = Entry ∓ h.sl_punkte, Fusion zu = TP ± hedge_puffer (echter Fill → normaler Puffer). Ohne Hedge nur
+   * tv.einstieg_nq. Schreiben über mt5_baseline_patch_in (RLS) — nur im Profil der ID selbst. */
+  async function mklWdEntryVonHand(pid){
+    const pw = ((mkl.wd && mkl.wd.plaene) || []).find(x => String(x.id) === String(pid)); if(!pw) return
+    const toast = (t, k) => { if(typeof atToast === 'function') atToast(t, k) }
+    if(!mklWdEigenerPlan(pid)) return toast(`Entry von Hand geht nur im Profil von ${pw.person || 'dieser ID'} (fremder Plan — Backend-Route fehlt noch)`, 'end')
+    const alt = Number(pw.einstieg_nq) > 0 ? Number(pw.einstieg_nq).toLocaleString('de-DE', { minimumFractionDigits: 2 }) : ''
+    const ein = prompt(`Echter Einstieg aus TradingView/Tradovate für ${pw.person || ''} (Avg Fill Price, NQ/MNQ-Preis):`, alt)
+    if(ein == null) return
+    const v = tvKursZahl(String(ein).trim())
+    if(!(v > 1000)) return toast('Kein gültiger Preis: ' + ein, 'end')
+    const jetzt = new Date().toISOString(), h = pw.hedge || null, plus = pw.richtung === 'buy' ? 1 : pw.richtung === 'sell' ? -1 : 0
+    try{
+      await baselinePatchIn(pid, 'tv', { einstieg_nq: v, einstieg_quelle: 'hand', einstieg_hand_at: jetzt })
+      let txt = ''
+      if(h && plus){
+        const upd = { einstieg_nq: v, einstieg_quelle: 'hand (TV)', einstieg_feed_vorher: Number(h.einstieg_nq) > 0 ? Number(h.einstieg_nq) : null, einstieg_nachgetragen_at: jetzt }
+        const pkt = Number(h.punkte), slp = Number(h.sl_punkte)
+        if(h.tp_quelle !== 'hand' && pkt > 0){
+          const tpNeu = Math.round((v + plus * pkt) * 100) / 100
+          Object.assign(upd, { tp_level_feed_vorher: h.tp_level_nq ?? null, schliesst_bei_feed_vorher: h.schliesst_bei_nq ?? null, tp_level_nq: tpNeu,
+            schliesst_bei_nq: hedgeSchliesstBei(pw.richtung, tpNeu, hedgePuffer()), puffer_punkte: hedgePuffer(), puffer_ohne_fill: null, tp_quelle: 'entry_hand' })
+          txt = ` · TP ${tpNeu.toLocaleString('de-DE', { minimumFractionDigits: 2 })} · Fusion zu ${upd.schliesst_bei_nq.toLocaleString('de-DE', { minimumFractionDigits: 2 })}`
+        }
+        if(slp > 0) Object.assign(upd, { sl_level_feed_vorher: h.sl_level_nq ?? null, sl_level_nq: Math.round((v - plus * slp) * 100) / 100 })
+        await baselinePatchIn(pid, 'hedge', upd)
+      }
+      toast(`✓ Entry ${v.toLocaleString('de-DE', { minimumFractionDigits: 2 })} gesetzt${txt}`, 'start')
+      mkl.wd.at = 0; try{ await mklWdLaden() }catch(_){} ; mklWdRender(); try{ mklChartZeichnen() }catch(_){}
+    }catch(e){ toast('Entry nicht gespeichert: ' + ((e && e.message) || e), 'end') }
+  }
   async function mklWdTpVonHand(pid){
     const pw = ((mkl.wd && mkl.wd.plaene) || []).find(x => String(x.id) === String(pid)); if(!pw) return
     const eigen = mklWdEigenerPlan(pid)
@@ -35024,7 +35060,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.724'
+  const OS_TAB_BUILD = '2026-09-22.725'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
