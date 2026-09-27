@@ -22049,7 +22049,7 @@
         linie(pw.sl_level_nq, '#b91c1c', `${slTxt} ${pz(pw.sl_level_nq)}`, 0, 2, true)
         if(hOffen) linie(mklWdSchliesstBei(pw), '#7C3AED', `Fusion zu ${pz(mklWdSchliesstBei(pw))}`, 2, 1, true)
       } else {
-        linie(pw.einstieg_nq, farbe, kurz, 0, 1, false)
+        linie(pw.einstieg_nq, farbe, `Entry ${pz(pw.einstieg_nq)} ${kurz}`, 0, 2, true)   // Preis an der Achse auch ohne Klick (Finn 28.09.2026: „bei den Entrys auch Zahlen hinschreiben“)
         linie(pw.tp_level_nq, '#15803d', `TP ${pz(pw.tp_level_nq)} ${kurz}`, 2, 1, true)
         if(hOffen) linie(mklWdSchliesstBei(pw), '#7C3AED', `Fusion zu ${pz(mklWdSchliesstBei(pw))} ${kurz}`, 2, 1, true)
         linie(pw.sl_level_nq, '#b91c1c', `${slTxt} ${kurz}`, 2, 1, false)   // WD: Liquidation statt SL (F22)
@@ -35024,7 +35024,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.723'
+  const OS_TAB_BUILD = '2026-09-22.724'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
