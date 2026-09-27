@@ -6912,6 +6912,30 @@ def _wd_level(einstieg, richtung, usd, ppl, kt, ist_tp):
     return round(e + d if hoch else e - d, 2)
 
 
+def tsx_zeile_ueberlagern(route, tv, einstieg, richtung, ppl, kt):
+    """REIN RECHNEND (testbar, F28 mit Front end, 27.09.2026): Topstep V2 (tsv2) hat echte Werte aus TopstepX in der tv-Baseline —
+    tv.tp_level_nq / tv.sl_level_nq (Brackets aus dem Reiter „Orders"), tv.mll_start (MLL, trailing) + tv.balance_start.
+    Liquidation = MLL beim Start: liq_balance = mll_start, Level aus (balance_start − mll_start) als $-Abstand.
+    einstieg_quelle wird unverändert durchgereicht ('fill' | 'reader_klick'). -> dict mit den Überschreibungen ({} sonst)"""
+    if str(route or "") != "tsv2" or not isinstance(tv, dict):
+        return {}
+    out = {}
+    tp, sl = _wd_num(tv.get("tp_level_nq")), _wd_num(tv.get("sl_level_nq"))
+    if tp and tp > 1000:
+        out["tp_level_nq"], out["level_quelle"] = tp, "tsx"
+    mll, bs = _wd_num(tv.get("mll_start")), _wd_num(tv.get("balance_start"))
+    if mll is not None and bs is not None and bs > mll:
+        out.update(liq_balance=mll, liq_regel="MLL TopstepX beim Start", liq_quelle="mll_tsx",
+                   liq_level_nq=_wd_level(einstieg, richtung, bs - mll, ppl, kt, False), liq_pl_usd=round(mll - bs, 2))
+    if sl and sl > 1000:
+        out.update(sl_level_nq=sl, sl_art="bracket")
+    elif out.get("liq_level_nq") is not None:
+        out.update(sl_level_nq=out["liq_level_nq"], sl_art="liquidation")
+    if tv.get("einstieg_quelle"):
+        out["einstieg_quelle"] = str(tv.get("einstieg_quelle"))
+    return out
+
+
 def _wd_konto_groesse(acc):
     """Kontogröße: starting_balance, sonst „150k" aus dem Namen (wie tpKontoGroesseAusName)."""
     sb = _wd_num((acc or {}).get("starting_balance"))
@@ -7037,7 +7061,7 @@ def _wd_heute_zeile(p, acc, disp, vorher=None):
     uid = str(p.get("user_id") or "")
     ext = str((acc or {}).get("external_id") or "").strip()
     slz = wd_sl_zeile(p, acc, hedge, tv, einstieg, richtung, ppl, kt, sl_usd, vorher)
-    return {
+    zeile = {
         "id": str(p.get("id")), "plan_id": str(p.get("id")), "user_id": uid, "person": disp.get(uid, uid[:8]),
         # farbe_key: derselbe Schluessel, mit dem die Flotte Personen faerbt (merken(w.uid) → mt5FleetFarbe(uid)) —
         # die user_id; das Frontend hasht wie gehabt
@@ -7080,6 +7104,11 @@ def _wd_heute_zeile(p, acc, disp, vorher=None):
         # Endlesung (25.09.2026): Stand der Puls-Lesung nach dem Ende (Versuche, Fehler, Befund, Exit-Fill) — Statuszeile + „Jetzt lesen" (Design)
         "endlesung": _wd_endlesung_zeile(final),
     }
+    # F28: Topstep V2 — echte Brackets/MLL aus TopstepX vor gerechneten Werten (liq_level_nq/liq_pl_usd nur für live-trades)
+    ueber = tsx_zeile_ueberlagern(p.get("route"), tv, einstieg, richtung, ppl, kt)
+    zeile.update({k: v for k, v in ueber.items() if k not in ("liq_level_nq", "liq_regel", "liq_pl_usd")})
+    zeile["_tsx"] = ueber
+    return zeile
 
 
 def _wd_endlesung_signal(plan):
@@ -7192,6 +7221,7 @@ def admin_wd_heute():
         fruehere = _wd_fruehere_trades(acc_ids)       # B14: für den Balance-Vorläufer (konto_balance)
         for p in plaene:
             z = _wd_heute_zeile(p, accs.get(str(p.get("master_account_id") or "")), disp, wd_vorher_waehlen(p, fruehere))
+            z.pop("_tsx", None)
             if _wd_heute_behalten(z, tag):
                 zeilen.append(z)
         kj = _kurs_jetzt()                       # B35/F28: aktueller Kurs je Wurzel (Radar-Weg Topstep)
@@ -7348,6 +7378,10 @@ def _lt_zeile(p, acc, disp, kerzen_je_wurzel, vorher=None):
     start_bal, liq_quelle, _sa = wd_start_balance(p, tv, acc, vorher)
     liq = _lt_liq(acc, p, start_bal, z.get("einstieg_nq"), z.get("richtung"), ppl, kt)
     liq_bal, liq_regel, liq_level = liq["balance"], liq["regel"], liq["level"]
+    ub = z.pop("_tsx", {}) or {}
+    if ub.get("liq_balance") is not None:                  # F28: Topstep V2 — Liquidation = MLL TopstepX beim Start
+        liq_bal, liq_regel, liq_level, liq_quelle = ub["liq_balance"], ub["liq_regel"], ub.get("liq_level_nq"), "mll_tsx"
+        liq = dict(liq, pl_usd=ub.get("liq_pl_usd"))
     kerzen = kerzen_je_wurzel.get(z.get("symbol_root") or "") or []
     # Ende (B5): beendete Trades rechnen die Demo nur bis zum Ende — ended_at, sonst final.at, sonst completed_at
     ende = None if str(p.get("status") or "") == "open" else (p.get("ended_at") or fin.get("at") or p.get("completed_at"))

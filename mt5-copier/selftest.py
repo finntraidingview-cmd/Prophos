@@ -1771,6 +1771,7 @@ def main():
     results.append(test_tsx_beweis())
     results.append(test_tsx_order())
     results.append(test_tsx_login())
+    results.append(test_puls_heim())
     results.append(test_hedge_bereit())
     results.append(test_quickedit())
 
@@ -3155,6 +3156,78 @@ def test_tsx_login():
         and "Invalid username or password" in (st.get("fehler") or ("", ""))[1])
     if ok:
         print("✓ TSX-Login: Login-Seite erkannt, höchstens EIN Klick (auch bei Chrome-Autofill), abgelehnt → Ende 'login', Zugangsdaten maskiert")
+    return ok
+
+
+
+def test_puls_heim():
+    """B35 (27.09.2026, Finn): nach jedem Puls-Lauf zurück in den Prophos-Tab — nur wenn der Lauf den Vordergrund gewechselt
+    hat, Prophos-Tab im Puls-Fenster anklicken (links der Mitte, nie das X), sonst Prophos-Fenster wie Echo; nie im Konto-
+    Zwischenschritt der Kette."""
+    import order_bot as ob
+    ok = True
+
+    def chk(name, bed):
+        nonlocal ok
+        if not bed:
+            print("✗ Puls-Heim: " + name); ok = False
+
+    w = ob.prophos_tab_wahl
+    chk("Tab-Wahl", w(["NQZ26 $30,921.75 ▲", "Prophos"]) == 1 and w(["localhost:5000/prophos"]) == 0
+        and w(["Prophos-Backend", "TradingView"]) is None and w(["DevTools - Prophos"]) is None and w([]) is None)
+
+    class Tab:
+        def __init__(s, n, r): s.n, s.r = n, r
+        def window_text(s): return s.n
+        def rectangle(s):
+            import types
+            return types.SimpleNamespace(left=s.r[0], top=s.r[1], right=s.r[2], bottom=s.r[3])
+
+    class Fenster:
+        def __init__(s): s.fokus = 0
+        def window_text(s): return "NQZ26 $30,921.75 ▲ +0.50% - Google Chrome"
+        def descendants(s, control_type=None): return [Tab("NQZ26 $30,921.75", (0, 0, 240, 40)), Tab("Prophos", (240, 0, 480, 40))]
+        def set_focus(s): s.fokus += 1
+
+    klicks = []
+    alt = {k: getattr(ob, k) for k in ("_warte", "_maus_fahren", "_klick_absolut", "_zurueck_zu_prophos")}
+    ob._warte = lambda *a, **k: None
+    ob._maus_fahren = lambda x, y: None
+    ob._klick_absolut = lambda x, y: klicks.append((x, y))
+    ob._zurueck_zu_prophos = lambda: "Fenster-Weg"
+    try:
+        ob._PULS_HEIM.update(w=None, gewechselt=False, aus=False)
+        f = Fenster()
+        ob._puls_vorn_merken(f, "Prophos - Google Chrome")
+        ob._puls_vorn_merken(Fenster(), "NQZ26 $1 - x")          # zweites Holen im Lauf ändert nichts
+        h = ob._puls_heim()
+        chk(f"Prophos-Tab angeklickt ({h}, {klicks})", h == "zurück zu Prophos (Tab Prophos)" and klicks == [(336, 20)])
+        chk("nur einmal je Lauf", ob._puls_heim() is None)
+        klicks.clear()
+        ob._PULS_HEIM.update(w=None, gewechselt=False, aus=False)
+        ob._puls_vorn_merken(Fenster(), "NQZ26 $30,921.75 ▲ +0.50% - Google Chrome")
+        chk("TopstepX stand schon vorn → kein Heimweg", ob._puls_heim() is None and not klicks)
+        ob._PULS_HEIM.update(w=None, gewechselt=False, aus=False)
+        ob._puls_vorn_merken(Fenster(), "Prophos - Google Chrome")
+        ob._PULS_HEIM["aus"] = True
+        chk("im Konto-Zwischenschritt kein Heimweg", ob._puls_heim() is None)
+        ob._PULS_HEIM["aus"] = False
+
+        class OhneTab(Fenster):
+            def descendants(s, control_type=None): return [Tab("NQZ26 $30,921.75", (0, 0, 240, 40))]
+        ob._PULS_HEIM.update(w=None, gewechselt=False, aus=False)
+        ob._puls_vorn_merken(OhneTab(), "Prophos - Google Chrome")
+        chk("Prophos in anderem Fenster → Echo-Weg", ob._puls_heim() == "zurück zu Prophos (Fenster: Fenster-Weg)")
+        res = {"trail": "a > b"}
+        ob._PULS_HEIM.update(w=Fenster(), gewechselt=True, aus=False)
+        ob._puls_heim_in(res)
+        chk("Spur-Zeile an res['trail']", res["trail"].endswith(" > zurück zu Prophos (Tab Prophos)"))
+    finally:
+        for k, v in alt.items():
+            setattr(ob, k, v)
+        ob._PULS_HEIM.update(w=None, gewechselt=False, aus=False)
+    if ok:
+        print("✓ Puls-Heim: Prophos-Tab (links der Mitte) oder Fenster, nur nach eigenem Wechsel, einmal je Lauf, nie im Zwischenschritt")
     return ok
 
 

@@ -26,7 +26,7 @@ def lade():
         return re.search(rf"^{name} = .*$", src, re.M).group(0)
     exec("\n".join([const("LT_WD_BLOW_PLUS"), const("WD_HEUTE_PPL")]
                    + [block(f) for f in ("_wd_num", "_wd_level", "_wd_konto_groesse", "ist_topstep_express", "konto_basis_balance",
-                                           "_lt_liq_balance", "_lt_liq", "_lt_demo", "kurs_jetzt_wahl")]), ns)
+                                           "_lt_liq_balance", "_lt_liq", "_lt_demo", "kurs_jetzt_wahl", "tsx_zeile_ueberlagern")]), ns)
     return ns
 
 
@@ -104,6 +104,16 @@ def main():
     check(kj["NQ"]["kurs"] == 30921.75 and kj["MNQ"]["kurs"] == 30921.75 and kj["MNQ"]["quelle"] == "NQ",
           "kurs_jetzt: jüngste Minute, MNQ übernimmt NQ")
     check(kw([]) == {} and kw([{"wurzel": "ES", "minute": "x", "c": 1}]) == {}, "kurs_jetzt: leer/fremde Wurzel → {}")
+    # F28: Topstep V2 — echte Brackets/MLL aus TopstepX
+    ue = a["tsx_zeile_ueberlagern"]
+    tv = {"tp_level_nq": 30927.75, "balance_start": 150000.0, "mll_start": 148000.0, "einstieg_quelle": "reader_klick"}
+    u = ue("tsv2", tv, 30921.75, "buy", 2.0, 2)
+    check(u["tp_level_nq"] == 30927.75 and u["level_quelle"] == "tsx" and u["liq_balance"] == 148000.0
+          and u["liq_level_nq"] == 30421.75 and u["sl_level_nq"] == 30421.75 and u["sl_art"] == "liquidation"
+          and u["einstieg_quelle"] == "reader_klick" and u["liq_pl_usd"] == -2000.0, "tsv2: TP aus Orders, Liquidation = MLL beim Start")
+    u2 = ue("tsv2", dict(tv, sl_level_nq=30800.0), 30921.75, "buy", 2.0, 2)
+    check(u2["sl_level_nq"] == 30800.0 and u2["sl_art"] == "bracket", "tsv2: echte SL-Bracket geht vor Liquidation")
+    check(ue("tvv2", tv, 30921.75, "buy", 2.0, 2) == {} and ue("tsv2", {}, 1, "buy", 2.0, 2) == {}, "nur tsv2 mit Werten")
 
     print("\nALLES GRUEN" if ok else "\nFEHLER")
     return 0 if ok else 1

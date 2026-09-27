@@ -1627,6 +1627,93 @@ def _zurueck_zu_prophos():
         return f"Rueckkehr zu Prophos fehlgeschlagen ({type(e).__name__})"
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# HEIMWEG NACH JEDEM PULS-LAUF (B35, 27.09.2026, Finn: „Nachdem die Order platziert ist, soll Puls automatisch wieder zurück in
+# Prophos gehen, auf den Prophos-/localhost-Tab"). Echo macht das seit 28.08. mit _zurueck_zu_prophos — das findet aber nur ein
+# FENSTER mit Titel „Prophos…". Seit der Fenster-Treue (26.09.) liegen TradingView/TopstepX als TAB im Puls-Fenster neben
+# Prophos — dann zeigt der Fenstertitel TopstepX. Deshalb: erst den Prophos-Tab im Puls-Fenster anklicken, sonst das
+# Prophos-Fenster wie Echo. Nur wenn der Lauf den Vordergrund selbst gewechselt hat; nie einen Tab schließen.
+# ═══════════════════════════════════════════════════════════════════════════
+_PULS_HEIM = {"w": None, "gewechselt": False, "aus": False}
+
+
+def prophos_tab_wahl(namen):
+    """REIN RECHNEND (testbar): Index des Prophos-Tabs in der Tableiste — Name beginnt mit „Prophos" (nicht die Backend-Konsole
+    „Prophos-Backend") oder ist die Adresse localhost:5000 / prophos.pages.dev (Tab lädt noch). -> Index | None"""
+    for i, n in enumerate(namen or ()):
+        t = str(n or "").strip().lower()
+        if t.startswith("devtools") or t.startswith("prophos-backend"):
+            continue
+        if t.startswith("prophos") or "localhost:5000" in t or "prophos.pages.dev" in t:
+            return i
+    return None
+
+
+def _vordergrund_titel():
+    try:
+        import ctypes
+        u32 = ctypes.windll.user32
+        h = u32.GetForegroundWindow()
+        buf = ctypes.create_unicode_buffer(512)
+        u32.GetWindowTextW(h, buf, 512)
+        return buf.value or ""
+    except Exception:
+        return ""
+
+
+def _puls_vorn_merken(pw, vorher_titel):
+    """Beim ERSTEN Holen von TradingView/TopstepX im Lauf: Puls-Fenster merken; gewechselt = vorher stand etwas anderes vorn
+    (meist Prophos). Stand TV/TopstepX schon vorn, gibt es keinen Heimweg."""
+    if _PULS_HEIM["w"] is not None:
+        return
+    t = str(vorher_titel or "")
+    _PULS_HEIM["w"] = pw
+    _PULS_HEIM["gewechselt"] = not (ist_topstepx_titel(t) or ist_tradingview_fenster(t, "Chrome_WidgetWin_1")
+                                    or tv_tab_rang(t, "", "") > 0)
+
+
+def _puls_heim():
+    """Zurück zu Prophos (einmal je Lauf) → Spur-Text | None (nichts zu tun). Best-Effort, ändert nie das Ergebnis."""
+    pw, gew = _PULS_HEIM["w"], _PULS_HEIM["gewechselt"]
+    if _PULS_HEIM["aus"] or pw is None or not gew:
+        return None
+    _PULS_HEIM["w"] = None
+    try:
+        _warte(0.3, 0.5)
+        try:
+            if str(pw.window_text() or "").strip().lower().startswith("prophos"):
+                return "zurück zu Prophos (war schon vorn)"
+            tabs = pw.descendants(control_type="TabItem")
+        except Exception:
+            tabs = []
+        namen = []
+        for t in tabs:
+            try:
+                namen.append(t.window_text() or "")
+            except Exception:
+                namen.append("")
+        i = prophos_tab_wahl(namen)
+        if i is not None:
+            r = tabs[i].rectangle()
+            x, y = int(r.left + (r.right - r.left) * 0.4), int((r.top + r.bottom) / 2)   # links der Mitte — nie das Tab-X
+            pw.set_focus()
+            _warte(0.15, 0.15)
+            _maus_fahren(x, y)
+            _klick_absolut(x, y)
+            return f"zurück zu Prophos (Tab {namen[i][:30]})"
+        heim = _zurueck_zu_prophos()                     # anderes Chrome-Fenster mit Prophos (wie Echo; nie das Reader-Chrome)
+        return f"zurück zu Prophos (Fenster: {heim})"
+    except Exception as e:
+        return f"zurück zu Prophos fehlgeschlagen ({type(e).__name__})"
+
+
+def _puls_heim_in(res):
+    """Heimweg vor der JSON-Ausgabe der TV-Modi; Spur-Zeile an res['trail']."""
+    h = _puls_heim()
+    if h:
+        res["trail"] = (str(res.get("trail") or "") + " > " + h) if res.get("trail") else h
+
+
 def modus_tvfokus():
     """Orbit-Puls, Etappe 3 Schritt 1 (28.08.2026, Finns Ansage 'mehr mal
     nicht, nur bis dahin'): NUR den TradingView-Tab nach vorn holen — kein
@@ -1885,9 +1972,11 @@ def _tv_tab_suchen(w, begriff, symbol, gesehen):
 def _tv_fenster_holen(trail, begriff="", symbol=""):
     """TradingView im PULS-FENSTER nach vorn (Fenster-Treue, 26.09.2026) — Titel zuerst (aktiver Tab), sonst ueber die
     Tableiste DIESES Fensters. Andere Chrome-Fenster werden nie aktiviert. (fenster, fehlertext)"""
+    vorher = _vordergrund_titel()                        # B35: Heimweg nur, wenn der Lauf den Vordergrund wechselt
     pw, code, msg = _puls_fenster(trail)
     if pw is None:
         return None, msg
+    _puls_vorn_merken(pw, vorher)
     try:
         titel = pw.window_text() or ""
         klasse = pw.element_info.class_name
@@ -3651,6 +3740,7 @@ def modus_tvkonto(cmd):
         # Text-Suche wieder aus: sie laeuft durchs ganze DOM und soll nie im
         # Dauerbetrieb mitlaufen (der Server schaltet nach 90 s ohnehin ab).
         _tv_http("/suche", {"texte": []}, timeout=1.5)
+        _puls_heim_in(res)
         print(json.dumps(res))
         return "fertig"       # fuer die inneren Ablaeufe: 'es ist alles gesagt, nichts mehr tun'
 
@@ -5839,19 +5929,23 @@ def modus_tvkette(cmd):
     cmd = tv_bruecke_auspacken(cmd)
     puffer, echt = io.StringIO(), sys.stdout
     sys.stdout = puffer
+    _PULS_HEIM["aus"] = True          # B35: kein Heimweg zwischen Konto-Schritt und Asset/Order — erst am Ende der Kette
     try:
         modus_tvkonto(cmd)
     finally:
         sys.stdout = echt
+        _PULS_HEIM["aus"] = False
     zeilen = [z for z in puffer.getvalue().strip().splitlines() if z.strip()]
     try:
         res = json.loads(zeilen[-1])
     except (ValueError, IndexError):
-        print(json.dumps({"ok": False, "schritt": "absturz",
-                          "msg": "Konto-Schritt ohne lesbare Antwort: " + (zeilen[-1][:160] if zeilen else "leer")}))
+        r_ = {"ok": False, "schritt": "absturz", "msg": "Konto-Schritt ohne lesbare Antwort: " + (zeilen[-1][:160] if zeilen else "leer")}
+        _puls_heim_in(r_)
+        print(json.dumps(r_))
         return
     symbol = str(cmd.get("symbol") or "").strip()
     if not res.get("ok") or not symbol:
+        _puls_heim_in(res)
         print(json.dumps(res))
         return
     trail = _StempelSpur()
@@ -5900,6 +5994,7 @@ def modus_tvkette(cmd):
     res["msg"] = (f"{res.get('msg')} · {msg}" if ok else
                   f"Konto steht ({res.get('konto_aktiv')}), aber: {msg} | Zuletzt: " + " > ".join(list(trail)[-3:]))
     res["trail"] = str(res.get("trail") or "") + " || Asset/Order: " + " > ".join(trail)
+    _puls_heim_in(res)
     print(json.dumps(res))
 
 
@@ -6467,6 +6562,7 @@ def _tv_konto_abgefangen(cmd, ext, geschwister, res, trail):
     cmd_k["sitzung_merken"] = bool(cmd.get("sitzung_merken"))
     puffer, echt = io.StringIO(), sys.stdout
     sys.stdout = puffer
+    _PULS_HEIM["aus"] = True          # B35: Heimweg erst am Ende des äußeren Laufs (Rundgang/Schließen)
     try:
         modus_tvkonto(cmd_k)
     except Exception as e:
@@ -6474,6 +6570,7 @@ def _tv_konto_abgefangen(cmd, ext, geschwister, res, trail):
         return "tv_fehlt", f"Konto-Schritt abgebrochen: {type(e).__name__}: {e}", {}
     finally:
         sys.stdout = echt
+        _PULS_HEIM["aus"] = False
     zeilen = [z for z in puffer.getvalue().strip().splitlines() if z.strip()]
     try:
         res_k = json.loads(zeilen[-1])
@@ -7004,6 +7101,7 @@ def modus_tvlesen(cmd):
         res.pop("konto_trail", None)
         if reader_da[0]:
             _tv_http("/suche", {"texte": []}, timeout=1.5)     # Textsuche nie im Dauerbetrieb
+        _puls_heim_in(res)
         try:
             print(json.dumps(res, ensure_ascii=False))
         except UnicodeEncodeError:
@@ -7310,6 +7408,7 @@ def modus_tvclose(cmd):
         res.pop("konto_trail", None)
         if reader_da[0]:
             _tv_http("/suche", {"texte": []}, timeout=1.5)
+        _puls_heim_in(res)
         try:
             print(json.dumps(res, ensure_ascii=False))
         except UnicodeEncodeError:
@@ -7613,6 +7712,7 @@ def modus_tvorder(cmd):
         # laesst das Userscript 60 s lang seinen Kandidaten-Dump mitschicken.
         if not res["ok"]:
             _tv_http("/dump-an", {})
+        _puls_heim_in(res)
         print(json.dumps(res))
         return
 
@@ -10414,9 +10514,11 @@ def ist_topstepx_url(url):
 
 def _tsx_tab_holen(trail, warten_s=25.0):
     """TopstepX-Tab im Puls-Fenster nach vorn, sonst Strg+T + topstepx.com/trade (Fenster-Treue). (fenster, fehler)"""
+    vorher = _vordergrund_titel()                        # B35: Heimweg nur, wenn der Lauf den Vordergrund wechselt
     pw, code, msg = _puls_fenster(trail)
     if pw is None:
         return None, msg
+    _puls_vorn_merken(pw, vorher)
     try:
         if ist_topstepx_titel(pw.window_text()) or ist_topstepx_url(_chrome_url(pw)):
             pw.set_focus()
@@ -10931,6 +11033,9 @@ def _tsx_esc():
 
 
 def _tsx_ausgabe(res, trail):
+    h = _puls_heim()                                     # B35: zurück zu Prophos (auch nach Wachhund/Fehler)
+    if h:
+        trail.append(h)
     res["trail"] = " > ".join(trail)
     print(json.dumps(res, ensure_ascii=False))
 
