@@ -10722,6 +10722,22 @@
       eigenerCodeUid = uid; eigenerCode = c
       return c
     }
+    /* Reiter für IDs mit eigenem Code (27.09.2026, Finn: „Emin sollte bei sich nur Übersicht,
+     * Payouts und Meta Wallet sehen, den Rest nicht"). Die übrigen Reiter nur ausblenden
+     * (Markierung data-nur-eigene-aus, damit ein Profilwechsel sie zurückholt); die Daten
+     * grenzen Backend (_admin_nur_uid) und RLS (admin_nur_eigene) ohnehin ein. */
+    const KASSE_REITER_EIGENE = new Set(['overview', 'fin', 'wallet'])
+    function kasseReiterFuer(ec){
+      document.querySelectorAll('.adm-tab').forEach(b => {
+        if(!ec){
+          if(b.dataset.nurEigeneAus){ b.style.display = ''; delete b.dataset.nurEigeneAus }
+        } else if(!KASSE_REITER_EIGENE.has(b.dataset.admtab) && b.style.display !== 'none'){
+          b.style.display = 'none'; b.dataset.nurEigeneAus = '1'
+        }
+      })
+      const akt = document.querySelector('.adm-tab.active')
+      if(ec && akt && !KASSE_REITER_EIGENE.has(akt.dataset.admtab)) document.querySelector('.adm-tab[data-admtab="overview"]')?.click()
+    }
     const kasseFreiFuer = ec => {
       try { return localStorage.getItem(kasseSchluessel()) === (ec ? '2' : '1') } catch(_){ return false }
     }
@@ -10745,8 +10761,9 @@
       // Nicht bei jedem Betreten neu laden (24.09.2026 abends, Finn: „dass das nicht immer neu geladen werden muss,
       // wenn ich ganz kurz auf Kompass gehe — die Übersicht auch, ist mir nervig"): Stand bleibt 10 min, ↻ lädt sofort.
       if(!admData || Date.now() - (window._admLadeZeit || 0) > ADM_CACHE_MS) admLoad()
+      kasseReiterFuer(eigenerCode)
       // Sprung aus Trades („Winning Days") wartet hinter dem Kasse-Code (23.09.2026)
-      if(window._wdTabPending){ window._wdTabPending = false; document.querySelector('.adm-tab[data-admtab="wd"]')?.click() }
+      if(window._wdTabPending){ window._wdTabPending = false; if(!eigenerCode) document.querySelector('.adm-tab[data-admtab="wd"]')?.click() }
     }
 
     /* ── Admin-Übersicht: Kapitalverteilung über ALLE Personen ──
@@ -34407,7 +34424,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.688'
+  const OS_TAB_BUILD = '2026-09-22.689'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
