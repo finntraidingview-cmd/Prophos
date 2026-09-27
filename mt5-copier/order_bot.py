@@ -10154,7 +10154,12 @@ def tsx_kopf_werte(elemente):
             continue
         wert = tsx_geld(m.group(2)) if m.group(2) else None
         if wert is None and i + 1 < len(namen):
-            wert = tsx_geld(namen[i + 1])
+            # B22 (Inventar Mike): „BAL:" · „$" · „154,504.88" als DREI Knoten — Vorzeichen/Währung und Zahl zusammenfügen
+            nxt = namen[i + 1]
+            if re.fullmatch(r"[-−(]?\s*\$?\s*[-−]?", nxt) and i + 2 < len(namen):
+                wert = tsx_geld(nxt + namen[i + 2])
+            else:
+                wert = tsx_geld(nxt)
         out[key] = wert
     return out
 
@@ -10177,12 +10182,28 @@ def tsx_konto_sichtbar(text):
     return m.group(1).upper().rstrip("-") if m.group(2) else m.group(1).upper(), bool(m.group(2))
 
 
+TSX_RX_OHNE_ID = re.compile(r"^\s*(\$\s*\d+(?:[.,]\d+)?\s*K\b[^|$]*?)\s*\|?\s*(…|\.\.\.)?\s*$", re.I)
+
+
+def tsx_label(text):
+    """REIN RECHNEND (testbar, B22): Produkt-Label vor dem '|' („$150K TRADING COMBINE"), normalisiert; '' ohne Label."""
+    m = re.match(r"^\s*(\$\s*\d+(?:[.,]\d+)?\s*K\b[^|]*)", str(text or ""), re.I)
+    return re.sub(r"\s+", " ", m.group(1)).strip().upper() if m else ""
+
+
+def tsx_ist_ausloeser_text(text):
+    """REIN RECHNEND (testbar, B22): Konto-Auslöser — mit Kennung („… | EXPRESS-V2-…") ODER ohne (TopstepX lässt die Kennung
+    bei langen Namen ganz weg: nur „$150K TRADING COMBINE" + „|", Inventar Mike 11:24 UTC)."""
+    t = str(text or "")
+    return bool(tsx_konto_sichtbar(t)[0]) or bool(TSX_RX_OHNE_ID.match(t))
+
+
 def tsx_konto_steht(text, ext_id):
     """REIN RECHNEND (testbar, B18): 'ja' (volle Kennung = External ID), 'vielleicht' (abgekürzt, Präfix passt — erst die Liste
     beweist es), 'nein'."""
     k, kurz = tsx_konto_sichtbar(text)
     if not k:
-        return "nein"
+        return "unbekannt" if TSX_RX_OHNE_ID.match(str(text or "")) else "nein"
     if not kurz:
         return "ja" if _nur_alnum(k) == _nur_alnum(ext_id) else "nein"
     return "vielleicht" if len(_nur_alnum(k)) >= 4 and _nur_alnum(ext_id).startswith(_nur_alnum(k)) else "nein"
@@ -10198,6 +10219,18 @@ def tsx_wechsel_urteil(ausloeser_text, ext_id, liste_texte, bal_vorher, bal_jetz
     stand = tsx_konto_steht(ausloeser_text, ext_id)
     if stand == "ja":
         return True, "Auslöser zeigt die Ziel-ID"
+    if stand == "unbekannt":
+        # B22: Auslöser ohne Kennung — Label muss dem Ziel-Eintrag entsprechen; bewiesen durch geänderte BAL oder ein in der
+        # Liste EINDEUTIGES Label (Mikes zwei „$150K TRADING COMBINE" → nur über die BAL)
+        ziel = [t for t in liste_texte or () if _nur_alnum(tsx_konto_aus_text(t)) == _nur_alnum(ext_id)]
+        z_label = tsx_label(ziel[0]) if ziel else ""
+        if not z_label or tsx_label(ausloeser_text) != z_label:
+            return False, f"Auslöser-Label '{tsx_label(ausloeser_text)}' ≠ Ziel '{z_label}'"
+        if bal_vorher is not None and bal_jetzt is not None and abs(bal_jetzt - bal_vorher) >= 0.005:
+            return True, "Auslöser ohne Kennung, Label passt und BAL geändert"
+        if sum(1 for t in liste_texte or () if tsx_label(t) == z_label) == 1:
+            return True, "Auslöser ohne Kennung, Label in der Liste eindeutig"
+        return False, "Auslöser ohne Kennung, Label doppelt und BAL unverändert — Wechsel nicht beweisbar"
     if stand == "vielleicht":
         k, _kurz = tsx_konto_sichtbar(ausloeser_text)
         gleich = [t for t in liste_texte or () if _nur_alnum(tsx_konto_aus_text(t)).startswith(_nur_alnum(k))]
@@ -10322,7 +10355,10 @@ def _chrome_url(w):
             except Exception:
                 pass
             try:
-                if TSX_RX_ADRESSLEISTE.search(e.window_text() or ""):
+                n_ = e.window_text() or ""
+                if re.match(r"^(https?://)?[\w-]+(\.[\w-]+)+(/|$)", n_.strip()):
+                    return n_.strip()          # B22 (Mike): das Edit HEISST die Adresse („topstepx.com/trade")
+                if TSX_RX_ADRESSLEISTE.search(n_):
                     try:
                         return str(e.get_value() or "")
                     except Exception:
@@ -10444,20 +10480,33 @@ def _tsx_seite(w):
 
 
 def _tsx_seite_suchen(w):
+    """B22: das Document des AKTIVEN Tabs — sein Name ist der Seitentitel = Fenstertitel ohne „ - Google Chrome"; nur
+    sichtbare. Rückfall: das größte sichtbare Document."""
     try:
         docs = w.descendants(control_type="Document", depth=8)
     except Exception:
         return None
-    best = None
+    try:
+        titel = re.sub(r"\s+[-–]\s+(Google Chrome|Microsoft Edge|Brave).*$", "", w.window_text() or "").strip()
+    except Exception:
+        titel = ""
+    best, passend = None, None
     for d in docs:
         try:
+            if hasattr(d, "is_visible") and not d.is_visible():
+                continue
             r = d.rectangle()
+            if not (r.right - r.left > 300 and r.bottom - r.top > 200):
+                continue
+            rr = (r.left, r.top, r.right, r.bottom)
             fl = (r.right - r.left) * (r.bottom - r.top)
-            if r.right - r.left > 300 and r.bottom - r.top > 200 and (best is None or fl > best[0]):
-                best = (fl, (r.left, r.top, r.right, r.bottom))
+            if titel and (d.window_text() or "").strip() == titel:
+                passend = rr
+            if best is None or fl > best[0]:
+                best = (fl, rr)
         except Exception:
             continue
-    return best[1] if best else None
+    return passend or (best[1] if best else None)
 
 
 def _tsx_seite_roh(w, typen=None):
@@ -10506,14 +10555,14 @@ def tsx_zeilen(roh, tol=8, luecke=40):
 def tsx_ausloeser_waehlen(roh):
     """REIN RECHNEND (testbar, B20): Konto-Auslöser — erst ein einzelnes Element mit dem ganzen Muster, sonst ein
     zusammengefügtes Stück (tsx_zeilen). Oberstes zuerst. -> (text, rect, typ) | None"""
-    einzeln = [e for e in roh or () if e[1] and tsx_konto_sichtbar(e[0])[0]]
-    if einzeln:
-        return sorted(einzeln, key=lambda e: (e[1][1], e[1][0]))[0]
-    st = [(t, r) for t, r in tsx_zeilen(roh) if tsx_konto_sichtbar(t)[0]]
-    if st:
-        t, r = sorted(st, key=lambda x: (x[1][1], x[1][0]))[0]
-        return (t, r, "Zeile")
-    return None
+    # B22: IMMER der oberste Kandidat — Einzel-Element mit Kennung ODER zusammengefügtes Stück. Vorher gingen Einzel-Elemente
+    # vor: blieb die Liste nach dem Klick im Baum, galt ein Listeneintrag (volle ID) als „Auslöser" → falsche Bestätigung.
+    kand = [(str(e[0]), tuple(e[1]), e[2] if len(e) > 2 else "", 0) for e in roh or () if e[1] and tsx_konto_sichtbar(e[0])[0]]
+    kand += [(t, r, "Zeile", 1) for t, r in tsx_zeilen(roh) if tsx_ist_ausloeser_text(t)]
+    if not kand:
+        return None
+    t, r, typ, _v = sorted(kand, key=lambda x: (x[1][1], x[3], x[1][0]))[0]
+    return (t, r, typ)
 
 
 def tsx_eintraege_waehlen(roh, unter_y):
@@ -10670,7 +10719,7 @@ def modus_tsxinventar(cmd):
     seite = _tsx_seite(w)
     res["seite"] = list(seite) if seite else None
     _puls_diagnose_senden(trail, "tsx_inventar")      # B17: Spur vor den Klicks
-    ke = _tsx_konto_element(seiten_filter(roh, seite))
+    ke = tsx_ausloeser_waehlen(seiten_filter(roh, seite))       # B22: auch Auslöser ohne Kennung
     if ke:
         _tsx_klick(ke, f"Konto-Dropdown ('{ke[0][:40]}')", trail)
         _warte(0.8, 0.4)

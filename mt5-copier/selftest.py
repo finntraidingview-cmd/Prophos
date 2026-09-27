@@ -1767,6 +1767,7 @@ def main():
     results.append(test_tsx_konto_abgekuerzt())
     results.append(test_tsx_titel_url())
     results.append(test_tsx_zeilen())
+    results.append(test_tsx_inventar_mike())
     results.append(test_hedge_bereit())
     results.append(test_quickedit())
 
@@ -2702,6 +2703,50 @@ def test_tsx_zeilen():
     chk("leer/Unsinn wirft nicht", ob.tsx_zeilen(None) == [] and ob.tsx_ausloeser_waehlen([("x", None, "Text")]) is None)
     if ok:
         print("✓ TSX-Zeilen: getrennte Knoten → Auslöser/Einträge, Kopfzeile bleibt getrennt, Einzel-Element geht vor")
+    return ok
+
+
+def test_tsx_inventar_mike():
+    """B22 (27.09.2026, Inventar pc-l5o8bv 11:24 UTC, exakt diese Knoten): Auslöser ohne Kennung („$150K TRADING COMBINE" + „|"),
+    Kopfzeile „BAL:" · „$" · „154,504.88" getrennt; Wechsel-Urteil ohne Kennung (Label + BAL / eindeutiges Label)."""
+    import order_bot as ob
+    ok = True
+
+    def chk(name, bed):
+        nonlocal ok
+        if not bed:
+            print("✗ TSX-Inventar Mike: " + name); ok = False
+
+    roh = [("Weekend Hours", (75, 124, 200, 149), "Text"), (":", (199, 124, 206, 149), "Text"),
+           ("We are undergoing scheduled maintenance, which may temporari", (220, 124, 1200, 149), "Text"),
+           ("$150K TRADING COMBINE", (102, 180, 262, 199), "Text"), ("|", (267, 180, 280, 199), "Text"),
+           ("BAL:", (346, 181, 379, 200), "Text"), ("$", (378, 181, 386, 200), "Text"), ("154,504.88", (385, 181, 455, 200), "Text"),
+           ("MLL:", (484, 181, 518, 200), "Text"), ("$", (517, 181, 525, 200), "Text"), ("150,000.00", (525, 181, 594, 200), "Text"),
+           ("RP&L:", (623, 181, 664, 200), "Text"), ("$0.00", (663, 181, 699, 200), "Text"),
+           ("UP&L:", (727, 181, 769, 200), "Text"), ("$0.00", (768, 181, 803, 200), "Text"),
+           ("Trading Lockout", (832, 181, 852, 201), "Button"), ("Chart X", (95, 218, 155, 254), "TabItem")]
+    a = ob.tsx_ausloeser_waehlen(roh)
+    chk("Auslöser ohne Kennung gefunden (nur Label + |), Rechteck nur der Auslöser",
+        a is not None and a[0].startswith("$150K TRADING COMBINE") and a[1] == (102, 180, 280, 199))
+    chk("Stand ohne Kennung = unbekannt → Liste öffnen", ob.tsx_konto_steht(a[0], "150KTC-SKU-V2-682437-58370042") == "unbekannt")
+    chk("Kopfzeile aus drei Knoten: BAL/MLL/RP&L/UP&L", ob.tsx_kopf_werte(roh) == {"balance": 154504.88, "mll": 150000.0, "rpl": 0.0, "upl": 0.0})
+    chk("Kopfzeile negativ getrennt: -$ und 120.25 als zwei Knoten", ob.tsx_kopf_werte([("RP&L:", None, "T"), ("-$", None, "T"), ("120.25", None, "T")])["rpl"] == -120.25)
+    liste = ["$150K TRADING COMBINE | 150KTC-SKU-V2-682437-58370042", "$150K TRADING COMBINE | 150KTC-SKU-V2-682437-71275127",
+             "$150K EXPRESS | EXPRESS-V2-682437-57131691", "$50K EXPRESS | EXPRESS-V2-682437-1 (Ineligible)"]
+    wu = ob.tsx_wechsel_urteil
+    chk("ohne Kennung: Label passt + BAL geändert → bestätigt",
+        wu("$150K TRADING COMBINE |", "150KTC-SKU-V2-682437-58370042", liste, 11079.66, 154504.88)[0])
+    chk("ohne Kennung: Label doppelt + BAL gleich → nicht beweisbar (Mikes zwei TRADING COMBINE)",
+        not wu("$150K TRADING COMBINE |", "150KTC-SKU-V2-682437-58370042", liste, 154504.88, 154504.88)[0])
+    chk("ohne Kennung: Label eindeutig (EXPRESS) + BAL gleich → bestätigt",
+        wu("$150K EXPRESS |", "EXPRESS-V2-682437-57131691", liste, 11079.66, 11079.66)[0])
+    chk("ohne Kennung: falsches Label → nein", not wu("$150K EXPRESS |", "150KTC-SKU-V2-682437-58370042", liste, 1.0, 2.0)[0])
+    offen = roh + [("$150K TRADING COMBINE | 150KTC-SKU-V2-682437-58370042", (102, 230, 400, 250), "Text")]
+    chk("offene Liste im Baum: Auslöser bleibt der OBERSTE (nicht der Listeneintrag mit voller ID)",
+        ob.tsx_ausloeser_waehlen(offen)[1][1] == 180)
+    chk("Kopfzeile ist kein Auslöser", not ob.tsx_ist_ausloeser_text("BAL: $ 154,504.88") and ob.tsx_ist_ausloeser_text("$150K TRADING COMBINE |"))
+    if ok:
+        print("✓ TSX-Inventar Mike: Auslöser ohne Kennung, Kopfzeile aus drei Knoten, Urteil über Label + BAL")
     return ok
 
 
