@@ -11346,6 +11346,21 @@ def tsx_mengenfeld(felder, leiste, label_rect=None):
     return tsx_feld_zu_label(felder, label_rect) if label_rect else None
 
 
+TSX_RX_ABGELEHNT = re.compile(r"reject|market\s+(is\s+)?closed|not\s+allowed|outside\s+(of\s+)?(regular\s+)?trading\s+hours|"
+                              r"denied|insufficient|order\s+failed|failed\s+to|abgelehnt|nicht\s+erlaubt", re.I)
+
+
+def tsx_ablehnung(vorher, nachher):
+    """REIN RECHNEND (testbar, B31): Ablehnungs-Text von TopstepX nach dem Klick — nur Texte, die VOR dem Klick nicht da waren
+    (der Knopf „Market closed" steht am Wochenende schon vorher). -> Text | None"""
+    alt = {str(t or "").strip().lower() for t in vorher or ()}
+    for t in nachher or ():
+        t = str(t or "").strip()
+        if t and t.lower() not in alt and len(t) < 300 and TSX_RX_ABGELEHNT.search(t):
+            return t
+    return None
+
+
 def tsx_order_befehl(cmd):
     """REIN RECHNEND (testbar): Befehl prüfen → (dict | None, fehler). richtung buy/sell, Menge 1–50 ganz, Wurzel MNQ/NQ aus
     symbol, TP > 0, SL optional (> 0 oder leer), scharf bool."""
@@ -11468,10 +11483,11 @@ def _tsx_order_nach_kopf(befehl):
         if res.get("position") != "keine":
             return ende("position", "Im Konto ist eine Position offen (kein „No Active Position\") — keine zweite Order.")
         markt_zu = any(n.strip().lower() == "market closed" for n in namen)
-        if markt_zu and befehl["scharf"]:
-            return ende("markt_zu", "TopstepX meldet „Market closed\" — keine Order.")
+        # B31 (27.09.2026, Finn: „Die Orders werden rejected, nicht in die Warteschlange gemacht. Starte es einfach live, es
+        # passt."): „Market closed" bricht auch scharf nicht mehr ab — TopstepX lehnt ab, der Nachher-Beweis meldet es ehrlich
         if markt_zu:
-            trail.append("Markt zu (Probe läuft trotzdem bis vor den Knopf)")
+            trail.append("Markt zu — " + ("scharf läuft trotzdem bis zum Klick (TopstepX lehnt ab, keine Warteschlange)"
+                                          if befehl["scharf"] else "Probe läuft trotzdem bis vor den Knopf"))
         # 3. Order-Typ, 4a. Position Bracket
         # B29 (27.09.2026, erste Probe bei Mike: „Order-Typ ist nicht Market (Order Type)", obwohl Market stand): Wert über
         # tsx_feld_wert; abgebrochen wird nur bei eindeutig anderem Wert — unlesbar = weiter, der Knopf-Beweis entscheidet
@@ -11638,6 +11654,8 @@ def _tsx_order_nach_kopf(befehl):
             _puls_diagnose_senden(trail, "tsx_probe")
             return _tsx_ausgabe(res, trail)
         # 8. Senden
+        _TOAST_TYPEN = ("Text", "Button", "Group", "Custom", "ListItem")
+        vorher_txt = [e[0] for e in _tsx_seite_roh(w, _TOAST_TYPEN) if e[1]]
         res["retry_ok"] = False
         res["klick_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         _tsx_klick(knopf, f"Order senden ({knopf[0]})", trail)
@@ -11648,6 +11666,10 @@ def _tsx_order_nach_kopf(befehl):
         while time.time() < t_bis:
             _warte(0.4, 0.2)
             roh_n = _tsx_seite_roh(w)
+            abl = tsx_ablehnung(vorher_txt, [e[0] for e in _tsx_seite_roh(w, _TOAST_TYPEN) if e[1]])
+            if abl:
+                trail.append(f"TopstepX-Meldung nach dem Klick: „{abl[:160]}\"")
+                return ende("abgelehnt", f"Von TopstepX abgelehnt: {abl[:200]}", gesendet=True, retry_ok=False, abgelehnt_text=abl[:300])
             if tsx_position_zustand([e[0] for e in roh_n if e[1]]) != "keine":
                 werte = tsx_kopf_werte(roh_n)
                 res["summary"] = {lbl: (f"${werte[k]:,.2f}" if werte[k] is not None else None) for lbl, k in
@@ -11658,6 +11680,9 @@ def _tsx_order_nach_kopf(befehl):
                 trail.append("Nachher-Beweis: „No Active Position\" ist weg")
                 _puls_diagnose_senden(trail, "tsx_fertig")
                 return _tsx_ausgabe(res, trail)
+        if markt_zu:
+            return ende("beweis", "Order geklickt, keine Position — vermutlich abgelehnt (Markt zu), bitte in TopstepX unter Orders "
+                                  "nachsehen.", gesendet=True, retry_ok=False)
         return ende("beweis", "Order-Knopf geklickt, aber „No Active Position\" steht nach 10 s noch — in TopstepX nachsehen, "
                               "nichts wiederholen.", gesendet=True, retry_ok=False)
     return weiter

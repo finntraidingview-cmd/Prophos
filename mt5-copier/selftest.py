@@ -2879,7 +2879,7 @@ def test_tsx_order():
     chk("Haken neben „Automatically apply\"", ob.tsx_haken_zu_text(hk, (957, 872, 1296, 891)) == hk[0])
 
     # Trockenlauf
-    def lauf(befehl_cmd, pos_offen=False, typ="Order Type Market", haken=0):
+    def lauf(befehl_cmd, pos_offen=False, typ="Order Type Market", haken=0, markt=False, nach="pos"):
         z = {"dialog": False, "profit": "250", "risk": "100", "haken": haken, "contract": "NQZ26", "menge": 1, "pos": pos_offen, "klicks": []}
 
         def roh(w, typen=None):
@@ -2892,6 +2892,10 @@ def test_tsx_order():
                  ("BUY +1 @ MARKET", (500, 684, 640, 718), "Button"), ("CLOSE POSITION", (2094, 730, 2440, 760), "Button")]
             if not z["pos"]:
                 r.append(("No Active Position", (2100, 800, 2300, 820), "Text"))
+            if markt:
+                r.append(("Market closed", (2094, 740, 2440, 770), "Button"))
+            if z.get("toast"):
+                r.append(("Order rejected: Market is closed", (2000, 1200, 2440, 1240), "Text"))
             if z["dialog"]:
                 r += [("Position Brackets close", (906, 577, 1654, 658), "Text"), ("close", (1601, 587, 1644, 630), "Button"),
                       ("Automatically apply Risk / Profit bracket to new Positions", (957, 872, 1296, 891), "Text")]
@@ -2912,7 +2916,9 @@ def test_tsx_order():
             elif name == "Bracket-Dialog schließen": z["dialog"] = False
             elif name.startswith("Haken"): z["haken"] = 1
             elif name.startswith("Contract "): z["contract"] = "MNQZ26"
-            elif name.startswith("Order senden"): z["pos"] = True
+            elif name.startswith("Order senden"):
+                if nach == "pos": z["pos"] = True
+                elif nach == "toast": z["toast"] = True
             elif name.startswith("Schnellknopf "): z["menge"] = int(name.split()[-1])
             elif name == "Increase quantity": z["menge"] += 1
 
@@ -2974,6 +2980,15 @@ def test_tsx_order():
                                ("1", (500, 100, 520, 120), "Button"), ("Increase quantity", (2338, 567, 2365, 594), "Button")], 1917)
     chk("B30: Mengen-Leiste nur in der ±-Zeile", list(ml["schnell"].keys()) == [1] and ml["plus"] is not None)
     chk("B30: Mengenfeld in der ±-Zeile", ob.tsx_mengenfeld([("", (1977, 565, 2100, 596), "Edit", "1", None)], ml)[1] == (1977, 565, 2100, 596))
+    r, z = lauf(dict(cmd, scharf=True), markt=True, nach="toast")
+    chk(f"B31: Markt zu + scharf → Klick → abgelehnt ({r.get('code')}: {r.get('msg')})", r.get("code") == "abgelehnt" and r.get("gesendet") is True
+        and r.get("retry_ok") is False and "Market is closed" in r.get("msg", "") and sum(k.startswith("Order senden") for k in z["klicks"]) == 1)
+    r, z = lauf(dict(cmd, scharf=True), markt=True, nach="nichts")
+    chk(f"B31: Markt zu, keine Meldung, keine Position → beweis ({r.get('msg')})", r.get("code") == "beweis" and "vermutlich abgelehnt" in r.get("msg", ""))
+    ab = ob.tsx_ablehnung
+    chk("B31: Ablehnung nur als neuer Text", ab(["Market closed", "BUY +1 @ MARKET"], ["Market closed", "Order rejected: Market is closed"])
+        == "Order rejected: Market is closed" and ab(["Market closed"], ["Market closed"]) is None
+        and ab([], ["Outside trading hours"]) == "Outside trading hours" and ab([], ["BUY +1 @ MARKET"]) is None)
     r, z = lauf(cmd, typ="Order Type Limit")
     chk("Order-Typ Limit: Riegel", r.get("code") == "ordertyp" and not z["klicks"])
     # B29 (Mike 16:04 UTC): ComboBox heißt nur „Order Type" — unlesbar = weiter, Knopf-Beweis entscheidet
