@@ -5981,7 +5981,7 @@
                 <!-- Umbenannt „Winning Days Farm" (24.09.2026 spät, Finns Zielbild): Gegenhedge als Faktor mit TP/SL-Vorschau, beide
                      Schließ-Level liegen broker-seitig in MetaTrader. -->
                 <button type="button" id="tp-route-wd" title="Winning Days Farm: Orbit V2 + Fusion-Gegenhedge (Faktor, TP- und SL-Level in MetaTrader) — Dropdown zeigt nur Funded-Futures-Konten">Winning Days Farm</button>
-                <button type="button" id="tp-route-tsv2" title="Du platzierst selbst in TopstepX — kein Bot, keine API, kein Hedge">Topstep V2</button>
+                <button type="button" id="tp-route-tsv2" title="Topstep V2 — Puls platziert in TopstepX (Schalter „Puls für Topstep" unter Admin → Winning Days; aus = von Hand)">Topstep V2</button>
               </div>
               <!-- Alte Wege der Hedge-Ära, zweite Zeile (Reihenfolge Orbit · Topstep · Echo · Duplikum seit 22.09.2026) -->
               <div class="seg" id="tp-route-seg" style="margin-top:6px;opacity:.85">
@@ -8303,6 +8303,11 @@
                 <div class="wd-felder">
                   <div class="wd-feld"><label>Instrument</label><select class="input mono" id="wd-instr"><option value="mnq">MNQ</option><option value="nq">NQ</option></select></div>
                   <div class="wd-feld"><label>Kontrakte <small>· Standard</small></label><input type="number" class="input mono" id="wd-kt" min="1" step="1" value="1" title="gilt, wenn die Firma keine eigene Spanne hat"></div>
+                </div>
+                <!-- Puls für Topstep (27.09.2026, F23): zentraler Schalter wd_farmer_regeln.puls_topstep — eigene Verdrahtung (tsPulsSchalter) -->
+                <div class="wd-felder">
+                  <div class="wd-feld"><label>Puls für Topstep <small>· TopstepX</small></label><select class="input mono" id="wd-puls-topstep" title="aus = Topstep V2 von Hand · nur lesen = „Starten" liest nur Konto/Balance, keine Order · scharf = Puls platziert in TopstepX"><option value="aus">aus</option><option value="lesen">nur lesen</option><option value="scharf">scharf</option></select></div>
+                  <div class="wd-feld"><label>&nbsp;</label><div class="wd-abl-wert" id="wd-puls-topstep-stand" style="font-size:11.5px;color:var(--sub)"></div></div>
                 </div>
                 <div class="wd-abl-abschnitt">Gegenhedge</div>
                 <label class="wd-abl-schalter"><span><b>Fusion-Gegenhedge</b><small>Staffel-Betrag je Konto auf Fusion — zu am Master-TP (+ Puffer) oder am Liquidations-Level</small></span><input type="checkbox" id="wd-hedge-an"></label>
@@ -17472,7 +17477,7 @@
       // Teil B (25.09.2026): erst der Status (Guard planned), danach NUR die eigenen Felder atomar per RPC (Guard open) —
       // kein Lesen-Ändern-Schreiben mehr, ein gleichzeitiger Hedge-Write kann nicht verloren gehen.
       let patchBase = null
-      if(plan.route === 'tvv2'){
+      if(plan.route === 'tvv2' || plan.route === 'tsv2'){   // Topstep V2 mit Puls (F23)
         // Orbit V2 (24.09.2026): Startwert von Today's P&L aus dem Reader — oder ehrlich ohne tv-Feld
         if(tvBaseline && typeof tvBaseline === 'object') patchBase = { tv: tvBaseline }
         else console.warn('[v2PlanAufOpen] Orbit V2 ohne Start-Baseline (kein tv-lesen) — Auto-P&L nimmt später Today\'s P&L als Ganzes')
@@ -17710,7 +17715,45 @@
    * Echo-Zustandsmaschine (mt5PlanPollTick), Slave-P&L fest 0. */
   function routeIstV2(r){ return r === 'mt5v2' || r === 'tvv2' || r === 'tsv2' }   // tsv2 = Topstep V2, von Hand (24.09.2026 abends)
   function routeIstEcho(r){ return r === 'mt5' || r === 'mt5v2' }      // Puls im MT5-Master-Terminal
-  function routeIstOrbit(r){ return r === 'tvplus' || r === 'tvv2' }   // Puls in TradingView
+  /* PULS FÜR TOPSTEP (27.09.2026, F23 mit Backend B16, Finn: „Mit den Settings ist alles ganz genau gleich … die Popups sollen genau
+   * gleich sein wie bei Orbit. Wenn ich meine Eingaben gemacht habe und den Trade direkt starte oder für später plane, soll der
+   * Puls-Bot loslaufen."). Topstep V2 (tsv2) läuft wie Orbit V2, Puls klickt aber in der TopstepX-Web-App (Panel /api/tsx-*).
+   * Zentraler Schalter wd_farmer_regeln.puls_topstep: 'aus' = von Hand wie bisher, 'lesen' = „Starten" liest nur (Inventar, keine
+   * Order), 'scharf' = Order. Standard 'lesen', bis Finn nach dem Live-Test scharf schaltet (fehlt die Spalte: 'lesen'). */
+  var _tsPulsModus = 'lesen'   // var + function: routeIstOrbit darf das auch vor dieser Zeile fragen (kein TDZ)
+  function tsPulsModus(){ return _tsPulsModus || 'lesen' }
+  async function tsPulsModusLaden(){
+    try{ const { data, error } = await supabase.from('wd_farmer_regeln').select('*').eq('id', 1).maybeSingle()
+         if(!error && data && ['aus', 'lesen', 'scharf'].includes(data.puls_topstep)) _tsPulsModus = data.puls_topstep }catch(_){}
+    return _tsPulsModus
+  }
+  setTimeout(() => { if(currentUserId) tsPulsModusLaden() }, 4000); setInterval(() => { if(currentUserId) tsPulsModusLaden() }, 5 * 60000)
+  window._tsPulsModus = v => { if(['aus', 'lesen', 'scharf'].includes(v)){ _tsPulsModus = v; try{ renderTradePlans() }catch(_){} } return _tsPulsModus }   // Test-Haken
+  // Schalter im Admin-Farmer (Ablauf → Order): lädt beim Öffnen, speichert sofort beim Wechsel (nur Admins dürfen wd_farmer_regeln schreiben)
+  ;(function tsPulsSchalter(){
+    const sel = document.getElementById('wd-puls-topstep'), st = document.getElementById('wd-puls-topstep-stand'); if(!sel) return
+    const zeig = t => { if(st) st.textContent = t || '' }
+    const fuellen = async () => { await tsPulsModusLaden(); sel.value = tsPulsModus(); zeig('') }
+    document.querySelector('.adm-tab[data-admtab="wd"]')?.addEventListener('click', () => setTimeout(fuellen, 300))
+    setTimeout(() => { if(currentUserId) fuellen() }, 5000)
+    sel.addEventListener('change', async () => {
+      const v = sel.value; zeig('speichert …')
+      try{
+        const { error } = await supabase.from('wd_farmer_regeln').update({ puls_topstep: v, updated_at: new Date().toISOString() }).eq('id', 1)
+        if(error) throw error
+        _tsPulsModus = v; zeig(v === 'scharf' ? '✓ scharf — Puls platziert in TopstepX' : v === 'lesen' ? '✓ nur lesen — keine Order' : '✓ aus — Topstep V2 von Hand')
+        try{ renderTradePlans() }catch(_){}
+      }catch(e){ sel.value = tsPulsModus(); zeig('nicht gespeichert: ' + String((e && e.message) || e).slice(0, 80)) }
+    })
+  })()
+  // Plan läuft mit Puls (Rundgang, Nachlesung, Demo-Ende, Schließen): Orbit V2 immer, Topstep V2 nur, wenn Puls ihn gestartet hat
+  // (mt5_baseline.tv.puls 'tsx') — von Hand gestartete tsv2-Pläne bleiben Handarbeit.
+  function planIstPuls(p){ return !!p && (p.route === 'tvv2' || (p.route === 'tsv2' && !!(p.mt5Baseline && p.mt5Baseline.tv && p.mt5Baseline.tv.puls === 'tsx'))) }
+  // Panel-Route: TopstepX (tsx-*) für Topstep V2 bzw. Firma Topstep, sonst TradingView (tv-*)
+  const pulsApiName = (plan, art) => ((plan && (plan.route === 'tsv2' || /topstep/i.test(String(plan.masterFirm || '')))) ? 'tsx-' : 'tv-') + art
+  const pulsPlattform = plan => (plan && plan.route === 'tsv2') ? 'TopstepX' : 'TradingView'
+  // Orbit-Weg (Puls platziert): tvplus, tvv2 und — solange der Schalter nicht 'aus' steht — tsv2
+  function routeIstOrbit(r){ return r === 'tvplus' || r === 'tvv2' || (r === 'tsv2' && tsPulsModus() !== 'aus') }   // Puls in TradingView bzw. TopstepX
   // Winning-Day-Plan (25.09.2026, Finn am Trades-Tab: „kennzeichne die Trades als Winning Days, nicht als Orbit V2"): intern
   // route 'tvv2', erkennbar an hedge_eur > 0, der Farmer-Notiz oder der Kontoart 'winning_days' des Master-Kontos.
   function tpIstWdPlan(p){
@@ -17728,7 +17771,7 @@
     mt5v2:  ['Echo V2',   'Echo V2 — Puls platziert im Master-Terminal, kein Hedge, kein Copier'],
     tvv2:   ['Orbit V2',  'Orbit V2 — Puls platziert in TradingView, kein Duplikum, kein Hedge'],
     wd:     ['Winning Day', 'Winning Days Farm — Puls platziert in TradingView, Fusion-Gegenhedge (intern Orbit V2)'],
-    tsv2:   ['Topstep V2', 'Topstep V2 — du platzierst selbst in TopstepX: kein Bot, keine API, kein Hedge; „Läuft" und P&L von Hand'],
+    tsv2:   ['Topstep V2', 'Topstep V2 — Puls platziert in TopstepX (Schalter „Puls für Topstep"), kein Hedge; P&L aus der Balance wie Orbit V2'],
     mirror: ['Mirror',    'Topstep Mirror — TopstepX-Master auf MetaApi-Slave'],
     tsx:    ['TopstepX',  'TopstepX — Position direkt auf dem Topstep-Konto']
   }
@@ -18912,7 +18955,7 @@
   function mt5LivePnlInner(p){
     try{
       if(p && p.route === 'mt5v2') return mt5V2LivePnlInner(p)   // Echo V2 (24.09.2026): eigener Chip, gleicher Ticker
-      if(p && p.route === 'tvv2' && typeof tvV2LivePnlInner === 'function') return tvV2LivePnlInner(p)   // Orbit V2 (24.09.2026): Rundgang-Chip
+      if(planIstPuls(p) && typeof tvV2LivePnlInner === 'function') return tvV2LivePnlInner(p)   // Orbit V2 (24.09.2026): Rundgang-Chip
       if(!p || p.route !== 'mt5' || p.status !== 'open') return ''
       // Quelle 1 (PC): lokales Copier-Panel — frisch ≤15s, wie immer.
       let s = null
@@ -19015,7 +19058,7 @@
     // Daten da sind. Seit 29.08.2026 auch OHNE MT5_LOCAL: am Handy/Mac füllt
     // der Cloud-Fallback (mt5_live) die Zeile — das Gate hierauf hielt die
     // Live-P&L-Zeile am Handy dauerhaft leer.
-    if(!p || !(routeIstEcho(p.route) || p.route === 'tvv2') || p.status !== 'open') return ''   // Echo + Echo V2 + Orbit V2 (24.09.2026)
+    if(!p || !(routeIstEcho(p.route) || planIstPuls(p)) || p.status !== 'open') return ''   // Echo + Echo V2 + Orbit V2 (24.09.2026)
     return `<span data-mt5live="${escapeHtml(String(p.id))}">${mt5LivePnlInner(p)}</span>`
   }
   // Ticker: hält die Live-Zeilen frisch (5 s), solange offene MT5-Pläne sichtbar
@@ -19125,7 +19168,7 @@
   async function tvV2Lesen(konto, timeoutS, plan, zusatz){
     if(typeof window.mtcApi !== 'function') return { ok:false, code:'reader_fehlt', msg:'Copier-Backend nicht erreichbar' }
     // zusatz (25.09.2026): {ende, symbol, richtung} nur von der Endlesung — Ende-Modus des Bots (Befund, Rückfall, Exit-Fill)
-    const r = await window.mtcApi('tv-lesen', { method:'POST', headers:{ 'Content-Type':'application/json' },
+    const r = await window.mtcApi(pulsApiName(plan, 'lesen'), { method:'POST', headers:{ 'Content-Type':'application/json' },   // tsx-lesen für Topstep (F23)
       body: JSON.stringify(Object.assign({ konto: String(konto), timeout_s: timeoutS || 45 }, tvV2KontoKontext(plan), zusatz || {})) })
     if(!r || r._httpFail || r.copier_offline) return { ok:false, code:'reader_fehlt', msg: (r && r.error) || 'keine Antwort' }
     return r
@@ -19214,11 +19257,30 @@
     finally{ _tvBalLesenLaeuft.delete(id) }
   }
   window._tvKontoBalanceJetzt = tvKontoBalanceJetzt
+  // TopstepX-Inventar (F23): nur lesen, eine Maus (wie die Balance-Lesung), Ergebnis gekürzt für order_signale.ergebnis
+  async function tsxInventarLesen(){
+    if(!MT5_LOCAL || typeof window.mtcApi !== 'function') return { ok: false, msg: 'Nur am PC mit Copier-Backend' }
+    const t0 = Date.now()
+    for(;;){
+      let belegt = true; try{ belegt = !!_tpOrbitLaeuft || !!tvV2Poll.busy }catch(_){ belegt = true }
+      if(!belegt) break
+      if(Date.now() - t0 > 170000) return { ok: false, msg: 'Puls 3 min belegt — später nochmal' }
+      await new Promise(res => setTimeout(res, 8000 + Math.random() * 6000))
+    }
+    tvV2Poll.busy = true
+    try{
+      const r = await window.mtcApi('tsx-inventar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      if(!r || r._httpFail) return { ok: false, msg: 'Panel kennt /api/tsx-inventar noch nicht' }
+      const inv = {}; for(const [k, v] of Object.entries(r.inventar || {})) inv[k] = Array.isArray(v) ? v.slice(0, 200) : v
+      return { ok: !!r.ok, msg: r.msg || null, titel: r.titel || null, tabs: r.tabs || null, inventar: inv, datei: r.datei || null, trail: String(r.trail || '').slice(0, 2000) }
+    }finally{ tvV2Poll.busy = false }
+  }
+  window._tsxInventarLesen = tsxInventarLesen
   // Start-Baseline direkt nach dem bewiesenen Kauf-Klick: Today's P&L JETZT, als Startwert. Ohne Antwort
   // oder ohne Zahl bleibt today_pnl_start null — kein Schätzwert („Beweis oder leer"). Liefert immer ein
   // tv-Objekt (Konto + Datum + Zeit), damit später sichtbar ist, WANN gestartet wurde.
   async function tvV2BaselineLesen(plan){
-    const tv = { konto: tvV2Konto(plan), today_pnl_start: null, datum_start: tvV2Handelstag(), at: new Date().toISOString(),
+    const tv = { konto: tvV2Konto(plan), today_pnl_start: null, datum_start: tvV2Handelstag(), at: new Date().toISOString(), puls: plan.route === 'tsv2' ? 'tsx' : 'tv',
                  pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : null }   // pc: hier läuft TradingView — dort liest die Endlesung (25.09.2026)
     if(!tv.konto){ tv.grund = 'kein_konto'; return tv }
     try{
@@ -19262,7 +19324,7 @@
     try{
       if(!MT5_LOCAL || tvV2Poll.busy) return { ok:false, grund: tvV2Poll.busy ? 'laeuft_schon' : 'kein_pc' }
       let _tp; try { _tp = tradePlans } catch(_){ _tp = [] }
-      const plans = (_tp || []).filter(p => p && p.route === 'tvv2' && p.status === 'open')
+      const plans = (_tp || []).filter(p => p && planIstPuls(p) && p.status === 'open')
       if(!plans.length) return { ok:false, grund:'keine_plaene' }
       if(typeof window.mtcApi !== 'function') return { ok:false, grund:'kein_backend' }
       // Order geht vor: läuft am PC gerade ein Orbit-Start, fasst der Rundgang TradingView nicht an.
@@ -19399,7 +19461,7 @@
    * und damit auf jedem Gerät. Ergebnis als Toast. Eigene Verdrahtung des Knopfes, kein Sammel-Handler. */
   async function tvV2PnlHolen(){
     let _tp; try { _tp = tradePlans } catch(_){ _tp = [] }
-    const plans = (_tp || []).filter(p => p && p.route === 'tvv2' && p.status === 'open')
+    const plans = (_tp || []).filter(p => p && planIstPuls(p) && p.status === 'open')
     const toast = (t) => { if(typeof atToast === 'function') atToast(t) }
     if(!plans.length){ toast('Kein laufender Orbit-V2-Plan — nichts zu holen.'); return }
     const btn = document.getElementById('tpPnlHolenBtn')
@@ -19430,7 +19492,7 @@
    * ein Reader-/Konto-Fehler, sagt der Chip das („Reader ?" / „Konto ?"). Nie alte Zahlen als live. */
   function tvV2LivePnlInner(p){
     try{
-      if(!p || p.route !== 'tvv2' || p.status !== 'open') return ''
+      if(!p || !planIstPuls(p) || p.status !== 'open') return ''
       // 25.09.2026 (Finn: Master-P&L live auf der Karte wie im Winning-Days-Block): mit bekanntem Einstieg rechnet der Chip
       // mit dem Feed-Kurs (wdKursJetzt + wdMasterLive — dieselbe Rechnung wie der Block); ohne frischen Kurs grau „Kurs
       // fehlt", nie eine alte Zahl als live. Ohne Einstieg bleibt der bisherige Rundgang-Chip darunter.
@@ -20240,7 +20302,7 @@
     const tag = (fin && fin.datum) || tvV2Handelstag(endeMs)
     let anzahl = 0, summe = 0, fehlt = 0
     for(const p of (plaene || [])){
-      if(!p || !plan || String(p.id) === String(plan.id) || p.route !== 'tvv2' || String(p.masterAccountId) !== String(plan.masterAccountId)) continue
+      if(!p || !plan || String(p.id) === String(plan.id) || !planIstPuls(p) || String(p.masterAccountId) !== String(plan.masterAccountId)) continue
       if(!(p.status === 'review' || p.status === 'completed')) continue
       const f = (p.mt5Baseline && p.mt5Baseline.final) || null
       const pEnde = Date.parse((f && f.at) || p.endedAt || '') || 0
@@ -20257,14 +20319,14 @@
     const endeMs = Date.parse((fin && fin.at) || '') || 0
     if(!endeMs) return false
     const tag = (fin && fin.datum) || tvV2Handelstag(endeMs)
-    return (plaene || []).some(p => p && String(p.id) !== String(plan.id) && p.route === 'tvv2' && String(p.masterAccountId) === String(plan.masterAccountId)
+    return (plaene || []).some(p => p && String(p.id) !== String(plan.id) && planIstPuls(p) && String(p.masterAccountId) === String(plan.masterAccountId)
       && p.startedAt && (Date.parse(p.startedAt) || 0) > endeMs && tvV2Handelstag(p.startedAt) === tag)
   }
   // REIN RECHNEND: warum ist für diesen Plan JETZT keine Endlesung dran? '' = dran (ohne PC-Prüfung — die macht der Aufrufer).
   // force = Knopf „Jetzt lesen" (Design, 25.09.2026): ohne Pausen-, Versuchs- und Aufgegeben-Tor; Status, „schon gelesen" und
   // Handelstag gelten weiter (danach steht Today's P&L auf dem neuen Tag — eine Lesung wäre falsch, nicht nur spät).
   function tvV2EndlesungGrund(p, jetzt, force){
-    if(!p || p.route !== 'tvv2') return 'kein Orbit-V2-/Winning-Day-Plan'
+    if(!p || !planIstPuls(p)) return 'kein Orbit-V2-/Winning-Day-/Topstep-Puls-Plan'
     // Mit Start-Balance zählt der Handelstag nicht (Balance ist tagesunabhängig) — nur Today's P&L springt über Nacht auf 0
     const mitBalance = !!(p.mt5Baseline && p.mt5Baseline.tv && typeof p.mt5Baseline.tv.balance_start === 'number')
     // „Erledigt" bleibt jederzeit möglich (F5, Master 26.09.2026 nach Befund F4: bei 1–150 min Wartezeit ist Erledigt vor der
@@ -20310,7 +20372,7 @@
     if(!ende) return null
     let best = null
     for(const q of (plaene || [])){
-      if(!q || String(q.id) === String(plan.id) || q.route !== 'tvv2' || String(q.masterAccountId) !== String(plan.masterAccountId)) continue
+      if(!q || String(q.id) === String(plan.id) || !(q.route === 'tvv2' || q.route === 'tsv2') || String(q.masterAccountId) !== String(plan.masterAccountId)) continue
       const tv = q.mt5Baseline && q.mt5Baseline.tv
       const st = Date.parse(q.startedAt || (tv && tv.at) || '') || 0
       if(!st || st <= ende) continue
@@ -20325,7 +20387,7 @@
   function tvV2NachleseOffen(accountId, jetzt){
     let _tp = []; try{ _tp = tradePlans }catch(_){}
     jetzt = jetzt || Date.now()
-    const p = (_tp || []).filter(x => x && x.route === 'tvv2' && String(x.masterAccountId) === String(accountId)
+    const p = (_tp || []).filter(x => x && planIstPuls(x) && String(x.masterAccountId) === String(accountId)
         && (x.status === 'review' || (x.status === 'completed' && jetzt - (Date.parse(x.endedAt || '') || 0) <= TV_NACHLESE_ERLEDIGT_MAX_MS)))
       .sort((a, b) => (Date.parse(b.endedAt || '') || 0) - (Date.parse(a.endedAt || '') || 0))[0]
     const b = p && p.mt5Baseline, fin = b && b.final
@@ -20546,7 +20608,7 @@
     try{
       if(!MT5_LOCAL || !currentUserId) return
       let _tp = []; try{ _tp = tradePlans }catch(_){}
-      const offen = (_tp || []).filter(p => p && p.route === 'tvv2' && p.status === 'open' && !(p.mt5Baseline && p.mt5Baseline.hedge) && tvV2EndlesungPcPasst(p))
+      const offen = (_tp || []).filter(p => p && planIstPuls(p) && p.status === 'open' && !(p.mt5Baseline && p.mt5Baseline.hedge) && tvV2EndlesungPcPasst(p))
       if(!offen.length) return
       const { data: { session } } = await supabase.auth.getSession(); const tok = session?.access_token; if(!tok) return
       const ctrl = new AbortController(), tm = setTimeout(() => ctrl.abort(), 20000)
@@ -22247,7 +22309,7 @@
   function tcLesungZeichnen(pid){
     const el = document.getElementById('tc-lesung'); if(!el) return
     const p = tradePlans.find(x => String(x.id) === String(pid))
-    el.innerHTML = (p && p.route === 'tvv2' && p.mt5Baseline) ? endlesungZeileHtml(p.id, p.mt5Baseline.final, p.status, 'data-tc-lesen', p) : ''
+    el.innerHTML = (p && planIstPuls(p) && p.mt5Baseline) ? endlesungZeileHtml(p.id, p.mt5Baseline.final, p.status, 'data-tc-lesen', p) : ''
   }
   // Trade-Popup: eigener Listener nur für den Knopf in #tc-lesung
   document.getElementById('tc-lesung')?.addEventListener('click', ev => { const b = ev.target.closest && ev.target.closest('[data-tc-lesen]'); if(b) endlesungJetzt(b.getAttribute('data-tc-lesen')) })
@@ -22327,7 +22389,7 @@
         + `<input type="text" inputmode="decimal" class="input mono mwd-abh-in" data-abh-plan="${escapeHtml(pid)}" data-abh-feld="${art}" value="${escapeHtml(text)}" placeholder="0,00"${busy ? ' disabled' : ''}>`
         + `<span class="mwd-box-s">${escapeHtml(hand ? 'von Hand geändert' : quelle)}</span>`
         + ((art === 'm' && !hand && w.mPruefen) ? `<span class="mwd-box-s" style="color:#B45309;font-weight:600">${escapeHtml(w.mPruefen)}</span>` : '') + `</label>`
-      return `<div class="mwd-abh" data-mwd-abh="${escapeHtml(pid)}">${kopf(x)}${x.route === 'tvv2' ? endlesungZeileHtml(pid, x.endlesung || x.final, x.status, 'data-mwd-lesen') : ''}<div class="mwd-abh-werte">`
+      return `<div class="mwd-abh" data-mwd-abh="${escapeHtml(pid)}">${kopf(x)}${(x.route === 'tvv2' || x.route === 'tsv2') ? endlesungZeileHtml(pid, x.endlesung || x.final, x.status, 'data-mwd-lesen') : ''}<div class="mwd-abh-werte">`
         + feld('m', w.mText, '$', w.mq, w.mHand) + feld('f', w.fText, '€', w.fq, w.fHand)
         + `<div class="mwd-box mwd-box-sum"><span class="mwd-box-t">zusammen</span><span class="mwd-box-v" data-abh-summe="${escapeHtml(pid)}" style="color:${col(summe)}">${summe == null ? '–' : '≈ ' + sig(summe, '€')}</span><span class="mwd-box-s">Master × ${fx.toLocaleString('de-DE', { maximumFractionDigits: 3 })} + Fusion</span></div>`
         + `<button type="button" class="btn btn-primary mwd-btn mwd-abh-knopf" data-mwd-abhaken="${escapeHtml(pid)}" title="Plan erledigt setzen — Fusion-P&L wird in Finanzen als Winning-Days-Hedge gebucht"${busy ? ' disabled' : ''}>${busy ? 'bucht…' : 'Abhaken'}</button>`
@@ -26467,7 +26529,7 @@
           tvStandZustand = 'aktuell'
           try{
             const leseMs = Date.parse(a.tvBalanceAt || '') || 0
-            const offen = (tradePlans || []).some(p => p && p.route === 'tvv2' && p.status === 'open' && String(p.masterAccountId) === String(a.id)
+            const offen = (tradePlans || []).some(p => p && planIstPuls(p) && p.status === 'open' && String(p.masterAccountId) === String(a.id)
               && (Date.parse(p.startedAt || '') || 0) > leseMs)
             if(offen) tvStandZustand = 'Trade läuft · Stand vor dem Trade'
             else if(nachlese) tvStandZustand = 'Trade beendet'
@@ -31094,7 +31156,7 @@
       actions = istV2Karte ? `
         <button class="btn btn-ghost icon-btn tc2-ab" data-plan-edit="${p.id}" title="Bearbeiten">${svgEdit}</button>
         <button class="btn btn-ghost icon-btn tc2-ab" data-plan-del="${p.id}" title="Löschen">${svgDel}</button>
-        ${p.route === 'tsv2'
+        ${(p.route === 'tsv2' && tsPulsModus() === 'aus')
           ? `<button class="btn btn-primary tc2-btn" data-plan-start="${p.id}" title="Topstep V2: du hast in TopstepX platziert — Plan als laufend markieren">Läuft</button>`
           // „Läuft" ohne Puls auch bei Echo V2/Orbit V2 (24.09.2026 abends, Finn: „ich plane manuell, starte manuell oder
           // mit dem Bot — das automatische Tracken funktioniert am Anfang noch nicht"): keine Baseline, P&L später von Hand.
@@ -31113,7 +31175,7 @@
       // Echo V2 über /api/master-close (ohne_hedge), Orbit V2 über /api/tv-close; vom Mac als close-Signal.
       const closeBtn = (p.route === 'mt5' && !isPending)
         ? `<button class="btn btn-ghost tc2-btn" data-plan-schliessen="${p.id}" title="Master-Position schließen — Puls klickt im Terminal, der Hedge geht über Echo mit" style="color:#D92D20">Schließen</button>`
-        : (istV2Karte && !isPending && p.route !== 'tsv2')
+        : (istV2Karte && !isPending && (p.route !== 'tsv2' || planIstPuls(p)))
           ? `<button class="btn btn-ghost tc2-btn" data-plan-v2-schliessen="${p.id}" title="${p.route === 'mt5v2' ? 'Master-Position schließen — Puls klickt im MT5-Terminal (ohne Hedge)' : 'Position flatten — Puls schließt in TradingView und liest Today’s P&L'}" style="color:#D92D20">Schließen</button>`
           : ''
       // Fusion-Gegenhedge (24.09.2026): „Hedge zu" nur am PC, der ihn hält (eigener Handler data-plan-hedge-zu)
@@ -31157,7 +31219,7 @@
               : ''}
           </div>
           <div class="tc2-sub">${sub}</div>
-          ${(isReview && p.route === 'tvv2' && p.mt5Baseline) ? endlesungZeileHtml(p.id, p.mt5Baseline.final, p.status, 'data-plan-lesen', p) : ''}
+          ${(isReview && planIstPuls(p) && p.mt5Baseline) ? endlesungZeileHtml(p.id, p.mt5Baseline.final, p.status, 'data-plan-lesen', p) : ''}
         </div>
         <div class="tc2-metric">${metric}</div>
         <div class="tc2-actions">${actions}</div>
@@ -31841,7 +31903,7 @@
     // V2-Wege (23.09.2026): Echo V2 hat seinen eigenen Check ohne Copier; Orbit V2 kennt keinen Duplikum-Check —
     // „Speichern & Starten" landet im Order-Popup, „Starten" auf der Karte geht direkt zu Puls (tpOrbitStarten).
     if(plan.route === 'mt5v2') return tpPreflightMt5V2(plan)
-    if(plan.route === 'tvv2') return openTpOrderModal(planId)
+    if(plan.route === 'tvv2' || (plan.route === 'tsv2' && tsPulsModus() !== 'aus')) return openTpOrderModal(planId)   // Topstep V2 mit Puls wie Orbit V2 (F23)
 
     // Orbit: aus Popup 1 („Speichern") geht es ins Order-Popup (Richtung/TP/SL/Lots).
     // Erst DESSEN „Speichern" kommt mit nurDup hierher zurück und fährt den Duplikum-Check
@@ -34167,7 +34229,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.670'
+  const OS_TAB_BUILD = '2026-09-22.673'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -34382,14 +34444,15 @@
     // Lokal am PC (nach dem Check): Zeile + Abschluss im offenen Check-Popup.
     // ORBIT V2 (23.09.2026): kein Duplikum-Check — am PC trotzdem das Check-Popup mit nur der Puls-Zeile
     // aufmachen, damit Ergebnis/Fehler dort stehen bleiben (ein Toast ist nach 5 s weg).
-    if(!fern && MT5_LOCAL && plan.route === 'tvv2' && !(opts && opts.nachCheck)){
+    const pv2 = plan.route === 'tvv2' || plan.route === 'tsv2'   // Puls-V2 (Orbit V2 / Topstep V2, F23): kein Duplikum, Plan läuft ab dem bewiesenen Klick
+    if(!fern && MT5_LOCAL && pv2 && !(opts && opts.nachCheck)){
       if(_rsAktiv) return toast('Gerade läuft schon ein Remote-Lauf — gleich danach erneut „Starten".', 'end')
       _pfPlanId = planId
       const _rows = document.getElementById('pf-rows'); if(_rows) _rows.innerHTML = ''
       const _fin = document.getElementById('pf-final'); if(_fin) _fin.style.display = 'none'
       const _ft = document.getElementById('pf-foot'); if(_ft) _ft.style.display = 'none'
       _pfEchoKnopf(false)
-      const _inf = document.getElementById('pf-plan-info'); if(_inf) _inf.textContent = tpIstWdPlan(plan) ? `Winning Day · ${plan.masterName || '—'} — Puls in TradingView, Fusion-Gegenhedge` : `Orbit V2 · ${plan.masterName || '—'} — ohne Duplikum, ohne Hedge`
+      const _inf = document.getElementById('pf-plan-info'); if(_inf) _inf.textContent = plan.route === 'tsv2' ? `Topstep V2 · ${plan.masterName || '—'} — Puls in TopstepX${tsPulsModus() === 'lesen' ? ' (nur lesen)' : ''}` : tpIstWdPlan(plan) ? `Winning Day · ${plan.masterName || '—'} — Puls in TradingView, Fusion-Gegenhedge` : `Orbit V2 · ${plan.masterName || '—'} — ohne Duplikum, ohne Hedge`
       document.getElementById('tpPreflightModal')?.classList.add('open')
     }
     const imPopup = !fern && document.getElementById('tpPreflightModal')?.classList.contains('open')
@@ -34442,7 +34505,7 @@
     }
     // RICHTUNGS-SCHUTZ Orbit V2 / Winning Days Farm (25.09.2026): frisch aus der DB, bevor irgendetwas an Puls geht — gilt für den
     // Karten-Klick, die Startzeit/den Farmer (tpStartUmTick) und den Remote-Start vom Mac/Handy (orderSignalTick → hier am PC)
-    if(plan.route === 'tvv2'){
+    if(pv2){
       let k = null; try{ k = await v2RichtungKonflikt({ firm: plan.masterFirm, ohneId: plan.id, frisch: true }) }catch(_){}
       if(k && k.lauf && k.lauf !== (dir === 'sell' ? 'short' : 'long')){
         const t = k.text + ' — nicht gestartet (Richtungs-Schutz).'
@@ -34461,7 +34524,7 @@
     // Vorher lief hier das Check-Popup + tpOrbitRemote, ein Lauf zur Zeit — jeder weitere
     // Klick endete im Toast „gleich danach erneut Starten".
     if(!MT5_LOCAL && !fern) return _rsQueueAdd(plan)
-    if(!fern && !(opts && opts.nachCheck) && plan.route !== 'tvv2'){
+    if(!fern && !(opts && opts.nachCheck) && !pv2){
       if(_rsAktiv) return toast('Gerade läuft schon ein Remote-Lauf — gleich danach erneut „Starten".', 'end')
       return tpPreflightAndStart(planId, { nurDup: true, weiter: () => tpOrbitStarten(planId, null, { nachCheck: true }) })
     }
@@ -34470,7 +34533,29 @@
     const masterAcc = (accounts || []).find(a => String(a.id) === String(plan.masterAccountId))
     extId = (masterAcc && masterAcc.externalId) ? String(masterAcc.externalId).trim() : ''
     if(!extId)
-      return fehler(`„${plan.masterName}" hat keine External ID. Puls wüsste nicht, welches Tradovate-Unterkonto er wählen soll: unter Accounts nachtragen.`)
+      return fehler(`„${plan.masterName}" hat keine External ID. Puls wüsste nicht, welches ${plan.route === 'tsv2' ? 'TopstepX-Konto' : 'Tradovate-Unterkonto'} er wählen soll: unter Accounts nachtragen.`)
+    // TOPSTEP (F23): Schalter „Puls für Topstep" — 'aus' startet nichts, 'lesen' liest nur (Konto, Balance, Positionen), 'scharf' = Order
+    if(plan.route === 'tsv2'){
+      await tsPulsModusLaden()
+      if(tsPulsModus() === 'aus') return fehler('Puls für Topstep ist AUS (Admin → Winning Days → Ablauf) — nichts gestartet. Topstep V2 von Hand: „Läuft".')
+      if(tsPulsModus() === 'lesen'){
+        _tpOrbitLaeuft = true
+        try{
+          if(imPopup) _pfAddRow('ob-order', 'Puls liest TopstepX (nur lesen)')
+          if(imPopup) _pfSet('ob-order', 'warn', `⏳ TopstepX → Konto ${escapeHtml(extId)} → Balance und Positionen lesen — KEINE Order (Schalter „nur lesen")`)
+          let r0 = null; try{ r0 = await tvV2Lesen(extId, 45, plan) }catch(e){ r0 = { ok: false, msg: String((e && e.message) || e) } }
+          const b0 = tvBalanceAus(r0 && r0.summary), pos = Array.isArray(r0 && r0.positionen) ? r0.positionen.length : null
+          const txt = (r0 && (r0.ok || b0.balance != null))
+            ? `Nur gelesen (keine Order): Konto ${r0.konto_aktiv || extId}${b0.balance != null ? ' · Balance ' + b0.balance.toLocaleString('de-DE', { minimumFractionDigits: 2 }) + ' $' : ''}${pos != null ? ' · ' + pos + ' Position(en)' : ''}`
+            : 'Lesen fehlgeschlagen: ' + String((r0 && (r0.msg || r0.code)) || 'keine Antwort')
+          if(b0.balance != null && (!r0.konto_aktiv || String(r0.konto_aktiv).includes(extId))) tvKontoBalanceSchreiben(plan.masterAccountId, b0, new Date().toISOString())
+          if(fern) fern.melde({ ok: false, nur_lesen: true, msg: txt + ' — Plan bleibt „Geplant".', trail: (r0 && r0.trail) || null })
+          if(imPopup){ _pfSet('ob-order', (r0 && (r0.ok || b0.balance != null)) ? 'ok' : 'err', escapeHtml(txt)); pfEnde(!!(r0 && (r0.ok || b0.balance != null)), 'Puls für Topstep steht auf „nur lesen" — nichts platziert, der Plan bleibt „Geplant".') }
+          else if(!fern) toast(txt, 'end')
+        }finally{ _tpOrbitLaeuft = false }
+        return
+      }
+    }
     // FUTURES-PULS NEUAUFBAU (21.09.2026, Finn: der tv-order-Bau vom 30.08.
     // „hat echt gebuggt — lass mich den neuen Bot step nach step aufbauen").
     // Dieser Knopf fährt deshalb NICHT mehr die alte Kette, sondern die neue,
@@ -34516,9 +34601,9 @@
     if(plan.hedgeEur > 0 && typeof window.mtcApi === 'function'){
       try{ window.mtcApi('hedge-solo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ aktion: 'bereit', sekunden: 180, grund: 'winning_day_start' }), timeoutMs: 5000 }).catch(() => {}) }catch(_){}
     }
-    if(imPopup) _pfAddRow('ob-order', 'Puls platziert in TradingView')
-    if(imPopup) _pfSet('ob-order', 'warn', `⏳ TradingView → Konto ${escapeHtml(extId)} → ${escapeHtml(symbol)} → Order-Panel → ${escapeHtml(dir.toUpperCase())} (ECHTE Order) — HÄNDE WEG von Maus und Tastatur!`)
-    else toast(`Puls übernimmt: TradingView → Konto ${extId} → ${symbol} → Order-Panel → ${dir.toUpperCase()} klicken (ECHTE Order). HÄNDE WEG von Maus und Tastatur.`, 'start')
+    if(imPopup) _pfAddRow('ob-order', 'Puls platziert in ' + pulsPlattform(plan))
+    if(imPopup) _pfSet('ob-order', 'warn', `⏳ ${pulsPlattform(plan)} → Konto ${escapeHtml(extId)} → ${escapeHtml(symbol)} → Order-Panel → ${escapeHtml(dir.toUpperCase())} (ECHTE Order) — HÄNDE WEG von Maus und Tastatur!`)
+    else toast(`Puls übernimmt: ${pulsPlattform(plan)} → Konto ${extId} → ${symbol} → Order-Panel → ${dir.toUpperCase()} klicken (ECHTE Order). HÄNDE WEG von Maus und Tastatur.`, 'start')
     try{
       // scharf (22.09.2026, Schritt 4b): NUR mit dieser Marke klickt Puls den Kauf-Knopf —
       // genau einmal, danach zählt nur der Beweis (Reader, sonst Positions-Tabelle).
@@ -34537,12 +34622,21 @@
       let r = null
       const _tvT0 = Date.now()
       for(;;){
-        r = await window.mtcApi('tv-konto', { method:'POST', headers:{'Content-Type':'application/json'}, body: _tvBody })
+        // Topstep V2 (F23): TopstepX-Order über /api/tsx-konto (Vertrag B16, Etappe 2), sonst TradingView wie bisher.
+        // Kennt das Panel die Route noch nicht (404 vor jedem Klick), ehrlich „kommt mit Etappe 2" — nichts gesendet.
+        r = plan.route === 'tsv2'
+          ? await window.mtcApi('tsx-konto', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ext_id: extId, firma: firmName, symbol, richtung: dir, volumen: lots,
+              tp_usd: tp > 0 ? tp : null, sl_usd: (tp > 0 && sl > 0) ? sl : null, scharf: true, plan_id: String(plan.id) }) })
+          : await window.mtcApi('tv-konto', { method:'POST', headers:{'Content-Type':'application/json'}, body: _tvBody })
         const beschaeftigt = !!(r && !r.ok && !r._httpFail && (r.code === 'puls_beschaeftigt' || /schon ein TradingView-Lauf/i.test(String(r.msg || ''))))
         if(!beschaeftigt || Date.now() - _tvT0 > 150000) break
         const sek = Math.round((Date.now() - _tvT0) / 1000)
         if(imPopup) _pfSet('ob-order', 'warn', `⏳ Puls ist gerade beschäftigt (Rundgang/Schließen in TradingView) — die Order wartet, neuer Versuch gleich… (${sek}s)`)
         await new Promise(res => setTimeout(res, 8000 + Math.random() * 6000))
+      }
+      if(plan.route === 'tsv2' && r && (r._httpFail || r.copier_offline) && !r.gesendet){
+        await fehler('Der Order-Weg für TopstepX kommt mit Etappe 2 (Panel kennt /api/tsx-konto noch nicht) — nichts gesendet. Bis dahin „Puls für Topstep" auf „nur lesen" lassen.', r)
+        return
       }
       // SPUR IN DIE DB, auch fuer lokale Laeufe (22.09.2026 13:5x): ein Klick direkt am PC
       // schrieb bisher keine Signal-Zeile — bei Erfolg blieb nur ein Toast, die Spur war weg,
@@ -34588,13 +34682,13 @@
       if(r && r.ok && r.gesendet){
         // Position bewiesen → Kauf-Klick stempeln; „Läuft" setzt die Duplikum-Erkennung (s. tvPlanGesendet).
         // ORBIT V2 (23.09.2026): niemand erkennt hier etwas — der bewiesene Klick IST „Läuft".
-        if(plan.route === 'tvv2') await v2AufOpen()
+        if(pv2) await v2AufOpen()
         else await tvPlanGesendet(plan.id)
         if(fern) fern.melde({ ok:true, einstieg: r.einstieg || null, tv_symbol: r.tv_symbol || null, trail: r.trail || null,
                               msg: String(r.msg || 'Order platziert.') })
         if(imPopup){
           _pfSet('ob-order', 'ok', escapeHtml(String(r.msg || 'Order platziert.')))
-          pfEnde(true, plan.route === 'tvv2' ? '✓ Order platziert — Plan läuft (ohne Hedge). Puls liest das Konto alle 50–80 s: Live-P&L auf der Karte, Ende und Today\'s P&L kommen automatisch.'
+          pfEnde(true, pv2 ? '✓ Order platziert — Plan läuft (ohne Hedge). Puls liest das Konto alle 50–80 s: Live-P&L auf der Karte, Ende und Today\'s P&L kommen automatisch.'
                                               : '✓ Order platziert — sobald Duplikum sie sieht, springt der Plan auf „Läuft".')
           setTimeout(() => { if(document.getElementById('pf-final')?.className.indexOf('ok') !== -1) _pfClose() }, 2400)
         }
@@ -34607,9 +34701,9 @@
         // der MT5-Route (18.08.2026) — erst nachsehen, nie blind wiederholen, sonst liegt die
         // Order zweimal im Markt. Ging der Klick nachweislich raus (r.gesendet), wird er
         // gestempelt: die Karte zeigt „Warte auf Duplikum", Duplikum erkennt die Order selbst.
-        if(r.gesendet) await (plan.route === 'tvv2' ? v2AufOpen() : tvPlanGesendet(plan.id))
-        await fehler('⚠ Ergebnis UNKLAR — erst in TradingView nachsehen, ob die Order liegt. NICHT blind erneut starten'
-          + (plan.route === 'tvv2' ? '.' : ' (liegt sie, erkennt Duplikum sie von selbst).') + ' · ' + (r.msg || r.error || ''), r)
+        if(r.gesendet) await (pv2 ? v2AufOpen() : tvPlanGesendet(plan.id))
+        await fehler(`⚠ Ergebnis UNKLAR — erst in ${pulsPlattform(plan)} nachsehen, ob die Order liegt. NICHT blind erneut starten`
+          + (pv2 ? '.' : ' (liegt sie, erkennt Duplikum sie von selbst).') + ' · ' + (r.msg || r.error || ''), r)
       } else {
         await fehler('Nichts platziert · ' + ((r && (r.msg || r.error)) || 'keine Antwort'), r)
       }
@@ -34648,8 +34742,8 @@
                           { key:'claim', state:'',     label:'PC' },
                           { key:'order', state:'',     label:'Order' } ] }
     _rsQueueRender()
-    // ORBIT V2 (23.09.2026): kein Duplikum — Schritt „Duplikum" entfällt, direkt das Signal an den PC.
-    if(plan.route === 'tvv2'){
+    // ORBIT V2 (23.09.2026): kein Duplikum — Schritt „Duplikum" entfällt, direkt das Signal an den PC. Topstep V2 mit Puls ebenso (F23).
+    if(plan.route === 'tvv2' || plan.route === 'tsv2'){
       _rsAktiv.steps = _rsAktiv.steps.filter(x => x.key !== 'dup')
       _rsQueueRender()
       await tpOrbitRemoteSchlange(plan, w)
@@ -35475,7 +35569,7 @@
     if(!plan || plan.status !== 'open' || !routeIstV2(plan.route)) return { ok:false, msg:'Plan läuft nicht (mehr) — nichts geschlossen.', retry:false }
     if(typeof window.mtcApi !== 'function') return { ok:false, msg:'Copier-Backend am PC nicht erreichbar.', retry:true }
     const pid = String(plan.id)
-    if(plan.route === 'tvv2'){
+    if(planIstPuls(plan)){   // Orbit V2 bzw. Topstep V2 mit Puls (F23: tsx-close in TopstepX)
       const konto = tvV2Konto(plan)
       if(!konto) return { ok:false, msg:'Master-Konto hat keine External ID — unter Accounts nachtragen.', retry:false }
       const symbol = tpOrbitWerte(plan).symbol || ''
@@ -35491,7 +35585,7 @@
         const _clBody = JSON.stringify(Object.assign({ konto, symbol, timeout_s: 90, richtung: (plan.richtung === 'buy' || plan.richtung === 'sell') ? plan.richtung : '' }, tvV2KontoKontext(plan)))
         const _clT0 = Date.now()
         for(;;){
-          r = await window.mtcApi('tv-close', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: _clBody })
+          r = await window.mtcApi(pulsApiName(plan, 'close'), { method:'POST', headers:{ 'Content-Type':'application/json' }, body: _clBody })
           const beschaeftigt = !!(r && !r.ok && !r._httpFail && r.code === 'puls_beschaeftigt')
           if(!beschaeftigt || Date.now() - _clT0 > 150000) break
           await new Promise(res => setTimeout(res, 8000 + Math.random() * 6000))
@@ -35852,6 +35946,19 @@
                       ergebnis:{ ok:false, msg:'Signal älter als 3 Minuten — aus Sicherheit NICHT ausgeführt.' } })
             .eq('id', sig.id).eq('status', 'wartet')
           _osStand = 'verfallen-beerdigt'
+          continue
+        }
+        // TopstepX-Inventar auf Zuruf (F23, Wunsch Backend B16): plan_id 'tsx:<irgendwas>', params {aktion:'tsx_inventar'} — Panel
+        // POST /api/tsx-inventar {} (nur lesen), Ergebnis gekürzt (titel, tabs, inventar je Zustand max. 200) in order_signale.ergebnis.
+        if(String((sig.params || {}).aktion || '') === 'tsx_inventar'){
+          const { data: clI } = await supabase.from('order_signale')
+            .update({ status:'laeuft', pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : '', updated_at: new Date().toISOString() })
+            .eq('id', sig.id).eq('status', 'wartet').select()
+          if(!clI || !clI.length){ _osStand = 'claim-verloren'; continue }
+          _osStand = 'claim-tsx-inventar: ' + String(sig.id).slice(0, 8)
+          tsxInventarLesen()
+            .then(er => supabase.from('order_signale').update({ status: er && er.ok ? 'fertig' : 'fehler', updated_at: new Date().toISOString(), ergebnis: er }).eq('id', sig.id))
+            .catch(e => supabase.from('order_signale').update({ status: 'fehler', updated_at: new Date().toISOString(), ergebnis: { ok: false, msg: String((e && e.message) || e) } }).eq('id', sig.id))
           continue
         }
         // Balance lesen auf Zuruf (F19, 27.09.2026, Vertrag mit Backend B12): plan_id 'konto:<id>', params {aktion:'konto_balance',
@@ -41225,9 +41332,9 @@
       let herkunft = ''
       if(b && p.route === 'mt5v2' && b.master_balance != null){
         herkunft = `Baseline ${fmt(b.master_balance)} → Ende ${(b.final && b.final.master_balance != null) ? fmt(b.final.master_balance) : '—'}`
-      } else if(b && p.route === 'tvv2' && b.tv && b.tv.today_pnl_start != null){
+      } else if(b && planIstPuls(p) && b.tv && b.tv.today_pnl_start != null){
         herkunft = `Today's P&amp;L Start ${usd(b.tv.today_pnl_start)} → Ende ${(b.final && b.final.today_pnl != null) ? usd(b.final.today_pnl) : '—'}`
-      } else if(b && p.route === 'tvv2' && b.final && b.final.today_pnl != null){
+      } else if(b && planIstPuls(p) && b.final && b.final.today_pnl != null){
         herkunft = `Today's P&amp;L Ende ${usd(b.final.today_pnl)} (kein Startwert beim Puls-Klick)`
       }
       document.getElementById('tradeCompleteInfo').innerHTML = `
@@ -41263,9 +41370,9 @@
     // Herkunft des Master-Werts merken (24.09.2026, pl_quelle): in „Überprüfen" steht nur der Auto-Wert
     // (atMoveToReview), bei „Bearbeiten" die gespeicherte Quelle; der Auto-Nachlader (apply) überschreibt.
     // Schätzung aus dem Hedge-Level (25.09.2026) ist keine Quelle im Sinne von pl_quelle → null (nicht anfassen)
-    const _tcFin = (p.route === 'tvv2' && p.mt5Baseline && p.mt5Baseline.final) || null
+    const _tcFin = (planIstPuls(p) && p.mt5Baseline && p.mt5Baseline.final) || null
     const _tcSchaetzung = !!(_tcFin && (_tcFin.quelle === 'level' || _tcFin.quelle === 'demo') && typeof _tcFin.master_pl_schaetzung === 'number' && p.masterPl != null && Math.abs(Number(p.masterPl) - _tcFin.master_pl_schaetzung) < 0.005)
-    _tcAuto = (p.masterPl != null && p.status === 'review') ? { wert: Number(p.masterPl), quelle: _tcSchaetzung ? null : plQuelleFuerRoute(p.route) }
+    _tcAuto = (p.masterPl != null && p.status === 'review') ? { wert: Number(p.masterPl), quelle: _tcSchaetzung ? null : plQuellePlan(p) }
             : (p.masterPl != null && p.status === 'completed') ? { wert: Number(p.masterPl), quelle: p.plQuelle || null }
             : null
     document.getElementById('tc-slave-pl').value  = tcGehedgt
@@ -41297,7 +41404,7 @@
     // Balance-Nachlesung steht noch aus (F5, 26.09.2026): Erledigt ist trotzdem möglich — Puls liest nach und trägt den P&L exakt
     // nach (nur leeres Feld oder Schätzung). Ruhiger Hinweis, gleiche Rechnung wie Live Trades/Accounts (tvV2NachleseAb).
     { const b = p.mt5Baseline || {}, fin = b.final
-      if(p.route === 'tvv2' && fin && b.tv && typeof b.tv.balance_start === 'number' && !(typeof fin.balance_end === 'number' && isFinite(fin.balance_end)) && typeof tvV2NachleseAb === 'function'){
+      if(planIstPuls(p) && fin && b.tv && typeof b.tv.balance_start === 'number' && !(typeof fin.balance_end === 'number' && isFinite(fin.balance_end)) && typeof tvV2NachleseAb === 'function'){
         const ab = tvV2NachleseAb(p.id, fin.at || p.endedAt), hEl = document.getElementById('tc-nachlese-hint')
         if(ab && hEl){
           hEl.textContent = (fin.hinweis ? fin.hinweis + ' · ' : '') + (ab > Date.now() ? `Balance-Nachlesung ab ${new Date(ab).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} — P&L wird dann exakt nachgetragen` : 'Balance-Nachlesung läuft — P&L wird dann exakt nachgetragen')   // hinweis: Demo TP+Liq in einer Minute (F21)
@@ -41498,7 +41605,7 @@
     // Echo V2 seit 24.09.2026 ebenfalls aus der Baseline (Master-Balance Start/Ende, Slave = 0).
     if(routeIstEcho(plan.route)) return _autoPnlFetchMt5(plan)
     // Orbit V2 (24.09.2026 nachts): Today's P&L aus dem Rundgang (mt5_baseline.tv + .final) — kein Duplikum.
-    if(plan.route === 'tvv2' && typeof _autoPnlFetchTvV2 === 'function') return _autoPnlFetchTvV2(plan)
+    if(planIstPuls(plan) && typeof _autoPnlFetchTvV2 === 'function') return _autoPnlFetchTvV2(plan)
     if(routeIstV2(plan.route)) return null
     // Orbit (seit 22.09.2026): Duplikum kopiert diese Trades — P&L wie auf der Duplikum-Route.
     // Mirror-Route hat ihren eigenen Pfad (Duplikum kennt diese Trades nicht)
@@ -41613,7 +41720,7 @@
           if(res.slavePnl != null && sEl && sEl.value === ''){ sEl.value = res.slavePnl.toFixed(2); if(!routeIstV2(plan.route)) filled.push('Slave ' + res.slavePnl.toFixed(2) + (res.slaveCcy||'')) }
           if(res.masterPnl != null && mEl && mEl.value === ''){
             mEl.value = res.masterPnl.toFixed(2); filled.push('Master ' + res.masterPnl.toFixed(2) + (res.masterCcy||''))
-            _tcAuto = { wert: Number(res.masterPnl.toFixed(2)), quelle: plQuelleFuerRoute(plan.route) }   // pl_quelle (24.09.2026)
+            _tcAuto = { wert: Number(res.masterPnl.toFixed(2)), quelle: plQuellePlan(plan) }   // pl_quelle (24.09.2026)
           }
           if(filled.length){
             if(typeof tcRecompute === 'function') { try { tcRecompute() } catch(_){} }
@@ -41643,7 +41750,7 @@
         // Sind durch den Cache schon beide Felder gefüllt → fertig, kein Live-Nachladen nötig
         if((mEl && mEl.value !== '') && (sEl && sEl.value !== '')) return
 
-        if(msgEl){ msgEl.textContent = plan.route === 'tvv2' ? '⏳ Auto-PnL aus Today\'s P&L…' : isMt5Plan ? '⏳ Auto-PnL aus MT5-Baseline…' : isMirrorPlan ? '⏳ Auto-PnL aus Mirror/TSX…' : '⏳ Auto-PnL aus Duplikum…'; msgEl.className = 'modal-msg muted' }
+        if(msgEl){ msgEl.textContent = planIstPuls(plan) ? '⏳ Auto-PnL aus der Balance (Puls)…' : isMt5Plan ? '⏳ Auto-PnL aus MT5-Baseline…' : isMirrorPlan ? '⏳ Auto-PnL aus Mirror/TSX…' : '⏳ Auto-PnL aus Duplikum…'; msgEl.className = 'modal-msg muted' }
         _autoPnlFetch(plan).then(res => {
           if(apply(res)) return
           // Retry nach 1,5s (Duplikum-Latenz — Finns "kurz warten"-Idee)
@@ -41938,12 +42045,13 @@
    * läuft über den Wert: weicht der gespeicherte Master-Wert vom Auto-Wert ab, war es Hand. Spalte legt der
    * DB-Agent parallel an — fehlt sie noch, wird ohne pl_quelle wiederholt (kein hängender Abschluss). */
   let _tcAuto = null   // { wert, quelle } — Herkunft des vorbelegten Master-Werts im Abschließen-Popup
+  function plQuellePlan(p){ return (p && p.route === 'tsv2' && planIstPuls(p)) ? 'tv' : plQuelleFuerRoute(p && p.route) }   // Topstep mit Puls = Auto-Quelle 'tv' (F23)
   function plQuelleFuerRoute(route){
     // Review-Finding K16 (24.09.2026): Mirror (route 'topstep') zählt als 'duplikum' — der Check-Constraint
     // kennt nur echo/tv/duplikum/hand, ein eigener Wert würde den Abschluss abweisen.
     if(route === 'mt5' || route === 'mt5v2') return 'echo'
     if(route === 'tvv2') return 'tv'
-    if(route === 'tsv2') return 'hand'   // Topstep V2: es gibt keine Auto-Quelle
+    if(route === 'tsv2') return 'hand'   // Topstep V2 von Hand; mit Puls ruft der Aufrufer plQuellePlan (F23)
     return 'duplikum'   // dup, tvplus, topstep (Mirror) und alles Unbekannte
   }
   function plQuelleErmitteln(mPl){
