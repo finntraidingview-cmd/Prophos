@@ -2993,6 +2993,7 @@ def test_tsx_login():
         ob._tsx_felder = lambda w: [f_user[:3] + (user_wert, None, False), f_pw[:3] + (pw_wert, None, True)] if z["seite"] != "trade" else []
 
         def klick(e, name, trail):
+            z.setdefault("klick_uhr", uhr[0])
             z["klicks"] += 1
             trail.append(name)
             z["seite"] = nach_klick
@@ -3013,6 +3014,7 @@ def test_tsx_login():
             ob.time = alt_time
 
     ke, st, z, sp = lauf(MAIL, "••••••••", "trade")
+    chk(f"B28: Klick ohne Feld-Wartezeit (Uhr {z.get('klick_uhr')})", z.get("klick_uhr", 99) <= 1002.0)
     chk(f"gefüllt → ein Klick → Handelsseite ({sp})", ke and z["klicks"] == 1 and not st.get("fehler") and "TopstepX-Login geklickt (Felder vorausgefüllt)" in sp)
     chk("Mail nie in der Spur", MAIL not in sp)
     ke, st, z, sp = lauf("", "", "trade")

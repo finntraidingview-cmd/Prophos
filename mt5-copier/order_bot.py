@@ -10847,15 +10847,14 @@ def _tsx_login_versuch(w, trail, stand):
             stand["fehler"] = ("login", f"TopstepX-Login abgelehnt: {fehl[0][:160]}")
         return True
     gefuellt = lage["user"] and lage["pw"]
-    if not gefuellt:
-        # Nachtrag B27 (27.09.2026, Mike pc-l5o8bv, 4,1 s nach Tab-Öffnen „Username leer, Passwort leer", obwohl Chrome beide
-        # sichtbar ausgefüllt hatte — Finn: „er muss nur hier drauf drücken"): Chrome gibt Autofill-Werte erst nach einem
-        # echten Klick an die Seite (und an UIA) frei. Erst bis 5 s warten, dann trotzdem EIN Klick — getippt wird nie.
-        stand.setdefault("leer_seit", time.time())
-        if time.time() - stand["leer_seit"] < 5.0:
-            return True
+    # Nachtrag B27 (27.09.2026, Mike pc-l5o8bv, 4,1 s nach Tab-Öffnen „Username leer, Passwort leer", obwohl Chrome beide
+    # sichtbar ausgefüllt hatte — Finn: „er muss nur hier drauf drücken"): Chrome gibt Autofill-Werte erst nach einem echten
+    # Klick an die Seite (und an UIA) frei — also trotzdem EIN Klick, getippt wird nie.
+    # B28 (27.09.2026, Finn: „nur der Klick geht langsam, mach schneller" — 5 s Feld-Wartezeit vor dem Klick): nicht mehr auf
+    # die Felder warten (UIA liest sie ohnehin nicht), nur eine kurze Jitter-Pause.
     if not lage["knopf"]:
         return True                                  # Seite zeichnet noch — nächste Runde
+    _warte(0.4, 0.6)
     _tsx_klick(lage["knopf"], "TopstepX-Login geklickt (Felder vorausgefüllt)" if gefuellt else
                "TopstepX-Login geklickt (Felder per UIA leer — Chrome-Autofill gibt sie erst beim Klick frei)", trail)
     stand["geklickt"] = time.time()
