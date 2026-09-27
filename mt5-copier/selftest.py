@@ -2912,7 +2912,7 @@ def test_tsx_order():
 
         def klick(e, name, trail):
             z["klicks"].append(name)
-            if name == "Manage brackets": z["dialog"] = True
+            if name.startswith("Manage brackets"): z["dialog"] = True
             elif name == "Bracket-Dialog schließen": z["dialog"] = False
             elif name.startswith("Haken"): z["haken"] = 1
             elif name.startswith("Contract "): z["contract"] = "MNQZ26"
@@ -2955,8 +2955,10 @@ def test_tsx_order():
     chk("B30: Menge 2 = Schnellknopf 1 + 1× Increase, kein Tippen", "Schnellknopf 1" in z["klicks"] and z["klicks"].count("Increase quantity") == 1
         and "tippe # of Contracts" not in z["klicks"])
     chk("B30: Haken-Zustand vorher in der Spur", "war aus → geklickt → an" in r.get("trail", ""))
+    chk("B33: Kontrolle nach Wiederöffnen in der Spur", "Haken nach Wiederöffnen: an" in r.get("trail", "") and r.get("haken_kontrolle") == "an"
+        and z["klicks"].count("Manage brackets (Kontrolle Haken)") == 1 and not z["dialog"])
     chk("Probe: Rücklesung in der Spur", "Brackets zurückgelesen" in r.get("trail", ""))
-    r, z = lauf(dict(cmd, scharf=True, sl_usd=150))
+    r, z = lauf(dict(cmd, scharf=True, sl_usd=150), haken=1)
     chk(f"Scharf: gesendet + Position steht ({r.get('code')}: {r.get('msg')})", r.get("ok") and r.get("gesendet") is True and r.get("schritt") == "fertig"
         and r.get("retry_ok") is False and z["risk"] == "150")
     chk("Scharf: genau ein Order-Klick", sum(k.startswith("Order senden") for k in z["klicks"]) == 1)
@@ -3007,11 +3009,19 @@ def test_tsx_order():
                                ("1", (500, 100, 520, 120), "Button"), ("Increase quantity", (2338, 567, 2365, 594), "Button")], 1917)
     chk("B30: Mengen-Leiste nur in der ±-Zeile", list(ml["schnell"].keys()) == [1] and ml["plus"] is not None)
     chk("B30: Mengenfeld in der ±-Zeile", ob.tsx_mengenfeld([("", (1977, 565, 2100, 596), "Edit", "1", None)], ml)[1] == (1977, 565, 2100, 596))
-    r, z = lauf(dict(cmd, scharf=True), markt=True, nach="toast")
+    r, z = lauf(dict(cmd, scharf=True), markt=True, nach="toast", haken=1)
     chk(f"B31: Markt zu + scharf → Klick → abgelehnt ({r.get('code')}: {r.get('msg')})", r.get("code") == "abgelehnt" and r.get("gesendet") is True
         and r.get("retry_ok") is False and "Market is closed" in r.get("msg", "") and sum(k.startswith("Order senden") for k in z["klicks"]) == 1)
-    r, z = lauf(dict(cmd, scharf=True), markt=True, nach="nichts")
+    r, z = lauf(dict(cmd, scharf=True), markt=True, nach="nichts", haken=1)
     chk(f"B31: Markt zu, keine Meldung, keine Position → beweis ({r.get('msg')})", r.get("code") == "beweis" and "vermutlich abgelehnt" in r.get("msg", ""))
+    r, z = lauf(dict(cmd, scharf=True), haken=0)
+    chk(f"B33: scharf + „war aus\" → ENDE ohne Haken-/Order-Klick ({r.get('code')})", r.get("code") == "bracket" and "unsicher" in r.get("msg", "")
+        and not any(k.startswith("Haken") or k.startswith("Order senden") for k in z["klicks"]))
+    feldc = (1977, 278, 2448, 314)
+    alt_li = [("CLX26 · Crude", (1977, 5000, 2448, 5030), "ListItem")]
+    neu_li = alt_li + [(f"6{c}Z26", (1977, 320 + 32 * i, 2448, 350 + 32 * i), "ListItem") for i, c in enumerate("ABCD")]
+    chk("B33: neue Vorschlagsliste unter dem Feld gezählt", ob.tsx_liste_neu(alt_li, neu_li, feldc) == 4 and ob.tsx_liste_neu(neu_li, neu_li, feldc) == 0)
+    chk("B33: Bot-Stand in der Spur", ob.puls_bot_stand().startswith("Bot ") and "Datei " in ob.puls_bot_stand())
     ab = ob.tsx_ablehnung
     chk("B31: Ablehnung nur als neuer Text", ab(["Market closed", "BUY +1 @ MARKET"], ["Market closed", "Order rejected: Market is closed"])
         == "Order rejected: Market is closed" and ab(["Market closed"], ["Market closed"]) is None

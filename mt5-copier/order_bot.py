@@ -1172,6 +1172,19 @@ def _spur(trail):
     return " → ".join(list(trail) + zusatz)
 
 
+def puls_bot_stand():
+    """B33 (27.09.2026): welcher Bot läuft wirklich — Version/Commit vom Panel (Umgebung PULS_BOT_STAND) + Git-Blob-Hash
+    dieser Datei (unabhängig vom Panel; auf dem Mac: git hash-object mt5-copier/order_bot.py)."""
+    try:
+        import hashlib
+        with open(os.path.abspath(__file__), "rb") as f:
+            daten = f.read()
+        blob = hashlib.sha1(b"blob %d\0" % len(daten) + daten).hexdigest()[:7]
+    except Exception:
+        blob = "?"
+    return f"Bot {os.environ.get('PULS_BOT_STAND') or '?'} · Datei {blob}"
+
+
 class _StempelSpur(list):
     """Spur-Liste, die jeden Eintrag mit der Sekunde seit Lauf-Start stempelt
     (01.09.2026, Finns Tempo-Beschwerde: 'Popup offen, dann 10 Sekunden bis
@@ -10926,6 +10939,7 @@ def modus_tsxinventar(cmd):
     """Nur lesen: Inventar Grundzustand / Konto-Dropdown / Bracket-Dialog (je öffnen und wieder schließen)."""
     res = {"ok": False, "code": "", "msg": "", "trail": "", "schritt": "start", "inventar": {}}
     trail = _StempelSpur()
+    trail.append(puls_bot_stand())                    # B33: erste Spur-Zeile = welcher Bot lief
     try:
         from pywinauto import Desktop  # noqa: F401
     except ImportError:
@@ -11029,6 +11043,7 @@ def modus_tsxlesen(cmd, weiter=None, wachhund_s=100.0):
     res = {"ok": False, "code": "", "msg": "", "trail": "", "schritt": "start", "konto": "", "balance": None,
            "mll": None, "rpl": None, "upl": None, "position": None}
     trail = _StempelSpur()
+    trail.append(puls_bot_stand())                    # B33: erste Spur-Zeile = welcher Bot lief
     ext = str((cmd or {}).get("konto") or (cmd or {}).get("ext_id") or "").strip()
     if len(_nur_alnum(ext)) < 5:
         res.update(code="befehl", msg="Feld 'konto' (External ID) fehlt")
@@ -11428,6 +11443,23 @@ def _uia_fokus():
         return None
 
 
+def tsx_liste_neu(vorher, nachher, feld_rect):
+    """REIN RECHNEND (testbar, B33): Anzahl ListItems, die nach dem Klick NEU unter dem Feld stehen (oben ab Unterkante −6 px,
+    x-Spanne ±50 px). vorher/nachher = [(name, rect, typ)]."""
+    alt = {(str(e[0]), tuple(e[1])) for e in vorher or () if e[1]}
+    n = 0
+    for e in nachher or ():
+        try:
+            r = e[1]
+            if not r or (str(e[0]), tuple(r)) in alt:
+                continue
+            if r[1] >= feld_rect[3] - 6 and r[0] >= feld_rect[0] - 50 and r[2] <= feld_rect[2] + 50:
+                n += 1
+        except (TypeError, IndexError):
+            continue
+    return n
+
+
 def _uia_tastatur_im_feld(rect):
     """B32: Element am Feld-Mittelpunkt (oder sein Eltern-Feld) meldet HasKeyboardFocus. -> bool"""
     try:
@@ -11462,10 +11494,25 @@ def _tsx_tippen(feld, text, trail, name, ist=None, liste_ok=False):
     except ImportError:
         return False
     fokus_ok = False
+    liste = liste_ok if callable(liste_ok) else None       # B33: Liste der ListItems (vorher/nachher) für die Contract-Suche
+    liste_vorher = liste() if liste else []
     for versuch in range(2):
         _tsx_klick((name, feld[1], feld[2]), f"Feld {name}", trail)
         _warte(0.25, 0.2)
         fk = _uia_fokus()
+        if liste:
+            # B33 (Mike 16:29 UTC): der aktive Eintrag (aktueller Wert MNQZ26) liegt weit unten in der gescrollten Liste —
+            # Rechteck außerhalb. Beweis: ≥ 3 NEUE Einträge unter dem Feld UND Fokus ListItem (egal wo) oder HasKeyboardFocus
+            n_neu = tsx_liste_neu(liste_vorher, liste(), feld[1])
+            tast = _uia_tastatur_im_feld(feld[1])
+            if n_neu >= 3 and ((fk and fk[0] in ("ListItem", "List")) or tast):
+                trail.append(f"Fokus-Beweis Feld {name}: Vorschlagsliste mit {n_neu} Einträgen offen, Fokus "
+                             f"{fk[0] if fk else '?'}{', HasKeyboardFocus' if tast else ''}")
+                fokus_ok = True
+                break
+            trail.append(f"Fokus-Beweis Feld {name} fehlt: {n_neu} neue Einträge, Fokus {fk[0] if fk else '?'}, "
+                         f"HasKeyboardFocus {'ja' if tast else 'nein'}")
+            continue
         if tsx_fokus_passt(fk, feld[1], liste_ok):
             if liste_ok and fk and fk[0] in ("ListItem", "List"):
                 trail.append(f"Fokus-Beweis Feld {name}: Vorschlagsliste unter dem Feld offen (Tastatur im Feld)")
@@ -11575,6 +11622,12 @@ def _tsx_order_nach_kopf(befehl):
                 return ende("bracket", "Haken „Automatically apply …\" unlesbar — nicht angefasst, keine Order.",
                             felder=tsx_felder_kurz(felder, 40))
             trail.append("Haken „Automatically apply\" unlesbar — nicht angefasst")
+        elif haken[4] == 0 and befehl["scharf"]:
+            # B33 (27.09.2026): beim selben Konto …58370042 zweimal hintereinander „war aus → geklickt → an" — Lesung womöglich
+            # INVERTIERT (dann schaltet Puls den Haken jedes Mal AUS und TP greift nicht). Bis geklärt: scharf nie klicken.
+            _tsx_esc()
+            return ende("bracket", "Haken-Zustand unsicher („war aus“ gelesen) — scharf nicht angefasst, keine Order.",
+                        haken_roh=[haken[0], list(haken[1]), haken[4]])
         elif haken[4] == 0:
             _tsx_klick(("Haken", haken[1], "CheckBox"), "Haken Automatically apply", trail)
             _warte(0.4, 0.2)
@@ -11595,6 +11648,30 @@ def _tsx_order_nach_kopf(befehl):
         _warte(0.5, 0.3)
         if any(f[0].lower().startswith("risk") for f in _tsx_felder(w)):
             return ende("bracket", "Bracket-Dialog ging nicht zu.")
+        # B33: Kontrolle — Dialog einmal wieder öffnen und den Haken NUR lesen (bleibt er gespeichert, ist die Lesung richtig)
+        if txt and haken:
+            mb2 = [e for e in _tsx_seite_roh(w, ("Button",)) if e[1] and TSX_RX_MANAGE_BRACKETS.search(str(e[0]))]
+            if len(mb2) == 1:
+                _tsx_klick(mb2[0], "Manage brackets (Kontrolle Haken)", trail)
+                f2, t_bis = [], time.time() + 3.0
+                while time.time() < t_bis:
+                    _warte(0.3, 0.2)
+                    f2 = _tsx_felder(w)
+                    if any(f[0].lower().startswith("risk") for f in f2):
+                        break
+                h2 = tsx_haken_zu_text(f2, txt[0][1])
+                zustand = {0: "aus", 1: "an"}.get(h2[4] if h2 else None, "unlesbar")
+                trail.append(f"Haken nach Wiederöffnen: {zustand} (roh {h2[4] if h2 else '—'})")
+                res["haken_kontrolle"] = zustand
+                zu2 = [e for e in _tsx_seite_roh(w, ("Button",)) if e[1] and str(e[0]).strip().lower() in ("close", "schließen", "×")
+                       and not TSX_RX_NIE.search(str(e[0])) and e[1][3] <= f_risk[1][1] and abs(e[1][0] - f_prof[1][2]) < 400]
+                if len(zu2) == 1:
+                    _tsx_klick(zu2[0], "Bracket-Dialog schließen", trail)
+                else:
+                    _tsx_esc()
+                _warte(0.5, 0.3)
+                if any(f[0].lower().startswith("risk") for f in _tsx_felder(w)):
+                    return ende("bracket", "Bracket-Dialog ging nach der Haken-Kontrolle nicht zu.")
         _puls_diagnose_senden(trail, "tsx_order_brackets")
         # 5. Contract
         felder = _tsx_felder(w)
@@ -11605,7 +11682,8 @@ def _tsx_order_nach_kopf(befehl):
         cw_ok = lambda v: tsx_contract_wahl([str(v or "").split("·")[0].strip()], befehl["wurzel"]) is not None
         trail.append(f"Contract vorher: {cwert} ({cq})" if cwert else "Contract vorher unlesbar")
         if not cw_ok(cwert):
-            if not _tsx_tippen(cb, befehl["wurzel"].lower(), trail, "Contract", liste_ok=True):
+            if not _tsx_tippen(cb, befehl["wurzel"].lower(), trail, "Contract",
+                               liste_ok=lambda: _tsx_seite_roh(w, ("ListItem",))):
                 return ende("contract", "Contract-Suche bekam keinen Fokus — nichts getippt.")
             vor, t_bis = [], time.time() + 4.0
             while time.time() < t_bis:

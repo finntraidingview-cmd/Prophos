@@ -2581,7 +2581,8 @@ class Handler(BaseHTTPRequestHandler):
                     res = {"ok": False, "code": "bot_fehlt", "retry_ok": True, "gesendet": False, "msg": "order_bot.py fehlt auf diesem PC."}
                 else:
                     p = subprocess.run([sys.executable, bot, "tsxorder", json.dumps(cmd)],
-                                       capture_output=True, text=True, errors="replace", timeout=to)
+                                       capture_output=True, text=True, errors="replace", timeout=to,
+                                       env=dict(os.environ, PULS_BOT_STAND=f"{BOT_STAND.get('version') or '?'} {str(BOT_STAND.get('sha') or '')[:7]}"))
                     line = (p.stdout or "").strip().splitlines()
                     res = json.loads(line[-1]) if line else {
                         "ok": False, "code": "bot_stumm", "retry_ok": not cmd["scharf"],
@@ -2626,7 +2627,8 @@ class Handler(BaseHTTPRequestHandler):
                     res = {"ok": False, "code": "bot_fehlt", "retry_ok": True, "msg": "order_bot.py fehlt auf diesem PC."}
                 else:
                     p = subprocess.run([sys.executable, bot, modus, json.dumps(cmd)],
-                                       capture_output=True, text=True, errors="replace", timeout=to)
+                                       capture_output=True, text=True, errors="replace", timeout=to,
+                                       env=dict(os.environ, PULS_BOT_STAND=f"{BOT_STAND.get('version') or '?'} {str(BOT_STAND.get('sha') or '')[:7]}"))
                     line = (p.stdout or "").strip().splitlines()
                     res = json.loads(line[-1]) if line else {
                         "ok": False, "code": "bot_stumm",
