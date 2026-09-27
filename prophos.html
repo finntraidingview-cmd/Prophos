@@ -9804,7 +9804,7 @@
       <div id="ac-tvlive-section" hidden>
         <div class="modal-divider">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--violet)"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-          Futures · Live <span style="font-weight:400;color:var(--sub);font-size:11.5px">(TradingView · nur Anzeige)</span>
+          Futures · Live <span style="font-weight:400;color:var(--sub);font-size:11.5px" id="ac-tvlive-quelle">(TradingView · nur Anzeige)</span>
         </div>
         <div class="form-grid">
           <div class="field">
@@ -9828,7 +9828,7 @@
             <pre id="ac-tsx-inv-erg" style="display:none;margin:6px 0 0;max-height:160px;overflow:auto;font-size:10.5px;background:var(--surface-tint);padding:8px;border-radius:8px;white-space:pre-wrap"></pre>
           </div>
           <div class="field" style="grid-column:1/-1;margin-top:-6px">
-            <div style="font-size:11px;color:var(--sub)">Puls liest die Account Balance aus TradingView beim Platzieren und nach dem Ende eines Orbit-V2-Trades. Unabhängig von Echo (MT5) — wird hier nicht geändert.</div>
+            <div style="font-size:11px;color:var(--sub)" id="ac-tvlive-erkl">Puls liest die Account Balance aus TradingView beim Platzieren und nach dem Ende eines Orbit-V2-Trades. Unabhängig von Echo (MT5) — wird hier nicht geändert.</div>
           </div>
         </div>
       </div>
@@ -26978,8 +26978,15 @@
   let _acTsxInvErg = null
   function acTsxInventarZeigen(acc){
     const box = document.getElementById('ac-tsx-inv'); if(!box) return
-    const admin = (() => { try{ return localStorage.getItem('prophos_wd_admin') === '1' }catch(_){ return false } })()
-    box.hidden = !(admin && acc && /topstep/i.test(String(acc.firm || '')))
+    // Sichtbar für jedes Topstep-Konto im Popup (F25, 27.09.2026: Finn fand den Knopf nicht — auf seinem Gerät fehlte der Admin-Merker).
+    // Das Konto-Popup zeigt nur EIGENE Konten, das Signal geht an den eigenen PC — ein Admin-Riegel ist hier unnötig.
+    box.hidden = !(acc && /topstep/i.test(String(acc.firm || '')))
+    // Texte je Plattform (F25): Topstep liest BAL aus TopstepX, sonst Account Balance aus TradingView
+    const ts = !!(acc && /topstep/i.test(String(acc.firm || '')))
+    const q = document.getElementById('ac-tvlive-quelle'); if(q) q.textContent = ts ? '(TopstepX · nur Anzeige)' : '(TradingView · nur Anzeige)'
+    const er = document.getElementById('ac-tvlive-erkl')
+    if(er) er.textContent = ts ? 'Puls liest BAL aus TopstepX — beim Start eines Topstep-V2-Trades, nach dem Ende und auf Klick (↻ in der Konten-Liste). Unabhängig von Echo (MT5) — wird hier nicht geändert.'
+                               : 'Puls liest die Account Balance aus TradingView beim Platzieren und nach dem Ende eines Orbit-V2-Trades. Unabhängig von Echo (MT5) — wird hier nicht geändert.'
     const st = document.getElementById('ac-tsx-inv-stand'), pre = document.getElementById('ac-tsx-inv-erg'), kp = document.getElementById('ac-tsx-inv-kopie')
     if(st) st.textContent = ''; if(pre){ pre.style.display = 'none'; pre.textContent = '' }; if(kp) kp.hidden = true; _acTsxInvErg = null
   }
@@ -27021,7 +27028,7 @@
       return m < 1 ? 'gerade eben' : m < 60 ? `vor ${m} min` : m < 1440 ? `vor ${Math.round(m / 60)} h` : `vor ${Math.round(m / 1440)} Tagen` }
     const zeigeBal = (b, at, quelle) => {
       bal.textContent = b != null ? f2(b) + ' $' : '–'
-      stand.textContent = b != null ? `${at ? vor(at) + ' · ' : ''}${quelle === 'dashboard' ? 'aus Dashboard eingefügt' : 'aus Orbit-V2-Trade (Puls)'}` : 'noch nicht gelesen'
+      stand.textContent = b != null ? `${at ? vor(at) + ' · ' : ''}${quelle === 'dashboard' ? 'aus Dashboard eingefügt' : (acc && /topstep/i.test(String(acc.firm || '')) ? 'aus TopstepX (Puls)' : 'aus Orbit-V2-Trade (Puls)')}` : 'noch nicht gelesen'
       stand.title = at ? new Date(at).toLocaleString('de-DE') : ''
     }
     _acTvLiveId = acc ? acc.id : null
@@ -34366,7 +34373,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.679'
+  const OS_TAB_BUILD = '2026-09-22.680'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
