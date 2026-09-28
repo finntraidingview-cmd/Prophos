@@ -5757,9 +5757,13 @@ def tv_stapel_offen(roh):
     return sum(1 for n in namen if len(n) <= 90 and tv_meldung_art(n) is not None) >= 2
 
 
-def _tv_show_more_invoke(w, punkt, trail):
-    """Zweiter Weg, wenn der Maus-Klick den Stapel nicht öffnet: InvokePattern am 'Show more'-Knopf, der dem geklickten Punkt am
-    nächsten liegt (nie 'Show less', nie ein X). -> bool"""
+def _tv_show_more_invoke(w, punkt, trail, offen_fn=None):
+    """Zweiter Weg, wenn der Maus-Klick den Stapel nicht öffnet: am 'Show more'-Knopf, der dem geklickten Punkt am nächsten liegt
+    (nie 'Show less', nie ein X), eine Kaskade von Wegen — nach JEDEM Weg lesend prüfen (offen_fn), nie zwei blind hintereinander.
+    LIVE-BEFUND 29.09.2026 (EzPoker b0252248 pc-40mali 22:10 UTC, wie Chris 79633d2e 28.09. 23:07): Maus-Klick @373,1015 ohne
+    Wirkung, invoke() -> NoPatternInterfaceError (Chrome bietet am Knopf kein InvokePattern) — Fill-Toast blieb zu, Hedge nahm
+    den Feed. Deshalb: InvokePattern -> LegacyIAccessible DoDefaultAction -> echte Maus auf die Mitte des ELEMENTS (Hover, dann
+    SendInput) -> click_input. Ohne offen_fn gilt der erste Weg ohne Ausnahme als Erfolg (alter Vertrag). -> bool"""
     try:
         kand = []
         for b in w.descendants(control_type="Button"):
@@ -5779,12 +5783,40 @@ def _tv_show_more_invoke(w, punkt, trail):
         if d > 120:
             trail.append(f"Show more: nächster Knopf {int(d)} px weg — kein Invoke")
             return False
-        b.invoke()
-        trail.append(f"Show more per Invoke ({n} @{r})")
-        return True
     except Exception as e:
-        trail.append(f"Show more Invoke fehlgeschlagen ({type(e).__name__})")
+        trail.append(f"Show more: Knopfsuche fehlgeschlagen ({type(e).__name__})")
         return False
+
+    def _weg_maus():
+        mx, my = (r[0] + r[2]) // 2, (r[1] + r[3]) // 2
+        _maus_fahren(mx, my, schritte=6)
+        _warte(0.15, 0.1)
+        if not _klick_absolut(mx, my):
+            raise RuntimeError("SendInput abgelehnt")
+
+    for wegname, tu in (("Invoke", lambda: b.invoke()),
+                        ("DoDefaultAction", lambda: b.iface_legacyiaccessible.DoDefaultAction()),
+                        ("Maus aufs Element", _weg_maus),
+                        ("click_input", lambda: b.click_input())):
+        try:
+            tu()
+        except Exception as e:
+            trail.append(f"Show more {wegname} fehlgeschlagen ({type(e).__name__})")
+            continue
+        if offen_fn is None:
+            trail.append(f"Show more per {wegname} ({n} @{r})")
+            return True
+        ende = time.time() + 1.0
+        while time.time() < ende:
+            _warte(0.3, 0.15)
+            try:
+                if offen_fn():
+                    trail.append(f"Show more per {wegname} — Stapel offen ({n} @{r})")
+                    return True
+            except Exception:
+                break
+        trail.append(f"Show more {wegname}: ohne Wirkung")
+    return False
 
 
 def tv_show_more_knopf(roh):
@@ -6433,7 +6465,8 @@ def tv_order_schritt(w, cmd, trail, erg=None):
                             if tv_stapel_offen(roh_):
                                 offen_ = True
                                 break
-                        if not offen_ and _tv_show_more_invoke(w, k_["punkt"], trail):
+                        if not offen_ and _tv_show_more_invoke(w, k_["punkt"], trail,
+                                                               lambda: tv_stapel_offen(_tv_uia_roh(w, typen))):
                             _warte(0.5, 0.2)
                             roh_ = _tv_uia_roh(w, typen)
                             offen_ = tv_stapel_offen(roh_)
