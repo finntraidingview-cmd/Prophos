@@ -635,6 +635,10 @@
     transition:all .15s var(--ease);z-index:40;
   }
   #dashboard-view .user-dropdown.open{opacity:1;visibility:visible;transform:translateY(0)}
+  /* ID-Wechsel läuft (29.09.2026): Vollbild-Hinweis bis zum Neuladen — kein zweiter Tipp, sichtbar, dass etwas passiert */
+  .prof-wechsel{position:fixed;inset:0;z-index:400;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;
+    background:rgba(250,251,252,.92);color:var(--ink);font-size:14px;font-weight:600}
+  .prof-wechsel::before{content:'';width:22px;height:22px;border-radius:50%;border:2.5px solid var(--border);border-top-color:var(--violet);animation:spin .7s linear infinite}
   #dashboard-view .ud-header{
     padding:10px 12px 12px;border-bottom:1px solid var(--border-soft);
     margin-bottom:4px;
@@ -10384,8 +10388,27 @@
     renderProfileMenu()
   }
 
-  // Auf ein anderes gespeichertes Profil wechseln
+  /* ID-WECHSEL MIT RIEGEL + RÜCKMELDUNG (29.09.2026, Finn am Handy: „ID wechseln hängt/buggt"): der Wechsel wartet auf zwei
+   * Supabase-Aufrufe und lädt dann die ganze Seite neu — sekundenlang sah man nichts und tippte nochmal. Ein zweiter Lauf hätte
+   * profSnapshotAndClear(alte ID) mit dem schon eingespielten Bucket der ZIEL-ID gemacht → Daten zweier IDs vermischt. Jetzt:
+   * ein Wechsel zur Zeit, Menü sofort zu, Vollbild-Hinweis bis zum Neuladen; endet der Wechsel ohne Neuladen (Login nötig),
+   * verschwindet der Hinweis wieder. */
+  let _profWechselLaeuft = false
   async function profSwitchTo(userId){
+    if(_profWechselLaeuft || !userId || userId === profActiveId()) return
+    const target = profList().find(p => p.userId === userId)
+    if(!target) return
+    _profWechselLaeuft = true
+    try{ document.getElementById('userDropdown')?.classList.remove('open') }catch(_){}
+    const hinweis = document.createElement('div')
+    hinweis.className = 'prof-wechsel'
+    hinweis.textContent = `Wechsle zu ${target.name || target.email} …`
+    document.body.appendChild(hinweis)
+    let neuLaden = false
+    try{ neuLaden = (await profSwitchToKern(userId)) === 'neu_laden' }
+    finally{ if(!neuLaden){ hinweis.remove(); _profWechselLaeuft = false } }
+  }
+  async function profSwitchToKern(userId){
     if(!userId || userId === profActiveId()) return
     const target = profList().find(p => p.userId === userId)
     if(!target) return
@@ -10423,6 +10446,7 @@
       // werden beim Modul-Start EINMAL aus dem localStorage gelesen und nie wieder — ohne
       // Reload würde Profil B mit den Duplikum-/Topstep-Verbindungen von Profil A arbeiten.
       location.reload()
+      return 'neu_laden'   // Hinweis + Riegel bleiben bis zum Neuladen (profSwitchTo)
     }catch(e){
       // Refresh-Token abgelaufen/ungültig → sauber auf Login zurück, Mail vorbefüllt
       localStorage.removeItem(PROF_SESSION + userId)
@@ -10469,7 +10493,7 @@
         <span style="width:18px;height:18px;border-radius:50%;background:var(--violet);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0">${escapeHtml((p.email[0]||'U').toUpperCase())}</span>
         <span style="flex:1;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(p.name || p.email)}</span>
         ${n ? `<span title="${n} Trade${n===1?'':'s'} warten auf Bestätigung" style="background:var(--violet);color:#fff;border-radius:9px;min-width:17px;height:17px;padding:0 5px;font-size:10px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0">${n}</span>` : ''}
-        <span data-prof-remove="${escapeHtml(p.userId)}" title="Aus der Liste entfernen" style="opacity:.45;font-size:15px;padding:0 2px;line-height:1">×</span>
+        <span data-prof-remove="${escapeHtml(p.userId)}" title="Aus der Liste entfernen" style="opacity:.45;font-size:15px;line-height:1;padding:8px 10px;margin:-8px -8px -8px 0">×</span>
       </button>`
     }).join('') : ''
     box.querySelectorAll('[data-prof-switch]').forEach(btn => {
@@ -10643,6 +10667,13 @@
     userDropdown.classList.toggle('open')
   })
   document.addEventListener('click', () => userDropdown.classList.remove('open'))
+  // Außen-Tipp schließt NUR das Menü (29.09.2026, Handy: der Tipp neben das Menü öffnete zusätzlich die Karte darunter) —
+  // im Capture abfangen, bevor das Ziel ihn bekommt; Tipps im Menü und auf den Knopf laufen normal weiter
+  document.addEventListener('click', (e) => {
+    if(!userDropdown.classList.contains('open') || userDropdown.contains(e.target) || userBtn.contains(e.target)) return
+    userDropdown.classList.remove('open')
+    e.stopPropagation(); e.preventDefault()
+  }, true)
 
   /* ========== DASHBOARD TABS ========== */
   const viewTitles = {
@@ -35496,7 +35527,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.754'
+  const OS_TAB_BUILD = '2026-09-22.755'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
