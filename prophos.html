@@ -8584,21 +8584,18 @@
                 <div id="adm-kf-pers-wrap">
                   <div class="kf-abschnitt">Personen im Vergleich <span class="adm-sub" id="adm-kf-pers-sub" style="font-weight:400;text-transform:none;letter-spacing:0"></span></div>
                   <div class="adm-dist kf-rows kf-quoten" id="adm-kf-rows-p"></div>
-                  <div class="kf-chart kf-trades-verlauf">
-                    <div class="kf-titel">Vorteil ohne Hedge · kumuliert je Person <span class="adm-sub">Hedge + Reibung, die nicht angefallen sind · gestrichelt = alle · Klick auf eine Linie filtert</span></div>
-                    <div class="adm-vl"><canvas id="adm-kf-chart-pv"></canvas></div>
-                    <div class="adm-vl-legend" id="adm-kf-legend-pv"></div>
-                  </div>
                 </div>
                 <!-- Oberkategorie „Verlauf" (24.09.2026 abends, Finn: „für eine Oberkategorie ein Chart, unterteilt … viel cleaner") -->
                 <div class="kf-gruppe" data-kf-gruppe="verlauf">
                   <div class="kf-gruppe-kopf"><div class="kf-abschnitt">Verlauf</div><div class="kf-chip-bar" data-kf-chips="verlauf"></div></div>
                   <div class="kf-gross">
-                    <div class="kf-chart" data-kf-chart="hyp" hidden>
-                      <div class="kf-titel">Mit Hedge (hypothetisch) · kumuliert je Person</div>
-                      <div class="kf-sub">So wäre der Gegen-Hedge gelaufen — Realmoney in EUR, gestrichelt = alle zusammen · Klick auf Person hebt sie hervor und filtert</div>
-                      <div class="adm-vl"><canvas id="adm-kf-chart-hyp"></canvas></div>
-                      <div class="adm-vl-legend" id="adm-kf-legend-hyp"></div>
+                    <!-- EIN Chart statt zwei (28.09.2026, Finn: „ist nur 1:1 gleich, der Chart zeigt nur das Gegenteil — ein schöner, großer,
+                         cleaner Chart"): „Mit Hedge (hypothetisch)" war die Spiegelung von „Vorteil ohne Hedge" — nur noch dieser, groß hier -->
+                    <div class="kf-chart" data-kf-chart="pv" hidden>
+                      <div class="kf-titel">Vorteil ohne Hedge · kumuliert je Person</div>
+                      <div class="kf-sub">Hedge + Reibung, die nicht angefallen sind — über 0 = ohne Hedge besser gefahren, unter 0 = der Hedge hätte geholfen · gestrichelt = alle · Klick auf Person filtert</div>
+                      <div class="adm-vl"><canvas id="adm-kf-chart-pv"></canvas></div>
+                      <div class="adm-vl-legend" id="adm-kf-legend-pv"></div>
                     </div>
                     <div class="kf-chart" data-kf-chart="real" hidden>
                       <div class="kf-titel">Real · Master-P&amp;L kumuliert je Person</div>
@@ -11920,7 +11917,7 @@
      * ein Chip-Balken und EINE Fläche, genau eine Sicht je Gruppe sichtbar. Wechsel zeichnet über admKfRender neu, damit
      * Chart.js die Breite des eben eingeblendeten Containers bekommt. Auswahl lebt in der Sitzung (admKf.charts). */
     const ADM_KF_GRUPPEN = {
-      verlauf: [['hyp', 'Mit Hedge'], ['real', 'Real · Master-P&L'], ['dup', 'Duplikum gespart'], ['reibp', 'Reibung gespart']],
+      verlauf: [['pv', 'Vorteil ohne Hedge'], ['real', 'Real · Master-P&L'], ['dup', 'Duplikum gespart'], ['reibp', 'Reibung gespart']],
       trades:  [['tag', 'Je Tag'], ['kal', 'Kalender'], ['pnl', 'Verteilung'], ['wt', 'Wochentag'], ['std', 'Stunde'], ['dauer', 'Haltedauer']],
       // Linien zuerst (26.09.2026, Finn: „kein Balkendiagramm, ein Liniendiagramm") — die Balken je Firma bleiben dahinter
       // nur die neue Ära (26.09.2026, Finn: „hier nur die Reibung seit der neuen Ära") — Hedge-Ära-Charts entfernt
@@ -35424,7 +35421,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.745'
+  const OS_TAB_BUILD = '2026-09-22.746'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
