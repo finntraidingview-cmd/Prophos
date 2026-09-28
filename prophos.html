@@ -24000,7 +24000,7 @@
     }
   }
   const wdlAktiv = () => { const v = document.querySelector('#dashboard-view .view[data-view="wdlive"]'); return !!(v && v.classList.contains('active')) }
-  async function wdlLaden(){
+  async function wdlLaden(voll){
     if(wdl.laedt) return
     wdl.laedt = true
     try{
@@ -24019,6 +24019,12 @@
       wdl.kurs = k ? { preis: Number(k.preis), wurzel: k.wurzel, alter_ms: Date.now() - (Date.parse(k.updated_at) || 0) } : null
     }catch(_){}
     finally{ wdl.laedt = false }
+    // Liste nur neu aufbauen, wenn sich etwas geändert hat (29.09.2026, Handy: der 15-s-Takt ersetzte die ganze Liste per innerHTML
+    // auch ohne neue Daten — mitten im Scrollen/Tippen gingen Tipps verloren, die Karten flackerten). Live-Zahlen schreibt
+    // wdlLiveTick alle 2 s nach; die Minuten-Texte („Nachlesung in n min") hält der Neuaufbau spätestens alle 60 s frisch.
+    const sig = JSON.stringify([(wdl.daten && wdl.daten.trades) || null, wdl.fehler])
+    if(!voll && sig === wdl.sig && Date.now() - (wdl.renderAt || 0) < 60000) return
+    wdl.sig = sig
     wdlRender()
   }
   function wdlKursJetzt(){
@@ -24061,6 +24067,7 @@
   setInterval(wdlLiveTick, 2000)
   function wdlRender(){
     const kopf = document.getElementById('wdl-kopf'), liste = document.getElementById('wdl-liste'); if(!kopf || !liste) return
+    wdl.renderAt = Date.now()
     wdlFarben()
     const alleTrades = (wdl.daten && wdl.daten.trades) || []
     wdlIdsRender(alleTrades)
@@ -24132,6 +24139,15 @@
     const c = ev.target.closest('[data-wdl-trade]'); if(!c) return
     const id = c.getAttribute('data-wdl-trade'), t = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === id); if(!t) return
     wdl.auswahl = wdl.auswahl === id ? null : id; wdlRender()   // zweiter Klick hebt die Auswahl auf
+    // Handy (29.09.2026, Finn: „offene Trades antippen hängt/buggt"): der Chart steht dort weit über der Liste — die Linien erschienen
+    // außer Sicht, der Tipp wirkte wie „nichts passiert". Beim Auswählen den Chart sanft ins Bild holen (unter die Kopfzeile).
+    if(wdl.auswahl && window.matchMedia('(max-width:820px)').matches){
+      // 80 ms später: der Chart-Neuaufbau im selben Takt brach den sanften Bildlauf sonst nach ~100 px ab (Stub-Messung)
+      setTimeout(() => {
+        const slot = document.getElementById('wdl-chart-slot'), bar = document.querySelector('#dashboard-view .topbar')
+        if(slot) window.scrollTo({ top: Math.max(0, slot.getBoundingClientRect().top + window.scrollY - (bar ? bar.getBoundingClientRect().height : 50) - 8), behavior: 'smooth' })
+      }, 80)
+    }
   })
   // Chart umhängen: #mkl-wrap wohnt in „Markt live"; Live Trades leiht ihn aus (kein zweiter Chart). Heimat = Platz vor #mkl-wd.
   const _mklHeimat = (() => { const w = document.getElementById('mkl-wrap'); return w ? { parent: w.parentNode, next: w.nextElementSibling } : null })()
@@ -24144,11 +24160,11 @@
     wdl.timer = setTimeout(wdlTakt, 15000)
   }
   window.wdlOnEnter = () => { wdlChartHolen(); wdlRender(); wdlTakt(); try{ setTimeout(() => mklTick(true), 80) }catch(_){} }
-  document.getElementById('wdl-refresh')?.addEventListener('click', () => wdlLaden())
+  document.getElementById('wdl-refresh')?.addEventListener('click', () => wdlLaden(true))
   document.querySelectorAll('#wdl-tage [data-wdl-tage]').forEach(b => b.addEventListener('click', () => {
     wdl.tage = Number(b.dataset.wdlTage) || 2
     document.querySelectorAll('#wdl-tage [data-wdl-tage]').forEach(x => x.classList.toggle('active', x === b))
-    wdl.daten = null; wdlRender(); wdlLaden()
+    wdl.daten = null; wdlRender(); wdlLaden(true)
   }))
   // Stub ohne Login: window._wdlStub({trades:[…]}) zeichnet die View mit Testdaten
   window._wdlStub = d => { wdl.daten = d; wdl.fehler = ''; wdlRender() }
@@ -35561,7 +35577,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.756'
+  const OS_TAB_BUILD = '2026-09-22.757'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
