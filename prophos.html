@@ -4418,6 +4418,12 @@
     }
     #dashboard-view .sidebar::before{width:38px;height:5px;margin:6px auto 12px}
     #dashboard-view .sb-overlay{background:rgba(16,24,40,.34)}
+    /* Tab-Bar ÜBER dem „Mehr"-Sheet (29.09.2026, Finn: „man kommt gefühlt nicht mehr raus"): das Sheet (z 70) deckte die Leiste
+       zu, „Mehr" ließ sich nicht wieder antippen. Das Sheet läuft jetzt hinter der Leiste aus, sein Polster hält die letzten
+       Einträge darüber; der Griff lässt sich nach unten wischen (MOBILE SIDEBAR). */
+    #dashboard-view .mob-nav{z-index:75}
+    #dashboard-view .sidebar{padding-bottom:calc(var(--m-nav-h) + env(safe-area-inset-bottom) + 14px);max-height:86vh;
+      -webkit-user-select:none;user-select:none}
     #dashboard-view .sb-nav{gap:5px}
     #dashboard-view .sidebar .sb-link{
       border-radius:var(--m-r-ctl);padding:12px 11px;font-size:13.5px;font-weight:550;
@@ -15703,6 +15709,34 @@
     document.getElementById('sidebar').classList.toggle('open')
     document.getElementById('sbOverlay').classList.toggle('open')
   })
+  /* „MEHR"-SHEET ZUWISCHEN (29.09.2026, Finn am Handy: „unten rechts ‚Mehr' — man kommt gefühlt nicht mehr raus"): der Griff oben
+   * war nur Deko. Wischen nach unten zieht das Sheet mit dem Finger mit und schließt ab 80 px — nur wenn die Liste oben steht
+   * (sonst gehört die Geste dem Scrollen). Dazu liegt die Tab-Bar jetzt ÜBER dem Sheet (CSS v3), „Mehr" tippt es wieder zu. */
+  ;(() => {
+    const sb = document.getElementById('sidebar'), ov = document.getElementById('sbOverlay')
+    if(!sb || !ov) return
+    let y0 = null, dy = 0
+    sb.addEventListener('touchstart', e => {
+      if(!sb.classList.contains('open') || sb.scrollTop > 0 || e.touches.length !== 1){ y0 = null; return }
+      y0 = e.touches[0].clientY; dy = 0
+    }, { passive: true })
+    sb.addEventListener('touchmove', e => {
+      if(y0 == null) return
+      dy = e.touches[0].clientY - y0
+      if(dy <= 0 || sb.scrollTop > 0){ sb.style.transform = ''; sb.style.transition = ''; if(sb.scrollTop > 0) y0 = null; return }
+      sb.style.transition = 'none'
+      sb.style.transform = `translateY(${dy}px)`
+    }, { passive: true })
+    const ende = () => {
+      if(y0 == null) return
+      y0 = null
+      sb.style.transition = ''; sb.style.transform = ''
+      if(dy > 80){ sb.classList.remove('open'); ov.classList.remove('open') }
+      dy = 0
+    }
+    sb.addEventListener('touchend', ende, { passive: true })
+    sb.addEventListener('touchcancel', ende, { passive: true })
+  })()
 
   /* ── Nav-Bar faengt den grossen Titel auf (App-Shell v3, 22.09.2026) ──
    * Am Handy steht der Screen-Name gross im Inhalt; die schmale Leiste oben
@@ -35527,7 +35561,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.755'
+  const OS_TAB_BUILD = '2026-09-22.756'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
