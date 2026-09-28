@@ -15727,6 +15727,7 @@
       if(a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT' || a.isContentEditable) && (a.value || a.textContent || '').trim()) return 'Eingabe offen'
       return ''
     }
+    window._bwGrund = bwGrund   // Brücken-Selbstheilung (28.09.2026) lädt nur im selben ruhigen Moment neu
     // Schleifenschutz: je Zielversion höchstens 3 Neuladungen, frühestens
     // 5 min nach der letzten — liefert pages.dev die neue VERSION schon, das
     // HTML aber noch aus dem Cache, bliebe der Tab sonst im Neulade-Kreis.
@@ -35256,7 +35257,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.737'
+  const OS_TAB_BUILD = '2026-09-22.738'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -49141,9 +49142,48 @@
   }
 
   // ── Bruecke: lokaler Reader → Cloud (+ Fernschalter durchsetzen), alle 5s ──
-  let _epPushBusy = false
+  /* BRÜCKEN-SCHUTZ (28.09.2026, Vorfall pc-usq1i6: Reader lief, Kurse kamen im Reader an, aber der Prophos-Tab schrieb ab
+   * 04:36 Dubai 11 h lang NICHTS mehr — tv_kurse UND mt5_live verstummten in derselben Sekunde, der Tab blieb offen.
+   * Finn: „Solange dieser Tab offen ist, soll es jede Sekunde senden — kein einziger Fehler.")
+   * Drei Riegel:
+   *   (1) Hänger: ein Cloud-Aufruf ohne Antwort (Netz-Aussetzer, supabase-js hat keinen Timeout) hielt _epPushBusy für immer
+   *       auf true → jeder weitere Tick kehrte sofort um. Jetzt gilt ein Tick nach 10 s als tot, der nächste läuft trotzdem;
+   *       der alte darf _epPushBusy danach nicht mehr zurücksetzen (Tick-Nummer).
+   *   (2) Takt aus einem Worker: Chrome drosselt setInterval in Hintergrund-Tabs (ab 5 min auf 1×/min), Worker-Timer nicht.
+   *       setInterval bleibt als Rückfall; Doppel-Ticks fängt der 700-ms-Abstand ab. Dazu hält der Tab einen Web Lock —
+   *       Chrome friert Seiten mit gehaltenem Lock nicht ein.
+   *   (3) Selbstheilung: liefert der Reader frische Kurse, aber seit 60 s ging kein einziger Cloud-Schreibvorgang durch
+   *       (auch das hängende Supabase-Login trifft alles gleichzeitig), lädt der Tab neu — nur im ruhigen Moment des
+   *       Build-Wächters, höchstens 1× je 10 min. Zähler + Zeiten reisen in kurs_bruecke (mt5_live.status) mit. */
+  let _epPushBusy = false, _epTickNr = 0, _epTickSeit = 0, _epTickLetzter = 0
+  const EP_TICK_TOT_MS = 10000, EP_HEIL_MS = 60000, EP_HEIL_PAUSE_MS = 10 * 60 * 1000, EP_HEIL_KEY = 'prophos_bruecke_heil'
+  const epStart = Date.now()
+  function epHeilPruefen(){
+    if(typeof MT5_LOCAL === 'undefined' || !MT5_LOCAL) return
+    const jetzt = Date.now()
+    if(!epLokal.readerFrischAt || jetzt - epLokal.readerFrischAt > 10000) return   // Reader liefert nichts — kein Tab-Problem
+    const stumm = jetzt - Math.max(epLokal.cloudOkAt || 0, epStart)
+    if(stumm < EP_HEIL_MS) return
+    let letzte = 0
+    try{ letzte = Number(localStorage.getItem(EP_HEIL_KEY)) || 0 }catch(_){}
+    if(jetzt - letzte < EP_HEIL_PAUSE_MS) return
+    let grund = ''
+    try{ grund = (typeof window._bwGrund === 'function') ? window._bwGrund(0) : '' }catch(_){ grund = 'unbekannt' }
+    if(grund){
+      if(!epLokal.heilWarteLog || jetzt - epLokal.heilWarteLog > 30000){ epLokal.heilWarteLog = jetzt; console.warn('[bruecke] Cloud seit ' + Math.round(stumm / 1000) + ' s stumm — Neuladen wartet (' + grund + ')') }
+      return
+    }
+    try{ localStorage.setItem(EP_HEIL_KEY, String(jetzt)) }catch(_){}
+    console.warn('[bruecke] Cloud seit ' + Math.round(stumm / 1000) + ' s stumm, Reader frisch — Tab lädt neu')
+    location.reload()
+  }
   async function epBrueckeTick(){
-    if(_epPushBusy) return
+    const jetzt = Date.now()
+    if(jetzt - _epTickLetzter < 700) return   // Worker + setInterval: höchstens ein Tick je Sekunde
+    if(_epPushBusy && jetzt - _epTickSeit < EP_TICK_TOT_MS){ epHeilPruefen(); return }
+    if(_epPushBusy){ epLokal.diag = Object.assign(epLokal.diag || {}, { haenger: ((epLokal.diag && epLokal.diag.haenger) || 0) + 1, haenger_at: new Date().toISOString() }); console.warn('[bruecke] Tick hing > 10 s — läuft weiter') }
+    const nr = ++_epTickNr
+    _epTickLetzter = jetzt; _epTickSeit = jetzt
     _epPushBusy = true
     try{
       const d = await epLokalHolen()
@@ -49169,13 +49209,14 @@
       // Positionen weiter alle 5 s (der Tick läuft seit Aufgabe B alle 2 s — nur Kurse/Kerzen brauchen den schnellen Takt)
       const cloudFaellig = Date.now() - (epLokal.cloudAt || 0) >= 5000
       if(cloudFaellig){ epLokal.cloudAt = Date.now()
-      await supabase.from('echoplus_live').upsert({
+      const { error: epErr } = await supabase.from('echoplus_live').upsert({
         id: pc, pc_name: pc,
         an: d.an !== false,
         positionen: d.positionen || [],
         reader_ts: Number(d.ts) || 0,
         updated_at: new Date().toISOString()
-      }) }
+      })
+      if(!epErr) epLokal.cloudOkAt = Date.now() }
       // Versionen des Reader-PCs (24.09.2026 spät, Finn live: Tab .495, Reader meldet sich, tv_kurse leer — aus der Cloud sah
       // man nicht, welches Script dort läuft): reader_version/script_version aus der GET-Antwort. Eigener, toleranter Update-
       // Aufruf NACH dem Upsert — fehlen die Spalten noch (SQL kommt vom Backend), scheitert nur er, nie der Positions-Strom.
@@ -49205,6 +49246,7 @@
                       : (typeof q.lp === 'number' && isFinite(q.lp) && q.lp > 0) ? q.lp
                       : ((typeof tvKursZahl === 'function') ? tvKursZahl(q.text) : null)
           if(!(preis > 0)) continue
+          epLokal.readerFrischAt = Date.now()
           // quelle/stale/modus (Spalten seit .488): modus 'delayed_streaming_600' = TV-CME-Abo auf dem PC nicht aktiv (Kurse 10 min alt)
           // Nur bei Änderung schreiben (1-s-Takt), spätestens alle 5 s als Lebenszeichen (updated_at ist die Frische im Markt-Kopf)
           epLokal.letzterKurs = epLokal.letzterKurs || {}
@@ -49215,7 +49257,11 @@
             sichtbar: q.sichtbar !== false, reader_ts: Number(q.ts) || Number(d.ts) || 0, updated_at: new Date().toISOString(),
             quelle: String(q.quelle || '').slice(0, 12) || null, stale: false, modus: String(q.modus || '').slice(0, 32) || null })
         }
-        if(rows.length) await supabase.from('tv_kurse').upsert(rows)
+        if(rows.length){
+          const { error: kErr } = await supabase.from('tv_kurse').upsert(rows)
+          if(!kErr){ epLokal.cloudOkAt = Date.now(); epLokal.diag = Object.assign(epLokal.diag || {}, { cloud_ok_at: new Date().toISOString() }) }
+          else epLokal.diag = Object.assign(epLokal.diag || {}, { kurs_fehler: String(kErr.message || kErr.code || kErr).slice(0, 120), kurs_fehler_at: new Date().toISOString() })
+        }
       }
       const k = d.kurs
       if(!ks && k && k.symbol && k.text && typeof d.kurs_alter_s === 'number' && d.kurs_alter_s <= 20){
@@ -49290,12 +49336,21 @@
           }catch(e){ epLokal.kerzenErstladung = 'fehler'; epLokal.diag = Object.assign(epLokal.diag || {}, { erstladung: 'fehler', erstladung_fehler: String(e && e.message || e), erstladung_at: new Date().toISOString() }); console.warn('[bruecke] Kerzen-Erstladung', e && e.message || e) }
         }
     }catch(_){ /* still — naechster Tick */ }
-    finally{ _epPushBusy = false }
+    finally{ if(nr === _epTickNr) _epPushBusy = false; epHeilPruefen() }
   }
   // 1 s statt 5 s (25.09.2026, Aufgabe B — Finn am Mac: „jede Bewegung", keine 5-Sekunden-Sprünge): der Reader antwortet lokal,
   // Kurse + laufende Kerze gehen NUR bei Änderung in die Cloud (sonst alle 5 s als Lebenszeichen), Positionen/echoplus_live
   // bleiben bei 5 s (Wächter cloudAt). Keine Tick-Ströme: höchstens 2 Kurs- + 2 Kerzen-Zeilen je Sekunde.
   setInterval(epBrueckeTick, 1000)
+  if(typeof MT5_LOCAL !== 'undefined' && MT5_LOCAL){
+    try{
+      const w = new Worker(URL.createObjectURL(new Blob(['setInterval(() => postMessage(0), 1000)'], { type: 'text/javascript' })))
+      w.onmessage = () => { epBrueckeTick() }
+    }catch(e){ console.warn('[bruecke] Worker-Takt nicht verfügbar — nur setInterval', e && e.message || e) }
+    try{ if(navigator.locks) navigator.locks.request('prophos-bruecke-wach', () => new Promise(() => {})) }catch(_){}
+    // Hinweis in der Diagnose, damit man aus der Ferne sieht, dass der Schutz läuft
+    epLokal.diag = Object.assign(epLokal.diag || {}, { schutz: 'worker+lock+heil', tab_start: new Date(epStart).toISOString() })
+  }
 
   // ── Schalten: soll_an schreiben (sticky), lokal zusaetzlich sofort ──
   async function epSchalten(id, an){
