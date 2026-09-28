@@ -1120,6 +1120,36 @@ def main():
         _l1["fill"] == 30801.0 and _l2["fill"] == 30801.0 and _l3["tp"] == 30858.25 and _l3["fill"] is None and _l4["fill"] is None
         and order_bot.tv_show_more_knopf(_LV) == {"punkt": (275, 995), "text": "Show more"}
         and any(x.startswith("UMGEBUNG: ") and "Button:Show more" in x for x in _rl))
+    # DEUTSCHES TRADINGVIEW (29.09.2026, Chris pc-c19p2l, Plan ab797028, Rohtext aus hedge.tv_meldung_roh): 'Take-Profit-Order platziert für'
+    # + 'zu 30.564,75 kaufen' (Preis VOR dem Verb, deutsches Zahlenformat); Fill vermutlich 'Marktorder ausgeführt für' + '4 zu 30.600,50 verkaufen'
+    _DE = [("Positionen 1", (60, 1200, 170, 1220), "TabItem"), ("Orders 1", (180, 1200, 260, 1220), "TabItem"),
+           ("Take-Profit-Order platziert für", (40, 1020, 280, 1038), "Text"), ("zu 30.564,75 kaufen", (40, 1042, 200, 1058), "Text")]
+    _DEF = [("Marktorder ausgeführt für", (40, 960, 250, 978), "Text"), ("4 zu 30.600,50 verkaufen", (40, 982, 230, 998), "Text")] + _DE
+    _g1 = order_bot.tv_meldung_preise(_DE, "MNQZ6", "sell", 4, vorher=["Positionen 1", "Orders 1"])
+    _g2 = order_bot.tv_meldung_preise(_DEF, "MNQZ6", "sell", 4)
+    _g3 = order_bot.tv_meldung_preise(_DEF, "MNQZ6", "sell", 3)                       # falsche Menge am Fill -> kein Fill, TP (ohne Menge) bleibt
+    _g4 = order_bot.tv_meldung_preise([("Take-Profit-Order platziert für MNQZ6 · 2 zu 30.858,25 verkaufen", (40, 1020, 480, 1038), "Text")], "MNQZ6", "buy", 2)
+    _g5 = order_bot.tv_meldung_preise(_DE, "MNQZ6", "sell", 4, vorher=["zu 30.564,75 kaufen"])   # alte Preis-Zeile zaehlt nie
+    chk("TV-ORDER Deutsch: 'zu 30.564,75 kaufen' unter TP-Titel = TP, '4 zu 30.600,50 verkaufen' unter 'Marktorder ausgeführt' = Fill, Menge geprueft, alte Zeile zaehlt nie",
+        _g1["tp"] == 30564.75 and _g1["fill"] is None and _g2["fill"] == 30600.5 and _g2["tp"] == 30564.75
+        and _g3["fill"] is None and _g3["tp"] == 30564.75 and _g4["tp"] == 30858.25 and _g5["tp"] is None
+        and order_bot.tv_meldung_preise(_LV, "MNQZ6", "buy", 1, vorher=["Positions", "Orders"])["fill"] == 30801.0)   # englisch unveraendert
+    # Neuheit (29.09.2026, ab797028): gleicher Titel stand schon vorher da -> neu nur ueber Anzahl oder neue Preis-Zeile
+    _alt = [("Take-Profit-Order platziert für", (40, 1020, 280, 1038), "Text"), ("zu 30.500,00 kaufen", (40, 1042, 200, 1058), "Text")]
+    _nv = {str(e[0]).strip() for e in _alt}
+    _zv = order_bot.tv_meldung_zaehlen(_alt, "MNQZ6")
+    _jetzt_preis = [("Take-Profit-Order platziert für", (40, 1020, 280, 1038), "Text"), ("zu 30.564,75 kaufen", (40, 1042, 200, 1058), "Text")]
+    _jetzt_zwei = _alt + [("Take-Profit-Order platziert für", (40, 960, 280, 978), "Text")]
+    chk("TV-ORDER neue Meldung trotz gleichem Titel: neue Preis-Zeile oder mehr gleiche Titel = neu; unveraendert = nichts; neuer Titel wie bisher",
+        order_bot.tv_meldungen_neu(_alt, "MNQZ6", _nv, _zv) == []
+        and order_bot.tv_meldungen_neu(_jetzt_preis, "MNQZ6", _nv, _zv) == ["Take-Profit-Order platziert für · zu 30.564,75 kaufen"]
+        and order_bot.tv_meldungen_neu(_jetzt_zwei, "MNQZ6", _nv, _zv) == ["Take-Profit-Order platziert für"]
+        and order_bot.tv_meldungen_neu([("Market order executed on", (40, 1020, 250, 1038), "Text")], "MNQZ6", {"Positions"}, {}) == ["Market order executed on"]
+        and order_bot.tv_meldungen_neu([("Jahr zu Tag in 1-tägige Intervalle", (40, 1020, 250, 1038), "Button")], "MNQZ6", set(), {}) == [])
+    chk("TV-ORDER Orders-Reiter Rohzone fuer puls_diagnose: Knoten bis 260 px unter dem Reiter, Typ:Name@x,y",
+        order_bot.tv_orders_roh_zone([("Orders 1", (180, 700, 260, 720), "TabItem"), ("Säulen-Einstellung", (200, 740, 300, 760), "Button"),
+                                      ("Symbol", (40, 745, 90, 760), "HeaderItem"), ("weit weg", (40, 1100, 90, 1120), "Text")])
+        == ["TabItem:Orders 1@180,700", "Button:Säulen-Einstellung@200,740", "HeaderItem:Symbol@40,745"])
     # Leerzeit Konto-Lesen (22.09.2026): ein sichtbar FREMDES Konto beendet die Leseschleife.
     chk("TV-KONTO: fremdes Konto erkannt — kontoartig (Buchstaben + Ziffern, ' USD'), nie eine erwartete ID, nie reine Ziffern",
         order_bot.tv_fremdes_konto(["30,849.00", "4470324", "APEX6416990000025 USD"], ["TDFYSL150813173931", "TDFYSL150813173930"]) == "APEX6416990000025 USD"

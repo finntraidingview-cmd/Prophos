@@ -5675,6 +5675,64 @@ def tv_order_meldungen(roh, symbol):
     return out
 
 
+def tv_meldung_zaehlen(roh, symbol):
+    """Wie oft steht jeder Meldungs-Titel (tv_order_meldungen) gerade auf dem Schirm — OHNE Doppelte zu streichen. -> {text: n}"""
+    root = tv_symbol_root(symbol)
+    z = {}
+    for e in roh or ():
+        n = str(e[0]).strip()
+        if len(e) < 2 or not e[1] or not TV_RX_MELDUNG.search(n):
+            continue
+        woerter = [tv_symbol_root(x) for x in re.findall(r"\b[A-Za-z]{1,6}[A-Za-z0-9]*\d[A-Za-z0-9!]*", n)]
+        if root and woerter and root not in woerter:
+            continue
+        z[n] = z.get(n, 0) + 1
+    return z
+
+
+def tv_meldungen_neu(roh, symbol, namen_vorher=(), zaehl_vorher=None):
+    """NEUE Order-Meldung nach dem Kauf-Klick (29.09.2026, Chris pc-c19p2l, Plan ab797028: der deutsche Titel 'Take-Profit-Order
+    platziert für' traegt weder Symbol noch Preis — stand vor dem Klick noch eine alte gleiche Meldung, galt die neue als alt, der
+    Fill-Weg ('Mehr anzeigen', Fill + TP) lief nie). Neu ist: (1) ein Titel-Text, den es vorher nicht gab; (2) ein Titel, der jetzt
+    OEFTER dasteht als vorher; (3) eine Preis-Zeile ('Sell 1 at X', 'zu X kaufen', 'at X'), die es vorher nicht gab, waehrend ein
+    Titel zu sehen ist. Rein rechnend. -> Liste der Texte (leer = nichts Neues)"""
+    vorher = {" ".join(str(x).split()) for x in (namen_vorher or ())}
+    titel = tv_order_meldungen(roh, symbol)
+    neu = [t for t in titel if " ".join(t.split()) not in vorher]
+    if neu:
+        return neu
+    if zaehl_vorher is not None:
+        jetzt = tv_meldung_zaehlen(roh, symbol)
+        mehr = [t for t, n in jetzt.items() if n > (zaehl_vorher.get(t) or 0)]
+        if mehr:
+            return mehr
+    if titel:
+        for e in roh or ():
+            n = " ".join(str(e[0]).split())
+            if len(e) < 2 or not e[1] or not n or n in vorher:
+                continue
+            if TV_RX_MELDUNG_DETAIL.search(n) or TV_RX_MELDUNG_DETAIL_DE.search(n) or TV_RX_MELDUNG_AT.match(n):
+                return [titel[0] + " · " + n]
+    return []
+
+
+def tv_orders_roh_zone(roh, max_n=60):
+    """Rohe Knoten rund um den Reiter 'Orders' (fuer puls_diagnose, 29.09.2026: deutsche Kopfzeile unbekannt — 'Säulen-Einstellung',
+    Werbe-Knoten). 'Typ:Name@x,y' fuer alles bis 260 px unter dem obersten Orders-Reiter. Rein rechnend. -> [str]"""
+    tabs = [e[1] for e in roh or () if len(e) > 1 and e[1] and TV_RX_ORDERS_TAB_N.search(" ".join(str(e[0]).split()))]
+    if not tabs:
+        return []
+    t = min(tabs, key=lambda r: r[1])
+    out = []
+    for e in sorted([e for e in roh or () if len(e) > 1 and e[1] and 0 <= e[1][1] - t[1] <= 260], key=lambda e: (e[1][1], e[1][0])):
+        n = " ".join(str(e[0]).split())[:40]
+        if n:
+            out.append(f"{e[2] if len(e) > 2 else ''}:{n}@{e[1][0]},{e[1][1]}")
+        if len(out) >= max_n:
+            break
+    return out
+
+
 # FILL AUS TRADINGVIEWS EIGENER MELDUNG (28.09.2026, Finn 02:20 Dubai, Vorfall Jacob c28a7639: Einstieg kam aus dem Kurs-Feed
 # beim Hedge-Open (30825,75), der echte Fill lag bei ~30838 — Fusion schloss 12 Punkte vor dem echten TP). Beleg aus
 # order_signale (letzte 5 Tage): die Positions-Tabelle war auf KEINEM PC ein einziges Mal lesbar ('kein Reiter Positions zu
@@ -5692,6 +5750,10 @@ TV_RX_MELDUNG_SL = re.compile(r"\b(stop[ -]?loss|verlustbegrenzung|stop order|st
 TV_RX_MELDUNG_LIMIT = re.compile(r"\blimit\b", re.I)
 # 'Sell 2 at 30,858.25' / 'Buy 1 @ 30,838.00' / deutsch 'Kaufen 2 zu 30.858,25' (ungeprueft, nur mitgenommen)
 TV_RX_MELDUNG_DETAIL = re.compile(r"\b(buy|sell|kauf(?:en)?|verkauf(?:en)?)\s+([\d.,]+)\s*(?:@|\bat\b|\bzu\b|\bbei\b)\s*([\d][\d.,]*)", re.I)
+# DEUTSCHES TRADINGVIEW (29.09.2026, Chris pc-c19p2l, Plan ab797028): der Preis steht VOR dem Verb — 'zu 30.564,75 kaufen' unter
+# 'Take-Profit-Order platziert für', vermutlich '1 zu 30.600,50 verkaufen' unter 'Marktorder ausgeführt für'. Menge davor optional;
+# Seite aus dem Verb am Ende. tv_zahl_lesen liest 30.564,75 wie 30,564.75.
+TV_RX_MELDUNG_DETAIL_DE = re.compile(r"(?:(?<![\d.,])(\d+)\s+)?\b(?:zu|bei|@)\s*(\d[\d.,]*)\s+(verkaufen|kaufen|verkauf|kauf)\b", re.I)
 
 
 def tv_meldung_art(text):
@@ -5781,6 +5843,15 @@ def tv_meldung_preise(roh, symbol, richtung, menge=None, vorher=()):
         if m and n not in vorher:
             seite = "buy" if m.group(1).lower().startswith(("buy", "kauf")) else "sell"
             qty, preis = tv_zahl_lesen(m.group(2)), tv_zahl_lesen(m.group(3))
+            if preis is None or preis <= 0:
+                continue
+            if menge and qty and abs(float(qty) - float(menge)) > 1e-9:
+                continue
+            details.append({"seite": seite, "preis": preis, "r": r, "text": n, "art": art})
+        elif TV_RX_MELDUNG_DETAIL_DE.search(n) and n not in vorher:
+            m = TV_RX_MELDUNG_DETAIL_DE.search(n)
+            seite = "sell" if m.group(3).lower().startswith("verkauf") else "buy"
+            qty, preis = (tv_zahl_lesen(m.group(1)) if m.group(1) else None), tv_zahl_lesen(m.group(2))
             if preis is None or preis <= 0:
                 continue
             if menge and qty and abs(float(qty) - float(menge)) > 1e-9:
@@ -6427,8 +6498,8 @@ def tv_order_schritt(w, cmd, trail, erg=None):
         # Meldung nach dem Klick. Gezaehlt werden nur Meldungen, die es VOR dem Klick
         # noch nicht gab (alte bleiben minutenlang stehen).
         roh_v = roh_p if quelle != "reader" else _tv_uia_roh(w, typen)
-        toasts_vorher = set(tv_order_meldungen(roh_v, cmd.get("symbol")))
         namen_vorher = {str(e[0]).strip() for e in roh_v if e[1]}
+        zaehl_vorher = tv_meldung_zaehlen(roh_v, cmd.get("symbol"))   # 29.09.2026: gleicher Titel oefter = neu (tv_meldungen_neu)
 
     # --- Beweis am Knopf: er sagt selbst, was er gleich tun wuerde -----------
     roh, _b = blick()
@@ -6623,7 +6694,7 @@ def tv_order_schritt(w, cmd, trail, erg=None):
     while time.time() < ende:
         _warte(0.25, 0.15)
         roh_t = _tv_uia_roh(w, typen)
-        neu_t = [t for t in tv_order_meldungen(roh_t, cmd.get("symbol")) if t not in toasts_vorher]
+        neu_t = tv_meldungen_neu(roh_t, cmd.get("symbol"), namen_vorher, zaehl_vorher)
         if neu_t:
             trail.append(f"TradingView meldet: '{neu_t[0][:60]}'")
             # 28.09.2026: zuerst der Preis AUS der Meldung (echter Fill), erst danach der Avg-Fill-Weg ueber die Tabelle
@@ -7916,10 +7987,21 @@ def _tv_tp_aus_orders(w, trail, symbol, richtung, menge):
             kopf = tv_tabelle_kopf_unter(roh, min(tabs, key=lambda r: r[1]) if tabs else None)
             if kopf:
                 break
+        def _roh_melden(grund_):
+            # 29.09.2026 (Deutsch-PC Chris): die echte Kopfzeile fehlt uns — Rohknoten unter dem Reiter in puls_diagnose
+            try:
+                import threading
+                threading.Thread(target=_puls_diagnose_senden, args=(["Orders-Reiter roh (" + grund_ + "): " + " | ".join(tv_orders_roh_zone(roh))],
+                                 "tv_orders_roh")).start()
+            except Exception:
+                pass
         if not kopf:
             trail.append("TP aus Orders: keine Kopfzeile 'Symbol' unter dem Reiter")
+            _roh_melden("keine Kopfzeile")
             return None
         t = tv_tp_order_waehlen(roh, kopf, symbol, richtung, menge)
+        if not t:
+            _roh_melden("keine eindeutige Limit-Order")
         trail.append(f"TP aus Orders: {t['preis'] if t else 'keine eindeutige Limit-Order'} "
                      f"(Köpfe: {', '.join(tv_orders_spalten(roh, kopf)['koepfe'][:10])})")
         return t["preis"] if t else None
