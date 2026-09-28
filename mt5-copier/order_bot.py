@@ -2018,6 +2018,7 @@ def _tv_fenster_holen(trail, begriff="", symbol=""):
         except Exception:
             pass
         trail.append(f"TradingView war schon der aktive Tab ({titel[:40]})")
+        _tv_popups_weg(pw, trail)
         return pw, ""
     tab_namen = []
     tab = _tv_tab_suchen(pw, begriff, symbol, tab_namen)
@@ -2035,6 +2036,7 @@ def _tv_fenster_holen(trail, begriff="", symbol=""):
             _klick_absolut(x, y)
             _warte(0.5, 0.4)
             trail.append(f"TradingView-Tab angeklickt ({(tab.window_text() or '')[:50]})")
+            _tv_popups_weg(pw, trail)
             return pw, ""
         except Exception as e:
             trail.append(f"Tab-Klick fehlgeschlagen ({type(e).__name__})")
@@ -2962,8 +2964,156 @@ def _tv_uia_konten(w, ids, info=None, nur_ziel=None, ohne=None):
     return tv_uia_filtern(roh, ids, fenster, nur_ziel=nur_ziel, ohne=ohne)
 
 
+# ---------------------------------------------------------------------------
+# FREMDE POPUPS (28.09.2026, Moritz' PC: TradingView-Werbung „Don't miss this Autumn sale — Up to 80% off" lag als großes
+# Fenster über Chart und Order-Knöpfen). Finn: „fremde Pop-ups erkennen und oben rechts auf das X drücken". Bewusst KEINE
+# Liste einzelner Werbungen (jede Aktion sieht anders aus): erkannt wird die FORM — ein großer Kasten mit einem Schließen-
+# Knopf („Close"/„Schließen") oben rechts. Puls-eigene Dialoge (Order-Ticket, Broker-Connect, Tradovate-Login, Bestätigen)
+# bleiben unangetastet: enthält der Kasten eins ihrer Wörter, fasst Puls ihn nicht an — außer er trägt eindeutige
+# Werbe-Merkmale (Sale, % off, Upgrade, Trial …) und keins der harten Ticket-Wörter. Nur im Puls-Fenster, Klick aufs X,
+# sonst einmal Esc; alles mit Rohtext in der Spur.
+# ---------------------------------------------------------------------------
+POPUP_X_NAMEN = ("close", "schließen", "schliessen", "close dialog", "close popup", "dismiss", "schließen-schaltfläche")
+_RX_POPUP_WERBUNG = re.compile(r"\bsale\b|\d+\s*%\s*off|\boffers?\b|\bdeal\b|\bupgrade\b|\btrial\b|\bpremium\b|"
+                               r"\bsubscri|\bdiscount|\bangebot|\brabatt|\bblack friday\b|\bcyber monday\b|\bplans?\b.*\bprice",
+                               re.I)
+_RX_POPUP_PULS = re.compile(r"\bbuy\b|\bsell\b|\bkaufen\b|\bverkaufen\b|\border\b|\bticket\b|\bconnect\b|\bverbinden\b|"
+                            r"\bbroker\b|tradovate|\bdemo\b|\blog ?in\b|\bsign ?in\b|\banmelden\b|take profit|stop loss|"
+                            r"\bposition|\bconfirm|\bbestätig|\bpassword|\bpasswort|\busername", re.I)
+_RX_POPUP_HART = re.compile(r"take profit|stop loss|tradovate|\bconnect\b|\blog ?in\b|\bpassword|\bpasswort|\bquantity\b|"
+                            r"\bmenge\b|\bcontracts?\b", re.I)
+
+
+def fremdes_popup_urteil(text, kasten, knopf, fenster=None):
+    """REIN RECHNEND (testbar): ist das ein fremdes Popup, das Puls wegklicken darf? text = sichtbare Namen im Kasten,
+    kasten/knopf/fenster = (l, t, r, b). -> (ja, grund)."""
+    try:
+        kl, kt, kr, kb = [float(v) for v in kasten]
+        bl, bt, br, bb = [float(v) for v in knopf]
+    except (TypeError, ValueError):
+        return False, "Lage unlesbar"
+    kw, kh = kr - kl, kb - kt
+    if kw < 300 or kh < 200:
+        return False, "zu klein für ein Popup"
+    if fenster:
+        try:
+            fl, ft, fr, fb = [float(v) for v in fenster]
+            if kw >= (fr - fl) * 0.97 and kh >= (fb - ft) * 0.9:
+                return False, "Kasten = ganze Seite"
+        except (TypeError, ValueError):
+            pass
+    bx, by = (bl + br) / 2, (bt + bb) / 2
+    if not (kl <= bx <= kr and kt <= by <= kb):
+        return False, "Knopf außerhalb"
+    if bx < kl + kw * 0.75 or by > kt + kh * 0.25:
+        return False, "Knopf nicht oben rechts"
+    t = str(text or "")
+    werbung = bool(_RX_POPUP_WERBUNG.search(t))
+    if werbung and not _RX_POPUP_HART.search(t):
+        return True, "Werbung"
+    if _RX_POPUP_PULS.search(t):
+        return False, "Puls-eigener Dialog"
+    return True, "fremdes Popup"
+
+
+def _popup_kaesten(pw):
+    """Kandidaten im Puls-Fenster: (knopf-element, kasten-rect, text, knopf-rect). Kasten = nächster Vorfahr des X-Knopfs,
+    der groß genug ist."""
+    out = []
+    try:
+        knoepfe = pw.descendants(control_type="Button")
+    except Exception:
+        return out
+    for k in knoepfe[:600]:
+        try:
+            n = (k.window_text() or "").strip().lower()
+            if n not in POPUP_X_NAMEN:
+                continue
+            if hasattr(k, "is_visible") and not k.is_visible():
+                continue
+            kr = k.rectangle()
+            eltern, p = None, k
+            for _ in range(8):
+                p = p.parent()
+                if p is None:
+                    break
+                r = p.rectangle()
+                if (r.right - r.left) >= 300 and (r.bottom - r.top) >= 200:
+                    eltern = p
+                    break
+            if eltern is None:
+                continue
+            er = eltern.rectangle()
+            namen = []
+            for e in eltern.descendants()[:120]:
+                try:
+                    tx = (e.window_text() or "").strip()
+                except Exception:
+                    continue
+                if 2 <= len(tx) <= 120 and tx not in namen:
+                    namen.append(tx)
+            out.append((k, (er.left, er.top, er.right, er.bottom), " · ".join(namen)[:600],
+                        (kr.left, kr.top, kr.right, kr.bottom)))
+        except Exception:
+            continue
+    return out
+
+
+_POPUP_LETZTE = {"at": 0.0}
+
+
+def _tv_popups_weg(pw, trail, min_abstand_s=0.0):
+    """Fremde Popups im Puls-Fenster wegklicken (X, sonst Esc). Best-Effort, bricht den Lauf nie ab — scheitert es, meldet
+    der nächste Schritt ehrlich, dass sein Knopf nicht erreichbar ist. -> Anzahl weggeklickter Popups."""
+    if pw is None or (min_abstand_s and time.time() - _POPUP_LETZTE["at"] < min_abstand_s):
+        return 0
+    _POPUP_LETZTE["at"] = time.time()
+    try:
+        fr = pw.rectangle()
+        fenster = (fr.left, fr.top, fr.right, fr.bottom)
+    except Exception:
+        fenster = None
+    weg = 0
+    for _runde in range(3):
+        treffer = None
+        for k, kasten, text, knopf in _popup_kaesten(pw):
+            ja, grund = fremdes_popup_urteil(text, kasten, knopf, fenster)
+            if ja:
+                treffer = (k, text, knopf, grund)
+                break
+        if not treffer:
+            break
+        k, text, knopf, grund = treffer
+        x, y = int((knopf[0] + knopf[2]) / 2), int((knopf[1] + knopf[3]) / 2)
+        try:
+            import ctypes
+            if int(ctypes.windll.user32.GetForegroundWindow()) != int(pw.handle):
+                pw.set_focus()
+                _warte(0.2, 0.2)
+        except Exception:
+            pass
+        _maus_fahren(x, y)
+        _klick_absolut(x, y)
+        _warte(0.5, 0.3)
+        trail.append(f"{grund} weggeklickt (X @{x},{y}): '{text[:80]}'")
+        if any(kk_text == text for _k, _ka, kk_text, _kn in _popup_kaesten(pw)):
+            try:
+                from pywinauto import keyboard
+                keyboard.send_keys("{ESC}")
+                _warte(0.4, 0.2)
+                trail.append("Popup noch da — Esc gedrückt")
+            except Exception:
+                pass
+        weg += 1
+    return weg
+
+
 def _tv_uia_klick(el, name, trail):
     """UIA-Element anklicken — Punkt ist schon Bildschirm-Pixel. (ok, fehler)"""
+    try:
+        _tv_popups_weg(_PULS_FENSTER.get("w"), trail, min_abstand_s=5.0)   # fremdes Popup über dem Knopf? (28.09.2026)
+    except Exception:
+        pass
     x, y = el["punkt"]
     _maus_fahren(x, y)
     if not _klick_absolut(x, y):
@@ -3367,6 +3517,16 @@ def _tv_tab_neu_mit_link(w, cfg, begriff, trail):
                 n_jetzt = _tab_anzahl(w)
                 if not strg_w_erlaubt(titel_w, "tv", n_jetzt):
                     return False, (f"Strg+W verweigert: vorn '{titel_w[:40]}', {n_jetzt} Tab(s) — es wird nichts geschlossen.")
+                # 28.09.2026 (Moritz: Reader-Tab in „Terminal 1" war weg): der Titel allein beweist nicht, WELCHES Fenster vorn
+                # steht — ein deckungsgleiches Reader-Fenster mit dem Feed-Chart trägt ebenfalls einen TradingView-Titel.
+                # Strg+W nur, wenn das Vordergrund-Fenster nachweislich das Puls-Fenster ist.
+                try:
+                    _vorn_h = int(_h)
+                except Exception:
+                    _vorn_h = None
+                if _vorn_h is None or _vorn_h != int(w.handle):
+                    return False, ("Strg+W verweigert: vorn steht nicht das Puls-Fenster (anderes Chrome-Fenster) — "
+                                   "es wird nichts geschlossen.")
                 keyboard.send_keys("^w")
                 trail.append("TradingView-Tab geschlossen")
                 verlassen_bestaetigen()

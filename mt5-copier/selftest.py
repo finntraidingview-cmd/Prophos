@@ -2466,6 +2466,23 @@ def test_fenster_treue():
         la([{"profil": "Profile 1", "lage": True}, {"profil": "Profile 2", "lage": True}], "", {"Profile 2"}) == {0, 1})
     chk("andere Lage bleibt drin", la([{"profil": "Profile 1", "lage": False}], "Profile 1", set()) == set())
 
+    fp = ob.fremdes_popup_urteil
+    fen = (0, 0, 1920, 1040)
+    kasten, x_oben_rechts = (440, 230, 1725, 1040), (1655, 250, 1705, 300)
+    chk("Autumn-Sale-Werbung (Moritz 28.09.2026) → wegklicken",
+        fp("Don't miss this · Autumn sale · Up to 80% off · Offer ends in · Explore offers · Close", kasten, x_oben_rechts, fen)[0])
+    chk("Order-Ticket mit X → nie anfassen",
+        not fp("Buy · Sell · Market · Limit · Quantity · Take Profit · Stop Loss · Close", kasten, x_oben_rechts, fen)[0])
+    chk("Broker-Connect-Dialog → nie anfassen", not fp("Tradovate · Live · Demo · Connect · Close", kasten, x_oben_rechts, fen)[0])
+    chk("Upgrade-Werbung ohne Ticket-Wörter → wegklicken", fp("Upgrade to Premium · Start free trial · Close", kasten, x_oben_rechts, fen)[0])
+    chk("unbekanntes Popup ohne Puls-Wörter → wegklicken", fp("What's new in TradingView · Got it · Close", kasten, x_oben_rechts, fen)[0])
+    chk("X nicht oben rechts → nicht", not fp("Autumn sale · 80% off", kasten, (500, 900, 540, 940), fen)[0])
+    chk("kleiner Kasten (Toast) → nicht", not fp("Autumn sale · 80% off", (1500, 900, 1700, 980), (1680, 905, 1695, 920), fen)[0])
+    chk("Kasten = ganze Seite → nicht", not fp("Autumn sale · 80% off", fen, (1880, 5, 1915, 30), fen)[0])
+    import inspect
+    q_w = inspect.getsource(ob._tv_tab_neu_mit_link)
+    chk("Strg+W nur, wenn das Vordergrund-Fenster das Puls-Fenster ist", "_vorn_h != int(w.handle)" in q_w)
+
     tp = ob.tab_neu_plan
     chk("≥ 2 Tabs: schließen, neuer Tab", tp(3) == ["schliessen", "neuer_tab", "adresse"])
     chk("1 Tab: erst neuer Tab, dann Tab 1 schließen (Fenster bleibt)", tp(1) == ["neuer_tab", "tab_1", "schliessen", "adresse"])
