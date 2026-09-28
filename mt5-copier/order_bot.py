@@ -608,6 +608,25 @@ def reader_geo_passt(rect, geo, tol=16):
     return False
 
 
+def lage_ausschluss(fenster, eigen="", tabu=()):
+    """REIN RECHNEND (testbar): welche Fenster schliesst die Lage-Pruefung aus? fenster = [{profil, lage}] (lage = liegt dort,
+    wo der Reader seinen Feed-Tab meldet) → Menge der Indizes, die raus sind.
+    Ausnahme (28.09.2026, Moritz' PC: Handels-Chrome „Profile 1" und Reader-Chrome „Profile 2" beide maximiert → deckungsgleich,
+    Puls sperrte sein eigenes Fenster und platzierte nichts): liegt ein Fenster eines TABU-Profils an derselben Stelle, ist der
+    Feed-Tab damit erklaert — ein Fenster im EIGENEN Profil bleibt dann erlaubt. Sonst gilt die Lage wie bisher (Profil unlesbar,
+    kein Tabu-Fenster dort)."""
+    tabu = set(tabu or ())
+    erklaert = any(f.get("lage") and f.get("profil") and f.get("profil") in tabu for f in fenster)
+    raus = set()
+    for i, f in enumerate(fenster):
+        if not f.get("lage"):
+            continue
+        if erklaert and eigen and f.get("profil") == eigen:
+            continue
+        raus.add(i)
+    return raus
+
+
 def tab_neu_plan(n):
     """REIN RECHNEND (testbar): Tastenfolge fuer „TradingView-Tab schliessen und neu mit Link", ohne dass das Fenster
     zugeht. n = Tabs im Fenster. ≥ 2: aktiven TV-Tab schliessen, dann neuer Tab. 1: erst neuer (leerer) Tab, dann
@@ -743,6 +762,8 @@ def _puls_fenster(trail):
     geos = _reader_geos()
     kand, fenster = [], {}
     _FENSTER_DIAG["kandidaten"] = []
+    # Lage vorab fuer ALLE Browser-Fenster (auch gesperrte): nur so sieht lage_ausschluss, ob das Reader-Profil den Feed-Tab erklaert
+    alle = []
     for w in Desktop(backend="uia").windows():
         try:
             if (w.element_info.class_name or "") not in BROWSER_KLASSEN:
@@ -750,6 +771,12 @@ def _puls_fenster(trail):
             info = _fenster_info(w.handle)
         except Exception:
             continue
+        alle.append((w, info))
+    regel = puls_profil_regel_holen()
+    lage_raus = lage_ausschluss([{"profil": i_.get("profil") or "",
+                                  "lage": any(reader_geo_passt(i_.get("rect") or (0, 0, 0, 0), g) for g in geos)} for _, i_ in alle],
+                                regel.get("eigen") or "", regel.get("tabu") or ())
+    for idx, (w, info) in enumerate(alle):
         titel = info.get("titel") or ""
         exe = info.get("exe") or ""
         l, t, r, b = info.get("rect") or (0, 0, 0, 0)
@@ -766,7 +793,7 @@ def _puls_fenster(trail):
             aus = "kleines Popup"
         elif _fenster_gesperrt(w.handle):
             aus = "Reader-/Fremdprofil " + _fenster_gesperrt(w.handle)
-        elif any(reader_geo_passt((l, t, r, b), g) for g in geos):
+        elif idx in lage_raus:
             aus = "Lage = Feed-Tab des Readers"
         tv = False
         if not aus:

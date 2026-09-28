@@ -2454,6 +2454,18 @@ def test_fenster_treue():
     chk("Reader-Lage bei 100 % (dpr 1) erkannt", rg((100, 50, 1300, 850), dict(geo, dpr=1)))
     chk("anderes Fenster nicht", not rg((0, 0, 1920, 1040), geo) and not rg((125, 62, 1625, 1062), None))
 
+    la = ob.lage_ausschluss
+    # Moritz 28.09.2026: beide Fenster maximiert (gleiche Lage), Reader in Profile 2 → eigenes Profile 1 bleibt erlaubt
+    chk("deckungsgleich, Reader-Profil erklärt die Lage → eigenes Fenster erlaubt",
+        la([{"profil": "Profile 1", "lage": True}, {"profil": "Profile 2", "lage": True}], "Profile 1", {"Profile 2"}) == {1})
+    chk("kein Tabu-Fenster an der Stelle → Lage sperrt auch das eigene",
+        la([{"profil": "Profile 1", "lage": True}], "Profile 1", {"Profile 2"}) == {0})
+    chk("Profil unlesbar → Lage sperrt wie bisher",
+        la([{"profil": "", "lage": True}, {"profil": "Profile 2", "lage": True}], "Profile 1", {"Profile 2"}) == {0, 1})
+    chk("ohne eigenes Profil keine Ausnahme",
+        la([{"profil": "Profile 1", "lage": True}, {"profil": "Profile 2", "lage": True}], "", {"Profile 2"}) == {0, 1})
+    chk("andere Lage bleibt drin", la([{"profil": "Profile 1", "lage": False}], "Profile 1", set()) == set())
+
     tp = ob.tab_neu_plan
     chk("≥ 2 Tabs: schließen, neuer Tab", tp(3) == ["schliessen", "neuer_tab", "adresse"])
     chk("1 Tab: erst neuer Tab, dann Tab 1 schließen (Fenster bleibt)", tp(1) == ["neuer_tab", "tab_1", "schliessen", "adresse"])
