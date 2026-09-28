@@ -2019,7 +2019,13 @@
   #dashboard-view .mwj-zelle{min-width:0;font-family:var(--mono);font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #dashboard-view .mwj-zelle small{display:block;font-family:inherit;font-weight:400;font-size:10.5px;color:var(--sub-2)}
   #dashboard-view .mwj-naechste{margin-top:8px;font-size:12px;color:var(--sub)}
-  @media (max-width:820px){ #dashboard-view .mwj-zeile{grid-template-columns:minmax(0,1fr) 52px minmax(0,1fr);row-gap:4px} }
+  /* Handy (29.09.2026): Name + Konto in eigener voller Zeile, Richtung + vier Werte in drei gleich breiten Spalten — vorher rutschte
+     die Fusion-Zelle in die 52-px-Spalte der Richtung („Fusion noc…"), das Konto stand abgeschnitten neben dem Namen */
+  @media (max-width:820px){
+    #dashboard-view .mwj-zeile{grid-template-columns:repeat(3,minmax(0,1fr));row-gap:6px}
+    #dashboard-view .mwj-zeile .mwj-wer{grid-column:1 / -1}
+    #dashboard-view .mwj-zeile > .mwd-chip{justify-self:start}
+  }
   /* Zeitstrahl „Plan heute Nacht" (F34) — Muster des Farmer-Zeitstrahls (#wz-panel), eine Bahn, Blöcke in Personenfarbe */
   #dashboard-view .mwz{position:relative;margin:10px 0 4px;padding:0 2px}
   #dashboard-view .mwz-achse{position:relative;height:20px;border-bottom:1px solid var(--line)}
@@ -35579,7 +35585,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.758'
+  const OS_TAB_BUILD = '2026-09-22.759'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
