@@ -638,6 +638,8 @@
   /* ID-Wechsel läuft (29.09.2026): Vollbild-Hinweis bis zum Neuladen — kein zweiter Tipp, sichtbar, dass etwas passiert */
   .prof-wechsel{position:fixed;inset:0;z-index:400;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;
     background:rgba(250,251,252,.92);color:var(--ink);font-size:14px;font-weight:600}
+  /* Kalibrier-Vorschau (29.09.2026, Handy): die Tabelle ist ~440 px breit und lief ungeschützt aus der Karte — wischbar statt abgeschnitten */
+  #calib-preview-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%}
   .prof-wechsel::before{content:'';width:22px;height:22px;border-radius:50%;border:2.5px solid var(--border);border-top-color:var(--violet);animation:spin .7s linear infinite}
   #dashboard-view .ud-header{
     padding:10px 12px 12px;border-bottom:1px solid var(--border-soft);
@@ -35585,7 +35587,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.759'
+  const OS_TAB_BUILD = '2026-09-22.760'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
