@@ -1466,6 +1466,13 @@
   #dashboard-view #kasse-content > .subtabs{overflow-x:auto;scrollbar-width:thin}
   #dashboard-view #kasse-content > .subtabs .subtab{white-space:nowrap;flex-shrink:0}
   #af-view .af-kpis{grid-template-columns:repeat(auto-fit,minmax(120px,1fr))}
+  /* Tages-Überblick (28.09.2026): Trades heute, Long/Short, Ausgleich als Balken */
+  #af-view .af-heute{margin:12px 0 14px}
+  #af-view .af-heute .af-kpis{margin-top:10px}
+  #af-view .af-ls{display:flex;height:8px;border-radius:999px;overflow:hidden;background:var(--surface-tint);margin-top:12px}
+  #af-view .af-ls .l{background:#12B76A}
+  #af-view .af-ls .s{background:#F04438}
+  #af-view .af-ls-leg{display:flex;justify-content:space-between;font-size:11.5px;color:var(--sub);margin-top:5px;font-variant-numeric:tabular-nums}
   #af-view .af-kpis .kpi{cursor:pointer}
   #af-view .af-kpis .kpi-delta{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
   #af-view .af-kpis .kpi.is-on{border-color:var(--violet);background:var(--violet-tint)}
@@ -7817,6 +7824,15 @@
           <span class="adm-sub" id="af-stand"></span>
           <button class="btn btn-ghost" id="af-refresh" title="Neu laden" style="padding:8px 12px">↻</button>
         </div>
+        <div class="panel af-heute" id="af-heute">
+          <div class="panel-head"><div>
+            <div class="panel-title" id="af-heute-titel">Heute</div>
+            <div class="panel-sub">Gestartete Trades heute · laufend, zu prüfen und fertig · folgt der Firmen-/ID-Auswahl</div>
+          </div></div>
+          <div class="kpis af-kpis" id="af-heute-kpis"></div>
+          <div class="af-ls" id="af-ls"><div class="l"></div><div class="s"></div></div>
+          <div class="af-ls-leg"><span id="af-ls-l"></span><span id="af-ls-s"></span></div>
+        </div>
         <div class="kpis af-kpis" id="af-kpis"></div>
         <div class="panel" id="af-matrix-panel" hidden style="margin-top:14px">
           <div class="panel-head"><div>
@@ -12722,6 +12738,8 @@
       const lz = afLadeZeit
       $('af-stand').textContent = lz ? 'Stand ' + new Date(lz).toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' }) : ''
 
+      afHeuteRender(alle)
+
       // 3) Kennzahlen je Phase (Klick filtert auf die Phase, zweiter Klick hebt auf)
       const rows = inFirma.filter(r => !afPerson || String(r.user_id) === afPerson)
       const phasen = AF_PHASEN.map(p => p[0])
@@ -12781,6 +12799,51 @@
         box.appendChild(p)
       }
       if(!box.children.length) box.innerHTML = '<div style="color:var(--sub);font-size:13px;padding:18px 2px">Keine Accounts für diese Auswahl.</div>'
+    }
+    /* Tages-Überblick (28.09.2026, Finn: „wie viele Trades gemacht wurden, wie viele davon Long, wie viele
+     * Short, wie ausgeglichen das war — immer vom heutigen Tag"). Quelle trades_start aus /admin/overview:
+     * gestartete Pläne (open/review/completed), gezählt je Plan nach der Master-Richtung. „Heute" = Ortszeit
+     * wie afHeute. Firma/ID-Filter gelten über das Master-Konto; ohne Filter zählen auch Trades auf Konten,
+     * die nicht mehr in der Liste stehen. Der Archiv-Schalter gilt NICHT — ein heute geblowtes Konto hat
+     * heute trotzdem getradet. */
+    function afHeuteRender(alle){
+      const box = $('af-heute'); if(!box) return
+      const heuteStr = new Date().toDateString()
+      const konten = new Set(alle.filter(r => (!afFirma || r.firm === afFirma) && (!afPerson || String(r.user_id) === afPerson)).map(r => String(r.id)))
+      const gefiltert = !!(afFirma || afPerson)
+      const t = (afData.trades_start || []).filter(p => {
+        const d = new Date(p.at)
+        return !isNaN(d) && d.toDateString() === heuteStr && (!gefiltert || konten.has(String(p.account_id)))
+      })
+      const nL = t.filter(p => p.richtung === 'buy').length, nS = t.filter(p => p.richtung === 'sell').length
+      const nO = t.filter(p => p.status === 'open').length, nX = t.length - nL - nS
+      const nLS = nL + nS
+      const pL = nLS ? Math.round(nL / nLS * 100) : 0
+      const diff = nL - nS
+      $('af-heute-titel').textContent = 'Heute · ' + new Date().toLocaleDateString('de-DE', { weekday:'long', day:'2-digit', month:'2-digit' })
+      const kachel = (label, wert, sub, farbe) => {
+        const k = document.createElement('div'); k.className = 'kpi'; k.style.cursor = 'default'
+        k.innerHTML = '<div class="kpi-label"></div><div class="kpi-value"></div><div class="kpi-delta delta-neutral"></div>'
+        k.querySelector('.kpi-label').textContent = label
+        k.querySelector('.kpi-value').textContent = wert
+        if(farbe) k.querySelector('.kpi-value').style.color = farbe
+        k.querySelector('.kpi-delta').textContent = sub; k.querySelector('.kpi-delta').title = sub
+        return k
+      }
+      const kp = $('af-heute-kpis'); kp.innerHTML = ''
+      kp.appendChild(kachel('Trades', String(t.length), [nO ? `${nO} laufen` : '', nX ? `${nX} ohne Richtung` : ''].filter(Boolean).join(' · ') || (t.length ? 'alle beendet' : 'noch keiner')))
+      kp.appendChild(kachel('Long', String(nL), nLS ? `${pL} %` : '—', nL ? '#15803d' : ''))
+      kp.appendChild(kachel('Short', String(nS), nLS ? `${100 - pL} %` : '—', nS ? '#b91c1c' : ''))
+      // Ausgleich: 0 = gleich viele; Überhang in Trades, Bewertung grob nach Anteil
+      const aus = !nLS ? '—' : diff === 0 ? '0' : (diff > 0 ? '+' : '−') + Math.abs(diff) + (diff > 0 ? ' Long' : ' Short')
+      const urteil = !nLS ? 'noch keine Richtung' : diff === 0 ? 'perfekt ausgeglichen'
+        : Math.abs(pL - 50) <= 10 ? 'ausgeglichen' : Math.abs(pL - 50) <= 25 ? 'leicht einseitig' : 'einseitig'
+      kp.appendChild(kachel('Ausgleich', aus, urteil, !nLS || Math.abs(pL - 50) <= 10 ? '' : '#b54708'))
+      const bar = $('af-ls')
+      bar.querySelector('.l').style.width = nLS ? pL + '%' : '0'
+      bar.querySelector('.s').style.width = nLS ? (100 - pL) + '%' : '0'
+      $('af-ls-l').textContent = nLS ? `Long ${nL} · ${pL} %` : ''
+      $('af-ls-s').textContent = nLS ? `Short ${nS} · ${100 - pL} %` : ''
     }
     function afKarte(r, mitFirma){
       const k = document.createElement('div')
@@ -35351,7 +35414,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.743'
+  const OS_TAB_BUILD = '2026-09-22.744'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

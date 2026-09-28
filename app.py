@@ -5702,6 +5702,29 @@ def admin_build_overview(kapitel_id=None):
         # Übersicht trotzdem liefern, aber hörbar — nie catch-und-schweigen.
         print(f"[admin] ⚠️ trades_heute: {type(e).__name__}: {e}", flush=True)
 
+    # TAGES-ÜBERBLICK „Accounts je Firma" (28.09.2026, Finn: „wie viele Trades
+    # gemacht wurden, wie viele Long, wie viele Short, wie ausgeglichen"). Anders
+    # als trades_heute zählt hier der START (started_at) und jeder echte Trade —
+    # laufend (open), zu prüfen (review) und fertig (completed); planned ohne Start
+    # nicht. 36 h Fenster, „heute" entscheidet das Frontend in Ortszeit.
+    trades_start = []
+    try:
+        seit_s = datetime.fromtimestamp(datetime.now(timezone.utc).timestamp() - 36 * 3600,
+                                        tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        # Von Hand nachgetragene Trades haben kein started_at → created_at als Rückfall
+        for p in _sb_all("trade_plans", {"select": "id,user_id,master_account_id,richtung,route,status,started_at,created_at",
+                                         "status": "in.(open,review,completed)",
+                                         "or": f"(started_at.gte.{seit_s},and(started_at.is.null,created_at.gte.{seit_s}))"}):
+            uid = str(p.get("user_id") or "")
+            if uid in excluded_ids:
+                continue
+            trades_start.append({"id": p.get("id"), "user_id": uid,
+                                 "account_id": str(p.get("master_account_id") or ""),
+                                 "richtung": p.get("richtung") or "", "route": p.get("route") or "",
+                                 "status": p.get("status") or "", "at": p.get("started_at") or p.get("created_at") or ""})
+    except Exception as e:
+        print(f"[admin] ⚠️ trades_start: {type(e).__name__}: {e}", flush=True)
+
     people_list = sorted(
         [{"user_id": u, "name": disp.get(u) or names.get(u, u[:8]),
           "mail": names.get(u, ""),
@@ -5721,6 +5744,7 @@ def admin_build_overview(kapitel_id=None):
             "verlauf": verlauf,
             "payout_ready": payout_ready,
             "trades_heute": trades_heute,
+            "trades_start": trades_start,   # Tages-Überblick „Accounts je Firma" (28.09.2026)
             "fx_usd_eur": fx, "generated": _wt_now_iso(),
             "excluded": sorted(excluded_names),
             "excluded_uids": sorted(excluded_ids),
