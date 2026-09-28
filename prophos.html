@@ -3670,23 +3670,24 @@
     #dashboard-view #fin-rg-rows td:nth-child(6){grid-column:2;grid-row:3}
     /* Zeitraum-Leiste: var(--card)/var(--bg2) existieren nicht → Leiste und
        aktive Pill waren unsichtbar; der Einzeiler brach dreizeilig um. */
-    #dashboard-view [data-view="payouts"] .kpis + div{
+    #dashboard-view #fin-range-box{
       gap:12px !important;padding:14px !important;
       border:none !important;background:var(--surface) !important;
       border-radius:14px;box-shadow:var(--shadow-mob-card);
     }
-    #dashboard-view [data-view="payouts"] .kpis + div > div:nth-child(1){
+    #dashboard-view #fin-range-box > div:nth-child(1){
       flex:1 0 100%;background:var(--surface-tint) !important;
     }
     #dashboard-view .fin-range-pill{flex:1;padding:8px 6px !important;font-size:12.5px !important}
     #dashboard-view .fin-range-pill.active{
       background:var(--surface) !important;box-shadow:0 1px 2px rgba(16,24,40,.08);
     }
-    #dashboard-view [data-view="payouts"] .kpis + div > div:nth-child(2){flex:1 0 100%}
-    #dashboard-view #fin-range-from,#dashboard-view #fin-range-to{flex:1 1 auto;min-width:0}
-    #dashboard-view [data-view="payouts"] .kpis + div > div:nth-child(3){display:none}
-    #dashboard-view [data-view="payouts"] .kpis + div > div:nth-child(4),
-    #dashboard-view [data-view="payouts"] .kpis + div > div:nth-child(5){
+    #dashboard-view #fin-range-box > div:nth-child(2){flex:1 0 100%;min-width:0}
+    /* Datumsfelder teilen sich die Zeile (29.09.2026: je 164 px Eigenbreite schoben das rechte Feld 12 px aus dem Bild) */
+    #dashboard-view #fin-range-from,#dashboard-view #fin-range-to{flex:1 1 0;width:0 !important;min-width:0}
+    #dashboard-view #fin-range-box > div:nth-child(3){display:none}
+    #dashboard-view #fin-range-box > div:nth-child(4),
+    #dashboard-view #fin-range-box > div:nth-child(5){
       flex:1 1 0;text-align:left !important;margin-left:0 !important;
     }
     /* Zyklus-Karte: doppelte Polsterung raus, Abrechnen-Knopf volle Breite */
@@ -7101,8 +7102,9 @@
       <!-- Kapitel-Hinweis (24.09.2026): welche Buchungen die Kacheln und die Liste gerade zeigen -->
       <div id="fin-kapitel-zeile" style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--sub);margin:-6px 0 14px 2px"></div>
 
-      <!-- Zeitraum-Auswertung: Account-Kosten + Live-P/L im gewählten Zeitraum -->
-      <div style="margin:0 0 16px;padding:12px 16px;background:var(--card);border:1px solid var(--border);border-radius:10px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+      <!-- Zeitraum-Auswertung: Account-Kosten + Live-P/L im gewählten Zeitraum (id seit 29.09.2026 — die Handy-Regeln hingen an
+           „.kpis + div" und trafen seit der Kapitel-Zeile vom 24.09. die falsche Box) -->
+      <div id="fin-range-box" style="margin:0 0 16px;padding:12px 16px;background:var(--card);border:1px solid var(--border);border-radius:10px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
         <div style="display:flex;gap:4px;background:var(--bg2);border-radius:7px;padding:3px">
           <button class="fin-range-pill active" data-finrange="today" style="padding:5px 11px;border-radius:5px;border:none;background:var(--card);color:var(--ink);font-size:11.5px;font-weight:600;cursor:pointer">Heute</button>
           <button class="fin-range-pill" data-finrange="7d" style="padding:5px 11px;border-radius:5px;border:none;background:transparent;color:var(--sub);font-size:11.5px;font-weight:500;cursor:pointer">7 Tage</button>
@@ -35577,7 +35579,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.757'
+  const OS_TAB_BUILD = '2026-09-22.758'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
