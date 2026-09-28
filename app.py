@@ -7400,6 +7400,26 @@ def _lt_demo(richtung, tp_level, liq_level, kerzen, start_iso, ende_iso=None):
     return {"status": "laeuft", "minuten": len(ks), "letzte_minute": ks[-1][0].isoformat()}
 
 
+def _lt_kerze_start(kerzen, start_iso):
+    """REIN RECHNEND (testbar): Einstieg eines Handstarts aus Minutenkerzen [{minute, h, l}] — Mitte (h+l)/2 der Kerze der
+    Start-Minute, sonst die erste bis 3 min danach; auf 0,25 gerundet. None ohne passende Kerze."""
+    try:
+        t0 = datetime.fromisoformat(str(start_iso).replace("Z", "+00:00")).replace(second=0, microsecond=0)
+    except (TypeError, ValueError):
+        return None
+    best = None
+    for k in kerzen or []:
+        try:
+            m = datetime.fromisoformat(str(k.get("minute")).replace("Z", "+00:00"))
+            h, l = float(k.get("h")), float(k.get("l"))
+        except (TypeError, ValueError):
+            continue
+        d = (m - t0).total_seconds()
+        if 0 <= d <= 180 and h > 1000 and l > 1000 and (best is None or d < best[0]):
+            best = (d, h, l)
+    return None if best is None else round((best[1] + best[2]) / 2 * 4) / 4
+
+
 def _lt_zeile(p, acc, disp, kerzen_je_wurzel, vorher=None):
     z = _wd_heute_zeile(p, acc, disp, vorher)
     base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
@@ -7416,6 +7436,21 @@ def _lt_zeile(p, acc, disp, kerzen_je_wurzel, vorher=None):
         liq_bal, liq_regel, liq_level, liq_quelle = ub["liq_balance"], ub["liq_regel"], ub.get("liq_level_nq"), "mll_tsx"
         liq = dict(liq, pl_usd=ub.get("liq_pl_usd"))
     kerzen = kerzen_je_wurzel.get(z.get("symbol_root") or "") or []
+    # HANDSTART (28.09.2026, Vorfall Jacob Apex …0002, Plan 2a6637b9: Puls füllte das Ticket, fand den Kauf-Knopf nicht —
+    # „Nichts platziert"; Jacob kaufte selbst und setzte den Plan von Hand auf „Läuft". Ohne Puls-Fill fehlte jeder Einstieg,
+    # der Radar zeigte keine Level, die Demo stand auf 'ohne_level' → kein Demo-Ende, keine Nachlesung. Finn: „jeder einzelne
+    # Trade soll ins Prophos-Radar"). Kein Einstieg am Plan → Mitte der Minutenkerze beim Start (höchstens 3 min später, falls
+    # der Feed dort eine Lücke hat), Quelle 'kerze_start'. Der PC-Tab friert den Wert danach am Plan ein (tvV2HandstartEinstieg).
+    if z.get("einstieg_nq") is None and p.get("started_at") and z.get("richtung") in ("buy", "sell"):
+        ek = _lt_kerze_start(kerzen, p.get("started_at"))
+        if ek is not None:
+            z["einstieg_nq"], z["einstieg_quelle"], z["level_quelle"] = ek, "kerze_start", "einstieg"
+            z["tp_level_nq"] = z.get("tp_level_nq") or _wd_level(ek, z.get("richtung"), p.get("master_tp"), ppl, kt, True)
+            if z.get("sl_level_nq") is None and z.get("sl_art") != "liquidation":
+                z["sl_level_nq"] = _wd_level(ek, z.get("richtung"), p.get("master_sl"), ppl, kt, False)
+            if ub.get("liq_balance") is None:          # Topstep V2 behält seine MLL aus TopstepX
+                liq = _lt_liq(acc, p, start_bal, ek, z.get("richtung"), ppl, kt)
+                liq_bal, liq_regel, liq_level = liq["balance"], liq["regel"], liq["level"]
     # Ende (B5): beendete Trades rechnen die Demo nur bis zum Ende — ended_at, sonst final.at, sonst completed_at
     ende = None if str(p.get("status") or "") == "open" else (p.get("ended_at") or fin.get("at") or p.get("completed_at"))
     demo = _lt_demo(z.get("richtung"), z.get("tp_level_nq"), liq_level, kerzen, p.get("started_at"), ende) if p.get("started_at") else {"status": "geplant"}

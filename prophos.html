@@ -7774,7 +7774,7 @@
          Signale, keine Schwellen, keine Empfehlung: Prophos ist
          Ausfuehrungs-Infrastruktur, kein Ratgeber. -->
     <!-- LIVE TRADES (26.09.2026, Finn): je Orbit-V2-Trade Einstieg, TP- und Liquidations-Level (NQ), Demo-Ausführung gegen den Reader-Kurs,
-         Balance beim Platzieren und nach der Nachlesung (1–150 min nach dem Ende, seit 26.09.2026 spät), exakter P&L = Balance nachher − vorher.
+         Balance beim Platzieren und nach der Nachlesung (1–200 min nach dem Ende, seit 28.09.2026), exakter P&L = Balance nachher − vorher.
          Daten: GET /admin/live-trades (Railway, alle IDs), Verdrahtung im Modul (Sektion WINNING DAYS LIVE TRADES), eigene IDs wdl-*. -->
     <section class="view" data-view="wdlive">
       <div class="view-head">
@@ -20640,12 +20640,12 @@
     const endeTag = fin.datum || tvV2Handelstag(fin.at || p.endedAt || jetzt)
     if(!mitBalance && tvV2Handelstag(jetzt) !== endeTag) return `Handelstag ${endeTag} ist vorbei — Today's P&L zählt inzwischen den neuen Tag`
     if(force) return ''
-    // Nachlesung 1–150 min nach dem Ende (26.09.2026, Finn: „Zufallsprinzip, 1 bis 30 Minuten nach dem Trade"; am selben Abend über den
+    // Nachlesung 1–200 min nach dem Ende (seit 28.09.2026; 26.09.2026: Finn: „Zufallsprinzip, 1 bis 30 Minuten nach dem Trade"; am selben Abend über den
     // Master erst „1 – 200 min", dann „1–150 min") — je Plan fest aus der ID
     // gewürfelt, damit alle Tabs dieselbe Zeit sehen und nicht zweimal einloggen. Nur vor dem ersten Versuch.
     const vers0 = Number(fin.puls_versuche) || (fin.puls_at ? 1 : 0)
     const endeMs = Date.parse(fin.at || p.endedAt || '') || 0
-    if(!vers0 && endeMs && jetzt < endeMs + tvV2NachleseMs(p.id)) return `Nachlesung ab ${new Date(endeMs + tvV2NachleseMs(p.id)).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} (1–150 min Zufall)`
+    if(!vers0 && endeMs && jetzt < endeMs + tvV2NachleseMs(p.id)) return `Nachlesung ab ${new Date(endeMs + tvV2NachleseMs(p.id)).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} (1–200 min Zufall)`
     if(fin.puls_aufgegeben) return 'aufgegeben: ' + String(fin.puls_fehler || '')
     const versuche = Number(fin.puls_versuche) || (fin.puls_at ? 1 : 0)
     if(versuche >= TV_ENDLESUNG_MAX) return `${versuche} Versuche erfolglos`
@@ -20654,11 +20654,11 @@
     return ''
   }
   function tvV2EndlesungFaellig(p, jetzt){ return !tvV2EndlesungGrund(p, jetzt, false) }
-  // REIN RECHNEND: Wartezeit der Nachlesung je Plan, 60–9.000 s (1–150 min, Finn 26.09.2026 spät; vorher 60–1.800 s), fest aus der
+  // REIN RECHNEND: Wartezeit der Nachlesung je Plan, 60–12.000 s (1–200 min, Finn 28.09.2026: „1 bis 200 Minuten später“; vorher 1–150, 1–30 min), fest aus der
   // Plan-ID (FNV-Hash) — gleich auf allen Tabs
   function tvV2NachleseMs(id){
     let h = 2166136261; for(const ch of String(id || '')) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0
-    return (60 + (h % 8941)) * 1000
+    return (60 + (h % 11941)) * 1000
   }
   // Nachlesung ab (ms) — EINE Rechnung für Live Trades, Accounts-Balance und das Konto-Popup (26.09.2026, F3)
   const tvV2NachleseAb = (id, endeIso) => { const e = Date.parse(endeIso || '') || 0; return e ? e + tvV2NachleseMs(id) : 0 }
@@ -20900,6 +20900,34 @@
    * Rechenwegs: 'tp'/'liquidiert' → Ende mit Schätzung demo.pl_usd, 'beide_in_minute' → Ende ohne Schätzung. final.at = demo.at, damit
    * die zufällige Nachlese-Zeit ab dem echten Treffer zählt. Ein Versuch je Plan und 60 s, ein Tab je Plan (mt5_baseline_sperre).
    * Der stündliche Rundgang bleibt Rückfall; ohne Reader-Kurs (ohne_kurs) passiert nichts. */
+  /* HANDSTART-EINSTIEG (28.09.2026, Vorfall Jacob Apex …0002, Plan 2a6637b9: Puls fand den Kauf-Knopf nicht, Jacob kaufte selbst und
+   * setzte den Plan von Hand auf „Läuft" — ohne Einstieg kein Radar-Level, keine Demo, kein Ende, keine Nachlesung. Finn: „jeder
+   * einzelne Trade soll ins Prophos-Radar"). /admin/live-trades rechnet solchen Plänen den Einstieg aus der Startminute
+   * (einstieg_quelle 'kerze_start'); dieser Tab friert ihn am Plan ein (mt5_baseline.tv, atomar) — genauer aus dem eigenen
+   * Kurs-Puffer, wenn der Start keine 5 min her ist ('feed_start'), sonst der Kerzen-Wert. pc/konto/datum nur, wo tv noch leer ist:
+   * dann liest die Nachlesung an diesem PC. Ein Versuch je Plan und Minute. */
+  const _handstartVersucht = new Map()
+  async function tvV2HandstartEinstieg(p, t){
+    try{
+      const pid = String(p.id), alt = _handstartVersucht.get(pid)
+      if(alt && Date.now() - alt < 60000) return
+      _handstartVersucht.set(pid, Date.now())
+      const tv = (p.mt5Baseline && p.mt5Baseline.tv) || null
+      if(tv && Number(tv.einstieg_nq) > 1000) return
+      const wurzel = /^MNQ/i.test(String(p.masterSymbolRoot || p.masterSymbol || '')) ? 'MNQ' : 'NQ'
+      const startMs = Date.parse(p.startedAt || '') || 0
+      const feed = (startMs && Date.now() - startMs < HEDGE_FEED_PUFFER_MS) ? hedgeFeedAmKlick(wurzel, startMs) : null
+      const patch = feed ? { einstieg_nq: feed.preis, einstieg_quelle: 'feed_start', einstieg_wurzel: feed.wurzel }
+                         : { einstieg_nq: Number(t.einstieg_nq), einstieg_quelle: 'kerze_start', einstieg_wurzel: t.symbol_root || wurzel }
+      if(!(patch.einstieg_nq > 1000)) return
+      patch.handstart_at = new Date().toISOString()
+      if(!tv) Object.assign(patch, { konto: tvV2Konto(p), datum_start: tvV2Handelstag(startMs || Date.now()), at: p.startedAt || patch.handstart_at,
+                                     puls: 'tv', pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : null, grund: 'handstart' })
+      await baselinePatchIn(pid, 'tv', patch, 'open')
+      if(typeof atToast === 'function') atToast(`✓ ${p.masterName || 'Plan'}: von Hand gestartet — Einstieg ${patch.einstieg_nq.toLocaleString('de-DE')} (${feed ? 'Kurs beim Start' : 'Startminute'}) im Radar`, 'start')
+    }catch(e){ console.warn('[handstart]', e) }
+  }
+  window._tvV2HandstartEinstieg = tvV2HandstartEinstieg   // Test-Haken
   const _demoEndeVersucht = new Map()
   async function tvV2DemoEndeTakt(){
     try{ await tvV2DemoEndePruefen() }catch(e){ console.warn('[demo-ende] Takt', e) }
@@ -20917,8 +20945,9 @@
       const d = r.ok ? await r.json().catch(() => null) : null
       for(const t of ((d && d.trades) || [])){
         const pid = String(t.id || t.plan_id || ''), dm = t.demo || {}
-        if(!['tp', 'liquidiert', 'beide_in_minute'].includes(dm.status)) continue
         const p = offen.find(x => String(x.id) === pid); if(!p) continue
+        if(t.einstieg_quelle === 'kerze_start') await tvV2HandstartEinstieg(p, t)
+        if(!['tp', 'liquidiert', 'beide_in_minute'].includes(dm.status)) continue
         const alt = _demoEndeVersucht.get(pid); if(alt && Date.now() - alt < 60000) continue
         _demoEndeVersucht.set(pid, Date.now())
         if(!(await hedgeSperre(pid, 'demo_ende', 30))) continue
@@ -35257,7 +35286,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.738'
+  const OS_TAB_BUILD = '2026-09-22.741'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
