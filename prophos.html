@@ -6460,13 +6460,6 @@
               <label>Lesson learned (optional)</label>
               <textarea class="input" id="tc-result-notes" rows="2" placeholder="Was war gut, was schlecht…"></textarea>
             </div>
-            <div class="field" style="grid-column:span 2">
-              <label style="display:flex;align-items:center;gap:9px;cursor:pointer;margin:0;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg2)">
-                <input type="checkbox" id="tc-traded-today" style="width:16px;height:16px;flex-shrink:0">
-                <span style="color:var(--ink);font-weight:500">🚫 Heute schon getradet — kein weiterer Trade heute auf diesem Account</span>
-              </label>
-              <div style="font-size:11px;color:var(--sub-2);margin-top:4px;padding-left:2px">Setzt sich automatisch um Mitternacht (deutsche Zeit) zurück.</div>
-            </div>
           </div>
 
           <!-- Balance-Nachlesung steht aus (F5, 26.09.2026) — eigene Zeile, der Auto-P&L-Ablauf überschreibt tradeCompleteMsg -->
@@ -35503,7 +35496,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.753'
+  const OS_TAB_BUILD = '2026-09-22.754'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -38703,12 +38696,11 @@
         const idPart = extId ? `  #${extId}` : ''
         const busyPart = busy[String(a.id)] ? `  ·  ${busy[String(a.id)]}` : ''
         const warnPart = dupWarn[String(a.id)] ? `  ·  ${dupWarn[String(a.id)]}` : ''
-        const tradedPart = (typeof isTradedToday === 'function' && isTradedToday(a.id)) ? '  ·  🚫 heute schon getradet' : ''
         // Tages-P&L direkt rechts neben der Live-Balance (08.09.2026, Finns
         // Wunsch): grün/rot als Ampel, ob heute noch Spielraum ist.
         const tagesPl = (typeof tagesPlLabel === 'function') ? tagesPlLabel(a.id, bal.ccy) : ''
         const tagesPart = tagesPl ? `  ·  ${tagesPl} heute` : ''
-        return `<option value="${a.id}">${escapeHtml(name)}${escapeHtml(idPart)}  ·  ${escapeHtml(status)}  ·  ${escapeHtml(balPart)}${escapeHtml(tagesPart)}${escapeHtml(busyPart)}${escapeHtml(warnPart)}${escapeHtml(tradedPart)}</option>`
+        return `<option value="${a.id}">${escapeHtml(name)}${escapeHtml(idPart)}  ·  ${escapeHtml(status)}  ·  ${escapeHtml(balPart)}${escapeHtml(tagesPart)}${escapeHtml(busyPart)}${escapeHtml(warnPart)}</option>`
       }
 
       // HTML zusammenbauen — sortiert
@@ -42406,28 +42398,16 @@
   /* ══ ENDE WD-ANBAU ══ */
 
   // ─────── Trade-Complete-Modal ───────
-  /* ── "Heute schon getradet" pro Account (Reset automatisch um Mitternacht DE-Zeit) ──
-   * Datums-basiert statt Timer: gespeichert wird das DE-Datum (YYYY-MM-DD, Europe/Berlin).
-   * Ist das gespeicherte Datum nicht mehr heute, gilt der Account als "nicht getradet" —
-   * damit resettet es sich um Mitternacht von selbst, auch wenn die App zu war. */
-  const TRADED_TODAY_LS = 'prophos_traded_today'
+  /* „Heute schon getradet“-Haken entfernt (29.09.2026, Finn: „mach das ding komplett weg, das nutz ich nicht mehr“) —
+   * er lebte nur im localStorage je Browser und zeigte nur einen Zusatz im Account-Dropdown; den alten Merker einmal wegräumen. */
+  try { localStorage.removeItem('prophos_traded_today') } catch(_){}
+  /* DE-Datum (YYYY-MM-DD, Europe/Berlin) — Tages-Anker für Tages-P&L und Merker unten */
   function _deTodayStr(){ return new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' }) }
-  function tradedTodayMap(){ try { return JSON.parse(localStorage.getItem(TRADED_TODAY_LS) || '{}') } catch { return {} } }
-  function isTradedToday(accountId){ if(!accountId) return false; return tradedTodayMap()[String(accountId)] === _deTodayStr() }
-  function setTradedToday(accountId, on){
-    if(!accountId) return
-    const m = tradedTodayMap()
-    const today = _deTodayStr()
-    if(on) m[String(accountId)] = today; else delete m[String(accountId)]
-    // Aufräumen: alle Einträge, die nicht von heute sind, wegwerfen (das ist der Mitternacht-Reset)
-    for(const k of Object.keys(m)){ if(m[k] !== today) delete m[k] }
-    localStorage.setItem(TRADED_TODAY_LS, JSON.stringify(m))
-  }
 
   /* ── Tages-P&L pro Account (08.09.2026, Finns Wunsch: im Trade-planen-Dropdown
    * neben der Live-Balance sehen, was der Account HEUTE schon gemacht hat) ──
    * Summe der heute realisierten Plan-P&Ls (completed + review) des Accounts.
-   * Gleiche Mitternachts-Logik wie "heute schon getradet": DE-Datum vergleichen,
+   * Mitternachts-Logik über das DE-Datum (_deTodayStr) vergleichen,
    * kein Timer — resettet sich um Mitternacht von selbst. Quelle sind die
    * trade_plans aus Supabase, damit Mac/PC/Handy dieselbe Zahl sehen und alle
    * Wege (Duplikum, Topstep, Echo, Orbit) abgedeckt sind — jede Route schreibt
@@ -42630,7 +42610,7 @@
   }
 
   /* Toast "Winning Day abgehakt" nach Trade-Ende — einmal pro Account pro Tag
-   * (localStorage-Merker, gleiches Aufräum-Muster wie setTradedToday). Hängt an
+   * (localStorage-Merker, alles nicht von heute wird weggeräumt). Hängt an
    * allen drei Fertig-Pfaden: Server-Wächter-Poll (planPollTick), Browser-
    * Tracker (atMoveToReview) und manueller Abschluss (tradeCompleteSave). */
   const ZIEL_TOAST_LS = 'prophos_ziel_toast'
@@ -42929,9 +42909,6 @@
       tcPopulateStatusAccountPicker(p)
     }
 
-    // "Heute schon getradet"-Haken den aktuellen Stand des Master-Accounts spiegeln
-    const ttCb = document.getElementById('tc-traded-today')
-    if(ttCb) ttCb.checked = isTradedToday(p.masterAccountId)
     // Manueller Winning Day (15.09.2026): Häkchen nur, wenn ein Account des
     // Plans manuell zählt — sonst bleibt die Box unsichtbar.
     tcWinningDayPrepare(p)
@@ -43722,9 +43699,6 @@
         }, `${planRef} WD-Hedge`, { nullErlaubt: true })
       }
 
-      // "Heute schon getradet"-Haken auf den Master-Account anwenden (Reset autom. um Mitternacht DE)
-      const _ttCb = document.getElementById('tc-traded-today')
-      if(_ttCb && masterAcc?.id) setTradedToday(masterAcc.id, !!_ttCb.checked)
       // Manueller Winning Day +1 (15.09.2026) — nur wenn Finn den Haken gesetzt
       // hat und er nicht schon (disabled) für heute stand.
       const _wdCb = document.getElementById('tc-winning-day')
