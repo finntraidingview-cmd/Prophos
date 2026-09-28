@@ -35591,7 +35591,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.762'
+  const OS_TAB_BUILD = '2026-09-22.763'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -36055,6 +36055,14 @@
         else if(MT5_LOCAL && typeof tvV2BaselineLesen === 'function'){
           if(imPopup) _pfSet('ob-order', 'warn', '⏳ Order platziert — Puls liest Today\'s P&L als Startwert…')
           try{ tvb = await tvV2BaselineLesen(plan) }catch(_){ tvb = null }
+        }
+        // started_at = Klickzeit auch für Orbit V2 (29.09.2026, EzPoker b0252248: Klick 22:10:38.853, Hedge-Wiederholung 90 s +
+        // Today's-P&L-Lesung 27 s → started_at stand auf 22:12:38 — Radar-Demo, Einstiegsminute und Hedge-Selbstheilung zählten
+        // 2 min zu spät). Nur in eine gelesene Baseline eintragen; ohne Baseline bleibt es wie bisher (kein tv-Objekt nur für die Zeit).
+        if(plan.route === 'tvv2' && tvb && typeof tvb === 'object' && !tvb.klick_at){
+          const kms = Number(r && r.order_klick_ms)
+          const kIso = (kms > 1e12 && kms <= Date.now() + 60000) ? new Date(kms).toISOString() : ((r && (r.beweis_at || r.klick_at)) || null)
+          if(kIso) tvb.klick_at = kIso
         }
         await v2PlanAufOpen(plan.id, null, tvb)
         // Bot-Fill auch OHNE Hedge am Plan (Gegenprüfung 25.09.2026): mt5_baseline.tv.einstieg_nq — die Winning-Days-Übersicht
