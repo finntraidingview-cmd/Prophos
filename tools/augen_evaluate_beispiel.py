@@ -40,8 +40,7 @@ def augen(port, was="stand", opts=None, timeout=5):
         return {"ok": False, "fehler": "kein TradingView-Tab im Puls-Chrome"}
     with open(AUGEN, encoding="utf-8") as f:
         quelle = f.read()
-    aufruf = "augenInventar" if was == "inventar" else "augenStand"
-    ausdruck = quelle + "\n" + aufruf + "(" + json.dumps(opts or {}) + ")"
+    ausdruck = quelle + "\nprophosAugen." + ("inventar" if was == "inventar" else "stand") + "(" + json.dumps(opts or {}) + ")"
     ws = websocket.create_connection(ws_url, timeout=timeout)
     try:
         ws.send(json.dumps({"id": 1, "method": "Runtime.evaluate",

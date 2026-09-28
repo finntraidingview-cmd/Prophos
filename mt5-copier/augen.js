@@ -7,7 +7,7 @@
  *       returnByValue = true).
  * Beide Funktionen geben reines JSON zurück (keine DOM-Knoten), werfen nie und KLICKEN NIE.
  *
- * Koordinaten: rect = [links, oben, breite, hoehe] in CSS-Pixeln relativ zum Viewport; geo trägt screenX/Y, outer/inner und
+ * Koordinaten: rect = [x, y, w, h] in CSS-Pixeln relativ zum Viewport (x/y = linke obere Ecke); geo trägt screenX/Y, outer/inner und
  * devicePixelRatio — Puls rechnet daraus Bildschirm-Pixel (wie beim Reader-Bedienfeld seit 30.08.2026).
  *
  * Signatur-Reihenfolge je Feld (Lehre aus dem Reader 0.3–0.8): stabile data-name/id → role/aria → Text DE+EN → Geometrie.
@@ -23,7 +23,7 @@
  */
 var PROPHOS_AUGEN = (function () {
   'use strict';
-  var VERSION = '0.1.0';
+  var VERSION = '0.2.0';   // 0.2.0 (29.09.2026): Vertrag mit T3 — globalThis.prophosAugen, Schlüssel-Whitelist, popups, kauf_knopf
 
   // ── Grundwerkzeuge ─────────────────────────────────────────────────────────
   function sichtbar(el) {
@@ -85,7 +85,10 @@ var PROPHOS_AUGEN = (function () {
   function feldZu(label, wurzel) {
     if (!label) return null;
     var lr = label.getBoundingClientRect();
-    var kand = alle('input,[role="spinbutton"],[contenteditable="true"]', wurzel).filter(sichtbar);
+    // nie der Haken/Schalter selbst (Test 29.09.2026: 'Take-Profit, $' trägt seine Checkbox im label) — nur Wertfelder
+    var kand = alle('input,[role="spinbutton"],[contenteditable="true"]', wurzel).filter(sichtbar).filter(function (e) {
+      return !/^(checkbox|radio|hidden|button|submit)$/i.test(e.type || '') && !label.contains(e);
+    });
     var best = null, bestD = 1e9;
     for (var i = 0; i < kand.length; i++) {
       var r = kand[i].getBoundingClientRect();
@@ -176,7 +179,7 @@ var PROPHOS_AUGEN = (function () {
       // Gruppe = der höchste Vorfahr (≤ 6 Ebenen), der KEINE andere Toast-Gruppe enthält (Live 29.09.2026: ohne diese Grenze lief
       // die Suche bis zur gemeinsamen Toast-Liste hoch, und jede Gruppe meldete die Texte aller anderen)
       var g = b, i = 0;
-      while (g.parentElement && i < 6) {
+      while (g.parentElement && i < 3 && !/^(BODY|HTML|SECTION)$/.test(g.parentElement.tagName)) {   // TV: Knopf → Steuerleiste → toastGroup
         var hoeher = g.parentElement;
         var fremd = alle('[data-name^="toast-group-expand-button-"]', hoeher).some(function (x) { return x !== b; });
         if (fremd) break;
@@ -265,14 +268,32 @@ var PROPHOS_AUGEN = (function () {
 
   // ── Öffentliche Funktionen ─────────────────────────────────────────────────
   /* Stand für Puls: alles, was er vor und nach einem Klick braucht. opts.kontoTexte = External IDs (Suche als Text). */
+  /* VERTRAG MIT T3 (29.09.2026, Route im Augen-Prozess): nur diese Schlüssel kommen durch — v, ts, url, titel, geo, sichtbar,
+   * fokus, popups, konto, ticket, kauf_knopf, positionen, orders, toasts, konto_summary (+ fehler). Rechtecke [x, y, w, h] in
+   * CSS-Pixeln. positionen/orders/konto_summary bleiben leer bzw. null, bis das Inventar die Selektoren liefert. ≤ ~50 KB. */
+  var STAND_MAX = 48000;
   function stand(opts) {
     opts = opts || {};
-    var o = { ok: true, version: VERSION, zeit: Date.now(), url: location.href, titel: document.title, lang: document.documentElement.lang || '',
-              sichtbar: document.visibilityState, geo: geo() };
-    try { o.ticket = ticket(); } catch (e) { o.ticket = { fehler: String(e) }; }
-    try { o.toasts = toasts(); } catch (e) { o.toasts = { fehler: String(e) }; }
-    try { o.dialoge = dialoge(); } catch (e) { o.dialoge = [{ fehler: String(e) }]; }
-    try { o.konto = konto(opts.kontoTexte); } catch (e) { o.konto = { fehler: String(e) }; }
+    var fehler = [];
+    var g = geo(); g.lang = document.documentElement.lang || '';
+    var o = { v: VERSION, ts: Date.now(), url: location.href, titel: document.title, geo: g,
+              sichtbar: document.visibilityState, fokus: (function () { try { return document.hasFocus(); } catch (_) { return null; } })(),
+              popups: [], konto: null, ticket: null, kauf_knopf: null, positionen: [], orders: [], toasts: null, konto_summary: null };
+    try { o.ticket = ticket(); o.kauf_knopf = (o.ticket && o.ticket.senden) || null; } catch (e) { fehler.push('ticket: ' + e); }
+    try { o.toasts = toasts(); } catch (e) { fehler.push('toasts: ' + e); }
+    try { o.popups = dialoge(); } catch (e) { fehler.push('popups: ' + e); }
+    try { o.konto = konto(opts.kontoTexte); } catch (e) { fehler.push('konto: ' + e); }
+    // Größen-Riegel: erst die langen Listen kürzen, nie die Knöpfe/Rechtecke
+    try {
+      if (JSON.stringify(o).length > STAND_MAX) {
+        if (o.konto) { o.konto.treffer = (o.konto.treffer || []).slice(0, 10); o.konto.eintraege = (o.konto.eintraege || []).slice(0, 15); }
+        if (o.toasts && o.toasts.gruppen) o.toasts.gruppen.forEach(function (gr) { gr.texte = (gr.texte || []).slice(0, 8); });
+        if (o.toasts && o.toasts.log) o.toasts.log = o.toasts.log.slice(0, 3);
+        if (o.ticket && o.ticket.typen) o.ticket.typen = o.ticket.typen.slice(0, 6);
+        if (JSON.stringify(o).length > STAND_MAX) fehler.push('stand über ' + STAND_MAX + ' Zeichen');
+      }
+    } catch (e) { fehler.push('groesse: ' + e); }
+    if (fehler.length) o.fehler = fehler;
     return o;
   }
 
@@ -305,7 +326,7 @@ var PROPHOS_AUGEN = (function () {
                         title: attr(e, 'title') || undefined, ph: attr(e, 'placeholder') || undefined });
       liste.push(z);
     }
-    var o = { ok: true, art: 'augen_inventar', version: VERSION, zeit: Date.now(), url: location.href, titel: document.title,
+    var o = { ok: true, art: 'augen_inventar', v: VERSION, ts: Date.now(), url: location.href, titel: document.title,
               lang: document.documentElement.lang || '', sichtbar: document.visibilityState, geo: geo(),
               iframes: alle('iframe').map(function (f) { return { src: String(f.src || '').slice(0, 120), rect: sichtbar(f) ? rect(f) : null }; }),
               shadow: alle('*').filter(function (x) { return !!x.shadowRoot; }).slice(0, 20).map(function (x) { return x.tagName.toLowerCase(); }),
@@ -314,8 +335,10 @@ var PROPHOS_AUGEN = (function () {
     return o;
   }
 
-  return { version: VERSION, stand: stand, inventar: inventar };
+  return { v: VERSION, version: VERSION, stand: stand, inventar: inventar };
 })();
-// Kurznamen für Runtime.evaluate / Userscript
+// Vertrag T3: globalThis.prophosAugen = { v, stand(), inventar() } — mehrfaches Ausführen setzt es einfach neu (idempotent).
+// PROPHOS_AUGEN / augenStand / augenInventar bleiben als Alias.
+globalThis.prophosAugen = PROPHOS_AUGEN;
 function augenStand(opts) { return PROPHOS_AUGEN.stand(opts); }
 function augenInventar(opts) { return PROPHOS_AUGEN.inventar(opts); }
