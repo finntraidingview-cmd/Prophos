@@ -10148,6 +10148,13 @@
 
 <!-- ========== SCRIPT ========== -->
 <script type="module">
+  // Sicheres Neuladen (28.09.2026): erst prüfen, ob die Seite vom Server kommt (lokales Backend kann gerade neu starten)
+  window._seiteSicherLaden = (laden, versuch) => {
+    const n = versuch || 0
+    fetch(location.pathname + '?probe=' + Date.now(), { cache: 'no-store' })
+      .then(r => r.ok ? r.text() : '').catch(() => '')
+      .then(t => { if(/const OS_TAB_BUILD = '/.test(t)) laden(); else { console.warn('[neuladen] Seite gerade nicht erreichbar — neuer Versuch in 15 s'); setTimeout(() => window._seiteSicherLaden(laden, n + 1), 15000) } })
+  }
   // GEPINNT auf jsdelivr statt esm.sh/@2 (05.08.2026): esm.sh hat morgens die frisch
   // gebaute 2.112.1 ausgeliefert, deren Sub-Imports im Browser nicht luden — die ganze
   // App hing dadurch für ALLE im Boot-Spinner (Modul startet nie, kein Konsolen-Fehler).
@@ -15727,7 +15734,10 @@
     // Liefert die Ziel-Build-Nummer, wenn die frische Seite wirklich neuer ist als dieser Tab — sonst null
     const echtNeu = async v => { if(!v) return null; const b = await seiteBuild(v); return (b && bwNeuerV(b, eigenBuild())) ? b : null }
     // Neu laden mit Cache-Bust (?v=<build>), Hash bleibt — der Browser/pages.dev liefert so sicher die neue Datei
-    const frischLaden = ziel => { try{ const u = new URL(location.href); u.searchParams.set('v', ziel); location.replace(u.toString()) }catch(_){ location.reload() } }
+    // Nur laden, wenn die Seite gerade wirklich kommt (28.09.2026, Vorfall pc-usq1i6 13:45 UTC: fällt das Neuladen in den Neustart
+    // des lokalen Backends nach einem Update, bleibt eine Chrome-Fehlerseite ohne JS stehen — nichts heilt sich mehr). Probe = die
+    // Seite selbst (no-store) mit OS_TAB_BUILD; sonst in 15 s erneut.
+    const frischLaden = ziel => { window._seiteSicherLaden(() => { try{ const u = new URL(location.href); u.searchParams.set('v', ziel); location.replace(u.toString()) }catch(_){ location.reload() } }) }
     // Ehrlicher Stand im „Mehr"-Sheet statt des statischen „v0.1 · alles live"
     const foot = document.querySelector('#dashboard-view .sb-foot')
     if(foot) foot.innerHTML = '<span class="dot"></span> Build ' + eigenBuild()   // der laufende Code, nicht die VERSION (Backend zählt die ohne neue Seite hoch)
@@ -49336,7 +49346,26 @@
     }
     try{ localStorage.setItem(EP_HEIL_KEY, String(jetzt)) }catch(_){}
     console.warn('[bruecke] Cloud seit ' + Math.round(stumm / 1000) + ' s stumm, Reader frisch — Tab lädt neu')
-    location.reload()
+    window._seiteSicherLaden(() => location.reload())
+  }
+  /* READER-DIREKTFEED (28.09.2026, Finn: „Egal, welches Update reinkommt, der Reader sendet trotzdem die ganze Zeit live rein").
+   * Reader ≥ 0.9.9 schickt Kurse + Kerzen selbst an Railway (POST /reader-kurs) — unabhängig von diesem Tab, seinen Neuladungen und
+   * Chromes Hintergrund-Drosselung. Er braucht dafür EINMAL einen Schlüssel (feed_direkt.token false): Railway signiert ihn für das
+   * eingeloggte Profil + diesen PC, der Tab legt ihn im Reader ab (Datei, überlebt Neustarts). Höchstens 1× je Minute versucht.
+   * Diese Brücke schreibt unverändert weiter mit — Reserve, beide Wege upserten dieselben Zeilen. */
+  let _epFeedVersuch = 0
+  async function epFeedSchluessel(d, pc){
+    try{
+      const fd = d && d.feed_direkt
+      if(!fd || fd.token || !pc || Date.now() - _epFeedVersuch < 60000) return
+      _epFeedVersuch = Date.now()
+      const tok = await _pushTok(); if(!tok) return
+      const r = await fetch(`${WATCHER_HOME}/reader-feed-token`, { method: 'POST', headers: { 'sb-token': tok, 'Content-Type': 'application/json' }, body: JSON.stringify({ pc }) })
+      const j = await r.json().catch(() => ({}))
+      if(!r.ok || !j.token){ epLokal.diag = Object.assign(epLokal.diag || {}, { feed_schluessel: 'fehler ' + r.status }); return }
+      const r2 = await fetch(EP_READER + '/feed-token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: j.token }) })
+      epLokal.diag = Object.assign(epLokal.diag || {}, { feed_schluessel: r2.ok ? 'übergeben ' + new Date().toISOString() : 'reader ' + r2.status })
+    }catch(e){ epLokal.diag = Object.assign(epLokal.diag || {}, { feed_schluessel: 'fehler ' + String((e && e.message) || e).slice(0, 60) }) }
   }
   async function epBrueckeTick(){
     const jetzt = Date.now()
@@ -49350,6 +49379,7 @@
       const d = await epLokalHolen()
       if(!d) return
       const pc = epPcId()
+      epFeedSchluessel(d, pc)   // Reader-Direktfeed (28.09.2026): Schlüssel einmal übergeben, nicht awaiten
       // Fernschalter: eigenen soll_an lesen und aufs lokale Geraet anwenden.
       // Bewusst VOR dem Push, damit "an" im Push schon den neuen Ist traegt.
       try{

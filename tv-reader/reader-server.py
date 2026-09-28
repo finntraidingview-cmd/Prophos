@@ -65,7 +65,7 @@ PORT = 8790
 # < 0.7.0 (Tampermonkey prueft nur taeglich). Ab jetzt sagt jede Antwort, welcher Server und
 # welches Script wirklich laufen; die Bruecke schreibt beides nach echoplus_live, der Markt-
 # Kopf zeigt es. Bei JEDER Aenderung an dieser Datei mitbumpen.
-READER_VERSION = "0.9.8"
+READER_VERSION = "0.9.9"
 HIER = os.path.dirname(os.path.abspath(__file__))
 DATEI = os.path.join(HIER, "positions.json")
 AUS_FLAG = os.path.join(HIER, "reader_aus.flag")   # Datei vorhanden = pausiert
@@ -782,6 +782,7 @@ def _mit_an(stand):
     if not kerzen:
         kerzen = [k for k in (_k1m_vor, _k1m) if k and _kurs_1m_frisch(k.get("minute"), _j1m)]
     out["kurs_1m"] = kerzen
+    out["feed_direkt"] = feed_status()   # 0.9.9: der Tab sieht, ob der Reader selbst sendet / einen Schluessel braucht
     out["kerzen_alter_s"] = round(time.time() - _kerzen_s, 3) if _kerzen_s else None
     out["kerzen_anzahl"] = {w: len(r) for w, r in _kerzen.items()}
     out["kerzen_quelle"] = {w: ("ws-tick" if _ring_ist_tick(r) else "ws") for w, r in _kerzen.items()}   # 0.8.4
@@ -873,6 +874,22 @@ class Handler(BaseHTTPRequestHandler):
                       f" ({_vtid}, reader-server {READER_VERSION})", flush=True)
                 _version_je_tab[_vtid] = v_neu
             _script_version, _script_s = v_neu, s_neu
+
+        # 0.9.9: POST /feed-token {"token": "..."} — Schluessel fuer den Direktfeed vom eingeloggten Prophos-Tab
+        if self.path.rstrip("/") == "/feed-token":
+            t = str((daten or {}).get("token") or "").strip() if isinstance(daten, dict) else ""
+            if t.count(".") != 2 or len(t) >= 200:
+                self._json(400, {"ok": False, "msg": "Schluessel ungueltig"})
+                return
+            try:
+                with open(FEED_TOKEN_DATEI, "w", encoding="utf-8") as f:
+                    f.write(t)
+                _FEED["fehler"] = ""
+                print(f"\n[{time.strftime('%H:%M:%S')}] Direktfeed-Schluessel erhalten — Reader sendet Kurse selbst in die Cloud", flush=True)
+                self._json(200, {"ok": True})
+            except Exception as e:
+                self._json(500, {"ok": False, "msg": f"{type(e).__name__}: {e}"})
+            return
 
         # Schalter (Orbit-View): POST /schalter {"an": true/false}
         if self.path.rstrip("/") == "/schalter":
@@ -1699,6 +1716,84 @@ def _aufsicht(starter=None, schlafen=time.sleep, max_starts=None):
     return starts
 
 
+# ── Direktfeed (0.9.9, 28.09.2026, Finn: „Egal, welches Update reinkommt, der Reader sendet trotzdem die ganze Zeit live rein"):
+# Kurse + Minutenkerzen gingen bisher NUR ueber den Prophos-Tab in die Cloud. Laedt der Tab neu (Update) oder friert Chrome ihn
+# ein, stand der Radar — Vorfall pc-usq1i6 13:45 UTC: dieses Fenster sendete sauber, die Cloud bekam nichts. Jetzt schickt der
+# Reader selbst an Railway (POST /reader-kurs, dort Service-Key). Schluessel: holt der eingeloggte Tab einmal und legt ihn per
+# POST /feed-token hier ab (Datei feed_token.txt, ueberlebt Neustarts). Takt 1 s bei Aenderung, sonst alle 5 s ein Lebenszeichen.
+# Fehler still (nie den Reader stoeren); der Tab schreibt weiter mit (Reserve), beide Wege upserten dieselben Zeilen.
+FEED_TOKEN_DATEI = os.path.join(HIER, "feed_token.txt")
+_FEED = {"ok_s": 0.0, "fehler": "", "gesendet": 0, "sig": None, "sig_s": 0.0}
+
+
+def feed_token_lesen():
+    try:
+        with open(FEED_TOKEN_DATEI, "r", encoding="utf-8") as f:
+            t = f.read().strip()
+        return t if t.count(".") == 2 and len(t) < 200 else ""
+    except Exception:
+        return ""
+
+
+def feed_paket(stand):
+    """REIN RECHNEND (testbar): /positions-Ausgabe → Paket fuer /reader-kurs + Signatur (gleiche Signatur = nichts Neues)."""
+    st = stand or {}
+    paket = {"kurse": st.get("kurse") or {}, "kurs_1m": st.get("kurs_1m") or [], "modus": st.get("modus"), "reader_version": READER_VERSION}
+    sig = json.dumps([{w: (q or {}).get("preis") or (q or {}).get("lp") for w, q in (paket["kurse"] or {}).items() if isinstance(q, dict)},
+                      [(k.get("wurzel"), k.get("minute"), k.get("o"), k.get("h"), k.get("l"), k.get("c")) for k in paket["kurs_1m"] if isinstance(k, dict)]],
+                     sort_keys=True, default=str)
+    return paket, sig
+
+
+def feed_status(jetzt=None):
+    jetzt = time.time() if jetzt is None else jetzt
+    return {"token": bool(feed_token_lesen()), "ok_alter_s": round(jetzt - _FEED["ok_s"], 1) if _FEED["ok_s"] else None,
+            "fehler": _FEED["fehler"] or None, "gesendet": _FEED["gesendet"]}
+
+
+def _feed_schleife(schlafen=time.sleep):
+    import urllib.request
+    import urllib.error
+    while True:
+        try:
+            token = feed_token_lesen()
+            if not token:
+                _FEED["fehler"] = "kein Schluessel (Prophos-Tab gibt ihn einmal)"
+                schlafen(3)
+                continue
+            paket, sig = feed_paket(_mit_an(_stand or {}))
+            jetzt = time.time()
+            if not paket["kurse"] and not paket["kurs_1m"]:
+                schlafen(1)
+                continue
+            if sig == _FEED["sig"] and jetzt - _FEED["sig_s"] < 5:
+                schlafen(1)
+                continue
+            req = urllib.request.Request(f"{DIAGNOSE_BACKEND}/reader-kurs", data=json.dumps(paket, default=str).encode("utf-8"),
+                                         headers={"Content-Type": "application/json", "User-Agent": "prophos-reader",
+                                                  "X-Reader-Token": token})
+            try:
+                urllib.request.urlopen(req, timeout=5.0).read()
+                _FEED.update(ok_s=time.time(), fehler="", sig=sig, sig_s=jetzt)
+                _FEED["gesendet"] += 1
+            except urllib.error.HTTPError as e:
+                _FEED["fehler"] = f"HTTP {e.code}" + (" — Schluessel ungueltig, Tab gibt neuen" if e.code == 401 else "")
+                if e.code == 401:
+                    try:
+                        os.remove(FEED_TOKEN_DATEI)
+                    except Exception:
+                        pass
+                schlafen(3)
+                continue
+            except Exception as e:
+                _FEED["fehler"] = f"{type(e).__name__}: {str(e)[:80]}"
+                schlafen(2)
+                continue
+        except Exception as e:
+            _FEED["fehler"] = f"{type(e).__name__}: {str(e)[:80]}"
+        schlafen(1)
+
+
 if __name__ == "__main__" and os.environ.get(KIND_ENV) != "1":
     if quickedit_aus():
         print("QuickEdit aus (Klick ins Fenster hält den Reader nicht mehr an)")
@@ -1720,6 +1815,7 @@ elif __name__ == "__main__":
     # 0.9.8: Einzelinstanz — Sperre, fremde Reader beenden, dann EXKLUSIV binden; Kind meldet sich alle 5 min
     einzelinstanz_sichern()
     threading.Thread(target=_kind_diagnose_schleife, daemon=True).start()
+    threading.Thread(target=_feed_schleife, daemon=True).start()   # 0.9.9 Direktfeed
     try:
         ExklusiverServer(("127.0.0.1", PORT), Handler).serve_forever()
     except KeyboardInterrupt:

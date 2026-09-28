@@ -9203,6 +9203,108 @@ def reader_diagnose_schreiben(kennung):
     return jsonify({"ok": True})
 
 
+
+# ══ READER-DIREKTFEED (28.09.2026, Finn: „Egal, welches Update reinkommt, der Reader sendet trotzdem die ganze Zeit live rein") ══
+# Bisher lief jeder Kurs Reader → Prophos-Tab (Chrome) → Supabase. Der Tab ist das schwache Glied: bei jedem Update lädt er neu
+# (fällt das in den Neustart des lokalen Backends, bleibt eine Chrome-Fehlerseite ohne JS stehen), Chrome friert Hintergrund-Tabs
+# ein — Vorfall pc-usq1i6 heute 13:45 UTC: Reader sendete sauber, Tab + mt5_live gleichzeitig still, Radar ohne Kurs.
+# Jetzt schickt reader-server.py (eigener Python-Prozess) Kurse + Minutenkerzen selbst hierher; Railway schreibt mit dem Service-Key.
+# Zugang: der eingeloggte Tab holt EINMAL einen signierten Schlüssel (POST /reader-feed-token, HMAC über user_id + pc, Geheimnis
+# aus dem Service-Key abgeleitet — keine neue Env-Var) und gibt ihn dem Reader, der ihn in einer Datei hält. Ohne gültigen
+# Schlüssel schreibt niemand Kurse (der Hedge-Wächter schließt auf diesen Kursen). Die Tab-Brücke schreibt weiter mit (Reserve).
+READER_FEED_MAX = 64 * 1024
+
+
+def _reader_feed_sig(uid, pc):
+    geheim = hashlib.sha256(("prophos-reader-feed|" + (SUPABASE_SERVICE_KEY or "")).encode()).digest()
+    return hmac.new(geheim, f"{uid}|{pc}".encode(), hashlib.sha256).hexdigest()[:40]
+
+
+def reader_feed_token_pruefen(token):
+    """REIN RECHNEND (testbar, ohne Service-Key immer None): 'uid.pc.sig' → (uid, pc) oder None."""
+    if not SUPABASE_SERVICE_KEY or not isinstance(token, str):
+        return None
+    teile = token.strip().split(".")
+    if len(teile) != 3 or not re.fullmatch(r"[0-9a-f-]{36}", teile[0]) or not READER_KENNUNG_MUSTER.fullmatch(teile[1]):
+        return None
+    return (teile[0], teile[1]) if hmac.compare_digest(teile[2], _reader_feed_sig(teile[0], teile[1])) else None
+
+
+def _feed_zahl(v):
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return None
+    return x if x == x and x > 0 else None
+
+
+def reader_feed_zeilen(pc, daten, jetzt_iso):
+    """REIN RECHNEND (testbar): Reader-Paket {kurse, kurs_1m, modus} → (tv_kurse-Zeilen, tv_kurs_1m-Zeilen). Dieselben Regeln wie
+    die Tab-Brücke (epBrueckeTick): stale nie, delayed_* nie (10 min alte Kurse/Teil-Bars), nur NQ/MNQ, Preis > 1000."""
+    d = daten if isinstance(daten, dict) else {}
+    ks = d.get("kurse") if isinstance(d.get("kurse"), dict) else {}
+    verz = lambda m: str(m or "").startswith("delayed")
+    kurse = []
+    for w in ("NQ", "MNQ"):
+        q = ks.get(w)
+        if not isinstance(q, dict) or q.get("stale") or verz(q.get("modus")):
+            continue
+        preis = _feed_zahl(q.get("preis")) or _feed_zahl(q.get("lp"))
+        if not preis or preis < 1000:
+            continue
+        kurse.append({"id": f"{pc}:{w}", "pc_name": pc, "symbol": str(q.get("symbol_text") or w)[:32], "wurzel": w, "preis": preis,
+                      "text": str(q.get("text") or preis)[:32], "sichtbar": q.get("sichtbar") is not False,
+                      "reader_ts": int(_feed_zahl(q.get("ts")) or 0), "updated_at": jetzt_iso,
+                      "quelle": (str(q.get("quelle") or "")[:12] or None), "stale": False, "modus": (str(q.get("modus") or "")[:32] or None)})
+    kerzen = []
+    if not verz(d.get("modus")) and not any(isinstance(q, dict) and verz(q.get("modus")) for q in ks.values()):
+        for x in (d.get("kurs_1m") if isinstance(d.get("kurs_1m"), list) else [])[:40]:
+            if not isinstance(x, dict) or str(x.get("wurzel") or "") not in ("NQ", "MNQ"):
+                continue
+            m, c = _feed_zahl(x.get("minute")), _feed_zahl(x.get("c"))
+            if not m or not c or c < 1000:
+                continue
+            kerzen.append({"wurzel": x["wurzel"], "minute": datetime.fromtimestamp(int(m), timezone.utc).isoformat(),
+                           "symbol": str(x.get("symbol") or "")[:32], "o": _feed_zahl(x.get("o")) or c, "h": _feed_zahl(x.get("h")) or c,
+                           "l": _feed_zahl(x.get("l")) or c, "c": c, "ticks": int(_feed_zahl(x.get("n")) or 0), "pc": pc,
+                           "updated_at": jetzt_iso, "quelle": (str(x.get("quelle") or "")[:12] or None)})
+    return kurse, kerzen
+
+
+@app.route("/reader-feed-token", methods=["POST", "OPTIONS"])
+def reader_feed_token():
+    """POST {pc} mit sb-token → {ok, token} für den Reader dieses PCs."""
+    if request.method == "OPTIONS":
+        return "", 200
+    uid, _mail, err = _login_uid_mail()
+    if err:
+        return err
+    pc = str((request.get_json(silent=True) or {}).get("pc") or "").strip()
+    if not READER_KENNUNG_MUSTER.fullmatch(pc):
+        return jsonify({"ok": False, "msg": "pc ungültig"}), 400
+    return jsonify({"ok": True, "token": f"{uid}.{pc}.{_reader_feed_sig(uid, pc)}"})
+
+
+@app.route("/reader-kurs", methods=["POST", "OPTIONS"])
+def reader_kurs_schreiben():
+    """POST vom reader-server (Header X-Reader-Token) → tv_kurse + tv_kurs_1m (Upsert, idempotent)."""
+    if request.method == "OPTIONS":
+        return "", 200
+    wer = reader_feed_token_pruefen(request.headers.get("X-Reader-Token") or "")
+    if not wer:
+        return jsonify({"ok": False, "msg": "Schlüssel ungültig"}), 401
+    if (request.content_length or 0) > READER_FEED_MAX:
+        return jsonify({"ok": False, "msg": "zu groß"}), 413
+    kurse, kerzen = reader_feed_zeilen(wer[1], request.get_json(silent=True), datetime.now(timezone.utc).isoformat())
+    try:
+        if kurse:
+            sb_upsert("tv_kurse", kurse)
+        if kerzen:
+            sb_upsert("tv_kurs_1m", kerzen)
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"nicht speicherbar ({type(e).__name__})"}), 502
+    return jsonify({"ok": True, "kurse": len(kurse), "kerzen": len(kerzen)})
+
 # ══ KONTEN PRÜFEN (27.09.2026, Auftrag Koordination B10 für F11: Konten per Einfügen des Tradeify-Dashboard-Texts
 # anlegen, Dubletten über ALLE Nutzer ausschließen) ════════════════════════════════════════════════════════════════
 # accounts liegt unter RLS am Login — ob eine External ID schon bei einer ANDEREN Person liegt, sieht nur der Service-Key.
