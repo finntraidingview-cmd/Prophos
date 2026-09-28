@@ -20280,14 +20280,23 @@
   function hedgeLiqStart(plan){
     const tv = plan && plan.mt5Baseline && plan.mt5Baseline.tv
     if(tv && typeof tv.balance_start === 'number' && isFinite(tv.balance_start)) return { balance: tv.balance_start, quelle: 'balance_start', at: tv.at || null }
+    return tvKontoBalanceVorStart(plan, Infinity)
+  }
+  /* Konto-Balance als Start-Balance (aus hedgeLiqStart herausgezogen, 29.09.2026 — Handstart braucht dieselbe Regel): accounts.tv_balance
+   * gilt nur, wenn sie nach dem Ende des letzten Trades dieses Kontos gelesen wurde, keine Nachlesung aussteht und die Lesung nicht
+   * nach bisMs liegt (Handstart: startedAt — eine Lesung nach dem Start könnte einen schon erreichten TP enthalten → P&L 0).
+   * -> {balance, quelle:'konto_balance', at} | null */
+  function tvKontoBalanceVorStart(plan, bisMs){
     const acc = (accounts || []).find(a => String(a.id) === String(plan && plan.masterAccountId))
-    if(!acc || acc.tvBalance == null || !acc.tvBalanceAt) return null
+    if(!acc || acc.tvBalance == null || !acc.tvBalanceAt || !isFinite(Number(acc.tvBalance))) return null
+    const lesMs = Date.parse(acc.tvBalanceAt) || 0
     let letzteEnde = 0; try{ for(const q of (tradePlans || [])){ if(!q || String(q.id) === String(plan.id) || String(q.masterAccountId) !== String(acc.id)) continue
       const e = Date.parse((q.mt5Baseline && q.mt5Baseline.final && q.mt5Baseline.final.at) || q.endedAt || '') || 0; if(e > letzteEnde) letzteEnde = e } }catch(_){}
-    if(!((Date.parse(acc.tvBalanceAt) || 0) > letzteEnde)) return null
+    if(!(lesMs > letzteEnde) || lesMs > bisMs) return null
     if(typeof tvV2NachleseOffen === 'function' && tvV2NachleseOffen(acc.id)) return null
     return { balance: Number(acc.tvBalance), quelle: 'konto_balance', at: acc.tvBalanceAt }
   }
+  window._tvKontoBalanceVorStart = tvKontoBalanceVorStart   // Test-Haken
   // -> {sl_punkte, sl_level_nq, sl_art, liq_balance, sl_usd_hedge, liq_quelle, liq_balance_start} | {hinweis}
   function hedgeLiqLevel(plan, einstieg, ppl, kt){
     const acc = (accounts || []).find(a => String(a.id) === String(plan && plan.masterAccountId))
@@ -21061,7 +21070,10 @@
    * einzelne Trade soll ins Prophos-Radar"). /admin/live-trades rechnet solchen Plänen den Einstieg aus der Startminute
    * (einstieg_quelle 'kerze_start'); dieser Tab friert ihn am Plan ein (mt5_baseline.tv, atomar) — genauer aus dem eigenen
    * Kurs-Puffer, wenn der Start keine 5 min her ist ('feed_start'), sonst der Kerzen-Wert. pc/konto/datum nur, wo tv noch leer ist:
-   * dann liest die Nachlesung an diesem PC. Ein Versuch je Plan und Minute. */
+   * dann liest die Nachlesung an diesem PC. Ein Versuch je Plan und Minute.
+   * START-BALANCE (29.09.2026, Master-Befund: Handstart-Pläne hatten nie tv.balance_start → keine Nachlesung, nie ein exakter P&L):
+   * fehlt sie, kommt accounts.tv_balance dazu — nur eine Lesung VOR startedAt (tvKontoBalanceVorStart), sonst bleibt das Feld leer.
+   * Auch für Pläne, deren Einstieg schon eingefroren ist (früher stieg die Funktion dort sofort aus). */
   const _handstartVersucht = new Map()
   async function tvV2HandstartEinstieg(p, t){
     try{
@@ -21069,18 +21081,27 @@
       if(alt && Date.now() - alt < 60000) return
       _handstartVersucht.set(pid, Date.now())
       const tv = (p.mt5Baseline && p.mt5Baseline.tv) || null
-      if(tv && Number(tv.einstieg_nq) > 1000) return
+      const hatEinstieg = !!(tv && Number(tv.einstieg_nq) > 1000)
+      const hatBalance = !!(tv && typeof tv.balance_start === 'number' && isFinite(tv.balance_start))
+      if(hatEinstieg && hatBalance) return
       const wurzel = /^MNQ/i.test(String(p.masterSymbolRoot || p.masterSymbol || '')) ? 'MNQ' : 'NQ'
       const startMs = Date.parse(p.startedAt || '') || 0
-      const feed = (startMs && Date.now() - startMs < HEDGE_FEED_PUFFER_MS) ? hedgeFeedAmKlick(wurzel, startMs) : null
-      const patch = feed ? { einstieg_nq: feed.preis, einstieg_quelle: 'feed_start', einstieg_wurzel: feed.wurzel }
-                         : { einstieg_nq: Number(t.einstieg_nq), einstieg_quelle: 'kerze_start', einstieg_wurzel: t.symbol_root || wurzel }
-      if(!(patch.einstieg_nq > 1000)) return
-      patch.handstart_at = new Date().toISOString()
+      let patch = {}, feed = null
+      if(!hatEinstieg){
+        feed = (startMs && Date.now() - startMs < HEDGE_FEED_PUFFER_MS) ? hedgeFeedAmKlick(wurzel, startMs) : null
+        patch = feed ? { einstieg_nq: feed.preis, einstieg_quelle: 'feed_start', einstieg_wurzel: feed.wurzel }
+                     : { einstieg_nq: Number(t.einstieg_nq), einstieg_quelle: 'kerze_start', einstieg_wurzel: t.symbol_root || wurzel }
+        if(!(patch.einstieg_nq > 1000)) patch = {}
+      }
+      const bal = (!hatBalance && startMs) ? tvKontoBalanceVorStart(p, startMs) : null
+      if(bal) Object.assign(patch, { balance_start: bal.balance, balance_start_at: bal.at, balance_start_quelle: 'konto_balance' })
+      else if(!hatBalance) console.info('[handstart] keine Konto-Balance vor dem Start — Start-Balance bleibt leer', pid)
+      if(!Object.keys(patch).length) return
+      patch.handstart_at = (tv && tv.handstart_at) || new Date().toISOString()
       if(!tv) Object.assign(patch, { konto: tvV2Konto(p), datum_start: tvV2Handelstag(startMs || Date.now()), at: p.startedAt || patch.handstart_at,
                                      puls: 'tv', pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : null, grund: 'handstart' })
       await baselinePatchIn(pid, 'tv', patch, 'open')
-      if(typeof atToast === 'function') atToast(`✓ ${p.masterName || 'Plan'}: von Hand gestartet — Einstieg ${patch.einstieg_nq.toLocaleString('de-DE')} (${feed ? 'Kurs beim Start' : 'Startminute'}) im Radar`, 'start')
+      if(patch.einstieg_nq > 1000 && typeof atToast === 'function') atToast(`✓ ${p.masterName || 'Plan'}: von Hand gestartet — Einstieg ${patch.einstieg_nq.toLocaleString('de-DE')} (${feed ? 'Kurs beim Start' : 'Startminute'}) im Radar`, 'start')
     }catch(e){ console.warn('[handstart]', e) }
   }
   window._tvV2HandstartEinstieg = tvV2HandstartEinstieg   // Test-Haken
@@ -21102,7 +21123,9 @@
       for(const t of ((d && d.trades) || [])){
         const pid = String(t.id || t.plan_id || ''), dm = t.demo || {}
         const p = offen.find(x => String(x.id) === pid); if(!p) continue
-        if(t.einstieg_quelle === 'kerze_start') await tvV2HandstartEinstieg(p, t)
+        // Handstart auch mit eingefrorenem Einstieg ('feed_start'), solange die Start-Balance fehlt (29.09.2026)
+        const _tvH = (p.mt5Baseline && p.mt5Baseline.tv) || {}
+        if(t.einstieg_quelle === 'kerze_start' || (_tvH.handstart_at && typeof _tvH.balance_start !== 'number')) await tvV2HandstartEinstieg(p, t)
         if(!['tp', 'liquidiert', 'beide_in_minute'].includes(dm.status)) continue
         const alt = _demoEndeVersucht.get(pid); if(alt && Date.now() - alt < 60000) continue
         _demoEndeVersucht.set(pid, Date.now())
@@ -23415,11 +23438,15 @@
     const zeilen = offen.map(x => {
       const pid = String(x.id), w = mklWdAbhakenWerte(x), busy = !!mkl.wd.busy[pid + ':abh']
       const m = mklWdZahlLesen(w.mText), f = mklWdZahlLesen(w.fText)
-      const summe = (m != null && !isNaN(m) && f != null && !isNaN(f)) ? m * fx + f : (m != null && !isNaN(m) && !(Number(x.hedge_eur) > 0) ? m * fx : null)
+      const tvBs = (x.tv && x.tv.balance_start_quelle) ? x.tv : ((((tradePlans || []).find(q => String(q.id) === pid) || {}).mt5Baseline || {}).tv || null)
+      const summe =(m != null && !isNaN(m) && f != null && !isNaN(f)) ? m * fx + f : (m != null && !isNaN(m) && !(Number(x.hedge_eur) > 0) ? m * fx : null)
       const feld = (art, text, einheit, quelle, hand) => `<label class="mwd-box"><span class="mwd-box-t">${art === 'm' ? 'Master' : 'Fusion'} ${einheit}</span>`
         + `<input type="text" inputmode="decimal" class="input mono mwd-abh-in" data-abh-plan="${escapeHtml(pid)}" data-abh-feld="${art}" value="${escapeHtml(text)}" placeholder="0,00"${busy ? ' disabled' : ''}>`
         + `<span class="mwd-box-s">${escapeHtml(hand ? 'von Hand geändert' : quelle)}</span>`
-        + ((art === 'm' && !hand && w.mPruefen) ? `<span class="mwd-box-s" style="color:#B45309;font-weight:600">${escapeHtml(w.mPruefen)}</span>` : '') + `</label>`
+        + ((art === 'm' && !hand && w.mPruefen) ? `<span class="mwd-box-s" style="color:#B45309;font-weight:600">${escapeHtml(w.mPruefen)}</span>` : '')
+        // Handstart (29.09.2026): Start-Balance kam aus der Konto-Lesung vor dem Start, nicht aus Puls beim Platzieren.
+        // /admin/wd-plaene liefert tv nur gekürzt — sonst aus dem eigenen Plan-Cache (eigene IDs)
+        + ((art === 'm' && tvBs && tvBs.balance_start_quelle === 'konto_balance') ? `<span class="mwd-box-s">Start-Balance aus Konto-Lesung ${tvBs.balance_start_at ? new Date(tvBs.balance_start_at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : ''}</span>` : '') + `</label>`
       return `<div class="mwd-abh" data-mwd-abh="${escapeHtml(pid)}">${kopf(x)}${(x.route === 'tvv2' || x.route === 'tsv2') ? endlesungZeileHtml(pid, x.endlesung || x.final, x.status, 'data-mwd-lesen') : ''}<div class="mwd-abh-werte">`
         + feld('m', w.mText, '$', w.mq, w.mHand) + feld('f', w.fText, '€', w.fq, w.fHand)
         + `<div class="mwd-box mwd-box-sum"><span class="mwd-box-t">zusammen</span><span class="mwd-box-v" data-abh-summe="${escapeHtml(pid)}" style="color:${col(summe)}">${summe == null ? '–' : '≈ ' + sig(summe, '€')}</span><span class="mwd-box-s">Master × ${fx.toLocaleString('de-DE', { maximumFractionDigits: 3 })} + Fusion</span></div>`
@@ -35458,7 +35485,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.750'
+  const OS_TAB_BUILD = '2026-09-22.751'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
