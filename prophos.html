@@ -35587,7 +35587,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.760'
+  const OS_TAB_BUILD = '2026-09-22.761'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -41542,6 +41542,10 @@
       // Haken = DAUERHAFT (26.09.2026, Finn: „einmal live stellen, dann jeden Tag automatisch, bis ich Stopp drücke") — geht auch bei
       // IDs, die für den Tag noch nicht eingetragen sind (vorher gesperrt, bis gewürfelt war). „nur heute" ist ein eigener Knopf.
       const hakenSperre = fest || planFest || (k.archiviert && !k.plan_id)
+      // Haken zeigt „heute drin" (29.09.2026, Finn bei Chris: Konto dauerhaft im Farm, heute abgewählt → das Kästchen stand ANGEHAKT;
+      // „Haken setzen" nahm es in Wahrheit dauerhaft raus, nach dem Würfeln blieb es draußen). Heute abgewählt (mit External ID, nicht
+      // archiviert) = leeres Kästchen; ein Tipp → wdKontoHaken(an) setzt es dauerhaft UND für heute rein. „nur heute raus" bleibt Tag-only.
+      const hakenAn = k.farm && (k.aktiv !== false || !k.ext || k.archiviert)
       const tagKnopf = (!erw && !fest && !planFest && k.farm && k.ext && !k.archiviert)
         ? `<button type="button" class="btn btn-ghost btn-xs" data-wd-heute="${escapeHtml(String(k.id))}" data-wd-heute-rein="${k.aktiv === false ? '1' : ''}" title="${k.aktiv === false ? 'für diesen Tag wieder mitfahren lassen' : 'nur an diesem Tag auslassen — morgen fährt das Konto wieder mit'}">${k.aktiv === false ? 'heute wieder rein' : 'nur heute raus'}</button>` : ''
       const start = k.plan_id && k.start_um ? wdHhmm(k.start_um) : (wdAktiv(k) && zeiten.get(String(k.id))) ? wdHhmm(zeiten.get(String(k.id))) : '—'
@@ -41558,7 +41562,7 @@
       const slave = (k.slave != null) ? `${escapeHtml(k.waehrung || '€')}${de(k.slave)}` : (wdAktiv(k) ? '<span class="kf">nach Staffel</span>' : '—')
       const wd = kd.winning_days != null ? `${kd.winning_days}${kd.goal_target ? `<span class="kf"> / ${kd.goal_target}</span>` : ''}` : '—'
       return `<tr class="${aus ? 'aus' : ''}">
-        <td><input type="checkbox" data-wd-konto="${escapeHtml(String(k.id))}" ${k.farm ? 'checked' : ''} ${hakenSperre ? 'disabled' : ''} title="Haken = dauerhaft im Farm: jeden Handelstag neu gewürfelt und gefahren, bis du ihn rausnimmst"></td>
+        <td><input type="checkbox" data-wd-konto="${escapeHtml(String(k.id))}" ${hakenAn ? 'checked' : ''} ${hakenSperre ? 'disabled' : ''} title="${hakenAn || !k.farm ? 'Haken = dauerhaft im Farm: jeden Handelstag neu gewürfelt und gefahren, bis du ihn rausnimmst' : 'dauerhaft im Farm, heute abgewählt — Haken setzen = heute wieder rein'}"></td>
         <td><div class="kn">${escapeHtml(k.name || '')}</div><div class="kf">${escapeHtml(k.firm || '')}${k.ext ? ' · ' + escapeHtml(k.ext) : ' · <span style="color:var(--danger)">ohne External ID</span>'}</div></td>
         <td class="mono">${wd}</td><td class="mono">${bal}</td><td class="mono">${start}</td><td>${tpFeld}</td><td>${slFeld}</td><td class="mono">${dd}</td><td class="mono">${slave}</td><td>${wdStand(k)}${tagKnopf ? `<div style="margin-top:3px">${tagKnopf}</div>` : ''}</td></tr>`
     }).join('')
