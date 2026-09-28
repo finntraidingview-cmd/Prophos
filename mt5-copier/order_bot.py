@@ -5239,6 +5239,68 @@ def tv_im_panel(roh, bereich, muster, y_von=None, y_bis=None):
     return out
 
 
+def tv_knopf_ausser_sicht(roh):
+    """Senden-Knoepfe ('Buy 3 NQZ6 MARKET'), die im Scan OHNE Rechteck stehen — die Sammelabfrage gibt Elemente
+    ausserhalb des Bildes (IsOffscreen) so zurueck, tv_im_panel verwirft sie. Nur Namen mit Orderart (market/markt/mkt):
+    der Seiten-Kasten 'Buy 30,650.50' zaehlt nicht. -> [(name, typ)] ohne Doppelte"""
+    out = []
+    for e in roh or ():
+        if e[1]:
+            continue
+        n = tv_name_norm(e[0])
+        if TV_RX_SENDEN.search(n) and re.search(r"market|markt|\bmkt\b", n, re.I):
+            k = (n[:80], e[2] if len(e) > 2 else "")
+            if k not in out:
+                out.append(k)
+    return out
+
+
+def _tv_uia_in_sicht(w, name, typ="Button"):
+    """Element mit genau diesem (normalisierten) Namen per UIA ScrollItemPattern.ScrollIntoView ins Bild holen — KEIN
+    Klick, nur Scrollen. -> True, wenn der Aufruf durchging."""
+    try:
+        els = w.descendants(control_type=typ or "Button")
+    except Exception:
+        return False
+    for e in els[:4000]:
+        try:
+            if tv_name_norm(e.window_text())[:80] != name:
+                continue
+            e.iface_scroll_item.ScrollIntoView()
+            return True
+        except Exception:
+            continue
+    return False
+
+
+def tv_knopf_inventar(roh, bereich, y_von, max_n=40):
+    """Was stand im Panel unter der Stop-Loss-Zeile? Fuer die Fehlermeldung, wenn der Kauf-Knopf fehlt (tv_uia_spur
+    filtert auf Login-/Broker-Woerter und zeigt den Knopf nie). -> ([name, typ, [l,t,r,b]|None], lesbarer Text);
+    Elemente ausserhalb des Bildes stehen mit None und '(ausser Sicht)' dabei."""
+    liste, gesehen = [], set()
+    for e in roh or ():
+        typ = e[2] if len(e) > 2 else ""
+        n = tv_name_norm(e[0])[:60]
+        if e[1]:
+            l, t, r, b = e[1]
+            if not (bereich["links"] <= (l + r) // 2 <= bereich["rechts"]) or (t + b) // 2 < y_von:
+                continue
+            eintrag = [n, typ, [l, t, r, b]]
+        elif TV_RX_SENDEN.search(n):
+            eintrag = [n, typ, None]
+        else:
+            continue
+        k = (n, typ, eintrag[2] is None)
+        if k in gesehen:
+            continue
+        gesehen.add(k)
+        liste.append(eintrag)
+        if len(liste) >= max_n:
+            break
+    text = " | ".join(f"{typ}:{n}" + (f"@{r[1]}" if r else " (ausser Sicht)") for n, typ, r in liste[:15])
+    return liste, (text or "nichts")
+
+
 def tv_feld_unter(felder_r, label_r, bereich, max_abstand=70):
     """Index des Eingabefelds DIREKT UNTER einer Beschriftung: im Panel, Oberkante
     bis max_abstand unter der Beschriftung; bei mehreren das LINKE (rechts daneben
@@ -6245,10 +6307,44 @@ def tv_order_schritt(w, cmd, trail, erg=None):
     roh, _b = blick()
     # UNTER der Stop-Loss-Zeile suchen: der Seiten-Kasten oben heisst sonst auch
     # 'Buy 30,827.75' und saehe aus wie ein Kauf-Knopf.
-    knopf = tv_im_panel(roh, ber, TV_RX_SENDEN, y_von=lab["r"][3])
+    y_knopf = lab["r"][3]
+    knopf = tv_im_panel(roh, ber, TV_RX_SENDEN, y_von=y_knopf)
+    if not knopf:
+        # 29.09.2026 (Jacob pc-8jcrsm, order_signale 47979c82, 28.09. 13:41 UTC — Ticket fertig: Buy 3, TP 7500 $, Klick
+        # fehlte, Jacob kaufte von Hand): beim ersten Panel-Blick war der Knopf da (die Box 342x450 reicht nur mit ihm bis
+        # unten), 16 s spaeter 0 Treffer — zugleich war auch die Positions-Tabelle unten weg. Die Sammelabfrage liefert
+        # Elemente AUSSERHALB des Bildes ohne Rechteck, tv_im_panel verwirft sie: ein weggeschobener Knopf heisst dann
+        # '0 Treffer'. Deshalb bis ~3 s nachschauen und einen Knopf ausser Sicht per UIA ins Bild holen (ScrollIntoView,
+        # KEIN Klick). Der Beweis danach bleibt unveraendert (Text, Menge, Symbol) — nie auf Koordinaten klicken.
+        t_k, geholt = time.time(), False
+        while not knopf and time.time() - t_k < 3.0:
+            weg = tv_knopf_ausser_sicht(roh)
+            if weg and not geholt:
+                geholt = True
+                if _tv_uia_in_sicht(w, weg[0][0], weg[0][1]):
+                    trail.append(f"Kauf-Knopf lag ausser Sicht ('{weg[0][0][:40]}') — per UIA ins Bild geholt")
+                else:
+                    trail.append(f"Kauf-Knopf ausser Sicht ('{weg[0][0][:40]}'), ins Bild holen ging nicht")
+            _warte(0.5, 0.3)
+            roh, _b = blick()
+            if geholt:
+                # nach dem Scrollen steht auch die Stop-Loss-Zeile woanders: dieselbe Beschriftung (gleiche Spalte) neu lesen
+                sl_neu = [s for s in tv_im_panel(roh, ber, TV_RX_SL) if abs(s["r"][0] - lab["r"][0]) <= 20]
+                if sl_neu:
+                    y_knopf = max(s["r"][3] for s in sl_neu)
+            knopf = tv_im_panel(roh, ber, TV_RX_SENDEN, y_von=y_knopf)
+        if knopf:
+            trail.append(f"Kauf-Knopf nach {time.time() - t_k:.1f} s lesbar")
     if len(knopf) != 1:
-        return False, (f"Der Kauf-Knopf unten im Panel ist nicht eindeutig ({len(knopf)} Treffer). "
-                       "Gesehen: " + tv_uia_spur(roh))
+        inv, inv_text = tv_knopf_inventar(roh, ber, y_knopf)
+        msg_k = (f"Der Kauf-Knopf unten im Panel ist nicht eindeutig ({len(knopf)} Treffer). "
+                 f"Im Panel unter '{lab['text'][:20]}': {inv_text}")
+        if not knopf:
+            # Inventar in die DB (puls_inventar), damit der naechste Fall beweisbar ist — vorher gab es fuer pc-8jcrsm keins
+            _puls_inventar_senden({"ok": False, "code": "tv_knopf", "msg": msg_k[:200], "schritt": "order",
+                                   "inventar": {"grund": inv},
+                                   "ausloeser_kandidaten": [[n, typ, None] for n, typ in tv_knopf_ausser_sicht(roh)]}, trail)
+        return False, msg_k
     ok, f = tv_senden_text_passt(knopf[0]["text"], plan["richtung"], plan["menge"])
     if not ok and f.startswith("Menge "):
         # 24.09.2026 00:0x (Finns Screenshot, Auto-Start angehalten): Units stand auf 1, der
@@ -6262,7 +6358,7 @@ def tv_order_schritt(w, cmd, trail, erg=None):
             setze_wert(feld_u, float(plan["menge"]), "Units")
             _warte(0.6, 0.3)
             roh, _b = blick()
-            knopf = tv_im_panel(roh, ber, TV_RX_SENDEN, y_von=lab["r"][3])
+            knopf = tv_im_panel(roh, ber, TV_RX_SENDEN, y_von=y_knopf)
             if len(knopf) == 1:
                 ok, f = tv_senden_text_passt(knopf[0]["text"], plan["richtung"], plan["menge"])
             else:
