@@ -20744,6 +20744,59 @@
     try{ _autoPnlCache.delete(pid) }catch(_){}
     return { m: m == null ? null : m, res }
   }
+  /* „BEENDET" PRÜFT ERST (28.09.2026, Finn: „einfach auf ‚Beendet' drücken, dann loggt Puls sich automatisch ein und liest, wie viel
+   * es letztendlich war — ist die Order noch live, geht Puls zurück in Prophos und es passiert einfach nichts"). Nur für laufende
+   * Puls-Pläne, am PC des Plans (Aufruf aus tvV2EndlesungVersuch, lokal oder per Signal 'endlesung'). Eine Lesung (tv-lesen im
+   * Ende-Modus, eine Maus wie die Endlesung): Position offen → {offen:true}, Plan bleibt „Läuft"; flach → Ende mit gelesener Balance
+   * (final quelle 'puls', grund 'beendet_knopf') → Überprüfen, Master-P&L = Balance nachher − vorher. Lesung gescheitert → nichts
+   * geändert, der Knopf setzt dann von Hand (mklWdAktion). */
+  async function tvV2BeendetPruefen(p0){
+    const pid = String(p0.id)
+    if(!tvV2EndlesungPcPasst(p0)) return { ok: false, msg: `Plan gehört zu PC ${tvV2EndlesungPc(p0)} — dort prüft Puls` }
+    const konto = tvV2Konto(p0)
+    if(!konto) return { ok: false, msg: 'Master-Konto ohne External ID' }
+    const w = (typeof tpOrbitWerte === 'function') ? tpOrbitWerte(p0) : { symbol: p0.masterSymbol || '', dir: p0.richtung }
+    const dir = (w.dir === 'buy' || w.dir === 'sell') ? w.dir : ''
+    const t0 = Date.now()
+    let r = null
+    for(;;){
+      let belegt = true; try{ belegt = !!_tpOrbitLaeuft || !!tvV2Poll.busy }catch(_){ belegt = true }
+      if(!belegt){
+        tvV2Poll.busy = true
+        try{ r = await tvV2Lesen(konto, 45, p0, { ende: true, symbol: w.symbol || '', richtung: dir }) }
+        catch(e){ r = { ok: false, code: 'reader_fehlt', msg: String((e && e.message) || e) } }
+        finally{ tvV2Poll.busy = false }
+        if(!(r && !r.ok && r.code === 'puls_beschaeftigt')) break
+      }
+      if(Date.now() - t0 > 180000){ r = r || { ok: false, code: 'puls_belegt', msg: 'Puls/Rundgang 3 min belegt' }; break }
+      await new Promise(res => setTimeout(res, 8000 + Math.random() * 6000))
+    }
+    const erg = tvV2EndlesungAuswerten(r, w.symbol, dir)
+    const name = p0.masterName || 'Plan'
+    if(erg.offen){
+      if(typeof atToast === 'function') atToast(`${name}: Order läuft laut TradingView noch — nichts geändert`, 'start')
+      return { ok: false, offen: true, msg: 'Order läuft laut TradingView noch — Plan bleibt „Läuft"' }
+    }
+    if(!erg.ok) return { ok: false, msg: 'Puls konnte den Stand nicht lesen: ' + erg.fehler }
+    const nowIso = new Date().toISOString()
+    const extra = { grund: 'beendet_knopf', puls_at: nowIso, puls_versuche: 1, puls_flach: erg.flach, puls_fehler: null, puls_konto: (r && r.konto_aktiv) || null,
+                    balance_end: erg.balance, equity_end: erg.equity, lesen_trail: String((r && r.trail) || '').slice(0, 2000), lesen_at: nowIso }
+    if(r && r.exit_fill && typeof r.exit_fill === 'object') extra.exit_fill = tvJsonKurz(r.exit_fill, 400)
+    let ok = false
+    try{ ok = await tvV2EndeSetzen(p0, erg.today, 'puls', extra) }catch(e){ return { ok: false, msg: 'Ende nicht geschrieben: ' + String((e && e.message) || e) } }
+    if(!ok) return { ok: false, msg: 'Plan lief schon nicht mehr — nichts geschrieben' }
+    try{ const pf = tradePlans.find(x => String(x.id) === pid); if(pf && pf.status === 'open' && typeof atMoveToReview === 'function') await atMoveToReview(pf) }catch(e){ console.warn('[beendet] Überprüfen', e) }
+    if(erg.balance != null) tvKontoBalanceSchreiben(p0.masterAccountId, { balance: erg.balance, equity: erg.equity }, nowIso)
+    let msg = erg.balance != null ? `beendet · Balance ${erg.balance.toLocaleString('de-DE', { minimumFractionDigits: 2 })} $` : 'beendet'
+    try{
+      const { data } = await supabase.from('trade_plans').select('*').eq('id', pid).maybeSingle()
+      if(data){ const pn = rowToPlan(data); const { m } = await tvV2MasterPlAusBalance(pid, pn, {}, pn.mt5Baseline)
+        if(m != null) msg = `beendet · Master-P&L ${m >= 0 ? '+' : '−'}${Math.abs(m).toLocaleString('de-DE', { minimumFractionDigits: 2 })} $ aus TradingView` }
+    }catch(e){ console.warn('[beendet] P&L', e) }
+    if(typeof atToast === 'function') atToast(`✓ ${name}: ${msg}`, 'end')
+    try{ renderTradePlans() }catch(_){}
+    return { ok: true, msg }
+  }
   // -> immer {ok, msg} (nie werfen) — für den Knopf „Jetzt lesen" und den Signal-Empfänger
   async function tvV2EndlesungVersuch(pid, opts){
     pid = String(pid)
@@ -20755,6 +20808,7 @@
       let p0 = tradePlans.find(x => String(x.id) === pid)
       try{ const { data } = await supabase.from('trade_plans').select('*').eq('id', pid).maybeSingle(); if(data) p0 = rowToPlan(data) }catch(_){}
       if(!p0) return { ok: false, msg: 'Plan nicht gefunden' }
+      if(p0.status === 'open' && planIstPuls(p0)) return await tvV2BeendetPruefen(p0)   // Knopf „Beendet" (28.09.2026)
       const grund = tvV2EndlesungGrund(p0, Date.now(), force)
       if(grund) return { ok: false, msg: grund }
       if(!tvV2EndlesungPcPasst(p0)) return { ok: false, msg: `Plan gehört zu PC ${tvV2EndlesungPc(p0)} — dort liest Puls` }
@@ -20874,7 +20928,7 @@
         const d = st && st.d
         if(d && d.status && !['wartet', 'laeuft'].includes(d.status)){
           const e = d.ergebnis || {}
-          return { ok: !!e.ok, signal: true, msg: String(e.msg || (d.status === 'verfallen' ? 'Kein PC hat das Signal binnen 3 min übernommen — läuft Prophos auf dem PC des Plans?' : d.status)) }
+          return { ok: !!e.ok, offen: !!e.offen, signal: true, msg: String(e.msg || (d.status === 'verfallen' ? 'Kein PC hat das Signal binnen 3 min übernommen — läuft Prophos auf dem PC des Plans?' : d.status)) }
         }
       }
       return { ok: false, signal: true, msg: 'Der PC hat binnen 4 min nicht geantwortet — die Statuszeile zeigt den Stand, sobald er liest' }
@@ -23016,7 +23070,7 @@
         const hedgeHier = !!(h && ['offen', 'schliesst'].includes(h.status) && MT5_LOCAL && h.pc && typeof hedgePcId === 'function' && h.pc === hedgePcId())
         aktionen = `<span class="mwd-aktionen">`
           + (hedgeHier ? knopf('hedge', 'Hedge zu', 'Fusion-Gegenposition jetzt schließen (dieser PC hält sie)') : '')
-          + knopf('ende', 'Beendet', 'Master ist schon zu (von Hand) — Plan als beendet setzen, danach Master- und Fusion-P&L eintragen')
+          + knopf('ende', 'Beendet', pw.route === 'tvv2' ? 'Puls prüft sofort in TradingView: Position zu → Plan beendet + Balance gelesen; noch offen → nichts passiert' : 'Master ist schon zu (von Hand) — Plan als beendet setzen, danach Master- und Fusion-P&L eintragen')
           // echter TP aus TradingView (28.09.2026, Vorfall Jacob): Level von Hand setzen, der Wächter schließt dann bei TP ± Puffer
           + ((h && ['offen', 'schliesst', 'oeffnet', 'wartet'].includes(String(h.status || ''))) ? `<button type="button" class="btn btn-ghost mwd-btn" data-mwd-tp="${escapeHtml(String(pw.id))}" title="Echten TP aus TradingView (Sell-/Buy-Limit-Linie, NQ-Preis) eintragen — Fusion schließt dann bei TP ± ${hedgePufferTicks()} Ticks">✎ TP aus TV</button>` : '')
           // echter Entry aus TradingView (28.09.2026, Finn: Feed-Einstieg 30.818,75 statt Fill 30.819,50): Einstieg setzen, Level neu rechnen
@@ -23532,6 +23586,17 @@
     mkl.wd.frage = null; mkl.wd.busy[key] = true; mklWdRender()
     const pw = (mkl.wd.plaene || []).find(x => String(x.id) === pid) || {}
     try{
+      if(aktion === 'ende' && pw.route === 'tvv2' && typeof tvV2EndlesungJetzt === 'function'){
+        // Erst Puls prüfen (28.09.2026, Finn): offen → nichts, flach → Ende mit gelesener Balance. Nur wenn Puls gar nicht lesen
+        // konnte, fällt der Knopf auf das Setzen von Hand zurück (unten) — Puls liest dann 1–200 min später nach.
+        if(typeof atToast === 'function') atToast(`Puls prüft ${(pw.konto && pw.konto.name) || pw.person || '—'} in TradingView…`, 'start')
+        const pr = await tvV2EndlesungJetzt(pid)
+        if(pr.ok || pr.offen || /schon nicht mehr|nicht in „Überprüfen/.test(String(pr.msg || ''))){
+          if(typeof atToast === 'function') atToast(pr.offen ? `Läuft noch: ${(pw.konto && pw.konto.name) || '—'} — nichts geändert` : `✓ ${pr.msg || 'beendet'}`, pr.offen ? 'start' : 'end')
+          mkl.wd.at = 0; try{ await mklWdLaden() }catch(_){} ; return
+        }
+        if(typeof atToast === 'function') atToast(`Puls konnte nicht prüfen (${pr.msg || '—'}) — als beendet gesetzt, Puls liest später nach`, 'end')
+      }
       if(aktion === 'ende'){
         // EIN Weg für alle IDs (Koordination 25.09.2026, Backend .539): Railway setzt final {quelle:'hand'} + status review +
         // ended_at in einem Schritt — auch für fremde Pläne, die trade_plans-RLS hier nicht schreiben ließe. Den Fusion-Hedge
@@ -35286,7 +35351,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.742'
+  const OS_TAB_BUILD = '2026-09-22.743'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -36648,10 +36713,10 @@
     if(!neuB){ if(typeof loadTradePlansFromSupabase === 'function') loadTradePlansFromSupabase(); return false }
     const fresh = tradePlans.find(x => String(x.id) === String(plan.id)) || Object.assign({}, plan, { mt5Baseline: neuB })
     try{ tvV2Poll.wasOpen.delete(String(plan.id)); tvV2Poll.streak.delete(String(plan.id)) }catch(_){}
-    if(fin.today_pnl == null && fin.quelle !== 'level' && fin.quelle !== 'demo' && typeof atToast === 'function') atToast(`⚠ Orbit V2: geschlossen, aber kein Today's P&L gelesen — Puls liest nach (${plan.masterName || '—'})`, 'end')
+    if(fin.today_pnl == null && fin.balance_end == null && fin.quelle !== 'level' && fin.quelle !== 'demo' && typeof atToast === 'function') atToast(`⚠ Orbit V2: geschlossen, aber kein Today's P&L gelesen — Puls liest nach (${plan.masterName || '—'})`, 'end')
     if(typeof atShowEndPrompt === 'function') atShowEndPrompt(fresh)
     // JEDES Ende ohne Zahl (Level, Master weg laut Reader, Schließen/Auto-Close ohne Today's P&L) → Puls-Endlesung (25.09.2026)
-    if(fin.today_pnl == null && typeof tvV2EndlesungAnstossen === 'function') tvV2EndlesungAnstossen(plan.id)
+    if(fin.today_pnl == null && fin.balance_end == null && typeof tvV2EndlesungAnstossen === 'function') tvV2EndlesungAnstossen(plan.id)
     // FUSION-GEGENHEDGE (24.09.2026 abends): Master ist zu → Hedge sofort zu (der Wächter täte es binnen 5 s
     // ohnehin, sobald der Plan „review" ist — hier ohne Wartezeit, mit dem frischen Plan-Objekt).
     try{ if(typeof hedgeSoloSchliessen === 'function' && fresh.mt5Baseline && fresh.mt5Baseline.hedge && fresh.mt5Baseline.hedge.status === 'offen') hedgeSoloSchliessen(fresh, 'master_ende') }catch(_){}
@@ -42462,13 +42527,12 @@
   function tcWdFarmPrepare(p){
     const wrap = document.getElementById('tc-wd-farm-wrap'), cb = document.getElementById('tc-wd-farm'), lbl = document.getElementById('tc-wd-farm-label')
     if(!wrap || !cb || !lbl) return
+    // Nie mehr im Abschluss (28.09.2026, Finn: „nicht nach jedem Funded-Trade fragen, ob er zum WD-Farm gehört — das stelle ich
+    // von Hand in den Account-Einstellungen ein"). Haken bleibt nur im Bearbeiten-Popup des Kontos (ac-wd-farm-row).
+    wrap.hidden = true; return
     const a = (accounts || []).find(x => String(x.id) === String(p.masterAccountId))
-    const t = String((a && a.type) || '').toLowerCase()
-    // CFD-Konten nie (28.09.2026, Finn: „bei CFD gibt es ja keine Winning Days") — nur Futures-Master farmen
-    if(!a || !(t === 'funded' || t === 'live' || t === 'winning_days') || tpFirmIstCfd(a.firm)){ wrap.hidden = true; return }
-    wrap.hidden = false
-    cb.checked = !!a.wdFarm
-    lbl.textContent = `${a.wdFarm ? 'Im WD-Farm' : 'Nicht im WD-Farm'} — ${a.name}`
+    cb.checked = !!(a && a.wdFarm)
+    lbl.textContent = `${a && a.wdFarm ? 'Im WD-Farm' : 'Nicht im WD-Farm'} — ${a ? a.name : ''}`
   }
   /* Winning-Day-Kennzeichen am Trade (25.09.2026): Haken nur bei Funded/Live-Master. Vorbelegung = gespeicherter
    * Wert; nie gesetzt → Faustregel wie im Backend (_hq_typ_trade): Master-Risiko < 1.000 $, ohne Risiko |Master-P&L|. */
@@ -42477,9 +42541,12 @@
     if(!wrap || !cb) return
     const a = (accounts || []).find(x => String(x.id) === String(p.masterAccountId))
     const t = String((a && a.type) || '').toLowerCase()
-    // CFD-Konten nie (28.09.2026, Finn: „bei CFD gibt es ja keine Winning Days")
-    if(!a || !(t === 'funded' || t === 'live' || t === 'winning_days') || tpFirmIstCfd(a.firm)){ wrap.hidden = true; return }
+    // Nur noch bei Kontotyp „Winning Days" (28.09.2026, Finn: „Winning Day nur, wenn der Account-Typ so gespeichert ist, nicht bei
+    // jedem Funded") — Funded/Live fragen nicht mehr, winning_day bleibt dort unangetastet (Speichern nur bei sichtbarem Haken);
+    // CFD-Konten nie („bei CFD gibt es ja keine Winning Days")
+    if(!a || t !== 'winning_days' || tpFirmIstCfd(a.firm)){ wrap.hidden = true; return }
     wrap.hidden = false
+    if(p.winningDay == null){ cb.checked = true; if(hint) hint.textContent = 'Konto ist vom Typ Winning Days — Haken raus, wenn es der Big Trade war.'; return }
     if(p.winningDay === true || p.winningDay === false){
       cb.checked = p.winningDay
       if(hint) hint.textContent = 'Gespeichert — die Statistik rechnet ihn ' + (p.winningDay ? 'als Winning Day.' : 'als Big Trade.')

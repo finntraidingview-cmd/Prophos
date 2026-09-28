@@ -7153,6 +7153,13 @@ def _wd_endlesung_signal(plan):
         return None, (404, "Plan nicht gefunden")
     if plan.get("route") != "tvv2":
         return None, (409, "Kein Orbit-V2-/Winning-Day-Plan")
+    if plan.get("status") == "open":
+        # Knopf „Beendet“ (28.09.2026): laufender Plan → der PC prüft erst in TradingView (tvV2BeendetPruefen), offen = nichts
+        uid = str(plan.get("user_id") or "")
+        if len(uid) < 10:
+            return None, (409, "Plan ohne Besitzer")
+        return {"user_id": uid, "plan_id": str(plan.get("id")), "status": "wartet",
+                "params": {"aktion": "endlesung", "von": "admin", "pruefen": True}}, None
     if plan.get("status") != "review":
         return None, (409, f"Plan ist nicht in „Überprüfen“ (Status {plan.get('status')})")
     base = plan.get("mt5_baseline") if isinstance(plan.get("mt5_baseline"), dict) else {}
