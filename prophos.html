@@ -538,6 +538,9 @@
     border-bottom:1px solid var(--border-soft);
     display:flex;align-items:center;gap:14px;
     padding:0 28px;position:sticky;top:0;z-index:30;
+    /* min-width:0 (29.09.2026): als Grid-Element nahm die Spalte sonst die min-content-Breite der Kopfzeile — der nowrap-Titel
+       zählte voll, die Ellipsis-Regel griff nie; mit der Puls-Pille lief die Seite bei 1024 px auf 1128 px über */
+    min-width:0;
   }
   #dashboard-view .tb-title{font-size:15px;font-weight:600;letter-spacing:-.01em}
   #dashboard-view .tb-sub{font-size:12.5px;color:var(--sub);margin-left:8px}
@@ -581,6 +584,8 @@
   #dashboard-view .tb-puls.is-bald{border-color:rgba(245,158,11,.45);background:rgba(245,158,11,.10)}
   #dashboard-view .tb-puls.is-bald .tb-puls-dot{background:#f59e0b}
   #dashboard-view .tb-puls[hidden]{display:none}
+  /* Schmaler Desktop (29.09.2026): ohne Uhrzeit — „Puls · in 8 min", damit der Titel Platz behält */
+  @media (max-width: 1180px){ #dashboard-view .tb-puls .tb-puls-uhr{display:none} }
   /* Handy: nur Punkt + „in n min" — sonst schiebt die Pille Glocke und Avatar aus dem Bild */
   @media (max-width: 640px){
     #dashboard-view .tb-puls{padding:0 8px;margin-right:0;gap:5px;font-size:11.5px;height:28px}
@@ -35498,7 +35503,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.752'
+  const OS_TAB_BUILD = '2026-09-22.753'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
