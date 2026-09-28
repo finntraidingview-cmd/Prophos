@@ -7187,7 +7187,7 @@
               </select>
             </div>
             <div class="field">
-              <label>Betrag (<span id="fin-cur-label">$</span>)</label>
+              <label>Betrag (<span id="fin-cur-label">€</span>)</label>
               <input type="number" class="input mono" id="fin-amount" step="0.01" placeholder="z.B. 1500">
             </div>
             <div class="field">
@@ -35256,7 +35256,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.736'
+  const OS_TAB_BUILD = '2026-09-22.737'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -44376,6 +44376,9 @@
 
     document.getElementById('fin-amount').value = ''
     document.getElementById('fin-currency').value = 'EUR'   // Finanzen laufen in Euro
+    // Programmatisches .value feuert kein change — ohne diesen Aufruf stand
+    // „Betrag ($)" neben EUR (Finn 28.09.2026)
+    updateFinCurLabel()
     document.getElementById('fin-date').value = new Date().toISOString().slice(0,10)
     document.getElementById('fin-notes').value = ''
     document.getElementById('finModalMsg').textContent = ''
