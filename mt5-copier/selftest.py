@@ -1878,7 +1878,6 @@ def main():
     results.append(test_puls_heim())
     results.append(test_tv_tp_orders())
     results.append(test_hedge_bereit())
-    results.append(test_bot_begleiter())
     results.append(test_quickedit())
 
     print()
@@ -2068,38 +2067,6 @@ def test_quickedit():
                 mod.os.name = alt
     if ok:
         print("✓ QuickEdit aus: Bit-Logik, Nicht-Windows kein Eingriff, ohne Konsole kein Absturz (copier + panel)")
-    return ok
-
-
-def test_bot_begleiter():
-    """Script-Augen (29.09.2026): augen.js kommt mit derselben Commit-Kennung wie order_bot.py; ohne Kennzeichen/zu kurz/Fehler
-    nie ersetzt, gleicher Inhalt nie neu geschrieben; ein Fehler beim Begleiter bricht nichts ab."""
-    import panel, tempfile, os
-    d = tempfile.mkdtemp()
-    alt_here, alt_rd = panel.HERE, panel.repo_datei
-    gefragt = []
-    inhalt = {"mt5-copier/augen.js": b"/* x */ var PROPHOS_AUGEN = (function(){ return {}; })();" + b" " * 300}
-    def fake(pfad, sha=None, timeout=15):
-        gefragt.append((pfad, sha))
-        if pfad not in inhalt:
-            raise OSError("404")
-        return inhalt[pfad]
-    ok = True
-    try:
-        panel.HERE, panel.repo_datei = d, fake
-        n1 = panel.ensure_bot_begleiter("abc1234")
-        n2 = panel.ensure_bot_begleiter("abc1234")                      # gleicher Inhalt -> nichts
-        inhalt["mt5-copier/augen.js"] = b"kaputt ohne Kennzeichen" + b" " * 300
-        n3 = panel.ensure_bot_begleiter("def5678")                      # ohne PROPHOS_AUGEN -> nie ersetzt
-        del inhalt["mt5-copier/augen.js"]
-        n4 = panel.ensure_bot_begleiter("def5678")                      # Download-Fehler -> still, nichts
-        with open(os.path.join(d, "augen.js"), "rb") as f:
-            liegt = f.read()
-        ok = (n1 == ["augen.js"] and n2 == [] and n3 == [] and n4 == [] and b"PROPHOS_AUGEN" in liegt
-              and ("mt5-copier/augen.js", "abc1234") in gefragt)
-    finally:
-        panel.HERE, panel.repo_datei = alt_here, alt_rd
-    print(("✓" if ok else "✗") + " Bot-Begleiter augen.js: gleiche Kennung, Kennzeichen-Pruefung, kein Neuschreiben, Fehler still")
     return ok
 
 

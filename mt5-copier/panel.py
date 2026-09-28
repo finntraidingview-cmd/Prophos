@@ -218,36 +218,6 @@ def repo_datei(pfad, sha=None, timeout=15):
     return urllib.request.urlopen(url, timeout=timeout).read()
 
 
-# Begleitdateien des Bots (29.09.2026, Projekt „Script-Augen", Variante B/CDP): liegen neben order_bot.py und kommen mit
-# DERSELBEN Commit-Kennung — sonst liefe ein neuer Bot mit alten Augen. (Repo-Pfad, Dateiname, Pflicht-Kennzeichen im Inhalt)
-BOT_BEGLEITER = [("mt5-copier/augen.js", "augen.js", b"PROPHOS_AUGEN")]
-
-
-def ensure_bot_begleiter(sha=None):
-    """Begleitdateien holen/aktuell halten; ein Fehler hier beruehrt order_bot.py nie. -> Liste der ersetzten Dateien."""
-    neu = []
-    for pfad, name, kennung in BOT_BEGLEITER:
-        try:
-            data = repo_datei(pfad, sha)
-            if len(data) < 200 or kennung not in data:
-                continue
-            dst = os.path.join(HERE, name)
-            old = b""
-            if os.path.exists(dst):
-                with open(dst, "rb") as f:
-                    old = f.read()
-            if data != old:
-                tmp = dst + ".tmp"
-                with open(tmp, "wb") as f:
-                    f.write(data)
-                os.replace(tmp, dst)
-                neu.append(name)
-                print(f"[panel] {name} aktualisiert ({len(data)} Bytes, Stand {(sha or 'main')[:7]}).", flush=True)
-        except Exception as e:
-            print(f"[panel] {name}-Download fehlgeschlagen ({type(e).__name__}).", flush=True)
-    return neu
-
-
 def ensure_bot_source(sha=None):
     """order_bot.py aus dem Repo holen/aktuell halten (15.08.2026, erster
     Bot-Test: 'keine Antwort vom Bot' — die Datei lag gar nicht auf dem PC).
@@ -258,7 +228,6 @@ def ensure_bot_source(sha=None):
     dst = os.path.join(HERE, "order_bot.py")
     try:
         sha = sha or repo_sha()
-        ensure_bot_begleiter(sha)      # augen.js & Co. mit derselben Kennung (29.09.2026), eigener Fehlerweg
         data = repo_datei("mt5-copier/order_bot.py", sha)
         if len(data) < 500 or b"def run(" not in data:
             return False
