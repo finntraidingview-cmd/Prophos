@@ -7781,7 +7781,7 @@
          Signale, keine Schwellen, keine Empfehlung: Prophos ist
          Ausfuehrungs-Infrastruktur, kein Ratgeber. -->
     <!-- LIVE TRADES (26.09.2026, Finn): je Orbit-V2-Trade Einstieg, TP- und Liquidations-Level (NQ), Demo-Ausführung gegen den Reader-Kurs,
-         Balance beim Platzieren und nach der Nachlesung (1–200 min nach dem Ende, seit 28.09.2026), exakter P&L = Balance nachher − vorher.
+         Balance beim Platzieren und nach der Nachlesung (1–120 min nach dem Ende, seit 29.09.2026), exakter P&L = Balance nachher − vorher.
          Daten: GET /admin/live-trades (Railway, alle IDs), Verdrahtung im Modul (Sektion WINNING DAYS LIVE TRADES), eigene IDs wdl-*. -->
     <section class="view" data-view="wdlive">
       <div class="view-head">
@@ -19624,10 +19624,13 @@
     wasOpen: new Set(),       // Rundgang hat die Position SELBST gesehen (Muster mt5PlanPoll.wasOpen)
     stand: new Map()          // planId → { code, at } — letzter Reader-/Konto-Fehler für die Karte
   }
+  // Automatischer Rundgang AUS (29.09.2026, Finn: „Ich will nicht, dass Puls sich alle 55–60 min während des Trades einloggt —
+  // nur, wenn der Trade 1:1 in Radar gespiegelt wird"). Puls kommt nur noch zum Start (Order + Start-Balance) und einmal nach dem
+  // Ende (Nachlesung 1–120 min). Das Ende erkennt die Demo gegen die Reader-Kerzen (tvV2DemoEndeTakt) oder der Knopf „Beendet";
+  // „P&L holen" (tvV2PnlHolen → tvV2PollTick({manuell:true})) bleibt als Handgriff.
   function tvV2NaechsterTick(){
     try{ clearTimeout(tvV2Poll.timer) }catch(_){}
-    const pause = tvV2Poll.MIN + Math.random() * (tvV2Poll.MAX - tvV2Poll.MIN)
-    tvV2Poll.timer = setTimeout(tvV2PollTick, pause)
+    tvV2Poll.timer = null
   }
   async function tvV2PollTick(opts){
     const manuell = !!(opts && opts.manuell)
@@ -20725,7 +20728,7 @@
     // gewürfelt, damit alle Tabs dieselbe Zeit sehen und nicht zweimal einloggen. Nur vor dem ersten Versuch.
     const vers0 = Number(fin.puls_versuche) || (fin.puls_at ? 1 : 0)
     const endeMs = Date.parse(fin.at || p.endedAt || '') || 0
-    if(!vers0 && endeMs && jetzt < endeMs + tvV2NachleseMs(p.id)) return `Nachlesung ab ${new Date(endeMs + tvV2NachleseMs(p.id)).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} (1–200 min Zufall)`
+    if(!vers0 && endeMs && jetzt < endeMs + tvV2NachleseMs(p.id)) return `Nachlesung ab ${new Date(endeMs + tvV2NachleseMs(p.id)).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} (1–120 min Zufall)`
     if(fin.puls_aufgegeben) return 'aufgegeben: ' + String(fin.puls_fehler || '')
     const versuche = Number(fin.puls_versuche) || (fin.puls_at ? 1 : 0)
     if(versuche >= TV_ENDLESUNG_MAX) return `${versuche} Versuche erfolglos`
@@ -20734,11 +20737,11 @@
     return ''
   }
   function tvV2EndlesungFaellig(p, jetzt){ return !tvV2EndlesungGrund(p, jetzt, false) }
-  // REIN RECHNEND: Wartezeit der Nachlesung je Plan, 60–12.000 s (1–200 min, Finn 28.09.2026: „1 bis 200 Minuten später“; vorher 1–150, 1–30 min), fest aus der
-  // Plan-ID (FNV-Hash) — gleich auf allen Tabs
+  // REIN RECHNEND: Wartezeit der Nachlesung je Plan, 60–7.200 s (1–120 min, Finn 29.09.2026: „1 bis 120 Minuten nach dem Trade loggt
+  // Puls sich ein und überprüft den Profit"; vorher 1–200, 1–150, 1–30 min), fest aus der Plan-ID (FNV-Hash) — gleich auf allen Tabs
   function tvV2NachleseMs(id){
     let h = 2166136261; for(const ch of String(id || '')) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0
-    return (60 + (h % 11941)) * 1000
+    return (60 + (h % 7141)) * 1000
   }
   // Nachlesung ab (ms) — EINE Rechnung für Live Trades, Accounts-Balance und das Konto-Popup (26.09.2026, F3)
   const tvV2NachleseAb = (id, endeIso) => { const e = Date.parse(endeIso || '') || 0; return e ? e + tvV2NachleseMs(id) : 0 }
@@ -23253,14 +23256,14 @@
     }
     // Balance nach dem Trade gelesen (seit .625 statt Today's P&L; F21 27.09.2026) — P&L exakt setzt endlesungZeileHtml mit der Start-Balance
     if(typeof fin.balance_end === 'number' && isFinite(fin.balance_end))
-      return { art: 'gelesen', text: `gelesen ${uhr(fin.puls_at || fin.at)} (Balance ${n2(fin.balance_end)} $${fin.balance_quelle === 'folgetrade' ? ', aus dem Folgetrade' : ''})${exText}`, tip: tip.join('\n'), bisMs: null, knopf: false }
+      return { art: 'gelesen', text: `✓ Puls hat bestätigt ${uhr(fin.puls_at || fin.at)} (Balance ${n2(fin.balance_end)} $${fin.balance_quelle === 'folgetrade' ? ', aus dem Folgetrade' : ''})${exText}`, tip: tip.join('\n'), bisMs: null, knopf: false }
     if(planStatus !== 'review') return null
     const versuche = Number(fin.puls_versuche) || (fin.puls_at ? 1 : 0)
     // Warte auf Puls (F21, Finn 27.09.2026: „Warte auf Puls. Wird so und so viele Minuten später abgecheckt, je nach Zufall"): vor dem
     // ersten Versuch bis zur zufälligen Nachlese-Zeit (tvV2NachleseAb ab final.at — beim Demo-Ende = Demo-Zeitpunkt)
     if(!versuche && pid && fin.at && typeof tvV2NachleseAb === 'function'){
       const ab = tvV2NachleseAb(pid, fin.at)
-      if(ab > jetzt) return { art: 'laeuft', text: `Warte auf Puls · Nachlesung ab ${uhr(ab)} (in ${Math.max(1, Math.ceil((ab - jetzt) / 60000))} min)`, tip: tip.join('\n'), bisMs: null, knopf: true }
+      if(ab > jetzt) return { art: 'laeuft', text: `Profit geschätzt aus Radar · Puls bestätigt ab ${uhr(ab)} (noch ${Math.max(1, Math.ceil((ab - jetzt) / 60000))} min)`, tip: tip.join('\n'), bisMs: null, knopf: true }
     }
     if(fin.puls_aufgegeben || versuche >= max){
       return { art: 'aufgegeben', text: 'Lesung aufgegeben — ' + (fin.puls_fehler ? String(fin.puls_fehler) : 'ohne Grund'), tip: tip.join('\n'), bisMs: null, knopf: true }
@@ -23282,7 +23285,7 @@
     if(!st) return ''
     // P&L exakt aus Balance nachher − vorher, wenn die Start-Balance am eigenen Plan steht (F21)
     try{ const bs = plan && plan.mt5Baseline && plan.mt5Baseline.tv && plan.mt5Baseline.tv.balance_start
-         if(st.art === 'gelesen' && typeof fin.balance_end === 'number' && typeof bs === 'number'){ const d = Math.round((fin.balance_end - bs) * 100) / 100; st.text = `P&L exakt ${d >= 0 ? '+' : '−'}${Math.abs(d).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $ · ` + st.text } }catch(_){}
+         if(st.art === 'gelesen' && typeof fin.balance_end === 'number' && typeof bs === 'number'){ const d = Math.round((fin.balance_end - bs) * 100) / 100; st.text = st.text.replace(/^✓ Puls hat bestätigt /, `✓ Puls hat bestätigt · P&L exakt ${d >= 0 ? '+' : '−'}${Math.abs(d).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $ · `) } }catch(_){}
     const busy = _elBusy.has(String(pid))
     let sperre = ''
     try{ const g = window._tvV2Endlesung && window._tvV2Endlesung.grund; if(plan && typeof g === 'function') sperre = String(g(plan, Date.now(), true) || '') }catch(_){}
@@ -23668,7 +23671,7 @@
     try{
       if(aktion === 'ende' && pw.route === 'tvv2' && typeof tvV2EndlesungJetzt === 'function'){
         // Erst Puls prüfen (28.09.2026, Finn): offen → nichts, flach → Ende mit gelesener Balance. Nur wenn Puls gar nicht lesen
-        // konnte, fällt der Knopf auf das Setzen von Hand zurück (unten) — Puls liest dann 1–200 min später nach.
+        // konnte, fällt der Knopf auf das Setzen von Hand zurück (unten) — Puls liest dann 1–120 min später nach.
         if(typeof atToast === 'function') atToast(`Puls prüft ${(pw.konto && pw.konto.name) || pw.person || '—'} in TradingView…`, 'start')
         const pr = await tvV2EndlesungJetzt(pid)
         if(pr.ok || pr.offen || /schon nicht mehr|nicht in „Überprüfen/.test(String(pr.msg || ''))){
@@ -32254,7 +32257,11 @@
       const fmtR = v => (v>=0?'+':'') + v.toLocaleString('de-DE')
       const colR = v => v>=0 ? '#15803d' : '#b91c1c'
       const parts = []
-      if(p.masterPl != null) parts.push(`<span class="tc2-pnl" style="color:${colR(p.masterPl)}">$${fmtR(p.masterPl)}</span>`)
+      // Schätzung aus Radar/Level (29.09.2026, Finn: „jetzt schon mal der Profit grob — noch so viele Minuten, bis Puls bestätigt"):
+      // ≈ vor dem Betrag, solange master_pl noch die Schätzung ist; nach Puls' Balance-Lesung steht der exakte Wert ohne ≈
+      const _rvFin = (planIstPuls(p) && p.mt5Baseline && p.mt5Baseline.final) || null
+      const _rvGeschaetzt = !!(_rvFin && (_rvFin.quelle === 'level' || _rvFin.quelle === 'demo') && typeof _rvFin.master_pl_schaetzung === 'number' && p.masterPl != null && Math.abs(Number(p.masterPl) - _rvFin.master_pl_schaetzung) < 0.005)
+      if(p.masterPl != null) parts.push(`<span class="tc2-pnl" style="color:${colR(p.masterPl)}"${_rvGeschaetzt ? ' title="Geschätzt aus Radar (TP/SL-Level) — Puls bestätigt den exakten Wert aus der Balance"' : ''}>${_rvGeschaetzt ? '≈ ' : ''}$${fmtR(p.masterPl)}</span>`)
       if(p.slavePl  != null) parts.push(`<span class="tc2-pnl" style="color:${colR(p.slavePl)}">${sCur}${fmtR(p.slavePl)}</span>`)
       // Fusion-Gegenhedge (24.09.2026): Stand des Hedges auch auf „Überprüfen" (offen = noch nicht zu!)
       { const hc = (typeof hedgeChipSlot === 'function') ? hedgeChipSlot(p) : ''; if(hc) parts.push(hc) }
@@ -35431,7 +35438,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.747'
+  const OS_TAB_BUILD = '2026-09-22.748'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -35922,7 +35929,7 @@
                               msg: String(r.msg || 'Order platziert.') })
         if(imPopup){
           _pfSet('ob-order', 'ok', escapeHtml(String(r.msg || 'Order platziert.')))
-          pfEnde(true, pv2 ? '✓ Order platziert — Plan läuft (ohne Hedge). Puls liest das Konto alle 50–80 s: Live-P&L auf der Karte, Ende und Today\'s P&L kommen automatisch.'
+          pfEnde(true, pv2 ? '✓ Order platziert — Plan läuft (ohne Hedge). Live-P&L und Ende (TP/SL) kommen aus Radar, Puls bestätigt den Profit 1–120 min nach dem Ende.'
                                               : '✓ Order platziert — sobald Duplikum sie sieht, springt der Plan auf „Läuft".')
           setTimeout(() => { if(document.getElementById('pf-final')?.className.indexOf('ok') !== -1) _pfClose() }, 2400)
         }
