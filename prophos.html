@@ -32474,8 +32474,12 @@
             ? `<span class="rsq-card-run" title="Puls hat die Order in TradingView platziert — sobald Duplikum sie sieht, springt der Plan auf „Läuft" (nach 10 min ohne Erkennung erscheint „Starten" wieder)">⏳ Warte auf Duplikum…</span>${neuBtn}`
             : `<button class="btn btn-primary tc2-btn" data-plan-orbit-start="${p.id}" title="Puls platziert die Order in TradingView: Konto → Asset → Order-Panel → Buy/Sell">Starten</button>`
       // Geplante Startzeit (22.09.2026): Chip statt Knopf, Klick nimmt die Zeit wieder raus.
+      const _vc = p.status === 'planned' && p.mt5Baseline && p.mt5Baseline.vorcheck
+      const vorcheckChip = (_vc && _vc.status === 'slave_nicht_bereit') ? `<span class="rsq-card-run" style="color:var(--danger)" title="${escapeHtml(String(_vc.grund || ''))}">⚠ Slave-Terminal nicht bereit · seit ${tpStartUmText(_vc.seit)} · ${Number(_vc.versuche) || 1} Versuche</span>`
+        : (_vc && _vc.status === 'verpasst_slave') ? `<span class="rsq-card-run" style="color:var(--danger)" title="${escapeHtml(String(_vc.grund || ''))}">✗ nicht gestartet — Slave-Terminal war nicht bereit</span>` : ''
       const startUmBtn = (p.startUm && !p.startUmGestartetAt)
-        ? `<button class="btn btn-ghost tc2-btn rsq-card-wait" data-plan-start-um-x="${p.id}" title="Der PC-Tab startet zu dieser Zeit von selbst (Duplikum-Check → Puls). Klick nimmt die Startzeit wieder raus.">⏰ ${tpStartUmText(p.startUm)} ✕</button>`
+        ? vorcheckChip + `<button class="btn btn-ghost tc2-btn rsq-card-wait" data-plan-start-um-x="${p.id}" title="Der PC-Tab startet zu dieser Zeit von selbst (Duplikum-Check → Puls). Klick nimmt die Startzeit wieder raus.">⏰ ${tpStartUmText(p.startUm)} ✕</button>`
+        : vorcheckChip && _vc.status === 'verpasst_slave' ? vorcheckChip + neuBtn
         : (p.startUm && p.startUmGestartetAt && gestVor < 15 * 60 * 1000 && !wartetDup && !qs)
           ? `<span class="rsq-card-run" title="Der PC-Tab hat die geplante Startzeit ausgelöst — kommt binnen 2 min nichts zurück, erscheint „Neu starten"">⏰ gestartet ${tpStartUmText(p.startUmGestartetAt)}</span>${neuBtn}`
           : ''
@@ -35587,7 +35591,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.761'
+  const OS_TAB_BUILD = '2026-09-22.762'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -35966,6 +35970,15 @@
       .slice(0, 10)
     geschwister = [..._gleicheFirma.filter(a => !_istArch(a)), ..._inaktiv]
       .map(a => String(a.externalId).trim())
+    // Slave-Vorprüfung auch für Hand-Start und Fern-Signal (29.09.2026) — VOR dem Riegel _tpOrbitLaeuft, sonst bliebe er hängen
+    if(vorcheckNoetig(plan) && MT5_LOCAL){
+      const vc = await slaveBereitPruefen()
+      if(!vc.ok){
+        try{ await vorcheckMelden(plan, 'slave_nicht_bereit', vc.grund) }catch(_){}
+        await fehler(`✗ Slave-Terminal (Fusion-Copier) nicht bereit — ${vc.grund}. Nichts geklickt, Plan bleibt Geplant. Copier auf diesem PC starten, dann erneut.`)
+        return
+      }
+    }
     _tpOrbitLaeuft = true
     // Winning Day: Copier-Update-Neustart für die nächsten 3 min vertagen (Panel POST /api/hedge-solo {aktion:'bereit'}, abc14c6) —
     // sonst trifft der Hedge-Open das Neustart-Fenster (Plan 9302faea: copier_alt). Ohne Antwort egal, die Wiederholung fängt es.
@@ -38295,6 +38308,49 @@
   // Alle 20 s neu (Countdown); Farmer-Schalter auf Geräten ohne Startzeit-Takt (Mac/Handy) höchstens 1× je Minute nachlesen
   setInterval(() => { try{ if(!_suScharf || Date.now() - _suScharf.at > 60000) tpFarmerScharf().catch(() => {}) }catch(_){}; try{ pulsNaechsterZeichnen() }catch(_){} }, 20000)
   setTimeout(() => { try{ pulsNaechsterZeichnen() }catch(_){} }, 1500)
+  /* SLAVE-VORPRÜFUNG VOR DEM WD-START (29.09.2026, Vorfall EzPoker b0252248 auf pc-40mali 22:10 UTC: Puls kaufte sauber in TV, der
+   * Fusion-Hedge scheiterte 8× an 'copier_alt' — das MT5-Slave-Terminal war nicht offen, Finn setzte den Hedge von Hand). Vor dem Puls-Klick
+   * eines Orbit-V2-Plans mit Fusion-Hedge: läuft auf diesem PC ein Copier mit frischem Status? Dieselbe Regel wie der copier_alt-Riegel in
+   * panel.py /api/hedge-solo (running + Status ≤ 15 s) — /api/instances liefert sie je Instanz als alive. Nicht bereit → kein Claim, kein
+   * Klick, mt5_baseline.vorcheck am Plan (Vertrag an Backend: status/seit/letzte_pruefung/versuche/pc/grund/bereit_at/verpasst_at/push_at),
+   * Alarm höchstens alle 10 min, neuer Versuch in 20–40 s; nach dem Start-Fenster 'verpasst_slave' — NIE ohne Hedge starten. */
+  const _vorcheckNaechst = new Map()   // planId → frühester nächster Versuch (ms)
+  const vorcheckNoetig = p => !!p && p.route === 'tvv2' && Number(p.hedgeEur) > 0
+  async function slaveBereitPruefen(){
+    if(!MT5_LOCAL || typeof window.mtcApi !== 'function') return { ok: false, grund: 'Copier-API im Tab nicht geladen' }
+    let d = null
+    try{ d = await window.mtcApi('instances', { timeoutMs: 6000 }) }catch(_){ d = null }
+    if(!d || d.copier_offline || d._httpFail || !Array.isArray(d.instances)) return { ok: false, grund: 'Panel nicht erreichbar' }
+    if(d.instances.some(i => i && i.alive)) return { ok: true }
+    return { ok: false, grund: d.instances.length ? 'kein Copier mit frischem Status (Slave-Terminal zu?)' : 'keine Copier-Instanz auf diesem PC' }
+  }
+  async function vorcheckMelden(plan, status, grund){
+    const alt = (plan.mt5Baseline && plan.mt5Baseline.vorcheck) || null, jetzt = new Date().toISOString()
+    const pc = (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : ''
+    const start = plan.startUm ? new Date(plan.startUm).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '—'
+    let vc
+    if(status === 'ok'){
+      if(!alt || alt.status === 'ok') return
+      vc = Object.assign({}, alt, { status: 'ok', letzte_pruefung: jetzt, bereit_at: jetzt, pc })
+    } else {
+      const erst = !(alt && alt.status === status)
+      const pushJetzt = erst || !alt.push_at || Date.now() - (Date.parse(alt.push_at) || 0) > 10 * 60000
+      vc = { status, seit: (alt && alt.status !== 'ok' && alt.seit) || jetzt, letzte_pruefung: jetzt,
+             versuche: (status === 'slave_nicht_bereit' ? 1 : 0) + ((alt && alt.status !== 'ok' && Number(alt.versuche)) || 0), pc, grund: grund || '',
+             bereit_at: null, verpasst_at: status === 'verpasst_slave' ? jetzt : null, push_at: pushJetzt ? jetzt : (alt && alt.push_at) || null }
+      if(pushJetzt){
+        const text = status === 'verpasst_slave'
+          ? `„${plan.masterName || 'Plan'}" (Start ${start}) NICHT gestartet — das Slave-Terminal (Fusion-Copier) war im ganzen Start-Fenster nicht bereit. Plan bleibt Geplant.`
+          : `„${plan.masterName || 'Plan'}" (Start ${start}) wartet — Slave-Terminal (Fusion-Copier) auf ${pc || 'diesem PC'} nicht bereit: ${grund}. Puls klickt erst, wenn es läuft.`
+        if(typeof atToast === 'function') atToast('⚠ ' + text, 'end')
+        try{ if(typeof pushAnsHandy === 'function') pushAnsHandy('Slave-Terminal nicht bereit', text, 'https://prophos.pages.dev/prophos#trades', 'vorcheck-' + String(plan.id).slice(0, 8)) }catch(_){}
+      }
+    }
+    try{ await baselinePatchIn(plan.id, 'vorcheck', vc) }catch(e){ console.warn('[vorcheck] schreiben', e) }
+    try{ renderTradePlans() }catch(_){}
+  }
+  window._vorcheck = { pruefen: slaveBereitPruefen, noetig: vorcheckNoetig }   // Test-Haken
+
   async function tpStartUmTick(){
     if(!MT5_LOCAL || _suLaeuft) return
     let uid; try{ uid = currentUserId }catch(_){ uid = null }
@@ -38303,12 +38359,30 @@
     const now = Date.now()
     const scharf = await tpFarmerScharf()
     const faellig = (_tp || []).filter(p => p && p.status === 'planned' && p.startUm && !p.startUmGestartetAt
-      && new Date(p.startUm).getTime() <= now && (routeIstOrbit(p.route) || routeIstEcho(p.route)) && (scharf || !tpIstFarmerPlan(p)))
+      && new Date(p.startUm).getTime() <= now && (routeIstOrbit(p.route) || routeIstEcho(p.route)) && (scharf || !tpIstFarmerPlan(p))
+      && !((_vorcheckNaechst.get(String(p.id)) || 0) > now))   // Slave-Vorprüfung: wartender Plan erst nach seinem Jitter wieder
     if(!faellig.length) return
     const plan = faellig.sort((a, b) => new Date(a.startUm) - new Date(b.startUm))[0]
     _suLaeuft = true
     try{
       const verspaetet = now - new Date(plan.startUm).getTime()
+      // SLAVE-VORPRÜFUNG VOR dem Claim — der Claim verbraucht den Plan (start_um_gestartet_at), ein späterer Riegel ließe ihn nie wieder zu
+      if(vorcheckNoetig(plan)){
+        const vc = await slaveBereitPruefen()
+        if(!vc.ok){
+          if(verspaetet > (tpIstFarmerPlan(plan) ? 60 : 10) * 60 * 1000){
+            const { data: dv } = await supabase.from('trade_plans').update({ start_um_gestartet_at: new Date().toISOString() })
+              .eq('id', plan.id).eq('status', 'planned').is('start_um_gestartet_at', null).select('*')
+            if(dv && dv.length){ const iv = tradePlans.findIndex(x => String(x.id) === String(plan.id)); if(iv >= 0) tradePlans[iv] = rowToPlan(dv[0]); await vorcheckMelden(plan, 'verpasst_slave', vc.grund) }
+            return
+          }
+          _vorcheckNaechst.set(String(plan.id), Date.now() + 20000 + Math.floor(Math.random() * 20000))
+          await vorcheckMelden(plan, 'slave_nicht_bereit', vc.grund)
+          return
+        }
+        _vorcheckNaechst.delete(String(plan.id))
+        await vorcheckMelden(plan, 'ok')
+      }
       // Claim: nur der Tab, dessen Update eine Zeile trifft, darf feuern
       const { data } = await supabase.from('trade_plans').update({ start_um_gestartet_at: new Date().toISOString() })
         .eq('id', plan.id).eq('status', 'planned').is('start_um_gestartet_at', null).select('*')
@@ -41208,6 +41282,7 @@
       const zuSpaet = plan.status === 'planned' && plan.startUmGestartetAt && !plan.orbitGesendetAt && Date.now() - new Date(plan.startUm || 0).getTime() > 15 * 60000
       const st = zuSpaet ? 'verpasst' : plan.status
       set(k, 'status', st); set(k, 'gesendet', !!plan.orbitGesendetAt); set(k, 'um', plan.orbitGesendetAt || plan.startUmGestartetAt || null)
+      { const vcz = plan.mt5Baseline && plan.mt5Baseline.vorcheck; set(k, 'vorcheck', (plan.status === 'planned' && vcz && vcz.status !== 'ok') ? vcz.status : null) }   // Slave-Vorprüfung (29.09.2026)
       set(k, 'ended', plan.endedAt || null); set(k, 'pl', plan.masterPl == null ? null : plan.masterPl)
       if(st === 'verpasst') verpasst++
       else if(st === 'planned'){ if(plan.startUmGestartetAt) laeuft++; else offen++ }
@@ -41513,6 +41588,8 @@
     if(k.hinweis && !k.plan_id) return `<span style="color:var(--danger)">${escapeHtml(k.hinweis)}</span>`
     if(!k.plan_id) return k.aktiv === false ? '<span style="color:var(--sub)">heute abgewählt</span>' : (_wd.regeln && _wd.regeln.scharf) ? '<span style="color:var(--sub)">noch kein Plan — „Würfeln"</span>' : '<span style="color:var(--sub)">bereit — Plan kommt beim Scharfstellen</span>'
     const um = k.um ? ` · ${wdHhmm(k.um)}` : ''
+    if(k.vorcheck === 'slave_nicht_bereit') return `<span style="color:var(--danger)">⚠ Slave-Terminal nicht bereit — Puls wartet</span>`
+    if(k.vorcheck === 'verpasst_slave') return `<span style="color:var(--danger)">✗ nicht gestartet — Slave-Terminal war nicht bereit</span>`
     if(k.status === 'planned' || !k.status) return k.gestartet ? `<span style="color:#2a9d5c">▶ startet gerade${um}</span>` : `<span style="color:var(--sub)">⏰ Plan liegt bereit</span>`
     if(k.status === 'open') return `<span style="color:#2a9d5c">✓ Order raus${um} · läuft</span>`
     if(k.status === 'review' || k.status === 'completed') return `<span style="color:#2a9d5c">✓ Trade zu Ende${k.ended ? ` · ${wdHhmm(k.ended)}` : ''}${typeof k.pl === 'number' ? ` · P&L ${k.pl > 0 ? '+' : ''}${de(k.pl)} $` : ''}</span>`
