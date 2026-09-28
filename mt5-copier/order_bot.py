@@ -13067,6 +13067,438 @@ def modus_tsxorder(cmd):
         return
     return modus_tsxlesen({"konto": befehl["ext"]}, weiter=_tsx_order_nach_kopf(befehl), wachhund_s=150.0)
 
+# ═══════════════════════════════════════════════════════════════════════════
+# PULS-AUGEN ÜBER CDP (29.09.2026, Etappe E0 — Finns Go, Master-Koordination; erster PC: Moritz pc-usq1i6)
+# Warum: UIA sieht TradingView nur unvollständig (namenlose X, eingeklappte Toasts, Knopf außer Sicht, deutsche Texte),
+# und Pixel-Klicks brauchen Fenster vorn + DPI-Rechnung. Das Chrome DevTools Protocol liest den DOM direkt. Seit Chrome 136
+# gilt --remote-debugging-port nur mit EIGENEM --user-data-dir → der Puls hält ein eigenes „Puls-Chrome“ (Port 9333, nur
+# 127.0.0.1), getrennt vom Chrome des Nutzers, vom Prophos-Tab und vom Reader (Fenster-Treue per Konstruktion: Targets
+# kommen nur von diesem Port, kein Win32/UIA auf fremde Fenster).
+# E0 = NUR LESEN: augen.js (T1, eigene Datei im Repo, per Runtime.evaluate übergeben — nie per URL nachgeladen) liefert
+# stand() und inventar(); das Ergebnis geht in die Spur und über Railway nach puls_augen. Kein Klick, keine Order, der
+# bestehende Lauf bleibt unberührt: angestoßen wird ENTKOPPELT (eigener Prozess) nach tvkonto/tvlesen/tsxlesen.
+# Schalter: wd_farmer_regeln.puls_augen_cdp (GET /puls-regel/<pc_id>, lokal 10 min zwischengespeichert), Rückfall 'uia'.
+# ═══════════════════════════════════════════════════════════════════════════
+PULS_CDP_HOST = "127.0.0.1"
+PULS_CDP_PORT = 9333
+PULS_CHROME_ORDNER = "puls-chrome"
+AUGEN_ABSTAND_S = 60.0            # höchstens ein Lesen je Minute (Feed-PC: keine Ressourcen-Spitzen)
+AUGEN_REGEL_GUELTIG_S = 600.0
+AUGEN_TV_URL = "https://www.tradingview.com/chart/"
+_AUGEN_HIER = os.path.dirname(os.path.abspath(__file__))
+
+
+def puls_chrome_profil_pfad(localappdata=None):
+    """REIN RECHNEND (testbar): eigener Profilordner des Puls-Chrome — nie Chromes Standard-'User Data'."""
+    basis = localappdata if localappdata is not None else (os.environ.get("LOCALAPPDATA") or _AUGEN_HIER)
+    return os.path.join(basis, "Prophos", PULS_CHROME_ORDNER)
+
+
+def puls_chrome_argumente(exe, profil_pfad, port=PULS_CDP_PORT, url=AUGEN_TV_URL):
+    """REIN RECHNEND (testbar): Kommandozeile des Puls-Chrome. Bricht ab (ValueError), wenn der Profilordner nicht der
+    eigene ist — ein Start mit dem Standardprofil würde die Chrome-Sitzung des Nutzers (Prophos-Tab, Reader) erwischen."""
+    p = str(profil_pfad or "")
+    if PULS_CHROME_ORDNER not in p.replace("\\", "/").split("/") or "user data" in p.lower():
+        raise ValueError(f"Puls-Chrome nur mit eigenem Profilordner ({PULS_CHROME_ORDNER}), nicht '{p}'")
+    return [exe, f"--user-data-dir={p}", f"--remote-debugging-port={int(port)}",
+            f"--remote-debugging-address={PULS_CDP_HOST}", f"--remote-allow-origins=http://{PULS_CDP_HOST}:{int(port)}",
+            "--no-first-run", "--no-default-browser-check", "--disable-features=Translate", "--new-window", url]
+
+
+def ws_frame_bauen(nutzdaten, opcode=0x1, maske=None):
+    """REIN RECHNEND (testbar): WebSocket-Client-Frame (RFC 6455, immer maskiert, FIN)."""
+    if isinstance(nutzdaten, str):
+        nutzdaten = nutzdaten.encode("utf-8")
+    maske = maske if maske is not None else os.urandom(4)
+    kopf = bytearray([0x80 | (opcode & 0x0F)])
+    n = len(nutzdaten)
+    if n < 126:
+        kopf.append(0x80 | n)
+    elif n < 65536:
+        kopf.append(0x80 | 126)
+        kopf += n.to_bytes(2, "big")
+    else:
+        kopf.append(0x80 | 127)
+        kopf += n.to_bytes(8, "big")
+    kopf += maske
+    return bytes(kopf) + bytes(b ^ maske[i % 4] for i, b in enumerate(nutzdaten))
+
+
+def ws_frame_lesen(puffer):
+    """REIN RECHNEND (testbar): ein Frame aus dem Puffer. -> (fin, opcode, nutzdaten, rest) oder None (unvollständig)."""
+    if len(puffer) < 2:
+        return None
+    b0, b1 = puffer[0], puffer[1]
+    fin, opcode, maskiert, n = bool(b0 & 0x80), b0 & 0x0F, bool(b1 & 0x80), b1 & 0x7F
+    i = 2
+    if n == 126:
+        if len(puffer) < 4:
+            return None
+        n, i = int.from_bytes(puffer[2:4], "big"), 4
+    elif n == 127:
+        if len(puffer) < 10:
+            return None
+        n, i = int.from_bytes(puffer[2:10], "big"), 10
+    m = b""
+    if maskiert:
+        if len(puffer) < i + 4:
+            return None
+        m, i = puffer[i:i + 4], i + 4
+    if len(puffer) < i + n:
+        return None
+    daten = puffer[i:i + n]
+    if maskiert:
+        daten = bytes(b ^ m[k % 4] for k, b in enumerate(daten))
+    return fin, opcode, bytes(daten), puffer[i + n:]
+
+
+def cdp_ws_url_pruefen(url, port=PULS_CDP_PORT):
+    """REIN RECHNEND (testbar): nur ws://127.0.0.1:<port>/devtools/… — nie ein fremder Host. -> (host, port, pfad) | None"""
+    m = re.fullmatch(r"ws://(127\.0\.0\.1|localhost):(\d+)(/devtools/[A-Za-z0-9/_\-]+)", str(url or ""))
+    if not m or int(m.group(2)) != int(port):
+        return None
+    return PULS_CDP_HOST, int(m.group(2)), m.group(3)
+
+
+class _CdpVerbindung:
+    """Kleiner stdlib-WebSocket-Client für genau eine CDP-Seite (nur 127.0.0.1, ohne TLS, ohne Origin-Kopf)."""
+
+    def __init__(self, ws_url, timeout=8.0):
+        import socket
+        import base64
+        ziel = cdp_ws_url_pruefen(ws_url)
+        if not ziel:
+            raise ValueError(f"CDP-Adresse abgelehnt: {str(ws_url)[:80]}")
+        host, port, pfad = ziel
+        self.s = socket.create_connection((host, port), timeout=timeout)
+        self.s.settimeout(timeout)
+        schluessel = base64.b64encode(os.urandom(16)).decode("ascii")
+        anfrage = (f"GET {pfad} HTTP/1.1\r\nHost: {host}:{port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+                   f"Sec-WebSocket-Key: {schluessel}\r\nSec-WebSocket-Version: 13\r\n\r\n")
+        self.s.sendall(anfrage.encode("ascii"))
+        antwort = b""
+        while b"\r\n\r\n" not in antwort:
+            teil = self.s.recv(4096)
+            if not teil:
+                raise ConnectionError("CDP-Handshake: Verbindung zu")
+            antwort += teil
+        kopf, _, self.puffer = antwort.partition(b"\r\n\r\n")
+        if b" 101 " not in kopf.split(b"\r\n", 1)[0]:
+            raise ConnectionError("CDP-Handshake abgelehnt: " + kopf.split(b"\r\n", 1)[0].decode("latin-1")[:80])
+        self.naechste_id = 0
+
+    def _frame(self):
+        while True:
+            f = ws_frame_lesen(self.puffer)
+            if f:
+                self.puffer = f[3]
+                return f
+            teil = self.s.recv(65536)
+            if not teil:
+                raise ConnectionError("CDP-Verbindung zu")
+            self.puffer += teil
+
+    def _nachricht(self):
+        teile, op0 = [], None
+        while True:
+            fin, op, daten, _r = self._frame()
+            if op == 0x9:                                   # ping → pong
+                self.s.sendall(ws_frame_bauen(daten, 0xA))
+                continue
+            if op == 0x8:
+                raise ConnectionError("CDP-Verbindung vom Browser geschlossen")
+            if op in (0x1, 0x2):
+                op0, teile = op, [daten]
+            elif op == 0x0:
+                teile.append(daten)
+            if fin and op0 is not None:
+                return b"".join(teile).decode("utf-8", "replace")
+
+    def rufe(self, methode, params=None, timeout=10.0):
+        self.naechste_id += 1
+        mid = self.naechste_id
+        self.s.sendall(ws_frame_bauen(json.dumps({"id": mid, "method": methode, "params": params or {}})))
+        ende = time.time() + timeout
+        while time.time() < ende:
+            d = json.loads(self._nachricht())
+            if d.get("id") == mid:
+                if d.get("error"):
+                    raise RuntimeError(f"CDP {methode}: {str(d['error'].get('message'))[:120]}")
+                return d.get("result") or {}
+        raise TimeoutError(f"CDP {methode}: keine Antwort")
+
+    def zu(self):
+        try:
+            self.s.sendall(ws_frame_bauen(b"", 0x8))
+        except Exception:
+            pass
+        try:
+            self.s.close()
+        except Exception:
+            pass
+
+
+def _cdp_http(pfad, methode="GET", timeout=2.0):
+    """JSON vom DevTools-HTTP-Endpunkt des Puls-Chrome (nur 127.0.0.1:9333). None = nicht erreichbar."""
+    import urllib.request
+    try:
+        req = urllib.request.Request(f"http://{PULS_CDP_HOST}:{PULS_CDP_PORT}{pfad}", method=methode)
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read().decode("utf-8", "replace"))
+    except Exception:
+        return None
+
+
+def augen_regel_entscheid(regel_datei, jetzt):
+    """REIN RECHNEND (testbar): Soll der Hauptlauf den Augen-Prozess anstoßen? regel_datei = {'augen', 'at'} | None.
+    'cdp' → ja; veraltet/fehlend → ja (der Augen-Prozess holt die Regel neu und endet bei 'uia' sofort); 'uia' frisch → nein."""
+    if not isinstance(regel_datei, dict):
+        return True
+    try:
+        alt = jetzt - float(regel_datei.get("at") or 0)
+    except (TypeError, ValueError):
+        return True
+    if alt > AUGEN_REGEL_GUELTIG_S or alt < 0:
+        return True
+    return regel_datei.get("augen") == "cdp"
+
+
+def _augen_pc_id():
+    try:
+        with open(os.path.join(_AUGEN_HIER, "pc_id.json"), "r", encoding="utf-8") as f:
+            pc = (json.load(f) or {}).get("pc_id")
+        return pc if isinstance(pc, str) and re.fullmatch(r"pc-[a-z0-9]{4,12}", pc) else None
+    except Exception:
+        return None
+
+
+def _augen_json_lesen(name):
+    try:
+        with open(os.path.join(_AUGEN_HIER, name), "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _augen_json_schreiben(name, d):
+    try:
+        tmp = os.path.join(_AUGEN_HIER, name + ".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(d, f)
+        os.replace(tmp, os.path.join(_AUGEN_HIER, name))
+    except Exception:
+        pass
+
+
+def _augen_regel_holen(pc):
+    """'cdp' | 'uia' von Railway (2 s), Ergebnis lokal merken. Jeder Fehler = 'uia'."""
+    import urllib.request
+    augen = "uia"
+    try:
+        with urllib.request.urlopen(f"{PULS_BACKEND}/puls-regel/{pc}", timeout=2.0) as r:
+            d = json.loads(r.read().decode("utf-8", "replace"))
+        augen = "cdp" if d.get("augen") == "cdp" else "uia"
+    except Exception:
+        augen = "uia"
+    _augen_json_schreiben("augen_regel.json", {"augen": augen, "at": time.time()})
+    return augen
+
+
+def augen_anstossen():
+    """Am Ende von tvkonto/tvlesen/tsxlesen: Augen-Prozess ENTKOPPELT starten (der Lauf wartet nicht), nur wenn die lokal
+    gemerkte Regel 'cdp' sagt oder veraltet ist. Nie ein Fehler nach außen."""
+    try:
+        if not augen_regel_entscheid(_augen_json_lesen("augen_regel.json"), time.time()):
+            return False
+        import subprocess
+        flags = 0x00000008 | 0x00000200 | 0x08000000 | 0x00004000   # DETACHED, NEW_PROCESS_GROUP, NO_WINDOW, BELOW_NORMAL
+        subprocess.Popen([sys.executable, os.path.abspath(__file__), "augen", "{}"], creationflags=flags,
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
+        return True
+    except Exception:
+        return False
+
+
+def _augen_js_holen(trail):
+    """augen.js vom Repo-Stand holen (dieselbe ungecachte Commit-Abfrage wie das Panel), lokal zwischenspeichern.
+    Kein Netz → letzte lokale Kopie. -> Quelltext | None"""
+    import urllib.request
+    pfad, merk = os.path.join(_AUGEN_HIER, "augen.js"), _augen_json_lesen("augen_stand.json") or {}
+    sha = None
+    try:
+        req = urllib.request.Request("https://github.com/finntraidingview-cmd/Prophos.git/info/refs?service=git-upload-pack",
+                                     headers={"User-Agent": "git/2.40"})
+        m = re.search(rb"([0-9a-f]{40}) refs/heads/main", urllib.request.urlopen(req, timeout=6).read())
+        sha = m.group(1).decode("ascii") if m else None
+    except Exception:
+        sha = None
+    if sha and sha != merk.get("sha"):
+        try:
+            data = urllib.request.urlopen(
+                f"https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/{sha}/mt5-copier/augen.js", timeout=10).read()
+            if len(data) > 200:
+                with open(pfad + ".tmp", "wb") as f:
+                    f.write(data)
+                os.replace(pfad + ".tmp", pfad)
+                _augen_json_schreiben("augen_stand.json", {"sha": sha, "at": time.time()})
+                trail.append(f"augen.js aktualisiert ({len(data)} Bytes, {sha[:7]})")
+        except Exception as e:
+            trail.append(f"augen.js-Download fehlgeschlagen ({type(e).__name__}) — lokale Kopie")
+    # Start-Datei für den Hand-Start (Login) mitbringen — neue .bat kommen sonst nie auf die PCs (Panel holt nur start-alles.bat)
+    bat = os.path.join(_AUGEN_HIER, "puls-chrome-starten.bat")
+    if sha and not os.path.exists(bat):
+        try:
+            data = urllib.request.urlopen(
+                f"https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/{sha}/mt5-copier/puls-chrome-starten.bat", timeout=10).read()
+            if data.startswith(b"@echo off"):
+                with open(bat, "wb") as f:
+                    f.write(data)
+                trail.append("puls-chrome-starten.bat abgelegt")
+        except Exception:
+            pass
+    try:
+        with open(pfad, "r", encoding="utf-8") as f:
+            return f.read()
+    except Exception:
+        return None
+
+
+def _puls_chrome_sicher(trail, warten_s=15.0, sichtbar=False):
+    """Puls-Chrome erreichbar machen: antwortet Port 9333 → benutzen; sonst EINMAL starten (minimiert, ohne Aktivieren,
+    BELOW_NORMAL). -> True/False"""
+    v = _cdp_http("/json/version")
+    if v:
+        return True
+    exe = _chrome_pfad(_puls_cfg_datei().get("tv_browser_path") or "")
+    if not exe:
+        trail.append("Puls-Chrome: chrome.exe nicht gefunden")
+        return False
+    profil = puls_chrome_profil_pfad()
+    try:
+        os.makedirs(profil, exist_ok=True)
+        import subprocess
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= 0x00000001                 # STARTF_USESHOWWINDOW
+        si.wShowWindow = 1 if sichtbar else 7    # Hand-Start (Login): normal; sonst SW_SHOWMINNOACTIVE — nie Fokus-Klau (Reader!)
+        subprocess.Popen(puls_chrome_argumente(exe, profil), startupinfo=si, creationflags=0x00004000 | 0x00000008,
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
+        trail.append(f"Puls-Chrome gestartet (Port {PULS_CDP_PORT}, Profil {profil}, {'sichtbar' if sichtbar else 'minimiert'})")
+    except Exception as e:
+        trail.append(f"Puls-Chrome-Start fehlgeschlagen ({type(e).__name__}: {str(e)[:80]})")
+        return False
+    ende = time.time() + warten_s
+    while time.time() < ende:
+        _warte(0.8, 0.4)
+        if _cdp_http("/json/version"):
+            return True
+    trail.append("Puls-Chrome antwortet nach dem Start nicht auf Port 9333")
+    return False
+
+
+def augen_target_waehlen(liste):
+    """REIN RECHNEND (testbar): TradingView-Seite aus /json/list — Chart vor anderen TV-Seiten, nur type 'page'. -> dict | None"""
+    tv = [t for t in (liste or []) if isinstance(t, dict) and t.get("type") == "page"
+          and re.match(r"https://([a-z]+\.)?tradingview\.com/", str(t.get("url") or ""))]
+    tv.sort(key=lambda t: 0 if "/chart" in str(t.get("url")) else 1)
+    return tv[0] if tv else None
+
+
+def modus_augen(cmd):
+    """Augen-Lauf (E0, nur lesen). cmd.start = True: Puls-Chrome auch ohne Schalter starten (einmaliger Menschen-Login)."""
+    t0, trail = time.time(), []
+    res = {"ok": False, "trail": trail}
+    pc = _augen_pc_id()
+    sperre = os.path.join(_AUGEN_HIER, "augen.lock")
+    try:
+        if os.path.exists(sperre) and time.time() - os.path.getmtime(sperre) < 120:
+            res["msg"] = "Augen-Lauf läuft schon"
+            print(json.dumps(res, ensure_ascii=False))
+            return
+        with open(sperre, "w") as f:
+            f.write(str(os.getpid()))
+    except Exception:
+        pass
+    try:
+        start = bool(cmd.get("start"))
+        augen = _augen_regel_holen(pc) if pc else "uia"
+        if augen != "cdp" and not start:
+            res.update(ok=True, msg="Regel 'uia' — nichts zu tun")
+            return
+        letzt = _augen_json_lesen("augen_letzt.json") or {}
+        if not start and time.time() - float(letzt.get("at") or 0) < AUGEN_ABSTAND_S:
+            res.update(ok=True, msg="letztes Lesen < 60 s — übersprungen")
+            return
+        _augen_json_schreiben("augen_letzt.json", {"at": time.time()})
+        if not _puls_chrome_sicher(trail, sichtbar=start):
+            res["msg"] = "Puls-Chrome nicht erreichbar"
+            return
+        if start:
+            res.update(ok=True, msg="Puls-Chrome läuft — jetzt von Hand einloggen (TradingView, Tradovate mit Remember me)")
+            return
+        ziel = augen_target_waehlen(_cdp_http("/json/list"))
+        if not ziel:
+            _cdp_http("/json/new?" + AUGEN_TV_URL, methode="PUT")
+            trail.append("Puls-Chrome: TradingView-Tab angelegt — Lesen beim nächsten Lauf")
+            res.update(ok=True, msg="TV-Tab angelegt")
+            return
+        js = _augen_js_holen(trail)
+        if not js:
+            res["msg"] = "augen.js fehlt (noch nicht im Repo?)"
+            return
+        ws = _CdpVerbindung(ziel.get("webSocketDebuggerUrl"))
+        try:
+            ws.rufe("Runtime.evaluate", {"expression": js, "returnByValue": False, "awaitPromise": True}, timeout=8)
+            ausdruck = ("(async () => { const A = globalThis.prophosAugen; if (!A) return {fehler: 'prophosAugen fehlt'};"
+                        " return {stand: await A.stand(), inventar: A.inventar ? await A.inventar() : null}; })()")
+            r = ws.rufe("Runtime.evaluate", {"expression": ausdruck, "returnByValue": True, "awaitPromise": True}, timeout=10)
+        finally:
+            ws.zu()
+        wert = ((r or {}).get("result") or {}).get("value") or {}
+        if r.get("exceptionDetails") or wert.get("fehler"):
+            res["msg"] = "augen.js: " + str(wert.get("fehler") or (r.get("exceptionDetails") or {}).get("text") or "Ausnahme")[:160]
+            return
+        stand, inv = wert.get("stand") or {}, wert.get("inventar")
+        tk = (stand.get("ticket") or {}) if isinstance(stand, dict) else {}
+        kk = (stand.get("kauf_knopf") or {}) if isinstance(stand, dict) else {}
+        trail.append(f"Augen (cdp): {str(ziel.get('url'))[:50]} · Ticket {'offen' if tk.get('offen') else 'zu'} · "
+                     f"Knopf '{str(kk.get('text') or '-')[:40]}' · Toasts {len(stand.get('toasts') or []) if isinstance(stand, dict) else '?'}"
+                     f" · Popups {len(stand.get('popups') or []) if isinstance(stand, dict) else '?'}")
+        dauer = int((time.time() - t0) * 1000)
+        if pc:
+            import urllib.request
+            for art, daten in (("stand", stand), ("inventar", {"inventar": inv} if inv is not None else None)):
+                if not isinstance(daten, dict):
+                    continue
+                daten = dict(daten, dauer_ms=dauer, target=str(ziel.get("url"))[:200])
+                try:
+                    req = urllib.request.Request(f"{PULS_BACKEND}/puls-augen/{pc}",
+                                                 data=json.dumps({"art": art, "daten": daten}, ensure_ascii=False).encode("utf-8"),
+                                                 headers={"Content-Type": "application/json"})
+                    urllib.request.urlopen(req, timeout=6.0).read()
+                except Exception as e:
+                    trail.append(f"puls_augen ({art}) nicht geschrieben ({type(e).__name__})")
+        res.update(ok=True, msg="gelesen", dauer_ms=dauer)
+    except Exception as e:
+        res["msg"] = f"Augen-Lauf abgebrochen: {type(e).__name__}: {str(e)[:160]}"
+    finally:
+        try:
+            os.remove(sperre)
+        except Exception:
+            pass
+        # Fehler NICHT nach puls_diagnose (eine Zeile je PC — würde die Diagnose des echten Puls-Laufs überschreiben),
+        # sondern als Stand mit 'fehler' nach puls_augen
+        if pc and not res.get("ok") and res.get("msg") != "Augen-Lauf läuft schon":
+            try:
+                import urllib.request
+                daten = {"fehler": (str(res.get("msg") or "") + " | " + " > ".join(trail))[:1500], "ts": int(time.time() * 1000)}
+                req = urllib.request.Request(f"{PULS_BACKEND}/puls-augen/{pc}", data=json.dumps({"art": "stand", "daten": daten},
+                                             ensure_ascii=False).encode("utf-8"), headers={"Content-Type": "application/json"})
+                urllib.request.urlopen(req, timeout=6.0).read()
+            except Exception:
+                pass
+        print(json.dumps(res, ensure_ascii=False))
+
+
 def main():
     # Konsole robust (24.09.2026 abends, Finns PC: tvlesen 'absturz @ raus' = UnicodeEncodeError, cp1252 kann
     # '\u25bc' aus dem TradingView-Tab-Titel nicht kodieren — die Spur traegt den Titel, die JSON-Antwort
@@ -13110,6 +13542,19 @@ def main():
         except Exception as e:
             print(json.dumps({"ok": False, "schritt": "absturz",
                               "msg": f"TV-Kette abgebrochen: {type(e).__name__}: {e}"}))
+        augen_anstossen()      # Augen E0 (29.09.2026): entkoppelt, nur mit Schalter 'cdp'
+        return 0
+    if len(sys.argv) >= 2 and sys.argv[1] == "augen":
+        # Puls-Augen über CDP (29.09.2026, E0): nur lesen, entkoppelt angestoßen; 'augen {"start": true}' = Puls-Chrome
+        # für den einmaligen Menschen-Login öffnen
+        if len(sys.argv) >= 3 and sys.argv[2].strip().lower() == "start":
+            cmd = {"start": True}          # 'order_bot.py augen start' / puls-chrome-starten.bat — ohne JSON-Quoting in cmd
+        else:
+            try:
+                cmd = json.loads(sys.argv[2]) if len(sys.argv) >= 3 else {}
+            except ValueError:
+                cmd = {}
+        modus_augen(cmd if isinstance(cmd, dict) else {})
         return 0
     if len(sys.argv) >= 3 and sys.argv[1] == "tsxorder":
         # Puls für Topstep, Etappe 2 (27.09.2026): Order bzw. Probe (scharf:false) — retry_ok bei Absturz immer False
@@ -13135,6 +13580,7 @@ def main():
         except Exception as e:
             print(json.dumps({"ok": False, "code": "absturz", "schritt": "absturz",
                               "msg": f"TopstepX-Lauf abgebrochen: {type(e).__name__}: {e} @ {_absturz_ort(e)}"}))
+        augen_anstossen()
         return 0
     if len(sys.argv) >= 3 and sys.argv[1] == "tvlesen":
         # Orbit-V2-Rundgang (24.09.2026): Konto anfahren, dann NUR lesen —
@@ -13153,6 +13599,7 @@ def main():
             # nicht' — in der DB stand nur 'absturz'): letzte eigene Stelle aus dem Traceback.
             print(json.dumps({"ok": False, "code": "absturz", "schritt": "absturz",
                               "msg": f"TV-Lesen abgebrochen: {type(e).__name__}: {e} @ {_absturz_ort(e)}"}))
+        augen_anstossen()
         return 0
     if len(sys.argv) >= 3 and sys.argv[1] == "tvclose":
         # Orbit V2 schliessen (24.09.2026, Auto-Close 23:45–00:00 Dubai): Konto

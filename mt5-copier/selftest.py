@@ -1867,6 +1867,7 @@ def main():
     results.append(test_fenster_treue())
     results.append(test_puls_tempo())
     results.append(test_puls_topstep())
+    results.append(test_puls_augen_cdp())
     results.append(test_puls_nie_chrome_schliessen())
     results.append(test_tsx_konto_abgekuerzt())
     results.append(test_tsx_titel_url())
@@ -2571,6 +2572,50 @@ def test_puls_tempo():
     chk("Avg Fill wartet 1,2 s statt 3 s", "_avg_fill_nachlauf(sekunden=1.2)" in inspect.getsource(ob))
     if ok:
         print("✓ Puls-Tempo: Dialog sofort, Network error → Connect erneut (max. 3), Login-Enter nach 1,5 s, Avg Fill 1,2 s")
+    return ok
+
+
+def test_puls_augen_cdp():
+    """Puls-Augen über CDP (29.09.2026, E0): eigenes Profil, nur 127.0.0.1:9333, WebSocket-Frames, Regel, Target-Wahl."""
+    import order_bot as ob
+    ok = True
+
+    def chk(bed, text):
+        nonlocal ok
+        if not bed:
+            print("  ✗ " + text)
+            ok = False
+    prof = ob.puls_chrome_profil_pfad("C:\\Users\\m\\AppData\\Local")
+    arg = ob.puls_chrome_argumente("chrome.exe", prof)
+    chk(any(a.startswith("--user-data-dir=") and "puls-chrome" in a for a in arg), "eigenes --user-data-dir puls-chrome")
+    chk("--remote-debugging-port=9333" in arg and "--remote-debugging-address=127.0.0.1" in arg, "Port 9333 nur 127.0.0.1")
+    chk(not any(a.startswith("--profile-directory") for a in arg), "nie --profile-directory")
+    for falsch in ("C:\\Users\\m\\AppData\\Local\\Google\\Chrome\\User Data", "", "C:\\x\\puls-chromeX"):
+        try:
+            ob.puls_chrome_argumente("chrome.exe", falsch)
+            chk(False, f"Standard-/fremdes Profil muss abbrechen: '{falsch}'")
+        except ValueError:
+            pass
+    for n in (0, 5, 125, 126, 300, 65535, 65536, 70000):
+        d = bytes(range(256)) * (n // 256) + bytes(range(n % 256))
+        f = ob.ws_frame_bauen(d, 0x1, maske=b"\x01\x02\x03\x04")
+        r = ob.ws_frame_lesen(f + b"REST")
+        chk(r is not None and r[0] and r[1] == 1 and r[2] == d and r[3] == b"REST", f"WebSocket-Frame hin und zurück ({n} Bytes)")
+        chk(ob.ws_frame_lesen(f[:-1]) is None, f"unvollständiger Frame ({n} Bytes) → None")
+    chk(ob.cdp_ws_url_pruefen("ws://127.0.0.1:9333/devtools/page/ABC-1") == ("127.0.0.1", 9333, "/devtools/page/ABC-1"), "eigene CDP-Adresse ok")
+    chk(ob.cdp_ws_url_pruefen("ws://10.0.0.5:9333/devtools/page/X") is None, "fremder Host abgelehnt")
+    chk(ob.cdp_ws_url_pruefen("ws://127.0.0.1:9222/devtools/page/X") is None, "fremder Port abgelehnt")
+    e = ob.augen_regel_entscheid
+    chk(e(None, 1000.0) and e({"augen": "cdp", "at": 990}, 1000.0), "Regel fehlt/cdp → anstoßen")
+    chk(not e({"augen": "uia", "at": 990}, 1000.0), "Regel uia frisch → nicht anstoßen")
+    chk(e({"augen": "uia", "at": 0}, 1000.0), "Regel uia veraltet → anstoßen (Neu-Holen)")
+    w = ob.augen_target_waehlen
+    chk(w([{"type": "page", "url": "https://www.tradingview.com/", "id": "a"},
+           {"type": "page", "url": "https://www.tradingview.com/chart/x/", "id": "b"},
+           {"type": "service_worker", "url": "https://www.tradingview.com/chart/", "id": "c"}])["id"] == "b", "Chart-Seite gewinnt, nur type page")
+    chk(w([{"type": "page", "url": "https://evil.example/tradingview.com/chart"}]) is None, "fremde Domain nie")
+    if ok:
+        print("✓ Puls-Augen CDP: eigenes Profil, 127.0.0.1:9333, WebSocket-Frames, Regel-Entscheid, Target-Wahl")
     return ok
 
 

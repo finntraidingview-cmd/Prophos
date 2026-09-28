@@ -9668,6 +9668,67 @@ def puls_inventar_schreiben(pc_id):
     return jsonify({"ok": True})
 
 
+# ── PULS-AUGEN über CDP (29.09.2026, Etappe E0, Finns Go) ────────────────────────────────────────────────────────────
+# Schalter je PC: wd_farmer_regeln.puls_augen_cdp (text[] der pc_ids mit 'cdp'), gelesen über GET /puls-regel/<pc_id> —
+# der Puls (order_bot.py) hat keinen DB-Zugang und fragt hier; jeder Fehler heißt dort 'uia' (wie bisher). Ergebnisse
+# (Lesestand/Inventar aus augen.js) schreibt der Puls über POST /puls-augen/<pc_id> in puls_augen (RLS an, nur Service-Key).
+# SQL: sql/2026-09-29_puls_augen.sql. E0 = nur lesen, kein Klick.
+PULS_AUGEN_MAX = 60_000
+_PULS_REGEL_CACHE = {"at": 0.0, "cdp": []}
+
+
+def puls_augen_modus(pc_id, cdp_liste):
+    """REIN RECHNEND (testbar): 'cdp', wenn pc_id in der Liste steht, sonst 'uia'."""
+    return "cdp" if isinstance(cdp_liste, list) and pc_id in [str(x) for x in cdp_liste] else "uia"
+
+
+def puls_augen_saeubern(d):
+    """REIN RECHNEND (testbar): {art, daten} mit bekannter Art, daten nur als Objekt mit bekannten Schlüsseln, Größendeckel.
+    -> (art, daten) | None"""
+    if not isinstance(d, dict) or d.get("art") not in ("stand", "inventar") or not isinstance(d.get("daten"), dict):
+        return None
+    erlaubt = ("v", "ts", "url", "titel", "geo", "sichtbar", "fokus", "popups", "konto", "ticket", "kauf_knopf", "positionen",
+               "orders", "toasts", "konto_summary", "inventar", "fehler", "dauer_ms", "target", "chrome")
+    daten = {k: v for k, v in d["daten"].items() if k in erlaubt}
+    if len(json.dumps(daten, ensure_ascii=False)) > PULS_AUGEN_MAX:
+        return None
+    return d["art"], daten
+
+
+@app.route("/puls-regel/<pc_id>", methods=["GET", "OPTIONS"])
+def puls_regel_lesen(pc_id):
+    if request.method == "OPTIONS":
+        return "", 200
+    if not PC_ID_MUSTER.fullmatch(pc_id or ""):
+        return jsonify({"ok": False, "msg": "pc_id ungültig"}), 400
+    if time.time() - _PULS_REGEL_CACHE["at"] > 60:
+        try:
+            zeilen = sb_select("wd_farmer_regeln", {"id": "eq.1", "select": "puls_augen_cdp"})
+            _PULS_REGEL_CACHE["cdp"] = (zeilen[0].get("puls_augen_cdp") if zeilen else None) or []
+            _PULS_REGEL_CACHE["at"] = time.time()
+        except Exception:
+            _PULS_REGEL_CACHE["cdp"], _PULS_REGEL_CACHE["at"] = [], time.time()   # Spalte fehlt / DB weg → 'uia'
+    return jsonify({"ok": True, "augen": puls_augen_modus(pc_id, _PULS_REGEL_CACHE["cdp"])})
+
+
+@app.route("/puls-augen/<pc_id>", methods=["POST", "OPTIONS"])
+def puls_augen_schreiben(pc_id):
+    if request.method == "OPTIONS":
+        return "", 200
+    if not PC_ID_MUSTER.fullmatch(pc_id or ""):
+        return jsonify({"ok": False, "msg": "pc_id ungültig"}), 400
+    if (request.content_length or 0) > PULS_AUGEN_MAX * 2:
+        return jsonify({"ok": False, "msg": "zu groß"}), 413
+    g = puls_augen_saeubern(request.get_json(silent=True))
+    if g is None:
+        return jsonify({"ok": False, "msg": "Augen-Daten ungültig"}), 400
+    try:
+        sb_upsert("puls_augen", {"pc_id": pc_id, "art": g[0], "daten": g[1], "at": datetime.now(timezone.utc).isoformat()})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"nicht speicherbar ({type(e).__name__})"}), 502
+    return jsonify({"ok": True})
+
+
 start_kompass()
 
 
