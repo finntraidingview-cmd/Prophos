@@ -2975,8 +2975,14 @@ def _tv_uia_konten(w, ids, info=None, nur_ziel=None, ohne=None):
 # ---------------------------------------------------------------------------
 POPUP_X_NAMEN = ("close", "schließen", "schliessen", "close dialog", "close popup", "dismiss", "schließen-schaltfläche")
 _RX_POPUP_WERBUNG = re.compile(r"\bsale\b|\d+\s*%\s*off|\boffers?\b|\bdeal\b|\bupgrade\b|\btrial\b|\bpremium\b|"
-                               r"\bsubscri|\bdiscount|\bangebot|\brabatt|\bblack friday\b|\bcyber monday\b|\bplans?\b.*\bprice",
-                               re.I)
+                               r"\bsubscri|\bdiscount|\bangebot|\brabatt|\bblack friday\b|\bcyber monday\b|\bplans?\b.*\bprice|"
+                               r"don.?t miss|\bends in\b|\bendet in\b|special offer|explore offers|verpassen sie", re.I)
+# 29.09.2026 (Chris pc-c19p2l 22:54 UTC, derselbe Autumn-Sale-Dialog): TradingViews X traegt oft KEINEN Namen oder nur '×'/'✕' —
+# POPUP_X_NAMEN fand es nicht, der Konto-Schritt sah durch das Modal kein Konto ('kein Broker') und verband neu. Namenlose X
+# zaehlen nur in Kaesten MIT Werbe-Text. Geklickt wird NIE ein Element mit Kauf-/Angebots-Wort (Explore offers, Upgrade …).
+POPUP_X_ZEICHEN = ("", "×", "✕", "✖", "x", "╳")
+_RX_POPUP_NIE = re.compile(r"explore|offer|angebot|upgrade|\bbuy\b|kauf|trial|\bget\b|\bstart|subscri|abonn|premium|\bplan", re.I)
+POPUP_TAB_LEISTE_PX = 80     # oberhalb fenster.top + 80 px liegt Chromes Tab-/Adressleiste — dort nie klicken
 _RX_POPUP_PULS = re.compile(r"\bbuy\b|\bsell\b|\bkaufen\b|\bverkaufen\b|\border\b|\bticket\b|\bconnect\b|\bverbinden\b|"
                             r"\bbroker\b|tradovate|\bdemo\b|\blog ?in\b|\bsign ?in\b|\banmelden\b|take profit|stop loss|"
                             r"\bposition|\bconfirm|\bbestätig|\bpassword|\bpasswort|\busername", re.I)
@@ -2984,9 +2990,13 @@ _RX_POPUP_HART = re.compile(r"take profit|stop loss|tradovate|\bconnect\b|\blog 
                             r"\bmenge\b|\bcontracts?\b", re.I)
 
 
-def fremdes_popup_urteil(text, kasten, knopf, fenster=None):
+def fremdes_popup_urteil(text, kasten, knopf, fenster=None, knopf_name=None):
     """REIN RECHNEND (testbar): ist das ein fremdes Popup, das Puls wegklicken darf? text = sichtbare Namen im Kasten,
-    kasten/knopf/fenster = (l, t, r, b). -> (ja, grund)."""
+    kasten/knopf/fenster = (l, t, r, b), knopf_name = Name des X (None = alter Aufruf, gilt als benannt). -> (ja, grund)."""
+    kn = str(knopf_name or "").strip()
+    if kn and _RX_POPUP_NIE.search(kn):
+        return False, "Knopf ist kein Schließen"
+    unbenannt = knopf_name is not None and kn.lower() in POPUP_X_ZEICHEN
     try:
         kl, kt, kr, kb = [float(v) for v in kasten]
         bl, bt, br, bb = [float(v) for v in knopf]
@@ -3003,12 +3013,24 @@ def fremdes_popup_urteil(text, kasten, knopf, fenster=None):
         except (TypeError, ValueError):
             pass
     bx, by = (bl + br) / 2, (bt + bb) / 2
+    if fenster:
+        try:
+            if by < float(fenster[1]) + POPUP_TAB_LEISTE_PX:
+                return False, "Knopf in Chromes Leiste"
+        except (TypeError, ValueError, IndexError):
+            pass
     if not (kl <= bx <= kr and kt <= by <= kb):
         return False, "Knopf außerhalb"
     if bx < kl + kw * 0.75 or by > kt + kh * 0.25:
         return False, "Knopf nicht oben rechts"
     t = str(text or "")
     werbung = bool(_RX_POPUP_WERBUNG.search(t))
+    if unbenannt:
+        if (br - bl) > 60 or (bb - bt) > 60:
+            return False, "namenloser Knopf zu groß für ein X"
+        if not werbung or _RX_POPUP_HART.search(t):
+            return False, "namenloses X nur bei Werbung"
+        return True, "Werbung"
     if werbung and not _RX_POPUP_HART.search(t):
         return True, "Werbung"
     if _RX_POPUP_PULS.search(t):
@@ -3027,11 +3049,13 @@ def _popup_kaesten(pw):
     for k in knoepfe[:600]:
         try:
             n = (k.window_text() or "").strip().lower()
-            if n not in POPUP_X_NAMEN:
+            if n not in POPUP_X_NAMEN and n not in POPUP_X_ZEICHEN:
                 continue
             if hasattr(k, "is_visible") and not k.is_visible():
                 continue
             kr = k.rectangle()
+            if n in POPUP_X_ZEICHEN and ((kr.right - kr.left) > 60 or (kr.bottom - kr.top) > 60 or (kr.right - kr.left) < 6):
+                continue
             eltern, p = None, k
             for _ in range(8):
                 p = p.parent()
@@ -3053,7 +3077,7 @@ def _popup_kaesten(pw):
                 if 2 <= len(tx) <= 120 and tx not in namen:
                     namen.append(tx)
             out.append((k, (er.left, er.top, er.right, er.bottom), " · ".join(namen)[:600],
-                        (kr.left, kr.top, kr.right, kr.bottom)))
+                        (kr.left, kr.top, kr.right, kr.bottom), n))
         except Exception:
             continue
     return out
@@ -3062,9 +3086,39 @@ def _popup_kaesten(pw):
 _POPUP_LETZTE = {"at": 0.0}
 
 
+# STARKE Werbe-Merkmale fuer den Esc-Rueckfall ohne X: TradingViews Kopfleiste traegt 'Upgrade'/'Explore offers' oft dauerhaft
+# — die allein duerfen nie ein Esc ausloesen (Esc schliesst auch ein Order-Ticket-Popup). Verlangt werden ZWEI verschiedene.
+_RX_POPUP_STARK = re.compile(r"don.?t miss|\d+\s*%\s*off|\bsale\b|\bends in\b|\bendet in\b|special offer|black friday|"
+                             r"cyber monday|verpassen sie|\brabatt", re.I)
+
+
+def tv_werbe_texte(namen):
+    """REIN RECHNEND (testbar): sichtbare Texte eines Werbe-Dialogs (29.09.2026) — nur, wenn mindestens ZWEI verschiedene
+    starke Merkmale (_RX_POPUP_STARK) da sind und kein Ticket-/Login-Wort. -> Liste (leer = kein Werbe-Dialog)"""
+    out, treffer = [], set()
+    for n in namen or ():
+        t = " ".join(str(n or "").split())
+        if not (3 <= len(t) <= 90) or _RX_POPUP_HART.search(t):
+            continue
+        m = _RX_POPUP_STARK.search(t)
+        if m and t not in out:
+            out.append(t)
+            treffer.add(m.group(0).lower())
+    return out if len(treffer) >= 2 else []
+
+
+def _tv_werbe_sichtbar(pw):
+    """Sichtbare Werbe-Texte im Puls-Fenster (ein Sammel-Scan, nur Text). -> Liste (leer = nichts / unlesbar)"""
+    try:
+        roh = _tv_uia_roh(pw, ("Text",), muster=(_RX_POPUP_STARK,))
+    except Exception:
+        return []
+    return tv_werbe_texte([e[0] for e in roh or () if e[1]])
+
+
 def _tv_popups_weg(pw, trail, min_abstand_s=0.0):
-    """Fremde Popups im Puls-Fenster wegklicken (X, sonst Esc). Best-Effort, bricht den Lauf nie ab — scheitert es, meldet
-    der nächste Schritt ehrlich, dass sein Knopf nicht erreichbar ist. -> Anzahl weggeklickter Popups."""
+    """Fremde Popups im Puls-Fenster wegklicken (X, sonst Esc) und das Verschwinden BEWEISEN. Best-Effort, bricht den Lauf nie
+    ab — scheitert es, meldet der nächste Schritt ehrlich, dass sein Knopf nicht erreichbar ist. -> Anzahl weggeräumter Popups."""
     if pw is None or (min_abstand_s and time.time() - _POPUP_LETZTE["at"] < min_abstand_s):
         return 0
     _POPUP_LETZTE["at"] = time.time()
@@ -3073,18 +3127,8 @@ def _tv_popups_weg(pw, trail, min_abstand_s=0.0):
         fenster = (fr.left, fr.top, fr.right, fr.bottom)
     except Exception:
         fenster = None
-    weg = 0
-    for _runde in range(3):
-        treffer = None
-        for k, kasten, text, knopf in _popup_kaesten(pw):
-            ja, grund = fremdes_popup_urteil(text, kasten, knopf, fenster)
-            if ja:
-                treffer = (k, text, knopf, grund)
-                break
-        if not treffer:
-            break
-        k, text, knopf, grund = treffer
-        x, y = int((knopf[0] + knopf[2]) / 2), int((knopf[1] + knopf[3]) / 2)
+
+    def vorn():
         try:
             import ctypes
             if int(ctypes.windll.user32.GetForegroundWindow()) != int(pw.handle):
@@ -3092,19 +3136,52 @@ def _tv_popups_weg(pw, trail, min_abstand_s=0.0):
                 _warte(0.2, 0.2)
         except Exception:
             pass
+
+    def esc():
+        try:
+            from pywinauto import keyboard
+            vorn()
+            keyboard.send_keys("{ESC}")
+            _warte(0.4, 0.2)
+            return True
+        except Exception:
+            return False
+
+    weg = 0
+    for _runde in range(3):
+        treffer = None
+        for k, kasten, text, knopf, kname in _popup_kaesten(pw):
+            ja, grund = fremdes_popup_urteil(text, kasten, knopf, fenster, knopf_name=kname)
+            if ja:
+                treffer = (k, text, knopf, grund, kname)
+                break
+        if not treffer:
+            break
+        k, text, knopf, grund, kname = treffer
+        x, y = int((knopf[0] + knopf[2]) / 2), int((knopf[1] + knopf[3]) / 2)
+        vorn()
         _maus_fahren(x, y)
         _klick_absolut(x, y)
         _warte(0.5, 0.3)
-        trail.append(f"{grund} weggeklickt (X @{x},{y}): '{text[:80]}'")
-        if any(kk_text == text for _k, _ka, kk_text, _kn in _popup_kaesten(pw)):
-            try:
-                from pywinauto import keyboard
-                keyboard.send_keys("{ESC}")
-                _warte(0.4, 0.2)
+        trail.append(f"{grund} weggeklickt (X '{kname or '-'}' @{x},{y}): '{text[:80]}'")
+        if any(kk_text == text for _k, _ka, kk_text, _kn, _nn in _popup_kaesten(pw)):
+            if esc():
                 trail.append("Popup noch da — Esc gedrückt")
-            except Exception:
-                pass
         weg += 1
+    # Werbe-Text sichtbar, aber kein X gefunden (oder das X half nicht): einmal Esc, dann Beweis
+    reste = _tv_werbe_sichtbar(pw)
+    if reste:
+        if esc():
+            trail.append(f"Werbe-Dialog ohne greifbares X — Esc gedrückt ('{reste[0][:50]}')")
+        _warte(0.3, 0.2)
+        reste2 = _tv_werbe_sichtbar(pw)
+        if reste2:
+            trail.append(f"Popup bleibt: '{' · '.join(reste2[:3])[:120]}'")
+        else:
+            trail.append("Popup weg (bewiesen: Werbe-Text verschwunden)")
+            weg += 1
+    elif weg:
+        trail.append("Popup weg (bewiesen: kein Werbe-Text mehr)")
     return weg
 
 
@@ -4083,6 +4160,20 @@ def modus_tvkonto(cmd):
             break
         fremd_vor = fremd
         _warte(0.2, 0.15)
+    if zustand == "kein_broker" and not max_fehl[0]:
+        # 29.09.2026 (Chris pc-c19p2l, Startlesung nach ab797028): ein TradingView-Werbe-Modal („Autumn sale") verdeckte die
+        # Seite, für UIA war kein Konto zu sehen → 'kein Broker' → Tab zu, Demo, Connect, kein Login-Fenster, balance_start
+        # fehlte. Vor jedem Neu-Verbinden: Popups wegräumen, Konto neu lesen, zweiter Blick mit Streuung — erst dann wie bisher.
+        pw_ = fenster[0] if fenster[0] is not None else _PULS_FENSTER.get("w")
+        n_weg = _tv_popups_weg(pw_, trail) if pw_ is not None else 0
+        for blick_nr in (1, 2):
+            _warte(0.9, 0.7)
+            zustand, aktiv, bf, uia_el = lies()
+            if zustand != "kein_broker" or max_fehl[0]:
+                trail.append(f"Konto nach Popup-Check ({n_weg} weggeräumt) beim {blick_nr}. Blick lesbar -> {zustand}")
+                break
+        else:
+            trail.append(f"kein Broker nach Popup-Check ({n_weg} weggeräumt, 2 Blicke) → neu verbinden")
     if max_fehl[0]:
         return raus(max_fehl[0], "panel")
     res["zustand"], res["konto_aktiv"] = zustand, aktiv[:80]
@@ -5983,6 +6074,10 @@ def tv_order_schritt(w, cmd, trail, erg=None):
             break
         _warte(0.3, 0.15)
         roh, ber = blick()
+    if not ber and _tv_popups_weg(w, trail):
+        # 29.09.2026: ein Werbe-Modal kann das Panel verdecken — erst wegräumen und neu schauen, dann erst Shift+T (Umschalter!)
+        _warte(0.4, 0.2)
+        roh, ber = blick()
     if not ber:
         fr = _tv_fenster_rect(w)
         if not fr:
@@ -6341,6 +6436,11 @@ def tv_order_schritt(w, cmd, trail, erg=None):
     # 'Buy 30,827.75' und saehe aus wie ein Kauf-Knopf.
     y_knopf = lab["r"][3]
     knopf = tv_im_panel(roh, ber, TV_RX_SENDEN, y_von=y_knopf)
+    if not knopf and _tv_popups_weg(w, trail):
+        # Werbe-Modal über dem Panel (29.09.2026, Chris pc-c19p2l): weggeräumt → Knopf neu lesen
+        _warte(0.4, 0.2)
+        roh, _b = blick()
+        knopf = tv_im_panel(roh, ber, TV_RX_SENDEN, y_von=y_knopf)
     if not knopf:
         # 29.09.2026 (Jacob pc-8jcrsm, order_signale 47979c82, 28.09. 13:41 UTC — Ticket fertig: Buy 3, TP 7500 $, Klick
         # fehlte, Jacob kaufte von Hand): beim ersten Panel-Blick war der Knopf da (die Box 342x450 reicht nur mit ihm bis

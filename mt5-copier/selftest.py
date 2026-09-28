@@ -2479,6 +2479,23 @@ def test_fenster_treue():
     chk("X nicht oben rechts → nicht", not fp("Autumn sale · 80% off", kasten, (500, 900, 540, 940), fen)[0])
     chk("kleiner Kasten (Toast) → nicht", not fp("Autumn sale · 80% off", (1500, 900, 1700, 980), (1680, 905, 1695, 920), fen)[0])
     chk("Kasten = ganze Seite → nicht", not fp("Autumn sale · 80% off", fen, (1880, 5, 1915, 30), fen)[0])
+    # 29.09.2026 (Chris pc-c19p2l): namenloses X, Sperrwörter, Chrome-Leiste, Esc nur bei starker Werbung
+    x_klein = (1675, 250, 1705, 280)
+    werbung = "Don't miss this · Autumn sale · Up to 80% off · Offer ends in · Explore offers"
+    chk("namenloses X im Werbe-Dialog → wegklicken", fp(werbung, kasten, x_klein, fen, knopf_name="")[0])
+    chk("'×' im Werbe-Dialog → wegklicken", fp(werbung, kasten, x_klein, fen, knopf_name="×")[0])
+    chk("namenloses X ohne Werbung → nie", not fp("What's new in TradingView · Got it", kasten, x_klein, fen, knopf_name="")[0])
+    chk("namenloser Knopf zu groß für ein X → nie", not fp(werbung, kasten, (1600, 240, 1705, 300), fen, knopf_name="")[0])
+    chk("Knopf 'Explore offers' → nie", not fp(werbung, kasten, x_klein, fen, knopf_name="Explore offers")[0])
+    chk("namenloses X im Ticket mit Werbe-Wort → nie", not fp("Take Profit · 80% off · Sale", kasten, x_klein, fen, knopf_name="")[0])
+    chk("X in Chromes Tab-Leiste → nie", not fp(werbung, (440, 0, 1725, 1040), (1675, 20, 1705, 50), fen, knopf_name="close")[0])
+    wt = ob.tv_werbe_texte
+    chk("Kopfleiste 'Upgrade'/'Explore offers' allein → kein Werbe-Dialog (kein Esc)", wt(["Upgrade", "Explore offers", "Premium"]) == [])
+    chk("Autumn-Sale-Dialog → Werbe-Dialog erkannt", len(wt(["Don't miss this", "Autumn sale", "Up to 80% off", "Offer ends in"])) >= 2)
+    chk("ein einzelnes Werbe-Merkmal → kein Esc", wt(["Autumn sale", "Chart", "NQ1!"]) == [])
+    import inspect as _insp
+    q_k = _insp.getsource(ob)
+    chk("Konto-Schritt: vor dem Neu-Verbinden Popup-Check + zweiter Blick", "kein Broker nach Popup-Check" in q_k and "Konto nach Popup-Check" in q_k)
     import inspect
     q_w = inspect.getsource(ob._tv_tab_neu_mit_link)
     chk("Strg+W nur, wenn das Vordergrund-Fenster das Puls-Fenster ist", "_vorn_h != int(w.handle)" in q_w)
