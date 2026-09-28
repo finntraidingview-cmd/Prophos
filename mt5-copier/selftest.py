@@ -2614,6 +2614,15 @@ def test_puls_augen_cdp():
            {"type": "page", "url": "https://www.tradingview.com/chart/x/", "id": "b"},
            {"type": "service_worker", "url": "https://www.tradingview.com/chart/", "id": "c"}])["id"] == "b", "Chart-Seite gewinnt, nur type page")
     chk(w([{"type": "page", "url": "https://evil.example/tradingview.com/chart"}]) is None, "fremde Domain nie")
+    fp = ob.fenster_ist_puls_chrome
+    rl = '"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --user-data-dir="C:\\Users\\m\\AppData\\Local\\Prophos\\puls-chrome" --profile-directory=Default'
+    chk(fp(100, 100, "") and not fp(100, 200, ""), "Puls-Chrome-Fenster per Browser-PID erkannt")
+    chk(fp(1, None, rl) and fp(1, None, "chrome.exe --user-data-dir=C:\\x\\Prophos\\puls-chrome"), "Puls-Chrome-Fenster per Relaunch-Befehl erkannt")
+    chk(not fp(1, None, 'chrome.exe --profile-directory="Profile 2"') and not fp(1, None, "--user-data-dir=C:\\x\\puls-chromeX"),
+        "normales Chrome / ähnlicher Ordner nie als Puls-Chrome")
+    import inspect as _i2
+    chk("Puls-Chrome (CDP)" in _i2.getsource(ob._fenster_gesperrt), "Fenster-Wahl sperrt das Puls-Chrome")
+    chk("Browser.close" in _i2.getsource(ob.modus_augen), "Regel 'uia' schließt das Puls-Chrome (Browser.close)")
     if ok:
         print("✓ Puls-Augen CDP: eigenes Profil, 127.0.0.1:9333, WebSocket-Frames, Regel-Entscheid, Target-Wahl")
     return ok

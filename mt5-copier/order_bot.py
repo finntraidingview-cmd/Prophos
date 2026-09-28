@@ -512,8 +512,66 @@ def _fenster_profil(hwnd):
     return profil
 
 
+_PULS_CHROME_PID = {"geholt": False, "pid": None}
+
+
+def _puls_chrome_browser_pid():
+    """Prozess-ID des Puls-Chrome-Browsers (CDP-Port 9333, SystemInfo.getProcessInfo), einmal je Lauf. None = läuft nicht."""
+    if _PULS_CHROME_PID["geholt"]:
+        return _PULS_CHROME_PID["pid"]
+    _PULS_CHROME_PID["geholt"] = True
+    try:
+        v = _cdp_http("/json/version", timeout=1.0)
+        if v and v.get("webSocketDebuggerUrl"):
+            ws = _CdpVerbindung(v["webSocketDebuggerUrl"], timeout=3.0)
+            try:
+                info = ws.rufe("SystemInfo.getProcessInfo", timeout=3.0)
+            finally:
+                ws.zu()
+            for pr in info.get("processInfo") or []:
+                if pr.get("type") == "browser":
+                    _PULS_CHROME_PID["pid"] = int(pr.get("id"))
+                    break
+    except Exception:
+        pass
+    return _PULS_CHROME_PID["pid"]
+
+
+def _fenster_relaunch(hwnd):
+    """Chromes Relaunch-Befehl eines Fensters (PKEY_AppUserModel_RelaunchCommand) — '' = nicht lesbar."""
+    try:
+        import pywintypes
+        from win32com.propsys import propsys
+        fmt = pywintypes.IID("{9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3}")
+        store = propsys.SHGetPropertyStoreForWindow(int(hwnd), propsys.IID_IPropertyStore)
+        return str(store.GetValue((fmt, 2)).GetValue() or "")
+    except Exception:
+        return ""
+
+
+def fenster_ist_puls_chrome(fenster_pid, browser_pid, relaunch):
+    """REIN RECHNEND (testbar): gehört ein Fenster zum Puls-Chrome (CDP)? Gleiche Prozess-ID wie dessen Browser ODER
+    'puls-chrome' im --user-data-dir des Relaunch-Befehls."""
+    try:
+        if browser_pid and fenster_pid and int(fenster_pid) == int(browser_pid):
+            return True
+    except (TypeError, ValueError):
+        pass
+    return bool(re.search(r"--user-data-dir=\"?[^\"]*[\\/]" + re.escape(PULS_CHROME_ORDNER) + r"(\"|\s|$|[\\/])", str(relaunch or ""), re.I))
+
+
 def _fenster_gesperrt(hwnd):
     """'' = Puls darf das Fenster benutzen, sonst die Bezeichnung des fremden Profils."""
+    # 29.09.2026 (Moritz pc-usq1i6, 23:5x UTC): das Puls-Chrome (CDP, eigenes Profil „Default" im Ordner puls-chrome) sah für
+    # die Fenster-Wahl aus wie das Puls-Fenster — der UIA-Puls schloss/öffnete darin TradingView-Tabs. Nie benutzen.
+    try:
+        import ctypes
+        pid_ = ctypes.c_ulong()
+        ctypes.windll.user32.GetWindowThreadProcessId(int(hwnd), ctypes.byref(pid_))
+        if fenster_ist_puls_chrome(pid_.value, _puls_chrome_browser_pid(), _fenster_relaunch(hwnd)):
+            return "Puls-Chrome (CDP)"
+    except Exception:
+        pass
     regel = puls_profil_regel_holen()
     p = _fenster_profil(hwnd)
     if profil_erlaubt(p, regel):
@@ -13422,6 +13480,24 @@ def modus_augen(cmd):
         start = bool(cmd.get("start"))
         augen = _augen_regel_holen(pc) if pc else "uia"
         if augen != "cdp" and not start:
+            # Aufräumen (29.09.2026, Moritz pc-usq1i6: Schalter zurück auf uia, das Puls-Chrome lief weiter und kickte die
+            # TradingView-Sitzung des Readers): antwortet Port 9333, das Puls-Chrome per CDP Browser.close schließen — trifft nur
+            # die Instanz mit diesem Debug-Port (das Reader-Chrome hat keinen), kein taskkill, keine Fenstersuche.
+            v = _cdp_http("/json/version", timeout=1.0)
+            if v and v.get("webSocketDebuggerUrl"):
+                try:
+                    ws = _CdpVerbindung(v["webSocketDebuggerUrl"], timeout=3.0)
+                    try:
+                        ws.rufe("Browser.close", timeout=3.0)
+                    except Exception:
+                        pass            # Chrome schließt die Verbindung beim Beenden — kein Fehler
+                    finally:
+                        ws.zu()
+                    trail.append("Regel 'uia' — Puls-Chrome (Port 9333) per Browser.close geschlossen")
+                except Exception as e:
+                    trail.append(f"Puls-Chrome schließen fehlgeschlagen ({type(e).__name__})")
+                res.update(ok=True, msg="Regel 'uia' — Puls-Chrome geschlossen")
+                return
             res.update(ok=True, msg="Regel 'uia' — nichts zu tun")
             return
         letzt = _augen_json_lesen("augen_letzt.json") or {}
