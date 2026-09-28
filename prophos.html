@@ -10161,7 +10161,17 @@
 
   const SUPABASE_URL      = 'https://gxhkannmzpyuepxlepta.supabase.co'
   const SUPABASE_ANON_KEY = 'sb_publishable__LWDlDHJbNIr6X7kRwfqqg_tZcjwaDS'
-  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+  // Zeitlimit für JEDE Supabase-Anfrage (28.09.2026, Radar-Ausfälle pc-usq1i6): supabase-js hat keinen Timeout. Hing die
+  // Token-Erneuerung des Brücken-Tabs (localhost:5000) im Netz, wartete danach jede Anfrage kurz vor Token-Ablauf auf genau
+  // diese Erneuerung — Edge-Logs 15:01:15 UTC: tv_kurse, mt5_live, echoplus_live, order_signale verstummen in derselben
+  // Sekunde, kein /token vom Tab kommt je an, der pages.dev-Tab am selben PC erneuert stündlich pünktlich weiter; der Ausfall
+  // 13:45–14:06 UTC endete in der Sekunde der verspäteten Erneuerung. 30 s → die Anfrage scheitert, auth-js versucht neu.
+  // global.fetch reicht supabase-js auch an den Auth-Client weiter. Eigenes signal des Aufrufers bleibt unangetastet.
+  const sbFetch = (url, opt) => {
+    if((opt && opt.signal) || typeof AbortSignal === 'undefined' || !AbortSignal.timeout) return fetch(url, opt)
+    return fetch(url, Object.assign({}, opt || {}, { signal: AbortSignal.timeout(30000) }))
+  }
+  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { global: { fetch: sbFetch } })
 
   const loginEl     = document.getElementById('login-view')
   const dashboardEl = document.getElementById('dashboard-view')
@@ -35421,7 +35431,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.746'
+  const OS_TAB_BUILD = '2026-09-22.747'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -49337,6 +49347,11 @@
     if(jetzt - letzte < EP_HEIL_PAUSE_MS) return
     let grund = ''
     try{ grund = (typeof window._bwGrund === 'function') ? window._bwGrund(0) : '' }catch(_){ grund = 'unbekannt' }
+    // Hängt die Cloud, hängen auch die Merker des ruhigen Moments („Signal in Arbeit", „Rundgang läuft" warten selbst auf
+    // Supabase) — der Moment käme nie (28.09.2026, 19:01 Dubai: 4 h Ausfall bei offenem Tab). Ab 5 min Stille zählt nur noch
+    // ein laufender Puls-Klick, ab 15 min nichts mehr.
+    if(grund && stumm >= 15 * 60000) grund = ''
+    else if(grund && stumm >= 5 * 60000 && grund !== 'Puls läuft') grund = ''
     if(grund){
       if(!epLokal.heilWarteLog || jetzt - epLokal.heilWarteLog > 30000){ epLokal.heilWarteLog = jetzt; console.warn('[bruecke] Cloud seit ' + Math.round(stumm / 1000) + ' s stumm — Neuladen wartet (' + grund + ')') }
       return
@@ -49375,6 +49390,10 @@
     try{
       const d = await epLokalHolen()
       if(!d) return
+      // Reader frisch VOR dem ersten Cloud-Aufruf merken (28.09.2026): stand bisher erst hinter dem echoplus_live-select —
+      // hing der, blieb readerFrischAt alt und epHeilPruefen hielt den Reader für tot, die Selbstheilung griff nie.
+      if(d.kurse && typeof d.kurse === 'object' && Object.values(d.kurse).some(q => q && !q.stale && !/^delayed/.test(String(q.modus || ''))))
+        epLokal.readerFrischAt = Date.now()
       const pc = epPcId()
       epFeedSchluessel(d, pc)   // Reader-Direktfeed (28.09.2026): Schlüssel einmal übergeben, nicht awaiten
       // Fernschalter: eigenen soll_an lesen und aufs lokale Geraet anwenden.
