@@ -35286,7 +35286,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.741'
+  const OS_TAB_BUILD = '2026-09-22.742'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -42464,7 +42464,8 @@
     if(!wrap || !cb || !lbl) return
     const a = (accounts || []).find(x => String(x.id) === String(p.masterAccountId))
     const t = String((a && a.type) || '').toLowerCase()
-    if(!a || !(t === 'funded' || t === 'live' || t === 'winning_days')){ wrap.hidden = true; return }
+    // CFD-Konten nie (28.09.2026, Finn: „bei CFD gibt es ja keine Winning Days") — nur Futures-Master farmen
+    if(!a || !(t === 'funded' || t === 'live' || t === 'winning_days') || tpFirmIstCfd(a.firm)){ wrap.hidden = true; return }
     wrap.hidden = false
     cb.checked = !!a.wdFarm
     lbl.textContent = `${a.wdFarm ? 'Im WD-Farm' : 'Nicht im WD-Farm'} — ${a.name}`
@@ -42476,7 +42477,8 @@
     if(!wrap || !cb) return
     const a = (accounts || []).find(x => String(x.id) === String(p.masterAccountId))
     const t = String((a && a.type) || '').toLowerCase()
-    if(!a || !(t === 'funded' || t === 'live' || t === 'winning_days')){ wrap.hidden = true; return }
+    // CFD-Konten nie (28.09.2026, Finn: „bei CFD gibt es ja keine Winning Days")
+    if(!a || !(t === 'funded' || t === 'live' || t === 'winning_days') || tpFirmIstCfd(a.firm)){ wrap.hidden = true; return }
     wrap.hidden = false
     if(p.winningDay === true || p.winningDay === false){
       cb.checked = p.winningDay
