@@ -23,7 +23,7 @@
  */
 var PROPHOS_AUGEN = (function () {
   'use strict';
-  var VERSION = '0.5.1';   // 0.5.1 (29.09.2026, Lesung 00:17 pc-usq1i6): Schalter-Rechteck, ticket.seite/bereit, Legende, veraltete Zeilen   // 0.5.0 (29.09.2026): Aufnahme-Modus (Finn klickt den Ablauf einmal selbst, jede Aktion wird mitgeschrieben)   // 0.4.0 (29.09.2026, K1–K4 für T3): positionen, orders, konto_summary, symbolsuche, toasts.meldungen   // 0.3.0 (29.09.2026, erste echte Lesung pc-usq1i6): TP/SL-Zustand, Konto-Leiste, Toast-Rückfall   // 0.2.0 (29.09.2026): Vertrag mit T3 — globalThis.prophosAugen, Schlüssel-Whitelist, popups, kauf_knopf
+  var VERSION = '0.5.2';   // 0.5.2 (29.09.2026, Lesung 00:22): Panel 'Collapse panel'/Manager-Knopf, Konto entdoppelt + kontonr   // 0.5.1 (29.09.2026, Lesung 00:17 pc-usq1i6): Schalter-Rechteck, ticket.seite/bereit, Legende, veraltete Zeilen   // 0.5.0 (29.09.2026): Aufnahme-Modus (Finn klickt den Ablauf einmal selbst, jede Aktion wird mitgeschrieben)   // 0.4.0 (29.09.2026, K1–K4 für T3): positionen, orders, konto_summary, symbolsuche, toasts.meldungen   // 0.3.0 (29.09.2026, erste echte Lesung pc-usq1i6): TP/SL-Zustand, Konto-Leiste, Toast-Rückfall   // 0.2.0 (29.09.2026): Vertrag mit T3 — globalThis.prophosAugen, Schlüssel-Whitelist, popups, kauf_knopf
 
   // ── Grundwerkzeuge ─────────────────────────────────────────────────────────
   function sichtbar(el) {
@@ -134,6 +134,12 @@ var PROPHOS_AUGEN = (function () {
       }
     } catch (_) {}
     return { an: null, quelle: 'unklar' };
+  }
+  // 'ABCABC' → 'ABC', 'X Y X Y' → 'X Y' (TradingView legt manche Texte doppelt ins DOM: sichtbar + Mess-/Tooltip-Kopie)
+  function entdoppeln(t) {
+    t = String(t || '');
+    var m = t.match(/^(.+?)\s*\1$/);
+    return m ? m[1] : t;
   }
   function schalterZustand(el) {
     if (!el) return null;
@@ -315,14 +321,23 @@ var PROPHOS_AUGEN = (function () {
     var mgr = suche([{ q: 'aria:account manager', sel: '#footer-chart-panel button[aria-label], button[aria-label]', text: /account\s*manager|konto(-|\s*)?manager|kontoverwaltung/i }]);
     var tog = document.querySelector('#footer-chart-panel [data-name="toggle-visibility-button"], [data-name="toggle-visibility-button"]');
     var togA = tog ? (attr(tog, 'aria-label') || attr(tog, 'title')) : '';
-    var panel = tog ? (/open|öffnen|oeffnen|einblenden|show/i.test(togA) ? 'zu' : /close|schlie|ausblenden|hide|minim/i.test(togA) ? 'offen' : 'unklar') : null;
+    // Lesung 00:22: offen heißt der Knopf 'Collapse panel' (zu: 'Open panel'), der Manager-Knopf 'Close account manager' / 'Open account manager'
+    var ZU_RX = /open|öffnen|oeffnen|einblenden|show|expand|aufklappen|ausklappen|maximi/i, OFFEN_RX = /close|schlie|ausblenden|hide|minim|collapse|einklappen|zuklappen/i;
+    var panel = tog ? (OFFEN_RX.test(togA) ? 'offen' : ZU_RX.test(togA) ? 'zu' : null) : null;
+    var mgrA = mgr.el ? attr(mgr.el, 'aria-label') : '';
+    if (!panel && mgrA) panel = /^(close|schlie)/i.test(mgrA) ? 'offen' : /^(open|öffnen|oeffnen)/i.test(mgrA) ? 'zu' : null;
+    if (!panel) panel = tog || mgr.el ? 'unklar' : null;
     var schalter = s.el ? kurz(s.el, { quelle: s.quelle }) : null;
-    var aktivText = s.el ? txt(s.el).slice(0, 60) : '';
+    // Lesung 00:22: textContent las 'PAAPEX6416990000009USDPAAPEX6416990000009USD' (versteckter Doppel-Text) — entdoppeln, Nummer extra
+    var aktivText = s.el ? entdoppeln(txt(s.el)).slice(0, 60) : '';
+    var kontonrM = aktivText.match(/[A-Z]{2,}[A-Z0-9_-]*?\d{5,}/);
+    eintraege.forEach(function (e) { e.text = entdoppeln(e.text); });
     eintraege.forEach(function (e) {
       var n1 = String(e.text || '').replace(/[^a-z0-9]/gi, '').toUpperCase(), n2 = aktivText.replace(/[^a-z0-9]/gi, '').toUpperCase();
       e.aktiv = e['aria-selected'] === 'true' || e['aria-checked'] === 'true' || (!!n1 && !!n2 && (n1.indexOf(n2) >= 0 || n2.indexOf(n1) >= 0));
     });
-    return { schalter: schalter, aktiv: aktivText, liste_offen: eintraege.length > 0, eintraege: eintraege, treffer: treffer, notiz: s.notiz,
+    if (schalter) schalter.text = entdoppeln(schalter.text);
+    return { schalter: schalter, aktiv: aktivText, kontonr: kontonrM ? kontonrM[0] : null, liste_offen: eintraege.length > 0, eintraege: eintraege, treffer: treffer, notiz: s.notiz,
              broker: mgr.el ? txt(mgr.el).slice(0, 30) : (leiste ? txt(leiste).slice(0, 30) : ''), manager_knopf: mgr.el ? kurz(mgr.el) : null,
              panel: panel, panel_knopf: tog && sichtbar(tog) ? kurz(tog) : null,
              hinweis: (!s.el && !treffer.length && panel === 'zu') ? 'Broker-Panel zu — Kontonummer nicht sichtbar (panel_knopf öffnet es)' : null };
