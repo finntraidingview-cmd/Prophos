@@ -23,7 +23,7 @@
  */
 var PROPHOS_AUGEN = (function () {
   'use strict';
-  var VERSION = '0.6.1';   // 0.6.1 (29.09.2026): aufnahme_letzte() als Rettungskopie, T3-Banner 'prophos-aufnahme' ausgeblendet   // 0.6.0 (29.09.2026, Aufnahme 00:36 leer): window-capture, roh-Zähler, tab_id, Sichtbarkeit   // 0.5.3 (29.09.2026, Lesung 00:22:50): Konto-Anker Kontonummer zuerst, Summary Total P/L = today   // 0.5.2 (29.09.2026, Lesung 00:22): Panel 'Collapse panel'/Manager-Knopf, Konto entdoppelt + kontonr   // 0.5.1 (29.09.2026, Lesung 00:17 pc-usq1i6): Schalter-Rechteck, ticket.seite/bereit, Legende, veraltete Zeilen   // 0.5.0 (29.09.2026): Aufnahme-Modus (Finn klickt den Ablauf einmal selbst, jede Aktion wird mitgeschrieben)   // 0.4.0 (29.09.2026, K1–K4 für T3): positionen, orders, konto_summary, symbolsuche, toasts.meldungen   // 0.3.0 (29.09.2026, erste echte Lesung pc-usq1i6): TP/SL-Zustand, Konto-Leiste, Toast-Rückfall   // 0.2.0 (29.09.2026): Vertrag mit T3 — globalThis.prophosAugen, Schlüssel-Whitelist, popups, kauf_knopf
+  var VERSION = '0.7.0';   // 0.7.0 (29.09.2026, Aufnahme 00:52): Kontoliste ohne Rollen, Meldungs-Status, Watchlist, Dialog-Knöpfe   // 0.6.1 (29.09.2026): aufnahme_letzte() als Rettungskopie, T3-Banner 'prophos-aufnahme' ausgeblendet   // 0.6.0 (29.09.2026, Aufnahme 00:36 leer): window-capture, roh-Zähler, tab_id, Sichtbarkeit   // 0.5.3 (29.09.2026, Lesung 00:22:50): Konto-Anker Kontonummer zuerst, Summary Total P/L = today   // 0.5.2 (29.09.2026, Lesung 00:22): Panel 'Collapse panel'/Manager-Knopf, Konto entdoppelt + kontonr   // 0.5.1 (29.09.2026, Lesung 00:17 pc-usq1i6): Schalter-Rechteck, ticket.seite/bereit, Legende, veraltete Zeilen   // 0.5.0 (29.09.2026): Aufnahme-Modus (Finn klickt den Ablauf einmal selbst, jede Aktion wird mitgeschrieben)   // 0.4.0 (29.09.2026, K1–K4 für T3): positionen, orders, konto_summary, symbolsuche, toasts.meldungen   // 0.3.0 (29.09.2026, erste echte Lesung pc-usq1i6): TP/SL-Zustand, Konto-Leiste, Toast-Rückfall   // 0.2.0 (29.09.2026): Vertrag mit T3 — globalThis.prophosAugen, Schlüssel-Whitelist, popups, kauf_knopf
 
   // ── Grundwerkzeuge ─────────────────────────────────────────────────────────
   function sichtbar(el) {
@@ -141,7 +141,9 @@ var PROPHOS_AUGEN = (function () {
   function entdoppeln(t) {
     t = String(t || '');
     var m = t.match(/^(.+?)\s*\1$/);
-    return m ? m[1] : t;
+    if (m) return m[1];
+    var m2 = t.match(/^(.{6,}?)\1(.*)$/);           // 'NR NR USD' als 'NRNRUSD' (versteckte Kopie mitten im Knopf)
+    return m2 ? m2[1] + m2[2] : t;
   }
   function schalterZustand(el) {
     if (!el) return null;
@@ -278,8 +280,11 @@ var PROPHOS_AUGEN = (function () {
     alle('[role="dialog"],[role="alertdialog"],[data-dialog-name],[aria-modal="true"]').filter(sichtbar).forEach(function (d) {
       if (gesehen.some(function (g) { return g.contains(d); })) return;
       gesehen.push(d);
+      // Knöpfe mit data-name (Aufnahme 00:52: „Close position"-Dialog → [data-name=submit-button]); submit extra für den Bestätigungs-Klick
+      var kn = alle('button[data-name],[role="button"][data-name]', d).filter(sichtbar).slice(0, 8).map(function (b) { return kurz(b); });
+      var sub = kn.filter(function (b) { return /submit|confirm|ok|apply/i.test(b.dn); })[0] || null;
       out.push({ dn: attr(d, 'data-name'), name: attr(d, 'data-dialog-name'), role: attr(d, 'role'), rect: rect(d),
-                 titel: txt(d.querySelector('h1,h2,h3,[class*="title"]')).slice(0, 60), text: txt(d).slice(0, 120), x: xIn(d) });
+                 titel: txt(d.querySelector('h1,h2,h3,[class*="title"]')).slice(0, 60), text: txt(d).slice(0, 120), x: xIn(d), knoepfe: kn, submit: sub });
     });
     // Overlays ohne Dialog-Rolle (Werbung, Broker-Hinweise): fest positioniert, groß, weit oben im Stapel — nur mit X gemeldet
     alle('body > div, body > section, body > aside').forEach(function (e) {
@@ -294,6 +299,47 @@ var PROPHOS_AUGEN = (function () {
   }
 
   // ── Konto (Account-Manager) ────────────────────────────────────────────────
+  /* KONTO-DROPDOWN (Aufnahme 00:52 pc-usq1i6, T3): Tradovate rendert die Liste OHNE role — Zeilen sind div ~228×32 im 32-px-Raster
+   * ([78,600|632|664|696,228,32]), darin ein span mit der Kontonummer; Gruppen-Köpfe (z. B. „Apex") stehen in derselben Spalte ohne
+   * Nummer. Direkt nach dem Öffnen kommt ein focusin auf einen gleich breiten Container weiter oben ([6,30,228,32]) — bei gleicher
+   * Nummer gewinnt deshalb die Zeile, die dem Umschalter am nächsten liegt. -> {zeilen:[{text, kontonr, rect, aktiv}], gruppen:[{text, rect}]} */
+  function kontoZeilen(schalterEl) {
+    var sr = schalterEl ? schalterEl.getBoundingClientRect() : null;
+    var kand = [];
+    alle('div,li,button,a,[tabindex]').forEach(function (e) {
+      if (!sichtbar(e) || (schalterEl && (e === schalterEl || schalterEl.contains(e) || e.contains(schalterEl)))) return;
+      if (e.closest('table,[data-name="order-panel"],#footer-chart-panel,[data-name="symbol-list-wrap"],[data-name="tree"],[data-name^="toast-group-"]')) return;
+      var r = e.getBoundingClientRect();
+      if (sr && Math.abs(r.left - sr.left) > 320) return;           // Liste klappt am Umschalter auf, nicht irgendwo im Chart
+      if (r.height < 24 || r.height > 44 || r.width < 150 || r.width > 340) return;
+      var t = entdoppeln(txt(e)); if (!RX_KONTO.test(t) || t.length > 60) return;
+      if (/[A-Z]\d{4}\d*[.,]\d/.test(t.replace(/\s/g, ''))) return;    // Symbol + Kurs ohne Leerzeichen ('NQZ202630,500.75') ist kein Konto
+      kand.push({ el: e, t: t, r: r });
+    });
+    // innerste passende Zeile (nicht die Liste, die mehrere Zeilen umschließt — die ist höher und fiele ohnehin raus)
+    kand = kand.filter(function (k) { return !kand.some(function (m) { return m !== k && k.el.contains(m.el); }); });
+    var jeNr = {};
+    kand.forEach(function (k) {
+      var nr = (k.t.match(/[A-Z]{2,}[A-Z0-9_-]*?\d{5,}/) || [k.t])[0];
+      var d = sr ? Math.abs(k.r.top - sr.top) : 0;
+      if (!jeNr[nr] || d < jeNr[nr].d) jeNr[nr] = { k: k, d: d, nr: nr };
+    });
+    var zeilen = Object.keys(jeNr).map(function (nr) { var k = jeNr[nr].k;
+      return { text: k.t, kontonr: nr, rect: rect(k.el), aktiv: attr(k.el, 'aria-selected') === 'true' || attr(k.el, 'aria-checked') === 'true' || null }; })
+      .sort(function (a, b) { return a.rect[1] - b.rect[1]; });
+    var gruppen = [];
+    if (zeilen.length) {
+      var x0 = zeilen[0].rect[0], y0 = zeilen[0].rect[1] - 120, y1 = zeilen[zeilen.length - 1].rect[1] + 40;
+      alle('div,span').forEach(function (e) {
+        if (gruppen.length >= 10 || e.children.length > 2 || !sichtbar(e)) return;
+        var r = e.getBoundingClientRect(), t = entdoppeln(txt(e));
+        if (Math.abs(r.left - x0) > 14 || r.top < y0 || r.top > y1 || r.height < 14 || r.height > 40 || !t || t.length > 30 || RX_KONTO.test(t) || /\d{4,}/.test(t)) return;
+        if (gruppen.some(function (g) { return g.text === t; })) return;
+        gruppen.push({ text: t, rect: rect(e) });
+      });
+    }
+    return { zeilen: zeilen.slice(0, 40), gruppen: gruppen };
+  }
   function konto(texte) {
     // Lesung 00:22:50: '[data-name*=account] button' traf 'Column setup' in der Account-Manager-Tabelle — jetzt zuerst die KONTONUMMER
     // als Text (unser eigener Anker, z. B. 'PAAPEX6416990000009USD' [72,510]), data-name-Wege nur noch mit Kontonummer im Text
@@ -303,6 +349,8 @@ var PROPHOS_AUGEN = (function () {
                    { q: 'dn*account button', sel: '[data-name*="account"][role="button"], [data-name*="account"] button', text: RX_KONTO }]);
     var eintraege = alle('[role="listbox"] [role="option"],[role="menu"] [role="menuitem"],[data-name="menu-inner"] [role="option"],[data-name="popup-menu-container"] [role="menuitem"]')
       .filter(sichtbar).slice(0, 40).map(function (e) { return kurz(e); });
+    var gruppen = [];
+    if (!eintraege.length) { var kl = kontoZeilen(s.el); eintraege = kl.zeilen; gruppen = kl.gruppen; }
     // External IDs als Text suchen (Reader-Lehre 21.09.2026: eine 17-stellige Kontonummer kann TradingView nicht umbenennen)
     var treffer = [];
     var nadeln = (texte || []).map(function (x) { return String(x || '').replace(/[^a-z0-9]/gi, '').toUpperCase(); })
@@ -341,7 +389,9 @@ var PROPHOS_AUGEN = (function () {
       e.aktiv = e['aria-selected'] === 'true' || e['aria-checked'] === 'true' || (!!n1 && !!n2 && (n1.indexOf(n2) >= 0 || n2.indexOf(n1) >= 0));
     });
     if (schalter) schalter.text = entdoppeln(schalter.text);
-    return { schalter: schalter, aktiv: aktivText, kontonr: kontonrM ? kontonrM[0] : null, liste_offen: eintraege.length > 0, eintraege: eintraege, treffer: treffer, notiz: s.notiz,
+    // offen = mindestens zwei Zeilen oder eine, die nicht das aktive Konto ist (nur die aktive Nummer irgendwo reicht nicht)
+    var offenListe = eintraege.length >= 2 || (eintraege.length === 1 && !eintraege[0].aktiv);
+    return { schalter: schalter, aktiv: aktivText, kontonr: kontonrM ? kontonrM[0] : null, gruppen: gruppen, liste_offen: offenListe, eintraege: eintraege, treffer: treffer, notiz: s.notiz,
              broker: mgr.el ? txt(mgr.el).slice(0, 30) : (leiste ? txt(leiste).slice(0, 30) : ''), manager_knopf: mgr.el ? kurz(mgr.el) : null,
              panel: panel, panel_knopf: tog && sichtbar(tog) ? kurz(tog) : null,
              hinweis: (!s.el && !treffer.length && panel === 'zu') ? 'Broker-Panel zu — Kontonummer nicht sichtbar (panel_knopf öffnet es)' : null };
@@ -486,27 +536,54 @@ var PROPHOS_AUGEN = (function () {
       });
     }
     var leg = suche([{ q: 'aria:Change symbol', sel: 'button[aria-label]', text: /change symbol|symbol (ä|ae)ndern/i }]);
-    return { knopf: k.el ? kurz(k.el, { quelle: k.quelle }) : null, legende: leg.el ? kurz(leg.el) : null, dialog: dlg && sichtbar(dlg) ? { rect: rect(dlg), x: xIn(dlg) } : null,
+    // Watchlist rechts (Aufnahme 00:52: Finn wechselte NQ↔MNQ per Klick in [data-name=symbol-list-wrap] / [data-name=tree], Zeile ~80×27)
+    var watch = [];
+    var wl = document.querySelector('[data-name="symbol-list-wrap"]') || document.querySelector('[data-name="tree"]');
+    if (wl && sichtbar(wl)) {
+      var gs = [];
+      alle('*', wl).forEach(function (e) {
+        if (watch.length >= 30 || e.children.length || !sichtbar(e)) return;
+        var t = txt(e); if (!/^[A-Z][A-Z0-9]{0,5}([FGHJKMNQUVXZ]\d{2,4}|\d!)$/.test(t)) return;
+        var z = e, i = 0;
+        while (z.parentElement && z.parentElement !== wl && i < 5) { var rr = z.getBoundingClientRect(); if (rr.width >= 150 && rr.height >= 18 && rr.height <= 44) break; z = z.parentElement; i++; }
+        if (gs.indexOf(z) >= 0) return; gs.push(z);
+        watch.push({ symbol: t, rect: rect(z), text_rect: rect(e) });
+      });
+    }
+    return { knopf: k.el ? kurz(k.el, { quelle: k.quelle }) : null, legende: leg.el ? kurz(leg.el) : null, watchlist: watch, dialog: dlg && sichtbar(dlg) ? { rect: rect(dlg), x: xIn(dlg) } : null,
              feld: f.el ? kurz(f.el, { quelle: f.quelle }) : null, treffer: treffer, notiz: k.notiz.concat(f.notiz) };
   }
 
   // ── Order-Meldungen aus Toast-Texten (EN + DE, Regeln wie tv_meldung_preise im Bot) ─
   var RX_M_TP = /take[\s-]*profit|gewinnmitnahme/i, RX_M_SL = /stop[\s-]*loss|verlustbegrenzung|stop[\s-]*order/i;
   var RX_M_FILL = /executed|filled|position opened|ausgef(ü|ue)hrt|gef(ü|ue)llt/i;
+  // Status aus dem Titel (Aufnahme 00:52: Close position → „Take Profit/Stop Loss order CANCELLED … Buy 1 at …" — das sind die
+  // stornierten Bracket-Beine eines Shorts, keine neuen TP/SL; ohne Status sah das wie ein falsch zugeordnetes TP/SL aus)
+  var RX_M_STORNO = /cancel+ed|canceled|storniert|abgebrochen|gel(ö|oe)scht/i, RX_M_ABGELEHNT = /reject|abgelehnt/i;
+  var RX_M_GEAENDERT = /modified|ge(ä|ae)ndert/i, RX_M_PLATZIERT = /placed|platziert|submitted|aufgegeben/i;
+  var RX_M_TITEL = /\border\b|auftrag|position opened|marktorder|limitorder|stop-?order/i;
   var RX_D_EN = /\b(buy|sell|kauf(?:en)?|verkauf(?:en)?)\s+([\d.,]+)\s*(?:@|\bat\b|\bzu\b|\bbei\b)\s*(\d[\d.,]*)/i;
   var RX_D_DE = /(?:(?:^|\s)(\d+)\s+)?\b(?:zu|bei|@)\s*(\d[\d.,]*)\s+(verkaufen|kaufen|verkauf|kauf)\b/i;
   function meldungenAus(texte) {
-    var out = [], art = null;
+    var out = [], art = null, status = null;
     for (var i = 0; i < texte.length; i++) {
       var t = texte[i].text, r = texte[i].rect;
-      if (RX_M_TP.test(t)) art = 'tp'; else if (RX_M_SL.test(t)) art = 'sl'; else if (RX_M_FILL.test(t)) art = 'fill';
+      // Jeder Titel setzt Art UND Status neu — die Preis-Zeile darunter gehört zu genau diesem Toast
+      if (RX_M_TITEL.test(t) || RX_M_TP.test(t) || RX_M_SL.test(t)) {
+        art = RX_M_TP.test(t) ? 'tp' : RX_M_SL.test(t) ? 'sl' : RX_M_FILL.test(t) ? 'fill' : 'order';
+        status = RX_M_STORNO.test(t) ? 'storniert' : RX_M_ABGELEHNT.test(t) ? 'abgelehnt' : RX_M_FILL.test(t) ? 'ausgefuehrt'
+               : RX_M_GEAENDERT.test(t) ? 'geaendert' : RX_M_PLATZIERT.test(t) ? 'platziert' : null;
+        if (status === 'ausgefuehrt' && art !== 'fill') art = 'fill';
+      }
       var m = t.match(RX_D_EN), seite = null, menge = null, preis = null;
       if (!m && i + 1 < texte.length && /^(buy|sell|kauf(en)?|verkauf(en)?)\s+[\d.,]+$/i.test(t) && /^(@|at|zu|bei)\s*\d/i.test(texte[i + 1].text)) {
         m = (t + ' ' + texte[i + 1].text).match(RX_D_EN); if (m) i++;               // 'Buy 4' + 'at 30,594.25' als zwei Knoten
       }
       if (m) { seite = seiteNorm(m[1]); menge = zahl(m[2]); preis = zahl(m[3]); }
       else { var d = t.match(RX_D_DE); if (d) { seite = /^verkauf/i.test(d[3]) ? 'sell' : 'buy'; menge = d[1] ? zahl(d[1]) : null; preis = zahl(d[2]); } }
-      if (preis != null && preis > 0) out.push({ art: art, seite: seite, menge: menge, preis: preis, text: t.slice(0, 80), rect: r });
+      // aktiv = zählt als laufendes TP/SL bzw. echter Fill; stornierte/abgelehnte Meldungen bleiben zur Nachvollziehbarkeit stehen
+      if (preis != null && preis > 0) out.push({ art: art, status: status, aktiv: status !== 'storniert' && status !== 'abgelehnt',
+                                                seite: seite, menge: menge, preis: preis, text: t.slice(0, 80), rect: r });
     }
     return out;
   }
