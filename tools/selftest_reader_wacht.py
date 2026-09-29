@@ -30,7 +30,7 @@ def lade():
 
     code = "\n".join([const(c) for c in ("READER_WACHT_SCHWELLE_S", "READER_WACHT_KERZEN_S",
                                          "READER_WACHT_ERINNERUNG_1_S", "READER_WACHT_ERINNERUNG_N_S",
-                                         "READER_WACHT_TZ", "READER_WACHT_KERZEN_HAUPT")]
+                                         "READER_WACHT_TZ", "READER_WACHT_KERZEN_HAUPT", "READER_WACHT_NAEHERUNG_N")]
                      + [block(f) for f in ("cme_markt_offen", "_cme_offen_seit_s", "_rw_uhr", "_rw_kurs_text",
                                            "reader_wacht_schritt", "_rw_frisch", "_rw_ts", "_rw_uebernahme_key",
                                            "_rw_puls_text", "_rw_versions_wechsel")])
@@ -195,6 +195,37 @@ def main():
           and uk({"art": "kerzen", "laut": None, "gemeldet": 0}) == "kerzen_leise"
           and uk({"art": "kerzen", "laut": None, "wurzel": "MNQ", "gemeldet": 1}) == "kerzen" and uk({"art": "feed"}) == "feed",
           "Übernahme-Schlüssel: laut=false/Nebenwurzel/gemeldet 0 → leise")
+    # Näherung (29.09.2026): MNQ nur noch aus Einzelkursen ('ws-tick') statt aus dem TradingView-Chart ('ws') → Push
+    km = {"MNQ": 20, "NQ": 20}
+    _, ev = s(leer, T, 3, True, kerzen_je=km, haupt_kerzen=[(T - 20, "ws-tick"), (T - 80, "ws"), (T - 140, "ws")], **kw)
+    check(ev == [], "eine einzelne Minute ohne Chart-Serie → noch kein Vorfall")
+    zn, ev = s(leer, T, 3, True, kerzen_je=km, haupt_kerzen=[(T - 20, "ws-tick"), (T - 80, "ws-tick"), (T - 140, "ws")], **kw)
+    check([e["art"] for e in ev] == ["naeherung_beginn"] and ev[0]["push"] and ev[0]["renotify"]
+          and "MNQ nur noch Näherung seit" in ev[0]["titel"] and "pc-usq1i6" in ev[0]["text"]
+          and zn["naeherung"]["von"] == T - 80, "zwei jüngste MNQ-Kerzen am Stück 'ws-tick' → EIN Push, von = erste Tick-Minute")
+    zn2, ev = s(zn, T + 30, 3, True, kerzen_je=km, haupt_kerzen=[(T + 10, "ws-tick"), (T - 20, "ws-tick")], **kw)
+    check(ev == [] and zn2["naeherung"], "Näherung nur einmal gemeldet")
+    zn3, ev = s(zn2, T + 60, 3, True, kerzen_je=km, haupt_kerzen=[(T + 40, "ws-tick"), (T + 10, "ws")], **kw)
+    check(ev == [] and zn3["naeherung"], "jüngste Kerze noch Tick → Vorfall bleibt offen")
+    zn4, ev = s(zn3, T + 90, 3, True, kerzen_je=km, haupt_kerzen=[(T + 70, "ws"), (T + 40, "ws-tick")], **kw)
+    check([e["art"] for e in ev] == ["naeherung_ende"] and ev[0]["push"] and "MNQ wieder exakt" in ev[0]["titel"]
+          and zn4["naeherung"] is None, "jüngste Kerze wieder aus dem Chart → „wieder exakt“-Push")
+    _, ev = s(leer, T, 3, True, kerzen_je=km, haupt_kerzen=[(T - 20, None), (T - 80, None), (T - 140, None)], **kw)
+    check(ev == [], "Quelle unbekannt (alte Zeilen ohne quelle) → keine Aussage")
+    _, ev = s(zn, T + 30, 3, True, kerzen_je=km, haupt_kerzen=None, **kw)
+    check(ev == [], "Kerzen-Abfrage gescheitert → Vorfall bleibt, keine Meldung")
+    zc2, ev = s(zn, T + 30, 3, False, kerzen_je=km, haupt_kerzen=[(T + 10, "ws-tick"), (T - 20, "ws-tick")], **kw)
+    check([e["art"] for e in ev] == ["naeherung_still"] and not ev[0]["push"] and zc2["naeherung"] is None,
+          "Marktschluss schliesst die Näherung still")
+    zf3, ev = s(zn, T + 30, 300, True, kerzen_je=None, **kw)
+    check(sorted(e["art"] for e in ev) == ["feed_beginn", "naeherung_still"], "Feed-Ausfall schliesst die Näherung still")
+    zk4, ev = s(zn, T + 30, 3, True, kerzen_je={"MNQ": 400, "NQ": 20}, haupt_kerzen=[(T - 370, "ws-tick")], **kw)
+    check(sorted(e["art"] for e in ev) == ["kerzen_beginn", "naeherung_still"] and zk4["naeherung"] is None,
+          "MNQ-Kerzen fehlen ganz → Kerzen-Alarm, Näherung still zu")
+    check(uk({"art": "naeherung"}) == "naeherung", "Übernahme-Schlüssel Näherung")
+    _, ev = s(leer, T, 3, True, kerzen_je=km, haupt_kerzen=[(T - 20, "ws"), (T - 80, "ws")], **kw)
+    check(ev == [], "MNQ aus dem Chart → nichts")
+
     # Puls-Hinweis im Push
     pt = a["_rw_puls_text"]
     von = utc("2026-09-25T10:25:14").timestamp()
