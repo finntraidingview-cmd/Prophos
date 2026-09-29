@@ -8468,6 +8468,8 @@ def pruefe_tv_close_befehl(cmd):
 
 
 def modus_tvclose(cmd):
+    if augen_modus_lauf() == "cdp":          # CDP-PC (29.09.2026, Finn: „Schließen in Prophos über den neuen Puls"): Puls-Chrome
+        return modus_tvclose_cdp(cmd)
     res = {"ok": False, "code": "", "msg": "", "trail": "", "schritt": "start",
            "konto_aktiv": "", "konto_quelle": None, "quelle": None, "geklickt": False, "bestaetigt": False,
            "retry_ok": True}
@@ -15307,6 +15309,189 @@ K3_RX_FREIGABE = re.compile(r"^\s*(allow|authori[sz]e|zulassen|erlauben|genehmig
 K3_RX_ORDER_OFFEN = re.compile(r"working|accepted|pending|placed|received|suspended|wartend|aktiv|offen|platziert", re.I)
 K3_RX_ORDER_ZU = re.compile(r"fill|cancel|reject|expir|ausgef|storn|abgelehnt|abgelaufen", re.I)
 
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PULS ÜBER CDP — SCHLIESSEN (29.09.2026, Finn: „Schließen in Prophos soll über den neuen Puls laufen — einloggen/Konto wechseln wie
+# bei der Order, Position schließen, danach Total P/L lesen"). Bis hierhin schloss der alte UIA-Puls im normalen Chrome (samt
+# Tradovate-Login dort = Doppel-Login, der das Puls-Chrome rauswarf). Vertrag wie modus_tvclose: {ok, code ('schon_flach' | …), msg,
+# trail, today_pnl, positionen_danach, retry_ok, konto_aktiv, geklickt, bestaetigt} + balance_end/equity_end (für P&L = Balance
+# nachher − vorher, balance_start kommt aus der Order-Antwort).
+# Ablauf: Konto (Auto-Login) → Reiter Positions (bewiesen) → flach? (2 Lesungen, Tabelle sichtbar) → sonst GENAU EINE Zeile der
+# Wurzel, deren Close-Knopf (k3_close_knopf, K3 live 29.09.2026) → Rückfrage nur über [data-name=submit-button] mit „Close" im
+# Dialog → flach bewiesen (2 Lesungen) → Account summary. Jede Mehrdeutigkeit = nichts geklickt; nach dem Close-Klick nie wiederholen.
+# ═══════════════════════════════════════════════════════════════════════════
+
+def cdp_summary_ende(summary):
+    """REIN RECHNEND (testbar): End-Werte aus „Account summary" (Schlüssel balance_end/equity_end, nicht lesbar = None)."""
+    st = cdp_summary_start(summary)
+    return {"balance_end": st["balance_start"], "equity_end": st["equity_start"]}
+
+
+def _cdp_today_info(s, opts, trail):
+    """Account summary lesen (Reiter hin und zurück) → Today-Felder wie _tv_today_aus_uia + balance_end/equity_end."""
+    try:
+        sm, t, lab, txt = _cdp_today_aus_reiter(s, opts, trail)
+    except Exception as e_:
+        trail.append(f"Account summary nicht lesbar ({type(e_).__name__})")
+        sm, t, lab, txt = None, None, None, None
+    info = {"summary": sm, "today_pnl": t, "today_label": lab, "today_pnl_text": txt, "summary_hinweis": None,
+            "sprache_fremd": False, "summary_fehler": None if sm else "keine Zusammenfassung (augen.js)"}
+    info.update(cdp_summary_ende(sm))
+    return info
+
+
+def modus_tvclose_cdp(cmd):
+    """tvclose über das Puls-Chrome (Block-Kopf)."""
+    res = {"ok": False, "code": "", "msg": "", "trail": "", "schritt": "start", "konto_aktiv": "", "konto_quelle": "cdp",
+           "quelle": "cdp", "geklickt": False, "bestaetigt": False, "retry_ok": True}
+    trail = _StempelSpur()
+    sitz = [None]
+
+    def raus(code, msg, schritt, **extra):
+        res["code"], res["msg"], res["schritt"] = code, msg, schritt
+        res.update(extra)
+        if res.get("geklickt"):
+            res["retry_ok"] = False                  # der Close-Klick war raus — nie blind wiederholen (Doktrin wie tvorder)
+        res["trail"] = " > ".join(trail)
+        if sitz[0]:
+            sitz[0].zu()
+        if res.get("geklickt"):
+            _puls_diagnose_senden(spur=trail, schritt="cdp-close")
+        try:
+            print(json.dumps(res, ensure_ascii=False))
+        except UnicodeEncodeError:
+            print(json.dumps(res, ensure_ascii=True))
+
+    fehler = pruefe_tv_close_befehl(cmd)
+    if fehler:
+        return raus("befehl", "Befehl unvollstaendig: " + " / ".join(fehler), "befehl")
+    ext = str(cmd.get("konto") or cmd.get("ext_id") or "").strip()
+    symbol = str(cmd.get("symbol") or "").strip()
+    root = tv_symbol_root(symbol)
+    richtung = str(cmd.get("richtung") or "").strip().lower() or None
+    geschwister = [str(x).strip() for x in (cmd.get("geschwister") or []) if len(_nur_alnum(x)) >= 3][:60]
+    opts = {"kontoTexte": [ext] + geschwister}
+    res["symbol"], res["wurzel"], res["richtung"] = symbol, root, richtung
+    trail.append("Weg: Puls-Chrome (CDP, Schließen)")
+    if _handlauf_aktiv():
+        return raus("handlauf", "K3-Handlauf läuft im Puls-Chrome — nichts geklickt, bitte gleich erneut anstoßen.", "sperre")
+    try:
+        s = sitz[0] = _cdp_sitzung_holen(cmd, trail)
+        ok, code, msg, st, extra = _cdp_konto_mit_login(sitz, ext, opts, cmd, trail, res)
+        s = sitz[0]
+        res.update({k: v for k, v in extra.items() if k == "konto_aktiv"})
+        if not ok:
+            return raus(code, msg + " — nichts geklickt.", "konto", **{k: v for k, v in extra.items() if k != "konto_aktiv"})
+        _cdp_reiter(s, "positions", trail)
+        # Vorher: flach nur mit zwei Lesungen bei sichtbarer Tabelle; eine Zeile der Wurzel (ggf. nur diese Seite) zählt sofort
+        vorher, n_flach, sichtbar = [], 0, False
+        for _ in range(4):
+            st = s.stand(opts)
+            ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+            if ko.get("positionen_sichtbar") is True:
+                sichtbar = True
+                vorher = [z for z in k3_zeilen(st.get("positionen"), root) if not richtung or z.get("seite") == richtung]
+                if vorher:
+                    break
+                n_flach += 1
+                if n_flach >= 2:
+                    break
+            _warte(0.6, 0.3)
+        res["positionen_vorher"] = cdp_positionen_vertrag([p for p in st.get("positionen") or [] if isinstance(p, dict) and p.get("sichtbar")])
+        if not vorher:
+            if not sichtbar or n_flach < 2:
+                return raus("tabelle_unklar", "Positions-Tabelle im Puls-Chrome nicht sicher lesbar — nichts geklickt.", "lesen")
+            t_info = _cdp_today_info(s, opts, trail)
+            return raus("schon_flach", f"Keine offene Position {root} auf {res['konto_aktiv'][:40]} — nichts geklickt"
+                        + (f", Total P/L {t_info['today_pnl']:g}" if t_info["today_pnl"] is not None else ""),
+                        "fertig", ok=True, positionen_danach=res["positionen_vorher"], geklickt=False, retry_ok=False,
+                        gelesen_at=time.strftime("%Y-%m-%dT%H:%M:%S"), **t_info)
+        if len(vorher) != 1:
+            return raus("close_knopf_unklar", f"{len(vorher)} offene {root}-Zeilen — nicht eindeutig, nichts geklickt.", "knopf")
+        z0 = vorher[0]
+        trail.append(f"Offen: {z0.get('symbol')} {str(z0.get('seite')).upper()} {k3_fmt(z0.get('menge'), 0)} @ Avg {k3_fmt(z0.get('avg'))}")
+        # Close-Knopf GENAU dieser Zeile (K3-Regel: sichtbare Beschriftung Close/×, nie Reverse/Protect/Settings)
+        knopf_c, zeile_c = None, None
+        for runde in range(2):
+            roh = s.lese_js(K3_ZEILEN_JS) or []
+            kz = [z for z in roh if isinstance(z, dict) and z.get("sichtbar") and tv_symbol_root(str(z.get("symbol") or "")) == root
+                  and not any(k in (z.get("spalten") or {}) for k in ("Status", "Order ID", "Order-ID"))]
+            if len(kz) != 1:
+                return raus("close_knopf_unklar", f"{len(kz)} sichtbare {root}-Zeilen in der Tabelle — nichts geklickt.", "knopf")
+            zeile_c = kz[0]
+            knopf_c, _n = k3_close_knopf(zeile_c)
+            if knopf_c:
+                break
+            if runde == 0 and cdp_rect(zeile_c.get("zeile")):
+                s.hin(zeile_c.get("zeile"), f"{root}-Zeile (Knöpfe einblenden)")
+                _warte(0.6, 0.3)
+        if not knopf_c:
+            return raus("close_knopf_unklar", (f"Kein eindeutiger Schließen-Knopf in der {root}-Zeile "
+                                               f"({[k3_label(k) or k.get('dn') for k in (zeile_c or {}).get('knoepfe') or []][:8]}) — nichts geklickt."),
+                        "knopf", zeile_knoepfe=(zeile_c or {}).get("knoepfe"))
+        vorher_c = [k3_meldung_schluessel(m) for m in ((st.get("toasts") or {}).get("meldungen") or []) if isinstance(m, dict)]
+        res["geklickt"] = True
+        if not s.klick(cdp_rect(knopf_c), f"Close-Knopf der {root}-Zeile"):
+            res["geklickt"] = False                  # ohne bewiesenen Hover/Fenster kein Druck → nachweislich nichts geklickt
+            return raus("close_knopf_unklar", "Close-Knopf NICHT gedrückt (Maus/Fenster nicht bewiesen) — nichts geklickt.", "knopf")
+        # Rückfrage: nur ein Dialog mit [data-name=submit-button] und „Close/Schließen" darin
+        bestaetigung, ende = "", time.time() + 6
+        while time.time() < ende and not bestaetigung:
+            _warte(0.5, 0.2)
+            st = s.stand(opts)
+            dl = [p for p in st.get("popups") or [] if isinstance(p, dict) and cdp_rect(p.get("submit"))]
+            if len(dl) > 1:
+                return raus("bestaetigung_unklar", f"{len(dl)} Dialoge mit Bestätigen-Knopf — nichts bestätigt, POSITION OFFEN, bitte von Hand.", "bestaetigung")
+            if dl:
+                p_ = dl[0]
+                sub = p_.get("submit") or {}
+                wort = f"{p_.get('titel') or ''} {p_.get('text') or ''} {sub.get('text') or ''}"
+                if sub.get("dn") != "submit-button" or not re.search(r"close|schlie", wort, re.I):
+                    return raus("bestaetigung_unklar", f"Dialog passt nicht zum Schließen ('{wort.strip()[:80]}') — nichts bestätigt, POSITION OFFEN.", "bestaetigung")
+                trail.append(f"Rückfrage '{str(p_.get('titel') or p_.get('text') or '')[:50]}': '{str(sub.get('text') or '')[:30]}' [data-name=submit-button]")
+                if not s.klick(cdp_rect(sub), "Bestätigen (submit-button)"):
+                    return raus("bestaetigung_unklar", "Bestätigen-Knopf NICHT gedrückt — Rückfrage steht noch, POSITION OFFEN, bitte von Hand.", "bestaetigung")
+                bestaetigung = "dialog"
+                break
+            ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+            if ko.get("positionen_sichtbar") is True and not k3_zeilen(st.get("positionen"), root):
+                bestaetigung = "ohne_dialog"
+        if not bestaetigung:
+            return raus("bestaetigung_unklar", "Nach dem Close-Klick weder Rückfrage noch leere Tabelle (6 s) — POSITION womöglich OFFEN, bitte nachsehen.", "bestaetigung")
+        res["bestaetigung"] = bestaetigung
+        # Flach-Beweis: zwei Lesungen mit sichtbarer Tabelle ohne Zeile der Wurzel
+        n_flach, neu_c, ende = 0, [], time.time() + 15
+        while time.time() < ende:
+            _warte(1.0, 0.4)
+            st = s.stand(opts)
+            ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+            neu_c = k3_neue_meldungen(vorher_c, (st.get("toasts") or {}).get("meldungen"))
+            if ko.get("positionen_sichtbar") is True and not k3_zeilen(st.get("positionen"), root):
+                n_flach += 1
+                if n_flach >= 2:
+                    break
+            else:
+                n_flach = 0
+        danach = cdp_positionen_vertrag([p for p in st.get("positionen") or [] if isinstance(p, dict) and p.get("sichtbar")])
+        if n_flach < 2:
+            return raus("ende_unklar", f"Schließen geklickt, aber flach NICHT bewiesen ({root}-Zeile noch da oder Tabelle unsichtbar) — in TradingView nachsehen.",
+                        "flach", positionen_danach=danach)
+        c_fill, storno = k3_close_meldungen(neu_c, str(z0.get("seite") or ""), cdp_zahl(z0.get("menge")) or 1)
+        res["close_fill"], res["storniert"], res["beweis"] = c_fill, sorted(storno), "tabelle"
+        trail.append(f"FLACH (2 Lesungen, Tabelle sichtbar) · Close-Fill {k3_fmt(c_fill) if c_fill else 'nicht in den Meldungen'} · "
+                     f"storniert: {', '.join(sorted(storno)).upper() or 'nicht gemeldet'}")
+        t_info = _cdp_today_info(s, opts, trail)
+        trail.append(f"Danach: Balance {k3_fmt(t_info['balance_end'])} · Equity {k3_fmt(t_info['equity_end'])} · Total P/L {k3_fmt(t_info['today_pnl'])}")
+        return raus("", f"Position {root} auf {res['konto_aktiv'][:40]} geschlossen (bewiesen: Tabelle"
+                    + (", Rückfrage bestätigt" if bestaetigung == "dialog" else "") + ")"
+                    + (f", Total P/L {t_info['today_pnl']:g}" if t_info["today_pnl"] is not None else ", Total P/L nicht gelesen"),
+                    "fertig", ok=True, bestaetigt=True, positionen_danach=danach, gelesen_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
+                    userscript=None, **t_info)
+    except Exception as e:
+        if res.get("geklickt"):
+            return raus("ende_unklar", f"Schließen geklickt, danach brach der Bot ab ({type(e).__name__}: {str(e)[:100]}) — in TradingView nachsehen.", "absturz")
+        return raus("cdp_fehler", f"Puls-Chrome/CDP: {type(e).__name__}: {str(e)[:160]} — nichts geklickt.", "cdp")
 
 class _LiveSpur(_StempelSpur):
     """Spur, die jede Station SOFORT auf die Konsole schreibt — Finn schaut beim Handlauf live zu."""

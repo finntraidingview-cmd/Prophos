@@ -3061,6 +3061,15 @@ def test_puls_cdp_login():
         and "orders:Orders 2@" in ob.cdp_reiter_kurz(leiste) and "positions:Positions 1*" in ob.cdp_reiter_kurz(leiste),
         "Reiter: aktiv über aria-selected, Wahl role=tab per id/Text, Leiste kompakt")
     chk("_cdp_reiter(s, \"orders\", trail)" in _i.getsource(ob._cdp_endpruefung), "Endprüfung wechselt den Reiter nur mit Beweis")
+    # Schließen über CDP (Finn 29.09.2026): Weiche, genau ein Close-Klick, Rückfrage nur submit-button mit „Close", End-Balance
+    q_cl = _i.getsource(ob.modus_tvclose_cdp)
+    chk('if augen_modus_lauf() == "cdp":' in _i.getsource(ob.modus_tvclose) and "modus_tvclose_cdp(cmd)" in _i.getsource(ob.modus_tvclose),
+        "tvclose: CDP-Weiche vor dem alten Pfad")
+    chk(q_cl.count('f"Close-Knopf der {root}-Zeile"') == 1 and q_cl.index('res["geklickt"] = True') < q_cl.index('f"Close-Knopf der {root}-Zeile"')
+        and 'sub.get("dn") != "submit-button"' in q_cl and "k3_close_knopf(zeile_c)" in q_cl and '"schon_flach"' in q_cl,
+        "tvclose CDP: EIN Close-Klick, geklickt vorher, Rückfrage nur submit-button, schon_flach ohne Klick")
+    chk(ob.cdp_summary_ende({"Account Balance": "153,760.96", "Equity": "153,760.96", "Total P/L": "4.00"}) == {"balance_end": 153760.96, "equity_end": 153760.96}
+        and ob.cdp_summary_ende(None) == {"balance_end": None, "equity_end": None}, "End-Balance/Equity aus Account summary")
     W = ob.tv_konto_wort_passt
     chk(W("TDFYU324689097 tradovate.com", "TDFYU324689097") and not W("APEX_641699TDFYU324689097", "TDFYU324689097")
         and not W("APEX_641699", "TDFYU324689097"), "Vorschlag nur mit dem Username als ganzem Wort (angehängter Name zählt nicht)")
