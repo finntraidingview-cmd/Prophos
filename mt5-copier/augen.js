@@ -23,7 +23,7 @@
  */
 var PROPHOS_AUGEN = (function () {
   'use strict';
-  var VERSION = '0.7.0';   // 0.7.0 (29.09.2026, Aufnahme 00:52): Kontoliste ohne Rollen, Meldungs-Status, Watchlist, Dialog-Knöpfe   // 0.6.1 (29.09.2026): aufnahme_letzte() als Rettungskopie, T3-Banner 'prophos-aufnahme' ausgeblendet   // 0.6.0 (29.09.2026, Aufnahme 00:36 leer): window-capture, roh-Zähler, tab_id, Sichtbarkeit   // 0.5.3 (29.09.2026, Lesung 00:22:50): Konto-Anker Kontonummer zuerst, Summary Total P/L = today   // 0.5.2 (29.09.2026, Lesung 00:22): Panel 'Collapse panel'/Manager-Knopf, Konto entdoppelt + kontonr   // 0.5.1 (29.09.2026, Lesung 00:17 pc-usq1i6): Schalter-Rechteck, ticket.seite/bereit, Legende, veraltete Zeilen   // 0.5.0 (29.09.2026): Aufnahme-Modus (Finn klickt den Ablauf einmal selbst, jede Aktion wird mitgeschrieben)   // 0.4.0 (29.09.2026, K1–K4 für T3): positionen, orders, konto_summary, symbolsuche, toasts.meldungen   // 0.3.0 (29.09.2026, erste echte Lesung pc-usq1i6): TP/SL-Zustand, Konto-Leiste, Toast-Rückfall   // 0.2.0 (29.09.2026): Vertrag mit T3 — globalThis.prophosAugen, Schlüssel-Whitelist, popups, kauf_knopf
+  var VERSION = '0.7.1';   // 0.7.1 (29.09.2026, K2 für T3): kauf_knopf.disabled, tp/sl.einheit/wert/neben, summary_reiter   // 0.7.0 (29.09.2026, Aufnahme 00:52): Kontoliste ohne Rollen, Meldungs-Status, Watchlist, Dialog-Knöpfe   // 0.6.1 (29.09.2026): aufnahme_letzte() als Rettungskopie, T3-Banner 'prophos-aufnahme' ausgeblendet   // 0.6.0 (29.09.2026, Aufnahme 00:36 leer): window-capture, roh-Zähler, tab_id, Sichtbarkeit   // 0.5.3 (29.09.2026, Lesung 00:22:50): Konto-Anker Kontonummer zuerst, Summary Total P/L = today   // 0.5.2 (29.09.2026, Lesung 00:22): Panel 'Collapse panel'/Manager-Knopf, Konto entdoppelt + kontonr   // 0.5.1 (29.09.2026, Lesung 00:17 pc-usq1i6): Schalter-Rechteck, ticket.seite/bereit, Legende, veraltete Zeilen   // 0.5.0 (29.09.2026): Aufnahme-Modus (Finn klickt den Ablauf einmal selbst, jede Aktion wird mitgeschrieben)   // 0.4.0 (29.09.2026, K1–K4 für T3): positionen, orders, konto_summary, symbolsuche, toasts.meldungen   // 0.3.0 (29.09.2026, erste echte Lesung pc-usq1i6): TP/SL-Zustand, Konto-Leiste, Toast-Rückfall   // 0.2.0 (29.09.2026): Vertrag mit T3 — globalThis.prophosAugen, Schlüssel-Whitelist, popups, kauf_knopf
 
   // ── Grundwerkzeuge ─────────────────────────────────────────────────────────
   function sichtbar(el) {
@@ -195,7 +195,20 @@ var PROPHOS_AUGEN = (function () {
       var feld = feldZu(sch[0], w);
       var z = schalterNahe(sch[0], feld, w);
       // schalter = das (unsichtbare) input[role=switch] rechts in der Zeile — Lesung 00:17: [1196,397,38,20] (TP) / [1196,481,38,20] (SL)
-      return { da: true, beschriftung: kurz(sch[0]), an: z.an, an_quelle: z.quelle, schalter: z.schalter || null, feld: feld ? kurz(feld) : null };
+      // Einheit aus der Beschriftung ('Take profit, $' → '$'; 'ticks'/'%'/'Punkte' falls umgestellt); daneben der Umrechnungs-Knopf
+      // (#dropdownId, Lesung 00:05: '30651.50price' bzw. '124ticks') — zeigt denselben Abstand in der anderen Einheit
+      var bt = txt(sch[0]), em = bt.match(/,\s*(.+)$/);
+      var neben = null;
+      if (feld) {
+        var fr = feld.getBoundingClientRect();
+        var nb = alle('button,[role="button"]', w).filter(function (b) {
+          var r = b.getBoundingClientRect();
+          return sichtbar(b) && Math.abs(r.top - fr.top) <= 6 && r.left > fr.right + 20 && r.left - fr.right < 200 && txt(b);
+        })[0];
+        if (nb) { var nt = txt(nb), nm = nt.match(/^([\d.,\-]+)\s*([A-Za-zäöü%$]+)$/); neben = { text: nt, wert: nm ? zahl(nm[1]) : null, einheit: nm ? nm[2] : null, rect: rect(nb) }; }
+      }
+      return { da: true, beschriftung: kurz(sch[0]), an: z.an, an_quelle: z.quelle, schalter: z.schalter || null, feld: feld ? kurz(feld) : null,
+               einheit: em ? em[1].trim() : null, wert: feld ? zahl(feld.value) : null, neben: neben };
     }
     out.tp = klammer(RX_TP, 'TP');
     out.sl = klammer(RX_SL, 'SL');
@@ -204,7 +217,8 @@ var PROPHOS_AUGEN = (function () {
                       nicht: /buy-order-button|sell-order-button/ }], w);
     if (sd.el) {
       var t = txt(sd.el), m = t.match(/^(buy|sell|kauf(?:en)?|verkauf(?:en)?)\s+([\d.,]+)\s+(\S+)\s+(\S+)/i);
-      out.senden = kurz(sd.el, { quelle: sd.quelle, seite: m ? (/^(buy|kauf)/i.test(m[1]) ? 'buy' : 'sell') : null,
+      out.senden = kurz(sd.el, { quelle: sd.quelle, disabled: !!(sd.el.disabled || attr(sd.el, 'aria-disabled') === 'true' || sd.el.closest('[aria-disabled="true"],[disabled]')),
+                                 seite: m ? (/^(buy|kauf)/i.test(m[1]) ? 'buy' : 'sell') : null,
                                  menge: m ? m[2] : null, symbol: m ? m[3] : null, typ: m ? m[4] : null });
     } else out.senden = null;
     out.seite = out.senden && out.senden.seite ? out.senden.seite : null;
@@ -506,6 +520,10 @@ var PROPHOS_AUGEN = (function () {
       });
     }
     if (!n) return null;
+    // Welcher Reiter des Account Managers ist aktiv (T3 29.09.2026): 'Total P/L' (= heute) steht NUR im Reiter #summary; im Reiter
+    // #positions zeigt die Kopfzeile nur Account Balance · Equity · Profit (Profit = offene Positionen, NICHT heute)
+    var reiter = null;
+    try { var rt = document.querySelector('#id_account-manager-tabs [role="tab"][aria-selected="true"]'); reiter = rt ? (rt.id || txt(rt)) : null; } catch (_) {}
     function nimm(rx, nicht) { for (var l in paare) { if (rx.test(l) && !(nicht && nicht.test(l))) return { label: l, text: paare[l], wert: geldZahl(paare[l]) }; } return null; }
     var UNREAL = /unreal|nicht\s*real|offen|open/i;
     // Tradovate 'Account summary' (Lesung 00:22:50): Account Balance · Equity · Net Liq · Open P/L · Total P/L · Profit · Margins.
@@ -513,7 +531,7 @@ var PROPHOS_AUGEN = (function () {
     return { balance: nimm(/^(account\s*)?balance$|kontostand|saldo|guthaben|^balance/i), equity: nimm(/equity|eigenkapital|net\s*liq|netto-?liquid/i),
              realisiert: nimm(/realized|realisiert/i, UNREAL), unrealisiert: nimm(/unrealized|unrealisiert|nicht\s*realisiert|open\s*p/i),
              today_pnl: nimm(/today|heutig|tages|^total\s*p\/?l|gesamt\s*g(&|u)v/i, UNREAL), profit: nimm(/^profit$|^gewinn$/i),
-             net_liq: nimm(/net\s*liq|netto-?liquid/i), texte: paare };
+             net_liq: nimm(/net\s*liq|netto-?liquid/i), reiter: reiter, texte: paare };
   }
 
   // ── Symbolsuche (Kopfleiste + Such-Dialog) ─────────────────────────────────
