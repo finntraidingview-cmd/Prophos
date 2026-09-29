@@ -22899,7 +22899,40 @@
   // springen sofort, ohne Poll; das Polling bleibt als Rückfall (15 s bei SUBSCRIBED, sonst 5 s). Voraussetzung: beide Tabellen
   // in der Publikation supabase_realtime (sql/2026-09-25_realtime_tv_kurse.sql, angewendet); die RLS-Lesepolicy (authenticated)
   // gilt auch hier. Der Kanal startet, sobald ein Nutzer eingeloggt ist, und wird nur einmal aufgebaut (supabase-js verbindet neu).
-  let mklPollMs = 5000, _mklRt = null, _mklRtStatus = null
+  /* Kerzen-Kanal nur bei offenem Chart (29.09.2026, Finn: „Speichern bugt seit ein, zwei Tagen" — pg_stat_statements: die
+   * Realtime-Auswertung der WAL war mit Abstand der größte Posten der Datenbank-Rechenzeit, 44 ms je Durchlauf statt früher 10 ms,
+   * weil sie jede Kurs- UND Kerzen-Änderung für jedes einzelne Abo prüft — 14 offene Tabs × zwei Tabellen, jede Kerze doppelt
+   * geschrieben (Tab-Brücke + Reader-Direktfeed). Die PC-Tabs zeigen keinen Chart, hielten das tv_kurs_1m-Abo aber trotzdem.)
+   * tv_kurse bleibt auf jedem Gerät abonniert (Kopf, Wächter, hedgeFeedPuffern am PC). tv_kurs_1m kommt als eigener Kanal
+   * dazu, sobald Markt/Radar oder Winning Days live sichtbar ist (1-s-Prüfer unten), und geht 60 s nach dem Verlassen wieder —
+   * kurzes Hin- und Herschalten baut nichts neu. Bis der Kerzen-Kanal steht, pollt die View im 5-s-Takt wie ohne Realtime. */
+  let mklPollMs = 5000, _mklRt = null, _mklRtStatus = null, _mklRtK = null, _mklRtKStatus = null, _mklRtKWeg = 0
+  const mklPollSetzen = () => { mklPollMs = (_mklRtStatus === 'SUBSCRIBED' && _mklRtKStatus === 'SUBSCRIBED') ? 15000 : 5000 }
+  function mklKerzenKanal(){
+    if(mkl.stub || !currentUserId || typeof supabase.channel !== 'function') return
+    if(mklAktiv()){
+      _mklRtKWeg = 0
+      if(_mklRtK) return
+      try{
+        _mklRtK = supabase.channel('markt-kerzen')
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'tv_kurs_1m' }, m => { try{
+            const k = m.new; if(!k || k.wurzel !== mkl.wurzel || mkl.stub) return
+            const t = Date.parse(k.minute) || 0
+            const i = mkl.kerzen.findIndex(x => (Date.parse(x.minute) || 0) === t)
+            if(i >= 0) mkl.kerzen[i] = k
+            else { mkl.kerzen.push(k); mkl.kerzen.sort((a, b) => (Date.parse(a.minute) || 0) - (Date.parse(b.minute) || 0)) }
+            if(mklAktiv()) mklChartZeichnen()
+          }catch(e){ console.warn('[markt-live] tv_kurs_1m', e) } })
+          .subscribe(status => { _mklRtKStatus = status; mklPollSetzen(); console.log('[markt-live] Kerzen-Realtime', status) })
+      }catch(e){ console.warn('[markt-live] Kerzen-Realtime', e); _mklRtK = null; _mklRtKStatus = null; mklPollSetzen() }
+      return
+    }
+    if(!_mklRtK) return
+    if(!_mklRtKWeg){ _mklRtKWeg = Date.now(); return }
+    if(Date.now() - _mklRtKWeg < 60000) return
+    try{ supabase.removeChannel(_mklRtK) }catch(_){}
+    _mklRtK = null; _mklRtKStatus = null; _mklRtKWeg = 0; mklPollSetzen()
+  }
   function mklRealtimeStart(){
     if(_mklRt || !currentUserId || typeof supabase.channel !== 'function') return
     try{
@@ -22913,23 +22946,17 @@
           if(r.wurzel === mkl.wurzel){ mkl.kursAlt = kk; mkl.kurs = kk.alter_ms <= HEDGE_KURS_MAX_ALTER_MS ? kk : null }
           if(mklAktiv()){ mklKopf(); mklChartZeichnen(); mklOrdersRender(); mklWdRender() }
         }catch(e){ console.warn('[markt-live] tv_kurse', e) } })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'tv_kurs_1m' }, m => { try{
-          const k = m.new; if(!k || k.wurzel !== mkl.wurzel || mkl.stub) return
-          const t = Date.parse(k.minute) || 0
-          const i = mkl.kerzen.findIndex(x => (Date.parse(x.minute) || 0) === t)
-          if(i >= 0) mkl.kerzen[i] = k
-          else { mkl.kerzen.push(k); mkl.kerzen.sort((a, b) => (Date.parse(a.minute) || 0) - (Date.parse(b.minute) || 0)) }
-          if(mklAktiv()) mklChartZeichnen()
-        }catch(e){ console.warn('[markt-live] tv_kurs_1m', e) } })
         .subscribe(status => {
           _mklRtStatus = status
-          mklPollMs = status === 'SUBSCRIBED' ? 15000 : 5000
+          mklPollSetzen()
           console.log('[markt-live] Realtime', status)
         })
-    }catch(e){ console.warn('[markt-live] Realtime', e); _mklRt = null; mklPollMs = 5000 }
+    }catch(e){ console.warn('[markt-live] Realtime', e); _mklRt = null; _mklRtStatus = null; mklPollSetzen() }
   }
   window._mklRealtimeStatus = () => _mklRtStatus
+  window._mklKerzenStatus = () => _mklRtKStatus   // Test-/Diagnose-Zugriff: null = kein Kerzen-Abo (kein Chart offen)
   setTimeout(mklRealtimeStart, 3000); setInterval(mklRealtimeStart, 15000)
+  setInterval(mklKerzenKanal, 1000)
   // Kein Frontend-Push mehr für den Kurs-Feed (26.09.2026, Auftrag F2 über den Master, Befund Research R3): am Freitag 25.09.
   // kamen für DIESELBEN Ausfälle 24 Pushes der Backend-Wacht (app.py READER_WACHT_UIDS) plus 7 aus diesem Tab-Alarm — und der
   // ging an JEDEN Nutzer mit offenem Tab (Claim je user_id, jede kurze Erholung = neue Episode). Handeln kann nur, wer den
@@ -36010,7 +36037,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.811'
+  const OS_TAB_BUILD = '2026-09-22.812'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -37730,6 +37757,7 @@
   }
 
   let _osStartAufgeraeumt = false   // F24: Aufräumen beim Tab-Start genau einmal
+  let _osVerwaistAt = 0             // letzte Prüfung auf verwaiste Läufe (1×/min, 29.09.2026)
   /* CLAIMS DIESES TABS MERKEN (29.09.2026, Vorfall d0f5564d pc-usq1i6 01:17: der Tab lud sich kurz nach dem Claim eines konto_balance-
    * Signals neu — das F24-Aufräumen nahm nur Zeilen älter als 4 min, das Signal blieb auf 'laeuft'). sessionStorage überlebt das Neuladen
    * im SELBEN Tab: was hier steht und beim Start noch 'laeuft' ist, gehörte sicher dem vorigen Leben dieses Tabs — sofort abschließen. */
@@ -37800,8 +37828,13 @@
       }
       // Verwaiste Läufe (25.09.2026): 'laeuft' auf DIESEM PC, seit > 6 min ohne Abschluss, und hier läuft gerade nichts —
       // der Lauf ist abgerissen (Tab neu geladen, Build-Wechsel). Abschließen statt ewig 'laeuft' — Ergebnis UNKLAR.
+      // Einmal je Minute statt bei jedem 5-s-Tick (29.09.2026, Finn: „Speichern bugt seit ein, zwei Tagen" — Supabase-Edge-Logs:
+      // dieses PATCH lief auf jedem PC alle 5 s, und weil die Zeitgrenze in der Adresse steht, fragte der Browser jedes Mal
+      // zusätzlich per OPTIONS vorab — zusammen gut ein Fünftel aller Anfragen, gefunden hat es fast nie etwas). Ein
+      // abgerissener Lauf wird damit nach 6–7 statt 6 min abgeschlossen.
       try{
-        if(!_tpOrbitLaeuft){
+        if(!_tpOrbitLaeuft && Date.now() - _osVerwaistAt >= 60000){
+          _osVerwaistAt = Date.now()
           const pcIch = (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : ''
           const grenze = new Date(Date.now() - 6 * 60000).toISOString()
           const pcAlle = [pcIch, ...((typeof pcIdFrueher === 'function') ? pcIdFrueher() : [])].filter(Boolean)   // frühere Kennung (Panel .570)
@@ -50337,9 +50370,14 @@
         epLokal.readerFrischAt = Date.now()
       const pc = epPcId()
       epFeedSchluessel(d, pc)   // Reader-Direktfeed (28.09.2026): Schlüssel einmal übergeben, nicht awaiten
+      // Positionen, Fernschalter und Status alle 5 s (der Tick läuft seit Aufgabe B jede Sekunde — nur Kurse/Kerzen brauchen den schnellen Takt)
+      const cloudFaellig = Date.now() - (epLokal.cloudAt || 0) >= 5000
       // Fernschalter: eigenen soll_an lesen und aufs lokale Geraet anwenden.
       // Bewusst VOR dem Push, damit "an" im Push schon den neuen Ist traegt.
-      try{
+      // Nur noch im 5-s-Takt (29.09.2026, Finn: „Speichern bugt seit ein, zwei Tagen" — Supabase-Edge-Logs: der Puls-PC fragte
+      // soll_an 1,5×/s ab, rund jede zehnte Anfrage an die Datenbank). Geschaltet wird selten, am eigenen Gerät schaltet
+      // epSchalten ohnehin sofort lokal; aus der Ferne greift der Schalter jetzt binnen 5 s statt 1 s.
+      if(cloudFaellig) try{
         const { data: zeile } = await supabase.from('echoplus_live')
           .select('soll_an').eq('id', pc).maybeSingle()
         const soll = zeile ? zeile.soll_an : null
@@ -50354,28 +50392,27 @@
       }catch(_){ /* Cloud/Schalter gerade nicht erreichbar — naechster Tick */ }
       // soll_an wird hier bewusst NICHT mitgeschrieben (sticky Schalter —
       // den setzen nur die Schalt-Klicks, sonst wuerde die Bruecke ihn platt-pushen)
-      // Positionen weiter alle 5 s (der Tick läuft seit Aufgabe B alle 2 s — nur Kurse/Kerzen brauchen den schnellen Takt)
-      const cloudFaellig = Date.now() - (epLokal.cloudAt || 0) >= 5000
       if(cloudFaellig){ epLokal.cloudAt = Date.now()
-      const { error: epErr } = await supabase.from('echoplus_live').upsert({
+      const epZeile = {
         id: pc, pc_name: pc,
         an: d.an !== false,
         positionen: d.positionen || [],
         reader_ts: Number(d.ts) || 0,
         updated_at: new Date().toISOString()
-      })
-      if(!epErr) epLokal.cloudOkAt = Date.now() }
+      }
       // Versionen des Reader-PCs (24.09.2026 spät, Finn live: Tab .495, Reader meldet sich, tv_kurse leer — aus der Cloud sah
-      // man nicht, welches Script dort läuft): reader_version/script_version aus der GET-Antwort. Eigener, toleranter Update-
-      // Aufruf NACH dem Upsert — fehlen die Spalten noch (SQL kommt vom Backend), scheitert nur er, nie der Positions-Strom.
-      // Konto + Positions-Frische des Readers (0.8.5, 25.09.2026): toleranter Update wie die Versionen — fehlen die Spalten, scheitert nur er
-      if(cloudFaellig && (d.konto != null || d.positionen_ok != null || d.positionen_ts)){
-        try{ await supabase.from('echoplus_live').update({ konto: (typeof d.konto === 'string') ? d.konto.slice(0, 64) : null, positionen_ok: (typeof d.positionen_ok === 'boolean') ? d.positionen_ok : null,
-          positionen_ts: (Number(d.positionen_ts) > 0) ? new Date(Number(d.positionen_ts)).toISOString() : null }).eq('id', pc) }catch(_){}
-      }
-      if(cloudFaellig && (d.reader_version || d.script_version)){
-        try{ await supabase.from('echoplus_live').update({ reader_version: String(d.reader_version || '').slice(0, 24) || null, script_version: String(d.script_version || '').slice(0, 24) || null }).eq('id', pc) }catch(_){}
-      }
+      // man nicht, welches Script dort läuft): reader_version/script_version aus der GET-Antwort.
+      // Konto + Positions-Frische des Readers (0.8.5, 25.09.2026).
+      // Ein Schreibvorgang statt drei (29.09.2026, gleicher Anlass wie oben): beide reisten bisher als eigene, tolerante Updates
+      // hinter dem Upsert her, weil ihre Spalten anfangs fehlen konnten — die gibt es seit 25.09. Liefert der Reader ein Feld
+      // nicht, bleibt es aus der Zeile heraus; der Upsert lässt den gespeicherten Wert dann stehen (wie vorher ohne Update).
+      if(d.konto != null || d.positionen_ok != null || d.positionen_ts)
+        Object.assign(epZeile, { konto: (typeof d.konto === 'string') ? d.konto.slice(0, 64) : null, positionen_ok: (typeof d.positionen_ok === 'boolean') ? d.positionen_ok : null,
+          positionen_ts: (Number(d.positionen_ts) > 0) ? new Date(Number(d.positionen_ts)).toISOString() : null })
+      if(d.reader_version || d.script_version)
+        Object.assign(epZeile, { reader_version: String(d.reader_version || '').slice(0, 24) || null, script_version: String(d.script_version || '').slice(0, 24) || null })
+      const { error: epErr } = await supabase.from('echoplus_live').upsert(epZeile)
+      if(!epErr) epLokal.cloudOkAt = Date.now() }
       // Live-Kurs aus dem Tab-Titel (Userscript 0.6.0, 24.09.2026 — Winning-Day-Gegenhedge): eine Zeile je PC
       // in tv_kurse, der Hedge-Wächter (hedgeWacheTick) nimmt die jüngste über alle PCs. Nur mit lesbarer Zahl
       // und nur, wenn der Titel jünger als 20 s ist — ein eingefrorener Titel (Tab zu, TV ausgeloggt) wird
