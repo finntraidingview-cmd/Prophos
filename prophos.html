@@ -36037,7 +36037,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.815'
+  const OS_TAB_BUILD = '2026-09-22.816'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -37463,8 +37463,15 @@
       if(r.ok || r.code === 'schon_flach'){
         if(nochOffen === true) return { ok:false, unklar:true, retry:false, msg:'Puls meldet ok, aber die Position steht noch im Konto — in TradingView nachsehen.' }
         const todayPnl = (typeof r.today_pnl === 'number' && isFinite(r.today_pnl)) ? r.today_pnl : null
+        // End-Balance aus derselben Schließen-Antwort (29.09.2026, neuer Puls über das Puls-Chrome: liest nach dem Flach-Beweis die
+        // Account summary) → final.balance_end; _autoPnlTvV2Gelesen rechnet dann Balance nachher − vorher (tagesunabhängig, auch wenn
+        // am selben Tag schon ein Trade lief) und die Nachlesung entfällt. Der alte Weg liefert kein balance_end → alles wie bisher.
+        const zahl = v => (typeof v === 'number' && isFinite(v)) ? v : null
+        const finExtra = {}
+        if(zahl(r.balance_end) != null) finExtra.balance_end = r.balance_end
+        if(zahl(r.equity_end) != null) finExtra.equity_end = r.equity_end
         let beendet = false
-        try{ beendet = await tvV2EndeSetzen(plan, todayPnl) }catch(e){ console.warn('[v2-close] final', e) }
+        try{ beendet = await tvV2EndeSetzen(plan, todayPnl, 'close', Object.keys(finExtra).length ? finExtra : undefined) }catch(e){ console.warn('[v2-close] final', e) }
         return { ok:true, beendet, profit: todayPnl, trail: r.trail || null,
           msg: (r.code === 'schon_flach' ? 'Position war schon flach — Plan beendet.' : String(r.msg || 'Position geschlossen.'))
              + (todayPnl != null ? ` · Today's P&L ${todayPnl.toLocaleString('de-DE')} $` : '') }
