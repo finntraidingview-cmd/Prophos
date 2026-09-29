@@ -2623,6 +2623,12 @@ def test_puls_augen_cdp():
     import inspect as _i2
     chk("Puls-Chrome (CDP)" in _i2.getsource(ob._fenster_gesperrt), "Fenster-Wahl sperrt das Puls-Chrome")
     chk("Browser.close" in _i2.getsource(ob.modus_augen), "Regel 'uia' schließt das Puls-Chrome (Browser.close)")
+    kf = ob.augen_kurzform
+    st = {"ticket": {"da": True, "typ": "Market", "menge": {"wert": "4"}, "tp": {"feld": {"wert": "447.00"}}, "sl": {"feld": {"wert": "249.00"}}},
+          "kauf_knopf": {"text": "Buy 4 MNQZ6 MARKET"}, "toasts": {"log": [], "gruppen": []}, "popups": []}
+    chk(kf(st) == "Ticket offen · Market · Units 4 · TP 447.00 · SL 249.00 · Knopf 'Buy 4 MNQZ6 MARKET' · Toasts 0 · Popups 0",
+        "Augen-Kurzform aus echter Zeile (Moritz 29.09.2026): ticket.da, toasts {log, gruppen}")
+    chk(kf({"toasts": {"gruppen": [1, 2], "log": [3]}}).endswith("Toasts 3 · Popups 0") and kf(None) == "kein Stand", "Kurzform zählt Toast-Einträge")
     if ok:
         print("✓ Puls-Augen CDP: eigenes Profil, 127.0.0.1:9333, WebSocket-Frames, Regel-Entscheid, Target-Wahl")
     return ok

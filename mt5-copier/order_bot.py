@@ -13461,6 +13461,42 @@ def augen_target_waehlen(liste):
     return tv[0] if tv else None
 
 
+def augen_kurzform(stand):
+    """REIN RECHNEND (testbar): lesbare Spur-Zeile aus augen.js stand() (29.09.2026, erste echte Zeile von Moritz' PC: ticket.da
+    statt offen, toasts als {log, gruppen} statt Liste — die erste Fassung meldete „Ticket zu · Toasts 2")."""
+    if not isinstance(stand, dict):
+        return "kein Stand"
+    if stand.get("fehler"):
+        return "Fehler: " + str(stand.get("fehler"))[:80]
+    tk = stand.get("ticket") if isinstance(stand.get("ticket"), dict) else {}
+
+    def wert(x):
+        if isinstance(x, dict):
+            if "wert" in x:
+                return x.get("wert")
+            return wert(x.get("feld"))
+        return x
+    offen = tk.get("da", tk.get("offen"))
+    teile = [f"Ticket {'offen' if offen else 'zu'}"]
+    if offen:
+        teile.append(f"{tk.get('typ') or '?'} · Units {wert(tk.get('menge') or tk.get('units')) or '-'}"
+                     f" · TP {wert(tk.get('tp')) or '-'} · SL {wert(tk.get('sl')) or '-'}")
+    kk = stand.get("kauf_knopf") if isinstance(stand.get("kauf_knopf"), dict) else {}
+    teile.append(f"Knopf '{str(kk.get('text') or '-')[:40]}'")
+    to = stand.get("toasts")
+    if isinstance(to, dict):
+        n_to = sum(len(v) for v in to.values() if isinstance(v, list))
+    else:
+        n_to = len(to) if isinstance(to, list) else 0
+    po = stand.get("popups")
+    teile.append(f"Toasts {n_to}")
+    teile.append(f"Popups {len(po) if isinstance(po, list) else 0}")
+    ko = stand.get("konto") if isinstance(stand.get("konto"), dict) else {}
+    if ko.get("aktiv"):
+        teile.append(f"Konto {str(ko.get('aktiv'))[:30]}")
+    return " · ".join(teile)
+
+
 def modus_augen(cmd):
     """Augen-Lauf (E0, nur lesen). cmd.start = True: Puls-Chrome auch ohne Schalter starten (einmaliger Menschen-Login)."""
     t0, trail = time.time(), []
@@ -13535,11 +13571,7 @@ def modus_augen(cmd):
             res["msg"] = "augen.js: " + str(wert.get("fehler") or (r.get("exceptionDetails") or {}).get("text") or "Ausnahme")[:160]
             return
         stand, inv = wert.get("stand") or {}, wert.get("inventar")
-        tk = (stand.get("ticket") or {}) if isinstance(stand, dict) else {}
-        kk = (stand.get("kauf_knopf") or {}) if isinstance(stand, dict) else {}
-        trail.append(f"Augen (cdp): {str(ziel.get('url'))[:50]} · Ticket {'offen' if tk.get('offen') else 'zu'} · "
-                     f"Knopf '{str(kk.get('text') or '-')[:40]}' · Toasts {len(stand.get('toasts') or []) if isinstance(stand, dict) else '?'}"
-                     f" · Popups {len(stand.get('popups') or []) if isinstance(stand, dict) else '?'}")
+        trail.append(f"Augen (cdp): {str(ziel.get('url'))[:50]} · " + augen_kurzform(stand))
         dauer = int((time.time() - t0) * 1000)
         if pc:
             import urllib.request
