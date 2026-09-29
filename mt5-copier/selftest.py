@@ -2955,6 +2955,55 @@ def test_puls_cdp_login():
     q_k4 = _i.getsource(ob.modus_tvkette_cdp)
     chk(q_k4.index("_cdp_today_aus_reiter(") < q_k4.index("_cdp_ticket_fuellen(") and q_k4.index('"SENDEN-Knopf"') < q_k4.index("_cdp_endpruefung(")
         and "klick(" not in _i.getsource(ob.cdp_pruefung), "Summary vor dem Ausfüllen, Endprüfung nach dem Senden (rein rechnend)")
+    # Stabilität nach Live-Befunden 29.09.2026 14:4x: Seite fertig laden, augen.js nachladen, Regel bei Netzfehler behalten
+    chk(ob.cdp_fehlertext({"exceptionDetails": {"text": "Uncaught", "exception": {"description": "TypeError: Cannot read properties of undefined (reading 'stand')"}}}).startswith("TypeError")
+        and ob.cdp_fehlertext({"exceptionDetails": {"text": "Uncaught"}}) == "Uncaught" and ob.cdp_fehlertext({}) == "", "Ausnahme-Text statt nur 'Uncaught'")
+    chk(ob.augen_fehlt("TypeError: Cannot read properties of undefined (reading 'stand')") and ob.augen_fehlt("ReferenceError: prophosAugen is not defined")
+        and not ob.augen_fehlt("RangeError: Maximum call stack"), "fehlendes prophosAugen erkannt")
+
+    class _WsN:
+        def __init__(self):
+            self.n, self.geladen = 0, 0
+
+        def rufe(self, m, p=None, timeout=10.0):
+            ex = (p or {}).get("expression", "")
+            if "document.readyState" in ex:
+                return {"result": {"value": ["complete", "https://www.tradingview.com/chart/", 9000]}}
+            if ex == "/* augen.js */":
+                self.geladen += 1
+                return {"result": {}}
+            self.n += 1
+            if self.n == 1:
+                return {"exceptionDetails": {"text": "Uncaught", "exception": {"description": "TypeError: Cannot read properties of undefined (reading 'stand')"}}}
+            return {"result": {"value": {"konto": {"aktiv": "X"}}}}
+    s2 = ob._AugenSitzung.__new__(ob._AugenSitzung)
+    s2.trail, s2.ws, s2.js = [], _WsN(), "/* augen.js */"
+    alt_w = ob._warte
+    ob._warte = lambda a_, b_: None
+    try:
+        v2 = s2.stand({})
+    except Exception as e_:
+        v2 = e_
+    finally:
+        ob._warte = alt_w
+    chk(v2 == {"konto": {"aktiv": "X"}} and s2.ws.geladen == 1, f"stand(): fehlt augen.js → einmal nachgeladen, dann gelesen ({v2!r})")
+    import urllib.request as _ur
+    alt_uo, alt_l, alt_s = _ur.urlopen, ob._augen_json_lesen, ob._augen_json_schreiben
+    geschrieben = []
+    try:
+        _ur.urlopen = lambda *a_, **k_: (_ for _ in ()).throw(OSError("timeout"))
+        ob._augen_json_lesen = lambda n: {"augen": "cdp", "at": __import__("time").time() - 60, "pc": "pc-usq1i6"}
+        ob._augen_json_schreiben = lambda n, d: geschrieben.append(d)
+        r1 = ob._augen_regel_holen("pc-usq1i6")
+        e1 = ob._AUGEN_REGEL_STAND["explizit"]
+        ob._augen_json_lesen = lambda n: None
+        r2 = ob._augen_regel_holen("pc-usq1i6")
+    finally:
+        _ur.urlopen, ob._augen_json_lesen, ob._augen_json_schreiben = alt_uo, alt_l, alt_s
+    chk(r1 == "cdp" and e1 is False and r2 == "uia" and not geschrieben, "Netzfehler: letzte 'cdp'-Regel bleibt, Datei unverändert; ohne Merker 'uia'")
+    q_au = _i.getsource(ob.modus_augen)
+    chk('not _AUGEN_REGEL_STAND["explizit"]' in q_au and q_au.index('_AUGEN_REGEL_STAND["explizit"]') < q_au.index("Browser.close"),
+        "Puls-Chrome wird nur bei AUSDRÜCKLICHEM 'uia' geschlossen")
     W = ob.tv_konto_wort_passt
     chk(W("TDFYU324689097 tradovate.com", "TDFYU324689097") and not W("APEX_641699TDFYU324689097", "TDFYU324689097")
         and not W("APEX_641699", "TDFYU324689097"), "Vorschlag nur mit dem Username als ganzem Wort (angehängter Name zählt nicht)")

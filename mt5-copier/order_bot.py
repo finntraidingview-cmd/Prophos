@@ -13356,16 +13356,25 @@ def _augen_json_schreiben(name, d):
         pass
 
 
+_AUGEN_REGEL_STAND = {"explizit": False}
+
+
 def _augen_regel_holen(pc):
-    """'cdp' | 'uia' von Railway (2 s), Ergebnis lokal merken. Jeder Fehler = 'uia'."""
+    """'cdp' | 'uia' von Railway (2 s), Ergebnis lokal merken. Netzfehler bzw. unlesbare Antwort: die letzte lokal gemerkte Regel
+    bleibt stehen (augen_regel_weiche, ≤ 12 h) und die Datei unverändert — 29.09.2026 14:44 UTC (Railway-Deploy): ein 2-s-Timeout
+    kippte pc-usq1i6 auf 'uia', der Augen-Prozess schloss das Puls-Chrome, der nächste Lauf nahm den alten UIA-Weg und klickte ins
+    Prophos-Fenster. Nur eine ausdrückliche Server-Antwort ändert die Regel; _AUGEN_REGEL_STAND['explizit'] sagt, ob es eine gab."""
     import urllib.request
-    augen = "uia"
     try:
         with urllib.request.urlopen(f"{PULS_BACKEND}/puls-regel/{pc}", timeout=2.0) as r:
             d = json.loads(r.read().decode("utf-8", "replace"))
-        augen = "cdp" if d.get("augen") == "cdp" else "uia"
+        if d.get("augen") not in ("cdp", "uia"):
+            raise ValueError("Regel unbekannt")
+        augen = d["augen"]
     except Exception:
-        augen = "uia"
+        _AUGEN_REGEL_STAND["explizit"] = False
+        return augen_regel_weiche(_augen_json_lesen("augen_regel.json"), time.time(), pc)
+    _AUGEN_REGEL_STAND["explizit"] = True
     _augen_json_schreiben("augen_regel.json", {"augen": augen, "at": time.time(), "pc": pc})
     return augen
 
@@ -13757,6 +13766,9 @@ def modus_augen(cmd):
         start = bool(cmd.get("start"))
         jetzt = bool(cmd.get("jetzt")) or bool(cmd.get("aufnahme"))   # Hand-Test/Aufnahme: ohne Schalter + 60-s-Sperre, nie schließen
         augen = _augen_regel_holen(pc) if pc else "uia"
+        if augen != "cdp" and not start and not jetzt and not _AUGEN_REGEL_STAND["explizit"]:
+            res.update(ok=True, msg="Regel nicht abrufbar und keine gültige 'cdp'-Regel gemerkt — Puls-Chrome bleibt, nichts gelesen")
+            return
         if augen != "cdp" and not start and not jetzt:
             # Aufräumen (29.09.2026, Moritz pc-usq1i6: Schalter zurück auf uia, das Puls-Chrome lief weiter und kickte die
             # TradingView-Sitzung des Readers): antwortet Port 9333, das Puls-Chrome per CDP Browser.close schließen — trifft nur
@@ -14035,6 +14047,21 @@ def _win_tasten(text_sk):
     keyboard.send_keys(text_sk, with_spaces=True, pause=0.04)
 
 
+
+def cdp_fehlertext(r):
+    """REIN RECHNEND (testbar): lesbarer Text einer CDP-Ausnahme — exception.description (z. B. „TypeError: Cannot read properties of
+    undefined (reading 'stand')") statt nur „Uncaught"."""
+    ed = (r or {}).get("exceptionDetails") if isinstance(r, dict) else None
+    if not isinstance(ed, dict):
+        return ""
+    ex = ed.get("exception") if isinstance(ed.get("exception"), dict) else {}
+    return " ".join(str(ex.get("description") or ex.get("value") or ed.get("text") or "unbekannt").split())[:200]
+
+
+def augen_fehlt(text):
+    """REIN RECHNEND (testbar): sagt die Ausnahme, dass globalThis.prophosAugen fehlt (Seite neu geladen)?"""
+    return bool(re.search(r"prophosAugen|of undefined|of null|is not a function|is not defined", str(text or ""), re.I))
+
 class _AugenSitzung:
     """Eine CDP-Verbindung zur TradingView-Seite im Puls-Chrome: augen.js einmal geladen, stand() lesen, klicken (Windows: echte Maus)."""
 
@@ -14056,16 +14083,51 @@ class _AugenSitzung:
             self.ws.rufe("Emulation.setFocusEmulationEnabled", {"enabled": True}, timeout=3)   # minimiertes Fenster = „fokussiert"
         except Exception:
             pass
+        self._seite_abwarten()
+        self._augen_laden()
+
+    def _seite_abwarten(self, sek=25.0):
+        """Erst weiter, wenn die Seite fertig geladen ist (29.09.2026 14:45 UTC, frisch gestartetes Puls-Chrome: augen.js lag in der
+        noch LADENDEN Seite, TradingView lud fertig, prophosAugen war weg → „stand() wirft: Uncaught"). Fertig = readyState
+        'complete' und die Seite schon > 3 s alt oder dieselbe Adresse zwei Blicke lang. -> True/False (False = trotzdem weiter)"""
+        ende, vorher = time.time() + sek, None
+        while time.time() < ende:
+            try:
+                r = self.ws.rufe("Runtime.evaluate", {"expression": "[document.readyState, String(location.href), performance.now()]",
+                                                      "returnByValue": True}, timeout=4)
+                v = (r.get("result") or {}).get("value")
+            except Exception:
+                v = None
+            if isinstance(v, list) and len(v) == 3 and v[0] == "complete":
+                if (isinstance(v[2], (int, float)) and v[2] > 3000) or v[1] == vorher:
+                    return True
+                vorher = v[1]
+            else:
+                vorher = None
+            _warte(0.4, 0.2)
+        self.trail.append(f"Seite nach {sek:.0f} s nicht fertig geladen — weiter")
+        return False
+
+    def _augen_laden(self):
         r = self.ws.rufe("Runtime.evaluate", {"expression": self.js, "returnByValue": False}, timeout=8)
         if r.get("exceptionDetails"):
-            raise RuntimeError("augen.js wirft beim Laden")
+            raise RuntimeError("augen.js wirft beim Laden: " + cdp_fehlertext(r))
 
     def stand(self, opts=None):
         a = "globalThis.prophosAugen.stand(" + json.dumps(opts or {}) + ")"
-        r = self.ws.rufe("Runtime.evaluate", {"expression": a, "returnByValue": True, "awaitPromise": True}, timeout=10)
-        if r.get("exceptionDetails"):
-            raise RuntimeError("stand() wirft: " + str((r.get("exceptionDetails") or {}).get("text"))[:80])
-        return ((r.get("result") or {}).get("value")) or {}
+        for versuch in (1, 2):
+            r = self.ws.rufe("Runtime.evaluate", {"expression": a, "returnByValue": True, "awaitPromise": True}, timeout=10)
+            if not r.get("exceptionDetails"):
+                return ((r.get("result") or {}).get("value")) or {}
+            text = cdp_fehlertext(r)
+            if versuch == 1 and augen_fehlt(text):
+                # Seite hat neu geladen (Navigation, Login-Rückkehr) — augen.js ist weg: einmal nachladen, dann erneut lesen
+                self.trail.append(f"augen.js fehlte in der Seite ({text[:60]}) — neu geladen")
+                self._seite_abwarten(15.0)
+                self._augen_laden()
+                continue
+            raise RuntimeError("stand() wirft: " + text[:120])
+        return {}
 
     def klick(self, rect, name):
         if _WIN_EINGABE:
