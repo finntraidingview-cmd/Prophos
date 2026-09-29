@@ -1960,6 +1960,9 @@
   #dashboard-view .acc-balref:hover{color:var(--violet);border-color:var(--violet)}
   #dashboard-view .acc-balref.dreht{animation:accBalDreh 1s linear infinite;color:var(--violet);cursor:default}
   @keyframes accBalDreh{to{transform:rotate(360deg)}}
+  #dashboard-view .acc-term-btn{display:inline-flex;align-items:center;gap:5px;margin-bottom:5px;padding:3px 9px;border-radius:6px;border:1px solid var(--border);background:var(--surface,#fff);color:var(--ink);font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap}   /* Terminal öffnen (29.09.2026) */
+  #dashboard-view .acc-term-btn:hover{border-color:#0d9488;color:#0d9488}
+  #dashboard-view .acc-term-btn:disabled{opacity:.6;cursor:default}
   /* Bulk: Vorschau „Aus dem Dashboard einfügen" (F11, 27.09.2026) */
   #bulk-paste-vorschau .bpv{display:flex;gap:10px;align-items:flex-start;padding:8px 11px;border-top:1px solid var(--border);font-size:12.5px}
   #bulk-paste-vorschau .bpv:first-child{border-top:none}
@@ -27907,6 +27910,96 @@
     }
     setTimeout(tick, 1500)
   }
+  /* 🖥 TERMINAL ÖFFNEN aus der Accounts-Liste (Finn 29.09.2026, Screenshot: „bei CFD-Accounts über der MT5-Copier-Connection ein neues
+   * Feld Terminal öffnen — wenn ich darauf drücke, öffnet sich automatisch das Terminal von dem Account"). Derselbe Weg wie ↻ bei
+   * MT5-Konten, nur ohne Lesen: am PC mit der Instanz direkt /api/start-terminal (Login-Zwang mit den gespeicherten Zugangsdaten; ein
+   * laufendes Fenster holt das Panel nach vorn statt ein zweites zu starten), sonst Signal 'mt5_terminal' an den PC-Tab — claimen darf
+   * nur der PC, dessen Panel eine Instanz mit diesem Login hat. Keine Order.
+   * -> {ok, login?, code?, msg} (nie werfen). code 'keine_instanz'/'copier_offline' = die Instanz liegt auf einem anderen PC. */
+  const _accTermLauf = new Map()   // accountId → {laeuft, text, fehler}
+  async function mt5KontoTerminalOeffnen(accountId, loginHint){
+    if(!MT5_LOCAL || typeof window.mtcApi !== 'function') return { ok: false, code: 'nicht_pc', msg: 'Nur am PC mit MT5 möglich' }
+    let acc = null; try{ acc = (accounts || []).find(a => String(a.id) === String(accountId)) }catch(_){}
+    const login = (acc && mt5KontoLogin(acc)) || String(loginHint || '').trim()
+    if(!login) return { ok: false, code: 'kein_login', msg: 'Konto ohne MT5-Login' }
+    let insts = null
+    try{ const dd = await window.mtcApi('instances'); insts = (!dd || dd.copier_offline || dd._httpFail) ? null : (dd.instances || []) }catch(_){ insts = null }
+    if(!insts) return { ok: false, code: 'copier_offline', msg: 'Copier-Backend am PC nicht erreichbar — start-alles.bat ausführen' }
+    const passt = x => !!x && String(((x.status || {}).master_login) || x.master_expected || '') === login
+    const inst = insts.find(x => passt(x) && x.has_terminal) || insts.find(passt)
+    if(!inst) return { ok: false, code: 'keine_instanz', msg: `Kein MT5-Terminal für Login ${login} auf diesem PC` }
+    if(!inst.has_terminal) return { ok: false, msg: `Instanz ${inst.name || inst.file} hat keinen Terminal-Pfad (master_terminal_path)` }
+    // Puls am Werk? Ein Fenster nach vorn würde den laufenden Klick stören — warten wie beim Balance-Lesen, höchstens 60 s
+    const t0 = Date.now()
+    while(mt5PulsBelegt()){
+      if(Date.now() - t0 > 60000) return { ok: false, msg: 'Puls arbeitet gerade — später nochmal' }
+      await new Promise(res => setTimeout(res, 5000))
+    }
+    const mc = (acc && acc.creds) || {}
+    const sendCreds = !!(mc.login && mc.password && String(mc.login) === login)
+    let ts = null
+    try{
+      ts = await window.mtcApi(`start-terminal?file=${encodeURIComponent(inst.file)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(sendCreds ? { login: String(mc.login), password: String(mc.password), server: String(mc.server || '') } : {}) })
+    }catch(e){ ts = { ok: false, msg: String((e && e.message) || e) } }
+    if(!ts || !ts.ok) return { ok: false, msg: 'Terminal-Start fehlgeschlagen: ' + String((ts && (ts.msg || ts.error)) || 'Fehler') }
+    if(/FALSCHEN Konto/i.test(String(ts.msg || ''))) return { ok: false, msg: String(ts.msg) }
+    return { ok: true, login, msg: String(ts.msg || 'Terminal geöffnet') }
+  }
+  function accTermBtnHtml(id){
+    const st = _accTermLauf.get(String(id)), laeuft = !!(st && st.laeuft)
+    return `<button type="button" class="acc-term-btn" data-acc-term="${escapeHtml(String(id))}" data-stop-row-click="1" title="Öffnet das MT5-Terminal dieses Kontos auf dem PC dieser ID — ein laufendes Fenster kommt nach vorn, keine Order" ${laeuft ? 'disabled' : ''}>🖥 ${laeuft ? 'öffnet …' : 'Terminal öffnen'}</button>`
+  }
+  function accTermStatusHtml(id){
+    const st = _accTermLauf.get(String(id)); if(!st || !st.text) return ''
+    return `<div style="font-size:11px;margin-top:3px;color:${st.fehler ? 'var(--danger)' : 'var(--sub)'}">${escapeHtml(st.text)}</div>`
+  }
+  async function accTerminalOeffnen(id){
+    id = String(id)
+    const setz = (o) => { _accTermLauf.set(id, o); try{ renderAccounts() }catch(_){} }
+    // Erfolgsmeldung räumt sich nach 20 s selbst weg — die Zelle bleibt schlank
+    const fertig = (text) => { setz({ laeuft: false, text }); setTimeout(() => { const st = _accTermLauf.get(id); if(st && !st.laeuft && !st.fehler){ _accTermLauf.delete(id); try{ renderAccounts() }catch(_){} } }, 20000) }
+    if(_accTermLauf.get(id)?.laeuft) return
+    const acc = (accounts || []).find(a => String(a.id) === id); if(!acc) return
+    const login = mt5KontoLogin(acc)
+    if(MT5_LOCAL){
+      setz({ laeuft: true, text: 'Terminal wird geöffnet … (hier am PC)' })
+      const r = await mt5KontoTerminalOeffnen(id)
+      if(r.ok){ fertig('Terminal offen (hier am PC)'); return }
+      if(!['keine_instanz', 'copier_offline'].includes(r.code)){ setz({ laeuft: false, fehler: true, text: r.msg }); return }
+      // Instanz liegt nicht auf diesem PC → weiter mit dem Signal
+    }
+    await accBalSignaleAufraeumen(id)   // hängende konto:-Signale dieses Kontos freigeben (dieselbe plan_id wie ↻)
+    let sig = null
+    try{
+      const params = { aktion: 'mt5_terminal', account_id: id, login, external_id: acc.externalId, firm: acc.firm, name: acc.name, von: 'besitzer' }
+      const { data, error } = await supabase.from('order_signale').insert({ plan_id: 'konto:' + id, params }).select('*').single()
+      if(error) throw error; sig = data
+    }catch(e){ setz({ laeuft: false, fehler: true, text: 'Signal nicht gesendet: ' + String((e && e.message) || e).slice(0, 80) }); return }
+    setz({ laeuft: true, text: 'wartet auf den PC dieser ID …' })
+    const t0 = Date.now()
+    const tick = async () => {
+      let row = null; try{ const { data } = await supabase.from('order_signale').select('*').eq('id', sig.id).maybeSingle(); row = data }catch(_){}
+      if(row && row.status === 'fertig'){ fertig('Terminal offen' + (row.pc ? ` (PC ${row.pc})` : '')); return }
+      if(row && ['fehler', 'verfallen', 'verworfen'].includes(row.status)){
+        let m = String((row.ergebnis || {}).msg || row.status)
+        // Ein PC-Tab mit älterem Build kennt 'mt5_terminal' nicht und schließt es über den Plan-Zweig ab — ehrlich sagen, was los ist
+        if(/Plan zum Signal nicht gefunden/i.test(m)) m = 'PC-Tab hat noch eine ältere Prophos-Version — lädt sich gleich selbst neu, dann nochmal drücken'
+        setz({ laeuft: false, fehler: true, text: m }); return
+      }
+      if(row && row.status === 'laeuft' && Date.now() - (Date.parse(row.updated_at || '') || 0) > 180000){
+        try{ await supabase.from('order_signale').update({ status: 'fehler', updated_at: new Date().toISOString(), ergebnis: { ok: false, msg: 'PC-Tab nicht erreichbar — Prophos am PC neu öffnen' } }).eq('id', sig.id).eq('status', 'laeuft') }catch(_){}
+        setz({ laeuft: false, fehler: true, text: 'PC-Tab nicht erreichbar — Prophos am PC neu öffnen' + (row.pc ? ` (PC ${row.pc})` : '') }); return
+      }
+      if((Date.now() - t0) / 1000 > 180 && (!row || row.status === 'wartet')){
+        try{ await supabase.from('order_signale').update({ status: 'verfallen', updated_at: new Date().toISOString(), ergebnis: { ok: false, msg: 'keine Antwort vom PC' } }).eq('id', sig.id).in('status', ['wartet']) }catch(_){}
+        setz({ laeuft: false, fehler: true, text: `kein PC dieser ID hat ein MT5-Terminal für Login ${login || '?'} gemeldet (Prophos-Tab + start-alles.bat offen?)` }); return
+      }
+      if(row && row.status === 'laeuft'){ const t = `Terminal wird geöffnet … (PC ${row.pc || '?'})`; if(_accTermLauf.get(id)?.text !== t) setz({ laeuft: true, text: t }) }
+      setTimeout(tick, 2000)
+    }
+    setTimeout(tick, 1500)
+  }
   function renderAccounts(){
     if(!accEls.table) return
     if(typeof tsAutoLinkSoon === 'function') tsAutoLinkSoon()  // Auto-Verlinkung per External ID (17.09.2026)
@@ -28189,7 +28282,7 @@
             <td>${escapeHtml(a.firm || '–')}</td>
             <td>${accTypChipHtml(a)}${accWdToggleHtml(a)}</td>
             <td>${balCell}</td>
-            <td>${linksHtml}</td>
+            <td>${(_mtcLogin && !isArchived && typeof mt5KontoIst === 'function' && mt5KontoIst(a)) ? `<div>${accTermBtnHtml(a.id)}</div>` : ''}${linksHtml}${accTermStatusHtml(a.id)}</td>
             <td style="padding-right:20px;text-align:right;white-space:nowrap" data-stop-row-click="1">
               <button class="btn btn-ghost icon-btn" data-acc-cred="${a.id}" title="Zugangsdaten${a.creds ? '' : ' (leer)'}" style="padding:5px 8px${a.creds ? ';color:var(--violet)' : ''}">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
@@ -28243,6 +28336,7 @@
       // Edit-Buttons
       // ↻ Balance lesen (F19) — eigener Handler je Knopf
       accEls.table.querySelectorAll('[data-acc-balref]').forEach(btn => btn.addEventListener('click', ev => { ev.stopPropagation(); accBalanceLesen(btn.dataset.accBalref) }))
+      accEls.table.querySelectorAll('[data-acc-term]').forEach(btn => btn.addEventListener('click', ev => { ev.stopPropagation(); accTerminalOeffnen(btn.dataset.accTerm) }))
       accEls.table.querySelectorAll('[data-acc-edit]').forEach(btn => {
         btn.addEventListener('click', () => {
           const id = btn.dataset.accEdit
@@ -35916,7 +36010,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.807'
+  const OS_TAB_BUILD = '2026-09-22.808'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -37640,7 +37734,7 @@
    * Signals neu — das F24-Aufräumen nahm nur Zeilen älter als 4 min, das Signal blieb auf 'laeuft'). sessionStorage überlebt das Neuladen
    * im SELBEN Tab: was hier steht und beim Start noch 'laeuft' ist, gehörte sicher dem vorigen Leben dieses Tabs — sofort abschließen. */
   const OS_CLAIMS_KEY = 'prophos_os_claims'
-  const OS_LESEND = ['konto_balance', 'balance_lesen', 'endlesung', 'rundgang', 'tsx_inventar', 'mt5_balance']
+  const OS_LESEND = ['konto_balance', 'balance_lesen', 'endlesung', 'rundgang', 'tsx_inventar', 'mt5_balance', 'mt5_terminal']
   function osClaimMerken(sig){
     try{
       const jetzt = Date.now()
@@ -37765,6 +37859,24 @@
           osClaimMerken(sig)
           _osStand = 'claim-mt5-balance: ' + String(sig.id).slice(0, 8)
           mt5KontoBalanceJetzt(pm.account_id, lg)
+            .then(er => supabase.from('order_signale').update({ status: er && er.ok ? 'fertig' : 'fehler', updated_at: new Date().toISOString(), ergebnis: er || { ok: false, msg: 'keine Antwort' } }).eq('id', sig.id))
+            .catch(e => supabase.from('order_signale').update({ status: 'fehler', updated_at: new Date().toISOString(), ergebnis: { ok: false, msg: String((e && e.message) || e) } }).eq('id', sig.id))
+          continue
+        }
+        // Terminal öffnen auf Zuruf (29.09.2026, Knopf „Terminal öffnen" in der Accounts-Spalte VERKNÜPFUNGEN): plan_id 'konto:<id>',
+        // params {aktion:'mt5_terminal', account_id, login}. Claim-Regel wie mt5_balance — nur der PC mit einer Instanz dieses Logins.
+        // Nur /api/start-terminal, kein Lesen, KEINE Order.
+        if(String((sig.params || {}).aktion || '') === 'mt5_terminal'){
+          const pm = sig.params || {}, lg = String(pm.login || '').trim()
+          const hier = !!lg && (dd.instances || []).some(x => x && String(((x.status || {}).master_login) || x.master_expected || '') === lg)
+          if(!hier) continue
+          const { data: clT } = await supabase.from('order_signale')
+            .update({ status:'laeuft', pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : '', updated_at: new Date().toISOString() })
+            .eq('id', sig.id).eq('status', 'wartet').select()
+          if(!clT || !clT.length){ _osStand = 'claim-verloren'; continue }
+          osClaimMerken(sig)
+          _osStand = 'claim-mt5-terminal: ' + String(sig.id).slice(0, 8)
+          mt5KontoTerminalOeffnen(pm.account_id, lg)
             .then(er => supabase.from('order_signale').update({ status: er && er.ok ? 'fertig' : 'fehler', updated_at: new Date().toISOString(), ergebnis: er || { ok: false, msg: 'keine Antwort' } }).eq('id', sig.id))
             .catch(e => supabase.from('order_signale').update({ status: 'fehler', updated_at: new Date().toISOString(), ergebnis: { ok: false, msg: String((e && e.message) || e) } }).eq('id', sig.id))
           continue
