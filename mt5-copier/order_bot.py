@@ -16662,21 +16662,58 @@ def cdp_panel_zu(stand):
     return ko.get("panel_knopf") if ko.get("panel") == "zu" and cdp_rect(ko.get("panel_knopf")) else None
 
 
+def cdp_panel_frei_js(rect):
+    """Liegt über der Mitte des „Open panel"-Knopfs wirklich der Knopf? Live 29.09.2026 23:04 UTC (pc-2zc2we, erster Login im
+    Puls-Chrome): dreimal „geklickt, Hover bewiesen", das Panel blieb zu — TradingViews Connect-Dialog stand während des Logins noch
+    und seine Fläche lag über der Seite; :hover bewies nur die Fläche. Verdeckt heißt NUR: Dialog/Overlay (#overlap-manager-root,
+    role=dialog, aria-modal) oder ein Element über ≥ 40 % des Bilds; Meldungen und alles Unklare gelten als frei (wie bisher). Liest nur.
+    -> {frei, was}"""
+    x, y = rect[0] + rect[2] / 2.0, rect[1] + rect[3] / 2.0
+    return ("(function(){var e=document.elementFromPoint(" + f"{float(x):.1f},{float(y):.1f}" + ");if(!e)return {frei:true,was:''};"
+            "if(e.closest('[data-name=\"toggle-visibility-button\"]'))return {frei:true,was:''};"
+            "if(e.closest('[data-name^=\"toast-group-\"],[class*=\"toastGroup-\"],[class*=\"toastListInner-\"],[class*=\"toastItem\"]'))"
+            "return {frei:true,was:'Meldung'};"
+            "var r=e.getBoundingClientRect(),gross=r.width*r.height>=0.4*innerWidth*innerHeight;"
+            "var d=e.closest('#overlap-manager-root,[role=\"dialog\"],[role=\"alertdialog\"],[aria-modal=\"true\"]');"
+            "var c=(typeof e.className==='string'?e.className:'').split(' ')[0]||'';"
+            "return {frei:!(d||gross),was:((e.getAttribute('data-name')||e.tagName.toLowerCase())+(c?'.'+c:'')).slice(0,50)};})()")
+
+
 def _cdp_verbunden_lesen(s, opts, trail):
     """cdp_konto_verbunden — ist das Broker-Panel zugeklappt (Live 29.09.2026 16:25 UTC nach dem Login: nur „Tradovate ▾" +
     „Open panel", Umschalter unsichtbar → 40 s „kein Konto"), wird es aufgeklappt (höchstens 3× je Sitzung) und neu gelesen.
-    -> Kontotext | ''"""
+    Live 29.09.2026 23:04 UTC (pc-2zc2we): alle 3 Klicks fielen in den Login (1,2 s nach Connect, 1–4 s nach „Anmelden") und trafen
+    den noch offenen Connect-Dialog — als Tradovate verbunden war, war das Kontingent leer und der Lauf wartete 40 s auf „kein Konto".
+    Seitdem: liegt ein Dialog über dem Knopf, wird NICHT geklickt (zählt nicht, der Aufrufer fragt ohnehin wieder), und nach dem Klick
+    wird bewiesen, dass das Panel aufging. -> Kontotext | ''"""
     st = s.stand(opts)
     aktiv = cdp_konto_verbunden(st)
     if aktiv:
         return aktiv
     knopf = cdp_panel_zu(st)
-    if knopf and getattr(s, "_panel_klicks", 0) < 3:
-        s._panel_klicks = getattr(s, "_panel_klicks", 0) + 1
-        if s.klick(cdp_rect(knopf), "Handelspanel auf (Open panel)"):
-            _warte(1.0, 0.4)
-            return cdp_konto_verbunden(s.stand(opts))
-    return ""
+    if not knopf or getattr(s, "_panel_klicks", 0) >= 3:
+        return ""
+    if hasattr(s, "werbung_weg"):
+        s.werbung_weg()                                   # eine Werbung über dem Knopf zählt nicht als Dialog-Warten
+    frei = s.lese_js(cdp_panel_frei_js(cdp_rect(knopf))) if hasattr(s, "lese_js") else None
+    if isinstance(frei, dict) and not frei.get("frei"):
+        if not getattr(s, "_panel_verdeckt_gemeldet", False):
+            s._panel_verdeckt_gemeldet = True
+            trail.append(f"„Open panel“ verdeckt ('{frei.get('was')}' liegt darüber, z. B. der Connect-Dialog im Login) — kein Klick, warte")
+        return ""
+    s._panel_klicks = getattr(s, "_panel_klicks", 0) + 1
+    if not s.klick(cdp_rect(knopf), "Handelspanel auf (Open panel)"):
+        return ""
+    st2 = st
+    for _ in range(5):                                    # ~3 s: Panel auf + Konto geladen?
+        _warte(0.6, 0.3)
+        st2 = s.stand(opts)
+        aktiv = cdp_konto_verbunden(st2)
+        if aktiv or not cdp_panel_zu(st2):
+            break
+    if not aktiv:
+        trail.append("Handelspanel " + ("offen (bewiesen), Konto lädt noch" if not cdp_panel_zu(st2) else "bleibt nach dem Klick zu"))
+    return aktiv
 
 
 def cdp_abgemeldet(stand):

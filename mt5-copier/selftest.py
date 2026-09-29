@@ -3137,6 +3137,42 @@ def test_puls_cdp_login():
     finally:
         ob._warte = alt_w
     chk(v_ == "PAAPEX6416990000008 USD" and sp_.klicks == ["Handelspanel auf (Open panel)"], f"zugeklapptes Panel → einmal auf → Konto ({v_!r})")
+    # Live 29.09.2026 23:04 UTC (pc-2zc2we): Connect-Dialog lag über „Open panel" — nicht klicken, Versuch zählt nicht; Klick ohne
+    # Wirkung steht ehrlich in der Spur
+    class _SPD(_SP):
+        def __init__(self, frei, wirkt=True):
+            super().__init__()
+            self.frei, self.wirkt, self.ww = frei, wirkt, 0
+
+        def werbung_weg(self, zwang=False):
+            self.ww += 1
+            return 0
+
+        def lese_js(self, a, timeout=8):
+            return {"frei": self.frei, "was": "div.backdrop"}
+
+        def klick(self, r, n, toast_ok=False):
+            self.klicks.append(n)
+            self.auf = self.wirkt
+            return True
+    ob._warte = lambda a_, b_: None
+    try:
+        sd_, td_ = _SPD(False), []
+        v1_ = ob._cdp_verbunden_lesen(sd_, {}, td_)
+        v1b_ = ob._cdp_verbunden_lesen(sd_, {}, td_)
+        sd_.frei = True
+        v2_ = ob._cdp_verbunden_lesen(sd_, {}, td_)
+        sn_, tn_ = _SPD(True, wirkt=False), []
+        v3_ = ob._cdp_verbunden_lesen(sn_, {}, tn_)
+    finally:
+        ob._warte = alt_w
+    chk(v1_ == "" and v1b_ == "" and sum("verdeckt" in x for x in td_) == 1 and getattr(sd_, "_panel_klicks", 0) == 1
+        and v2_ == "PAAPEX6416990000008 USD" and sd_.klicks == ["Handelspanel auf (Open panel)"] and sd_.ww == 3,
+        f"Dialog über „Open panel“ → kein Klick, zählt nicht, danach frei → Klick → Konto ({td_})")
+    chk(v3_ == "" and tn_ == ["Handelspanel bleibt nach dem Klick zu"] and sn_._panel_klicks == 1, f"Klick ohne Wirkung → Spur ({tn_})")
+    fj_ = ob.cdp_panel_frei_js([1482, 907, 38, 38])
+    chk("elementFromPoint(1501.0,926.0)" in fj_ and "toggle-visibility-button" in fj_ and "#overlap-manager-root" in fj_ and "toastGroup-" in fj_,
+        "Frei-Probe: Knopfmitte, Dialog/Overlay verdeckt, Meldungen frei")
     chk(_i.getsource(ob._cdp_anmelden).count("_cdp_verbunden_lesen(") == 1 and "cdp_konto_verbunden(s.stand(opts))" not in _i.getsource(ob._cdp_anmelden),
         "Warten nach dem Login klappt das Panel auf")
     # Tradovate-Formular fliegt beim Laden herein (Live 16:33 UTC): erst ruhig, Fokus nicht da → neu lesen, bis 2× neu klicken
