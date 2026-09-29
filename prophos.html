@@ -22711,7 +22711,7 @@
       for(const L of ll){ try{ _mklLw.wdLinien.push(_mklLw.serie.createPriceLine({ price: L.preis, color: L.farbe, lineWidth: L.breite, lineStyle: L.art, axisLabelVisible: true, title: L.titel })) }catch(_){} }
       // Auto-Skala schließt die Level der EINGEBLENDETEN Trades ein (F7, Master 26.09.2026 nach F6: Liquidation lag sonst außerhalb des
       // Bereichs). Ausgeblendete Trades ziehen nicht auf; in „Markt live" wieder die reine Kerzen-Skala (unten).
-      const preise = ll.map(L => L.preis), lo = preise.length ? Math.min(...preise) : null, hi = preise.length ? Math.max(...preise) : null, sig = lo == null ? '' : lo + '|' + hi
+      const preise = ll.filter(L => L.skala !== false).map(L => L.preis), lo = preise.length ? Math.min(...preise) : null, hi = preise.length ? Math.max(...preise) : null, sig = lo == null ? '' : lo + '|' + hi
       if(_mklLw.skalaSig !== sig){
         _mklLw.skalaSig = sig
         try{ _mklLw.serie.applyOptions({ autoscaleInfoProvider: orig => { const r = orig(); if(lo == null) return r
@@ -22748,7 +22748,7 @@
       if(typeof wdlAktiv === 'function' && wdlAktiv()){
         const t = wdl.auswahl ? ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === wdl.auswahl) : null
         if(!t) return null
-        return { entry: n(t.einstieg_nq), tp: n(t.tp_level_nq), liq: n(t.liq_level_nq) || n(t.sl_level_nq), start: t.started_at, kt: n(t.kt), root: String(t.symbol_root || 'MNQ'), richtung: t.richtung, offen: t.status === 'open' }
+        return { entry: n(t.einstieg_nq), tp: n(t.tp_level_nq), liq: wdlSlEcht(t) || n(t.liq_level_nq) || n(t.sl_level_nq), start: t.started_at, kt: n(t.kt), root: String(t.symbol_root || 'MNQ'), richtung: t.richtung, offen: t.status === 'open' }   // echter SL begrenzt die rote Zone (29.09.2026)
       }
     }catch(_){}
     const pw = mkl.wd.aktiv ? ((mkl.wd && mkl.wd.plaene) || []).find(x => x && String(x.id) === String(mkl.wd.aktiv)) : null
@@ -24275,13 +24275,21 @@
     wdl.pFarbe = wdlFarbenZuteilen(trades.map(t => String(t.user_id || t.person || '')), WDL_P_FARBEN)
   }
   // Linien für mklChartZeichnen: Entry durchgezogen, TP gestrichelt, Liquidation gepunktet, SL lang gestrichelt (nur wenn gesetzt)
+  const WDL_SKALA_PKT = 600   // ≈ 2 % NQ — typische WD-Liquidationen (≤ 400 Pkt) bleiben im Bild, Funded-Liquidationen nicht
   function wdlChartLinien(){
     const out = [], num = v => (v == null || v === '' || !isFinite(Number(v)) || !(Number(v) > 0)) ? null : Number(v)
     for(const t of ((wdl.daten && wdl.daten.trades) || [])){
       if(!wdlPasst(t) || !wdlLinienAn(t)) continue
       // feste Farben wie im Winning-Days-Chart, an der Achse nur der Preis (Titel leer)
-      const l = (v, farbe, art, breite) => { const p = num(v); if(p != null) out.push({ preis: p, farbe, art, breite, titel: '' }) }
-      l(t.einstieg_nq, '#2563EB', 0, 3); l(t.tp_level_nq, '#2563EB', 0, 2); l(t.liq_level_nq, '#b91c1c', 0, 2); l(t.sl_level_nq, '#b91c1c', 0, 2)
+      // Auto-Skala (29.09.2026, Finn: „wenn ich auf die Order drücke, verschwindet der Chart"): Apex …0008 hatte die Liquidation
+      // 4.600 Pkt unter dem Einstieg — die Skala zog bis dorthin auf, die Kerzen wurden zum Strich. Level weiter als WDL_SKALA_PKT vom
+      // Einstieg werden gezeichnet, ziehen die Skala aber nicht mit (skala:false). Echter SL → SL-Linie statt Liquidation.
+      const ein = num(t.einstieg_nq)
+      const l = (v, farbe, art, breite) => { const p = num(v); if(p != null) out.push({ preis: p, farbe, art, breite, titel: '', skala: ein == null || Math.abs(p - ein) <= WDL_SKALA_PKT }) }
+      const slE = wdlSlEcht(t)
+      l(t.einstieg_nq, '#2563EB', 0, 3); l(t.tp_level_nq, '#2563EB', 0, 2)
+      if(slE != null) l(slE, '#b91c1c', 0, 2)
+      else { l(t.liq_level_nq, '#b91c1c', 0, 2); if(num(t.sl_level_nq) != null && num(t.sl_level_nq) !== num(t.liq_level_nq)) l(t.sl_level_nq, '#b91c1c', 0, 2) }
       const h = t.hedge || {}, sb = num(t.schliesst_bei_nq) != null ? num(t.schliesst_bei_nq) : num(h.schliesst_bei_nq)
       if(sb != null && t.status === 'open' && h.status && !['geschlossen', 'fehler', 'abgelehnt', 'zu'].includes(String(h.status))) l(sb, '#7C3AED', 2, 2)
     }
@@ -24340,6 +24348,12 @@
   /* LIVE-P&L DES MASTER-KONTOS (F28, 27.09.2026, Finn: „Sehe ich den P&L vom Master-Account, wo TP bzw. Liquidationspreis wäre?"):
    * dieselbe Rechnung wie der Winning-Days-Block im Markt (wdMasterLive, Punktwert mklPpl: MNQ 2 $/Pkt, NQ 20 $/Pkt = WD_HEUTE_PPL im
    * Backend). NQ und MNQ laufen preisgleich, der Kurs gilt für beide. Nur Anzeige: exakt bleibt „Balance nachher − vorher". */
+  // Echter Stop-Loss der Order (29.09.2026, Finn: „wenn die Order einen Stop-Loss hat, statt der Liquidation den SL hinschreiben"):
+  // sl_art 'bracket' = exakt aus TradingViews Meldung (tv.sl_level_nq), 'master_sl' = aus SL $ gerechnet. 'liquidation' ist KEIN SL.
+  function wdlSlEcht(t){
+    const v = t && Number(t.sl_level_nq)
+    return (t && (t.sl_art === 'bracket' || t.sl_art === 'master_sl') && isFinite(v) && v > 0) ? v : null
+  }
   function wdlLive(t, kp){
     const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
     const buy = t.richtung === 'buy', ri = buy ? 1 : t.richtung === 'sell' ? -1 : 0
@@ -24350,12 +24364,13 @@
     const m = wdMasterLive(t.richtung, t.einstieg_nq, kt, wurzel, kp), pl = m ? m.pl : null, bs = n(t.balance_start)
     const dTp = (tp != null && tp > 0) ? (buy ? tp - kp : kp - tp) : null
     const dLq = (lq != null && lq > 0) ? (buy ? kp - lq : lq - kp) : null
-    return { pl, bal: (pl != null && bs != null) ? bs + pl : null, dTp, dTpUsd: usd(dTp), dLq, dLqUsd: usd(dLq) }
+    const sl = wdlSlEcht(t), dSl = (sl != null) ? (buy ? kp - sl : sl - kp) : null
+    return { pl, bal: (pl != null && bs != null) ? bs + pl : null, dTp, dTpUsd: usd(dTp), dLq, dLqUsd: usd(dLq), dSl, dSlUsd: usd(dSl) }
   }
   function wdlLiveTexte(L, kp){
     const z = (v, d) => Number(v).toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d })
     const abst = (pkt, usd, name) => pkt == null ? '' : pkt <= 0 ? `${name} erreicht (Kurs)` : `noch ${z(pkt, pkt < 10 ? 2 : 0)} Pkt${usd != null ? ' · ' + z(usd, 0) + ' $' : ''}`
-    return { kp: kp != null ? z(kp, 2) : '–', tp: abst(L.dTp, L.dTpUsd, 'TP'), lq: abst(L.dLq, L.dLqUsd, 'Liq.'),
+    return { kp: kp != null ? z(kp, 2) : '–', tp: abst(L.dTp, L.dTpUsd, 'TP'), lq: abst(L.dLq, L.dLqUsd, 'Liq.'), sl: abst(L.dSl, L.dSlUsd, 'SL'),
              pl: L.pl != null ? `${L.pl < 0 ? '−' : '+'}${z(Math.abs(L.pl), 2)} $` : '–',
              bal: L.bal != null ? '≈ ' + z(L.bal, 2) + ' $' : '–',
              plFarbe: L.pl == null ? 'var(--sub)' : L.pl >= 0 ? '#15803d' : '#b91c1c' }
@@ -24394,7 +24409,7 @@
     const karte = t => {
       const farbe = (wdl.tFarbe && wdl.tFarbe.get(wdlTid(t))) || '#667085'   // Trade-Farbe = Farbe seiner Linien im Chart (F6)
       const k = t.konto || {}, buy = t.richtung === 'buy', sell = t.richtung === 'sell', offen = t.status === 'open', gepl = t.status === 'planned'
-      const e = num(t.einstieg_nq), tp = num(t.tp_level_nq), lq = num(t.liq_level_nq)
+      const e = num(t.einstieg_nq), tp = num(t.tp_level_nq), lq = num(t.liq_level_nq), slE = wdlSlEcht(t)
       const dTp = (offen && kp != null && tp != null) ? (buy ? tp - kp : kp - tp) : null
       const LT = wdlLiveTexte(wdlLive(t, kp), kp)   // Live-P&L + Abstände (F28), der 2-s-Takt schreibt dieselben Texte nach
       const st = offen ? `läuft seit ${uhr(t.started_at)}` : gepl ? `geplant${t.start_um ? ' · Start ' + uhr(t.start_um) : ''}` : `zu ${tagUhr(t.ended_at)}`
@@ -24424,7 +24439,8 @@
         <div class="wdl-level">
           <div title="${t.einstieg_quelle === 'reader_klick' ? 'Kein Fill aus TopstepX — Reader-Kurs direkt nach dem Klick (F28)' : ''}"><small>Einstieg${t.einstieg_quelle === 'reader_klick' ? ' · Kurs beim Klick' : ''}</small><b>${f2(e)}</b></div>
           <div><small>TP${num(t.master_tp) != null ? ' · ' + f0(t.master_tp) + ' $' : ''}</small><b style="color:#0E9757">${f2(tp)}</b>${offen && tp != null ? `<small data-wdl-lv="tp">${LT.tp}</small>` : ''}</div>
-          <div title="${escapeHtml(String(t.liq_regel || ''))}"><small>Liquidation${num(t.liq_balance) != null ? ' · bei ' + f0(t.liq_balance) + ' $' : ''}</small><b style="color:#D92D20">${lq != null ? f2(lq) : '–'}</b>${lq == null && t.liq_regel ? `<small>${escapeHtml(String(t.liq_regel))}</small>` : offen && lq != null ? `<small data-wdl-lv="lq">${LT.lq}</small>` : ''}</div>
+          ${slE != null ? `<div title="${escapeHtml('Stop-Loss ' + (t.sl_art === 'bracket' ? 'exakt aus TradingView' : 'aus SL $ gerechnet') + (lq != null ? ' · Liquidation ' + f2(lq) + (num(t.liq_balance) != null ? ' (bei ' + f0(t.liq_balance) + ' $)' : '') : ''))}"><small>SL${num(t.master_sl) != null ? ' · ' + f0(t.master_sl) + ' $' : ''}</small><b style="color:#D92D20">${f2(slE)}</b>${offen ? `<small data-wdl-lv="sl">${LT.sl}</small>` : ''}</div>`
+          : `<div title="${escapeHtml(String(t.liq_regel || ''))}"><small>Liquidation${num(t.liq_balance) != null ? ' · bei ' + f0(t.liq_balance) + ' $' : ''}</small><b style="color:#D92D20">${lq != null ? f2(lq) : '–'}</b>${lq == null && t.liq_regel ? `<small>${escapeHtml(String(t.liq_regel))}</small>` : offen && lq != null ? `<small data-wdl-lv="lq">${LT.lq}</small>` : ''}</div>`}
           ${offen ? `<div></div>
           <div title="${e != null ? 'aus dem Kurs · exakt nach der Nachlesung' : 'kein Einstieg gespeichert'}"><small>Live-P&amp;L</small><b data-wdl-lv="pl" style="color:${LT.plFarbe}">${LT.pl}</b></div>`
           : `<div><small>Balance nachher</small><b>${num(t.balance_end) != null ? f2(t.balance_end) + ' $' : '–'}</b></div>
@@ -24449,7 +24465,8 @@
     wdl.auswahl = wdl.auswahl === id ? null : id; wdlRender()   // zweiter Klick hebt die Auswahl auf
     // Handy (29.09.2026, Finn: „offene Trades antippen hängt/buggt"): der Chart steht dort weit über der Liste — die Linien erschienen
     // außer Sicht, der Tipp wirkte wie „nichts passiert". Beim Auswählen den Chart sanft ins Bild holen (unter die Kopfzeile).
-    if(wdl.auswahl && window.matchMedia('(max-width:820px)').matches){
+    // Seit 29.09.2026 abends auf JEDER Breite (Finn am MacBook: „wenn ich auf die Order drücke, soll er hoch zum Chart scrollen").
+    if(wdl.auswahl){
       // 80 ms später: der Chart-Neuaufbau im selben Takt brach den sanften Bildlauf sonst nach ~100 px ab (Stub-Messung)
       setTimeout(() => {
         const slot = document.getElementById('wdl-chart-slot'), bar = document.querySelector('#dashboard-view .topbar')
@@ -36095,7 +36112,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.826'
+  const OS_TAB_BUILD = '2026-09-22.827'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
