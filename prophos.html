@@ -1238,7 +1238,7 @@
   #tradePlanModal .tp-wd > #tp-wd-head-a{margin-top:0;padding-top:0;border-top:none}
   #tradePlanModal .tp-wd > .tp-wd-head span{display:block;margin-top:2px;text-transform:none;letter-spacing:0;font-weight:400;color:var(--sub-2)}
   #tradePlanModal .tp-wd > #tp-master-row,#tradePlanModal .tp-wd > #tp-wd-multi-row,#tradePlanModal .tp-wd > #tp-wd-hedge-row,
-  #tradePlanModal .tp-wd > #tp-kompass-box,#tradePlanModal .tp-wd > #tp-dir-row,#tradePlanModal .tp-wd > #tp-plan-start-um-row{grid-column:1 / -1 !important}
+  #tradePlanModal .tp-wd > #tp-kompass-box,#tradePlanModal .tp-wd > #tp-letzte-orders,#tradePlanModal .tp-wd > #tp-dir-row,#tradePlanModal .tp-wd > #tp-plan-start-um-row{grid-column:1 / -1 !important}
   #tradePlanModal .tp-wd > #tp-v2-instr-row{order:1;grid-column:1 / -1}
   #tradePlanModal .tp-wd > .field:has(> #tp-master-qty){order:2}
   #tradePlanModal .tp-wd > #tp-wd-head-a{order:3}
@@ -1251,6 +1251,13 @@
   #tradePlanModal .tp-wd > #tp-wd-head-c{order:10}
   #tradePlanModal .tp-wd > #tp-wd-hedge-row{order:11}
   #tradePlanModal .tp-wd > #tp-kompass-box{order:12}
+  #tradePlanModal .tp-wd > #tp-letzte-orders{order:12}   /* gleiche Ordnung wie Kompass → DOM-Reihenfolge: direkt darunter (29.09.2026) */
+  #tradePlanModal .tp-lo-zeile{display:flex;flex-wrap:wrap;align-items:center;gap:2px 8px;padding:4px 0;border-top:1px solid var(--border-soft)}
+  #tradePlanModal .tp-lo-zeile:first-child{border-top:none}
+  #tradePlanModal .tp-lo-links{display:flex;align-items:center;gap:8px;flex:1 1 170px;min-width:0}
+  #tradePlanModal .tp-lo-konto{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink)}
+  #tradePlanModal .tp-lo-rechts{display:flex;align-items:center;gap:8px;flex:none;margin-left:auto}
+  #tradePlanModal .tp-lo-chip{font-family:var(--mono);font-weight:700;font-size:11px;padding:1px 6px;border-radius:5px}
   #tradePlanModal .tp-wd > #tp-dir-row{order:13}
   #tradePlanModal .tp-wd > #tp-plan-start-um-row{order:14}
   /* Felder immer auf einer Linie: Zeilen oben ausrichten, Labels einzeilig, Hilfszeile unter dem Feld (fehlt sie, rutscht nichts) */
@@ -6299,6 +6306,15 @@
                   <div id="tp-kompass-meta" style="font-size:12px;color:var(--sub);text-align:right"></div>
                 </div>
                 <div id="tp-kompass-wahl" style="font-size:12px;margin-top:6px;color:var(--ink)"></div>
+              </div>
+            </div>
+            <!-- Letzte Orders (29.09.2026, Finn: „im Trade-Plan will ich wieder die letzten Orders sehen, LONG/SHORT, für alle
+                 Wege"). Reine Anzeige der letzten 8 gestarteten Pläne aus tradePlans — keine Bewertung, keine Sperre.
+                 Gefüllt von tpLetzteOrdersRender, sichtbar wie der Kompass-Kasten (V2-Wege). -->
+            <div class="field" id="tp-letzte-orders" style="grid-column:span 2;display:none">
+              <div style="padding:8px 12px;border-radius:8px;border:1px solid var(--border)">
+                <span style="font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:.06em">Letzte Orders</span>
+                <div id="tp-letzte-orders-liste" style="margin-top:4px;font-size:12px"></div>
               </div>
             </div>
             <div class="field" id="tp-dir-row" style="grid-column:span 2;display:none">
@@ -34724,6 +34740,9 @@
     // Kompass-Feld + Richtungs-Vorwahl (23.09.2026): lädt asynchron, würfelt nur bei neuem Plan ohne Richtung.
     v2zeig('tp-kompass-box', v2, true)
     if(typeof tpV2KompassVorwahl === 'function') tpV2KompassVorwahl()
+    // Letzte Orders (29.09.2026): direkt unter dem Kompass, gleiche Sichtbarkeit
+    v2zeig('tp-letzte-orders', v2, true)
+    if(v2) try{ tpLetzteOrdersRender() }catch(_){}
     // Winning Days Farm (24.09.2026 spät): Faktor-Feld mit TP/SL-Vorschau nur auf diesem Weg
     v2zeig('tp-wd-hedge-row', wdAn, true)
     if(wdAn){ tpWdSlaveRiskVorbelegen(); tpWdVorschau() }
@@ -34814,6 +34833,39 @@
     // kompass_regeln bleiben im Code, werden aber nicht mehr gezogen (Admin-Panel dazu ist ausgeblendet).
     _tpKp.wahl = null
     tpKompassBoxRender(row, null, false)
+  }
+  /* LETZTE ORDERS im Plan-Popup (29.09.2026, Finn: „ich will im Trade planen wieder die letzten Orders sehen — LONG/SHORT —
+   * für Echo V2, Orbit V2, Winning Days und Topstep V2"). Quelle: tradePlans (schon geladen, nur die eigene ID), Richtung aus
+   * trade_plans.richtung ('buy'/'sell', rowToPlan → p.richtung). Gestartet = open/review/completed, neueste zuerst nach
+   * started_at (Rückfall created_at). Reine Anzeige — keine Bewertung, keine Sperre (die macht allein tpV2RichtungSchutz). */
+  function tpLetzteOrdersRender(){
+    const el = document.getElementById('tp-letzte-orders-liste')
+    if(!el) return
+    const zeit = p => { const t = new Date(p.startedAt || p.createdAt || 0).getTime(); return isFinite(t) ? t : 0 }
+    const liste = (tradePlans || [])
+      .filter(p => p && (p.status === 'open' || p.status === 'review' || p.status === 'completed'))
+      .sort((a, b) => zeit(b) - zeit(a)).slice(0, 8)
+    if(!liste.length){ el.innerHTML = '<div style="color:var(--sub);padding:4px 0">Noch keine gestarteten Orders.</div>'; return }
+    const wegKurz = p => routeIstV2(p.route) ? (tpIstWdPlan(p) ? 'WD' : wegLabel(p)) : ((SYS_STICKER[p.route || 'dup'] || [p.route || '—'])[0])
+    const kontoKurz = p => {
+      const n = String(p.masterName || '').trim()
+      const ziff = (n.match(/\d{5,}/g) || []).pop()
+      return (n.length > 16 && ziff) ? '…' + ziff.slice(-4) : (n || '—')
+    }
+    const statusTxt = s => ({ open: 'Läuft', review: 'Prüfen', completed: 'Erledigt' })[s] || s
+    el.innerHTML = liste.map(p => {
+      const d = new Date(p.startedAt || p.createdAt || 0)
+      const wann = isFinite(d) ? d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) + ' ' + d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '—'
+      const chip = p.richtung === 'buy' ? '<span class="tp-lo-chip" style="background:rgba(18,183,106,.12);color:#0E9757">▲ LONG</span>'
+        : p.richtung === 'sell' ? '<span class="tp-lo-chip" style="background:rgba(240,68,56,.10);color:var(--danger)">▼ SHORT</span>'
+        : '<span class="tp-lo-chip" style="color:var(--sub)">—</span>'
+      const pl = p.masterPl != null && isFinite(p.masterPl)
+        ? `<span class="tnum" style="color:${p.masterPl >= 0 ? '#0E9757' : 'var(--danger)'}">${p.masterPl >= 0 ? '+' : '−'}$${Math.abs(p.masterPl).toLocaleString('de-DE', { maximumFractionDigits: 2 })}</span>` : ''
+      return `<div class="tp-lo-zeile"><div class="tp-lo-links"><span class="tnum" style="color:var(--sub);font-family:var(--mono);font-size:11px;white-space:nowrap;flex:none">${escapeHtml(wann)}</span>`
+        + `<span style="color:var(--sub);white-space:nowrap;flex:none">${escapeHtml(wegKurz(p))}</span>`
+        + `<span class="tp-lo-konto" title="${escapeHtml([p.masterFirm, p.masterName].filter(Boolean).join(' · '))}">${escapeHtml(kontoKurz(p))}</span></div>`
+        + `<div class="tp-lo-rechts">${chip}<span style="color:var(--sub)">${escapeHtml(statusTxt(p.status))}</span>${pl}</div></div>`
+    }).join('')
   }
   // Gesperrte Gegenrichtung im Plan-Popup (Richtungs-Schutz V2, 25.09.2026): tpDirSet wählt sie nie — auch nicht über die
   // Kompass-Vorwahl oder beim Bearbeiten; stattdessen die laufende Richtung.
@@ -35591,7 +35643,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.794'
+  const OS_TAB_BUILD = '2026-09-22.795'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
