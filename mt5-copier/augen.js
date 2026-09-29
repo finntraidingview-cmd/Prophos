@@ -23,12 +23,12 @@
  */
 var PROPHOS_AUGEN = (function () {
   'use strict';
-  var VERSION = '0.6.0';   // 0.6.0 (29.09.2026, Aufnahme 00:36 leer): window-capture, roh-Zähler, tab_id, Sichtbarkeit   // 0.5.3 (29.09.2026, Lesung 00:22:50): Konto-Anker Kontonummer zuerst, Summary Total P/L = today   // 0.5.2 (29.09.2026, Lesung 00:22): Panel 'Collapse panel'/Manager-Knopf, Konto entdoppelt + kontonr   // 0.5.1 (29.09.2026, Lesung 00:17 pc-usq1i6): Schalter-Rechteck, ticket.seite/bereit, Legende, veraltete Zeilen   // 0.5.0 (29.09.2026): Aufnahme-Modus (Finn klickt den Ablauf einmal selbst, jede Aktion wird mitgeschrieben)   // 0.4.0 (29.09.2026, K1–K4 für T3): positionen, orders, konto_summary, symbolsuche, toasts.meldungen   // 0.3.0 (29.09.2026, erste echte Lesung pc-usq1i6): TP/SL-Zustand, Konto-Leiste, Toast-Rückfall   // 0.2.0 (29.09.2026): Vertrag mit T3 — globalThis.prophosAugen, Schlüssel-Whitelist, popups, kauf_knopf
+  var VERSION = '0.6.1';   // 0.6.1 (29.09.2026): aufnahme_letzte() als Rettungskopie, T3-Banner 'prophos-aufnahme' ausgeblendet   // 0.6.0 (29.09.2026, Aufnahme 00:36 leer): window-capture, roh-Zähler, tab_id, Sichtbarkeit   // 0.5.3 (29.09.2026, Lesung 00:22:50): Konto-Anker Kontonummer zuerst, Summary Total P/L = today   // 0.5.2 (29.09.2026, Lesung 00:22): Panel 'Collapse panel'/Manager-Knopf, Konto entdoppelt + kontonr   // 0.5.1 (29.09.2026, Lesung 00:17 pc-usq1i6): Schalter-Rechteck, ticket.seite/bereit, Legende, veraltete Zeilen   // 0.5.0 (29.09.2026): Aufnahme-Modus (Finn klickt den Ablauf einmal selbst, jede Aktion wird mitgeschrieben)   // 0.4.0 (29.09.2026, K1–K4 für T3): positionen, orders, konto_summary, symbolsuche, toasts.meldungen   // 0.3.0 (29.09.2026, erste echte Lesung pc-usq1i6): TP/SL-Zustand, Konto-Leiste, Toast-Rückfall   // 0.2.0 (29.09.2026): Vertrag mit T3 — globalThis.prophosAugen, Schlüssel-Whitelist, popups, kauf_knopf
 
   // ── Grundwerkzeuge ─────────────────────────────────────────────────────────
   function sichtbar(el) {
     try {
-      if (!el || !el.getBoundingClientRect) return false;
+      if (!el || !el.getBoundingClientRect || eigen(el)) return false;
       var r = el.getBoundingClientRect();
       if (r.width < 3 || r.height < 3) return false;
       if (r.bottom < 0 || r.right < 0 || r.top > window.innerHeight || r.left > window.innerWidth) return false;
@@ -36,6 +36,8 @@ var PROPHOS_AUGEN = (function () {
       return st.visibility !== 'hidden' && st.display !== 'none' && st.opacity !== '0';
     } catch (_) { return false; }
   }
+  // T3s Aufnahme-Banner/-Rahmen (data-name="prophos-aufnahme", pointer-events none) gehören nicht zu TradingView
+  function eigen(el) { try { return !!(el && el.closest && el.closest('[data-name="prophos-aufnahme"]')); } catch (_) { return false; } }
   function rect(el) {
     var r = el.getBoundingClientRect();
     return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)];
@@ -567,7 +569,7 @@ var PROPHOS_AUGEN = (function () {
       if (typ === 'pointerdown') A.letztPd = { el: ev.target, t: Date.now() };
       if (typ === 'keydown' && !/^(Enter|Tab|Escape)$/.test(ev.key)) return;
       var ziel = ev.target && ev.target.nodeType === 1 ? ev.target : (ev.target && ev.target.parentElement);
-      if (!ziel) return;
+      if (!ziel || eigen(ziel)) return;
       // input: pro Feld nur der letzte Stand (sonst 300 Einträge nach ein paar Tastendrücken)
       if (typ === 'input' && A.liste.length) {
         var letzt = A.liste[A.liste.length - 1];
@@ -605,7 +607,14 @@ var PROPHOS_AUGEN = (function () {
               anzahl: liste.length, roh: A.roh || 0, tab_id: A.tab_id, sichtbar_start: A.sichtbar_start, fokus_start: A.fokus_start,
               sichtbar_stopp: document.visibilityState, fokus_stopp: fokus(), geo: geo(), ereignisse: liste };
     window.__prophosAufnahme = null;
+    // Rettungskopie (T3 29.09.2026: 119 Ereignisse verloren, weil der Upload scheiterte und der Puffer schon null war) — bleibt bis
+    // zur nächsten Aufnahme bzw. bis die Seite neu lädt; aufnahme_letzte() liefert sie für „augen aufnahme senden"
+    try { window.__prophosAufnahmeLetzte = o; } catch (_) {}
     return o;
+  }
+  function aufnahme_letzte() {
+    var L = window.__prophosAufnahmeLetzte;
+    return L ? L : null;
   }
   function aufnahme_stand() {
     var A = window.__prophosAufnahme;
@@ -712,7 +721,7 @@ var PROPHOS_AUGEN = (function () {
   }
 
   return { v: VERSION, version: VERSION, stand: stand, inventar: inventar,
-           aufnahme_start: aufnahme_start, aufnahme_stopp: aufnahme_stopp, aufnahme_stand: aufnahme_stand };
+           aufnahme_start: aufnahme_start, aufnahme_stopp: aufnahme_stopp, aufnahme_stand: aufnahme_stand, aufnahme_letzte: aufnahme_letzte };
 })();
 // Vertrag T3: globalThis.prophosAugen = { v, stand(), inventar() } — mehrfaches Ausführen setzt es einfach neu (idempotent).
 // PROPHOS_AUGEN / augenStand / augenInventar bleiben als Alias.
