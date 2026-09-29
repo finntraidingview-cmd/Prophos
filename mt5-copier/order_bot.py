@@ -14898,8 +14898,9 @@ def _cdp_endpruefung(s, opts, plan, root, trail):
     avg = cdp_zahl((zeile or {}).get("avg"))
     tp_o = sl_o = diag = None
     brauch = lambda: (tp_o is None and plan["tp"]) or (sl_o is None and plan["sl"])
-    r_ord = s.rect_von("#id_account-manager-tabs #orders")
-    if r_ord and s.klick(r_ord, "Reiter Orders"):
+    # Live 15:29 UTC (.814): „Reiter Orders geklickt @211,554", aber aktiv blieb „positions" und sichtbar die Positions-Tabelle —
+    # der Wechsel wird jetzt bewiesen (aria-selected), sonst ein zweiter Klick, sonst steht die Reiterleiste in der Spur
+    if _cdp_reiter(s, "orders", trail):
         roh = None
         for _ in range(3):
             _warte(0.6, 0.3)
@@ -14917,13 +14918,72 @@ def _cdp_endpruefung(s, opts, plan, root, trail):
         if brauch():
             diag = cdp_tabellen_kurz(roh)
             trail.append(f"Reiter Orders: TP/SL nicht gefunden — sichtbar: {diag[:700]}")
-        r_pos = s.rect_von("#id_account-manager-tabs #positions")
-        if r_pos:
-            s.klick(r_pos, "Reiter Positions")
-            _warte(0.4, 0.2)
+        _cdp_reiter(s, "positions", trail)
     else:
-        trail.append("Reiter Orders nicht gefunden/geklickt — TP/SL nur aus den Meldungen")
+        trail.append("Reiter Orders nicht aktiv zu bekommen — TP/SL nur aus den Meldungen")
+        _cdp_reiter(s, "positions", trail)
     return avg, tp_o, sl_o, diag
+
+
+# Reiterleiste des Account-Managers (Positions / Orders / Account summary …): id, Text, aria-selected, Rechteck. Nur lesen.
+CDP_REITER_JS = r"""(function () {
+  function T(e) { return String((e && e.textContent) || '').replace(/\s+/g, ' ').trim(); }
+  var box = document.getElementById('id_account-manager-tabs');
+  if (!box) return null;
+  return Array.prototype.slice.call(box.querySelectorAll('[role="tab"],[id],button')).filter(function (e) {
+    var r = e.getBoundingClientRect(); return r.width > 3 && r.height > 3 && r.top < innerHeight && r.bottom > 0; }).slice(0, 16).map(function (e) {
+    var r = e.getBoundingClientRect();
+    return { id: e.id || '', text: T(e).slice(0, 30), role: e.getAttribute('role') || '', sel: e.getAttribute('aria-selected'),
+             rect: [r.left, r.top, r.width, r.height] }; });
+})()"""
+
+
+def cdp_reiter_passt(e, name):
+    """REIN RECHNEND (testbar): ist dieser Eintrag der Reiter 'name' (id gleich oder Text beginnt damit, z. B. „Orders 2")?"""
+    if not isinstance(e, dict):
+        return False
+    n = str(name or "").lower()
+    return str(e.get("id") or "").lower() == n or bool(re.match(re.escape(n) + r"\b", str(e.get("text") or "").lower()))
+
+
+def cdp_reiter_aktiv(reiter, name):
+    """REIN RECHNEND (testbar): steht der Reiter 'name' auf aria-selected=true?"""
+    return any(cdp_reiter_passt(e, name) and str(e.get("sel")).lower() == "true" for e in reiter or [])
+
+
+def cdp_reiter_wahl(reiter, name):
+    """REIN RECHNEND (testbar): GENAU EIN klickbarer Eintrag für den Reiter (role=tab bevorzugt, innerster bei gleichem Ort). -> Eintrag|None"""
+    kand = [e for e in reiter or [] if cdp_reiter_passt(e, name) and cdp_klickpunkt(e.get("rect")) is not None]
+    tabs = [e for e in kand if e.get("role") == "tab"]
+    kand = tabs or kand
+    kand = [k for k in kand if not any(j is not k and _k3_rect_in(j["rect"], k["rect"]) and list(j["rect"]) != list(k["rect"]) for j in kand)]
+    return kand[0] if len(kand) == 1 else None
+
+
+def cdp_reiter_kurz(reiter):
+    """REIN RECHNEND (testbar): Reiterleiste für die Spur."""
+    return " | ".join(f"{e.get('id') or '-'}:{e.get('text') or ''}{'*' if str(e.get('sel')).lower() == 'true' else ''}@{[int(v) for v in (e.get('rect') or [])[:2]]}"
+                      for e in (reiter or [])[:10] if isinstance(e, dict))[:500] or "keine Reiterleiste"
+
+
+def _cdp_reiter(s, name, trail):
+    """Reiter des Account-Managers aktiv machen und den Wechsel beweisen (aria-selected). Höchstens 2 Klicks. -> bool"""
+    reiter = []
+    for versuch in (1, 2):
+        reiter = s.lese_js(CDP_REITER_JS) or []
+        if cdp_reiter_aktiv(reiter, name):
+            return True
+        z = cdp_reiter_wahl(reiter, name)
+        if not z:
+            break
+        if s.klick(z["rect"], f"Reiter {name} ({z.get('id') or z.get('text')})"):
+            for _ in range(5):
+                _warte(0.3, 0.15)
+                reiter = s.lese_js(CDP_REITER_JS) or []
+                if cdp_reiter_aktiv(reiter, name):
+                    return True
+    trail.append(f"Reiter {name} nicht aktiv — Leiste: {cdp_reiter_kurz(reiter)}")
+    return False
 
 
 # Sichtbare Tabellen roh (Endprüfung, Reiter Orders): je Tabelle Spaltenköpfe + bis 8 sichtbare Zeilen [data-label, Text] — auch

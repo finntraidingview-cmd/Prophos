@@ -3051,6 +3051,16 @@ def test_puls_cdp_login():
     q_an2 = _i.getsource(ob._cdp_anmelden)
     chk(q_an2.index("fokus_im(cdp_rect(u)") < q_an2.index('taste("a", modifiers=2)') and "_win_root_am_punkt(" in _i.getsource(ob._AugenSitzung._win_klick),
         "Login: Fokus vor Strg+A/Tippen bewiesen; jeder Windows-Klick prüft das Fenster am Zielpunkt")
+    # Reiter-Wechsel beweisen (Live 15:29 UTC: Orders geklickt, aktiv blieb positions)
+    leiste = [{"id": "positions", "text": "Positions 1", "role": "tab", "sel": "true", "rect": [80, 540, 80, 24]},
+              {"id": "orders", "text": "Orders 2", "role": "tab", "sel": "false", "rect": [170, 540, 80, 24]},
+              {"id": "", "text": "Orders 2", "role": "", "sel": None, "rect": [175, 544, 60, 16]},
+              {"id": "summary", "text": "Account summary", "role": "tab", "sel": "false", "rect": [260, 540, 120, 24]}]
+    chk(ob.cdp_reiter_aktiv(leiste, "positions") and not ob.cdp_reiter_aktiv(leiste, "orders")
+        and ob.cdp_reiter_wahl(leiste, "orders")["id"] == "orders" and ob.cdp_reiter_wahl(leiste, "history") is None
+        and "orders:Orders 2@" in ob.cdp_reiter_kurz(leiste) and "positions:Positions 1*" in ob.cdp_reiter_kurz(leiste),
+        "Reiter: aktiv über aria-selected, Wahl role=tab per id/Text, Leiste kompakt")
+    chk("_cdp_reiter(s, \"orders\", trail)" in _i.getsource(ob._cdp_endpruefung), "Endprüfung wechselt den Reiter nur mit Beweis")
     W = ob.tv_konto_wort_passt
     chk(W("TDFYU324689097 tradovate.com", "TDFYU324689097") and not W("APEX_641699TDFYU324689097", "TDFYU324689097")
         and not W("APEX_641699", "TDFYU324689097"), "Vorschlag nur mit dem Username als ganzem Wort (angehängter Name zählt nicht)")
