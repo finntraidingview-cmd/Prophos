@@ -14441,8 +14441,11 @@ def modus_tvlesen_cdp(cmd):
 # PULS ÜBER CDP — K2 ORDER-PROBELAUF (29.09.2026 nachts, Finn: „let's go mit K2"). tvkonto verzweigt NUR bei lokaler Regel
 # 'cdp' hierher. Konto → Symbol (Watchlist) → Seite → Market → Units → TP/SL (Schalter + Wert, Einheit $) → Units nochmal
 # (TV dreht Units nach TP/SL gern zurück, 24.09.2026) → Knopf-Beweis (tv_senden_text_passt + Symbol + nicht disabled).
-# Nach JEDEM Schritt neu gelesen (stand()). Es gibt in diesem Weg KEINEN Klick auf den Senden-Knopf — auch ein scharfer
-# Start endet hier als Probelauf mit gesendet:false (Senden kommt erst mit K3). Moritz' PC hat bis dahin keine Puls-Orders.
+# Nach JEDEM Schritt neu gelesen (stand()). Bis K4 gab es hier KEINEN Senden-Klick (scharfer Start = Probelauf, gesendet:false).
+# K4 (29.09.2026 abends, Finn: „einfach den letzten Button unten noch drücken, Buy oder Sell, je nachdem was eingestellt ist"):
+# mit Marke 'scharf' (tv_ist_scharf) nach vollständiger Rücklesung EIN Klick auf den Knopf „Buy/Sell N SYMBOL MARKET" (Text
+# exakt, nicht gesperrt, Konto stimmt, kein Popup), Beweis über TradingViews Meldungen bzw. die Positions-Tabelle, Rückgabe wie
+# der alte Puls (gesendet/bestaetigt/einstieg/tp_limit/order_klick_ms/meldung_roh). Ohne 'scharf' bleibt es der Probelauf.
 # ═══════════════════════════════════════════════════════════════════════════
 
 def cdp_zahl(x):
@@ -14597,8 +14600,73 @@ def _cdp_ticket_fuellen(s, st, plan, symbol, opts, trail):
     return True, "", "", "knopf", st, kk
 
 
+
+def cdp_ticket_ruecklesung(st, plan):
+    """REIN RECHNEND (testbar): das ganze Ticket direkt vor dem Senden noch einmal gelesen — wie k3_ruecklesung, aber TP/SL dürfen
+    AUS sein (Plan ohne TP bzw. SL, z. B. Winning Days ohne Stop Loss): dann darf der Schalter nicht AN stehen. -> (ok, zeile, fehler[])"""
+    tk = st.get("ticket") if isinstance(st, dict) and isinstance(st.get("ticket"), dict) else {}
+    kk = st.get("kauf_knopf") if isinstance(st, dict) and isinstance(st.get("kauf_knopf"), dict) else {}
+    fehler = []
+    market = cdp_ticket_typ_market(tk.get("typen"))[1]
+    if not market:
+        fehler.append("Typ nicht Market")
+    seite = str(kk.get("seite") or tk.get("seite") or "")
+    if seite != plan["richtung"]:
+        fehler.append(f"Seite '{seite or '-'}' statt {plan['richtung']}")
+    mg = cdp_zahl((tk.get("menge") or {}).get("wert")) if isinstance(tk.get("menge"), dict) else None
+    if mg != float(plan["menge"]):
+        fehler.append(f"Units '{mg}' statt {plan['menge']}")
+    teile = [f"Typ {'Market' if market else '?'}", f"Seite {seite or '-'}", f"Units {k3_fmt(mg, 0) if mg is not None else '-'}"]
+    for schl, name, soll in (("tp", "TP", plan["tp"]), ("sl", "SL", plan["sl"])):
+        f_ = tk.get(schl) if isinstance(tk.get(schl), dict) else {}
+        w, an, einh = cdp_zahl(f_.get("wert")), f_.get("an"), str(f_.get("einheit") or "")
+        if soll is None:
+            if an is True:
+                fehler.append(f"{name}-Schalter AN, der Plan hat kein {name}")
+            teile.append(f"{name} aus")
+            continue
+        if an is not True:
+            fehler.append(f"{name}-Schalter nicht AN")
+        if "$" not in einh:
+            fehler.append(f"{name}-Einheit '{einh or '?'}' statt $")
+        if w != float(soll):
+            fehler.append(f"{name} '{w}' statt {soll}")
+        teile.append(f"{name} {k3_fmt(w, 0) if w is not None else '-'} {einh or '?'} {'AN' if an is True else 'AUS/unlesbar'}")
+    return not fehler, " · ".join(teile), fehler
+
+
+def cdp_zeilen_menge(zeilen, richtung):
+    """REIN RECHNEND (testbar): Summe der (vorzeichenlosen) Menge sichtbarer Positionszeilen dieser Seite."""
+    summe = 0.0
+    for z in zeilen or []:
+        if isinstance(z, dict) and z.get("seite") == richtung:
+            m = cdp_zahl(z.get("menge"))
+            if m:
+                summe += abs(m)
+    return summe
+
+
+def cdp_order_beweis(neu, zeilen, plan, menge_vorher):
+    """REIN RECHNEND (testbar): Liegt die Order nach dem EINEN Klick? Beweis = neue Fill-Meldung dieser Seite und Menge („Market
+    order executed") ODER die sichtbare Positionsmenge dieser Seite ist um die Plan-Menge gewachsen. Einstieg: Fill aus der
+    Meldung, sonst Avg der Zeile — aber nur, wenn vorher nichts offen war (sonst wäre es der Schnitt mit der alten Position).
+    -> {bestaetigt, einstieg, einstieg_quelle, tp, sl, symbol, beweis}"""
+    om = k3_order_meldungen(neu, plan["richtung"], plan["menge"])
+    vorher = float(menge_vorher or 0.0)
+    gewachsen = cdp_zeilen_menge(zeilen, plan["richtung"]) >= vorher + float(plan["menge"]) - 1e-9
+    zeile = next((z for z in zeilen or [] if isinstance(z, dict) and z.get("seite") == plan["richtung"]), None)
+    out = {"bestaetigt": bool(om.get("fill") is not None or gewachsen), "tp": om.get("tp"), "sl": om.get("sl"),
+           "symbol": (zeile or {}).get("symbol"), "einstieg": None, "einstieg_quelle": None, "beweis": ""}
+    if om.get("fill") is not None:
+        out.update(einstieg=om["fill"], einstieg_quelle="fill_toast", beweis="TradingView-Meldung (Fill)")
+    elif gewachsen:
+        avg = cdp_zahl((zeile or {}).get("avg")) if vorher == 0 else None
+        out.update(einstieg=avg, einstieg_quelle="tabelle_avg_fill" if avg is not None else None, beweis="Positions-Tabelle")
+    return out
+
 def modus_tvkette_cdp(cmd):
-    """tvkonto über das Puls-Chrome (CDP) — K2: Ticket vollständig ausfüllen und beweisen, NIE senden."""
+    """tvkonto über das Puls-Chrome (CDP): Konto (mit Auto-Login) → Ticket ausfüllen und beweisen → mit Marke 'scharf' EIN Klick
+    auf den Senden-Knopf + Beweis (K4, Block-Kopf). Ohne 'scharf' Probelauf wie K2."""
     res = {"ok": False, "code": "", "msg": "", "trail": "", "schritt": "start", "gesendet": False, "retry_ok": True,
            "konto_aktiv": "", "konto_quelle": "cdp", "quelle": "cdp"}
     trail = _StempelSpur()
@@ -14607,10 +14675,13 @@ def modus_tvkette_cdp(cmd):
     def raus(code, msg, schritt, **extra):
         res["code"], res["msg"], res["schritt"] = code, msg, schritt
         res.update(extra)
-        res["gesendet"] = False                      # K2: in diesem Weg wird nie gesendet
+        if res.get("gesendet"):
+            res["retry_ok"] = False                  # es KANN gesendet worden sein — nie blind wiederholen (wie der alte Puls)
         res["trail"] = " > ".join(trail)
         if sitz[0]:
             sitz[0].zu()
+        if res.get("gesendet"):
+            _puls_diagnose_senden(spur=trail, schritt="cdp-order")
         try:
             print(json.dumps(res, ensure_ascii=False))
         except UnicodeEncodeError:
@@ -14623,9 +14694,10 @@ def modus_tvkette_cdp(cmd):
     plan, fehler = tv_order_plan(cmd) if symbol else (None, "")
     if symbol and not plan:
         return raus("befehl", fehler, "befehl")
+    scharf = tv_ist_scharf(cmd)
     geschwister = [str(x).strip() for x in (cmd.get("geschwister") or []) if len(_nur_alnum(x)) >= 3][:60]
     opts = {"kontoTexte": [ext] + geschwister}
-    trail.append("Weg: Puls-Chrome (CDP, K2 Probelauf — kein Senden)")
+    trail.append("Weg: Puls-Chrome (CDP" + (", SCHARF" if scharf and symbol else ", Probelauf — kein Senden" if symbol else "") + ")")
     if _handlauf_aktiv():                    # K3-Handlauf (29.09.2026): nicht ins laufende Ticket/Dropdown klicken
         return raus("handlauf", "K3-Handlauf läuft im Puls-Chrome — nichts geklickt, bitte gleich erneut anstoßen.", "sperre")
     try:
@@ -14640,17 +14712,91 @@ def modus_tvkette_cdp(cmd):
             return raus("", f"Richtiges Konto ist aktiv ({res['konto_aktiv'][:60]}).", "konto")
         ok, code, msg, schritt, st, kk = _cdp_ticket_fuellen(s, st, plan, symbol, opts, trail)
         if not ok:
-            return raus(code, msg, schritt)
+            return raus(code, msg + (" — nichts gesendet." if scharf else ""), schritt)
         tpsl = f"TP {str(plan['tp']) + ' $' if plan['tp'] else 'aus'}, SL {str(plan['sl']) + ' $' if plan['sl'] else 'aus'}"
-        trail.append(f"Knopf: '{str(kk.get('text'))[:50]}' — NICHT geklickt (K2)")
-        text = f"PROBELAUF (CDP, K2): Ticket steht — Knopf zeigt '{str(kk.get('text'))[:50]}', {tpsl}. NICHT gesendet."
-        if cmd.get("scharf") is True:
-            # scharfer Start auf dem CDP-Test-PC: ehrlich „nichts platziert" (Plan bleibt Geplant), retry_ok true
-            return raus("k2_probe", text + " Senden über CDP kommt mit K3.", "probe", tv_symbol=kk.get("symbol"))
+        res["schritt_order"], res["scharf"] = True, scharf
+        if not scharf:
+            trail.append(f"Knopf: '{str(kk.get('text'))[:50]}' — NICHT geklickt (Probelauf)")
+            res["ok"] = True
+            return raus("", f"PROBELAUF (CDP): Ticket steht — Knopf zeigt '{str(kk.get('text'))[:50]}', {tpsl}. NICHT gesendet.",
+                        "probe", tv_symbol=kk.get("symbol"))
+
+        # ═══ K4: AB HIER UNUMKEHRBAR — vorher alles noch einmal aus EINEM frischen Blick, dann genau EIN Klick ═══════════════
+        _warte(0.3, 0.2)
+        st = s.stand(opts)
+        rl_ok, rl_text, rl_fehler = cdp_ticket_ruecklesung(st, plan)
+        trail.append(f"Rücklesung vor dem Senden: {rl_text}")
+        if not rl_ok:
+            return raus("ruecklesung", "Ticket passt vor dem Senden nicht: " + "; ".join(rl_fehler) + " — nichts gesendet.", "ruecklesung")
+        kk = st.get("kauf_knopf") if isinstance(st.get("kauf_knopf"), dict) else {}
+        ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+        sym_k = str(kk.get("symbol") or "").strip() or symbol
+        root = tv_symbol_root(symbol)
+        if tv_symbol_root(sym_k) != root or not k3_knopf_exakt(kk.get("text"), plan["richtung"], plan["menge"], sym_k):
+            return raus("knopf", f"Knopf zeigt '{kk.get('text')}', verlangt '{k3_knopf_soll(plan['richtung'], plan['menge'], sym_k)}' "
+                                 "— nichts gesendet.", "knopf")
+        if kk.get("disabled") or cdp_klickpunkt(cdp_rect(kk)) is None:
+            return raus("knopf", f"Senden-Knopf gesperrt oder ohne Rechteck ('{kk.get('text')}') — nichts gesendet.", "knopf")
+        if st.get("popups"):
+            return raus("popup", f"Dialog/Popup offen ({[p.get('titel') or p.get('text') for p in st['popups']][:2]}) — nichts gesendet.", "knopf")
+        if not tv_konto_passt(str(ko.get("aktiv") or ""), ext):
+            return raus("konto", f"Konto vor dem Klick nicht mehr {ext} ('{ko.get('aktiv')}') — nichts gesendet.", "knopf")
+        menge0 = cdp_zeilen_menge(k3_zeilen(st.get("positionen"), root), plan["richtung"])
+        vorher_m = [k3_meldung_schluessel(m) for m in ((st.get("toasts") or {}).get("meldungen") or []) if isinstance(m, dict)]
+        trail.append(f"Knopf EXAKT '{kk.get('text')}', nicht gesperrt, Konto {ext}, kein Popup, vorher {menge0:g} {plan['richtung']} offen — EIN Klick")
+        try:
+            import threading                  # Spur liegt im Backend, bevor der unumkehrbare Klick läuft — ohne den Klick aufzuhalten
+            threading.Thread(target=_puls_diagnose_senden, args=(list(trail), "cdp-senden"), daemon=True).start()
+        except Exception:
+            pass
+        res["gesendet"], res["retry_ok"] = True, False
+        t_vor = time.time()
+        geklickt = s.klick(cdp_rect(kk), "SENDEN-Knopf")
+        # Klickzeit mit Millisekunden wie beim alten Puls (28.09.2026): der PC-Tab nimmt daraus den Feed-Kurs, wenn kein Fill kommt
+        res["order_klick_ms"] = int(round((t_vor + time.time()) / 2.0 * 1000))
+        if not geklickt:
+            # Windows-Maus: ohne bewiesenen Hover bzw. bei abgelehntem SendInput gab es KEINEN Druck → nachweislich nichts gesendet
+            res["gesendet"], res["retry_ok"] = False, True
+            return raus("knopf", "Senden-Knopf NICHT gedrückt (Maus nicht bewiesen über dem Knopf) — nichts gesendet.", "knopf")
+        trail.append("Senden geklickt — ab hier zählt nur der Beweis")
+        b, neu, erst_ok = {}, [], None
+        ende = time.time() + 15.0
+        while time.time() < ende:
+            _warte(0.5, 0.25)
+            try:
+                st = s.stand(opts)
+            except Exception as e_:
+                trail.append(f"Blick nach dem Klick: {type(e_).__name__}")
+                continue
+            neu = k3_neue_meldungen(vorher_m, (st.get("toasts") or {}).get("meldungen"))
+            b = cdp_order_beweis(neu, k3_zeilen(st.get("positionen"), root), plan, menge0)
+            if b["bestaetigt"]:
+                erst_ok = erst_ok or time.time()
+                # TP/SL-Meldungen kommen oft kurz nach dem Fill — höchstens 4 s darauf warten
+                if ((b["tp"] is not None or not plan["tp"]) and (b["sl"] is not None or not plan["sl"])) or time.time() - erst_ok >= 4.0:
+                    break
+        res["meldung_roh"] = [str(m.get("text") or "")[:160] for m in neu][:8]
+        trail.append("Meldungen roh: " + (" | ".join(res["meldung_roh"]) or "nichts")[:600])
+        if not b.get("bestaetigt"):
+            pops = [p.get("titel") or p.get("text") for p in (st.get("popups") or [])][:2]
+            return raus("unklar", ("Senden geklickt, aber in 15 s weder Fill-Meldung noch neue Position gesehen"
+                                   + (f" (Dialog offen: {pops})" if pops else "") + " — Ergebnis UNKLAR. Erst in TradingView nachsehen, "
+                                   "NICHT erneut starten."), "unklar")
+        res.update(bestaetigt=True, menge=float(plan["menge"]), tv_symbol=b.get("symbol") or sym_k,
+                   einstieg=(str(b["einstieg"]) if b.get("einstieg") is not None else None), einstieg_quelle=b.get("einstieg_quelle"),
+                   sl_limit=b.get("sl"))
+        if b.get("tp") is not None:
+            res["tp_limit"], res["tp_limit_quelle"] = b["tp"], "tv_toast"
+        trail.append(f"Order bewiesen ({b['beweis']}): Einstieg {res['einstieg'] or '-'} ({res['einstieg_quelle'] or '-'}), "
+                     f"TP-Limit {b.get('tp') if b.get('tp') is not None else '-'}, SL-Limit {b.get('sl') if b.get('sl') is not None else '-'}")
         res["ok"] = True
-        return raus("", text, "probe", tv_symbol=kk.get("symbol"))
+        return raus("", (f"Order platziert: {plan['richtung'].upper()} {plan['menge']} {res['tv_symbol']}"
+                         + (f" @ {res['einstieg']}" if res.get("einstieg") else "") + f" · {tpsl} (bewiesen: {b['beweis']})"), "fertig")
     except Exception as e:
-        return raus("cdp_fehler", f"Puls-Chrome/CDP: {type(e).__name__}: {str(e)[:160]}", "cdp")
+        if res.get("gesendet"):
+            return raus("unklar", (f"Ergebnis UNKLAR: der Senden-Klick ging raus, danach brach der Bot ab ({type(e).__name__}: "
+                                   f"{str(e)[:100]}). Erst in TradingView nachsehen — NICHT blind erneut starten."), "unklar")
+        return raus("cdp_fehler", f"Puls-Chrome/CDP: {type(e).__name__}: {str(e)[:160]} — nichts gesendet.", "cdp")
 
 
 # ═══════════════════════════════════════════════════════════════════════════

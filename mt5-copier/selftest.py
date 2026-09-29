@@ -2675,10 +2675,14 @@ def test_puls_augen_cdp():
     kg = ob.aufnahme_kompakt(gross)
     import json as _js
     chk(len(_js.dumps(kg, ensure_ascii=False)) <= ob.AUFNAHME_KOMPAKT_MAX and kg.get("abgeschnitten", 0) > 0, "Aufnahme kompakt bleibt unter dem Deckel")
-    # K2 (29.09.2026): Probelauf hat KEINEN Senden-Klick; Weiche vor dem alten tvkonto-Pfad; Helfer
+    # K4 (29.09.2026 abends, Finn: „den letzten Button unten drücken"): genau EIN Senden-Klick, nur scharf, gesendet VORHER True
     q_k2 = _i3.getsource(ob.modus_tvkette_cdp)
-    chk("klick(cdp_rect(kk" not in q_k2 and "klick(cdp_rect(knopf" not in q_k2 and "dispatchMouseEvent" not in q_k2
-        and 'res["gesendet"] = False' in q_k2, "K2: kein Klick auf den Senden-Knopf, gesendet immer False")
+    chk(q_k2.count('"SENDEN-Knopf"') == 1 and "dispatchMouseEvent" not in q_k2
+        and q_k2.index("scharf = tv_ist_scharf(cmd)") < q_k2.index("if not scharf:") < q_k2.index('"SENDEN-Knopf"')
+        and q_k2.index('res["gesendet"], res["retry_ok"] = True, False') < q_k2.index('"SENDEN-Knopf"')
+        and q_k2.index("cdp_ticket_ruecklesung(st, plan)") < q_k2.index('"SENDEN-Knopf"')
+        and q_k2.index("k3_knopf_exakt(") < q_k2.index('"SENDEN-Knopf"') and q_k2.index('st.get("popups")') < q_k2.index('"SENDEN-Knopf"'),
+        "K4: EIN Senden-Klick nur scharf, nach Rücklesung + exaktem Knopf-Text + ohne Popup, gesendet/retry_ok vorher gesetzt")
     q_tk = _i3.getsource(ob.modus_tvkette)
     chk("if augen_modus_lauf() == \"cdp\":" in q_tk and q_tk.index("augen_modus_lauf") < q_tk.index("modus_tvkonto(cmd)"),
         "tvkonto: CDP-Weiche vor dem alten Pfad, sonst unverändert")
@@ -2888,6 +2892,32 @@ def test_puls_cdp_login():
     F = ob.cdp_tab_frisch
     chk(F(True, None, 0) and F(False, 1_000_500.0, 1_000_000.0) and not F(False, 990_000.0, 1_000_000.0) and not F(False, None, 1_000_000.0)
         and not F(False, 5.0, 0.0), "Tradovate-Tab zählt nur, wenn neu oder seit dem Connect-Klick neu geladen (alter Fehlversuchs-Tab nicht)")
+    # K4: Rücklesung vor dem Senden (TP/SL dürfen AUS sein) + Beweis nach dem Klick
+    tk_ = {"typen": [{"id": "Market", "aria-selected": "true", "rect": [1, 1, 5, 5]}], "seite": "buy", "menge": {"wert": "2"},
+           "tp": {"an": True, "wert": 100, "einheit": "$"}, "sl": {"an": False, "wert": 50, "einheit": "$"}}
+    st_ = {"ticket": tk_, "kauf_knopf": {"text": "Buy 2 MNQZ6 MARKET", "seite": "buy"}}
+    RL = ob.cdp_ticket_ruecklesung
+    chk(RL(st_, {"richtung": "buy", "menge": 2, "tp": 100.0, "sl": None})[0], "Rücklesung: Plan ohne SL, SL-Schalter AUS = ok")
+    chk(not RL(st_, {"richtung": "buy", "menge": 2, "tp": 100.0, "sl": 50.0})[0]
+        and not RL(dict(st_, ticket=dict(tk_, sl={"an": True, "wert": 50, "einheit": "$"})), {"richtung": "buy", "menge": 2, "tp": 100.0, "sl": None})[0]
+        and not RL(st_, {"richtung": "sell", "menge": 2, "tp": 100.0, "sl": None})[0]
+        and not RL(st_, {"richtung": "buy", "menge": 1, "tp": 100.0, "sl": None})[0]
+        and not RL(st_, {"richtung": "buy", "menge": 2, "tp": 120.0, "sl": None})[0], "Rücklesung: SL fehlt/an, falsche Seite/Menge/TP = kein Senden")
+    chk(ob.k3_knopf_exakt("Buy 2 MNQZ6 MARKET", "buy", 2, "MNQZ6") and not ob.k3_knopf_exakt("Buy 2 MNQZ6 MARKET", "buy", 1, "MNQZ6")
+        and not ob.k3_knopf_exakt("Sell 2 MNQZ6 MARKET", "buy", 2, "MNQZ6") and not ob.k3_knopf_exakt("Buy 2 NQZ6 MARKET", "buy", 2, "MNQZ6"),
+        "Knopf-Text exakt (Seite, Menge, Symbol)")
+    fill = {"art": "fill", "status": "ausgefuehrt", "seite": "buy", "menge": 2, "preis": 30637.0, "text": "Market order executed Buy 2 at 30,637.00"}
+    tpm = {"art": "tp", "status": "platziert", "seite": "sell", "menge": 2, "preis": 30662.0, "text": "Take Profit order placed"}
+    zeile = {"symbol": "MNQZ6", "seite": "buy", "menge": 2, "avg": 30637.25, "sichtbar": True}
+    P2 = {"richtung": "buy", "menge": 2, "tp": 100.0, "sl": None}
+    b1 = ob.cdp_order_beweis([fill, tpm], [zeile], P2, 0)
+    chk(b1["bestaetigt"] and b1["einstieg"] == 30637.0 and b1["einstieg_quelle"] == "fill_toast" and b1["tp"] == 30662.0, f"Beweis über die Fill-Meldung ({b1})")
+    b2 = ob.cdp_order_beweis([], [zeile], P2, 0)
+    chk(b2["bestaetigt"] and b2["einstieg"] == 30637.25 and b2["einstieg_quelle"] == "tabelle_avg_fill", "Beweis über die Tabelle (vorher flach → Avg = Einstieg)")
+    b3 = ob.cdp_order_beweis([], [dict(zeile, menge=3)], P2, 1)
+    chk(b3["bestaetigt"] and b3["einstieg"] is None, "vorher schon offen: Menge gewachsen = Beweis, Avg ist dann KEIN Einstieg")
+    chk(not ob.cdp_order_beweis([], [dict(zeile, menge=1)], P2, 1)["bestaetigt"] and not ob.cdp_order_beweis([], [], P2, 0)["bestaetigt"]
+        and not ob.cdp_order_beweis([dict(fill, seite="sell")], [], P2, 0)["bestaetigt"], "kein Wachstum / fremde Seite = nicht bewiesen")
     W = ob.tv_konto_wort_passt
     chk(W("TDFYU324689097 tradovate.com", "TDFYU324689097") and not W("APEX_641699TDFYU324689097", "TDFYU324689097")
         and not W("APEX_641699", "TDFYU324689097"), "Vorschlag nur mit dem Username als ganzem Wort (angehängter Name zählt nicht)")
