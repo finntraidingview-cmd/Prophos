@@ -1757,10 +1757,12 @@
   #dashboard-view .type-phase2{background:rgba(247,144,9,.18);color:#9a5a08}
   #dashboard-view .type-funded{background:var(--violet-tint);color:var(--violet)}
   #dashboard-view .type-funded_cfd{background:rgba(73,150,255,.12);color:#1F6FD6}   /* Funded CFD (29.09.2026): Blau, getrennt vom Futures-Violett */
+  #dashboard-view .type-waiting_payout{background:#1F6FD6;color:#fff}   /* Funded CFD mit Waiting for Payout (29.09.2026): volles Blau = Zustand, kein eigener Typ */
   #dashboard-view .type-winning_days{background:rgba(22,200,198,.14);color:#0E7A78}   /* Winning Days (25.09.2026): Teal wie die V2-Sticker */
   #dashboard-view .acc-wd-toggle{margin-left:6px;padding:2px 7px;border-radius:6px;border:1px dashed var(--border);background:transparent;color:var(--sub);font-size:10.5px;font-weight:600;cursor:pointer;white-space:nowrap;vertical-align:middle}
   #dashboard-view .acc-wd-toggle:hover{border-color:#0E7A78;color:#0E7A78;background:rgba(22,200,198,.08)}
   #dashboard-view .acc-wd-toggle:disabled{opacity:.5;cursor:default}
+  #dashboard-view .acc-wd-toggle.acc-wp-toggle:hover{border-color:#1F6FD6;color:#1F6FD6;background:rgba(73,150,255,.08)}
   #dashboard-view .type-live{background:rgba(18,183,106,.1);color:#058a50}
   #dashboard-view .type-live::before{
     content:'';width:6px;height:6px;border-radius:999px;background:#12B76A;
@@ -27771,7 +27773,40 @@
     const futures = (typeof tpFirmIstFutures === 'function') && tpFirmIstFutures(a.firm)
     if(a.type === 'funded' && futures) return ` <button type="button" class="acc-wd-toggle" data-acc-wdtyp="${escapeHtml(String(a.id))}" data-ziel="winning_days" data-stop-row-click="1" title="Big Trade gewonnen — dieses Funded-Konto als Winning-Days-Konto führen (dieselbe Konto-Zeile, sofort gespeichert)">→ Winning Days</button>`
     if(a.type === 'winning_days') return ` <button type="button" class="acc-wd-toggle" data-acc-wdtyp="${escapeHtml(String(a.id))}" data-ziel="funded" data-stop-row-click="1" title="Zurück auf Funded (dieselbe Konto-Zeile, sofort gespeichert)">→ Funded</button>`
+    // Funded CFD ⇄ Waiting for Payout (29.09.2026, Finn: „wie bei Winning Days rechts daneben drücken, dann switcht es rüber"):
+    // der Typ bleibt funded_cfd, nur waiting_payout_since wird gesetzt/geleert (accWartetUmstellen)
+    if(a.type === 'funded_cfd') return a.waitingPayoutSince
+      ? ` <button type="button" class="acc-wd-toggle acc-wp-toggle" data-acc-wartet="${escapeHtml(String(a.id))}" data-ziel="aus" data-stop-row-click="1" title="Zurück auf Funded CFD — Waiting for Payout aus (sofort gespeichert)">→ Funded CFD</button>`
+      : ` <button type="button" class="acc-wd-toggle acc-wp-toggle" data-acc-wartet="${escapeHtml(String(a.id))}" data-ziel="an" data-stop-row-click="1" title="Konto ist im Plus und wartet nur auf den Payout (sofort gespeichert) — springt beim Payout-Anfragen von selbst zurück">→ Waiting for Payout</button>`
     return ''
+  }
+  // Typ-Chip der Accounts-Tabelle: Funded CFD mit Waiting for Payout zeigt den Zustand statt des Typs (29.09.2026), „seit" im Tooltip
+  function accTypChipHtml(a){
+    if(a && a.type === 'funded_cfd' && a.waitingPayoutSince){
+      const d = new Date(a.waitingPayoutSince)
+      const seit = isNaN(d) ? '' : ' seit ' + d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Europe/Berlin' })
+      return `<span class="type-badge type-waiting_payout" title="Funded CFD · Waiting for Payout${seit}">Waiting for Payout</span>`
+    }
+    return `<span class="type-badge type-${a.type}">${typeLabel(a.type)}</span>`
+  }
+  /* Ein Klick setzt/leert „Waiting for Payout" (29.09.2026) — eigener Weg neben accWdUmstellen, derselbe Aufbau: sofort in die DB,
+   * Zeile aus der Antwort übernehmen, Fehler benannt. Leeren beim Payout-Anfragen macht weiter wartetPayoutClear. */
+  async function accWartetUmstellen(accId, an, opts){
+    const acc = accounts.find(a => String(a.id) === String(accId)); if(!acc) return false
+    const btn = opts && opts.btn; if(btn) btn.disabled = true
+    try{
+      const { data, error } = await supabase.from('accounts').update({ waiting_payout_since: an ? new Date().toISOString() : null }).eq('id', acc.id).select('*').single()
+      if(error) throw error
+      const idx = accounts.findIndex(x => String(x.id) === String(acc.id)); if(idx >= 0) accounts[idx] = rowToAccount(data)
+      if(typeof renderAccounts === 'function') renderAccounts()
+      if(typeof renderFinPayoutStatus === 'function') renderFinPayoutStatus()
+      if(typeof atToast === 'function') atToast(an ? `⏳ ${acc.name}: Waiting for Payout` : `${acc.name}: wieder Funded CFD`)
+      return true
+    }catch(e){
+      const t = 'Nicht umgestellt: ' + (e && e.message || e)
+      if(typeof atToast === 'function') atToast(t); else alert(t)
+      return false
+    }finally{ if(btn) btn.disabled = false }
   }
   async function accWdUmstellen(accId, zielRoh, opts){
     const acc = accounts.find(a => String(a.id) === String(accId)); if(!acc) return false
@@ -28104,9 +28139,6 @@
         // Payout-Termin (15.09.2026): "💸 Payout ab 22.09. · in 7 Tagen" / "anfragbar seit …"
         const payoutHtml = (typeof payoutReadyBadgeHtml === 'function') ? payoutReadyBadgeHtml(a) : ''
         if(payoutHtml) metaParts.push(payoutHtml)
-        // Waiting for Payout (29.09.2026): „⏳ Waiting for Payout · seit 3 Tagen"
-        const wartetHtml = (typeof wartetPayoutBadgeHtml === 'function') ? wartetPayoutBadgeHtml(a) : ''
-        if(wartetHtml) metaParts.push(wartetHtml)
         // Parent-/Successor-Chain
         if(parentAcc){
           metaParts.push(`<span style="color:var(--violet)">↳ Nachfolger von <a href="#" data-acc-jump="${escapeHtml(parentAcc.id)}" style="color:var(--violet);text-decoration:underline">${escapeHtml(parentAcc.name)}</a></span>`)
@@ -28155,7 +28187,7 @@
               ${meta}
             </td>
             <td>${escapeHtml(a.firm || '–')}</td>
-            <td><span class="type-badge type-${a.type}">${typeLabel(a.type)}</span>${accWdToggleHtml(a)}</td>
+            <td>${accTypChipHtml(a)}${accWdToggleHtml(a)}</td>
             <td>${balCell}</td>
             <td>${linksHtml}</td>
             <td style="padding-right:20px;text-align:right;white-space:nowrap" data-stop-row-click="1">
@@ -28255,6 +28287,10 @@
       // (Attribut data-acc-wdtyp — data-acc-wd trägt bereits der Winning-Day-Zähler-Badge im Namen, der das Bearbeiten öffnet)
       accEls.table.querySelectorAll('[data-acc-wdtyp]').forEach(btn => {
         btn.addEventListener('click', e => { e.stopPropagation(); accWdUmstellen(btn.dataset.accWdtyp, btn.dataset.ziel, { btn }) })
+      })
+      // Funded CFD ⇄ Waiting for Payout (29.09.2026): gleiches Muster, eigener Handler
+      accEls.table.querySelectorAll('[data-acc-wartet]').forEach(btn => {
+        btn.addEventListener('click', e => { e.stopPropagation(); accWartetUmstellen(btn.dataset.accWartet, btn.dataset.ziel === 'an', { btn }) })
       })
       // Row-Click → Account Detail View
       accEls.table.querySelectorAll('tr[data-acc-detail]').forEach(row => {
@@ -35880,7 +35916,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.805'
+  const OS_TAB_BUILD = '2026-09-22.806'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -43281,6 +43317,7 @@
       const idx = accounts.findIndex(x => String(x.id) === String(a.id))
       if(idx >= 0) accounts[idx] = rowToAccount(data)
       if(typeof renderAccounts === 'function') renderAccounts()
+      if(typeof renderFinPayoutStatus === 'function') renderFinPayoutStatus()
       if(typeof atToast === 'function') atToast(`⏳ Waiting for Payout zurückgesetzt · ${a.name}`, 'end')
     }catch(e){
       console.warn('[payout] Waiting for Payout leeren fehlgeschlagen:', e.message || e)
