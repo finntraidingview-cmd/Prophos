@@ -14024,8 +14024,9 @@ class _AugenSitzung:
         self.trail.append(f"Maus über {name} @{int(p[0])},{int(p[1])}")
         return True
 
-    def js(self, ausdruck, timeout=8):
-        """Eigener Lese-Ausdruck (returnByValue). -> Wert | None bei Ausnahme"""
+    def lese_js(self, ausdruck, timeout=8):
+        """Eigener Lese-Ausdruck (returnByValue). -> Wert | None bei Ausnahme. NICHT „js" nennen: self.js ist der augen.js-Quelltext
+        (Befund 29.09.2026 vor dem ersten K3-Lauf: eine Methode js() wurde vom Attribut überdeckt → TypeError NACH dem Kauf)."""
         r = self.ws.rufe("Runtime.evaluate", {"expression": ausdruck, "returnByValue": True, "awaitPromise": True}, timeout=timeout)
         return None if r.get("exceptionDetails") else ((r.get("result") or {}).get("value"))
 
@@ -15238,7 +15239,7 @@ def modus_k3(cmd):
         else:
             knopf_c, zeile_c = None, None
             for runde in range(2):
-                roh = s.js(K3_ZEILEN_JS) or []
+                roh = s.lese_js(K3_ZEILEN_JS) or []
                 kz = [z for z in roh if isinstance(z, dict) and z.get("sichtbar") and tv_symbol_root(str(z.get("symbol") or "")) == root
                       and not any(k in (z.get("spalten") or {}) for k in ("Status", "Order ID", "Order-ID"))]
                 if len(kz) != 1:

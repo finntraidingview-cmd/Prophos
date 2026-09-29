@@ -2779,6 +2779,25 @@ def test_puls_k3():
     for f in (ob.modus_tvlesen_cdp, ob.modus_tvkette_cdp, ob.modus_augen):
         chk("_handlauf_aktiv()" in _i.getsource(f), f"{f.__name__} hält bei laufendem K3 still")
     chk("pc-usq1i6" in ob.K3_PCS and len(ob.K3_PCS) == 1, "K3 nur auf dem CDP-Test-PC")
+    # echte Sitzungs-Klasse mit Attrappen-Verbindung (29.09.2026: Methode js() war vom Attribut self.js = augen.js überdeckt)
+    class _Ws:
+        def __init__(self):
+            self.gesendet = []
+
+        def rufe(self, m, p=None, timeout=10.0):
+            self.gesendet.append((m, p))
+            return {"result": {"value": [{"symbol": "MNQZ2026"}]}} if m == "Runtime.evaluate" else {}
+    s_ = ob._AugenSitzung.__new__(ob._AugenSitzung)
+    s_.trail, s_.ws, s_.js, s_.maus, s_.target_id = [], _Ws(), "/* augen.js */", (0.0, 0.0), "T"
+    try:
+        z_ = s_.lese_js(ob.K3_ZEILEN_JS)
+    except Exception as e_:
+        z_ = e_
+    chk(z_ == [{"symbol": "MNQZ2026"}], f"lese_js an der echten Klasse (augen.js-Attribut überdeckt nichts): {z_!r}")
+    for f_ in ("klick", "hin", "taste", "tippen", "feld_setzen", "lese_js", "rect_von", "stand"):
+        chk(callable(getattr(s_, f_, None)), f"_AugenSitzung.{f_} ist aufrufbar (kein Attribut überdeckt sie)")
+    for name_ in _re.findall(r"\bs\.([a-z_]+)\(", _i.getsource(ob.modus_k3) + _i.getsource(ob._k3_login_wechsel)):
+        chk(callable(getattr(s_, name_, None)), f"modus_k3 ruft s.{name_}() — an der echten Klasse aufrufbar")
     if ok:
         print("✓ Puls K3: Knopf exakt, Meldungen/Zeilen/Close eindeutig, Sperre, Login-Blick ohne Feldwerte, nur Hand-Befehl")
     return ok
