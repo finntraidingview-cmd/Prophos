@@ -35591,7 +35591,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.790'
+  const OS_TAB_BUILD = '2026-09-22.791'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -37309,6 +37309,35 @@
   }
 
   let _osStartAufgeraeumt = false   // F24: Aufräumen beim Tab-Start genau einmal
+  /* CLAIMS DIESES TABS MERKEN (29.09.2026, Vorfall d0f5564d pc-usq1i6 01:17: der Tab lud sich kurz nach dem Claim eines konto_balance-
+   * Signals neu — das F24-Aufräumen nahm nur Zeilen älter als 4 min, das Signal blieb auf 'laeuft'). sessionStorage überlebt das Neuladen
+   * im SELBEN Tab: was hier steht und beim Start noch 'laeuft' ist, gehörte sicher dem vorigen Leben dieses Tabs — sofort abschließen. */
+  const OS_CLAIMS_KEY = 'prophos_os_claims'
+  const OS_LESEND = ['konto_balance', 'balance_lesen', 'endlesung', 'rundgang', 'tsx_inventar']
+  function osClaimMerken(sig){
+    try{
+      const jetzt = Date.now()
+      const l = (JSON.parse(sessionStorage.getItem(OS_CLAIMS_KEY) || '[]') || []).filter(x => x && x.id && jetzt - (x.t || 0) < 24 * 3600000)
+      l.push({ id: String(sig.id), aktion: String(((sig && sig.params) || {}).aktion || 'order'), t: jetzt })
+      sessionStorage.setItem(OS_CLAIMS_KEY, JSON.stringify(l.slice(-30)))
+    }catch(_){}
+  }
+  async function osEigeneClaimsAbschliessen(pcAlle){
+    let l = []
+    try{ l = JSON.parse(sessionStorage.getItem(OS_CLAIMS_KEY) || '[]') || [] }catch(_){ l = [] }
+    try{ sessionStorage.removeItem(OS_CLAIMS_KEY) }catch(_){}
+    const ids = l.filter(x => x && x.id).map(x => x.id)
+    if(!ids.length || !pcAlle.length) return
+    const { data } = await supabase.from('order_signale').select('id,params').in('id', ids).eq('status', 'laeuft').in('pc', pcAlle)
+    for(const z of (data || [])){
+      const aktion = String(((z.params || {}).aktion) || '')
+      const lesend = OS_LESEND.includes(aktion)
+      const ergebnis = lesend
+        ? { ok: false, msg: 'Tab neu geladen — Lesung abgebrochen, Ergebnis verloren. Bitte erneut anstoßen.', tab_neu: true }
+        : { ok: false, unklar: true, tab_neu: true, msg: '⚠ Stand UNBEKANNT: Der Tab lud während einer Order neu — erst in TradingView/TopstepX nachsehen, ob die Order liegt bzw. zu ist, NICHT blind erneut starten.' }
+      try{ await supabase.from('order_signale').update({ status: 'fehler', updated_at: new Date().toISOString(), ergebnis }).eq('id', z.id).eq('status', 'laeuft') }catch(_){}
+    }
+  }
   async function orderSignalTick(){
     if(!MT5_LOCAL) return
     if(_osBusy || _osActive){ _osStand = 'lauf-aktiv'; return }
@@ -37342,6 +37371,7 @@
         try{
           const pcIch0 = (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : ''
           const pcAlle0 = [pcIch0, ...((typeof pcIdFrueher === 'function') ? pcIdFrueher() : [])].filter(Boolean)
+          try{ await osEigeneClaimsAbschliessen(pcAlle0) }catch(e){ console.warn('[signal] eigene Claims', e) }   // 29.09.2026: sofort, ohne 4-min-Grenze
           if(pcAlle0.length) await supabase.from('order_signale').update({ status: 'fehler', updated_at: new Date().toISOString(),
               ergebnis: { ok: false, unklar: true, msg: '⚠ abgebrochen (Tab neu gestartet) — bei einer Order erst in TradingView/TopstepX nachsehen' } })
             .eq('status', 'laeuft').in('pc', pcAlle0).lt('updated_at', new Date(Date.now() - 4 * 60000).toISOString())
@@ -37384,6 +37414,7 @@
             .update({ status:'laeuft', pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : '', updated_at: new Date().toISOString() })
             .eq('id', sig.id).eq('status', 'wartet').select()
           if(!clI || !clI.length){ _osStand = 'claim-verloren'; continue }
+          osClaimMerken(sig)
           _osStand = 'claim-tsx-inventar: ' + String(sig.id).slice(0, 8)
           tsxInventarLesen()
             .then(er => supabase.from('order_signale').update({ status: er && er.ok ? 'fertig' : 'fehler', updated_at: new Date().toISOString(), ergebnis: er }).eq('id', sig.id))
@@ -37398,6 +37429,7 @@
             .update({ status:'laeuft', pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : '', updated_at: new Date().toISOString() })
             .eq('id', sig.id).eq('status', 'wartet').select()
           if(!clB || !clB.length){ _osStand = 'claim-verloren'; continue }
+          osClaimMerken(sig)
           _osStand = 'claim-balance: ' + String(sig.id).slice(0, 8)
           tvKontoBalanceJetzt((sig.params || {}).account_id)
             .then(er => supabase.from('order_signale').update({ status: er && er.ok ? 'fertig' : 'fehler', updated_at: new Date().toISOString(), ergebnis: er || { ok: false, msg: 'keine Antwort' } }).eq('id', sig.id))
@@ -37440,6 +37472,7 @@
             .update({ status:'laeuft', pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : '', updated_at: new Date().toISOString() })
             .eq('id', sig.id).eq('status', 'wartet').select()
           if(!clE || !clE.length){ _osStand = 'claim-verloren'; continue }
+          osClaimMerken(sig)
           _osStand = 'claim-endlesung: ' + String(sig.id).slice(0, 8)
           tvV2EndlesungVersuch(plan.id, { force: true })
             .then(er => supabase.from('order_signale').update({ status: er && er.ok ? 'fertig' : 'fehler', updated_at: new Date().toISOString(),
@@ -37454,6 +37487,7 @@
             .update({ status:'laeuft', pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : '', updated_at: new Date().toISOString() })
             .eq('id', sig.id).eq('status', 'wartet').select()
           if(!clR || !clR.length){ _osStand = 'claim-verloren'; continue }
+          osClaimMerken(sig)
           let rr = null
           try{ rr = await tvV2PollTick({ manuell: true }) }catch(e){ rr = { ok:false, grund: String((e && e.message) || e) } }
           await supabase.from('order_signale')
@@ -37480,6 +37514,7 @@
                       updated_at: new Date().toISOString() })
             .eq('id', sig.id).eq('status', 'wartet').select()
           if(!clV || !clV.length){ _osStand = 'claim-verloren'; continue }
+          osClaimMerken(sig)
           _osStand = 'claim-close-v2: ' + String(sig.id).slice(0, 8)
           _osActive = { sigId: sig.id, planId: String(plan.id), timeout: null }
           _osActive.timeout = setTimeout(() => {
@@ -37527,6 +37562,7 @@
                       updated_at: new Date().toISOString() })
             .eq('id', sig.id).eq('status', 'wartet').select()
           if(!clC || !clC.length){ _osStand = 'claim-verloren'; continue }
+          osClaimMerken(sig)
           _osStand = 'claim-close: ' + String(sig.id).slice(0, 8)
           _osActive = { sigId: sig.id, planId: String(plan.id), timeout: null }
           // Backstop (Timeout-Doktrin): nie still offen lassen — der Proxy
@@ -37578,6 +37614,7 @@
                       updated_at: new Date().toISOString() })
             .eq('id', sig.id).eq('status', 'wartet').select()
           if(!clO || !clO.length){ _osStand = 'claim-verloren'; continue }
+          osClaimMerken(sig)
           _osStand = 'claim-orbit: ' + String(sig.id).slice(0, 8)
           _osActive = { sigId: sig.id, planId: String(plan.id), timeout: null }
           // Backstop (Timeout-Doktrin): der Proxy gibt dem Bot 260 s — danach ist Stille ein UNKLAR.
@@ -37627,6 +37664,7 @@
                     updated_at: new Date().toISOString() })
           .eq('id', sig.id).eq('status', 'wartet').select()
         if(!cl || !cl.length){ _osStand = 'claim-verloren'; continue }
+        osClaimMerken(sig)
         _osStand = 'claim: ' + String(sig.id).slice(0, 8)
         // EXAKT der lokale Weg: Order merken, Rückkanal setzen, Check starten.
         _tpPendingOrder = { planId: plan.id, symbol: String(p.symbol).trim(), richtung: p.richtung,
