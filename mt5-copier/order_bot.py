@@ -14041,6 +14041,29 @@ def _win_nach_vorn(hwnd):
         pass
 
 
+def _win_root_am_punkt(x, y):
+    """Top-Level-Fenster (GA_ROOT) unter diesem Bildschirmpunkt — dorthin geht ein Druck wirklich. -> (hwnd, titel)"""
+    import ctypes
+    import ctypes.wintypes as wt
+    u32 = ctypes.windll.user32
+    u32.WindowFromPoint.argtypes, u32.WindowFromPoint.restype = [wt.POINT], wt.HWND
+    u32.GetAncestor.argtypes, u32.GetAncestor.restype = [wt.HWND, wt.UINT], wt.HWND
+    h = u32.WindowFromPoint(wt.POINT(int(x), int(y)))
+    r = u32.GetAncestor(h, 2) if h else None
+    b = ctypes.create_unicode_buffer(256)
+    if r:
+        u32.GetWindowTextW(r, b, 256)
+    return int(r or 0), b.value or ""
+
+
+def win_fokus_js(rect):
+    """Hat das Feld an diesem Rechteck (CSS-px) den Tastatur-Fokus UND die Seite selbst den Fokus? Liest nur."""
+    x, y, w, h = [float(v) for v in rect[:4]]
+    return ("(function(){var a=document.activeElement;if(!document.hasFocus()||!a||a===document.body||a===document.documentElement)"
+            "return false;var r=a.getBoundingClientRect();return r.right>" + f"{x:.1f}" + "&&r.left<" + f"{x + w:.1f}" + "&&r.bottom>"
+            + f"{y:.1f}" + "&&r.top<" + f"{y + h:.1f}" + ";})()")
+
+
 def _win_tasten(text_sk):
     """Echte Tastatur (pywinauto send_keys → SendInput) an das Vordergrund-Fenster."""
     from pywinauto import keyboard
@@ -14185,11 +14208,26 @@ class _AugenSitzung:
                                                     "nativeVirtualKeyCode": vk}, timeout=3)
             _warte(0.06, 0.06)
 
+    def fokus_im(self, rect, name, versuche=3):
+        """Beweis nach dem Klick: das Feld an diesem Rechteck hat den Tastatur-Fokus und die Seite selbst den Fokus. Ohne Beweis wird
+        NICHTS getippt (Live 15:11 UTC: Klick gemeldet, Feld blieb leer — getippt wurde trotzdem). -> bool"""
+        for i in range(versuche):
+            try:
+                if self.lese_js(win_fokus_js(rect), timeout=4) is True:
+                    return True
+            except Exception:
+                pass
+            _warte(0.25, 0.15)
+        self.trail.append(f"{name}: Feld hat nach dem Klick keinen Fokus — nichts getippt")
+        return False
+
     def feld_setzen(self, rect, wert, name):
-        """Feld anklicken, alles markieren (Strg+A), Wert Zeichen für Zeichen tippen, Tab. -> bool (Klick ging)"""
+        """Feld anklicken, Fokus beweisen, alles markieren (Strg+A), Wert Zeichen für Zeichen tippen, Tab. -> bool (getippt)"""
         if not self.klick(rect, f"Feld {name}"):
             return False
         _warte(0.15, 0.1)
+        if not self.fokus_im(rect, f"Feld {name}"):
+            return False
         self.taste("a", modifiers=2)          # Strg+A (Windows)
         _warte(0.1, 0.08)
         self.tippen(wert)
@@ -14225,6 +14263,9 @@ class _AugenSitzung:
             return None, "Puls-Chrome-Fenster nicht eindeutig gefunden"
         if getattr(self, "_win_hwnd", None) is None:
             self._win_hwnd = hwnd                       # am Ende wieder minimieren (zu)
+        if getattr(self, "_win_gemeldet", None) != hwnd:
+            self._win_gemeldet = hwnd                   # Live 15:11 UTC: welches Fenster Puls nahm, stand nirgends
+            self.trail.append(f"Fenster {hwnd} '{str(g.get('titel') or '')[:40]}'")
         if _win_minimiert(hwnd):
             _win_zeigen(hwnd, 9)                        # SW_RESTORE: alte Größe bzw. Maximierung bleibt
             _warte(0.5, 0.2)
@@ -14253,6 +14294,17 @@ class _AugenSitzung:
             self.trail.append(f"{name}: {grund} — nichts geklickt")
             return False
         _maus_fahren(*punkt)
+        # Riegel (Live 29.09.2026 15:11 UTC, Tradeify-Login: „Benutzerfeld geklickt, Hover bewiesen", auf der Seite kam nichts an):
+        # am Zielpunkt muss WIRKLICH dieses Puls-Chrome-Fenster liegen — :hover allein kann ein alter Stand der Seite sein
+        try:
+            wurzel, w_titel = _win_root_am_punkt(*punkt)
+        except Exception as e_:
+            self.trail.append(f"{name}: Fenster am Zielpunkt nicht prüfbar ({type(e_).__name__}) — kein Druck")
+            return False
+        if wurzel != int(hwnd):
+            self.trail.append(f"{name}: am Zielpunkt @{punkt[0]},{punkt[1]} liegt ein anderes Fenster ({wurzel} '{w_titel[:40]}', "
+                              f"erwartet {hwnd}) — kein Druck")
+            return False
         hover = False
         ende = time.time() + 0.9
         while time.time() < ende:
@@ -16575,6 +16627,9 @@ def _cdp_anmelden(s, ort, benutzer, opts, trail, vorher=None):
             if versuch == 1:
                 if not ort.eingabe.klick(cdp_rect(u), "Benutzerfeld"):
                     return "login_feld", "Benutzerfeld ließ sich nicht klicken — nichts eingegeben."
+            elif not ort.eingabe.fokus_im(cdp_rect(u), "Benutzerfeld"):
+                # vor Strg+A/Backspace/Tippen: ohne bewiesenen Fokus gingen die Tasten womöglich woanders hin
+                return "login_feld", "Benutzerfeld hat keinen Fokus (Klick nicht angekommen?) — nichts eingegeben."
             elif versuch == 2:
                 # Vorschlag nicht in der Liste (vorbelegtes Feld filtert sie): Feld leeren — leer zeigt Chrome alle Logins;
                 # Pfeil runter öffnet die Liste nur (markiert, schickt nie ab)

@@ -3026,6 +3026,31 @@ def test_puls_cdp_login():
     chk(ob.cdp_liste_kurz([("APEX_641699", None, "ListItem"), ("••••••••", None, "Text"), ("TDFYU324689097", None, "Text"),
                            ("tradovate.com", None, "Text"), ("APEX_641699", None, "ListItem")]) == "ListItem:APEX_641699 | Text:TDFYU324689097 | Text:tradovate.com"
         and ob.cdp_liste_kurz([]) == "leer" and "Group" in ob.CDP_AUTOFILL_TYPEN, "Vorschlagsliste für die Spur: ohne Punkte, doppelte einmal")
+    # Fokus-Riegel (Live 15:11 UTC: Klick gemeldet, Feld blieb leer, getippt wurde trotzdem): ohne Fokus-Beweis keine Taste
+    class _WsF:
+        def __init__(self, fokus):
+            self.fokus, self.keys = fokus, []
+
+        def rufe(self, m, p=None, timeout=10.0):
+            if m == "Runtime.evaluate":
+                return {"result": {"value": self.fokus}}
+            if m == "Input.dispatchKeyEvent" and (p or {}).get("type") in ("keyDown", "rawKeyDown"):
+                self.keys.append((p or {}).get("key"))
+            return {}
+    alt_w, alt_e = ob._warte, ob._WIN_EINGABE
+    erg_f = []
+    try:
+        ob._warte, ob._WIN_EINGABE = (lambda a_, b_: None), False
+        for fok in (False, True):
+            sf = ob._AugenSitzung.__new__(ob._AugenSitzung)
+            sf.trail, sf.ws, sf.maus = [], _WsF(fok), (0.0, 0.0)
+            erg_f.append((sf.feld_setzen([10, 10, 100, 20], "12", "Units"), list(sf.ws.keys)))
+    finally:
+        ob._warte, ob._WIN_EINGABE = alt_w, alt_e
+    chk(erg_f[0] == (False, []) and erg_f[1][0] is True and "1" in erg_f[1][1], f"feld_setzen: ohne Fokus keine einzige Taste, mit Fokus getippt ({erg_f})")
+    q_an2 = _i.getsource(ob._cdp_anmelden)
+    chk(q_an2.index("fokus_im(cdp_rect(u)") < q_an2.index('taste("a", modifiers=2)') and "_win_root_am_punkt(" in _i.getsource(ob._AugenSitzung._win_klick),
+        "Login: Fokus vor Strg+A/Tippen bewiesen; jeder Windows-Klick prüft das Fenster am Zielpunkt")
     W = ob.tv_konto_wort_passt
     chk(W("TDFYU324689097 tradovate.com", "TDFYU324689097") and not W("APEX_641699TDFYU324689097", "TDFYU324689097")
         and not W("APEX_641699", "TDFYU324689097"), "Vorschlag nur mit dem Username als ganzem Wort (angehängter Name zählt nicht)")
@@ -3072,8 +3097,8 @@ def test_puls_win_maus():
     # echte Klasse, Windows nachgebildet
     alt = {n: getattr(ob, n) for n in ("_WIN_EINGABE", "_puls_fenster_liste", "_puls_chrome_browser_pid", "_win_vordergrund", "_win_minimiert",
                                        "_win_zeigen", "_win_nach_vorn", "_klient_rechteck", "_maus_fahren", "_klick_absolut", "_dpi_bewusst",
-                                       "_warte", "_win_tasten")}
-    zustand = {"hover": True, "vorn": 11, "klicks": [], "tasten": [], "gezeigt": [], "minimiert": True, "fahrten": []}
+                                       "_warte", "_win_tasten", "_win_root_am_punkt")}
+    zustand = {"hover": True, "vorn": 11, "klicks": [], "tasten": [], "gezeigt": [], "minimiert": True, "fahrten": [], "wurzel": 11}
 
     class _Ws:
         def rufe(self, m, par=None, timeout=10.0):
@@ -3102,6 +3127,7 @@ def test_puls_win_maus():
         ob._dpi_bewusst = lambda: True
         ob._warte = lambda a, b: None
         ob._win_tasten = lambda t: zustand["tasten"].append(t)
+        ob._win_root_am_punkt = lambda x, y: (zustand["wurzel"], "Fremd")
         s_ = ob._AugenSitzung.__new__(ob._AugenSitzung)
         s_.trail, s_.ws, s_.js, s_.maus, s_.target_id = [], _Ws(), "/* augen.js */", (0.0, 0.0), "T"
         chk(s_.klick([952, 701, 282, 56], "SENDEN-Knopf") is True and len(zustand["klicks"]) == 1, "Hover bewiesen → genau EIN Druck")
@@ -3112,6 +3138,10 @@ def test_puls_win_maus():
         zustand["hover"] = False
         chk(s_.klick([952, 701, 282, 56], "SENDEN-Knopf") is False and len(zustand["klicks"]) == 1 and "kein Druck" in s_.trail[-1],
             "kein Hover (fremdes Fenster/falsche Umrechnung) → KEIN Druck")
+        zustand["hover"], zustand["wurzel"] = True, 77
+        chk(s_.klick([952, 701, 282, 56], "SENDEN-Knopf") is False and len(zustand["klicks"]) == 1 and "anderes Fenster" in s_.trail[-1],
+            "am Zielpunkt liegt ein anderes Fenster (WindowFromPoint) → KEIN Druck, auch mit Hover")
+        zustand["wurzel"] = 11
         zustand["hover"], zustand["vorn"] = True, 99
         chk(s_.klick([952, 701, 282, 56], "SENDEN-Knopf") is False and len(zustand["klicks"]) == 1, "Puls-Chrome nicht vorn → KEIN Druck")
         zustand["vorn"] = 11
