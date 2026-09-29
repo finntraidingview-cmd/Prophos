@@ -23,7 +23,7 @@
  */
 var PROPHOS_AUGEN = (function () {
   'use strict';
-  var VERSION = '0.4.0';   // 0.4.0 (29.09.2026, K1–K4 für T3): positionen, orders, konto_summary, symbolsuche, toasts.meldungen   // 0.3.0 (29.09.2026, erste echte Lesung pc-usq1i6): TP/SL-Zustand, Konto-Leiste, Toast-Rückfall   // 0.2.0 (29.09.2026): Vertrag mit T3 — globalThis.prophosAugen, Schlüssel-Whitelist, popups, kauf_knopf
+  var VERSION = '0.4.1';   // 0.4.0 (29.09.2026, K1–K4 für T3): positionen, orders, konto_summary, symbolsuche, toasts.meldungen   // 0.3.0 (29.09.2026, erste echte Lesung pc-usq1i6): TP/SL-Zustand, Konto-Leiste, Toast-Rückfall   // 0.2.0 (29.09.2026): Vertrag mit T3 — globalThis.prophosAugen, Schlüssel-Whitelist, popups, kauf_knopf
 
   // ── Grundwerkzeuge ─────────────────────────────────────────────────────────
   function sichtbar(el) {
@@ -500,8 +500,13 @@ var PROPHOS_AUGEN = (function () {
     try { o.toasts = toasts(); } catch (e) { fehler.push('toasts: ' + e); }
     try { o.popups = dialoge(); } catch (e) { fehler.push('popups: ' + e); }
     try { o.konto = konto(opts.kontoTexte); } catch (e) { fehler.push('konto: ' + e); }
-    try { var tb = tabellen(); o.positionen = tb.positionen; o.orders = tb.orders; o.positionen_sichtbar = tb.positionen_sichtbar; o.orders_sichtbar = tb.orders_sichtbar; }
-    catch (e) { fehler.push('tabellen: ' + e); o.positionen_sichtbar = false; o.orders_sichtbar = false; }
+    // Sichtbarkeit der Tabellen unter konto (Master 29.09.2026: KEINE neuen Top-Schlüssel — die Route in app.py bleibt unverändert,
+    // sonst Backend-Neustart auf allen PCs): konto.positionen_sichtbar / konto.orders_sichtbar
+    var ps = false, os_ = false;
+    try { var tb = tabellen(); o.positionen = tb.positionen; o.orders = tb.orders; ps = tb.positionen_sichtbar; os_ = tb.orders_sichtbar; }
+    catch (e) { fehler.push('tabellen: ' + e); }
+    if (!o.konto) o.konto = {};
+    o.konto.positionen_sichtbar = ps; o.konto.orders_sichtbar = os_;
     try { o.konto_summary = zusammenfassung(); } catch (e) { fehler.push('konto_summary: ' + e); }
     try { if (o.ticket) o.ticket.symbolsuche = symbolsuche(); } catch (e) { fehler.push('symbolsuche: ' + e); }
     try {
