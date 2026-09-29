@@ -15588,8 +15588,9 @@ def modus_k3(cmd):
 #       Link — dann kommt man JEDES MAL zu dem Connect"). Verbindet sich eine gemerkte Sitzung von selbst: zweiter Durchgang.
 #   [4] Connect-Dialog: Demo (Pflicht — Prop-Konten leben auf Demo) → „Don't remember me" (Standard setzen; cmd.sitzung_merken =
 #       Haken AUS, wie beim alten Puls) → Connect; „Network error occurred" → bis 3× erneut.
-#   [5] Tradovate-Anmeldeseite (eigener Tab): Username tippen, Chromes Vorschlag per Pfeil runter + Enter, Username EXAKT und
-#       Passwort gefüllt beweisen (Werte nie gelesen), Login (Rückfall: Enter im Passwortfeld).
+#   [5] Tradovate-Anmeldeseite (eigener Tab): ins Benutzerfeld klicken, in Chromes Vorschlagsliste (Windows-UIA) den Eintrag mit
+#       genau diesem Username anklicken, Username EXAKT und Passwort gefüllt beweisen (Werte nie gelesen), dann Anmelden. Nie Enter
+#       vor diesem Beweis (erster Live-Lauf .799: Enter schickte einen falschen Username ab).
 #   [6] TradingView zeigt ein Konto → [1] wählt das Zielkonto im Dropdown.
 # Nie: ein Passwort tippen, eine Freigabe („Allow") bestätigen, bei Mehrdeutigkeit raten. Das Puls-Chrome hat ein EIGENES Profil —
 # jeder Tradovate-Login muss dort einmal von Hand gespeichert sein, sonst endet der Lauf mit genau diesem Hinweis.
@@ -15683,6 +15684,17 @@ def cdp_login_bereit(lb):
     pw_ok = bool(pw.get("gefuellt") or pw.get("autofill"))
     return user_ok and pw_ok, (f"Benutzer {'= Username' if user_ok else ('gefüllt, aber NICHT der Username' if u.get('gefuellt') else 'LEER')}, "
                                f"Passwort {'gefüllt' if pw_ok else 'LEER'} (Werte nie gelesen)")
+
+
+def cdp_tab_frisch(neu, time_origin_ms, klick_ms, spiel_ms=1500.0):
+    """REIN RECHNEND (testbar): Gehört dieser Tradovate-Tab zu DIESEM Connect-Klick? Neu seit dem Klick, oder die Seite hat nach dem
+    Klick geladen (performance.timeOrigin in ms seit 1970, etwas Spiel für die Uhr). Unlesbar = nur, wenn neu."""
+    if neu:
+        return True
+    try:
+        return float(time_origin_ms) >= float(klick_ms) - spiel_ms > 0
+    except (TypeError, ValueError):
+        return False
 
 
 def cdp_tradovate_tabs(liste, ohne=()):
@@ -15884,8 +15896,9 @@ def _cdp_dialog_verbinden(s, merken, trail):
         trail.append(f"[Login] {txt} → jetzt {'AN' if an2 else ('AUS' if an2 is False else 'unlesbar')}")
     else:
         trail.append(f"[Login] {txt}")
-    vorher = {str(t.get("id")) for t in _cdp_http("/json/list") or [] if isinstance(t, dict)}
+    ids = {str(t.get("id")) for t in _cdp_http("/json/list") or [] if isinstance(t, dict)}
     _puls_diagnose_senden(spur=trail, schritt="cdp-connect")     # Spur liegt im Backend, bevor sich die Anmeldeseite öffnet
+    vorher = {"ids": ids, "ms": time.time() * 1000.0}           # Klick-Zeit: auch ein wiederverwendeter Tab lädt danach neu
     if not s.klick(cdp_rect(d["connect"]), "Connect"):
         return "connect", "Connect ließ sich nicht klicken (Maus nicht bewiesen über dem Knopf) — nicht verbunden.", None
     return "", "", vorher
@@ -15894,7 +15907,11 @@ def _cdp_dialog_verbinden(s, merken, trail):
 def _cdp_login_ort(s, vorher, benutzer, opts, trail, warten_s=25.0):
     """[5] Wo steht das Tradovate-Formular — eigener Tab (neu seit dem Connect-Klick) oder in der TradingView-Seite? Verbindet sich
     TradingView ohne Formular (Tradovate noch angemeldet), ist der Schritt erledigt. „Network error occurred" → Connect erneut
-    (höchstens TV_CONNECT_NETZ_MAX×, wie beim alten Puls). -> (ort | 'verbunden' | None, text)"""
+    (höchstens TV_CONNECT_NETZ_MAX×, wie beim alten Puls). -> (ort | 'verbunden' | None, text)
+    vorher = {ids, ms}: ein Tradovate-Tab zählt, wenn er NEU ist oder seit dem Connect-Klick neu geladen hat (performance.timeOrigin) —
+    der Tab eines gescheiterten Laufs bleibt offen (erster Live-Lauf .799), und TradingView öffnet die Anmeldung womöglich darin neu."""
+    vorher = vorher if isinstance(vorher, dict) else {}
+    ids, klick_ms = vorher.get("ids") or set(), float(vorher.get("ms") or 0.0)
     ort_tv = _K3Ort("TradingView-Seite", s.ws, s, benutzer)
     ende, netz_n = time.time() + warten_s, 0
     while time.time() < ende:
@@ -15902,13 +15919,16 @@ def _cdp_login_ort(s, vorher, benutzer, opts, trail, warten_s=25.0):
         b = ort_tv.blick()
         if b.get("login"):
             return ort_tv, ""
-        for t in cdp_tradovate_tabs(_cdp_http("/json/list"), vorher or ()):
+        for t in cdp_tradovate_tabs(_cdp_http("/json/list")):
             try:
                 ws2 = _CdpVerbindung(t.get("webSocketDebuggerUrl"), timeout=8.0)
             except Exception as e_:
                 trail.append(f"[Login] Tradovate-Tab nicht erreichbar ({type(e_).__name__})")
                 continue
             o2 = _K3Ort("Tradovate-Tab", ws2, _k3_eingabe(ws2, trail), benutzer, eigen=True)
+            if not cdp_tab_frisch(str(t.get("id")) not in ids, o2.eingabe.lese_js("performance.timeOrigin", timeout=4), klick_ms):
+                o2.zu()                               # alter Tab (z. B. vom gescheiterten Lauf), seit dem Klick nicht neu geladen
+                continue
             if o2.blick().get("login"):
                 o2.target_id = t.get("id")
                 trail.append(f"[Login] Tradovate-Anmeldeseite offen ({str(t.get('url') or '')[:60]})")
@@ -15925,10 +15945,56 @@ def _cdp_login_ort(s, vorher, benutzer, opts, trail, warten_s=25.0):
             if netz_n > TV_CONNECT_NETZ_MAX:
                 return None, f"Tradovate meldet nach {TV_CONNECT_NETZ_MAX}× Connect weiter 'Network error occurred' — Internet/Tradovate am PC prüfen."
             _warte(1.0, 1.0)
+            klick_ms = time.time() * 1000.0
             s.klick(cdp_rect(d["connect"]), f"Connect (erneut {netz_n}/{TV_CONNECT_NETZ_MAX})")
             _warte(2.0, 0.8)                  # der alte Fehlertext steht nach dem Klick noch kurz da
             ende = time.time() + warten_s
     return None, f"Nach 'Connect' keine Tradovate-Anmeldeseite ({warten_s:.0f} s)."
+
+
+def _cdp_autofill_klick(eingabe, benutzer, feld_rect, trail):
+    """Chromes Vorschlagsliste (eigenes kleines Fenster des Puls-Chrome-Prozesses, für CDP unsichtbar) per Windows-UIA lesen und den
+    Eintrag mit GENAU diesem Username als ganzem Wort (tv_konto_wort_passt, wie der alte Puls — „APEX_641699TDFYU324689097" zählt
+    nicht) mit der echten Maus anklicken. Das Benutzerfeld selbst ist ausgenommen. -> True/False"""
+    if not _WIN_EINGABE:
+        trail.append("[Login] Vorschlagsliste nur unter Windows lesbar")
+        return False
+    from pywinauto import Desktop
+    ohne = None
+    try:
+        g, kl = eingabe.lese_js(WIN_GEO_JS) or {}, _klient_rechteck(getattr(eingabe, "_win_hwnd", None))
+        x, y, w, h = [float(v) for v in feld_rect[:4]]
+        a, _g1 = tv_bildschirm_punkt([x, y, 1.0, 1.0], g, kl)
+        b, _g2 = tv_bildschirm_punkt([x + w - 1.0, y + h - 1.0, 1.0, 1.0], g, kl)
+        if a and b:
+            ohne = (int(a[0]), int(a[1]), int(b[0]), int(b[1]))
+    except Exception:
+        ohne = None
+
+    class _Nadel:                       # Vorfilter mit derselben Schnittstelle wie ein Regex
+        @staticmethod
+        def search(name):
+            return tv_konto_wort_passt(name, benutzer)
+    roh = []
+    for f in _puls_fenster_liste(_puls_chrome_browser_pid()):
+        try:
+            w_ = Desktop(backend="uia").window(handle=int(f["hwnd"])).wrapper_object()
+            roh += [x_ for x_ in _tv_uia_roh(w_, ("ListItem", "MenuItem", "Button", "DataItem", "Text"), 600, muster=(_Nadel,)) if x_[1]]
+        except Exception:
+            continue
+    kand = tv_uia_namen_filtern(roh, _Nadel, typ_vorrang=None, ohne=ohne)
+    if len(kand) != 1:
+        trail.append(f"[Login] Vorschlag '{benutzer}' in Chromes Liste {len(kand)}× gesehen"
+                     + (f": {[k['text'][:30] for k in kand][:4]}" if kand else ""))
+        return False
+    x_, y_ = kand[0]["punkt"]
+    _maus_fahren(x_, y_)
+    _warte(0.12, 0.1)
+    if not _klick_absolut(x_, y_):
+        trail.append("[Login] Klick auf den Vorschlag von Windows abgelehnt")
+        return False
+    trail.append(f"[Login] Vorschlag '{kand[0]['text'][:40]}' geklickt @{x_},{y_} (Windows-Maus)")
+    return True
 
 
 def _cdp_anmelden(s, ort, benutzer, opts, trail):
@@ -15942,33 +16008,45 @@ def _cdp_anmelden(s, ort, benutzer, opts, trail):
     if ok_b:
         trail.append(f"[Login] schon ausgefüllt: {txt_b}")
     else:
+        # FINNS HANDWEG (29.09.2026, Screenshot nach dem ersten Live-Lauf .799): ins Benutzerfeld klicken → Chrome zeigt die
+        # gespeicherten Logins → den passenden anklicken → Passwort kommt mit → Anmelden. NIE Enter im Formular: im ersten Lauf
+        # hatte Chrome „APEX_641699" vorbelegt (für die Seite vor dem ersten Klick unsichtbar), der Username wurde angehängt, die
+        # Autofill-Markierung des Passworts galt als Vorschau, und Enter schickte „APEX_641699TDFYU324689097" ab → „Incorrect
+        # username or password" (ein Fehlversuch bei Tradovate). Die Liste ist ein eigenes Browser-Fenster → Windows-UIA wie beim
+        # alten Puls; geklickt wird nur ein Eintrag mit genau diesem Username als ganzem Wort.
         if not cdp_rect(u):
-            return "login_feld", "Benutzerfeld vor dem Passwortfeld nicht gefunden — nichts getippt."
-        if not ort.eingabe.klick(cdp_rect(u), "Benutzerfeld"):
-            return "login_feld", "Benutzerfeld ließ sich nicht klicken — nichts getippt."
-        _warte(0.5, 0.3)
-        if u.get("gefuellt"):
-            ort.eingabe.taste("a", modifiers=2)
-            ort.eingabe.taste("Backspace")
-            _warte(0.3, 0.2)
-        ort.eingabe.tippen(benutzer)
-        trail.append(f"[Login] Username '{benutzer}' getippt")
-        _warte(0.9, 0.4)
-        ort.eingabe.taste("ArrowDown")
-        _warte(0.6, 0.3)
-        lb = ort.blick().get("login") or {}
-        if not ((lb.get("user") or {}).get("autofill") or (lb.get("pw") or {}).get("autofill")):
+            return "login_feld", "Benutzerfeld vor dem Passwortfeld nicht gefunden — nichts eingegeben."
+        gewaehlt = False
+        for versuch in (1, 2, 3):
+            if versuch == 1:
+                if not ort.eingabe.klick(cdp_rect(u), "Benutzerfeld"):
+                    return "login_feld", "Benutzerfeld ließ sich nicht klicken — nichts eingegeben."
+            elif versuch == 2:
+                # Vorschlag nicht in der Liste (vorbelegtes Feld filtert sie): Feld leeren — leer zeigt Chrome alle Logins;
+                # Pfeil runter öffnet die Liste nur (markiert, schickt nie ab)
+                ort.eingabe.taste("a", modifiers=2)
+                ort.eingabe.taste("Backspace")
+                _warte(0.4, 0.2)
+                ort.eingabe.taste("ArrowDown")
+                trail.append("[Login] Benutzerfeld geleert, Liste neu geöffnet")
+            else:
+                ort.eingabe.tippen(benutzer)       # letzter Versuch: die Liste auf genau diesen Login filtern (kein Enter)
+                trail.append(f"[Login] '{benutzer}' getippt, um die Liste zu filtern")
+            _warte(0.8, 0.4)
+            if _cdp_autofill_klick(ort.eingabe, benutzer, cdp_rect(u), trail):
+                gewaehlt = True
+                break
+        if not gewaehlt:
             if ort.eigen:
                 ort.eingabe.taste("Escape")          # nur im eigenen Tradovate-Tab — in TradingView schlösse Esc den Dialog
-            return "autofill", (f"Chrome bietet für '{benutzer}' kein gespeichertes Passwort an — im Puls-Chrome (eigenes Profil) diesen "
-                                "Tradovate-Login EINMAL von Hand anmelden und 'Passwort speichern' bestätigen. Nichts abgeschickt.")
-        ort.eingabe.taste("Enter")
-        _warte(0.9, 0.4)
+            return "autofill", (f"Chrome zeigt keinen gespeicherten Login '{benutzer}' in der Vorschlagsliste — ist er im Puls-Chrome "
+                                "(eigenes Profil) gespeichert? Nichts abgeschickt.")
+        _warte(0.8, 0.4)
         lb = ort.blick().get("login") or {}
         ok_b, txt_b = cdp_login_bereit(lb)
-        trail.append(f"[Login] Autofill: {txt_b}")
+        trail.append(f"[Login] nach dem Vorschlag: {txt_b}")
         if not ok_b:
-            return "autofill", f"Autofill nicht vollständig ({txt_b}) — Login NICHT geklickt."
+            return "autofill", f"Nach dem Klick auf den Vorschlag nicht bewiesen ({txt_b}) — Anmelden NICHT geklickt."
     k, nk = k3_eindeutig(lb.get("knoepfe"), K3_RX_CONNECT)
     if not k:
         return "login_knopf", f"Kein eindeutiger Login-Knopf ({nk}; Knöpfe {[k3_label(x) for x in lb.get('knoepfe') or []][:8]}) — nicht angemeldet."

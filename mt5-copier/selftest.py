@@ -2880,6 +2880,22 @@ def test_puls_cdp_login():
                                           ob._cdp_abmelden, ob._cdp_konto_mit_login))
     chk(q.count(".tippen(") == 1 and "tippen(benutzer)" in q, "getippt wird nur der Username — nie ein Passwort")
     chk("K3_RX_FREIGABE" not in q and '"freigabe"' in q, "Freigabe ('Allow') wird nur gemeldet, nie geklickt")
+    # erster Live-Lauf .799 (29.09.2026): Enter schickte „APEX_641699TDFYU324689097" ab — jetzt Vorschlag anklicken, Enter nur nach Beweis
+    q_an = _i.getsource(ob._cdp_anmelden)
+    chk(q_an.count('taste("Enter")') == 1 and q_an.index("if ok3:") < q_an.index('taste("Enter")'),
+        "Enter im Login-Formular nur noch EINMAL und nur nach bewiesenem Username + Passwort")
+    chk("_cdp_autofill_klick(" in q_an and q_an.index("_cdp_autofill_klick(") < q_an.index("(Login)"), "erst Chrome-Vorschlag anklicken, dann Anmelden")
+    F = ob.cdp_tab_frisch
+    chk(F(True, None, 0) and F(False, 1_000_500.0, 1_000_000.0) and not F(False, 990_000.0, 1_000_000.0) and not F(False, None, 1_000_000.0)
+        and not F(False, 5.0, 0.0), "Tradovate-Tab zählt nur, wenn neu oder seit dem Connect-Klick neu geladen (alter Fehlversuchs-Tab nicht)")
+    W = ob.tv_konto_wort_passt
+    chk(W("TDFYU324689097 tradovate.com", "TDFYU324689097") and not W("APEX_641699TDFYU324689097", "TDFYU324689097")
+        and not W("APEX_641699", "TDFYU324689097"), "Vorschlag nur mit dem Username als ganzem Wort (angehängter Name zählt nicht)")
+    nadel = type("N", (), {"search": staticmethod(lambda n: W(n, "TDFYU324689097"))})
+    liste = [("APEX_641699", (300, 400, 600, 440), "ListItem"), ("TDFYU324689097 tradovate.com", (300, 450, 600, 490), "ListItem"),
+             ("TDFYU324689097", (300, 300, 600, 330), "Text")]
+    gef = ob.tv_uia_namen_filtern(liste, nadel, typ_vorrang=None, ohne=(290, 295, 610, 335))
+    chk(len(gef) == 1 and gef[0]["punkt"] == (450, 470), f"Vorschlagsliste: genau der Tradeify-Eintrag, das Benutzerfeld ist ausgenommen ({gef})")
     for f in (ob.modus_tvlesen_cdp, ob.modus_tvkette_cdp):
         src = _i.getsource(f)
         chk("_cdp_konto_mit_login(sitz" in src and "_cdp_sitzung_holen(cmd" in src and "s = sitz[0]" in src,
