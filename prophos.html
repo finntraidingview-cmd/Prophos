@@ -1799,9 +1799,12 @@
     padding:3px 8px;border-radius:6px;
     font-size:11px;font-weight:600;letter-spacing:.02em;
   }
-  #dashboard-view .type-challenge{background:rgba(247,144,9,.1);color:#b6690a}
-  #dashboard-view .type-phase1{background:rgba(247,144,9,.1);color:#b6690a}
-  #dashboard-view .type-phase2{background:rgba(247,144,9,.18);color:#9a5a08}
+  /* Challenge / Phase 1 / Phase 2 (30.09.2026, Finn): Challenge sah genauso aus wie Phase 1, Phase 2 nur einen
+     Hauch dunkler — unter „Typ" nicht zu trennen. Challenge jetzt Rosé (kein Rot, das läse sich wie Warnung),
+     die Phasen bleiben eine Familie: Phase 1 helles Gelb-Amber, Phase 2 kräftiges Orange. */
+  #dashboard-view .type-challenge{background:rgba(238,70,150,.1);color:#C11574}
+  #dashboard-view .type-phase1{background:rgba(250,197,21,.18);color:#A15C07}
+  #dashboard-view .type-phase2{background:rgba(249,115,22,.12);color:#C2410C}
   #dashboard-view .type-funded{background:var(--violet-tint);color:var(--violet)}
   #dashboard-view .type-funded_cfd{background:rgba(73,150,255,.12);color:#1F6FD6}   /* Funded CFD (29.09.2026): Blau, getrennt vom Futures-Violett */
   #dashboard-view .type-waiting_payout{background:#1F6FD6;color:#fff}   /* Funded CFD mit Waiting for Payout (29.09.2026): volles Blau = Zustand, kein eigener Typ */
@@ -36189,7 +36192,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.836'
+  const OS_TAB_BUILD = '2026-09-22.837'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
