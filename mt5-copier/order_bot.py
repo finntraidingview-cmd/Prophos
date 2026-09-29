@@ -14838,26 +14838,106 @@ def cdp_pruefung(b, fill_tabelle, tp_orders, sl_orders, plan, toleranz=0.01):
 
 def _cdp_endpruefung(s, opts, plan, root, trail):
     """Avg Fill der Positions-Zeile (Reiter Positions) + TP/SL-Limit aus dem Reiter „Orders", danach zurück auf Positions.
-    Nur Reiter-Klicks. -> (avg|None, tp|None, sl|None)"""
+    Nur Reiter-Klicks. Live 29.09.2026 14:58 UTC (.807): Reiter Orders geklickt, aber augen.js lieferte keine Order-Zeile
+    (liest nur td[data-label]) — dann liest Puls die sichtbaren Tabellen selbst (CDP_TABELLEN_JS: data-label, sonst Spaltenkopf)
+    und schreibt kompakt in die Spur, was dort steht. -> (avg|None, tp|None, sl|None, diag|None)"""
     st = s.stand(opts)
     zeile = next((z for z in k3_zeilen(st.get("positionen"), root) if z.get("seite") == plan["richtung"]), None)
     avg = cdp_zahl((zeile or {}).get("avg"))
-    tp_o = sl_o = None
+    tp_o = sl_o = diag = None
+    brauch = lambda: (tp_o is None and plan["tp"]) or (sl_o is None and plan["sl"])
     r_ord = s.rect_von("#id_account-manager-tabs #orders")
     if r_ord and s.klick(r_ord, "Reiter Orders"):
+        roh = None
         for _ in range(3):
             _warte(0.6, 0.3)
             st2 = s.stand(opts)
             tp_o, sl_o = cdp_brackets_aus_orders(st2.get("orders"), root, plan["richtung"], plan["menge"])
-            if (tp_o is not None or not plan["tp"]) and (sl_o is not None or not plan["sl"]):
+            if not brauch():
                 break
+            roh = s.lese_js(CDP_TABELLEN_JS) or {}
+            tp2, sl2 = cdp_brackets_aus_orders(cdp_orders_aus_roh(roh), root, plan["richtung"], plan["menge"])
+            tp_o = tp_o if tp_o is not None else tp2
+            sl_o = sl_o if sl_o is not None else sl2
+            if not brauch():
+                trail.append("TP/SL aus dem eigenen Tabellen-Blick (augen.js sah keine Order-Zeile)")
+                break
+        if brauch():
+            diag = cdp_tabellen_kurz(roh)
+            trail.append(f"Reiter Orders: TP/SL nicht gefunden — sichtbar: {diag[:700]}")
         r_pos = s.rect_von("#id_account-manager-tabs #positions")
         if r_pos:
             s.klick(r_pos, "Reiter Positions")
             _warte(0.4, 0.2)
     else:
         trail.append("Reiter Orders nicht gefunden/geklickt — TP/SL nur aus den Meldungen")
-    return avg, tp_o, sl_o
+    return avg, tp_o, sl_o, diag
+
+
+# Sichtbare Tabellen roh (Endprüfung, Reiter Orders): je Tabelle Spaltenköpfe + bis 8 sichtbare Zeilen [data-label, Text] — auch
+# Zellen ohne data-label (dann zählt die Spalte des Kopfs). Nur lesen.
+CDP_TABELLEN_JS = r"""(function () {
+  function sb(e) { try { var r = e.getBoundingClientRect(); if (r.width < 3 || r.height < 3 || r.bottom < 0 || r.top > innerHeight) return false;
+    var s = getComputedStyle(e); return s.visibility !== 'hidden' && s.display !== 'none'; } catch (_) { return false; } }
+  function T(e) { return String((e && e.textContent) || '').replace(/\s+/g, ' ').trim(); }
+  var aktiv = document.querySelector('#id_account-manager-tabs [aria-selected="true"]');
+  var out = { reiter: aktiv ? String(aktiv.id || T(aktiv)).slice(0, 20) : null, tabellen: [] };
+  document.querySelectorAll('table').forEach(function (t) {
+    if (out.tabellen.length >= 3 || !sb(t)) return;
+    var koepfe = Array.prototype.slice.call(t.querySelectorAll('th,[role="columnheader"]')).map(function (h) { return T(h).slice(0, 24); });
+    var zeilen = [];
+    t.querySelectorAll('tr').forEach(function (tr) {
+      if (zeilen.length >= 8 || !sb(tr)) return;
+      var tds = tr.querySelectorAll('td'); if (!tds.length) return;
+      zeilen.push(Array.prototype.slice.call(tds).map(function (td) { return [td.getAttribute('data-label') || '', T(td).slice(0, 24)]; }));
+    });
+    out.tabellen.push({ koepfe: koepfe.slice(0, 20), zeilen: zeilen });
+  });
+  return out;
+})()"""
+
+
+def cdp_orders_aus_roh(roh):
+    """REIN RECHNEND (testbar): Order-Zeilen aus dem eigenen Tabellen-Blick — Spaltenname = data-label, sonst der Kopf an derselben
+    Stelle. Form wie augen.js orders (symbol, seite, menge, typ, preis, status, sichtbar, spalten)."""
+    out = []
+    for t in (roh or {}).get("tabellen") or [] if isinstance(roh, dict) else []:
+        koepfe = t.get("koepfe") or [] if isinstance(t, dict) else []
+        for z in (t.get("zeilen") or []) if isinstance(t, dict) else []:
+            d = {}
+            for i, zelle in enumerate(z if isinstance(z, list) else []):
+                lab, txt = (list(zelle) + ["", ""])[:2] if isinstance(zelle, (list, tuple)) else ("", "")
+                name = str(lab or (koepfe[i] if i < len(koepfe) else "")).strip()
+                if name and name not in d:
+                    d[name] = str(txt or "").strip()
+
+            def feld(rx):
+                for k, v in d.items():
+                    if re.fullmatch(rx, k, re.I) and v and v not in ("—", "-"):
+                        return v
+                return None
+            sym = feld(r"symbol")
+            if not sym:
+                continue
+            sd = feld(r"side|seite") or ""
+            out.append({"symbol": sym, "seite": "buy" if re.match(r"(buy|kauf|long)", sd, re.I) else "sell" if re.match(r"(sell|verkauf|short)", sd, re.I) else None,
+                        "menge": cdp_zahl(feld(r"qty|quantity|menge|anz(ahl|\.)?")), "typ": feld(r"type|typ|order type|auftragsart"),
+                        "status": feld(r"status"),
+                        "preis": cdp_zahl(feld(r"limit\s*price|limitpreis|limit-preis")) or cdp_zahl(feld(r"stop\s*price|stopp-preis|stop-preis"))
+                        or cdp_zahl(feld(r"price|preis")), "sichtbar": True, "spalten": d})
+    return out
+
+
+def cdp_tabellen_kurz(roh, max_zeichen=700):
+    """REIN RECHNEND (testbar): der Tabellen-Blick kompakt für die Spur — Reiter, Köpfe, erste Zeilen als Name=Wert."""
+    if not isinstance(roh, dict):
+        return "kein Tabellen-Blick"
+    teile = [f"Reiter {roh.get('reiter') or '?'}"]
+    for t in roh.get("tabellen") or []:
+        teile.append("Köpfe " + "/".join(str(k) for k in (t.get("koepfe") or [])[:12]))
+        for z in (t.get("zeilen") or [])[:3]:
+            teile.append(" ".join(f"{(c[0] or '·')}={c[1]}" for c in z if isinstance(c, (list, tuple)) and len(c) >= 2 and c[1])[:220])
+    return " | ".join(teile)[:max_zeichen]
 
 def cdp_meldung_text(m):
     """REIN RECHNEND (testbar): eine gelesene Meldung als Rohtext für order_signale/Diagnose — Art, Status, Seite, Menge, Preis."""
@@ -15055,8 +15135,10 @@ def modus_tvkette_cdp(cmd):
         # Endprüfung (Finn 29.09.2026: „ob das echt genau passt"): Avg Fill der Positions-Zeile + TP/SL-Limit aus dem Reiter „Orders"
         # gegen die Meldungswerte; fehlt ein Meldungswert, füllt ihn die Tabelle. Nur lesen + Reiter-Klicks, nie etwas an der Order.
         try:
-            avg_t, tp_o, sl_o = _cdp_endpruefung(s, opts, plan, root, trail)
+            avg_t, tp_o, sl_o, diag_o = _cdp_endpruefung(s, opts, plan, root, trail)
             pr = cdp_pruefung(b, avg_t if menge0 == 0 else None, tp_o, sl_o, plan)
+            if diag_o:
+                pr["orders_diag"] = diag_o
             res["pruefung"] = pr
             trail.append("Endprüfung: " + pr["text"])
             if res.get("einstieg") is None and pr.get("fill_tabelle") is not None:
@@ -16085,6 +16167,18 @@ def cdp_connect_dialog(bl):
     return {"dialog": d, "connect": c, "demo": demo, "nicht_merken": nm, "netzfehler": bool(d.get("netzfehler"))}
 
 
+CDP_RX_CONNECT_FEHLER = re.compile(r"error!|cancel+ed\b|\bfailed\b|abgebrochen|fehlgeschlagen", re.I)
+
+
+def cdp_connect_fehler(bl):
+    """REIN RECHNEND (testbar): Fehlermeldung im Tradovate-Connect-Dialog (z. B. „Error! The login operation has been canceled",
+    „Error! Network error occurred …") als kurzer Text, sonst ''."""
+    d = cdp_connect_dialog(bl)
+    t = " ".join(str(((d or {}).get("dialog") or {}).get("text") or "").split())
+    m = CDP_RX_CONNECT_FEHLER.search(t)
+    return t[max(0, m.start() - 20): m.start() + 100].strip() if m else ""
+
+
 def cdp_nicht_merken_plan(nm, merken):
     """REIN RECHNEND (testbar): Was tun mit „Don't remember me"? merken = Sitzung soll gemerkt werden (cmd.sitzung_merken, wie beim
     alten Puls). -> ('klick'|'lassen'|'fehlt', text). Zustand unlesbar (nur Beschriftung): im frisch geöffneten Dialog ist der Haken
@@ -16325,7 +16419,8 @@ def _cdp_dialog_verbinden(s, merken, trail):
         trail.append(f"[Login] {txt}")
     ids = {str(t.get("id")) for t in _cdp_http("/json/list") or [] if isinstance(t, dict)}
     _puls_diagnose_senden(spur=trail, schritt="cdp-connect")     # Spur liegt im Backend, bevor sich die Anmeldeseite öffnet
-    vorher = {"ids": ids, "ms": time.time() * 1000.0}           # Klick-Zeit: auch ein wiederverwendeter Tab lädt danach neu
+    vorher = {"ids": ids, "ms": time.time() * 1000.0,           # Klick-Zeit: auch ein wiederverwendeter Tab lädt danach neu
+              "fehler": cdp_connect_fehler(ort.blick())}        # Fehlermeldung, die schon VOR dem Klick dastand, zählt nicht als neu
     if not s.klick(cdp_rect(d["connect"]), "Connect"):
         return "connect", "Connect ließ sich nicht klicken (Maus nicht bewiesen über dem Knopf) — nicht verbunden.", None
     return "", "", vorher
@@ -16338,7 +16433,7 @@ def _cdp_login_ort(s, vorher, benutzer, opts, trail, warten_s=25.0):
     vorher = {ids, ms}: ein Tradovate-Tab zählt, wenn er NEU ist oder seit dem Connect-Klick neu geladen hat (performance.timeOrigin) —
     der Tab eines gescheiterten Laufs bleibt offen (erster Live-Lauf .799), und TradingView öffnet die Anmeldung womöglich darin neu."""
     vorher = vorher if isinstance(vorher, dict) else {}
-    ids, klick_ms = vorher.get("ids") or set(), float(vorher.get("ms") or 0.0)
+    ids, klick_ms, fehler_alt = vorher.get("ids") or set(), float(vorher.get("ms") or 0.0), vorher.get("fehler") or ""
     ort_tv = _K3Ort("TradingView-Seite", s.ws, s, benutzer)
     ende, netz_n = time.time() + warten_s, 0
     while time.time() < ende:
@@ -16366,6 +16461,9 @@ def _cdp_login_ort(s, vorher, benutzer, opts, trail, warten_s=25.0):
             trail.append(f"[Login] ohne Anmeldeseite verbunden ('{aktiv[:40]}') — Tradovate war noch angemeldet")
             return "verbunden", ""
         d = cdp_connect_dialog(b)
+        f_neu = cdp_connect_fehler(b)
+        if f_neu and f_neu != fehler_alt and not (d and d["netzfehler"]):
+            return "abgebrochen", f_neu
         if d and d["netzfehler"]:
             netz_n += 1
             trail.append(f"[Login] 'Network error occurred' im Connect-Dialog ({netz_n}. Mal)")
@@ -16424,7 +16522,7 @@ def _cdp_autofill_klick(eingabe, benutzer, feld_rect, trail):
     return True
 
 
-def _cdp_anmelden(s, ort, benutzer, opts, trail):
+def _cdp_anmelden(s, ort, benutzer, opts, trail, vorher=None):
     """[5] Username + gespeichertes Passwort (Chrome) beweisen, Login, warten bis TradingView ein Konto zeigt. -> (code, text)"""
     lb = ort.blick().get("login") or {}
     u = lb.get("user") or {}
@@ -16486,6 +16584,11 @@ def _cdp_anmelden(s, ort, benutzer, opts, trail):
         if aktiv:
             trail.append(f"[Login] OK verbunden, aktiv '{aktiv[:40]}'")
             return "", ""
+        # Live 29.09.2026 14:56 UTC: nach „Anmelden" verschwand das Formular, TradingView zeigte im Connect-Dialog „Error! The login
+        # operation has been canceled" — Puls wartete 40 s auf ein Konto. Eine NEUE Fehlermeldung dort beendet das Warten sofort.
+        f_tv = cdp_connect_fehler(_K3Ort("TradingView-Seite", s.ws, s, "").blick()) if ort.eigen else ""
+        if f_tv and f_tv != ((vorher or {}).get("fehler") or ""):
+            return "abgebrochen", f_tv
         bo = ort.blick()
         if bo.get("freigabe"):
             return "freigabe", "Tradovate fragt nach einer Freigabe ('Allow') — NICHT automatisch bestätigt; bitte im Puls-Chrome einmal von Hand."
@@ -16542,25 +16645,38 @@ def _cdp_tradovate_verbinden(sitz, cmd, opts, trail):
                                                                         for d_ in bl2.get("dialoge") or [] if isinstance(d_, dict)][:3],
                                                            "leiste": bl2.get("leiste"), "url": bl2.get("url")}, ensure_ascii=False)[:500])
             return "dialog", "TradingView ist mit ?trade-now=TRADOVATE neu offen, aber der Tradovate-Dialog erscheint nicht (40 s).", ""
-    code, text, vorher = _cdp_dialog_verbinden(s, bool(cmd.get("sitzung_merken")), trail)
-    if code:
-        return code, text, ""
-    ort, text = _cdp_login_ort(s, vorher, benutzer, opts, trail)
-    if ort == "verbunden":
-        return "", "", "login"
-    if ort is None:
-        return "login_formular", text + " Tradovate ist NICHT verbunden.", ""
-    code = "?"
-    try:
-        code, text = _cdp_anmelden(s, ort, benutzer, opts, trail)
-        return code, text, "login"
-    finally:
-        if ort.eigen:
-            tid = getattr(ort, "target_id", None)
-            if not code and tid and any(isinstance(t, dict) and t.get("id") == tid for t in _cdp_http("/json/list") or []):
-                _cdp_http(f"/json/close/{tid}")          # Tradovate-Tab blieb nach dem Login offen → zu (bei Fehlern bleibt er für die Hand)
-                trail.append("[Login] Tradovate-Tab geschlossen")
-            ort.zu()
+    for versuch in (1, 2):
+        code, text, vorher = _cdp_dialog_verbinden(s, bool(cmd.get("sitzung_merken")), trail)
+        if code:
+            return code, text, ""
+        ort, text = _cdp_login_ort(s, vorher, benutzer, opts, trail)
+        if ort == "verbunden":
+            return "", "", "login"
+        if ort is None:
+            return "login_formular", text + " Tradovate ist NICHT verbunden.", ""
+        if ort == "abgebrochen":
+            code = "abgebrochen"
+        else:
+            code = "?"
+            try:
+                code, text = _cdp_anmelden(s, ort, benutzer, opts, trail, vorher)
+            finally:
+                if ort.eigen:
+                    tid = getattr(ort, "target_id", None)
+                    if not code and tid and any(isinstance(t, dict) and t.get("id") == tid for t in _cdp_http("/json/list") or []):
+                        _cdp_http(f"/json/close/{tid}")      # Tradovate-Tab blieb nach dem Login offen → zu (bei Fehlern bleibt er für die Hand)
+                        trail.append("[Login] Tradovate-Tab geschlossen")
+                    ort.zu()
+            if code != "abgebrochen":
+                return code, text, "login"
+        if versuch == 1:
+            # TradingView hat den Login abgebrochen („Error! The login operation has been canceled") — Dialog steht mit Connect
+            # wieder da: EINMAL neu verbinden; Tradovate ist dann meist schon angemeldet (Connect ohne Anmeldeseite)
+            trail.append(f"[Login] TradingView meldet '{text[:90]}' — Connect noch einmal")
+            _warte(1.0, 0.8)
+            continue
+        return "abgebrochen", f"TradingView bricht den Login zweimal ab ('{text[:90]}') — Tradovate ist NICHT verbunden.", ""
+    return "abgebrochen", "Login nicht abgeschlossen.", ""
 
 
 def _cdp_login_sichern(res, trail):

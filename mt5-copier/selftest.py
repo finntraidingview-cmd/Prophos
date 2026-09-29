@@ -3004,6 +3004,25 @@ def test_puls_cdp_login():
     q_au = _i.getsource(ob.modus_augen)
     chk('not _AUGEN_REGEL_STAND["explizit"]' in q_au and q_au.index('_AUGEN_REGEL_STAND["explizit"]') < q_au.index("Browser.close"),
         "Puls-Chrome wird nur bei AUSDRÜCKLICHEM 'uia' geschlossen")
+    # Live 29.09.2026 14:56/14:58 UTC: Login-Abbruch im Connect-Dialog + Orders-Tabelle ohne data-label
+    dlg_f = dict(dlg, text="Tradovate Live Demo Error! The login operation has been canceled Don't remember me Connect")
+    chk("login operation has been canceled" in ob.cdp_connect_fehler({"dialoge": [dlg_f]}) and ob.cdp_connect_fehler({"dialoge": [dlg]}) == ""
+        and ob.cdp_connect_fehler({"dialoge": [dict(dlg, text="Error! Network error occurred. Please check")]}).startswith("Error!")
+        and ob.cdp_connect_fehler(None) == "", "Fehlermeldung im Connect-Dialog erkannt (Abbruch, Netzfehler), sonst leer")
+    q_tv = _i.getsource(ob._cdp_tradovate_verbinden)
+    chk("for versuch in (1, 2):" in q_tv and "Connect noch einmal" in q_tv and '"abgebrochen"' in _i.getsource(ob._cdp_anmelden)
+        and "f_neu != fehler_alt" in _i.getsource(ob._cdp_login_ort), "Login-Abbruch: sofort erkannt, genau ein zweiter Connect")
+    roh_t = {"reiter": "orders", "tabellen": [{"koepfe": ["Symbol", "Side", "Type", "Qty", "Limit Price", "Stop Price", "Status"],
+             "zeilen": [[["", "MNQZ6"], ["", "Buy"], ["", "Limit"], ["", "1"], ["", "30,679.50"], ["", ""], ["", "Working"]],
+                        [["", "MNQZ6"], ["", "Buy"], ["", "Stop"], ["", "1"], ["", "—"], ["", "30,806.50"], ["", "Working"]],
+                        [["", "MNQZ6"], ["", "Sell"], ["", "Market"], ["", "1"], ["", ""], ["", ""], ["", "Filled"]]]}]}
+    oz = ob.cdp_orders_aus_roh(roh_t)
+    chk(len(oz) == 3 and ob.cdp_brackets_aus_orders(oz, "MNQ", "sell", 1) == (30679.5, 30806.5), f"Orders ohne data-label über die Spaltenköpfe ({oz[:1]})")
+    roh_l = {"tabellen": [{"koepfe": [], "zeilen": [[["Symbol", "MNQZ6"], ["Side", "Buy"], ["Type", "Limit"], ["Qty", "1"], ["Limit Price", "30,679.50"], ["Status", "Working"]]]}]}
+    chk(ob.cdp_brackets_aus_orders(ob.cdp_orders_aus_roh(roh_l), "MNQ", "sell", 1)[0] == 30679.5 and ob.cdp_orders_aus_roh(None) == [],
+        "Orders mit data-label, leerer Blick = nichts")
+    chk("Reiter orders" in ob.cdp_tabellen_kurz(roh_t) and "Köpfe Symbol/Side" in ob.cdp_tabellen_kurz(roh_t) and len(ob.cdp_tabellen_kurz(roh_t)) <= 700,
+        "Tabellen-Blick kompakt für die Spur")
     W = ob.tv_konto_wort_passt
     chk(W("TDFYU324689097 tradovate.com", "TDFYU324689097") and not W("APEX_641699TDFYU324689097", "TDFYU324689097")
         and not W("APEX_641699", "TDFYU324689097"), "Vorschlag nur mit dem Username als ganzem Wort (angehängter Name zählt nicht)")
