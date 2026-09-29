@@ -23,7 +23,7 @@
  */
 var PROPHOS_AUGEN = (function () {
   'use strict';
-  var VERSION = '0.2.0';   // 0.2.0 (29.09.2026): Vertrag mit T3 — globalThis.prophosAugen, Schlüssel-Whitelist, popups, kauf_knopf
+  var VERSION = '0.3.0';   // 0.3.0 (29.09.2026, erste echte Lesung pc-usq1i6): TP/SL-Zustand, Konto-Leiste, Toast-Rückfall   // 0.2.0 (29.09.2026): Vertrag mit T3 — globalThis.prophosAugen, Schlüssel-Whitelist, popups, kauf_knopf
 
   // ── Grundwerkzeuge ─────────────────────────────────────────────────────────
   function sichtbar(el) {
@@ -105,6 +105,36 @@ var PROPHOS_AUGEN = (function () {
     }
     return null;
   }
+  /* TP/SL-SCHALTER (erste echte Lesung pc-usq1i6 29.09.2026 00:05 UTC): 'Take profit, $' ist ein <button> mit Symbol-Span, der
+   * eigentliche Haken ist ein UNSICHTBARES Kästchen (opacity 0) — sichtbar() filtert es weg, tp.an/sl.an blieben null. Deshalb hier
+   * OHNE Sichtbarkeits-Filter: Kästchen/Schalter in derselben Zeile (±16 px) nahe der Beschriftung. Rückfall: deaktiviertes/
+   * ausgegrautes Wertfeld = aus. -> {an: true|false|null, quelle} */
+  function schalterNahe(label, feld, wurzel) {
+    try {
+      var lr = label.getBoundingClientRect(), mitte = lr.top + lr.height / 2;
+      var kand = alle('input[type="checkbox"],[role="switch"],[role="checkbox"],[aria-checked]', wurzel).filter(function (e) {
+        var r = e.getBoundingClientRect();
+        if (!r.width && !r.height) { var p = e.parentElement; if (p) r = p.getBoundingClientRect(); }
+        return Math.abs((r.top + r.height / 2) - mitte) <= 16 && r.left >= lr.left - 60 && r.left <= lr.right + 320;
+      });
+      if (kand.length === 1 || (kand.length > 1 && kand.every(function (k) { return schalterZustand(k) === schalterZustand(kand[0]); }))) {
+        var z = schalterZustand(kand[0]);
+        if (z !== null) return { an: z, quelle: 'kaestchen:' + (kand[0].type || attr(kand[0], 'role') || kand[0].tagName.toLowerCase()) };
+      }
+      var inner = label.querySelector && label.querySelector('input[type="checkbox"],[role="switch"],[role="checkbox"],[aria-checked]');
+      if (inner && schalterZustand(inner) !== null) return { an: schalterZustand(inner), quelle: 'kaestchen:innen' };
+      var ap = attr(label, 'aria-pressed') || attr(label, 'aria-checked');
+      if (ap === 'true' || ap === 'false') return { an: ap === 'true', quelle: 'beschriftung:aria' };
+      if (feld) {
+        if (feld.disabled || feld.readOnly || attr(feld, 'aria-disabled') === 'true') return { an: false, quelle: 'feld:deaktiviert' };
+        var op = 1, x = feld;
+        for (var i = 0; i < 4 && x; i++) { op *= parseFloat(window.getComputedStyle(x).opacity || '1'); x = x.parentElement; }
+        if (op < 0.75) return { an: false, quelle: 'feld:grau(' + op.toFixed(2) + ')' };
+        return { an: null, quelle: 'unklar (Feld aktiv, kein Kästchen gefunden)', kandidaten: kand.length };
+      }
+    } catch (_) {}
+    return { an: null, quelle: 'unklar' };
+  }
   function schalterZustand(el) {
     if (!el) return null;
     var cb = el.matches && el.matches('input[type="checkbox"]') ? el : (el.querySelector && el.querySelector('input[type="checkbox"]'));
@@ -153,8 +183,8 @@ var PROPHOS_AUGEN = (function () {
       sch = sch.filter(function (e) { return !sch.some(function (f) { return f !== e && e.contains(f); }); });
       if (sch.length !== 1) return { da: false, notiz: name + ': ' + sch.length + ' Beschriftungen' };
       var feld = feldZu(sch[0], w);
-      return { da: true, beschriftung: kurz(sch[0]), an: schalterZustand(sch[0].closest('label,button,[role="switch"],[role="checkbox"]') || sch[0]),
-               feld: feld ? kurz(feld) : null };
+      var z = schalterNahe(sch[0], feld, w);
+      return { da: true, beschriftung: kurz(sch[0]), an: z.an, an_quelle: z.quelle, feld: feld ? kurz(feld) : null };
     }
     out.tp = klammer(RX_TP, 'TP');
     out.sl = klammer(RX_SL, 'SL');
@@ -201,6 +231,19 @@ var PROPHOS_AUGEN = (function () {
       gruppen.push({ gruppe: name, offen: attr(b, 'aria-expanded') === 'true', mehr: sichtbar(b) ? kurz(b) : null,
                      zu: zu && sichtbar(zu) ? kurz(zu) : null, rect: g && sichtbar(g) ? rect(g) : null, texte: texte });
     });
+    // Rückfall ohne Gruppen-Knopf (erste echte Lesung: laut Spur 2 Toasts, gruppen leer): Container, deren Klasse mit 'toastGroup-'
+    // beginnt (gehasht nur hinten), sichtbare Blatt-Texte einsammeln
+    if (!gruppen.some(function (gr) { return gr.texte.length; })) {
+      alle('[class*="toastGroup-"],[class*="toastListInner-"]').filter(sichtbar).slice(0, 6).forEach(function (c) {
+        if (gruppen.some(function (gr) { return gr._el && (gr._el.contains(c) || c.contains(gr._el)); })) return;
+        var texte = [], lauf = document.createTreeWalker(c, NodeFilter.SHOW_TEXT), k;
+        while ((k = lauf.nextNode()) && texte.length < 20) {
+          var t = String(k.nodeValue || '').replace(/\s+/g, ' ').trim(), el = k.parentElement;
+          if (t && el && sichtbar(el)) texte.push({ text: t.slice(0, 80), rect: rect(el) });
+        }
+        if (texte.length) gruppen.push({ gruppe: 'unbekannt', offen: null, mehr: null, zu: xIn(c), rect: rect(c), texte: texte, quelle: 'klasse:toastGroup' });
+      });
+    }
     var log = alle('[role="log"]').map(function (l) { return { text: txt(l).slice(0, 400), live: attr(l, 'aria-live') }; })
       .filter(function (l) { return l.text; });
     return { gruppen: gruppen, log: log };
@@ -262,8 +305,19 @@ var PROPHOS_AUGEN = (function () {
         treffer.push(kurz(el, { liste: !!el.closest('[role="listbox"],[role="menu"],[data-name="menu-inner"],[data-name="popup-menu-container"]') }));
       }
     }
-    return { schalter: s.el ? kurz(s.el, { quelle: s.quelle }) : null, aktiv: s.el ? txt(s.el).slice(0, 60) : '', eintraege: eintraege,
-             treffer: treffer, notiz: s.notiz };
+    // Broker-Leiste unten (erste echte Lesung 29.09.2026): #footer-chart-panel mit Knopf aria 'Open account manager' (Text = Broker,
+    // z. B. 'Tradovate') und [data-name=toggle-visibility-button] 'Open panel'/'Close panel'. Ist das Panel zu, steht die Kontonummer
+    // NICHT auf dem Schirm — dann ehrlich 'panel_zu' statt eines leeren Kontos.
+    var leiste = document.getElementById('footer-chart-panel');
+    var mgr = suche([{ q: 'aria:account manager', sel: '#footer-chart-panel button[aria-label], button[aria-label]', text: /account\s*manager|konto(-|\s*)?manager|kontoverwaltung/i }]);
+    var tog = document.querySelector('#footer-chart-panel [data-name="toggle-visibility-button"], [data-name="toggle-visibility-button"]');
+    var togA = tog ? (attr(tog, 'aria-label') || attr(tog, 'title')) : '';
+    var panel = tog ? (/open|öffnen|oeffnen|einblenden|show/i.test(togA) ? 'zu' : /close|schlie|ausblenden|hide|minim/i.test(togA) ? 'offen' : 'unklar') : null;
+    var schalter = s.el ? kurz(s.el, { quelle: s.quelle }) : null;
+    return { schalter: schalter, aktiv: s.el ? txt(s.el).slice(0, 60) : '', eintraege: eintraege, treffer: treffer, notiz: s.notiz,
+             broker: mgr.el ? txt(mgr.el).slice(0, 30) : (leiste ? txt(leiste).slice(0, 30) : ''), manager_knopf: mgr.el ? kurz(mgr.el) : null,
+             panel: panel, panel_knopf: tog && sichtbar(tog) ? kurz(tog) : null,
+             hinweis: (!s.el && !treffer.length && panel === 'zu') ? 'Broker-Panel zu — Kontonummer nicht sichtbar (panel_knopf öffnet es)' : null };
   }
 
   // ── Öffentliche Funktionen ─────────────────────────────────────────────────
@@ -326,7 +380,13 @@ var PROPHOS_AUGEN = (function () {
                         title: attr(e, 'title') || undefined, ph: attr(e, 'placeholder') || undefined });
       liste.push(z);
     }
-    var o = { ok: true, art: 'augen_inventar', v: VERSION, ts: Date.now(), url: location.href, titel: document.title,
+    // unsichtbare Kästchen/Schalter (TP/SL-Haken, 29.09.2026) — sichtbar() filtert sie, für die Signaturen brauchen wir sie trotzdem
+    var kaestchen = alle('input[type="checkbox"],input[type="radio"],[role="switch"],[role="checkbox"]').slice(0, 60).map(function (e) {
+      var r = e.getBoundingClientRect(), st = window.getComputedStyle(e);
+      return kurz(e, { zone: zone(e), opacity: st.opacity, display: st.display, sichtbar: sichtbar(e),
+                       eltern: e.parentElement ? (e.parentElement.tagName.toLowerCase() + ':' + txt(e.parentElement).slice(0, 30)) : '' });
+    });
+    var o = { ok: true, art: 'augen_inventar', v: VERSION, kaestchen: kaestchen, ts: Date.now(), url: location.href, titel: document.title,
               lang: document.documentElement.lang || '', sichtbar: document.visibilityState, geo: geo(),
               iframes: alle('iframe').map(function (f) { return { src: String(f.src || '').slice(0, 120), rect: sichtbar(f) ? rect(f) : null }; }),
               shadow: alle('*').filter(function (x) { return !!x.shadowRoot; }).slice(0, 20).map(function (x) { return x.tagName.toLowerCase(); }),
