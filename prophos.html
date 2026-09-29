@@ -588,11 +588,43 @@
   #dashboard-view .tb-puls.is-aktiv b{color:#047857}
   #dashboard-view .tb-puls.is-aktiv .tb-puls-dot{background:#10b981;animation:tc2Pulse 1.6s ease-in-out infinite}
   #dashboard-view .tb-puls[hidden]{display:none}
+  /* Hover-Karte (29.09.2026, Finn: „wenn ich mit der Maus drüberfahre, dass ich immer sehe, was da gemacht wird" — am MacBook kam
+     vom title-Tooltip nichts an). Optik wie .user-dropdown; nur Anzeige. Die Brücke (::before) hält den Hover beim Weg in die Karte. */
+  #dashboard-view .tb-puls-wrap{position:relative;display:inline-flex;margin-right:8px}
+  #dashboard-view .tb-puls-wrap .tb-puls{margin-right:0}
+  #dashboard-view .tb-puls-karte{position:absolute;right:0;top:calc(100% + 6px);width:340px;max-width:calc(100vw - 32px);
+    background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow-pop);padding:10px 12px;
+    font-size:12px;color:var(--sub);white-space:normal;text-align:left;
+    opacity:0;visibility:hidden;transform:translateY(-4px);transition:all .15s var(--ease);z-index:40}
+  #dashboard-view .tb-puls-karte::before{content:'';position:absolute;left:0;right:0;top:-8px;height:8px}
+  #dashboard-view .tb-puls-wrap:hover .tb-puls-karte,#dashboard-view .tb-puls-wrap:focus-within .tb-puls-karte{opacity:1;visibility:visible;transform:translateY(0)}
+  #dashboard-view .tb-puls[hidden] + .tb-puls-karte{display:none}
+  @media (hover: none){ #dashboard-view .tb-puls-karte{display:none} }
+  #dashboard-view .tpk-kopf{display:flex;align-items:center;gap:6px;font-weight:600;color:var(--ink);margin-bottom:4px}
+  #dashboard-view .tpk-kopf.is-aktiv{color:#047857}
+  #dashboard-view .tpk-kopf.is-danach{margin-top:8px}
+  #dashboard-view .tpk-dot{width:6px;height:6px;border-radius:50%;background:var(--sub-2);flex:none}
+  #dashboard-view .tpk-kopf.is-aktiv .tpk-dot{background:#10b981;animation:tc2Pulse 1.6s ease-in-out infinite}
+  #dashboard-view .tpk-zeile{display:flex;gap:10px;padding:6px 0;border-top:1px solid var(--border-soft)}
+  #dashboard-view .tpk-kopf + .tpk-zeile{border-top:0}
+  #dashboard-view .tpk-zeit{flex:none;width:62px;display:flex;flex-direction:column;font-variant-numeric:tabular-nums}
+  #dashboard-view .tpk-zeit b{color:var(--ink);font-weight:600}
+  #dashboard-view .tpk-zeit span{font-size:11px;color:var(--sub-2)}
+  #dashboard-view .tpk-was{min-width:0}
+  #dashboard-view .tpk-titel{color:var(--ink);font-weight:500}
+  #dashboard-view .tpk-info{margin-top:1px;line-height:1.4;overflow-wrap:anywhere}
+  #dashboard-view .tpk-leer{padding:2px 0}
+  #dashboard-view .tpk-fuss{margin-top:6px;padding-top:6px;border-top:1px solid var(--border-soft);font-size:11px;color:var(--sub-2)}
+  /* Countdown in der Pille (29.09.2026, Finn: „ganz dick von 10 runtergezählt, sodass man weiß: jetzt nichts bedienen") */
+  #dashboard-view .tb-puls.is-zaehlt{border-color:rgba(245,158,11,.6);background:rgba(245,158,11,.14);color:#b45309}
+  #dashboard-view .tb-puls.is-zaehlt b{color:#b45309;font-size:16px;font-weight:700}
+  #dashboard-view .tb-puls.is-zaehlt .tb-puls-dot{background:#f59e0b}
   /* Schmaler Desktop (29.09.2026): ohne Uhrzeit — „Puls · in 8 min", damit der Titel Platz behält */
   @media (max-width: 1180px){ #dashboard-view .tb-puls .tb-puls-uhr{display:none} }
   /* Handy: nur Punkt + „in n min" — sonst schiebt die Pille Glocke und Avatar aus dem Bild */
   @media (max-width: 640px){
     #dashboard-view .tb-puls{padding:0 8px;margin-right:0;gap:5px;font-size:11.5px;height:28px}
+    #dashboard-view .tb-puls-wrap{margin-right:0}
     #dashboard-view .tb-puls .tb-puls-uhr,#dashboard-view .tb-puls .tb-puls-lbl{display:none}
   }
   /* Handy hochkant (≤ 480 px): Kopfzeile ist mit Titel, Kapitel-Umschalter, Glocke und Avatar voll — die Pille schob den Avatar
@@ -644,6 +676,21 @@
     background:rgba(250,251,252,.92);color:var(--ink);font-size:14px;font-weight:600}
   /* Kalibrier-Vorschau (29.09.2026, Handy): die Tabelle ist ~440 px breit und lief ungeschützt aus der Karte — wischbar statt abgeschnitten */
   #calib-preview-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%}
+  /* Puls-Countdown vollflächig (29.09.2026): die letzten 10 s vor einem Puls-Einsatz, dann solange Puls läuft. Klicks gehen durch
+     (pointer-events:none) — der Hinweis gilt der Maus am PC, nicht diesem Bildschirm. */
+  .puls-cd{position:fixed;inset:0;z-index:390;display:flex;align-items:center;justify-content:center;pointer-events:none;
+    background:rgba(250,251,252,.55);opacity:0;transition:opacity .2s ease}
+  .puls-cd.is-an{opacity:1}
+  .puls-cd[hidden]{display:none}
+  .puls-cd-karte{display:flex;flex-direction:column;align-items:center;gap:6px;padding:22px 34px 20px;border-radius:20px;
+    background:var(--surface);border:1px solid rgba(245,158,11,.45);box-shadow:var(--shadow-pop);text-align:center;max-width:calc(100vw - 32px)}
+  .puls-cd-lbl{font-size:13px;font-weight:600;color:#b45309}
+  .puls-cd-zahl{font-size:112px;line-height:1;font-weight:700;color:#b45309;font-variant-numeric:tabular-nums;letter-spacing:-.03em}
+  .puls-cd-was{font-size:14px;font-weight:600;color:var(--ink)}
+  .puls-cd-hinweis{font-size:12.5px;color:var(--sub)}
+  .puls-cd.is-laeuft .puls-cd-karte{border-color:rgba(16,185,129,.45)}
+  .puls-cd.is-laeuft .puls-cd-lbl,.puls-cd.is-laeuft .puls-cd-zahl{color:#047857}
+  .puls-cd.is-laeuft .puls-cd-zahl{font-size:56px}
   .prof-wechsel::before{content:'';width:22px;height:22px;border-radius:50%;border:2.5px solid var(--border);border-top-color:var(--violet);animation:spin .7s linear infinite}
   #dashboard-view .ud-header{
     padding:10px 12px 12px;border-bottom:1px solid var(--border-soft);
@@ -4999,8 +5046,11 @@
     <!-- Wachhund Kurs-Feed (25.09.2026): feedWacheTick blendet ihn ein, wenn tv_kurse bei offenem Markt > 2 min steht -->
     <button type="button" class="tb-feedwarn" id="tb-feedwarn" hidden>Kurs-Feed steht</button>
 
-    <!-- Nächster Puls-Einsatz (29.09.2026): pulsNaechsterZeichnen füllt die Pille aus den eigenen Plänen dieser ID -->
-    <button type="button" class="tb-puls" id="tb-puls" hidden></button>
+    <!-- Nächster Puls-Einsatz (29.09.2026): pulsNaechsterZeichnen füllt Pille + Hover-Karte aus den eigenen Plänen dieser ID -->
+    <div class="tb-puls-wrap">
+      <button type="button" class="tb-puls" id="tb-puls" aria-describedby="tb-puls-karte" hidden></button>
+      <div class="tb-puls-karte" id="tb-puls-karte" role="tooltip"></div>
+    </div>
 
     <button class="tb-btn" aria-label="Notifications">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
@@ -21042,13 +21092,14 @@
     if(!p || !planIstPuls(p)) return 'kein Orbit-V2-/Winning-Day-/Topstep-Puls-Plan'
     // Mit Start-Balance zählt der Handelstag nicht (Balance ist tagesunabhängig) — nur Today's P&L springt über Nacht auf 0
     const mitBalance = !!(p.mt5Baseline && p.mt5Baseline.tv && typeof p.mt5Baseline.tv.balance_start === 'number')
-    // „Erledigt" bleibt jederzeit möglich (F5, Master 26.09.2026 nach Befund F4: bei 1–150 min Wartezeit ist Erledigt vor der
-    // Nachlesung der Normalfall) — mit Start-Balance liest Puls auch einen erledigten Plan nach, höchstens 12 h nach dem Ende
-    if(p.status !== 'review' && !(p.status === 'completed' && mitBalance)) return `Plan ist nicht in „Überprüfen" (Status ${p.status || '?'})`
+    // ERLEDIGT = FERTIG (29.09.2026, Finn: „ich hab den Trade manuell schon erledigt, deswegen soll das ja eigentlich wegfallen" —
+    // Pille zeigte um 19:47 noch eine Bestätigung für Plan b9a32d78, erledigt 15:10 UTC mit der Demo-Schätzung). Ersetzt F5
+    // (26.09.2026: erledigte Pläne mit Start-Balance las Puls bis 12 h nach dem Ende nach): wer „Erledigt" drückt, dessen P&L gilt
+    if(p.status === 'completed') return 'erledigt — Puls liest nicht mehr nach, der P&L am Plan gilt'
+    if(p.status !== 'review') return `Plan ist nicht in „Überprüfen" (Status ${p.status || '?'})`
     const fin = p.mt5Baseline && p.mt5Baseline.final
     if(!fin) return 'Plan hat noch kein Ende'
     if((typeof fin.today_pnl === 'number' && isFinite(fin.today_pnl)) || (typeof fin.balance_end === 'number' && isFinite(fin.balance_end)) || fin.quelle === 'puls') return 'Ende ist schon gelesen'
-    if(p.status === 'completed'){ const e = Date.parse(fin.at || p.endedAt || '') || 0; if(!e || jetzt - e > TV_NACHLESE_ERLEDIGT_MAX_MS) return 'erledigt und Ende über 12 h her — keine Nachlesung mehr' }
     const endeTag = fin.datum || tvV2Handelstag(fin.at || p.endedAt || jetzt)
     if(!mitBalance && tvV2Handelstag(jetzt) !== endeTag) return `Handelstag ${endeTag} ist vorbei — Today's P&L zählt inzwischen den neuen Tag`
     if(force) return ''
@@ -21074,7 +21125,6 @@
   }
   // Nachlesung ab (ms) — EINE Rechnung für Live Trades, Accounts-Balance und das Konto-Popup (26.09.2026, F3)
   const tvV2NachleseAb = (id, endeIso) => { const e = Date.parse(endeIso || '') || 0; return e ? e + tvV2NachleseMs(id) : 0 }
-  const TV_NACHLESE_ERLEDIGT_MAX_MS = 12 * 3600000   // erledigte Pläne: Nachlesung höchstens 12 h nach dem Ende (F5)
   /* FOLGETRADE (F5, Master 26.09.2026 nach Befund F4: „Hat ein späterer Plan desselben Kontos schon tv.balance_start, gilt der als
    * balance_end dieses Trades"). Die Start-Balance des nächsten Trades IST die End-Balance dieses — exakter als eine Nachlesung, die
    * nach bis zu 150 min schon den nächsten Trade mitzählen würde. REIN RECHNEND: frühester Orbit-V2-Plan desselben Kontos, der NACH
@@ -21101,7 +21151,7 @@
     let _tp = []; try{ _tp = tradePlans }catch(_){}
     jetzt = jetzt || Date.now()
     const p = (_tp || []).filter(x => x && planIstPuls(x) && String(x.masterAccountId) === String(accountId)
-        && (x.status === 'review' || (x.status === 'completed' && jetzt - (Date.parse(x.endedAt || '') || 0) <= TV_NACHLESE_ERLEDIGT_MAX_MS)))
+        && x.status === 'review')   // erledigt = fertig (29.09.2026): kein „aktualisiert in …" mehr
       .sort((a, b) => (Date.parse(b.endedAt || '') || 0) - (Date.parse(a.endedAt || '') || 0))[0]
     const b = p && p.mt5Baseline, fin = b && b.final
     if(!fin || !(b.tv && typeof b.tv.balance_start === 'number') || (typeof fin.balance_end === 'number' && isFinite(fin.balance_end))) return null
@@ -21139,7 +21189,7 @@
   }
   // Master-P&L aus der Balance nachtragen (aus tvV2EndlesungVersuch herausgezogen, F5 26.09.2026 — Lesung UND Folgetrade nutzen es).
   // Nur ein leeres Feld oder die Schätzung (TP/SL-Level, Vorbelegung) wird ersetzt; eine von Hand eingetragene Zahl bleibt, die
-  // Differenz zeigt Live Trades (P&L exakt). Gilt für „Überprüfen" UND erledigte Pläne. -> {m, res}
+  // Differenz zeigt Live Trades (P&L exakt). Nur „Überprüfen" — ein erledigter Plan behält seinen P&L (29.09.2026). -> {m, res}
   async function tvV2MasterPlAusBalance(pid, pBasis, fin0, neu){
     const i = tradePlans.findIndex(x => String(x.id) === pid)
     const planNeu = Object.assign({}, i >= 0 ? tradePlans[i] : pBasis, { mt5Baseline: neu })
@@ -21147,7 +21197,7 @@
     const m = res && res.masterPnl
     if(m != null){
       const sz = fin0 && fin0.master_pl_schaetzung
-      let q = supabase.from('trade_plans').update({ master_pl: m }).eq('id', pid).in('status', ['review', 'completed'])
+      let q = supabase.from('trade_plans').update({ master_pl: m }).eq('id', pid).eq('status', 'review')
       q = (typeof sz === 'number' && isFinite(sz)) ? q.or(`master_pl.is.null,master_pl.eq.${sz}`) : q.is('master_pl', null)
       const { data: d2, error: e2 } = await q.select('*')
       if(e2) console.warn('[endlesung] master_pl', e2.message || e2)
@@ -21229,15 +21279,15 @@
       const konto = tvV2Konto(p0)
       let _tp = []; try{ _tp = tradePlans }catch(_){}
       const mitBal = !!(p0.mt5Baseline.tv && typeof p0.mt5Baseline.tv.balance_start === 'number')
-      // Schreiben mit Status-Guard review ODER completed (F5: Erledigt vor der Nachlesung erlaubt; wechselt der Status während der Lesung, zweiter Versuch)
-      const finPatch = async patch => { let n = await baselinePatchIn(pid, 'final', patch, p0.status === 'completed' ? 'completed' : 'review'); if(!n && p0.status === 'review') n = await baselinePatchIn(pid, 'final', patch, 'completed'); return n }
+      // Schreiben nur mit Status-Guard review — drückt Finn während der Lesung „Erledigt", gilt sein P&L (erledigt = fertig, 29.09.2026)
+      const finPatch = patch => baselinePatchIn(pid, 'final', patch, 'review')
       const folge = mitBal ? tvV2FolgeBalance(p0, _tp) : null
       if(folge && folge.balance != null){
         // Folgetrade kennt die End-Balance schon — keine Puls-Lesung nötig
         let neuF = null
         try{ neuF = await finPatch({ balance_end: folge.balance, balance_quelle: 'folgetrade', folge_plan: folge.planId, puls_fehler: null, puls_at: new Date().toISOString() }) }
         catch(e){ return { ok: false, msg: 'Schreiben fehlgeschlagen: ' + String((e && e.message) || e) } }
-        if(!neuF) return { ok: false, msg: 'Plan weder in „Überprüfen" noch erledigt — nichts geschrieben' }
+        if(!neuF) return { ok: false, msg: 'Plan nicht mehr in „Überprüfen" (inzwischen erledigt?) — nichts geschrieben' }
         const rf = await tvV2MasterPlAusBalance(pid, p0, fin0, neuF)
         try{ renderTradePlans() }catch(_){}
         return { ok: true, msg: `Balance nachher aus dem Folgetrade (${folge.balance})${rf.m != null ? ' · Master-P&L ' + rf.m : ''}` }
@@ -21283,7 +21333,7 @@
       if(erg.ok && mitBal){ let _tp2 = []; try{ _tp2 = tradePlans }catch(_){}; const f2 = tvV2FolgeBalance(p0, _tp2); if(f2 && f2.balance != null) Object.assign(patch, { balance_end: f2.balance, balance_quelle: 'folgetrade', folge_plan: f2.planId, balance_gelesen: erg.balance }) }
       let neu = null
       try{ neu = await finPatch(patch) }catch(e){ console.warn('[endlesung] final-Patch', (e && e.message) || e); return { ok: false, msg: 'Schreiben fehlgeschlagen: ' + String((e && e.message) || e) } }
-      if(!neu) return { ok: false, msg: 'Plan weder in „Überprüfen" noch erledigt — nichts geschrieben' }
+      if(!neu) return { ok: false, msg: 'Plan nicht mehr in „Überprüfen" (inzwischen erledigt?) — nichts geschrieben' }
       if(erg.ok && erg.balance != null) tvKontoBalanceSchreiben(p0.masterAccountId, { balance: erg.balance, equity: erg.equity }, nowIso)   // Live-Balance am Konto
       // Einstiegs-Fill an tv.einstieg_fill, falls noch nicht da
       if(r && r.einstieg_fill && typeof r.einstieg_fill === 'object' && !(neu.tv && neu.tv.einstieg_fill)){
@@ -21357,7 +21407,11 @@
         if(p) tvV2EndlesungVersuch(p.id).catch(e => console.warn('[endlesung]', e))
       }
     }catch(e){ console.warn('[endlesung] Takt', e) }
-    setTimeout(tvV2EndlesungTakt, 60000 + Math.random() * 40000)
+    // Spätestens zur nächsten fälligen Bestätigung aufwachen (29.09.2026): die Puls-Pille zählt die letzten 10 s auf genau diese Zeit
+    // herunter — mit dem 60–100-s-Takt kam die Lesung bis zu 1,5 min nach der „0"
+    let warte = 60000 + Math.random() * 40000
+    try{ if(MT5_LOCAL){ const jetzt = Date.now(), t = pulsTermine(jetzt).find(x => x.art === 'Bestätigung' && x.t > jetzt); if(t) warte = Math.min(warte, t.t - jetzt + 500) } }catch(_){}
+    setTimeout(tvV2EndlesungTakt, warte)
   }
   setTimeout(tvV2EndlesungTakt, 30000 + Math.random() * 20000)
   /* DEMO-ENDE (27.09.2026, F21, Finn: „Wenn der Trade auf diesem Markt als erledigt ist, springt er unter den Live Trades auf Überprüfen.
@@ -36039,7 +36093,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.819'
+  const OS_TAB_BUILD = '2026-09-22.820'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -38800,7 +38854,7 @@
    *       — dieselbe Auswahl wie tpStartUmTick; überfällig über das Start-Fenster hinaus (10 min, Farmer 60 min) zählt nicht mehr,
    *       tpStartUmTick feuert solche Pläne nie (vorher stand dann ewig „jetzt")
    *   (2) Bestätigung: Puls-Plan nach dem Ende ohne gelesene Balance — Nachlesung ab tvV2NachleseAb, nach einem Fehlversuch
-   *       der nächste Versuch (TV_ENDLESUNG_PAUSE_S); aufgegeben/8 Versuche/erledigt > 12 h zählen nicht
+   *       der nächste Versuch (TV_ENDLESUNG_PAUSE_S); aufgegeben/8 Versuche/erledigt zählen nicht (erledigt = fertig, 29.09.2026)
    * Nur Anzeige, kein Takt, keine Entscheidung. */
   /* PULS LÄUFT GERADE (29.09.2026, Finn: „dass man oben sieht, wann Puls gerade eben aktiv ist … und am MacBook, wann die nächste
    * Puls-Order ist"). Screenshot 29.09.: Auto-Start-Panel „Puls füllt den Order-Dialog im Master-Terminal… (38s)", die Pille daneben
@@ -38813,28 +38867,45 @@
    * (b)+(c) und die geplanten Starts holt pulsFernLaden alle 15 s selbst (nur sichtbarer Tab): am Mac wird tradePlans nur beim
    * Login geladen, nachts angelegte Farmer-Pläne fehlten dort bis zum Neuladen. */
   const PULS_SIGNAL_MAX_MS = 10 * 60000, PULS_CLAIM_MAX_MS = 4 * 60000, PULS_FERN_MAX = 100
-  const _pulsFern = { at: 0, versuch: 0, laeuft: false, signale: [], plaene: null }
+  const _pulsFern = { at: 0, versuch: 0, laeuft: false, signale: [], plaene: null, review: null, reviewAt: 0 }
   const _pulsSeit = {}   // Quelle → erster Moment, in dem sie „läuft" meldete (die lokalen Riegel tragen keine Uhrzeit)
   const pulsStartFenster = p => (tpIstFarmerPlan(p) ? 60 : 10) * 60000
+  // Offene Bestätigungen frisch aus der DB (29.09.2026): Puls-Pläne in „Überprüfen" ohne End-Balance, schmal (nur was pulsTermine und
+  // die Karte brauchen) — am Mac rechnete die Pille mit dem Login-Stand von tradePlans und zeigte einen längst erledigten Plan
+  const PULS_REVIEW_MAX = 20
+  const PULS_REVIEW_SPALTEN = 'id,status,route,master_name,master_account_id,master_pl,ended_at,fin:mt5_baseline->final,tv_bs:mt5_baseline->tv->balance_start,tv_puls:mt5_baseline->tv->>puls'
+  const pulsReviewPlan = r => ({ id: r.id, status: r.status, route: r.route, masterName: r.master_name || '', masterAccountId: r.master_account_id,
+    masterPl: r.master_pl == null ? null : Number(r.master_pl), endedAt: r.ended_at || null,
+    mt5Baseline: { final: (r.fin && typeof r.fin === 'object') ? r.fin : null, tv: { balance_start: typeof r.tv_bs === 'number' ? r.tv_bs : null, puls: r.tv_puls || null } } })
   function pulsPlaene(jetzt){
     let _tp = []; try{ _tp = tradePlans || [] }catch(_){}
-    const f = _pulsFern.plaene
-    if(!f || jetzt - _pulsFern.at > 90000) return _tp
+    const f = (_pulsFern.plaene && jetzt - _pulsFern.at <= 90000) ? _pulsFern.plaene : null
+    const r = (_pulsFern.review && jetzt - _pulsFern.reviewAt <= 180000) ? _pulsFern.review : null
+    if(!f && !r) return _tp
     const grenze = jetzt - 65 * 60000
     // Frischer DB-Stand der geplanten Starts gewinnt: neue Pläne kommen dazu, ein lokal noch 'planned' geführter Plan, den die DB
     // nicht mehr als geplant kennt (gestartet, gelöscht), fällt raus — außer die Liste war am Deckel abgeschnitten
-    const frisch = new Map(f.map(p => [String(p.id), p]))
-    const voll = f.length < PULS_FERN_MAX
+    const frisch = new Map((f || []).map(p => [String(p.id), p]))
+    const voll = !!f && f.length < PULS_FERN_MAX
+    // Dasselbe für offene Bestätigungen: ein lokal noch in „Überprüfen" geführter Puls-Plan, den die DB nicht mehr als offen kennt
+    // (erledigt, schon gelesen), fällt raus
+    const rFrisch = new Map((r || []).map(p => [String(p.id), p]))
+    const rVoll = !!r && r.length < PULS_REVIEW_MAX
     const out = []
     for(const p of _tp){
       if(!p) continue
-      const id = String(p.id), fp = frisch.get(id)
+      const id = String(p.id), rp = rFrisch.get(id)
+      if(rp){ out.push(rp); rFrisch.delete(id); continue }
+      if(rVoll && p.status === 'review' && planIstPuls(p)) continue
+      if(!f){ out.push(p); continue }
+      const fp = frisch.get(id)
       if(fp && p.status === 'planned'){ out.push(fp); frisch.delete(id); continue }
       if(!fp && voll && p.status === 'planned' && p.startUm && (Date.parse(p.startUm) || 0) >= grenze) continue
       if(fp) frisch.delete(id)
       out.push(p)
     }
     for(const p of frisch.values()) out.push(p)
+    for(const p of rFrisch.values()) out.push(p)
     return out
   }
   function pulsTermine(jetzt){
@@ -38848,12 +38919,13 @@
         if(t && jetzt - t <= pulsStartFenster(p)) out.push({ t, art: 'Start', plan: p })
         continue
       }
-      if(!planIstPuls(p) || !(p.status === 'review' || p.status === 'completed')) continue
+      // erledigt = fertig (29.09.2026): nur „Überprüfen" — einen erledigten Plan liest Puls nicht mehr nach (tvV2EndlesungGrund)
+      if(!planIstPuls(p) || p.status !== 'review') continue
       const b = p.mt5Baseline || {}, fin = b.final
       if(!fin || !b.tv || typeof b.tv.balance_start !== 'number') continue
       if(typeof fin.balance_end === 'number' || typeof fin.today_pnl === 'number' || fin.quelle === 'puls' || fin.puls_aufgegeben) continue
       const ende = Date.parse(fin.at || p.endedAt || '') || 0
-      if(!ende || (p.status === 'completed' && jetzt - ende > TV_NACHLESE_ERLEDIGT_MAX_MS)) continue
+      if(!ende) continue
       const vers = Number(fin.puls_versuche) || (fin.puls_at ? 1 : 0)
       if(vers >= TV_ENDLESUNG_MAX) continue
       const letzte = Date.parse(fin.puls_at || '') || 0
@@ -38915,47 +38987,118 @@
     _pulsFern.versuch = Date.now()
     try{
       const ab = new Date(Date.now() - PULS_SIGNAL_MAX_MS).toISOString()
-      const [sig, pl] = await Promise.all([
+      const mitReview = Date.now() - _pulsFern.reviewAt >= 60000
+      const [sig, pl, rv] = await Promise.all([
         supabase.from('order_signale').select('id,plan_id,params,status,created_at').eq('user_id', uid)
           .in('status', ['wartet', 'laeuft']).gte('created_at', ab).order('created_at', { ascending: false }).limit(5),
         // ab 65 min vor jetzt: Farmer-Fenster 60 min + Claim-Dauer — ältere nie gefeuerte Pläne würden sonst den Deckel füllen
         supabase.from('trade_plans').select('*').eq('user_id', uid).eq('status', 'planned')
-          .gte('start_um', new Date(Date.now() - 65 * 60000).toISOString()).order('start_um', { ascending: true }).limit(PULS_FERN_MAX)
+          .gte('start_um', new Date(Date.now() - 65 * 60000).toISOString()).order('start_um', { ascending: true }).limit(PULS_FERN_MAX),
+        // offene Bestätigungen — 1× je Minute reicht, die Nachlese-Zeiten liegen minutengenau
+        mitReview ? supabase.from('trade_plans').select(PULS_REVIEW_SPALTEN).eq('user_id', uid).eq('status', 'review').in('route', ['tvv2', 'tsv2'])
+          .is('mt5_baseline->final->>balance_end', null).order('ended_at', { ascending: false }).limit(PULS_REVIEW_MAX) : null
       ])
       if(!sig.error) _pulsFern.signale = sig.data || []
+      if(rv && !rv.error){ _pulsFern.review = (rv.data || []).map(pulsReviewPlan); _pulsFern.reviewAt = Date.now() }
       if(!pl.error){ _pulsFern.plaene = (pl.data || []).map(r => { try{ return rowToPlan(r) }catch(_){ return null } }).filter(Boolean); _pulsFern.at = Date.now() }
     }catch(_){}
     finally{ _pulsFern.laeuft = false }
     try{ pulsNaechsterZeichnen() }catch(_){}
   }
   const pulsInText = ms => { const m = Math.ceil(ms / 60000); if(ms <= 30000) return 'jetzt'; if(m < 60) return 'in ' + m + ' min'; const h = Math.floor(m / 60), r = m % 60; return 'in ' + h + ' h' + (r ? ' ' + r + ' min' : '') }
+  const pulsUhr = t => new Date(t).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
+  const pulsDollar = v => `${v >= 0 ? '+' : '−'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $`
+  // Was Puls bei einem Termin tut -> { was, info[] } — für Hover-Karte und Countdown (29.09.2026)
+  function pulsTerminText(x){
+    const p = x.plan || {}, fin = (p.mt5Baseline && p.mt5Baseline.final) || {}
+    if(x.art === 'Start'){
+      let w = null; try{ w = tpOrbitWerte(p) }catch(_){}
+      const order = (w && w.dir) ? [w.dir.toUpperCase(), w.lots > 0 ? w.lots : '', w.symbol].filter(Boolean).join(' ') : ''
+      return { was: `${routeIstOrbit(p.route) ? 'Orbit' : 'Echo'}-Order platzieren${order ? ' · ' + order : ''}`,
+               info: [p.masterName || 'Konto', tpIstFarmerPlan(p) ? 'Winning-Day-Farmer' : 'geplanter Start'] }
+    }
+    const info = [p.masterName || 'Konto']
+    const ende = Date.parse(fin.at || p.endedAt || '') || 0
+    if(ende) info.push('Trade beendet ' + pulsUhr(ende))
+    const m = p.masterPl != null ? Number(p.masterPl) : NaN
+    if(isFinite(m)) info.push('P&L bisher ' + pulsDollar(m) + (typeof fin.master_pl_schaetzung === 'number' && Math.abs(m - fin.master_pl_schaetzung) < 0.005 ? ' (geschätzt)' : ''))
+    const vers = Number(fin.puls_versuche) || (fin.puls_at ? 1 : 0)
+    if(vers) info.push(`Versuch ${vers + 1}/${TV_ENDLESUNG_MAX}`)
+    info.push('entfällt mit „Erledigt"')
+    return { was: 'Profit prüfen · Balance in ' + pulsPlattform(p) + ' lesen', info }
+  }
+  /* COUNTDOWN (29.09.2026, Finn: „ganz dick von 10 runtergezählt, sodass man weiß: Okay, jetzt nichts bedienen … oder auf dem ganzen
+   * Bildschirm"). Die letzten 10 s vor dem nächsten Termin groß in der Pille und vollflächig (.puls-cd an body, Klicks gehen durch);
+   * danach „läuft" mit Sekunden, solange Puls arbeitet (höchstens 3 min nach dem Termin), sonst nach 15 s weg — am Mac sieht die
+   * Pille eine Nachlesung am PC nicht laufen. Nur wo die Pille sichtbar ist (Handy hochkant nicht) und im sichtbaren Tab. */
+  const PULS_CD_MS = 10000, PULS_CD_NACH_MS = 3 * 60000
+  let _pulsCd = null, _pulsCdEl = null   // _pulsCd: { ziel, text } des letzten Countdowns
+  function pulsCountdownZeigen(cd){
+    if(!cd){ if(_pulsCdEl && !_pulsCdEl.hidden){ _pulsCdEl.hidden = true; _pulsCdEl.classList.remove('is-an') } return }
+    if(!_pulsCdEl){
+      _pulsCdEl = document.createElement('div')
+      _pulsCdEl.className = 'puls-cd'; _pulsCdEl.hidden = true; _pulsCdEl.setAttribute('aria-hidden', 'true')
+      _pulsCdEl.innerHTML = '<div class="puls-cd-karte"><div class="puls-cd-lbl"></div><div class="puls-cd-zahl"></div><div class="puls-cd-was"></div>'
+        + '<div class="puls-cd-hinweis">Maus und Tastatur am PC jetzt nicht bedienen</div></div>'
+      document.body.appendChild(_pulsCdEl)
+    }
+    const setz = (sel, t) => { const e = _pulsCdEl.querySelector(sel); if(e && e.textContent !== t) e.textContent = t }
+    setz('.puls-cd-lbl', cd.lbl); setz('.puls-cd-zahl', cd.zahl); setz('.puls-cd-was', cd.was)
+    _pulsCdEl.classList.toggle('is-laeuft', !!cd.laeuft)
+    if(_pulsCdEl.hidden){ _pulsCdEl.hidden = false; requestAnimationFrame(() => { if(_pulsCdEl && !_pulsCdEl.hidden) _pulsCdEl.classList.add('is-an') }) }
+  }
   function pulsNaechsterZeichnen(){
     const el = document.getElementById('tb-puls'); if(!el) return
+    const karteEl = document.getElementById('tb-puls-karte')
     let uid = null; try{ uid = currentUserId }catch(_){}
-    if(!uid){ el.hidden = true; return }
+    if(!uid){ el.hidden = true; pulsCountdownZeigen(null); return }
     const jetzt = Date.now(), liste = pulsTermine(jetzt), n = liste[0], aktiv = pulsAktivJetzt(jetzt)
-    const uhr = t => new Date(t).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
-    const naechste = liste.slice(0, 6).map(x => `${uhr(Math.max(x.t, jetzt))} · ${x.art} · ${x.plan.masterName || 'Konto'}${x.t <= jetzt ? ' (fällig)' : ''}`)
-    let html, titel
-    if(aktiv){
-      const s = Math.max(0, Math.round((jetzt - aktiv.seit) / 1000))
-      html = `<span class="tb-puls-dot"></span><span class="tb-puls-lbl">Puls ${aktiv.wartet ? 'wartet' : 'läuft'} · </span><b>${aktiv.art} · ${s < 120 ? s + ' s' : Math.round(s / 60) + ' min'}</b>`
-      titel = `Puls arbeitet gerade: ${aktiv.art}${aktiv.name ? ' · ' + aktiv.name : ''} (${aktiv.wo}) — Maus und Tastatur am PC frei lassen`
-        + (naechste.length ? '\n\nDanach:\n' + naechste.join('\n') : '')
+    const zeile = (oben, unten, was, info) => `<div class="tpk-zeile"><div class="tpk-zeit"><b>${escapeHtml(oben)}</b><span>${escapeHtml(unten)}</span></div>`
+      + `<div class="tpk-was"><div class="tpk-titel">${escapeHtml(was)}</div><div class="tpk-info">${escapeHtml(info.filter(Boolean).join(' · '))}</div></div></div>`
+    const zeileTermin = x => { const tx = pulsTerminText(x); return zeile(pulsUhr(Math.max(x.t, jetzt)), x.t <= jetzt ? 'fällig' : pulsInText(x.t - jetzt), tx.was, tx.info) }
+    const s = aktiv ? Math.max(0, Math.round((jetzt - aktiv.seit) / 1000)) : 0
+    const dauer = s < 120 ? s + ' s' : Math.round(s / 60) + ' min'
+    const rest = n ? n.t - jetzt : Infinity
+    const zaehlt = !!n && rest > 0 && rest <= PULS_CD_MS
+    if(zaehlt){ const tx = pulsTerminText(n); _pulsCd = { ziel: n.t, text: tx.was + ' · ' + tx.info[0] } }
+    let html, karte
+    if(zaehlt){
+      html = `<span class="tb-puls-dot"></span><span class="tb-puls-lbl">Puls in </span><b>${Math.ceil(rest / 1000)}</b>`
+    } else if(aktiv){
+      html = `<span class="tb-puls-dot"></span><span class="tb-puls-lbl">Puls ${aktiv.wartet ? 'wartet' : 'läuft'} · </span><b>${aktiv.art} · ${dauer}</b>`
     } else if(!n){
       html = '<span class="tb-puls-dot"></span><span class="tb-puls-lbl">Puls · </span>nichts geplant'
-      titel = 'Kein geplanter Start und keine offene Bestätigung auf dieser ID'
     } else {
-      const rest = Math.max(0, n.t - jetzt)
-      html = `<span class="tb-puls-dot"></span><span class="tb-puls-lbl">Puls</span><span class="tb-puls-uhr"> · ${uhr(Math.max(n.t, jetzt))}</span><span class="tb-puls-lbl"> · </span><b>${pulsInText(rest)}</b>`
-      titel = 'Nächste Puls-Einsätze (Maus + TradingView frei lassen):\n' + naechste.join('\n')
+      html = `<span class="tb-puls-dot"></span><span class="tb-puls-lbl">Puls</span><span class="tb-puls-uhr"> · ${pulsUhr(Math.max(n.t, jetzt))}</span><span class="tb-puls-lbl"> · </span><b>${pulsInText(rest)}</b>`
     }
-    // Sekundentakt: nur anfassen, was sich geändert hat — sonst flackert der Tooltip
+    // Hover-Karte (29.09.2026, Finn: „wenn ich mit der Maus drüberfahre, dass ich immer sehe, was da gemacht wird") — ersetzt den
+    // title-Tooltip: je Termin Uhrzeit, was Puls tut, auf welchem Konto und warum
+    if(aktiv){
+      karte = `<div class="tpk-kopf is-aktiv"><span class="tpk-dot"></span>Puls ${aktiv.wartet ? 'wartet' : 'arbeitet gerade'}</div>`
+        + zeile(dauer, 'seit ' + pulsUhr(aktiv.seit), aktiv.art, [aktiv.name, aktiv.wo, aktiv.wartet ? '' : 'Maus und Tastatur am PC frei lassen'])
+        + (liste.length ? '<div class="tpk-kopf is-danach"><span class="tpk-dot"></span>Danach</div>' + liste.slice(0, 5).map(zeileTermin).join('') : '')
+    } else if(!n){
+      karte = '<div class="tpk-kopf"><span class="tpk-dot"></span>Puls</div><div class="tpk-leer">Kein geplanter Start und keine offene Bestätigung auf dieser ID.</div>'
+    } else {
+      karte = '<div class="tpk-kopf"><span class="tpk-dot"></span>Nächste Puls-Einsätze</div>' + liste.slice(0, 6).map(zeileTermin).join('')
+        + `<div class="tpk-fuss">${liste.length > 6 ? `+ ${liste.length - 6} weitere · ` : ''}Zu diesen Zeiten Maus und ${n.plan && n.plan.route === 'tsv2' ? 'TopstepX' : 'TradingView'} am PC frei lassen · Klick öffnet Trades</div>`
+    }
+    // Sekundentakt: nur anfassen, was sich geändert hat
     if(el.innerHTML !== html) el.innerHTML = html
-    if(el.title !== titel) el.title = titel
-    el.classList.toggle('is-aktiv', !!aktiv)
-    el.classList.toggle('is-bald', !aktiv && !!n && n.t - jetzt <= 10 * 60000)
+    if(karteEl && karteEl.innerHTML !== karte) karteEl.innerHTML = karte
+    el.classList.toggle('is-zaehlt', zaehlt)
+    el.classList.toggle('is-aktiv', !zaehlt && !!aktiv)
+    el.classList.toggle('is-bald', !zaehlt && !aktiv && !!n && rest <= 10 * 60000)
     el.hidden = false
+    let cd = null
+    if(!document.hidden && el.getClientRects().length){
+      if(zaehlt) cd = { lbl: 'Puls startet in', zahl: String(Math.ceil(rest / 1000)), was: _pulsCd.text }
+      else if(_pulsCd && jetzt - _pulsCd.ziel <= PULS_CD_NACH_MS){
+        if(aktiv && !aktiv.wartet) cd = { lbl: 'Puls läuft', zahl: dauer, was: [aktiv.art, aktiv.name].filter(Boolean).join(' · '), laeuft: true }
+        else if(jetzt - _pulsCd.ziel <= 15000) cd = { lbl: 'Puls startet', zahl: '0', was: _pulsCd.text }
+      }
+    }
+    pulsCountdownZeigen(cd)
   }
   window._pulsNaechsterZeichnen = pulsNaechsterZeichnen
   document.getElementById('tb-puls')?.addEventListener('click', () => { document.querySelector('#dashboard-view .sb-link[data-view="trades"]')?.click() })
@@ -43762,18 +43905,18 @@
       const msgEl = document.getElementById('tradeCompleteMsg')
       if(msgEl){
         msgEl.textContent = '✨ P&L automatisch erfasst — bitte prüfen & bestätigen'
-          + (_tcSchaetzung ? (_tcFin.quelle === 'demo' ? ' · Master-P&L geschätzt aus der Demo (TP/Liquidation) — Puls liest die Balance nach' : ' · Master-P&L geschätzt aus TP/SL-Level (Today\'s P&L nicht gelesen)') : (_tcFin && _tcFin.quelle === 'puls') ? ' · Master-P&L aus TradingView gelesen' : '')
+          + (_tcSchaetzung ? (_tcFin.quelle === 'demo' ? ' · Master-P&L geschätzt aus der Demo (TP/Liquidation)' : ' · Master-P&L geschätzt aus TP/SL-Level (Today\'s P&L nicht gelesen)') : (_tcFin && _tcFin.quelle === 'puls') ? ' · Master-P&L aus TradingView gelesen' : '')
         msgEl.className = 'modal-msg ok'
       }
     }
 
-    // Balance-Nachlesung steht noch aus (F5, 26.09.2026): Erledigt ist trotzdem möglich — Puls liest nach und trägt den P&L exakt
-    // nach (nur leeres Feld oder Schätzung). Ruhiger Hinweis, gleiche Rechnung wie Live Trades/Accounts (tvV2NachleseAb).
+    // Balance-Nachlesung steht noch aus (F5, 26.09.2026): Erledigt ist trotzdem möglich. Seit 29.09.2026 (Finn: erledigt = fertig)
+    // entfällt die Nachlesung damit — der Hinweis sagt das VOR dem Klick. Gleiche Rechnung wie Live Trades/Accounts (tvV2NachleseAb).
     { const b = p.mt5Baseline || {}, fin = b.final
-      if(planIstPuls(p) && fin && b.tv && typeof b.tv.balance_start === 'number' && !(typeof fin.balance_end === 'number' && isFinite(fin.balance_end)) && typeof tvV2NachleseAb === 'function'){
+      if(p.status === 'review' && planIstPuls(p) && fin && b.tv && typeof b.tv.balance_start === 'number' && !(typeof fin.balance_end === 'number' && isFinite(fin.balance_end)) && typeof tvV2NachleseAb === 'function'){
         const ab = tvV2NachleseAb(p.id, fin.at || p.endedAt), hEl = document.getElementById('tc-nachlese-hint')
         if(ab && hEl){
-          hEl.textContent = (fin.hinweis ? fin.hinweis + ' · ' : '') + (ab > Date.now() ? `Balance-Nachlesung ab ${new Date(ab).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} — P&L wird dann exakt nachgetragen` : 'Balance-Nachlesung läuft — P&L wird dann exakt nachgetragen')   // hinweis: Demo TP+Liq in einer Minute (F21)
+          hEl.textContent = (fin.hinweis ? fin.hinweis + ' · ' : '') + (ab > Date.now() ? `Puls liest die Balance ab ${new Date(ab).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} nach` : 'Puls liest die Balance gerade nach') + ' — mit „Erledigt" entfällt das, der P&L oben gilt'   // hinweis: Demo TP+Liq in einer Minute (F21)
           hEl.hidden = false
         }
       } else { const hEl = document.getElementById('tc-nachlese-hint'); if(hEl) hEl.hidden = true } }
