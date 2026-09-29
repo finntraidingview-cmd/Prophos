@@ -1756,6 +1756,7 @@
   #dashboard-view .type-phase1{background:rgba(247,144,9,.1);color:#b6690a}
   #dashboard-view .type-phase2{background:rgba(247,144,9,.18);color:#9a5a08}
   #dashboard-view .type-funded{background:var(--violet-tint);color:var(--violet)}
+  #dashboard-view .type-funded_cfd{background:rgba(73,150,255,.12);color:#1F6FD6}   /* Funded CFD (29.09.2026): Blau, getrennt vom Futures-Violett */
   #dashboard-view .type-winning_days{background:rgba(22,200,198,.14);color:#0E7A78}   /* Winning Days (25.09.2026): Teal wie die V2-Sticker */
   #dashboard-view .acc-wd-toggle{margin-left:6px;padding:2px 7px;border-radius:6px;border:1px dashed var(--border);background:transparent;color:var(--sub);font-size:10.5px;font-weight:600;cursor:pointer;white-space:nowrap;vertical-align:middle}
   #dashboard-view .acc-wd-toggle:hover{border-color:#0E7A78;color:#0E7A78;background:rgba(22,200,198,.08)}
@@ -5231,7 +5232,8 @@
                 <option value="challenge">Challenge</option>
                 <option value="phase1">Phase 1</option>
                 <option value="phase2">Phase 2</option>
-                <option value="funded">Funded</option>
+                <option value="funded">Funded Futures</option>
+                <option value="funded_cfd">Funded CFD</option>
                 <option value="winning_days">Winning Days</option>
                 <option value="live">Live</option>
               </select>
@@ -5486,7 +5488,8 @@
               <option value="challenge">Challenge</option>
               <option value="phase1">Phase 1</option>
               <option value="phase2">Phase 2</option>
-              <option value="funded">Funded</option>
+              <option value="funded">Funded Futures</option>
+              <option value="funded_cfd">Funded CFD</option>
               <option value="winning_days">Winning Days</option>
               <option value="live">Live</option>
             </select>
@@ -6097,7 +6100,8 @@
                   <option value="challenge">Challenge</option>
                 <option value="phase1">Phase 1</option>
                 <option value="phase2">Phase 2</option>
-                  <option value="funded">Funded</option>
+                  <option value="funded">Funded Futures</option>
+                  <option value="funded_cfd">Funded CFD</option>
                   <option value="live">Live</option>
                 </select>
               </div>
@@ -6114,7 +6118,8 @@
                   <option value="challenge">Challenge</option>
                 <option value="phase1">Phase 1</option>
                 <option value="phase2">Phase 2</option>
-                  <option value="funded">Funded</option>
+                  <option value="funded">Funded Futures</option>
+                  <option value="funded_cfd">Funded CFD</option>
                   <option value="live">Live</option>
                 </select>
               </div>
@@ -6559,7 +6564,8 @@
                 <option value="challenge">Challenge</option>
                 <option value="phase1">Phase 1</option>
                 <option value="phase2">Phase 2</option>
-                <option value="funded">Funded</option>
+                <option value="funded">Funded Futures</option>
+                <option value="funded_cfd">Funded CFD</option>
                 <option value="winning_days">Winning Days</option>
                 <option value="live">Live</option>
               </select>
@@ -7578,7 +7584,8 @@
               <option value="challenge">Challenge</option>
               <option value="phase1">Phase 1</option>
               <option value="phase2">Phase 2</option>
-              <option value="funded">Funded</option>
+              <option value="funded">Funded Futures</option>
+              <option value="funded_cfd">Funded CFD</option>
               <option value="winning_days">Winning Days</option>
               <option value="live">Live</option>
             </select>
@@ -7622,7 +7629,8 @@
               <option value="challenge">Challenge</option>
               <option value="phase1">Phase 1</option>
               <option value="phase2">Phase 2</option>
-              <option value="funded">Funded</option>
+              <option value="funded">Funded Futures</option>
+              <option value="funded_cfd">Funded CFD</option>
               <option value="winning_days">Winning Days</option>
               <option value="live">Live</option>
             </select>
@@ -9795,7 +9803,8 @@
             <option value="challenge">Challenge</option>
             <option value="phase1">Phase 1</option>
             <option value="phase2">Phase 2</option>
-            <option value="funded">Funded</option>
+            <option value="funded">Funded Futures</option>
+            <option value="funded_cfd">Funded CFD</option>
             <option value="winning_days">Winning Days</option>
             <option value="live">Live-Account</option>
           </select>
@@ -9943,6 +9952,15 @@
             <label>Payout anfragbar ab</label>
             <input class="input mono" id="ac-payout-ready" type="date" autocomplete="off">
             <div style="font-size:11px;color:var(--sub);margin-top:4px">Ab wann der nächste Payout angefragt werden kann. Steht auf der Account-Karte und im Admin-Kalender (Finanzen → Nächste Payouts). Beim Anfragen wird das Datum geleert — den nächsten Termin danach hier neu setzen.</div>
+          </div>
+          <!-- Waiting for Payout (29.09.2026, Finn: „der Account ist schon im Plus, wir warten nur auf den Payout") — nur bei
+               Funded CFD sichtbar (toggleAcBloecke), Spalte waiting_payout_since; beim Payout-Anfragen leert wartetPayoutClear(). -->
+          <div class="field" style="grid-column:1/-1" id="ac-wartet-payout-row" hidden>
+            <label style="display:flex;align-items:center;gap:9px;cursor:pointer;margin:0;padding:9px 12px;border:1px solid var(--border);border-radius:8px">
+              <input type="checkbox" id="ac-wartet-payout" style="width:16px;height:16px;flex-shrink:0">
+              <span style="font-weight:500">Waiting for Payout</span>
+              <span style="font-size:11.5px;color:var(--sub)">— Konto ist im Plus und wartet nur auf den Payout. Springt beim „Payout anfragen" von selbst zurück.</span>
+            </label>
           </div>
         </div>
       </div>
@@ -10098,7 +10116,8 @@
             <option value="phase1">Phase 1</option>
             <option value="phase2">Phase 2</option>
             <option value="challenge">Challenge</option>
-            <option value="funded">Funded</option>
+            <option value="funded">Funded Futures</option>
+            <option value="funded_cfd">Funded CFD</option>
             <option value="winning_days">Winning Days</option>
           </select>
         </div>
@@ -12490,7 +12509,7 @@
       const panel = $('adm-wert-panel'); if(!panel || !admData) return
       const tb = $('adm-wert-rows'), sums = $('adm-wert-sums'), pers = $('adm-wert-personen'), empty = $('adm-wert-empty')
       if(!tb || !sums || !pers) return
-      const rows = admFiltered().filter(r => (r.type === 'funded' || r.type === 'winning_days') && !r.archived)
+      const rows = admFiltered().filter(r => (r.type === 'funded' || r.type === 'funded_cfd' || r.type === 'winning_days') && !r.archived)
       tb.innerHTML = ''; sums.innerHTML = ''; pers.innerHTML = ''
       if(empty) empty.hidden = rows.length > 0
       const add = (m, c, v) => { if(v != null) m.set(c, (m.get(c) || 0) + v) }
@@ -12749,7 +12768,7 @@
      * Solange die View offen ist, alle 60 s neu (nur bei sichtbarem Tab).
      * ID-Farbe = mt5FleetFarbe(user_id), dieselbe wie in der Flotte der Live Trades. Reine Anzeige. */
     const AF_PHASEN = [['challenge', 'Challenge'], ['phase1', 'Phase 1'], ['phase2', 'Phase 2'],
-                       ['funded', 'Funded'], ['winning_days', 'Winning Days'], ['live', 'Live']]
+                       ['funded', 'Funded Futures'], ['funded_cfd', 'Funded CFD'], ['winning_days', 'Winning Days'], ['live', 'Live']]
     let afFirma = '', afPerson = '', afArch = false, afPhase = ''
     const afPhaseName = t => (AF_PHASEN.find(p => p[0] === t) || [t, t || 'Sonstige'])[1]
     const afFarbe = uid => typeof mt5FleetFarbe === 'function' ? mt5FleetFarbe(String(uid)) : admPersonColor(uid)
@@ -26880,16 +26899,18 @@
     else if(acc.type === 'phase1') suggested = `${acc.name} → Phase 2`
     else if(acc.type === 'phase2') suggested = `${acc.name} → Funded`
     else if(acc.type === 'challenge') suggested = `${acc.name} → Funded`  // Legacy
-    else if(acc.type === 'funded') suggested = `${acc.name} → Live`
+    else if(acc.type === 'funded' || acc.type === 'funded_cfd') suggested = `${acc.name} → Live`
     else if(acc.type === 'winning_days') suggested = `${acc.name} → Live`
     document.getElementById('suc-name').value = suggested
 
     // Default-Typ vorschlagen
     const sucType = document.getElementById('suc-type')
+    // Funded Futures / Funded CFD (29.09.2026) nach der Firma vorschlagen — Phase 2 ist fast immer CFD, Challenge fast immer Futures
+    const sucFunded = (typeof tpFirmIstFutures === 'function' && tpFirmIstFutures(acc.firm)) ? 'funded' : 'funded_cfd'
     if(acc.type === 'phase1') sucType.value = 'phase2'
-    else if(acc.type === 'phase2') sucType.value = 'funded'
-    else if(acc.type === 'challenge') sucType.value = 'funded'  // Legacy
-    else if(acc.type === 'funded' || acc.type === 'winning_days') sucType.value = 'live'
+    else if(acc.type === 'phase2') sucType.value = sucFunded
+    else if(acc.type === 'challenge') sucType.value = sucFunded  // Legacy
+    else if(acc.type === 'funded' || acc.type === 'funded_cfd' || acc.type === 'winning_days') sucType.value = 'live'
     else sucType.value = 'phase1'
     // Übergang Funded ⇄ Winning Days (25.09.2026, Finns vierte Kontoart): kein neues Konto, dieselbe Zeile wechselt die Art
     sucWdBlockRender(acc)
@@ -27186,6 +27207,8 @@
       goalManualLast: row.goal_manual_last || null,
       // Payout-Termin (15.09.2026): ab wann der nächste Payout angefragt werden kann
       payoutReadyAt:  row.payout_ready_at || null,
+      // Waiting for Payout (29.09.2026): seit wann, null = nein — nur Funded CFD
+      waitingPayoutSince: row.waiting_payout_since || null,
       creds: (row.cred_login || row.cred_password || row.cred_server || row.cred_platform || row.cred_notes) ? {
         login:    row.cred_login    || '',
         password: row.cred_password || '',
@@ -27233,7 +27256,8 @@
       goal_since:       a.goalSince      || null,
       goal_manual:      !!a.goalManual,
       goal_manual_last: a.goalManualLast || null,
-      payout_ready_at:  a.payoutReadyAt  || null
+      payout_ready_at:  a.payoutReadyAt  || null,
+      waiting_payout_since: a.waitingPayoutSince || null
     }
     if(a.creds){
       row.cred_login    = a.creds.login    || null
@@ -27307,6 +27331,8 @@
     wdTarget:      document.getElementById('ac-wd-target'),
     payoutReady:   document.getElementById('ac-payout-ready'),
     payoutSec:     document.getElementById('ac-payout-section'),
+    wartetPayout:    document.getElementById('ac-wartet-payout'),
+    wartetPayoutRow: document.getElementById('ac-wartet-payout-row'),
     maSec:    document.getElementById('ac-ma-section'),
     maTok:    document.getElementById('ac-ma-token'),
     maAcc:    document.getElementById('ac-ma-account'),
@@ -27326,7 +27352,8 @@
   }
   const typeLabel = t => {
     if(t === 'live') return 'Live'
-    if(t === 'funded') return 'Funded'
+    if(t === 'funded') return 'Funded Futures'
+    if(t === 'funded_cfd') return 'Funded CFD'   // 29.09.2026 (Finn): Funded für Futures und für CFD getrennt; 'funded' bleibt der Futures-Wert
     if(t === 'winning_days') return 'Winning Days'   // vierte Kontoart (25.09.2026): bestandenes Funded-Konto nach dem Big Trade
     if(t === 'phase1') return 'Phase 1'
     if(t === 'phase2') return 'Phase 2'
@@ -27701,7 +27728,7 @@
     if(h) todoHaken(h.dataset.todoId, h.checked)
   })
 
-  const ACC_TYPE_RANG = { challenge: 0, phase1: 1, phase2: 2, funded: 3, winning_days: 4, live: 5 }
+  const ACC_TYPE_RANG = { challenge: 0, phase1: 1, phase2: 2, funded: 3, funded_cfd: 3, winning_days: 4, live: 5 }
   /* Vierte Kontoart „Winning Days" (Finn 25.09.2026; Koordination: die Migration stellte nur ein Konto um, 94 Funded-Konten
    * muss Finn selbst zuordnen): kleiner Knopf neben dem Typ-Chip — bei Funded-Konten einer Futures-Firma „→ Winning Days",
    * bei Winning-Days-Konten „→ Funded". Schreibt account_type + Notiz-Zeile mit Datum auf DIESELBE Zeile (accWdUmstellen),
@@ -28044,6 +28071,9 @@
         // Payout-Termin (15.09.2026): "💸 Payout ab 22.09. · in 7 Tagen" / "anfragbar seit …"
         const payoutHtml = (typeof payoutReadyBadgeHtml === 'function') ? payoutReadyBadgeHtml(a) : ''
         if(payoutHtml) metaParts.push(payoutHtml)
+        // Waiting for Payout (29.09.2026): „⏳ Waiting for Payout · seit 3 Tagen"
+        const wartetHtml = (typeof wartetPayoutBadgeHtml === 'function') ? wartetPayoutBadgeHtml(a) : ''
+        if(wartetHtml) metaParts.push(wartetHtml)
         // Parent-/Successor-Chain
         if(parentAcc){
           metaParts.push(`<span style="color:var(--violet)">↳ Nachfolger von <a href="#" data-acc-jump="${escapeHtml(parentAcc.id)}" style="color:var(--violet);text-decoration:underline">${escapeHtml(parentAcc.name)}</a></span>`)
@@ -28255,6 +28285,7 @@
       if(accEls.wdCount)  accEls.wdCount.value  = editAccount.goalDoneOffset != null ? Math.max(0, editAccount.goalDoneOffset) : ''
       if(accEls.wdTarget) accEls.wdTarget.value = editAccount.goalTarget > 0 ? editAccount.goalTarget : ''
       if(accEls.payoutReady) accEls.payoutReady.value = editAccount.payoutReadyAt ? String(editAccount.payoutReadyAt).slice(0,10) : ''
+      if(accEls.wartetPayout) accEls.wartetPayout.checked = !!editAccount.waitingPayoutSince
       // MetaApi-Felder vorausfüllen wenn vorhanden
       accEls.maTok.value = editAccount.ma?.token     || ''
       accEls.maAcc.value = editAccount.ma?.accountId || ''
@@ -28283,6 +28314,7 @@
       if(accEls.wdCount)  accEls.wdCount.value  = ''
       if(accEls.wdTarget) accEls.wdTarget.value = ''
       if(accEls.payoutReady) accEls.payoutReady.value = ''
+      if(accEls.wartetPayout) accEls.wartetPayout.checked = false
     }
     // Passwort-Feld immer verdeckt starten
     // Passwort standardmäßig SICHTBAR (Finn, 15.08.2026) — Toggle kann weiter verbergen
@@ -28331,10 +28363,13 @@
     const typ  = accEls.type?.value || ''
     const istFutures = (typeof tpFirmIstFutures === 'function') ? tpFirmIstFutures(firm) : false
     const istPhase   = typ === 'challenge' || typ === 'phase1' || typ === 'phase2'
-    const istFunded  = typ === 'funded' || typ === 'winning_days'   // Winning Days (25.09.2026): bestandenes Funded-Konto, gleiche Blöcke
+    const istFunded  = typ === 'funded' || typ === 'funded_cfd' || typ === 'winning_days'   // Winning Days (25.09.2026): bestandenes Funded-Konto, gleiche Blöcke
+    // Funded CFD (29.09.2026) ist ausdrücklich CFD — Payout-Block auch dann, wenn die Firma in der Futures-Liste steht
+    const istCfd = typ === 'funded_cfd'
     if(accEls.goalSec)   accEls.goalSec.hidden   = !(istPhase && !istFutures)
-    if(accEls.wdSec)     accEls.wdSec.hidden     = !(istFunded && istFutures)
-    if(accEls.payoutSec) accEls.payoutSec.hidden = !(istFunded && !istFutures)
+    if(accEls.wdSec)     accEls.wdSec.hidden     = !(istFunded && istFutures && !istCfd)
+    if(accEls.payoutSec) accEls.payoutSec.hidden = !((istFunded && !istFutures) || istCfd)
+    if(accEls.wartetPayoutRow) accEls.wartetPayoutRow.hidden = !istCfd
     // Futures · Live (26.09.2026): nur Futures-Firma und nur beim Bearbeiten (ein neues Konto hat noch keine Lesung)
     const tvSec = document.getElementById('ac-tvlive-section'); if(tvSec) tvSec.hidden = !(istFutures && _editingAccountId)
     // „Im WD-Farm" nur beim Bearbeiten, nie beim Anlegen (F17-Ergänzung, 27.09.2026)
@@ -28491,6 +28526,8 @@
     const wdSecOn     = !!accEls.wdSec     && !accEls.wdSec.hidden
     const payoutSecOn = !!accEls.payoutSec && !accEls.payoutSec.hidden
     const payoutReadyVal = payoutSecOn ? (accEls.payoutReady?.value || null) : (vorher?.payoutReadyAt || null)
+    // Waiting for Payout (29.09.2026): nur Funded CFD; der alte Zeitstempel bleibt, solange der Haken bleibt
+    const wartetPayoutVal = (type === 'funded_cfd' && accEls.wartetPayout?.checked) ? (vorher?.waitingPayoutSince || new Date().toISOString()) : null
     const wdCountNum  = parseInt(accEls.wdCount?.value, 10)
     const wdTargetNum = parseInt(accEls.wdTarget?.value, 10)
     // Zugangsdaten einlesen (optional)
@@ -28538,6 +28575,7 @@
         goalManualLast: vorher?.goalManualLast || null
       }),
       payoutReadyAt:  payoutReadyVal,
+      waitingPayoutSince: wartetPayoutVal,
       wdFarm:         isEdit ? !!accEls.wdFarm?.checked : false,   // neue Konten nie im WD-Farm (F17-Ergänzung, 27.09.2026)
       creds: hasCreds ? credObj : null,
       createdAt: new Date().toISOString(),
@@ -28611,6 +28649,7 @@
           goal_manual:      acc.goalManual,
           goal_manual_last: acc.goalManualLast,
           payout_ready_at:  acc.payoutReadyAt,
+          waiting_payout_since: acc.waitingPayoutSince,
           // Zugangsdaten immer mit-updaten (auch Leeren möglich)
           cred_login:    acc.creds?.login    || null,
           cred_password: acc.creds?.password || null,
@@ -29516,7 +29555,7 @@
         const titel = si > 0 ? zlAlle[si - 1] : ''
         const gm = /\$\s*(\d+(?:[.,]\d+)?)\s*K\b/i.exec(teil)
         const typZeile = (/(CHALLENGE|FUNDED)[^\n]*/i.exec(teil) || [''])[0]
-        const typ = /funded/i.test(typZeile) ? 'funded' : /P2/i.test(typZeile) ? 'phase2' : /P1/i.test(typZeile) ? 'phase1' : 'challenge'
+        const typ = /funded/i.test(typZeile) ? 'funded_cfd' : /P2/i.test(typZeile) ? 'phase2' : /P1/i.test(typZeile) ? 'phase1' : 'challenge'
         const bi = zl.findIndex(x => /^current balance$/i.test(x)), bal = bi >= 0 && bi + 1 < zl.length ? bulkGeld(zl[bi + 1]) : null
         const nachher = roh.slice(m.index + m[0].length, m.index + m[0].length + 20), plat = (/\b(MT[45])\b/i.exec(nachher) || [])[1] || 'MT5'
         dazu(m.index, { id: m[1], titel, status: '', plattform: plat.toUpperCase(), firma: 'FundedNext', groesse: gm ? Math.round(parseFloat(gm[1].replace(',', '.')) * 1000) : null,
@@ -29547,7 +29586,7 @@
       return out.sort((a, b) => a.pos - b.pos).map(({ pos, ...b }) => b)
     }
     window._bulkDashboardParsen = bulkDashboardParsen   // Test-Haken
-    const bulkTypLabel = t => ({ funded: 'Funded', challenge: 'Challenge', phase1: 'Phase 1', phase2: 'Phase 2', winning_days: 'Winning Days', live: 'Live' })[t] || t || '?'
+    const bulkTypLabel = t => ({ funded: 'Funded Futures', funded_cfd: 'Funded CFD', challenge: 'Challenge', phase1: 'Phase 1', phase2: 'Phase 2', winning_days: 'Winning Days', live: 'Live' })[t] || t || '?'
     // Vorlage eines Blocks: von Hand gewählt (bulkPaste.vorlage) oder automatisch über Präfix/Titel (F12)
     function bulkPasteVorlage(x){
       if(bulkPaste.vorlage.has(x.id)){ const id = bulkPaste.vorlage.get(x.id); return id ? (bulkZentral.find(z => String(z.id) === String(id)) || null) : null }
@@ -30636,10 +30675,11 @@
       return sum + v
     }, 0)
     const breakdown = []
-    const counts = { live:0, funded:0, winning_days:0, challenge:0, phase1:0, phase2:0 }
+    const counts = { live:0, funded:0, funded_cfd:0, winning_days:0, challenge:0, phase1:0, phase2:0 }
     accounts.forEach(a => { counts[a.type] = (counts[a.type]||0) + 1 })
     if(counts.live)      breakdown.push(`${counts.live} Live`)
-    if(counts.funded)    breakdown.push(`${counts.funded} Funded`)
+    if(counts.funded)    breakdown.push(`${counts.funded} Funded Futures`)
+    if(counts.funded_cfd) breakdown.push(`${counts.funded_cfd} Funded CFD`)
     if(counts.winning_days) breakdown.push(`${counts.winning_days} Winning Days`)
     if(counts.phase1)    breakdown.push(`${counts.phase1} Phase 1`)
     if(counts.phase2)    breakdown.push(`${counts.phase2} Phase 2`)
@@ -35807,7 +35847,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.803'
+  const OS_TAB_BUILD = '2026-09-22.804'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -40612,7 +40652,7 @@
     return f.includes('tradeify') ? 'tradeify' : f.includes('apex') ? 'apex' : f.includes('topstep') ? 'topstep' : 'sonst'
   }
   // Kontoart 'winning_days' (25.09.2026, Finn: vierte Kontoart „Winning Days") zählt überall als Funded; tpIstWinningDays ist das Geschwister
-  function tpVorplanIstFunded(acc){ const t = String((acc && acc.type) || '').toLowerCase(); return t === 'funded' || t === 'live' || t === 'winning_days' }
+  function tpVorplanIstFunded(acc){ const t = String((acc && acc.type) || '').toLowerCase(); return t === 'funded' || t === 'funded_cfd' || t === 'live' || t === 'winning_days' }
   function tpIstWinningDays(acc){ return String((acc && acc.type) || '').toLowerCase() === 'winning_days' }
   function tpVorplanSpanne(von, bis){ const v = Math.max(0, Number(von) || 0); return [v, Math.max(v, Number(bis) || v)] }
   // Staffel: „wie viel auf der Balance drauf ist" ($, = Live-Balance − Kontogröße) → Slave-Betrag (€).
@@ -43179,6 +43219,41 @@
     }
   }
 
+  /* Waiting for Payout (29.09.2026, Finn: „der Account ist schon im Plus, wir warten hier nur auf den Payout") — von Hand im
+   * Account-Modal gesetzt (nur Funded CFD), Tage in Berlin-Kalendertagen wie payoutReadyInfo. Reine Anzeige, kein Urteil. */
+  function wartetPayoutBadgeHtml(a){
+    if(!a || !a.waitingPayoutSince || a.type !== 'funded_cfd') return ''
+    const t = new Date(a.waitingPayoutSince); if(isNaN(t)) return ''
+    const tag = t.toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' })
+    const tage = Math.max(0, Math.round((Date.parse(_deTodayStr() + 'T12:00:00Z') - Date.parse(tag + 'T12:00:00Z')) / 86400000))
+    const rel = tage === 0 ? 'seit heute' : tage === 1 ? 'seit gestern' : `seit ${tage} Tagen`
+    const lang = t.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Europe/Berlin' })
+    return `<span style="color:#1F6FD6;font-weight:600" title="Waiting for Payout seit ${lang} — springt beim Payout-Anfragen zurück">⏳ Waiting for Payout · ${rel}</span>`
+  }
+
+  /* Payout angefragt → „Waiting for Payout" ist erledigt (29.09.2026, Finn: „wenn ich den Payout anfrage, markiere ich ihn
+   * als abgehakt, und dieses Feld resetet sich automatisch"). Läuft an denselben zwei Stellen wie payoutReadyClear
+   * (Anfrage-Flow + Direktbuchung), per await NACH ihm — zwei gleichzeitige Updates derselben Zeile könnten sich im
+   * lokalen accounts-Stand überholen. Fehler werden BENANNT (Toast mit Handgriff). */
+  async function wartetPayoutClear(accountId){
+    if(!accountId) return
+    const a = (accounts || []).find(x => String(x.id) === String(accountId))
+    if(!a || !a.waitingPayoutSince) return
+    try{
+      const { data, error } = await supabase
+        .from('accounts').update({ waiting_payout_since: null }).eq('id', a.id).select('*').single()
+      if(error) throw error
+      const idx = accounts.findIndex(x => String(x.id) === String(a.id))
+      if(idx >= 0) accounts[idx] = rowToAccount(data)
+      if(typeof renderAccounts === 'function') renderAccounts()
+      if(typeof atToast === 'function') atToast(`⏳ Waiting for Payout zurückgesetzt · ${a.name}`, 'end')
+    }catch(e){
+      console.warn('[payout] Waiting for Payout leeren fehlgeschlagen:', e.message || e)
+      if(typeof atToast === 'function')
+        atToast(`⚠ „Waiting for Payout" für ${a.name} nicht zurückgesetzt — im Account-Modal den Haken von Hand rausnehmen`, 'end')
+    }
+  }
+
   /* Toast "Winning Day abgehakt" nach Trade-Ende — einmal pro Account pro Tag
    * (localStorage-Merker, alles nicht von heute wird weggeräumt). Hängt an
    * allen drei Fertig-Pfaden: Server-Wächter-Poll (planPollTick), Browser-
@@ -45014,7 +45089,7 @@
     const panel = document.getElementById('fin-status-panel')
     if(!panel) return
     const arch = (typeof getArchive === 'function') ? getArchive() : {}
-    const list = (accounts || []).filter(a => (a.type === 'funded' || a.type === 'winning_days') && !arch[a.id]?.archived)   // Winning Days (25.09.2026) zahlen aus wie Funded
+    const list = (accounts || []).filter(a => (a.type === 'funded' || a.type === 'funded_cfd' || a.type === 'winning_days') && !arch[a.id]?.archived)   // Winning Days (25.09.2026) zahlen aus wie Funded
     if(!list.length){ panel.hidden = true; return }
     const rows = list.map(a => {
       const pi = (typeof payoutReadyInfo === 'function') ? payoutReadyInfo(a) : null
@@ -45030,6 +45105,9 @@
         sort = ready ? -1e9 : (f.target - f.count) * 1000
         html = (typeof zielBadgeHtml === 'function') ? zielBadgeHtml(a) : ''
       }
+      // Waiting for Payout (29.09.2026): steht vor Termin/Ziel, sortiert direkt hinter die anfragbaren
+      const wp = (typeof wartetPayoutBadgeHtml === 'function') ? wartetPayoutBadgeHtml(a) : ''
+      if(wp){ html = (pi || f) ? `${wp} <span style="color:var(--sub)">·</span> ${html}` : wp; if(!ready) sort = Math.min(sort, -1e6) }
       return { a, html, ready, sort }
     })
     rows.sort((x, y) => (x.ready === y.ready ? x.sort - y.sort : (x.ready ? -1 : 1)) || x.a.name.localeCompare(y.a.name))
@@ -45211,7 +45289,7 @@
     // aufblähen, Finn hat hunderte Accounts insgesamt).
     const accountSel = document.getElementById('fin-account')
     const finArchive = (typeof getArchive === 'function') ? getArchive() : {}
-    const finFundedAccounts = accounts.filter(a => (a.type === 'funded' || a.type === 'winning_days') && !finArchive[a.id]?.archived)   // Winning Days (25.09.2026) zahlen aus wie Funded
+    const finFundedAccounts = accounts.filter(a => (a.type === 'funded' || a.type === 'funded_cfd' || a.type === 'winning_days') && !finArchive[a.id]?.archived)   // Winning Days (25.09.2026) zahlen aus wie Funded
     // Live-Balance pro Account ans Dropdown hängen, damit Finn bei vielen fast
     // gleich benannten Accounts den richtigen zuordnen kann (Priorität TSX > MT5 > Duplikum).
     const finLiveBalStr = (a) => {
@@ -45346,6 +45424,8 @@
         if(typeof zielPayoutReset === 'function') await zielPayoutReset(accountId)
         // Payout-Termin ist verbraucht (15.09.2026) — leeren, nächsten setzt Finn
         if(typeof payoutReadyClear === 'function') await payoutReadyClear(accountId)
+        // Waiting for Payout ist mit der Anfrage erledigt (29.09.2026)
+        if(typeof wartetPayoutClear === 'function') await wartetPayoutClear(accountId)
       }catch(e){
         msgEl.textContent = 'Fehler: ' + (e.message || e); msgEl.className = 'modal-msg err'
       }
@@ -45376,6 +45456,7 @@
       // hierüber (finReceivePending) und resettet bewusst nicht nochmal.
       if(kind === 'payout' && typeof zielPayoutReset === 'function') await zielPayoutReset(accountId)
       if(kind === 'payout' && typeof payoutReadyClear === 'function') await payoutReadyClear(accountId)
+      if(kind === 'payout' && typeof wartetPayoutClear === 'function') await wartetPayoutClear(accountId)
     }catch(e){
       msgEl.textContent = 'Fehler: ' + (e.message || e); msgEl.className = 'modal-msg err'
     }

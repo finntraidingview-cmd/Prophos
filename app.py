@@ -4742,7 +4742,10 @@ def _hq_typ(acc):
     accounts_winning_days.sql — ein Funded-Konto nach bestandenem Big Trade) heißt in der Statistik
     'wd', wie die Winning-Day-Trades der Hedge-Ära (Faustregel in _hq_typ_trade)."""
     t = str(acc.get("account_type") or "").strip().lower() or "—"
-    return "wd" if t == "winning_days" else t
+    # 'funded_cfd' (29.09.2026, Funded CFD getrennt von Funded Futures, sql/2026-09-29_accounts_funded_cfd.sql) zählt in der
+    # Statistik weiter als 'funded' — Gruppen „Firma|funded" und HQ_ZIELE bleiben, alte Trades der 31 umgestellten
+    # CFD-Konten springen nicht in eine neue Gruppe.
+    return "wd" if t == "winning_days" else "funded" if t == "funded_cfd" else t
 
 
 # Winning Day als eigener Typ (25.09.2026, Finn am Statistik-Tab: „bei Tradeify Funded sollte es auch grob
@@ -4764,7 +4767,7 @@ def _hq_typ_trade(acc, plan):
     Mikes Funded-Trade 2ff62bb5 lief als Winning Day, weil sein Konto Stunden später auf 'winning_days' umgestellt wurde.
     Ohne konto_typ (Spalte fehlt / Altbestand) wie bisher der heutige Kontotyp."""
     kt = str((plan or {}).get("konto_typ") or "").strip().lower()
-    typ = ("wd" if kt == "winning_days" else kt) if kt else _hq_typ(acc)
+    typ = ("wd" if kt == "winning_days" else "funded" if kt == "funded_cfd" else kt) if kt else _hq_typ(acc)
     # Kontotyp 'winning_days' (25.09.2026) schlägt alles: jeder Trade auf so einem Konto ist ein Winning Day —
     # der Erledigt-Haken und die Risiko-Faustregel gelten nur noch für Konten, die (noch) 'funded' heißen
     # (Hedge-Ära-Bestand, dessen Konten damals nicht umgestellt waren).
