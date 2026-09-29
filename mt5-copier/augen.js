@@ -23,7 +23,7 @@
  */
 var PROPHOS_AUGEN = (function () {
   'use strict';
-  var VERSION = '0.3.0';   // 0.3.0 (29.09.2026, erste echte Lesung pc-usq1i6): TP/SL-Zustand, Konto-Leiste, Toast-Rückfall   // 0.2.0 (29.09.2026): Vertrag mit T3 — globalThis.prophosAugen, Schlüssel-Whitelist, popups, kauf_knopf
+  var VERSION = '0.4.0';   // 0.4.0 (29.09.2026, K1–K4 für T3): positionen, orders, konto_summary, symbolsuche, toasts.meldungen   // 0.3.0 (29.09.2026, erste echte Lesung pc-usq1i6): TP/SL-Zustand, Konto-Leiste, Toast-Rückfall   // 0.2.0 (29.09.2026): Vertrag mit T3 — globalThis.prophosAugen, Schlüssel-Whitelist, popups, kauf_knopf
 
   // ── Grundwerkzeuge ─────────────────────────────────────────────────────────
   function sichtbar(el) {
@@ -314,10 +314,173 @@ var PROPHOS_AUGEN = (function () {
     var togA = tog ? (attr(tog, 'aria-label') || attr(tog, 'title')) : '';
     var panel = tog ? (/open|öffnen|oeffnen|einblenden|show/i.test(togA) ? 'zu' : /close|schlie|ausblenden|hide|minim/i.test(togA) ? 'offen' : 'unklar') : null;
     var schalter = s.el ? kurz(s.el, { quelle: s.quelle }) : null;
-    return { schalter: schalter, aktiv: s.el ? txt(s.el).slice(0, 60) : '', eintraege: eintraege, treffer: treffer, notiz: s.notiz,
+    var aktivText = s.el ? txt(s.el).slice(0, 60) : '';
+    eintraege.forEach(function (e) {
+      var n1 = String(e.text || '').replace(/[^a-z0-9]/gi, '').toUpperCase(), n2 = aktivText.replace(/[^a-z0-9]/gi, '').toUpperCase();
+      e.aktiv = e['aria-selected'] === 'true' || e['aria-checked'] === 'true' || (!!n1 && !!n2 && (n1.indexOf(n2) >= 0 || n2.indexOf(n1) >= 0));
+    });
+    return { schalter: schalter, aktiv: aktivText, liste_offen: eintraege.length > 0, eintraege: eintraege, treffer: treffer, notiz: s.notiz,
              broker: mgr.el ? txt(mgr.el).slice(0, 30) : (leiste ? txt(leiste).slice(0, 30) : ''), manager_knopf: mgr.el ? kurz(mgr.el) : null,
              panel: panel, panel_knopf: tog && sichtbar(tog) ? kurz(tog) : null,
              hinweis: (!s.el && !treffer.length && panel === 'zu') ? 'Broker-Panel zu — Kontonummer nicht sichtbar (panel_knopf öffnet es)' : null };
+  }
+
+
+  // ── Zahlen DE/EN (wie zahlAusText im Reader / tv_zahl_lesen im Bot) ─────────
+  function zahl(t) {
+    var z = String(t == null ? '' : t).replace(/−/g, '-').replace(/[^\d.,\-]/g, '');
+    if (!/\d/.test(z)) return null;
+    if (z.indexOf(',') >= 0 && z.indexOf('.') >= 0) {
+      var dez = z.lastIndexOf(',') > z.lastIndexOf('.') ? ',' : '.';
+      z = z.split(dez === ',' ? '.' : ',').join('').replace(dez, '.');
+    } else if (/^-?\d{1,3}([.,]\d{3})+$/.test(z)) z = z.replace(/[.,]/g, '');
+    else z = z.replace(',', '.');
+    var n = Number(z);
+    return isFinite(n) ? n : null;
+  }
+  function seiteNorm(t) {
+    var u = String(t || '').trim().toLowerCase();
+    if (/^(buy|kauf|long)/.test(u)) return 'buy';
+    if (/^(sell|verkauf|short)/.test(u)) return 'sell';
+    return null;
+  }
+
+  // ── Tabellen: Positionen + Orders (td[data-label], Spaltennamen wie im Reader) ─
+  var SP = {
+    symbol: ['Symbol'], seite: ['Seite', 'Side'], menge: ['Menge', 'Anz.', 'Anzahl', 'Qty', 'Quantity'],
+    avg: ['Durchschn. Ausführungspreis', 'Durchschnittlicher Erfüllungspreis', 'Ø Ausführungspreis', 'Avg Fill Price', 'Avg. Fill Price'],
+    pnl: ['Unrealisierter G&V', 'Profit', 'Unrealized P&L', 'P&L', 'G&V'],
+    typ: ['Typ', 'Type', 'Auftragsart', 'Order Type'], status: ['Status'],
+    preis: ['Limitpreis', 'Limit-Preis', 'Limit Price', 'Preis', 'Price', 'Stopp-Preis', 'Stop Price'],
+    id: ['Order-ID', 'Order ID', 'Auftrags-ID', 'Auftragsnummer', 'Order Id']
+  };
+  function sp(z, namen) { for (var i = 0; i < namen.length; i++) { var v = z[namen[i]]; if (v != null && String(v).trim() !== '') return String(v).trim(); } return null; }
+  var RX_ZU = /close|schlie(ß|ss)en|flatten|glattstellen|cancel|stornieren|abbrechen|^[×✕✖]$/i;
+  function zeilenKnopf(tr, rx) {
+    var k = alle('button,[role="button"],[data-name],[aria-label],[title]', tr).filter(function (e) {
+      return rx.test(attr(e, 'aria-label') + ' ' + attr(e, 'title') + ' ' + attr(e, 'data-name') + ' ' + txt(e));
+    });
+    k = k.filter(function (e) { return !k.some(function (f) { return f !== e && e.contains(f); }); });
+    var sicht = k.filter(sichtbar);
+    return sicht.length === 1 ? kurz(sicht[0]) : sicht.length ? { mehrdeutig: sicht.length } : (k.length ? { versteckt: k.length } : null);
+  }
+  function tabellen() {
+    var zeilen = [];
+    var map = new Map();
+    alle('td[data-label]').forEach(function (td) {
+      var tr = td.closest('tr'); if (!tr) return;
+      if (!map.has(tr)) { map.set(tr, {}); zeilen.push(tr); }
+      map.get(tr)[attr(td, 'data-label')] = txt(td);
+    });
+    var pos = [], ord = [];
+    zeilen.forEach(function (tr) {
+      var z = map.get(tr), symbol = sp(z, SP.symbol);
+      if (!symbol) return;
+      var istOrder = !!(sp(z, SP.status) || sp(z, SP.id) || (sp(z, SP.typ) && !sp(z, SP.pnl)));
+      var basis = { symbol: symbol, seite: seiteNorm(sp(z, SP.seite)), menge: zahl(sp(z, SP.menge)), zeile_rect: sichtbar(tr) ? rect(tr) : null,
+                    sichtbar: sichtbar(tr), spalten: z };
+      if (istOrder) {
+        basis.typ = sp(z, SP.typ); basis.preis = zahl(sp(z, SP.preis)); basis.status = sp(z, SP.status);
+        basis.cancel = zeilenKnopf(tr, /cancel|stornieren|abbrechen|^[×✕✖]$/i);
+        ord.push(basis);
+      } else {
+        basis.avg = zahl(sp(z, SP.avg)); basis.pl_text = sp(z, SP.pnl);
+        basis.close = zeilenKnopf(tr, RX_ZU);
+        pos.push(basis);
+      }
+    });
+    // „keine Position" vs „nicht lesbar" (T3 29.09.2026): ist ein Tabellenkopf der Art überhaupt sichtbar?
+    var koepfe = alle('th,[role="columnheader"]').filter(sichtbar).map(function (h) { return txt(h); });
+    function kopfHat(namen) { return koepfe.some(function (k) { return namen.some(function (n) { return k.indexOf(n) === 0; }); }); }
+    var posSicht = pos.some(function (z) { return z.sichtbar; }) || kopfHat(SP.avg.concat(['Unrealized', 'Unrealisiert', 'Avg']));
+    var ordSicht = ord.some(function (z) { return z.sichtbar; }) || kopfHat(SP.status.concat(SP.id, ['Limit Price', 'Limitpreis', 'Stop Price']));
+    return { positionen: pos.slice(0, 20), orders: ord.slice(0, 20), positionen_sichtbar: posSicht, orders_sichtbar: ordSicht };
+  }
+
+  // ── Konto-Zusammenfassung (Label → Wert im Account Manager; Reader liesZusammenfassung) ─
+  var RX_WERT = /^\(?\s*[+\-−–]?\s*(?:[$€£]|USD|EUR|GBP|CHF)?\s*[+\-−–]?\d[\d.,\s ']*\s*(?:%|USD|EUR|GBP|CHF|\$|€|£)?\s*\)?$/;
+  function istWert(t) { return t.length >= 1 && t.length <= 24 && /\d/.test(t) && RX_WERT.test(t); }
+  function istLabel(t) { return t.length >= 2 && t.length <= 40 && /[A-Za-zÄÖÜäöüß]/.test(t) && !/\d{4,}/.test(t); }
+  function geldZahl(t) {
+    var s0 = String(t || '').trim(), neg = /^\(.*\)$/.test(s0) || /^[\-−–]/.test(s0.replace(/^[\s($€£A-Z]+/, ''));
+    var n = zahl(s0.replace(/[()]/g, ''));
+    return n == null ? null : (neg && n > 0 ? -n : n);
+  }
+  function zusammenfassung() {
+    var paare = {}, n = 0;
+    function setze(l, v) { l = String(l || '').replace(/[:\s]+$/, '').trim(); v = String(v || '').trim(); if (!l || !v || paare[l] !== undefined || n >= 40) return; paare[l] = v; n++; }
+    var zmap = new Map();
+    alle('td[data-label]').forEach(function (td) { var tr = td.closest('tr'); if (!tr) return; if (!zmap.has(tr)) zmap.set(tr, []); zmap.get(tr).push([attr(td, 'data-label'), txt(td)]); });
+    zmap.forEach(function (zellen) {
+      if (zellen.some(function (c) { return SP.symbol.indexOf(c[0]) >= 0 || SP.seite.indexOf(c[0]) >= 0; })) return;
+      zellen.forEach(function (c) { if (istLabel(c[0]) && istWert(c[1])) setze(c[0], c[1]); });
+    });
+    // Panel zu: dann nur die Fußleiste (#footer-chart-panel) — stehen dort Balance/Equity, kommen sie mit, sonst null (T3 29.09.2026)
+    var wurzel = document.querySelector('[data-name="account-manager"],[data-name^="account-manager"],[class*="accountManager"]') || document.getElementById('footer-chart-panel');
+    if (wurzel) {
+      var w = wurzel, st = 0;
+      while (w.parentElement && w !== document.body && st < 12) { var r = w.getBoundingClientRect(); if (r.height >= 120 && r.width >= window.innerWidth * 0.4) break; w = w.parentElement; st++; }
+      alle('*', w).slice(0, 6000).forEach(function (el) {
+        if (n >= 40 || el.children.length || el.closest('table,script,style,input,textarea')) return;
+        var t = txt(el); if (!t || t.length > 70) return;
+        var m = t.match(/^([^:\d]{2,40}):\s*(.+)$/);
+        if (m && istLabel(m[1].trim()) && istWert(m[2].trim())) { setze(m[1], m[2]); return; }
+        if (!istLabel(t)) return;
+        var p = el.parentElement, kand = [el.nextElementSibling, el.previousElementSibling];
+        if (p) { for (var i = 0; i < p.children.length; i++) if (p.children[i] !== el && kand.indexOf(p.children[i]) < 0) kand.push(p.children[i]); kand.push(p.nextElementSibling, p.previousElementSibling); }
+        for (var j = 0; j < kand.length; j++) { var k = kand[j]; if (!k || k === el) continue; var v = txt(k); if (!v || v.length > 40) continue; if (istWert(v)) { setze(t, v); break; } if (istLabel(v) && k.parentElement === p) break; }
+      });
+    }
+    if (!n) return null;
+    function nimm(rx, nicht) { for (var l in paare) { if (rx.test(l) && !(nicht && nicht.test(l))) return { label: l, text: paare[l], wert: geldZahl(paare[l]) }; } return null; }
+    var UNREAL = /unreal|nicht\s*real|offen|open/i;
+    return { balance: nimm(/^(account\s*)?balance$|kontostand|saldo|guthaben|^balance/i), equity: nimm(/equity|eigenkapital|net\s*liq|netto-?liquid/i),
+             realisiert: nimm(/realized|realisiert/i, UNREAL), unrealisiert: nimm(/unrealized|unrealisiert|nicht\s*realisiert|open\s*p/i),
+             today_pnl: nimm(/today|heutig|tages/i, UNREAL), texte: paare };
+  }
+
+  // ── Symbolsuche (Kopfleiste + Such-Dialog) ─────────────────────────────────
+  function symbolsuche() {
+    var k = suche([{ q: 'id:header-toolbar-symbol-search', sel: '#header-toolbar-symbol-search' }, { q: 'aria:Symbol', sel: 'button[aria-label^="Symbol"]' }]);
+    var dlg = document.querySelector('[data-name="symbol-search-items-dialog"]');
+    var f = suche([{ q: 'data-role:search', sel: 'input[data-role="search"]' }, { q: 'dialog>input', sel: '[data-name="symbol-search-items-dialog"] input' },
+                   { q: 'aria/placeholder:Suche', sel: 'input[aria-label*="uch"], input[placeholder*="uch"], input[aria-label*="earch"], input[placeholder*="earch"]' }]);
+    var treffer = [];
+    if (dlg && sichtbar(dlg)) {
+      var gesehen = [];
+      alle('*', dlg).forEach(function (e) {
+        if (treffer.length >= 20 || e.children.length || !sichtbar(e)) return;
+        var t = txt(e);
+        if (!/^[A-Z][A-Z0-9!.]{1,11}$/.test(t)) return;          // Symbol-artiger Text (MNQZ2026, NQ1!, MNQ)
+        var zeile = e.closest('[role="row"],[role="option"],[data-role="list-item"],a,[tabindex]') || e.parentElement;
+        if (!zeile || gesehen.indexOf(zeile) >= 0) return;
+        gesehen.push(zeile);
+        treffer.push({ symbol: t, text: txt(zeile).slice(0, 80), rect: rect(zeile) });
+      });
+    }
+    return { knopf: k.el ? kurz(k.el, { quelle: k.quelle }) : null, dialog: dlg && sichtbar(dlg) ? { rect: rect(dlg), x: xIn(dlg) } : null,
+             feld: f.el ? kurz(f.el, { quelle: f.quelle }) : null, treffer: treffer, notiz: k.notiz.concat(f.notiz) };
+  }
+
+  // ── Order-Meldungen aus Toast-Texten (EN + DE, Regeln wie tv_meldung_preise im Bot) ─
+  var RX_M_TP = /take[\s-]*profit|gewinnmitnahme/i, RX_M_SL = /stop[\s-]*loss|verlustbegrenzung|stop[\s-]*order/i;
+  var RX_M_FILL = /executed|filled|position opened|ausgef(ü|ue)hrt|gef(ü|ue)llt/i;
+  var RX_D_EN = /\b(buy|sell|kauf(?:en)?|verkauf(?:en)?)\s+([\d.,]+)\s*(?:@|\bat\b|\bzu\b|\bbei\b)\s*(\d[\d.,]*)/i;
+  var RX_D_DE = /(?:(?:^|\s)(\d+)\s+)?\b(?:zu|bei|@)\s*(\d[\d.,]*)\s+(verkaufen|kaufen|verkauf|kauf)\b/i;
+  function meldungenAus(texte) {
+    var out = [], art = null;
+    for (var i = 0; i < texte.length; i++) {
+      var t = texte[i].text, r = texte[i].rect;
+      if (RX_M_TP.test(t)) art = 'tp'; else if (RX_M_SL.test(t)) art = 'sl'; else if (RX_M_FILL.test(t)) art = 'fill';
+      var m = t.match(RX_D_EN), seite = null, menge = null, preis = null;
+      if (!m && i + 1 < texte.length && /^(buy|sell|kauf(en)?|verkauf(en)?)\s+[\d.,]+$/i.test(t) && /^(@|at|zu|bei)\s*\d/i.test(texte[i + 1].text)) {
+        m = (t + ' ' + texte[i + 1].text).match(RX_D_EN); if (m) i++;               // 'Buy 4' + 'at 30,594.25' als zwei Knoten
+      }
+      if (m) { seite = seiteNorm(m[1]); menge = zahl(m[2]); preis = zahl(m[3]); }
+      else { var d = t.match(RX_D_DE); if (d) { seite = /^verkauf/i.test(d[3]) ? 'sell' : 'buy'; menge = d[1] ? zahl(d[1]) : null; preis = zahl(d[2]); } }
+      if (preis != null && preis > 0) out.push({ art: art, seite: seite, menge: menge, preis: preis, text: t.slice(0, 80), rect: r });
+    }
+    return out;
   }
 
   // ── Öffentliche Funktionen ─────────────────────────────────────────────────
@@ -337,6 +500,22 @@ var PROPHOS_AUGEN = (function () {
     try { o.toasts = toasts(); } catch (e) { fehler.push('toasts: ' + e); }
     try { o.popups = dialoge(); } catch (e) { fehler.push('popups: ' + e); }
     try { o.konto = konto(opts.kontoTexte); } catch (e) { fehler.push('konto: ' + e); }
+    try { var tb = tabellen(); o.positionen = tb.positionen; o.orders = tb.orders; o.positionen_sichtbar = tb.positionen_sichtbar; o.orders_sichtbar = tb.orders_sichtbar; }
+    catch (e) { fehler.push('tabellen: ' + e); o.positionen_sichtbar = false; o.orders_sichtbar = false; }
+    try { o.konto_summary = zusammenfassung(); } catch (e) { fehler.push('konto_summary: ' + e); }
+    try { if (o.ticket) o.ticket.symbolsuche = symbolsuche(); } catch (e) { fehler.push('symbolsuche: ' + e); }
+    try {
+      if (o.toasts) {
+        var ms = [];
+        (o.toasts.gruppen || []).forEach(function (gr) { meldungenAus(gr.texte || []).forEach(function (m) { m.gruppe = gr.gruppe; ms.push(m); }); });
+        (o.toasts.log || []).forEach(function (l) { meldungenAus([{ text: l.text, rect: null }]).forEach(function (m) { m.gruppe = 'log'; ms.push(m); }); });
+        // erst_gesehen je Meldung (T3): Merker überlebt mehrfaches Evaluate im selben Tab (globalThis), neu geladen = neu
+        var merk = globalThis.__prophosAugenGesehen = globalThis.__prophosAugenGesehen || {};
+        var jetzt = Date.now();
+        ms.forEach(function (m) { var k = (m.art || '') + '|' + m.seite + '|' + m.menge + '|' + m.preis + '|' + m.text; if (!merk[k]) merk[k] = jetzt; m.erst_gesehen = merk[k]; });
+        o.toasts.meldungen = ms.slice(0, 20);
+      }
+    } catch (e) { fehler.push('meldungen: ' + e); }
     // Größen-Riegel: erst die langen Listen kürzen, nie die Knöpfe/Rechtecke
     try {
       if (JSON.stringify(o).length > STAND_MAX) {
@@ -344,6 +523,8 @@ var PROPHOS_AUGEN = (function () {
         if (o.toasts && o.toasts.gruppen) o.toasts.gruppen.forEach(function (gr) { gr.texte = (gr.texte || []).slice(0, 8); });
         if (o.toasts && o.toasts.log) o.toasts.log = o.toasts.log.slice(0, 3);
         if (o.ticket && o.ticket.typen) o.ticket.typen = o.ticket.typen.slice(0, 6);
+        (o.positionen || []).concat(o.orders || []).forEach(function (z) { delete z.spalten; });
+        if (o.konto_summary) delete o.konto_summary.texte;
         if (JSON.stringify(o).length > STAND_MAX) fehler.push('stand über ' + STAND_MAX + ' Zeichen');
       }
     } catch (e) { fehler.push('groesse: ' + e); }
