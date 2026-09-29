@@ -2925,9 +2925,36 @@ def test_puls_cdp_login():
         and MZ({"gruppen": [dict(zu_o, offen=True)]}) is None and MZ({"gruppen": [dict(zu_o, gruppe="x"), dict(zu_o, gruppe="y")]}) is None
         and MZ(None) is None, "eingeklappter Stapel: 'orders' bevorzugt, offen/mehrdeutig = kein Klick")
     q_mehr = _i.getsource(ob.modus_tvkette_cdp)
-    chk(q_mehr.count('"Show more (Meldungen') == 1 and 'mehr["klick"] = 1' in q_mehr
-        and q_mehr.index('mehr["klick"] = 1') < q_mehr.index('"Show more (Meldungen'), "Show more höchstens EINMAL je Lauf, Merker vor dem Klick")
+    chk(q_mehr.count('"Show more (Meldungen') == 1 and 'not mehr["gedrueckt"] and mehr["versuche"] < 4' in q_mehr
+        and 'mehr["gedrueckt"] = True' in q_mehr, "Show more: bis 4 Versuche, nach einem echten Druck nie wieder")
+    SW = ob.cdp_show_more_wahl
+    dn_k = {"text": "Show more 3", "dn": "toast-group-expand-button-orders", "expanded": "false", "rect": [1500, 800, 90, 22]}
+    tx_k = {"text": "Show more", "dn": "", "rect": [1500, 800, 70, 22]}
+    chk(SW([dn_k]) is dn_k and SW([tx_k, dn_k]) is dn_k and SW([dict(dn_k, expanded="true")]) is None
+        and SW([dict(tx_k, text="Show less")]) is None and SW([]) is None, "Show-more-Wahl: data-name vor Text, offen/Show less nie")
+    a_ = dict(tx_k, rect=[1500, 780, 70, 22]); b_ = dict(tx_k, rect=[200, 100, 70, 22])
+    chk(SW([a_, b_], [1400, 810, 300, 120]) is a_ and SW([a_, b_]) is None and SW([a_, dict(a_)], [1400, 810, 300, 120]) is None,
+        "mehrere Text-Treffer: der nächste zum Stapel, gleich nah/ohne Stapel = keiner")
     chk("@ 30,637.00" in ob.cdp_meldung_text(fill) and ob.cdp_meldung_text(None) == "", "Rohtext der Meldung mit Preis")
+    # Start-Werte + Endprüfung im selben Lauf (Finn 29.09.2026: „am Ende die Werte nochmal überprüfen")
+    chk(ob.cdp_summary_start({"Account Balance": "150,012.10", "Total P/L": "-56.96", "Equity": "150,000.00"})
+        == {"balance_start": 150012.1, "equity_start": 150000.0, "today_pnl_start": -56.96}
+        and ob.cdp_summary_start(None) == {"balance_start": None, "equity_start": None, "today_pnl_start": None}, "Start-Werte aus Account summary")
+    ords = [{"symbol": "MNQZ6", "seite": "buy", "menge": 1, "typ": "Limit", "preis": 30516.5, "status": "Working", "sichtbar": True},
+            {"symbol": "MNQZ6", "seite": "buy", "menge": 1, "typ": "Stop", "preis": None, "status": "Working", "sichtbar": True,
+             "spalten": {"Stop Price": "30,698.50"}},
+            {"symbol": "NQZ6", "seite": "buy", "menge": 1, "typ": "Limit", "preis": 1.0, "status": "Working", "sichtbar": True}]
+    chk(ob.cdp_brackets_aus_orders(ords, "MNQ", "sell", 1) == (30516.5, 30698.5) and ob.cdp_brackets_aus_orders(ords, "MNQ", "buy", 1) == (None, None)
+        and ob.cdp_brackets_aus_orders(ords + [dict(ords[0])], "MNQ", "sell", 1)[0] is None, "TP/SL aus dem Reiter Orders (Gegenseite, genau eine)")
+    bw = {"einstieg": 30682.25, "einstieg_quelle": "fill_toast", "tp": 30516.5, "sl": 30698.5}
+    PR = ob.cdp_pruefung
+    chk(PR(bw, 30682.25, 30516.5, 30698.5, {"tp": 1, "sl": 1})["ok"] and not PR(bw, 30682.5, 30516.5, 30698.5, {"tp": 1, "sl": 1})["ok"]
+        and PR(bw, None, None, None, {"tp": 1, "sl": 1})["ok"] and not PR({}, None, None, None, {"tp": None, "sl": None})["ok"]
+        and PR(bw, 30682.25, 30516.5, 30698.5, {"tp": 1, "sl": 1})["abweichung"] == {"fill": 0.0, "tp": 0.0, "sl": 0.0},
+        "Endprüfung: exakt = passt, 0,25 daneben = nicht sicher, nichts gelesen = nicht sicher")
+    q_k4 = _i.getsource(ob.modus_tvkette_cdp)
+    chk(q_k4.index("_cdp_today_aus_reiter(") < q_k4.index("_cdp_ticket_fuellen(") and q_k4.index('"SENDEN-Knopf"') < q_k4.index("_cdp_endpruefung(")
+        and "klick(" not in _i.getsource(ob.cdp_pruefung), "Summary vor dem Ausfüllen, Endprüfung nach dem Senden (rein rechnend)")
     W = ob.tv_konto_wort_passt
     chk(W("TDFYU324689097 tradovate.com", "TDFYU324689097") and not W("APEX_641699TDFYU324689097", "TDFYU324689097")
         and not W("APEX_641699", "TDFYU324689097"), "Vorschlag nur mit dem Username als ganzem Wort (angehängter Name zählt nicht)")

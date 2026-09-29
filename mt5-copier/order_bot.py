@@ -14658,6 +14658,145 @@ def cdp_meldungen_zu(toasts):
     return gruppen[0] if len(gruppen) == 1 else None
 
 
+
+# Knöpfe „Show more" am Meldungsstapel, die GANZ im Bild liegen (Rand eingeschlossen) — Text („Show more", „Show more 3", „Mehr
+# anzeigen") oder data-name toast-group-expand-button-*; der klickbare Vorfahr (button/[role=button]) liefert das Rechteck.
+CDP_SHOW_MORE_JS = r"""(function () {
+  function drin(r) { return r.width >= 3 && r.height >= 3 && r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight; }
+  function T(e) { return String((e && e.textContent) || '').replace(/\s+/g, ' ').trim(); }
+  function sb(e) { try { var s = getComputedStyle(e); return s.visibility !== 'hidden' && s.display !== 'none' && s.opacity !== '0'; } catch (_) { return false; } }
+  var c = [];
+  document.querySelectorAll('[data-name^="toast-group-expand-button-"],button,[role="button"],span,div').forEach(function (e) {
+    var t = T(e), dn = e.getAttribute('data-name') || '';
+    if (!/^toast-group-expand-button-/.test(dn) && (t.length > 30 || !/^(show more|mehr anzeigen)/i.test(t) || /show less|weniger/i.test(t))) return;
+    if (!sb(e) || !drin(e.getBoundingClientRect())) return;
+    c.push(e);
+  });
+  c = c.filter(function (e) { return !c.some(function (f) { return f !== e && e.contains(f); }); });
+  var out = [];
+  c.forEach(function (e) {
+    var k = e.closest('button,[role="button"]') || e, r = k.getBoundingClientRect();
+    if (!drin(r) || out.some(function (o) { return o._k === k; })) return;
+    out.push({ _k: k, text: T(k).slice(0, 30), dn: (k.getAttribute('data-name') || e.getAttribute('data-name') || ''),
+               expanded: k.getAttribute('aria-expanded'), rect: [r.left, r.top, r.width, r.height] });
+  });
+  return out.slice(0, 8).map(function (o) { delete o._k; return o; });
+})()"""
+
+
+def cdp_show_more_wahl(kandidaten, stapel_rect=None):
+    """REIN RECHNEND (testbar): GENAU EIN „Show more" am Meldungsstapel. Schon offene (aria-expanded true) und „Show less" zählen nie.
+    Mehrere: der toast-group-expand-Knopf vor Text-Treffern, dann der nächste zum Stapel (höchstens 400 px). -> Kandidat | None"""
+    kand = [k for k in kandidaten or [] if isinstance(k, dict) and cdp_klickpunkt(k.get("rect")) is not None
+            and str(k.get("expanded")).lower() != "true" and not re.search(r"show less|weniger", str(k.get("text") or ""), re.I)]
+    if len(kand) <= 1:
+        return kand[0] if kand else None
+    dn = [k for k in kand if str(k.get("dn") or "").startswith("toast-group-expand-button-")]
+    if len(dn) == 1:
+        return dn[0]
+    kand = dn or kand
+    if not stapel_rect:
+        return None
+    try:
+        sx, sy, sw, sh = [float(v) for v in stapel_rect[:4]]
+    except (TypeError, ValueError, IndexError):
+        return None
+
+    def abstand(k):
+        x, y, w, h = [float(v) for v in k["rect"][:4]]
+        dx = max(0.0, sx - (x + w), x - (sx + sw))
+        dy = max(0.0, sy - (y + h), y - (sy + sh))
+        return dx + dy
+    nah = sorted((abstand(k), i) for i, k in enumerate(kand))
+    if nah[0][0] > 400 or (len(nah) > 1 and nah[1][0] - nah[0][0] < 10):
+        return None                                   # zu weit weg oder zwei gleich nah = mehrdeutig
+    return kand[nah[0][1]]
+
+
+def cdp_summary_start(summary):
+    """REIN RECHNEND (testbar): Start-Werte aus „Account summary" für die Order-Antwort — Schlüssel wie tsx-konto
+    (balance_start), dazu equity_start und today_pnl_start (Total P/L = heute, Finn). Nicht lesbar = None, nie 0."""
+    bal, tpl = k3_summary_werte(summary)
+    eq = None
+    for k, v in (summary or {}).items():
+        if re.match(r"^\s*(equity|net\s*liq)", str(k), re.I):
+            eq = tv_geld_lesen(v)
+            if eq is not None:
+                break
+    return {"balance_start": bal, "equity_start": eq, "today_pnl_start": tpl}
+
+
+def cdp_brackets_aus_orders(orders, root, richtung, menge):
+    """REIN RECHNEND (testbar): TP = offene Limit-Order der Gegenseite, SL = offene Stop-Order der Gegenseite (sichtbare Zeilen der
+    Wurzel, Menge passt), je GENAU eine. Preis aus augen.js 'preis', bei Stop-Orders notfalls aus der Spalte „Stop Price".
+    -> (tp|None, sl|None)"""
+    gegen = "sell" if richtung == "buy" else "buy"
+    offen = [o for o in k3_offene_orders(orders, root) if o.get("seite") == gegen
+             and (o.get("menge") is None or cdp_zahl(o.get("menge")) == float(menge))]
+
+    def preis(o):
+        sp_ = o.get("spalten") if isinstance(o.get("spalten"), dict) else {}
+        for w in (o.get("preis"), sp_.get("Stop Price"), sp_.get("Stopp-Preis"), sp_.get("Limit Price"), sp_.get("Limitpreis")):
+            z = cdp_zahl(w)
+            if z:
+                return z
+        return None
+    typ = lambda o: str(o.get("typ") or "")
+    lim = [o for o in offen if re.search(r"limit", typ(o), re.I) and not re.search(r"stop", typ(o), re.I)]
+    stp = [o for o in offen if re.search(r"stop", typ(o), re.I)]
+    return (preis(lim[0]) if len(lim) == 1 else None), (preis(stp[0]) if len(stp) == 1 else None)
+
+
+def cdp_pruefung(b, fill_tabelle, tp_orders, sl_orders, plan, toleranz=0.01):
+    """REIN RECHNEND (testbar): Endprüfung — Meldungswerte (b: einstieg/tp/sl) gegen Tabelle (Avg Fill) und Reiter Orders (TP/SL).
+    ok = jeder gebrauchte Wert ist da (Fill; TP/SL nur, wenn der Plan sie hat) und kein Paar weicht mehr als die Toleranz ab.
+    -> {ok, fill_tabelle, tp_orders, sl_orders, abweichung: {fill, tp, sl}, text}"""
+    b = b or {}
+    fill_m = b.get("einstieg") if b.get("einstieg_quelle") == "fill_toast" else None
+    paare = {"fill": (fill_m, fill_tabelle), "tp": (b.get("tp"), tp_orders), "sl": (b.get("sl"), sl_orders)}
+    ab, teile, ok = {}, [], True
+    for name, (m, t) in paare.items():
+        brauch = name == "fill" or bool(plan.get(name))
+        if m is not None and t is not None:
+            ab[name] = round(abs(float(m) - float(t)), 4)
+            if ab[name] > toleranz:
+                ok = False
+            teile.append(f"{name.upper()} Meldung {k3_fmt(m)} / {'Tabelle' if name == 'fill' else 'Orders'} {k3_fmt(t)}"
+                         + (" ✓" if ab[name] <= toleranz else f" ABWEICHUNG {ab[name]:g}"))
+        else:
+            ab[name] = None
+            if brauch and m is None and t is None:
+                ok = False
+                teile.append(f"{name.upper()} nirgends gelesen")
+            elif brauch or m is not None or t is not None:
+                teile.append(f"{name.upper()} {k3_fmt(m if m is not None else t)} (nur {'Meldung' if m is not None else ('Tabelle' if name == 'fill' else 'Orders')})")
+    return {"ok": ok, "fill_tabelle": fill_tabelle, "tp_orders": tp_orders, "sl_orders": sl_orders, "abweichung": ab,
+            "text": ("passt: " if ok else "NICHT sicher: ") + " · ".join(teile)}
+
+
+def _cdp_endpruefung(s, opts, plan, root, trail):
+    """Avg Fill der Positions-Zeile (Reiter Positions) + TP/SL-Limit aus dem Reiter „Orders", danach zurück auf Positions.
+    Nur Reiter-Klicks. -> (avg|None, tp|None, sl|None)"""
+    st = s.stand(opts)
+    zeile = next((z for z in k3_zeilen(st.get("positionen"), root) if z.get("seite") == plan["richtung"]), None)
+    avg = cdp_zahl((zeile or {}).get("avg"))
+    tp_o = sl_o = None
+    r_ord = s.rect_von("#id_account-manager-tabs #orders")
+    if r_ord and s.klick(r_ord, "Reiter Orders"):
+        for _ in range(3):
+            _warte(0.6, 0.3)
+            st2 = s.stand(opts)
+            tp_o, sl_o = cdp_brackets_aus_orders(st2.get("orders"), root, plan["richtung"], plan["menge"])
+            if (tp_o is not None or not plan["tp"]) and (sl_o is not None or not plan["sl"]):
+                break
+        r_pos = s.rect_von("#id_account-manager-tabs #positions")
+        if r_pos:
+            s.klick(r_pos, "Reiter Positions")
+            _warte(0.4, 0.2)
+    else:
+        trail.append("Reiter Orders nicht gefunden/geklickt — TP/SL nur aus den Meldungen")
+    return avg, tp_o, sl_o
+
 def cdp_meldung_text(m):
     """REIN RECHNEND (testbar): eine gelesene Meldung als Rohtext für order_signale/Diagnose — Art, Status, Seite, Menge, Preis."""
     if not isinstance(m, dict):
@@ -14730,6 +14869,19 @@ def modus_tvkette_cdp(cmd):
         if not symbol:
             res["ok"] = True
             return raus("", f"Richtiges Konto ist aktiv ({res['konto_aktiv'][:60]}).", "konto")
+        # Start-Werte im SELBEN Lauf (Finn 29.09.2026: „am Ende die Werte nochmal überprüfen" — bisher las Prophos die Baseline
+        # danach in einem zweiten Puls-Lauf über den alten Weg, der Tradovate im normalen Chrome anmeldete): Reiter „Account summary"
+        # vor dem Ausfüllen, Schlüssel wie tsx-konto (balance_start …). Fehlt die Lesung, wird trotzdem gesendet — Prophos liest dann
+        # wie bisher selbst nach.
+        try:
+            sm0, _t0, _l0, _x0 = _cdp_today_aus_reiter(s, opts, trail)
+            start = cdp_summary_start(sm0)
+            res.update(start)
+            trail.append(f"Start-Werte: Balance {k3_fmt(start['balance_start'])} · Equity {k3_fmt(start['equity_start'])} · "
+                         f"Total P/L {k3_fmt(start['today_pnl_start'])}")
+            st = s.stand(opts)
+        except Exception as e_:
+            trail.append(f"Start-Werte nicht lesbar ({type(e_).__name__}) — Prophos liest selbst nach")
         ok, code, msg, schritt, st, kk = _cdp_ticket_fuellen(s, st, plan, symbol, opts, trail)
         if not ok:
             return raus(code, msg + (" — nichts gesendet." if scharf else ""), schritt)
@@ -14779,7 +14931,7 @@ def modus_tvkette_cdp(cmd):
             res["gesendet"], res["retry_ok"] = False, True
             return raus("knopf", "Senden-Knopf NICHT gedrückt (Maus nicht bewiesen über dem Knopf) — nichts gesendet.", "knopf")
         trail.append("Senden geklickt — ab hier zählt nur der Beweis")
-        b, neu, erst_ok, mehr = {}, [], None, {"klick": 0, "hin": 0}
+        b, neu, erst_ok, mehr = {}, [], None, {"gedrueckt": False, "versuche": 0, "hin": False}
         ende = time.time() + 15.0
         while time.time() < ende:
             _warte(0.5, 0.25)
@@ -14788,28 +14940,42 @@ def modus_tvkette_cdp(cmd):
             except Exception as e_:
                 trail.append(f"Blick nach dem Klick: {type(e_).__name__}")
                 continue
-            # „Show more" (Finn 29.09.2026 nach dem ersten K4-Lauf: SL fehlte, der Meldungsstapel war eingeklappt und zeigte nur
-            # „Sell 1 | Buy 1 | Sell 1"): den Stapel EINMAL aufklappen, sobald TradingView ihn zeigt — erst dann stehen Fill, TP und
-            # SL mit Preis da (Radar spiegelt die Order 1:1). Nie ein zweiter Klick (er klappte wieder zu); ohne sichtbaren Knopf
-            # einmal mit der Maus über den Stapel (TradingView blendet die Steuerleiste beim Hover ein).
+            # „Show more" (Finn 29.09.2026 nach dem ersten K4-Lauf: SL fehlte, der Meldungsstapel war eingeklappt): den Stapel aufklappen,
+            # damit Fill, TP und SL sichtbar mit Preis dastehen (Radar spiegelt die Order 1:1). Zweiter Live-Lauf .804 (14:26 UTC): der
+            # data-name-Knopf lag beim Blick außerhalb des Fensters (Stapel fuhr noch ein) → „nichts geklickt", und es gab keinen zweiten
+            # Versuch. Jetzt: nur ein Knopf GANZ im Bild (Text „Show more" oder toast-group-expand-button, CDP_SHOW_MORE_JS), bis zu
+            # 4 Versuche mit frischem Blick, solange NICHT gedrückt wurde; nach einem echten Druck nie wieder (er klappte sonst zu).
             gr = cdp_meldungen_zu(st.get("toasts"))
-            if gr and not mehr["klick"]:
-                if cdp_rect(gr.get("mehr")):
-                    mehr["klick"] = 1
-                    if s.klick(cdp_rect(gr.get("mehr")), f"Show more (Meldungen '{gr.get('gruppe')}')"):
-                        _warte(0.6, 0.3)
-                        continue                           # sofort frisch lesen — aufgeklappt
-                elif cdp_rect(gr) and not mehr["hin"]:
-                    mehr["hin"] = 1
-                    s.hin(cdp_rect(gr), f"Meldungsstapel '{gr.get('gruppe')}'")
+            if gr and not mehr["gedrueckt"] and mehr["versuche"] < 4:
+                mehr["versuche"] += 1
+                geo = st.get("geo") if isinstance(st.get("geo"), dict) else {}
+                k = cdp_show_more_wahl(s.lese_js(CDP_SHOW_MORE_JS) or [], cdp_rect(gr))
+                if not k:
+                    trail.append(f"Show more {mehr['versuche']}/4: kein Knopf ganz im Bild (augen-Knopf {cdp_rect(gr.get('mehr'))}, "
+                                 f"Stapel {cdp_rect(gr)}, Seite {geo.get('innerWidth')}×{geo.get('innerHeight')})")
+                    if cdp_rect(gr) and not mehr["hin"]:
+                        mehr["hin"] = True
+                        s.hin(cdp_rect(gr), f"Meldungsstapel '{gr.get('gruppe')}'")   # Hover blendet die Steuerleiste ein
                     continue
+                if s.klick(cdp_rect(k), f"Show more (Meldungen '{gr.get('gruppe')}', {k.get('text') or k.get('dn')})"):
+                    mehr["gedrueckt"] = True
+                    _warte(0.6, 0.3)
+                    continue                           # sofort frisch lesen — aufgeklappt
+                trail.append(f"Show more {mehr['versuche']}/4 nicht gedrückt (Knopf @{k.get('rect')}, Seite "
+                             f"{geo.get('innerWidth')}×{geo.get('innerHeight')}) — nächster Blick")
+                continue
             neu = k3_neue_meldungen(vorher_m, (st.get("toasts") or {}).get("meldungen"))
             b = cdp_order_beweis(neu, k3_zeilen(st.get("positionen"), root), plan, menge0)
             if b["bestaetigt"]:
                 erst_ok = erst_ok or time.time()
-                # TP/SL-Meldungen kommen oft kurz nach dem Fill — höchstens 4 s darauf warten
-                if ((b["tp"] is not None or not plan["tp"]) and (b["sl"] is not None or not plan["sl"])) or time.time() - erst_ok >= 4.0:
+                # TP/SL-Meldungen kommen oft kurz nach dem Fill — höchstens 4 s darauf warten; „Show more" erst gedrückt oder
+                # aufgegeben (Finn will den Klick sehen), außer der Stapel ist gar nicht eingeklappt
+                alles = (b["tp"] is not None or not plan["tp"]) and (b["sl"] is not None or not plan["sl"])
+                mehr_fertig = mehr["gedrueckt"] or mehr["versuche"] >= 4 or gr is None
+                if (alles and mehr_fertig) or time.time() - erst_ok >= 6.0:
                     break
+        if cdp_meldungen_zu((st.get("toasts") if isinstance(st, dict) else None)) and not mehr["gedrueckt"]:
+            trail.append("Show more NICHT gedrückt — Werte aus TradingViews Meldungsprotokoll (role=log)")
         res["meldung_roh"] = [cdp_meldung_text(m) for m in neu][:14]
         trail.append("Meldungen roh: " + (" | ".join(res["meldung_roh"]) or "nichts")[:600])
         if not b.get("bestaetigt"):
@@ -14824,6 +14990,22 @@ def modus_tvkette_cdp(cmd):
             res["tp_limit"], res["tp_limit_quelle"] = b["tp"], "tv_toast"
         if b.get("sl") is not None:
             res["sl_limit_quelle"] = "tv_toast"
+        # Endprüfung (Finn 29.09.2026: „ob das echt genau passt"): Avg Fill der Positions-Zeile + TP/SL-Limit aus dem Reiter „Orders"
+        # gegen die Meldungswerte; fehlt ein Meldungswert, füllt ihn die Tabelle. Nur lesen + Reiter-Klicks, nie etwas an der Order.
+        try:
+            avg_t, tp_o, sl_o = _cdp_endpruefung(s, opts, plan, root, trail)
+            pr = cdp_pruefung(b, avg_t if menge0 == 0 else None, tp_o, sl_o, plan)
+            res["pruefung"] = pr
+            trail.append("Endprüfung: " + pr["text"])
+            if res.get("einstieg") is None and pr.get("fill_tabelle") is not None:
+                res["einstieg"], res["einstieg_quelle"] = str(pr["fill_tabelle"]), "tabelle_avg_fill"
+            if res.get("tp_limit") is None and tp_o is not None:
+                res["tp_limit"], res["tp_limit_quelle"] = tp_o, "tv_orders"
+            if res.get("sl_limit") is None and sl_o is not None:
+                res["sl_limit"], res["sl_limit_quelle"] = sl_o, "tv_orders"
+        except Exception as e_:
+            res["pruefung"] = {"ok": False, "text": f"Endprüfung abgebrochen ({type(e_).__name__})"}
+            trail.append(res["pruefung"]["text"])
         trail.append(f"Order bewiesen ({b['beweis']}): Einstieg {res['einstieg'] or '-'} ({res['einstieg_quelle'] or '-'}), "
                      f"TP-Limit {b.get('tp') if b.get('tp') is not None else '-'}, SL-Limit {b.get('sl') if b.get('sl') is not None else '-'}")
         res["ok"] = True
