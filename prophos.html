@@ -17880,6 +17880,8 @@
           // lesen (25.09.2026, Mikes PC): Echo V2 läuft ohne Copier — das Panel liest den Master-Snapshot dann selbst
           if(r && (r.inst.alive || r.inst.lesen) && !s.note && s.master_balance != null){
             base = { master_balance: Number(s.master_balance), at: new Date().toISOString(), ticket: ticket ?? null }
+            // Baseline auch ans Konto (29.09.2026): Plan 44d665b5 las 200.923,50 — am Konto kam sie nie an
+            try{ mt5KontoBalanceSchreiben(plan.masterAccountId, { balance: Number(s.master_balance), equity: s.master_equity != null ? Number(s.master_equity) : null, ccy: s.master_currency || null }) }catch(_){}
           }
         }catch(_){}
         if(base) patchBase = base   // oberste Ebene: master_balance, at, ticket
@@ -18021,6 +18023,8 @@
          * trägt ein („Beweis oder leer"). Danach derselbe Weg wie Echo: atShowEndPrompt → review + Auto-P&L. */
         if(istV2){
           const finV2 = { master_balance: s.master_balance != null ? Number(s.master_balance) : null, at: new Date().toISOString() }
+          // End-Balance auch ans Konto (29.09.2026) — ungedrosselt, das ist der Stand nach dem Trade
+          if(finV2.master_balance != null){ try{ mt5KontoBalanceSchreiben(plan.masterAccountId, { balance: finV2.master_balance, equity: s.master_equity != null ? Number(s.master_equity) : null, ccy: s.master_currency || null }) }catch(_){} }
           let bV2 = null   // atomar (Teil B, 25.09.2026): nur final
           try{ bV2 = await baselinePatch(plan.id, { final: finV2 }, 'open') }catch(eV2){ console.warn('[mt5Poll] V2 final:', (eV2 && eV2.message) || eV2); continue }
           if(!bV2){
@@ -18234,6 +18238,8 @@
     try{
       const dd = await window.mtcApi('instances')
       if(!dd || dd.copier_offline || dd._httpFail) return
+      // MT5-Balance dauerhaft am Konto (29.09.2026): frische Master-Balance → accounts.tv_balance (gedrosselt, s. mt5BalanceAusInstanzen)
+      try{ mt5BalanceAusInstanzen(dd.instances || []) }catch(e){ console.warn('[mt5-balance]', e) }
       const pc = mt5FleetPcId()
       // Wem gehoeren die Instanzen dieses PCs? Dem eingeloggten Profil — die
       // Flotte gruppiert damit pro PERSON (25.08.2026, Finns Layout-Ansage).
@@ -19623,6 +19629,126 @@
       if(error) console.warn('[tv-balance] Konto', error.message || error)
       else { const a = (accounts || []).find(x => String(x.id) === String(accountId)); if(a){ a.tvBalance = b.balance; a.tvBalanceAt = upd.tv_balance_at; a.tvBalanceQuelle = 'puls' } }
     }catch(e){ console.warn('[tv-balance] Konto', e) }
+  }
+  /* MT5-BALANCE DAUERHAFT AM KONTO (29.09.2026, Finn: unter Accounts stand bei den MT5-Konten — The5ers bei „Finn + Pascal" — in
+   * BALANCE nur „–"). Die Master-Balance kam bisher NUR live aus mt5_live (Copier bzw. Lese-EA „ProphosHedgeReader" im Master-Terminal,
+   * Panel liest die Snapshot-CSV ≤ 15 s). Terminal zu = Zahl weg: Plan 44d665b5 hatte am 28.09. 11:57 UTC 200.923,50 gelesen
+   * (mt5_baseline.master_balance), aber nie ans Konto geschrieben. Jetzt landet jede frische Master-Balance in denselben Feldern wie bei
+   * Futures (tv_balance/tv_equity/tv_balance_at), Quelle 'mt5' (sql/2026-09-29_accounts_tv_balance_quelle_mt5.sql erweitert den Check;
+   * fehlt die Erweiterung noch, wird ohne Quelle geschrieben — ein Nicht-Futures-Konto mit tv_balance ist ohnehin MT5). Nur Lesen. */
+  function mt5KontoLogin(acc){
+    if(!acc) return ''
+    const l = (typeof mt5LoginForAccount === 'function') ? mt5LoginForAccount(acc.id) : null
+    if(l) return String(l)
+    const ext = String(acc.externalId || '').trim()
+    if(/^\d{4,}$/.test(ext)) return ext
+    const cl = String((acc.creds && acc.creds.login) || '').trim()
+    return /^\d{4,}$/.test(cl) ? cl : ''
+  }
+  function mt5KontoIst(acc){
+    return !!acc && !((typeof tpFirmIstFutures === 'function') && tpFirmIstFutures(acc.firm)) && !!mt5KontoLogin(acc)
+  }
+  function mt5KontenZuLogin(login){
+    login = String(login || '').trim(); if(!login) return []
+    let l = []; try{ l = accounts || [] }catch(_){ l = [] }
+    return l.filter(a => mt5KontoIst(a) && mt5KontoLogin(a) === login)
+  }
+  // Frischer Master-Stand einer Instanz: Copier lebt (alive) oder Lese-EA (lesen, Panel prüft ≤ 15 s), keine note. Login = das
+  // TATSÄCHLICH eingeloggte Konto aus dem Snapshot (nicht master_expected) — steht das Terminal im falschen Konto, gehört die Zahl
+  // eben diesem Konto. -> {login, balance, equity, ccy} | null
+  function mt5InstBalanceFrisch(inst){
+    const s = (inst && inst.status) || {}
+    if(!inst || !(inst.alive || inst.lesen) || s.note || s.master_balance == null || !s.master_login) return null
+    const bal = Number(s.master_balance); if(!isFinite(bal) || bal <= 0) return null
+    const eq = s.master_equity != null ? Number(s.master_equity) : null
+    return { login: String(s.master_login), balance: bal, equity: (eq != null && isFinite(eq)) ? eq : null, ccy: s.master_currency || null }
+  }
+  const _mt5BalGeschrieben = new Map()   // accountId → {bal, t} — Drossel für den 5-s-Flotten-Takt
+  async function mt5KontoBalanceSchreiben(accountId, b, opts){
+    if(!accountId || !b || !(typeof b.balance === 'number' && isFinite(b.balance) && b.balance > 0)) return false
+    const id = String(accountId), jetzt = Date.now(), alt = _mt5BalGeschrieben.get(id)
+    // Flotten-Takt: nur bei Änderung oder alle 60 s (der Zeitstempel trägt „Live" vs. „zuletzt HH:MM" in der Accounts-Spalte)
+    if(opts && opts.drossel && alt && Math.abs(alt.bal - b.balance) < 0.005 && jetzt - alt.t < 60000) return false
+    _mt5BalGeschrieben.set(id, { bal: b.balance, t: jetzt })
+    const at = new Date().toISOString()
+    try{
+      const upd = { tv_balance: b.balance, tv_equity: (typeof b.equity === 'number' && isFinite(b.equity)) ? b.equity : null, tv_balance_at: at, tv_balance_quelle: 'mt5' }
+      let { error } = await supabase.from('accounts').update(upd).eq('id', id)
+      // Check-Constraint noch ohne 'mt5' (SQL-Datei nicht angewendet) → ohne Quelle schreiben, die Zahl ist wichtiger
+      if(error && /tv_balance_quelle/.test(String(error.message || ''))){ delete upd.tv_balance_quelle; ({ error } = await supabase.from('accounts').update(upd).eq('id', id)) }
+      if(error){ _mt5BalGeschrieben.delete(id); console.warn('[mt5-balance] Konto', error.message || error); return false }
+      let a = null; try{ a = (accounts || []).find(x => String(x.id) === id) }catch(_){}
+      if(a){ a.tvBalance = b.balance; a.tvBalanceAt = at; a.tvBalanceQuelle = 'mt5'; if(b.ccy) a.mt5BalCcy = b.ccy }
+      return true
+    }catch(e){ _mt5BalGeschrieben.delete(id); console.warn('[mt5-balance] Konto', e); return false }
+  }
+  // Aus dem Flotten-Takt (PC-Tab, alle 5 s): jede frische Master-Balance ans passende eigene Konto
+  function mt5BalanceAusInstanzen(instances){
+    for(const inst of (instances || [])){
+      const f = mt5InstBalanceFrisch(inst); if(!f) continue
+      for(const a of mt5KontenZuLogin(f.login)) mt5KontoBalanceSchreiben(a.id, f, { drossel: true })
+    }
+  }
+  // Puls/Order am Werk? Dann kein Terminal nach vorn holen — das würde einen laufenden Klick stören
+  function mt5PulsBelegt(){
+    try{ if(_tpOrbitLaeuft || _osActive) return true }catch(_){}
+    return !!(document.getElementById('tpPreflightModal')?.classList.contains('open') || document.getElementById('tpOrderModal')?.classList.contains('open'))
+  }
+  /* MT5-BALANCE JETZT LESEN (29.09.2026, Knopf ↻ in der Accounts-Spalte BALANCE): auf DIESEM PC das Master-Terminal mit dem Login des
+   * Kontos öffnen — derselbe Weg wie Echo V2 beim Start (Instanz per Login, /api/start-terminal mit Login-Zwang, Panel heilt das
+   * Lese-EA), aber OHNE Order und ohne master-order. Dann warten, bis der Snapshot frisch ist (max. ~90 s), Balance ans Konto.
+   * -> {ok, balance?, equity?, ccy?, balance_at?, code?, msg} (nie werfen). code 'keine_instanz'/'copier_offline' = anderer PC. */
+  const _mt5BalLesenLaeuft = new Set()
+  async function mt5KontoBalanceJetzt(accountId, loginHint){
+    if(!MT5_LOCAL || typeof window.mtcApi !== 'function') return { ok: false, code: 'nicht_pc', msg: 'Nur am PC mit MT5 möglich' }
+    let acc = null; try{ acc = (accounts || []).find(a => String(a.id) === String(accountId)) }catch(_){}
+    const login = (acc && mt5KontoLogin(acc)) || String(loginHint || '').trim()
+    if(!login) return { ok: false, code: 'kein_login', msg: 'Konto ohne MT5-Login (External ID)' }
+    const id = String(accountId)
+    if(_mt5BalLesenLaeuft.has(id)) return { ok: false, msg: 'Lesung für dieses Konto läuft schon' }
+    _mt5BalLesenLaeuft.add(id)
+    const warte = ms => new Promise(res => setTimeout(res, ms))
+    try{
+      const holen = async () => { try{ const dd = await window.mtcApi('instances'); return (!dd || dd.copier_offline || dd._httpFail) ? null : (dd.instances || []) }catch(_){ return null } }
+      const passt = x => !!x && String(((x.status || {}).master_login) || x.master_expected || '') === login
+      let insts = await holen()
+      if(!insts) return { ok: false, code: 'copier_offline', msg: 'Copier-Backend am PC nicht erreichbar — start-alles.bat ausführen' }
+      const inst = insts.find(x => passt(x) && x.has_terminal) || insts.find(passt)
+      if(!inst) return { ok: false, code: 'keine_instanz', msg: `Kein MT5-Terminal für Login ${login} auf diesem PC` }
+      const file = inst.file
+      const fertig = async (f) => {
+        await mt5KontoBalanceSchreiben(id, f)
+        return { ok: true, balance: f.balance, equity: f.equity, ccy: f.ccy, balance_at: new Date().toISOString(), login, msg: 'gelesen' }
+      }
+      let f = mt5InstBalanceFrisch(inst)
+      if(f && f.login === login) return await fertig(f)   // Terminal + EA laufen schon — nichts öffnen
+      if(!inst.has_terminal) return { ok: false, msg: `Instanz ${inst.name || file} hat keinen Terminal-Pfad (master_terminal_path)` }
+      const t0 = Date.now()
+      while(mt5PulsBelegt()){
+        if(Date.now() - t0 > 60000) return { ok: false, msg: 'Puls arbeitet gerade — später nochmal' }
+        await warte(5000)
+      }
+      const mc = (acc && acc.creds) || {}
+      const sendCreds = !!(mc.login && mc.password && String(mc.login) === login)
+      let ts = null
+      try{
+        ts = await window.mtcApi(`start-terminal?file=${encodeURIComponent(file)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(sendCreds ? { login: String(mc.login), password: String(mc.password), server: String(mc.server || '') } : {}) })
+      }catch(e){ ts = { ok: false, msg: String((e && e.message) || e) } }
+      if(!ts || !ts.ok) return { ok: false, msg: 'Terminal-Start fehlgeschlagen: ' + String((ts && (ts.msg || ts.error)) || 'Fehler') }
+      if(/FALSCHEN Konto/i.test(String(ts.msg || ''))) return { ok: false, msg: String(ts.msg) }
+      // Snapshot frisch? Das Panel liefert lesen/alive nur bei ≤ 15 s alter Datei — bis ~90 s nach dem Start
+      let fremd = ''
+      const t1 = Date.now()
+      while(Date.now() - t1 < 90000){
+        await warte(4000)
+        insts = await holen(); if(!insts) continue
+        f = mt5InstBalanceFrisch(insts.find(x => x && x.file === file))
+        if(f && f.login === login) return await fertig(f)
+        if(f) fremd = f.login
+      }
+      return { ok: false, code: 'kein_snapshot', msg: fremd ? `Terminal steht im Konto ${fremd}, nicht ${login}` : 'Nach 90 s kein frischer Stand vom Lese-EA — Terminal/EA am PC prüfen' }
+    }finally{ _mt5BalLesenLaeuft.delete(id) }
   }
   /* BALANCE JETZT LESEN (27.09.2026, F19, Finn am Screenshot der Accounts-Liste: „neben den Balances bei den Futures ein Refresh-
    * Symbol … Puls loggt sich in den Account ein und liest ganz kurz die Balance aus. So könnt ihr auch testen, ob es funktioniert.")
@@ -27608,9 +27734,10 @@
    * Besitzers: order_signale {plan_id:'konto:<id>', params:{aktion:'balance_lesen', account_id}} — die Accounts-Liste zeigt nur eigene
    * Konten, also ist der Absender der Besitzer (RLS erlaubt das eigene Signal). 2-s-Abfrage, nach 3 min „keine Antwort vom PC". */
   const _accBalLauf = new Map()   // accountId → {laeuft, text, fehler}
-  function accBalRefHtml(id){
+  function accBalRefHtml(id, mt5){
     const st = _accBalLauf.get(String(id)), dreht = !!(st && st.laeuft)
-    return `<button type="button" class="acc-balref ${dreht ? 'dreht' : ''}" data-acc-balref="${escapeHtml(String(id))}" data-stop-row-click="1" title="Balance jetzt über Puls lesen (PC dieser ID)" ${dreht ? 'disabled' : ''}>↻</button>`
+    const titel = mt5 ? 'Balance jetzt lesen — öffnet das MT5-Terminal dieses Logins auf dem PC dieser ID (keine Order)' : 'Balance jetzt über Puls lesen (PC dieser ID)'
+    return `<button type="button" class="acc-balref ${dreht ? 'dreht' : ''}" data-acc-balref="${escapeHtml(String(id))}" data-stop-row-click="1" title="${titel}" ${dreht ? 'disabled' : ''}>↻</button>`
   }
   function accBalStatusHtml(id){
     const st = _accBalLauf.get(String(id)); if(!st || !st.text) return ''
@@ -27632,7 +27759,15 @@
     const setz = (o) => { _accBalLauf.set(id, o); try{ renderAccounts() }catch(_){} }
     if(_accBalLauf.get(id)?.laeuft) return
     const acc = (accounts || []).find(a => String(a.id) === id); if(!acc) return
-    if(MT5_LOCAL){
+    // MT5-Konto (29.09.2026): Terminal dieses Logins öffnen + Lese-EA-Snapshot lesen. Hier am PC direkt, sofern die Instanz hier liegt —
+    // sonst (andere Maschine der ID, Mac, Handy) über das Signal 'mt5_balance'; claimen darf nur der PC, der die Instanz hat.
+    const mt5 = mt5KontoIst(acc), mt5Login = mt5 ? mt5KontoLogin(acc) : ''
+    if(mt5 && MT5_LOCAL){
+      setz({ laeuft: true, text: 'MT5 wird geöffnet · liest … (hier am PC)' })
+      const r = await mt5KontoBalanceJetzt(id)
+      if(r.ok || !['keine_instanz', 'copier_offline'].includes(r.code)){ setz({ laeuft: false, fehler: !r.ok, text: r.ok ? 'gerade gelesen' : r.msg }); return }
+      // Instanz liegt nicht auf diesem PC → weiter mit dem Signal
+    } else if(MT5_LOCAL){
       setz({ laeuft: true, text: `wird gelesen … (hier am PC)` })
       const r = await tvKontoBalanceJetzt(id)
       setz({ laeuft: false, fehler: !r.ok, text: r.ok ? 'gerade gelesen' : r.msg })
@@ -27643,7 +27778,9 @@
     await accBalSignaleAufraeumen(id)
     let sig = null
     try{
-      const { data, error } = await supabase.from('order_signale').insert({ plan_id: 'konto:' + id, params: { aktion: 'konto_balance', account_id: id, external_id: acc.externalId, firm: acc.firm, name: acc.name, von: 'besitzer' } }).select('*').single()
+      const params = mt5 ? { aktion: 'mt5_balance', account_id: id, login: mt5Login, external_id: acc.externalId, firm: acc.firm, name: acc.name, von: 'besitzer' }
+        : { aktion: 'konto_balance', account_id: id, external_id: acc.externalId, firm: acc.firm, name: acc.name, von: 'besitzer' }
+      const { data, error } = await supabase.from('order_signale').insert({ plan_id: 'konto:' + id, params }).select('*').single()
       if(error) throw error; sig = data
     }catch(e){ setz({ laeuft: false, fehler: true, text: 'Signal nicht gesendet: ' + String((e && e.message) || e).slice(0, 80) }); return }
     setz({ laeuft: true, text: 'wartet auf den PC dieser ID …' })
@@ -27653,7 +27790,7 @@
       const sek = (Date.now() - t0) / 1000
       if(row && row.status === 'fertig'){
         const e = row.ergebnis || {}
-        if(typeof e.balance === 'number'){ acc.tvBalance = e.balance; acc.tvBalanceAt = e.balance_at || new Date().toISOString(); acc.tvBalanceQuelle = 'puls' }
+        if(typeof e.balance === 'number'){ acc.tvBalance = e.balance; acc.tvBalanceAt = e.balance_at || new Date().toISOString(); acc.tvBalanceQuelle = mt5 ? 'mt5' : 'puls'; if(mt5 && e.ccy) acc.mt5BalCcy = e.ccy }
         setz({ laeuft: false, text: 'gerade gelesen' + (row.pc ? ` (PC ${row.pc})` : '') }); return
       }
       if(row && ['fehler', 'verfallen', 'verworfen'].includes(row.status)){ setz({ laeuft: false, fehler: true, text: String((row.ergebnis || {}).msg || row.status) }); return }
@@ -27664,9 +27801,9 @@
       }
       if(sek > 180 && (!row || row.status === 'wartet')){
         try{ await supabase.from('order_signale').update({ status: 'verfallen', updated_at: new Date().toISOString(), ergebnis: { ok: false, msg: 'keine Antwort vom PC' } }).eq('id', sig.id).in('status', ['wartet']) }catch(_){}
-        setz({ laeuft: false, fehler: true, text: 'keine Antwort vom PC (Prophos-Tab + Copier auf dem PC der ID offen?)' }); return
+        setz({ laeuft: false, fehler: true, text: mt5 ? `kein PC dieser ID hat ein MT5-Terminal für Login ${mt5Login} gemeldet (Prophos-Tab + start-alles.bat offen?)` : 'keine Antwort vom PC (Prophos-Tab + Copier auf dem PC der ID offen?)' }); return
       }
-      if(row && row.status === 'laeuft'){ const t = `wird gelesen … (PC ${row.pc || '?'})`; if(_accBalLauf.get(id)?.text !== t) setz({ laeuft: true, text: t }) }
+      if(row && row.status === 'laeuft'){ const t = mt5 ? `MT5 wird geöffnet · liest … (PC ${row.pc || '?'})` : `wird gelesen … (PC ${row.pc || '?'})`; if(_accBalLauf.get(id)?.text !== t) setz({ laeuft: true, text: t }) }
       setTimeout(tick, 2000)
     }
     setTimeout(tick, 1500)
@@ -27820,6 +27957,27 @@
             liveBal = a.tvBalance; liveSrc = a.tvBalanceQuelle === 'dashboard' ? 'Dashboard (eingefügt)' : (/topstep/i.test(String(a.firm || '')) ? 'TopstepX' : 'TradingView'); liveTime = a.tvBalanceAt || null; liveCcy = 'USD'
           }
         }
+        // MT5 dauerhaft am Konto (29.09.2026, Finn: The5ers bei „Finn + Pascal" stand nur mit „–"): ist kein frischer Live-Stand da
+        // (MT5-Copier ≤ 15 s, MT5-Cloud ≤ 60 s, MetaApi/TSX), zeigt die Zelle den zuletzt gespeicherten Stand aus accounts.tv_balance
+        // (Quelle 'mt5') — mit „zuletzt HH:MM", nie als Live. Gespeichert wird aus dem PC-Tab (Flotten-Takt, Echo-V2-Start/-Ende, ↻).
+        const istMt5Konto = !istFut && mt5KontoIst(a)
+        let mt5Gespeichert = false
+        if(istMt5Konto && a.tvBalance != null && isFinite(Number(a.tvBalance)) && a.tvBalanceQuelle !== 'dashboard'){
+          const tvAt = Date.parse(a.tvBalanceAt || '') || 0, altAt = liveTime ? (Date.parse(liveTime) || Number(liveTime) || 0) : 0
+          const liveFrisch = liveSrc === 'TSX' || liveSrc === 'MT5' || liveSrc === 'MT5-Copier' || (liveSrc === 'MT5-Cloud' && altAt && Date.now() - altAt <= 60000)
+          if(!liveFrisch && (liveBal == null || !altAt || tvAt > altAt)){
+            const c = (typeof mt5BalFuerAccount === 'function') ? mt5BalFuerAccount(a.id) : null
+            liveBal = Number(a.tvBalance); liveSrc = 'MT5-Konto'; liveTime = a.tvBalanceAt || null; liveCcy = a.mt5BalCcy || (c && c.ccy) || 'USD'
+            mt5Gespeichert = true
+          }
+        }
+        // „Live" nur, solange der gespeicherte Stand ≤ 90 s alt ist (der PC-Tab schreibt bei offenem Terminal mindestens jede Minute)
+        const mt5GespMs = mt5Gespeichert ? (Date.parse(a.tvBalanceAt || '') || 0) : 0
+        const mt5GespLive = mt5Gespeichert && mt5GespMs && Date.now() - mt5GespMs <= 90000
+        const mt5Zuletzt = (mt5Gespeichert && !mt5GespLive && mt5GespMs) ? (() => {
+          const d = new Date(mt5GespMs), heute = new Date().toDateString() === d.toDateString()
+          return 'zuletzt ' + (heute ? '' : d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) + ' ') + d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
+        })() : ''
         const nachlese = istFut && typeof tvV2NachleseOffen === 'function' ? tvV2NachleseOffen(a.id) : null
         // Zustand statt Alter (27.09.2026, Finn: „diese eine Stunde ist ja die ganze Zeit live" — die gelesene Balance gilt, bis ein Trade
         // sie ändert; „1 Std" hat nur verunsichert). Gezeigt wird deshalb nur, WAS mit dem Stand ist: „aktuell" = gilt; „Trade läuft · Stand
@@ -27837,10 +27995,11 @@
           }catch(_){}
         }
         // ↻ Balance jetzt lesen (F19): nur Futures mit External ID; Status aus _accBalLauf (übersteht das Neuzeichnen)
-        const balRef = (istFut && a.externalId) ? accBalRefHtml(a.id) : ''
+        // MT5 (29.09.2026): ↻ öffnet auf dem PC der ID das Master-Terminal und liest den Lese-EA-Snapshot — keine Order
+        const balRef = (istFut && a.externalId) ? accBalRefHtml(a.id) : (istMt5Konto ? accBalRefHtml(a.id, true) : '')
         let balCell
         if(liveBal != null){
-          const balFormatted = (liveSrc === 'Duplikum' || liveSrc === 'MT5-Copier' || liveSrc === 'MT5-Cloud')
+          const balFormatted = (liveSrc === 'Duplikum' || liveSrc === 'MT5-Copier' || liveSrc === 'MT5-Cloud' || liveSrc === 'MT5-Konto')
             ? dupFmtMoney(liveBal, liveCcy) : fmtMoney(liveBal)
           // „Live" nur, wenn es das auch ist (31.08.2026): ein aus der Cloud
           // nachgeladener Stand ist die richtige Antwort auf „wie viel liegt
@@ -27848,11 +28007,13 @@
           // Minute heisst er ehrlich „Stand". Die Zeitangabe daneben stand hier
           // schon immer, sie trägt die Aussage jetzt mit.
           const cloudAlt = (liveSrc === 'MT5-Cloud' && liveTime && (Date.now() - liveTime) > 60000) || liveSrc === 'Dashboard (eingefügt)'   // eingefügter Stand ist nie „Live" (F11)
+            || (mt5Gespeichert && !mt5GespLive)   // gespeicherter MT5-Stand: „Stand · MT5 · zuletzt HH:MM" (29.09.2026)
           balCell = `
             <div style="font-weight:600;color:var(--ink);font-family:var(--mono);display:flex;align-items:center;gap:6px">${balFormatted}${balRef}</div>
             <div style="font-size:11px;color:var(--sub);margin-top:2px">
-              <span style="color:var(--violet);font-weight:500">${cloudAlt ? 'Stand' : 'Live'} · ${liveSrc}</span>
-              ${(liveTime && !tvStandZustand) ? `<span style="margin-left:6px">${timeAgo(liveTime)}</span>` : ''}
+              <span style="color:var(--violet);font-weight:500">${cloudAlt ? 'Stand' : 'Live'} · ${liveSrc === 'MT5-Konto' ? 'MT5' : liveSrc}</span>
+              ${mt5Zuletzt ? `<span style="margin-left:6px" title="${escapeHtml(timeAgo(liveTime))}">${escapeHtml(mt5Zuletzt)}</span>`
+                : ((liveTime && !tvStandZustand && !mt5GespLive) ? `<span style="margin-left:6px">${timeAgo(liveTime)}</span>` : '')}
               ${tvStandZustand ? `<span style="margin-left:6px" title="gelesen ${liveTime ? escapeHtml(timeAgo(liveTime)) : ''}">${escapeHtml(tvStandZustand)}</span>` : ''}
             </div>
             ${nachlese ? `<div style="font-size:11px;color:var(--sub);margin-top:2px" title="${escapeHtml(nachlese.text)}">${escapeHtml(nachlese.kurz)}</div>` : ''}
@@ -35642,7 +35803,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.797'
+  const OS_TAB_BUILD = '2026-09-22.798'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -37364,7 +37525,7 @@
    * Signals neu — das F24-Aufräumen nahm nur Zeilen älter als 4 min, das Signal blieb auf 'laeuft'). sessionStorage überlebt das Neuladen
    * im SELBEN Tab: was hier steht und beim Start noch 'laeuft' ist, gehörte sicher dem vorigen Leben dieses Tabs — sofort abschließen. */
   const OS_CLAIMS_KEY = 'prophos_os_claims'
-  const OS_LESEND = ['konto_balance', 'balance_lesen', 'endlesung', 'rundgang', 'tsx_inventar']
+  const OS_LESEND = ['konto_balance', 'balance_lesen', 'endlesung', 'rundgang', 'tsx_inventar', 'mt5_balance']
   function osClaimMerken(sig){
     try{
       const jetzt = Date.now()
@@ -37475,6 +37636,24 @@
         // Balance lesen auf Zuruf (F19, 27.09.2026, Vertrag mit Backend B12): plan_id 'konto:<id>', params {aktion:'konto_balance',
         // account_id, external_id, …} — vom Frontend direkt (eigenes Konto) oder von Railway POST /admin/konto-balance-lesen im Namen des
         // Besitzers. Kein Plan nötig. Ergebnis {ok, balance, equity, balance_at, msg}. NICHT awaiten (bis ~3 min Warten auf die Maus).
+        // MT5-Balance auf Zuruf (29.09.2026, ↻ in der Accounts-Spalte bei MT5-Konten): plan_id 'konto:<id>', params {aktion:'mt5_balance',
+        // account_id, login}. Claimen darf NUR der PC, dessen Panel eine Instanz mit diesem Login hat — sonst liegen lassen (ein anderer PC
+        // derselben ID hat das Terminal; ohne Treffer verfällt es nach 3 min ehrlich). Terminal öffnen + Snapshot lesen, KEINE Order.
+        if(String((sig.params || {}).aktion || '') === 'mt5_balance'){
+          const pm = sig.params || {}, lg = String(pm.login || '').trim()
+          const hier = !!lg && (dd.instances || []).some(x => x && String(((x.status || {}).master_login) || x.master_expected || '') === lg)
+          if(!hier) continue
+          const { data: clM } = await supabase.from('order_signale')
+            .update({ status:'laeuft', pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : '', updated_at: new Date().toISOString() })
+            .eq('id', sig.id).eq('status', 'wartet').select()
+          if(!clM || !clM.length){ _osStand = 'claim-verloren'; continue }
+          osClaimMerken(sig)
+          _osStand = 'claim-mt5-balance: ' + String(sig.id).slice(0, 8)
+          mt5KontoBalanceJetzt(pm.account_id, lg)
+            .then(er => supabase.from('order_signale').update({ status: er && er.ok ? 'fertig' : 'fehler', updated_at: new Date().toISOString(), ergebnis: er || { ok: false, msg: 'keine Antwort' } }).eq('id', sig.id))
+            .catch(e => supabase.from('order_signale').update({ status: 'fehler', updated_at: new Date().toISOString(), ergebnis: { ok: false, msg: String((e && e.message) || e) } }).eq('id', sig.id))
+          continue
+        }
         if(['konto_balance', 'balance_lesen'].includes(String((sig.params || {}).aktion || ''))){
           const { data: clB } = await supabase.from('order_signale')
             .update({ status:'laeuft', pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : '', updated_at: new Date().toISOString() })
