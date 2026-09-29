@@ -8036,11 +8036,8 @@
             <button type="button" data-mkl-art="kerzen" class="active" title="Minutenkerzen (Docht + Körper), die laufende Kerze bewegt sich mit dem Live-Kurs">Kerzen</button>
             <button type="button" data-mkl-art="linie" title="Schlusskurs je Minute als Linie">Linie</button>
           </div>
-          <div class="seg" id="mkl-span">
-            <button type="button" data-mkl-span="60" class="active">1 h</button>
-            <button type="button" data-mkl-span="240">4 h</button>
-            <button type="button" data-mkl-span="1440">24 h</button>
-          </div>
+          <!-- Zeitumschalter 1 h / 4 h / 24 h entfernt (30.09.2026, Finn: „Ich nutze eh immer nur den Minuten-Chart, die 1 h") —
+               der Ausschnitt steht fest auf 1 h (mkl.span = 60), die geladenen 24 h Kerzen bleiben zum Zurückscrollen -->
         </div>
         <div id="mkl-beide" class="mono" style="font-size:12px;margin-top:6px;display:flex;flex-wrap:wrap;gap:4px 10px"></div>
         <!-- Chart-Container für Lightweight Charts (25.09.2026): Höhe setzt mklChartZeichnen (380 Desktop / 260 Handy), der Platzhalter
@@ -22577,7 +22574,7 @@
     el.textContent = mklFmt(k.preis); el.style.opacity = frisch ? '1' : '.45'
     if(sym) sym.textContent = k.symbol
     // Tagesveränderung gegen die erste Kerze der Spanne (ehrlich: „seit Spannenanfang", nicht Vortag)
-    // Vergleichswert = erste Kerze im SICHTBAREN Fenster (1 h / 4 h / 24 h), die Daten sind immer 24 h
+    // Vergleichswert = erste Kerze im SICHTBAREN Fenster (seit 30.09.2026 fest 1 h), die Daten sind immer 24 h
     const bisK = mkl.kerzen.length ? (Date.parse(mkl.kerzen[mkl.kerzen.length - 1].minute) || 0) + 60000 : Date.now()
     const ersteK = mkl.kerzen.find(kk => (Date.parse(kk.minute) || 0) >= Math.min(Date.now(), bisK) - mkl.span * 60000)
     const erste = ersteK ? Number(ersteK.o) : null
@@ -22628,7 +22625,7 @@
   }
   // Chart (25.09.2026, Finn zum Chart.js-Kerzenversuch: „richtig gottlos hässlich … lass es auch rauszoomen … nur 1-Minuten-
   // Chart, das reicht"): TradingView Lightweight Charts (MIT, jsDelivr 4.2.3, lazy beim ersten Zeichnen) statt Floating-Bars.
-  // Daten = ALLE 1-Minuten-Kerzen der letzten 24 h der gewählten Wurzel; 1 h / 4 h / 24 h setzen nur den sichtbaren Bereich,
+  // Daten = ALLE 1-Minuten-Kerzen der letzten 24 h der gewählten Wurzel; der Ausschnitt (fest 1 h) setzt nur den sichtbaren Bereich,
   // Zoom (Mausrad/Pinch) und Verschieben (Drag) sind eingebaut. Laufende Kerze per series.update() (close = Live-Kurs, h/l
   // mitgezogen — nur Anzeige, die Cloud-Kerze kommt vom Reader), neue Minute = neue Kerze. Demo-Orders als Preislinien. Farben
   // aus den Design-Tokens, Zeit lokal (Dubai wie überall). Fehlt die Bibliothek (offline/CDN): Hinweistext statt Absturz.
@@ -22650,7 +22647,7 @@
   const mklZeit = tt => new Date(tt * 1000).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
   const mklChartHoehe = () => (window.innerWidth || 1000) < 700 ? 300 : 520   // 25.09.2026, Finn: „den Winning-Days-Chart ein Stück größer" (vorher 260/380)
   function mklChartEntfernen(){ if(_mklLw){ try{ _mklLw.ro && _mklLw.ro.disconnect() }catch(_){} try{ _mklLw.chart.remove() }catch(_){} _mklLw = null } }
-  // 1 h / 4 h / 24 h = sichtbarer Bereich bis „jetzt + 5 Kerzen", Daten bleiben die vollen 24 h
+  // 1 h (fest seit 30.09.2026) = sichtbarer Bereich bis „jetzt + 5 Kerzen", Daten bleiben die vollen 24 h
   function mklSichtbarSetzen(){
     if(!_mklLw || !_mklLw.n) return
     // Liegt die letzte Kerze > 10 min zurück (Markt zu, Feed steht), endet der Ausschnitt an ihr (26.09.2026, Samstag: der Bereich
@@ -22985,13 +22982,9 @@
   window._mklAusschnitt = (von, bis) => { try{ if(_mklLw && von != null) _mklLw.chart.timeScale().setVisibleRange({ from: von, to: bis }); return _mklLw ? _mklLw.chart.timeScale().getVisibleRange() : null }catch(_){ return null } }   // Test-Haken: Zoom lesen/setzen
   window._mklChartDaten = () => (_mklLw && _mklLw.serie && typeof _mklLw.serie.data === 'function') ? _mklLw.serie.data() : null   // Test-Zugriff
   window._mklStub = d => { mkl.stub = d; mkl.kursAlt = d.kurs; mkl.kurs = d.kurs && d.kurs.alter_ms <= HEDGE_KURS_MAX_ALTER_MS ? d.kurs : null; mkl.kursJe = d.kurs && d.kurs.wurzel ? { [d.kurs.wurzel]: d.kurs } : {}; mkl.kerzen = d.kerzen || []; mkl.orders = d.orders || []; mklKopf(); mklChartZeichnen(); mklOrdersRender() }
-  // Verdrahtung: Spanne, Richtung, Instrument, Platzieren — jeweils eigene Handler
-  // 1 h / 4 h / 24 h (25.09.2026): nur der sichtbare Bereich — die Daten sind immer die vollen 24 h 1-Minuten-Kerzen
-  document.querySelectorAll('#mkl-span [data-mkl-span]').forEach(b => b.addEventListener('click', () => {
-    mkl.span = Number(b.getAttribute('data-mkl-span')) || 60
-    document.querySelectorAll('#mkl-span button').forEach(x => x.classList.toggle('active', x === b))
-    mklSichtbarSetzen(); mklKopf()
-  }))
+  // Verdrahtung: Richtung, Instrument, Platzieren — jeweils eigene Handler
+  // Spanne 1 h / 4 h / 24 h entfernt (30.09.2026, Finn: „Die verschiedenen Dinger kannst du weglassen") — mkl.span bleibt fest 60,
+  // wurde nie gespeichert, also hängt niemand auf 4 h oder 24 h fest
   document.querySelectorAll('#mkl-dir [data-mkl-dir]').forEach(b => b.addEventListener('click', () => {
     mkl.dir = b.getAttribute('data-mkl-dir')
     document.querySelectorAll('#mkl-dir button').forEach(x => { x.classList.toggle('active', x === b); x.style.color = x === b ? (mkl.dir === 'sell' ? 'var(--danger)' : '#2a9d5c') : '' })
@@ -36192,7 +36185,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.837'
+  const OS_TAB_BUILD = '2026-09-22.838'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
