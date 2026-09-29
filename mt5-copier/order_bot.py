@@ -14621,13 +14621,17 @@ def _k3_rect_in(a, b):
 
 def k3_close_knopf(zeile):
     """REIN RECHNEND (testbar): GENAU EIN Schließen-Knopf in DIESER Zeile (aria/title/data-name/Text „close"/×, nie Reverse/
-    Protect). Hülle + innerer Knopf zählen einmal (der innere gewinnt), gleiche Rechtecke einmal. -> (knopf|None, anzahl)"""
+    Protect). Hülle + innerer Knopf zählen einmal (der innere gewinnt), gleiche Rechtecke einmal. -> (knopf|None, anzahl)
+    Der Ausschluss (Reverse/Protect/Settings …) prüft NUR die sichtbare Beschriftung (aria/title/Text), nie den data-name — erster
+    K3-Lauf 29.09.2026 13:14 UTC: der einzige, richtige Knopf hieß aria/title „Close", data-name „close-settings-cell-button"; das
+    „settings" darin warf ihn raus, Position blieb offen."""
     kand = []
     for k in (zeile or {}).get("knoepfe") or []:
         if not isinstance(k, dict) or cdp_klickpunkt(k.get("rect")) is None:
             continue
         lab = " ".join(str(k.get(f) or "") for f in ("aria", "title", "dn", "text"))
-        if (K3_RX_CLOSE.search(lab) or K3_RX_KREUZ.match(str(k.get("text") or "").strip())) and not K3_RX_NICHT_CLOSE.search(lab):
+        sicht = " ".join(str(k.get(f) or "") for f in ("aria", "title", "text"))
+        if (K3_RX_CLOSE.search(lab) or K3_RX_KREUZ.match(str(k.get("text") or "").strip())) and not K3_RX_NICHT_CLOSE.search(sicht):
             kand.append(k)
     kand = [k for k in kand if not any(j is not k and list(j["rect"]) != list(k["rect"]) and _k3_rect_in(j["rect"], k["rect"]) for j in kand)]
     einzeln = {}

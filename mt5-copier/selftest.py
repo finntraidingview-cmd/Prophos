@@ -2741,6 +2741,13 @@ def test_puls_k3():
     chk(k2 and k2["tag"] == "button" and n2 == 1, "Hülle + innerer Knopf = einer (innerer gewinnt)")
     chk(ob.k3_close_knopf({"knoepfe": [{"aria": "Close position", "rect": [1, 1, 20, 20]}, {"text": "×", "rect": [40, 1, 20, 20]}]})[0] is None
         and ob.k3_close_knopf({"knoepfe": []}) == (None, 0), "zwei Kandidaten / keiner = kein Knopf (Abbruch)")
+    # echter Knopf aus dem ersten K3-Lauf (29.09.2026 13:14 UTC, pc-usq1i6) — wurde vom „settings" im data-name verworfen
+    echt = {"tag": "button", "text": "", "aria": "Close", "title": "Close", "dn": "close-settings-cell-button", "rect": [893, 649, 22, 22]}
+    k4_, n4_ = ob.k3_close_knopf({"knoepfe": [echt]})
+    chk(k4_ is echt and n4_ == 1, "echter Tradovate-Close-Knopf (data-name close-settings-cell-button) wird genommen")
+    chk(ob.k3_close_knopf({"knoepfe": [{"aria": "Close", "title": "Position settings", "rect": [1, 1, 20, 20]}]})[0] is None
+        and ob.k3_close_knopf({"knoepfe": [{"aria": "Reverse position", "dn": "close-reverse", "rect": [1, 1, 20, 20]}]})[0] is None,
+        "sichtbare Beschriftung Settings/Reverse schließt weiter aus")
     menue = [{"text": "Trading settings", "rect": [100, 400, 180, 30]}, {"text": "Log out", "rect": [100, 430, 180, 30]}]
     chk(ob.k3_eindeutig(menue, ob.K3_RX_ABMELDEN)[0]["text"] == "Log out"
         and ob.k3_eindeutig([{"text": "Disconnect", "rect": [1, 1, 50, 20]}], ob.K3_RX_ABMELDEN)[0] is not None
