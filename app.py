@@ -9694,7 +9694,7 @@ def puls_inventar_schreiben(pc_id):
 # (Lesestand/Inventar aus augen.js) schreibt der Puls über POST /puls-augen/<pc_id> in puls_augen (RLS an, nur Service-Key).
 # SQL: sql/2026-09-29_puls_augen.sql. E0 = nur lesen, kein Klick.
 PULS_AUGEN_MAX = 60_000
-_PULS_REGEL_CACHE = {"at": 0.0, "cdp": []}
+_PULS_REGEL_CACHE = {"at": 0.0, "cdp": [], "gut": False}
 
 
 def puls_augen_modus(pc_id, cdp_liste):
@@ -9725,9 +9725,14 @@ def puls_regel_lesen(pc_id):
         try:
             zeilen = sb_select("wd_farmer_regeln", {"id": "eq.1", "select": "puls_augen_cdp"})
             _PULS_REGEL_CACHE["cdp"] = (zeilen[0].get("puls_augen_cdp") if zeilen else None) or []
-            _PULS_REGEL_CACHE["at"] = time.time()
+            _PULS_REGEL_CACHE["at"], _PULS_REGEL_CACHE["gut"] = time.time(), True
         except Exception:
-            _PULS_REGEL_CACHE["cdp"], _PULS_REGEL_CACHE["at"] = [], time.time()   # Spalte fehlt / DB weg → 'uia'
+            # DB weg / Spalte fehlt: NIE ausdrücklich 'uia' melden (29.09.2026, Finns Live-Test 14:44 UTC — ein ausdrückliches 'uia'
+            # schickt den Bot auf den alten Weg und schließt das Puls-Chrome). Letzten guten Stand weiter nutzen und in 10 s erneut
+            # lesen; gab es noch keinen, 503 → der Bot behält seine gemerkte Regel (Client-Rückfall seit .809).
+            if not _PULS_REGEL_CACHE["gut"]:
+                return jsonify({"ok": False, "msg": "Regel gerade nicht lesbar"}), 503
+            _PULS_REGEL_CACHE["at"] = time.time() - 50
     return jsonify({"ok": True, "augen": puls_augen_modus(pc_id, _PULS_REGEL_CACHE["cdp"])})
 
 
