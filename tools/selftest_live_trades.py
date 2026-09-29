@@ -26,7 +26,8 @@ def lade():
         return re.search(rf"^{name} = .*$", src, re.M).group(0)
     exec("\n".join([const("LT_WD_BLOW_PLUS"), const("WD_HEUTE_PPL")]
                    + [block(f) for f in ("_wd_num", "_wd_level", "_wd_konto_groesse", "ist_topstep_express", "konto_basis_balance",
-                                           "_lt_liq_balance", "_lt_liq", "_lt_demo", "kurs_jetzt_wahl", "tsx_zeile_ueberlagern")]), ns)
+                                           "_lt_liq_balance", "_lt_liq", "_lt_demo", "kurs_jetzt_wahl", "tsx_zeile_ueberlagern",
+                                           "tv_bracket_ueberlagern")]), ns)
     return ns
 
 
@@ -114,6 +115,15 @@ def main():
     u2 = ue("tsv2", dict(tv, sl_level_nq=30800.0), 30921.75, "buy", 2.0, 2)
     check(u2["sl_level_nq"] == 30800.0 and u2["sl_art"] == "bracket", "tsv2: echte SL-Bracket geht vor Liquidation")
     check(ue("tvv2", tv, 30921.75, "buy", 2.0, 2) == {} and ue("tsv2", {}, 1, "buy", 2.0, 2) == {}, "nur tsv2 mit Werten")
+    # 29.09.2026: Orbit V2 ohne Hedge — exakte Brackets aus TradingViews Meldungen (Live-Test Plan 8fdf12d0, SELL @ 30682.25)
+    tb = a["tv_bracket_ueberlagern"]
+    tvo = {"einstieg_nq": 30682.25, "tp_level_nq": 30516.5, "sl_level_nq": 30698.5, "tp_level_quelle": "tv_toast"}
+    b1 = tb("tvv2", tvo, None)
+    check(b1 == {"tp_level_nq": 30516.5, "level_quelle": "tv_toast", "sl_level_nq": 30698.5, "sl_art": "bracket"}, "tvv2 ohne Hedge: TP/SL aus den Meldungen")
+    check(tb("tvv2", tvo, {"tp_level_nq": 30516.25, "status": "offen"}) == {}, "tvv2 mit Hedge: hedge.* bleibt maßgeblich")
+    check(tb("tvv2", {"einstieg_nq": 30682.25}, None) == {} and tb("tsv2", tvo, None) == {} and tb("tvv2", None, None) == {},
+          "tvv2 ohne Brackets / andere Wege → nichts")
+    check(tb("tvv2", {"tp_level_nq": 30516.5}, {}) == {"tp_level_nq": 30516.5, "level_quelle": "tv_toast"}, "leerer Hedge = kein Hedge, nur TP")
 
     print("\nALLES GRUEN" if ok else "\nFEHLER")
     return 0 if ok else 1

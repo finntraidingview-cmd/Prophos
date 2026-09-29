@@ -6996,6 +6996,23 @@ def tsx_zeile_ueberlagern(route, tv, einstieg, richtung, ppl, kt):
     return out
 
 
+def tv_bracket_ueberlagern(route, tv, hedge):
+    """REIN RECHNEND (testbar, 29.09.2026, Finn: „den Trade 1:1 in Radar klonen"): Orbit V2 (tvv2) OHNE Hedge — der neue Puls (CDP)
+    liest TP- und SL-Limit exakt aus TradingViews Meldungen, der PC-Tab friert sie als tv.tp_level_nq / tv.sl_level_nq ein (gleiche
+    Felder wie Topstep V2). Bisher rechnete der Radar TP/SL aus master_tp/master_sl ab dem Fill — TradingView verankert die Brackets
+    aber am Kurs beim Klick (Live-Test 14:26 UTC, Plan 8fdf12d0: 0,25 Pkt daneben). Mit Hedge bleibt hedge.* maßgeblich (beim Open
+    eingefroren, Hand-Werte „✎ TP aus TV"). -> dict mit den Überschreibungen ({} sonst)"""
+    if str(route or "") != "tvv2" or not isinstance(tv, dict) or hedge:
+        return {}
+    out = {}
+    tp, sl = _wd_num(tv.get("tp_level_nq")), _wd_num(tv.get("sl_level_nq"))
+    if tp and tp > 1000:
+        out["tp_level_nq"], out["level_quelle"] = tp, str(tv.get("tp_level_quelle") or "tv_toast")
+    if sl and sl > 1000:
+        out.update(sl_level_nq=sl, sl_art="bracket")
+    return out
+
+
 def _wd_konto_groesse(acc):
     """Kontogröße: starting_balance, sonst „150k" aus dem Namen (wie tpKontoGroesseAusName)."""
     sb = _wd_num((acc or {}).get("starting_balance"))
@@ -7165,7 +7182,7 @@ def _wd_heute_zeile(p, acc, disp, vorher=None):
         "endlesung": _wd_endlesung_zeile(final),
     }
     # F28: Topstep V2 — echte Brackets/MLL aus TopstepX vor gerechneten Werten (liq_level_nq/liq_pl_usd nur für live-trades)
-    ueber = tsx_zeile_ueberlagern(p.get("route"), tv, einstieg, richtung, ppl, kt)
+    ueber = tsx_zeile_ueberlagern(p.get("route"), tv, einstieg, richtung, ppl, kt) or tv_bracket_ueberlagern(p.get("route"), tv, hedge)
     zeile.update({k: v for k, v in ueber.items() if k not in ("liq_level_nq", "liq_regel", "liq_pl_usd")})
     zeile["_tsx"] = ueber
     return zeile

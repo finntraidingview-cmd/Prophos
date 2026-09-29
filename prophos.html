@@ -19883,6 +19883,39 @@
     return tv
   }
   window._tsxBaselineAusOrder = tsxBaselineAusOrder   // Test-Haken (Stub)
+  /* ORBIT V2 START-BASELINE AUS DER ORDER-ANTWORT (29.09.2026, Finn nach dem Live-Test 14:26 UTC: „ging zurück in Prophos und danach
+   * wieder zurück, um noch irgendwas zu machen — mir wäre lieber, er prüft am Ende die Werte, ob das echt genau passt"). Das „danach"
+   * war tvV2BaselineLesen: ein ZWEITER Puls-Lauf nur für die Start-Balance, über den alten Weg im normalen Chrome samt Tradovate-Login.
+   * Liefert der neue Puls (CDP) die Account summary aus DEMSELBEN Lauf mit (balance_start, equity_start, today_pnl_start), gilt dasselbe
+   * Muster wie bei Topstep (tsxBaselineAusOrder): Baseline aus der Order-Antwort, kein zweiter Lauf. Dazu die exakten Brackets aus
+   * TradingViews Meldungen (tp_limit/sl_limit → tv.tp_level_nq/sl_level_nq — gleiche Felder wie Topstep V2, der Radar zeichnet daraus)
+   * und die Endprüfung des Bots (pruefung) zur Einsicht am Plan. */
+  function tvV2BaselineAusOrder(plan, r){
+    const zahl = v => (typeof v === 'number' && isFinite(v)) ? v : null
+    const at = (r && r.klick_at) || new Date().toISOString()
+    const tv = { konto: tvV2Konto(plan) || (r && r.konto) || null, today_pnl_start: zahl(r.today_pnl_start), datum_start: tvV2Handelstag(), at, puls: 'tv',
+                 pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : null, quelle: 'cdp_order', klick_at: (r && r.klick_at) || null,
+                 balance_start: zahl(r.balance_start), equity_start: zahl(r.equity_start),
+                 lesen_trail: String(r.trail || '').slice(0, 2000), lesen_at: new Date().toISOString() }
+    if(tv.today_pnl_start == null) tv.grund = 'kein_today_pnl: Order-Antwort ohne Total P/L'
+    Object.assign(tv, tvV2OrderLevel(r))
+    if(r && r.pruefung && typeof r.pruefung === 'object') tv.pruefung = r.pruefung
+    if(tv.balance_start != null) tvKontoBalanceSchreiben(plan.masterAccountId, { balance: tv.balance_start, equity: tv.equity_start }, at)
+    return tv
+  }
+  window._tvV2BaselineAusOrder = tvV2BaselineAusOrder   // Test-Haken (Stub)
+  // Einstieg + Brackets aus der Puls-Antwort (Fill- und TP/SL-Meldung) als tv-Felder; einstieg_quelle bleibt 'fill' (Leser prüfen darauf),
+  // der Beleg (fill_toast | tabelle_avg_fill) steht daneben. -> {} ohne verwertbare Werte
+  function tvV2OrderLevel(r){
+    const out = {}
+    const num = v => (v != null && typeof tvKursZahl === 'function') ? tvKursZahl(v) : null
+    const ein = num(r && r.einstieg), tp = num(r && r.tp_limit), sl = num(r && r.sl_limit)
+    if(ein > 1000) Object.assign(out, { einstieg_nq: ein, einstieg_quelle: 'fill', einstieg_beleg: (r && r.einstieg_quelle) || null, einstieg_symbol: (r && r.tv_symbol) || null })
+    if(tp > 1000) Object.assign(out, { tp_level_nq: tp, tp_level_quelle: (r && r.tp_limit_quelle) || 'tv_toast' })
+    if(sl > 1000) Object.assign(out, { sl_level_nq: sl, sl_level_quelle: (r && r.sl_limit_quelle) || 'tv_toast' })
+    return out
+  }
+  window._tvV2OrderLevel = tvV2OrderLevel   // Test-Haken (Stub)
 
   const tvV2Poll = {
     // Stündlich statt 50–80 s (24.09.2026 abends, Finn: „alle 60 Sekunden in jeden Account einloggen ist zu viel —
@@ -35847,7 +35880,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.804'
+  const OS_TAB_BUILD = '2026-09-22.805'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -36308,6 +36341,8 @@
         let tvb = null
         // Topstep V2 (F28): Start-Werte stecken schon in der tsx-konto-Antwort — kein zweiter Chrome-Lauf
         if(plan.route === 'tsv2' && r && typeof r.balance_start === 'number' && isFinite(r.balance_start)) tvb = tsxBaselineAusOrder(plan, r)
+        // Orbit V2 über den neuen Puls (29.09.2026): Account summary aus demselben Lauf → kein zweiter Chrome-Lauf (tvV2BaselineAusOrder)
+        else if(plan.route === 'tvv2' && r && typeof r.balance_start === 'number' && isFinite(r.balance_start)) tvb = tvV2BaselineAusOrder(plan, r)
         else if(MT5_LOCAL && typeof tvV2BaselineLesen === 'function'){
           if(imPopup) _pfSet('ob-order', 'warn', '⏳ Order platziert — Puls liest Today\'s P&L als Startwert…')
           try{ tvb = await tvV2BaselineLesen(plan) }catch(_){ tvb = null }
@@ -36322,13 +36357,13 @@
         }
         await v2PlanAufOpen(plan.id, null, tvb)
         // Bot-Fill auch OHNE Hedge am Plan (Gegenprüfung 25.09.2026): mt5_baseline.tv.einstieg_nq — die Winning-Days-Übersicht
-        // (wd-heute) zeichnet daraus Entry-/TP-/SL-Linien für reine Orbit-V2-Winning-Days
+        // (wd-heute) zeichnet daraus Entry-/TP-/SL-Linien für reine Orbit-V2-Winning-Days. Seit 29.09.2026 auch die exakten Brackets
+        // aus TradingViews Meldungen (tv.tp_level_nq/sl_level_nq): der Radar rechnete TP/SL bisher aus TP$/SL$ ab dem Fill, TradingView
+        // verankert sie aber am Kurs beim Klick (Live-Test 14:26 UTC: 0,25 Pkt daneben). Nachgereicht auch, wenn die Baseline vom alten Weg kam.
         try{
-          const ein = (r && r.einstieg != null && typeof tvKursZahl === 'function') ? tvKursZahl(r.einstieg) : null
-          if(ein > 1000){
-            await baselinePatchIn(plan.id, 'tv', { einstieg_nq: ein, einstieg_quelle: 'fill', einstieg_symbol: r.tv_symbol || null })   // atomar (Teil B)
-          }
-        }catch(e){ console.warn('[v2] einstieg_nq', e) }
+          const lv = (typeof tvV2OrderLevel === 'function') ? tvV2OrderLevel(r) : {}
+          if(Object.keys(lv).length) await baselinePatchIn(plan.id, 'tv', lv)   // atomar (Teil B)
+        }catch(e){ console.warn('[v2] einstieg/level', e) }
       }
       // TOPSTEPX SCHARF (B31, Master 27.09.2026): Puls klickt auch bei „Market closed", TopstepX lehnt am
       // Wochenende ab → code 'abgelehnt' (gesendet:true, msg = TopstepX-Text). code 'beweis' ohne ok = Klick
