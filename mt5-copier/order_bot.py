@@ -13465,12 +13465,12 @@ def augen_target_waehlen(liste):
 
 AUGEN_BANNER_JS = (
     "(function(){var b=document.getElementById('prophos-aufnahme-banner');if(!b){b=document.createElement('div');"
-    "b.id='prophos-aufnahme-banner';document.documentElement.appendChild(b);}"
+    "b.id='prophos-aufnahme-banner';b.setAttribute('data-name','prophos-aufnahme');document.documentElement.appendChild(b);}"
     "b.setAttribute('style','position:fixed;left:0;top:0;right:0;z-index:2147483647;pointer-events:none;"
     "padding:8px 16px;background:#d62b2b;color:#fff;font:bold 18px/1.3 system-ui,Arial;text-align:center;"
     "box-shadow:0 2px 12px rgba(0,0,0,.4)');b.textContent='\\u25cf AUFNAHME L\\u00c4UFT \\u2013 in DIESEM Fenster klicken (Puls-Chrome)';"
     "var r=document.getElementById('prophos-aufnahme-rahmen');if(!r){r=document.createElement('div');r.id='prophos-aufnahme-rahmen';"
-    "document.documentElement.appendChild(r);}r.setAttribute('style','position:fixed;inset:0;z-index:2147483646;"
+    "r.setAttribute('data-name','prophos-aufnahme');document.documentElement.appendChild(r);}r.setAttribute('style','position:fixed;inset:0;z-index:2147483646;"
     "pointer-events:none;border:6px solid #d62b2b;box-sizing:border-box');return true;})()")
 AUGEN_BANNER_WEG_JS = ("(function(){['prophos-aufnahme-banner','prophos-aufnahme-rahmen'].forEach(function(i){"
                        "var e=document.getElementById(i);if(e)e.remove();});return true;})()")
@@ -13484,9 +13484,129 @@ def augen_tv_targets(liste):
     return tv
 
 
+AUFNAHME_KOMPAKT_MAX = 48_000       # Railway-Route deckelt bei 60 KB (erste Aufnahme 00:38 UTC: 119 Ereignisse → HTTPError)
+_AUFNAHME_KLICKTYPEN = ("pointerdown", "mousedown", "focusin", "click", "pointerup", "mouseup")
+
+
+def _aufnahme_element_kompakt(e, text_max=40):
+    if not isinstance(e, dict):
+        return None
+    out = {}
+    for k in ("tag", "dn", "role", "aria", "id"):
+        if e.get(k):
+            out[k] = str(e[k])[:60]
+    if e.get("text"):
+        out["text"] = str(e["text"])[:text_max]
+    if e.get("wert") not in (None, ""):
+        out["wert"] = str(e["wert"])[:20]
+    if isinstance(e.get("rect"), (list, tuple)):
+        out["rect"] = [int(v) if isinstance(v, (int, float)) else v for v in e["rect"][:4]]
+    return out
+
+
+def aufnahme_kompakt(wert, vorfahren_n=2, text_max=40, max_bytes=AUFNAHME_KOMPAKT_MAX):
+    """REIN RECHNEND (testbar): Aufnahme-Ergebnis (augen.js aufnahme_stopp) → kompakte Form unter max_bytes.
+    Je Ereignis nur t/typ/zone/maus/taste/wert, Element = Ziel + höchstens vorfahren_n Vorfahren mit dn/role/aria/id/text/wert/
+    rect. Aufeinanderfolgende Klick-Ereignisse (pointerdown/mousedown/focusin/click/…) auf DEMSELBEN Ziel werden zu EINEM
+    'klick' mit typen[] zusammengefasst. Zu groß → weniger Vorfahren, kürzere Texte, zuletzt abschneiden (abgeschnitten=n)."""
+    if not isinstance(wert, dict):
+        return {"ereignisse": [], "anzahl": 0}
+    roh = [e for e in (wert.get("ereignisse") or []) if isinstance(e, dict)]
+    zus = []
+    for e in roh:
+        ziel = _aufnahme_element_kompakt(e.get("ziel"), text_max)
+        vor = [v for v in (_aufnahme_element_kompakt(x, text_max) for x in (e.get("vorfahren") or [])[:vorfahren_n]) if v]
+        typ = str(e.get("typ") or "")
+        schl = json.dumps(ziel, sort_keys=True) if ziel else None
+        if typ in _AUFNAHME_KLICKTYPEN and zus and zus[-1].get("typ") == "klick" and zus[-1].get("_schl") == schl \
+                and int(e.get("t") or 0) - int(zus[-1].get("t_bis") or 0) <= 1500:
+            zus[-1]["typen"].append(typ)
+            zus[-1]["t_bis"] = int(e.get("t") or 0)
+            continue
+        k = {"t": int(e.get("t") or 0), "typ": "klick" if typ in _AUFNAHME_KLICKTYPEN else typ, "ziel": ziel, "vorfahren": vor}
+        if typ in _AUFNAHME_KLICKTYPEN:
+            k["typen"], k["t_bis"], k["_schl"] = [typ], int(e.get("t") or 0), schl
+        for f in ("zone", "maus", "taste", "wert"):
+            if e.get(f) not in (None, ""):
+                k[f] = e[f] if f != "wert" else str(e[f])[:20]
+        zus.append(k)
+    for k in zus:
+        k.pop("_schl", None)
+    out = {k: wert.get(k) for k in ("v", "tab_id", "roh", "anzahl", "verloren", "dauer_ms", "url", "sichtbar_start", "sichtbar_stopp",
+                                    "fokus_start", "fokus_stopp") if k in wert}
+    out.update({"ereignisse": zus, "anzahl": len(roh), "zusammengefasst": len(zus), "kompakt": True})
+    if len(json.dumps(out, ensure_ascii=False)) <= max_bytes:
+        return out
+    if vorfahren_n > 0 or text_max > 16:
+        return aufnahme_kompakt(wert, max(0, vorfahren_n - 1), max(16, text_max - 12), max_bytes)
+    while zus and len(json.dumps(out, ensure_ascii=False)) > max_bytes:
+        zus.pop()
+        out["abgeschnitten"] = len(roh) - len(zus)
+    return out
+
+
+def _aufnahme_lokal_schreiben(daten, trail):
+    """Volle Aufnahme (alle Targets) als Datei neben dem Bot — überlebt jeden Upload-Fehler. -> Pfad | None"""
+    try:
+        name = os.path.join(_AUGEN_HIER, "augen_aufnahme_" + time.strftime("%Y%m%d_%H%M%S") + ".json")
+        with open(name, "w", encoding="utf-8") as f:
+            json.dump(daten, f, ensure_ascii=False)
+        trail.append(f"Aufnahme lokal gesichert: {os.path.basename(name)}")
+        return name
+    except Exception as e:
+        trail.append(f"Aufnahme lokal NICHT gesichert ({type(e).__name__})")
+        return None
+
+
+def _aufnahme_lokal_letzte():
+    """Neueste augen_aufnahme_*.json neben dem Bot. -> (pfad, daten) | (None, None)"""
+    try:
+        kand = sorted(n for n in os.listdir(_AUGEN_HIER) if n.startswith("augen_aufnahme_") and n.endswith(".json"))
+        if not kand:
+            return None, None
+        p = os.path.join(_AUGEN_HIER, kand[-1])
+        with open(p, "r", encoding="utf-8") as f:
+            return p, json.load(f)
+    except Exception:
+        return None, None
+
+
+def _aufnahme_senden(daten_kompakt, stand, pc, trail, ziel_url=""):
+    """Kompakte Aufnahme (+ kleiner Stand) nach puls_augen. -> True/False"""
+    if not pc:
+        return False
+    import urllib.request
+    ok = True
+    for art, daten in (("inventar", {"inventar": {"aufnahme": daten_kompakt}}), ("stand", stand if isinstance(stand, dict) else None)):
+        if not isinstance(daten, dict):
+            continue
+        body = json.dumps({"art": art, "daten": dict(daten, target=str(ziel_url)[:200])}, ensure_ascii=False).encode("utf-8")
+        try:
+            req = urllib.request.Request(f"{PULS_BACKEND}/puls-augen/{pc}", data=body, headers={"Content-Type": "application/json"})
+            urllib.request.urlopen(req, timeout=8.0).read()
+            trail.append(f"puls_augen ({art}) geschrieben ({len(body)} Bytes)")
+        except Exception as e_:
+            ok = False
+            trail.append(f"puls_augen ({art}) nicht geschrieben ({type(e_).__name__}, {len(body)} Bytes)")
+    return ok
+
+
 def _augen_aufnahme(aktion, js, trail, res, pc):
     """Aufnahme start|stopp in ALLEN TradingView-Tabs des Puls-Chrome. Ergebnis je Target in Spur + res; stopp schreibt
     inventar.aufnahme (alle Targets) + einen Stand (Target mit den meisten Ereignissen) nach puls_augen."""
+    if aktion == "senden":
+        # Nachreichen (29.09.2026, erste Aufnahme verlor den Upload am 60-KB-Deckel): neueste lokale Volldatei, sonst die Kopie
+        # im Tab (augen.js ≥ 0.6.1 aufnahme_letzte()). Nie eine neue Aufnahme, nie ein Klick.
+        pfad, voll = _aufnahme_lokal_letzte()
+        if isinstance(voll, dict) and voll.get("targets"):
+            best = max((t for t in voll["targets"] if isinstance(t, dict)), key=lambda t: len(t.get("ereignisse") or []), default=None)
+            if best:
+                k = aufnahme_kompakt(best)
+                trail.append(f"Aufnahme aus {os.path.basename(pfad)}: {k.get('anzahl')} Ereignisse → {k.get('zusammengefasst')} kompakt")
+                ok = _aufnahme_senden(k, None, pc, trail, best.get("url") or "")
+                res.update(ok=ok, msg=f"Aufnahme nachgereicht ({k.get('anzahl')} Ereignisse, lokal)" if ok else "Nachreichen fehlgeschlagen")
+                return
+        trail.append("keine lokale Aufnahme-Datei — frage die Tabs (aufnahme_letzte)")
     targets = augen_tv_targets(_cdp_http("/json/list"))
     alle = _cdp_http("/json/list") or []
     n_tabs = sum(1 for t in alle if isinstance(t, dict) and t.get("type") == "page")
@@ -13496,7 +13616,7 @@ def _augen_aufnahme(aktion, js, trail, res, pc):
         res["msg"] = "im Puls-Chrome ist keine TradingView-Seite offen"
         return
     ergebnisse, bester, bester_n = [], None, -1
-    fn = "aufnahme_start" if aktion == "start" else "aufnahme_stopp"
+    fn = {"start": "aufnahme_start", "stopp": "aufnahme_stopp", "senden": "aufnahme_letzte"}[aktion]
     for t in targets:
         eintrag = {"target_id": str(t.get("id") or "")[:40], "url": str(t.get("url") or "")[:200]}
         try:
@@ -13508,10 +13628,13 @@ def _augen_aufnahme(aktion, js, trail, res, pc):
                 wert = ((r or {}).get("result") or {}).get("value") or {}
                 if r.get("exceptionDetails"):
                     wert = {"fehler": str((r.get("exceptionDetails") or {}).get("text"))[:120]}
-                ws.rufe("Runtime.evaluate", {"expression": AUGEN_BANNER_JS if aktion == "start" else AUGEN_BANNER_WEG_JS,
-                                             "returnByValue": True}, timeout=5)
+                if aktion == "senden" and not wert:
+                    wert = {"fehler": "keine letzte Aufnahme in diesem Tab"}
+                if aktion != "senden":
+                    ws.rufe("Runtime.evaluate", {"expression": AUGEN_BANNER_JS if aktion == "start" else AUGEN_BANNER_WEG_JS,
+                                                 "returnByValue": True}, timeout=5)
                 stand = None
-                if aktion == "stopp":
+                if aktion in ("stopp", "senden"):
                     r2 = ws.rufe("Runtime.evaluate", {"expression": "globalThis.prophosAugen.stand()", "returnByValue": True}, timeout=10)
                     stand = ((r2 or {}).get("result") or {}).get("value")
             finally:
@@ -13524,15 +13647,18 @@ def _augen_aufnahme(aktion, js, trail, res, pc):
         if isinstance(wert, dict):
             eintrag.update({k: wert.get(k) for k in ("tab_id", "sichtbar", "fokus", "roh", "anzahl", "verloren", "laeuft", "fehler",
                                                      "sichtbar_start", "sichtbar_stopp", "fokus_start", "fokus_stopp") if k in wert})
-            if aktion == "stopp":
+            if aktion in ("stopp", "senden"):
                 eintrag["ereignisse"] = wert.get("ereignisse") or []
                 eintrag["anzahl"] = len(eintrag["ereignisse"])
+                for k_ in ("v", "dauer_ms", "url"):
+                    if k_ in wert:
+                        eintrag[k_ + ("_tab" if k_ == "url" else "")] = wert.get(k_)
                 if eintrag["anzahl"] > bester_n:
                     bester, bester_n = (eintrag, stand), eintrag["anzahl"]
         ergebnisse.append(eintrag)
         trail.append(f"Target {eintrag['url'][:40]} (tab {eintrag.get('tab_id') or '?'}): "
                      + (f"{fn} ok" if not eintrag.get("fehler") else f"FEHLER {eintrag['fehler']}")
-                     + (f", roh {eintrag.get('roh')}, Ereignisse {eintrag.get('anzahl')}" if aktion == "stopp" else "")
+                     + (f", roh {eintrag.get('roh')}, Ereignisse {eintrag.get('anzahl')}" if aktion != "start" else "")
                      + (", VERLOREN" if eintrag.get("verloren") else "") + (", lief schon" if eintrag.get("laeuft") else ""))
     if aktion == "start":
         ok_n = sum(1 for e in ergebnisse if not e.get("fehler"))
@@ -13546,22 +13672,20 @@ def _augen_aufnahme(aktion, js, trail, res, pc):
     trail.append(f"Aufnahme gestoppt: {gesamt} Ereignisse (roh {roh}) über {len(ergebnisse)} Target(s)"
                  + (" — AUFNAHME VERLOREN (Seite neu geladen?)" if verloren else "")
                  + (" — roh 0 überall: in keinem Puls-Chrome-Tab kam ein Klick an (anderes Fenster/Reader-Chrome?)" if roh == 0 and not verloren else ""))
-    if pc:
-        import urllib.request
-        stand = bester[1] if bester else None
-        for art, daten in (("inventar", {"inventar": {"aufnahme": {"targets": ergebnisse, "gesamt": gesamt, "roh": roh, "verloren": verloren}}}),
-                           ("stand", stand if isinstance(stand, dict) else None)):
-            if not isinstance(daten, dict):
-                continue
-            try:
-                req = urllib.request.Request(f"{PULS_BACKEND}/puls-augen/{pc}", data=json.dumps(
-                    {"art": art, "daten": dict(daten, target=(bester[0]["url"] if bester else ""))}, ensure_ascii=False).encode("utf-8"),
-                    headers={"Content-Type": "application/json"})
-                urllib.request.urlopen(req, timeout=8.0).read()
-            except Exception as e_:
-                trail.append(f"puls_augen ({art}) nicht geschrieben ({type(e_).__name__}) — Aufnahme zu groß?")
-    res.update(ok=not verloren and gesamt > 0, msg=f"Aufnahme: {gesamt} Ereignisse, roh {roh}, {len(ergebnisse)} Target(s)"
-               + (", verloren" if verloren else ""), targets=[{k: v for k, v in e.items() if k != "ereignisse"} for e in ergebnisse])
+    # Volle Aufnahme IMMER zuerst lokal (überlebt jeden Upload-Fehler), dann kompakt (< 48 KB) in die DB
+    if aktion == "stopp" and gesamt > 0:
+        _aufnahme_lokal_schreiben({"targets": ergebnisse, "gesamt": gesamt, "roh": roh, "verloren": verloren,
+                                   "at": time.strftime("%Y-%m-%dT%H:%M:%S")}, trail)
+    gesendet = False
+    if bester and bester_n > 0:
+        k = aufnahme_kompakt(bester[0])
+        k["targets_n"], k["roh_gesamt"] = len(ergebnisse), roh
+        trail.append(f"kompakt: {k.get('anzahl')} Ereignisse → {k.get('zusammengefasst')}"
+                     + (f", {k['abgeschnitten']} abgeschnitten" if k.get("abgeschnitten") else ""))
+        gesendet = _aufnahme_senden(k, bester[1], pc, trail, bester[0].get("url") or "")
+    res.update(ok=gesamt > 0 and gesendet, msg=f"Aufnahme: {gesamt} Ereignisse, roh {roh}, {len(ergebnisse)} Target(s)"
+               + (", verloren" if verloren else "") + ("" if gesendet or gesamt == 0 else " — Upload fehlgeschlagen, lokal gesichert; 'augen aufnahme senden'"),
+               targets=[{k_: v for k_, v in e.items() if k_ != "ereignisse"} for e in ergebnisse])
 
 
 def augen_kurzform(stand):
@@ -13922,6 +14046,7 @@ def modus_tvlesen_cdp(cmd):
         s = sitz[0] = _AugenSitzung(trail)
         st = s.stand(opts)
         # --- Konto sicherstellen (höchstens 4 Schritte: Panel auf → Umschalter → Eintrag → prüfen)
+        geklickt_umschalter = False
         for _runde in range(4):
             ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
             aktiv = str(ko.get("aktiv") or "")
@@ -13946,9 +14071,19 @@ def modus_tvlesen_cdp(cmd):
             if not cdp_rect(ko.get("schalter")):
                 return raus("kein_broker", f"Kein Konto-Umschalter zu sehen (aktiv '{aktiv[:40] or '-'}', "
                             f"{str(ko.get('hinweis') or '')[:80]}) — Tradovate im Puls-Chrome verbunden?", "konto")
+            # Umschalter höchstens EINMAL (erster Live-Lauf 00:44 UTC: 4 Klicks hintereinander, Dropdown nie erkannt — ein zweiter
+            # Klick schließt ein offenes Dropdown wieder). Danach zweimal lesen; bleibt es zu, ehrlich raus MIT dem Stand für T1.
+            if geklickt_umschalter:
+                return raus("konto_nicht_erreicht", f"Konto-Umschalter geklickt, Dropdown nicht erkannt (aktiv '{aktiv[:40] or '-'}') — "
+                            "augen.js sieht die Liste nicht (Selektoren?) oder der Klick trifft nicht.", "konto",
+                            konto_stand=ko, popups=st.get("popups"))
+            geklickt_umschalter = True
             s.klick(cdp_rect(ko.get("schalter")), "Konto-Umschalter")
-            _warte(0.8, 0.4)
+            _warte(0.9, 0.4)
             st = s.stand(opts)
+            if not (st.get("konto") or {}).get("liste_offen"):
+                _warte(1.0, 0.4)
+                st = s.stand(opts)
         else:
             ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
             return raus("konto_nicht_erreicht", f"Konto {ext} nicht aktiv (steht: '{str(ko.get('aktiv') or '-')[:40]}')", "konto")
@@ -14029,7 +14164,7 @@ def main():
             cmd = {"start": True}          # 'order_bot.py augen start' / puls-chrome-starten.bat — ohne JSON-Quoting in cmd
         elif len(sys.argv) >= 3 and sys.argv[2].strip().lower() == "jetzt":
             cmd = {"jetzt": True}          # 'order_bot.py augen jetzt': sofort einmal lesen (Test am PC, 29.09.2026)
-        elif len(sys.argv) >= 4 and sys.argv[2].strip().lower() == "aufnahme" and sys.argv[3].strip().lower() in ("start", "stopp"):
+        elif len(sys.argv) >= 4 and sys.argv[2].strip().lower() == "aufnahme" and sys.argv[3].strip().lower() in ("start", "stopp", "senden"):
             cmd = {"aufnahme": sys.argv[3].strip().lower()}   # 'augen aufnahme start|stopp' (Finns Idee 29.09.2026)
         else:
             try:

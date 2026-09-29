@@ -2657,6 +2657,20 @@ def test_puls_augen_cdp():
         and ob.tv_avg_fill_je_wurzel(pv)["MNQ"]["avg_fill"] == 30594.25, "Positionen → Vertragsform + avg_fill_je_wurzel")
     ke = ob.cdp_konto_eintrag([{"text": "TDFYSL150800892182 USD", "rect": [1, 1, 9, 9]}, {"text": "APEX6416990000025 USD", "rect": [1, 1, 9, 9]}], "TDFYSL150800892182")
     chk(ke[0] is not None and ke[1] == 1 and ob.cdp_konto_eintrag([], "X")[0] is None, "Konto-Eintrag: genau ein Treffer")
+    # Aufnahme kompakt (29.09.2026: 119 Ereignisse scheiterten am 60-KB-Deckel der Route)
+    z = {"tag": "button", "dn": "account-switch", "text": "TDFYSL150800892182 USD", "rect": [10, 20, 100, 30]}
+    evs = [{"t": 100, "typ": "pointerdown", "ziel": z, "vorfahren": [{"tag": "div", "text": "x" * 300}] * 3},
+           {"t": 105, "typ": "mousedown", "ziel": z}, {"t": 180, "typ": "click", "ziel": z},
+           {"t": 900, "typ": "input", "ziel": {"tag": "input", "id": "quantity-field", "wert": "4"}, "wert": "4"}]
+    k = ob.aufnahme_kompakt({"ereignisse": evs, "tab_id": "t1"})
+    chk(k["zusammengefasst"] == 2 and k["ereignisse"][0]["typ"] == "klick" and k["ereignisse"][0]["typen"] == ["pointerdown", "mousedown", "click"]
+        and len(k["ereignisse"][0]["vorfahren"]) == 2 and len(k["ereignisse"][0]["vorfahren"][0]["text"]) == 40 and k["ereignisse"][1]["wert"] == "4",
+        "Aufnahme kompakt: Klick-Kette auf demselben Ziel = 1 Eintrag, 2 Vorfahren, Texte gekürzt")
+    gross = {"ereignisse": [{"t": i, "typ": "input", "ziel": {"tag": "div", "text": "y" * 400, "rect": [i, i, 5, 5]},
+                             "vorfahren": [{"text": "z" * 400}] * 3} for i in range(3000)]}
+    kg = ob.aufnahme_kompakt(gross)
+    import json as _js
+    chk(len(_js.dumps(kg, ensure_ascii=False)) <= ob.AUFNAHME_KOMPAKT_MAX and kg.get("abgeschnitten", 0) > 0, "Aufnahme kompakt bleibt unter dem Deckel")
     if ok:
         print("✓ Puls-Augen CDP: eigenes Profil, 127.0.0.1:9333, WebSocket-Frames, Regel-Entscheid, Target-Wahl, K1-Weiche + Vertrag")
     return ok
