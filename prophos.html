@@ -28380,15 +28380,16 @@
           // schon immer, sie trägt die Aussage jetzt mit.
           const cloudAlt = (liveSrc === 'MT5-Cloud' && liveTime && (Date.now() - liveTime) > 60000) || liveSrc === 'Dashboard (eingefügt)'   // eingefügter Stand ist nie „Live" (F11)
             || (mt5Gespeichert && !mt5GespLive)   // gespeicherter MT5-Stand: „Stand · MT5 · zuletzt HH:MM" (29.09.2026)
-          // Grün, solange „aktuell" (29.09.2026, Finn: „farblich markieren, wenn sie aktuell ist — gelesen und seitdem kein Trade")
+          // „aktuell" nur als kleiner grüner Punkt (29.09.2026 spät, Finn: grüne Zahlen „grün, pink, grün — sieht übel aus"): Zahl schwarz,
+          // Quelle und Zustand in einem ruhigen Grau
           const balAktuell = tvStandZustand === 'aktuell'
           balCell = `
-            <div style="font-weight:600;color:${balAktuell ? '#15803d' : 'var(--ink)'};font-family:var(--mono);display:flex;align-items:center;gap:6px">${balFormatted}${balRef}</div>
+            <div style="font-weight:600;color:var(--ink);font-family:var(--mono);display:flex;align-items:center;gap:6px">${balFormatted}${balRef}</div>
             <div style="font-size:11px;color:var(--sub);margin-top:2px">
-              <span style="color:var(--violet);font-weight:500">${cloudAlt ? 'Stand' : 'Live'} · ${liveSrc === 'MT5-Konto' ? 'MT5' : liveSrc}</span>
+              <span style="color:var(--sub);font-weight:500">${cloudAlt ? 'Stand' : 'Live'} · ${liveSrc === 'MT5-Konto' ? 'MT5' : liveSrc}</span>
               ${mt5Zuletzt ? `<span style="margin-left:6px" title="${escapeHtml(timeAgo(liveTime))}">${escapeHtml(mt5Zuletzt)}</span>`
                 : ((liveTime && !tvStandZustand && !mt5GespLive) ? `<span style="margin-left:6px">${timeAgo(liveTime)}</span>` : '')}
-              ${tvStandZustand ? `<span style="margin-left:6px${balAktuell ? ';color:#15803d;font-weight:500' : ''}" title="gelesen ${liveTime ? escapeHtml(timeAgo(liveTime)) : ''}">${balAktuell ? '● ' : ''}${escapeHtml(tvStandZustand)}</span>` : ''}
+              ${tvStandZustand ? `<span style="margin-left:6px" title="gelesen ${liveTime ? escapeHtml(timeAgo(liveTime)) : ''}">${balAktuell ? '<span style="color:#12B76A">●</span> ' : ''}${escapeHtml(tvStandZustand)}</span>` : ''}
             </div>
             ${nachlese ? `<div style="font-size:11px;color:var(--sub);margin-top:2px" title="${escapeHtml(nachlese.text)}">${escapeHtml(nachlese.kurz)}</div>` : ''}
             ${accBalStatusHtml(a.id)}
@@ -36188,7 +36189,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.833'
+  const OS_TAB_BUILD = '2026-09-22.834'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
