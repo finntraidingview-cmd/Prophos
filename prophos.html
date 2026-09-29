@@ -5836,6 +5836,12 @@
           Offen
           <span class="subtab-count" id="tradetab-count-open">0</span>
         </button>
+        <!-- Warte auf Puls (29.09.2026, Finn: „Radar beendet → auf die Warteliste, wenn sie wirklich fertig sind → Überprüfen"): nur Anzeige,
+             kein eigener Status — Pläne in 'review', deren Puls-Nachlesung noch aussteht (planWartetAufPuls) -->
+        <button class="subtab" data-tradetab="wait">
+          Warte auf Puls
+          <span class="subtab-count" id="tradetab-count-wait">0</span>
+        </button>
         <button class="subtab" data-tradetab="review">
           Überprüfen
           <span class="subtab-count" id="tradetab-count-review">0</span>
@@ -5867,6 +5873,18 @@
           </div>
           <h3>Keine offenen Trades</h3>
           <p>Wenn du einen geplanten Trade in Duplikum gestartet hast, klick "Trade läuft" — er wandert hierher bis du ihn abschließt.</p>
+        </div>
+      </div>
+
+      <!-- Warte auf Puls -->
+      <div class="subtab-pane" data-tradepane="wait">
+        <div class="trade-cards" id="tradeCardsWait"></div>
+        <div class="empty" id="tradeEmptyWait" style="display:none;border:none;background:transparent">
+          <div class="empty-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          </div>
+          <h3>Nichts wartet</h3>
+          <p>Hat der Radar ein Trade-Ende erkannt, wartet der Trade hier, bis Puls den echten P&amp;L aus TradingView gelesen hat — dann springt er nach „Überprüfen".</p>
         </div>
       </div>
 
@@ -21117,6 +21135,29 @@
     return ''
   }
   function tvV2EndlesungFaellig(p, jetzt){ return !tvV2EndlesungGrund(p, jetzt, false) }
+  // Reiter „Warte auf Puls" (29.09.2026): Puls-Plan in „Überprüfen", dessen Nachlesung noch kommt (fällig, geplant oder zwischen zwei
+  // Versuchen). Gelesen, aufgegeben, alle Versuche verbraucht oder Handelstag vorbei → „Überprüfen" (dort entscheidet Finn selbst).
+  function planWartetAufPuls(p){
+    if(!p || p.status !== 'review' || !planIstPuls(p)) return false
+    try{ const g = tvV2EndlesungGrund(p, Date.now(), false); return g === '' || /^Nachlesung ab|^Pause bis/.test(g) }catch(_){ return false }
+  }
+  // Am Mac/Handy kennt tradePlans nur den Login-Stand — ein Plan bliebe in „Warte auf Puls", bis neu geladen wird. Solange der Reiter
+  // etwas zeigt und die Trades-Ansicht offen ist: genau diese Pläne 1× je Minute frisch holen (eine kleine Abfrage), bei Änderung neu zeichnen.
+  setInterval(async () => {
+    try{
+      if(MT5_LOCAL || document.hidden) return
+      const v = document.querySelector('#dashboard-view .view[data-view="trades"]'); if(!v || !v.classList.contains('active')) return
+      const ids = (tradePlans || []).filter(planWartetAufPuls).map(x => String(x.id)).slice(0, 30); if(!ids.length) return
+      const { data, error } = await supabase.from('trade_plans').select('*').in('id', ids)
+      if(error || !Array.isArray(data)) return
+      let anders = false
+      for(const r of data){
+        const neuP = rowToPlan(r), i = tradePlans.findIndex(x => String(x.id) === String(neuP.id)); if(i < 0) continue
+        if(JSON.stringify([tradePlans[i].status, tradePlans[i].mt5Baseline, tradePlans[i].masterPl]) !== JSON.stringify([neuP.status, neuP.mt5Baseline, neuP.masterPl])){ tradePlans[i] = neuP; anders = true }
+      }
+      if(anders) renderTradePlans()
+    }catch(_){}
+  }, 60000)
   // REIN RECHNEND: Wartezeit der Nachlesung je Plan, 60–7.200 s (1–120 min, Finn 29.09.2026: „1 bis 120 Minuten nach dem Trade loggt
   // Puls sich ein und überprüft den Profit"; vorher 1–200, 1–150, 1–30 min), fest aus der Plan-ID (FNV-Hash) — gleich auf allen Tabs
   function tvV2NachleseMs(id){
@@ -32556,11 +32597,12 @@
     const lanes = [
       { status:'planned',   target:'tradeCardsPlanned',   empty:'tradeEmptyPlanned',   countId:'tradetab-count-planned' },
       { status:'open',      target:'tradeCardsOpen',      empty:'tradeEmptyOpen',      countId:'tradetab-count-open' },
-      { status:'review',    target:'tradeCardsReview',    empty:'tradeEmptyReview',    countId:'tradetab-count-review' },
+      { status:'review',    target:'tradeCardsWait',      empty:'tradeEmptyWait',      countId:'tradetab-count-wait', warte:true },
+      { status:'review',    target:'tradeCardsReview',    empty:'tradeEmptyReview',    countId:'tradetab-count-review', warte:false },
       { status:'completed', target:'tradeCardsCompleted', empty:'tradeEmptyCompleted', countId:'tradetab-count-completed' }
     ]
     for(const lane of lanes){
-      let list = tradePlans.filter(p => p.status === lane.status)
+      let list = tradePlans.filter(p => p.status === lane.status && (lane.status !== 'review' || !!lane.warte === planWartetAufPuls(p)))
       // Erledigt zählt nur das gewählte Kapitel (24.09.2026) — die anderen Lanes
       // sind Gegenwart und bleiben ungefiltert
       const totalForLane = lane.status === 'completed' ? kapitelFilterPlaene(list).length : list.length
@@ -36112,7 +36154,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.831'
+  const OS_TAB_BUILD = '2026-09-22.832'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
