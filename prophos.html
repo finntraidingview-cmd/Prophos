@@ -8020,10 +8020,11 @@
           <!-- Name des Charts: „Radar" (27.09.2026, Finn: „passt ja" — Puls/Echo/Orbit/Kompass sind vergeben). Derselbe Chart in
                Winning Days und Live Trades (F6); interne IDs mkl-* bleiben. -->
           <span style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--sub)">Radar</span>
-          <div><span class="mono" id="mkl-preis" style="font-size:28px;font-weight:800;letter-spacing:-.02em">–</span> <span class="mono" id="mkl-sym" style="font-size:12px;color:var(--sub)"></span></div>
+          <div><span class="mono" id="mkl-preis" style="font-size:28px;font-weight:800;letter-spacing:-.02em">–</span></div>
           <span class="mono" id="mkl-diff" style="font-size:13px;font-weight:700"></span>
-          <!-- laufende Minute H/L (25.09.2026): zeigt, dass Ausreißer zwischen zwei Anzeigen erfasst sind — Demo-Orders werten über H/L aus -->
-          <span class="mono" id="mkl-minute" style="font-size:12px;color:var(--sub)"></span>
+          <!-- Technik-Texte raus (30.09.2026, Finn: „So viele kleine Texte, die nichts helfen, nur uns"): Symbol neben dem Kurs
+               (CME_MINI:…1!), „Minute: H/L" und der Hinweis unter dem Chart sind weg; #mkl-quelle zeigt im Normalfall nur „live · vor N s",
+               Warnungen (Feed steht, Markt zu, CME-Abo) bleiben -->
           <span id="mkl-quelle" style="font-size:11.5px;color:var(--sub-2)"></span>
           <!-- NQ ↔ MNQ (24.09.2026 spät, Finn: „nur NQ und MNQ aus TradingView"): der Reader liefert seit 0.7.0 beide Wurzeln,
                der Chart zeigt eine, die Zeile darunter beide Kurse mit Alter. Kein Fusion-/NAS100-Kurs im Chart. -->
@@ -8051,7 +8052,6 @@
             <p id="mkl-leer-text">Der Chart füllt sich, sobald der Reader-PC mit offenem TradingView-Tab Kurse liefert.</p>
           </div>
         </div>
-        <div id="mkl-hinweis" style="font-size:11.5px;color:var(--sub-2);margin-top:6px;line-height:1.5"></div>
       </div>
       <!-- Winning Days (25.09.2026, Finn: „Unten reicht es, wenn ich die Übersicht aller Winning Days habe — wie sie aussehen, wie sie
            laufen, welche es sind — und die Winning Days im Chart sehen, wo die Take Profits sind. Das mit der Order kannst du alles
@@ -22474,12 +22474,8 @@
     // demo_orders wird nicht mehr geladen (25.09.2026, Finn: „das mit der Order kannst du alles weglassen") — Auswertung/Tabelle
     // bleiben im Code, mkl.orders bleibt leer, nichts pollt
     const [rk, rz, ro] = await Promise.all(q.map(p => p.then ? p : Promise.resolve(p)))
-    // Reader-PCs mit Versionen (24.09.2026 spät): für die Kopfzeile ohne Feed — welcher PC meldet sich, welches Script läuft dort.
-    // Tolerant: fehlen die Spalten noch, bleibt die Liste leer.
-    if(neben) try{
-      const { data } = await supabase.from('echoplus_live').select('pc_name,reader_version,script_version,updated_at').order('updated_at', { ascending: false }).limit(3)
-      mkl.readerPcs = (data || []).filter(r => r && r.pc_name && (Date.now() - (Date.parse(r.updated_at) || 0)) < 600000)
-    }catch(_){ mkl.readerPcs = [] }
+    // Reader-PC-Versionen (echoplus_live) werden nicht mehr geladen (30.09.2026): sie standen nur im Technik-Hinweis unter dem Chart,
+    // der auf Finns Wunsch weg ist
     const rows = (rk && rk.data) || []
     for(const x of rows) hedgeFeedPuffern(x, Date.parse((x && x.updated_at) || '') || 0)   // Rückfall ohne Realtime (28.09.2026)
     // 0.7.0 (24.09.2026 spät): je Wurzel die frischeste Zeile über alle PCs (`${pc}:NQ` / `${pc}:MNQ`; alte Ein-Symbol-Zeilen
@@ -22536,7 +22532,7 @@
     }
   }
   function mklKopf(){
-    const k = mkl.kursAlt, el = $mkl('mkl-preis'), sym = $mkl('mkl-sym'), diff = $mkl('mkl-diff'), q = $mkl('mkl-quelle'), hint = $mkl('mkl-hinweis')
+    const k = mkl.kursAlt, el = $mkl('mkl-preis'), diff = $mkl('mkl-diff'), q = $mkl('mkl-quelle')
     if(!el) return
     // Umschalter-Knöpfe (25.09.2026): Wurzel ohne Kerzen (nur Watchlist auf dem Reader-PC) bekommt „nur Kurs" als Hinweis
     { const je = mkl.kerzenJe || {}
@@ -22558,21 +22554,13 @@
     }
     if(!k){
       const andere = mkl.wurzel === 'NQ' ? 'MNQ' : 'NQ', jeA = (mkl.kursJe || {})[andere]
-      el.textContent = '–'; if(sym) sym.textContent = mkl.wurzel; if(diff) diff.textContent = ''
+      el.textContent = '–'; if(diff) diff.textContent = ''
       if(q){ q.style.color = ''; q.style.fontWeight = ''; q.textContent = jeA ? `Kein ${mkl.wurzel}-Kurs im Feed — ${andere} liefert (Reader < 0.7.0 liest nur ein Symbol).`
                                          : 'Kein Kurs-Feed: auf dem 24/7-PC TradingView mit NQ/MNQ offen, Userscript ≥ 0.7.0 + Reader laufend, Prophos-Tab ≥ .469 offen.' }
-      // Welcher Reader-PC meldet sich und mit welchen Versionen (echoplus_live) — Script < 0.7.0 liefert keine Kurse
-      if(hint){
-        const pcs = mkl.readerPcs || []
-        hint.textContent = pcs.length
-          ? pcs.map(r => { const alt = !r.script_version || /^0\.[0-6]\./.test(String(r.script_version)); return `Reader-PC ${r.pc_name}: Reader-Server ${r.reader_version || '?'}, Script ${r.script_version || '?'}${alt ? ' — Script < 0.7.0 liefert keine Kurse; Reader-Fenster neu starten / Tampermonkey-Updates prüfen' : ''}` }).join(' · ')
-          : 'Kein Reader-PC meldet sich (echoplus_live in den letzten 10 min leer).'
-      }
       return
     }
     const frisch = k.alter_ms <= HEDGE_KURS_MAX_ALTER_MS
     el.textContent = mklFmt(k.preis); el.style.opacity = frisch ? '1' : '.45'
-    if(sym) sym.textContent = k.symbol
     // Tagesveränderung gegen die erste Kerze der Spanne (ehrlich: „seit Spannenanfang", nicht Vortag)
     // Vergleichswert = erste Kerze im SICHTBAREN Fenster (seit 30.09.2026 fest 1 h), die Daten sind immer 24 h
     const bisK = mkl.kerzen.length ? (Date.parse(mkl.kerzen[mkl.kerzen.length - 1].minute) || 0) + 60000 : Date.now()
@@ -22599,29 +22587,12 @@
       q.textContent = (zu && k.alter_ms > 60000) ? `Markt geschlossen · letzter Kurs ${new Date(letzteMs).toLocaleString('de-DE', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}`
         : steht ? `⚠ Feed steht seit ${dauer} — ${mklFeedDiagnose(k.pc, mklFeedLageCache(k.pc)).zeile}`
         : !frisch ? `⚠ kein Live-Kurs — letzter Stand vor ${alt} s (PC ${k.pc})`
-        : `live · vor ${alt} s` + ` (PC ${k.pc}${k.quelle ? ` · ${k.quelle === 'ws' ? 'Socket, Tab verdeckt ok' : k.quelle === 'titel' ? 'Titel, Tab muss sichtbar sein' : k.quelle}` : ''})${(k.sichtbar || k.quelle === 'ws') ? '' : ' · Tab verdeckt'}`
+        : `live · vor ${alt} s`   // PC/Socket/„Tab verdeckt" raus (30.09.2026, Finn: Texte „nur für uns"), Details im title
         + (delayed ? ' · ⚠ TV-CME-Abo auf dem PC nicht aktiv — Kurse 10 min alt' : '')
       q.style.color = steht ? '#b91c1c' : delayed ? '#B45309' : (frisch || zu) ? '' : '#B45309'
       q.style.fontWeight = (steht || delayed) ? '600' : ''
       q.title = `Cloud-Zeile vor ${alt} s geschrieben · letzter Handel (reader_ts) vor ${Math.round((k.handel_ms || 0) / 1000)} s — in ruhigen Minuten liegt der Handel weiter zurück als der Feed. Die Brücke schreibt jede Sekunde bei Änderung; Ausreißer zwischen zwei Anzeigen stecken im High/Low der laufenden Minute, Demo-Orders werten darüber aus.`
     }
-    // Laufende Minute H/L (25.09.2026, Finn: „jede Bewegung"): aus der letzten Kerze (< 2 min) plus Live-Kurs — sichtbar, dass
-    // Ausreißer zwischen zwei Anzeigen erfasst sind; die Demo-Orders werten ohnehin über High/Low aus.
-    const mEl = $mkl('mkl-minute')
-    if(mEl){
-      const last = mkl.kerzen.length ? mkl.kerzen[mkl.kerzen.length - 1] : null
-      if(last && Date.now() - (Date.parse(last.minute) || 0) < 120000){
-        const h = Math.max(Number(last.h), frisch ? k.preis : -Infinity), l = Math.min(Number(last.l), frisch ? k.preis : Infinity)
-        mEl.textContent = `Minute: H ${mklFmt(h)} / L ${mklFmt(l)}`
-        mEl.title = 'High/Low der laufenden Minute aus dem Reader-Ring (+ Live-Kurs) — jeder Tick dazwischen ist darin erfasst, auch wenn die Anzeige ihn nicht einzeln zeigt'
-      } else { mEl.textContent = ''; mEl.title = '' }
-    }
-    // Kerzen-Quelle (Reader 0.8.4): 'ws-tick' = aus Quote-Ticks gebaut (Wurzel ohne Chart-Serie, z. B. NQ nur in der Watchlist) —
-    // H/L nur so gut wie die Tick-Dichte, kein Volumen; Ersatz-Marker für ältere Zeilen ohne quelle: ticks > 0
-    const tickKerzen = mkl.kerzen.filter(kk => kk.quelle === 'ws-tick' || (!kk.quelle && Number(kk.ticks) > 0)).length
-    if(hint) hint.textContent = `${mkl.kerzen.length} Minutenkerzen ${mkl.wurzel} · Quelle: TradingView-Reader des 24/7-PCs (Chart-Legenden ab Userscript 0.7.0, davor Tab-Titel — dann muss der Tab sichtbar sein)`
-      + (tickKerzen ? ` · ${tickKerzen === mkl.kerzen.length ? `${mkl.wurzel}: aus Quote-Ticks (H/L Näherung, kein Volumen — ${mkl.wurzel} hat auf dem Reader-PC keine Chart-Serie)` : `${tickKerzen} Kerzen aus Quote-Ticks (H/L Näherung)`}` : '')
-      + ' — Lücken sind Lücken (PC aus, Markt zu), nie interpoliert.'
   }
   // Chart (25.09.2026, Finn zum Chart.js-Kerzenversuch: „richtig gottlos hässlich … lass es auch rauszoomen … nur 1-Minuten-
   // Chart, das reicht"): TradingView Lightweight Charts (MIT, jsDelivr 4.2.3, lazy beim ersten Zeichnen) statt Floating-Bars.
@@ -22791,6 +22762,7 @@
           const pr = (r && r.priceRange) || { minValue: lo, maxValue: hi }
           return Object.assign({}, r || {}, { priceRange: { minValue: Math.min(pr.minValue, lo), maxValue: Math.max(pr.maxValue, hi) } }) } }) }catch(_){}
       }
+      mklWdMarkerSetzen([])   // Live Trades hat eigene Linien — keine WD-Einstiegs-Marker (30.09.2026)
       mklZonenZeichnen()   // Positions-Zonen + Live-P&L des ausgewählten Trades (28.09.2026)
       return
     }
@@ -22808,7 +22780,36 @@
       linie(pw.sl_level_nq, '#b91c1c', 0, 2)
       if(hOffen) linie(mklWdSchliesstBei(pw), '#7C3AED', 2, 2)
     }
+    mklWdMarkerSetzen(mklWdMarker())
     mklZonenZeichnen()
+  }
+  /* EINSTIEGS-MARKER JE LAUFENDEM WINNING DAY (30.09.2026, Finn: jede laufende Order kurz sehen, ohne das Zuviel vom 28.09.) —
+   * statt Linien je Trade nur ein kleiner Pfeil auf der Einstiegs-Kerze: Long unter der Kerze nach oben, Short darüber nach unten,
+   * Farbe = Person (mklWdFarbe, ohne farbe_key ruhiges Blau), kein Text, keine Achsen-Labels, kein Preis in der Auto-Skala.
+   * Minute = started_at — seit 29.09.2026 die Klickzeit aus Puls (order_klick_ms → tv.klick_at → v2PlanAufOpen), sonst der Open.
+   * Liegt sie außerhalb der geladenen 24 h (oder ist ihre Kerze noch nicht da), fällt der Marker weg — kein Ersatz-Platz, der einen
+   * falschen Einstieg zeigt. Der angeklickte Trade behält zusätzlich seine vollen Linien (oben). */
+  function mklWdMarker(){
+    if(!_mklLw || !_mklLw.n) return []
+    const aus = []
+    for(const pw of ((mkl.wd && mkl.wd.plaene) || [])){
+      if(!pw || pw.status !== 'open' || !(Number(pw.einstieg_nq) > 0)) continue
+      const tt = Math.floor((Date.parse(pw.started_at) || 0) / 60000) * 60
+      if(!(tt >= _mklLw.erste && tt <= _mklLw.letzte)) continue
+      const farbe = pw.farbe_key ? mklWdFarbe(pw) : '#2563EB'
+      if(pw.richtung === 'buy') aus.push({ time: tt, position: 'belowBar', shape: 'arrowUp', color: farbe, size: 1 })
+      else if(pw.richtung === 'sell') aus.push({ time: tt, position: 'aboveBar', shape: 'arrowDown', color: farbe, size: 1 })
+      else aus.push({ time: tt, position: 'inBar', shape: 'circle', color: farbe, size: 1 })
+    }
+    return aus.sort((a, b) => a.time - b.time)   // setMarkers will aufsteigende Zeiten
+  }
+  // Nur bei Änderung an die Bibliothek (der Takt zeichnet jede Sekunde); neue Serie (NQ↔MNQ, Kerzen↔Linie) = neues _mklLw, Signatur leer
+  function mklWdMarkerSetzen(liste){
+    if(!_mklLw || !_mklLw.serie) return
+    const sig = JSON.stringify(liste)
+    if(_mklLw.markerSig === sig) return
+    _mklLw.markerSig = sig
+    try{ _mklLw.serie.setMarkers(liste) }catch(_){}
   }
   /* POSITIONS-ZONEN WIE IN TRADINGVIEW (28.09.2026, Finn über den Master, Screenshots TV neben dem WD-Chart): für den AUSGEWÄHLTEN
    * Trade ab Trade-Start nach rechts eine leicht grüne Box Entry→TP und eine ganz dezente rote Box Entry→Liq (an der Chartkante
@@ -36185,7 +36186,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.838'
+  const OS_TAB_BUILD = '2026-09-22.839'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
