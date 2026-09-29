@@ -98,6 +98,19 @@ def main():
     check(dm("sell", 29700.0, None, k2, "2026-09-25T00:59:30+00:00", "kaputt")["status"] == "tp",
           "kaputtes Ende wirft nicht, rechnet wie ohne Ende")
 
+    # 29.09.2026: Einstiegsminute zählt nicht (Finns Plan b2f630e6: Hoch der Kauf-Minute lag VOR dem Kauf) + echter SL beendet die Demo
+    kf = [{"minute": "2026-09-29T16:41:00+00:00", "h": 30558.75, "l": 30534.75}, {"minute": "2026-09-29T16:42:00+00:00", "h": 30548, "l": 30528.5},
+          {"minute": "2026-09-29T16:43:00+00:00", "h": 30544, "l": 30525.25}, {"minute": "2026-09-29T16:44:00+00:00", "h": 30529.25, "l": 30517.5}]
+    d = dm("buy", 30555.25, 28299.25, kf, "2026-09-29T16:41:37.551+00:00", None, 30527.75)
+    check(d["status"] == "liquidiert" and d.get("stop") == "sl" and d["preis"] == 30527.75 and d["at"].startswith("2026-09-29T16:43"),
+          "Finns Fall: kein TP aus der Kauf-Minute, SL um 16:43")
+    d = dm("buy", 30555.25, 28299.25, kf, "2026-09-29T16:41:37.551+00:00")
+    check(d["status"] == "laeuft", "ohne SL: Liquidation weit weg, TP nie nach dem Kauf → läuft")
+    d = dm("buy", 30555.25, None, kf[:1], "2026-09-29T16:41:37+00:00")
+    check(d["status"] == "laeuft" and d["minuten"] == 0, "nur die Kauf-Minute da → läuft (0 Minuten), nicht ohne_kurs")
+    d = dm("buy", 30545.0, None, kf, "2026-09-29T16:41:37+00:00", None, 30527.75)
+    check(d["status"] == "tp" and d["at"].startswith("2026-09-29T16:42"), "TP nach dem Kauf wird weiter erkannt (16:42)")
+
     # B35/F28: aktueller Kurs je Wurzel — jüngste Minute, fehlende Wurzel übernimmt die andere
     kw = a["kurs_jetzt_wahl"]
     kj = kw([{"wurzel": "NQ", "minute": "2026-09-27T16:00:00+00:00", "c": 30900.0},

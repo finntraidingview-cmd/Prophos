@@ -21498,7 +21498,7 @@
         try{ const pf = tradePlans.find(x => String(x.id) === pid); if(pf && pf.status === 'open' && typeof atMoveToReview === 'function') await atMoveToReview(pf) }catch(e){ console.warn('[demo-ende] Überprüfen', e) }
         // Trade-Ende = Demo-Treffer (atMoveToReview stempelt „jetzt") — Live Trades rechnet die Nachlese-Zeit ab ended_at
         try{ await supabase.from('trade_plans').update({ ended_at: extra.at }).eq('id', pid).eq('status', 'review'); const pf = tradePlans.find(x => String(x.id) === pid); if(pf) pf.endedAt = extra.at }catch(_){}
-        if(typeof atToast === 'function') atToast(`✓ ${frisch.masterName || 'Plan'}: Demo ${dm.status === 'tp' ? 'TP' : dm.status === 'liquidiert' ? 'Liquidation' : 'TP + Liquidation'} erreicht → Überprüfen · Warte auf Puls`, 'end')
+        if(typeof atToast === 'function') atToast(`✓ ${frisch.masterName || 'Plan'}: Demo ${dm.status === 'tp' ? 'TP' : dm.status === 'liquidiert' ? (dm.stop === 'sl' ? 'SL' : 'Liquidation') : 'TP + Liquidation'} erreicht → Überprüfen · Warte auf Puls`, 'end')   // stop 'sl' seit 29.09.2026 (Backend _lt_demo)
       }
     }catch(e){ console.warn('[demo-ende]', e) }
   }
@@ -24415,7 +24415,7 @@
       const st = offen ? `läuft seit ${uhr(t.started_at)}` : gepl ? `geplant${t.start_um ? ' · Start ' + uhr(t.start_um) : ''}` : `zu ${tagUhr(t.ended_at)}`
       const d = t.demo || {}
       const demo = d.status === 'tp' ? `<span class="wdl-demo tp">Demo: TP erreicht ${uhr(d.at)} · ${sig(d.pl_usd, '$', 0)}</span>`
-        : d.status === 'liquidiert' ? `<span class="wdl-demo liq">Demo: liquidiert ${uhr(d.at)}${num(d.pl_usd) != null ? ' · ' + sig(d.pl_usd, '$', 0) : ''}</span>`
+        : d.status === 'liquidiert' ? `<span class="wdl-demo liq">Demo: ${d.stop === 'sl' ? 'SL erreicht' : 'liquidiert'} ${uhr(d.at)}${num(d.pl_usd) != null ? ' · ' + sig(d.pl_usd, '$', 0) : ''}</span>`
         : d.status === 'beide_in_minute' ? `<span class="wdl-demo liq">Demo: TP und Liquidation in derselben Minute ${uhr(d.at)} — Reihenfolge unklar</span>`
         : d.status === 'laeuft' ? `<span class="wdl-demo lauf">Demo läuft · ${f0(d.minuten)} Minuten Kurs seit Start${dTp != null && dTp > 0 ? ` · TP in ${f0(dTp)} Pkt` : ''}</span>`
         : d.status === 'ohne_kurs' ? '<span class="wdl-demo">Demo: kein Reader-Kurs seit dem Start</span>'
@@ -36112,7 +36112,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.830'
+  const OS_TAB_BUILD = '2026-09-22.831'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

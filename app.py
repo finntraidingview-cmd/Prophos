@@ -7409,12 +7409,17 @@ def _lt_liq(acc, plan, balance_start, einstieg, richtung, ppl, kt):
             "regel": f"Max-Drawdown {dd:,.0f} $ als SL".replace(",", "."), "pl_usd": -round(dd, 2)}
 
 
-def _lt_demo(richtung, tp_level, liq_level, kerzen, start_iso, ende_iso=None):
+def _lt_demo(richtung, tp_level, liq_level, kerzen, start_iso, ende_iso=None, sl_level=None):
     """REIN RECHNEND (testbar): Demo-Ausführung gegen Minutenkerzen [{minute, h, l}] ab der Start-Minute.
     → {status: 'tp'|'liquidiert'|'beide_in_minute'|'laeuft'|'beendet_ohne_treffer'|'ohne_kurs'|'ohne_level', at, preis, minuten}.
     BUY: TP bei h ≥ TP, Liquidation bei l ≤ Level; SELL gespiegelt. Beide in derselben Minute: Reihenfolge unbekannt.
     ende_iso (B5, 26.09.2026, Finns Screenshot: Moritz Apex …0008 SELL 6 MNQ „zu 26.09., 01:17" zeigte „Demo läuft · 543 Minuten"):
-    Kerzen NACH der Ende-Minute zählen nicht; ohne Treffer bis zum Ende → 'beendet_ohne_treffer' (at = Ende)."""
+    Kerzen NACH der Ende-Minute zählen nicht; ohne Treffer bis zum Ende → 'beendet_ohne_treffer' (at = Ende).
+    EINSTIEGSMINUTE ZÄHLT NICHT (29.09.2026, Finns Live-Test Plan b2f630e6: Kauf 16:41:37 @ 30543.5, TP 30555.25 — das Hoch der Kerze
+    16:41 (30558.75) lag VOR dem Kauf, die Demo meldete „TP 16:41", in TradingView traf 16:43 der SL). Gewertet wird ab der Minute
+    NACH dem Start; ein Treffer in den Sekunden nach dem Fill bleibt der Nachlesung/„Beendet" überlassen.
+    sl_level (29.09.2026): echter Stop-Loss (Bracket/master_sl) — beendet die Demo wie eine Liquidation (status 'liquidiert',
+    stop 'sl'); ohne SL wie bisher die Liquidation."""
     if richtung not in ("buy", "sell") or tp_level is None:
         return {"status": "ohne_level"}
     try:
@@ -7434,18 +7439,25 @@ def _lt_demo(richtung, tp_level, liq_level, kerzen, start_iso, ende_iso=None):
             t1 = datetime.fromisoformat(str(ende_iso).replace("Z", "+00:00")).replace(second=0, microsecond=0)
         except (TypeError, ValueError):
             t1 = None
-    ks = sorted([k for k in ks if k[0] >= t0 and (t1 is None or k[0] <= t1)], key=lambda k: k[0])
+    im_fenster = [k for k in ks if k[0] >= t0 and (t1 is None or k[0] <= t1)]
+    ks = sorted([k for k in im_fenster if k[0] > t0], key=lambda k: k[0])   # ohne die Einstiegsminute (s. o.)
     if not ks:
+        if im_fenster and t1 is None:                                        # nur die Einstiegsminute da: läuft, noch nichts gewertet
+            return {"status": "laeuft", "minuten": 0, "letzte_minute": t0.isoformat()}
         return {"status": "ohne_kurs"}
+    stop = sl_level if sl_level is not None else liq_level
     for m, h, l in ks:
         tp = (h >= tp_level) if richtung == "buy" else (l <= tp_level)
-        liq = liq_level is not None and ((l <= liq_level) if richtung == "buy" else (h >= liq_level))
+        liq = stop is not None and ((l <= stop) if richtung == "buy" else (h >= stop))
         if tp and liq:
             return {"status": "beide_in_minute", "at": m.isoformat(), "preis": None, "minuten": len(ks)}
         if tp:
             return {"status": "tp", "at": m.isoformat(), "preis": tp_level, "minuten": len(ks)}
         if liq:
-            return {"status": "liquidiert", "at": m.isoformat(), "preis": liq_level, "minuten": len(ks)}
+            aus = {"status": "liquidiert", "at": m.isoformat(), "preis": stop, "minuten": len(ks)}
+            if sl_level is not None:
+                aus["stop"] = "sl"
+            return aus
     if t1 is not None:
         return {"status": "beendet_ohne_treffer", "at": t1.isoformat(), "minuten": len(ks), "letzte_minute": ks[-1][0].isoformat()}
     return {"status": "laeuft", "minuten": len(ks), "letzte_minute": ks[-1][0].isoformat()}
@@ -7504,9 +7516,13 @@ def _lt_zeile(p, acc, disp, kerzen_je_wurzel, vorher=None):
                 liq_bal, liq_regel, liq_level = liq["balance"], liq["regel"], liq["level"]
     # Ende (B5): beendete Trades rechnen die Demo nur bis zum Ende — ended_at, sonst final.at, sonst completed_at
     ende = None if str(p.get("status") or "") == "open" else (p.get("ended_at") or fin.get("at") or p.get("completed_at"))
-    demo = _lt_demo(z.get("richtung"), z.get("tp_level_nq"), liq_level, kerzen, p.get("started_at"), ende) if p.get("started_at") else {"status": "geplant"}
+    # echter SL (Bracket aus TradingView bzw. master_sl) beendet die Demo vor der Liquidation (29.09.2026); WD ('liquidation') nicht
+    sl_demo = _wd_num(z.get("sl_level_nq")) if z.get("sl_art") in ("bracket", "master_sl") else None
+    demo = _lt_demo(z.get("richtung"), z.get("tp_level_nq"), liq_level, kerzen, p.get("started_at"), ende, sl_demo) if p.get("started_at") else {"status": "geplant"}
     if demo.get("status") == "tp":
         demo["pl_usd"] = _wd_num(p.get("master_tp"))
+    elif demo.get("status") == "liquidiert" and demo.get("stop") == "sl":
+        demo["pl_usd"] = -abs(_wd_num(p.get("master_sl"))) if _wd_num(p.get("master_sl")) is not None else None
     elif demo.get("status") == "liquidiert":
         demo["pl_usd"] = liq["pl_usd"]
     z.update({"balance_start": bs, "equity_start": _wd_num(tv.get("equity_start")), "balance_end": be,
