@@ -16477,7 +16477,28 @@ def _cdp_login_ort(s, vorher, benutzer, opts, trail, warten_s=25.0):
     return None, f"Nach 'Connect' keine Tradovate-Anmeldeseite ({warten_s:.0f} s)."
 
 
-def _cdp_autofill_klick(eingabe, benutzer, feld_rect, trail):
+CDP_AUTOFILL_TYPEN = ("ListItem", "MenuItem", "Button", "DataItem", "Text", "Group", "Custom", "Hyperlink")
+
+
+def cdp_liste_kurz(roh, max_n=30, max_zeichen=700):
+    """REIN RECHNEND (testbar): Inhalt der Vorschlagsliste für die Spur — Typ:Name, ohne reine Punkt-/Sternzeilen (maskierte
+    Passwörter), doppelte einmal."""
+    out, gesehen = [], set()
+    for e in roh or []:
+        try:
+            n, typ = " ".join(str(e[0]).split()), str(e[2] if len(e) > 2 else "")
+        except (TypeError, IndexError):
+            continue
+        if not n or re.fullmatch(r"[•●*·\s]+", n) or (typ, n) in gesehen:
+            continue
+        gesehen.add((typ, n))
+        out.append(f"{typ}:{n[:40]}")
+        if len(out) >= max_n:
+            break
+    return (" | ".join(out) or "leer")[:max_zeichen]
+
+
+def _cdp_autofill_klick(eingabe, benutzer, feld_rect, trail, diag=False):
     """Chromes Vorschlagsliste (eigenes kleines Fenster des Puls-Chrome-Prozesses, für CDP unsichtbar) per Windows-UIA lesen und den
     Eintrag mit GENAU diesem Username als ganzem Wort (tv_konto_wort_passt, wie der alte Puls — „APEX_641699TDFYU324689097" zählt
     nicht) mit der echten Maus anklicken. Das Benutzerfeld selbst ist ausgenommen. -> True/False"""
@@ -16500,17 +16521,25 @@ def _cdp_autofill_klick(eingabe, benutzer, feld_rect, trail):
         @staticmethod
         def search(name):
             return tv_konto_wort_passt(name, benutzer)
-    roh = []
+    # Live 29.09.2026 15:11 UTC (Tradeify-Wechsel): „TDFYU324689097 · tradovate.com" (für die Domain gespeichert, nicht für
+    # trader.tradovate.com) wurde mit den fünf alten Typen 3× nicht gefunden, „Passwort für APEX_641699" schon — deshalb mehr Typen,
+    # und beim ersten Fehlversuch steht der Inhalt der Liste (Typ:Name, ohne maskierte Passwörter) in der Spur.
+    roh, popup_roh = [], []
     for f in _puls_fenster_liste(_puls_chrome_browser_pid()):
         try:
             w_ = Desktop(backend="uia").window(handle=int(f["hwnd"])).wrapper_object()
-            roh += [x_ for x_ in _tv_uia_roh(w_, ("ListItem", "MenuItem", "Button", "DataItem", "Text"), 600, muster=(_Nadel,)) if x_[1]]
+            alle_ = _tv_uia_roh(w_, CDP_AUTOFILL_TYPEN, 600, muster=(_Nadel,))
+            roh += [x_ for x_ in alle_ if x_[1]]
+            if diag and not str(f.get("text") or "").strip():      # kleines Popup-Fenster ohne Titel = Chromes Vorschlagsliste
+                popup_roh += alle_
         except Exception:
             continue
     kand = tv_uia_namen_filtern(roh, _Nadel, typ_vorrang=None, ohne=ohne)
     if len(kand) != 1:
         trail.append(f"[Login] Vorschlag '{benutzer}' in Chromes Liste {len(kand)}× gesehen"
                      + (f": {[k['text'][:30] for k in kand][:4]}" if kand else ""))
+        if diag:
+            trail.append(f"[Login] Vorschlagsliste enthält: {cdp_liste_kurz(popup_roh)}")
         return False
     x_, y_ = kand[0]["punkt"]
     _maus_fahren(x_, y_)
@@ -16558,7 +16587,7 @@ def _cdp_anmelden(s, ort, benutzer, opts, trail, vorher=None):
                 ort.eingabe.tippen(benutzer)       # letzter Versuch: die Liste auf genau diesen Login filtern (kein Enter)
                 trail.append(f"[Login] '{benutzer}' getippt, um die Liste zu filtern")
             _warte(0.8, 0.4)
-            if _cdp_autofill_klick(ort.eingabe, benutzer, cdp_rect(u), trail):
+            if _cdp_autofill_klick(ort.eingabe, benutzer, cdp_rect(u), trail, diag=(versuch == 1)):
                 gewaehlt = True
                 break
         if not gewaehlt:

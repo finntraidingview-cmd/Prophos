@@ -3023,6 +3023,9 @@ def test_puls_cdp_login():
         "Orders mit data-label, leerer Blick = nichts")
     chk("Reiter orders" in ob.cdp_tabellen_kurz(roh_t) and "Köpfe Symbol/Side" in ob.cdp_tabellen_kurz(roh_t) and len(ob.cdp_tabellen_kurz(roh_t)) <= 700,
         "Tabellen-Blick kompakt für die Spur")
+    chk(ob.cdp_liste_kurz([("APEX_641699", None, "ListItem"), ("••••••••", None, "Text"), ("TDFYU324689097", None, "Text"),
+                           ("tradovate.com", None, "Text"), ("APEX_641699", None, "ListItem")]) == "ListItem:APEX_641699 | Text:TDFYU324689097 | Text:tradovate.com"
+        and ob.cdp_liste_kurz([]) == "leer" and "Group" in ob.CDP_AUTOFILL_TYPEN, "Vorschlagsliste für die Spur: ohne Punkte, doppelte einmal")
     W = ob.tv_konto_wort_passt
     chk(W("TDFYU324689097 tradovate.com", "TDFYU324689097") and not W("APEX_641699TDFYU324689097", "TDFYU324689097")
         and not W("APEX_641699", "TDFYU324689097"), "Vorschlag nur mit dem Username als ganzem Wort (angehängter Name zählt nicht)")
