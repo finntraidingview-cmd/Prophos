@@ -8146,6 +8146,8 @@ def _tv_exit_fill_lesen(w, trail, symbol, richtung):
 
 
 def modus_tvlesen(cmd):
+    if augen_modus_lauf() == "cdp":          # nur CDP-Test-PC (29.09.2026, K1): lokal gelesen, ohne Netz; sonst unverändert
+        return modus_tvlesen_cdp(cmd)
     res = {"ok": False, "code": "", "msg": "", "trail": "", "schritt": "start",
            "konto_aktiv": "", "konto_quelle": None, "quelle": None}
     trail = _StempelSpur()
@@ -13358,7 +13360,7 @@ def _augen_regel_holen(pc):
         augen = "cdp" if d.get("augen") == "cdp" else "uia"
     except Exception:
         augen = "uia"
-    _augen_json_schreiben("augen_regel.json", {"augen": augen, "at": time.time()})
+    _augen_json_schreiben("augen_regel.json", {"augen": augen, "at": time.time(), "pc": pc})
     return augen
 
 
@@ -13461,6 +13463,107 @@ def augen_target_waehlen(liste):
     return tv[0] if tv else None
 
 
+AUGEN_BANNER_JS = (
+    "(function(){var b=document.getElementById('prophos-aufnahme-banner');if(!b){b=document.createElement('div');"
+    "b.id='prophos-aufnahme-banner';document.documentElement.appendChild(b);}"
+    "b.setAttribute('style','position:fixed;left:0;top:0;right:0;z-index:2147483647;pointer-events:none;"
+    "padding:8px 16px;background:#d62b2b;color:#fff;font:bold 18px/1.3 system-ui,Arial;text-align:center;"
+    "box-shadow:0 2px 12px rgba(0,0,0,.4)');b.textContent='\\u25cf AUFNAHME L\\u00c4UFT \\u2013 in DIESEM Fenster klicken (Puls-Chrome)';"
+    "var r=document.getElementById('prophos-aufnahme-rahmen');if(!r){r=document.createElement('div');r.id='prophos-aufnahme-rahmen';"
+    "document.documentElement.appendChild(r);}r.setAttribute('style','position:fixed;inset:0;z-index:2147483646;"
+    "pointer-events:none;border:6px solid #d62b2b;box-sizing:border-box');return true;})()")
+AUGEN_BANNER_WEG_JS = ("(function(){['prophos-aufnahme-banner','prophos-aufnahme-rahmen'].forEach(function(i){"
+                       "var e=document.getElementById(i);if(e)e.remove();});return true;})()")
+
+
+def augen_tv_targets(liste):
+    """REIN RECHNEND (testbar): ALLE TradingView-Seiten (type page) aus /json/list, Chart zuerst. -> Liste"""
+    tv = [t for t in (liste or []) if isinstance(t, dict) and t.get("type") == "page"
+          and re.match(r"https://([a-z]+\.)?tradingview\.com/", str(t.get("url") or ""))]
+    tv.sort(key=lambda t: 0 if "/chart" in str(t.get("url")) else 1)
+    return tv
+
+
+def _augen_aufnahme(aktion, js, trail, res, pc):
+    """Aufnahme start|stopp in ALLEN TradingView-Tabs des Puls-Chrome. Ergebnis je Target in Spur + res; stopp schreibt
+    inventar.aufnahme (alle Targets) + einen Stand (Target mit den meisten Ereignissen) nach puls_augen."""
+    targets = augen_tv_targets(_cdp_http("/json/list"))
+    alle = _cdp_http("/json/list") or []
+    n_tabs = sum(1 for t in alle if isinstance(t, dict) and t.get("type") == "page")
+    trail.append(f"Puls-Chrome: {n_tabs} Tab(s), davon {len(targets)} TradingView — Aufnahme in "
+                 + (", ".join(str(t.get('url'))[:45] for t in targets) or "keinem"))
+    if not targets:
+        res["msg"] = "im Puls-Chrome ist keine TradingView-Seite offen"
+        return
+    ergebnisse, bester, bester_n = [], None, -1
+    fn = "aufnahme_start" if aktion == "start" else "aufnahme_stopp"
+    for t in targets:
+        eintrag = {"target_id": str(t.get("id") or "")[:40], "url": str(t.get("url") or "")[:200]}
+        try:
+            ws = _CdpVerbindung(t.get("webSocketDebuggerUrl"), timeout=8.0)
+            try:
+                ws.rufe("Runtime.evaluate", {"expression": js, "returnByValue": False}, timeout=8)
+                r = ws.rufe("Runtime.evaluate", {"expression": f"globalThis.prophosAugen.{fn} ? globalThis.prophosAugen.{fn}() : "
+                                                 "({fehler: 'augen.js ohne Aufnahme'})", "returnByValue": True}, timeout=10)
+                wert = ((r or {}).get("result") or {}).get("value") or {}
+                if r.get("exceptionDetails"):
+                    wert = {"fehler": str((r.get("exceptionDetails") or {}).get("text"))[:120]}
+                ws.rufe("Runtime.evaluate", {"expression": AUGEN_BANNER_JS if aktion == "start" else AUGEN_BANNER_WEG_JS,
+                                             "returnByValue": True}, timeout=5)
+                stand = None
+                if aktion == "stopp":
+                    r2 = ws.rufe("Runtime.evaluate", {"expression": "globalThis.prophosAugen.stand()", "returnByValue": True}, timeout=10)
+                    stand = ((r2 or {}).get("result") or {}).get("value")
+            finally:
+                ws.zu()
+        except Exception as e:
+            eintrag["fehler"] = f"{type(e).__name__}: {str(e)[:80]}"
+            ergebnisse.append(eintrag)
+            trail.append(f"Target {eintrag['url'][:40]}: {eintrag['fehler']}")
+            continue
+        if isinstance(wert, dict):
+            eintrag.update({k: wert.get(k) for k in ("tab_id", "sichtbar", "fokus", "roh", "anzahl", "verloren", "laeuft", "fehler",
+                                                     "sichtbar_start", "sichtbar_stopp", "fokus_start", "fokus_stopp") if k in wert})
+            if aktion == "stopp":
+                eintrag["ereignisse"] = wert.get("ereignisse") or []
+                eintrag["anzahl"] = len(eintrag["ereignisse"])
+                if eintrag["anzahl"] > bester_n:
+                    bester, bester_n = (eintrag, stand), eintrag["anzahl"]
+        ergebnisse.append(eintrag)
+        trail.append(f"Target {eintrag['url'][:40]} (tab {eintrag.get('tab_id') or '?'}): "
+                     + (f"{fn} ok" if not eintrag.get("fehler") else f"FEHLER {eintrag['fehler']}")
+                     + (f", roh {eintrag.get('roh')}, Ereignisse {eintrag.get('anzahl')}" if aktion == "stopp" else "")
+                     + (", VERLOREN" if eintrag.get("verloren") else "") + (", lief schon" if eintrag.get("laeuft") else ""))
+    if aktion == "start":
+        ok_n = sum(1 for e in ergebnisse if not e.get("fehler"))
+        trail.append(f"Aufnahme läuft in {ok_n}/{len(ergebnisse)} Tab(s) — im Fenster mit dem ROTEN Rahmen klicken (NICHT kaufen), "
+                     "dann 'augen aufnahme stopp'")
+        res.update(ok=ok_n > 0, msg=f"Aufnahme gestartet ({ok_n} Tab(s))", targets=ergebnisse)
+        return
+    gesamt = sum(int(e.get("anzahl") or 0) for e in ergebnisse)
+    roh = sum(int(e.get("roh") or 0) for e in ergebnisse if isinstance(e.get("roh"), int))
+    verloren = all(e.get("verloren") for e in ergebnisse if not e.get("fehler")) if ergebnisse else True
+    trail.append(f"Aufnahme gestoppt: {gesamt} Ereignisse (roh {roh}) über {len(ergebnisse)} Target(s)"
+                 + (" — AUFNAHME VERLOREN (Seite neu geladen?)" if verloren else "")
+                 + (" — roh 0 überall: in keinem Puls-Chrome-Tab kam ein Klick an (anderes Fenster/Reader-Chrome?)" if roh == 0 and not verloren else ""))
+    if pc:
+        import urllib.request
+        stand = bester[1] if bester else None
+        for art, daten in (("inventar", {"inventar": {"aufnahme": {"targets": ergebnisse, "gesamt": gesamt, "roh": roh, "verloren": verloren}}}),
+                           ("stand", stand if isinstance(stand, dict) else None)):
+            if not isinstance(daten, dict):
+                continue
+            try:
+                req = urllib.request.Request(f"{PULS_BACKEND}/puls-augen/{pc}", data=json.dumps(
+                    {"art": art, "daten": dict(daten, target=(bester[0]["url"] if bester else ""))}, ensure_ascii=False).encode("utf-8"),
+                    headers={"Content-Type": "application/json"})
+                urllib.request.urlopen(req, timeout=8.0).read()
+            except Exception as e_:
+                trail.append(f"puls_augen ({art}) nicht geschrieben ({type(e_).__name__}) — Aufnahme zu groß?")
+    res.update(ok=not verloren and gesamt > 0, msg=f"Aufnahme: {gesamt} Ereignisse, roh {roh}, {len(ergebnisse)} Target(s)"
+               + (", verloren" if verloren else ""), targets=[{k: v for k, v in e.items() if k != "ereignisse"} for e in ergebnisse])
+
+
 def augen_kurzform(stand):
     """REIN RECHNEND (testbar): lesbare Spur-Zeile aus augen.js stand() (29.09.2026, erste echte Zeile von Moritz' PC: ticket.da
     statt offen, toasts als {log, gruppen} statt Liste — die erste Fassung meldete „Ticket zu · Toasts 2")."""
@@ -13558,49 +13661,19 @@ def modus_augen(cmd):
         if not js:
             res["msg"] = "augen.js fehlt (noch nicht im Repo?)"
             return
-        ws = _CdpVerbindung(ziel.get("webSocketDebuggerUrl"))
         if cmd.get("aufnahme"):
             # AUFNAHME (29.09.2026, Finns Idee + Freigabe): Finn klickt den Order-Ablauf im Puls-Chrome einmal SELBST durch (bis
-            # VOR den Kauf-Knopf); augen.js 0.5 zeichnet Klicks/Eingaben auf (Capture-Listener, Puffer im Fenster, Passwortfelder
+            # VOR den Kauf-Knopf); augen.js ≥ 0.5 zeichnet Klicks/Eingaben auf (Capture-Listener, Puffer im Fenster, Passwortfelder
             # und Login-Formulare nur „[verborgen]"). Puls klickt hier NICHTS. 'stopp' holt Puffer + frischen Stand nach puls_augen
             # (inventar.aufnahme). Neuladen der Seite verwirft den Puffer → verloren.
-            try:
-                ws.rufe("Runtime.evaluate", {"expression": js, "returnByValue": False}, timeout=8)
-                fn = "aufnahme_start" if cmd["aufnahme"] == "start" else "aufnahme_stopp"
-                r = ws.rufe("Runtime.evaluate", {"expression": f"globalThis.prophosAugen.{fn} ? globalThis.prophosAugen.{fn}() : "
-                                                 "({fehler: 'augen.js ohne Aufnahme'})", "returnByValue": True}, timeout=10)
-                wert = ((r or {}).get("result") or {}).get("value") or {}
-                stand = None
-                if cmd["aufnahme"] == "stopp":
-                    r2 = ws.rufe("Runtime.evaluate", {"expression": "globalThis.prophosAugen.stand()", "returnByValue": True}, timeout=10)
-                    stand = ((r2 or {}).get("result") or {}).get("value")
-            finally:
-                ws.zu()
-            if r.get("exceptionDetails") or (isinstance(wert, dict) and wert.get("fehler")):
-                res["msg"] = "Aufnahme: " + str((wert or {}).get("fehler") or (r.get("exceptionDetails") or {}).get("text"))[:160]
-                return
-            if cmd["aufnahme"] == "start":
-                trail.append("Aufnahme läuft — jetzt im Puls-Chrome den Ablauf durchklicken (NICHT kaufen), dann 'augen aufnahme stopp'"
-                             + (" (lief schon)" if wert.get("laeuft") else ""))
-                res.update(ok=True, msg="Aufnahme gestartet")
-                return
-            n_e = len(wert.get("ereignisse") or []) if isinstance(wert, dict) else 0
-            verloren = bool(isinstance(wert, dict) and wert.get("verloren"))
-            trail.append(f"Aufnahme gestoppt: {n_e} Ereignisse" + (" — AUFNAHME VERLOREN (Seite neu geladen?)" if verloren else ""))
-            if pc:
-                import urllib.request
-                for art, daten in (("inventar", {"inventar": {"aufnahme": wert}}), ("stand", stand if isinstance(stand, dict) else None)):
-                    if not isinstance(daten, dict):
-                        continue
-                    try:
-                        req = urllib.request.Request(f"{PULS_BACKEND}/puls-augen/{pc}", data=json.dumps(
-                            {"art": art, "daten": dict(daten, target=str(ziel.get("url"))[:200])}, ensure_ascii=False).encode("utf-8"),
-                            headers={"Content-Type": "application/json"})
-                        urllib.request.urlopen(req, timeout=8.0).read()
-                    except Exception as e_:
-                        trail.append(f"puls_augen ({art}) nicht geschrieben ({type(e_).__name__}) — Aufnahme zu groß?")
-            res.update(ok=not verloren, msg=f"Aufnahme: {n_e} Ereignisse" + (", verloren" if verloren else ""))
+            # ERSTE LIVE-AUFNAHME (00:36–00:38 UTC, pc-usq1i6): 0 Ereignisse — Puls hatte nur EIN Target (das erste aus
+            # /json/list); Finn klickte womöglich in einem anderen TV-Tab oder im Reader-Chrome. Deshalb jetzt: ALLE TradingView-
+            # Seiten des Puls-Chrome (je Target eigene Verbindung), rotes Banner „AUFNAHME LÄUFT" in jedem Tab (pointer-events
+            # none, blockiert keinen Klick), beim Stopp wieder weg; je Target roh/anzahl/tab_id in Spur + DB. roh 0 = dort kam
+            # nichts an (T1: hidden/fokus allein beweisen nichts).
+            _augen_aufnahme(cmd["aufnahme"], js, trail, res, pc)
             return
+        ws = _CdpVerbindung(ziel.get("webSocketDebuggerUrl"))
         try:
             ws.rufe("Runtime.evaluate", {"expression": js, "returnByValue": False, "awaitPromise": True}, timeout=8)
             ausdruck = ("(async () => { const A = globalThis.prophosAugen; if (!A) return {fehler: 'prophosAugen fehlt'};"
@@ -13648,6 +13721,260 @@ def modus_augen(cmd):
             except Exception:
                 pass
         print(json.dumps(res, ensure_ascii=False))
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PULS ÜBER CDP — K1 LESEN (29.09.2026 nachts, Finns Freigabe: Moritz pc-usq1i6 ist CDP-Test-PC, der alte UIA-Weg dort ist
+# nach dem Sitzungs-Kick ohne Broker). tvlesen verzweigt NUR bei Regel 'cdp' hierher — gleicher Ergebnis-Vertrag (ok,
+# positionen, offen, summary, today_pnl …), Prophos/Panel merken nichts. Kein UIA-Rückfall auf einem cdp-PC.
+# Weiche: NUR die lokale augen_regel.json (schreibt der Augen-Prozess nach jeder Railway-Abfrage). Fehlt/veraltet → 'uia'
+# sofort, ohne Netz — alle anderen PCs laufen bytegleich im alten Pfad (Finns Vorgabe).
+# Klicks nach den Master-Regeln (Klicktest 29.09.2026): mouseMoved-Bahn mit Streuung, mousePressed force 0.5, Abstände über
+# _warte. K1 klickt nur Handelspanel / Konto-Umschalter / Konto-Eintrag — nie etwas im Order-Ticket.
+# ═══════════════════════════════════════════════════════════════════════════
+
+def augen_regel_weiche(regel_datei, jetzt, pc_id):
+    """REIN RECHNEND (testbar): 'cdp' nur, wenn die lokale Regel frisch (≤ 10 min) 'cdp' sagt und zu DIESEM PC gehört; sonst 'uia'."""
+    if not isinstance(regel_datei, dict) or regel_datei.get("augen") != "cdp" or not pc_id:
+        return "uia"
+    if regel_datei.get("pc") not in (None, pc_id):
+        return "uia"
+    try:
+        alt = jetzt - float(regel_datei.get("at") or 0)
+    except (TypeError, ValueError):
+        return "uia"
+    return "cdp" if 0 <= alt <= AUGEN_REGEL_GUELTIG_S else "uia"
+
+
+def augen_modus_lauf():
+    """'cdp' | 'uia' für DIESEN Lauf — nur lokal gelesen, nie Netz. Jeder Fehler = 'uia'."""
+    try:
+        return augen_regel_weiche(_augen_json_lesen("augen_regel.json"), time.time(), _augen_pc_id())
+    except Exception:
+        return "uia"
+
+
+def cdp_klick_bahn(von, nach, schritte=8, streu=2.0, rnd=None):
+    """REIN RECHNEND (testbar): Zwischenpunkte einer Mausbahn (leicht gekrümmt, gestreut, letzter Punkt exakt = Ziel)."""
+    import random as _r
+    rnd = rnd or _r
+    (x0, y0), (x1, y1) = von, nach
+    n = max(3, int(schritte))
+    bogen = rnd.uniform(-0.12, 0.12)
+    out = []
+    for i in range(1, n + 1):
+        t = i / n
+        tt = t * t * (3 - 2 * t)
+        x = x0 + (x1 - x0) * tt - (y1 - y0) * bogen * t * (1 - t)
+        y = y0 + (y1 - y0) * tt + (x1 - x0) * bogen * t * (1 - t)
+        if i < n:
+            x += rnd.uniform(-streu, streu)
+            y += rnd.uniform(-streu, streu)
+        out.append((round(x, 1), round(y, 1)))
+    out[-1] = (float(x1), float(y1))
+    return out
+
+
+def cdp_klickpunkt(rect, rnd=None):
+    """REIN RECHNEND (testbar): Punkt im inneren Drittel eines [x, y, w, h]-Rechtecks (CSS-px). None bei Unsinn."""
+    import random as _r
+    rnd = rnd or _r
+    try:
+        x, y, w, h = [float(v) for v in rect[:4]]
+    except (TypeError, ValueError, IndexError):
+        return None
+    if w < 2 or h < 2:
+        return None
+    return (round(x + w / 2 + rnd.uniform(-w / 6, w / 6), 1), round(y + h / 2 + rnd.uniform(-h / 6, h / 6), 1))
+
+
+class _AugenSitzung:
+    """Eine CDP-Verbindung zur TradingView-Seite im Puls-Chrome: augen.js einmal geladen, stand() lesen, klicken."""
+
+    def __init__(self, trail):
+        self.trail = trail
+        if not _puls_chrome_sicher(trail):
+            raise RuntimeError("Puls-Chrome nicht erreichbar (Port 9333)")
+        ziel = augen_target_waehlen(_cdp_http("/json/list"))
+        if not ziel:
+            raise RuntimeError("im Puls-Chrome ist keine TradingView-Seite offen")
+        self.js = _augen_js_holen(trail)
+        if not self.js:
+            raise RuntimeError("augen.js fehlt")
+        self.ws = _CdpVerbindung(ziel.get("webSocketDebuggerUrl"), timeout=10.0)
+        self.maus = (40.0, 40.0)
+        try:
+            self.ws.rufe("Emulation.setFocusEmulationEnabled", {"enabled": True}, timeout=3)   # minimiertes Fenster = „fokussiert"
+        except Exception:
+            pass
+        r = self.ws.rufe("Runtime.evaluate", {"expression": self.js, "returnByValue": False}, timeout=8)
+        if r.get("exceptionDetails"):
+            raise RuntimeError("augen.js wirft beim Laden")
+
+    def stand(self, opts=None):
+        a = "globalThis.prophosAugen.stand(" + json.dumps(opts or {}) + ")"
+        r = self.ws.rufe("Runtime.evaluate", {"expression": a, "returnByValue": True, "awaitPromise": True}, timeout=10)
+        if r.get("exceptionDetails"):
+            raise RuntimeError("stand() wirft: " + str((r.get("exceptionDetails") or {}).get("text"))[:80])
+        return ((r.get("result") or {}).get("value")) or {}
+
+    def klick(self, rect, name):
+        p = cdp_klickpunkt(rect)
+        if not p:
+            self.trail.append(f"{name}: kein klickbares Rechteck")
+            return False
+        for (x, y) in cdp_klick_bahn(self.maus, p):
+            self.ws.rufe("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": x, "y": y, "buttons": 0}, timeout=3)
+            _warte(0.018, 0.02)
+        _warte(0.08, 0.08)
+        self.ws.rufe("Input.dispatchMouseEvent", {"type": "mousePressed", "x": p[0], "y": p[1], "button": "left",
+                                                  "buttons": 1, "clickCount": 1, "force": 0.5}, timeout=3)
+        _warte(0.07, 0.06)
+        self.ws.rufe("Input.dispatchMouseEvent", {"type": "mouseReleased", "x": p[0], "y": p[1], "button": "left",
+                                                  "buttons": 0, "clickCount": 1}, timeout=3)
+        self.maus = p
+        self.trail.append(f"{name} geklickt @{int(p[0])},{int(p[1])} (CDP)")
+        return True
+
+    def zu(self):
+        try:
+            self.ws.zu()
+        except Exception:
+            pass
+
+
+def cdp_konto_eintrag(eintraege, ext):
+    """REIN RECHNEND (testbar): GENAU EIN Dropdown-Eintrag mit dieser External ID. -> (eintrag|None, anzahl)"""
+    treffer = [e for e in (eintraege or []) if isinstance(e, dict) and tv_konto_passt(str(e.get("text") or ""), ext)]
+    return (treffer[0] if len(treffer) == 1 else None), len(treffer)
+
+
+def cdp_rect(x):
+    """rect aus einem augen.js-Element ({rect: [...]}) oder direkt einer Liste."""
+    if isinstance(x, dict):
+        return x.get("rect")
+    return x if isinstance(x, (list, tuple)) else None
+
+
+def cdp_summary(ks):
+    """REIN RECHNEND (testbar): augen.js konto_summary → tvlesen-'summary' {Label: Text}. texte gewinnt; fehlt es, aus den
+    geparsten Einträgen (label/text) — 'Account Balance'/'Equity' als Rückfall-Label, damit Prophos (tvBalanceAus) sie findet."""
+    if not isinstance(ks, dict):
+        return None
+    out = {}
+    t = ks.get("texte")
+    if isinstance(t, dict):
+        out.update({str(k): str(v) for k, v in t.items() if v is not None})
+    for key, rueck in (("balance", "Account Balance"), ("equity", "Equity"), ("today_pnl", "Today's P&L"),
+                       ("realisiert", "Realized P&L"), ("unrealisiert", "Unrealized P&L")):
+        e = ks.get(key)
+        if isinstance(e, dict) and e.get("text") not in (None, ""):
+            lab = str(e.get("label") or rueck)
+            if lab not in out:
+                out[lab] = str(e.get("text"))
+    return out or None
+
+
+def cdp_positionen_vertrag(pos):
+    """REIN RECHNEND (testbar): augen.js positionen → tvlesen-Vertragsform (Texte + *_zahl)."""
+    out = []
+    for p in (pos or []):
+        if not isinstance(p, dict):
+            continue
+        menge, avg, pl = p.get("menge"), p.get("avg"), p.get("pl_text")
+        out.append({"symbol": p.get("symbol"), "seite": p.get("seite"),
+                    "menge": None if menge is None else str(menge), "einstieg": None if avg is None else str(avg),
+                    "pnl": pl, "sl": None, "tp": None,
+                    "menge_zahl": menge if isinstance(menge, (int, float)) else tv_geld_lesen(menge),
+                    "einstieg_zahl": avg if isinstance(avg, (int, float)) else tv_geld_lesen(avg),
+                    "pnl_zahl": tv_geld_lesen(pl)})
+    return out
+
+
+def modus_tvlesen_cdp(cmd):
+    """tvlesen über das Puls-Chrome (CDP). Konto sicherstellen (Panel auf, Umschalter, Eintrag — je Schritt neu gelesen),
+    dann EIN Stand: Positionen + Zusammenfassung. Nichts im Order-Ticket."""
+    res = {"ok": False, "code": "", "msg": "", "trail": "", "schritt": "start", "konto_aktiv": "",
+           "konto_quelle": "cdp", "quelle": "cdp"}
+    trail = _StempelSpur()
+    ende = bool(cmd.get("ende")) if isinstance(cmd, dict) else False
+    sitz = [None]
+
+    def raus(code, msg, schritt, **extra):
+        res["code"], res["msg"], res["schritt"] = code, msg, schritt
+        res.update(extra)
+        res["trail"] = " > ".join(trail)
+        if sitz[0]:
+            sitz[0].zu()
+        try:
+            print(json.dumps(res, ensure_ascii=False))
+        except UnicodeEncodeError:
+            print(json.dumps(res, ensure_ascii=True))
+
+    fehler = pruefe_tv_lesen_befehl(cmd)
+    if fehler:
+        return raus("befehl", "Befehl unvollstaendig: " + " / ".join(fehler), "befehl")
+    ext = str(cmd.get("konto") or cmd.get("ext_id") or "").strip()
+    geschwister = [str(x).strip() for x in (cmd.get("geschwister") or []) if len(_nur_alnum(x)) >= 3][:60]
+    opts = {"kontoTexte": [ext] + geschwister}
+    trail.append("Weg: Puls-Chrome (CDP)")
+    try:
+        s = sitz[0] = _AugenSitzung(trail)
+        st = s.stand(opts)
+        # --- Konto sicherstellen (höchstens 4 Schritte: Panel auf → Umschalter → Eintrag → prüfen)
+        for _runde in range(4):
+            ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+            aktiv = str(ko.get("aktiv") or "")
+            if aktiv and tv_konto_passt(aktiv, ext):
+                res["konto_aktiv"] = aktiv[:80]
+                trail.append(f"Konto steht: '{aktiv[:40]}'")
+                break
+            if ko.get("panel") == "zu" and cdp_rect(ko.get("panel_knopf")):
+                s.klick(cdp_rect(ko.get("panel_knopf")), "Handelspanel auf")
+                _warte(1.0, 0.5)
+                st = s.stand(opts)
+                continue
+            if ko.get("liste_offen"):
+                e, n = cdp_konto_eintrag(ko.get("eintraege"), ext)
+                if not e:
+                    return raus("konto_nicht_erreicht", f"Konto {ext} steht im Dropdown {n}x (nicht genau einmal) — nichts geklickt.",
+                                "konto", konto_eintraege=[str(x.get("text"))[:40] for x in (ko.get("eintraege") or [])][:20])
+                s.klick(cdp_rect(e), f"Konto {ext}")
+                _warte(1.2, 0.6)
+                st = s.stand(opts)
+                continue
+            if not cdp_rect(ko.get("schalter")):
+                return raus("kein_broker", f"Kein Konto-Umschalter zu sehen (aktiv '{aktiv[:40] or '-'}', "
+                            f"{str(ko.get('hinweis') or '')[:80]}) — Tradovate im Puls-Chrome verbunden?", "konto")
+            s.klick(cdp_rect(ko.get("schalter")), "Konto-Umschalter")
+            _warte(0.8, 0.4)
+            st = s.stand(opts)
+        else:
+            ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+            return raus("konto_nicht_erreicht", f"Konto {ext} nicht aktiv (steht: '{str(ko.get('aktiv') or '-')[:40]}')", "konto")
+        # --- EIN frischer Stand nach dem Konto
+        _warte(0.6, 0.3)
+        st = s.stand(opts)
+        summary = cdp_summary(st.get("konto_summary"))
+        today, today_label, today_text = tv_today_pnl(summary)
+        ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+        if ko.get("positionen_sichtbar") is False:
+            return raus("tabelle_unklar", "Positions-Tabelle im Puls-Chrome nicht sichtbar — kein Stand ohne Tabelle.", "lesen",
+                        summary=summary, today_pnl=today, today_label=today_label, today_pnl_text=today_text)
+        positionen = cdp_positionen_vertrag(st.get("positionen"))
+        trail.append(f"gelesen (CDP): {len(positionen)} Pos, {len(summary or {})} Summary-Paare, Today {today} ('{today_label}')")
+        res.update({"ok": True, "positionen": positionen, "offen": bool(positionen),
+                    "avg_fill_je_wurzel": tv_avg_fill_je_wurzel(positionen), "summary": summary,
+                    "today_pnl": today, "today_label": today_label, "today_pnl_text": today_text,
+                    "alter_s": 0.0, "gelesen_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "userscript": None,
+                    "sprache_fremd": False, "summary_fehler": None if summary else "keine Zusammenfassung (augen.js)"})
+        if ende:
+            res["exit_diag"] = {"fehler": "Exit-Fill über CDP kommt mit K4"}
+        return raus("", f"Konto {res['konto_aktiv'][:40]}: {len(positionen)} Position(en) (CDP)"
+                    + (f", Today's P&L {today:g} ({today_label})" if today is not None else ", Tages-G&V nicht gefunden"),
+                    "fertig")
+    except Exception as e:
+        return raus("cdp_fehler", f"Puls-Chrome/CDP: {type(e).__name__}: {str(e)[:160]}", "cdp")
 
 
 def main():

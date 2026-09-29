@@ -2629,8 +2629,36 @@ def test_puls_augen_cdp():
     chk(kf(st) == "Ticket offen · Market · Units 4 · TP 447.00 · SL 249.00 · Knopf 'Buy 4 MNQZ6 MARKET' · Toasts 0 · Popups 0",
         "Augen-Kurzform aus echter Zeile (Moritz 29.09.2026): ticket.da, toasts {log, gruppen}")
     chk(kf({"toasts": {"gruppen": [1, 2], "log": [3]}}).endswith("Toasts 3 · Popups 0") and kf(None) == "kein Stand", "Kurzform zählt Toast-Einträge")
+    # K1 (29.09.2026): Weiche nur lokal + nur dieser PC; Klick-Bahn/-Punkt; Summary/Positionen in Vertragsform
+    import random as _rnd
+    wch = ob.augen_regel_weiche
+    chk(wch({"augen": "cdp", "at": 990.0, "pc": "pc-usq1i6"}, 1000.0, "pc-usq1i6") == "cdp", "Weiche: cdp frisch + eigener PC → cdp")
+    chk(wch({"augen": "cdp", "at": 990.0, "pc": "pc-usq1i6"}, 1000.0, "pc-8jcrsm") == "uia", "Weiche: Regel eines anderen PCs → uia")
+    chk(wch({"augen": "cdp", "at": 0.0}, 1000.0, "pc-usq1i6") == "uia" and wch(None, 1000.0, "pc-usq1i6") == "uia"
+        and wch({"augen": "uia", "at": 999.0}, 1000.0, "pc-usq1i6") == "uia" and wch({"augen": "cdp", "at": 999.0}, 1000.0, None) == "uia",
+        "Weiche: veraltet/fehlt/uia/ohne pc_id → uia (alter Pfad unverändert)")
+    import inspect as _i3
+    q_tl = _i3.getsource(ob.modus_tvlesen)
+    chk(q_tl.lstrip().startswith("def modus_tvlesen(cmd):\n    if augen_modus_lauf() == \"cdp\":") and "modus_tvlesen_cdp(cmd)" in q_tl,
+        "tvlesen: einzige Änderung vor dem alten Pfad ist die lokale Weiche")
+    chk("_augen_regel_holen" not in _i3.getsource(ob.augen_modus_lauf) and "urllib" not in _i3.getsource(ob.augen_modus_lauf),
+        "Weiche liest nie Netz")
+    r_ = _rnd.Random(7)
+    bahn = ob.cdp_klick_bahn((0, 0), (100, 50), rnd=r_)
+    chk(len(bahn) == 8 and bahn[-1] == (100.0, 50.0) and bahn[0] != (100.0, 50.0), "Klick-Bahn: mehrere Schritte, letzter exakt am Ziel")
+    pt = ob.cdp_klickpunkt([100, 200, 60, 30], rnd=_rnd.Random(3))
+    chk(pt and 110 <= pt[0] <= 150 and 205 <= pt[1] <= 225 and ob.cdp_klickpunkt([1, 1, 1, 1]) is None, "Klickpunkt im inneren Drittel, Mini-Rect → None")
+    sm = ob.cdp_summary({"balance": {"label": "Account Balance", "text": "153,756.96", "wert": 153756.96}, "equity": {"label": None, "text": "153,700.00"},
+                         "today_pnl": {"label": "Total P/L", "text": "-56.96"}, "texte": {"Realized P&L": "0.00"}})
+    chk(sm == {"Realized P&L": "0.00", "Account Balance": "153,756.96", "Equity": "153,700.00", "Total P/L": "-56.96"}
+        and ob.cdp_summary(None) is None, "Summary → tvlesen-Form (Label: Text), Rückfall-Labels")
+    pv = ob.cdp_positionen_vertrag([{"symbol": "MNQZ6", "seite": "buy", "menge": 4, "avg": 30594.25, "pl_text": "-12.50"}, "x"])
+    chk(len(pv) == 1 and pv[0]["menge_zahl"] == 4 and pv[0]["einstieg_zahl"] == 30594.25 and pv[0]["pnl_zahl"] == -12.5
+        and ob.tv_avg_fill_je_wurzel(pv)["MNQ"]["avg_fill"] == 30594.25, "Positionen → Vertragsform + avg_fill_je_wurzel")
+    ke = ob.cdp_konto_eintrag([{"text": "TDFYSL150800892182 USD", "rect": [1, 1, 9, 9]}, {"text": "APEX6416990000025 USD", "rect": [1, 1, 9, 9]}], "TDFYSL150800892182")
+    chk(ke[0] is not None and ke[1] == 1 and ob.cdp_konto_eintrag([], "X")[0] is None, "Konto-Eintrag: genau ein Treffer")
     if ok:
-        print("✓ Puls-Augen CDP: eigenes Profil, 127.0.0.1:9333, WebSocket-Frames, Regel-Entscheid, Target-Wahl")
+        print("✓ Puls-Augen CDP: eigenes Profil, 127.0.0.1:9333, WebSocket-Frames, Regel-Entscheid, Target-Wahl, K1-Weiche + Vertrag")
     return ok
 
 
