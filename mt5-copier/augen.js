@@ -23,7 +23,7 @@
  */
 var PROPHOS_AUGEN = (function () {
   'use strict';
-  var VERSION = '0.7.1';   // 0.7.1 (29.09.2026, K2 für T3): kauf_knopf.disabled, tp/sl.einheit/wert/neben, summary_reiter   // 0.7.0 (29.09.2026, Aufnahme 00:52): Kontoliste ohne Rollen, Meldungs-Status, Watchlist, Dialog-Knöpfe   // 0.6.1 (29.09.2026): aufnahme_letzte() als Rettungskopie, T3-Banner 'prophos-aufnahme' ausgeblendet   // 0.6.0 (29.09.2026, Aufnahme 00:36 leer): window-capture, roh-Zähler, tab_id, Sichtbarkeit   // 0.5.3 (29.09.2026, Lesung 00:22:50): Konto-Anker Kontonummer zuerst, Summary Total P/L = today   // 0.5.2 (29.09.2026, Lesung 00:22): Panel 'Collapse panel'/Manager-Knopf, Konto entdoppelt + kontonr   // 0.5.1 (29.09.2026, Lesung 00:17 pc-usq1i6): Schalter-Rechteck, ticket.seite/bereit, Legende, veraltete Zeilen   // 0.5.0 (29.09.2026): Aufnahme-Modus (Finn klickt den Ablauf einmal selbst, jede Aktion wird mitgeschrieben)   // 0.4.0 (29.09.2026, K1–K4 für T3): positionen, orders, konto_summary, symbolsuche, toasts.meldungen   // 0.3.0 (29.09.2026, erste echte Lesung pc-usq1i6): TP/SL-Zustand, Konto-Leiste, Toast-Rückfall   // 0.2.0 (29.09.2026): Vertrag mit T3 — globalThis.prophosAugen, Schlüssel-Whitelist, popups, kauf_knopf
+  var VERSION = '0.7.2';   // 0.7.2 (29.09.2026): Aufnahme stoppt nach 10 min von selbst   // 0.7.1 (29.09.2026, K2 für T3): kauf_knopf.disabled, tp/sl.einheit/wert/neben, summary_reiter   // 0.7.0 (29.09.2026, Aufnahme 00:52): Kontoliste ohne Rollen, Meldungs-Status, Watchlist, Dialog-Knöpfe   // 0.6.1 (29.09.2026): aufnahme_letzte() als Rettungskopie, T3-Banner 'prophos-aufnahme' ausgeblendet   // 0.6.0 (29.09.2026, Aufnahme 00:36 leer): window-capture, roh-Zähler, tab_id, Sichtbarkeit   // 0.5.3 (29.09.2026, Lesung 00:22:50): Konto-Anker Kontonummer zuerst, Summary Total P/L = today   // 0.5.2 (29.09.2026, Lesung 00:22): Panel 'Collapse panel'/Manager-Knopf, Konto entdoppelt + kontonr   // 0.5.1 (29.09.2026, Lesung 00:17 pc-usq1i6): Schalter-Rechteck, ticket.seite/bereit, Legende, veraltete Zeilen   // 0.5.0 (29.09.2026): Aufnahme-Modus (Finn klickt den Ablauf einmal selbst, jede Aktion wird mitgeschrieben)   // 0.4.0 (29.09.2026, K1–K4 für T3): positionen, orders, konto_summary, symbolsuche, toasts.meldungen   // 0.3.0 (29.09.2026, erste echte Lesung pc-usq1i6): TP/SL-Zustand, Konto-Leiste, Toast-Rückfall   // 0.2.0 (29.09.2026): Vertrag mit T3 — globalThis.prophosAugen, Schlüssel-Whitelist, popups, kauf_knopf
 
   // ── Grundwerkzeuge ─────────────────────────────────────────────────────────
   function sichtbar(el) {
@@ -681,19 +681,45 @@ var PROPHOS_AUGEN = (function () {
       A.liste.push(e);
     } catch (_) {}
   }
-  function aufnahme_start() {
+  /* SELBST-STOPP (29.09.2026, Finn hatte eine Aufnahme offen gelassen): nach max_ms (Standard 10 min) stoppt die Aufnahme selbst —
+   * Listener ab, Ergebnis in __prophosAufnahmeLetzte (holt „augen aufnahme senden"), T3s roter Banner/Rahmen weg. Der Timer liegt in
+   * window, damit ein erneutes Evaluate ihn weder verdoppelt noch verliert; ein Stopp von Hand räumt ihn ab. */
+  var AUFNAHME_MAX_MS = 10 * 60 * 1000;
+  function aufnahmeTimerWeg() {
+    try { if (window.__prophosAufnahmeTimer) clearTimeout(window.__prophosAufnahmeTimer); } catch (_) {}
+    window.__prophosAufnahmeTimer = null;
+  }
+  function aufnahmeAutoStopp() {
+    window.__prophosAufnahmeTimer = null;
+    var A = window.__prophosAufnahme; if (!A || !A.an) return;
+    var r = aufnahme_stopp();
+    try { r.auto_stopp = true; var ms_ = A.max_ms || AUFNAHME_MAX_MS; r.grund = 'zeit_' + (ms_ >= 60000 ? Math.round(ms_ / 60000) + 'min' : Math.round(ms_ / 1000) + 's'); } catch (_) {}
+    try { alle('[data-name="prophos-aufnahme"]').forEach(function (e) { e.remove(); }); } catch (_) {}
+  }
+  function aufnahme_start(opts) {
+    opts = opts || {};
     var A = window.__prophosAufnahme;
     if (A && A.an) return { ok: true, laeuft: true, eintraege: A.liste.length, roh: A.roh || 0, tab_id: A.tab_id, seit_ms: Date.now() - A.t0 };
     // WINDOW + capture: sieht jedes Ereignis als Allererstes, noch vor einem stopImmediatePropagation der Seite auf document/window
     A = window.__prophosAufnahme = { an: true, t0: Date.now(), liste: [], voll: false, lst: aufnahmeEintrag, url: location.href, roh: 0,
-                                     tab_id: tabId(), sichtbar_start: document.visibilityState, fokus_start: fokus() };
+                                     tab_id: tabId(), sichtbar_start: document.visibilityState, fokus_start: fokus(),
+                                     max_ms: (opts.max_ms > 0 && opts.max_ms <= 30 * 60 * 1000) ? opts.max_ms : AUFNAHME_MAX_MS };
+    aufnahmeTimerWeg();
+    window.__prophosAufnahmeTimer = setTimeout(aufnahmeAutoStopp, A.max_ms);
     AUFNAHME_TYPEN.forEach(function (t) { window.addEventListener(t, A.lst, true); });
     document.addEventListener('visibilitychange', A.lst, true);
-    return { ok: true, gestartet: true, t0: A.t0, tab_id: A.tab_id, sichtbar: A.sichtbar_start, fokus: A.fokus_start, url: location.href };
+    return { ok: true, gestartet: true, t0: A.t0, tab_id: A.tab_id, sichtbar: A.sichtbar_start, fokus: A.fokus_start, url: location.href,
+             stopp_um: A.t0 + A.max_ms };
   }
   function aufnahme_stopp() {
     var A = window.__prophosAufnahme;
-    if (!A) return { ok: true, verloren: true, ereignisse: [], hinweis: 'kein Aufnahme-Puffer (Seite neu geladen oder nie gestartet)' };
+    aufnahmeTimerWeg();
+    if (!A) {
+      // schon von selbst gestoppt? Dann liegt das Ergebnis in der Rettungskopie
+      var L = window.__prophosAufnahmeLetzte;
+      if (L && L.auto_stopp) return L;
+      return { ok: true, verloren: true, ereignisse: [], hinweis: 'kein Aufnahme-Puffer (Seite neu geladen oder nie gestartet)' };
+    }
     AUFNAHME_TYPEN.forEach(function (t) { try { window.removeEventListener(t, A.lst, true); } catch (_) {} try { document.removeEventListener(t, A.lst, true); } catch (_) {} });
     try { document.removeEventListener('visibilitychange', A.lst, true); } catch (_) {}
     A.an = false;
