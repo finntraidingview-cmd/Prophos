@@ -13514,7 +13514,7 @@ def modus_augen(cmd):
         pass
     try:
         start = bool(cmd.get("start"))
-        jetzt = bool(cmd.get("jetzt"))       # Hand-Test: ohne Schalter und ohne 60-s-Sperre lesen, nie schließen
+        jetzt = bool(cmd.get("jetzt")) or bool(cmd.get("aufnahme"))   # Hand-Test/Aufnahme: ohne Schalter + 60-s-Sperre, nie schließen
         augen = _augen_regel_holen(pc) if pc else "uia"
         if augen != "cdp" and not start and not jetzt:
             # Aufräumen (29.09.2026, Moritz pc-usq1i6: Schalter zurück auf uia, das Puls-Chrome lief weiter und kickte die
@@ -13559,6 +13559,48 @@ def modus_augen(cmd):
             res["msg"] = "augen.js fehlt (noch nicht im Repo?)"
             return
         ws = _CdpVerbindung(ziel.get("webSocketDebuggerUrl"))
+        if cmd.get("aufnahme"):
+            # AUFNAHME (29.09.2026, Finns Idee + Freigabe): Finn klickt den Order-Ablauf im Puls-Chrome einmal SELBST durch (bis
+            # VOR den Kauf-Knopf); augen.js 0.5 zeichnet Klicks/Eingaben auf (Capture-Listener, Puffer im Fenster, Passwortfelder
+            # und Login-Formulare nur „[verborgen]"). Puls klickt hier NICHTS. 'stopp' holt Puffer + frischen Stand nach puls_augen
+            # (inventar.aufnahme). Neuladen der Seite verwirft den Puffer → verloren.
+            try:
+                ws.rufe("Runtime.evaluate", {"expression": js, "returnByValue": False}, timeout=8)
+                fn = "aufnahme_start" if cmd["aufnahme"] == "start" else "aufnahme_stopp"
+                r = ws.rufe("Runtime.evaluate", {"expression": f"globalThis.prophosAugen.{fn} ? globalThis.prophosAugen.{fn}() : "
+                                                 "({fehler: 'augen.js ohne Aufnahme'})", "returnByValue": True}, timeout=10)
+                wert = ((r or {}).get("result") or {}).get("value") or {}
+                stand = None
+                if cmd["aufnahme"] == "stopp":
+                    r2 = ws.rufe("Runtime.evaluate", {"expression": "globalThis.prophosAugen.stand()", "returnByValue": True}, timeout=10)
+                    stand = ((r2 or {}).get("result") or {}).get("value")
+            finally:
+                ws.zu()
+            if r.get("exceptionDetails") or (isinstance(wert, dict) and wert.get("fehler")):
+                res["msg"] = "Aufnahme: " + str((wert or {}).get("fehler") or (r.get("exceptionDetails") or {}).get("text"))[:160]
+                return
+            if cmd["aufnahme"] == "start":
+                trail.append("Aufnahme läuft — jetzt im Puls-Chrome den Ablauf durchklicken (NICHT kaufen), dann 'augen aufnahme stopp'"
+                             + (" (lief schon)" if wert.get("laeuft") else ""))
+                res.update(ok=True, msg="Aufnahme gestartet")
+                return
+            n_e = len(wert.get("ereignisse") or []) if isinstance(wert, dict) else 0
+            verloren = bool(isinstance(wert, dict) and wert.get("verloren"))
+            trail.append(f"Aufnahme gestoppt: {n_e} Ereignisse" + (" — AUFNAHME VERLOREN (Seite neu geladen?)" if verloren else ""))
+            if pc:
+                import urllib.request
+                for art, daten in (("inventar", {"inventar": {"aufnahme": wert}}), ("stand", stand if isinstance(stand, dict) else None)):
+                    if not isinstance(daten, dict):
+                        continue
+                    try:
+                        req = urllib.request.Request(f"{PULS_BACKEND}/puls-augen/{pc}", data=json.dumps(
+                            {"art": art, "daten": dict(daten, target=str(ziel.get("url"))[:200])}, ensure_ascii=False).encode("utf-8"),
+                            headers={"Content-Type": "application/json"})
+                        urllib.request.urlopen(req, timeout=8.0).read()
+                    except Exception as e_:
+                        trail.append(f"puls_augen ({art}) nicht geschrieben ({type(e_).__name__}) — Aufnahme zu groß?")
+            res.update(ok=not verloren, msg=f"Aufnahme: {n_e} Ereignisse" + (", verloren" if verloren else ""))
+            return
         try:
             ws.rufe("Runtime.evaluate", {"expression": js, "returnByValue": False, "awaitPromise": True}, timeout=8)
             ausdruck = ("(async () => { const A = globalThis.prophosAugen; if (!A) return {fehler: 'prophosAugen fehlt'};"
@@ -13660,6 +13702,8 @@ def main():
             cmd = {"start": True}          # 'order_bot.py augen start' / puls-chrome-starten.bat — ohne JSON-Quoting in cmd
         elif len(sys.argv) >= 3 and sys.argv[2].strip().lower() == "jetzt":
             cmd = {"jetzt": True}          # 'order_bot.py augen jetzt': sofort einmal lesen (Test am PC, 29.09.2026)
+        elif len(sys.argv) >= 4 and sys.argv[2].strip().lower() == "aufnahme" and sys.argv[3].strip().lower() in ("start", "stopp"):
+            cmd = {"aufnahme": sys.argv[3].strip().lower()}   # 'augen aufnahme start|stopp' (Finns Idee 29.09.2026)
         else:
             try:
                 cmd = json.loads(sys.argv[2]) if len(sys.argv) >= 3 else {}
