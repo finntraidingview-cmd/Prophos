@@ -23,7 +23,7 @@
  */
 var PROPHOS_AUGEN = (function () {
   'use strict';
-  var VERSION = '0.5.2';   // 0.5.2 (29.09.2026, Lesung 00:22): Panel 'Collapse panel'/Manager-Knopf, Konto entdoppelt + kontonr   // 0.5.1 (29.09.2026, Lesung 00:17 pc-usq1i6): Schalter-Rechteck, ticket.seite/bereit, Legende, veraltete Zeilen   // 0.5.0 (29.09.2026): Aufnahme-Modus (Finn klickt den Ablauf einmal selbst, jede Aktion wird mitgeschrieben)   // 0.4.0 (29.09.2026, K1–K4 für T3): positionen, orders, konto_summary, symbolsuche, toasts.meldungen   // 0.3.0 (29.09.2026, erste echte Lesung pc-usq1i6): TP/SL-Zustand, Konto-Leiste, Toast-Rückfall   // 0.2.0 (29.09.2026): Vertrag mit T3 — globalThis.prophosAugen, Schlüssel-Whitelist, popups, kauf_knopf
+  var VERSION = '0.5.3';   // 0.5.3 (29.09.2026, Lesung 00:22:50): Konto-Anker Kontonummer zuerst, Summary Total P/L = today   // 0.5.2 (29.09.2026, Lesung 00:22): Panel 'Collapse panel'/Manager-Knopf, Konto entdoppelt + kontonr   // 0.5.1 (29.09.2026, Lesung 00:17 pc-usq1i6): Schalter-Rechteck, ticket.seite/bereit, Legende, veraltete Zeilen   // 0.5.0 (29.09.2026): Aufnahme-Modus (Finn klickt den Ablauf einmal selbst, jede Aktion wird mitgeschrieben)   // 0.4.0 (29.09.2026, K1–K4 für T3): positionen, orders, konto_summary, symbolsuche, toasts.meldungen   // 0.3.0 (29.09.2026, erste echte Lesung pc-usq1i6): TP/SL-Zustand, Konto-Leiste, Toast-Rückfall   // 0.2.0 (29.09.2026): Vertrag mit T3 — globalThis.prophosAugen, Schlüssel-Whitelist, popups, kauf_knopf
 
   // ── Grundwerkzeuge ─────────────────────────────────────────────────────────
   function sichtbar(el) {
@@ -293,10 +293,12 @@ var PROPHOS_AUGEN = (function () {
 
   // ── Konto (Account-Manager) ────────────────────────────────────────────────
   function konto(texte) {
-    var s = suche([{ q: 'dn:account-manager-account-select', sel: '[data-name="account-manager-account-select"]' },
-                   { q: 'dn*account button', sel: '[data-name*="account"][role="button"],[data-name*="account"] button' },
-                   { q: 'text:Kontonummer', sel: 'button,[role="button"]', text: RX_KONTO,
-                     filter: function (e) { return e.getBoundingClientRect().top > window.innerHeight * 0.4; } }]);
+    // Lesung 00:22:50: '[data-name*=account] button' traf 'Column setup' in der Account-Manager-Tabelle — jetzt zuerst die KONTONUMMER
+    // als Text (unser eigener Anker, z. B. 'PAAPEX6416990000009USD' [72,510]), data-name-Wege nur noch mit Kontonummer im Text
+    var s = suche([{ q: 'text:Kontonummer', sel: 'button,[role="button"]', text: RX_KONTO,
+                     filter: function (e) { return e.getBoundingClientRect().top > window.innerHeight * 0.3 && !e.closest('[data-name="order-panel"]'); } },
+                   { q: 'dn:account-manager-account-select', sel: '[data-name="account-manager-account-select"]' },
+                   { q: 'dn*account button', sel: '[data-name*="account"][role="button"], [data-name*="account"] button', text: RX_KONTO }]);
     var eintraege = alle('[role="listbox"] [role="option"],[role="menu"] [role="menuitem"],[data-name="menu-inner"] [role="option"],[data-name="popup-menu-container"] [role="menuitem"]')
       .filter(sichtbar).slice(0, 40).map(function (e) { return kurz(e); });
     // External IDs als Text suchen (Reader-Lehre 21.09.2026: eine 17-stellige Kontonummer kann TradingView nicht umbenennen)
@@ -454,9 +456,12 @@ var PROPHOS_AUGEN = (function () {
     if (!n) return null;
     function nimm(rx, nicht) { for (var l in paare) { if (rx.test(l) && !(nicht && nicht.test(l))) return { label: l, text: paare[l], wert: geldZahl(paare[l]) }; } return null; }
     var UNREAL = /unreal|nicht\s*real|offen|open/i;
+    // Tradovate 'Account summary' (Lesung 00:22:50): Account Balance · Equity · Net Liq · Open P/L · Total P/L · Profit · Margins.
+    // Finn: 'Total P/L' ist das P&L von heute (ein Trade pro Tag) → today_pnl; 'Open P/L' = unrealisiert; 'Profit' eigenes Feld.
     return { balance: nimm(/^(account\s*)?balance$|kontostand|saldo|guthaben|^balance/i), equity: nimm(/equity|eigenkapital|net\s*liq|netto-?liquid/i),
              realisiert: nimm(/realized|realisiert/i, UNREAL), unrealisiert: nimm(/unrealized|unrealisiert|nicht\s*realisiert|open\s*p/i),
-             today_pnl: nimm(/today|heutig|tages/i, UNREAL), texte: paare };
+             today_pnl: nimm(/today|heutig|tages|^total\s*p\/?l|gesamt\s*g(&|u)v/i, UNREAL), profit: nimm(/^profit$|^gewinn$/i),
+             net_liq: nimm(/net\s*liq|netto-?liquid/i), texte: paare };
   }
 
   // ── Symbolsuche (Kopfleiste + Such-Dialog) ─────────────────────────────────
