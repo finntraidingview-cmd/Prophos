@@ -3098,6 +3098,33 @@ def test_puls_cdp_login():
         "Ziel-Probe erkennt Meldungen, im-Bild-Prüfung")
     q_mz = _i.getsource(ob.modus_tvkette_cdp)
     chk("Show less (Meldungen" in q_mz and q_mz.index("Show less (Meldungen") < q_mz.index("_cdp_endpruefung("), "Stapel nach dem Lesen zuklappen, vor den Reiter-Klicks")
+    # Broker-Panel nach dem Login zugeklappt (Live 16:25 UTC): aufklappen, dann Konto
+    chk(ob.cdp_panel_zu({"konto": {"panel": "zu", "panel_knopf": {"rect": [1500, 900, 30, 30]}}}) is not None
+        and ob.cdp_panel_zu({"konto": {"panel": "offen", "panel_knopf": {"rect": [1, 1, 30, 30]}}}) is None and ob.cdp_panel_zu(None) is None,
+        "Panel zu erkannt")
+
+    class _SP:
+        def __init__(self):
+            self.auf, self.klicks = False, []
+
+        def stand(self, opts=None):
+            return ({"konto": {"panel": "offen", "schalter": {"rect": [1, 1, 50, 20]}, "aktiv": "PAAPEX6416990000008 USD"}} if self.auf
+                    else {"konto": {"panel": "zu", "panel_knopf": {"rect": [1500, 900, 30, 30]}, "aktiv": ""}})
+
+        def klick(self, r, n, toast_ok=False):
+            self.klicks.append(n)
+            self.auf = True
+            return True
+    alt_w = ob._warte
+    ob._warte = lambda a_, b_: None
+    try:
+        sp_ = _SP()
+        v_ = ob._cdp_verbunden_lesen(sp_, {}, [])
+    finally:
+        ob._warte = alt_w
+    chk(v_ == "PAAPEX6416990000008 USD" and sp_.klicks == ["Handelspanel auf (Open panel)"], f"zugeklapptes Panel → einmal auf → Konto ({v_!r})")
+    chk(_i.getsource(ob._cdp_anmelden).count("_cdp_verbunden_lesen(") == 1 and "cdp_konto_verbunden(s.stand(opts))" not in _i.getsource(ob._cdp_anmelden),
+        "Warten nach dem Login klappt das Panel auf")
     W = ob.tv_konto_wort_passt
     chk(W("TDFYU324689097 tradovate.com", "TDFYU324689097") and not W("APEX_641699TDFYU324689097", "TDFYU324689097")
         and not W("APEX_641699", "TDFYU324689097"), "Vorschlag nur mit dem Username als ganzem Wort (angehängter Name zählt nicht)")

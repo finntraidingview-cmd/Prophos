@@ -16562,6 +16562,29 @@ def cdp_konto_verbunden(stand):
     return aktiv if cdp_rect(ko.get("schalter")) and K3_RX_KONTONR.search(re.sub(r"\s", "", aktiv).upper()) else ""
 
 
+def cdp_panel_zu(stand):
+    """REIN RECHNEND (testbar): Broker-Panel zugeklappt und der „Open panel"-Knopf greifbar? -> Knopf | None"""
+    ko = (stand or {}).get("konto") if isinstance(stand, dict) and isinstance(stand.get("konto"), dict) else {}
+    return ko.get("panel_knopf") if ko.get("panel") == "zu" and cdp_rect(ko.get("panel_knopf")) else None
+
+
+def _cdp_verbunden_lesen(s, opts, trail):
+    """cdp_konto_verbunden — ist das Broker-Panel zugeklappt (Live 29.09.2026 16:25 UTC nach dem Login: nur „Tradovate ▾" +
+    „Open panel", Umschalter unsichtbar → 40 s „kein Konto"), wird es aufgeklappt (höchstens 3× je Sitzung) und neu gelesen.
+    -> Kontotext | ''"""
+    st = s.stand(opts)
+    aktiv = cdp_konto_verbunden(st)
+    if aktiv:
+        return aktiv
+    knopf = cdp_panel_zu(st)
+    if knopf and getattr(s, "_panel_klicks", 0) < 3:
+        s._panel_klicks = getattr(s, "_panel_klicks", 0) + 1
+        if s.klick(cdp_rect(knopf), "Handelspanel auf (Open panel)"):
+            _warte(1.0, 0.4)
+            return cdp_konto_verbunden(s.stand(opts))
+    return ""
+
+
 def cdp_abgemeldet(stand):
     """REIN RECHNEND (testbar): nach „Log out" — weder Umschalter noch Kontonummer zu sehen (Bedingung des K3-Laufs 12:27 UTC)."""
     ko = (stand or {}).get("konto") if isinstance(stand, dict) and isinstance(stand.get("konto"), dict) else {}
@@ -16830,7 +16853,7 @@ def _cdp_nach_link(s, opts, warten_s=40.0):
         bl = ort.blick()
         if cdp_connect_dialog(bl):
             return "dialog", bl
-        aktiv = cdp_konto_verbunden(s.stand(opts))
+        aktiv = _cdp_verbunden_lesen(s, opts, trail)
         if aktiv:
             return "verbunden", aktiv
         if time.time() >= ende:
@@ -16911,7 +16934,7 @@ def _cdp_login_ort(s, vorher, benutzer, opts, trail, warten_s=25.0):
                 trail.append(f"[Login] Tradovate-Anmeldeseite offen ({str(t.get('url') or '')[:60]})")
                 return o2, ""
             o2.zu()
-        aktiv = cdp_konto_verbunden(s.stand(opts))
+        aktiv = _cdp_verbunden_lesen(s, opts, trail)
         if aktiv:
             trail.append(f"[Login] ohne Anmeldeseite verbunden ('{aktiv[:40]}') — Tradovate war noch angemeldet")
             return "verbunden", ""
@@ -17067,7 +17090,7 @@ def _cdp_anmelden(s, ort, benutzer, opts, trail, vorher=None):
     t0, enter = time.time(), False
     while time.time() - t0 < 40.0:
         _warte(1.0, 0.4)
-        aktiv = cdp_konto_verbunden(s.stand(opts))
+        aktiv = _cdp_verbunden_lesen(s, opts, trail)
         if aktiv:
             trail.append(f"[Login] OK verbunden, aktiv '{aktiv[:40]}'")
             return "", ""
@@ -17114,7 +17137,7 @@ def _cdp_tradovate_verbinden(sitz, cmd, opts, trail):
     if cdp_connect_dialog(bl):
         trail.append("[Login] Connect-Dialog steht schon da — direkt verbinden")
     else:
-        aktiv = cdp_konto_verbunden(s.stand(opts))
+        aktiv = _cdp_verbunden_lesen(s, opts, trail)
         if aktiv or cdp_rect(bl.get("ctx")):
             trail.append(f"[Login] Tradovate verbunden mit anderem Login ('{aktiv[:40] or '-'}') → abmelden")
             ok, f = _cdp_abmelden(s, opts, trail)
