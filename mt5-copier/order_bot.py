@@ -13987,6 +13987,32 @@ def win_hover_js(x, y):
             ");return !!(e&&e.matches(':hover'));})()")
 
 
+def win_ziel_js(x, y):
+    """Am Viewport-Punkt: liegt das Element unter dem Mauszeiger (:hover) — und gehört es zu einer TradingView-Meldung (Toast)?
+    Live 29.09.2026 16:13 UTC: der aufgeklappte Meldungsstapel lag über dem Konto-Umschalter, der Klick traf die Meldung. Liest nur."""
+    return ("(function(){var e=document.elementFromPoint(" + f"{float(x):.1f},{float(y):.1f}" + ");if(!e)return {hover:false,toast:false};"
+            "var t=e.closest('[data-name^=\"toast-group-\"],[class*=\"toastGroup-\"],[class*=\"toastListInner-\"],[class*=\"toastItem\"]');"
+            "return {hover:e.matches(':hover'),toast:!!t};})()")
+
+
+# Schließen-Knöpfe der Meldungen, die GANZ im Bild liegen: erst das X der Gruppe (toast-group-close-button-*), sonst das X einzelner
+# Meldungen (aria-label/title „Close"/„Schließen", Text ×) innerhalb eines Toast-Containers. Nur lesen.
+CDP_TOAST_ZU_JS = r"""(function () {
+  function drin(r) { return r.width >= 3 && r.height >= 3 && r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight; }
+  function sb(e) { try { var s = getComputedStyle(e); return s.visibility !== 'hidden' && s.display !== 'none' && s.opacity !== '0'; } catch (_) { return false; } }
+  function R(e) { var r = e.getBoundingClientRect(); return [r.left, r.top, r.width, r.height]; }
+  var gruppe = Array.prototype.slice.call(document.querySelectorAll('[data-name^="toast-group-close-button-"]')).filter(function (e) {
+    return sb(e) && drin(e.getBoundingClientRect()); });
+  if (gruppe.length) return gruppe.slice(0, 3).map(function (e) { return { art: 'gruppe', dn: e.getAttribute('data-name'), rect: R(e) }; });
+  var box = '[class*="toastGroup-"],[class*="toastListInner-"],[class*="toastItem"]';
+  var einzeln = Array.prototype.slice.call(document.querySelectorAll('button,[role="button"]')).filter(function (e) {
+    if (!e.closest(box) || !sb(e) || !drin(e.getBoundingClientRect())) return false;
+    var w = (e.getAttribute('aria-label') || '') + ' ' + (e.getAttribute('title') || '') + ' ' + (e.textContent || '').trim();
+    return /\bclose\b|schlie(ß|ss)en|dismiss|^\s*[×✕✖]\s*$/i.test(w) && !/show (more|less)|mehr|weniger/i.test(w); });
+  return einzeln.slice(0, 6).map(function (e) { return { art: 'einzeln', dn: e.getAttribute('data-name') || '', rect: R(e) }; });
+})()"""
+
+
 def _puls_fenster_liste(pid):
     """Sichtbare Top-Level-Fenster des Puls-Chrome-Browserprozesses (Windows). -> [{hwnd, text, klasse, sichtbar, minimiert}]"""
     import ctypes
@@ -14155,9 +14181,14 @@ class _AugenSitzung:
             raise RuntimeError("stand() wirft: " + text[:120])
         return {}
 
-    def klick(self, rect, name):
+    def klick(self, rect, name, toast_ok=False):
         if _WIN_EINGABE:
-            return self._win_klick(rect, name)
+            self._verdeckt = False
+            ok = self._win_klick(rect, name, toast_ok=toast_ok)
+            if not ok and self._verdeckt and not toast_ok and self._toasts_weg():
+                self._verdeckt = False
+                ok = self._win_klick(rect, name)          # Meldungen weg — derselbe Klick genau einmal neu
+            return ok
         p = cdp_klickpunkt(rect)
         if not p:
             self.trail.append(f"{name}: kein klickbares Rechteck")
@@ -14242,7 +14273,7 @@ class _AugenSitzung:
     def hin(self, rect, name):
         """Maus nur HINFAHREN (Bahn mit Streuung, kein Druck) — z. B. damit TradingView die Knöpfe einer Tabellenzeile zeigt."""
         if _WIN_EINGABE:
-            return self._win_klick(rect, name, druck=False)
+            return self._win_klick(rect, name, druck=False, toast_ok=True)   # nur Hover, kein Druck — über einer Meldung harmlos
         p = cdp_klickpunkt(rect)
         if not p:
             return False
@@ -14280,7 +14311,25 @@ class _AugenSitzung:
             _warte(0.25, 0.15)
         return hwnd, ""
 
-    def _win_klick(self, rect, name, druck=True):
+    def _toasts_weg(self):
+        """TradingView-Meldungen über dem Ziel schließen (X der Gruppe, sonst X einzelner Meldungen). -> True, wenn geklickt"""
+        geklickt = False
+        for _ in range(4):
+            kand = self.lese_js(CDP_TOAST_ZU_JS) or []
+            if not kand:
+                break
+            k = kand[0]
+            if not self._win_klick(k.get("rect"), f"Meldungen schließen ({k.get('art')} X)", toast_ok=True):
+                break
+            geklickt = True
+            _warte(0.5, 0.25)
+            if k.get("art") == "gruppe":
+                break                                        # das Gruppen-X räumt den ganzen Stapel
+        if not geklickt:
+            self.trail.append("Meldungen über dem Ziel, aber kein Schließen-Knopf im Bild")
+        return geklickt
+
+    def _win_klick(self, rect, name, druck=True, toast_ok=False):
         """Echte Windows-Maus: Punkt im inneren Drittel → Bildschirm-Pixel (Breiten-Abgleich), Zeiger sichtbar hinfahren, :hover des
         Ziels beweisen, dann EIN SendInput-Druck. Ohne Beweis kein Druck. druck=False = nur hinfahren (Hover)."""
         hwnd, grund = self._win_vorn()
@@ -14312,7 +14361,13 @@ class _AugenSitzung:
         ende = time.time() + 0.9
         while time.time() < ende:
             _warte(0.08, 0.05)
-            if self.lese_js(win_hover_js(p[0], p[1])):
+            v = self.lese_js(win_ziel_js(p[0], p[1]))
+            if isinstance(v, dict) and v.get("toast") and not toast_ok:
+                # das Ziel liegt unter einer TradingView-Meldung — ein Druck träfe die Meldung (Live 16:13 UTC, Konto-Umschalter)
+                self._verdeckt = True
+                self.trail.append(f"{name}: von einer TradingView-Meldung verdeckt @{punkt[0]},{punkt[1]} — kein Druck")
+                return False
+            if (v.get("hover") if isinstance(v, dict) else v):
                 hover = True
                 break
         if not hover:
@@ -14762,6 +14817,18 @@ def cdp_zeilen_menge(zeilen, richtung):
                 summe += abs(m)
     return summe
 
+
+
+def cdp_im_bild(rect, geo):
+    """REIN RECHNEND (testbar): Rechteck [x, y, w, h] ganz im Viewport (innerWidth/innerHeight aus geo)? Ohne geo: nur plausibel."""
+    try:
+        x, y, w, h = [float(v) for v in rect[:4]]
+    except (TypeError, ValueError, IndexError):
+        return False
+    if w < 3 or h < 3 or x < 0 or y < 0:
+        return False
+    iw, ih = (geo or {}).get("innerWidth"), (geo or {}).get("innerHeight")
+    return not (iw and ih) or (x + w <= float(iw) and y + h <= float(ih))
 
 
 def cdp_meldungen_zu(toasts):
@@ -15270,7 +15337,7 @@ def modus_tvkette_cdp(cmd):
                         mehr["hin"] = True
                         s.hin(cdp_rect(gr), f"Meldungsstapel '{gr.get('gruppe')}'")   # Hover blendet die Steuerleiste ein
                     continue
-                if s.klick(cdp_rect(k), f"Show more (Meldungen '{gr.get('gruppe')}', {k.get('text') or k.get('dn')})"):
+                if s.klick(cdp_rect(k), f"Show more (Meldungen '{gr.get('gruppe')}', {k.get('text') or k.get('dn')})", toast_ok=True):
                     mehr["gedrueckt"] = True
                     _warte(0.6, 0.3)
                     continue                           # sofort frisch lesen — aufgeklappt
@@ -15303,6 +15370,18 @@ def modus_tvkette_cdp(cmd):
             res["tp_limit"], res["tp_limit_quelle"] = b["tp"], "tv_toast"
         if b.get("sl") is not None:
             res["sl_limit_quelle"] = "tv_toast"
+        # Stapel wieder zuklappen (Finn 29.09.2026, Live 16:13 UTC: der vom vorigen Lauf aufgeklappte Stapel lag über Konto-Umschalter
+        # und Reitern) — „Show less" am offenen Stapel, nur mit Knopf ganz im Bild; sonst räumt ihn der nächste verdeckte Klick weg
+        try:
+            st_z = s.stand(opts)
+            geo_z = st_z.get("geo") if isinstance(st_z.get("geo"), dict) else {}
+            for g_z in ((st_z.get("toasts") or {}).get("gruppen") or []):
+                if isinstance(g_z, dict) and g_z.get("offen") is True and cdp_im_bild(cdp_rect(g_z.get("mehr")), geo_z):
+                    s.klick(cdp_rect(g_z.get("mehr")), f"Show less (Meldungen '{g_z.get('gruppe')}' zuklappen)", toast_ok=True)
+                    _warte(0.4, 0.2)
+                    break
+        except Exception as e_:
+            trail.append(f"Stapel zuklappen: {type(e_).__name__}")
         # Endprüfung (Finn 29.09.2026: „ob das echt genau passt"): Avg Fill der Positions-Zeile + TP/SL-Limit aus dem Reiter „Orders"
         # gegen die Meldungswerte; fehlt ein Meldungswert, füllt ihn die Tabelle. Nur lesen + Reiter-Klicks, nie etwas an der Order.
         try:

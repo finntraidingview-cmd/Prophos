@@ -3093,6 +3093,11 @@ def test_puls_cdp_login():
     chk(q_k.index('"SENDEN-Knopf"') < q_k.index('_puls_ergebnis_senden("order", "geklickt"') and '_puls_ergebnis_senden("order", "ende"' in q_k
         and q_c.index('f"Close-Knopf der {root}-Zeile"') < q_c.index('_puls_ergebnis_senden("close", "geklickt"') and '_puls_ergebnis_senden("close", "ende"' in q_c
         and "tv_bruecke_auspacken(cmd)" in q_c, "Order und Schließen melden ihr Ergebnis nach dem Klick und am Ende selbst")
+    chk(ob.cdp_im_bild([10, 10, 50, 20], {"innerWidth": 100, "innerHeight": 100}) and not ob.cdp_im_bild([90, 10, 50, 20], {"innerWidth": 100, "innerHeight": 100})
+        and not ob.cdp_im_bild(None, {}) and '[data-name^="toast-group-"]' in ob.win_ziel_js(1, 2) and "toast:!!t" in ob.win_ziel_js(1, 2),
+        "Ziel-Probe erkennt Meldungen, im-Bild-Prüfung")
+    q_mz = _i.getsource(ob.modus_tvkette_cdp)
+    chk("Show less (Meldungen" in q_mz and q_mz.index("Show less (Meldungen") < q_mz.index("_cdp_endpruefung("), "Stapel nach dem Lesen zuklappen, vor den Reiter-Klicks")
     W = ob.tv_konto_wort_passt
     chk(W("TDFYU324689097 tradovate.com", "TDFYU324689097") and not W("APEX_641699TDFYU324689097", "TDFYU324689097")
         and not W("APEX_641699", "TDFYU324689097"), "Vorschlag nur mit dem Username als ganzem Wort (angehängter Name zählt nicht)")
@@ -3150,7 +3155,10 @@ def test_puls_win_maus():
             if a == ob.WIN_GEO_JS:
                 return {"result": {"value": {"innerWidth": 1600, "innerHeight": 773, "dpr": 1, "titel": "MNQZ2026 30,481.00 Unnamed"}}}
             if "elementFromPoint" in a:
-                return {"result": {"value": zustand["hover"]}}
+                h_ = zustand["hover"]
+                return {"result": {"value": h_(a) if callable(h_) else h_}}
+            if a == ob.CDP_TOAST_ZU_JS:
+                return {"result": {"value": zustand.get("zu", [])}}
             return {"result": {"value": None}}
 
         def zu(self):
@@ -3187,6 +3195,27 @@ def test_puls_win_maus():
         zustand["hover"], zustand["vorn"] = True, 99
         chk(s_.klick([952, 701, 282, 56], "SENDEN-Knopf") is False and len(zustand["klicks"]) == 1, "Puls-Chrome nicht vorn → KEIN Druck")
         zustand["vorn"] = 11
+        # Live 16:13 UTC: Meldungsstapel über dem Konto-Umschalter → kein Druck aufs Ziel, erst das X der Meldungen, dann EIN neuer Klick
+        n0 = len(zustand["klicks"])
+        zustand["zu"] = [{"art": "gruppe", "dn": "toast-group-close-button-orders", "rect": [20, 600, 20, 20]}]
+        zustand["hover"] = lambda a: {"hover": True, "toast": bool(zustand.get("zu"))} if "30.0,610.0" not in a else {"hover": True, "toast": True}
+
+        def _klick_x(x, y, taste="links", doppel=False):
+            zustand["klicks"].append((x, y))
+            if len(zustand["klicks"]) == n0 + 1:
+                zustand["zu"] = []                     # erster Druck = X der Gruppe → Meldungen weg
+            return True
+        ob._klick_absolut = _klick_x
+        alt_kp = ob.cdp_klickpunkt
+        ob.cdp_klickpunkt = lambda r, rnd=None: (r[0] + r[2] / 2, r[1] + r[3] / 2) if r else None
+        try:
+            ok_v = s_.klick([100, 700, 180, 28], "Konto-Umschalter")
+        finally:
+            ob.cdp_klickpunkt = alt_kp
+        chk(ok_v is True and len(zustand["klicks"]) == n0 + 2 and any("von einer TradingView-Meldung verdeckt" in z for z in s_.trail)
+            and any("Meldungen schließen (gruppe X)" in z for z in s_.trail), f"verdeckt → Meldungen per X weg → Ziel genau einmal ({zustand['klicks'][n0:]})")
+        zustand["hover"] = True
+        ob._klick_absolut = lambda x, y, taste="links", doppel=False: (zustand["klicks"].append((x, y)), True)[1]
         s_.taste("a", modifiers=2)
         s_.tippen("1+0")
         chk(zustand["tasten"] == ["^a", "1", "{+}", "0"], f"Tastatur über Windows, Sonderzeichen entschärft ({zustand['tasten']})")
