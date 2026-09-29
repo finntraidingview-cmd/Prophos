@@ -24410,6 +24410,8 @@
       const nachAb = (!offen && !gepl && num(t.balance_end) == null && t.ended_at && typeof tvV2NachleseMs === 'function') ? tvV2NachleseAb(t.id, t.ended_at) : 0
       const endSub = num(t.balance_end) != null ? 'nach der Nachlesung' : offen ? 'nach dem Trade' : gepl ? '–' : (nachAb > Date.now() ? `Warte auf Puls · Nachlesung ab ${uhr(nachAb)} (in ${Math.max(1, Math.ceil((nachAb - Date.now()) / 60000))} min)` : 'wird gelesen')
       const an = wdlLinienAn(t)
+      // „Kurs jetzt" aus den laufenden Karten raus (29.09.2026, Finn am Radar-Screenshot: „Kurs jetzt kann weg") — der Kurs steht
+      // oben im Kopf. Die leere Spalte an seiner Stelle hält Live-P&L genau unter „P&L" der beendeten Karten.
       return `<div class="mwd-card ${offen ? 'mwd-open' : gepl ? 'mwd-planned' : 'mwd-done'}" style="--mwd-farbe:${farbe}" data-wdl-trade="${escapeHtml(wdlTid(t))}" title="klicken: Linien im Chart ${an ? 'ausblenden' : 'einblenden'}">
         <div class="mwd-kopf">
           <span class="wdl-dot ${an ? '' : 'aus'}"></span>
@@ -24423,7 +24425,7 @@
           <div title="${t.einstieg_quelle === 'reader_klick' ? 'Kein Fill aus TopstepX — Reader-Kurs direkt nach dem Klick (F28)' : ''}"><small>Einstieg${t.einstieg_quelle === 'reader_klick' ? ' · Kurs beim Klick' : ''}</small><b>${f2(e)}</b></div>
           <div><small>TP${num(t.master_tp) != null ? ' · ' + f0(t.master_tp) + ' $' : ''}</small><b style="color:#0E9757">${f2(tp)}</b>${offen && tp != null ? `<small data-wdl-lv="tp">${LT.tp}</small>` : ''}</div>
           <div title="${escapeHtml(String(t.liq_regel || ''))}"><small>Liquidation${num(t.liq_balance) != null ? ' · bei ' + f0(t.liq_balance) + ' $' : ''}</small><b style="color:#D92D20">${lq != null ? f2(lq) : '–'}</b>${lq == null && t.liq_regel ? `<small>${escapeHtml(String(t.liq_regel))}</small>` : offen && lq != null ? `<small data-wdl-lv="lq">${LT.lq}</small>` : ''}</div>
-          ${offen ? `<div><small>Kurs jetzt</small><b data-wdl-lv="kp">${LT.kp}</b></div>
+          ${offen ? `<div></div>
           <div title="${e != null ? 'aus dem Kurs · exakt nach der Nachlesung' : 'kein Einstieg gespeichert'}"><small>Live-P&amp;L</small><b data-wdl-lv="pl" style="color:${LT.plFarbe}">${LT.pl}</b></div>`
           : `<div><small>Balance nachher</small><b>${num(t.balance_end) != null ? f2(t.balance_end) + ' $' : '–'}</b></div>
           <div title="${escapeHtml(num(t.pl_balance) != null ? 'Balance nachher − vorher' : (num(d.pl_usd) != null ? 'Demo ' + sig(d.pl_usd, '$', 0) + ' · exakt nach der Nachlesung' : 'folgt nach der Nachlesung'))}"><small>P&amp;L${num(t.pl_balance) != null ? ' exakt' : ''}</small><b style="color:${col(t.pl_balance)}">${sig(t.pl_balance, '$', 2)}</b></div>`}
@@ -36093,7 +36095,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.824'
+  const OS_TAB_BUILD = '2026-09-22.825'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
