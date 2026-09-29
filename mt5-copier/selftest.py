@@ -2671,6 +2671,18 @@ def test_puls_augen_cdp():
     kg = ob.aufnahme_kompakt(gross)
     import json as _js
     chk(len(_js.dumps(kg, ensure_ascii=False)) <= ob.AUFNAHME_KOMPAKT_MAX and kg.get("abgeschnitten", 0) > 0, "Aufnahme kompakt bleibt unter dem Deckel")
+    # K2 (29.09.2026): Probelauf hat KEINEN Senden-Klick; Weiche vor dem alten tvkonto-Pfad; Helfer
+    q_k2 = _i3.getsource(ob.modus_tvkette_cdp)
+    chk("klick(cdp_rect(kk" not in q_k2 and "klick(cdp_rect(knopf" not in q_k2 and "dispatchMouseEvent" not in q_k2
+        and 'res["gesendet"] = False' in q_k2, "K2: kein Klick auf den Senden-Knopf, gesendet immer False")
+    q_tk = _i3.getsource(ob.modus_tvkette)
+    chk("if augen_modus_lauf() == \"cdp\":" in q_tk and q_tk.index("augen_modus_lauf") < q_tk.index("modus_tvkonto(cmd)"),
+        "tvkonto: CDP-Weiche vor dem alten Pfad, sonst unverändert")
+    chk(ob.cdp_watchlist_ziel([{"symbol": "NQZ2026", "rect": [1, 1, 9, 9]}, {"symbol": "MNQZ2026", "rect": [1, 20, 9, 9]}], "MNQZ6")["symbol"] == "MNQZ2026"
+        and ob.cdp_watchlist_ziel([{"symbol": "NQZ2026", "rect": [1, 1, 9, 9]}], "MNQZ6") is None, "Watchlist: MNQ nie NQ")
+    chk(ob.cdp_ticket_typ_market([{"id": "Market", "aria-selected": "true", "rect": [1, 1, 5, 5]}])[1]
+        and not ob.cdp_ticket_typ_market([{"id": "Market", "aria-selected": "false", "rect": [1, 1, 5, 5]}])[1], "Market-Reiter aktiv erkannt")
+    chk(ob.cdp_zahl("1,050.00") == 1050.0 and ob.cdp_zahl(4) == 4.0 and ob.cdp_zahl(True) is None, "cdp_zahl")
     if ok:
         print("✓ Puls-Augen CDP: eigenes Profil, 127.0.0.1:9333, WebSocket-Frames, Regel-Entscheid, Target-Wahl, K1-Weiche + Vertrag")
     return ok

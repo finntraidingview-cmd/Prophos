@@ -6893,6 +6893,8 @@ def modus_tvkette(cmd):
     UNANGETASTET — seine Ausgabe wird abgefangen statt umgebaut."""
     import io
     cmd = tv_bruecke_auspacken(cmd)
+    if augen_modus_lauf() == "cdp":          # nur CDP-Test-PC (29.09.2026, K2): Probelauf über das Puls-Chrome, nie senden
+        return modus_tvkette_cdp(cmd)
     puffer, echt = io.StringIO(), sys.stdout
     sys.stdout = puffer
     _PULS_HEIM["aus"] = True          # B35: kein Heimweg zwischen Konto-Schritt und Asset/Order — erst am Ende der Kette
@@ -13960,6 +13962,50 @@ class _AugenSitzung:
         self.trail.append(f"{name} geklickt @{int(p[0])},{int(p[1])} (CDP)")
         return True
 
+    # Tasten (Master-Klicktest 29.09.2026): keyDown(text)/keyUp je Zeichen — NIE Input.insertText (kein keydown/keypress);
+    # Sondertasten mit windowsVirtualKeyCode, alle Abstände über _warte mit Streuung.
+    _VK = {"Tab": 9, "Enter": 13, "Escape": 27, "Backspace": 8, "Delete": 46, "a": 65}
+
+    def taste(self, key, modifiers=0):
+        vk = self._VK.get(key, 0)
+        code = {"a": "KeyA"}.get(key, key)
+        self.ws.rufe("Input.dispatchKeyEvent", {"type": "rawKeyDown", "key": key, "code": code, "windowsVirtualKeyCode": vk,
+                                                "nativeVirtualKeyCode": vk, "modifiers": modifiers}, timeout=3)
+        _warte(0.05, 0.04)
+        self.ws.rufe("Input.dispatchKeyEvent", {"type": "keyUp", "key": key, "code": code, "windowsVirtualKeyCode": vk,
+                                                "nativeVirtualKeyCode": vk, "modifiers": modifiers}, timeout=3)
+        _warte(0.05, 0.04)
+
+    def tippen(self, text):
+        for ch in str(text):
+            vk = ord(ch.upper()) if ch.isalnum() else (190 if ch == "." else 188 if ch == "," else 0)
+            self.ws.rufe("Input.dispatchKeyEvent", {"type": "keyDown", "key": ch, "text": ch, "unmodifiedText": ch,
+                                                    "windowsVirtualKeyCode": vk, "nativeVirtualKeyCode": vk}, timeout=3)
+            _warte(0.04, 0.04)
+            self.ws.rufe("Input.dispatchKeyEvent", {"type": "keyUp", "key": ch, "windowsVirtualKeyCode": vk,
+                                                    "nativeVirtualKeyCode": vk}, timeout=3)
+            _warte(0.06, 0.06)
+
+    def feld_setzen(self, rect, wert, name):
+        """Feld anklicken, alles markieren (Strg+A), Wert Zeichen für Zeichen tippen, Tab. -> bool (Klick ging)"""
+        if not self.klick(rect, f"Feld {name}"):
+            return False
+        _warte(0.15, 0.1)
+        self.taste("a", modifiers=2)          # Strg+A (Windows)
+        _warte(0.1, 0.08)
+        self.tippen(wert)
+        _warte(0.12, 0.1)
+        self.taste("Tab")
+        self.trail.append(f"{name} getippt: {wert}")
+        return True
+
+    def rect_von(self, selektor):
+        """[x, y, w, h] eines sichtbaren Elements (nur Lesen, kein Klick) — für Reiter, die augen.js nicht als Rechteck liefert."""
+        a = ("(function(){var e=document.querySelector(" + json.dumps(selektor) + ");if(!e)return null;"
+             "var r=e.getBoundingClientRect();return (r.width>0&&r.height>0)?[r.x,r.y,r.width,r.height]:null;})()")
+        r = self.ws.rufe("Runtime.evaluate", {"expression": a, "returnByValue": True}, timeout=5)
+        return ((r.get("result") or {}).get("value")) if not r.get("exceptionDetails") else None
+
     def zu(self):
         try:
             self.ws.zu()
@@ -14015,9 +14061,84 @@ def cdp_positionen_vertrag(pos):
     return out
 
 
+def _cdp_konto_sichern(s, ext, opts, trail):
+    """Konto im Puls-Chrome sicherstellen (Panel auf → Umschalter höchstens EINMAL → genau ein Eintrag), je Schritt neu gelesen.
+    -> (ok, code, msg, stand, extra). Steht das Konto nicht im Dropdown (anderer Tradovate-Login), Esc — die Liste bleibt nie offen
+    (K1-Test 2, 00:59 UTC: Liste blieb offen, der nächste Lauf klickte direkt einen Eintrag)."""
+    st = s.stand(opts)
+    geklickt_umschalter = False
+    for _runde in range(4):
+        ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+        aktiv = str(ko.get("aktiv") or "")
+        if aktiv and tv_konto_passt(aktiv, ext):
+            trail.append(f"Konto steht: '{aktiv[:40]}'")
+            return True, "", "", st, {"konto_aktiv": aktiv[:80]}
+        if ko.get("panel") == "zu" and cdp_rect(ko.get("panel_knopf")):
+            s.klick(cdp_rect(ko.get("panel_knopf")), "Handelspanel auf")
+            _warte(1.0, 0.5)
+            st = s.stand(opts)
+            continue
+        if ko.get("liste_offen"):
+            e, n = cdp_konto_eintrag(ko.get("eintraege"), ext)
+            if not e:
+                s.taste("Escape")
+                trail.append("Konto-Liste mit Esc geschlossen")
+                return False, "konto_nicht_erreicht", (f"Konto {ext} steht im Dropdown {n}x (nicht genau einmal) — nichts geklickt"
+                                                        + (" (anderer Tradovate-Login?)" if n == 0 else "") + "."), st, \
+                    {"konto_eintraege": [str(x.get("text"))[:40] for x in (ko.get("eintraege") or [])][:20]}
+            s.klick(cdp_rect(e), f"Konto {ext}")
+            _warte(1.2, 0.6)
+            st = s.stand(opts)
+            continue
+        if not cdp_rect(ko.get("schalter")):
+            return False, "kein_broker", (f"Kein Konto-Umschalter zu sehen (aktiv '{aktiv[:40] or '-'}', "
+                                          f"{str(ko.get('hinweis') or '')[:80]}) — Tradovate im Puls-Chrome verbunden?"), st, {}
+        # Umschalter höchstens EINMAL (erster Live-Lauf 00:44 UTC: 4 Klicks hintereinander — ein zweiter Klick schließt ein
+        # offenes Dropdown wieder). Danach zweimal lesen; bleibt es zu, ehrlich raus MIT dem Stand für T1.
+        if geklickt_umschalter:
+            return False, "konto_nicht_erreicht", (f"Konto-Umschalter geklickt, Dropdown nicht erkannt (aktiv '{aktiv[:40] or '-'}') — "
+                                                   "augen.js sieht die Liste nicht (Selektoren?) oder der Klick trifft nicht."), st, \
+                {"konto_stand": ko, "popups": st.get("popups")}
+        geklickt_umschalter = True
+        s.klick(cdp_rect(ko.get("schalter")), "Konto-Umschalter")
+        _warte(0.9, 0.4)
+        st = s.stand(opts)
+        if not (st.get("konto") or {}).get("liste_offen"):
+            _warte(1.0, 0.4)
+            st = s.stand(opts)
+    ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+    return False, "konto_nicht_erreicht", f"Konto {ext} nicht aktiv (steht: '{str(ko.get('aktiv') or '-')[:40]}')", st, {}
+
+
+def _cdp_today_aus_reiter(s, opts, trail):
+    """Tagesergebnis steht bei Tradovate NUR im Reiter „Account summary" („Total P/L", T1/Finn 29.09.2026) — kurz hin, lesen,
+    zurück auf „Positions". Nur Reiter-Klicks, nie etwas im Ticket. -> (summary|None, today, label, text)"""
+    r_sum = s.rect_von("#id_account-manager-tabs #summary")
+    if not r_sum:
+        return None, None, None, None
+    s.klick(r_sum, "Reiter Account summary")
+    _warte(0.7, 0.3)
+    st = s.stand(opts)
+    summary = cdp_summary(st.get("konto_summary"))
+    today, lab, txt = tv_today_pnl(summary)
+    if today is None and isinstance(summary, dict):
+        for k_, v_ in summary.items():
+            if re.match(r"^\s*total\s*p\s*/\s*l\s*$", str(k_), re.I):
+                w_ = tv_geld_lesen(v_)
+                if w_ is not None:
+                    today, lab, txt = w_, str(k_), str(v_)
+                    break
+    r_pos = s.rect_von("#id_account-manager-tabs #positions")
+    if r_pos:
+        s.klick(r_pos, "Reiter Positions")
+        _warte(0.5, 0.2)
+    trail.append(f"Today aus „Account summary\": {today} ('{lab}')")
+    return summary, today, lab, txt
+
+
 def modus_tvlesen_cdp(cmd):
-    """tvlesen über das Puls-Chrome (CDP). Konto sicherstellen (Panel auf, Umschalter, Eintrag — je Schritt neu gelesen),
-    dann EIN Stand: Positionen + Zusammenfassung. Nichts im Order-Ticket."""
+    """tvlesen über das Puls-Chrome (CDP). Konto sicherstellen, dann EIN Stand: Positionen + Zusammenfassung (Today aus dem
+    Reiter „Account summary"). Nichts im Order-Ticket."""
     res = {"ok": False, "code": "", "msg": "", "trail": "", "schritt": "start", "konto_aktiv": "",
            "konto_quelle": "cdp", "quelle": "cdp"}
     trail = _StempelSpur()
@@ -14044,50 +14165,10 @@ def modus_tvlesen_cdp(cmd):
     trail.append("Weg: Puls-Chrome (CDP)")
     try:
         s = sitz[0] = _AugenSitzung(trail)
-        st = s.stand(opts)
-        # --- Konto sicherstellen (höchstens 4 Schritte: Panel auf → Umschalter → Eintrag → prüfen)
-        geklickt_umschalter = False
-        for _runde in range(4):
-            ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
-            aktiv = str(ko.get("aktiv") or "")
-            if aktiv and tv_konto_passt(aktiv, ext):
-                res["konto_aktiv"] = aktiv[:80]
-                trail.append(f"Konto steht: '{aktiv[:40]}'")
-                break
-            if ko.get("panel") == "zu" and cdp_rect(ko.get("panel_knopf")):
-                s.klick(cdp_rect(ko.get("panel_knopf")), "Handelspanel auf")
-                _warte(1.0, 0.5)
-                st = s.stand(opts)
-                continue
-            if ko.get("liste_offen"):
-                e, n = cdp_konto_eintrag(ko.get("eintraege"), ext)
-                if not e:
-                    return raus("konto_nicht_erreicht", f"Konto {ext} steht im Dropdown {n}x (nicht genau einmal) — nichts geklickt.",
-                                "konto", konto_eintraege=[str(x.get("text"))[:40] for x in (ko.get("eintraege") or [])][:20])
-                s.klick(cdp_rect(e), f"Konto {ext}")
-                _warte(1.2, 0.6)
-                st = s.stand(opts)
-                continue
-            if not cdp_rect(ko.get("schalter")):
-                return raus("kein_broker", f"Kein Konto-Umschalter zu sehen (aktiv '{aktiv[:40] or '-'}', "
-                            f"{str(ko.get('hinweis') or '')[:80]}) — Tradovate im Puls-Chrome verbunden?", "konto")
-            # Umschalter höchstens EINMAL (erster Live-Lauf 00:44 UTC: 4 Klicks hintereinander, Dropdown nie erkannt — ein zweiter
-            # Klick schließt ein offenes Dropdown wieder). Danach zweimal lesen; bleibt es zu, ehrlich raus MIT dem Stand für T1.
-            if geklickt_umschalter:
-                return raus("konto_nicht_erreicht", f"Konto-Umschalter geklickt, Dropdown nicht erkannt (aktiv '{aktiv[:40] or '-'}') — "
-                            "augen.js sieht die Liste nicht (Selektoren?) oder der Klick trifft nicht.", "konto",
-                            konto_stand=ko, popups=st.get("popups"))
-            geklickt_umschalter = True
-            s.klick(cdp_rect(ko.get("schalter")), "Konto-Umschalter")
-            _warte(0.9, 0.4)
-            st = s.stand(opts)
-            if not (st.get("konto") or {}).get("liste_offen"):
-                _warte(1.0, 0.4)
-                st = s.stand(opts)
-        else:
-            ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
-            return raus("konto_nicht_erreicht", f"Konto {ext} nicht aktiv (steht: '{str(ko.get('aktiv') or '-')[:40]}')", "konto")
-        # --- EIN frischer Stand nach dem Konto
+        ok, code, msg, st, extra = _cdp_konto_sichern(s, ext, opts, trail)
+        res.update({k: v for k, v in extra.items() if k == "konto_aktiv"})
+        if not ok:
+            return raus(code, msg, "konto", **{k: v for k, v in extra.items() if k != "konto_aktiv"})
         _warte(0.6, 0.3)
         st = s.stand(opts)
         summary = cdp_summary(st.get("konto_summary"))
@@ -14097,6 +14178,14 @@ def modus_tvlesen_cdp(cmd):
             return raus("tabelle_unklar", "Positions-Tabelle im Puls-Chrome nicht sichtbar — kein Stand ohne Tabelle.", "lesen",
                         summary=summary, today_pnl=today, today_label=today_label, today_pnl_text=today_text)
         positionen = cdp_positionen_vertrag(st.get("positionen"))
+        if today is None:
+            try:
+                sum2, t2, l2, x2 = _cdp_today_aus_reiter(s, opts, trail)
+                if t2 is not None:
+                    today, today_label, today_text = t2, l2, x2
+                    summary = dict(summary or {}, **(sum2 or {}))
+            except Exception as e_:
+                trail.append(f"Today-Reiter nicht lesbar ({type(e_).__name__})")
         trail.append(f"gelesen (CDP): {len(positionen)} Pos, {len(summary or {})} Summary-Paare, Today {today} ('{today_label}')")
         res.update({"ok": True, "positionen": positionen, "offen": bool(positionen),
                     "avg_fill_je_wurzel": tv_avg_fill_je_wurzel(positionen), "summary": summary,
@@ -14108,6 +14197,210 @@ def modus_tvlesen_cdp(cmd):
         return raus("", f"Konto {res['konto_aktiv'][:40]}: {len(positionen)} Position(en) (CDP)"
                     + (f", Today's P&L {today:g} ({today_label})" if today is not None else ", Tages-G&V nicht gefunden"),
                     "fertig")
+    except Exception as e:
+        return raus("cdp_fehler", f"Puls-Chrome/CDP: {type(e).__name__}: {str(e)[:160]}", "cdp")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PULS ÜBER CDP — K2 ORDER-PROBELAUF (29.09.2026 nachts, Finn: „let's go mit K2"). tvkonto verzweigt NUR bei lokaler Regel
+# 'cdp' hierher. Konto → Symbol (Watchlist) → Seite → Market → Units → TP/SL (Schalter + Wert, Einheit $) → Units nochmal
+# (TV dreht Units nach TP/SL gern zurück, 24.09.2026) → Knopf-Beweis (tv_senden_text_passt + Symbol + nicht disabled).
+# Nach JEDEM Schritt neu gelesen (stand()). Es gibt in diesem Weg KEINEN Klick auf den Senden-Knopf — auch ein scharfer
+# Start endet hier als Probelauf mit gesendet:false (Senden kommt erst mit K3). Moritz' PC hat bis dahin keine Puls-Orders.
+# ═══════════════════════════════════════════════════════════════════════════
+
+def cdp_zahl(x):
+    """REIN RECHNEND (testbar): Zahl aus augen.js-Wert (Zahl oder Text wie '1,050.00'/'4')."""
+    if isinstance(x, bool):
+        return None
+    if isinstance(x, (int, float)):
+        return float(x)
+    return tv_zahl_lesen(x)
+
+
+def cdp_watchlist_ziel(watchlist, symbol):
+    """REIN RECHNEND (testbar): Watchlist-Zeile mit derselben Wurzel wie das Plan-Symbol (MNQZ6 → MNQZ2026, nie NQ für MNQ). -> dict|None"""
+    ziel = tv_symbol_root(symbol)
+    kand = [w for w in (watchlist or []) if isinstance(w, dict) and cdp_rect(w) and tv_symbol_root(str(w.get("symbol") or "")) == ziel]
+    return kand[0] if len(kand) == 1 else None
+
+
+def cdp_ticket_typ_market(typen):
+    """REIN RECHNEND (testbar): (market_eintrag|None, ist_aktiv)."""
+    for t in typen or []:
+        if isinstance(t, dict) and str(t.get("id") or "").lower() == "market":
+            return t, str(t.get("aria-selected")).lower() == "true"
+    return None, False
+
+
+def modus_tvkette_cdp(cmd):
+    """tvkonto über das Puls-Chrome (CDP) — K2: Ticket vollständig ausfüllen und beweisen, NIE senden."""
+    res = {"ok": False, "code": "", "msg": "", "trail": "", "schritt": "start", "gesendet": False, "retry_ok": True,
+           "konto_aktiv": "", "konto_quelle": "cdp", "quelle": "cdp"}
+    trail = _StempelSpur()
+    sitz = [None]
+
+    def raus(code, msg, schritt, **extra):
+        res["code"], res["msg"], res["schritt"] = code, msg, schritt
+        res.update(extra)
+        res["gesendet"] = False                      # K2: in diesem Weg wird nie gesendet
+        res["trail"] = " > ".join(trail)
+        if sitz[0]:
+            sitz[0].zu()
+        try:
+            print(json.dumps(res, ensure_ascii=False))
+        except UnicodeEncodeError:
+            print(json.dumps(res, ensure_ascii=True))
+
+    ext = str(cmd.get("ext_id") or cmd.get("konto") or "").strip()
+    symbol = str(cmd.get("symbol") or "").strip()
+    if len(_nur_alnum(ext)) < 3:
+        return raus("befehl", "Konto (External ID) fehlt", "befehl")
+    plan, fehler = tv_order_plan(cmd) if symbol else (None, "")
+    if symbol and not plan:
+        return raus("befehl", fehler, "befehl")
+    geschwister = [str(x).strip() for x in (cmd.get("geschwister") or []) if len(_nur_alnum(x)) >= 3][:60]
+    opts = {"kontoTexte": [ext] + geschwister}
+    trail.append("Weg: Puls-Chrome (CDP, K2 Probelauf — kein Senden)")
+    try:
+        s = sitz[0] = _AugenSitzung(trail)
+        ok, code, msg, st, extra = _cdp_konto_sichern(s, ext, opts, trail)
+        res.update({k: v for k, v in extra.items() if k == "konto_aktiv"})
+        if not ok:
+            return raus(code, msg, "konto", **{k: v for k, v in extra.items() if k != "konto_aktiv"})
+        if not symbol:
+            res["ok"] = True
+            return raus("", f"Richtiges Konto ist aktiv ({res['konto_aktiv'][:60]}).", "konto")
+        ziel = tv_symbol_root(symbol)
+
+        def ticket():
+            return st.get("ticket") if isinstance(st.get("ticket"), dict) else {}
+
+        def knopf():
+            return st.get("kauf_knopf") if isinstance(st.get("kauf_knopf"), dict) else {}
+
+        # --- Symbol
+        for _v in range(2):
+            ist = tv_symbol_root(str(knopf().get("symbol") or ticket().get("symbol") or ""))
+            if ist == ziel:
+                trail.append(f"Symbol steht: {knopf().get('symbol') or ticket().get('symbol')}")
+                break
+            wl = cdp_watchlist_ziel(((ticket().get("symbolsuche") or {}).get("watchlist")), symbol)
+            if not wl or _v:
+                return raus("asset", f"Symbol {ziel} nicht einstellbar (Ticket zeigt '{ist or '-'}', Watchlist-Treffer "
+                            f"{'1' if wl else '0'}).", "asset")
+            s.klick(cdp_rect(wl), f"Watchlist {wl.get('symbol')}")
+            _warte(1.2, 0.5)
+            st = s.stand(opts)
+        if not ticket().get("da"):
+            return raus("ticket", "Order-Ticket im Puls-Chrome nicht offen — nichts getippt.", "ticket")
+        # --- Seite
+        if str(knopf().get("seite") or ticket().get("seite") or "") != plan["richtung"]:
+            kachel = ticket().get("kaufen" if plan["richtung"] == "buy" else "verkaufen")
+            if not cdp_rect(kachel):
+                return raus("ticket", f"Seiten-Kachel {plan['richtung'].upper()} nicht gefunden.", "ticket")
+            s.klick(cdp_rect(kachel), f"Seite {plan['richtung'].upper()}")
+            _warte(0.6, 0.3)
+            st = s.stand(opts)
+            if str(knopf().get("seite") or ticket().get("seite") or "") != plan["richtung"]:
+                return raus("ticket", f"Seite steht nicht auf {plan['richtung'].upper()} ('{knopf().get('text') or '-'}').", "ticket")
+        trail.append(f"Seite = {plan['richtung'].upper()}")
+        # --- Order-Typ Market
+        m_, aktiv_ = cdp_ticket_typ_market(ticket().get("typen"))
+        if not aktiv_:
+            if not cdp_rect(m_):
+                return raus("ticket", "Reiter Market nicht gefunden.", "ticket")
+            s.klick(cdp_rect(m_), "Reiter Market")
+            _warte(0.6, 0.3)
+            st = s.stand(opts)
+            if not cdp_ticket_typ_market(ticket().get("typen"))[1]:
+                return raus("ticket", "Reiter Market ist nach dem Klick nicht aktiv.", "ticket")
+        trail.append("Typ = Market")
+
+        def units_setzen():
+            nonlocal st
+            mg = ticket().get("menge") if isinstance(ticket().get("menge"), dict) else {}
+            if cdp_zahl(mg.get("wert")) == float(plan["menge"]):
+                return True
+            if not cdp_rect(mg):
+                return False
+            for _v in range(2):
+                s.feld_setzen(cdp_rect(mg), str(plan["menge"]), "Units")
+                _warte(0.4, 0.2)
+                st = s.stand(opts)
+                mg = ticket().get("menge") if isinstance(ticket().get("menge"), dict) else {}
+                if cdp_zahl(mg.get("wert")) == float(plan["menge"]):
+                    return True
+                trail.append(f"Units: '{mg.get('wert')}' statt {plan['menge']} — tippe einmal neu")
+            return False
+
+        if not units_setzen():
+            return raus("ticket", f"Units stehen nicht auf {plan['menge']} (Feld: '{(ticket().get('menge') or {}).get('wert')}').", "ticket")
+        trail.append(f"Units = {plan['menge']}")
+        # --- TP / SL: Schalter + Wert (Einheit $)
+        for schl, name, soll in (("tp", "Take profit", plan["tp"]), ("sl", "Stop loss", plan["sl"])):
+            f_ = ticket().get(schl) if isinstance(ticket().get(schl), dict) else {}
+            if not f_.get("da", True) and soll is not None:
+                return raus("ticket", f"'{name}' im Ticket nicht gefunden.", "ticket")
+            an = f_.get("an")
+            if soll is None:
+                if an:
+                    if not cdp_rect(f_.get("schalter")):
+                        return raus("ticket", f"'{name}' ist AN, Schalter nicht greifbar.", "ticket")
+                    s.klick(cdp_rect(f_.get("schalter")), f"Schalter {name} AUS")
+                    _warte(0.5, 0.2)
+                    st = s.stand(opts)
+                    if (ticket().get(schl) or {}).get("an"):
+                        return raus("ticket", f"Schalter '{name}' ließ sich nicht AUS stellen.", "ticket")
+                trail.append(f"{name} AUS")
+                continue
+            if "$" not in str(f_.get("einheit") or ""):
+                return raus("ticket", f"'{name}' steht nicht auf $ (Einheit '{f_.get('einheit') or '?'}') — der Wert {soll:g} wäre etwas anderes.", "ticket")
+            if an is False:
+                if not cdp_rect(f_.get("schalter")):
+                    return raus("ticket", f"'{name}' ist AUS, Schalter nicht greifbar.", "ticket")
+                s.klick(cdp_rect(f_.get("schalter")), f"Schalter {name} AN")
+                _warte(0.5, 0.2)
+                st = s.stand(opts)
+                f_ = ticket().get(schl) if isinstance(ticket().get(schl), dict) else {}
+            if cdp_zahl(f_.get("wert")) != float(soll):
+                ok_w = False
+                for _v in range(2):
+                    if not cdp_rect(f_.get("feld")):
+                        break
+                    s.feld_setzen(cdp_rect(f_.get("feld")), f"{soll:g}", name)
+                    _warte(0.4, 0.2)
+                    st = s.stand(opts)
+                    f_ = ticket().get(schl) if isinstance(ticket().get(schl), dict) else {}
+                    if cdp_zahl(f_.get("wert")) == float(soll):
+                        ok_w = True
+                        break
+                if not ok_w:
+                    return raus("ticket", f"{name}: im Feld steht '{f_.get('wert')}' statt {soll:g}.", "ticket")
+            if f_.get("an") is False:
+                return raus("ticket", f"'{name}' steht auf {soll:g} $, aber der Schalter ist AUS — die Order ginge ohne {name} raus.", "ticket")
+            trail.append(f"{name} = {soll:g} $ (Schalter {'AN' if f_.get('an') else 'unlesbar'})")
+        # --- Units nach TP/SL nochmal (TradingView dreht sie gern auf den alten Ticket-Wert zurück)
+        st = s.stand(opts)
+        if not units_setzen():
+            return raus("ticket", "Units nach TP/SL nicht mehr korrekt.", "ticket")
+        # --- Knopf-Beweis
+        kk = knopf()
+        ok_k, f_k = tv_senden_text_passt(str(kk.get("text") or ""), plan["richtung"], plan["menge"])
+        if not ok_k:
+            return raus("knopf", f_k, "knopf")
+        if not any(tv_symbol_root(w) == ziel for w in str(kk.get("text") or "").split()):
+            return raus("knopf", f"Auf dem Knopf steht nicht {ziel} ('{str(kk.get('text'))[:40]}').", "knopf")
+        if kk.get("disabled"):
+            return raus("knopf", f"Senden-Knopf ist gesperrt ('{str(kk.get('text'))[:40]}').", "knopf")
+        tpsl = f"TP {str(plan['tp']) + ' $' if plan['tp'] else 'aus'}, SL {str(plan['sl']) + ' $' if plan['sl'] else 'aus'}"
+        trail.append(f"Knopf: '{str(kk.get('text'))[:50]}' — NICHT geklickt (K2)")
+        text = f"PROBELAUF (CDP, K2): Ticket steht — Knopf zeigt '{str(kk.get('text'))[:50]}', {tpsl}. NICHT gesendet."
+        if cmd.get("scharf") is True:
+            # scharfer Start auf dem CDP-Test-PC: ehrlich „nichts platziert" (Plan bleibt Geplant), retry_ok true
+            return raus("k2_probe", text + " Senden über CDP kommt mit K3.", "probe", tv_symbol=kk.get("symbol"))
+        res["ok"] = True
+        return raus("", text, "probe", tv_symbol=kk.get("symbol"))
     except Exception as e:
         return raus("cdp_fehler", f"Puls-Chrome/CDP: {type(e).__name__}: {str(e)[:160]}", "cdp")
 
@@ -14156,6 +14449,13 @@ def main():
             print(json.dumps({"ok": False, "schritt": "absturz",
                               "msg": f"TV-Kette abgebrochen: {type(e).__name__}: {e}"}))
         augen_anstossen()      # Augen E0 (29.09.2026): entkoppelt, nur mit Schalter 'cdp'
+        return 0
+    if len(sys.argv) >= 6 and sys.argv[1] == "probe":
+        # K2-Probelauf am PC (29.09.2026): 'order_bot.py probe <ExternalID> <Symbol> <buy|sell> <Menge> [TP$] [SL$]' —
+        # füllt das Ticket im Puls-Chrome und beweist jeden Wert, sendet NIE (modus_tvkette_cdp kennt keinen Senden-Klick)
+        a = sys.argv[2:]
+        modus_tvkette_cdp({"ext_id": a[0], "symbol": a[1], "richtung": a[2].lower(), "volumen": a[3],
+                           "tp_usd": a[4] if len(a) > 4 else None, "sl_usd": a[5] if len(a) > 5 else None, "scharf": False})
         return 0
     if len(sys.argv) >= 2 and sys.argv[1] == "augen":
         # Puls-Augen über CDP (29.09.2026, E0): nur lesen, entkoppelt angestoßen; 'augen {"start": true}' = Puls-Chrome
