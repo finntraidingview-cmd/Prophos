@@ -9792,6 +9792,68 @@ def puls_regel_lesen(pc_id):
     return jsonify({"ok": True, "augen": puls_augen_modus(pc_id, _PULS_REGEL_CACHE["cdp"])})
 
 
+# ── PULS-ERGEBNISSE (29.09.2026, Finns Live-Test 15:49–15:50 UTC, Plan 5ab15b24) ───────────────────────────────────────
+# Der neue Puls platzierte BUY 1 MNQZ6 sauber, die Antwort erreichte den Prophos-Tab aber nie — Plan blieb „Geplant", Position offen
+# und für Prophos unsichtbar. Seit .822 meldet der Bot jede scharfe Order und jedes Schließen zusätzlich hierher (direkt nach dem
+# Klick stufe 'geklickt', am Ende 'ende'); der PC-Tab des Besitzers übernimmt nie verarbeitete Ergebnisse. Eine Zeile je Plan+Art,
+# jede Meldung setzt abgeholt_at zurück (ein neuer Lauf desselben Plans zählt wieder). SQL: sql/2026-09-29_puls_ergebnisse.sql.
+PULS_ERGEBNIS_MAX = 30_000
+PULS_ERGEBNIS_FELDER = ("ok", "code", "schritt", "msg", "gesendet", "bestaetigt", "bestaetigung", "geklickt", "retry_ok",
+                        "einstieg", "einstieg_quelle", "tp_limit", "tp_limit_quelle", "sl_limit", "sl_limit_quelle", "order_klick_ms",
+                        "klick_at", "balance_start", "equity_start", "today_pnl_start", "today_pnl", "balance_end", "equity_end",
+                        "tv_symbol", "menge", "konto_aktiv", "pruefung", "meldung_roh", "positionen_danach", "close_fill", "storniert",
+                        "symbol", "richtung", "konto", "trail_ende", "quelle")
+_PLAN_ID_MUSTER = re.compile(r"[A-Za-z0-9-]{8,64}")
+
+
+def puls_ergebnis_saeubern(d, pc_id):
+    """REIN RECHNEND (testbar): Paket des Bots → Tabellenzeile für puls_ergebnisse | None. Nur bekannte Schlüssel, Listen/Texte
+    gekürzt, Größendeckel; Top-Level konto/symbol/richtung/at_ms wandern ins ergebnis, falls es sie nicht selbst trägt."""
+    if not isinstance(d, dict) or not isinstance(d.get("ergebnis"), dict):
+        return None
+    plan_id, art, stufe = str(d.get("plan_id") or ""), d.get("art"), d.get("stufe") or "ende"
+    if not _PLAN_ID_MUSTER.fullmatch(plan_id) or art not in ("order", "close") or stufe not in ("geklickt", "ende"):
+        return None
+    e = {k: v for k, v in d["ergebnis"].items() if k in PULS_ERGEBNIS_FELDER}
+    for k in ("konto", "symbol", "richtung"):
+        if e.get(k) in (None, "") and d.get(k) not in (None, ""):
+            e[k] = d.get(k)
+    if isinstance(d.get("at_ms"), (int, float)):
+        e["at_ms"] = int(d["at_ms"])
+    if isinstance(e.get("meldung_roh"), list):
+        e["meldung_roh"] = [str(x)[:300] for x in e["meldung_roh"][:14]]
+    if isinstance(e.get("positionen_danach"), list):
+        e["positionen_danach"] = e["positionen_danach"][:10]
+    for k in ("msg", "trail_ende"):
+        if isinstance(e.get(k), str):
+            e[k] = e[k][:1500]
+    if len(json.dumps(e, ensure_ascii=False, default=str)) > PULS_ERGEBNIS_MAX:
+        e.pop("pruefung", None)
+        e.pop("trail_ende", None)
+        if len(json.dumps(e, ensure_ascii=False, default=str)) > PULS_ERGEBNIS_MAX:
+            return None
+    return {"plan_id": plan_id, "art": art, "pc_id": pc_id, "stufe": stufe, "ergebnis": e, "abgeholt_at": None}
+
+
+@app.route("/puls-ergebnis/<pc_id>", methods=["POST", "OPTIONS"])
+def puls_ergebnis_schreiben(pc_id):
+    if request.method == "OPTIONS":
+        return "", 200
+    if not PC_ID_MUSTER.fullmatch(pc_id or ""):
+        return jsonify({"ok": False, "msg": "pc_id ungültig"}), 400
+    if (request.content_length or 0) > PULS_ERGEBNIS_MAX * 3:
+        return jsonify({"ok": False, "msg": "zu groß"}), 413
+    zeile = puls_ergebnis_saeubern(request.get_json(silent=True), pc_id)
+    if zeile is None:
+        return jsonify({"ok": False, "msg": "Ergebnis ungültig"}), 400
+    zeile["at"] = datetime.now(timezone.utc).isoformat()
+    try:
+        sb_upsert("puls_ergebnisse", zeile)
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"nicht speicherbar ({type(e).__name__})"}), 502
+    return jsonify({"ok": True})
+
+
 @app.route("/puls-augen/<pc_id>", methods=["POST", "OPTIONS"])
 def puls_augen_schreiben(pc_id):
     if request.method == "OPTIONS":

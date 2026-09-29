@@ -36093,7 +36093,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.823'
+  const OS_TAB_BUILD = '2026-09-22.824'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -36495,9 +36495,10 @@
       // genau einmal, danach zählt nur der Beweis (Reader, sonst Positions-Tabelle).
       // BRÜCKE: dieselben Felder ZUSÄTZLICH als „@feld=wert" in der geschwister-Liste —
       // die reicht jedes Panel seit .316 durch, auch ein am PC noch altes.
-      const _tvBody = JSON.stringify({ ext_id: extId, tv_username: tvUser, firma: firmName, symbol, scharf: true,
-          // Marken VORN: das Panel kappt die Liste bei 60 Einträgen.
-          geschwister: ['@scharf=1', '@symbol=' + symbol, '@richtung=' + dir, '@volumen=' + lots,
+      const _tvBody = JSON.stringify({ ext_id: extId, tv_username: tvUser, firma: firmName, symbol, scharf: true, plan_id: String(plan.id),
+          // Marken VORN: das Panel kappt die Liste bei 60 Einträgen. plan_id (29.09.2026): der Bot meldet sein Ergebnis damit
+          // zusätzlich selbst an puls_ergebnisse — geht die Antwort an diesen Tab verloren, übernimmt pulsErgebnisseUebernehmen.
+          geschwister: ['@scharf=1', '@plan_id=' + String(plan.id), '@symbol=' + symbol, '@richtung=' + dir, '@volumen=' + lots,
             '@tp_usd=' + (tp > 0 ? tp : ''), '@sl_usd=' + (tp > 0 && sl > 0 ? sl : ''), ...geschwister] })
       // PULS-WARTESCHLEIFE (Cross-Check V2-Kette, 24.09.2026): hält der Rundgang (tv-lesen, bis ~2,5 min je
       // Konto) oder ein tv-close gerade den TV-Lock im Panel, antwortet /api/tv-konto mit 409
@@ -37502,7 +37503,9 @@
         // kommt 409 puls_beschaeftigt VOR jedem Bot-Aufruf — nichts geklickt, nur warten (8–14 s, max ~150 s).
         // Danach bleibt der 409 ein ehrlicher Fehler mit retry (Auto-Close/Signal versuchen es später erneut).
         // Konto-Kontext (25.09.2026): Geschwister/Firma/Username wie beim Start — sonst scheitert das Schließen, wenn ein anderes Konto desselben Logins aktiv ist
-        const _clBody = JSON.stringify(Object.assign({ konto, symbol, timeout_s: 90, richtung: (plan.richtung === 'buy' || plan.richtung === 'sell') ? plan.richtung : '' }, tvV2KontoKontext(plan)))
+        const _clKk = tvV2KontoKontext(plan)   // plan_id über die Brücke (29.09.2026, puls_ergebnisse) — vorn, das Panel kappt bei 60
+        _clKk.geschwister = ['@plan_id=' + String(plan.id), ...((_clKk && _clKk.geschwister) || [])]
+        const _clBody = JSON.stringify(Object.assign({ konto, symbol, timeout_s: 90, richtung: (plan.richtung === 'buy' || plan.richtung === 'sell') ? plan.richtung : '', plan_id: String(plan.id) }, _clKk))
         const _clT0 = Date.now()
         for(;;){
           r = await window.mtcApi(pulsApiName(plan, 'close'), { method:'POST', headers:{ 'Content-Type':'application/json' }, body: _clBody })
@@ -37572,6 +37575,82 @@
     return { ok:false, msg:(r && (r.msg || r.error)) || 'keine Antwort vom Bot', pausiert, trail: (r && r.trail) || null,
              retry: !!(r && r.retry_ok) || pausiert, unklar: !!(r && r.retry_ok === false) }
   }
+
+  /* PULS-ERGEBNISSE ÜBERNEHMEN (29.09.2026, Finns Live-Test 15:49–15:50 UTC, Plan 5ab15b24): der neue Puls platzierte BUY 1 MNQZ6
+   * sauber, die Antwort erreichte diesen Tab aber nie — kein order_signale-Eintrag, Plan blieb „Geplant", die offene Position war für
+   * Prophos unsichtbar. Seit .822 meldet der Bot jede scharfe Order und jedes Schließen zusätzlich selbst (Railway → puls_ergebnisse,
+   * plan_id über die Brücke). Dieser PC-Tab schaut alle 30 s nach Meldungen ohne abgeholt_at und macht daraus, was der verlorene Weg
+   * gemacht hätte — Order: v2PlanAufOpen mit der Baseline aus der Order-Antwort (wie v2AufOpen; ein fehlender Fusion-Hedge holt die
+   * Hedge-Selbstheilung nach), Schließen: tvV2EndeSetzen wie v2SchliessenAmPc. Riegel gegen Doppelarbeit: frühestens 2 min nach der
+   * Meldung, nie während auf diesem PC ein Puls-Lauf läuft, Plan frisch aus der DB und nur im Zustand VOR dem Lauf ('planned' bzw.
+   * 'open'). Alles andere (schon verarbeitet, nichts gesendet, unklar) → nur abgeholt_at, bei unklar mit Hinweis. */
+  const PE_GNADE_MS = 120000
+  let _peLaeuft = false
+  async function pulsErgebnisAbgeholt(planId, art){
+    try{ await supabase.from('puls_ergebnisse').update({ abgeholt_at: new Date().toISOString() }).eq('plan_id', String(planId)).eq('art', art) }catch(_){}
+  }
+  async function pulsErgebnisseUebernehmen(){
+    if(!MT5_LOCAL || _peLaeuft) return
+    let uid = null; try{ uid = currentUserId }catch(_){}
+    if(!uid) return
+    try{ if(_tpOrbitLaeuft || _suLaeuft || _rsAktiv) return }catch(_){ return }
+    _peLaeuft = true
+    try{
+      const { data, error } = await supabase.from('puls_ergebnisse').select('*').is('abgeholt_at', null).order('at', { ascending: true }).limit(10)
+      if(error || !Array.isArray(data)) return
+      for(const z of data){
+        const e = (z && z.ergebnis) || {}, alt = Date.now() - (Date.parse(z.at || '') || Date.now())
+        if(alt < PE_GNADE_MS) continue                                   // der normale Weg ist vielleicht noch dran
+        const { data: row } = await supabase.from('trade_plans').select('*').eq('id', z.plan_id).maybeSingle()
+        if(!row){ await pulsErgebnisAbgeholt(z.plan_id, z.art); continue }
+        const plan = rowToPlan(row), i = tradePlans.findIndex(x => String(x.id) === String(plan.id))
+        if(i >= 0) tradePlans[i] = plan; else tradePlans.push(plan)
+        const name = plan.masterName || 'Plan'
+        if(z.art === 'order'){
+          if(plan.status !== 'planned' || !(e.gesendet || e.ok)){ await pulsErgebnisAbgeholt(z.plan_id, 'order'); continue }
+          const kms = Number(e.order_klick_ms)
+          const klickIso = (kms > 1e12 && kms <= Date.now() + 60000) ? new Date(kms).toISOString() : (e.klick_at || z.at)
+          let tvb = null
+          if(typeof e.balance_start === 'number' && isFinite(e.balance_start)) tvb = tvV2BaselineAusOrder(plan, Object.assign({}, e, { trail: e.trail_ende || '' }))
+          else tvb = Object.assign({ konto: tvV2Konto(plan), today_pnl_start: null, datum_start: tvV2Handelstag(), at: klickIso, puls: 'tv',
+                                     pc: z.pc_id || null, quelle: 'puls_ergebnis', grund: 'kein_today_pnl: Ergebnis ohne Start-Werte' }, tvV2OrderLevel(e))
+          tvb.klick_at = klickIso
+          tvb.nachgeholt = 'puls_ergebnisse'
+          await v2PlanAufOpen(plan.id, null, tvb)
+          try{ const lv = tvV2OrderLevel(e); if(Object.keys(lv).length) await baselinePatchIn(plan.id, 'tv', lv) }catch(_){}
+          try{ await supabase.from('order_signale').insert({ plan_id: String(plan.id), status: e.ok ? 'fertig' : 'fehler', pc: z.pc_id || '',
+            params: { aktion: 'orbit', lokal: true, nachgeholt: true },
+            ergebnis: { ok: !!e.ok, gesendet: !!e.gesendet, msg: 'Nachgeholt aus puls_ergebnisse (Antwort an den Tab verloren): ' + String(e.msg || ''),
+              trail: e.trail_ende || null, einstieg: e.einstieg || null, einstieg_quelle: e.einstieg_quelle || null, tp_limit: e.tp_limit || null,
+              sl_limit: e.sl_limit || null, order_klick_ms: e.order_klick_ms || null } }) }catch(_){}
+          await pulsErgebnisAbgeholt(z.plan_id, 'order')
+          if(typeof atToast === 'function') atToast(`⚠ ${name}: Puls hatte die Order platziert, die Antwort ging verloren — Plan jetzt „Läuft"${e.einstieg ? ' (Einstieg ' + e.einstieg + ')' : ''}${plan.hedgeEur > 0 ? ' · Fusion-Hedge wird nachgeholt' : ''}`, 'start')
+          try{ renderTradePlans() }catch(_){}
+        } else if(z.art === 'close'){
+          if(plan.status !== 'open'){ await pulsErgebnisAbgeholt(z.plan_id, 'close'); continue }
+          const danach = Array.isArray(e.positionen_danach) ? e.positionen_danach : null
+          const sym = e.symbol || (tpOrbitWerte(plan).symbol || '')
+          const nochOffen = danach ? danach.some(x => x && tvSymbolPasst(x.symbol, sym)) : null
+          if(!(e.ok || e.code === 'schon_flach') || nochOffen === true){
+            await pulsErgebnisAbgeholt(z.plan_id, 'close')
+            if(e.geklickt && typeof atToast === 'function') atToast(`⚠ ${name}: Schließen ohne Beweis (${String(e.code || e.msg || 'unklar').slice(0, 80)}) — in TradingView nachsehen`, 'end')
+            continue
+          }
+          const zahl = v => (typeof v === 'number' && isFinite(v)) ? v : null
+          const fx = {}
+          if(zahl(e.balance_end) != null) fx.balance_end = e.balance_end
+          if(zahl(e.equity_end) != null) fx.equity_end = e.equity_end
+          fx.nachgeholt = 'puls_ergebnisse'
+          await tvV2EndeSetzen(plan, zahl(e.today_pnl), 'close', fx)
+          await pulsErgebnisAbgeholt(z.plan_id, 'close')
+          if(typeof atToast === 'function') atToast(`⚠ ${name}: Puls hatte geschlossen, die Antwort ging verloren — Plan jetzt „Überprüfen"`, 'end')
+        }
+      }
+    }catch(e){ console.warn('[puls-ergebnisse]', (e && e.message) || e) }
+    finally{ _peLaeuft = false }
+  }
+  window._pulsErgebnisseUebernehmen = pulsErgebnisseUebernehmen   // Test-Haken (Stub)
+  setInterval(() => { pulsErgebnisseUebernehmen().catch(() => {}) }, 30000)
 
   // Karten-Knopf „Schließen" auf V2 (data-plan-v2-schliessen): lokal direkt, am Mac/Handy als close-Signal.
   // Live-Schritte im vorhandenen Check-Popup — dieselbe Optik wie tpPlanSchliessen, kein neues Design.
