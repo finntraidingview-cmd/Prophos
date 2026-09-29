@@ -17029,8 +17029,34 @@ def _cdp_autofill_klick(eingabe, benutzer, feld_rect, trail, diag=False):
     return True
 
 
+def cdp_rect_gleich(a, b, tol=1.0):
+    """REIN RECHNEND (testbar): zwei Rechtecke [x, y, w, h] am selben Ort (±tol px)?"""
+    try:
+        return all(abs(float(x) - float(y)) <= tol for x, y in zip(list(a)[:4], list(b)[:4])) and len(a) >= 4 and len(b) >= 4
+    except (TypeError, ValueError):
+        return False
+
+
+def _cdp_formular_ruhig(ort, trail, max_s=3.0, grundruhe=True):
+    """Tradovate schiebt das Anmeldeformular beim Laden von links herein (Live 29.09.2026 16:33 UTC: „Benutzerfeld geklickt, Hover
+    bewiesen", der Druck traf daneben, das Formular flog noch). Erst ~1 s Grundruhe, dann warten, bis das Benutzerfeld zwei Blicke
+    (~0,3 s) lang am selben Ort steht, höchstens max_s. -> True = ruhig"""
+    if grundruhe:
+        _warte(1.0, 0.4)
+    t0, vorher = time.time(), None
+    while time.time() - t0 < max_s:
+        r = cdp_rect((ort.blick().get("login") or {}).get("user"))
+        if r and vorher and cdp_rect_gleich(r, vorher):
+            return True
+        vorher = r
+        _warte(0.3, 0.1)
+    trail.append(f"[Login] Formular nach {max_s:.0f} s noch in Bewegung — weiter")
+    return False
+
+
 def _cdp_anmelden(s, ort, benutzer, opts, trail, vorher=None):
     """[5] Username + gespeichertes Passwort (Chrome) beweisen, Login, warten bis TradingView ein Konto zeigt. -> (code, text)"""
+    _cdp_formular_ruhig(ort, trail)
     lb = ort.blick().get("login") or {}
     u = lb.get("user") or {}
     trail.append(f"[Login] Formular ({ort.name}): Benutzerfeld {'gefüllt' if u.get('gefuellt') else 'leer'}, Passwort "
@@ -17048,11 +17074,23 @@ def _cdp_anmelden(s, ort, benutzer, opts, trail, vorher=None):
         # alten Puls; geklickt wird nur ein Eintrag mit genau diesem Username als ganzem Wort.
         if not cdp_rect(u):
             return "login_feld", "Benutzerfeld vor dem Passwortfeld nicht gefunden — nichts eingegeben."
+        # Klick ins Benutzerfeld mit Fokus-Beweis; kam er nicht an (Formular bewegte sich noch), Rechteck neu lesen und bis zu 2× neu
+        feld_ok = False
+        for k_versuch in range(3):
+            if ort.eingabe.klick(cdp_rect(u), "Benutzerfeld") and ort.eingabe.fokus_im(cdp_rect(u), "Benutzerfeld"):
+                feld_ok = True
+                break
+            if k_versuch < 2:
+                _warte(0.4, 0.2)
+                _cdp_formular_ruhig(ort, trail, max_s=2.0, grundruhe=False)
+                u = (ort.blick().get("login") or {}).get("user") or u
+                trail.append(f"[Login] Benutzerfeld: Klick kam nicht an — Rechteck neu gelesen {cdp_rect(u)}, {k_versuch + 2}. Versuch")
+        if not feld_ok:
+            return "login_feld", "Klick ins Benutzerfeld kam dreimal nicht an (kein Fokus) — nichts eingegeben."
         gewaehlt = False
         for versuch in (1, 2, 3):
             if versuch == 1:
-                if not ort.eingabe.klick(cdp_rect(u), "Benutzerfeld"):
-                    return "login_feld", "Benutzerfeld ließ sich nicht klicken — nichts eingegeben."
+                pass                                   # Feld hat den Fokus — Chrome zeigt die Liste jetzt
             elif not ort.eingabe.fokus_im(cdp_rect(u), "Benutzerfeld"):
                 # vor Strg+A/Backspace/Tippen: ohne bewiesenen Fokus gingen die Tasten womöglich woanders hin
                 return "login_feld", "Benutzerfeld hat keinen Fokus (Klick nicht angekommen?) — nichts eingegeben."
@@ -17085,8 +17123,17 @@ def _cdp_anmelden(s, ort, benutzer, opts, trail, vorher=None):
     k, nk = k3_eindeutig(lb.get("knoepfe"), K3_RX_CONNECT)
     if not k:
         return "login_knopf", f"Kein eindeutiger Login-Knopf ({nk}; Knöpfe {[k3_label(x) for x in lb.get('knoepfe') or []][:8]}) — nicht angemeldet."
-    if not ort.eingabe.klick(cdp_rect(k), f"'{k3_label(k)}' (Login)"):
-        return "login_knopf", "Login-Knopf ließ sich nicht klicken (Maus nicht bewiesen über dem Knopf) — nicht angemeldet."
+    geklickt_login = False
+    for k_versuch in range(3):
+        if ort.eingabe.klick(cdp_rect(k), f"'{k3_label(k)}' (Login)"):
+            geklickt_login = True
+            break
+        if k_versuch < 2:                              # nicht gedrückt (Hover/Fenster) → Formular ruhig, Knopf neu lesen, erneut
+            _cdp_formular_ruhig(ort, trail, max_s=2.0, grundruhe=False)
+            k2, _n2 = k3_eindeutig((ort.blick().get("login") or {}).get("knoepfe"), K3_RX_CONNECT)
+            k = k2 or k
+    if not geklickt_login:
+        return "login_knopf", "Login-Knopf ließ sich dreimal nicht klicken (Maus nicht bewiesen über dem Knopf) — nicht angemeldet."
     t0, enter = time.time(), False
     while time.time() - t0 < 40.0:
         _warte(1.0, 0.4)

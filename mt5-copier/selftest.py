@@ -3125,6 +3125,12 @@ def test_puls_cdp_login():
     chk(v_ == "PAAPEX6416990000008 USD" and sp_.klicks == ["Handelspanel auf (Open panel)"], f"zugeklapptes Panel → einmal auf → Konto ({v_!r})")
     chk(_i.getsource(ob._cdp_anmelden).count("_cdp_verbunden_lesen(") == 1 and "cdp_konto_verbunden(s.stand(opts))" not in _i.getsource(ob._cdp_anmelden),
         "Warten nach dem Login klappt das Panel auf")
+    # Tradovate-Formular fliegt beim Laden herein (Live 16:33 UTC): erst ruhig, Fokus nicht da → neu lesen, bis 2× neu klicken
+    chk(ob.cdp_rect_gleich([10, 20, 100, 30], [10.5, 20, 100, 30]) and not ob.cdp_rect_gleich([10, 20, 100, 30], [60, 20, 100, 30])
+        and not ob.cdp_rect_gleich(None, [1, 1, 1, 1]), "Rechteck gleich (±1 px)")
+    q_an3 = _i.getsource(ob._cdp_anmelden)
+    chk(q_an3.index("_cdp_formular_ruhig(ort, trail)") < q_an3.index('"Benutzerfeld")') and "for k_versuch in range(3):" in q_an3
+        and "kam dreimal nicht an" in q_an3, "Login: Formular-Ruhe vor dem Klick, Benutzerfeld bis 3 Versuche mit Fokus-Beweis")
     W = ob.tv_konto_wort_passt
     chk(W("TDFYU324689097 tradovate.com", "TDFYU324689097") and not W("APEX_641699TDFYU324689097", "TDFYU324689097")
         and not W("APEX_641699", "TDFYU324689097"), "Vorschlag nur mit dem Username als ganzem Wort (angehängter Name zählt nicht)")
