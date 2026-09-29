@@ -14013,6 +14013,52 @@ CDP_TOAST_ZU_JS = r"""(function () {
 })()"""
 
 
+# WERBUNG IM PULS-CHROME (30.09.2026, Finn an Jacobs PC pc-8jcrsm, Screenshot „Don't miss this Autumn sale · Up to 80% off · Explore
+# offers"): TradingViews Sale-Modal legte sich über den Connect-Dialog und verschluckte den Klick; der neue Puls kannte — anders als der
+# alte (_tv_popups_weg) — kein Wegklicken. Gesucht werden sichtbare Kästen (kleinster zuerst, höchstens 80 % des Bilds) mit
+# MINDESTENS ZWEI verschiedenen Werbe-Merkmalen und ohne Handels-/Login-Wort; geklickt wird nur ihr EINES X oben rechts (≤ 60 px,
+# nie ein Knopf mit Kauf-/Angebots-Wort). „You have a discount" in der Kopfleiste allein ist nur EIN Merkmal und zählt nicht. Nur lesen.
+CDP_WERBUNG_JS = r"""(function () {
+  var MERKMALE = [/\bsale\b/i, /\d+\s*%\s*off|up to \d+\s*%/i, /don.?t miss/i, /\bends in\b|offer ends/i, /explore offers?/i,
+                  /special offer/i, /black friday|cyber monday/i, /\bdiscount\b/i, /\bupgrade\b/i, /\bsubscription\b/i];
+  var HART = /take profit|stop loss|tradovate|\bconnect\b|\blog ?in\b|password|passwort|quantity|\bcontracts?\b|\b(buy|sell) \d/i;
+  var NIE = /explore|offer|angebot|upgrade|\bbuy\b|kauf|trial|\bget\b|\bstart|subscri|abonn|premium|\bplan|claim/i;
+  function sb(e) { try { var s = getComputedStyle(e); if (s.visibility === 'hidden' || s.display === 'none' || s.opacity === '0') return false;
+    var r = e.getBoundingClientRect(); return r.width > 2 && r.height > 2 && r.bottom > 0 && r.right > 0 && r.left < innerWidth && r.top < innerHeight; } catch (_) { return false; } }
+  function drin(r) { return r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight; }
+  function R(e) { var r = e.getBoundingClientRect(); return [r.left, r.top, r.width, r.height]; }
+  var sel = '[role="dialog"],[role="alertdialog"],[aria-modal="true"],[data-dialog-name],body > div,body > section,body > aside,' +
+            '[class*="toast"],[class*="popup"],[class*="dialog"],[class*="modal"]';
+  var kand = Array.prototype.slice.call(document.querySelectorAll(sel)).filter(sb).map(function (b) {
+    var r = b.getBoundingClientRect(); return { b: b, r: r, f: r.width * r.height }; })
+    .filter(function (k) { return k.r.width >= 200 && k.r.height >= 80 && k.f <= 0.8 * innerWidth * innerHeight; })
+    .sort(function (a, c) { return a.f - c.f; });
+  var out = [], genommen = [];
+  kand.forEach(function (k) {
+    if (out.length >= 3 || genommen.some(function (g) { return k.b.contains(g) || g.contains(k.b); })) return;
+    var t = (k.b.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 400);
+    var n = MERKMALE.filter(function (rx) { return rx.test(t); }).length;
+    if (n < 2 || HART.test(t)) return;
+    var xs = Array.prototype.slice.call(k.b.querySelectorAll('button,[role="button"],[aria-label],[data-name*="close"],[class*="close"]')).filter(function (e) {
+      if (!sb(e)) return false;
+      var q = e.getBoundingClientRect();
+      if (q.width > 60 || q.height > 60 || q.width < 6 || q.height < 6 || !drin(q)) return false;
+      if (k.r.right - q.right > 70 || q.top - k.r.top > 70) return false;
+      var oben = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2);   // verdecktes X (Karte unter dem Modal) erst später
+      if (!oben || !(oben === e || e.contains(oben))) return false;
+      var w = (e.getAttribute('aria-label') || '') + ' ' + (e.getAttribute('title') || '') + ' ' + (e.getAttribute('data-name') || '') + ' ' + (e.textContent || '').trim();
+      if (NIE.test(w)) return false;
+      return /close|schlie|dismiss/i.test(w) || /^\s*[×✕✖xX]?\s*$/.test(e.textContent || '');
+    });
+    xs = xs.filter(function (e) { return !xs.some(function (f) { return f !== e && e.contains(f); }); });
+    if (xs.length !== 1) return;
+    genommen.push(k.b);
+    out.push({ text: t.slice(0, 120), box: R(k.b), x: R(xs[0]) });
+  });
+  return out;
+})()"""
+
+
 def _puls_fenster_liste(pid):
     """Sichtbare Top-Level-Fenster des Puls-Chrome-Browserprozesses (Windows). -> [{hwnd, text, klasse, sichtbar, minimiert}]"""
     import ctypes
@@ -14183,11 +14229,14 @@ class _AugenSitzung:
 
     def klick(self, rect, name, toast_ok=False):
         if _WIN_EINGABE:
+            self.werbung_weg()                            # Werbe-Modal zuerst weg (30.09.2026, Jacobs PC: Autumn-Sale über Connect)
             self._verdeckt = False
             ok = self._win_klick(rect, name, toast_ok=toast_ok)
             if not ok and self._verdeckt and not toast_ok and self._toasts_weg():
                 self._verdeckt = False
                 ok = self._win_klick(rect, name)          # Meldungen weg — derselbe Klick genau einmal neu
+            if not ok and not toast_ok and self.werbung_weg(zwang=True):
+                ok = self._win_klick(rect, name)          # Werbung kam gerade erst — derselbe Klick genau einmal neu
             return ok
         p = cdp_klickpunkt(rect)
         if not p:
@@ -14310,6 +14359,47 @@ class _AugenSitzung:
             _win_nach_vorn(hwnd)
             _warte(0.25, 0.15)
         return hwnd, ""
+
+    def werbung_weg(self, zwang=False):
+        """Werbe-Modals (CDP_WERBUNG_JS) per X schließen, Verschwinden beweisen; X nicht klickbar → einmal Esc. Ohne zwang höchstens
+        alle 3 s (ein Lese-Ausdruck, ~50 ms). -> Anzahl geschlossener Werbungen"""
+        jetzt = time.time()
+        if not zwang and jetzt - getattr(self, "_werbung_at", 0.0) < 3.0:
+            return 0
+        self._werbung_at = jetzt
+        weg = 0
+        try:
+            return self._werbung_weg_kern()
+        except Exception as e_:                        # darf keinen Klick verhindern — schlimmstenfalls bleibt die Werbung stehen
+            self.trail.append(f"Werbung-Prüfung übersprungen ({type(e_).__name__})")
+            return weg
+
+    def _werbung_weg_kern(self):
+        weg = 0
+        for _ in range(3):
+            kand = self.lese_js(CDP_WERBUNG_JS)
+            kand = [x for x in kand if isinstance(x, dict)] if isinstance(kand, list) else []
+            if not kand:
+                break
+            k = kand[0]
+            text = str(k.get("text") or "")[:60]
+            if self._win_klick(k.get("x"), f"Werbung schließen (X) '{text}'", toast_ok=True):
+                _warte(0.6, 0.3)
+            else:
+                try:
+                    self.taste("Escape")
+                    self.trail.append(f"Werbung '{text}': X nicht klickbar — Esc gedrückt")
+                except Exception:
+                    pass
+                _warte(0.5, 0.3)
+            nach = self.lese_js(CDP_WERBUNG_JS)
+            noch = [x for x in (nach if isinstance(nach, list) else []) if isinstance(x, dict) and str(x.get("text") or "")[:60] == text]
+            if noch:
+                self.trail.append(f"Werbung '{text}' bleibt — weiter ohne")
+                break
+            self.trail.append(f"Werbung weg (bewiesen): '{text}'")
+            weg += 1
+        return weg
 
     def _toasts_weg(self):
         """TradingView-Meldungen über dem Ziel schließen (X der Gruppe, sonst X einzelner Meldungen). -> True, wenn geklickt"""
@@ -15288,6 +15378,10 @@ def modus_tvkette_cdp(cmd):
                                  "— nichts gesendet.", "knopf")
         if kk.get("disabled") or cdp_klickpunkt(cdp_rect(kk)) is None:
             return raus("knopf", f"Senden-Knopf gesperrt oder ohne Rechteck ('{kk.get('text')}') — nichts gesendet.", "knopf")
+        if st.get("popups") and s.werbung_weg(zwang=True):  # Werbe-Modal (30.09.2026) — weg, frisch lesen, dann erst urteilen
+            st = s.stand(opts)
+            kk = st.get("kauf_knopf") if isinstance(st.get("kauf_knopf"), dict) else {}
+            ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
         if st.get("popups"):
             return raus("popup", f"Dialog/Popup offen ({[p.get('titel') or p.get('text') for p in st['popups']][:2]}) — nichts gesendet.", "knopf")
         if not tv_konto_passt(str(ko.get("aktiv") or ""), ext):
@@ -16913,9 +17007,11 @@ def _cdp_login_ort(s, vorher, benutzer, opts, trail, warten_s=25.0):
     vorher = vorher if isinstance(vorher, dict) else {}
     ids, klick_ms, fehler_alt = vorher.get("ids") or set(), float(vorher.get("ms") or 0.0), vorher.get("fehler") or ""
     ort_tv = _K3Ort("TradingView-Seite", s.ws, s, benutzer)
-    ende, netz_n = time.time() + warten_s, 0
+    ende, netz_n, nochmal_n, werbung_seit = time.time() + warten_s, 0, 0, False
     while time.time() < ende:
         _warte(0.8, 0.3)
+        if s.werbung_weg():                               # Autumn-Sale über dem Dialog (30.09.2026, Jacobs PC)
+            werbung_seit = True
         b = ort_tv.blick()
         if b.get("login"):
             return ort_tv, ""
@@ -16952,6 +17048,18 @@ def _cdp_login_ort(s, vorher, benutzer, opts, trail, warten_s=25.0):
             s.klick(cdp_rect(d["connect"]), f"Connect (erneut {netz_n}/{TV_CONNECT_NETZ_MAX})")
             _warte(2.0, 0.8)                  # der alte Fehlertext steht nach dem Klick noch kurz da
             ende = time.time() + warten_s
+            continue
+        # Connect-Dialog steht noch, ohne Fehler und ohne Anmeldeseite (30.09.2026, Jacobs PC: die Werbung verschluckte den Klick) —
+        # nach geschlossener Werbung sofort, sonst nach 8 s ohne Wirkung: Connect genau noch einmal (höchstens 2×)
+        seit_s = time.time() - (klick_ms / 1000.0 if klick_ms else 0.0)
+        if d and cdp_rect(d.get("connect")) and nochmal_n < 2 and (werbung_seit or seit_s > 8.0):
+            nochmal_n += 1
+            trail.append(f"[Login] Connect-Dialog steht noch ({'Werbung lag darüber' if werbung_seit else f'{seit_s:.0f} s ohne Wirkung'}) — Connect erneut ({nochmal_n}/2)")
+            werbung_seit = False
+            klick_ms = time.time() * 1000.0
+            s.klick(cdp_rect(d["connect"]), f"Connect (nochmal {nochmal_n}/2)")
+            _warte(1.5, 0.6)
+            ende = max(ende, time.time() + warten_s / 2)
     return None, f"Nach 'Connect' keine Tradovate-Anmeldeseite ({warten_s:.0f} s)."
 
 

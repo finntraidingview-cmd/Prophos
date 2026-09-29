@@ -2650,6 +2650,20 @@ def test_puls_augen_cdp():
     r_ = _rnd.Random(7)
     bahn = ob.cdp_klick_bahn((0, 0), (100, 50), rnd=r_)
     chk(len(bahn) == 8 and bahn[-1] == (100.0, 50.0) and bahn[0] != (100.0, 50.0), "Klick-Bahn: mehrere Schritte, letzter exakt am Ziel")
+    # 30.09.2026, Jacobs PC: Werbe-Modal („Autumn sale") über dem Connect-Dialog — werbung_weg klickt sein X, beweist das Verschwinden
+    _ws = object.__new__(ob._AugenSitzung)
+    _ws.trail, _ws._werbung_at = [], 0.0
+    _werb = [[{"text": "Don't miss this Autumn sale Up to 80% off", "box": [200, 40, 900, 560], "x": [1050, 60, 30, 30]}], []]
+    _ws.lese_js = lambda ausdruck, timeout=8: (_werb.pop(0) if _werb else []) if "MERKMALE" in ausdruck else None
+    _ws._win_klick = lambda rect, name, druck=True, toast_ok=False: rect == [1050, 60, 30, 30]
+    _alt_w = ob._warte
+    ob._warte = lambda a, b: None
+    try:
+        _n = _ws.werbung_weg(zwang=True)
+        _n2 = _ws.werbung_weg()            # innerhalb von 3 s: gedrosselt, kein Lesen
+    finally:
+        ob._warte = _alt_w
+    chk(_n == 1 and _n2 == 0 and any("Werbung weg (bewiesen)" in z for z in _ws.trail), "werbung_weg: X geklickt, weg bewiesen, danach 3 s gedrosselt")
     pt = ob.cdp_klickpunkt([100, 200, 60, 30], rnd=_rnd.Random(3))
     chk(pt and 110 <= pt[0] <= 150 and 205 <= pt[1] <= 225 and ob.cdp_klickpunkt([1, 1, 1, 1]) is None, "Klickpunkt im inneren Drittel, Mini-Rect → None")
     sm = ob.cdp_summary({"balance": {"label": "Account Balance", "text": "153,756.96", "wert": 153756.96}, "equity": {"label": None, "text": "153,700.00"},
