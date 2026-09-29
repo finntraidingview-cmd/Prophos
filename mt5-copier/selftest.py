@@ -3070,6 +3070,15 @@ def test_puls_cdp_login():
         "tvclose CDP: EIN Close-Klick, geklickt vorher, Rückfrage nur submit-button, schon_flach ohne Klick")
     chk(ob.cdp_summary_ende({"Account Balance": "153,760.96", "Equity": "153,760.96", "Total P/L": "4.00"}) == {"balance_end": 153760.96, "equity_end": 153760.96}
         and ob.cdp_summary_ende(None) == {"balance_end": None, "equity_end": None}, "End-Balance/Equity aus Account summary")
+    # „Session disconnected" (Live 15:48 UTC): erkennen, nie als Broker-Connect-Dialog nehmen
+    sitz_d = {"titel": "Session disconnected", "rect": [500, 250, 600, 300],
+              "text": "Session disconnected Your session ended because your account was accessed from another browser or device. Connect",
+              "knoepfe": [{"text": "Connect", "rect": [760, 480, 90, 34]}, {"text": "", "aria": "Close", "rect": [1070, 260, 20, 20]}]}
+    chk(ob.cdp_sitzung_getrennt({"dialoge": [sitz_d]})["text"] == "Connect" and ob.cdp_sitzung_getrennt({"dialoge": [dlg]}) is None
+        and ob.cdp_sitzung_getrennt(None) is None and ob.cdp_connect_dialog({"dialoge": [sitz_d]}) is None,
+        "Sitzungs-Dialog erkannt; Broker-Dialog ist keiner; Sitzungs-Dialog ist nie der Broker-Connect-Dialog")
+    q_km = _i.getsource(ob._cdp_konto_mit_login)
+    chk(q_km.index("_cdp_sitzung_zurueck(") < q_km.index("_cdp_konto_sichern("), "Sitzungs-Dialog vor dem Konto-Schritt lösen")
     W = ob.tv_konto_wort_passt
     chk(W("TDFYU324689097 tradovate.com", "TDFYU324689097") and not W("APEX_641699TDFYU324689097", "TDFYU324689097")
         and not W("APEX_641699", "TDFYU324689097"), "Vorschlag nur mit dem Username als ganzem Wort (angehängter Name zählt nicht)")

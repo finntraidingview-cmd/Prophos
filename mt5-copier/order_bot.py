@@ -16450,6 +16450,8 @@ def cdp_connect_dialog(bl):
     for d in bl.get("dialoge") or []:
         if not isinstance(d, dict) or (lg.get("box") and d.get("rect") and _k3_rect_in(lg["box"], d["rect"])):
             continue
+        if CDP_RX_SITZUNG_WEG.search(str(d.get("titel") or "") + " " + str(d.get("text") or "")):
+            continue                                  # TradingViews „Session disconnected" hat auch „Connect" — kein Broker-Dialog
         c, _n = k3_eindeutig(d.get("knoepfe"), TV_RX_CONNECT)
         if c:
             kand.append((d, c))
@@ -16462,6 +16464,23 @@ def cdp_connect_dialog(bl):
                          and (not box or _k3_rect_in(x.get("rect") or [], box))])
     nm = d.get("nicht_merken") if isinstance(d.get("nicht_merken"), dict) else None
     return {"dialog": d, "connect": c, "demo": demo, "nicht_merken": nm, "netzfehler": bool(d.get("netzfehler"))}
+
+
+# TradingViews Modal (Finn-Screenshot 29.09.2026 15:48 UTC): „Session disconnected — Your session ended because your account was
+# accessed from another browser or device … only one active session per user … simply click "Connect" to continue"
+CDP_RX_SITZUNG_WEG = re.compile(r"session disconnected|only one active session|accessed from another (browser|device)|"
+                                r"sitzung (wurde )?getrennt|nur eine aktive sitzung", re.I)
+
+
+def cdp_sitzung_getrennt(bl):
+    """REIN RECHNEND (testbar): steht TradingViews „Session disconnected"-Dialog mit GENAU EINEM „Connect"-Knopf da? -> Knopf | None"""
+    kand = []
+    for d in (bl or {}).get("dialoge") or [] if isinstance(bl, dict) else []:
+        if isinstance(d, dict) and CDP_RX_SITZUNG_WEG.search(str(d.get("titel") or "") + " " + str(d.get("text") or "")):
+            c, _n = k3_eindeutig(d.get("knoepfe"), TV_RX_CONNECT)
+            if c:
+                kand.append(c)
+    return kand[0] if len(kand) == 1 else None
 
 
 CDP_RX_CONNECT_FEHLER = re.compile(r"error!|cancel+ed\b|\bfailed\b|abgebrochen|fehlgeschlagen", re.I)
@@ -17019,11 +17038,44 @@ def _cdp_login_sichern(res, trail):
         pass
 
 
+def _cdp_sitzung_zurueck(s, opts, trail):
+    """Finn 29.09.2026 („offensichtliche Fehlerdialoge selbst lösen"), Live 15:48 UTC: TradingViews „Session disconnected"-Modal lag
+    im Puls-Chrome, der Konto-Schritt scheiterte am Umschalter darunter. Steht der Dialog mit genau einem „Connect" da: klicken
+    (echte Maus), warten, bis er weg ist. „Connect" holt die TradingView-Sitzung in DIESES Chrome — die andere (z. B. Reader-Chrome
+    mit demselben Konto) wird getrennt. -> True, wenn geklickt und weg"""
+    try:
+        bl = _K3Ort("TradingView-Seite", s.ws, s, "").blick()
+    except Exception:
+        return False
+    k = cdp_sitzung_getrennt(bl)
+    if not k:
+        return False
+    trail.append("TradingView: „Session disconnected“ (Konto in anderem Browser/Gerät aktiv) — „Connect“ im Puls-Chrome")
+    if not s.klick(cdp_rect(k), "Connect (Sitzung zurückholen)"):
+        trail.append("„Connect“ im Sitzungs-Dialog NICHT gedrückt — Dialog bleibt")
+        return False
+    ende = time.time() + 12.0
+    while time.time() < ende:
+        _warte(0.8, 0.3)
+        try:
+            if not cdp_sitzung_getrennt(_K3Ort("TradingView-Seite", s.ws, s, "").blick()):
+                _warte(1.5, 0.8)                     # TradingView baut Panel/Konto nach dem Wiederverbinden neu auf
+                trail.append("Sitzung wieder verbunden — weiter")
+                return True
+        except Exception:
+            continue
+    trail.append("Sitzungs-Dialog nach „Connect“ noch da (12 s)")
+    return False
+
+
 def _cdp_konto_mit_login(sitz, ext, opts, cmd, trail, res):
     """Konto sicherstellen wie _cdp_konto_sichern — steht es nicht im Puls-Chrome (kein Broker / anderer Tradovate-Login), verbindet
     Puls selbst (Block-Kopf). sitz = [Sitzung] (der Login tauscht den Tab). -> (ok, code, msg, stand, extra) wie _cdp_konto_sichern.
     Scheitert der Login, bleibt der Code 'konto_nicht_erreicht' (Frontend „Konto ?", Panel 409) — der Grund steht in msg."""
+    _cdp_sitzung_zurueck(sitz[0], opts, trail)
     ok, code, msg, st, extra = _cdp_konto_sichern(sitz[0], ext, opts, trail)
+    if not ok and _cdp_sitzung_zurueck(sitz[0], opts, trail):
+        ok, code, msg, st, extra = _cdp_konto_sichern(sitz[0], ext, opts, trail)   # der Dialog lag über dem Umschalter
     if not ok and code == "kein_broker":
         # ein Blick kann in die Ladephase fallen (Regel seit .327: nie aus EINEM Blick urteilen) — zweiter Blick mit Streuung
         _warte(1.5, 1.0)
