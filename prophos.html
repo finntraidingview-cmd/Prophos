@@ -19864,14 +19864,45 @@
    * 'puls'. Eine Maus: wartet wie die Endlesung auf einen ruhigen Moment (keine Order, kein Rundgang), 8–14 s gestreut, höchstens ~3 min.
    * -> {ok, balance?, msg} (nie werfen) */
   const _tvBalLesenLaeuft = new Set()
-  async function tvKontoBalanceJetzt(accountId){
+  /* WARTESCHLANGE FÜR BALANCE-LESUNGEN (29.09.2026, Finn drückte ↻ bei allen Konten nacheinander: „wie in einer Warteschlange, einer nach
+   * dem anderen"). Bisher claimte der PC-Tab jedes Signal sofort und jede Lesung wartete für sich im 8–14-s-Zufallstakt, bis Puls frei
+   * war — keine Reihenfolge, Tradeify/Apex abwechselnd (jeder Wechsel = Abmelden + Login), nach 170 s „3 min belegt", und der Mac
+   * meldete nach 4 min ohne Bewegung „PC-Tab nicht erreichbar". Jetzt: eine Lesung nach der anderen, als Nächstes bevorzugt ein Konto
+   * mit DEMSELBEN Login wie die letzte Lesung, sonst die älteste; bis 10 min in der Schlange; das Signal bekommt alle 45 s einen
+   * Herzschlag (updated_at) + seinen Platz (ergebnis.warteschlange) — der Mac zeigt „in der Warteschlange · Platz n". */
+  const _tvBalSchlange = []
+  let _tvBalAktiv = false, _tvBalLetzterKey = null
+  const tvBalLoginKey = acc => { try{ const k = tvV2KontoKontext({ masterAccountId: acc.id, masterFirm: acc.firm }) || {}; return String(k.tv_username || k.firma || acc.firm || '').trim().toLowerCase() || null }catch(_){ return null } }
+  async function tvBalDranWarten(eintrag){
+    _tvBalSchlange.push(eintrag)
+    const t0 = Date.now()
+    let herz = 0
+    const raus = () => { const i = _tvBalSchlange.indexOf(eintrag); if(i >= 0) _tvBalSchlange.splice(i, 1) }
+    for(;;){
+      const naechster = _tvBalSchlange.find(e => e.key && e.key === _tvBalLetzterKey) || _tvBalSchlange[0]
+      let belegt = true; try{ belegt = !!_tpOrbitLaeuft || !!tvV2Poll.busy }catch(_){ belegt = true }
+      if(naechster === eintrag && !belegt && !_tvBalAktiv){ raus(); _tvBalAktiv = true; return true }
+      if(Date.now() - t0 > 10 * 60000){ raus(); return false }
+      if(eintrag.sigId && Date.now() - herz > 45000){
+        herz = Date.now()
+        const platz = Math.max(1, _tvBalSchlange.indexOf(eintrag) + 1 + (_tvBalAktiv ? 1 : 0))
+        try{ await supabase.from('order_signale').update({ updated_at: new Date().toISOString(), ergebnis: { warteschlange: platz } }).eq('id', eintrag.sigId).eq('status', 'laeuft') }catch(_){}
+      }
+      await new Promise(res => setTimeout(res, 1000 + Math.random() * 1500))
+    }
+  }
+  async function tvKontoBalanceJetzt(accountId, sigId){
     const acc = (accounts || []).find(a => String(a.id) === String(accountId))
     if(!MT5_LOCAL) return { ok: false, msg: 'Nur am PC mit TradingView möglich' }
     if(!acc || !acc.externalId) return { ok: false, msg: 'Konto ohne External ID' }
     const konto = String(acc.externalId).trim(), id = String(acc.id)
     if(_tvBalLesenLaeuft.has(id)) return { ok: false, msg: 'Lesung für dieses Konto läuft schon' }
     _tvBalLesenLaeuft.add(id)
+    const eintrag = { id, key: tvBalLoginKey(acc), sigId: sigId || null }
+    let dran = false
     try{
+      dran = await tvBalDranWarten(eintrag)
+      if(!dran) return { ok: false, msg: '10 min in der Warteschlange ohne Platz — später nochmal' }
       const t0 = Date.now(); let r = null
       for(;;){
         let belegt = true; try{ belegt = !!_tpOrbitLaeuft || !!tvV2Poll.busy }catch(_){ belegt = true }
@@ -19895,9 +19926,10 @@
       return { ok: true, trail, balance: b.balance, equity: (typeof b.equity === 'number' && isFinite(b.equity)) ? b.equity : null, balance_at: at,
                msg: `Balance ${b.balance.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $ gelesen` }
     }catch(e){ return { ok: false, msg: 'Lesung abgebrochen: ' + String((e && e.message) || e) } }
-    finally{ _tvBalLesenLaeuft.delete(id) }
+    finally{ _tvBalLesenLaeuft.delete(id); if(dran){ _tvBalAktiv = false; _tvBalLetzterKey = eintrag.key } }
   }
   window._tvKontoBalanceJetzt = tvKontoBalanceJetzt
+  window._tvBalSchlange = () => ({ aktiv: _tvBalAktiv, letzter: _tvBalLetzterKey, schlange: _tvBalSchlange.map(e => ({ id: e.id, key: e.key })) })   // Test-Haken
   // TopstepX-Inventar (F23): nur lesen, eine Maus (wie die Balance-Lesung), Ergebnis gekürzt für order_signale.ergebnis
   async function tsxInventarLesen(){
     if(!MT5_LOCAL || typeof window.mtcApi !== 'function') return { ok: false, msg: 'Nur am PC mit Copier-Backend' }
@@ -28058,7 +28090,7 @@
         try{ await supabase.from('order_signale').update({ status: 'verfallen', updated_at: new Date().toISOString(), ergebnis: { ok: false, msg: 'keine Antwort vom PC' } }).eq('id', sig.id).in('status', ['wartet']) }catch(_){}
         setz({ laeuft: false, fehler: true, text: mt5 ? `kein PC dieser ID hat ein MT5-Terminal für Login ${mt5Login} gemeldet (Prophos-Tab + start-alles.bat offen?)` : 'keine Antwort vom PC (Prophos-Tab + Copier auf dem PC der ID offen?)' }); return
       }
-      if(row && row.status === 'laeuft'){ const t = mt5 ? `MT5 wird geöffnet · liest … (PC ${row.pc || '?'})` : `wird gelesen … (PC ${row.pc || '?'})`; if(_accBalLauf.get(id)?.text !== t) setz({ laeuft: true, text: t }) }
+      if(row && row.status === 'laeuft'){ const pl = Number(((row.ergebnis || {}).warteschlange)) || 0; const t = mt5 ? `MT5 wird geöffnet · liest … (PC ${row.pc || '?'})` : pl > 1 ? `in der Warteschlange · Platz ${pl} (PC ${row.pc || '?'})` : `wird gelesen … (PC ${row.pc || '?'})`; if(_accBalLauf.get(id)?.text !== t) setz({ laeuft: true, text: t }) }
       setTimeout(tick, 2000)
     }
     setTimeout(tick, 1500)
@@ -28348,13 +28380,15 @@
           // schon immer, sie trägt die Aussage jetzt mit.
           const cloudAlt = (liveSrc === 'MT5-Cloud' && liveTime && (Date.now() - liveTime) > 60000) || liveSrc === 'Dashboard (eingefügt)'   // eingefügter Stand ist nie „Live" (F11)
             || (mt5Gespeichert && !mt5GespLive)   // gespeicherter MT5-Stand: „Stand · MT5 · zuletzt HH:MM" (29.09.2026)
+          // Grün, solange „aktuell" (29.09.2026, Finn: „farblich markieren, wenn sie aktuell ist — gelesen und seitdem kein Trade")
+          const balAktuell = tvStandZustand === 'aktuell'
           balCell = `
-            <div style="font-weight:600;color:var(--ink);font-family:var(--mono);display:flex;align-items:center;gap:6px">${balFormatted}${balRef}</div>
+            <div style="font-weight:600;color:${balAktuell ? '#15803d' : 'var(--ink)'};font-family:var(--mono);display:flex;align-items:center;gap:6px">${balFormatted}${balRef}</div>
             <div style="font-size:11px;color:var(--sub);margin-top:2px">
               <span style="color:var(--violet);font-weight:500">${cloudAlt ? 'Stand' : 'Live'} · ${liveSrc === 'MT5-Konto' ? 'MT5' : liveSrc}</span>
               ${mt5Zuletzt ? `<span style="margin-left:6px" title="${escapeHtml(timeAgo(liveTime))}">${escapeHtml(mt5Zuletzt)}</span>`
                 : ((liveTime && !tvStandZustand && !mt5GespLive) ? `<span style="margin-left:6px">${timeAgo(liveTime)}</span>` : '')}
-              ${tvStandZustand ? `<span style="margin-left:6px" title="gelesen ${liveTime ? escapeHtml(timeAgo(liveTime)) : ''}">${escapeHtml(tvStandZustand)}</span>` : ''}
+              ${tvStandZustand ? `<span style="margin-left:6px${balAktuell ? ';color:#15803d;font-weight:500' : ''}" title="gelesen ${liveTime ? escapeHtml(timeAgo(liveTime)) : ''}">${balAktuell ? '● ' : ''}${escapeHtml(tvStandZustand)}</span>` : ''}
             </div>
             ${nachlese ? `<div style="font-size:11px;color:var(--sub);margin-top:2px" title="${escapeHtml(nachlese.text)}">${escapeHtml(nachlese.kurz)}</div>` : ''}
             ${accBalStatusHtml(a.id)}
@@ -36154,7 +36188,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.832'
+  const OS_TAB_BUILD = '2026-09-22.833'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -38124,7 +38158,7 @@
           if(!clB || !clB.length){ _osStand = 'claim-verloren'; continue }
           osClaimMerken(sig)
           _osStand = 'claim-balance: ' + String(sig.id).slice(0, 8)
-          tvKontoBalanceJetzt((sig.params || {}).account_id)
+          tvKontoBalanceJetzt((sig.params || {}).account_id, sig.id)
             .then(er => supabase.from('order_signale').update({ status: er && er.ok ? 'fertig' : 'fehler', updated_at: new Date().toISOString(), ergebnis: er || { ok: false, msg: 'keine Antwort' } }).eq('id', sig.id))
             .catch(e => supabase.from('order_signale').update({ status: 'fehler', updated_at: new Date().toISOString(), ergebnis: { ok: false, msg: String((e && e.message) || e) } }).eq('id', sig.id))
           continue
