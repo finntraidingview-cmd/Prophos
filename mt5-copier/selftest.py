@@ -1868,6 +1868,7 @@ def main():
     results.append(test_puls_tempo())
     results.append(test_puls_topstep())
     results.append(test_puls_augen_cdp())
+    results.append(test_puls_k3())
     results.append(test_puls_nie_chrome_schliessen())
     results.append(test_tsx_konto_abgekuerzt())
     results.append(test_tsx_titel_url())
@@ -2686,6 +2687,100 @@ def test_puls_augen_cdp():
     chk(ob.cdp_zahl("1,050.00") == 1050.0 and ob.cdp_zahl(4) == 4.0 and ob.cdp_zahl(True) is None, "cdp_zahl")
     if ok:
         print("✓ Puls-Augen CDP: eigenes Profil, 127.0.0.1:9333, WebSocket-Frames, Regel-Entscheid, Target-Wahl, K1-Weiche + Vertrag")
+    return ok
+
+
+def test_puls_k3():
+    """K3 scharfer Handlauf (29.09.2026, Finns Anweisung an T3): Knopf-Text exakt, Meldungen/Zeilen/Close-Knopf eindeutig,
+    Sperre, Login-Blick liefert nie Feldwerte, nur Hand-Befehl führt zu modus_k3."""
+    import order_bot as ob
+    import inspect as _i
+    import re as _re
+    ok = True
+
+    def chk(bed, text):
+        nonlocal ok
+        if not bed:
+            print("  ✗ K3: " + text)
+            ok = False
+    ke = ob.k3_knopf_exakt
+    chk(ke("Buy 1 MNQZ6 MARKET", "buy", 1, "MNQZ6") and ke("  Buy 1  MNQZ6 MARKET ", "buy", 1, "mnqz6"), "Knopf exakt (Leerraum egal)")
+    chk(not ke("Buy 10 MNQZ6 MARKET", "buy", 1, "MNQZ6") and not ke("Sell 1 MNQZ6 MARKET", "buy", 1, "MNQZ6")
+        and not ke("Buy 1 NQZ6 MARKET", "buy", 1, "MNQZ6") and not ke("Buy 1 MNQZ6 LIMIT", "buy", 1, "MNQZ6")
+        and not ke("Buy 1 MNQZ6 MARKET x", "buy", 1, "MNQZ6") and not ke("", "buy", 1, "MNQZ6"), "Knopf: jede Abweichung = nein")
+    # Meldungen im augen.js-Format (toasts.meldungen)
+    alt = {"art": "fill", "status": "ausgefuehrt", "seite": "sell", "menge": 1, "preis": 30401.0, "text": "alt"}
+    fill = {"art": "fill", "status": "ausgefuehrt", "seite": "buy", "menge": 1, "preis": 30483.25, "text": "Buy 1 at 30,483.25"}
+    tp = {"art": "tp", "status": "platziert", "seite": "sell", "menge": 1, "preis": 30533.25, "text": "Sell 1 at 30,533.25"}
+    sl = {"art": "sl", "status": "platziert", "seite": "sell", "menge": 1, "preis": 30458.25, "text": "Sell 1 at 30,458.25"}
+    vor = [ob.k3_meldung_schluessel(alt)]
+    neu = ob.k3_neue_meldungen(vor, [alt, fill, tp, sl, dict(fill)])
+    chk(len(neu) == 3 and alt not in neu, "neue Meldungen: alte raus, Doppel einmal")
+    om = ob.k3_order_meldungen(neu, "buy", 1)
+    chk(om == {"fill": 30483.25, "tp": 30533.25, "sl": 30458.25}, f"Fill/TP/SL der eigenen Order ({om})")
+    chk(ob.k3_order_meldungen([dict(fill, menge=2)], "buy", 1)["fill"] is None, "Fill mit anderer Menge zählt nicht")
+    storno = [{"art": "tp", "status": "storniert", "seite": "sell", "menge": 1, "preis": 30533.25, "text": "a"},
+              {"art": "sl", "status": "storniert", "seite": "sell", "menge": 1, "preis": 30458.25, "text": "b"},
+              {"art": "fill", "status": "ausgefuehrt", "seite": "sell", "menge": 1, "preis": 30490.0, "text": "c"}]
+    chk(ob.k3_close_meldungen(storno, "buy", 1) == (30490.0, {"tp", "sl"}), "Close-Fill Gegenseite + beide Beine storniert")
+    pos = [{"symbol": "MNQZ2026", "sichtbar": True, "seite": "buy", "menge": 1}, {"symbol": "MNQZ2026", "sichtbar": False},
+           {"symbol": "NQZ2026", "sichtbar": True}]
+    chk(len(ob.k3_zeilen(pos, "MNQ")) == 1 and not ob.k3_zeilen(pos[1:2], "MNQ"), "nur sichtbare Zeilen der Wurzel (MNQ nie NQ)")
+    ords = [{"symbol": "MNQZ2026", "sichtbar": True, "status": "Working"}, {"symbol": "MNQZ2026", "sichtbar": True, "status": "Filled"},
+            {"symbol": "MNQZ2026", "sichtbar": True, "status": "Cancelled"}, {"symbol": "NQZ2026", "sichtbar": True, "status": "Working"}]
+    chk(len(ob.k3_offene_orders(ords, "MNQ")) == 1, "offene Orders: nur Working der Wurzel")
+    sm = {"Equity": "149,967.60", "Net Liq": "149967.60", "Open P/L": "0.00", "Total P/L": "0.00", "Account Balance": "149,967.60"}
+    chk(ob.k3_summary_werte(sm) == (149967.6, 0.0) and ob.k3_summary_werte({"Account Balance": "150,012.10", "Total P/L": "-56.96"}) == (150012.1, -56.96)
+        and ob.k3_summary_werte(None) == (None, None), "Summary: Account Balance + Total P/L (echte Lesung 01:30)")
+    z = {"knoepfe": [{"aria": "Protect position", "rect": [800, 640, 24, 24]}, {"aria": "Reverse position", "rect": [830, 640, 24, 24]},
+                     {"aria": "Close position", "rect": [860, 640, 24, 24]}]}
+    k, n = ob.k3_close_knopf(z)
+    chk(k and k["aria"] == "Close position" and n == 1, "Close-Knopf: genau der eine, nie Reverse/Protect")
+    z2 = {"knoepfe": [{"title": "Close", "tag": "div", "rect": [855, 635, 34, 34]}, {"dn": "close-button", "tag": "button", "rect": [860, 640, 24, 24]}]}
+    k2, n2 = ob.k3_close_knopf(z2)
+    chk(k2 and k2["tag"] == "button" and n2 == 1, "Hülle + innerer Knopf = einer (innerer gewinnt)")
+    chk(ob.k3_close_knopf({"knoepfe": [{"aria": "Close position", "rect": [1, 1, 20, 20]}, {"text": "×", "rect": [40, 1, 20, 20]}]})[0] is None
+        and ob.k3_close_knopf({"knoepfe": []}) == (None, 0), "zwei Kandidaten / keiner = kein Knopf (Abbruch)")
+    menue = [{"text": "Trading settings", "rect": [100, 400, 180, 30]}, {"text": "Log out", "rect": [100, 430, 180, 30]}]
+    chk(ob.k3_eindeutig(menue, ob.K3_RX_ABMELDEN)[0]["text"] == "Log out"
+        and ob.k3_eindeutig([{"text": "Disconnect", "rect": [1, 1, 50, 20]}], ob.K3_RX_ABMELDEN)[0] is not None
+        and ob.k3_eindeutig(menue[:1], ob.K3_RX_ABMELDEN) == (None, 0), "Kontextmenü: Log out/Disconnect eindeutig")
+    kn = [{"text": "Connect", "rect": [10, 10, 80, 30]}, {"text": "Cancel", "rect": [100, 10, 80, 30]}]
+    chk(ob.k3_eindeutig(kn, ob.K3_RX_CONNECT)[0]["text"] == "Connect"
+        and ob.k3_eindeutig([dict(kn[0], aus=True)], ob.K3_RX_CONNECT) == (None, 0)
+        and ob.k3_eindeutig([{"text": "Connect to Tradovate broker", "rect": [1, 1, 50, 20]}], ob.K3_RX_CONNECT)[0] is None, "Connect exakt, gesperrt zählt nicht")
+    chk(ob.k3_kontonr({"text": "TDFYSL150146498821USD"}) == "TDFYSL150146498821" and ob.k3_kontonr({"kontonr": "APEX6416990000024"}) == "APEX6416990000024"
+        and ob.K3_RX_TRADEIFY.match("FTDFYSLX150153370465") and ob.K3_RX_APEX.match("PAAPEX6416990000009")
+        and not ob.K3_RX_TRADEIFY.match("APEX6416990000024"), "Kontonummern Tradeify/Apex")
+    # echter Stand pc-usq1i6 01:30 UTC (nach K2-Probelauf) — Rücklesung ok
+    st = {"ticket": {"typen": [{"id": "Market", "aria-selected": "true", "rect": [952, 209, 68, 28]}], "seite": "buy",
+                     "menge": {"wert": "1", "rect": [955, 278, 122, 28]},
+                     "tp": {"an": True, "wert": 100, "einheit": "$", "neben": {"text": "30533.00price"}},
+                     "sl": {"an": True, "wert": 50, "einheit": "$", "neben": {"text": "100ticks"}}},
+          "kauf_knopf": {"text": "Buy 1 MNQZ6 MARKET", "seite": "buy", "disabled": False}}
+    plan = {"richtung": "buy", "menge": 1, "tp": 100.0, "sl": 50.0}
+    r_ok, r_text, r_f = ob.k3_ruecklesung(st, plan)
+    chk(r_ok and "TP 100 $ AN (= 30533.00price)" in r_text and "SL 50 $ AN" in r_text, f"Rücklesung echter Stand ({r_text} {r_f})")
+    st2 = {"ticket": dict(st["ticket"], sl={"an": False, "wert": 50, "einheit": "$"}), "kauf_knopf": st["kauf_knopf"]}
+    chk(not ob.k3_ruecklesung(st2, plan)[0] and not ob.k3_ruecklesung(st, dict(plan, tp=120.0))[0], "Rücklesung: SL aus / falscher TP = nein")
+    chk(ob.handlauf_sperre_frisch(1000.0, 1060.0) and not ob.handlauf_sperre_frisch(1000.0, 1000.0 + 16 * 60)
+        and not ob.handlauf_sperre_frisch(None, 5.0) and not ob.handlauf_sperre_frisch(2000.0, 1000.0), "Sperre gilt ≤ 15 min")
+    # Riegel im Quelltext
+    js = ob.K3_LOGIN_BLICK_JS
+    alle_v = len(_re.findall(r"\.value", js))
+    sicher_v = len(_re.findall(r"\.value \|\| ''\)\.(?:length|toLowerCase\(\)\.indexOf)", js))
+    chk(alle_v == 3 and alle_v == sicher_v, f"Login-Blick gibt nie Feldwerte zurück ({alle_v} Zugriffe, {sicher_v} nur Länge/Anfang)")
+    q_k3 = _i.getsource(ob.modus_k3)
+    chk(q_k3.count('"SENDEN-Knopf"') == 1 and q_k3.index('res["gesendet"] = True') < q_k3.index('"SENDEN-Knopf"'),
+        "K3: genau EIN Senden-Klick, gesendet vorher auf True")
+    chk("klick(cdp_rect(kk" not in _i.getsource(ob._cdp_ticket_fuellen), "Ticket-Helfer (K2/K3) klickt nie den Senden-Knopf")
+    src = _i.getsource(ob)
+    chk(src.count("modus_k3(") == 2, "modus_k3 nur aus dem Hand-Befehl in main()")
+    for f in (ob.modus_tvlesen_cdp, ob.modus_tvkette_cdp, ob.modus_augen):
+        chk("_handlauf_aktiv()" in _i.getsource(f), f"{f.__name__} hält bei laufendem K3 still")
+    chk("pc-usq1i6" in ob.K3_PCS and len(ob.K3_PCS) == 1, "K3 nur auf dem CDP-Test-PC")
+    if ok:
+        print("✓ Puls K3: Knopf exakt, Meldungen/Zeilen/Close eindeutig, Sperre, Login-Blick ohne Feldwerte, nur Hand-Befehl")
     return ok
 
 

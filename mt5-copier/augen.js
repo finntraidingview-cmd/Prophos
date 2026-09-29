@@ -23,7 +23,7 @@
  */
 var PROPHOS_AUGEN = (function () {
   'use strict';
-  var VERSION = '0.7.2';   // 0.7.2 (29.09.2026): Aufnahme stoppt nach 10 min von selbst   // 0.7.1 (29.09.2026, K2 für T3): kauf_knopf.disabled, tp/sl.einheit/wert/neben, summary_reiter   // 0.7.0 (29.09.2026, Aufnahme 00:52): Kontoliste ohne Rollen, Meldungs-Status, Watchlist, Dialog-Knöpfe   // 0.6.1 (29.09.2026): aufnahme_letzte() als Rettungskopie, T3-Banner 'prophos-aufnahme' ausgeblendet   // 0.6.0 (29.09.2026, Aufnahme 00:36 leer): window-capture, roh-Zähler, tab_id, Sichtbarkeit   // 0.5.3 (29.09.2026, Lesung 00:22:50): Konto-Anker Kontonummer zuerst, Summary Total P/L = today   // 0.5.2 (29.09.2026, Lesung 00:22): Panel 'Collapse panel'/Manager-Knopf, Konto entdoppelt + kontonr   // 0.5.1 (29.09.2026, Lesung 00:17 pc-usq1i6): Schalter-Rechteck, ticket.seite/bereit, Legende, veraltete Zeilen   // 0.5.0 (29.09.2026): Aufnahme-Modus (Finn klickt den Ablauf einmal selbst, jede Aktion wird mitgeschrieben)   // 0.4.0 (29.09.2026, K1–K4 für T3): positionen, orders, konto_summary, symbolsuche, toasts.meldungen   // 0.3.0 (29.09.2026, erste echte Lesung pc-usq1i6): TP/SL-Zustand, Konto-Leiste, Toast-Rückfall   // 0.2.0 (29.09.2026): Vertrag mit T3 — globalThis.prophosAugen, Schlüssel-Whitelist, popups, kauf_knopf
+  var VERSION = '0.7.3';   // 0.7.3 (29.09.2026, K3): kurz() gibt geheime Felder (Passwort, Login-Formular) nie mit Wert zurück   // 0.7.2 (29.09.2026): Aufnahme stoppt nach 10 min von selbst   // 0.7.1 (29.09.2026, K2 für T3): kauf_knopf.disabled, tp/sl.einheit/wert/neben, summary_reiter   // 0.7.0 (29.09.2026, Aufnahme 00:52): Kontoliste ohne Rollen, Meldungs-Status, Watchlist, Dialog-Knöpfe   // 0.6.1 (29.09.2026): aufnahme_letzte() als Rettungskopie, T3-Banner 'prophos-aufnahme' ausgeblendet   // 0.6.0 (29.09.2026, Aufnahme 00:36 leer): window-capture, roh-Zähler, tab_id, Sichtbarkeit   // 0.5.3 (29.09.2026, Lesung 00:22:50): Konto-Anker Kontonummer zuerst, Summary Total P/L = today   // 0.5.2 (29.09.2026, Lesung 00:22): Panel 'Collapse panel'/Manager-Knopf, Konto entdoppelt + kontonr   // 0.5.1 (29.09.2026, Lesung 00:17 pc-usq1i6): Schalter-Rechteck, ticket.seite/bereit, Legende, veraltete Zeilen   // 0.5.0 (29.09.2026): Aufnahme-Modus (Finn klickt den Ablauf einmal selbst, jede Aktion wird mitgeschrieben)   // 0.4.0 (29.09.2026, K1–K4 für T3): positionen, orders, konto_summary, symbolsuche, toasts.meldungen   // 0.3.0 (29.09.2026, erste echte Lesung pc-usq1i6): TP/SL-Zustand, Konto-Leiste, Toast-Rückfall   // 0.2.0 (29.09.2026): Vertrag mit T3 — globalThis.prophosAugen, Schlüssel-Whitelist, popups, kauf_knopf
 
   // ── Grundwerkzeuge ─────────────────────────────────────────────────────────
   function sichtbar(el) {
@@ -56,7 +56,9 @@ var PROPHOS_AUGEN = (function () {
   function kurz(el, extra) {
     var o = { tag: el.tagName.toLowerCase(), dn: attr(el, 'data-name'), role: attr(el, 'role'), aria: attr(el, 'aria-label'),
               id: el.id || '', text: txt(el).slice(0, 60), rect: rect(el) };
-    if (typeof el.value === 'string') o.wert = el.value.slice(0, 30);
+    // Geheime Felder nie mit Wert (T3 29.09.2026, K3-Login-Wechsel): inventar() lieferte jeden Feldwert — auch Passwort/Benutzer im
+    // Tradovate-Login, und das Ergebnis geht nach puls_augen. geheim() = Passwortfeld oder jedes Feld in einem Login-Formular/-Dialog.
+    if (typeof el.value === 'string') o.wert = geheim(el) ? (el.value ? '[verborgen]' : '') : el.value.slice(0, 30);
     var zust = ['aria-expanded', 'aria-selected', 'aria-checked', 'aria-pressed', 'aria-disabled', 'disabled', 'checked'];
     for (var i = 0; i < zust.length; i++) { var v = attr(el, zust[i]); if (v !== '') o[zust[i]] = v; }
     if (el.type === 'checkbox' || el.type === 'radio') o.checked = !!el.checked;

@@ -13737,6 +13737,11 @@ def modus_augen(cmd):
     """Augen-Lauf (E0, nur lesen). cmd.start = True: Puls-Chrome auch ohne Schalter starten (einmaliger Menschen-Login)."""
     t0, trail = time.time(), []
     res = {"ok": False, "trail": trail}
+    if _handlauf_aktiv():
+        # K3-Handlauf (29.09.2026): kein Lesen, solange er läuft — inventar() las jeden Feldwert, auch im Tradovate-Login-Formular
+        res.update(ok=True, msg="K3-Handlauf läuft — Augen lesen in dieser Zeit nicht")
+        print(json.dumps(res, ensure_ascii=False))
+        return
     pc = _augen_pc_id()
     sperre = os.path.join(_AUGEN_HIER, "augen.lock")
     try:
@@ -13935,6 +13940,7 @@ class _AugenSitzung:
         if not self.js:
             raise RuntimeError("augen.js fehlt")
         self.ws = _CdpVerbindung(ziel.get("webSocketDebuggerUrl"), timeout=10.0)
+        self.target_id = ziel.get("id")        # K3: Fenster des Tabs (Browser.getWindowForTarget) für den Login kurz nach vorn
         self.maus = (40.0, 40.0)
         try:
             self.ws.rufe("Emulation.setFocusEmulationEnabled", {"enabled": True}, timeout=3)   # minimiertes Fenster = „fokussiert"
@@ -13971,7 +13977,7 @@ class _AugenSitzung:
 
     # Tasten (Master-Klicktest 29.09.2026): keyDown(text)/keyUp je Zeichen — NIE Input.insertText (kein keydown/keypress);
     # Sondertasten mit windowsVirtualKeyCode, alle Abstände über _warte mit Streuung.
-    _VK = {"Tab": 9, "Enter": 13, "Escape": 27, "Backspace": 8, "Delete": 46, "a": 65}
+    _VK = {"Tab": 9, "Enter": 13, "Escape": 27, "Backspace": 8, "Delete": 46, "a": 65, "ArrowDown": 40, "ArrowUp": 38}
 
     def taste(self, key, modifiers=0):
         vk = self._VK.get(key, 0)
@@ -14005,6 +14011,23 @@ class _AugenSitzung:
         self.taste("Tab")
         self.trail.append(f"{name} getippt: {wert}")
         return True
+
+    def hin(self, rect, name):
+        """Maus nur HINFAHREN (Bahn mit Streuung, kein Druck) — z. B. damit TradingView die Knöpfe einer Tabellenzeile zeigt."""
+        p = cdp_klickpunkt(rect)
+        if not p:
+            return False
+        for (x, y) in cdp_klick_bahn(self.maus, p):
+            self.ws.rufe("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": x, "y": y, "buttons": 0}, timeout=3)
+            _warte(0.018, 0.02)
+        self.maus = p
+        self.trail.append(f"Maus über {name} @{int(p[0])},{int(p[1])}")
+        return True
+
+    def js(self, ausdruck, timeout=8):
+        """Eigener Lese-Ausdruck (returnByValue). -> Wert | None bei Ausnahme"""
+        r = self.ws.rufe("Runtime.evaluate", {"expression": ausdruck, "returnByValue": True, "awaitPromise": True}, timeout=timeout)
+        return None if r.get("exceptionDetails") else ((r.get("result") or {}).get("value"))
 
     def rect_von(self, selektor):
         """[x, y, w, h] eines sichtbaren Elements (nur Lesen, kein Klick) — für Reiter, die augen.js nicht als Rechteck liefert."""
@@ -14170,6 +14193,8 @@ def modus_tvlesen_cdp(cmd):
     geschwister = [str(x).strip() for x in (cmd.get("geschwister") or []) if len(_nur_alnum(x)) >= 3][:60]
     opts = {"kontoTexte": [ext] + geschwister}
     trail.append("Weg: Puls-Chrome (CDP)")
+    if _handlauf_aktiv():                    # K3-Handlauf (29.09.2026): im Puls-Chrome klickt gerade ein Hand-Befehl — nicht dazwischen
+        return raus("handlauf", "K3-Handlauf läuft im Puls-Chrome — nichts gelesen, bitte gleich erneut anstoßen.", "sperre")
     try:
         s = sitz[0] = _AugenSitzung(trail)
         ok, code, msg, st, extra = _cdp_konto_sichern(s, ext, opts, trail)
@@ -14240,6 +14265,134 @@ def cdp_ticket_typ_market(typen):
     return None, False
 
 
+def _cdp_ticket_fuellen(s, st, plan, symbol, opts, trail):
+    """Ticket im Puls-Chrome füllen und jeden Wert zurücklesen — K2 und K3 gemeinsam (29.09.2026 unverändert aus
+    modus_tvkette_cdp herausgezogen). KEIN Klick auf den Senden-Knopf. -> (ok, code, msg, schritt, st, knopf)"""
+    ziel = tv_symbol_root(symbol)
+
+    def ticket():
+        return st.get("ticket") if isinstance(st.get("ticket"), dict) else {}
+
+    def knopf():
+        return st.get("kauf_knopf") if isinstance(st.get("kauf_knopf"), dict) else {}
+
+    # --- Symbol
+    for _v in range(2):
+        ist = tv_symbol_root(str(knopf().get("symbol") or ticket().get("symbol") or ""))
+        if ist == ziel:
+            trail.append(f"Symbol steht: {knopf().get('symbol') or ticket().get('symbol')}")
+            break
+        wl = cdp_watchlist_ziel(((ticket().get("symbolsuche") or {}).get("watchlist")), symbol)
+        if not wl or _v:
+            return (False, "asset", f"Symbol {ziel} nicht einstellbar (Ticket zeigt '{ist or '-'}', Watchlist-Treffer "
+                    f"{'1' if wl else '0'}).", "asset", st, None)
+        s.klick(cdp_rect(wl), f"Watchlist {wl.get('symbol')}")
+        _warte(1.2, 0.5)
+        st = s.stand(opts)
+    if not ticket().get("da"):
+        return False, "ticket", "Order-Ticket im Puls-Chrome nicht offen — nichts getippt.", "ticket", st, None
+    # --- Seite
+    if str(knopf().get("seite") or ticket().get("seite") or "") != plan["richtung"]:
+        kachel = ticket().get("kaufen" if plan["richtung"] == "buy" else "verkaufen")
+        if not cdp_rect(kachel):
+            return False, "ticket", f"Seiten-Kachel {plan['richtung'].upper()} nicht gefunden.", "ticket", st, None
+        s.klick(cdp_rect(kachel), f"Seite {plan['richtung'].upper()}")
+        _warte(0.6, 0.3)
+        st = s.stand(opts)
+        if str(knopf().get("seite") or ticket().get("seite") or "") != plan["richtung"]:
+            return False, "ticket", f"Seite steht nicht auf {plan['richtung'].upper()} ('{knopf().get('text') or '-'}').", "ticket", st, None
+    trail.append(f"Seite = {plan['richtung'].upper()}")
+    # --- Order-Typ Market
+    m_, aktiv_ = cdp_ticket_typ_market(ticket().get("typen"))
+    if not aktiv_:
+        if not cdp_rect(m_):
+            return False, "ticket", "Reiter Market nicht gefunden.", "ticket", st, None
+        s.klick(cdp_rect(m_), "Reiter Market")
+        _warte(0.6, 0.3)
+        st = s.stand(opts)
+        if not cdp_ticket_typ_market(ticket().get("typen"))[1]:
+            return False, "ticket", "Reiter Market ist nach dem Klick nicht aktiv.", "ticket", st, None
+    trail.append("Typ = Market")
+
+    def units_setzen():
+        nonlocal st
+        mg = ticket().get("menge") if isinstance(ticket().get("menge"), dict) else {}
+        if cdp_zahl(mg.get("wert")) == float(plan["menge"]):
+            return True
+        if not cdp_rect(mg):
+            return False
+        for _v in range(2):
+            s.feld_setzen(cdp_rect(mg), str(plan["menge"]), "Units")
+            _warte(0.4, 0.2)
+            st = s.stand(opts)
+            mg = ticket().get("menge") if isinstance(ticket().get("menge"), dict) else {}
+            if cdp_zahl(mg.get("wert")) == float(plan["menge"]):
+                return True
+            trail.append(f"Units: '{mg.get('wert')}' statt {plan['menge']} — tippe einmal neu")
+        return False
+
+    if not units_setzen():
+        return False, "ticket", f"Units stehen nicht auf {plan['menge']} (Feld: '{(ticket().get('menge') or {}).get('wert')}').", "ticket", st, None
+    trail.append(f"Units = {plan['menge']}")
+    # --- TP / SL: Schalter + Wert (Einheit $)
+    for schl, name, soll in (("tp", "Take profit", plan["tp"]), ("sl", "Stop loss", plan["sl"])):
+        f_ = ticket().get(schl) if isinstance(ticket().get(schl), dict) else {}
+        if not f_.get("da", True) and soll is not None:
+            return False, "ticket", f"'{name}' im Ticket nicht gefunden.", "ticket", st, None
+        an = f_.get("an")
+        if soll is None:
+            if an:
+                if not cdp_rect(f_.get("schalter")):
+                    return False, "ticket", f"'{name}' ist AN, Schalter nicht greifbar.", "ticket", st, None
+                s.klick(cdp_rect(f_.get("schalter")), f"Schalter {name} AUS")
+                _warte(0.5, 0.2)
+                st = s.stand(opts)
+                if (ticket().get(schl) or {}).get("an"):
+                    return False, "ticket", f"Schalter '{name}' ließ sich nicht AUS stellen.", "ticket", st, None
+            trail.append(f"{name} AUS")
+            continue
+        if "$" not in str(f_.get("einheit") or ""):
+            return False, "ticket", f"'{name}' steht nicht auf $ (Einheit '{f_.get('einheit') or '?'}') — der Wert {soll:g} wäre etwas anderes.", "ticket", st, None
+        if an is False:
+            if not cdp_rect(f_.get("schalter")):
+                return False, "ticket", f"'{name}' ist AUS, Schalter nicht greifbar.", "ticket", st, None
+            s.klick(cdp_rect(f_.get("schalter")), f"Schalter {name} AN")
+            _warte(0.5, 0.2)
+            st = s.stand(opts)
+            f_ = ticket().get(schl) if isinstance(ticket().get(schl), dict) else {}
+        if cdp_zahl(f_.get("wert")) != float(soll):
+            ok_w = False
+            for _v in range(2):
+                if not cdp_rect(f_.get("feld")):
+                    break
+                s.feld_setzen(cdp_rect(f_.get("feld")), f"{soll:g}", name)
+                _warte(0.4, 0.2)
+                st = s.stand(opts)
+                f_ = ticket().get(schl) if isinstance(ticket().get(schl), dict) else {}
+                if cdp_zahl(f_.get("wert")) == float(soll):
+                    ok_w = True
+                    break
+            if not ok_w:
+                return False, "ticket", f"{name}: im Feld steht '{f_.get('wert')}' statt {soll:g}.", "ticket", st, None
+        if f_.get("an") is False:
+            return False, "ticket", f"'{name}' steht auf {soll:g} $, aber der Schalter ist AUS — die Order ginge ohne {name} raus.", "ticket", st, None
+        trail.append(f"{name} = {soll:g} $ (Schalter {'AN' if f_.get('an') else 'unlesbar'})")
+    # --- Units nach TP/SL nochmal (TradingView dreht sie gern auf den alten Ticket-Wert zurück)
+    st = s.stand(opts)
+    if not units_setzen():
+        return False, "ticket", "Units nach TP/SL nicht mehr korrekt.", "ticket", st, None
+    # --- Knopf-Beweis
+    kk = knopf()
+    ok_k, f_k = tv_senden_text_passt(str(kk.get("text") or ""), plan["richtung"], plan["menge"])
+    if not ok_k:
+        return False, "knopf", f_k, "knopf", st, None
+    if not any(tv_symbol_root(w) == ziel for w in str(kk.get("text") or "").split()):
+        return False, "knopf", f"Auf dem Knopf steht nicht {ziel} ('{str(kk.get('text'))[:40]}').", "knopf", st, None
+    if kk.get("disabled"):
+        return False, "knopf", f"Senden-Knopf ist gesperrt ('{str(kk.get('text'))[:40]}').", "knopf", st, None
+    return True, "", "", "knopf", st, kk
+
+
 def modus_tvkette_cdp(cmd):
     """tvkonto über das Puls-Chrome (CDP) — K2: Ticket vollständig ausfüllen und beweisen, NIE senden."""
     res = {"ok": False, "code": "", "msg": "", "trail": "", "schritt": "start", "gesendet": False, "retry_ok": True,
@@ -14269,6 +14422,8 @@ def modus_tvkette_cdp(cmd):
     geschwister = [str(x).strip() for x in (cmd.get("geschwister") or []) if len(_nur_alnum(x)) >= 3][:60]
     opts = {"kontoTexte": [ext] + geschwister}
     trail.append("Weg: Puls-Chrome (CDP, K2 Probelauf — kein Senden)")
+    if _handlauf_aktiv():                    # K3-Handlauf (29.09.2026): nicht ins laufende Ticket/Dropdown klicken
+        return raus("handlauf", "K3-Handlauf läuft im Puls-Chrome — nichts geklickt, bitte gleich erneut anstoßen.", "sperre")
     try:
         s = sitz[0] = _AugenSitzung(trail)
         ok, code, msg, st, extra = _cdp_konto_sichern(s, ext, opts, trail)
@@ -14278,128 +14433,9 @@ def modus_tvkette_cdp(cmd):
         if not symbol:
             res["ok"] = True
             return raus("", f"Richtiges Konto ist aktiv ({res['konto_aktiv'][:60]}).", "konto")
-        ziel = tv_symbol_root(symbol)
-
-        def ticket():
-            return st.get("ticket") if isinstance(st.get("ticket"), dict) else {}
-
-        def knopf():
-            return st.get("kauf_knopf") if isinstance(st.get("kauf_knopf"), dict) else {}
-
-        # --- Symbol
-        for _v in range(2):
-            ist = tv_symbol_root(str(knopf().get("symbol") or ticket().get("symbol") or ""))
-            if ist == ziel:
-                trail.append(f"Symbol steht: {knopf().get('symbol') or ticket().get('symbol')}")
-                break
-            wl = cdp_watchlist_ziel(((ticket().get("symbolsuche") or {}).get("watchlist")), symbol)
-            if not wl or _v:
-                return raus("asset", f"Symbol {ziel} nicht einstellbar (Ticket zeigt '{ist or '-'}', Watchlist-Treffer "
-                            f"{'1' if wl else '0'}).", "asset")
-            s.klick(cdp_rect(wl), f"Watchlist {wl.get('symbol')}")
-            _warte(1.2, 0.5)
-            st = s.stand(opts)
-        if not ticket().get("da"):
-            return raus("ticket", "Order-Ticket im Puls-Chrome nicht offen — nichts getippt.", "ticket")
-        # --- Seite
-        if str(knopf().get("seite") or ticket().get("seite") or "") != plan["richtung"]:
-            kachel = ticket().get("kaufen" if plan["richtung"] == "buy" else "verkaufen")
-            if not cdp_rect(kachel):
-                return raus("ticket", f"Seiten-Kachel {plan['richtung'].upper()} nicht gefunden.", "ticket")
-            s.klick(cdp_rect(kachel), f"Seite {plan['richtung'].upper()}")
-            _warte(0.6, 0.3)
-            st = s.stand(opts)
-            if str(knopf().get("seite") or ticket().get("seite") or "") != plan["richtung"]:
-                return raus("ticket", f"Seite steht nicht auf {plan['richtung'].upper()} ('{knopf().get('text') or '-'}').", "ticket")
-        trail.append(f"Seite = {plan['richtung'].upper()}")
-        # --- Order-Typ Market
-        m_, aktiv_ = cdp_ticket_typ_market(ticket().get("typen"))
-        if not aktiv_:
-            if not cdp_rect(m_):
-                return raus("ticket", "Reiter Market nicht gefunden.", "ticket")
-            s.klick(cdp_rect(m_), "Reiter Market")
-            _warte(0.6, 0.3)
-            st = s.stand(opts)
-            if not cdp_ticket_typ_market(ticket().get("typen"))[1]:
-                return raus("ticket", "Reiter Market ist nach dem Klick nicht aktiv.", "ticket")
-        trail.append("Typ = Market")
-
-        def units_setzen():
-            nonlocal st
-            mg = ticket().get("menge") if isinstance(ticket().get("menge"), dict) else {}
-            if cdp_zahl(mg.get("wert")) == float(plan["menge"]):
-                return True
-            if not cdp_rect(mg):
-                return False
-            for _v in range(2):
-                s.feld_setzen(cdp_rect(mg), str(plan["menge"]), "Units")
-                _warte(0.4, 0.2)
-                st = s.stand(opts)
-                mg = ticket().get("menge") if isinstance(ticket().get("menge"), dict) else {}
-                if cdp_zahl(mg.get("wert")) == float(plan["menge"]):
-                    return True
-                trail.append(f"Units: '{mg.get('wert')}' statt {plan['menge']} — tippe einmal neu")
-            return False
-
-        if not units_setzen():
-            return raus("ticket", f"Units stehen nicht auf {plan['menge']} (Feld: '{(ticket().get('menge') or {}).get('wert')}').", "ticket")
-        trail.append(f"Units = {plan['menge']}")
-        # --- TP / SL: Schalter + Wert (Einheit $)
-        for schl, name, soll in (("tp", "Take profit", plan["tp"]), ("sl", "Stop loss", plan["sl"])):
-            f_ = ticket().get(schl) if isinstance(ticket().get(schl), dict) else {}
-            if not f_.get("da", True) and soll is not None:
-                return raus("ticket", f"'{name}' im Ticket nicht gefunden.", "ticket")
-            an = f_.get("an")
-            if soll is None:
-                if an:
-                    if not cdp_rect(f_.get("schalter")):
-                        return raus("ticket", f"'{name}' ist AN, Schalter nicht greifbar.", "ticket")
-                    s.klick(cdp_rect(f_.get("schalter")), f"Schalter {name} AUS")
-                    _warte(0.5, 0.2)
-                    st = s.stand(opts)
-                    if (ticket().get(schl) or {}).get("an"):
-                        return raus("ticket", f"Schalter '{name}' ließ sich nicht AUS stellen.", "ticket")
-                trail.append(f"{name} AUS")
-                continue
-            if "$" not in str(f_.get("einheit") or ""):
-                return raus("ticket", f"'{name}' steht nicht auf $ (Einheit '{f_.get('einheit') or '?'}') — der Wert {soll:g} wäre etwas anderes.", "ticket")
-            if an is False:
-                if not cdp_rect(f_.get("schalter")):
-                    return raus("ticket", f"'{name}' ist AUS, Schalter nicht greifbar.", "ticket")
-                s.klick(cdp_rect(f_.get("schalter")), f"Schalter {name} AN")
-                _warte(0.5, 0.2)
-                st = s.stand(opts)
-                f_ = ticket().get(schl) if isinstance(ticket().get(schl), dict) else {}
-            if cdp_zahl(f_.get("wert")) != float(soll):
-                ok_w = False
-                for _v in range(2):
-                    if not cdp_rect(f_.get("feld")):
-                        break
-                    s.feld_setzen(cdp_rect(f_.get("feld")), f"{soll:g}", name)
-                    _warte(0.4, 0.2)
-                    st = s.stand(opts)
-                    f_ = ticket().get(schl) if isinstance(ticket().get(schl), dict) else {}
-                    if cdp_zahl(f_.get("wert")) == float(soll):
-                        ok_w = True
-                        break
-                if not ok_w:
-                    return raus("ticket", f"{name}: im Feld steht '{f_.get('wert')}' statt {soll:g}.", "ticket")
-            if f_.get("an") is False:
-                return raus("ticket", f"'{name}' steht auf {soll:g} $, aber der Schalter ist AUS — die Order ginge ohne {name} raus.", "ticket")
-            trail.append(f"{name} = {soll:g} $ (Schalter {'AN' if f_.get('an') else 'unlesbar'})")
-        # --- Units nach TP/SL nochmal (TradingView dreht sie gern auf den alten Ticket-Wert zurück)
-        st = s.stand(opts)
-        if not units_setzen():
-            return raus("ticket", "Units nach TP/SL nicht mehr korrekt.", "ticket")
-        # --- Knopf-Beweis
-        kk = knopf()
-        ok_k, f_k = tv_senden_text_passt(str(kk.get("text") or ""), plan["richtung"], plan["menge"])
-        if not ok_k:
-            return raus("knopf", f_k, "knopf")
-        if not any(tv_symbol_root(w) == ziel for w in str(kk.get("text") or "").split()):
-            return raus("knopf", f"Auf dem Knopf steht nicht {ziel} ('{str(kk.get('text'))[:40]}').", "knopf")
-        if kk.get("disabled"):
-            return raus("knopf", f"Senden-Knopf ist gesperrt ('{str(kk.get('text'))[:40]}').", "knopf")
+        ok, code, msg, schritt, st, kk = _cdp_ticket_fuellen(s, st, plan, symbol, opts, trail)
+        if not ok:
+            return raus(code, msg, schritt)
         tpsl = f"TP {str(plan['tp']) + ' $' if plan['tp'] else 'aus'}, SL {str(plan['sl']) + ' $' if plan['sl'] else 'aus'}"
         trail.append(f"Knopf: '{str(kk.get('text'))[:50]}' — NICHT geklickt (K2)")
         text = f"PROBELAUF (CDP, K2): Ticket steht — Knopf zeigt '{str(kk.get('text'))[:50]}', {tpsl}. NICHT gesendet."
@@ -14410,6 +14446,909 @@ def modus_tvkette_cdp(cmd):
         return raus("", text, "probe", tv_symbol=kk.get("symbol"))
     except Exception as e:
         return raus("cdp_fehler", f"Puls-Chrome/CDP: {type(e).__name__}: {str(e)[:160]}", "cdp")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PULS ÜBER CDP — K3 SCHARFER HANDLAUF (29.09.2026, Finns direkte Anweisung an T3: „1 MNQ auf einem Apex-Konto, der ganze
+# Ablauf über CDP, ich schaue live zu"). NUR von Hand am CDP-Test-PC:
+#   order_bot.py k3 <ApexExtID> <Symbol> <buy|sell> 1 <TP$> <SL$> [<Login-Anfang>]    (ohne Login-Anfang: Schritte 1–7)
+#   order_bot.py k3login <Login-Anfang>                                                 (nur Schritte 8–9, Konto muss flach sein)
+# Kein Weg aus Prophos/Panel führt hierher — tvkonto/tvkette bleiben K2 (nie senden).
+# Ablauf: [1] Konto → [2] Summary vorher → [3] Ticket (K2-Helfer) + Rücklesung → [4] Knopf-Text EXAKT → EIN Klick →
+# [5] Beweis (sichtbare Zeile + Fill/TP/SL aus den Meldungen) → [6] Close-Knopf der EINEN Zeile beweisen, klicken, Dialog
+# [data-name=submit-button] (Master 29.09.2026: der Tabellen-Knopf ist noch nie live geklickt — kein eindeutiger Knopf = Abbruch,
+# nie Koordinaten raten) → flach (2 Lesungen, Tabelle sichtbar) + Brackets storniert → [7] Summary nachher →
+# [8] nur flach: Tradovate im Puls-Chrome abmelden (Kontextmenü neben „Tradovate"), Kachel Tradovate, Chrome-Autofill per
+# Tastatur (Anfang tippen, Pfeil runter, Enter), Connect → [9] Tradeify im Dropdown, ein Konto lesen, KEINE Order.
+# Jeder Schritt neu gelesen, jede Mehrdeutigkeit = Abbruch; nach dem Senden-Klick wird er nie wiederholt.
+# Passwort (Finn): nie gelesen, nie geloggt — K3_LOGIN_BLICK_JS liefert nur Ja/Nein (gefüllt, Autofill), nie einen Wert.
+# Sperrdatei puls_handlauf.lock: tvlesen/tvkette über CDP und der Augen-Prozess (inventar() las Feldwerte!) halten still.
+# ═══════════════════════════════════════════════════════════════════════════
+K3_PCS = ("pc-usq1i6",)
+HANDLAUF_SPERRE = "puls_handlauf.lock"
+HANDLAUF_SPERRE_S = 15 * 60.0
+K3_PUNKTWERT = {"MNQ": 2.0}                  # $ je Punkt und Kontrakt — K3 kennt nur MNQ (Finn: „nur 1 MNQ")
+K3_RX_APEX = re.compile(r"^(PA)?APEX\d", re.I)
+K3_RX_TRADEIFY = re.compile(r"^F?TDFY", re.I)
+K3_RX_KONTONR = re.compile(r"[A-Z]{2,}[A-Z0-9_-]*?\d{5,}")
+K3_RX_CLOSE = re.compile(r"\bclose\b|flatten|schlie(ß|ss)en|glattstell", re.I)
+K3_RX_KREUZ = re.compile(r"^[×✕✖]$")
+K3_RX_NICHT_CLOSE = re.compile(r"reverse|umkehr|protect|bracket|schutz|modify|edit|(ä|ae)ndern|setting|einstell|manager", re.I)
+K3_RX_ABMELDEN = re.compile(r"^\s*(log\s*out|logout|sign\s*out|disconnect|abmelden|ausloggen|verbindung\s*trennen|trennen)\b", re.I)
+K3_RX_JA = re.compile(r"^\s*(log\s*out|logout|sign\s*out|disconnect|yes|ok|confirm|abmelden|ja|trennen)\s*$", re.I)
+K3_RX_CONNECT = re.compile(r"^\s*(connect|log\s*in|login|sign\s*in|verbinden|anmelden|einloggen)\s*$", re.I)
+K3_RX_FREIGABE = re.compile(r"^\s*(allow|authori[sz]e|zulassen|erlauben|genehmigen)\s*$", re.I)
+K3_RX_ORDER_OFFEN = re.compile(r"working|accepted|pending|placed|received|suspended|wartend|aktiv|offen|platziert", re.I)
+K3_RX_ORDER_ZU = re.compile(r"fill|cancel|reject|expir|ausgef|storn|abgelehnt|abgelaufen", re.I)
+
+
+class _LiveSpur(_StempelSpur):
+    """Spur, die jede Station SOFORT auf die Konsole schreibt — Finn schaut beim Handlauf live zu."""
+    def append(self, s):
+        super().append(s)
+        try:
+            print("  " + self[-1], flush=True)
+        except Exception:
+            pass
+
+
+def handlauf_sperre_frisch(mtime, jetzt):
+    """REIN RECHNEND (testbar): Sperrdatei gilt ≤ 15 min (ein K3-Lauf dauert wenige Minuten; ein Absturz sperrt nie ewig)."""
+    try:
+        alt = float(jetzt) - float(mtime)
+    except (TypeError, ValueError):
+        return False
+    return 0 <= alt <= HANDLAUF_SPERRE_S
+
+
+def _handlauf_aktiv():
+    try:
+        return handlauf_sperre_frisch(os.path.getmtime(os.path.join(_AUGEN_HIER, HANDLAUF_SPERRE)), time.time())
+    except OSError:
+        return False
+
+
+def _handlauf_setzen(an):
+    p = os.path.join(_AUGEN_HIER, HANDLAUF_SPERRE)
+    try:
+        if an:
+            with open(p, "w") as f:
+                f.write(str(os.getpid()))
+        elif os.path.exists(p):
+            os.remove(p)
+    except OSError:
+        pass
+
+
+def k3_knopf_soll(richtung, menge, symbol):
+    """REIN RECHNEND (testbar): der Knopf-Text, den Finn verlangt — z. B. „Buy 1 MNQZ6 MARKET"."""
+    return f"{'Buy' if str(richtung).lower() == 'buy' else 'Sell'} {int(menge)} {str(symbol or '').strip().upper()} MARKET"
+
+
+def k3_knopf_exakt(text, richtung, menge, symbol):
+    """REIN RECHNEND (testbar): Knopf-Text GENAU wie verlangt, nur Leerraum normalisiert — keine Teiltreffer."""
+    return " ".join(str(text or "").split()) == k3_knopf_soll(richtung, menge, symbol)
+
+
+def k3_fmt(x, stellen=2):
+    try:
+        return f"{float(x):,.{stellen}f}"
+    except (TypeError, ValueError):
+        return "?"
+
+
+def k3_meldung_schluessel(m):
+    return "|".join(str(m.get(k)) for k in ("art", "status", "seite", "menge", "preis", "text"))
+
+
+def k3_neue_meldungen(vorher, jetzt):
+    """REIN RECHNEND (testbar): Meldungen, deren Schlüssel vor dem Klick nicht da war (jede nur einmal)."""
+    alt, out, gesehen = set(vorher or ()), [], set()
+    for m in jetzt or []:
+        if not isinstance(m, dict):
+            continue
+        k = k3_meldung_schluessel(m)
+        if k in alt or k in gesehen:
+            continue
+        gesehen.add(k)
+        out.append(m)
+    return out
+
+
+def _k3_menge_passt(m, menge):
+    try:
+        return m.get("menge") is None or float(m.get("menge")) == float(menge)
+    except (TypeError, ValueError):
+        return False
+
+
+def k3_order_meldungen(neu, richtung, menge):
+    """REIN RECHNEND (testbar): Fill der eigenen Order + platzierte TP/SL-Beine (Gegenseite) aus NEUEN Meldungen.
+    -> {'fill', 'tp', 'sl'} (Preis | None)"""
+    gegen = "sell" if richtung == "buy" else "buy"
+
+    def erst(art, seite, stati):
+        for m in neu or []:
+            if m.get("art") == art and m.get("seite") == seite and m.get("status") in stati and m.get("aktiv", True) \
+                    and _k3_menge_passt(m, menge):
+                return m.get("preis")
+        return None
+    return {"fill": erst("fill", richtung, ("ausgefuehrt",)), "tp": erst("tp", gegen, ("platziert", "geaendert", None)),
+            "sl": erst("sl", gegen, ("platziert", "geaendert", None))}
+
+
+def k3_close_meldungen(neu, richtung, menge):
+    """REIN RECHNEND (testbar): Close-Fill (Gegenseite, ausgeführt) + welche Bracket-Beine storniert wurden. -> (preis|None, {'tp','sl'})"""
+    gegen = "sell" if richtung == "buy" else "buy"
+    fill = next((m.get("preis") for m in neu or [] if m.get("art") == "fill" and m.get("seite") == gegen
+                 and m.get("status") == "ausgefuehrt" and _k3_menge_passt(m, menge)), None)
+    storno = {m.get("art") for m in neu or [] if m.get("art") in ("tp", "sl") and m.get("status") == "storniert"}
+    return fill, storno
+
+
+def k3_zeilen(positionen, root):
+    """REIN RECHNEND (testbar): SICHTBARE Positionszeilen dieser Wurzel — unsichtbare sind womöglich veraltet, nie Wahrheit."""
+    return [p for p in positionen or [] if isinstance(p, dict) and p.get("sichtbar")
+            and tv_symbol_root(str(p.get("symbol") or "")) == root]
+
+
+def k3_offene_orders(orders, root):
+    """REIN RECHNEND (testbar): sichtbare Order-Zeilen der Wurzel mit Status „Working"/… (nie Filled/Cancelled/Rejected)."""
+    return [o for o in orders or [] if isinstance(o, dict) and o.get("sichtbar")
+            and tv_symbol_root(str(o.get("symbol") or "")) == root
+            and K3_RX_ORDER_OFFEN.search(str(o.get("status") or "")) and not K3_RX_ORDER_ZU.search(str(o.get("status") or ""))]
+
+
+def k3_summary_werte(summary):
+    """REIN RECHNEND (testbar): (Balance, Total P/L) aus {Label: Text} der „Account summary" (Finn: Total P/L = heute)."""
+    bal = tpl = None
+    for k, v in (summary or {}).items():
+        kl = re.sub(r"\s+", " ", str(k)).strip().lower()
+        if bal is None and kl in ("account balance", "balance", "kontostand"):
+            bal = tv_geld_lesen(v)
+        if tpl is None and re.fullmatch(r"total p\s*/\s*l", kl):
+            tpl = tv_geld_lesen(v)
+    return bal, tpl
+
+
+def _k3_rect_in(a, b):
+    try:
+        return a[0] >= b[0] and a[1] >= b[1] and a[0] + a[2] <= b[0] + b[2] and a[1] + a[3] <= b[1] + b[3]
+    except (TypeError, IndexError):
+        return False
+
+
+def k3_close_knopf(zeile):
+    """REIN RECHNEND (testbar): GENAU EIN Schließen-Knopf in DIESER Zeile (aria/title/data-name/Text „close"/×, nie Reverse/
+    Protect). Hülle + innerer Knopf zählen einmal (der innere gewinnt), gleiche Rechtecke einmal. -> (knopf|None, anzahl)"""
+    kand = []
+    for k in (zeile or {}).get("knoepfe") or []:
+        if not isinstance(k, dict) or cdp_klickpunkt(k.get("rect")) is None:
+            continue
+        lab = " ".join(str(k.get(f) or "") for f in ("aria", "title", "dn", "text"))
+        if (K3_RX_CLOSE.search(lab) or K3_RX_KREUZ.match(str(k.get("text") or "").strip())) and not K3_RX_NICHT_CLOSE.search(lab):
+            kand.append(k)
+    kand = [k for k in kand if not any(j is not k and list(j["rect"]) != list(k["rect"]) and _k3_rect_in(j["rect"], k["rect"]) for j in kand)]
+    einzeln = {}
+    for k in kand:
+        einzeln.setdefault(tuple(k["rect"]), k)
+    kand = list(einzeln.values())
+    return (kand[0] if len(kand) == 1 else None), len(kand)
+
+
+def k3_label(k):
+    return " / ".join(x for x in (str(k.get("text") or ""), str(k.get("aria") or ""), str(k.get("title") or "")) if x)[:60] \
+        if isinstance(k, dict) else "?"
+
+
+def k3_eindeutig(items, rx):
+    """REIN RECHNEND (testbar): GENAU EIN klickbares Element, dessen Text, aria-label oder title passt. -> (el|None, anzahl)"""
+    kand = [k for k in items or [] if isinstance(k, dict) and not k.get("aus") and cdp_klickpunkt(k.get("rect")) is not None
+            and any(rx.search(str(k.get(f) or "")) for f in ("text", "aria", "title"))]
+    return (kand[0] if len(kand) == 1 else None), len(kand)
+
+
+def k3_kontonr(e):
+    m = K3_RX_KONTONR.search(re.sub(r"\s", "", str((e or {}).get("kontonr") or (e or {}).get("text") or "")).upper())
+    return m.group(0) if m else ""
+
+
+def k3_ruecklesung(st, plan):
+    """REIN RECHNEND (testbar): das komplette Ticket zurückgelesen. -> (ok, zeile, fehler[])"""
+    tk = st.get("ticket") if isinstance(st.get("ticket"), dict) else {}
+    kk = st.get("kauf_knopf") if isinstance(st.get("kauf_knopf"), dict) else {}
+    fehler = []
+    market = cdp_ticket_typ_market(tk.get("typen"))[1]
+    if not market:
+        fehler.append("Typ nicht Market")
+    seite = str(kk.get("seite") or tk.get("seite") or "")
+    if seite != plan["richtung"]:
+        fehler.append(f"Seite '{seite or '-'}' statt {plan['richtung']}")
+    mg = cdp_zahl((tk.get("menge") or {}).get("wert")) if isinstance(tk.get("menge"), dict) else None
+    if mg != float(plan["menge"]):
+        fehler.append(f"Units '{mg}' statt {plan['menge']}")
+    teile = [f"Typ {'Market' if market else '?'}", f"Seite {seite or '-'}", f"Units {k3_fmt(mg, 0) if mg is not None else '-'}"]
+    for schl, name, soll in (("tp", "TP", plan["tp"]), ("sl", "SL", plan["sl"])):
+        f_ = tk.get(schl) if isinstance(tk.get(schl), dict) else {}
+        w, an, einh = cdp_zahl(f_.get("wert")), f_.get("an"), str(f_.get("einheit") or "")
+        nb = f_.get("neben") if isinstance(f_.get("neben"), dict) else {}
+        if an is not True:
+            fehler.append(f"{name}-Schalter nicht AN")
+        if "$" not in einh:
+            fehler.append(f"{name}-Einheit '{einh or '?'}' statt $")
+        if soll is None or w != float(soll):
+            fehler.append(f"{name} '{w}' statt {soll}")
+        teile.append(f"{name} {k3_fmt(w, 0) if w is not None else '-'} {einh or '?'} {'AN' if an is True else 'AUS/unlesbar'}"
+                     + (f" (= {nb.get('text')})" if nb.get("text") else ""))
+    return not fehler, " · ".join(teile), fehler
+
+
+K3_ZEILEN_JS = r"""(function () {
+  function sb(e) { try { if (!e || !e.getBoundingClientRect) return false; var r = e.getBoundingClientRect(); if (r.width < 3 || r.height < 3) return false;
+    if (r.bottom < 0 || r.right < 0 || r.top > innerHeight || r.left > innerWidth) return false; var s = getComputedStyle(e);
+    return s.visibility !== 'hidden' && s.display !== 'none' && s.opacity !== '0'; } catch (_) { return false; } }
+  function R(e) { var r = e.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)]; }
+  function T(e) { return String((e && e.textContent) || '').replace(/\s+/g, ' ').trim(); }
+  function A(e, n) { try { return e.getAttribute(n) || ''; } catch (_) { return ''; } }
+  var rows = new Map(), out = [];
+  document.querySelectorAll('td[data-label]').forEach(function (td) { var tr = td.closest('tr'); if (!tr) return;
+    if (!rows.has(tr)) rows.set(tr, {}); rows.get(tr)[A(td, 'data-label')] = T(td).slice(0, 40); });
+  rows.forEach(function (sp, tr) {
+    if (!sp.Symbol) return;
+    var kn = Array.prototype.slice.call(tr.querySelectorAll('button,[role="button"],[data-name],[aria-label],[title]')).filter(function (e) {
+      return sb(e) && (e.tagName === 'BUTTON' || A(e, 'role') === 'button' || A(e, 'aria-label') || A(e, 'title') || A(e, 'data-name')); });
+    out.push({ symbol: sp.Symbol, sichtbar: sb(tr), zeile: sb(tr) ? R(tr) : null, spalten: sp,
+               knoepfe: kn.slice(0, 16).map(function (e) { return { tag: e.tagName.toLowerCase(), text: T(e).slice(0, 30),
+                 aria: A(e, 'aria-label').slice(0, 40), title: A(e, 'title').slice(0, 40), dn: A(e, 'data-name'), rect: R(e) }; }) });
+  });
+  return out.slice(0, 20);
+})()"""
+
+# Login-Blick (K3 Schritt 8): NIE einen Feldwert zurückgeben — Passwort nur „gefüllt"/„Autofill" als Ja/Nein, Benutzerfeld nur
+# „gefüllt" und „beginnt mit dem getippten Anfang" (Finn 29.09.2026: Passwort nie lesen oder loggen). :-webkit-autofill zeigt auch
+# die Vorschau eines per Pfeil markierten Chrome-Vorschlags — daran hängt, ob Enter überhaupt gedrückt wird.
+K3_LOGIN_BLICK_JS = r"""(function (anfang) {
+  function sb(e) { try { if (!e || !e.getBoundingClientRect) return false; var r = e.getBoundingClientRect(); if (r.width < 3 || r.height < 3) return false;
+    if (r.bottom < 0 || r.right < 0 || r.top > innerHeight || r.left > innerWidth) return false; var s = getComputedStyle(e);
+    return s.visibility !== 'hidden' && s.display !== 'none' && s.opacity !== '0'; } catch (_) { return false; } }
+  function R(e) { var r = e.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)]; }
+  function T(e) { return String((e && e.textContent) || '').replace(/\s+/g, ' ').trim(); }
+  function A(e, n) { try { return e.getAttribute(n) || ''; } catch (_) { return ''; } }
+  function Q(s, w) { try { return Array.prototype.slice.call((w || document).querySelectorAll(s)); } catch (_) { return []; } }
+  function K(e) { return { tag: e.tagName.toLowerCase(), text: T(e).slice(0, 40), aria: A(e, 'aria-label').slice(0, 40), title: A(e, 'title').slice(0, 40),
+    dn: A(e, 'data-name'), role: A(e, 'role'), rect: R(e), aus: !!(e.disabled || A(e, 'aria-disabled') === 'true'),
+    an: A(e, 'aria-selected') === 'true' || A(e, 'aria-checked') === 'true' || A(e, 'aria-pressed') === 'true' }; }
+  function innen(l) { return l.filter(function (e) { return !l.some(function (f) { return f !== e && e.contains(f); }); }); }
+  function af(e) { try { return e.matches(':-webkit-autofill'); } catch (_) { try { return e.matches(':autofill'); } catch (__) { return false; } } }
+  var o = { url: String(location.href).slice(0, 120), titel: String(document.title).slice(0, 60), fokus: document.hasFocus(), sichtbar: document.visibilityState };
+  var fp = document.getElementById('footer-chart-panel');
+  o.leiste = fp ? T(fp).slice(0, 60) : null;
+  var ctx = innen(Q('button,[role="button"]', fp || document).filter(sb).filter(function (e) { return /context\s*menu|kontextmen/i.test(A(e, 'title') + ' ' + A(e, 'aria-label')); }));
+  o.ctx = ctx.length === 1 ? K(ctx[0]) : (ctx.length ? { mehrdeutig: ctx.length } : null);
+  var tp = Q('button,[role="button"]', fp || document).filter(sb).filter(function (e) { return /^(trading\s*panel|handelspanel)$/i.test(T(e) || A(e, 'aria-label')); });
+  o.panel_knopf = tp.length === 1 ? K(tp[0]) : null;
+  o.menue = innen(Q('[role="menuitem"],[role="menuitemcheckbox"],[role="menuitemradio"],[data-role="menuitem"],[data-name="menu-inner"] [role],[data-name="popup-menu-container"] [role]').filter(sb))
+    .filter(function (e) { return T(e).length <= 60; }).slice(0, 25).map(K);
+  o.dialoge = Q('[role="dialog"],[role="alertdialog"],[data-dialog-name],[aria-modal="true"]').filter(sb).slice(0, 4).map(function (d) {
+    return { titel: T(d.querySelector('h1,h2,h3,[class*="title"]')).slice(0, 60), text: T(d).slice(0, 240), rect: R(d),
+             knoepfe: innen(Q('button,[role="button"],[role="tab"],[role="radio"],input[type="submit"]', d).filter(sb)).slice(0, 20).map(K) }; });
+  var pws = Q('input[type="password"]').filter(sb);
+  if (pws.length) {
+    var pw = pws[0];
+    var box = pw.closest('form') || pw.closest('[role="dialog"],[data-dialog-name],[aria-modal="true"]') || document.body;
+    var felder = Q('input', box).filter(sb).filter(function (e) { var t = String(e.type || 'text').toLowerCase();
+      return (t === 'text' || t === 'email' || t === 'tel') && !e.readOnly && !e.disabled; });
+    var vor = felder.filter(function (e) { return !!(e.compareDocumentPosition(pw) & 4); });
+    var u = vor.length ? vor[vor.length - 1] : null, p = String(anfang || '').toLowerCase();
+    o.login = { pw_n: pws.length, box: R(box), pw: { rect: R(pw), gefuellt: String(pw.value || '').length > 0, autofill: af(pw), fokus: document.activeElement === pw },
+      user: u ? { rect: R(u), gefuellt: String(u.value || '').length > 0, passt: !!p && String(u.value || '').toLowerCase().indexOf(p) === 0,
+                  autofill: af(u), fokus: document.activeElement === u } : null,
+      knoepfe: innen(Q('button,[role="button"],input[type="submit"]', box).filter(sb)).slice(0, 12).map(K),
+      merken: (function () { var c = Q('input[type="checkbox"]', box).filter(function (e) { return /remember|merken|angemeldet/i.test(T(e.closest('label') || e.parentElement)); });
+                              return c.length === 1 ? { an: !!c[0].checked } : null; })() };
+  }
+  var kach = [];
+  Q('div,span,button,a,p,img').filter(sb).forEach(function (e) {
+    if (fp && fp.contains(e)) return;
+    var t = e.tagName === 'IMG' ? A(e, 'alt') : (e.children.length ? '' : T(e));
+    if (!/^tradovate$/i.test(t)) return;
+    var k = e.closest('button,a,[role="button"],[role="option"],[role="listitem"],[tabindex]') || e;
+    if (kach.indexOf(k) < 0) kach.push(k);
+  });
+  o.kacheln = innen(kach).slice(0, 6).map(K);
+  o.umgebung = Q('[role="tab"],[role="radio"],button,label').filter(sb).filter(function (e) { return /^(live|demo|simulation|sim|paper)$/i.test(T(e)); }).slice(0, 6).map(K);
+  o.iframes = Q('iframe').filter(sb).slice(0, 6).map(function (f) { return { src: String(f.src || '').slice(0, 100), rect: R(f) }; });
+  o.freigabe = Q('button,[role="button"],input[type="submit"]').filter(sb).filter(function (e) { return /^\s*(allow|authori[sz]e|zulassen|erlauben|genehmigen)\s*$/i.test(T(e) || A(e, 'value')); }).length;
+  var fm = (document.body ? T(document.body) : '').match(/(invalid|incorrect|wrong password|login failed|access denied|locked|falsch|ungültig|fehlgeschlagen)[^.]{0,80}/i);
+  o.fehler_text = fm ? fm[0].slice(0, 100) : null;
+  return o;
+})"""
+
+
+def _k3_eingabe(ws, trail):
+    """Klick/Tasten-Werkzeug für ein ANDERES Target (Tradovate-Fenster) — dieselben Regeln wie _AugenSitzung, ohne augen.js."""
+    e = _AugenSitzung.__new__(_AugenSitzung)
+    e.trail, e.ws, e.maus, e.target_id = trail, ws, (40.0, 40.0), None
+    return e
+
+
+class _K3Ort:
+    """Wo das Login-Formular sitzt: die TradingView-Seite selbst oder ein eigenes Tradovate-Fenster (neues Target)."""
+
+    def __init__(self, name, ws, eingabe, anfang, eigen=False):
+        self.name, self.ws, self.eingabe, self.anfang, self.eigen = name, ws, eingabe, anfang, eigen
+
+    def blick(self):
+        try:
+            r = self.ws.rufe("Runtime.evaluate", {"expression": K3_LOGIN_BLICK_JS + "(" + json.dumps(self.anfang) + ")",
+                                                  "returnByValue": True}, timeout=6)
+            return {} if r.get("exceptionDetails") else (((r.get("result") or {}).get("value")) or {})
+        except Exception:
+            return {}
+
+    def zu(self):
+        if self.eigen:
+            try:
+                self.ws.zu()
+            except Exception:
+                pass
+
+
+def _k3_fenster(s, zustand, trail):
+    """Puls-Chrome-Fenster 'normal' (nach vorn — Finn: für den Login ok) bzw. zurück 'minimized'. -> vorheriger Zustand | None"""
+    try:
+        v = _cdp_http("/json/version") or {}
+        b = _CdpVerbindung(v.get("webSocketDebuggerUrl"), timeout=5.0)
+        try:
+            w = b.rufe("Browser.getWindowForTarget", {"targetId": s.target_id}, timeout=3)
+            vorher = (w.get("bounds") or {}).get("windowState")
+            b.rufe("Browser.setWindowBounds", {"windowId": w.get("windowId"), "bounds": {"windowState": zustand}}, timeout=3)
+        finally:
+            b.zu()
+        if zustand == "normal":
+            s.ws.rufe("Page.bringToFront", {}, timeout=3)
+        trail.append(f"Puls-Chrome-Fenster: {vorher} -> {zustand}")
+        return vorher
+    except Exception as e:
+        trail.append(f"Fenster '{zustand}' nicht gesetzt ({type(e).__name__}: {str(e)[:60]})")
+        return None
+
+
+def _k3_summary(s, opts, trail, schritt):
+    summary, _t, _l, _x = _cdp_today_aus_reiter(s, opts, trail)
+    bal, tpl = k3_summary_werte(summary)
+    return bal, tpl, summary
+
+
+def _k3_flach_konto(s, opts, trail):
+    """Aktives Konto flach? Nur mit sichtbarer Tabelle, zwei Lesungen. -> (ja, text)"""
+    n = 0
+    for _ in range(4):
+        st = s.stand(opts)
+        ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+        z = [p for p in st.get("positionen") or [] if isinstance(p, dict) and p.get("sichtbar")]
+        if ko.get("positionen_sichtbar") is True and not z:
+            n += 1
+            if n >= 2:
+                return True, f"flach ({str(ko.get('aktiv') or '-')[:30]}, Tabelle sichtbar, 2 Lesungen)"
+        else:
+            if z:
+                return False, f"{len(z)} Position(en) offen: " + ", ".join(f"{p.get('symbol')} {p.get('seite')} {p.get('menge')}" for p in z[:3])
+            n = 0
+        _warte(1.0, 0.4)
+    return False, "Positions-Tabelle nicht sichtbar — flach nicht bewiesen"
+
+
+def _k3_demo(eingabe, bl, trail, box=None):
+    """Umgebung melden und „Demo" wählen, falls angeboten und nicht aktiv (puls-chrome-starten.bat: „Tradovate (Demo)").
+    Nur Einträge im Login-Kasten bzw. Dialog (box), nie irgendein „Live" der Chartseite."""
+    umg = [x for x in (bl or {}).get("umgebung") or [] if isinstance(x, dict) and (not box or _k3_rect_in(x.get("rect") or [], box))]
+    if not umg:
+        return
+    trail.append("[8] Umgebung: " + ", ".join(f"{k3_label(x)}{' (aktiv)' if x.get('an') else ''}" for x in umg))
+    demo = [x for x in umg if re.fullmatch(r"\s*demo\s*", str(x.get("text") or ""), re.I)]
+    if len(demo) == 1 and not demo[0].get("an") and cdp_rect(demo[0]):
+        eingabe.klick(cdp_rect(demo[0]), "Umgebung Demo")
+        _warte(0.6, 0.3)
+
+
+def _k3_login_wechsel(s, anfang, opts, trail, res):
+    """K3 Schritte 8+9: Tradovate im Puls-Chrome ab-/neu anmelden (Chrome-Autofill), Tradeify beweisen. -> (code, msg, schritt)"""
+    res["fenster_vorher"] = vorher = _k3_fenster(s, "normal", trail)
+    ort_tv = _K3Ort("TradingView-Seite", s.ws, s, anfang)
+    b = ort_tv.blick()
+    # --- 8a Abmelden über das Kontextmenü neben „Tradovate" (Inventar 01:30 UTC: button title „Open context menu" in #footer-chart-panel)
+    if not cdp_rect(b.get("ctx")):
+        return "abmelden", f"Kontextmenü-Knopf neben 'Tradovate' nicht eindeutig ({b.get('ctx')}) — nichts geklickt, Tradovate bleibt verbunden.", "8-abmelden"
+    s.klick(cdp_rect(b.get("ctx")), "Kontextmenü neben Tradovate")
+    _warte(0.8, 0.3)
+    b = ort_tv.blick()
+    texte = [k3_label(m) for m in b.get("menue") or []]
+    trail.append(f"[8] Kontextmenü: {texte}")
+    e, n = k3_eindeutig(b.get("menue"), K3_RX_ABMELDEN)
+    if not e:
+        s.taste("Escape")
+        return "abmelden", f"Im Kontextmenü kein eindeutiger Eintrag 'Log out/Disconnect' ({n} Treffer) — Menü mit Esc zu, Tradovate bleibt verbunden.", "8-abmelden"
+    s.klick(cdp_rect(e), f"Menü '{k3_label(e)}'")
+    ja_geklickt = False
+    getrennt = False
+    ende = time.time() + 14
+    while time.time() < ende:
+        _warte(0.9, 0.3)
+        st = s.stand(opts)
+        ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+        if not ko.get("schalter") and not K3_RX_KONTONR.search(str(ko.get("aktiv") or "")):
+            getrennt = True
+            break
+        b = ort_tv.blick()
+        if not ja_geklickt:
+            for d in b.get("dialoge") or []:
+                j, nj = k3_eindeutig(d.get("knoepfe"), K3_RX_JA)
+                if j:
+                    trail.append(f"[8] Rückfrage '{str(d.get('titel') or d.get('text') or '')[:60]}'")
+                    s.klick(cdp_rect(j), f"Rückfrage '{k3_label(j)}'")
+                    ja_geklickt = True
+                    break
+    if not getrennt:
+        return "abmelden", "Nach 'Log out' ist das Konto weiter sichtbar (14 s) — Stand bitte im Puls-Chrome ansehen.", "8-abmelden"
+    b = ort_tv.blick()
+    trail.append(f"[8] OK Tradovate abgemeldet (Konto-Umschalter weg, Leiste '{str(b.get('leiste') or '')[:40]}')")
+    # --- 8b Tradovate neu verbinden: Kachel (ggf. erst „Trading Panel" auf)
+    vorher_ids = {str(t.get("id")) for t in (_cdp_http("/json/list") or []) if isinstance(t, dict)}
+    b = ort_tv.blick()
+    if not b.get("kacheln") and not b.get("login") and cdp_rect(b.get("panel_knopf")):
+        s.klick(cdp_rect(b.get("panel_knopf")), "Trading Panel")
+        _warte(1.2, 0.5)
+        b = ort_tv.blick()
+    if not b.get("login"):
+        kach = b.get("kacheln") or []
+        if len(kach) != 1 or not cdp_rect(kach[0]):
+            return "verbinden", (f"Tradovate-Kachel nicht eindeutig ({len(kach)}) — Tradovate ist ABGEMELDET, Puls-Chrome steht vorn: "
+                                 "bitte von Hand verbinden."), "8-verbinden"
+        s.klick(cdp_rect(kach[0]), "Kachel Tradovate")
+    ort, zwischen = None, 0
+    ende = time.time() + 20
+    while time.time() < ende and not ort:
+        _warte(0.9, 0.3)
+        b = ort_tv.blick()
+        if b.get("login"):
+            ort = ort_tv
+            break
+        for t in _cdp_http("/json/list") or []:
+            if not isinstance(t, dict) or str(t.get("id")) in vorher_ids or t.get("type") != "page":
+                continue
+            if not re.match(r"https://([a-z0-9-]+\.)*tradovate\.com/", str(t.get("url") or "")):
+                continue
+            try:
+                ws2 = _CdpVerbindung(t.get("webSocketDebuggerUrl"), timeout=8.0)
+            except Exception as e_:
+                trail.append(f"Tradovate-Fenster nicht erreichbar ({type(e_).__name__})")
+                continue
+            o2 = _K3Ort("Tradovate-Fenster", ws2, _k3_eingabe(ws2, trail), anfang, eigen=True)
+            if o2.blick().get("login"):
+                try:
+                    ws2.rufe("Page.bringToFront", {}, timeout=3)
+                except Exception:
+                    pass
+                ort = o2
+                break
+            o2.zu()
+        if ort:
+            break
+        if zwischen == 0:
+            # TradingView-Zwischendialog (z. B. Umgebung + „Connect", noch ohne Passwortfeld) — genau einmal, Umgebung nur melden
+            for d in b.get("dialoge") or []:
+                c, nc = k3_eindeutig(d.get("knoepfe"), K3_RX_CONNECT)
+                if c:
+                    trail.append(f"[8] Zwischendialog '{str(d.get('titel') or '')[:40]}'")
+                    _k3_demo(s, b, trail, d.get("rect"))
+                    s.klick(cdp_rect(c), f"'{k3_label(c)}' im Zwischendialog")
+                    zwischen = 1
+                    break
+    if not ort:
+        res["login_diag"] = {"dialoge": b.get("dialoge"), "iframes": b.get("iframes"), "kacheln": b.get("kacheln")}
+        return "login_formular", ("Kein Login-Formular gefunden (20 s) — Tradovate ist ABGEMELDET, Puls-Chrome steht vorn: bitte von Hand "
+                                  "verbinden. Dialoge/iframes stehen in login_diag."), "8-formular"
+    try:
+        lb = (ort.blick().get("login") or {})
+        u = lb.get("user") or {}
+        trail.append(f"[8] Login-Formular ({ort.name}): Benutzerfeld {'gefüllt' if u.get('gefuellt') else 'leer'}, "
+                     f"Passwortfeld {'gefüllt' if (lb.get('pw') or {}).get('gefuellt') else 'leer'}, Remember me "
+                     f"{'-' if lb.get('merken') is None else ('AN' if lb['merken'].get('an') else 'AUS')} (Werte nie gelesen)")
+        if not cdp_rect(u):
+            return "login_feld", "Benutzerfeld vor dem Passwortfeld nicht gefunden — nichts getippt.", "8-autofill"
+        bl0 = ort.blick()
+        _k3_demo(ort.eingabe, bl0, trail, (bl0.get("login") or {}).get("box"))
+        lb = (ort.blick().get("login") or {})
+        u = lb.get("user") or u
+        # --- 8c Chrome-Autofill per Tastatur (Finn): Feld anklicken, alten Inhalt weg, Anfang tippen, Pfeil runter, Enter
+        ort.eingabe.klick(cdp_rect(u), "Login-Feld")
+        _warte(0.5, 0.3)
+        if u.get("gefuellt"):
+            ort.eingabe.taste("a", modifiers=2)
+            ort.eingabe.taste("Backspace")
+            _warte(0.3, 0.2)
+        ort.eingabe.tippen(anfang)
+        trail.append(f"Anfang '{anfang}' getippt")
+        _warte(0.9, 0.4)
+        ort.eingabe.taste("ArrowDown")
+        _warte(0.6, 0.3)
+        lb = (ort.blick().get("login") or {})
+        if not ((lb.get("user") or {}).get("autofill") or (lb.get("pw") or {}).get("autofill")):
+            return "autofill", ("Kein Chrome-Vorschlag markiert (keine Autofill-Vorschau nach Pfeil runter) — KEIN Enter, kein Connect. "
+                                "Tradovate ist ABGEMELDET, Puls-Chrome steht vorn: bitte von Hand einloggen."), "8-autofill"
+        ort.eingabe.taste("Enter")
+        _warte(0.9, 0.4)
+        lb = (ort.blick().get("login") or {})
+        u, pw = lb.get("user") or {}, lb.get("pw") or {}
+        user_ok, pw_ok = bool(u.get("gefuellt") and u.get("passt")), bool(pw.get("gefuellt") or pw.get("autofill"))
+        trail.append(f"[8] Autofill übernommen: Benutzer {'gefüllt' if u.get('gefuellt') else 'LEER'}, beginnt mit '{anfang}': "
+                     f"{'ja' if u.get('passt') else 'NEIN'}; Passwort {'nicht leer' if pw_ok else 'LEER'} (Wert nie gelesen)")
+        if not user_ok or not pw_ok:
+            return "autofill", "Autofill nicht vollständig (siehe Zeile davor) — kein Connect. Puls-Chrome steht vorn: bitte von Hand.", "8-autofill"
+        c, nc = k3_eindeutig(lb.get("knoepfe"), K3_RX_CONNECT)
+        if not c:
+            return "connect", f"Kein eindeutiger Connect-Knopf ({nc}; Knöpfe: {[k3_label(k) for k in lb.get('knoepfe') or []][:8]}) — nicht verbunden.", "8-connect"
+        ort.eingabe.klick(cdp_rect(c), f"'{k3_label(c)}' (Connect)")
+        verbunden, ko = False, {}
+        ende = time.time() + 30
+        while time.time() < ende:
+            _warte(1.0, 0.4)
+            st = s.stand(opts)
+            ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+            if ko.get("schalter") and K3_RX_KONTONR.search(str(ko.get("aktiv") or "")):
+                verbunden = True
+                break
+            bo = ort.blick()
+            if bo.get("freigabe"):
+                return "freigabe", "Tradovate fragt nach einer Freigabe ('Allow') — NICHT automatisch bestätigt; bitte im Puls-Chrome von Hand.", "8-connect"
+            if bo.get("login") and bo.get("fehler_text"):
+                return "login_fehler", f"Login-Meldung: '{bo.get('fehler_text')}' — nicht verbunden.", "8-connect"
+        if not verbunden:
+            return "verbunden", "Nach Connect kein Konto sichtbar (30 s) — Puls-Chrome ansehen.", "8-connect"
+        trail.append(f"[8] OK verbunden, aktiv '{str(ko.get('aktiv'))[:40]}'")
+    finally:
+        if ort is not ort_tv and ort is not None:
+            ort.zu()
+    # --- 9 Beweis: Dropdown zeigt Tradeify (und kein Apex), ein Tradeify-Konto wählen, Summary lesen — KEINE Order
+    st = s.stand(opts)
+    ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+    if not ko.get("liste_offen") and cdp_rect(ko.get("schalter")):
+        s.klick(cdp_rect(ko.get("schalter")), "Konto-Umschalter")
+        _warte(0.9, 0.4)
+        st = s.stand(opts)
+        ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+        if not ko.get("liste_offen"):
+            _warte(1.0, 0.4)
+            st = s.stand(opts)
+            ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+    nrs = [k3_kontonr(e) for e in ko.get("eintraege") or []]
+    tdf = [x for x in nrs if K3_RX_TRADEIFY.match(x)]
+    apx = [x for x in nrs if K3_RX_APEX.match(x)]
+    res["dropdown"] = nrs[:40]
+    trail.append(f"[9] Dropdown: {len(nrs)} Konten — Tradeify {len(tdf)}, Apex {len(apx)}: {', '.join(nrs[:6])}{' …' if len(nrs) > 6 else ''}")
+    if not tdf or apx:
+        if ko.get("liste_offen"):
+            s.taste("Escape")
+        return "dropdown", f"Dropdown zeigt nicht nur Tradeify (Tradeify {len(tdf)}, Apex {len(apx)}) — kein Konto gewählt.", "9-dropdown"
+    # schon aktives Tradeify-Konto bevorzugen (dann kein Klick in die Liste, nur Esc — sonst schlösse der Reiter-Klick nur die Liste)
+    aktiv_nr = k3_kontonr({"text": ko.get("aktiv")})
+    wahl = aktiv_nr if aktiv_nr in tdf else tdf[0]
+    if wahl == aktiv_nr and ko.get("liste_offen"):
+        s.taste("Escape")
+        _warte(0.4, 0.2)
+    ok, code, msg, st, extra = _cdp_konto_sichern(s, wahl, {"kontoTexte": [wahl]}, trail)
+    if not ok:
+        return code, msg, "9-konto"
+    bal, tpl, _sm = _k3_summary(s, {"kontoTexte": [wahl]}, trail, "9")
+    res["tradeify"] = {"konto": wahl, "balance": bal, "total_pl": tpl}
+    trail.append(f"[9] OK Tradeify-Konto {wahl}: Balance {k3_fmt(bal)} · Total P/L {k3_fmt(tpl)} (keine Order)")
+    if vorher == "minimized":
+        _k3_fenster(s, "minimized", trail)
+    return "", f"Login gewechselt: Tradeify {wahl} aktiv, Balance {k3_fmt(bal)}, Total P/L {k3_fmt(tpl)}.", "9-fertig"
+
+
+def _k3_hochladen(res, pc):
+    """Ergebnis + Spur nach puls_augen (art 'inventar', unter daten.inventar.k3 — die Route bleibt unverändert) und lokal."""
+    try:
+        with open(os.path.join(_AUGEN_HIER, "k3_" + time.strftime("%Y%m%d_%H%M%S") + ".json"), "w", encoding="utf-8") as f:
+            json.dump(res, f, ensure_ascii=False, default=str)
+    except Exception:
+        pass
+    if not pc:
+        return
+    import urllib.request
+    spur = list(res.get("trail") or [])
+    for n in (160, 80, 30):
+        daten = {"inventar": {"art": "k3", "k3": {k: v for k, v in res.items() if k not in ("trail", "login_diag")},
+                              "login_diag": res.get("login_diag"), "trail": spur[-n:]}, "ts": int(time.time() * 1000)}
+        body = json.dumps({"art": "inventar", "daten": daten}, ensure_ascii=False, default=str).encode("utf-8")
+        if len(body) < 55_000:
+            break
+    try:
+        req = urllib.request.Request(f"{PULS_BACKEND}/puls-augen/{pc}", data=body, headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=8.0).read()
+    except Exception:
+        pass
+
+
+def modus_k3(cmd):
+    """K3 scharfer Handlauf (siehe Block-Kopf). Druckt die Spur live, am Ende das Ergebnis als JSON."""
+    nur_login = bool(cmd.get("nur_login"))
+    res = {"ok": False, "code": "", "msg": "", "schritt": "start", "gesendet": False, "flach": None, "quelle": "cdp",
+           "modus": "k3login" if nur_login else "k3", "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
+    trail = _LiveSpur()
+    pc = _augen_pc_id()
+    sitz, gesperrt = [None], [False]
+
+    def raus(code, msg, schritt, **extra):
+        res["code"], res["msg"], res["schritt"] = code, msg, schritt
+        res.update(extra)
+        res["ok"] = not code
+        trail.append(("FERTIG: " if not code else "ABBRUCH: ") + msg)
+        res["trail"] = list(trail)
+        if sitz[0]:
+            sitz[0].zu()
+        if gesperrt[0]:
+            _handlauf_setzen(False)
+        _k3_hochladen(res, pc)
+        try:
+            print(json.dumps({k: v for k, v in res.items() if k != "trail"}, ensure_ascii=False, default=str))
+        except UnicodeEncodeError:
+            print(json.dumps({k: v for k, v in res.items() if k != "trail"}, ensure_ascii=True, default=str))
+        return res
+
+    anfang = str(cmd.get("login_anfang") or "").strip()
+    anfang = "" if anfang == "-" else anfang
+    ext = str(cmd.get("ext_id") or "").strip()
+    symbol = str(cmd.get("symbol") or "").strip().upper()
+    print(f"K3-Handlauf ({res['modus']}) auf {pc or '?'} — Spur live:", flush=True)
+    if pc not in K3_PCS:
+        return raus("pc", f"K3 läuft nur auf {', '.join(K3_PCS)} (dieser PC: {pc or 'ohne pc_id'}) — nichts getan.", "befehl")
+    if nur_login and not anfang:
+        return raus("befehl", "k3login braucht den Anfang des Tradeify-Logins — nichts getan.", "befehl")
+    plan, root = None, ""
+    if not nur_login:
+        plan, fehler = tv_order_plan(cmd)
+        root = tv_symbol_root(symbol)
+        if not plan:
+            return raus("befehl", f"Befehl: {fehler} — nichts getan.", "befehl")
+        if plan["menge"] != 1 or root not in K3_PUNKTWERT:
+            return raus("befehl", f"K3 nur mit 1 MNQ (Befehl: {plan['menge']} {symbol}) — nichts getan.", "befehl")
+        if not plan["tp"] or not plan["sl"]:
+            return raus("befehl", "K3 verlangt TP und SL in $ — nichts getan.", "befehl")
+        if not K3_RX_APEX.match(re.sub(r"[^A-Z0-9]", "", ext.upper())):
+            return raus("befehl", f"K3 nur auf einem Apex-Konto ('{ext}') — nichts getan.", "befehl")
+    if _augen_regel_holen(pc) != "cdp":
+        return raus("regel", "Schalter puls_augen_cdp steht für diesen PC nicht auf 'cdp' — nichts getan.", "befehl")
+    if _handlauf_aktiv():
+        return raus("sperre", "Ein K3-Handlauf läuft schon (puls_handlauf.lock jünger als 15 min) — nichts getan.", "befehl")
+    _handlauf_setzen(True)
+    gesperrt[0] = True
+    trail.append("Sperre gesetzt: tvlesen/tvkette (CDP) und Augen-Prozess halten still")
+    try:
+        s = sitz[0] = _AugenSitzung(trail)
+        if nur_login:
+            opts = {"kontoTexte": []}
+            ja, text = _k3_flach_konto(s, opts, trail)
+            trail.append(f"[8] Vorprüfung aktives Konto: {text}")
+            if not ja:
+                return raus("nicht_flach", f"Aktives Konto nicht nachweislich flach ({text}) — kein Login-Wechsel.", "8-vorpruefung")
+            res["flach"] = True
+            code, msg, schritt = _k3_login_wechsel(s, anfang, opts, trail, res)
+            return raus(code, msg, schritt)
+        opts = {"kontoTexte": [ext]}
+        # [1] Panel + Konto
+        trail.append(f"[1] Konto {ext}: Panel öffnen, im Dropdown wählen")
+        ok, code, msg, st, extra = _cdp_konto_sichern(s, ext, opts, trail)
+        if not ok:
+            return raus(code, msg + " — nichts gesendet.", "1-konto")
+        ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+        if not tv_konto_passt(str(ko.get("aktiv") or ""), ext):
+            return raus("konto", f"Aktiv ist '{ko.get('aktiv')}', nicht {ext} — nichts gesendet.", "1-konto")
+        res["konto"] = str(ko.get("aktiv"))[:40]
+        trail.append(f"[1] OK Konto aktiv: '{res['konto']}' (Broker {ko.get('broker') or '?'}, Panel {ko.get('panel') or '?'})")
+        # [2] Account Summary vorher
+        bal0, tpl0, _sm = _k3_summary(s, opts, trail, "2")
+        if bal0 is None or tpl0 is None:
+            return raus("summary", f"Account Summary unvollständig (Balance {bal0}, Total P/L {tpl0}) — nichts gesendet.", "2-summary")
+        res["vorher"] = {"balance": bal0, "total_pl": tpl0}
+        trail.append(f"[2] OK Summary vorher: Balance {k3_fmt(bal0)} · Total P/L {k3_fmt(tpl0)}")
+        _warte(0.5, 0.3)
+        st = s.stand(opts)
+        ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+        if ko.get("positionen_sichtbar") is not True:
+            return raus("tabelle", "Positions-Tabelle nicht sichtbar — ohne Tabelle kein Beweis, nichts gesendet.", "2-flach")
+        schon = [p for p in st.get("positionen") or [] if isinstance(p, dict) and p.get("sichtbar")]
+        if schon:
+            return raus("nicht_flach", f"Konto hat schon {len(schon)} Position(en) ({schon[0].get('symbol')} {schon[0].get('menge')}) — nichts gesendet.", "2-flach")
+        trail.append("[2] OK Konto flach vor der Order (Tabelle sichtbar, keine Zeile)")
+        # [3] Ticket füllen + alles zurücklesen
+        trail.append(f"[3] Ticket: {symbol}, {plan['richtung'].upper()}, Market, Units 1, TP {plan['tp']:g} $, SL {plan['sl']:g} $")
+        ok, code, msg, schritt, st, kk = _cdp_ticket_fuellen(s, st, plan, symbol, opts, trail)
+        if not ok:
+            return raus(code, msg + " — nichts gesendet.", "3-" + schritt)
+        _warte(0.4, 0.2)
+        st = s.stand(opts)
+        rl_ok, rl_text, rl_fehler = k3_ruecklesung(st, plan)
+        trail.append(f"[3] Rücklesung: {rl_text}")
+        if not rl_ok:
+            return raus("ruecklesung", "Rücklesung passt nicht: " + "; ".join(rl_fehler) + " — nichts gesendet.", "3-ruecklesung")
+        # [4] Knopf-Text EXAKT, dann EIN Klick
+        kk = st.get("kauf_knopf") if isinstance(st.get("kauf_knopf"), dict) else {}
+        soll = k3_knopf_soll(plan["richtung"], 1, symbol)
+        ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+        if not k3_knopf_exakt(kk.get("text"), plan["richtung"], 1, symbol):
+            return raus("knopf", f"Knopf zeigt '{kk.get('text')}', verlangt '{soll}' — nichts gesendet.", "4-knopf")
+        if kk.get("disabled") or cdp_klickpunkt(cdp_rect(kk)) is None:
+            return raus("knopf", f"Senden-Knopf gesperrt oder ohne Rechteck ('{kk.get('text')}') — nichts gesendet.", "4-knopf")
+        if st.get("popups"):
+            return raus("popup", f"Dialog/Popup offen ({[p.get('titel') or p.get('text') for p in st['popups']][:2]}) — nichts gesendet.", "4-knopf")
+        if not tv_konto_passt(str(ko.get("aktiv") or ""), ext):
+            return raus("konto", f"Konto vor dem Klick nicht mehr {ext} ('{ko.get('aktiv')}') — nichts gesendet.", "4-knopf")
+        vorher_m = [k3_meldung_schluessel(m) for m in ((st.get("toasts") or {}).get("meldungen") or []) if isinstance(m, dict)]
+        trail.append(f"[4] Knopf-Text EXAKT '{soll}', nicht gesperrt, Konto {ext}, kein Popup — EIN Klick")
+        res["gesendet"] = True                 # ab hier: nie wiederholen, jeder Abbruch = „Stand ansehen"
+        s.klick(cdp_rect(kk), "SENDEN-Knopf")
+        # [5] Beweis: sichtbare Zeile + Meldungen
+        zl, om, neu = [], {}, []
+        ende = time.time() + 15
+        while time.time() < ende:
+            _warte(0.8, 0.3)
+            st = s.stand(opts)
+            neu = k3_neue_meldungen(vorher_m, (st.get("toasts") or {}).get("meldungen"))
+            om = k3_order_meldungen(neu, plan["richtung"], 1)
+            zl = k3_zeilen(st.get("positionen"), root)
+            if st.get("popups") and not zl and not om.get("fill"):
+                return raus("dialog_nach_senden", (f"Nach dem Klick erschien ein Dialog ({[p.get('titel') or p.get('text') for p in st['popups']][:2]}) "
+                                                   "— NICHTS weiter geklickt. Stand bitte in TradingView ansehen."), "5-beweis")
+            if len(zl) == 1 and om.get("fill") and om.get("tp") and om.get("sl"):
+                break
+        res["meldungen_order"] = [m.get("text") for m in neu][:8]
+        if not zl:
+            return raus("kein_beweis", "Nach dem Klick keine sichtbare MNQ-Zeile (15 s) — Stand UNKLAR, nichts weiter geklickt. "
+                                       "Bitte in TradingView nachsehen.", "5-beweis")
+        z0 = zl[0]
+        if len(zl) != 1 or cdp_zahl(z0.get("menge")) != 1.0 or z0.get("seite") != plan["richtung"]:
+            return raus("position_unerwartet", f"Unerwartete Position(en): {[(p.get('symbol'), p.get('seite'), p.get('menge')) for p in zl]} "
+                                               "— NICHT geschlossen, bitte von Hand prüfen.", "5-beweis")
+        pw = K3_PUNKTWERT[root]
+        fill = om.get("fill") or z0.get("avg")
+        d_tp = plan["tp"] / pw
+        d_sl = plan["sl"] / pw
+        vz = 1 if plan["richtung"] == "buy" else -1
+        pr = []
+        for name, preis, soll_p in (("TP", om.get("tp"), (fill + vz * d_tp) if fill else None), ("SL", om.get("sl"), (fill - vz * d_sl) if fill else None)):
+            if preis is None:
+                pr.append(f"{name}-Limit nicht in den Meldungen")
+            else:
+                pr.append(f"{name} {k3_fmt(preis)}" + (f" ({'passt' if soll_p is not None and abs(preis - soll_p) <= 1.0 else 'ABWEICHUNG'}, "
+                                                       f"Soll {k3_fmt(soll_p)})" if soll_p is not None else ""))
+        res["order"] = {"symbol": z0.get("symbol"), "seite": z0.get("seite"), "menge": z0.get("menge"), "avg": z0.get("avg"),
+                        "fill_meldung": om.get("fill"), "tp_limit": om.get("tp"), "sl_limit": om.get("sl")}
+        trail.append(f"[5] OK Position {z0.get('symbol')} {str(z0.get('seite')).upper()} {k3_fmt(z0.get('menge'), 0)} @ Avg {k3_fmt(z0.get('avg'))} · "
+                     f"Fill (Meldung) {k3_fmt(om.get('fill')) if om.get('fill') else 'nicht gesehen'} · " + " · ".join(pr))
+        # [6] Schließen: Close-Knopf der EINEN Zeile beweisen, klicken, Dialog [data-name=submit-button]
+        _warte(1.5, 0.8)
+        st = s.stand(opts)
+        vorher_c = [k3_meldung_schluessel(m) for m in ((st.get("toasts") or {}).get("meldungen") or []) if isinstance(m, dict)]
+        zl = k3_zeilen(st.get("positionen"), root)
+        if not zl:
+            trail.append("[6] MNQ-Zeile schon weg (TP/SL ausgelöst?) — kein Close-Klick")
+        else:
+            knopf_c, zeile_c = None, None
+            for runde in range(2):
+                roh = s.js(K3_ZEILEN_JS) or []
+                kz = [z for z in roh if isinstance(z, dict) and z.get("sichtbar") and tv_symbol_root(str(z.get("symbol") or "")) == root
+                      and not any(k in (z.get("spalten") or {}) for k in ("Status", "Order ID", "Order-ID"))]
+                if len(kz) != 1:
+                    return raus("close_zeile", f"{len(kz)} sichtbare MNQ-Zeilen in der Tabelle — POSITION OFFEN, bitte von Hand schließen.", "6-close")
+                zeile_c = kz[0]
+                knopf_c, n_k = k3_close_knopf(zeile_c)
+                if knopf_c:
+                    break
+                if runde == 0 and cdp_rect(zeile_c.get("zeile")):
+                    s.hin(zeile_c.get("zeile"), "MNQ-Zeile (Knöpfe einblenden)")
+                    _warte(0.6, 0.3)
+            if not knopf_c:
+                res["zeile_knoepfe"] = (zeile_c or {}).get("knoepfe")
+                return raus("close_knopf", f"Kein eindeutiger Schließen-Knopf in der MNQ-Zeile ({[k3_label(k) or k.get('dn') for k in (zeile_c or {}).get('knoepfe') or []][:8]}) "
+                                           "— POSITION OFFEN, bitte von Hand schließen.", "6-close")
+            st = s.stand(opts)
+            zl = k3_zeilen(st.get("positionen"), root)
+            if len(zl) != 1 or cdp_zahl(zl[0].get("menge")) != 1.0 or zl[0].get("seite") != plan["richtung"]:
+                return raus("close_beweis", f"Zeile vor dem Close-Klick nicht mehr eindeutig ({[(p.get('symbol'), p.get('menge')) for p in zl]}) "
+                                            "— nichts geklickt, bitte von Hand prüfen.", "6-close")
+            sp_ = zeile_c.get("spalten") or {}
+            trail.append(f"[6] Close-Knopf bewiesen: Zeile {sp_.get('Symbol')} {sp_.get('Side') or sp_.get('Seite') or ''} "
+                         f"{sp_.get('Qty') or sp_.get('Quantity') or sp_.get('Menge') or ''}, Knopf '{k3_label(knopf_c) or knopf_c.get('dn')}' @{knopf_c.get('rect')}")
+            s.klick(cdp_rect(knopf_c), "Close-Knopf der MNQ-Zeile")
+            bestaetigt = False
+            ende = time.time() + 6
+            while time.time() < ende:
+                _warte(0.5, 0.2)
+                st = s.stand(opts)
+                dl = [p for p in st.get("popups") or [] if isinstance(p, dict) and cdp_rect(p.get("submit"))]
+                if len(dl) > 1:
+                    return raus("close_dialog", f"{len(dl)} Dialoge mit Bestätigen-Knopf — nichts bestätigt, POSITION OFFEN, bitte von Hand.", "6-close")
+                if dl:
+                    p = dl[0]
+                    sub = p.get("submit") or {}
+                    wort = f"{p.get('titel') or ''} {p.get('text') or ''} {sub.get('text') or ''}"
+                    if sub.get("dn") != "submit-button" or not re.search(r"close|schlie", wort, re.I):
+                        return raus("close_dialog", f"Dialog passt nicht zum Schließen ('{wort.strip()[:80]}', Knopf {sub.get('dn')}) — nichts bestätigt, POSITION OFFEN.", "6-close")
+                    trail.append(f"[6] Dialog '{str(p.get('titel') or p.get('text') or '')[:50]}': Knopf '{str(sub.get('text') or '')[:30]}' [data-name=submit-button]")
+                    s.klick(cdp_rect(sub), "Bestätigen (submit-button)")
+                    bestaetigt = True
+                    break
+                ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+                if ko.get("positionen_sichtbar") is True and not k3_zeilen(st.get("positionen"), root):
+                    trail.append("[6] Position ohne Rückfrage-Dialog geschlossen")
+                    bestaetigt = True
+                    break
+            if not bestaetigt:
+                return raus("close_dialog", "Nach dem Close-Klick kein Bestätigungs-Dialog (6 s) und die Position steht noch — POSITION OFFEN, bitte von Hand.", "6-close")
+        # Flach-Beweis: zwei Lesungen mit sichtbarer Tabelle ohne MNQ-Zeile
+        n_flach, neu_c = 0, []
+        ende = time.time() + 15
+        while time.time() < ende:
+            _warte(1.2, 0.4)
+            st = s.stand(opts)
+            ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+            neu_c = k3_neue_meldungen(vorher_c, (st.get("toasts") or {}).get("meldungen"))
+            if ko.get("positionen_sichtbar") is True and not k3_zeilen(st.get("positionen"), root):
+                n_flach += 1
+                if n_flach >= 2:
+                    break
+            else:
+                n_flach = 0
+        if n_flach < 2:
+            return raus("nicht_flach", "Flach NICHT bewiesen (MNQ-Zeile noch da oder Tabelle unsichtbar) — bitte in TradingView nachsehen.", "6-flach")
+        res["flach"] = True
+        c_fill, storno = k3_close_meldungen(neu_c, plan["richtung"], 1)
+        res["close"] = {"fill_meldung": c_fill, "storniert": sorted(storno)}
+        trail.append(f"[6] OK FLACH: 2 Lesungen ohne MNQ-Zeile (Tabelle sichtbar) · Close-Fill {k3_fmt(c_fill) if c_fill else 'nicht in den Meldungen'} · "
+                     f"storniert: {', '.join(sorted(storno)).upper() or 'nicht gemeldet'}")
+        # Offene Orders (Brackets) im Reiter „Orders" gegenlesen, dann zurück auf „Positions"
+        orders_ok = None
+        r_ord = s.rect_von("#id_account-manager-tabs #orders")
+        if r_ord:
+            s.klick(r_ord, "Reiter Orders")
+            _warte(0.9, 0.3)
+            st = s.stand(opts)
+            ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+            offen = k3_offene_orders(st.get("orders"), root)
+            sichtbar_n = len([o for o in st.get("orders") or [] if isinstance(o, dict) and o.get("sichtbar")])
+            orders_ok = bool(ko.get("orders_sichtbar")) and not offen
+            trail.append(f"[6] Reiter Orders: {sichtbar_n} sichtbare Zeilen, davon offen (Working) MNQ: {len(offen)}"
+                         + ("" if ko.get("orders_sichtbar") else " — Tabelle nicht lesbar"))
+            r_pos = s.rect_von("#id_account-manager-tabs #positions")
+            if r_pos:
+                s.klick(r_pos, "Reiter Positions")
+                _warte(0.5, 0.2)
+            if offen:
+                return raus("order_offen", f"OFFENE ORDER nach dem Schließen ({[(o.get('typ'), o.get('preis'), o.get('status')) for o in offen][:3]}) "
+                                           "— bitte von Hand stornieren, kein Login-Wechsel.", "6-orders")
+        brackets_zu = ("tp" in storno and "sl" in storno) or orders_ok is True
+        # [7] Account Summary nachher
+        bal1, tpl1, _sm = _k3_summary(s, opts, trail, "7")
+        res["nachher"] = {"balance": bal1, "total_pl": tpl1}
+        d_bal = (bal1 - bal0) if bal1 is not None else None
+        trail.append(f"[7] OK Summary nachher: Balance {k3_fmt(bal1)} (Δ {k3_fmt(d_bal)}) · Total P/L {k3_fmt(tpl1)}")
+        if not anfang:
+            return raus("", f"K3 fertig (ohne Login-Wechsel): Order + Close bewiesen, flach. Balance {k3_fmt(bal0)} → {k3_fmt(bal1)}.", "7-fertig")
+        if not brackets_zu:
+            return raus("brackets_unklar", "TP/SL-Storno weder gemeldet noch im Orders-Reiter bewiesen — kein Login-Wechsel. Orders-Reiter bitte ansehen.", "7-brackets")
+        # [8]+[9] Login-Wechsel auf Tradeify (nur flach)
+        trail.append("[8] Konto flach bewiesen, Brackets storniert — Login-Wechsel auf Tradeify")
+        code, msg, schritt = _k3_login_wechsel(s, anfang, {"kontoTexte": []}, trail, res)
+        if code:
+            return raus(code, "Order + Close fertig und flach; Login-Wechsel: " + msg, schritt)
+        return raus("", f"K3 komplett: Order + Close bewiesen, flach (Balance {k3_fmt(bal0)} → {k3_fmt(bal1)}); {msg}", schritt)
+    except Exception as e:
+        wo = ("NACH dem Senden-Klick — Stand UNKLAR, erst in TradingView nachsehen" if res.get("gesendet") and not res.get("flach")
+              else "vor dem Senden — nichts gesendet" if not res.get("gesendet") else "nach dem Flach-Beweis")
+        return raus("cdp_fehler", f"Puls-Chrome/CDP: {type(e).__name__}: {str(e)[:140]} ({wo})", res.get("schritt") or "cdp")
 
 
 def main():
@@ -14456,6 +15395,25 @@ def main():
             print(json.dumps({"ok": False, "schritt": "absturz",
                               "msg": f"TV-Kette abgebrochen: {type(e).__name__}: {e}"}))
         augen_anstossen()      # Augen E0 (29.09.2026): entkoppelt, nur mit Schalter 'cdp'
+        return 0
+    if len(sys.argv) >= 2 and sys.argv[1] in ("k3", "k3login"):
+        # K3 scharfer Handlauf (29.09.2026, Finns direkte Anweisung an T3) — NUR von Hand am CDP-Test-PC, kein Weg aus Prophos/Panel:
+        # 'order_bot.py k3 <ApexExtID> <Symbol> <buy|sell> 1 <TP$> <SL$> [<Login-Anfang>]' bzw. 'order_bot.py k3login <Login-Anfang>'
+        a = sys.argv[2:]
+        if sys.argv[1] == "k3" and len(a) >= 6:
+            cmd = {"ext_id": a[0], "symbol": a[1], "richtung": a[2].lower(), "volumen": a[3], "tp_usd": a[4], "sl_usd": a[5],
+                   "login_anfang": a[6] if len(a) > 6 else ""}
+        elif sys.argv[1] == "k3login" and len(a) >= 1:
+            cmd = {"nur_login": True, "login_anfang": a[0]}
+        else:
+            print("Aufruf: order_bot.py k3 <ApexExtID> <Symbol> <buy|sell> 1 <TP$> <SL$> [<Login-Anfang>]  |  order_bot.py k3login <Login-Anfang>")
+            return 2
+        try:
+            modus_k3(cmd)
+        except Exception as e:
+            _handlauf_setzen(False)
+            print(json.dumps({"ok": False, "code": "absturz", "msg": f"K3 abgebrochen: {type(e).__name__}: {e} @ {_absturz_ort(e)} — "
+                              "erst in TradingView nachsehen, ob eine Position/Order offen ist."}, ensure_ascii=False))
         return 0
     if len(sys.argv) >= 6 and sys.argv[1] == "probe":
         # K2-Probelauf am PC (29.09.2026): 'order_bot.py probe <ExternalID> <Symbol> <buy|sell> <Menge> [TP$] [SL$]' —
