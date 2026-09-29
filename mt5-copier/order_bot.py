@@ -6860,7 +6860,8 @@ def tv_order_schritt(w, cmd, trail, erg=None):
                    + tv_positions_zone(roh) + neu_txt)
 
 
-TV_BRUECKE_FELDER = ("symbol", "richtung", "volumen", "tp_usd", "sl_usd", "probe", "scharf")
+TV_BRUECKE_FELDER = ("symbol", "richtung", "volumen", "tp_usd", "sl_usd", "probe", "scharf",
+                     "plan_id")        # 29.09.2026: Plan-ID für puls_ergebnis (Ergebnis überlebt einen neu geladenen Prophos-Tab)
 
 
 def tv_bruecke_auspacken(cmd):
@@ -15079,6 +15080,60 @@ def cdp_order_beweis(neu, zeilen, plan, menge_vorher):
         out.update(einstieg=avg, einstieg_quelle="tabelle_avg_fill" if avg is not None else None, beweis="Positions-Tabelle")
     return out
 
+# ═══════════════════════════════════════════════════════════════════════════
+# ERGEBNIS ÜBERLEBT DEN PROPHOS-TAB (29.09.2026, Live 15:49 UTC, pc-usq1i6): BUY 1 MNQZ6 @ 30606 auf TDFYSL150800892182 lag in
+# TradingView, Prophos erfuhr nie davon — der aufrufende Tab war nach Finns Chrome-Neustart weg, die Antwort ging ins Leere, der Plan
+# blieb 'planned' (Gefahr: zweiter Start = zweite Order). Jetzt schickt der Bot nach JEDEM scharfen Klick (Order bzw. Schließen)
+# sein Ergebnis selbst an Railway (POST /puls-ergebnis/<pc_id>, Upsert je plan_id + art) — gleich nach dem Klick (stufe 'geklickt')
+# und am Ende (stufe 'ende') — und legt eine Kopie lokal ab (puls_ergebnisse/). Der PC-Tab übernimmt 'planned'-Pläne mit
+# gesendet:true daraus. plan_id reist über die Brücke ('@plan_id=…'); ohne plan_id wird trotzdem gesendet (Zuordnung über Konto/Zeit).
+# Fehler (Route fehlt, Netz) bleiben still — die lokale Kopie bleibt.
+# ═══════════════════════════════════════════════════════════════════════════
+PULS_ERGEBNIS_FELDER = ("ok", "code", "schritt", "msg", "gesendet", "bestaetigt", "geklickt", "retry_ok", "einstieg", "einstieg_quelle",
+                        "tp_limit", "tp_limit_quelle", "sl_limit", "sl_limit_quelle", "order_klick_ms", "balance_start", "equity_start",
+                        "today_pnl_start", "today_pnl", "balance_end", "equity_end", "tv_symbol", "menge", "konto_aktiv", "pruefung",
+                        "meldung_roh", "positionen_danach", "close_fill", "storniert", "symbol", "richtung")
+
+
+def puls_ergebnis_paket(art, stufe, cmd, res, trail=None, jetzt_ms=None):
+    """REIN RECHNEND (testbar): das Paket für /puls-ergebnis — nur bekannte Felder, Spur-Ende gekürzt."""
+    erg = {k: res.get(k) for k in PULS_ERGEBNIS_FELDER if isinstance(res, dict) and k in res}
+    if trail:
+        erg["trail_ende"] = " > ".join(list(trail))[-1500:]
+    c = cmd if isinstance(cmd, dict) else {}
+    for k in ("symbol", "richtung"):                  # Plan-Symbol + Richtung auch IM Ergebnis (Wunsch Tab-Übernahme, 29.09.2026)
+        if not erg.get(k) and str(c.get(k) or "").strip():
+            erg[k] = str(c.get(k)).strip()[:20]
+    return {"plan_id": str(c.get("plan_id") or "").strip()[:64] or None, "art": art, "stufe": stufe,
+            "at_ms": int(jetzt_ms if jetzt_ms is not None else time.time() * 1000),
+            "konto": str(c.get("ext_id") or c.get("konto") or "").strip()[:60] or None,
+            "symbol": str(c.get("symbol") or "").strip()[:20] or None, "richtung": str(c.get("richtung") or "").strip()[:8] or None,
+            "ergebnis": erg}
+
+
+def _puls_ergebnis_senden(art, stufe, cmd, res, trail):
+    """Paket lokal sichern und an Railway schicken (3 s, Fehler still). Nie ein Grund für einen Abbruch."""
+    import urllib.request
+    paket = puls_ergebnis_paket(art, stufe, cmd, res, trail)
+    try:
+        ordner = os.path.join(_AUGEN_HIER, "puls_ergebnisse")
+        os.makedirs(ordner, exist_ok=True)
+        with open(os.path.join(ordner, f"{time.strftime('%Y%m%d_%H%M%S')}_{art}_{stufe}_{paket['plan_id'] or 'ohne-plan'}.json"),
+                  "w", encoding="utf-8") as f:
+            json.dump(paket, f, ensure_ascii=False, default=str)
+    except Exception:
+        pass
+    pc = _augen_pc_id()
+    if not pc:
+        return
+    try:
+        body = json.dumps(paket, ensure_ascii=False, default=str).encode("utf-8")
+        req = urllib.request.Request(f"{PULS_BACKEND}/puls-ergebnis/{pc}", data=body, headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=3.0).read()
+    except Exception:
+        pass
+
+
 def modus_tvkette_cdp(cmd):
     """tvkonto über das Puls-Chrome (CDP): Konto (mit Auto-Login) → Ticket ausfüllen und beweisen → mit Marke 'scharf' EIN Klick
     auf den Senden-Knopf + Beweis (K4, Block-Kopf). Ohne 'scharf' Probelauf wie K2."""
@@ -15096,6 +15151,7 @@ def modus_tvkette_cdp(cmd):
         if sitz[0]:
             sitz[0].zu()
         if res.get("gesendet"):
+            _puls_ergebnis_senden("order", "ende", cmd, res, trail)
             _puls_diagnose_senden(spur=trail, schritt="cdp-order")
         try:
             print(json.dumps(res, ensure_ascii=False))
@@ -15187,6 +15243,7 @@ def modus_tvkette_cdp(cmd):
             res["gesendet"], res["retry_ok"] = False, True
             return raus("knopf", "Senden-Knopf NICHT gedrückt (Maus nicht bewiesen über dem Knopf) — nichts gesendet.", "knopf")
         trail.append("Senden geklickt — ab hier zählt nur der Beweis")
+        _puls_ergebnis_senden("order", "geklickt", cmd, res, trail)   # sofort: überlebt Absturz und einen neu geladenen Prophos-Tab
         b, neu, erst_ok, mehr = {}, [], None, {"gedrueckt": False, "versuche": 0, "hin": False}
         ende = time.time() + 15.0
         while time.time() < ende:
@@ -15357,12 +15414,14 @@ def modus_tvclose_cdp(cmd):
         if sitz[0]:
             sitz[0].zu()
         if res.get("geklickt"):
+            _puls_ergebnis_senden("close", "ende", cmd, res, trail)
             _puls_diagnose_senden(spur=trail, schritt="cdp-close")
         try:
             print(json.dumps(res, ensure_ascii=False))
         except UnicodeEncodeError:
             print(json.dumps(res, ensure_ascii=True))
 
+    cmd = tv_bruecke_auspacken(cmd)          # '@plan_id=…' u. a. aus der geschwister-Brücke (nie als Konto)
     fehler = pruefe_tv_close_befehl(cmd)
     if fehler:
         return raus("befehl", "Befehl unvollstaendig: " + " / ".join(fehler), "befehl")
@@ -15435,6 +15494,7 @@ def modus_tvclose_cdp(cmd):
         if not s.klick(cdp_rect(knopf_c), f"Close-Knopf der {root}-Zeile"):
             res["geklickt"] = False                  # ohne bewiesenen Hover/Fenster kein Druck → nachweislich nichts geklickt
             return raus("close_knopf_unklar", "Close-Knopf NICHT gedrückt (Maus/Fenster nicht bewiesen) — nichts geklickt.", "knopf")
+        _puls_ergebnis_senden("close", "geklickt", cmd, res, trail)
         # Rückfrage: nur ein Dialog mit [data-name=submit-button] und „Close/Schließen" darin
         bestaetigung, ende = "", time.time() + 6
         while time.time() < ende and not bestaetigung:

@@ -3079,6 +3079,20 @@ def test_puls_cdp_login():
         "Sitzungs-Dialog erkannt; Broker-Dialog ist keiner; Sitzungs-Dialog ist nie der Broker-Connect-Dialog")
     q_km = _i.getsource(ob._cdp_konto_mit_login)
     chk(q_km.index("_cdp_sitzung_zurueck(") < q_km.index("_cdp_konto_sichern("), "Sitzungs-Dialog vor dem Konto-Schritt lösen")
+    # Ergebnis überlebt den Prophos-Tab (Live 15:49 UTC: Order lag, Prophos erfuhr nie davon)
+    pk = ob.puls_ergebnis_paket("order", "ende", {"plan_id": "5ab15b24", "ext_id": "TDFYSL150800892182", "symbol": "MNQZ6", "richtung": "buy"},
+                                {"ok": True, "gesendet": True, "einstieg": "30606.0", "tp_limit": 30722.5, "trail": "x", "summary": {"a": 1}}, ["a", "b"], 5)
+    chk(pk["plan_id"] == "5ab15b24" and pk["art"] == "order" and pk["at_ms"] == 5 and pk["ergebnis"]["einstieg"] == "30606.0"
+        and "summary" not in pk["ergebnis"] and "trail" not in pk["ergebnis"] and pk["ergebnis"]["trail_ende"] == "a > b"
+        and pk["ergebnis"]["symbol"] == "MNQZ6" and pk["ergebnis"]["richtung"] == "buy"
+        and ob.puls_ergebnis_paket("close", "geklickt", {}, {}, None, 1)["plan_id"] is None, "Ergebnis-Paket: bekannte Felder, Plan-ID, ohne Plan ok")
+    chk(ob.tv_bruecke_auspacken({"geschwister": ["@plan_id=5ab15b24", "TDFYSL1"]}) == {"geschwister": ["TDFYSL1"], "plan_id": "5ab15b24"},
+        "plan_id reist über die Brücke, nie als Konto")
+    q_k = _i.getsource(ob.modus_tvkette_cdp)
+    q_c = _i.getsource(ob.modus_tvclose_cdp)
+    chk(q_k.index('"SENDEN-Knopf"') < q_k.index('_puls_ergebnis_senden("order", "geklickt"') and '_puls_ergebnis_senden("order", "ende"' in q_k
+        and q_c.index('f"Close-Knopf der {root}-Zeile"') < q_c.index('_puls_ergebnis_senden("close", "geklickt"') and '_puls_ergebnis_senden("close", "ende"' in q_c
+        and "tv_bruecke_auspacken(cmd)" in q_c, "Order und Schließen melden ihr Ergebnis nach dem Klick und am Ende selbst")
     W = ob.tv_konto_wort_passt
     chk(W("TDFYU324689097 tradovate.com", "TDFYU324689097") and not W("APEX_641699TDFYU324689097", "TDFYU324689097")
         and not W("APEX_641699", "TDFYU324689097"), "Vorschlag nur mit dem Username als ganzem Wort (angehängter Name zählt nicht)")
