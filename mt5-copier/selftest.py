@@ -2918,6 +2918,16 @@ def test_puls_cdp_login():
     chk(b3["bestaetigt"] and b3["einstieg"] is None, "vorher schon offen: Menge gewachsen = Beweis, Avg ist dann KEIN Einstieg")
     chk(not ob.cdp_order_beweis([], [dict(zeile, menge=1)], P2, 1)["bestaetigt"] and not ob.cdp_order_beweis([], [], P2, 0)["bestaetigt"]
         and not ob.cdp_order_beweis([dict(fill, seite="sell")], [], P2, 0)["bestaetigt"], "kein Wachstum / fremde Seite = nicht bewiesen")
+    # „Show more" nach dem Kauf (Finn 29.09.2026: SL fehlte, Stapel eingeklappt)
+    MZ = ob.cdp_meldungen_zu
+    zu_o = {"gruppe": "orders", "offen": False, "mehr": {"rect": [1500, 900, 80, 20]}, "texte": [{"text": "Sell 1"}]}
+    chk(MZ({"gruppen": [{"gruppe": "alerts", "offen": False, "texte": [{"text": "x"}]}, zu_o]}) is zu_o
+        and MZ({"gruppen": [dict(zu_o, offen=True)]}) is None and MZ({"gruppen": [dict(zu_o, gruppe="x"), dict(zu_o, gruppe="y")]}) is None
+        and MZ(None) is None, "eingeklappter Stapel: 'orders' bevorzugt, offen/mehrdeutig = kein Klick")
+    q_mehr = _i.getsource(ob.modus_tvkette_cdp)
+    chk(q_mehr.count('"Show more (Meldungen') == 1 and 'mehr["klick"] = 1' in q_mehr
+        and q_mehr.index('mehr["klick"] = 1') < q_mehr.index('"Show more (Meldungen'), "Show more höchstens EINMAL je Lauf, Merker vor dem Klick")
+    chk("@ 30,637.00" in ob.cdp_meldung_text(fill) and ob.cdp_meldung_text(None) == "", "Rohtext der Meldung mit Preis")
     W = ob.tv_konto_wort_passt
     chk(W("TDFYU324689097 tradovate.com", "TDFYU324689097") and not W("APEX_641699TDFYU324689097", "TDFYU324689097")
         and not W("APEX_641699", "TDFYU324689097"), "Vorschlag nur mit dem Username als ganzem Wort (angehängter Name zählt nicht)")

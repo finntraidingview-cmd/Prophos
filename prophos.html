@@ -35807,7 +35807,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.802'
+  const OS_TAB_BUILD = '2026-09-22.803'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -36248,7 +36248,7 @@
             status: (r && r.ok) ? 'fertig' : 'fehler', pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : '',
             params: { aktion: 'orbit', lokal: true, orbit: { symbol, richtung: dir, volumen: lots, tp_usd: tp > 0 ? tp : null, sl_usd: (tp > 0 && sl > 0) ? sl : null } },
             ergebnis: { ok: !!(r && r.ok), gesendet: !!(r && r.gesendet), schritt: r && r.schritt, msg: r && (r.msg || r.error), trail: r && r.trail,
-              einstieg: (r && r.einstieg) || null, einstieg_quelle: (r && r.einstieg_quelle) || null, tp_limit: (r && r.tp_limit) || null, order_klick_ms: (r && r.order_klick_ms) || null, meldung_roh: (r && Array.isArray(r.meldung_roh)) ? r.meldung_roh.slice(0, 14) : null } })   // Fill-Nachweis (28.09.2026)
+              einstieg: (r && r.einstieg) || null, einstieg_quelle: (r && r.einstieg_quelle) || null, tp_limit: (r && r.tp_limit) || null, tp_limit_quelle: (r && r.tp_limit_quelle) || null, sl_limit: (r && r.sl_limit) || null, sl_limit_quelle: (r && r.sl_limit_quelle) || null, order_klick_ms: (r && r.order_klick_ms) || null, meldung_roh: (r && Array.isArray(r.meldung_roh)) ? r.meldung_roh.slice(0, 14) : null } })   // Fill-Nachweis (28.09.2026); SL-Limit seit 29.09.2026 — der neue Puls liest nach „Show more“ Fill, TP UND SL exakt (Radar spiegelt 1:1)
         }catch(_){}
       }
       // ORBIT V2 (24.09.2026 nachts): direkt nach dem bewiesenen Klick liest Puls einmal Today's P&L als

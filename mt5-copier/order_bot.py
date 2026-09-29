@@ -14646,6 +14646,26 @@ def cdp_zeilen_menge(zeilen, richtung):
     return summe
 
 
+
+def cdp_meldungen_zu(toasts):
+    """REIN RECHNEND (testbar): der EINGEKLAPPTE Meldungsstapel (augen.js toasts.gruppen: offen = aria-expanded) — bevorzugt die
+    Gruppe „orders", sonst genau eine Gruppe mit Texten. -> Gruppe (mit 'mehr' = Show-more-Knopf, falls sichtbar) | None"""
+    gruppen = [g for g in ((toasts or {}).get("gruppen") or []) if isinstance(g, dict) and g.get("offen") is False
+               and (g.get("texte") or cdp_rect(g.get("mehr")))]
+    orders = [g for g in gruppen if str(g.get("gruppe") or "").lower() == "orders"]
+    if len(orders) == 1:
+        return orders[0]
+    return gruppen[0] if len(gruppen) == 1 else None
+
+
+def cdp_meldung_text(m):
+    """REIN RECHNEND (testbar): eine gelesene Meldung als Rohtext für order_signale/Diagnose — Art, Status, Seite, Menge, Preis."""
+    if not isinstance(m, dict):
+        return ""
+    teile = [str(m.get("art") or "?"), str(m.get("status") or "-"), str(m.get("seite") or "?"),
+             k3_fmt(m.get("menge"), 0) if m.get("menge") is not None else "?", "@", k3_fmt(m.get("preis"))]
+    return (" ".join(teile) + f" ({str(m.get('text') or '')[:60]})")[:160]
+
 def cdp_order_beweis(neu, zeilen, plan, menge_vorher):
     """REIN RECHNEND (testbar): Liegt die Order nach dem EINEN Klick? Beweis = neue Fill-Meldung dieser Seite und Menge („Market
     order executed") ODER die sichtbare Positionsmenge dieser Seite ist um die Plan-Menge gewachsen. Einstieg: Fill aus der
@@ -14759,7 +14779,7 @@ def modus_tvkette_cdp(cmd):
             res["gesendet"], res["retry_ok"] = False, True
             return raus("knopf", "Senden-Knopf NICHT gedrückt (Maus nicht bewiesen über dem Knopf) — nichts gesendet.", "knopf")
         trail.append("Senden geklickt — ab hier zählt nur der Beweis")
-        b, neu, erst_ok = {}, [], None
+        b, neu, erst_ok, mehr = {}, [], None, {"klick": 0, "hin": 0}
         ende = time.time() + 15.0
         while time.time() < ende:
             _warte(0.5, 0.25)
@@ -14768,6 +14788,21 @@ def modus_tvkette_cdp(cmd):
             except Exception as e_:
                 trail.append(f"Blick nach dem Klick: {type(e_).__name__}")
                 continue
+            # „Show more" (Finn 29.09.2026 nach dem ersten K4-Lauf: SL fehlte, der Meldungsstapel war eingeklappt und zeigte nur
+            # „Sell 1 | Buy 1 | Sell 1"): den Stapel EINMAL aufklappen, sobald TradingView ihn zeigt — erst dann stehen Fill, TP und
+            # SL mit Preis da (Radar spiegelt die Order 1:1). Nie ein zweiter Klick (er klappte wieder zu); ohne sichtbaren Knopf
+            # einmal mit der Maus über den Stapel (TradingView blendet die Steuerleiste beim Hover ein).
+            gr = cdp_meldungen_zu(st.get("toasts"))
+            if gr and not mehr["klick"]:
+                if cdp_rect(gr.get("mehr")):
+                    mehr["klick"] = 1
+                    if s.klick(cdp_rect(gr.get("mehr")), f"Show more (Meldungen '{gr.get('gruppe')}')"):
+                        _warte(0.6, 0.3)
+                        continue                           # sofort frisch lesen — aufgeklappt
+                elif cdp_rect(gr) and not mehr["hin"]:
+                    mehr["hin"] = 1
+                    s.hin(cdp_rect(gr), f"Meldungsstapel '{gr.get('gruppe')}'")
+                    continue
             neu = k3_neue_meldungen(vorher_m, (st.get("toasts") or {}).get("meldungen"))
             b = cdp_order_beweis(neu, k3_zeilen(st.get("positionen"), root), plan, menge0)
             if b["bestaetigt"]:
@@ -14775,7 +14810,7 @@ def modus_tvkette_cdp(cmd):
                 # TP/SL-Meldungen kommen oft kurz nach dem Fill — höchstens 4 s darauf warten
                 if ((b["tp"] is not None or not plan["tp"]) and (b["sl"] is not None or not plan["sl"])) or time.time() - erst_ok >= 4.0:
                     break
-        res["meldung_roh"] = [str(m.get("text") or "")[:160] for m in neu][:8]
+        res["meldung_roh"] = [cdp_meldung_text(m) for m in neu][:14]
         trail.append("Meldungen roh: " + (" | ".join(res["meldung_roh"]) or "nichts")[:600])
         if not b.get("bestaetigt"):
             pops = [p.get("titel") or p.get("text") for p in (st.get("popups") or [])][:2]
@@ -14787,6 +14822,8 @@ def modus_tvkette_cdp(cmd):
                    sl_limit=b.get("sl"))
         if b.get("tp") is not None:
             res["tp_limit"], res["tp_limit_quelle"] = b["tp"], "tv_toast"
+        if b.get("sl") is not None:
+            res["sl_limit_quelle"] = "tv_toast"
         trail.append(f"Order bewiesen ({b['beweis']}): Einstieg {res['einstieg'] or '-'} ({res['einstieg_quelle'] or '-'}), "
                      f"TP-Limit {b.get('tp') if b.get('tp') is not None else '-'}, SL-Limit {b.get('sl') if b.get('sl') is not None else '-'}")
         res["ok"] = True
