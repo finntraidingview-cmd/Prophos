@@ -23,7 +23,7 @@
  */
 var PROPHOS_AUGEN = (function () {
   'use strict';
-  var VERSION = '0.5.3';   // 0.5.3 (29.09.2026, Lesung 00:22:50): Konto-Anker Kontonummer zuerst, Summary Total P/L = today   // 0.5.2 (29.09.2026, Lesung 00:22): Panel 'Collapse panel'/Manager-Knopf, Konto entdoppelt + kontonr   // 0.5.1 (29.09.2026, Lesung 00:17 pc-usq1i6): Schalter-Rechteck, ticket.seite/bereit, Legende, veraltete Zeilen   // 0.5.0 (29.09.2026): Aufnahme-Modus (Finn klickt den Ablauf einmal selbst, jede Aktion wird mitgeschrieben)   // 0.4.0 (29.09.2026, K1–K4 für T3): positionen, orders, konto_summary, symbolsuche, toasts.meldungen   // 0.3.0 (29.09.2026, erste echte Lesung pc-usq1i6): TP/SL-Zustand, Konto-Leiste, Toast-Rückfall   // 0.2.0 (29.09.2026): Vertrag mit T3 — globalThis.prophosAugen, Schlüssel-Whitelist, popups, kauf_knopf
+  var VERSION = '0.6.0';   // 0.6.0 (29.09.2026, Aufnahme 00:36 leer): window-capture, roh-Zähler, tab_id, Sichtbarkeit   // 0.5.3 (29.09.2026, Lesung 00:22:50): Konto-Anker Kontonummer zuerst, Summary Total P/L = today   // 0.5.2 (29.09.2026, Lesung 00:22): Panel 'Collapse panel'/Manager-Knopf, Konto entdoppelt + kontonr   // 0.5.1 (29.09.2026, Lesung 00:17 pc-usq1i6): Schalter-Rechteck, ticket.seite/bereit, Legende, veraltete Zeilen   // 0.5.0 (29.09.2026): Aufnahme-Modus (Finn klickt den Ablauf einmal selbst, jede Aktion wird mitgeschrieben)   // 0.4.0 (29.09.2026, K1–K4 für T3): positionen, orders, konto_summary, symbolsuche, toasts.meldungen   // 0.3.0 (29.09.2026, erste echte Lesung pc-usq1i6): TP/SL-Zustand, Konto-Leiste, Toast-Rückfall   // 0.2.0 (29.09.2026): Vertrag mit T3 — globalThis.prophosAugen, Schlüssel-Whitelist, popups, kauf_knopf
 
   // ── Grundwerkzeuge ─────────────────────────────────────────────────────────
   function sichtbar(el) {
@@ -516,6 +516,7 @@ var PROPHOS_AUGEN = (function () {
    * window.__prophosAufnahme, damit ein erneutes Evaluate derselben Datei die Listener weder doppelt setzt noch verliert.
    * Datenschutz: Passwort-/Kreditkartenfelder nie mit Wert, von der Tastatur nur Enter/Tab/Esc (kein Mitschnitt von Tipperei). */
   var AUFNAHME_MAX = 300;
+  var AUFNAHME_TYPEN = ['pointerdown', 'mousedown', 'click', 'input', 'change', 'keydown', 'focusin'];
   function zoneVon(e) {
     try {
       if (e.closest('[data-name="order-panel"]')) return 'ticket';
@@ -549,10 +550,21 @@ var PROPHOS_AUGEN = (function () {
     if (el.type === 'checkbox' || el.type === 'radio') o.checked = !!el.checked;
     return o;
   }
+  // Tab-Kennung (sessionStorage): zeigt beim Stopp, ob Start und Stopp im selben Tab liefen (Aufnahme 00:36: 0 Ereignisse, Tab 'hidden')
+  function tabId() {
+    try { var id = sessionStorage.getItem('prophos_augen_tab'); if (!id) { id = 'a' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); sessionStorage.setItem('prophos_augen_tab', id); } return id; }
+    catch (_) { return window.__prophosAugenTab || (window.__prophosAugenTab = 'w' + Math.random().toString(36).slice(2, 9)); }
+  }
+  function fokus() { try { return document.hasFocus(); } catch (_) { return null; } }
   function aufnahmeEintrag(ev) {
     var A = window.__prophosAufnahme; if (!A || !A.an) return;
     try {
       var typ = ev.type;
+      A.roh = (A.roh || 0) + 1;                       // JEDES Ereignis vor den Filtern — 0 heißt: in diesem Tab kam gar nichts an
+      if (typ === 'visibilitychange') { if (A.liste.length < AUFNAHME_MAX) A.liste.push({ n: A.liste.length + 1, t: Date.now() - A.t0, typ: 'sichtbarkeit', zone: '-', ziel: null, vorfahren: [], maus: null, wert: document.visibilityState }); return; }
+      // mousedown nur, wenn kein pointerdown auf dasselbe Ziel direkt davor (sonst jeder Klick doppelt)
+      if (typ === 'mousedown' && A.letztPd && A.letztPd.el === ev.target && Date.now() - A.letztPd.t < 150) return;
+      if (typ === 'pointerdown') A.letztPd = { el: ev.target, t: Date.now() };
       if (typ === 'keydown' && !/^(Enter|Tab|Escape)$/.test(ev.key)) return;
       var ziel = ev.target && ev.target.nodeType === 1 ? ev.target : (ev.target && ev.target.parentElement);
       if (!ziel) return;
@@ -574,25 +586,31 @@ var PROPHOS_AUGEN = (function () {
   }
   function aufnahme_start() {
     var A = window.__prophosAufnahme;
-    if (A && A.an) return { ok: true, laeuft: true, eintraege: A.liste.length, seit_ms: Date.now() - A.t0 };
-    A = window.__prophosAufnahme = { an: true, t0: Date.now(), liste: [], voll: false, lst: aufnahmeEintrag, url: location.href };
-    ['pointerdown', 'click', 'input', 'change', 'keydown'].forEach(function (t) { document.addEventListener(t, A.lst, true); });
-    return { ok: true, gestartet: true, t0: A.t0 };
+    if (A && A.an) return { ok: true, laeuft: true, eintraege: A.liste.length, roh: A.roh || 0, tab_id: A.tab_id, seit_ms: Date.now() - A.t0 };
+    // WINDOW + capture: sieht jedes Ereignis als Allererstes, noch vor einem stopImmediatePropagation der Seite auf document/window
+    A = window.__prophosAufnahme = { an: true, t0: Date.now(), liste: [], voll: false, lst: aufnahmeEintrag, url: location.href, roh: 0,
+                                     tab_id: tabId(), sichtbar_start: document.visibilityState, fokus_start: fokus() };
+    AUFNAHME_TYPEN.forEach(function (t) { window.addEventListener(t, A.lst, true); });
+    document.addEventListener('visibilitychange', A.lst, true);
+    return { ok: true, gestartet: true, t0: A.t0, tab_id: A.tab_id, sichtbar: A.sichtbar_start, fokus: A.fokus_start, url: location.href };
   }
   function aufnahme_stopp() {
     var A = window.__prophosAufnahme;
     if (!A) return { ok: true, verloren: true, ereignisse: [], hinweis: 'kein Aufnahme-Puffer (Seite neu geladen oder nie gestartet)' };
-    ['pointerdown', 'click', 'input', 'change', 'keydown'].forEach(function (t) { try { document.removeEventListener(t, A.lst, true); } catch (_) {} });
+    AUFNAHME_TYPEN.forEach(function (t) { try { window.removeEventListener(t, A.lst, true); } catch (_) {} try { document.removeEventListener(t, A.lst, true); } catch (_) {} });
+    try { document.removeEventListener('visibilitychange', A.lst, true); } catch (_) {}
     A.an = false;
     var liste = JSON.parse(JSON.stringify(A.liste));   // _el fällt raus (nicht aufzählbar)
     var o = { ok: true, verloren: false, v: VERSION, t0: A.t0, dauer_ms: Date.now() - A.t0, url: A.url, url_jetzt: location.href, voll: A.voll,
-              anzahl: liste.length, geo: geo(), ereignisse: liste };
+              anzahl: liste.length, roh: A.roh || 0, tab_id: A.tab_id, sichtbar_start: A.sichtbar_start, fokus_start: A.fokus_start,
+              sichtbar_stopp: document.visibilityState, fokus_stopp: fokus(), geo: geo(), ereignisse: liste };
     window.__prophosAufnahme = null;
     return o;
   }
   function aufnahme_stand() {
     var A = window.__prophosAufnahme;
-    return A ? { ok: true, laeuft: !!A.an, eintraege: A.liste.length, voll: A.voll, seit_ms: Date.now() - A.t0 } : { ok: true, laeuft: false };
+    return A ? { ok: true, laeuft: !!A.an, eintraege: A.liste.length, roh: A.roh || 0, voll: A.voll, tab_id: A.tab_id, sichtbar: document.visibilityState, fokus: fokus(), seit_ms: Date.now() - A.t0 }
+             : { ok: true, laeuft: false, tab_id: tabId() };
   }
 
   // ── Öffentliche Funktionen ─────────────────────────────────────────────────
