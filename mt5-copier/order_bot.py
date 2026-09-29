@@ -13926,8 +13926,117 @@ def cdp_klickpunkt(rect, rnd=None):
     return (round(x + w / 2 + rnd.uniform(-w / 6, w / 6), 1), round(y + h / 2 + rnd.uniform(-h / 6, h / 6), 1))
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# PULS-CHROME MIT ECHTER WINDOWS-MAUS (29.09.2026, Finn: „wirklich manuelle Klicks … eine Lösung für alles, die immer nur so
+# funktioniert", kein Schalter). augen.js ist das AUGE (Rechtecke, Werte); geklickt und getippt wird auf den Windows-PCs IMMER mit
+# der echten Maus/Tastatur (SendInput, sichtbarer Zeiger) — so war augen.js gedacht („geklickt wird weiter mit der ECHTEN Maus").
+# Vor jedem Druck beweist die Seite per :hover, dass genau das Ziel unter dem Zeiger liegt (kein fremdes Fenster darüber,
+# Umrechnung stimmt) — sonst KEIN Druck, der Lauf bricht ab. Kein stiller Rückfall auf CDP-Eingaben. Nur ohne Windows (Mac-Tests)
+# bleibt der CDP-Weg. Das Puls-Chrome kommt dafür nach vorn (Wiederherstellen — nie Größe ändern, sonst verschieben sich alle
+# Rechtecke) und wird am Ende des Laufs wieder minimiert (Reader-Chrome frei, sonst drosselt Chrome den Feed).
+# ═══════════════════════════════════════════════════════════════════════════
+_WIN_EINGABE = (os.name == "nt")
+PULS_WIN_TASTEN = {"Tab": "{TAB}", "Enter": "{ENTER}", "Escape": "{ESC}", "Backspace": "{BACKSPACE}", "Delete": "{DELETE}",
+                   "ArrowDown": "{DOWN}", "ArrowUp": "{UP}"}
+WIN_GEO_JS = "({innerWidth: innerWidth, innerHeight: innerHeight, dpr: devicePixelRatio, titel: String(document.title || '')})"
+
+
+def win_taste_text(key, modifiers=0):
+    """REIN RECHNEND (testbar): CDP-Tastenname → pywinauto-send_keys-Text (Strg = ^). None = unbekannte Taste."""
+    k = str(key or "")
+    t = PULS_WIN_TASTEN.get(k) or (k if len(k) == 1 and k.isalnum() else None)
+    if t is None:
+        return None
+    return ("^" if int(modifiers or 0) & 2 else "") + t
+
+
+def puls_fenster_waehlen(fenster, titel):
+    """REIN RECHNEND (testbar): fenster = [{hwnd, text, klasse, sichtbar}] des Puls-Chrome-Browsers, titel = document.title des Tabs.
+    GENAU EIN Browser-Fenster (Chrome_WidgetWin_1, mit Titel, kein DevTools); bei mehreren das, dessen Titel mit dem ersten Wort des
+    Seitentitels beginnt (der Kurs im TradingView-Titel ändert sich laufend — nur das erste Wort ist stabil). -> hwnd | None"""
+    kand = [f for f in fenster or [] if isinstance(f, dict) and f.get("sichtbar") and f.get("klasse") == "Chrome_WidgetWin_1"
+            and str(f.get("text") or "").strip() and not str(f.get("text")).startswith("DevTools")]
+    if len(kand) == 1:
+        return kand[0].get("hwnd")
+    wort = (str(titel or "").split() or [""])[0]
+    if wort:
+        k2 = [f for f in kand if str(f.get("text")).startswith(wort)]
+        if len(k2) == 1:
+            return k2[0].get("hwnd")
+    return None
+
+
+def win_hover_js(x, y):
+    """Liegt das Element an diesem Viewport-Punkt unter dem Mauszeiger (:hover)? Liest nur."""
+    return ("(function(){var e=document.elementFromPoint(" + f"{float(x):.1f},{float(y):.1f}" +
+            ");return !!(e&&e.matches(':hover'));})()")
+
+
+def _puls_fenster_liste(pid):
+    """Sichtbare Top-Level-Fenster des Puls-Chrome-Browserprozesses (Windows). -> [{hwnd, text, klasse, sichtbar, minimiert}]"""
+    import ctypes
+    import ctypes.wintypes as wt
+    u32 = ctypes.windll.user32
+    out = []
+
+    @ctypes.WINFUNCTYPE(ctypes.c_bool, wt.HWND, wt.LPARAM)
+    def cb(h, _l):
+        try:
+            p_ = ctypes.c_ulong()
+            u32.GetWindowThreadProcessId(h, ctypes.byref(p_))
+            if pid and p_.value == int(pid) and u32.IsWindowVisible(h):
+                n = u32.GetWindowTextLengthW(h)
+                b = ctypes.create_unicode_buffer(n + 1)
+                u32.GetWindowTextW(h, b, n + 1)
+                k = ctypes.create_unicode_buffer(128)
+                u32.GetClassNameW(h, k, 128)
+                out.append({"hwnd": int(h), "text": b.value or "", "klasse": k.value or "", "sichtbar": True,
+                            "minimiert": bool(u32.IsIconic(h))})
+        except Exception:
+            pass
+        return True
+    u32.EnumWindows(cb, 0)
+    return out
+
+
+def _win_vordergrund():
+    import ctypes
+    return int(ctypes.windll.user32.GetForegroundWindow() or 0)
+
+
+def _win_minimiert(hwnd):
+    import ctypes
+    return bool(ctypes.windll.user32.IsIconic(int(hwnd)))
+
+
+def _win_zeigen(hwnd, befehl):
+    import ctypes
+    ctypes.windll.user32.ShowWindow(int(hwnd), int(befehl))
+
+
+def _win_nach_vorn(hwnd):
+    """Fenster in den Vordergrund (pywinautos set_focus wie beim UIA-Puls, sonst SetForegroundWindow)."""
+    try:
+        from pywinauto.controls.hwndwrapper import HwndWrapper
+        HwndWrapper(int(hwnd)).set_focus()
+        return
+    except Exception:
+        pass
+    try:
+        import ctypes
+        ctypes.windll.user32.SetForegroundWindow(int(hwnd))
+    except Exception:
+        pass
+
+
+def _win_tasten(text_sk):
+    """Echte Tastatur (pywinauto send_keys → SendInput) an das Vordergrund-Fenster."""
+    from pywinauto import keyboard
+    keyboard.send_keys(text_sk, with_spaces=True, pause=0.04)
+
+
 class _AugenSitzung:
-    """Eine CDP-Verbindung zur TradingView-Seite im Puls-Chrome: augen.js einmal geladen, stand() lesen, klicken."""
+    """Eine CDP-Verbindung zur TradingView-Seite im Puls-Chrome: augen.js einmal geladen, stand() lesen, klicken (Windows: echte Maus)."""
 
     def __init__(self, trail):
         self.trail = trail
@@ -13958,6 +14067,8 @@ class _AugenSitzung:
         return ((r.get("result") or {}).get("value")) or {}
 
     def klick(self, rect, name):
+        if _WIN_EINGABE:
+            return self._win_klick(rect, name)
         p = cdp_klickpunkt(rect)
         if not p:
             self.trail.append(f"{name}: kein klickbares Rechteck")
@@ -13980,6 +14091,13 @@ class _AugenSitzung:
     _VK = {"Tab": 9, "Enter": 13, "Escape": 27, "Backspace": 8, "Delete": 46, "a": 65, "ArrowDown": 40, "ArrowUp": 38}
 
     def taste(self, key, modifiers=0):
+        if _WIN_EINGABE:
+            t = win_taste_text(key, modifiers)
+            if t is None:
+                raise RuntimeError(f"Taste '{key}' ohne Windows-Entsprechung")
+            self._win_key(t)
+            _warte(0.05, 0.04)
+            return
         vk = self._VK.get(key, 0)
         code = {"a": "KeyA"}.get(key, key)
         self.ws.rufe("Input.dispatchKeyEvent", {"type": "rawKeyDown", "key": key, "code": code, "windowsVirtualKeyCode": vk,
@@ -13990,6 +14108,11 @@ class _AugenSitzung:
         _warte(0.05, 0.04)
 
     def tippen(self, text):
+        if _WIN_EINGABE:
+            for ch in str(text):
+                self._win_key(tv_tasten_escape(ch))
+                _warte(0.06, 0.06)
+            return
         for ch in str(text):
             vk = ord(ch.upper()) if ch.isalnum() else (190 if ch == "." else 188 if ch == "," else 0)
             self.ws.rufe("Input.dispatchKeyEvent", {"type": "keyDown", "key": ch, "text": ch, "unmodifiedText": ch,
@@ -14014,6 +14137,8 @@ class _AugenSitzung:
 
     def hin(self, rect, name):
         """Maus nur HINFAHREN (Bahn mit Streuung, kein Druck) — z. B. damit TradingView die Knöpfe einer Tabellenzeile zeigt."""
+        if _WIN_EINGABE:
+            return self._win_klick(rect, name, druck=False)
         p = cdp_klickpunkt(rect)
         if not p:
             return False
@@ -14023,6 +14148,77 @@ class _AugenSitzung:
         self.maus = p
         self.trail.append(f"Maus über {name} @{int(p[0])},{int(p[1])}")
         return True
+
+    def _win_vorn(self):
+        """Windows-Fenster DIESES Tabs finden und in den Vordergrund holen — Wiederherstellen, nie Größe ändern. -> (hwnd | None, grund)"""
+        _dpi_bewusst()
+        try:
+            self.ws.rufe("Page.bringToFront", {}, timeout=3)
+        except Exception:
+            pass
+        g = self.lese_js(WIN_GEO_JS) or {}
+        hwnd = puls_fenster_waehlen(_puls_fenster_liste(_puls_chrome_browser_pid()), g.get("titel"))
+        if not hwnd:
+            return None, "Puls-Chrome-Fenster nicht eindeutig gefunden"
+        if getattr(self, "_win_hwnd", None) is None:
+            self._win_hwnd = hwnd                       # am Ende wieder minimieren (zu)
+        if _win_minimiert(hwnd):
+            _win_zeigen(hwnd, 9)                        # SW_RESTORE: alte Größe bzw. Maximierung bleibt
+            _warte(0.5, 0.2)
+        ende = time.time() + 3.0
+        while _win_vordergrund() != int(hwnd):
+            if time.time() >= ende:
+                return None, "Puls-Chrome kommt nicht in den Vordergrund"
+            _win_nach_vorn(hwnd)
+            _warte(0.25, 0.15)
+        return hwnd, ""
+
+    def _win_klick(self, rect, name, druck=True):
+        """Echte Windows-Maus: Punkt im inneren Drittel → Bildschirm-Pixel (Breiten-Abgleich), Zeiger sichtbar hinfahren, :hover des
+        Ziels beweisen, dann EIN SendInput-Druck. Ohne Beweis kein Druck. druck=False = nur hinfahren (Hover)."""
+        hwnd, grund = self._win_vorn()
+        if not hwnd:
+            self.trail.append(f"{name}: {grund} — nichts geklickt")
+            return False
+        p = cdp_klickpunkt(rect)
+        if not p:
+            self.trail.append(f"{name}: kein klickbares Rechteck")
+            return False
+        g = self.lese_js(WIN_GEO_JS) or {}
+        punkt, grund = tv_bildschirm_punkt([p[0] - 0.5, p[1] - 0.5, 1.0, 1.0], g, _klient_rechteck(hwnd))
+        if not punkt:
+            self.trail.append(f"{name}: {grund} — nichts geklickt")
+            return False
+        _maus_fahren(*punkt)
+        hover = False
+        ende = time.time() + 0.9
+        while time.time() < ende:
+            _warte(0.08, 0.05)
+            if self.lese_js(win_hover_js(p[0], p[1])):
+                hover = True
+                break
+        if not hover:
+            self.trail.append(f"{name}: Maus steht @{punkt[0]},{punkt[1]}, Ziel NICHT unter dem Zeiger (Hover) — kein Druck")
+            return False
+        self.maus = p
+        if not druck:
+            self.trail.append(f"Maus über {name} @{punkt[0]},{punkt[1]} (Windows-Maus)")
+            return True
+        if _win_vordergrund() != int(hwnd):
+            self.trail.append(f"{name}: Puls-Chrome nicht mehr vorn — kein Druck")
+            return False
+        if not _klick_absolut(punkt[0], punkt[1]):
+            self.trail.append(f"{name}: SendInput abgelehnt")
+            return False
+        self.trail.append(f"{name} geklickt @{punkt[0]},{punkt[1]} (Windows-Maus, Hover bewiesen)")
+        return True
+
+    def _win_key(self, text_sk):
+        """Echte Tastatur — nur wenn das Puls-Chrome-Fenster dieses Tabs vorn ist, sonst Abbruch (Tasten gingen ins falsche Fenster)."""
+        hwnd, grund = self._win_vorn()
+        if not hwnd:
+            raise RuntimeError("Tastatur: " + grund)
+        _win_tasten(text_sk)
 
     def lese_js(self, ausdruck, timeout=8):
         """Eigener Lese-Ausdruck (returnByValue). -> Wert | None bei Ausnahme. NICHT „js" nennen: self.js ist der augen.js-Quelltext
@@ -14038,6 +14234,11 @@ class _AugenSitzung:
         return ((r.get("result") or {}).get("value")) if not r.get("exceptionDetails") else None
 
     def zu(self):
+        if _WIN_EINGABE and getattr(self, "_win_hwnd", None):
+            try:
+                _win_zeigen(self._win_hwnd, 7)          # SW_SHOWMINNOACTIVE: wieder minimiert, nichts aktiviert — Reader frei
+            except Exception:
+                pass
         try:
             self.ws.zu()
         except Exception:
@@ -14800,7 +15001,10 @@ class _K3Ort:
 
 
 def _k3_fenster(s, zustand, trail):
-    """Puls-Chrome-Fenster 'normal' (nach vorn — Finn: für den Login ok) bzw. zurück 'minimized'. -> vorheriger Zustand | None"""
+    """Puls-Chrome-Fenster 'normal' (nach vorn — Finn: für den Login ok) bzw. zurück 'minimized'. -> vorheriger Zustand | None
+    Auf Windows nichts: dort holt jeder Klick das Fenster per Wiederherstellen nach vorn, zu() minimiert es wieder."""
+    if _WIN_EINGABE:
+        return None
     try:
         v = _cdp_http("/json/version") or {}
         b = _CdpVerbindung(v.get("webSocketDebuggerUrl"), timeout=5.0)

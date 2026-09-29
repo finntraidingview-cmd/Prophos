@@ -1869,6 +1869,7 @@ def main():
     results.append(test_puls_topstep())
     results.append(test_puls_augen_cdp())
     results.append(test_puls_k3())
+    results.append(test_puls_win_maus())
     results.append(test_puls_nie_chrome_schliessen())
     results.append(test_tsx_konto_abgekuerzt())
     results.append(test_tsx_titel_url())
@@ -2807,6 +2808,99 @@ def test_puls_k3():
         chk(callable(getattr(s_, name_, None)), f"modus_k3 ruft s.{name_}() — an der echten Klasse aufrufbar")
     if ok:
         print("✓ Puls K3: Knopf exakt, Meldungen/Zeilen/Close eindeutig, Sperre, Login-Blick ohne Feldwerte, nur Hand-Befehl")
+    return ok
+
+
+def test_puls_win_maus():
+    """Puls-Chrome mit echter Windows-Maus (Finn 29.09.2026, „immer nur so"): augen.js Auge, Windows Hand, :hover-Beweis vor jedem
+    Druck — geprüft an der echten Sitzungs-Klasse mit nachgebildeten Windows-Funktionen."""
+    import order_bot as ob
+    ok = True
+
+    def chk(bed, text):
+        nonlocal ok
+        if not bed:
+            print("  ✗ Win-Maus: " + text)
+            ok = False
+    chk(ob.win_taste_text("a", 2) == "^a" and ob.win_taste_text("Tab") == "{TAB}" and ob.win_taste_text("ArrowDown") == "{DOWN}"
+        and ob.win_taste_text("Escape") == "{ESC}" and ob.win_taste_text("Enter") == "{ENTER}" and ob.win_taste_text("F13") is None,
+        "Tasten → send_keys")
+    f1 = {"hwnd": 11, "text": "MNQZ2026 30,481.00 ▼ −0.28% Unnamed - Google Chrome", "klasse": "Chrome_WidgetWin_1", "sichtbar": True}
+    f2 = {"hwnd": 22, "text": "Tradovate - Google Chrome", "klasse": "Chrome_WidgetWin_1", "sichtbar": True}
+    dt = {"hwnd": 33, "text": "DevTools - www.tradingview.com", "klasse": "Chrome_WidgetWin_1", "sichtbar": True}
+    leer = {"hwnd": 44, "text": "", "klasse": "Chrome_WidgetWin_1", "sichtbar": True}
+    w = ob.puls_fenster_waehlen
+    chk(w([f1, dt, leer], "MNQZ2026 30,490.25 ▲ 0.01% Unnamed") == 11, "einziges Browser-Fenster (DevTools/ohne Titel zählen nicht)")
+    chk(w([f1, f2], "MNQZ2026 30,490.25 ▲") == 11 and w([f1, f2], "Tradovate") == 22, "zwei Fenster: erstes Wort des Seitentitels (Kurs ändert sich)")
+    chk(w([f1, dict(f1, hwnd=12)], "MNQZ2026 x") is None and w([], "x") is None, "mehrdeutig/keins → None (nie raten)")
+    chk("elementFromPoint(100.5,200.0)" in ob.win_hover_js(100.5, 200) and ":hover" in ob.win_hover_js(1, 2), "Hover-Probe liest nur")
+
+    # echte Klasse, Windows nachgebildet
+    alt = {n: getattr(ob, n) for n in ("_WIN_EINGABE", "_puls_fenster_liste", "_puls_chrome_browser_pid", "_win_vordergrund", "_win_minimiert",
+                                       "_win_zeigen", "_win_nach_vorn", "_klient_rechteck", "_maus_fahren", "_klick_absolut", "_dpi_bewusst",
+                                       "_warte", "_win_tasten")}
+    zustand = {"hover": True, "vorn": 11, "klicks": [], "tasten": [], "gezeigt": [], "minimiert": True, "fahrten": []}
+
+    class _Ws:
+        def rufe(self, m, par=None, timeout=10.0):
+            if m != "Runtime.evaluate":
+                return {}
+            a = (par or {}).get("expression", "")
+            if a == ob.WIN_GEO_JS:
+                return {"result": {"value": {"innerWidth": 1600, "innerHeight": 773, "dpr": 1, "titel": "MNQZ2026 30,481.00 Unnamed"}}}
+            if "elementFromPoint" in a:
+                return {"result": {"value": zustand["hover"]}}
+            return {"result": {"value": None}}
+
+        def zu(self):
+            pass
+    try:
+        ob._WIN_EINGABE = True
+        ob._puls_fenster_liste = lambda pid: [f1]
+        ob._puls_chrome_browser_pid = lambda: 4711
+        ob._win_vordergrund = lambda: zustand["vorn"]
+        ob._win_minimiert = lambda h: zustand["minimiert"]
+        ob._win_zeigen = lambda h, b: (zustand["gezeigt"].append(b), zustand.update(minimiert=(b in (6, 7))))
+        ob._win_nach_vorn = lambda h: None
+        ob._klient_rechteck = lambda h: (0, 87, 1600, 773)          # Klient 1600 breit, 87 px Tab-/Adressleiste über dem Viewport
+        ob._maus_fahren = lambda x, y, schritte=8: zustand["fahrten"].append((x, y))
+        ob._klick_absolut = lambda x, y, taste="links", doppel=False: (zustand["klicks"].append((x, y)), True)[1]
+        ob._dpi_bewusst = lambda: True
+        ob._warte = lambda a, b: None
+        ob._win_tasten = lambda t: zustand["tasten"].append(t)
+        s_ = ob._AugenSitzung.__new__(ob._AugenSitzung)
+        s_.trail, s_.ws, s_.js, s_.maus, s_.target_id = [], _Ws(), "/* augen.js */", (0.0, 0.0), "T"
+        chk(s_.klick([952, 701, 282, 56], "SENDEN-Knopf") is True and len(zustand["klicks"]) == 1, "Hover bewiesen → genau EIN Druck")
+        x_, y_ = zustand["klicks"][0]
+        chk(952 + 282 / 3 <= x_ <= 952 + 2 * 282 / 3 + 1 and 87 + 701 + 56 / 3 <= y_ <= 87 + 701 + 2 * 56 / 3 + 1,
+            f"Bildschirmpunkt im inneren Drittel inkl. Leiste oben ({x_},{y_})")
+        chk(zustand["gezeigt"][:1] == [9] and "Windows-Maus, Hover bewiesen" in s_.trail[-1], "minimiertes Fenster wiederhergestellt (SW_RESTORE), Spur sagt Windows-Maus")
+        zustand["hover"] = False
+        chk(s_.klick([952, 701, 282, 56], "SENDEN-Knopf") is False and len(zustand["klicks"]) == 1 and "kein Druck" in s_.trail[-1],
+            "kein Hover (fremdes Fenster/falsche Umrechnung) → KEIN Druck")
+        zustand["hover"], zustand["vorn"] = True, 99
+        chk(s_.klick([952, 701, 282, 56], "SENDEN-Knopf") is False and len(zustand["klicks"]) == 1, "Puls-Chrome nicht vorn → KEIN Druck")
+        zustand["vorn"] = 11
+        s_.taste("a", modifiers=2)
+        s_.tippen("1+0")
+        chk(zustand["tasten"] == ["^a", "1", "{+}", "0"], f"Tastatur über Windows, Sonderzeichen entschärft ({zustand['tasten']})")
+        zustand["vorn"] = 99
+        try:
+            s_.taste("Tab")
+            chk(False, "Taste ohne Vordergrund muss abbrechen")
+        except RuntimeError:
+            pass
+        zustand["vorn"] = 11
+        n_k = len(zustand["klicks"])
+        chk(s_.hin([72, 630, 860, 40], "Zeile") is True and len(zustand["klicks"]) == n_k, "hin = nur fahren, kein Druck")
+        s_.zu()
+        chk(zustand["gezeigt"][-1] == 7, "am Ende wieder minimiert (SW_SHOWMINNOACTIVE)")
+        chk(ob._k3_fenster(s_, "normal", []) is None, "Windows: kein CDP-Fensterwechsel (maximiert bliebe sonst nicht)")
+    finally:
+        for n, v in alt.items():
+            setattr(ob, n, v)
+    if ok:
+        print("✓ Puls Windows-Maus: Tasten, Fensterwahl, Hover-Beweis vor jedem Druck, Vordergrund-Riegel, wieder minimiert")
     return ok
 
 
