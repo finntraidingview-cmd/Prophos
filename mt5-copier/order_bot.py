@@ -13478,8 +13478,9 @@ def modus_augen(cmd):
         pass
     try:
         start = bool(cmd.get("start"))
+        jetzt = bool(cmd.get("jetzt"))       # Hand-Test: ohne Schalter und ohne 60-s-Sperre lesen, nie schließen
         augen = _augen_regel_holen(pc) if pc else "uia"
-        if augen != "cdp" and not start:
+        if augen != "cdp" and not start and not jetzt:
             # Aufräumen (29.09.2026, Moritz pc-usq1i6: Schalter zurück auf uia, das Puls-Chrome lief weiter und kickte die
             # TradingView-Sitzung des Readers): antwortet Port 9333, das Puls-Chrome per CDP Browser.close schließen — trifft nur
             # die Instanz mit diesem Debug-Port (das Reader-Chrome hat keinen), kein taskkill, keine Fenstersuche.
@@ -13501,7 +13502,7 @@ def modus_augen(cmd):
             res.update(ok=True, msg="Regel 'uia' — nichts zu tun")
             return
         letzt = _augen_json_lesen("augen_letzt.json") or {}
-        if not start and time.time() - float(letzt.get("at") or 0) < AUGEN_ABSTAND_S:
+        if not start and not jetzt and time.time() - float(letzt.get("at") or 0) < AUGEN_ABSTAND_S:
             res.update(ok=True, msg="letztes Lesen < 60 s — übersprungen")
             return
         _augen_json_schreiben("augen_letzt.json", {"at": time.time()})
@@ -13625,6 +13626,8 @@ def main():
         # für den einmaligen Menschen-Login öffnen
         if len(sys.argv) >= 3 and sys.argv[2].strip().lower() == "start":
             cmd = {"start": True}          # 'order_bot.py augen start' / puls-chrome-starten.bat — ohne JSON-Quoting in cmd
+        elif len(sys.argv) >= 3 and sys.argv[2].strip().lower() == "jetzt":
+            cmd = {"jetzt": True}          # 'order_bot.py augen jetzt': sofort einmal lesen (Test am PC, 29.09.2026)
         else:
             try:
                 cmd = json.loads(sys.argv[2]) if len(sys.argv) >= 3 else {}
