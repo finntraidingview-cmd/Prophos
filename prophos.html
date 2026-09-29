@@ -583,6 +583,10 @@
   #dashboard-view .tb-puls .tb-puls-dot{width:6px;height:6px;border-radius:50%;background:var(--sub-2)}
   #dashboard-view .tb-puls.is-bald{border-color:rgba(245,158,11,.45);background:rgba(245,158,11,.10)}
   #dashboard-view .tb-puls.is-bald .tb-puls-dot{background:#f59e0b}
+  /* Puls arbeitet GERADE (29.09.2026): grün wie die anderen Live-Anzeigen, Punkt pulsiert (tc2Pulse) — Hände weg am PC */
+  #dashboard-view .tb-puls.is-aktiv{border-color:rgba(16,185,129,.45);background:rgba(16,185,129,.10);color:#047857}
+  #dashboard-view .tb-puls.is-aktiv b{color:#047857}
+  #dashboard-view .tb-puls.is-aktiv .tb-puls-dot{background:#10b981;animation:tc2Pulse 1.6s ease-in-out infinite}
   #dashboard-view .tb-puls[hidden]{display:none}
   /* Schmaler Desktop (29.09.2026): ohne Uhrzeit — „Puls · in 8 min", damit der Titel Platz behält */
   @media (max-width: 1180px){ #dashboard-view .tb-puls .tb-puls-uhr{display:none} }
@@ -35803,7 +35807,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.799'
+  const OS_TAB_BUILD = '2026-09-22.800'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -38528,20 +38532,55 @@
   /* NÄCHSTER PULS-EINSATZ (29.09.2026, Finn: „oben rechts unter Jacob: Nächster Puls-Impuls um die Uhrzeit, in so und so viel
    * Minuten — das gibt Puls den Spielraum, den er braucht"). Pille #tb-puls in der Kopfzeile, je ID aus den eigenen Plänen:
    *   (1) Start: geplanter Plan mit Startzeit, noch nicht gestartet, Orbit/Echo-Route (Farmer-Pläne nur bei scharfem Farmer)
-   *       — dieselbe Auswahl wie tpStartUmTick
+   *       — dieselbe Auswahl wie tpStartUmTick; überfällig über das Start-Fenster hinaus (10 min, Farmer 60 min) zählt nicht mehr,
+   *       tpStartUmTick feuert solche Pläne nie (vorher stand dann ewig „jetzt")
    *   (2) Bestätigung: Puls-Plan nach dem Ende ohne gelesene Balance — Nachlesung ab tvV2NachleseAb, nach einem Fehlversuch
    *       der nächste Versuch (TV_ENDLESUNG_PAUSE_S); aufgegeben/8 Versuche/erledigt > 12 h zählen nicht
-   * Nur Anzeige, kein Takt, keine Entscheidung. Überfällig = „jetzt". */
+   * Nur Anzeige, kein Takt, keine Entscheidung. */
+  /* PULS LÄUFT GERADE (29.09.2026, Finn: „dass man oben sieht, wann Puls gerade eben aktiv ist … und am MacBook, wann die nächste
+   * Puls-Order ist"). Screenshot 29.09.: Auto-Start-Panel „Puls füllt den Order-Dialog im Master-Terminal… (38s)", die Pille daneben
+   * „nichts geplant" — ein gestarteter Plan fiel aus pulsTermine, einen laufenden Einsatz kannte die Pille gar nicht. Drei Quellen,
+   * die erste gewinnt:
+   *   (a) dieses Gerät: Fern-Lauf (_rsAktiv, Mac/Handy), Startzeit-/Orbit-Lauf (_tpOrbitLaeuft/_suLaeuft), Signal (_osActive),
+   *       Balance-Rundgang (tvV2Poll.busy) — sofort, ohne DB
+   *   (b) order_signale 'wartet'/'laeuft' dieser ID (≤ 10 min alt) — was der PC gerade für Handy/Mac erledigt
+   *   (c) Plan mit beanspruchter Startzeit, noch 'planned' (≤ 4 min) — der PC-Tab hat ihn zur Startzeit angestoßen
+   * (b)+(c) und die geplanten Starts holt pulsFernLaden alle 15 s selbst (nur sichtbarer Tab): am Mac wird tradePlans nur beim
+   * Login geladen, nachts angelegte Farmer-Pläne fehlten dort bis zum Neuladen. */
+  const PULS_SIGNAL_MAX_MS = 10 * 60000, PULS_CLAIM_MAX_MS = 4 * 60000, PULS_FERN_MAX = 100
+  const _pulsFern = { at: 0, versuch: 0, laeuft: false, signale: [], plaene: null }
+  const _pulsSeit = {}   // Quelle → erster Moment, in dem sie „läuft" meldete (die lokalen Riegel tragen keine Uhrzeit)
+  const pulsStartFenster = p => (tpIstFarmerPlan(p) ? 60 : 10) * 60000
+  function pulsPlaene(jetzt){
+    let _tp = []; try{ _tp = tradePlans || [] }catch(_){}
+    const f = _pulsFern.plaene
+    if(!f || jetzt - _pulsFern.at > 90000) return _tp
+    const grenze = jetzt - 65 * 60000
+    // Frischer DB-Stand der geplanten Starts gewinnt: neue Pläne kommen dazu, ein lokal noch 'planned' geführter Plan, den die DB
+    // nicht mehr als geplant kennt (gestartet, gelöscht), fällt raus — außer die Liste war am Deckel abgeschnitten
+    const frisch = new Map(f.map(p => [String(p.id), p]))
+    const voll = f.length < PULS_FERN_MAX
+    const out = []
+    for(const p of _tp){
+      if(!p) continue
+      const id = String(p.id), fp = frisch.get(id)
+      if(fp && p.status === 'planned'){ out.push(fp); frisch.delete(id); continue }
+      if(!fp && voll && p.status === 'planned' && p.startUm && (Date.parse(p.startUm) || 0) >= grenze) continue
+      if(fp) frisch.delete(id)
+      out.push(p)
+    }
+    for(const p of frisch.values()) out.push(p)
+    return out
+  }
   function pulsTermine(jetzt){
     jetzt = jetzt || Date.now()
-    let _tp = []; try{ _tp = tradePlans }catch(_){}
     const scharf = !!(_suScharf && _suScharf.an)
     const out = []
-    for(const p of (_tp || [])){
+    for(const p of pulsPlaene(jetzt)){
       if(!p) continue
       if(p.status === 'planned' && p.startUm && !p.startUmGestartetAt && (routeIstOrbit(p.route) || routeIstEcho(p.route)) && (scharf || !tpIstFarmerPlan(p))){
         const t = Date.parse(p.startUm) || 0
-        if(t) out.push({ t, art: 'Start', plan: p })
+        if(t && jetzt - t <= pulsStartFenster(p)) out.push({ t, art: 'Start', plan: p })
         continue
       }
       if(!planIstPuls(p) || !(p.status === 'review' || p.status === 'completed')) continue
@@ -38559,31 +38598,113 @@
     return out.sort((a, b) => a.t - b.t)
   }
   window._pulsTermine = pulsTermine
+  const pulsArtVonSignal = (planId, aktion) => {
+    const a = String(aktion || ''), pid = String(planId || '')
+    if(a === 'close') return 'Schließen'
+    if(/balance|endlesung|rundgang/.test(a) || pid.startsWith('konto:')) return 'Balance lesen'
+    if(a === 'tsx_inventar' || pid.startsWith('tsx:')) return 'Lesen'
+    return 'Order'
+  }
+  function pulsSeit(quelle, an, jetzt){
+    if(!an){ delete _pulsSeit[quelle]; return 0 }
+    if(!_pulsSeit[quelle]) _pulsSeit[quelle] = jetzt
+    return _pulsSeit[quelle]
+  }
+  // -> { art, seit, name, wo } | null
+  function pulsAktivJetzt(jetzt){
+    const lies = f => { try{ return f() }catch(_){ return null } }
+    const plaene = pulsPlaene(jetzt)
+    const name = id => { const p = id ? plaene.find(x => x && String(x.id) === String(id)) : null; return (p && p.masterName) || '' }
+    const rs = lies(() => _rsAktiv)
+    if(rs) return { art: rs.planId ? 'Order' : 'Schließen', seit: rs.t0 || jetzt, name: name(rs.planId), wo: 'von diesem Gerät gestartet' }
+    const os = lies(() => _osActive)
+    const orbit = !!lies(() => _tpOrbitLaeuft || _suLaeuft)
+    const tOrbit = pulsSeit('orbit', orbit && !os, jetzt)
+    if(os) return { art: pulsArtVonSignal(os.planId), seit: pulsSeit('os:' + os.sigId, true, jetzt), name: name(os.planId), wo: 'dieser PC' }
+    if(orbit) return { art: 'Order', seit: tOrbit, name: '', wo: 'dieser PC' }
+    const runde = !!lies(() => tvV2Poll && tvV2Poll.busy)
+    const tRunde = pulsSeit('runde', runde, jetzt)
+    if(runde) return { art: 'Balance lesen', seit: tRunde, name: '', wo: 'dieser PC' }
+    for(const s of _pulsFern.signale){
+      const t0 = Date.parse(s.created_at || '') || 0
+      if(!t0 || jetzt - t0 > PULS_SIGNAL_MAX_MS) continue
+      return { art: pulsArtVonSignal(s.plan_id, s.params && s.params.aktion), seit: t0, name: name(s.plan_id),
+               wo: s.status === 'wartet' ? 'wartet, bis der PC-Tab übernimmt' : 'am PC', wartet: s.status === 'wartet' }
+    }
+    for(const p of plaene){
+      if(!p || p.status !== 'planned' || !p.startUmGestartetAt || !p.startUm) continue
+      const g = Date.parse(p.startUmGestartetAt) || 0, s0 = Date.parse(p.startUm) || 0
+      if(!g || jetzt - g > PULS_CLAIM_MAX_MS) continue
+      // verpasst (Claim nach dem Start-Fenster bzw. Slave-Vorprüfung aufgegeben) = kein Lauf
+      if(s0 && g - s0 > pulsStartFenster(p)) continue
+      if(/^verpasst/.test(String((p.mt5Baseline && p.mt5Baseline.vorcheck && p.mt5Baseline.vorcheck.status) || ''))) continue
+      return { art: 'Order', seit: g, name: p.masterName || '', wo: 'am PC zur Startzeit' }
+    }
+    return null
+  }
+  async function pulsFernLaden(){
+    if(_pulsFern.laeuft || document.hidden) return
+    let uid = null; try{ uid = currentUserId }catch(_){}
+    if(!uid) return
+    _pulsFern.laeuft = true
+    _pulsFern.versuch = Date.now()
+    try{
+      const ab = new Date(Date.now() - PULS_SIGNAL_MAX_MS).toISOString()
+      const [sig, pl] = await Promise.all([
+        supabase.from('order_signale').select('id,plan_id,params,status,created_at').eq('user_id', uid)
+          .in('status', ['wartet', 'laeuft']).gte('created_at', ab).order('created_at', { ascending: false }).limit(5),
+        // ab 65 min vor jetzt: Farmer-Fenster 60 min + Claim-Dauer — ältere nie gefeuerte Pläne würden sonst den Deckel füllen
+        supabase.from('trade_plans').select('*').eq('user_id', uid).eq('status', 'planned')
+          .gte('start_um', new Date(Date.now() - 65 * 60000).toISOString()).order('start_um', { ascending: true }).limit(PULS_FERN_MAX)
+      ])
+      if(!sig.error) _pulsFern.signale = sig.data || []
+      if(!pl.error){ _pulsFern.plaene = (pl.data || []).map(r => { try{ return rowToPlan(r) }catch(_){ return null } }).filter(Boolean); _pulsFern.at = Date.now() }
+    }catch(_){}
+    finally{ _pulsFern.laeuft = false }
+    try{ pulsNaechsterZeichnen() }catch(_){}
+  }
   const pulsInText = ms => { const m = Math.ceil(ms / 60000); if(ms <= 30000) return 'jetzt'; if(m < 60) return 'in ' + m + ' min'; const h = Math.floor(m / 60), r = m % 60; return 'in ' + h + ' h' + (r ? ' ' + r + ' min' : '') }
   function pulsNaechsterZeichnen(){
     const el = document.getElementById('tb-puls'); if(!el) return
     let uid = null; try{ uid = currentUserId }catch(_){}
     if(!uid){ el.hidden = true; return }
-    const jetzt = Date.now(), liste = pulsTermine(jetzt), n = liste[0]
+    const jetzt = Date.now(), liste = pulsTermine(jetzt), n = liste[0], aktiv = pulsAktivJetzt(jetzt)
     const uhr = t => new Date(t).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
-    if(!n){
-      el.innerHTML = '<span class="tb-puls-dot"></span><span class="tb-puls-lbl">Puls · </span>nichts geplant'
-      el.classList.remove('is-bald')
-      el.title = 'Kein geplanter Start und keine offene Bestätigung auf dieser ID'
+    const naechste = liste.slice(0, 6).map(x => `${uhr(Math.max(x.t, jetzt))} · ${x.art} · ${x.plan.masterName || 'Konto'}${x.t <= jetzt ? ' (fällig)' : ''}`)
+    let html, titel
+    if(aktiv){
+      const s = Math.max(0, Math.round((jetzt - aktiv.seit) / 1000))
+      html = `<span class="tb-puls-dot"></span><span class="tb-puls-lbl">Puls ${aktiv.wartet ? 'wartet' : 'läuft'} · </span><b>${aktiv.art} · ${s < 120 ? s + ' s' : Math.round(s / 60) + ' min'}</b>`
+      titel = `Puls arbeitet gerade: ${aktiv.art}${aktiv.name ? ' · ' + aktiv.name : ''} (${aktiv.wo}) — Maus und Tastatur am PC frei lassen`
+        + (naechste.length ? '\n\nDanach:\n' + naechste.join('\n') : '')
+    } else if(!n){
+      html = '<span class="tb-puls-dot"></span><span class="tb-puls-lbl">Puls · </span>nichts geplant'
+      titel = 'Kein geplanter Start und keine offene Bestätigung auf dieser ID'
     } else {
       const rest = Math.max(0, n.t - jetzt)
-      el.innerHTML = `<span class="tb-puls-dot"></span><span class="tb-puls-lbl">Puls</span><span class="tb-puls-uhr"> · ${uhr(Math.max(n.t, jetzt))}</span><span class="tb-puls-lbl"> · </span><b>${pulsInText(rest)}</b>`
-      el.classList.toggle('is-bald', rest <= 10 * 60000)
-      el.title = 'Nächste Puls-Einsätze (Maus + TradingView frei lassen):\n' + liste.slice(0, 6).map(x =>
-        `${uhr(Math.max(x.t, jetzt))} · ${x.art} · ${x.plan.masterName || 'Konto'}${x.t <= jetzt ? ' (fällig)' : ''}`).join('\n')
+      html = `<span class="tb-puls-dot"></span><span class="tb-puls-lbl">Puls</span><span class="tb-puls-uhr"> · ${uhr(Math.max(n.t, jetzt))}</span><span class="tb-puls-lbl"> · </span><b>${pulsInText(rest)}</b>`
+      titel = 'Nächste Puls-Einsätze (Maus + TradingView frei lassen):\n' + naechste.join('\n')
     }
+    // Sekundentakt: nur anfassen, was sich geändert hat — sonst flackert der Tooltip
+    if(el.innerHTML !== html) el.innerHTML = html
+    if(el.title !== titel) el.title = titel
+    el.classList.toggle('is-aktiv', !!aktiv)
+    el.classList.toggle('is-bald', !aktiv && !!n && n.t - jetzt <= 10 * 60000)
     el.hidden = false
   }
   window._pulsNaechsterZeichnen = pulsNaechsterZeichnen
   document.getElementById('tb-puls')?.addEventListener('click', () => { document.querySelector('#dashboard-view .sb-link[data-view="trades"]')?.click() })
-  // Alle 20 s neu (Countdown); Farmer-Schalter auf Geräten ohne Startzeit-Takt (Mac/Handy) höchstens 1× je Minute nachlesen
-  setInterval(() => { try{ if(!_suScharf || Date.now() - _suScharf.at > 60000) tpFarmerScharf().catch(() => {}) }catch(_){}; try{ pulsNaechsterZeichnen() }catch(_){} }, 20000)
-  setTimeout(() => { try{ pulsNaechsterZeichnen() }catch(_){} }, 1500)
+  // Jede Sekunde zeichnen (Sekunden beim Lauf, reine Rechnung auf dem Speicher); DB alle 15 s (nur sichtbarer Tab), nach dem Login
+  // sofort (noch nie geladen: alle 3 s versuchen); Farmer-Schalter auf Geräten ohne Startzeit-Takt (Mac/Handy) höchstens 1× je Minute
+  let _pulsScharfHolt = false
+  setInterval(() => {
+    try{ if(!_pulsScharfHolt && (!_suScharf || Date.now() - _suScharf.at > 60000)){ _pulsScharfHolt = true; tpFarmerScharf().catch(() => {}).finally(() => { _pulsScharfHolt = false }) } }catch(_){}
+    const seitVersuch = Date.now() - _pulsFern.versuch
+    if(seitVersuch >= 15000 || (!_pulsFern.at && seitVersuch >= 3000)) pulsFernLaden().catch(() => {})
+    try{ pulsNaechsterZeichnen() }catch(_){}
+  }, 1000)
+  document.addEventListener('visibilitychange', () => { if(!document.hidden) pulsFernLaden().catch(() => {}) })
+  setTimeout(() => { try{ tpFarmerScharf().then(() => pulsNaechsterZeichnen()).catch(() => {}) }catch(_){}; try{ pulsNaechsterZeichnen() }catch(_){} }, 1500)
   /* SLAVE-VORPRÜFUNG VOR DEM WD-START (29.09.2026, Vorfall EzPoker b0252248 auf pc-40mali 22:10 UTC: Puls kaufte sauber in TV, der
    * Fusion-Hedge scheiterte 8× an 'copier_alt' — das MT5-Slave-Terminal war nicht offen, Finn setzte den Hedge von Hand). Vor dem Puls-Klick
    * eines Orbit-V2-Plans mit Fusion-Hedge: läuft auf diesem PC ein Copier mit frischem Status? Dieselbe Regel wie der copier_alt-Riegel in
