@@ -23,7 +23,7 @@
  */
 var PROPHOS_AUGEN = (function () {
   'use strict';
-  var VERSION = '0.4.1';   // 0.4.0 (29.09.2026, K1–K4 für T3): positionen, orders, konto_summary, symbolsuche, toasts.meldungen   // 0.3.0 (29.09.2026, erste echte Lesung pc-usq1i6): TP/SL-Zustand, Konto-Leiste, Toast-Rückfall   // 0.2.0 (29.09.2026): Vertrag mit T3 — globalThis.prophosAugen, Schlüssel-Whitelist, popups, kauf_knopf
+  var VERSION = '0.5.0';   // 0.5.0 (29.09.2026): Aufnahme-Modus (Finn klickt den Ablauf einmal selbst, jede Aktion wird mitgeschrieben)   // 0.4.0 (29.09.2026, K1–K4 für T3): positionen, orders, konto_summary, symbolsuche, toasts.meldungen   // 0.3.0 (29.09.2026, erste echte Lesung pc-usq1i6): TP/SL-Zustand, Konto-Leiste, Toast-Rückfall   // 0.2.0 (29.09.2026): Vertrag mit T3 — globalThis.prophosAugen, Schlüssel-Whitelist, popups, kauf_knopf
 
   // ── Grundwerkzeuge ─────────────────────────────────────────────────────────
   function sichtbar(el) {
@@ -483,6 +483,92 @@ var PROPHOS_AUGEN = (function () {
     return out;
   }
 
+
+  /* ── AUFNAHME-MODUS (29.09.2026, Finns Idee): Finn klickt den Order-Ablauf im Puls-Chrome einmal selbst bis VOR den Kauf-Knopf,
+   * jede Aktion wird mit Ziel + 3 Vorfahren + Zone mitgeschrieben — daraus werden die Signaturen gebaut. Capture-Listener auf
+   * document (sehen jedes Ereignis zuerst, ändern nichts: kein preventDefault, kein stopPropagation). Zustand in
+   * window.__prophosAufnahme, damit ein erneutes Evaluate derselben Datei die Listener weder doppelt setzt noch verliert.
+   * Datenschutz: Passwort-/Kreditkartenfelder nie mit Wert, von der Tastatur nur Enter/Tab/Esc (kein Mitschnitt von Tipperei). */
+  var AUFNAHME_MAX = 300;
+  function zoneVon(e) {
+    try {
+      if (e.closest('[data-name="order-panel"]')) return 'ticket';
+      if (e.closest('[role="dialog"],[role="alertdialog"],[data-dialog-name]')) return 'dialog';
+      if (e.closest('[data-name^="toast-group-"],[class*="toastGroup-"]')) return 'toast';
+      if (e.closest('[role="listbox"],[role="menu"],[data-name="menu-inner"],[data-name="popup-menu-container"]')) return 'menu';
+      if (e.closest('[data-name*="account"],#footer-chart-panel,[class*="accountManager"]')) return 'konto';
+      if (e.closest('table,[role="table"],[role="grid"]')) return 'tabelle';
+      var r = e.getBoundingClientRect();
+      return r.top < 70 ? 'kopf' : r.left > window.innerWidth * 0.6 ? 'rechts' : r.top > window.innerHeight * 0.6 ? 'unten' : 'mitte';
+    } catch (_) { return '?'; }
+  }
+  function geheim(el) {
+    try {
+      var t = String(el.type || '').toLowerCase(), ac = attr(el, 'autocomplete').toLowerCase();
+      if (t === 'password' || /password|cc-|one-time-code/.test(ac) || /passw|kennwort|pin\b|cvc|cvv/i.test(attr(el, 'name') + ' ' + attr(el, 'aria-label') + ' ' + attr(el, 'placeholder'))) return true;
+      // Login-Formulare/-Dialoge (Tradovate/TradingView-Anmeldung, T3 29.09.2026): JEDES Feld dort verborgen, auch Benutzername
+      var f = el.closest('form'); if (f && f.querySelector('input[type="password"]')) return true;
+      var d = el.closest('[role="dialog"],[role="alertdialog"],[data-dialog-name],[aria-modal="true"]');
+      if (d && (d.querySelector('input[type="password"]') || /sign\s*in|log\s*in|anmeld|einloggen|login|passwort|password/i.test(txt(d).slice(0, 300)))) return true;
+      return false;
+    } catch (_) { return true; }
+  }
+  function aufnahmeKnoten(el) {
+    if (!el || !el.tagName) return null;
+    var o = { tag: el.tagName.toLowerCase(), dn: attr(el, 'data-name'), role: attr(el, 'role'), aria: attr(el, 'aria-label'), id: el.id || '',
+              text: txt(el).slice(0, 60), rect: el.getBoundingClientRect ? rect(el) : null };
+    if (typeof el.value === 'string') o.wert = geheim(el) ? '[verborgen]' : el.value.slice(0, 60);
+    var zust = ['aria-expanded', 'aria-selected', 'aria-checked', 'aria-pressed', 'data-dialog-name', 'title', 'placeholder', 'type'];
+    for (var i = 0; i < zust.length; i++) { var v = attr(el, zust[i]); if (v !== '') o[zust[i]] = v.slice(0, 60); }
+    if (el.type === 'checkbox' || el.type === 'radio') o.checked = !!el.checked;
+    return o;
+  }
+  function aufnahmeEintrag(ev) {
+    var A = window.__prophosAufnahme; if (!A || !A.an) return;
+    try {
+      var typ = ev.type;
+      if (typ === 'keydown' && !/^(Enter|Tab|Escape)$/.test(ev.key)) return;
+      var ziel = ev.target && ev.target.nodeType === 1 ? ev.target : (ev.target && ev.target.parentElement);
+      if (!ziel) return;
+      // input: pro Feld nur der letzte Stand (sonst 300 Einträge nach ein paar Tastendrücken)
+      if (typ === 'input' && A.liste.length) {
+        var letzt = A.liste[A.liste.length - 1];
+        if (letzt.typ === 'input' && letzt._el === ziel) { letzt.wert = geheim(ziel) ? '[verborgen]' : String(ziel.value || '').slice(0, 60); letzt.t_ende = Date.now() - A.t0; return; }
+      }
+      if (A.liste.length >= AUFNAHME_MAX) { A.voll = true; return; }
+      var vorfahren = [], p = ziel.parentElement;
+      for (var i = 0; i < 3 && p && p !== document.body; i++) { vorfahren.push(aufnahmeKnoten(p)); p = p.parentElement; }
+      var e = { n: A.liste.length + 1, t: Date.now() - A.t0, typ: typ, zone: zoneVon(ziel), ziel: aufnahmeKnoten(ziel), vorfahren: vorfahren,
+                maus: (typeof ev.clientX === 'number' && typ !== 'keydown') ? [Math.round(ev.clientX), Math.round(ev.clientY)] : null };
+      if (typ === 'keydown') e.taste = ev.key;
+      if (typ === 'input' || typ === 'change') e.wert = geheim(ziel) ? '[verborgen]' : String(ziel.value == null ? '' : ziel.value).slice(0, 60);
+      Object.defineProperty(e, '_el', { value: ziel, enumerable: false });   // nur für das Zusammenfassen, nie im JSON
+      A.liste.push(e);
+    } catch (_) {}
+  }
+  function aufnahme_start() {
+    var A = window.__prophosAufnahme;
+    if (A && A.an) return { ok: true, laeuft: true, eintraege: A.liste.length, seit_ms: Date.now() - A.t0 };
+    A = window.__prophosAufnahme = { an: true, t0: Date.now(), liste: [], voll: false, lst: aufnahmeEintrag, url: location.href };
+    ['pointerdown', 'click', 'input', 'change', 'keydown'].forEach(function (t) { document.addEventListener(t, A.lst, true); });
+    return { ok: true, gestartet: true, t0: A.t0 };
+  }
+  function aufnahme_stopp() {
+    var A = window.__prophosAufnahme;
+    if (!A) return { ok: true, verloren: true, ereignisse: [], hinweis: 'kein Aufnahme-Puffer (Seite neu geladen oder nie gestartet)' };
+    ['pointerdown', 'click', 'input', 'change', 'keydown'].forEach(function (t) { try { document.removeEventListener(t, A.lst, true); } catch (_) {} });
+    A.an = false;
+    var liste = JSON.parse(JSON.stringify(A.liste));   // _el fällt raus (nicht aufzählbar)
+    var o = { ok: true, verloren: false, v: VERSION, t0: A.t0, dauer_ms: Date.now() - A.t0, url: A.url, url_jetzt: location.href, voll: A.voll,
+              anzahl: liste.length, geo: geo(), ereignisse: liste };
+    window.__prophosAufnahme = null;
+    return o;
+  }
+  function aufnahme_stand() {
+    var A = window.__prophosAufnahme;
+    return A ? { ok: true, laeuft: !!A.an, eintraege: A.liste.length, voll: A.voll, seit_ms: Date.now() - A.t0 } : { ok: true, laeuft: false };
+  }
+
   // ── Öffentliche Funktionen ─────────────────────────────────────────────────
   /* Stand für Puls: alles, was er vor und nach einem Klick braucht. opts.kontoTexte = External IDs (Suche als Text). */
   /* VERTRAG MIT T3 (29.09.2026, Route im Augen-Prozess): nur diese Schlüssel kommen durch — v, ts, url, titel, geo, sichtbar,
@@ -581,7 +667,8 @@ var PROPHOS_AUGEN = (function () {
     return o;
   }
 
-  return { v: VERSION, version: VERSION, stand: stand, inventar: inventar };
+  return { v: VERSION, version: VERSION, stand: stand, inventar: inventar,
+           aufnahme_start: aufnahme_start, aufnahme_stopp: aufnahme_stopp, aufnahme_stand: aufnahme_stand };
 })();
 // Vertrag T3: globalThis.prophosAugen = { v, stand(), inventar() } — mehrfaches Ausführen setzt es einfach neu (idempotent).
 // PROPHOS_AUGEN / augenStand / augenInventar bleiben als Alias.
