@@ -14038,11 +14038,12 @@ def _win_tasten(text_sk):
 class _AugenSitzung:
     """Eine CDP-Verbindung zur TradingView-Seite im Puls-Chrome: augen.js einmal geladen, stand() lesen, klicken (Windows: echte Maus)."""
 
-    def __init__(self, trail):
+    def __init__(self, trail, ziel=None):
         self.trail = trail
         if not _puls_chrome_sicher(trail):
             raise RuntimeError("Puls-Chrome nicht erreichbar (Port 9333)")
-        ziel = augen_target_waehlen(_cdp_http("/json/list"))
+        # ziel: ein bestimmter Tab (Auto-Login 29.09.2026: der neue Tab mit ?trade-now) — sonst wie bisher die Chart-Seite
+        ziel = ziel or augen_target_waehlen(_cdp_http("/json/list"))
         if not ziel:
             raise RuntimeError("im Puls-Chrome ist keine TradingView-Seite offen")
         self.js = _augen_js_holen(trail)
@@ -14317,7 +14318,7 @@ def _cdp_konto_sichern(s, ext, opts, trail):
                 trail.append("Konto-Liste mit Esc geschlossen")
                 return False, "konto_nicht_erreicht", (f"Konto {ext} steht im Dropdown {n}x (nicht genau einmal) — nichts geklickt"
                                                         + (" (anderer Tradovate-Login?)" if n == 0 else "") + "."), st, \
-                    {"konto_eintraege": [str(x.get("text"))[:40] for x in (ko.get("eintraege") or [])][:20]}
+                    {"konto_eintraege": [str(x.get("text"))[:40] for x in (ko.get("eintraege") or [])][:20], "konto_treffer": n}
             s.klick(cdp_rect(e), f"Konto {ext}")
             _warte(1.2, 0.6)
             st = s.stand(opts)
@@ -14398,8 +14399,9 @@ def modus_tvlesen_cdp(cmd):
     if _handlauf_aktiv():                    # K3-Handlauf (29.09.2026): im Puls-Chrome klickt gerade ein Hand-Befehl — nicht dazwischen
         return raus("handlauf", "K3-Handlauf läuft im Puls-Chrome — nichts gelesen, bitte gleich erneut anstoßen.", "sperre")
     try:
-        s = sitz[0] = _AugenSitzung(trail)
-        ok, code, msg, st, extra = _cdp_konto_sichern(s, ext, opts, trail)
+        s = sitz[0] = _cdp_sitzung_holen(cmd, trail)          # kein TradingView-Tab offen → einer wird geöffnet (Auto-Login)
+        ok, code, msg, st, extra = _cdp_konto_mit_login(sitz, ext, opts, cmd, trail, res)
+        s = sitz[0]                                          # der Auto-Login tauscht den Tab → neue Sitzung
         res.update({k: v for k, v in extra.items() if k == "konto_aktiv"})
         if not ok:
             return raus(code, msg, "konto", **{k: v for k, v in extra.items() if k != "konto_aktiv"})
@@ -14627,8 +14629,9 @@ def modus_tvkette_cdp(cmd):
     if _handlauf_aktiv():                    # K3-Handlauf (29.09.2026): nicht ins laufende Ticket/Dropdown klicken
         return raus("handlauf", "K3-Handlauf läuft im Puls-Chrome — nichts geklickt, bitte gleich erneut anstoßen.", "sperre")
     try:
-        s = sitz[0] = _AugenSitzung(trail)
-        ok, code, msg, st, extra = _cdp_konto_sichern(s, ext, opts, trail)
+        s = sitz[0] = _cdp_sitzung_holen(cmd, trail)          # kein TradingView-Tab offen → einer wird geöffnet (Auto-Login)
+        ok, code, msg, st, extra = _cdp_konto_mit_login(sitz, ext, opts, cmd, trail, res)
+        s = sitz[0]                                          # der Auto-Login tauscht den Tab → neue Sitzung
         res.update({k: v for k, v in extra.items() if k == "konto_aktiv"})
         if not ok:
             return raus(code, msg, "konto", **{k: v for k, v in extra.items() if k != "konto_aktiv"})
@@ -14937,7 +14940,17 @@ K3_LOGIN_BLICK_JS = r"""(function (anfang) {
     .filter(function (e) { return T(e).length <= 60; }).slice(0, 25).map(K);
   o.dialoge = Q('[role="dialog"],[role="alertdialog"],[data-dialog-name],[aria-modal="true"]').filter(sb).slice(0, 4).map(function (d) {
     return { titel: T(d.querySelector('h1,h2,h3,[class*="title"]')).slice(0, 60), text: T(d).slice(0, 240), rect: R(d),
-             knoepfe: innen(Q('button,[role="button"],[role="tab"],[role="radio"],input[type="submit"]', d).filter(sb)).slice(0, 20).map(K) }; });
+             knoepfe: innen(Q('button,[role="button"],[role="tab"],[role="radio"],input[type="submit"]', d).filter(sb)).slice(0, 20).map(K),
+             // Auto-Login (29.09.2026): Haken „Don't remember me" im Tradovate-Connect-Dialog (alter Puls: CheckBox, 21.09.) — Kästchen oft
+             // unsichtbar (opacity 0) → dann die Beschriftung als Klickziel; ohne Kästchen nur die Beschriftung (Zustand unlesbar = null)
+             nicht_merken: (function () { var rx = /(don.?t|do not|nicht)\s+(remember|merken|speichern|erinnern)/i;
+               var c = Q('input[type="checkbox"],[role="checkbox"]', d).filter(function (e) { return rx.test(T(e.closest('label') || e.parentElement) + ' ' + A(e, 'aria-label')); });
+               if (c.length > 1) return { mehrdeutig: c.length };
+               if (c.length === 1) { var l = c[0].closest('label'), z = sb(c[0]) ? c[0] : (l && sb(l) ? l : (sb(c[0].parentElement) ? c[0].parentElement : null));
+                 return { an: c[0].tagName === 'INPUT' ? !!c[0].checked : A(c[0], 'aria-checked') === 'true', rect: z ? R(z) : null, quelle: 'kaestchen' }; }
+               var t = innen(Q('label,span,div,button', d).filter(sb).filter(function (e) { return rx.test(T(e)) && T(e).length <= 40; }));
+               return t.length === 1 ? { an: null, rect: R(t[0]), quelle: 'text' } : (t.length ? { mehrdeutig: t.length } : null); })(),
+             netzfehler: /network error occurred|netzwerkfehler|check your internet connection/i.test(T(d)) }; });
   var pws = Q('input[type="password"]').filter(sb);
   if (pws.length) {
     var pw = pws[0];
@@ -14948,6 +14961,7 @@ K3_LOGIN_BLICK_JS = r"""(function (anfang) {
     var u = vor.length ? vor[vor.length - 1] : null, p = String(anfang || '').toLowerCase();
     o.login = { pw_n: pws.length, box: R(box), pw: { rect: R(pw), gefuellt: String(pw.value || '').length > 0, autofill: af(pw), fokus: document.activeElement === pw },
       user: u ? { rect: R(u), gefuellt: String(u.value || '').length > 0, passt: !!p && String(u.value || '').toLowerCase().indexOf(p) === 0,
+                  laenge_gleich: !!p && String(u.value || '').length === p.length,       // Auto-Login: passt + gleiche Länge = exakt der Username
                   autofill: af(u), fokus: document.activeElement === u } : null,
       knoepfe: innen(Q('button,[role="button"],input[type="submit"]', box).filter(sb)).slice(0, 12).map(K),
       merken: (function () { var c = Q('input[type="checkbox"]', box).filter(function (e) { return /remember|merken|angemeldet/i.test(T(e.closest('label') || e.parentElement)); });
@@ -15558,6 +15572,539 @@ def modus_k3(cmd):
         wo = ("NACH dem Senden-Klick — Stand UNKLAR, erst in TradingView nachsehen" if res.get("gesendet") and not res.get("flach")
               else "vor dem Senden — nichts gesendet" if not res.get("gesendet") else "nach dem Flach-Beweis")
         return raus("cdp_fehler", f"Puls-Chrome/CDP: {type(e).__name__}: {str(e)[:140]} ({wo})", res.get("schritt") or "cdp")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PULS ÜBER CDP — TRADOVATE SELBST VERBINDEN (29.09.2026, Finn: „wenn das neue Chrome-Tab geöffnet wird und man in keinem
+# Tradovate-Konto drin ist bzw. im falschen, muss er das eigenständig erkennen" — dann wie beim alten Puls über TradingViews
+# Connect-to-Tradovate-Seite, „Don't remember me", mit dem Tradovate-Login der Firma anmelden, zurück zu TradingView).
+# Bis hierhin endete der CDP-Weg (tvlesen/tvkette) mit „kein_broker" bzw. „Konto 0x im Dropdown (anderer Tradovate-Login?)";
+# der Hand-Befehl k3login fand nach dem Log out keine Tradovate-Kachel (29.09.2026 12:27 UTC) und ließ Tradovate abgemeldet stehen.
+# Ablauf wie der alte UIA-Puls (modus_tvkonto, live 22.09.2026) — Auge = augen.js/Login-Blick, Hand = echte Windows-Maus:
+#   [1] Konto lesen — steht es oder liegt es im Dropdown: fertig, kein Login (_cdp_konto_sichern, unverändert).
+#   [2] kein Broker bzw. Konto 0× im Dropdown + tv_username der Firma → ist Tradovate verbunden, erst Log out (Kontextmenü neben
+#       „Tradovate", K3-Weg, live 12:27 UTC).
+#   [3] NEUER Tab mit ?trade-now=TRADOVATE, danach der alte TradingView-Tab zu (Finns Weg 22.09.2026: „Tab zu, neuer Tab mit dem
+#       Link — dann kommt man JEDES MAL zu dem Connect"). Verbindet sich eine gemerkte Sitzung von selbst: zweiter Durchgang.
+#   [4] Connect-Dialog: Demo (Pflicht — Prop-Konten leben auf Demo) → „Don't remember me" (Standard setzen; cmd.sitzung_merken =
+#       Haken AUS, wie beim alten Puls) → Connect; „Network error occurred" → bis 3× erneut.
+#   [5] Tradovate-Anmeldeseite (eigener Tab): Username tippen, Chromes Vorschlag per Pfeil runter + Enter, Username EXAKT und
+#       Passwort gefüllt beweisen (Werte nie gelesen), Login (Rückfall: Enter im Passwortfeld).
+#   [6] TradingView zeigt ein Konto → [1] wählt das Zielkonto im Dropdown.
+# Nie: ein Passwort tippen, eine Freigabe („Allow") bestätigen, bei Mehrdeutigkeit raten. Das Puls-Chrome hat ein EIGENES Profil —
+# jeder Tradovate-Login muss dort einmal von Hand gespeichert sein, sonst endet der Lauf mit genau diesem Hinweis.
+# Diagnose: Spur in puls_diagnose (vor dem Connect-Klick und am Ende), volle Kopie lokal login_<zeit>.json.
+# ═══════════════════════════════════════════════════════════════════════════
+CDP_RX_DEMO = re.compile(r"^\s*demo\s*$", re.I)
+CDP_RX_TV_SEITE = re.compile(r"https://([a-z]+\.)?tradingview\.com/")
+CDP_RX_TRADOVATE_SEITE = re.compile(r"https://([a-z0-9-]+\.)*tradovate\.com/")
+CDP_LOGIN_ZWEITER_BIS_S = 120.0       # zweiter Durchgang nur, wenn der erste früh genug fertig war (Panel-Deckel 260 s)
+
+
+def cdp_login_noetig(code, extra):
+    """REIN RECHNEND (testbar): Braucht es einen Tradovate-Login? Nur bei „kein Broker" oder wenn das Dropdown offen war und das
+    Konto darin 0× stand (anderer Login). Mehrdeutig (≥ 2) oder Dropdown nicht erkannt = nein (ein Abmelden wäre geraten)."""
+    if code == "kein_broker":
+        return True
+    return code == "konto_nicht_erreicht" and isinstance(extra, dict) and extra.get("konto_treffer") == 0
+
+
+def cdp_konto_verbunden(stand):
+    """REIN RECHNEND (testbar): Zeigt TradingView ein Tradovate-Konto (Umschalter + Kontonummer)? -> Kontotext | ''"""
+    ko = (stand or {}).get("konto") if isinstance(stand, dict) and isinstance(stand.get("konto"), dict) else {}
+    aktiv = str(ko.get("aktiv") or "")
+    return aktiv if cdp_rect(ko.get("schalter")) and K3_RX_KONTONR.search(re.sub(r"\s", "", aktiv).upper()) else ""
+
+
+def cdp_abgemeldet(stand):
+    """REIN RECHNEND (testbar): nach „Log out" — weder Umschalter noch Kontonummer zu sehen (Bedingung des K3-Laufs 12:27 UTC)."""
+    ko = (stand or {}).get("konto") if isinstance(stand, dict) and isinstance(stand.get("konto"), dict) else {}
+    return not ko.get("schalter") and not K3_RX_KONTONR.search(re.sub(r"\s", "", str(ko.get("aktiv") or "")).upper())
+
+
+def cdp_innerste(items):
+    """REIN RECHNEND (testbar): klickbare Elemente; Hülle + inneres zählen einmal (das innere gewinnt), gleiche Rechtecke einmal."""
+    kand = [k for k in items or [] if isinstance(k, dict) and cdp_klickpunkt(k.get("rect")) is not None]
+    kand = [k for k in kand if not any(j is not k and list(j["rect"]) != list(k["rect"]) and _k3_rect_in(j["rect"], k["rect"]) for j in kand)]
+    einzeln = {}
+    for k in kand:
+        einzeln.setdefault(tuple(k["rect"]), k)
+    return list(einzeln.values())
+
+
+def cdp_connect_dialog(bl):
+    """REIN RECHNEND (testbar): TradingViews Tradovate-Dialog (nach ?trade-now) im Login-Blick — GENAU EIN Dialog mit GENAU EINEM
+    Knopf „Connect" (TV_RX_CONNECT, nie „Sign in" — das wäre TradingViews eigene Anmeldung), kein Login-Formular darin.
+    -> {dialog, connect, demo: [...], nicht_merken, netzfehler} | None"""
+    if not isinstance(bl, dict):
+        return None
+    lg = bl.get("login") if isinstance(bl.get("login"), dict) else {}
+    kand = []
+    for d in bl.get("dialoge") or []:
+        if not isinstance(d, dict) or (lg.get("box") and d.get("rect") and _k3_rect_in(lg["box"], d["rect"])):
+            continue
+        c, _n = k3_eindeutig(d.get("knoepfe"), TV_RX_CONNECT)
+        if c:
+            kand.append((d, c))
+    if len(kand) != 1:
+        return None
+    d, c = kand[0]
+    box = d.get("rect")
+    demo = cdp_innerste([x for x in list(d.get("knoepfe") or []) + list(bl.get("umgebung") or [])
+                         if isinstance(x, dict) and CDP_RX_DEMO.match(str(x.get("text") or ""))
+                         and (not box or _k3_rect_in(x.get("rect") or [], box))])
+    nm = d.get("nicht_merken") if isinstance(d.get("nicht_merken"), dict) else None
+    return {"dialog": d, "connect": c, "demo": demo, "nicht_merken": nm, "netzfehler": bool(d.get("netzfehler"))}
+
+
+def cdp_nicht_merken_plan(nm, merken):
+    """REIN RECHNEND (testbar): Was tun mit „Don't remember me"? merken = Sitzung soll gemerkt werden (cmd.sitzung_merken, wie beim
+    alten Puls). -> ('klick'|'lassen'|'fehlt', text). Zustand unlesbar (nur Beschriftung): im frisch geöffneten Dialog ist der Haken
+    AUS (alter Puls, 22.09.2026) — geklickt wird dann nur, wenn er gesetzt werden soll. Nie ein Abbruchgrund."""
+    soll = not merken
+    if not isinstance(nm, dict) or nm.get("mehrdeutig") or not cdp_rect(nm):
+        return "fehlt", "'Don't remember me' nicht eindeutig gefunden — TradingView merkt sich diese Sitzung"
+    an = nm.get("an")
+    if an is None:
+        return (("klick", "'Don't remember me' setzen (Zustand unlesbar, Standard AUS)") if soll
+                else ("lassen", "Sitzung wird gemerkt (Haken bleibt AUS)"))
+    if bool(an) == soll:
+        return "lassen", f"'Don't remember me' steht schon {'AN' if an else 'AUS'}"
+    return "klick", "'Don't remember me' " + ("setzen" if soll else "entfernen (Sitzung merken)")
+
+
+def cdp_login_bereit(lb):
+    """REIN RECHNEND (testbar): Steht im Tradovate-Formular EXAKT der Username (Anfang + gleiche Länge) und ist das Passwort gefüllt
+    bzw. als Autofill markiert? Werte werden nie gelesen, nur diese Ja/Nein. -> (ok, text)"""
+    lb = lb if isinstance(lb, dict) else {}
+    u = lb.get("user") if isinstance(lb.get("user"), dict) else {}
+    pw = lb.get("pw") if isinstance(lb.get("pw"), dict) else {}
+    user_ok = bool(u.get("gefuellt") and u.get("passt") and u.get("laenge_gleich"))
+    pw_ok = bool(pw.get("gefuellt") or pw.get("autofill"))
+    return user_ok and pw_ok, (f"Benutzer {'= Username' if user_ok else ('gefüllt, aber NICHT der Username' if u.get('gefuellt') else 'LEER')}, "
+                               f"Passwort {'gefüllt' if pw_ok else 'LEER'} (Werte nie gelesen)")
+
+
+def cdp_tradovate_tabs(liste, ohne=()):
+    """REIN RECHNEND (testbar): Seiten-Tabs auf tradovate.com, die nicht in 'ohne' stehen (IDs vor dem Connect-Klick)."""
+    return [t for t in liste or [] if isinstance(t, dict) and t.get("type") == "page" and str(t.get("id")) not in ohne
+            and CDP_RX_TRADOVATE_SEITE.match(str(t.get("url") or ""))]
+
+
+def _cdp_tab_neu(url, trail):
+    """Neuer Tab im Puls-Chrome (DevTools /json/new: ein Tab im bestehenden Fenster, nie ein neues Fenster). -> Target | None"""
+    import urllib.parse
+    t = _cdp_http("/json/new?" + urllib.parse.quote(url, safe=":/"), methode="PUT", timeout=5.0)
+    if isinstance(t, dict) and t.get("webSocketDebuggerUrl"):
+        trail.append(f"[Login] neuer Tab: {url[:90]}")
+        return t
+    trail.append(f"[Login] neuer Tab ließ sich nicht öffnen ({url[:60]})")
+    return None
+
+
+def _cdp_seite_geladen(ziel, trail, warten_s=30.0):
+    """Wartet, bis der Tab fertig geladen auf tradingview.com steht (document.readyState) — augen.js vorher zu laden hieße, es in
+    eine Seite zu legen, die gleich ersetzt wird. -> True/False"""
+    try:
+        ws = _CdpVerbindung(ziel.get("webSocketDebuggerUrl"), timeout=8.0)
+    except Exception as e:
+        trail.append(f"[Login] Tab nicht erreichbar ({type(e).__name__})")
+        return False
+    try:
+        ende = time.time() + warten_s
+        while time.time() < ende:
+            _warte(0.6, 0.3)
+            try:
+                r = ws.rufe("Runtime.evaluate", {"expression": "[document.readyState, String(location.href)]",
+                                                 "returnByValue": True}, timeout=4)
+            except Exception:
+                continue
+            v = (r.get("result") or {}).get("value")
+            if isinstance(v, list) and len(v) == 2 and v[0] == "complete" and CDP_RX_TV_SEITE.match(str(v[1])):
+                return True
+        trail.append(f"[Login] Tab nach {warten_s:.0f} s nicht fertig geladen")
+        return False
+    finally:
+        ws.zu()
+
+
+def _cdp_sitzung_auf(ziel, trail, alt=None):
+    """Augen-Sitzung auf genau diesem Tab, sobald er geladen ist; übernimmt das gemerkte Windows-Fenster der alten Sitzung (zu()
+    minimiert es am Ende des Laufs wieder — Reader-Chrome frei)."""
+    if not _cdp_seite_geladen(ziel, trail):
+        raise RuntimeError("neuer TradingView-Tab lädt nicht fertig")
+    _warte(1.5, 1.0)                          # TradingView baut Leiste, Panel und Dialog erst nach dem Laden
+    s = _AugenSitzung(trail, ziel=ziel)
+    if alt is not None and getattr(alt, "_win_hwnd", None):
+        s._win_hwnd = alt._win_hwnd
+    return s
+
+
+def _cdp_tab_zu(s, trail):
+    """Tab der Sitzung s schließen. Fragt die Seite „Seite verlassen?", wird das bestätigt (Browser-Dialog, kein Seiten-Klick).
+    -> True, wenn weg"""
+    tid, weg = s.target_id, False
+    if tid:
+        try:
+            s.ws.rufe("Page.enable", {}, timeout=3)
+        except Exception:
+            pass
+        _cdp_http(f"/json/close/{tid}")
+        ende = time.time() + 6.0
+        while time.time() < ende:
+            _warte(0.5, 0.2)
+            liste = _cdp_http("/json/list")
+            if isinstance(liste, list) and not any(isinstance(t, dict) and t.get("id") == tid for t in liste):
+                weg = True
+                break
+            try:
+                s.ws.rufe("Page.handleJavaScriptDialog", {"accept": True}, timeout=2)
+                trail.append("[Login] 'Seite verlassen?' bestätigt")
+            except Exception:
+                pass
+    try:
+        s.ws.zu()
+    except Exception:
+        pass
+    trail.append("[Login] alter TradingView-Tab " + ("geschlossen" if weg else "ging nicht zu — bleibt offen"))
+    return weg
+
+
+def _cdp_tab_mit_link(sitz, url, trail):
+    """[3] Finns Weg (22.09.2026): neuer Tab mit ?trade-now=TRADOVATE, dann der alte TradingView-Tab zu. sitz[0] = neue Sitzung.
+    Erst der neue, dann der alte — das Fenster geht so nie zu."""
+    alt = sitz[0]
+    neu = _cdp_tab_neu(url, trail)
+    if not neu:
+        raise RuntimeError("neuer TradingView-Tab ließ sich nicht öffnen")
+    sitz[0] = _cdp_sitzung_auf(neu, trail, alt=alt)
+    if alt is not None and alt.target_id and alt.target_id != neu.get("id"):
+        _cdp_tab_zu(alt, trail)
+
+
+def _cdp_sitzung_holen(cmd, trail):
+    """Augen-Sitzung für tvlesen/tvkette. Ist im Puls-Chrome gar keine TradingView-Seite offen (Tab zu, frischer Start), wird eine
+    geöffnet — mit tv_username gleich mit ?trade-now, dann steht der Connect-Dialog sofort da."""
+    if not _puls_chrome_sicher(trail):
+        raise RuntimeError("Puls-Chrome nicht erreichbar (Port 9333)")
+    ende = time.time() + 5.0
+    while not augen_target_waehlen(_cdp_http("/json/list")):
+        if time.time() >= ende:
+            benutzer = str((cmd or {}).get("tv_username") or "").strip()
+            url = tv_trade_now_url((cmd or {}).get("tv_url")) if benutzer else tv_start_url((cmd or {}).get("tv_url"))
+            trail.append("[Login] keine TradingView-Seite im Puls-Chrome — neuer Tab")
+            neu = _cdp_tab_neu(url, trail)
+            if not neu:
+                raise RuntimeError("im Puls-Chrome ist keine TradingView-Seite offen, ein neuer Tab ließ sich nicht öffnen")
+            return _cdp_sitzung_auf(neu, trail)
+        _warte(0.8, 0.4)                      # gerade gestartetes Puls-Chrome: die Chart-Seite taucht erst nach dem Laden auf
+    return _AugenSitzung(trail)
+
+
+def _cdp_abmelden(s, opts, trail):
+    """[2] Log out über das Kontextmenü neben „Tradovate" (K3-Weg, live 29.09.2026 12:27 UTC: „Log out ok"). -> (ok, text)"""
+    ort = _K3Ort("TradingView-Seite", s.ws, s, "")
+    b = ort.blick()
+    if not cdp_rect(b.get("ctx")):
+        return False, f"Kontextmenü-Knopf neben 'Tradovate' nicht eindeutig ({b.get('ctx')}) — nicht abgemeldet."
+    if not s.klick(cdp_rect(b.get("ctx")), "Kontextmenü neben Tradovate"):
+        return False, "Kontextmenü neben 'Tradovate' ließ sich nicht klicken — nicht abgemeldet."
+    _warte(0.8, 0.3)
+    b = ort.blick()
+    trail.append(f"[Login] Kontextmenü: {[k3_label(m) for m in b.get('menue') or []][:8]}")
+    e, n = k3_eindeutig(b.get("menue"), K3_RX_ABMELDEN)
+    if not e:
+        s.taste("Escape")
+        return False, f"Im Kontextmenü kein eindeutiges 'Log out' ({n} Treffer) — Menü mit Esc zu, nicht abgemeldet."
+    s.klick(cdp_rect(e), f"Menü '{k3_label(e)}'")
+    ja, ende = False, time.time() + 14
+    while time.time() < ende:
+        _warte(0.9, 0.3)
+        if cdp_abgemeldet(s.stand(opts)):
+            trail.append("[Login] Tradovate abgemeldet")
+            return True, ""
+        if not ja:
+            for d in ort.blick().get("dialoge") or []:
+                j, _nj = k3_eindeutig(d.get("knoepfe"), K3_RX_JA)
+                if j:
+                    trail.append(f"[Login] Rückfrage '{str(d.get('titel') or d.get('text') or '')[:60]}'")
+                    s.klick(cdp_rect(j), f"Rückfrage '{k3_label(j)}'")
+                    ja = True
+                    break
+    return False, "Nach 'Log out' zeigt TradingView weiter ein Konto (14 s) — nicht abgemeldet."
+
+
+def _cdp_nach_link(s, opts, warten_s=40.0):
+    """Nach dem Öffnen mit ?trade-now: Was zeigt TradingView? -> ('dialog', blick) | ('verbunden', kontotext) | ('nichts', blick)"""
+    ort = _K3Ort("TradingView-Seite", s.ws, s, "")
+    ende = time.time() + warten_s
+    while True:
+        bl = ort.blick()
+        if cdp_connect_dialog(bl):
+            return "dialog", bl
+        aktiv = cdp_konto_verbunden(s.stand(opts))
+        if aktiv:
+            return "verbunden", aktiv
+        if time.time() >= ende:
+            return "nichts", bl
+        _warte(0.7, 0.4)
+
+
+def _cdp_dialog_verbinden(s, merken, trail):
+    """[4] Connect-Dialog: Demo (Pflicht) → „Don't remember me" → Connect. -> (code, text, Tab-IDs vor dem Connect-Klick)"""
+    ort = _K3Ort("TradingView-Seite", s.ws, s, "")
+    d = cdp_connect_dialog(ort.blick())
+    if not d:
+        return "dialog", "Connect-Dialog nicht (mehr) eindeutig zu sehen.", None
+    dl = d["dialog"]
+    trail.append(f"[Login] Connect-Dialog '{str(dl.get('titel') or '')[:40]}': {[k3_label(k) for k in dl.get('knoepfe') or []][:10]}")
+    if len(d["demo"]) != 1:
+        return "demo", (f"Demo-Schalter im Tradovate-Dialog nicht eindeutig ({len(d['demo'])}) — Prop-Konten leben auf Demo, ohne ihn "
+                        "wird nicht verbunden."), None
+    if d["demo"][0].get("an"):
+        trail.append("[Login] Demo ist schon gewählt")
+    else:
+        if not s.klick(cdp_rect(d["demo"][0]), "Demo"):
+            return "demo", "Demo ließ sich nicht klicken (Maus nicht bewiesen über dem Schalter) — nicht verbunden.", None
+        _warte(0.5, 0.3)
+        d = cdp_connect_dialog(ort.blick()) or d
+    plan, txt = cdp_nicht_merken_plan(d.get("nicht_merken"), merken)
+    if plan == "klick":
+        vorher_an = d["nicht_merken"].get("an")
+        s.klick(cdp_rect(d["nicht_merken"]), "Don't remember me")
+        _warte(0.4, 0.3)
+        d = cdp_connect_dialog(ort.blick()) or d
+        an2 = (d.get("nicht_merken") or {}).get("an")
+        if vorher_an is None and an2 is False and not merken:
+            # vorher unlesbar, jetzt lesbar AUS: der Klick hat einen gesetzten Haken entfernt → einmal zurück (alter Puls, 22.09.2026)
+            s.klick(cdp_rect(d.get("nicht_merken")), "Don't remember me (zurück)")
+            _warte(0.4, 0.3)
+            d = cdp_connect_dialog(ort.blick()) or d
+            an2 = (d.get("nicht_merken") or {}).get("an")
+        trail.append(f"[Login] {txt} → jetzt {'AN' if an2 else ('AUS' if an2 is False else 'unlesbar')}")
+    else:
+        trail.append(f"[Login] {txt}")
+    vorher = {str(t.get("id")) for t in _cdp_http("/json/list") or [] if isinstance(t, dict)}
+    _puls_diagnose_senden(spur=trail, schritt="cdp-connect")     # Spur liegt im Backend, bevor sich die Anmeldeseite öffnet
+    if not s.klick(cdp_rect(d["connect"]), "Connect"):
+        return "connect", "Connect ließ sich nicht klicken (Maus nicht bewiesen über dem Knopf) — nicht verbunden.", None
+    return "", "", vorher
+
+
+def _cdp_login_ort(s, vorher, benutzer, opts, trail, warten_s=25.0):
+    """[5] Wo steht das Tradovate-Formular — eigener Tab (neu seit dem Connect-Klick) oder in der TradingView-Seite? Verbindet sich
+    TradingView ohne Formular (Tradovate noch angemeldet), ist der Schritt erledigt. „Network error occurred" → Connect erneut
+    (höchstens TV_CONNECT_NETZ_MAX×, wie beim alten Puls). -> (ort | 'verbunden' | None, text)"""
+    ort_tv = _K3Ort("TradingView-Seite", s.ws, s, benutzer)
+    ende, netz_n = time.time() + warten_s, 0
+    while time.time() < ende:
+        _warte(0.8, 0.3)
+        b = ort_tv.blick()
+        if b.get("login"):
+            return ort_tv, ""
+        for t in cdp_tradovate_tabs(_cdp_http("/json/list"), vorher or ()):
+            try:
+                ws2 = _CdpVerbindung(t.get("webSocketDebuggerUrl"), timeout=8.0)
+            except Exception as e_:
+                trail.append(f"[Login] Tradovate-Tab nicht erreichbar ({type(e_).__name__})")
+                continue
+            o2 = _K3Ort("Tradovate-Tab", ws2, _k3_eingabe(ws2, trail), benutzer, eigen=True)
+            if o2.blick().get("login"):
+                o2.target_id = t.get("id")
+                trail.append(f"[Login] Tradovate-Anmeldeseite offen ({str(t.get('url') or '')[:60]})")
+                return o2, ""
+            o2.zu()
+        aktiv = cdp_konto_verbunden(s.stand(opts))
+        if aktiv:
+            trail.append(f"[Login] ohne Anmeldeseite verbunden ('{aktiv[:40]}') — Tradovate war noch angemeldet")
+            return "verbunden", ""
+        d = cdp_connect_dialog(b)
+        if d and d["netzfehler"]:
+            netz_n += 1
+            trail.append(f"[Login] 'Network error occurred' im Connect-Dialog ({netz_n}. Mal)")
+            if netz_n > TV_CONNECT_NETZ_MAX:
+                return None, f"Tradovate meldet nach {TV_CONNECT_NETZ_MAX}× Connect weiter 'Network error occurred' — Internet/Tradovate am PC prüfen."
+            _warte(1.0, 1.0)
+            s.klick(cdp_rect(d["connect"]), f"Connect (erneut {netz_n}/{TV_CONNECT_NETZ_MAX})")
+            _warte(2.0, 0.8)                  # der alte Fehlertext steht nach dem Klick noch kurz da
+            ende = time.time() + warten_s
+    return None, f"Nach 'Connect' keine Tradovate-Anmeldeseite ({warten_s:.0f} s)."
+
+
+def _cdp_anmelden(s, ort, benutzer, opts, trail):
+    """[5] Username + gespeichertes Passwort (Chrome) beweisen, Login, warten bis TradingView ein Konto zeigt. -> (code, text)"""
+    lb = ort.blick().get("login") or {}
+    u = lb.get("user") or {}
+    trail.append(f"[Login] Formular ({ort.name}): Benutzerfeld {'gefüllt' if u.get('gefuellt') else 'leer'}, Passwort "
+                 f"{'gefüllt' if (lb.get('pw') or {}).get('gefuellt') else 'leer'}, Remember me "
+                 f"{'-' if lb.get('merken') is None else ('AN' if lb['merken'].get('an') else 'AUS')} (Werte nie gelesen)")
+    ok_b, txt_b = cdp_login_bereit(lb)
+    if ok_b:
+        trail.append(f"[Login] schon ausgefüllt: {txt_b}")
+    else:
+        if not cdp_rect(u):
+            return "login_feld", "Benutzerfeld vor dem Passwortfeld nicht gefunden — nichts getippt."
+        if not ort.eingabe.klick(cdp_rect(u), "Benutzerfeld"):
+            return "login_feld", "Benutzerfeld ließ sich nicht klicken — nichts getippt."
+        _warte(0.5, 0.3)
+        if u.get("gefuellt"):
+            ort.eingabe.taste("a", modifiers=2)
+            ort.eingabe.taste("Backspace")
+            _warte(0.3, 0.2)
+        ort.eingabe.tippen(benutzer)
+        trail.append(f"[Login] Username '{benutzer}' getippt")
+        _warte(0.9, 0.4)
+        ort.eingabe.taste("ArrowDown")
+        _warte(0.6, 0.3)
+        lb = ort.blick().get("login") or {}
+        if not ((lb.get("user") or {}).get("autofill") or (lb.get("pw") or {}).get("autofill")):
+            if ort.eigen:
+                ort.eingabe.taste("Escape")          # nur im eigenen Tradovate-Tab — in TradingView schlösse Esc den Dialog
+            return "autofill", (f"Chrome bietet für '{benutzer}' kein gespeichertes Passwort an — im Puls-Chrome (eigenes Profil) diesen "
+                                "Tradovate-Login EINMAL von Hand anmelden und 'Passwort speichern' bestätigen. Nichts abgeschickt.")
+        ort.eingabe.taste("Enter")
+        _warte(0.9, 0.4)
+        lb = ort.blick().get("login") or {}
+        ok_b, txt_b = cdp_login_bereit(lb)
+        trail.append(f"[Login] Autofill: {txt_b}")
+        if not ok_b:
+            return "autofill", f"Autofill nicht vollständig ({txt_b}) — Login NICHT geklickt."
+    k, nk = k3_eindeutig(lb.get("knoepfe"), K3_RX_CONNECT)
+    if not k:
+        return "login_knopf", f"Kein eindeutiger Login-Knopf ({nk}; Knöpfe {[k3_label(x) for x in lb.get('knoepfe') or []][:8]}) — nicht angemeldet."
+    if not ort.eingabe.klick(cdp_rect(k), f"'{k3_label(k)}' (Login)"):
+        return "login_knopf", "Login-Knopf ließ sich nicht klicken (Maus nicht bewiesen über dem Knopf) — nicht angemeldet."
+    t0, enter = time.time(), False
+    while time.time() - t0 < 40.0:
+        _warte(1.0, 0.4)
+        aktiv = cdp_konto_verbunden(s.stand(opts))
+        if aktiv:
+            trail.append(f"[Login] OK verbunden, aktiv '{aktiv[:40]}'")
+            return "", ""
+        bo = ort.blick()
+        if bo.get("freigabe"):
+            return "freigabe", "Tradovate fragt nach einer Freigabe ('Allow') — NICHT automatisch bestätigt; bitte im Puls-Chrome einmal von Hand."
+        lb2 = bo.get("login") or {}
+        if lb2 and bo.get("fehler_text"):
+            return "login_fehler", f"Tradovate meldet '{bo.get('fehler_text')}' — nicht angemeldet."
+        if lb2 and ort.eigen and not enter and time.time() - t0 >= 3.0:
+            # Login-Klick ohne Wirkung (alter Puls 23.09.2026: Hover ja, Klick nicht — die offene Autofill-Liste schluckte ihn) →
+            # Esc, ins Passwortfeld, Esc, und NUR mit bewiesenem Username/Passwort Enter (schickt das Formular ab)
+            enter = True
+            try:
+                ort.eingabe.taste("Escape")
+                _warte(0.2, 0.15)
+                pw = lb2.get("pw") or {}
+                if cdp_rect(pw) and ort.eingabe.klick(cdp_rect(pw), "Passwortfeld"):
+                    _warte(0.3, 0.2)
+                    ort.eingabe.taste("Escape")
+                    ok3, txt3 = cdp_login_bereit(ort.blick().get("login"))
+                    if ok3:
+                        ort.eingabe.taste("Enter")
+                        trail.append("[Login] Login-Klick ohne Wirkung → Enter im Passwortfeld")
+                    else:
+                        trail.append(f"[Login] Rückfall Enter abgesagt: {txt3}")
+            except Exception as e_:
+                trail.append(f"[Login] Rückfall Enter nicht möglich ({type(e_).__name__})")
+    return "verbunden", "Nach dem Login zeigt TradingView kein Konto (40 s) — Puls-Chrome ansehen."
+
+
+def _cdp_tradovate_verbinden(sitz, cmd, opts, trail):
+    """Schritte [2]–[5]: einmal Tradovate mit dem Login der Firma verbinden. sitz = [Sitzung], wird beim Tab-Tausch ersetzt.
+    -> (code, text, wie) — code '' = TradingView zeigt danach ein Tradovate-Konto (welches, klärt der Aufrufer über das Dropdown);
+    wie 'login' = selbst angemeldet, 'selbst' = eine gemerkte Sitzung hat sich von allein verbunden."""
+    benutzer = str(cmd.get("tv_username") or "").strip()
+    s = sitz[0]
+    bl = _K3Ort("TradingView-Seite", s.ws, s, benutzer).blick()
+    if cdp_connect_dialog(bl):
+        trail.append("[Login] Connect-Dialog steht schon da — direkt verbinden")
+    else:
+        aktiv = cdp_konto_verbunden(s.stand(opts))
+        if aktiv or cdp_rect(bl.get("ctx")):
+            trail.append(f"[Login] Tradovate verbunden mit anderem Login ('{aktiv[:40] or '-'}') → abmelden")
+            ok, f = _cdp_abmelden(s, opts, trail)
+            if not ok:
+                return "abmelden", f, ""
+        _cdp_tab_mit_link(sitz, tv_trade_now_url(bl.get("url") or cmd.get("tv_url")), trail)
+        s = sitz[0]
+        art, x = _cdp_nach_link(s, opts)
+        if art == "verbunden":
+            trail.append(f"[Login] TradingView hat sich von selbst verbunden ('{str(x)[:40]}') — gemerkte Sitzung")
+            return "", "", "selbst"
+        if art != "dialog":
+            bl2 = x if isinstance(x, dict) else {}
+            trail.append("[Login] gesehen: " + json.dumps({"dialoge": [{"titel": d_.get("titel"), "knoepfe": [k3_label(k) for k in d_.get("knoepfe") or []][:8]}
+                                                                        for d_ in bl2.get("dialoge") or [] if isinstance(d_, dict)][:3],
+                                                           "leiste": bl2.get("leiste"), "url": bl2.get("url")}, ensure_ascii=False)[:500])
+            return "dialog", "TradingView ist mit ?trade-now=TRADOVATE neu offen, aber der Tradovate-Dialog erscheint nicht (40 s).", ""
+    code, text, vorher = _cdp_dialog_verbinden(s, bool(cmd.get("sitzung_merken")), trail)
+    if code:
+        return code, text, ""
+    ort, text = _cdp_login_ort(s, vorher, benutzer, opts, trail)
+    if ort == "verbunden":
+        return "", "", "login"
+    if ort is None:
+        return "login_formular", text + " Tradovate ist NICHT verbunden.", ""
+    code = "?"
+    try:
+        code, text = _cdp_anmelden(s, ort, benutzer, opts, trail)
+        return code, text, "login"
+    finally:
+        if ort.eigen:
+            tid = getattr(ort, "target_id", None)
+            if not code and tid and any(isinstance(t, dict) and t.get("id") == tid for t in _cdp_http("/json/list") or []):
+                _cdp_http(f"/json/close/{tid}")          # Tradovate-Tab blieb nach dem Login offen → zu (bei Fehlern bleibt er für die Hand)
+                trail.append("[Login] Tradovate-Tab geschlossen")
+            ort.zu()
+
+
+def _cdp_login_sichern(res, trail):
+    """Spur des Auto-Logins ins Backend (puls_diagnose, letzte 1800 Zeichen) und voll lokal (login_<zeit>.json). Nie ein Passwort —
+    der Login-Blick liefert keins."""
+    _puls_diagnose_senden(spur=trail, schritt="cdp-login")
+    try:
+        with open(os.path.join(_AUGEN_HIER, "login_" + time.strftime("%Y%m%d_%H%M%S") + ".json"), "w", encoding="utf-8") as f:
+            json.dump({"login": res.get("login"), "trail": list(trail)}, f, ensure_ascii=False, default=str)
+    except Exception:
+        pass
+
+
+def _cdp_konto_mit_login(sitz, ext, opts, cmd, trail, res):
+    """Konto sicherstellen wie _cdp_konto_sichern — steht es nicht im Puls-Chrome (kein Broker / anderer Tradovate-Login), verbindet
+    Puls selbst (Block-Kopf). sitz = [Sitzung] (der Login tauscht den Tab). -> (ok, code, msg, stand, extra) wie _cdp_konto_sichern.
+    Scheitert der Login, bleibt der Code 'konto_nicht_erreicht' (Frontend „Konto ?", Panel 409) — der Grund steht in msg."""
+    ok, code, msg, st, extra = _cdp_konto_sichern(sitz[0], ext, opts, trail)
+    if not ok and code == "kein_broker":
+        # ein Blick kann in die Ladephase fallen (Regel seit .327: nie aus EINEM Blick urteilen) — zweiter Blick mit Streuung
+        _warte(1.5, 1.0)
+        ok, code, msg, st, extra = _cdp_konto_sichern(sitz[0], ext, opts, trail)
+    if ok or not cdp_login_noetig(code, extra):
+        return ok, code, msg, st, extra
+    benutzer = str(cmd.get("tv_username") or "").strip()
+    if not benutzer:
+        return False, code, (msg + " Puls kann nicht selbst verbinden: für die Firma ist kein Tradovate-Username hinterlegt "
+                             "(Einstellungen > Prop Firms > Firma bearbeiten > 'Tradovate-Username für TradingView')."), st, extra
+    t0 = time.time()
+    res["login"] = {"username": benutzer, "anlass": code, "durchgaenge": 0}
+    for durchgang in (1, 2):
+        res["login"]["durchgaenge"] = durchgang
+        trail.append(f"[Login] {durchgang}. Durchgang: Konto {ext} im Puls-Chrome nicht erreichbar ({code}) → Tradovate mit '{benutzer}' verbinden")
+        c2, m2, wie = _cdp_tradovate_verbinden(sitz, cmd, opts, trail)
+        if c2:
+            res["login"].update(ok=False, code=c2)
+            _cdp_login_sichern(res, trail)
+            return False, "konto_nicht_erreicht", f"Tradovate-Login '{benutzer}' nicht geschafft ({c2}): {m2}", {}, {"login_code": c2}
+        res["login"]["wie"] = wie
+        ok, code, msg, st, extra = _cdp_konto_sichern(sitz[0], ext, opts, trail)
+        # zweiter Durchgang nur, wenn sich eine GEMERKTE Sitzung von selbst verbunden hat (ggf. fremder Login) — nach einem eigenen
+        # Login mit dem Username der Firma brächte ein zweiter nichts
+        if ok or not cdp_login_noetig(code, extra) or wie != "selbst" or time.time() - t0 > CDP_LOGIN_ZWEITER_BIS_S:
+            break
+    res["login"].update(ok=bool(ok), code="" if ok else code)
+    if not ok and cdp_login_noetig(code, extra):
+        msg += f" — auch nach dem Tradovate-Login '{benutzer}'. Gehört der Username wirklich zu dieser Firma?"
+    _cdp_login_sichern(res, trail)
+    return ok, code, msg, st, extra
 
 
 def main():

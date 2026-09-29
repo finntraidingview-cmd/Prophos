@@ -1869,6 +1869,7 @@ def main():
     results.append(test_puls_topstep())
     results.append(test_puls_augen_cdp())
     results.append(test_puls_k3())
+    results.append(test_puls_cdp_login())
     results.append(test_puls_win_maus())
     results.append(test_puls_nie_chrome_schliessen())
     results.append(test_tsx_konto_abgekuerzt())
@@ -2777,7 +2778,7 @@ def test_puls_k3():
     js = ob.K3_LOGIN_BLICK_JS
     alle_v = len(_re.findall(r"\.value", js))
     sicher_v = len(_re.findall(r"\.value \|\| ''\)\.(?:length|toLowerCase\(\)\.indexOf)", js))
-    chk(alle_v == 3 and alle_v == sicher_v, f"Login-Blick gibt nie Feldwerte zurück ({alle_v} Zugriffe, {sicher_v} nur Länge/Anfang)")
+    chk(alle_v == 4 and alle_v == sicher_v, f"Login-Blick gibt nie Feldwerte zurück ({alle_v} Zugriffe, {sicher_v} nur Länge/Anfang)")   # 4: laenge_gleich (Auto-Login)
     q_k3 = _i.getsource(ob.modus_k3)
     chk(q_k3.count('"SENDEN-Knopf"') == 1 and q_k3.index('res["gesendet"] = True') < q_k3.index('"SENDEN-Knopf"'),
         "K3: genau EIN Senden-Klick, gesendet vorher auf True")
@@ -2808,6 +2809,85 @@ def test_puls_k3():
         chk(callable(getattr(s_, name_, None)), f"modus_k3 ruft s.{name_}() — an der echten Klasse aufrufbar")
     if ok:
         print("✓ Puls K3: Knopf exakt, Meldungen/Zeilen/Close eindeutig, Sperre, Login-Blick ohne Feldwerte, nur Hand-Befehl")
+    return ok
+
+
+def test_puls_cdp_login():
+    """Auto-Login im Puls-Chrome (29.09.2026, Finn: kein/falsches Tradovate-Konto selbst erkennen und wie der alte Puls über
+    ?trade-now=TRADOVATE neu verbinden): wann ein Login nötig ist, Connect-Dialog + Demo + „Don't remember me", Username-Beweis,
+    Riegel im Quelltext (nie Passwort tippen, nie „Allow", nur tvlesen/tvkette über CDP, K3 unberührt)."""
+    import order_bot as ob
+    import inspect as _i
+    ok = True
+
+    def chk(bed, text):
+        nonlocal ok
+        if not bed:
+            print("  ✗ CDP-Login: " + text)
+            ok = False
+    # wann ein Login nötig ist
+    chk(ob.cdp_login_noetig("kein_broker", {}) and ob.cdp_login_noetig("konto_nicht_erreicht", {"konto_treffer": 0})
+        and not ob.cdp_login_noetig("konto_nicht_erreicht", {"konto_treffer": 2}) and not ob.cdp_login_noetig("konto_nicht_erreicht", {})
+        and not ob.cdp_login_noetig("cdp_fehler", {"konto_treffer": 0}) and not ob.cdp_login_noetig("", None),
+        "Login nur bei kein Broker oder 0 Treffern im Dropdown (mehrdeutig/Dropdown nicht erkannt = nie abmelden)")
+    st_ok = {"konto": {"schalter": {"rect": [70, 900, 180, 28]}, "aktiv": "APEX6416990000024 USD"}}
+    chk(ob.cdp_konto_verbunden(st_ok) == "APEX6416990000024 USD" and ob.cdp_konto_verbunden({"konto": {"aktiv": "APEX6416990000024"}}) == ""
+        and ob.cdp_konto_verbunden({"konto": {"schalter": {"rect": [1, 1, 50, 20]}, "aktiv": "Tradovate"}}) == ""
+        and ob.cdp_konto_verbunden(None) == "", "verbunden = Umschalter UND Kontonummer")
+    chk(ob.cdp_abgemeldet({"konto": {"schalter": None, "aktiv": ""}}) and not ob.cdp_abgemeldet(st_ok)
+        and not ob.cdp_abgemeldet({"konto": {"schalter": None, "aktiv": "TDFYSL150146498821 USD"}}), "abgemeldet = weder Umschalter noch Nummer")
+    # Connect-Dialog (Aufbau wie am 21./22.09. gesehen: Live/Demo + Don't remember me + Connect)
+    dlg = {"titel": "Tradovate", "rect": [700, 300, 520, 420], "netzfehler": False,
+           "knoepfe": [{"text": "Live", "role": "radio", "rect": [740, 420, 80, 30], "an": False},
+                       {"text": "Demo", "role": "radio", "rect": [830, 420, 80, 30], "an": True},
+                       {"text": "Connect", "rect": [900, 640, 120, 36]}, {"text": "", "aria": "Close", "rect": [1190, 310, 20, 20]}],
+           "nicht_merken": {"an": False, "rect": [740, 580, 180, 20], "quelle": "kaestchen"}}
+    bl = {"dialoge": [dlg], "umgebung": [{"text": "Demo", "role": "radio", "rect": [830, 420, 80, 30], "an": True},
+                                         {"text": "Live", "role": "tab", "rect": [10, 10, 60, 20]}]}
+    d = ob.cdp_connect_dialog(bl)
+    chk(d is not None and d["connect"]["text"] == "Connect" and len(d["demo"]) == 1 and d["demo"][0].get("an") is True
+        and d["nicht_merken"]["rect"] == [740, 580, 180, 20], f"Connect-Dialog erkannt, Demo einmal (doppelt gemeldet = eins): {d and len(d['demo'])}")
+    chk(ob.cdp_connect_dialog({"dialoge": [dict(dlg, knoepfe=[{"text": "Sign in", "rect": [900, 640, 120, 36]}])]}) is None,
+        "TradingViews eigenes 'Sign in' ist NIE der Connect-Dialog")
+    chk(ob.cdp_connect_dialog({"dialoge": [dlg, dict(dlg, rect=[0, 0, 400, 300])]}) is None, "zwei Connect-Dialoge = keiner (mehrdeutig)")
+    chk(ob.cdp_connect_dialog({"dialoge": [dlg], "login": {"box": [720, 320, 300, 200]}}) is None, "Dialog mit Login-Formular darin ist kein Connect-Dialog")
+    chk(ob.cdp_connect_dialog({"dialoge": [dict(dlg, knoepfe=dlg["knoepfe"][2:])]})["demo"] == [], "ohne Demo: leere Liste (Aufrufer bricht ab)")
+    chk(ob.cdp_connect_dialog({"dialoge": [dict(dlg, netzfehler=True)]})["netzfehler"], "Network error wird gemeldet")
+    # Don't remember me
+    P = ob.cdp_nicht_merken_plan
+    chk(P({"an": False, "rect": [1, 1, 50, 20]}, False)[0] == "klick" and P({"an": True, "rect": [1, 1, 50, 20]}, False)[0] == "lassen"
+        and P({"an": True, "rect": [1, 1, 50, 20]}, True)[0] == "klick" and P({"an": False, "rect": [1, 1, 50, 20]}, True)[0] == "lassen",
+        "Haken nach sitzung_merken: Standard setzen, gemerkt = AUS")
+    chk(P({"an": None, "rect": [1, 1, 50, 20]}, False)[0] == "klick" and P({"an": None, "rect": [1, 1, 50, 20]}, True)[0] == "lassen"
+        and P(None, False)[0] == "fehlt" and P({"mehrdeutig": 2}, False)[0] == "fehlt" and P({"an": False, "rect": None}, False)[0] == "fehlt",
+        "unlesbar: nur klicken, wenn gesetzt werden soll; fehlt/mehrdeutig = nie Abbruch, nur Hinweis")
+    # Username exakt + Passwort (Werte nie gelesen)
+    B = ob.cdp_login_bereit
+    gut = {"user": {"gefuellt": True, "passt": True, "laenge_gleich": True}, "pw": {"gefuellt": True}}
+    chk(B(gut)[0] and B(dict(gut, pw={"gefuellt": False, "autofill": True}))[0], "Username exakt + Passwort gefüllt/Autofill = bereit")
+    chk(not B(dict(gut, user={"gefuellt": True, "passt": True, "laenge_gleich": False}))[0]
+        and not B(dict(gut, user={"gefuellt": True, "passt": False, "laenge_gleich": True}))[0]
+        and not B(dict(gut, pw={"gefuellt": False}))[0] and not B(None)[0], "längerer/anderer Username oder leeres Passwort = nicht bereit")
+    tabs = [{"id": "A", "type": "page", "url": "https://trader.tradovate.com/oauth?x=1"}, {"id": "B", "type": "page", "url": "https://www.tradingview.com/chart/"},
+            {"id": "C", "type": "page", "url": "https://tradovate.com.evil.io/"}, {"id": "D", "type": "service_worker", "url": "https://trader.tradovate.com/sw.js"}]
+    chk([t["id"] for t in ob.cdp_tradovate_tabs(tabs)] == ["A"] and ob.cdp_tradovate_tabs(tabs, {"A"}) == [],
+        "Tradovate-Tab: nur echte tradovate.com-Seiten, die nach dem Connect neu sind")
+    chk(ob.tv_trade_now_url("https://www.tradingview.com/chart/AbC123/?symbol=MNQ") == "https://www.tradingview.com/chart/AbC123/?trade-now=TRADOVATE"
+        and ob.tv_trade_now_url("https://evil.example/chart/") == "https://www.tradingview.com/chart/?trade-now=TRADOVATE",
+        "trade-now-Adresse behält das Layout, fremde Seite → Standard")
+    # Riegel im Quelltext
+    q = "".join(_i.getsource(f) for f in (ob._cdp_anmelden, ob._cdp_dialog_verbinden, ob._cdp_login_ort, ob._cdp_tradovate_verbinden,
+                                          ob._cdp_abmelden, ob._cdp_konto_mit_login))
+    chk(q.count(".tippen(") == 1 and "tippen(benutzer)" in q, "getippt wird nur der Username — nie ein Passwort")
+    chk("K3_RX_FREIGABE" not in q and '"freigabe"' in q, "Freigabe ('Allow') wird nur gemeldet, nie geklickt")
+    for f in (ob.modus_tvlesen_cdp, ob.modus_tvkette_cdp):
+        src = _i.getsource(f)
+        chk("_cdp_konto_mit_login(sitz" in src and "_cdp_sitzung_holen(cmd" in src and "s = sitz[0]" in src,
+            f"{f.__name__}: Auto-Login + neue Sitzung nach dem Tab-Tausch")
+    chk("_cdp_konto_mit_login" not in _i.getsource(ob.modus_k3), "K3-Handlauf bleibt unverändert (eigener Login-Wechsel)")
+    chk("ziel=None" in _i.getsource(ob._AugenSitzung.__init__), "_AugenSitzung nimmt einen bestimmten Tab")
+    if ok:
+        print("✓ CDP-Login: nur bei kein Broker/0 Treffern, Connect-Dialog + Demo + Don't remember me, Username exakt, nie Passwort/Allow")
     return ok
 
 
