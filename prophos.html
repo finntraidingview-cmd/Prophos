@@ -28132,14 +28132,9 @@
         const parentId = parents[a.id]
           || Object.entries(archive).find(([, info]) => info?.successorId && String(info.successorId) === String(a.id))?.[0]
           || null
-        const parentAcc = parentId ? accounts.find(x => String(x.id) === String(parentId)) : null
         // Successor: irgendein archivierter Account dessen successorId === a.id
         const successorOf = Object.entries(archive).find(([_, info]) => info?.successorId === a.id)
         const isSuccessor = !!successorOf
-        // Andere Richtung: ist a archiviert mit einem successor → wer ist es?
-        const successorAcc = archInfo?.successorId
-          ? accounts.find(x => String(x.id) === String(archInfo.successorId))
-          : null
 
         const dupAcc = dupByManualId[a.id] || null
 
@@ -28271,13 +28266,8 @@
         // Payout-Termin (15.09.2026): "💸 Payout ab 22.09. · in 7 Tagen" / "anfragbar seit …"
         const payoutHtml = (typeof payoutReadyBadgeHtml === 'function') ? payoutReadyBadgeHtml(a) : ''
         if(payoutHtml) metaParts.push(payoutHtml)
-        // Parent-/Successor-Chain
-        if(parentAcc){
-          metaParts.push(`<span style="color:var(--violet)">↳ Nachfolger von <a href="#" data-acc-jump="${escapeHtml(parentAcc.id)}" style="color:var(--violet);text-decoration:underline">${escapeHtml(parentAcc.name)}</a></span>`)
-        }
-        if(successorAcc){
-          metaParts.push(`<span style="color:var(--violet)">↗ Nachfolger: <a href="#" data-acc-jump="${escapeHtml(successorAcc.id)}" style="color:var(--violet);text-decoration:underline">${escapeHtml(successorAcc.name)}</a></span>`)
-        }
+        // Nachfolger-Kette („↳ Nachfolger von …“ / „↗ Nachfolger: …“) steht seit 29.09.2026 nicht mehr unter dem Namen — Finn: „unnötig,
+        // irritiert nur“. Die Kette selbst (parents/Archiv) bleibt; die Account-Detailansicht zeigt sie weiter als Sprung-Chips.
         const meta = metaParts.length
           ? `<div style="font-size:11px;color:var(--sub);margin-top:2px;display:flex;flex-direction:column;gap:1px">${metaParts.map(p => `<div>${p}</div>`).join('')}</div>`
           : ''
@@ -36049,7 +36039,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.818'
+  const OS_TAB_BUILD = '2026-09-22.819'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -43376,9 +43366,11 @@
   function zielLabel(a){ return (zielKonfig(a)?.kind || a.goalKind) === 'winning_days' ? 'Winning Days' : 'Trading Days' }
 
   // Punkte-Reihe ●●●○○ — nur bis 10 Ziel-Tage, darüber trägt die Zahl allein
+  // Winning Days (29.09.2026, Finn: „in einer anderen Farbe, ein bisschen grün“): Türkis #0E7A78 wie der Chip „Winning Days“ — als
+  // Literal in den Funktionen, keine Modul-Konstante: renderAccounts läuft schon beim ersten Render, bevor das Modul hier ankommt (TDZ)
   function zielDotsHtml(f){
     if(!f || f.target > 10) return ''
-    const farbe = f.done ? 'var(--good)' : 'var(--violet)'
+    const farbe = f.done ? 'var(--good)' : f.kind === 'winning_days' ? '#0E7A78' : 'var(--violet)'
     let s = '<span style="display:inline-flex;gap:3px;align-items:center;margin-left:6px;vertical-align:middle">'
     for(let i = 0; i < f.target; i++){
       s += `<span style="width:6px;height:6px;border-radius:50%;background:${i < f.count ? farbe : 'var(--border)'}"></span>`
@@ -43390,7 +43382,7 @@
   function zielBadgeHtml(a, klickbar){
     const f = zielFortschritt(a)
     if(!f) return ''
-    const farbe = f.done ? 'var(--good)' : 'var(--violet)'
+    const farbe = f.done ? 'var(--good)' : f.kind === 'winning_days' ? '#0E7A78' : 'var(--violet)'
     const stand = `${Math.min(f.count, f.target)}/${f.target}`
     // Ziel erreicht + Winning Days = Payout-Fenster offen (15.09.2026, Finn:
     // „sobald ich bei 5 angekommen bin, ist der Payout anfragbar")
