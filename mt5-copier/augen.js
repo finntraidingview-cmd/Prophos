@@ -23,7 +23,7 @@
  */
 var PROPHOS_AUGEN = (function () {
   'use strict';
-  var VERSION = '0.5.0';   // 0.5.0 (29.09.2026): Aufnahme-Modus (Finn klickt den Ablauf einmal selbst, jede Aktion wird mitgeschrieben)   // 0.4.0 (29.09.2026, K1–K4 für T3): positionen, orders, konto_summary, symbolsuche, toasts.meldungen   // 0.3.0 (29.09.2026, erste echte Lesung pc-usq1i6): TP/SL-Zustand, Konto-Leiste, Toast-Rückfall   // 0.2.0 (29.09.2026): Vertrag mit T3 — globalThis.prophosAugen, Schlüssel-Whitelist, popups, kauf_knopf
+  var VERSION = '0.5.1';   // 0.5.1 (29.09.2026, Lesung 00:17 pc-usq1i6): Schalter-Rechteck, ticket.seite/bereit, Legende, veraltete Zeilen   // 0.5.0 (29.09.2026): Aufnahme-Modus (Finn klickt den Ablauf einmal selbst, jede Aktion wird mitgeschrieben)   // 0.4.0 (29.09.2026, K1–K4 für T3): positionen, orders, konto_summary, symbolsuche, toasts.meldungen   // 0.3.0 (29.09.2026, erste echte Lesung pc-usq1i6): TP/SL-Zustand, Konto-Leiste, Toast-Rückfall   // 0.2.0 (29.09.2026): Vertrag mit T3 — globalThis.prophosAugen, Schlüssel-Whitelist, popups, kauf_knopf
 
   // ── Grundwerkzeuge ─────────────────────────────────────────────────────────
   function sichtbar(el) {
@@ -119,7 +119,7 @@ var PROPHOS_AUGEN = (function () {
       });
       if (kand.length === 1 || (kand.length > 1 && kand.every(function (k) { return schalterZustand(k) === schalterZustand(kand[0]); }))) {
         var z = schalterZustand(kand[0]);
-        if (z !== null) return { an: z, quelle: 'kaestchen:' + (kand[0].type || attr(kand[0], 'role') || kand[0].tagName.toLowerCase()) };
+        if (z !== null) return { an: z, quelle: 'kaestchen:' + (attr(kand[0], 'role') || kand[0].type || kand[0].tagName.toLowerCase()), schalter: kurz(kand[0]) };
       }
       var inner = label.querySelector && label.querySelector('input[type="checkbox"],[role="switch"],[role="checkbox"],[aria-checked]');
       if (inner && schalterZustand(inner) !== null) return { an: schalterZustand(inner), quelle: 'kaestchen:innen' };
@@ -184,7 +184,8 @@ var PROPHOS_AUGEN = (function () {
       if (sch.length !== 1) return { da: false, notiz: name + ': ' + sch.length + ' Beschriftungen' };
       var feld = feldZu(sch[0], w);
       var z = schalterNahe(sch[0], feld, w);
-      return { da: true, beschriftung: kurz(sch[0]), an: z.an, an_quelle: z.quelle, feld: feld ? kurz(feld) : null };
+      // schalter = das (unsichtbare) input[role=switch] rechts in der Zeile — Lesung 00:17: [1196,397,38,20] (TP) / [1196,481,38,20] (SL)
+      return { da: true, beschriftung: kurz(sch[0]), an: z.an, an_quelle: z.quelle, schalter: z.schalter || null, feld: feld ? kurz(feld) : null };
     }
     out.tp = klammer(RX_TP, 'TP');
     out.sl = klammer(RX_SL, 'SL');
@@ -196,6 +197,8 @@ var PROPHOS_AUGEN = (function () {
       out.senden = kurz(sd.el, { quelle: sd.quelle, seite: m ? (/^(buy|kauf)/i.test(m[1]) ? 'buy' : 'sell') : null,
                                  menge: m ? m[2] : null, symbol: m ? m[3] : null, typ: m ? m[4] : null });
     } else out.senden = null;
+    out.seite = out.senden && out.senden.seite ? out.senden.seite : null;
+    out.bereit = !!(out.senden && out.senden.seite && out.senden.menge);   // Lesung 00:17: nach der Order 'Start creating order' = keine Seite gewählt
     out.notiz = out.notiz.concat(kauf.notiz, verk.notiz, menge.notiz, sd.notiz);
     return out;
   }
@@ -377,8 +380,10 @@ var PROPHOS_AUGEN = (function () {
       var z = map.get(tr), symbol = sp(z, SP.symbol);
       if (!symbol) return;
       var istOrder = !!(sp(z, SP.status) || sp(z, SP.id) || (sp(z, SP.typ) && !sp(z, SP.pnl)));
-      var basis = { symbol: symbol, seite: seiteNorm(sp(z, SP.seite)), menge: zahl(sp(z, SP.menge)), zeile_rect: sichtbar(tr) ? rect(tr) : null,
-                    sichtbar: sichtbar(tr), spalten: z };
+      // Unsichtbare Zeile (Panel zu) = womöglich VERALTET: Lesung 00:17 zeigte versteckt Avg 30556.75, der echte Fill war 30543.75
+      var sb = sichtbar(tr);
+      var basis = { symbol: symbol, seite: seiteNorm(sp(z, SP.seite)), menge: zahl(sp(z, SP.menge)), zeile_rect: sb ? rect(tr) : null,
+                    sichtbar: sb, veraltet_moeglich: !sb, spalten: z };
       if (istOrder) {
         basis.typ = sp(z, SP.typ); basis.preis = zahl(sp(z, SP.preis)); basis.status = sp(z, SP.status);
         basis.cancel = zeilenKnopf(tr, /cancel|stornieren|abbrechen|^[×✕✖]$/i);
@@ -458,7 +463,8 @@ var PROPHOS_AUGEN = (function () {
         treffer.push({ symbol: t, text: txt(zeile).slice(0, 80), rect: rect(zeile) });
       });
     }
-    return { knopf: k.el ? kurz(k.el, { quelle: k.quelle }) : null, dialog: dlg && sichtbar(dlg) ? { rect: rect(dlg), x: xIn(dlg) } : null,
+    var leg = suche([{ q: 'aria:Change symbol', sel: 'button[aria-label]', text: /change symbol|symbol (ä|ae)ndern/i }]);
+    return { knopf: k.el ? kurz(k.el, { quelle: k.quelle }) : null, legende: leg.el ? kurz(leg.el) : null, dialog: dlg && sichtbar(dlg) ? { rect: rect(dlg), x: xIn(dlg) } : null,
              feld: f.el ? kurz(f.el, { quelle: f.quelle }) : null, treffer: treffer, notiz: k.notiz.concat(f.notiz) };
   }
 
