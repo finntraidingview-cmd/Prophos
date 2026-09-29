@@ -2634,7 +2634,8 @@ def test_puls_augen_cdp():
     wch = ob.augen_regel_weiche
     chk(wch({"augen": "cdp", "at": 990.0, "pc": "pc-usq1i6"}, 1000.0, "pc-usq1i6") == "cdp", "Weiche: cdp frisch + eigener PC → cdp")
     chk(wch({"augen": "cdp", "at": 990.0, "pc": "pc-usq1i6"}, 1000.0, "pc-8jcrsm") == "uia", "Weiche: Regel eines anderen PCs → uia")
-    chk(wch({"augen": "cdp", "at": 0.0}, 1000.0, "pc-usq1i6") == "uia" and wch(None, 1000.0, "pc-usq1i6") == "uia"
+    chk(wch({"augen": "cdp", "at": 0.0}, 50000.0, "pc-usq1i6") == "uia" and wch({"augen": "cdp", "at": 0.0}, 3 * 3600.0, "pc-usq1i6") == "cdp"
+        and wch(None, 1000.0, "pc-usq1i6") == "uia"
         and wch({"augen": "uia", "at": 999.0}, 1000.0, "pc-usq1i6") == "uia" and wch({"augen": "cdp", "at": 999.0}, 1000.0, None) == "uia",
         "Weiche: veraltet/fehlt/uia/ohne pc_id → uia (alter Pfad unverändert)")
     import inspect as _i3

@@ -13146,6 +13146,10 @@ PULS_CDP_PORT = 9333
 PULS_CHROME_ORDNER = "puls-chrome"
 AUGEN_ABSTAND_S = 60.0            # höchstens ein Lesen je Minute (Feed-PC: keine Ressourcen-Spitzen)
 AUGEN_REGEL_GUELTIG_S = 600.0
+# Weiche des CDP-PCs (29.09.2026, Master-Freigabe): eine lokale 'cdp'-Regel gilt 12 h — mit 10 min lief jeder erste Lauf nach
+# einer Pause über den alten UIA-Weg (dort ohne Broker → Tab-Umbau). Der Augen-Prozess holt die Regel nach JEDEM Lauf frisch,
+# Abschalten wirkt also nach höchstens einem Lauf. 'uia'-Datei oder keine Datei = sofort alter Weg (alle anderen PCs).
+AUGEN_CDP_WEICHE_S = 12 * 3600.0
 AUGEN_TV_URL = "https://www.tradingview.com/chart/"
 _AUGEN_HIER = os.path.dirname(os.path.abspath(__file__))
 
@@ -13625,7 +13629,10 @@ def _augen_aufnahme(aktion, js, trail, res, pc):
             ws = _CdpVerbindung(t.get("webSocketDebuggerUrl"), timeout=8.0)
             try:
                 ws.rufe("Runtime.evaluate", {"expression": js, "returnByValue": False}, timeout=8)
-                r = ws.rufe("Runtime.evaluate", {"expression": f"globalThis.prophosAugen.{fn} ? globalThis.prophosAugen.{fn}() : "
+                # start mit 5-min-Autostopp (augen.js ≥ 0.7.2; Master 29.09.2026: eine vergessene Aufnahme lief parallel zum
+                # K2-Probelauf weiter) — ältere augen.js ignorieren das Argument
+                arg = "({max_ms: 300000})" if fn == "aufnahme_start" else "()"
+                r = ws.rufe("Runtime.evaluate", {"expression": f"globalThis.prophosAugen.{fn} ? globalThis.prophosAugen.{fn}{arg} : "
                                                  "({fehler: 'augen.js ohne Aufnahme'})", "returnByValue": True}, timeout=10)
                 wert = ((r or {}).get("result") or {}).get("value") or {}
                 if r.get("exceptionDetails"):
@@ -13860,7 +13867,7 @@ def modus_augen(cmd):
 # ═══════════════════════════════════════════════════════════════════════════
 
 def augen_regel_weiche(regel_datei, jetzt, pc_id):
-    """REIN RECHNEND (testbar): 'cdp' nur, wenn die lokale Regel frisch (≤ 10 min) 'cdp' sagt und zu DIESEM PC gehört; sonst 'uia'."""
+    """REIN RECHNEND (testbar): 'cdp' nur, wenn die lokale Regel 'cdp' sagt, ≤ 12 h alt ist und zu DIESEM PC gehört; sonst 'uia'."""
     if not isinstance(regel_datei, dict) or regel_datei.get("augen") != "cdp" or not pc_id:
         return "uia"
     if regel_datei.get("pc") not in (None, pc_id):
@@ -13869,7 +13876,7 @@ def augen_regel_weiche(regel_datei, jetzt, pc_id):
         alt = jetzt - float(regel_datei.get("at") or 0)
     except (TypeError, ValueError):
         return "uia"
-    return "cdp" if 0 <= alt <= AUGEN_REGEL_GUELTIG_S else "uia"
+    return "cdp" if 0 <= alt <= AUGEN_CDP_WEICHE_S else "uia"
 
 
 def augen_modus_lauf():
