@@ -85,12 +85,16 @@
     padding:13px 18px 13px 15px;border-radius:14px;font-size:13.5px;font-weight:600;
     color:#fff;line-height:1.4;pointer-events:none;max-width:340px;
     display:flex;align-items:center;gap:10px;
+    /* Grundfarbe (30.09.2026, Finn am Radar: „hier passt die Farbe nicht"): Meldungen ohne Typ (rund 70 Aufrufe, z. B. „Erledigt ·
+       ohne Fusion-Buchung") hatten gar keinen Hintergrund — weiße Schrift auf der weißen Liste. Die Typen unten überschreiben. */
+    background:#101828;
     box-shadow:0 10px 34px rgba(0,0,0,.26);
     backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
     animation:atSlideUp .3s cubic-bezier(.2,.9,.3,1.25);
   }
   .at-toast::before{content:'';width:9px;height:9px;border-radius:50%;background:#fff;flex-shrink:0;animation:atDotPulse 1.5s ease-in-out infinite}
-  .at-toast.start{background:linear-gradient(135deg,#10b981 0%,#059669 100%)}
+  .at-toast.start,.at-toast.ok{background:linear-gradient(135deg,#10b981 0%,#059669 100%)}
+  .at-toast.warn{background:linear-gradient(135deg,#d97706 0%,#b45309 100%)}
   .at-toast.end{background:linear-gradient(135deg,#7c3aed 0%,#5b21b6 100%)}
   .at-toast.feed{background:linear-gradient(135deg,#dc2626 0%,#b91c1c 100%)}   /* Kurs-Feed steht (Wachhund, 25.09.2026) */
   /* Toast eines Hintergrund-Profils: anklickbar → wechselt direkt zu dem Profil */
@@ -24219,7 +24223,10 @@
     }
     // Echo V2 / Topstep V2 (30.09.2026, Abhaken im Radar auch für fremde IDs): kein Fusion-Hedge → Feld weg, slave_pl null;
     // P&L in $ vorbelegt: Balance nachher − vorher (pl_balance), sonst der P&L am Plan (master_pl.wert)
-    _mwdErlOhneHedge = pw.route === 'mt5v2' || pw.route === 'tsv2' || pw.plattform === 'echo'
+    // Orbit V2 ohne Gegenhedge (30.09.2026, Finn: „kommt trotzdem das Pop-up, wo ich den Fusion-P&L eingebe, obwohl gar kein Fusion-
+    // Account getradet wurde"): tvv2 zählt nur mit Fusion-Hedge (hedge_eur > 0 oder Hedge am Plan = Winning Days) als gehedgt
+    const mitHedge = Number(pw.hedge_eur) > 0 || !!pw.hedge
+    _mwdErlOhneHedge = pw.route === 'mt5v2' || pw.route === 'tsv2' || pw.plattform === 'echo' || (pw.route === 'tvv2' && !mitHedge)
     const plVor = (pw.pl_balance != null && isFinite(Number(pw.pl_balance))) ? Number(pw.pl_balance)
       : (pw.master_pl && pw.master_pl.wert != null && isFinite(Number(pw.master_pl.wert))) ? Number(pw.master_pl.wert) : null
     const m = document.getElementById('mwd-erl-master'); if(m) m.value = plVor != null ? String(plVor) : ''
@@ -24239,7 +24246,7 @@
   // Ergebniszeile, rechnet beim Tippen mit: zusammen ≈ Master × FX + Fusion (FX wie überall: window._fxUsdEur, sonst 0,85)
   function mklWdErlSumme(){
     const el = document.getElementById('mwd-erl-summe'); if(!el) return
-    if(_mwdErlOhneHedge){ el.innerHTML = '<span class="mwd-erl-buchung">P&amp;L in $ — ohne Fusion-Buchung</span>'; return }   // Echo/Topstep
+    if(_mwdErlOhneHedge){ el.innerHTML = '<span class="mwd-erl-buchung">P&amp;L in $ — ohne Fusion-Buchung</span>'; return }   // Echo/Topstep/Orbit ohne Hedge
     const zahl = id => { const v = String(document.getElementById(id)?.value || '').trim().replace(',', '.').replace('−', '-'); return v === '' ? null : Number(v) }
     const mpl = zahl('mwd-erl-master'), spl = zahl('mwd-erl-fusion')
     const fx = (Number(window._fxUsdEur) > 0) ? Number(window._fxUsdEur) : 0.85
@@ -24256,7 +24263,7 @@
     const msg = document.getElementById('mwdErledigtMsg'), btn = document.getElementById('mwdErledigtSave')
     const say = (t, k) => { if(msg){ msg.textContent = t; msg.className = 'modal-msg' + (k ? ' ' + k : '') } }
     const zahl = id => { const v = String(document.getElementById(id)?.value || '').trim().replace(',', '.').replace('−', '-'); return v === '' ? null : Number(v) }
-    const mpl = zahl('mwd-erl-master'), spl = _mwdErlOhneHedge ? null : zahl('mwd-erl-fusion')   // Echo/Topstep: nie slave_pl
+    const mpl = zahl('mwd-erl-master'), spl = _mwdErlOhneHedge ? null : zahl('mwd-erl-fusion')   // ohne Hedge: nie slave_pl
     if(mpl == null || !isFinite(mpl)) return say('Master-P&L eintragen ($).', 'err')
     if(spl != null && !isFinite(spl)) return say('Fusion-P&L ist keine Zahl.', 'err')
     if(btn) btn.disabled = true; say('')
@@ -24271,7 +24278,7 @@
       // Buchung aber gescheitert, bleibt das Popup offen: ein zweites „Erledigt" ist idempotent und holt die Buchung nach.
       if(d.buchung_fehler){ say(`Plan ist erledigt, die Buchung in Finanzen aber nicht: ${d.buchung_fehler} — „Erledigt" noch einmal drücken.`, 'err'); return }
       const bu = d.buchung || null, betrag = (bu && isFinite(Number(bu.amount))) ? Number(bu.amount) : null
-      if(typeof atToast === 'function') atToast(bu ? `Erledigt · Fusion ${betrag != null ? fmtE(betrag) : ''} auf „${bu.account_name || 'Hedge-Konto'}" gebucht` : 'Erledigt · ohne Fusion-Buchung')
+      if(typeof atToast === 'function') atToast(bu ? `Erledigt · Fusion ${betrag != null ? fmtE(betrag) : ''} auf „${bu.account_name || 'Hedge-Konto'}" gebucht` : _mwdErlOhneHedge ? 'Erledigt' : 'Erledigt · ohne Fusion-Buchung', 'ok')
       mklWdErledigtZu()
       try{ mkl.wd.at = 0; await mklWdLaden() }catch(_){}
       mklWdRender(); mklChartZeichnen()
@@ -26284,7 +26291,7 @@
   function atToast(msg, type){
     document.querySelectorAll('.at-toast').forEach(el => el.remove())
     const el = document.createElement('div')
-    el.className = `at-toast ${type}`
+    el.className = 'at-toast' + (type ? ' ' + type : '')
     el.textContent = msg
     document.body.appendChild(el)
     setTimeout(() => el.remove(), 5000)
@@ -36445,7 +36452,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.886'
+  const OS_TAB_BUILD = '2026-09-22.887'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
