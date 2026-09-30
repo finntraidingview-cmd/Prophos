@@ -7558,11 +7558,111 @@ def _lt_zeile(p, acc, disp, kerzen_je_wurzel, vorher=None):
     return z
 
 
+# ══ ECHO IM RADAR (30.09.2026, Finn: „im Radar oben die Orbit-Trades und darunter eine Sektion ‚Echo' — so sieht man auch bei
+# Echo, wie nah ein Trade am TP bzw. an der Liquidation/dem SL ist"). Echo V2 (route mt5v2) hat KEINE NQ-Level und keine Demo:
+# der Plan trägt TP/SL nur in $ und kein Symbol; die echten Werte stehen in der MT5-Cloud (mt5_live.status.master_positions,
+# je Position ident = mt5_baseline.ticket, symbol, volume, type 0 buy/1 sell, price_open, sl, tp, contract_size) — geschrieben
+# vom Copier bzw. vom PC-Panel der Lese-Instanz (lesen=true) alle paar Sekunden. Einen CFD-Kurs-Feed gibt es nicht (tv_kurse
+# führt nur NQ/MNQ): der Kurs jetzt wird nur dann aus Equity − Balance zurückgerechnet, wenn die Plan-Position die EINZIGE
+# offene des Kontos ist (sonst null) — Swap/Spread machen ihn zu einem ≈-Wert, quelle 'mt5_equity'. Opt-in über ?echo=1,
+# damit PC-Tab-Takt, Winning Days und Live Trades unverändert bleiben (kein Mehr-Read für sie).
+LT_ECHO_MAX_ALTER_S = 90       # ältere mt5_live-Zeilen gelten nicht als live (Position kann längst zu sein)
+
+
+def lt_echo_live_wahl(zeilen):
+    """REIN RECHNEND (testbar): mt5_live-Zeilen → {master_login: jüngste Zeile}. Ein Login kann auf mehreren PCs
+    konfiguriert sein (real: pc-4bx8nm 5 Tage alt neben pc-usq1i6 frisch) — die jüngste gewinnt."""
+    out = {}
+    for z in zeilen or ():
+        lg = str(z.get("master_login") or "").strip()
+        if lg and (lg not in out or str(z.get("updated_at") or "") > str(out[lg].get("updated_at") or "")):
+            out[lg] = z
+    return out
+
+
+def lt_echo_felder(p, live, jetzt_ts):
+    """REIN RECHNEND (testbar): Echo-Felder eines mt5v2-Plans aus mt5_baseline und der jüngsten mt5_live-Zeile des
+    Master-Logins (live = {updated_at, pos, bal, eq, ccy, note} oder None). Nichts wird erfunden: ohne passende, frische
+    Position bleiben Einstieg/Level/Kurs null. -> dict"""
+    base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+    fin = base.get("final") if isinstance(base.get("final"), dict) else {}
+    bs, be = _wd_num(base.get("master_balance")), _wd_num(fin.get("master_balance"))
+    out = {"plattform": "echo", "symbol": None, "symbol_quelle": None, "lots": _wd_num(p.get("master_contracts")),
+           "contract_size": None, "einstieg": None, "tp_level": None, "sl_level": None, "liq_level": None, "level_quelle": None,
+           "position_offen": False, "kurs_jetzt": None, "pl_live": None, "pl_live_art": None, "pl_bei_tp": None, "pl_bei_sl": None,
+           "waehrung": None, "mt5_alter_s": None, "balance_start": bs, "balance_end": be,
+           "pl_balance": round(be - bs, 2) if (bs is not None and be is not None) else None,
+           "konto_balance": None, "konto_balance_at": None, "demo": None}
+    if not live:
+        return out
+    try:
+        alter = jetzt_ts - datetime.fromisoformat(str(live.get("updated_at")).replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError):
+        return out
+    out["mt5_alter_s"] = int(round(alter))
+    if alter > LT_ECHO_MAX_ALTER_S or live.get("note"):
+        return out
+    eq, bal = _wd_num(live.get("eq")), _wd_num(live.get("bal"))
+    ccy = str(live.get("ccy") or "").upper() or None
+    out.update(waehrung=ccy, konto_balance=bal, konto_balance_at=live.get("updated_at"))
+    if str(p.get("status") or "") != "open":
+        return out
+    positionen = [x for x in (live.get("pos") or []) if isinstance(x, dict)]
+    # Live-P&L wie der Karten-Chip (mt5V2PnlAus): Equity − Start-Balance; ohne Baseline Equity − Balance (schwebend)
+    if eq is not None and bs is not None:
+        out.update(pl_live=round(eq - bs, 2), pl_live_art="equity_start")
+    elif eq is not None and bal is not None and positionen:
+        out.update(pl_live=round(eq - bal, 2), pl_live_art="schwebend")
+    ticket = str(base.get("ticket") or "").strip()
+    pos = next((x for x in positionen if ticket and str(x.get("ident") or "") == ticket), None)
+    if pos is None and not ticket and len(positionen) == 1:
+        pos = positionen[0]          # Plan ohne Ticket (Baseline fehlte): nur die einzige offene Position
+    if pos is None:
+        return out
+    vol, cs, e = _wd_num(pos.get("volume")), _wd_num(pos.get("contract_size")), _wd_num(pos.get("price_open"))
+    tp, sl = _wd_num(pos.get("tp")), _wd_num(pos.get("sl"))
+    richtung = "buy" if str(pos.get("type")) == "0" else "sell" if str(pos.get("type")) == "1" else None
+    vz = 1 if richtung == "buy" else -1 if richtung == "sell" else 0
+    faktor = (vol or 0) * (cs or 0)
+    out.update(symbol=pos.get("symbol") or None, symbol_quelle="mt5_position", contract_size=cs, einstieg=e,
+               tp_level=tp if tp else None, sl_level=sl if sl else None, level_quelle="mt5_position", position_offen=True,
+               lots=vol if vol is not None else out["lots"], richtung_mt5=richtung)
+    if e and vz and faktor > 0:
+        if tp:
+            out["pl_bei_tp"] = round((tp - e) * vz * faktor, 2)
+        if sl:
+            out["pl_bei_sl"] = round((sl - e) * vz * faktor, 2)
+        if len(positionen) == 1 and eq is not None and bal is not None:
+            out["kurs_jetzt"] = {"kurs": round(e + vz * (eq - bal) / faktor, 2), "minute": None, "quelle": "mt5_equity",
+                                 "alter_s": out["mt5_alter_s"]}
+    return out
+
+
+def _lt_echo_zeile(p, acc, disp, live_je_login, firm_sym, jetzt_ts, vorher=None):
+    """Eine Echo-V2-Zeile im Live-Trades-Format: Rahmen aus _wd_heute_zeile (Person, Konto, Farbe, Status, master_pl …),
+    NQ-Felder bleiben leer, dazu lt_echo_felder. Symbol ohne Position: Firmen-Standard (symbol_quelle 'firma')."""
+    z = _wd_heute_zeile(p, acc, disp, vorher)
+    z.pop("_tsx", None)
+    login = str((acc or {}).get("external_id") or "").strip()
+    z.update(lt_echo_felder(p, live_je_login.get(login) if login else None, jetzt_ts))
+    # NQ-/Futures-Felder gelten für Echo nicht — leer statt gerechnet (die Max-Drawdown-Liquidation ist eine Futures-Regel)
+    for k in ("einstieg_nq", "einstieg_quelle", "tp_level_nq", "sl_level_nq", "sl_art", "schliesst_bei_nq", "liq_level_nq",
+              "liq_balance", "liq_regel", "liq_quelle", "sl_hinweis", "punktwert", "symbol_root"):
+        z[k] = None
+    if not z.get("symbol") and acc:
+        s = firm_sym.get(_firm_norm(acc.get("firm")))
+        if s:
+            z["symbol"], z["symbol_quelle"] = s, "firma"
+    return z
+
+
 @app.route("/admin/live-trades", methods=["GET", "OPTIONS"])
 def admin_live_trades():
     """GET /admin/live-trades?tage=2 → {jetzt, trades:[…]} — alle Orbit-V2-Pläne (route tvv2) aller IDs: laufend, geplant, in
     „Überprüfen" und abgeschlossen der letzten `tage` Tage. Je Trade der /admin/wd-heute-Vertrag plus balance_start/_end,
-    pl_balance, liq_balance/_regel/_level_nq und demo {status, at, preis, pl_usd}. Auth wie /admin/wd-heute."""
+    pl_balance, liq_balance/_regel/_level_nq und demo {status, at, preis, pl_usd}. Auth wie /admin/wd-heute.
+    ?echo=1 (30.09.2026): zusätzlich Echo-V2-Pläne (route mt5v2) mit plattform 'echo' und den Feldern aus lt_echo_felder;
+    jede Zeile trägt plattform 'orbit' | 'echo'. Ohne den Parameter ist die Antwort wie bisher (nur Orbit/Topstep V2)."""
     if request.method == "OPTIONS":
         return "", 200
     me, err = _wd_login()
@@ -7573,12 +7673,13 @@ def admin_live_trades():
         # F21 (27.09.2026): jeder PC-Tab fragt alle 55–70 s ?tage=1&nur_eigene=1&status=open — Last klein halten
         nur_eigene = str(request.args.get("nur_eigene") or "") in ("1", "true", "ja")
         nur_offen = str(request.args.get("status") or "").lower() == "open"
+        mit_echo = str(request.args.get("echo") or "") in ("1", "true", "ja")
         disp, excluded = _wd_personen()
         seit = datetime.fromtimestamp(datetime.now(timezone.utc).timestamp() - tage * 86400, timezone.utc).isoformat()
         felder = ("id,user_id,master_account_id,master_name,master_firm,route,notes,status,richtung,master_contracts,master_symbol,"
                   "master_symbol_root,master_tp,master_sl,master_pl,hedge_eur,hedge_faktor,start_um,start_um_gestartet_at,orbit_gesendet_at,"
                   "started_at,ended_at,completed_at,planned_for,created_at,mt5_baseline,slave_pl,pl_quelle,konto_typ")
-        basis_f = {"select": felder, "route": "in.(tvv2,tsv2)"}     # B16: Topstep V2 (Puls für Topstep) wie Orbit V2
+        basis_f = {"select": felder, "route": "in.(tvv2,tsv2,mt5v2)" if mit_echo else "in.(tvv2,tsv2)"}   # B16: Topstep V2 wie Orbit V2
         if nur_eigene:
             basis_f["user_id"] = f"eq.{me}"
         if nur_offen:
@@ -7602,12 +7703,13 @@ def admin_live_trades():
                                             "id": f"in.({','.join(ids[i:i + 80])})"}):
                 accs[str(a["id"])] = a
         # Kerzen je Wurzel ab dem frühesten Start (eine Abfrage je Wurzel)
-        starts = [str(p.get("started_at")) for p in plaene if p.get("started_at")]
+        orbit = [p for p in plaene if str(p.get("route") or "") != "mt5v2"]      # Echo rechnet keine NQ-Demo
+        starts = [str(p.get("started_at")) for p in orbit if p.get("started_at")]
         kerzen = {}
         if starts:
             ab = min(starts)
             # F21: Kerzen nur für die Wurzeln der gelieferten Pläne (Rückfall: die andere Wurzel, preisgleich)
-            noetig = {_symbol_wurzel(p.get("master_symbol_root") or p.get("master_symbol")) for p in plaene if p.get("started_at")}
+            noetig = {_symbol_wurzel(p.get("master_symbol_root") or p.get("master_symbol")) for p in orbit if p.get("started_at")}
             noetig = [w for w in ("NQ", "MNQ") if w in noetig] or ["NQ", "MNQ"]
             for w in noetig:
                 kerzen[w] = _sb_all("tv_kurs_1m", {"select": "minute,h,l", "wurzel": f"eq.{w}", "minute": f"gte.{ab[:16]}", "order": "minute.asc"})
@@ -7618,13 +7720,51 @@ def admin_live_trades():
                         kerzen[andere] = _sb_all("tv_kurs_1m", {"select": "minute,h,l", "wurzel": f"eq.{andere}", "minute": f"gte.{ab[:16]}", "order": "minute.asc"})
                     kerzen[w] = kerzen[andere]
         fruehere = _wd_fruehere_trades(ids)          # B14: für den Balance-Vorläufer (konto_balance)
-        trades = [_lt_zeile(p, accs.get(str(p.get("master_account_id") or "")), disp, kerzen, wd_vorher_waehlen(p, fruehere))
-                  for p in plaene]
+        # Echo (?echo=1): EIN Read auf mt5_live für die Master-Logins laufender Echo-Pläne — nur die nötigen JSON-Teile
+        echo = [p for p in plaene if str(p.get("route") or "") == "mt5v2"]
+        live_je_login, firm_sym = {}, {}
+        logins = sorted({str((accs.get(str(p.get("master_account_id") or "")) or {}).get("external_id") or "").strip()
+                         for p in echo if p.get("status") == "open"} - {""})
+        if logins:
+            try:
+                live_je_login = lt_echo_live_wahl(sb_select("mt5_live", {
+                    "select": "master_login,updated_at,pos:status->master_positions,bal:status->master_balance,eq:status->master_equity,"
+                              "ccy:status->>master_currency,note:status->>note",
+                    "master_login": f"in.({','.join(logins)})"}) or [])
+            except Exception as e:
+                print(f"[live-trades] ⚠️ mt5_live (Echo): {type(e).__name__}: {e}", flush=True)
+        jetzt_ts = datetime.now(timezone.utc).timestamp()
+        trades = []
+        for p in plaene:
+            acc, vorher = accs.get(str(p.get("master_account_id") or "")), wd_vorher_waehlen(p, fruehere)
+            if str(p.get("route") or "") == "mt5v2":
+                try:
+                    z = _lt_echo_zeile(p, acc, disp, live_je_login, firm_sym, jetzt_ts, vorher)
+                except Exception as e:     # eine kaputte Echo-Zeile darf Orbit nicht mitreißen
+                    print(f"[live-trades] ⚠️ Echo-Zeile {str(p.get('id'))[:8]}: {type(e).__name__}: {e}", flush=True)
+                    continue
+                if not z.get("symbol") and acc and not firm_sym.get("_geladen"):
+                    # Firmen-Standard nur, wenn einem Echo-Plan die Position fehlt (Überprüfen/Erledigt) — einmal je Abruf
+                    firm_sym["_geladen"] = True
+                    try:
+                        for f in _sb_all("firm_specs", {"select": "name,symbol"}):
+                            w = _cfd_wurzel(f.get("symbol"))
+                            if w:
+                                firm_sym.setdefault(_firm_norm(f.get("name")), w)
+                    except Exception as e:
+                        print(f"[live-trades] ⚠️ firm_specs (Echo): {type(e).__name__}: {e}", flush=True)
+                    z = _lt_echo_zeile(p, acc, disp, live_je_login, firm_sym, jetzt_ts, vorher)
+                trades.append(z)
+            else:
+                z = _lt_zeile(p, acc, disp, kerzen, vorher)
+                z["plattform"] = "orbit"
+                trades.append(z)
         rang = {"open": 0, "planned": 1, "review": 2, "completed": 3}
         trades.sort(key=lambda z: (rang.get(z.get("status"), 9), str(z.get("started_at") or z.get("start_um") or "")), reverse=False)
         kj = _kurs_jetzt()                       # B35/F28: aktueller Kurs je Wurzel (Radar-Weg Topstep)
         for z in trades:
-            z["kurs_jetzt"] = kj.get(z.get("symbol_root") or "")
+            if z.get("plattform") != "echo":     # Echo trägt seinen eigenen (CFD-)Kurs aus lt_echo_felder
+                z["kurs_jetzt"] = kj.get(z.get("symbol_root") or "")
         return jsonify({"jetzt": datetime.now(timezone.utc).isoformat(), "tage": tage, "kurs_jetzt": kj, "trades": trades})
     except Exception as e:
         print(f"[live-trades] ⚠️ {type(e).__name__}: {e}", flush=True)
