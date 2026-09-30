@@ -39,7 +39,7 @@ def lade():
     firm_rules = src[i:src.index("\n]\n", i) + 2]
     exec("\n".join([firm_rules] + [block(f) for f in (
         "_wd_num", "_wd_level", "_wd_konto_groesse", "_firm_norm", "_cme_handelstag", "liq_regel_waehlen", "liq_stufe", "_liq_de",
-        "liq_aus_regel", "liq_tagesstart", "liq_regel_felder")]), ns)
+        "liq_aus_regel", "liq_tagesstart", "liq_regel_felder", "lt_demo_liq", "_lt_demo")]), ns)
     return ns
 
 
@@ -126,6 +126,22 @@ def main():
     check("Boden" in z11["liq_regel_text"], f"Plan mit hedge_eur > 0 zählt als Winning Day → {z11['liq_regel_text']}")
     z12 = F(REGELN, {"firm": "Tradeify", "account_type": "winning_days", "name": "Tradeify ohne Größe"}, {"id": "o"}, 155000.0, None, 30000, "buy", 2, 1)
     check(z12["liq_regel_level_nq"] is None and "Kontogröße unbekannt" in z12["liq_regel_text"], f"Boden ohne Kontogröße: klarer Grund → {z12['liq_regel_text']}")
+
+    # 8) DEMO-LIQ: die Demo rechnet gegen die Regel-Liq, sonst wie bisher
+    D = a["lt_demo_liq"]
+    rf = F(REGELN, moritz, plan, 159398.98, 159398.98, 30706, "buy", 20, 3)
+    lvl, pl = D(30551.02, -9298.98, rf, 159398.98, 30706, "buy", 20, 3)
+    check(lvl == 30656.0 and pl == -3000.0, f"Demo-Liq Moritz: Regel-Level 30.656 / −3.000 $ statt 30.551 / −9.298,98 → {lvl} / {pl}")
+    lvl2, pl2 = D(30551.02, -9298.98, {}, 159398.98, 30706, "buy", 20, 3)
+    check(lvl2 == 30551.02 and pl2 == -9298.98, f"Demo-Liq ohne Regel: wie bisher → {lvl2} / {pl2}")
+    lvl3, pl3 = D(None, None, {"liq_regel_level_nq": 30896.0, "liq_regel_balance": None}, None, 30671, "sell", 20, 1)
+    check(lvl3 == 30896.0 and pl3 == -4500.0, f"Demo-Liq ohne Start-Balance (SELL, fest 4.500): $ aus dem Level → {lvl3} / {pl3}")
+    kerzen = [{"minute": "2026-09-30T00:22:00+00:00", "h": 30720, "l": 30690}, {"minute": "2026-09-30T00:23:00+00:00", "h": 30700, "l": 30650},
+              {"minute": "2026-09-30T00:24:00+00:00", "h": 30690, "l": 30660}]
+    alt = a["_lt_demo"]("buy", 30801.25, 30551.02, kerzen, "2026-09-30T00:21:07+00:00")
+    neu = a["_lt_demo"]("buy", 30801.25, lvl, kerzen, "2026-09-30T00:21:07+00:00")
+    check(alt.get("status") == "laeuft" and neu.get("status") == "liquidiert",
+          f"Demo mit Tief 30.650: alte Liq → {alt.get('status')}, Regel-Liq → {neu.get('status')} ({neu.get('at')})")
 
     print("\nALLES OK" if ok else "\nFEHLER")
     sys.exit(0 if ok else 1)

@@ -7588,6 +7588,25 @@ def liq_regel_felder(regeln, acc, plan, start_bal, tagesstart, einstieg, richtun
     return {"liq_regel_balance": bal, "liq_regel_level_nq": level, "liq_regel_text": f"{text} ({weg})" if weg else text}
 
 
+def lt_demo_liq(liq_level, liq_pl_alt, regel_f, start_bal, einstieg, richtung, ppl, kt):
+    """REIN RECHNEND (testbar, DEMO-LIQ 30.09.2026, Master: „Spanne, Chart und Demo sollen übereinstimmen"): Liquidations-Level und
+    $ beim Erreichen für die Radar-Demo → (level, pl_usd). liq_regel_level_nq (liq_regeln) vor dem alten Level; $ = Liq-Balance −
+    Start-Balance, ohne Balance aus dem Level ((Level − Einstieg) × Richtung × Punktwert × Kontrakte). Ohne Regel-Level wie bisher.
+    Nur die Demo — der Fusion-Hedge rechnet unverändert mit liq_level_nq/hedge.sl_level_nq."""
+    lvl = (regel_f or {}).get("liq_regel_level_nq")
+    if lvl is None:
+        return liq_level, liq_pl_alt
+    rb = (regel_f or {}).get("liq_regel_balance")
+    if rb is not None and start_bal is not None:
+        return lvl, round(rb - start_bal, 2)
+    ri = 1 if richtung == "buy" else -1 if richtung == "sell" else 0
+    try:
+        pl = round((float(lvl) - float(einstieg)) * ri * float(ppl) * float(kt), 2) if (einstieg and ppl and kt and ri) else None
+    except (TypeError, ValueError):
+        pl = None
+    return lvl, pl
+
+
 def _lt_demo(richtung, tp_level, liq_level, kerzen, start_iso, ende_iso=None, sl_level=None):
     """REIN RECHNEND (testbar): Demo-Ausführung gegen Minutenkerzen [{minute, h, l}] ab der Start-Minute.
     → {status: 'tp'|'liquidiert'|'beide_in_minute'|'laeuft'|'beendet_ohne_treffer'|'ohne_kurs'|'ohne_level', at, preis, minuten}.
@@ -7693,26 +7712,29 @@ def _lt_zeile(p, acc, disp, kerzen_je_wurzel, vorher=None, regeln=None, fruehere
             if ub.get("liq_balance") is None:          # Topstep V2 behält seine MLL aus TopstepX
                 liq = _lt_liq(acc, p, start_bal, ek, z.get("richtung"), ppl, kt)
                 liq_bal, liq_regel, liq_level = liq["balance"], liq["regel"], liq["level"]
+    # LIQ-REGELN (30.09.2026): Anzeige-Felder aus liq_regeln — VOR der Demo, damit sie gegen dieselbe Liq rechnet wie Spanne und Chart
+    regel_f = {}
+    if regeln is not None:
+        tagesstart, _tq = liq_tagesstart(p, start_bal, fruehere)
+        regel_f = liq_regel_felder(regeln, acc, p, start_bal, tagesstart, z.get("einstieg_nq"), z.get("richtung"), ppl, kt)
+    demo_liq, demo_liq_pl = lt_demo_liq(liq_level, liq["pl_usd"], regel_f, start_bal, z.get("einstieg_nq"), z.get("richtung"), ppl, kt)
     # Ende (B5): beendete Trades rechnen die Demo nur bis zum Ende — ended_at, sonst final.at, sonst completed_at
     ende = None if str(p.get("status") or "") == "open" else (p.get("ended_at") or fin.get("at") or p.get("completed_at"))
     # echter SL (Bracket aus TradingView bzw. master_sl) beendet die Demo vor der Liquidation (29.09.2026); WD ('liquidation') nicht
     sl_demo = _wd_num(z.get("sl_level_nq")) if z.get("sl_art") in ("bracket", "master_sl") else None
-    demo = _lt_demo(z.get("richtung"), z.get("tp_level_nq"), liq_level, kerzen, p.get("started_at"), ende, sl_demo) if p.get("started_at") else {"status": "geplant"}
+    demo = _lt_demo(z.get("richtung"), z.get("tp_level_nq"), demo_liq, kerzen, p.get("started_at"), ende, sl_demo) if p.get("started_at") else {"status": "geplant"}
     if demo.get("status") == "tp":
         demo["pl_usd"] = _wd_num(p.get("master_tp"))
     elif demo.get("status") == "liquidiert" and demo.get("stop") == "sl":
         demo["pl_usd"] = -abs(_wd_num(p.get("master_sl"))) if _wd_num(p.get("master_sl")) is not None else None
     elif demo.get("status") == "liquidiert":
-        demo["pl_usd"] = liq["pl_usd"]
+        demo["pl_usd"] = demo_liq_pl
     z.update({"balance_start": bs, "equity_start": _wd_num(tv.get("equity_start")), "balance_end": be,
               "pl_balance": round(be - bs, 2) if (bs is not None and be is not None) else None,
               "liq_balance": liq_bal, "liq_regel": liq_regel, "liq_level_nq": liq_level, "demo": demo,
               "liq_quelle": liq_quelle if liq_level is not None else None,
               "konto_balance": _wd_num((acc or {}).get("tv_balance")), "konto_balance_at": (acc or {}).get("tv_balance_at")})
-    # LIQ-REGELN (30.09.2026): nur zusätzliche Anzeige-Felder — liq_level_nq/Hedge bleiben wie oben gerechnet
-    if regeln is not None:
-        tagesstart, _tq = liq_tagesstart(p, start_bal, fruehere)
-        z.update(liq_regel_felder(regeln, acc, p, start_bal, tagesstart, z.get("einstieg_nq"), z.get("richtung"), ppl, kt))
+    z.update(regel_f)   # liq_regel_* nur zusätzlich — liq_level_nq/Hedge bleiben wie oben gerechnet
     return z
 
 
