@@ -24476,7 +24476,11 @@
     const ein = n(t.einstieg_nq), kt = n(t.kt), root = String(t.symbol_root || ''), ri = t.richtung === 'buy' ? 1 : t.richtung === 'sell' ? -1 : 0
     const ppl = n(t.punktwert) || ((root === 'NQ' || root === 'MNQ') ? mklPpl(root) : null)
     const pl = v => (ein != null && kt && ppl && ri) ? Math.round((v - ein) * ri * ppl * kt) : null
-    return { links, rechts, ein, art: slE != null ? 'SL' : 'Liq', plLinks: pl(links), plRechts: pl(rechts), regel: slE == null && lqR != null ? String(t.liq_regel_text || '') : '' }
+    // KONTO-BODEN (30.09.2026): liq_regel_level_nq ist seit dem Backend die ENGERE von Regel und Konto-Boden (Max DD); der Tooltip zeigt
+    // beide mit „✓ gilt" (liq_vergleich_text) — sonst nur die eine, ohne „Regel:", wenn allein der Boden gilt
+    const vgl = t.liq_vergleich_text ? String(t.liq_vergleich_text) : ''
+    return { links, rechts, ein, art: slE != null ? 'SL' : 'Liq', plLinks: pl(links), plRechts: pl(rechts),
+             regel: slE == null && lqR != null ? (vgl || String(t.liq_regel_text || '')) : '', regelPur: !!vgl || t.liq_gilt === 'boden' }
   }
   // Betrag kompakt für die Enden der Spanne: „−3.000 $", „+272 $", ab 10.000 „−10,5k $"; lang (Tooltip) immer ganze $
   function wdlSpBetrag(v, lang){
@@ -24639,7 +24643,7 @@
         if(sp){
           const naeh = t.einstieg_quelle === 'reader_klick' ? ' (kein Fill — Kurs beim Klick)' : t.einstieg_quelle === 'kerze_start' ? ' (kein Fill — Minutenkerze beim Start)' : ''
           const lg = v => v != null ? ' · ' + wdlSpBetrag(v, true) : ''
-          const spTip = `${sp.art === 'SL' ? 'SL' : 'Liquidation'} ${f2(sp.links)}${lg(sp.plLinks)}${sp.regel ? ' · Regel: ' + sp.regel : ''}${sp.ein != null ? ' · Einstieg ' + f2(sp.ein) + naeh : ''} · TP ${f2(sp.rechts)}${lg(sp.plRechts)}${kp != null ? ' · Kurs ' + f2(kp) : ''}${demoTip(d) ? ' · ' + demoTip(d) : ''}`
+          const spTip = `${sp.art === 'SL' ? 'SL' : 'Liquidation'} ${f2(sp.links)}${lg(sp.plLinks)}${sp.regel ? (sp.regelPur ? ' · ' : ' · Regel: ') + sp.regel : ''}${sp.ein != null ? ' · Einstieg ' + f2(sp.ein) + naeh : ''} · TP ${f2(sp.rechts)}${lg(sp.plRechts)}${kp != null ? ' · Kurs ' + f2(kp) : ''}${demoTip(d) ? ' · ' + demoTip(d) : ''}`
           miZ = wdlSpanneHtml(sp, kp, LT.plFarbe, spTip)
         } else miZ = zelle('mi', '–', { tip: num(t.tp_level_nq) == null ? 'kein TP gespeichert' : 'keine Liquidation/SL gespeichert' })
         plZ = zelle('pl', LT.pl, { f: LT.plFarbe, lv: 'pl' })
@@ -36441,7 +36445,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.882'
+  const OS_TAB_BUILD = '2026-09-22.883'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

@@ -39,7 +39,8 @@ def lade():
     firm_rules = src[i:src.index("\n]\n", i) + 2]
     exec("\n".join([firm_rules] + [block(f) for f in (
         "_wd_num", "_wd_level", "_wd_konto_groesse", "_firm_norm", "_cme_handelstag", "liq_regel_waehlen", "liq_stufe", "_liq_de",
-        "liq_aus_regel", "liq_tagesstart", "liq_regel_felder", "lt_demo_liq", "_lt_demo")]), ns)
+        "liq_aus_regel", "liq_tagesstart", "liq_regel_felder", "lt_demo_liq", "_lt_demo",
+        "ist_topstep_express", "liq_peak", "liq_konto_groesse", "liq_konto_boden", "_liq_pl_de")]), ns)
     return ns
 
 
@@ -142,6 +143,102 @@ def main():
     neu = a["_lt_demo"]("buy", 30801.25, lvl, kerzen, "2026-09-30T00:21:07+00:00")
     check(alt.get("status") == "laeuft" and neu.get("status") == "liquidiert",
           f"Demo mit Tief 30.650: alte Liq → {alt.get('status')}, Regel-Liq → {neu.get('status')} ({neu.get('at')})")
+
+    # 9) KONTO-BODEN (LIQ-KONTOBODEN, 30.09.2026) — Regeln mit den Spalten aus sql/2026-09-30_liq-kontoboden.sql
+    RB = [dict(r) for r in REGELN]
+    for r in RB:
+        if r["firma"] == "Tradeify":
+            r.update(maxdd_art="eod_trailing", maxdd_lock_ueber_groesse_usd=None if r["kontotyp"] == "challenge" else 100)
+        if r["firma"] == "Apex Trader":
+            r.update(maxdd_art="eod_trailing", maxdd_lock_ueber_groesse_usd=100)
+    RB += [{"id": 8, "firma": "Topstep", "kontotyp": "challenge", "art": None, "maxdd_art": "eod_trailing", "maxdd_lock_ueber_groesse_usd": 0},
+           {"id": 11, "firma": "Lucid Trading", "kontotyp": None, "art": None, "maxdd_art": "statisch"}]
+    P, B = a["liq_peak"], a["liq_konto_boden"]
+    # 9a) Finns Beispiel: 150k, Max DD 4.000, gestern 150.000 → 147.500 verloren; heute erster Trade ab 147.500 → Liq-Abstand 1.500 $
+    apex = {"id": "ap1", "firm": "Apex Trader", "account_type": "challenge", "name": "150k Apex APEX6708050000005", "max_drawdown": "4000"}
+    heute = {"id": "p2", "master_account_id": "ap1", "started_at": "2026-09-30T14:00:00+00:00"}
+    verlauf = [{"id": "p1", "master_account_id": "ap1", "konto_typ": "challenge", "started_at": "2026-09-29T14:00:00+00:00",
+                "ended_at": "2026-09-29T15:00:00+00:00", "bal_start": 150000.0, "bal_end": 147500.0}]
+    pk = P(heute, apex, 147500.0, verlauf)
+    zf = F(RB, apex, heute, 147500.0, 147500.0, 30000, "buy", 20, 1, peak=pk)
+    check(pk == 150000.0 and zf["liq_boden_balance"] == 146000.0 and zf["liq_regel_nur_balance"] == 145500.0,
+          f"Finn: Höchststand 150.000, Boden 146.000, Regel 145.500 → {pk} / {zf['liq_boden_balance']} / {zf['liq_regel_nur_balance']}")
+    check(zf["liq_regel_balance"] == 146000.0 and zf["liq_gilt"] == "boden" and zf["liq_regel_level_nq"] == 29925.0,
+          f"Finn: effektiv 146.000 (Boden gilt), 1.500 $ = 75 Pkt → Level 29.925 → {zf['liq_regel_balance']} / {zf['liq_gilt']} / {zf['liq_regel_level_nq']}")
+    check("Konto-Boden 146.000 $" in (zf["liq_vergleich_text"] or "") and "→ −1.500 $ ✓ gilt" in zf["liq_vergleich_text"]
+          and "Regel: Daily Loss 2.000 $" in zf["liq_vergleich_text"] and "→ −2.000 $" in zf["liq_vergleich_text"],
+          f"Finn: Tooltip-Vergleich → {zf['liq_vergleich_text']}")
+    zst = F(REGELN, apex, heute, 147500.0, 147500.0, 30000, "buy", 20, 1, peak=pk)
+    check(zst["liq_regel_balance"] == 146000.0 and zst["liq_maxdd_art"] == "statisch",
+          f"Finn statisch (Spalten fehlen/unklar): ebenfalls 146.000 → {zst['liq_regel_balance']} ({zst['liq_maxdd_art']})")
+    lv, pl = D(29800.0, -4000.0, zf, 147500.0, 30000, "buy", 20, 1)
+    check(lv == 29925.0 and pl == -1500.0, f"Finn: Demo liquidiert bei −1.500 $ (Spanne, Chart, Demo gleich) → {lv} / {pl}")
+    # 9b) EOD-trailing mit Lock (Tradeify Funded 150k, DD 4.500, Lock Größe + 100)
+    tf = {"id": "tf1", "firm": "Tradeify", "account_type": "funded", "starting_balance": 150000, "max_drawdown": "4500"}
+    bl, bt, dd, art = B(RB[1], tf, 150000.0, 156000.0, 153000.0)
+    check(bl == 150100.0 and "Lock bei 150.100 $" in bt and dd == 4500 and art == "eod_trailing",
+          f"Trailing mit Lock: Höchststand 156.000 → 151.500, gedeckelt 150.100 → {bl} ({bt})")
+    zl = F(RB, tf, {"id": "x"}, 153000.0, None, 30000, "buy", 2, 1, peak=156000.0)
+    check(zl["liq_regel_balance"] == 150100.0 and zl["liq_gilt"] == "boden" and zl["liq_regel_level_nq"] == 28550.0,
+          f"Tradeify Funded 153.000: Boden 150.100 schlägt fest 148.500 → Abstand 2.900 $ → {zl['liq_regel_balance']} / {zl['liq_regel_level_nq']}")
+    bl2, bt2, _, _ = B(RB[1], tf, 150000.0, 152000.0, 151000.0)
+    check(bl2 == 147500.0 and "Lock" not in bt2, f"Trailing unter dem Lock: 152.000 − 4.500 = 147.500 → {bl2} ({bt2})")
+    tc = {"id": "tc1", "firm": "Tradeify", "account_type": "challenge", "name": "150k Tradeify", "max_drawdown": "4500"}
+    zc = F(RB, tc, {"id": "y"}, 155000.0, None, 30000, "buy", 2, 1, peak=156000.0)
+    check(zc["liq_regel_balance"] == 151500.0 and zc["liq_gilt"] == "boden",
+          f"Tradeify Challenge (kein Lock): 156.000 − 4.500 = 151.500 schlägt fest 150.500 → {zc['liq_regel_balance']} ({zc['liq_regel_text']})")
+    # 9c) ohne max_drawdown: nur die Regel; maxdd_usd der Regel als Rückfall
+    ohne = dict(apex, max_drawdown=None)
+    zo = F(RB, ohne, heute, 147500.0, 147500.0, 30000, "buy", 20, 1, peak=150000.0)
+    check(zo["liq_regel_balance"] == 145500.0 and zo["liq_gilt"] == "regel" and zo["liq_boden_balance"] is None and zo["liq_vergleich_text"] is None
+          and "kein Max Drawdown" in zo["liq_boden_text"], f"ohne Max DD: Regel 145.500 gilt allein → {zo['liq_regel_balance']} ({zo['liq_boden_text']})")
+    RB2 = [dict(r, maxdd_usd=3000) if r["id"] == 3 else r for r in RB]
+    zr = F(RB2, ohne, heute, 147500.0, 147500.0, 30000, "buy", 20, 1, peak=150000.0)
+    check(zr["liq_boden_balance"] == 147000.0 and zr["liq_regel_balance"] == 147000.0, f"maxdd_usd der Regel als Rückfall: 150.000 − 3.000 → {zr['liq_boden_balance']}")
+    # 9d) Höchststand: nur dieselbe Phase, nur VOR dem Start, tv_balance nur wenn vorher gelesen
+    vl = verlauf + [{"id": "ch", "master_account_id": "ap1", "konto_typ": "funded", "started_at": "2026-09-20T14:00:00+00:00",
+                     "ended_at": "2026-09-20T15:00:00+00:00", "bal_start": 158000.0, "bal_end": 159000.0},
+                    {"id": "sp", "master_account_id": "ap1", "konto_typ": "challenge", "started_at": "2026-09-30T16:00:00+00:00",
+                     "ended_at": "2026-09-30T17:00:00+00:00", "bal_start": 147500.0, "bal_end": 151000.0},
+                    {"id": "nt", "master_account_id": "ap1", "konto_typ": None, "bal_end": 170000.0, "ended_at": "2026-09-01T00:00:00+00:00"},
+                    {"id": "fr", "master_account_id": "anderes", "konto_typ": "challenge", "bal_end": 180000.0, "ended_at": "2026-09-01T00:00:00+00:00"}]
+    check(P(heute, apex, 147500.0, vl) == 150000.0, f"Höchststand ignoriert andere Phase, späteren Trade, ohne konto_typ, fremdes Konto → {P(heute, apex, 147500.0, vl)}")
+    check(P(heute, dict(apex, tv_balance=151200.0, tv_balance_at="2026-09-30T10:00:00+00:00"), 147500.0, vl) == 151200.0
+          and P(heute, dict(apex, tv_balance=151200.0, tv_balance_at="2026-09-30T18:00:00+00:00"), 147500.0, vl) == 150000.0,
+          "tv_balance zählt nur, wenn vor dem Start gelesen")
+    check(P({"id": "g", "master_account_id": "ap1"}, apex, None, verlauf) == 150000.0, "geplanter Trade (ohne started_at): alle belegten Werte")
+    # 9e) Topstep V2 mit gelesener MLL: MLL ist der Boden; Express bekommt keinen gerechneten Boden
+    ts = {"id": "ts1", "firm": "Topstep", "account_type": "challenge", "name": "Topstep 150K Combine", "max_drawdown": "4500"}
+    zm = F(RB, ts, {"id": "t1"}, 148000.0, None, 30000, "buy", 2, 1, peak=151000.0, mll=146900.0)
+    check(zm["liq_regel_balance"] == 146900.0 and "MLL TopstepX" in zm["liq_regel_text"] and zm["liq_maxdd_art"] == "mll",
+          f"Topstep mit MLL: MLL 146.900 statt gerechnet 146.500 → {zm['liq_regel_balance']} ({zm['liq_regel_text']})")
+    zt = F(RB, ts, {"id": "t2"}, 148000.0, None, 30000, "buy", 2, 1, peak=151000.0)
+    check(zt["liq_regel_balance"] == 146500.0 and zt["liq_gilt"] == "boden", f"Topstep ohne MLL: trailing 151.000 − 4.500 → {zt['liq_regel_balance']}")
+    zx = F(RB, dict(ts, name="Topstep Express EXPRESS-V2-1"), {"id": "t3"}, 11079.66, None, 30000, "buy", 2, 1, peak=11079.66)
+    check(zx["liq_boden_balance"] is None and "Express" in zx["liq_boden_text"], f"Topstep Express: kein Konto-Boden → {zx['liq_boden_text']}")
+    # 9f) Winning Day behält die Boden-Regel (Größe + 100); Gleichstand → Regel gilt
+    twd2 = {"id": "w1", "firm": "Tradeify", "account_type": "winning_days", "starting_balance": 150000, "max_drawdown": "4500"}
+    zw = F(RB, twd2, {"id": "w"}, 155000.0, None, 30000, "buy", 2, 1, peak=158000.0)
+    check(zw["liq_regel_balance"] == 150100.0 and zw["liq_gilt"] == "regel" and "Boden 150.000 + 100" in zw["liq_regel_text"],
+          f"Tradeify WD: Regel-Boden 150.100 bleibt (Konto-Boden gelockt ebenso) → {zw['liq_regel_balance']} / {zw['liq_gilt']}")
+    # 9g) Boden nicht unter der Balance (Datenzweifel) → nicht angewandt; statisch ohne Zeile (Lucid)
+    bz, btz, _, _ = B(None, {"max_drawdown": 4000}, 150000.0, None, 145000.0)
+    check(bz is None and "nicht angewandt" in btz, f"Boden 146.000 über Balance 145.000 → nicht angewandt ({btz})")
+    lu = {"id": "l1", "firm": "Lucid Trading", "account_type": "challenge", "name": "Lucid 50k", "max_drawdown": "2000"}
+    zlu = F(RB, lu, {"id": "l"}, 49000.0, None, 30000, "buy", 2, 1, peak=51000.0)
+    check(zlu["liq_regel_balance"] == 48000.0 and zlu["liq_maxdd_art"] == "statisch" and zlu["liq_gilt"] == "boden",
+          f"Lucid (statisch, offen): 50.000 − 2.000 = 48.000 trotz Höchststand 51.000 → {zlu['liq_regel_balance']}")
+
+    # 9h) Kontogröße aus dem Kürzel (nur für den Konto-Boden; ~60 echte Konten ohne „150k" im Namen)
+    G = a["liq_konto_groesse"]
+    check(G({"name": "TDFYSL150984582962"}) == 150000 and G({"name": "Tradeify FTDFYSLX150132677414 → Funded"}) == 150000
+          and G({"name": "150KTC-SKU-V2-679005-56869878"}) == 150000 and G({"name": "x", "external_id": "TDFYSL50123"}) == 50000
+          and G({"name": "Apex APEX6416990000001"}) is None and G({"name": "150k Apex"}) == 150000 and G({"starting_balance": 100000}) == 100000,
+          "Kontogröße: TDFYSL150/FTDFYSLX150/150KTC → 150.000, TDFYSL50 → 50.000, Apex ohne Größe → None")
+    tk = {"id": "k1", "firm": "Tradeify", "account_type": "challenge", "name": "TDFYSL150984582962", "max_drawdown": "4500"}
+    zk = F(RB, tk, {"id": "k"}, 147000.0, None, 30000, "buy", 2, 1, peak=150000.0)
+    check(zk["liq_regel_balance"] == 145500.0 and zk["liq_gilt"] == "boden",
+          f"Tradeify ohne Größe im Namen: Boden 145.500 aus dem Kürzel schlägt fest 142.500 → {zk['liq_regel_balance']}")
 
     print("\nALLES OK" if ok else "\nFEHLER")
     sys.exit(0 if ok else 1)

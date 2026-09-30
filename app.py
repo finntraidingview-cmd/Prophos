@@ -7467,7 +7467,12 @@ def _liq_regeln_laden():
     if _liq_regeln_cache["zeilen"] is not None and jetzt - _liq_regeln_cache["at"] < LIQ_REGELN_CACHE_S:
         return _liq_regeln_cache["zeilen"]
     try:
-        zeilen = _sb_all("liq_regeln", {"select": "id,firma,kontotyp,groesse,art,betrag_usd,lock_ueber_start_usd,stufen,wie_kontotyp"})
+        try:
+            zeilen = _sb_all("liq_regeln", {"select": "id,firma,kontotyp,groesse,art,betrag_usd,lock_ueber_start_usd,stufen,wie_kontotyp,"
+                                                      "maxdd_art,maxdd_lock_ueber_groesse_usd,maxdd_usd"})
+        except Exception:
+            # Spalten des Konto-Bodens (sql/2026-09-30_liq-kontoboden.sql) noch nicht da → Regeln wie bisher, Boden statisch
+            zeilen = _sb_all("liq_regeln", {"select": "id,firma,kontotyp,groesse,art,betrag_usd,lock_ueber_start_usd,stufen,wie_kontotyp"})
         _liq_regeln_cache.update(at=jetzt, zeilen=zeilen or [])
     except Exception as e:
         print(f"[liq-regeln] ⚠️ {type(e).__name__}: {e}", flush=True)
@@ -7581,26 +7586,154 @@ def liq_tagesstart(p, start_bal, fruehere):
     return start_bal, "Start-Balance dieses Trades"
 
 
-def liq_regel_felder(regeln, acc, plan, start_bal, tagesstart, einstieg, richtung, ppl, kt):
-    """REIN RECHNEND (testbar): Anzeige-Felder einer /admin/live-trades-Zeile aus liq_regeln →
-    {liq_regel_balance, liq_regel_level_nq, liq_regel_text}. Level = Abstand (Start-Balance − Liq-Balance) als $-SL ab Einstieg
-    (_wd_level). art fest geht auch ohne Start-Balance (Abstand = Betrag, wie die Max-Drawdown-Rechnung). Winning Day wie in
-    _lt_liq_balance erkannt (Kontoart, konto_typ am Plan oder hedge_eur > 0)."""
+# ══ KONTO-BODEN (LIQ-KONTOBODEN, 30.09.2026, Finn: „Der Account hat insgesamt 4.000 $ Drawdown. Ich habe schon 2.500 $ verloren, von
+# 150.000 auf 147.500. Beim nächsten Trade ist die Liquidation nur noch 1.500 $ entfernt, nicht wieder 4.000."). Die Regel aus liq_regeln
+# rechnet ab der Balance beim Trade-Start — nach einem Verlust ist das zu viel Luft. Daneben jetzt der absolute Boden des Kontos aus dem
+# Max Drawdown (statisch: Größe − DD; eod_trailing: höchste belegte End-Balance − DD, gedeckelt beim Lock). Die Liquidation im Radar
+# ist die ENGERE (höhere) der beiden. Nur Anzeige wie liq_regeln — der Fusion-Hedge rechnet unverändert.
+LIQ_VERLAUF_CACHE_S = 60
+_liq_verlauf_cache = {}
+
+
+def _liq_verlauf_laden(acc_ids):
+    """Belegte Balances (tv.balance_start, final.balance_end) aller Orbit-/Topstep-V2-Pläne der Konten, ohne Zeitgrenze (der Höchststand
+    kann älter als 14 Tage sein) — je Konto 60 s gecacht, Fehler → [] (dann rechnet der Boden ab Kontogröße bzw. Start-Balance)."""
+    jetzt, out, fehlt = time.time(), [], []
+    for a in sorted({str(x) for x in acc_ids if x}):
+        c = _liq_verlauf_cache.get(a)
+        if c and jetzt - c[0] < LIQ_VERLAUF_CACHE_S:
+            out += c[1]
+        else:
+            fehlt.append(a)
+    try:
+        for i in range(0, len(fehlt), 80):
+            teil = fehlt[i:i + 80]
+            zeilen = _sb_all("trade_plans", {"select": "id,master_account_id,konto_typ,started_at,ended_at,"
+                                                       "bal_end:mt5_baseline->final->balance_end,bal_start:mt5_baseline->tv->balance_start",
+                                             "master_account_id": f"in.({','.join(teil)})", "route": "in.(tvv2,tsv2)"})
+            je = {a: [] for a in teil}
+            for z in zeilen or []:
+                je.setdefault(str(z.get("master_account_id")), []).append(z)
+            for a, l in je.items():
+                _liq_verlauf_cache[a] = (jetzt, l)
+                out += l
+    except Exception as e:
+        print(f"[liq-verlauf] ⚠️ {type(e).__name__}: {e}", flush=True)
+    return out
+
+
+def liq_peak(p, acc, start_bal, verlauf):
+    """REIN RECHNEND (testbar): höchste BELEGTE Balance des Kontos in seiner aktuellen Phase VOR dem Start dieses Trades → wert | None.
+    Belegt = final.balance_end früherer Pläne (Ende vor diesem Start), tv.balance_start früherer Pläne, die Start-Balance dieses Trades
+    und accounts.tv_balance (gelesen vor diesem Start). Phase = trade_plans.konto_typ gleich der Kontoart — Höchststände aus der
+    Challenge heben den Funded-Boden nicht (dieselbe Konto-Zeile wechselt die Phase). Pläne ohne konto_typ zählen nicht."""
+    a = acc or {}
+    typ, aid = str(a.get("account_type") or "").lower(), str(a.get("id") or p.get("master_account_id") or "")
+    st = str(p.get("started_at") or "")
+    werte = [start_bal] if start_bal is not None else []
+    for f in verlauf or ():
+        if str(f.get("master_account_id") or "") != aid or str(f.get("id")) == str(p.get("id")):
+            continue
+        if not f.get("konto_typ") or str(f.get("konto_typ")).lower() != typ:
+            continue
+        be, bs = _wd_num(f.get("bal_end")), _wd_num(f.get("bal_start"))
+        if be is not None and f.get("ended_at") and (not st or str(f["ended_at"]) <= st):
+            werte.append(be)
+        if bs is not None and f.get("started_at") and (not st or str(f["started_at"]) <= st):
+            werte.append(bs)
+    tvb = _wd_num(a.get("tv_balance"))
+    if tvb is not None and a.get("tv_balance_at") and (not st or str(a["tv_balance_at"]) <= st):
+        werte.append(tvb)
+    werte = [w for w in werte if w is not None and w > 0]
+    return max(werte) if werte else None
+
+
+def liq_konto_groesse(acc):
+    """REIN RECHNEND (testbar): Kontogröße NUR für den Konto-Boden — _wd_konto_groesse, sonst die Größe aus dem Kürzel in Name bzw.
+    External ID (Tradeify TDFYSL150…/FTDFYSLX150…, Topstep 150KTC-…). Rund 60 Konten tragen die Größe nur so. _wd_konto_groesse selbst
+    bleibt unverändert, weil der Fusion-Hedge der Winning Days daran hängt (Größe + 100 $)."""
+    g = _wd_konto_groesse(acc)
+    if g:
+        return g
+    kenn = (str((acc or {}).get("name") or "") + " " + str((acc or {}).get("external_id") or "")).upper()
+    m = re.search(r"F?TDFYSLX?(150|100|50|25)", kenn) or re.search(r"\b(150|100|50)KTC", kenn)
+    return float(m.group(1)) * 1000 if m else None
+
+
+def liq_konto_boden(regel, acc, groesse, peak, start_bal):
+    """REIN RECHNEND (testbar): absoluter Konto-Boden aus dem Max Drawdown → (boden | None, text, max_dd | None, art | None).
+    statisch: Größe − DD. eod_trailing: max(Größe, peak) − DD, höchstens Größe + maxdd_lock_ueber_groesse_usd (null = kein Lock).
+    DD aus accounts.max_drawdown, sonst maxdd_usd der Regel. Topstep Express (Start bei 0 $) und ein Boden, der nicht unter der
+    Start-Balance liegt (Datenzweifel), werden nicht angewandt."""
+    a = acc or {}
+    if ist_topstep_express(a):
+        return None, "Topstep Express — Boden = MLL aus TopstepX", None, None
+    dd = _wd_num(a.get("max_drawdown")) or _wd_num((regel or {}).get("maxdd_usd"))
+    if not dd or dd <= 0:
+        return None, "kein Max Drawdown am Konto", None, None
+    if not groesse:
+        return None, "Kontogröße unbekannt", dd, None
+    art = (regel or {}).get("maxdd_art") or "statisch"
+    if art == "eod_trailing":
+        bezug = max(groesse, peak) if peak else groesse
+        boden, lock = bezug - dd, _wd_num((regel or {}).get("maxdd_lock_ueber_groesse_usd"))
+        gelockt = lock is not None and boden >= groesse + lock
+        if gelockt:
+            boden = groesse + lock
+        text = (f"Konto-Boden {_liq_de(boden)} $ (Max DD {_liq_de(dd)} $, EOD-trailing ab Höchststand {_liq_de(bezug, 2)} $"
+                + (f", Lock bei {_liq_de(groesse + lock)} $" if gelockt else "") + ")")
+    else:
+        art, boden = "statisch", groesse - dd
+        text = f"Konto-Boden {_liq_de(boden)} $ (Max DD {_liq_de(dd)} $, statisch ab {_liq_de(groesse)} $)"
+    if start_bal is not None and boden >= start_bal:
+        return None, text + " — liegt nicht unter der Balance, nicht angewandt", dd, art
+    return round(boden, 2), text, dd, art
+
+
+def _liq_pl_de(v):
+    return None if v is None else f"{'−' if v < 0 else '+'}{_liq_de(abs(v))} $"
+
+
+def liq_regel_felder(regeln, acc, plan, start_bal, tagesstart, einstieg, richtung, ppl, kt, peak=None, mll=None):
+    """REIN RECHNEND (testbar): Anzeige-Felder einer /admin/live-trades-Zeile → {liq_regel_balance, liq_regel_level_nq,
+    liq_regel_text, liq_gilt, liq_regel_nur_balance, liq_boden_balance, liq_boden_text, liq_maxdd, liq_maxdd_art, liq_vergleich_text}.
+    liq_regel_balance/_level_nq = die EFFEKTIVE Liquidation: die engere (höhere Balance) von Regel (liq_regeln, unverändert) und
+    Konto-Boden (liq_konto_boden; bei Topstep V2 mit gelesener MLL die MLL selbst). Level = Abstand (Start-Balance − Liq-Balance) als
+    $-SL ab Einstieg (_wd_level). art fest geht auch ohne Start-Balance (Abstand = Betrag). Winning Day wie in _lt_liq_balance erkannt;
+    dort liegt der Boden der Regel (Größe + 100) ohnehin gleich oder enger."""
     a = acc or {}
     typ = str(a.get("account_type") or "").lower()
     wd = typ == "winning_days" or str(plan.get("konto_typ") or "") == "winning_days" or (_wd_num(plan.get("hedge_eur")) or 0) > 0
     groesse = _wd_konto_groesse(a)
     regel, weg = liq_regel_waehlen(regeln, a.get("firm"), "winning_days" if wd else (typ or None), groesse)
-    bal, text = liq_aus_regel(regel, groesse, start_bal, tagesstart)
+    r_bal, r_text = liq_aus_regel(regel, groesse, start_bal, tagesstart)
+    if weg:
+        r_text = f"{r_text} ({weg})"
+    if mll is not None:
+        b_bal, b_text, dd, art = mll, f"MLL TopstepX {_liq_de(mll, 2)} $", None, "mll"
+    else:
+        b_bal, b_text, dd, art = liq_konto_boden(regel, a, liq_konto_groesse(a), peak, start_bal)
+    kand = [(v, k) for v, k in ((r_bal, "regel"), (b_bal, "boden")) if v is not None]
+    bal, gilt = max(kand) if kand else (None, None)        # gleich hoch → „regel" (Tupel-Vergleich, 'regel' > 'boden')
+    text = b_text if gilt == "boden" else r_text
     abstand = None
     if bal is not None and start_bal is not None:
         abstand = start_bal - bal
         if abstand <= 0:
             text += " — Start-Balance liegt nicht darüber"
     elif regel and regel.get("art") == "fest" and _wd_num(regel.get("betrag_usd")):
-        abstand = _wd_num(regel.get("betrag_usd"))
+        abstand, gilt, text = _wd_num(regel.get("betrag_usd")), "regel", r_text
     level = _wd_level(einstieg, richtung, abstand, ppl, kt, False) if (abstand or 0) > 0 else None
-    return {"liq_regel_balance": bal, "liq_regel_level_nq": level, "liq_regel_text": f"{text} ({weg})" if weg else text}
+
+    def teil(v, t, k):
+        pl = _liq_pl_de(v - start_bal) if (v is not None and start_bal is not None) else None
+        return f"{t}{' → ' + pl if pl else ''}{' ✓ gilt' if gilt == k and len(kand) > 1 else ''}"
+    vergleich = None
+    if b_bal is not None and r_bal is not None:
+        vergleich = " · ".join([teil(b_bal, b_text, "boden"), "Regel: " + teil(r_bal, r_text, "regel")])
+    return {"liq_regel_balance": bal, "liq_regel_level_nq": level, "liq_regel_text": text, "liq_gilt": gilt,
+            "liq_regel_nur_balance": r_bal, "liq_boden_balance": b_bal, "liq_boden_text": b_text, "liq_maxdd": dd,
+            "liq_maxdd_art": art, "liq_vergleich_text": vergleich}
 
 
 def lt_demo_liq(liq_level, liq_pl_alt, regel_f, start_bal, einstieg, richtung, ppl, kt):
@@ -7696,7 +7829,7 @@ def _lt_kerze_start(kerzen, start_iso):
     return None if best is None else round((best[1] + best[2]) / 2 * 4) / 4
 
 
-def _lt_zeile(p, acc, disp, kerzen_je_wurzel, vorher=None, regeln=None, fruehere=None):
+def _lt_zeile(p, acc, disp, kerzen_je_wurzel, vorher=None, regeln=None, fruehere=None, verlauf=None):
     z = _wd_heute_zeile(p, acc, disp, vorher)
     base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
     tv = base.get("tv") if isinstance(base.get("tv"), dict) else {}
@@ -7731,7 +7864,9 @@ def _lt_zeile(p, acc, disp, kerzen_je_wurzel, vorher=None, regeln=None, fruehere
     regel_f = {}
     if regeln is not None:
         tagesstart, _tq = liq_tagesstart(p, start_bal, fruehere)
-        regel_f = liq_regel_felder(regeln, acc, p, start_bal, tagesstart, z.get("einstieg_nq"), z.get("richtung"), ppl, kt)
+        # Konto-Boden (30.09.2026): Höchststand der Phase für EOD-trailing; Topstep V2 mit gelesener MLL nimmt die MLL als Boden
+        regel_f = liq_regel_felder(regeln, acc, p, start_bal, tagesstart, z.get("einstieg_nq"), z.get("richtung"), ppl, kt,
+                                   peak=liq_peak(p, acc, start_bal, verlauf), mll=ub.get("liq_balance"))
     demo_liq, demo_liq_pl = lt_demo_liq(liq_level, liq["pl_usd"], regel_f, start_bal, z.get("einstieg_nq"), z.get("richtung"), ppl, kt)
     # Ende (B5): beendete Trades rechnen die Demo nur bis zum Ende — ended_at, sonst final.at, sonst completed_at
     ende = None if str(p.get("status") or "") == "open" else (p.get("ended_at") or fin.get("at") or p.get("completed_at"))
@@ -7916,6 +8051,7 @@ def admin_live_trades():
                     kerzen[w] = kerzen[andere]
         fruehere = _wd_fruehere_trades(ids)          # B14: für den Balance-Vorläufer (konto_balance)
         liq_regeln = _liq_regeln_laden()             # LIQ-REGELN (30.09.2026): einmal je Abruf, 60 s gecacht
+        liq_verlauf = _liq_verlauf_laden(ids)        # KONTO-BODEN (30.09.2026): belegte Balances je Konto, 60 s gecacht
         # Echo (?echo=1): EIN Read auf mt5_live für die Master-Logins laufender Echo-Pläne — nur die nötigen JSON-Teile
         echo = [p for p in plaene if str(p.get("route") or "") == "mt5v2"]
         live_je_login, firm_sym = {}, {}
@@ -7952,7 +8088,7 @@ def admin_live_trades():
                     z = _lt_echo_zeile(p, acc, disp, live_je_login, firm_sym, jetzt_ts, vorher)
                 trades.append(z)
             else:
-                z = _lt_zeile(p, acc, disp, kerzen, vorher, regeln=liq_regeln, fruehere=fruehere)
+                z = _lt_zeile(p, acc, disp, kerzen, vorher, regeln=liq_regeln, fruehere=fruehere, verlauf=liq_verlauf)
                 z["plattform"] = "orbit"
                 trades.append(z)
         rang = {"open": 0, "planned": 1, "review": 2, "completed": 3}
