@@ -4450,7 +4450,8 @@ def _admin_basis():
     und nie eine zweite Regel entsteht. Wirft RuntimeError, wenn Ausblenden
     nicht möglich ist (Auth-API weg) — wie die Übersicht vorher auch."""
     # kapitel_id seit 24.09.2026 mit (per Trigger nach created_at gesetzt, backfilled).
-    accounts = _sb_all("accounts", {"select": "id,user_id,firm,account_type,purchase_cost,name,external_id,created_at,payout_ready_at,goal_kind,goal_target,goal_done_offset,goal_manual,balance,topstep_balance,meta_api_balance,payout_pct,payout_override,topstep_last_check,meta_api_last_check,wd_farm,kapitel_id,account_size,starting_balance,tv_balance,tv_balance_at"})
+    # waiting_payout_since seit 30.09.2026 mit: „Accounts je Firma" zählt solche Konten nicht als „noch offen".
+    accounts = _sb_all("accounts", {"select": "id,user_id,firm,account_type,purchase_cost,name,external_id,created_at,payout_ready_at,goal_kind,goal_target,goal_done_offset,goal_manual,balance,topstep_balance,meta_api_balance,payout_pct,payout_override,topstep_last_check,meta_api_last_check,wd_farm,kapitel_id,account_size,starting_balance,tv_balance,tv_balance_at,waiting_payout_since"})
     arch_rows = _sb_all("user_settings", {"select": "value", "key": "eq.archive"})
     fx_rows   = _sb_all("user_settings", {"select": "value", "key": "eq.fx_usd_eur"})
 
@@ -5578,13 +5579,37 @@ def admin_build_overview(kapitel_id=None):
     except Exception as e:
         print(f"[admin] ⚠️ beendete Pläne: {type(e).__name__}: {e}", flush=True)
 
+    # SCHON GEPLANT (30.09.2026, „Accounts je Firma" je ID — Finn: sein Bruder managt die Trades von
+    # Hand und muss sehen, wo noch welcher Trade steht): EIN Read der Pläne mit status planned, je
+    # Master-Konto der nächste (früheste start_um; ohne Startzeit zuletzt). Wie im_trade: keine
+    # Kapitel-Regel (aktueller Zustand eines Kontos), sichtbar nur an Zeilen, die die Übersicht ohnehin
+    # liefert (excluded_ids / Admin-Zugang greifen beim Zeilenaufbau). Ob der Tag schon vorbei ist,
+    # entscheidet das Frontend in Ortszeit — planned_for wandert deshalb mit.
+    geplant = {}
+    try:
+        for p in _sb_all("trade_plans", {"select": "master_account_id,start_um,route,planned_for",
+                                         "status": "eq.planned"}):
+            k = str(p.get("master_account_id") or "")
+            if not k:
+                continue
+            neu = {"start_um": p.get("start_um") or "", "route": p.get("route") or "",
+                   "planned_for": str(p.get("planned_for") or "")[:10]}
+            alt = geplant.get(k)
+            if alt is None or (neu["start_um"] and (not alt["start_um"] or neu["start_um"] < alt["start_um"])):
+                geplant[k] = neu
+    except Exception as e:
+        print(f"[admin] ⚠️ geplante Pläne: {type(e).__name__}: {e}", flush=True)
+
     def _firma_felder(a, aid):
         return {"size": _pnum(a.get("account_size")),
                 "start": _pnum(a.get("starting_balance")),
                 "payout_at": str(a.get("payout_ready_at") or "")[:10],
                 "arch_grund": (arch_info.get(aid) or {}).get("reason") or "",
                 "im_trade": offen.get(aid),
-                "letztes_ende": ende.get(aid)}
+                "letztes_ende": ende.get(aid),
+                "geplant": geplant.get(aid),   # 30.09.2026, s. o.
+                # Funded CFD „Waiting for Payout" (29.09.2026): wartet nur auf die Auszahlung, braucht keinen Trade
+                "waiting_payout_since": a.get("waiting_payout_since") or None}
 
     for r in rows:
         r.update(_firma_felder(by_id.get(r["id"]) or {}, r["id"]))

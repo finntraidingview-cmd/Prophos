@@ -1599,6 +1599,7 @@
   #af-view .af-klapp{display:flex;align-items:center;gap:6px;width:100%;margin-top:6px;padding:7px 0 3px;border:none;border-top:1px solid var(--border-soft);background:none;font:inherit;font-size:12px;color:var(--sub);cursor:pointer;text-align:left}
   #af-view .af-klapp:hover{color:var(--ink)}
   #af-view .af-klapp .af-pfeil{margin-left:auto;color:var(--violet)}
+  #af-view .af-geplant{color:var(--violet);font-weight:500}   /* „geplant 14:30“ am offenen Konto (30.09.2026) */
   @media (max-width:820px){
     /* Handy (v3-Maße): eine Spalte, Zeilen auf Touch-Höhe, Long/Short unter die Zahlen */
     #af-view .af-ids{columns:1}
@@ -12578,15 +12579,17 @@
      *   läuft        = im_trade (offener Plan als Master oder Slave) mit Richtung · Symbol · seit
      *   heute fertig = letztes_ende heute in Ortszeit, eingeklappt — auch ein heute geblowtes (schon archiviertes) Konto
      * Live-Konten (Hedge-Broker) brauchen nie selbst einen Trade: nie „offen", nur wenn sie laufen oder heute fertig sind.
-     * Geplante, noch nicht gestartete Pläne liefert /admin/overview nicht (nur status open + beendete) — deshalb kein
-     * „geplant HH:MM" am Konto; das Backend blieb bewusst unberührt. Weg sind Matrix Firma × Phase, Phasen-Kacheln,
-     * ID-Chips und das Ausgleichs-Urteil. Quelle wie bisher /admin/overview (accounts + live_konten + trades_start),
+     * Seit 30.09.2026 abends (FIRMEN-BACKEND) liefert /admin/overview je Konto auch geplant {start_um, route,
+     * planned_for} (nächster Plan status planned) und waiting_payout_since: geplante Konten bleiben „offen" und
+     * zeigen rechts „geplant 14:30"; Funded CFD mit „Waiting for Payout" braucht keinen Trade → eigener, eingeklappter
+     * Zustand „wartet auf Payout". Weg sind Matrix Firma × Phase, Phasen-Kacheln, ID-Chips und das Ausgleichs-Urteil. Quelle wie bisher /admin/overview (accounts + live_konten + trades_start),
      * alle 60 s neu, solange die View offen und der Tab sichtbar ist. Reine Anzeige. */
     const AF_PHASEN = [['challenge', 'Challenge', 'Challenge'], ['phase1', 'Phase 1', 'Phase 1'], ['phase2', 'Phase 2', 'Phase 2'],
                        ['funded', 'Funded', 'Funded Futures'], ['funded_cfd', 'Funded CFD', 'Funded CFD'],
                        ['winning_days', 'WD', 'Winning Days'], ['live', 'Live', 'Live-Konto']]
     let afFirma = '', afArch = false
     const afFertigAuf = new Set()   // IDs mit aufgeklapptem „heute fertig" — überlebt den 60-s-Takt
+    const afWartetAuf = new Set()   // dasselbe für „wartet auf Payout"
     const afPhase = t => AF_PHASEN.find(p => p[0] === t) || [t, t || 'Sonstige', t || 'Sonstige']
     const afPhaseRang = t => { const i = AF_PHASEN.findIndex(p => p[0] === t); return i < 0 ? 99 : i }
     const afFarbe = uid => typeof mt5FleetFarbe === 'function' ? mt5FleetFarbe(String(uid)) : admPersonColor(uid)
@@ -12600,12 +12603,26 @@
       return afIstHeute(at) ? d.toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' }) : d.toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit' }) }
     const afRichtung = x => x === 'buy' ? 'Long' : x === 'sell' ? 'Short' : (x || '')
     const afFirmaVon = r => r.firm || '—'
-    // Zustand je Konto: lauf · fertig · offen · arch — '' = gar nicht zeigen
+    // „geplant 14:30" (heute) bzw. „geplant 02.10. 14:30" (späterer Tag); ein nie gestarteter Plan eines VERGANGENEN
+    // Tags (Farmer-Rest) zeigt nichts — der Server kennt die Ortszeit nicht, deshalb entscheidet das hier
+    function afGeplant(r){
+      const g = r.geplant; if(!g) return ''
+      if(g.start_um){
+        const d = new Date(g.start_um); if(isNaN(d)) return 'geplant'
+        const uhr = d.toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' })
+        if(afIstHeute(g.start_um)) return 'geplant ' + uhr
+        return d > new Date() ? 'geplant ' + d.toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit' }) + '. ' + uhr : ''
+      }
+      return g.planned_for && g.planned_for < new Date().toLocaleDateString('sv-SE') ? '' : 'geplant'
+    }
+    // Zustand je Konto: lauf · fertig · warten · offen · arch — '' = gar nicht zeigen.
+    // warten = Funded CFD „Waiting for Payout" (wartet nur auf die Auszahlung, braucht keinen Trade)
     function afZustand(r){
       if(r.im_trade) return 'lauf'
       if(afHeute(r)) return 'fertig'
       if(r.archived) return afArch ? 'arch' : ''
       if(r.type === 'live') return ''
+      if(r.waiting_payout_since) return 'warten'
       return 'offen'
     }
     async function afLaden(){
@@ -12688,7 +12705,7 @@
       const jeId = new Map()
       for(const x of rows){
         const u = String(x.r.user_id)
-        if(!jeId.has(u)) jeId.set(u, { u, name: x.r.person || '—', offen:[], lauf:[], fertig:[], arch:[] })
+        if(!jeId.has(u)) jeId.set(u, { u, name: x.r.person || '—', offen:[], lauf:[], fertig:[], warten:[], arch:[] })
         jeId.get(u)[x.z].push(x.r)
       }
       const ids = [...jeId.values()].sort((a, b) =>
@@ -12744,20 +12761,29 @@
         g.lauf.sort((a, b) => String(a.im_trade.seit || '').localeCompare(String(b.im_trade.seit || '')))
         for(const r of g.lauf) k.appendChild(afZeile(r, 'lauf'))
       }
-      // 3) Heute fertig: eingeklappt, im Knopf nur die Zählung TP/SL
-      if(g.fertig.length){
-        const auf = afFertigAuf.has(g.u)
-        const nTp = g.fertig.filter(r => afHeute(r).ergebnis === 'tp').length, nSl = g.fertig.filter(r => afHeute(r).ergebnis === 'sl').length
+      // Eingeklappte Gruppe: eine graue Zeile mit Zählung, „zeigen" klappt die Konten darunter auf
+      const klapp = (set, txt) => {
+        const auf = set.has(g.u)
         const b = document.createElement('button'); b.type = 'button'; b.className = 'af-klapp' + (auf ? ' is-auf' : '')
         b.innerHTML = '<span class="af-p"></span><span></span><span class="af-pfeil"></span>'
-        b.children[1].textContent = `${g.fertig.length} heute fertig` + [nTp ? ` · ${nTp} TP` : '', nSl ? ` · ${nSl} SL` : ''].join('')
+        b.children[1].textContent = txt
         b.children[2].textContent = auf ? 'ausblenden' : 'zeigen'   // Wort statt ▾ — der Pfeil war bei 12 px nur ein Punkt
-        b.addEventListener('click', () => { if(afFertigAuf.has(g.u)) afFertigAuf.delete(g.u); else afFertigAuf.add(g.u); afRender() })
+        b.addEventListener('click', () => { if(set.has(g.u)) set.delete(g.u); else set.add(g.u); afRender() })
         k.appendChild(b)
-        if(auf){
+        return auf
+      }
+      // 3) Heute fertig: eingeklappt, im Knopf nur die Zählung TP/SL
+      if(g.fertig.length){
+        const nTp = g.fertig.filter(r => afHeute(r).ergebnis === 'tp').length, nSl = g.fertig.filter(r => afHeute(r).ergebnis === 'sl').length
+        if(klapp(afFertigAuf, `${g.fertig.length} heute fertig` + [nTp ? ` · ${nTp} TP` : '', nSl ? ` · ${nSl} SL` : ''].join(''))){
           g.fertig.sort((a, b) => String(afHeute(b).at).localeCompare(String(afHeute(a).at)))
           for(const r of g.fertig) k.appendChild(afZeile(r, 'fertig'))
         }
+      }
+      // 3b) Wartet auf Payout (30.09.2026): braucht keinen Trade, deshalb nicht „offen" — ruhig und eingeklappt
+      if(g.warten.length && klapp(afWartetAuf, `${g.warten.length} ${g.warten.length === 1 ? 'wartet' : 'warten'} auf Payout`)){
+        g.warten.sort((a, b) => String(a.waiting_payout_since).localeCompare(String(b.waiting_payout_since)))
+        for(const r of g.warten) k.appendChild(afZeile(r, 'warten'))
       }
       // 4) Archiviert: nur mit Schalter, grau
       if(g.arch.length){
@@ -12769,7 +12795,7 @@
     // Eine Konto-Zeile: Phase-Badge · Name · rechts Firma bzw. Trade/Ergebnis. Balance, P&L, Payout-Datum im Tooltip.
     function afZeile(r, z){
       const d = document.createElement('div')
-      d.className = 'af-z' + (z === 'fertig' ? ' is-fertig' : z === 'arch' ? ' is-arch' : '')
+      d.className = 'af-z' + (z === 'fertig' || z === 'warten' ? ' is-fertig' : z === 'arch' ? ' is-arch' : '')
       d.innerHTML = '<span class="type-badge"></span><span class="af-z-name"></span><span class="af-z-info"></span>'
       const ph = afPhase(r.type)
       const badge = d.firstElementChild
@@ -12782,7 +12808,11 @@
       const punkt = kl => { const i = document.createElement('span'); i.className = 'af-p' + (kl ? ' ' + kl : ''); info.appendChild(i) }
       const text = t => { const s = document.createElement('span'); s.textContent = t; info.appendChild(s) }
       const ccy = r.balance_ccy || 'USD'
-      if(z === 'offen') text(afFirmaVon(r))
+      const geplant = afGeplant(r)
+      if(z === 'offen'){
+        if(geplant){ const s = document.createElement('span'); s.className = 'af-geplant'; s.textContent = geplant; info.appendChild(s) }
+        text(afFirmaVon(r))
+      }else if(z === 'warten') text('wartet seit ' + afZeit(r.waiting_payout_since))
       else if(z === 'lauf'){
         const tr = r.im_trade
         punkt('is-lauf')
@@ -12807,7 +12837,9 @@
         [afFirmaVon(r), ph[2], size ? (size >= 1000 ? (size / 1000).toLocaleString('de-DE') + 'k' : String(size)) : ''].filter(Boolean).join(' · '),
         ext ? '#' + ext : 'keine Kontonummer',
         bal != null ? 'Balance ' + afGeld(bal, ccy) + (pl != null ? ` (${pl >= 0 ? '+' : '−'}${afGeld(Math.abs(pl), ccy)} seit Start)` : '') : 'keine Live-Balance',
-        r.payout_at ? 'Payout ab ' + afDatum(r.payout_at) : ''
+        r.payout_at ? 'Payout ab ' + afDatum(r.payout_at) : '',
+        r.waiting_payout_since ? 'Waiting for Payout seit ' + new Date(r.waiting_payout_since).toLocaleDateString('de-DE') : '',
+        geplant ? geplant + (r.geplant.route ? ' · ' + r.geplant.route : '') : ''
       ].filter(Boolean).join('\n')
       return d
     }
@@ -35898,7 +35930,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.842'
+  const OS_TAB_BUILD = '2026-09-22.843'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
