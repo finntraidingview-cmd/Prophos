@@ -4983,8 +4983,14 @@
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
         Accounts <span class="sb-badge" id="sb-badge-accounts" hidden>0</span>
       </button>
+      <!-- Radar (vorher „Live Trades", 26.09.2026). Seit 30.09.2026 direkt nach Accounts, vor Winning Days (Finn: „Trades · Accounts ·
+           Radar · Winning Days · Accounts je Firma") — nur Markup verschoben, data-view="wdlive" und Handler unverändert -->
+      <button class="sb-link" data-view="wdlive">
+        <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M5.6 5.6a9 9 0 0 0 0 12.8M18.4 5.6a9 9 0 0 1 0 12.8"/></svg>
+        Radar
+      </button>
       <!-- „Winning Days" (25.09.2026, Finn): vorher „Markt" — Live-Chart NQ/MNQ + Winning Days des Handelstags. Position direkt
-           nach Accounts; data-view="markt" und #markt bleiben intern (Links, Stubs, gespeicherte Ansicht). -->
+           nach Accounts (seit 30.09.2026 nach Radar); data-view="markt" und #markt bleiben intern (Links, Stubs, gespeicherte Ansicht). -->
       <button class="sb-link" data-view="markt">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l5-6 4 4 5-7 4 5"/><path d="M3 21h18"/></svg>
         Winning Days
@@ -4993,11 +4999,6 @@
       <button class="sb-link" data-view="firmen">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
         Accounts je Firma
-      </button>
-      <!-- Live Trades (26.09.2026, Finn: „bei jedem Trade, den Puls auf TradingView platziert, eine neue Navigation unter Winning Days") -->
-      <button class="sb-link" data-view="wdlive">
-        <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M5.6 5.6a9 9 0 0 0 0 12.8M18.4 5.6a9 9 0 0 1 0 12.8"/></svg>
-        Radar
       </button>
       <button class="sb-link" data-view="payouts">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
@@ -36277,7 +36278,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.871'
+  const OS_TAB_BUILD = '2026-09-22.872'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
