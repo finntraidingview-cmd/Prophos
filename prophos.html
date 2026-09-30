@@ -2137,6 +2137,12 @@
   #dashboard-view .wdl-z-lauf .wdl-z-pl{font-size:15px;font-weight:700}
   #dashboard-view .wdl-z-lauf .wdl-z-dauer{color:var(--ink-2);font-weight:600}
   #dashboard-view .wdl-z-wart .wdl-z-mi{color:var(--sub)}
+  /* Spalte mit Knopf (30.09.2026): Wartet „ab 07:33 · in 1 h [Jetzt lesen]", Überprüfen „TP ✓ [Abhaken]" — rechtsbündig, Knopf el-knopf */
+  #dashboard-view .wdl-z > .wdl-z-akt{display:flex;align-items:center;justify-content:flex-end;gap:8px}
+  #dashboard-view .wdl-z-akt > span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}   /* auch am Handy („in 58 min" in einer Zeile) */
+  /* Knopfmaße hier fest (spezifischer als die Handy-Regeln für .btn mit min-height 39–46 px), gesperrt sichtbar blass */
+  #dashboard-view .wdl-z-akt .el-knopf{flex:none;min-height:0;height:auto;padding:3px 10px;font-size:11px;font-weight:500;line-height:1.5;border-radius:6px}
+  #dashboard-view .wdl-z-akt .el-knopf:disabled{opacity:.45;cursor:default}
   #dashboard-view .wdl-z > .wdl-sp{display:flex;align-items:center;gap:8px;min-height:18px;overflow:visible;text-align:left}
   #dashboard-view .wdl-sp small{flex:none;font-size:10px;font-weight:600;letter-spacing:.03em;color:var(--sub-2)}
   /* Beträge an den Enden (30.09.2026): „Liq −3.000 $" gedämpft rot, „TP +272 $" gedämpft grün; Spalte 256 px (vorher 228), Spaltenabstand
@@ -2171,6 +2177,7 @@
     #dashboard-view .wdl-z-ri em{min-width:28px;margin-right:4px;letter-spacing:0}
     #dashboard-view .wdl-z-ab{display:none}
     #dashboard-view .wdl-z-sym{display:none}   /* Handy: nur „0,5 Lot", das Symbol steht im Tooltip */
+    #dashboard-view .wdl-z > .wdl-z-akt{flex-wrap:wrap;row-gap:4px}   /* Handy: passt „in 58 min" + Knopf nicht in eine Zeile, rutscht der Knopf darunter */
   }
   #dashboard-view .mwd-box{padding:7px 10px;border-radius:8px;border:1px solid var(--border-soft);background:var(--bg)}
   #dashboard-view .mwd-box-sum{background:var(--surface-tint)}
@@ -24471,10 +24478,25 @@
     }
   }
   setInterval(wdlLiveTick, 2000)
+  // Sperren der Radar-Knöpfe (30.09.2026): nur anbieten, was der vorhandene Weg auch kann. Fremde Pläne gehen über
+  // /admin/wd-plaene, und das Backend nimmt dort nur Orbit V2 (tvv2) an; eigene laufen lokal über tradePlans (jede Route).
+  function wdlLesenSperre(t){
+    const pid = wdlTid(t), eigen = mklWdEigenerPlan(pid)
+    const amPc = !!(MT5_LOCAL && eigen && typeof tvV2EndlesungPcPasst === 'function' && tvV2EndlesungPcPasst(eigen))
+    if(!amPc && t.route !== 'tvv2') return 'Nachlesen per Signal gibt es nur für Orbit V2 — am PC des Plans lesen'
+    try{ const g = window._tvV2Endlesung && window._tvV2Endlesung.grund; if(eigen && typeof g === 'function') return String(g(eigen, Date.now(), true) || '') }catch(_){}
+    return ''
+  }
+  function wdlAbhakenSperre(t){
+    if(mklWdEigenerPlan(wdlTid(t)) || t.route === 'tvv2') return ''
+    return (wdlIstEcho(t) ? 'Echo' : 'Topstep') + ' einer anderen ID — im Trades-Reiter dieser ID abhaken'
+  }
   function wdlRender(){
     const kopf = document.getElementById('wdl-kopf'), liste = document.getElementById('wdl-liste'); if(!kopf || !liste) return
     wdl.renderAt = Date.now()
-    const alleTrades = (wdl.daten && wdl.daten.trades) || []
+    // Geplante raus (30.09.2026, Finn: „Geplante Trades komplett rausmachen. Die gehören nur unter die jeweilige ID in die
+    // Trade-Planung") — Liste, ID-Chips und Auswahl sehen status planned nicht mehr; das Backend liefert sie weiter
+    const alleTrades = ((wdl.daten && wdl.daten.trades) || []).filter(t => t.status !== 'planned')
     // Auswahl, deren Trade aus den Daten gefallen ist, aufheben — sonst bliebe sie unsichtbar gesetzt (30.09.2026, s. mklAuswahlTrade)
     if(wdl.auswahl && wdl.daten && !alleTrades.some(x => wdlTid(x) === wdl.auswahl)) wdl.auswahl = null
     wdlIdsRender(alleTrades)
@@ -24547,13 +24569,31 @@
       } else if(wt){
         // Wartet: zu, P&L aus der Balance kommt noch — Stand der Nachlesung statt Ergebnis, P&L „–" (Demo-Schätzung nur im Tooltip)
         art = 'wart'
-        const txt = wt.ab && jetzt < wt.ab ? `ab ${zeit(wt.ab)} · in ${minTxt(wt.ab - jetzt)}` : `wird gelesen · seit ${minTxt(jetzt - (wt.ab || jetzt))}`   // Kopf sagt „Nachlesung"
-        miZ = zelle('mi', txt, { tip: wt.versuche ? `${wt.versuche}. Leseversuch` : 'Puls liest die Balance 1–120 min nach dem Ende' })
+        // Vorsatz („ab 07:33 · " / „wird gelesen · ") in wdl-z-ab: am Handy ausgeblendet, dort bleibt „in 58 min" neben dem Knopf
+        const txt = wt.ab && jetzt < wt.ab ? `<span class="wdl-z-ab">ab ${zeit(wt.ab)} · </span>in ${minTxt(wt.ab - jetzt)}` : `<span class="wdl-z-ab">wird gelesen · </span>seit ${minTxt(jetzt - (wt.ab || jetzt))}`   // Kopf sagt „Nachlesung"
+        // „Jetzt lesen" (30.09.2026, Finn: „Mach bei Wartet einen Knopf, mit dem ich jetzt nachlesen kann"): derselbe Weg wie Karte,
+        // Zum Abhaken und Trade-Popup — endlesungJetzt → window._tvV2EndlesungJetzt (am PC des Plans direkt, sonst Signal über
+        // /admin/wd-plaene), Sperre _elBusy gegen Mehrfachklicks; „liest…" solange sie läuft
+        const pid = wdlTid(t), busy = _elBusy.has(pid), sperre = wdlLesenSperre(t)
+        miZ = zelle('mi wdl-z-akt', `<span>${txt}</span><button type="button" class="btn btn-ghost el-knopf" data-wdl-lesen="${escapeHtml(pid)}"${(busy || sperre) ? ' disabled' : ''} title="${escapeHtml(sperre || 'Balance jetzt nachlesen — am PC des Plans (vom Mac/Handy per Signal)')}">${busy ? 'liest…' : 'Jetzt lesen'}</button>`,
+          { tip: wt.versuche ? `${wt.versuche}. Leseversuch` : 'Puls liest die Balance 1–120 min nach dem Ende' })
         plZ = zelle('pl', '–', { tip: num(d.pl_usd) != null ? `Demo ${sig(d.pl_usd, '$', 0)} · exakt nach der Nachlesung` : 'exakt nach der Nachlesung' })
+        zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
+      } else if(t.status === 'review'){
+        // ÜBERPRÜFEN (30.09.2026, Finn: „Läuft → Wartet → Überprüfen (P&L ist eingetragen, ich muss nur noch abhaken) → Erledigt"):
+        // P&L steht (Balance nachher − vorher, sonst der P&L am Plan), „Abhaken" ruft die vorhandene Erledigt-Aktion der Winning-
+        // Days-Karte (mklWdErledigtOeffnen: eigener Plan → Erledigt-Popup der Trade-Karte, fremder Orbit-Plan → kompaktes Popup)
+        art = 'pruef'
+        const pid = wdlTid(t), sperre = wdlAbhakenSperre(t)
+        const pb = num(t.pl_balance) != null ? num(t.pl_balance) : num(t.master_pl && t.master_pl.wert)
+        const erg = echo ? '' : d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : ''
+        miZ = zelle('mi wdl-z-akt', `${erg ? `<span>${erg}</span>` : ''}<button type="button" class="btn btn-ghost el-knopf" data-wdl-abhaken="${escapeHtml(pid)}"${sperre ? ' disabled' : ''} title="${escapeHtml(sperre || 'Abhaken — P&L prüfen und Trade erledigen')}">Abhaken</button>`,
+          { tip: echo ? '' : demoTip(d) })
+        plZ = zelle('pl', sig(pb, '$', 2), { f: col(pb), tip: num(t.pl_balance) != null ? (echo ? 'MT5-Balance' : 'Balance') + ' nachher − vorher' : pb != null ? 'P&L am Plan' : 'noch kein P&L — beim Abhaken eintragen' })
         zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
       } else {
         art = 'zu'
-        // Beendet: Ergebnis (was die Demo sah), P&L = Balance nachher − vorher; fehlt sie, nur „–"
+        // Erledigt: Ergebnis (was die Demo sah), P&L = Balance nachher − vorher; fehlt sie, nur „–"
         if(echo){
           // Echo: keine Demo → kein Ergebnis-Wort; P&L = MT5-Balance nachher − vorher, sonst der P&L am Plan
           const pb = num(t.pl_balance) != null ? num(t.pl_balance) : num(t.master_pl && t.master_pl.wert)
@@ -24595,13 +24635,15 @@
     // „Orbit"/„Echo" (wdl-pf). Echo kennt kein „Wartet" (kein Puls, den P&L schreibt mt5PlanPollTick am Ende direkt aus der
     // MT5-Balance); Chart-Auswahl weiter nur für Orbit. Beendet bleibt gekürzt (WDL_BEENDET_KURZ, Schlüssel 'beendet').
     // Seit .869 innerhalb jeder Gruppe erst Orbit, dann Echo — nicht mehr gemischt (s. gruppe).
+    // Ablauf (30.09.2026, Finn): Läuft → Wartet (Nachlesung) → Überprüfen (P&L steht, abhaken) → Erledigt; „Geplant" ist raus.
+    // Echo hat kein Wartet: review geht direkt nach Überprüfen.
     const gruppen = arr => {
-      const la = arr.filter(t => t.status === 'open'), ge = arr.filter(t => t.status === 'planned'), zz = arr.filter(t => t.status === 'review' || t.status === 'completed')
-      const wa = zz.filter(t => !wdlIstEcho(t) && wdlWartet(t)), fe = zz.filter(t => !wa.includes(t))
+      const la = arr.filter(t => t.status === 'open'), rv = arr.filter(t => t.status === 'review'), er = arr.filter(t => t.status === 'completed')
+      const wa = rv.filter(t => !wdlIstEcho(t) && wdlWartet(t)), pr = rv.filter(t => !wa.includes(t))
       return gruppe('Läuft', nachStart(la), ['Spanne', 'P&amp;L', 'Seit'], 'wdl-tab-lauf')
         + gruppe('Wartet', nachEnde(wa), ['Nachlesung', 'P&amp;L', 'Zu'])
-        + gruppe('Geplant', ge, ['TP', '', 'Start'])
-        + gruppe('Beendet', nachEnde(fe), ['Ergebnis', 'P&amp;L', 'Zu'], '', 'beendet')
+        + gruppe('Überprüfen', nachEnde(pr), ['', 'P&amp;L', 'Zu'])
+        + gruppe('Erledigt', nachEnde(er), ['Ergebnis', 'P&amp;L', 'Zu'], '', 'erledigt')
     }
     liste.innerHTML = trades.length ? gruppen(trades)
       : `<div class="mwd-leer">${wdl.daten ? 'Keine Trades im Zeitraum.' : (wdl.fehler ? 'Nicht ladbar: ' + escapeHtml(wdl.fehler) : 'Lade Radar…')}</div>`
@@ -24611,6 +24653,22 @@
   document.getElementById('wdl-liste')?.addEventListener('click', ev => {
     const m = ev.target.closest('[data-wdl-mehr]')
     if(m){ const k = m.getAttribute('data-wdl-mehr'); wdl.alleZu = Object.assign({}, wdl.alleZu, { [k]: !(wdl.alleZu || {})[k] }); wdlRender(); return }
+    // „Jetzt lesen" (Wartet) und „Abhaken" (Überprüfen), 30.09.2026 — vorhandene Wege, keine Auswahl der Zeile
+    const le = ev.target.closest('[data-wdl-lesen]')
+    if(le){
+      const pid = le.getAttribute('data-wdl-lesen'); if(le.disabled || _elBusy.has(pid)) return
+      const lauf = endlesungJetzt(pid)   // setzt _elBusy sofort (vor dem ersten await) — der Neuaufbau zeigt „liest…"
+      wdlRender()
+      Promise.resolve(lauf).finally(() => wdlLaden(true))
+      return
+    }
+    const ab = ev.target.closest('[data-wdl-abhaken]')
+    if(ab){
+      if(ab.disabled) return
+      const pid = ab.getAttribute('data-wdl-abhaken'), t = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === pid)
+      if(t) mklWdErledigtOeffnen(pid, t)
+      return
+    }
     const c = ev.target.closest('[data-wdl-trade]'); if(!c) return
     const id = c.getAttribute('data-wdl-trade'), t = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === id); if(!t) return
     if(wdlIstEcho(t)) return   // Echo (CFD) hat keine Linien im NQ-Chart — keine Auswahl, kein Hochscrollen
