@@ -5,8 +5,9 @@
  *
  * Vertrag (wie augen.js): globalThis.prophosAugen = { v, stand(), inventar() } — reines JSON, wirft nie, KLICKT NIE.
  * Rechtecke [x, y, w, h] in CSS-Pixeln relativ zum Viewport; geo trägt screenX/Y, outer/inner, devicePixelRatio.
- * stand() nutzt nur die Schlüssel, die die Route puls_augen durchlässt (app.py puls_augen_saeubern): v, ts, url, titel, geo,
- * sichtbar, fokus, popups, konto, ticket, kauf_knopf, positionen, orders, toasts, konto_summary, fehler — ≤ 60 KB je Zeile.
+ * Die Route puls_augen lässt nur bekannte Oberschlüssel durch (app.py puls_augen_saeubern): v, ts, url, titel, geo, sichtbar,
+ * fokus, popups, konto, ticket, kauf_knopf, positionen, orders, toasts, konto_summary, fehler, seit 30.09.2026 auch die K1-Felder
+ * kopf, positionen_sichtbar, flach (Vertrag T3, Whitelist von T1) — ≤ 60 KB je Zeile.
  *
  * STAND 0.1 (vor dem K0-Inventar): Grundgerüst + Toast-Lesung. Die Toasts sind durch Finns Bilder belegt (tsx-fill-toast.png,
  * tsx-bracket-toasts.webp, 30.09.2026): unten links, je Meldung Haken-Symbol, Titel „Order Filled" / „Order Placed", darunter
@@ -14,10 +15,12 @@
  * (TP), X oben rechts. Gelesen wird deshalb NUR über diese Texte und die Geometrie (kein Klassen-/data-Anker geraten).
  * Konto-Auslöser, BAL/MLL, Manage brackets, Risk/Profit, Contract, Kauf-Knopf und Reiter kommen erst mit dem K0-Inventar
  * (puls_augen 'inventar_tsx_*') — bis dahin bleiben konto/ticket/kauf_knopf/konto_summary null, positionen/orders leer.
+ * STAND 0.2 (30.09.2026, K1-Vertrag von T3): Gerüst für konto/kopf/positionen/positionen_sichtbar/flach — Felder da, Werte null,
+ * bis die Anker aus dem K0-Inventar von Mikes PC stehen (Abschnitt „K1 Lesen").
  */
 var PROPHOS_AUGEN_TSX = (function () {
   'use strict';
-  var VERSION = 'tsx-0.1.0';
+  var VERSION = 'tsx-0.2.1';
 
   // ── Grundwerkzeuge (wie augen.js) ──────────────────────────────────────────
   function sichtbar(el) {
@@ -236,6 +239,123 @@ var PROPHOS_AUGEN_TSX = (function () {
     return out;
   }
 
+  // ── K1 Lesen: Konto, Kopfzeile, Positionen (Vertrag T3, 30.09.2026) ────────
+  /* Danach richtet sich der Bot:
+   *   konto {aktiv: Text des Konto-Auslösers, kontonr: volle ID oder sichtbare Kennung, abgekuerzt: bool}
+   *   kopf {balance|mll|rpl|upl: {text, wert}}   (Kopfzeile BAL / MLL / RP&L / UP&L)
+   *   positionen [{symbol, seite: 'buy'|'sell', menge, avg, pl_text}]
+   *   positionen_sichtbar: true, wenn der Positions-Bereich zu sehen ist (Zeilen oder „No Active Position")
+   *   flach: true | false | null
+   * STAND 0.2 = GERÜST: K1_ANKER steht auf false, bis das K0-Inventar von Mikes PC (puls_augen inventar_tsx_*) die DOM-Anker belegt —
+   * bis dahin liefert stand() überall null (positionen leer). Geraten wird nichts: ein falscher Anker hieße, der Bot hält ein fremdes
+   * Konto für das richtige oder ein offenes Konto für flach. Die TEXTREGELN dagegen sind schon belegt (UIA-Inventar Mike, B18/B22 in
+   * order_bot.py) und hier 1:1 nachgebaut, damit JS und Python dieselben Texte gleich lesen. */
+  var K1_ANKER = false;
+  var KOPF_LABELS = { 'BAL': 'balance', 'MLL': 'mll', 'RP&L': 'rpl', 'UP&L': 'upl' };
+  var RX_KOPF = /^(BAL|MLL|RP&L|UP&L)\s*:?\s*(.*)$/i;
+  var RX_VORSATZ = /^[-−(]?\s*\$?\s*[-−]?$/;   // Knoten nur aus Vorzeichen/Klammer/„$" (Teil eines zerlegten Werts)
+  var RX_AUSLOESER = /\$\s*\d+(?:[.,]\d+)?\s*K\b[^|]*\|\s*([A-Z0-9][A-Z0-9-]*)\s*(…|\.\.\.)?/i;
+  var RX_OHNE_ID = /^\s*(\$\s*\d+(?:[.,]\d+)?\s*K\b[^|$]*?)\s*\|?\s*(…|\.\.\.)?\s*$/i;
+  var RX_KEINE_POS = /no active position|keine aktive position/i;
+
+  // US-Geldformat wie tsx_geld: '$11,079.66', '-$1,234.50', '$-7.00', '($12.50)' → Zahl | null. Komma ist hier IMMER Tausender
+  // (nicht zahl(): die liest „12,5" deutsch — TopstepX schreibt US). Minus zählt überall VOR der ersten Ziffer („$" · „-7.00"
+  // zusammengesetzt = „$-7.00" wäre sonst +7; an T3 für tsx_geld, 30.09.2026)
+  function geld(t) {
+    t = String(t == null ? '' : t).trim().replace(/−/g, '-');
+    var neg = /^[^\d]*-/.test(t) || (t.charAt(0) === '(' && t.charAt(t.length - 1) === ')');
+    var m = /\d[\d,]*(?:\.\d+)?/.exec(t);
+    if (!m) return null;
+    var v = Number(m[0].replace(/,/g, ''));
+    return isFinite(v) ? (neg ? -v : v) : null;
+  }
+
+  // Kopfzeile wie tsx_kopf_werte: Texte in Lesereihenfolge → {balance, mll, rpl, upl}, je {text, wert} oder null.
+  // Form 1 „BAL: $11,079.66" in einem Knoten; Form 2 Label und Wert im nächsten Knoten; B22 (Inventar Mike): „BAL:" · „$" ·
+  // „154,504.88" als DREI Knoten. Bei negativen Werten zerlegt TopstepX womöglich noch feiner: „RP&L:" · „-" · „$" · „50.00" oder
+  // „(" · „$" · „12.50" · „)" (Master 30.09.2026, gleiche Regel an T3 für tsx_kopf_werte) — bis zu drei Vorsatz-Knoten (auch ein
+  // Rest im Label-Knoten wie „RP&L: -") vor die Zahl setzen, eine schließende Klammer als eigenen Knoten anhängen. Ein Label
+  // ohne lesbaren Wert darf ein späteres gleiches Label noch füllen (wie im Bot).
+  function kopfAusTexten(namen) {
+    var out = { balance: null, mll: null, rpl: null, upl: null };
+    namen = (namen || []).map(function (n) { return String(n == null ? '' : n).trim(); });
+    for (var i = 0; i < namen.length; i++) {
+      var m = RX_KOPF.exec(namen[i]);
+      if (!m) continue;
+      var key = KOPF_LABELS[m[1].toUpperCase()];
+      if (out[key] && out[key].wert !== null) continue;
+      var text = m[2] || '', wert = text ? geld(text) : null;
+      if (wert === null && i + 1 < namen.length) {
+        var vor = RX_VORSATZ.test(text) ? text : '', j = i + 1;
+        while (j < namen.length - 1 && j - i <= 3 && RX_VORSATZ.test(namen[j])) vor += namen[j++];
+        text = RX_KOPF.test(namen[j]) ? vor : vor + namen[j];   // nie das nächste Label („MLL:") als Wert schlucken
+        if (text.charAt(0) === '(' && text.charAt(text.length - 1) !== ')' && namen[j + 1] === ')') text += ')';
+        wert = geld(text);
+      }
+      out[key] = { text: text || null, wert: wert };
+    }
+    return out;
+  }
+
+  // Konto-Auslöser wie tsx_konto_sichtbar / tsx_ist_ausloeser_text (B18/B22):
+  //   „$150K EXPRESS | EXPRESS-V2-682437-57131691"  → volle Kennung, abgekuerzt false
+  //   „$150K EXPRESS | EXPRESS-…"                    → sichtbare Kennung ohne Rest-Striche, abgekuerzt true (volle ID erst in der Liste)
+  //   „$150K TRADING COMBINE |"                      → TopstepX lässt die Kennung bei langen Namen ganz weg (Inventar Mike 11:24 UTC):
+  //                                                    kontonr null, abgekuerzt true — auch hier beweist erst die Liste das Konto
+  function kontoAusText(t) {
+    t = String(t == null ? '' : t).replace(/\s+/g, ' ').trim();
+    var m = RX_AUSLOESER.exec(t);
+    if (m) { var k = m[1].toUpperCase(); return { aktiv: t, kontonr: m[2] ? k.replace(/-+$/, '') : k, abgekuerzt: !!m[2] }; }
+    if (RX_OHNE_ID.test(t)) return { aktiv: t, kontonr: null, abgekuerzt: true };
+    return { aktiv: t || null, kontonr: null, abgekuerzt: null };
+  }
+
+  // Sichtbare Blatt-Texte eines Bereichs in DOM-Reihenfolge (für die Kopfzeile: „BAL:" · „$" · „154,504.88")
+  function blattTexte(w, max) {
+    var out = [];
+    try {
+      var lauf = document.createTreeWalker(w, NodeFilter.SHOW_TEXT), k;
+      while ((k = lauf.nextNode()) && out.length < (max || 120)) {
+        var s = String(k.nodeValue || '').replace(/\s+/g, ' ').trim();
+        if (s && sichtbar(k.parentElement)) out.push(s);
+      }
+    } catch (_) {}
+    return out;
+  }
+
+  // ANKER — kommen mit dem K0-Inventar (je Anker ein Kommentar mit Beleg: Inventar-Art + Datum). Bis dahin null bzw. leer.
+  function ankerKonto() { return null; }            // Konto-Auslöser oben links
+  function ankerKopf() { return null; }             // Kopfzeile BAL / MLL / RP&L / UP&L
+  function ankerPositionen() { return null; }       // Positions-Bereich (Zeilen oder „No Active Position")
+  function positionsZeilen(bereich) { return []; }  // Zeilen im Positions-Bereich
+  function positionAus(zeile) { return null; }      // eine Zeile → {symbol, seite: 'buy'|'sell', menge, avg, pl_text}
+
+  var KONTO_LEER = function () { return { aktiv: null, kontonr: null, abgekuerzt: null }; };
+  var KOPF_LEER = function () { return { balance: null, mll: null, rpl: null, upl: null }; };
+
+  function kontoLesen() {
+    if (!K1_ANKER) return KONTO_LEER();
+    var el = ankerKonto();
+    return el && sichtbar(el) ? kontoAusText(txt(el)) : KONTO_LEER();
+  }
+  function kopfLesen() {
+    if (!K1_ANKER) return KOPF_LEER();
+    var w = ankerKopf();
+    return w && sichtbar(w) ? kopfAusTexten(blattTexte(w)) : KOPF_LEER();
+  }
+  // -> {sichtbar, zeilen, flach}. Ohne Anker (Gerüst) alles null; Bereich nicht zu sehen → sichtbar false, flach null.
+  // flach nur aus einem eindeutigen Bild: „No Active Position" ohne Zeilen = true, Zeilen ohne den Text = false, sonst null.
+  function positionenLesen() {
+    if (!K1_ANKER) return { sichtbar: null, zeilen: [], flach: null };
+    var b = ankerPositionen();
+    if (!b || !sichtbar(b)) return { sichtbar: false, zeilen: [], flach: null };
+    var zeilen = [];
+    positionsZeilen(b).forEach(function (z) { var p = positionAus(z); if (p) zeilen.push(p); });
+    var keine = RX_KEINE_POS.test(txt(b));
+    return { sichtbar: keine || zeilen.length > 0, zeilen: zeilen,
+             flach: keine && !zeilen.length ? true : (!keine && zeilen.length ? false : null) };
+  }
+
   // ── Öffentliche Funktionen ─────────────────────────────────────────────────
   var STAND_MAX = 48000;
   function stand(opts) {
@@ -243,13 +363,20 @@ var PROPHOS_AUGEN_TSX = (function () {
     var fehler = [];
     var g = geo(); g.lang = document.documentElement.lang || '';
     var o = { v: VERSION, ts: Date.now(), url: location.href, titel: document.title, geo: g, sichtbar: document.visibilityState, fokus: fokus(),
-              popups: [], konto: null, ticket: null, kauf_knopf: null, positionen: [], orders: [], toasts: null, konto_summary: null };
+              popups: [], konto: null, kopf: null, ticket: null, kauf_knopf: null, positionen: [], positionen_sichtbar: null, flach: null,
+              orders: [], toasts: null, konto_summary: null };
+    // K1 (Vertrag T3): jeder Teil für sich — ein Fehler im einen lässt die anderen stehen, das Feld bleibt dann null
+    try { o.konto = kontoLesen(); } catch (e) { o.konto = KONTO_LEER(); fehler.push('konto: ' + e); }
+    try { o.kopf = kopfLesen(); } catch (e) { o.kopf = KOPF_LEER(); fehler.push('kopf: ' + e); }
+    try { var pl = positionenLesen(); o.positionen = pl.zeilen; o.positionen_sichtbar = pl.sichtbar; o.flach = pl.flach; }
+    catch (e) { fehler.push('positionen: ' + e); }
     try { o.toasts = toasts(); } catch (e) { fehler.push('toasts: ' + e); }
     try { o.popups = dialoge(); } catch (e) { fehler.push('popups: ' + e); }
     try {
       if (JSON.stringify(o).length > STAND_MAX) {
         if (o.toasts) { o.toasts.gruppen = (o.toasts.gruppen || []).slice(0, 6); o.toasts.meldungen = (o.toasts.meldungen || []).slice(0, 10); }
         o.popups = (o.popups || []).slice(0, 4);
+        o.positionen = (o.positionen || []).slice(0, 20);
         if (JSON.stringify(o).length > STAND_MAX) fehler.push('stand über ' + STAND_MAX + ' Zeichen');
       }
     } catch (e) { fehler.push('groesse: ' + e); }
@@ -318,7 +445,7 @@ var PROPHOS_AUGEN_TSX = (function () {
   }
 
   return { v: VERSION, version: VERSION, plattform: 'topstepx', stand: stand, inventar: inventar,
-           _meldungAus: meldungAus };   // _meldungAus: nur für Tests (reine Textregel)
+           _meldungAus: meldungAus, _geld: geld, _kopfAusTexten: kopfAusTexten, _kontoAusText: kontoAusText };   // _…: nur für Tests (reine Textregeln)
 })();
 // Vertrag T3: globalThis.prophosAugen = { v, stand(), inventar() } — wie augen.js; im TopstepX-Tab gilt diese Datei.
 globalThis.prophosAugen = PROPHOS_AUGEN_TSX;
