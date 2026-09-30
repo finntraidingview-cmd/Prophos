@@ -16590,6 +16590,37 @@ def _cdp_panel_aufklappen(s, trail):
     return "bleibt_eingeklappt", d2
 
 
+def _cdp_panel_zurueck(s, trail):
+    """Am Ende eines Orbit-Laufs (Lesen/Order/Schließen): ist das Broker-Panel maximiert („Restore panel" im Panel-Kopf), EINMAL
+    zurückstellen — Finn 01.10.2026 (erster Orbit-V3-Trade bei Moritz): „am Ende einfach noch mal auf Restore drücken, dann geht es
+    zurück, wo ich es haben will" — Chart wieder sichtbar, Positions-Tabelle in normaler Höhe (das Userscript liest sie per
+    textContent auch dort). Nur der Layout-Knopf, nie etwas an Order/Konto; Frei-Probe wie beim Aufklappen; jeder Fehler nur Spur."""
+    try:
+        if not hasattr(s, "lese_js"):
+            return False
+        d = s.lese_js(CDP_PANEL_LAGE_JS)
+        kn = d.get("max_knopf") if isinstance(d, dict) and isinstance(d.get("max_knopf"), dict) else None
+        if not kn or not cdp_rect(kn) or not re.search(r"restore|wiederherst", str(kn.get("aria") or ""), re.I):
+            return False                                   # nicht maximiert (oder Knopf unbekannt) → nichts tun
+        frei = s.lese_js(cdp_panel_frei_js(cdp_rect(kn)))
+        if isinstance(frei, dict) and not frei.get("frei"):
+            trail.append(f"„Restore panel“ am Ende verdeckt ('{frei.get('was')}') — Panel bleibt maximiert")
+            return False
+        if not s.klick(cdp_rect(kn), "Broker-Panel am Ende wiederherstellen (Restore panel)"):
+            return False
+        for _ in range(4):                                 # Treffer ≠ Wirkung
+            _warte(0.5, 0.2)
+            d2 = s.lese_js(CDP_PANEL_LAGE_JS)
+            k2 = d2.get("max_knopf") if isinstance(d2, dict) and isinstance(d2.get("max_knopf"), dict) else {}
+            if re.search(r"maxim", str(k2.get("aria") or ""), re.I):
+                trail.append("Panel zurück in normaler Größe (Chart sichtbar)")
+                return True
+        trail.append("„Restore panel“ geklickt, Panel wirkt weiter maximiert")
+    except Exception as e_:
+        trail.append(f"Panel zurückstellen: {type(e_).__name__}")
+    return False
+
+
 def _cdp_esc(s, st, trail, grund):
     """Esc im Konto-Schritt — nur ohne offenen Dialog (Prüfer Runde 2, 30.09.2026: ein „Session disconnected"-Modal würde sonst
     geschlossen, bevor _cdp_sitzung_zurueck es sieht) und ohne Ausnahme (Windows: Puls-Chrome nicht vorn → RuntimeError aus _win_key,
@@ -16767,6 +16798,8 @@ def modus_tvlesen_cdp(cmd):
     def raus(code, msg, schritt, **extra):
         res["code"], res["msg"], res["schritt"] = code, msg, schritt
         res.update(extra)
+        if sitz[0]:
+            _cdp_panel_zurueck(sitz[0], trail)   # 01.10.2026: maximiertes Panel am Ende zurück („Restore panel“)
         res["trail"] = " > ".join(trail)
         if sitz[0]:
             sitz[0].zu()
@@ -17502,6 +17535,8 @@ def modus_tvkette_cdp(cmd):
         res.update(extra)
         if res.get("gesendet"):
             res["retry_ok"] = False                  # es KANN gesendet worden sein — nie blind wiederholen (wie der alte Puls)
+        if sitz[0]:
+            _cdp_panel_zurueck(sitz[0], trail)   # 01.10.2026: maximiertes Panel am Ende zurück („Restore panel“)
         res["trail"] = " > ".join(trail)
         if sitz[0]:
             sitz[0].zu()
@@ -17799,6 +17834,8 @@ def modus_tvclose_cdp(cmd):
         res.update(extra)
         if res.get("geklickt"):
             res["retry_ok"] = False                  # der Close-Klick war raus — nie blind wiederholen (Doktrin wie tvorder)
+        if sitz[0]:
+            _cdp_panel_zurueck(sitz[0], trail)   # 01.10.2026: maximiertes Panel am Ende zurück („Restore panel“)
         res["trail"] = " > ".join(trail)
         if sitz[0]:
             sitz[0].zu()

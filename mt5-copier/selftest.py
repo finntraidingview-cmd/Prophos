@@ -3279,6 +3279,29 @@ def test_puls_cdp_login():
         and not any("Maximize" in x for x in ko1_.klicks), f"eingeklappt → „Open panel“ reicht → kein Maximize ({ko1_.klicks})")
     chk(ro2_[0] and ko2_.klicks[:2] == ["Order-Panel öffnen (Open panel)", "Order-Panel aufklappen (Maximize panel)"]
         and any("Rückfall" in x for x in to2_), f"Open panel zu niedrig → Rückfall Maximize ({ko2_.klicks})")
+    # Am Ende „Restore panel" (Finn 01.10.2026, erster Orbit-V3-Trade: „am Ende einfach noch mal auf Restore drücken")
+    class _SR:
+        def __init__(self, maxi): self.maxi, self.klicks = maxi, []
+        def lese_js(self, a, timeout=8):
+            if "elementFromPoint" in a:
+                return {"frei": True, "was": ""}
+            return {"leiste": [56, 0, 1194, 38], "unter_leiste": 915 if self.maxi else 113,
+                    "max_knopf": {"rect": [1240, 0, 38, 38], "aria": "Restore panel" if self.maxi else "Maximize panel"}}
+        def klick(self, r, n, toast_ok=False):
+            self.klicks.append(n); self.maxi = False; return True
+    ob._warte = lambda a_, b_: None
+    try:
+        sr1_, tr1_ = _SR(True), []
+        rr1_ = ob._cdp_panel_zurueck(sr1_, tr1_)
+        sr2_, tr2_ = _SR(False), []
+        rr2_ = ob._cdp_panel_zurueck(sr2_, tr2_)
+    finally:
+        ob._warte = alt_w
+    chk(rr1_ and sr1_.klicks == ["Broker-Panel am Ende wiederherstellen (Restore panel)"] and "Panel zurück in normaler Größe (Chart sichtbar)" in tr1_
+        and not rr2_ and sr2_.klicks == [] and tr2_ == [] and ob._cdp_panel_zurueck(object(), []) is False,
+        f"Ende: maximiert → EIN Restore-Klick, sonst nichts ({sr1_.klicks}, {tr1_})")
+    chk(sum(_i.getsource(f_).count("_cdp_panel_zurueck(sitz[0], trail)") for f_ in (ob.modus_tvlesen_cdp, ob.modus_tvkette_cdp, ob.modus_tvclose_cdp)) == 3,
+        "Restore am Ende in Lesen, Order und Schließen (Orbit), nicht in Topstep")
     fj_ = ob.cdp_panel_frei_js([1482, 907, 38, 38])
     chk("elementFromPoint(1501.0,926.0)" in fj_ and "toggle-visibility-button" in fj_ and "#overlap-manager-root" in fj_ and "toastGroup-" in fj_,
         "Frei-Probe: Knopfmitte, Dialog/Overlay verdeckt, Meldungen frei")
