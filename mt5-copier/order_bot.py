@@ -12135,6 +12135,8 @@ def _tsx_ausgabe(res, trail):
 
 def modus_tsxinventar(cmd):
     """Nur lesen: Inventar Grundzustand / Konto-Dropdown / Bracket-Dialog (je öffnen und wieder schließen)."""
+    if tsx_weg_lauf() == "cdp":                        # K0-Riegel: auf einem Topstep-CDP-PC nie über UIA (Doppelsitzung)
+        return modus_tsxinventar_cdp(cmd if isinstance(cmd, dict) else {})
     res = {"ok": False, "code": "", "msg": "", "trail": "", "schritt": "start", "inventar": {}}
     trail = _StempelSpur()
     trail.append(puls_bot_stand())                    # B33: erste Spur-Zeile = welcher Bot lief
@@ -12235,9 +12237,13 @@ def modus_tsxinventar(cmd):
     return _tsx_ausgabe(res, trail)
 
 
-def modus_tsxlesen(cmd, weiter=None, wachhund_s=100.0):
+def modus_tsxlesen(cmd, weiter=None, wachhund_s=100.0, weg=None):
     """Konto wählen und lesen: {ok, konto, balance, mll, rpl, upl, position, trail, code, schritt}. Keine Order.
-    weiter (Etappe 2): nach erfolgreicher Kopf-Lesung weiter(w, res, trail) statt der Lese-Antwort (tsxorder)."""
+    weiter (Etappe 2): nach erfolgreicher Kopf-Lesung weiter(w, res, trail) statt der Lese-Antwort (tsxorder).
+    weg: vom Aufrufer schon bestimmter Weg (tsxorder prüft selbst VORHER) — sonst hier tsx_weg_lauf()."""
+    if (weg or tsx_weg_lauf()) == "cdp":               # K0-Riegel: Lesen über CDP kommt mit K1 — nie UIA auf einem cdp-PC
+        print(json.dumps(tsx_cdp_folgt("tsxorder" if weiter else "tsxlesen"), ensure_ascii=False))
+        return
     res = {"ok": False, "code": "", "msg": "", "trail": "", "schritt": "start", "konto": "", "balance": None,
            "mll": None, "rpl": None, "upl": None, "position": None}
     trail = _StempelSpur()
@@ -13324,7 +13330,11 @@ def modus_tsxorder(cmd):
     if f:
         print(json.dumps({"ok": False, "code": "befehl", "retry_ok": True, "gesendet": False, "msg": f}, ensure_ascii=False))
         return
-    return modus_tsxlesen({"konto": befehl["ext"]}, weiter=_tsx_order_nach_kopf(befehl), wachhund_s=150.0)
+    # K0-Riegel VOR dem Lese-Zweig (Master-Vertrag): eine Order landet auf einem Topstep-CDP-PC nie im UIA-Weg
+    if tsx_weg_lauf() == "cdp":
+        print(json.dumps(tsx_cdp_folgt("tsxorder" if befehl.get("scharf") else "tsxprobe"), ensure_ascii=False))
+        return
+    return modus_tsxlesen({"konto": befehl["ext"]}, weiter=_tsx_order_nach_kopf(befehl), wachhund_s=150.0, weg="uia")
 
 # ═══════════════════════════════════════════════════════════════════════════
 # PULS-AUGEN ÜBER CDP (29.09.2026, Etappe E0 — Finns Go, Master-Koordination; erster PC: Moritz pc-usq1i6)
@@ -13544,16 +13554,21 @@ def _augen_json_lesen(name):
 
 
 def _augen_json_schreiben(name, d):
+    # eigener tmp-Name je Prozess (K0-Prüfer 30.09.2026: tsx-Lauf und Augen-Prozess schreiben augen_regel.json gleichzeitig —
+    # mit festem .tmp entstand kaputtes JSON, und die klebrige tsx-Regel war weg)
+    tmp = os.path.join(_AUGEN_HIER, f"{name}.{os.getpid()}.{int(time.time() * 1000) % 100000}.tmp")
     try:
-        tmp = os.path.join(_AUGEN_HIER, name + ".tmp")
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(d, f)
         os.replace(tmp, os.path.join(_AUGEN_HIER, name))
     except Exception:
-        pass
+        try:
+            os.remove(tmp)                                     # kein .tmp-Rest je Fehlversuch (Prüfer K0 Runde 2)
+        except OSError:
+            pass
 
 
-_AUGEN_REGEL_STAND = {"explizit": False}
+_AUGEN_REGEL_STAND = {"explizit": False, "tsx": None}
 
 
 def _augen_regel_holen(pc):
@@ -13572,7 +13587,15 @@ def _augen_regel_holen(pc):
         _AUGEN_REGEL_STAND["explizit"] = False
         return augen_regel_weiche(_augen_json_lesen("augen_regel.json"), time.time(), pc)
     _AUGEN_REGEL_STAND["explizit"] = True
-    _augen_json_schreiben("augen_regel.json", {"augen": augen, "at": time.time(), "pc": pc})
+    neu = {"augen": augen, "at": time.time(), "pc": pc}
+    tsx = tsx_regel_aus_antwort(d)                     # K0 (30.09.2026): die TopstepX-Regel in derselben Datei nie verlieren
+    _AUGEN_REGEL_STAND["tsx"] = tsx                    # modus_augen nimmt die Antwort selbst, nicht die (evtl. nicht geschriebene) Datei
+    tsx_vorher = tsx_regel_weiche(_augen_json_lesen("augen_regel.json"), pc)
+    if tsx:
+        neu.update(tsx=tsx, tsx_at=time.time(), tsx_pc=pc)
+    _augen_regel_mischen(neu)
+    if tsx_vorher == "cdp" and tsx == "uia":
+        _tsx_tabs_schliessen()                         # Prüfer K0 Runde 2: kam die Rückschaltung zuerst hier an, sah der tsx-Lauf sie nie
     return augen
 
 
@@ -13591,11 +13614,23 @@ def augen_anstossen():
         return False
 
 
-def _augen_js_holen(trail):
-    """augen.js vom Repo-Stand holen (dieselbe ungecachte Commit-Abfrage wie das Panel), lokal zwischenspeichern.
-    Kein Netz → letzte lokale Kopie. -> Quelltext | None"""
+def augen_stand_sha(merk, datei):
+    """REIN RECHNEND (testbar): gemerkter Repo-Stand JE DATEI (K0, 30.09.2026: augen.js + augen_tsx.js). Alte Form {sha} gilt nur für
+    augen.js — sonst lüde augen_tsx.js nie, solange sich main nicht bewegt."""
+    m = merk if isinstance(merk, dict) else {}
+    je = m.get("dateien") if isinstance(m.get("dateien"), dict) else {}
+    if datei in je:
+        return je.get(datei)
+    return m.get("sha") if datei == "augen.js" else None
+
+
+def _augen_js_holen(trail, datei="augen.js"):
+    """augen.js (bzw. augen_tsx.js für TopstepX) vom Repo-Stand holen (dieselbe ungecachte Commit-Abfrage wie das Panel), lokal
+    zwischenspeichern, sha je Datei merken. Kein Netz → letzte lokale Kopie. -> Quelltext | None"""
     import urllib.request
-    pfad, merk = os.path.join(_AUGEN_HIER, "augen.js"), _augen_json_lesen("augen_stand.json") or {}
+    if datei not in ("augen.js", "augen_tsx.js"):
+        raise ValueError(f"unbekannte Augen-Datei {datei}")
+    pfad, merk = os.path.join(_AUGEN_HIER, datei), _augen_json_lesen("augen_stand.json") or {}
     sha = None
     try:
         req = urllib.request.Request("https://github.com/finntraidingview-cmd/Prophos.git/info/refs?service=git-upload-pack",
@@ -13604,18 +13639,22 @@ def _augen_js_holen(trail):
         sha = m.group(1).decode("ascii") if m else None
     except Exception:
         sha = None
-    if sha and sha != merk.get("sha"):
+    if sha and (sha != augen_stand_sha(merk, datei) or not os.path.exists(pfad)):
         try:
             data = urllib.request.urlopen(
-                f"https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/{sha}/mt5-copier/augen.js", timeout=10).read()
+                f"https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/{sha}/mt5-copier/{datei}", timeout=10).read()
             if len(data) > 200:
                 with open(pfad + ".tmp", "wb") as f:
                     f.write(data)
                 os.replace(pfad + ".tmp", pfad)
-                _augen_json_schreiben("augen_stand.json", {"sha": sha, "at": time.time()})
-                trail.append(f"augen.js aktualisiert ({len(data)} Bytes, {sha[:7]})")
+                je = dict(merk.get("dateien") or {}) if isinstance(merk.get("dateien"), dict) else {}
+                if "augen.js" not in je and merk.get("sha"):
+                    je["augen.js"] = merk.get("sha")
+                je[datei] = sha
+                _augen_json_schreiben("augen_stand.json", {"dateien": je, "sha": je.get("augen.js"), "at": time.time()})
+                trail.append(f"{datei} aktualisiert ({len(data)} Bytes, {sha[:7]})")
         except Exception as e:
-            trail.append(f"augen.js-Download fehlgeschlagen ({type(e).__name__}) — lokale Kopie")
+            trail.append(f"{datei}-Download fehlgeschlagen ({type(e).__name__}) — lokale Kopie")
     # Start-Datei für den Hand-Start (Login) mitbringen — neue .bat kommen sonst nie auf die PCs (Panel holt nur start-alles.bat)
     bat = os.path.join(_AUGEN_HIER, "puls-chrome-starten.bat")
     if sha and not os.path.exists(bat):
@@ -13635,7 +13674,7 @@ def _augen_js_holen(trail):
         return None
 
 
-def _puls_chrome_sicher(trail, warten_s=15.0, sichtbar=False):
+def _puls_chrome_sicher(trail, warten_s=15.0, sichtbar=False, url=AUGEN_TV_URL):
     """Puls-Chrome erreichbar machen: antwortet Port 9333 → benutzen; sonst EINMAL starten (minimiert, ohne Aktivieren,
     BELOW_NORMAL). -> True/False"""
     v = _cdp_http("/json/version")
@@ -13652,7 +13691,7 @@ def _puls_chrome_sicher(trail, warten_s=15.0, sichtbar=False):
         si = subprocess.STARTUPINFO()
         si.dwFlags |= 0x00000001                 # STARTF_USESHOWWINDOW
         si.wShowWindow = 1 if sichtbar else 7    # Hand-Start (Login): normal; sonst SW_SHOWMINNOACTIVE — nie Fokus-Klau (Reader!)
-        subprocess.Popen(puls_chrome_argumente(exe, profil), startupinfo=si, creationflags=0x00004000 | 0x00000008,
+        subprocess.Popen(puls_chrome_argumente(exe, profil, url=url), startupinfo=si, creationflags=0x00004000 | 0x00000008,
                          stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
         trail.append(f"Puls-Chrome gestartet (Port {PULS_CDP_PORT}, Profil {profil}, {'sichtbar' if sichtbar else 'minimiert'})")
     except Exception as e:
@@ -13966,6 +14005,19 @@ def modus_augen(cmd):
         if augen != "cdp" and not start and not jetzt and not _AUGEN_REGEL_STAND["explizit"]:
             res.update(ok=True, msg="Regel nicht abrufbar und keine gültige 'cdp'-Regel gemerkt — Puls-Chrome bleibt, nichts gelesen")
             return
+        tsx_hier = _AUGEN_REGEL_STAND.get("tsx") or tsx_regel_weiche(_augen_json_lesen("augen_regel.json"), pc)
+        if augen != "cdp" and not start and not jetzt and tsx_hier == "cdp":
+            # K0 (30.09.2026): ein Topstep-PC (puls_topstep_pcs) braucht das Puls-Chrome, auch wenn TradingView dort 'uia' ist —
+            # sonst schlösse jeder Augen-Lauf nach einem tsx-Lauf das TopstepX-Fenster (Browser.close). Aber: TradingView-Tabs darin
+            # zu (Prüfer: ein angemeldeter TV-Tab im Puls-Chrome kickte am 29.09. den Reader) — nur Tabs, nie das ganze Chrome.
+            zu = 0
+            for t in augen_tv_targets(_cdp_http("/json/list", timeout=1.0)):
+                if t.get("id") and _cdp_tab_schliessen(t.get("id")):
+                    zu += 1
+            if zu:
+                trail.append(f"Regel 'uia' für TradingView — {zu} TradingView-Tab(s) im Puls-Chrome geschlossen, TopstepX bleibt")
+            res.update(ok=True, msg="Regel 'uia' für TradingView, Topstep läuft über das Puls-Chrome — es bleibt offen")
+            return
         if augen != "cdp" and not start and not jetzt:
             # Aufräumen (29.09.2026, Moritz pc-usq1i6: Schalter zurück auf uia, das Puls-Chrome lief weiter und kickte die
             # TradingView-Sitzung des Readers): antwortet Port 9333, das Puls-Chrome per CDP Browser.close schließen — trifft nur
@@ -13992,8 +14044,18 @@ def modus_augen(cmd):
             res.update(ok=True, msg="letztes Lesen < 60 s — übersprungen")
             return
         _augen_json_schreiben("augen_letzt.json", {"at": time.time()})
-        if not _puls_chrome_sicher(trail, sichtbar=start):
+        if not _puls_chrome_sicher(trail, sichtbar=start, url=TSX_URL if cmd.get("tsx") else AUGEN_TV_URL):
             res["msg"] = "Puls-Chrome nicht erreichbar"
+            return
+        if start and cmd.get("tsx"):
+            # K0 (30.09.2026): 'order_bot.py augen start tsx' — TopstepX-Tab im Puls-Chrome öffnen (keine .bat) und zeigen, damit
+            # Finn/Mike dort EINMAL von Hand anmeldet (Passwort in Chrome speichern)
+            ziel = _tsx_tab_sicher(trail)
+            if not ziel:
+                res["msg"] = "TopstepX-Tab im Puls-Chrome nicht geöffnet"
+                return
+            _cdp_tab_zeigen(ziel.get("id"), trail)
+            res.update(ok=True, msg="Puls-Chrome mit TopstepX offen — jetzt dort anmelden und das Passwort in Chrome speichern")
             return
         if start:
             res.update(ok=True, msg="Puls-Chrome läuft — jetzt von Hand einloggen (TradingView, Tradovate mit Remember me)")
@@ -14068,6 +14130,584 @@ def modus_augen(cmd):
             except Exception:
                 pass
         print(json.dumps(res, ensure_ascii=False))
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PULS FÜR TOPSTEP ÜBER DAS PULS-CHROME — K0 (30.09.2026, Topstep-Komplett-Paket Plan v2, Master-GO; Finn: „eine Lösung für alles,
+# immer nur so" → CDP wie Orbit). Warum: der UIA-Weg lief im Alltags-Chrome (Chris 30.09. 02:20 UTC: Konto dort umgestellt, offener
+# Hand-Trade daneben) und sah TopstepX lückenhaft (Risk-Feld B36, Toast-Stücke B37).
+# Schalter je PC: wd_farmer_regeln.puls_topstep_pcs → GET /puls-regel/<pc> liefert tsx 'cdp'|'uia' (Terminal 1, d0a9e48).
+# RIEGEL: tsx='cdp' ist KLEBRIG — die lokale Regel verfällt nie (anders als die 12-h-Weiche der Augen), nur ein ausdrückliches
+# Server-'uia' schaltet zurück. Auf einem cdp-PC läuft KEIN tsx-Modus mehr über UIA (sonst Doppelsitzung im Alltags-Chrome); was
+# noch fehlt, antwortet ehrlich code 'cdp_folgt' + etappe. PCs außerhalb der Liste laufen bytegleich auf dem alten Weg.
+# K0 = Inventar (Grundzustand / Konto-Liste offen / Bracket-Dialog offen) → puls_augen arts inventar_tsx_grund/_konto/_bracket
+# + stand_tsx. Klicks nur: EIN „PLATFORM LOGIN" mit Autofill-Beweis (nie tippen, nie Enter), Konto-Auslöser und Bracket-Zahnrad —
+# je nur bei GENAU EINEM Kandidaten, Windows-Maus mit Hover-/Fenster-Beweis, nie ein Order-/Close-/Flatten-Knopf.
+# ═══════════════════════════════════════════════════════════════════════════
+TSX_ETAPPE = {"tsxlesen": "K1", "tsxprobe": "K3", "tsxorder": "K4", "tsxclose": "K5"}
+TSX_K0_TABU = re.compile(r"\b(buy|sell|close|flatten|cancel|reverse|join|market|limit|stop|submit|confirm|place|order|kauf|verkauf|"
+                         r"schlie(ß|ss)en|glattstellen|stornieren|log ?out|abmelden|delete|löschen|reset)\b", re.I)
+TSX_K0_ZUSTAENDE = ("grund", "konto", "bracket")
+TSX_INVENTAR_MAX = 58_000          # Railway deckelt je puls_augen-Zeile bei 60 KB — der Bot kürzt selbst darunter
+TSX_LOGIN_SPERRE_S = 30 * 60.0     # nach einem Login-Klick 30 min kein zweiter (auch nicht im nächsten Lauf)
+TSX_K0_WACHHUND_S = 120.0          # Panel beendet den Bot nach 150 s — vorher ehrlich raus, Sperre lösen, Fenster minimieren
+
+
+def tsx_regel_weiche(regel_datei, pc_id):
+    """REIN RECHNEND (testbar): lokale TopstepX-Regel. 'cdp' ist KLEBRIG (kein Verfall), gilt nur für DIESEN PC; sonst 'uia'."""
+    if not isinstance(regel_datei, dict) or regel_datei.get("tsx") != "cdp" or not pc_id:
+        return "uia"
+    return "cdp" if regel_datei.get("tsx_pc", regel_datei.get("pc")) in (None, pc_id) else "uia"
+
+
+def tsx_regel_aus_antwort(d):
+    """REIN RECHNEND (testbar): tsx aus der /puls-regel-Antwort — 'cdp' | 'uia' | None (fehlt/unbekannt → lokale Regel gilt)."""
+    v = d.get("tsx") if isinstance(d, dict) else None
+    return v if v in ("cdp", "uia") else None
+
+
+def _augen_regel_mischen(neu):
+    """augen_regel.json aktualisieren, ohne die jeweils andere Regel zu verlieren (augen = TradingView, tsx = TopstepX). Lesen-Mischen-
+    Schreiben unter einer kurzen Sperrdatei (≤ 1,5 s warten, ältere als 5 s gelten als verwaist) — sonst schreibt ein Lauf seinen alten
+    Stand über ein gerade gekommenes ausdrückliches 'uia' (K0-Prüfer 30.09.2026)."""
+    sperre = os.path.join(_AUGEN_HIER, "augen_regel.lock")
+    fd, ende = None, time.time() + 1.5
+    while fd is None and time.time() < ende:
+        try:
+            fd = os.open(sperre, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            try:
+                if time.time() - os.path.getmtime(sperre) > 5.0:
+                    os.remove(sperre)
+                    continue
+            except OSError:
+                pass
+            time.sleep(0.05)                                   # Sperr-Takt, kein Warten auf die Seite (nicht über _warte)
+        except OSError:
+            break
+    try:
+        alt = _augen_json_lesen("augen_regel.json")
+        d = dict(alt) if isinstance(alt, dict) else {}
+        d.update(neu)
+        _augen_json_schreiben("augen_regel.json", d)
+    finally:
+        if fd is not None:
+            try:
+                os.close(fd)
+                os.remove(sperre)
+            except OSError:
+                pass
+
+
+def _tsx_regel_holen(pc):
+    """tsx frisch von Railway (2 s) und lokal merken; ohne ausdrückliche Antwort gilt die lokale (klebrige) Regel."""
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"{PULS_BACKEND}/puls-regel/{pc}", timeout=2.0) as r:
+            v = tsx_regel_aus_antwort(json.loads(r.read().decode("utf-8", "replace")))
+    except Exception:
+        v = None
+    if v:
+        alt = _augen_json_lesen("augen_regel.json") or {}
+        vorher = tsx_regel_weiche(alt, pc)
+        if alt.get("tsx") != v or alt.get("tsx_pc") != pc:          # nur bei Änderung schreiben (Prüfer K0: sonst jeder Lauf)
+            _augen_regel_mischen({"tsx": v, "tsx_at": time.time(), "tsx_pc": pc})
+        if vorher == "cdp" and v == "uia":
+            # Prüfer K0: sonst läuft der UIA-Weg sofort, während TopstepX im Puls-Chrome noch angemeldet ist (Doppelsitzung)
+            _tsx_tabs_schliessen()
+        return v
+    return tsx_regel_weiche(_augen_json_lesen("augen_regel.json"), pc)
+
+
+def tsx_weg_lauf():
+    """'cdp' | 'uia' für DIESEN TopstepX-Lauf. Ohne pc_id = 'uia' (alter Weg); jeder Fehler = lokale Regel."""
+    pc = _augen_pc_id()
+    if not pc:
+        return "uia"
+    try:
+        return _tsx_regel_holen(pc)
+    except Exception:
+        return tsx_regel_weiche(_augen_json_lesen("augen_regel.json"), pc)
+
+
+def tsx_cdp_folgt(modus):
+    """REIN RECHNEND (testbar): ehrliche Antwort eines tsx-Modus, dessen CDP-Etappe noch fehlt — nie „nichts gesendet, neu starten"."""
+    etappe = TSX_ETAPPE.get(modus, "K1")
+    return {"ok": False, "code": "cdp_folgt", "etappe": etappe, "weg": "cdp", "schritt": "weg", "gesendet": False, "retry_ok": False,
+            "msg": (f"Topstep läuft auf diesem PC über das Puls-Chrome — dieser Schritt kommt mit Etappe {etappe}. Der alte Weg im "
+                    "normalen Chrome ist hier gesperrt (Doppelsitzung). Plan bleibt stehen, NICHT erneut starten.")}
+
+
+def tsx_targets(liste):
+    """REIN RECHNEND (testbar): TopstepX-Seiten (type page) aus /json/list, …/trade zuerst. -> Liste"""
+    t = [x for x in (liste or []) if isinstance(x, dict) and x.get("type") == "page" and ist_topstepx_url(x.get("url"))]
+    t.sort(key=lambda x: 0 if "/trade" in str(x.get("url")) else 1)
+    return t
+
+
+def _tsx_tab_sicher(trail, warten_s=20.0):
+    """TopstepX-Tab im Puls-Chrome finden, sonst EINEN neuen öffnen (topstepx.com/trade) und warten, bis er in /json/list steht.
+    Keine .bat, kein Alltags-Chrome. -> Target | None"""
+    t = tsx_targets(_cdp_http("/json/list"))
+    if t:
+        return t[0]
+    _cdp_http("/json/new?" + TSX_URL, methode="PUT")
+    trail.append("Puls-Chrome: TopstepX-Tab geöffnet (topstepx.com/trade)")
+    ende = time.time() + warten_s
+    while time.time() < ende:
+        _warte(0.8, 0.4)
+        t = tsx_targets(_cdp_http("/json/list"))
+        if t and t[0].get("webSocketDebuggerUrl"):
+            return t[0]
+    trail.append(f"TopstepX-Tab nach {warten_s:.0f} s nicht in der Tab-Liste")
+    return None
+
+
+def _cdp_tab_schliessen(target_id):
+    """Einen Tab im Puls-Chrome schließen (/json/close antwortet Text „Target is closing", kein JSON). -> True bei HTTP 200"""
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"http://{PULS_CDP_HOST}:{PULS_CDP_PORT}/json/close/{target_id}", timeout=1.5) as r:
+            return r.status == 200
+    except Exception:
+        return False
+
+
+def _tsx_tabs_schliessen(trail=None):
+    """Alle TopstepX-Tabs im Puls-Chrome schließen (Rückschaltung auf den alten Weg — keine zweite Sitzung). -> Anzahl"""
+    n = 0
+    for t in tsx_targets(_cdp_http("/json/list", timeout=1.0)):
+        if t.get("id") and _cdp_tab_schliessen(t.get("id")):
+            n += 1
+    if n and trail is not None:
+        trail.append(f"Topstep wieder über den alten Weg — {n} TopstepX-Tab(s) im Puls-Chrome geschlossen")
+    return n
+
+
+def _cdp_tab_zeigen(target_id, trail):
+    """Tab nach vorn und sein Fenster auf „normal" (Hand-Login: das Puls-Chrome liegt sonst minimiert). Nur Browser-Befehle, kein Klick."""
+    _cdp_http(f"/json/activate/{target_id}")
+    v = _cdp_http("/json/version")
+    if not (v or {}).get("webSocketDebuggerUrl"):
+        return
+    ws = None
+    try:
+        ws = _CdpVerbindung(v["webSocketDebuggerUrl"], timeout=4.0)
+        w = ws.rufe("Browser.getWindowForTarget", {"targetId": target_id}, timeout=4)
+        ws.rufe("Browser.setWindowBounds", {"windowId": w.get("windowId"), "bounds": {"windowState": "normal"}}, timeout=4)
+        trail.append("Puls-Chrome-Fenster sichtbar (normal)")
+    except Exception as e:
+        trail.append(f"Fenster nicht sichtbar gemacht ({type(e).__name__}) — bitte das Puls-Chrome in der Taskleiste öffnen")
+    finally:
+        if ws:
+            ws.zu()
+
+
+# Lese-Blick für K0 (NUR LESEN, klickt nie): Login-Lage (Knopf „PLATFORM LOGIN", Felder mit Autofill-Markierung — Werte nie),
+# Kandidaten für den Konto-Auslöser ('$…K … | KENNUNG') und das Bracket-Zahnrad („Manage brackets" bzw. kleiner Knopf rechts neben
+# „Position Bracket"), Dialoge mit ihren X, Zahl der Konto-Zeilen (Beweis „Liste offen").
+TSX_K0_BLICK_JS = r"""(function () {
+  function sb(e) { try { if (!e || !e.getBoundingClientRect) return false; var r = e.getBoundingClientRect(); if (r.width < 3 || r.height < 3) return false;
+    if (r.bottom < 0 || r.right < 0 || r.top > innerHeight || r.left > innerWidth) return false; var s = getComputedStyle(e);
+    return s.visibility !== 'hidden' && s.display !== 'none' && s.opacity !== '0'; } catch (_) { return false; } }
+  function R(e) { var r = e.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)]; }
+  function T(e) { return String((e && e.textContent) || '').replace(/\s+/g, ' ').trim(); }
+  function A(e, n) { try { return e.getAttribute(n) || ''; } catch (_) { return ''; } }
+  function Q(s, w) { try { return Array.prototype.slice.call((w || document).querySelectorAll(s)); } catch (_) { return []; } }
+  function innen(l) { return l.filter(function (e) { return !l.some(function (f) { return f !== e && e.contains(f); }); }); }
+  function af(e) { try { return e.matches(':-webkit-autofill'); } catch (_) { try { return e.matches(':autofill'); } catch (__) { return false; } } }
+  function zeiger(e) { try { return getComputedStyle(e).cursor === 'pointer'; } catch (_) { return false; } }
+  function K(e) { return { tag: e.tagName.toLowerCase(), text: T(e).slice(0, 90), aria: A(e, 'aria-label').slice(0, 60), title: A(e, 'title').slice(0, 60),
+    role: A(e, 'role'), testid: A(e, 'data-testid').slice(0, 40), rect: R(e), aus: !!(e.disabled || A(e, 'aria-disabled') === 'true'),
+    popup: A(e, 'aria-haspopup'), offen: A(e, 'aria-expanded') }; }
+  var KLICKBAR = 'button,[role="button"],[role="combobox"],[aria-haspopup],a[href],[tabindex]';
+  var RX_KONTO = /\$\s*\d+(?:[.,]\d+)?\s*K\b[^|]*\|/i;
+  var o = { url: String(location.href).slice(0, 160), titel: String(document.title).slice(0, 80), fokus: document.hasFocus() };
+  // Login-Seite (B27: topstepx.com/login, gelber Knopf „PLATFORM LOGIN", Felder von Chrome vorausgefüllt)
+  var pws = Q('input[type="password"]').filter(sb);
+  var lk = innen(Q('button,[role="button"],input[type="submit"]').filter(sb).filter(function (e) {
+    return /^\s*(platform\s+)?log\s?in\s*$/i.test(T(e) || A(e, 'value') || A(e, 'aria-label')); }));
+  var lg = { seite: /\/(login|signin|sign-in)\b/i.test(location.pathname) || (pws.length > 0 && lk.length > 0), knoepfe: lk.length,
+             knopf: lk.length === 1 ? K(lk[0]) : null, pw_n: pws.length };
+  if (pws.length) {
+    var pw = pws[0], box = pw.closest('form') || document.body;
+    var felder = Q('input', box).filter(sb).filter(function (e) { var t = String(e.type || 'text').toLowerCase();
+      return (t === 'text' || t === 'email') && !e.readOnly && !e.disabled; });
+    var vor = felder.filter(function (e) { return !!(e.compareDocumentPosition(pw) & 4); });
+    var u = vor.length ? vor[vor.length - 1] : null;
+    lg.pw = { rect: R(pw), gefuellt: String(pw.value || '').length > 0, autofill: af(pw) };
+    lg.user = u ? { rect: R(u), gefuellt: String(u.value || '').length > 0, autofill: af(u) } : null;
+  }
+  var bt = document.body ? T(document.body) : '';
+  var fm = bt.match(/(invalid|incorrect|wrong password|login failed|access denied|locked|too many attempts)[^.]{0,80}/i);
+  lg.fehler_text = fm ? fm[0].slice(0, 100) : null;
+  lg.zwei_faktor = /captcha|verification code|two.?factor|2fa|one.?time (pass)?code|code (was )?sent|recaptcha/i.test(bt);
+  o.login = lg;
+  // Konto-Auslöser: klickbare Elemente mit '$…K … |' (innerstes), dazu wie viele Konto-Zeilen sichtbar sind
+  o.konto = innen(Q(KLICKBAR + ',div,span').filter(sb).filter(function (e) {
+    var t = T(e); if (!RX_KONTO.test(t) || t.length > 140) return false;
+    return e.matches(KLICKBAR) || zeiger(e);
+  })).slice(0, 8).map(K);
+  o.konto_zeilen = innen(Q('div,li,span,button,[role="option"],[role="menuitem"]').filter(sb).filter(function (e) {
+    var t = T(e); return RX_KONTO.test(t) && t.length <= 140; })).length;
+  // Bracket-Zahnrad: benannt („Manage brackets"), sonst kleine Knöpfe rechts neben dem Text „Position Bracket"
+  var gear = innen(Q(KLICKBAR + ',svg').filter(sb).filter(function (e) {
+    return /manage\s*brackets?/i.test(A(e, 'aria-label') + ' ' + A(e, 'title') + ' ' + T(e)); }));
+  if (!gear.length) {
+    var pb = innen(Q('div,span,label,p').filter(sb).filter(function (e) { return /^position\s*brackets?$/i.test(T(e)); }));
+    if (pb.length === 1) {
+      var pr = pb[0].getBoundingClientRect(), my = pr.top + pr.height / 2;
+      gear = innen(Q(KLICKBAR + ',svg').filter(sb).filter(function (e) {
+        var q = e.getBoundingClientRect();
+        return q.left >= pr.right - 2 && q.left <= pr.right + 120 && Math.abs(q.top + q.height / 2 - my) <= 14 && q.width <= 44 && q.height <= 44
+               && !/position\s*bracket/i.test(T(e)); }));
+    }
+  }
+  o.bracket = gear.slice(0, 6).map(K);
+  o.dialoge = Q('[role="dialog"],[role="alertdialog"],[aria-modal="true"]').filter(sb).slice(0, 4).map(function (d) {
+    var x = innen(Q('button,[role="button"]', d).filter(sb).filter(function (e) {
+      var w = A(e, 'aria-label') + ' ' + A(e, 'title') + ' ' + T(e); return /\bclose\b|schlie|dismiss|^\s*[×✕✖]\s*$/i.test(w) && T(e).length <= 12; }));
+    return { titel: T(d.querySelector('h1,h2,h3,h4,[class*="title"],[class*="header"]')).slice(0, 60), text: T(d).slice(0, 160), rect: R(d),
+             x: x.length === 1 ? K(x[0]) : null, x_n: x.length };
+  });
+  o.bracket_dialog = o.dialoge.some(function (d) { return /bracket/i.test(d.titel + ' ' + d.text); }) ||
+                     /position\s*brackets?[\s\S]{0,200}(risk|profit)/i.test(Q('[role="dialog"],[aria-modal="true"]').filter(sb).map(T).join(' '));
+  return o;
+})()"""
+
+# Chart-Blick (Master-Merkposten 30.09.2026: Finn will SL/TP später per Drag & Drop an der Positions-/Orderlinie im TopstepX-Chart
+# setzen): ist die Positionslinie mit ziehbaren SL/TP-Griffen im DOM greifbar oder nur Canvas? Liest nur — Canvas-Flächen, iframes
+# (gleiche Herkunft → innen lesbar), DOM-Knoten mit Linien-/Griff-Merkmalen. Noch KEIN Umbau, nur die Fakten fürs Inventar.
+TSX_K0_CHART_JS = r"""(function () {
+  function R(e) { var r = e.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)]; }
+  function T(e) { return String((e && e.textContent) || '').replace(/\s+/g, ' ').trim(); }
+  function A(e, n) { try { return e.getAttribute(n) || ''; } catch (_) { return ''; } }
+  function blick(doc, tiefe) {
+    var out = { canvas: [], linien: [], iframes: [] };
+    try {
+      Array.prototype.slice.call(doc.querySelectorAll('canvas')).forEach(function (c) {
+        var r = c.getBoundingClientRect(); if (r.width * r.height >= 20000 && out.canvas.length < 12) out.canvas.push(R(c)); });
+      var rx = /(order|position|bracket|stop|take.?profit|sl|tp)[-_ ]?(line|handle|drag|label|marker)|draggable|drag-handle/i;
+      Array.prototype.slice.call(doc.querySelectorAll('*')).forEach(function (e) {
+        if (out.linien.length >= 20) return;
+        var c = typeof e.className === 'string' ? e.className : ((e.className && e.className.baseVal) || '');
+        var m = c + ' ' + A(e, 'data-testid') + ' ' + A(e, 'data-name') + ' ' + A(e, 'aria-label') + ' ' + (A(e, 'draggable') === 'true' ? 'draggable' : '');
+        if (rx.test(m)) out.linien.push({ tag: e.tagName.toLowerCase(), cls: c.slice(0, 60), testid: A(e, 'data-testid').slice(0, 40),
+                                          text: T(e).slice(0, 40), rect: R(e) }); });
+      if (tiefe < 2) Array.prototype.slice.call(doc.querySelectorAll('iframe')).slice(0, 6).forEach(function (f) {
+        var i = { src: String(f.src || '').slice(0, 120), rect: R(f), gleiche_herkunft: false };
+        try { if (f.contentDocument && f.contentDocument.body) { i.gleiche_herkunft = true; i.innen = blick(f.contentDocument, tiefe + 1); } } catch (_) {}
+        out.iframes.push(i); });
+    } catch (e) { out.fehler = String(e).slice(0, 80); }
+    return out;
+  }
+  return blick(document, 0);
+})()"""
+
+
+def tsx_k0_eindeutig(kandidaten, art):
+    """REIN RECHNEND (testbar): GENAU EIN klickbarer Kandidat (Konto-Auslöser bzw. Bracket-Zahnrad), nie gesperrt, nie mit einem
+    Order-/Close-/Flatten-Wort (TSX_K0_TABU). -> (element | None, grund)"""
+    k = [e for e in (kandidaten or []) if isinstance(e, dict) and isinstance(e.get("rect"), (list, tuple)) and len(e["rect"]) >= 4
+         and str(e.get("role") or "").lower() not in ("option", "menuitem", "listitem", "menuitemradio")]   # nie eine Listen-Zeile
+    if art == "konto":
+        k = [e for e in k if tsx_konto_sichtbar(e.get("text"))[0] or TSX_RX_OHNE_ID.match(str(e.get("text") or ""))]
+    tabu = [e for e in k if TSX_K0_TABU.search(" ".join(str(e.get(f) or "") for f in ("text", "aria", "title", "testid")))]
+    k = [e for e in k if e not in tabu and not e.get("aus")]
+    if len(k) != 1:
+        return None, f"{len(k)} Kandidaten" + (f" (+{len(tabu)} mit Order-/Close-Wort verworfen)" if tabu else "")
+    return k[0], ""
+
+
+def tsx_login_beweis(lg):
+    """REIN RECHNEND (testbar): Darf Puls EINMAL „PLATFORM LOGIN" drücken? Nur mit genau einem Knopf und beiden Feldern gefüllt bzw.
+    von Chrome als Autofill markiert (Werte nie gelesen); nie bei 2FA/Captcha oder Fehlermeldung. -> (ok, text)"""
+    lg = lg if isinstance(lg, dict) else {}
+    u = lg.get("user") if isinstance(lg.get("user"), dict) else {}
+    p = lg.get("pw") if isinstance(lg.get("pw"), dict) else {}
+    # nur Chromes Autofill-Markierung zählt (Prüfer K0: „gefüllt" bleibt nach einem Fehlversuch stehen → jeder Lauf klickte erneut)
+    u_ok, p_ok = bool(u.get("autofill")), bool(p.get("autofill"))
+    text = (f"Benutzer {'von Chrome ausgefüllt' if u_ok else ('gefüllt, aber nicht von Chrome' if u.get('gefuellt') else 'LEER')}, "
+            f"Passwort {'von Chrome ausgefüllt' if p_ok else ('gefüllt, aber nicht von Chrome' if p.get('gefuellt') else 'LEER')}, "
+            f"Login-Knöpfe {lg.get('knoepfe', 0)} (Werte nie gelesen)")
+    if lg.get("zwei_faktor"):
+        return False, text + " — 2FA/Captcha auf der Seite"
+    if lg.get("fehler_text"):
+        return False, text + f" — Meldung '{str(lg.get('fehler_text'))[:60]}'"
+    return bool(u_ok and p_ok and isinstance(lg.get("knopf"), dict)), text
+
+
+def tsx_inventar_deckeln(daten, max_bytes=TSX_INVENTAR_MAX):
+    """REIN RECHNEND (testbar): puls_augen-Zeile unter max_bytes — erst Blatt-Texte, dann Elemente von hinten kürzen (Kopf bleibt),
+    Zähler inventar.gekuerzt. -> daten (Kopie)"""
+    d = json.loads(json.dumps(daten, ensure_ascii=False, default=str))
+    inv = d.get("inventar") if isinstance(d.get("inventar"), dict) else {}
+    n = 0
+    while len(json.dumps(d, ensure_ascii=False)) > max_bytes and n < 60:
+        n += 1
+        if len(inv.get("blatt") or []) > 40:
+            inv["blatt"] = inv["blatt"][:int(len(inv["blatt"]) * 0.8)]
+        elif len(inv.get("elemente") or []) > 40:
+            inv["elemente"] = inv["elemente"][:int(len(inv["elemente"]) * 0.85)]
+        elif isinstance(inv.get("stand"), dict):
+            inv["stand"] = {"gekuerzt": True}
+        elif isinstance(inv.get("chart"), dict):
+            inv["chart"] = {"gekuerzt": True}
+        else:
+            break
+        inv["gekuerzt"] = n
+    return d
+
+
+def _tsx_k0_lesen(s, trail, zustand, pc, blick=None):
+    """Inventar + Stand + Chart-Blick im aktuellen Zustand → puls_augen (inventar_tsx_<zustand>; beim Grundzustand auch stand_tsx)
+    und lokal tsx_inventar_cdp_<zustand>.json. -> Kurzinfo | None"""
+    import urllib.request
+    t0 = time.time()
+    ausdruck = ("(async () => { const A = globalThis.prophosAugen; if (!A) return {fehler: 'prophosAugen fehlt'};"
+                " return {stand: await A.stand(), inventar: A.inventar ? await A.inventar() : null}; })()")
+    wert = s.lese_js(ausdruck, timeout=15)
+    if not isinstance(wert, dict) or wert.get("fehler"):
+        s._seite_abwarten(10.0)
+        s._augen_laden()
+        wert = s.lese_js(ausdruck, timeout=15)
+    if not isinstance(wert, dict) or wert.get("fehler") or not isinstance(wert.get("inventar"), dict):
+        trail.append(f"Inventar ({zustand}) nicht lesbar ({(wert or {}).get('fehler') if isinstance(wert, dict) else 'keine Antwort'})")
+        return None
+    inv = wert["inventar"]
+    try:
+        inv["chart"] = s.lese_js(TSX_K0_CHART_JS, timeout=10)
+    except Exception as e_:
+        inv["chart"] = {"fehler": type(e_).__name__}
+    if isinstance(blick, dict):
+        inv["k0_blick"] = {k: blick.get(k) for k in ("konto", "konto_zeilen", "bracket", "dialoge", "bracket_dialog")}
+    stand = wert.get("stand") if isinstance(wert.get("stand"), dict) else {}
+    kopf = {"zustand": zustand, "bot": puls_bot_stand(), "target": str(inv.get("url") or "")[:200], "dauer_ms": int((time.time() - t0) * 1000)}
+    daten = tsx_inventar_deckeln(dict(kopf, inventar=inv))
+    try:
+        with open(os.path.join(_AUGEN_HIER, f"tsx_inventar_cdp_{zustand}.json"), "w", encoding="utf-8") as f:
+            json.dump(dict(kopf, inventar=inv, stand=stand), f, ensure_ascii=False, default=str)
+    except Exception:
+        pass
+    pakete = [("inventar_tsx_" + zustand, daten)]
+    if zustand == "grund" and stand:
+        pakete.append(("stand_tsx", tsx_inventar_deckeln(dict(stand, zustand=zustand, bot=kopf["bot"], target=kopf["target"]))))
+    geschrieben = []
+    for art, d in pakete:
+        if not pc:
+            break
+        body = json.dumps({"art": art, "daten": d}, ensure_ascii=False, default=str).encode("utf-8")
+        try:
+            req = urllib.request.Request(f"{PULS_BACKEND}/puls-augen/{pc}", data=body, headers={"Content-Type": "application/json"})
+            urllib.request.urlopen(req, timeout=8.0).read()
+            geschrieben.append(art)
+        except Exception as e_:
+            trail.append(f"puls_augen ({art}) nicht geschrieben ({type(e_).__name__}, {len(body)} Bytes)")
+    ch = inv.get("chart") if isinstance(inv.get("chart"), dict) else {}
+    trail.append(f"Inventar {zustand}: {len(inv.get('elemente') or [])} Elemente, {len(inv.get('blatt') or [])} Texte, "
+                 f"Chart {len(ch.get('canvas') or [])} Canvas/{len(ch.get('iframes') or [])} iframes/{len(ch.get('linien') or [])} Linien-Knoten"
+                 + (f" → {', '.join(geschrieben)}" if geschrieben else ""))
+    return {"zustand": zustand, "arts": geschrieben, "elemente": len(inv.get("elemente") or [])}
+
+
+def _tsx_cdp_login(s, trail):
+    """TopstepX-Login-Seite im Puls-Chrome? Dann höchstens EIN Klick auf „PLATFORM LOGIN" — nur mit Autofill-Beweis (tsx_login_beweis),
+    nie tippen, nie Enter, kein zweiter Versuch. -> True (angemeldet) | Fehlertext"""
+    bl = s.lese_js(TSX_K0_BLICK_JS) or {}
+    lg = bl.get("login") if isinstance(bl.get("login"), dict) else {}
+    if not lg.get("seite"):
+        return True
+    ok, text = tsx_login_beweis(lg)
+    trail.append(f"TopstepX-Login-Seite: {text}")
+    letzt = _augen_json_lesen("tsx_login.json") or {}
+    try:
+        seit = time.time() - float(letzt["at"]) if letzt.get("at") else 1e9
+    except (TypeError, ValueError):
+        seit = 1e9
+    if 0 <= seit < TSX_LOGIN_SPERRE_S:
+        # Prüfer K0: ein Login-Klick ohne Erfolg darf sich nicht Lauf für Lauf wiederholen (Fehlversuche bis zur Kontosperre)
+        return (f"TopstepX zeigt wieder die Login-Seite, der letzte Login-Klick war vor {int(seit // 60)} min — kein neuer Versuch. "
+                "Bitte im Puls-Chrome von Hand anmelden (`python order_bot.py augen start tsx`).")
+    if not ok:
+        return (f"TopstepX im Puls-Chrome nicht angemeldet ({text}) — bitte einmal von Hand anmelden und das Passwort in Chrome "
+                "speichern (`python order_bot.py augen start tsx`).")
+    _augen_json_schreiben("tsx_login.json", {"at": time.time()})    # vor dem Druck merken — auch ein Absturz danach zählt als Versuch
+    if not s.klick(lg["knopf"]["rect"], "PLATFORM LOGIN (Autofill bewiesen)",
+                   pruef={"rect": lg["knopf"].get("rect"), "text": "login", "aria": "", "tabu": r"\b(buy|sell|order|logout|log out)\b"}):
+        return "Login-Knopf nicht gedrückt (Klick ohne Beweis) — nichts weiter versucht."
+    ende = time.time() + 25.0
+    while time.time() < ende:
+        _warte(1.0, 0.4)
+        try:
+            b2 = s.lese_js(TSX_K0_BLICK_JS) or {}
+        except Exception:
+            continue                                        # Seite lädt gerade neu
+        l2 = b2.get("login") if isinstance(b2.get("login"), dict) else {}
+        if not l2.get("seite"):
+            s._seite_abwarten(15.0)
+            s._augen_laden()
+            trail.append("TopstepX angemeldet (Login-Seite weg)")
+            return True
+        if l2.get("fehler_text") or l2.get("zwei_faktor"):
+            return f"TopstepX-Login nach dem Klick: '{l2.get('fehler_text') or '2FA/Captcha'}' — nicht angemeldet, kein zweiter Versuch."
+    return "TopstepX zeigt 25 s nach dem Login-Klick weiter die Login-Seite — kein zweiter Versuch, bitte im Puls-Chrome nachsehen."
+
+
+def tsx_k0_pruef(el):
+    """REIN RECHNEND (testbar): Ziel-Merkmale für den Druck (win_ziel_pruef_js) — Rechteck, Text (Konto: die sichtbare Kennung, sonst
+    der Anfang), Beschriftung, Tabu-Wörter."""
+    t = str(el.get("text") or "")
+    kenn = tsx_konto_sichtbar(t)[0]
+    return {"rect": list(el.get("rect") or [])[:4], "text": (kenn or " ".join(t.split())[:24]).strip()[:40],
+            "aria": str(el.get("aria") or el.get("title") or "")[:40], "tabu": TSX_K0_TABU.pattern}
+
+
+def _tsx_k0_esc(s, bl, trail, grund, erlaubt_dialog=False):
+    """Esc im K0 — nie, solange ein FREMDER Dialog offen ist (erlaubt_dialog: nur der eigene Bracket-Dialog darf offen sein); Windows-
+    Fehler werfen nicht. -> True, wenn gedrückt"""
+    dlg = [d for d in ((bl or {}).get("dialoge") or []) if isinstance(d, dict)]
+    fremd = [d for d in dlg if not (erlaubt_dialog and re.search(r"bracket", str(d.get("titel")) + " " + str(d.get("text")), re.I))]
+    if fremd:
+        trail.append(f"{grund}: fremder Dialog offen ('{str(fremd[0].get('titel') or fremd[0].get('text') or '')[:40]}') — kein Esc")
+        return False
+    try:
+        s.taste("Escape")
+    except Exception as e_:
+        trail.append(f"{grund}: Esc nicht möglich ({type(e_).__name__})")
+        return False
+    trail.append(f"{grund} → Esc")
+    return True
+
+
+def _tsx_k0_zustand(s, trail, pc, art, res):
+    """Konto-Liste bzw. Bracket-Dialog EINMAL öffnen (genau ein Kandidat, Windows-Maus mit Ziel-Beweis beim Druck), Wirkung beweisen,
+    Inventar, wieder zu (X nur im Bracket-Dialog, sonst Esc ohne fremde Dialoge) und das Schließen beweisen. -> True, wenn inventarisiert
+    Prüfer K0 (30.09.2026): das Rechteck erst NACH dem Nach-vorn-Holen lesen (ein Hintergrund-Tab holt beim bringToFront Änderungen nach,
+    z. B. fällt der „Weekend Hours"-Banner weg und alles rutscht 43 px) — und beim Druck beweisen, dass dort genau der Kandidat liegt."""
+    name = "Konto-Auslöser" if art == "konto" else "Bracket-Zahnrad"
+    if _WIN_EINGABE:
+        hw, gr = s._win_vorn()
+        if not hw:
+            trail.append(f"{name}: {gr} — nichts geklickt")
+            res.setdefault("offen", []).append(f"{art}: {gr}")
+            return False
+        _warte(0.6, 0.3)
+    bl = s.lese_js(TSX_K0_BLICK_JS) or {}
+    if art == "bracket" and (bl.get("dialoge") or []):
+        trail.append(f"{name}: es ist schon ein Dialog offen — nichts geklickt")
+        res.setdefault("offen", []).append(f"{art}: Dialog offen")
+        return False
+    el, grund = tsx_k0_eindeutig(bl.get(art), art)
+    if not el:
+        trail.append(f"{name} nicht eindeutig ({grund}) — nichts geklickt")
+        res.setdefault("offen", []).append(f"{art}: {grund}")
+        return False
+    vorher_z, vorher_d = int(bl.get("konto_zeilen") or 0), bool(bl.get("bracket_dialog"))
+    if not s.klick(el["rect"], f"{name} ('{str(el.get('text') or el.get('aria') or '')[:40]}')", pruef=tsx_k0_pruef(el)):
+        res.setdefault("offen", []).append(f"{art}: Klick ohne Beweis")
+        return False
+    b2 = {}
+    for _ in range(5):                                      # Treffer ≠ Wirkung (Regel .835)
+        _warte(0.6, 0.3)
+        b2 = s.lese_js(TSX_K0_BLICK_JS) or {}
+        if (art == "konto" and int(b2.get("konto_zeilen") or 0) > vorher_z) or (art == "bracket" and b2.get("bracket_dialog") and not vorher_d):
+            break
+    else:
+        trail.append(f"{name} geklickt, Wirkung nicht erkannt (Zeilen {vorher_z}→{b2.get('konto_zeilen')}, Dialog {b2.get('bracket_dialog')}) "
+                     "— Inventar trotzdem (zeigt, was nach dem Klick steht)")
+    info = _tsx_k0_lesen(s, trail, art, pc, blick=b2)
+    if info:
+        res["arts"] += info["arts"]
+    # wieder zu: Bracket-Dialog über sein EINES X (frisch gelesen, nur wenn es DER Bracket-Dialog ist), sonst Esc — nie ein anderer Knopf
+    b_x = s.lese_js(TSX_K0_BLICK_JS) or {}
+    dlg = [d for d in (b_x.get("dialoge") or []) if isinstance(d, dict)]
+    x = None
+    if art == "bracket" and b_x.get("bracket_dialog") and len(dlg) == 1 and isinstance(dlg[0].get("x"), dict) \
+            and re.search(r"bracket", str(dlg[0].get("titel")) + " " + str(dlg[0].get("text")), re.I):
+        x = dlg[0]["x"]
+    if not (x and s.klick(x["rect"], "Bracket-Dialog schließen (X)", pruef={"rect": x.get("rect"), "text": "", "aria": str(x.get("aria") or "")[:40],
+                                                                       "tabu": r"\b(buy|sell|flatten|cancel|order|market|limit|all)\b"})):
+        _tsx_k0_esc(s, b_x, trail, "Konto-Liste" if art == "konto" else "Bracket-Dialog", erlaubt_dialog=(art == "bracket"))
+    _warte(0.6, 0.3)
+    b3 = s.lese_js(TSX_K0_BLICK_JS) or {}
+    zu = (int(b3.get("konto_zeilen") or 0) <= vorher_z) if art == "konto" else not b3.get("bracket_dialog")
+    trail.append(f"{name}: wieder zu {'(bewiesen)' if zu else '— NICHT bewiesen, bitte im Puls-Chrome ansehen'}")
+    if not zu:
+        res.setdefault("offen", []).append(f"{art}: nach dem Inventar noch offen")
+        res["_nicht_zu"] = True
+    return bool(info)
+
+
+def modus_tsxinventar_cdp(cmd):
+    """K0: TopstepX im Puls-Chrome erfassen (siehe Block-Kopf). Antwort wie modus_tsxinventar: {ok, code, msg, trail, schritt, weg,
+    arts, offen}. Sperrt andere Puls-Chrome-Läufe (Handlauf-Sperre) für die Dauer."""
+    res = {"ok": False, "code": "", "msg": "", "trail": "", "schritt": "start", "weg": "cdp", "etappe": "K0", "arts": []}
+    trail = _StempelSpur()
+    trail.append(puls_bot_stand())
+    trail.append("Weg: Puls-Chrome (CDP) — K0 Inventar TopstepX")
+    pc = _augen_pc_id()
+    sitz = [None]
+
+    def raus(code, msg, schritt, ok=False):
+        res.update(ok=ok, code=code, msg=msg, schritt=schritt)
+        res["trail"] = " > ".join(trail)
+        _puls_diagnose_senden(trail, "tsx_inventar_cdp")
+        print(json.dumps(res, ensure_ascii=False))
+
+    if _handlauf_aktiv():
+        return raus("handlauf", "Im Puls-Chrome läuft gerade ein anderer Hand-Lauf — nichts gelesen, gleich erneut anstoßen.", "sperre")
+    _handlauf_setzen(True)
+    import threading
+
+    def _wachhund():
+        # Prüfer K0: ohne Wachhund beendete das Panel den Bot nach 150 s hart — die Sperre blieb 15 min und hielt Orbit fern
+        trail.append(f"Wachhund: nach {int(TSX_K0_WACHHUND_S)} s abgebrochen (Schritt {res.get('schritt')})")
+        _handlauf_setzen(False)
+        try:
+            if sitz[0]:
+                sitz[0].zu()
+        except Exception:
+            pass
+        try:
+            raus("haenger", f"K0-Inventar hing nach {int(TSX_K0_WACHHUND_S)} s — abgebrochen (Puls-Chrome ansehen: Liste/Dialog offen?).", "haenger")
+            sys.stdout.flush()
+        finally:
+            os._exit(0)
+    wh = threading.Timer(TSX_K0_WACHHUND_S, _wachhund)
+    wh.daemon = True
+    wh.start()
+    try:
+        if not _puls_chrome_sicher(trail, url=TSX_URL):      # Kaltstart mit TopstepX, nie mit dem TradingView-Chart (Prüfer K0)
+            return raus("chrome", "Puls-Chrome nicht erreichbar (Port 9333) — einmal `python order_bot.py augen start tsx` am PC.", "chrome")
+        ziel = _tsx_tab_sicher(trail)
+        if not ziel:
+            return raus("tab", "TopstepX-Tab im Puls-Chrome nicht erreichbar.", "tab")
+        s = sitz[0] = _AugenSitzung(trail, ziel=ziel, js_datei="augen_tsx.js", tv_riegel=False)
+        lg = _tsx_cdp_login(s, trail)
+        if lg is not True:
+            return raus("login", lg, "login")
+        g = _tsx_k0_lesen(s, trail, "grund", pc, blick=s.lese_js(TSX_K0_BLICK_JS))
+        if not g:
+            return raus("inventar", "Grund-Inventar nicht lesbar (augen_tsx.js) — nichts geklickt.", "grund")
+        res["arts"] += g["arts"]
+        if not cmd.get("nur_grund"):
+            _tsx_k0_zustand(s, trail, pc, "konto", res)
+            if res.pop("_nicht_zu", False):
+                trail.append("Konto-Liste nicht bewiesen zu — Bracket-Schritt ausgelassen (nichts rutscht unter die Maus)")
+                res.setdefault("offen", []).append("bracket: ausgelassen (Konto-Liste nicht bewiesen zu)")
+            else:
+                _tsx_k0_zustand(s, trail, pc, "bracket", res)
+        msg = f"Inventar TopstepX gelesen ({', '.join(res['arts']) or 'nur lokal'}) — keine Order."
+        if res.get("offen"):
+            msg += " Offen: " + "; ".join(res["offen"])
+        return raus("", msg, "fertig", ok=True)
+    except Exception as e:
+        return raus("cdp_fehler", f"K0-Inventar abgebrochen: {type(e).__name__}: {str(e)[:160]}", "absturz")
+    finally:
+        wh.cancel()
+        _handlauf_setzen(False)
+        if sitz[0]:
+            sitz[0].zu()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -14187,6 +14827,22 @@ def win_ziel_js(x, y):
     return ("(function(){var e=document.elementFromPoint(" + f"{float(x):.1f},{float(y):.1f}" + ");if(!e)return {hover:false,toast:false};"
             "var t=e.closest('[data-name^=\"toast-group-\"],[class*=\"toastGroup-\"],[class*=\"toastListInner-\"],[class*=\"toastItem\"]');"
             "return {hover:e.matches(':hover'),toast:!!t};})()")
+
+
+def win_ziel_pruef_js(x, y, pruef):
+    """Ziel-Beweis beim Druck (K0-Prüfer 30.09.2026: der Hover-Beweis bestätigt JEDES oberste Element — bei Mike liegt „SELL -1 @
+    MARKET" 31 px unter dem Bracket-Zahnrad). Am Punkt: :hover UND das klickbare Element dort ist der Kandidat — seine Mitte liegt darin,
+    es ist höchstens ~4× so groß, Text bzw. Beschriftung passen — und trägt kein Order-/Close-Wort. Liest nur. pruef = {rect, text, aria, tabu}"""
+    return ("(function(p){var e=document.elementFromPoint(" + f"{float(x):.1f},{float(y):.1f}" + ");if(!e)return {hover:false,passt:false,was:''};"
+            "function T(n){return String((n&&n.textContent)||'').replace(/\\s+/g,' ').trim().toLowerCase();}"
+            "function A(n){return String(n.getAttribute('aria-label')||n.getAttribute('title')||'').toLowerCase();}"
+            "var k=e.closest('button,[role=\"button\"],[role=\"combobox\"],[aria-haspopup],a[href],[tabindex]')||e,r=k.getBoundingClientRect(),c=p.rect;"
+            "var mx=c[0]+c[2]/2,my=c[1]+c[3]/2,drin=mx>=r.left-3&&mx<=r.right+3&&my>=r.top-3&&my<=r.bottom+3,klein=r.width*r.height<=Math.max(4*c[2]*c[3],2500);"
+            "var t=(p.text||'').toLowerCase(),a=(p.aria||'').toLowerCase(),kt=T(k),ka=A(k);"
+            "var text_ok=(!t&&!a)||(t&&(kt.indexOf(t)>=0||T(e).indexOf(t)>=0))||(a&&(ka.indexOf(a)>=0||A(e).indexOf(a)>=0));"
+            "var tabu=p.tabu?new RegExp(p.tabu,'i').test(kt+' '+ka):false;"
+            "return {hover:e.matches(':hover'),passt:!!(drin&&klein&&text_ok&&!tabu),was:(kt||ka).slice(0,40),tabu:tabu};})("
+            + json.dumps(pruef, ensure_ascii=False) + ")")
 
 
 # Schließen-Knöpfe der Meldungen, die GANZ im Bild liegen: erst das X der Gruppe (toast-group-close-button-*), sonst das X einzelner
@@ -14357,17 +15013,19 @@ def augen_fehlt(text):
 class _AugenSitzung:
     """Eine CDP-Verbindung zur TradingView-Seite im Puls-Chrome: augen.js einmal geladen, stand() lesen, klicken (Windows: echte Maus)."""
 
-    def __init__(self, trail, ziel=None):
+    def __init__(self, trail, ziel=None, js_datei="augen.js", tv_riegel=True):
         self.trail = trail
+        # K0 (30.09.2026): js_datei 'augen_tsx.js' für den TopstepX-Tab; tv_riegel=False = ohne TradingView-Werbung/-Meldungen wegräumen
+        self.tv_riegel = tv_riegel
         if not _puls_chrome_sicher(trail):
             raise RuntimeError("Puls-Chrome nicht erreichbar (Port 9333)")
         # ziel: ein bestimmter Tab (Auto-Login 29.09.2026: der neue Tab mit ?trade-now) — sonst wie bisher die Chart-Seite
         ziel = ziel or augen_target_waehlen(_cdp_http("/json/list"))
         if not ziel:
             raise RuntimeError("im Puls-Chrome ist keine TradingView-Seite offen")
-        self.js = _augen_js_holen(trail)
+        self.js = _augen_js_holen(trail, js_datei)
         if not self.js:
-            raise RuntimeError("augen.js fehlt")
+            raise RuntimeError(f"{js_datei} fehlt")
         self.ws = _CdpVerbindung(ziel.get("webSocketDebuggerUrl"), timeout=10.0)
         self.target_id = ziel.get("id")        # K3: Fenster des Tabs (Browser.getWindowForTarget) für den Login kurz nach vorn
         self.maus = (40.0, 40.0)
@@ -14421,15 +15079,21 @@ class _AugenSitzung:
             raise RuntimeError("stand() wirft: " + text[:120])
         return {}
 
-    def klick(self, rect, name, toast_ok=False):
+    def klick(self, rect, name, toast_ok=False, pruef=None):
+        """pruef (K0, 30.09.2026): {rect, text, aria, tabu} — gedrückt wird nur, wenn am Zielpunkt genau dieser Kandidat liegt
+        (win_ziel_pruef_js); ohne pruef wie bisher (nur :hover)."""
         if _WIN_EINGABE:
-            self.werbung_weg()                            # Werbe-Modal zuerst weg (30.09.2026, Jacobs PC: Autumn-Sale über Connect)
+            tv = getattr(self, "tv_riegel", True)          # TopstepX-Tab (K0): nichts TradingView-Eigenes wegklicken
+            if tv:
+                self.werbung_weg()                        # Werbe-Modal zuerst weg (30.09.2026, Jacobs PC: Autumn-Sale über Connect)
             self._verdeckt = False
+            if pruef:
+                return self._win_klick(rect, name, toast_ok=toast_ok, pruef=pruef)
             ok = self._win_klick(rect, name, toast_ok=toast_ok)
-            if not ok and self._verdeckt and not toast_ok and self._toasts_weg():
+            if tv and not ok and self._verdeckt and not toast_ok and self._toasts_weg():
                 self._verdeckt = False
                 ok = self._win_klick(rect, name)          # Meldungen weg — derselbe Klick genau einmal neu
-            if not ok and not toast_ok and self.werbung_weg(zwang=True):
+            if tv and not ok and not toast_ok and self.werbung_weg(zwang=True):
                 ok = self._win_klick(rect, name)          # Werbung kam gerade erst — derselbe Klick genau einmal neu
             return ok
         p = cdp_klickpunkt(rect)
@@ -14440,6 +15104,11 @@ class _AugenSitzung:
             self.ws.rufe("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": x, "y": y, "buttons": 0}, timeout=3)
             _warte(0.018, 0.02)
         _warte(0.08, 0.08)
+        if pruef:
+            v = self.lese_js(win_ziel_pruef_js(p[0], p[1], pruef))
+            if not (isinstance(v, dict) and v.get("passt")):
+                self.trail.append(f"{name}: am Zielpunkt liegt nicht das Ziel ('{(v or {}).get('was') if isinstance(v, dict) else '-'}') — kein Druck")
+                return False
         self.ws.rufe("Input.dispatchMouseEvent", {"type": "mousePressed", "x": p[0], "y": p[1], "button": "left",
                                                   "buttons": 1, "clickCount": 1, "force": 0.5}, timeout=3)
         _warte(0.07, 0.06)
@@ -14613,7 +15282,7 @@ class _AugenSitzung:
             self.trail.append("Meldungen über dem Ziel, aber kein Schließen-Knopf im Bild")
         return geklickt
 
-    def _win_klick(self, rect, name, druck=True, toast_ok=False):
+    def _win_klick(self, rect, name, druck=True, toast_ok=False, pruef=None):
         """Echte Windows-Maus: Punkt im inneren Drittel → Bildschirm-Pixel (Breiten-Abgleich), Zeiger sichtbar hinfahren, :hover des
         Ziels beweisen, dann EIN SendInput-Druck. Ohne Beweis kein Druck. druck=False = nur hinfahren (Hover)."""
         hwnd, grund = self._win_vorn()
@@ -14645,6 +15314,16 @@ class _AugenSitzung:
         ende = time.time() + 0.9
         while time.time() < ende:
             _warte(0.08, 0.05)
+            if pruef:
+                v = self.lese_js(win_ziel_pruef_js(p[0], p[1], pruef))
+                if isinstance(v, dict) and v.get("hover") and not v.get("passt"):
+                    self.trail.append(f"{name}: am Zielpunkt @{punkt[0]},{punkt[1]} liegt nicht das Ziel ('{v.get('was')}'"
+                                      + (", Order-/Close-Wort" if v.get("tabu") else "") + ") — kein Druck")
+                    return False
+                if isinstance(v, dict) and v.get("hover"):
+                    hover = True
+                    break
+                continue
             v = self.lese_js(win_ziel_js(p[0], p[1]))
             if isinstance(v, dict) and v.get("toast") and not toast_ok:
                 # das Ziel liegt unter einer TradingView-Meldung — ein Druck träfe die Meldung (Live 16:13 UTC, Konto-Umschalter)
@@ -18074,6 +18753,8 @@ def main():
         # für den einmaligen Menschen-Login öffnen
         if len(sys.argv) >= 3 and sys.argv[2].strip().lower() == "start":
             cmd = {"start": True}          # 'order_bot.py augen start' / puls-chrome-starten.bat — ohne JSON-Quoting in cmd
+            if len(sys.argv) >= 4 and sys.argv[3].strip().lower() == "tsx":
+                cmd["tsx"] = True          # 'order_bot.py augen start tsx' (K0): TopstepX-Tab im Puls-Chrome öffnen
         elif len(sys.argv) >= 3 and sys.argv[2].strip().lower() == "jetzt":
             cmd = {"jetzt": True}          # 'order_bot.py augen jetzt': sofort einmal lesen (Test am PC, 29.09.2026)
         elif len(sys.argv) >= 4 and sys.argv[2].strip().lower() == "aufnahme" and sys.argv[3].strip().lower() in ("start", "stopp", "senden"):

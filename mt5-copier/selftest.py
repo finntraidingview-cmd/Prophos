@@ -1882,6 +1882,7 @@ def main():
     results.append(test_puls_k3())
     results.append(test_puls_cdp_login())
     results.append(test_cdp_konto_regression_865())
+    results.append(test_tsx_k0())
     results.append(test_puls_win_maus())
     results.append(test_puls_nie_chrome_schliessen())
     results.append(test_tsx_konto_abgekuerzt())
@@ -3515,6 +3516,289 @@ def test_cdp_konto_regression_865():
         "Shift+T: Chart-Klick nur nach gedrücktem Restore, danach wieder maximiert")
     if ok:
         print("✓ Regression .865: fremde Liste kein Beleg, Abmelden nur mit Beleg, unlesbar = ehrlich raus, Umschalter auch maximiert")
+    return ok
+
+
+def test_tsx_k0():
+    """K0 (30.09.2026, Topstep-Komplett-Paket Plan v2): TopstepX über das Puls-Chrome — Regel je PC klebrig, Riegel in tsxlesen/
+    tsxorder/tsxinventar (nie UIA auf einem cdp-PC, ehrlich 'cdp_folgt'), TopstepX-Tab, Inventar-Kandidaten nur eindeutig und nie
+    Order-/Close-Knöpfe, Login-Klick nur mit Autofill-Beweis, Größen-Deckel, Puls-Chrome bleibt auf Topstep-PCs offen."""
+    import order_bot as ob
+    import inspect as _i
+    import io
+    import contextlib
+    import tempfile
+    import os as _os
+    import json
+    import re
+    import time
+    ok = True
+
+    def chk(bed, text):
+        nonlocal ok
+        if not bed:
+            print("  ✗ TSX-K0: " + text)
+            ok = False
+    PC = "pc-l5o8bv"
+    W = ob.tsx_regel_weiche
+    chk(W({"tsx": "cdp", "tsx_pc": PC, "tsx_at": 1.0}, PC) == "cdp" and W({"tsx": "cdp", "pc": PC}, PC) == "cdp"
+        and W({"tsx": "cdp", "tsx_pc": "pc-andere1"}, PC) == "uia" and W({"tsx": "uia"}, PC) == "uia" and W(None, PC) == "uia"
+        and W({"tsx": "cdp"}, None) == "uia", "Regel: 'cdp' klebrig (auch uralt), nur eigener PC; sonst 'uia'")
+    A = ob.tsx_regel_aus_antwort
+    chk(A({"ok": True, "augen": "uia", "tsx": "cdp"}) == "cdp" and A({"ok": True, "augen": "cdp"}) is None and A({"tsx": "x"}) is None
+        and A(None) is None, "Antwort ohne tsx = lokale Regel (nie stilles 'uia')")
+    F = ob.tsx_cdp_folgt
+    f1, f2, f3 = F("tsxlesen"), F("tsxorder"), F("tsxprobe")
+    chk(f1["code"] == f2["code"] == "cdp_folgt" and (f1["etappe"], f2["etappe"], f3["etappe"]) == ("K1", "K4", "K3")
+        and f2["gesendet"] is False and f2["retry_ok"] is False and "NICHT erneut starten" in f2["msg"], "cdp_folgt: Etappe, nichts gesendet, kein Neustart")
+    # Regel-Datei: augen und tsx verlieren sich nie gegenseitig; ohne Netz gilt die lokale tsx-Regel
+    alt_hier, alt_url = ob._AUGEN_HIER, None
+    import urllib.request as _ur
+    alt_url = _ur.urlopen
+    d = tempfile.mkdtemp()
+    try:
+        ob._AUGEN_HIER = d
+        ob._augen_json_schreiben("augen_regel.json", {"tsx": "cdp", "tsx_pc": PC, "tsx_at": 5.0})
+        ob._augen_regel_mischen({"augen": "uia", "at": 9.0, "pc": PC})
+        r1 = ob._augen_json_lesen("augen_regel.json")
+
+        def _kaputt(*a, **k):
+            raise OSError("kein Netz")
+        _ur.urlopen = _kaputt
+        v1 = ob._tsx_regel_holen(PC)
+
+        class _Antw:
+            def __init__(self, b):
+                self.b = b
+
+            def read(self):
+                return self.b
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+        _ur.urlopen = lambda *a, **k: _Antw(b'{"ok": true, "augen": "cdp", "tsx": "uia"}')
+        v2 = ob._tsx_regel_holen(PC)
+        r2 = ob._augen_json_lesen("augen_regel.json")
+        _ur.urlopen = lambda *a, **k: _Antw(b'{"ok": true, "augen": "uia", "tsx": "cdp"}')
+        v3 = ob._augen_regel_holen(PC)
+        r3 = ob._augen_json_lesen("augen_regel.json")
+    finally:
+        _ur.urlopen = alt_url
+        ob._AUGEN_HIER = alt_hier
+    chk(r1.get("tsx") == "cdp" and r1.get("augen") == "uia", f"augen-Regel schreiben behält tsx ({r1})")
+    chk(v1 == "cdp", "ohne Netz: lokale 'cdp'-Regel gilt (Riegel)")
+    chk(v2 == "uia" and r2.get("tsx") == "uia" and r2.get("augen") == "uia", f"ausdrückliches Server-'uia' schaltet zurück ({r2})")
+    chk(v3 == "uia" and r3.get("tsx") == "cdp" and r3.get("augen") == "uia", f"Augen-Abfrage nimmt tsx mit ({r3})")
+    # Riegel in den drei Modi
+    alt_weg, alt_lesen, alt_inv = ob.tsx_weg_lauf, ob.modus_tsxlesen, ob.modus_tsxinventar_cdp
+    auf = []
+    try:
+        ob.tsx_weg_lauf = lambda: "cdp"
+        o1 = io.StringIO()
+        with contextlib.redirect_stdout(o1):
+            ob.modus_tsxlesen({"konto": "EXPRESS-V2-682437-57131691"})
+        o2 = io.StringIO()
+        with contextlib.redirect_stdout(o2):
+            ob.modus_tsxorder({"ext_id": "150KTC-SKU-V2-682437-71275127", "symbol": "MNQ", "richtung": "buy", "volumen": 1, "tp_usd": 40, "scharf": True})
+        o3 = io.StringIO()
+        with contextlib.redirect_stdout(o3):
+            ob.modus_tsxorder({"ext_id": "150KTC-SKU-V2-682437-71275127", "symbol": "MNQ", "richtung": "buy", "volumen": 1, "tp_usd": 40})
+        ob.modus_tsxinventar_cdp = lambda c: auf.append(("inv", c))
+        ob.modus_tsxinventar({"x": 1})
+        ob.tsx_weg_lauf = lambda: "uia"
+        ob.modus_tsxlesen = lambda c, **kw: auf.append(("lesen", c, kw.get("weg")))
+        ob.modus_tsxorder({"ext_id": "150KTC-SKU-V2-682437-71275127", "symbol": "MNQ", "richtung": "buy", "volumen": 1, "tp_usd": 40})
+    finally:
+        ob.tsx_weg_lauf, ob.modus_tsxlesen, ob.modus_tsxinventar_cdp = alt_weg, alt_lesen, alt_inv
+    j1, j2, j3 = (json.loads(o.getvalue()) for o in (o1, o2, o3))
+    chk(j1["code"] == "cdp_folgt" and j1["etappe"] == "K1", f"tsxlesen auf cdp-PC → cdp_folgt K1 ({j1})")
+    chk(j2["code"] == "cdp_folgt" and j2["etappe"] == "K4" and j2["gesendet"] is False, f"tsxorder scharf → K4, nichts gesendet ({j2})")
+    chk(j3["etappe"] == "K3", "tsxorder Probe → K3")
+    chk(("inv", {"x": 1}) in auf, "tsxinventar auf cdp-PC → CDP-Inventar (K0)")
+    chk(any(a[0] == "lesen" and a[2] == "uia" for a in auf), "uia-PC: tsxorder geht mit bestimmtem Weg in den alten Lese-Zweig (bytegleich)")
+    q_o = _i.getsource(ob.modus_tsxorder)
+    chk(q_o.index("tsx_weg_lauf()") < q_o.index("modus_tsxlesen("), "tsxorder prüft den Weg VOR dem Lese-Zweig")
+    for f in (ob.modus_tsxinventar, ob.modus_tsxlesen):
+        q = _i.getsource(f)
+        chk("tsx_weg_lauf()" in q and q.index("tsx_weg_lauf()") < q.index("_StempelSpur()"), f"{f.__name__}: Riegel vor jedem UIA-Schritt")
+    # Tab
+    T = ob.tsx_targets
+    lst = [{"type": "page", "url": "https://www.tradingview.com/chart/x/"}, {"type": "page", "url": "https://topstepx.com/login", "id": "a"},
+           {"type": "page", "url": "https://topstepx.com/trade", "id": "b"}, {"type": "iframe", "url": "https://topstepx.com/trade"}]
+    chk([t["id"] for t in T(lst)] == ["b", "a"] and T(None) == [], "TopstepX-Tab: /trade zuerst, nur Seiten")
+    # Kandidaten
+    E = ob.tsx_k0_eindeutig
+    k_ok = {"text": "$150K EXPRESS | EXPRESS-V2-682437-57131691", "rect": [10, 60, 300, 32]}
+    chk(E([k_ok], "konto")[0] is k_ok and E([k_ok, dict(k_ok, rect=[10, 90, 300, 32])], "konto")[0] is None
+        and E([dict(k_ok, aria="Close")], "konto")[0] is None and E([dict(k_ok, aus=True)], "konto")[0] is None
+        and E([{"text": "Balance $150,000", "rect": [1, 1, 9, 9]}], "konto")[0] is None,
+        "Konto-Auslöser: genau einer, nie gesperrt, nie mit Close-Wort, nur mit Konto-Text")
+    g_ok = {"aria": "Manage Brackets", "text": "", "rect": [500, 700, 24, 24]}
+    chk(E([g_ok], "bracket")[0] is g_ok and E([g_ok, {"aria": "Buy Market", "rect": [1, 1, 20, 20]}], "bracket")[0] is g_ok
+        and "verworfen" in E([{"text": "Flatten", "rect": [1, 1, 20, 20]}], "bracket")[1], "Bracket-Zahnrad: Order-/Flatten-Knöpfe fallen raus")
+    B = ob.tsx_login_beweis
+    lg = {"seite": True, "knoepfe": 1, "knopf": {"rect": [700, 500, 200, 40]}, "user": {"autofill": True}, "pw": {"autofill": True}}
+    chk(B(lg)[0] and not B(dict(lg, pw={"gefuellt": False}))[0] and not B(dict(lg, knopf=None))[0]
+        and not B(dict(lg, zwei_faktor=True))[0] and not B(dict(lg, fehler_text="Invalid password"))[0] and not B(None)[0],
+        "Login-Klick nur mit Autofill-Beweis, nie bei 2FA/Fehler/ohne eindeutigen Knopf")
+    chk(not B(dict(lg, user={"gefuellt": True}, pw={"gefuellt": True}))[0], "gefüllt ohne Chrome-Autofill reicht nicht (Fehlversuch-Schleife)")
+    chk(E([dict(k_ok, role="option")], "konto")[0] is None, "eine Listen-Zeile (role option) ist nie der Auslöser")
+    P_ = ob.tsx_k0_pruef(k_ok)
+    chk(P_["text"] == "EXPRESS-V2-682437-57131691" and P_["rect"] == [10, 60, 300, 32] and P_["tabu"] == ob.TSX_K0_TABU.pattern,
+        f"Ziel-Merkmale für den Druck ({P_})")
+    # Login-Merker: kein zweiter Klick innerhalb von 30 min (auch nicht im nächsten Lauf)
+    class _SL:
+        def __init__(self):
+            self.klicks = []
+
+        def lese_js(self, a, timeout=8):
+            return {"login": lg}
+
+        def klick(self, r, n, toast_ok=False, pruef=None):
+            self.klicks.append((n, pruef))
+            return True
+    d3 = tempfile.mkdtemp()
+    alt_h, alt_w = ob._AUGEN_HIER, ob._warte
+    try:
+        ob._AUGEN_HIER, ob._warte = d3, (lambda a_, b_: None)
+        ob._augen_json_schreiben("tsx_login.json", {"at": time.time() - 120})
+        sl, tl = _SL(), []
+        r_sl = ob._tsx_cdp_login(sl, tl)
+        _os.remove(_os.path.join(d3, "tsx_login.json"))
+        sl2, tl2 = _SL(), []
+        alt_t = ob.time
+        uhr = {"t": 1000.0}
+
+        class _Uhr:
+            @staticmethod
+            def time():
+                uhr["t"] += 5.0
+                return uhr["t"]
+        ob.time = _Uhr
+        try:
+            r_sl2 = ob._tsx_cdp_login(sl2, tl2)
+        finally:
+            ob.time = alt_t
+        merk = ob._augen_json_lesen("tsx_login.json")
+    finally:
+        ob._AUGEN_HIER, ob._warte = alt_h, alt_w
+    chk(isinstance(r_sl, str) and "kein neuer Versuch" in r_sl and sl.klicks == [], f"Login-Klick vor 2 min → kein neuer ({r_sl})")
+    chk(isinstance(r_sl2, str) and len(sl2.klicks) == 1 and sl2.klicks[0][1] and "login" in sl2.klicks[0][1]["text"] and merk,
+        f"erster Login: genau EIN Klick mit Ziel-Beweis, Merker gesetzt ({sl2.klicks}, {r_sl2})")
+    # Regel-Datei: keine Sperr-/tmp-Reste; Rückschalten cdp → uia schließt TopstepX-Tabs im Puls-Chrome
+    d4 = tempfile.mkdtemp()
+    alt_h, alt_c, alt_z = ob._AUGEN_HIER, ob._cdp_http, ob._cdp_tab_schliessen
+    zu4 = []
+    ob._cdp_tab_schliessen = lambda tid: zu4.append("/json/close/" + str(tid)) or True
+    try:
+        ob._AUGEN_HIER = d4
+        ob._augen_json_schreiben("augen_regel.json", {"tsx": "cdp", "tsx_pc": PC})
+        ob._cdp_http = lambda pfad, *a, **k: (zu4.append(pfad) or ([{"type": "page", "id": "ts9", "url": "https://topstepx.com/trade"}]
+                                                                   if pfad == "/json/list" else {}))
+        _ur.urlopen = lambda *a, **k: _Antw(b'{"ok": true, "augen": "uia", "tsx": "uia"}')
+        v5 = ob._tsx_regel_holen(PC)
+        zu5 = list(zu4)
+        reste = [n for n in _os.listdir(d4) if n.endswith(".tmp") or n.endswith(".lock")]
+        # Rückschaltung kommt zuerst beim Augen-Prozess an → auch dort TopstepX-Tabs zu
+        ob._augen_json_schreiben("augen_regel.json", {"augen": "cdp", "at": 1.0, "tsx": "cdp", "tsx_pc": PC})
+        zu4.clear()
+        _ur.urlopen = lambda *a, **k: _Antw(b'{"ok": true, "augen": "cdp", "tsx": "uia"}')
+        v6 = ob._augen_regel_holen(PC)
+        zu6 = list(zu4)
+        zu4.clear()
+        v7 = ob._tsx_regel_holen(PC)             # zweiter Lauf: Datei schon 'uia' → kein Schreiben, kein Schließen
+        zu7 = list(zu4)
+    finally:
+        _ur.urlopen, ob._AUGEN_HIER, ob._cdp_http, ob._cdp_tab_schliessen = alt_url, alt_h, alt_c, alt_z
+    chk(v6 == "cdp" and "/json/close/ts9" in zu6 and v7 == "uia" and zu7 == [],
+        f"Rückschaltung über den Augen-Prozess schließt TopstepX-Tabs, danach nichts mehr ({zu6}, {zu7})")
+    chk(v5 == "uia" and "/json/close/ts9" in zu5 and not reste, f"cdp → uia: TopstepX-Tab im Puls-Chrome zu, keine Reste ({zu5}, {reste})")
+    q_z = _i.getsource(ob._tsx_k0_zustand)
+    chk("pruef=tsx_k0_pruef(el)" in q_z and q_z.index("s._win_vorn()") < q_z.index("TSX_K0_BLICK_JS") and "erlaubt_dialog" in q_z,
+        "Zustand: erst nach vorn, dann lesen; Druck mit Ziel-Beweis; Esc nie über fremdem Dialog")
+    q_i2 = _i.getsource(ob.modus_tsxinventar_cdp)
+    chk("threading.Timer(TSX_K0_WACHHUND_S" in q_i2 and "wh.cancel()" in q_i2 and ob.TSX_K0_WACHHUND_S < 150
+        and '"_nicht_zu"' in q_i2, "Wachhund unter 150 s löst Sperre; Bracket nur nach bewiesen geschlossener Liste")
+    q_k2 = _i.getsource(ob._AugenSitzung._win_klick)
+    chk("win_ziel_pruef_js(" in q_k2 and 'not v.get("passt")' in q_k2, "Windows-Druck mit Ziel-Beweis, ohne passenden Kandidaten kein Druck")
+    D = ob.tsx_inventar_deckeln
+    gross = {"zustand": "grund", "inventar": {"elemente": [{"t": "x" * 200}] * 400, "blatt": [{"t": "y" * 100}] * 300, "stand": {"a": 1}}}
+    dk = D(gross, max_bytes=30000)
+    chk(len(json.dumps(dk, ensure_ascii=False)) <= 30000 and dk["inventar"].get("gekuerzt") and dk["zustand"] == "grund"
+        and D({"inventar": {"elemente": [1]}}) == {"inventar": {"elemente": [1]}}, "Größen-Deckel: kürzt von hinten, Kopf bleibt")
+    S = ob.augen_stand_sha
+    chk(S({"sha": "abc"}, "augen.js") == "abc" and S({"sha": "abc"}, "augen_tsx.js") is None
+        and S({"dateien": {"augen.js": "a1", "augen_tsx.js": "t1"}}, "augen_tsx.js") == "t1" and S(None, "augen.js") is None,
+        "sha je Augen-Datei (alte Form nur für augen.js)")
+    try:
+        ob._augen_js_holen([], "../app.py")
+        chk(False, "fremde Datei darf nicht geholt werden")
+    except ValueError:
+        pass
+    # Puls-Chrome bleibt auf einem Topstep-PC offen, auch wenn TradingView dort 'uia' ist
+    alt = {n: getattr(ob, n) for n in ("_augen_pc_id", "_augen_regel_holen", "_cdp_http", "_handlauf_aktiv", "_AUGEN_HIER")}
+    http = []
+    d2 = tempfile.mkdtemp()
+    try:
+        ob._AUGEN_HIER = d2
+        ob._augen_json_schreiben("augen_regel.json", {"augen": "uia", "at": 1.0, "tsx": "cdp", "tsx_pc": PC})
+        ob._augen_pc_id = lambda: PC
+        ob._augen_regel_holen = lambda pc: "uia"
+        ob._AUGEN_REGEL_STAND["explizit"] = True
+        ob._AUGEN_REGEL_STAND["tsx"] = None          # Antwort ohne tsx → die Datei zählt
+        ob._cdp_http = lambda *a, **k: http.append(a) or None
+        ob._handlauf_aktiv = lambda: False
+        o4 = io.StringIO()
+        with contextlib.redirect_stdout(o4):
+            ob.modus_augen({})
+    finally:
+        for n, v in alt.items():
+            setattr(ob, n, v)
+    j4 = json.loads(o4.getvalue())
+    chk(j4.get("ok") and "bleibt offen" in j4.get("msg", "") and all(a[0] == "/json/list" for a in http),
+        f"Topstep-PC: kein Browser.close ({j4.get('msg')}, {http})")
+    # … aber TradingView-Tabs im Puls-Chrome zu (Reader-Kick 29.09.), der TopstepX-Tab bleibt
+    http2 = []
+    alt["_cdp_tab_schliessen"] = ob._cdp_tab_schliessen
+    ob._cdp_tab_schliessen = lambda tid: http2.append("/json/close/" + str(tid)) or True
+    tabs = [{"type": "page", "id": "tv1", "url": "https://www.tradingview.com/chart/x/"}, {"type": "page", "id": "ts1", "url": "https://topstepx.com/trade"}]
+    try:
+        ob._AUGEN_HIER = d2
+        ob._augen_pc_id = lambda: PC
+        ob._augen_regel_holen = lambda pc: "uia"
+        ob._cdp_http = lambda pfad, *a, **k: (http2.append(pfad) or (tabs if pfad == "/json/list" else {}))
+        ob._handlauf_aktiv = lambda: False
+        with contextlib.redirect_stdout(io.StringIO()):
+            ob.modus_augen({})
+    finally:
+        for n, v in alt.items():
+            setattr(ob, n, v)
+    chk("/json/close/tv1" in http2 and "/json/close/ts1" not in http2 and "/json/version" not in http2,
+        f"Topstep-PC: nur TradingView-Tabs geschlossen ({http2})")
+    # Quelltext-Riegel: Lese-Blicke klicken/tippen nie; Sitzung für TopstepX ohne TradingView-Aufräumen; Befehl 'augen start tsx'
+    for js in (ob.TSX_K0_BLICK_JS, ob.TSX_K0_CHART_JS):
+        chk(".click(" not in js and "dispatchEvent" not in js and ".focus(" not in js and not re.search(r"\.value\s*=[^=]", js)
+            and "submit(" not in js, "K0-Blicke lesen nur")
+    sig = _i.signature(ob._AugenSitzung.__init__).parameters
+    q_k = _i.getsource(ob._AugenSitzung.klick)
+    chk("js_datei" in sig and "tv_riegel" in sig and 'getattr(self, "tv_riegel", True)' in q_k and "if tv:" in q_k,
+        "Sitzung: Augen-Datei wählbar, TopstepX ohne Werbung/Meldungen wegklicken")
+    q_i = _i.getsource(ob.modus_tsxinventar_cdp)
+    chk('js_datei="augen_tsx.js", tv_riegel=False' in q_i and "_handlauf_setzen(True)" in q_i and "_handlauf_setzen(False)" in q_i
+        and "_tsx_cdp_login(" in q_i, "K0-Inventar: augen_tsx.js, Sperre für andere Puls-Chrome-Läufe, Login nur über den Beweis")
+    q_m = _i.getsource(ob.main)
+    chk('cmd["tsx"] = True' in q_m and "augen start tsx" in _i.getsource(ob.modus_augen), "Befehl 'augen start tsx' öffnet den TopstepX-Tab")
+    q_l = _i.getsource(ob._tsx_cdp_login)
+    chk(q_l.count("s.klick(") == 1 and "tippen" not in q_l.replace("nie tippen", "") and "Enter" not in q_l.replace("nie Enter", ""),
+        "Login: genau ein Klick, nie tippen, nie Enter")
+    js_d = _os.path.join(_os.path.dirname(_os.path.abspath(ob.__file__)), "augen_tsx.js")
+    chk(_os.path.exists(js_d) and "globalThis.prophosAugen = PROPHOS_AUGEN_TSX" in open(js_d, encoding="utf-8").read(),
+        "augen_tsx.js liegt neben dem Bot (Terminal 2)")
+    if ok:
+        print("✓ TSX-K0: Regel klebrig, Riegel in allen tsx-Modi, TopstepX-Tab, Inventar-Kandidaten eindeutig, Login nur mit Autofill-Beweis")
     return ok
 
 
