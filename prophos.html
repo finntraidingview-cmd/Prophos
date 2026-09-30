@@ -1514,7 +1514,6 @@
      einzelnen Chart nebeneinander … allgemein so viel mehr Daten mit einer cleanen Übersicht") */
   #adm-pane-stat .kf-chart .kf-titel{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:baseline}
   #adm-pane-stat .kf-mini-sum{font-weight:400;font-variant-numeric:tabular-nums}
-  #adm-pane-stat .kf-mini-cv{position:relative;height:170px;margin-top:4px}
   #adm-pane-kapitel .kap-regel,#adm-pane-stat .kap-regel{font-size:11px;color:var(--sub);margin:-2px 0 6px}
   #adm-pane-stat .kf-trades .adm-row-name{display:flex;align-items:flex-start}
   #adm-pane-stat .kf-trades .adm-row-name .adm-dot{margin-top:5px}
@@ -1550,6 +1549,10 @@
   /* Admin-Reiter: einzeilig + horizontal scrollbar wie am Handy (sonst brechen die Beschriftungen zweizeilig um) */
   #dashboard-view #kasse-content > .subtabs{overflow-x:auto;scrollbar-width:thin}
   #dashboard-view #kasse-content > .subtabs .subtab{white-space:nowrap;flex-shrink:0}
+  /* Kompass + Rechnungen rechtsbündig unter „sperren", klein und gedämpft (30.09.2026, Finn: „wo man sie quasi nicht sieht");
+     aktiv setzt der Tab-Handler die Farbe inline (violett) — dann sehen sie normal aus */
+  #dashboard-view #kasse-content > .subtabs .adm-tab-rand{font-size:12px;padding-left:10px;padding-right:10px;color:var(--sub-2)}
+  #dashboard-view #kasse-content > .subtabs .adm-tab-rand-erst{margin-left:auto}
   #af-view .af-kpis{grid-template-columns:repeat(auto-fit,minmax(120px,1fr))}
   /* Tages-Überblick (28.09.2026): Trades heute, Long/Short, Ausgleich als Balken */
   #af-view .af-heute{margin:12px 0 14px}
@@ -1593,25 +1596,13 @@
   #adm-pane-stat .kf-gross .kf-chart[hidden]{display:none}
   #adm-pane-stat .kf-gross .kf-chart .kf-titel{margin-top:4px;font-size:13px}
   #adm-pane-stat .kf-gross .adm-vl{height:360px}
-  #adm-pane-stat .kf-gross .kf-mini-cv{height:320px}
   /* Oberkategorie: Titel links, Unter-Auswahl rechts, darunter EINE Fläche (24.09.2026 abends) */
   #adm-pane-stat .kf-gruppe{margin-top:12px;padding:12px 14px 10px;border:1px solid var(--border-soft);border-radius:12px;background:var(--surface,#fff)}
   #adm-pane-stat .kf-gruppe-kopf{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
   #adm-pane-stat .kf-gruppe-kopf .kf-abschnitt{margin-top:0}
   #adm-pane-stat .kf-gruppe-kopf .kf-chip-bar{margin-top:0}
-  /* Kalender-Heatmap (24.09.2026 abends): reines HTML-Raster, kein Chart.js */
-  #adm-pane-stat .kf-kal-wrap{display:flex;gap:6px;margin-top:8px;align-items:stretch}
-  #adm-pane-stat .kf-kal-tage{display:grid;grid-template-rows:repeat(7,1fr);gap:3px;font-size:10px;color:var(--sub);font-family:var(--mono);line-height:1}
-  #adm-pane-stat .kf-kal-tage span{display:flex;align-items:center}
-  #adm-pane-stat .kf-kal{flex:1;display:grid;grid-auto-flow:column;grid-template-rows:repeat(7,1fr);gap:3px;min-height:150px}
-  #adm-pane-stat .kf-kal .z{border-radius:3px;background:var(--surface-tint);cursor:default;min-width:8px;transition:transform .1s var(--ease)}
-  #adm-pane-stat .kf-kal .z.hat{cursor:pointer}
-  #adm-pane-stat .kf-kal .z.hat:hover{transform:scale(1.15)}
-  #adm-pane-stat .kf-kal .z.is-on{outline:2px solid var(--violet);outline-offset:1px}
-  #adm-pane-stat .kf-kal .z.leer{background:transparent}
-  #adm-pane-stat .kf-kal-monate{display:flex;justify-content:space-between;font-size:10px;color:var(--sub);font-family:var(--mono);margin-top:4px;padding-left:28px}
   @media (max-width:600px){
-    #adm-pane-stat .kf-gross .adm-vl,#adm-pane-stat .kf-gross .kf-mini-cv{height:280px}
+    #adm-pane-stat .kf-gross .adm-vl{height:280px}
     /* Zeilen-Raster mobil (Review 24.09.2026, F4): Trade-Liste und Quoten liefen über die Seitenbreite */
     #adm-pane-stat .kf-trades .adm-row{grid-template-columns:minmax(0,1fr) auto;grid-auto-rows:auto;gap:4px 10px}
     #adm-pane-stat .kf-trades .adm-row .adm-pct{grid-column:1 / -1}
@@ -8270,15 +8261,18 @@
         <div class="subtabs">
           <button class="subtab active adm-tab" data-admtab="overview">Übersicht</button>
           <button class="subtab adm-tab" data-admtab="wd">Winning Days</button>
-          <button class="subtab adm-tab" data-admtab="kompass">Kompass</button>
-          <button class="subtab adm-tab" data-admtab="kapitel">📖 Kapitel</button>
-          <button class="subtab adm-tab" data-admtab="stat">📊 Statistik</button>
+          <!-- Kapitel/Statistik ohne Emojis (Finn 30.09.2026: „die Emojis weg, die nerven") -->
+          <button class="subtab adm-tab" data-admtab="kapitel">Kapitel</button>
+          <button class="subtab adm-tab" data-admtab="stat">Statistik</button>
           <button class="subtab adm-tab" data-admtab="buys">Acc-Käufe</button>
           <button class="subtab adm-tab" data-admtab="fin">Payouts</button>
           <!-- Kasse ausgeblendet (Finn 24.09.2026: „mach Kasse mal weg, das nutzen wir aktuell nicht mehr") — Pane + JS bleiben, nur der Reiter ist weg -->
           <button class="subtab adm-tab" data-admtab="kasse" style="display:none">Kasse</button>
           <button class="subtab adm-tab" data-admtab="wallet">Meta Wallet</button>
-          <button class="subtab adm-tab" data-admtab="rg">Rechnungen</button>
+          <!-- Kompass + Rechnungen ganz rechts unter „sperren", klein und gedämpft (Finn 30.09.2026: „ganz nach rechts, unter das
+               ‚sperren', wo man sie quasi nicht sieht. Braucht man eh nicht, fast ganz weg, aber behalten") — Pane/Umschaltung unverändert -->
+          <button class="subtab adm-tab adm-tab-rand adm-tab-rand-erst" data-admtab="kompass">Kompass</button>
+          <button class="subtab adm-tab adm-tab-rand" data-admtab="rg">Rechnungen</button>
         </div>
 
         <!-- ÜBERSICHT: Kapitalverteilung über alle Personen -->
@@ -8671,7 +8665,7 @@
               </div>
             </div>
             <div class="kap-karten" id="adm-kap-karten"></div>
-            <div class="kap-regel" style="margin:0 0 10px">Die Auswertung „Ohne Hedge" (Kontrafakt, Reibung, Duplikum, Kategorien) steht im Reiter <b>📊 Statistik</b>.</div>
+            <div class="kap-regel" style="margin:0 0 10px">Die Auswertung „Ohne Hedge" (Kontrafakt, Reibung, Duplikum, Kategorien) steht im Reiter <b>Statistik</b>.</div>
             <div class="panel">
               <div class="panel-head">
                 <div>
@@ -8767,26 +8761,8 @@
                     </div>
                   </div>
                 </div>
-                <div class="kf-abschnitt">Trades</div>
-                <div class="kpis kf-kpis" id="adm-kf-kpis2"></div>
-                <!-- Oberkategorie „Trades im Zeitverlauf" (24.09.2026 abends, Finn: „für eine Oberkategorie ein Chart, unterteilt … viel cleaner") -->
-                <div class="kf-gruppe" data-kf-gruppe="trades">
-                  <div class="kf-gruppe-kopf"><div class="kf-abschnitt">Trades im Zeitverlauf</div><div class="kf-chip-bar" data-kf-chips="trades"></div></div>
-                  <div class="kf-gross">
-                    <div class="kf-chart" data-kf-chart="tag" hidden><div class="kf-titel">Je Tag · Mit Hedge vs. Real <span class="adm-sub kf-mini-sum" id="adm-kf-sum-tag"></span></div><div class="kf-sub">links Hedge hypothetisch (€, Kapitel-Farbe), rechts Master-P&amp;L real ($, grün/rot) · Klick auf einen Tag filtert</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-tag"></canvas></div></div>
-                    <div class="kf-chart" data-kf-chart="pnl" hidden><div class="kf-titel">Verteilung Master-P&amp;L je Trade <span class="adm-sub kf-mini-sum" id="adm-kf-sum-pnl"></span></div><div class="kf-sub">Anzahl Trades je 1.000-$-Stufe (−2k … +8k $) · Klick auf eine Stufe filtert</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-pnl"></canvas></div></div>
-                    <!-- Kalender-Heatmap (24.09.2026 abends): Wochen als Spalten, Mo–So als Zeilen, Farbe = Master-P&L des Tages -->
-                    <div class="kf-chart" data-kf-chart="kal" hidden>
-                      <div class="kf-titel">Kalender · Master-P&amp;L je Tag <span class="adm-sub kf-mini-sum" id="adm-kf-sum-kal"></span></div>
-                      <div class="kf-sub">letzte 16 Wochen, Spalte = Woche, Zeile = Wochentag · grün = Plus, rot = Minus, je kräftiger, desto mehr · Klick auf einen Tag filtert</div>
-                      <div class="kf-kal-wrap"><div class="kf-kal-tage"><span>Mo</span><span>Di</span><span>Mi</span><span>Do</span><span>Fr</span><span>Sa</span><span>So</span></div><div class="kf-kal" id="adm-kf-kal"></div></div>
-                      <div class="kf-kal-monate" id="adm-kf-kal-monate"></div>
-                    </div>
-                    <div class="kf-chart" data-kf-chart="std" hidden><div class="kf-titel">Nach Stunde (Dubai) <span class="adm-sub kf-mini-sum" id="adm-kf-sum-std"></span></div><div class="kf-sub">Stunde des Trade-Endes in Dubai-Zeit · Balken links = Mit Hedge (hypothetisch, €) in Kapitel-Farbe · rechts = Master-P&amp;L real ($) · Klick auf einen Balken filtert alles, nochmal = aus</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-std"></canvas></div></div>
-                    <div class="kf-chart" data-kf-chart="dauer" hidden><div class="kf-titel">Nach Haltedauer <span class="adm-sub kf-mini-sum" id="adm-kf-sum-dauer"></span></div><div class="kf-sub">Zeit vom Start bis zum Ende des Trades · Balken links = Mit Hedge (hypothetisch, €) in Kapitel-Farbe · rechts = Master-P&amp;L real ($) · Klick auf einen Balken filtert alles, nochmal = aus</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-dauer"></canvas></div></div>
-                    <div class="kf-chart" data-kf-chart="wt" hidden><div class="kf-titel">Nach Wochentag <span class="adm-sub kf-mini-sum" id="adm-kf-sum-wt"></span></div><div class="kf-sub">Balken links = Mit Hedge (hypothetisch, €) in Kapitel-Farbe · rechts = Master-P&amp;L real ($) · Klick auf einen Balken filtert alles, nochmal = aus</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-wt"></canvas></div></div>
-                  </div>
-                </div>
+                <!-- „Trades" (acht Kacheln) und „Trades im Zeitverlauf" (Je Tag, Kalender, Verteilung, Wochentag, Stunde, Haltedauer)
+                     entfernt (Finn 30.09.2026 am Screenshot: „komplett unnötig, das verschmutzt nur alles. Kannst einfach weg machen"). -->
                 <!-- „Nach Kategorie" (Symbol/Weg/Richtung/Firma/Kontotyp/Kontogröße/Konto/Person) entfernt
                      (Finn 24.09.2026 spät am Screenshot: „mies, untauglich, der kann weg"). -->
                 <!-- Oberkategorie „Reibung" (24.09.2026 abends, Finn: „für eine Oberkategorie ein Chart, unterteilt … viel cleaner") -->
@@ -8831,18 +8807,8 @@
                   <div class="adm-vl"><canvas id="adm-kf-chart-tp"></canvas></div>
                 </div>
                 <div class="adm-dist kf-rows kf-trades" id="adm-kf-rows-t"></div>
-                <!-- Kosten nach Prop-Firma (25.09.2026 abends, Finn: „da drunter noch einen Chart, wie sich die Kosten aus den
-                     jeweiligen Prop-Firmen ergeben, wie viel, und daraus noch ein paar Charts"): dieselben Trades wie die Liste,
-                     Hedge hypothetisch (€, Quote × Master − Reibung) je Firma, je Firma · Typ und als Verlauf. -->
-                <div class="kf-gruppe" data-kf-gruppe="firma">
-                  <div class="kf-gruppe-kopf"><div class="kf-abschnitt">Kosten nach Prop-Firma</div><div class="kf-chip-bar" data-kf-chips="firma"></div></div>
-                  <div class="kf-gross">
-                    <div class="kf-chart" data-kf-chart="fS" hidden><div class="kf-titel">Hedge-Kosten je Firma <span class="adm-sub kf-mini-sum" id="adm-kf-sum-fS"></span></div><div class="kf-sub">links Hedge hypothetisch (€, Kapitel-Farbe) = was der Gegenhedge bei dieser Firma gekostet hätte · rechts Master-P&amp;L real ($) · Klick filtert auf die Firma</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-fS"></canvas></div></div>
-                    <div class="kf-chart" data-kf-chart="fT" hidden><div class="kf-titel">Hedge-Kosten je Firma · Typ <span class="adm-sub kf-mini-sum" id="adm-kf-sum-fT"></span></div><div class="kf-sub">wie links, aufgeteilt nach Challenge / Phase / Funded / Winning Day · Klick filtert auf Firma · Typ</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-fT"></canvas></div></div>
-                    <div class="kf-chart" data-kf-chart="fA" hidden><div class="kf-titel">Ø Hedge je Trade und Firma <span class="adm-sub kf-mini-sum" id="adm-kf-sum-fA"></span></div><div class="kf-sub">Hedge hypothetisch je Trade (€) im Schnitt · rechts die Quote (€ Hedge je $ Master, aus der Hedge-Ära bzw. Vorgabe) · Klick filtert auf die Firma</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-fA"></canvas></div></div>
-                    <div class="kf-chart" data-kf-chart="fV" hidden><div class="kf-titel">Verlauf · Hedge-Kosten kumuliert je Firma</div><div class="kf-sub">Hedge hypothetisch, aufsummiert über die Tage des Kapitels, eine Linie je Firma, gestrichelt = alle zusammen · Klick auf Chip oder Linie filtert auf die Firma</div><div class="adm-vl"><canvas id="adm-kf-chart-fV"></canvas></div><div class="adm-vl-legend" id="adm-kf-legend-fV"></div></div>
-                  </div>
-                </div>
+                <!-- „Kosten nach Prop-Firma" (Je Firma, Je Firma · Typ, Ø je Trade, Verlauf) entfernt
+                     (Finn 30.09.2026 am Screenshot: „der auch weg"). -->
               </div>
             </div>
         </div>
@@ -11459,7 +11425,6 @@
       if(Date.now() - admKapGeladenAt > ADM_CACHE_MS) admKapitelLaden()   // still im Hintergrund, Stand bleibt sichtbar
       if(admKapChart){ try { admKapChart.resize() } catch(_){} }
       for(const n of ['kfhyp', 'kfreal', 'kfreib', 'kfdup']){ if(admVlCharts[n]){ try { admVlCharts[n].resize() } catch(_){} } }
-      for(const c of Object.values(admKfCharts)){ if(c){ try { c.resize() } catch(_){} } }
     }
     function admKapitelRender(d){
       admKapData = d
@@ -11728,10 +11693,6 @@
       const a = Number(t.reibung_anteil), r = Number(t.reibung_real); if(a > 0 && Number.isFinite(r)) return r / a
       const m = Number(admKapData?.reibung_gruppen?.global?.median); return Number.isFinite(m) ? m : admKfReibGlobal() * 2 }
     const admKfHyp = (t, fx) => { const q = admKfQ(t); return -admKapNum(t.master_pl) * (q !== null ? q : fx) * admKf.param.faktor - admKfReib(t) }
-    // P&L-Stufe für das Histogramm: 1.000-$-Schritte von −2k bis +8k, Ränder gesammelt
-    const admKfMinus = n => String(n).replace('-', '−')   // typografisches Minus wie überall im Panel
-    const admKfBucket = v => v < -2000 ? '< −2k' : v >= 8000 ? '≥ 8k' : (lo => `${admKfMinus(lo / 1000)}…${admKfMinus(lo / 1000 + 1)}k`)(Math.floor(v / 1000) * 1000)
-    const ADM_KF_BUCKETS = ['< −2k', ...Array.from({ length: 10 }, (_, k) => `${admKfMinus(k - 2)}…${admKfMinus(k - 1)}k`), '≥ 8k']
     const admKfQFmt = q => admKfDe(q, 3) + ' €/$'   // drei Stellen (24.09.2026 abends, Finn: „auf den dritten Cent — eher 0,04 oder 0,045")
     // 'wd' = Winning Day (25.09.2026, Finn: „unterscheiden zwischen Funded, Winning Day und Challenge") — Backend
     // ordnet Funded-Trades mit Master-Risiko < 1.000 $ so ein, Funded bleibt der Big Trade.
@@ -11743,17 +11704,12 @@
     const admKfFirmColor = firm => { let h = 0; for(const ch of String(firm || '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return ADM_P_COLORS[h % ADM_P_COLORS.length] }
     const admKfUsdKurz = v => Math.abs(v) >= 1000 ? (v / 1000).toLocaleString('de-DE', { maximumFractionDigits:1 }) + 'k $' : Math.round(v) + ' $'
     const ADM_KF_WEG = { mt5v2: 'Echo V2', tvv2: 'Orbit V2', wd: 'Winning Days', tsv2: 'Topstep V2', mt5: 'Echo', tvplus: 'Orbit', dup: 'Duplikum' }
-    const admKfWochentag = d => { const x = d ? new Date(d + 'T12:00:00Z') : null; return x && !isNaN(x) ? ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'][x.getUTCDay()] : '—' }
-    const ADM_KF_WT = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So', '—']
-    const admKfStdNum = k => { const n = parseInt(k); return Number.isFinite(n) ? n : 99 }   // „00 h" ist 0, nicht „fehlt" (Review F5)
-    const ADM_KF_DAUER = ['< 5 min', '5–15 min', '15–30 min', '30–60 min', '1–2 h', '2–6 h', '> 6 h', '—']
-    const admKfDauerBucket = m => m == null || !Number.isFinite(Number(m)) ? '—' : (v => v < 5 ? '< 5 min' : v < 15 ? '5–15 min' : v < 30 ? '15–30 min' : v < 60 ? '30–60 min' : v < 120 ? '1–2 h' : v < 360 ? '2–6 h' : '> 6 h')(Number(m))
     const admKfRi = r => r === 'buy' ? 'BUY' : r === 'sell' ? 'SELL' : '—'
     // Symbol (24.09.2026, Finn: „—" bei Echo V2 soll „CFD · Echo V2" heißen): MT5-Weg → Wurzel aus dem
     // Firmen-Standard-Symbol (Backend symbol_quelle 'firma'), sonst „CFD"; Futures-Wege → NQ/MNQ wie gehabt.
     const admKfSym = t => t.route === 'mt5v2' ? (t.master_symbol_root || 'CFD') + ' · Echo V2' : (t.master_symbol_root || '—')
-    // [Titel, Wert je Trade, Anzeige-Label] — Filter-Arten; jede Art hat seit 24.09.2026 einen eigenen Chart
-    // (admKfDimCharts / Tag / Histogramm), Person läuft über admKf.person. 'q' = Firma · Typ (Quoten-Zeilen, Reibung-Chart).
+    // [Titel, Wert je Trade, Anzeige-Label] — Filter-Arten; Person läuft über admKf.person. 'q' = Firma · Typ (Quoten-Zeilen),
+    // 'firm' = Firma (Reibung je Firma). Tag/P&L-Stufe/Wochentag/Stunde/Haltedauer sind mit „Trades im Zeitverlauf" raus (30.09.2026).
     const ADM_KF_ARTEN = { sym:  ['Symbol',   admKfSym, w => w],
                            weg:  ['Weg',      t => (t.route === 'tvv2' && (String(t.master_typ || '').toLowerCase() === 'wd' || Number(t.hedge_eur) > 0)) ? 'wd' : (t.route || '—'), w => ADM_KF_WEG[w] || w],   // Winning Days als eigener Weg (25.09.2026)
                            ri:   ['Richtung', t => admKfRi(t.richtung), w => w],
@@ -11761,16 +11717,9 @@
                            typ:  ['Kontotyp', t => admKfTyp(t.master_typ), w => w],
                            // Zwei weitere Dimensionen (24.09.2026 abends, Finn: „mach doch 1–2 mehr Charts")
                            gr:   ['Kontogröße', t => t.master_groesse ? admKfGroesse(t.master_groesse) : '—', w => w],
-                           // Viertes Element = feste Reihenfolge der Balken (Zeit-Dimensionen), sonst nach Anzahl
-                           wt:   ['Wochentag', t => admKfWochentag(t.datum), w => w, (a, b) => ADM_KF_WT.indexOf(a.key) - ADM_KF_WT.indexOf(b.key)],
-                           // Mehr Sichten (24.09.2026 abends, Finn: „MEHR, CLEAN, SAUBER"): Konto, Stunde (Dubai), Haltedauer
+                           // Mehr Sichten (24.09.2026 abends, Finn: „MEHR, CLEAN, SAUBER"): Konto
                            acc:  ['Konto', t => t.account_name || '—', w => w],
-                           std:  ['Stunde', t => t.stunde == null ? '—' : String(t.stunde).padStart(2, '0') + ' h', w => w, (a, b) => admKfStdNum(a.key) - admKfStdNum(b.key)],
-                           dauer: ['Haltedauer', t => admKfDauerBucket(t.dauer_min), w => w, (a, b) => ADM_KF_DAUER.indexOf(a.key) - ADM_KF_DAUER.indexOf(b.key)],
-                           tag:  ['Tag',      t => t.datum || '—', w => admVlDatum(w) || w],
-                           pnl:  ['P&L-Stufe', t => admKfBucket(admKapNum(t.master_pl)), w => w + ' $'],
                            q:    ['Firma · Typ', admKfFirmaTyp, w => w] }
-    const admKfCharts = {}   // Balken-Charts (Dimensionen, Reibung, Tag, Histogramm), Name → Chart.js-Instanz
     // Welches Kapitel zeigt das Panel: das aktive, wenn es hedge-frei ist, sonst das jüngste hedge-freie
     function admKfKapitel(liste){
       const frei = liste.filter(k => !k.hedge_aktiv)
@@ -11823,7 +11772,6 @@
       const hyp = trades.reduce((a, t) => a + admKfHyp(t, fx), 0)
       const ohneQ = trades.filter(t => admKfQ(t) === null).length
       const mpl = trades.reduce((a, t) => a + admKapNum(t.master_pl), 0)
-      const blown = trades.filter(t => t.blown).length
       const personen = new Map()
       for(const t of alle){ const u = String(t.user_id); if(!personen.has(u)) personen.set(u, t.person || u) }
       // a) Kacheln
@@ -11831,18 +11779,12 @@
       const kpi = (label, value, sub, valStyle) =>
         `<div class="kpi"><div class="kpi-label">${label}</div><div class="kpi-value" style="${valStyle || ''}">${value}</div><div class="kpi-delta delta-neutral" title="${String(sub).replace(/<[^>]+>/g, '').replace(/"/g, '&quot;')}">${sub}</div></div>`
       const real = sumP - sumK, mitHedge = real + hyp
-      const filterTxt = escapeHtml((pers ? admShortName(personen.get(pers) || pers) : 'alle Personen') + (f ? ` · ${ADM_KF_ARTEN[f.art][2](f.wert)}` : ''))
       // Mehr Kennzahlen (24.09.2026, Finn: „so viel mehr Daten mit einer cleanen Übersicht"): Bilanz-Zeile
-      // (Payouts, Kauf, Master real, Hedge hyp., Reibung gespart, Vorteil ohne Hedge) + Trades-Zeile.
+      // (Payouts, Kauf, Master real, Hedge hyp., Reibung gespart, Vorteil ohne Hedge). Die Trades-Zeile (Trades, Ø, Win-Rate, Ø Quote,
+      // Bester/Schlechtester, Serien) ist raus (Finn 30.09.2026: „komplett unnötig, das verschmutzt nur alles").
       const n = trades.length
       const reibSum = trades.reduce((a, t) => a + admKfReib(t), 0)
-      const wins = trades.filter(t => admKapNum(t.master_pl) > 0).length
-      const mitQ = trades.filter(t => admKfQ(t) !== null)
-      const qAvg = mitQ.length ? mitQ.reduce((a, t) => a + admKfQ(t), 0) / mitQ.length : null
-      const sortiert = trades.slice().sort((a, b) => admKapNum(b.master_pl) - admKapNum(a.master_pl))
-      const best = sortiert[0], worst = sortiert[sortiert.length - 1]
-      const tradeTxt = t => t ? escapeHtml(`${t.account_name || t.person || '—'} · ${admVlDatum(t.datum)}`) : '–'
-      const kp = $('adm-kf-kpis'), kp2 = $('adm-kf-kpis2')
+      const kp = $('adm-kf-kpis')
       // Acht Kacheln in zwei 4er-Reihen (24.09.2026 abends, Finn: „mach besser" — 6 + 1 verwaiste Kachel)
       if(kp) kp.innerHTML =
         kpi('Payouts', admVlSign(sumP), `${payouts.length} Auszahlung${payouts.length === 1 ? '' : 'en'} im Kapitel`, `color:${col(sumP)}`) +
@@ -11852,17 +11794,6 @@
         kpi('Hedge hypothetisch', admVlSign(hyp), `mit Hedge wäre Real ${admVlSign(mitHedge)}` + (ohneQ ? ` · ${ohneQ} ohne Quote` : ''), `color:${col(hyp)}`) +
         kpi('Vorteil ohne Hedge', admVlSign(-hyp), -hyp >= 0 ? 'so viel hätte der Gegen-Hedge gekostet' : 'so viel hätte der Gegen-Hedge gebracht', `color:${col(-hyp)}`) +
         kpi('Reibung gespart', admVlSign(reibSum), n ? `Ø ${admKfDe(reibSum / n, 2)} € je Trade · steckt im Hedge-Wert` : 'reale Reibung, die nicht anfällt', `color:${col(reibSum)}`)
-      if(kp2) kp2.innerHTML =
-        kpi('Trades', String(n), `Blow-Quote ${n ? Math.round(blown / n * 100) + ' %' : '–'} · ${filterTxt}`) +
-        kpi('Ø je Trade', n ? admUsdSign(mpl / n) : '–', 'Master-P&amp;L geteilt durch Trades', n ? `color:${col(mpl)}` : '') +
-        kpi('Win-Rate', n ? Math.round(wins / n * 100) + ' %' : '–', `${wins} von ${n} im Plus`) +
-        kpi('Ø Quote', qAvg !== null ? admKfQFmt(qAvg) : '–', `${mitQ.length} von ${n} mit Quote · Ersparnis ${n ? admVlSign(-hyp / n) : '–'} je Trade`) +
-        kpi('Bester Trade', best ? admUsdSign(admKapNum(best.master_pl)) : '–', tradeTxt(best), best ? `color:${col(admKapNum(best.master_pl))}` : '') +
-        kpi('Schlechtester Trade', worst ? admUsdSign(admKapNum(worst.master_pl)) : '–', tradeTxt(worst), worst ? `color:${col(admKapNum(worst.master_pl))}` : '') +
-        // Serien (24.09.2026 abends): aktuelle Serie + längste Gewinn-/Verlustserie
-        (() => { const sr = admKfSerien(trades); const txt = sr.cur ? `${sr.cur} ${sr.curSign > 0 ? 'Gewinn' : 'Verlust'}${sr.cur === 1 ? '' : 'e'} in Folge` : '–'
-                 return kpi('Serie aktuell', sr.cur ? (sr.curSign > 0 ? '+' : '−') + sr.cur : '–', txt, sr.cur ? `color:${sr.curSign > 0 ? '#15803d' : '#b91c1c'}` : '') +
-                        kpi('Längste Serien', `${sr.bestW} · ${sr.bestL}`, 'Gewinne in Folge · Verluste in Folge') })()
       // b) Filter-Chips (ein Klick nimmt den Filter wieder weg)
       const fw = $('adm-kf-filter')
       if(fw){
@@ -11919,19 +11850,13 @@
       // Chart B: Master-P&L real in USD — bei gewählter Person nur diese
       admVerlauf('kfreal', 'adm-kf-chart-real', 'adm-kf-legend-real', serien(trades, t => admKapNum(t.master_pl)), pers, pick,
                  { tage, gesamt: true, gesamtFarbe: farbe, kurz: admKfUsdKurz, sign: admUsdSign })
-      // d) Balken-Charts (24.09.2026): Reibung je Firma · Typ, je Tag, Histogramm, sechs Dimensionen.
-      // Personen-Filter gilt für Sach-Dimensionen, der Balken-Filter für den Personen-Chart (sonst bliebe
-      // nur der gewählte Balken); Reibung-Chart zeigt die Hedge-Ära-Gruppen, unabhängig vom Filter.
+      // d) Liste, Personen, Reibung, Winning Days — die Balken-Charts (Je Tag, Kalender, Verteilung, Wochentag, Stunde, Haltedauer)
+      // und „Kosten nach Prop-Firma" sind raus (Finn 30.09.2026: „komplett unnötig" / „der auch weg").
       // Reibung-Gruppe zeigt seit 26.09.2026 nur die neue Ära (admKfReibSpar) — die Hedge-Ära-Charts (Je Firma, Verlauf nach Ketten-Ausgang) sind raus
-      admKfTagChart(alle.filter(persOk), f, fx, farbe)
-      admKfKalender(alle.filter(persOk), f)
-      admKfHistChart(alle.filter(persOk), f, farbe)
-      admKfDimCharts(alle, persOk, artOk, pers, f, fx, farbe, pick, personen)
       admKfTradeListe(trades, fx, pick, pers, alle.filter(artOk), personen, tage)
       admKfPersonen(alle.filter(artOk), fx, pick, pers, personen, tage, farbe)
       admKfReibSpar(trades, farbe, tage)
       admKfWd(k, fx, pick, pers, personen, farbe)
-      admKfFirmaCharts(alle.filter(persOk), f, fx, farbe, tage)
     }
     /* Personen im Vergleich (26.09.2026, Finn: „mehr auf die einzelnen Personen … im Vergleich sehen, wie sie beim Vorteil
      * mithelfen, ohne gegen Hedge zu zahlen"): je Person Vorteil ohne Hedge (−Hedge hyp. = Hedge + Reibung, die nicht
@@ -12060,54 +11985,6 @@
                  key => { admKf.reibsPick = admKf.reibsPick === key ? '' : key; admKfRender() },
                  { tage, farbe: k => FARBE[k], labelRoh: true, sub: () => `${mit.length} Trades` })
     }
-    /* Kosten nach Prop-Firma (25.09.2026 abends, Finn: „wie sich die Kosten aus den jeweiligen Prop-Firmen ergeben, wie viel,
-     * und daraus noch ein paar Charts"): dieselben Trades wie die Liste (Personen-Filter greift, Sach-Filter nicht — sonst
-     * bliebe nur der gewählte Balken). Vier Sichten: Σ je Firma, Σ je Firma · Typ, Ø je Trade + Quote, Verlauf kumuliert. */
-    function admKfFirmaCharts(rows, f, fx, farbe, tage){
-      const eur = v => admVlSign(v)
-      const gruppe = (wertVon, labelVon) => {
-        const g = new Map()
-        for(const t of rows){
-          const w = wertVon(t)
-          const e = g.get(w) || { key: w, label: labelVon(w), firm: t.master_firm || '—', n: 0, a: 0, b: 0, qs: 0, qn: 0 }
-          e.n++; e.a += admKfHyp(t, fx); e.b += admKapNum(t.master_pl)
-          const q = admKfQ(t); if(q !== null){ e.qs += q; e.qn++ }
-          g.set(w, e)
-        }
-        return [...g.values()].sort((x, y) => x.a - y.a)   // größte Kosten (negativstes Hedge) zuerst
-      }
-      const firmVon = t => t.master_firm || '—'
-      const qVon = t => (t.master_firm || '—') + ' · ' + admKfTyp(t.master_typ)
-      const zeilen = e => [`${e.n} Trade${e.n === 1 ? '' : 's'} · Ø Hedge ${eur(e.a / e.n)} · Ø Master ${admUsdSign(e.b / e.n)}${e.qn ? ` · Quote Ø ${admKfQFmt(e.qs / e.qn)}` : ''}`]
-      const aktivF = f && f.art === 'firm' ? f.wert : '', aktivQ = f && f.art === 'q' ? f.wert : ''
-      const klickF = e => { admKf.filter = (f && f.art === 'firm' && f.wert === e.key) ? null : { art: 'firm', wert: e.key }; admKfRender() }
-      const klickQ = e => { admKf.filter = (f && f.art === 'q' && f.wert === e.key) ? null : { art: 'q', wert: e.key }; admKfRender() }
-      const cfgAB = { a: { label: 'Hedge hyp. (€)', farbe: (e, on) => admKapAlpha(farbe, on ? 'CC' : '33'), fmt: eur, kurz: admEurKurz },
-                      b: { label: 'Master-P&L real ($)', farbe: (e, on) => (e.b < 0 ? admKfRot : admKfGut) + (on ? 'CC' : '33'), fmt: admUsdSign, kurz: admKfUsdKurz },
-                      tick: e => admKfFirmColor(e.firm), zeilen }
-      // Σ je Firma
-      const cf = gruppe(firmVon, w => w)
-      admKfSumHtml('adm-kf-sum-fS', cf.length ? [['Hedge', cf.reduce((x, e) => x + e.a, 0), admVlSign], ['Master', cf.reduce((x, e) => x + e.b, 0), admUsdSign]] : [])
-      admKfBar('fS', 'adm-kf-cv-fS', cf, { ...cfgAB, horizontal: true, istOn: e => !aktivF || e.key === aktivF, klick: klickF })
-      // Σ je Firma · Typ
-      const cq = gruppe(qVon, w => w)
-      admKfSumHtml('adm-kf-sum-fT', cq.length ? [['Gruppen', cq.length, v => String(v)]] : [])
-      admKfBar('fT', 'adm-kf-cv-fT', cq, { ...cfgAB, horizontal: true, istOn: e => !aktivQ || e.key === aktivQ, klick: klickQ })
-      // Ø je Trade + Quote (b auf eigener Achse, weil €/$ eine andere Größe ist)
-      const ca = cf.map(e => ({ ...e, a: e.a / e.n, b: e.qn ? e.qs / e.qn : 0 })).sort((x, y) => x.a - y.a)
-      admKfSumHtml('adm-kf-sum-fA', ca.length ? [['Ø Hedge', rows.length ? cf.reduce((x, e) => x + e.a, 0) / rows.length : 0, admVlSign]] : [])
-      admKfBar('fA', 'adm-kf-cv-fA', ca, { horizontal: true,
-        a: { label: 'Ø Hedge je Trade (€)', farbe: (e, on) => admKapAlpha(farbe, on ? 'CC' : '33'), fmt: eur, kurz: admEurKurz },
-        b: { label: 'Quote (€/$)', farbe: (e, on) => '#94A3B8' + (on ? 'CC' : '33'), fmt: admKfQFmt, kurz: v => admKfDe(v, 2) },
-        tick: e => admKfFirmColor(e.firm), istOn: e => !aktivF || e.key === aktivF, klick: klickF, zeilen })
-      // Verlauf kumuliert je Firma (admVerlauf: Serien = Firmen, Farbe = Firmen-Farbe, gestrichelt = alle)
-      const sm = new Map()
-      for(const t of rows){ if(!t.datum) continue; const w = firmVon(t); const sr = sm.get(w) || { key: w, label: w, events: [] }; sr.events.push({ datum: t.datum, eur: admKfHyp(t, fx) }); sm.set(w, sr) }
-      const serien = [...sm.values()].sort((x, y) => x.label.localeCompare(y.label, 'de'))
-      admVerlauf('kffV', 'adm-kf-chart-fV', 'adm-kf-legend-fV', serien, aktivF, key => klickF({ key }),
-                 { tage, gesamt: true, gesamtFarbe: farbe, farbe: k => admKfFirmColor(k), labelRoh: true,
-                   sub: k => { const e = cf.find(x => x.key === k); return e ? `${e.n} Trades · Ø ${admVlSign(e.a / e.n)}` : '' } })
-    }
     /* Chart-Auswahl (24.09.2026, Finn: „einen ganz großen Chart — je nachdem, wo ich draufdrücke, sehe ich es"):
      * zwölf Sichten als Chips, genau eine sichtbar. Wechsel zeichnet über admKfRender neu, damit Chart.js die
      * volle Breite des eben eingeblendeten Containers bekommt. Auswahl lebt nur in der Sitzung (admKf.chart). */
@@ -12116,12 +11993,10 @@
      * Chart.js die Breite des eben eingeblendeten Containers bekommt. Auswahl lebt in der Sitzung (admKf.charts). */
     const ADM_KF_GRUPPEN = {
       verlauf: [['pv', 'Vorteil ohne Hedge'], ['real', 'Real · Master-P&L'], ['dup', 'Duplikum gespart'], ['reibp', 'Reibung gespart']],
-      trades:  [['tag', 'Je Tag'], ['kal', 'Kalender'], ['pnl', 'Verteilung'], ['wt', 'Wochentag'], ['std', 'Stunde'], ['dauer', 'Haltedauer']],
       // Linien zuerst (26.09.2026, Finn: „kein Balkendiagramm, ein Liniendiagramm") — die Balken je Firma bleiben dahinter
       // nur die neue Ära (26.09.2026, Finn: „hier nur die Reibung seit der neuen Ära") — Hedge-Ära-Charts entfernt
       reibung: [['reibs', 'Gemessen vs. real'], ['reibf', 'Je Firma']],
-      wd:      [['wdv', 'Master vs. Fusion'], ['wdp', 'Je Person']],
-      firma:   [['fS', 'Je Firma'], ['fT', 'Je Firma · Typ'], ['fA', 'Ø je Trade'], ['fV', 'Verlauf']] }
+      wd:      [['wdv', 'Master vs. Fusion'], ['wdp', 'Je Person']] }   // „trades" und „firma" raus (Finn 30.09.2026)
     function admKfChartWahlRender(){
       if(!admKf.charts) admKf.charts = {}
       for(const [gruppe, liste] of Object.entries(ADM_KF_GRUPPEN)){
@@ -12211,52 +12086,6 @@
         el.appendChild(row)
       }
     }
-    /* Ein Balken-Chart im Kontrafakt-Muster (24.09.2026). cats = [{ label, key, a, b, n, … }], cfg:
-     *   a/b = { label, farbe(e, on), fmt, kurz } — b optional (zweite Achse rechts),
-     *   istOn(e) = Balken voll oder blass, tick(e) = Farbe der x-Beschriftung, klick(e), zeilen(e) = Tooltip-Zusatz.
-     * Alle Charts dieses Panels laufen über diese eine Funktion, damit Farben, Achsen und Klick gleich sind. */
-    function admKfBar(name, cvId, cats, cfg){
-      const cv = $(cvId); if(!cv) return
-      if(admKfCharts[name]){ try { admKfCharts[name].destroy() } catch(_){} admKfCharts[name] = null }
-      const wrap = cv.parentElement
-      // Versteckte Sicht nicht zeichnen (Review 24.09.2026, F2): jeder Render lief sonst über alle ~20 Charts,
-      // auch bei jedem Tastendruck in Faktor/Reibung. Der Chip-Wechsel zeichnet über admKfRender nach.
-      const sicht = cv.closest('.kf-chart'); if(sicht && sicht.hidden) return
-      if(typeof Chart === 'undefined' || !cats.length){ wrap.hidden = true; admKfLeerHinweis(wrap, true); return }
-      wrap.hidden = false; admKfLeerHinweis(wrap, false)
-      const mono = { family: 'JetBrains Mono', size: 9 }
-      const on = e => !cfg.istOn || cfg.istOn(e)
-      // Liegende Balken (24.09.2026, Finn am Screenshot: „man erkennt da nix" — 14 Firma·Typ-Namen auf der
-      // x-Achse druckten übereinander). cfg.horizontal: Kategorien auf der y-Achse, Höhe wächst mit der Zahl
-      // der Zeilen; Wert-Achse liegt dann auf x, eine zweite Wert-Achse oben statt rechts.
-      const horiz = !!cfg.horizontal
-      // Höhe folgt der Zeilenzahl (24.09.2026 abends: drei Balken in 320 px waren Leerraum), Untergrenze 220/200 mobil
-      wrap.style.height = horiz ? Math.min(640, Math.max(window.innerWidth <= 600 ? 200 : 220, cats.length * 34 + 70)) + 'px' : ''
-      const axisKey = horiz ? 'xAxisID' : 'yAxisID', prim = horiz ? 'x' : 'y', sek = horiz ? 'x1' : 'y1'
-      const datasets = [{ label: cfg.a.label, data: cats.map(e => +Number(e.a).toFixed(2)), [axisKey]: prim, borderRadius: 3, maxBarThickness: 26,
-                          backgroundColor: cats.map(e => cfg.a.farbe(e, on(e))) }]
-      if(cfg.b) datasets.push({ label: cfg.b.label, data: cats.map(e => +Number(e.b).toFixed(2)), [axisKey]: cfg.b.achse ? prim : sek, borderRadius: 3, maxBarThickness: 26,
-                                backgroundColor: cats.map(e => cfg.b.farbe(e, on(e))) })
-      const katAchse = { grid: { display: false }, ticks: { font: horiz ? { family: 'JetBrains Mono', size: 10 } : mono, maxRotation: 0, autoSkip: !horiz && cats.length > 14,
-                                                            color: ctx => { const e = cats[ctx.index]; return e && cfg.tick ? (on(e) ? cfg.tick(e) : cfg.tick(e) + '66') : '#667085' } } }
-      const wertAchse = { position: horiz ? 'bottom' : 'left', grid: { color: ctx => ctx.tick.value === 0 ? 'rgba(102,112,133,.35)' : 'rgba(102,112,133,.08)' },
-                          ticks: { color: '#667085', font: mono, maxTicksLimit: 5, precision: cfg.a.ganz ? 0 : undefined, callback: v => cfg.a.kurz(v) } }
-      const scales = horiz ? { y: katAchse, x: wertAchse } : { x: katAchse, y: wertAchse }
-      if(cfg.b && !cfg.b.achse) scales[sek] = { position: horiz ? 'top' : 'right', grid: { display: false }, ticks: { color: '#667085', font: mono, maxTicksLimit: 5, callback: v => cfg.b.kurz(v) } }
-      const wert = ctx => ctx.parsed[prim]
-      admKfCharts[name] = new Chart(cv.getContext('2d'), {
-        type: 'bar', data: { labels: cats.map(e => e.label), datasets },
-        options: { responsive: true, maintainAspectRatio: false, animation: { duration: 250 }, indexAxis: horiz ? 'y' : 'x',
-          interaction: { mode: 'index', intersect: false },
-          onClick: (ev, els) => { const el = els && els[0]; const e = el && cats[el.index]; if(e && cfg.klick) cfg.klick(e) },
-          onHover: (ev, els) => { const t = ev.native && ev.native.target; if(t) t.style.cursor = els.length && cfg.klick ? 'pointer' : '' },
-          plugins: { legend: { display: false }, tooltip: { backgroundColor: '#101828', displayColors: true,
-            callbacks: { title: items => items.length ? String(cats[items[0].dataIndex].label) : '',
-                         label: ctx => ` ${ctx.datasetIndex === 0 ? cfg.a.label : cfg.b.label}: ${(ctx.datasetIndex === 0 ? cfg.a : cfg.b).fmt(wert(ctx))}`,
-                         afterBody: items => { const e = cats[items[0].dataIndex]; return e && cfg.zeilen ? cfg.zeilen(e) : '' } } } },
-          scales }
-      })
-    }
     /* Leer-Hinweis statt stumm ausgeblendeter Fläche (Review 24.09.2026, F8) */
     function admKfLeerHinweis(wrap, zeigen){
       if(!wrap || !wrap.parentElement) return
@@ -12265,119 +12094,6 @@
       if(h) h.hidden = !zeigen
     }
     const admKfGut = '#15803d', admKfRot = '#b91c1c'
-    const admKfSumHtml = (id, teile) => { const el = $(id); if(el) el.innerHTML = teile.map(([t, v, fmt]) => `· ${t} <b style="color:${v < 0 ? admKfRot : admKfGut}">${fmt(v)}</b>`).join(' ') }
-    /* Sechs Mini-Charts (24.09.2026, Finn am Screenshot des Panels: „für jedes Ding jeweils einen einzelnen Chart
-     * nebeneinander, mit genau der Logik, die ich gerade erklärt habe [Hedge-Quoten je Firma/Typ]"). Je Kategorie
-     * zwei Balken: Hedge hypothetisch (€, Kapitel-Farbe, links) und Master-P&L real ($, grün/rot, rechts).
-     * Kategorie-Farbe in der x-Beschriftung (Person = admPersonColor, sonst Palette per Namens-Hash). */
-    function admKfDimCharts(alle, persOk, artOk, pers, f, fx, farbe, pick, personen){
-      // Seit 24.09.2026 spät nur noch Wochentag/Stunde/Haltedauer — die Gruppe „Nach Kategorie" (Symbol, Weg, Richtung,
-      // Firma, Kontotyp, Kontogröße, Konto, Person) ist raus (Finn am Screenshot: „mies, untauglich, der kann weg").
-      const dims = [['wt', 'wt'], ['std', 'std'], ['dauer', 'dauer']]
-      for(const [name, art] of dims){
-        const istPerson = !art
-        const rows = istPerson ? alle.filter(artOk) : alle.filter(persOk)
-        const wertVon = istPerson ? (t => String(t.user_id)) : ADM_KF_ARTEN[art][1]
-        const labelVon = istPerson ? (k => admShortName(personen.get(k) || k)) : ADM_KF_ARTEN[art][2]
-        const g = new Map()
-        for(const t of rows){
-          const w = wertVon(t)
-          const e = g.get(w) || { key: w, label: labelVon(w), n: 0, a: 0, b: 0, qs: 0, qn: 0 }
-          e.n++; e.b += admKapNum(t.master_pl); e.a += admKfHyp(t, fx)
-          const q = admKfQ(t); if(q !== null){ e.qs += q; e.qn++ }
-          g.set(w, e)
-        }
-        const ordnung = !istPerson && ADM_KF_ARTEN[art][3]
-        const cats = [...g.values()].sort(istPerson ? ((a, b) => a.label.localeCompare(b.label, 'de')) : (ordnung || ((a, b) => b.n - a.n)))
-        admKfSumHtml('adm-kf-sum-' + name, cats.length ? [['Hedge', cats.reduce((x, e) => x + e.a, 0), admVlSign], ['Master', cats.reduce((x, e) => x + e.b, 0), admUsdSign]] : [])
-        const aktiv = istPerson ? (pers || '') : (f && f.art === art ? f.wert : '')
-        const catCol = e => istPerson ? admPersonColor(e.key) : admKfFirmColor(e.label)
-        // Immer derselbe Chart (24.09.2026 abends, Finn: „für die großen über Kategorien immer den gleichen Chart"): liegend
-        admKfBar('dim-' + name, 'adm-kf-cv-' + name, cats, { horizontal: true,
-          a: { label: 'Mit Hedge (hyp.)', farbe: (e, on) => admKapAlpha(farbe, on ? 'CC' : '33'), fmt: admVlSign, kurz: admEurKurz },
-          b: { label: 'Master-P&L real', farbe: (e, on) => (e.b < 0 ? admKfRot : admKfGut) + (on ? 'CC' : '33'), fmt: admUsdSign, kurz: admKfUsdKurz },
-          istOn: e => !aktiv || String(e.key) === String(aktiv), tick: catCol,
-          klick: e => { if(istPerson){ pick(e.key); return } admKf.filter = (f && f.art === art && f.wert === e.key) ? null : { art, wert: e.key }; admKfRender() },
-          zeilen: e => [`${e.n} Trade${e.n === 1 ? '' : 's'} · Ø Hedge ${admVlSign(e.a / e.n)} · Ø Master ${admUsdSign(e.b / e.n)}`,
-                        e.qn ? `Quote Ø ${admKfQFmt(e.qs / e.qn)}${e.qn < e.n ? ` (${e.n - e.qn} ohne Quote)` : ''}` : 'ohne Quote (FX × 1)'] })
-      }
-    }
-    /* Kalender-Heatmap (24.09.2026 abends, Finn: „MEHR, CLEAN"): 16 Wochen bis heute (Dubai), Zelle = Tag, Farbe nach
-     * Master-P&L-Summe des Tages (grün/rot, Deckkraft relativ zum Tagesmaximum). Klick = Tag-Filter wie im Je-Tag-Chart. */
-    function admKfKalender(rows, f){
-      const el = $('adm-kf-kal'), mon = $('adm-kf-kal-monate'); if(!el) return
-      const sicht = el.closest('.kf-chart'); if(sicht && sicht.hidden) return   // versteckt nicht bauen (Review F2)
-      const heute = (typeof _kapitelHeuteIso === 'function') ? _kapitelHeuteIso() : new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Dubai' })
-      const je = new Map()
-      for(const t of rows){ if(!t.datum) continue; const e = je.get(t.datum) || { n: 0, s: 0 }; e.n++; e.s += admKapNum(t.master_pl); je.set(t.datum, e) }
-      const maxAbs = Math.max(1, ...[...je.values()].map(e => Math.abs(e.s)))
-      // Start = Montag der Woche vor 16 Wochen
-      const ende = new Date(heute + 'T00:00:00Z')
-      const start = new Date(ende); start.setUTCDate(start.getUTCDate() - 7 * 16 + 1)
-      start.setUTCDate(start.getUTCDate() - ((start.getUTCDay() + 6) % 7))   // auf Montag
-      const aktiv = f && f.art === 'tag' ? f.wert : ''
-      el.innerHTML = ''; if(mon) mon.innerHTML = ''
-      const monate = []
-      let letzterMonat = ''
-      for(let d = new Date(start), i = 0; d <= ende; d.setUTCDate(d.getUTCDate() + 1), i++){
-        const iso = d.toISOString().slice(0, 10)
-        const e = je.get(iso)
-        const z = document.createElement('div')
-        z.className = 'z' + (e ? ' hat' : '') + (aktiv === iso ? ' is-on' : '')
-        if(e){
-          const a = Math.min(1, 0.25 + 0.75 * Math.abs(e.s) / maxAbs)
-          z.style.background = (e.s < 0 ? `rgba(185,28,28,${a.toFixed(2)})` : `rgba(21,128,61,${a.toFixed(2)})`)
-          z.title = `${admVlDatum(iso)} · ${e.n} Trade${e.n === 1 ? '' : 's'} · ${admUsdSign(e.s)}`
-          z.addEventListener('click', () => { admKf.filter = (f && f.art === 'tag' && f.wert === iso) ? null : { art: 'tag', wert: iso }; admKfRender() })
-        } else z.title = admVlDatum(iso)
-        el.appendChild(z)
-        if(i % 7 === 0){ const m = iso.slice(0, 7); monate.push(m !== letzterMonat ? new Date(iso + 'T12:00:00Z').toLocaleDateString('de-DE', { month: 'short', timeZone: 'UTC' }) : ''); letzterMonat = m }
-      }
-      if(mon) mon.innerHTML = monate.map(m => `<span>${m}</span>`).join('')
-      const tage = [...je.values()]
-      admKfSumHtml('adm-kf-sum-kal', tage.length ? [['Handelstage', tage.length, v => String(v)], ['Plus-Tage', tage.filter(e => e.s > 0).length, v => String(v)], ['Ø/Tag', tage.reduce((x, e) => x + e.s, 0) / tage.length, admUsdSign]] : [])
-    }
-    /* Serien (24.09.2026 abends): aktuelle Gewinn-/Verlustserie und die längsten Serien, chronologisch über den Filter */
-    function admKfSerien(trades){
-      const chrono = trades.slice().sort((a, b) => String(a.datum).localeCompare(String(b.datum)) || (Number(a.id) - Number(b.id)))
-      let cur = 0, curSign = 0, bestW = 0, bestL = 0, run = 0, runSign = 0
-      for(const t of chrono){
-        const v = admKapNum(t.master_pl); const sg = v > 0 ? 1 : v < 0 ? -1 : 0
-        if(!sg){ run = 0; runSign = 0; cur = 0; curSign = 0; continue }   // Null-Trade bricht die Serie (Review F7)
-        if(sg === runSign) run++; else { run = 1; runSign = sg }
-        if(sg > 0) bestW = Math.max(bestW, run); else bestL = Math.max(bestL, run)
-        cur = run; curSign = sg
-      }
-      return { cur, curSign, bestW, bestL }
-    }
-    /* Je Tag: Mit Hedge (€) vs. Real ($) als Balkenpaar (24.09.2026) — Klick auf einen Tag filtert */
-    function admKfTagChart(rows, f, fx, farbe){
-      const g = new Map()
-      for(const t of rows){ if(!t.datum) continue; const e = g.get(t.datum) || { key: t.datum, label: admVlDatum(t.datum), n: 0, a: 0, b: 0 }; e.n++; e.a += admKfHyp(t, fx); e.b += admKapNum(t.master_pl); g.set(t.datum, e) }
-      const cats = [...g.values()].sort((a, b) => a.key.localeCompare(b.key))
-      admKfSumHtml('adm-kf-sum-tag', cats.length ? [['Tage', cats.length, v => String(v)], ['Ø/Tag Hedge', cats.reduce((x, e) => x + e.a, 0) / Math.max(1, cats.length), admVlSign]] : [])
-      const aktiv = f && f.art === 'tag' ? f.wert : ''
-      admKfBar('tag', 'adm-kf-cv-tag', cats, {
-        a: { label: 'Mit Hedge (hyp.)', farbe: (e, on) => admKapAlpha(farbe, on ? 'CC' : '33'), fmt: admVlSign, kurz: admEurKurz },
-        b: { label: 'Master-P&L real', farbe: (e, on) => (e.b < 0 ? admKfRot : admKfGut) + (on ? 'CC' : '33'), fmt: admUsdSign, kurz: admKfUsdKurz },
-        istOn: e => !aktiv || e.key === aktiv,
-        klick: e => { admKf.filter = (f && f.art === 'tag' && f.wert === e.key) ? null : { art: 'tag', wert: e.key }; admKfRender() },
-        zeilen: e => [`${e.n} Trade${e.n === 1 ? '' : 's'} · Ø Hedge ${admVlSign(e.a / e.n)} · Ø Master ${admUsdSign(e.b / e.n)}`] })
-    }
-    /* Histogramm der Master-P&Ls (24.09.2026): 1.000-$-Stufen −2k … +8k, Ränder gesammelt; Farbe nach Vorzeichen */
-    function admKfHistChart(rows, f, farbe){
-      const g = new Map(ADM_KF_BUCKETS.map(b => [b, { key: b, label: b, n: 0, a: 0, sum: 0 }]))
-      for(const t of rows){ const e = g.get(admKfBucket(admKapNum(t.master_pl))); if(e){ e.n++; e.a++; e.sum += admKapNum(t.master_pl) } }
-      const cats = ADM_KF_BUCKETS.map(b => g.get(b))
-      const belegt = cats.filter(e => e.n)
-      admKfSumHtml('adm-kf-sum-pnl', belegt.length ? [['Trades', rows.length, v => String(v)], ['Median', (arr => arr.length ? arr[Math.floor(arr.length / 2)] : 0)(rows.map(t => admKapNum(t.master_pl)).sort((x, y) => x - y)), admUsdSign]] : [])
-      const aktiv = f && f.art === 'pnl' ? f.wert : ''
-      admKfBar('pnl', 'adm-kf-cv-pnl', belegt.length ? cats : [], {
-        a: { label: 'Trades', ganz: true, farbe: (e, on) => (e.key.startsWith('< ') || e.key.startsWith('−') ? admKfRot : admKfGut) + (on ? 'CC' : '33'), fmt: v => String(v), kurz: v => String(v) },
-        istOn: e => !aktiv || e.key === aktiv,
-        klick: e => { if(!e.n) return; admKf.filter = (f && f.art === 'pnl' && f.wert === e.key) ? null : { art: 'pnl', wert: e.key }; admKfRender() },
-        zeilen: e => e.n ? [`Σ ${admUsdSign(e.sum)} · Ø ${admUsdSign(e.sum / e.n)}`] : ['keine Trades'] })
-    }
     /* Hedge-Quoten aus der Hedge-Ära (24.09.2026, Finn: „Ich will erkennen: Apex Funded, gerade +7.500 $ gemacht,
      * ist so grob ein Tausender wert. Oder von einem 100k-Konto waren die Gesamtkosten grob 2.000 — verliert der
      * Master 2.000, sind es so grob 400 € weniger"). Zeilen = Gruppen A (Firma · Typ · Größe) und B (Firma · Typ)
@@ -36186,7 +35902,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.839'
+  const OS_TAB_BUILD = '2026-09-22.840'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
