@@ -27,6 +27,7 @@
 --
 -- Lesen darf jeder Eingeloggte (Radar/Karten sollen die Regel anzeigen können), schreiben nur service_role (Railway / Master).
 -- Im Supabase SQL Editor einfügen und auf 'Run' klicken. Idempotent (Seed nur, wo die Kombination firma/kontotyp/groesse fehlt).
+-- Ergänzt durch sql/2026-09-30_liq-regeln-2.sql (art 'boden', Tradeify Funded fest, Tradeify Winning Days 150.100, FundedNext ohne Regel).
 
 create table if not exists public.liq_regeln (
   id                   bigint generated always as identity primary key,
