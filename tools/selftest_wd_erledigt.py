@@ -23,7 +23,8 @@ def lade():
         return src[i:src.find("\n\n\n", i)]
 
     exec("\n".join(['WD_HEDGE_LOGIN = "488579"', 'WD_ERLEDIGT_ROUTEN = ("tvv2", "mt5v2", "tsv2")'] + [block(n) for n in (
-        "_wd_ende_upd", "_wd_hedge_schluessel", "_wd_hedge_konto", "_wd_zahl", "_wd_erledigt_upd", "_wd_hedge_buchung")]), ns)
+        "_wd_ende_upd", "_wd_hedge_schluessel", "_wd_hedge_konto", "_wd_zahl", "_wd_erledigt_upd", "_wd_hedge_buchung",
+        "_wd_good_day", "_wd_good_day_konto_upd")] + ['WD_GOOD_DAY_MIN = {"tradeify": 250.0}']), ns)
     return ns
 
 
@@ -100,6 +101,17 @@ def main():
     z = a["_wd_hedge_buchung"](offen["id"], "u1", None, "Moritz", -4.2, D)
     check(z["account_id"] is None and z["account_name"] == "Fusion (WD-Hedge)" and z["account_firm"] == "Fusion Markets",
           "Buchung ohne Konto: account_id null, 'Fusion (WD-Hedge)'")
+    # Good Day (01.10.2026): Tradeify-WD über 250 $ zählt als Winning Day, einmal je Berlin-Tag
+    wd = {"account_type": "winning_days", "firm": "Tradeify"}
+    check(a["_wd_good_day"](wd, 250.01) and not a["_wd_good_day"](wd, 250) and not a["_wd_good_day"](wd, -400),
+          "Good Day: Tradeify-WD erst über 250 $")
+    check(not a["_wd_good_day"](dict(wd, firm="Apex Trader"), 900) and not a["_wd_good_day"](dict(wd, account_type="funded"), 900)
+          and not a["_wd_good_day"](None, 900) and not a["_wd_good_day"](wd, None), "Good Day: andere Firma/Typ/ohne P&L nie")
+    u = a["_wd_good_day_konto_upd"]({"goal_done_offset": 2, "goal_target": None, "goal_manual_last": "2026-09-30"}, "2026-10-01")
+    check(u == {"goal_done_offset": 3, "goal_manual_last": "2026-10-01", "goal_kind": "winning_days", "goal_manual": True, "goal_target": 5},
+          "Good Day: Konto +1, Ziel 5 wenn leer")
+    check(a["_wd_good_day_konto_upd"]({"goal_done_offset": 3, "goal_manual_last": "2026-10-01"}, "2026-10-01") is None,
+          "Good Day: am selben Tag nie doppelt")
     print("\n" + ("alle Tests bestanden" if ok else "FEHLER"))
     return 0 if ok else 1
 

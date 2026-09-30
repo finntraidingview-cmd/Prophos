@@ -7418,6 +7418,7 @@ def _wd_heute_zeile(p, acc, disp, vorher=None):
         "master_pl_plan": _wd_num(p.get("master_pl")), "slave_pl": _wd_num(p.get("slave_pl")), "pl_quelle": p.get("pl_quelle"),
         "final_quelle": final.get("quelle"), "master_pl_schaetzung": _wd_num(final.get("master_pl_schaetzung")),
         "completed_at": p.get("completed_at"),
+        "good_day": _wd_good_day(acc, p.get("master_pl")),   # 01.10.2026: Tradeify-WD über 250 $ → „Good Day" in Erledigt
         # P&L aus Fills + Abgleich (Koordination 25.09.2026): Einstieg/Start aus der tv-Baseline, Ende aus final — nur die Felder,
         # die die Rechnung braucht (Fill-Preise, Today's P&L, Quelle, Ende-Art), keine Zugangsdaten
         # TSV2-PNL (01.10.2026): dazu Balance vorher/nachher + Basis (TopstepX-Express 0-basiert) und der RP&L-Start
@@ -8429,6 +8430,52 @@ def _wd_zahl(v):
         return None
 
 
+# Good Day (01.10.2026, Finn: „wenn der Winning Day abgehakt wird und der P&L bei Tradeify über 250 ist, automatisch als
+# Winning Day anhaken"): Firma (Teilstring, klein) → Master-P&L in $, AB dem (echt darüber) der Tag als Winning Day zählt.
+# Nur Konten vom Typ 'winning_days'; andere Firmen zählen weiter von Hand über das 🏆-Häkchen.
+WD_GOOD_DAY_MIN = {"tradeify": 250.0}
+
+
+def _wd_good_day(konto, master_pl):
+    """REIN RECHNEND (testbar): True, wenn dieser Trade ein Good Day ist — Konto vom Typ winning_days, Firma mit Schwelle in
+    WD_GOOD_DAY_MIN und Master-P&L echt darüber. Fehlt etwas → False."""
+    if not isinstance(konto, dict) or str(konto.get("account_type") or "") != "winning_days":
+        return False
+    try:
+        pl = float(master_pl)
+    except (TypeError, ValueError):
+        return False
+    firma = str(konto.get("firm") or "").lower()
+    return any(k in firma and pl > grenze for k, grenze in WD_GOOD_DAY_MIN.items())
+
+
+def _wd_good_day_konto_upd(konto, heute):
+    """REIN RECHNEND (testbar): Konto-Update für „Winning Day +1" — gleiche Felder und Regel wie zielManuellPlus im Frontend:
+    höchstens einmal je Berlin-Tag (goal_manual_last), goal_kind/goal_manual/goal_target werden mitgeschrieben (Futures-Funded
+    zählt implizit mit Ziel 5). None = heute schon gezählt (erneutes 'erledigt' zählt nie doppelt)."""
+    if str(konto.get("goal_manual_last") or "")[:10] == heute:
+        return None
+    ziel = konto.get("goal_target")
+    try:
+        ziel = int(ziel) if ziel and int(ziel) > 0 else 5
+    except (TypeError, ValueError):
+        ziel = 5
+    try:
+        stand = max(0, int(konto.get("goal_done_offset") or 0))
+    except (TypeError, ValueError):
+        stand = 0
+    return {"goal_done_offset": stand + 1, "goal_manual_last": heute, "goal_kind": "winning_days", "goal_manual": True, "goal_target": ziel}
+
+
+def _berlin_heute():
+    # Berlin wie _deTodayStr() im Frontend — sonst zählte derselbe Tag je nach Seite unterschiedlich
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("Europe/Berlin")).strftime("%Y-%m-%d")
+    except Exception:   # pragma: no cover — tzdata fehlt → UTC
+        return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
 WD_ERLEDIGT_ROUTEN = ("tvv2", "mt5v2", "tsv2")   # 30.09.2026: Abhaken im Radar für Orbit, Echo und Topstep V2
 
 
@@ -8795,7 +8842,26 @@ def admin_wd_plaene():
                                    "konto_quelle": konto_quelle, "hedge_login": login_quelle}
                 except Exception as e:
                     buchung_fehler = f"Buchung fehlgeschlagen ({type(e).__name__}) — erneut 'erledigt' senden, der Plan bleibt completed"
+                # Good Day (01.10.2026): Tradeify-WD mit Master-P&L über 250 $ → Plan winning_day = true und Winning Day +1 am
+                # Konto (einmal je Berlin-Tag). Fehler hier stoppen das Abhaken nicht — sie stehen in der Antwort.
+                good_day = None
+                if plan.get("master_account_id"):
+                    try:
+                        kr = sb_select("accounts", {"select": "id,name,firm,account_type,goal_done_offset,goal_manual_last,goal_target",
+                                                    "id": f"eq.{plan.get('master_account_id')}", "limit": "1"})
+                        kk = kr[0] if kr else None
+                        if _wd_good_day(kk, mpl):
+                            sb_update("trade_plans", {"id": f"eq.{pid}"}, {"winning_day": True})
+                            k_upd = _wd_good_day_konto_upd(kk, _berlin_heute())
+                            if k_upd:
+                                sb_update("accounts", {"id": f"eq.{kk['id']}"}, k_upd)
+                            good_day = {"gezaehlt": bool(k_upd), "stand": (k_upd or {}).get("goal_done_offset", kk.get("goal_done_offset")),
+                                        "ziel": (k_upd or {}).get("goal_target", kk.get("goal_target") or 5), "konto": kk.get("name")}
+                    except Exception as e:
+                        good_day = {"fehler": f"Winning Day nicht gezählt ({type(e).__name__}) — im Account von Hand +1"}
                 out = {"ok": True, "plan_id": pid, "status": "completed", "buchung": buchung}
+                if good_day:
+                    out["good_day"] = good_day
                 if buchung_fehler:
                     out["buchung_fehler"] = buchung_fehler
                 return jsonify(out)

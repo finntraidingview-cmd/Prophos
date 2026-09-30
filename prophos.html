@@ -24216,6 +24216,8 @@
     const erlZeilen = erl.map(x => { const k = x.konto || {}, m = (x.master_pl_plan != null) ? Number(x.master_pl_plan) : null, f = (x.slave_pl != null) ? Number(x.slave_pl) : null
       const summe = (m != null ? m * fx : 0) + (f != null ? f : 0)
       return `<div class="mwd-abh-erl-zeile"><span class="mwd-person">${escapeHtml(String(x.person || '?'))}</span><span class="mwd-konto">${escapeHtml(String(k.firma || '?'))}${k.kontonr_ende ? ' …' + escapeHtml(String(k.kontonr_ende)) : ''}</span>`
+        // Good Day (01.10.2026, Finn): Tradeify-WD über 250 $ — Backend hat ihn beim Abhaken als Winning Day gezählt (good_day)
+        + (x.good_day ? `<span class="mwd-chip mwd-buy" title="Master-P&L über 250 $ — als Winning Day gezählt">🏆 Good Day</span>` : '')
         + `<span>Master <b style="color:${col(m)}">${sig(m, '$')}</b></span><span>Fusion <b style="color:${col(f)}">${sig(f, '€')}</b></span><span class="mono" style="color:${col(summe)}">≈ ${sig(summe, '€')}</span></div>` })
     // Gebühren je Firma (Round Turn je Kontrakt): gelernt / von Hand / ohne — Feld leer lassen = zurück auf gelernt
     const firmen = [...new Set([...offen, ...erl].map(x => String((x.konto || {}).firma || '').trim()).filter(Boolean))]
@@ -24265,7 +24267,10 @@
       const k = pw.konto || {}
       if(typeof atToast === 'function') atToast(`Abgehakt: ${pw.person || '?'} · ${k.firma || '?'}${k.kontonr_ende ? ' …' + k.kontonr_ende : ''}`
         + (d.buchung ? ` · Fusion ${Number(d.buchung.amount).toLocaleString('de-DE', { minimumFractionDigits: 2 })} € in Finanzen` : (f == null ? ' · ohne Fusion-Buchung' : ''))
-        + (d.buchung_fehler ? ` · ⚠ ${d.buchung_fehler}` : ''))
+        + (d.buchung_fehler ? ` · ⚠ ${d.buchung_fehler}` : '')
+        // Good Day (01.10.2026): Backend zählt Tradeify-WD über 250 $ selbst als Winning Day (+1, einmal je Tag)
+        + (d.good_day ? (d.good_day.fehler ? ` · ⚠ ${d.good_day.fehler}` : ` · 🏆 Good Day${d.good_day.gezaehlt ? ` — Winning Day ${d.good_day.stand}/${d.good_day.ziel}` : ' — heute schon gezählt'}`) : ''))
+      if(d.good_day && d.good_day.gezaehlt){ try{ if(typeof loadAccountsFromSupabase === 'function') await loadAccountsFromSupabase() }catch(_){} }
       if(mkl.wd.abh) delete mkl.wd.abh[String(pid)]
       try{ if(typeof loadTradePlansFromSupabase === 'function') await loadTradePlansFromSupabase() }catch(_){}
     }catch(e){
@@ -36799,7 +36804,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.906'
+  const OS_TAB_BUILD = '2026-09-22.907'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -44809,7 +44814,26 @@
   // Trade-Abschluss: welcher Account des Plans zählt manuell? Master zuerst
   // (Prop-Account), sonst Slave — ein Plan hat praktisch nie zwei.
   let _tcWinningAccId = null
+  /* Good Day (01.10.2026, Finn: „wenn der P&L bei Tradeify über 250 ist und der Account Winning Day ist, automatisch als
+   * Winning Day anhaken"): gleiche Regel wie _wd_good_day im Backend. tcRecompute ruft das bei jeder P&L-Änderung (Hand,
+   * Vorbelegung, Auto-Nachlader); hat Finn den Haken selbst angefasst, bleibt er, wie er ist. */
+  const TC_GOOD_DAY_MIN = { tradeify: 250 }
+  let _tcGoodDayHand = false
+  function tcGoodDayAuto(p, mPl){
+    const cb = document.getElementById('tc-winning-day'), wrap = document.getElementById('tc-winning-day-wrap'), hint = document.getElementById('tc-winning-day-hint')
+    if(!cb || !wrap || wrap.hidden || cb.disabled || _tcGoodDayHand) return
+    const a = (accounts || []).find(x => String(x.id) === String(p.masterAccountId))
+    if(!a || a.type !== 'winning_days' || String(a.id) !== String(_tcWinningAccId)) return
+    const firma = String(a.firm || '').toLowerCase()
+    const good = isFinite(mPl) && Object.keys(TC_GOOD_DAY_MIN).some(k => firma.includes(k) && mPl > TC_GOOD_DAY_MIN[k])
+    if(good === cb.checked) return
+    cb.checked = good
+    if(hint) hint.textContent = good ? '🏆 Good Day — Master-P&L über 250 $, automatisch angehakt.' : 'Zählt +1 auf den Stand des Accounts (einmal pro Tag).'
+  }
+  document.getElementById('tc-winning-day')?.addEventListener('change', () => { _tcGoodDayHand = true })
+
   function tcWinningDayPrepare(p){
+    _tcGoodDayHand = false
     const wrap = document.getElementById('tc-winning-day-wrap')
     const cb = document.getElementById('tc-winning-day')
     const lbl = document.getElementById('tc-winning-day-label')
@@ -45354,6 +45378,7 @@
     if(!p) return
     const mPl = plFeldZahl('tc-master-pl')   // wie früher parseFloat: NaN = leer oder keine Zahl (30.09.2026, plZahl)
     const sPl = plFeldZahl('tc-slave-pl')
+    tcGoodDayAuto(p, mPl)
     const masterAcc = accounts.find(a => String(a.id) === String(p.masterAccountId))
     const slaveAcc  = accounts.find(a => String(a.id) === String(p.slaveAccountId))
 
