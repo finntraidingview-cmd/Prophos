@@ -52,6 +52,11 @@ def main():
         check(S({"art": art, "daten": {}}) is None, f"Art {art!r} abgelehnt")
     g = S({"art": "inventar_tsx_konto", "daten": {"zustand": "konto_liste_offen", "bot": "2026-09-22.876", "inventar": [1]}})
     check(g and g[1] == {"zustand": "konto_liste_offen", "bot": "2026-09-22.876", "inventar": [1]}, "Schlüssel zustand und bot bleiben erhalten")
+    g = S({"art": "stand_tsx", "daten": {"kopf": {"konto": "150KTC-…", "balance": 148210.5}, "positionen_sichtbar": True, "flach": False,
+                                         "fremd": 1}})
+    check(g and g[1] == {"kopf": {"konto": "150KTC-…", "balance": 148210.5}, "positionen_sichtbar": True, "flach": False},
+          "AUGEN-WL-2: kopf, positionen_sichtbar und flach bleiben (stand_tsx aus augen_tsx.js), fremde fallen weg")
+    check(S({"art": "stand_tsx", "daten": {"kopf": "x" * (a["PULS_AUGEN_MAX"] + 10)}}) is None, "AUGEN-WL-2: Deckel gilt auch für kopf")
     gross = {"art": "inventar_tsx_grund", "daten": {"inventar": "x" * (a["PULS_AUGEN_MAX"] + 10)}}
     check(S(gross) is None, "über 60 KB je Zeile → abgelehnt")
 

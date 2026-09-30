@@ -10299,7 +10299,8 @@ def puls_augen_saeubern(d):
         return None
     erlaubt = ("v", "ts", "url", "titel", "geo", "sichtbar", "fokus", "popups", "konto", "ticket", "kauf_knopf", "positionen",
                "orders", "toasts", "konto_summary", "inventar", "fehler", "dauer_ms", "target", "chrome",
-               "zustand", "bot")   # zustand/bot seit 30.09.2026 (TopstepX-Inventare je Zustand, Bot-Version)
+               "zustand", "bot",   # zustand/bot seit 30.09.2026 (TopstepX-Inventare je Zustand, Bot-Version)
+               "kopf", "positionen_sichtbar", "flach")   # AUGEN-WL-2 (30.09.2026): stand_tsx von augen_tsx.js (K1-Vertrag mit Terminal 3)
     daten = {k: v for k, v in d["daten"].items() if k in erlaubt}
     if len(json.dumps(daten, ensure_ascii=False)) > PULS_AUGEN_MAX:
         return None
