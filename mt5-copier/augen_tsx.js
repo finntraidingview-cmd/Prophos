@@ -16,14 +16,17 @@
  * Konto-Auslöser, BAL/MLL, Manage brackets, Risk/Profit, Contract, Kauf-Knopf und Reiter kommen erst mit dem K0-Inventar
  * (puls_augen 'inventar_tsx_*') — bis dahin bleiben konto/ticket/kauf_knopf/konto_summary null, positionen/orders leer.
  * STAND 0.2 (30.09.2026, K1-Vertrag von T3): Gerüst für konto/kopf/positionen/positionen_sichtbar/flach — Felder da, Werte null,
- * bis die Anker aus dem K0-Inventar von Mikes PC stehen (Abschnitt „K1 Lesen").
+ * bis die Anker aus dem K0-Inventar des ersten Topstep-PCs stehen (Abschnitt „K1 Lesen").
+ * STAND 0.4 (01.10.2026, TSX-CHART-SONDE): chart_sonde() — nur lesend: Library-API im Chart-iframe, Preisbereich/Modus der
+ * Haupt-Preisskala, Pane-Geometrie, Preis → Host-y (mit Gegenprobe), Order-/Positionslinien aus dem Chart-Modell; auch in inventar().
+ * Dazu ticket.bracket (Bracket-Dialog lesen, Form mit T3 abgestimmt).
  * STAND 0.3 (30.09.2026, TSX-ANKER-K1): echte Anker aus dem K0-Inventar (puls_augen, 30.09.2026) für Konto-Auslöser, Kopfzeile,
  * „No Active Position" und die Konto-Liste (konto.liste für K2); ticket.anzeigen als Rohtext. Die Anzeige einer OFFENEN Position
  * ist noch nicht belegt (Inventar war flach). inventar(): Overlays (Liste/Dialog) zuerst, SVG-Innereien raus.
  */
 var PROPHOS_AUGEN_TSX = (function () {
   'use strict';
-  var VERSION = 'tsx-0.3.1';
+  var VERSION = 'tsx-0.4.0';
 
   // ── Grundwerkzeuge (wie augen.js) ──────────────────────────────────────────
   function sichtbar(el) {
@@ -276,7 +279,7 @@ var PROPHOS_AUGEN_TSX = (function () {
   }
 
   // Kopfzeile wie tsx_kopf_werte: Texte in Lesereihenfolge → {balance, mll, rpl, upl}, je {text, wert} oder null.
-  // Form 1 „BAL: $11,079.66" in einem Knoten; Form 2 Label und Wert im nächsten Knoten; B22 (Inventar Mike): „BAL:" · „$" ·
+  // Form 1 „BAL: $11,079.66" in einem Knoten; Form 2 Label und Wert im nächsten Knoten; B22 (UIA-Inventar): „BAL:" · „$" ·
   // „154,504.88" als DREI Knoten. Bei negativen Werten zerlegt TopstepX womöglich noch feiner: „RP&L:" · „-" · „$" · „50.00" oder
   // „(" · „$" · „12.50" · „)" (Master 30.09.2026, gleiche Regel an T3 für tsx_kopf_werte) — bis zu drei Vorsatz-Knoten (auch ein
   // Rest im Label-Knoten wie „RP&L: -") vor die Zahl setzen, eine schließende Klammer als eigenen Knoten anhängen. Ein Label
@@ -303,9 +306,9 @@ var PROPHOS_AUGEN_TSX = (function () {
   }
 
   // Konto-Auslöser wie tsx_konto_sichtbar / tsx_ist_ausloeser_text (B18/B22):
-  //   „$150K EXPRESS | EXPRESS-V2-682437-57131691"  → volle Kennung, abgekuerzt false
+  //   „$150K EXPRESS | EXPRESS-V2-000000-00000000"  → volle Kennung, abgekuerzt false
   //   „$150K EXPRESS | EXPRESS-…"                    → sichtbare Kennung ohne Rest-Striche, abgekuerzt true (volle ID erst in der Liste)
-  //   „$150K TRADING COMBINE |"                      → TopstepX lässt die Kennung bei langen Namen ganz weg (Inventar Mike 11:24 UTC):
+  //   „$150K TRADING COMBINE |"                      → TopstepX lässt die Kennung bei langen Namen ganz weg (UIA-Inventar 11:24 UTC):
   //                                                    kontonr null, abgekuerzt true — auch hier beweist erst die Liste das Konto
   function kontoAusText(t) {
     t = String(t == null ? '' : t).replace(/\s+/g, ' ').trim();
@@ -438,9 +441,379 @@ var PROPHOS_AUGEN_TSX = (function () {
   // (bid, last-price, ask, no-position …) als Rohtext. Der Vertrag für Contract/Menge/Kauf-Knopf folgt mit K2/K3.
   function ticketLesen() {
     if (!K1_ANKER || !q1(tid('order-card-container'))) return null;
-    return { anzeigen: alle('[data-testid^="order-card-display-value-"]').filter(sichtbar).slice(0, 12).map(function (e) {
+    var t = { anzeigen: alle('[data-testid^="order-card-display-value-"]').filter(sichtbar).slice(0, 12).map(function (e) {
       return { testid: testid(e), text: txt(e).slice(0, 80), rect: rect(e) };
     }) };
+    try { t.bracket = bracketLesen(); } catch (e) { t.bracket = { fehler: String(e).slice(0, 80) }; }
+    return t;
+  }
+
+  /* BRACKET — nur LESEN (K3/K4 setzen SL/TP per Ziehen im Chart, nicht über den Dialog, Entscheidung vom 30.09.2026). Gebraucht wird der Zustand:
+   * legt TopstepX nach einem Fill selbst SL/TP an („Automatically apply …")? Belegt durch inventar_tsx_bracket (30.09.2026 20:48 UTC,
+   * Dialog offen, Konto flach):
+   *   Order-Karte  [data-testid="oco-bracket-selector-container"] → [role="combobox"] „Enabled" (Mui-disabled); Zahnrad
+   *                [data-testid="oco-bracket-selector-click-button-settings"] (aria „Manage brackets")
+   *   Dialog       [role="dialog"], Titel h2 „Position Brackets", X = button[aria-label="close"]
+   *                [data-testid="auto-oco-brackets-click-button-switch-mode"] „Switch to Auto OCO Brackets" (aria „Account must be fully
+   *                flattened before switching") → aktiv ist „Position Brackets"; die Gegenrichtung („Switch to Position …") ist unbelegt
+   *                [data-testid="auto-oco-brackets-input-field-risk" | "-profit"] → input (beide leer)
+   *                [data-testid="auto-oco-brackets-toggle-switch-auto-apply"] → input[type=checkbox] (opacity 0, darum ohne sichtbar()-Filter;
+   *                checked false = „Automatically apply Risk / Profit bracket to new Positions" AUS)
+   * Form wie mit T3 abgestimmt (30.09.2026): flach unter ticket.bracket (ticket steht auf der Route-Whitelist, ein eigener Oberschlüssel
+   * nicht) — dialog_offen, modus 'position'|'auto_oco'|null, auto_apply bool|null, risk/profit {text, wert}|null; ohne offenen Dialog
+   * bleiben modus/auto_apply/risk/profit null. Dazu auswahl/zahnrad aus der Order-Karte und titel/x/umschalten aus dem Dialog. */
+  function bracketFeld(id) {
+    var f = q1(tid(id)), i = f ? f.querySelector('input') : null;
+    return i ? { text: String(i.value || ''), wert: geld(i.value), rect: rect(i), zu: zustand(i) } : null;
+  }
+  function bracketLesen() {
+    var o = { dialog_offen: false, modus: null, auto_apply: null, risk: null, profit: null,
+              auswahl: null, auswahl_aus: null, zahnrad: null, titel: null, x: null, umschalten: null, rect: null };
+    var sel = q1(tid('oco-bracket-selector-container')), cb = sel ? q1('[role="combobox"]', sel) : null;
+    if (cb) { o.auswahl = txt(cb) || null; o.auswahl_aus = hatKlasse(cb, 'Mui-disabled') || attr(cb, 'aria-disabled') === 'true'; }
+    var z = q1(tid('oco-bracket-selector-click-button-settings'));
+    if (z) o.zahnrad = { rect: rect(z), zu: zustand(z) };
+    var sw = q1(tid('auto-oco-brackets-click-button-switch-mode')), dlg = sw && sw.closest ? sw.closest('[role="dialog"]') : null;
+    if (!dlg) return o;
+    var t = txt(sw), x = q1('button[aria-label="close"]', dlg), h = q1('h2', dlg);
+    var hk = q1(tid('auto-oco-brackets-toggle-switch-auto-apply')), kb = hk ? hk.querySelector('input[type="checkbox"]') : null;
+    o.dialog_offen = true; o.titel = h ? txt(h) : null; o.rect = rect(dlg);
+    o.modus = /switch to auto\s*oco/i.test(t) ? 'position' : (/switch to position/i.test(t) ? 'auto_oco' : null);
+    o.umschalten = { text: t || null, hinweis: attr(sw, 'aria-label') || null, zu: zustand(sw) };
+    o.risk = bracketFeld('auto-oco-brackets-input-field-risk'); o.profit = bracketFeld('auto-oco-brackets-input-field-profit');
+    o.auto_apply = kb ? !!kb.checked : (hk && hatKlasse(hk, 'Mui-checked') ? true : null);
+    o.x = x ? { rect: rect(x), zu: zustand(x) } : null;
+    return o;
+  }
+
+  // ── Chart-Sonde (TSX-CHART-SONDE, 01.10.2026) ──────────────────────────────
+  /* Entscheidung vom 30.09.2026: Puls setzt SL/TP auf TopstepX NICHT über den Bracket-Dialog, sondern zieht sie per echter Maus aus der
+   * Positionslinie im Chart. Dafür braucht der Bot Preis → Bildschirm-y. Die Linien sind Canvas (K0: keine DOM-Knoten), der Chart ist
+   * die TradingView-Library im iframe#tradingview_… (blob:, gleiche Herkunft → contentWindow lesbar).
+   * Belegt durch die Recherche (Workflow wf_2c5d535c, Quellen: Library-Doku, öffentliche d.ts, Library-Bundles v31/v32, TopstepX-Bundle):
+   *   - TopstepX lädt „TT v31.1.0" (iframe-Attribut version, TradingView.version()); ein globales Widget gibt es in Produktion nicht
+   *     (__tvWidget nur mit Feature-Flag). Der Weg: iframe.contentWindow.tradingViewApi — dasselbe Objekt wie widget._innerAPI().
+   *   - Aktiver Chart über tradingViewApi._activeChartWidgetWV.value() (schon gecacht). activeChart()/chart(i) ruft die Sonde NICHT
+   *     auf: beim ersten Aufruf legt die Library einen Wrapper an, der intern Abos anmeldet.
+   *   - Preis → y (pane-lokal, CSS-px, y = 0 oben): priceToCoordinate gibt es erst ab v32.2 (auf TopstepX fehlt es). Öffentlicher
+   *     Ersatz, so rechnet TopstepX selbst: y = (to − p)/(to − from)·(h − 1), h = pane.getHeight(), {from, to} = getVisiblePriceRange()
+   *     (Ränder schon enthalten), nur im Modus Normal (0); Log (1) in log10. Gegenprobe mit coordinateToPrice(y) (ab v28).
+   *     Host-y = iframe.top + Pane-Canvas.top + y.
+   *   - Order-/Positionslinien: öffentlich NICHT aufzählbar (getAllShapes filtert LineToolOrder heraus). TopstepX zeichnet Position,
+   *     SL und TP mit createOrderLine; die Positionslinie trägt den Cancel-Tooltip „Close position" (das Kreuz SCHLIESST die Position —
+   *     nie dorthin ziehen/klicken). Lesbar nur intern: model().model().dataSources() mit toolname 'LineToolOrder', adapter().getPrice()
+   *     usw.; das zuletzt gezeichnete Label-Rechteck liegt als Feld in _paneViews.get(undefined)[0]._orderRenderer._cache
+   *     ({left, right, bodyRight, quantityRight, top, bottom}); ziehbar ist der Body [left, bodyRight) — nur mit hasMoveCallback und
+   *     ohne getBlocked(); ist die Linie ausgewählt, zusätzlich ein Punkt bei x = Pane-Breite − 5 auf Linienhöhe (Radius 6 px).
+   *   - Gegenprüfung (Prüfer im Workflow): TopstepX legt über createOrderLine AUCH Preisalarme („Delete alert"/„Edit alert") und eine
+   *     unsichtbare Hilfslinie an (Text = 3000 Leerzeichen, setLineLength(0, "pixel"), Body über die ganze Pane-Breite). Darum die
+   *     Positionslinie NUR über den Cancel-Tooltip „Close position" erkennen, nie über toolname allein; eine Alarm-/Hilfslinie nahe
+   *     am Positionspreis kann Treffer abfangen.
+   * STRIKT LESEN: Aufgerufen werden nur Getter aus GETTER (s. ruf()); nie Setter, subscribe, create*, remove, Callbacks, Klicks, Events.
+   * getVisiblePriceRange/coordinateToPrice ziehen höchstens die Autoscale-Rechnung vor, die der nächste Frame ohnehin macht (TopstepX
+   * ruft sie selbst für seine Hover-Linien). TopstepX speichert Chart-Änderungen nach ~1 s auf dem Server — darum nichts anfassen.
+   * Fehlt etwas: null + grund, nichts geraten. */
+  var SONDE_MAX = 16000;
+  var GETTER = {
+    version: 1, chartsCount: 1, activeChartIndex: 1, value: 1, symbol: 1, resolution: 1, symbolExt: 1, chartType: 1, getPanes: 1,
+    getHeight: 1, paneIndex: 1, hasMainSeries: 1, isCollapsed: 1, isMaximized: 1, getMainSourcePriceScale: 1, getMode: 1, isInverted: 1,
+    isAutoScale: 1, isLocked: 1, getVisiblePriceRange: 1, coordinateToPrice: 1, priceToCoordinate: 1, hasModel: 1, model: 1,
+    dataSources: 1, name: 1, adapter: 1, getPrice: 1, getText: 1, getQuantity: 1, getLineStyle: 1, getLineColor: 1, getBodyTextColor: 1,
+    getBodyBackgroundColor: 1, getQuantityBackgroundColor: 1, getCancelTooltip: 1, getTooltip: 1, getEditable: 1, getCancellable: 1,
+    getLineLength: 1, getLineLengthUnit: 1, getExtendLeft: 1, hasMoveCallback: 1, isOnCancelCallbackPresent: 1, getBlocked: 1, getVisible: 1, panes: 1,
+    mainSeries: 1, paneForSource: 1, paneByState: 1, canvasElement: 1
+  };
+  // Einziger Weg, eine Library-Methode aufzurufen: nur Namen aus GETTER, sonst Fehler (Programmier-Riegel, nie still)
+  function ruf(obj, name, args) {
+    if (!GETTER[name]) throw new Error('Sonde: ' + name + ' ist nicht als Getter freigegeben');
+    if (!obj || typeof obj[name] !== 'function') return undefined;
+    return obj[name].apply(obj, args || []);
+  }
+  // Nur einfache Werte ins Ergebnis (Prüfer 01.10.2026): liefert ein Getter ein Library-Objekt mit Rückverweisen, scheitern
+  // JSON.stringify und CDP returnByValue — dann wären Stand UND Inventar des Zustands verloren
+  function prim(v) {
+    if (v === null || v === undefined) return null;
+    if (typeof v === 'string') return v.slice(0, 120);
+    if (typeof v === 'number') return isFinite(v) ? v : null;
+    if (typeof v === 'boolean') return v;
+    return '[' + typeof v + ']';
+  }
+  function versuch(fn, fehler, was) { try { return fn(); } catch (e) { if (fehler) fehler.push(was + ': ' + String(e && e.message || e).slice(0, 90)); return null; } }
+  // Methodennamen eines Objekts (eigene + Prototyp-Kette) — nur Namen, nichts aufrufen
+  function methoden(obj, max) {
+    var out = [], seen = {}, p = obj, n = 0;
+    try {
+      while (p && p !== Object.prototype && n++ < 6) {
+        Object.getOwnPropertyNames(p).forEach(function (k) {
+          if (seen[k] || k === 'constructor') return; seen[k] = 1;
+          var d = Object.getOwnPropertyDescriptor(p, k);
+          if (d && typeof d.value === 'function') out.push(k);
+        });
+        p = Object.getPrototypeOf(p);
+      }
+    } catch (_) {}
+    out.sort();
+    return out.slice(0, max || 80);
+  }
+  function rechteckIn(r, off) { return r ? [r[0] + (off ? off[0] : 0), r[1] + (off ? off[1] : 0), r[2], r[3]] : null; }
+
+  // Canvas im iframe einordnen: Haupt-Pane = breitestes Canvas (bei Gleichstand das oberste, wie TopstepX), Preisachse = rechts
+  // daneben mit gleicher Höhe, Zeitachse = darunter mit gleicher Breite. aria-label „Chart for …" markiert die Pane-Canvas (v32-Demo).
+  function canvasEinordnen(doc) {
+    var cs = [];
+    Array.prototype.slice.call(doc.querySelectorAll('canvas')).forEach(function (c) {
+      var r = c.getBoundingClientRect();
+      if (r.width >= 3 && r.height >= 3) cs.push({ el: c, rect: [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)], aria: attr(c, 'aria-label').slice(0, 80) });
+    });
+    var pane = null;
+    cs.forEach(function (c) { if (!pane || c.rect[2] > pane.rect[2] || (c.rect[2] === pane.rect[2] && c.rect[1] < pane.rect[1])) pane = c; });
+    cs.forEach(function (c) {
+      c.rolle = !pane ? null : (c.rect[0] === pane.rect[0] && c.rect[1] === pane.rect[1] && c.rect[2] === pane.rect[2] && c.rect[3] === pane.rect[3]) ? 'pane'
+        : (Math.abs(c.rect[1] - pane.rect[1]) <= 1 && Math.abs(c.rect[3] - pane.rect[3]) <= 1 && c.rect[0] >= pane.rect[0] + pane.rect[2] - 1) ? 'preisachse'
+        : (Math.abs(c.rect[0] - pane.rect[0]) <= 1 && Math.abs(c.rect[2] - pane.rect[2]) <= 1 && c.rect[1] >= pane.rect[1] + pane.rect[3] - 1) ? 'zeitachse' : 'sonst';
+    });
+    return { liste: cs, pane: pane };
+  }
+
+  function chartSonde(opts) {
+    opts = opts || {};
+    var f = [], o = { v: VERSION, ts: Date.now(), dpr: window.devicePixelRatio || 1, geo: geo(), iframes: [], version: null, host: null, api: null,
+                      chart: null, panes: null, skala: null, geometrie: null, umrechnung: null, linien: null, legende: null, overlays: null, fehler: f };
+    // 1. iframe(s) — bei jedem Aufruf neu suchen (TopstepX tauscht das iframe zur Laufzeit aus)
+    var ifs = alle('iframe[id^="tradingview_"]'), ifr = null;
+    ifs.slice(0, 4).forEach(function (i) {
+      var gh = false; try { gh = !!(i.contentDocument && i.contentWindow && i.contentWindow.document); } catch (_) {}
+      var e = { id: i.id, titel: attr(i, 'title'), version: attr(i, 'version') || null, rect: rect(i), sichtbar: sichtbar(i), gleiche_herkunft: gh };
+      o.iframes.push(e);
+      if (!ifr && gh && e.sichtbar) ifr = i;
+    });
+    if (!ifr) { o.grund = ifs.length ? 'Chart-iframe nicht sichtbar oder nicht gleiche Herkunft' : 'kein iframe[id^="tradingview_"]'; return sondeDeckeln(o); }
+    var W = ifr.contentWindow, D = ifr.contentDocument, ir = rect(ifr);
+    o.version = { iframe: attr(ifr, 'version') || null, tv: prim(versuch(function () { return window.TradingView ? ruf(window.TradingView, 'version') : null; }, f, 'TradingView.version')) };
+    // 2. Hauptfenster: Globals nur auf Existenz prüfen (nichts aufrufen außer version()); Widget-Optionen window[iframe.id] nur Schlüssel
+    o.host = versuch(function () {
+      var h = { TradingView: !!window.TradingView, tvWidget: !!window.tvWidget, __tvWidget: !!window.__tvWidget, __tvChartLines: !!window.__tvChartLines,
+                optionen: null, widget_kandidaten: [] };
+      var op = window[ifr.id];
+      if (op && typeof op === 'object') h.optionen = { schluessel: Object.keys(op).slice(0, 40), broker: !!(op.brokerFactory || op.broker_factory) };
+      Object.keys(window).slice(0, 600).forEach(function (k) {
+        if (h.widget_kandidaten.length >= 6 || /^(webkit|on)/.test(k)) return;
+        try { var d = Object.getOwnPropertyDescriptor(window, k), v = d && 'value' in d ? d.value : null; if (v && typeof v === 'object' && (typeof v.activeChart === 'function' || typeof v.chart === 'function' && typeof v.chartsCount === 'function')) h.widget_kandidaten.push(k); } catch (_) {}
+      });
+      return h;
+    }, f, 'host');
+    // 3. Library-API im iframe
+    var api = null;
+    try { api = W.tradingViewApi || null; } catch (_) {}
+    o.api = { da: !!api, iframe_globals: versuch(function () {
+                return ['tradingViewApi', 'TradingViewApi', 'chartWidgetCollection', 'ChartApiInstance', 'chartWidget', 'widgetReady', 'TradingView']
+                  .filter(function (k) { try { return W[k] != null; } catch (_) { return false; } });
+              }, f, 'iframe_globals') };
+    if (!api) { o.api.grund = 'iframe.contentWindow.tradingViewApi fehlt (Chart noch nicht bereit?)'; }
+    else {
+      o.api.methoden = methoden(api, 70);
+      o.api.charts = prim(versuch(function () { return ruf(api, 'chartsCount'); }, f, 'chartsCount'));
+      o.api.aktiv = prim(versuch(function () { return ruf(api, 'activeChartIndex'); }, f, 'activeChartIndex'));
+    }
+    var ch = api ? versuch(function () { var wv = api._activeChartWidgetWV; return wv ? ruf(wv, 'value') : null; }, f, '_activeChartWidgetWV') : null;
+    if (api && !ch) o.api.grund = 'kein _activeChartWidgetWV (activeChart() wird bewusst nicht aufgerufen)';
+    // 4. Chart: Symbol, Auflösung, Tick, Panes, Haupt-Preisskala
+    var skala = null, hMain = null, paneApi = null;
+    if (ch) {
+      o.chart = { methoden: methoden(ch, 80), symbol: prim(versuch(function () { return ruf(ch, 'symbol'); }, f, 'symbol')),
+                  aufloesung: prim(versuch(function () { return ruf(ch, 'resolution'); }, f, 'resolution')),
+                  typ: prim(versuch(function () { return ruf(ch, 'chartType'); }, f, 'chartType')) };
+      var se = versuch(function () { return ruf(ch, 'symbolExt'); }, f, 'symbolExt');
+      if (se && typeof se === 'object') {
+        var ps = Number(se.pricescale), mm = Number(se.minmov);
+        o.chart.symbol_info = { name: prim(se.name), full_name: prim(se.full_name), pricescale: isFinite(ps) ? ps : null, minmov: isFinite(mm) ? mm : null,
+                                tick: isFinite(ps) && ps > 0 && isFinite(mm) ? mm / ps : null };
+      }
+      var panes = versuch(function () { return ruf(ch, 'getPanes'); }, f, 'getPanes') || [];
+      o.panes = [];
+      panes.slice(0, 6).forEach(function (p, i) {
+        var e = { i: i, index: prim(versuch(function () { return ruf(p, 'paneIndex'); }, f, 'paneIndex')), hoehe: prim(versuch(function () { return ruf(p, 'getHeight'); }, f, 'getHeight')),
+                  haupt: prim(versuch(function () { return ruf(p, 'hasMainSeries'); }, f, 'hasMainSeries')),
+                  eingeklappt: prim(versuch(function () { return ruf(p, 'isCollapsed'); }, null, '')), maximiert: prim(versuch(function () { return ruf(p, 'isMaximized'); }, null, '')) };
+        o.panes.push(e);
+        if (e.haupt && !paneApi) { paneApi = p; hMain = e.hoehe; }
+      });
+      if (!paneApi && panes.length) { paneApi = panes[0]; hMain = o.panes[0].hoehe; o.chart.haupt_pane_hinweis = 'keine Pane mit hasMainSeries — Pane 0 genommen'; }
+      skala = paneApi ? versuch(function () { return ruf(paneApi, 'getMainSourcePriceScale'); }, f, 'getMainSourcePriceScale') : null;
+      if (skala) {
+        var vr = versuch(function () { return ruf(skala, 'getVisiblePriceRange'); }, f, 'getVisiblePriceRange');
+        var md = prim(versuch(function () { return ruf(skala, 'getMode'); }, f, 'getMode'));
+        o.skala = { von: vr && typeof vr.from === 'number' && isFinite(vr.from) ? vr.from : null, bis: vr && typeof vr.to === 'number' && isFinite(vr.to) ? vr.to : null, modus: md,
+                    modus_name: md === 0 ? 'normal' : md === 1 ? 'log' : md === 2 ? 'prozent' : md === 3 ? 'indexed100' : null,
+                    invertiert: prim(versuch(function () { return ruf(skala, 'isInverted'); }, f, 'isInverted')),
+                    auto: prim(versuch(function () { return ruf(skala, 'isAutoScale'); }, null, '')), gesperrt: prim(versuch(function () { return ruf(skala, 'isLocked'); }, null, '')),
+                    price_to_coordinate: typeof skala.priceToCoordinate === 'function', coordinate_to_price: typeof skala.coordinateToPrice === 'function',
+                    methoden: methoden(skala, 40) };
+      } else if (ch) o.skala = { grund: 'keine Haupt-Preisskala (No Scale/Overlay?)' };
+    }
+    // 5. Geometrie: Pane-Canvas im iframe → Host-Koordinaten. Erst intern (paneByState(pane).canvasElement()), sonst Heuristik.
+    var ce = canvasEinordnen(D), paneEl = null, quelle = null;
+    var cw = ch ? versuch(function () { return ch._chartWidget || null; }, f, '_chartWidget') : null;
+    var M = cw ? versuch(function () { return ruf(cw, 'hasModel') ? ruf(ruf(cw, 'model'), 'model') : null; }, f, 'model') : null;
+    if (cw && M) paneEl = versuch(function () {
+      var mp = ruf(M, 'paneForSource', [ruf(M, 'mainSeries')]);
+      var w = mp ? ruf(cw, 'paneByState', [mp]) : null, el = w ? ruf(w, 'canvasElement') : null;
+      return el && el.getBoundingClientRect ? el : null;
+    }, f, 'paneWidget');
+    if (paneEl) quelle = 'intern'; else if (ce.pane) { paneEl = ce.pane.el; quelle = 'breitestes_canvas'; }
+    var pr = paneEl ? (function () { var r = paneEl.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)]; })() : null;
+    var pExakt = paneEl ? paneEl.getBoundingClientRect() : null;
+    o.geometrie = { iframe: ir, iframe_dpr: versuch(function () { return W.devicePixelRatio; }, null, ''), pane_quelle: quelle,
+                    pane_iframe: pr, pane_host: rechteckIn(pr, ir),
+                    preisachse_host: (function () { var a = ce.liste.filter(function (c) { return c.rolle === 'preisachse'; })[0]; return a ? rechteckIn(a.rect, ir) : null; })(),
+                    zeitachse_host: (function () { var a = ce.liste.filter(function (c) { return c.rolle === 'zeitachse'; })[0]; return a ? rechteckIn(a.rect, ir) : null; })(),
+                    canvas: ce.liste.slice(0, 10).map(function (c) { return { rect: c.rect, rolle: c.rolle, aria: c.aria || undefined }; }),
+                    hoehe_passt: pExakt && typeof hMain === 'number' ? Math.abs(pExakt.height - hMain) < 1.5 : null };
+    if (opts.kompakt) { delete o.geometrie.canvas; }
+    // 6. Umrechnung Preis → y (+ Gegenprobe über coordinateToPrice)
+    o.umrechnung = umrechnen(o, skala, hMain, ifr, paneEl, opts.preise, f);
+    // 7. Linien (intern, nur Felder/Getter) — Position/SL/TP/Orders/Alarme als LineToolOrder
+    o.linien = M ? versuch(function () { return linienLesen(M, ifr, paneEl, f); }, f, 'linien') : { grund: 'kein Chart-Modell (intern)' };
+    // 8. Legende, DOM-Overlays über der Pane, Tooltips (nur Texte/Rechtecke)
+    // Legende: je Quelle ein Eintrag (Demo v31.1/v32.2: data-qa-id legend-series-item = Hauptserie, legend-source-item = Studien)
+    o.legende = versuch(function () {
+      return Array.prototype.slice.call(D.querySelectorAll('[data-qa-id="legend-series-item"],[data-qa-id="legend-source-item"]')).slice(0, 8).map(function (e) {
+        return { art: attr(e, 'data-qa-id') === 'legend-series-item' ? 'serie' : 'quelle', text: txt(e).slice(0, 100) };
+      });
+    }, f, 'legende');
+    o.overlays = pExakt ? versuch(function () {
+      var pts = [[0.5, 0.5], [0.97, 0.5], [0.5, 0.05], [0.5, 0.95]], seen = [], out = [];
+      pts.forEach(function (p) {
+        (D.elementsFromPoint(pExakt.left + pExakt.width * p[0], pExakt.top + pExakt.height * p[1]) || []).forEach(function (e) {
+          if (out.length >= 12 || seen.indexOf(e) >= 0 || e.tagName === 'CANVAS' || e === D.body || e === D.documentElement) return;
+          seen.push(e);
+          var c = typeof e.className === 'string' ? e.className : ((e.className && e.className.baseVal) || '');
+          out.push({ tag: e.tagName.toLowerCase(), cls: c.replace(/\s+/g, ' ').slice(0, 60), rect: rechteckIn(rect(e), ir), text: txt(e).slice(0, 40) || undefined });
+        });
+      });
+      return out;
+    }, f, 'overlays') : null;
+    // offene Tooltips: nur role=tooltip — Klassen mit „tooltip" tragen in der Library auch Knöpfe und Watchlist-Zeilen (Demo v31.1/v32.2)
+    o.tooltips = versuch(function () {
+      return Array.prototype.slice.call(D.querySelectorAll('[role="tooltip"]')).filter(function (e) {
+        var r = e.getBoundingClientRect(); return r.width > 3 && r.height > 3 && txt(e);
+      })
+        .slice(0, 4).map(function (e) { return { text: txt(e).slice(0, 80), rect: rechteckIn(rect(e), ir) }; });
+    }, f, 'tooltips');
+    if (opts.kompakt) {   // für inventar(): ohne Methodenlisten/Overlays/Optionsschlüssel — die Anker-Elemente brauchen den Platz
+      if (o.api) delete o.api.methoden; if (o.chart) delete o.chart.methoden; if (o.skala) delete o.skala.methoden;
+      if (o.linien) delete o.linien.adapter_methoden; delete o.overlays; if (o.host && o.host.optionen) delete o.host.optionen.schluessel;
+    }
+    if (!f.length) delete o.fehler;
+    return sondeDeckeln(o);
+  }
+
+  // Preis → y. Modus 0 (normal) linear, 1 (log) in log10, 2/3 (prozent/indexed) wie linear (laut Library-Code affin, live unbelegt).
+  // y_pane zählt ab Pane-Oberkante (CSS-px), y_host = iframe.top + pane.top + y_pane (Viewport des Hauptfensters, wie rect()).
+  function umrechnen(o, skala, h, ifr, paneEl, preise, f) {
+    var s = o.skala || {}, u = { ok: false, formel: null, von: s.von, bis: s.bis, hoehe: h, pane_top_host: null, pane_left_host: null, pane_breite: null, punkte: [] };
+    if (!skala || !isFinite(s.von) || !isFinite(s.bis) || !(h > 1) || !paneEl) { u.grund = 'Preisbereich, Pane-Höhe oder Pane-Canvas fehlt'; return u; }
+    if (s.bis === s.von) { u.grund = 'Preisbereich ohne Spanne'; return u; }
+    var ifrR = ifr.getBoundingClientRect(), pR = paneEl.getBoundingClientRect();
+    u.pane_top_host = Math.round((ifrR.top + pR.top) * 100) / 100; u.pane_left_host = Math.round((ifrR.left + pR.left) * 100) / 100; u.pane_breite = Math.round(pR.width);
+    var log = s.modus === 1;
+    if (log && !(s.von > 0 && s.bis > 0)) { u.grund = 'Log-Skala mit Preis ≤ 0'; return u; }
+    u.formel = log ? 'log10' : 'linear';
+    if (s.modus !== 0 && s.modus !== 1) u.hinweis = 'Modus ' + s.modus + ' (' + s.modus_name + '): laut Library-Code affin im Preis (Prüfer bestätigt), live unbelegt';
+    function yVon(p) {
+      var a = log ? Math.log(s.bis) / Math.LN10 : s.bis, b = log ? Math.log(s.von) / Math.LN10 : s.von, x = log ? Math.log(p) / Math.LN10 : p;
+      return (a - x) / (a - b) * (h - 1);
+    }
+    var liste = (Array.isArray(preise) && preise.length ? preise : [s.bis, (s.bis + s.von) / 2, s.von]).slice(0, 8);
+    liste.forEach(function (p) {
+      p = Number(p);
+      if (!isFinite(p) || (log && p <= 0)) { u.punkte.push({ preis: p, y_pane: null, grund: 'Preis ungültig' }); return; }
+      var y = yVon(p), e = { preis: p, y_pane: Math.round(y * 100) / 100, y_host: Math.round((u.pane_top_host + y) * 100) / 100, im_bild: y >= 0 && y <= h - 1 };
+      if (s.price_to_coordinate) e.y_library = prim(versuch(function () { return ruf(skala, 'priceToCoordinate', [p]); }, f, 'priceToCoordinate'));
+      if (s.coordinate_to_price && e.im_bild) {
+        var zp = versuch(function () { return ruf(skala, 'coordinateToPrice', [y]); }, f, 'coordinateToPrice');
+        if (typeof zp === 'number' && isFinite(zp)) { e.gegenprobe = Math.round(zp * 1e6) / 1e6; e.abweichung = Math.round(Math.abs(zp - p) * 1e6) / 1e6; }
+      }
+      u.punkte.push(e);
+    });
+    var tick = o.chart && o.chart.symbol_info ? o.chart.symbol_info.tick : null;
+    var abw = u.punkte.filter(function (e) { return typeof e.abweichung === 'number'; }).map(function (e) { return e.abweichung; });
+    u.gegenprobe = abw.length ? { max_abweichung: Math.max.apply(null, abw), tick: tick, passt: tick ? Math.max.apply(null, abw) <= tick / 2 : null } : null;
+    // ok nur, wenn die Pane sicher die der Hauptserie ist (intern bestimmt oder Höhe = getHeight) und die Gegenprobe nicht widerspricht —
+    // die Gegenprobe prüft nur pane-lokal, ein falscher Host-Versatz (Rückfall „breitestes Canvas", Indikator-Pane darüber) fiele ihr nicht auf
+    var g = o.geometrie || {};
+    if (!(g.pane_quelle === 'intern' || g.hoehe_passt === true)) u.grund = 'Pane-Zuordnung unsicher (' + g.pane_quelle + ', Höhe passt ' + g.hoehe_passt + ')';
+    else if (u.gegenprobe && u.gegenprobe.passt === false) u.grund = 'Gegenprobe über coordinateToPrice weicht um mehr als einen halben Tick ab';
+    else u.ok = true;
+    return u;
+  }
+
+  // Linien aus dem Chart-Modell: toolname 'LineToolOrder' (auch 'LineToolPosition'/'LineToolExecution'). Nur Getter + Felder.
+  function linienLesen(M, ifr, paneEl, f) {
+    var srcs = ruf(M, 'dataSources') || [], out = { quelle: 'intern', anzahl: 0, liste: [] };
+    var ifrR = ifr.getBoundingClientRect(), pR = paneEl ? paneEl.getBoundingClientRect() : null;
+    var offX = pR ? ifrR.left + pR.left : null, offY = pR ? ifrR.top + pR.top : null;
+    var alle_ = [];
+    srcs.forEach(function (s) {
+      var tn = null; try { tn = s && s.toolname; } catch (_) {}
+      if (!/^LineTool(Order|Position|Execution)$/.test(String(tn || ''))) return;
+      out.anzahl++;
+      if (alle_.length >= 60) return;
+      var a = versuch(function () { return ruf(s, 'adapter') || s._adapter || null; }, f, 'adapter');
+      var g = function (n) { return a ? prim(versuch(function () { return ruf(a, n); }, null, '')) : null; };
+      var tx = a ? versuch(function () { return ruf(a, 'getText'); }, null, '') : null, txs = typeof tx === 'string' ? tx : null;
+      var e = { toolname: tn, name: prim(versuch(function () { return ruf(s, 'name'); }, null, '')), preis: g('getPrice'),
+                text: txs === null ? prim(tx) : txs.replace(/\s+/g, ' ').trim().slice(0, 80), text_laenge: txs === null ? null : txs.length, menge: g('getQuantity'),
+                stil: g('getLineStyle'), farbe: g('getLineColor'), body_farbe: g('getBodyBackgroundColor'), cancel_tooltip: g('getCancelTooltip'), tooltip: g('getTooltip'),
+                editierbar: g('getEditable'), ziehbar: g('hasMoveCallback'), kreuz: g('isOnCancelCallbackPresent'), laenge: g('getLineLength'),
+                laenge_einheit: g('getLineLengthUnit'), links_verlaengert: g('getExtendLeft'), gesperrt: g('getBlocked'), sichtbar: g('getVisible') };
+      if (!out.adapter_methoden && a) out.adapter_methoden = methoden(a, 60);
+      // Rolle nur aus belegten TopstepX-Konstanten: Positionslinie = Cancel-Tooltip „Close position", Alarm = „Delete alert"
+      var hilfe = (txs !== null && txs.length >= 100 && !txs.trim()) || (e.laenge === 0 && e.laenge_einheit === 'pixel');
+      e.rolle = /^close position$/i.test(String(e.cancel_tooltip || '')) ? 'position'
+        : /alert/i.test(String(e.cancel_tooltip || '') + ' ' + String(e.tooltip || '')) ? 'alarm' : hilfe ? 'hilfe' : null;
+      // Label-Rechteck des letzten Zeichnens (pane-lokal, CSS-px) — reiner Feldzugriff, nie renderer() aufrufen
+      var c = versuch(function () {
+        var pv = s._paneViews, v = pv && typeof pv.get === 'function' ? pv.get(undefined) : null, r = v && v[0] && v[0]._orderRenderer;
+        return r && r._cache ? r._cache : null;
+      }, null, '');
+      if (c && typeof c.left === 'number' && typeof c.top === 'number' && isFinite(c.left) && isFinite(c.top)) {
+        e.label_pane = { left: c.left, right: c.right, body_right: c.bodyRight, menge_right: c.quantityRight, top: c.top, bottom: c.bottom };
+        if (offX !== null) e.label_host = { body: [Math.round((offX + c.left) * 10) / 10, Math.round((offY + c.top) * 10) / 10, Math.round((c.bodyRight - c.left) * 10) / 10, Math.round((c.bottom - c.top) * 10) / 10],
+                                            menge: isFinite(c.quantityRight) ? [Math.round((offX + c.bodyRight) * 10) / 10, Math.round((offY + c.top) * 10) / 10, Math.round((c.quantityRight - c.bodyRight) * 10) / 10, Math.round((c.bottom - c.top) * 10) / 10] : null,
+                                            kreuz: isFinite(c.right) && isFinite(c.quantityRight) && c.right > c.quantityRight ? [Math.round((offX + c.quantityRight) * 10) / 10, Math.round((offY + c.top) * 10) / 10, Math.round((c.right - c.quantityRight) * 10) / 10, Math.round((c.bottom - c.top) * 10) / 10] : null };
+      } else e.label_grund = 'kein gezeichnetes Label-Rechteck (_orderRenderer._cache fehlt)';
+      alle_.push(e);
+    });
+    // Positionslinie zuerst, dann Linien ohne Rolle (SL/TP/Orders), dann Alarme und Hilfslinien — erst DANN kürzen (Prüfer: TopstepX legt
+    // Alarme und die Hilfslinie beim Laden an, also vor der Position; sonst fiele die Position aus der Liste)
+    var rang = { position: 0, alarm: 2, hilfe: 3 };
+    alle_.sort(function (x, y) { return (x.rolle in rang ? rang[x.rolle] : 1) - (y.rolle in rang ? rang[y.rolle] : 1); });
+    out.liste = alle_.slice(0, 12);
+    if (alle_.length > 12) out.weggelassen = alle_.length - 12;
+    if (!out.anzahl) out.grund = 'keine LineToolOrder/-Position im Modell (keine offene Position/Order oder anderer Pfad)';
+    return out;
+  }
+
+  // Größen-Riegel: erst Methodenlisten kürzen, dann Overlays/Canvas — die Umrechnung und die Linien bleiben
+  function sondeDeckeln(o) {
+    try {
+      var n = 0;
+      while (JSON.stringify(o).length > SONDE_MAX && n++ < 12) {
+        if (o.api && o.api.methoden && o.api.methoden.length > 20) o.api.methoden = o.api.methoden.slice(0, 20);
+        else if (o.chart && o.chart.methoden && o.chart.methoden.length > 20) o.chart.methoden = o.chart.methoden.slice(0, 20);
+        else if (o.skala && o.skala.methoden) delete o.skala.methoden;
+        else if (o.linien && o.linien.adapter_methoden) delete o.linien.adapter_methoden;
+        else if (o.overlays && o.overlays.length > 4) o.overlays = o.overlays.slice(0, 4);
+        else if (o.geometrie && o.geometrie.canvas) delete o.geometrie.canvas;
+        else if (o.legende || o.tooltips) { delete o.legende; delete o.tooltips; }
+        else if (o.linien && o.linien.liste && o.linien.liste.length > 4) o.linien.liste = o.linien.liste.slice(0, 4);
+        else if (o.host && o.host.optionen) delete o.host.optionen;
+        else break;
+        o.gekappt = true;
+      }
+    } catch (_) {}
+    return o;
   }
 
   // ── Öffentliche Funktionen ─────────────────────────────────────────────────
@@ -528,13 +901,21 @@ var PROPHOS_AUGEN_TSX = (function () {
               canvas: alle('canvas').filter(sichtbar).length,
               anzahl: els.length, ueber: els.filter(ueber).length, elemente: liste, blatt: blatt, kaestchen: kaestchen };
     try { o.stand = stand(opts); } catch (e2) { o.stand = { fehler: String(e2) }; }
+    // Chart-Sonde (nur lesen) — eigener Schlüssel: inv.chart überschreibt der Bot mit seinem eigenen Chart-Blick
+    try { o.chart_sonde = chartSonde({ kompakt: true }); } catch (e3) { o.chart_sonde = { fehler: String(e3).slice(0, 120) }; }
     // Größen-Riegel: erst Blatt-Texte, dann Elemente von hinten kürzen — Overlays stehen vorn und bleiben
     try {
       var n = 0;
       while (JSON.stringify(o).length > INVENTAR_MAX && n++ < 40) {
-        if (o.blatt.length > 60) o.blatt = o.blatt.slice(0, Math.floor(o.blatt.length * 0.8));
+        // die Chart-Sonde zuerst eindampfen (Prüfer 01.10.2026: sonst gehen die Anker-Elemente für sie drauf), ganz zuletzt ganz raus
+        if (o.chart_sonde && !o.chart_sonde.eingedampft) o.chart_sonde = { eingedampft: true, version: o.chart_sonde.version, grund: o.chart_sonde.grund,
+          skala: o.chart_sonde.skala, geometrie: o.chart_sonde.geometrie && { pane_host: o.chart_sonde.geometrie.pane_host, pane_quelle: o.chart_sonde.geometrie.pane_quelle, hoehe_passt: o.chart_sonde.geometrie.hoehe_passt },
+          umrechnung: o.chart_sonde.umrechnung && { ok: o.chart_sonde.umrechnung.ok, grund: o.chart_sonde.umrechnung.grund, gegenprobe: o.chart_sonde.umrechnung.gegenprobe },
+          linien: o.chart_sonde.linien && { anzahl: o.chart_sonde.linien.anzahl, liste: (o.chart_sonde.linien.liste || []).slice(0, 3) } };
+        else if (o.blatt.length > 60) o.blatt = o.blatt.slice(0, Math.floor(o.blatt.length * 0.8));
         else if (o.elemente.length > 80) o.elemente = o.elemente.slice(0, Math.floor(o.elemente.length * 0.85));
         else if (o.kaestchen.length > 10) o.kaestchen = o.kaestchen.slice(0, 10);
+        else if (o.chart_sonde) delete o.chart_sonde;
         else break;
         o.gekappt = true;
       }
@@ -542,7 +923,7 @@ var PROPHOS_AUGEN_TSX = (function () {
     return o;
   }
 
-  return { v: VERSION, version: VERSION, plattform: 'topstepx', stand: stand, inventar: inventar,
+  return { v: VERSION, version: VERSION, plattform: 'topstepx', stand: stand, inventar: inventar, chart_sonde: chartSonde,
            _meldungAus: meldungAus, _geld: geld, _kopfAusTexten: kopfAusTexten, _kontoAusText: kontoAusText, _balanceRelativ: balanceRelativ };   // _…: nur für Tests (reine Textregeln)
 })();
 // Vertrag T3: globalThis.prophosAugen = { v, stand(), inventar() } — wie augen.js; im TopstepX-Tab gilt diese Datei.
