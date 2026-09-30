@@ -2039,12 +2039,7 @@
   #bulk-paste-vorschau .bpv .id{font-family:var(--mono);font-weight:600;word-break:break-all}
   #bulk-paste-vorschau .bpv .m{display:block;font-size:11.5px;color:var(--sub);margin-top:1px}
   #bulk-paste-vorschau .bpv .bal{margin-left:auto;font-family:var(--mono);white-space:nowrap;text-align:right}
-  /* Live Trades: Farbpunkt je Trade (= Farbe seiner Linien im Chart), hohl = Linien aus (26.09.2026, F6) */
-  #dashboard-view .wdl-dot{width:12px;height:12px;border-radius:50%;border:2px solid var(--mwd-farbe,#667085);background:var(--mwd-farbe,#667085);flex:none;padding:0;cursor:pointer}
-  #dashboard-view .wdl-dot.aus{background:transparent}
-  #dashboard-view .wdl-ids .adm-vl-chip small{margin-left:5px;color:var(--sub-2);font-weight:400;font-variant-numeric:tabular-nums}
-  #dashboard-view .wdl-legende{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:11.5px;color:var(--sub);margin-top:6px}
-  #dashboard-view .wdl-legende i{display:inline-block;width:22px;height:0;border-top:2px solid var(--sub);vertical-align:middle;margin-right:5px}
+  #dashboard-view .wdl-ids .adm-vl-chip b{margin-left:5px;font-variant-numeric:tabular-nums}
   #dashboard-view .mwd-card{position:relative;min-width:0;overflow:hidden;padding:10px 12px 9px 14px;border:1px solid var(--border);border-left:4px solid var(--mwd-farbe,#667085);border-radius:10px;background:var(--surface);cursor:pointer;transition:border-color .12s,box-shadow .12s}
   #dashboard-view .mwd-card:hover{border-color:#d1d5db}
   #dashboard-view .mwd-card.is-aktiv{box-shadow:0 0 0 2px var(--mwd-farbe,#667085)}
@@ -2074,29 +2069,43 @@
   #dashboard-view .mwd-level-txt{margin-top:26px;font-size:11px;color:var(--sub)}
   #dashboard-view .mwd-level-txt .mwd-nah{color:#B45309;font-weight:700}
   #dashboard-view .mwd-pl{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px}
-  /* Live Trades (26.09.2026): Level-Zeile + Demo-Chip, sonst die Karten-Bausteine der Winning Days (mwd-*) */
-  #dashboard-view .wdl-gruppe{margin:16px 0 6px;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--sub)}
-  #dashboard-view .wdl-level{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:8px}
-  #dashboard-view .wdl-level div{min-width:0}
-  #dashboard-view .wdl-level b{display:block;font-family:var(--mono);font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  #dashboard-view .wdl-level small{display:block;font-size:10.5px;color:var(--sub-2)}
-  #dashboard-view .wdl-demo{display:inline-flex;align-items:center;gap:6px;margin-top:8px;padding:3px 9px;border-radius:6px;font-size:12px;font-weight:600;background:var(--surface-tint);color:var(--sub)}
-  #dashboard-view .wdl-demo.tp{background:rgba(18,183,106,.12);color:#0E9757}
-  #dashboard-view .wdl-demo.liq{background:rgba(240,68,56,.10);color:#D92D20}
-  #dashboard-view .wdl-demo.lauf{background:rgba(247,144,9,.12);color:#B54708}
-  @media (max-width:820px){ #dashboard-view .wdl-level{grid-template-columns:repeat(2,minmax(0,1fr))} }
-  /* Radar-Karten schmal (29.09.2026, Finn: „ein bisschen schmaler und cleaner — schon ein bisschen fett"): Level + P&L in EINER Zeile,
-     Balance vorher → live/nachher und Demo als Fußzeile statt drei Kästen — etwa halbe Höhe. Nur #wdl-liste; die Winning-Days-Karten
-     und das Abhak-Popup nutzen dieselben mwd-*-Bausteine und bleiben, wie sie sind. */
-  #dashboard-view #wdl-liste .mwd-liste{gap:6px}
-  #dashboard-view #wdl-liste .mwd-card{padding:8px 12px 7px 12px}
-  #dashboard-view #wdl-liste .wdl-level{grid-template-columns:repeat(5,minmax(0,1fr));gap:4px 12px;margin-top:5px}
-  #dashboard-view #wdl-liste .wdl-level b{font-size:13px;line-height:1.3}
-  #dashboard-view #wdl-liste .wdl-level small{font-size:10.5px;line-height:1.3}
-  #dashboard-view #wdl-liste .wdl-fuss{display:flex;flex-wrap:wrap;align-items:center;gap:3px 10px;margin-top:5px;font-size:11px;color:var(--sub-2)}
-  #dashboard-view #wdl-liste .wdl-fuss b{font-family:var(--mono);font-weight:600;color:var(--ink-2)}
-  #dashboard-view #wdl-liste .wdl-demo{margin-top:0;padding:1px 7px;font-size:11px}
-  @media (max-width:820px){ #dashboard-view #wdl-liste .wdl-level{grid-template-columns:repeat(3,minmax(0,1fr))} }
+  /* Radar als ruhige Tabelle (30.09.2026, Finn am Radar-Screenshot: „so viele kleine Texte, die nichts helfen … warum haben EzPoker und
+     Chris die gleiche Farbe? … Balance vorher, live, Liquidation, Kontogröße unbekannt" und nach der ersten Runde: „Die Farben (das
+     Pink) sind hässlich … kein sauberes Layout, alles aufeinander geklatscht"). Je Gruppe ein Kasten, darin EINMAL die Spaltenköpfe und
+     eine Zeile je Trade; alle Gruppen teilen dasselbe Raster, Zahlen rechtsbündig mit tabular-nums — alles steht exakt untereinander.
+     ID-Farbe nur als kleiner Punkt (dieselbe wie in #wdl-ids), Grün/Rot nur für P&L, sonst Graustufen, BUY/SELL als graue Pille.
+     Liquidation/SL zeigt der Chart beim Klick. Eigene wdl-z-*-Klassen, die mwd-*-Karten der Winning Days bleiben, wie sie sind. */
+  #dashboard-view .wdl-tab{border:1px solid var(--border-soft);border-radius:10px;background:var(--surface);overflow:hidden}
+  #dashboard-view .wdl-tab + .wdl-tab{margin-top:14px}
+  #dashboard-view .wdl-z{display:grid;grid-template-columns:minmax(0,1fr) 112px 104px 104px 112px 136px;grid-template-areas:"wer ri ein tp pl zeit";align-items:center;column-gap:20px;padding:11px 16px;font-size:13px;color:var(--ink-2);font-variant-numeric:tabular-nums;cursor:pointer;transition:background .12s}
+  #dashboard-view .wdl-z + .wdl-z{border-top:1px solid var(--border-soft)}
+  #dashboard-view .wdl-z:not(.wdl-z-kopf):hover{background:var(--bg)}
+  #dashboard-view .wdl-z.is-aktiv,#dashboard-view .wdl-z.is-aktiv:hover{background:var(--surface-tint)}
+  #dashboard-view .wdl-z-kopf{padding-top:9px;padding-bottom:8px;font-size:10.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--sub-2);cursor:default}
+  #dashboard-view .wdl-z-kopf .wdl-z-wer{color:var(--sub)}
+  #dashboard-view .wdl-z > span{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #dashboard-view .wdl-z-wer{grid-area:wer}
+  #dashboard-view .wdl-z-wer b{font-weight:600;color:var(--ink)}
+  #dashboard-view .wdl-z-wer small{margin-left:8px;font-size:12.5px;color:var(--sub)}
+  #dashboard-view .wdl-z-punkt{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:9px;vertical-align:1px;background:var(--wdl-id,#98A2B3)}
+  #dashboard-view .wdl-z-ri{grid-area:ri;color:var(--sub)}
+  #dashboard-view .wdl-z-ri em{display:inline-block;min-width:34px;margin-right:6px;padding:1px 0;border-radius:4px;background:var(--surface-tint);color:var(--ink-2);font-style:normal;font-size:10.5px;font-weight:600;letter-spacing:.03em;text-align:center}
+  #dashboard-view .wdl-z-ein{grid-area:ein;text-align:right}
+  #dashboard-view .wdl-z-tp{grid-area:tp;text-align:right}
+  #dashboard-view .wdl-z-tp i{font-style:normal;margin-left:4px;color:var(--sub)}
+  #dashboard-view .wdl-z-pl{grid-area:pl;text-align:right;font-weight:600}
+  #dashboard-view .wdl-z-zeit{grid-area:zeit;text-align:right;color:var(--sub)}
+  /* Handy: zwei Zeilen, dasselbe Raster für Kopf und Zeilen — oben wer + P&L, darunter Richtung · Einstieg · TP · Zeit */
+  @media (max-width:820px){
+    #dashboard-view .wdl-tab{border:none;border-radius:var(--m-r-card,16px);box-shadow:var(--shadow-mob-card,0 1px 2px rgba(16,24,40,.05))}
+    #dashboard-view .wdl-z{grid-template-columns:84px minmax(0,1fr) minmax(0,1fr) 76px;grid-template-areas:"wer wer wer pl" "ri ein tp zeit";column-gap:4px;row-gap:5px;padding:10px 12px;font-size:12px}
+    #dashboard-view .wdl-z-kopf{padding-top:8px;padding-bottom:7px}
+    #dashboard-view .wdl-z-wer b{font-size:12.5px}
+    #dashboard-view .wdl-z-wer small{font-size:12px}
+    #dashboard-view .wdl-z-ri em{min-width:28px;margin-right:4px;letter-spacing:0}
+    #dashboard-view .wdl-z-tp i{margin-left:2px}
+    #dashboard-view .wdl-z-ab{display:none}
+  }
   #dashboard-view .mwd-box{padding:7px 10px;border-radius:8px;border:1px solid var(--border-soft);background:var(--bg)}
   #dashboard-view .mwd-box-sum{background:var(--surface-tint)}
   #dashboard-view .mwd-box-t{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--sub)}
@@ -7959,7 +7968,8 @@
         <div>
           <!-- „Live Trades" heißt seit 27.09.2026 „Radar" (Finn: „änder mal Live Trades zu Radar"); data-view="wdlive" und wdl-* bleiben -->
           <h1 class="view-title">Radar</h1>
-          <p class="view-sub">Jeder Orbit-V2-Trade als Demo gegen den Reader-Kurs · Balance vorher/nachher aus TradingView</p>
+          <!-- Untertitel ohne Technik (30.09.2026, Finn: „viel Text, bringt gar nichts") — Demo/Balance laufen weiter im Hintergrund -->
+          <p class="view-sub">Futures-Trades aller IDs</p>
         </div>
         <div style="display:flex;gap:10px;align-items:center">
           <div class="seg" id="wdl-tage"><button type="button" data-wdl-tage="1">Heute</button><button type="button" data-wdl-tage="2" class="active">2 Tage</button><button type="button" data-wdl-tage="7">7 Tage</button></div>
@@ -7972,7 +7982,8 @@
            über wdlChartLinien. -->
       <div class="adm-vl-legend wdl-ids" id="wdl-ids" style="margin:0 0 10px"></div>
       <div id="wdl-chart-slot"></div>
-      <div class="card" id="wdl-kopf" style="padding:12px 16px;margin-bottom:14px"></div>
+      <!-- #wdl-kopf zeigt seit 30.09.2026 nur noch einen Ladefehler (Statistik-Zeile + Legende entfallen, Finn), sonst ausgeblendet -->
+      <div class="card" id="wdl-kopf" style="padding:10px 16px;margin-bottom:14px;display:none"></div>
       <div id="wdl-liste"></div>
     </section>
     <!-- ACCOUNTS JE FIRMA (27.09.2026 als Firma → Phase → Karten; Neubau 30.09.2026, Finn: „komplett unübersichtlich …
@@ -10817,7 +10828,7 @@
     notes:     ['Notizzettel', 'Schneller Zettel — geräteübergreifend synchron'],
     markt:     ['Winning Days', 'NQ & MNQ live · Winning Days des Handelstags'],
     firmen:    ['Accounts je Firma', 'Je ID: was heute noch offen ist'],
-    wdlive:    ['Radar', 'Orbit V2 · Topstep V2 · Demo gegen den Reader-Kurs · Balance vorher/nachher'],
+    wdlive:    ['Radar', 'Futures-Trades aller IDs'],
     news:      ['News', 'USD-Kalender & Alerts (Forex Factory)'],
     kasse:     ['Admin', 'Kapitalverteilung über alle Personen'],
     settings:  ['Einstellungen', 'Profil & Integrationen']
@@ -22565,7 +22576,9 @@
     try{
       if(typeof wdlAktiv === 'function' && wdlAktiv()){
         const t = wdl.auswahl ? ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === wdl.auswahl) : null
-        if(!t) return null
+        // Zone + Kästchen nur, wo wdlChartLinien auch Linien zeichnet (30.09.2026, Finn „es buggt": Filter-Chip auf eine andere ID
+        // gewechselt — die Linien verschwanden, die grün-rote Zone und „3 | +2.340,00 $" liefen weiter mit)
+        if(!t || !wdlPasst(t)) return null
         return { entry: n(t.einstieg_nq), tp: n(t.tp_level_nq), liq: wdlSlEcht(t) || n(t.liq_level_nq) || n(t.sl_level_nq), start: t.started_at, kt: n(t.kt), root: String(t.symbol_root || 'MNQ'), richtung: t.richtung, offen: t.status === 'open' }   // echter SL begrenzt die rote Zone (29.09.2026)
       }
     }catch(_){}
@@ -24062,32 +24075,47 @@
    * Daten: GET /admin/live-trades (Railway, alle IDs; Demo rechnet das Backend aus den Reader-Minutenkerzen). Takt 15 s nur, solange die View
    * offen ist; Kurs jetzt = wdKursJetzt, sonst der jüngste tv_kurse-Stand. Eigene Verdrahtung, eigene IDs wdl-*. ========== */
   const wdl = { tage: 2, daten: null, fehler: '', timer: null, laedt: false, kurs: null, person: null, linien: new Map() }
-  /* CHART + ID-LEISTE (26.09.2026, F6, Finn am Screenshot Build .635). Farben: je TRADE eine eigene (Linien + Punkt/Randstrich der Karte),
-   * je ID die Personen-Farbe nach dem Muster der Statistik (admPersonColorsBauen: feste Palette, Wunschplatz aus einem Hash der user_id,
-   * bei Kollision der nächste freie Platz). Linien: standardmäßig nur laufende Trades, Klick auf Karte/Punkt schaltet um (wdl.linien).
+  /* CHART + ID-LEISTE (26.09.2026, F6, Finn am Screenshot Build .635). Farben: ursprünglich je TRADE eine eigene und je ID die
+   * Personen-Farbe — seit 30.09.2026 nur noch Farbe = ID (siehe WDL_ID_FARBEN). Linien: Klick auf eine Zeile schaltet um (wdl.auswahl).
    * Level von NQ-Trades gelten auf dem MNQ-Chart 1:1 (gleicher Basiswert). */
-  const WDL_TRADE_FARBEN = ['#2563EB', '#D97706', '#7C3AED', '#0891B2', '#DB2777', '#65A30D', '#EA580C', '#4F46E5', '#0D9488', '#9333EA', '#CA8A04', '#E11D48']
-  const WDL_P_FARBEN = ['#5447CE', '#0EA5E9', '#16A34A', '#E0891F', '#E11D48', '#A855F7', '#14B8A6', '#F59E0B', '#64748B', '#0F766E', '#BE185D', '#7C3AED']   // = ADM_P_COLORS
-  function wdlFarbenZuteilen(keys, palette){
+  /* FARBE = ID (30.09.2026, Finn am Radar: „Warum haben EzPoker und Chris die gleiche Farbe?"): Die Karte trug bis dahin die TRADE-Farbe
+   * (je Trade eine), die ID-Leiste die Personen-Farbe aus ADM_P_COLORS — zwei Farbsysteme, und beide Paletten hatten Nachbarn (zwei
+   * Rot-/Pinktöne, drei Violetts, zwei Teals), dazu würfelte der Hash-Wunschplatz. Jetzt EIN System für Zeile und Leiste: Farbe = ID.
+   * Palette gedämpft, aber klar verschieden (Finn nach der ersten Runde: „das Pink ist hässlich") — kein Pink, kein Rot (Rot heißt hier
+   * Verlust); die ersten zehn reichen für die zehn IDs, die es im Radar gibt, die letzten zwei sind Reserve. Vergeben wird der ERSTE freie Platz (kein Hash — der ließ Lücken und zog die
+   * Reserve-Töne früh herein). Stabil: vergebene Plätze merkt sich der Browser (localStorage prophos_wdl_idfarbe) und hält sie frei,
+   * auch wenn die ID gerade keinen Trade im Zeitraum hat — eine neue ID bekommt nie den Platz einer anderen. Die Chart-Linien behalten
+   * ihre festen Bedeutungsfarben (wdlChartLinien). */
+  const WDL_ID_FARBEN = ['#4C7BD9', '#E08A3C', '#3FA37A', '#8B6FD6', '#D4A72C', '#3BA3B8', '#9B7B61', '#6B7A90', '#8AA33B', '#2F4A7A', '#C98A6B', '#5E9E9A']
+  function wdlFarbenZuteilen(keys, palette, fest){
+    // fest: Map Schlüssel → Palettenplatz aus früheren Besuchen; bleibt, wie er ist, und neue Schlüssel werden hineingeschrieben
     const m = new Map(), frei = palette.map(() => true)
-    for(const k of [...new Set(keys.map(String))].sort()){
-      let h = 0; for(const ch of k) h = (h * 31 + ch.charCodeAt(0)) >>> 0
-      let i = h % palette.length, n = 0
-      while(!frei[i] && n < palette.length){ i = (i + 1) % palette.length; n++ }
-      if(n >= palette.length) frei.fill(true)   // mehr Schlüssel als Farben: Palette beginnt von vorn
-      frei[i] = false; m.set(k, palette[i])
+    if(fest) for(const i of fest.values()) if(i >= 0 && i < palette.length) frei[i] = false
+    for(const k of [...new Set(keys.map(String).filter(Boolean))].sort()){
+      let i = fest && fest.has(k) ? fest.get(k) : -1
+      if(!(i >= 0 && i < palette.length)){
+        i = frei.indexOf(true)
+        if(i < 0){ let h = 0; for(const ch of k) h = (h * 31 + ch.charCodeAt(0)) >>> 0; i = h % palette.length }   // mehr IDs als Farben
+        frei[i] = false
+        if(fest) fest.set(k, i)
+      }
+      m.set(k, palette[i])
     }
     return m
   }
+  const WDL_ID_SPEICHER = 'prophos_wdl_idfarbe'
+  const wdlIdPlatz = (() => { try{ const o = JSON.parse(localStorage.getItem(WDL_ID_SPEICHER) || '{}'); return new Map(Object.entries(o || {}).filter(([, v]) => Number.isInteger(v))) }catch(_){ return new Map() } })()
   const wdlTid = t => String(t.id || t.plan_id || '')
   // 28.09.2026 (Finn: „zu voll"): Linien nur für den EINEN ausgewählten Trade (wdl.auswahl), ohne Auswahl nur der Chart
   const wdlLinienAn = t => !!wdl.auswahl && wdl.auswahl === wdlTid(t)
   const wdlPasst = t => !wdl.person || String(t.user_id || t.person || '') === wdl.person
+  const wdlUid = t => String(t.user_id || t.person || '')
   function wdlFarben(){
-    const trades = (wdl.daten && wdl.daten.trades) || []
-    wdl.tFarbe = wdlFarbenZuteilen(trades.map(wdlTid), WDL_TRADE_FARBEN)
-    wdl.pFarbe = wdlFarbenZuteilen(trades.map(t => String(t.user_id || t.person || '')), WDL_P_FARBEN)
+    const trades = (wdl.daten && wdl.daten.trades) || [], vorher = wdlIdPlatz.size
+    wdl.pFarbe = wdlFarbenZuteilen(trades.map(wdlUid), WDL_ID_FARBEN, wdlIdPlatz)
+    if(wdlIdPlatz.size !== vorher){ try{ localStorage.setItem(WDL_ID_SPEICHER, JSON.stringify(Object.fromEntries(wdlIdPlatz))) }catch(_){} }
   }
+  const wdlIdFarbe = t => (wdl.pFarbe && wdl.pFarbe.get(wdlUid(t))) || '#667085'
   // Linien für mklChartZeichnen: Entry durchgezogen, TP gestrichelt, Liquidation gepunktet, SL lang gestrichelt (nur wenn gesetzt)
   const WDL_SKALA_PKT = 600   // ≈ 2 % NQ — typische WD-Liquidationen (≤ 400 Pkt) bleiben im Bild, Funded-Liquidationen nicht
   function wdlChartLinien(){
@@ -24112,18 +24140,24 @@
   function wdlIdsRender(trades){
     const bar = document.getElementById('wdl-ids'); if(!bar) return
     const je = new Map()
-    for(const t of trades){ const u = String(t.user_id || t.person || ''); const x = je.get(u) || { name: t.person || '?', lauf: 0, zu: 0, n: 0 }; x.n++; if(t.status === 'open') x.lauf++; else if(t.status === 'review' || t.status === 'completed') x.zu++; je.set(u, x) }
+    for(const t of trades){ const u = wdlUid(t); const x = je.get(u) || { name: t.person || '?', lauf: 0, zu: 0, n: 0 }; x.n++; if(t.status === 'open') x.lauf++; else if(t.status === 'review' || t.status === 'completed') x.zu++; je.set(u, x) }
     const reihe = [...je.keys()].sort((a, b) => (je.get(b).lauf - je.get(a).lauf) || String(je.get(a).name).localeCompare(String(je.get(b).name), 'de'))
     bar.innerHTML = ''
     for(const u of reihe){
       const x = je.get(u), b = document.createElement('button'); b.type = 'button'
       b.className = 'adm-vl-chip' + (wdl.person ? (wdl.person === u ? ' is-on' : ' is-off') : '')
-      b.innerHTML = `<span class="adm-dot" style="background:${(wdl.pFarbe && wdl.pFarbe.get(u)) || '#94A3B8'}"></span><span class="nm"></span><b></b><small></small>`
-      b.querySelector('.nm').textContent = String(x.name).split(/\s+/)[0] + ' '
-      b.querySelector('b').textContent = String(x.lauf)
-      b.querySelector('small').textContent = x.zu ? `+${x.zu} zu` : ''
+      // Chip = Farbe + Name + Zahl der laufenden Trades (nur wenn > 0); „+n zu" entfällt (30.09.2026, Finn: „so viele kleine Texte")
+      b.innerHTML = `<span class="adm-dot" style="background:${(wdl.pFarbe && wdl.pFarbe.get(u)) || '#94A3B8'}"></span><span class="nm"></span><b></b>`
+      b.querySelector('.nm').textContent = String(x.name).split(/\s+/)[0]
+      b.querySelector('b').textContent = x.lauf ? String(x.lauf) : ''
       b.title = wdl.person === u ? 'Filter aufheben' : `${x.lauf} laufen gerade · ${x.zu} beendet im Zeitraum — klicken zeigt nur diese ID`
-      b.addEventListener('click', () => { wdl.person = wdl.person === u ? null : u; wdlRender() })
+      b.addEventListener('click', () => {
+        wdl.person = wdl.person === u ? null : u
+        // Filterwechsel hebt eine Auswahl auf, die nicht mehr sichtbar ist (30.09.2026, Finn: Zone + P&L-Kästchen blieben stehen)
+        const sel = wdl.auswahl ? ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === wdl.auswahl) : null
+        if(sel && !wdlPasst(sel)) wdl.auswahl = null
+        wdlRender()
+      })
       bar.appendChild(b)
     }
   }
@@ -24189,13 +24223,20 @@
              bal: L.bal != null ? '≈ ' + z(L.bal, 2) + ' $' : '–',
              plFarbe: L.pl == null ? 'var(--sub)' : L.pl >= 0 ? '#15803d' : '#b91c1c' }
   }
+  // LAUFZEIT (30.09.2026, Finn: die Demo-Zeile „Demo läuft · 40 Minuten …" kann weg, „aber die Laufzeit finde ich gut"): ab
+  // started_at, nicht aus den Demo-Minuten. „40 min" · ab 60 min „1 h 12 min" · ab 24 h „1 T 3 h"; wdlLiveTick schreibt sie nach.
+  function wdlDauer(ab){
+    const t0 = Date.parse(ab || ''); if(!isFinite(t0)) return '–'
+    const m = Math.max(0, Math.floor((Date.now() - t0) / 60000)), h = Math.floor(m / 60)
+    return m < 60 ? `${m} min` : h < 24 ? `${h} h${m % 60 ? ` ${m % 60} min` : ''}` : `${Math.floor(h / 24)} T${h % 24 ? ` ${h % 24} h` : ''}`
+  }
   // Nur die Live-Zahlen der laufenden Karten alle 2 s nachschreiben — kein Neuaufbau (Chart-Linien, ID-Leiste bleiben stehen)
   function wdlLiveTick(){
     if(!wdl.daten || !wdlAktiv()) return
     const k = wdlKursJetzt(), kp = k ? k.preis : null
-    for(const c of document.querySelectorAll('#wdl-liste .mwd-open[data-wdl-trade]')){
+    for(const c of document.querySelectorAll('#wdl-liste .wdl-z-lauf[data-wdl-trade]')){
       const t = (wdl.daten.trades || []).find(x => wdlTid(x) === c.getAttribute('data-wdl-trade')); if(!t) continue
-      const T = wdlLiveTexte(wdlLive(t, kp), kp)
+      const T = Object.assign(wdlLiveTexte(wdlLive(t, kp), kp), { dauer: wdlDauer(t.started_at) })
       c.querySelectorAll('[data-wdl-lv]').forEach(el => { const f = el.getAttribute('data-wdl-lv'); if(el.textContent !== T[f]) el.textContent = T[f]; if(f === 'pl') el.style.color = T.plFarbe })
     }
   }
@@ -24205,6 +24246,8 @@
     wdl.renderAt = Date.now()
     wdlFarben()
     const alleTrades = (wdl.daten && wdl.daten.trades) || []
+    // Auswahl, deren Trade aus den Daten gefallen ist, aufheben — sonst bliebe sie unsichtbar gesetzt (30.09.2026, s. mklAuswahlTrade)
+    if(wdl.auswahl && wdl.daten && !alleTrades.some(x => wdlTid(x) === wdl.auswahl)) wdl.auswahl = null
     wdlIdsRender(alleTrades)
     const trades = alleTrades.filter(wdlPasst)
     const num = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
@@ -24212,64 +24255,70 @@
     const f0 = v => num(v) == null ? '–' : Number(v).toLocaleString('de-DE', { maximumFractionDigits: 0 })
     const sig = (v, e, d) => { const n = num(v); if(n == null) return '–'; return `${n < 0 ? '−' : '+'}${Math.abs(n).toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d })} ${e}` }
     const col = v => num(v) == null ? 'var(--sub)' : Number(v) >= 0 ? '#15803d' : '#b91c1c'
-    const uhr = t => t ? new Date(t).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '–'
-    const tagUhr = t => t ? new Date(t).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '–'
+    // Uhrzeit; an einem anderen Tag mit Datum davor („29.09. 23:40" — toLocaleDateString liefert den Punkt nach dem Monat schon mit)
+    const heute = new Date().toDateString()
+    const tag = d => d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })
+    const zeit = t => { const d = new Date(t || ''); if(isNaN(d)) return '–'; const u = d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }); return d.toDateString() === heute ? u : tag(d) + ' ' + u }
     const kurs = wdlKursJetzt(), kp = kurs ? kurs.preis : null
     const lauf = trades.filter(t => t.status === 'open'), geplant = trades.filter(t => t.status === 'planned'), zu = trades.filter(t => t.status === 'review' || t.status === 'completed')
-    const demoTp = trades.filter(t => t.demo && t.demo.status === 'tp').length, demoLiq = trades.filter(t => t.demo && t.demo.status === 'liquidiert').length
-    const plSumme = trades.reduce((a, t) => a + (num(t.pl_balance) || 0), 0), plN = trades.filter(t => num(t.pl_balance) != null).length
-    const legende = `<div class="wdl-legende"><span><i></i>Entry</span><span><i style="border-top-style:dashed"></i>TP</span><span><i style="border-top-style:dotted"></i>Liquidation</span><span><i style="border-top-style:dashed;border-top-width:3px"></i>SL</span><span>· Klick auf eine Karte zeigt ihre Level im Chart (blau Entry, grün TP, rot Liq/SL, violett Fusion zu), zweiter Klick blendet aus</span></div>`
-    kopf.innerHTML = `<div class="mwj-kopf">${trades.some(t => t.route === 'tsv2') ? 'Orbit V2 · Topstep V2' : 'Orbit V2'} <span>${lauf.length} laufen · ${geplant.length} geplant · ${zu.length} beendet · Demo: ${demoTp} TP, ${demoLiq} liquidiert${plN ? ` · P&L aus Balance ${sig(plSumme, '$', 0)} (${plN} Trades)` : ''} · Kurs ${kp != null ? f2(kp) + ' ' + escapeHtml(kurs.wurzel || '') : 'kein frischer Reader-Kurs'}${wdl.fehler ? ` · <span style="color:#B45309">${escapeHtml(wdl.fehler)}</span>` : ''}</span></div>` + legende
-    const karte = t => {
-      const farbe = (wdl.tFarbe && wdl.tFarbe.get(wdlTid(t))) || '#667085'   // Trade-Farbe = Farbe seiner Linien im Chart (F6)
+    // KOPF (30.09.2026, Finn: „Orbit V2 · Topstep V2 · 3 laufen · 0 geplant · 42 beendet · Demo … ist hässlich, viel Text, bringt gar
+    // nichts"): Statistik-Zeile und Legende entfallen, die Gruppen zählen selbst. Der Kopf erscheint nur noch, wenn das Neuladen
+    // scheitert, während alte Zeilen stehen (sonst sähe ein eingefrorener Stand frisch aus); ohne Zeilen sagt es die Liste.
+    const kopfFehler = !!(wdl.fehler && alleTrades.length)
+    kopf.style.display = kopfFehler ? '' : 'none'
+    kopf.innerHTML = kopfFehler ? `<span style="font-size:12px;color:#B45309">Nicht aktualisiert: ${escapeHtml(wdl.fehler)}</span>` : ''
+    // ZEILE (30.09.2026, Finn: „Warum Balance vorher, live, Liquidation, Kontogröße unbekannt …? So viele unnötige Sachen"): nur, was
+    // man zum Handeln braucht — wer · Konto · Richtung · Einstieg · TP · P&L · Zeit, je Wert EINE Zahl, die Spaltenköpfe einmal je
+    // Gruppe. Raus aus der Anzeige: Balance vorher/live/nachher, „beim Start nicht gelesen", Kontogröße, „noch X Pkt", TP in $,
+    // Liquidation/SL (Chart beim Klick + Tooltip), Demo-Sätze, Nachlesungs-Zeile. Rechnung, Demo und Nachlesung laufen unverändert.
+    // Demo nur noch als Zeichen am TP: ✓ = TP erreicht, ✕ = liquidiert bzw. SL, ? = beides in derselben Minute; Uhrzeit im Tooltip.
+    const demoMarke = d => d.status === 'tp' ? { z: '✓', tip: `Demo: TP erreicht ${zeit(d.at)}` }
+      : d.status === 'liquidiert' ? { z: '✕', tip: `Demo: ${d.stop === 'sl' ? 'SL erreicht' : 'liquidiert'} ${zeit(d.at)}` }
+      : d.status === 'beide_in_minute' ? { z: '?', tip: `Demo: TP und Liquidation in derselben Minute ${zeit(d.at)}` } : null
+    // Zelle; lv = Feld, das wdlLiveTick alle 2 s nachschreibt (die Zelle bzw. das Element trägt dann nur diesen Text)
+    const zelle = (art, inhalt, o = {}) => `<span class="wdl-z-${art}"${o.lv ? ` data-wdl-lv="${o.lv}"` : ''}${o.tip ? ` title="${escapeHtml(o.tip)}"` : ''}${o.f ? ` style="color:${o.f}"` : ''}>${inhalt}</span>`
+    const zeile = t => {
       const k = t.konto || {}, buy = t.richtung === 'buy', sell = t.richtung === 'sell', offen = t.status === 'open', gepl = t.status === 'planned'
-      const e = num(t.einstieg_nq), tp = num(t.tp_level_nq), lq = num(t.liq_level_nq), slE = wdlSlEcht(t)
-      const dTp = (offen && kp != null && tp != null) ? (buy ? tp - kp : kp - tp) : null
-      const LT = wdlLiveTexte(wdlLive(t, kp), kp)   // Live-P&L + Abstände (F28), der 2-s-Takt schreibt dieselben Texte nach
-      const st = offen ? `läuft seit ${uhr(t.started_at)}` : gepl ? `geplant${t.start_um ? ' · Start ' + uhr(t.start_um) : ''}` : `zu ${tagUhr(t.ended_at)}`
-      const d = t.demo || {}
-      const demo = d.status === 'tp' ? `<span class="wdl-demo tp">Demo: TP erreicht ${uhr(d.at)} · ${sig(d.pl_usd, '$', 0)}</span>`
-        : d.status === 'liquidiert' ? `<span class="wdl-demo liq">Demo: ${d.stop === 'sl' ? 'SL erreicht' : 'liquidiert'} ${uhr(d.at)}${num(d.pl_usd) != null ? ' · ' + sig(d.pl_usd, '$', 0) : ''}</span>`
-        : d.status === 'beide_in_minute' ? `<span class="wdl-demo liq">Demo: TP und Liquidation in derselben Minute ${uhr(d.at)} — Reihenfolge unklar</span>`
-        : d.status === 'laeuft' ? `<span class="wdl-demo lauf">Demo läuft · ${f0(d.minuten)} Minuten Kurs seit Start${dTp != null && dTp > 0 ? ` · TP in ${f0(dTp)} Pkt` : ''}</span>`
-        : d.status === 'ohne_kurs' ? '<span class="wdl-demo">Demo: kein Reader-Kurs seit dem Start</span>'
-        : d.status === 'ohne_level' ? '<span class="wdl-demo">Demo: kein Einstieg/TP gespeichert</span>'
-        // B5 (Backend .636): Trade zu, ohne dass TP oder Liquidation im Kurs lag
-        : d.status === 'beendet_ohne_treffer' ? `<span class="wdl-demo">Demo: weder TP noch Liquidation bis zum Ende ${uhr(d.at || t.ended_at)} · ${f0(d.minuten)} Minuten Kurs</span>` : ''
-      const nachAb = (!offen && !gepl && num(t.balance_end) == null && t.ended_at && typeof tvV2NachleseMs === 'function') ? tvV2NachleseAb(t.id, t.ended_at) : 0
-      const endSub = num(t.balance_end) != null ? 'nach der Nachlesung' : offen ? 'nach dem Trade' : gepl ? '–' : (nachAb > Date.now() ? `Warte auf Puls · Nachlesung ab ${uhr(nachAb)} (in ${Math.max(1, Math.ceil((nachAb - Date.now()) / 60000))} min)` : 'wird gelesen')
-      const an = wdlLinienAn(t)
-      // „Kurs jetzt" aus den laufenden Karten raus (29.09.2026, Finn am Radar-Screenshot: „Kurs jetzt kann weg") — der Kurs steht
-      // oben im Kopf. Die leere Spalte an seiner Stelle hält Live-P&L genau unter „P&L" der beendeten Karten.
-      return `<div class="mwd-card ${offen ? 'mwd-open' : gepl ? 'mwd-planned' : 'mwd-done'}" style="--mwd-farbe:${farbe}" data-wdl-trade="${escapeHtml(wdlTid(t))}" title="klicken: Linien im Chart ${an ? 'ausblenden' : 'einblenden'}">
-        <div class="mwd-kopf">
-          <span class="wdl-dot ${an ? '' : 'aus'}"></span>
-          <span class="mwd-person">${escapeHtml(String(t.person || '?'))}</span>
-          <span class="mwd-konto" title="${escapeHtml(String(k.name || ''))}">${escapeHtml(String(k.firma || '?'))}${k.groesse ? ' ' + f0(k.groesse / 1000) + 'k' : ''}${k.kontonr_ende ? ` <span class="mono">…${escapeHtml(String(k.kontonr_ende))}</span>` : ''}</span>
-          <span class="mwd-chip ${buy ? 'mwd-buy' : sell ? 'mwd-sell' : ''}">${buy ? 'BUY' : sell ? 'SELL' : '?'}</span>
-          <span class="mwd-kt mono">${t.kt != null ? f0(t.kt) : '?'} × ${escapeHtml(t.symbol_root || '?')}</span>
-          <span class="mwd-status">${st}</span>
-        </div>
-        <div class="wdl-level">
-          <div title="${t.einstieg_quelle === 'reader_klick' ? 'Kein Fill aus TopstepX — Reader-Kurs direkt nach dem Klick (F28)' : ''}"><small>Einstieg${t.einstieg_quelle === 'reader_klick' ? ' · Kurs beim Klick' : ''}</small><b>${f2(e)}</b></div>
-          <div><small>TP${num(t.master_tp) != null ? ' · ' + f0(t.master_tp) + ' $' : ''}</small><b style="color:#0E9757">${f2(tp)}</b>${offen && tp != null ? `<small data-wdl-lv="tp">${LT.tp}</small>` : ''}</div>
-          ${slE != null ? `<div title="${escapeHtml('Stop-Loss ' + (t.sl_art === 'bracket' ? 'exakt aus TradingView' : 'aus SL $ gerechnet') + (lq != null ? ' · Liquidation ' + f2(lq) + (num(t.liq_balance) != null ? ' (bei ' + f0(t.liq_balance) + ' $)' : '') : ''))}"><small>SL${num(t.master_sl) != null ? ' · ' + f0(t.master_sl) + ' $' : ''}</small><b style="color:#D92D20">${f2(slE)}</b>${offen ? `<small data-wdl-lv="sl">${LT.sl}</small>` : ''}</div>`
-          : `<div title="${escapeHtml(String(t.liq_regel || ''))}"><small>Liquidation${num(t.liq_balance) != null ? ' · bei ' + f0(t.liq_balance) + ' $' : ''}</small><b style="color:#D92D20">${lq != null ? f2(lq) : '–'}</b>${lq == null && t.liq_regel ? `<small>${escapeHtml(String(t.liq_regel))}</small>` : offen && lq != null ? `<small data-wdl-lv="lq">${LT.lq}</small>` : ''}</div>`}
-          ${offen ? `<div></div>
-          <div title="${e != null ? 'aus dem Kurs · exakt nach der Nachlesung' : 'kein Einstieg gespeichert'}"><small>Live-P&amp;L</small><b data-wdl-lv="pl" style="color:${LT.plFarbe}">${LT.pl}</b></div>`
-          : `<div><small>Balance nachher</small><b>${num(t.balance_end) != null ? f2(t.balance_end) + ' $' : '–'}</b></div>
-          <div title="${escapeHtml(num(t.pl_balance) != null ? 'Balance nachher − vorher' : (num(d.pl_usd) != null ? 'Demo ' + sig(d.pl_usd, '$', 0) + ' · exakt nach der Nachlesung' : 'folgt nach der Nachlesung'))}"><small>P&amp;L${num(t.pl_balance) != null ? ' exakt' : ''}</small><b style="color:${col(t.pl_balance)}">${sig(t.pl_balance, '$', 2)}</b></div>`}
-        </div>
-        <div class="wdl-fuss">
-          ${demo}
-          <span>Balance vorher <b>${num(t.balance_start) != null ? f2(t.balance_start) + ' $' : '–'}</b>${num(t.balance_start) != null ? '' : gepl ? '' : ' (beim Start nicht gelesen)'}</span>
-          ${offen ? (num(t.balance_start) != null ? `<span>live <b data-wdl-lv="bal">${LT.bal}</b></span>` : '') : (!gepl && num(t.balance_end) == null ? `<span>${escapeHtml(endSub)}</span>` : '')}
-        </div>
-      </div>`
+      const e = num(t.einstieg_nq), tp = num(t.tp_level_nq), lq = num(t.liq_level_nq), slE = wdlSlEcht(t), d = t.demo || {}, dm = demoMarke(d), an = wdlLinienAn(t)
+      const konto = `${k.firma || '?'}${k.kontonr_ende ? ' …' + k.kontonr_ende : ''}`
+      const tip = [k.name || konto, slE != null ? 'SL ' + f2(slE) : '', lq != null ? 'Liquidation ' + f2(lq) : ''].filter(Boolean).join(' · ') + ` — klicken: Level im Chart ${an ? 'ausblenden' : 'einblenden'}`
+      const ri = zelle('ri', `<em>${buy ? 'BUY' : sell ? 'SELL' : '?'}</em>${t.kt != null ? f0(t.kt) : '?'} × ${escapeHtml(t.symbol_root || '?')}`)
+      // kein echter Fill (Kurs beim Klick bzw. Minutenkerze beim Handstart) → „≈" vor dem Einstieg, die Quelle im Tooltip
+      const naeh = t.einstieg_quelle === 'reader_klick' ? 'kein Fill — Kurs direkt nach dem Klick' : t.einstieg_quelle === 'kerze_start' ? 'kein Fill — Minutenkerze beim Start' : ''
+      const ein = zelle('ein', gepl || e == null ? '–' : (naeh ? '≈ ' : '') + f2(e), { tip: naeh })
+      let art, tpZ, plZ, zeitZ
+      if(offen){
+        art = 'lauf'
+        const LT = wdlLiveTexte(wdlLive(t, kp), kp)   // Live-P&L (F28); der 2-s-Takt schreibt denselben Text nach
+        tpZ = zelle('tp', f2(tp) + (dm ? `<i>${dm.z}</i>` : ''), { tip: [num(t.master_tp) != null ? 'TP ' + f0(t.master_tp) + ' $' : '', dm ? dm.tip : ''].filter(Boolean).join(' · ') })
+        plZ = zelle('pl', LT.pl, { f: LT.plFarbe, lv: 'pl' })
+        // „läuft seit 03:24 · 40 min" (Finn 30.09.2026) — an einem anderen Tag „29.09. · 1 T 3 h"; am Handy nur die Laufzeit
+        const ab = new Date(t.started_at || ''), abTxt = isNaN(ab) ? '' : ab.toDateString() === heute ? zeit(t.started_at) : tag(ab)
+        zeitZ = zelle('zeit', `${abTxt ? `<span class="wdl-z-ab">${abTxt} · </span>` : ''}<span data-wdl-lv="dauer">${wdlDauer(t.started_at)}</span>`, { tip: 'läuft seit ' + zeit(t.started_at) })
+      } else if(gepl){
+        art = 'plan'
+        tpZ = zelle('tp', num(t.master_tp) != null ? f0(t.master_tp) + ' $' : '–')
+        plZ = zelle('pl', '')
+        zeitZ = zelle('zeit', zeit(t.start_um))
+      } else {
+        art = 'zu'
+        // Beendet: Ergebnis statt TP-Preis (was die Demo sah), P&L = Balance nachher − vorher; fehlt sie, nur „–"
+        const erg = d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : '–'
+        tpZ = zelle('tp', erg, { tip: dm ? dm.tip : '' })
+        plZ = zelle('pl', sig(t.pl_balance, '$', 2), { f: col(t.pl_balance), tip: num(t.pl_balance) != null ? 'Balance nachher − vorher' : 'folgt nach der Nachlesung' })
+        zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
+      }
+      return `<div class="wdl-z wdl-z-${art}${an ? ' is-aktiv' : ''}" style="--wdl-id:${wdlIdFarbe(t)}" data-wdl-trade="${escapeHtml(wdlTid(t))}" title="${escapeHtml(tip)}">`
+        + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><small>${escapeHtml(konto)}</small></span>`
+        + ri + ein + tpZ + plZ + zeitZ + '</div>'
     }
-    const gruppe = (titel, arr) => arr.length ? `<div class="wdl-gruppe">${titel} · ${arr.length}</div><div class="mwd-liste">${arr.map(karte).join('')}</div>` : ''
-    liste.innerHTML = trades.length ? gruppe('Läuft', lauf) + gruppe('Geplant', geplant) + gruppe('Beendet', zu.sort((a, b) => String(b.ended_at || '').localeCompare(String(a.ended_at || ''))))
-      : `<div class="mwd-leer">${wdl.daten ? 'Keine Orbit-V2-Trades im Zeitraum.' : (wdl.fehler ? 'Nicht ladbar: ' + escapeHtml(wdl.fehler) : 'Lade Radar…')}</div>`
+    // Gruppe = ein Kasten, oben einmal die Spaltenköpfe im selben Raster wie die Zeilen
+    const gruppe = (titel, arr, sp) => !arr.length ? '' : `<div class="wdl-tab"><div class="wdl-z wdl-z-kopf"><span class="wdl-z-wer">${titel} · ${arr.length}</span><span class="wdl-z-ri"></span>`
+      + sp.map((x, i) => `<span class="wdl-z-${['ein', 'tp', 'pl', 'zeit'][i]}">${x}</span>`).join('') + `</div>${arr.map(zeile).join('')}</div>`
+    liste.innerHTML = trades.length ? gruppe('Läuft', lauf, ['Einstieg', 'TP', 'P&amp;L', 'Seit'])
+        + gruppe('Geplant', geplant, ['Einstieg', 'TP', '', 'Start'])
+        + gruppe('Beendet', zu.sort((a, b) => String(b.ended_at || '').localeCompare(String(a.ended_at || ''))), ['Einstieg', 'Ergebnis', 'P&amp;L', 'Zu'])
+      : `<div class="mwd-leer">${wdl.daten ? 'Keine Trades im Zeitraum.' : (wdl.fehler ? 'Nicht ladbar: ' + escapeHtml(wdl.fehler) : 'Lade Radar…')}</div>`
     try{ if(wdlAktiv() && typeof mklChartZeichnen === 'function') mklChartZeichnen() }catch(_){}
   }
   // Klick auf eine Karte (oder ihren Punkt) schaltet die Linien dieses Trades — eigener Handler am Listen-Container
@@ -35930,7 +35979,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.843'
+  const OS_TAB_BUILD = '2026-09-22.844'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
