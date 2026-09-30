@@ -36441,7 +36441,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.881'
+  const OS_TAB_BUILD = '2026-09-22.882'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -36901,18 +36901,20 @@
       // „nichts gesendet, bleibt Geplant", während der Bot unter dem Lock weiterklickte; ein neuer Start hätte doppelt platziert):
       //  · fetch warf (TypeError, Backend weg) oder das Panel kennt die Route nicht (404 vor jedem Klick) → nichts gesendet
       //  · Proxy-502 / Zeitlimit / kein JSON → UNKLAR: Plan bleibt, NICHT erneut starten, erst in TopstepX nachsehen
-      if(plan.route === 'tsv2' && r && !r.ok && !r.gesendet){
-        if(r.code === 'cdp_folgt'){ await fehler(tsxCdpFolgtText(r), Object.assign({}, r, { retry_ok: false })); return }
+      // Seit 30.09.2026 (Master-Entscheidung nach B37) auch für Orbit V2 (tvv2): vorher meldete dort jeder Proxy-502/Zeitabbruch
+      // „Nichts platziert" — mit „Starten" auf der Karte die gefährlichere Seite (Doppel-Order). UNKLAR setzt über fehler() die Marke.
+      if(pv2 && r && !r.ok && !r.gesendet){
+        if(plan.route === 'tsv2' && r.code === 'cdp_folgt'){ await fehler(tsxCdpFolgtText(r), Object.assign({}, r, { retry_ok: false })); return }
         if(r._nichtGesendet){
           await fehler('Lokales Backend nicht erreichbar (' + String(r.error || '').slice(0, 80) + ') — nichts gesendet, Plan bleibt Geplant.', r)
           return
         }
         if(!r._httpFail && /^not found$/i.test(String(r.error || ''))){
-          await fehler('Das Panel an diesem PC kennt /api/tsx-konto noch nicht — nichts gesendet, Plan bleibt Geplant.', r)
+          await fehler(`Das Panel an diesem PC kennt /api/${plan.route === 'tsv2' ? 'tsx-konto' : 'tv-konto'} noch nicht — nichts gesendet, Plan bleibt Geplant.`, r)
           return
         }
         if(r._httpFail || r.copier_offline){
-          await fehler('⚠ Ergebnis UNKLAR — keine Antwort von Puls (' + String(r.error || 'Proxy/Zeitlimit').slice(0, 80) + '). Puls kann trotzdem geklickt haben: erst in TopstepX nachsehen, NICHT erneut starten.',
+          await fehler('⚠ Ergebnis UNKLAR — keine Antwort von Puls (' + String(r.error || 'Proxy/Zeitlimit').slice(0, 80) + `). Puls kann trotzdem geklickt haben: erst in ${pulsPlattform(plan)} nachsehen, NICHT erneut starten.`,
             Object.assign({}, r, { retry_ok: false }))
           return
         }
