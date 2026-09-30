@@ -2110,6 +2110,7 @@
   #dashboard-view .wdl-z-sym{color:var(--sub-2)}   /* Richtung-Spalte 150 px (vorher 112): „SELL 0,5 Lot NDX100" passt ganz */
   #dashboard-view .wdl-z{display:grid;grid-template-columns:minmax(0,1fr) 150px 256px 112px 136px;grid-template-areas:"wer ri mi pl zeit";align-items:center;column-gap:16px;padding:11px 16px;font-size:13px;color:var(--ink-2);font-variant-numeric:tabular-nums;cursor:pointer;transition:background .12s}
   #dashboard-view .wdl-z + .wdl-z{border-top:1px solid var(--border-soft)}
+  #dashboard-view .wdl-z + .wdl-z.wdl-z-pfneu{border-top:2px solid var(--border)}   /* Wechsel Orbit → Echo in einer Gruppe (30.09.2026, .869) */
   #dashboard-view .wdl-z:not(.wdl-z-kopf):hover{background:var(--bg)}
   #dashboard-view .wdl-z.is-aktiv,#dashboard-view .wdl-z.is-aktiv:hover{background:var(--surface-tint)}
   #dashboard-view .wdl-z-kopf{padding-top:9px;padding-bottom:8px;font-size:10.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--sub-2);cursor:default}
@@ -24326,7 +24327,7 @@
   }
   // LAUFZEIT (30.09.2026, Finn: die Demo-Zeile „Demo läuft · 40 Minuten …" kann weg, „aber die Laufzeit finde ich gut"): ab
   // started_at, nicht aus den Demo-Minuten. „40 min" · ab 60 min „1 h 12 min" · ab 24 h „1 T 3 h"; wdlLiveTick schreibt sie nach.
-  const WDL_BEENDET_KURZ = 5   // „Beendet" zeigt zuerst nur die letzten 5 (30.09.2026)
+  const WDL_BEENDET_KURZ = 5   // „Beendet" zeigt zuerst nur die letzten 5 (30.09.2026) — seit .869 je Block (Orbit 5, Echo 5)
   function wdlDauer(ab){
     const t0 = Date.parse(ab || ''); if(!isFinite(t0)) return '–'
     const m = Math.max(0, Math.floor((Date.now() - t0) / 60000)), h = Math.floor(m / 60)
@@ -24470,7 +24471,7 @@
     // Zelle; lv = Feld, das wdlLiveTick alle 2 s nachschreibt (die Zelle bzw. das Element trägt dann nur diesen Text)
     const zelle = (art, inhalt, o = {}) => `<span class="wdl-z-${art}"${o.lv ? ` data-wdl-lv="${o.lv}"` : ''}${o.tip ? ` title="${escapeHtml(o.tip)}"` : ''}${o.f ? ` style="color:${o.f}"` : ''}>${inhalt}</span>`
     const jetzt = Date.now(), minTxt = ms => { const m = Math.max(1, Math.ceil(ms / 60000)), h = Math.floor(m / 60); return m < 60 ? `${m} min` : `${h} h${m % 60 ? ` ${m % 60} min` : ''}` }   // wie wdlDauer
-    const zeile = t => {
+    const zeile = (t, extra) => {
       const k = t.konto || {}, buy = t.richtung === 'buy', sell = t.richtung === 'sell', offen = t.status === 'open', gepl = t.status === 'planned'
       // Echo (30.09.2026): kein Chart, kein „Wartet" (siehe gruppen), Lots + CFD-Symbol statt „3 × NQ"
       const echo = wdlIstEcho(t)
@@ -24531,19 +24532,26 @@
         }
         zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
       }
-      return `<div class="wdl-z wdl-z-${art}${echo ? ' wdl-z-echo' : ''}${an ? ' is-aktiv' : ''}" style="--wdl-id:${wdlIdFarbe(t)}" data-wdl-trade="${escapeHtml(wdlTid(t))}" title="${escapeHtml(tip)}">`
+      return `<div class="wdl-z wdl-z-${art}${echo ? ' wdl-z-echo' : ''}${an ? ' is-aktiv' : ''}${extra ? ' ' + extra : ''}" style="--wdl-id:${wdlIdFarbe(t)}" data-wdl-trade="${escapeHtml(wdlTid(t))}" title="${escapeHtml(tip)}">`
         + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><i class="wdl-pf">${echo ? 'Echo' : 'Orbit'}</i><small>${escapeHtml(konto)}</small></span>`
         + ri + miZ + plZ + zeitZ + '</div>'
     }
     // Gruppe = ein Kasten, oben einmal die Spaltenköpfe im selben Raster wie die Zeilen
     // mehr = Schlüssel für „Beendet" (30.09.2026, Finn sah die Echo-Sektion nicht — sie stand unter Orbits „Beendet · 42"): nur die
     // letzten WDL_BEENDET_KURZ Zeilen, darunter „alle N zeigen" / „weniger". Zustand nur im Speicher (wdl.alleZu), Neuladen = kurz.
+    // ERST ORBIT, DANN ECHO (30.09.2026, Finn am Radar .867: „Orbit und Echo, zuerst eins und dann das andere, nicht durch alles
+    // durcheinander. Sonst erkennen wir gar nichts"): je Gruppe zwei Blöcke in der bisherigen Reihenfolge (Läuft nach Start,
+    // Beendet nach Ende), zwischen ihnen eine etwas kräftigere Linie (wdl-z-pfneu). Gekürzt wird JE BLOCK — sonst belegten bei
+    // „Beendet" die 5 neuesten Orbit-Zeilen alle Plätze und Echo wäre wieder versteckt (der Anlass für die Kürzung).
     const gruppe = (titel, arr, sp, cls, mehr) => {
       if(!arr.length) return ''
-      const alle = !mehr || (wdl.alleZu || {})[mehr] || arr.length <= WDL_BEENDET_KURZ, zeigen = alle ? arr : arr.slice(0, WDL_BEENDET_KURZ)
-      const fuss = mehr && arr.length > WDL_BEENDET_KURZ ? `<button type="button" class="wdl-mehr" data-wdl-mehr="${mehr}">${alle ? 'weniger' : `alle ${arr.length} zeigen`}</button>` : ''
+      const bloecke = [arr.filter(t => !wdlIstEcho(t)), arr.filter(wdlIstEcho)].filter(b => b.length)
+      const lang = bloecke.some(b => b.length > WDL_BEENDET_KURZ)
+      const alle = !mehr || (wdl.alleZu || {})[mehr] || !lang
+      const zeilen = bloecke.map((b, i) => (alle ? b : b.slice(0, WDL_BEENDET_KURZ)).map((t, j) => zeile(t, i && !j ? 'wdl-z-pfneu' : '')).join('')).join('')
+      const fuss = mehr && lang ? `<button type="button" class="wdl-mehr" data-wdl-mehr="${mehr}">${alle ? 'weniger' : `alle ${arr.length} zeigen`}</button>` : ''
       return `<div class="wdl-tab${cls ? ' ' + cls : ''}"><div class="wdl-z wdl-z-kopf"><span class="wdl-z-wer">${titel} · ${arr.length}</span><span class="wdl-z-ri"></span>`
-        + sp.map((x, i) => `<span class="wdl-z-${['mi', 'pl', 'zeit'][i]}">${x}</span>`).join('') + `</div>${zeigen.map(zeile).join('')}${fuss}</div>`
+        + sp.map((x, i) => `<span class="wdl-z-${['mi', 'pl', 'zeit'][i]}">${x}</span>`).join('') + `</div>${zeilen}${fuss}</div>`
     }
     const nachEnde = arr => arr.sort((a, b) => String(b.ended_at || '').localeCompare(String(a.ended_at || '')))
     const nachStart = arr => arr.sort((a, b) => String(a.started_at || '').localeCompare(String(b.started_at || '')))
@@ -24552,6 +24560,7 @@
     // (seit .858) sind weg — Läuft · Wartet · Geplant · Beendet mit beiden Plattformen gemischt, je Zeile die graue Mini-Pille
     // „Orbit"/„Echo" (wdl-pf). Echo kennt kein „Wartet" (kein Puls, den P&L schreibt mt5PlanPollTick am Ende direkt aus der
     // MT5-Balance); Chart-Auswahl weiter nur für Orbit. Beendet bleibt gekürzt (WDL_BEENDET_KURZ, Schlüssel 'beendet').
+    // Seit .869 innerhalb jeder Gruppe erst Orbit, dann Echo — nicht mehr gemischt (s. gruppe).
     const gruppen = arr => {
       const la = arr.filter(t => t.status === 'open'), ge = arr.filter(t => t.status === 'planned'), zz = arr.filter(t => t.status === 'review' || t.status === 'completed')
       const wa = zz.filter(t => !wdlIstEcho(t) && wdlWartet(t)), fe = zz.filter(t => !wa.includes(t))
@@ -36235,7 +36244,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.868'
+  const OS_TAB_BUILD = '2026-09-22.869'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
