@@ -23146,19 +23146,37 @@
    * Realtime-Auswertung der WAL war mit Abstand der größte Posten der Datenbank-Rechenzeit, 44 ms je Durchlauf statt früher 10 ms,
    * weil sie jede Kurs- UND Kerzen-Änderung für jedes einzelne Abo prüft — 14 offene Tabs × zwei Tabellen, jede Kerze doppelt
    * geschrieben (Tab-Brücke + Reader-Direktfeed). Die PC-Tabs zeigen keinen Chart, hielten das tv_kurs_1m-Abo aber trotzdem.)
-   * tv_kurse bleibt auf jedem Gerät abonniert (Kopf, Wächter, hedgeFeedPuffern am PC). tv_kurs_1m kommt als eigener Kanal
+   * tv_kurse blieb damals auf jedem Gerät abonniert (seit 30.09.2026 nur noch PC-Tab + sichtbarer Radar, s. u.). tv_kurs_1m kommt als eigener Kanal
    * dazu, sobald Markt/Radar oder Winning Days live sichtbar ist (1-s-Prüfer unten), und geht 60 s nach dem Verlassen wieder —
    * kurzes Hin- und Herschalten baut nichts neu. Bis der Kerzen-Kanal steht, pollt die View im 5-s-Takt wie ohne Realtime. */
   let mklPollMs = 5000, _mklRt = null, _mklRtStatus = null, _mklRtK = null, _mklRtKStatus = null, _mklRtKWeg = 0
   const mklPollSetzen = () => { mklPollMs = (_mklRtStatus === 'SUBSCRIBED' && _mklRtKStatus === 'SUBSCRIBED') ? 15000 : 5000 }
+  /* KANÄLE NUR, WO SIE GEBRAUCHT WERDEN (30.09.2026, Supabase hat das Projekt gedrosselt: Realtime Messages 8,2 Mio. von 5 Mio.
+   * im Pro-Kontingent, Spend Cap an). Supabase zählt jede Nachricht JE ABONNENT — markt-live lief in jedem eingeloggten Tab
+   * (Mac, Handy, Hintergrund-Tabs) mit jeder tv_kurse-Zeile beider Wurzeln von allen Liefer-PCs, auch ohne offenen Radar.
+   *   tv_kurse (markt-live): am PC-Tab (MT5_LOCAL = Prophos über localhost vom lokalen Backend) IMMER — hedgeFeedPuffern
+   *     braucht den Kurs zum Puls-Kauf-Klick (Rückfall-Einstieg, Vorfall 28.09.2026), der Tab läuft dort oft minimiert.
+   *     Sonst nur, solange Radar/Live Trades offen UND der Tab sichtbar ist; 60 s nach dem Verlassen wieder abgemeldet,
+   *     dann übernimmt das Polling der View (mklPollMs 5 s). Die Karten-Chips (wdKursJetzt) fallen dann auf den Cloud-Cache.
+   *     NICHT nach Wurzel gefiltert: hedgeFeedAmKlick/hedgeKursAktuell nehmen bei fehlender Plan-Wurzel die andere, und die
+   *     Kopfzeile zeigt NQ und MNQ nebeneinander (mkl.kursJe) — beide Wurzeln werden gebraucht.
+   *   tv_kurs_1m (markt-kerzen-<Wurzel>): nur bei sichtbarem Chart und serverseitig auf die gewählte Wurzel gefiltert
+   *     (der Chart zeichnet nur mkl.wurzel); Wurzelwechsel = neu abonnieren. Name mit Wurzel, weil supabase-js zu einem Namen,
+   *     dessen Abbau noch läuft, den alten Kanal zurückgibt; aus demselben Grund wartet ein neuer Aufbau auf das Ende des Abbaus. */
+  const mklSichtbar = () => typeof document === 'undefined' || document.visibilityState !== 'hidden'
+  const mklKursKanalGewollt = () => (typeof MT5_LOCAL !== 'undefined' && MT5_LOCAL) || (mklAktiv() && mklSichtbar())
+  let _mklRtWeg = 0, _mklRtAbbau = null, _mklRtKWurzel = null, _mklRtKAbbau = null
   function mklKerzenKanal(){
     if(mkl.stub || !currentUserId || typeof supabase.channel !== 'function') return
-    if(mklAktiv()){
+    if(mklAktiv() && mklSichtbar()){
       _mklRtKWeg = 0
-      if(_mklRtK) return
+      if(_mklRtK && _mklRtKWurzel === mkl.wurzel) return
+      if(_mklRtK){ mklKerzenKanalAbbauen(); return }   // Wurzel gewechselt → alter Filter weg, nächster Takt baut neu
+      if(_mklRtKAbbau) return
+      const w = mkl.wurzel === 'MNQ' ? 'MNQ' : 'NQ'
       try{
-        _mklRtK = supabase.channel('markt-kerzen')
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'tv_kurs_1m' }, m => { try{
+        const ch = supabase.channel('markt-kerzen-' + w)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'tv_kurs_1m', filter: 'wurzel=eq.' + w }, m => { try{
             const k = m.new; if(!k || k.wurzel !== mkl.wurzel || mkl.stub) return
             const t = Date.parse(k.minute) || 0
             const i = mkl.kerzen.findIndex(x => (Date.parse(x.minute) || 0) === t)
@@ -23166,40 +23184,59 @@
             else { mkl.kerzen.push(k); mkl.kerzen.sort((a, b) => (Date.parse(a.minute) || 0) - (Date.parse(b.minute) || 0)) }
             if(mklAktiv()) mklChartZeichnen()
           }catch(e){ console.warn('[markt-live] tv_kurs_1m', e) } })
-          .subscribe(status => { _mklRtKStatus = status; mklPollSetzen(); console.log('[markt-live] Kerzen-Realtime', status) })
-      }catch(e){ console.warn('[markt-live] Kerzen-Realtime', e); _mklRtK = null; _mklRtKStatus = null; mklPollSetzen() }
+        _mklRtK = ch; _mklRtKWurzel = w
+        ch.subscribe(status => { if(_mklRtK !== ch) return; _mklRtKStatus = status; mklPollSetzen(); console.log('[markt-live] Kerzen-Realtime', w, status) })
+      }catch(e){ console.warn('[markt-live] Kerzen-Realtime', e); _mklRtK = null; _mklRtKWurzel = null; _mklRtKStatus = null; mklPollSetzen() }
       return
     }
     if(!_mklRtK) return
     if(!_mklRtKWeg){ _mklRtKWeg = Date.now(); return }
     if(Date.now() - _mklRtKWeg < 60000) return
-    try{ supabase.removeChannel(_mklRtK) }catch(_){}
-    _mklRtK = null; _mklRtKStatus = null; _mklRtKWeg = 0; mklPollSetzen()
+    mklKerzenKanalAbbauen()
+  }
+  function mklKerzenKanalAbbauen(){
+    const ch = _mklRtK
+    _mklRtK = null; _mklRtKWurzel = null; _mklRtKStatus = null; _mklRtKWeg = 0; mklPollSetzen()
+    if(!ch) return
+    try{ _mklRtKAbbau = Promise.resolve(supabase.removeChannel(ch)).catch(() => {}).finally(() => { _mklRtKAbbau = null }) }catch(_){ _mklRtKAbbau = null }
   }
   function mklRealtimeStart(){
-    if(_mklRt || !currentUserId || typeof supabase.channel !== 'function') return
-    try{
-      _mklRt = supabase.channel('markt-live')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'tv_kurse' }, m => { try{
-          const r = m.new; if(!r || !(r.wurzel === 'NQ' || r.wurzel === 'MNQ') || mkl.stub) return
-          hedgeFeedPuffern(r, Date.now())   // Kurs zum Puls-Klick (28.09.2026) — vor dem Zwei-PC-Filter, jeder Kurs zählt
-          const kk = mklKursAus(r, Date.now()), alt = mkl.kursJe[r.wurzel]
-          if(alt && alt.pc !== kk.pc && alt.alter_ms < 15000) return   // zweiter PC liefert dieselbe Wurzel — nicht hin- und herspringen
-          mkl.kursJe[r.wurzel] = kk
-          if(r.wurzel === mkl.wurzel){ mkl.kursAlt = kk; mkl.kurs = kk.alter_ms <= HEDGE_KURS_MAX_ALTER_MS ? kk : null }
-          if(mklAktiv()){ mklKopf(); mklChartZeichnen(); mklOrdersRender(); mklWdRender() }
-        }catch(e){ console.warn('[markt-live] tv_kurse', e) } })
-        .subscribe(status => {
+    if(mkl.stub || !currentUserId || typeof supabase.channel !== 'function') return
+    if(mklKursKanalGewollt()){
+      _mklRtWeg = 0
+      if(_mklRt || _mklRtAbbau) return
+      try{
+        const ch = supabase.channel('markt-live')
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'tv_kurse' }, m => { try{
+            const r = m.new; if(!r || !(r.wurzel === 'NQ' || r.wurzel === 'MNQ') || mkl.stub) return
+            hedgeFeedPuffern(r, Date.now())   // Kurs zum Puls-Klick (28.09.2026) — vor dem Zwei-PC-Filter, jeder Kurs zählt
+            const kk = mklKursAus(r, Date.now()), alt = mkl.kursJe[r.wurzel]
+            if(alt && alt.pc !== kk.pc && alt.alter_ms < 15000) return   // zweiter PC liefert dieselbe Wurzel — nicht hin- und herspringen
+            mkl.kursJe[r.wurzel] = kk
+            if(r.wurzel === mkl.wurzel){ mkl.kursAlt = kk; mkl.kurs = kk.alter_ms <= HEDGE_KURS_MAX_ALTER_MS ? kk : null }
+            if(mklAktiv()){ mklKopf(); mklChartZeichnen(); mklOrdersRender(); mklWdRender() }
+          }catch(e){ console.warn('[markt-live] tv_kurse', e) } })
+        _mklRt = ch
+        ch.subscribe(status => {
+          if(_mklRt !== ch) return   // Status eines schon abgemeldeten Kanals (CLOSED) nicht übernehmen
           _mklRtStatus = status
           mklPollSetzen()
           console.log('[markt-live] Realtime', status)
         })
-    }catch(e){ console.warn('[markt-live] Realtime', e); _mklRt = null; _mklRtStatus = null; mklPollSetzen() }
+      }catch(e){ console.warn('[markt-live] Realtime', e); _mklRt = null; _mklRtStatus = null; mklPollSetzen() }
+      return
+    }
+    if(!_mklRt) return
+    if(!_mklRtWeg){ _mklRtWeg = Date.now(); return }
+    if(Date.now() - _mklRtWeg < 60000) return
+    const ch = _mklRt
+    _mklRt = null; _mklRtStatus = null; _mklRtWeg = 0; mklPollSetzen()
+    try{ _mklRtAbbau = Promise.resolve(supabase.removeChannel(ch)).catch(() => {}).finally(() => { _mklRtAbbau = null }) }catch(_){ _mklRtAbbau = null }
   }
-  window._mklRealtimeStatus = () => _mklRtStatus
+  window._mklRealtimeStatus = () => _mklRtStatus   // null = kein Kurs-Abo (weder PC-Tab noch Radar sichtbar)
   window._mklKerzenStatus = () => _mklRtKStatus   // Test-/Diagnose-Zugriff: null = kein Kerzen-Abo (kein Chart offen)
-  setTimeout(mklRealtimeStart, 3000); setInterval(mklRealtimeStart, 15000)
-  setInterval(mklKerzenKanal, 1000)
+  // Ein 1-s-Prüfer für beide Kanäle (vorher markt-live alle 15 s nur „aufbauen, falls fehlt") — Radar öffnen abonniert sofort
+  setInterval(() => { mklRealtimeStart(); mklKerzenKanal() }, 1000)
   // Kein Frontend-Push mehr für den Kurs-Feed (26.09.2026, Auftrag F2 über den Master, Befund Research R3): am Freitag 25.09.
   // kamen für DIESELBEN Ausfälle 24 Pushes der Backend-Wacht (app.py READER_WACHT_UIDS) plus 7 aus diesem Tab-Alarm — und der
   // ging an JEDEN Nutzer mit offenem Tab (Claim je user_id, jede kurze Erholung = neue Episode). Handeln kann nur, wer den
@@ -36589,7 +36626,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.894'
+  const OS_TAB_BUILD = '2026-09-22.895'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
