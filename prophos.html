@@ -1851,9 +1851,9 @@
   #dashboard-view .type-waiting_payout::before{content:'';width:6px;height:6px;border-radius:999px;background:#5A51BA;box-shadow:0 0 0 2px #E8EAFF}
   #dashboard-view .type-winning_days{border-color:#9AE3CB;color:#006F4F}
   #dashboard-view .acc-wd-toggle{margin-left:6px;padding:2px 7px;border-radius:6px;border:1px dashed var(--border);background:transparent;color:var(--sub);font-size:10.5px;font-weight:600;cursor:pointer;white-space:nowrap;vertical-align:middle}
-  #dashboard-view .acc-wd-toggle:hover{border-color:#0E7A78;color:#0E7A78;background:rgba(22,200,198,.08)}
+  #dashboard-view .acc-wd-toggle:hover{border-color:#006F4F;color:#006F4F;background:rgba(0,111,79,.06)}   /* Mint wie .type-winning_days (30.09.2026) */
   #dashboard-view .acc-wd-toggle:disabled{opacity:.5;cursor:default}
-  #dashboard-view .acc-wd-toggle.acc-wp-toggle:hover{border-color:#1F6FD6;color:#1F6FD6;background:rgba(73,150,255,.08)}
+  #dashboard-view .acc-wd-toggle.acc-wp-toggle:hover{border-color:#5049A2;color:#5049A2;background:rgba(80,73,162,.06)}   /* Indigo wie Funded CFD / Waiting for Payout (30.09.2026) */
   #dashboard-view .type-live{border-color:#B4DFAE;color:#1B6A14}
   #dashboard-view .type-live::before{
     content:'';width:6px;height:6px;border-radius:999px;background:#4AA342;
@@ -35995,7 +35995,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.848'
+  const OS_TAB_BUILD = '2026-09-22.849'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -43579,7 +43579,8 @@
     const tage = Math.max(0, Math.round((Date.parse(_deTodayStr() + 'T12:00:00Z') - Date.parse(tag + 'T12:00:00Z')) / 86400000))
     const rel = tage === 0 ? 'seit heute' : tage === 1 ? 'seit gestern' : `seit ${tage} Tagen`
     const lang = t.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Europe/Berlin' })
-    return `<span style="color:#1F6FD6;font-weight:600" title="Waiting for Payout seit ${lang} — springt beim Payout-Anfragen zurück">⏳ Waiting for Payout · ${rel}</span>`
+    // Indigo wie .type-waiting_payout (30.09.2026, Typ-Palette Outline — vorher das alte CFD-Blau #1F6FD6)
+    return `<span style="color:#5049A2;font-weight:600" title="Waiting for Payout seit ${lang} — springt beim Payout-Anfragen zurück">⏳ Waiting for Payout · ${rel}</span>`
   }
 
   /* Payout angefragt → „Waiting for Payout" ist erledigt (29.09.2026, Finn: „wenn ich den Payout anfrage, markiere ich ihn
