@@ -3503,6 +3503,79 @@ def test_cdp_konto_regression_865():
         and "(eintraege.length === 1 && !!s.el && !eintraege[0].aktiv)" in js and "panel_lage: lage" in js
         and "VERSION = '0.7.4'" in js, "augen.js 0.7.4: Umschalter unter der Broker-Leiste (beide Lagen), panel_lage, Liste nur mit Umschalter")
     chk("warnung" in ob.PULS_ERGEBNIS_FELDER and "unklar" in ob.PULS_ERGEBNIS_FELDER, "Ergebnis-Paket trägt warnung + unklar")
+    # Login-Abriss (30.09.2026 03:23 UTC, pc-usq1i6): Verbindung weg nach „Anmelden" → Spur mit Chrome-Zustand, EINMAL neu anhängen
+    import inspect as _ia
+    V = ob.cdp_verbindung_weg_urteil
+    ta, tb = {"id": "a", "webSocketDebuggerUrl": "ws://a"}, {"id": "b", "webSocketDebuggerUrl": "ws://b"}
+    chk(V(False, [])[0] == "chrome_weg" and V(False, [ta], "a")[0] == "chrome_weg" and V(True, [ta, tb], "b") == ("neu_anhaengen", tb)
+        and V(True, [ta], "b") == ("tab_weg", None) and V(True, [ta]) == ("neu_anhaengen", ta) and V(True, [ta, tb])[0] == "tab_weg"
+        and V(True, [])[0] == "tab_weg", "Verbindung weg: Chrome tot / nur DERSELBE Tab wird neu angehängt / sonst Tab weg")
+    q_a = _ia.getsource(ob._cdp_anmelden)
+    chk("except (OSError, RuntimeError)" in q_a and "cdp_verbindung_weg_urteil(" in q_a and "not neu_dran" in q_a
+        and "sitz[0] = _AugenSitzung(" in q_a and '"chrome_weg"' in q_a
+        and "sitz=sitz" in _ia.getsource(ob._cdp_tradovate_verbinden), "Login-Warten: Abriss ehrlich mit Chrome-Zustand, höchstens einmal neu anhängen")
+    # Verhalten: Formular bereit → Login-Klick → 1. Blick reißt ab. (a) Chrome lebt + TV-Tab da → neu anhängen, Konto kommt → OK;
+    # (b) Chrome tot → 'chrome_weg'; (c) zweiter Abriss nach dem Neu-Anhängen → 'verbindung' (kein drittes Anhängen)
+    class _Eing:
+        def klick(self, r, n, toast_ok=False, pruef=None):
+            return True
+
+        def fokus_im(self, r, n, versuche=3):
+            return True
+
+        def taste(self, k, modifiers=0):
+            pass
+
+    class _OrtA:
+        name, eigen, eingabe = "Tradovate-Tab", True, _Eing()
+
+        def blick(self):
+            return {"login": {"user": {"gefuellt": True, "passt": True, "laenge_gleich": True, "rect": [1, 1, 50, 20]},
+                              "pw": {"gefuellt": True, "rect": [1, 30, 50, 20]},
+                              "knoepfe": [{"text": "Login", "rect": [1, 60, 80, 30]}]}}
+    alt_a = {n: getattr(ob, n) for n in ("_cdp_formular_ruhig", "_cdp_verbunden_lesen", "_cdp_http", "_AugenSitzung", "_warte")}
+    faelle = {}
+    try:
+        ob._cdp_formular_ruhig = lambda *a, **k: None
+        ob._warte = lambda a_, b_: None
+        for fall, lebt, abrisse, tid, fehler in (("a", True, 1, "t1", ConnectionAbortedError), ("b", False, 1, "t1", ConnectionAbortedError),
+                                                 ("c", True, 2, "t1", ConnectionAbortedError), ("d", True, 1, "anderer", ConnectionAbortedError),
+                                                 ("e", True, 2, "t1", TimeoutError), ("f", True, 1, "t1", RuntimeError)):
+            zahl = {"n": 0, "neu": 0}
+
+            def _lesen(s_, o_, t_, _z=zahl, _ab=abrisse, _f=fehler):
+                _z["n"] += 1
+                if _z["n"] <= _ab:
+                    raise _f(10053, "Verbindung abgebrochen") if _f is ConnectionAbortedError else _f("CDP Runtime.evaluate: Target crashed")
+                return "PAAPEX6416990000007USD"
+
+            class _NeuS:
+                ws = None
+
+                def __init__(self, trail, ziel=None, _z=zahl):
+                    _z["neu"] += 1
+            ob._cdp_verbunden_lesen = _lesen
+            ob._AugenSitzung = _NeuS
+            ob._cdp_http = (lambda pfad, *a, _l=lebt, **k: (({"Browser": "x"} if pfad == "/json/version" else
+                                                                 [{"type": "page", "id": "t1", "url": "https://www.tradingview.com/chart/x/",
+                                                                   "webSocketDebuggerUrl": "ws://127.0.0.1:9333/devtools/page/t1"}]) if _l else None))
+            sz, tr = [type("S0", (), {"ws": None, "target_id": tid, "_win_hwnd": 4711})()], []
+            r_ = ob._cdp_anmelden(sz[0], _OrtA(), "APEX_641699", {}, tr, None, sitz=sz)
+            faelle[fall] = (r_, zahl["neu"], isinstance(sz[0], _NeuS), tr, getattr(sz[0], "_win_hwnd", None))
+    finally:
+        for n, f in alt_a.items():
+            setattr(ob, n, f)
+    chk(faelle["a"][0] == ("", "") and faelle["a"][1] == 1 and faelle["a"][2] and any("neu an denselben TradingView-Tab" in x for x in faelle["a"][3]),
+        f"Abriss, Chrome lebt → einmal neu anhängen, Login gilt ({faelle['a'][0]}, {faelle['a'][3][-3:]})")
+    chk(faelle["b"][0][0] == "chrome_weg" and faelle["b"][1] == 0 and "beendet" in faelle["b"][0][1] and any("ANTWORTET NICHT" in x for x in faelle["b"][3]),
+        f"Abriss, Chrome tot → chrome_weg, kein Anhängen ({faelle['b'][0]})")
+    chk(faelle["c"][0][0] == "verbindung" and faelle["c"][1] == 1, f"zweiter Abriss → ehrlich 'verbindung', nur EIN Neu-Anhängen ({faelle['c'][0]}, {faelle['c'][1]})")
+    chk(faelle["a"][4] == 4711, "Neu-Anhängen nimmt das gemerkte Fenster mit (zu() minimiert wieder)")
+    chk(faelle["d"][0][0] == "verbindung" and faelle["d"][1] == 0 and "TradingView-Tab weg" in faelle["d"][0][1] and any("tab_weg" in x for x in faelle["d"][3]),
+        f"Sitzungs-Tab weg, anderer TV-Tab da → NICHT an den anderen anhängen ({faelle['d'][0]})")
+    chk(faelle["e"][0] == ("", "") and faelle["e"][1] == 0 and sum("antwortet gerade nicht" in x for x in faelle["e"][3]) == 1,
+        f"Zeitüberschreitung ist kein Abriss: weiter warten, kein Neu-Anhängen, einmal vermerkt ({faelle['e'][3]})")
+    chk(faelle["f"][0] == ("", "") and faelle["f"][1] == 1, "CDP-Fehlerantwort (Target crashed) wie ein Abriss: einmal neu anhängen")
     import inspect as _i
     chk("trail" in _i.signature(ob._cdp_nach_link).parameters and "_cdp_nach_link(s, opts, trail)" in _i.getsource(ob._cdp_tradovate_verbinden),
         "_cdp_nach_link bekommt die Spur (NameError seit .828)")

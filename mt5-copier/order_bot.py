@@ -18380,8 +18380,25 @@ def _cdp_formular_ruhig(ort, trail, max_s=3.0, grundruhe=True):
     return False
 
 
-def _cdp_anmelden(s, ort, benutzer, opts, trail, vorher=None):
-    """[5] Username + gespeichertes Passwort (Chrome) beweisen, Login, warten bis TradingView ein Konto zeigt. -> (code, text)"""
+def cdp_verbindung_weg_urteil(chrome_lebt, tv_tabs, target_id=None):
+    """REIN RECHNEND (testbar): Nach „Anmelden" ist die Verbindung zum TradingView-Tab abgerissen — was nun? -> ('neu_anhaengen', tab) |
+    ('chrome_weg', None) (Port 9333 antwortet nicht) | ('tab_weg', None). Neu angehängt wird NUR an DENSELBEN Tab (target_id der
+    Sitzung) — nie an einen anderen TradingView-Tab (Prüfer 30.09.2026: alter ?trade-now-Tab, zweiter TV-Tab; alle Folgeschritte liefen
+    sonst im falschen Tab). Ohne bekannte target_id gilt genau EIN TradingView-Tab als derselbe."""
+    if not chrome_lebt:
+        return "chrome_weg", None
+    tabs = [t for t in (tv_tabs or []) if isinstance(t, dict) and t.get("webSocketDebuggerUrl")]
+    if target_id:
+        tabs = [t for t in tabs if t.get("id") == target_id]
+    elif len(tabs) != 1:
+        tabs = []
+    return ("neu_anhaengen", tabs[0]) if tabs else ("tab_weg", None)
+
+
+def _cdp_anmelden(s, ort, benutzer, opts, trail, vorher=None, sitz=None):
+    """[5] Username + gespeichertes Passwort (Chrome) beweisen, Login, warten bis TradingView ein Konto zeigt. -> (code, text)
+    sitz = [Sitzung] des Aufrufers: reißt die Verbindung zum TradingView-Tab nach „Anmelden" ab, hängt sich der Lauf EINMAL neu an
+    (sitz[0] wird ersetzt) bzw. meldet ehrlich, ob das Puls-Chrome noch lebt."""
     _cdp_formular_ruhig(ort, trail)
     lb = ort.blick().get("login") or {}
     u = lb.get("user") or {}
@@ -18460,10 +18477,47 @@ def _cdp_anmelden(s, ort, benutzer, opts, trail, vorher=None):
             k = k2 or k
     if not geklickt_login:
         return "login_knopf", "Login-Knopf ließ sich dreimal nicht klicken (Maus nicht bewiesen über dem Knopf) — nicht angemeldet."
-    t0, enter = time.time(), False
+    t0, enter, neu_dran, zeit_gemeldet = time.time(), False, False, False
     while time.time() - t0 < 40.0:
         _warte(1.0, 0.4)
-        aktiv = _cdp_verbunden_lesen(s, opts, trail)
+        try:
+            aktiv = _cdp_verbunden_lesen(s, opts, trail)
+        except (OSError, RuntimeError) as e_:
+            # Live 30.09.2026 03:23 UTC (pc-usq1i6, Plan beb06b7f, 6 Versuche): ~1 s nach „Anmelden" ConnectionAbortedError (WinError
+            # 10053) → roher 'cdp_fehler', 9 s später startete der Augen-Prozess ein FRISCHES Puls-Chrome (Start-Adresse, about:blank) —
+            # das Puls-Chrome hatte sich beim Login beendet. Ursache offen; seitdem steht in der Spur, ob Chrome noch lebt und welche
+            # Tabs da sind, und der Lauf hängt sich EINMAL neu an DENSELBEN TradingView-Tab (der Login kann trotzdem gelungen sein).
+            import socket as _so
+            if isinstance(e_, (TimeoutError, _so.timeout)):
+                # langsamer Tab ≠ Verbindung weg (Prüfer): nur vermerken und weiter warten — die 40-s-Grenze bleibt
+                if not zeit_gemeldet:
+                    zeit_gemeldet = True
+                    trail.append("[Login] TradingView-Tab antwortet gerade nicht (Zeitüberschreitung) — warte weiter")
+                continue
+            lebt = bool(_cdp_http("/json/version", timeout=1.5))
+            liste = _cdp_http("/json/list", timeout=1.5) or []
+            tabs = [str(t.get("url"))[:50] for t in liste if isinstance(t, dict) and t.get("type") == "page"][:6]
+            urteil, tab = cdp_verbindung_weg_urteil(lebt, augen_tv_targets(liste), getattr(s, "target_id", None))
+            trail.append(f"[Login] Verbindung zum TradingView-Tab weg ({type(e_).__name__}: {str(e_)[:60]}) — Puls-Chrome "
+                         f"{'läuft' if lebt else 'ANTWORTET NICHT (beendet)'}, Tabs {tabs} → {urteil}")
+            if urteil == "neu_anhaengen" and sitz is not None and not neu_dran:
+                neu_dran = True
+                try:
+                    alt_s = s
+                    s = sitz[0] = _AugenSitzung(trail, ziel=tab)
+                    if getattr(alt_s, "_win_hwnd", None):
+                        s._win_hwnd = alt_s._win_hwnd      # zu() minimiert das Fenster am Ende wieder (wie beim Tab-Tausch)
+                    if not ort.eigen:                      # Formular in der TradingView-Seite: auch der Login-Blick braucht die neue Verbindung
+                        ort.ws, ort.eingabe = s.ws, s
+                    trail.append("[Login] neu an denselben TradingView-Tab angehängt — warte weiter auf das Konto")
+                    continue
+                except Exception as e2:
+                    lebt = bool(_cdp_http("/json/version", timeout=1.5))     # Chrome kann genau jetzt geendet sein
+                    trail.append(f"[Login] Neu-Anhängen gescheitert ({type(e2).__name__}) — Puls-Chrome {'läuft' if lebt else 'antwortet nicht'}")
+            return ("chrome_weg" if not lebt else "verbindung"), (
+                "Beim Tradovate-Login " + ("hat sich das Puls-Chrome beendet" if not lebt else
+                                           ("ist der TradingView-Tab weg" if urteil == "tab_weg" else "ist die Verbindung zum TradingView-Tab abgerissen"))
+                + " — ob der Login durchging, ist offen. Puls-Chrome ansehen, NICHT mehrfach hintereinander neu anstoßen.")
         if aktiv:
             trail.append(f"[Login] OK verbunden, aktiv '{aktiv[:40]}'")
             return "", ""
@@ -18554,7 +18608,8 @@ def _cdp_tradovate_verbinden(sitz, cmd, opts, trail, beleg=None):
         else:
             code = "?"
             try:
-                code, text = _cdp_anmelden(s, ort, benutzer, opts, trail, vorher)
+                code, text = _cdp_anmelden(s, ort, benutzer, opts, trail, vorher, sitz=sitz)
+                s = sitz[0]                              # beim Neu-Anhängen ersetzt
             finally:
                 if ort.eigen:
                     tid = getattr(ort, "target_id", None)
