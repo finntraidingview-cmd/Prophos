@@ -16534,6 +16534,33 @@ def _cdp_panel_aufklappen(s, trail):
     if lage != "eingeklappt":
         return lage, d
     h = d.get("unter_leiste")
+    # ERST „Open panel" (Finn 01.10.2026, Live-Befund Moritz 23:08 UTC, Orbit V3: nach „Maximize panel" war der Chart weg, das Symbol
+    # ließ sich nicht einstellen — „nur auf Open Panel, das Dropdown sieht man da perfekt"). Normale Höhe, Chart bleibt sichtbar;
+    # „Maximize panel" nur noch als Rückfall, wenn das offene Panel zu niedrig bleibt (Vorfall pc-cccccc 30.09.: 49 px trotz „offen").
+    vk = d.get("vis_knopf") if isinstance(d.get("vis_knopf"), dict) else None
+    va = str((vk or {}).get("aria") or "")
+    if (not getattr(s, "_panel_open_versucht", False) and vk and cdp_rect(vk)
+            and re.search(r"open|öffnen|oeffnen|show|expand|einblenden", va, re.I) and not re.search(r"collapse|close|schlie|hide", va, re.I)):
+        s._panel_open_versucht = True
+        if hasattr(s, "werbung_weg"):
+            s.werbung_weg()
+        frei_o = s.lese_js(cdp_panel_frei_js(cdp_rect(vk)))
+        if isinstance(frei_o, dict) and not frei_o.get("frei"):
+            trail.append(f"„Open panel“ verdeckt ('{frei_o.get('was')}' liegt darüber) — kein Klick")
+        else:
+            trail.append(f"Order-Panel eingeklappt ({h} px unter der Broker-Leiste) → „Open panel“")
+            if s.klick(cdp_rect(vk), "Order-Panel öffnen (Open panel)"):
+                for _ in range(5):                        # Treffer ≠ Wirkung (Regel .835)
+                    _warte(0.6, 0.3)
+                    d2 = s.lese_js(CDP_PANEL_LAGE_JS)
+                    if cdp_panel_lage(d2) == "ok":
+                        s._panel_aufgeklappt = True
+                        trail.append(f"Order-Panel offen ({d2.get('unter_leiste')} px, Chart bleibt sichtbar)")
+                        return "aufgeklappt", d2
+                    if isinstance(d2, dict):
+                        d = d2
+                trail.append(f"Order-Panel nach „Open panel“ zu niedrig ({(d or {}).get('unter_leiste')} px) → Rückfall „Maximize panel“")
+                h = (d or {}).get("unter_leiste")
     if getattr(s, "_panel_max_versucht", False):
         return "bleibt_eingeklappt", d
     s._panel_max_versucht = True
@@ -16897,7 +16924,9 @@ def _cdp_ticket_fuellen(s, st, plan, symbol, opts, trail):
                 if ticket().get("da") or knopf():
                     break
             if restored:
-                s._panel_max_versucht = False              # Positions-Tabelle wieder groß (Beweis nach dem Senden)
+                # NICHT wieder maximieren (Live-Befund Moritz 01.10.2026 23:08 UTC: danach war der Chart weg, MNQ ließ sich nicht
+                # einstellen). Höchstens „Open panel" in normaler Höhe; Maximize bleibt für diesen Lauf gesperrt.
+                s._panel_max_versucht, s._panel_open_versucht = True, False
                 if _cdp_panel_aufklappen(s, trail)[0] == "aufgeklappt":
                     st = s.stand(opts)
             if not ticket().get("da") and not knopf():
@@ -16916,8 +16945,12 @@ def _cdp_ticket_fuellen(s, st, plan, symbol, opts, trail):
             return (False, "asset", f"Symbol {ziel} nicht einstellbar (Ticket zeigt '{ist or '-'}', Watchlist-Treffer "
                     f"{'1' if wl else '0'}).", "asset", st, None)
         s.klick(cdp_rect(wl), f"Watchlist {wl.get('symbol')}")
-        _warte(1.2, 0.5)
-        st = s.stand(opts)
+        # Bis ~6 s auf das neue Symbol warten (Live-Befund Moritz 01.10.2026: EIN Blick nach 1,2 s sah '-', kurz danach stand MNQZ6 im Ticket)
+        for _b in range(6):
+            _warte(1.0, 0.4)
+            st = s.stand(opts)
+            if tv_symbol_root(str(knopf().get("symbol") or ticket().get("symbol") or "")) == ziel:
+                break
     if not ticket().get("da"):
         return False, "ticket", "Order-Ticket im Puls-Chrome nicht offen — nichts getippt.", "ticket", st, None
     # --- Seite

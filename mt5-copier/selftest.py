@@ -3250,6 +3250,35 @@ def test_puls_cdp_login():
         f"Panel groß, Liste trotzdem nicht erkannt → ehrliche Meldung mit Panel-Lage, Umschalter nur einmal ({r3_[2]})")
     chk(r4_[0] and k4_.klicks == ["Order-Panel aufklappen (Maximize panel)"] and k4_.gross,
         f"Konto steht, Panel eingeklappt → einmal aufklappen (Positionen lesbar), nie deshalb scheitern ({k4_.klicks})")
+    # Open panel zuerst (Finn 01.10.2026, Live-Befund Moritz 23:08 UTC: Maximize versteckte den Chart → Symbol nicht einstellbar)
+    class _SO(_SK):
+        def __init__(self, open_reicht=True, **kw):
+            _SK.__init__(self, **kw); self.open_reicht, self.zu = open_reicht, True
+
+        def lese_js(self, a, timeout=8):
+            d = _SK.lese_js(self, a, timeout)
+            if "elementFromPoint" in a:
+                return d
+            d["vis_knopf"] = {"rect": [860, 686, 38, 38], "aria": "Open panel" if self.zu else "Collapse panel"}
+            return d
+
+        def klick(self, r, n, toast_ok=False):
+            if "Open panel" in n:
+                self.klicks.append(n); self.zu = False; self.gross = self.open_reicht
+                return True
+            return _SK.klick(self, r, n, toast_ok)
+    ob._warte = lambda a_, b_: None
+    try:
+        ko1_, to1_ = _SO(), []
+        ro1_ = ob._cdp_konto_sichern(ko1_, "PAAPEX0000000000008", {}, to1_)
+        ko2_, to2_ = _SO(open_reicht=False), []
+        ro2_ = ob._cdp_konto_sichern(ko2_, "PAAPEX0000000000008", {}, to2_)
+    finally:
+        ob._warte = alt_w
+    chk(ro1_[0] and ko1_.klicks == ["Order-Panel öffnen (Open panel)", "Konto-Umschalter", "Konto PAAPEX0000000000008"]
+        and not any("Maximize" in x for x in ko1_.klicks), f"eingeklappt → „Open panel“ reicht → kein Maximize ({ko1_.klicks})")
+    chk(ro2_[0] and ko2_.klicks[:2] == ["Order-Panel öffnen (Open panel)", "Order-Panel aufklappen (Maximize panel)"]
+        and any("Rückfall" in x for x in to2_), f"Open panel zu niedrig → Rückfall Maximize ({ko2_.klicks})")
     fj_ = ob.cdp_panel_frei_js([1482, 907, 38, 38])
     chk("elementFromPoint(1501.0,926.0)" in fj_ and "toggle-visibility-button" in fj_ and "#overlap-manager-root" in fj_ and "toastGroup-" in fj_,
         "Frei-Probe: Knopfmitte, Dialog/Overlay verdeckt, Meldungen frei")
@@ -3588,9 +3617,9 @@ def test_cdp_konto_regression_865():
         "augen.js meldet liste_voll (auch der hohe Container wird geprüft)")
     chk("c === document.body" in js and "if (t > 2) return false;" in js, "listeVoll: Ausreißer außerhalb des Listen-Containers → nicht voll")
     q_tk = _i.getsource(ob._cdp_ticket_fuellen) if hasattr(ob, "_cdp_ticket_fuellen") else ""
-    chk(not q_tk or ("chart_frei and bw > 200" in q_tk and "s._panel_max_versucht = False" in q_tk and "chart_frei = restored" in q_tk
-                     and "Treffer ≠ Wirkung" in q_tk),
-        "Shift+T: Chart-Klick nur nach gedrücktem Restore, danach wieder maximiert")
+    chk(not q_tk or ("chart_frei and bw > 200" in q_tk and "s._panel_max_versucht, s._panel_open_versucht = True, False" in q_tk
+                     and "chart_frei = restored" in q_tk and "Treffer ≠ Wirkung" in q_tk and "for _b in range(6):" in q_tk),
+        "Shift+T: Chart-Klick nur nach gedrücktem Restore, danach NICHT wieder maximiert (höchstens Open panel); Symbol bis ~6 s warten")
     if ok:
         print("✓ Regression .865: fremde Liste kein Beleg, Abmelden nur mit Beleg, unlesbar = ehrlich raus, Umschalter auch maximiert")
     return ok
