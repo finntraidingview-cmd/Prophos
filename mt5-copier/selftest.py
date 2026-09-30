@@ -1881,6 +1881,7 @@ def main():
     results.append(test_puls_augen_cdp())
     results.append(test_puls_k3())
     results.append(test_puls_cdp_login())
+    results.append(test_cdp_konto_regression_865())
     results.append(test_puls_win_maus())
     results.append(test_puls_nie_chrome_schliessen())
     results.append(test_tsx_konto_abgekuerzt())
@@ -3240,7 +3241,7 @@ def test_puls_cdp_login():
         f"eingeklappt → EIN Klick „Maximize panel“ → Umschalter → Konto gewechselt ({k1_.klicks}, {t1_})")
     chk(not r2_[0] and r2_[1] == "kein_broker" and k2_.klicks == [] and "Login-Weg" in r2_[2]
         and ob.cdp_login_noetig(r2_[1], r2_[4]), f"Symbol fehlt → kein Klick, kein_broker → Login-Weg ({r2_[2]})")
-    chk(not r3_[0] and r3_[1] == "konto_nicht_erreicht" and k3_.klicks == ["Konto-Umschalter"] and "Order-Panel ok (320 px)" in r3_[2],
+    chk(not r3_[0] and r3_[1] == "konto_nicht_erreicht" and k3_.klicks == ["Konto-Umschalter", "Taste Escape"] and "Order-Panel ok (320 px)" in r3_[2],
         f"Panel groß, Liste trotzdem nicht erkannt → ehrliche Meldung mit Panel-Lage, Umschalter nur einmal ({r3_[2]})")
     chk(r4_[0] and k4_.klicks == ["Order-Panel aufklappen (Maximize panel)"] and k4_.gross,
         f"Konto steht, Panel eingeklappt → einmal aufklappen (Positionen lesbar), nie deshalb scheitern ({k4_.klicks})")
@@ -3271,6 +3272,249 @@ def test_puls_cdp_login():
     chk("ziel=None" in _i.getsource(ob._AugenSitzung.__init__), "_AugenSitzung nimmt einen bestimmten Tab")
     if ok:
         print("✓ CDP-Login: nur bei kein Broker/0 Treffern, Connect-Dialog + Demo + Don't remember me, Username exakt, nie Passwort/Allow")
+    return ok
+
+
+def test_cdp_konto_regression_865():
+    """Regression .865 (30.09.2026, pc-usq1i6, Orbit-Endlesung Plan beb06b7f): nach „Maximize panel" stand der Konto-Umschalter oben
+    ([72,59] unter der Broker-Leiste [56,0]), augen.js ≤ 0.7.3 fand ihn nicht, hielt ihn für eine offene Liste mit 1 Zeile, das Ziel
+    stand darin 0× → Login-Weg las den Login als '-' und meldete eine richtige Tradovate-Sitzung ab. Geprüft: fremde Liste = nie Beleg,
+    Abmelden nur mit Beleg, unlesbar = ehrlich raus, neues augen.js findet den Umschalter in beiden Lagen (Quelltext)."""
+    import order_bot as ob
+    ok = True
+
+    def chk(bed, text):
+        nonlocal ok
+        if not bed:
+            print("  ✗ Regression .865: " + text)
+            ok = False
+    Z7, Z8 = "PAAPEX6416990000007", "PAAPEX6416990000008"
+    MAX = {"leiste": [56, 0, 1194, 38], "unter_leiste": 735, "max_knopf": {"rect": [1212, 0, 38, 38], "aria": "Restore panel"}}
+
+    class _Max:
+        """Puls-Chrome mit maximiertem Panel (Inventar 03:13 UTC). alt=True: augen.js 0.7.3 (Umschalter unsichtbar, er selbst als
+        „Liste"); alt=False: 0.7.4 (Umschalter [72,59], Liste geht erst nach dem Klick auf)."""
+        ws = None
+
+        def __init__(self, alt, aktiv=Z8 + "USD", ziele=(Z7, Z8), voll=True, offen=False, esc_wirkt=True, eintrag_druck=True):
+            self.alt, self.aktiv, self.ziele, self.offen, self.klicks = alt, aktiv, ziele, offen, []
+            self.voll, self.esc_wirkt, self.eintrag_druck = voll, esc_wirkt, eintrag_druck
+
+        def stand(self, opts=None):
+            if self.alt:
+                return {"konto": {"panel": "offen", "schalter": None, "aktiv": "", "liste_offen": True,
+                                  "eintraege": [{"text": Z8 + "USD", "rect": [72, 59, 199, 28], "aktiv": False}]}}
+            ein = [{"text": z + "USD", "rect": [78, 90 + 32 * i, 228, 32], "aktiv": (z + "USD") == self.aktiv} for i, z in enumerate(self.ziele)]
+            return {"konto": {"panel": "offen", "panel_lage": "maximiert", "schalter": {"rect": [72, 59, 199, 28]}, "aktiv": self.aktiv,
+                              "liste_offen": self.offen, "liste_voll": self.offen and self.voll, "eintraege": ein if self.offen else []}}
+
+        def lese_js(self, a, timeout=8):
+            return {"frei": True, "was": ""} if "elementFromPoint" in a else dict(MAX)
+
+        def werbung_weg(self, zwang=False):
+            return 0
+
+        def taste(self, k, modifiers=0):
+            self.klicks.append("Taste " + k)
+            if k == "Escape" and self.esc_wirkt:
+                self.offen = False
+
+        def klick(self, r, n, toast_ok=False):
+            self.klicks.append(n)
+            if n == "Konto-Umschalter":
+                self.offen = True
+            elif n.startswith("Konto "):
+                if not self.eintrag_druck:
+                    return False
+                self.aktiv, self.offen = n.split(" ", 1)[1] + "USD", False
+            return True
+    alt_w = ob._warte
+    ob._warte = lambda a_, b_: None
+    try:
+        # 1) altes augen.js im maximierten Panel: nichts gewählt, kein Login-Beleg (früher: Esc → konto_treffer 0 → Login → Log out)
+        k1, t1 = _Max(alt=True), []
+        r1 = ob._cdp_konto_sichern(k1, Z7, {}, t1)
+        # 2) neues augen.js, maximiert, aktiv …0008, Ziel …0007: Umschalter → Liste → Ziel
+        k2, t2 = _Max(alt=False), []
+        r2 = ob._cdp_konto_sichern(k2, Z7, {}, t2)
+        # 3) Konto steht schon (aktiv = Ziel): weder Liste noch Login noch Panel-Klick
+        k3, t3 = _Max(alt=False, aktiv=Z7 + "USD"), []
+        r3 = ob._cdp_konto_sichern(k3, Z7, {}, t3)
+        # 4) selbst geöffnete Liste, Ziel (Tradeify) 0×, aktives Apex-Konto lesbar → Beleg über die Familie (liste_aktiv);
+        #    4b) Ziel vom SELBEN Apex-User 0× → nie Beleg (steht nur außer Sicht); 5) unlesbar → kein Beleg
+        TD1, TD2, TD3 = "TDFYSL150800892182", "TDFYSL150381887426", "TDFYSL150111222333"
+        k4, t4 = _Max(alt=False, ziele=(Z8, "PAAPEX6416990000009")), []
+        r4 = ob._cdp_konto_sichern(k4, TD1, {}, t4)
+        k4b, t4b = _Max(alt=False, ziele=(Z8, "PAAPEX6416990000009")), []
+        r4b = ob._cdp_konto_sichern(k4b, Z7, {}, t4b)
+        k5, t5 = _Max(alt=False, aktiv="Konto wählen", ziele=(Z8,)), []
+        r5 = ob._cdp_konto_sichern(k5, Z7, {}, t5)
+        # Tradeify↔Tradeify (keine User-ID in der Nummer): abgeschnittene Liste bzw. Liste ohne aktives Konto → kein Beleg; vollständig → Beleg
+        k6, t6 = _Max(alt=False, aktiv=TD1 + "USD", ziele=(TD1, TD3), voll=False), []
+        r6 = ob._cdp_konto_sichern(k6, TD2, {}, t6)
+        k7, t7 = _Max(alt=False, aktiv=TD1 + "USD", ziele=(TD3, "TDFYSL150444555666")), []
+        r7 = ob._cdp_konto_sichern(k7, TD2, {}, t7)
+        k7b, t7b = _Max(alt=False, aktiv=TD1 + "USD", ziele=(TD1, TD3)), []
+        r7b = ob._cdp_konto_sichern(k7b, TD2, {}, t7b)
+        # Konto steht, alte Liste offen → Esc, dann ok; Liste bleibt trotz Esc → ehrlich raus (Reiter lägen darunter)
+        k8, t8 = _Max(alt=False, aktiv=Z7 + "USD", offen=True), []
+        r8 = ob._cdp_konto_sichern(k8, Z7, {}, t8)
+        k9, t9 = _Max(alt=False, aktiv=Z7 + "USD", offen=True, esc_wirkt=False), []
+        r9 = ob._cdp_konto_sichern(k9, Z7, {}, t9)
+        # Eintrag nicht gedrückt → Esc, ehrlich raus, keine weiteren Runden
+        k10, t10 = _Max(alt=False, eintrag_druck=False), []
+        r10 = ob._cdp_konto_sichern(k10, Z7, {}, t10)
+        # Eval-ID gegen aktives PA-Konto gleicher Nummer: steht NICHT (Liste: nur PA-Konten → 0×)
+        k11, t11 = _Max(alt=False, aktiv="PAAPEX6416990000007USD", ziele=(Z7, Z8)), []
+        r11 = ob._cdp_konto_sichern(k11, "APEX6416990000007", {}, t11)
+    finally:
+        ob._warte = alt_w
+    chk(not r1[0] and r1[1] == "konto_nicht_erreicht" and k1.klicks == ["Taste Escape"] and "konto_treffer" not in r1[4]
+        and not ob.cdp_login_noetig(r1[1], r1[4]) and "kein Login" in r1[2] and any("nicht von diesem Lauf" in x for x in t1),
+        f"altes augen.js maximiert: EINMAL Esc, nichts gewählt, KEIN Login-Weg ({k1.klicks}, {r1[2]})")
+    chk(r2[0] and k2.klicks == ["Konto-Umschalter", "Konto " + Z7], f"maximiert: Umschalter oben → Liste → Ziel ({k2.klicks})")
+    chk(r3[0] and k3.klicks == [] and r3[4].get("konto_aktiv") == Z7 + "USD", f"Konto steht → kein Klick ({k3.klicks})")
+    chk(not r4[0] and r4[4].get("konto_treffer") == 0 and r4[4].get("liste_aktiv") == Z8 + "USD" and ob.cdp_login_noetig(r4[1], r4[4])
+        and k4.klicks == ["Konto-Umschalter", "Taste Escape"], f"eigene Liste, Tradeify-Ziel 0×, Apex aktiv → Login-Beleg ({r4[4]})")
+    chk(not r4b[0] and r4b[4].get("konto_treffer") is None and not ob.cdp_login_noetig(r4b[1], r4b[4]) and "selben Apex-Login" in r4b[2],
+        f"Ziel vom selben Apex-User 0× → nie Login ({r4b[2]})")
+    chk(not r7b[0] and r7b[4].get("konto_treffer") == 0 and r7b[4].get("liste_aktiv") == TD1 + "USD",
+        f"Tradeify↔Tradeify mit vollständiger Liste inkl. aktivem Konto → Beleg ({r7b[4]})")
+    chk(not r5[0] and r5[4].get("konto_treffer") is None and not ob.cdp_login_noetig(r5[1], r5[4]) and "nicht lesbar" in r5[2],
+        f"eigene Liste, Ziel 0×, aktiv unlesbar → kein Login ({r5[2]})")
+    chk(not r6[0] and r6[4].get("konto_treffer") is None and not ob.cdp_login_noetig(r6[1], r6[4]) and "nicht vollständig" in r6[2],
+        f"Tradeify: abgeschnittene Liste, Ziel 0× → kein Login-Beleg ({r6[2]})")
+    chk(not r7[0] and r7[4].get("konto_treffer") is None and "steht nicht in der Liste" in r7[2],
+        f"Liste ohne das aktive Konto → kein Login-Beleg ({r7[2]})")
+    chk(r8[0] and k8.klicks == ["Taste Escape"] and not k8.offen, f"Konto steht + alte Liste offen → Esc, dann ok ({k8.klicks})")
+    chk(not r9[0] and r9[1] == "konto_nicht_erreicht" and "geht mit Esc nicht zu" in r9[2] and k9.klicks == ["Taste Escape"],
+        f"Konto steht, Liste bleibt offen → nichts lesen ({r9[2]})")
+    chk(not r10[0] and k10.klicks == ["Konto-Umschalter", "Konto " + Z7, "Taste Escape"] and not k10.offen and "nicht gedrückt" in r10[2],
+        f"Eintrag nicht gedrückt → Esc, ehrlich raus ({k10.klicks})")
+    chk(not r11[0] and k11.klicks[:1] == ["Konto-Umschalter"] and r11[4].get("konto_treffer") is None and "selben Apex-Login" in r11[2],
+        f"Eval-ID steht nicht, nur weil das PA-Konto gleicher Nummer aktiv ist ({k11.klicks}, {r11[2]})")
+    P = ob.cdp_konto_passt
+    chk(P("PAAPEX6416990000007USD", "PAAPEX6416990000007") and not P("PAAPEX6416990000007USD", "APEX6416990000007")
+        and P("APEX6416990000007 USD", "APEX6416990000007") and P("PA-1234567 · Tradeify · $50k", "PA1234567")
+        and P("TDFYSL150800892182 USD", "TDFYSL150800892182") and not P("PAAPEX64169900000071USD", "PAAPEX6416990000007")
+        and not P("PAAPEX6416990000007XYZ", "PAAPEX6416990000007") and not P("PA-12", "12") and not P("x", None),
+        "Konto-Abgleich streng: ganzes Wort, nur Währungs-Anhang (PA ≠ Eval)")
+    chk(ob.cdp_kontonr("PAAPEX6416990000008USD") == "PAAPEX6416990000008" and ob.cdp_kontonr("Konto wählen") == "" and ob.cdp_kontonr(None) == ""
+        and ob.cdp_kontonr("Apex · PAAPEX6416990000009USD") == "PAAPEX6416990000009" and ob.cdp_kontonr("TDFYSL150800892182 USD") == "TDFYSL150800892182",
+        "Kontonummer aus dem Umschalter-Text (auch mit Beiwerk davor)")
+    F = ob.cdp_konto_familie
+    chk(F("PAAPEX6416990000008") == F("APEX6416990000007") == "apex:641699" and F("PAAPEX6708050000002") == "apex:670805"
+        and F("TDFYSL150800892182") == F("FTDFYSLX150740428270") == "tradeify" and F("LFE10084019460001") == "lucid"
+        and F("EXPRESS-V2-682437-17793859") == "" and F("APEX64169900000") == "" and F(None) == "",
+        "Login-Familie aus der Kontonummer (Apex mit User-ID, Tradeify, Lucid)")
+    B = ob.cdp_liste_beleg
+    ko_v = {"liste_voll": True, "eintraege": [{"text": TD1 + "USD"}]}
+    chk(B({}, Z8 + "USD", TD1) == (True, "") and B({}, Z8 + "USD", "PAAPEX6708050000002") == (True, "")
+        and not B(ko_v, Z8 + "USD", Z7)[0] and B(ko_v, TD1 + "USD", TD2) == (True, "") and not B({"liste_voll": False, "eintraege": ko_v["eintraege"]}, TD1, TD2)[0]
+        and not B(ko_v, "-", TD2)[0], "Beleg: andere Firma/anderer Apex-User sicher, gleicher Apex-User nie, sonst nur mit voller Liste")
+    class _EscS:
+        def __init__(self, wirft):
+            self.wirft, self.n = wirft, 0
+
+        def taste(self, k, modifiers=0):
+            self.n += 1
+            if self.wirft:
+                raise RuntimeError("Puls-Chrome kommt nicht in den Vordergrund")
+    e1, e2, te = _EscS(False), _EscS(True), []
+    chk(ob._cdp_esc(e1, {"popups": [{"titel": "Session disconnected"}]}, te, "x") is False and e1.n == 0
+        and ob._cdp_esc(e2, {}, te, "y") is False and ob._cdp_esc(e1, {}, te, "z") is True and e1.n == 1,
+        f"Esc nie über einem Dialog, Windows-Fehler wirft nicht ({te})")
+    # Abmelde-Regel (rein rechnend)
+    A = ob.cdp_abmelden_erlaubt
+    beleg = {"konto_treffer": 0, "liste_aktiv": Z8 + "USD"}
+    chk(A("", beleg) == (False, "unlesbar") and A("-", beleg) == (False, "unlesbar") and A(None, None) == (False, "unlesbar")
+        and A("Konto wählen", beleg) == (False, "unlesbar"), "unlesbarer Login → nie abmelden")
+    chk(A(Z8 + " USD", beleg) == (True, "") and A(Z8 + "USD", {}) == (False, "ohne_beleg")
+        and A(Z8 + "USD", {"konto_treffer": 0}) == (False, "ohne_beleg") and A(Z8 + "USD", {"konto_treffer": None, "liste_aktiv": Z8})
+        == (False, "ohne_beleg") and A("PAAPEX6416990000009USD", beleg) == (False, "anders"),
+        "abmelden nur mit Beleg (eigene Liste, 0×) und gleichem aktivem Konto")
+
+    # Login-Weg mit Attrappen: ctx (Kontextmenü neben „Tradovate") da, Konto unlesbar → login_unlesbar, KEIN _cdp_abmelden
+    class _Ort:
+        def __init__(self, *a, **k):
+            pass
+
+        def blick(self):
+            return {"ctx": {"rect": [166, 8, 22, 22]}, "dialoge": [], "url": "https://www.tradingview.com/chart/x/"}
+    gesehen = {"ab": 0, "lesen": ""}
+    alt = {n: getattr(ob, n) for n in ("_K3Ort", "_cdp_verbunden_lesen", "_cdp_abmelden", "_cdp_tab_mit_link", "_cdp_login_sichern",
+                                        "_cdp_sitzung_zurueck")}
+
+    def _ab(s, opts, trail):
+        gesehen["ab"] += 1
+        return False, "Attrappe: nicht abgemeldet"
+
+    def _tab(sitz, url, trail):
+        raise RuntimeError("Attrappe: kein neuer Tab erwartet")
+    sz = type("Sz", (), {"ws": None})()
+    ob._K3Ort, ob._cdp_abmelden, ob._cdp_tab_mit_link = _Ort, _ab, _tab
+    ob._cdp_verbunden_lesen = lambda s, o, t: gesehen["lesen"]
+    ob._cdp_login_sichern = lambda res, trail: None
+    ob._cdp_sitzung_zurueck = lambda s, o, t: False
+    try:
+        cmd = {"tv_username": "APEX_641699"}
+        tv1 = []
+        v1 = ob._cdp_tradovate_verbinden([sz], cmd, {}, tv1, beleg={"konto_treffer": 0, "liste_aktiv": Z8})
+        gesehen["lesen"] = Z8 + "USD"
+        v2 = ob._cdp_tradovate_verbinden([sz], cmd, {}, [], beleg={})
+        v3 = ob._cdp_tradovate_verbinden([sz], cmd, {}, [], beleg={"konto_treffer": 0, "liste_aktiv": Z8 + "USD"})
+        ab_vor_e2e = gesehen["ab"]
+        # Ende zu Ende wie am 30.09.: kein Umschalter (kein_broker), Tradovate verbunden, Konto unlesbar → ehrlich raus, nichts abgemeldet
+        gesehen["lesen"] = ""
+
+        class _Leer(_Max):
+            def stand(self, opts=None):
+                return {"konto": {"panel": "offen", "schalter": None, "aktiv": "", "liste_offen": False, "eintraege": []}}
+        ob._warte = lambda a_, b_: None
+        res_e, tr_e = {}, []
+        e2e = ob._cdp_konto_mit_login([_Leer(alt=False)], Z7, {}, cmd, tr_e, res_e)
+        # altes augen.js maximiert über den ganzen Login-Weg: kein Login-Versuch
+        res_a, tr_a = {}, []
+        e2a = ob._cdp_konto_mit_login([_Max(alt=True)], Z7, {}, cmd, tr_a, res_a)
+        # kein Umschalter, aber Tradovate zeigt ein lesbares Konto ohne Beleg → zweimal 'steht', nichts abgemeldet, Code 409-fähig
+        gesehen["lesen"] = Z8 + "USD"
+        res_s, tr_s = {}, []
+        e2s = ob._cdp_konto_mit_login([_Leer(alt=False)], Z7, {}, cmd, tr_s, res_s)
+    finally:
+        for n, f in alt.items():
+            setattr(ob, n, f)
+        ob._warte = alt_w
+    chk(v1[0] == "login_unlesbar" and "nichts abgemeldet" in v1[1] and any("NICHT abgemeldet" in x for x in tv1),
+        f"ctx da, Konto unlesbar → login_unlesbar ({v1})")
+    chk(v2 == ("", "", "steht"), f"Konto lesbar ohne Beleg → nicht abmelden, Konto-Schritt neu ({v2})")
+    chk(v3[0] == "abmelden" and ab_vor_e2e == 1, f"nur mit Beleg wird abgemeldet (Attrappe) ({v3}, {ab_vor_e2e})")
+    chk(not e2e[0] and e2e[1] == "konto_nicht_erreicht" and "nicht lesbar" in e2e[2] and gesehen["ab"] == 1
+        and (res_e.get("login") or {}).get("code") == "login_unlesbar", f"kein_broker + unlesbar → ehrlich raus, nichts abgemeldet ({e2e[2]})")
+    chk(not e2a[0] and "login" not in res_a and not any("[Login]" in x for x in tr_a), f"altes augen.js maximiert → kein Login-Versuch ({tr_a})")
+    chk(not e2s[0] and e2s[1] == "konto_nicht_erreicht" and gesehen["ab"] == 1 and (res_s.get("login") or {}).get("durchgaenge") == 2
+        and "nichts abgemeldet" in e2s[2] and "auch nach dem Tradovate-Login" not in e2s[2],
+        f"zweimal 'steht' → Schluss, nichts abgemeldet, konto_nicht_erreicht ({e2s[1]}, {e2s[2]})")
+
+    # augen.js 0.7.4 (nur Quelltext — kein Node auf dem Mac): Umschalter relativ zur Broker-Leiste, Lage, keine Ein-Zeilen-Liste ohne Umschalter
+    import os as _os
+    js = open(_os.path.join(_os.path.dirname(_os.path.abspath(ob.__file__)), "augen.js"), encoding="utf-8").read()
+    chk("function kontoSchalter()" in js and "r.top >= lr.top - 4" in js and "var s = kontoSchalter();" in js
+        and "(eintraege.length === 1 && !!s.el && !eintraege[0].aktiv)" in js and "panel_lage: lage" in js
+        and "VERSION = '0.7.4'" in js, "augen.js 0.7.4: Umschalter unter der Broker-Leiste (beide Lagen), panel_lage, Liste nur mit Umschalter")
+    chk("warnung" in ob.PULS_ERGEBNIS_FELDER and "unklar" in ob.PULS_ERGEBNIS_FELDER, "Ergebnis-Paket trägt warnung + unklar")
+    import inspect as _i
+    chk("trail" in _i.signature(ob._cdp_nach_link).parameters and "_cdp_nach_link(s, opts, trail)" in _i.getsource(ob._cdp_tradovate_verbinden),
+        "_cdp_nach_link bekommt die Spur (NameError seit .828)")
+    chk("liste_voll" in js and "function listeVoll(els, ohne)" in js and "liste_voll: !!(offenListe && voll)" in js
+        and "listeVoll(zeilenEl, schalterEl)" in js and js.index("if (ar.bottom > H + 1") < js.index("ab hier kein Listen-Container mehr"),
+        "augen.js meldet liste_voll (auch der hohe Container wird geprüft)")
+    chk("c === document.body" in js and "if (t > 2) return false;" in js, "listeVoll: Ausreißer außerhalb des Listen-Containers → nicht voll")
+    q_tk = _i.getsource(ob._cdp_ticket_fuellen) if hasattr(ob, "_cdp_ticket_fuellen") else ""
+    chk(not q_tk or ("chart_frei and bw > 200" in q_tk and "s._panel_max_versucht = False" in q_tk and "chart_frei = restored" in q_tk
+                     and "Treffer ≠ Wirkung" in q_tk),
+        "Shift+T: Chart-Klick nur nach gedrücktem Restore, danach wieder maximiert")
+    if ok:
+        print("✓ Regression .865: fremde Liste kein Beleg, Abmelden nur mit Beleg, unlesbar = ehrlich raus, Umschalter auch maximiert")
     return ok
 
 

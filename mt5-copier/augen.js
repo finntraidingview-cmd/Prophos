@@ -23,7 +23,7 @@
  */
 var PROPHOS_AUGEN = (function () {
   'use strict';
-  var VERSION = '0.7.3';   // 0.7.3 (29.09.2026, K3): kurz() gibt geheime Felder (Passwort, Login-Formular) nie mit Wert zurück   // 0.7.2 (29.09.2026): Aufnahme stoppt nach 10 min von selbst   // 0.7.1 (29.09.2026, K2 für T3): kauf_knopf.disabled, tp/sl.einheit/wert/neben, summary_reiter   // 0.7.0 (29.09.2026, Aufnahme 00:52): Kontoliste ohne Rollen, Meldungs-Status, Watchlist, Dialog-Knöpfe   // 0.6.1 (29.09.2026): aufnahme_letzte() als Rettungskopie, T3-Banner 'prophos-aufnahme' ausgeblendet   // 0.6.0 (29.09.2026, Aufnahme 00:36 leer): window-capture, roh-Zähler, tab_id, Sichtbarkeit   // 0.5.3 (29.09.2026, Lesung 00:22:50): Konto-Anker Kontonummer zuerst, Summary Total P/L = today   // 0.5.2 (29.09.2026, Lesung 00:22): Panel 'Collapse panel'/Manager-Knopf, Konto entdoppelt + kontonr   // 0.5.1 (29.09.2026, Lesung 00:17 pc-usq1i6): Schalter-Rechteck, ticket.seite/bereit, Legende, veraltete Zeilen   // 0.5.0 (29.09.2026): Aufnahme-Modus (Finn klickt den Ablauf einmal selbst, jede Aktion wird mitgeschrieben)   // 0.4.0 (29.09.2026, K1–K4 für T3): positionen, orders, konto_summary, symbolsuche, toasts.meldungen   // 0.3.0 (29.09.2026, erste echte Lesung pc-usq1i6): TP/SL-Zustand, Konto-Leiste, Toast-Rückfall   // 0.2.0 (29.09.2026): Vertrag mit T3 — globalThis.prophosAugen, Schlüssel-Whitelist, popups, kauf_knopf
+  var VERSION = '0.7.4';   // 0.7.4 (30.09.2026, Regression .865): Konto-Umschalter relativ zur Broker-Leiste (auch maximiert oben), konto.panel_lage, keine Ein-Zeilen-Liste ohne Umschalter, konto.liste_voll (ganze Liste im Bild)   // 0.7.3 (29.09.2026, K3): kurz() gibt geheime Felder (Passwort, Login-Formular) nie mit Wert zurück   // 0.7.2 (29.09.2026): Aufnahme stoppt nach 10 min von selbst   // 0.7.1 (29.09.2026, K2 für T3): kauf_knopf.disabled, tp/sl.einheit/wert/neben, summary_reiter   // 0.7.0 (29.09.2026, Aufnahme 00:52): Kontoliste ohne Rollen, Meldungs-Status, Watchlist, Dialog-Knöpfe   // 0.6.1 (29.09.2026): aufnahme_letzte() als Rettungskopie, T3-Banner 'prophos-aufnahme' ausgeblendet   // 0.6.0 (29.09.2026, Aufnahme 00:36 leer): window-capture, roh-Zähler, tab_id, Sichtbarkeit   // 0.5.3 (29.09.2026, Lesung 00:22:50): Konto-Anker Kontonummer zuerst, Summary Total P/L = today   // 0.5.2 (29.09.2026, Lesung 00:22): Panel 'Collapse panel'/Manager-Knopf, Konto entdoppelt + kontonr   // 0.5.1 (29.09.2026, Lesung 00:17 pc-usq1i6): Schalter-Rechteck, ticket.seite/bereit, Legende, veraltete Zeilen   // 0.5.0 (29.09.2026): Aufnahme-Modus (Finn klickt den Ablauf einmal selbst, jede Aktion wird mitgeschrieben)   // 0.4.0 (29.09.2026, K1–K4 für T3): positionen, orders, konto_summary, symbolsuche, toasts.meldungen   // 0.3.0 (29.09.2026, erste echte Lesung pc-usq1i6): TP/SL-Zustand, Konto-Leiste, Toast-Rückfall   // 0.2.0 (29.09.2026): Vertrag mit T3 — globalThis.prophosAugen, Schlüssel-Whitelist, popups, kauf_knopf
 
   // ── Grundwerkzeuge ─────────────────────────────────────────────────────────
   function sichtbar(el) {
@@ -319,6 +319,55 @@ var PROPHOS_AUGEN = (function () {
    * ([78,600|632|664|696,228,32]), darin ein span mit der Kontonummer; Gruppen-Köpfe (z. B. „Apex") stehen in derselben Spalte ohne
    * Nummer. Direkt nach dem Öffnen kommt ein focusin auf einen gleich breiten Container weiter oben ([6,30,228,32]) — bei gleicher
    * Nummer gewinnt deshalb die Zeile, die dem Umschalter am nächsten liegt. -> {zeilen:[{text, kontonr, rect, aktiv}], gruppen:[{text, rect}]} */
+  /* LISTE VOLLSTÄNDIG? (Prüfer 30.09.2026 zur Regression .865): „Ziel 0× in der Liste" belegt einen fremden Login nur, wenn die Liste
+   * GANZ zu sehen ist. Bei 358 px unter der Leiste passen ~10 Zeilen, APEX_641699 hat 32 Konten — der Rest liegt unter dem Fensterrand
+   * (sichtbar() wirft ihn raus) oder in einem Scroll-Container. Nein, wenn eine Zeile aus dem Fenster ragt, ein enger Container darum
+   * scrollt oder abgeschnitten ist, oder darin mehr Konto-Zeilen (auch unsichtbare) stehen als gemeldet. -> true | false */
+  function listeVoll(els, ohne) {
+    if (!els || !els.length) return false;
+    var H = window.innerHeight, W = window.innerWidth, oben = Infinity, unten = -Infinity, i;
+    for (i = 0; i < els.length; i++) {
+      var r = els[i].getBoundingClientRect();
+      if (r.top < 0 || r.bottom > H + 1 || r.left < 0 || r.right > W + 1) return false;
+      oben = Math.min(oben, r.top); unten = Math.max(unten, r.bottom);
+    }
+    var c = els[0].parentElement;
+    while (c && !els.every(function (e) { return c.contains(e); })) c = c.parentElement;
+    // Prüfer Runde 3 (30.09.2026): ein gemeldetes Element AUSSERHALB des Listen-Containers (z. B. der Fokus-Container [6,30] mit der
+    // aktiven Nummer) zieht den gemeinsamen Vorfahren bis zum Portal/body hoch — dann prüfte die Schleife den Scroll-Container nie.
+    // Zeilen einer Liste liegen eng beieinander im DOM: gemeinsamer Vorfahr body oder mehr als 3 Ebenen über einer Zeile → nicht voll.
+    if (!c || c === document.body || c === document.documentElement) return false;
+    for (i = 0; i < els.length; i++) {
+      for (var t = 0, p = els[i]; p && p !== c; t++) {
+        p = p.parentElement;
+        if (!p || p === c) break;
+        // auch ZWISCHEN Zeile und Vorfahr: Scroll-Container bzw. hoher Innen-Wrapper einer virtualisierten Liste (Probe E4)
+        var pr = p.getBoundingClientRect(), ps = window.getComputedStyle(p);
+        if (pr.bottom > H + 1 || pr.top < -1) return false;
+        if (/(auto|scroll|hidden)/.test(ps.overflowY + ' ' + ps.overflow) && p.scrollHeight > p.clientHeight + 2) return false;
+      }
+      if (t > 2) return false;                                              // t = Ebenen ZWISCHEN Zeile und Vorfahr (höchstens 3 Schritte)
+    }
+    // Prüfer Runde 2 (30.09.2026): nicht beim ersten HOHEN Vorfahren aufhören, sondern auch ihn prüfen — genau der hohe Listen-Container
+    // (32 Zeilen, 1024 px, Rand zufällig auf einer Zeilengrenze; virtualisierte Liste) trägt die unsichtbaren Zeilen.
+    for (var n = 0, a = c; a && a !== document.body && n < 8; n++, a = a.parentElement) {
+      var ar = a.getBoundingClientRect();
+      if (ar.bottom > H + 1 || ar.top < -1) return false;                  // Container ragt aus dem Fenster → Zeilen darin können fehlen
+      var st = window.getComputedStyle(a);
+      if (/(auto|scroll|hidden)/.test(st.overflowY + ' ' + st.overflow) && a.scrollHeight > a.clientHeight + 2) return false;
+      var nrs = {};
+      alle('div,li,button,a,[tabindex]', a).forEach(function (e) {
+        if (ohne && (e === ohne || ohne.contains(e) || e.contains(ohne))) return;
+        var rr = e.getBoundingClientRect();
+        if (rr.height < 24 || rr.height > 44 || rr.width < 150) return;
+        var m = entdoppeln(txt(e)).match(/[A-Z]{2,}[A-Z0-9_-]*?\d{5,}/);
+        if (m) nrs[m[0]] = 1;
+      });
+      if (Object.keys(nrs).length > els.length) return false;              // mehr Konto-Zeilen im DOM als gemeldet (auch unsichtbare)
+      if (ar.height > (unten - oben) + 160 || ar.width > 600) break;       // ab hier kein Listen-Container mehr (geprüft ist er trotzdem)
+    }
+    return true;
+  }
   function kontoZeilen(schalterEl) {
     var sr = schalterEl ? schalterEl.getBoundingClientRect() : null;
     var kand = [];
@@ -340,6 +389,7 @@ var PROPHOS_AUGEN = (function () {
       var d = sr ? Math.abs(k.r.top - sr.top) : 0;
       if (!jeNr[nr] || d < jeNr[nr].d) jeNr[nr] = { k: k, d: d, nr: nr };
     });
+    var zeilenEl = Object.keys(jeNr).map(function (nr) { return jeNr[nr].k.el; });
     var zeilen = Object.keys(jeNr).map(function (nr) { var k = jeNr[nr].k;
       return { text: k.t, kontonr: nr, rect: rect(k.el), aktiv: attr(k.el, 'aria-selected') === 'true' || attr(k.el, 'aria-checked') === 'true' || null }; })
       .sort(function (a, b) { return a.rect[1] - b.rect[1]; });
@@ -349,24 +399,51 @@ var PROPHOS_AUGEN = (function () {
       alle('div,span').forEach(function (e) {
         if (gruppen.length >= 10 || e.children.length > 2 || !sichtbar(e)) return;
         var r = e.getBoundingClientRect(), t = entdoppeln(txt(e));
-        if (Math.abs(r.left - x0) > 14 || r.top < y0 || r.top > y1 || r.height < 14 || r.height > 40 || !t || t.length > 30 || RX_KONTO.test(t) || /\d{4,}/.test(t)) return;
+        // Kurse ('30,603.00Sell' der Chart-Kauf/Verkauf-Knöpfe unter dem maximierten Panel, Inventar 30.09.2026) sind keine Gruppe
+        if (Math.abs(r.left - x0) > 14 || r.top < y0 || r.top > y1 || r.height < 14 || r.height > 40 || !t || t.length > 30 || RX_KONTO.test(t) || /\d{4,}/.test(t) || /\d[.,]\d/.test(t)) return;
         if (gruppen.some(function (g) { return g.text === t; })) return;
         gruppen.push({ text: t, rect: rect(e) });
       });
     }
-    return { zeilen: zeilen.slice(0, 40), gruppen: gruppen };
+    return { zeilen: zeilen.slice(0, 40), gruppen: gruppen, voll: zeilen.length <= 40 && listeVoll(zeilenEl, schalterEl) };
+  }
+  /* KONTO-UMSCHALTER RELATIV ZUR BROKER-LEISTE (30.09.2026, Regression .865 bei pc-usq1i6, Inventar 03:13 UTC): maximiert steht
+   * #footer-chart-panel OBEN ([56,0,1194,38], Knopf „Restore panel") und der Umschalter direkt darunter ([72,59,199,28] 'PAAPEX…0008USD');
+   * normal unten (Leiste 686, Umschalter 745 bzw. [72,510]). Der alte Filter „untere 70 % des Fensters" verlor ihn maximiert →
+   * aktiv '' → kontoZeilen hielt den Umschalter selbst für eine offene Liste mit 1 Eintrag → der Bot fand das Ziel darin 0× → Login-Weg
+   * meldete eine richtige Tradovate-Sitzung ab. Jetzt: unter der Oberkante der Leiste, im linken Teil; ohne Leiste wie bisher untere
+   * 70 %. Mehrere → der nächste unter der Leiste (Notiz). -> {el, quelle, notiz} wie suche() */
+  function kontoSchalter() {
+    var leiste = document.getElementById('footer-chart-panel');
+    var lr = leiste && sichtbar(leiste) ? leiste.getBoundingClientRect() : null;
+    var kand = alle('button,[role="button"]').filter(sichtbar).filter(function (e) {
+      if (!RX_KONTO.test(txt(e) + ' ' + attr(e, 'aria-label'))) return false;
+      if (e.closest('[data-name="order-panel"],table,[role="listbox"],[role="menu"],[data-name="menu-inner"],[data-name="popup-menu-container"]')) return false;
+      var r = e.getBoundingClientRect();
+      return lr ? (r.top >= lr.top - 4 && r.left <= lr.left + 400) : r.top > window.innerHeight * 0.3;
+    });
+    // innerster Knopf (ein Knopf im Knopf zählt einmal)
+    kand = kand.filter(function (k) { return !kand.some(function (m) { return m !== k && k.contains(m); }); });
+    if (!kand.length) return { el: null, quelle: null, notiz: [] };
+    var notiz = kand.length > 1 ? ['text:Kontonummer: ' + kand.length + ' Treffer, der nächste unter der Broker-Leiste gilt'] : [];
+    if (lr) kand.sort(function (a, b) { return (a.getBoundingClientRect().top - lr.top) - (b.getBoundingClientRect().top - lr.top); });
+    else if (kand.length > 1) return { el: null, quelle: null, notiz: ['text:Kontonummer: ' + kand.length + ' Treffer ohne Broker-Leiste'] };
+    return { el: kand[0], quelle: lr ? 'text:Kontonummer (unter Broker-Leiste)' : 'text:Kontonummer', notiz: notiz };
   }
   function konto(texte) {
     // Lesung 00:22:50: '[data-name*=account] button' traf 'Column setup' in der Account-Manager-Tabelle — jetzt zuerst die KONTONUMMER
     // als Text (unser eigener Anker, z. B. 'PAAPEX6416990000009USD' [72,510]), data-name-Wege nur noch mit Kontonummer im Text
-    var s = suche([{ q: 'text:Kontonummer', sel: 'button,[role="button"]', text: RX_KONTO,
-                     filter: function (e) { return e.getBoundingClientRect().top > window.innerHeight * 0.3 && !e.closest('[data-name="order-panel"]'); } },
-                   { q: 'dn:account-manager-account-select', sel: '[data-name="account-manager-account-select"]' },
-                   { q: 'dn*account button', sel: '[data-name*="account"][role="button"], [data-name*="account"] button', text: RX_KONTO }]);
-    var eintraege = alle('[role="listbox"] [role="option"],[role="menu"] [role="menuitem"],[data-name="menu-inner"] [role="option"],[data-name="popup-menu-container"] [role="menuitem"]')
-      .filter(sichtbar).slice(0, 40).map(function (e) { return kurz(e); });
-    var gruppen = [];
-    if (!eintraege.length) { var kl = kontoZeilen(s.el); eintraege = kl.zeilen; gruppen = kl.gruppen; }
+    var s = kontoSchalter();
+    if (!s.el) {
+      var s2 = suche([{ q: 'dn:account-manager-account-select', sel: '[data-name="account-manager-account-select"]' },
+                      { q: 'dn*account button', sel: '[data-name*="account"][role="button"], [data-name*="account"] button', text: RX_KONTO }]);
+      s = { el: s2.el, quelle: s2.quelle, notiz: s.notiz.concat(s2.notiz) };
+    }
+    var optEl = alle('[role="listbox"] [role="option"],[role="menu"] [role="menuitem"],[data-name="menu-inner"] [role="option"],[data-name="popup-menu-container"] [role="menuitem"]')
+      .filter(sichtbar);
+    var eintraege = optEl.slice(0, 40).map(function (e) { return kurz(e); });
+    var gruppen = [], voll = optEl.length <= 40 && listeVoll(optEl, s.el);
+    if (!eintraege.length) { var kl = kontoZeilen(s.el); eintraege = kl.zeilen; gruppen = kl.gruppen; voll = kl.voll; }
     // External IDs als Text suchen (Reader-Lehre 21.09.2026: eine 17-stellige Kontonummer kann TradingView nicht umbenennen)
     var treffer = [];
     var nadeln = (texte || []).map(function (x) { return String(x || '').replace(/[^a-z0-9]/gi, '').toUpperCase(); })
@@ -405,11 +482,16 @@ var PROPHOS_AUGEN = (function () {
       e.aktiv = e['aria-selected'] === 'true' || e['aria-checked'] === 'true' || (!!n1 && !!n2 && (n1.indexOf(n2) >= 0 || n2.indexOf(n1) >= 0));
     });
     if (schalter) schalter.text = entdoppeln(schalter.text);
-    // offen = mindestens zwei Zeilen oder eine, die nicht das aktive Konto ist (nur die aktive Nummer irgendwo reicht nicht)
-    var offenListe = eintraege.length >= 2 || (eintraege.length === 1 && !eintraege[0].aktiv);
+    // offen = mindestens zwei Zeilen oder eine, die nicht das aktive Konto ist (nur die aktive Nummer irgendwo reicht nicht).
+    // Eine einzelne Zeile OHNE gefundenen Umschalter ist fast sicher der Umschalter selbst (Regression 30.09.2026) → nicht offen.
+    var offenListe = eintraege.length >= 2 || (eintraege.length === 1 && !!s.el && !eintraege[0].aktiv);
+    // Panel-Lage aus dem Maximieren-Knopf (Inventar 30.09.2026: maximiert heißt er 'Restore panel', sonst 'Maximize panel')
+    var mx = document.querySelector('#footer-chart-panel [data-name="toggle-maximize-button"], [data-name="toggle-maximize-button"]');
+    var mxA = mx ? (attr(mx, 'aria-label') || attr(mx, 'title')) : '';
+    var lage = !mx ? null : /restore|wiederherst/i.test(mxA) ? 'maximiert' : /maxim/i.test(mxA) ? 'normal' : null;
     return { schalter: schalter, aktiv: aktivText, kontonr: kontonrM ? kontonrM[0] : null, gruppen: gruppen, liste_offen: offenListe, eintraege: eintraege, treffer: treffer, notiz: s.notiz,
              broker: mgr.el ? txt(mgr.el).slice(0, 30) : (leiste ? txt(leiste).slice(0, 30) : ''), manager_knopf: mgr.el ? kurz(mgr.el) : null,
-             panel: panel, panel_knopf: tog && sichtbar(tog) ? kurz(tog) : null,
+             panel: panel, panel_knopf: tog && sichtbar(tog) ? kurz(tog) : null, panel_lage: lage, liste_voll: !!(offenListe && voll),
              hinweis: (!s.el && !treffer.length && panel === 'zu') ? 'Broker-Panel zu — Kontonummer nicht sichtbar (panel_knopf öffnet es)' : null };
   }
 

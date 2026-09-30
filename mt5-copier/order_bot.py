@@ -14702,10 +14702,73 @@ class _AugenSitzung:
             pass
 
 
+def cdp_konto_passt(text, ext_id):
+    """REIN RECHNEND (testbar): Trägt dieser Konto-Text (Umschalter/Listenzeile im Puls-Chrome) GENAU diese External ID?
+    Ganzes Wort, nur ein Währungs-Anhang darf direkt folgen: augen.js liest den Umschalter als 'PAAPEX6416990000007USD' (zwei spans ohne
+    Leerraum), tv_konto_wort_passt fände das nie. Kein Teilstring (Prüfer 30.09.2026 zur Regression .865, wie tv_konto_wort_passt am
+    21.09.): 'APEX6416990000007' (Eval) steckt in 'PAAPEX6416990000007USD' (PA) — im Login APEX_641699 stehen 8 solche Paare.
+    DB-Stand 30.09.: alle Tradovate-IDs (Apex/Tradeify/Lucid) sind volle Kontonamen. 3-Zeichen-Riegel wie tv_konto_passt."""
+    e = _nur_alnum(ext_id)
+    if len(e) < 3:
+        return False
+    for w in re.split(r"[\s·|,;:()\[\]/$]+", str(text or "")):
+        n = _nur_alnum(w)
+        if n == e or (n.startswith(e) and n[len(e):] in ("usd", "eur", "gbp", "chf", "aud", "cad", "jpy")):
+            return True
+    return False
+
+
+def cdp_kontonr(text):
+    """REIN RECHNEND (testbar): Kontonummer aus einem Umschalter-/Listen-Text ('PAAPEX6416990000008USD' → 'PAAPEX6416990000008') | ''
+    Je Wort (Beiwerk davor wie 'Apex · PAAPEX…' klebt sonst an der Nummer, Prüfer Runde 2)."""
+    for w in re.split(r"[^A-Za-z0-9_-]+", str(text or "")):
+        m = K3_RX_KONTONR.match(w.upper())
+        if m:
+            return m.group(0)
+    return ""
+
+
+def cdp_konto_familie(nr):
+    """REIN RECHNEND (testbar): Zu welchem Tradovate-Login gehört eine Kontonummer? DB-Stand 30.09.2026: Apex immer (PA)APEX + 6-stellige
+    User-ID + 7-stelliger Zähler (58/58, 7 User; Username APEX_<User-ID>), Tradeify immer (F)TDFY…, Lucid LFE…/TOF…. -> 'apex:<id>' |
+    'tradeify' | 'lucid' | '' (unbekannt). Tradeify/Lucid tragen keine User-ID in der Nummer."""
+    u = _nur_alnum(nr).upper()
+    m = re.match(r"^(?:PA)?APEX(\d{6})\d{7}$", u)
+    if m:
+        return "apex:" + m.group(1)
+    if re.match(r"^F?TDFY", u):
+        return "tradeify"
+    if re.match(r"^(LFE|TOF)", u):
+        return "lucid"
+    return ""
+
+
 def cdp_konto_eintrag(eintraege, ext):
-    """REIN RECHNEND (testbar): GENAU EIN Dropdown-Eintrag mit dieser External ID. -> (eintrag|None, anzahl)"""
-    treffer = [e for e in (eintraege or []) if isinstance(e, dict) and tv_konto_passt(str(e.get("text") or ""), ext)]
+    """REIN RECHNEND (testbar): GENAU EIN Dropdown-Eintrag mit dieser External ID (cdp_konto_passt). -> (eintrag|None, anzahl)"""
+    treffer = [e for e in (eintraege or []) if isinstance(e, dict) and cdp_konto_passt(str(e.get("text") or ""), ext)]
     return (treffer[0] if len(treffer) == 1 else None), len(treffer)
+
+
+def cdp_liste_beleg(ko, aktiv, ext=""):
+    """REIN RECHNEND (testbar): Belegt eine SELBST geöffnete Liste ohne Ziel einen fremden Tradovate-Login? -> (ja, grund)
+    Prüfer 30.09.2026 (Regression .865): eine abgeschnittene Liste (maximiert ≈ 21 Zeilen, APEX_641699 hat 32 Konten) zeigte das Ziel
+    0× — „Log out" einer richtigen Sitzung. Deshalb zuerst die Nummern selbst (cdp_konto_familie): andere Firma bzw. anderer Apex-User
+    = sicher ein anderer Login (so bleibt der live grüne Wechsel Apex↔Tradeify auch bei 94 Konten möglich); derselbe Apex-User = nie
+    (das Ziel steht nur außer Sicht). Sonst (Tradeify↔Tradeify, unbekannt) nur mit vollständiger Liste (augen.js liste_voll ≥ 0.7.4)
+    UND dem aktiven Konto selbst als Zeile darin."""
+    nr = cdp_kontonr(aktiv)
+    if not nr:
+        return False, f"aktives Konto nicht lesbar ('{str(aktiv or '')[:40] or '-'}')"
+    fa, fz = cdp_konto_familie(nr), cdp_konto_familie(ext)
+    if fa and fz and fa != fz:
+        return True, ""
+    if fa and fa == fz and fa.startswith("apex:"):
+        return False, f"Ziel und aktives Konto gehören zum selben Apex-Login (User {fa[5:]}) — das Ziel steht nur nicht sichtbar in der Liste"
+    if (ko or {}).get("liste_voll") is not True:
+        return False, "Liste nicht vollständig im Bild (abgeschnitten/scrollbar oder augen.js < 0.7.4)"
+    if not any(isinstance(x, dict) and cdp_konto_passt(str(x.get("text") or ""), nr) for x in (ko or {}).get("eintraege") or []):
+        return False, f"aktives Konto {nr} steht nicht in der Liste"
+    return True, ""
 
 
 def cdp_rect(x):
@@ -14820,21 +14883,52 @@ def _cdp_panel_aufklappen(s, trail):
     return "bleibt_eingeklappt", d2
 
 
+def _cdp_esc(s, st, trail, grund):
+    """Esc im Konto-Schritt — nur ohne offenen Dialog (Prüfer Runde 2, 30.09.2026: ein „Session disconnected"-Modal würde sonst
+    geschlossen, bevor _cdp_sitzung_zurueck es sieht) und ohne Ausnahme (Windows: Puls-Chrome nicht vorn → RuntimeError aus _win_key,
+    die ehrliche Rückgabe käme nie an). -> True, wenn gedrückt"""
+    if isinstance(st, dict) and st.get("popups"):
+        trail.append(f"{grund}: Dialog offen — kein Esc")
+        return False
+    try:
+        s.taste("Escape")
+    except Exception as e_:
+        trail.append(f"{grund}: Esc nicht möglich ({type(e_).__name__})")
+        return False
+    trail.append(f"{grund} → Esc")
+    return True
+
+
 def _cdp_konto_sichern(s, ext, opts, trail):
     """Konto im Puls-Chrome sicherstellen (Panel auf → Umschalter höchstens EINMAL → genau ein Eintrag), je Schritt neu gelesen.
     -> (ok, code, msg, stand, extra). Steht das Konto nicht im Dropdown (anderer Tradovate-Login), Esc — die Liste bleibt nie offen
     (K1-Test 2, 00:59 UTC: Liste blieb offen, der nächste Lauf klickte direkt einen Eintrag).
     Seit 30.09.2026: eingeklapptes Order-Panel (s. CDP_PANEL_MIN_H) wird vor dem Umschalter bzw. nach „Dropdown nicht erkannt" EINMAL
     aufgeklappt und der Konto-Schritt EINMAL wiederholt; ohne Aufklapp-Symbol bzw. ohne Wirkung → 'kein_broker' (Login-Weg im
-    Aufrufer _cdp_konto_mit_login). Gilt für jeden CDP-Lauf mit Konto-Schritt (Lesen, Order, Schließen)."""
+    Aufrufer _cdp_konto_mit_login). Gilt für jeden CDP-Lauf mit Konto-Schritt (Lesen, Order, Schließen).
+    Seit der Regression .865 (30.09.2026): eine Liste zählt nur, wenn DIESER Lauf den Umschalter geklickt hat; 0 Treffer sind nur mit
+    cdp_liste_beleg ein Login-Beleg (extra liste_aktiv, sonst konto_treffer None); Konto-Abgleich streng (cdp_konto_passt)."""
     st = s.stand(opts)
     geklickt_umschalter = False
     wiederholt = False
+    fremd_esc = False
+
+    def _eintr(ko_):
+        return [str(x.get("text"))[:40] for x in (ko_.get("eintraege") or []) if isinstance(x, dict)][:20]
     for _runde in range(6):
         ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
         aktiv = str(ko.get("aktiv") or "")
-        if aktiv and tv_konto_passt(aktiv, ext):
+        if aktiv and cdp_konto_passt(aktiv, ext):
             trail.append(f"Konto steht: '{aktiv[:40]}'")
+            # Prüfer 30.09.2026: eine offene Liste (z. B. aus einem früheren Lauf) liegt maximiert direkt über den Reitern Positions/
+            # Account summary — der Reiter-Klick drückte sonst eine Kontozeile. Erst zu, dann weiter.
+            if ko.get("liste_offen"):
+                _cdp_esc(s, st, trail, "Konto-Liste stand offen")
+                _warte(0.6, 0.3)
+                st = s.stand(opts)
+                if (st.get("konto") or {}).get("liste_offen"):
+                    return False, "konto_nicht_erreicht", (f"Konto {ext} steht, aber die Konto-Liste geht mit Esc nicht zu — nichts "
+                                                           "gelesen/geklickt (die Reiter lägen darunter)."), st, {"konto_eintraege": _eintr(ko)}
             # Konto passt, Panel aber eingeklappt: Lesen/Schließen sähen die Positionen nicht — einmal aufklappen, nie deshalb scheitern
             if not getattr(s, "_panel_max_versucht", False) and _cdp_panel_aufklappen(s, trail)[0] == "aufgeklappt":
                 st = s.stand(opts)
@@ -14846,15 +14940,43 @@ def _cdp_konto_sichern(s, ext, opts, trail):
             _warte(1.0, 0.5)
             st = s.stand(opts)
             continue
+        if ko.get("liste_offen") and not geklickt_umschalter:
+            # REGRESSION .865 (30.09.2026, pc-usq1i6, Orbit-Endlesung Plan beb06b7f): nach „Maximize panel" stand der Umschalter oben,
+            # augen.js ≤ 0.7.3 fand ihn nicht (aktiv '') und hielt ihn selbst für eine offene Liste mit 1 Zeile ('…0008'); das Ziel
+            # '…0007' stand darin 0× → Login-Weg → „Log out" einer richtigen Sitzung. Eine Liste, die dieser Lauf NICHT selbst geöffnet
+            # hat, ist deshalb nie ein Beleg: nichts daraus wählen, keinen Login daraus ableiten — EINMAL Esc und neu lesen.
+            eintr = _eintr(ko)
+            if fremd_esc:
+                return False, "konto_nicht_erreicht", (f"Konto-Liste steht ohne eigenen Klick offen und bleibt es nach Esc "
+                                                       f"(aktiv '{aktiv[:40] or '-'}', Zeilen {eintr[:4]}) — nichts gewählt, kein Login."), st, \
+                    {"konto_eintraege": eintr, "konto_stand": ko}
+            fremd_esc = True
+            _cdp_esc(s, st, trail, f"Konto-Liste stand schon offen, nicht von diesem Lauf ({len(eintr)} Zeilen, aktiv '{aktiv[:40] or '-'}'), neu lesen")
+            _warte(0.6, 0.3)
+            st = s.stand(opts)
+            continue
         if ko.get("liste_offen"):
             e, n = cdp_konto_eintrag(ko.get("eintraege"), ext)
             if not e:
-                s.taste("Escape")
-                trail.append("Konto-Liste mit Esc geschlossen")
+                _cdp_esc(s, st, trail, "Konto-Liste schließen")
+                ex = {"konto_eintraege": _eintr(ko), "konto_treffer": n}
+                grund = ""
+                if n == 0:
+                    # Beleg für „anderer Tradovate-Login" nur mit lesbarem aktivem Konto, vollständiger Liste und dem aktiven Konto
+                    # darin — der Login-Weg vergleicht liste_aktiv vor dem Abmelden noch einmal (cdp_abmelden_erlaubt)
+                    ja, grund = cdp_liste_beleg(ko, aktiv, ext)
+                    if ja:
+                        ex["liste_aktiv"] = aktiv[:80]
+                    else:
+                        ex["konto_treffer"] = None
                 return False, "konto_nicht_erreicht", (f"Konto {ext} steht im Dropdown {n}x (nicht genau einmal) — nichts geklickt"
-                                                        + (" (anderer Tradovate-Login?)" if n == 0 else "") + "."), st, \
-                    {"konto_eintraege": [str(x.get("text"))[:40] for x in (ko.get("eintraege") or [])][:20], "konto_treffer": n}
-            s.klick(cdp_rect(e), f"Konto {ext}")
+                                                        + ((" (anderer Tradovate-Login?)" if ex.get("liste_aktiv") else
+                                                            f" — kein Login-Beleg: {grund}") if n == 0 else "") + "."), st, ex
+            if not s.klick(cdp_rect(e), f"Konto {ext}"):
+                # Prüfer 30.09.2026: ein nicht gedrückter Eintrag verbrauchte alle Runden und ließ die Liste offen
+                _cdp_esc(s, st, trail, "Konto-Eintrag nicht gedrückt")
+                return False, "konto_nicht_erreicht", f"Konto-Eintrag {ext} nicht gedrückt (Klick ohne Beweis) — Liste mit Esc zu, nichts gewechselt.", \
+                    st, {"konto_eintraege": _eintr(ko)}
             _warte(1.2, 0.6)
             st = s.stand(opts)
             continue
@@ -14865,10 +14987,13 @@ def _cdp_konto_sichern(s, ext, opts, trail):
         if lage == "aufgeklappt":
             if geklickt_umschalter:
                 wiederholt, geklickt_umschalter = True, False
+                _cdp_esc(s, st, trail, "Liste vom ersten Umschalter-Klick")   # evtl. halb offen — zu, bevor neu geklickt wird
                 trail.append("Konto-Schritt nach dem Aufklappen einmal wiederholt")
             st = s.stand(opts)
             continue
         if lage in ("ohne_knopf", "bleibt_eingeklappt"):
+            if geklickt_umschalter:
+                _cdp_esc(s, st, trail, "Umschalter geklickt, Panel bleibt eingeklappt")
             return False, "kein_broker", (f"Order-Panel eingeklappt ({(pd or {}).get('unter_leiste')} px) und "
                                           + ("kein Aufklapp-Symbol „Maximize panel“" if lage == "ohne_knopf" else "nicht aufklappbar")
                                           + f" (aktiv '{aktiv[:40] or '-'}') → wie kein Broker: Login-Weg"), st, {"panel_lage": pd}
@@ -14878,9 +15003,11 @@ def _cdp_konto_sichern(s, ext, opts, trail):
         # Umschalter höchstens EINMAL (erster Live-Lauf 00:44 UTC: 4 Klicks hintereinander — ein zweiter Klick schließt ein
         # offenes Dropdown wieder). Danach zweimal lesen; bleibt es zu, ehrlich raus MIT dem Stand für T1.
         if geklickt_umschalter:
+            _cdp_esc(s, st, trail, "Dropdown nicht erkannt")   # was auch immer aufging: nicht offen stehen lassen (Prüfer 30.09.2026)
             return False, "konto_nicht_erreicht", (f"Konto-Umschalter geklickt, Dropdown nicht erkannt (aktiv '{aktiv[:40] or '-'}') — "
-                                                   "augen.js sieht die Liste nicht (Selektoren?) oder der Klick trifft nicht"
-                                                   + (f"; Order-Panel {lage} ({(pd or {}).get('unter_leiste')} px)" if lage else "") + "."), st, \
+                                                   "augen.js sieht die Liste nicht (Selektoren?), der Klick trifft nicht, oder der Login hat "
+                                                   "nur dieses eine Konto" + (f"; Order-Panel {lage} ({(pd or {}).get('unter_leiste')} px)" if lage else "")
+                                                   + " — Esc, nichts gewählt."), st, \
                 {"konto_stand": ko, "popups": st.get("popups"), "panel_lage": pd}
         geklickt_umschalter = True
         s.klick(cdp_rect(ko.get("schalter")), "Konto-Umschalter")
@@ -14890,6 +15017,8 @@ def _cdp_konto_sichern(s, ext, opts, trail):
             _warte(1.0, 0.4)
             st = s.stand(opts)
     ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+    if ko.get("liste_offen"):
+        _cdp_esc(s, st, trail, "Konto-Liste nach der letzten Runde")
     return False, "konto_nicht_erreicht", f"Konto {ext} nicht aktiv (steht: '{str(ko.get('aktiv') or '-')[:40]}')", st, {}
 
 
@@ -15053,7 +15182,30 @@ def _cdp_ticket_fuellen(s, st, plan, symbol, opts, trail):
                 s.werbung_weg()
             g = s.lese_js(WIN_GEO_JS) or {}
             bw, bh = float(g.get("innerWidth") or 0), float(g.get("innerHeight") or 0)
-            if bw > 200 and bh > 200:
+            # Prüfer 30.09.2026: seit .865 kann das Broker-Panel maximiert stehen (Konto-Schritt) — dann läge bei 35 %/35 % die
+            # Positions-Tabelle statt des Charts. Erst „Restore panel" (TradingView-Layout, kein Broker-Knopf), dann der Chart-Klick.
+            # Runde 2: ohne gedrücktes Restore KEIN Chart-Klick (sonst Tabelle); danach wieder maximieren (unten), sonst fehlt der
+            # Positions-Beweis für den Rest des Laufs (K3/tvkette)
+            pl = s.lese_js(CDP_PANEL_LAGE_JS) if hasattr(s, "lese_js") else None
+            mk = (pl or {}).get("max_knopf") if isinstance(pl, dict) and isinstance(pl.get("max_knopf"), dict) else None
+            chart_frei, restored = True, False
+            if mk and cdp_rect(mk) and re.search(r"restore|wiederherst", str(mk.get("aria") or ""), re.I):
+                gedrueckt = bool(s.klick(cdp_rect(mk), "Broker-Panel wiederherstellen (Restore panel) — Chart für Shift+T frei"))
+                restored = False
+                for _ in range(5 if gedrueckt else 0):     # Treffer ≠ Wirkung (Regel .835, Prüfer Runde 3): Knopf heißt wieder „Maximize"?
+                    _warte(0.6, 0.3)
+                    pl2 = s.lese_js(CDP_PANEL_LAGE_JS) or {}
+                    mk2 = pl2.get("max_knopf") if isinstance(pl2, dict) and isinstance(pl2.get("max_knopf"), dict) else {}
+                    if re.search(r"maxim", str(mk2.get("aria") or ""), re.I) and not re.search(r"restore|wiederherst", str(mk2.get("aria") or ""), re.I):
+                        restored = True
+                        break
+                chart_frei = restored
+                if restored:
+                    g = s.lese_js(WIN_GEO_JS) or {}
+                    bw, bh = float(g.get("innerWidth") or 0), float(g.get("innerHeight") or 0)
+                else:
+                    trail.append("„Restore panel“ " + ("ohne Wirkung" if gedrueckt else "nicht gedrückt") + " — kein Chart-Klick, nur Shift+T")
+            if chart_frei and bw > 200 and bh > 200:
                 # mittig-links im oberen Chart-Drittel: weit weg von BUY/SELL oben links und vom Broker-Panel unten
                 s.klick([bw * 0.35 - 10, bh * 0.35 - 10, 20.0, 20.0], "Chart (Fokus für Shift+T)")
                 _warte(0.25, 0.15)
@@ -15064,6 +15216,10 @@ def _cdp_ticket_fuellen(s, st, plan, symbol, opts, trail):
                 st = s.stand(opts)
                 if ticket().get("da") or knopf():
                     break
+            if restored:
+                s._panel_max_versucht = False              # Positions-Tabelle wieder groß (Beweis nach dem Senden)
+                if _cdp_panel_aufklappen(s, trail)[0] == "aufgeklappt":
+                    st = s.stand(opts)
             if not ticket().get("da") and not knopf():
                 return (False, "asset", "Order-Ticket rechts ist zu und ging auch mit Shift+T nicht auf — in TradingView oben "
                         "rechts auf „Trade“ klicken, sodass Market/Limit/Stop und Units zu sehen sind.", "asset", st, None)
@@ -15570,10 +15726,15 @@ def cdp_order_beweis(neu, zeilen, plan, menge_vorher):
 # gesendet:true daraus. plan_id reist über die Brücke ('@plan_id=…'); ohne plan_id wird trotzdem gesendet (Zuordnung über Konto/Zeit).
 # Fehler (Route fehlt, Netz) bleiben still — die lokale Kopie bleibt.
 # ═══════════════════════════════════════════════════════════════════════════
-PULS_ERGEBNIS_FELDER = ("ok", "code", "schritt", "msg", "gesendet", "bestaetigt", "geklickt", "retry_ok", "einstieg", "einstieg_quelle",
-                        "tp_limit", "tp_limit_quelle", "sl_limit", "sl_limit_quelle", "order_klick_ms", "balance_start", "equity_start",
-                        "today_pnl_start", "today_pnl", "balance_end", "equity_end", "tv_symbol", "menge", "konto_aktiv", "pruefung",
-                        "meldung_roh", "positionen_danach", "close_fill", "storniert", "symbol", "richtung")
+# KANONISCH (30.09.2026): 1:1 dieselbe Liste wie app.py PULS_ERGEBNIS_FELDER (Topstep-Paket B, Terminal 1) — warnung + unklar
+# (Master 30.09.2026): sonst fehlen UNKLAR-Marke und Warn-Chip beim Nachholen aus puls_ergebnisse
+PULS_ERGEBNIS_FELDER = ("ok", "code", "schritt", "msg", "gesendet", "bestaetigt", "bestaetigung", "geklickt", "retry_ok",
+                        "einstieg", "einstieg_quelle", "tp_limit", "tp_limit_quelle", "sl_limit", "sl_limit_quelle", "order_klick_ms",
+                        "klick_at", "balance_start", "equity_start", "today_pnl_start", "today_pnl", "balance_end", "equity_end",
+                        "tv_symbol", "menge", "konto_aktiv", "pruefung", "meldung_roh", "positionen_danach", "close_fill", "storniert",
+                        "symbol", "richtung", "konto", "trail_ende", "quelle",
+                        "mll", "rpl", "tp_level", "sl_level", "positionen", "plattform",
+                        "warnung", "unklar")
 
 
 def puls_ergebnis_paket(art, stufe, cmd, res, trail=None, jetzt_ms=None):
@@ -15708,7 +15869,7 @@ def modus_tvkette_cdp(cmd):
             ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
         if st.get("popups"):
             return raus("popup", f"Dialog/Popup offen ({[p.get('titel') or p.get('text') for p in st['popups']][:2]}) — nichts gesendet.", "knopf")
-        if not tv_konto_passt(str(ko.get("aktiv") or ""), ext):
+        if not cdp_konto_passt(str(ko.get("aktiv") or ""), ext):
             return raus("konto", f"Konto vor dem Klick nicht mehr {ext} ('{ko.get('aktiv')}') — nichts gesendet.", "knopf")
         menge0 = cdp_zeilen_menge(k3_zeilen(st.get("positionen"), root), plan["richtung"])
         vorher_m = [k3_meldung_schluessel(m) for m in ((st.get("toasts") or {}).get("meldungen") or []) if isinstance(m, dict)]
@@ -16730,7 +16891,7 @@ def modus_k3(cmd):
         if not ok:
             return raus(code, msg + " — nichts gesendet.", "1-konto")
         ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
-        if not tv_konto_passt(str(ko.get("aktiv") or ""), ext):
+        if not cdp_konto_passt(str(ko.get("aktiv") or ""), ext):
             return raus("konto", f"Aktiv ist '{ko.get('aktiv')}', nicht {ext} — nichts gesendet.", "1-konto")
         res["konto"] = str(ko.get("aktiv"))[:40]
         trail.append(f"[1] OK Konto aktiv: '{res['konto']}' (Broker {ko.get('broker') or '?'}, Panel {ko.get('panel') or '?'})")
@@ -16770,7 +16931,7 @@ def modus_k3(cmd):
             return raus("knopf", f"Senden-Knopf gesperrt oder ohne Rechteck ('{kk.get('text')}') — nichts gesendet.", "4-knopf")
         if st.get("popups"):
             return raus("popup", f"Dialog/Popup offen ({[p.get('titel') or p.get('text') for p in st['popups']][:2]}) — nichts gesendet.", "4-knopf")
-        if not tv_konto_passt(str(ko.get("aktiv") or ""), ext):
+        if not cdp_konto_passt(str(ko.get("aktiv") or ""), ext):
             return raus("konto", f"Konto vor dem Klick nicht mehr {ext} ('{ko.get('aktiv')}') — nichts gesendet.", "4-knopf")
         vorher_m = [k3_meldung_schluessel(m) for m in ((st.get("toasts") or {}).get("meldungen") or []) if isinstance(m, dict)]
         trail.append(f"[4] Knopf-Text EXAKT '{soll}', nicht gesperrt, Konto {ext}, kein Popup — EIN Klick")
@@ -16971,6 +17132,23 @@ def cdp_login_noetig(code, extra):
     if code == "kein_broker":
         return True
     return code == "konto_nicht_erreicht" and isinstance(extra, dict) and extra.get("konto_treffer") == 0
+
+
+def cdp_abmelden_erlaubt(aktiv, beleg):
+    """REIN RECHNEND (testbar): Darf der Login-Weg die laufende Tradovate-Sitzung abmelden? -> (ja, grund)
+    Regression .865 (30.09.2026, pc-usq1i6, Plan beb06b7f): der Login-Weg las den aktuellen Login als '-' und klickte „Log out" —
+    eine richtige Sitzung war weg. Seitdem NUR mit Beleg: der Konto-Schritt hat die Liste selbst geöffnet, das Ziel stand darin 0×
+    (beleg konto_treffer 0 + liste_aktiv), und das aktive Konto ist jetzt lesbar und dasselbe wie beim Beleg.
+    grund: 'unlesbar' (nie abmelden, ehrlich abbrechen) | 'ohne_beleg' / 'anders' (nicht abmelden, Konto-Schritt neu) | ''"""
+    a = _nur_alnum(aktiv).upper()
+    if not a or not K3_RX_KONTONR.search(a):
+        return False, "unlesbar"
+    b = beleg if isinstance(beleg, dict) else {}
+    if b.get("konto_treffer") != 0 or not b.get("liste_aktiv"):
+        return False, "ohne_beleg"
+    if _nur_alnum(b.get("liste_aktiv")).upper() != a:
+        return False, "anders"
+    return True, ""
 
 
 def cdp_konto_verbunden(stand):
@@ -17300,7 +17478,7 @@ def _cdp_abmelden(s, opts, trail):
     return False, "Nach 'Log out' zeigt TradingView weiter ein Konto (14 s) — nicht abgemeldet."
 
 
-def _cdp_nach_link(s, opts, warten_s=40.0):
+def _cdp_nach_link(s, opts, trail, warten_s=40.0):
     """Nach dem Öffnen mit ?trade-now: Was zeigt TradingView? -> ('dialog', blick) | ('verbunden', kontotext) | ('nichts', blick)"""
     ort = _K3Ort("TradingView-Seite", s.ws, s, "")
     ende = time.time() + warten_s
@@ -17643,10 +17821,12 @@ def _cdp_anmelden(s, ort, benutzer, opts, trail, vorher=None):
     return "verbunden", "Nach dem Login zeigt TradingView kein Konto (40 s) — Puls-Chrome ansehen."
 
 
-def _cdp_tradovate_verbinden(sitz, cmd, opts, trail):
+def _cdp_tradovate_verbinden(sitz, cmd, opts, trail, beleg=None):
     """Schritte [2]–[5]: einmal Tradovate mit dem Login der Firma verbinden. sitz = [Sitzung], wird beim Tab-Tausch ersetzt.
     -> (code, text, wie) — code '' = TradingView zeigt danach ein Tradovate-Konto (welches, klärt der Aufrufer über das Dropdown);
-    wie 'login' = selbst angemeldet, 'selbst' = eine gemerkte Sitzung hat sich von allein verbunden."""
+    wie 'login' = selbst angemeldet, 'selbst' = eine gemerkte Sitzung hat sich von allein verbunden, 'steht' = ein Konto ist zu
+    sehen, aber ohne Beleg für einen fremden Login (nichts abgemeldet, der Aufrufer macht den Konto-Schritt neu).
+    beleg = extra des letzten Konto-Schritts (cdp_abmelden_erlaubt). code 'login_unlesbar' = verbunden, Konto nicht lesbar."""
     benutzer = str(cmd.get("tv_username") or "").strip()
     s = sitz[0]
     bl = _K3Ort("TradingView-Seite", s.ws, s, benutzer).blick()
@@ -17655,13 +17835,23 @@ def _cdp_tradovate_verbinden(sitz, cmd, opts, trail):
     else:
         aktiv = _cdp_verbunden_lesen(s, opts, trail)
         if aktiv or cdp_rect(bl.get("ctx")):
-            trail.append(f"[Login] Tradovate verbunden mit anderem Login ('{aktiv[:40] or '-'}') → abmelden")
+            ja, grund = cdp_abmelden_erlaubt(aktiv, beleg)
+            if grund == "unlesbar":
+                trail.append(f"[Login] Tradovate ist verbunden, das aktive Konto aber nicht lesbar ('{aktiv[:40] or '-'}') — NICHT abgemeldet")
+                return "login_unlesbar", ("Tradovate ist im Puls-Chrome verbunden, aber welches Konto aktiv ist, war nicht lesbar "
+                                          "(kein Konto-Umschalter im Broker-Panel erkannt) — nichts abgemeldet, kein Login. "
+                                          "Puls-Chrome ansehen (Broker-Panel)."), ""
+            if not ja:
+                trail.append(f"[Login] Tradovate zeigt '{aktiv[:40]}' — kein Beleg für einen fremden Login ({grund}) → nicht "
+                             "abmelden, Konto-Schritt neu")
+                return "", "", "steht"
+            trail.append(f"[Login] Tradovate verbunden mit anderem Login ('{aktiv[:40]}', Ziel 0× in der selbst geöffneten Liste) → abmelden")
             ok, f = _cdp_abmelden(s, opts, trail)
             if not ok:
                 return "abmelden", f, ""
         _cdp_tab_mit_link(sitz, tv_trade_now_url(bl.get("url") or cmd.get("tv_url")), trail)
         s = sitz[0]
-        art, x = _cdp_nach_link(s, opts)
+        art, x = _cdp_nach_link(s, opts, trail)       # trail fehlte seit .828 (NameError → nach Log-out abgebrochen, Prüfer 30.09.2026)
         if art == "verbunden":
             trail.append(f"[Login] TradingView hat sich von selbst verbunden ('{str(x)[:40]}') — gemerkte Sitzung")
             return "", "", "selbst"
@@ -17762,27 +17952,48 @@ def _cdp_konto_mit_login(sitz, ext, opts, cmd, trail, res):
         return ok, code, msg, st, extra
     benutzer = str(cmd.get("tv_username") or "").strip()
     if not benutzer:
-        return False, code, (msg + " Puls kann nicht selbst verbinden: für die Firma ist kein Tradovate-Username hinterlegt "
+        return False, "konto_nicht_erreicht", (msg + " Puls kann nicht selbst verbinden: für die Firma ist kein Tradovate-Username hinterlegt "
                              "(Einstellungen > Prop Firms > Firma bearbeiten > 'Tradovate-Username für TradingView')."), st, extra
     t0 = time.time()
     res["login"] = {"username": benutzer, "anlass": code, "durchgaenge": 0}
-    for durchgang in (1, 2):
+    wege = []
+    for durchgang in (1, 2, 3):
         res["login"]["durchgaenge"] = durchgang
         trail.append(f"[Login] {durchgang}. Durchgang: Konto {ext} im Puls-Chrome nicht erreichbar ({code}) → Tradovate mit '{benutzer}' verbinden")
-        c2, m2, wie = _cdp_tradovate_verbinden(sitz, cmd, opts, trail)
+        c2, m2, wie = _cdp_tradovate_verbinden(sitz, cmd, opts, trail, beleg=extra)
+        if c2 == "login_unlesbar":
+            # Regression .865 (30.09.2026): nichts abgemeldet — ehrlich raus mit dem Befund, kein „Login nicht geschafft"
+            res["login"].update(ok=False, code=c2)
+            _cdp_login_sichern(res, trail)
+            return False, "konto_nicht_erreicht", f"Konto {ext}: {m2}", st, {"login_code": c2}
         if c2:
             res["login"].update(ok=False, code=c2)
             _cdp_login_sichern(res, trail)
             return False, "konto_nicht_erreicht", f"Tradovate-Login '{benutzer}' nicht geschafft ({c2}): {m2}", {}, {"login_code": c2}
+        wege.append(wie)
         res["login"]["wie"] = wie
         ok, code, msg, st, extra = _cdp_konto_sichern(sitz[0], ext, opts, trail)
-        # zweiter Durchgang nur, wenn sich eine GEMERKTE Sitzung von selbst verbunden hat (ggf. fremder Login) — nach einem eigenen
-        # Login mit dem Username der Firma brächte ein zweiter nichts
-        if ok or not cdp_login_noetig(code, extra) or wie != "selbst" or time.time() - t0 > CDP_LOGIN_ZWEITER_BIS_S:
+        # weiter nur, wenn sich eine GEMERKTE Sitzung von selbst verbunden hat (ggf. fremder Login) oder ein Konto ohne Beleg stand
+        # ('steht': erst jetzt kann die selbst geöffnete Liste den fremden Login belegen). 'steht' zählt nicht als Login-Durchgang
+        # (Prüfer 30.09.2026: sonst fiel die Rettung über die gemerkte Sitzung weg): höchstens 2 echte Durchgänge, 'steht' höchstens
+        # einmal; nach einem eigenen Login mit dem Username der Firma brächte ein weiterer nichts
+        echte = sum(1 for w in wege if w != "steht")
+        if (ok or not cdp_login_noetig(code, extra) or wie not in ("selbst", "steht") or time.time() - t0 > CDP_LOGIN_ZWEITER_BIS_S
+                or wege.count("steht") > 1 or echte >= 2):
             break
     res["login"].update(ok=bool(ok), code="" if ok else code)
-    if not ok and cdp_login_noetig(code, extra):
-        msg += f" — auch nach dem Tradovate-Login '{benutzer}'. Gehört der Username wirklich zu dieser Firma?"
+    noetig = not ok and cdp_login_noetig(code, extra)
+    if not ok and code == "kein_broker":
+        code = "konto_nicht_erreicht"          # nach dem Login-Weg gilt der Vertrag des Docstrings (Panel 409 „Konto ?")
+    if noetig:
+        if "login" in wege:
+            msg += f" — auch nach dem Tradovate-Login '{benutzer}'. Gehört der Username wirklich zu dieser Firma?"
+        elif "selbst" in wege:
+            msg += " — die gemerkte Tradovate-Sitzung verbindet immer wieder denselben Login; bitte im Puls-Chrome von Hand abmelden."
+        else:
+            msg += " — nichts abgemeldet (kein weiterer Durchgang)."
+    elif not ok and wege and all(w == "steht" for w in wege):
+        msg += " — Tradovate zeigt ein Konto, aber ohne Beleg für einen fremden Login: nichts abgemeldet."
     _cdp_login_sichern(res, trail)
     return ok, code, msg, st, extra
 
