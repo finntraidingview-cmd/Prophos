@@ -2102,12 +2102,13 @@
   #dashboard-view .wdl-tab{border:1px solid var(--border-soft);border-radius:10px;background:var(--surface);overflow:hidden}
   #dashboard-view .wdl-tab + .wdl-tab{margin-top:14px}
   /* Sektionen Orbit / Echo (30.09.2026): ruhige Titelzeile über den Gruppen; Echo-Zeilen ohne Chart-Auswahl, Symbol grau */
-  #dashboard-view .wdl-sek{margin:22px 2px 8px;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--sub)}
+  /* Sektionsköpfe Orbit/Echo kräftiger als die Gruppenköpfe (30.09.2026: Finn übersah „Echo" unter Orbits „Beendet") — beide gleich */
+  #dashboard-view .wdl-sek{margin:26px 2px 8px;font-size:12.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-2)}
   #dashboard-view .wdl-sek:first-child{margin-top:0}
   #dashboard-view .wdl-sek span{font-weight:500;letter-spacing:0;text-transform:none;color:var(--sub-2)}
   #dashboard-view .wdl-z-echo{cursor:default}
   #dashboard-view .wdl-z-sym{color:var(--sub-2)}   /* Richtung-Spalte 150 px (vorher 112): „SELL 0,5 Lot NDX100" passt ganz */
-  #dashboard-view .wdl-z{display:grid;grid-template-columns:minmax(0,1fr) 150px 228px 112px 136px;grid-template-areas:"wer ri mi pl zeit";align-items:center;column-gap:20px;padding:11px 16px;font-size:13px;color:var(--ink-2);font-variant-numeric:tabular-nums;cursor:pointer;transition:background .12s}
+  #dashboard-view .wdl-z{display:grid;grid-template-columns:minmax(0,1fr) 150px 256px 112px 136px;grid-template-areas:"wer ri mi pl zeit";align-items:center;column-gap:16px;padding:11px 16px;font-size:13px;color:var(--ink-2);font-variant-numeric:tabular-nums;cursor:pointer;transition:background .12s}
   #dashboard-view .wdl-z + .wdl-z{border-top:1px solid var(--border-soft)}
   #dashboard-view .wdl-z:not(.wdl-z-kopf):hover{background:var(--bg)}
   #dashboard-view .wdl-z.is-aktiv,#dashboard-view .wdl-z.is-aktiv:hover{background:var(--surface-tint)}
@@ -2133,6 +2134,14 @@
   #dashboard-view .wdl-z-wart .wdl-z-mi{color:var(--sub)}
   #dashboard-view .wdl-z > .wdl-sp{display:flex;align-items:center;gap:8px;min-height:18px;overflow:visible;text-align:left}
   #dashboard-view .wdl-sp small{flex:none;font-size:10px;font-weight:600;letter-spacing:.03em;color:var(--sub-2)}
+  /* Beträge an den Enden (30.09.2026): „Liq −3.000 $" gedämpft rot, „TP +272 $" gedämpft grün; Spalte 256 px (vorher 228), Spaltenabstand
+     16 statt 20 px — sonst schnitt die Namensspalte „Finn + Pascal Tradeify …7426" ab */
+  #dashboard-view .wdl-sp small i{font-style:normal}
+  #dashboard-view .wdl-sp small b{margin-left:4px;font-weight:600;letter-spacing:0}
+  #dashboard-view .wdl-sp-l b{color:rgba(185,28,28,.72)}
+  #dashboard-view .wdl-sp-r b{color:rgba(21,128,61,.78)}
+  #dashboard-view .wdl-mehr{display:block;width:100%;padding:8px 16px;border:none;border-top:1px solid var(--border-soft);background:transparent;color:var(--sub);font:inherit;font-size:12px;text-align:center;cursor:pointer}
+  #dashboard-view .wdl-mehr:hover{background:var(--bg);color:var(--ink-2)}
   #dashboard-view .wdl-sp-bahn{position:relative;flex:1;min-width:40px;height:4px;border-radius:2px;background:var(--border-soft)}
   #dashboard-view .wdl-sp-bahn::before,#dashboard-view .wdl-sp-bahn::after{content:'';position:absolute;top:-3px;width:2px;height:10px;border-radius:1px}
   #dashboard-view .wdl-sp-bahn::before{left:-1px;background:rgba(217,45,32,.5)}
@@ -2145,6 +2154,11 @@
     #dashboard-view .wdl-z{grid-template-columns:84px minmax(0,1fr) minmax(0,1fr) 88px;grid-template-areas:"wer wer wer pl" "ri mi mi zeit";column-gap:4px;row-gap:5px;padding:10px 12px;font-size:12px}
     #dashboard-view .wdl-z-lauf .wdl-z-pl{font-size:14px}
     #dashboard-view .wdl-z > .wdl-sp{gap:6px;padding:0 4px}
+    #dashboard-view .wdl-sp small i:not(:only-child){display:none}   /* Handy: nur der Betrag, das Label nur ohne Betrag */
+    #dashboard-view .wdl-sp small b{margin-left:0}
+    #dashboard-view .wdl-z > .wdl-sp{gap:4px;padding:0 2px}   /* „−3.000 $ ●── +5.715 $" passt so in ~135 px */
+    #dashboard-view .wdl-sp small{font-size:9.5px}
+    #dashboard-view .wdl-sp-bahn{min-width:24px}
     #dashboard-view .wdl-z-wart .wdl-z-mi{white-space:normal;line-height:1.3}   /* „wird gelesen · seit 1 h 52 min" passt nicht in eine Zeile */
     #dashboard-view .wdl-z-kopf{padding-top:8px;padding-bottom:7px}
     #dashboard-view .wdl-z-wer b{font-size:12.5px}
@@ -22681,7 +22695,7 @@
         // Zone + Kästchen nur, wo wdlChartLinien auch Linien zeichnet (30.09.2026, Finn „es buggt": Filter-Chip auf eine andere ID
         // gewechselt — die Linien verschwanden, die grün-rote Zone und „3 | +2.340,00 $" liefen weiter mit)
         if(!t || !wdlPasst(t)) return null
-        return { entry: n(t.einstieg_nq), tp: n(t.tp_level_nq), liq: wdlSlEcht(t) || n(t.liq_level_nq) || n(t.sl_level_nq), start: t.started_at, kt: n(t.kt), root: String(t.symbol_root || 'MNQ'), richtung: t.richtung, offen: t.status === 'open' }   // echter SL begrenzt die rote Zone (29.09.2026)
+        return { entry: n(t.einstieg_nq), tp: n(t.tp_level_nq), liq: wdlSlEcht(t) || n(t.liq_regel_level_nq) || n(t.liq_level_nq) || n(t.sl_level_nq), start: t.started_at, kt: n(t.kt), root: String(t.symbol_root || 'MNQ'), richtung: t.richtung, offen: t.status === 'open' }   // echter SL begrenzt die rote Zone (29.09.2026)
       }
     }catch(_){}
     const pw = mkl.wd.aktiv ? ((mkl.wd && mkl.wd.plaene) || []).find(x => x && String(x.id) === String(mkl.wd.aktiv)) : null
@@ -24210,7 +24224,11 @@
       const slE = wdlSlEcht(t)
       l(t.einstieg_nq, '#2563EB', 0, 3); l(t.tp_level_nq, '#2563EB', 0, 2)
       if(slE != null) l(slE, '#b91c1c', 0, 2)
-      else { l(t.liq_level_nq, '#b91c1c', 0, 2); if(num(t.sl_level_nq) != null && num(t.sl_level_nq) !== num(t.liq_level_nq)) l(t.sl_level_nq, '#b91c1c', 0, 2) }
+      else {
+        // Liq nach liq_regeln vor der alten Rechnung — wie die Spanne (30.09.2026); die alte WD-Liq (= Hedge-Level) nicht zusätzlich zeichnen
+        const lqA = num(t.liq_level_nq), lqR = num(t.liq_regel_level_nq) != null ? num(t.liq_regel_level_nq) : lqA, sl = num(t.sl_level_nq)
+        l(lqR, '#b91c1c', 0, 2); if(sl != null && sl !== lqA && sl !== lqR) l(sl, '#b91c1c', 0, 2)
+      }
       const h = t.hedge || {}, sb = num(t.schliesst_bei_nq) != null ? num(t.schliesst_bei_nq) : num(h.schliesst_bei_nq)
       if(sb != null && t.status === 'open' && h.status && !['geschlossen', 'fehler', 'abgelehnt', 'zu'].includes(String(h.status))) l(sb, '#7C3AED', 2, 2)
     }
@@ -24308,6 +24326,7 @@
   }
   // LAUFZEIT (30.09.2026, Finn: die Demo-Zeile „Demo läuft · 40 Minuten …" kann weg, „aber die Laufzeit finde ich gut"): ab
   // started_at, nicht aus den Demo-Minuten. „40 min" · ab 60 min „1 h 12 min" · ab 24 h „1 T 3 h"; wdlLiveTick schreibt sie nach.
+  const WDL_BEENDET_KURZ = 5   // „Beendet" zeigt zuerst nur die letzten 5 (30.09.2026)
   function wdlDauer(ab){
     const t0 = Date.parse(ab || ''); if(!isFinite(t0)) return '–'
     const m = Math.max(0, Math.floor((Date.now() - t0) / 60000)), h = Math.floor(m / 60)
@@ -24321,10 +24340,24 @@
   function wdlSpanne(t){
     const n = v => (v == null || v === '' || !isFinite(Number(v)) || !(Number(v) > 0)) ? null : Number(v)
     // Echo: echter SL und TP der MT5-Position (CFD-Preis) — eine Liquidation gibt es dort nicht
-    if(wdlIstEcho(t)){ const l = n(t.sl_level), r = n(t.tp_level); return (l == null || r == null || l === r) ? null : { links: l, rechts: r, ein: n(t.einstieg), art: 'SL' } }
-    const slE = wdlSlEcht(t), links = slE != null ? slE : (n(t.liq_level_nq) != null ? n(t.liq_level_nq) : n(t.sl_level_nq)), rechts = n(t.tp_level_nq)
+    // Beträge an den Enden (30.09.2026, Finn: „Bei TP und bei Stop Loss/Liquidation soll stehen, wie viel es dann wäre") — ganze $
+    const d0 = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Math.round(Number(v))
+    if(wdlIstEcho(t)){ const l = n(t.sl_level), r = n(t.tp_level); return (l == null || r == null || l === r) ? null : { links: l, rechts: r, ein: n(t.einstieg), art: 'SL', plLinks: d0(t.pl_bei_sl), plRechts: d0(t.pl_bei_tp) } }
+    // LIQ-REGELN (30.09.2026): Liquidation nach der Tabelle liq_regeln (Backend liq_regel_level_nq, z. B. Apex-Daily-Loss-Stufe) vor der
+    // alten Rechnung (Kontogröße + 100 $ bzw. Max-Drawdown); ein echter SL bleibt vorn. Nur Anzeige — der Fusion-Hedge rechnet wie bisher.
+    const slE = wdlSlEcht(t), lqR = n(t.liq_regel_level_nq), lqA = n(t.liq_level_nq)
+    const links = slE != null ? slE : lqR != null ? lqR : lqA != null ? lqA : n(t.sl_level_nq), rechts = n(t.tp_level_nq)
     if(links == null || rechts == null || links === rechts) return null
-    return { links, rechts, ein: n(t.einstieg_nq), art: slE != null ? 'SL' : 'Liq' }
+    // $ beim Erreichen: (Level − Einstieg) × Richtung × Punktwert × Kontrakte (punktwert vom Backend, sonst NQ 20 / MNQ 2)
+    const ein = n(t.einstieg_nq), kt = n(t.kt), root = String(t.symbol_root || ''), ri = t.richtung === 'buy' ? 1 : t.richtung === 'sell' ? -1 : 0
+    const ppl = n(t.punktwert) || ((root === 'NQ' || root === 'MNQ') ? mklPpl(root) : null)
+    const pl = v => (ein != null && kt && ppl && ri) ? Math.round((v - ein) * ri * ppl * kt) : null
+    return { links, rechts, ein, art: slE != null ? 'SL' : 'Liq', plLinks: pl(links), plRechts: pl(rechts), regel: slE == null && lqR != null ? String(t.liq_regel_text || '') : '' }
+  }
+  // Betrag kompakt für die Enden der Spanne: „−3.000 $", „+272 $", ab 10.000 „−10,5k $"; lang (Tooltip) immer ganze $
+  function wdlSpBetrag(v, lang){
+    const a = Math.abs(v), z = !lang && a >= 10000 ? (a / 1000).toLocaleString('de-DE', { maximumFractionDigits: 1 }) + 'k' : a.toLocaleString('de-DE', { maximumFractionDigits: 0 })
+    return `${v < 0 ? '−' : '+'}${z} $`
   }
   const wdlSpPos = (sp, v) => (sp && v != null && isFinite(v)) ? Math.max(0, Math.min(100, (v - sp.links) / (sp.rechts - sp.links) * 100)) : null
   // Echo-Punkt in Preis-Einheiten: Kurs ≈ aus MT5; ohne Kurs (mehrere Positionen am Konto) die Lage aus dem Live-P&L zwischen
@@ -24348,7 +24381,7 @@
   // Spannen-Tooltip Echo: echte Preise der Position, Kurs mit „≈" (aus Equity − Balance gerechnet)
   function wdlEchoSpTip(t, sp, pkt){
     const f2 = v => Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    return `SL ${f2(sp.links)}${sp.ein != null ? ' · Einstieg ' + f2(sp.ein) : ''} · TP ${f2(sp.rechts)}`
+    return `SL ${f2(sp.links)}${sp.plLinks != null ? ' · ' + wdlSpBetrag(sp.plLinks, true) : ''}${sp.ein != null ? ' · Einstieg ' + f2(sp.ein) : ''} · TP ${f2(sp.rechts)}${sp.plRechts != null ? ' · ' + wdlSpBetrag(sp.plRechts, true) : ''}`
       + (pkt ? (pkt.art === 'kurs' ? ` · Kurs ≈ ${f2(pkt.v)}` : ' · Lage aus dem Live-P&L') : '') + (t.symbol ? ` · ${t.symbol}` : '')
   }
   // Nur die Echo-Live-Werte der laufenden Zeilen nachschreiben (P&L, Punkt, Tooltip) — kein Neuaufbau
@@ -24368,9 +24401,10 @@
     const pE = wdlSpPos(sp, sp.ein), pK = wdlSpPos(sp, kurs)
     // blasses Rot bis zum Einstieg, blasses Grün ab dem Einstieg (wie mwd-bar); ohne Einstieg nur der graue Track
     const bahn = pE != null ? `background:linear-gradient(90deg,rgba(240,68,56,.14) 0 ${pE.toFixed(2)}%,rgba(18,183,106,.22) ${pE.toFixed(2)}% 100%)` : ''
-    return `<span class="wdl-z-mi wdl-sp"${tip ? ` title="${escapeHtml(tip)}"` : ''}><small>${sp.art === 'SL' ? 'SL' : 'Liq'}</small><span class="wdl-sp-bahn" style="${bahn}">`
+    const betrag = v => (v != null && isFinite(v)) ? `<b>${wdlSpBetrag(v)}</b>` : ''   // fehlt der Betrag: nur das Label
+    return `<span class="wdl-z-mi wdl-sp"${tip ? ` title="${escapeHtml(tip)}"` : ''}><small class="wdl-sp-l"><i>${sp.art === 'SL' ? 'SL' : 'Liq'}</i>${betrag(sp.plLinks)}</small><span class="wdl-sp-bahn" style="${bahn}">`
       + (pE != null ? `<i class="wdl-sp-ein" style="left:${pE.toFixed(2)}%"></i>` : '')
-      + `<b class="wdl-sp-punkt" style="left:${(pK != null ? pK : 0).toFixed(2)}%;background:${farbe || 'var(--sub)'}${pK == null ? ';display:none' : ''}"></b></span><small>TP</small></span>`
+      + `<b class="wdl-sp-punkt" style="left:${(pK != null ? pK : 0).toFixed(2)}%;background:${farbe || 'var(--sub)'}${pK == null ? ';display:none' : ''}"></b></span><small class="wdl-sp-r"><i>TP</i>${betrag(sp.plRechts)}</small></span>`
   }
   /* WARTET (30.09.2026, Finn: „wenn noch nachgelesen wird, soll der Trade erst warten und dann zu Beendet gehen, bis das gemacht ist"):
    * zu, aber die Balance-Nachlesung steht noch aus. Dieselben Zweige wie tvV2EndlesungGrund / planWartetAufPuls (Reiter „Warte auf
@@ -24440,7 +24474,7 @@
       const k = t.konto || {}, buy = t.richtung === 'buy', sell = t.richtung === 'sell', offen = t.status === 'open', gepl = t.status === 'planned'
       // Echo (30.09.2026): kein Chart, kein „Wartet" (siehe gruppen), Lots + CFD-Symbol statt „3 × NQ"
       const echo = wdlIstEcho(t)
-      const lq = num(t.liq_level_nq), slE = wdlSlEcht(t), d = t.demo || {}, an = !echo && wdlLinienAn(t), wt = echo ? null : wdlWartet(t)
+      const lq = num(t.liq_regel_level_nq) != null ? num(t.liq_regel_level_nq) : num(t.liq_level_nq), slE = wdlSlEcht(t), d = t.demo || {}, an = !echo && wdlLinienAn(t), wt = echo ? null : wdlWartet(t)
       const konto = `${k.firma || '?'}${k.kontonr_ende ? ' …' + k.kontonr_ende : ''}`
       const tip = echo ? [k.name || konto, 'Echo (MT5)', t.symbol || ''].filter(Boolean).join(' · ')
         : [k.name || konto, slE != null ? 'SL ' + f2(slE) : '', lq != null ? 'Liquidation ' + f2(lq) : ''].filter(Boolean).join(' · ') + ` — klicken: Level im Chart ${an ? 'ausblenden' : 'einblenden'}`
@@ -24461,7 +24495,8 @@
         const sp = wdlSpanne(t)
         if(sp){
           const naeh = t.einstieg_quelle === 'reader_klick' ? ' (kein Fill — Kurs beim Klick)' : t.einstieg_quelle === 'kerze_start' ? ' (kein Fill — Minutenkerze beim Start)' : ''
-          const spTip = `${sp.art === 'SL' ? 'SL' : 'Liquidation'} ${f2(sp.links)}${sp.ein != null ? ' · Einstieg ' + f2(sp.ein) + naeh : ''} · TP ${f2(sp.rechts)}${kp != null ? ' · Kurs ' + f2(kp) : ''}${demoTip(d) ? ' · ' + demoTip(d) : ''}`
+          const lg = v => v != null ? ' · ' + wdlSpBetrag(v, true) : ''
+          const spTip = `${sp.art === 'SL' ? 'SL' : 'Liquidation'} ${f2(sp.links)}${lg(sp.plLinks)}${sp.regel ? ' · Regel: ' + sp.regel : ''}${sp.ein != null ? ' · Einstieg ' + f2(sp.ein) + naeh : ''} · TP ${f2(sp.rechts)}${lg(sp.plRechts)}${kp != null ? ' · Kurs ' + f2(kp) : ''}${demoTip(d) ? ' · ' + demoTip(d) : ''}`
           miZ = wdlSpanneHtml(sp, kp, LT.plFarbe, spTip)
         } else miZ = zelle('mi', '–', { tip: num(t.tp_level_nq) == null ? 'kein TP gespeichert' : 'keine Liquidation/SL gespeichert' })
         plZ = zelle('pl', LT.pl, { f: LT.plFarbe, lv: 'pl' })
@@ -24501,27 +24536,36 @@
         + ri + miZ + plZ + zeitZ + '</div>'
     }
     // Gruppe = ein Kasten, oben einmal die Spaltenköpfe im selben Raster wie die Zeilen
-    const gruppe = (titel, arr, sp, cls) => !arr.length ? '' : `<div class="wdl-tab${cls ? ' ' + cls : ''}"><div class="wdl-z wdl-z-kopf"><span class="wdl-z-wer">${titel} · ${arr.length}</span><span class="wdl-z-ri"></span>`
-      + sp.map((x, i) => `<span class="wdl-z-${['mi', 'pl', 'zeit'][i]}">${x}</span>`).join('') + `</div>${arr.map(zeile).join('')}</div>`
+    // mehr = Schlüssel für „Beendet" (30.09.2026, Finn sah die Echo-Sektion nicht — sie stand unter Orbits „Beendet · 42"): nur die
+    // letzten WDL_BEENDET_KURZ Zeilen, darunter „alle N zeigen" / „weniger". Zustand nur im Speicher (wdl.alleZu), Neuladen = kurz.
+    const gruppe = (titel, arr, sp, cls, mehr) => {
+      if(!arr.length) return ''
+      const alle = !mehr || (wdl.alleZu || {})[mehr] || arr.length <= WDL_BEENDET_KURZ, zeigen = alle ? arr : arr.slice(0, WDL_BEENDET_KURZ)
+      const fuss = mehr && arr.length > WDL_BEENDET_KURZ ? `<button type="button" class="wdl-mehr" data-wdl-mehr="${mehr}">${alle ? 'weniger' : `alle ${arr.length} zeigen`}</button>` : ''
+      return `<div class="wdl-tab${cls ? ' ' + cls : ''}"><div class="wdl-z wdl-z-kopf"><span class="wdl-z-wer">${titel} · ${arr.length}</span><span class="wdl-z-ri"></span>`
+        + sp.map((x, i) => `<span class="wdl-z-${['mi', 'pl', 'zeit'][i]}">${x}</span>`).join('') + `</div>${zeigen.map(zeile).join('')}${fuss}</div>`
+    }
     const nachEnde = arr => arr.sort((a, b) => String(b.ended_at || '').localeCompare(String(a.ended_at || '')))
     // ZWEI SEKTIONEN (30.09.2026, Finn: „unter Radar auch Echo"): Orbit (Orbit V2 + Topstep V2, NQ-Chart) und darunter Echo (MT5/CFD),
     // je mit denselben Gruppen im selben Raster. Echo kennt kein „Wartet": den P&L schreibt mt5PlanPollTick am Ende direkt aus der
     // MT5-Balance, eine Puls-Nachlesung gibt es dort nicht. Leere Sektion = nur die graue Titelzeile „· keine Trades".
-    const gruppen = arr => {
+    const gruppen = (arr, schl) => {
       const la = arr.filter(t => t.status === 'open'), ge = arr.filter(t => t.status === 'planned'), zz = arr.filter(t => t.status === 'review' || t.status === 'completed')
       const wa = zz.filter(t => !wdlIstEcho(t) && wdlWartet(t)), fe = zz.filter(t => !wa.includes(t))
       return gruppe('Läuft', la, ['Spanne', 'P&amp;L', 'Seit'], 'wdl-tab-lauf')
         + gruppe('Wartet', nachEnde(wa), ['Nachlesung', 'P&amp;L', 'Zu'])
         + gruppe('Geplant', ge, ['TP', '', 'Start'])
-        + gruppe('Beendet', nachEnde(fe), ['Ergebnis', 'P&amp;L', 'Zu'])
+        + gruppe('Beendet', nachEnde(fe), ['Ergebnis', 'P&amp;L', 'Zu'], '', schl)
     }
-    const sektion = (name, arr) => `<div class="wdl-sek">${name}${arr.length ? '' : '<span> · keine Trades</span>'}</div>` + (arr.length ? gruppen(arr) : '')
+    const sektion = (name, arr) => `<div class="wdl-sek">${name}${arr.length ? '' : '<span> · keine Trades</span>'}</div>` + (arr.length ? gruppen(arr, name.toLowerCase()) : '')
     liste.innerHTML = trades.length ? sektion('Orbit', trades.filter(t => !wdlIstEcho(t))) + sektion('Echo', trades.filter(wdlIstEcho))
       : `<div class="mwd-leer">${wdl.daten ? 'Keine Trades im Zeitraum.' : (wdl.fehler ? 'Nicht ladbar: ' + escapeHtml(wdl.fehler) : 'Lade Radar…')}</div>`
     try{ if(wdlAktiv() && typeof mklChartZeichnen === 'function') mklChartZeichnen() }catch(_){}
   }
   // Klick auf eine Karte (oder ihren Punkt) schaltet die Linien dieses Trades — eigener Handler am Listen-Container
   document.getElementById('wdl-liste')?.addEventListener('click', ev => {
+    const m = ev.target.closest('[data-wdl-mehr]')
+    if(m){ const k = m.getAttribute('data-wdl-mehr'); wdl.alleZu = Object.assign({}, wdl.alleZu, { [k]: !(wdl.alleZu || {})[k] }); wdlRender(); return }
     const c = ev.target.closest('[data-wdl-trade]'); if(!c) return
     const id = c.getAttribute('data-wdl-trade'), t = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === id); if(!t) return
     if(wdlIstEcho(t)) return   // Echo (CFD) hat keine Linien im NQ-Chart — keine Auswahl, kein Hochscrollen
@@ -36186,7 +36230,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.862'
+  const OS_TAB_BUILD = '2026-09-22.863'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
