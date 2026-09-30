@@ -25,7 +25,7 @@ def lade():
     def const(name):
         return re.search(rf"^{name} = .*$", src, re.M).group(0)
     exec("\n".join([const("LT_WD_BLOW_PLUS"), const("WD_HEUTE_PPL")]
-                   + [block(f) for f in ("_wd_num", "_wd_level", "_wd_konto_groesse", "ist_topstep_express", "konto_basis_balance",
+                   + [block(f) for f in ("_wd_num", "_wd_level", "_wd_konto_groesse", "ist_topstep_express", "plan_balance_relativ", "konto_basis_balance",
                                            "_lt_liq_balance", "_lt_liq", "_lt_demo", "kurs_jetzt_wahl", "tsx_zeile_ueberlagern",
                                            "tv_bracket_ueberlagern")]), ns)
     return ns
@@ -72,8 +72,24 @@ def main():
     r = liq(xfa, {"konto_typ": "winning_days"}, 11079.66, 30000.0, "buy", ppl["NQ"], 1)
     check(r["level"] == 29775.0 and r["balance"] == 6579.66 and r["pl_usd"] == -4500 and "Max-Drawdown" in r["regel"],
           "Topstep Express als WD: Max-Drawdown statt Größe + 100 (Balance 11.079,66 − 4.500)")
-    check(a["ist_topstep_express"](xfa) and not a["ist_topstep_express"](dict(xfa, external_id="150KTC-SKU-V2-682437-58370042", name="$150K TRADING COMBINE"))
+    kombi = {"account_type": "challenge", "firm": "Topstep", "external_id": "150KTC-SKU-V2-000000-00000000", "name": "$150K TRADING COMBINE"}
+    check(a["ist_topstep_express"](xfa) and not a["ist_topstep_express"](kombi)
           and not a["ist_topstep_express"](dict(xfa, firm="Apex")), "Express-Erkennung: Topstep + EXPRESS/XFA, Combine nicht, andere Firma nicht")
+    # Gemeinsame Regel FE/BE (Master-Entscheid 01.10.2026): Topstep UND (Typ funded/winning_days ODER EXPRESS/XFA); Lesung gewinnt
+    ohne_kenn = {"firm": "Topstep", "account_type": "funded", "external_id": "KONTO-TEST-1", "name": "150k topstep"}
+    check(a["ist_topstep_express"](ohne_kenn) and a["ist_topstep_express"](dict(ohne_kenn, account_type="winning_days"))
+          and not a["ist_topstep_express"](dict(ohne_kenn, account_type="challenge")),
+          "Express-Regel: Topstep funded/winning_days ohne Kennung = Express, challenge nicht")
+    check(not a["ist_topstep_express"](ohne_kenn, False) and a["ist_topstep_express"](dict(ohne_kenn, account_type="challenge"), True)
+          and not a["ist_topstep_express"](dict(ohne_kenn, firm="Apex"), True),
+          "balance_relativ der Lesung gewinnt (False → kein Express, True → Express), nie bei anderer Firma")
+    pr = a["plan_balance_relativ"]
+    check(pr({"mt5_baseline": {"tv": {"balance_relativ": True}}}) is True and pr({"mt5_baseline": {"final": {"balance_relativ": False}}}) is False
+          and pr({"mt5_baseline": {"tv": {}}}) is None and pr({}) is None and pr(None) is None, "plan_balance_relativ: tv, sonst final, sonst None")
+    r = liq(dict(ohne_kenn, account_type="winning_days", max_drawdown=2000), {"konto_typ": "winning_days", "mt5_baseline": {"tv": {"balance_relativ": True}}},
+            0.0, 30000.0, "buy", ppl["NQ"], 1)
+    check(r["level"] == 29900.0 and r["balance"] == -2000.0 and "Max-Drawdown" in r["regel"],
+          "Topstep WD ohne Kennung, Lesung relativ, Start 0 → Max-Drawdown (Level 100 Pkt), nicht Größe + 100")
     check(a["konto_basis_balance"](xfa) == 0.0 and a["konto_basis_balance"]({"starting_balance": 150000}) == 150000.0,
           "Basis-Balance: Express 0 $, sonst Kontogröße")
 

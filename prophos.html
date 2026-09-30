@@ -19752,7 +19752,8 @@
     // dort reicht eine endliche Zahl, auch 0 oder negativ (01.10.2026, TSV2-PNL; vorher wurden 0…1.000 und negative Stände still
     // verworfen, tv_balance blieb alt und hieß trotzdem „● aktuell"). -> true = geschrieben
     const _acc = accountId ? (accounts || []).find(x => String(x.id) === String(accountId)) : null
-    const express = !!(b && b.relativ === true) || (typeof kontoIstTopstepExpress === 'function' && kontoIstTopstepExpress(_acc))
+    // Lesung gewinnt (gemeinsame Regel 01.10.2026): relativ true = Express auch ohne Konto im Cache, false = absolut (Schwelle > 1000)
+    const express = !!(b && b.relativ === true) || (!(b && b.relativ === false) && typeof kontoIstTopstepExpress === 'function' && kontoIstTopstepExpress(_acc))
     if(!accountId || !b || !(typeof b.balance === 'number' && isFinite(b.balance) && (express || b.balance > 1000))) return false
     try{
       const upd = { tv_balance: b.balance, tv_equity: (typeof b.equity === 'number' && isFinite(b.equity)) ? b.equity : null, tv_balance_at: at || new Date().toISOString(), tv_balance_quelle: 'puls' }
@@ -19949,7 +19950,7 @@
       if(r.konto_aktiv && !String(r.konto_aktiv).includes(konto)) return { ok: false, trail, msg: `Puls stand auf einem anderen Konto (${String(r.konto_aktiv).slice(0, 40)})` }
       const at = new Date().toISOString()
       b.relativ = tsxBalanceRelativ(r)
-      const _express = b.relativ === true || kontoIstTopstepExpress(acc)
+      const _express = kontoIstTopstepExpress(acc, b.relativ) || b.relativ === true
       const _txt = `${b.balance.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $${_express ? ' (Express ab 0)' : ''}`
       if(!(await tvKontoBalanceSchreiben(acc.id, b, at))) return { ok: false, trail, msg: `Balance ${_txt} gelesen, aber nicht gespeichert — unplausibel oder DB-Fehler` }
       return { ok: true, trail, balance: b.balance, equity: (typeof b.equity === 'number' && isFinite(b.equity)) ? b.equity : null, balance_at: at,
@@ -23634,14 +23635,21 @@
    * „+x über 150k" = Balance − Kontogröße (starting_balance, sonst die Zahl vor dem k im Namen). */
   function mklWdKontoBalance(P, k){
     const kd = (P.konten && k && P.konten[String(k.id)]) || null
-    const live = kd && Number(kd.live_balance) > 0 ? Number(kd.live_balance) : (Number(k && k.live) > 0 ? Number(k.live) : null)
-    if(live == null) return { text: 'Balance noch nicht gelesen', tip: 'Puls hat dieses Konto noch nicht in TradingView gelesen' }
-    const m = /(\d{2,3})\s*k/i.exec(String((k && k.name) || (kd && kd.name) || ''))
-    const groesse = (kd && Number(kd.starting_balance) > 1000) ? Number(kd.starting_balance) : m ? Number(m[1]) * 1000 : null
-    const plus = groesse ? live - groesse : (Number(k && k.plus) || null)
+    // Topstep Express (01.10.2026, gemeinsame Regel): TopstepX zeigt die Balance 0-basiert — 0/negativ sind echte Stände, die Balance
+    // IST der Gewinn; vorher stand dort „1.600 $ · −148.400 über 150k" bzw. „Balance noch nicht gelesen"
+    const express = !!kd && kontoIstTopstepExpress({ firm: kd.firm, ext: kd.ext, name: kd.name || (k && k.name), type: kd.type })
+    const zahl = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
+    const live = express ? (zahl(kd.live_balance) != null ? zahl(kd.live_balance) : zahl(k && k.live))
+      : kd && Number(kd.live_balance) > 0 ? Number(kd.live_balance) : (Number(k && k.live) > 0 ? Number(k.live) : null)
+    if(live == null) return { text: 'Balance noch nicht gelesen', tip: `Puls hat dieses Konto noch nicht in ${express ? 'TopstepX' : 'TradingView'} gelesen` }
     const z = v => Math.round(v).toLocaleString('de-DE')
     const at = kd && kd.live_at ? Date.parse(kd.live_at) : 0
     const alter = at ? (() => { const min = Math.max(0, Math.round((Date.now() - at) / 60000)); return min < 60 ? `vor ${min} min` : min < 2880 ? `vor ${Math.round(min / 60)} h` : `vor ${Math.round(min / 1440)} T` })() : ''
+    if(express) return { text: `${z(live)} $ · Express ab 0${alter ? ' · ' + alter : ''}`,
+                         tip: `Live · TopstepX — relativ: Express-Konten zeigen den Gewinn seit Start ab 0 $${at ? ' — gelesen ' + new Date(at).toLocaleString('de-DE') : ''}` }
+    const m = /(\d{2,3})\s*k/i.exec(String((k && k.name) || (kd && kd.name) || ''))
+    const groesse = (kd && Number(kd.starting_balance) > 1000) ? Number(kd.starting_balance) : m ? Number(m[1]) * 1000 : null
+    const plus = groesse ? live - groesse : (Number(k && k.plus) || null)
     return { text: `${z(live)} $${plus != null ? ` · ${plus >= 0 ? '+' : '−'}${z(Math.abs(plus))}${groesse ? ' über ' + z(groesse / 1000) + 'k' : ''}` : ''}${alter ? ' · ' + alter : ''}`,
              tip: `Live · TradingView${at ? ' — gelesen ' + new Date(at).toLocaleString('de-DE') : ' (Stand aus dem Tagesplan)'}` }
   }
@@ -36720,7 +36728,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.902'
+  const OS_TAB_BUILD = '2026-09-22.903'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -41971,15 +41979,18 @@
   /* TOPSTEP EXPRESS (27.09.2026, F27, Finn am Admin-Block „Wert in Funded-Accounts": Mikes EXPRESS-V2-682437-57131691 mit 11.079,66 $
    * zählte nicht mit). Topstep-Express-Konten (TopstepX „$150K EXPRESS", Kennung EXPRESS-V2-…) starten mit Balance 0 $ — der Gewinn IST
    * die Balance. Für Gewinn-Rechnungen („Balance − Größe") ist die Basis deshalb 0; die Anzeige „150k" bleibt. Combines (150KTC-…)
-   * starten mit 150.000 $ (Mike 154.5xx $) und bleiben bei der Größe. Erkennung: Firma Topstep UND (Kennung/Name EXPRESS ODER Typ
-   * funded/winning_days). Nimmt Konto-Objekte aus Frontend (firm, externalId, name, type) und Backend (firm_raw, ext, account_name, …). */
-  function kontoIstTopstepExpress(k){
+   * starten mit 150.000 $ und bleiben bei der Größe. Nimmt Konto-Objekte aus Frontend (firm, externalId, name, type) und Backend
+   * (firm_raw, ext, account_name, …). EINE Regel mit app.py ist_topstep_express (Master-Entscheid 01.10.2026): Firma Topstep UND
+   * (Typ funded/winning_days ODER „EXPRESS"/„XFA" in Kennung/Name). relativ (true/false) = balance_relativ einer frischen
+   * TopstepX-Lesung (Plan-Baseline bzw. die Lesung, die gerade geschrieben wird) — die gewinnt; sonst die Regel. */
+  function kontoIstTopstepExpress(k, relativ){
     if(!k) return false
     const firm = String(k.firm_raw || k.account_firm || k.firm || '')
     if(!/topstep/i.test(firm)) return false
+    if(relativ === true || relativ === false) return relativ
     const ext = String(k.ext || k.externalId || k.external_id || ''), name = String(k.account_name || k.name || '')
-    const typ = String(k.type || k.account_type || '')
-    return /^EXPRESS/i.test(ext.trim()) || /express/i.test(name) || typ === 'funded' || typ === 'winning_days'
+    const typ = String(k.type || k.account_type || '').toLowerCase()
+    return /EXPRESS|XFA/i.test(ext + ' ' + name) || typ === 'funded' || typ === 'winning_days'
   }
   window._kontoIstTopstepExpress = kontoIstTopstepExpress   // Test-Haken
   function tpKontoGroesseAusName(name){ const m = /(\d{2,3})\s*k\b/i.exec(String(name || '')); return m ? (+m[1]) * 1000 : 0 }

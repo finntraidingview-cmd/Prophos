@@ -40,7 +40,7 @@ def lade():
     exec("\n".join([firm_rules] + [block(f) for f in (
         "_wd_num", "_wd_level", "_wd_konto_groesse", "_firm_norm", "_cme_handelstag", "liq_regel_waehlen", "liq_stufe", "_liq_de",
         "liq_aus_regel", "liq_tagesstart", "liq_regel_felder", "lt_demo_liq", "_lt_demo",
-        "ist_topstep_express", "liq_peak", "liq_konto_groesse", "liq_konto_boden", "_liq_pl_de")]), ns)
+        "ist_topstep_express", "plan_balance_relativ", "liq_peak", "liq_konto_groesse", "liq_konto_boden", "_liq_pl_de")]), ns)
     return ns
 
 

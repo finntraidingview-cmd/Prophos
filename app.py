@@ -5304,8 +5304,13 @@ def acc_balance_wahl(a, echo_bal, dup_bal):
         except (TypeError, ValueError):
             return None
     a = a or {}
+    # Topstep Express (01.10.2026, Master-Entscheid, gemeinsame Regel ist_topstep_express): TopstepX zeigt die Balance 0-basiert —
+    # 0 und negativ sind dort echte Stände, keine leeren Syncs. Der alte TSX-Sync (seit 24.09.2026 still) gilt nur, wenn er
+    # nicht älter ist als die Puls-Lesung — sonst wird ein veralteter Stand ≈ Kontogröße zum „Gewinn" im Payout-Kalender.
+    express = ist_topstep_express(a)
     b = num(a.get("topstep_balance"))
-    if b is not None:
+    tv_x = _wd_num(a.get("tv_balance")) if express else None
+    if b is not None and not (tv_x is not None and str(a.get("tv_balance_at") or "") > str(a.get("topstep_last_check") or "")):
         return b, "USD", "TSX", a.get("topstep_last_check") or ""
     b = num(a.get("meta_api_balance"))
     if b is not None:
@@ -5316,7 +5321,7 @@ def acc_balance_wahl(a, echo_bal, dup_bal):
         b = num(hit[0])
         if b is not None:
             return b, hit[1], "Echo", hit[2]
-    tv = num(a.get("tv_balance"))
+    tv = tv_x if express else num(a.get("tv_balance"))
     tv_at = str(a.get("tv_balance_at") or "")
     hit = (dup_bal or {}).get(login)
     dup = num(hit[0]) if hit else None
@@ -7239,12 +7244,16 @@ def wd_start_balance(p, tv, acc, vorher):
     dieses Kontos (vorher = {ended_at, balance_end_da}), dessen Nachlesung nicht mehr aussteht (balance_end da), und nicht
     NACH dem Ende dieses Plans (sonst wäre es schon die End-Balance). Sonst (None, None, None).
     Hintergrund (Front end 27.09.2026): tv.balance_start kommt erst NACH dem Hedge-Open — der Hedge öffnet sofort nach dem Klick."""
+    # Topstep Express (01.10.2026, gemeinsame Regel ist_topstep_express): TopstepX zeigt die Balance 0-basiert — 0 und negativ sind
+    # echte Stände; vorher fiel die Start-Balance dort weg und es gab keine Liquidation (bzw. einen Konto-Wert anderer Basis)
+    express = ist_topstep_express(acc, plan_balance_relativ(p))
+    gueltig = (lambda v: v is not None) if express else (lambda v: v is not None and v > 0)
     bs = _wd_num((tv or {}).get("balance_start"))
-    if bs is not None and bs > 0:
+    if gueltig(bs):
         return bs, "balance_start", (tv or {}).get("balance_start_at") or p.get("started_at")
     kb = _wd_num((acc or {}).get("tv_balance"))
     kb_at = str((acc or {}).get("tv_balance_at") or "")
-    if kb is None or kb <= 0 or not kb_at:
+    if not gueltig(kb) or not kb_at:
         return None, None, None
     if p.get("ended_at") and kb_at > str(p.get("ended_at")):
         return None, None, None                    # schon die Balance NACH diesem Trade
@@ -7380,7 +7389,8 @@ def _wd_heute_zeile(p, acc, disp, vorher=None):
         "konto": {"name": (acc or {}).get("name") or p.get("master_name") or "", "firma": (acc or {}).get("firm") or p.get("master_firm") or "",
                   "groesse": _wd_konto_groesse(acc), "kontonr_ende": ext[-4:] if ext else "", "external_id": ext,
                   # B25: Start-Balance eines frischen Kontos — Topstep Express 0 $, sonst die Größe
-                  "basis_balance": konto_basis_balance(acc), "topstep_express": ist_topstep_express(acc)},
+                  "basis_balance": konto_basis_balance(acc, plan_balance_relativ(p)),
+                  "topstep_express": ist_topstep_express(acc, plan_balance_relativ(p))},
         "route": p.get("route"), "richtung": richtung or None, "kt": kt, "kontrakte": kt, "symbol_root": root or None,
         "punktwert": ppl,   # B35/F28: $ je Punkt und Kontrakt (NQ 20, MNQ 2) — Live-P&L im Radar = (Kurs − Einstieg) · punktwert · kt
         "master_tp": tp_usd, "master_sl": sl_usd, "status": p.get("status"),
@@ -7586,19 +7596,37 @@ def admin_wd_heute():
 LT_WD_BLOW_PLUS = 100.0
 
 
-def ist_topstep_express(acc):
+def ist_topstep_express(acc, relativ=None):
     """REIN RECHNEND (testbar, B25, 27.09.2026): Topstep-Express-Konto (XFA, Kennung EXPRESS-V2-…). Startet bei 0 $ Balance,
-    nicht bei der Kontogröße (Mike Express: 11.079,66 $ = Gewinn) — „Größe + 100 $" als Liquidation wäre dort Unsinn."""
+    nicht bei der Kontogröße (ein Express mit 11.079,66 $ = Gewinn) — „Größe + 100 $" als Liquidation wäre dort Unsinn.
+    EINE Regel mit dem Frontend (kontoIstTopstepExpress, Master-Entscheid 01.10.2026): Topstep UND (Kontotyp funded/winning_days
+    ODER „EXPRESS"/„XFA" in Name/External ID). relativ (bool) = balance_relativ einer frischen TopstepX-Lesung dieses Trades —
+    die gewinnt (TopstepX zeigt Express 0-basiert, Combine absolut); None = keine Lesung, dann die Regel."""
     a = acc or {}
     firm = str(a.get("firm") or "").lower()
+    if "topstep" not in firm:
+        return False
+    if isinstance(relativ, bool):
+        return relativ
     kenn = (str(a.get("external_id") or "") + " " + str(a.get("name") or "")).upper()
-    return "topstep" in firm and ("EXPRESS" in kenn or "XFA" in kenn)
+    typ = str(a.get("account_type") or "").lower()
+    return typ in ("funded", "winning_days") or "EXPRESS" in kenn or "XFA" in kenn
 
 
-def konto_basis_balance(acc):
+def plan_balance_relativ(p):
+    """REIN RECHNEND (testbar): balance_relativ der TopstepX-Lesungen eines Plans (tv beim Start, sonst final beim Ende) → bool | None."""
+    base = (p or {}).get("mt5_baseline") if isinstance((p or {}).get("mt5_baseline"), dict) else {}
+    for k in ("tv", "final"):
+        v = base.get(k).get("balance_relativ") if isinstance(base.get(k), dict) else None
+        if isinstance(v, bool):
+            return v
+    return None
+
+
+def konto_basis_balance(acc, relativ=None):
     """REIN RECHNEND (testbar, B25): Balance, bei der ein frisches Konto startet — Topstep Express 0 $, sonst die Kontogröße
-    (starting_balance, sonst „150k" aus dem Namen). None = unbekannt."""
-    return 0.0 if ist_topstep_express(acc) else _wd_konto_groesse(acc)
+    (starting_balance, sonst „150k" aus dem Namen). None = unbekannt. relativ wie ist_topstep_express."""
+    return 0.0 if ist_topstep_express(acc, relativ) else _wd_konto_groesse(acc)
 
 
 def kurs_jetzt_wahl(zeilen):
@@ -7633,7 +7661,7 @@ def _lt_liq_balance(acc, plan, balance_start):
     B25: Topstep Express startet bei 0 $ — dort nie „Kontogröße + 100", sondern wie jedes andere Konto Max-Drawdown."""
     typ = str((acc or {}).get("account_type") or "").lower()
     wd = typ == "winning_days" or str(plan.get("konto_typ") or "") == "winning_days" or (_wd_num(plan.get("hedge_eur")) or 0) > 0
-    if wd and not ist_topstep_express(acc):
+    if wd and not ist_topstep_express(acc, plan_balance_relativ(plan)):
         g = _wd_konto_groesse(acc)
         return (g + LT_WD_BLOW_PLUS, f"Winning Day: Kontogröße {g:,.0f} + {LT_WD_BLOW_PLUS:,.0f} $".replace(",", ".")) if g else (None, "Kontogröße unbekannt")
     dd = _wd_num((acc or {}).get("max_drawdown"))
@@ -7650,7 +7678,7 @@ def _lt_liq(acc, plan, balance_start, einstieg, richtung, ppl, kt):
     liq_bal, regel = _lt_liq_balance(acc, plan, balance_start)
     typ = str((acc or {}).get("account_type") or "").lower()
     wd = typ == "winning_days" or str(plan.get("konto_typ") or "") == "winning_days" or (_wd_num(plan.get("hedge_eur")) or 0) > 0
-    if wd and not ist_topstep_express(acc):
+    if wd and not ist_topstep_express(acc, plan_balance_relativ(plan)):
         level = None
         if balance_start is not None and liq_bal is not None and balance_start > liq_bal:
             level = _wd_level(einstieg, richtung, balance_start - liq_bal, ppl, kt, False)
@@ -7873,13 +7901,13 @@ def liq_konto_groesse(acc):
     return float(m.group(1)) * 1000 if m else None
 
 
-def liq_konto_boden(regel, acc, groesse, peak, start_bal):
+def liq_konto_boden(regel, acc, groesse, peak, start_bal, relativ=None):
     """REIN RECHNEND (testbar): absoluter Konto-Boden aus dem Max Drawdown → (boden | None, text, max_dd | None, art | None).
     statisch: Größe − DD. eod_trailing: max(Größe, peak) − DD, höchstens Größe + maxdd_lock_ueber_groesse_usd (null = kein Lock).
     DD aus accounts.max_drawdown, sonst maxdd_usd der Regel. Topstep Express (Start bei 0 $) und ein Boden, der nicht unter der
     Start-Balance liegt (Datenzweifel), werden nicht angewandt."""
     a = acc or {}
-    if ist_topstep_express(a):
+    if ist_topstep_express(a, relativ):
         return None, "Topstep Express — Boden = MLL aus TopstepX", None, None
     dd = _wd_num(a.get("max_drawdown")) or _wd_num((regel or {}).get("maxdd_usd"))
     if not dd or dd <= 0:
@@ -7925,7 +7953,7 @@ def liq_regel_felder(regeln, acc, plan, start_bal, tagesstart, einstieg, richtun
     if mll is not None:
         b_bal, b_text, dd, art = mll, f"MLL TopstepX {_liq_de(mll, 2)} $", None, "mll"
     else:
-        b_bal, b_text, dd, art = liq_konto_boden(regel, a, liq_konto_groesse(a), peak, start_bal)
+        b_bal, b_text, dd, art = liq_konto_boden(regel, a, liq_konto_groesse(a), peak, start_bal, plan_balance_relativ(plan))
     kand = [(v, k) for v, k in ((r_bal, "regel"), (b_bal, "boden")) if v is not None]
     bal, gilt = max(kand) if kand else (None, None)        # gleich hoch → „regel" (Tupel-Vergleich, 'regel' > 'boden')
     text = b_text if gilt == "boden" else r_text
@@ -8501,7 +8529,9 @@ def admin_wd_plaene():
                     "starting_balance": _wd_num(a.get("starting_balance")),
                     # B8 (26.09.2026): Live-Wert aus TradingView statt der manuellen Balance (Feld „balance" entfällt —
                     # das Frontend liest es seit F9 nicht mehr; Rückfall bei RPC-Ausfall nimmt diese drei Namen, F10)
-                    "live_balance": _wd_num(a.get("tv_balance")) if (_wd_num(a.get("tv_balance")) or 0) > 0 else None,
+                    # Topstep Express (01.10.2026, gemeinsame Regel): 0-basiert — 0/negativ sind echte Stände, keine leeren Syncs
+                    "live_balance": _wd_num(a.get("tv_balance")) if ((_wd_num(a.get("tv_balance")) or 0) > 0
+                                                                      or (_wd_num(a.get("tv_balance")) is not None and ist_topstep_express(a))) else None,
                     "live_at": a.get("tv_balance_at"),
                     "wd_farm": bool(a.get("wd_farm")),
                 })

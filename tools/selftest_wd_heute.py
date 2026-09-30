@@ -28,7 +28,7 @@ def lade():
         m = re.search(rf"^{name} = .*$", src, re.M)
         return m.group(0)
 
-    code = "\n".join([const("WD_HEUTE_PPL"), const("LT_WD_BLOW_PLUS"), block("ist_topstep_express"), block("konto_basis_balance"), block("_lt_liq_balance"), block("_lt_liq"),
+    code = "\n".join([const("WD_HEUTE_PPL"), const("LT_WD_BLOW_PLUS"), block("ist_topstep_express"), block("plan_balance_relativ"), block("konto_basis_balance"), block("_lt_liq_balance"), block("_lt_liq"),
                       block("wd_start_balance"), block("wd_vorher_waehlen"), block("wd_sl_zeile"), block("_wd_num"), block("_symbol_wurzel"), block("_cme_handelstag"),
                       block("_wd_level"), block("tsx_zeile_ueberlagern"), block("tv_bracket_ueberlagern"), block("_wd_konto_groesse"), block("_wd_endlesung_zeile"), block("_wd_heute_zeile"),
                       block("_wd_heute_behalten"), block("_wd_heute_sortkey"), block("_wd_heute_sortieren"), block("_wd_ohne_master_sl")])
@@ -172,6 +172,14 @@ def main():
     r = sz({"id": "f1", "konto_typ": "funded"}, {"account_type": "funded"}, {}, {}, 30000.0, "buy", 20.0, 1, 400.0)
     check(r == {"sl_level_nq": 29980.0, "sl_art": "master_sl", "liq_balance": None, "liq_quelle": None, "sl_hinweis": None},
           "Nicht-WD: master_sl wie bisher")
+    # Topstep Express (01.10.2026, gemeinsame Regel): 0-basierte Start-Balance (auch 0/negativ) zählt; nicht Express bleibt > 0
+    xk = {"firm": "Topstep", "account_type": "funded", "name": "150k topstep", "tv_balance": -250, "tv_balance_at": "2026-09-27T09:00:00+00:00"}
+    px = dict(pw, konto_typ="funded", mt5_baseline={"tv": {"balance_relativ": True}})
+    check(sb(px, {"balance_start": 0}, xk, None)[:2] == (0.0, "balance_start") and sb(px, {}, xk, None)[:2] == (-250.0, "konto_balance"),
+          "Express: Start-Balance 0 bzw. Konto-Balance −250 gelten (0-basiert)")
+    check(sb(dict(px, mt5_baseline={"tv": {"balance_relativ": False}}), {"balance_start": 0}, xk, None) == (None, None, None)
+          and sb(pw, {"balance_start": 0}, dict(wdk, tv_balance=0), None) == (None, None, None),
+          "nicht Express (Lesung absolut bzw. andere Firma): 0 bleibt „keine Balance\"")
     vw = a["wd_vorher_waehlen"]
     fr = [{"id": "a", "master_account_id": "K", "ended_at": "2026-09-27T07:00:00+00:00", "bal_end": 151000},
           {"id": "b", "master_account_id": "K", "ended_at": "2026-09-27T08:00:00+00:00", "bal_end": None},
