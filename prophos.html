@@ -1548,25 +1548,32 @@
      aktiv setzt der Tab-Handler die Farbe inline (violett) — dann sehen sie normal aus */
   #dashboard-view #kasse-content > .subtabs .adm-tab-rand{font-size:12px;padding-left:10px;padding-right:10px;color:var(--sub-2)}
   #dashboard-view #kasse-content > .subtabs .adm-tab-rand-erst{margin-left:auto}
-  /* Kopfzeile: drei Zahlen + Long/Short von heute in EINER Zeile */
-  #af-view .af-summe{display:flex;align-items:center;gap:8px 22px;flex-wrap:wrap;padding:12px 18px;margin-bottom:14px}
-  #af-view .af-s{display:inline-flex;align-items:baseline;gap:6px;font-size:12.5px;color:var(--sub);white-space:nowrap}
-  #af-view .af-s b{font-size:20px;font-weight:600;letter-spacing:-.02em;color:var(--ink);font-variant-numeric:tabular-nums}
+  /* KOPF-KACHELN (30.09.2026, Finn am Screenshot .867: „Das Untere passt echt gut. Aber oben könnten noch mehr Infos kommen … nur
+     ‚74 noch offen · 6 laufen · x erledigt', das ist ein bisschen zu mager"): statt der dünnen Summenzeile eine Reihe .kpi-Kacheln
+     wie im Finanzen-Überblick — Noch offen · Läuft · Heute erledigt · Long/Short heute · Wartet auf Payout (nur wenn vorhanden).
+     Klick filtert „Je ID" auf IDs mit diesem Zustand, zweiter Klick hebt auf (wie der Firma-Filter). auto-fit: 4 oder 5 Kacheln
+     füllen die Breite; am Handy greift die v3-Regel (2 je Zeile). */
+  #af-view .af-kpis{grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:14px}
+  #af-view .af-k{display:flex;flex-direction:column;justify-content:flex-start;width:100%;min-width:0;font:inherit;color:inherit;text-align:left;cursor:pointer;--af-kc:var(--sub)}
+  #af-view .af-k[hidden]{display:none}
+  #af-view .af-k .kpi-value{font-variant-numeric:tabular-nums;white-space:nowrap}
+  #af-view .af-k .kpi-delta{display:block;color:var(--sub);line-height:1.4}   /* bricht nur an den „·" um (Teile mit geschütztem Leerzeichen) */
+  #af-view .af-k.is-on{border-color:var(--af-kc);box-shadow:0 0 0 2px color-mix(in srgb,var(--af-kc) 18%,transparent)}
+  #af-view .af-k .af-ls{width:100%;margin:6px 0 7px}
   /* ZUSTANDS-CODIERUNG (30.09.2026, Finn am Screenshot .856: Violett und Grün passen nicht zusammen, „läuft" und „erledigt" sahen mit
      je einem grünen Punkt fast gleich aus — „das ist komisch"): offen = Violett (Marke), läuft = Himmelblau (#0BA5EC Fläche/Punkt,
      #026AA2 Schrift 5,9:1 — kräftiger und heller als das gedeckte Phasen-Blau der Typ-Badges), erledigt = ruhig grau ohne Punkt.
      Grün/Rot nur noch für Geld (+890 $) und die Long/Short-Leiste. Summenzeile, Balken, Zeilen und Legende nutzen dieselben Töne. */
-  #af-view .af-s.is-offen b{color:var(--violet)}
-  #af-view .af-s.is-lauf b{color:#026AA2}
-  #af-view .af-s.is-fertig b{color:var(--sub)}
-  #af-view .af-s.is-leer b{color:var(--sub-2)}
-  #af-view .af-ls-box{margin-left:auto;display:flex;align-items:center;gap:10px;font-size:12px;color:var(--sub);font-variant-numeric:tabular-nums;white-space:nowrap}
+  #af-view .af-k.is-offen{--af-kc:var(--violet)}
+  #af-view .af-k.is-offen .kpi-value{color:var(--violet)}
+  #af-view .af-k.is-lauf{--af-kc:#0BA5EC}
+  #af-view .af-k.is-lauf .kpi-value{color:#026AA2}
+  #af-view .af-k.is-fertig .kpi-value{color:var(--sub)}
+  #af-view .af-k.is-leer .kpi-value{color:var(--sub-2)}
   #af-view .af-ls{display:flex;width:120px;height:6px;border-radius:999px;overflow:hidden;background:var(--surface-tint);flex:none}
   #af-view .af-ls .l{background:#12B76A}
   #af-view .af-ls .s{background:#F04438}
   #af-view .af-ls[hidden]{display:none}   /* display:flex schlägt sonst das hidden-Attribut */
-  #af-view .af-ls-lbl{font-size:11px;color:var(--sub-2)}   /* „Long 2 ▬▬ 1 Short" — klar Richtung, nicht Zustand (30.09.2026) */
-  #af-view .af-ls-lbl[hidden]{display:none}
   #af-view .af-aktionen{display:flex;align-items:center;gap:10px}   /* Seitenkopf rechts: Archiv-Schalter, Stand, ↻ */
   /* FIRMEN-V3 (30.09.2026, Finn zu .848: „Wird schon besser, aber ist irgendwie alles noch so hingeklatscht" — Vorbild
      Admin → Acc-Käufe): statt verschieden langer Karten nebeneinander zwei Panels wie „Käufe nach Person / Prop-Firma",
@@ -1619,11 +1626,8 @@
   #af-view .af-klapp .af-pfeil{color:var(--violet)}
   #af-view .af-geplant{color:var(--violet);font-weight:500}   /* „geplant 14:30“ am offenen Konto (30.09.2026) */
   @media (max-width:820px){
-    /* Handy (v3-Maße): Panels untereinander (s. .af-grid), Long/Short unter die Zahlen */
+    /* Handy (v3-Maße): Panels untereinander (s. .af-grid); die Kacheln laufen über die v3-Regel .kpis (2 je Zeile) */
     #af-view{--af-typ:72px}
-    #af-view .af-summe{padding:12px 16px;gap:6px 16px}
-    #af-view .af-ls-box{margin-left:0;width:100%}
-    #af-view .af-ls-box .af-ls{flex:1;width:auto}
     /* Konto-Zeile zweizeilig, weiter im Raster: oben Typ + Name, darunter Firma (unter dem Namen) + Status rechts */
     #af-view .af-z{grid-template-columns:var(--af-typ) minmax(0,1fr) auto;grid-template-areas:"typ name name" ". firma status";column-gap:10px;row-gap:2px;padding:7px 0}
     #af-view .af-z-firma,#af-view .af-z-status{font-size:11.5px}
@@ -8067,11 +8071,13 @@
       </div>
       <div id="af-msg" style="color:var(--sub);font-size:13px;padding:22px 2px">Lade Accounts…</div>
       <div id="af-body" hidden>
-        <div class="panel af-summe" id="af-summe">
-          <span class="af-s is-offen"><b id="af-n-offen">0</b>noch offen</span>
-          <span class="af-s is-lauf"><b id="af-n-lauf">0</b>laufen</span>
-          <span class="af-s is-fertig"><b id="af-n-fertig">0</b>heute erledigt</span>
-          <span class="af-ls-box"><span id="af-ls-txt"></span><span class="af-ls-lbl" id="af-ls-l"></span><span class="af-ls" id="af-ls"><span class="l"></span><span class="s"></span></span><span class="af-ls-lbl" id="af-ls-s"></span></span>
+        <!-- Kopf-Kacheln (30.09.2026, Finn: „oben könnten noch mehr Infos kommen") — Werte schreibt afKpiRender, Klick filtert „Je ID" -->
+        <div class="kpis af-kpis" id="af-kpis">
+          <button type="button" class="kpi af-k is-offen" data-af-k="offen"><div class="kpi-label">Noch offen</div><div class="kpi-value">0</div><div class="kpi-delta"></div></button>
+          <button type="button" class="kpi af-k is-lauf" data-af-k="lauf"><div class="kpi-label">Läuft</div><div class="kpi-value">0</div><div class="kpi-delta"></div></button>
+          <button type="button" class="kpi af-k is-fertig" data-af-k="fertig"><div class="kpi-label">Heute erledigt</div><div class="kpi-value">0</div><div class="kpi-delta"></div></button>
+          <button type="button" class="kpi af-k" data-af-k="ls"><div class="kpi-label">Long / Short heute</div><div class="kpi-value">–</div><span class="af-ls" id="af-ls"><span class="l"></span><span class="s"></span></span><div class="kpi-delta"></div></button>
+          <button type="button" class="kpi af-k" data-af-k="warten" hidden><div class="kpi-label">Wartet auf Payout</div><div class="kpi-value">0</div><div class="kpi-delta"></div></button>
         </div>
         <div class="grid-2 af-grid">
           <div class="panel">
@@ -12671,6 +12677,8 @@
                        ['funded', 'Funded', 'Funded Futures'], ['winning_days', 'WD', 'Winning Days'],
                        ['funded_cfd', 'Funded CFD', 'Funded CFD'], ['live', 'Live', 'Live-Konto']]
     let afFirma = '', afArch = false
+    let afKachel = ''   // Kachel-Filter oben (30.09.2026): '' | offen | lauf | fertig | ls | warten — nur im Speicher
+    const AF_KACHEL_TXT = { offen: 'noch offen', lauf: 'läuft', fertig: 'heute erledigt', ls: 'heute getradet', warten: 'wartet auf Payout' }
     const afIdAuf = new Set()   // aufgeklappte IDs — nur im Speicher: beim Öffnen der Seite ist alles zu (Finn: „ein Blick muss reichen")
     const afFertigAuf = new Set()   // IDs mit aufgeklapptem „heute fertig" — überlebt den 60-s-Takt
     const afWartetAuf = new Set()   // dasselbe für „wartet auf Payout"
@@ -12756,6 +12764,8 @@
     document.addEventListener('DOMContentLoaded', () => {
       $('af-arch')?.addEventListener('change', e => { afArch = e.target.checked; afRender() })
       $('af-refresh')?.addEventListener('click', afLaden)
+      // Kachel = Filter für „Je ID", zweiter Klick hebt auf (wie der Firma-Filter rechts)
+      $('af-kpis')?.addEventListener('click', e => { const b = e.target.closest('[data-af-k]'); if(!b) return; const k = b.dataset.afK; afKachel = afKachel === k ? '' : k; afRender() })
     })
     function afAlle(){
       if(!afData) return []
@@ -12769,22 +12779,15 @@
       $('af-stand').textContent = afLadeZeit ? 'Stand ' + new Date(afLadeZeit).toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' }) : ''
       if(afFirma && !alle.some(x => afFirmaVon(x.r) === afFirma)) afFirma = ''
 
-      // Zusammenfassung oben (folgt der Firma)
+      // Kopf-Kacheln (folgen der Firma) — heute gestartete Trades: die Firma filtert über das Master-Konto
       const rows = alle.filter(x => !afFirma || afFirmaVon(x.r) === afFirma)
-      for(const [id, z] of [['af-n-offen', 'offen'], ['af-n-lauf', 'lauf'], ['af-n-fertig', 'fertig']]){
-        const n = rows.filter(x => x.z === z).length
-        $(id).textContent = String(n)
-        $(id).parentElement.classList.toggle('is-leer', !n)
-      }
-      afHeuteRender()
-
-      // Heute je ID: gestartete Trades heute nach user_id, die Firma filtert über das Master-Konto
       const kontenFirma = new Set(afAlle().filter(r => afFirmaVon(r) === afFirma).map(r => String(r.id)))
+      const heuteT = (afData.trades_start || []).filter(p => afIstHeute(p.at) && (!afFirma || kontenFirma.has(String(p.account_id))))
       const heuteJeId = new Map()
-      for(const p of (afData.trades_start || [])){
-        if(!afIstHeute(p.at) || (afFirma && !kontenFirma.has(String(p.account_id)))) continue
-        const u = String(p.user_id); if(!heuteJeId.has(u)) heuteJeId.set(u, []); heuteJeId.get(u).push(p)
-      }
+      for(const p of heuteT){ const u = String(p.user_id); if(!heuteJeId.has(u)) heuteJeId.set(u, []); heuteJeId.get(u).push(p) }
+      // Kachel-Filter ohne Treffer (nach dem 60-s-Takt oder Firmenwechsel) hebt sich selbst auf
+      if(afKachel && !(afKachel === 'ls' ? heuteT.length : rows.some(x => x.z === afKachel))) afKachel = ''
+      afKpiRender(rows, heuteT)
 
       // Gruppen je ID (folgt der Firma) und je Firma (immer alle — so bleibt die Auswahl sichtbar, wie bei den Käufen)
       const gruppe = (key, name) => ({ key, name, offen:[], lauf:[], fertig:[], warten:[], arch:[] })
@@ -12796,9 +12799,11 @@
       const zaehl = g => [g.lauf.length ? `${g.lauf.length}\u00a0läuft` : '', g.fertig.length ? `${g.fertig.length}\u00a0erledigt` : '']
 
       // Je ID: Klick klappt die Konten DIREKT darunter auf (mehrere gleichzeitig möglich)
-      $('af-ids-titel').textContent = afFirma ? `Je ID · ${afFirma}` : 'Je ID'
+      $('af-ids-titel').textContent = ['Je ID', afFirma, afKachel ? AF_KACHEL_TXT[afKachel] : ''].filter(Boolean).join(' · ')
       const idBox = $('af-ids'); idBox.innerHTML = ''
-      for(const g of [...jeId.values()].sort(nachOffen)){
+      // Kachel-Filter: nur IDs mit mindestens einem Konto in diesem Zustand (bzw. mit einem Trade heute)
+      const passtKachel = g => !afKachel || (afKachel === 'ls' ? heuteJeId.has(g.key) : g[afKachel].length > 0)
+      for(const g of [...jeId.values()].filter(passtKachel).sort(nachOffen)){
         const auf = afIdAuf.has(g.key)
         const h = heuteJeId.get(g.key) || []
         const hTxt = h.length ? `heute\u00a0${h.filter(p => p.richtung === 'buy').length}\u00a0L\u00a0/\u00a0${h.filter(p => p.richtung === 'sell').length}\u00a0S` : 'heute noch kein Trade'
@@ -12807,7 +12812,7 @@
           klick: () => { if(afIdAuf.has(g.key)) afIdAuf.delete(g.key); else afIdAuf.add(g.key); afRender() } }))
         if(auf) idBox.appendChild(afKonten(g))
       }
-      if(!jeId.size) idBox.innerHTML = '<div class="adm-empty">Keine Accounts für diese Auswahl.</div>'
+      if(!idBox.children.length) idBox.innerHTML = '<div class="adm-empty">Keine Accounts für diese Auswahl.</div>'
 
       // Je Firma: Klick filtert die IDs (und die Summenzeile) auf diese Firma, zweiter Klick hebt auf
       const fBox = $('af-firmen'); fBox.innerHTML = ''
@@ -12841,25 +12846,53 @@
       row.addEventListener('click', o.klick)
       return row
     }
-    /* Long/Short von heute als EINE schmale Zeile (28.09.2026 als Kachel-Panel, seit 30.09.2026 nur noch Text + Balken).
-     * Quelle trades_start: gestartete Pläne (open/review/completed), je Plan die Master-Richtung, „heute" in Ortszeit.
-     * Die Firma filtert über das Master-Konto; ohne Filter zählen auch Trades auf Konten, die nicht mehr in der Liste
-     * stehen. Der Archiv-Schalter gilt nicht — ein heute geblowtes Konto hat heute trotzdem getradet. */
-    function afHeuteRender(){
-      const konten = new Set(afAlle().filter(r => afFirmaVon(r) === afFirma).map(r => String(r.id)))
-      const t = (afData.trades_start || []).filter(p => afIstHeute(p.at) && (!afFirma || konten.has(String(p.account_id))))
-      const nL = t.filter(p => p.richtung === 'buy').length, nS = t.filter(p => p.richtung === 'sell').length
-      const nLS = nL + nS, pL = nLS ? Math.round(nL / nLS * 100) : 0
-      // „Heute 3 Trades   Long 2 ▬▬▬ 1 Short" — die Leiste trägt ihre Bedeutung selbst, damit Grün/Rot hier nicht als Zustand gelesen
-      // wird (30.09.2026, Zustands-Codierung)
-      $('af-ls-txt').textContent = t.length ? `Heute ${t.length} Trade${t.length === 1 ? '' : 's'}` : 'Heute noch kein Trade'
-      const bar = $('af-ls'), lL = $('af-ls-l'), lS = $('af-ls-s')
-      bar.hidden = !nLS
-      if(lL){ lL.hidden = !nLS; lL.textContent = `Long ${nL}` }
-      if(lS){ lS.hidden = !nLS; lS.textContent = `${nS} Short` }
-      bar.querySelector('.l').style.width = pL + '%'
-      bar.querySelector('.s').style.width = (100 - pL) + '%'
-      bar.title = nLS ? `Long ${pL} % · Short ${100 - pL} %` : ''
+    /* KOPF-KACHELN (30.09.2026, Finn: „oben könnten noch mehr Infos kommen … zu mager"). Nur, was /admin/overview je Konto schon
+     * liefert: Zustand (afZustand), geplant (afGeplant), im_trade {richtung, route, rolle}, letztes_ende {ergebnis, pl} heute,
+     * waiting_payout_since, dazu trades_start (heute gestartete Pläne, Master-Richtung) für Long/Short — wie bisher die Leiste
+     * „Long 2 ▬▬ 1 Short" (28.09.2026 als Kachel-Panel, bis heute als Zeile). Reine Anzeige; Grün/Rot nur für Geld und die
+     * Long/Short-Leiste. P&L heute je Kontowährung getrennt (nie Dollar und Euro zusammenzählen). */
+    function afKpiRender(rows, heuteT){
+      const box = $('af-kpis'); if(!box) return
+      const setz = (k, wert, sub, leer) => {
+        const b = box.querySelector(`[data-af-k="${k}"]`); if(!b) return
+        b.querySelector('.kpi-value').textContent = wert
+        b.querySelector('.kpi-delta').innerHTML = sub
+        b.classList.toggle('is-leer', !!leer); b.classList.toggle('is-on', afKachel === k)
+        b.title = afKachel === k ? 'Filter aufheben' : `„Je ID" auf ${AF_KACHEL_TXT[k]} filtern`
+      }
+      const im = z => rows.filter(x => x.z === z)
+      const offen = im('offen'), lauf = im('lauf'), fertig = im('fertig'), warten = im('warten')
+      const nb = '\u00a0'
+      // 1) Noch offen — davon geplant, in wie vielen IDs (IDs mit aktiven Konten)
+      const ids = new Set(rows.filter(x => x.z !== 'arch').map(x => String(x.r.user_id)))
+      const idsOffen = new Set(offen.map(x => String(x.r.user_id)))
+      const nGepl = offen.filter(x => afGeplant(x.r)).length
+      setz('offen', String(offen.length), [nGepl ? `davon${nb}${nGepl}${nb}geplant` : '', `in${nb}${idsOffen.size}${nb}von${nb}${ids.size}${nb}IDs`].filter(Boolean).join(' · '), !offen.length)
+      // 2) Läuft — Long/Short, dazu der Weg aus im_trade.route (Orbit tv*/ts*, Echo mt5*, Hedge = Slave-Seite)
+      const weg = x => { const t = x.r.im_trade || {}; if(t.rolle === 'slave') return 'Hedge'; const r = String(t.route || ''); return /^mt5/.test(r) ? 'Echo' : /^(tv|ts)/.test(r) ? 'Orbit' : '' }
+      const lL = lauf.filter(x => (x.r.im_trade || {}).richtung === 'buy').length, lS = lauf.filter(x => (x.r.im_trade || {}).richtung === 'sell').length
+      const wege = ['Orbit', 'Echo', 'Hedge'].map(w => [w, lauf.filter(x => weg(x) === w).length]).filter(([, n]) => n).map(([w, n]) => `${w}${nb}${n}`)
+      setz('lauf', String(lauf.length), lauf.length ? [`L${nb}${lL}${nb}/${nb}S${nb}${lS}`, ...wege].join(' · ') : 'gerade kein Trade', !lauf.length)
+      // 3) Heute erledigt — TP/SL und der P&L von heute aus den Zeilen (letztes_ende.pl in der Kontowährung)
+      const nTp = fertig.filter(x => (afHeute(x.r) || {}).ergebnis === 'tp').length, nSl = fertig.filter(x => (afHeute(x.r) || {}).ergebnis === 'sl').length
+      const je = new Map()
+      for(const x of fertig){ const e = afHeute(x.r); const v = e && e.pl != null ? Number(e.pl) : NaN; if(isFinite(v)){ const c = x.r.balance_ccy || 'USD'; je.set(c, (je.get(c) || 0) + v) } }
+      const geld = [...je].map(([c, v]) => `<span class="${v >= 0 ? 'af-plus' : 'af-minus'}">${v >= 0 ? '+' : '−'}${afGeld(Math.abs(v), c)}</span>`).join(' · ')
+      setz('fertig', String(fertig.length), [nTp || nSl ? `TP${nb}${nTp} · SL${nb}${nSl}` : '', geld].filter(Boolean).join(' · ') || 'heute noch nichts', !fertig.length)
+      // 4) Long / Short heute — gestartete Trades, Leiste grün/rot (Richtung, kein Zustand)
+      const nL = heuteT.filter(p => p.richtung === 'buy').length, nS = heuteT.filter(p => p.richtung === 'sell').length, nLS = nL + nS
+      const pL = nLS ? Math.round(nL / nLS * 100) : 0
+      setz('ls', nLS ? `${nL}${nb}L · ${nS}${nb}S` : '–', heuteT.length ? `heute${nb}${heuteT.length}${nb}Trade${heuteT.length === 1 ? '' : 's'}` : 'heute noch kein Trade', !heuteT.length)
+      const bar = $('af-ls')
+      if(bar){ bar.hidden = !nLS; bar.querySelector('.l').style.width = pL + '%'; bar.querySelector('.s').style.width = (100 - pL) + '%'; bar.title = nLS ? `Long ${pL} % · Short ${100 - pL} %` : '' }
+      // 5) Wartet auf Payout — nur, wenn es solche Konten gibt; „seit" = das älteste
+      const wBox = box.querySelector('[data-af-k="warten"]')
+      if(wBox) wBox.hidden = !warten.length
+      if(warten.length){
+        const alt = warten.map(x => x.r.waiting_payout_since).filter(Boolean).sort()[0]
+        const d = alt ? new Date(alt) : null
+        setz('warten', String(warten.length), d && !isNaN(d) ? `ältestes seit ${d.toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit' })}` : 'Funded CFD', false)
+      }
     }
     /* Aufgeklappte Konten einer ID (FIRMEN-V3, vorher „Karte je ID" aus dem Feinschliff): EINE Liste im festen Raster,
      * sortiert offen → läuft → erledigt, innerhalb davon nach Typ (Finns Reihenfolge), Firma, Name. Erledigte klappen erst
@@ -36244,7 +36277,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.869'
+  const OS_TAB_BUILD = '2026-09-22.870'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
