@@ -1552,13 +1552,21 @@
   #af-view .af-summe{display:flex;align-items:center;gap:8px 22px;flex-wrap:wrap;padding:12px 18px;margin-bottom:14px}
   #af-view .af-s{display:inline-flex;align-items:baseline;gap:6px;font-size:12.5px;color:var(--sub);white-space:nowrap}
   #af-view .af-s b{font-size:20px;font-weight:600;letter-spacing:-.02em;color:var(--ink);font-variant-numeric:tabular-nums}
+  /* ZUSTANDS-CODIERUNG (30.09.2026, Finn am Screenshot .856: Violett und Grün passen nicht zusammen, „läuft" und „erledigt" sahen mit
+     je einem grünen Punkt fast gleich aus — „das ist komisch"): offen = Violett (Marke), läuft = Himmelblau (#0BA5EC Fläche/Punkt,
+     #026AA2 Schrift 5,9:1 — kräftiger und heller als das gedeckte Phasen-Blau der Typ-Badges), erledigt = ruhig grau ohne Punkt.
+     Grün/Rot nur noch für Geld (+890 $) und die Long/Short-Leiste. Summenzeile, Balken, Zeilen und Legende nutzen dieselben Töne. */
   #af-view .af-s.is-offen b{color:var(--violet)}
+  #af-view .af-s.is-lauf b{color:#026AA2}
+  #af-view .af-s.is-fertig b{color:var(--sub)}
   #af-view .af-s.is-leer b{color:var(--sub-2)}
   #af-view .af-ls-box{margin-left:auto;display:flex;align-items:center;gap:10px;font-size:12px;color:var(--sub);font-variant-numeric:tabular-nums;white-space:nowrap}
   #af-view .af-ls{display:flex;width:120px;height:6px;border-radius:999px;overflow:hidden;background:var(--surface-tint);flex:none}
   #af-view .af-ls .l{background:#12B76A}
   #af-view .af-ls .s{background:#F04438}
   #af-view .af-ls[hidden]{display:none}   /* display:flex schlägt sonst das hidden-Attribut */
+  #af-view .af-ls-lbl{font-size:11px;color:var(--sub-2)}   /* „Long 2 ▬▬ 1 Short" — klar Richtung, nicht Zustand (30.09.2026) */
+  #af-view .af-ls-lbl[hidden]{display:none}
   #af-view .af-aktionen{display:flex;align-items:center;gap:10px}   /* Seitenkopf rechts: Archiv-Schalter, Stand, ↻ */
   /* FIRMEN-V3 (30.09.2026, Finn zu .848: „Wird schon besser, aber ist irgendwie alles noch so hingeklatscht" — Vorbild
      Admin → Acc-Käufe): statt verschieden langer Karten nebeneinander zwei Panels wie „Käufe nach Person / Prop-Firma",
@@ -1573,12 +1581,12 @@
   #af-view .adm-track{display:flex}
   #af-view .adm-fill{border-radius:0;flex:none}
   #af-view .af-f-offen{background:var(--violet)}
-  #af-view .af-f-lauf{background:#12B76A}
+  #af-view .af-f-lauf{background:#0BA5EC}
   #af-view .af-f-fertig{background:#D0D5DD}
   #af-view .adm-val.is-offen{color:var(--violet)}
   #af-view .adm-val.is-null{color:var(--sub-2);font-weight:500}
-  #af-view .af-legende{display:inline-flex;align-items:center;gap:4px 10px;flex-wrap:wrap}
-  #af-view .af-legende i{display:inline-block;width:8px;height:8px;border-radius:3px;margin-right:4px;vertical-align:0}
+  #af-view .af-legende{display:inline-flex;align-items:center;gap:4px 10px;flex-wrap:wrap;font-size:11px;color:var(--sub-2);white-space:nowrap}
+  #af-view .af-legende i{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:4px;vertical-align:0}
   /* Aufgeklappte Konten einer ID direkt unter ihrer Zeile: festes Raster [Typ | Name | Firma | Status], alle Zeilen bündig */
   #af-view{--af-typ:80px;--af-firma:92px;--af-status:150px}   /* so breit, dass der Name (mit Kontonummer) im linken Panel meist ganz passt */
   #af-view .af-konten{padding:0 0 8px;border-bottom:1px solid var(--border-soft)}
@@ -1594,17 +1602,15 @@
   #af-view .af-z-status > span:last-child{overflow:hidden;text-overflow:ellipsis}
   #af-view .af-z.is-offen .af-z-name{font-weight:500}
   #af-view .af-z-status .af-offen{color:var(--violet);font-weight:500}
-  #af-view .af-z.is-lauf .af-z-status{color:var(--ink)}
+  #af-view .af-z.is-lauf .af-z-status{color:#026AA2}
   #af-view .af-z.is-fertig,#af-view .af-z.is-arch{color:var(--sub)}
   #af-view .af-z.is-fertig .type-badge,#af-view .af-z.is-arch .type-badge{opacity:.55}
   #af-view .af-plus{color:#15803d}
   #af-view .af-minus{color:#b91c1c}
-  /* Status-Punkte: läuft = grün mit kleinem Puls (nur der Punkt), TP grün, SL rot, sonst grau */
+  /* Status-Punkt nur noch bei „läuft" (Himmelblau mit kleinem Puls); erledigte Zeilen haben keinen Punkt, die Klapp-Zeile einen grauen */
   #af-view .af-p{width:7px;height:7px;border-radius:50%;background:var(--sub-2);flex:none}
-  #af-view .af-p.is-lauf{background:#12B76A;animation:afPuls 1.8s ease-in-out infinite}
-  #af-view .af-p.is-tp{background:#12B76A}
-  #af-view .af-p.is-sl{background:#F04438}
-  @keyframes afPuls{0%,100%{box-shadow:0 0 0 0 rgba(18,183,106,.45)}50%{box-shadow:0 0 0 4px rgba(18,183,106,0)}}
+  #af-view .af-p.is-lauf{background:#0BA5EC;animation:afPuls 1.8s ease-in-out infinite}
+  @keyframes afPuls{0%,100%{box-shadow:0 0 0 0 rgba(11,165,236,.45)}50%{box-shadow:0 0 0 4px rgba(11,165,236,0)}}
   /* Eingeklappt (erledigt erst ab mehr als 4, wartet auf Payout immer): eine graue Zeile im selben Raster */
   #af-view .af-klapp{display:grid;grid-template-columns:var(--af-typ) minmax(0,1fr) auto;column-gap:12px;align-items:center;width:100%;
     padding:7px 0;border:none;border-top:1px solid var(--border-soft);background:none;font:inherit;font-size:12px;color:var(--sub);cursor:pointer;text-align:left}
@@ -8048,17 +8054,19 @@
       <div id="af-body" hidden>
         <div class="panel af-summe" id="af-summe">
           <span class="af-s is-offen"><b id="af-n-offen">0</b>noch offen</span>
-          <span class="af-s"><b id="af-n-lauf">0</b>laufen</span>
-          <span class="af-s"><b id="af-n-fertig">0</b>heute erledigt</span>
-          <span class="af-ls-box"><span id="af-ls-txt"></span><span class="af-ls" id="af-ls"><span class="l"></span><span class="s"></span></span></span>
+          <span class="af-s is-lauf"><b id="af-n-lauf">0</b>laufen</span>
+          <span class="af-s is-fertig"><b id="af-n-fertig">0</b>heute erledigt</span>
+          <span class="af-ls-box"><span id="af-ls-txt"></span><span class="af-ls-lbl" id="af-ls-l"></span><span class="af-ls" id="af-ls"><span class="l"></span><span class="s"></span></span><span class="af-ls-lbl" id="af-ls-s"></span></span>
         </div>
         <div class="grid-2 af-grid">
           <div class="panel">
             <div class="panel-head">
               <div>
                 <div class="panel-title" id="af-ids-titel">Je ID</div>
-                <div class="panel-sub">Zum Aufklappen auf eine ID klicken · <span class="af-legende"><span><i class="af-f-offen"></i>offen</span><span><i class="af-f-lauf"></i>läuft</span><span><i class="af-f-fertig"></i>erledigt</span></span></div>
+                <div class="panel-sub">Zum Aufklappen auf eine ID klicken</div>
               </div>
+              <!-- Legende oben rechts (30.09.2026): dieselben Zustands-Töne wie Balken, Summenzeile und Zeilen -->
+              <span class="af-legende"><span><i class="af-f-offen"></i>offen</span><span><i class="af-f-lauf"></i>läuft</span><span><i class="af-f-fertig"></i>erledigt</span></span>
             </div>
             <div class="adm-dist" id="af-ids"></div>
           </div>
@@ -12818,9 +12826,13 @@
       const t = (afData.trades_start || []).filter(p => afIstHeute(p.at) && (!afFirma || konten.has(String(p.account_id))))
       const nL = t.filter(p => p.richtung === 'buy').length, nS = t.filter(p => p.richtung === 'sell').length
       const nLS = nL + nS, pL = nLS ? Math.round(nL / nLS * 100) : 0
-      $('af-ls-txt').textContent = t.length ? `Heute ${t.length} Trade${t.length === 1 ? '' : 's'} · ${nL} Long · ${nS} Short` : 'Heute noch kein Trade'
-      const bar = $('af-ls')
+      // „Heute 3 Trades   Long 2 ▬▬▬ 1 Short" — die Leiste trägt ihre Bedeutung selbst, damit Grün/Rot hier nicht als Zustand gelesen
+      // wird (30.09.2026, Zustands-Codierung)
+      $('af-ls-txt').textContent = t.length ? `Heute ${t.length} Trade${t.length === 1 ? '' : 's'}` : 'Heute noch kein Trade'
+      const bar = $('af-ls'), lL = $('af-ls-l'), lS = $('af-ls-s')
       bar.hidden = !nLS
+      if(lL){ lL.hidden = !nLS; lL.textContent = `Long ${nL}` }
+      if(lS){ lS.hidden = !nLS; lS.textContent = `${nS} Short` }
       bar.querySelector('.l').style.width = pL + '%'
       bar.querySelector('.s').style.width = (100 - pL) + '%'
       bar.title = nLS ? `Long ${pL} % · Short ${100 - pL} %` : ''
@@ -12881,9 +12893,9 @@
         text([tr.rolle === 'slave' ? 'Hedge' : '', [afRichtung(tr.richtung), tr.symbol].filter(Boolean).join(' '), seit ? 'seit ' + seit : ''].filter(Boolean).join(' · ') || 'im Trade')
       }else if(z === 'fertig'){
         // „TP 12:40 · +272 $" — Betrag klein grün/rot, Rest gedämpft
+        // erledigt = ruhig grau, KEIN Punkt (30.09.2026, Finn: „läuft" und „erledigt" sahen gleich aus) — nur der Betrag grün/rot
         const e = afHeute(r)
-        punkt(e.ergebnis === 'tp' ? 'is-tp' : e.ergebnis === 'sl' ? 'is-sl' : '')
-        const was = (e.ergebnis === 'tp' ? 'TP' : e.ergebnis === 'sl' ? 'SL' : 'beendet') + ' ' + afZeit(e.at)
+        const was = (e.ergebnis === 'tp' ? '✓ TP' : e.ergebnis === 'sl' ? 'SL' : 'beendet') + ' ' + afZeit(e.at)
         const s = text(was)
         if(e.pl != null){
           s.append(' · ')
@@ -36161,7 +36173,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.860'
+  const OS_TAB_BUILD = '2026-09-22.861'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
