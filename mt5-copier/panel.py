@@ -398,7 +398,7 @@ def snapshot():
         seen_magic.setdefault(magic, []).append(inst["config_file"])
         seen_snap.setdefault(snapf, []).append(inst["config_file"])
         alive = bool(st.get("running")) and age is not None and age <= 15
-        # Lese-Instanz (25.09.2026, Finn: „Warum sehe ich bei Mike nicht den Live-P&L, wenn es doch über
+        # Lese-Instanz (25.09.2026, Finn: „Warum sehe ich bei ID A nicht den Live-P&L, wenn es doch über
         # Echo V2 gemacht wurde?"): Echo V2 läuft absichtlich OHNE Copier — dann schrieb niemand
         # master_balance/-equity/-positionen, Baseline und Live-P&L blieben leer. Läuft der Copier nicht,
         # liest das Panel die Snapshot-Datei des Lese-EAs selbst (nur Datei, keine Terminal-Verbindung,
@@ -708,7 +708,7 @@ def terminal_schliessbar(cfg, st, age, plan_status=None, lese=None):
     frisch = bool(st.get("running")) and age is not None and age <= 15
     if not frisch:
         # Echo V2 läuft absichtlich OHNE Copier (25.09.2026) — dann war der Copier-Status nie frisch und
-        # KEIN Terminal ging mehr zu (30.09.2026, Mike pc-l5o8bv: alle 7 Instanzen alive=false, 5–7
+        # KEIN Terminal ging mehr zu (30.09.2026, ID A pc-aaaaaa: alle 7 Instanzen alive=false, 5–7
         # Terminals stundenlang offen). Beweis dann über den frischen Snapshot des Lese-EAs (≤ 15 s).
         # Meldet der letzte (alte) Copier-Stand noch einen Hedge, bleibt es beim Nein.
         if isinstance(lese, dict) and lese.get("lesen"):
@@ -1050,11 +1050,11 @@ TV_ORDER_LOCK = threading.Lock()
 HEDGE_SOLO_LOCK = threading.Lock()
 
 
-# PC-Kennung im Panel (25.09.2026, Koordinations-Session): Finn nutzt auf pc-usq1i6 zwei Chrome-Profile (Puls +
-# Feed). Prophos erzeugte die Kennung je Profil aus localStorage → zwei Kennungen am selben PC (pc-usq1i6 +
-# pc-4bx8nm), und hedge.pc band Wächter/Schließen an EIN Profil. Jetzt verwahrt das Panel die Kennung für alle
+# PC-Kennung im Panel (25.09.2026, Koordinations-Session): Finn nutzt auf pc-cccccc zwei Chrome-Profile (Puls +
+# Feed). Prophos erzeugte die Kennung je Profil aus localStorage → zwei Kennungen am selben PC (pc-cccccc +
+# pc-dddddd), und hedge.pc band Wächter/Schließen an EIN Profil. Jetzt verwahrt das Panel die Kennung für alle
 # Profile des PCs. Keine Erfindung, keine Überschreibung: das erste Profil, das POST /api/pc-id schickt, trägt
-# seine bestehende Kennung ein (so bleiben pc-usq1i6 … erhalten), jedes weitere bekommt diese zurück.
+# seine bestehende Kennung ein (so bleiben pc-cccccc … erhalten), jedes weitere bekommt diese zurück.
 PC_ID_DATEI = os.path.join(HERE, "pc_id.json")
 PC_ID_RE = re.compile(r"^pc-[a-z0-9]{4,12}$")
 PC_ID_LOCK = threading.Lock()
@@ -1539,7 +1539,7 @@ def start_terminal(fname, creds=None):
     wird der Login beim Start ERZWUNGEN — per transienter /config-ini mit
     KeepPrivate=1, exakt der Provisionierungs-Weg. Ohne Zwang schlaegt MT5 das
     zuletzt benutzte Konto des Ordners vor (15.08.2026, erster Trade-Test: das
-    Terminal oeffnete mit 437916 statt 438639 und der Trade lief ins Leere)."""
+    Terminal oeffnete mit 400005 statt 400006 und der Trade lief ins Leere)."""
     cfg = read_json(os.path.join(HERE, fname), {}) or {}
     path = str(cfg.get("master_terminal_path") or "").strip()
     if not path:
@@ -1891,7 +1891,7 @@ pre.log{background:var(--surface-tint);border:1px solid var(--border-soft);borde
   <p class=modal-sub>klont das Master-Vorlage-Terminal, loggt ein, legt EA + Config an — alles automatisch</p>
   <div class=row>
     <div><label>Name (kurz, nur Buchstaben/Zahlen)</label><input data-p=name placeholder="z.B. ftmo1"></div>
-    <div><label>Login (Kontonummer)</label><input data-p=login placeholder="z.B. 437899"></div>
+    <div><label>Login (Kontonummer)</label><input data-p=login placeholder="z.B. 12345678"></div>
   </div>
   <div class=row style="margin-top:2px">
     <div><label>Passwort (sichtbar — auf Wunsch)</label><input data-p=password autocomplete=off spellcheck=false></div>
@@ -2308,7 +2308,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if u.path == "/api/set-hedge":
             # Hedge-Konto dieses PCs zentral umstellen (25.08.2026, Finns Wunsch
-            # nach dem 437804/488579-Hänger: die ID soll in Prophos eingebbar
+            # nach dem 400002/400004-Hänger: die ID soll in Prophos eingebbar
             # sein statt per Hand in jeder config*.json). Schreibt
             # hedge_expected_login in ALLE Instanz-Configs — check_fleet
             # verlangt ohnehin, dass sie identisch sind. Der Copier merkt die
@@ -2323,7 +2323,7 @@ class Handler(BaseHTTPRequestHandler):
             login_raw = str(body.get("login") or "").strip()
             if not re.fullmatch(r"\d{1,12}", login_raw):
                 return self._send(400, json.dumps({"ok": False, "msg":
-                    "Hedge-Kontonummer muss eine Zahl sein (z.B. 488579)."}, ensure_ascii=False))
+                    "Hedge-Kontonummer muss eine Zahl sein (z.B. 12345678)."}, ensure_ascii=False))
             new_login = int(login_raw)
             insts = instances()
             if not insts:
@@ -2355,7 +2355,7 @@ class Handler(BaseHTTPRequestHandler):
                         f"dann das Hedge-Konto wechseln."}, ensure_ascii=False))
             changed = []
             # Die VORLAGE mit umstellen (25.08.2026, Finns Live-Fund: die
-            # Provisionierung von '100kThe5ers26574775' erbte das alte
+            # Provisionierung von '100kThe5ers00000000' erbte das alte
             # Hedge-Konto aus config.vorlage.json — die Flotten-Pruefung brach
             # in der Schleife ab, weil die neue Config vom Rest abwich. Der
             # Chip ist die eine Stelle, die das Hedge-Konto dieses PCs pflegt —
@@ -3632,7 +3632,7 @@ class Handler(BaseHTTPRequestHandler):
         pass  # eigenes, ruhigeres Logging oben
 
 
-# ── Neustart-Sperre „Start steht bevor" (25.09.2026, Finns Test auf pc-8jcrsm: der Hedge-Open um 20:51:14
+# ── Neustart-Sperre „Start steht bevor" (25.09.2026, Finns Test auf pc-iiiiii: der Hedge-Open um 20:51:14
 # bekam 'copier_alt', weil der Copier gerade per Selbst-Update neu startete — zwischen Puls-Start und Hedge-Open
 # liegen bis zu ~1 min, und in diesem Fenster hielt nichts den Neustart auf; eine offene Solo-Position tut es
 # erst NACH dem Open). Jeder echte Puls-Start (/api/tv-order ohne probe) und POST /api/hedge-solo
@@ -3679,7 +3679,7 @@ def _local_version():
         return None
 
 
-# ── QuickEdit aus (25.09.2026, Live-Befund pc-usq1i6: Feed stand 6 min, Finns Foto zeigte die Titelleiste
+# ── QuickEdit aus (25.09.2026, Live-Befund pc-cccccc: Feed stand 6 min, Finns Foto zeigte die Titelleiste
 # „Auswählen Prophos TV-Reader"). Windows-Konsolen starten bei einem Klick ins Fenster eine MARKIERUNG
 # (QuickEdit) — solange sie steht, blockiert Windows jede Ausgabe, der Prozess haengt beim naechsten print()
 # und nimmt nichts mehr an. Beim Start abschalten; auf Mac/Linux nichts.

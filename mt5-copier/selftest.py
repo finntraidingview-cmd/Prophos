@@ -219,7 +219,7 @@ def main():
             print(f"    Fehler: {errors}")
         return ok
 
-    BASE = {"hedge_terminal_path": "C:\\MT5-Hedge\\terminal64.exe", "hedge_expected_login": 437804}
+    BASE = {"hedge_terminal_path": "C:\\MT5-Hedge\\terminal64.exe", "hedge_expected_login": 400002}
 
     # 18) Doppelte magic wird als Fehler erkannt (der kritische Audit-Fund)
     results.append(fleet(
@@ -238,7 +238,7 @@ def main():
     # 20) master_expected_login 0 ist ab zwei Mastern verboten
     results.append(fleet(
         "FLOTTE: master_expected_login 0 bei zwei Mastern → Abbruch-Fehler",
-        [dict(BASE, _file="config.json", magic=770001, snapshot_file="a.csv", master_expected_login=437803),
+        [dict(BASE, _file="config.json", magic=770001, snapshot_file="a.csv", master_expected_login=400001),
          dict(BASE, _file="config-m2.json", magic=770002, snapshot_file="b.csv", master_expected_login=0)],
         expect_error_contains="master_expected_login"))
 
@@ -248,14 +248,14 @@ def main():
         [dict(BASE, _file="config.json", magic=770001, snapshot_file="a.csv", master_expected_login=1),
          {"_file": "config-m2.json", "magic": 770002, "snapshot_file": "b.csv",
           "master_expected_login": 2, "hedge_terminal_path": "C:\\ANDERES\\terminal64.exe",
-          "hedge_expected_login": 437804}],
+          "hedge_expected_login": 400002}],
         expect_error_contains="hedge_terminal_path"))
 
     # 22) Saubere Zwei-Master-Flotte geht durch
     results.append(fleet(
         "FLOTTE: saubere Zwei-Master-Config → keine Fehler",
-        [dict(BASE, _file="config.json", magic=770001, snapshot_file="a.csv", master_expected_login=437803),
-         dict(BASE, _file="config-m2.json", magic=770002, snapshot_file="b.csv", master_expected_login=437873)],
+        [dict(BASE, _file="config.json", magic=770001, snapshot_file="a.csv", master_expected_login=400001),
+         dict(BASE, _file="config-m2.json", magic=770002, snapshot_file="b.csv", master_expected_login=400003)],
         expect_ok=True))
 
     # ── Startup-Skip mit Hedge-Adoption (Neustart-Recovery, seit 13.08.2026) ────
@@ -305,7 +305,7 @@ def main():
 
     with tempfile.TemporaryDirectory() as td:
         base = {"mode": "demo", "hedge_terminal_path": "C:\\MT5-Hedge\\terminal64.exe",
-                "hedge_expected_login": 437804, "master_expected_login": 437803,
+                "hedge_expected_login": 400002, "master_expected_login": 400001,
                 "snapshot_file": "prophos_master.csv", "magic": 770001,
                 "comment_prefix": "PH", "multiplier": 1.0,
                 "symbol_map": {"NAS100": "NAS100"},
@@ -329,7 +329,7 @@ def main():
                                             ident=ident)
         results.append(prov(
             "PROVISION: Config erbt Hedge-Ziel, kein mode-Feld, keine _kommentare",
-            lambda: cfg["hedge_expected_login"] == 437804
+            lambda: cfg["hedge_expected_login"] == 400002
                     and "mode" not in cfg
                     and "mode" not in provision.build_master_config(
                         dict(base, mode="live"), name="x1",
@@ -349,21 +349,21 @@ def main():
             and provision.prefix_for(771002, {"PH"}, 771000) == "P2"
             # Bestands-PC ohne magic_base bleibt exakt wie bisher (Default 770000):
             and provision.next_magic({770001, 770002}) == 770003)
-        # Und end-zu-end an einem FRISCHEN Ordner (= Moritz' eigener PC, eigener
+        # Und end-zu-end an einem FRISCHEN Ordner (= eigener PC von ID B, eigener
         # Ordner): der erste Account landet sauber im 771000er-Block mit PH.
         with tempfile.TemporaryDirectory() as td2:
             # Vorlage ohne magic/comment_prefix — genau wie die echte
             # config.vorlage.json (die ist kein Account).
-            _json.dump({"hedge_expected_login": 488579,
+            _json.dump({"hedge_expected_login": 400004,
                         "master_terminal_path": "C:\\MT5-Master\\terminal64.exe",
                         "magic_base": 771000},
                        open(os.path.join(td2, "config.vorlage.json"), "w"))
-            ident_block1 = provision.alloc_identity(td2, "moritz1", magic_base=771000)
+            ident_block1 = provision.alloc_identity(td2, "idb1", magic_base=771000)
         results.append(prov(
             "PROVISION: magic_base verschiebt den Block; frischer PC → magic 771001, Praefix PH",
             lambda: magic_base_logik
                     and ident_block1 == {"magic": 771001, "prefix": "PH",
-                                         "snapshot": "prophos_master_moritz1.csv"}))
+                                         "snapshot": "prophos_master_idb1.csv"}))
 
         # 28) plan_checks faengt die Nutzerfehler ab
         probs = provision.plan_checks(td, "böse name!", "abc", "", None)
@@ -552,7 +552,7 @@ def main():
     chk("ORDER-BOT (Spur): Inventar unter der Reiterzeile nennt Typ, Name und Rechteck",
         _inv.startswith("ComboBox:Einheiten@1510,300,1600,322 | ComboBox:Ø USD Risiko@") and _inv.count("|") == 3
         and "Kauf 30" not in _inv)
-    # Zuruecklesen mit Nachlesen (25.09.2026, pc-8jcrsm: 'Stop loss: im Feld steht '?' statt 250.0')
+    # Zuruecklesen mit Nachlesen (25.09.2026, pc-iiiiii: 'Stop loss: im Feld steht '?' statt 250.0')
     def _folge(werte):
         it = iter(werte)
         return lambda: next(it, None)
@@ -596,7 +596,7 @@ def main():
     chk("ORDER-BOT: Backend-Konsole/MT5-Terminal sind KEIN Prophos-Fenster",
         not order_bot.ist_prophos_fenster("Prophos-Backend", "ConsoleWindowClass")
         and not order_bot.ist_prophos_fenster("Prophos-Backend", "CASCADIA_HOSTING_WINDOW_CLASS")
-        and not order_bot.ist_prophos_fenster("437803: FTMO-Demo", order_bot.MT5_KLASSE))
+        and not order_bot.ist_prophos_fenster("400001: FTMO-Demo", order_bot.MT5_KLASSE))
     chk("ORDER-BOT: DevTools/leerer Titel/leere Klasse sind KEIN Prophos-Fenster",
         not order_bot.ist_prophos_fenster("DevTools - prophos.pages.dev/prophos", "Chrome_WidgetWin_1")
         and not order_bot.ist_prophos_fenster("", "Chrome_WidgetWin_1")
@@ -689,32 +689,32 @@ def main():
     _P = lambda *els: {"geo": _G, "konto": {"aktiv": "", "schalter": None, "eintraege": []}, "panel": list(els)}
     _el = lambda text, x, y, w, h: {"tag": "div", "text": text, "rect": [x, y, w, h]}
     _finn = _P(_el("Tradovate", 70, 850, 120, 30),
-               _el("APEX6416990000024 USD", 72, 905, 200, 34),      # Huelle
-               _el("APEX6416990000024 USD", 76, 908, 190, 28),      # Knopf
-               _el("APEX6416990000024", 84, 912, 130, 20),           # Textspanne
+               _el("APEX0000000000024 USD", 72, 905, 200, 34),      # Huelle
+               _el("APEX0000000000024 USD", 76, 908, 190, 28),      # Knopf
+               _el("APEX0000000000024", 84, 912, 130, 20),           # Textspanne
                _el("Positions", 75, 950, 80, 28))
     chk("TV-KONTO: Kontonummer im Panel-Text schlaegt fehlenden Anker (Finns Lauf 21.09.)",
-        order_bot.tv_konto_zustand(_finn, "APEX6416990000024", [])[0] == "richtig"
-        and order_bot.tv_konto_zustand(_finn, "APEX6416990000031", ["APEX6416990000024"])[0] == "gleicher_login"
+        order_bot.tv_konto_zustand(_finn, "APEX0000000000024", [])[0] == "richtig"
+        and order_bot.tv_konto_zustand(_finn, "APEX0000000000031", ["APEX0000000000024"])[0] == "gleicher_login"
         and order_bot.tv_konto_zustand(_finn, "TDFY123456", ["TDFY999999"])[0] == "kein_broker")
     chk("TV-KONTO: Text-Suche — verschachtelte Treffer werden EIN Element (das innerste)",
-        [e["rect"] for e in order_bot.tv_konto_per_text(_finn, ["APEX6416990000024"])] == [[84, 912, 130, 20]])
+        [e["rect"] for e in order_bot.tv_konto_per_text(_finn, ["APEX0000000000024"])] == [[84, 912, 130, 20]])
     # Offene Aufklappliste: zwei bekannte Konten sichtbar -> welcher aktiv ist,
     # sagt der Text nicht -> NIE 'richtig' aus dem Text-Weg.
-    _offen = _P(_el("APEX6416990000024 USD", 76, 908, 190, 28), _el("APEX6416990000031 USD", 76, 860, 190, 28))
+    _offen = _P(_el("APEX0000000000024 USD", 76, 908, 190, 28), _el("APEX0000000000031 USD", 76, 860, 190, 28))
     chk("TV-KONTO: Text-Suche — zwei bekannte Konten sichtbar = kein Urteil",
-        order_bot.tv_konto_zustand(_offen, "APEX6416990000024", ["APEX6416990000031"])[0] == "kein_broker")
+        order_bot.tv_konto_zustand(_offen, "APEX0000000000024", ["APEX0000000000031"])[0] == "kein_broker")
     chk("TV-KONTO: Text-Suche — Nummer in der oberen Fensterhaelfte zaehlt nicht, fuer Listeneintraege doch",
-        order_bot.tv_konto_per_text(_P(_el("APEX6416990000024", 300, 200, 150, 20)), ["APEX6416990000024"]) == []
-        and len(order_bot.tv_konto_per_text(_P(_el("APEX6416990000024", 300, 200, 150, 20)), ["APEX6416990000024"], ueberall=True)) == 1)
+        order_bot.tv_konto_per_text(_P(_el("APEX0000000000024", 300, 200, 150, 20)), ["APEX0000000000024"]) == []
+        and len(order_bot.tv_konto_per_text(_P(_el("APEX0000000000024", 300, 200, 150, 20)), ["APEX0000000000024"], ueberall=True)) == 1)
     chk("TV-KONTO: Text-Suche — Listeneintrag nur das ZIEL, nie der Umschalter selbst",
-        [e["text"] for e in order_bot.tv_konto_per_text(_offen, ["APEX6416990000024", "APEX6416990000031"],
-            nur_ziel="APEX6416990000031", ohne=(76, 908, 190, 28), ueberall=True)] == ["APEX6416990000031 USD"]
-        and order_bot.tv_konto_per_text(_offen, ["APEX6416990000024"], nur_ziel="APEX6416990000024",
+        [e["text"] for e in order_bot.tv_konto_per_text(_offen, ["APEX0000000000024", "APEX0000000000031"],
+            nur_ziel="APEX0000000000031", ohne=(76, 908, 190, 28), ueberall=True)] == ["APEX0000000000031 USD"]
+        and order_bot.tv_konto_per_text(_offen, ["APEX0000000000024"], nur_ziel="APEX0000000000024",
             ohne=(76, 908, 190, 28), ueberall=True) == [])
     chk("TV-KONTO: Diagnose — nur der untere Bereich, ohne Doppelte, klein genug fuer die Zwischenablage",
         [e["text"] for e in order_bot.tv_diagnose(dict(_finn, dump=_finn["panel"] + [_el("Trade", 1700, 20, 60, 30)]))["unten"]]
-            == ["Tradovate", "APEX6416990000024 USD", "APEX6416990000024 USD", "APEX6416990000024", "Positions"]
+            == ["Tradovate", "APEX0000000000024 USD", "APEX0000000000024 USD", "APEX0000000000024", "Positions"]
         and order_bot.tv_diagnose(None)["unten"] == [])
 
     # Finns ZWEITER Lauf 21.09.2026: Dropdown ging auf, "0 Eintraege" — die
@@ -723,22 +723,22 @@ def main():
     # Feld da, gilt NUR es — auch leer.
     _T = lambda treffer, *panel: dict(_P(*panel), treffer=treffer, version="0.4.2")
     _tr = lambda text, x, y, w=190, h=28: {"rect": [x, y, w, h], "text": text, "rolle": "option", "liste": True}
-    _zu = _T([_tr("APEX6416990000031", 84, 912, 130, 20)])
-    _auf = _T([_tr("APEX6416990000031", 84, 912, 130, 20),                 # Umschalter
-               _tr("APEX6416990000024", 90, 300), _tr("APEX6416990000031", 90, 340),
-               _tr("APEX6416990000047", 90, 380)])
-    _ids = ["APEX6416990000024", "APEX6416990000031", "APEX6416990000047"]
+    _zu = _T([_tr("APEX0000000000031", 84, 912, 130, 20)])
+    _auf = _T([_tr("APEX0000000000031", 84, 912, 130, 20),                 # Umschalter
+               _tr("APEX0000000000024", 90, 300), _tr("APEX0000000000031", 90, 340),
+               _tr("APEX0000000000047", 90, 380)])
+    _ids = ["APEX0000000000024", "APEX0000000000031", "APEX0000000000047"]
     chk("TV-KONTO: 'treffer' — Zustand bei geschlossener Liste, Zieleintrag bei offener (auch oben im Fenster)",
-        order_bot.tv_konto_zustand(_zu, "APEX6416990000024", _ids[1:])[0] == "gleicher_login"
-        and [e["rect"] for e in order_bot.tv_konto_per_text(_auf, _ids, nur_ziel="APEX6416990000024",
+        order_bot.tv_konto_zustand(_zu, "APEX0000000000024", _ids[1:])[0] == "gleicher_login"
+        and [e["rect"] for e in order_bot.tv_konto_per_text(_auf, _ids, nur_ziel="APEX0000000000024",
              ohne=(84, 912, 130, 20), ueberall=True)] == [[90, 300, 190, 28]]
         # aktives Konto steht ZWEIMAL da (Umschalter + Liste): als Ziel gesucht
         # bleibt nur der Listeneintrag, der Umschalter ist ausgenommen
-        and [e["rect"] for e in order_bot.tv_konto_per_text(_auf, _ids, nur_ziel="APEX6416990000031",
+        and [e["rect"] for e in order_bot.tv_konto_per_text(_auf, _ids, nur_ziel="APEX0000000000031",
              ohne=(84, 912, 130, 20), ueberall=True)] == [[90, 340, 190, 28]])
     chk("TV-KONTO: 'treffer' vorhanden aber leer schlaegt die gekappte panel-Liste (nie beides mischen)",
-        order_bot.tv_konto_per_text(_T([], _el("APEX6416990000024", 84, 912, 130, 20)), _ids) == []
-        and len(order_bot.tv_konto_per_text(dict(_P(_el("APEX6416990000024", 84, 912, 130, 20)), treffer=None), _ids)) == 1)
+        order_bot.tv_konto_per_text(_T([], _el("APEX0000000000024", 84, 912, 130, 20)), _ids) == []
+        and len(order_bot.tv_konto_per_text(dict(_P(_el("APEX0000000000024", 84, 912, 130, 20)), treffer=None), _ids)) == 1)
     chk("TV-KONTO: Userscript-Mindestversion",
         order_bot.tv_version_min("0.4.2", "0.4.2") and order_bot.tv_version_min("0.5.0", "0.4.2")
         and order_bot.tv_version_min("0.4.10", "0.4.2")
@@ -750,21 +750,21 @@ def main():
     # (l,t,r,b). Nachgestellt: Fenster 0,0-1920,1040, Umschalter unten links,
     # offene Liste darueber, jeder Eintrag als ListItem-Huelle + Text.
     _F = (0, 0, 1920, 1040)
-    _sw = ("APEX6416990000031 USD", (84, 960, 260, 984))
-    _li = [("APEX6416990000024", (90, 700, 300, 728)), ("APEX6416990000024", (96, 704, 230, 724)),
-           ("APEX6416990000031", (90, 740, 300, 768)), ("APEX6416990000031", (96, 744, 230, 764)),
-           ("APEX6416990000047", (90, 780, 300, 808)), ("TDFY000123456", (90, 820, 300, 848))]
+    _sw = ("APEX0000000000031 USD", (84, 960, 260, 984))
+    _li = [("APEX0000000000024", (90, 700, 300, 728)), ("APEX0000000000024", (96, 704, 230, 724)),
+           ("APEX0000000000031", (90, 740, 300, 768)), ("APEX0000000000031", (96, 744, 230, 764)),
+           ("APEX0000000000047", (90, 780, 300, 808)), ("TDFY000123456", (90, 820, 300, 848))]
     chk("TV-UIA: geschlossene Liste = genau ein Element = Urteil moeglich; Klickpunkt = Mitte in Bildschirm-Pixeln",
-        [(e["id"], e["punkt"]) for e in order_bot.tv_uia_filtern([_sw], _ids, _F)] == [("APEX6416990000031", (172, 972))])
+        [(e["id"], e["punkt"]) for e in order_bot.tv_uia_filtern([_sw], _ids, _F)] == [("APEX0000000000031", (172, 972))])
     chk("TV-UIA: offene Liste — Ziel genau einmal (innerstes Element), Umschalter ausgenommen, fremdes Konto nie",
-        [e["r"] for e in order_bot.tv_uia_filtern([_sw] + _li, _ids, _F, nur_ziel="APEX6416990000024", ohne=_sw[1])] == [(96, 704, 230, 724)]
-        and [e["r"] for e in order_bot.tv_uia_filtern([_sw] + _li, _ids, _F, nur_ziel="APEX6416990000031", ohne=_sw[1])] == [(96, 744, 230, 764)]
+        [e["r"] for e in order_bot.tv_uia_filtern([_sw] + _li, _ids, _F, nur_ziel="APEX0000000000024", ohne=_sw[1])] == [(96, 704, 230, 724)]
+        and [e["r"] for e in order_bot.tv_uia_filtern([_sw] + _li, _ids, _F, nur_ziel="APEX0000000000031", ohne=_sw[1])] == [(96, 744, 230, 764)]
         and order_bot.tv_uia_filtern([_sw] + _li, _ids, _F, nur_ziel="TDFY000123456") == []
         and len(order_bot.tv_uia_filtern([_sw] + _li, _ids, _F)) == 4)
     chk("TV-UIA: ausserhalb des Fensters / Nullgroesse / kaputtes Rechteck zaehlt nie",
-        order_bot.tv_uia_filtern([("APEX6416990000024", (2500, 700, 2700, 728))], _ids, _F) == []
-        and order_bot.tv_uia_filtern([("APEX6416990000024", (90, 700, 90, 728))], _ids, _F) == []
-        and order_bot.tv_uia_filtern([("APEX6416990000024", None), ("APEX6416990000024", ("a", 1, 2, 3))], _ids, _F) == []
+        order_bot.tv_uia_filtern([("APEX0000000000024", (2500, 700, 2700, 728))], _ids, _F) == []
+        and order_bot.tv_uia_filtern([("APEX0000000000024", (90, 700, 90, 728))], _ids, _F) == []
+        and order_bot.tv_uia_filtern([("APEX0000000000024", None), ("APEX0000000000024", ("a", 1, 2, 3))], _ids, _F) == []
         and order_bot.tv_uia_filtern(None, _ids, _F) == [])
 
     # Schritt 2b (21.09.2026 nachts): Tradovate-Login wechseln. Gefunden wird
@@ -792,30 +792,30 @@ def main():
         and [e["punkt"] for e in order_bot.tv_uia_namen_filtern(_N, order_bot.TV_RX_TRADE, _F, y_bis=0.15)] == [(1730, 25)]
         and order_bot.tv_uia_namen_filtern(_N, order_bot.TV_RX_TRADE, _F, y_von=0.5) == [])
     chk("TV-LOGIN: Tasten-Escape — Sonderzeichen im Username werden nicht zu Tastenkombinationen",
-        order_bot.tv_tasten_escape("APEX_641699") == "APEX_641699"
+        order_bot.tv_tasten_escape("APEX_000000") == "APEX_000000"
         and order_bot.tv_tasten_escape("max+apex(1)") == "max{+}apex{(}1{)}"
         and order_bot.tv_tasten_escape("a^b%c~d") == "a{^}b{%}c{~}d")
     chk("TV-LOGIN: Diagnose-Inventar — kurz, ohne Doppelte, lange Texte (News) raus",
         order_bot.tv_uia_inventar(_N + [("x" * 60, (1, 1, 9, 9), "Text")]) ==
             ["Button:Tradovate@70,850", "Text:Tradovate@100,856", "Button:Trade@1700,10", "Button:Unsichtbar"])
 
-    # Finns erster 2b-Lauf (21.09.2026 nachts): aktiv war 'PAAPEX6416990000008' —
-    # darin steckt 'APEX6416990000008' als Teilstring. Zwei verschiedene Konten.
+    # Finns erster 2b-Lauf (21.09.2026 nachts): aktiv war 'PAAPEX0000000000008' —
+    # darin steckt 'APEX0000000000008' als Teilstring. Zwei verschiedene Konten.
     chk("TV-KONTO: ganze Woerter statt Teilstring — PAAPEX…008 ist NICHT APEX…008",
-        not order_bot.tv_konto_wort_passt("PAAPEX6416990000008 USD", "APEX6416990000008")
-        and order_bot.tv_konto_wort_passt("PAAPEX6416990000008 USD", "PAAPEX6416990000008")
-        and order_bot.tv_konto_wort_passt("APEX6416990000024 USD", "APEX6416990000024")
+        not order_bot.tv_konto_wort_passt("PAAPEX0000000000008 USD", "APEX0000000000008")
+        and order_bot.tv_konto_wort_passt("PAAPEX0000000000008 USD", "PAAPEX0000000000008")
+        and order_bot.tv_konto_wort_passt("APEX0000000000024 USD", "APEX0000000000024")
         and order_bot.tv_konto_wort_passt("APEX-123-01 · PA", "APEX12301")
         and order_bot.tv_konto_wort_passt("Konto (APEX-123-01)", "APEX-123-01")
         and not order_bot.tv_konto_wort_passt("APEX-123-011", "APEX-123-01")
         and not order_bot.tv_konto_wort_passt("PA-12", "12")
-        and order_bot.tv_konto_zustand(_bf("PAAPEX6416990000008 USD"), "APEX6416990000008", [])[0] == "falsch")
+        and order_bot.tv_konto_zustand(_bf("PAAPEX0000000000008 USD"), "APEX0000000000008", [])[0] == "falsch")
     chk("TV-LOGIN: Menuepunkt 'Connect another broker…' und kontonummer-artige Namen",
         order_bot.TV_RX_ANDERER_BROKER.search("Connect another broker…")
         and order_bot.TV_RX_ANDERER_BROKER.search("Anderen Broker verbinden…")
         and not order_bot.TV_RX_ANDERER_BROKER.search("Connect broker")
         and not order_bot.TV_RX_ANDERER_BROKER.search("Trading settings…")
-        and all(order_bot.TV_RX_KONTOARTIG.search(x) for x in ("PAAPEX6416990000008 USD", "APEX6416990000024", "TDFY-123456-01 EUR"))
+        and all(order_bot.TV_RX_KONTOARTIG.search(x) for x in ("PAAPEX0000000000008 USD", "APEX0000000000024", "TDFY-123456-01 EUR"))
         and not any(order_bot.TV_RX_KONTOARTIG.search(x) for x in ("Account Balance", "157,501.40", "NQU2026", "Tradovate", "29,613.75 USD")))
     _K = [("Tradovate", (640, 470, 740, 500), "Text"), ("Tradovate", (660, 400, 720, 460), "Image"),
           ("Tradovate", (110, 970, 180, 995), "Text"), ("Tradovate", (80, 965, 210, 1000), "Button")]
@@ -829,12 +829,12 @@ def main():
 
     # Fund der Simulation (21.09.2026 nachts): der Username steckt als Teilstring
     # in einer Kontonummer — der Autofill-Vorschlag darf nur als GANZES WORT passen.
-    chk("TV-LOGIN: Autofill — Username nur als ganzes Wort, nie in 'PAAPEX6416990000008'",
-        order_bot.tv_konto_wort_passt("APEX_641699", "APEX_641699")
-        and order_bot.tv_konto_wort_passt("APEX_641699, ••••••••", "APEX_641699")
-        and order_bot.tv_konto_wort_passt("apex_641699 tradovate.com", "APEX_641699")
-        and not order_bot.tv_konto_wort_passt("PAAPEX6416990000008 USD", "APEX_641699")
-        and not order_bot.tv_konto_wort_passt("APEX_6416990", "APEX_641699"))
+    chk("TV-LOGIN: Autofill — Username nur als ganzes Wort, nie in 'PAAPEX0000000000008'",
+        order_bot.tv_konto_wort_passt("APEX_000000", "APEX_000000")
+        and order_bot.tv_konto_wort_passt("APEX_000000, ••••••••", "APEX_000000")
+        and order_bot.tv_konto_wort_passt("apex_000000 tradovate.com", "APEX_000000")
+        and not order_bot.tv_konto_wort_passt("PAAPEX0000000000008 USD", "APEX_000000")
+        and not order_bot.tv_konto_wort_passt("APEX_0000000", "APEX_000000"))
 
     # Direkt-Adresse zum Tradovate-Dialog (am echten TradingView bewiesen,
     # 21.09.2026 nachts) — ersetzt Knopf "Trade" + Kachel-Suche.
@@ -912,11 +912,11 @@ def main():
     # Bruecke am Panel vorbei (22.09.2026): neue Felder reisen als '@feld=wert'
     # in der geschwister-Liste. Sie duerfen NIE als Kontonummer gelten.
     _br = order_bot.tv_bruecke_auspacken({"ext_id": "APEX1", "geschwister":
-          ["@symbol=MNQZ6", "@richtung=sell", "@volumen=1", "@tp_usd=", "@boese=1", "APEX6416990000031", "@kaputt"]})
+          ["@symbol=MNQZ6", "@richtung=sell", "@volumen=1", "@tp_usd=", "@boese=1", "APEX0000000000031", "@kaputt"]})
     chk("TV-BRUECKE: Marken werden Felder, verschwinden aus der Liste, Unbekanntes wird verworfen",
         _br["symbol"] == "MNQZ6" and _br["richtung"] == "sell" and _br["volumen"] == "1"
         and _br.get("tp_usd") in (None, "") and "boese" not in _br
-        and _br["geschwister"] == ["APEX6416990000031", "@kaputt"]
+        and _br["geschwister"] == ["APEX0000000000031", "@kaputt"]
         and order_bot.tv_konto_zustand(_bf("MNQZ6"), "APEX1XX", _br["geschwister"])[0] == "falsch")
     chk("TV-BRUECKE: ein echtes Feld im Befehl gewinnt gegen die Marke",
         order_bot.tv_bruecke_auspacken({"symbol": "NQZ6", "geschwister": ["@symbol=MNQZ6"]})["symbol"] == "NQZ6"
@@ -1011,7 +1011,7 @@ def main():
         and order_bot.tv_positions_tabelle(_PT[:1] + _PT[6:], "MNQZ6", "sell") is None
         and order_bot.tv_positions_tabelle([], "MNQZ6", "sell") is None
         and "Symbol@56,979" in order_bot.tv_positions_zone(_PT))
-    # Avg Fill je Wurzel + Tabellen-Diagnose (25.09.2026, Plan 273fd74f: Nachlauf 'nicht lesbar (3 s)')
+    # Avg Fill je Wurzel + Tabellen-Diagnose (25.09.2026, Plan …: Nachlauf 'nicht lesbar (3 s)')
     _PTF = _PT + [("Avg Fill Price", (560, 979, 660, 997), "Text"), ("30,725.25", (560, 1020, 640, 1038), "Text"),
                   ("30.710,50", (560, 1054, 640, 1072), "Text")]
     _zf = order_bot.tv_positionen_auspacken(order_bot.tv_positions_lesen(_PTF, order_bot.tv_positions_kopf(_PTF)))
@@ -1046,7 +1046,7 @@ def main():
         and order_bot.tv_order_meldungen(_TO, "ESZ6") == []
         and order_bot.tv_order_meldungen([("Take Profit order placed on", (130, 1100, 400, 1120), "Text"), ("Stop Loss order placed on", (130, 1130, 400, 1150), "Text")], "NQZ6")
             == ["Take Profit order placed on", "Stop Loss order placed on"])
-    # Fill aus der Meldung (28.09.2026, Vorfall Jacob c28a7639: Einstieg aus dem Feed 12 Pkt neben dem echten Fill)
+    # Fill aus der Meldung (28.09.2026, Vorfall ID C …: Einstieg aus dem Feed 12 Pkt neben dem echten Fill)
     _ME = [("Market order executed on", (130, 1040, 330, 1058), "Text"), ("MNQZ6", (335, 1040, 390, 1058), "Hyperlink"),
            ("Buy 4 at 30,838.00", (130, 1062, 300, 1078), "Text"),
            ("Take Profit order placed on", (130, 1100, 330, 1118), "Text"), ("MNQZ6", (335, 1100, 390, 1118), "Hyperlink"),
@@ -1082,7 +1082,7 @@ def main():
         and _d2["fill"] == 30816.25
         and order_bot.tv_meldung_art("Take profit, $") is None and order_bot.tv_meldung_art("Limit order filled on MNQZ6") == "tp"
         and "Text:Market order filled" in _r1 and "Text:Sell 1 at 30,822.00" in _r1 and not any("Chart" in x for x in _r1))
-    # Finns Screenshots 28.09.2026 00:34 (Jacob-PC): drei gestapelte Meldungen, sichtbar nur eine + 'Show more' (Zaehler 3)
+    # Finns Screenshots 28.09.2026 00:34 (PC von ID C): drei gestapelte Meldungen, sichtbar nur eine + 'Show more' (Zaehler 3)
     _ST = [("Market order placed on", (40, 900, 240, 918), "Text"), ("MNQZ6", (245, 900, 300, 918), "Button"), ("Buy 1", (40, 922, 90, 938), "Text"),
            ("Market order executed on", (40, 960, 250, 978), "Text"), ("MNQZ6", (255, 960, 310, 978), "Button"), ("Buy 1 at 30,807.25", (40, 982, 200, 998), "Text"),
            ("Take Profit order placed on", (40, 1020, 260, 1038), "Text"), ("MNQZ6", (265, 1020, 320, 1038), "Button"), ("Sell 1 at 30,812.75", (40, 1042, 200, 1058), "Text")]
@@ -1095,16 +1095,16 @@ def main():
         and _k1 == {"punkt": (90, 1080), "text": "Show more"}
         and order_bot.tv_show_more_knopf([("Take Profit order placed on", (40, 1020, 260, 1038), "Text"), ("Show less 3", (40, 1070, 140, 1090), "Button")]) is None
         and order_bot.tv_show_more_knopf([("Show more", (1500, 300, 1580, 320), "Button")]) is None)
-    # LIVE-BEFUND Chris 79633d2e (23:07 UTC): 'Show more' geklickt, Stapel blieb zu — Aufklappen muss bewiesen werden
+    # LIVE-BEFUND ID F … (23:07 UTC): 'Show more' geklickt, Stapel blieb zu — Aufklappen muss bewiesen werden
     _zu = [("Market order executed on", (40, 1020, 260, 1038), "Text"), ("Sell 4", (40, 1042, 85, 1058), "Text"),
            ("at 30,794.75", (90, 1042, 190, 1058), "Text"), ("Show more", (420, 936, 515, 956), "Button")]
     _auf = _zu[:3] + [("Take Profit order placed on", (40, 960, 260, 978), "Text"), ("Buy 4", (40, 982, 85, 998), "Text"),
                       ("at 30,760.75", (90, 982, 190, 998), "Text"), ("Show less", (420, 900, 515, 920), "Button")]
-    chk("TV-ORDER Stapel offen/zu beweisen (Chris 23:07: Klick traf, Stapel blieb zu)",
+    chk("TV-ORDER Stapel offen/zu beweisen (ID F 23:07: Klick traf, Stapel blieb zu)",
         not order_bot.tv_stapel_offen(_zu) and order_bot.tv_stapel_offen(_auf)
         and order_bot.tv_stapel_offen(_zu[:3] + [("Take Profit order placed on", (40, 960, 260, 978), "Text")])
         and order_bot.tv_meldung_preise(_auf, "MNQZ6", "sell", 4)["tp"] == 30760.75)
-    # LIVE-BEFUND .726 (Plan 32652690, Jacob-PC): ["TabItem:Positions 1", "TabItem:Orders 1", "Text:Market order executed on", "Text:Buy 1",
+    # LIVE-BEFUND .726 (Plan …, PC von ID C): ["TabItem:Positions 1", "TabItem:Orders 1", "Text:Market order executed on", "Text:Buy 1",
     # "Text:at 30,801.00"] — Seite+Menge und Preis in ZWEI Knoten; 'Show more' rechts UEBER dem Toast (Button mit Text-Kind, Zaehler 3)
     _LV = [("Positions 1", (60, 1200, 150, 1220), "TabItem"), ("Orders 1", (160, 1200, 240, 1220), "TabItem"),
            ("Market order executed on", (40, 1020, 250, 1038), "Text"), ("MNQZ6", (255, 1020, 310, 1038), "Button"),
@@ -1120,7 +1120,7 @@ def main():
         _l1["fill"] == 30801.0 and _l2["fill"] == 30801.0 and _l3["tp"] == 30858.25 and _l3["fill"] is None and _l4["fill"] is None
         and order_bot.tv_show_more_knopf(_LV) == {"punkt": (275, 995), "text": "Show more"}
         and any(x.startswith("UMGEBUNG: ") and "Button:Show more" in x for x in _rl))
-    # DEUTSCHES TRADINGVIEW (29.09.2026, Chris pc-c19p2l, Plan ab797028, Rohtext aus hedge.tv_meldung_roh): 'Take-Profit-Order platziert für'
+    # DEUTSCHES TRADINGVIEW (29.09.2026, ID F pc-bbbbbb, Plan …, Rohtext aus hedge.tv_meldung_roh): 'Take-Profit-Order platziert für'
     # + 'zu 30.564,75 kaufen' (Preis VOR dem Verb, deutsches Zahlenformat); Fill vermutlich 'Marktorder ausgeführt für' + '4 zu 30.600,50 verkaufen'
     _DE = [("Positionen 1", (60, 1200, 170, 1220), "TabItem"), ("Orders 1", (180, 1200, 260, 1220), "TabItem"),
            ("Take-Profit-Order platziert für", (40, 1020, 280, 1038), "Text"), ("zu 30.564,75 kaufen", (40, 1042, 200, 1058), "Text")]
@@ -1134,7 +1134,7 @@ def main():
         _g1["tp"] == 30564.75 and _g1["fill"] is None and _g2["fill"] == 30600.5 and _g2["tp"] == 30564.75
         and _g3["fill"] is None and _g3["tp"] == 30564.75 and _g4["tp"] == 30858.25 and _g5["tp"] is None
         and order_bot.tv_meldung_preise(_LV, "MNQZ6", "buy", 1, vorher=["Positions", "Orders"])["fill"] == 30801.0)   # englisch unveraendert
-    # Neuheit (29.09.2026, ab797028): gleicher Titel stand schon vorher da -> neu nur ueber Anzahl oder neue Preis-Zeile
+    # Neuheit (29.09.2026, …): gleicher Titel stand schon vorher da -> neu nur ueber Anzahl oder neue Preis-Zeile
     _alt = [("Take-Profit-Order platziert für", (40, 1020, 280, 1038), "Text"), ("zu 30.500,00 kaufen", (40, 1042, 200, 1058), "Text")]
     _nv = {str(e[0]).strip() for e in _alt}
     _zv = order_bot.tv_meldung_zaehlen(_alt, "MNQZ6")
@@ -1152,10 +1152,10 @@ def main():
         == ["TabItem:Orders 1@180,700", "Button:Säulen-Einstellung@200,740", "HeaderItem:Symbol@40,745"])
     # Leerzeit Konto-Lesen (22.09.2026): ein sichtbar FREMDES Konto beendet die Leseschleife.
     chk("TV-KONTO: fremdes Konto erkannt — kontoartig (Buchstaben + Ziffern, ' USD'), nie eine erwartete ID, nie reine Ziffern",
-        order_bot.tv_fremdes_konto(["30,849.00", "4470324", "APEX6416990000025 USD"], ["TDFYSL150813173931", "TDFYSL150813173930"]) == "APEX6416990000025 USD"
-        and order_bot.tv_fremdes_konto(["APEX6416990000025 USD"], ["APEX6416990000025"]) == ""
-        and order_bot.tv_fremdes_konto(["PAAPEX6416990000031"], ["APEX6416990000031"]) == ""      # Geschwister-aehnlich: kein Urteil
-        and order_bot.tv_fremdes_konto(["4470324", "Sell 2 at 30,858.25"], ["APEX1"]) == ""
+        order_bot.tv_fremdes_konto(["30,849.00", "4000000", "APEX0000000000025 USD"], ["TDFYSL150310000001", "TDFYSL150310000000"]) == "APEX0000000000025 USD"
+        and order_bot.tv_fremdes_konto(["APEX0000000000025 USD"], ["APEX0000000000025"]) == ""
+        and order_bot.tv_fremdes_konto(["PAAPEX0000000000031"], ["APEX0000000000031"]) == ""      # Geschwister-aehnlich: kein Urteil
+        and order_bot.tv_fremdes_konto(["4000000", "Sell 2 at 30,858.25"], ["APEX1"]) == ""
         and order_bot.tv_fremdes_konto(None, ["APEX1"]) == "")
     chk("TV-TAB: Chromes 'Website verlassen?' — 'Verlassen'/'Leave' wird gefunden, 'Abbrechen' nie, Unsichtbares nie",
         order_bot.tv_verlassen_knopf([("Abbrechen", (1113, 288, 1211, 322), "Button"), ("Verlassen", (1003, 288, 1101, 322), "Button")])["punkt"] == (1052, 305)
@@ -1191,8 +1191,8 @@ def main():
         and order_bot.tv_panel_lage(_PK, _KN, None)["zustand"] is None)
     # Klickpunkt am Fensterrand (22.09.2026 12:33, Finns PC): Umschalter ragt unter den Rand
     chk("TV-UIA: Klickpunkt bleibt 12 px ueber dem Fensterboden, wenn das Element darunter hinausragt",
-        order_bot.tv_uia_filtern([("FNFTCHFINNSAMUELHERM11892 USD", (80, 1165, 330, 1200))], ["FNFTCHFINNSAMUELHERM11892"], (0, 0, 2000, 1186))[0]["punkt"] == (205, 1174)
-        and order_bot.tv_uia_filtern([("FNFTCHFINNSAMUELHERM11892 USD", (80, 900, 330, 930))], ["FNFTCHFINNSAMUELHERM11892"], (0, 0, 2000, 1186))[0]["punkt"] == (205, 915))
+        order_bot.tv_uia_filtern([("FNFTCHVORNAMENACHNAM00000 USD", (80, 1165, 330, 1200))], ["FNFTCHVORNAMENACHNAM00000"], (0, 0, 2000, 1186))[0]["punkt"] == (205, 1174)
+        and order_bot.tv_uia_filtern([("FNFTCHVORNAMENACHNAM00000 USD", (80, 900, 330, 930))], ["FNFTCHVORNAMENACHNAM00000"], (0, 0, 2000, 1186))[0]["punkt"] == (205, 915))
     chk("TV-ORDER: Knopf-Beweis versteht 'MKT' wie 'MARKET' — und verwechselt Sell nie mit Buy",
         order_bot.tv_senden_text_passt("Sell 1 MNQZ6 MKT", "sell", 1)[0]
         and order_bot.tv_senden_text_passt("Buy 2 MNQZ6 MARKET", "buy", 2)[0]
@@ -1410,7 +1410,7 @@ def main():
     chk("CLOSE: Haftungs-Fenster am Titel erkannt, MT5-Hauptfenster nie",
         order_bot.ist_einklick_dialog("Ein-Klick-Handel")
         and order_bot.ist_einklick_dialog("One Click Trading")
-        and not order_bot.ist_einklick_dialog("26645308 - FivePercentOnline-Real: Demokonto - Hedge")
+        and not order_bot.ist_einklick_dialog("10000003 - FivePercentOnline-Real: Demokonto - Hedge")
         and not order_bot.ist_einklick_dialog(""))
     # Kennzeichen des Dialogs (01.09.2026, zweiter Anlauf): der Titel allein
     # war zu streng — ein Kind-Fenster ohne lesbare Beschriftung fiel still
@@ -1486,12 +1486,12 @@ def main():
     with _tf.TemporaryDirectory() as _td:
         _v5 = os.path.join(_td, "v5.csv")
         with open(_v5, "w") as f:
-            f.write("PROPHOS1;7;123;437803;Srv;2;1;10000.00;10000.00;USD;1\n"
+            f.write("PROPHOS1;7;123;400001;Srv;2;1;10000.00;10000.00;USD;1\n"
                     "P;101;NAS100;0;1.00000000;1.00000000;20000.00000000;19900.00000000;20200.00000000\n"
                     "END;7;1\n")
         _alt = os.path.join(_td, "alt.csv")
         with open(_alt, "w") as f:
-            f.write("PROPHOS1;3;123;437803;Srv;2;1\n"
+            f.write("PROPHOS1;3;123;400001;Srv;2;1\n"
                     "P;102;NAS100;0;1.00000000;1.00000000\n"
                     "END;3;1\n")
         s5 = read_snapshot(_v5)
@@ -1534,7 +1534,7 @@ def main():
         def __init__(self):
             self.init_calls = self.shutdown_calls = 0
             self.verbunden = False
-            self.login = 14190828
+            self.login = 10000001
             self.ai_none_mal = 0
             self.init_ok = True
 
@@ -1572,36 +1572,36 @@ def main():
     try:
         fk = _fake_an()
         for _ in range(6):
-            _r = order_bot._api_lesen(_P, 14190828)
+            _r = order_bot._api_lesen(_P, 10000001)
         chk("ORDER-BOT: 6 Lesevorgaenge docken nur EINMAL an (vorher 6x)",
             fk.init_calls == 1 and fk.shutdown_calls == 0 and "positionen" in _r)
         chk("ORDER-BOT: Spur weist die API-Bilanz aus",
             "API-Lesen 6x" in order_bot._spur(["X"]))
         order_bot._api_trennen()
-        order_bot._api_lesen(_P, 14190828)
+        order_bot._api_lesen(_P, 10000001)
         chk("ORDER-BOT: nach _api_trennen wird frisch angedockt",
             fk.shutdown_calls == 1 and fk.init_calls == 2)
 
         fk = _fake_an()
-        order_bot._api_lesen(_P, 14190828)
+        order_bot._api_lesen(_P, 10000001)
         fk.ai_none_mal = 1                      # Verbindung stirbt mittendrin
-        _r = order_bot._api_lesen(_P, 14190828)
+        _r = order_bot._api_lesen(_P, 10000001)
         chk("ORDER-BOT: Verbindungsabriss → genau ein Wiederanlauf, Lesen klappt",
             "positionen" in _r and fk.init_calls == 2)
 
         fk = _fake_an(); fk.init_ok = False
-        _r = order_bot._api_lesen(_P, 14190828)
+        _r = order_bot._api_lesen(_P, 10000001)
         chk("ORDER-BOT: Terminal weg → Fehlertext wie bisher, hoechstens 2 Versuche",
             _r.get("fehler", "").startswith("Terminal-Verbindung") and fk.init_calls == 2)
 
         fk = _fake_an(); fk.login = 999999
-        _r = order_bot._api_lesen(_P, 14190828)
+        _r = order_bot._api_lesen(_P, 10000001)
         chk("ORDER-BOT: falsches Konto bleibt harter Riegel (kein Wiederanlauf)",
             "FALSCHEN Konto" in _r.get("fehler", "") and fk.init_calls == 1)
 
         fk = _fake_an()
-        order_bot._api_lesen(r"C:\MT5-A\terminal64.exe", 14190828)
-        order_bot._api_lesen(r"C:\MT5-B\terminal64.exe", 14190828)
+        order_bot._api_lesen(r"C:\MT5-A\terminal64.exe", 10000001)
+        order_bot._api_lesen(r"C:\MT5-B\terminal64.exe", 10000001)
         chk("ORDER-BOT: Pfadwechsel haengt sauber um (trennen, neu andocken)",
             fk.init_calls == 2 and fk.shutdown_calls == 1)
     finally:
@@ -1727,7 +1727,7 @@ def main():
     chk("ORDER-BOT: UAC-Hinweis bei Verbindungsfehler, nicht bei Konto/Symbol",
         order_bot._ist_verbindungsfehler("Terminal-Verbindung fehlgeschlagen: (-1, 'x')")
         and order_bot._ist_verbindungsfehler("Kein Konto verbunden (account_info leer).")
-        and not order_bot._ist_verbindungsfehler("Terminal ist im FALSCHEN Konto (999 statt 14190828).")
+        and not order_bot._ist_verbindungsfehler("Terminal ist im FALSCHEN Konto (999 statt 10000001).")
         and not order_bot._ist_verbindungsfehler("Broker kennt Symbol 'NDX100' nicht"))
 
     # ── Panel: Terminal-Zu-Entscheidung (03.09.2026) ───────────────────────
@@ -1764,7 +1764,7 @@ def main():
         and panel.terminal_schliessbar({}, _stOK, 5, None)[0] is False)
     chk("PANEL: Status-Warnung (note) blockt Terminal-Zu — Alt-Snapshot ist kein Beweis",
         panel.terminal_schliessbar(_cfgT, dict(_stOK, note="Snapshot eingefroren"), 5, None)[0] is False)
-    # Echo V2 ohne Copier (30.09.2026, Mike): frischer Lese-EA-Snapshot ist der Beweis
+    # Echo V2 ohne Copier (30.09.2026, ID A): frischer Lese-EA-Snapshot ist der Beweis
     _lese0 = {"lesen": True, "master_positions": []}
     _stAlt = dict(_stOK, running=False)
     chk("PANEL: Terminal-Zu ohne Copier nur mit frischem Lese-EA, ohne Position, ohne alten Hedge",
@@ -1834,29 +1834,30 @@ def main():
         panel.loesch_terminal_dir(_cfgL, [{"master_terminal_path": "/mt5/acc1/terminal64.exe"}]) is None
         and panel.loesch_terminal_dir(_cfgL, [{"hedge_terminal_path": "/mt5/acc1/terminal64.exe"}]) is None)
 
-    # ── Magic-Umzug 11.09.2026 (Jakobs The5ers-Kollision — NUR 2 Accounts) ────
+    # ── Magic-Umzug 11.09.2026 (The5ers-Kollision von ID C — NUR 2 Accounts) ────
     # PC-uebergreifende magic-Kollision am gemeinsamen Hedge-Konto: fremder
     # Copier schloss die frischen Hedges sofort. Der Umzug darf ausschliesslich
     # die zwei benannten Master treffen und nie einen neuen Konflikt erzeugen.
+    _M1, _M2 = sorted(MAGIC_UMZUG)   # die zwei benannten Master — echte Logins stehen nur in der Logik-Tabelle (copier.py)
     chk("Magic-Umzug trifft NUR die zwei benannten Master",
-        magic_umzug_ziel(26674215, 770005, set()) == 779215
-        and magic_umzug_ziel(26674216, 770006, set()) == 779216
-        and magic_umzug_ziel(26651693, 770007, set()) is None
+        magic_umzug_ziel(_M1, 770005, set()) == 779215
+        and magic_umzug_ziel(_M2, 770006, set()) == 779216
+        and magic_umzug_ziel(10000004, 770007, set()) is None
         and magic_umzug_ziel(0, 770005, set()) is None
         and magic_umzug_ziel(None, 770005, set()) is None)
     chk("Magic-Umzug ist idempotent und respektiert hoehere Bloecke",
-        magic_umzug_ziel(26674215, 779215, set()) is None
-        and magic_umzug_ziel(26674215, 771003, set()) is None)
+        magic_umzug_ziel(_M1, 779215, set()) is None
+        and magic_umzug_ziel(_M1, 771003, set()) is None)
     chk("Magic-Umzug weicht belegtem Ziel aus (nie neuer lokaler Konflikt)",
-        magic_umzug_ziel(26674215, 770005, {779215}) is None
-        and magic_umzug_ziel(26674216, 770006, {779215}) == 779216)
+        magic_umzug_ziel(_M1, 770005, {779215}) is None
+        and magic_umzug_ziel(_M2, 770006, {779215}) == 779216)
 
     # ── Magic-Familie 11.09.2026 nachmittags (Erweiterung auf 760000-779999) ──
     # Die Flotte hatte alle Bestands-Bloecke 770000-776000 vergeben; erweitert
     # wurde nach UNTEN, damit Bestand und 779er-Umzugs-Reservat exakt so
     # weiterlaufen wie vorher. Der Check nagelt die Grenzen fest und beweist,
     # dass die Umzugs-Ziele in der Familie liegen — laegen sie draussen,
-    # wuerden Jakobs umgezogene Hedges auf jedem anderen PC als FREMDE
+    # wuerden die umgezogenen Hedges von ID C auf jedem anderen PC als FREMDE
     # Position alarmiert.
     chk("Magic-Familie: 760000-779999, Bestand + Umzugs-Reservat innerhalb",
         FAMILIE_MIN == 760000 and FAMILIE_MAX == 779999
@@ -1883,12 +1884,13 @@ def main():
     results.append(test_puls_cdp_login())
     results.append(test_cdp_konto_regression_865())
     results.append(test_tsx_k0())
+    results.append(test_tsx_k1_vorbau())
     results.append(test_puls_win_maus())
     results.append(test_puls_nie_chrome_schliessen())
     results.append(test_tsx_konto_abgekuerzt())
     results.append(test_tsx_titel_url())
     results.append(test_tsx_zeilen())
-    results.append(test_tsx_inventar_mike())
+    results.append(test_tsx_inventar_ida())
     results.append(test_tsx_beweis())
     results.append(test_tsx_order())
     results.append(test_tsx_login())
@@ -2040,8 +2042,8 @@ def test_solo_plan_kennung():
     und die Kennung reist mit bekannt → Abschluss-Ring."""
     import copier
     ok = True
-    k = copier.solo_kommentar("2089a033-1234-4abc-9def-000000000000")
-    if k != "PXsolo:2089a033" or len(k) > copier.SOLO_KOMMENTAR_MAX:
+    k = copier.solo_kommentar("0a0a0a33-1234-4abc-9def-000000000000")
+    if k != "PXsolo:0a0a0a33" or len(k) > copier.SOLO_KOMMENTAR_MAX:
         print(f"✗ solo_kommentar mit plan_id: {k!r}"); ok = False
     if copier.solo_kommentar(None) != "PXsolo" or copier.solo_kommentar("") != "PXsolo":
         print("✗ solo_kommentar ohne plan_id"); ok = False
@@ -2049,16 +2051,16 @@ def test_solo_plan_kennung():
         print(f"✗ solo_kommentar Sonderzeichen: {copier.solo_kommentar('ab:c/d e;f')!r}"); ok = False
     if len(copier.solo_kommentar("x" * 200)) > 31:
         print("✗ Kommentar laenger als 31"); ok = False
-    faelle = {"PXsolo:2089a033": "2089a033", " PXsolo:2089a0 ": "2089a0", "PXsolo": None, "PXsoloc": None,
-              "PXsolo:": None, "": None, None: None, "PX-760001": None, "PXsolo:2089a033extra": "2089a033"}
+    faelle = {"PXsolo:0a0a0a33": "0a0a0a33", " PXsolo:0a0a0a ": "0a0a0a", "PXsolo": None, "PXsoloc": None,
+              "PXsolo:": None, "": None, None: None, "PX-760001": None, "PXsolo:0a0a0a33extra": "0a0a0a33"}
     for ein, soll in faelle.items():
         if copier.solo_plan8(ein) != soll:
             print(f"✗ solo_plan8({ein!r}) = {copier.solo_plan8(ein)!r}, soll {soll!r}"); ok = False
     # Kennung reist mit: bekannt-Eintrag traegt plan8/plan_id, verschwundene Position → Ring-Eintrag hat sie
-    bekannt = {4711: {"symbol": "NAS100", "lots": 0.09, "plan8": "2089a033", "plan_id": "2089a033-1234"}}
+    bekannt = {4711: {"symbol": "NAS100", "lots": 0.09, "plan8": "0a0a0a33", "plan_id": "0a0a0a33-1234"}}
     weg = copier.solo_zu_erkennen(bekannt, {})
     ring = copier.solo_zu_ring([], dict(weg[0], pl=-4.2))
-    if ring[0].get("plan8") != "2089a033" or ring[0].get("plan_id") != "2089a033-1234":
+    if ring[0].get("plan8") != "0a0a0a33" or ring[0].get("plan_id") != "0a0a0a33-1234":
         print(f"✗ Kennung im Abschluss-Ring: {ring}"); ok = False
     if ok:
         print("✓ Solo-Plan-Kennung: Kommentar PXsolo:<plan8> (≤ 31), Parsen mit/ohne Kennung, Kennung im Abschluss-Ring")
@@ -2066,7 +2068,7 @@ def test_solo_plan_kennung():
 
 
 def test_quickedit():
-    """QuickEdit aus beim Start (25.09.2026, pc-usq1i6: Klick ins Konsolenfenster hielt den Prozess an) —
+    """QuickEdit aus beim Start (25.09.2026, pc-cccccc: Klick ins Konsolenfenster hielt den Prozess an) —
     copier und panel: Bit-Logik, Nicht-Windows = None, 'Windows' ohne Konsole = False statt Absturz."""
     import copier, panel, os
     ok = True
@@ -2166,7 +2168,7 @@ def test_solo_riegel():
     → der zweite findet die Position des ersten und antwortet 'schon_offen' (retry_ok False, Ticket/Lots/Fill)."""
     import copier
     ok = True
-    pid = "2089a033-1234-4abc-9def-000000000000"
+    pid = "0a0a0a33-1234-4abc-9def-000000000000"
     konto = []   # offene Positionen im geteilten Fusion-Konto
     # Auftrag 1: nichts offen → kein Riegel, „Open" legt die Position mit Kommentar PXsolo:<plan8> an
     if copier.solo_schon_offen(konto, pid) is not None:
@@ -2177,7 +2179,7 @@ def test_solo_riegel():
     treffer = copier.solo_schon_offen(konto, pid)
     erg = copier.solo_schon_offen_erg(treffer, pid) if treffer is not None else {}
     soll = {"ok": False, "code": "schon_offen", "retry_ok": False, "ticket": 555001, "lots": 0.94, "fill": 20000.5,
-            "sl": 20150.0, "tp": 19890.0, "richtung": "sell", "plan8": "2089a033"}
+            "sl": 20150.0, "tp": 19890.0, "richtung": "sell", "plan8": "0a0a0a33"}
     if any(erg.get(k) != v for k, v in soll.items()):
         print(f"✗ zweiter Auftrag gleicher plan8: {erg}"); ok = False
     # anderer Plan, fremde magic, ohne plan_id → kein Riegel
@@ -2208,11 +2210,11 @@ def test_pc_id():
     d = tempfile.mkdtemp(); pf = os.path.join(d, "pc_id.json")
     if panel.pc_id_lesen(pf) is not None:
         print("✗ pc_id: ohne Datei muss null kommen"); ok = False
-    if panel.pc_id_setzen("pc-usq1i6", pf) != ("pc-usq1i6", True) or panel.pc_id_lesen(pf) != "pc-usq1i6":
+    if panel.pc_id_setzen("pc-cccccc", pf) != ("pc-cccccc", True) or panel.pc_id_lesen(pf) != "pc-cccccc":
         print("✗ pc_id: erster POST setzt nicht"); ok = False
-    if panel.pc_id_setzen("pc-4bx8nm", pf) != ("pc-usq1i6", False) or panel.pc_id_lesen(pf) != "pc-usq1i6":
+    if panel.pc_id_setzen("pc-dddddd", pf) != ("pc-cccccc", False) or panel.pc_id_lesen(pf) != "pc-cccccc":
         print("✗ pc_id: zweiter POST darf nicht ueberschreiben"); ok = False
-    for kaputt in ("{nicht json", '{"pc_id": 5}', '{"pc_id": "PC-GROSS"}', '["pc-usq1i6"]'):
+    for kaputt in ("{nicht json", '{"pc_id": 5}', '{"pc_id": "PC-GROSS"}', '["pc-cccccc"]'):
         open(pf, "w").write(kaputt)
         if panel.pc_id_lesen(pf) is not None:
             print(f"✗ pc_id: kaputte Datei {kaputt!r} muss null liefern"); ok = False
@@ -2231,7 +2233,7 @@ def test_pc_id():
 
 
 def test_lese_instanz():
-    """Echo V2 ohne Copier (25.09.2026, Mikes PC pc-l5o8bv: zwei Echo-V2-Trades ohne Live-P&L, weil ohne
+    """Echo V2 ohne Copier (25.09.2026, PC von ID A pc-aaaaaa: zwei Echo-V2-Trades ohne Live-P&L, weil ohne
     Copier niemand Balance/Equity schrieb): das Panel liest die Snapshot-Datei selbst. Frisch → Master-
     Felder + lesen, alive bleibt falsch; alt, fremdes Konto, halb geschrieben oder fehlend → nichts;
     läuft der Copier, gewinnt sein Status unverändert."""
@@ -2239,13 +2241,13 @@ def test_lese_instanz():
     from datetime import datetime
     ok = True
     d = tempfile.mkdtemp()
-    cfg = {"snapshot_file": "prophos_m1.csv", "common_files_dir": d, "master_expected_login": 14277928}
+    cfg = {"snapshot_file": "prophos_m1.csv", "common_files_dir": d, "master_expected_login": 10000002}
     pfad = os.path.join(d, "prophos_m1.csv")
     def schreiben(zeilen, alter_s=0):
         open(pfad, "w", encoding="ascii").write("\n".join(zeilen) + "\n")
         t = time.time() - alter_s
         os.utime(pfad, (t, t))
-    voll = ["PROPHOS1;42;0;14277928;FundedNext-Server;2;1;50000.00;50123.45;USD;1",
+    voll = ["PROPHOS1;42;0;10000002;FundedNext-Server;2;1;50000.00;50123.45;USD;1",
             "P;777;NDX100;0;0.50;1;18000.5;0;18100.0", "END;42;1"]
     def chk(name, bed):
         nonlocal ok
@@ -2255,7 +2257,7 @@ def test_lese_instanz():
     st = panel.lese_status(cfg)
     chk("frische Datei liefert Master-Stand", bool(st) and st["lesen"] is True and st["note"] is None
         and st["master_balance"] == 50000.0 and st["master_equity"] == 50123.45 and st["master_currency"] == "USD"
-        and st["master_login"] == 14277928 and len(st["master_positions"]) == 1
+        and st["master_login"] == 10000002 and len(st["master_positions"]) == 1
         and st["master_positions"][0]["volume"] == 0.5 and "hedge_balance" not in st and "running" not in st)
     schreiben(voll, alter_s=30)
     chk("30 s alte Datei ist kein Live-Stand", panel.lese_status(cfg) is None)
@@ -2264,7 +2266,7 @@ def test_lese_instanz():
     chk("ohne erwarteten Login angenommen", bool(panel.lese_status(dict(cfg, master_expected_login=None))))
     schreiben(voll[:2])
     chk("halb geschrieben (ohne END) verworfen", panel.lese_status(cfg) is None)
-    schreiben(["PROPHOS1;7;0;14277928;S;2;0", "END;7;0"])
+    schreiben(["PROPHOS1;7;0;10000002;S;2;0", "END;7;0"])
     st2 = panel.lese_status(cfg)
     chk("altes EA ohne Balance → None statt 0", bool(st2) and st2["master_balance"] is None and st2["master_equity"] is None)
     os.remove(pfad)
@@ -2355,12 +2357,12 @@ def test_endlesung_bausteine():
     # Befund
     gross = en + [(f"Text {i} lang lang lang", (5 + i, 700 + i, 60 + i, 716 + i), "Text") for i in range(400)] \
         + [("Account Balance", (300, 470, 400, 486), "Text"), ("150,373.00", (410, 470, 480, 486), "Text"),
-           ("FTDFYSLX150372060459", (20, 460, 200, 476), "Button")]
-    bf = ob.tv_befund_kompakt(gross, (0, 0, 1600, 900), {"code": "tabelle_unklar", "konto": "FTDFYSLX150372060459"})
+           ("FTDFYSLX150100000000", (20, 460, 200, 476), "Button")]
+    bf = ob.tv_befund_kompakt(gross, (0, 0, 1600, 900), {"code": "tabelle_unklar", "konto": "FTDFYSLX150100000000"})
     groesse = len(_j.dumps(bf, ensure_ascii=False).encode("utf-8"))
     chk(f"Befund <= 2 kB ({groesse})", groesse <= 2000)
     chk("Befund traegt Reiter, Kopf, Konto, Code", any(x.startswith("Positions@") for x in bf["reiter"]) and bf["panel_kopf"]
-        and "FTDFYSLX150372060459" in bf["konten"] and bf["code"] == "tabelle_unklar" and bf["fenster"] == [0, 0, 1600, 900])
+        and "FTDFYSLX150100000000" in bf["konten"] and bf["code"] == "tabelle_unklar" and bf["fenster"] == [0, 0, 1600, 900])
     chk("Befund ohne Fenster/leer wirft nicht", isinstance(ob.tv_befund_kompakt([], None), dict))
     # Ende-Modus: Befehls-Fehler darf nicht an 'ende' scheitern (Befund-Versuch ohne Windows)
     puf = io.StringIO()
@@ -2385,7 +2387,7 @@ def test_endlesung_bausteine():
 
 
 def test_profil_riegel():
-    """Chrome-Profil-Riegel (26.09.2026, Moritz' PC): Puls benutzt nur Fenster seines Profils, nie das
+    """Chrome-Profil-Riegel (26.09.2026, PC von ID B): Puls benutzt nur Fenster seines Profils, nie das
     Reader-Profil ('Terminal 1'), und startet Chrome immer mit --profile-directory seines Profils."""
     import order_bot as ob
     ok = True
@@ -2395,9 +2397,9 @@ def test_profil_riegel():
         if not bed:
             print("✗ Profil-Riegel: " + name); ok = False
 
-    ls = {"profile": {"info_cache": {"Default": {"name": "Moritz"}, "Profile 1": {"name": "Terminal 1"}}}}
+    ls = {"profile": {"info_cache": {"Default": {"name": "ID B"}, "Profile 1": {"name": "Terminal 1"}}}}
     prof = ob.chrome_profile_lesen(ls)
-    chk("Local State lesen", prof == {"Default": "Moritz", "Profile 1": "Terminal 1"})
+    chk("Local State lesen", prof == {"Default": "ID B", "Profile 1": "Terminal 1"})
     chk("Relaunch mit Anfuehrungszeichen", ob.chrome_profil_aus_relaunch(
         '"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --profile-directory="Profile 1"') == "Profile 1")
     chk("Relaunch ohne Anfuehrungszeichen", ob.chrome_profil_aus_relaunch("chrome.exe --profile-directory=Default") == "Default")
@@ -2408,14 +2410,14 @@ def test_profil_riegel():
     chk("Aufloesen per Verzeichnis", ob.chrome_profil_aufloesen("profile 1", prof) == "Profile 1")
     chk("Aufloesen unbekannt", ob.chrome_profil_aufloesen("Finn", prof) == "")
 
-    # Moritz: nichts eingetragen -> Default ist Puls-Profil, Terminal 1 gesperrt
+    # ID B: nichts eingetragen -> Default ist Puls-Profil, Terminal 1 gesperrt
     r = ob.puls_profil_regel(prof)
     chk("ohne Config eigen = Default", r["eigen"] == "Default" and not r["fehler"])
     chk("Reader-Profil gesperrt", not ob.profil_erlaubt("Profile 1", r))
     chk("eigenes Profil erlaubt", ob.profil_erlaubt("Default", r))
     chk("unbekanntes Fenster erlaubt (wie bisher)", ob.profil_erlaubt("", r))
     # Config per Anzeigename + ausdrueckliches Reader-Profil
-    r = ob.puls_profil_regel(prof, eigen="Moritz", tabu="Terminal 1")
+    r = ob.puls_profil_regel(prof, eigen="ID B", tabu="Terminal 1")
     chk("Config per Anzeigename", r["eigen"] == "Default" and r["tabu"] == {"Profile 1"} and not r["fehler"])
     # Puls-Profil = Reader-Profil -> nie arbeiten, Fehler
     r = ob.puls_profil_regel(prof, eigen="Terminal 1", tabu="Terminal 1")
@@ -2452,7 +2454,7 @@ def test_profil_riegel():
         ob._PROFIL_REGEL, ob._PROFIL_NAMEN = ob.puls_profil_regel(prof), prof
         ob._FENSTER_PROFIL.update({111: "Profile 1", 222: "Default", 333: ""})
         chk("Reader-Fenster gesperrt mit Namen", ob._fenster_gesperrt(111) == "Terminal 1 (Profile 1)")
-        chk("Moritz-Fenster frei", ob._fenster_gesperrt(222) == "" and ob._fenster_gesperrt(333) == "")
+        chk("ID B-Fenster frei", ob._fenster_gesperrt(222) == "" and ob._fenster_gesperrt(333) == "")
     finally:
         ob._PROFIL_REGEL, ob._PROFIL_NAMEN = alt
         for h in (111, 222, 333):
@@ -2503,7 +2505,7 @@ def test_fenster_treue():
     chk("anderes Fenster nicht", not rg((0, 0, 1920, 1040), geo) and not rg((125, 62, 1625, 1062), None))
 
     la = ob.lage_ausschluss
-    # Moritz 28.09.2026: beide Fenster maximiert (gleiche Lage), Reader in Profile 2 → eigenes Profile 1 bleibt erlaubt
+    # ID B 28.09.2026: beide Fenster maximiert (gleiche Lage), Reader in Profile 2 → eigenes Profile 1 bleibt erlaubt
     chk("deckungsgleich, Reader-Profil erklärt die Lage → eigenes Fenster erlaubt",
         la([{"profil": "Profile 1", "lage": True}, {"profil": "Profile 2", "lage": True}], "Profile 1", {"Profile 2"}) == {1})
     chk("kein Tabu-Fenster an der Stelle → Lage sperrt auch das eigene",
@@ -2517,7 +2519,7 @@ def test_fenster_treue():
     fp = ob.fremdes_popup_urteil
     fen = (0, 0, 1920, 1040)
     kasten, x_oben_rechts = (440, 230, 1725, 1040), (1655, 250, 1705, 300)
-    chk("Autumn-Sale-Werbung (Moritz 28.09.2026) → wegklicken",
+    chk("Autumn-Sale-Werbung (ID B 28.09.2026) → wegklicken",
         fp("Don't miss this · Autumn sale · Up to 80% off · Offer ends in · Explore offers · Close", kasten, x_oben_rechts, fen)[0])
     chk("Order-Ticket mit X → nie anfassen",
         not fp("Buy · Sell · Market · Limit · Quantity · Take Profit · Stop Loss · Close", kasten, x_oben_rechts, fen)[0])
@@ -2527,7 +2529,7 @@ def test_fenster_treue():
     chk("X nicht oben rechts → nicht", not fp("Autumn sale · 80% off", kasten, (500, 900, 540, 940), fen)[0])
     chk("kleiner Kasten (Toast) → nicht", not fp("Autumn sale · 80% off", (1500, 900, 1700, 980), (1680, 905, 1695, 920), fen)[0])
     chk("Kasten = ganze Seite → nicht", not fp("Autumn sale · 80% off", fen, (1880, 5, 1915, 30), fen)[0])
-    # 29.09.2026 (Chris pc-c19p2l): namenloses X, Sperrwörter, Chrome-Leiste, Esc nur bei starker Werbung
+    # 29.09.2026 (ID F pc-bbbbbb): namenloses X, Sperrwörter, Chrome-Leiste, Esc nur bei starker Werbung
     x_klein = (1675, 250, 1705, 280)
     werbung = "Don't miss this · Autumn sale · Up to 80% off · Offer ends in · Explore offers"
     chk("namenloses X im Werbe-Dialog → wegklicken", fp(werbung, kasten, x_klein, fen, knopf_name="")[0])
@@ -2644,16 +2646,16 @@ def test_puls_augen_cdp():
     st = {"ticket": {"da": True, "typ": "Market", "menge": {"wert": "4"}, "tp": {"feld": {"wert": "447.00"}}, "sl": {"feld": {"wert": "249.00"}}},
           "kauf_knopf": {"text": "Buy 4 MNQZ6 MARKET"}, "toasts": {"log": [], "gruppen": []}, "popups": []}
     chk(kf(st) == "Ticket offen · Market · Units 4 · TP 447.00 · SL 249.00 · Knopf 'Buy 4 MNQZ6 MARKET' · Toasts 0 · Popups 0",
-        "Augen-Kurzform aus echter Zeile (Moritz 29.09.2026): ticket.da, toasts {log, gruppen}")
+        "Augen-Kurzform aus echter Zeile (ID B 29.09.2026): ticket.da, toasts {log, gruppen}")
     chk(kf({"toasts": {"gruppen": [1, 2], "log": [3]}}).endswith("Toasts 3 · Popups 0") and kf(None) == "kein Stand", "Kurzform zählt Toast-Einträge")
     # K1 (29.09.2026): Weiche nur lokal + nur dieser PC; Klick-Bahn/-Punkt; Summary/Positionen in Vertragsform
     import random as _rnd
     wch = ob.augen_regel_weiche
-    chk(wch({"augen": "cdp", "at": 990.0, "pc": "pc-usq1i6"}, 1000.0, "pc-usq1i6") == "cdp", "Weiche: cdp frisch + eigener PC → cdp")
-    chk(wch({"augen": "cdp", "at": 990.0, "pc": "pc-usq1i6"}, 1000.0, "pc-8jcrsm") == "uia", "Weiche: Regel eines anderen PCs → uia")
-    chk(wch({"augen": "cdp", "at": 0.0}, 50000.0, "pc-usq1i6") == "uia" and wch({"augen": "cdp", "at": 0.0}, 3 * 3600.0, "pc-usq1i6") == "cdp"
-        and wch(None, 1000.0, "pc-usq1i6") == "uia"
-        and wch({"augen": "uia", "at": 999.0}, 1000.0, "pc-usq1i6") == "uia" and wch({"augen": "cdp", "at": 999.0}, 1000.0, None) == "uia",
+    chk(wch({"augen": "cdp", "at": 990.0, "pc": "pc-cccccc"}, 1000.0, "pc-cccccc") == "cdp", "Weiche: cdp frisch + eigener PC → cdp")
+    chk(wch({"augen": "cdp", "at": 990.0, "pc": "pc-cccccc"}, 1000.0, "pc-iiiiii") == "uia", "Weiche: Regel eines anderen PCs → uia")
+    chk(wch({"augen": "cdp", "at": 0.0}, 50000.0, "pc-cccccc") == "uia" and wch({"augen": "cdp", "at": 0.0}, 3 * 3600.0, "pc-cccccc") == "cdp"
+        and wch(None, 1000.0, "pc-cccccc") == "uia"
+        and wch({"augen": "uia", "at": 999.0}, 1000.0, "pc-cccccc") == "uia" and wch({"augen": "cdp", "at": 999.0}, 1000.0, None) == "uia",
         "Weiche: veraltet/fehlt/uia/ohne pc_id → uia (alter Pfad unverändert)")
     import inspect as _i3
     q_tl = _i3.getsource(ob.modus_tvlesen)
@@ -2664,7 +2666,7 @@ def test_puls_augen_cdp():
     r_ = _rnd.Random(7)
     bahn = ob.cdp_klick_bahn((0, 0), (100, 50), rnd=r_)
     chk(len(bahn) == 8 and bahn[-1] == (100.0, 50.0) and bahn[0] != (100.0, 50.0), "Klick-Bahn: mehrere Schritte, letzter exakt am Ziel")
-    # 30.09.2026, Jacobs PC: Werbe-Modal („Autumn sale") über dem Connect-Dialog — werbung_weg klickt sein X, beweist das Verschwinden
+    # 30.09.2026, PC von ID C: Werbe-Modal („Autumn sale") über dem Connect-Dialog — werbung_weg klickt sein X, beweist das Verschwinden
     _ws = object.__new__(ob._AugenSitzung)
     _ws.trail, _ws._werbung_at = [], 0.0
     _werb = [[{"text": "Don't miss this Autumn sale Up to 80% off", "box": [200, 40, 900, 560], "x": [1050, 60, 30, 30]}], []]
@@ -2687,10 +2689,10 @@ def test_puls_augen_cdp():
     pv = ob.cdp_positionen_vertrag([{"symbol": "MNQZ6", "seite": "buy", "menge": 4, "avg": 30594.25, "pl_text": "-12.50"}, "x"])
     chk(len(pv) == 1 and pv[0]["menge_zahl"] == 4 and pv[0]["einstieg_zahl"] == 30594.25 and pv[0]["pnl_zahl"] == -12.5
         and ob.tv_avg_fill_je_wurzel(pv)["MNQ"]["avg_fill"] == 30594.25, "Positionen → Vertragsform + avg_fill_je_wurzel")
-    ke = ob.cdp_konto_eintrag([{"text": "TDFYSL150800892182 USD", "rect": [1, 1, 9, 9]}, {"text": "APEX6416990000025 USD", "rect": [1, 1, 9, 9]}], "TDFYSL150800892182")
+    ke = ob.cdp_konto_eintrag([{"text": "TDFYSL150300000000 USD", "rect": [1, 1, 9, 9]}, {"text": "APEX0000000000025 USD", "rect": [1, 1, 9, 9]}], "TDFYSL150300000000")
     chk(ke[0] is not None and ke[1] == 1 and ob.cdp_konto_eintrag([], "X")[0] is None, "Konto-Eintrag: genau ein Treffer")
     # Aufnahme kompakt (29.09.2026: 119 Ereignisse scheiterten am 60-KB-Deckel der Route)
-    z = {"tag": "button", "dn": "account-switch", "text": "TDFYSL150800892182 USD", "rect": [10, 20, 100, 30]}
+    z = {"tag": "button", "dn": "account-switch", "text": "TDFYSL150300000000 USD", "rect": [10, 20, 100, 30]}
     evs = [{"t": 100, "typ": "pointerdown", "ziel": z, "vorfahren": [{"tag": "div", "text": "x" * 300}] * 3},
            {"t": 105, "typ": "mousedown", "ziel": z}, {"t": 180, "typ": "click", "ziel": z},
            {"t": 900, "typ": "input", "ziel": {"tag": "input", "id": "quantity-field", "wert": "4"}, "wert": "4"}]
@@ -2775,7 +2777,7 @@ def test_puls_k3():
     chk(k2 and k2["tag"] == "button" and n2 == 1, "Hülle + innerer Knopf = einer (innerer gewinnt)")
     chk(ob.k3_close_knopf({"knoepfe": [{"aria": "Close position", "rect": [1, 1, 20, 20]}, {"text": "×", "rect": [40, 1, 20, 20]}]})[0] is None
         and ob.k3_close_knopf({"knoepfe": []}) == (None, 0), "zwei Kandidaten / keiner = kein Knopf (Abbruch)")
-    # echter Knopf aus dem ersten K3-Lauf (29.09.2026 13:14 UTC, pc-usq1i6) — wurde vom „settings" im data-name verworfen
+    # echter Knopf aus dem ersten K3-Lauf (29.09.2026 13:14 UTC, pc-cccccc) — wurde vom „settings" im data-name verworfen
     echt = {"tag": "button", "text": "", "aria": "Close", "title": "Close", "dn": "close-settings-cell-button", "rect": [893, 649, 22, 22]}
     k4_, n4_ = ob.k3_close_knopf({"knoepfe": [echt]})
     chk(k4_ is echt and n4_ == 1, "echter Tradovate-Close-Knopf (data-name close-settings-cell-button) wird genommen")
@@ -2790,10 +2792,10 @@ def test_puls_k3():
     chk(ob.k3_eindeutig(kn, ob.K3_RX_CONNECT)[0]["text"] == "Connect"
         and ob.k3_eindeutig([dict(kn[0], aus=True)], ob.K3_RX_CONNECT) == (None, 0)
         and ob.k3_eindeutig([{"text": "Connect to Tradovate broker", "rect": [1, 1, 50, 20]}], ob.K3_RX_CONNECT)[0] is None, "Connect exakt, gesperrt zählt nicht")
-    chk(ob.k3_kontonr({"text": "TDFYSL150146498821USD"}) == "TDFYSL150146498821" and ob.k3_kontonr({"kontonr": "APEX6416990000024"}) == "APEX6416990000024"
-        and ob.K3_RX_TRADEIFY.match("FTDFYSLX150153370465") and ob.K3_RX_APEX.match("PAAPEX6416990000009")
-        and not ob.K3_RX_TRADEIFY.match("APEX6416990000024"), "Kontonummern Tradeify/Apex")
-    # echter Stand pc-usq1i6 01:30 UTC (nach K2-Probelauf) — Rücklesung ok
+    chk(ob.k3_kontonr({"text": "TDFYSL150001000000USD"}) == "TDFYSL150001000000" and ob.k3_kontonr({"kontonr": "APEX0000000000024"}) == "APEX0000000000024"
+        and ob.K3_RX_TRADEIFY.match("FTDFYSLX150010000000") and ob.K3_RX_APEX.match("PAAPEX0000000000009")
+        and not ob.K3_RX_TRADEIFY.match("APEX0000000000024"), "Kontonummern Tradeify/Apex")
+    # echter Stand pc-cccccc 01:30 UTC (nach K2-Probelauf) — Rücklesung ok
     st = {"ticket": {"typen": [{"id": "Market", "aria-selected": "true", "rect": [952, 209, 68, 28]}], "seite": "buy",
                      "menge": {"wert": "1", "rect": [955, 278, 122, 28]},
                      "tp": {"an": True, "wert": 100, "einheit": "$", "neben": {"text": "30533.00price"}},
@@ -2819,7 +2821,7 @@ def test_puls_k3():
     chk(src.count("modus_k3(") == 2, "modus_k3 nur aus dem Hand-Befehl in main()")
     for f in (ob.modus_tvlesen_cdp, ob.modus_tvkette_cdp, ob.modus_augen):
         chk("_handlauf_aktiv()" in _i.getsource(f), f"{f.__name__} hält bei laufendem K3 still")
-    chk("pc-usq1i6" in ob.K3_PCS and len(ob.K3_PCS) == 1, "K3 nur auf dem CDP-Test-PC")
+    chk(len(ob.K3_PCS) == 1 and bool(_re.fullmatch(r"pc-[a-z0-9]{6}", ob.K3_PCS[0])), "K3 nur auf dem CDP-Test-PC")
     # echte Sitzungs-Klasse mit Attrappen-Verbindung (29.09.2026: Methode js() war vom Attribut self.js = augen.js überdeckt)
     class _Ws:
         def __init__(self):
@@ -2862,12 +2864,12 @@ def test_puls_cdp_login():
         and not ob.cdp_login_noetig("konto_nicht_erreicht", {"konto_treffer": 2}) and not ob.cdp_login_noetig("konto_nicht_erreicht", {})
         and not ob.cdp_login_noetig("cdp_fehler", {"konto_treffer": 0}) and not ob.cdp_login_noetig("", None),
         "Login nur bei kein Broker oder 0 Treffern im Dropdown (mehrdeutig/Dropdown nicht erkannt = nie abmelden)")
-    st_ok = {"konto": {"schalter": {"rect": [70, 900, 180, 28]}, "aktiv": "APEX6416990000024 USD"}}
-    chk(ob.cdp_konto_verbunden(st_ok) == "APEX6416990000024 USD" and ob.cdp_konto_verbunden({"konto": {"aktiv": "APEX6416990000024"}}) == ""
+    st_ok = {"konto": {"schalter": {"rect": [70, 900, 180, 28]}, "aktiv": "APEX0000000000024 USD"}}
+    chk(ob.cdp_konto_verbunden(st_ok) == "APEX0000000000024 USD" and ob.cdp_konto_verbunden({"konto": {"aktiv": "APEX0000000000024"}}) == ""
         and ob.cdp_konto_verbunden({"konto": {"schalter": {"rect": [1, 1, 50, 20]}, "aktiv": "Tradovate"}}) == ""
         and ob.cdp_konto_verbunden(None) == "", "verbunden = Umschalter UND Kontonummer")
     chk(ob.cdp_abgemeldet({"konto": {"schalter": None, "aktiv": ""}}) and not ob.cdp_abgemeldet(st_ok)
-        and not ob.cdp_abgemeldet({"konto": {"schalter": None, "aktiv": "TDFYSL150146498821 USD"}}), "abgemeldet = weder Umschalter noch Nummer")
+        and not ob.cdp_abgemeldet({"konto": {"schalter": None, "aktiv": "TDFYSL150001000000 USD"}}), "abgemeldet = weder Umschalter noch Nummer")
     # Connect-Dialog (Aufbau wie am 21./22.09. gesehen: Live/Demo + Don't remember me + Connect)
     dlg = {"titel": "Tradovate", "rect": [700, 300, 520, 420], "netzfehler": False,
            "knoepfe": [{"text": "Live", "role": "radio", "rect": [740, 420, 80, 30], "an": False},
@@ -2912,7 +2914,7 @@ def test_puls_cdp_login():
                                           ob._cdp_abmelden, ob._cdp_konto_mit_login))
     chk(q.count(".tippen(") == 1 and "tippen(benutzer)" in q, "getippt wird nur der Username — nie ein Passwort")
     chk("K3_RX_FREIGABE" not in q and '"freigabe"' in q, "Freigabe ('Allow') wird nur gemeldet, nie geklickt")
-    # erster Live-Lauf .799 (29.09.2026): Enter schickte „APEX_641699TDFYU324689097" ab — jetzt Vorschlag anklicken, Enter nur nach Beweis
+    # erster Live-Lauf .799 (29.09.2026): Enter schickte „APEX_000000TDFYU000000000" ab — jetzt Vorschlag anklicken, Enter nur nach Beweis
     q_an = _i.getsource(ob._cdp_anmelden)
     chk(q_an.count('taste("Enter")') == 1 and q_an.index("if ok3:") < q_an.index('taste("Enter")'),
         "Enter im Login-Formular nur noch EINMAL und nur nach bewiesenem Username + Passwort")
@@ -3020,12 +3022,12 @@ def test_puls_cdp_login():
     geschrieben = []
     try:
         _ur.urlopen = lambda *a_, **k_: (_ for _ in ()).throw(OSError("timeout"))
-        ob._augen_json_lesen = lambda n: {"augen": "cdp", "at": __import__("time").time() - 60, "pc": "pc-usq1i6"}
+        ob._augen_json_lesen = lambda n: {"augen": "cdp", "at": __import__("time").time() - 60, "pc": "pc-cccccc"}
         ob._augen_json_schreiben = lambda n, d: geschrieben.append(d)
-        r1 = ob._augen_regel_holen("pc-usq1i6")
+        r1 = ob._augen_regel_holen("pc-cccccc")
         e1 = ob._AUGEN_REGEL_STAND["explizit"]
         ob._augen_json_lesen = lambda n: None
-        r2 = ob._augen_regel_holen("pc-usq1i6")
+        r2 = ob._augen_regel_holen("pc-cccccc")
     finally:
         _ur.urlopen, ob._augen_json_lesen, ob._augen_json_schreiben = alt_uo, alt_l, alt_s
     chk(r1 == "cdp" and e1 is False and r2 == "uia" and not geschrieben, "Netzfehler: letzte 'cdp'-Regel bleibt, Datei unverändert; ohne Merker 'uia'")
@@ -3051,8 +3053,8 @@ def test_puls_cdp_login():
         "Orders mit data-label, leerer Blick = nichts")
     chk("Reiter orders" in ob.cdp_tabellen_kurz(roh_t) and "Köpfe Symbol/Side" in ob.cdp_tabellen_kurz(roh_t) and len(ob.cdp_tabellen_kurz(roh_t)) <= 700,
         "Tabellen-Blick kompakt für die Spur")
-    chk(ob.cdp_liste_kurz([("APEX_641699", None, "ListItem"), ("••••••••", None, "Text"), ("TDFYU324689097", None, "Text"),
-                           ("tradovate.com", None, "Text"), ("APEX_641699", None, "ListItem")]) == "ListItem:APEX_641699 | Text:TDFYU324689097 | Text:tradovate.com"
+    chk(ob.cdp_liste_kurz([("APEX_000000", None, "ListItem"), ("••••••••", None, "Text"), ("TDFYU000000000", None, "Text"),
+                           ("tradovate.com", None, "Text"), ("APEX_000000", None, "ListItem")]) == "ListItem:APEX_000000 | Text:TDFYU000000000 | Text:tradovate.com"
         and ob.cdp_liste_kurz([]) == "leer" and "Group" in ob.CDP_AUTOFILL_TYPEN, "Vorschlagsliste für die Spur: ohne Punkte, doppelte einmal")
     # Fokus-Riegel (Live 15:11 UTC: Klick gemeldet, Feld blieb leer, getippt wurde trotzdem): ohne Fokus-Beweis keine Taste
     class _WsF:
@@ -3108,13 +3110,13 @@ def test_puls_cdp_login():
     q_km = _i.getsource(ob._cdp_konto_mit_login)
     chk(q_km.index("_cdp_sitzung_zurueck(") < q_km.index("_cdp_konto_sichern("), "Sitzungs-Dialog vor dem Konto-Schritt lösen")
     # Ergebnis überlebt den Prophos-Tab (Live 15:49 UTC: Order lag, Prophos erfuhr nie davon)
-    pk = ob.puls_ergebnis_paket("order", "ende", {"plan_id": "5ab15b24", "ext_id": "TDFYSL150800892182", "symbol": "MNQZ6", "richtung": "buy"},
+    pk = ob.puls_ergebnis_paket("order", "ende", {"plan_id": "0000abcd", "ext_id": "TDFYSL150300000000", "symbol": "MNQZ6", "richtung": "buy"},
                                 {"ok": True, "gesendet": True, "einstieg": "30606.0", "tp_limit": 30722.5, "trail": "x", "summary": {"a": 1}}, ["a", "b"], 5)
-    chk(pk["plan_id"] == "5ab15b24" and pk["art"] == "order" and pk["at_ms"] == 5 and pk["ergebnis"]["einstieg"] == "30606.0"
+    chk(pk["plan_id"] == "0000abcd" and pk["art"] == "order" and pk["at_ms"] == 5 and pk["ergebnis"]["einstieg"] == "30606.0"
         and "summary" not in pk["ergebnis"] and "trail" not in pk["ergebnis"] and pk["ergebnis"]["trail_ende"] == "a > b"
         and pk["ergebnis"]["symbol"] == "MNQZ6" and pk["ergebnis"]["richtung"] == "buy"
         and ob.puls_ergebnis_paket("close", "geklickt", {}, {}, None, 1)["plan_id"] is None, "Ergebnis-Paket: bekannte Felder, Plan-ID, ohne Plan ok")
-    chk(ob.tv_bruecke_auspacken({"geschwister": ["@plan_id=5ab15b24", "TDFYSL1"]}) == {"geschwister": ["TDFYSL1"], "plan_id": "5ab15b24"},
+    chk(ob.tv_bruecke_auspacken({"geschwister": ["@plan_id=0000abcd", "TDFYSL1"]}) == {"geschwister": ["TDFYSL1"], "plan_id": "0000abcd"},
         "plan_id reist über die Brücke, nie als Konto")
     q_k = _i.getsource(ob.modus_tvkette_cdp)
     q_c = _i.getsource(ob.modus_tvclose_cdp)
@@ -3136,7 +3138,7 @@ def test_puls_cdp_login():
             self.auf, self.klicks = False, []
 
         def stand(self, opts=None):
-            return ({"konto": {"panel": "offen", "schalter": {"rect": [1, 1, 50, 20]}, "aktiv": "PAAPEX6416990000008 USD"}} if self.auf
+            return ({"konto": {"panel": "offen", "schalter": {"rect": [1, 1, 50, 20]}, "aktiv": "PAAPEX0000000000008 USD"}} if self.auf
                     else {"konto": {"panel": "zu", "panel_knopf": {"rect": [1500, 900, 30, 30]}, "aktiv": ""}})
 
         def klick(self, r, n, toast_ok=False):
@@ -3150,8 +3152,8 @@ def test_puls_cdp_login():
         v_ = ob._cdp_verbunden_lesen(sp_, {}, [])
     finally:
         ob._warte = alt_w
-    chk(v_ == "PAAPEX6416990000008 USD" and sp_.klicks == ["Handelspanel auf (Open panel)"], f"zugeklapptes Panel → einmal auf → Konto ({v_!r})")
-    # Live 29.09.2026 23:04 UTC (pc-2zc2we): Connect-Dialog lag über „Open panel" — nicht klicken, Versuch zählt nicht; Klick ohne
+    chk(v_ == "PAAPEX0000000000008 USD" and sp_.klicks == ["Handelspanel auf (Open panel)"], f"zugeklapptes Panel → einmal auf → Konto ({v_!r})")
+    # Live 29.09.2026 23:04 UTC (pc-jjjjjj): Connect-Dialog lag über „Open panel" — nicht klicken, Versuch zählt nicht; Klick ohne
     # Wirkung steht ehrlich in der Spur
     class _SPD(_SP):
         def __init__(self, frei, wirkt=True):
@@ -3181,10 +3183,10 @@ def test_puls_cdp_login():
     finally:
         ob._warte = alt_w
     chk(v1_ == "" and v1b_ == "" and sum("verdeckt" in x for x in td_) == 1 and getattr(sd_, "_panel_klicks", 0) == 1
-        and v2_ == "PAAPEX6416990000008 USD" and sd_.klicks == ["Handelspanel auf (Open panel)"] and sd_.ww == 3,
+        and v2_ == "PAAPEX0000000000008 USD" and sd_.klicks == ["Handelspanel auf (Open panel)"] and sd_.ww == 3,
         f"Dialog über „Open panel“ → kein Klick, zählt nicht, danach frei → Klick → Konto ({td_})")
     chk(v3_ == "" and tn_ == ["Handelspanel bleibt nach dem Klick zu"] and sn_._panel_klicks == 1, f"Klick ohne Wirkung → Spur ({tn_})")
-    # Order-Panel eingeklappt (Finn 30.09.2026, pc-usq1i6: 49 px unter der Broker-Leiste, „Dropdown nicht erkannt") → „Maximize panel"
+    # Order-Panel eingeklappt (Finn 30.09.2026, pc-cccccc: 49 px unter der Broker-Leiste, „Dropdown nicht erkannt") → „Maximize panel"
     # EINMAL, Konto-Schritt EINMAL wiederholen; Symbol fehlt → kein_broker (Login-Weg)
     L_ = ob.cdp_panel_lage
     chk(L_(None) == "unklar" and L_({"unter_leiste": 40}) == "unklar" and L_({"leiste": [56, 686, 879, 38], "unter_leiste": True}) == "unklar"
@@ -3196,11 +3198,11 @@ def test_puls_cdp_login():
 
     class _SK:
         """Attrappe Puls-Chrome: Panel eingeklappt (49 px) bis „Maximize panel", Liste geht nur bei großem Panel auf."""
-        def __init__(self, knopf=True, liste=True, gross=False, aktiv="PAAPEX6416990000007USD"):
+        def __init__(self, knopf=True, liste=True, gross=False, aktiv="PAAPEX0000000000007USD"):
             self.gross, self.knopf, self.liste, self.aktiv, self.offen, self.klicks = gross, knopf, liste, aktiv, False, []
 
         def stand(self, opts=None):
-            ein = [{"text": "PAAPEX6416990000007USD", "rect": [78, 600, 228, 32]}, {"text": "PAAPEX6416990000008USD", "rect": [78, 632, 228, 32]}]
+            ein = [{"text": "PAAPEX0000000000007USD", "rect": [78, 600, 228, 32]}, {"text": "PAAPEX0000000000008USD", "rect": [78, 632, 228, 32]}]
             return {"konto": {"panel": "offen", "schalter": {"rect": [72, 745, 199, 28]}, "aktiv": self.aktiv,
                               "liste_offen": self.offen, "eintraege": ein if self.offen else []}}
 
@@ -3223,21 +3225,21 @@ def test_puls_cdp_login():
             elif n == "Konto-Umschalter":
                 self.offen = self.liste and self.gross
             elif n.startswith("Konto "):
-                self.aktiv, self.offen = "PAAPEX6416990000008USD", False
+                self.aktiv, self.offen = "PAAPEX0000000000008USD", False
             return True
     ob._warte = lambda a_, b_: None
     try:
         k1_, t1_ = _SK(), []
-        r1_ = ob._cdp_konto_sichern(k1_, "PAAPEX6416990000008", {}, t1_)
+        r1_ = ob._cdp_konto_sichern(k1_, "PAAPEX0000000000008", {}, t1_)
         k2_, t2_ = _SK(knopf=False), []
-        r2_ = ob._cdp_konto_sichern(k2_, "PAAPEX6416990000008", {}, t2_)
+        r2_ = ob._cdp_konto_sichern(k2_, "PAAPEX0000000000008", {}, t2_)
         k3_, t3_ = _SK(gross=True, liste=False), []
-        r3_ = ob._cdp_konto_sichern(k3_, "PAAPEX6416990000008", {}, t3_)
-        k4_, t4_ = _SK(aktiv="PAAPEX6416990000008USD"), []
-        r4_ = ob._cdp_konto_sichern(k4_, "PAAPEX6416990000008", {}, t4_)
+        r3_ = ob._cdp_konto_sichern(k3_, "PAAPEX0000000000008", {}, t3_)
+        k4_, t4_ = _SK(aktiv="PAAPEX0000000000008USD"), []
+        r4_ = ob._cdp_konto_sichern(k4_, "PAAPEX0000000000008", {}, t4_)
     finally:
         ob._warte = alt_w
-    chk(r1_[0] and k1_.klicks == ["Order-Panel aufklappen (Maximize panel)", "Konto-Umschalter", "Konto PAAPEX6416990000008"]
+    chk(r1_[0] and k1_.klicks == ["Order-Panel aufklappen (Maximize panel)", "Konto-Umschalter", "Konto PAAPEX0000000000008"]
         and "Order-Panel war eingeklappt → aufgeklappt → Konto gewechselt" in t1_,
         f"eingeklappt → EIN Klick „Maximize panel“ → Umschalter → Konto gewechselt ({k1_.klicks}, {t1_})")
     chk(not r2_[0] and r2_[1] == "kein_broker" and k2_.klicks == [] and "Login-Weg" in r2_[2]
@@ -3258,11 +3260,11 @@ def test_puls_cdp_login():
     chk(q_an3.index("_cdp_formular_ruhig(ort, trail)") < q_an3.index('"Benutzerfeld")') and "for k_versuch in range(3):" in q_an3
         and "kam dreimal nicht an" in q_an3, "Login: Formular-Ruhe vor dem Klick, Benutzerfeld bis 3 Versuche mit Fokus-Beweis")
     W = ob.tv_konto_wort_passt
-    chk(W("TDFYU324689097 tradovate.com", "TDFYU324689097") and not W("APEX_641699TDFYU324689097", "TDFYU324689097")
-        and not W("APEX_641699", "TDFYU324689097"), "Vorschlag nur mit dem Username als ganzem Wort (angehängter Name zählt nicht)")
-    nadel = type("N", (), {"search": staticmethod(lambda n: W(n, "TDFYU324689097"))})
-    liste = [("APEX_641699", (300, 400, 600, 440), "ListItem"), ("TDFYU324689097 tradovate.com", (300, 450, 600, 490), "ListItem"),
-             ("TDFYU324689097", (300, 300, 600, 330), "Text")]
+    chk(W("TDFYU000000000 tradovate.com", "TDFYU000000000") and not W("APEX_000000TDFYU000000000", "TDFYU000000000")
+        and not W("APEX_000000", "TDFYU000000000"), "Vorschlag nur mit dem Username als ganzem Wort (angehängter Name zählt nicht)")
+    nadel = type("N", (), {"search": staticmethod(lambda n: W(n, "TDFYU000000000"))})
+    liste = [("APEX_000000", (300, 400, 600, 440), "ListItem"), ("TDFYU000000000 tradovate.com", (300, 450, 600, 490), "ListItem"),
+             ("TDFYU000000000", (300, 300, 600, 330), "Text")]
     gef = ob.tv_uia_namen_filtern(liste, nadel, typ_vorrang=None, ohne=(290, 295, 610, 335))
     chk(len(gef) == 1 and gef[0]["punkt"] == (450, 470), f"Vorschlagsliste: genau der Tradeify-Eintrag, das Benutzerfeld ist ausgenommen ({gef})")
     for f in (ob.modus_tvlesen_cdp, ob.modus_tvkette_cdp):
@@ -3277,7 +3279,7 @@ def test_puls_cdp_login():
 
 
 def test_cdp_konto_regression_865():
-    """Regression .865 (30.09.2026, pc-usq1i6, Orbit-Endlesung Plan beb06b7f): nach „Maximize panel" stand der Konto-Umschalter oben
+    """Regression .865 (30.09.2026, pc-cccccc, Orbit-Endlesung Plan …): nach „Maximize panel" stand der Konto-Umschalter oben
     ([72,59] unter der Broker-Leiste [56,0]), augen.js ≤ 0.7.3 fand ihn nicht, hielt ihn für eine offene Liste mit 1 Zeile, das Ziel
     stand darin 0× → Login-Weg las den Login als '-' und meldete eine richtige Tradovate-Sitzung ab. Geprüft: fremde Liste = nie Beleg,
     Abmelden nur mit Beleg, unlesbar = ehrlich raus, neues augen.js findet den Umschalter in beiden Lagen (Quelltext)."""
@@ -3289,7 +3291,7 @@ def test_cdp_konto_regression_865():
         if not bed:
             print("  ✗ Regression .865: " + text)
             ok = False
-    Z7, Z8 = "PAAPEX6416990000007", "PAAPEX6416990000008"
+    Z7, Z8 = "PAAPEX0000000000007", "PAAPEX0000000000008"
     MAX = {"leiste": [56, 0, 1194, 38], "unter_leiste": 735, "max_knopf": {"rect": [1212, 0, 38, 38], "aria": "Restore panel"}}
 
     class _Max:
@@ -3343,10 +3345,10 @@ def test_cdp_konto_regression_865():
         r3 = ob._cdp_konto_sichern(k3, Z7, {}, t3)
         # 4) selbst geöffnete Liste, Ziel (Tradeify) 0×, aktives Apex-Konto lesbar → Beleg über die Familie (liste_aktiv);
         #    4b) Ziel vom SELBEN Apex-User 0× → nie Beleg (steht nur außer Sicht); 5) unlesbar → kein Beleg
-        TD1, TD2, TD3 = "TDFYSL150800892182", "TDFYSL150381887426", "TDFYSL150111222333"
-        k4, t4 = _Max(alt=False, ziele=(Z8, "PAAPEX6416990000009")), []
+        TD1, TD2, TD3 = "TDFYSL150300000000", "TDFYSL150110000000", "TDFYSL150111222333"
+        k4, t4 = _Max(alt=False, ziele=(Z8, "PAAPEX0000000000009")), []
         r4 = ob._cdp_konto_sichern(k4, TD1, {}, t4)
-        k4b, t4b = _Max(alt=False, ziele=(Z8, "PAAPEX6416990000009")), []
+        k4b, t4b = _Max(alt=False, ziele=(Z8, "PAAPEX0000000000009")), []
         r4b = ob._cdp_konto_sichern(k4b, Z7, {}, t4b)
         k5, t5 = _Max(alt=False, aktiv="Konto wählen", ziele=(Z8,)), []
         r5 = ob._cdp_konto_sichern(k5, Z7, {}, t5)
@@ -3366,8 +3368,8 @@ def test_cdp_konto_regression_865():
         k10, t10 = _Max(alt=False, eintrag_druck=False), []
         r10 = ob._cdp_konto_sichern(k10, Z7, {}, t10)
         # Eval-ID gegen aktives PA-Konto gleicher Nummer: steht NICHT (Liste: nur PA-Konten → 0×)
-        k11, t11 = _Max(alt=False, aktiv="PAAPEX6416990000007USD", ziele=(Z7, Z8)), []
-        r11 = ob._cdp_konto_sichern(k11, "APEX6416990000007", {}, t11)
+        k11, t11 = _Max(alt=False, aktiv="PAAPEX0000000000007USD", ziele=(Z7, Z8)), []
+        r11 = ob._cdp_konto_sichern(k11, "APEX0000000000007", {}, t11)
     finally:
         ob._warte = alt_w
     chk(not r1[0] and r1[1] == "konto_nicht_erreicht" and k1.klicks == ["Taste Escape"] and "konto_treffer" not in r1[4]
@@ -3395,22 +3397,22 @@ def test_cdp_konto_regression_865():
     chk(not r11[0] and k11.klicks[:1] == ["Konto-Umschalter"] and r11[4].get("konto_treffer") is None and "selben Apex-Login" in r11[2],
         f"Eval-ID steht nicht, nur weil das PA-Konto gleicher Nummer aktiv ist ({k11.klicks}, {r11[2]})")
     P = ob.cdp_konto_passt
-    chk(P("PAAPEX6416990000007USD", "PAAPEX6416990000007") and not P("PAAPEX6416990000007USD", "APEX6416990000007")
-        and P("APEX6416990000007 USD", "APEX6416990000007") and P("PA-1234567 · Tradeify · $50k", "PA1234567")
-        and P("TDFYSL150800892182 USD", "TDFYSL150800892182") and not P("PAAPEX64169900000071USD", "PAAPEX6416990000007")
-        and not P("PAAPEX6416990000007XYZ", "PAAPEX6416990000007") and not P("PA-12", "12") and not P("x", None),
+    chk(P("PAAPEX0000000000007USD", "PAAPEX0000000000007") and not P("PAAPEX0000000000007USD", "APEX0000000000007")
+        and P("APEX0000000000007 USD", "APEX0000000000007") and P("PA-1234567 · Tradeify · $50k", "PA1234567")
+        and P("TDFYSL150300000000 USD", "TDFYSL150300000000") and not P("PAAPEX00000000000071USD", "PAAPEX0000000000007")
+        and not P("PAAPEX0000000000007XYZ", "PAAPEX0000000000007") and not P("PA-12", "12") and not P("x", None),
         "Konto-Abgleich streng: ganzes Wort, nur Währungs-Anhang (PA ≠ Eval)")
-    chk(ob.cdp_kontonr("PAAPEX6416990000008USD") == "PAAPEX6416990000008" and ob.cdp_kontonr("Konto wählen") == "" and ob.cdp_kontonr(None) == ""
-        and ob.cdp_kontonr("Apex · PAAPEX6416990000009USD") == "PAAPEX6416990000009" and ob.cdp_kontonr("TDFYSL150800892182 USD") == "TDFYSL150800892182",
+    chk(ob.cdp_kontonr("PAAPEX0000000000008USD") == "PAAPEX0000000000008" and ob.cdp_kontonr("Konto wählen") == "" and ob.cdp_kontonr(None) == ""
+        and ob.cdp_kontonr("Apex · PAAPEX0000000000009USD") == "PAAPEX0000000000009" and ob.cdp_kontonr("TDFYSL150300000000 USD") == "TDFYSL150300000000",
         "Kontonummer aus dem Umschalter-Text (auch mit Beiwerk davor)")
     F = ob.cdp_konto_familie
-    chk(F("PAAPEX6416990000008") == F("APEX6416990000007") == "apex:641699" and F("PAAPEX6708050000002") == "apex:670805"
-        and F("TDFYSL150800892182") == F("FTDFYSLX150740428270") == "tradeify" and F("LFE10084019460001") == "lucid"
-        and F("EXPRESS-V2-682437-17793859") == "" and F("APEX64169900000") == "" and F(None) == "",
+    chk(F("PAAPEX0000000000008") == F("APEX0000000000007") == "apex:000000" and F("PAAPEX1111110000002") == "apex:111111"
+        and F("TDFYSL150300000000") == F("FTDFYSLX150200000000") == "tradeify" and F("LFE10000000000000") == "lucid"
+        and F("EXPRESS-V2-000000-00000000") == "" and F("APEX00000000000") == "" and F(None) == "",
         "Login-Familie aus der Kontonummer (Apex mit User-ID, Tradeify, Lucid)")
     B = ob.cdp_liste_beleg
     ko_v = {"liste_voll": True, "eintraege": [{"text": TD1 + "USD"}]}
-    chk(B({}, Z8 + "USD", TD1) == (True, "") and B({}, Z8 + "USD", "PAAPEX6708050000002") == (True, "")
+    chk(B({}, Z8 + "USD", TD1) == (True, "") and B({}, Z8 + "USD", "PAAPEX1111110000002") == (True, "")
         and not B(ko_v, Z8 + "USD", Z7)[0] and B(ko_v, TD1 + "USD", TD2) == (True, "") and not B({"liste_voll": False, "eintraege": ko_v["eintraege"]}, TD1, TD2)[0]
         and not B(ko_v, "-", TD2)[0], "Beleg: andere Firma/anderer Apex-User sicher, gleicher Apex-User nie, sonst nur mit voller Liste")
     class _EscS:
@@ -3432,7 +3434,7 @@ def test_cdp_konto_regression_865():
         and A("Konto wählen", beleg) == (False, "unlesbar"), "unlesbarer Login → nie abmelden")
     chk(A(Z8 + " USD", beleg) == (True, "") and A(Z8 + "USD", {}) == (False, "ohne_beleg")
         and A(Z8 + "USD", {"konto_treffer": 0}) == (False, "ohne_beleg") and A(Z8 + "USD", {"konto_treffer": None, "liste_aktiv": Z8})
-        == (False, "ohne_beleg") and A("PAAPEX6416990000009USD", beleg) == (False, "anders"),
+        == (False, "ohne_beleg") and A("PAAPEX0000000000009USD", beleg) == (False, "anders"),
         "abmelden nur mit Beleg (eigene Liste, 0×) und gleichem aktivem Konto")
 
     # Login-Weg mit Attrappen: ctx (Kontextmenü neben „Tradovate") da, Konto unlesbar → login_unlesbar, KEIN _cdp_abmelden
@@ -3458,7 +3460,7 @@ def test_cdp_konto_regression_865():
     ob._cdp_login_sichern = lambda res, trail: None
     ob._cdp_sitzung_zurueck = lambda s, o, t: False
     try:
-        cmd = {"tv_username": "APEX_641699"}
+        cmd = {"tv_username": "APEX_000000"}
         tv1 = []
         v1 = ob._cdp_tradovate_verbinden([sz], cmd, {}, tv1, beleg={"konto_treffer": 0, "liste_aktiv": Z8})
         gesehen["lesen"] = Z8 + "USD"
@@ -3612,7 +3614,7 @@ def test_tsx_k0():
         if not bed:
             print("  ✗ TSX-K0: " + text)
             ok = False
-    PC = "pc-l5o8bv"
+    PC = "pc-aaaaaa"
     W = ob.tsx_regel_weiche
     chk(W({"tsx": "cdp", "tsx_pc": PC, "tsx_at": 1.0}, PC) == "cdp" and W({"tsx": "cdp", "pc": PC}, PC) == "cdp"
         and W({"tsx": "cdp", "tsx_pc": "pc-andere1"}, PC) == "uia" and W({"tsx": "uia"}, PC) == "uia" and W(None, PC) == "uia"
@@ -3666,28 +3668,35 @@ def test_tsx_k0():
     chk(v2 == "uia" and r2.get("tsx") == "uia" and r2.get("augen") == "uia", f"ausdrückliches Server-'uia' schaltet zurück ({r2})")
     chk(v3 == "uia" and r3.get("tsx") == "cdp" and r3.get("augen") == "uia", f"Augen-Abfrage nimmt tsx mit ({r3})")
     # Riegel in den drei Modi
-    alt_weg, alt_lesen, alt_inv = ob.tsx_weg_lauf, ob.modus_tsxlesen, ob.modus_tsxinventar_cdp
+    alt_weg, alt_lesen, alt_inv, alt_k1, alt_k1_an = (ob.tsx_weg_lauf, ob.modus_tsxlesen, ob.modus_tsxinventar_cdp, ob.modus_tsxlesen_cdp,
+                                                      ob.TSX_K1_AKTIV)
     auf = []
     try:
         ob.tsx_weg_lauf = lambda: "cdp"
+        ob.modus_tsxlesen_cdp = lambda c: auf.append(("k1", c))     # der echte K1-Lauf startet Chrome — hier nur nachgebildet
         o1 = io.StringIO()
         with contextlib.redirect_stdout(o1):
-            ob.modus_tsxlesen({"konto": "EXPRESS-V2-682437-57131691"})
+            ob.TSX_K1_AKTIV = False
+            ob.modus_tsxlesen({"konto": "EXPRESS-V2-000000-10000001"})
+        ob.TSX_K1_AKTIV = True
+        ob.modus_tsxlesen({"konto": "EXPRESS-V2-000000-10000001"})
         o2 = io.StringIO()
         with contextlib.redirect_stdout(o2):
-            ob.modus_tsxorder({"ext_id": "150KTC-SKU-V2-682437-71275127", "symbol": "MNQ", "richtung": "buy", "volumen": 1, "tp_usd": 40, "scharf": True})
+            ob.modus_tsxorder({"ext_id": "150KTC-SKU-V2-000000-20000000", "symbol": "MNQ", "richtung": "buy", "volumen": 1, "tp_usd": 40, "scharf": True})
         o3 = io.StringIO()
         with contextlib.redirect_stdout(o3):
-            ob.modus_tsxorder({"ext_id": "150KTC-SKU-V2-682437-71275127", "symbol": "MNQ", "richtung": "buy", "volumen": 1, "tp_usd": 40})
+            ob.modus_tsxorder({"ext_id": "150KTC-SKU-V2-000000-20000000", "symbol": "MNQ", "richtung": "buy", "volumen": 1, "tp_usd": 40})
         ob.modus_tsxinventar_cdp = lambda c: auf.append(("inv", c))
         ob.modus_tsxinventar({"x": 1})
         ob.tsx_weg_lauf = lambda: "uia"
         ob.modus_tsxlesen = lambda c, **kw: auf.append(("lesen", c, kw.get("weg")))
-        ob.modus_tsxorder({"ext_id": "150KTC-SKU-V2-682437-71275127", "symbol": "MNQ", "richtung": "buy", "volumen": 1, "tp_usd": 40})
+        ob.modus_tsxorder({"ext_id": "150KTC-SKU-V2-000000-20000000", "symbol": "MNQ", "richtung": "buy", "volumen": 1, "tp_usd": 40})
     finally:
-        ob.tsx_weg_lauf, ob.modus_tsxlesen, ob.modus_tsxinventar_cdp = alt_weg, alt_lesen, alt_inv
+        ob.tsx_weg_lauf, ob.modus_tsxlesen, ob.modus_tsxinventar_cdp, ob.modus_tsxlesen_cdp, ob.TSX_K1_AKTIV = (alt_weg, alt_lesen, alt_inv,
+                                                                                                             alt_k1, alt_k1_an)
     j1, j2, j3 = (json.loads(o.getvalue()) for o in (o1, o2, o3))
-    chk(j1["code"] == "cdp_folgt" and j1["etappe"] == "K1", f"tsxlesen auf cdp-PC → cdp_folgt K1 ({j1})")
+    chk(j1["code"] == "cdp_folgt" and j1["etappe"] == "K1", f"tsxlesen auf cdp-PC, K1 aus → cdp_folgt K1 ({j1})")
+    chk(("k1", {"konto": "EXPRESS-V2-000000-10000001"}) in auf, "tsxlesen auf cdp-PC, K1 an → K1-Weg (nie UIA im Alltags-Chrome)")
     chk(j2["code"] == "cdp_folgt" and j2["etappe"] == "K4" and j2["gesendet"] is False, f"tsxorder scharf → K4, nichts gesendet ({j2})")
     chk(j3["etappe"] == "K3", "tsxorder Probe → K3")
     chk(("inv", {"x": 1}) in auf, "tsxinventar auf cdp-PC → CDP-Inventar (K0)")
@@ -3707,7 +3716,7 @@ def test_tsx_k0():
         and not ob.tsx_url_login("https://topstepx.com/trade"), "TopstepX-Tab: angemeldeter Tab vor der alten Login-Seite")
     # Kandidaten
     E = ob.tsx_k0_eindeutig
-    k_ok = {"text": "$150K EXPRESS | EXPRESS-V2-682437-57131691", "rect": [10, 60, 300, 32]}
+    k_ok = {"text": "$150K EXPRESS | EXPRESS-V2-000000-10000001", "rect": [10, 60, 300, 32]}
     chk(E([k_ok], "konto")[0] is k_ok and E([k_ok, dict(k_ok, rect=[10, 90, 300, 32])], "konto")[0] is None
         and E([dict(k_ok, aria="Close")], "konto")[0] is None and E([dict(k_ok, aus=True)], "konto")[0] is None
         and E([{"text": "Balance $150,000", "rect": [1, 1, 9, 9]}], "konto")[0] is None,
@@ -3723,7 +3732,7 @@ def test_tsx_k0():
     chk(not B(dict(lg, user={"gefuellt": True}, pw={"gefuellt": True}))[0], "gefüllt ohne Chrome-Autofill reicht nicht (Fehlversuch-Schleife)")
     chk(E([dict(k_ok, role="option")], "konto")[0] is None, "eine Listen-Zeile (role option) ist nie der Auslöser")
     P_ = ob.tsx_k0_pruef(k_ok)
-    chk(P_["text"] == "EXPRESS-V2-682437-57131691" and P_["rect"] == [10, 60, 300, 32] and P_["tabu"] == ob.TSX_K0_TABU.pattern,
+    chk(P_["text"] == "EXPRESS-V2-000000-10000001" and P_["rect"] == [10, 60, 300, 32] and P_["tabu"] == ob.TSX_K0_TABU.pattern,
         f"Ziel-Merkmale für den Druck ({P_})")
     # Login-Merker: kein zweiter Klick innerhalb von 30 min (auch nicht im nächsten Lauf)
     class _SL:
@@ -3999,6 +4008,334 @@ def test_tsx_k0():
     return ok
 
 
+def test_tsx_k1_vorbau():
+    """K1-Vorbau (30.09.2026, nicht live): stand_tsx → tv-lesen-Vertrag (alter_s nur mit Frische-Beweis), ehrliche Codes ohne Anker,
+    Schalter TSX_K1_AKTIV aus = weiter cdp_folgt."""
+    import order_bot as ob
+    import io
+    import json
+    import contextlib
+    ok = True
+
+    def chk(bed, text):
+        nonlocal ok
+        if not bed:
+            print("  ✗ TSX-K1: " + text)
+            ok = False
+    U = ob.tsx_frisch_urteil
+    chk(U({"raf": True, "sichtbar": "visible", "ms": 34})[0] and not U({"raf": False, "sichtbar": "visible"})[0]
+        and not U({"raf": True, "sichtbar": "hidden"})[0] and not U(None)[0], "Frische nur mit Frames + sichtbar")
+    L = ob.tsx_cdp_lesung
+    EXT = "EXPRESS-V2-000000-00000000"
+    kopf = {"balance": {"text": "$150,210.50", "wert": 150210.5}, "mll": {"text": "$145,500.00"}, "rpl": {"text": "$210.50", "wert": 210.5},
+            "upl": {"text": "$0.00", "wert": 0}}
+    f0, c0, m0 = L({"toasts": {}}, EXT)
+    chk(c0 == "anker_fehlt" and "konto/kopf/positionen_sichtbar" in m0 and f0 == {}, f"ohne Anker ehrlich ({m0})")
+    st_ok = {"konto": {"aktiv": "$150K EXPRESS | " + EXT, "kontonr": EXT, "abgekuerzt": False, "liste_offen": False, "liste": []},
+             "kopf": dict(kopf, balance_relativ=False), "positionen_sichtbar": True, "positionen": [], "flach": True}
+    f1, c1, m1 = L(st_ok, EXT)
+    chk(c1 == "" and f1["positionen"] == [] and f1["position"] == "keine" and f1["balance"] == 150210.5 and f1["mll"] == 145500.0
+        and f1["today_pnl"] == 210.5 and f1["summary"]["Balance"] == "$150,210.50" and f1["konto_aktiv"] == EXT
+        and f1["balance_relativ"] is False, f"flach gelesen ({f1})")
+    # Vertrag tsx-0.3.1 (Terminal 2): balance_relativ ist bool|null und wird DURCHGEREICHT — der Rohwert bleibt (Express: BAL $0.00, MLL $-4,500.00)
+    kopf_rel = {"balance": {"text": "$0.00", "wert": 0}, "mll": {"text": "$-4,500.00", "wert": -4500}, "rpl": {"text": "$0.00", "wert": 0},
+                "upl": {"text": "$0.00", "wert": 0}, "balance_relativ": True}
+    fr, cr, _ = L(dict(st_ok, kopf=kopf_rel), EXT)
+    chk(cr == "" and fr["balance_relativ"] is True and fr["balance"] == 0.0 and fr["mll"] == -4500.0 and fr["summary"]["MLL"] == "-$4,500.00"
+        and fr["today_pnl"] == 0.0, f"relative Balance: Merkmal durchgereicht, nichts umgerechnet ({fr})")
+    fn, cn, _ = L(dict(st_ok, kopf=dict(kopf, balance_relativ=None)), EXT)
+    fx, cx, _ = L(dict(st_ok, kopf=dict(kopf, balance_relativ={"text": "x", "wert": 1})), EXT)
+    fo, co, _ = L(dict(st_ok, kopf=dict(kopf)), EXT)
+    chk(cn == "" and fn["balance_relativ"] is None and cx == "" and fx["balance_relativ"] is None and co == "" and fo["balance_relativ"] is None,
+        "balance_relativ null / falsche Form / fehlt → None (nie geraten)")
+    # flach: nur mit Beweis (No Active Position + gesperrtes Close Position); null oder Widerspruch = tabelle_unklar
+    _, cf1, mf1 = L(dict(st_ok, flach=None), EXT)
+    _, cf2, _ = L({k: v for k, v in st_ok.items() if k != "flach"}, EXT)
+    _, cf3, mf3 = L(dict(st_ok, flach=True, positionen=[{"symbol": "MNQZ26", "seite": "buy", "menge": 1, "avg": 30592.25, "pl_text": "+$12.50"}]), EXT)
+    chk(cf1 == "tabelle_unklar" and "flach nicht bewiesen" in mf1 and cf2 == "tabelle_unklar" and cf3 == "tabelle_unklar" and "Widerspruch" in mf3,
+        f"flach null/fehlt/Widerspruch → tabelle_unklar ({cf1}, {cf2}, {cf3})")
+    B = ob.tsx_k1_bereit
+    chk(B(st_ok) and B(dict(st_ok, kopf=kopf_rel)) and not B(dict(st_ok, konto={"aktiv": None, "kontonr": None}))
+        and not B(dict(st_ok, kopf={"balance": None, "mll": None, "rpl": None, "upl": None, "balance_relativ": None})) and not B(None) and not B({}),
+        "Bereit-Probe: Konto-Auslöser + BAL (auch BAL 0.00 zählt), Lade-Schirm nicht")
+    f2, c2, _ = L(dict(st_ok, flach=False, positionen=[{"symbol": "MNQZ26", "seite": "buy", "menge": 1, "avg": 30592.25, "pl_text": "+$12.50"}],
+                        kopf=dict(kopf, upl={"text": "$12.50", "wert": 12.5})), EXT)
+    chk(c2 == "" and f2["offen"] and f2["positionen"][0]["einstieg_zahl"] == 30592.25 and f2["positionen"][0]["pnl_zahl"] == 12.5
+        and f2["today_pnl"] == 223.0 and "UP&L" in f2["today_label"], f"offen gelesen ({f2.get('positionen')}, {f2.get('today_pnl')})")
+    f3, c3, m3 = L(dict(st_ok, konto={"aktiv": "$50K COMBINE | 50KTC-V2-000000-11111111", "kontonr": "50KTC-V2-000000-11111111"}), EXT)
+    chk(c3 == "konto" and "K2" in m3, f"anderes Konto → K2 ({m3})")
+    f3b, c3b, _ = L(dict(st_ok, konto={"aktiv": "$150K EXPRESS | EXPRESS-…", "kontonr": "EXPRESS-", "abgekuerzt": True}), EXT)
+    chk(c3b == "konto", "abgekürzte Kennung beweist das Konto nicht")
+    f3c, c3c, _ = L(dict(st_ok, kopf=dict(kopf, rpl={"text": "$-50.00"}, upl={"text": "($12.50)"})), EXT)
+    chk(c3c == "" and f3c["rpl"] == -50.0 and f3c["upl"] == -12.5 and f3c["today_pnl"] == -62.5, f"negative Kopfwerte aus Text ({f3c.get('rpl')}, {f3c.get('upl')})")
+    f4, c4, _ = L(dict(st_ok, kopf=dict(kopf, balance={"text": "—"})), EXT)
+    f5, c5, _ = L(dict(st_ok, positionen_sichtbar=False), EXT)
+    chk(c4 == "balance" and c5 == "tabelle_unklar", "BAL unlesbar / Positions-Bereich unsichtbar → ehrlich")
+    # Schalter aus: tsxlesen auf cdp-PC bleibt cdp_folgt; an: K1-Weg
+    alt_w, alt_k, alt_a = ob.tsx_weg_lauf, ob.modus_tsxlesen_cdp, ob.TSX_K1_AKTIV
+    auf = []
+    try:
+        ob.tsx_weg_lauf = lambda: "cdp"
+        ob.modus_tsxlesen_cdp = lambda c: auf.append(c)
+        o = io.StringIO()
+        with contextlib.redirect_stdout(o):
+            ob.TSX_K1_AKTIV = False
+            ob.modus_tsxlesen({"konto": EXT})
+        ob.TSX_K1_AKTIV = True
+        ob.modus_tsxlesen({"konto": EXT})
+    finally:
+        ob.tsx_weg_lauf, ob.modus_tsxlesen_cdp, ob.TSX_K1_AKTIV = alt_w, alt_k, alt_a
+    chk(json.loads(o.getvalue())["code"] == "cdp_folgt" and auf == [{"konto": EXT}], "Schalter aus = cdp_folgt, an = K1-Weg")
+    chk(ob.TSX_K1_AKTIV is True, "K1 ist ausgeliefert AN (wirkt nur auf Topstep-CDP-PCs, sonst bleibt der UIA-Weg)")
+
+    # Verhalten des ganzen Laufs (nachgebildete Sitzung): Sitzungswahl statt eigenem Tab-Weg, Bereit-Probe, kein Klick
+    class _Ws:
+        def rufe(self, m, par=None, timeout=10.0):
+            return {}
+
+    class _Sitz:
+        def __init__(self, staende, frisch=True):
+            self.staende, self.frisch, self.ws, self.gelesen, self.klicks, self.geschlossen = list(staende), frisch, _Ws(), 0, [], 0
+
+        def lese_js(self, ausdruck, timeout=8):
+            return {"raf": self.frisch, "sichtbar": "visible" if self.frisch else "hidden", "ms": 30} if ausdruck == ob.TSX_FRISCH_JS else None
+
+        def stand(self, opts=None):
+            self.gelesen += 1
+            return self.staende[min(self.gelesen, len(self.staende)) - 1]
+
+        def klick(self, *a, **k):
+            self.klicks.append(a)
+            return True
+
+        def _win_vorn(self):
+            return 11, ""
+
+        def zu(self):
+            self.geschlossen += 1
+
+    laden = {"konto": {"aktiv": None, "kontonr": None, "abgekuerzt": None, "liste_offen": False, "liste": []},
+             "kopf": {"balance": None, "mll": None, "rpl": None, "upl": None, "balance_relativ": None}, "positionen_sichtbar": None,
+             "positionen": [], "flach": None}
+    namen = ("_puls_chrome_sicher", "_tsx_sitzung_waehlen", "_handlauf_aktiv", "_puls_diagnose_senden", "_warte", "_WIN_EINGABE",
+             "TSX_K1_BEREIT_S", "puls_bot_stand")
+    alt_m = {n: getattr(ob, n) for n in namen}
+    import threading as _th
+    alt_timer = _th.Timer
+    timer_log = []
+
+    class _Timer:                                         # K1-Prüfer: der echte 120-s-Wachhund darf im Test nie laufen (os._exit!)
+        def __init__(self, s_, f_):
+            self.f = f_
+            timer_log.append(["neu", s_])
+
+        def start(self):
+            timer_log.append(["start"])
+
+        def cancel(self):
+            timer_log.append(["cancel"])
+        daemon = True
+
+    def lauf(sz, login=True, handlauf=False, chrome=True, bereit_s=8.0, uhr=None):
+        gewartet = []
+        ob._puls_chrome_sicher = lambda trail, **k: chrome
+        ob._handlauf_aktiv = lambda: handlauf
+        ob._puls_diagnose_senden = lambda *a, **k: None
+
+        def warte(a, b):
+            gewartet.append((a, b))
+            if len(gewartet) > 200:
+                raise RuntimeError("Test-Riegel: _warte über 200× (Endlosschleife)")
+            if uhr is not None:
+                uhr[0] += 3.0
+        ob._warte = warte
+        _th.Timer = _Timer
+        ob._WIN_EINGABE = False
+        ob.TSX_K1_BEREIT_S = bereit_s
+        ob.puls_bot_stand = lambda: "Bot Test"
+
+        def waehlen(trail, sitz=None):
+            if sz is not None and sitz is not None:
+                sitz[0] = sz
+            return sz, (login if sz is not None else "TopstepX-Tab im Puls-Chrome nicht erreichbar.")
+        ob._tsx_sitzung_waehlen = waehlen
+        o_ = io.StringIO()
+        with contextlib.redirect_stdout(o_):
+            ob.modus_tsxlesen_cdp({"konto": EXT})
+        return json.loads(o_.getvalue().strip().splitlines()[-1]), gewartet
+    try:
+        s1 = _Sitz([laden, laden, dict(st_ok, kopf=kopf_rel)])
+        r1, w1 = lauf(s1)
+        chk(r1["ok"] and r1["code"] == "" and r1["balance"] == 0.0 and r1["balance_relativ"] is True and r1["mll"] == -4500.0
+            and r1["position"] == "keine" and r1["alter_s"] == 0.0 and r1["weg"] == "cdp" and r1["etappe"] == "K1" and s1.gelesen == 3
+            and len(w1) == 2 and all(a_ > 0 and b_ > 0 for a_, b_ in w1) and "Bereit-Probe: 3 Lesungen" in r1["trail"] and not s1.klicks
+            and s1.geschlossen >= 1, f"Lauf: Lade-Schirm abgewartet (Jitter), relativ durchgereicht, kein Klick, Sitzung zu ({r1})")
+        s2 = _Sitz([laden])
+        r2, _ = lauf(s2, bereit_s=0.0)
+        chk(not r2["ok"] and r2["code"] == "anker_fehlt" and "lädt noch" in r2["msg"] and r2["balance"] is None and s2.geschlossen >= 1
+            and "NICHT bereit" not in r2["trail"], f"nie bereit (Grenze 0 s) → anker_fehlt statt „anderes Konto“, kein Wert ({r2['code']})")
+        # Grenze mit Testuhr: jede Wartezeit = 3 s → 4 Lesungen (0, 3, 6, 9 s), dann Schluss mit Vermerk
+        s2b = _Sitz([laden])
+        uhr = [1000.0]
+        echt = ob.time.time
+        ob.time.time = lambda: uhr[0]
+        try:
+            r2b, w2b = lauf(s2b, uhr=uhr)
+        finally:
+            ob.time.time = echt
+        chk(not r2b["ok"] and r2b["code"] == "anker_fehlt" and s2b.gelesen == 4 and len(w2b) == 3 and "nach 8 s NICHT bereit" in r2b["trail"],
+            f"Bereit-Probe endet an der Grenze ({s2b.gelesen} Lesungen, {r2b['code']})")
+        s3 = _Sitz([st_ok], frisch=False)
+        r3, _ = lauf(s3)
+        chk(not r3["ok"] and r3["code"] == "nicht_frisch" and s3.gelesen == 0 and r3["balance"] is None and r3["alter_s"] is None,
+            f"nicht frisch → ehrlich nicht_frisch, nichts gelesen ({r3['code']}, {s3.gelesen})")
+        s4 = _Sitz([st_ok])
+        r4, _ = lauf(s4, login="TopstepX nicht angemeldet — bitte im Puls-Chrome anmelden.")
+        chk(not r4["ok"] and r4["code"] == "login" and s4.gelesen == 0 and s4.geschlossen >= 1, f"Login-Fehler → nichts gelesen, Sitzung zu ({r4['code']})")
+        r5, _ = lauf(None)
+        r6, _ = lauf(_Sitz([st_ok]), handlauf=True)
+        r7, _ = lauf(_Sitz([st_ok]), chrome=False)
+        chk(r5["code"] == "tab" and r6["code"] == "handlauf" and r7["code"] == "chrome", f"Tab/Handlauf/Chrome ehrlich ({r5['code']}, {r6['code']}, {r7['code']})")
+        s8 = _Sitz([dict(st_ok, konto=dict(st_ok["konto"], liste_offen=True))])
+        r8, _ = lauf(s8)
+        chk(r8["ok"] and "Konto-Liste steht offen" in r8["trail"] and not s8.klicks, "offene Konto-Liste: nur vermerkt, kein Klick")
+        s9 = _Sitz([dict(st_ok, positionen_sichtbar=False, flach=None)])
+        r9, _ = lauf(s9)
+        chk(not r9["ok"] and r9["code"] == "tabelle_unklar" and r9["balance"] == 150210.5 and r9["position"] is None,
+            f"offene Position (noch nicht lesbar) → tabelle_unklar, nie keine Position ({r9['code']}, {r9.get('position')})")
+        chk(timer_log.count(["start"]) >= 9 and timer_log.count(["start"]) == timer_log.count(["cancel"]),
+            f"Wachhund in jedem Lauf gestartet UND abgebrochen ({timer_log.count(['start'])}/{timer_log.count(['cancel'])})")
+        # B3: Wachhund feuert, während der Hauptpfad noch antworten will → genau EINE Antwort (die des Wachhunds)
+        ausgaben, exits = [], []
+        alt_exit = ob.os._exit
+        ob.os._exit = lambda c: exits.append(c)
+        try:
+            class _SitzHaenger(_Sitz):
+                def stand(self, opts=None):
+                    self.gelesen += 1
+                    [e for e in timer_log if e[0] == "neu"]      # noqa: B018 (nur Lesbarkeit)
+                    feuer[0].f()                                  # Wachhund feuert mitten im Lesen
+                    raise ConnectionError("Sitzung geschlossen")
+            feuer = [None]
+
+            class _TimerFeuer(_Timer):
+                def __init__(self, s_, f_):
+                    super().__init__(s_, f_)
+                    feuer[0] = self
+            _th.Timer = _TimerFeuer
+            o_ = io.StringIO()
+            with contextlib.redirect_stdout(o_):
+                sz = _SitzHaenger([st_ok])
+                ob._tsx_sitzung_waehlen = lambda trail, sitz=None: (sitz.__setitem__(0, sz) if sitz is not None else None, (sz, True))[1]
+                ob.modus_tsxlesen_cdp({"konto": EXT})
+            ausgaben = [l for l in o_.getvalue().splitlines() if l.startswith("{")]
+        finally:
+            ob.os._exit = alt_exit
+        chk(len(ausgaben) == 1 and json.loads(ausgaben[0])["code"] == "haenger" and exits == [0],
+            f"Wachhund + Hauptpfad: genau eine Antwort ({[json.loads(a_)['code'] for a_ in ausgaben]}, exit {exits})")
+    finally:
+        for n, v in alt_m.items():
+            setattr(ob, n, v)
+        _th.Timer = alt_timer
+    # K0-Inventar (Live 30.09.2026 20:48 UTC): nach dem Login erst die Bereit-Probe; nicht bereit → nur Grund-Inventar, KEIN Klick-Schritt
+    namen0 = ("_puls_chrome_sicher", "_tsx_sitzung_waehlen", "_handlauf_aktiv", "_handlauf_setzen", "_puls_diagnose_senden", "_warte",
+              "_augen_pc_id", "_tsx_k0_lesen", "_tsx_k0_zustand", "TSX_K1_BEREIT_S", "puls_bot_stand")
+    alt0 = {n: getattr(ob, n) for n in namen0}
+    schritte0 = []
+
+    def k0_lauf(staende):
+        schritte0.clear()
+        sz = _Sitz(staende)
+        ob._puls_chrome_sicher = lambda trail, **k: True
+        ob._tsx_sitzung_waehlen = lambda trail, sitz=None: (sitz.__setitem__(0, sz) if sitz is not None else None, (sz, True))[1]
+        ob._handlauf_aktiv = lambda: False
+        ob._handlauf_setzen = lambda an: None
+        ob._puls_diagnose_senden = lambda *a, **k: None
+        ob._warte = lambda a, b: None
+        ob._augen_pc_id = lambda: "pc-xxxxxx"
+        ob.TSX_K1_BEREIT_S = 0.0
+        ob.puls_bot_stand = lambda: "Bot Test"
+        ob._tsx_k0_lesen = lambda s_, trail, zustand, pc, blick=None: (schritte0.append("lesen:" + zustand), {"arts": ["inventar_tsx_" + zustand]})[1]
+        ob._tsx_k0_zustand = lambda s_, trail, pc, art, res: schritte0.append("zustand:" + art)
+        _th.Timer = _Timer
+        o_ = io.StringIO()
+        with contextlib.redirect_stdout(o_):
+            ob.modus_tsxinventar_cdp({})
+        return json.loads([l for l in o_.getvalue().splitlines() if l.startswith("{")][-1]), sz
+    try:
+        r0a, sz0a = k0_lauf([laden])
+        s0a = list(schritte0)
+        r0b, sz0b = k0_lauf([st_ok])
+        s0b = list(schritte0)
+    finally:
+        for n, v in alt0.items():
+            setattr(ob, n, v)
+        _th.Timer = alt_timer
+    chk(r0a["ok"] and s0a == ["lesen:grund"] and any("nicht bereit" in o_ for o_ in r0a.get("offen") or []) and sz0a.gelesen >= 1 and not sz0a.klicks,
+        f"K0: Seite nach dem Login nicht bereit → nur Grund-Inventar, keine Klick-Schritte ({s0a}, {r0a.get('offen')})")
+    chk(r0b["ok"] and s0b == ["lesen:grund", "zustand:konto", "zustand:bracket"], f"K0: bereit → Grund, Konto, Bracket wie bisher ({s0b})")
+    chk("MuiDataGrid" in ob.TSX_K0_CHART_JS, "Chart-Probe: Tabellen-Spaltenköpfe (MUI DataGrid) zählen nicht als Linien")
+    # Stapel-Prüfer: genau EINE Antwort — der Verlierer wartet, bis der Gewinner geschrieben hat (nie 0 Antworten)
+    import threading as _th2
+    import time as _t2
+    E = ob._EineAntwort()
+    reihe = []
+
+    def gewinner():
+        E.nehmen()
+        _t2.sleep(0.3)                                    # hängt z. B. kurz, bevor er schreibt
+        reihe.append("gewinner schreibt")
+        E._fertig.set()
+    t_ = _th2.Thread(target=gewinner)
+    t_.start()
+    _t2.sleep(0.05)
+    verloren = E.nehmen(warten_s=5)
+    reihe.append("verlierer zurück")
+    t_.join()
+    chk(verloren is False and reihe == ["gewinner schreibt", "verlierer zurück"], f"Verlierer wartet auf die Ausgabe ({reihe})")
+    o_ = io.StringIO()
+    E2 = ob._EineAntwort()
+    with contextlib.redirect_stdout(o_):
+        chk(E2.nehmen() and not E2.nehmen(warten_s=0.1), "zweites nehmen verliert")
+        E2.ausgeben({"ok": True, "code": ""})
+    chk(o_.getvalue().count("\n") == 1 and E2._fertig.is_set(), "ausgeben: eine Zeile, danach fertig")
+    import inspect as _i0
+    q_k1, q_k0 = _i0.getsource(ob.modus_tsxlesen_cdp), _i0.getsource(ob.modus_tsxinventar_cdp)
+    chk(all(q.index("antwort.ausgeben(res)") < q.index("_puls_diagnose_senden") and "zuerst=_schliessen" in q for q in (q_k1, q_k0))
+        and q_k0.index("_schliessen()\n            _handlauf_setzen(False)") > 0,
+        "erst drucken, dann Diagnose; Wachhund schließt zuerst, K0 gibt die Handlauf-Sperre zuletzt frei")
+    # B9: Combine ohne Kennung im Auslöser („$150K TRADING COMBINE |") → nie „steht"
+    f9, c9, m9 = L(dict(st_ok, konto={"aktiv": "$150K TRADING COMBINE |", "kontonr": None, "abgekuerzt": True}), EXT)
+    chk(c9 == "konto" and "unbekannt" in m9, f"Auslöser ohne Kennung → konto/unbekannt ({c9}, {m9[:70]})")
+    # B10 + B2: Teilstring und abgekürzte Gleichheit beweisen nichts (Richtung Regression .865)
+    _, c10a, _ = L(dict(st_ok, konto={"aktiv": "x", "kontonr": EXT + "1", "abgekuerzt": False}), EXT)
+    _, c10b, _ = L(dict(st_ok, konto={"aktiv": "x", "kontonr": "PA" + EXT, "abgekuerzt": False}), EXT)
+    _, c10c, m10c = L(dict(st_ok, konto={"aktiv": "$150K Express|" + EXT + "…", "kontonr": EXT, "abgekuerzt": True}), EXT)
+    chk(c10a == "konto" and c10b == "konto" and c10c == "konto" and "vielleicht" in m10c,
+        f"Teilstring/abgekürzt gleich → kein Beweis ({c10a}, {c10b}, {c10c})")
+    # B6: bewiesenes Konto → konto_aktiv = External ID (auch bei anderer Schreibweise), Anzeige extra
+    f6, c6, _ = L(st_ok, EXT.lower())
+    chk(c6 == "" and f6["konto_aktiv"] == EXT.lower() and f6["konto_anzeige"] == EXT, f"konto_aktiv = ext, konto_anzeige = Seite ({f6.get('konto_aktiv')})")
+    # B1/B4: Minus vor dem Dollar (tvGeldText liest nur ein führendes Minus), auch im UIA-Weg über tsx_summary
+    S = ob.tsx_summary
+    chk(S({"balance": -300.0, "mll": -4500, "rpl": 12.5, "upl": None}) == {"Balance": "-$300.00", "MLL": "-$4,500.00", "RP&L": "$12.50", "UP&L": None}
+        and S({"balance": -0.0})["Balance"] == "$0.00" and S({"balance": 154504.88})["Balance"] == "$154,504.88" and S(None)["Balance"] is None,
+        "summary: -$300.00 / $154,504.88 / -0.0 → $0.00")
+    fm, cm, _ = L(dict(st_ok, kopf=dict(kopf_rel, balance={"text": "$-300.00", "wert": -300})), EXT)
+    chk(cm == "" and fm["balance"] == -300.0 and fm["summary"]["Balance"] == "-$300.00", "K1: negative relative Balance mit Minus vorn")
+    import inspect as _i
+    chk(_i.getsource(ob.modus_tsxlesen).count("tsx_summary(werte)") == 1 and 'f"${werte[k]' not in _i.getsource(ob),
+        "UIA-Weg (Lesen + Order) nutzt dieselbe summary-Formatierung")
+    # B11: Kopfzeile — bis zu drei Vorsatz-Knoten (auch leere), Wert noch nicht gezeichnet
+    K = ob.tsx_kopf_werte
+    kk = K([("RP&L:", None, "Text"), ("", None, "Text"), ("-", None, "Text"), ("$", None, "Text"), ("50.00", None, "Text")])
+    kb = K([("BAL:", None, "Text"), ("$", None, "Text")])
+    chk(kk["rpl"] == -50.0 and kb["balance"] is None, f"Vorsatz-Knoten: leer + - + $ → -50.00; nur „$“ → None ({kk['rpl']}, {kb['balance']})")
+    if ok:
+        print("✓ TSX-K1-Vorbau: Vertrag wie tv-lesen, balance_relativ durchgereicht, flach nur mit Beweis, Bereit-Probe, Schalter aus")
+    return ok
+
+
 def test_puls_win_maus():
     """Puls-Chrome mit echter Windows-Maus (Finn 29.09.2026, „immer nur so"): augen.js Auge, Windows Hand, :hover-Beweis vor jedem
     Druck — geprüft an der echten Sitzungs-Klasse mit nachgebildeten Windows-Funktionen."""
@@ -4138,14 +4475,14 @@ def test_puls_topstep():
     chk("TopstepX nie als TradingView-Fenster/-Tab/schliessbar", not ob.ist_tradingview_fenster(tsx_titel, "Chrome_WidgetWin_1")
         and ob.tv_tab_rang(tsx_titel, "MNQZ26", "MNQZ6") == 0 and not ob.tv_tab_schliessbar(tsx_titel, "Chrome_WidgetWin_1", "MNQZ26"))
     chk("TradingView-Chart weiter erkannt", ob.tv_tab_rang("MNQZ2026 30,922.50 ▲ +0.4% Unnamed", "", "") > 0)
-    liste = ["$150K TRADING COMBINE | 150KTC-SKU-V2-682437-58370042", "$150K EXPRESS | EXPRESS-V2-682437-57131691",
-             "$50K EXPRESS | EXPRESS-V2-682437-57131690 (Ineligible)"]
-    chk("Konto aus Text", ob.tsx_konto_aus_text(liste[1]) == "EXPRESS-V2-682437-57131691" and ob.tsx_konto_aus_text("BAL: $11,079.66") == "")
-    chk("Konto-Treffer genau einer", ob.tsx_konto_treffer(liste, "EXPRESS-V2-682437-57131691") == (1, ""))
-    chk("nur Ineligible → kein Treffer mit Grund", ob.tsx_konto_treffer(liste, "EXPRESS-V2-682437-57131690")[0] is None
-        and "Ineligible" in ob.tsx_konto_treffer(liste, "EXPRESS-V2-682437-57131690")[1])
-    chk("Teiltreffer zählt nicht (…5713169 vs …57131691)", ob.tsx_konto_treffer(liste, "EXPRESS-V2-682437-5713169")[0] is None)
-    chk("doppelt → nicht eindeutig", ob.tsx_konto_treffer(liste + [liste[1]], "EXPRESS-V2-682437-57131691")[0] is None)
+    liste = ["$150K TRADING COMBINE | 150KTC-SKU-V2-000000-11000000", "$150K EXPRESS | EXPRESS-V2-000000-10000001",
+             "$50K EXPRESS | EXPRESS-V2-000000-10000000 (Ineligible)"]
+    chk("Konto aus Text", ob.tsx_konto_aus_text(liste[1]) == "EXPRESS-V2-000000-10000001" and ob.tsx_konto_aus_text("BAL: $11,079.66") == "")
+    chk("Konto-Treffer genau einer", ob.tsx_konto_treffer(liste, "EXPRESS-V2-000000-10000001") == (1, ""))
+    chk("nur Ineligible → kein Treffer mit Grund", ob.tsx_konto_treffer(liste, "EXPRESS-V2-000000-10000000")[0] is None
+        and "Ineligible" in ob.tsx_konto_treffer(liste, "EXPRESS-V2-000000-10000000")[1])
+    chk("Teiltreffer zählt nicht (…1000000 vs …10000001)", ob.tsx_konto_treffer(liste, "EXPRESS-V2-000000-1000000")[0] is None)
+    chk("doppelt → nicht eindeutig", ob.tsx_konto_treffer(liste + [liste[1]], "EXPRESS-V2-000000-10000001")[0] is None)
     vor = ["MNQZ26 · Micro Nasdaq (Dec 2026)", "NQZ26 · Nasdaq (Dec 2026)", "MNQH27 · Micro Nasdaq (Mar 2027)"]
     chk("Contract NQ ≠ MNQ", ob.tsx_contract_wahl(vor[:2], "NQ") == 1 and ob.tsx_contract_wahl(vor[:2], "MNQ") == 0)
     chk("Contract mehrdeutig (zwei MNQ-Monate) → None", ob.tsx_contract_wahl(vor, "MNQ") is None)
@@ -4174,7 +4511,7 @@ def test_puls_topstep():
 
 
 def test_puls_nie_chrome_schliessen():
-    """B17 (27.09.2026, Mikes PC): Puls klickte in TopstepX Chromes eigenes Tab-/Fenster-X („Close") und schloss Prophos.
+    """B17 (27.09.2026, PC von ID A): Puls klickte in TopstepX Chromes eigenes Tab-/Fenster-X („Close") und schloss Prophos.
     Jetzt: Klicks nur in der Webseite; allgemeine Strg+W-Regel; Trockenlauf mit Chromes Knöpfen im UIA-Baum."""
     import order_bot as ob, io, contextlib, json as _j, sys as _s, types as _t
     ok = True
@@ -4219,12 +4556,12 @@ def test_puls_nie_chrome_schliessen():
         ob._puls_diagnose_senden = lambda *a, **k: None
         ob._tsx_wachhund = lambda *a, **k: None
         ob._tv_uia_roh = lambda w_, typen=None, mx=0, muster=(): chrome_x + [
-            ("$150K TRADING COMBINE | 150KTC-SKU-V2-682437-71275127", (20, 160, 300, 180), "Text"),
+            ("$150K TRADING COMBINE | 150KTC-SKU-V2-000000-20000000", (20, 160, 300, 180), "Text"),
             ("BAL: $149,210.00", (400, 130, 520, 150), "Text"), ("No Active Position", (1500, 400, 1700, 420), "Text")]
         ob._tv_uia_klick = lambda el, name, trail: (geklickt.append((name, el.get("punkt"))), (True, ""))[1]
         b = io.StringIO()
         with contextlib.redirect_stdout(b):
-            ob.modus_tsxlesen({"konto": "150KTC-SKU-V2-682437-71275127"})
+            ob.modus_tsxlesen({"konto": "150KTC-SKU-V2-000000-20000000"})
         r = _j.loads(b.getvalue().strip().splitlines()[-1])
         chk("Trockenlauf: Balance gelesen, kein einziger Klick auf Chromes X",
             r.get("ok") and r.get("balance") == 149210.0 and not any(p_ and p_[1] < 120 for _n, p_ in geklickt))
@@ -4241,7 +4578,7 @@ def test_puls_nie_chrome_schliessen():
 
 
 def test_tsx_konto_abgekuerzt():
-    """B18 (27.09.2026, zweiter Live-Test bei Mike): Auslöser zeigt „$150K EXPRESS | EXPRESS-…" (abgekürzt) — Konto über die
+    """B18 (27.09.2026, zweiter Live-Test bei ID A): Auslöser zeigt „$150K EXPRESS | EXPRESS-…" (abgekürzt) — Konto über die
     aufgeklappte Liste mit der vollen ID wählen; jeder Schritt mit Ende."""
     import order_bot as ob, io, contextlib, json as _j, sys as _s, types as _t
     ok = True
@@ -4253,32 +4590,32 @@ def test_tsx_konto_abgekuerzt():
 
     chk("sichtbar: abgekürzt", ob.tsx_konto_sichtbar("$150K EXPRESS | EXPRESS-…") == ("EXPRESS", True)
         and ob.tsx_konto_sichtbar("$150K EXPRESS | EXPRESS-V2-68...") == ("EXPRESS-V2-68", True))
-    chk("sichtbar: voll", ob.tsx_konto_sichtbar("$150K EXPRESS | EXPRESS-V2-682437-57131691") == ("EXPRESS-V2-682437-57131691", False)
+    chk("sichtbar: voll", ob.tsx_konto_sichtbar("$150K EXPRESS | EXPRESS-V2-000000-10000001") == ("EXPRESS-V2-000000-10000001", False)
         and ob.tsx_konto_sichtbar("BAL: $11,079.66") == ("", False))
-    ext = "EXPRESS-V2-682437-57131691"
+    ext = "EXPRESS-V2-000000-10000001"
     chk("steht: voll gleich → ja, abgekürzt Präfix → vielleicht, anderes → nein",
-        ob.tsx_konto_steht("$150K EXPRESS | EXPRESS-V2-682437-57131691", ext) == "ja"
+        ob.tsx_konto_steht("$150K EXPRESS | EXPRESS-V2-000000-10000001", ext) == "ja"
         and ob.tsx_konto_steht("$150K EXPRESS | EXPRESS-…", ext) == "vielleicht"
         and ob.tsx_konto_steht("$150K TRADING COMBINE | 150KTC-…", ext) == "nein"
-        and ob.tsx_konto_steht("$150K EXPRESS | EXPRESS-V2-682437-57131690", ext) == "nein")
+        and ob.tsx_konto_steht("$150K EXPRESS | EXPRESS-V2-000000-10000000", ext) == "nein")
 
     wu = ob.tsx_wechsel_urteil
-    liste2 = ["$150K TRADING COMBINE | 150KTC-SKU-V2-682437-58370042", "$150K TRADING COMBINE | 150KTC-SKU-V2-682437-71275127",
-              "$150K EXPRESS | EXPRESS-V2-682437-57131691"]
-    chk("Urteil: volle Ziel-ID → bestätigt", wu("$150K TRADING COMBINE | 150KTC-SKU-V2-682437-58370042",
-                                               "150KTC-SKU-V2-682437-58370042", liste2, 11079.66, 11079.66)[0])
+    liste2 = ["$150K TRADING COMBINE | 150KTC-SKU-V2-000000-11000000", "$150K TRADING COMBINE | 150KTC-SKU-V2-000000-20000000",
+              "$150K EXPRESS | EXPRESS-V2-000000-10000001"]
+    chk("Urteil: volle Ziel-ID → bestätigt", wu("$150K TRADING COMBINE | 150KTC-SKU-V2-000000-11000000",
+                                               "150KTC-SKU-V2-000000-11000000", liste2, 11079.66, 11079.66)[0])
     chk("Urteil: anderes TRADING COMBINE (gleiches Präfix, volle ID) → nein",
-        not wu("$150K TRADING COMBINE | 150KTC-SKU-V2-682437-71275127", "150KTC-SKU-V2-682437-58370042", liste2, 1.0, 2.0)[0])
+        not wu("$150K TRADING COMBINE | 150KTC-SKU-V2-000000-20000000", "150KTC-SKU-V2-000000-11000000", liste2, 1.0, 2.0)[0])
     chk("Urteil: abgekürzt + Präfix doppelt (zwei TRADING COMBINE) → nie bestätigt, auch wenn BAL sich ändert",
-        not wu("$150K TRADING COMBINE | 150KTC-…", "150KTC-SKU-V2-682437-58370042", liste2, 11079.66, 154504.88)[0])
+        not wu("$150K TRADING COMBINE | 150KTC-…", "150KTC-SKU-V2-000000-11000000", liste2, 11079.66, 154504.88)[0])
     chk("Urteil: abgekürzt + Präfix eindeutig + BAL geändert → bestätigt; BAL gleich → nein",
-        wu("$150K EXPRESS | EXPRESS-…", "EXPRESS-V2-682437-57131691", liste2, 154504.88, 11079.66)[0]
-        and not wu("$150K EXPRESS | EXPRESS-…", "EXPRESS-V2-682437-57131691", liste2, 11079.66, 11079.66)[0])
+        wu("$150K EXPRESS | EXPRESS-…", "EXPRESS-V2-000000-10000001", liste2, 154504.88, 11079.66)[0]
+        and not wu("$150K EXPRESS | EXPRESS-…", "EXPRESS-V2-000000-10000001", liste2, 11079.66, 11079.66)[0])
     chk("BAL US-Format aus Finns Screenshot", ob.tsx_kopf_werte([("BAL: $154,504.88", (0, 0, 9, 9), "Text")])["balance"] == 154504.88)
 
     alt_mod = _s.modules.get("pywinauto")
     pw = _t.ModuleType("pywinauto"); pw.Desktop = object; _s.modules["pywinauto"] = pw
-    z = {"offen": False, "konto": "EXPRESS-V2-682437-11111111"}
+    z = {"offen": False, "konto": "EXPRESS-V2-000000-11111111"}
     class Wf:
         handle = 4711
         def window_text(self): return "NQZ26 $30,921.75 | TopstepX - Google Chrome"
@@ -4294,16 +4631,16 @@ def test_tsx_konto_abgekuerzt():
                ("BAL: $11,079.66", (400, 160, 520, 180), "Text"), ("MLL: $145,500.00", (540, 160, 660, 180), "Text"),
                ("No Active Position", (1500, 400, 1700, 420), "Text")]
         if z["offen"]:
-            out += [("$150K TRADING COMBINE | 150KTC-SKU-V2-682437-58370042", (20, 200, 300, 220), "ListItem"),
-                    ("$150K EXPRESS | EXPRESS-V2-682437-57131691", (20, 230, 300, 250), "ListItem"),
-                    ("$50K EXPRESS | EXPRESS-V2-682437-57131690 (Ineligible)", (20, 260, 300, 280), "ListItem")]
+            out += [("$150K TRADING COMBINE | 150KTC-SKU-V2-000000-11000000", (20, 200, 300, 220), "ListItem"),
+                    ("$150K EXPRESS | EXPRESS-V2-000000-10000001", (20, 230, 300, 250), "ListItem"),
+                    ("$50K EXPRESS | EXPRESS-V2-000000-10000000 (Ineligible)", (20, 260, 300, 280), "ListItem")]
         return out
     def klick(el, name, trail):
         trail.append("Klick " + name)
         if name == "Konto-Dropdown öffnen":
             z["offen"] = True
         elif name.startswith("Konto EXPRESS"):
-            z.update(offen=True, alt_konto=z["konto"], konto="EXPRESS-V2-682437-57131691", alt_runden=1)   # Liste bleibt im Baum
+            z.update(offen=True, alt_konto=z["konto"], konto="EXPRESS-V2-000000-10000001", alt_runden=1)   # Liste bleibt im Baum
         return True, ""
     orig = {k: getattr(ob, k) for k in ("_puls_fenster", "_tv_fenster_rect", "_dpi_bewusst", "_warte", "_tv_uia_roh",
                                          "_tv_uia_klick", "_tsx_seite", "_puls_diagnose_senden", "_tsx_wachhund")}
@@ -4326,10 +4663,10 @@ def test_tsx_konto_abgekuerzt():
             r.get("ok") and r.get("konto_aktiv") == ext and r.get("balance") == 11079.66 and "Konto per Liste gewählt" in r.get("trail", "")
             and "Klick Konto EXPRESS" in r.get("trail", "") and "Wechsel-Prüfung (2 Runden)" in r.get("trail", ""))
         chk("Spur ohne 'TradingView' im TopstepX-Lauf", "TradingView" not in r.get("trail", ""))
-        z.update(offen=False, konto="EXPRESS-V2-682437-11111111", alt_runden=0)
+        z.update(offen=False, konto="EXPRESS-V2-000000-11111111", alt_runden=0)
         b = io.StringIO()
         with contextlib.redirect_stdout(b):
-            ob.modus_tsxlesen({"konto": "EXPRESS-V2-682437-99999999"})
+            ob.modus_tsxlesen({"konto": "EXPRESS-V2-000000-99999999"})
         r2 = _j.loads(b.getvalue().strip().splitlines()[-1])
         chk("unbekanntes Konto: ehrliches Ende mit Grund + Liste", not r2.get("ok") and r2.get("code") == "konto"
             and "nicht in der Liste" in r2.get("msg", "") and len(r2.get("liste") or []) == 3)
@@ -4346,7 +4683,7 @@ def test_tsx_konto_abgekuerzt():
 
 
 def test_tsx_titel_url():
-    """B19 (27.09.2026, dritter Live-Test bei Mike): der geladene TopstepX-Tab heisst „NQZ26 $30,921.75 ▲ +0.50%" (ohne
+    """B19 (27.09.2026, dritter Live-Test bei ID A): der geladene TopstepX-Tab heisst „NQZ26 $30,921.75 ▲ +0.50%" (ohne
     'TopstepX') — trotzdem TopstepX, nie TradingView; TradingView-Titel bleiben TradingView; Adresse topstepx.com."""
     import order_bot as ob
     ok = True
@@ -4374,7 +4711,7 @@ def test_tsx_titel_url():
 
 
 def test_tsx_zeilen():
-    """B20 (27.09.2026, Inventar bei Mike: 2 Kandidaten, aber kein Auslöser): getrennte Knoten „$150K EXPRESS" / „|" /
+    """B20 (27.09.2026, Inventar bei ID A: 2 Kandidaten, aber kein Auslöser): getrennte Knoten „$150K EXPRESS" / „|" /
     „EXPRESS-…" zu einem Stück zusammenfügen — ohne die Kopfzeile (BAL …) rechts daneben mitzunehmen."""
     import order_bot as ob
     ok = True
@@ -4392,25 +4729,25 @@ def test_tsx_zeilen():
         and any(t.startswith("BAL: $11,079.66") for t, _r in z) and not any("EXPRESS" in t and "BAL" in t for t, _r in z))
     a = ob.tsx_ausloeser_waehlen(roh)
     chk("Auslöser aus Stücken, Klick-Rechteck = erster Knoten (Label)", a == ("$150K EXPRESS | EXPRESS-…", (20, 160, 120, 180), "Zeile")
-        and ob.tsx_konto_steht(a[0], "EXPRESS-V2-682437-57131691") == "vielleicht")
-    einzeln = [("$150K EXPRESS | EXPRESS-V2-682437-57131691", (20, 160, 300, 180), "Button")] + roh
+        and ob.tsx_konto_steht(a[0], "EXPRESS-V2-000000-10000001") == "vielleicht")
+    einzeln = [("$150K EXPRESS | EXPRESS-V2-000000-10000001", (20, 160, 300, 180), "Button")] + roh
     chk("ein einzelnes Element mit dem ganzen Muster geht vor", ob.tsx_ausloeser_waehlen(einzeln)[2] == "Button")
     liste = roh + [("$150K TRADING COMBINE", (20, 200, 150, 220), "Text"), ("|", (152, 200, 156, 220), "Text"),
-                   ("150KTC-SKU-V2-682437-58370042", (160, 200, 360, 220), "Text"),
+                   ("150KTC-SKU-V2-000000-11000000", (160, 200, 360, 220), "Text"),
                    ("$150K EXPRESS", (20, 230, 120, 250), "Text"), ("|", (124, 230, 128, 250), "Text"),
-                   ("EXPRESS-V2-682437-57131691", (132, 230, 330, 250), "Text")]
+                   ("EXPRESS-V2-000000-10000001", (132, 230, 330, 250), "Text")]
     e = ob.tsx_eintraege_waehlen(liste, 184)
     chk("Einträge unterhalb aus Stücken, volle ID", [t for t, _r, _ty in e] ==
-        ["$150K TRADING COMBINE | 150KTC-SKU-V2-682437-58370042", "$150K EXPRESS | EXPRESS-V2-682437-57131691"]
-        and ob.tsx_konto_treffer([t for t, _r, _ty in e], "EXPRESS-V2-682437-57131691") == (1, ""))
+        ["$150K TRADING COMBINE | 150KTC-SKU-V2-000000-11000000", "$150K EXPRESS | EXPRESS-V2-000000-10000001"]
+        and ob.tsx_konto_treffer([t for t, _r, _ty in e], "EXPRESS-V2-000000-10000001") == (1, ""))
     chk("leer/Unsinn wirft nicht", ob.tsx_zeilen(None) == [] and ob.tsx_ausloeser_waehlen([("x", None, "Text")]) is None)
     if ok:
         print("✓ TSX-Zeilen: getrennte Knoten → Auslöser/Einträge, Kopfzeile bleibt getrennt, Einzel-Element geht vor")
     return ok
 
 
-def test_tsx_inventar_mike():
-    """B22 (27.09.2026, Inventar pc-l5o8bv 11:24 UTC, exakt diese Knoten): Auslöser ohne Kennung („$150K TRADING COMBINE" + „|"),
+def test_tsx_inventar_ida():
+    """B22 (27.09.2026, Inventar pc-aaaaaa 11:24 UTC, exakt diese Knoten): Auslöser ohne Kennung („$150K TRADING COMBINE" + „|"),
     Kopfzeile „BAL:" · „$" · „154,504.88" getrennt; Wechsel-Urteil ohne Kennung (Label + BAL / eindeutiges Label)."""
     import order_bot as ob
     ok = True
@@ -4418,7 +4755,7 @@ def test_tsx_inventar_mike():
     def chk(name, bed):
         nonlocal ok
         if not bed:
-            print("✗ TSX-Inventar Mike: " + name); ok = False
+            print("✗ TSX-Inventar ID A: " + name); ok = False
 
     roh = [("Weekend Hours", (75, 124, 200, 149), "Text"), (":", (199, 124, 206, 149), "Text"),
            ("We are undergoing scheduled maintenance, which may temporari", (220, 124, 1200, 149), "Text"),
@@ -4432,37 +4769,52 @@ def test_tsx_inventar_mike():
     chk("Auslöser ohne Kennung gefunden (nur Label + |), Klick-Rechteck = Label-Knoten",
         a is not None and a[0].startswith("$150K TRADING COMBINE") and a[1] == (102, 180, 262, 199))
     mit_id = [("$150K TRADING COMBINE", (102, 180, 262, 199), "Text"), ("|", (267, 180, 280, 199), "Text"),
-              ("150KTC-SKU-V2-682437-58370042", (284, 180, 560, 199), "Text"), ("BAL:", (620, 181, 650, 200), "Text")]
+              ("150KTC-SKU-V2-000000-11000000", (284, 180, 560, 199), "Text"), ("BAL:", (620, 181, 650, 200), "Text")]
     a2 = ob.tsx_ausloeser_waehlen(mit_id)
     chk("B24: Auslöser MIT ID (Stück bis x=560) → Klick auf den Label-Knoten, nicht in die Stück-Mitte",
         a2[1] == (102, 180, 262, 199) and (a2[1][0] + a2[1][2]) // 2 < 300)
     knopf = mit_id + [("", (90, 172, 300, 206), "Button"), ("Konto", (80, 170, 900, 210), "Button")]
     a3 = ob.tsx_ausloeser_waehlen([e for e in knopf if e[0]] + [("Kontoauswahl", (90, 172, 300, 206), "Button")])
     chk("B24: umschließender (kleinster) Button → dessen Rechteck", a3[1] == (90, 172, 300, 206))
-    chk("Stand ohne Kennung = unbekannt → Liste öffnen", ob.tsx_konto_steht(a[0], "150KTC-SKU-V2-682437-58370042") == "unbekannt")
+    chk("Stand ohne Kennung = unbekannt → Liste öffnen", ob.tsx_konto_steht(a[0], "150KTC-SKU-V2-000000-11000000") == "unbekannt")
     chk("Kopfzeile aus drei Knoten: BAL/MLL/RP&L/UP&L", ob.tsx_kopf_werte(roh) == {"balance": 154504.88, "mll": 150000.0, "rpl": 0.0, "upl": 0.0})
     chk("Kopfzeile negativ getrennt: -$ und 120.25 als zwei Knoten", ob.tsx_kopf_werte([("RP&L:", None, "T"), ("-$", None, "T"), ("120.25", None, "T")])["rpl"] == -120.25)
-    liste = ["$150K TRADING COMBINE | 150KTC-SKU-V2-682437-58370042", "$150K TRADING COMBINE | 150KTC-SKU-V2-682437-71275127",
-             "$150K EXPRESS | EXPRESS-V2-682437-57131691", "$50K EXPRESS | EXPRESS-V2-682437-1 (Ineligible)"]
+    K_ = ob.tsx_kopf_werte
+    chk("Kopfzeile aus VIER Knoten: - · $ · 50.00 (T2-Parität 30.09.2026)",
+        K_([("RP&L:", None, "T"), ("-", None, "T"), ("$", None, "T"), ("50.00", None, "T")])["rpl"] == -50.0
+        and K_([("UP&L:", None, "T"), ("(", None, "T"), ("$", None, "T"), ("12.50", None, "T"), (")", None, "T")])["upl"] == -12.5
+        and K_([("RP&L:", None, "T"), ("$", None, "T"), ("-", None, "T"), ("7.25", None, "T")])["rpl"] == -7.25
+        and K_([("BAL:", None, "T"), ("MLL:", None, "T"), ("$", None, "T"), ("150,000.00", None, "T")]) == {"balance": None, "mll": 150000.0, "rpl": None, "upl": None}
+        and K_([("RP&L:", None, "T"), ("$", None, "T"), ("50.00", None, "T")])["rpl"] == 50.0
+        and K_([("RP&L: -", None, "T"), ("$", None, "T"), ("50.00", None, "T")])["rpl"] == -50.0
+        and K_([("UP&L:", None, "T"), ("(", None, "T"), ("$", None, "T"), ("12.50", None, "T")])["upl"] == 12.5
+        and K_([("RP&L:", None, "T"), ("", None, "T"), ("-$", None, "T"), ("3.00", None, "T")])["rpl"] == -3.0
+        and K_([("BAL:", None, "T"), ("x", None, "T"), ("BAL: $5.00", None, "T")])["balance"] == 5.0)
+    G_ = ob.tsx_geld
+    chk("Geld wie geld() in augen_tsx.js: Minus vor der ersten Ziffer, Klammer nur mit beiden Enden",
+        G_("$-50.00") == -50.0 and G_("$-7.00") == -7.0 and G_("($50.00") == 50.0 and G_("($12.50)") == -12.5 and G_("-$1,234.50") == -1234.5
+        and G_("$11,079.66") == 11079.66 and G_("(USD) 50.00") == 50.0 and G_("—") is None)
+    liste = ["$150K TRADING COMBINE | 150KTC-SKU-V2-000000-11000000", "$150K TRADING COMBINE | 150KTC-SKU-V2-000000-20000000",
+             "$150K EXPRESS | EXPRESS-V2-000000-10000001", "$50K EXPRESS | EXPRESS-V2-000000-0 (Ineligible)"]
     wu = ob.tsx_wechsel_urteil
     chk("ohne Kennung: Label passt + BAL geändert → bestätigt",
-        wu("$150K TRADING COMBINE |", "150KTC-SKU-V2-682437-58370042", liste, 11079.66, 154504.88)[0])
-    chk("ohne Kennung: Label doppelt + BAL gleich → nicht beweisbar (Mikes zwei TRADING COMBINE)",
-        not wu("$150K TRADING COMBINE |", "150KTC-SKU-V2-682437-58370042", liste, 154504.88, 154504.88)[0])
+        wu("$150K TRADING COMBINE |", "150KTC-SKU-V2-000000-11000000", liste, 11079.66, 154504.88)[0])
+    chk("ohne Kennung: Label doppelt + BAL gleich → nicht beweisbar (die zwei TRADING COMBINE von ID A)",
+        not wu("$150K TRADING COMBINE |", "150KTC-SKU-V2-000000-11000000", liste, 154504.88, 154504.88)[0])
     chk("ohne Kennung: Label eindeutig (EXPRESS) + BAL gleich → bestätigt",
-        wu("$150K EXPRESS |", "EXPRESS-V2-682437-57131691", liste, 11079.66, 11079.66)[0])
-    chk("ohne Kennung: falsches Label → nein", not wu("$150K EXPRESS |", "150KTC-SKU-V2-682437-58370042", liste, 1.0, 2.0)[0])
-    offen = roh + [("$150K TRADING COMBINE | 150KTC-SKU-V2-682437-58370042", (102, 230, 400, 250), "Text")]
+        wu("$150K EXPRESS |", "EXPRESS-V2-000000-10000001", liste, 11079.66, 11079.66)[0])
+    chk("ohne Kennung: falsches Label → nein", not wu("$150K EXPRESS |", "150KTC-SKU-V2-000000-11000000", liste, 1.0, 2.0)[0])
+    offen = roh + [("$150K TRADING COMBINE | 150KTC-SKU-V2-000000-11000000", (102, 230, 400, 250), "Text")]
     chk("offene Liste im Baum: Auslöser bleibt der OBERSTE (nicht der Listeneintrag mit voller ID)",
         ob.tsx_ausloeser_waehlen(offen)[1][1] == 180)
     chk("Kopfzeile ist kein Auslöser", not ob.tsx_ist_ausloeser_text("BAL: $ 154,504.88") and ob.tsx_ist_ausloeser_text("$150K TRADING COMBINE |"))
     if ok:
-        print("✓ TSX-Inventar Mike: Auslöser ohne Kennung, Kopfzeile aus drei Knoten, Urteil über Label + BAL")
+        print("✓ TSX-Inventar ID A: Auslöser ohne Kennung, Kopfzeile aus drei Knoten, Urteil über Label + BAL")
     return ok
 
 
 def test_tsx_beweis():
-    """B23 (27.09.2026, Mike .684): Wechsel klappte, Beweis scheiterte („Ziel-Label ''") — Label aus Nachbarknoten, markierter
+    """B23 (27.09.2026, ID A .684): Wechsel klappte, Beweis scheiterte („Ziel-Label ''") — Label aus Nachbarknoten, markierter
     Listeneintrag als Beweis (vorher: steht schon; nachher: Liste erneut öffnen), Reihenfolge ID → markiert → Label + BAL."""
     import order_bot as ob, io, contextlib, json as _j, sys as _s, types as _t
     ok = True
@@ -4472,23 +4824,23 @@ def test_tsx_beweis():
         if not bed:
             print("✗ TSX-Beweis: " + name); ok = False
 
-    roh = [("$150K TRADING COMBINE", (102, 270, 262, 288), "Text"), ("150KTC-SKU-V2-682437-71275127", (102, 289, 330, 305), "Text")]
-    e = ("✓ 150KTC-SKU-V2-682437-71275127", (102, 289, 330, 305), "Text")
+    roh = [("$150K TRADING COMBINE", (102, 270, 262, 288), "Text"), ("150KTC-SKU-V2-000000-20000000", (102, 289, 330, 305), "Text")]
+    e = ("✓ 150KTC-SKU-V2-000000-20000000", (102, 289, 330, 305), "Text")
     chk("Label aus Nachbarknoten derselben Listenzeile", ob.tsx_eintrag_label(e, roh) == "$150K TRADING COMBINE")
     chk("Label ohne Anker im eigenen Text", ob.tsx_label("✓ $150K TRADING COMBINE | 150KTC-X") == "$150K TRADING COMBINE")
     mu = ob.tsx_markiert_urteil
-    chk("markiert: Ziel / anderes / nichts", mu(["$150K TRADING COMBINE | 150KTC-SKU-V2-682437-71275127"], "150KTC-SKU-V2-682437-71275127") == "ja"
-        and mu(["$150K TRADING COMBINE | 150KTC-SKU-V2-682437-58370042"], "150KTC-SKU-V2-682437-71275127") == "nein"
-        and mu([], "150KTC-SKU-V2-682437-71275127") == "unbekannt" and mu(["$150K TRADING COMBINE"], "X-1-2") == "unbekannt")
-    liste = ["$150K TRADING COMBINE | 150KTC-SKU-V2-682437-58370042", "$150K TRADING COMBINE | 150KTC-SKU-V2-682437-71275127"]
+    chk("markiert: Ziel / anderes / nichts", mu(["$150K TRADING COMBINE | 150KTC-SKU-V2-000000-20000000"], "150KTC-SKU-V2-000000-20000000") == "ja"
+        and mu(["$150K TRADING COMBINE | 150KTC-SKU-V2-000000-11000000"], "150KTC-SKU-V2-000000-20000000") == "nein"
+        and mu([], "150KTC-SKU-V2-000000-20000000") == "unbekannt" and mu(["$150K TRADING COMBINE"], "X-1-2") == "unbekannt")
+    liste = ["$150K TRADING COMBINE | 150KTC-SKU-V2-000000-11000000", "$150K TRADING COMBINE | 150KTC-SKU-V2-000000-20000000"]
     chk("Urteil mit Label aus Nachbarknoten: Label + BAL geändert → ja",
-        ob.tsx_wechsel_urteil("$150K TRADING COMBINE |", "150KTC-SKU-V2-682437-71275127", ["150KTC-SKU-V2-682437-71275127"],
+        ob.tsx_wechsel_urteil("$150K TRADING COMBINE |", "150KTC-SKU-V2-000000-20000000", ["150KTC-SKU-V2-000000-20000000"],
                               154504.88, 149210.0, "$150K TRADING COMBINE")[0])
 
     # Trockenlauf: Auslöser ohne ID, zwei TRADING COMBINE, BAL gleich → nur der markierte Eintrag beweist
     alt_mod = _s.modules.get("pywinauto")
     pw = _t.ModuleType("pywinauto"); pw.Desktop = object; _s.modules["pywinauto"] = pw
-    z = {"konto": "150KTC-SKU-V2-682437-58370042", "offen": False}
+    z = {"konto": "150KTC-SKU-V2-000000-11000000", "offen": False}
     class Wf:
         handle = 1
         def window_text(self): return "NQZ26 $30,921.75 ▲ +0.50% - Google Chrome"
@@ -4505,7 +4857,7 @@ def test_tsx_beweis():
         if "öffnen" in name:
             z["offen"] = True
         elif name.startswith("Konto 150KTC"):
-            z.update(konto="150KTC-SKU-V2-682437-71275127", offen=False)
+            z.update(konto="150KTC-SKU-V2-000000-20000000", offen=False)
         return True, ""
     orig = {k: getattr(ob, k) for k in ("_puls_fenster", "_tv_fenster_rect", "_dpi_bewusst", "_warte", "_tv_uia_roh", "_tv_uia_klick",
                                          "_tsx_seite", "_puls_diagnose_senden", "_tsx_wachhund", "_tsx_markiert", "_tsx_esc")}
@@ -4524,14 +4876,14 @@ def test_tsx_beweis():
         ob._tsx_markiert = lambda w_: ([f"$150K TRADING COMBINE | {z['konto']}"] if z["offen"] else [])
         b = io.StringIO()
         with contextlib.redirect_stdout(b):
-            ob.modus_tsxlesen({"konto": "150KTC-SKU-V2-682437-71275127"})
+            ob.modus_tsxlesen({"konto": "150KTC-SKU-V2-000000-20000000"})
         r = _j.loads(b.getvalue().strip().splitlines()[-1])
         chk("Trockenlauf zwei TRADING COMBINE, BAL gleich: markierter Eintrag beweist, Balance gelesen",
             r.get("ok") and "markierter Listeneintrag = Ziel-ID" in r.get("trail", "") and r.get("balance") == 154504.88)
-        z.update(konto="150KTC-SKU-V2-682437-71275127", offen=False)
+        z.update(konto="150KTC-SKU-V2-000000-20000000", offen=False)
         b = io.StringIO()
         with contextlib.redirect_stdout(b):
-            ob.modus_tsxlesen({"konto": "150KTC-SKU-V2-682437-71275127"})
+            ob.modus_tsxlesen({"konto": "150KTC-SKU-V2-000000-20000000"})
         r2 = _j.loads(b.getvalue().strip().splitlines()[-1])
         chk("Ziel stand schon (markiert vorher) → kein Klick auf den Eintrag", r2.get("ok") and "schon ausgewählt" in r2.get("trail", "")
             and "Klick Konto 150KTC" not in r2.get("trail", ""))
@@ -4554,7 +4906,7 @@ def test_tsx_beweis():
 
 
 def test_tsx_order():
-    """B26 Etappe 2 (27.09.2026): Order in TopstepX — Trockenlauf mit Mikes Inventar-Rechtecken. Probe endet vor dem Knopf
+    """B26 Etappe 2 (27.09.2026): Order in TopstepX — Trockenlauf mit Inventar-Rechtecken von ID A. Probe endet vor dem Knopf
     (Brackets/Contract/Menge gesetzt, kein Order-Klick), scharf klickt genau den Panel-Knopf, Riegel bei offener Position."""
     import order_bot as ob, io, contextlib, json as _j
     ok = True
@@ -4565,7 +4917,7 @@ def test_tsx_order():
             print("✗ TSX-Order: " + name); ok = False
 
     # reine Teile
-    b, f = ob.tsx_order_befehl({"ext_id": "150KTC-SKU-V2-682437-71275127", "symbol": "MNQ1!", "richtung": "BUY", "volumen": 2, "tp_usd": 400})
+    b, f = ob.tsx_order_befehl({"ext_id": "150KTC-SKU-V2-000000-20000000", "symbol": "MNQ1!", "richtung": "BUY", "volumen": 2, "tp_usd": 400})
     chk("Befehl gültig", b and b["wurzel"] == "MNQ" and b["menge"] == 2 and b["brackets"] == {"profit": "400", "risk": ""} and b["scharf"] is False)
     chk("scharf nur bei echtem true", ob.tsx_order_befehl({"ext_id": "12345X", "symbol": "NQ", "richtung": "sell", "volumen": 1, "tp_usd": 50, "scharf": "true"})[0]["scharf"] is False)
     chk("Menge 1.5 / Symbol ES / ohne TP abgelehnt", ob.tsx_order_befehl({"ext_id": "12345X", "symbol": "NQ", "richtung": "buy", "volumen": 1.5, "tp_usd": 5})[0] is None
@@ -4661,7 +5013,7 @@ def test_tsx_order():
             for k, v in alt.items():
                 setattr(ob, k, v)
 
-    cmd = {"ext_id": "150KTC-SKU-V2-682437-71275127", "symbol": "MNQ1!", "richtung": "buy", "volumen": 2, "tp_usd": 400, "sl_usd": None}
+    cmd = {"ext_id": "150KTC-SKU-V2-000000-20000000", "symbol": "MNQ1!", "richtung": "buy", "volumen": 2, "tp_usd": 400, "sl_usd": None}
     r, z = lauf(cmd)
     chk(f"Probe: ok/probe/nicht gesendet ({r.get('code')}: {r.get('msg')})", r.get("ok") and r.get("schritt") == "probe" and r.get("gesendet") is False)
     chk("Probe: Brackets 400/leer, Haken an, MNQ, Menge 2", z["profit"] == "400" and z["risk"] == "" and z["haken"] == 1
@@ -4765,7 +5117,7 @@ def test_tsx_order():
         and ab([], ["Outside trading hours"]) == "Outside trading hours" and ab([], ["BUY +1 @ MARKET"]) is None)
     r, z = lauf(cmd, typ="Order Type Limit")
     chk("Order-Typ Limit: Riegel", r.get("code") == "ordertyp" and not z["klicks"])
-    # B29 (Mike 16:04 UTC): ComboBox heißt nur „Order Type" — unlesbar = weiter, Knopf-Beweis entscheidet
+    # B29 (ID A 16:04 UTC): ComboBox heißt nur „Order Type" — unlesbar = weiter, Knopf-Beweis entscheidet
     r, z = lauf(cmd, typ="Order Type")
     chk(f"B29: nur „Order Type\" → Probe läuft durch ({r.get('code')}: {r.get('msg')})", r.get("ok") and r.get("schritt") == "probe"
         and "Order-Typ unlesbar" in r.get("trail", ""))
@@ -4783,7 +5135,7 @@ def test_tsx_order():
 
 
 def test_tsx_login():
-    """B27 (27.09.2026, Mike): TopstepX-Login-Seite — nur bei vorausgefüllten Feldern EIN Klick auf „PLATFORM LOGIN",
+    """B27 (27.09.2026, ID A): TopstepX-Login-Seite — nur bei vorausgefüllten Feldern EIN Klick auf „PLATFORM LOGIN",
     nie tippen, Zugangsdaten nie in Spur/Inventar, leere Felder bzw. Fehlertext → ehrliches Ende 'login'."""
     import order_bot as ob
     ok = True
@@ -4793,7 +5145,7 @@ def test_tsx_login():
         if not bed:
             print("✗ TSX-Login: " + name); ok = False
 
-    MAIL = "mike.beispiel@example.com"
+    MAIL = "id-a.beispiel@example.com"
     knopf = ("PLATFORM LOGIN", (1100, 700, 1460, 750), "Button")
     f_user = ("Username", (1100, 520, 1460, 560), "Edit", MAIL, None, False)
     f_pw = ("Password", (1100, 600, 1460, 640), "Edit", "••••••••", None, True)
@@ -4861,8 +5213,8 @@ def test_tsx_login():
 
 
 def test_tsx_bracket_b36():
-    """B36 (30.09.2026, Chris pc-c19p2l + Mike pc-l5o8bv): „Feld Risk geklickt → Fokus nicht im Feld Risk (Group)". Attrappe des
-    Dialogs „Position Brackets" (Mikes Rechtecke): Edit vor Container gleichen Namens, frisches Rechteck nach Verschieben,
+    """B36 (30.09.2026, ID F pc-bbbbbb + ID A pc-aaaaaa): „Feld Risk geklickt → Fokus nicht im Feld Risk (Group)". Attrappe des
+    Dialogs „Position Brackets" (Rechtecke von ID A): Edit vor Container gleichen Namens, frisches Rechteck nach Verschieben,
     Tab-Weg vom bewiesenen Profit-Feld, gesperrtes Feld, Umgebung in der Meldung — nie eine Taste ohne Fokus-Beweis."""
     import order_bot as ob, sys as _s, types as _t
     ok = True
@@ -4903,7 +5255,7 @@ def test_tsx_bracket_b36():
 
         def fld(w):
             if z["zu"]:
-                return []                                  # Dialog nach dem Klick weg (Mike: 2. Klick traf das Dokument)
+                return []                                  # Dialog nach dem Klick weg (ID A: 2. Klick traf das Dokument)
             r = []
             if mit_container:
                 r.append(("Risk (~$)", (920, 790 + z["dy"], 1190, 860 + z["dy"]), "ComboBox", "", None))
@@ -4965,7 +5317,7 @@ def test_tsx_bracket_b36():
     chk(f"Risk-Container + Edit-Kind → Klick aufs Edit → getippt ({sp1})", ok1 and z1["risk"] == "12" and z1["profit"] == "33"
         and "Feld Risk geklickt @1056,825" in sp1 and "Feld Risk getippt: '12'" in sp1 and "Feld Profit getippt: '33'" in sp1)
     (ok2, m2, u2), z2, sp2 = lauf(risk_klick=False)
-    chk(f"Chris-Fall: Maus trifft Risk nicht → Shift+Tab aus Profit → getippt ({sp2})", ok2 and z2["risk"] == "12"
+    chk(f"ID F-Fall: Maus trifft Risk nicht → Shift+Tab aus Profit → getippt ({sp2})", ok2 and z2["risk"] == "12"
         and "per Shift+Tab aus Feld Profit erreicht" in sp2 and "Fokus nicht im Feld Risk (Group 'Position Brackets'" in sp2
         and z2["tasten"].count("+{TAB}") == 1 and "{TAB}" not in z2["tasten"])
     (ok3, m3, u3), z3, sp3 = lauf(risk_klick=False, tab="tab")
@@ -5067,7 +5419,7 @@ def test_puls_heim():
 
 
 def test_tv_tp_orders():
-    """Master 28.09.2026 (Chris 79633d2e): TP-Limit aus dem Reiter „Orders", wenn der Toast-Stapel zu bleibt — Limit-Order mit
+    """Master 28.09.2026 (ID F …): TP-Limit aus dem Reiter „Orders", wenn der Toast-Stapel zu bleibt — Limit-Order mit
     Wurzel, Gegenseite und Menge, nicht gefüllt; Reiter mit Zähler („Orders 1") erkannt."""
     import order_bot as ob
     ok = True

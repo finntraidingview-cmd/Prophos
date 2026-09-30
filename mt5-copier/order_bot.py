@@ -293,7 +293,7 @@ TSX_RX_TITEL = re.compile(r"^\s*(?:\(\d+\)\s*)?[A-Z]{1,5}[FGHJKMNQUVXZ]\d{2}\s+\
 def ist_topstepx_titel(titel):
     """B16 (27.09.2026): TopstepX-Web-App (topstepx.com/trade) — Titel/Tab-Name enthaelt 'topstepx'. Der Titel kann
     wie ein TradingView-Chart aussehen ('MNQZ26 30,922.50 …'), deshalb schliesst dieses Merkmal ihn ueberall aus.
-    B19 (27.09.2026, dritter Live-Test bei Mike): der geladene TopstepX-Tab heisst NUR „NQZ26 $30,921.75 ▲ +0.50%" — kein
+    B19 (27.09.2026, dritter Live-Test bei ID A): der geladene TopstepX-Tab heisst NUR „NQZ26 $30,921.75 ▲ +0.50%" — kein
     'TopstepX'. Merkmal: Kontrakt mit ZWEISTELLIGEM Jahr (NQZ26) und '$' vor dem Kurs. TradingView schreibt 'NQZ2026 30,882.00'
     bzw. 'MNQ1! 30,889.25' (vierstelliges Jahr/Dauerkontrakt, kein '$') — diese Titel bleiben TradingView."""
     t = str(titel or "")
@@ -320,10 +320,10 @@ def ist_tradingview_fenster(titel, klasse):
 # ---------------------------------------------------------------------------
 # CHROME-PROFIL-RIEGEL (26.09.2026) — Puls fasst das Reader-Chrome nie an
 #
-# Finn 26.09.2026 (Moritz' PC pc-usq1i6): "Wenn ich manchmal Trades bei Moritz
+# Finn 26.09.2026 (PC von ID B pc-cccccc): "Wenn ich manchmal Trades bei ID B
 # machen will, geht der Puls-Bot automatisch in dieses extra neue Chrome-Profil,
 # wo nur das Reader-Terminal liegt, will da Orders platzieren und meldet sich
-# deshalb auch an." Dort: Hauptprofil "Moritz" (Orders), zweites Profil
+# deshalb auch an." Dort: Hauptprofil "ID B" (Orders), zweites Profil
 # "Terminal 1" (nur TradingView 24/7 fuer den Reader). Beleg order_signale:
 # Rundgaenge fanden den Reader-Tab ("MNQ1! … Nicht benannt") zuerst, schlossen
 # ihn (Feed-Ausfall 10:25:14–10:27:51) und meldeten sich darin bei Tradovate an.
@@ -341,7 +341,7 @@ def ist_tradingview_fenster(titel, klasse):
 # lesbares Profil (ein einziges Chrome-Profil, andere Browser) bleiben wie
 # bisher erlaubt. Neue TV-Fenster startet er immer mit --profile-directory
 # seines Profils — ohne den Schalter oeffnet Chrome im ZULETZT benutzten
-# Profil, und das war auf Moritz' PC das Reader-Profil.
+# Profil, und das war auf PC von ID B das Reader-Profil.
 # ---------------------------------------------------------------------------
 
 _RX_PROFIL_ARG = re.compile(r'--profile-directory=(?:"([^"]+)"|(\S+))', re.I)
@@ -562,7 +562,7 @@ def fenster_ist_puls_chrome(fenster_pid, browser_pid, relaunch):
 
 def _fenster_gesperrt(hwnd):
     """'' = Puls darf das Fenster benutzen, sonst die Bezeichnung des fremden Profils."""
-    # 29.09.2026 (Moritz pc-usq1i6, 23:5x UTC): das Puls-Chrome (CDP, eigenes Profil „Default" im Ordner puls-chrome) sah für
+    # 29.09.2026 (ID B pc-cccccc, 23:5x UTC): das Puls-Chrome (CDP, eigenes Profil „Default" im Ordner puls-chrome) sah für
     # die Fenster-Wahl aus wie das Puls-Fenster — der UIA-Puls schloss/öffnete darin TradingView-Tabs. Nie benutzen.
     try:
         import ctypes
@@ -669,7 +669,7 @@ def reader_geo_passt(rect, geo, tol=16):
 def lage_ausschluss(fenster, eigen="", tabu=()):
     """REIN RECHNEND (testbar): welche Fenster schliesst die Lage-Pruefung aus? fenster = [{profil, lage}] (lage = liegt dort,
     wo der Reader seinen Feed-Tab meldet) → Menge der Indizes, die raus sind.
-    Ausnahme (28.09.2026, Moritz' PC: Handels-Chrome „Profile 1" und Reader-Chrome „Profile 2" beide maximiert → deckungsgleich,
+    Ausnahme (28.09.2026, PC von ID B: Handels-Chrome „Profile 1" und Reader-Chrome „Profile 2" beide maximiert → deckungsgleich,
     Puls sperrte sein eigenes Fenster und platzierte nichts): liegt ein Fenster eines TABU-Profils an derselben Stelle, ist der
     Feed-Tab damit erklaert — ein Fenster im EIGENEN Profil bleibt dann erlaubt. Sonst gilt die Lage wie bisher (Profil unlesbar,
     kein Tabu-Fenster dort)."""
@@ -2403,8 +2403,8 @@ def pruefe_tv_konto_befehl(cmd):
 
 def tv_konto_wort_passt(text, ext_id):
     """Steht die External ID als GANZES WORT im Text? (21.09.2026 nachts,
-    Finns Screenshot: im Panel stand 'PAAPEX6416990000008' — und darin steckt
-    als Teilstring 'APEX6416990000008'. Das PA-Konto und das Eval-Konto
+    Finns Screenshot: im Panel stand 'PAAPEX0000000000008' — und darin steckt
+    als Teilstring 'APEX0000000000008'. Das PA-Konto und das Eval-Konto
     desselben Apex-Users sind aber ZWEI Konten; mit dem Teilstring-Vergleich
     von tv_konto_passt haette der Bot das eine fuer das andere gehalten, und
     die Order waere spaeter auf dem falschen Konto gelandet.)
@@ -2451,7 +2451,7 @@ def tv_konto_per_text(bf, ids, nur_ziel=None, ohne=None, ueberall=False):
     """Konto-Elemente ueber ihren TEXT finden statt ueber TradingViews Anker.
 
     21.09.2026, Finns erster Lauf von Schritt 2 (PC mit englischem
-    TradingView): im Panel stand sichtbar 'APEX6416990000024 USD' — das
+    TradingView): im Panel stand sichtbar 'APEX0000000000024 USD' — das
     RICHTIGE Konto —, der Bot meldete trotzdem 'kein Broker'. Beide Signaturen
     des Userscripts ([data-name="account-manager-account-select"] und
     [data-name*="account"]) hatten null Treffer: TradingView hat die Anker
@@ -2793,12 +2793,12 @@ TV_RX_PANEL_RESTORE = re.compile(r"(restore|wiederherstell)", re.I)
 def tv_panel_eingeklappt(roh, fenster, knoepfe=None):
     """Ist das Tradovate-Panel unten nur als KOPFZEILE zu sehen? (22.09.2026,
     Finns PC, erster Lauf: 'unten sieht man den Accountnamen nicht — man muesste
-    das Fenster an der Leiste hochziehen'; bei Moritz laedt es aufgeklappt.)
+    das Fenster an der Leiste hochziehen'; bei ID B laedt es aufgeklappt.)
     Kopfzeile = 'Account Balance'/'Equity' im unteren Fensterbereich; ZU FLACH,
     wenn darunter bis zum Fensterrand weniger als 11 % der Fensterhoehe (mind.
     90 px) bleiben — dann passt die aufgeklappte Konto-Liste nicht hinein
     (22.09.2026 12:2x, Finns zweiter Lauf: Konto sichtbar, Dropdown geklickt,
-    '0 Treffer' — die Liste wurde unten abgeschnitten). Moritz' offenes Panel
+    '0 Treffer' — die Liste wurde unten abgeschnitten). Das offene Panel am PC von ID B
     (~17 % der Hoehe) bleibt unberuehrt.
     -> {'kopf_y': y, 'knopf': {...}|None} oder None (Kopfzeile nicht zu sehen /
     Panel offen). knopf = Maximieren-Knopf in derselben Zeile, falls benannt."""
@@ -3023,7 +3023,7 @@ def _tv_uia_konten(w, ids, info=None, nur_ziel=None, ohne=None):
 
 
 # ---------------------------------------------------------------------------
-# FREMDE POPUPS (28.09.2026, Moritz' PC: TradingView-Werbung „Don't miss this Autumn sale — Up to 80% off" lag als großes
+# FREMDE POPUPS (28.09.2026, PC von ID B: TradingView-Werbung „Don't miss this Autumn sale — Up to 80% off" lag als großes
 # Fenster über Chart und Order-Knöpfen). Finn: „fremde Pop-ups erkennen und oben rechts auf das X drücken". Bewusst KEINE
 # Liste einzelner Werbungen (jede Aktion sieht anders aus): erkannt wird die FORM — ein großer Kasten mit einem Schließen-
 # Knopf („Close"/„Schließen") oben rechts. Puls-eigene Dialoge (Order-Ticket, Broker-Connect, Tradovate-Login, Bestätigen)
@@ -3035,7 +3035,7 @@ POPUP_X_NAMEN = ("close", "schließen", "schliessen", "close dialog", "close pop
 _RX_POPUP_WERBUNG = re.compile(r"\bsale\b|\d+\s*%\s*off|\boffers?\b|\bdeal\b|\bupgrade\b|\btrial\b|\bpremium\b|"
                                r"\bsubscri|\bdiscount|\bangebot|\brabatt|\bblack friday\b|\bcyber monday\b|\bplans?\b.*\bprice|"
                                r"don.?t miss|\bends in\b|\bendet in\b|special offer|explore offers|verpassen sie", re.I)
-# 29.09.2026 (Chris pc-c19p2l 22:54 UTC, derselbe Autumn-Sale-Dialog): TradingViews X traegt oft KEINEN Namen oder nur '×'/'✕' —
+# 29.09.2026 (ID F pc-bbbbbb 22:54 UTC, derselbe Autumn-Sale-Dialog): TradingViews X traegt oft KEINEN Namen oder nur '×'/'✕' —
 # POPUP_X_NAMEN fand es nicht, der Konto-Schritt sah durch das Modal kein Konto ('kein Broker') und verband neu. Namenlose X
 # zaehlen nur in Kaesten MIT Werbe-Text. Geklickt wird NIE ein Element mit Kauf-/Angebots-Wort (Explore offers, Upgrade …).
 POPUP_X_ZEICHEN = ("", "×", "✕", "✖", "x", "╳")
@@ -3585,7 +3585,7 @@ def _tv_tab_neu_mit_link(w, cfg, begriff, trail):
         while True:
             h_v, t_v, k_v = vorne()
             # Profil-Riegel (26.09.2026): Strg+W geht ans Vordergrund-Fenster — steht dort das
-            # Reader-Chrome, schliesst es den Feed-Tab (Feed-Ausfall 10:25 auf pc-usq1i6).
+            # Reader-Chrome, schliesst es den Feed-Tab (Feed-Ausfall 10:25 auf pc-cccccc).
             if h_v == int(w.handle) or (tv_tab_schliessbar(t_v, k_v, begriff) and not _fenster_gesperrt(h_v)):
                 break
             if time.time() >= ende_v:
@@ -3652,7 +3652,7 @@ def _tv_tab_neu_mit_link(w, cfg, begriff, trail):
                 n_jetzt = _tab_anzahl(w)
                 if not strg_w_erlaubt(titel_w, "tv", n_jetzt):
                     return False, (f"Strg+W verweigert: vorn '{titel_w[:40]}', {n_jetzt} Tab(s) — es wird nichts geschlossen.")
-                # 28.09.2026 (Moritz: Reader-Tab in „Terminal 1" war weg): der Titel allein beweist nicht, WELCHES Fenster vorn
+                # 28.09.2026 (ID B: Reader-Tab in „Terminal 1" war weg): der Titel allein beweist nicht, WELCHES Fenster vorn
                 # steht — ein deckungsgleiches Reader-Fenster mit dem Feed-Chart trägt ebenfalls einen TradingView-Titel.
                 # Strg+W nur, wenn das Vordergrund-Fenster nachweislich das Puls-Fenster ist.
                 try:
@@ -3768,7 +3768,7 @@ TV_RX_LOGIN_LABELS = re.compile(r"^(benutzername|kennwort|passwort|anmelden|user
 
 
 def tv_seite_texte(roh, max_n=6):
-    """Was steht auf der Seite? (23.09.2026, Moritz-PC: 'Login geklickt, aber das
+    """Was steht auf der Seite? (23.09.2026, PC von ID B: 'Login geklickt, aber das
     Tradovate-Fenster ist noch offen — steht dort eine Fehlermeldung?' — die Frage
     beantwortet der Bot jetzt selbst.) Kurze, lesbare Saetze ohne die bekannten
     Feld-/Knopf-Beschriftungen; Fehler- und Rueckfragetexte kommen so in die Meldung."""
@@ -3980,8 +3980,8 @@ def _tv_autofill_vorschlag(username, ohne=None, anmelde_handle=None):
 
     Ganzes Wort + TradingView ausgenommen, weil (Fund in der Simulation,
     21.09.2026 nachts, bevor es live passieren konnte): der Username
-    'APEX_641699' steckt als Teilstring in der Kontonummer
-    'PAAPEX6416990000008' — mit Teilstring-Suche haette der Bot statt des
+    'APEX_000000' steckt als Teilstring in der Kontonummer
+    'PAAPEX0000000000008' — mit Teilstring-Suche haette der Bot statt des
     Vorschlags das Konto-Feld in TradingView angeklickt."""
     if len(_nur_alnum(username)) < 3:
         return []
@@ -4219,7 +4219,7 @@ def modus_tvkonto(cmd):
         fremd_vor = fremd
         _warte(0.2, 0.15)
     if zustand == "kein_broker" and not max_fehl[0]:
-        # 29.09.2026 (Chris pc-c19p2l, Startlesung nach ab797028): ein TradingView-Werbe-Modal („Autumn sale") verdeckte die
+        # 29.09.2026 (ID F pc-bbbbbb, Startlesung nach …): ein TradingView-Werbe-Modal („Autumn sale") verdeckte die
         # Seite, für UIA war kein Konto zu sehen → 'kein Broker' → Tab zu, Demo, Connect, kein Login-Fenster, balance_start
         # fehlte. Vor jedem Neu-Verbinden: Popups wegräumen, Konto neu lesen, zweiter Blick mit Streuung — erst dann wie bisher.
         pw_ = fenster[0] if fenster[0] is not None else _PULS_FENSTER.get("w")
@@ -4811,7 +4811,7 @@ def modus_tvkonto(cmd):
                           "Passwort NICHT nachweislich drin — es wird nicht auf Login geklickt. Ist "
                           "dieser Login in Chromes Passwortmanager fuer tradovate.com gespeichert?", "login")
             trail.append("Username + gefuelltes Passwort bewiesen")
-            # Login-Klick mit NACHWEIS und zwei Rueckfaellen (23.09.2026 04:2x, Moritz-PC,
+            # Login-Klick mit NACHWEIS und zwei Rueckfaellen (23.09.2026 04:2x, PC von ID B,
             # Finn: "der Knopf wird beim Drueberfahren ein anderes Blau, die Maus ist drauf,
             # aber es geht nicht los — irgendwas packt es"). Der atomare SendInput-Klick
             # (Bewegen+Druecken+Loslassen in einem Batch) erreicht den Knopf als Hover,
@@ -4886,7 +4886,7 @@ def modus_tvkonto(cmd):
             if noch_da:
                 roh_n = _tv_uia_roh(tw)
                 inventar["tradovate_nach_login"] = tv_uia_inventar(roh_n)
-                # Was auf der Seite steht, gehoert in die Meldung (23.09.2026, Moritz-PC,
+                # Was auf der Seite steht, gehoert in die Meldung (23.09.2026, PC von ID B,
                 # Remote-Lauf: die Frage 'steht dort eine Fehlermeldung?' konnte vom Mac
                 # aus niemand beantworten — Dump lag nur auf dem PC). Typische Faelle:
                 # Tradovate verlangt bei einem NEUEN Geraet einen Bestaetigungscode per
@@ -4911,7 +4911,7 @@ def modus_tvkonto(cmd):
                 if zustand in ("richtig", "gleicher_login") or time.time() >= ende:
                     break
                 # NACH DEM EIGENEN LOGIN ist JEDES angezeigte Konto derselbe Login (22.09.2026
-                # 13:2x, Finns PC: nach dem Login mit TDFYU954156097 stand 'FTDFYSLX150141702701
+                # 13:2x, Finns PC: nach dem Login mit TDFYU100000000 stand 'FTDFYSLX150000000000
                 # USD' im Panel — ein Konto dieses Logins, das Prophos nicht kennt (anderes
                 # Namensmuster als TDFYSL…) — und der Bot verlangte eines der BEKANNTEN Konten).
                 # Steht ein kontoartiger Text da, gilt 'gleicher_login': weiter zum Dropdown.
@@ -5529,7 +5529,7 @@ def tv_panel_inventar(roh, bereich, max_n=10):
 
 def tv_wert_nachlesen(lesen, soll, warten, versuche=3, toleranz=0.005):
     """Getippten Wert zuruecklesen, mit Nachlesen statt sofortigem Abbruch (25.09.2026, Finns Lauf auf
-    pc-8jcrsm: 'Stop loss: im Feld steht '?' statt 250.0' — direkt nach dem Tippen baut TradingView die
+    pc-iiiiii: 'Stop loss: im Feld steht '?' statt 250.0' — direkt nach dem Tippen baut TradingView die
     Zeile neu auf, fuer einen Moment steht unter der Beschriftung GAR KEIN Eingabefeld (das '?'); der zweite
     Versuch eine Minute spaeter lief durch). lesen() -> Zahl | None (None = Feld nicht da/Wert unlesbar),
     warten() = Pause mit Streuung (_warte). Bis zu `versuche` Lesungen, dazwischen warten.
@@ -5749,7 +5749,7 @@ def tv_meldung_zaehlen(roh, symbol):
 
 
 def tv_meldungen_neu(roh, symbol, namen_vorher=(), zaehl_vorher=None):
-    """NEUE Order-Meldung nach dem Kauf-Klick (29.09.2026, Chris pc-c19p2l, Plan ab797028: der deutsche Titel 'Take-Profit-Order
+    """NEUE Order-Meldung nach dem Kauf-Klick (29.09.2026, ID F pc-bbbbbb, Plan …: der deutsche Titel 'Take-Profit-Order
     platziert für' traegt weder Symbol noch Preis — stand vor dem Klick noch eine alte gleiche Meldung, galt die neue als alt, der
     Fill-Weg ('Mehr anzeigen', Fill + TP) lief nie). Neu ist: (1) ein Titel-Text, den es vorher nicht gab; (2) ein Titel, der jetzt
     OEFTER dasteht als vorher; (3) eine Preis-Zeile ('Sell 1 at X', 'zu X kaufen', 'at X'), die es vorher nicht gab, waehrend ein
@@ -5791,7 +5791,7 @@ def tv_orders_roh_zone(roh, max_n=60):
     return out
 
 
-# FILL AUS TRADINGVIEWS EIGENER MELDUNG (28.09.2026, Finn 02:20 Dubai, Vorfall Jacob c28a7639: Einstieg kam aus dem Kurs-Feed
+# FILL AUS TRADINGVIEWS EIGENER MELDUNG (28.09.2026, Finn 02:20 Dubai, Vorfall ID C …: Einstieg kam aus dem Kurs-Feed
 # beim Hedge-Open (30825,75), der echte Fill lag bei ~30838 — Fusion schloss 12 Punkte vor dem echten TP). Beleg aus
 # order_signale (letzte 5 Tage): die Positions-Tabelle war auf KEINEM PC ein einziges Mal lesbar ('kein Reiter Positions zu
 # sehen', Avg Fill 0/29) — damit faellt auch die Historie weg (_tv_exit_fill_lesen braucht genau EINEN Reiter 'Positions').
@@ -5808,7 +5808,7 @@ TV_RX_MELDUNG_SL = re.compile(r"\b(stop[ -]?loss|verlustbegrenzung|stop order|st
 TV_RX_MELDUNG_LIMIT = re.compile(r"\blimit\b", re.I)
 # 'Sell 2 at 30,858.25' / 'Buy 1 @ 30,838.00' / deutsch 'Kaufen 2 zu 30.858,25' (ungeprueft, nur mitgenommen)
 TV_RX_MELDUNG_DETAIL = re.compile(r"\b(buy|sell|kauf(?:en)?|verkauf(?:en)?)\s+([\d.,]+)\s*(?:@|\bat\b|\bzu\b|\bbei\b)\s*([\d][\d.,]*)", re.I)
-# DEUTSCHES TRADINGVIEW (29.09.2026, Chris pc-c19p2l, Plan ab797028): der Preis steht VOR dem Verb — 'zu 30.564,75 kaufen' unter
+# DEUTSCHES TRADINGVIEW (29.09.2026, ID F pc-bbbbbb, Plan …): der Preis steht VOR dem Verb — 'zu 30.564,75 kaufen' unter
 # 'Take-Profit-Order platziert für', vermutlich '1 zu 30.600,50 verkaufen' unter 'Marktorder ausgeführt für'. Menge davor optional;
 # Seite aus dem Verb am Ende. tv_zahl_lesen liest 30.564,75 wie 30,564.75.
 TV_RX_MELDUNG_DETAIL_DE = re.compile(r"(?:(?<![\d.,])(\d+)\s+)?\b(?:zu|bei|@)\s*(\d[\d.,]*)\s+(verkaufen|kaufen|verkauf|kauf)\b", re.I)
@@ -5837,7 +5837,7 @@ TV_RX_MELDUNG_AT = re.compile(r"^(?:@|at|zu|bei)\s*([\d][\d.,]*)$", re.I)
 
 
 def tv_meldung_zusammen(roh, vorher=()):
-    """LIVE-BEFUND .726 (Plan 32652690, Jacob-PC, 28.09.2026): TradingView liefert 'Buy 1' und 'at 30,801.00' als ZWEI Text-Knoten
+    """LIVE-BEFUND .726 (Plan …, PC von ID C, 28.09.2026): TradingView liefert 'Buy 1' und 'at 30,801.00' als ZWEI Text-Knoten
     hintereinander. Hier werden sie zu EINEM Knoten 'Buy 1 at 30,801.00' zusammengesetzt (Rechteck = Vereinigung): Seite+Menge aus dem
     einen, 'at PREIS' aus einem der naechsten 3 Knoten, der hoechstens 40 px tiefer und 400 px daneben steht. Zaehlt nur, wenn der
     'at'-Teil NEU ist (nicht in vorher). Rein rechnend. -> roh + zusammengesetzte Knoten (typ 'Zusammen')"""
@@ -5968,7 +5968,7 @@ TV_RX_SHOW_LESS = re.compile(r"\b(show less|weniger anzeigen)\b", re.I)
 
 
 def tv_stapel_offen(roh):
-    """REIN RECHNEND (testbar, Live-Befund Chris 79633d2e 28.09.2026 23:07 UTC: 'Show more' geklickt @467,946, danach stand
+    """REIN RECHNEND (testbar, Live-Befund ID F … 28.09.2026 23:07 UTC: 'Show more' geklickt @467,946, danach stand
     weiter 'Show more' und nur EIN Toast — der Klick hatte den Stapel nicht aufgeklappt). Offen = 'Show less' sichtbar oder
     mindestens zwei Meldungs-Titel. -> bool"""
     namen = [" ".join(str(e[0] or "").split()) for e in roh or () if len(e) > 1 and e[1]]
@@ -5980,7 +5980,7 @@ def tv_stapel_offen(roh):
 def _tv_show_more_invoke(w, punkt, trail, offen_fn=None):
     """Zweiter Weg, wenn der Maus-Klick den Stapel nicht öffnet: am 'Show more'-Knopf, der dem geklickten Punkt am nächsten liegt
     (nie 'Show less', nie ein X), eine Kaskade von Wegen — nach JEDEM Weg lesend prüfen (offen_fn), nie zwei blind hintereinander.
-    LIVE-BEFUND 29.09.2026 (EzPoker b0252248 pc-40mali 22:10 UTC, wie Chris 79633d2e 28.09. 23:07): Maus-Klick @373,1015 ohne
+    LIVE-BEFUND 29.09.2026 (ID E … pc-hhhhhh 22:10 UTC, wie ID F … 28.09. 23:07): Maus-Klick @373,1015 ohne
     Wirkung, invoke() -> NoPatternInterfaceError (Chrome bietet am Knopf kein InvokePattern) — Fill-Toast blieb zu, Hedge nahm
     den Feed. Deshalb: InvokePattern -> LegacyIAccessible DoDefaultAction -> echte Maus auf die Mitte des ELEMENTS (Hover, dann
     SendInput) -> click_input. Ohne offen_fn gilt der erste Weg ohne Ausnahme als Erfolg (alter Vertrag). -> bool"""
@@ -6040,7 +6040,7 @@ def _tv_show_more_invoke(w, punkt, trail, offen_fn=None):
 
 
 def tv_show_more_knopf(roh):
-    """Der Knopf 'Show more' am Meldungs-Stapel (Finns Screenshots 28.09.2026 00:34, Jacob-PC: nach dem Order-Klick liegen 3 Meldungen
+    """Der Knopf 'Show more' am Meldungs-Stapel (Finns Screenshots 28.09.2026 00:34, PC von ID C: nach dem Order-Klick liegen 3 Meldungen
     gestapelt — 'Market order placed', 'Market order executed … Buy 1 at 30,807.25', 'Take Profit order placed … Sell 1 at 30,812.75' —,
     sichtbar ist nur EINE plus 'Show more' mit Zaehler). Nur ein sichtbarer 'Show more' in der Naehe einer Meldungs-Zeile (0–220 px
     darunter/darueber, waagrecht hoechstens 250 px daneben) — nie irgendein 'Show more' anderswo auf der Seite. Genau EIN Treffer,
@@ -6566,13 +6566,13 @@ def tv_order_schritt(w, cmd, trail, erg=None):
     y_knopf = lab["r"][3]
     knopf = tv_im_panel(roh, ber, TV_RX_SENDEN, y_von=y_knopf)
     if not knopf and _tv_popups_weg(w, trail):
-        # Werbe-Modal über dem Panel (29.09.2026, Chris pc-c19p2l): weggeräumt → Knopf neu lesen
+        # Werbe-Modal über dem Panel (29.09.2026, ID F pc-bbbbbb): weggeräumt → Knopf neu lesen
         _warte(0.4, 0.2)
         roh, _b = blick()
         knopf = tv_im_panel(roh, ber, TV_RX_SENDEN, y_von=y_knopf)
     if not knopf:
-        # 29.09.2026 (Jacob pc-8jcrsm, order_signale 47979c82, 28.09. 13:41 UTC — Ticket fertig: Buy 3, TP 7500 $, Klick
-        # fehlte, Jacob kaufte von Hand): beim ersten Panel-Blick war der Knopf da (die Box 342x450 reicht nur mit ihm bis
+        # 29.09.2026 (ID C pc-iiiiii, order_signale …, 28.09. 13:41 UTC — Ticket fertig: Buy 3, TP 7500 $, Klick
+        # fehlte, ID C kaufte von Hand): beim ersten Panel-Blick war der Knopf da (die Box 342x450 reicht nur mit ihm bis
         # unten), 16 s spaeter 0 Treffer — zugleich war auch die Positions-Tabelle unten weg. Die Sammelabfrage liefert
         # Elemente AUSSERHALB des Bildes ohne Rechteck, tv_im_panel verwirft sie: ein weggeschobener Knopf heisst dann
         # '0 Treffer'. Deshalb bis ~3 s nachschauen und einen Knopf ausser Sicht per UIA ins Bild holen (ScrollIntoView,
@@ -6601,7 +6601,7 @@ def tv_order_schritt(w, cmd, trail, erg=None):
         msg_k = (f"Der Kauf-Knopf unten im Panel ist nicht eindeutig ({len(knopf)} Treffer). "
                  f"Im Panel unter '{lab['text'][:20]}': {inv_text}")
         if not knopf:
-            # Inventar in die DB (puls_inventar), damit der naechste Fall beweisbar ist — vorher gab es fuer pc-8jcrsm keins
+            # Inventar in die DB (puls_inventar), damit der naechste Fall beweisbar ist — vorher gab es fuer pc-iiiiii keins
             _puls_inventar_senden({"ok": False, "code": "tv_knopf", "msg": msg_k[:200], "schritt": "order",
                                    "inventar": {"grund": inv},
                                    "ausloeser_kandidaten": [[n, typ, None] for n, typ in tv_knopf_ausser_sicht(roh)]}, trail)
@@ -6685,7 +6685,7 @@ def tv_order_schritt(w, cmd, trail, erg=None):
                     if k_:
                         _tv_uia_klick(k_, "Meldungen 'Show more'", trail)
                         ende_m = max(ende_m, time.time() + 2.5)
-                        # Live-Befund Chris 23:07 UTC: der Maus-Klick traf, der Stapel blieb zu — Aufklappen beweisen, sonst Invoke
+                        # Live-Befund ID F 23:07 UTC: der Maus-Klick traf, der Stapel blieb zu — Aufklappen beweisen, sonst Invoke
                         offen_ = False
                         t_off = time.time() + 1.0
                         while time.time() < t_off:
@@ -7102,7 +7102,7 @@ def tv_positionen_auspacken(pos):
 def tv_avg_fill_je_wurzel(positionen):
     """REIN RECHNEND (testbar, 25.09.2026): Avg Fill der offenen Position je Symbol-Wurzel aus den gelesenen
     Zeilen — fuer den Nachtrag von einstieg_nq, wenn der Nachlauf nach dem Order-Klick nichts lesen konnte
-    (Plan 273fd74f: Reiter 'Positions' direkt nach der Order sekundenlang verdeckt). Tradovate nettet je
+    (Plan …: Reiter 'Positions' direkt nach der Order sekundenlang verdeckt). Tradovate nettet je
     Symbol → eine Zeile je Kontrakt; bei mehreren Zeilen derselben Wurzel gewinnt die erste mit Zahl.
     -> {wurzel: {avg_fill, symbol, seite, menge}}"""
     out = {}
@@ -7647,7 +7647,7 @@ def _absturz_ort(e):
 # aendern — nur am Ende etwas ergaenzen"). Nur mit cmd['ende'] (die Endlesung im
 # Frontend setzt es); Rundgang und Start-Baseline lesen wie bisher.
 #   (1) Befund: bei jedem Fehlschlag ein kompaktes UIA-Bild (Reiter, Panel-Kopf,
-#       Zahlen-Beschriftungen, Konten, Fenster) — damit ein Fall wie Jacobs
+#       Zahlen-Beschriftungen, Konten, Fenster) — damit ein Fall wie der von ID C
 #       (25.09., Reiter 'Positions' per UIA unsichtbar) aus der DB lesbar ist.
 #   (2) Rueckfall: ist gar kein Panel-Kopf zu sehen, EIN benannter Knopf
 #       'Trading Panel'/'Handelspanel' — aufklappen, lesen, wieder zuklappen.
@@ -7967,7 +7967,7 @@ def _tv_reiter_klick(w, roh, muster, name, trail):
     return bool(ok)
 
 
-# TP-LIMIT AUS DEM REITER „ORDERS" (Master 28.09.2026 nach Chris 79633d2e: der Toast-Stapel blieb trotz 'Show more' zu, der TP fehlte).
+# TP-LIMIT AUS DEM REITER „ORDERS" (Master 28.09.2026 nach ID F …: der Toast-Stapel blieb trotz 'Show more' zu, der TP fehlte).
 # Tradovate-Panel zeigt die Reiter mit Zähler („Positions 1", „Orders 1") — deshalb eigene Muster mit optionaler Zahl.
 TV_RX_POS_TAB_N = re.compile(r"^position(s|en)?(\s*\(?\d+\)?)?$", re.I)
 TV_RX_ORDERS_TAB_N = re.compile(r"^(orders?|auftr(ä|ae)ge)(\s*\(?\d+\)?)?$", re.I)
@@ -8049,7 +8049,7 @@ def _tv_tp_aus_orders(w, trail, symbol, richtung, menge):
             if kopf:
                 break
         def _roh_melden(grund_):
-            # 29.09.2026 (Deutsch-PC Chris): die echte Kopfzeile fehlt uns — Rohknoten unter dem Reiter in puls_diagnose
+            # 29.09.2026 (Deutsch-PC ID F): die echte Kopfzeile fehlt uns — Rohknoten unter dem Reiter in puls_diagnose
             try:
                 import threading
                 threading.Thread(target=_puls_diagnose_senden, args=(["Orders-Reiter roh (" + grund_ + "): " + " | ".join(tv_orders_roh_zone(roh))],
@@ -9936,7 +9936,7 @@ def _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=None, nur_anker=False
 def _handel_tab_aktivieren(w, trail=None, maus_grenze=None, anker_pfad=None,
                            anker_nutzen=True):
     """Toolbox auf den 'Handel'-Tab stellen, BEVOR der Bot die Position
-    anklickt (28.08.2026, Finns Live-Fund auf Moritz' PC): nach einem frischen
+    anklickt (28.08.2026, Finns Live-Fund auf PC von ID B): nach einem frischen
     Terminal-Start stand die Toolbox auf 'Posteingang' (die 'neuer Account'-
     Mail). Die Order ging ueber den F9-Dialog clean durch, aber das SL/TP-
     Aendern klickte ins Leere, weil die Positionsliste gar nicht sichtbar war —
@@ -11327,9 +11327,11 @@ TSX_KOPF_LABELS = {"BAL": "balance", "MLL": "mll", "RP&L": "rpl", "UP&L": "upl"}
 
 
 def tsx_geld(text):
-    """REIN RECHNEND (testbar): US-Geldformat ('$11,079.66', '-$1,234.50', '($12.50)', '11079.66') → float | None."""
+    """REIN RECHNEND (testbar): US-Geldformat ('$11,079.66', '-$1,234.50', '($12.50)', '11079.66') → float | None.
+    PARITÄT mit geld() in augen_tsx.js (Terminal 2, tsx-0.2.1, 30.09.2026): ein Minus zählt überall VOR der ersten Ziffer („$-7.00"
+    ergab vorher +7.0), Klammern nur mit beiden Enden."""
     t = str(text or "").strip().replace("−", "-")
-    neg = t.startswith("-") or (t.startswith("(") and t.endswith(")"))
+    neg = bool(re.match(r"^[^\d]*-", t)) or (t.startswith("(") and t.endswith(")"))
     m = re.search(r"\d[\d,]*(?:\.\d+)?", t)
     if not m:
         return None
@@ -11340,32 +11342,55 @@ def tsx_geld(text):
     return -v if neg else v
 
 
+TSX_RX_KOPF = re.compile(r"^(BAL|MLL|RP&L|UP&L)\s*:?\s*(.*)$", re.I)
+TSX_RX_VORSATZ = re.compile(r"^[-−(]?\s*\$?\s*[-−]?$")      # Knoten nur aus Vorzeichen/Klammer/„$" (Teil eines zerlegten Werts)
+
+
+def tsx_summary(werte):
+    """REIN RECHNEND (testbar): Kopfwerte {balance, mll, rpl, upl} → summary {Label: Text} für tvBalanceAus im Frontend. Minus VOR dem
+    Dollar („-$300.00"): tvGeldText erkennt ein Minus nur ganz vorn, „$-300.00" wurde dort +300 (K1-Prüfer 30.09.2026 — Express zeigt
+    BAL relativ, im Verlust also negativ → falsche balance_start/-end, P&L und tv_balance; betraf auch den UIA-Weg). Zahlwerte bleiben."""
+    def t(v):
+        if v is None:
+            return None
+        v = float(v) + 0.0                                    # -0.0 → 0.0
+        return f"-${abs(v):,.2f}" if v < 0 else f"${v:,.2f}"
+    w = werte if isinstance(werte, dict) else {}
+    return {lbl: t(w.get(k)) for lbl, k in (("Balance", "balance"), ("MLL", "mll"), ("RP&L", "rpl"), ("UP&L", "upl"))}
+
+
 def tsx_kopf_werte(elemente):
     """REIN RECHNEND (testbar): Kopfzeile → {balance, mll, rpl, upl}. elemente = [(name, rect|None, typ)] in Lesereihenfolge.
-    Form 1 'BAL: $11,079.66' in einem Element; Form 2 Label 'BAL:' und Wert im naechsten Element."""
+    Form 1 'BAL: $11,079.66' in einem Element; Form 2 Label 'BAL:' und Wert im naechsten Element; B22 (UIA-Inventar) „BAL:" · „$" ·
+    „154,504.88" als DREI Knoten. PARITÄT mit kopfAusTexten() in augen_tsx.js (Terminal 2, 30.09.2026): bei negativen Werten noch
+    feiner — „RP&L:" · „-" · „$" · „50.00" oder „(" · „$" · „12.50" · „)": bis zu drei Vorsatz-Knoten (auch ein Rest im Label-Knoten
+    wie „RP&L: -") vor die Zahl, eine schließende Klammer als eigener Knoten wird angehängt, das nächste Label nie als Wert."""
     out = {v: None for v in TSX_KOPF_LABELS.values()}
     namen = [str(e[0] or "").strip() for e in (elemente or ())]
     for i, n in enumerate(namen):
-        m = re.match(r"^(BAL|MLL|RP&L|UP&L)\s*:?\s*(.*)$", n, re.I)
+        m = TSX_RX_KOPF.match(n)
         if not m:
             continue
         key = TSX_KOPF_LABELS[m.group(1).upper()]
         if out[key] is not None:
             continue
-        wert = tsx_geld(m.group(2)) if m.group(2) else None
+        text = m.group(2) or ""
+        wert = tsx_geld(text) if text else None
         if wert is None and i + 1 < len(namen):
-            # B22 (Inventar Mike): „BAL:" · „$" · „154,504.88" als DREI Knoten — Vorzeichen/Währung und Zahl zusammenfügen
-            nxt = namen[i + 1]
-            if re.fullmatch(r"[-−(]?\s*\$?\s*[-−]?", nxt) and i + 2 < len(namen):
-                wert = tsx_geld(nxt + namen[i + 2])
-            else:
-                wert = tsx_geld(nxt)
+            vor, j = (text if TSX_RX_VORSATZ.match(text) else ""), i + 1
+            while j < len(namen) - 1 and j - i <= 3 and TSX_RX_VORSATZ.match(namen[j]):
+                vor += namen[j]
+                j += 1
+            text = vor if TSX_RX_KOPF.match(namen[j]) else vor + namen[j]
+            if text.startswith("(") and not text.endswith(")") and j + 1 < len(namen) and namen[j + 1] == ")":
+                text += ")"
+            wert = tsx_geld(text)
         out[key] = wert
     return out
 
 
 def tsx_konto_aus_text(text):
-    """REIN RECHNEND (testbar): '$150K EXPRESS | EXPRESS-V2-682437-57131691' → 'EXPRESS-V2-682437-57131691' | ''."""
+    """REIN RECHNEND (testbar): '$150K EXPRESS | EXPRESS-V2-000000-10000001' → 'EXPRESS-V2-000000-10000001' | ''."""
     m = TSX_RX_KONTO.search(str(text or ""))
     return m.group(1).upper() if m else ""
 
@@ -11417,7 +11442,7 @@ def tsx_markiert_urteil(markiert_texte, ext_id):
 
 def tsx_ist_ausloeser_text(text):
     """REIN RECHNEND (testbar, B22): Konto-Auslöser — mit Kennung („… | EXPRESS-V2-…") ODER ohne (TopstepX lässt die Kennung
-    bei langen Namen ganz weg: nur „$150K TRADING COMBINE" + „|", Inventar Mike 11:24 UTC)."""
+    bei langen Namen ganz weg: nur „$150K TRADING COMBINE" + „|", Inventar ID A 11:24 UTC)."""
     t = str(text or "")
     return bool(tsx_konto_sichtbar(t)[0]) or bool(TSX_RX_OHNE_ID.match(t))
 
@@ -11434,10 +11459,10 @@ def tsx_konto_steht(text, ext_id):
 
 
 def tsx_wechsel_urteil(ausloeser_text, ext_id, liste_texte, bal_vorher, bal_jetzt, ziel_label=""):
-    """REIN RECHNEND (testbar, B21, 27.09.2026 — Mike: TopstepX HATTE gewechselt, Puls meldete trotzdem Fehler, weil er
+    """REIN RECHNEND (testbar, B21, 27.09.2026 — ID A: TopstepX HATTE gewechselt, Puls meldete trotzdem Fehler, weil er
     zusätzlich „Liste zu" verlangte und unterhalb des Auslösers weiter Kontozeilen stehen blieben). Bestätigt ist der Wechsel:
     - Auslöser trägt die VOLLE Ziel-ID ('ja') — Regelfall, per UIA steht die volle ID auch bei optisch gekürzter Anzeige;
-    - oder Auslöser abgekürzt mit passendem Präfix ('vielleicht'), der Präfix ist in der Liste EINDEUTIG (Mike hat zwei
+    - oder Auslöser abgekürzt mit passendem Präfix ('vielleicht'), der Präfix ist in der Liste EINDEUTIG (ID A hat zwei
       „$150K TRADING COMBINE") UND BAL hat sich gegenüber vorher geändert.
     -> (True|False, grund)"""
     stand = tsx_konto_steht(ausloeser_text, ext_id)
@@ -11445,7 +11470,7 @@ def tsx_wechsel_urteil(ausloeser_text, ext_id, liste_texte, bal_vorher, bal_jetz
         return True, "Auslöser zeigt die Ziel-ID"
     if stand == "unbekannt":
         # B22: Auslöser ohne Kennung — Label muss dem Ziel-Eintrag entsprechen; bewiesen durch geänderte BAL oder ein in der
-        # Liste EINDEUTIGES Label (Mikes zwei „$150K TRADING COMBINE" → nur über die BAL)
+        # Liste EINDEUTIGES Label (die zwei „$150K TRADING COMBINE" von ID A → nur über die BAL)
         ziel = [t for t in liste_texte or () if _nur_alnum(tsx_konto_aus_text(t)) == _nur_alnum(ext_id)]
         z_label = (tsx_label(ziel[0]) if ziel else "") or str(ziel_label or "").strip().upper()
         if not z_label or tsx_label(ausloeser_text) != z_label:
@@ -11570,7 +11595,7 @@ _EDIT_NAMEN = []
 
 def _chrome_url(w):
     """Adresse des AKTIVEN Tabs aus Chromes Adressleiste (UIA-Edit 'Address and search bar'). '' = nicht lesbar.
-    B20: ohne Tiefengrenze (depth=12 fand sie bei Mike nicht); gesehene Edit-Namen landen in _EDIT_NAMEN (Inventar)."""
+    B20: ohne Tiefengrenze (depth=12 fand sie bei ID A nicht); gesehene Edit-Namen landen in _EDIT_NAMEN (Inventar)."""
     try:
         for e in w.descendants(control_type="Edit"):
             try:
@@ -11581,7 +11606,7 @@ def _chrome_url(w):
             try:
                 n_ = e.window_text() or ""
                 if re.match(r"^(https?://)?[\w-]+(\.[\w-]+)+(/|$)", n_.strip()):
-                    return n_.strip()          # B22 (Mike): das Edit HEISST die Adresse („topstepx.com/trade")
+                    return n_.strip()          # B22 (ID A): das Edit HEISST die Adresse („topstepx.com/trade")
                 if TSX_RX_ADRESSLEISTE.search(n_):
                     try:
                         return str(e.get_value() or "")
@@ -11796,7 +11821,7 @@ def tsx_ausloeser_waehlen(roh):
     if not kand:
         return None
     t, r, typ, _v, erst = sorted(kand, key=lambda x: (x[1][1], x[3], x[1][0]))[0]
-    # B24 (27.09.2026, Mike): NIE in die Mitte eines zusammengefügten Stücks klicken — mit ID im Auslöser reichte es bis x≈560,
+    # B24 (27.09.2026, ID A): NIE in die Mitte eines zusammengefügten Stücks klicken — mit ID im Auslöser reichte es bis x≈560,
     # die Mitte (477) lag neben dem Knopf → „Liste: 0 Einträge". Klick-Rechteck: kleinster Button/ComboBox, der den ersten
     # Knoten (Label) umschließt; sonst der erste Knoten selbst.
     return (t, tsx_klick_rechteck(roh, erst), typ)
@@ -11999,7 +12024,7 @@ def _tsx_felder(w):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# TOPSTEPX-LOGIN-SEITE (B27, 27.09.2026, Finn mit Screenshot bei Mike): beim ↻/Lesen landet TopstepX manchmal auf
+# TOPSTEPX-LOGIN-SEITE (B27, 27.09.2026, Finn mit Screenshot bei ID A): beim ↻/Lesen landet TopstepX manchmal auf
 # topstepx.com/login — Username/Password von Chrome vorausgefüllt, gelber Knopf „PLATFORM LOGIN". Finn: „Da müsste man nochmal
 # auf Login drücken … die Daten müssten immer schon automatisch ausgefüllt sein." Puls drückt deshalb NUR den Knopf, wenn
 # beide Felder schon einen Wert haben — er tippt, liest oder speichert nie Zugangsdaten, höchstens EIN Klick je Lauf.
@@ -12055,7 +12080,7 @@ def _tsx_login_versuch(w, trail, stand):
             stand["fehler"] = ("login", f"TopstepX-Login abgelehnt: {fehl[0][:160]}")
         return True
     gefuellt = lage["user"] and lage["pw"]
-    # Nachtrag B27 (27.09.2026, Mike pc-l5o8bv, 4,1 s nach Tab-Öffnen „Username leer, Passwort leer", obwohl Chrome beide
+    # Nachtrag B27 (27.09.2026, ID A pc-aaaaaa, 4,1 s nach Tab-Öffnen „Username leer, Passwort leer", obwohl Chrome beide
     # sichtbar ausgefüllt hatte — Finn: „er muss nur hier drauf drücken"): Chrome gibt Autofill-Werte erst nach einem echten
     # Klick an die Seite (und an UIA) frei — also trotzdem EIN Klick, getippt wird nie.
     # B28 (27.09.2026, Finn: „nur der Klick geht langsam, mach schneller" — 5 s Feld-Wartezeit vor dem Klick): nicht mehr auf
@@ -12094,7 +12119,7 @@ def _tsx_klick(e, name, trail):
 
 def _tsx_vorbereiten(w, trail):
     """Einmal Login/Connect mittig drücken, benannte Banner-/Modal-X oben schließen (nur benannte Knöpfe).
-    B17 (27.09.2026, Mikes PC pc-l5o8bv): gesucht wird NUR innerhalb der Webseite. Vorher sah die Suche das ganze Chrome-
+    B17 (27.09.2026, PC von ID A pc-aaaaaa): gesucht wird NUR innerhalb der Webseite. Vorher sah die Suche das ganze Chrome-
     Fenster — Chromes Tab-X „Close" und das Fenster-X oben rechts heißen genauso und lagen im oberen Viertel: Puls klickte
     sie und schloss das Fenster samt Prophos-Tab (Signal ohne Ergebnis). Ohne erkannten Seitenbereich: gar kein Klick."""
     seite = _tsx_seite(w)
@@ -12241,7 +12266,9 @@ def modus_tsxlesen(cmd, weiter=None, wachhund_s=100.0, weg=None):
     """Konto wählen und lesen: {ok, konto, balance, mll, rpl, upl, position, trail, code, schritt}. Keine Order.
     weiter (Etappe 2): nach erfolgreicher Kopf-Lesung weiter(w, res, trail) statt der Lese-Antwort (tsxorder).
     weg: vom Aufrufer schon bestimmter Weg (tsxorder prüft selbst VORHER) — sonst hier tsx_weg_lauf()."""
-    if (weg or tsx_weg_lauf()) == "cdp":               # K0-Riegel: Lesen über CDP kommt mit K1 — nie UIA auf einem cdp-PC
+    if (weg or tsx_weg_lauf()) == "cdp":               # Riegel: nie UIA auf einem cdp-PC — Lesen über CDP (K1), Order folgt (K3/K4)
+        if weiter is None and TSX_K1_AKTIV:
+            return modus_tsxlesen_cdp(cmd if isinstance(cmd, dict) else {})
         print(json.dumps(tsx_cdp_folgt("tsxorder" if weiter else "tsxlesen"), ensure_ascii=False))
         return
     res = {"ok": False, "code": "", "msg": "", "trail": "", "schritt": "start", "konto": "", "balance": None,
@@ -12398,8 +12425,7 @@ def modus_tsxlesen(cmd, weiter=None, wachhund_s=100.0, weg=None):
         res.update(code="balance", schritt="lesen", msg="BAL in der Kopfzeile nicht lesbar.", inventar=tsx_inventar_kurz(roh, fr, 80))
         return _tsx_ausgabe(res, trail)
     # Vertrag wie tv-lesen (F23): summary {Label: Text} fuer tvBalanceAus, konto_aktiv, positionen ([] = flach, None = unbekannt)
-    res["summary"] = {lbl: (f"${werte[k]:,.2f}" if werte[k] is not None else None) for lbl, k in
-                      (("Balance", "balance"), ("MLL", "mll"), ("RP&L", "rpl"), ("UP&L", "upl"))}
+    res["summary"] = tsx_summary(werte)
     res["konto_aktiv"] = ext
     res["positionen"] = [] if res["position"] == "keine" else None
     if weiter is not None:
@@ -12411,7 +12437,7 @@ def modus_tsxlesen(cmd, weiter=None, wachhund_s=100.0, weg=None):
 
 # ═══════════════════════════════════════════════════════════════════════════
 # PULS FÜR TOPSTEP — ETAPPE 2: ORDER (27.09.2026, Plan B26, vom Master freigegeben)
-# Grundlage: echtes Inventar von Mike (puls_inventar) — Namen wörtlich: ComboBox „Order Type Market", ComboBox „Position
+# Grundlage: echtes Inventar von ID A (puls_inventar) — Namen wörtlich: ComboBox „Order Type Market", ComboBox „Position
 # Bracket Enabled", Knopf „Manage brackets", Dialog „Position Brackets" mit Edits „Risk (~$)" / „Profit (~$)" und Text
 # „Automatically apply Risk / Profit bracket to new Positions", ComboBox „Contract", Text „# of Contracts" (+ Schnellknöpfe),
 # Order-Knöpfe „BUY +n @ MARKET" / „SELL -n @ MARKET" (Order-Panel rechts; die DOM-Leiter hat gleichnamige — nie die).
@@ -12475,7 +12501,7 @@ def tsx_order_knopf(roh, richtung, menge, panel_links):
 
 
 def tsx_feld_wert(label, roh, felder=()):
-    """REIN RECHNEND (testbar, B29 27.09.2026 — erste Probe bei Mike: ComboBox hieß nur „Order Type", „Market" stand woanders):
+    """REIN RECHNEND (testbar, B29 27.09.2026 — erste Probe bei ID A: ComboBox hieß nur „Order Type", „Market" stand woanders):
     sichtbarer Wert eines beschrifteten Feldes (Order Type / Position Bracket / Contract). Quellen der Reihe nach:
     1. ValuePattern des Feldes mit diesem Namen, 2. Name mit Wert dahinter („Order Type Market"), 3. anderer Knoten im
     Rechteck des Feldes, 4. zusammengefügte Zeile nach der Beschriftung, 5. Knoten direkt unter der Beschriftung.
@@ -12536,7 +12562,7 @@ def tsx_menge_plan(n, schnell):
 
 
 def tsx_mengen_leiste(roh, panel_links):
-    """REIN RECHNEND (testbar, B30 — Inventar Mike: „# of Contracts" y≈396, Knöpfe y≈580): die Mengen-Leiste im Order-Panel
+    """REIN RECHNEND (testbar, B30 — Inventar ID A: „# of Contracts" y≈396, Knöpfe y≈580): die Mengen-Leiste im Order-Panel
     = Zeile von „Decrease quantity"/„Increase quantity". -> {'schnell': {wert: el}, 'plus': el|None, 'minus': el|None, 'zeile': (t,b)|None}"""
     btn = [e for e in roh or () if e[1] and (e[2] if len(e) > 2 else "") == "Button" and (e[1][0] + e[1][2]) / 2 >= panel_links]
     plus = next((e for e in btn if re.match(r"^\s*increase quantity\s*$", str(e[0]), re.I)), None)
@@ -12567,7 +12593,7 @@ def tsx_mengenfeld(felder, leiste, label_rect=None):
 
 # ═══════════════════════════════════════════════════════════════════════════
 # TOPSTEPX-TABELLEN UNTEN (B35, 27.09.2026 — Master: Ablehnung/Fill im Reiter „Orders" lesen, Einstieg (Avg) / TP / SL für den
-# Radar-Weg F28). Inventar Mike: Reiter „Positions X" / „Orders X" / „Trades X" (TabItem, y≈1056; „X" = Schließen-Kreuz im
+# Radar-Weg F28). Inventar ID A: Reiter „Positions X" / „Orders X" / „Trades X" (TabItem, y≈1056; „X" = Schließen-Kreuz im
 # Reiter — nie dorthin klicken), Tabelle = DataItems: Kopfzellen je Spalte (x-Spanne) + eine Zeilen-Zelle über die volle Breite.
 # ═══════════════════════════════════════════════════════════════════════════
 TSX_RX_STATUS_ABGELEHNT = re.compile(r"reject|cancel+ed\s+by\s+system|denied|failed|abgelehnt", re.I)
@@ -12733,7 +12759,7 @@ def tsx_fokus_passt(fokus, feld_rect, liste_ok=False):
     try:
         typ, r = fokus[0], fokus[1]                  # B36: _uia_fokus liefert seit 30.09.2026 auch den Namen (Index 2)
         if liste_ok and typ in ("ListItem", "List"):
-            # B32 (27.09.2026, erster scharfer Lauf bei Mike): Chrome meldet bei der Autocomplete-Combobox „Contract" den
+            # B32 (27.09.2026, erster scharfer Lauf bei ID A): Chrome meldet bei der Autocomplete-Combobox „Contract" den
             # aktiven Listeneintrag (aria-activedescendant) als Fokus, obwohl die Tastatur im Eingabefeld ist — gilt, wenn
             # die Liste direkt unter dem Feld aufgegangen ist (oben ab der Unterkante, gleiche x-Spanne ±50 px)
             return (feld_rect[3] - 6 <= r[1] <= feld_rect[3] + 700 and r[0] >= feld_rect[0] - 50 and r[2] <= feld_rect[2] + 50)
@@ -12813,7 +12839,7 @@ def _uia_tastatur_im_feld(rect):
 
 def _tsx_tippen(feld, text, trail, name, ist=None, liste_ok=False, klick=True, versuche=2):
     """Feld anklicken, Inhalt löschen (Strg+A, Entf), text tippen (leer = nur leeren).
-    B30 (27.09.2026, erste Probe bei Mike — Finn: „etwas wurde markiert, der ganze Bildschirm, da, wo das Bracket eingestellt
+    B30 (27.09.2026, erste Probe bei ID A — Finn: „etwas wurde markiert, der ganze Bildschirm, da, wo das Bracket eingestellt
     wurde"): Strg+A lief, als der Fokus nicht im Feld war (Risk war schon leer). Jetzt: steht der Soll-Wert schon (ist), wird
     gar nichts getippt; sonst nur tippen, wenn das fokussierte Element ein Eingabefeld IM Ziel-Feld ist (zweiter Klick als
     Versuch) — ohne Fokus-Beweis kein Tastendruck. -> True = Feld steht/wurde getippt, False = nichts getippt.
@@ -12835,7 +12861,7 @@ def _tsx_tippen(feld, text, trail, name, ist=None, liste_ok=False, klick=True, v
             _warte(0.25, 0.2)
         fk = _uia_fokus()
         if liste:
-            # B33 (Mike 16:29 UTC): der aktive Eintrag (aktueller Wert MNQZ26) liegt weit unten in der gescrollten Liste.
+            # B33 (ID A 16:29 UTC): der aktive Eintrag (aktueller Wert MNQZ26) liegt weit unten in der gescrollten Liste.
             # Korrektur B33 (Finn: „einfach mit der Maus ins Feld, tippen, dann den Vorschlag wählen — am Anfang ging es
             # sogar"): Beweis = Vorschlagsliste aufgegangen (≥ 3 Einträge unter dem Feld, irgendwo in der Seite); der Fokus
             # zählt nicht — die Rücklesung des Contracts (MNQ ≠ NQ) sichert ab.
@@ -12867,15 +12893,15 @@ def _tsx_tippen(feld, text, trail, name, ist=None, liste_ok=False, klick=True, v
     if text:
         keyboard.send_keys(tv_tasten_escape(str(text)), with_spaces=True, pause=0.03)
         _warte(0.2, 0.15)
-    # B36: Tippen selbst in die Spur (Chris 30.09.2026: nach „Feld Profit geklickt" fehlte jeder Beleg, dass 33 getippt wurde)
+    # B36: Tippen selbst in die Spur (ID F 30.09.2026: nach „Feld Profit geklickt" fehlte jeder Beleg, dass 33 getippt wurde)
     trail.append(f"Feld {name} getippt: '{text}'" if text else f"Feld {name} geleert")
     return True
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# B36 BRACKET-FELDER ROBUST (30.09.2026, Chris pc-c19p2l 02:20 UTC + Mike pc-l5o8bv 28.09. 20:49 zweimal): „Feld Profit geklickt",
-# dann „Feld Risk geklickt @736,645 → Fokus nicht im Feld Risk (Group)" (bei Mike beim zweiten Klick sogar das Dokument, 50030).
-# Befund: Risk ist ein Edit direkt links neben Profit (Mikes Inventar: Risk (~$) [936,800,1177,851], Profit [1197,800,1438,851]),
+# B36 BRACKET-FELDER ROBUST (30.09.2026, ID F pc-bbbbbb 02:20 UTC + ID A pc-aaaaaa 28.09. 20:49 zweimal): „Feld Profit geklickt",
+# dann „Feld Risk geklickt @736,645 → Fokus nicht im Feld Risk (Group)" (bei ID A beim zweiten Klick sogar das Dokument, 50030).
+# Befund: Risk ist ein Edit direkt links neben Profit (Inventar von ID A: Risk (~$) [936,800,1177,851], Profit [1197,800,1438,851]),
 # gefunden war also das richtige Feld. Bis zum 28.09. stand Risk immer schon leer (Pläne ohne SL) — der Risk-KLICK lief nie. Seit
 # SL gesetzt wird, trifft der Mausklick in die Mitte des (VOR dem Profit-Tippen gelesenen) Rechtecks nicht mehr das Eingabefeld.
 # Ob sich der Dialog nach dem Profit-Wert verschiebt oder etwas darüber liegt, zeigen die Daten nicht — deshalb beides:
@@ -12915,7 +12941,7 @@ def tsx_tab_taste(von_rect, zu_rect, umgekehrt=False):
 def tsx_bracket_umgebung(roh, felder, anker, max_n=24):
     """REIN RECHNEND (testbar, B36): Elemente rund um das Bracket-Feld für die Fehlermeldung — Typ:'Name'@l,t,r,b, Edits mit Wert
     und „gesperrt". Bereich = Mitte des Elements in anker ± 600 px waagerecht, 260 px darüber bis 140 px darunter (Dialog-Kopf bis
-    Haken-Zeile; Mikes Dialog 906–1654 bei Risk 936–1177, das Order-Panel rechts ab x 1976 bleibt draußen), Container > 1000 px nie.
+    Haken-Zeile; Dialog von ID A 906–1654 bei Risk 936–1177, das Order-Panel rechts ab x 1976 bleibt draußen), Container > 1000 px nie.
     Zugangsfelder nie mit Wert (tsx_ist_zugangsfeld). -> [str] (oben nach unten, links nach rechts)"""
     if not anker:
         return []
@@ -13015,7 +13041,7 @@ def _tsx_brackets_tippen(w, brackets, trail):
         if _tsx_tippen(f, wert, trail, nm, ist=f[3], versuche=1):
             bewiesen.append(nm)
             continue
-        f2 = frisch(nm)                                              # nie blind aufs alte Rechteck (Mike: 2. Klick traf das Dokument)
+        f2 = frisch(nm)                                              # nie blind aufs alte Rechteck (ID A: 2. Klick traf das Dokument)
         if not f2:
             return fehler(nm, f"Feld „{nm}\" nach dem ersten Klick nicht mehr im Dialog — kein zweiter Klick, nichts getippt.")
         if _tsx_tippen(f2, wert, trail, nm, ist=f2[3], versuche=1):
@@ -13067,7 +13093,7 @@ def _tsx_order_nach_kopf(befehl):
             trail.append("Markt zu — " + ("scharf läuft trotzdem bis zum Klick (TopstepX lehnt ab, keine Warteschlange)"
                                           if befehl["scharf"] else "Probe läuft trotzdem bis vor den Knopf"))
         # 3. Order-Typ, 4a. Position Bracket
-        # B29 (27.09.2026, erste Probe bei Mike: „Order-Typ ist nicht Market (Order Type)", obwohl Market stand): Wert über
+        # B29 (27.09.2026, erste Probe bei ID A: „Order-Typ ist nicht Market (Order Type)", obwohl Market stand): Wert über
         # tsx_feld_wert; abgebrochen wird nur bei eindeutig anderem Wert — unlesbar = weiter, der Knopf-Beweis entscheidet
         felder0 = _tsx_felder(w)
         typ, q = tsx_feld_wert("Order Type", roh, felder0)
@@ -13156,7 +13182,7 @@ def _tsx_order_nach_kopf(befehl):
                     f2 = _tsx_felder(w)
                     if any(f[0].lower().startswith("risk") for f in f2):
                         break
-                # Dialog kann beim zweiten Öffnen woanders liegen (Mike 16:38: 29 px tiefer) — Text neu suchen
+                # Dialog kann beim zweiten Öffnen woanders liegen (ID A 16:38: 29 px tiefer) — Text neu suchen
                 txt2 = [e for e in _tsx_seite_roh(w, ("Text",)) if e[1] and str(e[0]).lower().startswith("automatically apply")]
                 h2 = tsx_haken_zu_text(f2, (txt2 or txt)[0][1])
                 zustand = {0: "aus", 1: "an"}.get(h2[4] if h2 else None, "unlesbar")
@@ -13296,8 +13322,7 @@ def _tsx_order_nach_kopf(befehl):
                     trail.append("Orders: neue Zeile Filled")
             if tsx_position_zustand([e[0] for e in roh_n if e[1]]) != "keine":
                 werte = tsx_kopf_werte(roh_n)
-                res["summary"] = {lbl: (f"${werte[k]:,.2f}" if werte[k] is not None else None) for lbl, k in
-                                  (("Balance", "balance"), ("MLL", "mll"), ("RP&L", "rpl"), ("UP&L", "upl"))}
+                res["summary"] = tsx_summary(werte)
                 res["positionen"] = [{"symbol": cb[3], "seite": befehl["richtung"], "menge": befehl["menge"]}]
                 trail.append("Nachher-Beweis: „No Active Position\" ist weg")
                 # B35: Einstieg (Avg, Reiter Positions) + TP/SL-Level (aktive Limit/Stop, Reiter Orders) für den Radar-Weg
@@ -13337,7 +13362,7 @@ def modus_tsxorder(cmd):
     return modus_tsxlesen({"konto": befehl["ext"]}, weiter=_tsx_order_nach_kopf(befehl), wachhund_s=150.0, weg="uia")
 
 # ═══════════════════════════════════════════════════════════════════════════
-# PULS-AUGEN ÜBER CDP (29.09.2026, Etappe E0 — Finns Go, Master-Koordination; erster PC: Moritz pc-usq1i6)
+# PULS-AUGEN ÜBER CDP (29.09.2026, Etappe E0 — Finns Go, Master-Koordination; erster PC: ID B pc-cccccc)
 # Warum: UIA sieht TradingView nur unvollständig (namenlose X, eingeklappte Toasts, Knopf außer Sicht, deutsche Texte),
 # und Pixel-Klicks brauchen Fenster vorn + DPI-Rechnung. Das Chrome DevTools Protocol liest den DOM direkt. Seit Chrome 136
 # gilt --remote-debugging-port nur mit EIGENEM --user-data-dir → der Puls hält ein eigenes „Puls-Chrome“ (Port 9333, nur
@@ -13574,7 +13599,7 @@ _AUGEN_REGEL_STAND = {"explizit": False, "tsx": None}
 def _augen_regel_holen(pc):
     """'cdp' | 'uia' von Railway (2 s), Ergebnis lokal merken. Netzfehler bzw. unlesbare Antwort: die letzte lokal gemerkte Regel
     bleibt stehen (augen_regel_weiche, ≤ 12 h) und die Datei unverändert — 29.09.2026 14:44 UTC (Railway-Deploy): ein 2-s-Timeout
-    kippte pc-usq1i6 auf 'uia', der Augen-Prozess schloss das Puls-Chrome, der nächste Lauf nahm den alten UIA-Weg und klickte ins
+    kippte pc-cccccc auf 'uia', der Augen-Prozess schloss das Puls-Chrome, der nächste Lauf nahm den alten UIA-Weg und klickte ins
     Prophos-Fenster. Nur eine ausdrückliche Server-Antwort ändert die Regel; _AUGEN_REGEL_STAND['explizit'] sagt, ob es eine gab."""
     import urllib.request
     try:
@@ -13943,7 +13968,7 @@ def _augen_aufnahme(aktion, js, trail, res, pc):
 
 
 def augen_kurzform(stand):
-    """REIN RECHNEND (testbar): lesbare Spur-Zeile aus augen.js stand() (29.09.2026, erste echte Zeile von Moritz' PC: ticket.da
+    """REIN RECHNEND (testbar): lesbare Spur-Zeile aus augen.js stand() (29.09.2026, erste echte Zeile von PC von ID B: ticket.da
     statt offen, toasts als {log, gruppen} statt Liste — die erste Fassung meldete „Ticket zu · Toasts 2")."""
     if not isinstance(stand, dict):
         return "kein Stand"
@@ -14019,7 +14044,7 @@ def modus_augen(cmd):
             res.update(ok=True, msg="Regel 'uia' für TradingView, Topstep läuft über das Puls-Chrome — es bleibt offen")
             return
         if augen != "cdp" and not start and not jetzt:
-            # Aufräumen (29.09.2026, Moritz pc-usq1i6: Schalter zurück auf uia, das Puls-Chrome lief weiter und kickte die
+            # Aufräumen (29.09.2026, ID B pc-cccccc: Schalter zurück auf uia, das Puls-Chrome lief weiter und kickte die
             # TradingView-Sitzung des Readers): antwortet Port 9333, das Puls-Chrome per CDP Browser.close schließen — trifft nur
             # die Instanz mit diesem Debug-Port (das Reader-Chrome hat keinen), kein taskkill, keine Fenstersuche.
             v = _cdp_http("/json/version", timeout=1.0)
@@ -14049,7 +14074,7 @@ def modus_augen(cmd):
             return
         if start and cmd.get("tsx"):
             # K0 (30.09.2026): 'order_bot.py augen start tsx' — TopstepX-Tab im Puls-Chrome öffnen (keine .bat) und zeigen, damit
-            # Finn/Mike dort EINMAL von Hand anmeldet (Passwort in Chrome speichern)
+            # Finn/ID A dort EINMAL von Hand anmeldet (Passwort in Chrome speichern)
             ziel = _tsx_tab_sicher(trail)
             if not ziel:
                 res["msg"] = "TopstepX-Tab im Puls-Chrome nicht geöffnet"
@@ -14075,7 +14100,7 @@ def modus_augen(cmd):
             # VOR den Kauf-Knopf); augen.js ≥ 0.5 zeichnet Klicks/Eingaben auf (Capture-Listener, Puffer im Fenster, Passwortfelder
             # und Login-Formulare nur „[verborgen]"). Puls klickt hier NICHTS. 'stopp' holt Puffer + frischen Stand nach puls_augen
             # (inventar.aufnahme). Neuladen der Seite verwirft den Puffer → verloren.
-            # ERSTE LIVE-AUFNAHME (00:36–00:38 UTC, pc-usq1i6): 0 Ereignisse — Puls hatte nur EIN Target (das erste aus
+            # ERSTE LIVE-AUFNAHME (00:36–00:38 UTC, pc-cccccc): 0 Ereignisse — Puls hatte nur EIN Target (das erste aus
             # /json/list); Finn klickte womöglich in einem anderen TV-Tab oder im Reader-Chrome. Deshalb jetzt: ALLE TradingView-
             # Seiten des Puls-Chrome (je Target eigene Verbindung), rotes Banner „AUFNAHME LÄUFT" in jedem Tab (pointer-events
             # none, blockiert keinen Klick), beim Stopp wieder weg; je Target roh/anzahl/tab_id in Spur + DB. roh 0 = dort kam
@@ -14134,7 +14159,7 @@ def modus_augen(cmd):
 
 # ═══════════════════════════════════════════════════════════════════════════
 # PULS FÜR TOPSTEP ÜBER DAS PULS-CHROME — K0 (30.09.2026, Topstep-Komplett-Paket Plan v2, Master-GO; Finn: „eine Lösung für alles,
-# immer nur so" → CDP wie Orbit). Warum: der UIA-Weg lief im Alltags-Chrome (Chris 30.09. 02:20 UTC: Konto dort umgestellt, offener
+# immer nur so" → CDP wie Orbit). Warum: der UIA-Weg lief im Alltags-Chrome (ID F 30.09. 02:20 UTC: Konto dort umgestellt, offener
 # Hand-Trade daneben) und sah TopstepX lückenhaft (Risk-Feld B36, Toast-Stücke B37).
 # Schalter je PC: wd_farmer_regeln.puls_topstep_pcs → GET /puls-regel/<pc> liefert tsx 'cdp'|'uia' (Terminal 1, d0a9e48).
 # RIEGEL: tsx='cdp' ist KLEBRIG — die lokale Regel verfällt nie (anders als die 12-h-Weiche der Augen), nur ein ausdrückliches
@@ -14151,6 +14176,7 @@ TSX_K0_ZUSTAENDE = ("grund", "konto", "bracket")
 TSX_INVENTAR_MAX = 58_000          # Railway deckelt je puls_augen-Zeile bei 60 KB — der Bot kürzt selbst darunter
 TSX_LOGIN_SPERRE_S = 30 * 60.0     # nach einem Login-Klick 30 min kein zweiter (auch nicht im nächsten Lauf)
 TSX_K0_WACHHUND_S = 120.0          # Panel beendet den Bot nach 150 s — vorher ehrlich raus, Sperre lösen, Fenster minimieren
+TSX_K1_AKTIV = True                # K1-Lesen über CDP an (Finn 30.09.2026; Anker belegt, augen_tsx.js tsx-0.3.1) — wirkt nur auf PCs in puls_topstep_pcs
 
 
 def tsx_regel_weiche(regel_datei, pc_id):
@@ -14485,6 +14511,7 @@ TSX_K0_CHART_JS = r"""(function () {
         if (out.linien.length >= 20) return;
         var c = typeof e.className === 'string' ? e.className : ((e.className && e.className.baseVal) || '');
         var m = c + ' ' + A(e, 'data-testid') + ' ' + A(e, 'data-name') + ' ' + A(e, 'aria-label') + ' ' + (A(e, 'draggable') === 'true' ? 'draggable' : '');
+        if (/MuiDataGrid/.test(c)) return;               // Live 30.09.2026: 13 Spaltenköpfe der Trades-Tabelle galten als „Linien"
         if (rx.test(m)) out.linien.push({ tag: e.tagName.toLowerCase(), cls: c.slice(0, 60), testid: A(e, 'data-testid').slice(0, 40),
                                           text: T(e).slice(0, 40), rect: R(e) }); });
       if (tiefe < 2) Array.prototype.slice.call(doc.querySelectorAll('iframe')).slice(0, 6).forEach(function (f) {
@@ -14791,6 +14818,242 @@ def _tsx_k0_zustand(s, trail, pc, art, res):
     return bool(info)
 
 
+# ─── K1: Lesen über CDP (Vorbau 30.09.2026, NICHT live — die DOM-Anker liefert Terminal 2 nach dem K0-Inventar in augen_tsx.js) ───
+# Vertrag = tv-lesen (Orbit-V2-Rundgang, prophos.html tvV2): ok, konto_aktiv, positionen [{symbol, seite, menge, einstieg, pnl, *_zahl}]
+# ([] = flach, None = unbekannt), summary {Label: Text}, today_pnl (TopstepX: RP&L des Tages + UP&L), today_label, alter_s, gelesen_at —
+# dazu wie bisher balance/mll/rpl/upl/position/konto. alter_s NUR mit Frische-Beweis (Tab vorn + requestAnimationFrame läuft): ein
+# gedrosselter Hintergrund-Tab zeigt alte Werte, und das Frontend zählt nur alter_s < 30. Der UIA-Weg lieferte nie alter_s.
+# Erwartete stand()-Schlüssel von augen_tsx.js (Vorschlag an T2): konto {aktiv, kontonr, abgekuerzt}, kopf {balance|mll|rpl|upl: {text,
+# wert}}, positionen [{symbol, seite, menge, avg, pl_text}], positionen_sichtbar (Positions-Bereich sichtbar: Zeilen oder „No Active
+# Position"), flach (true/false/null). Fehlt ein Anker, antwortet K1 ehrlich 'anker_fehlt' — nie eine geratene Zahl.
+TSX_FRISCH_JS = r"""(function () {
+  return new Promise(function (ok) {
+    var fertig = false, t0 = performance.now();
+    function aus(v) { if (!fertig) { fertig = true; ok(v); } }
+    try { requestAnimationFrame(function () { requestAnimationFrame(function () { aus({ raf: true, ms: Math.round(performance.now() - t0),
+      sichtbar: document.visibilityState, fokus: document.hasFocus() }); }); }); } catch (e) { aus({ raf: false, fehler: String(e).slice(0, 60) }); }
+    setTimeout(function () { aus({ raf: false, ms: Math.round(performance.now() - t0), sichtbar: document.visibilityState, fokus: document.hasFocus() }); }, 1500);
+  });
+})()"""
+
+
+def tsx_frisch_urteil(f):
+    """REIN RECHNEND (testbar): Frische-Beweis aus TSX_FRISCH_JS — Seite sichtbar und zwei Animations-Frames in ≤ 1,5 s (ein
+    gedrosselter Hintergrund-Tab rendert nicht). -> (frisch, text)"""
+    f = f if isinstance(f, dict) else {}
+    ok = bool(f.get("raf")) and f.get("sichtbar") == "visible"
+    return ok, f"Seite {'frisch' if ok else 'NICHT frisch'} (sichtbar {f.get('sichtbar') or '?'}, Frames {'ja' if f.get('raf') else 'nein'}, {f.get('ms', '?')} ms)"
+
+
+TSX_K1_BEREIT_S = 8.0               # so lange wartet K1 auf Konto-Auslöser + BAL (Seite baut sich nach dem Laden noch auf)
+
+
+def _tsx_bereit_warten(s, trail, opts=None):
+    """Bereit-Probe für K0 und K1 — nur lesen, kein Klick: bis TSX_K1_BEREIT_S auf Konto-Auslöser + BAL warten (K0 30.09.2026: 0,8 s
+    nach dem Start stand noch „Loading the Ultimate Trading Experience", 7,1 s nach dem Login war die Seite noch leer — 2 Elemente,
+    Konto-Auslöser 0 Kandidaten). -> (stand, bereit)"""
+    t_ende = time.time() + TSX_K1_BEREIT_S
+    runden = 0
+    while True:
+        runden += 1
+        st = s.stand(opts or {})
+        if tsx_k1_bereit(st) or time.time() >= t_ende:
+            break
+        _warte(0.5, 0.4)
+    bereit = tsx_k1_bereit(st)
+    if runden > 1:
+        trail.append(f"Bereit-Probe: {runden} Lesungen" + ("" if bereit else f" — nach {int(TSX_K1_BEREIT_S)} s NICHT bereit"))
+    return st, bereit
+
+
+def tsx_k1_bereit(stand):
+    """REIN RECHNEND (testbar): TopstepX aufgebaut? Konto-Auslöser gelesen UND BAL lesbar (beides kommt erst nach dem Lade-Schirm)."""
+    st = stand if isinstance(stand, dict) else {}
+    ko, kopf = st.get("konto"), st.get("kopf")
+    return bool(isinstance(ko, dict) and ko.get("aktiv") and isinstance(kopf, dict) and _tsx_wert(kopf.get("balance")) is not None)
+
+
+def _tsx_wert(x):
+    """Kopfwert aus augen_tsx.js: {wert} zuerst, sonst der Text im US-Format von TopstepX (tsx_geld: auch „$-50.00", „($50.00")."""
+    if isinstance(x, dict):
+        w = x.get("wert")
+        return float(w) if isinstance(w, (int, float)) and not isinstance(w, bool) else tsx_geld(x.get("text"))
+    return float(x) if isinstance(x, (int, float)) and not isinstance(x, bool) else tsx_geld(x)
+
+
+def tsx_cdp_lesung(stand, ext):
+    """REIN RECHNEND (testbar): stand_tsx (augen_tsx.js) → Antwortfelder im tv-lesen-Vertrag. -> (felder, code, msg)
+    code '' = gelesen; 'anker_fehlt' (augen_tsx.js liefert Konto/Kopf/Positionen noch nicht); 'konto' (ein anderes Konto steht — Wechsel
+    kommt mit K2); 'balance' (BAL unlesbar); 'tabelle_unklar' (Positions-Bereich nicht sichtbar ODER „flach" nicht bewiesen).
+    Vertrag augen_tsx.js tsx-0.3.1 (Terminal 2, 30.09.2026): kopf.balance_relativ ist true|false|null und KEIN {text, wert} — wird als
+    balance_relativ DURCHGEREICHT, hier nie umgerechnet (Express zeigt BAL relativ: „$0.00" bei MLL „$-4,500.00"; was das Frontend daraus
+    macht, entscheidet das Frontend). flach ist nur true bei „No Active Position" UND gesperrtem „Close Position"; eine OFFENE Position
+    kann augen_tsx.js noch nicht lesen (positionen_sichtbar false, flach null) → ehrlich 'tabelle_unklar', nie „keine Position"."""
+    st = stand if isinstance(stand, dict) else {}
+    ko = st.get("konto") if isinstance(st.get("konto"), dict) else None
+    kopf = st.get("kopf") if isinstance(st.get("kopf"), dict) else None
+    fehlt = [n for n, da in (("konto", ko is not None), ("kopf", kopf is not None), ("positionen_sichtbar", "positionen_sichtbar" in st)) if not da]
+    if fehlt:
+        return {}, "anker_fehlt", ("TopstepX über das Puls-Chrome kann noch nicht lesen — augen_tsx.js liefert " + "/".join(fehlt)
+                                   + " noch nicht (Anker kommen aus dem K0-Inventar). Nichts gelesen.")
+    aktiv = str(ko.get("kontonr") or ko.get("aktiv") or "")
+    if not aktiv.strip():
+        # Konto-Auslöser gar nicht gelesen: Seite noch im Lade-Schirm oder TopstepX hat den Anker umbenannt — das ist KEIN „anderes Konto"
+        return {}, "anker_fehlt", "Konto-Auslöser in TopstepX nicht gefunden (Seite lädt noch oder Anker geändert). Nichts gelesen."
+    nr = _nur_alnum(ko.get("kontonr"))
+    if not nr:
+        steht = tsx_konto_steht(ko.get("aktiv"), ext)          # nur der Auslöser-Text ('$150K … | KENNUNG')
+    elif nr == _nur_alnum(ext) and ko.get("abgekuerzt") is not True:
+        steht = "ja"
+    else:
+        # abgekürzt beweist nichts — auch nicht, wenn der sichtbare Teil zufällig genau die External ID ist (K1-Prüfer: …-1 vs …-1…)
+        steht = "vielleicht" if ko.get("abgekuerzt") and _nur_alnum(ext).startswith(nr) else "nein"
+    if steht != "ja":
+        return {"konto_aktiv": aktiv[:80]}, "konto", (f"Im Puls-Chrome steht nicht {ext} ('{aktiv[:40] or '-'}', {steht}) — Konto wechseln kommt "
+                                                      "mit Etappe K2. Nichts gelesen.")
+    w = {k: _tsx_wert(kopf.get(k)) for k in ("balance", "mll", "rpl", "upl")}
+    rel = kopf.get("balance_relativ")
+    # konto_aktiv = External ID wie im UIA-Weg (das Konto ist hier bewiesen; das Frontend prüft includes(ext)), die angezeigte
+    # Kennung steht in konto_anzeige (K1-Prüfer 30.09.2026: andere Schreibweise der ID in Prophos ließ die Prüfung scheitern)
+    felder = dict(w, konto=ext, konto_aktiv=ext, konto_anzeige=aktiv[:80], balance_relativ=(rel if isinstance(rel, bool) else None),
+                  summary=tsx_summary(w))
+    if w["balance"] is None:
+        return felder, "balance", "BAL in der TopstepX-Kopfzeile nicht lesbar."
+    if st.get("positionen_sichtbar") is not True:
+        return felder, "tabelle_unklar", ("Positions-Bereich in TopstepX nicht sichtbar (eine offene Position kann das Puls-Chrome noch "
+                                          "nicht lesen) — kein Stand ohne Positionen.")
+    pos = cdp_positionen_vertrag(st.get("positionen"))
+    flach = st.get("flach")
+    if not pos and flach is not True:
+        return felder, "tabelle_unklar", "„No Active Position“ steht da, aber „Close Position“ ist nicht gesperrt — flach nicht bewiesen."
+    if pos and flach is True:
+        return felder, "tabelle_unklar", "TopstepX zeigt Positionen UND „No Active Position“ — Widerspruch, nichts gezählt."
+    felder.update(positionen=pos, offen=bool(pos), position=("offen" if pos else "keine"),
+                  avg_fill_je_wurzel=tv_avg_fill_je_wurzel(pos),
+                  today_pnl=(None if w["rpl"] is None else round(w["rpl"] + (w["upl"] or 0.0), 2)),
+                  today_label="RP&L" + (" + UP&L" if pos else ""), today_pnl_text=(kopf.get("rpl") or {}).get("text") if isinstance(kopf.get("rpl"), dict) else None)
+    return felder, "", f"Konto {ext}: Balance {w['balance']:,.2f} $, {len(pos)} Position(en) (CDP)"
+
+
+class _EineAntwort:
+    """Genau EINE JSON-Antwort je Lauf, für Wachhund und Hauptpfad (K1-Prüfer + Stapel-Prüfer 30.09.2026). nehmen(): wer die Sperre
+    NICHT bekommt, wartet, bis der andere geschrieben hat (sonst konnte der Prozess enden, bevor überhaupt etwas ausgegeben war —
+    Panel: „bot_stumm"). ausgeben(): erst print + flush, die Netz-Diagnose macht der Aufrufer DANACH."""
+
+    def __init__(self):
+        import threading
+        self._sperre = threading.Lock()
+        self._fertig = threading.Event()
+
+    def nehmen(self, warten_s=8.0):
+        if self._sperre.acquire(blocking=False):
+            return True
+        self._fertig.wait(warten_s)
+        return False
+
+    def ausgeben(self, res):
+        try:
+            print(json.dumps(res, ensure_ascii=False))
+            sys.stdout.flush()
+        finally:
+            self._fertig.set()
+
+
+def modus_tsxlesen_cdp(cmd):
+    """K1 (Vorbau): TopstepX im Puls-Chrome lesen — Tab, Login (Beweis), Tab nach vorn + Frische-Beweis, EIN stand(), Vertrag wie
+    tv-lesen. Kein Klick außer dem Login-Weg; Konto wechseln kommt mit K2. Wachhund 120 s."""
+    res = {"ok": False, "code": "", "msg": "", "trail": "", "schritt": "start", "weg": "cdp", "etappe": "K1", "quelle": "cdp",
+           "konto": "", "balance": None, "balance_relativ": None, "mll": None, "rpl": None, "upl": None, "position": None, "alter_s": None}
+    trail = _StempelSpur()
+    trail.append(puls_bot_stand())
+    trail.append("Weg: Puls-Chrome (CDP) — K1 Lesen TopstepX")
+    ext = str((cmd or {}).get("konto") or (cmd or {}).get("ext_id") or "").strip()
+    sitz = [None]
+    import threading
+    antwort = _EineAntwort()
+
+    def raus(code, msg, schritt, ok=False, zuerst=None, **extra):
+        if not antwort.nehmen():
+            return
+        if zuerst:
+            zuerst()                                          # Wachhund: erst die Sitzung schließen (Hauptpfad anhalten), dann antworten
+        res.update(ok=ok, code=code, msg=msg, schritt=schritt, **extra)
+        res["trail"] = " > ".join(trail)
+        antwort.ausgeben(res)
+        if not ok:
+            _puls_diagnose_senden(trail, "tsx_lesen_cdp")
+
+    if len(_nur_alnum(ext)) < 5:
+        return raus("befehl", "Feld 'konto' (External ID) fehlt", "befehl")
+    if _handlauf_aktiv():
+        return raus("handlauf", "Im Puls-Chrome läuft gerade ein Hand-Lauf — nichts gelesen, gleich erneut.", "sperre")
+
+    def _schliessen():
+        try:
+            if sitz[0]:
+                sitz[0].zu()
+        except Exception:
+            pass
+
+    def _wachhund():
+        trail.append(f"Wachhund: nach {int(TSX_K0_WACHHUND_S)} s abgebrochen (Schritt {res.get('schritt')})")
+        try:
+            raus("haenger", f"TopstepX-Lesen hing nach {int(TSX_K0_WACHHUND_S)} s — abgebrochen.", "haenger", zuerst=_schliessen)
+        finally:
+            _schliessen()
+            os._exit(0)
+    wh = threading.Timer(TSX_K0_WACHHUND_S, _wachhund)
+    wh.daemon = True
+    wh.start()
+    try:
+        if not _puls_chrome_sicher(trail, url=TSX_URL):
+            return raus("chrome", "Puls-Chrome nicht erreichbar (Port 9333).", "chrome")
+        res["schritt"] = "login"
+        s, lg = _tsx_sitzung_waehlen(trail, sitz)       # anderer angemeldeter TopstepX-Tab vor dem Login-Weg (Live 30.09.2026)
+        if s is None:
+            return raus("tab", lg, "tab")
+        if lg is not True:
+            return raus("login", lg, "login")
+        res["schritt"] = "frisch"
+        if _WIN_EINGABE:
+            hw, gr = s._win_vorn()                      # Tab + Fenster nach vorn — ein Hintergrund-Tab rendert gedrosselt
+            if not hw:
+                trail.append(f"Nach vorn: {gr}")
+        try:
+            s.ws.rufe("Page.bringToFront", {}, timeout=3)
+        except Exception:
+            pass
+        frisch, ftext = tsx_frisch_urteil(s.lese_js(TSX_FRISCH_JS, timeout=5))
+        trail.append(ftext)
+        if not frisch:
+            # K1-Prüfer 30.09.2026: ok mit leerem alter_s nahm „Balance jetzt lesen" trotzdem als Live-Wert — ein gedrosselter Tab
+            # liefert womöglich einen alten Stand. Ehrlich ablehnen; das Frontend wiederholt wie bei jedem anderen Fehler.
+            return raus("nicht_frisch", "TopstepX-Tab nicht frisch (Hintergrund/gedrosselt) — nichts gelesen, gleich erneut.", "frisch")
+        res["schritt"] = "lesen"
+        # Bereit-Probe (K0 30.09.2026: 0,8 s nach Laufbeginn stand noch „Loading the Ultimate Trading Experience" in der Seite):
+        # bis TSX_K1_BEREIT_S auf Konto-Auslöser + BAL warten, erst dann zählt die Lesung. Nur lesen, kein Klick.
+        st, _ = _tsx_bereit_warten(s, trail, {"kontoTexte": [ext]})
+        if isinstance(st, dict) and isinstance(st.get("konto"), dict) and st["konto"].get("liste_offen"):
+            trail.append("Konto-Liste steht offen (nicht von diesem Lauf) — nur gelesen, nichts geklickt")
+        felder, code, msg = tsx_cdp_lesung(st, ext)
+        res.update(felder)
+        if code:
+            return raus(code, msg, "lesen")
+        res.update(alter_s=0.0, gelesen_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
+                   sprache_fremd=False, userscript=None, summary_fehler=None)
+        if (cmd or {}).get("ende"):
+            res["exit_diag"] = {"fehler": "Exit-Fill über CDP kommt mit K5"}
+        trail.append(f"gelesen (CDP): BAL {res.get('balance')} · RP&L {res.get('rpl')} · UP&L {res.get('upl')} · {len(res.get('positionen') or [])} Pos"
+                     + ("" if frisch else " — NICHT frisch (alter_s leer, das Frontend zählt die Lesung nicht)"))
+        return raus("", msg + ("" if frisch else " — Seite nicht frisch bewiesen"), "fertig", ok=True)
+    except Exception as e:
+        return raus("cdp_fehler", f"TopstepX-Lesen abgebrochen: {type(e).__name__}: {str(e)[:160]}", "absturz")
+    finally:
+        wh.cancel()
+        if sitz[0]:
+            sitz[0].zu()
+
+
 def modus_tsxinventar_cdp(cmd):
     """K0: TopstepX im Puls-Chrome erfassen (siehe Block-Kopf). Antwort wie modus_tsxinventar: {ok, code, msg, trail, schritt, weg,
     arts, offen}. Sperrt andere Puls-Chrome-Läufe (Handlauf-Sperre) für die Dauer."""
@@ -14801,30 +15064,41 @@ def modus_tsxinventar_cdp(cmd):
     pc = _augen_pc_id()
     sitz = [None]
 
-    def raus(code, msg, schritt, ok=False):
+    import threading
+    antwort = _EineAntwort()
+
+    def raus(code, msg, schritt, ok=False, zuerst=None):
+        if not antwort.nehmen():
+            return
+        if zuerst:
+            zuerst()                                          # Wachhund: erst die Sitzung schließen (Hauptpfad anhalten), dann antworten
         res.update(ok=ok, code=code, msg=msg, schritt=schritt)
         res["trail"] = " > ".join(trail)
+        antwort.ausgeben(res)
         _puls_diagnose_senden(trail, "tsx_inventar_cdp")
-        print(json.dumps(res, ensure_ascii=False))
 
     if _handlauf_aktiv():
         return raus("handlauf", "Im Puls-Chrome läuft gerade ein anderer Hand-Lauf — nichts gelesen, gleich erneut anstoßen.", "sperre")
     _handlauf_setzen(True)
-    import threading
 
-    def _wachhund():
-        # Prüfer K0: ohne Wachhund beendete das Panel den Bot nach 150 s hart — die Sperre blieb 15 min und hielt Orbit fern
-        trail.append(f"Wachhund: nach {int(TSX_K0_WACHHUND_S)} s abgebrochen (Schritt {res.get('schritt')})")
-        _handlauf_setzen(False)
+    def _schliessen():
         try:
             if sitz[0]:
                 sitz[0].zu()
         except Exception:
             pass
+
+    def _wachhund():
+        # Prüfer K0: ohne Wachhund beendete das Panel den Bot nach 150 s hart — die Sperre blieb 15 min und hielt Orbit fern.
+        # Stapel-Prüfer 30.09.2026: erst die Sitzung schließen (der Hauptpfad klickt dann nicht mehr), dann antworten, die
+        # Handlauf-Sperre erst direkt vor dem Beenden freigeben.
+        trail.append(f"Wachhund: nach {int(TSX_K0_WACHHUND_S)} s abgebrochen (Schritt {res.get('schritt')})")
         try:
-            raus("haenger", f"K0-Inventar hing nach {int(TSX_K0_WACHHUND_S)} s — abgebrochen (Puls-Chrome ansehen: Liste/Dialog offen?).", "haenger")
-            sys.stdout.flush()
+            raus("haenger", f"K0-Inventar hing nach {int(TSX_K0_WACHHUND_S)} s — abgebrochen (Puls-Chrome ansehen: Liste/Dialog offen?).",
+                 "haenger", zuerst=_schliessen)
         finally:
+            _schliessen()
+            _handlauf_setzen(False)
             os._exit(0)
     wh = threading.Timer(TSX_K0_WACHHUND_S, _wachhund)
     wh.daemon = True
@@ -14837,11 +15111,16 @@ def modus_tsxinventar_cdp(cmd):
             return raus("tab", lg, "tab")
         if lg is not True:
             return raus("login", lg, "login")
+        res["schritt"] = "bereit"
+        _, bereit = _tsx_bereit_warten(s, trail)            # Live 30.09.2026 20:48 UTC: Grund-Inventar 0,5 s nach dem Login = leere Seite
         g = _tsx_k0_lesen(s, trail, "grund", pc, blick=s.lese_js(TSX_K0_BLICK_JS))
         if not g:
             return raus("inventar", "Grund-Inventar nicht lesbar (augen_tsx.js) — nichts geklickt.", "grund")
         res["arts"] += g["arts"]
-        if not cmd.get("nur_grund"):
+        if not bereit and not cmd.get("nur_grund"):
+            trail.append("Seite nicht bereit (Konto-Auslöser/BAL fehlen) — Konto- und Bracket-Schritt ausgelassen, nichts geklickt")
+            res.setdefault("offen", []).append("konto/bracket: Seite nach dem Login nicht bereit")
+        elif not cmd.get("nur_grund"):
             _tsx_k0_zustand(s, trail, pc, "konto", res)
             if res.pop("_nicht_zu", False):
                 trail.append("Konto-Liste nicht bewiesen zu — Bracket-Schritt ausgelassen (nichts rutscht unter die Maus)")
@@ -14862,7 +15141,7 @@ def modus_tsxinventar_cdp(cmd):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# PULS ÜBER CDP — K1 LESEN (29.09.2026 nachts, Finns Freigabe: Moritz pc-usq1i6 ist CDP-Test-PC, der alte UIA-Weg dort ist
+# PULS ÜBER CDP — K1 LESEN (29.09.2026 nachts, Finns Freigabe: ID B pc-cccccc ist CDP-Test-PC, der alte UIA-Weg dort ist
 # nach dem Sitzungs-Kick ohne Broker). tvlesen verzweigt NUR bei Regel 'cdp' hierher — gleicher Ergebnis-Vertrag (ok,
 # positionen, offen, summary, today_pnl …), Prophos/Panel merken nichts. Kein UIA-Rückfall auf einem cdp-PC.
 # Weiche: NUR die lokale augen_regel.json (schreibt der Augen-Prozess nach jeder Railway-Abfrage). Fehlt/veraltet → 'uia'
@@ -14981,7 +15260,7 @@ def win_ziel_js(x, y):
 
 
 def win_ziel_pruef_js(x, y, pruef):
-    """Ziel-Beweis beim Druck (K0-Prüfer 30.09.2026: der Hover-Beweis bestätigt JEDES oberste Element — bei Mike liegt „SELL -1 @
+    """Ziel-Beweis beim Druck (K0-Prüfer 30.09.2026: der Hover-Beweis bestätigt JEDES oberste Element — bei ID A liegt „SELL -1 @
     MARKET" 31 px unter dem Bracket-Zahnrad). Am Punkt: :hover UND das klickbare Element dort ist der Kandidat — seine Mitte liegt darin,
     es ist höchstens ~4× so groß, Text bzw. Beschriftung passen — und trägt kein Order-/Close-Wort. Liest nur. pruef = {rect, text, aria, tabu}"""
     return ("(function(p){var e=document.elementFromPoint(" + f"{float(x):.1f},{float(y):.1f}" + ");if(!e)return {hover:false,passt:false,was:''};"
@@ -15017,7 +15296,7 @@ CDP_TOAST_ZU_JS = r"""(function () {
 })()"""
 
 
-# WERBUNG IM PULS-CHROME (30.09.2026, Finn an Jacobs PC pc-8jcrsm, Screenshot „Don't miss this Autumn sale · Up to 80% off · Explore
+# WERBUNG IM PULS-CHROME (30.09.2026, Finn an PC von ID C pc-iiiiii, Screenshot „Don't miss this Autumn sale · Up to 80% off · Explore
 # offers"): TradingViews Sale-Modal legte sich über den Connect-Dialog und verschluckte den Klick; der neue Puls kannte — anders als der
 # alte (_tv_popups_weg) — kein Wegklicken. Gesucht werden sichtbare Kästen (kleinster zuerst, höchstens 80 % des Bilds) mit
 # MINDESTENS ZWEI verschiedenen Werbe-Merkmalen und ohne Handels-/Login-Wort; geklickt wird nur ihr EINES X oben rechts (≤ 60 px,
@@ -15239,7 +15518,7 @@ class _AugenSitzung:
         if _WIN_EINGABE:
             tv = getattr(self, "tv_riegel", True)          # TopstepX-Tab (K0): nichts TradingView-Eigenes wegklicken
             if tv:
-                self.werbung_weg()                        # Werbe-Modal zuerst weg (30.09.2026, Jacobs PC: Autumn-Sale über Connect)
+                self.werbung_weg()                        # Werbe-Modal zuerst weg (30.09.2026, PC von ID C: Autumn-Sale über Connect)
             self._verdeckt = False
             if pruef:
                 return self._win_klick(rect, name, toast_ok=toast_ok, pruef=pruef)
@@ -15550,9 +15829,9 @@ class _AugenSitzung:
 
 def cdp_konto_passt(text, ext_id):
     """REIN RECHNEND (testbar): Trägt dieser Konto-Text (Umschalter/Listenzeile im Puls-Chrome) GENAU diese External ID?
-    Ganzes Wort, nur ein Währungs-Anhang darf direkt folgen: augen.js liest den Umschalter als 'PAAPEX6416990000007USD' (zwei spans ohne
+    Ganzes Wort, nur ein Währungs-Anhang darf direkt folgen: augen.js liest den Umschalter als 'PAAPEX0000000000007USD' (zwei spans ohne
     Leerraum), tv_konto_wort_passt fände das nie. Kein Teilstring (Prüfer 30.09.2026 zur Regression .865, wie tv_konto_wort_passt am
-    21.09.): 'APEX6416990000007' (Eval) steckt in 'PAAPEX6416990000007USD' (PA) — im Login APEX_641699 stehen 8 solche Paare.
+    21.09.): 'APEX0000000000007' (Eval) steckt in 'PAAPEX0000000000007USD' (PA) — im Login APEX_000000 stehen 8 solche Paare.
     DB-Stand 30.09.: alle Tradovate-IDs (Apex/Tradeify/Lucid) sind volle Kontonamen. 3-Zeichen-Riegel wie tv_konto_passt."""
     e = _nur_alnum(ext_id)
     if len(e) < 3:
@@ -15565,7 +15844,7 @@ def cdp_konto_passt(text, ext_id):
 
 
 def cdp_kontonr(text):
-    """REIN RECHNEND (testbar): Kontonummer aus einem Umschalter-/Listen-Text ('PAAPEX6416990000008USD' → 'PAAPEX6416990000008') | ''
+    """REIN RECHNEND (testbar): Kontonummer aus einem Umschalter-/Listen-Text ('PAAPEX0000000000008USD' → 'PAAPEX0000000000008') | ''
     Je Wort (Beiwerk davor wie 'Apex · PAAPEX…' klebt sonst an der Nummer, Prüfer Runde 2)."""
     for w in re.split(r"[^A-Za-z0-9_-]+", str(text or "")):
         m = K3_RX_KONTONR.match(w.upper())
@@ -15597,7 +15876,7 @@ def cdp_konto_eintrag(eintraege, ext):
 
 def cdp_liste_beleg(ko, aktiv, ext=""):
     """REIN RECHNEND (testbar): Belegt eine SELBST geöffnete Liste ohne Ziel einen fremden Tradovate-Login? -> (ja, grund)
-    Prüfer 30.09.2026 (Regression .865): eine abgeschnittene Liste (maximiert ≈ 21 Zeilen, APEX_641699 hat 32 Konten) zeigte das Ziel
+    Prüfer 30.09.2026 (Regression .865): eine abgeschnittene Liste (maximiert ≈ 21 Zeilen, APEX_000000 hat 32 Konten) zeigte das Ziel
     0× — „Log out" einer richtigen Sitzung. Deshalb zuerst die Nummern selbst (cdp_konto_familie): andere Firma bzw. anderer Apex-User
     = sicher ein anderer Login (so bleibt der live grüne Wechsel Apex↔Tradeify auch bei 94 Konten möglich); derselbe Apex-User = nie
     (das Ziel steht nur außer Sicht). Sonst (Tradeify↔Tradeify, unbekannt) nur mit vollständiger Liste (augen.js liste_voll ≥ 0.7.4)
@@ -15659,12 +15938,12 @@ def cdp_positionen_vertrag(pos):
     return out
 
 
-# ORDER-PANEL EINGEKLAPPT (Finn 30.09.2026, pc-usq1i6, Schließen 150k Apex PAAPEX6416990000008 NQZ6: „Konto-Umschalter geklickt,
+# ORDER-PANEL EINGEKLAPPT (Finn 30.09.2026, pc-cccccc, Schließen 150k Apex PAAPEX0000000000008 NQZ6: „Konto-Umschalter geklickt,
 # Dropdown nicht erkannt (aktiv '…0007USD')"). Belegt im Stand 00:52 UTC: innerHeight 773, Broker-Leiste #footer-chart-panel bei
 # y 686–724, Umschalter bei y 745–773 — unter der Leiste blieben 49 px, die Tradovate-Kontoliste (32-px-Zeilen) hatte keinen Platz.
-# „Collapse panel" meldete dabei „offen", deshalb griff der alte Weg (Open panel) nicht. Bei pc-2zc2we (Liste ging auf) waren es 320 px.
+# „Collapse panel" meldete dabei „offen", deshalb griff der alte Weg (Open panel) nicht. Bei pc-jjjjjj (Liste ging auf) waren es 320 px.
 # Rechts im Panel-Kopf stehen „—" = [data-name=toggle-visibility-button] (Collapse/Open panel) und „⌐" =
-# [data-name=toggle-maximize-button] (aria „Maximize panel"), beide im Inventar pc-usq1i6/pc-2zc2we belegt. Finns Regel: Panel nicht
+# [data-name=toggle-maximize-button] (aria „Maximize panel"), beide im Inventar pc-cccccc/pc-jjjjjj belegt. Finns Regel: Panel nicht
 # zu sehen → rechts aufklappen und nochmal; ist auch das Symbol nicht da, ist kein Konto verbunden → Login-Weg.
 CDP_PANEL_MIN_H = 150       # px unter der Broker-Leiste: Platz für Reiter + Kontoliste (gut: 320, Vorfall: 49)
 CDP_PANEL_LAGE_JS = r"""(function () {
@@ -15787,7 +16066,7 @@ def _cdp_konto_sichern(s, ext, opts, trail):
             st = s.stand(opts)
             continue
         if ko.get("liste_offen") and not geklickt_umschalter:
-            # REGRESSION .865 (30.09.2026, pc-usq1i6, Orbit-Endlesung Plan beb06b7f): nach „Maximize panel" stand der Umschalter oben,
+            # REGRESSION .865 (30.09.2026, pc-cccccc, Orbit-Endlesung Plan …): nach „Maximize panel" stand der Umschalter oben,
             # augen.js ≤ 0.7.3 fand ihn nicht (aktiv '') und hielt ihn selbst für eine offene Liste mit 1 Zeile ('…0008'); das Ziel
             # '…0007' stand darin 0× → Login-Weg → „Log out" einer richtigen Sitzung. Eine Liste, die dieser Lauf NICHT selbst geöffnet
             # hat, ist deshalb nie ein Beleg: nichts daraus wählen, keinen Login daraus ableiten — EINMAL Esc und neu lesen.
@@ -16008,7 +16287,7 @@ def _cdp_ticket_fuellen(s, st, plan, symbol, opts, trail):
     def knopf():
         return st.get("kauf_knopf") if isinstance(st.get("kauf_knopf"), dict) else {}
 
-    # --- Order-Ticket zu? (Live 30.09.2026 04:12–04:14 Dubai, Moritz pc-usq1i6, Apex …0008, NQZ6: dreimal „Symbol NQ nicht
+    # --- Order-Ticket zu? (Live 30.09.2026 04:12–04:14 Dubai, ID B pc-cccccc, Apex …0008, NQZ6: dreimal „Symbol NQ nicht
     # einstellbar (Ticket zeigt '-')" — Chart + Watchlist standen richtig auf NQZ2026, aber puls_augen zeigte ticket.da=false:
     # das Order-Panel rechts war schlicht zu, und der neue Puls öffnete es nie.) Wie der alte Puls: Shift+T ist ein UMSCHALTER
     # (22.09.2026: ein im Aufbau „leer" gesehenes Panel wurde damit zugemacht) — also erst nach 4 leeren Blicken über ≥ 3 s,
@@ -16564,7 +16843,7 @@ def cdp_order_beweis(neu, zeilen, plan, menge_vorher):
     return out
 
 # ═══════════════════════════════════════════════════════════════════════════
-# ERGEBNIS ÜBERLEBT DEN PROPHOS-TAB (29.09.2026, Live 15:49 UTC, pc-usq1i6): BUY 1 MNQZ6 @ 30606 auf TDFYSL150800892182 lag in
+# ERGEBNIS ÜBERLEBT DEN PROPHOS-TAB (29.09.2026, Live 15:49 UTC, pc-cccccc): BUY 1 MNQZ6 @ 30606 auf TDFYSL150300000000 lag in
 # TradingView, Prophos erfuhr nie davon — der aufrufende Tab war nach Finns Chrome-Neustart weg, die Antwort ging ins Leere, der Plan
 # blieb 'planned' (Gefahr: zweiter Start = zweite Order). Jetzt schickt der Bot nach JEDEM scharfen Klick (Order bzw. Schließen)
 # sein Ergebnis selbst an Railway (POST /puls-ergebnis/<pc_id>, Upsert je plan_id + art) — gleich nach dem Klick (stufe 'geklickt')
@@ -17982,7 +18261,7 @@ def cdp_login_noetig(code, extra):
 
 def cdp_abmelden_erlaubt(aktiv, beleg):
     """REIN RECHNEND (testbar): Darf der Login-Weg die laufende Tradovate-Sitzung abmelden? -> (ja, grund)
-    Regression .865 (30.09.2026, pc-usq1i6, Plan beb06b7f): der Login-Weg las den aktuellen Login als '-' und klickte „Log out" —
+    Regression .865 (30.09.2026, pc-cccccc, Plan …): der Login-Weg las den aktuellen Login als '-' und klickte „Log out" —
     eine richtige Sitzung war weg. Seitdem NUR mit Beleg: der Konto-Schritt hat die Liste selbst geöffnet, das Ziel stand darin 0×
     (beleg konto_treffer 0 + liste_aktiv), und das aktive Konto ist jetzt lesbar und dasselbe wie beim Beleg.
     grund: 'unlesbar' (nie abmelden, ehrlich abbrechen) | 'ohne_beleg' / 'anders' (nicht abmelden, Konto-Schritt neu) | ''"""
@@ -18011,7 +18290,7 @@ def cdp_panel_zu(stand):
 
 
 def cdp_panel_frei_js(rect):
-    """Liegt über der Mitte des „Open panel"-Knopfs wirklich der Knopf? Live 29.09.2026 23:04 UTC (pc-2zc2we, erster Login im
+    """Liegt über der Mitte des „Open panel"-Knopfs wirklich der Knopf? Live 29.09.2026 23:04 UTC (pc-jjjjjj, erster Login im
     Puls-Chrome): dreimal „geklickt, Hover bewiesen", das Panel blieb zu — TradingViews Connect-Dialog stand während des Logins noch
     und seine Fläche lag über der Seite; :hover bewies nur die Fläche. Verdeckt heißt NUR: Dialog/Overlay (#overlap-manager-root,
     role=dialog, aria-modal) oder ein Element über ≥ 40 % des Bilds; Meldungen und alles Unklare gelten als frei (wie bisher). Liest nur.
@@ -18030,7 +18309,7 @@ def cdp_panel_frei_js(rect):
 def _cdp_verbunden_lesen(s, opts, trail):
     """cdp_konto_verbunden — ist das Broker-Panel zugeklappt (Live 29.09.2026 16:25 UTC nach dem Login: nur „Tradovate ▾" +
     „Open panel", Umschalter unsichtbar → 40 s „kein Konto"), wird es aufgeklappt (höchstens 3× je Sitzung) und neu gelesen.
-    Live 29.09.2026 23:04 UTC (pc-2zc2we): alle 3 Klicks fielen in den Login (1,2 s nach Connect, 1–4 s nach „Anmelden") und trafen
+    Live 29.09.2026 23:04 UTC (pc-jjjjjj): alle 3 Klicks fielen in den Login (1,2 s nach Connect, 1–4 s nach „Anmelden") und trafen
     den noch offenen Connect-Dialog — als Tradovate verbunden war, war das Kontingent leer und der Lauf wartete 40 s auf „kein Konto".
     Seitdem: liegt ein Dialog über dem Knopf, wird NICHT geklickt (zählt nicht, der Aufrufer fragt ohnehin wieder), und nach dem Klick
     wird bewiesen, dass das Panel aufging. -> Kontotext | ''"""
@@ -18395,7 +18674,7 @@ def _cdp_login_ort(s, vorher, benutzer, opts, trail, warten_s=25.0):
     ende, netz_n, nochmal_n, werbung_seit = time.time() + warten_s, 0, 0, False
     while time.time() < ende:
         _warte(0.8, 0.3)
-        if s.werbung_weg():                               # Autumn-Sale über dem Dialog (30.09.2026, Jacobs PC)
+        if s.werbung_weg():                               # Autumn-Sale über dem Dialog (30.09.2026, PC von ID C)
             werbung_seit = True
         b = ort_tv.blick()
         if b.get("login"):
@@ -18434,7 +18713,7 @@ def _cdp_login_ort(s, vorher, benutzer, opts, trail, warten_s=25.0):
             _warte(2.0, 0.8)                  # der alte Fehlertext steht nach dem Klick noch kurz da
             ende = time.time() + warten_s
             continue
-        # Connect-Dialog steht noch, ohne Fehler und ohne Anmeldeseite (30.09.2026, Jacobs PC: die Werbung verschluckte den Klick) —
+        # Connect-Dialog steht noch, ohne Fehler und ohne Anmeldeseite (30.09.2026, PC von ID C: die Werbung verschluckte den Klick) —
         # nach geschlossener Werbung sofort, sonst nach 8 s ohne Wirkung: Connect genau noch einmal (höchstens 2×)
         seit_s = time.time() - (klick_ms / 1000.0 if klick_ms else 0.0)
         if d and cdp_rect(d.get("connect")) and nochmal_n < 2 and (werbung_seit or seit_s > 8.0):
@@ -18471,7 +18750,7 @@ def cdp_liste_kurz(roh, max_n=30, max_zeichen=700):
 
 def _cdp_autofill_klick(eingabe, benutzer, feld_rect, trail, diag=False):
     """Chromes Vorschlagsliste (eigenes kleines Fenster des Puls-Chrome-Prozesses, für CDP unsichtbar) per Windows-UIA lesen und den
-    Eintrag mit GENAU diesem Username als ganzem Wort (tv_konto_wort_passt, wie der alte Puls — „APEX_641699TDFYU324689097" zählt
+    Eintrag mit GENAU diesem Username als ganzem Wort (tv_konto_wort_passt, wie der alte Puls — „APEX_000000TDFYU000000000" zählt
     nicht) mit der echten Maus anklicken. Das Benutzerfeld selbst ist ausgenommen. -> True/False"""
     if not _WIN_EINGABE:
         trail.append("[Login] Vorschlagsliste nur unter Windows lesbar")
@@ -18492,8 +18771,8 @@ def _cdp_autofill_klick(eingabe, benutzer, feld_rect, trail, diag=False):
         @staticmethod
         def search(name):
             return tv_konto_wort_passt(name, benutzer)
-    # Live 29.09.2026 15:11 UTC (Tradeify-Wechsel): „TDFYU324689097 · tradovate.com" (für die Domain gespeichert, nicht für
-    # trader.tradovate.com) wurde mit den fünf alten Typen 3× nicht gefunden, „Passwort für APEX_641699" schon — deshalb mehr Typen,
+    # Live 29.09.2026 15:11 UTC (Tradeify-Wechsel): „TDFYU000000000 · tradovate.com" (für die Domain gespeichert, nicht für
+    # trader.tradovate.com) wurde mit den fünf alten Typen 3× nicht gefunden, „Passwort für APEX_000000" schon — deshalb mehr Typen,
     # und beim ersten Fehlversuch steht der Inhalt der Liste (Typ:Name, ohne maskierte Passwörter) in der Spur.
     roh, popup_roh = [], []
     for f in _puls_fenster_liste(_puls_chrome_browser_pid()):
@@ -18578,8 +18857,8 @@ def _cdp_anmelden(s, ort, benutzer, opts, trail, vorher=None, sitz=None):
     else:
         # FINNS HANDWEG (29.09.2026, Screenshot nach dem ersten Live-Lauf .799): ins Benutzerfeld klicken → Chrome zeigt die
         # gespeicherten Logins → den passenden anklicken → Passwort kommt mit → Anmelden. NIE Enter im Formular: im ersten Lauf
-        # hatte Chrome „APEX_641699" vorbelegt (für die Seite vor dem ersten Klick unsichtbar), der Username wurde angehängt, die
-        # Autofill-Markierung des Passworts galt als Vorschau, und Enter schickte „APEX_641699TDFYU324689097" ab → „Incorrect
+        # hatte Chrome „APEX_000000" vorbelegt (für die Seite vor dem ersten Klick unsichtbar), der Username wurde angehängt, die
+        # Autofill-Markierung des Passworts galt als Vorschau, und Enter schickte „APEX_000000TDFYU000000000" ab → „Incorrect
         # username or password" (ein Fehlversuch bei Tradovate). Die Liste ist ein eigenes Browser-Fenster → Windows-UIA wie beim
         # alten Puls; geklickt wird nur ein Eintrag mit genau diesem Username als ganzem Wort.
         if not cdp_rect(u):

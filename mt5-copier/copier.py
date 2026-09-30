@@ -66,7 +66,7 @@ def local_version():
         return None
 
 
-# ── QuickEdit aus (25.09.2026, Live-Befund pc-usq1i6: Feed stand 6 min, Finns Foto zeigte die Titelleiste
+# ── QuickEdit aus (25.09.2026, Live-Befund pc-cccccc: Feed stand 6 min, Finns Foto zeigte die Titelleiste
 # „Auswählen Prophos TV-Reader"). Windows-Konsolen starten bei einem Klick ins Fenster eine MARKIERUNG
 # (QuickEdit) — solange sie steht, blockiert Windows jede Ausgabe, der Prozess haengt beim naechsten print()
 # und nimmt nichts mehr an. Beim Start abschalten; auf Mac/Linux nichts.
@@ -537,8 +537,8 @@ def check_fleet(cfgs):
     return errors, warnings
 
 
-# ── Gezielter Magic-Umzug (11.09.2026, Jakobs The5ers-Vorfall) ─────────────────
-# Live-Fund 10./11.09.2026: Hedges der Master 26674215/26674216 wurden am
+# ── Gezielter Magic-Umzug (11.09.2026, The5ers-Vorfall von ID C) ─────────────────
+# Live-Fund 10./11.09.2026: Hedges der zwei Master aus MAGIC_UMZUG wurden am
 # GEMEINSAMEN Fusion-Hedge-Konto sofort wieder geschlossen (oeffnen → fremd-
 # schliessen → oeffnen → …, danach griffen Hand-Close-Sperre bzw. Mehrfach-
 # Hedge-Schutz und es wurde gar nicht mehr gehedgt). Ursache: ein Copier auf
@@ -598,8 +598,8 @@ SOLO_KOMMENTAR_MAX = 31    # MT5: Order-Kommentar hoechstens 31 Zeichen
 
 def solo_kommentar(plan_id):
     """REIN RECHNEND (testbar): Order-Kommentar der Solo-Position, 25.09.2026 (Koordination: Finns Fusion-Konto
-    488579 ist zwischen allen PCs geteilt; hedge_solo zeigte alle Solo-Positionen ohne Zuordnung, ein verpasster
-    oder verlorener Hedge — Jacobs Plan 2089a033 — war nicht sicher wiederzufinden). 'PXsolo:<plan8>' mit den
+    400004 ist zwischen allen PCs geteilt; hedge_solo zeigte alle Solo-Positionen ohne Zuordnung, ein verpasster
+    oder verlorener Hedge — Plan von ID C 0a0a0a33 — war nicht sicher wiederzufinden). 'PXsolo:<plan8>' mit den
     ersten 8 Zeichen der plan_id (nur [0-9a-zA-Z-]), ohne plan_id wie bisher 'PXsolo'. Erkennung eigener
     Positionen bleibt die magic 790001 — der Kommentar ist nur Zusatz (manche Broker kuerzen/ueberschreiben ihn)."""
     p8 = re.sub(r"[^0-9A-Za-z-]", "", str(plan_id or ""))[:8]
@@ -607,7 +607,7 @@ def solo_kommentar(plan_id):
 
 
 def solo_plan8(kommentar):
-    """REIN RECHNEND (testbar): plan8 aus einem Solo-Kommentar ('PXsolo:2089a033' → '2089a033'); alte 'PXsolo'
+    """REIN RECHNEND (testbar): plan8 aus einem Solo-Kommentar ('PXsolo:0a0a0a33' → '0a0a0a33'); alte 'PXsolo'
     ohne Kennung, der Close-Kommentar 'PXsoloc' und Fremdes → None."""
     m = re.match(r"^PXsolo:([0-9A-Za-z-]{1,8})", str(kommentar or "").strip())
     return m.group(1) if m else None
@@ -626,7 +626,7 @@ def solo_schon_offen(positionen, plan_id, plan_map=None):
     selben Takt, oder ein Plan mit offenem Hedge wird erneut gestartet → zwei Fusion-Positionen, die erste ohne
     Wächter). Treffer: magic SOLO_MAGIC UND (plan_id laut Ticket→Plan-Zuordnung dieses Copiers == plan_id ODER
     plan8 aus dem Kommentar == erste 8 Zeichen der plan_id). Ohne plan_id (Frontend vor .548) kein Riegel → None.
-    Das Fusion-Konto 488579 ist zwischen den PCs geteilt — positions_get sieht auch Positionen anderer Terminals,
+    Das Fusion-Konto 400004 ist zwischen den PCs geteilt — positions_get sieht auch Positionen anderer Terminals,
     der Riegel greift also auch PC-übergreifend, sobald die erste Position im Konto steht."""
     pid = str(plan_id or "").strip()
     p8 = solo_plan8(solo_kommentar(pid)) if pid else None
@@ -2082,7 +2082,7 @@ def main():
             if my_version and rv and rv != my_version and _REMOTE_VERSION.get("neustart", True):
                 busy = [m.file for m in masters if getattr(m, "busy", False)]
                 # „Start steht bevor" (25.09.2026): nach einem Puls-Start folgt der Hedge-Open — so lange
-                # kein Neustart, sonst trifft der Open auf 'copier_alt' (Finns Test pc-8jcrsm 20:51:14)
+                # kein Neustart, sonst trifft der Open auf 'copier_alt' (Finns Test pc-iiiiii 20:51:14)
                 _bereit = hedge_bereit_rest(os.path.join(here, HEDGE_BEREIT), time.time())
                 if _bereit > 0:
                     busy.append(f"Start steht bevor (noch {int(_bereit)} s)")
@@ -2244,7 +2244,7 @@ def main():
                 if m.armed:
                     m.warned_unarmed.clear()
                 # Ohne expect_login lesen und SELBST vergleichen (15.08.2026, erster
-                # Trade-Test): das Terminal oeffnete mit fremdem Konto 437916, der
+                # Trade-Test): das Terminal oeffnete mit fremdem Konto 400005, der
                 # expect_login-Filter machte den Snapshot still zu None — im Preflight
                 # stand nur 'warte auf Snapshot' statt der Wahrheit. Der Mismatch muss
                 # LAUT werden (note + wrong_login), kopiert wird dabei weiterhin nichts.
@@ -2428,9 +2428,9 @@ def main():
                     write_closed(m.closed_path, m.closed, m.hedge_last_vol, m.hedge_last_tickets)
 
                 # ── Eingefrorener Snapshot = keine Order-Basis (25.08.2026) ─────
-                # Live-Fund beim ersten Echtgeld-Kontakt: Master 26592415 war
+                # Live-Fund beim ersten Echtgeld-Kontakt: Master 10000005 war
                 # laengst flach, aber die stehengebliebene Snapshot-Datei (Lese-EA
-                # tot) listete noch Position 591067191 — der Copier eroeffnete
+                # tot) listete noch Position 500000001 — der Copier eroeffnete
                 # daraus nach jedem Hand-Close einen frischen Echtgeld-Hedge.
                 # Eine Datei, die seit >15 s nicht mehr geschrieben wird, ist
                 # kein Beweis fuer offene Master-Positionen ('Beweis oder leer'):

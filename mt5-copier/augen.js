@@ -23,7 +23,7 @@
  */
 var PROPHOS_AUGEN = (function () {
   'use strict';
-  var VERSION = '0.7.4';   // 0.7.4 (30.09.2026, Regression .865): Konto-Umschalter relativ zur Broker-Leiste (auch maximiert oben), konto.panel_lage, keine Ein-Zeilen-Liste ohne Umschalter, konto.liste_voll (ganze Liste im Bild)   // 0.7.3 (29.09.2026, K3): kurz() gibt geheime Felder (Passwort, Login-Formular) nie mit Wert zurück   // 0.7.2 (29.09.2026): Aufnahme stoppt nach 10 min von selbst   // 0.7.1 (29.09.2026, K2 für T3): kauf_knopf.disabled, tp/sl.einheit/wert/neben, summary_reiter   // 0.7.0 (29.09.2026, Aufnahme 00:52): Kontoliste ohne Rollen, Meldungs-Status, Watchlist, Dialog-Knöpfe   // 0.6.1 (29.09.2026): aufnahme_letzte() als Rettungskopie, T3-Banner 'prophos-aufnahme' ausgeblendet   // 0.6.0 (29.09.2026, Aufnahme 00:36 leer): window-capture, roh-Zähler, tab_id, Sichtbarkeit   // 0.5.3 (29.09.2026, Lesung 00:22:50): Konto-Anker Kontonummer zuerst, Summary Total P/L = today   // 0.5.2 (29.09.2026, Lesung 00:22): Panel 'Collapse panel'/Manager-Knopf, Konto entdoppelt + kontonr   // 0.5.1 (29.09.2026, Lesung 00:17 pc-usq1i6): Schalter-Rechteck, ticket.seite/bereit, Legende, veraltete Zeilen   // 0.5.0 (29.09.2026): Aufnahme-Modus (Finn klickt den Ablauf einmal selbst, jede Aktion wird mitgeschrieben)   // 0.4.0 (29.09.2026, K1–K4 für T3): positionen, orders, konto_summary, symbolsuche, toasts.meldungen   // 0.3.0 (29.09.2026, erste echte Lesung pc-usq1i6): TP/SL-Zustand, Konto-Leiste, Toast-Rückfall   // 0.2.0 (29.09.2026): Vertrag mit T3 — globalThis.prophosAugen, Schlüssel-Whitelist, popups, kauf_knopf
+  var VERSION = '0.7.4';   // 0.7.4 (30.09.2026, Regression .865): Konto-Umschalter relativ zur Broker-Leiste (auch maximiert oben), konto.panel_lage, keine Ein-Zeilen-Liste ohne Umschalter, konto.liste_voll (ganze Liste im Bild)   // 0.7.3 (29.09.2026, K3): kurz() gibt geheime Felder (Passwort, Login-Formular) nie mit Wert zurück   // 0.7.2 (29.09.2026): Aufnahme stoppt nach 10 min von selbst   // 0.7.1 (29.09.2026, K2 für T3): kauf_knopf.disabled, tp/sl.einheit/wert/neben, summary_reiter   // 0.7.0 (29.09.2026, Aufnahme 00:52): Kontoliste ohne Rollen, Meldungs-Status, Watchlist, Dialog-Knöpfe   // 0.6.1 (29.09.2026): aufnahme_letzte() als Rettungskopie, T3-Banner 'prophos-aufnahme' ausgeblendet   // 0.6.0 (29.09.2026, Aufnahme 00:36 leer): window-capture, roh-Zähler, tab_id, Sichtbarkeit   // 0.5.3 (29.09.2026, Lesung 00:22:50): Konto-Anker Kontonummer zuerst, Summary Total P/L = today   // 0.5.2 (29.09.2026, Lesung 00:22): Panel 'Collapse panel'/Manager-Knopf, Konto entdoppelt + kontonr   // 0.5.1 (29.09.2026, Lesung 00:17 pc-cccccc): Schalter-Rechteck, ticket.seite/bereit, Legende, veraltete Zeilen   // 0.5.0 (29.09.2026): Aufnahme-Modus (Finn klickt den Ablauf einmal selbst, jede Aktion wird mitgeschrieben)   // 0.4.0 (29.09.2026, K1–K4 für T3): positionen, orders, konto_summary, symbolsuche, toasts.meldungen   // 0.3.0 (29.09.2026, erste echte Lesung pc-cccccc): TP/SL-Zustand, Konto-Leiste, Toast-Rückfall   // 0.2.0 (29.09.2026): Vertrag mit T3 — globalThis.prophosAugen, Schlüssel-Whitelist, popups, kauf_knopf
 
   // ── Grundwerkzeuge ─────────────────────────────────────────────────────────
   function sichtbar(el) {
@@ -109,7 +109,7 @@ var PROPHOS_AUGEN = (function () {
     }
     return null;
   }
-  /* TP/SL-SCHALTER (erste echte Lesung pc-usq1i6 29.09.2026 00:05 UTC): 'Take profit, $' ist ein <button> mit Symbol-Span, der
+  /* TP/SL-SCHALTER (erste echte Lesung pc-cccccc 29.09.2026 00:05 UTC): 'Take profit, $' ist ein <button> mit Symbol-Span, der
    * eigentliche Haken ist ein UNSICHTBARES Kästchen (opacity 0) — sichtbar() filtert es weg, tp.an/sl.an blieben null. Deshalb hier
    * OHNE Sichtbarkeits-Filter: Kästchen/Schalter in derselben Zeile (±16 px) nahe der Beschriftung. Rückfall: deaktiviertes/
    * ausgegrautes Wertfeld = aus. -> {an: true|false|null, quelle} */
@@ -315,12 +315,12 @@ var PROPHOS_AUGEN = (function () {
   }
 
   // ── Konto (Account-Manager) ────────────────────────────────────────────────
-  /* KONTO-DROPDOWN (Aufnahme 00:52 pc-usq1i6, T3): Tradovate rendert die Liste OHNE role — Zeilen sind div ~228×32 im 32-px-Raster
+  /* KONTO-DROPDOWN (Aufnahme 00:52 pc-cccccc, T3): Tradovate rendert die Liste OHNE role — Zeilen sind div ~228×32 im 32-px-Raster
    * ([78,600|632|664|696,228,32]), darin ein span mit der Kontonummer; Gruppen-Köpfe (z. B. „Apex") stehen in derselben Spalte ohne
    * Nummer. Direkt nach dem Öffnen kommt ein focusin auf einen gleich breiten Container weiter oben ([6,30,228,32]) — bei gleicher
    * Nummer gewinnt deshalb die Zeile, die dem Umschalter am nächsten liegt. -> {zeilen:[{text, kontonr, rect, aktiv}], gruppen:[{text, rect}]} */
   /* LISTE VOLLSTÄNDIG? (Prüfer 30.09.2026 zur Regression .865): „Ziel 0× in der Liste" belegt einen fremden Login nur, wenn die Liste
-   * GANZ zu sehen ist. Bei 358 px unter der Leiste passen ~10 Zeilen, APEX_641699 hat 32 Konten — der Rest liegt unter dem Fensterrand
+   * GANZ zu sehen ist. Bei 358 px unter der Leiste passen ~10 Zeilen, APEX_000000 hat 32 Konten — der Rest liegt unter dem Fensterrand
    * (sichtbar() wirft ihn raus) oder in einem Scroll-Container. Nein, wenn eine Zeile aus dem Fenster ragt, ein enger Container darum
    * scrollt oder abgeschnitten ist, oder darin mehr Konto-Zeilen (auch unsichtbare) stehen als gemeldet. -> true | false */
   function listeVoll(els, ohne) {
@@ -407,7 +407,7 @@ var PROPHOS_AUGEN = (function () {
     }
     return { zeilen: zeilen.slice(0, 40), gruppen: gruppen, voll: zeilen.length <= 40 && listeVoll(zeilenEl, schalterEl) };
   }
-  /* KONTO-UMSCHALTER RELATIV ZUR BROKER-LEISTE (30.09.2026, Regression .865 bei pc-usq1i6, Inventar 03:13 UTC): maximiert steht
+  /* KONTO-UMSCHALTER RELATIV ZUR BROKER-LEISTE (30.09.2026, Regression .865 bei pc-cccccc, Inventar 03:13 UTC): maximiert steht
    * #footer-chart-panel OBEN ([56,0,1194,38], Knopf „Restore panel") und der Umschalter direkt darunter ([72,59,199,28] 'PAAPEX…0008USD');
    * normal unten (Leiste 686, Umschalter 745 bzw. [72,510]). Der alte Filter „untere 70 % des Fensters" verlor ihn maximiert →
    * aktiv '' → kontoZeilen hielt den Umschalter selbst für eine offene Liste mit 1 Eintrag → der Bot fand das Ziel darin 0× → Login-Weg
@@ -432,7 +432,7 @@ var PROPHOS_AUGEN = (function () {
   }
   function konto(texte) {
     // Lesung 00:22:50: '[data-name*=account] button' traf 'Column setup' in der Account-Manager-Tabelle — jetzt zuerst die KONTONUMMER
-    // als Text (unser eigener Anker, z. B. 'PAAPEX6416990000009USD' [72,510]), data-name-Wege nur noch mit Kontonummer im Text
+    // als Text (unser eigener Anker, z. B. 'PAAPEX0000000000009USD' [72,510]), data-name-Wege nur noch mit Kontonummer im Text
     var s = kontoSchalter();
     if (!s.el) {
       var s2 = suche([{ q: 'dn:account-manager-account-select', sel: '[data-name="account-manager-account-select"]' },
@@ -473,7 +473,7 @@ var PROPHOS_AUGEN = (function () {
     if (!panel && mgrA) panel = /^(close|schlie)/i.test(mgrA) ? 'offen' : /^(open|öffnen|oeffnen)/i.test(mgrA) ? 'zu' : null;
     if (!panel) panel = tog || mgr.el ? 'unklar' : null;
     var schalter = s.el ? kurz(s.el, { quelle: s.quelle }) : null;
-    // Lesung 00:22: textContent las 'PAAPEX6416990000009USDPAAPEX6416990000009USD' (versteckter Doppel-Text) — entdoppeln, Nummer extra
+    // Lesung 00:22: textContent las 'PAAPEX0000000000009USDPAAPEX0000000000009USD' (versteckter Doppel-Text) — entdoppeln, Nummer extra
     var aktivText = s.el ? entdoppeln(txt(s.el)).slice(0, 60) : '';
     var kontonrM = aktivText.match(/[A-Z]{2,}[A-Z0-9_-]*?\d{5,}/);
     eintraege.forEach(function (e) { e.text = entdoppeln(e.text); });
