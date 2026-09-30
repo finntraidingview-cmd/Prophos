@@ -8563,7 +8563,7 @@
               <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
                 <!-- Kapitel „Ohne Hedge" (24.09.2026): der Farmer plant dann über Orbit V2 — kein Slave, kein
                      Duplikum. Chip nur im hedge-freien Kapitel (admHedgeModus), Texte darunter setzt die Farmer-Logik. -->
-                <span class="chip chip-good" id="wd-weg-chip" hidden title="Kapitel ohne Hedge: Pläne laufen über Orbit V2 — Puls platziert, kein Slave, kein Duplikum">Orbit V2 · ohne Hedge</span>
+                <span class="chip chip-good" id="wd-weg-chip" hidden title="Neue Ära: Pläne laufen über Orbit V2 — Puls platziert, kein Slave, kein Duplikum">Orbit V2 · ohne Hedge</span>
                 <span class="wd-status-chip" id="wd-auto-chip">—</span>
               </div>
             </div>
@@ -8751,7 +8751,7 @@
               </div>
             </div>
             <div class="kap-karten" id="adm-kap-karten"></div>
-            <div class="kap-regel" style="margin:0 0 10px">Die Auswertung „Ohne Hedge" (Kontrafakt, Reibung, Duplikum, Kategorien) steht im Reiter <b>Statistik</b>.</div>
+            <div class="kap-regel" style="margin:0 0 10px">Die Auswertung „Neue Ära" (Kontrafakt, Reibung, Duplikum, Kategorien) steht im Reiter <b>Statistik</b>.</div>
             <div class="panel">
               <div class="panel-head">
                 <div>
@@ -8791,7 +8791,7 @@
                   <div class="panel-sub" id="adm-kf-modell2"></div>
                   <!-- Zuordnungsregel (24.09.2026, DB-Trigger sql/2026-09-24_kapitel_konto_vererbung.sql: Buchungen erben das
                        Kapitel ihres Kontos; Trades nach Weg) — Finn: „bestehende Konten bleiben in der Hedge-Ära" -->
-                  <div class="panel-sub kap-regel" style="margin:2px 0 0" hidden>Konten und ihre Buchungen zählen zum Kapitel des Kaufs · Trades zum Kapitel des Wegs (V2 = ohne Hedge)</div>
+                  <div class="panel-sub kap-regel" style="margin:2px 0 0" hidden>Konten und ihre Buchungen zählen zum Kapitel des Kaufs · Trades zum Kapitel des Wegs (V2 = Neue Ära) · WD-Hedge nach Datum</div>
                 </div>
                 <div class="kf-param">
                   <label title="1,0 = symmetrischer Fixgrößen-Hedge, wie Prophos ihn in der Hedge-Ära fuhr">Faktor <input class="input mono" type="number" step="0.1" min="0" data-kf-param="faktor"></label>
@@ -11093,7 +11093,7 @@
         wc.hidden = !an
         wc.textContent = hedgeAn ? 'Orbit V2 · Fusion-Gegenhedge' : 'Orbit V2 · ohne Hedge'
         wc.title = hedgeAn ? 'Winning Days Farm: Puls platziert, der PC öffnet die Fusion-Gegenorder — beide Schließ-Level in MetaTrader'
-                           : 'Kapitel ohne Hedge: Pläne laufen über Orbit V2 — Puls platziert, kein Slave, kein Duplikum'
+                           : 'Neue Ära: Pläne laufen über Orbit V2 — Puls platziert, kein Slave, kein Duplikum'
       }
     }
     const admUsd = new Intl.NumberFormat('de-DE', { style:'currency', currency:'USD', minimumFractionDigits:0, maximumFractionDigits:0 })
@@ -11551,9 +11551,10 @@
         card.innerHTML =
           `<div class="kap-kopf"><span class="adm-dot" style="background:${farbe}"></span><span class="kap-name"></span>` +
           `<span class="kap-zeit">${escapeHtml(admKapZeit(k))}</span>` +
-          `<span class="chip ${k.hedge_aktiv ? 'chip-neutral' : 'chip-good'}">${k.hedge_aktiv ? 'mit Hedge' : 'ohne Hedge'}</span></div>` +
+          // hedge_aktiv=false heißt seit 30.09.2026 „ohne Dauer-Hedge" — gezielte Hedges (WD-Gegenhedge) gibt es dort sehr wohl
+          `<span class="chip ${k.hedge_aktiv ? 'chip-neutral' : 'chip-good'}"${k.hedge_aktiv ? '' : ' title="kein durchgehender Realmoney-Gegenhedge; gezielte Hedges wie der Winning-Days-Gegenhedge zählen dazu"'}>${k.hedge_aktiv ? 'mit Hedge' : 'ohne Dauer-Hedge'}</span></div>` +
           // Zuordnungsregel (24.09.2026, DB-Trigger kapitel_konto_vererbung): Buchungen erben das Kapitel des Kontos, Trades nach Weg
-          '<div class="kap-regel">Konten und ihre Buchungen zählen zum Kapitel des Kaufs · Trades zum Kapitel des Wegs (V2 = ohne Hedge)</div>' +
+          '<div class="kap-regel">Konten und ihre Buchungen zählen zum Kapitel des Kaufs · Trades zum Kapitel des Wegs (V2 = Neue Ära) · WD-Hedge nach Datum</div>' +
           (leer ? '<div class="kap-leer">Noch keine Buchungen in diesem Kapitel</div>' : '') +
           '<div class="kpis">' +
           kpi('Netto', leer ? '—' : sign(netto), 'Payouts − Kauf − Hedge', leer ? '' : `color:${col(netto)}`) +
@@ -11805,7 +11806,7 @@
       const k = admKfKapitel(liste || (admKapData?.kapitel || []))
       panel.hidden = !k
       const sm = $('adm-stat-msg')
-      if(sm){ sm.style.display = k ? 'none' : ''; if(!k) sm.textContent = 'Kein Kapitel ohne Hedge angelegt — die Statistik gilt für hedge-freie Kapitel.' }
+      if(sm){ sm.style.display = k ? 'none' : ''; if(!k) sm.textContent = 'Kein Kapitel „Neue Ära" angelegt — die Statistik gilt nur für Kapitel ohne Dauer-Hedge.' }
       if(!k) return
       const fx = Number(admKapData?.fx_usd_eur) || 0.85
       const farbe = admKapFarbe(k)
@@ -11823,7 +11824,7 @@
         ((rg && Number.isFinite(Number(rg.median)))
           ? `Reibung Hedge-Ära: gemessen Median ${admKfDe(Number(rg.median), 2)} € · Ø ${admKfDe(Number(rg.mean), 2)} € je Trade (${rg.n} saubere Trades, |Abw.| ≤ 100 €) → real Median ${admKfDe(Number(rg.real_median), 2)} € · Ø ${admKfDe(Number(rg.real_mean), 2)} € — realer Anteil ${admKfDe(100 * Number(rg.anteil || 0), 0)} % aus ${rg.n_entschieden || 0} entschiedenen Ketten-Trades (Fixgröße/Payout 100 %, Blow ohne Payout 0 %)`
           : 'Reibung: Gruppenwerte kommen mit dem nächsten Laden') +
-        '\nKonten und ihre Buchungen zählen zum Kapitel des Kaufs · Trades zum Kapitel des Wegs (V2 = ohne Hedge)'
+        '\nKonten und ihre Buchungen zählen zum Kapitel des Kaufs · Trades zum Kapitel des Wegs (V2 = Neue Ära) · WD-Hedge nach Datum'
       if(mod){
         mod.textContent = `Hedge € = −Master-P&L × Quote × Faktor ${admKfDe(admKf.param.faktor, 2)} − Reibung real` +
           (admKf.param.reibung !== null ? ` (Override ${admKfDe(admKf.param.reibung, 2)} €)` : (rg && Number.isFinite(Number(rg.real_mean)) ? ` (Ø ${admKfDe(Number(rg.real_mean), 2)} €)` : '')) +
@@ -36160,7 +36161,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.858'
+  const OS_TAB_BUILD = '2026-09-22.859'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -44941,7 +44942,9 @@
   // alles vor dem 24.09.2026 ist Hedge-Ära.
   const KAPITEL_FALLBACK = [
     { id:1, key:'hedge',      name:'Hedge-Ära',  von:'2026-04-29', bis:'2026-09-23', hedge:true,  farbe:'#7C3AED', beschreibung:'Gegenhedge mit Realmoney' },   // Werte = DB-Seed (sql/2026-09-24_kapitel.sql)
-    { id:2, key:'ohne_hedge', name:'Ohne Hedge', von:'2026-09-24', bis:null,         hedge:false, farbe:'#0E7A78', beschreibung:'Puls platziert nur, kein Gegenhedge' }
+    // Kapitel 2 heißt seit 30.09.2026 „Neue Ära" (Finn: in dieser Ära gibt es sehr wohl Hedges — WD-Gegenhedge, später Order-Paare);
+    // key 'ohne_hedge' und hedge:false bleiben, daran hängen Trigger und Backend
+    { id:2, key:'ohne_hedge', name:'Neue Ära',   von:'2026-09-24', bis:null,         hedge:false, farbe:'#0E7A78', beschreibung:'Ohne durchgehenden Realmoney-Gegenhedge; gezielte Hedges wie der Winning-Days-Gegenhedge gehören dazu' }
   ]
   let kapitelListe = KAPITEL_FALLBACK.slice()
   let kapitelAktiv = 'alle'   // 'alle' | id (number) — echter Startwert kommt gleich aus localStorage
@@ -44981,7 +44984,7 @@
   function kapitelKurz(k){
     if(k.kurz) return k.kurz
     if(k.key === 'hedge') return 'Hedge'
-    if(k.key === 'ohne_hedge') return 'Ohne'
+    if(k.key === 'ohne_hedge') return 'Neu'   // „Neue Ära" (30.09.2026), vorher „Ohne"
     const n = String(k.name || '').replace(/-Ära$/, '')
     return n.length > 8 ? n.split(/\s+/)[0] : n
   }
