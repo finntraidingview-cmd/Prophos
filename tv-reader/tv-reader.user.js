@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.9.0
+// @version      0.9.1
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt. Seit 0.5 auch die KONTO-ZUSAMMENFASSUNG (Balance, Today's P&L …) fuer den Orbit-V2-Rundgang.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -28,6 +28,9 @@
 // kommt ueber @updateURL/@downloadURL (GitHub-raw) von selbst.
 //
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
+//   0.9.1  01.10.2026  Puls-Chrome-Modus ignoriert eine alte Feed-Markierung (Live-Befund Moritz 01.10.2026: Badge „Feed-Tab ohne
+//                      Konto", obwohl Tradovate verbunden — der Tab stand nach dem Chrome-Start > 10 min ohne Konto, sessionStorage
+//                      'prophos_feed_tab' ueberlebt auch das Neuladen beim Umschalten). Im Puls-Chrome entscheidet nur das Konto.
 //   0.9.0  01.10.2026  Orbit V3 — Puls-Chrome-Modus (Finn: „im Chrome-Tab vom Puls-Bot das Tampermonkey-Script installieren,
 //                      was die Position ausliest, auch wenn der Tab im Hintergrund ist"). Einmal je Chrome-Profil im
 //                      Tampermonkey-Menue „Puls-Chrome (Orbit V3)" einschalten (GM_setValue, ueberlebt Neustarts). Dann liest
@@ -101,7 +104,7 @@
   // dreimal ein Update vermutet, das gar nicht aktiv war (31.08.2026), und von
   // aussen war das nur an FEHLENDEN Feldern zu erraten. Ab jetzt sagt jeder
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
-  const VERSION    = '0.9.0';
+  const VERSION    = '0.9.1';
   // 0.9.0: Puls-Chrome-Modus (Orbit V3) — je Chrome-Profil gespeichert, siehe CHANGELOG
   let PULS_CHROME = false;
   try { PULS_CHROME = GM_getValue('prophos_puls_chrome', false) === true; } catch (_) {}
@@ -323,7 +326,7 @@
     try { return sessionStorage.getItem('prophos_feed_tab') === '1'; } catch (_) { return false; }
   }
   function tabRolle(jetzt) {
-    if (feedMarkiert()) return 'feed';
+    if (feedMarkiert() && !PULS_CHROME) return 'feed';   // 0.9.1: im Puls-Chrome zaehlt nur das Konto
     return kontoAngemeldet(jetzt) ? 'broker' : 'feed';
   }
   function liesKonto() {
@@ -1454,7 +1457,7 @@
     // 0.8.8: Feed-Markierung pflegen, Login im Feed-Tab erkennen (Rolle bleibt dann 'feed')
     const titelJetzt = liesKursAusTitel();
     if (!PULS_CHROME) feedPflegen(Date.now(), titelJetzt);   // 0.9.0: Puls-Chrome wird nie Feed-Tab
-    const feedLogin = feedMarkiert() && kontoAngemeldet(Date.now()) ? kontoMerk.text : null;
+    const feedLogin = !PULS_CHROME && feedMarkiert() && kontoAngemeldet(Date.now()) ? kontoMerk.text : null;
     const rolle = tabRolle(Date.now());
     const positionen = rolle === 'broker' ? lesePositionen() : [];
     const blind = rolle === 'broker' ? blindGrund(positionen) : null;
