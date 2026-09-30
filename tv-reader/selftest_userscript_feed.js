@@ -17,10 +17,10 @@ var aus = [];
 var harness = "var store={}, sess={}; var sessionStorage={getItem:function(k){return k in sess?sess[k]:null},setItem:function(k,v){sess[k]=String(v)}};" +
   "var localStorage={getItem:function(k){return k in store?store[k]:null},setItem:function(k,v){store[k]=String(v)}};" +
   "var location={origin:'https://www.tradingview.com',pathname:'/chart/AbC123/',href:''};" +
-  "var kontoMerk={text:null,ts:0}; var kursMerk={}; var letzteEingabeMs=0; var EINGABE_RUHE_MS=120000;" +
+  "var PULS_CHROME=false; var kontoMerk={text:null,ts:0}; var kursMerk={}; var letzteEingabeMs=0; var EINGABE_RUHE_MS=120000;" +
   "var geplant=[]; function setTimeout(f){ geplant.push(f); }" + code +
   "; return {feedPflegen:feedPflegen, feedHeilen:feedHeilen, tabRolle:tabRolle, feedMarkiert:feedMarkiert, kontoAngemeldet:kontoAngemeldet," +
-  " sess:sess, store:store, kontoMerk:kontoMerk, kursMerk:kursMerk, location:location, geplant:geplant, setEingabe:function(t){letzteEingabeMs=t}};";
+  " sess:sess, store:store, kontoMerk:kontoMerk, kursMerk:kursMerk, location:location, geplant:geplant, setEingabe:function(t){letzteEingabeMs=t}, setPuls:function(b){PULS_CHROME=b}};";
 var h = new Function(harness)();
 function check(b, t) { aus.push((b ? "OK   " : "FEHL ") + t); }
 var T = Date.parse("2026-09-28T15:00:00Z");   // Montag, Markt offen
@@ -61,6 +61,12 @@ var h2 = new Function(harness)();
 h2.kontoMerk.text = "TDFYSL150800892182"; h2.kontoMerk.ts = T;
 h2.feedPflegen(T, mnq); h2.feedPflegen(T + 700000, mnq);
 check(!h2.feedMarkiert() && h2.tabRolle(T + 1000) === "broker" && !h2.feedHeilen(T + 900000, nq), "Handels-Tab mit Konto: nie markiert, nie geheilt");
+// 0.9.1 (Befund Moritz 01.10.2026): Puls-Chrome-Modus — alte Feed-Markierung zaehlt nicht, nur das Konto
+var h3 = new Function(harness)();
+h3.sess.prophos_feed_tab = "1"; h3.kontoMerk.text = "TDFYTEST0000000001"; h3.kontoMerk.ts = T;
+check(h3.tabRolle(T + 1000) === "feed", "ohne Puls-Modus: markierter Tab bleibt feed (wie 0.8.8)");
+h3.setPuls(true);
+check(h3.tabRolle(T + 1000) === "broker", "Puls-Modus: markierter Tab mit Konto → broker");
 var fehl = aus.filter(function (z) { return z.indexOf("FEHL") === 0; }).length;
 return aus.join("\n") + "\n" + (fehl ? "FEHLER (" + fehl + ")" : "alle Tests bestanden");
 }
