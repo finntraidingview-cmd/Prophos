@@ -1886,6 +1886,7 @@ def main():
     results.append(test_tsx_k0())
     results.append(test_tsx_k1_vorbau())
     results.append(test_tsx_k2())
+    results.append(test_tsx_k3a())
     results.append(test_puls_win_maus())
     results.append(test_puls_nie_chrome_schliessen())
     results.append(test_tsx_konto_abgekuerzt())
@@ -3671,10 +3672,11 @@ def test_tsx_k0():
     # Riegel in den drei Modi
     alt_weg, alt_lesen, alt_inv, alt_k1, alt_k1_an = (ob.tsx_weg_lauf, ob.modus_tsxlesen, ob.modus_tsxinventar_cdp, ob.modus_tsxlesen_cdp,
                                                       ob.TSX_K1_AKTIV)
+    alt_k3_an = ob.TSX_K3_AKTIV
     auf = []
     try:
         ob.tsx_weg_lauf = lambda: "cdp"
-        ob.modus_tsxlesen_cdp = lambda c: auf.append(("k1", c))     # der echte K1-Lauf startet Chrome — hier nur nachgebildet
+        ob.modus_tsxlesen_cdp = lambda c, **kw: auf.append(("k3", c, kw.get("order")) if kw.get("order") else ("k1", c))   # echter Lauf startet Chrome
         o1 = io.StringIO()
         with contextlib.redirect_stdout(o1):
             ob.TSX_K1_AKTIV = False
@@ -3686,7 +3688,16 @@ def test_tsx_k0():
             ob.modus_tsxorder({"ext_id": "150KTC-SKU-V2-000000-20000000", "symbol": "MNQ", "richtung": "buy", "volumen": 1, "tp_usd": 40, "scharf": True})
         o3 = io.StringIO()
         with contextlib.redirect_stdout(o3):
+            ob.TSX_K3_AKTIV = False
             ob.modus_tsxorder({"ext_id": "150KTC-SKU-V2-000000-20000000", "symbol": "MNQ", "richtung": "buy", "volumen": 1, "tp_usd": 40})
+        ob.TSX_K3_AKTIV = True                  # K3a (01.10.2026): die Probe läuft über das Puls-Chrome — auch ohne TP (SL/TP von Hand)
+        ob.modus_tsxorder({"ext_id": "150KTC-SKU-V2-000000-20000000", "symbol": "MNQ", "richtung": "buy", "volumen": 1, "tp_usd": None})
+        ob.modus_tsxorder({"ext_id": "150KTC-SKU-V2-000000-20000000", "symbol": "NQZ6", "richtung": "sell", "volumen": 3, "tp_usd": 90})
+        o3b = io.StringIO()
+        with contextlib.redirect_stdout(o3b):
+            ob.TSX_K1_AKTIV = False             # K1-Notschalter hält auch die Probe auf
+            ob.modus_tsxorder({"ext_id": "150KTC-SKU-V2-000000-20000000", "symbol": "MNQ", "richtung": "buy", "volumen": 1})
+        ob.TSX_K1_AKTIV = True
         ob.modus_tsxinventar_cdp = lambda c: auf.append(("inv", c))
         ob.modus_tsxinventar({"x": 1})
         ob.tsx_weg_lauf = lambda: "uia"
@@ -3695,11 +3706,20 @@ def test_tsx_k0():
     finally:
         ob.tsx_weg_lauf, ob.modus_tsxlesen, ob.modus_tsxinventar_cdp, ob.modus_tsxlesen_cdp, ob.TSX_K1_AKTIV = (alt_weg, alt_lesen, alt_inv,
                                                                                                              alt_k1, alt_k1_an)
+        ob.TSX_K3_AKTIV = alt_k3_an
     j1, j2, j3 = (json.loads(o.getvalue()) for o in (o1, o2, o3))
     chk(j1["code"] == "cdp_folgt" and j1["etappe"] == "K1", f"tsxlesen auf cdp-PC, K1 aus → cdp_folgt K1 ({j1})")
     chk(("k1", {"konto": "EXPRESS-V2-000000-10000001"}) in auf, "tsxlesen auf cdp-PC, K1 an → K1-Weg (nie UIA im Alltags-Chrome)")
     chk(j2["code"] == "cdp_folgt" and j2["etappe"] == "K4" and j2["gesendet"] is False, f"tsxorder scharf → K4, nichts gesendet ({j2})")
-    chk(j3["etappe"] == "K3", "tsxorder Probe → K3")
+    chk(j3["etappe"] == "K3", "tsxorder Probe, K3 aus → cdp_folgt K3")
+    k3 = [a for a in auf if a[0] == "k3"]
+    chk(len(k3) == 2 and k3[0][1] == {"konto": "150KTC-SKU-V2-000000-20000000", "firma": None}
+        and {k_: k3[0][2].get(k_) for k_ in ("richtung", "menge", "wurzel", "ext", "scharf", "brackets")}
+        == {"richtung": "buy", "menge": 1, "wurzel": "MNQ", "ext": "150KTC-SKU-V2-000000-20000000", "scharf": False, "brackets": None}
+        and {k_: k3[1][2].get(k_) for k_ in ("richtung", "menge", "wurzel", "scharf")} == {"richtung": "sell", "menge": 3, "wurzel": "NQ", "scharf": False},
+        f"tsxorder Probe, K3 an → K3a-Weg mit genau den Plan-Werten (buy 1 MNQ ohne TP; sell 3 NQ) ({[a[2] for a in k3]})")
+    j3b = json.loads(o3b.getvalue())
+    chk(j3b["code"] == "cdp_folgt" and j3b["etappe"] == "K3", "K1 aus, K3 an → Probe antwortet cdp_folgt (Notschalter hält die Kette auf)")
     chk(("inv", {"x": 1}) in auf, "tsxinventar auf cdp-PC → CDP-Inventar (K0)")
     chk(any(a[0] == "lesen" and a[2] == "uia" for a in auf), "uia-PC: tsxorder geht mit bestimmtem Weg in den alten Lese-Zweig (bytegleich)")
     q_o = _i.getsource(ob.modus_tsxorder)
@@ -4617,6 +4637,341 @@ def test_tsx_k2():
     if ok:
         print("✓ TSX-K2: Konto im Dropdown wechseln (Treffer, kein Treffer, doppelt, bleibt offen, Ineligible, fremd offen, verdeckt), "
               "Kopfzeile frisch, ganze Kette in einem Lauf (kalt, ohne Tab, ausgeloggt, falsches Konto), Felder, Vorzeichen")
+    return ok
+
+
+def test_tsx_k3a():
+    """K3a (01.10.2026, Finn: „Contract reinklicken, MNQ oder NQ auswählen; # of Contracts reinklicken, Zahl weg, eigentliche Zahl"):
+    Ticket über das Puls-Chrome füllen — Probe, NIE ein Order-Knopf. Nachbau der Order-Karte (Vorschläge MNQZ26/NQZ26/MNQH27, Menge
+    1/3/15), echte Regeln + echte Schritte + echte Kette; menschliche Pausen (1–2 s, Hover 0,3–0,8 s) an der echten Sitzungs-Klasse."""
+    import order_bot as ob
+    import inspect as _i
+    import threading as _th
+    import io
+    import contextlib
+    import json
+    import os
+    import re
+    ok = True
+
+    def chk(bed, text):
+        nonlocal ok
+        if not bed:
+            print("  ✗ TSX-K3a: " + text)
+            ok = False
+    E = "EXPRESS-V2-000000-30000003"
+    # ── reine Regeln ─────────────────────────────────────────────────────────────────────────────────────────
+    import calendar as _cal
+    ts = lambda y, m, d: _cal.timegm((y, m, d, 12, 0, 0))
+    chk(ob.tsx_frontmonat(ts(2026, 10, 1)) == "Z26" and ob.tsx_frontmonat(ts(2026, 12, 9)) == "Z26"
+        and ob.tsx_frontmonat(ts(2026, 12, 11)) == "H27" and ob.tsx_frontmonat(ts(2026, 9, 9)) == "U26"
+        and ob.tsx_frontmonat(ts(2026, 9, 11)) == "Z26", "Front-Monat wie das Frontend: Roll 8 Tage vor dem 3. Freitag, zweistelliges Jahr")
+    V = [{"code": "MNQZ26", "rect": [10, 130, 400, 40], "code_rect": [40, 134, 60, 16]},
+         {"code": "NQZ26", "rect": [10, 170, 400, 40], "code_rect": [40, 174, 50, 16]},
+         {"code": "MNQH27", "rect": [10, 210, 400, 40], "code_rect": [40, 214, 60, 16]}]
+    z = ob.tsx_k3_contract_ziel
+    chk(z(V, "NQ", ts(2026, 10, 1))[0]["code"] == "NQZ26" and z(V, "MNQ", ts(2026, 10, 1))[0]["code"] == "MNQZ26"
+        and z(V, "MNQ", ts(2026, 12, 11))[0]["code"] == "MNQH27", "MNQ ≠ NQ; zwei MNQ-Monate → Front-Monat")
+    chk(z(V[1:2], "MNQ")[0] is None and z([], "NQ")[0] is None and z(V[:1], "MNQ")[0]["code"] == "MNQZ26"
+        and z([{"code": "MNQZ26X"}], "MNQ")[0] is None, "kein passender Code → None (nie NQZ26 für MNQ, nie Teilstring)")
+    chk(z([V[0], {"code": "MNQU26"}], "MNQ", ts(2026, 12, 11))[0] is None, "zwei Monate ohne den Front-Monat → None")
+    mp = ob.tsx_k3_menge_passt
+    chk(mp("1", 1) and mp(" 15 ", 15) and mp("3", 3) and not mp("3", 1) and not mp("", 1) and not mp("1.5", 1) and not mp(None, 1)
+        and not mp("15a", 15), "Menge: genau die Zahl, sonst nie")
+    b0, f0 = ob.tsx_order_befehl({"ext_id": E, "symbol": "MNQ", "richtung": "buy", "volumen": 1}, tp_pflicht=False)
+    b1, f1 = ob.tsx_order_befehl({"ext_id": E, "symbol": "MNQ", "richtung": "buy", "volumen": 1})
+    chk(b0 and not f0 and b0["brackets"] is None and b1 is None and "TP" in f1, "ohne TP: K3a-Befehl ok (brackets None), UIA-Befehl verlangt TP")
+
+    def seite(**kw):
+        z_ = dict(konto_ok=True, flach=True, ordertyp="Market", contract="MNQZ26", offen=False, menge="3", popups=None)
+        z_.update(kw)
+        return z_
+
+    def stand_aus(zz, typed="", fokus=None):
+        vorsch = [dict(v, text=v["code"] + " · Nasdaq", zu={"disabled": False, "verdeckt": False})
+                  for v in zz.get("liste", V) if zz["offen"] and typed.upper() in str(v["code"])]    # MUI: „enthält" („nq" → MNQZ26 + NQZ26)
+        n = zz["menge"] if str(zz["menge"]).isdigit() else "0"
+        return {"v": zz.get("v", "tsx-0.5.0"),
+                "konto": {"aktiv": f"$150K Express|{E if zz['konto_ok'] else 'EXPRESS-V2-000000-39999999'}",
+                          "kontonr": E if zz["konto_ok"] else "EXPRESS-V2-000000-39999999", "abgekuerzt": False, "liste_offen": False, "liste": []},
+                "kopf": {"balance": {"text": "$0.00", "wert": 0.0}, "mll": {"text": "$-4,500.00", "wert": -4500.0},
+                         "rpl": {"text": "$0.00", "wert": 0.0}, "upl": {"text": "$0.00", "wert": 0.0}, "balance_relativ": True},
+                "positionen": [], "positionen_sichtbar": True, "flach": True if zz["flach"] else None, "popups": zz["popups"] or [],
+                "toasts": {"gruppen": [], "meldungen": []},
+                "ticket": None if zz.get("ohne_ticket") else dict(
+                    {"anzeigen": [{"testid": "order-card-display-value-no-position", "text": "No Active Position"}]},
+                    **({} if zz.get("alt") else {
+                        "k3": True,
+                        "contract": {"wert": zz["contract"] if not zz["offen"] else typed, "rect": [1582, 92, 376, 28], "offen": zz["offen"],
+                                     "fokus": fokus == "contract", "zu": {"disabled": False, "verdeckt": False}},
+                        "vorschlaege": vorsch,
+                        "menge": {"wert": zz["menge"], "rect": [1567, 188, 470, 40], "fokus": fokus == "menge",
+                                  "zu": {"disabled": False, "verdeckt": False}},
+                        "ordertyp": {"text": zz["ordertyp"], "rect": [1567, 138, 470, 40]},
+                        "kauf": {"text": zz.get("kauf_text") or f"Buy +{n} @ Market", "rect": [1675, 416, 123, 26],
+                                 "zu": {"disabled": bool(zz.get("knopf_gesperrt")), "verdeckt": False}},
+                        "verkauf": {"text": zz.get("verkauf_text") or f"Sell -{n} @ Market", "rect": [1804, 416, 124, 26],
+                                    "zu": {"disabled": bool(zz.get("knopf_gesperrt")), "verdeckt": False}}}))}
+
+    class _Karte:
+        """Nachbau der TopstepX-Order-Karte: Klick ins Feld = Fokus (Contract-Feld öffnet die Liste), Strg+A markiert, Rücktaste
+        leert, Tippen ersetzt/füllt, Klick auf einen Vorschlag wählt ihn, Esc schließt die Liste. Klick auf einen Order-Knopf = Fehler."""
+        def __init__(self, zz):
+            self.z, self.fokus, self.markiert, self.typed = zz, None, False, ""
+            self.klicks, self.pruef, self.tasten, self.rects = [], [], [], []
+
+        def stand(self, opts=None):
+            return stand_aus(self.z, self.typed, self.fokus)
+
+        def klick(self, r, name, toast_ok=False, pruef=None):
+            self.klicks.append(name)
+            self.pruef.append(pruef)
+            self.rects.append(list(r))
+            ereignisse.append(("klick", name))
+            if name == "Contract-Feld":
+                self.fokus, self.z["offen"], self.typed = (None if self.z.get("kein_fokus") else "contract"), True, self.z["contract"]
+            elif name.startswith("Contract "):
+                if self.z.get("klick_wirkt", True):
+                    self.z["contract"], self.z["offen"], self.fokus = name.split(" ", 1)[1], bool(self.z.get("liste_bleibt_offen")), None
+                    self.typed = self.z["contract"]          # das Feld zeigt den gewählten Code — auch wenn die Liste offen bleibt
+            elif name == "# of Contracts":
+                self.fokus = "menge"
+            else:
+                raise AssertionError("unerwarteter Klick " + name)
+            return True
+
+        def fokus_im(self, r, name, versuche=3):
+            # am Rechteck gemessen: nur das Feld, das den Fokus hat, überlappt
+            feld = {"contract": [1582, 92, 376, 28], "menge": [1567, 188, 470, 40]}.get(self.fokus)
+            return bool(feld) and not (r[0] + r[2] <= feld[0] or feld[0] + feld[2] <= r[0] or r[1] + r[3] <= feld[1] or feld[1] + feld[3] <= r[1])
+
+        def taste(self, k, modifiers=0):
+            self.tasten.append(("Strg+" if modifiers == 2 else "") + k)
+            if k == "a" and modifiers == 2:
+                self.markiert = True
+                if self.z.get("fokus_weg_nach_strg_a"):
+                    self.fokus = None
+            elif k == "Backspace" and self.fokus == "menge" and self.markiert:
+                self.z["menge"], self.markiert = "", False
+            elif k == "Escape":
+                self.z["offen"] = False
+
+        def tippen(self, t):
+            self.tasten.append("tippe " + t)
+            if self.fokus == "contract":
+                self.typed = t if self.markiert else self.typed + t
+                self.markiert = False
+            elif self.fokus == "menge" and not self.z.get("menge_klemmt"):
+                self.z["menge"] = t if self.markiert else str(self.z["menge"]) + t
+                self.markiert = False
+
+    gew, ereignisse = [], []
+    alt_w, alt_fm, alt_diag = ob._warte, ob.tsx_frontmonat, ob._puls_diagnose_senden
+
+    def probe(zz, richtung="buy", menge=1, wurzel="MNQ"):
+        k = _Karte(zz)
+        out = {}
+        res = {"balance": 0.0, "rpl": 0.0, "upl": 0.0}
+        t = []
+
+        def raus(code, msg, schritt, ok=False, **ex):
+            out.update(code=code, msg=msg, schritt=schritt, ok=ok)
+            return out
+        ob._tsx_k3_probe(k, k.stand(), {"richtung": richtung, "menge": menge, "wurzel": wurzel, "ext": E, "scharf": False}, res, t, raus)
+        return out, k, res, t
+    try:
+        ob._warte = lambda a, b: (gew.append((a, b)), ereignisse.append(("warte", (a, b))))
+        ob.tsx_frontmonat = lambda jetzt=None: "Z26"
+        ob._puls_diagnose_senden = lambda *a, **k: None
+        o, k, res, t = probe(seite())
+        chk(o["ok"] and o["schritt"] == "probe" and o["msg"].startswith("Ticket bereit (nicht gesendet): Buy +1 @ Market · MNQZ26 · Konto " + E),
+            f"MNQ BUY 1 aus Menge 3 → Ticket bereit ({o})")
+        chk(k.klicks == ["Contract-Feld", "Contract MNQZ26", "# of Contracts"], f"genau drei Klicks, kein Order-Knopf ({k.klicks})")
+        chk(all(p_ and p_["tabu"] == ob.TSX_K0_TABU.pattern for p_ in k.pruef) and k.pruef[1]["text"] == "mnqz26"
+            and k.pruef[1]["rect"] == V[0]["rect"], "jeder Druck mit Ziel-Beweis + Order-Tabu; Vorschlag: Klick im Code, Beweis gegen die Zeile")
+        chk(k.tasten == ["Strg+a", "tippe mnq", "Strg+a", "Backspace", "tippe 1"] and "Tab" not in k.tasten and "Enter" not in k.tasten,
+            f"Tastatur: Strg+A + Wurzel; Strg+A, Rücktaste, Menge — nie Tab/Enter ({k.tasten})")
+        chk(res.get("tv_symbol") == "MNQZ26" and res.get("balance_start") == 0.0, "Contract + Start-Balance in der Antwort")
+        chk(k.rects[1] == V[0]["code_rect"] and k.pruef[1].get("wort") == "mnqz26",
+            "Vorschlag: Klick GENAU im Code-Text, Beweis verlangt den Code als ganzes Wort am Punkt (nqz26 ≠ mnqz26)")
+        vor = [ereignisse[i - 1] for i, e_ in enumerate(ereignisse) if e_[0] == "klick" and i > 0]
+        chk(vor[0] == ("warte", ob.TSX_SCHRITT_PAUSE) and vor[2] == ("warte", ob.TSX_SCHRITT_PAUSE) and vor[1] == ("warte", (0.6, 0.6)),
+            f"Pause steht direkt VOR jedem Klick (Feld 1–2 s, Vorschlag 0,6–1,2 s, Menge 1–2 s) ({vor})")
+        chk(sum(1 for g in gew if g == ob.TSX_SCHRITT_PAUSE) >= 3 and all(b_ > 0 for a_, b_ in gew),
+            f"menschliche Pausen 1–2 s zwischen den Schritten, alle mit Streuung ({gew[:6]}…)")
+        o, k, _, _ = probe(seite(contract="MNQZ26", menge="3"), richtung="sell", menge=15, wurzel="NQ")
+        chk(o["ok"] and "Sell -15 @ Market · NQZ26" in o["msg"] and k.klicks[1] == "Contract NQZ26", f"NQ SELL 15 → NQZ26, Menge 15 ({o})")
+        o, k, _, _ = probe(seite(menge="3"), menge=3)
+        chk(o["ok"] and k.klicks == ["Contract-Feld", "Contract MNQZ26"], "Menge steht schon auf 3 → Feld nicht angefasst")
+        o, k, _, _ = probe(seite(liste=V[:1]), wurzel="NQ", richtung="sell")
+        chk(not o["ok"] and o["code"] == "contract" and "Contract MNQZ26" not in k.klicks and "Escape" in k.tasten
+            and "# of Contracts" not in k.klicks and "MNQZ26" in o["msg"],
+            f"NQ-Plan, „nq“ zeigt nur MNQZ26 (MUI „enthält“) → MNQZ26 NIE gewählt, Esc ({o})")
+        o, k, _, _ = probe(seite(liste=[dict(V[0], code_rect=None)]))
+        chk(not o["ok"] and o["code"] == "contract" and "Contract MNQZ26" not in k.klicks,
+            "Vorschlag ohne Code-Text (code_rect fehlt) → nie die Zeilenmitte klicken (Stern), ehrlich raus")
+        o, k, _, _ = probe(seite(kein_fokus=True))
+        chk(not o["ok"] and o["code"] == "contract" and not any(t_.startswith("tippe") for t_ in k.tasten) and "Strg+a" not in k.tasten,
+            f"Contract-Feld ohne Fokus → keine einzige Taste außer Esc ({k.tasten})")
+        o, k, _, _ = probe(seite(fokus_weg_nach_strg_a=True))
+        chk(not o["ok"] and o["code"] == "contract" and not any(t_.startswith("tippe") for t_ in k.tasten),
+            "Fokus nach Strg+A verloren → nichts getippt")
+        o, k, _, _ = probe(seite(liste_bleibt_offen=True))
+        chk(not o["ok"] and o["code"] == "contract" and "# of Contracts" not in k.klicks and "Escape" in k.tasten,
+            "Wert steht, aber die Liste bleibt offen → nicht als gewählt gezählt, Esc, Menge nie angefasst")
+        o, k, _, _ = probe(seite(menge_klemmt=True))
+        chk(not o["ok"] and o["code"] == "menge" and k.klicks.count("# of Contracts") == 2, "Menge wird nicht übernommen → zwei Versuche, dann ehrlich raus")
+        o, k, _, _ = probe(seite(kauf_text="Buy +3 @ Market"))
+        chk(not o["ok"] and o["code"] == "vorpruefung" and "Knopf zeigt 'Buy +3 @ Market'" in o["msg"],
+            "Knopf zeigt noch die alte Menge → Probe nicht bereit (Knopftext unabhängig vom Feld geprüft)")
+        o, k, _, _ = probe(seite(kauf_text="Market Closed"))
+        chk(o["ok"] and "Markt zu" in o["msg"], "Markt zu (Knopf „Market Closed“) → Probe bis hierher bestanden, mit Hinweis")
+        o, k, _, _ = probe(seite(knopf_gesperrt=True))
+        chk(not o["ok"] and "gesperrt" in o["msg"], "Order-Knopf gesperrt → nicht bereit")
+        o, k, _, _ = probe(seite(klick_wirkt=False))
+        chk(not o["ok"] and o["code"] == "contract" and k.klicks.count("Contract-Feld") == 2, "Vorschlag wirkt nicht → zweiter Versuch, dann ehrlich raus")
+        o, k, _, _ = probe(seite(ordertyp="Limit"))
+        chk(not o["ok"] and o["code"] == "ordertyp" and not k.klicks, "Order-Typ nicht Market → nichts angefasst")
+        o, k, _, _ = probe(seite(alt=True))
+        chk(not o["ok"] and o["code"] == "anker_fehlt" and not k.klicks, "alte augen_tsx.js ohne K3-Felder → nichts angefasst")
+        o, k, _, _ = probe(seite(flach=False))
+        chk(not o["ok"] and o["code"] == "vorpruefung" and "flach" in o["msg"], f"nicht flach → Probe sagt es ehrlich ({o})")
+        o, k, _, _ = probe(seite(konto_ok=False))
+        chk(not o["ok"] and o["code"] == "vorpruefung" and "Konto" in o["msg"], "falsches Konto im Blick vor dem Urteil → nicht bereit")
+        vk = ob.tsx_k3_vor_klick
+        bf = {"richtung": "buy", "menge": 1}
+        s_ok = stand_aus(dict(seite(menge="1")), "", None)
+        chk(vk(s_ok, bf, "MNQZ26", E)[0] and not vk(s_ok, bf, "NQZ26", E)[0], "Urteil: Contract muss genau der gewählte Code sein")
+        s_pop = dict(s_ok, popups=[{"titel": "Session disconnected"}])
+        s_off = stand_aus(dict(seite(menge="1", contract="MNQZ26", offen=True)), "MNQZ26", None)
+        chk(any("Dialog" in f_ for f_ in vk(s_pop, bf, "MNQZ26", E)[1]) and any("Liste noch offen" in f_ for f_ in vk(s_off, bf, "MNQZ26", E)[1])
+            and not vk(dict(s_ok, ticket=dict(s_ok["ticket"], ordertyp={"text": "Limit"})), bf, "MNQZ26", E)[0]
+            and not vk(dict(s_ok, ticket=dict(s_ok["ticket"], verkauf=None)), {"richtung": "sell", "menge": 1}, "MNQZ26", E)[0],
+            "Urteil: Dialog, offene Contract-Liste, Order-Typ Limit, fehlender Knopf → nicht bereit")
+    finally:
+        ob._warte, ob.tsx_frontmonat, ob._puls_diagnose_senden = alt_w, alt_fm, alt_diag
+    # nie ein Order-Knopf im K3a-Code (Quelltext-Riegel)
+    q = "".join(_i.getsource(f) for f in (ob._tsx_k3_probe, ob._tsx_k3_ticket, ob._tsx_k3_contract, ob._tsx_k3_menge))
+    chk(q.count("s.klick(") == 3 and q.count("TSX_K0_TABU.pattern") == 3 and "_puls_ergebnis_senden" not in q
+        and not re.search(r"gesendet[\"']?\]?\s*[=:]\s*True|gesendet=True", q) and "kauf" not in q.replace("verkauf", ""),
+        "K3a-Quelltext: genau drei Klicks (Feld, Vorschlag, Menge), alle mit Order-Tabu, nie gesendet=True, kein puls_ergebnis")
+
+    # ── ganze Kette: modus_tsxlesen_cdp mit order (Chrome/Tab/Login nachgebildet) ─────────────────────────────────────────
+    zz = seite(menge="3")
+    karte = _Karte(zz)
+
+    class _WsK:
+        def rufe(self, m, par=None, timeout=10.0):
+            return {}
+    karte.ws, karte.lese_js, karte.zu, karte._win_vorn = _WsK(), (lambda a, timeout=8: None), (lambda: None), (lambda: (1, ""))
+    timer = []
+
+    class _Timer:
+        def __init__(self, sek, f):
+            timer.append(sek)
+            self.daemon = False
+
+        def start(self):
+            pass
+
+        def cancel(self):
+            pass
+    namen = ("_puls_chrome_sicher", "_tsx_sitzung_waehlen", "_handlauf_aktiv", "_handlauf_setzen", "_puls_diagnose_senden", "_warte",
+             "_WIN_EINGABE", "tsx_frisch_urteil", "_tsx_bereit_warten", "tsx_frontmonat", "puls_bot_stand")
+    alt_m = {n: getattr(ob, n) for n in namen}
+    alt_timer = _th.Timer
+    try:
+        ob._puls_chrome_sicher = lambda trail, url=None: True
+        ob._tsx_sitzung_waehlen = lambda trail, sitz=None: (sitz.__setitem__(0, karte) if sitz is not None else None, (karte, True))[1]
+        ob._handlauf_aktiv = lambda: False
+        ob._handlauf_setzen = lambda an: None
+        ob._puls_diagnose_senden = lambda *a, **k: None
+        ob._warte = lambda a, b: None
+        ob._WIN_EINGABE = False
+        ob.tsx_frisch_urteil = lambda v: (True, "frisch (Test)")
+        ob._tsx_bereit_warten = lambda s_, trail, sek=None: (s_.stand(), True)
+        ob.tsx_frontmonat = lambda jetzt=None: "Z26"
+        ob.puls_bot_stand = lambda: "Bot-Stand (Test)"
+        _th.Timer = _Timer
+        o_ = io.StringIO()
+        with contextlib.redirect_stdout(o_):
+            ob.modus_tsxlesen_cdp({"konto": E}, order={"richtung": "buy", "menge": 1, "wurzel": "MNQ", "ext": E, "scharf": False}, order_cmd={})
+        j = json.loads(o_.getvalue().strip().splitlines()[-1])
+    finally:
+        for n_, v_ in alt_m.items():
+            setattr(ob, n_, v_)
+        _th.Timer = alt_timer
+    chk(j.get("ok") is True and j.get("gesendet") is False and j.get("retry_ok") is True and j.get("etappe") == "K3" and j.get("schritt") == "probe"
+        and j.get("balance_start") == 0.0 and j.get("tv_symbol") == "MNQZ26" and j.get("konto_aktiv") == E and j.get("summary"),
+        f"ganze Kette: Probe-Antwort im tsx-konto-Vertrag ({ {k_: j.get(k_) for k_ in ('ok', 'code', 'schritt', 'gesendet', 'retry_ok', 'etappe')} })")
+    chk(timer == [ob.TSX_K3_WACHHUND_S] and ob.TSX_K3_WACHHUND_S < 170, "Wachhund der Probe unter der 170-s-Grenze des Panels")
+    chk(karte.klicks == ["Contract-Feld", "Contract MNQZ26", "# of Contracts"], f"Kette klickt nur das Ticket ({karte.klicks})")
+
+    # ── Hover-Pause an der echten Sitzungs-Klasse (Windows nachgebildet) ─────────────────────────────────────────────────
+    alt = {n: getattr(ob, n) for n in ("_WIN_EINGABE", "_puls_fenster_liste", "_puls_chrome_browser_pid", "_win_vordergrund", "_win_minimiert",
+                                       "_win_zeigen", "_win_nach_vorn", "_klient_rechteck", "_maus_fahren", "_klick_absolut", "_dpi_bewusst",
+                                       "_warte", "_win_root_am_punkt")}
+    zs = {"proben": 0, "passt": [True, True], "klicks": [], "warte": []}
+    f1 = {"hwnd": 11, "text": "TopstepX - Google Chrome", "klasse": "Chrome_WidgetWin_1", "sichtbar": True}
+
+    class _Ws2:
+        def rufe(self, m, par=None, timeout=10.0):
+            if m != "Runtime.evaluate":
+                return {}
+            a = (par or {}).get("expression", "")
+            if a == ob.WIN_GEO_JS:
+                return {"result": {"value": {"innerWidth": 2100, "innerHeight": 900, "dpr": 1, "titel": "TopstepX"}}}
+            if "elementFromPoint" in a:
+                i_ = min(zs["proben"], len(zs["passt"]) - 1)
+                zs["proben"] += 1
+                return {"result": {"value": {"hover": True, "passt": zs["passt"][i_], "was": "x"}}}
+            return {"result": {"value": None}}
+    try:
+        ob._WIN_EINGABE = True
+        ob._puls_fenster_liste = lambda pid: [f1]
+        ob._puls_chrome_browser_pid = lambda: 4711
+        ob._win_vordergrund = lambda: 11
+        ob._win_minimiert = lambda h: False
+        ob._win_zeigen = lambda h, b: None
+        ob._win_nach_vorn = lambda h: None
+        ob._klient_rechteck = lambda h: (0, 87, 2100, 900)          # TopstepX-Fenster breit (Order-Karte rechts bei x ≈ 1560–2040)
+        ob._maus_fahren = lambda x, y, schritte=8: None
+        ob._klick_absolut = lambda x, y, taste="links", doppel=False: (zs["klicks"].append((x, y)), True)[1]
+        ob._dpi_bewusst = lambda: True
+        ob._warte = lambda a, b: zs["warte"].append((a, b))
+        ob._win_root_am_punkt = lambda x, y: (11, "TopstepX")
+        s_ = ob._AugenSitzung.__new__(ob._AugenSitzung)
+        s_.trail, s_.ws, s_.js, s_.maus, s_.target_id, s_.tv_riegel = [], _Ws2(), "/* augen_tsx.js */", (0.0, 0.0), "T", False
+        s_.hover_pause = ob.TSX_HOVER_PAUSE
+        pr = {"rect": [1582, 92, 376, 28], "text": "", "aria": "", "tabu": ob.TSX_K0_TABU.pattern}
+        chk(s_.klick([1582, 92, 376, 28], "Contract-Feld", pruef=pr) is True and len(zs["klicks"]) == 1 and ob.TSX_HOVER_PAUSE in zs["warte"]
+            and zs["proben"] == 2, f"TopstepX: Hover-Pause 0,3–0,8 s vor dem Druck, Ziel danach neu bewiesen ({zs['proben']} Proben)")
+        zs.update(proben=0, passt=[True, False], warte=[])
+        chk(s_.klick([1582, 92, 376, 28], "Contract-Feld", pruef=pr) is False and len(zs["klicks"]) == 1
+            and "nach der Hover-Pause" in s_.trail[-1], "Ziel nach der Hover-Pause weg → KEIN Druck")
+        zs.update(proben=0, passt=[True, True], warte=[])
+        s_.hover_pause = None                                         # Orbit-Sitzung (augen.js): unverändert
+        chk(s_.klick([1582, 92, 376, 28], "Knopf", pruef=pr) is True and ob.TSX_HOVER_PAUSE not in zs["warte"] and zs["proben"] == 1,
+            "Orbit-Sitzung ohne hover_pause: keine Pause, eine Probe wie bisher")
+    finally:
+        for n_, v_ in alt.items():
+            setattr(ob, n_, v_)
+    q_k2 = _i.getsource(ob._tsx_konto_sichern)
+    q_lg = _i.getsource(ob._tsx_cdp_login)
+    vor_druck = re.compile(r"_tsx_pause\(\)[^\n]*\n\s*if not s\.klick\(")
+    chk(len(vor_druck.findall(q_k2)) == 2 and len(vor_druck.findall(q_lg)) == 1 and ob.TSX_SCHRITT_PAUSE == (1.0, 1.0)
+        and ob.TSX_HOVER_PAUSE == (0.3, 0.5), "K2 (Auslöser, Zeile) und Login: 1–2 s Pause vor dem Druck")
+    chk("hover_pause = TSX_HOVER_PAUSE if js_datei == \"augen_tsx.js\"" in _i.getsource(ob._AugenSitzung.__init__),
+        "Hover-Pause nur für die TopstepX-Sitzung (augen_tsx.js)")
+    js = open(os.path.join(os.path.dirname(os.path.abspath(ob.__file__)), "augen_tsx.js"), encoding="utf-8").read()
+    chk("var VERSION = 'tsx-0.5.0'" in js and "contract-selector-input-select-contract" in js and "order-card-input-field-contracts" in js
+        and "order-card-click-button-buy" in js and "k3: true" in js
+        and "filter(function (z) { return RX_CODE.test(z); })" in js    # DOM-Test 01.10.2026: vor dem Code steht „■" — nie nur Zeile 1
+        and ".click(" not in js.split("function contractLesen")[1].split("function ticketLesen")[0],
+        "augen_tsx.js tsx-0.5.0: Contract/Menge/Knöpfe gelesen, nur lesend")
+    if ok:
+        print("✓ TSX-K3a: Contract per Tastatur + Vorschlag (MNQ ≠ NQ, Front-Monat), Menge ersetzen + Rücklesung, Probe ohne Order-Knopf, "
+              "menschliche Pausen, Kette im tsx-konto-Vertrag")
     return ok
 
 

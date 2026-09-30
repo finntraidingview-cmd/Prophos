@@ -36852,7 +36852,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.911'
+  const OS_TAB_BUILD = '2026-09-22.912'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -37208,13 +37208,17 @@
           }catch(e){ r0 = { ok: false, msg: String((e && e.message) || e) } }
           const b0 = tvBalanceAus(r0 && r0.summary), pos = Array.isArray(r0 && r0.positionen) ? r0.positionen.length : null
           const probe = !!(r0 && !r0._nurLesen)
+          // K3a (01.10.2026, Gegenprüfung): bei einer echten Probe zählt NUR r0.ok — die Antwort trägt die Balance aus der Lesung auch dann,
+          // wenn danach das Ticket scheitert (Contract, Menge, nicht flach …); „Balance da" gilt nur beim reinen Lese-Rückfall als Erfolg
+          const erfolg = probe ? !!(r0 && r0.ok) : !!(r0 && (r0.ok || b0.balance != null))
           const txt = (r0 && r0.code === 'cdp_folgt') ? tsxCdpFolgtText(r0)
-            : (r0 && (r0.ok || b0.balance != null))
+            : erfolg
             ? `${probe ? (r0.msg || 'Probe bis vor den Knopf') + ' — keine Order' : 'Nur gelesen (keine Order, Probe-Route fehlt noch)'}: Konto ${r0.konto_aktiv || extId}${b0.balance != null ? ' · Balance ' + b0.balance.toLocaleString('de-DE', { minimumFractionDigits: 2 }) + ' $' : ''}${pos != null ? ' · ' + pos + ' Position(en)' : ''}`
             : (probe ? 'Probe fehlgeschlagen' + (r0 && r0.schritt ? ' bei „' + r0.schritt + '"' : '') + ': ' : 'Lesen fehlgeschlagen: ') + String((r0 && (r0.msg || r0.code)) || 'keine Antwort')
+              + (probe && b0.balance != null ? ' (Konto gelesen, Balance ' + b0.balance.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' $)' : '')
           if(b0.balance != null && (!r0.konto_aktiv || String(r0.konto_aktiv).includes(extId))) tvKontoBalanceSchreiben(plan.masterAccountId, b0, new Date().toISOString())
           if(fern) fern.melde({ ok: false, nur_lesen: true, probe: !!(r0 && !r0._nurLesen), schritt: (r0 && r0.schritt) || null, msg: txt + ' — Plan bleibt „Geplant".', trail: (r0 && r0.trail) ? String(r0.trail).slice(0, 4000) : null })
-          if(imPopup){ _pfSet('ob-order', (r0 && (r0.ok || b0.balance != null)) ? 'ok' : 'err', escapeHtml(txt)); pfEnde(!!(r0 && (r0.ok || b0.balance != null)), 'Puls für Topstep steht auf „nur lesen" — nichts platziert, der Plan bleibt „Geplant".') }
+          if(imPopup){ _pfSet('ob-order', erfolg ? 'ok' : 'err', escapeHtml(txt)); pfEnde(erfolg, 'Puls für Topstep steht auf „nur lesen" — nichts platziert, der Plan bleibt „Geplant".') }
           else if(!fern) toast(txt, 'end')
         }finally{ _tpOrbitLaeuft = false }
         return

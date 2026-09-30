@@ -26,7 +26,7 @@
  */
 var PROPHOS_AUGEN_TSX = (function () {
   'use strict';
-  var VERSION = 'tsx-0.4.0';
+  var VERSION = 'tsx-0.5.0';
 
   // ── Grundwerkzeuge (wie augen.js) ──────────────────────────────────────────
   function sichtbar(el) {
@@ -437,14 +437,86 @@ var PROPHOS_AUGEN_TSX = (function () {
     if (typeof bal !== 'number' || !gr) return null;
     return bal < gr * 0.5;
   }
-  // Order-Karte rechts ([data-testid="order-card-container"]): vorerst nur die Anzeige-Felder order-card-display-value-*
-  // (bid, last-price, ask, no-position …) als Rohtext. Der Vertrag für Contract/Menge/Kauf-Knopf folgt mit K2/K3.
+  /* K3 (01.10.2026, Finn: „bei Contracts reinklicken, MNQ oder NQ auswählen; bei Number of Contracts reinklicken, die Zahl weg,
+   * die eigentliche Zahl angeben; Buy bzw. Sell"). NUR LESEN — geklickt und getippt wird im Bot (Windows-Maus/-Tastatur).
+   * Anker belegt im K0-Inventar 30.09.2026 (puls_augen inventar_tsx_grund):
+   *   Contract   [data-testid="contract-selector-input-select-contract"] → input[role="combobox"] (Wert „MNQZ26")
+   *   Order-Typ  [data-testid="order-card-click-select-order-type"] (Text „Market")
+   *   Menge      [data-testid="order-card-input-field-contracts"] → input (Wert „3")
+   *   Knöpfe     [data-testid="order-card-click-button-buy"] „Buy +3 @ Market", […-sell] „Sell -3 @ Market"
+   * NICHT im Inventar (die Liste war zu): die Vorschlagsliste des Contract-Felds (MUI-Autocomplete, Bild Finn 01.10.2026:
+   * „MNQZ26 · Micro Nasdaq (Dec 2026)", links ein Stern = Favorit). Gelesen wird die Liste, die das Feld per aria-controls nennt,
+   * sonst eine sichtbare [role=listbox] direkt unter dem Feld; es zählen nur Zeilen mit einer Textzeile, die GANZ ein Kontrakt-Code ist.
+   * Klickziel ist der Code-Text selbst (code_rect), nie die ganze Zeile — der Stern links darf nie getroffen werden. */
+  var RX_CODE = /^[A-Z]{1,5}[FGHJKMNQUVXZ]\d{1,2}$/;
+  function aktivIst(el) { try { return !!el && document.activeElement === el; } catch (_) { return false; } }
+  function feldIn(id) {
+    var w = q1(tid(id));
+    return { w: w, i: w ? q1('input', w) : null };
+  }
+  function contractLesen() {
+    var f = feldIn('contract-selector-input-select-contract');
+    if (!f.i) { var c = q1(tid('contract-selector-container')); if (c) f = { w: c, i: q1('input', c) }; }
+    if (!f.i) return null;
+    return { wert: String(f.i.value || '').trim().slice(0, 30), rect: rect(f.i), feld_rect: f.w ? rect(f.w) : null,
+             offen: attr(f.i, 'aria-expanded') === 'true', fokus: aktivIst(f.i), zu: zustand(f.i), liste_id: attr(f.i, 'aria-controls') || null };
+  }
+  function contractVorschlaege(c) {
+    var boxen = [], fr = c && (c.feld_rect || c.rect);
+    var eigen_ = c && c.liste_id ? document.getElementById(c.liste_id) : null;
+    if (eigen_ && sichtbar(eigen_)) boxen.push(eigen_);
+    if (!boxen.length && fr) {
+      alle('[role="listbox"]').filter(sichtbar).forEach(function (b) {
+        var r = b.getBoundingClientRect();
+        var unter = r.top >= fr[1] + fr[3] - 12 && r.top <= fr[1] + fr[3] + 60, quer = r.left < fr[0] + fr[2] && r.right > fr[0];
+        if (unter && quer) boxen.push(b);
+      });
+    }
+    var out = [];
+    boxen.forEach(function (b) {
+      alle('[role="option"]', b).filter(sichtbar).slice(0, 30).forEach(function (li) {
+        var zeilen = String(li.innerText || li.textContent || '').split('\n').map(function (z) { return z.replace(/\s+/g, ' ').trim(); })
+          .filter(Boolean);
+        // Code = die erste Textzeile, die GANZ ein Kontrakt-Code ist — davor stehen Markierungen („■", Stern), dahinter der Name
+        var code = (zeilen.map(function (z) { return z.toUpperCase(); }).filter(function (z) { return RX_CODE.test(z); })[0]) || '';
+        if (!code) return;
+        var blatt = null;
+        alle('*', li).some(function (e) {
+          if (e.children.length === 0 && sichtbar(e) && txt(e).toUpperCase() === code) { blatt = e; return true; }
+          return false;
+        });
+        out.push({ code: code, text: zeilen.join(' · ').slice(0, 80), rect: rect(li), code_rect: blatt ? rect(blatt) : null,
+                   markiert: attr(li, 'aria-selected') === 'true', zu: zustand(blatt || li) });
+      });
+    });
+    return out;
+  }
+  function mengeLesen() {
+    var f = feldIn('order-card-input-field-contracts');
+    return f.i ? { wert: String(f.i.value || '').trim().slice(0, 12), rect: rect(f.i), fokus: aktivIst(f.i), zu: zustand(f.i) } : null;
+  }
+  function knopfLesen(id) {
+    var b = q1(tid(id));
+    return b ? { testid: id, text: txt(b).slice(0, 40), rect: rect(b), zu: zustand(b) } : null;
+  }
+  // Order-Karte rechts ([data-testid="order-card-container"]): Anzeige-Felder order-card-display-value-* (bid, last-price, ask,
+  // no-position …) als Rohtext, Bracket-Auswahl, dazu seit tsx-0.5.0 (K3) Contract, Vorschläge, Menge, Order-Typ, Buy/Sell.
+  // k3 = true: dieser Vertrag ist da (ein Bot mit K3 weist eine ältere augen_tsx.js ohne diese Felder ab).
   function ticketLesen() {
     if (!K1_ANKER || !q1(tid('order-card-container'))) return null;
-    var t = { anzeigen: alle('[data-testid^="order-card-display-value-"]').filter(sichtbar).slice(0, 12).map(function (e) {
+    var t = { k3: true, anzeigen: alle('[data-testid^="order-card-display-value-"]').filter(sichtbar).slice(0, 12).map(function (e) {
       return { testid: testid(e), text: txt(e).slice(0, 80), rect: rect(e) };
     }) };
     try { t.bracket = bracketLesen(); } catch (e) { t.bracket = { fehler: String(e).slice(0, 80) }; }
+    try { var c = contractLesen(); t.contract = c; t.vorschlaege = c ? contractVorschlaege(c) : []; }
+    catch (e) { t.contract = null; t.vorschlaege = []; t.k3_fehler = 'contract: ' + String(e).slice(0, 60); }
+    try { t.menge = mengeLesen(); } catch (e) { t.menge = null; t.k3_fehler = 'menge: ' + String(e).slice(0, 60); }
+    try {
+      var ot = q1(tid('order-card-click-select-order-type'));
+      t.ordertyp = ot ? { text: txt(ot).slice(0, 30), rect: rect(ot) } : null;
+      t.kauf = knopfLesen('order-card-click-button-buy');
+      t.verkauf = knopfLesen('order-card-click-button-sell');
+    } catch (e) { t.k3_fehler = 'knoepfe: ' + String(e).slice(0, 60); }
     return t;
   }
 

@@ -12718,9 +12718,10 @@ def tsx_ablehnung(vorher, nachher):
     return None
 
 
-def tsx_order_befehl(cmd):
+def tsx_order_befehl(cmd, tp_pflicht=True):
     """REIN RECHNEND (testbar): Befehl prüfen → (dict | None, fehler). richtung buy/sell, Menge 1–50 ganz, Wurzel MNQ/NQ aus
-    symbol, TP > 0, SL optional (> 0 oder leer), scharf bool."""
+    symbol, TP > 0, SL optional (> 0 oder leer), scharf bool. tp_pflicht=False (K3 über das Puls-Chrome, Finn 01.10.2026: „SL/TP
+    setze ich vorerst von Hand"): ohne TP brackets None statt Abbruch — der UIA-Weg (Bracket-Dialog) prüft weiter mit TP-Pflicht."""
     c = cmd or {}
     r = str(c.get("richtung") or "").lower()
     if r not in ("buy", "sell"):
@@ -12735,7 +12736,7 @@ def tsx_order_befehl(cmd):
     if w not in ("MNQ", "NQ"):
         return None, f"symbol '{c.get('symbol')}' ist weder MNQ noch NQ"
     werte, f = tsx_bracket_werte(c.get("tp_usd"), c.get("sl_usd"))
-    if f:
+    if f and tp_pflicht:
         return None, f
     ext = str(c.get("ext_id") or c.get("konto") or "").strip()
     if len(_nur_alnum(ext)) < 5:
@@ -13351,13 +13352,20 @@ def _tsx_order_nach_kopf(befehl):
 
 def modus_tsxorder(cmd):
     """Etappe 2: Order in TopstepX (scharf:false = Probe bis vor den Knopf). Antwort wie tv-konto."""
-    befehl, f = tsx_order_befehl(cmd)
+    befehl, f = tsx_order_befehl(cmd, tp_pflicht=False)
     if f:
         print(json.dumps({"ok": False, "code": "befehl", "retry_ok": True, "gesendet": False, "msg": f}, ensure_ascii=False))
         return
     # K0-Riegel VOR dem Lese-Zweig (Master-Vertrag): eine Order landet auf einem Topstep-CDP-PC nie im UIA-Weg
     if tsx_weg_lauf() == "cdp":
-        print(json.dumps(tsx_cdp_folgt("tsxorder" if befehl.get("scharf") else "tsxprobe"), ensure_ascii=False))
+        if befehl.get("scharf") or not TSX_K3_AKTIV or not TSX_K1_AKTIV:   # K1 aus = auch keine Kette für die Probe
+            print(json.dumps(tsx_cdp_folgt("tsxorder" if befehl.get("scharf") else "tsxprobe"), ensure_ascii=False))
+            return
+        # K3a (01.10.2026): dieselbe Kette wie K1/K2 (Chrome, Login, Konto, Lesen), danach das Ticket füllen — Probe, nie ein Order-Knopf
+        return modus_tsxlesen_cdp({"konto": befehl["ext"], "firma": (cmd or {}).get("firma")}, order=befehl, order_cmd=cmd)
+    befehl, f = tsx_order_befehl(cmd)                    # UIA-Weg: TP Pflicht (Bracket-Dialog)
+    if f:
+        print(json.dumps({"ok": False, "code": "befehl", "retry_ok": True, "gesendet": False, "msg": f}, ensure_ascii=False))
         return
     return modus_tsxlesen({"konto": befehl["ext"]}, weiter=_tsx_order_nach_kopf(befehl), wachhund_s=150.0, weg="uia")
 
@@ -14181,6 +14189,18 @@ TSX_K1_WACHHUND_S = 140.0          # K1+K2 (01.10.2026): die ganze Kette in EINE
 TSX_K2_AKTIV = True                # K2 (01.10.2026): steht in TopstepX ein anderes Konto, wechselt K1 es im Dropdown (Windows-Maus,
                                    # nur Konto — KEINE Order). False = K1 endet wie vor K2 mit code 'konto'.
 TSX_K1_AKTIV = True                # K1-Lesen über CDP an (Finn 30.09.2026; Anker belegt, augen_tsx.js tsx-0.3.1) — wirkt nur auf PCs in puls_topstep_pcs
+TSX_K3_AKTIV = True                # K3a (Finn 01.10.2026: „richtiges Asset auswählen, richtige Lotanzahl"): Probe über das Puls-Chrome —
+                                   # Contract + Menge setzen und beweisen, KEIN Order-Knopf. False = cdp_folgt wie vor K3
+TSX_K3_WACHHUND_S = 158.0          # Panel /api/tsx-konto beendet den Bot nach 170 s OHNE finally (Sperre bliebe 15 min) — vorher ehrlich raus
+# Menschliches Tempo (Finn 01.10.2026: beim Kontowechsel ging das Dropdown „in einer Millisekunde" auf und zu): zwischen den Schritten
+# 1–2 s, vor jedem Druck 0,3–0,8 s über dem Ziel stehen — beides über _warte (Streuung). Gilt für K2, Login und das Ticket.
+TSX_SCHRITT_PAUSE = (1.0, 1.0)
+TSX_HOVER_PAUSE = (0.3, 0.5)
+
+
+def _tsx_pause():
+    """1–2 s Pause zwischen zwei TopstepX-Schritten (Finn 01.10.2026) — über _warte, nie fix."""
+    _warte(*TSX_SCHRITT_PAUSE)
 
 
 def tsx_regel_weiche(regel_datei, pc_id):
@@ -14725,6 +14745,7 @@ def _tsx_cdp_login(s, trail):
         return (f"TopstepX im Puls-Chrome nicht angemeldet ({text}; {_puls_chrome_wo()}) — bitte genau in DIESEM Chrome einmal von "
                 "Hand anmelden und das Passwort speichern (`python order_bot.py augen start tsx` holt das Fenster nach vorn).")
     _augen_json_schreiben("tsx_login.json", {"at": time.time()})    # vor dem Druck merken — auch ein Absturz danach zählt als Versuch
+    _tsx_pause()                                           # menschliches Tempo vor dem Login-Klick (Finn 01.10.2026)
     if not s.klick(lg["knopf"]["rect"], "PLATFORM LOGIN (Autofill bewiesen)",
                    pruef={"rect": lg["knopf"].get("rect"), "text": "login", "aria": "", "tabu": r"\b(buy|sell|order|logout|log out)\b"}):
         return "Login-Knopf nicht gedrückt (Klick ohne Beweis) — nichts weiter versucht."
@@ -14998,6 +15019,109 @@ def tsx_cdp_lesung(stand, ext):
     return felder, "", f"Konto {ext}: Balance {w['balance']:,.2f} $, {len(pos)} Position(en) (CDP)"
 
 
+# ══ K3a: TICKET ÜBER DAS PULS-CHROME (01.10.2026, Finn: „Hier bei Contracts einfach reinklicken und dann MNQ oder NQ auswählen. Bei
+# Number of Contracts auch einfach rein klicken und die Zahl weg machen, und dann die eigentliche Zahl angeben."). Probe: endet vor
+# dem Order-Knopf. Reine Regeln (testbar) — die Schritte stehen in _tsx_k3_ticket/_tsx_k3_probe. Anker: augen_tsx.js tsx-0.5.0 (ticket.contract,
+# ticket.vorschlaege, ticket.menge, ticket.ordertyp, ticket.kauf/verkauf; ticket.k3 = Vertrag da).
+
+def tsx_frontmonat(jetzt=None):
+    """REIN RECHNEND (testbar): Front-Monat der Nasdaq-Futures wie das Frontend (tpFuturesFrontcode, prophos.html): Quartal H/M/U/Z,
+    Roll 8 Tage vor dem 3. Freitag des Verfallsmonats (UTC) → 'Z26' (Monat + zweistelliges Jahr, wie TopstepX „MNQZ26")."""
+    import datetime as _dt
+    d = _dt.datetime.utcfromtimestamp(time.time() if jetzt is None else float(jetzt))
+    mon = {3: "H", 6: "M", 9: "U", 12: "Z"}
+    for i in range(13):
+        roh = d.month - 1 + i
+        jahr, monat = d.year + roh // 12, roh % 12 + 1
+        if monat not in mon:
+            continue
+        erster = _dt.datetime(jahr, monat, 1)
+        dritter_fr = erster + _dt.timedelta(days=(4 - erster.weekday()) % 7 + 14)     # weekday: Montag 0 … Freitag 4
+        if dritter_fr - _dt.timedelta(days=8) > d:
+            return f"{mon[monat]}{jahr % 100:02d}"
+    return ""
+
+
+def tsx_k3_contract_ziel(vorschlaege, wurzel, jetzt=None):
+    """REIN RECHNEND (testbar): Vorschlag der Contract-Liste für die Wurzel → (eintrag | None, grund). Nur Codes GENAU Wurzel + Monat
+    + Jahr (MNQ ≠ NQ: „nq" findet nie MNQZ26). Ein Code → der. Mehrere Monate → der Front-Monat (tsx_frontmonat), sonst None."""
+    w = str(wurzel or "").upper()
+    rx = re.compile(rf"^{re.escape(w)}[FGHJKMNQUVXZ]\d{{1,2}}$")
+    kand = [v for v in (vorschlaege or []) if isinstance(v, dict) and rx.match(str(v.get("code") or "").strip().upper())]
+    codes = sorted({str(v.get("code")).strip().upper() for v in kand})
+    if not kand:
+        return None, "kein passender Vorschlag"
+    if len(codes) == 1:
+        return kand[0], ""
+    front = w + tsx_frontmonat(jetzt)
+    f_ = [v for v in kand if str(v.get("code")).strip().upper() == front]
+    if f_:
+        return f_[0], ""
+    return None, f"mehrere Monate ({', '.join(codes)}), Front-Monat {front} nicht dabei"
+
+
+def tsx_k3_menge_passt(wert, menge):
+    """REIN RECHNEND (testbar): steht im Mengenfeld genau die Plan-Menge? („3" == 3; „", „3a", „1.5" nie)"""
+    m = re.fullmatch(r"\s*(\d{1,3})\s*", str(wert if wert is not None else ""))
+    try:
+        return bool(m) and int(m.group(1)) == int(menge)
+    except (TypeError, ValueError):
+        return False
+
+
+def tsx_k3_knopf(ticket, richtung):
+    """REIN RECHNEND (testbar): der Order-Knopf zur Richtung — ticket.kauf für buy, ticket.verkauf für sell, sonst None."""
+    t = ticket if isinstance(ticket, dict) else {}
+    k = t.get("kauf") if str(richtung or "").lower() == "buy" else t.get("verkauf") if str(richtung or "").lower() == "sell" else None
+    return k if isinstance(k, dict) else None
+
+
+def tsx_k3_vor_klick(stand, befehl, code, ext):
+    """REIN RECHNEND (testbar): Probe-Urteil aus EINEM frischen Blick — stünde das Ticket so da, dass eine Order genau dem Plan entspräche?
+    Nur lesen, klickt nichts. -> (ok, fehler[], knopf, markt_zu). Konto = ext (volle Kennung) und Liste zu · kein Dialog · flach bewiesen („No Active Position" + „Close Position" gesperrt —
+    keine zweite Order auf eine offene Position) · Order-Typ Market · Contract = code und Liste zu · Menge = Plan · Knopf zur Richtung mit
+    Text genau „Buy +n @ Market" / „Sell -n @ Market", nicht gesperrt, nicht verdeckt, mit Rechteck."""
+    st = stand if isinstance(stand, dict) else {}
+    b = befehl if isinstance(befehl, dict) else {}
+    t = st.get("ticket") if isinstance(st.get("ticket"), dict) else {}
+    ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+    f = []
+    if tsx_konto_urteil(ko, ext) != "ja":
+        f.append(f"Konto steht nicht auf {ext} ('{str(ko.get('kontonr') or ko.get('aktiv') or '-')[:40]}')")
+    if ko.get("liste_offen"):
+        f.append("Konto-Liste offen")
+    if st.get("popups"):
+        f.append("Dialog offen ('" + str((st["popups"][0] or {}).get("titel") or (st["popups"][0] or {}).get("text") or "")[:40] + "')")
+    if st.get("flach") is not True:
+        f.append("Konto nicht flach bewiesen (keine zweite Order auf eine offene Position)")
+    ot = str((t.get("ordertyp") or {}).get("text") or "").strip() if isinstance(t.get("ordertyp"), dict) else ""
+    if ot.lower() != "market":
+        f.append(f"Order-Typ '{ot or '-'}' statt Market")
+    c = t.get("contract") if isinstance(t.get("contract"), dict) else {}
+    if str(c.get("wert") or "").strip().upper() != str(code or "").upper() or not code:
+        f.append(f"Contract '{c.get('wert') or '-'}' statt {code or '-'}")
+    if c.get("offen"):
+        f.append("Contract-Liste noch offen")
+    m = t.get("menge") if isinstance(t.get("menge"), dict) else {}
+    if not tsx_k3_menge_passt(m.get("wert"), b.get("menge")):
+        f.append(f"Menge '{m.get('wert') if m.get('wert') is not None else '-'}' statt {b.get('menge')}")
+    kn = tsx_k3_knopf(t, b.get("richtung"))
+    markt_zu = False
+    if not kn:
+        f.append("Order-Knopf nicht gefunden")
+    else:
+        text = str(kn.get("text") or "")
+        if not tsx_knopf_passt(text, b.get("richtung"), b.get("menge")):
+            markt_zu = bool(re.search(r"market\s+closed|markt\s+geschlossen", text, re.I))
+            f.append(f"Knopf zeigt '{text[:40] or '-'}'")
+        zu = kn.get("zu") if isinstance(kn.get("zu"), dict) else {}
+        if zu.get("disabled") or zu.get("verdeckt"):
+            f.append("Order-Knopf " + ("gesperrt" if zu.get("disabled") else "verdeckt"))
+        if not cdp_rect(kn.get("rect")):
+            f.append("Order-Knopf ohne Rechteck")
+    return (not f), f, kn, markt_zu
+
+
 class _EineAntwort:
     """Genau EINE JSON-Antwort je Lauf, für Wachhund und Hauptpfad (K1-Prüfer + Stapel-Prüfer 30.09.2026). nehmen(): wer die Sperre
     NICHT bekommt, wartet, bis der andere geschrieben hat (sonst konnte der Prozess enden, bevor überhaupt etwas ausgegeben war —
@@ -15084,6 +15208,7 @@ def _tsx_konto_sichern(s, ext, st, trail):
                              konto_zeilen=_zeilen(ko), konto_treffer=n)
             r = list(cdp_rect(x.get("rect")))[:4]
             pruef = {"rect": r, "text": str(x.get("id") or ext)[:60], "aria": "", "tabu": TSX_K0_TABU.pattern}
+            _tsx_pause()                                  # die offene Liste steht 1–2 s da, dann erst die Zeile (Finn 01.10.2026)
             if not s.klick(r, f"Konto {ext}", pruef=pruef):
                 _cdp_esc(s, st, trail, "Konto-Zeile nicht gedrückt")
                 return _raus("konto_nicht_erreicht", f"Konto-Zeile {ext} nicht gedrückt (Klick ohne Beweis) — Liste mit Esc zu, nichts gewechselt.",
@@ -15116,6 +15241,7 @@ def _tsx_konto_sichern(s, ext, st, trail):
         r = list(r)[:4]
         # Ziel-Beweis mit dem Auslöser-TEXT ('$150K … | KENNUNG' → volle Kennung), nicht der nackten kontonr (tsx_k0_pruef erkennt die
         # Kennung nur im Auslöser-Format, sonst nähme es die ersten 24 Zeichen)
+        _tsx_pause()                                      # menschliches Tempo vor dem Auslöser (Finn 01.10.2026)
         if not s.klick(r, "Konto-Auslöser", pruef=tsx_k0_pruef({"rect": r, "text": str(ko.get("aktiv") or aktiv), "aria": ""})):
             return _raus("konto_nicht_erreicht", "Konto-Auslöser nicht gedrückt (Klick ohne Beweis) — nichts gewechselt.", st)
         _warte(0.9, 0.4)
@@ -15143,16 +15269,201 @@ def _tsx_kopf_frisch(s, st, ext, trail, runden=4):
     return st, False
 
 
-def modus_tsxlesen_cdp(cmd):
-    """K1: TopstepX im Puls-Chrome lesen — die ganze Kette in EINEM Lauf (Entscheidung 01.10.2026): Puls-Chrome starten, TopstepX-Tab öffnen,
+def _tsx_tk(st):
+    return st.get("ticket") if isinstance(st, dict) and isinstance(st.get("ticket"), dict) else {}
+
+
+def _tsx_fokus_exakt(s, art, trail, schritt):
+    """K3a-Prüfer 01.10.2026: fokus_im prüft nur, ob IRGENDEIN fokussiertes Element das Feld überlappt (ein Dialog-Container würde
+    reichen). Vor jeder Tastenfolge deshalb exakt: augen_tsx.js meldet ticket.<art>.fokus = document.activeElement === dieses input.
+    -> True nur dann"""
+    try:
+        f = _tsx_tk(s.stand()).get(art)
+        if isinstance(f, dict) and f.get("fokus") is True:
+            return True
+    except Exception:
+        pass
+    trail.append(f"{schritt}: das Feld selbst hat nicht den Fokus — keine Taste")
+    return False
+
+
+def _tsx_k3_contract(s, st, wurzel, trail):
+    """K3a Schritt 1: ins Contract-Feld klicken (Ziel-Beweis), Fokus beweisen, Wurzel („mnq"/„nq") per echter Tastatur tippen, den
+    EINEN passenden Vorschlag (tsx_k3_contract_ziel) am Code-Text anklicken, Rücklesung Feld = Code und Liste zu. Höchstens zwei
+    Versuche, jeder Fehlschlag schließt die Liste mit Esc. -> (ok, code, msg, stand, contract-code | None)"""
+    letzter = ""
+    for versuch in range(2):
+        c = _tsx_tk(st).get("contract") if isinstance(_tsx_tk(st).get("contract"), dict) else {}
+        r = cdp_rect(c.get("rect"))
+        if not (isinstance(r, (list, tuple)) and len(r) >= 4 and r[2] >= 2 and r[3] >= 2):
+            return False, "contract", "Contract-Feld in TopstepX nicht gefunden (augen_tsx.js) — nichts getan.", st, None
+        zu = c.get("zu") if isinstance(c.get("zu"), dict) else {}
+        if zu.get("disabled") or zu.get("verdeckt"):
+            return False, "contract", f"Contract-Feld {'gesperrt' if zu.get('disabled') else 'verdeckt'} — Dialog offen? Nichts getan.", st, None
+        r = list(r)[:4]
+        _tsx_pause()
+        if not s.klick(r, "Contract-Feld", pruef={"rect": r, "text": "", "aria": "", "tabu": TSX_K0_TABU.pattern}):
+            return False, "contract", "Contract-Feld nicht gedrückt (Klick ohne Beweis) — nichts getan.", st, None
+        _warte(0.4, 0.3)
+        if not s.fokus_im(r, "Contract-Feld") or not _tsx_fokus_exakt(s, "contract", trail, "Contract-Feld"):
+            _cdp_esc(s, st, trail, "Contract-Feld ohne Fokus")
+            return False, "contract", "Contract-Feld hat nach dem Klick keinen Fokus — nichts getippt, Esc.", st, None
+        s.taste("a", modifiers=2)                   # Strg+A: den alten Wert markieren, das Tippen ersetzt ihn
+        _warte(0.25, 0.2)
+        if not _tsx_fokus_exakt(s, "contract", trail, "Contract-Feld vor dem Tippen"):
+            _cdp_esc(s, st, trail, "Contract-Feld verlor den Fokus")
+            return False, "contract", "Contract-Feld verlor vor dem Tippen den Fokus — nichts getippt, Esc.", st, None
+        s.tippen(str(wurzel).lower())
+        trail.append(f"Contract: '{str(wurzel).lower()}' getippt")
+        _warte(0.9, 0.5)                             # die Liste filtert
+        st = s.stand()
+        vs = _tsx_tk(st).get("vorschlaege") or []
+        x, grund = tsx_k3_contract_ziel(vs, wurzel)
+        codes = [str(v.get("code")) for v in vs if isinstance(v, dict)][:8]
+        if not x:
+            letzter = f"Contract {wurzel}: {grund} (Vorschläge {codes or '-'})"
+            _cdp_esc(s, st, trail, letzter)
+            _warte(0.6, 0.3)
+            st = s.stand()
+            continue
+        rr = cdp_rect(x.get("code_rect"))           # NUR der Code-Text — nie die Zeilenmitte (links sitzt der Favoriten-Stern)
+        zeile = cdp_rect(x.get("rect")) or rr
+        zu = x.get("zu") if isinstance(x.get("zu"), dict) else {}
+        if not rr or zu.get("disabled") or zu.get("verdeckt"):
+            letzter = f"Vorschlag {x.get('code')} ohne klickbaren Code-Text"
+            _cdp_esc(s, st, trail, letzter)
+            _warte(0.6, 0.3)
+            st = s.stand()
+            continue
+        _warte(0.6, 0.6)                             # die Liste steht einen Moment sichtbar da, dann erst wählen
+        # Klickpunkt im Code-Text (links sitzt der Favoriten-Stern). Beweis: die Zeile ist das klickbare Ziel UND der Text genau am
+        # Punkt ist der Code (wort) — „nqz26" steckt auch in „mnqz26", ein Teilstring der Zeile allein genügt nie
+        cd = str(x.get("code")).lower()
+        if not s.klick(list(rr)[:4], f"Contract {x.get('code')}", pruef={"rect": list(zeile)[:4], "text": cd, "aria": "", "wort": cd,
+                                                                         "tabu": TSX_K0_TABU.pattern}):
+            letzter = f"Vorschlag {x.get('code')} nicht gedrückt (Klick ohne Beweis)"
+            _cdp_esc(s, st, trail, letzter)
+            _warte(0.6, 0.3)
+            st = s.stand()
+            continue
+        c2 = {}
+        for _ in range(4):
+            _warte(0.6, 0.3)
+            st = s.stand()
+            c2 = _tsx_tk(st).get("contract") if isinstance(_tsx_tk(st).get("contract"), dict) else {}
+            if str(c2.get("wert") or "").strip().upper() == str(x.get("code")).upper() and not c2.get("offen"):
+                trail.append(f"Contract {x.get('code')} gewählt — Rücklesung '{c2.get('wert')}', Liste zu")
+                return True, "", "", st, str(x.get("code")).upper()
+        letzter = f"Contract nach dem Klick '{c2.get('wert') or '-'}'{' (Liste offen)' if c2.get('offen') else ''}, erwartet {x.get('code')}"
+        if c2.get("offen"):
+            _cdp_esc(s, st, trail, letzter)
+            _warte(0.6, 0.3)
+            st = s.stand()
+        trail.append(letzter + (" — zweiter Versuch" if versuch == 0 else ""))
+    return False, "contract", letzter + " — nichts weiter getan.", st, None
+
+
+def _tsx_k3_menge(s, st, menge, trail):
+    """K3a Schritt 2: ins Feld „# of Contracts" klicken (Ziel-Beweis), Fokus beweisen, alte Zahl weg (Strg+A, Rücktaste), Plan-Menge
+    tippen, Rücklesung Feld = Menge. Kein Tab (der Fokus bleibt im Feld). Steht die Menge schon da: nichts tun. -> (ok, code, msg, stand)"""
+    m = _tsx_tk(st).get("menge") if isinstance(_tsx_tk(st).get("menge"), dict) else {}
+    if tsx_k3_menge_passt(m.get("wert"), menge):
+        trail.append(f"Menge steht schon auf {menge}")
+        return True, "", "", st
+    for versuch in range(2):
+        r = cdp_rect(m.get("rect"))
+        if not (isinstance(r, (list, tuple)) and len(r) >= 4 and r[2] >= 2 and r[3] >= 2):
+            return False, "menge", "Feld „# of Contracts“ nicht gefunden (augen_tsx.js).", st
+        zu = m.get("zu") if isinstance(m.get("zu"), dict) else {}
+        if zu.get("disabled") or zu.get("verdeckt"):
+            return False, "menge", f"Feld „# of Contracts“ {'gesperrt' if zu.get('disabled') else 'verdeckt'}.", st
+        r = list(r)[:4]
+        _tsx_pause()
+        if not s.klick(r, "# of Contracts", pruef={"rect": r, "text": "", "aria": "", "tabu": TSX_K0_TABU.pattern}):
+            return False, "menge", "Feld „# of Contracts“ nicht gedrückt (Klick ohne Beweis).", st
+        _warte(0.35, 0.25)
+        if not s.fokus_im(r, "# of Contracts") or not _tsx_fokus_exakt(s, "menge", trail, "# of Contracts"):
+            return False, "menge", "Feld „# of Contracts“ hat keinen Fokus — nichts getippt.", st
+        s.taste("a", modifiers=2)
+        _warte(0.2, 0.2)
+        if not _tsx_fokus_exakt(s, "menge", trail, "# of Contracts vor der Rücktaste"):
+            return False, "menge", "Feld „# of Contracts“ verlor den Fokus — nichts gelöscht.", st
+        s.taste("Backspace")                         # „die Zahl weg machen"
+        _warte(0.3, 0.3)
+        if not _tsx_fokus_exakt(s, "menge", trail, "# of Contracts vor dem Tippen"):
+            return False, "menge", "Feld „# of Contracts“ verlor den Fokus — Menge nicht getippt.", st
+        s.tippen(str(int(menge)))
+        _warte(0.6, 0.3)
+        st = s.stand()
+        m = _tsx_tk(st).get("menge") if isinstance(_tsx_tk(st).get("menge"), dict) else {}
+        if tsx_k3_menge_passt(m.get("wert"), menge):
+            trail.append(f"Menge {menge} getippt — Rücklesung '{m.get('wert')}'")
+            return True, "", "", st
+        trail.append(f"Menge nach dem Tippen '{m.get('wert')}', erwartet {menge}" + (" — zweiter Versuch" if versuch == 0 else ""))
+    return False, "menge", f"Menge steht auf '{m.get('wert')}', nicht {menge}.", st
+
+
+def _tsx_k3_ticket(s, st, befehl, trail):
+    """K3a: Ticket füllen (Contract, Menge). -> (ok, code, msg, stand, contract-code | None)"""
+    t = _tsx_tk(st)
+    if not t.get("k3"):
+        return False, "anker_fehlt", ("Das TopstepX-Ticket liest das Puls-Chrome noch nicht (augen_tsx.js ohne K3-Felder — Stand "
+                                      f"{str(st.get('v') if isinstance(st, dict) else '-')[:12]}). Nichts getan."), st, None
+    ot = str((t.get("ordertyp") or {}).get("text") or "").strip() if isinstance(t.get("ordertyp"), dict) else ""
+    if ot.lower() != "market":
+        return False, "ordertyp", f"Order-Typ steht auf '{ot or '-'}', nicht Market — nichts getan (Prophos stellt ihn nicht um).", st, None
+    ok, code, msg, st, ziel = _tsx_k3_contract(s, st, befehl["wurzel"], trail)
+    if not ok:
+        return False, code, msg, st, None
+    ok, code, msg, st = _tsx_k3_menge(s, st, befehl["menge"], trail)
+    if not ok:
+        return False, code, msg, st, ziel
+    return True, "", "", st, ziel
+
+
+def _tsx_k3_probe(s, st, befehl, res, trail, raus):
+    """K3a nach der K1/K2-Kette (Konto steht, Kopf gelesen, flach): Ticket füllen, dann aus EINEM frischen Blick prüfen
+    (tsx_k3_vor_klick) und ehrlich enden — „Ticket bereit (nicht gesendet)". Klickt nie einen Order-Knopf."""
+    res["schritt"] = "ticket"
+    res["balance_start"] = res.get("balance")
+    ok, code, msg, st, ziel = _tsx_k3_ticket(s, st, befehl, trail)
+    if not ok:
+        return raus(code, msg, "ticket")
+    res["tv_symbol"] = ziel
+    _tsx_pause()
+    st = s.stand()                                    # EIN frischer Blick — daraus wird geurteilt
+    ok, fehler, kn, markt_zu = tsx_k3_vor_klick(st, befehl, ziel, befehl["ext"])
+    ktext = str((kn or {}).get("text") or "")
+    nur_markt = markt_zu and len(fehler) == 1
+    if not ok and not nur_markt:
+        return raus("vorpruefung", "Ticket gefüllt, aber es passt noch nicht: " + "; ".join(fehler), "probe")
+    trail.append(f"Knopf '{ktext}' — nicht geklickt (Probe)")
+    try:
+        _puls_diagnose_senden(list(trail), "tsx_probe_cdp")
+    except Exception:
+        pass
+    return raus("", (f"Ticket bereit (nicht gesendet): {ktext or '-'} · {ziel} · Konto {befehl['ext']}"
+                     + (" — Markt zu, Knopf nicht prüfbar" if nur_markt else "")), "probe", ok=True)
+
+
+def modus_tsxlesen_cdp(cmd, order=None, order_cmd=None):
+    """order (K3a, 01.10.2026): geprüfter tsx_order_befehl ohne scharf — nach der Lesung füllt _tsx_k3_probe das Ticket (Contract, Menge)
+    und endet vor dem Order-Knopf; Antwort wie tsx-konto (gesendet false, retry_ok), Wachhund TSX_K3_WACHHUND_S.
+    K1: TopstepX im Puls-Chrome lesen — die ganze Kette in EINEM Lauf (Entscheidung 01.10.2026): Puls-Chrome starten, TopstepX-Tab öffnen,
     Login (ein Klick mit Autofill-Beweis), Tab nach vorn + Frische-Beweis, Bereit-Probe, bei falschem Konto K2 (_tsx_konto_sichern:
     Konto im Dropdown per Windows-Maus wechseln, KEINE Order), dann EIN stand() im Vertrag wie tv-lesen. Klicks nur Login + K2 (Hand-
     lauf-Sperre gesetzt, damit kein anderer Lauf dazwischen klickt). Wachhund TSX_K1_WACHHUND_S (140 s)."""
     res = {"ok": False, "code": "", "msg": "", "trail": "", "schritt": "start", "weg": "cdp", "etappe": "K1", "quelle": "cdp",
            "konto": "", "balance": None, "balance_relativ": None, "mll": None, "rpl": None, "upl": None, "position": None, "alter_s": None}
+    if order:
+        # tsx-konto-Vertrag: das Panel ergänzt nichts — gesendet/retry_ok kommen vom Bot (Prüfer K3a: sonst fehlten sie)
+        res.update(etappe="K3", gesendet=False, retry_ok=True, scharf=False, plattform="tsx")
+    wachhund_s = TSX_K3_WACHHUND_S if order else TSX_K1_WACHHUND_S
+    diag_art = "tsx_probe_cdp" if order else "tsx_lesen_cdp"
     trail = _StempelSpur()
     trail.append(puls_bot_stand())
-    trail.append("Weg: Puls-Chrome (CDP) — K1 Lesen TopstepX")
+    trail.append("Weg: Puls-Chrome (CDP) — " + (f"K3a Probe TopstepX ({order.get('richtung')} {order.get('menge')} {order.get('wurzel')})"
+                                                 if order else "K1 Lesen TopstepX"))
     ext = str((cmd or {}).get("konto") or (cmd or {}).get("ext_id") or "").strip()
     sitz = [None]
     import threading
@@ -15167,7 +15478,7 @@ def modus_tsxlesen_cdp(cmd):
         res["trail"] = " > ".join(trail)
         antwort.ausgeben(res)
         if not ok:
-            _puls_diagnose_senden(trail, "tsx_lesen_cdp")
+            _puls_diagnose_senden(trail, diag_art)
 
     if len(_nur_alnum(ext)) < 5:
         return raus("befehl", "Feld 'konto' (External ID) fehlt", "befehl")
@@ -15184,14 +15495,15 @@ def modus_tsxlesen_cdp(cmd):
             pass
 
     def _wachhund():
-        trail.append(f"Wachhund: nach {int(TSX_K1_WACHHUND_S)} s abgebrochen (Schritt {res.get('schritt')})")
+        trail.append(f"Wachhund: nach {int(wachhund_s)} s abgebrochen (Schritt {res.get('schritt')})")
         try:
-            raus("haenger", f"TopstepX-Lesen hing nach {int(TSX_K1_WACHHUND_S)} s — abgebrochen.", "haenger", zuerst=_schliessen)
+            raus("haenger", f"TopstepX-{'Probe' if order else 'Lesen'} hing nach {int(wachhund_s)} s — abgebrochen.", "haenger",
+                 zuerst=_schliessen)
         finally:
             _schliessen()
             _handlauf_setzen(False)
             os._exit(0)
-    wh = threading.Timer(TSX_K1_WACHHUND_S, _wachhund)
+    wh = threading.Timer(wachhund_s, _wachhund)
     wh.daemon = True
     wh.start()
     try:
@@ -15258,6 +15570,8 @@ def modus_tsxlesen_cdp(cmd):
             return raus(code, msg, "lesen")
         res.update(alter_s=0.0, gelesen_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
                    sprache_fremd=False, userscript=None, summary_fehler=None)
+        if order:
+            return _tsx_k3_probe(s, st, order, res, trail, raus)
         if (cmd or {}).get("ende"):
             res["exit_diag"] = {"fehler": "Exit-Fill über CDP kommt mit K5"}
         trail.append(f"gelesen (CDP): BAL {res.get('balance')} · RP&L {res.get('rpl')} · UP&L {res.get('upl')} · {len(res.get('positionen') or [])} Pos"
@@ -15484,19 +15798,21 @@ def win_ziel_js(x, y):
 def win_ziel_pruef_js(x, y, pruef):
     """Ziel-Beweis beim Druck (K0-Prüfer 30.09.2026: der Hover-Beweis bestätigt JEDES oberste Element — bei ID A liegt „SELL -1 @
     MARKET" 31 px unter dem Bracket-Zahnrad). Am Punkt: :hover UND das klickbare Element dort ist der Kandidat — seine Mitte liegt darin,
-    es ist höchstens ~4× so groß, Text bzw. Beschriftung passen — und trägt kein Order-/Close-Wort. Liest nur. pruef = {rect, text, aria, tabu}"""
+    es ist höchstens ~4× so groß, Text bzw. Beschriftung passen — und trägt kein Order-/Close-Wort. Liest nur. pruef = {rect, text, aria, tabu}
+    + optional wort (K3a 01.10.2026): der Text GENAU am Klickpunkt ist dieses Wort (Contract-Vorschlag: „nqz26" steckt als Teilstring
+    auch in „mnqz26" — die Zeile allein beweist nichts)."""
     return ("(function(p){var e=document.elementFromPoint(" + f"{float(x):.1f},{float(y):.1f}" + ");if(!e)return {hover:false,passt:false,was:''};"
             "function T(n){return String((n&&n.textContent)||'').replace(/\\s+/g,' ').trim().toLowerCase();}"
             "function A(n){return String(n.getAttribute('aria-label')||n.getAttribute('title')||'').toLowerCase();}"
-            "var k=e.closest('button,[role=\"button\"],[role=\"combobox\"],[aria-haspopup],a[href],[tabindex]')||e,r=k.getBoundingClientRect(),c=p.rect;"
+            "var k=e.closest('input,textarea,button,[role=\"button\"],[role=\"combobox\"],[aria-haspopup],a[href],[tabindex]')||e,r=k.getBoundingClientRect(),c=p.rect;"
             "var mx=c[0]+c[2]/2,my=c[1]+c[3]/2,drin=mx>=r.left-3&&mx<=r.right+3&&my>=r.top-3&&my<=r.bottom+3,klein=r.width*r.height<=Math.max(4*c[2]*c[3],2500);"
             "var t=(p.text||'').toLowerCase(),a=(p.aria||'').toLowerCase(),kt=T(k),ka=A(k);"
             "var text_ok=(!t&&!a)||(t&&(kt.indexOf(t)>=0||T(e).indexOf(t)>=0))||(a&&(ka.indexOf(a)>=0||A(e).indexOf(a)>=0));"
-            "var tabu=p.tabu?new RegExp(p.tabu,'i').test(kt+' '+ka):false;"
+            "var tabu=p.tabu?new RegExp(p.tabu,'i').test(kt+' '+ka):false,w=String(p.wort||'').toLowerCase(),wort_ok=!w||T(e)===w;"
             "var hs=document.querySelectorAll(':hover'),d=hs.length?hs[hs.length-1]:null,dr=d?d.getBoundingClientRect():null;"
             "var unter=d?(d.tagName.toLowerCase()+' '+String(d.getAttribute('data-testid')||d.getAttribute('aria-label')||T(d)).slice(0,30)"
             "+' @'+Math.round(dr.left)+','+Math.round(dr.top)):'nichts';"
-            "return {hover:e.matches(':hover'),passt:!!(drin&&klein&&text_ok&&!tabu),was:(kt||ka||k.tagName.toLowerCase()).slice(0,40),tabu:tabu,unter:unter};})("
+            "return {hover:e.matches(':hover'),passt:!!(drin&&klein&&text_ok&&!tabu&&wort_ok),was:(kt||ka||k.tagName.toLowerCase()).slice(0,40),tabu:tabu,wort:wort_ok,unter:unter};})("
             + json.dumps(pruef, ensure_ascii=False) + ")")
 
 
@@ -15686,6 +16002,8 @@ class _AugenSitzung:
         self.ws = _CdpVerbindung(ziel.get("webSocketDebuggerUrl"), timeout=10.0)
         self.target_id = ziel.get("id")        # K3: Fenster des Tabs (Browser.getWindowForTarget) für den Login kurz nach vorn
         self.maus = (40.0, 40.0)
+        # Menschliches Tempo (Finn 01.10.2026) nur im TopstepX-Tab: vor jedem Druck TSX_HOVER_PAUSE über dem Ziel stehen — Orbit unverändert
+        self.hover_pause = TSX_HOVER_PAUSE if js_datei == "augen_tsx.js" else None
         try:
             self.ws.rufe("Emulation.setFocusEmulationEnabled", {"enabled": True}, timeout=3)   # minimiertes Fenster = „fokussiert"
         except Exception:
@@ -15761,6 +16079,8 @@ class _AugenSitzung:
             self.ws.rufe("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": x, "y": y, "buttons": 0}, timeout=3)
             _warte(0.018, 0.02)
         _warte(0.08, 0.08)
+        if getattr(self, "hover_pause", None):
+            _warte(*self.hover_pause)                 # wie im Windows-Weg (Finn 01.10.2026): erst stehen, dann drücken
         if pruef:
             v = self.lese_js(win_ziel_pruef_js(p[0], p[1], pruef))
             if not (isinstance(v, dict) and v.get("passt")):
@@ -16010,6 +16330,17 @@ class _AugenSitzung:
         if not druck:
             self.trail.append(f"Maus über {name} @{punkt[0]},{punkt[1]} (Windows-Maus)")
             return True
+        hp = getattr(self, "hover_pause", None)
+        if hp:
+            # Menschliches Tempo (Finn 01.10.2026, TopstepX: das Dropdown ging „in einer Millisekunde" auf und zu): erst über dem Ziel
+            # stehen bleiben, dann drücken — und das Ziel danach NEU beweisen, in der Pause kann sich die Seite bewegt haben
+            _warte(*hp)
+            if pruef:
+                v2 = self.lese_js(win_ziel_pruef_js(p[0], p[1], pruef))
+                if not (isinstance(v2, dict) and v2.get("hover") and v2.get("passt")):
+                    self.trail.append(f"{name}: nach der Hover-Pause liegt am Zielpunkt nicht mehr das Ziel "
+                                      f"('{v2.get('was') if isinstance(v2, dict) else '-'}') — kein Druck")
+                    return False
         if _win_vordergrund() != int(hwnd):
             self.trail.append(f"{name}: Puls-Chrome nicht mehr vorn — kein Druck")
             return False
