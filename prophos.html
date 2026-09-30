@@ -24082,7 +24082,9 @@
         : (pw.final_quelle === 'level' && num(pw.master_pl_schaetzung) != null && Math.abs(m - num(pw.master_pl_schaetzung)) < 0.005) ? 'aus TP-Level geschätzt'
         : pw.final_quelle === 'puls' ? 'aus TradingView gelesen' : 'eingetragen'
     } else if(pw.master_pl && num(pw.master_pl.wert) != null){
-      m = num(pw.master_pl.wert); mq = pw.master_pl.quelle === 'final' ? "Today's P&L" : pw.master_pl.quelle === 'rundgang' ? 'letzter Rundgang' : 'am Plan'
+      // art (TSV2-PNL, 01.10.2026): Topstep V2 rechnet im Backend aus der Balance bzw. dem RP&L ab dem Klick, nie aus dem Tageswert
+      m = num(pw.master_pl.wert); mq = pw.master_pl.art === 'balance' ? 'Balance nachher − vorher' : pw.master_pl.art === 'rpl_start' ? 'RP&L ab dem Klick'
+        : pw.master_pl.quelle === 'final' ? "Today's P&L" : pw.master_pl.quelle === 'rundgang' ? 'letzter Rundgang' : 'am Plan'
     } else if(num(pw.master_pl_schaetzung) != null){
       m = num(pw.master_pl_schaetzung); mq = 'aus TP-Level geschätzt'
     } else if(h && MWD_TP_GRUENDE.has(String(h.grund || '')) && num(pw.master_tp) > 0){
@@ -36718,7 +36720,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.901'
+  const OS_TAB_BUILD = '2026-09-22.902'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

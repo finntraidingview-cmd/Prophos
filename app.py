@@ -7317,6 +7317,25 @@ def wd_sl_zeile(p, acc, hedge, tv, einstieg, richtung, ppl, kt, sl_usd, vorher=N
             "sl_hinweis": None}
 
 
+def wd_tsx_master_pl(tv, final):
+    """REIN RECHNEND (testbar, TSV2-PNL 01.10.2026): Master-P&L eines beendeten Topstep-V2-Plans für /admin/wd-heute → dict | None.
+    Balance nachher − vorher, wenn beide Seiten dieselbe Basis haben (TopstepX-Express zeigt die Balance 0-basiert, balance_relativ);
+    sonst RP&L am Ende − RP&L beim Klick (today_pnl_start, ältere Pläne rpl_start) am selben Handelstag. NIE der Tages-RP&L allein:
+    der enthält jeden Trade des Tages, auch Hand-Trades außerhalb von Prophos."""
+    tv, final = tv or {}, final or {}
+    bs, be = _wd_num(tv.get("balance_start")), _wd_num(final.get("balance_end"))
+    ra, rb = tv.get("balance_relativ"), final.get("balance_relativ")
+    if bs is not None and be is not None and not (isinstance(ra, bool) and isinstance(rb, bool) and ra != rb):
+        return {"wert": round(be - bs, 2), "at": final.get("at"), "quelle": "final", "art": "balance"}
+    start = _wd_num(tv.get("today_pnl_start"))
+    if start is None:
+        start = _wd_num(tv.get("rpl_start"))
+    ende = _wd_num(final.get("today_pnl"))
+    if start is not None and ende is not None and final.get("datum") and final.get("datum") == tv.get("datum_start"):
+        return {"wert": round(ende - start, 2), "at": final.get("at"), "quelle": "final", "art": "rpl_start"}
+    return None
+
+
 def _wd_heute_zeile(p, acc, disp, vorher=None):
     """Eine Plan-Zeile für /admin/wd-heute — der JSON-Vertrag steht in der Route. vorher = letzter beendeter Trade
     desselben Kontos vor diesem Plan ({ended_at, balance_end_da}) für den Balance-Vorläufer (B14)."""
@@ -7343,6 +7362,8 @@ def _wd_heute_zeile(p, acc, disp, vorher=None):
         mpl = {"wert": _wd_num(p.get("master_pl")), "at": p.get("completed_at") or p.get("ended_at"), "quelle": "plan"}
     elif _wd_num(live.get("pnl")) is not None:
         mpl = {"wert": _wd_num(live.get("pnl")), "at": live.get("at"), "quelle": "rundgang"}
+    elif p.get("route") == "tsv2":
+        mpl = wd_tsx_master_pl(tv, final)
     elif _wd_num(final.get("today_pnl")) is not None:
         start = _wd_num(tv.get("today_pnl_start"))
         gleicher_tag = bool(final.get("datum")) and final.get("datum") == tv.get("datum_start")
@@ -7389,8 +7410,11 @@ def _wd_heute_zeile(p, acc, disp, vorher=None):
         "completed_at": p.get("completed_at"),
         # P&L aus Fills + Abgleich (Koordination 25.09.2026): Einstieg/Start aus der tv-Baseline, Ende aus final — nur die Felder,
         # die die Rechnung braucht (Fill-Preise, Today's P&L, Quelle, Ende-Art), keine Zugangsdaten
-        "tv": {k: tv.get(k) for k in ("einstieg_nq", "einstieg_quelle", "einstieg_fill", "einstieg_symbol", "today_pnl_start", "datum_start") if k in tv},
-        "final": {k: final.get(k) for k in ("today_pnl", "datum", "quelle", "art", "grund", "exit_fill", "ende_quelle") if k in final},
+        # TSV2-PNL (01.10.2026): dazu Balance vorher/nachher + Basis (TopstepX-Express 0-basiert) und der RP&L-Start
+        "tv": {k: tv.get(k) for k in ("einstieg_nq", "einstieg_quelle", "einstieg_fill", "einstieg_symbol", "today_pnl_start", "datum_start",
+                                      "balance_start", "balance_relativ", "rpl_start") if k in tv},
+        "final": {k: final.get(k) for k in ("today_pnl", "datum", "quelle", "art", "grund", "exit_fill", "ende_quelle",
+                                            "balance_end", "balance_relativ", "plattform") if k in final},
         # Endlesung (25.09.2026): Stand der Puls-Lesung nach dem Ende (Versuche, Fehler, Befund, Exit-Fill) — Statuszeile + „Jetzt lesen" (Design)
         "endlesung": _wd_endlesung_zeile(final),
     }
@@ -7433,7 +7457,11 @@ def _wd_endlesung_signal(plan):
     fin = base.get("final") if isinstance(base.get("final"), dict) else None
     if not fin:
         return None, (409, "Plan hat noch kein Ende")
-    if _wd_num(fin.get("today_pnl")) is not None or fin.get("quelle") == "puls":
+    if route == "tsv2":
+        # TSV2-PNL (01.10.2026): today_pnl ist bei TopstepX der RP&L des GANZEN Handelstags — gelesen ist erst die Balance danach
+        if _wd_num(fin.get("balance_end")) is not None:
+            return None, (409, "Balance nach dem Trade ist schon gelesen")
+    elif _wd_num(fin.get("today_pnl")) is not None or fin.get("quelle") == "puls":
         return None, (409, "Today's P&L ist schon gelesen")
     uid = str(plan.get("user_id") or "")
     if len(uid) < 10:
@@ -7447,7 +7475,10 @@ def _wd_endlesung_zeile(final):
     final = final if isinstance(final, dict) else {}
     keys = ("today_pnl", "quelle", "datum", "at", "puls_at", "puls_versuche", "puls_fehler", "puls_aufgegeben",
             "puls_diagnose", "puls_flach", "exit_fill", "exit_diag", "ende_quelle",
-            "puls_login_fehler", "puls_login_at", "puls_login_code")   # Login-Bremse (30.09.2026): Radar „Wartet · Login prüfen"
+            "puls_login_fehler", "puls_login_at", "puls_login_code",   # Login-Bremse (30.09.2026): Radar „Wartet · Login prüfen"
+            # Balance nach dem Trade (TSV2-PNL, 01.10.2026): ohne sie zeigte die Abhak-Liste „Puls liest …" trotz gelesener Balance
+            # und bei TopstepX den Tages-RP&L als „gelesen"
+            "balance_end", "balance_quelle", "balance_relativ", "plattform")
     out = {k: final.get(k) for k in keys if final.get(k) is not None}
     return out or None
 
@@ -10671,7 +10702,10 @@ PULS_ERGEBNIS_FELDER = ("ok", "code", "schritt", "msg", "gesendet", "bestaetigt"
                         "mll", "rpl", "tp_level", "sl_level", "positionen", "plattform",
                         # B37 (30.09.2026): Warnung trotz ok (z. B. SL-Bracket abgelehnt) + unklar (Klick raus, Position nicht belegbar) — das
                         # Tab braucht beide auch beim Nachholen (Karten-Chip bzw. UNKLAR-Marke); order_bot.py führt dieselbe Liste
-                        "warnung", "unklar")
+                        "warnung", "unklar",
+                        # TSV2-PNL (01.10.2026): TopstepX-Balance als Zahl + Basis (Express 0-basiert), UP&L beim Klick und die summary —
+                        # sonst verliert ein nachgeholter tsx-close die End-Balance. order_bot.py zieht nach (app.py zuerst deployen)
+                        "balance", "balance_relativ", "upl", "summary")
 _PLAN_ID_MUSTER = re.compile(r"[A-Za-z0-9-]{8,64}")
 
 
