@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.9.1
+// @version      0.9.2
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt. Seit 0.5 auch die KONTO-ZUSAMMENFASSUNG (Balance, Today's P&L …) fuer den Orbit-V2-Rundgang.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -28,6 +28,11 @@
 // kommt ueber @updateURL/@downloadURL (GitHub-raw) von selbst.
 //
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
+//   0.9.2  01.10.2026  Konto-Umschalter wie augen.js 0.7.4 (Live-Befund Moritz 01.10.2026: Badge „kein Konto angemeldet", obwohl
+//                      TDFYSL… im Umschalter stand — [data-name=account-manager-account-select] gibt es nicht mehr): Rueckfall =
+//                      Knopf, dessen TEXT eine Kontonummer ist, an der Broker-Leiste (#footer-chart-panel, auch maximiert oben),
+//                      nie im Order-Panel/Tabelle/Liste; textContent (verdeckter Tab) + entdoppelt. kontoMerk.text ist dann die
+//                      reine Kontonummer — der Hedge-Waechter vergleicht sie exakt mit der External ID (hedgeKontoPasst).
 //   0.9.1  01.10.2026  Puls-Chrome-Modus ignoriert eine alte Feed-Markierung (Live-Befund Moritz 01.10.2026: Badge „Feed-Tab ohne
 //                      Konto", obwohl Tradovate verbunden — der Tab stand nach dem Chrome-Start > 10 min ohne Konto, sessionStorage
 //                      'prophos_feed_tab' ueberlebt auch das Neuladen beim Umschalten). Im Puls-Chrome entscheidet nur das Konto.
@@ -104,7 +109,7 @@
   // dreimal ein Update vermutet, das gar nicht aktiv war (31.08.2026), und von
   // aussen war das nur an FEHLENDEN Feldern zu erraten. Ab jetzt sagt jeder
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
-  const VERSION    = '0.9.1';
+  const VERSION    = '0.9.2';
   // 0.9.0: Puls-Chrome-Modus (Orbit V3) — je Chrome-Profil gespeichert, siehe CHANGELOG
   let PULS_CHROME = false;
   try { PULS_CHROME = GM_getValue('prophos_puls_chrome', false) === true; } catch (_) {}
@@ -329,10 +334,36 @@
     if (feedMarkiert() && !PULS_CHROME) return 'feed';   // 0.9.1: im Puls-Chrome zaehlt nur das Konto
     return kontoAngemeldet(jetzt) ? 'broker' : 'feed';
   }
+  // 0.9.2: 'NR NR USD' / 'NRNRUSD' (versteckte Kopie im Knopf) → einmal — gleiche Regel wie augen.js entdoppeln()
+  function kontoEntdoppeln(t) {
+    t = String(t || '');
+    const m = t.match(/^(.+?)\s*\1$/);
+    if (m) return m[1];
+    const m2 = t.match(/^(.{6,}?)\1(.*)$/);
+    return m2 ? m2[1] + m2[2] : t;
+  }
+  // 0.9.2: Konto-Umschalter ueber die Kontonummer als Text (Port von augen.js kontoSchalter, 0.7.4). -> Kontonummer | ''
+  function kontoNummerAmSchalter() {
+    const leiste = document.getElementById('footer-chart-panel');
+    const lr = leiste && sichtbar(leiste) ? leiste.getBoundingClientRect() : null;
+    const tc = (e) => kontoEntdoppeln(String((e && e.textContent) || '').replace(/\s+/g, ' ').trim());
+    let kand = [...document.querySelectorAll('button,[role="button"]')].filter(sichtbar).filter((e) => {
+      if (!RX_KONTO_ECHT.test(tc(e))) return false;
+      if (e.closest('[data-name="order-panel"],table,[role="listbox"],[role="menu"],[data-name="menu-inner"],[data-name="popup-menu-container"]')) return false;
+      const r = e.getBoundingClientRect();
+      return lr ? (r.top >= lr.top - 4 && r.left <= lr.left + 400) : r.top > window.innerHeight * 0.3;
+    });
+    kand = kand.filter((k) => !kand.some((m) => m !== k && k.contains(m)));   // innerster Knopf
+    if (!kand.length || (!lr && kand.length > 1)) return '';
+    if (lr) kand.sort((a, b) => (a.getBoundingClientRect().top - lr.top) - (b.getBoundingClientRect().top - lr.top));
+    const m = tc(kand[0]).replace(/\s/g, '').match(/[A-Z]{2,}[A-Z0-9_-]*?\d{5,}/i);
+    return m ? m[0] : '';
+  }
   function liesKonto() {
     try {
       const k = suche(SIG_KONTO_SCHALTER);
-      const t = k && k.text ? String(k.text).replace(/\s+/g, ' ').trim().slice(0, 64) : '';
+      let t = k && k.text ? String(k.text).replace(/\s+/g, ' ').trim().slice(0, 64) : '';
+      if (!RX_KONTO_ECHT.test(t)) { const nr = kontoNummerAmSchalter(); if (nr) t = nr; }   // 0.9.2
       if (t) { kontoMerk.text = t; kontoMerk.ts = Date.now(); }
     } catch (_) {}
     return kontoMerk;
