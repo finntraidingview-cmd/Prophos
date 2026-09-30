@@ -18397,10 +18397,22 @@
           updated_at: new Date().toISOString()
         }
       })
-      if(rows.length) await supabase.from('mt5_live').upsert(rows)
+      // Nur bei Änderung schreiben, sonst Lebenszeichen alle 12 s (01.10.2026, Supabase-Kontingent überschritten, Projekt gesperrt —
+      // Edge-Logs 30.09. 08–16 UTC: 21.199 POST mt5_live + 5.188 OPTIONS in 8 h, jeder PC upsertete alle 5 s dieselben Zahlen, auch
+      // ohne offenen Trade). Leser prüfen updated_at mit 15–25 s (Flotte grau nach 20 s, hedgeSoloLive ≤ 25 s, Richtungs-Schutz ≤ 20 s,
+      // app.py Echo ≤ 90 s, Feed-Diagnose < 2 min) — 12 s bleibt sicher darunter. Läuft ein Trade, ändern sich P&L/Positionen bei
+      // jedem Tick → weiter alle 5 s. kurs_bruecke (Diagnose mit Zeitstempeln je Brücken-Tick) zählt nicht als Änderung, reist aber mit.
+      const fp = JSON.stringify(rows.map(r => [r.id, r.master_login, r.hedge_login, r.alive, Object.assign({}, r.status, { kurs_bruecke: null })]))
+      const faellig = fp !== _fleetPushFp || (Date.now() - _fleetPushAt) >= MT5_LIVE_LEBENSZEICHEN_MS
+      if(rows.length && faellig){
+        const { error } = await supabase.from('mt5_live').upsert(rows)
+        if(!error){ _fleetPushFp = fp; _fleetPushAt = Date.now() }
+      }
     }catch(_){ /* still — naechster Tick */ }
     finally{ _fleetPushBusy = false }
   }
+  const MT5_LIVE_LEBENSZEICHEN_MS = 12000
+  let _fleetPushFp = '', _fleetPushAt = 0
   setInterval(mt5FleetPushTick, 5000)
 
   // esc gab es bisher NUR innerhalb der Echo-Panel-IIFE (Zeile ~23300) — der
@@ -18664,7 +18676,7 @@
   }
   // Personen-Chips samt Auswahl sind seit der kompakten Ansicht (25.08.2026
   // nachts) raus — eine Zeile pro Person braucht keinen Umschalter mehr.
-  let _fleetRenderBusy = false
+  let _fleetRenderBusy = false, _fleetRenderAt = 0
   async function mt5FleetRenderTick(force){
     const box = document.getElementById('lt-fleet')
     if(!box || _fleetRenderBusy) return
@@ -18677,6 +18689,12 @@
     // auch fuer force-Renders — auf Geplant/Erledigt bleibt der Block weg.
     const offenAktiv = !!document.querySelector('.view[data-view="trades"].active .subtab-pane.active[data-tradepane="open"]')
     if(!offenAktiv){ box.style.display = 'none'; return }
+    // Versteckter Tab: höchstens alle 30 s statt alle 5 s (01.10.2026, Supabase-Kontingent überschritten — Edge-Logs 30.09. 08–16 UTC:
+    // 18.665 GET dup_live, 6.836 GET mt5_live, 2.907 RPC flotte_offene_plaene in 8 h, v. a. PC-Tabs, die im Hintergrund auf „Offen"
+    // stehen). Den Block sieht dort niemand; Hedge-Chips laden ihre Zeilen bei offenem Hedge selbst (hedgeCloudRowsNachladen, ≤ 8 s).
+    // Sichtbar unverändert alle 5 s (nach der Rückkehr in den Tab also spätestens nach 5 s), force (Reiter-Wechsel) sofort.
+    if(!force && typeof document !== 'undefined' && document.hidden && Date.now() - _fleetRenderAt < 30000) return
+    _fleetRenderAt = Date.now()
     if(!dupState.token) dupEnsureSession()   // Duplikium-Zeilen selbstheilend
     _fleetRenderBusy = true
     try{
@@ -24990,7 +25008,10 @@
     positions: null,     // letzter dup_live-Stand (Array), nie geraten
     fetchedAt: 0,        // updated_at der DB-Zeile (Schreibzeit des Wächters), nicht Lesezeit
     inFlight:  false,
-    INTERVAL:  10_000,   // Poll-Takt gegen Supabase — seit 25.08.2026 abends kein Duplikium-Call mehr
+    // Poll-Takt gegen Supabase — seit 25.08.2026 abends kein Duplikium-Call mehr. 10 → 15 s (01.10.2026, Supabase-Kontingent
+    // überschritten, 18.665 GET dup_live in 8 h): der Wächter schreibt dup_live nur ~alle 30 s, 15 s verpasst keinen Stand
+    // (Alter höchstens ~45 s, Frische-Grenze 75 s bleibt weit weg).
+    INTERVAL:  15_000,
     FRESH_MS:  75_000    // 2,5× Wächter-Takt (30s); älter gilt als stale und wird geleert
   }
 
@@ -38268,7 +38289,16 @@
     finally{ _peLaeuft = false }
   }
   window._pulsErgebnisseUebernehmen = pulsErgebnisseUebernehmen   // Test-Haken (Stub)
-  setInterval(() => { pulsErgebnisseUebernehmen().catch(() => {}) }, 30000)
+  // Im Leerlauf nur alle 90 s statt 30 s (01.10.2026, Supabase-Kontingent: 4.237 GET puls_ergebnisse in 8 h, fast immer leer).
+  // Schnell (30 s wie bisher) nach denselben Regeln wie der Signal-Empfänger (osPipelineAktiv: Signal/Puls-Lauf in den letzten
+  // 10 min, offener Plan, Startzeit in ≤ 5 min) — eine verlorene Antwort gehört fast immer zu einem Lauf dieses Tabs, der den
+  // schnellen Takt ohnehin hält. Nachgeholt wird ohnehin erst 2 min nach der Meldung (PE_GNADE_MS).
+  let _pePollAt = 0
+  setInterval(() => {
+    if(typeof osPipelineAktiv === 'function' && !osPipelineAktiv() && Date.now() - _pePollAt < 90000) return
+    _pePollAt = Date.now()
+    pulsErgebnisseUebernehmen().catch(() => {})
+  }, 30000)
 
   // Karten-Knopf „Schließen" auf V2 (data-plan-v2-schliessen): lokal direkt, am Mac/Handy als close-Signal.
   // Live-Schritte im vorhandenen Check-Popup — dieselbe Optik wie tpPlanSchliessen, kein neues Design.
@@ -38606,8 +38636,11 @@
       // dieses PATCH lief auf jedem PC alle 5 s, und weil die Zeitgrenze in der Adresse steht, fragte der Browser jedes Mal
       // zusätzlich per OPTIONS vorab — zusammen gut ein Fünftel aller Anfragen, gefunden hat es fast nie etwas). Ein
       // abgerissener Lauf wird damit nach 6–7 statt 6 min abgeschlossen.
+      // Im Leerlauf (osPipelineAktiv falsch: > 10 min kein Signal/Lauf hier, nichts offen, keine Startzeit nah) nur alle 5 min
+      // (01.10.2026, Supabase-Kontingent: 1.902 PATCH order_signale in 8 h — genau dieses Update, 1×/min je PC). Ein Lauf, der hier
+      // abreißt, hält den Takt ohnehin 10 min schnell; nur Waisen eines anderen Tabs am selben PC werden dann nach 6–11 min abgeschlossen.
       try{
-        if(!_tpOrbitLaeuft && Date.now() - _osVerwaistAt >= 60000){
+        if(!_tpOrbitLaeuft && Date.now() - _osVerwaistAt >= (osPipelineAktiv() ? 60000 : 300000)){
           _osVerwaistAt = Date.now()
           const pcIch = (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : ''
           const grenze = new Date(Date.now() - 6 * 60000).toISOString()
@@ -38624,6 +38657,7 @@
         .select('*').eq('status', 'wartet').order('created_at', { ascending: true })
       if(error){ _osStand = 'db-fehler: ' + String(error.message || error.code || '?').slice(0, 60); return }
       if(!sigs || !sigs.length){ _osStand = 'ok-leer'; return }
+      _osAktivAt = Date.now()   // Signal da → 10 min voller Takt (osPipelineAktiv)
       const dd = await window.mtcApi('instances')
       if(!dd || dd.copier_offline || dd._httpFail){ _osStand = 'copier-offline'; return }
       _osStand = 'kein-instanz-match'   // wird beim Claim/Beerdigen überschrieben
@@ -38969,7 +39003,30 @@
     }
     finally{ _osBusy = false }
   }
-  setInterval(orderSignalTick, 5000)
+  /* LEERLAUF-TAKT DES EMPFÄNGERS (01.10.2026, Supabase-Kontingent überschritten, Projekt gesperrt — Edge-Logs 30.09. 08–16 UTC:
+   * 23.816 GET order_signale + 4.685 OPTIONS in 8 h, fast alles dieser 5-s-Poll der PC-Tabs, der fast immer leer zurückkam).
+   * Schnell (5 s wie bisher), solange hier etwas los ist oder gleich los sein kann: ein Signal wartet/läuft oder lief in den letzten
+   * 10 min (auch die ersten 10 min nach dem Tab-Start), ein Puls-Lauf ist aktiv (Orbit-Start, Startzeit-Lauf, Remote-Lauf), ein
+   * eigener Plan ist offen (Schließen vom Mac), oder ein geplanter Plan hat eine Startzeit in den nächsten 5 min bzw. ist fällig und
+   * noch nicht gestartet. Sonst Leerlauf: alle 15 s — ein Signal vom Mac/Handy wird dann höchstens ~10 s später geclaimt, danach
+   * sofort wieder 5 s. Die geplante Startzeit selbst hängt NICHT an diesem Poll: tpStartUmTick prüft rein lokal jede Sekunde
+   * (setInterval(tpStartUmTick, 1000)) und claimt über trade_plans.start_um_gestartet_at, nicht über order_signale. */
+  const OS_TAKT_LEERLAUF_MS = 15000, OS_NACHLAUF_MS = 10 * 60000, OS_START_VORLAUF_MS = 5 * 60000
+  let _osAktivAt = Date.now(), _osPollAt = 0
+  function osPipelineAktiv(){
+    const jetzt = Date.now()
+    try{ if(_osActive || _tpOrbitLaeuft || _suLaeuft || _rsAktiv) _osAktivAt = jetzt }catch(_){ return true }   // _osBusy nicht: das ist nur der Poll selbst
+    if(jetzt - _osAktivAt < OS_NACHLAUF_MS) return true
+    try{
+      return (tradePlans || []).some(p => p && (p.status === 'open'
+        || (p.status === 'planned' && p.startUm && !p.startUmGestartetAt && new Date(p.startUm).getTime() - jetzt <= OS_START_VORLAUF_MS)))
+    }catch(_){ return true }
+  }
+  setInterval(() => {
+    if(!osPipelineAktiv() && Date.now() - _osPollAt < OS_TAKT_LEERLAUF_MS) return
+    _osPollAt = Date.now()
+    orderSignalTick()
+  }, 5000)
   // Riegel VOR dem ersten Tick hochziehen — er muss stehen, bevor der Tab
   // überhaupt in den Hintergrund geraten kann.
   _osWachStart()
@@ -39553,12 +39610,22 @@
   // Farmer-Schalter (23.09.2026, Finn: „einen Regler oben, wo ich es ausstellen kann — heute nur planen und gucken"):
   // Pläne des Winning-Day-Farmers (notes 'Winning-Day-Farmer') feuern zur Startzeit NUR, wenn wd_farmer_regeln.scharf
   // gesetzt ist. Der Schalter liegt in der DB, damit alle PC-Tabs denselben Stand haben; hier alle 60 s nachgelesen.
-  let _suScharf = null
-  async function tpFarmerScharf(){
-    if(_suScharf && Date.now() - _suScharf.at < 60000) return _suScharf.an
-    try{ const { data } = await supabase.from('wd_farmer_regeln').select('scharf').eq('id', 1).maybeSingle(); _suScharf = { at: Date.now(), an: !!(data && data.scharf) } }
-    catch(_){ _suScharf = { at: Date.now(), an: false } }
-    return _suScharf.an
+  // Nachlesen alle 60 s nur noch, wenn es zählt (01.10.2026, Supabase-Kontingent überschritten — Edge-Logs 30.09. 08–16 UTC:
+  // 7.192 GET wd_farmer_regeln in 8 h, jeder offene Tab 1×/min, oft doppelt, weil Startzeit-Takt und Kopfzeilen-Pille gleichzeitig
+  // nachfragten): der Schalter wirkt nur auf fällige Farmer-Pläne. tpStartUmTick verlangt deshalb 60 s, sobald ein Farmer-Plan
+  // in ≤ 10 min fällig ist (bzw. überfällig und nicht gestartet) — genau wie bisher; sonst und für die Pille reichen 5 min.
+  // Eine laufende Abfrage wird geteilt statt doppelt gestellt.
+  let _suScharf = null, _suScharfHolt = null
+  const WD_SCHARF_NAH_MS = 60000, WD_SCHARF_RUHE_MS = 5 * 60000
+  async function tpFarmerScharf(maxAlter){
+    if(_suScharf && Date.now() - _suScharf.at < (maxAlter || WD_SCHARF_NAH_MS)) return _suScharf.an
+    if(_suScharfHolt) return _suScharfHolt
+    _suScharfHolt = (async () => {
+      try{ const { data } = await supabase.from('wd_farmer_regeln').select('scharf').eq('id', 1).maybeSingle(); _suScharf = { at: Date.now(), an: !!(data && data.scharf) } }
+      catch(_){ _suScharf = { at: Date.now(), an: false } }
+      return _suScharf.an
+    })()
+    try{ return await _suScharfHolt }finally{ _suScharfHolt = null }
   }
   const tpIstFarmerPlan = p => /Winning-Day-Farmer/.test(String((p && p.notes) || ''))
 
@@ -39824,7 +39891,7 @@
   // sofort (noch nie geladen: alle 3 s versuchen); Farmer-Schalter auf Geräten ohne Startzeit-Takt (Mac/Handy) höchstens 1× je Minute
   let _pulsScharfHolt = false
   setInterval(() => {
-    try{ if(!_pulsScharfHolt && (!_suScharf || Date.now() - _suScharf.at > 60000)){ _pulsScharfHolt = true; tpFarmerScharf().catch(() => {}).finally(() => { _pulsScharfHolt = false }) } }catch(_){}
+    try{ if(!_pulsScharfHolt && (!_suScharf || Date.now() - _suScharf.at > WD_SCHARF_RUHE_MS)){ _pulsScharfHolt = true; tpFarmerScharf(WD_SCHARF_RUHE_MS).catch(() => {}).finally(() => { _pulsScharfHolt = false }) } }catch(_){}   // Pille: 5 min (01.10.2026)
     const seitVersuch = Date.now() - _pulsFern.versuch
     if(seitVersuch >= 15000 || (!_pulsFern.at && seitVersuch >= 3000)) pulsFernLaden().catch(() => {})
     try{ pulsNaechsterZeichnen() }catch(_){}
@@ -39880,7 +39947,10 @@
     if(!uid) return
     let _tp; try{ _tp = tradePlans }catch(_){ _tp = [] }
     const now = Date.now()
-    const scharf = await tpFarmerScharf()
+    // Schalter frisch (≤ 60 s) nur, wenn ein Farmer-Plan in ≤ 10 min fällig ist oder schon fällig wartet — sonst ≤ 5 min (01.10.2026)
+    const farmerNah = (_tp || []).some(p => p && p.status === 'planned' && p.startUm && !p.startUmGestartetAt && tpIstFarmerPlan(p)
+      && new Date(p.startUm).getTime() - now <= 10 * 60000)
+    const scharf = await tpFarmerScharf(farmerNah ? WD_SCHARF_NAH_MS : WD_SCHARF_RUHE_MS)
     const faellig = (_tp || []).filter(p => p && p.status === 'planned' && p.startUm && !p.startUmGestartetAt
       && new Date(p.startUm).getTime() <= now && (routeIstOrbit(p.route) || routeIstEcho(p.route)) && (scharf || !tpIstFarmerPlan(p))
       // Topstep V2 startet NICHT von selbst, bis Etappe K4 (scharf über CDP) grün ist (30.09.2026, Topstep-Paket, Plan v2) —
@@ -42869,9 +42939,19 @@
       if(_wd.registriertTag !== tagZiel){ const x = await wdRegistrieren(tagZiel); if(!x.fehler) _wd.registriertTag = tagZiel; else console.warn('[wd] eintragen', x.fehler) }
       // Automatik = nachts um 00:10 selbst würfeln (deterministisch, damit zwei Tabs dasselbe schreiben)
       if(r.aktiv && wdHandelstag(j.wochentag) && wdTickEntscheidung(j, r, null).wuerfeln && tagZiel === j.tag){
-        const rows = await wdRowsLaden(j.tag); if(rows.some(x => x.status === 'geplant' && !x.start_um)) await wdWuerfelnSchreiben(j.tag, false)
+        const rows = await wdRowsLaden(j.tag); if(rows.some(x => x.status === 'geplant' && !x.start_um)){ await wdWuerfelnSchreiben(j.tag, false); _wd.eigeneAt = 0 }   // gewürfelt → eigene Zeilen sofort lesen (01.10.2026)
       }
-      const { data } = await supabase.from('wd_tagesplan').select('*').eq('user_id', uid).gte('tag', wdTagPlus(j.tag, -1)).lte('tag', wdTagPlus(j.tag, 1))
+      // Eigene Zeilen alle 30 s nur, solange die Nacht „scharf" ist (01.10.2026, Supabase-Kontingent überschritten — Edge-Logs
+      // 30.09. 08–16 UTC: 3.490 GET wd_tagesplan in 8 h, fast alles diese Abfrage je PC alle 30 s, auch tagsüber ohne Plan):
+      // läuft ein Block oder ist er gewürfelt (start_um) bzw. hat er schon Pläne, bleibt es bei 30 s; sonst alle 90 s. Würfeln
+      // setzt start_um Stunden vor dem ersten Start (00:10 → ab 02:00), vom Mac angelegte Pläne sind damit weiter lange vor ihrer
+      // Startzeit geladen. Gefeuert wird ohnehin im 1-s-Takt von tpStartUmTick, nicht hier.
+      if(!_wd.eigeneAktiv && Date.now() - (_wd.eigeneAt || 0) < 90000) return
+      _wd.eigeneAt = Date.now()
+      const { data, error: eEigene } = await supabase.from('wd_tagesplan').select('*').eq('user_id', uid).gte('tag', wdTagPlus(j.tag, -1)).lte('tag', wdTagPlus(j.tag, 1))
+      if(eEigene) _wd.eigeneAt = 0   // Fehler → nächster Tick fragt wieder (nicht 90 s warten)
+      else _wd.eigeneAktiv = (data || []).some(row => row && (row.status === 'laeuft'
+        || (row.status === 'geplant' && (row.start_um || (row.konten || []).some(k => k && k.plan_id)))))
       // Pläne, die der Mac über Railway angelegt hat, kennt dieser Tab noch nicht — nachladen, sonst
       // sieht tpStartUmTick sie nicht und die Startzeit verstreicht
       const unbekannt = (data || []).some(row => (row.konten || []).some(k => k.plan_id && !(tradePlans || []).find(p => String(p.id) === String(k.plan_id))))
@@ -51294,7 +51374,11 @@
       // Nur noch im 5-s-Takt (29.09.2026, Finn: „Speichern bugt seit ein, zwei Tagen" — Supabase-Edge-Logs: der Puls-PC fragte
       // soll_an 1,5×/s ab, rund jede zehnte Anfrage an die Datenbank). Geschaltet wird selten, am eigenen Gerät schaltet
       // epSchalten ohnehin sofort lokal; aus der Ferne greift der Schalter jetzt binnen 5 s statt 1 s.
-      if(cloudFaellig) try{
+      // 5 → 30 s (01.10.2026, Supabase-Kontingent überschritten, 2.199 GET echoplus_live in 8 h): Fernschalten ist selten, der
+      // Schalter bleibt sticky in der Zeile — aus der Ferne greift er jetzt binnen 30 s. Der Status-Push unten bleibt bei 5 s.
+      const schalterFaellig = cloudFaellig && Date.now() - (epLokal.schalterAt || 0) >= 30000
+      if(schalterFaellig) epLokal.schalterAt = Date.now()
+      if(schalterFaellig) try{
         const { data: zeile } = await supabase.from('echoplus_live')
           .select('soll_an').eq('id', pc).maybeSingle()
         const soll = zeile ? zeile.soll_an : null
