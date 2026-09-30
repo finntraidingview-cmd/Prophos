@@ -11948,9 +11948,9 @@ def _tsx_felder(w):
         u = IUIA()
         dll = u.UIA_dll
         anfrage = u.iuia.CreateCacheRequest()
-        wert_id, toggle_id, pw_id = 30045, 30086, 30019   # Value, ToggleState, IsPassword (B27)
+        wert_id, toggle_id, pw_id, an_id = 30045, 30086, 30019, 30010   # Value, ToggleState, IsPassword (B27), IsEnabled (B36)
         for pid in (dll.UIA_NamePropertyId, dll.UIA_BoundingRectanglePropertyId, dll.UIA_IsOffscreenPropertyId,
-                    dll.UIA_ControlTypePropertyId, wert_id, toggle_id, pw_id):
+                    dll.UIA_ControlTypePropertyId, wert_id, toggle_id, pw_id, an_id):
             anfrage.AddProperty(pid)
         bed = None
         for t in ("Edit", "CheckBox", "Spinner", "ComboBox"):
@@ -11984,7 +11984,13 @@ def _tsx_felder(w):
                     pw = False
                 if pw:
                     wert = "•" * len(wert)             # B27: Passwort nie im Klartext — nur „gefüllt ja/nein" zählt
-                out.append((str(e.CachedName or "").strip()[:60], rr, name_von.get(e.CachedControlType, ""), wert, tg, pw))
+                try:
+                    an = e.GetCachedPropertyValue(an_id)
+                    an = bool(an) if isinstance(an, (bool, int)) else None
+                except Exception:
+                    an = None
+                # Index 6 = bearbeitbar (B36, 30.09.2026): False = in TopstepX gesperrt, None = unbekannt
+                out.append((str(e.CachedName or "").strip()[:60], rr, name_von.get(e.CachedControlType, ""), wert, tg, pw, an))
             except Exception:
                 continue
         return out
@@ -12719,7 +12725,7 @@ def tsx_fokus_passt(fokus, feld_rect, liste_ok=False):
     """REIN RECHNEND (testbar, B30): fokus = (typ, (l,t,r,b)) des fokussierten UIA-Elements. Tippen nur, wenn es ein
     Eingabefeld ist und im Ziel-Feld liegt (Mitte drin oder Feld-Mitte in ihm) — sonst markiert Strg+A die ganze Seite."""
     try:
-        typ, r = fokus
+        typ, r = fokus[0], fokus[1]                  # B36: _uia_fokus liefert seit 30.09.2026 auch den Namen (Index 2)
         if liste_ok and typ in ("ListItem", "List"):
             # B32 (27.09.2026, erster scharfer Lauf bei Mike): Chrome meldet bei der Autocomplete-Combobox „Contract" den
             # aktiven Listeneintrag (aria-activedescendant) als Fokus, obwohl die Tastatur im Eingabefeld ist — gilt, wenn
@@ -12736,15 +12742,30 @@ def tsx_fokus_passt(fokus, feld_rect, liste_ok=False):
 
 
 def _uia_fokus():
-    """(typ, rect) des fokussierten UIA-Elements | None."""
+    """(typ, rect, name) des fokussierten UIA-Elements | None. Name seit B36 (30.09.2026) — nur für die Spur."""
     try:
         from pywinauto.uia_defines import IUIA
         e = IUIA().iuia.GetFocusedElement()
         r = e.CurrentBoundingRectangle
         name_von = {v: k for k, v in _UIA_TYPID.items()}
-        return name_von.get(e.CurrentControlType, str(e.CurrentControlType)), (r.left, r.top, r.right, r.bottom)
+        try:
+            nm = str(e.CurrentName or "").strip()[:50]
+        except Exception:
+            nm = ""
+        return name_von.get(e.CurrentControlType, str(e.CurrentControlType)), (r.left, r.top, r.right, r.bottom), nm
     except Exception:
         return None
+
+
+def tsx_fokus_text(fk):
+    """REIN RECHNEND (testbar, B36): fokussiertes Element für die Spur — „Group 'Position Brackets' @906,577,1654,900"."""
+    try:
+        typ, r = fk[0], fk[1]
+        nm = str(fk[2]) if len(fk) > 2 and fk[2] else ""
+        teil = (" '" + nm[:40] + "'") if nm else ""
+        return str(typ) + teil + " @" + ",".join(str(int(v)) for v in r)
+    except (TypeError, ValueError, IndexError):
+        return "?"
 
 
 def tsx_liste_neu(vorher, nachher, feld_rect):
@@ -12784,12 +12805,14 @@ def _uia_tastatur_im_feld(rect):
     return False
 
 
-def _tsx_tippen(feld, text, trail, name, ist=None, liste_ok=False):
+def _tsx_tippen(feld, text, trail, name, ist=None, liste_ok=False, klick=True, versuche=2):
     """Feld anklicken, Inhalt löschen (Strg+A, Entf), text tippen (leer = nur leeren).
     B30 (27.09.2026, erste Probe bei Mike — Finn: „etwas wurde markiert, der ganze Bildschirm, da, wo das Bracket eingestellt
     wurde"): Strg+A lief, als der Fokus nicht im Feld war (Risk war schon leer). Jetzt: steht der Soll-Wert schon (ist), wird
     gar nichts getippt; sonst nur tippen, wenn das fokussierte Element ein Eingabefeld IM Ziel-Feld ist (zweiter Klick als
-    Versuch) — ohne Fokus-Beweis kein Tastendruck. -> True = Feld steht/wurde getippt, False = nichts getippt."""
+    Versuch) — ohne Fokus-Beweis kein Tastendruck. -> True = Feld steht/wurde getippt, False = nichts getippt.
+    B36 (30.09.2026): klick=False = der Fokus wurde schon per Tastatur ins Feld gebracht (_tsx_per_tab) — nur beweisen, nicht
+    klicken; die Spur nennt jetzt auch das Tippen selbst und bei Fehlern Typ, Name und Rechteck des fokussierten Elements."""
     if ist is not None and tsx_wert_gleich(ist, text):
         trail.append(f"Feld {name} steht schon ({'leer' if not str(text or '') else text}) — nichts getippt")
         return True
@@ -12800,9 +12823,10 @@ def _tsx_tippen(feld, text, trail, name, ist=None, liste_ok=False):
     fokus_ok = False
     liste = liste_ok if callable(liste_ok) else None       # B33: Liste der ListItems (vorher/nachher) für die Contract-Suche
     liste_vorher = liste() if liste else []
-    for versuch in range(2):
-        _tsx_klick((name, feld[1], feld[2]), f"Feld {name}", trail)
-        _warte(0.25, 0.2)
+    for versuch in range(max(1, int(versuche)) if klick else 1):
+        if klick:
+            _tsx_klick((name, feld[1], feld[2]), f"Feld {name}", trail)
+            _warte(0.25, 0.2)
         fk = _uia_fokus()
         if liste:
             # B33 (Mike 16:29 UTC): der aktive Eintrag (aktueller Wert MNQZ26) liegt weit unten in der gescrollten Liste.
@@ -12825,7 +12849,7 @@ def _tsx_tippen(feld, text, trail, name, ist=None, liste_ok=False):
             trail.append(f"Fokus-Beweis Feld {name}: HasKeyboardFocus")
             fokus_ok = True
             break
-        trail.append(f"Fokus nicht im Feld {name} ({fk[0] if fk else '?'})")
+        trail.append(f"Fokus nicht im Feld {name} ({tsx_fokus_text(fk) if fk else '?'})")
     if not fokus_ok:
         trail.append(f"Feld {name}: kein Fokus — nichts getippt")
         return False
@@ -12837,7 +12861,174 @@ def _tsx_tippen(feld, text, trail, name, ist=None, liste_ok=False):
     if text:
         keyboard.send_keys(tv_tasten_escape(str(text)), with_spaces=True, pause=0.03)
         _warte(0.2, 0.15)
+    # B36: Tippen selbst in die Spur (Chris 30.09.2026: nach „Feld Profit geklickt" fehlte jeder Beleg, dass 33 getippt wurde)
+    trail.append(f"Feld {name} getippt: '{text}'" if text else f"Feld {name} geleert")
     return True
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# B36 BRACKET-FELDER ROBUST (30.09.2026, Chris pc-c19p2l 02:20 UTC + Mike pc-l5o8bv 28.09. 20:49 zweimal): „Feld Profit geklickt",
+# dann „Feld Risk geklickt @736,645 → Fokus nicht im Feld Risk (Group)" (bei Mike beim zweiten Klick sogar das Dokument, 50030).
+# Befund: Risk ist ein Edit direkt links neben Profit (Mikes Inventar: Risk (~$) [936,800,1177,851], Profit [1197,800,1438,851]),
+# gefunden war also das richtige Feld. Bis zum 28.09. stand Risk immer schon leer (Pläne ohne SL) — der Risk-KLICK lief nie. Seit
+# SL gesetzt wird, trifft der Mausklick in die Mitte des (VOR dem Profit-Tippen gelesenen) Rechtecks nicht mehr das Eingabefeld.
+# Ob sich der Dialog nach dem Profit-Wert verschiebt oder etwas darüber liegt, zeigen die Daten nicht — deshalb beides:
+#   1. vor JEDEM Feld frisch lesen (Rechteck von jetzt, nicht von vor dem ersten Tippen), Edit vor anderen Typen gleichen Namens
+#   2. trifft die Maus nicht: vom schon per Klick bewiesenen Nachbarfeld aus EINE Taste (Shift+Tab/Tab nach Lage), Fokus im Zielfeld
+#      beweisen, erst dann Strg+A/Entf/tippen (Tab tippt nie etwas); gesperrtes Feld (IsEnabled false) → nie klicken, klar melden
+#   3. scheitert es trotzdem: Umgebung (Typ:'Name'@Rechteck, gesperrt) + fokussiertes Element in Meldung und Spur
+# Klick-Regeln unverändert (_tsx_klick → _tv_uia_klick: Windows-Maus, Popup-Räumung, Pausen über _warte mit Streuung).
+# ═══════════════════════════════════════════════════════════════════════════
+TSX_BRACKET_REIHE = (("Profit", "profit"), ("Risk", "risk"))
+
+
+def tsx_bracket_feld(felder, name):
+    """REIN RECHNEND (testbar, B36): Bracket-Feld per Namensanfang („Risk (~$)") — Edit/Spinner vor anderen Typen gleichen
+    Namens (ein ComboBox-/CheckBox-Treffer wäre kein Eingabefeld). -> Feld | None"""
+    pre = str(name or "").lower()
+    passend = [f for f in felder or () if str(f[0] or "").strip().lower().startswith(pre) and f[1]]
+    return next((f for f in passend if f[2] in ("Edit", "Spinner")), None) or (passend[0] if passend else None)
+
+
+def tsx_rect_verschoben(a, b, tol=3):
+    """REIN RECHNEND (testbar, B36): Rechtecke weichen um mehr als tol px ab (oder eins fehlt)."""
+    try:
+        return any(abs(int(x) - int(y)) > tol for x, y in zip(a, b))
+    except (TypeError, ValueError):
+        return True
+
+
+def tsx_tab_taste(von_rect, zu_rect, umgekehrt=False):
+    """REIN RECHNEND (testbar, B36): Taste vom Feld „von" zum Feld „zu" in Lese-Reihenfolge — liegt „zu" davor (darüber oder in
+    derselben Zeile links), Shift+Tab („+{TAB}"), sonst Tab. umgekehrt = die andere Richtung (zweiter Versuch)."""
+    vy, zy = (von_rect[1] + von_rect[3]) / 2, (zu_rect[1] + zu_rect[3]) / 2
+    davor = zy < vy - 10 or (abs(zy - vy) <= 10 and zu_rect[0] < von_rect[0])
+    return "+{TAB}" if davor != bool(umgekehrt) else "{TAB}"
+
+
+def tsx_bracket_umgebung(roh, felder, anker, max_n=24):
+    """REIN RECHNEND (testbar, B36): Elemente rund um das Bracket-Feld für die Fehlermeldung — Typ:'Name'@l,t,r,b, Edits mit Wert
+    und „gesperrt". Bereich = Mitte des Elements in anker ± 600 px waagerecht, 260 px darüber bis 140 px darunter (Dialog-Kopf bis
+    Haken-Zeile; Mikes Dialog 906–1654 bei Risk 936–1177, das Order-Panel rechts ab x 1976 bleibt draußen), Container > 1000 px nie.
+    Zugangsfelder nie mit Wert (tsx_ist_zugangsfeld). -> [str] (oben nach unten, links nach rechts)"""
+    if not anker:
+        return []
+    l0, t0, r0, b0 = anker[0] - 600, anker[1] - 260, anker[2] + 600, anker[3] + 140
+    out, gesehen = [], set()
+    alle = [(e[0], e[1], e[2] if len(e) > 2 else "", None) for e in roh or ()] + [(f[0], f[1], f[2], f) for f in felder or ()]
+    for n, r, typ, f in alle:
+        try:
+            l, t, rr, b = (int(v) for v in r)
+        except (TypeError, ValueError):
+            continue
+        mx, my = (l + rr) / 2, (t + b) / 2
+        if not (l0 <= mx <= r0 and t0 <= my <= b0) or rr - l > 1000:
+            continue
+        k = (str(typ), str(n or "")[:40], (l, t, rr, b))
+        if k in gesehen:
+            continue
+        gesehen.add(k)
+        zusatz = ""
+        if f is not None:
+            if len(f) > 6 and f[6] is False:
+                zusatz += " gesperrt"
+            if f[3] not in (None, "") and not tsx_ist_zugangsfeld(f):
+                zusatz += f" ='{str(f[3])[:12]}'"
+        out.append((t, l, f"{typ}:'{str(n or '')[:40]}'@{l},{t},{rr},{b}{zusatz}"))
+    return [x[2] for x in sorted(out)[:max_n]]
+
+
+def _tsx_per_tab(w, von, zu, wert, trail):
+    """B36: Zielfeld über die Tastatur erreichen — Nachbarfeld „von" (Klick dort schon bewiesen) anklicken, Fokus beweisen, EINE
+    Taste (Shift+Tab/Tab nach Lage), Fokus im Zielfeld beweisen, dann wie gewohnt leeren/tippen. Zweiter Versuch in die andere
+    Richtung (Tab-Reihenfolge muss nicht der Optik folgen). Ohne Beweis keine weitere Taste. -> bool (getippt/steht)"""
+    try:
+        from pywinauto import keyboard
+    except ImportError:
+        return False
+    for nr in range(2):
+        felder = _tsx_felder(w)
+        fv, fz = tsx_bracket_feld(felder, von), tsx_bracket_feld(felder, zu)
+        if not fv or not fz:
+            trail.append(f"Tab-Weg: Feld {von if not fv else zu} nicht mehr im Dialog")
+            return False
+        _tsx_klick((von, fv[1], fv[2]), f"Feld {von} (Ausgang für den Tab-Weg)", trail)
+        _warte(0.25, 0.2)
+        fk = _uia_fokus()
+        if not tsx_fokus_passt(fk, fv[1]):
+            trail.append(f"Tab-Weg: Fokus nicht im Feld {von} ({tsx_fokus_text(fk) if fk else '?'}) — keine Taste")
+            return False
+        taste = tsx_tab_taste(fv[1], fz[1], umgekehrt=bool(nr))
+        tname = "Shift+Tab" if taste.startswith("+") else "Tab"
+        keyboard.send_keys(taste)
+        _warte(0.25, 0.15)
+        fk = _uia_fokus()
+        if tsx_fokus_passt(fk, fz[1]):
+            trail.append(f"Feld {zu} per {tname} aus Feld {von} erreicht (Fokus {tsx_fokus_text(fk)})")
+            return _tsx_tippen(fz, wert, trail, zu, ist=fz[3], klick=False)
+        trail.append(f"Tab-Weg: {tname} aus Feld {von} landete nicht im Feld {zu} ({tsx_fokus_text(fk) if fk else '?'})")
+    return False
+
+
+def _tsx_brackets_tippen(w, brackets, trail):
+    """B36: Profit und Risk im Dialog „Position Brackets" setzen — je Feld frisch gelesen, Klick mit Fokus-Beweis (zweiter Klick nur auf
+    ein NEU gelesenes Rechteck), sonst Tab-Weg aus dem anderen Feld. -> (ok, msg, umgebung) — umgebung nur bei Fehlern.
+    Gegenprüfung 30.09.2026 (drei Prüfer, gleicher Befund): Ausgang für den Tab-Weg darf auch ein Feld sein, das schon auf dem Soll-Wert
+    stand (Wiederholung mit gleichem TP) — _tsx_per_tab beweist den Fokus dort ohnehin selbst per Klick, bevor es eine Taste drückt."""
+    felder0 = _tsx_felder(w)
+    namen = [n for n, _k in TSX_BRACKET_REIHE]
+    bewiesen, spaeter = [], []
+
+    def fehler(nm, grund):
+        felder = _tsx_felder(w)
+        f = tsx_bracket_feld(felder, nm) or tsx_bracket_feld(felder0, nm)
+        fk = _uia_fokus()
+        umg = tsx_bracket_umgebung(_tsx_seite_roh(w), felder, f[1] if f else None)
+        ftxt = tsx_fokus_text(fk) if fk else "?"
+        trail.append(f"Umgebung Feld {nm} (Fokus {ftxt}): " + " · ".join(umg))
+        return False, f"{grund} Fokus: {ftxt}. Umgebung: {' · '.join(umg[:8]) or 'leer'}", umg
+
+    def frisch(nm):
+        f = tsx_bracket_feld(_tsx_felder(w), nm)   # frisch: der Dialog kann sich nach dem vorigen Feld verschoben haben
+        f_alt = tsx_bracket_feld(felder0, nm)
+        if f and f_alt and tsx_rect_verschoben(f_alt[1], f[1]):
+            trail.append(f"Feld {nm} hat sich verschoben: {list(f_alt[1])} → {list(f[1])} — frisches Rechteck")
+        return f
+
+    # Runde 1: je Feld frisch lesen; steht → nichts; gesperrt → Ende; Klick (höchstens zwei, der zweite auf ein neu gelesenes Rechteck)
+    for nm, key in TSX_BRACKET_REIHE:
+        wert = brackets[key]
+        f = frisch(nm)
+        if not f:
+            return fehler(nm, f"Feld „{nm}\" nicht mehr im Dialog — nichts getippt.")
+        if tsx_wert_gleich(f[3], wert):
+            _tsx_tippen(f, wert, trail, nm, ist=f[3])                # nur die Zeile „steht schon" — kein Klick
+            continue
+        if len(f) > 6 and f[6] is False:
+            return fehler(nm, f"Feld „{nm}\" ist in TopstepX gesperrt (nicht bearbeitbar) — nichts getippt.")
+        if _tsx_tippen(f, wert, trail, nm, ist=f[3], versuche=1):
+            bewiesen.append(nm)
+            continue
+        f2 = frisch(nm)                                              # nie blind aufs alte Rechteck (Mike: 2. Klick traf das Dokument)
+        if not f2:
+            return fehler(nm, f"Feld „{nm}\" nach dem ersten Klick nicht mehr im Dialog — kein zweiter Klick, nichts getippt.")
+        if _tsx_tippen(f2, wert, trail, nm, ist=f2[3], versuche=1):
+            bewiesen.append(nm)
+            continue
+        trail.append(f"Feld {nm}: Maus trifft nicht — Tab-Weg aus dem anderen Feld")
+        spaeter.append((nm, key))
+    # Runde 2: Tab-Weg aus einem anderen Feld (erst per Klick bewiesene, dann schon stimmende) — _tsx_per_tab beweist selbst
+    for nm, key in spaeter:
+        quellen = [n for n in bewiesen if n != nm] + [n for n in namen if n != nm and n not in bewiesen and (n, dict(TSX_BRACKET_REIHE)[n]) not in spaeter]
+        if not quellen:
+            return fehler(nm, f"Feld „{nm}\" bekam keinen Fokus — kein anderes Feld für den Tab-Weg, nichts getippt.")
+        for q in quellen:
+            if _tsx_per_tab(w, q, nm, brackets[key], trail):
+                bewiesen.append(nm)
+                break
+        else:
+            return fehler(nm, f"Feld „{nm}\" bekam keinen Fokus (Klick und Tab-Weg) — nichts getippt.")
+    return True, "", None
 
 
 def _tsx_feld_wert(w, name=None, rect=None):
@@ -12893,20 +13084,23 @@ def _tsx_order_nach_kopf(befehl):
             felder = _tsx_felder(w)
             if any(f[0].lower().startswith("risk") for f in felder) and any(f[0].lower().startswith("profit") for f in felder):
                 break
-        f_risk = next((f for f in felder if f[0].lower().startswith("risk")), None)
-        f_prof = next((f for f in felder if f[0].lower().startswith("profit")), None)
+        f_risk = tsx_bracket_feld(felder, "Risk")
+        f_prof = tsx_bracket_feld(felder, "Profit")
         if not f_risk or not f_prof:
             _tsx_esc()
             return ende("bracket", "Bracket-Dialog: Felder „Risk (~$)\"/„Profit (~$)\" nicht gefunden.",
                         felder=tsx_felder_kurz(felder, 40))
-        for feld, wert, nm in ((f_prof, befehl["brackets"]["profit"], "Profit"), (f_risk, befehl["brackets"]["risk"], "Risk")):
-            if not _tsx_tippen(feld, wert, trail, nm, ist=feld[3]):
-                _tsx_esc()
-                return ende("bracket", f"Feld „{nm}\" bekam keinen Fokus — nichts getippt.")
+        # B36 (30.09.2026): je Feld frisch gelesen, Klick mit Fokus-Beweis, sonst Tab-Weg vom bewiesenen Nachbarfeld
+        ok_b, msg_b, umg_b = _tsx_brackets_tippen(w, befehl["brackets"], trail)
+        if not ok_b:
+            _tsx_esc()
+            return ende("bracket", msg_b, bracket_umgebung=umg_b)
         _warte(0.3, 0.2)
         felder = _tsx_felder(w)
-        r_ist = next((f[3] for f in felder if f[0].lower().startswith("risk")), None)
-        p_ist = next((f[3] for f in felder if f[0].lower().startswith("profit")), None)
+        f_risk = tsx_bracket_feld(felder, "Risk") or f_risk          # Dialog kann sich verschoben haben (Close-Knopf-Suche unten)
+        f_prof = tsx_bracket_feld(felder, "Profit") or f_prof
+        r_ist = f_risk[3] if tsx_bracket_feld(felder, "Risk") else None
+        p_ist = f_prof[3] if tsx_bracket_feld(felder, "Profit") else None
         trail.append(f"Brackets zurückgelesen: Profit '{p_ist}' (soll {befehl['brackets']['profit']}), "
                      f"Risk '{r_ist}' (soll {befehl['brackets']['risk'] or 'leer'})")
         p_ok = tsx_geld(p_ist) is not None and abs(tsx_geld(p_ist) - float(befehl["brackets"]["profit"])) < 0.01

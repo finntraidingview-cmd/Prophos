@@ -1890,6 +1890,7 @@ def main():
     results.append(test_tsx_beweis())
     results.append(test_tsx_order())
     results.append(test_tsx_login())
+    results.append(test_tsx_bracket_b36())
     results.append(test_puls_heim())
     results.append(test_tv_tp_orders())
     results.append(test_hedge_bereit())
@@ -3910,7 +3911,7 @@ def test_tsx_order():
             elif name.startswith("Schnellknopf "): z["menge"] = int(name.split()[-1])
             elif name == "Increase quantity": z["menge"] += 1
 
-        def tippen(feld, text, trail, name, ist=None, liste_ok=False):
+        def tippen(feld, text, trail, name, ist=None, liste_ok=False, **_kw):   # **_kw: klick/versuche (B36)
             if ist is not None and ob.tsx_wert_gleich(ist, text):
                 return True
             z["klicks"].append("tippe " + name)
@@ -4132,6 +4133,141 @@ def test_tsx_login():
     return ok
 
 
+
+
+def test_tsx_bracket_b36():
+    """B36 (30.09.2026, Chris pc-c19p2l + Mike pc-l5o8bv): „Feld Risk geklickt → Fokus nicht im Feld Risk (Group)". Attrappe des
+    Dialogs „Position Brackets" (Mikes Rechtecke): Edit vor Container gleichen Namens, frisches Rechteck nach Verschieben,
+    Tab-Weg vom bewiesenen Profit-Feld, gesperrtes Feld, Umgebung in der Meldung — nie eine Taste ohne Fokus-Beweis."""
+    import order_bot as ob, sys as _s, types as _t
+    ok = True
+
+    def chk(name, bed):
+        nonlocal ok
+        if not bed:
+            print("✗ TSX-Bracket B36: " + name); ok = False
+
+    RISK, PROF, DLG = (936, 800, 1177, 851), (1197, 800, 1438, 851), (906, 577, 1654, 910)
+    # rein rechnend
+    cont = ("Risk (~$)", (920, 790, 1190, 860), "ComboBox", "", None)
+    edit = ("Risk (~$)", RISK, "Edit", "", None)
+    chk("Edit vor Container gleichen Namens", ob.tsx_bracket_feld([cont, edit], "Risk") == edit
+        and ob.tsx_bracket_feld([cont], "risk") == cont and ob.tsx_bracket_feld([], "Risk") is None)
+    chk("Verschoben ±3 px", not ob.tsx_rect_verschoben(RISK, (937, 801, 1178, 852)) and ob.tsx_rect_verschoben(RISK, (936, 850, 1177, 901))
+        and ob.tsx_rect_verschoben(None, RISK))
+    chk("Tab-Richtung: Risk links von Profit = Shift+Tab, umgekehrt Tab", ob.tsx_tab_taste(PROF, RISK) == "+{TAB}"
+        and ob.tsx_tab_taste(PROF, RISK, umgekehrt=True) == "{TAB}" and ob.tsx_tab_taste(RISK, PROF) == "{TAB}")
+    chk("Fokus-Text", ob.tsx_fokus_text(("Group", DLG, "Position Brackets")) == "Group 'Position Brackets' @906,577,1654,910"
+        and ob.tsx_fokus_text(("Edit", RISK)) == "Edit @936,800,1177,851" and ob.tsx_fokus_text(None) == "?")
+    chk("Fokus-Beweis mit 3er-Tupel", ob.tsx_fokus_passt(("Edit", (940, 805, 1170, 845), "Risk (~$)"), RISK)
+        and not ob.tsx_fokus_passt(("Group", DLG, "x"), RISK))
+    roh_d = [("Position Brackets close", (906, 577, 1654, 658), "Text"), ("Risk (~$)", (953, 812, 1008, 831), "Text"),
+             ("Automatically apply Risk / Profit bracket to new Positions", (957, 872, 1296, 891), "Text"), ("Chart", (0, 0, 800, 400), "Pane")]
+    umg = ob.tsx_bracket_umgebung(roh_d, [("Risk (~$)", RISK, "Edit", "", None, False, False), ("Profit (~$)", PROF, "Edit", "33", None, False, True)], RISK)
+    chk(f"Umgebung: Dialog-Elemente, gesperrt + Wert, Chart draußen ({umg})",
+        any(u.startswith("Edit:'Risk (~$)'@936,800,1177,851 gesperrt") for u in umg) and any("='33'" in u for u in umg)
+        and any(u.startswith("Text:'Position Brackets close'") for u in umg) and not any("Chart" in u for u in umg)
+        and ob.tsx_bracket_umgebung(roh_d, [], None) == [])
+
+    # Attrappe: Dialog mit Maus-/Tastatur-Zustand
+    def lauf(risk_klick=True, tab="shift", verschiebt=0, gesperrt=None, risk_start="", mit_container=False, profit_start="250", schliesst=False):
+        z = {"fokus": None, "risk": risk_start, "profit": profit_start, "tasten": [], "klicks": [], "dy": 0, "zu": False}
+
+        def rr():
+            return (RISK[0], RISK[1] + z["dy"], RISK[2], RISK[3] + z["dy"])
+
+        def fld(w):
+            if z["zu"]:
+                return []                                  # Dialog nach dem Klick weg (Mike: 2. Klick traf das Dokument)
+            r = []
+            if mit_container:
+                r.append(("Risk (~$)", (920, 790 + z["dy"], 1190, 860 + z["dy"]), "ComboBox", "", None))
+            r += [("Risk (~$)", rr(), "Edit", z["risk"], None, False, gesperrt),
+                  ("Profit (~$)", (PROF[0], PROF[1] + z["dy"], PROF[2], PROF[3] + z["dy"]), "Edit", z["profit"], None, False, True)]
+            return r
+
+        def klick(e, name, trail):
+            x, y = (e[1][0] + e[1][2]) // 2, (e[1][1] + e[1][3]) // 2
+            z["klicks"].append(name)
+            trail.append(f"{name} geklickt @{x},{y}")
+            pr = (PROF[0], PROF[1] + z["dy"], PROF[2], PROF[3] + z["dy"])
+            if pr[0] <= x <= pr[2] and pr[1] <= y <= pr[3]:
+                z["fokus"] = ("Edit", pr, "Profit (~$)")
+            elif rr()[0] <= x <= rr()[2] and rr()[1] <= y <= rr()[3] and e[2] == "Edit" and risk_klick:
+                z["fokus"] = ("Edit", rr(), "Risk (~$)")
+            else:
+                z["fokus"] = ("Group", DLG, "Position Brackets")
+                if schliesst:
+                    z["zu"] = True
+
+        def tasten(k, **kw):
+            z["tasten"].append(k)
+            f = z["fokus"]
+            if k in ("+{TAB}", "{TAB}"):
+                if f and f[2] == "Profit (~$)" and ((k == "+{TAB}" and tab == "shift") or (k == "{TAB}" and tab == "tab")):
+                    z["fokus"] = ("Edit", rr(), "Risk (~$)")
+                else:
+                    z["fokus"] = ("Button", (936, 677, 1154, 716), "Account must be fully flattened before switching")
+                return
+            key = {"Risk (~$)": "risk", "Profit (~$)": "profit"}.get(f[2]) if f and f[0] == "Edit" else None
+            if not key:
+                return
+            if k == "{DELETE}":
+                z[key] = ""
+            elif k != "^a":
+                z[key] += k
+                if key == "profit" and verschiebt:
+                    z["dy"] = verschiebt                  # Dialog schiebt sich nach dem Profit-Wert (Hypothese B36)
+
+        pw_alt = _s.modules.get("pywinauto")
+        pw = _t.ModuleType("pywinauto"); pw.keyboard = _t.SimpleNamespace(send_keys=tasten); _s.modules["pywinauto"] = pw
+        alt = {k: getattr(ob, k) for k in ("_tsx_felder", "_tsx_klick", "_uia_fokus", "_warte", "_tsx_seite_roh", "_uia_tastatur_im_feld")}
+        ob._tsx_felder, ob._tsx_klick, ob._uia_fokus = fld, klick, (lambda: z["fokus"])
+        ob._warte = lambda *a, **k: None
+        ob._tsx_seite_roh = lambda w, typen=None: roh_d
+        ob._uia_tastatur_im_feld = lambda r: False
+        sp = []
+        try:
+            erg = ob._tsx_brackets_tippen(object(), {"profit": "33", "risk": "12"}, sp)
+        finally:
+            for k, v in alt.items():
+                setattr(ob, k, v)
+            if pw_alt is not None: _s.modules["pywinauto"] = pw_alt
+            else: _s.modules.pop("pywinauto", None)
+        return erg, z, " > ".join(sp)
+
+    (ok1, m1, u1), z1, sp1 = lauf(mit_container=True)
+    chk(f"Risk-Container + Edit-Kind → Klick aufs Edit → getippt ({sp1})", ok1 and z1["risk"] == "12" and z1["profit"] == "33"
+        and "Feld Risk geklickt @1056,825" in sp1 and "Feld Risk getippt: '12'" in sp1 and "Feld Profit getippt: '33'" in sp1)
+    (ok2, m2, u2), z2, sp2 = lauf(risk_klick=False)
+    chk(f"Chris-Fall: Maus trifft Risk nicht → Shift+Tab aus Profit → getippt ({sp2})", ok2 and z2["risk"] == "12"
+        and "per Shift+Tab aus Feld Profit erreicht" in sp2 and "Fokus nicht im Feld Risk (Group 'Position Brackets'" in sp2
+        and z2["tasten"].count("+{TAB}") == 1 and "{TAB}" not in z2["tasten"])
+    (ok3, m3, u3), z3, sp3 = lauf(risk_klick=False, tab="tab")
+    chk(f"Tab-Reihenfolge andersrum → zweiter Versuch mit Tab ({sp3})", ok3 and z3["risk"] == "12"
+        and z3["tasten"].count("+{TAB}") == 1 and z3["tasten"].count("{TAB}") == 1 and "per Tab aus Feld Profit erreicht" in sp3)
+    (ok4, m4, u4), z4, sp4 = lauf(risk_klick=False, tab="nie")
+    chk(f"weder Klick noch Tab → Ende mit Fokus + Umgebung, Risk nie getippt ({m4})", not ok4 and z4["risk"] == ""
+        and "Fokus: Button 'Account must be fully flattened" in m4 and "Umgebung: " in m4 and "Edit:'Risk (~$)'@936,800,1177,851" in m4
+        and "12" not in z4["tasten"] and u4)
+    (ok5, m5, u5), z5, sp5 = lauf(verschiebt=50)
+    chk(f"Dialog verschiebt sich nach dem Profit-Wert → frisches Rechteck, Klick trifft ({sp5})", ok5 and z5["risk"] == "12"
+        and "Feld Risk hat sich verschoben" in sp5 and "Feld Risk geklickt @1056,875" in sp5)
+    (ok6, m6, u6), z6, sp6 = lauf(gesperrt=False)
+    chk(f"Risk gesperrt → nie geklickt, klare Meldung ({m6})", not ok6 and "gesperrt" in m6 and "Feld Risk" not in " ".join(z6["klicks"])
+        and z6["risk"] == "")
+    (ok8, m8, u8), z8, sp8 = lauf(risk_klick=False, profit_start="33")
+    chk(f"Prüfer-Befund: Profit steht schon auf 33, Risk-Klick trifft nicht → Shift+Tab aus Profit ({sp8})", ok8 and z8["risk"] == "12"
+        and "Feld Profit steht schon" in sp8 and "per Shift+Tab aus Feld Profit erreicht" in sp8 and z8["tasten"].count("+{TAB}") == 1)
+    (ok9, m9, u9), z9, sp9 = lauf(risk_klick=False, schliesst=True)
+    chk(f"Dialog nach erstem Risk-Klick weg → kein zweiter Klick, Meldung ({m9})", not ok9 and z9["klicks"].count("Feld Risk") == 1
+        and "nicht mehr im Dialog" in m9 and "12" not in z9["tasten"])
+    (ok7, m7, u7), z7, sp7 = lauf(risk_start="12")
+    chk(f"Risk steht schon auf 12 → kein Risk-Klick ({sp7})", ok7 and "Feld Risk steht schon" in sp7 and "Feld Risk" not in " ".join(z7["klicks"]))
+    if ok:
+        print("✓ TSX-Bracket B36: Edit vor Container, frisches Rechteck, Tab-Weg vom bewiesenen Profit-Feld (beide Richtungen), "
+              "gesperrt/kein Fokus → Meldung mit Fokus + Umgebung, nie eine Taste ohne Beweis")
+    return ok
 
 def test_puls_heim():
     """B35 (27.09.2026, Finn): nach jedem Puls-Lauf zurück in den Prophos-Tab — nur wenn der Lauf den Vordergrund gewechselt
