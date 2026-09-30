@@ -1567,54 +1567,74 @@
   #af-view .af-ls[hidden]{display:none}   /* display:flex schlägt sonst das hidden-Attribut */
   #af-view .af-filter{display:flex;align-items:center;gap:8px 14px;flex-wrap:wrap;margin-bottom:14px}
   #af-view .af-filter .af-chip-bar{flex:1;min-width:0}
-  /* Karten je ID im Spalten-Fluss statt Raster: die Karten sind sehr verschieden hoch (2 bis 19 Konten), im Raster
-     blieben unter kurzen Karten große Lücken. Reihenfolge läuft dadurch spaltenweise von oben nach unten. */
-  #af-view .af-ids{column-width:360px;column-gap:12px}
-  #af-view .af-id{padding:14px 16px 10px;min-width:0;margin:0 0 12px;break-inside:avoid;-webkit-column-break-inside:avoid}
-  #af-view .af-id-kopf{display:flex;align-items:center;gap:8px;min-width:0;margin-bottom:8px}
+  /* Karten je ID (Feinschliff 30.09.2026, Finn zu .841: „gerade in den Kärtchen ist es vom Layout her noch richtig
+     schlecht"): jede Konto-Zeile aller Karten hat DASSELBE Raster [Typ | Name | Firma | Status] mit festen Breiten —
+     Badges, Namen, Firmen und Status stehen über alle Zeilen und Karten exakt untereinander. Damit der Name dabei
+     Platz behält, sind die Karten breit: eine Spalte am Laptop, zwei erst ab sehr breitem Bildschirm (gleiche Breite,
+     also auch dann bündig). */
+  #af-view{--af-typ:84px;--af-name:360px;--af-firma:120px;--af-status:200px}
+  #af-view .af-ids{column-width:620px;column-gap:12px}
+  #af-view .af-id{padding:12px 16px 6px;min-width:0;margin:0 0 12px;break-inside:avoid;-webkit-column-break-inside:avoid}
+  #af-view .af-id-kopf{display:flex;align-items:center;flex-wrap:wrap;gap:6px 10px;min-width:0;padding-bottom:8px;border-bottom:1px solid var(--border-soft)}
   #af-view .af-id-kopf .adm-dot{margin-right:0;width:10px;height:10px}
   #af-view .af-id-name{font-size:14px;font-weight:600;letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-  #af-view .af-id-zahlen{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--sub);white-space:nowrap;font-variant-numeric:tabular-nums}
-  #af-view .af-pille{font-size:12px;font-weight:600;padding:2px 9px;border-radius:999px;color:var(--violet);background:var(--violet-tint)}
+  #af-view .af-pille{font-size:12px;font-weight:600;padding:2px 9px;border-radius:999px;color:var(--violet);background:var(--violet-tint);white-space:nowrap}
+  #af-view .af-nix{font-size:12px;color:var(--sub-2);white-space:nowrap}
+  /* Heute je ID: „heute 3 Trades · 2 Long · 1 Short" + Mini-Balken wie oben */
+  #af-view .af-id-heute{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--sub);white-space:nowrap;font-variant-numeric:tabular-nums}
+  #af-view .af-id-heute .af-ls{width:56px;height:5px}
   #af-view .af-id.is-erledigt .af-id-name{color:var(--sub)}
-  #af-view .af-gruppe{margin-top:6px}
-  #af-view .af-g-titel{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--sub-2);margin:8px 0 2px}
-  #af-view .af-g-titel.is-offen{color:var(--violet)}
-  #af-view .af-leer{font-size:12.5px;color:var(--sub);padding:6px 0 4px}
-  /* Konto-Zeile: Phase-Badge · Name · Zusatz rechts, einzeilig */
-  #af-view .af-z{display:flex;align-items:center;gap:8px;min-width:0;padding:6px 0;border-top:1px solid var(--border-soft);font-size:13px}
-  #af-view .af-g-titel + .af-z{border-top:none}
-  #af-view .af-z .type-badge{flex:none;width:76px;justify-content:center;padding:2px 4px;font-size:10.5px;white-space:nowrap}
-  #af-view .af-z-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  #af-view .af-z-info{flex:none;max-width:48%;display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
-  #af-view .af-z-info span{overflow:hidden;text-overflow:ellipsis}
+  #af-view .af-leer{font-size:12.5px;color:var(--sub);padding:8px 0 6px}
+  /* Konto-Zeile: gemeinsames Raster, lange Namen mit Ellipse (voller Name im Tooltip) */
+  /* Name gedeckelt, der Rest der Breite liegt zwischen Firma und Status — sonst stand die Firma bei kurzen Namen weit rechts */
+  #af-view .af-z{display:grid;grid-template-columns:var(--af-typ) minmax(0,var(--af-name)) var(--af-firma) minmax(0,1fr) var(--af-status);
+    grid-template-areas:"typ name firma . status";column-gap:14px;align-items:center;min-width:0;padding:6px 0;
+    border-top:1px solid var(--border-soft);font-size:13px}
+  #af-view .af-id-kopf + .af-z{border-top:none}
+  #af-view .af-z .type-badge{grid-area:typ;width:100%;justify-content:center;padding:2px 4px;font-size:10.5px;white-space:nowrap;overflow:hidden}
+  #af-view .af-z-name{grid-area:name;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #af-view .af-z-firma{grid-area:firma;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--sub)}
+  #af-view .af-z-status{grid-area:status;min-width:0;display:flex;align-items:center;justify-content:flex-end;gap:6px;font-size:12px;color:var(--sub);white-space:nowrap;font-variant-numeric:tabular-nums}
+  #af-view .af-z-status > span:last-child{overflow:hidden;text-overflow:ellipsis}
+  #af-view .af-z.is-offen .af-z-name{font-weight:500}
+  #af-view .af-z-status .af-offen{color:var(--violet);font-weight:500}
+  #af-view .af-z.is-lauf .af-z-status{color:var(--ink)}
   #af-view .af-z.is-fertig,#af-view .af-z.is-arch{color:var(--sub)}
-  #af-view .af-z.is-fertig .type-badge,#af-view .af-z.is-arch .type-badge{opacity:.6}
+  #af-view .af-z.is-fertig .type-badge,#af-view .af-z.is-arch .type-badge{opacity:.55}
+  #af-view .af-plus{color:#15803d}
+  #af-view .af-minus{color:#b91c1c}
   /* Status-Punkte: läuft = grün mit kleinem Puls (nur der Punkt), TP grün, SL rot, sonst grau */
   #af-view .af-p{width:7px;height:7px;border-radius:50%;background:var(--sub-2);flex:none}
   #af-view .af-p.is-lauf{background:#12B76A;animation:afPuls 1.8s ease-in-out infinite}
   #af-view .af-p.is-tp{background:#12B76A}
   #af-view .af-p.is-sl{background:#F04438}
   @keyframes afPuls{0%,100%{box-shadow:0 0 0 0 rgba(18,183,106,.45)}50%{box-shadow:0 0 0 4px rgba(18,183,106,0)}}
-  #af-view .af-klapp{display:flex;align-items:center;gap:6px;width:100%;margin-top:6px;padding:7px 0 3px;border:none;border-top:1px solid var(--border-soft);background:none;font:inherit;font-size:12px;color:var(--sub);cursor:pointer;text-align:left}
+  /* Eingeklappt (erledigt erst ab mehr als 4, wartet auf Payout immer): eine graue Zeile im selben Raster */
+  #af-view .af-klapp{display:grid;grid-template-columns:var(--af-typ) minmax(0,1fr) auto;column-gap:14px;align-items:center;width:100%;
+    padding:7px 0;border:none;border-top:1px solid var(--border-soft);background:none;font:inherit;font-size:12px;color:var(--sub);cursor:pointer;text-align:left}
   #af-view .af-klapp:hover{color:var(--ink)}
-  #af-view .af-klapp .af-pfeil{margin-left:auto;color:var(--violet)}
+  #af-view .af-klapp .af-p{justify-self:center}
+  #af-view .af-klapp .af-pfeil{color:var(--violet)}
   #af-view .af-geplant{color:var(--violet);font-weight:500}   /* „geplant 14:30“ am offenen Konto (30.09.2026) */
   @media (max-width:820px){
-    /* Handy (v3-Maße): eine Spalte, Zeilen auf Touch-Höhe, Long/Short unter die Zahlen */
+    /* Handy (v3-Maße): eine Spalte, Long/Short unter die Zahlen */
+    #af-view{--af-typ:72px}
     #af-view .af-ids{columns:1}
     #af-view .af-id{margin-bottom:var(--m-gap)}
     #af-view .af-summe{padding:12px 16px;gap:6px 16px}
     #af-view .af-ls-box{margin-left:0;width:100%}
-    #af-view .af-ls{flex:1;width:auto}
+    #af-view .af-ls-box .af-ls{flex:1;width:auto}
     /* Firmen-Chips: eine wischbare Zeile — neben dem Schalter gequetscht stapelten sie sich einzeln (Stub 375 px) */
     #af-view .af-filter .af-chip-bar{flex:1 1 100%;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}
     #af-view .af-filter .af-chip-bar::-webkit-scrollbar{display:none}
-    /* Konto-Zeile zweizeilig: der Name (mit Kontonummer) bekommt die volle Breite, Firma/Trade darunter */
-    #af-view .af-z{flex-wrap:wrap;row-gap:1px;padding:7px 0}
-    #af-view .af-z .type-badge{width:68px}
-    #af-view .af-z-name{flex:1 1 0}
-    #af-view .af-z-info{flex:1 1 100%;max-width:none;padding-left:76px;font-size:11.5px}
+    /* Kopf: Heute-Zeile unter Name + Pille */
+    #af-view .af-id-heute{margin-left:0;flex:1 1 100%}
+    /* Konto-Zeile zweizeilig, weiter im Raster: oben Typ + Name, darunter Firma (unter dem Namen) + Status rechts */
+    #af-view .af-z{grid-template-columns:var(--af-typ) minmax(0,1fr) auto;grid-template-areas:"typ name name" ". firma status";column-gap:10px;row-gap:2px;padding:7px 0}
+    #af-view .af-z-firma,#af-view .af-z-status{font-size:11.5px}
+    /* Name darf am Handy zweizeilig werden: am Ende steht meist die Kontonummer, und einen Tooltip gibt es hier nicht */
+    #af-view .af-z-name{white-space:normal;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-height:1.35}
+    #af-view .af-klapp{grid-template-columns:var(--af-typ) minmax(0,1fr) auto;column-gap:10px}
   }
   @media (prefers-reduced-motion:reduce){#af-view .af-p.is-lauf{animation:none}}
   #adm-pane-stat .kf-kpis .kpi-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -8003,7 +8023,7 @@
         <div class="panel af-summe" id="af-summe">
           <span class="af-s is-offen"><b id="af-n-offen">0</b>noch offen</span>
           <span class="af-s"><b id="af-n-lauf">0</b>laufen</span>
-          <span class="af-s"><b id="af-n-fertig">0</b>heute fertig</span>
+          <span class="af-s"><b id="af-n-fertig">0</b>heute erledigt</span>
           <span class="af-ls-box"><span id="af-ls-txt"></span><span class="af-ls" id="af-ls"><span class="l"></span><span class="s"></span></span></span>
         </div>
         <div class="af-filter">
@@ -12588,7 +12608,8 @@
      * Gliederung jetzt nach ID (Farbpunkt = mt5FleetFarbe wie in der Flotte der Live Trades), je ID drei Zustände:
      *   noch offen   = nicht archiviert, kein Live-Konto, nicht im Trade, heute noch kein Ende → der Hauptinhalt
      *   läuft        = im_trade (offener Plan als Master oder Slave) mit Richtung · Symbol · seit
-     *   heute fertig = letztes_ende heute in Ortszeit, eingeklappt — auch ein heute geblowtes (schon archiviertes) Konto
+     *   erledigt     = letztes_ende heute in Ortszeit, sichtbar (seit Feinschliff; erst ab mehr als 4 eingeklappt) —
+     *                  auch ein heute geblowtes (schon archiviertes) Konto
      * Live-Konten (Hedge-Broker) brauchen nie selbst einen Trade: nie „offen", nur wenn sie laufen oder heute fertig sind.
      * Seit 30.09.2026 abends (FIRMEN-BACKEND) liefert /admin/overview je Konto auch geplant {start_um, route,
      * planned_for} (nächster Plan status planned) und waiting_payout_since: geplante Konten bleiben „offen" und
@@ -12721,8 +12742,15 @@
       }
       const ids = [...jeId.values()].sort((a, b) =>
         ((b.offen.length > 0) - (a.offen.length > 0)) || String(a.name).localeCompare(String(b.name), 'de'))
+      // Heute je ID (Feinschliff 30.09.2026): gestartete Trades heute nach user_id, die Firma filtert über das Master-Konto
+      const kontenFirma = new Set(afAlle().filter(r => afFirmaVon(r) === afFirma).map(r => String(r.id)))
+      const heuteJeId = new Map()
+      for(const p of (afData.trades_start || [])){
+        if(!afIstHeute(p.at) || (afFirma && !kontenFirma.has(String(p.account_id)))) continue
+        const u = String(p.user_id); if(!heuteJeId.has(u)) heuteJeId.set(u, []); heuteJeId.get(u).push(p)
+      }
       const box = $('af-ids'); box.innerHTML = ''
-      for(const g of ids) box.appendChild(afIdKarte(g))
+      for(const g of ids) box.appendChild(afIdKarte(g, heuteJeId.get(g.u) || []))
       if(!ids.length) box.innerHTML = '<div class="af-leer" style="padding:18px 2px">Keine Accounts für diese Auswahl.</div>'
     }
     /* Long/Short von heute als EINE schmale Zeile (28.09.2026 als Kachel-Panel, seit 30.09.2026 nur noch Text + Balken).
@@ -12741,104 +12769,110 @@
       bar.querySelector('.s').style.width = (100 - pL) + '%'
       bar.title = nLS ? `Long ${pL} % · Short ${100 - pL} %` : ''
     }
-    function afIdKarte(g){
+    /* Karte je ID (Feinschliff 30.09.2026, Finn: „mehr zu den Trades heute … sodass man bei jeder ID sieht, welche
+     * erledigt sind und welche gerade laufen"): Kopf = Name + „N offen" + Heute-Zeile (Trades · Long · Short, Mini-
+     * Balken). Darunter EINE Liste ohne Zwischentitel, sortiert offen → läuft → erledigt; die Status-Spalte sagt,
+     * was los ist. Erledigte stehen sichtbar da und klappen erst ab mehr als 4 ein; „wartet auf Payout" bleibt
+     * eingeklappt (braucht keinen Trade), Archivierte nur mit Schalter. */
+    function afIdKarte(g, heute){
       const k = document.createElement('div')
       k.className = 'panel af-id' + (g.offen.length || g.lauf.length ? '' : ' is-erledigt')
       const kopf = document.createElement('div'); kopf.className = 'af-id-kopf'
-      kopf.innerHTML = '<span class="adm-dot"></span><span class="af-id-name"></span><span class="af-id-zahlen"></span>'
+      kopf.innerHTML = '<span class="adm-dot"></span><span class="af-id-name"></span>'
       kopf.querySelector('.adm-dot').style.background = afFarbe(g.u)
       kopf.querySelector('.af-id-name').textContent = g.name
-      const zahlen = kopf.querySelector('.af-id-zahlen')
-      if(g.offen.length){ const p = document.createElement('span'); p.className = 'af-pille'; p.textContent = g.offen.length + ' offen'; zahlen.appendChild(p) }
-      const rest = [g.lauf.length ? g.lauf.length + ' läuft' : '', g.fertig.length ? g.fertig.length + ' fertig' : ''].filter(Boolean).join(' · ')
-      if(rest) zahlen.appendChild(document.createTextNode(rest))
+      const pille = document.createElement('span')
+      if(g.offen.length){ pille.className = 'af-pille'; pille.textContent = g.offen.length + ' offen' }
+      else{ pille.className = 'af-nix'; pille.textContent = 'nichts mehr offen' }
+      kopf.appendChild(pille)
+      // Heute-Zeile: Zahlen + Mini-Balken (Long grün, Short rot), ohne Trade nur ein grauer Satz
+      const h = document.createElement('span'); h.className = 'af-id-heute'
+      const nL = heute.filter(p => p.richtung === 'buy').length, nS = heute.filter(p => p.richtung === 'sell').length
+      const txt = document.createElement('span')
+      txt.textContent = heute.length ? `heute ${heute.length} Trade${heute.length === 1 ? '' : 's'} · ${nL} Long · ${nS} Short` : 'heute noch kein Trade'
+      h.appendChild(txt)
+      if(nL + nS){
+        const pL = Math.round(nL / (nL + nS) * 100)
+        const bar = document.createElement('span'); bar.className = 'af-ls'; bar.title = `Long ${pL} % · Short ${100 - pL} %`
+        bar.innerHTML = `<span class="l" style="width:${pL}%"></span><span class="s" style="width:${100 - pL}%"></span>`
+        h.appendChild(bar)
+      }
+      kopf.appendChild(h)
       k.appendChild(kopf)
-      const titel = (txt, offen) => { const t = document.createElement('div'); t.className = 'af-g-titel' + (offen ? ' is-offen' : ''); t.textContent = txt; k.appendChild(t) }
-      const nachName = (a, b) => String(a.name).localeCompare(String(b.name), 'de', { numeric:true })
 
-      // 1) Noch offen: nach Phase (Challenge → … → WD), dann Firma, dann Name
-      if(g.offen.length){
-        titel('Noch offen', true)
-        g.offen.sort((a, b) => (afPhaseRang(a.type) - afPhaseRang(b.type)) || afFirmaVon(a).localeCompare(afFirmaVon(b), 'de') || nachName(a, b))
-        for(const r of g.offen) k.appendChild(afZeile(r, 'offen'))
-      }else{
-        const l = document.createElement('div'); l.className = 'af-leer'
-        l.textContent = g.lauf.length ? 'Nichts mehr offen — nur noch laufende Trades.' : 'Nichts mehr offen.'
-        k.appendChild(l)
-      }
-      // 2) Läuft: ältester Trade zuerst
-      if(g.lauf.length){
-        titel('Läuft')
-        g.lauf.sort((a, b) => String(a.im_trade.seit || '').localeCompare(String(b.im_trade.seit || '')))
-        for(const r of g.lauf) k.appendChild(afZeile(r, 'lauf'))
-      }
-      // Eingeklappte Gruppe: eine graue Zeile mit Zählung, „zeigen" klappt die Konten darunter auf
-      const klapp = (set, txt) => {
+      const nachName = (a, b) => String(a.name).localeCompare(String(b.name), 'de', { numeric:true })
+      // Eingeklappte Gruppe: eine graue Zeile im Raster, „zeigen" klappt die Konten darunter auf
+      const klapp = (set, text) => {
         const auf = set.has(g.u)
         const b = document.createElement('button'); b.type = 'button'; b.className = 'af-klapp' + (auf ? ' is-auf' : '')
         b.innerHTML = '<span class="af-p"></span><span></span><span class="af-pfeil"></span>'
-        b.children[1].textContent = txt
+        b.children[1].textContent = text
         b.children[2].textContent = auf ? 'ausblenden' : 'zeigen'   // Wort statt ▾ — der Pfeil war bei 12 px nur ein Punkt
         b.addEventListener('click', () => { if(set.has(g.u)) set.delete(g.u); else set.add(g.u); afRender() })
         k.appendChild(b)
         return auf
       }
-      // 3) Heute fertig: eingeklappt, im Knopf nur die Zählung TP/SL
-      if(g.fertig.length){
-        const nTp = g.fertig.filter(r => afHeute(r).ergebnis === 'tp').length, nSl = g.fertig.filter(r => afHeute(r).ergebnis === 'sl').length
-        if(klapp(afFertigAuf, `${g.fertig.length} heute fertig` + [nTp ? ` · ${nTp} TP` : '', nSl ? ` · ${nSl} SL` : ''].join(''))){
-          g.fertig.sort((a, b) => String(afHeute(b).at).localeCompare(String(afHeute(a).at)))
-          for(const r of g.fertig) k.appendChild(afZeile(r, 'fertig'))
-        }
-      }
-      // 3b) Wartet auf Payout (30.09.2026): braucht keinen Trade, deshalb nicht „offen" — ruhig und eingeklappt
+      // offen: nach Phase (Challenge → … → WD), Firma, Name — geplante Konten stehen genauso darin
+      g.offen.sort((a, b) => (afPhaseRang(a.type) - afPhaseRang(b.type)) || afFirmaVon(a).localeCompare(afFirmaVon(b), 'de') || nachName(a, b))
+      for(const r of g.offen) k.appendChild(afZeile(r, 'offen'))
+      // läuft: ältester Trade zuerst
+      g.lauf.sort((a, b) => String(a.im_trade.seit || '').localeCompare(String(b.im_trade.seit || '')))
+      for(const r of g.lauf) k.appendChild(afZeile(r, 'lauf'))
+      // erledigt: jüngstes Ende zuerst, sichtbar — erst ab mehr als 4 eingeklappt
+      g.fertig.sort((a, b) => String(afHeute(b).at).localeCompare(String(afHeute(a).at)))
+      const nTp = g.fertig.filter(r => afHeute(r).ergebnis === 'tp').length, nSl = g.fertig.filter(r => afHeute(r).ergebnis === 'sl').length
+      if(g.fertig.length <= 4 || klapp(afFertigAuf, `${g.fertig.length} heute erledigt` + [nTp ? ` · ${nTp} TP` : '', nSl ? ` · ${nSl} SL` : ''].join('')))
+        for(const r of g.fertig) k.appendChild(afZeile(r, 'fertig'))
+      // wartet auf Payout (30.09.2026): braucht keinen Trade, deshalb nicht „offen" — ruhig und eingeklappt
       if(g.warten.length && klapp(afWartetAuf, `${g.warten.length} ${g.warten.length === 1 ? 'wartet' : 'warten'} auf Payout`)){
         g.warten.sort((a, b) => String(a.waiting_payout_since).localeCompare(String(b.waiting_payout_since)))
         for(const r of g.warten) k.appendChild(afZeile(r, 'warten'))
       }
-      // 4) Archiviert: nur mit Schalter, grau
-      if(g.arch.length){
-        titel(`Archiviert · ${g.arch.length}`)
-        for(const r of g.arch.sort(nachName)) k.appendChild(afZeile(r, 'arch'))
-      }
+      // archiviert: nur mit Schalter, grau
+      for(const r of g.arch.sort(nachName)) k.appendChild(afZeile(r, 'arch'))
+      if(k.children.length === 1){ const l = document.createElement('div'); l.className = 'af-leer'; l.textContent = 'Keine Konten.'; k.appendChild(l) }
       return k
     }
-    // Eine Konto-Zeile: Phase-Badge · Name · rechts Firma bzw. Trade/Ergebnis. Balance, P&L, Payout-Datum im Tooltip.
+    // Eine Konto-Zeile im gemeinsamen Raster: Typ · Name · Firma · Status. Balance, P&L, Payout-Datum im Tooltip.
     function afZeile(r, z){
       const d = document.createElement('div')
-      d.className = 'af-z' + (z === 'fertig' || z === 'warten' ? ' is-fertig' : z === 'arch' ? ' is-arch' : '')
-      d.innerHTML = '<span class="type-badge"></span><span class="af-z-name"></span><span class="af-z-info"></span>'
+      d.className = 'af-z ' + ({ offen:'is-offen', lauf:'is-lauf', fertig:'is-fertig', warten:'is-fertig', arch:'is-arch' }[z] || '')
+      d.innerHTML = '<span class="type-badge"></span><span class="af-z-name"></span><span class="af-z-firma"></span><span class="af-z-status"></span>'
       const ph = afPhase(r.type)
       const badge = d.firstElementChild
       badge.classList.add('type-' + (r.type || 'sonst')); badge.textContent = ph[1]; badge.title = ph[2]
       const ext = String(r.ext || '')
       const name = r.name || '—'
       d.querySelector('.af-z-name').textContent = ext && !name.includes(ext) ? `${name} · #${ext}` : name
+      d.querySelector('.af-z-firma').textContent = afFirmaVon(r)
 
-      const info = d.querySelector('.af-z-info')
-      const punkt = kl => { const i = document.createElement('span'); i.className = 'af-p' + (kl ? ' ' + kl : ''); info.appendChild(i) }
-      const text = t => { const s = document.createElement('span'); s.textContent = t; info.appendChild(s) }
+      const st = d.querySelector('.af-z-status')
+      const punkt = kl => { const i = document.createElement('span'); i.className = 'af-p' + (kl ? ' ' + kl : ''); st.appendChild(i) }
+      const text = (t, kl) => { const s = document.createElement('span'); s.textContent = t; if(kl) s.className = kl; st.appendChild(s); return s }
       const ccy = r.balance_ccy || 'USD'
       const geplant = afGeplant(r)
-      if(z === 'offen'){
-        if(geplant){ const s = document.createElement('span'); s.className = 'af-geplant'; s.textContent = geplant; info.appendChild(s) }
-        text(afFirmaVon(r))
-      }else if(z === 'warten') text('wartet seit ' + afZeit(r.waiting_payout_since))
+      if(z === 'offen') text(geplant || 'offen', geplant ? 'af-geplant' : 'af-offen')
       else if(z === 'lauf'){
         const tr = r.im_trade
         punkt('is-lauf')
-        text([tr.rolle === 'slave' ? 'Hedge' : '', afRichtung(tr.richtung), tr.symbol, afZeit(tr.seit)].filter(Boolean).join(' · ') || 'im Trade')
+        const seit = afZeit(tr.seit)
+        text([tr.rolle === 'slave' ? 'Hedge' : '', [afRichtung(tr.richtung), tr.symbol].filter(Boolean).join(' '), seit ? 'seit ' + seit : ''].filter(Boolean).join(' · ') || 'im Trade')
       }else if(z === 'fertig'){
+        // „TP 12:40 · +272 $" — Betrag klein grün/rot, Rest gedämpft
         const e = afHeute(r)
         punkt(e.ergebnis === 'tp' ? 'is-tp' : e.ergebnis === 'sl' ? 'is-sl' : '')
-        const was = e.ergebnis === 'tp' ? 'TP' : e.ergebnis === 'sl' ? 'SL' : 'beendet'
-        const epl = e.pl == null ? '' : (e.pl >= 0 ? '+' : '−') + afGeld(Math.abs(e.pl), ccy)
-        text([was, epl, e.blown ? 'geblowt' : '', afZeit(e.at)].filter(Boolean).join(' · '))
-      }else{
-        text({ blown:'geblowt', passed:'bestanden', passed_pending:'bestanden' }[r.arch_grund] || 'archiviert')
-      }
+        const was = (e.ergebnis === 'tp' ? 'TP' : e.ergebnis === 'sl' ? 'SL' : 'beendet') + ' ' + afZeit(e.at)
+        const s = text(was)
+        if(e.pl != null){
+          s.append(' · ')
+          const b = document.createElement('span'); b.className = e.pl >= 0 ? 'af-plus' : 'af-minus'
+          b.textContent = (e.pl >= 0 ? '+' : '−') + afGeld(Math.abs(e.pl), ccy); s.appendChild(b)
+        }
+        if(e.blown) s.append(' · geblowt')
+      }else if(z === 'warten') text('wartet seit ' + afZeit(r.waiting_payout_since))
+      else text({ blown:'geblowt', passed:'bestanden', passed_pending:'bestanden' }[r.arch_grund] || 'archiviert')
 
-      // Tooltip: alles, was die Zeile weglässt (Firma, Größe, Kontonummer, Balance, P&L seit Start, Payout)
+      // Tooltip: alles, was die Zeile weglässt (voller Name, Größe, Kontonummer, Balance, P&L seit Start, Payout)
       const size = r.size > 0 ? Number(r.size) : admAccGroesse(r.name, r.balance)
       const start = kontoIstTopstepExpress(r) ? 0 : (r.start > 0 ? Number(r.start) : size)   // Topstep Express: Basis 0 (F27)
       const bal = r.balance == null ? null : Number(r.balance)
@@ -35979,7 +36013,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.845'
+  const OS_TAB_BUILD = '2026-09-22.846'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
