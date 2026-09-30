@@ -11277,26 +11277,12 @@
      * jedem Tab die Legende neu lesen. Klick auf Kurve oder Chip tut dasselbe
      * wie der Klick auf den Balken: gleicher Zustand, gleicher Renderer. */
     const ADM_P_COLORS = ['#5447CE', '#0EA5E9', '#16A34A', '#E0891F', '#E11D48', '#A855F7', '#14B8A6', '#F59E0B', '#64748B', '#0F766E', '#BE185D', '#7C3AED']
-    let admPColors = new Map()
-    function admPersonColorsBauen(){
-      // Nach user_id sortiert (stabil), Wunschplatz aus einem Hash der ID — eine
-      // neue Person verschiebt die Farben der anderen nur bei einer Kollision.
-      admPColors = new Map()
-      // Kapitel-Tab (24.09.2026): Personen aus /admin/kapitel bekommen dieselbe feste Farbe — auch wenn die
-      // Übersicht noch nicht geladen ist (admData null). Hash je ID → gleiche Farbe in allen Tabs.
-      const uids = [...new Set([...(admData?.people || []).map(p => String(p.user_id)),
-                                ...(admData?.payouts_received || []).map(t => String(t.user_id || t.person || '—')),
-                                ...(admKapData?.kapitel || []).flatMap(k => (k.personen || []).map(q => String(q.user_id)))])].sort()
-      const frei = ADM_P_COLORS.map(() => true)
-      for(const uid of uids){
-        let h = 0; for(const ch of uid) h = (h * 31 + ch.charCodeAt(0)) >>> 0
-        let i = h % ADM_P_COLORS.length, n = 0
-        while(!frei[i] && n < ADM_P_COLORS.length){ i = (i + 1) % ADM_P_COLORS.length; n++ }
-        frei[i] = false
-        admPColors.set(uid, ADM_P_COLORS[i])
-      }
-    }
-    const admPersonColor = key => admPColors.get(String(key)) || '#94A3B8'
+    // Personen-Farbe seit 30.09.2026 = idFarbe (eine Farbe je ID in ganz Prophos, auf jedem Gerät gleich — Finn: EzPoker und Chris
+    // gleich gefärbt, Bruder an anderem PC). Vorher Hash + Freiplatz über die gerade geladenen Personen: eine neu geladene Person
+    // konnte die Farben der anderen verschieben. ADM_P_COLORS bleibt für die Firmenfarben (admKfFirmColor); die Aufrufer von
+    // admPersonColorsBauen bleiben unverändert, es gibt nichts mehr vorzubereiten.
+    function admPersonColorsBauen(){}
+    const admPersonColor = key => idFarbe(key)
     const admDot = key => `<span class="adm-dot" style="background:${admPersonColor(key)}"></span>`
     const admVlLabel = k => (admData?.people || []).find(p => String(p.user_id) === String(k))?.name || admShortName(k)
     const admVlDatum = d => d ? String(d).slice(2, 10).split('-').reverse().join('.') : ''
@@ -18220,13 +18206,34 @@
   // blieb einfach unsichtbar (Finns drei Leer-Screenshots am 25.08.2026,
   // aufgeklaert erst durch den sichtbaren Fehler-Kasten aus VERSION .107).
   function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])) }
-  const MT5_FLEET_FARBEN = ['#7C5CFC','#12B76A','#F79009','#F04438','#0BA5EC','#EE46BC','#6172F3','#16B364']
-  function mt5FleetFarbe(login){
-    const s = String(login || '')
-    let h = 0
-    for(let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0
-    return MT5_FLEET_FARBEN[h % MT5_FLEET_FARBEN.length]
+  /* ID-FARBE — EINE Farbe je ID, überall und auf jedem Gerät gleich (30.09.2026, Finn: EzPoker und Chris hatten im Radar dieselbe
+   * Farbe; sein Bruder sitzt an einem anderen PC und muss dieselbe ID in derselben Farbe sehen). Vorher vier Systeme: Flotte, Accounts
+   * je Firma und Winning Days über mt5FleetFarbe (reiner Hash über 8 Farben, Kollisionen), Admin über admPersonColorsBauen (Hash +
+   * Freiplatz über die gerade geladenen Personen), Radar über eine Zuteilung im localStorage (je Browser anders).
+   * Jetzt: feste Reihenfolge aller IDs nach Anlage des Logins (auth.users.created_at, Stand 30.09.2026; der Login „Test" ohne Konten
+   * fehlt bewusst) → Platz in der Palette. Keine Abfrage, kein localStorage, kein Backend — dieselbe Rechnung auf jedem Gerät. Das
+   * Frontend kennt keine Liste aller IDs mit Anlage-Zeitpunkt (/admin/overview liefert nur Personen mit Konten, ohne Zeit), deshalb
+   * steht die Reihenfolge hier. Eine NEUE ID bekommt, bis sie HINTEN angehängt ist, rechnerisch (Hash) eine der Reserve-Farben — auch
+   * die ist überall gleich; zwei neue IDs können sich eine Reserve-Farbe teilen. Nie umsortieren oder Einträge löschen, sonst wechseln
+   * Farben. Schlüssel: user_id (die ersten 8 Zeichen sind eindeutig); andere Schlüssel der Flotte („mail:…", Login) → Reserve.
+   * Palette gedämpft, kein Pink, kein Rot (Rot heißt hier Verlust). Konstanten in der Funktion: sie darf vor dieser Zeile laufen. */
+  function idFarbe(key){
+    // NEUE ID EINTRAGEN: die ersten 8 Zeichen ihrer user_id (auth.users.id) HINTEN an REIHE anhängen, HINTEN an PALETTE eine noch
+    // freie, gedämpfte Farbe (kein Pink, kein Rot, nicht zu nah an den vorhandenen) und den Namen HINTEN in die Namenszeile.
+    // Nie umsortieren, nie einen Eintrag löschen (auch nicht für ausgeschiedene IDs) — jede Verschiebung ändert Farben anderer IDs.
+    const REIHE = ['b55d7ab4', '6cceb3f3', 'aff98e60', '728b4d23', '48f272b4', '368076fd', '13905525', '8ad6a2f1', '7b1bc9a3', '46ce0409', '32b854d1', 'd1f5bcae']
+    //              Finn        Emin        Moritz      Pascal      Finn+Pascal Jacob       Aurel       EzPoker     Chris       (o. Name)   Mike        Ina
+    const PALETTE = ['#4C7BD9', '#E08A3C', '#3FA37A', '#8B6FD6', '#D4A72C', '#3BA3B8', '#8B6A4F', '#6B7A90', '#8AA33B', '#2F4A7A', '#7A4E9E', '#7FB3E6']
+    const RESERVE = ['#C98A6B', '#5E9E9A', '#1F2937', '#B8A07E']
+    const k = String(key || ''); if(!k) return '#98A2B3'
+    const i = REIHE.indexOf(k.slice(0, 8).toLowerCase())
+    if(i >= 0 && PALETTE[i]) return PALETTE[i]
+    let h = 0; for(const ch of k) h = (h * 31 + ch.charCodeAt(0)) >>> 0
+    return RESERVE[h % RESERVE.length]
   }
+  window.idFarbe = idFarbe
+  // Flotte, Accounts je Firma (afFarbe), Winning Days/Markt (mklWdFarbe, farbe_key) rufen weiter mt5FleetFarbe — seit 30.09.2026 = idFarbe
+  function mt5FleetFarbe(login){ return idFarbe(login) }
 
   /* ── Personen-Karte fuer die Flotte (25.08.2026, Finns Ansage: „jede Person
    * eine Farbe — und ich will ALLE laufenden Orders sehen, Copier UND
@@ -24110,46 +24117,18 @@
    * offen ist; Kurs jetzt = wdKursJetzt, sonst der jüngste tv_kurse-Stand. Eigene Verdrahtung, eigene IDs wdl-*. ========== */
   const wdl = { tage: 2, daten: null, fehler: '', timer: null, laedt: false, kurs: null, person: null, linien: new Map() }
   /* CHART + ID-LEISTE (26.09.2026, F6, Finn am Screenshot Build .635). Farben: ursprünglich je TRADE eine eigene und je ID die
-   * Personen-Farbe — seit 30.09.2026 nur noch Farbe = ID (siehe WDL_ID_FARBEN). Linien: Klick auf eine Zeile schaltet um (wdl.auswahl).
+   * Personen-Farbe — seit 30.09.2026 nur noch Farbe = ID über idFarbe. Linien: Klick auf eine Zeile schaltet um (wdl.auswahl).
    * Level von NQ-Trades gelten auf dem MNQ-Chart 1:1 (gleicher Basiswert). */
-  /* FARBE = ID (30.09.2026, Finn am Radar: „Warum haben EzPoker und Chris die gleiche Farbe?"): Die Karte trug bis dahin die TRADE-Farbe
-   * (je Trade eine), die ID-Leiste die Personen-Farbe aus ADM_P_COLORS — zwei Farbsysteme, und beide Paletten hatten Nachbarn (zwei
-   * Rot-/Pinktöne, drei Violetts, zwei Teals), dazu würfelte der Hash-Wunschplatz. Jetzt EIN System für Zeile und Leiste: Farbe = ID.
-   * Palette gedämpft, aber klar verschieden (Finn nach der ersten Runde: „das Pink ist hässlich") — kein Pink, kein Rot (Rot heißt hier
-   * Verlust); die ersten zehn reichen für die zehn IDs, die es im Radar gibt, die letzten zwei sind Reserve. Vergeben wird der ERSTE freie Platz (kein Hash — der ließ Lücken und zog die
-   * Reserve-Töne früh herein). Stabil: vergebene Plätze merkt sich der Browser (localStorage prophos_wdl_idfarbe) und hält sie frei,
-   * auch wenn die ID gerade keinen Trade im Zeitraum hat — eine neue ID bekommt nie den Platz einer anderen. Die Chart-Linien behalten
-   * ihre festen Bedeutungsfarben (wdlChartLinien). */
-  const WDL_ID_FARBEN = ['#4C7BD9', '#E08A3C', '#3FA37A', '#8B6FD6', '#D4A72C', '#3BA3B8', '#9B7B61', '#6B7A90', '#8AA33B', '#2F4A7A', '#C98A6B', '#5E9E9A']
-  function wdlFarbenZuteilen(keys, palette, fest){
-    // fest: Map Schlüssel → Palettenplatz aus früheren Besuchen; bleibt, wie er ist, und neue Schlüssel werden hineingeschrieben
-    const m = new Map(), frei = palette.map(() => true)
-    if(fest) for(const i of fest.values()) if(i >= 0 && i < palette.length) frei[i] = false
-    for(const k of [...new Set(keys.map(String).filter(Boolean))].sort()){
-      let i = fest && fest.has(k) ? fest.get(k) : -1
-      if(!(i >= 0 && i < palette.length)){
-        i = frei.indexOf(true)
-        if(i < 0){ let h = 0; for(const ch of k) h = (h * 31 + ch.charCodeAt(0)) >>> 0; i = h % palette.length }   // mehr IDs als Farben
-        frei[i] = false
-        if(fest) fest.set(k, i)
-      }
-      m.set(k, palette[i])
-    }
-    return m
-  }
-  const WDL_ID_SPEICHER = 'prophos_wdl_idfarbe'
-  const wdlIdPlatz = (() => { try{ const o = JSON.parse(localStorage.getItem(WDL_ID_SPEICHER) || '{}'); return new Map(Object.entries(o || {}).filter(([, v]) => Number.isInteger(v))) }catch(_){ return new Map() } })()
+  /* FARBE = ID (30.09.2026, Finn am Radar: „Warum haben EzPoker und Chris die gleiche Farbe?"): Zeile (Punkt) und ID-Leiste tragen
+   * die ID-Farbe aus idFarbe — dieselbe wie in Flotte, Accounts je Firma, Winning Days und Admin, auf jedem Gerät gleich. Die erste
+   * Fassung (localStorage prophos_wdl_idfarbe, je Browser) ist ersetzt; der alte Schlüssel darf liegen bleiben. Die Chart-Linien
+   * behalten ihre festen Bedeutungsfarben (wdlChartLinien). */
   const wdlTid = t => String(t.id || t.plan_id || '')
   // 28.09.2026 (Finn: „zu voll"): Linien nur für den EINEN ausgewählten Trade (wdl.auswahl), ohne Auswahl nur der Chart
   const wdlLinienAn = t => !!wdl.auswahl && wdl.auswahl === wdlTid(t)
   const wdlPasst = t => !wdl.person || String(t.user_id || t.person || '') === wdl.person
   const wdlUid = t => String(t.user_id || t.person || '')
-  function wdlFarben(){
-    const trades = (wdl.daten && wdl.daten.trades) || [], vorher = wdlIdPlatz.size
-    wdl.pFarbe = wdlFarbenZuteilen(trades.map(wdlUid), WDL_ID_FARBEN, wdlIdPlatz)
-    if(wdlIdPlatz.size !== vorher){ try{ localStorage.setItem(WDL_ID_SPEICHER, JSON.stringify(Object.fromEntries(wdlIdPlatz))) }catch(_){} }
-  }
-  const wdlIdFarbe = t => (wdl.pFarbe && wdl.pFarbe.get(wdlUid(t))) || '#667085'
+  const wdlIdFarbe = t => idFarbe(wdlUid(t))
   // Linien für mklChartZeichnen: Entry durchgezogen, TP gestrichelt, Liquidation gepunktet, SL lang gestrichelt (nur wenn gesetzt)
   const WDL_SKALA_PKT = 600   // ≈ 2 % NQ — typische WD-Liquidationen (≤ 400 Pkt) bleiben im Bild, Funded-Liquidationen nicht
   function wdlChartLinien(){
@@ -24181,8 +24160,9 @@
       const x = je.get(u), b = document.createElement('button'); b.type = 'button'
       b.className = 'adm-vl-chip' + (wdl.person ? (wdl.person === u ? ' is-on' : ' is-off') : '')
       // Chip = Farbe + Name + Zahl der laufenden Trades (nur wenn > 0); „+n zu" entfällt (30.09.2026, Finn: „so viele kleine Texte")
-      b.innerHTML = `<span class="adm-dot" style="background:${(wdl.pFarbe && wdl.pFarbe.get(u)) || '#94A3B8'}"></span><span class="nm"></span><b></b>`
-      b.querySelector('.nm').textContent = String(x.name).split(/\s+/)[0]
+      b.innerHTML = `<span class="adm-dot" style="background:${idFarbe(u)}"></span><span class="nm"></span><b></b>`
+      // voller Name (30.09.2026): das erste Wort machte aus „Finn + Pascal" einen zweiten Chip „Finn" — zwei IDs, gleicher Name
+      b.querySelector('.nm').textContent = String(x.name)
       b.querySelector('b').textContent = x.lauf ? String(x.lauf) : ''
       b.title = wdl.person === u ? 'Filter aufheben' : `${x.lauf} laufen gerade · ${x.zu} beendet im Zeitraum — klicken zeigt nur diese ID`
       b.addEventListener('click', () => {
@@ -24278,7 +24258,6 @@
   function wdlRender(){
     const kopf = document.getElementById('wdl-kopf'), liste = document.getElementById('wdl-liste'); if(!kopf || !liste) return
     wdl.renderAt = Date.now()
-    wdlFarben()
     const alleTrades = (wdl.daten && wdl.daten.trades) || []
     // Auswahl, deren Trade aus den Daten gefallen ist, aufheben — sonst bliebe sie unsichtbar gesetzt (30.09.2026, s. mklAuswahlTrade)
     if(wdl.auswahl && wdl.daten && !alleTrades.some(x => wdlTid(x) === wdl.auswahl)) wdl.auswahl = null
@@ -36013,7 +35992,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.846'
+  const OS_TAB_BUILD = '2026-09-22.847'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
