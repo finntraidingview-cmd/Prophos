@@ -42,7 +42,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-09-24.2"
+APP_BUILD = "2026-10-01.1"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -2852,10 +2852,147 @@ def _sb_headers(prefer=None):
     return h
 
 
+# ══ SUPABASE-BREMSE (01.10.2026, Supabase-Ausfall 30.09.: 11:24–20:12 UTC hing jede Anfrage 12 s und mehr, bei 48 Threads bis zu
+# 48 gleichzeitig; Routen mit mehreren Abfragen hielten einen Thread bis ~90 s, die Reader schickten alle 2 s nach). Eine Sicherung
+# je Dienst (rest, auth): nach SB_BREMSE_N Fehlern in Folge (Timeout, Verbindungsfehler, 5xx) 30 → 60 → 120 s lang keine Anfrage
+# mehr — SupabaseGesperrt sofort statt Warten —, danach genau EINE Mini-Probe; ihr Erfolg schließt die Sicherung. 4xx zählen nicht
+# (die DB hat geantwortet). Nachzügler (Anfragen, die schon liefen) verlängern nichts. Der Lock gilt nur für den Zustand, nie für
+# den Netz-Aufruf. Wirkt unter sync- und gthread-Worker gleich (Zustand im Prozess, --workers 1). kritisch=True geht immer durch
+# (/puls-ergebnis: der Bot wiederholt nicht, ein verlorenes Ergebnis hieße Plan „Geplant" bei offener Position).
+SB_BREMSE_N = 4
+SB_BREMSE_STUFEN = (30, 60, 120)
+SB_BREMSE_HALB_S = 5               # Rückmeldung an Wartende, während die Probe läuft (Retry-After nie 0)
+SB_TIMEOUT = (5, 12)               # Verbindungsaufbau / Lesen — vorher 12 s je Phase
+SB_PROBE_TIMEOUT = (3, 5)
+
+
+class SupabaseGesperrt(requests.exceptions.ConnectionError):
+    """Sicherung offen: die Anfrage wurde gar nicht gesendet. Erbt von ConnectionError, damit jedes bestehende except greift."""
+    sb_netz = True
+
+    def __init__(self, rest_s=0.0, dienst="rest"):
+        super().__init__(f"Supabase-Bremse offen ({dienst}, noch {int(max(0, rest_s))} s)")
+        self.rest_s, self.dienst = float(max(0.0, rest_s)), dienst
+
+
+def sb_bremse_neu():
+    return {"folge": 0, "stufe": -1, "offen_bis": 0.0, "probe": False, "seit": 0.0, "abgewiesen": 0, "letzter": ""}
+
+
+def sb_bremse_vorher(z, jetzt, kritisch=False):
+    """REIN RECHNEND (testbar): vor einer Anfrage → ('frei'|'probe'|'zu', rest_s). 'probe' bekommt genau einer."""
+    if kritisch or z["stufe"] < 0:
+        return "frei", 0.0
+    if jetzt < z["offen_bis"]:
+        return "zu", z["offen_bis"] - jetzt
+    if not z["probe"]:
+        return "probe", 0.0
+    return "zu", float(SB_BREMSE_HALB_S)
+
+
+def sb_bremse_nach(z, jetzt, ok, probe=False, fehler=""):
+    """REIN RECHNEND (testbar): Ergebnis einer Anfrage in den Zustand. Erfolg schließt; ein Probe-Fehler geht eine Stufe höher;
+    im offenen Zustand zählen andere Fehler nicht (Nachzügler); sonst öffnet der SB_BREMSE_N-te Fehler in Folge."""
+    if ok:
+        z.update(folge=0, stufe=-1, offen_bis=0.0, probe=False, seit=0.0)
+        return z
+    if fehler:
+        z["letzter"] = str(fehler)[:120]
+    if probe:
+        z["stufe"] = min(z["stufe"] + 1, len(SB_BREMSE_STUFEN) - 1)
+        z["offen_bis"], z["probe"] = jetzt + SB_BREMSE_STUFEN[z["stufe"]], False
+        return z
+    if z["stufe"] >= 0:
+        return z
+    z["folge"] += 1
+    if z["folge"] >= SB_BREMSE_N:
+        z.update(stufe=0, offen_bis=jetzt + SB_BREMSE_STUFEN[0], seit=jetzt)
+    return z
+
+
+_SB_BREMSE = {"rest": sb_bremse_neu(), "auth": sb_bremse_neu()}
+_SB_BREMSE_LOCK = threading.Lock()
+
+
+def sb_bremse_stand(jetzt=None):
+    """Zustand für /health und /watcher/status — nur Zahlen, keine Fehlertexte nach außen (Endpunkte sind offen)."""
+    jetzt = time.time() if jetzt is None else jetzt
+    with _SB_BREMSE_LOCK:
+        out = {}
+        for d, z in _SB_BREMSE.items():
+            art = "normal" if z["stufe"] < 0 else ("probe" if z["probe"] or jetzt >= z["offen_bis"] else "gesperrt")
+            out[d] = {"zustand": art, "rest_s": int(max(0, z["offen_bis"] - jetzt)) if z["stufe"] >= 0 else 0,
+                      "folge": z["folge"], "stufe": z["stufe"], "seit_s": int(jetzt - z["seit"]) if z["seit"] else 0,
+                      "abgewiesen": z["abgewiesen"]}
+        return out
+
+
+def sb_bremse_rest_s(dienst="rest"):
+    """Sekunden, bis die Sicherung wieder eine Anfrage (bzw. die Probe) zulässt; 0 = normal."""
+    with _SB_BREMSE_LOCK:
+        z = _SB_BREMSE[dienst]
+        return max(0.0, z["offen_bis"] - time.time()) if z["stufe"] >= 0 else 0.0
+
+
+def _sb_probe(dienst):
+    """Mini-Probe mit kurzem Zeitlimit — True, wenn der Dienst überhaupt antwortet (< 500). Wirft nie."""
+    try:
+        if dienst == "auth":
+            r = requests.get(f"{SUPABASE_URL}/auth/v1/health", headers={"apikey": SUPABASE_SERVICE_KEY}, timeout=SB_PROBE_TIMEOUT)
+        else:
+            r = requests.get(f"{SUPABASE_URL}/rest/v1/wd_farmer_regeln", params={"select": "id", "limit": "1"},
+                             headers=_sb_headers(), timeout=SB_PROBE_TIMEOUT)
+        return r.status_code < 500
+    except Exception:
+        return False
+
+
+def _sb_anfrage(methode, url, dienst="rest", kritisch=False, timeout=None, **kw):
+    """requests.request hinter der Sicherung → Response (Aufrufer prüft den Status selbst, wie bisher). Netzfehler und 5xx
+    zählen; ausgelöste Ausnahmen tragen sb_netz=True."""
+    with _SB_BREMSE_LOCK:
+        z = _SB_BREMSE[dienst]
+        aktion, rest = sb_bremse_vorher(z, time.time(), kritisch)
+        if aktion == "probe":
+            z["probe"] = True
+        elif aktion == "zu":
+            z["abgewiesen"] += 1
+    if aktion == "zu":
+        raise SupabaseGesperrt(rest, dienst)
+    if aktion == "probe":
+        ok = False
+        try:
+            ok = _sb_probe(dienst)
+        finally:
+            with _SB_BREMSE_LOCK:
+                sb_bremse_nach(_SB_BREMSE[dienst], time.time(), ok, probe=True, fehler="" if ok else "probe")
+        if not ok:
+            raise SupabaseGesperrt(sb_bremse_rest_s(dienst), dienst)
+    try:
+        r = requests.request(methode, url, timeout=timeout or SB_TIMEOUT, **kw)
+    except requests.exceptions.RequestException as e:
+        with _SB_BREMSE_LOCK:
+            sb_bremse_nach(_SB_BREMSE[dienst], time.time(), False, fehler=type(e).__name__)
+        e.sb_netz = True
+        raise
+    with _SB_BREMSE_LOCK:
+        sb_bremse_nach(_SB_BREMSE[dienst], time.time(), r.status_code < 500, fehler=f"http {r.status_code}")
+    return r
+
+
+def _sb_pruefen(r):
+    """raise_for_status wie bisher; 5xx zusätzlich als Netz-/DB-Fehler markiert (Schleifen und Rückfall-Lesungen unterscheiden so)."""
+    try:
+        r.raise_for_status()
+    except requests.exceptions.HTTPError as e:
+        if r.status_code >= 500:
+            e.sb_netz = True
+        raise
+
+
 def sb_select(table, params):
-    r = requests.get(f"{SUPABASE_URL}/rest/v1/{table}", params=params,
-                     headers=_sb_headers(), timeout=12)
-    r.raise_for_status()
+    r = _sb_anfrage("GET", f"{SUPABASE_URL}/rest/v1/{table}", params=params, headers=_sb_headers())
+    _sb_pruefen(r)
     return r.json()
 
 
@@ -2863,19 +3000,18 @@ def sb_update(table, params, body):
     """PATCH mit return=representation → Liste der WIRKLICH geänderten Zeilen.
     Leere Liste = Guard hat gegriffen (z.B. Status wurde inzwischen manuell
     geändert) — das ist ein normales Ergebnis, kein Fehler."""
-    r = requests.patch(f"{SUPABASE_URL}/rest/v1/{table}", params=params, json=body,
-                       headers=_sb_headers("return=representation"), timeout=12)
-    r.raise_for_status()
+    r = _sb_anfrage("PATCH", f"{SUPABASE_URL}/rest/v1/{table}", params=params, json=body,
+                    headers=_sb_headers("return=representation"))
+    _sb_pruefen(r)
     return r.json()
 
 
-def sb_upsert(table, body):
+def sb_upsert(table, body, kritisch=False):
     """POST mit merge-duplicates = Upsert auf den Primary Key (Service-Key,
-    an RLS vorbei). Fuer den dup_live-Spiegel (25.08.2026)."""
-    r = requests.post(f"{SUPABASE_URL}/rest/v1/{table}", json=body,
-                      headers=_sb_headers("resolution=merge-duplicates,return=minimal"),
-                      timeout=12)
-    r.raise_for_status()
+    an RLS vorbei). Fuer den dup_live-Spiegel (25.08.2026). kritisch=True: an der Supabase-Bremse vorbei."""
+    r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/{table}", kritisch=kritisch, json=body,
+                    headers=_sb_headers("resolution=merge-duplicates,return=minimal"))
+    _sb_pruefen(r)
 
 
 
@@ -6137,9 +6273,9 @@ def _admin_auth():
 def sb_insert(table, body):
     """POST mit return=representation → die eingefügte Zeile zurück.
     Hier lokal statt bei sb_upsert, um den Wächter-Codepfad nicht anzufassen."""
-    r = requests.post(f"{SUPABASE_URL}/rest/v1/{table}", json=body,
-                      headers=_sb_headers("return=representation"), timeout=20)
-    r.raise_for_status()
+    r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/{table}", json=body,
+                    headers=_sb_headers("return=representation"), timeout=(5, 20))
+    _sb_pruefen(r)
     d = r.json()
     return d[0] if isinstance(d, list) and d else d
 
@@ -8686,7 +8822,34 @@ def watcher_status():
         "error": bool(_watcher_info["last_error"]),
         "polls_last_hour": _dup_budget_snapshot(),
         "build": APP_BUILD,
+        "db": sb_bremse_stand(),       # Supabase-Bremse (01.10.2026): Signal für die Tabs, ohne DB-Zugriff
     })
+
+
+# ── /health (01.10.2026, AUSFALL-BREMSE): Railway hing am 30.09. mit, weil jeder Aufruf auf Supabase wartete; /version liest alle
+# 5 min die Kapitel-Tabelle und taugt nicht als Healthcheck. NUR Speicherwerte: kein Supabase, kein Netz, keine Datei, keine IDs
+# (Endpunkt offen, CORS *). Immer 200, solange der Prozess antwortet — auch bei gesperrter DB, sonst wiese ein Railway-Healthcheck
+# im nächsten Ausfall genau den Deploy ab, der ihn behebt.
+_BOOT_TS = time.time()
+
+
+@app.route("/health", methods=["GET", "OPTIONS"])
+def health():
+    if request.method == "OPTIONS":
+        return "", 200
+    jetzt = time.time()
+    last = _watcher_info.get("last_run") or 0
+    return jsonify({"ok": True, "laeuft_seit_s": int(jetzt - _BOOT_TS), "build": APP_BUILD,
+                    "commit": (os.environ.get("RAILWAY_GIT_COMMIT_SHA") or "")[:7], "threads": threading.active_count(),
+                    "db": sb_bremse_stand(jetzt),
+                    "waechter": {"an": bool(_watcher_info.get("started")), "letzter_lauf_vor_s": int(jetzt - last) if last else None}})
+
+
+@app.errorhandler(SupabaseGesperrt)
+def _sb_gesperrt_antwort(e):
+    """Routen ohne eigenes except: 503 mit Retry-After statt 500 (die Anfrage ging gar nicht an Supabase)."""
+    return (jsonify({"ok": False, "error": "Datenbank gerade gestört — gleich noch einmal", "db_bremse": True}), 503,
+            {"Retry-After": str(max(SB_BREMSE_HALB_S, int(getattr(e, "rest_s", 0) or 0)))})
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -10374,8 +10537,11 @@ PULS_REGEL_CACHE_S = 10
 def puls_regel_stand(jetzt, lesen=None):
     """Regel-Zeile auffrischen, wenn der Cache älter als PULS_REGEL_CACHE_S ist (lesen = sb_select, im Test ersetzbar).
     -> True = Stand brauchbar (frisch oder letzter guter), False = noch nie gelesen und gerade nicht lesbar (→ 503)."""
+    # Fehl-Cache (01.10.2026, AUSFALL-BREMSE): auch ein gescheiterter Versuch hält PULS_REGEL_CACHE_S — ohne guten Stand heißt das
+    # 10 s lang 503 ohne DB-Read (vorher las nach einem Start im Ausfall jede Anfrage bis 24 s). NIE True ohne guten Stand: dann
+    # meldete /puls-regel ausdrücklich 'uia' für alle PCs, und der Bot schlösse das Puls-Chrome (Vorfall 29.09.)
     if jetzt - _PULS_REGEL_CACHE["at"] <= PULS_REGEL_CACHE_S:
-        return True
+        return _PULS_REGEL_CACHE["gut"]
     lesen = lesen or sb_select
     try:
         # puls_topstep_pcs (30.09.2026, Topstep-Paket B, sql/2026-09-30_puls-topstep-pcs.sql): Schalter je PC für den Topstep-Puls
@@ -10385,7 +10551,9 @@ def puls_regel_stand(jetzt, lesen=None):
         tsx_da = True
         try:
             zeilen = lesen("wd_farmer_regeln", {"id": "eq.1", "select": "puls_augen_cdp,puls_topstep_pcs"})
-        except Exception:
+        except Exception as e:
+            if getattr(e, "sb_netz", False):      # Timeout/5xx/Bremse ist kein „Spalte fehlt" — kein zweiter Read
+                raise
             zeilen, tsx_da = lesen("wd_farmer_regeln", {"id": "eq.1", "select": "puls_augen_cdp"}), False
         _PULS_REGEL_CACHE["cdp"] = (zeilen[0].get("puls_augen_cdp") if zeilen else None) or []
         if tsx_da:
@@ -10396,9 +10564,9 @@ def puls_regel_stand(jetzt, lesen=None):
         # DB weg / Spalte fehlt: NIE ausdrücklich 'uia' melden (29.09.2026, Finns Live-Test 14:44 UTC — ein ausdrückliches 'uia'
         # schickt den Bot auf den alten Weg und schließt das Puls-Chrome). Letzten guten Stand weiter nutzen und nach Ablauf des
         # Caches erneut lesen; gab es noch keinen, False → 503, der Bot behält seine gemerkte Regel (Client-Rückfall seit .809).
+        _PULS_REGEL_CACHE["at"] = jetzt
         if not _PULS_REGEL_CACHE["gut"]:
             return False
-        _PULS_REGEL_CACHE["at"] = jetzt
     return True
 
 
@@ -10482,7 +10650,7 @@ def puls_ergebnis_schreiben(pc_id):
         return jsonify({"ok": False, "msg": "Ergebnis ungültig"}), 400
     zeile["at"] = datetime.now(timezone.utc).isoformat()
     try:
-        sb_upsert("puls_ergebnisse", zeile)
+        sb_upsert("puls_ergebnisse", zeile, kritisch=True)   # an der Supabase-Bremse vorbei: der Bot wiederholt nicht
     except Exception as e:
         return jsonify({"ok": False, "msg": f"nicht speicherbar ({type(e).__name__})"}), 502
     return jsonify({"ok": True})
