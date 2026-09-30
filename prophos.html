@@ -22123,6 +22123,11 @@
   // und seit ≥ 10 s durchgehend KEINE Position im Plan-Symbol (Wurzel NQ/MNQ). Reader offline/alt → false (nie raten).
   // Konto-Abgleich exakt (Gegenprüfung 25.09.2026, Punkt 9): die External ID muss als GANZES Token im Konto-Text stehen —
   // indexOf ließ „…0007" auch in „…00071" passen. Tokens = alles zwischen Nicht-Alphanumerik.
+  /* READER-STAND FÜR DEN HEDGE-WÄCHTER (01.10.2026, Live-Befund Moritz 23:31 UTC, Orbit V3): epLokal lebt im Orbit-View-Block, einer
+   * eigenen Funktion (;(() => { … })()) — hier oben sah typeof epLokal immer 'undefined'. Folge: „Master weg laut Reader" hat NIE
+   * gegriffen (Reader meldete flach, Fusion blieb offen), Kurs/Kerzen kamen nie vom lokalen Reader. Jetzt teilen sich beide Stellen
+   * EIN Objekt über window._epLokal (wer zuerst läuft, legt es an). */
+  const epLokal = window._epLokal || (window._epLokal = { stand: null, ab: 0, backoffMs: 45000, naechster: 0 })
   function hedgeKontoPasst(kontoText, extId){
     const id = String(extId || '').trim(); if(!id || !kontoText) return false
     const t = String(kontoText).trim()
@@ -22134,12 +22139,19 @@
     // die Felder: Payload-Alter ≤ 10 s. false = kein Urteil (Flatter-Vorfall 01.09.).
     if(o.positionenOk === false) return false
     if(o.liste.some(x => x && x.pnl_unklar)) return false   // Userscript 0.8.4: Zeile ohne lesbaren P&L = Lesung blind, nie „Master weg"
-    if(!(o.alterMs <= 10000) || !(o.sekundenSeitOpen >= 30)) return false
+    // SCHNELL (01.10.2026, Finn: „Sobald die Order geschlossen ist, muss sie auf Fusion direkt geschlossen werden — 10 s sind viel zu
+    // viel"): Stand aus dem Puls-Chrome (Userscript ≥ 0.9.3, Tab 'puls-…') meldet flach NUR mit Beweis (Reiter Positions + Leer-Text).
+    // Dann reichen: frisch ≤ 3 s, Konto ≥ 2 s stabil, zwei Lesungen leer (≥ 1 s) — und die Master-Position war seit dem Hedge-Open
+    // schon einmal im Reader (sonst könnte ein Hedge, der vor dem ersten Reader-Blick öffnet, sofort wieder zugehen).
+    if(o.schnell){
+      if(!o.gesehen || !(o.alterMs <= 3000) || !(o.sekundenSeitOpen >= 3)) return false
+    }
+    else if(!(o.alterMs <= 10000) || !(o.sekundenSeitOpen >= 30)) return false
     if(o.kontoPlan){ if(!hedgeKontoPasst(o.kontoAktiv, o.kontoPlan)) return false }   // exakter Token-Vergleich (Gegenprüfung 25.09.2026)
     else if(!(o.kontenAnzahl <= 1)) return false
     // Konto seit ≥ 10 s stabil (Gegenprüfung 25.09.2026): nach dem Zurückschalten von Konto B auf A ist die Tabelle kurz leer —
     // ohne diese Regel hätte eine einzige Lesung „Konto A, leer" den Hedge geschlossen, obwohl der Master läuft.
-    if(!(o.kontoStabilMs >= 10000)) return false
+    if(!(o.kontoStabilMs >= (o.schnell ? 2000 : 10000))) return false
     const w = o.wurzel === 'MNQ' ? 'MNQ' : 'NQ'
     const zeilen = o.liste.filter(x => { if(!x) return false; const xw = x.wurzel || ((typeof tvSymbolWurzel === 'function') ? tvSymbolWurzel(x.symbol || '') : String(x.symbol || '')); return xw === w })
     // Position im Plan-Symbol MIT Plan-Richtung (Tradovate nettet je Symbol): Menge 0 = weg, Teilmenge = nur Hinweis, nie schließen
@@ -22150,7 +22162,7 @@
       return true
     })
     if(offen) return false
-    return o.leerSeitMs >= 10000
+    return o.leerSeitMs >= (o.schnell ? 1000 : 10000)
   }
   // Teilschluss (nur Hinweis am Chip, nie schließen): Menge in der Plan-Wurzel/-Richtung kleiner als die Kontrakte des Plans
   function hedgeMasterTeilweise(liste, wurzel, richtung, kontrakte){
@@ -22164,7 +22176,8 @@
   window._hedgeMasterWegEntscheid = hedgeMasterWegEntscheid
   window._hedgeKontoPasst = hedgeKontoPasst
   const _hedgeLeerSeit = new Map()
-  const _hedgeKontoSeit = new Map()   // plan-id → {text, seit}: seit wann der Reader DIESES Konto (passend) ununterbrochen zeigt
+  const _hedgeKontoSeit = new Map()
+  const _hedgeMasterGesehen = new Set()   // plan-id: Reader (Konto passt, frisch) zeigte die Master-Position seit dem Hedge-Open (01.10.2026)   // plan-id → {text, seit}: seit wann der Reader DIESES Konto (passend) ununterbrochen zeigt
   const _hedgeNachgeholt = new Set()
   // Level eines Plans aus dem Puls-Fill (mt5_baseline.tv.einstieg_nq) + TP/SL in Punkten — für Übernahmen/Nachholen (25.09.2026)
   function hedgeLevelAusPlan(p){
@@ -22348,6 +22361,9 @@
             const kontoStabilMs = _hedgeKontoSeit.has(pidK) ? Date.now() - _hedgeKontoSeit.get(pidK).seit : 0
             const listeLeer = !!(st && frisch && kontoFrisch && kontoPasst && Array.isArray(st.positionen) && !st.positionen.some(x => { if(!x) return false; const xw = x.wurzel || ((typeof tvSymbolWurzel === 'function') ? tvSymbolWurzel(x.symbol || '') : ''); if(xw !== wz) return false; if(richtung && x.richtung && x.richtung !== richtung) return false; const m = (typeof x.menge_zahl === 'number') ? Math.abs(x.menge_zahl) : Math.abs((typeof tvKursZahl === 'function') ? (tvKursZahl(x.menge) || 0) : (Number(x.menge) || 0)); return m > 0 }))
             if(listeLeer){ if(!_hedgeLeerSeit.has(String(p.id))) _hedgeLeerSeit.set(String(p.id), Date.now()) } else _hedgeLeerSeit.delete(String(p.id))
+            // Master seit dem Open im Reader gesehen? (Voraussetzung der schnellen Regel)
+            if(st && frisch && kontoFrisch && kontoPasst && hedgeMasterTeilweise(st.positionen, wz, richtung, 1e9) != null) _hedgeMasterGesehen.add(pidK)
+            const schnell = !!(st && /^puls-/.test(String(st.positionen_tab || '')))
             // Teilschluss (Tradovate nettet je Symbol): nur Hinweis am Chip, schließen erst bei 0
             const teil = (st && frisch) ? hedgeMasterTeilweise(st.positionen, wz, richtung, Number(p.masterContracts) || 0) : null
             if((teil != null) !== (h.master_teil != null)){ try{ await hedgeAmPlanSchreiben(p.id, { master_teil: teil }) }catch(_){} }
@@ -22355,7 +22371,8 @@
               alterMs: st ? ((typeof st.positionen_alter_s === 'number') ? st.positionen_alter_s * 1000 : Date.now() - (epLokal.ab || 0)) : Infinity,
               sekundenSeitOpen: (Date.now() - (Date.parse(h.opened_at || h.at || '') || 0)) / 1000, wurzel: wz, richtung,
               kontoPlan, kontoAktiv, kontenAnzahl, kontoStabilMs,
-              leerSeitMs: _hedgeLeerSeit.has(String(p.id)) ? Date.now() - _hedgeLeerSeit.get(String(p.id)) : 0 })
+              leerSeitMs: _hedgeLeerSeit.has(String(p.id)) ? Date.now() - _hedgeLeerSeit.get(String(p.id)) : 0,
+              schnell, gesehen: _hedgeMasterGesehen.has(pidK) })
             if(weg){
               _hedgeLeerSeit.delete(String(p.id))
               await hedgeSoloSchliessen(p, 'master_ende_reader', kurs)
@@ -36858,7 +36875,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.918'
+  const OS_TAB_BUILD = '2026-09-22.919'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -51536,7 +51553,7 @@
   // Lokaler Reader: Stand + progressiver Backoff (Geraete OHNE Reader sollen
   // nicht alle 5s eine rote Console-Zeile produzieren — 45s → verdoppeln → max 10min;
   // Reset bei Erfolg und beim Betreten der View, da schaut ja jemand hin).
-  const epLokal = { stand: null, ab: 0, backoffMs: 45000, naechster: 0 }
+  const epLokal = window._epLokal || (window._epLokal = { stand: null, ab: 0, backoffMs: 45000, naechster: 0 })   // 01.10.2026: dasselbe Objekt wie im Hedge-Wächter
 
   /* Die Orbit-Copier-Instanz dieses PCs (31.08.2026, Finns Wunsch: den
    * Multiplier hier einstellen statt im Copier-Panel). Erkannt wie im Backend:
