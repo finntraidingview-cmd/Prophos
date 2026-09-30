@@ -14556,17 +14556,96 @@ def cdp_positionen_vertrag(pos):
     return out
 
 
+# ORDER-PANEL EINGEKLAPPT (Finn 30.09.2026, pc-usq1i6, Schließen 150k Apex PAAPEX6416990000008 NQZ6: „Konto-Umschalter geklickt,
+# Dropdown nicht erkannt (aktiv '…0007USD')"). Belegt im Stand 00:52 UTC: innerHeight 773, Broker-Leiste #footer-chart-panel bei
+# y 686–724, Umschalter bei y 745–773 — unter der Leiste blieben 49 px, die Tradovate-Kontoliste (32-px-Zeilen) hatte keinen Platz.
+# „Collapse panel" meldete dabei „offen", deshalb griff der alte Weg (Open panel) nicht. Bei pc-2zc2we (Liste ging auf) waren es 320 px.
+# Rechts im Panel-Kopf stehen „—" = [data-name=toggle-visibility-button] (Collapse/Open panel) und „⌐" =
+# [data-name=toggle-maximize-button] (aria „Maximize panel"), beide im Inventar pc-usq1i6/pc-2zc2we belegt. Finns Regel: Panel nicht
+# zu sehen → rechts aufklappen und nochmal; ist auch das Symbol nicht da, ist kein Konto verbunden → Login-Weg.
+CDP_PANEL_MIN_H = 150       # px unter der Broker-Leiste: Platz für Reiter + Kontoliste (gut: 320, Vorfall: 49)
+CDP_PANEL_LAGE_JS = r"""(function () {
+  function r(e) { if (!e) return null; var b = e.getBoundingClientRect(); return (b.width > 0 && b.height > 0) ? [b.x, b.y, b.width, b.height] : null; }
+  function knopf(sel) { var e = document.querySelector(sel), rr = r(e);
+    return rr ? { rect: rr, aria: String(e.getAttribute('aria-label') || e.getAttribute('title') || '').slice(0, 40) } : null; }
+  var lr = r(document.getElementById('footer-chart-panel')), tr = r(document.getElementById('id_account-manager-tabs'));
+  return { innen: innerHeight, leiste: lr, unter_leiste: lr ? Math.round(innerHeight - (lr[1] + lr[3])) : null, reiter: tr,
+           max_knopf: knopf('#footer-chart-panel [data-name="toggle-maximize-button"], [data-name="toggle-maximize-button"]'),
+           vis_knopf: knopf('#footer-chart-panel [data-name="toggle-visibility-button"], [data-name="toggle-visibility-button"]') };
+})()"""
+
+
+def cdp_panel_lage(d, min_h=CDP_PANEL_MIN_H):
+    """REIN RECHNEND (testbar): Lage des Order-Panels aus CDP_PANEL_LAGE_JS. -> 'ok' | 'eingeklappt' | 'unklar'
+    unklar = keine Broker-Leiste bzw. keine Höhe (dann entscheidet der alte Weg: kein Umschalter = kein Broker)."""
+    if not isinstance(d, dict) or not cdp_rect(d.get("leiste")):
+        return "unklar"
+    h = d.get("unter_leiste")
+    if not isinstance(h, (int, float)) or isinstance(h, bool):
+        return "unklar"
+    return "ok" if h >= min_h else "eingeklappt"
+
+
+def _cdp_panel_aufklappen(s, trail):
+    """Order-Panel eingeklappt? Dann „Maximize panel" EINMAL je Sitzung (Windows-Maus über s.klick: Werbung weg, Hover-/Fenster-/
+    Overlay-Riegel), Wirkung beweisen (≤ 5 Blicke). Liest sonst nur. -> (lage, daten)
+    lage: 'ok' | 'unklar' | 'aufgeklappt' | 'ohne_knopf' (Symbol fehlt) | 'bleibt_eingeklappt' (verdeckt, ohne Wirkung, schon versucht)"""
+    if not hasattr(s, "lese_js"):
+        return "unklar", None
+    d = s.lese_js(CDP_PANEL_LAGE_JS)
+    lage = cdp_panel_lage(d)
+    if lage != "eingeklappt":
+        return lage, d
+    h = d.get("unter_leiste")
+    if getattr(s, "_panel_max_versucht", False):
+        return "bleibt_eingeklappt", d
+    s._panel_max_versucht = True
+    kn = d.get("max_knopf") if isinstance(d.get("max_knopf"), dict) else None
+    if not kn or not cdp_rect(kn) or not re.search(r"maxim", str(kn.get("aria") or ""), re.I):
+        trail.append(f"Order-Panel eingeklappt ({h} px unter der Broker-Leiste), Aufklapp-Symbol „Maximize panel“ fehlt"
+                     + (f" (Knopf heißt '{kn.get('aria')}')" if kn else ""))
+        return "ohne_knopf", d
+    if hasattr(s, "werbung_weg"):
+        s.werbung_weg()
+    frei = s.lese_js(cdp_panel_frei_js(cdp_rect(kn)))
+    if isinstance(frei, dict) and not frei.get("frei"):
+        trail.append(f"„Maximize panel“ verdeckt ('{frei.get('was')}' liegt darüber) — kein Klick")
+        return "bleibt_eingeklappt", d
+    trail.append(f"Order-Panel eingeklappt ({h} px unter der Broker-Leiste — kein Platz für die Kontoliste) → „Maximize panel“")
+    if not s.klick(cdp_rect(kn), "Order-Panel aufklappen (Maximize panel)"):
+        return "bleibt_eingeklappt", d
+    d2 = d
+    for _ in range(5):                                    # Treffer ≠ Wirkung (Regel .835): Panel wirklich groß?
+        _warte(0.6, 0.3)
+        d2 = s.lese_js(CDP_PANEL_LAGE_JS)
+        if cdp_panel_lage(d2) == "ok":
+            s._panel_aufgeklappt = True
+            trail.append(f"Order-Panel aufgeklappt ({d2.get('unter_leiste')} px)")
+            return "aufgeklappt", d2
+    trail.append(f"Order-Panel nach „Maximize panel“ weiter eingeklappt ({(d2 or {}).get('unter_leiste')} px)")
+    return "bleibt_eingeklappt", d2
+
+
 def _cdp_konto_sichern(s, ext, opts, trail):
     """Konto im Puls-Chrome sicherstellen (Panel auf → Umschalter höchstens EINMAL → genau ein Eintrag), je Schritt neu gelesen.
     -> (ok, code, msg, stand, extra). Steht das Konto nicht im Dropdown (anderer Tradovate-Login), Esc — die Liste bleibt nie offen
-    (K1-Test 2, 00:59 UTC: Liste blieb offen, der nächste Lauf klickte direkt einen Eintrag)."""
+    (K1-Test 2, 00:59 UTC: Liste blieb offen, der nächste Lauf klickte direkt einen Eintrag).
+    Seit 30.09.2026: eingeklapptes Order-Panel (s. CDP_PANEL_MIN_H) wird vor dem Umschalter bzw. nach „Dropdown nicht erkannt" EINMAL
+    aufgeklappt und der Konto-Schritt EINMAL wiederholt; ohne Aufklapp-Symbol bzw. ohne Wirkung → 'kein_broker' (Login-Weg im
+    Aufrufer _cdp_konto_mit_login). Gilt für jeden CDP-Lauf mit Konto-Schritt (Lesen, Order, Schließen)."""
     st = s.stand(opts)
     geklickt_umschalter = False
-    for _runde in range(4):
+    wiederholt = False
+    for _runde in range(6):
         ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
         aktiv = str(ko.get("aktiv") or "")
         if aktiv and tv_konto_passt(aktiv, ext):
             trail.append(f"Konto steht: '{aktiv[:40]}'")
+            # Konto passt, Panel aber eingeklappt: Lesen/Schließen sähen die Positionen nicht — einmal aufklappen, nie deshalb scheitern
+            if not getattr(s, "_panel_max_versucht", False) and _cdp_panel_aufklappen(s, trail)[0] == "aufgeklappt":
+                st = s.stand(opts)
+            if getattr(s, "_panel_aufgeklappt", False) and geklickt_umschalter:
+                trail.append("Order-Panel war eingeklappt → aufgeklappt → Konto gewechselt")
             return True, "", "", st, {"konto_aktiv": aktiv[:80]}
         if ko.get("panel") == "zu" and cdp_rect(ko.get("panel_knopf")):
             s.klick(cdp_rect(ko.get("panel_knopf")), "Handelspanel auf")
@@ -14585,6 +14664,20 @@ def _cdp_konto_sichern(s, ext, opts, trail):
             _warte(1.2, 0.6)
             st = s.stand(opts)
             continue
+        # Order-Panel (30.09.2026): vor dem Umschalter-Klick bzw. nach „Dropdown nicht erkannt" prüfen — eingeklappt → EINMAL
+        # aufklappen und den Konto-Schritt EINMAL wiederholen; Symbol fehlt / ohne Wirkung → wie kein Broker (Login-Weg).
+        # VOR der Umschalter-Abfrage: ist das Panel ganz unten, kann auch der Umschalter selbst aus dem Bild sein.
+        lage, pd = _cdp_panel_aufklappen(s, trail) if (not geklickt_umschalter or not wiederholt) else ("", None)
+        if lage == "aufgeklappt":
+            if geklickt_umschalter:
+                wiederholt, geklickt_umschalter = True, False
+                trail.append("Konto-Schritt nach dem Aufklappen einmal wiederholt")
+            st = s.stand(opts)
+            continue
+        if lage in ("ohne_knopf", "bleibt_eingeklappt"):
+            return False, "kein_broker", (f"Order-Panel eingeklappt ({(pd or {}).get('unter_leiste')} px) und "
+                                          + ("kein Aufklapp-Symbol „Maximize panel“" if lage == "ohne_knopf" else "nicht aufklappbar")
+                                          + f" (aktiv '{aktiv[:40] or '-'}') → wie kein Broker: Login-Weg"), st, {"panel_lage": pd}
         if not cdp_rect(ko.get("schalter")):
             return False, "kein_broker", (f"Kein Konto-Umschalter zu sehen (aktiv '{aktiv[:40] or '-'}', "
                                           f"{str(ko.get('hinweis') or '')[:80]}) — Tradovate im Puls-Chrome verbunden?"), st, {}
@@ -14592,8 +14685,9 @@ def _cdp_konto_sichern(s, ext, opts, trail):
         # offenes Dropdown wieder). Danach zweimal lesen; bleibt es zu, ehrlich raus MIT dem Stand für T1.
         if geklickt_umschalter:
             return False, "konto_nicht_erreicht", (f"Konto-Umschalter geklickt, Dropdown nicht erkannt (aktiv '{aktiv[:40] or '-'}') — "
-                                                   "augen.js sieht die Liste nicht (Selektoren?) oder der Klick trifft nicht."), st, \
-                {"konto_stand": ko, "popups": st.get("popups")}
+                                                   "augen.js sieht die Liste nicht (Selektoren?) oder der Klick trifft nicht"
+                                                   + (f"; Order-Panel {lage} ({(pd or {}).get('unter_leiste')} px)" if lage else "") + "."), st, \
+                {"konto_stand": ko, "popups": st.get("popups"), "panel_lage": pd}
         geklickt_umschalter = True
         s.klick(cdp_rect(ko.get("schalter")), "Konto-Umschalter")
         _warte(0.9, 0.4)

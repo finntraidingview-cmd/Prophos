@@ -3170,6 +3170,68 @@ def test_puls_cdp_login():
         and v2_ == "PAAPEX6416990000008 USD" and sd_.klicks == ["Handelspanel auf (Open panel)"] and sd_.ww == 3,
         f"Dialog über „Open panel“ → kein Klick, zählt nicht, danach frei → Klick → Konto ({td_})")
     chk(v3_ == "" and tn_ == ["Handelspanel bleibt nach dem Klick zu"] and sn_._panel_klicks == 1, f"Klick ohne Wirkung → Spur ({tn_})")
+    # Order-Panel eingeklappt (Finn 30.09.2026, pc-usq1i6: 49 px unter der Broker-Leiste, „Dropdown nicht erkannt") → „Maximize panel"
+    # EINMAL, Konto-Schritt EINMAL wiederholen; Symbol fehlt → kein_broker (Login-Weg)
+    L_ = ob.cdp_panel_lage
+    chk(L_(None) == "unklar" and L_({"unter_leiste": 40}) == "unklar" and L_({"leiste": [56, 686, 879, 38], "unter_leiste": True}) == "unklar"
+        and L_({"leiste": [56, 686, 879, 38], "unter_leiste": 49}) == "eingeklappt"
+        and L_({"leiste": [56, 587, 1199, 38], "unter_leiste": 320}) == "ok" and L_({"leiste": [1, 1, 9, 9], "unter_leiste": 150}) == "ok",
+        "Order-Panel-Lage: 49 px eingeklappt, 320 px ok, ohne Leiste/Höhe unklar")
+    chk('toggle-maximize-button' in ob.CDP_PANEL_LAGE_JS and 'footer-chart-panel' in ob.CDP_PANEL_LAGE_JS
+        and 'id_account-manager-tabs' in ob.CDP_PANEL_LAGE_JS and "click" not in ob.CDP_PANEL_LAGE_JS, "Panel-Probe liest nur (Leiste, Reiter, Kopf-Knöpfe)")
+
+    class _SK:
+        """Attrappe Puls-Chrome: Panel eingeklappt (49 px) bis „Maximize panel", Liste geht nur bei großem Panel auf."""
+        def __init__(self, knopf=True, liste=True, gross=False, aktiv="PAAPEX6416990000007USD"):
+            self.gross, self.knopf, self.liste, self.aktiv, self.offen, self.klicks = gross, knopf, liste, aktiv, False, []
+
+        def stand(self, opts=None):
+            ein = [{"text": "PAAPEX6416990000007USD", "rect": [78, 600, 228, 32]}, {"text": "PAAPEX6416990000008USD", "rect": [78, 632, 228, 32]}]
+            return {"konto": {"panel": "offen", "schalter": {"rect": [72, 745, 199, 28]}, "aktiv": self.aktiv,
+                              "liste_offen": self.offen, "eintraege": ein if self.offen else []}}
+
+        def lese_js(self, a, timeout=8):
+            if "elementFromPoint" in a:
+                return {"frei": True, "was": ""}
+            return {"leiste": [56, 686, 879, 38], "unter_leiste": 320 if self.gross else 49,
+                    "max_knopf": {"rect": [897, 686, 38, 38], "aria": "Maximize panel"} if self.knopf else None}
+
+        def werbung_weg(self, zwang=False):
+            return 0
+
+        def taste(self, k, modifiers=0):
+            self.klicks.append("Taste " + k)
+
+        def klick(self, r, n, toast_ok=False):
+            self.klicks.append(n)
+            if "Maximize" in n:
+                self.gross = True
+            elif n == "Konto-Umschalter":
+                self.offen = self.liste and self.gross
+            elif n.startswith("Konto "):
+                self.aktiv, self.offen = "PAAPEX6416990000008USD", False
+            return True
+    ob._warte = lambda a_, b_: None
+    try:
+        k1_, t1_ = _SK(), []
+        r1_ = ob._cdp_konto_sichern(k1_, "PAAPEX6416990000008", {}, t1_)
+        k2_, t2_ = _SK(knopf=False), []
+        r2_ = ob._cdp_konto_sichern(k2_, "PAAPEX6416990000008", {}, t2_)
+        k3_, t3_ = _SK(gross=True, liste=False), []
+        r3_ = ob._cdp_konto_sichern(k3_, "PAAPEX6416990000008", {}, t3_)
+        k4_, t4_ = _SK(aktiv="PAAPEX6416990000008USD"), []
+        r4_ = ob._cdp_konto_sichern(k4_, "PAAPEX6416990000008", {}, t4_)
+    finally:
+        ob._warte = alt_w
+    chk(r1_[0] and k1_.klicks == ["Order-Panel aufklappen (Maximize panel)", "Konto-Umschalter", "Konto PAAPEX6416990000008"]
+        and "Order-Panel war eingeklappt → aufgeklappt → Konto gewechselt" in t1_,
+        f"eingeklappt → EIN Klick „Maximize panel“ → Umschalter → Konto gewechselt ({k1_.klicks}, {t1_})")
+    chk(not r2_[0] and r2_[1] == "kein_broker" and k2_.klicks == [] and "Login-Weg" in r2_[2]
+        and ob.cdp_login_noetig(r2_[1], r2_[4]), f"Symbol fehlt → kein Klick, kein_broker → Login-Weg ({r2_[2]})")
+    chk(not r3_[0] and r3_[1] == "konto_nicht_erreicht" and k3_.klicks == ["Konto-Umschalter"] and "Order-Panel ok (320 px)" in r3_[2],
+        f"Panel groß, Liste trotzdem nicht erkannt → ehrliche Meldung mit Panel-Lage, Umschalter nur einmal ({r3_[2]})")
+    chk(r4_[0] and k4_.klicks == ["Order-Panel aufklappen (Maximize panel)"] and k4_.gross,
+        f"Konto steht, Panel eingeklappt → einmal aufklappen (Positionen lesbar), nie deshalb scheitern ({k4_.klicks})")
     fj_ = ob.cdp_panel_frei_js([1482, 907, 38, 38])
     chk("elementFromPoint(1501.0,926.0)" in fj_ and "toggle-visibility-button" in fj_ and "#overlap-manager-root" in fj_ and "toastGroup-" in fj_,
         "Frei-Probe: Knopfmitte, Dialog/Overlay verdeckt, Meldungen frei")
