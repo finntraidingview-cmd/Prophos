@@ -19965,6 +19965,8 @@
                  sl_level_quelle: zahl(r.sl_level) > 1000 ? String(r.sl_level_quelle || 'tsx_toast') : null,
                  positionen: Array.isArray(r.positionen) ? r.positionen.slice(0, 5) : null,
                  lesen_trail: String(r.trail || '').slice(0, 2000), lesen_at: new Date().toISOString() }
+    // Warnung des Bots bei ok:true (B37, 30.09.2026: z. B. SL-Bracket abgelehnt, Position steht) — die Karte zeigt „Brackets in TopstepX prüfen"
+    if(r && r.warnung) tv.warnung = String(r.warnung).slice(0, 300)
     const ein = r.einstieg != null ? tvKursZahl(r.einstieg) : null
     if(ein > 1000){ tv.einstieg_nq = ein; tv.einstieg_quelle = 'fill'; tv.einstieg_beleg = (r && r.einstieg_quelle) || null; tv.einstieg_symbol = r.tv_symbol || null }
     else if(!(opts && opts.ohneReader)){
@@ -33261,7 +33263,10 @@
               ? 'Puls meldete die Order als platziert, Duplikum hat sie aber noch nicht erkannt — erst in TradingView nachsehen, dann erneut starten'
               : 'Der Start wurde ausgelöst, aber nichts kam zurück (PC nicht bereit?) — Klick stößt den Start erneut an'}">Neu starten</button>`
         : ''
-      const orbitBtn = (!MT5_LOCAL && qs && qs.laeuft)
+      const _tsxUnklar = p.route === 'tsv2' && p.status === 'planned' && p.mt5Baseline && p.mt5Baseline.puls_unklar
+      const orbitBtn = _tsxUnklar
+        ? `<button class="btn btn-ghost tc2-btn rsq-card-wait" data-plan-tsx-unklar="${p.id}" style="color:#B45309" title="Letzter Start: Puls hat geklickt, die Position steht vermutlich (${escapeHtml(String(_tsxUnklar.msg || _tsxUnklar.code || ''))}). Erst in TopstepX nachsehen — steht sie, „Läuft" setzen; ist nichts offen, Klick hier gibt „Starten" wieder frei.">⚠ UNKLAR · in TopstepX nachsehen</button>`
+        : (!MT5_LOCAL && qs && qs.laeuft)
         ? `<span class="rsq-card-run" title="Signal läuft — Live-Schritte im Auto-Start-Panel unten rechts">📡 startet gerade…</span>`
         : (!MT5_LOCAL && qs)
           ? `<button class="btn btn-ghost tc2-btn rsq-card-wait" data-plan-unqueue="${p.id}" title="Wartet auf den Auto-Start — Klick nimmt den Trade wieder aus der Warteschlange">⏳ Nr. ${qs.pos} in der Warteschlange ✕</button>`
@@ -33353,6 +33358,9 @@
                 // Winning Days Farm (25.09.2026, Design-Rundgang): „ohne Hedge" stand direkt neben „Fusion-Gegenhedge"
                 ? `<span class="tc2-chip" title="Winning Days Farm: Fusion-Gegenhedge, beide Schließ-Level in MetaTrader" style="background:rgba(124,58,237,.10);color:#6D28D9">Fusion-Hedge</span>`
                 : `<span class="tc2-chip" title="V2-Weg: kein Slave, nichts wird kopiert" style="opacity:.75">ohne Hedge</span>`}
+            ${(p.route === 'tsv2' && (p.status === 'open' || p.status === 'review') && p.mt5Baseline && p.mt5Baseline.tv && p.mt5Baseline.tv.warnung)
+              ? `<span class="tc2-chip" style="background:rgba(245,158,11,.12);color:#B45309" title="${escapeHtml(String(p.mt5Baseline.tv.warnung))}">⚠ Brackets in TopstepX prüfen</span>`
+              : ''}
             ${(routeIstEcho(p.route) && (p.richtung === 'buy' || p.richtung === 'sell'))
               ? `<span class="tc2-chip" style="font-family:var(--mono);font-weight:700;${p.richtung === 'buy' ? 'background:rgba(18,183,106,.12);color:#0E9757' : 'background:rgba(240,68,56,.10);color:#D92D20'}" title="Gespeicherte Order-Richtung">${p.richtung === 'buy' ? 'BUY' : 'SELL'}</span>`
               : ''}
@@ -33707,6 +33715,14 @@
     // Geplante Startzeit auf der Karte entfernen (22.09.2026) — eigener Handler.
     document.querySelectorAll('[data-plan-start-um-x]').forEach(btn => {
       btn.addEventListener('click', () => { if(typeof tpStartUmEntfernen === 'function') tpStartUmEntfernen(btn.dataset.planStartUmX) })
+    })
+    // Topstep-UNKLAR-Marke lösen (B37, 30.09.2026) — eigener Handler; nur nach Rückfrage, weil danach „Starten" wieder klickt
+    document.querySelectorAll('[data-plan-tsx-unklar]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if(!confirm('In TopstepX nachgesehen und KEINE Position offen?\n\nDann wird „Starten" wieder frei. Steht die Position, stattdessen „Läuft" setzen.')) return
+        try{ await baselinePatch(btn.dataset.planTsxUnklar, { puls_unklar: null }, 'planned'); renderTradePlans() }
+        catch(e){ if(typeof atToast === 'function') atToast('UNKLAR-Marke nicht gelöst: ' + ((e && e.message) || e), 'end') }
+      })
     })
     // „Neu starten" bei hängendem Start (23.09.2026) — eigener Handler, kein Sammel-Handler.
     document.querySelectorAll('[data-plan-neu-start]').forEach(btn => {
@@ -36424,7 +36440,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.879'
+  const OS_TAB_BUILD = '2026-09-22.880'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -36610,6 +36626,14 @@
   // zurück in die Signal-Zeile statt in ein Popup (am PC sitzt dann niemand).
   // Wrapper (25.09.2026, Live-Befund: Remote-Signal 39bb477f blieb auf 'laeuft'): meldet ein Remote-Lauf (fern) nichts,
   // weil ein Pfad ohne fern.melde endet oder wirft, schließt der Wrapper die Signal-Zeile ab — nie 'laeuft' liegen lassen.
+  // Topstep-UNKLAR-Marke setzen (B37, 30.09.2026) — nur solange der Plan „Geplant" ist (Guard im RPC); Fehler still, die Meldung kommt ohnehin
+  async function tsxUnklarMarke(planId, r){
+    try{
+      await baselinePatch(planId, { puls_unklar: { at: new Date().toISOString(), code: (r && r.code) || 'unklar', msg: String((r && (r.msg || r.error)) || '').slice(0, 200),
+        pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : null } }, 'planned')
+      try{ renderTradePlans() }catch(_){}
+    }catch(e){ console.warn('[tsx-unklar] Marke', (e && e.message) || e) }
+  }
   async function tpOrbitStarten(planId, fern, opts){
     if(!fern) return tpOrbitStartenKern(planId, null, opts)
     let gemeldet = false
@@ -36622,6 +36646,7 @@
   // (Puls-Chrome) gewählt ist, die nötige Etappe aber noch fehlt — gesendet:false, retry_ok:false. Nie „nichts gesendet" mit Neustart:
   // der Plan bleibt stehen, bis die Etappe da ist (oder von Hand in TopstepX).
   const tsxCdpFolgtText = r => `Topstep-Puls wird gerade umgebaut${r && r.etappe ? ' (Etappe ' + String(r.etappe).slice(0, 12) + ')' : ''} — dieser Schritt kommt noch. Plan bleibt stehen, NICHT erneut starten; bis dahin von Hand in TopstepX.`
+  window._tpOrbitStarten = (id, fern) => tpOrbitStarten(id, fern)   // Test-Haken (Stub)
   async function tpOrbitStartenKern(planId, fern, opts){
     let plan = tradePlans.find(x => String(x.id) === String(planId))
     const toast = (t, art) => { if(typeof atToast === 'function') atToast(t, art) }
@@ -36637,6 +36662,13 @@
       if(data){ const frisch = rowToPlan(data); const i = tradePlans.findIndex(x => String(x.id) === String(plan.id)); if(i >= 0) tradePlans[i] = frisch; plan = frisch }
     }catch(_){ /* offline: mit dem Cache weiter */ }
     if(plan.status !== 'planned'){ if(fern) fern.melde({ ok:false, msg: 'Plan ist nicht (mehr) „Geplant" — nichts gestartet.' }); return }
+    // Topstep-UNKLAR-Marke (B37, 30.09.2026): der letzte Start hat geklickt, die Position steht vermutlich — kein zweiter Klick,
+    // egal ob Karte, Startzeit oder Signal vom Mac. Gelöst wird die Marke nur bewusst über den Chip auf der Karte.
+    if(plan.route === 'tsv2' && plan.mt5Baseline && plan.mt5Baseline.puls_unklar){
+      const t = '⚠ UNKLAR — beim letzten Start ist die Position vermutlich offen geblieben: erst in TopstepX nachsehen, dann auf der Karte „⚠ UNKLAR" lösen. Nichts gestartet.'
+      if(fern) fern.melde({ ok:false, unklar:true, msg: t }); else toast(t, 'end')
+      return
+    }
     let extId = '', geschwister = []
     // Fehler gehören ins Order-Popup: dort bleiben sie stehen (ein Toast ist nach 5 s weg),
     // und dort sitzt auch „Diagnose kopieren".
@@ -36674,6 +36706,7 @@
         _pfSet('ob-order', 'err', escapeHtml(text))
         pfEnde(false, /^✗ von TopstepX abgelehnt/.test(text) ? '✗ Von TopstepX abgelehnt — Plan bleibt Geplant.'
           : /^⚠ Order geklickt, keine Position/.test(text) ? '⚠ Order geklickt, keine Position — erst in TopstepX unter Orders nachsehen. Plan bleibt Geplant.'
+          : /^⚠ UNKLAR — Position vermutlich offen/.test(text) ? '⚠ UNKLAR — Position vermutlich offen. In TopstepX nachsehen, NICHT erneut starten. Plan bleibt stehen.'
           : /^Topstep-Puls wird gerade umgebaut/.test(text) ? '⏸ Topstep-Puls wird umgebaut — Plan bleibt stehen, nicht erneut starten.'
           : /UNKLAR/.test(text) ? `⚠ Ergebnis UNKLAR — erst in ${pulsPlattform(plan)} nachsehen, NICHT blind erneut starten.` : '✗ Nichts platziert — Meldung oben.')
         return
@@ -36888,6 +36921,7 @@
             status: (r && r.ok) ? 'fertig' : 'fehler', pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : '',
             params: { aktion: 'orbit', lokal: true, orbit: { symbol, richtung: dir, volumen: lots, tp_usd: tp > 0 ? tp : null, sl_usd: (tp > 0 && sl > 0) ? sl : null } },
             ergebnis: { ok: !!(r && r.ok), gesendet: !!(r && r.gesendet), schritt: r && r.schritt, msg: r && (r.msg || r.error), trail: r && r.trail,
+              code: (r && r.code) || null, unklar: !!(r && r.unklar), warnung: (r && r.warnung) || null,
               einstieg: (r && r.einstieg) || null, einstieg_quelle: (r && r.einstieg_quelle) || null, tp_limit: (r && r.tp_limit) || null, tp_limit_quelle: (r && r.tp_limit_quelle) || null, sl_limit: (r && r.sl_limit) || null, sl_limit_quelle: (r && r.sl_limit_quelle) || null, order_klick_ms: (r && r.order_klick_ms) || null, meldung_roh: (r && Array.isArray(r.meldung_roh)) ? r.meldung_roh.slice(0, 14) : null } })   // Fill-Nachweis (28.09.2026); SL-Limit seit 29.09.2026 — der neue Puls liest nach „Show more“ Fill, TP UND SL exakt (Radar spiegelt 1:1)
         }catch(_){}
       }
@@ -36929,6 +36963,7 @@
         // verankert sie aber am Kurs beim Klick (Live-Test 14:26 UTC: 0,25 Pkt daneben). Nachgereicht auch, wenn die Baseline vom alten Weg kam.
         try{
           const lv = (typeof tvV2OrderLevel === 'function') ? tvV2OrderLevel(r) : {}
+          if(plan.route === 'tsv2' && r && r.warnung && !(tvb && tvb.warnung)) lv.warnung = String(r.warnung).slice(0, 300)
           if(Object.keys(lv).length) await baselinePatchIn(plan.id, 'tv', lv)   // atomar (Teil B)
         }catch(e){ console.warn('[v2] einstieg/level', e) }
       }
@@ -36943,6 +36978,15 @@
         await fehler('✗ von TopstepX abgelehnt: ' + abl, Object.assign({}, r, { retry_ok: undefined }))
         return
       }
+      if(plan.route === 'tsv2' && r && !r.ok && r.code === 'beweis' && r.unklar){
+        // B37 (Terminal 3, 30.09.2026): „No Active Position" ist weg, aber weder Fill noch Positionszeile lesbar — die Position steht
+        // vermutlich. Plan bleibt stehen, KEIN Neustart (retry_ok false sperrt Weiter/Erneut), erst in TopstepX nachsehen.
+        // Marke am Plan (mt5_baseline.puls_unklar): die Karte zeigt statt „Starten" den UNKLAR-Chip, jeder weitere Start wird abgewiesen
+        await tsxUnklarMarke(plan.id, r)
+        await fehler('⚠ UNKLAR — Position vermutlich offen: Puls hat geklickt, „No Active Position" ist weg, aber weder Fill noch Positionszeile lesbar. In TopstepX nachsehen, NICHT erneut starten.',
+          Object.assign({}, r, { retry_ok: false }))
+        return
+      }
       if(plan.route === 'tsv2' && r && !r.ok && r.code === 'beweis'){
         await fehler('⚠ Order geklickt, keine Position — in TopstepX unter Orders nachsehen. Plan bleibt Geplant, NICHT blind erneut starten.',
           Object.assign({}, r, { retry_ok: false }))
@@ -36951,17 +36995,22 @@
       if(r && r.ok && r.gesendet){
         // Position bewiesen → Kauf-Klick stempeln; „Läuft" setzt die Duplikum-Erkennung (s. tvPlanGesendet).
         // ORBIT V2 (23.09.2026): niemand erkennt hier etwas — der bewiesene Klick IST „Läuft".
+        // Warnung trotz ok (B37, 30.09.2026: z. B. SL-Bracket abgelehnt, Position steht) — Plan läuft wie gehabt, die Warnung bleibt
+        // im Popup stehen (kein Auto-Schließen) und steht über mt5_baseline.tv.warnung auf der Karte
+        const warn = (plan.route === 'tsv2' && r.warnung) ? String(r.warnung).slice(0, 300) : ''
         if(pv2) await v2AufOpen()
         else await tvPlanGesendet(plan.id)
         if(fern) fern.melde({ ok:true, einstieg: r.einstieg || null, tv_symbol: r.tv_symbol || null, trail: r.trail || null,
-                              msg: String(r.msg || 'Order platziert.') })
+                              msg: String(r.msg || 'Order platziert.'), warnung: warn || null })
         if(imPopup){
-          _pfSet('ob-order', 'ok', escapeHtml(String(r.msg || 'Order platziert.')))
+          _pfSet('ob-order', warn ? 'warn' : 'ok', escapeHtml(String(r.msg || 'Order platziert.')) + (warn ? '<br>⚠ ' + escapeHtml(warn) + ' — Brackets in TopstepX prüfen.' : ''))
           pfEnde(true, pv2 ? '✓ Order platziert — Plan läuft (ohne Hedge). Live-P&L und Ende (TP/SL) kommen aus Radar, Puls bestätigt den Profit 1–120 min nach dem Ende.'
                                               : '✓ Order platziert — sobald Duplikum sie sieht, springt der Plan auf „Läuft".')
-          setTimeout(() => { if(document.getElementById('pf-final')?.className.indexOf('ok') !== -1) _pfClose() }, 2400)
+          const _fin = document.getElementById('pf-final')
+          if(warn && _fin){ _fin.className = 'pf-final warn'; _fin.textContent = '✓ Order platziert, Plan läuft — ⚠ ' + warn + ' — Brackets in TopstepX prüfen.' }
+          else setTimeout(() => { if(document.getElementById('pf-final')?.className.indexOf('ok') !== -1) _pfClose() }, 2400)
         }
-        toast(`✓ Order platziert: ${dir.toUpperCase()} ${lots} ${r.tv_symbol || symbol}${r.einstieg ? ` @ ${r.einstieg}` : ''}${tp > 0 ? ` · TP $${tp}${sl > 0 ? ` / SL $${sl}` : ''}` : ' · ohne SL/TP'}`, 'start')
+        toast(`✓ Order platziert: ${dir.toUpperCase()} ${lots} ${r.tv_symbol || symbol}${r.einstieg ? ` @ ${r.einstieg}` : ''}${tp > 0 ? ` · TP $${tp}${sl > 0 ? ` / SL $${sl}` : ''}` : ' · ohne SL/TP'}${warn ? ' · ⚠ Brackets in TopstepX prüfen' : ''}`, 'start')
       } else if(r && r.ok){
         // ok OHNE gesendet = der Bot am PC ist noch der alte (kennt „scharf" nicht, kommt in ~20 s nach).
         await fehler(`${r.msg || ''} Gesendet wurde NICHTS — der Puls am PC ist noch der alte Stand. Kurz warten, dann erneut „Starten".`, r)
@@ -37149,8 +37198,8 @@
         _rsqStep('order', 'warn', `⏳ Puls klickt in TradingView: Konto → Asset → Order-Panel → ${escapeHtml(w.dir.toUpperCase())}… (${sec}s) — HÄNDE WEG am PC!`)
       } else if(row.status === 'fertig'){
         _rsqStep('claim', 'ok', null)
-        _rsqStep('order', 'ok', null)
-        fertig(true, '✓ ' + escapeHtml(String(erg.msg || 'Order platziert.')) + ' — sobald Duplikum sie sieht, springt der Plan auf „Läuft".', null)
+        _rsqStep('order', erg.warnung ? 'warn' : 'ok', erg.warnung ? '⚠ ' + escapeHtml(String(erg.warnung)) + ' — Brackets in TopstepX prüfen.' : null)
+        fertig(true, '✓ ' + escapeHtml(String(erg.msg || 'Order platziert.')) + (erg.warnung ? ' — ⚠ Brackets in TopstepX prüfen.' : ' — sobald Duplikum sie sieht, springt der Plan auf „Läuft".'), null)
       } else if(row.status === 'verworfen'){
         // Bewusster Abbruch (✕ hier oder von einem anderen Gerät) — kein PC-Problem, weiter.
         _rsqStep('claim', 'err', null)
@@ -37164,12 +37213,13 @@
           + (altTab ? '<br>Der PC-Tab fährt noch einen alten Build — am PC neu laden (Strg+F5).' : ''))
         // TopstepX (B31, 27.09.2026): „✗ von TopstepX abgelehnt" / „⚠ Order geklickt, keine Position" kommen fertig
         // formuliert vom PC-Tab — unverändert zeigen, nicht noch ein ✗ bzw. „in TradingView nachsehen" davor.
-        const _tsxText = /^(✗ von TopstepX abgelehnt|⚠ Order geklickt, keine Position)/.test(String(erg.msg || ''))
+        const _tsxText = /^(✗ von TopstepX abgelehnt|⚠ Order geklickt, keine Position|⚠ UNKLAR — Position vermutlich offen)/.test(String(erg.msg || ''))
         fertig(false,
           _tsxText ? escapeHtml(String(erg.msg))
           : erg.unklar ? '⚠ Ergebnis UNKLAR — erst am PC in TradingView nachsehen, ob die Order liegt: ' + escapeHtml(String(erg.msg || ''))
                      : '✗ ' + escapeHtml(String(erg.msg || row.status)),
-          (_tsxText && erg.unklar) ? '⏸ Angehalten — erst in TopstepX unter Orders nachsehen, NICHT blind weiter.'
+          (_tsxText && erg.unklar) ? (/^⚠ UNKLAR — Position/.test(String(erg.msg || '')) ? '⏸ Angehalten — Position vermutlich offen, erst in TopstepX nachsehen, NICHT blind weiter.'
+                                                                                         : '⏸ Angehalten — erst in TopstepX unter Orders nachsehen, NICHT blind weiter.')
           : erg.unklar ? '⏸ Angehalten — Ergebnis unklar, erst in TradingView nachsehen, NICHT blind weiter (liegt die Order, erkennt Duplikum sie von selbst).'
                      : '⏸ Angehalten — Fehler beim letzten Trade, erst beheben, dann ▶ Weiter.')
       }
@@ -37972,7 +38022,14 @@
           if(plan.status !== 'planned' || !(e.gesendet || e.ok)){ await pulsErgebnisAbgeholt(z.plan_id, 'order'); continue }
           // Topstep V2 (K4, 30.09.2026): nur ein BEWIESEN gesendeter Klick zählt — eine Probe (scharf:false, schritt 'probe') meldet ok:true
           // ohne gesendet und darf NIE „Läuft" setzen (der Bot sendet sie ohnehin nicht, das hier ist der Riegel im Tab)
-          if(plan.route === 'tsv2' && (!e.gesendet || e.schritt === 'probe' || e.code === 'probe')){ await pulsErgebnisAbgeholt(z.plan_id, 'order'); continue }
+          // Seit B37 (30.09.2026) auch: abgelehnt / beweis (gesendet:true, ok:false) und unklar setzen NIE „Läuft" — nur ok UND gesendet
+          if(plan.route === 'tsv2' && (!e.ok || !e.gesendet || e.unklar || e.schritt === 'probe' || e.code === 'probe')){
+            await pulsErgebnisAbgeholt(z.plan_id, 'order')
+            if(e.gesendet && e.unklar && plan.status === 'planned') await tsxUnklarMarke(plan.id, e)
+            if(e.gesendet && (e.unklar || e.code === 'beweis') && typeof atToast === 'function')
+              atToast(`⚠ ${name}: Puls hatte geklickt, Ergebnis UNKLAR (${String(e.code || 'unklar')}) — in TopstepX nachsehen, NICHT erneut starten`, 'end')
+            continue
+          }
           const kms = Number(e.order_klick_ms)
           const klickIso = (kms > 1e12 && kms <= Date.now() + 60000) ? new Date(kms).toISOString() : (e.klick_at || z.at)
           let tvb = null
@@ -37992,7 +38049,7 @@
               trail: e.trail_ende || null, einstieg: e.einstieg || null, einstieg_quelle: e.einstieg_quelle || null, tp_limit: e.tp_limit || null,
               sl_limit: e.sl_limit || null, order_klick_ms: e.order_klick_ms || null } }) }catch(_){}
           await pulsErgebnisAbgeholt(z.plan_id, 'order')
-          if(typeof atToast === 'function') atToast(`⚠ ${name}: Puls hatte die Order platziert, die Antwort ging verloren — Plan jetzt „Läuft"${e.einstieg ? ' (Einstieg ' + e.einstieg + ')' : ''}${plan.hedgeEur > 0 ? ' · Fusion-Hedge wird nachgeholt' : ''}`, 'start')
+          if(typeof atToast === 'function') atToast(`⚠ ${name}: Puls hatte die Order platziert, die Antwort ging verloren — Plan jetzt „Läuft"${e.einstieg ? ' (Einstieg ' + e.einstieg + ')' : ''}${plan.hedgeEur > 0 ? ' · Fusion-Hedge wird nachgeholt' : ''}${(plan.route === 'tsv2' && e.warnung) ? ' · ⚠ Brackets in TopstepX prüfen' : ''}`, 'start')
           try{ renderTradePlans() }catch(_){}
         } else if(z.art === 'close'){
           if(plan.status !== 'open'){ await pulsErgebnisAbgeholt(z.plan_id, 'close'); continue }
