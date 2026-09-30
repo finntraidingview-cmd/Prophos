@@ -27761,10 +27761,11 @@
 
   /* Reihenfolge der Accounts-Liste (30.09.2026, Finn: „Die Sortierung nach Typ ist gemischt" — es kam Waiting for Payout,
    * Funded CFD, Waiting for Payout, Funded CFD, Funded Futures … durcheinander, weil funded und funded_cfd sich Rang 3
-   * teilten). Jetzt jede Art eine eigene Gruppe: Challenge · Phase 1 · Phase 2 · Funded Futures · Funded CFD · Winning Days ·
-   * Waiting for Payout · Live. „Waiting for Payout" ist keine Kontoart in der DB (funded_cfd mit waiting_payout_since,
+   * teilten). Jetzt jede Art eine eigene Gruppe: Challenge · Phase 1 · Phase 2 · Funded Futures · Winning Days · Funded CFD ·
+   * Waiting for Payout · Live (Nachtrag Finn nach .851: „Funded Futures · Winning Days · Funded CFD · Waiting for Payout" —
+   * WD-Konten sind Futures und gehören direkt hinter Funded Futures). „Waiting for Payout" ist keine Kontoart in der DB (funded_cfd mit waiting_payout_since,
    * 29.09.2026), bekommt hier aber einen eigenen Rang — accTypRang erkennt es wie accTypChipHtml. */
-  const ACC_TYPE_RANG = { challenge: 0, phase1: 1, phase2: 2, funded: 3, funded_cfd: 4, winning_days: 5, waiting_payout: 6, live: 7 }
+  const ACC_TYPE_RANG = { challenge: 0, phase1: 1, phase2: 2, funded: 3, winning_days: 4, funded_cfd: 5, waiting_payout: 6, live: 7 }
   const accTypRang = a => ACC_TYPE_RANG[a && a.type === 'funded_cfd' && a.waitingPayoutSince ? 'waiting_payout' : a?.type] ?? 9
   /* Vierte Kontoart „Winning Days" (Finn 25.09.2026; Koordination: die Migration stellte nur ein Konto um, 94 Funded-Konten
    * muss Finn selbst zuordnen): kleiner Knopf neben dem Typ-Chip — bei Funded-Konten einer Futures-Firma „→ Winning Days",
@@ -36003,7 +36004,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.851'
+  const OS_TAB_BUILD = '2026-09-22.852'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
