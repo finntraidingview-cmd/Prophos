@@ -1537,14 +1537,15 @@
   #adm-pane-stat .kf-chip-bar .adm-vl-chip.is-on{color:var(--violet);border-color:var(--violet);background:var(--violet-tint);font-weight:600}
   /* Kacheln: Unterzeile einzeilig mit Ellipse, voller Text im Tooltip (Finn: „schau mal die Kacheln an, wie hässlich die sind") */
   #adm-pane-stat .kf-kpis .kpi-delta{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
-  /* Accounts je Firma (27.09.2026): Chips wie in der Statistik, Karten je Konto,
-     ID-Badge in der Flotten-Farbe der Person, laufender Trade leuchtet grün. */
+  /* Accounts je Firma — Neubau 30.09.2026 (Finn: „komplett hässlich, auch farblich echt schlecht … mein Bruder managt
+     die Trades von Hand, er muss sehen, bei welcher ID er noch welche Trades machen muss"). Leitfrage statt Firma → Phase:
+     je ID eine ruhige Karte mit drei Zuständen. Neutrale Flächen, EIN Akzent (Violett) für „noch offen", Status nur als
+     kleine Punkte — das rote Leuchten ganzer Karten (27.09.) war genau das Unruhige. */
   #af-view .af-chip-bar{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
-  #af-view .af-chip-bar .adm-vl-chip{font-size:12px;padding:4px 11px;border:1px solid var(--border);border-radius:999px;background:var(--surface,#fff);color:var(--sub);line-height:1.4}
+  #af-view .af-chip-bar .adm-vl-chip{font-size:12px;padding:4px 11px;border:1px solid var(--border);border-radius:999px;background:var(--surface,#fff);color:var(--sub);line-height:1.4;white-space:nowrap;flex:none}
   #af-view .af-chip-bar .adm-vl-chip:hover{background:var(--surface-tint)}
   #af-view .af-chip-bar .adm-vl-chip.is-on{color:var(--violet);border-color:var(--violet);background:var(--violet-tint);font-weight:600}
   #af-view .af-n{margin-left:5px;font-variant-numeric:tabular-nums;color:var(--sub-2);font-weight:400}
-  #af-view .af-firmen{margin-bottom:12px}
   #af-view .af-schalter{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--sub);cursor:pointer;white-space:nowrap}
   /* Admin-Reiter: einzeilig + horizontal scrollbar wie am Handy (sonst brechen die Beschriftungen zweizeilig um) */
   #dashboard-view #kasse-content > .subtabs{overflow-x:auto;scrollbar-width:thin}
@@ -1553,44 +1554,68 @@
      aktiv setzt der Tab-Handler die Farbe inline (violett) — dann sehen sie normal aus */
   #dashboard-view #kasse-content > .subtabs .adm-tab-rand{font-size:12px;padding-left:10px;padding-right:10px;color:var(--sub-2)}
   #dashboard-view #kasse-content > .subtabs .adm-tab-rand-erst{margin-left:auto}
-  #af-view .af-kpis{grid-template-columns:repeat(auto-fit,minmax(120px,1fr))}
-  /* Tages-Überblick (28.09.2026): Trades heute, Long/Short, Ausgleich als Balken */
-  #af-view .af-heute{margin:12px 0 14px}
-  #af-view .af-heute .af-kpis{margin-top:10px}
-  #af-view .af-ls{display:flex;height:8px;border-radius:999px;overflow:hidden;background:var(--surface-tint);margin-top:12px}
+  /* Kopfzeile: drei Zahlen + Long/Short von heute in EINER Zeile */
+  #af-view .af-summe{display:flex;align-items:center;gap:8px 22px;flex-wrap:wrap;padding:12px 18px;margin-bottom:12px}
+  #af-view .af-s{display:inline-flex;align-items:baseline;gap:6px;font-size:12.5px;color:var(--sub);white-space:nowrap}
+  #af-view .af-s b{font-size:20px;font-weight:600;letter-spacing:-.02em;color:var(--ink);font-variant-numeric:tabular-nums}
+  #af-view .af-s.is-offen b{color:var(--violet)}
+  #af-view .af-s.is-leer b{color:var(--sub-2)}
+  #af-view .af-ls-box{margin-left:auto;display:flex;align-items:center;gap:10px;font-size:12px;color:var(--sub);font-variant-numeric:tabular-nums;white-space:nowrap}
+  #af-view .af-ls{display:flex;width:120px;height:6px;border-radius:999px;overflow:hidden;background:var(--surface-tint);flex:none}
   #af-view .af-ls .l{background:#12B76A}
   #af-view .af-ls .s{background:#F04438}
-  #af-view .af-ls-leg{display:flex;justify-content:space-between;font-size:11.5px;color:var(--sub);margin-top:5px;font-variant-numeric:tabular-nums}
-  #af-view .af-kpis .kpi{cursor:pointer}
-  #af-view .af-kpis .kpi-delta{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
-  #af-view .af-kpis .kpi.is-on{border-color:var(--violet);background:var(--violet-tint)}
-  #af-view .af-kpis .kpi.is-leer{opacity:.45}
-  #af-view .af-matrix{overflow-x:auto}
-  #af-view .af-matrix td,#af-view .af-matrix th{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
-  #af-view .af-matrix td:first-child,#af-view .af-matrix th:first-child{text-align:left}
-  #af-view .af-matrix tbody tr{cursor:pointer}
-  #af-view .af-matrix tbody tr:hover{background:var(--surface-tint)}
-  #af-view .af-matrix .af-0{color:var(--sub-2)}
-  #af-view .af-phase{margin-top:14px}
-  #af-view .af-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
-  #af-view .af-karte{border:1px solid var(--border);border-radius:10px;padding:10px 12px;background:var(--surface);display:flex;flex-direction:column;gap:5px;min-width:0}
-  /* Rot (Finn 27.09.2026): im Trade = pulsierendes Leuchten, heute schon TP/SL = fester roter Rahmen */
-  #af-view .af-karte.is-trade{border-color:rgba(240,68,56,.7);animation:afTradeGlow 2.2s ease-in-out infinite}
-  #af-view .af-karte.is-heute{border-color:rgba(240,68,56,.55);background:rgba(240,68,56,.04);box-shadow:0 0 0 1px rgba(240,68,56,.25)}
-  #af-view .af-karte.is-arch{opacity:.55}
-  @keyframes afTradeGlow{0%,100%{box-shadow:0 0 0 0 rgba(240,68,56,0)}50%{box-shadow:0 0 16px 3px rgba(240,68,56,.35)}}
-  #af-view .af-kopf{display:flex;align-items:center;justify-content:space-between;gap:6px;min-width:0}
-  #af-view .af-id{display:inline-block;font-size:11px;font-weight:700;padding:2px 9px;border-radius:999px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:60%}
-  #af-view .af-trade{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:700;color:#b91c1c;background:rgba(240,68,56,.12);padding:2px 8px;border-radius:999px;white-space:nowrap}
-  #af-view .af-trade i{width:6px;height:6px;border-radius:50%;background:#F04438;animation:afDotPulse 1.6s ease-in-out infinite}
-  #af-view .af-trade.is-fertig i{animation:none;opacity:.7}
-  @keyframes afDotPulse{0%,100%{box-shadow:0 0 0 0 rgba(240,68,56,.5)}50%{box-shadow:0 0 0 5px rgba(240,68,56,0)}}
-  #af-view .af-kopf .af-pillen{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end;min-width:0}
-  #af-view .af-name{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  #af-view .af-meta{font-size:11.5px;color:var(--sub);font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  #af-view .af-bal{display:flex;justify-content:space-between;gap:8px;font-size:12.5px;font-variant-numeric:tabular-nums}
-  #af-view .af-fuss{display:flex;gap:6px;flex-wrap:wrap}
-  #af-view .af-tag{font-size:10.5px;padding:1px 7px;border-radius:999px;background:var(--surface-tint);color:var(--sub)}
+  #af-view .af-ls[hidden]{display:none}   /* display:flex schlägt sonst das hidden-Attribut */
+  #af-view .af-filter{display:flex;align-items:center;gap:8px 14px;flex-wrap:wrap;margin-bottom:14px}
+  #af-view .af-filter .af-chip-bar{flex:1;min-width:0}
+  /* Karten je ID im Spalten-Fluss statt Raster: die Karten sind sehr verschieden hoch (2 bis 19 Konten), im Raster
+     blieben unter kurzen Karten große Lücken. Reihenfolge läuft dadurch spaltenweise von oben nach unten. */
+  #af-view .af-ids{column-width:360px;column-gap:12px}
+  #af-view .af-id{padding:14px 16px 10px;min-width:0;margin:0 0 12px;break-inside:avoid;-webkit-column-break-inside:avoid}
+  #af-view .af-id-kopf{display:flex;align-items:center;gap:8px;min-width:0;margin-bottom:8px}
+  #af-view .af-id-kopf .adm-dot{margin-right:0;width:10px;height:10px}
+  #af-view .af-id-name{font-size:14px;font-weight:600;letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+  #af-view .af-id-zahlen{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--sub);white-space:nowrap;font-variant-numeric:tabular-nums}
+  #af-view .af-pille{font-size:12px;font-weight:600;padding:2px 9px;border-radius:999px;color:var(--violet);background:var(--violet-tint)}
+  #af-view .af-id.is-erledigt .af-id-name{color:var(--sub)}
+  #af-view .af-gruppe{margin-top:6px}
+  #af-view .af-g-titel{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--sub-2);margin:8px 0 2px}
+  #af-view .af-g-titel.is-offen{color:var(--violet)}
+  #af-view .af-leer{font-size:12.5px;color:var(--sub);padding:6px 0 4px}
+  /* Konto-Zeile: Phase-Badge · Name · Zusatz rechts, einzeilig */
+  #af-view .af-z{display:flex;align-items:center;gap:8px;min-width:0;padding:6px 0;border-top:1px solid var(--border-soft);font-size:13px}
+  #af-view .af-g-titel + .af-z{border-top:none}
+  #af-view .af-z .type-badge{flex:none;width:76px;justify-content:center;padding:2px 4px;font-size:10.5px;white-space:nowrap}
+  #af-view .af-z-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #af-view .af-z-info{flex:none;max-width:48%;display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+  #af-view .af-z-info span{overflow:hidden;text-overflow:ellipsis}
+  #af-view .af-z.is-fertig,#af-view .af-z.is-arch{color:var(--sub)}
+  #af-view .af-z.is-fertig .type-badge,#af-view .af-z.is-arch .type-badge{opacity:.6}
+  /* Status-Punkte: läuft = grün mit kleinem Puls (nur der Punkt), TP grün, SL rot, sonst grau */
+  #af-view .af-p{width:7px;height:7px;border-radius:50%;background:var(--sub-2);flex:none}
+  #af-view .af-p.is-lauf{background:#12B76A;animation:afPuls 1.8s ease-in-out infinite}
+  #af-view .af-p.is-tp{background:#12B76A}
+  #af-view .af-p.is-sl{background:#F04438}
+  @keyframes afPuls{0%,100%{box-shadow:0 0 0 0 rgba(18,183,106,.45)}50%{box-shadow:0 0 0 4px rgba(18,183,106,0)}}
+  #af-view .af-klapp{display:flex;align-items:center;gap:6px;width:100%;margin-top:6px;padding:7px 0 3px;border:none;border-top:1px solid var(--border-soft);background:none;font:inherit;font-size:12px;color:var(--sub);cursor:pointer;text-align:left}
+  #af-view .af-klapp:hover{color:var(--ink)}
+  #af-view .af-klapp .af-pfeil{margin-left:auto;color:var(--violet)}
+  @media (max-width:820px){
+    /* Handy (v3-Maße): eine Spalte, Zeilen auf Touch-Höhe, Long/Short unter die Zahlen */
+    #af-view .af-ids{columns:1}
+    #af-view .af-id{margin-bottom:var(--m-gap)}
+    #af-view .af-summe{padding:12px 16px;gap:6px 16px}
+    #af-view .af-ls-box{margin-left:0;width:100%}
+    #af-view .af-ls{flex:1;width:auto}
+    /* Firmen-Chips: eine wischbare Zeile — neben dem Schalter gequetscht stapelten sie sich einzeln (Stub 375 px) */
+    #af-view .af-filter .af-chip-bar{flex:1 1 100%;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}
+    #af-view .af-filter .af-chip-bar::-webkit-scrollbar{display:none}
+    /* Konto-Zeile zweizeilig: der Name (mit Kontonummer) bekommt die volle Breite, Firma/Trade darunter */
+    #af-view .af-z{flex-wrap:wrap;row-gap:1px;padding:7px 0}
+    #af-view .af-z .type-badge{width:68px}
+    #af-view .af-z-name{flex:1 1 0}
+    #af-view .af-z-info{flex:1 1 100%;max-width:none;padding-left:76px;font-size:11.5px}
+  }
+  @media (prefers-reduced-motion:reduce){#af-view .af-p.is-lauf{animation:none}}
   #adm-pane-stat .kf-kpis .kpi-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #adm-pane-stat .kf-gross{margin-top:8px}
   #adm-pane-stat .kf-gross .kf-chart[hidden]{display:none}
@@ -7948,44 +7973,33 @@
       <div class="card" id="wdl-kopf" style="padding:12px 16px;margin-bottom:14px"></div>
       <div id="wdl-liste"></div>
     </section>
-    <!-- ACCOUNTS JE FIRMA (27.09.2026, Finn: „pro Prop-Firma ALLE Accounts von ALLEN IDs auf einen Blick" — erst als
-         Admin-Reiter (.670), am selben Nachmittag auf Finns Wunsch als eigene Navigation wie Trades/Accounts/Winning Days).
-         Firma → Phase → Accounts mit ID-Badge. Daten: GET /admin/overview (Railway, alle IDs), eigener Lader afLaden,
-         reine Anzeige. Rot = gerade im Trade (pulsiert) oder heute schon TP/SL getroffen. -->
+    <!-- ACCOUNTS JE FIRMA (27.09.2026 als Firma → Phase → Karten; Neubau 30.09.2026, Finn: „komplett unübersichtlich …
+         mein Bruder managt die Trades von Hand und muss sehen, bei welcher ID er noch welche Trades machen muss").
+         Jetzt: je ID eine Karte mit „Noch offen" (aktiv, nicht im Trade, heute noch kein TP/SL) · „Läuft" · „Heute fertig".
+         Firma und Phase nur noch als Label am Konto. Daten: GET /admin/overview (Railway, alle IDs), Lader afLaden,
+         reine Anzeige. Der Name der Navigation bleibt, damit ihn niemand suchen muss. -->
     <section class="view" data-view="firmen" id="af-view">
       <div class="view-head">
         <div>
           <h1 class="view-title">Accounts je Firma</h1>
-          <p class="view-sub">Alle Accounts aller IDs · nach Firma und Phase · rot = im Trade oder heute schon TP/SL</p>
+          <p class="view-sub">Je ID: welche Konten heute noch einen Trade brauchen</p>
         </div>
       </div>
       <div id="af-msg" style="color:var(--sub);font-size:13px;padding:22px 2px">Lade Accounts…</div>
       <div id="af-body" hidden>
-        <div class="af-chip-bar af-firmen" id="af-firmen"></div>
-        <div class="adm-toolbar">
-          <div class="af-chip-bar" id="af-ids" style="flex:1;min-width:0"></div>
-          <label class="af-schalter"><input type="checkbox" id="af-arch"> Archivierte / geblowte zeigen</label>
+        <div class="panel af-summe" id="af-summe">
+          <span class="af-s is-offen"><b id="af-n-offen">0</b>noch offen</span>
+          <span class="af-s"><b id="af-n-lauf">0</b>laufen</span>
+          <span class="af-s"><b id="af-n-fertig">0</b>heute fertig</span>
+          <span class="af-ls-box"><span id="af-ls-txt"></span><span class="af-ls" id="af-ls"><span class="l"></span><span class="s"></span></span></span>
+        </div>
+        <div class="af-filter">
+          <div class="af-chip-bar" id="af-firmen"></div>
+          <label class="af-schalter"><input type="checkbox" id="af-arch"> Archivierte zeigen</label>
           <span class="adm-sub" id="af-stand"></span>
-          <button class="btn btn-ghost" id="af-refresh" title="Neu laden" style="padding:8px 12px">↻</button>
+          <button class="btn btn-ghost" id="af-refresh" title="Neu laden" style="padding:6px 11px">↻</button>
         </div>
-        <div class="panel af-heute" id="af-heute">
-          <div class="panel-head"><div>
-            <div class="panel-title" id="af-heute-titel">Heute</div>
-            <div class="panel-sub">Gestartete Trades heute · laufend, zu prüfen und fertig · folgt der Firmen-/ID-Auswahl</div>
-          </div></div>
-          <div class="kpis af-kpis" id="af-heute-kpis"></div>
-          <div class="af-ls" id="af-ls"><div class="l"></div><div class="s"></div></div>
-          <div class="af-ls-leg"><span id="af-ls-l"></span><span id="af-ls-s"></span></div>
-        </div>
-        <div class="kpis af-kpis" id="af-kpis"></div>
-        <div class="panel" id="af-matrix-panel" hidden style="margin-top:14px">
-          <div class="panel-head"><div>
-            <div class="panel-title">Firma × Phase</div>
-            <div class="panel-sub">Anzahl Accounts — Klick auf eine Zeile wählt die Firma</div>
-          </div></div>
-          <div class="af-matrix"><table class="t" id="af-matrix"></table></div>
-        </div>
-        <div id="af-phasen"></div>
+        <div class="af-ids" id="af-ids"></div>
       </div>
     </section>
     <section class="view" data-view="markt">
@@ -10800,7 +10814,7 @@
     managed:   ['Manage',    'Topstep-Accounts für andere'],
     notes:     ['Notizzettel', 'Schneller Zettel — geräteübergreifend synchron'],
     markt:     ['Winning Days', 'NQ & MNQ live · Winning Days des Handelstags'],
-    firmen:    ['Accounts je Firma', 'Alle Accounts aller IDs · nach Firma und Phase'],
+    firmen:    ['Accounts je Firma', 'Je ID: was heute noch offen ist'],
     wdlive:    ['Radar', 'Orbit V2 · Topstep V2 · Demo gegen den Reader-Kurs · Balance vorher/nachher'],
     news:      ['News', 'USD-Kalender & Alerts (Forex Factory)'],
     kasse:     ['Admin', 'Kapitalverteilung über alle Personen'],
@@ -12555,29 +12569,44 @@
       }
     }
 
-    /* ── ACCOUNTS JE FIRMA (27.09.2026, Finn: „pro Prop-Firma ALLE Accounts von ALLEN IDs auf einen
-     * Blick, nicht pro ID … an jedem Account muss klar erkennbar sein, zu welcher ID er gehört" und
-     * „falls ein Account gerade schon im Trade ist, soll der leuchten"). Gruppierung Firma → Phase →
-     * Accounts mit ID-Badge, NICHT ID → Firma. Quelle: /admin/overview (accounts + live_konten — die
-     * Hedge-Broker fehlen in accounts bewusst, weil jede Summe sie sonst zählt), eigener Lader afLaden:
-     * seit 27.09.2026 nachmittags eigene Navigation statt Admin-Reiter (Finn: „ein neuer Tab so wie Trades,
-     * Accounts oder Winning Days") — ohne Admin-Code-Sperre und ohne die ganze Admin-Übersicht mitzurendern.
-     * ROT (Finn: „leuchten in rot, wenn die im Trade sind, und rot, wenn sie heute schon Stop Loss oder TP
-     * gehittet haben"): im_trade = offener Plan (status open) als Master oder Slave → pulsiert;
-     * letztes_ende = jüngster beendeter Plan, „heute" in Ortszeit → fester roter Rahmen + „heute TP/SL".
-     * TP/SL steht nirgends als Feld: Vorzeichen des P&L der eigenen Seite, blown = SL (Backend).
-     * Solange die View offen ist, alle 60 s neu (nur bei sichtbarem Tab).
-     * ID-Farbe = mt5FleetFarbe(user_id), dieselbe wie in der Flotte der Live Trades. Reine Anzeige. */
-    const AF_PHASEN = [['challenge', 'Challenge'], ['phase1', 'Phase 1'], ['phase2', 'Phase 2'],
-                       ['funded', 'Funded Futures'], ['funded_cfd', 'Funded CFD'], ['winning_days', 'Winning Days'], ['live', 'Live']]
-    let afFirma = '', afPerson = '', afArch = false, afPhase = ''
-    const afPhaseName = t => (AF_PHASEN.find(p => p[0] === t) || [t, t || 'Sonstige'])[1]
+    /* ── ACCOUNTS JE FIRMA (27.09.2026 als Firma → Phase → Karten mit rotem Leuchten; NEUBAU 30.09.2026, Finn:
+     * „Accounts je Firma finde ich komplett hässlich, auch farblich … Mein Bruder managt die ganzen Trades von Hand.
+     * Er muss sehen, wo noch Trades stehen, also bei welcher ID er noch welche Trades machen muss … alles auf einer Seite").
+     * Gliederung jetzt nach ID (Farbpunkt = mt5FleetFarbe wie in der Flotte der Live Trades), je ID drei Zustände:
+     *   noch offen   = nicht archiviert, kein Live-Konto, nicht im Trade, heute noch kein Ende → der Hauptinhalt
+     *   läuft        = im_trade (offener Plan als Master oder Slave) mit Richtung · Symbol · seit
+     *   heute fertig = letztes_ende heute in Ortszeit, eingeklappt — auch ein heute geblowtes (schon archiviertes) Konto
+     * Live-Konten (Hedge-Broker) brauchen nie selbst einen Trade: nie „offen", nur wenn sie laufen oder heute fertig sind.
+     * Geplante, noch nicht gestartete Pläne liefert /admin/overview nicht (nur status open + beendete) — deshalb kein
+     * „geplant HH:MM" am Konto; das Backend blieb bewusst unberührt. Weg sind Matrix Firma × Phase, Phasen-Kacheln,
+     * ID-Chips und das Ausgleichs-Urteil. Quelle wie bisher /admin/overview (accounts + live_konten + trades_start),
+     * alle 60 s neu, solange die View offen und der Tab sichtbar ist. Reine Anzeige. */
+    const AF_PHASEN = [['challenge', 'Challenge', 'Challenge'], ['phase1', 'Phase 1', 'Phase 1'], ['phase2', 'Phase 2', 'Phase 2'],
+                       ['funded', 'Funded', 'Funded Futures'], ['funded_cfd', 'Funded CFD', 'Funded CFD'],
+                       ['winning_days', 'WD', 'Winning Days'], ['live', 'Live', 'Live-Konto']]
+    let afFirma = '', afArch = false
+    const afFertigAuf = new Set()   // IDs mit aufgeklapptem „heute fertig" — überlebt den 60-s-Takt
+    const afPhase = t => AF_PHASEN.find(p => p[0] === t) || [t, t || 'Sonstige', t || 'Sonstige']
+    const afPhaseRang = t => { const i = AF_PHASEN.findIndex(p => p[0] === t); return i < 0 ? 99 : i }
     const afFarbe = uid => typeof mt5FleetFarbe === 'function' ? mt5FleetFarbe(String(uid)) : admPersonColor(uid)
     const afGeld = (v, ccy) => new Intl.NumberFormat('de-DE', { style:'currency', currency: ccy || 'USD', maximumFractionDigits:0 }).format(v)
     const afDatum = d => d ? String(d).slice(0, 10).split('-').reverse().join('.').replace(/^(\d\d\.\d\d\.)\d\d(\d\d)$/, '$1$2') : ''
     let afData = null, afLadeZeit = 0, afLaeuft = false, afTakt = null
-    const afHeute = r => { const e = r.letztes_ende; if(!e || !e.at) return null
-      const d = new Date(e.at); return (!isNaN(d) && d.toDateString() === new Date().toDateString()) ? e : null }
+    const afIstHeute = at => { const d = new Date(at); return !isNaN(d) && d.toDateString() === new Date().toDateString() }
+    const afHeute = r => { const e = r.letztes_ende; return e && e.at && afIstHeute(e.at) ? e : null }
+    // Uhrzeit, wenn heute; sonst Datum (ein Trade von gestern, der noch läuft, soll nicht „14:05" heißen)
+    const afZeit = at => { const d = new Date(at); if(!at || isNaN(d)) return ''
+      return afIstHeute(at) ? d.toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' }) : d.toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit' }) }
+    const afRichtung = x => x === 'buy' ? 'Long' : x === 'sell' ? 'Short' : (x || '')
+    const afFirmaVon = r => r.firm || '—'
+    // Zustand je Konto: lauf · fertig · offen · arch — '' = gar nicht zeigen
+    function afZustand(r){
+      if(r.im_trade) return 'lauf'
+      if(afHeute(r)) return 'fertig'
+      if(r.archived) return afArch ? 'arch' : ''
+      if(r.type === 'live') return ''
+      return 'offen'
+    }
     async function afLaden(){
       if(afLaeuft) return
       afLaeuft = true
@@ -12622,198 +12651,164 @@
     function afRender(){
       const body = $('af-body'); if(!body || !afData) return
       $('af-msg').style.display = 'none'; body.hidden = false
-      const alle = afAlle()
-      const sichtbar = r => afArch || !r.archived
-      // 1) Firmen-Chips: Anzahl AKTIVER Accounts über alle IDs
+      const alle = afAlle().map(r => ({ r, z: afZustand(r) })).filter(x => x.z)
+
+      // Firmen-Chips: die Zahl ist „noch offen" je Firma (die Leitfrage), nicht die Kontenzahl
       const firmN = new Map()
-      for(const r of alle){ if(!firmN.has(r.firm)) firmN.set(r.firm, 0); if(!r.archived) firmN.set(r.firm, firmN.get(r.firm) + 1) }
-      const firmen = [...firmN.keys()].filter(f => firmN.get(f) > 0 || afArch)
-        .sort((a, b) => (firmN.get(b) - firmN.get(a)) || String(a).localeCompare(String(b), 'de'))
+      for(const x of alle){ const f = afFirmaVon(x.r); firmN.set(f, (firmN.get(f) || 0) + (x.z === 'offen' ? 1 : 0)) }
       if(afFirma && !firmN.has(afFirma)) afFirma = ''
-      const chip = (label, n, on, klick, dot) => {
+      const chip = (label, n, on, klick) => {
         const b = document.createElement('button'); b.type = 'button'
         b.className = 'adm-vl-chip' + (on ? ' is-on' : '')
-        b.innerHTML = (dot ? `<span class="adm-dot" style="background:${dot}"></span>` : '') + '<span class="nm"></span><span class="af-n"></span>'
+        b.innerHTML = '<span class="nm"></span><span class="af-n"></span>'
         b.querySelector('.nm').textContent = label
         b.querySelector('.af-n').textContent = String(n)
+        b.title = n + ' noch offen'
         b.addEventListener('click', klick)
         return b
       }
       const fBar = $('af-firmen'); fBar.innerHTML = ''
-      fBar.appendChild(chip('Alle', alle.filter(r => !r.archived).length, !afFirma, () => { afFirma = ''; afPerson = ''; afPhase = ''; afRender() }))
-      for(const f of firmen) fBar.appendChild(chip(f || '—', firmN.get(f), afFirma === f, () => { afFirma = afFirma === f ? '' : f; afPerson = ''; afPhase = ''; afRender() }))
-
-      // 2) ID-Filter innerhalb der Firma (Standard: alle IDs)
-      const inFirma = alle.filter(r => (!afFirma || r.firm === afFirma) && sichtbar(r))
-      const persN = new Map(), persName = new Map()
-      for(const r of inFirma){ const u = String(r.user_id); persN.set(u, (persN.get(u) || 0) + 1); persName.set(u, r.person) }
-      if(afPerson && !persN.has(afPerson)) afPerson = ''
-      const iBar = $('af-ids'); iBar.innerHTML = ''
-      iBar.appendChild(chip('Alle IDs', inFirma.length, !afPerson, () => { afPerson = ''; afRender() }))
-      for(const u of [...persN.keys()].sort((a, b) => String(persName.get(a)).localeCompare(String(persName.get(b)), 'de')))
-        iBar.appendChild(chip(persName.get(u), persN.get(u), afPerson === u, () => { afPerson = afPerson === u ? '' : u; afRender() }, afFarbe(u)))
+      fBar.appendChild(chip('Alle', alle.filter(x => x.z === 'offen').length, !afFirma, () => { afFirma = ''; afRender() }))
+      for(const f of [...firmN.keys()].sort((a, b) => (firmN.get(b) - firmN.get(a)) || a.localeCompare(b, 'de')))
+        fBar.appendChild(chip(f, firmN.get(f), afFirma === f, () => { afFirma = afFirma === f ? '' : f; afRender() }))
       $('af-arch').checked = afArch
-      const lz = afLadeZeit
-      $('af-stand').textContent = lz ? 'Stand ' + new Date(lz).toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' }) : ''
+      $('af-stand').textContent = afLadeZeit ? 'Stand ' + new Date(afLadeZeit).toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' }) : ''
 
-      afHeuteRender(alle)
-
-      // 3) Kennzahlen je Phase (Klick filtert auf die Phase, zweiter Klick hebt auf)
-      const rows = inFirma.filter(r => !afPerson || String(r.user_id) === afPerson)
-      const phasen = AF_PHASEN.map(p => p[0])
-      for(const r of rows) if(!phasen.includes(r.type)) phasen.push(r.type)
-      if(afPhase && !phasen.includes(afPhase)) afPhase = ''
-      const kp = $('af-kpis'); kp.innerHTML = ''
-      for(const t of phasen){
-        const g = rows.filter(r => r.type === t)
-        if(!g.length && !AF_PHASEN.some(p => p[0] === t && t !== 'winning_days')) continue   // WD/Sonstige nur, wenn vorhanden
-        const nt = g.filter(r => r.im_trade).length, nh = g.filter(r => !r.im_trade && afHeute(r)).length
-        const k = document.createElement('div')
-        k.className = 'kpi' + (afPhase === t ? ' is-on' : '') + (g.length ? '' : ' is-leer')
-        k.innerHTML = '<div class="kpi-label"></div><div class="kpi-value"></div><div class="kpi-delta delta-neutral"></div>'
-        k.querySelector('.kpi-label').textContent = afPhaseName(t)
-        k.querySelector('.kpi-value').textContent = String(g.length)
-        const sub = k.querySelector('.kpi-delta')
-        sub.textContent = [nt ? `${nt} im Trade` : '', nh ? `${nh} heute fertig` : ''].filter(Boolean).join(' · ') || (afPhase === t ? 'Filter aktiv' : '—')
-        if(nt || nh) sub.style.color = '#b91c1c'
-        sub.title = sub.textContent
-        k.title = afPhase === t ? 'Filter aufheben' : 'Nur diese Phase zeigen'
-        k.addEventListener('click', () => { afPhase = afPhase === t ? '' : t; afRender() })
-        kp.appendChild(k)
+      // Zusammenfassung oben (folgt der Firma)
+      const rows = alle.filter(x => !afFirma || afFirmaVon(x.r) === afFirma)
+      for(const [id, z] of [['af-n-offen', 'offen'], ['af-n-lauf', 'lauf'], ['af-n-fertig', 'fertig']]){
+        const n = rows.filter(x => x.z === z).length
+        $(id).textContent = String(n)
+        $(id).parentElement.classList.toggle('is-leer', !n)
       }
+      afHeuteRender()
 
-      // 6) Bei „Alle": Firma × Phase mit Anzahlen (gleiche Filter: ID, Archiv)
-      const mp = $('af-matrix-panel'); mp.hidden = !!afFirma
-      if(!afFirma){
-        const basis = alle.filter(r => sichtbar(r) && (!afPerson || String(r.user_id) === afPerson))
-        const spalten = phasen.filter(t => basis.some(r => r.type === t))
-        const zeilen = [...new Set(basis.map(r => r.firm))].map(f => {
-          const g = basis.filter(r => r.firm === f)
-          return { f, n: g.length, je: spalten.map(t => g.filter(r => r.type === t).length) }
-        }).sort((a, b) => (b.n - a.n) || String(a.f).localeCompare(String(b.f), 'de'))
-        const zelle = v => `<td class="${v ? '' : 'af-0'}">${v || '·'}</td>`
-        $('af-matrix').innerHTML =
-          `<thead><tr><th>Firma</th>${spalten.map(t => `<th>${escapeHtml(afPhaseName(t))}</th>`).join('')}<th>Gesamt</th></tr></thead><tbody>`
-          + zeilen.map(z => `<tr data-firm="${escapeHtml(z.f)}"><td>${escapeHtml(z.f || '—')}</td>${z.je.map(zelle).join('')}<td><b>${z.n}</b></td></tr>`).join('')
-          + `</tbody><tfoot><tr><td><b>Summe</b></td>${spalten.map(t => `<td><b>${basis.filter(r => r.type === t).length}</b></td>`).join('')}<td><b>${basis.length}</b></td></tr></tfoot>`
-        $('af-matrix').querySelectorAll('tbody tr').forEach(tr =>
-          tr.addEventListener('click', () => { afFirma = tr.dataset.firm; afPhase = ''; afRender() }))
+      // Karten je ID: IDs mit offenen Konten zuerst, sonst alphabetisch — feste Reihenfolge, damit man „seine" ID wiederfindet
+      const jeId = new Map()
+      for(const x of rows){
+        const u = String(x.r.user_id)
+        if(!jeId.has(u)) jeId.set(u, { u, name: x.r.person || '—', offen:[], lauf:[], fertig:[], arch:[] })
+        jeId.get(u)[x.z].push(x.r)
       }
-
-      // 3) Hauptteil: Blöcke je Phase (challenge → … → live), darin nach ID, dann Accountname
-      const box = $('af-phasen'); box.innerHTML = ''
-      for(const t of phasen){
-        if(afPhase && afPhase !== t) continue
-        const g = rows.filter(r => r.type === t).sort((a, b) =>
-          String(a.person).localeCompare(String(b.person), 'de') || String(a.name).localeCompare(String(b.name), 'de', { numeric:true }))
-        if(!g.length) continue
-        const nt = g.filter(r => r.im_trade).length, nh = g.filter(r => !r.im_trade && afHeute(r)).length
-        const p = document.createElement('div'); p.className = 'panel af-phase'
-        p.innerHTML = `<div class="panel-head"><div><div class="panel-title"></div><div class="panel-sub"></div></div></div><div class="af-grid"></div>`
-        p.querySelector('.panel-title').textContent = `${afPhaseName(t)} · ${g.length}`
-        p.querySelector('.panel-sub').textContent = (afFirma || 'Alle Firmen') + (nt ? ` · ${nt} im Trade` : '') + (nh ? ` · ${nh} heute fertig` : '')
-        const grid = p.querySelector('.af-grid')
-        for(const r of g) grid.appendChild(afKarte(r, !afFirma))
-        box.appendChild(p)
-      }
-      if(!box.children.length) box.innerHTML = '<div style="color:var(--sub);font-size:13px;padding:18px 2px">Keine Accounts für diese Auswahl.</div>'
+      const ids = [...jeId.values()].sort((a, b) =>
+        ((b.offen.length > 0) - (a.offen.length > 0)) || String(a.name).localeCompare(String(b.name), 'de'))
+      const box = $('af-ids'); box.innerHTML = ''
+      for(const g of ids) box.appendChild(afIdKarte(g))
+      if(!ids.length) box.innerHTML = '<div class="af-leer" style="padding:18px 2px">Keine Accounts für diese Auswahl.</div>'
     }
-    /* Tages-Überblick (28.09.2026, Finn: „wie viele Trades gemacht wurden, wie viele davon Long, wie viele
-     * Short, wie ausgeglichen das war — immer vom heutigen Tag"). Quelle trades_start aus /admin/overview:
-     * gestartete Pläne (open/review/completed), gezählt je Plan nach der Master-Richtung. „Heute" = Ortszeit
-     * wie afHeute. Firma/ID-Filter gelten über das Master-Konto; ohne Filter zählen auch Trades auf Konten,
-     * die nicht mehr in der Liste stehen. Der Archiv-Schalter gilt NICHT — ein heute geblowtes Konto hat
-     * heute trotzdem getradet. */
-    function afHeuteRender(alle){
-      const box = $('af-heute'); if(!box) return
-      const heuteStr = new Date().toDateString()
-      const konten = new Set(alle.filter(r => (!afFirma || r.firm === afFirma) && (!afPerson || String(r.user_id) === afPerson)).map(r => String(r.id)))
-      const gefiltert = !!(afFirma || afPerson)
-      const t = (afData.trades_start || []).filter(p => {
-        const d = new Date(p.at)
-        return !isNaN(d) && d.toDateString() === heuteStr && (!gefiltert || konten.has(String(p.account_id)))
-      })
+    /* Long/Short von heute als EINE schmale Zeile (28.09.2026 als Kachel-Panel, seit 30.09.2026 nur noch Text + Balken).
+     * Quelle trades_start: gestartete Pläne (open/review/completed), je Plan die Master-Richtung, „heute" in Ortszeit.
+     * Die Firma filtert über das Master-Konto; ohne Filter zählen auch Trades auf Konten, die nicht mehr in der Liste
+     * stehen. Der Archiv-Schalter gilt nicht — ein heute geblowtes Konto hat heute trotzdem getradet. */
+    function afHeuteRender(){
+      const konten = new Set(afAlle().filter(r => afFirmaVon(r) === afFirma).map(r => String(r.id)))
+      const t = (afData.trades_start || []).filter(p => afIstHeute(p.at) && (!afFirma || konten.has(String(p.account_id))))
       const nL = t.filter(p => p.richtung === 'buy').length, nS = t.filter(p => p.richtung === 'sell').length
-      const nO = t.filter(p => p.status === 'open').length, nX = t.length - nL - nS
-      const nLS = nL + nS
-      const pL = nLS ? Math.round(nL / nLS * 100) : 0
-      const diff = nL - nS
-      $('af-heute-titel').textContent = 'Heute · ' + new Date().toLocaleDateString('de-DE', { weekday:'long', day:'2-digit', month:'2-digit' })
-      const kachel = (label, wert, sub, farbe) => {
-        const k = document.createElement('div'); k.className = 'kpi'; k.style.cursor = 'default'
-        k.innerHTML = '<div class="kpi-label"></div><div class="kpi-value"></div><div class="kpi-delta delta-neutral"></div>'
-        k.querySelector('.kpi-label').textContent = label
-        k.querySelector('.kpi-value').textContent = wert
-        if(farbe) k.querySelector('.kpi-value').style.color = farbe
-        k.querySelector('.kpi-delta').textContent = sub; k.querySelector('.kpi-delta').title = sub
-        return k
-      }
-      const kp = $('af-heute-kpis'); kp.innerHTML = ''
-      kp.appendChild(kachel('Trades', String(t.length), [nO ? `${nO} laufen` : '', nX ? `${nX} ohne Richtung` : ''].filter(Boolean).join(' · ') || (t.length ? 'alle beendet' : 'noch keiner')))
-      kp.appendChild(kachel('Long', String(nL), nLS ? `${pL} %` : '—', nL ? '#15803d' : ''))
-      kp.appendChild(kachel('Short', String(nS), nLS ? `${100 - pL} %` : '—', nS ? '#b91c1c' : ''))
-      // Ausgleich: 0 = gleich viele; Überhang in Trades, Bewertung grob nach Anteil
-      const aus = !nLS ? '—' : diff === 0 ? '0' : (diff > 0 ? '+' : '−') + Math.abs(diff) + (diff > 0 ? ' Long' : ' Short')
-      const urteil = !nLS ? 'noch keine Richtung' : diff === 0 ? 'perfekt ausgeglichen'
-        : Math.abs(pL - 50) <= 10 ? 'ausgeglichen' : Math.abs(pL - 50) <= 25 ? 'leicht einseitig' : 'einseitig'
-      kp.appendChild(kachel('Ausgleich', aus, urteil, !nLS || Math.abs(pL - 50) <= 10 ? '' : '#b54708'))
+      const nLS = nL + nS, pL = nLS ? Math.round(nL / nLS * 100) : 0
+      $('af-ls-txt').textContent = t.length ? `Heute ${t.length} Trade${t.length === 1 ? '' : 's'} · ${nL} Long · ${nS} Short` : 'Heute noch kein Trade'
       const bar = $('af-ls')
-      bar.querySelector('.l').style.width = nLS ? pL + '%' : '0'
-      bar.querySelector('.s').style.width = nLS ? (100 - pL) + '%' : '0'
-      $('af-ls-l').textContent = nLS ? `Long ${nL} · ${pL} %` : ''
-      $('af-ls-s').textContent = nLS ? `Short ${nS} · ${100 - pL} %` : ''
+      bar.hidden = !nLS
+      bar.querySelector('.l').style.width = pL + '%'
+      bar.querySelector('.s').style.width = (100 - pL) + '%'
+      bar.title = nLS ? `Long ${pL} % · Short ${100 - pL} %` : ''
     }
-    function afKarte(r, mitFirma){
+    function afIdKarte(g){
       const k = document.createElement('div')
-      const heute = afHeute(r)
-      k.className = 'af-karte' + (r.im_trade ? ' is-trade' : heute ? ' is-heute' : '') + (r.archived ? ' is-arch' : '')
+      k.className = 'panel af-id' + (g.offen.length || g.lauf.length ? '' : ' is-erledigt')
+      const kopf = document.createElement('div'); kopf.className = 'af-id-kopf'
+      kopf.innerHTML = '<span class="adm-dot"></span><span class="af-id-name"></span><span class="af-id-zahlen"></span>'
+      kopf.querySelector('.adm-dot').style.background = afFarbe(g.u)
+      kopf.querySelector('.af-id-name').textContent = g.name
+      const zahlen = kopf.querySelector('.af-id-zahlen')
+      if(g.offen.length){ const p = document.createElement('span'); p.className = 'af-pille'; p.textContent = g.offen.length + ' offen'; zahlen.appendChild(p) }
+      const rest = [g.lauf.length ? g.lauf.length + ' läuft' : '', g.fertig.length ? g.fertig.length + ' fertig' : ''].filter(Boolean).join(' · ')
+      if(rest) zahlen.appendChild(document.createTextNode(rest))
+      k.appendChild(kopf)
+      const titel = (txt, offen) => { const t = document.createElement('div'); t.className = 'af-g-titel' + (offen ? ' is-offen' : ''); t.textContent = txt; k.appendChild(t) }
+      const nachName = (a, b) => String(a.name).localeCompare(String(b.name), 'de', { numeric:true })
+
+      // 1) Noch offen: nach Phase (Challenge → … → WD), dann Firma, dann Name
+      if(g.offen.length){
+        titel('Noch offen', true)
+        g.offen.sort((a, b) => (afPhaseRang(a.type) - afPhaseRang(b.type)) || afFirmaVon(a).localeCompare(afFirmaVon(b), 'de') || nachName(a, b))
+        for(const r of g.offen) k.appendChild(afZeile(r, 'offen'))
+      }else{
+        const l = document.createElement('div'); l.className = 'af-leer'
+        l.textContent = g.lauf.length ? 'Nichts mehr offen — nur noch laufende Trades.' : 'Nichts mehr offen.'
+        k.appendChild(l)
+      }
+      // 2) Läuft: ältester Trade zuerst
+      if(g.lauf.length){
+        titel('Läuft')
+        g.lauf.sort((a, b) => String(a.im_trade.seit || '').localeCompare(String(b.im_trade.seit || '')))
+        for(const r of g.lauf) k.appendChild(afZeile(r, 'lauf'))
+      }
+      // 3) Heute fertig: eingeklappt, im Knopf nur die Zählung TP/SL
+      if(g.fertig.length){
+        const auf = afFertigAuf.has(g.u)
+        const nTp = g.fertig.filter(r => afHeute(r).ergebnis === 'tp').length, nSl = g.fertig.filter(r => afHeute(r).ergebnis === 'sl').length
+        const b = document.createElement('button'); b.type = 'button'; b.className = 'af-klapp' + (auf ? ' is-auf' : '')
+        b.innerHTML = '<span class="af-p"></span><span></span><span class="af-pfeil"></span>'
+        b.children[1].textContent = `${g.fertig.length} heute fertig` + [nTp ? ` · ${nTp} TP` : '', nSl ? ` · ${nSl} SL` : ''].join('')
+        b.children[2].textContent = auf ? 'ausblenden' : 'zeigen'   // Wort statt ▾ — der Pfeil war bei 12 px nur ein Punkt
+        b.addEventListener('click', () => { if(afFertigAuf.has(g.u)) afFertigAuf.delete(g.u); else afFertigAuf.add(g.u); afRender() })
+        k.appendChild(b)
+        if(auf){
+          g.fertig.sort((a, b) => String(afHeute(b).at).localeCompare(String(afHeute(a).at)))
+          for(const r of g.fertig) k.appendChild(afZeile(r, 'fertig'))
+        }
+      }
+      // 4) Archiviert: nur mit Schalter, grau
+      if(g.arch.length){
+        titel(`Archiviert · ${g.arch.length}`)
+        for(const r of g.arch.sort(nachName)) k.appendChild(afZeile(r, 'arch'))
+      }
+      return k
+    }
+    // Eine Konto-Zeile: Phase-Badge · Name · rechts Firma bzw. Trade/Ergebnis. Balance, P&L, Payout-Datum im Tooltip.
+    function afZeile(r, z){
+      const d = document.createElement('div')
+      d.className = 'af-z' + (z === 'fertig' ? ' is-fertig' : z === 'arch' ? ' is-arch' : '')
+      d.innerHTML = '<span class="type-badge"></span><span class="af-z-name"></span><span class="af-z-info"></span>'
+      const ph = afPhase(r.type)
+      const badge = d.firstElementChild
+      badge.classList.add('type-' + (r.type || 'sonst')); badge.textContent = ph[1]; badge.title = ph[2]
+      const ext = String(r.ext || '')
+      const name = r.name || '—'
+      d.querySelector('.af-z-name').textContent = ext && !name.includes(ext) ? `${name} · #${ext}` : name
+
+      const info = d.querySelector('.af-z-info')
+      const punkt = kl => { const i = document.createElement('span'); i.className = 'af-p' + (kl ? ' ' + kl : ''); info.appendChild(i) }
+      const text = t => { const s = document.createElement('span'); s.textContent = t; info.appendChild(s) }
       const ccy = r.balance_ccy || 'USD'
+      if(z === 'offen') text(afFirmaVon(r))
+      else if(z === 'lauf'){
+        const tr = r.im_trade
+        punkt('is-lauf')
+        text([tr.rolle === 'slave' ? 'Hedge' : '', afRichtung(tr.richtung), tr.symbol, afZeit(tr.seit)].filter(Boolean).join(' · ') || 'im Trade')
+      }else if(z === 'fertig'){
+        const e = afHeute(r)
+        punkt(e.ergebnis === 'tp' ? 'is-tp' : e.ergebnis === 'sl' ? 'is-sl' : '')
+        const was = e.ergebnis === 'tp' ? 'TP' : e.ergebnis === 'sl' ? 'SL' : 'beendet'
+        const epl = e.pl == null ? '' : (e.pl >= 0 ? '+' : '−') + afGeld(Math.abs(e.pl), ccy)
+        text([was, epl, e.blown ? 'geblowt' : '', afZeit(e.at)].filter(Boolean).join(' · '))
+      }else{
+        text({ blown:'geblowt', passed:'bestanden', passed_pending:'bestanden' }[r.arch_grund] || 'archiviert')
+      }
+
+      // Tooltip: alles, was die Zeile weglässt (Firma, Größe, Kontonummer, Balance, P&L seit Start, Payout)
       const size = r.size > 0 ? Number(r.size) : admAccGroesse(r.name, r.balance)
       const start = kontoIstTopstepExpress(r) ? 0 : (r.start > 0 ? Number(r.start) : size)   // Topstep Express: Basis 0 (F27)
       const bal = r.balance == null ? null : Number(r.balance)
       const pl = (bal != null && (start || kontoIstTopstepExpress(r))) ? bal - start : null
-      const tr = r.im_trade
-      const seit = tr && tr.seit ? new Date(tr.seit) : null
-      const seitTxt = seit && !isNaN(seit) ? (seit.toDateString() === new Date().toDateString()
-        ? seit.toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' })
-        : seit.toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit' })) : ''
-      const tradeTxt = tr ? ['im Trade', tr.rolle === 'slave' ? 'Hedge' : '', tr.richtung, tr.symbol].filter(Boolean).join(' · ') : ''
-      const grund = r.archived ? ({ blown:'geblowt', passed:'bestanden', passed_pending:'bestanden' }[r.arch_grund] || 'archiviert') : ''
-      k.innerHTML = `<div class="af-kopf"><span class="af-id"></span><span class="af-pillen"></span></div>`
-        + `<div class="af-name"></div><div class="af-meta"></div>`
-        + `<div class="af-bal"><span class="af-b"></span><b class="af-pl"></b></div><div class="af-fuss"></div>`
-      const id = k.querySelector('.af-id')
-      id.textContent = r.person || '—'; id.style.background = afFarbe(r.user_id)
-      const pille = (txt, titel, fertig) => {
-        const s = document.createElement('span'); s.className = 'af-trade' + (fertig ? ' is-fertig' : '')
-        s.innerHTML = '<i></i><span></span>'; s.querySelector('span').textContent = txt; s.title = titel || ''
-        k.querySelector('.af-pillen').appendChild(s)
-      }
-      if(tr) pille(tradeTxt, seitTxt ? 'seit ' + seitTxt : '')
-      if(heute){
-        const epl = heute.pl == null ? '' : ' ' + (heute.pl >= 0 ? '+' : '−') + afGeld(Math.abs(heute.pl), ccy)
-        const was = heute.ergebnis === 'tp' ? 'TP' : heute.ergebnis === 'sl' ? (heute.blown ? 'SL · geblowt' : 'SL') : 'beendet'
-        pille('heute ' + was + epl, 'Ende ' + new Date(heute.at).toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' })
-          + [heute.richtung, heute.symbol].filter(Boolean).map(x => ' · ' + x).join(''), true)
-      }
-      k.querySelector('.af-name').textContent = r.name || '—'
-      k.querySelector('.af-name').title = r.name || ''
-      k.querySelector('.af-meta').textContent = [mitFirma ? r.firm : '', size ? (size >= 1000 ? (size / 1000).toLocaleString('de-DE') + 'k' : String(size)) : '', r.ext ? '#' + r.ext : 'keine Kontonummer'].filter(Boolean).join(' · ')
-      k.querySelector('.af-b').textContent = bal != null ? afGeld(bal, ccy) : 'keine Live-Balance'
-      if(bal == null) k.querySelector('.af-b').style.color = 'var(--sub-2)'
-      if(r.balance_at && bal != null) k.querySelector('.af-b').title = `${r.balance_src || ''} · Stand ${new Date(r.balance_at).toLocaleString('de-DE')}`
-      const plEl = k.querySelector('.af-pl')
-      if(pl != null){
-        plEl.textContent = (pl >= 0 ? '+' : '−') + afGeld(Math.abs(pl), ccy)
-        plEl.style.color = pl >= 0 ? '#15803d' : '#b91c1c'
-        plEl.title = 'seit Start ' + afGeld(start, ccy)
-      }
-      const fuss = k.querySelector('.af-fuss')
-      const tag = (txt, farbe) => { const s = document.createElement('span'); s.className = 'af-tag'; s.textContent = txt; if(farbe) s.style.color = farbe; fuss.appendChild(s) }
-      if(r.payout_at) tag('Payout ab ' + afDatum(r.payout_at), r.payout_at <= new Date().toISOString().slice(0, 10) ? '#15803d' : '')
-      if(grund) tag(grund, grund === 'geblowt' ? '#b91c1c' : '')
-      if(!fuss.children.length) fuss.remove()
-      return k
+      d.title = [
+        name,
+        [afFirmaVon(r), ph[2], size ? (size >= 1000 ? (size / 1000).toLocaleString('de-DE') + 'k' : String(size)) : ''].filter(Boolean).join(' · '),
+        ext ? '#' + ext : 'keine Kontonummer',
+        bal != null ? 'Balance ' + afGeld(bal, ccy) + (pl != null ? ` (${pl >= 0 ? '+' : '−'}${afGeld(Math.abs(pl), ccy)} seit Start)` : '') : 'keine Live-Balance',
+        r.payout_at ? 'Payout ab ' + afDatum(r.payout_at) : ''
+      ].filter(Boolean).join('\n')
+      return d
     }
 
     function admBuysRender(){
@@ -35902,7 +35897,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.840'
+  const OS_TAB_BUILD = '2026-09-22.841'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
