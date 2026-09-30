@@ -51222,6 +51222,7 @@
    *       (auch das hängende Supabase-Login trifft alles gleichzeitig), lädt der Tab neu — nur im ruhigen Moment des
    *       Build-Wächters, höchstens 1× je 10 min. Zähler + Zeiten reisen in kurs_bruecke (mt5_live.status) mit. */
   let _epPushBusy = false, _epTickNr = 0, _epTickSeit = 0, _epTickLetzter = 0
+  const EP_DIREKT_FRISCH_S = 12   // Tab schreibt Kurse/Kerzen nur, wenn der Reader-Direktfeed länger stumm ist (01.10.2026, s. epBrueckeTick)
   const EP_TICK_TOT_MS = 10000, EP_HEIL_MS = 60000, EP_HEIL_PAUSE_MS = 10 * 60 * 1000, EP_HEIL_KEY = 'prophos_bruecke_heil'
   const epStart = Date.now()
   function epHeilPruefen(){
@@ -51252,7 +51253,9 @@
    * Reader ≥ 0.9.9 schickt Kurse + Kerzen selbst an Railway (POST /reader-kurs) — unabhängig von diesem Tab, seinen Neuladungen und
    * Chromes Hintergrund-Drosselung. Er braucht dafür EINMAL einen Schlüssel (feed_direkt.token false): Railway signiert ihn für das
    * eingeloggte Profil + diesen PC, der Tab legt ihn im Reader ab (Datei, überlebt Neustarts). Höchstens 1× je Minute versucht.
-   * Diese Brücke schreibt unverändert weiter mit — Reserve, beide Wege upserten dieselben Zeilen. */
+   * Diese Brücke schreibt unverändert weiter mit — Reserve, beide Wege upserten dieselben Zeilen.
+   * Seit 01.10.2026 (Realtime-Kontingent überschritten) wirklich nur Reserve: Kurse/Kerzen schreibt der Tab nur, wenn feed_direkt.ok_alter_s
+   * älter als EP_DIREKT_FRISCH_S ist oder fehlt. echoplus_live, Erstladung und die stündliche Räumung laufen unverändert. */
   let _epFeedVersuch = 0
   async function epFeedSchluessel(d, pc){
     try{
@@ -51335,7 +51338,18 @@
       // tv_kurse-Zeile `${pc}:NQ` / `${pc}:MNQ` (die alte Ein-Symbol-Zeile id = pc bleibt für Reader < 0.7.0 als Fallback unten).
       // stale (Script-Urteil oder Empfang > 45 s) wird NICHT geschrieben — die Zeile altert dann sichtbar („Beweis oder leer").
       const ks = (d.kurse && typeof d.kurse === 'object') ? d.kurse : null
-      if(ks){
+      // TAB = ECHTE RESERVE (01.10.2026, Supabase-Sperre: Realtime Messages 8,2 Mio. bei 5 Mio. Kontingent). Edge-Logs 30.09.
+      // 08–16 UTC: tv_kurse 10.700 POSTs aus diesem Tab + 7.743 vom Reader-Direktfeed, tv_kurs_1m 10.050 + 7.747 — derselbe Kurs
+      // ging doppelt in die Cloud, und jede Zeile reist per Realtime an jeden Abonnenten. Der Reader meldet in /positions selbst,
+      // wann sein letzter POST /reader-kurs durchging (feed_direkt.ok_alter_s, Reader ≥ 0.9.9). Ist das höchstens 12 s her, schreibt
+      // dieser Tab weder tv_kurse noch tv_kurs_1m. Fällt der Direktfeed aus (Railway weg, Schlüssel ungültig, Reader neu gestartet
+      // → ok_alter_s null), übernimmt der Tab im nächsten 1-s-Tick: der Direktfeed sendet bei Ruhe alle 5 s ein Lebenszeichen,
+      // 12 s = zwei verpasste + Puffer. Schlimmstenfalls ist die tv_kurse-Zeile dann ~14 s alt — der Hedge-Wächter verlangt ≤ 30 s
+      // (HEDGE_KURS_MAX_ALTER_MS). Ein Paket deckt beide Wurzeln, die Frische gilt deshalb für NQ und MNQ zusammen.
+      const fdir = d.feed_direkt
+      const direktFrisch = !!(fdir && fdir.token && typeof fdir.ok_alter_s === 'number' && fdir.ok_alter_s >= 0 && fdir.ok_alter_s <= EP_DIREKT_FRISCH_S)
+      if(epLokal.direktFrisch !== direktFrisch){ epLokal.direktFrisch = direktFrisch; epLokal.diag = Object.assign(epLokal.diag || {}, { tab_reserve: direktFrisch ? 'wartet (Direktfeed frisch)' : 'schreibt', tab_reserve_at: new Date().toISOString() }) }
+      if(ks && !direktFrisch){
         const rows = []
         for(const w of ['NQ', 'MNQ']){
           const q = ks[w]; if(!q || q.stale) continue
@@ -51384,16 +51398,29 @@
         // fehler = letzter Upsert-Fehler, erstladung = Stand der 0.8.0-Erstladung).
         epLokal.diag = Object.assign(epLokal.diag || {}, { at: new Date().toISOString(), kurse: ks ? Object.keys(ks).join(',') : (k ? 'alt' : '-'), kz: kz.length, kz_bsp: kz[0] ? { wurzel: kz[0].wurzel, minute: kz[0].minute, c: kz[0].c } : null })
         if(kz.length && !/^delayed/.test(String(d.modus || '')) && !Object.values(d.kurse || {}).some(q => q && /^delayed/.test(String(q.modus || '')))){   // verzögerte Kerzen (delayed_*) nie schreiben — Teil-Bars, falsches c
+          const epKerzeJetzt = Date.now()
           const rows = kz.filter(x => x && x.wurzel && x.minute > 0 && x.c > 0).map(x => ({
             wurzel: String(x.wurzel).slice(0, 8), minute: new Date(Number(x.minute) * 1000).toISOString(), symbol: String(x.symbol || '').slice(0, 32),
             o: x.o, h: x.h, l: x.l, c: x.c, ticks: Number(x.n) || 0, pc, updated_at: new Date().toISOString(),
             quelle: String(x.quelle || '').slice(0, 12) || null }))   // 'ws' = Chart-Serie exakt, 'ws-tick' = aus Quote-Ticks (H/L Näherung) — Reader 0.8.4
-          // Nur geänderte Kerzen schreiben (1-s-Takt): Signatur je Wurzel+Minute aus O/H/L/C, spätestens alle 5 s erneut
+          // Nur geänderte Kerzen schreiben (1-s-Takt): Signatur je Wurzel+Minute aus O/H/L/C + Tick-Zahl.
+          // Drossel (01.10.2026, Realtime-Kontingent, s. o.): kein 5-s-Lebenszeichen mehr für unveränderte Kerzen — die liest niemand
+          // nach updated_at, und mit ticks in der Signatur bekommt die abgeschlossene Minute ihren Endstand (Feed-Wache zählt ticks).
+          // Die LAUFENDE Minute je Wurzel höchstens alle 2 s; eine abgeschlossene (ältere als die jüngste der Wurzel im Paket) geht
+          // bei jeder Änderung sofort raus — der Minutenwechsel schreibt die fertige Kerze also immer final.
+          // Gemerkt wird erst beim Schreiben; wartet der Tab als Reserve, bleibt der Merker stehen → beim Übernehmen geht alles raus.
           epLokal.letzteKerze = epLokal.letzteKerze || {}
-          const rowsNeu = rows.filter(r => { const key = r.wurzel + '|' + r.minute, sig = [r.o, r.h, r.l, r.c].join('|'), alt = epLokal.letzteKerze[key]
-            if(alt && alt.sig === sig && Date.now() - alt.at < 5000) return false
-            epLokal.letzteKerze[key] = { sig, at: Date.now() }; return true })
-          for(const key of Object.keys(epLokal.letzteKerze)) if(Date.now() - epLokal.letzteKerze[key].at > 600000) delete epLokal.letzteKerze[key]
+          epLokal.laufKerzeAt = epLokal.laufKerzeAt || {}
+          const jungsteJe = {}
+          for(const r of rows) if(!jungsteJe[r.wurzel] || r.minute > jungsteJe[r.wurzel]) jungsteJe[r.wurzel] = r.minute
+          const rowsNeu = direktFrisch ? [] : rows.filter(r => { const key = r.wurzel + '|' + r.minute, sig = [r.o, r.h, r.l, r.c, r.ticks].join('|'), alt = epLokal.letzteKerze[key]
+            if(alt && alt.sig === sig) return false
+            const lauf = epLokal.laufKerzeAt[r.wurzel]
+            if(r.minute === jungsteJe[r.wurzel] && lauf && lauf.minute === r.minute && epKerzeJetzt - lauf.at < 2000) return false
+            return true })
+          for(const r of rowsNeu){ epLokal.letzteKerze[r.wurzel + '|' + r.minute] = { sig: [r.o, r.h, r.l, r.c, r.ticks].join('|'), at: epKerzeJetzt }
+            if(r.minute === jungsteJe[r.wurzel]) epLokal.laufKerzeAt[r.wurzel] = { minute: r.minute, at: epKerzeJetzt } }
+          for(const key of Object.keys(epLokal.letzteKerze)) if(epKerzeJetzt - epLokal.letzteKerze[key].at > 600000) delete epLokal.letzteKerze[key]
           epLokal.diag.rows = rowsNeu.length
           if(rowsNeu.length){ const { error } = await supabase.from('tv_kurs_1m').upsert(rowsNeu, { onConflict: 'wurzel,minute' }); epLokal.diag.fehler = error ? String(error.message || error.code || error) : null; if(!error) epLokal.diag.letzter_ok = new Date().toISOString() }
           if(!epLokal.kerzenGeraeumt || Date.now() - epLokal.kerzenGeraeumt > 3600000){

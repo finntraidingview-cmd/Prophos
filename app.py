@@ -9875,6 +9875,54 @@ def reader_feed_zeilen(pc, daten, jetzt_iso):
     return kurse, kerzen
 
 
+# Drossel Direktfeed (01.10.2026, Supabase-Sperre: Realtime Messages 8,2 Mio. bei 5 Mio. Kontingent — Edge-Logs 30.09. 08–16 UTC:
+# 7.743 POSTs tv_kurse + 7.747 tv_kurs_1m allein von hier). Der Reader postet bei jeder Änderung (1 s) das ganze Paket: beide
+# tv_kurse-Zeilen und je Wurzel letzte abgeschlossene + laufende Minute — auch Zeilen, die sich gar nicht geändert haben, und jede
+# Zeile ist eine Realtime-Nachricht an jeden Abonnenten. Jetzt: tv_kurse-Zeile nur bei neuem Preis, sonst höchstens alle 4,5 s als
+# Lebenszeichen (updated_at = Frische für Hedge-Wächter ≤ 30 s und Feed-Wache); Kerze nur bei geänderten O/H/L/C/ticks, die LAUFENDE
+# Minute je Wurzel höchstens alle 2 s, die abgeschlossene bei Änderung sofort (Minutenwechsel = Endstand immer). Gemerkt wird erst
+# nach erfolgreichem Upsert — ein Fehler (502 an den Reader) lässt beim nächsten Paket alles erneut raus. Merker nur im Speicher
+# (1 Worker, Procfile); nach einem Neustart schreibt das erste Paket einfach alles.
+READER_FEED_KURS_LEBEN_S = 4.5
+READER_FEED_KERZE_TAKT_S = 2.0
+_reader_feed_merk = {}
+_reader_feed_lock = threading.Lock()
+
+
+def reader_feed_drosseln(pc, kurse, kerzen, merk, jetzt):
+    """REIN RECHNEND (testbar): (tv_kurse-Zeilen, tv_kurs_1m-Zeilen) gegen den Merker des letzten Schreibens filtern.
+    → (kurse, kerzen, neu) — neu = Merker-Einträge, die erst nach erfolgreichem Upsert in merk übernommen werden."""
+    neu = {}
+    kurse_raus = []
+    for z in kurse:
+        key = (pc, "k", z["wurzel"])
+        alt = merk.get(key)
+        if alt and alt[0] == z["preis"] and jetzt - alt[1] < READER_FEED_KURS_LEBEN_S:
+            continue
+        kurse_raus.append(z)
+        neu[key] = (z["preis"], jetzt)
+    jungste = {}
+    for z in kerzen:
+        if z["minute"] > jungste.get(z["wurzel"], ""):
+            jungste[z["wurzel"]] = z["minute"]
+    kerzen_raus = []
+    for z in kerzen:
+        key = (pc, "m", z["wurzel"], z["minute"])
+        sig = (z["o"], z["h"], z["l"], z["c"], z["ticks"])
+        alt = merk.get(key)
+        if alt and alt[0] == sig:
+            continue
+        laufend = z["minute"] == jungste[z["wurzel"]]
+        if laufend:
+            lauf = merk.get((pc, "lauf", z["wurzel"]))
+            if lauf and lauf[0] == z["minute"] and jetzt - lauf[1] < READER_FEED_KERZE_TAKT_S:
+                continue
+            neu[(pc, "lauf", z["wurzel"])] = (z["minute"], jetzt)
+        kerzen_raus.append(z)
+        neu[key] = (sig, jetzt)
+    return kurse_raus, kerzen_raus, neu
+
+
 @app.route("/reader-feed-token", methods=["POST", "OPTIONS"])
 def reader_feed_token():
     """POST {pc} mit sb-token → {ok, token} für den Reader dieses PCs."""
@@ -9900,6 +9948,9 @@ def reader_kurs_schreiben():
     if (request.content_length or 0) > READER_FEED_MAX:
         return jsonify({"ok": False, "msg": "zu groß"}), 413
     kurse, kerzen = reader_feed_zeilen(wer[1], request.get_json(silent=True), datetime.now(timezone.utc).isoformat())
+    jetzt = time.time()
+    with _reader_feed_lock:   # Drossel (01.10.2026, s. reader_feed_drosseln)
+        kurse, kerzen, neu = reader_feed_drosseln(wer[1], kurse, kerzen, _reader_feed_merk, jetzt)
     try:
         if kurse:
             sb_upsert("tv_kurse", kurse)
@@ -9907,6 +9958,11 @@ def reader_kurs_schreiben():
             sb_upsert("tv_kurs_1m", kerzen)
     except Exception as e:
         return jsonify({"ok": False, "msg": f"nicht speicherbar ({type(e).__name__})"}), 502
+    with _reader_feed_lock:
+        _reader_feed_merk.update(neu)
+        if len(_reader_feed_merk) > 2000:   # alte Minuten wegräumen (10 min)
+            for key in [k for k, v in _reader_feed_merk.items() if jetzt - v[1] > 600]:
+                _reader_feed_merk.pop(key, None)
     return jsonify({"ok": True, "kurse": len(kurse), "kerzen": len(kerzen)})
 
 # ══ KONTEN PRÜFEN (27.09.2026, Auftrag Koordination B10 für F11: Konten per Einfügen des Tradeify-Dashboard-Texts
