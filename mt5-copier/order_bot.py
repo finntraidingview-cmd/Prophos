@@ -14238,10 +14238,17 @@ def tsx_cdp_folgt(modus):
                     "normalen Chrome ist hier gesperrt (Doppelsitzung). Plan bleibt stehen, NICHT erneut starten.")}
 
 
+def tsx_url_login(url):
+    """REIN RECHNEND (testbar): steht dieser TopstepX-Tab laut Adresse auf der Login-Seite (…/login, /signin, /sign-in)?"""
+    return bool(re.search(r"topstepx\.com/+(login|signin|sign-in)\b", str(url or "").lower()))
+
+
 def tsx_targets(liste):
-    """REIN RECHNEND (testbar): TopstepX-Seiten (type page) aus /json/list, …/trade zuerst. -> Liste"""
+    """REIN RECHNEND (testbar): TopstepX-Seiten (type page) aus /json/list — angemeldete vor Login-Seiten, …/trade zuerst. -> Liste
+    Live 30.09.2026 11:15 UTC (erster Topstep-PC): der vom Bot geöffnete Tab stand noch auf der alten Login-Seite, während der Nutzer sich in
+    einem zweiten Tab desselben Puls-Chrome angemeldet hatte — der Bot las den alten."""
     t = [x for x in (liste or []) if isinstance(x, dict) and x.get("type") == "page" and ist_topstepx_url(x.get("url"))]
-    t.sort(key=lambda x: 0 if "/trade" in str(x.get("url")) else 1)
+    t.sort(key=lambda x: (1 if tsx_url_login(x.get("url")) else 0, 0 if "/trade" in str(x.get("url")) else 1))
     return t
 
 
@@ -14250,9 +14257,15 @@ def _tsx_tab_sicher(trail, warten_s=20.0):
     Keine .bat, kein Alltags-Chrome. -> Target | None"""
     t = tsx_targets(_cdp_http("/json/list"))
     if t:
+        if len(t) > 1:
+            trail.append(f"Puls-Chrome: {len(t)} TopstepX-Tabs ({[str(x.get('url'))[:40] for x in t][:4]}) — nehme den ersten (angemeldet vor Login-Seite)")
         return t[0]
-    _cdp_http("/json/new?" + TSX_URL, methode="PUT")
+    neu = _cdp_http("/json/new?" + TSX_URL, methode="PUT")
     trail.append("Puls-Chrome: TopstepX-Tab geöffnet (topstepx.com/trade)")
+    if isinstance(neu, dict) and neu.get("id"):
+        # vom Bot geöffnete Tabs merken — nur SOLCHE darf er später als toten Login-Tab schließen (nie einen Tab des Menschen)
+        eigene = [x for x in ((_augen_json_lesen("tsx_tabs.json") or {}).get("ids") or []) if isinstance(x, str)][-9:]
+        _augen_json_schreiben("tsx_tabs.json", {"ids": eigene + [str(neu.get("id"))]})
     ende = time.time() + warten_s
     while time.time() < ende:
         _warte(0.8, 0.4)
@@ -14282,6 +14295,64 @@ def _tsx_tabs_schliessen(trail=None):
     if n and trail is not None:
         trail.append(f"Topstep wieder über den alten Weg — {n} TopstepX-Tab(s) im Puls-Chrome geschlossen")
     return n
+
+
+def cdp_tabs_kurz(liste, n=8):
+    """REIN RECHNEND (testbar): Tab-Liste für die Spur — 'Titel (Adresse)' je Seite, gekürzt."""
+    out = [f"{str(t.get('title') or '')[:24]} ({str(t.get('url') or '')[:44]})" for t in (liste or [])
+           if isinstance(t, dict) and t.get("type") == "page"]
+    return " | ".join(out[:n]) + (f" | +{len(out) - n}" if len(out) > n else "") if out else "keine"
+
+
+def _puls_chrome_wo():
+    """Welches Chrome ist das? Port + Profilordner, mit dem der Bot das Puls-Chrome startet (puls_chrome_argumente lässt keinen anderen
+    zu). Die echte Kommandozeile gibt Chrome per CDP nur mit --enable-automation her (Prüfer 30.09.2026) — deshalb ehrlich „Soll". -> Text"""
+    return f"Puls-Chrome Port {PULS_CDP_PORT}, Profilordner (Soll) {puls_chrome_profil_pfad()}"
+
+
+def _tsx_sitzung_waehlen(trail, sitz=None):
+    """TopstepX-Sitzung im Puls-Chrome: Tab finden/öffnen, Login-Lage klären. -> (Sitzung | None, True | Fehlertext)
+    sitz = [Sitzung] des Aufrufers: wird SOFORT gesetzt (und beim Tab-Wechsel ersetzt), damit finally/Wachhund sie auch dann schließen
+    und das Fenster minimieren, wenn im Login-Teil etwas wirft.
+    Live 30.09.2026 11:11–11:15 UTC (erster Topstep-PC): der Bot-Tab zeigte die alte Login-Seite, der Nutzer war in einem ANDEREN Tab desselben
+    Puls-Chrome angemeldet. Deshalb bei einer Login-Seite: alle Tabs in die Spur, einen anderen TopstepX-Tab OHNE Login-Seite nehmen
+    (den toten Login-Tab nur schließen, wenn der Bot ihn selbst geöffnet hat), sonst _tsx_cdp_login (Autofill abwarten, EINMAL neu
+    laden, Klick nur mit Beweis)."""
+    ziel = _tsx_tab_sicher(trail)
+    if not ziel:
+        return None, "TopstepX-Tab im Puls-Chrome nicht erreichbar."
+    s = _AugenSitzung(trail, ziel=ziel, js_datei="augen_tsx.js", tv_riegel=False)
+    if sitz is not None:
+        sitz[0] = s
+
+    def login_seite(sz):
+        b = sz.lese_js(TSX_K0_BLICK_JS) or {}
+        return bool((b.get("login") or {}).get("seite")) if isinstance(b.get("login"), dict) else False
+
+    if login_seite(s):
+        liste = _cdp_http("/json/list") or []
+        trail.append(f"TopstepX-Login-Seite im Tab {str(ziel.get('url'))[:40]} — Tabs: {cdp_tabs_kurz(liste)} · {_puls_chrome_wo()}")
+        eigene = (_augen_json_lesen("tsx_tabs.json") or {}).get("ids") or []
+        for t in tsx_targets(liste):
+            if t.get("id") == ziel.get("id") or not t.get("webSocketDebuggerUrl"):
+                continue
+            s2 = None
+            try:
+                s2 = _AugenSitzung(trail, ziel=t, js_datei="augen_tsx.js", tv_riegel=False)
+                if not login_seite(s2):
+                    trail.append(f"anderer TopstepX-Tab ist angemeldet ({str(t.get('url'))[:40]}) — nehme diesen")
+                    if ziel.get("id") in eigene and _cdp_tab_schliessen(ziel.get("id")):
+                        trail.append("eigenen Login-Tab geschlossen")
+                    if sitz is not None:
+                        sitz[0] = s2
+                    s.zu()
+                    return s2, True
+                s2.zu()
+            except Exception as e_:
+                trail.append(f"Tab {str(t.get('url'))[:30]} nicht prüfbar ({type(e_).__name__})")
+                if s2:
+                    s2.zu()
+    return s, _tsx_cdp_login(s, trail)
 
 
 def _cdp_tab_zeigen(target_id, trail):
@@ -14335,8 +14406,8 @@ TSX_K0_BLICK_JS = r"""(function () {
       return (t === 'text' || t === 'email') && !e.readOnly && !e.disabled; });
     var vor = felder.filter(function (e) { return !!(e.compareDocumentPosition(pw) & 4); });
     var u = vor.length ? vor[vor.length - 1] : null;
-    lg.pw = { rect: R(pw), gefuellt: String(pw.value || '').length > 0, autofill: af(pw) };
-    lg.user = u ? { rect: R(u), gefuellt: String(u.value || '').length > 0, autofill: af(u) } : null;
+    lg.pw = { rect: R(pw), gefuellt: String(pw.value || '').length > 0, autofill: af(pw), fokus: document.activeElement === pw };
+    lg.user = u ? { rect: R(u), gefuellt: String(u.value || '').length > 0, autofill: af(u), fokus: document.activeElement === u } : null;
   }
   var bt = document.body ? T(document.body) : '';
   var fm = bt.match(/(invalid|incorrect|wrong password|login failed|access denied|locked|too many attempts)[^.]{0,80}/i);
@@ -14370,6 +14441,28 @@ TSX_K0_BLICK_JS = r"""(function () {
     return { titel: T(d.querySelector('h1,h2,h3,h4,[class*="title"],[class*="header"]')).slice(0, 60), text: T(d).slice(0, 160), rect: R(d),
              x: x.length === 1 ? K(x[0]) : null, x_n: x.length };
   });
+  // Offene Listen und Dialog-Inhalt eigens (Live 30.09.2026 11:18 UTC): das Inventar kappt von hinten, MUI-Popover hängen am Ende
+  // von body — die Kontozeilen fehlten in der Elementliste. Werte nur ohne Passwortfeld im Dialog, Passwörter nie.
+  function KZ(e) { var k = K(e); k.sel = A(e, 'aria-selected'); k.dis = A(e, 'aria-disabled'); k.dv = A(e, 'data-value').slice(0, 60);
+    k.id = String(e.id || '').slice(0, 40); k.cls = String(typeof e.className === 'string' ? e.className : '').slice(0, 50); return k; }
+  o.menues = Q('[role="listbox"],[role="menu"]').filter(sb).slice(0, 3).map(function (m) {
+    return { role: A(m, 'role'), rect: R(m), id: String(m.id || '').slice(0, 40), label: A(m, 'aria-labelledby').slice(0, 40),
+             eintraege: Q('[role="option"],[role="menuitem"],li', m).filter(sb).slice(0, 30).map(KZ) }; });
+  // Werte NUR als Zahl (Risk/Profit im Bracket-Dialog) und nie, wenn der Dialog oder das Feld nach Zugangsdaten aussieht — gleiche
+  // Vorsicht wie geheim() in augen_tsx.js (Prüfer 30.09.2026: 2FA-Code, Benutzername, sichtbar geschaltetes Passwort)
+  var RX_GEHEIM = /pass|pin\b|cvc|otp|one.?time|code|user|mail|log.?in|sign.?in|anmeld|verif|2fa|two.?factor|token|secret/i;
+  o.dialog_inhalt = innen(Q('[role="dialog"],[role="alertdialog"],[aria-modal="true"]').filter(sb)).slice(0, 2).map(function (d) {
+    var geheim = Q('input[type="password"]', d).length > 0 || RX_GEHEIM.test(T(d).slice(0, 400));
+    return { rect: R(d), geheim: geheim,
+      felder: Q('input,select,textarea,button,[role="button"],[role="combobox"],[role="switch"],label,h1,h2,h3,h4,[data-testid]', d).filter(sb).slice(0, 40).map(function (e) {
+        var k = KZ(e); k.text = k.text.slice(0, 40); k.cls = ''; k.typ = String(e.type || '').slice(0, 12); k.name = A(e, 'name').slice(0, 30); k.ph = A(e, 'placeholder').slice(0, 30);
+        var v = e.value === undefined ? '' : String(e.value), fg = geheim || /password|email/i.test(k.typ) ||
+                RX_GEHEIM.test(k.name + ' ' + k.ph + ' ' + k.id + ' ' + k.aria + ' ' + A(e, 'autocomplete'));
+        k.wert = (!fg && /^[-+$€%.,\d\s]{1,14}$/.test(v)) ? v : ''; return k; }),
+      kaestchen: Q('input[type="checkbox"],input[type="radio"],[role="checkbox"],[role="switch"]', d).slice(0, 20).map(function (e) {
+        var l = e.closest('label') || e.parentElement, z = sb(e) ? e : (l && sb(l) ? l : null);
+        return { an: e.checked === undefined ? A(e, 'aria-checked') === 'true' : !!e.checked, text: T(l).slice(0, 60), testid: A(e, 'data-testid').slice(0, 40),
+                 rect: z ? R(z) : null, aus: !!(e.disabled || A(e, 'aria-disabled') === 'true') }; }) }; });
   o.bracket_dialog = o.dialoge.some(function (d) { return /bracket/i.test(d.titel + ' ' + d.text); }) ||
                      /position\s*brackets?[\s\S]{0,200}(risk|profit)/i.test(Q('[role="dialog"],[aria-modal="true"]').filter(sb).map(T).join(' '));
   return o;
@@ -14449,10 +14542,17 @@ def tsx_inventar_deckeln(daten, max_bytes=TSX_INVENTAR_MAX):
             inv["blatt"] = inv["blatt"][:int(len(inv["blatt"]) * 0.8)]
         elif len(inv.get("elemente") or []) > 40:
             inv["elemente"] = inv["elemente"][:int(len(inv["elemente"]) * 0.85)]
-        elif isinstance(inv.get("stand"), dict):
+        elif isinstance(inv.get("stand"), dict) and not inv["stand"].get("gekuerzt"):
             inv["stand"] = {"gekuerzt": True}
-        elif isinstance(inv.get("chart"), dict):
+        elif isinstance(inv.get("chart"), dict) and not inv["chart"].get("gekuerzt"):
             inv["chart"] = {"gekuerzt": True}
+        elif isinstance(inv.get("k0_blick"), dict) and any(len(d_.get("felder") or []) > 12 for d_ in inv["k0_blick"].get("dialog_inhalt") or []
+                                                           if isinstance(d_, dict)):
+            for d_ in inv["k0_blick"]["dialog_inhalt"]:        # Prüfer: der Blick wuchs ungebremst → Railway lehnte die ganze Zeile ab
+                if isinstance(d_, dict) and isinstance(d_.get("felder"), list):
+                    d_["felder"] = d_["felder"][:max(12, int(len(d_["felder"]) * 0.6))]
+        elif isinstance(inv.get("k0_blick"), dict) and (inv["k0_blick"].get("menues") or inv["k0_blick"].get("dialog_inhalt")):
+            inv["k0_blick"]["menues"], inv["k0_blick"]["dialog_inhalt"] = [], []
         else:
             break
         inv["gekuerzt"] = n
@@ -14480,7 +14580,7 @@ def _tsx_k0_lesen(s, trail, zustand, pc, blick=None):
     except Exception as e_:
         inv["chart"] = {"fehler": type(e_).__name__}
     if isinstance(blick, dict):
-        inv["k0_blick"] = {k: blick.get(k) for k in ("konto", "konto_zeilen", "bracket", "dialoge", "bracket_dialog")}
+        inv["k0_blick"] = {k: blick.get(k) for k in ("konto", "konto_zeilen", "bracket", "dialoge", "bracket_dialog", "menues", "dialog_inhalt")}
     stand = wert.get("stand") if isinstance(wert.get("stand"), dict) else {}
     kopf = {"zustand": zustand, "bot": puls_bot_stand(), "target": str(inv.get("url") or "")[:200], "dauer_ms": int((time.time() - t0) * 1000)}
     daten = tsx_inventar_deckeln(dict(kopf, inventar=inv))
@@ -14513,11 +14613,64 @@ def _tsx_k0_lesen(s, trail, zustand, pc, blick=None):
 def _tsx_cdp_login(s, trail):
     """TopstepX-Login-Seite im Puls-Chrome? Dann höchstens EIN Klick auf „PLATFORM LOGIN" — nur mit Autofill-Beweis (tsx_login_beweis),
     nie tippen, nie Enter, kein zweiter Versuch. -> True (angemeldet) | Fehlertext"""
-    bl = s.lese_js(TSX_K0_BLICK_JS) or {}
-    lg = bl.get("login") if isinstance(bl.get("login"), dict) else {}
+    def blick():
+        b = s.lese_js(TSX_K0_BLICK_JS) or {}
+        return b.get("login") if isinstance(b.get("login"), dict) else {}
+
+    def warten(lg_):
+        """Bis ~6 s auf Chromes Autofill-Markierung (nur lesen). -> (login-Blick | None = Login-Seite weg, ok, text)"""
+        ok_, text_ = tsx_login_beweis(lg_)
+        for _ in range(6):
+            if ok_ or lg_.get("fehler_text") or lg_.get("zwei_faktor"):
+                break
+            _warte(1.0, 0.3)
+            lg_ = blick()
+            if not lg_.get("seite"):
+                return None, False, ""
+            ok_, text_ = tsx_login_beweis(lg_)
+        return lg_, ok_, text_
+
+    lg = blick()
     if not lg.get("seite"):
         return True
-    ok, text = tsx_login_beweis(lg)
+    # Live 30.09.2026 11:11/11:15 UTC (erster Topstep-PC): „Benutzer LEER, Passwort LEER" — beim ersten Mal 2,6 s nach dem Öffnen des Tabs
+    # (Chrome füllt ein spät gezeichnetes Formular erst etwas später aus), beim zweiten Mal stand der Tab noch auf der ALTEN Login-Seite,
+    # obwohl der Nutzer sich inzwischen in einem anderen Tab desselben Puls-Chrome angemeldet hatte (TopstepX lädt sich nicht selbst neu).
+    # Deshalb: erst kurz auf die Autofill-Markierung warten, dann den Tab EINMAL neu laden (Navigation, kein Klick) und erneut schauen.
+    lg, ok, text = warten(lg)
+    if lg is None:
+        trail.append("TopstepX: Login-Seite von selbst weg (Sitzung gültig)")
+        return True
+    def feld_frei(f):
+        return not (isinstance(f, dict) and (f.get("gefuellt") or f.get("fokus")))
+
+    letzt0 = _augen_json_lesen("tsx_login.json") or {}
+    try:
+        gesperrt = bool(letzt0.get("at")) and 0 <= time.time() - float(letzt0["at"]) < TSX_LOGIN_SPERRE_S
+    except (TypeError, ValueError):
+        gesperrt = False
+    # Neuladen NUR, wenn niemand gerade von Hand anmeldet (Prüfer 30.09.2026: getippte Eingaben wären weg) — beide Felder leer, kein
+    # Feld im Fokus — und nicht innerhalb der Login-Sperre (dann folgt ohnehin kein Klick)
+    if not ok and not lg.get("fehler_text") and not lg.get("zwei_faktor") and not gesperrt \
+            and feld_frei(lg.get("user")) and feld_frei(lg.get("pw")):
+        try:
+            s.ws.rufe("Page.navigate", {"url": TSX_URL}, timeout=8)
+            trail.append("TopstepX-Login-Seite ohne Autofill — Tab einmal neu geladen (topstepx.com/trade)")
+            _warte(1.5, 0.5)
+            s._seite_abwarten(20.0)
+            s._augen_laden()
+            _warte(1.5, 0.5)                             # die App entscheidet erst nach dem Laden: Handelsseite oder zurück zum Login
+            lg = blick()
+            if not lg.get("seite"):
+                trail.append("TopstepX nach dem Neuladen angemeldet (Sitzung aus einem anderen Tab)")
+                return True
+            lg, ok, text = warten(lg)
+            if lg is None:
+                trail.append("TopstepX nach dem Neuladen angemeldet")
+                return True
+        except Exception as e_:
+            trail.append(f"Neuladen des TopstepX-Tabs nicht möglich ({type(e_).__name__}) — urteile nach dem alten Stand")
+            lg = lg or {}
     trail.append(f"TopstepX-Login-Seite: {text}")
     letzt = _augen_json_lesen("tsx_login.json") or {}
     try:
@@ -14529,8 +14682,8 @@ def _tsx_cdp_login(s, trail):
         return (f"TopstepX zeigt wieder die Login-Seite, der letzte Login-Klick war vor {int(seit // 60)} min — kein neuer Versuch. "
                 "Bitte im Puls-Chrome von Hand anmelden (`python order_bot.py augen start tsx`).")
     if not ok:
-        return (f"TopstepX im Puls-Chrome nicht angemeldet ({text}) — bitte einmal von Hand anmelden und das Passwort in Chrome "
-                "speichern (`python order_bot.py augen start tsx`).")
+        return (f"TopstepX im Puls-Chrome nicht angemeldet ({text}; {_puls_chrome_wo()}) — bitte genau in DIESEM Chrome einmal von "
+                "Hand anmelden und das Passwort speichern (`python order_bot.py augen start tsx` holt das Fenster nach vorn).")
     _augen_json_schreiben("tsx_login.json", {"at": time.time()})    # vor dem Druck merken — auch ein Absturz danach zählt als Versuch
     if not s.klick(lg["knopf"]["rect"], "PLATFORM LOGIN (Autofill bewiesen)",
                    pruef={"rect": lg["knopf"].get("rect"), "text": "login", "aria": "", "tabu": r"\b(buy|sell|order|logout|log out)\b"}):
@@ -14679,11 +14832,9 @@ def modus_tsxinventar_cdp(cmd):
     try:
         if not _puls_chrome_sicher(trail, url=TSX_URL):      # Kaltstart mit TopstepX, nie mit dem TradingView-Chart (Prüfer K0)
             return raus("chrome", "Puls-Chrome nicht erreichbar (Port 9333) — einmal `python order_bot.py augen start tsx` am PC.", "chrome")
-        ziel = _tsx_tab_sicher(trail)
-        if not ziel:
-            return raus("tab", "TopstepX-Tab im Puls-Chrome nicht erreichbar.", "tab")
-        s = sitz[0] = _AugenSitzung(trail, ziel=ziel, js_datei="augen_tsx.js", tv_riegel=False)
-        lg = _tsx_cdp_login(s, trail)
+        s, lg = _tsx_sitzung_waehlen(trail, sitz)
+        if s is None:
+            return raus("tab", lg, "tab")
         if lg is not True:
             return raus("login", lg, "login")
         g = _tsx_k0_lesen(s, trail, "grund", pc, blick=s.lese_js(TSX_K0_BLICK_JS))
@@ -14841,7 +14992,10 @@ def win_ziel_pruef_js(x, y, pruef):
             "var t=(p.text||'').toLowerCase(),a=(p.aria||'').toLowerCase(),kt=T(k),ka=A(k);"
             "var text_ok=(!t&&!a)||(t&&(kt.indexOf(t)>=0||T(e).indexOf(t)>=0))||(a&&(ka.indexOf(a)>=0||A(e).indexOf(a)>=0));"
             "var tabu=p.tabu?new RegExp(p.tabu,'i').test(kt+' '+ka):false;"
-            "return {hover:e.matches(':hover'),passt:!!(drin&&klein&&text_ok&&!tabu),was:(kt||ka).slice(0,40),tabu:tabu};})("
+            "var hs=document.querySelectorAll(':hover'),d=hs.length?hs[hs.length-1]:null,dr=d?d.getBoundingClientRect():null;"
+            "var unter=d?(d.tagName.toLowerCase()+' '+String(d.getAttribute('data-testid')||d.getAttribute('aria-label')||T(d)).slice(0,30)"
+            "+' @'+Math.round(dr.left)+','+Math.round(dr.top)):'nichts';"
+            "return {hover:e.matches(':hover'),passt:!!(drin&&klein&&text_ok&&!tabu),was:(kt||ka||k.tagName.toLowerCase()).slice(0,40),tabu:tabu,unter:unter};})("
             + json.dumps(pruef, ensure_ascii=False) + ")")
 
 
@@ -15310,8 +15464,9 @@ class _AugenSitzung:
             self.trail.append(f"{name}: am Zielpunkt @{punkt[0]},{punkt[1]} liegt ein anderes Fenster ({wurzel} '{w_titel[:40]}', "
                               f"erwartet {hwnd}) — kein Druck")
             return False
-        hover = False
+        hover, v = False, None
         ende = time.time() + 0.9
+        gestupst = False
         while time.time() < ende:
             _warte(0.08, 0.05)
             if pruef:
@@ -15323,6 +15478,17 @@ class _AugenSitzung:
                 if isinstance(v, dict) and v.get("hover"):
                     hover = True
                     break
+                if not gestupst and time.time() >= ende - 0.15:
+                    # Live 30.09.2026 11:18 UTC (erster Topstep-PC, Bracket-Zahnrad): Zeiger stand rechnerisch richtig, die Seite meldete
+                    # 0,9 s lang kein :hover. EINMAL 2 px anstupsen (frische Mausbewegung, kein Druck) und noch 0,7 s schauen.
+                    gestupst = True
+                    try:
+                        _cursor_set(int(punkt[0]) + 2, int(punkt[1]) + 1)
+                        _warte(0.04, 0.03)
+                        _cursor_set(int(punkt[0]), int(punkt[1]))
+                    except Exception:
+                        pass
+                    ende = time.time() + 0.7
                 continue
             v = self.lese_js(win_ziel_js(p[0], p[1]))
             if isinstance(v, dict) and v.get("toast") and not toast_ok:
@@ -15334,7 +15500,8 @@ class _AugenSitzung:
                 hover = True
                 break
         if not hover:
-            self.trail.append(f"{name}: Maus steht @{punkt[0]},{punkt[1]}, Ziel NICHT unter dem Zeiger (Hover) — kein Druck")
+            zus = (f" — am Punkt '{v.get('was')}', Zeiger laut Seite über '{v.get('unter')}'" if pruef and isinstance(v, dict) else "")
+            self.trail.append(f"{name}: Maus steht @{punkt[0]},{punkt[1]}, Ziel NICHT unter dem Zeiger (Hover){zus} — kein Druck")
             return False
         self.maus = p
         if not druck:
@@ -18483,7 +18650,7 @@ def _cdp_anmelden(s, ort, benutzer, opts, trail, vorher=None, sitz=None):
         try:
             aktiv = _cdp_verbunden_lesen(s, opts, trail)
         except (OSError, RuntimeError) as e_:
-            # Live 30.09.2026 03:23 UTC (pc-usq1i6, Plan beb06b7f, 6 Versuche): ~1 s nach „Anmelden" ConnectionAbortedError (WinError
+            # Live 30.09.2026 03:23 UTC (ein Orbit-PC, 6 Versuche in Folge): ~1 s nach „Anmelden" ConnectionAbortedError (WinError
             # 10053) → roher 'cdp_fehler', 9 s später startete der Augen-Prozess ein FRISCHES Puls-Chrome (Start-Adresse, about:blank) —
             # das Puls-Chrome hatte sich beim Login beendet. Ursache offen; seitdem steht in der Spur, ob Chrome noch lebt und welche
             # Tabs da sind, und der Lauf hängt sich EINMAL neu an DENSELBEN TradingView-Tab (der Login kann trotzdem gelungen sein).

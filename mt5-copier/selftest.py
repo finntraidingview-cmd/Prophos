@@ -3503,7 +3503,7 @@ def test_cdp_konto_regression_865():
         and "(eintraege.length === 1 && !!s.el && !eintraege[0].aktiv)" in js and "panel_lage: lage" in js
         and "VERSION = '0.7.4'" in js, "augen.js 0.7.4: Umschalter unter der Broker-Leiste (beide Lagen), panel_lage, Liste nur mit Umschalter")
     chk("warnung" in ob.PULS_ERGEBNIS_FELDER and "unklar" in ob.PULS_ERGEBNIS_FELDER, "Ergebnis-Paket trägt warnung + unklar")
-    # Login-Abriss (30.09.2026 03:23 UTC, pc-usq1i6): Verbindung weg nach „Anmelden" → Spur mit Chrome-Zustand, EINMAL neu anhängen
+    # Login-Abriss (30.09.2026 03:23 UTC): Verbindung weg nach „Anmelden" → Spur mit Chrome-Zustand, EINMAL neu anhängen
     import inspect as _ia
     V = ob.cdp_verbindung_weg_urteil
     ta, tb = {"id": "a", "webSocketDebuggerUrl": "ws://a"}, {"id": "b", "webSocketDebuggerUrl": "ws://b"}
@@ -3547,7 +3547,7 @@ def test_cdp_konto_regression_865():
                 _z["n"] += 1
                 if _z["n"] <= _ab:
                     raise _f(10053, "Verbindung abgebrochen") if _f is ConnectionAbortedError else _f("CDP Runtime.evaluate: Target crashed")
-                return "PAAPEX6416990000007USD"
+                return "PAAPEX0000000000000USD"
 
             class _NeuS:
                 ws = None
@@ -3560,7 +3560,7 @@ def test_cdp_konto_regression_865():
                                                                  [{"type": "page", "id": "t1", "url": "https://www.tradingview.com/chart/x/",
                                                                    "webSocketDebuggerUrl": "ws://127.0.0.1:9333/devtools/page/t1"}]) if _l else None))
             sz, tr = [type("S0", (), {"ws": None, "target_id": tid, "_win_hwnd": 4711})()], []
-            r_ = ob._cdp_anmelden(sz[0], _OrtA(), "APEX_641699", {}, tr, None, sitz=sz)
+            r_ = ob._cdp_anmelden(sz[0], _OrtA(), "APEX_000000", {}, tr, None, sitz=sz)
             faelle[fall] = (r_, zahl["neu"], isinstance(sz[0], _NeuS), tr, getattr(sz[0], "_win_hwnd", None))
     finally:
         for n, f in alt_a.items():
@@ -3702,6 +3702,9 @@ def test_tsx_k0():
     lst = [{"type": "page", "url": "https://www.tradingview.com/chart/x/"}, {"type": "page", "url": "https://topstepx.com/login", "id": "a"},
            {"type": "page", "url": "https://topstepx.com/trade", "id": "b"}, {"type": "iframe", "url": "https://topstepx.com/trade"}]
     chk([t["id"] for t in T(lst)] == ["b", "a"] and T(None) == [], "TopstepX-Tab: /trade zuerst, nur Seiten")
+    lst2 = [{"type": "page", "url": "https://topstepx.com/login", "id": "alt"}, {"type": "page", "url": "https://topstepx.com/", "id": "neu"}]
+    chk([t["id"] for t in T(lst2)] == ["neu", "alt"] and ob.tsx_url_login("https://topstepx.com/login?x=1")
+        and not ob.tsx_url_login("https://topstepx.com/trade"), "TopstepX-Tab: angemeldeter Tab vor der alten Login-Seite")
     # Kandidaten
     E = ob.tsx_k0_eindeutig
     k_ok = {"text": "$150K EXPRESS | EXPRESS-V2-682437-57131691", "rect": [10, 60, 300, 32]}
@@ -3759,6 +3762,80 @@ def test_tsx_k0():
     finally:
         ob._AUGEN_HIER, ob._warte = alt_h, alt_w
     chk(isinstance(r_sl, str) and "kein neuer Versuch" in r_sl and sl.klicks == [], f"Login-Klick vor 2 min → kein neuer ({r_sl})")
+    # Login-Seite ohne Autofill: bis ~6 s warten, dann EINMAL neu laden (Navigation, kein Klick) — Sitzung aus einem anderen Tab zählt
+    leer = {"seite": True, "knoepfe": 1, "knopf": {"rect": [700, 500, 200, 40]}, "user": {}, "pw": {}}
+
+    class _WsN:
+        def __init__(self):
+            self.rufe_n = []
+
+        def rufe(self, m, p=None, timeout=5):
+            self.rufe_n.append((m, (p or {}).get("url")))
+            return {}
+
+    class _SN:
+        def __init__(self, danach):
+            self.ws, self.danach, self.klicks, self.geladen = _WsN(), danach, [], 0
+
+        def lese_js(self, a, timeout=8):
+            nav = any(m == "Page.navigate" for m, _u in self.ws.rufe_n)
+            return {"login": (self.danach if nav else leer)}
+
+        def _seite_abwarten(self, sek=25.0):
+            return True
+
+        def _augen_laden(self):
+            self.geladen += 1
+
+        def klick(self, r, n, toast_ok=False, pruef=None):
+            self.klicks.append(n)
+            return True
+    d5 = tempfile.mkdtemp()
+    alt_h5, alt_w5 = ob._AUGEN_HIER, ob._warte
+    try:
+        ob._AUGEN_HIER, ob._warte = d5, (lambda a_, b_: None)
+        s_a, t_a = _SN({"seite": False}), []
+        r_a = ob._tsx_cdp_login(s_a, t_a)
+        s_b, t_b = _SN(leer), []
+        r_b = ob._tsx_cdp_login(s_b, t_b)
+        s_c, t_c = _SN(leer), []
+        s_c.lese_js = lambda a, timeout=8: {"login": dict(leer, zwei_faktor=True)}
+        r_c = ob._tsx_cdp_login(s_c, t_c)
+        kein_merker = ob._augen_json_lesen("tsx_login.json") is None
+    finally:
+        ob._AUGEN_HIER, ob._warte = alt_h5, alt_w5
+    chk(r_a is True and s_a.ws.rufe_n == [("Page.navigate", ob.TSX_URL)] and s_a.klicks == [] and s_a.geladen == 1
+        and any("aus einem anderen Tab" in x for x in t_a), f"alte Login-Seite → einmal neu laden → angemeldet, kein Klick ({t_a})")
+    chk(isinstance(r_b, str) and "nicht angemeldet" in r_b and len(s_b.ws.rufe_n) == 1 and s_b.klicks == [] and kein_merker,
+        f"auch nach dem Neuladen leer → ehrlich, genau EIN Neuladen, kein Klick, kein Merker ({r_b})")
+    chk(isinstance(r_c, str) and s_c.ws.rufe_n == [] and s_c.klicks == [], f"2FA/Captcha → kein Neuladen, kein Klick ({r_c})")
+    d6 = tempfile.mkdtemp()
+    alt_h6, alt_w6 = ob._AUGEN_HIER, ob._warte
+    try:
+        ob._AUGEN_HIER, ob._warte = d6, (lambda a_, b_: None)
+        hand = dict(leer, user={"gefuellt": True}, pw={})           # jemand tippt gerade von Hand
+        s_d, t_d = _SN(leer), []
+        s_d.lese_js = lambda a, timeout=8: {"login": hand}
+        r_d = ob._tsx_cdp_login(s_d, t_d)
+        s_e, t_e = _SN(leer), []
+        s_e.lese_js = lambda a, timeout=8: {"login": dict(leer, pw={"fokus": True})}
+        r_e = ob._tsx_cdp_login(s_e, t_e)
+        ob._augen_json_schreiben("tsx_login.json", {"at": time.time() - 60})
+        s_f, t_f = _SN({"seite": False}), []
+        r_f = ob._tsx_cdp_login(s_f, t_f)
+    finally:
+        ob._AUGEN_HIER, ob._warte = alt_h6, alt_w6
+    chk(isinstance(r_d, str) and s_d.ws.rufe_n == [] and isinstance(r_e, str) and s_e.ws.rufe_n == [],
+        "Feld von Hand gefüllt oder im Fokus → NIE neu laden (Hand-Anmeldung bleibt)")
+    chk(isinstance(r_f, str) and s_f.ws.rufe_n == [] and "kein neuer Versuch" in r_f, f"innerhalb der Login-Sperre kein Neuladen ({r_f})")
+    blick_gross = {"dialog_inhalt": [{"felder": [{"text": "x" * 60, "aria": "y" * 40}] * 40, "kaestchen": []}] * 2, "menues": [{"eintraege": [{"text": "z" * 80}] * 30}]}
+    dk2 = ob.tsx_inventar_deckeln({"zustand": "bracket", "inventar": {"elemente": [{"t": "e" * 150}] * 45, "blatt": [], "stand": {"a": "s" * 3000},
+                                                                    "chart": {"c": "k" * 3000}, "k0_blick": blick_gross}}, max_bytes=9000)
+    chk(len(json.dumps(dk2, ensure_ascii=False)) <= 9000 and dk2["inventar"]["stand"] == {"gekuerzt": True} and dk2["inventar"]["chart"] == {"gekuerzt": True},
+        f"Deckel kürzt nach Stand auch Chart und den Blick ({len(json.dumps(dk2, ensure_ascii=False))} Bytes)")
+    js_b = ob.TSX_K0_BLICK_JS
+    chk("RX_GEHEIM" in js_b and "one.?time" in js_b and r"[-+$€%.,\d\s]{1,14}" in js_b and "fokus: document.activeElement === pw" in js_b,
+        "Dialog-Blick: Werte nur als Zahl und nie bei Zugangsdaten-Merkmalen; Login-Felder melden den Fokus")
     chk(isinstance(r_sl2, str) and len(sl2.klicks) == 1 and sl2.klicks[0][1] and "login" in sl2.klicks[0][1]["text"] and merk,
         f"erster Login: genau EIN Klick mit Ziel-Beweis, Merker gesetzt ({sl2.klicks}, {r_sl2})")
     # Regel-Datei: keine Sperr-/tmp-Reste; Rückschalten cdp → uia schließt TopstepX-Tabs im Puls-Chrome
@@ -3860,8 +3937,55 @@ def test_tsx_k0():
     chk("js_datei" in sig and "tv_riegel" in sig and 'getattr(self, "tv_riegel", True)' in q_k and "if tv:" in q_k,
         "Sitzung: Augen-Datei wählbar, TopstepX ohne Werbung/Meldungen wegklicken")
     q_i = _i.getsource(ob.modus_tsxinventar_cdp)
-    chk('js_datei="augen_tsx.js", tv_riegel=False' in q_i and "_handlauf_setzen(True)" in q_i and "_handlauf_setzen(False)" in q_i
-        and "_tsx_cdp_login(" in q_i, "K0-Inventar: augen_tsx.js, Sperre für andere Puls-Chrome-Läufe, Login nur über den Beweis")
+    q_w = _i.getsource(ob._tsx_sitzung_waehlen)
+    chk('js_datei="augen_tsx.js", tv_riegel=False' in q_w and "_handlauf_setzen(True)" in q_i and "_handlauf_setzen(False)" in q_i
+        and "_tsx_sitzung_waehlen(trail, sitz)" in q_i and "_tsx_cdp_login(s, trail)" in q_w,
+        "K0-Inventar: augen_tsx.js, Sperre für andere Puls-Chrome-Läufe, Login nur über den Beweis")
+    # Sitzungswahl (30.09.2026): eigener Tab zeigt die alte Login-Seite, ein anderer TopstepX-Tab ist angemeldet
+    class _FS:
+        def __init__(self, trail, ziel=None, js_datei="augen.js", tv_riegel=True):
+            self.ziel, self.zu_n = ziel, 0
+
+        def lese_js(self, a, timeout=8):
+            return {"login": {"seite": bool(self.ziel.get("_login"))}}
+
+        def zu(self):
+            self.zu_n += 1
+    alt_s = {n: getattr(ob, n) for n in ("_tsx_tab_sicher", "_AugenSitzung", "_cdp_http", "_cdp_tab_schliessen", "_augen_json_lesen",
+                                          "_tsx_cdp_login", "_puls_chrome_wo")}
+    t_bot = {"type": "page", "id": "bot1", "url": "https://topstepx.com/trade", "webSocketDebuggerUrl": "ws://x", "_login": True}
+    t_mensch = {"type": "page", "id": "mensch1", "url": "https://topstepx.com/trade", "webSocketDebuggerUrl": "ws://y", "_login": False}
+    t_tv = {"type": "page", "id": "tv1", "url": "https://www.tradingview.com/chart/x/", "title": "NQ"}
+    zu_tabs, login_ruf, erg = [], [], {}
+    try:
+        ob._AugenSitzung = _FS
+        ob._cdp_tab_schliessen = lambda tid: zu_tabs.append(tid) or True
+        ob._tsx_cdp_login = lambda s_, t_: login_ruf.append(s_.ziel["id"]) or "nicht angemeldet (Attrappe)"
+        ob._puls_chrome_wo = lambda: "Puls-Chrome Port 9333, Profil X"
+        for fall, tabs, eigene in (("anderer_angemeldet", [t_bot, t_mensch, t_tv], ["bot1"]), ("fremder_tab_bleibt", [t_bot, t_mensch], []),
+                                   ("alle_login", [t_bot, dict(t_mensch, _login=True)], ["bot1"]), ("angemeldet", [dict(t_bot, _login=False)], [])):
+            zu_tabs.clear()
+            login_ruf.clear()
+            ob._tsx_tab_sicher = lambda tr, _t=tabs: _t[0]
+            ob._cdp_http = lambda pfad, *a, _t=tabs, **k: list(_t)
+            ob._augen_json_lesen = lambda name, _e=eigene: {"ids": list(_e)}
+            tr = []
+            halter = [None]
+            sz, r_ = ob._tsx_sitzung_waehlen(tr, halter)
+            erg[fall] = (sz.ziel["id"], r_, list(zu_tabs), list(login_ruf), tr, halter[0] is sz)
+    finally:
+        for n, f in alt_s.items():
+            setattr(ob, n, f)
+    chk(erg["anderer_angemeldet"][:3] == ("mensch1", True, ["bot1"]) and erg["anderer_angemeldet"][3] == []
+        and any("Tabs:" in x and "Port 9333" in x for x in erg["anderer_angemeldet"][4]),
+        f"anderer TopstepX-Tab angemeldet → nehmen, eigenen Login-Tab schließen, Tabs + Profil in der Spur ({erg['anderer_angemeldet'][4]})")
+    chk(erg["fremder_tab_bleibt"][:3] == ("mensch1", True, []), "ein Tab, den der Bot nicht geöffnet hat, wird nie geschlossen")
+    chk(all(e[5] for e in erg.values()), "die gewählte Sitzung steht sofort beim Aufrufer (finally/Wachhund schließen sie)")
+    chk(erg["alle_login"][0] == "bot1" and isinstance(erg["alle_login"][1], str) and erg["alle_login"][3] == ["bot1"] and erg["alle_login"][2] == [],
+        "alle TopstepX-Tabs auf Login → Login-Blick im eigenen Tab (neu laden, Beweis)")
+    chk(erg["angemeldet"][0] == "bot1" and erg["angemeldet"][3] == ["bot1"], "kein Login-Bild → normaler Weg")
+    chk(ob.cdp_tabs_kurz([t_tv, {"type": "iframe", "url": "x"}, t_bot]) == "NQ (https://www.tradingview.com/chart/x/) |  (https://topstepx.com/trade)"
+        and ob.cdp_tabs_kurz(None) == "keine", "Tab-Liste für die Spur")
     q_m = _i.getsource(ob.main)
     chk('cmd["tsx"] = True' in q_m and "augen start tsx" in _i.getsource(ob.modus_augen), "Befehl 'augen start tsx' öffnet den TopstepX-Tab")
     q_l = _i.getsource(ob._tsx_cdp_login)
