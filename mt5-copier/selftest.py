@@ -3248,8 +3248,11 @@ def test_puls_cdp_login():
         and ob.cdp_login_noetig(r2_[1], r2_[4]), f"Symbol fehlt → kein Klick, kein_broker → Login-Weg ({r2_[2]})")
     chk(not r3_[0] and r3_[1] == "konto_nicht_erreicht" and k3_.klicks == ["Konto-Umschalter", "Taste Escape"] and "Order-Panel ok (320 px)" in r3_[2],
         f"Panel groß, Liste trotzdem nicht erkannt → ehrliche Meldung mit Panel-Lage, Umschalter nur einmal ({r3_[2]})")
-    chk(r4_[0] and k4_.klicks == ["Order-Panel aufklappen (Maximize panel)"] and k4_.gross,
-        f"Konto steht, Panel eingeklappt → einmal aufklappen (Positionen lesbar), nie deshalb scheitern ({k4_.klicks})")
+    chk(r4_[0] and k4_.klicks == [] and not k4_.gross,
+        f"Konto steht, Panel eingeklappt → NIE maximieren (Finn 01.10.2026: Chart sichtbar), nie deshalb scheitern ({k4_.klicks})")
+    chk("_cdp_panel_aufklappen(s, trail, ohne_max=True)" in _i.getsource(ob._cdp_konto_sichern)
+        and "if _cdp_panel_zurueck(s, trail):" in _i.getsource(ob._cdp_konto_sichern),
+        "Konto steht → höchstens Open panel, kurz Maximiertes sofort zurück (Restore) vor Ticket/Order")
     # Open panel zuerst (Finn 01.10.2026, Live-Befund Moritz 23:08 UTC: Maximize versteckte den Chart → Symbol nicht einstellbar)
     class _SO(_SK):
         def __init__(self, open_reicht=True, **kw):
@@ -3429,8 +3432,8 @@ def test_cdp_konto_regression_865():
     chk(not r1[0] and r1[1] == "konto_nicht_erreicht" and k1.klicks == ["Taste Escape"] and "konto_treffer" not in r1[4]
         and not ob.cdp_login_noetig(r1[1], r1[4]) and "kein Login" in r1[2] and any("nicht von diesem Lauf" in x for x in t1),
         f"altes augen.js maximiert: EINMAL Esc, nichts gewählt, KEIN Login-Weg ({k1.klicks}, {r1[2]})")
-    chk(r2[0] and k2.klicks == ["Konto-Umschalter", "Konto " + Z7], f"maximiert: Umschalter oben → Liste → Ziel ({k2.klicks})")
-    chk(r3[0] and k3.klicks == [] and r3[4].get("konto_aktiv") == Z7 + "USD", f"Konto steht → kein Klick ({k3.klicks})")
+    chk(r2[0] and k2.klicks == ["Konto-Umschalter", "Konto " + Z7, "Broker-Panel am Ende wiederherstellen (Restore panel)"], f"maximiert: Umschalter oben → Liste → Ziel → Restore (01.10.2026) ({k2.klicks})")
+    chk(r3[0] and k3.klicks == ["Broker-Panel am Ende wiederherstellen (Restore panel)"] and r3[4].get("konto_aktiv") == Z7 + "USD", f"Konto steht (maximiert) → nur Restore (01.10.2026) ({k3.klicks})")
     chk(not r4[0] and r4[4].get("konto_treffer") == 0 and r4[4].get("liste_aktiv") == Z8 + "USD" and ob.cdp_login_noetig(r4[1], r4[4])
         and k4.klicks == ["Konto-Umschalter", "Taste Escape"], f"eigene Liste, Tradeify-Ziel 0×, Apex aktiv → Login-Beleg ({r4[4]})")
     chk(not r4b[0] and r4b[4].get("konto_treffer") is None and not ob.cdp_login_noetig(r4b[1], r4b[4]) and "selben Apex-Login" in r4b[2],
@@ -3443,7 +3446,7 @@ def test_cdp_konto_regression_865():
         f"Tradeify: abgeschnittene Liste, Ziel 0× → kein Login-Beleg ({r6[2]})")
     chk(not r7[0] and r7[4].get("konto_treffer") is None and "steht nicht in der Liste" in r7[2],
         f"Liste ohne das aktive Konto → kein Login-Beleg ({r7[2]})")
-    chk(r8[0] and k8.klicks == ["Taste Escape"] and not k8.offen, f"Konto steht + alte Liste offen → Esc, dann ok ({k8.klicks})")
+    chk(r8[0] and k8.klicks == ["Taste Escape", "Broker-Panel am Ende wiederherstellen (Restore panel)"] and not k8.offen, f"Konto steht + alte Liste offen → Esc, dann Restore (01.10.2026) ({k8.klicks})")
     chk(not r9[0] and r9[1] == "konto_nicht_erreicht" and "geht mit Esc nicht zu" in r9[2] and k9.klicks == ["Taste Escape"],
         f"Konto steht, Liste bleibt offen → nichts lesen ({r9[2]})")
     chk(not r10[0] and k10.klicks == ["Konto-Umschalter", "Konto " + Z7, "Taste Escape"] and not k10.offen and "nicht gedrückt" in r10[2],

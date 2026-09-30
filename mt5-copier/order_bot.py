@@ -16523,7 +16523,7 @@ def cdp_panel_lage(d, min_h=CDP_PANEL_MIN_H):
     return "ok" if h >= min_h else "eingeklappt"
 
 
-def _cdp_panel_aufklappen(s, trail):
+def _cdp_panel_aufklappen(s, trail, ohne_max=False):
     """Order-Panel eingeklappt? Dann „Maximize panel" EINMAL je Sitzung (Windows-Maus über s.klick: Werbung weg, Hover-/Fenster-/
     Overlay-Riegel), Wirkung beweisen (≤ 5 Blicke). Liest sonst nur. -> (lage, daten)
     lage: 'ok' | 'unklar' | 'aufgeklappt' | 'ohne_knopf' (Symbol fehlt) | 'bleibt_eingeklappt' (verdeckt, ohne Wirkung, schon versucht)"""
@@ -16561,6 +16561,8 @@ def _cdp_panel_aufklappen(s, trail):
                         d = d2
                 trail.append(f"Order-Panel nach „Open panel“ zu niedrig ({(d or {}).get('unter_leiste')} px) → Rückfall „Maximize panel“")
                 h = (d or {}).get("unter_leiste")
+    if ohne_max:   # 01.10.2026 (Finn): Konto steht schon → nie maximieren, der Chart bleibt sichtbar
+        return "bleibt_eingeklappt", d
     if getattr(s, "_panel_max_versucht", False):
         return "bleibt_eingeklappt", d
     s._panel_max_versucht = True
@@ -16667,8 +16669,12 @@ def _cdp_konto_sichern(s, ext, opts, trail):
                 if (st.get("konto") or {}).get("liste_offen"):
                     return False, "konto_nicht_erreicht", (f"Konto {ext} steht, aber die Konto-Liste geht mit Esc nicht zu — nichts "
                                                            "gelesen/geklickt (die Reiter lägen darunter)."), st, {"konto_eintraege": _eintr(ko)}
-            # Konto passt, Panel aber eingeklappt: Lesen/Schließen sähen die Positionen nicht — einmal aufklappen, nie deshalb scheitern
-            if not getattr(s, "_panel_max_versucht", False) and _cdp_panel_aufklappen(s, trail)[0] == "aufgeklappt":
+            # Konto passt, Panel aber eingeklappt: höchstens „Open panel“, NIE maximieren (Finn 01.10.2026, Orbit V3 bei Moritz: „ich will
+            # den Chart sehen, wenn die Order platziert wird — alles in der normalen Ansicht, Maximize nur ganz kurz, wenn nötig").
+            if _cdp_panel_aufklappen(s, trail, ohne_max=True)[0] == "aufgeklappt":
+                st = s.stand(opts)
+            # War für den Kontowechsel kurz maximiert → sofort zurück, BEVOR Ticket/Order drankommen
+            if _cdp_panel_zurueck(s, trail):
                 st = s.stand(opts)
             if getattr(s, "_panel_aufgeklappt", False) and geklickt_umschalter:
                 trail.append("Order-Panel war eingeklappt → aufgeklappt → Konto gewechselt")
