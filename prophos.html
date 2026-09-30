@@ -6519,7 +6519,7 @@
             <!-- V2-Wege (23.09.2026, Finn: „alles in ein einziges Popup — Account, Kontrakte, TP, SL, Uhrzeit, dann nur
                  noch Starten"): Stop Loss und Startzeit direkt hier, nur auf Echo V2 / Orbit V2 sichtbar (tpRouteUpdateSeg). -->
             <div class="field tp-wd-only" id="tp-wd-tp-kachel"></div>
-            <div class="tp-wd-head" id="tp-wd-head-c">Kein Stop Loss <span>Winning Days laufen ohne SL — der Hedge endet mit dem Master</span></div>
+            <div class="tp-wd-head" id="tp-wd-head-c" style="display:none">Kein Stop Loss <span>Winning Days laufen ohne SL — der Hedge endet mit dem Master</span></div>
             <div class="field" id="tp-master-sl-row" style="display:none">
               <label style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Stop Loss ($) <span id="tp-master-sl-hint" style="color:var(--sub);font-weight:400"></span></label>
               <input type="number" class="input mono" id="tp-master-sl" min="0" step="10" placeholder="z.B. 100">
@@ -35798,7 +35798,7 @@
   function tpWdVorschau(){
     const row = document.getElementById('tp-wd-hedge-row'), box = document.getElementById('tp-wd-vorschau'), tpBox = document.getElementById('tp-wd-tp-kachel')
     const mv = document.getElementById('tp-wd-multi-value'), me = document.getElementById('tp-wd-multi-eq'), sq = document.getElementById('tp-wd-slave-qty')
-    if(!row || !box || row.style.display === 'none') return
+    if(!row || !box || !tpWdAktiv()) return   // 01.10.2026: Zeile „Kein Stop Loss“ ist immer aus — gerechnet wird trotzdem (Multiplikator, TP-Kachel)
     const r = tpWdRechnung()
     // Hand-Multiplikator: Risiko Slave folgt ihm (ohne input-Event — das würde den Handwert beenden)
     if(r.hand && r.slaveRisk > 0){ const sr = document.getElementById('tp-slave-risk'); if(sr && Number(sr.value) !== r.slaveRisk) sr.value = String(r.slaveRisk); _tpWdHand.slaveGeschrieben = r.slaveRisk }
@@ -35958,7 +35958,7 @@
     v2zeig('tp-letzte-orders', v2, true)
     if(v2) try{ tpLetzteOrdersRender() }catch(_){}
     // Winning Days Farm (24.09.2026 spät): Faktor-Feld mit TP/SL-Vorschau nur auf diesem Weg
-    v2zeig('tp-wd-hedge-row', wdAn, true)
+    v2zeig('tp-wd-hedge-row', false, true)   // „Kein Stop Loss / Notfall-SL Fusion“ aus (01.10.2026, Finn: „die Information weiß man, kann man weglassen“)
     if(wdAn){ tpWdSlaveRiskVorbelegen(); tpWdVorschau() }
     // Topstep-Weg: die Master-Filter (Firma/Typ) arbeiten auf Prophos-Feldern,
     // die TSX-API-Liste ignoriert sie — ausblenden statt so tun (01.09.2026).
@@ -36037,6 +36037,8 @@
       : (row && row.bias ? `Bot schlägt aktuell ${row.bias} vor — Richtung selbst wählen.` : 'Richtung selbst wählen.')   // nur Hinweis (24.09.2026)
   }
   async function tpV2KompassVorwahl(){
+    // Kompass-Box aus (01.10.2026, Finn: „der Kompass wird nicht mehr genutzt“) — keine Anzeige, keine Abfrage mehr
+    { const box = document.getElementById('tp-kompass-box'); if(box) box.style.display = 'none'; return }
     if(!routeIstV2(_tpRoute)){ const box = document.getElementById('tp-kompass-box'); if(box) box.style.display = 'none'; return }
     tpKompassBoxRender(null, null, true)
     const [row, q] = await Promise.all([tpKompassAktuell(), tpKompassQuoten()])
@@ -36856,7 +36858,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.913'
+  const OS_TAB_BUILD = '2026-09-22.914'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
