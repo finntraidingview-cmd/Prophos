@@ -2101,11 +2101,11 @@
      Liquidation/SL zeigt der Chart beim Klick. Eigene wdl-z-*-Klassen, die mwd-*-Karten der Winning Days bleiben, wie sie sind. */
   #dashboard-view .wdl-tab{border:1px solid var(--border-soft);border-radius:10px;background:var(--surface);overflow:hidden}
   #dashboard-view .wdl-tab + .wdl-tab{margin-top:14px}
-  /* Sektionen Orbit / Echo (30.09.2026): ruhige Titelzeile über den Gruppen; Echo-Zeilen ohne Chart-Auswahl, Symbol grau */
+  /* Echo-Zeilen (30.09.2026): ohne Chart-Auswahl, Symbol grau */
   /* Sektionsköpfe Orbit/Echo kräftiger als die Gruppenköpfe (30.09.2026: Finn übersah „Echo" unter Orbits „Beendet") — beide gleich */
-  #dashboard-view .wdl-sek{margin:26px 2px 8px;font-size:12.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-2)}
-  #dashboard-view .wdl-sek:first-child{margin-top:0}
-  #dashboard-view .wdl-sek span{font-weight:500;letter-spacing:0;text-transform:none;color:var(--sub-2)}
+  /* Plattform-Pille je Zeile (30.09.2026, Finn: „eine Liste, wo alle Laufenden drin sind, unterschieden nur mit Orbit und Echo"):
+     dezent grau, kein zweiter Farbcode — die Sektionsköpfe Orbit/Echo (.858) sind weg */
+  #dashboard-view .wdl-pf{display:inline-block;margin:0 0 0 8px;padding:1px 6px;border-radius:4px;background:var(--surface-tint);color:var(--sub);font-size:10px;font-weight:600;letter-spacing:.03em;font-style:normal;vertical-align:1px}
   #dashboard-view .wdl-z-echo{cursor:default}
   #dashboard-view .wdl-z-sym{color:var(--sub-2)}   /* Richtung-Spalte 150 px (vorher 112): „SELL 0,5 Lot NDX100" passt ganz */
   #dashboard-view .wdl-z{display:grid;grid-template-columns:minmax(0,1fr) 150px 256px 112px 136px;grid-template-areas:"wer ri mi pl zeit";align-items:center;column-gap:16px;padding:11px 16px;font-size:13px;color:var(--ink-2);font-variant-numeric:tabular-nums;cursor:pointer;transition:background .12s}
@@ -24532,7 +24532,7 @@
         zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
       }
       return `<div class="wdl-z wdl-z-${art}${echo ? ' wdl-z-echo' : ''}${an ? ' is-aktiv' : ''}" style="--wdl-id:${wdlIdFarbe(t)}" data-wdl-trade="${escapeHtml(wdlTid(t))}" title="${escapeHtml(tip)}">`
-        + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><small>${escapeHtml(konto)}</small></span>`
+        + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><i class="wdl-pf">${echo ? 'Echo' : 'Orbit'}</i><small>${escapeHtml(konto)}</small></span>`
         + ri + miZ + plZ + zeitZ + '</div>'
     }
     // Gruppe = ein Kasten, oben einmal die Spaltenköpfe im selben Raster wie die Zeilen
@@ -24546,19 +24546,21 @@
         + sp.map((x, i) => `<span class="wdl-z-${['mi', 'pl', 'zeit'][i]}">${x}</span>`).join('') + `</div>${zeigen.map(zeile).join('')}${fuss}</div>`
     }
     const nachEnde = arr => arr.sort((a, b) => String(b.ended_at || '').localeCompare(String(a.ended_at || '')))
-    // ZWEI SEKTIONEN (30.09.2026, Finn: „unter Radar auch Echo"): Orbit (Orbit V2 + Topstep V2, NQ-Chart) und darunter Echo (MT5/CFD),
-    // je mit denselben Gruppen im selben Raster. Echo kennt kein „Wartet": den P&L schreibt mt5PlanPollTick am Ende direkt aus der
-    // MT5-Balance, eine Puls-Nachlesung gibt es dort nicht. Leere Sektion = nur die graue Titelzeile „· keine Trades".
-    const gruppen = (arr, schl) => {
+    const nachStart = arr => arr.sort((a, b) => String(a.started_at || '').localeCompare(String(b.started_at || '')))
+    // EINE LISTE NACH ZUSTAND (30.09.2026, Finn am Radar .864: „Immer erst alle, die live sind, oben, Orbit und Echo zusammen, und
+    // darunter die beendeten. Nicht Echo weiter unten … unterscheidet sie nur mit Orbit und Echo"): die Sektionen „Orbit"/„Echo"
+    // (seit .858) sind weg — Läuft · Wartet · Geplant · Beendet mit beiden Plattformen gemischt, je Zeile die graue Mini-Pille
+    // „Orbit"/„Echo" (wdl-pf). Echo kennt kein „Wartet" (kein Puls, den P&L schreibt mt5PlanPollTick am Ende direkt aus der
+    // MT5-Balance); Chart-Auswahl weiter nur für Orbit. Beendet bleibt gekürzt (WDL_BEENDET_KURZ, Schlüssel 'beendet').
+    const gruppen = arr => {
       const la = arr.filter(t => t.status === 'open'), ge = arr.filter(t => t.status === 'planned'), zz = arr.filter(t => t.status === 'review' || t.status === 'completed')
       const wa = zz.filter(t => !wdlIstEcho(t) && wdlWartet(t)), fe = zz.filter(t => !wa.includes(t))
-      return gruppe('Läuft', la, ['Spanne', 'P&amp;L', 'Seit'], 'wdl-tab-lauf')
+      return gruppe('Läuft', nachStart(la), ['Spanne', 'P&amp;L', 'Seit'], 'wdl-tab-lauf')
         + gruppe('Wartet', nachEnde(wa), ['Nachlesung', 'P&amp;L', 'Zu'])
         + gruppe('Geplant', ge, ['TP', '', 'Start'])
-        + gruppe('Beendet', nachEnde(fe), ['Ergebnis', 'P&amp;L', 'Zu'], '', schl)
+        + gruppe('Beendet', nachEnde(fe), ['Ergebnis', 'P&amp;L', 'Zu'], '', 'beendet')
     }
-    const sektion = (name, arr) => `<div class="wdl-sek">${name}${arr.length ? '' : '<span> · keine Trades</span>'}</div>` + (arr.length ? gruppen(arr, name.toLowerCase()) : '')
-    liste.innerHTML = trades.length ? sektion('Orbit', trades.filter(t => !wdlIstEcho(t))) + sektion('Echo', trades.filter(wdlIstEcho))
+    liste.innerHTML = trades.length ? gruppen(trades)
       : `<div class="mwd-leer">${wdl.daten ? 'Keine Trades im Zeitraum.' : (wdl.fehler ? 'Nicht ladbar: ' + escapeHtml(wdl.fehler) : 'Lade Radar…')}</div>`
     try{ if(wdlAktiv() && typeof mklChartZeichnen === 'function') mklChartZeichnen() }catch(_){}
   }
@@ -36233,7 +36235,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.866'
+  const OS_TAB_BUILD = '2026-09-22.867'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
