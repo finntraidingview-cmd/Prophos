@@ -1262,11 +1262,13 @@
      Zeile 1 Master volle Breite, Zeile 2 Instrument | Kontrakte, Zeile 3 TP | SL (kein Loch mehr unter dem Master). */
   /* Größe (24.09.2026, Finn: „Du kannst das Popup mehr in die Größe ziehen, nicht so klein"): nur wenn das
      Formular tp-v2 trägt — das Popup verlässt den .9-Zoom, wird breiter, Felder und Schrift wachsen. */
-  #tradePlanModal:has(.tp-v2) .modal{zoom:1;max-width:760px !important;width:min(760px,96vw) !important;padding:22px 30px 20px}
+  /* Für ALLE Wege (01.10.2026, Finn: „wenn ich Orbit oder Mit Hedge auswähle, wird es kleiner — lass es so groß wie bei allen"):
+     :has(#tp-form-grid) ist immer wahr und schlägt über die ID den .9-Zoom weiter unten; vorher nur :has(.tp-v2). */
+  #tradePlanModal:has(#tp-form-grid) .modal{zoom:1;max-width:760px !important;width:min(760px,96vw) !important;padding:22px 30px 20px}
   #tradePlanModal .tp-v2{gap:14px 18px !important}   /* !important: das Grid trägt gap inline */
-  #tradePlanModal .tp-v2 label{font-size:13.5px}
-  #tradePlanModal .tp-v2 .input,#tradePlanModal .tp-v2 select.input{font-size:15px;padding:10px 12px}
-  #tradePlanModal .tp-v2 .seg button{font-size:13.5px;padding:8px 14px}
+  #tradePlanModal #tp-form-grid label{font-size:13.5px}
+  #tradePlanModal #tp-form-grid .input,#tradePlanModal #tp-form-grid select.input{font-size:15px;padding:10px 12px}
+  #tradePlanModal #tp-form-grid .seg button{font-size:13.5px;padding:8px 14px}
   /* Weg-Gruppen (01.10.2026): kleine Überschrift über jeder Knopfzeile */
   #tradePlanModal .tp-route-gruppe{font-size:11px;color:var(--sub);margin:10px 0 4px}
   #tradePlanModal .field > label + .tp-route-gruppe{margin-top:2px}
@@ -6288,32 +6290,34 @@
                  verlinkten Accounts; bei MT5 ist der Slave fix der Hedge dieses PCs. -->
             <div class="field" style="grid-column:1 / -1">
               <label>Weg</label>
-              <!-- Drei Gruppen (01.10.2026, Finn: „es gibt jetzt drei grobe Wege"): ohne Hedge (V2), mit Hedge neu (V3 =
+              <!-- Reihenfolge seit 01.10.2026 spät (Finn): Mit Hedge · V3 oben, Ohne Hedge Mitte, Mit Hedge · klassisch unten;
+                   „Winning Days Farm" heißt auf dem Knopf „Winning Day", Orbit (Puls) / Duplikum (manuell) beschriftet.
+                   Drei Gruppen (01.10.2026, Finn: „es gibt jetzt drei grobe Wege"): ohne Hedge (V2), mit Hedge neu (V3 =
                    Winning Days Farm + Orbit V3, der neue Weg) und die alten Hedge-Wege. Nur Markup — die Knopf-IDs sind
                    unverändert, die Verdrahtung hängt an den IDs, nicht an den Containern.
                    V2: Echo V2 = Puls im Master-Terminal, Orbit V2 = Puls in TradingView, Topstep V2 = Puls/von Hand. -->
+              <div class="tp-route-gruppe">Mit Hedge · V3</div>
+              <div class="seg" id="tp-route-seg-v3">
+                <!-- Winning Day (24.09.2026 abends): technisch Orbit V2 (route tvv2) + Fusion-Gegenhedge; nur Funded-Futures-Konten.
+                     Umbenannt „Winning Days Farm" (24.09.2026 spät): Gegenhedge als Faktor, beide Schließ-Level in MetaTrader. -->
+                <button type="button" id="tp-route-wd" title="Winning Day: Orbit V2 + Fusion-Gegenhedge (Faktor, TP- und SL-Level in MetaTrader) — Dropdown zeigt nur Funded-Futures-Konten">Winning Day</button>
+                <!-- Orbit V3 (01.10.2026): tvv2 + Fusion-Gegenhedge mit der Farm-Rechnung, jedes Futures-Konto, KEIN Winning Day
+                     (trade_plans.orbit_v3); Userscript im Puls-Chrome schließt, Radar als Backup. -->
+                <button type="button" id="tp-route-o3" title="Orbit V3 — Puls platziert in TradingView, Fusion-Gegenhedge; schließt, sobald das Userscript im Puls-Chrome die Position nicht mehr sieht, Radar (TP/SL) als Backup">Orbit V3</button>
+              </div>
               <div class="tp-route-gruppe">Ohne Hedge</div>
               <div class="seg tp-route-seg-v2" id="tp-route-seg-v2">
                 <button type="button" id="tp-route-mt5v2">Echo V2</button>
                 <button type="button" id="tp-route-tvv2">Orbit V2</button>
                 <button type="button" id="tp-route-tsv2" title="Topstep V2 — Puls platziert in TopstepX (Schalter „Puls für Topstep" unter Admin → Winning Days; aus = von Hand)">Topstep V2</button>
               </div>
-              <div class="tp-route-gruppe">Mit Hedge · V3</div>
-              <div class="seg" id="tp-route-seg-v3">
-                <!-- Winning Day (24.09.2026 abends): technisch Orbit V2 (route tvv2) + Fusion-Gegenhedge; nur Funded-Futures-Konten.
-                     Umbenannt „Winning Days Farm" (24.09.2026 spät): Gegenhedge als Faktor, beide Schließ-Level in MetaTrader. -->
-                <button type="button" id="tp-route-wd" title="Winning Days Farm: Orbit V2 + Fusion-Gegenhedge (Faktor, TP- und SL-Level in MetaTrader) — Dropdown zeigt nur Funded-Futures-Konten">Winning Days Farm</button>
-                <!-- Orbit V3 (01.10.2026): tvv2 + Fusion-Gegenhedge mit der Farm-Rechnung, jedes Futures-Konto, KEIN Winning Day
-                     (trade_plans.orbit_v3); Userscript im Puls-Chrome schließt, Radar als Backup. -->
-                <button type="button" id="tp-route-o3" title="Orbit V3 — Puls platziert in TradingView, Fusion-Gegenhedge; schließt, sobald das Userscript im Puls-Chrome die Position nicht mehr sieht, Radar (TP/SL) als Backup">Orbit V3</button>
-              </div>
               <!-- Alte Wege der Hedge-Ära (Reihenfolge Orbit · Topstep · Echo · Duplikum seit 22.09.2026) -->
               <div class="tp-route-gruppe">Mit Hedge · klassisch</div>
               <div class="seg" id="tp-route-seg" style="opacity:.85">
-                <button type="button" id="tp-route-tvplus">Orbit</button>
+                <button type="button" id="tp-route-tvplus">Orbit (Puls)</button>
                 <button type="button" id="tp-route-topstep">Topstep</button>
                 <button type="button" id="tp-route-mt5">Echo</button>
-                <button type="button" id="tp-route-dup">Duplikum</button>
+                <button type="button" id="tp-route-dup">Duplikum (manuell)</button>
               </div>
             </div>
             <div class="field" id="tp-master-row">
@@ -11185,7 +11189,7 @@
       if(wc){
         wc.hidden = !an
         wc.textContent = hedgeAn ? 'Orbit V2 · Fusion-Gegenhedge' : 'Orbit V2 · ohne Hedge'
-        wc.title = hedgeAn ? 'Winning Days Farm: Puls platziert, der PC öffnet die Fusion-Gegenorder — beide Schließ-Level in MetaTrader'
+        wc.title = hedgeAn ? 'Winning Day: Puls platziert, der PC öffnet die Fusion-Gegenorder — beide Schließ-Level in MetaTrader'
                            : 'Neue Ära: Pläne laufen über Orbit V2 — Puls platziert, kein Slave, kein Duplikum'
       }
     }
@@ -33759,7 +33763,7 @@
               ? `<i class="tc2-arrow">→</i><span class="tc2-name" title="${escapeHtml(slaveName)}">${escapeHtml(slaveName)}</span>`
               : (p.route === 'tvv2' && p.hedgeEur > 0)
                 // Winning Days Farm (25.09.2026, Design-Rundgang): „ohne Hedge" stand direkt neben „Fusion-Gegenhedge"
-                ? `<span class="tc2-chip" title="Winning Days Farm: Fusion-Gegenhedge, beide Schließ-Level in MetaTrader" style="background:rgba(124,58,237,.10);color:#6D28D9">Fusion-Hedge</span>`
+                ? `<span class="tc2-chip" title="Winning Day: Fusion-Gegenhedge, beide Schließ-Level in MetaTrader" style="background:rgba(124,58,237,.10);color:#6D28D9">Fusion-Hedge</span>`
                 : `<span class="tc2-chip" title="V2-Weg: kein Slave, nichts wird kopiert" style="opacity:.75">ohne Hedge</span>`}
             ${(p.route === 'tsv2' && (p.status === 'open' || p.status === 'review') && p.mt5Baseline && p.mt5Baseline.tv && p.mt5Baseline.tv.warnung)
               ? `<span class="tc2-chip" style="background:rgba(245,158,11,.12);color:#B45309" title="${escapeHtml(String(p.mt5Baseline.tv.warnung))}">⚠ Brackets in TopstepX prüfen</span>`
@@ -41903,7 +41907,7 @@
         if(k && k.lauf && k.lauf !== (_tpDir === 'sell' ? 'short' : 'long')){ msg(k.text + ' — nicht gespeichert (Richtungs-Schutz).', 'err'); return }
       }
       if(_tpWd || _tpO3){
-        if(!masterTp){ msg(`${_tpO3 ? 'Orbit V3' : 'Winning Days Farm'} braucht einen Take Profit in $ (die Fusion-Gegenposition schließt an dieser Distanz).`, 'err'); return }
+        if(!masterTp){ msg(`${_tpO3 ? 'Orbit V3' : 'Winning Day'} braucht einen Take Profit in $ (die Fusion-Gegenposition schließt an dieser Distanz).`, 'err'); return }
         if(!(mult > 0)){ msg('Multiplikator nicht rechenbar — Risiko Master ($), Kontrakte und Risiko Slave (€) prüfen.', 'err'); return }
         // Multiplikator-Logik wie bisher (Finn 24.09.2026 spät): hedge_faktor = Multiplikator (Chip/Bearbeiten), hedge_eur =
         // Lots × 0,85 × TP-Punkte = Fusion-Verlust am Master-TP (die Bedeutung, die Copier-Lots und Farmer-Abgleich kennen)
