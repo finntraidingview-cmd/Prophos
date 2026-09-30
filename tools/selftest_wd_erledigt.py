@@ -22,7 +22,7 @@ def lade():
         i = src.index(f"def {name}(")
         return src[i:src.find("\n\n\n", i)]
 
-    exec("\n".join(['WD_HEDGE_LOGIN = "488579"'] + [block(n) for n in (
+    exec("\n".join(['WD_HEDGE_LOGIN = "488579"', 'WD_ERLEDIGT_ROUTEN = ("tvv2", "mt5v2", "tsv2")'] + [block(n) for n in (
         "_wd_ende_upd", "_wd_hedge_schluessel", "_wd_hedge_konto", "_wd_zahl", "_wd_erledigt_upd", "_wd_hedge_buchung")]), ns)
     return ns
 
@@ -53,8 +53,15 @@ def main():
     u, e = a["_wd_erledigt_upd"](fertig, 260.0, -5.0, T, D)
     check(e is None and "completed_at" not in u and u["master_pl"] == 260.0, "Korrektur auf completed: completed_at bleibt, Werte neu")
     check(a["_wd_erledigt_upd"](dict(offen, status="planned"), 1, 1, T, D)[1] == (409, "nicht offen")
-          and a["_wd_erledigt_upd"](dict(offen, route="mt5v2"), 1, 1, T, D)[1] == (409, "nicht offen")
+          and a["_wd_erledigt_upd"](dict(offen, route="dup"), 1, 1, T, D)[1] == (409, "nicht offen")
           and a["_wd_erledigt_upd"](None, 1, 1, T, D)[1][0] == 404, "planned / falsche Route → 409, kein Plan → 404")
+    # 30.09.2026: Echo V2 und Topstep V2 abhakbar (Radar, auch fremde IDs) — ohne Fusion-P&L, ohne Baseline-Umbau
+    for rt in ("mt5v2", "tsv2"):
+        u, e = a["_wd_erledigt_upd"](dict(offen, route=rt, status="review", mt5_baseline={"tv": {"puls": "tsx"}}), -1692.4, None, T, D)
+        check(e is None and u["status"] == "completed" and u["master_pl"] == -1692.4 and u["slave_pl"] is None and "mt5_baseline" not in u,
+              f"{rt}: erledigt ohne Fusion, Baseline unberührt")
+        check(a["_wd_erledigt_upd"](dict(offen, route=rt), 100, -5, T, D)[1] == (400, "Fusion-P&L gibt es nur bei Orbit V2 / Winning Days"),
+              f"{rt}: Fusion-P&L → 400 (keine falsche wd_hedge-Buchung)")
     check(a["_wd_zahl"]("−4,20".replace("−", "-")) == -4.2 and a["_wd_zahl"](True) is None and a["_wd_zahl"]("x") is None
           and a["_wd_zahl"](250) == 250.0, "Zahl: Komma, bool/Text keine Zahl")
 

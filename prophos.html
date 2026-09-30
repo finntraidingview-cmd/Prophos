@@ -2296,6 +2296,8 @@
   #dashboard-view .mwd-abh-erl-zeile .mono{margin-left:auto}
   #dashboard-view .mwd-erl-kopf{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;font-size:12.5px;padding-bottom:12px;margin-bottom:14px;border-bottom:1px solid var(--border-soft)}
   #dashboard-view .mwd-erl-felder{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start}
+  #dashboard-view .mwd-erl-felder .field[hidden]{display:none}   /* Echo/Topstep ohne Fusion-Feld (30.09.2026) */
+  #dashboard-view .mwd-erl-felder:has(.field[hidden]){grid-template-columns:1fr}
   #dashboard-view .mwd-erl-felder .field{margin:0}
   #dashboard-view .mwd-erl-felder label{white-space:nowrap}
   #dashboard-view .mwd-erl-hilfe{font-size:11px;color:var(--sub-2);margin-top:4px;line-height:1.35}
@@ -18190,7 +18192,14 @@
   // (mt5_baseline.tv.puls 'tsx') — von Hand gestartete tsv2-Pläne bleiben Handarbeit.
   function planIstPuls(p){ return !!p && (p.route === 'tvv2' || (p.route === 'tsv2' && !!(p.mt5Baseline && p.mt5Baseline.tv && p.mt5Baseline.tv.puls === 'tsx'))) }
   // Panel-Route: TopstepX (tsx-*) für Topstep V2 bzw. Firma Topstep, sonst TradingView (tv-*)
-  const pulsApiName = (plan, art) => ((plan && (plan.route === 'tsv2' || /topstep/i.test(String(plan.masterFirm || '')))) ? 'tsx-' : 'tv-') + art
+  // Die ROUTE entscheidet (30.09.2026, Topstep-Paket Etappe S): tsv2 → tsx-*, tvv2 → tv-*. Vorher reichte die Firma „Topstep" —
+  // ein Orbit-V2-Plan (tvv2) auf einem Topstep-Konto lief beim Schließen/Nachlesen in tsx-close/tsx-lesen, obwohl er in TradingView
+  // platziert war. Nur der routenlose Balance-Pseudo-Plan (tvKontoBalanceJetzt: {masterAccountId, masterFirm}) geht noch nach der Firma.
+  const pulsApiName = (plan, art) => {
+    const r = plan && plan.route
+    const tsx = r ? r === 'tsv2' : !!(plan && /topstep/i.test(String(plan.masterFirm || '')))
+    return (tsx ? 'tsx-' : 'tv-') + art
+  }
   const pulsPlattform = plan => (plan && plan.route === 'tsv2') ? 'TopstepX' : 'TradingView'
   // Orbit-Weg (Puls platziert): tvplus, tvv2 und — solange der Schalter nicht 'aus' steht — tsv2
   function routeIstOrbit(r){ return r === 'tvplus' || r === 'tvv2' || (r === 'tsv2' && tsPulsModus() !== 'aus') }   // Puls in TradingView bzw. TopstepX
@@ -19644,7 +19653,7 @@
     let r = null
     for(let v = 1; v <= 4; v++){
       r = await window.mtcApi(_api, { method:'POST', headers:{ 'Content-Type':'application/json' },   // tsx-lesen für Topstep (F23)
-        timeoutMs: _api === 'tsx-lesen' ? 120000 : undefined,   // F25: TopstepX wartet bis 20 s auf die Seite + Wachhund 100/110 s — 20 s Standard war zu kurz
+        timeoutMs: _api === 'tsx-lesen' ? 175000 : undefined,   // F25: TopstepX wartet bis 20 s auf die Seite + Wachhund 100/110 s; seit 30.09.2026 175 s > Panel-Zeit 150 s (vorher 120 s = Abbruch VOR dem Panel)
         body: _body })
       const netz = !!(r && r._httpFail && /^TypeError\b/.test(String(r.error || '')))
       if(!netz || v === 4) break
@@ -19902,7 +19911,7 @@
     }
     tvV2Poll.busy = true
     try{
-      const r = await window.mtcApi('tsx-inventar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}', timeoutMs: 150000 })   // F25: 150 s
+      const r = await window.mtcApi('tsx-inventar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}', timeoutMs: 175000 })   // F25: 150 s; seit 30.09.2026 175 s > Panel-Zeit 150 s
       if(!r || r.copier_offline) return { ok: false, msg: 'Copier-Backend am PC nicht erreichbar' + (r && r.error ? ' (' + String(r.error).slice(0, 80) + ')' : '') }
       if(r._httpFail) return { ok: false, msg: 'Panel kennt /api/tsx-inventar noch nicht' + (r.error ? ' (' + String(r.error).slice(0, 80) + ')' : '') }
       const inv = {}; for(const [k, v] of Object.entries(r.inventar || {})) inv[k] = Array.isArray(v) ? v.slice(0, 200) : v
@@ -24179,7 +24188,7 @@
    * Buchung auf 'wd_hedge' um); fremder Plan → kompaktes Popup mwdErledigtModal → PATCH /admin/wd-plaene {aktion:'erledigt',
    * plan_id, master_pl, slave_pl} (Backend .541, geht aus open und review; auf completed = Korrektur). Fusion vorbelegt mit hedge.pl
    * aus der Deal-Historie. */
-  let _mwdErlId = null, _mwdErlKonto = ''
+  let _mwdErlId = null, _mwdErlKonto = '', _mwdErlOhneHedge = false
   function mklWdErledigtOeffnen(pid, extra){
     const pw = Object.assign({}, (mkl.wd.plaene || []).find(x => String(x.id) === String(pid)) || {}, extra || {})
     const hPl = (pw.hedge && pw.hedge.pl != null && isFinite(Number(pw.hedge.pl))) ? Number(pw.hedge.pl) : null
@@ -24194,12 +24203,23 @@
       info.innerHTML = `<span class="mwd-person">${escapeHtml(String(pw.person || '?'))}</span>`
         + `<span class="mwd-konto">${escapeHtml(String(k.firma || '?'))}${k.groesse ? ' ' + escapeHtml(String(k.groesse)) : ''}${k.kontonr_ende ? ` <span class="mono">…${escapeHtml(String(k.kontonr_ende))}</span>` : ''}</span>`
         + ((buy || sell) ? `<span class="mwd-chip ${buy ? 'mwd-buy' : 'mwd-sell'}">${buy ? 'BUY' : 'SELL'}</span>` : '')
-        + (pw.kt != null ? `<span class="mwd-kt mono">${f0(pw.kt)} × ${escapeHtml(String(pw.symbol_root || '?'))}</span>` : '')
+        + ((pw.route === 'mt5v2' && pw.lots != null) ? `<span class="mwd-kt mono">${Number(pw.lots).toLocaleString('de-DE', { maximumFractionDigits: 2 })} Lot ${escapeHtml(String(pw.symbol || ''))}</span>`
+           : pw.kt != null ? `<span class="mwd-kt mono">${f0(pw.kt)} × ${escapeHtml(String(pw.symbol_root || '?'))}</span>` : '')
         + (pw.master_tp != null ? `<span class="mwd-chip">TP ${f0(pw.master_tp)} $</span>` : '')
         + (pw.master_sl != null ? `<span class="mwd-chip">SL ${f0(pw.master_sl)} $</span>` : '')
     }
-    const m = document.getElementById('mwd-erl-master'); if(m) m.value = (pw.master_pl && pw.master_pl.wert != null) ? String(pw.master_pl.wert) : ''
-    const f = document.getElementById('mwd-erl-fusion'); if(f) f.value = hPl != null ? String(hPl) : ''
+    // Echo V2 / Topstep V2 (30.09.2026, Abhaken im Radar auch für fremde IDs): kein Fusion-Hedge → Feld weg, slave_pl null;
+    // P&L in $ vorbelegt: Balance nachher − vorher (pl_balance), sonst der P&L am Plan (master_pl.wert)
+    _mwdErlOhneHedge = pw.route === 'mt5v2' || pw.route === 'tsv2' || pw.plattform === 'echo'
+    const plVor = (pw.pl_balance != null && isFinite(Number(pw.pl_balance))) ? Number(pw.pl_balance)
+      : (pw.master_pl && pw.master_pl.wert != null && isFinite(Number(pw.master_pl.wert))) ? Number(pw.master_pl.wert) : null
+    const m = document.getElementById('mwd-erl-master'); if(m) m.value = plVor != null ? String(plVor) : ''
+    const mHilfe = m && m.closest('.field') && m.closest('.field').querySelector('.mwd-erl-hilfe')
+    if(mHilfe) mHilfe.textContent = pw.route === 'mt5v2' ? (pw.pl_balance != null ? 'MT5-Balance nachher − vorher' : 'aus MetaTrader eintragen')
+      : pw.route === 'tsv2' ? (pw.pl_balance != null ? 'Balance nachher − vorher' : 'aus TopstepX eintragen')
+      : pw.pl_balance != null ? 'Balance nachher − vorher' : 'aus TradingView eintragen'
+    const f = document.getElementById('mwd-erl-fusion'); if(f) f.value = (!_mwdErlOhneHedge && hPl != null) ? String(hPl) : ''
+    const fFeld = f && f.closest('.field'); if(fFeld) fFeld.hidden = _mwdErlOhneHedge
     const q = document.getElementById('mwd-erl-quelle'); if(q) q.textContent = hPl != null ? 'aus MetaTrader' : 'im Hedge-Terminal nachsehen'
     _mwdErlKonto = (pw.hedge && pw.hedge.hedge_login) ? `das Fusion-Konto ${pw.hedge.hedge_login}` : 'das Fusion-Konto des PCs'
     mklWdErlSumme()
@@ -24210,6 +24230,7 @@
   // Ergebniszeile, rechnet beim Tippen mit: zusammen ≈ Master × FX + Fusion (FX wie überall: window._fxUsdEur, sonst 0,85)
   function mklWdErlSumme(){
     const el = document.getElementById('mwd-erl-summe'); if(!el) return
+    if(_mwdErlOhneHedge){ el.innerHTML = '<span class="mwd-erl-buchung">P&amp;L in $ — ohne Fusion-Buchung</span>'; return }   // Echo/Topstep
     const zahl = id => { const v = String(document.getElementById(id)?.value || '').trim().replace(',', '.').replace('−', '-'); return v === '' ? null : Number(v) }
     const mpl = zahl('mwd-erl-master'), spl = zahl('mwd-erl-fusion')
     const fx = (Number(window._fxUsdEur) > 0) ? Number(window._fxUsdEur) : 0.85
@@ -24226,7 +24247,7 @@
     const msg = document.getElementById('mwdErledigtMsg'), btn = document.getElementById('mwdErledigtSave')
     const say = (t, k) => { if(msg){ msg.textContent = t; msg.className = 'modal-msg' + (k ? ' ' + k : '') } }
     const zahl = id => { const v = String(document.getElementById(id)?.value || '').trim().replace(',', '.').replace('−', '-'); return v === '' ? null : Number(v) }
-    const mpl = zahl('mwd-erl-master'), spl = zahl('mwd-erl-fusion')
+    const mpl = zahl('mwd-erl-master'), spl = _mwdErlOhneHedge ? null : zahl('mwd-erl-fusion')   // Echo/Topstep: nie slave_pl
     if(mpl == null || !isFinite(mpl)) return say('Master-P&L eintragen ($).', 'err')
     if(spl != null && !isFinite(spl)) return say('Fusion-P&L ist keine Zahl.', 'err')
     if(btn) btn.disabled = true; say('')
@@ -24531,17 +24552,21 @@
   }
   setInterval(wdlLiveTick, 2000)
   // Sperren der Radar-Knöpfe (30.09.2026): nur anbieten, was der vorhandene Weg auch kann. Fremde Pläne gehen über
-  // /admin/wd-plaene, und das Backend nimmt dort nur Orbit V2 (tvv2) an; eigene laufen lokal über tradePlans (jede Route).
+  // /admin/wd-plaene — seit TSX-S-B (30.09.2026 nachts) nimmt das Backend „erledigt" für Orbit V2, Echo V2 und Topstep V2 an,
+  // „endlesung" für Orbit V2 und von Puls gestartete Topstep-V2-Pläne (Handpläne lehnt es ehrlich ab). Echo hat keinen
+  // Lese-Weg über Puls (P&L aus der MT5-Balance). Eigene laufen lokal über tradePlans (jede Route).
   function wdlLesenSperre(t){
     const pid = wdlTid(t), eigen = mklWdEigenerPlan(pid)
     const amPc = !!(MT5_LOCAL && eigen && typeof tvV2EndlesungPcPasst === 'function' && tvV2EndlesungPcPasst(eigen))
-    if(!amPc && t.route !== 'tvv2') return 'Nachlesen per Signal gibt es nur für Orbit V2 — am PC des Plans lesen'
+    if(!amPc && t.route === 'mt5v2') return 'Echo liest den P&L selbst aus der MT5-Balance — kein Nachlesen über Puls'
+    if(!amPc && t.route !== 'tvv2' && t.route !== 'tsv2') return 'Nachlesen per Signal gibt es nur für Orbit V2 und Topstep V2 — am PC des Plans lesen'
     try{ const g = window._tvV2Endlesung && window._tvV2Endlesung.grund; if(eigen && typeof g === 'function') return String(g(eigen, Date.now(), true) || '') }catch(_){}
     return ''
   }
   function wdlAbhakenSperre(t){
-    if(mklWdEigenerPlan(wdlTid(t)) || t.route === 'tvv2') return ''
-    return (wdlIstEcho(t) ? 'Echo' : 'Topstep') + ' einer anderen ID — im Trades-Reiter dieser ID abhaken'
+    // seit 30.09.2026 (Finn wollte einen Echo-Trade von Mike abhaken, Knopf war gesperrt): Orbit/Echo/Topstep V2 aller IDs
+    if(mklWdEigenerPlan(wdlTid(t)) || ['tvv2', 'mt5v2', 'tsv2'].includes(t.route)) return ''
+    return 'Dieser Weg lässt sich hier nicht abhaken — im Trades-Reiter der ID erledigen'
   }
   function wdlRender(){
     const kopf = document.getElementById('wdl-kopf'), liste = document.getElementById('wdl-liste'); if(!kopf || !liste) return
@@ -33241,7 +33266,10 @@
       const vorcheckChip = (_vc && _vc.status === 'slave_nicht_bereit') ? `<span class="rsq-card-run" style="color:var(--danger)" title="${escapeHtml(String(_vc.grund || ''))}">⚠ Slave-Terminal nicht bereit · seit ${tpStartUmText(_vc.seit)} · ${Number(_vc.versuche) || 1} Versuche</span>`
         : (_vc && _vc.status === 'verpasst_slave') ? `<span class="rsq-card-run" style="color:var(--danger)" title="${escapeHtml(String(_vc.grund || ''))}">✗ nicht gestartet — Slave-Terminal war nicht bereit</span>` : ''
       const startUmBtn = (p.startUm && !p.startUmGestartetAt)
-        ? vorcheckChip + `<button class="btn btn-ghost tc2-btn rsq-card-wait" data-plan-start-um-x="${p.id}" title="Der PC-Tab startet zu dieser Zeit von selbst (Duplikum-Check → Puls). Klick nimmt die Startzeit wieder raus.">⏰ ${tpStartUmText(p.startUm)} ✕</button>`
+        ? vorcheckChip + (p.route === 'tsv2'
+          // Topstep V2: bis Etappe K4 kein automatischer Start (30.09.2026) — die Zeit ist nur Erinnerung, „Starten" von Hand bleibt
+          ? `<button class="btn btn-ghost tc2-btn rsq-card-wait" data-plan-start-um-x="${p.id}" title="Topstep V2 startet bis Etappe K4 NICHT von selbst — die Zeit ist nur eine Erinnerung. Klick nimmt sie raus.">⏰ ${tpStartUmText(p.startUm)} · von Hand ✕</button> ${orbitBtn}`
+          : `<button class="btn btn-ghost tc2-btn rsq-card-wait" data-plan-start-um-x="${p.id}" title="Der PC-Tab startet zu dieser Zeit von selbst (Duplikum-Check → Puls). Klick nimmt die Startzeit wieder raus.">⏰ ${tpStartUmText(p.startUm)} ✕</button>`)
         : vorcheckChip && _vc.status === 'verpasst_slave' ? vorcheckChip + neuBtn
         : (p.startUm && p.startUmGestartetAt && gestVor < 15 * 60 * 1000 && !wartetDup && !qs)
           ? `<span class="rsq-card-run" title="Der PC-Tab hat die geplante Startzeit ausgelöst — kommt binnen 2 min nichts zurück, erscheint „Neu starten"">⏰ gestartet ${tpStartUmText(p.startUmGestartetAt)}</span>${neuBtn}`
@@ -36389,7 +36417,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.874'
+  const OS_TAB_BUILD = '2026-09-22.875'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -36635,7 +36663,7 @@
         _pfSet('ob-order', 'err', escapeHtml(text))
         pfEnde(false, /^✗ von TopstepX abgelehnt/.test(text) ? '✗ Von TopstepX abgelehnt — Plan bleibt Geplant.'
           : /^⚠ Order geklickt, keine Position/.test(text) ? '⚠ Order geklickt, keine Position — erst in TopstepX unter Orders nachsehen. Plan bleibt Geplant.'
-          : /UNKLAR/.test(text) ? '⚠ Ergebnis UNKLAR — erst in TradingView nachsehen, NICHT blind erneut starten.' : '✗ Nichts platziert — Meldung oben.')
+          : /UNKLAR/.test(text) ? `⚠ Ergebnis UNKLAR — erst in ${pulsPlattform(plan)} nachsehen, NICHT blind erneut starten.` : '✗ Nichts platziert — Meldung oben.')
         return
       }
       await openTpOrderModal(planId)
@@ -36817,9 +36845,24 @@
         if(imPopup) _pfSet('ob-order', 'warn', `⏳ Puls ist gerade beschäftigt (Rundgang/Schließen in TradingView) — die Order wartet, neuer Versuch gleich… (${sek}s)`)
         await new Promise(res => setTimeout(res, 8000 + Math.random() * 6000))
       }
-      if(plan.route === 'tsv2' && r && (r._httpFail || r.copier_offline) && !r.gesendet){
-        await fehler('Der Order-Weg für TopstepX kommt mit Etappe 2 (Panel kennt /api/tsx-konto noch nicht) — nichts gesendet. Bis dahin „Puls für Topstep" auf „nur lesen" lassen.', r)
-        return
+      // „nichts gesendet" NUR, wenn es beweisbar ist (30.09.2026, Topstep-Paket S — vorher meldete jeder Proxy-502/Zeitabbruch
+      // „nichts gesendet, bleibt Geplant", während der Bot unter dem Lock weiterklickte; ein neuer Start hätte doppelt platziert):
+      //  · fetch warf (TypeError, Backend weg) oder das Panel kennt die Route nicht (404 vor jedem Klick) → nichts gesendet
+      //  · Proxy-502 / Zeitlimit / kein JSON → UNKLAR: Plan bleibt, NICHT erneut starten, erst in TopstepX nachsehen
+      if(plan.route === 'tsv2' && r && !r.ok && !r.gesendet){
+        if(r._nichtGesendet){
+          await fehler('Lokales Backend nicht erreichbar (' + String(r.error || '').slice(0, 80) + ') — nichts gesendet, Plan bleibt Geplant.', r)
+          return
+        }
+        if(!r._httpFail && /^not found$/i.test(String(r.error || ''))){
+          await fehler('Das Panel an diesem PC kennt /api/tsx-konto noch nicht — nichts gesendet, Plan bleibt Geplant.', r)
+          return
+        }
+        if(r._httpFail || r.copier_offline){
+          await fehler('⚠ Ergebnis UNKLAR — keine Antwort von Puls (' + String(r.error || 'Proxy/Zeitlimit').slice(0, 80) + '). Puls kann trotzdem geklickt haben: erst in TopstepX nachsehen, NICHT erneut starten.',
+            Object.assign({}, r, { retry_ok: false }))
+          return
+        }
       }
       // SPUR IN DIE DB, auch fuer lokale Laeufe (22.09.2026 13:5x): ein Klick direkt am PC
       // schrieb bisher keine Signal-Zeile — bei Erfolg blieb nur ein Toast, die Spur war weg,
@@ -37810,13 +37853,21 @@
           await new Promise(res => setTimeout(res, 8000 + Math.random() * 6000))
         }
       }catch(e){
-        return { ok:false, unklar:true, retry:false, msg:'tv-close gestört: ' + String(e && e.message || e) + ' — in TradingView prüfen, ob die Position noch offen ist.' }
+        return { ok:false, unklar:true, retry:false, msg: pulsApiName(plan, 'close') + ' gestört: ' + String(e && e.message || e) + ` — in ${pulsPlattform(plan)} prüfen, ob die Position noch offen ist.` }
       }finally{ try{ if(riegel) _tpOrbitLaeuft = false }catch(_){} }
-      if(!r || r._httpFail || r.copier_offline) return { ok:false, retry:true, code:'tv_close_fehlt', msg:'Das Panel am PC kennt /api/tv-close noch nicht (Panel zu alt?) — in TradingView von Hand schließen.' }
+      // Meldungen nach der Plattform des Plans (30.09.2026, Topstep-Paket S — vorher stand bei Topstep fest „TradingView").
+      // tsx-close gibt es im Panel erst mit Etappe K5: heute antwortet es 404 {ok:false, msg:"Instanz '' unbekannt"} bzw. „not found" —
+      // das ist beweisbar nichts geklickt. Sobald das Panel die Route kennt, läuft dieser Weg ohne Änderung hier.
+      const _plf = pulsPlattform(plan)
+      if(plan.route === 'tsv2' && r && !r.ok && (/^not found$/i.test(String(r.error || '')) || /Instanz\s*''\s*unbekannt/i.test(String(r.msg || r.error || ''))))
+        return { ok:false, retry:false, code:'tsx_close_fehlt', msg:'Schließen in TopstepX kommt mit Etappe K5 — bitte in TopstepX von Hand schließen.' }
+      if(!r || r._nichtGesendet) return { ok:false, retry:true, code:'backend_weg', msg:`Lokales Backend nicht erreichbar — nichts geschlossen. In ${_plf} von Hand schließen oder gleich erneut versuchen.` }
+      if(r._httpFail || r.copier_offline) return { ok:false, unklar:true, retry:false, code:'close_unklar',
+        msg:`Keine Antwort von Puls (${String(r.error || 'Proxy/Zeitlimit').slice(0, 60)}) — in ${_plf} nachsehen, ob die Position noch offen ist.` }
       const danach = Array.isArray(r.positionen_danach) ? r.positionen_danach : null
       const nochOffen = danach ? danach.some(x => x && tvSymbolPasst(x.symbol, symbol)) : null
       if(r.ok || r.code === 'schon_flach'){
-        if(nochOffen === true) return { ok:false, unklar:true, retry:false, msg:'Puls meldet ok, aber die Position steht noch im Konto — in TradingView nachsehen.' }
+        if(nochOffen === true) return { ok:false, unklar:true, retry:false, msg:`Puls meldet ok, aber die Position steht noch im Konto — in ${_plf} nachsehen.` }
         const todayPnl = (typeof r.today_pnl === 'number' && isFinite(r.today_pnl)) ? r.today_pnl : null
         // End-Balance aus derselben Schließen-Antwort (29.09.2026, neuer Puls über das Puls-Chrome: liest nach dem Flach-Beweis die
         // Account summary) → final.balance_end; _autoPnlTvV2Gelesen rechnet dann Balance nachher − vorher (tagesunabhängig, auch wenn
@@ -39289,7 +39340,8 @@
     const out = []
     for(const p of pulsPlaene(jetzt)){
       if(!p) continue
-      if(p.status === 'planned' && p.startUm && !p.startUmGestartetAt && (routeIstOrbit(p.route) || routeIstEcho(p.route)) && (scharf || !tpIstFarmerPlan(p))){
+      if(p.status === 'planned' && p.startUm && !p.startUmGestartetAt && (routeIstOrbit(p.route) || routeIstEcho(p.route)) && (scharf || !tpIstFarmerPlan(p))
+         && p.route !== 'tsv2'){   // Topstep V2 startet bis K4 nicht von selbst (30.09.2026) — kein angekündigter Start in der Pille
         const t = Date.parse(p.startUm) || 0
         if(t && jetzt - t <= pulsStartFenster(p)) out.push({ t, art: 'Start', plan: p })
         continue
@@ -39540,6 +39592,9 @@
     const scharf = await tpFarmerScharf()
     const faellig = (_tp || []).filter(p => p && p.status === 'planned' && p.startUm && !p.startUmGestartetAt
       && new Date(p.startUm).getTime() <= now && (routeIstOrbit(p.route) || routeIstEcho(p.route)) && (scharf || !tpIstFarmerPlan(p))
+      // Topstep V2 startet NICHT von selbst, bis Etappe K4 (scharf über CDP) grün ist (30.09.2026, Topstep-Paket, Plan v2) —
+      // der Plan bleibt mit seiner Startzeit stehen, Starten nur von Hand
+      && p.route !== 'tsv2'
       && !((_vorcheckNaechst.get(String(p.id)) || 0) > now))   // Slave-Vorprüfung: wartender Plan erst nach seinem Jitter wieder
     if(!faellig.length) return
     const plan = faellig.sort((a, b) => new Date(a.startUm) - new Date(b.startUm))[0]
@@ -49721,7 +49776,9 @@
   // Antwort nie kommt, für immer; _fleetPushBusy bleibt gesetzt, kein Push, keine lokalen Chips. Kurze Wege
   // 20 s, die langen Bot-Wege (tv-lesen/-close/-konto/-order, master-close) 320 s (> Proxy 310 s in app.py).
   async function mtcApi(path, opts){
-    const lang = /^(tv-lesen|tv-close|tv-konto|tv-order|master-close|order|tv-fokus|tsx-konto|tsx-close)/.test(String(path))   // tsx-* (F23/F25): Order/Schließen in TopstepX lang   // lokal: kein TDZ bei frühen Ticks
+    // tsx-lesen / tsx-inventar seit 30.09.2026 (Topstep-Paket S): das Panel wartet 150 s, der Proxy seit heute 310 s — 20 s Standard
+    // hätte eine laufende Lesung als „offline" gemeldet
+    const lang = /^(tv-lesen|tv-close|tv-konto|tv-order|master-close|order|tv-fokus|tsx-konto|tsx-close|tsx-lesen|tsx-inventar)/.test(String(path))   // tsx-* (F23/F25): Order/Schließen in TopstepX lang   // lokal: kein TDZ bei frühen Ticks
     const ctrl = new AbortController()
     const ms = (opts && opts.timeoutMs) || (lang ? 320000 : 20000)
     const tm = setTimeout(() => { try{ ctrl.abort() }catch(_){} }, ms)
@@ -49733,7 +49790,11 @@
                  error: r.ok ? 'Backend-Antwort ist kein JSON (falsche/alte Version?)' : `HTTP ${r.status}` }
       }
       return j
-    } catch(e){ return { ok:false, copier_offline:true, _httpFail:true, error: (e && e.name === 'AbortError') ? `Zeitlimit ${Math.round(ms / 1000)} s` : String(e) } }
+    // _nichtGesendet NUR, wenn fetch selbst wirft (TypeError: lokales Backend weg) — dann hat beweisbar niemand geklickt.
+    // Zeitlimit (_zeitlimit) oder Proxy-502 sagen darüber NICHTS: der Bot kann weiterklicken (30.09.2026, Topstep-Paket S).
+    } catch(e){ const abb = !!(e && e.name === 'AbortError')
+      return { ok:false, copier_offline:true, _httpFail:true, _zeitlimit: abb, _nichtGesendet: !abb && !!(e && e.name === 'TypeError'),
+               error: abb ? `Zeitlimit ${Math.round(ms / 1000)} s` : String(e) } }
     finally{ clearTimeout(tm) }
   }
 

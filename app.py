@@ -494,7 +494,12 @@ def copier_proxy(path):
         # brach der Proxy ab, während der Bot weiterklickte (PC-Agent-Befund).
         # hedge-solo (24.09.2026, Winning-Day-Gegenhedge): das Panel wartet bis 14 s auf die
         # Quittung des Copiers — 25 s waeren knapp, ein Proxy-Abbruch saehe wie „nicht gesendet" aus.
-        _tmo = (310 if path in ("master-order", "master-close", "tv-order", "tv-lesen", "tv-close")
+        # tsx-konto / tsx-lesen / tsx-inventar / tsx-close (30.09.2026, Topstep-Paket Etappe S): das Panel gibt dem Bot 170 s
+        # (tsx-konto) bzw. 150 s — mit den 25 s von bisher brach der Proxy ab, während der Bot unter TV_ORDER_LOCK
+        # weiterklickte (order_signale 99e6087a, 27.09. ReadTimeout). Das Frontend meldete „nichts gesendet", ein
+        # erneuter Start hätte ein zweites Mal platziert: derselbe Doppel-Order-Pfad wie master-order.
+        _tmo = (310 if path in ("master-order", "master-close", "tv-order", "tv-lesen", "tv-close",
+                                "tsx-konto", "tsx-lesen", "tsx-inventar", "tsx-close")
                 else 270 if path == "tv-konto" else 40 if path == "hedge-solo" else 25)
         r = requests.request(
             request.method, f"{COPIER_PANEL}/api/{path}",
@@ -7222,8 +7227,18 @@ def _wd_endlesung_signal(plan):
     Handelstag und PC prueft der PC-Tab selbst (tvV2EndlesungGrund/PcPasst) und meldet den Grund im Ergebnis."""
     if not plan:
         return None, (404, "Plan nicht gefunden")
-    if plan.get("route") != "tvv2":
-        return None, (409, "Kein Orbit-V2-/Winning-Day-Plan")
+    route = plan.get("route")
+    # 30.09.2026: Topstep V2 auch — aber NUR Pläne, die Puls in TopstepX gestartet hat (mt5_baseline.tv.puls == 'tsx');
+    # Handpläne liest niemand automatisch. Echo V2 hat keinen Lese-Weg über Puls: sein P&L kommt aus der MT5-Balance.
+    if route == "mt5v2":
+        return None, (409, "Echo liest den P&L selbst aus der MT5-Balance — kein Nachlesen über Puls")
+    if route == "tsv2":
+        _b = plan.get("mt5_baseline") if isinstance(plan.get("mt5_baseline"), dict) else {}
+        _tv = _b.get("tv") if isinstance(_b.get("tv"), dict) else {}
+        if _tv.get("puls") != "tsx":
+            return None, (409, "Topstep-Handplan — kein automatisches Nachlesen (nur von Puls gestartete Pläne)")
+    elif route != "tvv2":
+        return None, (409, "Kein Orbit-V2-/Winning-Day-/Topstep-V2-Plan")
     if plan.get("status") == "open":
         # Knopf „Beendet“ (28.09.2026): laufender Plan → der PC prüft erst in TradingView (tvV2BeendetPruefen), offen = nichts
         uid = str(plan.get("user_id") or "")
@@ -8033,17 +8048,25 @@ def _wd_zahl(v):
         return None
 
 
+WD_ERLEDIGT_ROUTEN = ("tvv2", "mt5v2", "tsv2")   # 30.09.2026: Abhaken im Radar für Orbit, Echo und Topstep V2
+
+
 def _wd_erledigt_upd(plan, master_pl, slave_pl, jetzt_iso, datum):
     """REIN RECHNEND (testbar): Update für „Winning Day erledigt" (Abschluss-Popup vom Mac, 25.09.2026).
-    Nur route 'tvv2' und status open/review (completed = Korrektur, idempotent: completed_at bleibt).
-    Setzt master_pl ($), slave_pl (€ | null), status 'completed', completed_at; ended_at, falls leer;
-    mt5_baseline.final wie bei 'ende', falls noch keins (Beenden und Erledigen in einem Schritt).
+    Route 'tvv2', seit 30.09.2026 auch 'mt5v2' (Echo V2) und 'tsv2' (Topstep V2) — Finn will im Radar ALLES abhaken, auch
+    Trades fremder IDs (Anlass: Echo-Trade von Mike, Knopf gesperrt). Status open/review (completed = Korrektur, idempotent:
+    completed_at bleibt). Setzt master_pl ($), slave_pl (€ | null), status 'completed', completed_at; ended_at, falls leer;
+    mt5_baseline.final wie bei 'ende', falls noch keins (nur tvv2 — Echo/Topstep behalten ihre Baseline).
+    Fusion-P&L (slave_pl) gibt es nur bei Orbit V2 / Winning Days: sonst 400, damit keine falsche wd_hedge-Buchung entsteht.
     -> (upd, None) oder (None, (http_code, fehler))"""
     if not isinstance(plan, dict) or not plan.get("id"):
         return None, (404, "Plan nicht gefunden")
     st = str(plan.get("status") or "")
-    if str(plan.get("route") or "") != "tvv2" or st not in ("open", "review", "completed"):
+    route = str(plan.get("route") or "")
+    if route not in WD_ERLEDIGT_ROUTEN or st not in ("open", "review", "completed"):
         return None, (409, "nicht offen")
+    if route != "tvv2" and slave_pl is not None:
+        return None, (400, "Fusion-P&L gibt es nur bei Orbit V2 / Winning Days")
     upd = {"status": "completed", "master_pl": master_pl, "slave_pl": slave_pl}
     if st != "completed" or not plan.get("completed_at"):
         upd["completed_at"] = jetzt_iso
@@ -8349,7 +8372,7 @@ def admin_wd_plaene():
                                                             "user_id": f"eq.{uid}"}) if uid else []
                             konto, konto_quelle = _wd_hedge_konto(konten, login or WD_HEDGE_LOGIN, _acc_plan_archiviert())
                             login_quelle = login or f"{WD_HEDGE_LOGIN} (Standard)"
-                    filt = {"id": f"eq.{pid}", "route": "eq.tvv2", "status": "in.(open,review,completed)"}
+                    filt = {"id": f"eq.{pid}", "route": f"in.({','.join(WD_ERLEDIGT_ROUTEN)})", "status": "in.(open,review,completed)"}
                     if plan.get("updated_at"):
                         filt["updated_at"] = f"eq.{plan['updated_at']}"
                     z = sb_update("trade_plans", filt, upd)
@@ -8359,10 +8382,11 @@ def admin_wd_plaene():
                     return jsonify({"error": "Plan wurde gleichzeitig geändert — bitte erneut versuchen", "plan_id": pid}), 409
                 # Kontotyp zum Zeitpunkt des Trades festhalten (25.09.2026) — ein Winning Day ist immer 'winning_days'; nur wenn leer,
                 # und still, falls die Spalte noch fehlt
-                try:
-                    sb_update("trade_plans", {"id": f"eq.{pid}", "konto_typ": "is.null"}, {"konto_typ": "winning_days"})
-                except Exception:
-                    pass
+                if str(plan.get("route") or "") == "tvv2":   # Echo/Topstep (30.09.2026) sind keine Winning Days
+                    try:
+                        sb_update("trade_plans", {"id": f"eq.{pid}", "konto_typ": "is.null"}, {"konto_typ": "winning_days"})
+                    except Exception:
+                        pass
                 # Buchung (idempotent)
                 buchung, buchung_fehler = None, None
                 try:

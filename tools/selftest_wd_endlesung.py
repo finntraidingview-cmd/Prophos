@@ -44,8 +44,15 @@ def main():
     z, f = sig(dict(plan, mt5_baseline={"final": dict(fin, today_pnl=0)}))
     check(z is None and f[0] == 409, "Today's P&L 0 zählt als gelesen → 409")
     check(sig(dict(plan, status="completed"))[1][0] == 409, "abgehakt → 409")
-    check(sig(dict(plan, status="open"))[1][0] == 409, "noch offen → 409")
-    check(sig(dict(plan, route="mt5v2"))[1][0] == 409, "andere Route → 409")
+    # noch offen (seit 28.09.2026, Knopf „Beendet"): Signal mit pruefen — der PC prüft erst, ob die Position zu ist
+    z, f = sig(dict(plan, status="open"))
+    check(f is None and z["params"] == {"aktion": "endlesung", "von": "admin", "pruefen": True}, "noch offen → Signal mit pruefen")
+    # 30.09.2026: Echo nie (P&L aus der MT5-Balance), Topstep V2 nur von Puls gestartet (tv.puls == 'tsx'), andere Wege nie
+    check(sig(dict(plan, route="mt5v2"))[1][0] == 409, "Echo V2 → 409 (kein Lese-Weg über Puls)")
+    check(sig(dict(plan, route="tsv2"))[1][0] == 409, "Topstep-Handplan → 409")
+    z, f = sig(dict(plan, route="tsv2", mt5_baseline={"final": fin, "tv": {"puls": "tsx"}}))
+    check(f is None and z["params"]["aktion"] == "endlesung", "Topstep V2 von Puls gestartet → Signal")
+    check(sig(dict(plan, route="dup"))[1][0] == 409, "andere Route → 409")
     check(sig(dict(plan, mt5_baseline={}))[1][0] == 409, "ohne Ende → 409")
     check(sig(dict(plan, mt5_baseline=None))[1][0] == 409, "Baseline null → 409")
     check(sig(dict(plan, user_id=None))[1][0] == 409, "ohne Besitzer → 409")
