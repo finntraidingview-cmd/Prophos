@@ -7089,7 +7089,9 @@ def _wd_fruehere_trades(acc_ids):
     seit = datetime.fromtimestamp(time.time() - 14 * 86400, timezone.utc).isoformat()
     try:
         for i in range(0, len(ids), 80):
-            out += _sb_all("trade_plans", {"select": "id,master_account_id,ended_at,bal_end:mt5_baseline->final->balance_end",
+            # started_at + bal_start seit 30.09.2026 für liq_tagesstart (Tagesstart-Balance je CME-Handelstag)
+            out += _sb_all("trade_plans", {"select": "id,master_account_id,ended_at,started_at,bal_end:mt5_baseline->final->balance_end,"
+                                                     "bal_start:mt5_baseline->tv->balance_start",
                                            "master_account_id": f"in.({','.join(ids[i:i + 80])})", "ended_at": f"gte.{seit}"})
     except Exception as e:
         print(f"[wd-heute] ⚠️ frühere Trades: {type(e).__name__}: {e}", flush=True)
@@ -7434,6 +7436,158 @@ def _lt_liq(acc, plan, balance_start, einstieg, richtung, ppl, kt):
             "regel": f"Max-Drawdown {dd:,.0f} $ als SL".replace(",", "."), "pl_usd": -round(dd, 2)}
 
 
+# ══ LIQ-REGELN (30.09.2026, Finn: „Die Liquidation ist bei uns immer der Stop Loss bzw. das Daily Loss, das nutzen wir immer
+# komplett aus. Leg dafür eine Tabelle an"). Anlass Radar .853: Moritz Apex …0008 (Winning Days, BUY 3 × NQ) zeigte die Liquidation
+# bei Kontogröße + 100 $ (≈ 155 Pkt unter dem Einstieg) — echt gilt Apex-Stufe 3, 3.000 $ Daily Loss ab Tagesstart-Balance (50 Pkt).
+# Tabelle public.liq_regeln (sql/2026-09-30_liq-regeln*.sql). NUR ANZEIGE: zusätzliche Felder liq_regel_balance / _level_nq / _text in
+# /admin/live-trades (_lt_zeile). liq_level_nq, wd_sl_zeile, hedge.sl_level_nq und die Hedge-Open-Rechnung bleiben unverändert — der
+# Fusion-Hedge der Winning Days schließt weiter bei Kontogröße + 100 $ (echtes Geld), bis Finn es ausdrücklich anders entscheidet.
+LIQ_REGELN_CACHE_S = 60
+_liq_regeln_cache = {"at": 0.0, "zeilen": None}
+
+
+def _liq_regeln_laden():
+    """public.liq_regeln, höchstens einmal je LIQ_REGELN_CACHE_S Sekunden gelesen (kleine Tabelle). Fehler → letzter Stand bzw. []."""
+    jetzt = time.time()
+    if _liq_regeln_cache["zeilen"] is not None and jetzt - _liq_regeln_cache["at"] < LIQ_REGELN_CACHE_S:
+        return _liq_regeln_cache["zeilen"]
+    try:
+        zeilen = _sb_all("liq_regeln", {"select": "id,firma,kontotyp,groesse,art,betrag_usd,lock_ueber_start_usd,stufen,wie_kontotyp"})
+        _liq_regeln_cache.update(at=jetzt, zeilen=zeilen or [])
+    except Exception as e:
+        print(f"[liq-regeln] ⚠️ {type(e).__name__}: {e}", flush=True)
+        _liq_regeln_cache["at"] = jetzt          # nicht bei jedem Abruf neu versuchen
+        if _liq_regeln_cache["zeilen"] is None:
+            _liq_regeln_cache["zeilen"] = []
+    return _liq_regeln_cache["zeilen"]
+
+
+def liq_regel_waehlen(regeln, firma, kontotyp, groesse):
+    """REIN RECHNEND (testbar): passende liq_regeln-Zeile → (zeile | None, weg). Die spezifischste gewinnt (Firma 4, Kontotyp 2,
+    Größe 1 Punkt; null = alle). Firmen normalisiert (_firm_norm). wie_kontotyp wird EINMAL aufgelöst (Winning Days → Regel der
+    Firma im Funded-Zustand); weg nennt das („winning_days wie funded"), sonst ''."""
+    f = _firm_norm(firma).lower() if firma else ""
+    g = _wd_num(groesse)
+
+    def beste(typ):
+        best, score = None, -1
+        for r in regeln or ():
+            rf, rt, rg = r.get("firma"), r.get("kontotyp"), _wd_num(r.get("groesse"))
+            if rf and _firm_norm(rf).lower() != f:
+                continue
+            if rt and rt != typ:
+                continue
+            if rg is not None and (g is None or abs(rg - g) > 0.5):
+                continue
+            s = (4 if rf else 0) + (2 if rt else 0) + (1 if rg is not None else 0)
+            if s > score:
+                best, score = r, s
+        return best
+
+    z = beste(kontotyp)
+    wie = (z or {}).get("wie_kontotyp")
+    if wie and wie != kontotyp:
+        z2 = beste(wie)
+        if z2:
+            return z2, f"{kontotyp} wie {wie}"
+    return z, ""
+
+
+def liq_stufe(stufen, balance):
+    """REIN RECHNEND (testbar): Stufe mit dem höchsten ab_balance ≤ balance (darunter: die erste) → (nr ab 1, stufe) | (None, None)."""
+    st = sorted([s for s in (stufen or []) if isinstance(s, dict) and _wd_num(s.get("ab_balance")) is not None],
+                key=lambda s: _wd_num(s["ab_balance"]))
+    if not st or balance is None:
+        return None, None
+    nr = 0
+    for i, s in enumerate(st):
+        if balance >= _wd_num(s["ab_balance"]):
+            nr = i
+    return nr + 1, st[nr]
+
+
+def _liq_de(v, d=0):
+    return f"{v:,.{d}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def liq_aus_regel(regel, groesse, balance_start, tagesstart):
+    """REIN RECHNEND (testbar): Liquidations-Balance nach einer liq_regeln-Zeile → (balance | None, text).
+    fest           Start-Balance − Betrag           trailing_lock  min(Start-Balance − Betrag, Größe + Lock)
+    tagesstart     Tagesstart − Betrag              stufen         Tagesstart − Daily Loss der Stufe (Stufe nach Tagesstart)
+    boden          Größe (der Zeile, sonst des Kontos) + Lock
+    Tagesstart fehlt → Start-Balance (dann ist dieser Trade der erste des Handelstags). Ohne nötige Werte → (None, Grund)."""
+    if not regel:
+        return None, "keine Liq-Regel für dieses Konto"
+    art, b = regel.get("art"), _wd_num(regel.get("betrag_usd"))
+    lock = _wd_num(regel.get("lock_ueber_start_usd")) or 0.0
+    gr = _wd_num(regel.get("groesse")) or _wd_num(groesse)
+    ts = tagesstart if tagesstart is not None else balance_start
+    if art == "fest" and b:
+        if balance_start is None:
+            return None, f"fest {_liq_de(b)} $ — keine Start-Balance"
+        return round(balance_start - b, 2), f"fest {_liq_de(b)} $ ab Start-Balance"
+    if art in ("trailing_lock", "boden") and not gr:
+        return None, f"{art} — Kontogröße unbekannt"
+    if art == "trailing_lock" and b:
+        if balance_start is None:
+            return None, f"{_liq_de(b)} $ trailing — keine Start-Balance"
+        return round(min(balance_start - b, gr + lock), 2), f"{_liq_de(b)} $ trailing, fest ab {_liq_de(gr + lock)} $"
+    if art == "boden":
+        return round(gr + lock, 2), f"Boden {_liq_de(gr)} + {_liq_de(lock)} $"
+    if art == "tagesstart" and b:
+        if ts is None:
+            return None, f"Daily Loss {_liq_de(b)} $ — keine Tagesstart-Balance"
+        return round(ts - b, 2), f"Daily Loss {_liq_de(b)} $ ab Tagesstart {_liq_de(ts, 2)} $"
+    if art == "stufen":
+        if ts is None:
+            return None, "Stufen — keine Tagesstart-Balance"
+        nr, st = liq_stufe(regel.get("stufen"), ts)
+        dl = _wd_num((st or {}).get("daily_loss_usd"))
+        if not dl:
+            return None, "Stufen ohne Daily Loss"
+        return round(ts - dl, 2), (f"Stufe {nr} (ab {_liq_de(_wd_num(st['ab_balance']))} $): Daily Loss {_liq_de(dl)} $ "
+                                   f"ab Tagesstart {_liq_de(ts, 2)} $")
+    return None, "Liq-Regel offen"
+
+
+def liq_tagesstart(p, start_bal, fruehere):
+    """REIN RECHNEND (testbar): Balance zu Beginn des CME-Handelstags dieses Plans → (wert | None, quelle). Früher gestarteter
+    Plan desselben Kontos im selben Handelstag mit Start-Balance → die des FRÜHESTEN; sonst ist dieser Plan der erste des Tages →
+    start_bal. fruehere = [{id, master_account_id, started_at, bal_start}] (_wd_fruehere_trades)."""
+    st = str(p.get("started_at") or "")
+    tag = _cme_handelstag(st) if st else None
+    acc = str(p.get("master_account_id") or "")
+    kand = [f for f in (fruehere or []) if str(f.get("master_account_id") or "") == acc and str(f.get("id")) != str(p.get("id"))
+            and f.get("started_at") and str(f["started_at"]) < st and _wd_num(f.get("bal_start")) is not None
+            and _cme_handelstag(f["started_at"]) == tag]
+    if tag and kand:
+        f = min(kand, key=lambda x: str(x["started_at"]))
+        return _wd_num(f["bal_start"]), "erster Trade des Handelstags"
+    return start_bal, "Start-Balance dieses Trades"
+
+
+def liq_regel_felder(regeln, acc, plan, start_bal, tagesstart, einstieg, richtung, ppl, kt):
+    """REIN RECHNEND (testbar): Anzeige-Felder einer /admin/live-trades-Zeile aus liq_regeln →
+    {liq_regel_balance, liq_regel_level_nq, liq_regel_text}. Level = Abstand (Start-Balance − Liq-Balance) als $-SL ab Einstieg
+    (_wd_level). art fest geht auch ohne Start-Balance (Abstand = Betrag, wie die Max-Drawdown-Rechnung). Winning Day wie in
+    _lt_liq_balance erkannt (Kontoart, konto_typ am Plan oder hedge_eur > 0)."""
+    a = acc or {}
+    typ = str(a.get("account_type") or "").lower()
+    wd = typ == "winning_days" or str(plan.get("konto_typ") or "") == "winning_days" or (_wd_num(plan.get("hedge_eur")) or 0) > 0
+    groesse = _wd_konto_groesse(a)
+    regel, weg = liq_regel_waehlen(regeln, a.get("firm"), "winning_days" if wd else (typ or None), groesse)
+    bal, text = liq_aus_regel(regel, groesse, start_bal, tagesstart)
+    abstand = None
+    if bal is not None and start_bal is not None:
+        abstand = start_bal - bal
+        if abstand <= 0:
+            text += " — Start-Balance liegt nicht darüber"
+    elif regel and regel.get("art") == "fest" and _wd_num(regel.get("betrag_usd")):
+        abstand = _wd_num(regel.get("betrag_usd"))
+    level = _wd_level(einstieg, richtung, abstand, ppl, kt, False) if (abstand or 0) > 0 else None
+    return {"liq_regel_balance": bal, "liq_regel_level_nq": level, "liq_regel_text": f"{text} ({weg})" if weg else text}
+
+
 def _lt_demo(richtung, tp_level, liq_level, kerzen, start_iso, ende_iso=None, sl_level=None):
     """REIN RECHNEND (testbar): Demo-Ausführung gegen Minutenkerzen [{minute, h, l}] ab der Start-Minute.
     → {status: 'tp'|'liquidiert'|'beide_in_minute'|'laeuft'|'beendet_ohne_treffer'|'ohne_kurs'|'ohne_level', at, preis, minuten}.
@@ -7508,7 +7662,7 @@ def _lt_kerze_start(kerzen, start_iso):
     return None if best is None else round((best[1] + best[2]) / 2 * 4) / 4
 
 
-def _lt_zeile(p, acc, disp, kerzen_je_wurzel, vorher=None):
+def _lt_zeile(p, acc, disp, kerzen_je_wurzel, vorher=None, regeln=None, fruehere=None):
     z = _wd_heute_zeile(p, acc, disp, vorher)
     base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
     tv = base.get("tv") if isinstance(base.get("tv"), dict) else {}
@@ -7555,6 +7709,10 @@ def _lt_zeile(p, acc, disp, kerzen_je_wurzel, vorher=None):
               "liq_balance": liq_bal, "liq_regel": liq_regel, "liq_level_nq": liq_level, "demo": demo,
               "liq_quelle": liq_quelle if liq_level is not None else None,
               "konto_balance": _wd_num((acc or {}).get("tv_balance")), "konto_balance_at": (acc or {}).get("tv_balance_at")})
+    # LIQ-REGELN (30.09.2026): nur zusätzliche Anzeige-Felder — liq_level_nq/Hedge bleiben wie oben gerechnet
+    if regeln is not None:
+        tagesstart, _tq = liq_tagesstart(p, start_bal, fruehere)
+        z.update(liq_regel_felder(regeln, acc, p, start_bal, tagesstart, z.get("einstieg_nq"), z.get("richtung"), ppl, kt))
     return z
 
 
@@ -7720,6 +7878,7 @@ def admin_live_trades():
                         kerzen[andere] = _sb_all("tv_kurs_1m", {"select": "minute,h,l", "wurzel": f"eq.{andere}", "minute": f"gte.{ab[:16]}", "order": "minute.asc"})
                     kerzen[w] = kerzen[andere]
         fruehere = _wd_fruehere_trades(ids)          # B14: für den Balance-Vorläufer (konto_balance)
+        liq_regeln = _liq_regeln_laden()             # LIQ-REGELN (30.09.2026): einmal je Abruf, 60 s gecacht
         # Echo (?echo=1): EIN Read auf mt5_live für die Master-Logins laufender Echo-Pläne — nur die nötigen JSON-Teile
         echo = [p for p in plaene if str(p.get("route") or "") == "mt5v2"]
         live_je_login, firm_sym = {}, {}
@@ -7756,7 +7915,7 @@ def admin_live_trades():
                     z = _lt_echo_zeile(p, acc, disp, live_je_login, firm_sym, jetzt_ts, vorher)
                 trades.append(z)
             else:
-                z = _lt_zeile(p, acc, disp, kerzen, vorher)
+                z = _lt_zeile(p, acc, disp, kerzen, vorher, regeln=liq_regeln, fruehere=fruehere)
                 z["plattform"] = "orbit"
                 trades.append(z)
         rang = {"open": 0, "planned": 1, "review": 2, "completed": 3}
