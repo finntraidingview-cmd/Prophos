@@ -1816,9 +1816,10 @@
     font-size:11px;font-weight:600;letter-spacing:.02em;
   }
   /* Challenge / Phase 1 / Phase 2 (30.09.2026, Finn): Challenge sah genauso aus wie Phase 1, Phase 2 nur einen
-     Hauch dunkler — unter „Typ" nicht zu trennen. Challenge jetzt Rosé (kein Rot, das läse sich wie Warnung),
-     die Phasen bleiben eine Familie: Phase 1 helles Gelb-Amber, Phase 2 kräftiges Orange. */
-  #dashboard-view .type-challenge{background:rgba(238,70,150,.1);color:#C11574}
+     Hauch dunkler — unter „Typ" nicht zu trennen. Die Phasen bleiben eine Familie: Phase 1 helles Gelb-Amber,
+     Phase 2 kräftiges Orange. Challenge ruhiges Schiefergrau (30.09.2026, Finn: das Rosé von .837 „mies hässlich") —
+     neben den farbigen Typen klar getrennt, nicht grell, Schrift ≈ 9:1 auf dem Tint. */
+  #dashboard-view .type-challenge{background:rgba(71,84,103,.1);color:#344054}
   #dashboard-view .type-phase1{background:rgba(250,197,21,.18);color:#A15C07}
   #dashboard-view .type-phase2{background:rgba(249,115,22,.12);color:#C2410C}
   #dashboard-view .type-funded{background:var(--violet-tint);color:var(--violet)}
@@ -35897,7 +35898,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.841'
+  const OS_TAB_BUILD = '2026-09-22.842'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
