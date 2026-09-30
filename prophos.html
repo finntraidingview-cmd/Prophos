@@ -39011,7 +39011,9 @@
    * noch nicht gestartet. Sonst Leerlauf: alle 15 s — ein Signal vom Mac/Handy wird dann höchstens ~10 s später geclaimt, danach
    * sofort wieder 5 s. Die geplante Startzeit selbst hängt NICHT an diesem Poll: tpStartUmTick prüft rein lokal jede Sekunde
    * (setInterval(tpStartUmTick, 1000)) und claimt über trade_plans.start_um_gestartet_at, nicht über order_signale. */
-  const OS_TAKT_LEERLAUF_MS = 15000, OS_NACHLAUF_MS = 10 * 60000, OS_START_VORLAUF_MS = 5 * 60000
+  // Überfällige, nie gestartete Pläne zählen nur 15 min nach startUm (Gegenprüfung 01.10.2026: Farmer-Pläne bei Schalter AUS
+  // bleiben sonst den ganzen Tag „fällig" und hielten den schnellen Takt dauerhaft — gleiche Grenze wie zuSpaet).
+  const OS_TAKT_LEERLAUF_MS = 15000, OS_NACHLAUF_MS = 10 * 60000, OS_START_VORLAUF_MS = 5 * 60000, OS_START_NACHLAUF_MS = 15 * 60000
   let _osAktivAt = Date.now(), _osPollAt = 0
   function osPipelineAktiv(){
     const jetzt = Date.now()
@@ -39019,7 +39021,8 @@
     if(jetzt - _osAktivAt < OS_NACHLAUF_MS) return true
     try{
       return (tradePlans || []).some(p => p && (p.status === 'open'
-        || (p.status === 'planned' && p.startUm && !p.startUmGestartetAt && new Date(p.startUm).getTime() - jetzt <= OS_START_VORLAUF_MS)))
+        || (p.status === 'planned' && p.startUm && !p.startUmGestartetAt && (() => { const d = new Date(p.startUm).getTime() - jetzt
+              return d <= OS_START_VORLAUF_MS && d >= -OS_START_NACHLAUF_MS })())))
     }catch(_){ return true }
   }
   setInterval(() => {
@@ -51302,7 +51305,7 @@
    *       (auch das hängende Supabase-Login trifft alles gleichzeitig), lädt der Tab neu — nur im ruhigen Moment des
    *       Build-Wächters, höchstens 1× je 10 min. Zähler + Zeiten reisen in kurs_bruecke (mt5_live.status) mit. */
   let _epPushBusy = false, _epTickNr = 0, _epTickSeit = 0, _epTickLetzter = 0
-  const EP_DIREKT_FRISCH_S = 12   // Tab schreibt Kurse/Kerzen nur, wenn der Reader-Direktfeed länger stumm ist (01.10.2026, s. epBrueckeTick)
+  const EP_DIREKT_FRISCH_S = 7   // Tab schreibt Kurse/Kerzen nur, wenn der Reader-Direktfeed länger stumm ist (01.10.2026, s. epBrueckeTick)
   const EP_TICK_TOT_MS = 10000, EP_HEIL_MS = 60000, EP_HEIL_PAUSE_MS = 10 * 60 * 1000, EP_HEIL_KEY = 'prophos_bruecke_heil'
   const epStart = Date.now()
   function epHeilPruefen(){
@@ -51427,9 +51430,11 @@
       // ging doppelt in die Cloud, und jede Zeile reist per Realtime an jeden Abonnenten. Der Reader meldet in /positions selbst,
       // wann sein letzter POST /reader-kurs durchging (feed_direkt.ok_alter_s, Reader ≥ 0.9.9). Ist das höchstens 12 s her, schreibt
       // dieser Tab weder tv_kurse noch tv_kurs_1m. Fällt der Direktfeed aus (Railway weg, Schlüssel ungültig, Reader neu gestartet
-      // → ok_alter_s null), übernimmt der Tab im nächsten 1-s-Tick: der Direktfeed sendet bei Ruhe alle 5 s ein Lebenszeichen,
-      // 12 s = zwei verpasste + Puffer. Schlimmstenfalls ist die tv_kurse-Zeile dann ~14 s alt — der Hedge-Wächter verlangt ≤ 30 s
-      // (HEDGE_KURS_MAX_ALTER_MS). Ein Paket deckt beide Wurzeln, die Frische gilt deshalb für NQ und MNQ zusammen.
+      // → ok_alter_s null), übernimmt der Tab im nächsten 1-s-Tick: der Direktfeed sendet bei Ruhe spätestens alle ~6 s ein
+      // Lebenszeichen, nach Fehlern alle 2–3 s. 7 s statt anfangs 12 s (Gegenprüfung 01.10.2026): hedgeKursAktuell nimmt aus
+      // Realtime/Cloud nur Kurse ≤ 5 s (HEDGE_KURS_MAX_ALTER_MS gilt nur für Anzeige/Liste) und hedgeFeedAmKlick nur Lücken
+      // ≤ 10 s — bei 12 s hätte der Fusion-Wächter auf Geräten ohne eigenen Reader ~13 s ohne Kurs-Beweis gestanden. Kurzes
+      // Flattern um die Grenze heißt nur: beide Wege schreiben wie früher. Ein Paket deckt beide Wurzeln, die Frische gilt deshalb für NQ und MNQ zusammen.
       const fdir = d.feed_direkt
       const direktFrisch = !!(fdir && fdir.token && typeof fdir.ok_alter_s === 'number' && fdir.ok_alter_s >= 0 && fdir.ok_alter_s <= EP_DIREKT_FRISCH_S)
       if(epLokal.direktFrisch !== direktFrisch){ epLokal.direktFrisch = direktFrisch; epLokal.diag = Object.assign(epLokal.diag || {}, { tab_reserve: direktFrisch ? 'wartet (Direktfeed frisch)' : 'schreibt', tab_reserve_at: new Date().toISOString() }) }
@@ -51502,11 +51507,14 @@
             const lauf = epLokal.laufKerzeAt[r.wurzel]
             if(r.minute === jungsteJe[r.wurzel] && lauf && lauf.minute === r.minute && epKerzeJetzt - lauf.at < 2000) return false
             return true })
-          for(const r of rowsNeu){ epLokal.letzteKerze[r.wurzel + '|' + r.minute] = { sig: [r.o, r.h, r.l, r.c, r.ticks].join('|'), at: epKerzeJetzt }
-            if(r.minute === jungsteJe[r.wurzel]) epLokal.laufKerzeAt[r.wurzel] = { minute: r.minute, at: epKerzeJetzt } }
-          for(const key of Object.keys(epLokal.letzteKerze)) if(epKerzeJetzt - epLokal.letzteKerze[key].at > 600000) delete epLokal.letzteKerze[key]
+          // Merker erst NACH erfolgreichem Upsert (Gegenprüfung 01.10.2026): ohne 5-s-Lebenszeichen käme eine beim Minutenwechsel
+          // gescheiterte End-Kerze sonst nie wieder — der End-Docht fehlte dann dauerhaft (hedgeExtremSeitOpen).
           epLokal.diag.rows = rowsNeu.length
-          if(rowsNeu.length){ const { error } = await supabase.from('tv_kurs_1m').upsert(rowsNeu, { onConflict: 'wurzel,minute' }); epLokal.diag.fehler = error ? String(error.message || error.code || error) : null; if(!error) epLokal.diag.letzter_ok = new Date().toISOString() }
+          if(rowsNeu.length){ const { error } = await supabase.from('tv_kurs_1m').upsert(rowsNeu, { onConflict: 'wurzel,minute' }); epLokal.diag.fehler = error ? String(error.message || error.code || error) : null
+            if(!error){ epLokal.diag.letzter_ok = new Date().toISOString()
+              for(const r of rowsNeu){ epLokal.letzteKerze[r.wurzel + '|' + r.minute] = { sig: [r.o, r.h, r.l, r.c, r.ticks].join('|'), at: epKerzeJetzt }
+                if(r.minute === jungsteJe[r.wurzel]) epLokal.laufKerzeAt[r.wurzel] = { minute: r.minute, at: epKerzeJetzt } } } }
+          for(const key of Object.keys(epLokal.letzteKerze)) if(epKerzeJetzt - epLokal.letzteKerze[key].at > 600000) delete epLokal.letzteKerze[key]
           if(!epLokal.kerzenGeraeumt || Date.now() - epLokal.kerzenGeraeumt > 3600000){
             epLokal.kerzenGeraeumt = Date.now()
             // 26 h statt 14 Tage (25.09.2026, Finn: „alle 24 h löschen" — ≈ 2.900 Zeilen/Tag, 440 kB bei 1.409 Zeilen): der Chart zeigt
