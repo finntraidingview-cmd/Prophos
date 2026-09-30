@@ -1,11 +1,14 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.8.8
+// @version      0.9.0
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt. Seit 0.5 auch die KONTO-ZUSAMMENFASSUNG (Balance, Today's P&L …) fuer den Orbit-V2-Rundgang.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_registerMenuCommand
 // @connect      127.0.0.1
 // @connect      localhost
 // @run-at       document-start
@@ -25,6 +28,13 @@
 // kommt ueber @updateURL/@downloadURL (GitHub-raw) von selbst.
 //
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
+//   0.9.0  01.10.2026  Orbit V3 — Puls-Chrome-Modus (Finn: „im Chrome-Tab vom Puls-Bot das Tampermonkey-Script installieren,
+//                      was die Position ausliest, auch wenn der Tab im Hintergrund ist"). Einmal je Chrome-Profil im
+//                      Tampermonkey-Menue „Puls-Chrome (Orbit V3)" einschalten (GM_setValue, ueberlebt Neustarts). Dann liest
+//                      das Script NUR Konto + Positionen (Broker-Tab): kein WebSocket-Mithoeren, keine Kurse/Kerzen (sonst schriebe
+//                      jeder Hedge-PC zusaetzlich tv_kurse — Realtime-Kontingent, Ausfall 30.09.), kein Neuladen, keine
+//                      Feed-Markierung/-Heilung — Puls arbeitet in diesem Tab, ein Reload mitten im Lauf risse ihm die Seite weg.
+//                      Aus = alles exakt wie 0.8.8 (Reader-Chrome des Feed-PCs unberuehrt).
 //   0.8.8  26.09.2026  Feed-Tab heilt sich selbst (Koordination B3, Befund R3: Freitag fehlte MNQ ~520 von 635 min, jede
 //                      Luecke begann mit einem Puls-Eingriff ins Reader-Chrome; 17:02–21:00 blieb tot, weil der Tab danach
 //                      NQ1! und ein Konto zeigte). Ein Tab, der 10 min am Stueck Feed war, bleibt Feed (sessionStorage) —
@@ -91,7 +101,16 @@
   // dreimal ein Update vermutet, das gar nicht aktiv war (31.08.2026), und von
   // aussen war das nur an FEHLENDEN Feldern zu erraten. Ab jetzt sagt jeder
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
-  const VERSION    = '0.8.8';
+  const VERSION    = '0.9.0';
+  // 0.9.0: Puls-Chrome-Modus (Orbit V3) — je Chrome-Profil gespeichert, siehe CHANGELOG
+  let PULS_CHROME = false;
+  try { PULS_CHROME = GM_getValue('prophos_puls_chrome', false) === true; } catch (_) {}
+  try {
+    GM_registerMenuCommand(PULS_CHROME ? '✓ Puls-Chrome (Orbit V3) — ausschalten' : 'Puls-Chrome (Orbit V3) — einschalten', () => {
+      try { GM_setValue('prophos_puls_chrome', !PULS_CHROME); } catch (_) {}
+      location.reload();   // bewusst nur auf Handklick: der Socket-Haken haengt an document-start
+    });
+  } catch (_) {}
   const ENDPOINT   = 'http://127.0.0.1:8790/positions';
   const BEDIENFELD = 'http://127.0.0.1:8790/bedienfeld';
   const KERZEN     = 'http://127.0.0.1:8790/kerzen';       // 0.8.0: Bars aus dem Socket, gebuendelt
@@ -1227,6 +1246,7 @@
     } catch (_) {}
   }
   (function pxWebSocketWrappen() {
+    if (PULS_CHROME) return;   // 0.9.0: im Puls-Chrome TradingViews Socket nie anfassen — keine Kurse von hier
     const W = (typeof unsafeWindow !== 'undefined' && unsafeWindow) ? unsafeWindow : window;
     const Orig = W.WebSocket;
     if (!Orig || Orig.__prophos) return;
@@ -1410,6 +1430,7 @@
 
   // Gesamtbild fuer den Payload: Legenden zuerst, Tab-Titel als Rueckfall fuer die Wurzel des aktiven Charts
   function liesKurse() {
+    if (PULS_CHROME) return {};   // 0.9.0: keine Kurse, kein Stale-Reload
     // 0.8.0: Socket zuerst (laeuft auch verdeckt), dann Legende (0.7.0), dann Tab-Titel (0.6.0)
     const kurse = pxKurse();
     const leg = liesKurseAusLegenden();
@@ -1432,7 +1453,7 @@
     if ((tickNr % BF_JEDER) === 0) liesKonto();
     // 0.8.8: Feed-Markierung pflegen, Login im Feed-Tab erkennen (Rolle bleibt dann 'feed')
     const titelJetzt = liesKursAusTitel();
-    feedPflegen(Date.now(), titelJetzt);
+    if (!PULS_CHROME) feedPflegen(Date.now(), titelJetzt);   // 0.9.0: Puls-Chrome wird nie Feed-Tab
     const feedLogin = feedMarkiert() && kontoAngemeldet(Date.now()) ? kontoMerk.text : null;
     const rolle = tabRolle(Date.now());
     const positionen = rolle === 'broker' ? lesePositionen() : [];
@@ -1468,18 +1489,19 @@
       // derselben Form. Nur Roh-Text, gedeutet wird im Prophos-Tab (Zahlformat
       // deutsch/englisch, gleiche Regel wie tv_snapshot.parse_de_zahl). null =
       // Titel nicht lesbar (kein Chart-Tab) — nie ein stilles 0.
-      kurs: titelJetzt,
+      kurs: PULS_CHROME ? null : titelJetzt,
+      puls_chrome: PULS_CHROME,   // 0.9.0: Kennung im Payload (reader-server ignoriert das Feld bisher — nur Nachweis im Rohstand)
       // 0.7.0: beide Symbole aus den Legenden (kurse.NQ / kurse.MNQ mit bid/ask/text/ts/quelle/stale),
       // Rueckfall Tab-Titel; reload_grund nur im ersten Tick nach einer Selbstheilung.
       kurse: liesKurse(),
       reload_grund: reloadGrund,
       feed_login: feedLogin,
     }, posFelder));
-    feedHeilen(Date.now(), titelJetzt);
+    if (!PULS_CHROME) feedHeilen(Date.now(), titelJetzt);
     reloadGrund = null;
 
     if ((tickNr++ % BF_JEDER) === 0) sendeBedienfeld();
-    try { pxKerzenSenden(); } catch (_) { feed.fehler++; }   // 0.8.0: wartende Bars gebuendelt an /kerzen
+    if (!PULS_CHROME) { try { pxKerzenSenden(); } catch (_) { feed.fehler++; } }   // 0.8.0: wartende Bars gebuendelt an /kerzen
 
     GM_xmlhttpRequest({
       method: 'POST',
@@ -1492,9 +1514,10 @@
         try { an = JSON.parse(r.responseText).an !== false; } catch (_) {}
         if (!an)             setBadge(`⏸ Reader pausiert (via Prophos)`, 'pause');
         else if (feedLogin)  setBadge(`⚠ Feed-Tab: Broker-Konto angemeldet (${feedLogin}) — hier nie handeln, bitte abmelden`, 'warn');   // 0.8.8
-        else if (rolle !== 'broker') setBadge(`● Feed-Tab ohne Konto — nur Kurse`, 'ok');   // 0.8.7: keine Warnung ohne Konto
+        else if (rolle !== 'broker') setBadge(PULS_CHROME ? `● Orbit V3 · Puls-Chrome · kein Konto angemeldet` : `● Feed-Tab ohne Konto — nur Kurse`, PULS_CHROME ? 'warn' : 'ok');   // 0.8.7: keine Warnung ohne Konto
         else if (blind)      setBadge(`⚠ Reader blind: ${blind} — Stand eingefroren, Hedge bleibt stehen`, 'warn');
         // 0.5.2: Englisch ist kein Warnfall mehr — Spalten und Zahlen werden in beiden Sprachen gelesen
+        else if (PULS_CHROME) setBadge(`● Orbit V3 · Puls-Chrome · ${positionen.length} Pos`, 'ok');
         else                 setBadge(`● Reader · ${positionen.length} Pos · Copier ok`, 'ok');
       },
       onerror:   () => setBadge(`● Reader · ${positionen.length} Pos · Copier OFFLINE`, 'warn'),

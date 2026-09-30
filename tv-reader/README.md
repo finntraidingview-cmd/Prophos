@@ -35,6 +35,30 @@ Reader sieht sie in < 1 s, schließen → sofort weg.
    ist die Brücke in die Cloud — er pusht den Reader-Stand alle 5s nach
    `echoplus_live`, damit die **Orbit-View** ihn von jedem Gerät zeigt.
 
+## Orbit V3 — Userscript im Puls-Chrome (01.10.2026)
+
+Orbit V3 (Trades → Weg → „Orbit V3") = Puls platziert die Order in TradingView, der Fusion-Gegenhedge
+öffnet beim ersten Fill-Beweis (wie bei der Winning Days Farm). **Geschlossen wird er, sobald das Userscript
+im Puls-Chrome die Position nicht mehr sieht** (TP, SL, von Hand, Liquidation — egal wie), frühestens 30 s nach
+dem Open und nach 10 s „leer" bei stabil angezeigtem Konto. **Radar läuft parallel als Backup**: der Kurs-Feed
+schließt am TP/SL-Level, falls das Script hängt, der Tab gerade ein anderes Konto zeigt oder der Reader weg ist.
+
+Einmal je PC, auf dem Fusion hedgt (dort, wo Puls-Chrome + Fusion-Terminal laufen):
+1. Im **Puls-Chrome** (nicht im normalen Chrome, nicht im Reader-Chrome) Tampermonkey aus dem Chrome Web Store
+   installieren, `chrome://extensions` → Tampermonkey → Details → **„Nutzerscripts zulassen"** an.
+2. `tv-reader.user.js` installieren (Link: raw-Datei auf GitHub öffnen, Tampermonkey bietet „Installieren" an).
+3. TradingView-Tab im Puls-Chrome: Tampermonkey-Symbol → **„Puls-Chrome (Orbit V3) — einschalten"**. Die Seite lädt
+   einmal neu, das Abzeichen unten rechts zeigt dann `● Orbit V3 · Puls-Chrome · n Pos`.
+   Dieser Modus liest NUR Konto + Positionen: keine Kurse (sonst schriebe jeder Hedge-PC zusätzlich `tv_kurse` —
+   Realtime-Kontingent), kein Selbst-Neuladen, keine Feed-Heilung (Puls arbeitet in diesem Tab).
+4. `start-reader.bat` starten und offen lassen (Empfänger auf 127.0.0.1:8790). Auf dem Feed-PC läuft er schon —
+   dort hängen Reader-Tab (Feed) und Puls-Chrome-Tab (Broker) am selben Empfänger, der hält sie per `tab_id` getrennt.
+5. Der Prophos-Tab des PCs (`localhost:5000`) liest den Stand und schließt den Hedge. Am Hedge-Chip der Trade-Karte
+   steht, ob der Reader die Master-Position gerade sieht.
+
+Grenzen: Wechselt Puls für einen anderen Plan das Konto im Puls-Chrome, gibt es für diesen Moment kein Urteil
+(Konto passt nicht) — dann schließt nur Radar. Mit 1–2 gleichzeitigen Trades ist das der seltene Fall.
+
 ## Der verdeckte Tab (01.09.2026) — warum „0 Positionen" ein Beweis braucht
 
 Finns Fund beim Zwei-Konten-Test: Order in TradingView platziert, sauber

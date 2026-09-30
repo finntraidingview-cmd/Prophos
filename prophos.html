@@ -2338,6 +2338,7 @@
   #dashboard-view .tc2-sys-mt5v2{background:rgba(14,151,149,.15);color:#0E7A78;outline:1px dashed rgba(14,122,120,.55);outline-offset:-1px}
   #dashboard-view .tc2-sys-wd{background:rgba(0,168,129,.12);color:#006F4F;outline:1px dashed rgba(0,111,79,.45);outline-offset:-1px}   /* Winning Day: Ton der Kontoart-Chips (25.09.2026; seit 30.09.2026 Mint der Typ-Palette) */
   #dashboard-view .tc2-sys-tvv2{background:rgba(124,58,237,.12);color:#7C3AED;outline:1px dashed rgba(124,58,237,.55);outline-offset:-1px}
+  #dashboard-view .tc2-sys-tvv3{background:rgba(124,58,237,.12);color:#7C3AED;outline:1px solid rgba(124,58,237,.55);outline-offset:-1px}   /* Orbit V3: wie V2, durchgezogen = mit Hedge (01.10.2026) */
   #dashboard-view .tc2-sys-tsv2{background:rgba(234,88,12,.12);color:#C2410C;outline:1px dashed rgba(234,88,12,.55);outline-offset:-1px}
   #dashboard-view .tc2-actions{display:flex;align-items:center;gap:3px;flex-shrink:0}
   #dashboard-view .tc2-actions .tc2-ab{padding:4px 6px}
@@ -6290,6 +6291,10 @@
               <div class="seg tp-route-seg-v2" id="tp-route-seg-v2">
                 <button type="button" id="tp-route-mt5v2">Echo V2</button>
                 <button type="button" id="tp-route-tvv2">Orbit V2</button>
+                <!-- Orbit V3 (01.10.2026, Finn: „Orbit wieder reaktivieren — Puls platziert, das Tampermonkey-Script im Puls-Chrome
+                     liest die Position aus, Fusion hedgt, Radar als Backup"): technisch tvv2 + Fusion-Gegenhedge mit der Farm-Rechnung
+                     (Risiko Master = SL, Risiko Slave → Multiplikator), jedes Futures-Konto, KEIN Winning Day (trade_plans.orbit_v3). -->
+                <button type="button" id="tp-route-o3" title="Orbit V3 — Puls platziert in TradingView, Fusion-Gegenhedge; schließt, sobald das Userscript im Puls-Chrome die Position nicht mehr sieht, Radar (TP/SL) als Backup">Orbit V3</button>
                 <!-- Winning Day (24.09.2026 abends, Finn: „ein Drittes, wo Winning-Day-Pläne drinstehen, und im Dropdown
                      nur Funded-Futures-Konten"): technisch Orbit V2 (route tvv2) + Fusion-Gegenhedge aus der Staffel (hedge_eur). -->
                 <!-- Umbenannt „Winning Days Farm" (24.09.2026 spät, Finns Zielbild): Gegenhedge als Faktor mit TP/SL-Vorschau, beide
@@ -6389,7 +6394,7 @@
             <div class="field">
               <label>Risiko Master ($)</label>
               <input type="number" class="input mono" id="tp-master-risk" min="0" step="10" placeholder="z.B. 1000">
-              <div class="tp-wd-hilfe">nur für die Lot-Rechnung — kein Stop in TradingView</div>
+              <div class="tp-wd-hilfe" id="tp-wd-hilfe-master">nur für die Lot-Rechnung — kein Stop in TradingView</div>
             </div>
             <div class="field">
               <!-- Label/step schaltet tpRouteUpdateSeg je Weg um (24.09.2026): Orbit V2 ganze Kontrakte, Echo V2 Lots 0.01 -->
@@ -6399,7 +6404,7 @@
             <div class="field" id="tp-slave-risk-field" style="grid-column:span 2">
               <label>Risiko Slave (<span id="tp-slave-cur">€</span>)</label>
               <input type="number" class="input mono" id="tp-slave-risk" min="0" step="5" placeholder="z.B. 350">
-              <div class="tp-wd-hilfe">auf Fusion · Staffel-Vorschlag</div>
+              <div class="tp-wd-hilfe" id="tp-wd-hilfe-slave">auf Fusion · Staffel-Vorschlag</div>
               <div id="tp-slave-suggest" style="display:none;margin-top:6px;padding:8px 12px;background:rgba(139,92,246,.08);border:1px solid rgba(139,92,246,.2);border-radius:6px;font-size:12px;line-height:1.4">
                 <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
                   <div style="color:var(--ink)">
@@ -18235,14 +18240,17 @@
   function routeIstOrbit(r){ return r === 'tvplus' || r === 'tvv2' || (r === 'tsv2' && tsPulsModus() !== 'aus') }   // Puls in TradingView bzw. TopstepX
   // Winning-Day-Plan (25.09.2026, Finn am Trades-Tab: „kennzeichne die Trades als Winning Days, nicht als Orbit V2"): intern
   // route 'tvv2', erkennbar an hedge_eur > 0, der Farmer-Notiz oder der Kontoart 'winning_days' des Master-Kontos.
+  // Orbit V3 (01.10.2026): tvv2 + Fusion-Hedge, aber kein Winning Day — die Kennung gewinnt vor hedge_eur > 0
+  const tpIstOrbitV3 = p => !!(p && p.route === 'tvv2' && p.orbitV3)
   function tpIstWdPlan(p){
     if(!p || p.route !== 'tvv2') return false
+    if(p.orbitV3) return false
     if(Number(p.hedgeEur) > 0) return true
     if(/Winning-Day-Farmer/i.test(String(p.notes || ''))) return true
     try{ const a = (accounts || []).find(x => String(x.id) === String(p.masterAccountId)); if(a && String(a.type || '').toLowerCase() === 'winning_days') return true }catch(_){}
     return false
   }
-  const wegLabel = p => tpIstWdPlan(p) ? 'Winning Day' : p && p.route === 'mt5v2' ? 'Echo V2' : p && p.route === 'tsv2' ? 'Topstep V2' : 'Orbit V2'   // Weg-Label für Anzeigen (25.09.2026)
+  const wegLabel = p => tpIstWdPlan(p) ? 'Winning Day' : tpIstOrbitV3(p) ? 'Orbit V3' : p && p.route === 'mt5v2' ? 'Echo V2' : p && p.route === 'tsv2' ? 'Topstep V2' : 'Orbit V2'   // Weg-Label für Anzeigen (25.09.2026)
   const SYS_STICKER = {
     dup:    ['Duplikium', 'Duplikium — Kopie Master → Slave über den Duplikium-Wächter'],
     mt5:    ['Echo',      'Echo — dein MT5-Hedge-Copier auf dem PC'],
@@ -18250,6 +18258,7 @@
     mt5v2:  ['Echo V2',   'Echo V2 — Puls platziert im Master-Terminal, kein Hedge, kein Copier'],
     tvv2:   ['Orbit V2',  'Orbit V2 — Puls platziert in TradingView, kein Duplikum, kein Hedge'],
     wd:     ['Winning Day', 'Winning Days Farm — Puls platziert in TradingView, Fusion-Gegenhedge (intern Orbit V2)'],
+    tvv3:   ['Orbit V3',  'Orbit V3 — Puls platziert in TradingView, Fusion-Gegenhedge; schließt über das Userscript im Puls-Chrome, Radar als Backup'],
     tsv2:   ['Topstep V2', 'Topstep V2 — Puls platziert in TopstepX (Schalter „Puls für Topstep"), kein Hedge; P&L aus der Balance wie Orbit V2'],
     mirror: ['Mirror',    'Topstep Mirror — TopstepX-Master auf MetaApi-Slave'],
     tsx:    ['TopstepX',  'TopstepX — Position direkt auf dem Topstep-Konto']
@@ -18264,6 +18273,7 @@
     if(p.route === 'mt5')    return 'mt5'
     if(p.route === 'tvplus') return 'tvplus'
     if(tpIstWdPlan(p))       return 'wd'   // Winning Day vor Orbit V2 (25.09.2026)
+    if(tpIstOrbitV3(p))      return 'tvv3'
     if(routeIstV2(p.route))  return p.route
     if(typeof planMirrorRoute === 'function' && planMirrorRoute(p)) return 'mirror'
     return 'dup'
@@ -20806,6 +20816,7 @@
    * (liq_quelle 'konto_balance'); sonst kein Level beim Open, der Wächter rechnet nach, sobald tv.balance_start da ist ('balance_start').
    * master_sl bleibt null. */
   function hedgeIstWd(plan){
+    if(plan && plan.orbitV3) return false   // Orbit V3 (01.10.2026): normaler Master-SL am Hedge, kein Liquidations-Level
     const acc = (accounts || []).find(a => String(a.id) === String(plan && plan.masterAccountId))
     return !!((acc && acc.type === 'winning_days') || (plan && (plan.kontoTyp === 'winning_days' || plan.konto_typ === 'winning_days')) || Number(plan && plan.hedgeEur) > 0)
   }
@@ -32511,6 +32522,7 @@
       // Faktor des Winning-Days-Farm-Hedges (24.09.2026 spät, Spalte hedge_faktor mit .470): 1,0 = spiegelbildlich
       // zum Master-TP. Wie hedge_eur bewusst nicht in planToRow — geschrieben nur vom Plan-Popup auf dem Weg WD-Farm.
       hedgeFaktor: row.hedge_faktor != null ? Number(row.hedge_faktor) : null,
+      orbitV3: row.orbit_v3 === true,   // Orbit V3 (01.10.2026, sql/2026-10-01_trade_plans_orbit_v3.sql) — wie hedge_eur nur vom Plan-Popup geschrieben
       // Buy/Sell am Plan (Migration 2026-08-28): Teil von Finns
       // Jetzt-starten-Flow — Order komplett beim Planen erfasst.
       richtung:    (row.richtung === 'buy' || row.richtung === 'sell') ? row.richtung : null,
@@ -35624,6 +35636,7 @@
   const TP_ROUTE_LS = 'prophos_tp_route'
   let _tpRoute = 'dup'            // wird bei jedem Modal-Open gesetzt (Edit: aus plan.route)
   let _tpWd = false               // Winning Day (24.09.2026 abends): tvv2 + hedge_eur aus der Staffel, nur Funded-Futures
+  let _tpO3 = false               // Orbit V3 (01.10.2026): tvv2 + Fusion-Hedge mit der Farm-Rechnung, jedes Futures-Konto, Master-SL = Risiko Master
   let _tpMt5HedgeAccId = null     // Prophos-Account-ID des fixen Hedge — async aufgelöst
   // Hedge-Betrag für einen Winning-Day-Plan: bestehender Wert bleibt, sonst Staffel (Live-Balance − Kontogröße),
   // ohne Rechenbasis (kein DD am Konto) die kleinste Stufe — ein Winning Day ohne Hedge wäre kein Winning Day.
@@ -35649,7 +35662,10 @@
   // Fusion-Verlust am Master-TP — die Bedeutung, die Copier-Lots-Rechnung und Farmer-Abgleich schon kennen).
   const TP_WD_SLAVE_FIRM = 'Fusion Markets'
   const tpWdSlavePpl = () => { const p = FIRM_PRESETS[firmToPreset(TP_WD_SLAVE_FIRM)] || FIRM_PRESETS.fusion; return (p && p.ppl > 0) ? p.ppl : 0.85 }
-  const tpWdAktiv = () => _tpRoute === 'tvv2' && _tpWd
+  // tpWdAktiv = „Fusion-Hedge-Rechnung im Popup an" (Risiko Master/Slave, Multiplikator-Box, Slave fix Fusion) — seit 01.10.2026
+  // auch für Orbit V3; alles Winning-Day-Eigene (Staffel, Kontoart-Filter, TP-Spanne, kein SL) hängt an _tpWd allein.
+  const tpWdAktiv = () => _tpRoute === 'tvv2' && (_tpWd || _tpO3)
+  const tpO3Aktiv = () => _tpRoute === 'tvv2' && _tpO3
   // Alles Rechenbare aus den Feldern von Popup 1
   /* Multiplikator von Hand (25.09.2026, Koordination: Finn testet mit ×0,01 — Jacobs Plan wurde mit 250 $ / 60 € gespeichert, ×0,56,
    * 0,56 Lot, der Broker lehnte ab): Klick auf den Multiplikator-Kasten → Zahl eintippen; der Wert gilt, bis Risiko Master oder
@@ -35680,7 +35696,7 @@
   // Risiko Slave vorbelegen (nur ein leeres Feld): beim Bearbeiten aus dem Plan, sonst die Farmer-Staffel des Kontos —
   // dieselbe Quelle, die der Farmer für seinen Multiplikator nutzt (tpVorplanZeile.slaveEur über tpWdHedgeEur)
   function tpWdSlaveRiskVorbelegen(){
-    if(!tpWdAktiv()) return
+    if(!tpWdAktiv() || _tpO3) return   // Orbit V3: keine Farmer-Staffel — Risiko Master/Slave tippt Finn selbst
     // Risiko Master ($) = Stop-Distanz für die Lot-Rechnung: leer → NUR die Farmer-SL-Vorgabe des Kontos (wd_sl). Der
     // Max-Drawdown als zweite Quelle ist raus (Koordination 25.09.2026: 4.000 $ vorbelegt ergab Multiplikator 0,059 und die
     // Kachel „Master −4.000 $" — Finns Beispiel ist 250/100). Leer bleibt leer, Speichern bleibt erlaubt (hedge_eur aus der Staffel).
@@ -35809,7 +35825,8 @@
     document.getElementById('tp-route-mt5')?.classList.toggle('active', _tpRoute === 'mt5')
     document.getElementById('tp-route-tvplus')?.classList.toggle('active', _tpRoute === 'tvplus')
     document.getElementById('tp-route-mt5v2')?.classList.toggle('active', _tpRoute === 'mt5v2')
-    document.getElementById('tp-route-tvv2')?.classList.toggle('active', _tpRoute === 'tvv2' && !_tpWd)
+    document.getElementById('tp-route-tvv2')?.classList.toggle('active', _tpRoute === 'tvv2' && !_tpWd && !_tpO3)
+    document.getElementById('tp-route-o3')?.classList.toggle('active', _tpRoute === 'tvv2' && _tpO3)
     document.getElementById('tp-route-wd')?.classList.toggle('active', _tpRoute === 'tvv2' && _tpWd)
     document.getElementById('tp-route-tsv2')?.classList.toggle('active', _tpRoute === 'tsv2')
     // MT5-Weg: „Speichern & Starten" wird zu „Weiter" — dazwischen liegt der
@@ -35831,7 +35848,7 @@
     const v2 = routeIstV2(_tpRoute)
     // Winning Days Farm (24.09.2026 spät, Finn: „die Logik soll genauso bleiben wie bisher"): auf diesem V2-Weg bleiben
     // Risiko Master ($ = Stop Loss), Risiko Slave (€) und die Multiplikator-Box SICHTBAR — Slave ist fix Fusion, kein Dropdown.
-    const wdAn = _tpRoute === 'tvv2' && _tpWd
+    const wdAn = tpWdAktiv()   // Orbit V3 (01.10.2026) zeigt dieselben Hedge-Felder
     const v2weg = (el, aus) => { const f = el ? el.closest('.field') : null; if(f) f.style.display = aus ? 'none' : '' }
     v2weg(slaveSel, v2)
     v2weg(document.getElementById('tp-slave-risk'), v2 && !wdAn)
@@ -35863,6 +35880,9 @@
     // Wegen wird sie exakt wieder entfernt — dort ändert sich nichts.
     document.getElementById('tp-form-grid')?.classList.toggle('tp-v2', v2)
     document.getElementById('tp-form-grid')?.classList.toggle('tp-wd', wdAn)   // WD-Farm-Raster (25.09.2026): Risiko Slave neben Kontrakte, TP volle Breite
+    // Orbit V3 (01.10.2026): Risiko Master IST der Stop in TradingView (master_sl), Risiko Slave ohne Staffel — Hilfszeilen passend
+    { const hm = document.getElementById('tp-wd-hilfe-master'); if(hm) hm.textContent = _tpO3 ? '= Stop Loss in TradingView · Stop-Distanz für die Lots' : 'nur für die Lot-Rechnung — kein Stop in TradingView'
+      const hs = document.getElementById('tp-wd-hilfe-slave'); if(hs) hs.textContent = _tpO3 ? 'auf Fusion' : 'auf Fusion · Staffel-Vorschlag' }
     // Kontrakte-Feld je Weg (24.09.2026, Finns Screenshot: der Browser meckerte beim Speichern „Die zwei
     // nächstliegenden gültigen Werte sind 0,91 und 1,01" — step 0.1 ab min 0.01 stammt aus der Lots-Welt):
     // Orbit V2 = ganze Kontrakte (step 1, min 1), Echo V2 = Lots mit 0.01, alle anderen Wege wie bisher.
@@ -36779,7 +36799,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.905'
+  const OS_TAB_BUILD = '2026-09-22.906'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -37025,7 +37045,7 @@
       const _fin = document.getElementById('pf-final'); if(_fin) _fin.style.display = 'none'
       const _ft = document.getElementById('pf-foot'); if(_ft) _ft.style.display = 'none'
       _pfEchoKnopf(false)
-      const _inf = document.getElementById('pf-plan-info'); if(_inf) _inf.textContent = plan.route === 'tsv2' ? `Topstep V2 · ${plan.masterName || '—'} — Puls in TopstepX${tsPulsModus() === 'lesen' ? ' (nur lesen)' : ''}` : tpIstWdPlan(plan) ? `Winning Day · ${plan.masterName || '—'} — Puls in TradingView, Fusion-Gegenhedge` : `Orbit V2 · ${plan.masterName || '—'} — ohne Duplikum, ohne Hedge`
+      const _inf = document.getElementById('pf-plan-info'); if(_inf) _inf.textContent = plan.route === 'tsv2' ? `Topstep V2 · ${plan.masterName || '—'} — Puls in TopstepX${tsPulsModus() === 'lesen' ? ' (nur lesen)' : ''}` : tpIstWdPlan(plan) ? `Winning Day · ${plan.masterName || '—'} — Puls in TradingView, Fusion-Gegenhedge` : tpIstOrbitV3(plan) ? `Orbit V3 · ${plan.masterName || '—'} — Puls in TradingView, Fusion-Gegenhedge, Userscript im Puls-Chrome schließt` : `Orbit V2 · ${plan.masterName || '—'} — ohne Duplikum, ohne Hedge`
       document.getElementById('tpPreflightModal')?.classList.add('open')
     }
     const imPopup = !fern && document.getElementById('tpPreflightModal')?.classList.contains('open')
@@ -37625,7 +37645,7 @@
     if(!plan) return 'Plan ' + String(pid).slice(0, 8)
     if(routeIstOrbit(plan.route) && typeof tpOrbitWerte === 'function'){   // Orbit (23.09.2026)
       const w = tpOrbitWerte(plan)
-      const vor = tpIstWdPlan(plan) ? 'Winning Day · ' : ''
+      const vor = tpIstWdPlan(plan) ? 'Winning Day · ' : tpIstOrbitV3(plan) ? 'Orbit V3 · ' : ''
       return w.dir ? `${vor}${plan.masterName || '—'} · ${w.dir.toUpperCase()} ${w.lots} ${w.symbol}` : `${vor}${plan.masterName || '—'}`
     }
     const { order } = _tpOrderAusPlan(plan)
@@ -40225,6 +40245,9 @@
     // Winning Day (24.09.2026 abends): beim Bearbeiten = tvv2-Plan mit hedge_eur; neu = letzte Wahl
     _tpWd = _editPlan ? (_editPlan.route === 'tvv2' && _editPlan.hedgeEur > 0)
                       : (_tpRoute === 'tvv2' && localStorage.getItem('prophos_tp_wd') === '1')
+    // Orbit V3 (01.10.2026): beim Bearbeiten aus der Kennung am Plan, neu = letzte Wahl; schließt Winning Day aus
+    _tpO3 = _editPlan ? tpIstOrbitV3(_editPlan) : (_tpRoute === 'tvv2' && localStorage.getItem('prophos_tp_o3') === '1')
+    if(_tpO3) _tpWd = false
     // Kapitel „Ohne Hedge" (24.09.2026, Finn: „Ab jetzt wird es nicht mehr
     // gegengehedgt mit Realmoney"): beim ersten neuen Plan im hedgefreien
     // Kapitel dreht die gespeicherte Vorwahl einmalig auf den V2-Weg —
@@ -40255,7 +40278,7 @@
     // Läuft der Plan schon (open/review/…), ist die Route fix — der Save-Guard
     // verwirft die Wahl ohnehin, also den Regler ehrlich sperren statt so tun.
     const _segLocked = !!(_editPlan && _editPlan.status !== 'planned')
-    ;['tp-route-dup', 'tp-route-topstep', 'tp-route-mt5', 'tp-route-tvplus', 'tp-route-mt5v2', 'tp-route-tvv2', 'tp-route-wd', 'tp-route-tsv2'].forEach(id => {
+    ;['tp-route-dup', 'tp-route-topstep', 'tp-route-mt5', 'tp-route-tvplus', 'tp-route-mt5v2', 'tp-route-tvv2', 'tp-route-o3', 'tp-route-wd', 'tp-route-tsv2'].forEach(id => {
       const b = document.getElementById(id)
       if(b){ b.disabled = _segLocked; b.title = _segLocked ? 'Route ist fix, sobald der Trade läuft' : '' }
     })
@@ -40775,15 +40798,17 @@
       tpRecompute()
     }
     ;[['tp-route-dup', 'dup'], ['tp-route-topstep', 'topstep'], ['tp-route-mt5', 'mt5'], ['tp-route-tvplus', 'tvplus'],
-      ['tp-route-mt5v2', 'mt5v2'], ['tp-route-tvv2', 'tvv2'], ['tp-route-wd', 'tvv2'], ['tp-route-tsv2', 'tsv2']].forEach(([id, r]) => {
+      ['tp-route-mt5v2', 'mt5v2'], ['tp-route-tvv2', 'tvv2'], ['tp-route-o3', 'tvv2'], ['tp-route-wd', 'tvv2'], ['tp-route-tsv2', 'tsv2']].forEach(([id, r]) => {
       const b = document.getElementById(id)
       if(b && !b._tpHooked){
         b.addEventListener('click', () => {
           const wd = id === 'tp-route-wd'   // Winning Day = tvv2 + Staffel-Hedge, Dropdown nur Funded-Futures (24.09.2026 abends)
-          if(_tpRoute === r && _tpWd === wd) return
-          _tpRoute = r; _tpWd = wd
+          const o3 = id === 'tp-route-o3'   // Orbit V3 = tvv2 + Fusion-Hedge, jedes Futures-Konto (01.10.2026)
+          if(_tpRoute === r && _tpWd === wd && _tpO3 === o3) return
+          _tpRoute = r; _tpWd = wd; _tpO3 = o3
           localStorage.setItem(TP_ROUTE_LS, r)
           localStorage.setItem('prophos_tp_wd', wd ? '1' : '0')
+          localStorage.setItem('prophos_tp_o3', o3 ? '1' : '0')
           tpRouteApply()
           if(wd){
             // TP-Vorschlag aus der Firmen-Spanne des gewählten Kontos (wie der Farmer), nur wenn das Feld leer ist
@@ -41755,13 +41780,15 @@
     // Winning Days Farm (24.09.2026 spät): V2-Weg MIT klassischer Multiplikator-Rechnung — Risiko Master/Slave sind Pflicht,
     // Slave fix Fusion (kein Dropdown, kein Slave-Konto am Plan)
     const wd = _tpRoute === 'tvv2' && _tpWd
-    if(((!masterRisk || !slaveRisk) && (!v2 || wd)) || !masterQty){
-      msg(wd ? 'Risiko Master ($), Kontrakte und Risiko Slave (€) ausfüllen — daraus rechnet sich der Multiplikator.' : 'Risiko und Anzahl ausfüllen.', 'err'); return
+    // Orbit V3 (01.10.2026): dieselbe Multiplikator-Rechnung wie die Farm, aber Risiko Master = echter Stop Loss in TradingView
+    const o3 = tpO3Aktiv(), mitHedge = wd || o3
+    if(((!masterRisk || !slaveRisk) && (!v2 || mitHedge)) || !masterQty){
+      msg(mitHedge ? 'Risiko Master ($), Kontrakte und Risiko Slave (€) ausfüllen — daraus rechnet sich der Multiplikator.' : 'Risiko und Anzahl ausfüllen.', 'err'); return
     }
 
     const master = accounts.find(a => String(a.id) === String(masterId))
     const slave  = v2 ? null : accounts.find(a => String(a.id) === String(slaveId))
-    const mult = wd ? (_tpWdHand.mult > 0 ? _tpWdHand.mult : tpCalcMultiplier(master.firm, TP_WD_SLAVE_FIRM, masterRisk, masterQty, slaveRisk))   // Hand-Multiplikator gewinnt (25.09.2026)
+    const mult = mitHedge ? (_tpWdHand.mult > 0 ? _tpWdHand.mult : tpCalcMultiplier(master.firm, TP_WD_SLAVE_FIRM, masterRisk, masterQty, slaveRisk))   // Hand-Multiplikator gewinnt (25.09.2026)
                : v2 ? null : tpCalcMultiplier(master.firm, slave.firm, masterRisk, masterQty, slaveRisk)
 
     const planObj = {
@@ -41772,7 +41799,7 @@
       slaveName:  slave ? slave.name : null,
       slaveFirm:  slave ? slave.firm : null,
       // V2: kein eigenes Risiko-Feld — der SL ist das Risiko (Karte zeigt ihn als SL)
-      masterRisk: (v2 && !wd) ? (masterSlV2 ?? 0) : masterRisk, masterContracts: masterQty, slaveRisk: (v2 && !wd) ? null : slaveRisk, multiplier: mult,
+      masterRisk: (v2 && !mitHedge) ? (masterSlV2 ?? 0) : masterRisk, masterContracts: masterQty, slaveRisk: (v2 && !mitHedge) ? null : slaveRisk, multiplier: mult,
       masterTp,
       // Der Order-SL gehoert NICHT diesem Formular (31.08.2026) — beim
       // Bearbeiten unveraendert durchreichen. Ohne diese Zeile schreibt
@@ -41780,7 +41807,8 @@
       // Stop der bereits gespeicherten Order still weg.
       // Winning Days OHNE Stop Loss (25.09.2026, Finn — verbindliche Regel: „Bei Winning Days ist NIE ein Stop Loss drin. Wir geben
       // beim Planen nur einen Take Profit an"). Risiko Master bleibt reines Rechenfeld für den Multiplikator (master_risk).
-      masterSl: wd ? null : v2 ? masterSlV2 : (_editingPlanId
+      // Orbit V3 (01.10.2026, Finn: „mit normalem Master-SL"): Risiko Master ist der Stop, den Puls in TradingView setzt
+      masterSl: wd ? null : o3 ? masterRisk : v2 ? masterSlV2 : (_editingPlanId
         ? (tradePlans.find(x => String(x.id) === String(_editingPlanId))?.masterSl ?? null)
         : null),
       // Richtung nur auf den Routen mit Jetzt-starten-Flow (28.08.2026) —
@@ -41817,15 +41845,20 @@
         let k = null; try{ k = await v2RichtungKonflikt({ firm: master.firm, ohneId: _editingPlanId, frisch: true }) }catch(_){}
         if(k && k.lauf && k.lauf !== (_tpDir === 'sell' ? 'short' : 'long')){ msg(k.text + ' — nicht gespeichert (Richtungs-Schutz).', 'err'); return }
       }
-      if(_tpWd){
-        if(!masterTp){ msg('Winning Days Farm braucht einen Take Profit in $ (die Fusion-Gegenposition schließt an dieser Distanz).', 'err'); return }
+      if(_tpWd || _tpO3){
+        if(!masterTp){ msg(`${_tpO3 ? 'Orbit V3' : 'Winning Days Farm'} braucht einen Take Profit in $ (die Fusion-Gegenposition schließt an dieser Distanz).`, 'err'); return }
         if(!(mult > 0)){ msg('Multiplikator nicht rechenbar — Risiko Master ($), Kontrakte und Risiko Slave (€) prüfen.', 'err'); return }
         // Multiplikator-Logik wie bisher (Finn 24.09.2026 spät): hedge_faktor = Multiplikator (Chip/Bearbeiten), hedge_eur =
         // Lots × 0,85 × TP-Punkte = Fusion-Verlust am Master-TP (die Bedeutung, die Copier-Lots und Farmer-Abgleich kennen)
         v2Extra.hedge_faktor = Math.round(mult * 1000) / 1000
-        v2Extra.hedge_eur = tpWdHedgeEurAus(tpWdRechnung()) ?? tpWdHedgeEur(masterId, _editPlan && _editPlan.hedgeEur)
+        // Orbit V3: kein Staffel-Rückfall — ohne rechenbaren Betrag gibt es keinen Hedge, also nicht speichern
+        v2Extra.hedge_eur = tpWdHedgeEurAus(tpWdRechnung()) ?? (_tpO3 ? null : tpWdHedgeEur(masterId, _editPlan && _editPlan.hedgeEur))
+        if(_tpO3 && !(v2Extra.hedge_eur > 0)){ msg('Orbit V3: Hedge-Betrag nicht rechenbar — Take Profit, Kontrakte und Risiko prüfen.', 'err'); return }
       } else v2Extra.hedge_faktor = null
-    } else if(v2){ v2Extra.hedge_eur = null; v2Extra.hedge_faktor = null }
+      // Orbit V3 → hedge_eur MUSS weg, wenn derselbe Plan auf Orbit V2 zurückgestellt wird: sonst wäre er ab jetzt ein Winning Day
+      if(!_tpWd && !_tpO3 && _editPlan && _editPlan.orbitV3) v2Extra.hedge_eur = null
+      v2Extra.orbit_v3 = !!_tpO3
+    } else if(v2){ v2Extra.hedge_eur = null; v2Extra.hedge_faktor = null; v2Extra.orbit_v3 = false }
     try{
       let savedPlanId = null
       if(_editingPlanId){
