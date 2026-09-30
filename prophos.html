@@ -27071,8 +27071,8 @@
     if(!acc) return
     // netPayouts: erhaltene Payouts gegenrechnen — sonst zeigt die Bilanz eines geblowten
     // Accounts nur die Kosten und unterschlägt, was er vorher eingebracht hat.
-    const gkEur = (typeof calcReingesteckdEur === 'function') ? calcReingesteckdEur(acc, { netPayouts: true }) : 0
-    const { gainEur, lossEur } = (typeof calcAccountGainLossEur === 'function') ? calcAccountGainLossEur(acc) : { gainEur:0, lossEur:0 }
+    const gkEur = (typeof calcReingesteckdEur === 'function') ? calcReingesteckdEur(acc, { netPayouts: true, mitWdHedge: true }) : 0   // Anzeige: mit WD-Fusion-Hedge (30.09.2026)
+    const { gainEur, lossEur } = (typeof calcAccountGainLossEur === 'function') ? calcAccountGainLossEur(acc, { mitWdHedge: true }) : { gainEur:0, lossEur:0 }
     const fmt = n => Math.abs(n).toLocaleString('de-DE', { minimumFractionDigits:2, maximumFractionDigits:2 }) + ' €'
     const nameEl = document.getElementById('blownSummaryAccName')
     if(nameEl) nameEl.textContent = acc.name
@@ -27711,12 +27711,12 @@
     // netPayouts: erhaltene Payouts werden gegengerechnet — sie senken die echten Kosten
     // des Accounts. (Der Hedge-Vorschlag im Trade-Plan rechnet bewusst weiter brutto.)
     const adGkEur = (!adIsLive && typeof calcReingesteckdEur === 'function')
-      ? calcReingesteckdEur(acc, { netPayouts: true }) : null
+      ? calcReingesteckdEur(acc, { netPayouts: true, mitWdHedge: true }) : null   // Anzeige: mit WD-Fusion-Hedge (30.09.2026)
     const adGkStr = adGkEur != null
       ? (adGkEur < 0 ? '−' : '') + Math.abs(adGkEur).toLocaleString('de-DE', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + ' €'
       : '—'
     // Aufschlüsselung: brutto + abgezogene Payouts (über die ganze Vorgänger-Kette)
-    const adGkGross = (!adIsLive && typeof calcReingesteckdEur === 'function') ? calcReingesteckdEur(acc) : null
+    const adGkGross = (!adIsLive && typeof calcReingesteckdEur === 'function') ? calcReingesteckdEur(acc, { mitWdHedge: true }) : null
     const adPayoutsEur = (adGkGross != null && adGkEur != null) ? (adGkGross - adGkEur) : 0
     const adFmtEur = v => Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + ' €'
     const adGkSub = adPayoutsEur > 0.005
@@ -27728,7 +27728,7 @@
     // nachschauen" (14.07.2026, Finns Ask).
     const adArchive = (typeof getArchive === 'function') ? getArchive() : {}
     const adIsBlown = adArchive[acc.id]?.reason === 'blown'
-    const adGainLoss = (adIsBlown && typeof calcAccountGainLossEur === 'function') ? calcAccountGainLossEur(acc) : null
+    const adGainLoss = (adIsBlown && typeof calcAccountGainLossEur === 'function') ? calcAccountGainLossEur(acc, { mitWdHedge: true }) : null
 
     // Fortschritts-Ziel (10.09.2026): "3/5 Winning Days" als eigene Kachel
     const adZiel = (typeof zielFortschritt === 'function') ? zielFortschritt(acc) : null
@@ -27886,8 +27886,11 @@
           const otherIsLive = isMaster
             ? accounts.find(x=>String(x.id)===String(p.slaveAccountId))?.type==='live'
             : accounts.find(x=>String(x.id)===String(p.masterAccountId))?.type==='live'
-          const otherCcy = isMaster ? ((FIRM_PRESETS[firmToPreset(p.slaveFirm)]||FIRM_PRESETS.projectx).currency) : '$'
-          const otherLabel = isMaster ? 'Slave' : 'Master'
+          // WD-Plan mit Fusion-Gegenhedge ohne Slave-Konto (30.09.2026, Finn: stand als „— → Slave · Slave: +$778,86" da — das
+          // Hedge-Ergebnis ist aber Euro): „Winning Day → Fusion-Hedge" und „Hedge: +778,86 €"; zählt in die Gesamtkosten (🔴)
+          const wdHedge = isMaster && planHatWdFusionHedge(p)
+          const otherCcy = wdHedge ? '€' : isMaster ? ((FIRM_PRESETS[firmToPreset(p.slaveFirm)]||FIRM_PRESETS.projectx).currency) : '$'
+          const otherLabel = wdHedge ? 'Hedge' : isMaster ? 'Slave' : 'Master'
           const otherCls = otherPl>=0?'color:#16a34a':'color:#dc2626'
           // Klick öffnet „Trade bearbeiten" (16.09.2026, Finn: „auf die Trades
           // drücken und im Nachhinein P&L bearbeiten — Finanzen sollen sich
@@ -27898,12 +27901,12 @@
           return `<div data-ad-plan="${escapeHtml(String(p.id))}" title="Klicken: Trade bearbeiten (P&L, Notiz)" style="display:flex;align-items:flex-start;gap:12px;padding:12px 0;border-bottom:1px solid var(--line);cursor:pointer">
             <span style="width:8px;height:8px;border-radius:50%;background:${pl>=0?'#16a34a':'#dc2626'};margin-top:5px;flex-shrink:0"></span>
             <div style="flex:1;min-width:0">
-              <div style="font-weight:600;font-size:13px">${escapeHtml(isMaster?(p.slaveName||'—'):(p.masterName||'—'))} <span style="font-size:11px;color:var(--sub);font-weight:400">→ ${isMaster?'Slave':'Master'}</span> <span style="font-size:11px;color:var(--sub-2);font-weight:400">✎</span></div>
+              <div style="font-weight:600;font-size:13px">${escapeHtml(wdHedge ? 'Winning Day' : isMaster?(p.slaveName||'—'):(p.masterName||'—'))} <span style="font-size:11px;color:var(--sub);font-weight:400">→ ${wdHedge ? 'Fusion-Hedge' : isMaster?'Slave':'Master'}</span> <span style="font-size:11px;color:var(--sub-2);font-weight:400">✎</span></div>
               <div style="font-size:11.5px;color:var(--sub);margin-top:2px">${escapeHtml(p.status==='completed'?'Erledigt':'Offen')} · ${dateLabel}</div>
             </div>
             <div style="text-align:right">
               <div style="font-weight:700;font-size:13px;${plCls}">${pl>=0?'+':''}$${pl.toLocaleString('de-DE',{minimumFractionDigits:0})}</div>
-              ${otherHasPl ? `<div style="font-size:10.5px;${otherCls};margin-top:2px">${otherLabel}${otherIsLive?' 🔴':''}: ${otherPl>=0?'+':''}${otherCcy==='$'?'$':''}${Number(otherPl).toLocaleString('de-DE',{minimumFractionDigits:0})}${otherCcy!=='$'?otherCcy:''}</div>` : ''}
+              ${otherHasPl ? `<div style="font-size:10.5px;${otherCls};margin-top:2px">${otherLabel}${(otherIsLive || wdHedge)?' 🔴':''}: ${otherPl>=0?'+':''}${otherCcy==='$'?'$':''}${Number(otherPl).toLocaleString('de-DE',{minimumFractionDigits:0})}${otherCcy!=='$'?otherCcy:''}</div>` : ''}
             </div>
           </div>`
         } else {
@@ -36230,7 +36233,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.863'
+  const OS_TAB_BUILD = '2026-09-22.864'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -40208,9 +40211,20 @@
     return sum
   }
 
+  /* WINNING-DAY-FUSION-HEDGE IN DEN GESAMTKOSTEN (30.09.2026, Finn am Account-Detail „150k Apex …0008 → Funded" (Moritz):
+   * „Die Winning-Days-Hedge-Kosten zählen nicht in die Gesamtkosten des Accounts. Das sind aber auch Kosten vom Account.").
+   * WD-Pläne (Farm-Weg) haben KEIN Slave-Konto — liveHedgeCostEur sah sie nie. Der Fusion-Gegenhedge steht in hedge_eur bzw.
+   * mt5_baseline.hedge, sein Ergebnis in slave_pl, und das ist bereits EUR (dieselbe Zahl wie die wd_hedge-Buchung auf dem
+   * Fusion-Konto, z. B. Plan 528d9b58: slave_pl 778,86 = wd_hedge +778,86 €) — kein FX. Doppelt zählt nichts: liveHedgeCostEur
+   * nimmt nur Pläne MIT Live-Slave-Konto. Nur mit opts.mitWdHedge (reine Anzeigen: Account-Detail, Blown-Bilanz) — die
+   * Hedge-GRÖSSEN („Gesamtkosten übernehmen" im Trade-Plan, Futures vorplanen) rechnen bis zu Finns Entscheidung ohne. */
+  function planHatWdFusionHedge(p){
+    return !!p && !p.slaveAccountId && ((Number(p.hedgeEur) || 0) > 0 || !!(p.mt5Baseline && p.mt5Baseline.hedge))
+  }
   function calcReingesteckdEur(masterAcc, opts){
     if(!masterAcc) return 0
     const netPayouts = !!(opts && opts.netPayouts)
+    const mitWdHedge = !!(opts && opts.mitWdHedge)
     let totalCostEur = 0  // Berechnung in EUR
     const fxUsdEur = window._fxUsdEur || 0.85
     const planList = (typeof tradePlans !== 'undefined' && Array.isArray(tradePlans)) ? tradePlans : []
@@ -40237,10 +40251,20 @@
       }
       return c
     }
+    // WD-Fusion-Hedge als Kosten (s. o.): slavePl ist EUR — Gewinn des Hedges senkt, Verlust erhöht die Kosten
+    const wdHedgeCostEur = (accId) => {
+      if(!mitWdHedge) return 0
+      let c = 0
+      for(const p of planList){
+        if(p.status !== 'completed' || String(p.masterAccountId) !== String(accId) || p.slavePl == null || !planHatWdFusionHedge(p)) continue
+        c += -Number(p.slavePl)
+      }
+      return c
+    }
 
     // 1. Aktiver Account: Kaufpreis + eigenes Netto-Live-Hedge
     if(masterAcc.purchaseCost) totalCostEur += Number(masterAcc.purchaseCost)
-    totalCostEur += liveHedgeCostEur(masterAcc.id)
+    totalCostEur += liveHedgeCostEur(masterAcc.id) + wdHedgeCostEur(masterAcc.id)
     if(netPayouts) totalCostEur -= calcAccountPayoutsEur(masterAcc.id)
 
     // 2. Komplette Vorgänger-Kette ablaufen (über archived successorId, Schritt für Schritt zurück)
@@ -40261,7 +40285,7 @@
 
       // Kaufpreis + Netto-Live-Hedge dieses Vorgängers (EUR)
       if(archAcc.purchaseCost) totalCostEur += Number(archAcc.purchaseCost)
-      totalCostEur += liveHedgeCostEur(archAcc.id)
+      totalCostEur += liveHedgeCostEur(archAcc.id) + wdHedgeCostEur(archAcc.id)
       if(netPayouts) totalCostEur -= calcAccountPayoutsEur(archAcc.id)
 
       // Eine Ebene weiter zurück in der Kette
@@ -40282,7 +40306,7 @@
   // Verlust-Seite getrennt statt genettet, für die Blown-Account-Übersicht (14.07.2026).
   // Gleiche Filter-Logik wie liveHedgeCostEur() in calcReingesteckdEur(): nur abgeschlossene
   // Trades, nur wo DIESER Account Master war und der Slave ein Live-Account ist.
-  function calcAccountGainLossEur(masterAcc){
+  function calcAccountGainLossEur(masterAcc, opts){
     if(!masterAcc) return { gainEur: 0, lossEur: 0 }
     const fxUsdEur = window._fxUsdEur || 0.85
     const planList = (typeof tradePlans !== 'undefined' && Array.isArray(tradePlans)) ? tradePlans : []
@@ -40295,6 +40319,11 @@
         let plEur = Number(p.slavePl)
         const slavePreset = FIRM_PRESETS[firmToPreset(p.slaveFirm)] || FIRM_PRESETS.projectx
         if(slavePreset.currency !== '€') plEur = plEur * fxUsdEur
+        if(plEur >= 0) gainEur += plEur
+        else lossEur += -plEur
+      } else if(opts && opts.mitWdHedge && p.slavePl != null && planHatWdFusionHedge(p)){
+        // WD-Fusion-Hedge (30.09.2026, s. calcReingesteckdEur): slavePl ist bereits EUR
+        const plEur = Number(p.slavePl)
         if(plEur >= 0) gainEur += plEur
         else lossEur += -plEur
       }
