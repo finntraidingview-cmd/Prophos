@@ -13962,7 +13962,7 @@ def win_taste_text(key, modifiers=0):
     t = PULS_WIN_TASTEN.get(k) or (k if len(k) == 1 and k.isalnum() else None)
     if t is None:
         return None
-    return ("^" if int(modifiers or 0) & 2 else "") + t
+    return ("^" if int(modifiers or 0) & 2 else "") + ("+" if int(modifiers or 0) & 8 else "") + t
 
 
 def puls_fenster_waehlen(fenster, titel):
@@ -14744,6 +14744,42 @@ def _cdp_ticket_fuellen(s, st, plan, symbol, opts, trail):
 
     def knopf():
         return st.get("kauf_knopf") if isinstance(st.get("kauf_knopf"), dict) else {}
+
+    # --- Order-Ticket zu? (Live 30.09.2026 04:12–04:14 Dubai, Moritz pc-usq1i6, Apex …0008, NQZ6: dreimal „Symbol NQ nicht
+    # einstellbar (Ticket zeigt '-')" — Chart + Watchlist standen richtig auf NQZ2026, aber puls_augen zeigte ticket.da=false:
+    # das Order-Panel rechts war schlicht zu, und der neue Puls öffnete es nie.) Wie der alte Puls: Shift+T ist ein UMSCHALTER
+    # (22.09.2026: ein im Aufbau „leer" gesehenes Panel wurde damit zugemacht) — also erst nach 4 leeren Blicken über ≥ 3 s,
+    # Werbung vorher weg, Fokus per Klick in den Chart, danach Beweis. Geht es nicht auf: klare Meldung statt „Symbol".
+    if not ticket().get("da") and not knopf():
+        t0, leer = time.time(), 0
+        while leer < 4 or time.time() - t0 < 3.0:
+            _warte(0.6, 0.25)
+            st = s.stand(opts)
+            if ticket().get("da") or knopf():
+                break
+            leer += 1
+            if time.time() - t0 > 8.0:
+                break
+        if not ticket().get("da") and not knopf():
+            if hasattr(s, "werbung_weg"):
+                s.werbung_weg()
+            g = s.lese_js(WIN_GEO_JS) or {}
+            bw, bh = float(g.get("innerWidth") or 0), float(g.get("innerHeight") or 0)
+            if bw > 200 and bh > 200:
+                # mittig-links im oberen Chart-Drittel: weit weg von BUY/SELL oben links und vom Broker-Panel unten
+                s.klick([bw * 0.35 - 10, bh * 0.35 - 10, 20.0, 20.0], "Chart (Fokus für Shift+T)")
+                _warte(0.25, 0.15)
+            s.taste("t", 8)
+            trail.append("Order-Ticket war zu — per Shift+T geöffnet")
+            for _ in range(8):
+                _warte(0.6, 0.3)
+                st = s.stand(opts)
+                if ticket().get("da") or knopf():
+                    break
+            if not ticket().get("da") and not knopf():
+                return (False, "asset", "Order-Ticket rechts ist zu und ging auch mit Shift+T nicht auf — in TradingView oben "
+                        "rechts auf „Trade“ klicken, sodass Market/Limit/Stop und Units zu sehen sind.", "asset", st, None)
+            trail.append("Order-Ticket offen (bewiesen)")
 
     # --- Symbol
     for _v in range(2):

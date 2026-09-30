@@ -3212,7 +3212,8 @@ def test_puls_win_maus():
             print("  ✗ Win-Maus: " + text)
             ok = False
     chk(ob.win_taste_text("a", 2) == "^a" and ob.win_taste_text("Tab") == "{TAB}" and ob.win_taste_text("ArrowDown") == "{DOWN}"
-        and ob.win_taste_text("Escape") == "{ESC}" and ob.win_taste_text("Enter") == "{ENTER}" and ob.win_taste_text("F13") is None,
+        and ob.win_taste_text("Escape") == "{ESC}" and ob.win_taste_text("Enter") == "{ENTER}" and ob.win_taste_text("F13") is None
+        and ob.win_taste_text("t", 8) == "+t",
         "Tasten → send_keys")
     f1 = {"hwnd": 11, "text": "MNQZ2026 30,481.00 ▼ −0.28% Unnamed - Google Chrome", "klasse": "Chrome_WidgetWin_1", "sichtbar": True}
     f2 = {"hwnd": 22, "text": "Tradovate - Google Chrome", "klasse": "Chrome_WidgetWin_1", "sichtbar": True}
