@@ -1833,28 +1833,31 @@
   /* Account type badges */
   #dashboard-view .type-badge{
     display:inline-flex;align-items:center;gap:5px;
-    padding:3px 8px;border-radius:6px;
+    padding:3px 8px;border-radius:6px;background:#fff;border:1px solid transparent;
     font-size:11px;font-weight:600;letter-spacing:.02em;
   }
-  /* Challenge / Phase 1 / Phase 2 (30.09.2026, Finn): Challenge sah genauso aus wie Phase 1, Phase 2 nur einen
-     Hauch dunkler — unter „Typ" nicht zu trennen. Die Phasen bleiben eine Familie: Phase 1 helles Gelb-Amber,
-     Phase 2 kräftiges Orange. Challenge ruhiges Schiefergrau (30.09.2026, Finn: das Rosé von .837 „mies hässlich") —
-     neben den farbigen Typen klar getrennt, nicht grell, Schrift ≈ 9:1 auf dem Tint. */
-  #dashboard-view .type-challenge{background:rgba(71,84,103,.1);color:#344054}
-  #dashboard-view .type-phase1{background:rgba(250,197,21,.18);color:#A15C07}
-  #dashboard-view .type-phase2{background:rgba(249,115,22,.12);color:#C2410C}
-  #dashboard-view .type-funded{background:var(--violet-tint);color:var(--violet)}
-  #dashboard-view .type-funded_cfd{background:rgba(73,150,255,.12);color:#1F6FD6}   /* Funded CFD (29.09.2026): Blau, getrennt vom Futures-Violett */
-  #dashboard-view .type-waiting_payout{background:#1F6FD6;color:#fff}   /* Funded CFD mit Waiting for Payout (29.09.2026): volles Blau = Zustand, kein eigener Typ */
-  #dashboard-view .type-winning_days{background:rgba(22,200,198,.14);color:#0E7A78}   /* Winning Days (25.09.2026): Teal wie die V2-Sticker */
+  /* Typ-Palette „Outline" (30.09.2026, Finn wählte Variante C aus drei Entwürfen, „nur ohne diese dicken Sachen"):
+     Rosé (.837) und Graphit (.842) fand er hässlich, Orange/Gelb/Grau passen nicht zu Grün, Blau, Violett — jetzt EINE
+     kühle Farbwelt, in OKLCH gerechnet mit gleicher Helligkeit/Buntheit je Rolle (Schrift L .46 · Rand L .86), nur der
+     Farbton wandert: Live Grün · WD Mint · Challenge Aqua · Phase Blau · Funded CFD Indigo · Funded Lila. Weiß mit 1-px-Rand,
+     keine Füllung. Challenge liegt am weitesten von den Phasen weg; Phase 2 = dieselbe Farbe kräftiger (Rand + Schrift).
+     Waiting for Payout ist ein Zustand von Funded CFD: dessen Ton mit Punkt, wie Live. Schrift auf Weiß ≥ 6:1. */
+  #dashboard-view .type-challenge{border-color:#90E1EA;color:#006B7D}
+  #dashboard-view .type-phase1{border-color:#AED4FF;color:#1157A4}
+  #dashboard-view .type-phase2{border-color:#7CB4FC;color:#003E8F}
+  #dashboard-view .type-funded{border-color:#DFC3FA;color:#6E3D93}
+  #dashboard-view .type-funded_cfd{border-color:#C9CBFF;color:#5049A2}
+  #dashboard-view .type-waiting_payout{border-color:#817CE9;color:#5049A2}
+  #dashboard-view .type-waiting_payout::before{content:'';width:6px;height:6px;border-radius:999px;background:#5A51BA;box-shadow:0 0 0 2px #E8EAFF}
+  #dashboard-view .type-winning_days{border-color:#9AE3CB;color:#006F4F}
   #dashboard-view .acc-wd-toggle{margin-left:6px;padding:2px 7px;border-radius:6px;border:1px dashed var(--border);background:transparent;color:var(--sub);font-size:10.5px;font-weight:600;cursor:pointer;white-space:nowrap;vertical-align:middle}
   #dashboard-view .acc-wd-toggle:hover{border-color:#0E7A78;color:#0E7A78;background:rgba(22,200,198,.08)}
   #dashboard-view .acc-wd-toggle:disabled{opacity:.5;cursor:default}
   #dashboard-view .acc-wd-toggle.acc-wp-toggle:hover{border-color:#1F6FD6;color:#1F6FD6;background:rgba(73,150,255,.08)}
-  #dashboard-view .type-live{background:rgba(18,183,106,.1);color:#058a50}
+  #dashboard-view .type-live{border-color:#B4DFAE;color:#1B6A14}
   #dashboard-view .type-live::before{
-    content:'';width:6px;height:6px;border-radius:999px;background:#12B76A;
-    box-shadow:0 0 0 2px rgba(18,183,106,.2);
+    content:'';width:6px;height:6px;border-radius:999px;background:#4AA342;
+    box-shadow:0 0 0 2px #DDF5D9;
   }
 
   /* Live-account cards in Topstep section */
@@ -35992,7 +35995,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.847'
+  const OS_TAB_BUILD = '2026-09-22.848'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
