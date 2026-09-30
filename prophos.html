@@ -27759,7 +27759,13 @@
     if(h) todoHaken(h.dataset.todoId, h.checked)
   })
 
-  const ACC_TYPE_RANG = { challenge: 0, phase1: 1, phase2: 2, funded: 3, funded_cfd: 3, winning_days: 4, live: 5 }
+  /* Reihenfolge der Accounts-Liste (30.09.2026, Finn: „Die Sortierung nach Typ ist gemischt" — es kam Waiting for Payout,
+   * Funded CFD, Waiting for Payout, Funded CFD, Funded Futures … durcheinander, weil funded und funded_cfd sich Rang 3
+   * teilten). Jetzt jede Art eine eigene Gruppe: Challenge · Phase 1 · Phase 2 · Funded Futures · Funded CFD · Winning Days ·
+   * Waiting for Payout · Live. „Waiting for Payout" ist keine Kontoart in der DB (funded_cfd mit waiting_payout_since,
+   * 29.09.2026), bekommt hier aber einen eigenen Rang — accTypRang erkennt es wie accTypChipHtml. */
+  const ACC_TYPE_RANG = { challenge: 0, phase1: 1, phase2: 2, funded: 3, funded_cfd: 4, winning_days: 5, waiting_payout: 6, live: 7 }
+  const accTypRang = a => ACC_TYPE_RANG[a && a.type === 'funded_cfd' && a.waitingPayoutSince ? 'waiting_payout' : a?.type] ?? 9
   /* Vierte Kontoart „Winning Days" (Finn 25.09.2026; Koordination: die Migration stellte nur ein Konto um, 94 Funded-Konten
    * muss Finn selbst zuordnen): kleiner Knopf neben dem Typ-Chip — bei Funded-Konten einer Futures-Firma „→ Winning Days",
    * bei Winning-Days-Konten „→ Funded". Schreibt account_type + Notiz-Zeile mit Datum auf DIESELBE Zeile (accWdUmstellen),
@@ -28050,9 +28056,9 @@
       if(qNorm && !accHaystack(a).includes(qNorm)) return false
       return true
     })
-    // Reihenfolge nach Kontoart (Koordination 25.09.2026, vierte Kontoart „Winning Days"): Challenge · Phase 1 · Phase 2 ·
-    // Funded · Winning Days · Live, innerhalb einer Art bleibt die bisherige Reihenfolge (stabil).
-    .map((a, i) => [a, i]).sort((x, y) => (ACC_TYPE_RANG[x[0].type] ?? 9) - (ACC_TYPE_RANG[y[0].type] ?? 9) || x[1] - y[1]).map(x => x[0])
+    // Reihenfolge nach Kontoart (Koordination 25.09.2026; seit 30.09.2026 jede Art eigene Gruppe inkl. Waiting for Payout,
+    // s. ACC_TYPE_RANG), innerhalb einer Art bleibt die bisherige Reihenfolge (stabil).
+    .map((a, i) => [a, i]).sort((x, y) => accTypRang(x[0]) - accTypRang(y[0]) || x[1] - y[1]).map(x => x[0])
     const archivedCount = accounts.filter(a => archive[a.id]?.archived).length
     const archCounter = document.getElementById('archived-counter')
     if(archCounter){
@@ -35997,7 +36003,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.850'
+  const OS_TAB_BUILD = '2026-09-22.851'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
