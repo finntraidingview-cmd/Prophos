@@ -36,8 +36,10 @@ def lade(fake_requests):
           "SUPABASE_SERVICE_KEY": "x", "_sb_headers": lambda prefer=None: {}}
     code = "\n".join([zuweisung(n) for n in ("SB_BREMSE_N", "SB_BREMSE_STUFEN", "SB_BREMSE_HALB_S", "SB_TIMEOUT", "SB_PROBE_TIMEOUT")]
                      + [klasse] + [block(n) for n in ("sb_bremse_neu", "sb_bremse_vorher", "sb_bremse_nach")]
-                     + ['_SB_BREMSE = {"rest": sb_bremse_neu(), "auth": sb_bremse_neu()}', "_SB_BREMSE_LOCK = threading.Lock()"]
-                     + [block(n) for n in ("sb_bremse_stand", "sb_bremse_rest_s", "_sb_probe", "_sb_anfrage", "_sb_pruefen")])
+                     + ['_SB_BREMSE = {"rest": sb_bremse_neu(), "auth": sb_bremse_neu()}', "_SB_BREMSE_LOCK = threading.Lock()",
+                        '_SB_GEHEILT_AT = {"rest": 0.0, "auth": 0.0}']
+                     + [block(n) for n in ("_sb_bremse_melden", "schleifen_pause", "_ist_db_fehler", "sb_bremse_stand",
+                                           "sb_bremse_rest_s", "_sb_probe", "_sb_anfrage", "_sb_pruefen")])
     exec(code, ns)
     return ns
 
@@ -174,9 +176,18 @@ def main():
     r = a["_sb_anfrage"]("GET", "u")
     check(r.status_code == 200 and lage["proben"] == 1 and lage["anfragen"] == 1 and a["_SB_BREMSE"]["rest"]["stufe"] == -1,
           "Erholung: eine Probe, dann die Anfrage selbst, Sicherung zu")
+    check(a["_SB_GEHEILT_AT"]["rest"] > 0, "Heil-Zeitpunkt gesetzt (Karenz der Reader-Wacht)")
     st = a["sb_bremse_stand"]()
     check(st["rest"]["zustand"] == "normal" and st["auth"]["zustand"] == "normal" and "letzter" not in st["rest"],
           "Stand für /health: normal, keine Fehlertexte nach außen")
+
+    # 3b) Schleifen-Pausen: ohne DB-Fehler Takt; Wächter ohne Exponential (≤ 120 s), Kompass/Reader-Wacht verdoppeln bis 300 s
+    P = a["schleifen_pause"]
+    check(P(30, 0, 0, 120, verdoppeln=False) == 30 and P(30, 5, 0, 120, verdoppeln=False) == 30
+          and P(30, 3, 55, 120, verdoppeln=False) == 55 and P(30, 3, 999, 120, verdoppeln=False) == 120,
+          "Wächter: Takt, mindestens bis die Sicherung fragt, höchstens 120 s — kein Exponential")
+    check([P(60, n, 0, 300) for n in range(5)] == [60, 120, 240, 300, 300] and P(30, 1, 100, 300) == 100,
+          "Kompass/Reader-Wacht: 60 → 120 → 240 → 300 s, Rest der Sicherung als Untergrenze")
 
     # 4) /puls-regel: Fehl-Cache — ohne guten Stand 10 s lang False ohne DB-Read; Netzfehler lösen keinen Rückfall-Read aus
     src = open(APP, encoding="utf-8").read()

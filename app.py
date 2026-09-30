@@ -713,7 +713,7 @@ def duplikum_session():
         return jsonify({"ok": False, "error": "Nicht angemeldet"}), 401
     uid = ""
     try:
-        r = requests.get(f"{SUPABASE_URL}/auth/v1/user", timeout=12,
+        r = _sb_anfrage("GET", f"{SUPABASE_URL}/auth/v1/user", dienst="auth", timeout=12,
                          headers={"apikey": SUPABASE_ANON_KEY, "Authorization": f"Bearer {token}"})
         uid = str((r.json() or {}).get("id") or "") if r.status_code == 200 else ""
         if not uid:
@@ -2912,6 +2912,44 @@ def sb_bremse_nach(z, jetzt, ok, probe=False, fehler=""):
 
 _SB_BREMSE = {"rest": sb_bremse_neu(), "auth": sb_bremse_neu()}
 _SB_BREMSE_LOCK = threading.Lock()
+_SB_GEHEILT_AT = {"rest": 0.0, "auth": 0.0}     # wann die Sicherung zuletzt von gesperrt auf normal ging (Reader-Wacht-Karenz)
+
+
+def _sb_bremse_melden(dienst, ok, probe=False, fehler=""):
+    with _SB_BREMSE_LOCK:
+        z = _SB_BREMSE[dienst]
+        war = z["stufe"]
+        sb_bremse_nach(z, time.time(), ok, probe=probe, fehler=fehler)
+        if war >= 0 and z["stufe"] < 0:
+            _SB_GEHEILT_AT[dienst] = time.time()
+            print(f"[sb-bremse] ✅ {dienst}: Supabase antwortet wieder — Sicherung zu", flush=True)
+        elif war < 0 and z["stufe"] >= 0:
+            print(f"[sb-bremse] ⛔ {dienst}: {SB_BREMSE_N} Fehler in Folge ({z['letzter']}) — {SB_BREMSE_STUFEN[0]} s gesperrt", flush=True)
+
+
+def schleifen_pause(normal_s, fehler_n, rest_s, deckel_s, verdoppeln=True):
+    """REIN RECHNEND (testbar): Pause einer Hintergrund-Schleife. Ohne DB-Fehler normal_s; mit n DB-Fehlern in Folge
+    normal·2^n (verdoppeln) bzw. normal, mindestens bis die Sicherung wieder fragt (rest_s), höchstens deckel_s."""
+    if fehler_n <= 0:
+        return float(normal_s)
+    basis = normal_s * (2 ** min(int(fehler_n), 10)) if verdoppeln else normal_s
+    return float(min(deckel_s, max(basis, rest_s, normal_s)))
+
+
+def _ist_db_fehler(e):
+    return bool(getattr(e, "sb_netz", False)) or _SB_BREMSE["rest"]["stufe"] >= 0
+
+
+def _schleife_schlafen(sek, db_pause=False):
+    """Schläft sek Sekunden in 5-s-Schritten. db_pause: aufwachen, sobald die Sicherung wieder zu ist (Supabase antwortet)."""
+    ende = time.time() + sek
+    while True:
+        rest = ende - time.time()
+        if rest <= 0:
+            return
+        time.sleep(min(rest, 5.0))
+        if db_pause and _SB_BREMSE["rest"]["stufe"] < 0:
+            return
 
 
 def sb_bremse_stand(jetzt=None):
@@ -2964,19 +3002,16 @@ def _sb_anfrage(methode, url, dienst="rest", kritisch=False, timeout=None, **kw)
         try:
             ok = _sb_probe(dienst)
         finally:
-            with _SB_BREMSE_LOCK:
-                sb_bremse_nach(_SB_BREMSE[dienst], time.time(), ok, probe=True, fehler="" if ok else "probe")
+            _sb_bremse_melden(dienst, ok, probe=True, fehler="" if ok else "probe")
         if not ok:
             raise SupabaseGesperrt(sb_bremse_rest_s(dienst), dienst)
     try:
         r = requests.request(methode, url, timeout=timeout or SB_TIMEOUT, **kw)
     except requests.exceptions.RequestException as e:
-        with _SB_BREMSE_LOCK:
-            sb_bremse_nach(_SB_BREMSE[dienst], time.time(), False, fehler=type(e).__name__)
+        _sb_bremse_melden(dienst, False, fehler=type(e).__name__)
         e.sb_netz = True
         raise
-    with _SB_BREMSE_LOCK:
-        sb_bremse_nach(_SB_BREMSE[dienst], time.time(), r.status_code < 500, fehler=f"http {r.status_code}")
+    _sb_bremse_melden(dienst, r.status_code < 500, fehler=f"http {r.status_code}")
     return r
 
 
@@ -3075,7 +3110,7 @@ def push_uid(req):
     if not token:
         return ""
     try:
-        r = requests.get(f"{SUPABASE_URL}/auth/v1/user", timeout=12,
+        r = _sb_anfrage("GET", f"{SUPABASE_URL}/auth/v1/user", dienst="auth", timeout=12,
                          headers={"apikey": SUPABASE_ANON_KEY, "Authorization": f"Bearer {token}"})
         return str((r.json() or {}).get("id") or "") if r.status_code == 200 else ""
     except Exception:
@@ -3133,7 +3168,7 @@ def push_an_user(uid, titel, text, url=None, tag=None, renotify=False):
         ok, meldung, tot = _push_an_geraet(row, payload)
         try:
             if tot:
-                requests.delete(f"{SUPABASE_URL}/rest/v1/push_geraete",
+                _sb_anfrage("DELETE", f"{SUPABASE_URL}/rest/v1/push_geraete",
                                 params={"id": f"eq.{row['id']}"},
                                 headers=_sb_headers("return=minimal"), timeout=10)
                 print(f"[push] 🧹 tote Anmeldung entfernt ({(row.get('geraet') or '—')[:24]})", flush=True)
@@ -3181,7 +3216,7 @@ def push_subscribe():
         # on_conflict=endpoint: dasselbe Geraet meldet sich nach jedem
         # Neu-Erteilen der Berechtigung erneut an. Ohne das gaebe es zwei
         # Zeilen und Finn bekaeme jede Meldung doppelt.
-        r = requests.post(f"{SUPABASE_URL}/rest/v1/push_geraete",
+        r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/push_geraete",
                           params={"on_conflict": "endpoint"},
                           json={"user_id": uid, "endpoint": endpoint, "p256dh": p256dh,
                                 "auth": auth, "geraet": str(d.get("geraet") or "")[:80],
@@ -3210,7 +3245,7 @@ def push_unsubscribe():
     try:
         # user_id MUSS mit in den Filter: sonst koennte ein eingeloggter User
         # mit einer fremden endpoint-Adresse das Geraet eines anderen abmelden.
-        requests.delete(f"{SUPABASE_URL}/rest/v1/push_geraete",
+        _sb_anfrage("DELETE", f"{SUPABASE_URL}/rest/v1/push_geraete",
                         params={"endpoint": f"eq.{endpoint}", "user_id": f"eq.{uid}"},
                         headers=_sb_headers("return=minimal"), timeout=12)
     except Exception as e:
@@ -4410,8 +4445,10 @@ def watcher_cycle():
 
 def watcher_loop():
     print(f"[watcher] 🚀 Server-Wächter läuft (Intervall {WATCHER_INTERVAL}s, parallel)", flush=True)
+    db_n = 0   # DB-Fehler in Folge (01.10.2026, AUSFALL-BREMSE)
     while True:
         started = time.time()
+        db_fehler = False
         try:
             watcher_cycle()
             # Handy-Meldungen: eigener Schritt NACH dem Zyklus und in eigenem
@@ -4430,10 +4467,15 @@ def watcher_loop():
             _watcher_info["last_error"] = ""
         except Exception as e:
             _watcher_info["last_error"] = f"{type(e).__name__}: {e}"
+            db_fehler = _ist_db_fehler(e)
             print(f"[watcher] ⚠️ Zyklus-Fehler: {e}", flush=True)
         _watcher_info["cycle_ms"] = int((time.time() - started) * 1000)
         _watcher_info["runs"] += 1
-        time.sleep(max(1.0, WATCHER_INTERVAL - (time.time() - started)))
+        db_n = db_n + 1 if db_fehler else 0
+        # Supabase gestört: KEIN Exponential (sonst fallen kurze Trades durch und dup_live altert) — Takt, mindestens bis die
+        # Sicherung wieder fragt, höchstens 120 s; schließt sie, geht es sofort weiter. Nicht-DB-Fehler (Duplikum) wie bisher.
+        _schleife_schlafen(schleifen_pause(max(1.0, WATCHER_INTERVAL - (time.time() - started)), db_n, sb_bremse_rest_s(), 120,
+                                           verdoppeln=False), db_pause=db_n > 0)
 
 
 def start_watcher():
@@ -4650,7 +4692,7 @@ def _admin_basis():
     disp = {}
     names_ok = False
     try:
-        r = requests.get(f"{SUPABASE_URL}/auth/v1/admin/users?per_page=200",
+        r = _sb_anfrage("GET", f"{SUPABASE_URL}/auth/v1/admin/users?per_page=200", dienst="auth",
                          headers=_sb_headers(), timeout=12)
         for u in (r.json() or {}).get("users", []):
             uid = str(u.get("id"))
@@ -6253,7 +6295,7 @@ def _admin_auth():
     if not token:
         return None, (jsonify({"error": "Nicht angemeldet"}), 401)
     try:
-        r = requests.get(f"{SUPABASE_URL}/auth/v1/user", timeout=12,
+        r = _sb_anfrage("GET", f"{SUPABASE_URL}/auth/v1/user", dienst="auth", timeout=12,
                          headers={"apikey": SUPABASE_ANON_KEY, "Authorization": f"Bearer {token}"})
         u = r.json() or {}
         if r.status_code != 200 or not u.get("id"):
@@ -6758,7 +6800,7 @@ def _acc_plan_personen(accs):
     ids = {str(a.get("user_id")) for a in accs if a.get("user_id")}
     namen, mails = {}, {}
     try:
-        r = requests.get(f"{SUPABASE_URL}/auth/v1/admin/users?per_page=200",
+        r = _sb_anfrage("GET", f"{SUPABASE_URL}/auth/v1/admin/users?per_page=200", dienst="auth",
                          headers=_sb_headers(), timeout=12)
         for u in (r.json() or {}).get("users", []):
             uid = str(u.get("id"))
@@ -6766,8 +6808,11 @@ def _acc_plan_personen(accs):
             mails[uid] = mail
             meta = str((u.get("user_metadata") or {}).get("name") or "").strip()
             namen[uid] = meta or (mail.split("@")[0] if "@" in mail else uid[:8])
-    except Exception:
-        pass
+    except Exception as e:
+        # Supabase gestört/gesperrt (01.10.2026, AUSFALL-BREMSE): weiterwerfen (→ 502 beim Aufrufer) — sonst fehlten die Mails und
+        # ADMIN_EXCLUDE_EMAILS filterte niemanden heraus; bis zu 120 s am Stück, wenn nur die Auth-Sicherung offen ist
+        if getattr(e, "sb_netz", False):
+            raise
     out = []
     for uid in ids:
         if str(mails.get(uid, "")).strip().lower() in ADMIN_EXCLUDE_EMAILS:
@@ -6842,7 +6887,7 @@ def admin_acc_plan():
 
     if request.method == "DELETE":
         try:
-            requests.delete(f"{SUPABASE_URL}/rest/v1/acc_plan",
+            _sb_anfrage("DELETE", f"{SUPABASE_URL}/rest/v1/acc_plan",
                             params={"id": f"eq.{pid}"},
                             headers=_sb_headers(), timeout=12).raise_for_status()
             return jsonify({"ok": True})
@@ -7038,7 +7083,7 @@ def _wd_login():
     if not token:
         return None, (jsonify({"error": "Nicht angemeldet"}), 401)
     try:
-        r = requests.get(f"{SUPABASE_URL}/auth/v1/user", timeout=12,
+        r = _sb_anfrage("GET", f"{SUPABASE_URL}/auth/v1/user", dienst="auth", timeout=12,
                          headers={"apikey": SUPABASE_ANON_KEY, "Authorization": f"Bearer {token}"})
         u = r.json() or {}
         if r.status_code != 200 or not u.get("id"):
@@ -7057,7 +7102,7 @@ def _wd_personen():
     """user_id → Anzeigename (user_metadata.name, sonst E-Mail-Kürzel) und die
     Menge der ausgeblendeten Personen (ADMIN_EXCLUDE_EMAILS) — wie in der Übersicht."""
     disp, excluded = {}, set()
-    r = requests.get(f"{SUPABASE_URL}/auth/v1/admin/users?per_page=200",
+    r = _sb_anfrage("GET", f"{SUPABASE_URL}/auth/v1/admin/users?per_page=200", dienst="auth",
                      headers=_sb_headers(), timeout=12)
     for u in (r.json() or {}).get("users", []):
         uid = str(u.get("id"))
@@ -8478,7 +8523,7 @@ def admin_wd_plaene():
                     if (farmer and o.get("status") == "planned" and not o.get("start_um_gestartet_at") and alt_tag and alt_tag < tag
                             and wd_plan_wegraeumbar(o.get("start_um"))):          # Vorfall 28.09.2026: nie vor/kurz nach dem Start
                         try:
-                            requests.delete(f"{SUPABASE_URL}/rest/v1/trade_plans",
+                            _sb_anfrage("DELETE", f"{SUPABASE_URL}/rest/v1/trade_plans",
                                             params={"id": f"eq.{o['id']}", "status": "eq.planned", "start_um_gestartet_at": "is.null"},
                                             headers=_sb_headers("return=representation"), timeout=12)
                         except Exception as e:
@@ -8525,7 +8570,7 @@ def admin_wd_plaene():
                     if (farmer and o.get("status") == "planned" and not o.get("start_um_gestartet_at") and alt_tag and neu_tag and alt_tag < neu_tag
                             and wd_plan_wegraeumbar(o.get("start_um"))):          # Vorfall 28.09.2026: nie vor/kurz nach dem Start
                         try:
-                            requests.delete(f"{SUPABASE_URL}/rest/v1/trade_plans",
+                            _sb_anfrage("DELETE", f"{SUPABASE_URL}/rest/v1/trade_plans",
                                             params={"id": f"eq.{o['id']}", "status": "eq.planned", "start_um_gestartet_at": "is.null"},
                                             headers=_sb_headers("return=representation"), timeout=12)
                         except Exception as e:
@@ -8672,14 +8717,14 @@ def admin_wd_plaene():
                                                      "notes": f"like.{_wd_hedge_schluessel(pid)}*"})
                     if spl is None:
                         for t in alt:
-                            requests.delete(f"{SUPABASE_URL}/rest/v1/transactions", params={"id": f"eq.{t['id']}"},
+                            _sb_anfrage("DELETE", f"{SUPABASE_URL}/rest/v1/transactions", params={"id": f"eq.{t['id']}"},
                                             headers=_sb_headers(), timeout=12).raise_for_status()
                     else:
                         zeile = _wd_hedge_buchung(pid, uid, konto, person, spl, jetzt.date().isoformat())
                         if alt:
                             r = sb_update("transactions", {"id": f"eq.{alt[0]['id']}"}, zeile)
                             for t in alt[1:]:   # Altlast: Doppelte weg, genau eine Buchung je Plan
-                                requests.delete(f"{SUPABASE_URL}/rest/v1/transactions", params={"id": f"eq.{t['id']}"},
+                                _sb_anfrage("DELETE", f"{SUPABASE_URL}/rest/v1/transactions", params={"id": f"eq.{t['id']}"},
                                                 headers=_sb_headers(), timeout=12).raise_for_status()
                         else:
                             r = sb_insert("transactions", zeile)
@@ -8743,7 +8788,7 @@ def admin_wd_plaene():
     if len(pid) < 10:
         return jsonify({"error": "id fehlt"}), 400
     try:
-        r = requests.delete(f"{SUPABASE_URL}/rest/v1/trade_plans",
+        r = _sb_anfrage("DELETE", f"{SUPABASE_URL}/rest/v1/trade_plans",
                             params={"id": f"eq.{pid}", "status": "eq.planned", "start_um_gestartet_at": "is.null"},
                             headers=_sb_headers("return=representation"), timeout=12)
         r.raise_for_status()
@@ -9142,23 +9187,29 @@ def kompass_auswerten():
 
 def kompass_loop():
     print(f"[kompass] 🧭 Sammler läuft (alle {KOMPASS_INTERVAL}s, {KOMPASS_URL})", flush=True)
+    db_n = 0   # DB-Fehler in Folge (01.10.2026, AUSFALL-BREMSE)
     while True:
         started = time.time()
+        db_fehler = False
         try:
             kompass_collect()
             _kompass_info["last_error"] = ""
         except Exception as e:
             _kompass_info["last_error"] = f"{type(e).__name__}: {e}"
+            db_fehler = db_fehler or _ist_db_fehler(e)
             print(f"[kompass] ⚠️ {e}", flush=True)
         try:
             _kompass_info["ausgewertet"] = kompass_auswerten()
             _kompass_info["auswertung_error"] = ""
         except Exception as e:
             _kompass_info["auswertung_error"] = f"{type(e).__name__}: {e}"
+            db_fehler = db_fehler or _ist_db_fehler(e)
             print(f"[kompass] ⚠️ Auswertung: {e}", flush=True)
         _kompass_info["last_run"] = time.time()
         _kompass_info["runs"] += 1
-        time.sleep(max(15.0, KOMPASS_INTERVAL - (time.time() - started)))
+        db_n = db_n + 1 if db_fehler else 0   # nur DB-Fehler verlängern (Worker-Fehler behalten den Takt)
+        _schleife_schlafen(schleifen_pause(max(15.0, KOMPASS_INTERVAL - (time.time() - started)), db_n, sb_bremse_rest_s(), 300),
+                           db_pause=db_n > 0)
 
 
 def start_kompass():
@@ -9728,9 +9779,16 @@ def _rw_versionen(jetzt):
             print(f"[reader-wacht] ℹ️ Update nicht protokolliert (SQL 2026-09-26 angewendet?): {type(e).__name__}", flush=True)
 
 
+READER_WACHT_KARENZ_S = 60
+
+
 def reader_wacht_tick(jetzt=None):
     global _reader_wacht_zustand
     jetzt = time.time() if jetzt is None else jetzt
+    # Karenz nach einem Supabase-Ausfall (01.10.2026, AUSFALL-BREMSE): die ersten 60 s nach dem Schließen der Sicherung stehen in
+    # tv_kurse noch Kurse von VOR dem Ausfall (die Reader stecken im Backoff) — kein Feed-Alarm an Finns Handy, keine Aussage
+    if jetzt - _SB_GEHEILT_AT["rest"] < READER_WACHT_KARENZ_S:
+        return []
     dt = datetime.fromtimestamp(jetzt, timezone.utc)
     seit = _cme_offen_seit_s(dt)
     offen = seit is not None
@@ -9776,17 +9834,22 @@ def reader_wacht_loop():
         _rw_uebernehmen(time.time())
     except Exception as e:
         print(f"[reader-wacht] ⚠️ Übernahme: {e}", flush=True)
+    db_n = 0   # DB-Fehler in Folge (01.10.2026, AUSFALL-BREMSE)
     while True:
         started = time.time()
+        db_fehler = False
         try:
             reader_wacht_tick()
             _reader_wacht_info["last_error"] = ""
         except Exception as e:
             _reader_wacht_info["last_error"] = f"{type(e).__name__}: {str(e)[:200]}"
+            db_fehler = _ist_db_fehler(e)
             print(f"[reader-wacht] ⚠️ {_reader_wacht_info['last_error']}", flush=True)
         _reader_wacht_info["last_check"] = time.time()
         _reader_wacht_info["runs"] += 1
-        time.sleep(max(5.0, READER_WACHT_TAKT - (time.time() - started)))
+        db_n = db_n + 1 if db_fehler else 0
+        _schleife_schlafen(schleifen_pause(max(5.0, READER_WACHT_TAKT - (time.time() - started)), db_n, sb_bremse_rest_s(), 300),
+                           db_pause=db_n > 0)
 
 
 def start_reader_wacht():
@@ -10110,6 +10173,11 @@ def reader_kurs_schreiben():
         return jsonify({"ok": False, "msg": "Schlüssel ungültig"}), 401
     if (request.content_length or 0) > READER_FEED_MAX:
         return jsonify({"ok": False, "msg": "zu groß"}), 413
+    # Supabase-Bremse offen (01.10.2026, AUSFALL-BREMSE): sofort 503 + Retry-After statt 2 × 12 s Hänger je Paket; der Reader wartet
+    # dann länger (feed_pause). Der Drossel-Merker bleibt unberührt, das nächste Paket geht vollständig raus.
+    _rest = sb_bremse_rest_s()
+    if _rest > 0:
+        return jsonify({"ok": False, "msg": "Datenbank gestört — später"}), 503, {"Retry-After": str(max(SB_BREMSE_HALB_S, int(_rest)))}
     kurse, kerzen = reader_feed_zeilen(wer[1], request.get_json(silent=True), datetime.now(timezone.utc).isoformat())
     jetzt = time.time()
     with _reader_feed_lock:   # Drossel (01.10.2026, s. reader_feed_drosseln)
@@ -10119,6 +10187,8 @@ def reader_kurs_schreiben():
             sb_upsert("tv_kurse", kurse)
         if kerzen:
             sb_upsert("tv_kurs_1m", kerzen)
+    except SupabaseGesperrt as e:
+        return jsonify({"ok": False, "msg": "Datenbank gestört — später"}), 503, {"Retry-After": str(max(SB_BREMSE_HALB_S, int(e.rest_s)))}
     except Exception as e:
         return jsonify({"ok": False, "msg": f"nicht speicherbar ({type(e).__name__})"}), 502
     with _reader_feed_lock:
@@ -10277,7 +10347,7 @@ def admin_bulk_vorlagen():
         if aktion == "loeschen":
             if not vid:
                 return jsonify({"ok": False, "error": "id fehlt"}), 400
-            r = requests.delete(f"{SUPABASE_URL}/rest/v1/bulk_vorlagen", params={"id": f"eq.{vid}"},
+            r = _sb_anfrage("DELETE", f"{SUPABASE_URL}/rest/v1/bulk_vorlagen", params={"id": f"eq.{vid}"},
                                 headers=_sb_headers("return=representation"), timeout=12)
             r.raise_for_status()
             rows = r.json() or []
@@ -10292,10 +10362,10 @@ def admin_bulk_vorlagen():
         body["updated_at"] = datetime.now(timezone.utc).isoformat()
         body["updated_by"] = request.environ.get("prophos.admin_uid")
         if vid:
-            r = requests.patch(f"{SUPABASE_URL}/rest/v1/bulk_vorlagen", params={"id": f"eq.{vid}"}, json=body,
+            r = _sb_anfrage("PATCH", f"{SUPABASE_URL}/rest/v1/bulk_vorlagen", params={"id": f"eq.{vid}"}, json=body,
                                headers=_sb_headers("return=representation"), timeout=12)
         else:
-            r = requests.post(f"{SUPABASE_URL}/rest/v1/bulk_vorlagen", json=body,
+            r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/bulk_vorlagen", json=body,
                               headers=_sb_headers("return=representation"), timeout=12)
         if r.status_code == 409 or "duplicate key" in (r.text or ""):
             return jsonify({"ok": False, "error": f"Eine Vorlage „{body['name']}\" gibt es schon"}), 409
@@ -10329,7 +10399,7 @@ def _login_uid_mail():
     if not token:
         return None, None, (jsonify({"error": "Nicht angemeldet"}), 401)
     try:
-        r = requests.get(f"{SUPABASE_URL}/auth/v1/user", timeout=12,
+        r = _sb_anfrage("GET", f"{SUPABASE_URL}/auth/v1/user", dienst="auth", timeout=12,
                          headers={"apikey": SUPABASE_ANON_KEY, "Authorization": f"Bearer {token}"})
         u = r.json() or {}
         if r.status_code != 200 or not u.get("id"):
