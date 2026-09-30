@@ -1764,6 +1764,17 @@ def main():
         and panel.terminal_schliessbar({}, _stOK, 5, None)[0] is False)
     chk("PANEL: Status-Warnung (note) blockt Terminal-Zu — Alt-Snapshot ist kein Beweis",
         panel.terminal_schliessbar(_cfgT, dict(_stOK, note="Snapshot eingefroren"), 5, None)[0] is False)
+    # Echo V2 ohne Copier (30.09.2026, Mike): frischer Lese-EA-Snapshot ist der Beweis
+    _lese0 = {"lesen": True, "master_positions": []}
+    _stAlt = dict(_stOK, running=False)
+    chk("PANEL: Terminal-Zu ohne Copier nur mit frischem Lese-EA, ohne Position, ohne alten Hedge",
+        panel.terminal_schliessbar(_cfgT, _stAlt, 999, None, _lese0)[0] is True
+        and panel.terminal_schliessbar(_cfgT, {}, None, None, _lese0)[0] is True
+        and panel.terminal_schliessbar(_cfgT, _stAlt, 999, None, None)[0] is False
+        and panel.terminal_schliessbar(_cfgT, _stAlt, 999, None, dict(_lese0, master_positions=[{"i": 1}]))[0] is False
+        and panel.terminal_schliessbar(_cfgT, dict(_stAlt, hedges={"7": [{"ticket": 1}]}), 999, None, _lese0)[0] is False
+        and panel.terminal_schliessbar(_cfgT, _stAlt, 999, "laufend", _lese0)[0] is False
+        and panel.terminal_schliessbar({}, _stAlt, 999, None, _lese0)[0] is False)
     # Zufalls-Streuung: Auto-Zu wuerfelt 1-2 min (21.09.2026, vorher 1-60 min)
     # — nie sofort und nie im immer gleichen Abstand (waere selbst ein Muster).
     _vz = [panel._zufalls_verzoegerung() for _ in range(200)]

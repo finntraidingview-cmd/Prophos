@@ -679,10 +679,12 @@ _TERMINAL_ZU_LOCK = threading.Lock()
 _TERMINAL_ZU_AKTIV = set()   # config_files mit laufendem Zu-Worker
 
 
-def terminal_schliessbar(cfg, st, age, plan_status=None):
+def terminal_schliessbar(cfg, st, age, plan_status=None, lese=None):
     """Reine Entscheidung (testbar, ohne I/O): darf das MASTER-Terminal dieser
     Instanz jetzt geschlossen werden? → (ja/nein, grund). Dieselbe strenge
-    Beweis-Doktrin wie der Loesch-Riegel: ohne frischen Status keine Aktion."""
+    Beweis-Doktrin wie der Loesch-Riegel: ohne frischen Status keine Aktion.
+    lese = lese_status(cfg) (Echo V2 ohne Copier): frischer Snapshot des Lese-EAs
+    zählt als Beweis, wenn der Copier-Status nicht frisch ist (30.09.2026)."""
     mpath = str(cfg.get("master_terminal_path") or "").strip()
     if not mpath:
         return False, "kein Master-Terminal (Orbit/TV-Instanz oder Pfad fehlt)"
@@ -705,6 +707,17 @@ def terminal_schliessbar(cfg, st, age, plan_status=None):
         return False, f"Trade-Plan ist '{plan_status}'"
     frisch = bool(st.get("running")) and age is not None and age <= 15
     if not frisch:
+        # Echo V2 läuft absichtlich OHNE Copier (25.09.2026) — dann war der Copier-Status nie frisch und
+        # KEIN Terminal ging mehr zu (30.09.2026, Mike pc-l5o8bv: alle 7 Instanzen alive=false, 5–7
+        # Terminals stundenlang offen). Beweis dann über den frischen Snapshot des Lese-EAs (≤ 15 s).
+        # Meldet der letzte (alte) Copier-Stand noch einen Hedge, bleibt es beim Nein.
+        if isinstance(lese, dict) and lese.get("lesen"):
+            if any(hs for hs in (st.get("hedges") or {}).values()):
+                return False, "letzter Copier-Stand meldet noch einen Hedge"
+            lpos = len(lese.get("master_positions") or [])
+            if lpos:
+                return False, f"{lpos} offene Master-Position(en) (Lese-EA)"
+            return True, "kein Trade aktiv (Lese-EA, Echo V2 ohne Copier)"
         return False, "Copier-Status nicht frisch — ob ein Trade laeuft, ist nicht beweisbar"
     if st.get("note"):
         return False, f"Status-Warnung: {st.get('note')}"
@@ -832,7 +845,9 @@ def _terminal_zu_worker(fname, ausloeser):
                       f"'{plan_status}'.", flush=True)
                 return
             frisch = bool(st.get("running")) and age is not None and age <= 15
-            if frisch and not st.get("note") and (st.get("master_positions") or []):
+            lese = None if frisch else lese_status(cfg)
+            if (frisch and not st.get("note") and (st.get("master_positions") or [])) or \
+                    (lese and (lese.get("master_positions") or [])):
                 print(f"[panel] {fname}: Terminal-Zu abgebrochen — Master hat wieder "
                       f"Positionen.", flush=True)
                 return
@@ -841,7 +856,7 @@ def _terminal_zu_worker(fname, ausloeser):
             if time.time() < frei_ab:
                 time.sleep(5)
                 continue
-            ok, grund = terminal_schliessbar(cfg, st, age, plan_status)
+            ok, grund = terminal_schliessbar(cfg, st, age, plan_status, lese)
             if ok:
                 install_dir = os.path.dirname(os.path.abspath(str(cfg["master_terminal_path"])))
                 pids = provision.terminal_pids(install_dir)
@@ -920,7 +935,9 @@ def _leerlauf_waechter():
                     age = (datetime.now() - datetime.fromisoformat(st.get("updated_at") or "")).total_seconds()
                 except (ValueError, TypeError):
                     pass
-                ok, grund = terminal_schliessbar(cfg, st, age, plans_akt.get(fname))
+                frisch = bool(st.get("running")) and age is not None and age <= 15
+                ok, grund = terminal_schliessbar(cfg, st, age, plans_akt.get(fname),
+                                                 None if frisch else lese_status(cfg))
                 schwelle = _LEERLAUF_SCHWELLE.setdefault(fname, LEERLAUF_MIN * 60 + random.uniform(0, 240))
                 seit, zu = leerlauf_entscheidung(ok, _LEERLAUF_SEIT.get(fname), time.time(), schwelle)
                 if seit is None:
