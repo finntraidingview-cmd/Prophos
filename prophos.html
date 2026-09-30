@@ -21066,6 +21066,29 @@
    * (baselinePatchIn 'final', Guard review) {today_pnl, datum, quelle:'puls', ende_quelle, puls_at, puls_versuche, puls_flach}. */
   const TV_ENDLESUNG_MAX = 8
   const TV_ENDLESUNG_PAUSE_S = [20, 45, 90, 180, 300, 480, 600, 900]   // Mindestabstand vor Versuch n+1; der Takt streut obendrauf
+  /* LOGIN-BREMSE (30.09.2026, Hinweis Terminal 3): die automatische Nachlesung wiederholt bis zu 6× in ~15 min — scheitert der Lauf
+   * im Login-Weg, sind das 6 Tradovate-/TopstepX-Logins in 15 min. Endet eine Lesung mit einem Login-/Verbindungs-Code, gibt es KEINE
+   * schnelle Wiederholung: nächster automatischer Versuch frühestens nach 30 min, höchstens 2 solche Fehlversuche je Plan — danach
+   * nur noch „Jetzt lesen" von Hand (Radar: „Wartet · Login prüfen"). Andere Fehler wiederholen wie bisher. Stand am Plan:
+   * final.puls_login_fehler (Zähler), puls_login_at, puls_login_code. Codes als kleine Liste — die genaue kommt von Terminal 3. */
+  const TV_ENDLESUNG_LOGIN_CODES = ['chrome_weg', 'verbindung', 'login_unlesbar', 'konto_nicht_erreicht', 'login']
+  const TV_ENDLESUNG_LOGIN_SCHRITT = { cdp_fehler: ['cdp-login'] }   // Codes, die nur in diesen Schritten als Login-Fehler zählen
+  const TV_ENDLESUNG_LOGIN_PAUSE_S = 30 * 60, TV_ENDLESUNG_LOGIN_MAX = 2
+  // REIN RECHNEND: ist die Puls-Antwort ein Login-/Verbindungsfehler?
+  function tvV2LoginFehler(r){
+    if(!r || r.ok) return false
+    const c = String(r.code || ''), st = TV_ENDLESUNG_LOGIN_SCHRITT[c]
+    return TV_ENDLESUNG_LOGIN_CODES.includes(c) || !!(st && st.includes(String(r.schritt || '')))
+  }
+  // REIN RECHNEND: Stand der Login-Bremse aus final (bzw. dem endlesung-Auszug von /admin/live-trades) → null = keine Bremse,
+  // {n, pruefen:true} = keine automatische Lesung mehr, {n, pruefen:false, bis} = Pause bis zum nächsten automatischen Versuch
+  function tvV2LoginBremse(fin, jetzt){
+    const n = Number(fin && fin.puls_login_fehler) || 0
+    if(!n) return null
+    if(n >= TV_ENDLESUNG_LOGIN_MAX) return { n, pruefen: true, bis: null, code: String(fin.puls_login_code || '') }
+    const at = Date.parse(fin.puls_login_at || '') || 0, bis = at ? at + TV_ENDLESUNG_LOGIN_PAUSE_S * 1000 : 0
+    return (bis && jetzt < bis) ? { n, pruefen: false, bis, code: String(fin.puls_login_code || '') } : null
+  }
   const _tvEndlesungLaeuft = new Set()
   // REIN RECHNEND: alle offenen G&V-Felder („Unrealized P&L" / „Nicht realisiert") der Zusammenfassung sind genau 0 — und es gibt eins
   function tvUnrealNull(summary){
@@ -21142,6 +21165,10 @@
     const endeMs = Date.parse(fin.at || p.endedAt || '') || 0
     if(!vers0 && endeMs && jetzt < endeMs + tvV2NachleseMs(p.id)) return `Nachlesung ab ${new Date(endeMs + tvV2NachleseMs(p.id)).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} (1–120 min Zufall)`
     if(fin.puls_aufgegeben) return 'aufgegeben: ' + String(fin.puls_fehler || '')
+    // Login-Bremse (30.09.2026): nach einem Login-/Verbindungsfehler 30 min Ruhe, nach zweien nur noch „Jetzt lesen" von Hand
+    const lb = tvV2LoginBremse(fin, jetzt)
+    if(lb && lb.pruefen) return `Login prüfen: ${lb.n} Lesungen scheiterten am Login/an der Verbindung${lb.code ? ' (' + lb.code + ')' : ''} — „Jetzt lesen" von Hand`
+    if(lb) return `Pause bis ${new Date(lb.bis).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} — Login-/Verbindungsfehler${lb.code ? ' (' + lb.code + ')' : ''}, kein schneller neuer Login`
     const versuche = Number(fin.puls_versuche) || (fin.puls_at ? 1 : 0)
     if(versuche >= TV_ENDLESUNG_MAX) return `${versuche} Versuche erfolglos`
     const letzte = Date.parse(fin.puls_at || '') || 0
@@ -21236,7 +21263,9 @@
     try{ const t = JSON.stringify(o); return t.length <= max ? o : { gekuerzt: true, text: t.slice(0, Math.max(0, max - 40)) } }catch(_){ return null }
   }
   window._tvV2Endlesung = { auswerten: tvV2EndlesungAuswerten, faellig: tvV2EndlesungFaellig, grund: tvV2EndlesungGrund, frueher: tvV2FruehereAmTag,
-    spaeter: tvV2SpaetererTrade, unrealNull: tvUnrealNull, max: TV_ENDLESUNG_MAX, pause: TV_ENDLESUNG_PAUSE_S.slice() }
+    spaeter: tvV2SpaetererTrade, unrealNull: tvUnrealNull, max: TV_ENDLESUNG_MAX, pause: TV_ENDLESUNG_PAUSE_S.slice(),
+    loginFehler: tvV2LoginFehler, loginBremse: tvV2LoginBremse, loginPauseS: TV_ENDLESUNG_LOGIN_PAUSE_S, loginMax: TV_ENDLESUNG_LOGIN_MAX,
+    versuch: (pid, opts) => tvV2EndlesungVersuch(pid, opts), wartet: p => planWartetAufPuls(p) }   // Test-Haken (Stub)
   function tvV2EndlesungAnstossen(pid){
     if(!MT5_LOCAL) return
     // 15–25 s nach dem Ende: der Broker bucht den Fill, TradingView zieht die Zusammenfassung nach
@@ -21381,6 +21410,8 @@
         puls_flach: erg.flach, puls_fehler: null, puls_diagnose: null, puls_konto: (r && r.konto_aktiv) || null,
         balance_end: erg.balance, equity_end: erg.equity })   // Balance nach dem Trade (26.09.2026) — P&L = balance_end − tv.balance_start
       else Object.assign(patch, { puls_fehler: erg.fehler, puls_diagnose: tvJsonKurz((r && r.befund) || null, 2200) })
+      // Login-Bremse: Login-/Verbindungsfehler zählen (auch beim Knopf „Jetzt lesen" — jeder Lauf ist ein Login)
+      if(!erg.ok && tvV2LoginFehler(r)) Object.assign(patch, { puls_login_fehler: (Number(fin0.puls_login_fehler) || 0) + 1, puls_login_at: nowIso, puls_login_code: String(r.code || '').slice(0, 40) })
       // (B) Exit-Fill aus der Order-Historie (Bot, Ende-Modus) — unabhängig davon, ob Today's P&L gelesen wurde
       if(r && r.exit_fill && typeof r.exit_fill === 'object') patch.exit_fill = tvJsonKurz(r.exit_fill, 400)
       else if(r && r.exit_diag && Object.keys(r.exit_diag).length) patch.exit_diag = tvJsonKurz(r.exit_diag, 800)
@@ -21400,6 +21431,8 @@
       if(!erg.ok){
         if(erg.offen && versuch === 1 && typeof atToast === 'function') atToast(`⚠ ${name}: Puls sieht die Master-Position noch offen — in TradingView prüfen`, 'end')
         if(!force && versuch >= TV_ENDLESUNG_MAX && typeof atToast === 'function') atToast(`⚠ ${name}: Today's P&L nach ${versuch} Versuchen nicht gelesen (${erg.fehler}) — Master-P&L bitte selbst eintragen`, 'end')
+        // Login-Bremse: beim zweiten Login-/Verbindungsfehler einmal deutlich sagen, dass Puls jetzt nicht mehr von selbst liest
+        if(patch.puls_login_fehler === TV_ENDLESUNG_LOGIN_MAX && typeof atToast === 'function') atToast(`⚠ ${name}: Puls kam ${TV_ENDLESUNG_LOGIN_MAX}× nicht durch den Login/die Verbindung (${patch.puls_login_code}) — Login am PC prüfen, dann „Jetzt lesen"`, 'end')
         try{ renderTradePlans() }catch(_){}
         return { ok: false, msg: `Versuch ${versuch}: ${erg.fehler}${exitTxt}` }
       }
@@ -23743,6 +23776,9 @@
       const ab = tvV2NachleseAb(pid, fin.at)
       if(ab > jetzt) return { art: 'laeuft', text: `Profit geschätzt aus Radar · Puls bestätigt ab ${uhr(ab)} (noch ${Math.max(1, Math.ceil((ab - jetzt) / 60000))} min)`, tip: tip.join('\n'), bisMs: null, knopf: true }
     }
+    // Login-Bremse (30.09.2026): nach zwei Login-/Verbindungsfehlern liest Puls nicht mehr von selbst — „Jetzt lesen" bleibt
+    const lb = (!fin.puls_aufgegeben && typeof tvV2LoginBremse === 'function') ? tvV2LoginBremse(fin, jetzt) : null
+    if(lb && lb.pruefen) return { art: 'aufgegeben', text: `Wartet · Login prüfen — ${lb.n} Lesungen scheiterten am Login/an der Verbindung${lb.code ? ' (' + lb.code + ')' : ''}`, tip: tip.join('\n'), bisMs: null, knopf: true }
     if(fin.puls_aufgegeben || versuche >= max){
       return { art: 'aufgegeben', text: 'Lesung aufgegeben — ' + (fin.puls_fehler ? String(fin.puls_fehler) : 'ohne Grund'), tip: tip.join('\n'), bisMs: null, knopf: true }
     }
@@ -23752,6 +23788,7 @@
     if(tagVorbei) return { art: 'aus', text: 'nicht gelesen — Handelstag vorbei, Master-P&L bitte selbst eintragen', tip: tip.join('\n'), bisMs: null, knopf: false }
     const letzte = Date.parse(fin.puls_at || '') || 0
     const bis = (versuche > 0 && letzte) ? letzte + pause[Math.min(versuche - 1, pause.length - 1)] * 1000 : null
+    if(lb) return { art: 'laeuft', text: `Login-/Verbindungsfehler · nächster Versuch ab ${uhr(lb.bis)}`, tip: tip.join('\n'), bisMs: lb.bis, knopf: true }
     return { art: 'laeuft', text: versuche ? `Puls liest … Versuch ${versuche}/${max}` : 'Puls liest gleich …', tip: tip.join('\n'), bisMs: bis, knopf: true }
   }
   window._endlesungStatus = endlesungStatus
@@ -24552,8 +24589,10 @@
     if(!t || t.status !== 'review' || n(t.balance_start) == null || n(t.balance_end) != null) return null
     if(n(e.today_pnl) != null || e.quelle === 'puls' || e.puls_aufgegeben) return null
     const versuche = Number(e.puls_versuche) || (e.puls_at ? 1 : 0)
-    if(versuche >= TV_ENDLESUNG_MAX) return null
-    return { ab: tvV2NachleseAb(t.id, e.at || t.ended_at), versuche }
+    // Login-Bremse (30.09.2026): nach zwei Login-/Verbindungsfehlern bleibt der Trade in „Wartet" („Login prüfen" + „Jetzt lesen")
+    const lb = tvV2LoginBremse(e, Date.now())
+    if(versuche >= TV_ENDLESUNG_MAX && !(lb && lb.pruefen)) return null
+    return { ab: tvV2NachleseAb(t.id, e.at || t.ended_at), versuche, login: lb ? (lb.pruefen ? 'pruefen' : 'pause') : null, bis: lb ? lb.bis : null, loginN: lb ? lb.n : 0, loginCode: lb ? lb.code : '' }
   }
   // Nur die Live-Zahlen der laufenden Karten alle 2 s nachschreiben — kein Neuaufbau (Chart-Linien, ID-Leiste bleiben stehen)
   function wdlLiveTick(){
@@ -24667,13 +24706,17 @@
         // Wartet: zu, P&L aus der Balance kommt noch — Stand der Nachlesung statt Ergebnis, P&L „–" (Demo-Schätzung nur im Tooltip)
         art = 'wart'
         // Vorsatz („ab 07:33 · " / „wird gelesen · ") in wdl-z-ab: am Handy ausgeblendet, dort bleibt „in 58 min" neben dem Knopf
-        const txt = wt.ab && jetzt < wt.ab ? `<span class="wdl-z-ab">ab ${zeit(wt.ab)} · </span>in ${minTxt(wt.ab - jetzt)}` : `<span class="wdl-z-ab">wird gelesen · </span>seit ${minTxt(jetzt - (wt.ab || jetzt))}`   // Kopf sagt „Nachlesung"
+        const txt = wt.login === 'pruefen' ? `<span class="wdl-z-ab">Wartet · </span>Login prüfen`
+          : wt.login === 'pause' ? `<span class="wdl-z-ab">Login-Fehler · </span>ab ${zeit(wt.bis)}`
+          : wt.ab && jetzt < wt.ab ? `<span class="wdl-z-ab">ab ${zeit(wt.ab)} · </span>in ${minTxt(wt.ab - jetzt)}` : `<span class="wdl-z-ab">wird gelesen · </span>seit ${minTxt(jetzt - (wt.ab || jetzt))}`   // Kopf sagt „Nachlesung"
         // „Jetzt lesen" (30.09.2026, Finn: „Mach bei Wartet einen Knopf, mit dem ich jetzt nachlesen kann"): derselbe Weg wie Karte,
         // Zum Abhaken und Trade-Popup — endlesungJetzt → window._tvV2EndlesungJetzt (am PC des Plans direkt, sonst Signal über
         // /admin/wd-plaene), Sperre _elBusy gegen Mehrfachklicks; „liest…" solange sie läuft
         const pid = wdlTid(t), busy = _elBusy.has(pid), sperre = wdlLesenSperre(t)
         miZ = zelle('mi wdl-z-akt', `<span>${txt}</span><button type="button" class="btn btn-ghost el-knopf" data-wdl-lesen="${escapeHtml(pid)}"${(busy || sperre) ? ' disabled' : ''} title="${escapeHtml(sperre || 'Balance jetzt nachlesen — am PC des Plans (vom Mac/Handy per Signal)')}">${busy ? 'liest…' : 'Jetzt lesen'}</button>`,
-          { tip: wt.versuche ? `${wt.versuche}. Leseversuch` : 'Puls liest die Balance 1–120 min nach dem Ende' })
+          { tip: wt.login === 'pruefen' ? `Puls kam ${wt.loginN}× nicht durch den Login/die Verbindung${wt.loginCode ? ' (' + wt.loginCode + ')' : ''} und liest nicht mehr von selbst — Login am PC prüfen, dann „Jetzt lesen"`
+              : wt.login === 'pause' ? `Login-/Verbindungsfehler${wt.loginCode ? ' (' + wt.loginCode + ')' : ''} — nächster automatischer Versuch frühestens ${zeit(wt.bis)} (kein schneller neuer Login)`
+              : wt.versuche ? `${wt.versuche}. Leseversuch` : 'Puls liest die Balance 1–120 min nach dem Ende' })
         plZ = zelle('pl', '–', { tip: num(d.pl_usd) != null ? `Demo ${sig(d.pl_usd, '$', 0)} · exakt nach der Nachlesung` : 'exakt nach der Nachlesung' })
         zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
       } else if(t.status === 'review'){
@@ -36452,7 +36495,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.889'
+  const OS_TAB_BUILD = '2026-09-22.890'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -39470,7 +39513,10 @@
       const vers = Number(fin.puls_versuche) || (fin.puls_at ? 1 : 0)
       if(vers >= TV_ENDLESUNG_MAX) continue
       const letzte = Date.parse(fin.puls_at || '') || 0
-      const t = (vers && letzte) ? letzte + TV_ENDLESUNG_PAUSE_S[Math.min(vers - 1, TV_ENDLESUNG_PAUSE_S.length - 1)] * 1000 : tvV2NachleseAb(p.id, fin.at || p.endedAt)
+      // Login-Bremse (30.09.2026): „Login prüfen" kündigt nichts mehr an, die 30-min-Pause verschiebt den Termin
+      const lb = tvV2LoginBremse(fin, jetzt)
+      if(lb && lb.pruefen) continue
+      const t = lb ? lb.bis : (vers && letzte) ? letzte + TV_ENDLESUNG_PAUSE_S[Math.min(vers - 1, TV_ENDLESUNG_PAUSE_S.length - 1)] * 1000 : tvV2NachleseAb(p.id, fin.at || p.endedAt)
       if(t) out.push({ t, art: 'Bestätigung', plan: p })
     }
     return out.sort((a, b) => a.t - b.t)

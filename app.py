@@ -7265,7 +7265,8 @@ def _wd_endlesung_zeile(final):
     """Endlesungs-Stand fuer die wd-heute-Zeile (Design-Statuszeile, auch fuer fremde Plaene) — nur die puls-Felder."""
     final = final if isinstance(final, dict) else {}
     keys = ("today_pnl", "quelle", "datum", "at", "puls_at", "puls_versuche", "puls_fehler", "puls_aufgegeben",
-            "puls_diagnose", "puls_flach", "exit_fill", "exit_diag", "ende_quelle")
+            "puls_diagnose", "puls_flach", "exit_fill", "exit_diag", "ende_quelle",
+            "puls_login_fehler", "puls_login_at", "puls_login_code")   # Login-Bremse (30.09.2026): Radar „Wartet · Login prüfen"
     out = {k: final.get(k) for k in keys if final.get(k) is not None}
     return out or None
 
@@ -10307,35 +10308,52 @@ def puls_augen_saeubern(d):
     return d["art"], daten
 
 
+# Cache der Regel-Zeile (30.09.2026, Vorfall Mike pc-l5o8bv: puls_topstep_pcs war schon gesetzt, der 60-s-Cache lieferte beim Einschalten
+# noch tsx 'uia' — der Bot lief einmal über den alten UIA-Weg im normalen Chrome). 10 s statt 60 s für die ganze Zeile: der Bot fragt
+# nicht im Takt (Augen-Regel lokal 10 min gemerkt, Topstep vor jedem Lauf), das sind höchstens 6 Ein-Zeilen-Reads je Minute und nur,
+# wenn überhaupt gefragt wird.
+PULS_REGEL_CACHE_S = 10
+
+
+def puls_regel_stand(jetzt, lesen=None):
+    """Regel-Zeile auffrischen, wenn der Cache älter als PULS_REGEL_CACHE_S ist (lesen = sb_select, im Test ersetzbar).
+    -> True = Stand brauchbar (frisch oder letzter guter), False = noch nie gelesen und gerade nicht lesbar (→ 503)."""
+    if jetzt - _PULS_REGEL_CACHE["at"] <= PULS_REGEL_CACHE_S:
+        return True
+    lesen = lesen or sb_select
+    try:
+        # puls_topstep_pcs (30.09.2026, Topstep-Paket B, sql/2026-09-30_puls-topstep-pcs.sql): Schalter je PC für den Topstep-Puls
+        # → tsx 'cdp' | 'uia'. Fehlt die Spalte noch, NICHT die ganze Regel verlieren (die Augen-Regel trägt Orbit auf allen PCs):
+        # dann ohne sie lesen — und tsx NICHT ausdrücklich 'uia' melden (Vertrag wie bei augen): letzter guter Stand, sonst ohne
+        # den Schlüssel (der Bot behält seine gemerkte Regel).
+        tsx_da = True
+        try:
+            zeilen = lesen("wd_farmer_regeln", {"id": "eq.1", "select": "puls_augen_cdp,puls_topstep_pcs"})
+        except Exception:
+            zeilen, tsx_da = lesen("wd_farmer_regeln", {"id": "eq.1", "select": "puls_augen_cdp"}), False
+        _PULS_REGEL_CACHE["cdp"] = (zeilen[0].get("puls_augen_cdp") if zeilen else None) or []
+        if tsx_da:
+            _PULS_REGEL_CACHE["tsx"] = (zeilen[0].get("puls_topstep_pcs") if zeilen else None) or []
+            _PULS_REGEL_CACHE["tsx_gut"] = True
+        _PULS_REGEL_CACHE["at"], _PULS_REGEL_CACHE["gut"] = jetzt, True
+    except Exception:
+        # DB weg / Spalte fehlt: NIE ausdrücklich 'uia' melden (29.09.2026, Finns Live-Test 14:44 UTC — ein ausdrückliches 'uia'
+        # schickt den Bot auf den alten Weg und schließt das Puls-Chrome). Letzten guten Stand weiter nutzen und nach Ablauf des
+        # Caches erneut lesen; gab es noch keinen, False → 503, der Bot behält seine gemerkte Regel (Client-Rückfall seit .809).
+        if not _PULS_REGEL_CACHE["gut"]:
+            return False
+        _PULS_REGEL_CACHE["at"] = jetzt
+    return True
+
+
 @app.route("/puls-regel/<pc_id>", methods=["GET", "OPTIONS"])
 def puls_regel_lesen(pc_id):
     if request.method == "OPTIONS":
         return "", 200
     if not PC_ID_MUSTER.fullmatch(pc_id or ""):
         return jsonify({"ok": False, "msg": "pc_id ungültig"}), 400
-    if time.time() - _PULS_REGEL_CACHE["at"] > 60:
-        try:
-            # puls_topstep_pcs (30.09.2026, Topstep-Paket B, sql/2026-09-30_puls-topstep-pcs.sql): Schalter je PC für den Topstep-Puls
-            # → tsx 'cdp' | 'uia'. Fehlt die Spalte noch, NICHT die ganze Regel verlieren (die Augen-Regel trägt Orbit auf allen PCs):
-            # dann ohne sie lesen — und tsx NICHT ausdrücklich 'uia' melden (Vertrag wie bei augen): letzter guter Stand, sonst ohne
-            # den Schlüssel (der Bot behält seine gemerkte Regel).
-            tsx_da = True
-            try:
-                zeilen = sb_select("wd_farmer_regeln", {"id": "eq.1", "select": "puls_augen_cdp,puls_topstep_pcs"})
-            except Exception:
-                zeilen, tsx_da = sb_select("wd_farmer_regeln", {"id": "eq.1", "select": "puls_augen_cdp"}), False
-            _PULS_REGEL_CACHE["cdp"] = (zeilen[0].get("puls_augen_cdp") if zeilen else None) or []
-            if tsx_da:
-                _PULS_REGEL_CACHE["tsx"] = (zeilen[0].get("puls_topstep_pcs") if zeilen else None) or []
-                _PULS_REGEL_CACHE["tsx_gut"] = True
-            _PULS_REGEL_CACHE["at"], _PULS_REGEL_CACHE["gut"] = time.time(), True
-        except Exception:
-            # DB weg / Spalte fehlt: NIE ausdrücklich 'uia' melden (29.09.2026, Finns Live-Test 14:44 UTC — ein ausdrückliches 'uia'
-            # schickt den Bot auf den alten Weg und schließt das Puls-Chrome). Letzten guten Stand weiter nutzen und in 10 s erneut
-            # lesen; gab es noch keinen, 503 → der Bot behält seine gemerkte Regel (Client-Rückfall seit .809).
-            if not _PULS_REGEL_CACHE["gut"]:
-                return jsonify({"ok": False, "msg": "Regel gerade nicht lesbar"}), 503
-            _PULS_REGEL_CACHE["at"] = time.time() - 50
+    if not puls_regel_stand(time.time()):
+        return jsonify({"ok": False, "msg": "Regel gerade nicht lesbar"}), 503
     out = {"ok": True, "augen": puls_augen_modus(pc_id, _PULS_REGEL_CACHE["cdp"])}
     if _PULS_REGEL_CACHE["tsx_gut"]:
         out["tsx"] = puls_augen_modus(pc_id, _PULS_REGEL_CACHE["tsx"])   # 'cdp' genau dann, wenn pc in puls_topstep_pcs (Vertrag T3)

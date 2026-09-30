@@ -62,6 +62,9 @@ def main():
     check(zl and zl["puls_versuche"] == 2 and zl["exit_fill"]["preis"] == 30812.25 and "puls_diagnose" in zl
           and "master_pl_schaetzung" not in zl and "hedge_pl" not in zl and "today_pnl" not in zl, "Zeile: nur puls-Felder, None weggelassen")
     check(zeile(None) is None and zeile({}) is None and zeile({"hedge_pl": 1}) is None, "ohne puls-Felder → None")
+    zb = zeile(dict(fin, puls_login_fehler=2, puls_login_at="2026-09-30T11:05:00Z", puls_login_code="login_unlesbar"))
+    check(zb and zb["puls_login_fehler"] == 2 and zb["puls_login_at"] == "2026-09-30T11:05:00Z" and zb["puls_login_code"] == "login_unlesbar",
+          "Login-Bremse (30.09.2026): Zähler, Zeit und Code kommen im Auszug mit (Radar „Wartet · Login prüfen“)")
     print("\nOK" if ok else "\nFEHLER")
     return 0 if ok else 1
 

@@ -30,8 +30,8 @@ def lade():
             j = src.index("\n", j + 1)
         return src[i:j]
     exec("\n".join([zuweisung(n) for n in ("PULS_AUGEN_MAX", "PULS_AUGEN_ARTEN", "_PULS_AUGEN_ART_TEIL", "PULS_ERGEBNIS_MAX",
-                                              "PULS_ERGEBNIS_FELDER", "_PLAN_ID_MUSTER")]
-                   + [block(n) for n in ("puls_augen_modus", "puls_augen_saeubern", "puls_ergebnis_saeubern")]), ns)
+                                              "PULS_ERGEBNIS_FELDER", "_PLAN_ID_MUSTER", "_PULS_REGEL_CACHE", "PULS_REGEL_CACHE_S")]
+                   + [block(n) for n in ("puls_augen_modus", "puls_augen_saeubern", "puls_ergebnis_saeubern", "puls_regel_stand")]), ns)
     return ns
 
 
@@ -63,6 +63,32 @@ def main():
     T = a["puls_augen_modus"]   # /puls-regel: tsx = puls_augen_modus(pc, puls_topstep_pcs)
     check(T("pc-l5o8bv", ["pc-l5o8bv", "pc-c19p2l"]) == "cdp" and T("pc-usq1i6", ["pc-l5o8bv"]) == "uia"
           and T("pc-l5o8bv", []) == "uia" and T("pc-l5o8bv", None) == "uia", "tsx: 'cdp' nur für PCs in puls_topstep_pcs, sonst 'uia'")
+
+    # PULS-REGEL-CACHE (30.09.2026, Vorfall Mike): die Liste gilt spätestens nach PULS_REGEL_CACHE_S Sekunden, nicht erst nach 60
+    R, C, zeile, rufe = a["puls_regel_stand"], a["_PULS_REGEL_CACHE"], {"puls_augen_cdp": ["pc-usq1i6"], "puls_topstep_pcs": []}, []
+
+    def lesen(tab, params):
+        rufe.append(params["select"])
+        return [dict(zeile)]
+    check(a["PULS_REGEL_CACHE_S"] <= 10 and R(1000.0, lesen) and len(rufe) == 1 and T("pc-l5o8bv", C["tsx"]) == "uia",
+          "Regel-Cache: erster Aufruf liest, Mikes PC noch 'uia'")
+    zeile["puls_topstep_pcs"] = ["pc-l5o8bv"]
+    check(R(1005.0, lesen) and len(rufe) == 1 and T("pc-l5o8bv", C["tsx"]) == "uia", "Regel-Cache: nach 5 s noch der alte Stand (kein zweiter Read)")
+    check(R(1011.0, lesen) and len(rufe) == 2 and T("pc-l5o8bv", C["tsx"]) == "cdp", "Regel-Cache: nach 11 s frisch gelesen → Mikes PC 'cdp' (vorher erst nach 60 s)")
+
+    def kaputt(tab, params):
+        raise RuntimeError("DB weg")
+    check(R(1030.0, kaputt) and T("pc-l5o8bv", C["tsx"]) == "cdp" and C["at"] == 1030.0,
+          "Regel-Cache: DB weg → letzter guter Stand bleibt, nächster Versuch nach Ablauf")
+
+    def ohne_spalte(tab, params):
+        if "puls_topstep_pcs" in params["select"]:
+            raise RuntimeError("42703")
+        return [{"puls_augen_cdp": ["pc-usq1i6", "pc-neu"]}]
+    check(R(1050.0, ohne_spalte) and C["cdp"] == ["pc-usq1i6", "pc-neu"] and C["tsx"] == ["pc-l5o8bv"],
+          "Regel-Cache: Spalte fehlt → Augen-Regel frisch, tsx bleibt beim letzten guten Stand")
+    C.update(at=0.0, gut=False, tsx_gut=False)
+    check(R(2000.0, kaputt) is False, "Regel-Cache: nie gelesen und DB weg → False (503, der Bot behält seine Regel)")
 
     F = a["PULS_ERGEBNIS_FELDER"]
     neu = ("mll", "rpl", "tp_level", "sl_level", "positionen", "plattform", "konto", "klick_at", "bestaetigung", "quelle",
