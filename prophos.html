@@ -36858,7 +36858,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.915'
+  const OS_TAB_BUILD = '2026-09-22.916'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -41903,6 +41903,9 @@
     // Winning Day (24.09.2026 abends): Fusion-Gegenhedge aus der Staffel am Plan; „Orbit V2" ohne Winning Day nullt ihn
     // nicht (der Betrag kann aus dem Order-Popup stammen) — nur der Wechsel weg von tvv2 räumt ihn weg.
     if(_tpRoute === 'tvv2'){
+      // _editPlan gab es hier nicht (nur in openTradePlanModal) — seit Orbit V3 (.906) warf reines Orbit V2 beim Speichern einen
+      // ReferenceError vor dem try: Knopf ohne Wirkung, keine Meldung (Finn 01.10.2026: „bei Orbit V2 kann ich nicht auf Start drücken")
+      const _editPlan = _editingPlanId ? tradePlans.find(x => String(x.id) === String(_editingPlanId)) : null
       // Richtungs-Schutz (25.09.2026): Pläne frisch aus der DB — Gegenrichtung zu einem laufenden/geplanten Trade wird nicht gespeichert
       if(_tpDir === 'buy' || _tpDir === 'sell'){
         let k = null; try{ k = await v2RichtungKonflikt({ firm: master.firm, ohneId: _editingPlanId, frisch: true }) }catch(_){}
