@@ -1583,7 +1583,7 @@
   /* FIRMEN-V3 (30.09.2026, Finn zu .848: „Wird schon besser, aber ist irgendwie alles noch so hingeklatscht" — Vorbild
      Admin → Acc-Käufe): statt verschieden langer Karten nebeneinander zwei Panels wie „Käufe nach Person / Prop-Firma",
      mit DENSELBEN Zeilen (.adm-dist, .adm-row-btn, .adm-track, .adm-val, .adm-pct). Links breit „Je ID", rechts „Je Firma".
-     Der Balken ist seit 30.09.2026 abends einfarbig (ID- bzw. Firmenfarbe) und zeigt „noch offen" relativ zur längsten Zeile. */
+     Der Balken: drei Teile offen · läuft · erledigt in Abstufungen der ID- bzw. Firmenfarbe (AF-DREI, s. afDreiTeile). */
   #af-view .af-grid{grid-template-columns:minmax(0,2.1fr) minmax(0,1fr);align-items:start}
   @media (max-width:960px){#af-view .af-grid{grid-template-columns:minmax(0,1fr)}}
   #af-view .adm-row{grid-template-columns:minmax(0,1.3fr) minmax(48px,1.4fr) 64px 34px}   /* „N offen" fest breit → Balken bündig */
@@ -1592,7 +1592,13 @@
   #af-view #af-firmen .adm-row-name small{white-space:normal}
   /* Unterzeile („1 läuft · 1 erledigt · heute 1 L / 1 S") nur grau; bei „läuft" ein winziger pulsierender Punkt in --ink-2 */
   #af-view .af-w{white-space:nowrap}
-  #af-view .af-w i{display:inline-block;width:5px;height:5px;border-radius:50%;margin-right:4px;vertical-align:1px;background:var(--ink-2);animation:afPuls 1.8s ease-in-out infinite}
+  #af-view .af-w i{display:inline-block;width:7px;height:7px;border-radius:2px;margin-right:4px;vertical-align:0}   /* Quadrat in der Balken-Abstufung (AF-DREI) */
+  /* drei Teile: volle Breite, 2 px weiße Lücke zwischen den Teilen, runde Enden außen über den Track (overflow hidden) */
+  #af-view .adm-track.af-drei{display:flex;background:var(--surface-tint)}
+  #af-view .af-drei .adm-fill{border-radius:0;flex:none;box-sizing:border-box}
+  #af-view .af-drei .adm-fill + .adm-fill{border-left:2px solid var(--surface)}
+  #af-view .af-legende{display:inline-flex;align-items:center;gap:4px 10px;font-size:11px;color:var(--sub-2);white-space:nowrap}
+  #af-view .af-legende i{display:inline-block;width:7px;height:7px;border-radius:2px;margin-right:4px;vertical-align:0}
   #af-view .adm-val.is-offen{color:var(--ink);font-weight:700}   /* „14 offen" dunkel und fett wie „5.101 €" im Vorbild */
   #af-view .adm-val.is-null{color:var(--sub-2);font-weight:500}
   #af-view .adm-row-btn.is-on{background:var(--surface-tint)}   /* aufgeklappte ID / gewählte Firma: neutral */
@@ -1643,7 +1649,7 @@
     #af-view .adm-dist .adm-row{grid-template-columns:minmax(0,1.25fr) minmax(40px,1fr) 58px 26px;gap:10px}
     #af-view .adm-row-name small{white-space:normal}
   }
-  @media (prefers-reduced-motion:reduce){#af-view .af-w i,#af-view .af-s.is-lauf i{animation:none}}
+  @media (prefers-reduced-motion:reduce){#af-view .af-s.is-lauf i{animation:none}}
   #adm-pane-stat .kf-kpis .kpi-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #adm-pane-stat .kf-gross{margin-top:8px}
   #adm-pane-stat .kf-gross .kf-chart[hidden]{display:none}
@@ -8105,6 +8111,8 @@
                 <div class="panel-title" id="af-ids-titel">Je ID</div>
                 <div class="panel-sub">Zum Aufklappen auf eine ID klicken</div>
               </div>
+              <!-- Legende (30.09.2026, AF-DREI): drei Abstufungen eines Graus — dieselbe Stufung wie jede ID-/Firmenfarbe im Balken -->
+              <span class="af-legende"><span><i style="background:var(--sub)"></i>offen</span><span><i style="background:color-mix(in srgb, var(--sub) 55%, #fff)"></i>läuft</span><span><i style="background:color-mix(in srgb, var(--sub) 22%, #fff)"></i>erledigt</span></span>
             </div>
             <div class="adm-dist" id="af-ids"></div>
           </div>
@@ -12830,12 +12838,12 @@
       const idBox = $('af-ids'); idBox.innerHTML = ''
       // Kachel-Filter: nur IDs mit mindestens einem Konto in diesem Zustand (bzw. mit einem Trade heute)
       const passtKachel = g => !afKachel || (afKachel === 'ls' ? heuteJeId.has(g.key) : g[afKachel].length > 0)
-      const idListe = [...jeId.values()].filter(passtKachel).sort(nachOffen), idMax = Math.max(0, ...idListe.map(g => g.offen.length))
+      const idListe = [...jeId.values()].filter(passtKachel).sort(nachOffen)
       for(const g of idListe){
         const auf = afIdAuf.has(g.key)
         const h = heuteJeId.get(g.key) || []
         const hTxt = h.length ? `heute\u00a0${h.filter(p => p.richtung === 'buy').length}\u00a0L\u00a0/\u00a0${h.filter(p => p.richtung === 'sell').length}\u00a0S` : 'heute noch kein Trade'
-        idBox.appendChild(afDistZeile(g, { dot: afFarbe(g.key), farbe: afFarbe(g.key), max: idMax, sub: [...zaehl(g), [hTxt, '']], on: auf,
+        idBox.appendChild(afDistZeile(g, { dot: afFarbe(g.key), farbe: afFarbe(g.key), sub: [...zaehl(g), [hTxt, '']], on: auf,
           titel: auf ? 'zum Zuklappen klicken' : 'zum Aufklappen klicken',
           klick: () => { if(afIdAuf.has(g.key)) afIdAuf.delete(g.key); else afIdAuf.add(g.key); afRender() } }))
         if(auf) idBox.appendChild(afKonten(g))
@@ -12844,31 +12852,46 @@
 
       // Je Firma: Klick filtert die IDs (und die Summenzeile) auf diese Firma, zweiter Klick hebt auf
       const fBox = $('af-firmen'); fBox.innerHTML = ''
-      const fListe = [...jeFirma.values()].sort(nachOffen), fMax = Math.max(0, ...fListe.map(g => g.offen.length))
+      const fListe = [...jeFirma.values()].sort(nachOffen)
       for(const g of fListe)
-        fBox.appendChild(afDistZeile(g, { farbe: afFirmaFarbe(g.key), max: fMax, sub: zaehl(g).length ? zaehl(g) : [['heute\u00a0noch\u00a0nichts', '']], on: afFirma === g.key,
+        fBox.appendChild(afDistZeile(g, { farbe: afFirmaFarbe(g.key), quadrate: false, sub: zaehl(g).length ? zaehl(g) : [['heute\u00a0noch\u00a0nichts', '']], on: afFirma === g.key,
           titel: afFirma === g.key ? 'Filter aufheben' : 'links nur diese Firma zeigen',
           klick: () => { afFirma = afFirma === g.key ? '' : g.key; afRender() } }))
       if(!jeFirma.size) fBox.innerHTML = '<div class="adm-empty">Keine Accounts.</div>'
     }
     /* Eine Verteilungszeile wie Admin → Acc-Käufe (admBuysDist, FIRMEN-V3 30.09.2026): dieselben Klassen, nur der Balken ist
-     * einfarbig (o.farbe = ID-/Firmenfarbe, Länge = offen / o.max) und statt Betrag/Anzahl stehen „N offen" und „N×". */
+     * gestapelt in drei Abstufungen der o.farbe (afDreiTeile) und statt Betrag/Anzahl stehen „N offen" und „N×". */
+    /* DREI TEILE IN EINER FARBE (30.09.2026, Finn nach .877: „Die Farben sind jetzt echt schön. Aber die Logik davor fand ich echt
+     * gut: drei Teile im Balken, offen, läuft, erledigt"): gestapelt über die volle Breite (Anteil an den aktiven Konten), links →
+     * rechts offen · läuft · erledigt, alles in der EINEN ID- bzw. Firmenfarbe abgestuft — offen voll (noch zu tun), läuft 55 %,
+     * erledigt 22 % (color-mix mit Weiß, damit die 2-px-Lücke weiß bleibt). afStufe liefert dieselben Töne für die Quadrate der
+     * Unterzeile. */
+    const AF_STUFE = { offen: 100, lauf: 55, fertig: 22 }
+    const afStufe = (farbe, z) => AF_STUFE[z] >= 100 ? farbe : `color-mix(in srgb, ${farbe} ${AF_STUFE[z]}%, #fff)`
+    function afDreiTeile(g, farbe){
+      const f = farbe || 'var(--sub-2)', aktiv = g.offen.length + g.lauf.length + g.fertig.length
+      if(!aktiv) return ''
+      return ['offen', 'lauf', 'fertig'].filter(z => g[z].length)
+        .map(z => `<div class="adm-fill" style="width:${(100 * g[z].length / aktiv).toFixed(2)}%;background:${afStufe(f, z)}"></div>`).join('')
+    }
     function afDistZeile(g, o){
       const aktiv = g.offen.length + g.lauf.length + g.fertig.length
       const row = document.createElement('button'); row.type = 'button'
       row.className = 'adm-row adm-row-btn' + (o.on ? ' is-on' : '')
       row.innerHTML = '<div class="adm-row-name"><span class="nm"></span><small></small></div>'
-        // wie „Käufe nach Person“: EIN Balken in der ID- bzw. Firmenfarbe, Länge = noch offen relativ zur Zeile mit den meisten
-        + `<div class="adm-track"><div class="adm-fill" style="width:${o.max > 0 ? Math.min(100, 100 * g.offen.length / o.max).toFixed(1) : 0}%;background:${o.farbe || 'var(--sub-2)'}"></div></div>`
+        + `<div class="adm-track af-drei">${afDreiTeile(g, o.farbe)}</div>`
         + '<div class="adm-val"></div><div class="adm-pct"></div>'
       if(o.dot){ const d = document.createElement('span'); d.className = 'adm-dot'; d.style.background = o.dot; row.querySelector('.adm-row-name').prepend(d) }
       row.querySelector('.nm').textContent = g.name
-      // Unterzeile aus Teilen [Text, Zustand] — Zustandsteile farbig mit Punkt, Rest normal, getrennt durch „ · "
+      // Unterzeile aus Teilen [Text, Zustand] — vor „läuft"/„erledigt" ein kleines Quadrat in der Abstufung des Balkens, Text grau
       const sm = row.querySelector('small')
       o.sub.forEach(([t, z], i) => {
         if(i) sm.append(' · ')
         if(!z){ sm.append(t); return }
-        const w = document.createElement('span'); w.className = 'af-w'; if(z === 'lauf') w.innerHTML = '<i></i>'; w.append(t); sm.appendChild(w)   // nur „läuft“ mit Punkt
+        const w = document.createElement('span'); w.className = 'af-w'
+        // Quadrat nur in „Je ID" — im schmalen Panel „Je Firma" bleibt die Unterzeile so einzeilig (Master nach Finns Bild, 30.09.2026)
+        if(o.quadrate !== false){ const q = document.createElement('i'); q.style.background = afStufe(o.farbe || 'var(--sub-2)', z); w.appendChild(q) }
+        w.append(t); sm.appendChild(w)
       })
       const val = row.querySelector('.adm-val')
       val.textContent = g.offen.length + ' offen'; val.classList.add(g.offen.length ? 'is-offen' : 'is-null')
@@ -36401,7 +36424,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.878'
+  const OS_TAB_BUILD = '2026-09-22.879'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
