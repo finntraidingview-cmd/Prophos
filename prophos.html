@@ -1563,12 +1563,26 @@
   /* ZUSTANDS-CODIERUNG (30.09.2026, Finn am Screenshot .856: Violett und Grün passen nicht zusammen, „läuft" und „erledigt" sahen mit
      je einem grünen Punkt fast gleich aus — „das ist komisch"): offen = Violett (Marke), läuft = Himmelblau (#0BA5EC Fläche/Punkt,
      #026AA2 Schrift 5,9:1 — kräftiger und heller als das gedeckte Phasen-Blau der Typ-Badges), erledigt = ruhig grau ohne Punkt.
-     Grün/Rot nur noch für Geld (+890 $) und die Long/Short-Leiste. Summenzeile, Balken, Zeilen und Legende nutzen dieselben Töne. */
-  #af-view .af-k.is-offen{--af-kc:var(--violet)}
-  #af-view .af-k.is-offen .kpi-value{color:var(--violet)}
-  #af-view .af-k.is-lauf{--af-kc:#0BA5EC}
-  #af-view .af-k.is-lauf .kpi-value{color:#026AA2}
-  #af-view .af-k.is-fertig .kpi-value{color:var(--sub)}
+     Grün/Rot nur noch für Geld (+890 $) und die Long/Short-Leiste. Summenzeile, Balken, Zeilen und Legende nutzen dieselben Töne.
+     ABGELÖST am selben Abend durch ZUSTAND KLAR (Pillen mit Wort, nur Prophos-Tokens, s. u.). */
+  /* ZUSTAND KLAR (30.09.2026, Finn am Screenshot „Moritz aufgeklappt": „Die grauen sind die erledigten Trades, richtig? … Man checkt
+     gar nicht, man denkt immer: Hä, was ist das Dunkelblaue, was das Blaue, was das Graue?"): drei ähnliche Töne ohne Wort waren nicht
+     lesbar, ausgegraute Zeilen wirkten deaktiviert. Jetzt EIN Satz Farben für Pillen, Balken, Legende, Kacheln und die Wörter unter
+     dem Namen — offen · läuft · erledigt, Zustand als Wort in der Badge-Form. „Wartet auf Payout" und Archiv bleiben ruhig grau. */
+  /* Farben (30.09.2026, Finn nach drei verworfenen Entwürfen: „Grün ist fertig/erledigt, Waiting for Payout ist läuft, und dieser
+     Anteil ist noch offen. Darf man immer so das Ticket nehmen?"): die Zustände tragen GENAU die Töne der Typ-Badges —
+     offen = Funded Futures (Lila), läuft = Waiting for Payout (Indigo, pulsierender Punkt), erledigt = Live (Grün, für TP UND SL;
+     nur der Betrag danach grün/rot). Gleiche Badge-Form (.type-badge: 1-px-Rand, zarter Tint, Punkt wie Live/Waiting). */
+  #af-view{
+    --af-offen-fg:#6E3D93;--af-offen-bd:#DFC3FA;--af-offen-bg:#FAF3FF;--af-offen-dot:#6E3D93;--af-offen-ring:#F0E2FC;--af-offen-bar:#6E3D93;
+    --af-lauf-fg:#5049A2;--af-lauf-bd:#817CE9;--af-lauf-bg:#F4F5FF;--af-lauf-dot:#5A51BA;--af-lauf-ring:#E8EAFF;--af-lauf-bar:#5A51BA;
+    --af-fertig-fg:#1B6A14;--af-fertig-bd:#B4DFAE;--af-fertig-bg:#F0FAEE;--af-fertig-dot:#4AA342;--af-fertig-ring:#DDF5D9;--af-fertig-bar:#4AA342
+  }
+  /* Kacheln: die Beschriftung IST die Zustands-Pille (dieselbe wie in den Zeilen), der Wert bleibt dunkel */
+  #af-view .af-k .kpi-label .af-pill{margin-left:-2px}
+  #af-view .af-k.is-offen{--af-kc:var(--af-offen-bar)}
+  #af-view .af-k.is-lauf{--af-kc:var(--af-lauf-bar)}
+  #af-view .af-k.is-fertig{--af-kc:var(--af-fertig-bar)}
   #af-view .af-k.is-leer .kpi-value{color:var(--sub-2)}
   #af-view .af-ls{display:flex;width:120px;height:6px;border-radius:999px;overflow:hidden;background:var(--surface-tint);flex:none}
   #af-view .af-ls .l{background:#12B76A}
@@ -1587,44 +1601,63 @@
   #af-view #af-firmen .adm-row-name small{white-space:normal}
   #af-view .adm-track{display:flex}
   #af-view .adm-fill{border-radius:0;flex:none}
-  #af-view .af-f-offen{background:var(--violet)}
-  #af-view .af-f-lauf{background:#0BA5EC}
-  #af-view .af-f-fertig{background:#D0D5DD}
-  #af-view .adm-val.is-offen{color:var(--violet)}
+  #af-view .af-f-offen{background:var(--af-offen-bar)}
+  #af-view .af-f-lauf{background:var(--af-lauf-bar)}
+  #af-view .af-f-fertig{background:var(--af-fertig-bar)}
+  /* Wörter unter dem Namen („1 läuft · 3 erledigt") in ihrer Zustandsfarbe, kleiner Punkt davor — Balken und Wort gehören zusammen */
+  #af-view .af-w{white-space:nowrap}
+  #af-view .af-w i{display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:4px;vertical-align:1px}
+  #af-view .af-w.is-lauf{color:var(--af-lauf-fg)}
+  #af-view .af-w.is-lauf i{background:var(--af-lauf-bar)}
+  #af-view .af-w.is-fertig{color:var(--af-fertig-fg)}
+  #af-view .af-w.is-fertig i{background:var(--af-fertig-bar)}
+  #af-view .adm-val.is-offen{color:var(--af-offen-fg)}
   #af-view .adm-val.is-null{color:var(--sub-2);font-weight:500}
   #af-view .af-legende{display:inline-flex;align-items:center;gap:4px 10px;flex-wrap:wrap;font-size:11px;color:var(--sub-2);white-space:nowrap}
   #af-view .af-legende i{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:4px;vertical-align:0}
   /* Aufgeklappte Konten einer ID direkt unter ihrer Zeile: festes Raster [Typ | Name | Firma | Status], alle Zeilen bündig */
-  #af-view{--af-typ:80px;--af-firma:92px;--af-status:150px}   /* so breit, dass der Name (mit Kontonummer) im linken Panel meist ganz passt */
+  #af-view{--af-typ:80px;--af-firma:92px;--af-status:212px}   /* Status 212 px (vorher 150): „Erledigt · TP 00:01 · +1.875 $" als Pille ganz */   /* so breit, dass der Name (mit Kontonummer) im linken Panel meist ganz passt */
   #af-view .af-konten{padding:0 0 8px;border-bottom:1px solid var(--border-soft)}
   #af-view .af-leer{font-size:12.5px;color:var(--sub);padding:8px 0 6px}
   #af-view .af-z{display:grid;grid-template-columns:var(--af-typ) minmax(0,1fr) var(--af-firma) var(--af-status);
     grid-template-areas:"typ name firma status";column-gap:12px;align-items:center;min-width:0;padding:6px 0;
     border-top:1px solid var(--border-soft);font-size:13px}
   #af-view .af-konten > :first-child{border-top:none}
-  #af-view .af-z .type-badge{grid-area:typ;width:100%;justify-content:center;padding:2px 4px;font-size:10.5px;white-space:nowrap;overflow:hidden}
+  #af-view .af-z > .type-badge{grid-area:typ;width:100%;justify-content:center;padding:2px 4px;font-size:10.5px;white-space:nowrap;overflow:hidden}
   #af-view .af-z-name{grid-area:name;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   #af-view .af-z-firma{grid-area:firma;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--sub)}
   #af-view .af-z-status{grid-area:status;min-width:0;display:flex;align-items:center;justify-content:flex-end;gap:6px;font-size:12px;color:var(--sub);white-space:nowrap;font-variant-numeric:tabular-nums}
   #af-view .af-z-status > span:last-child{overflow:hidden;text-overflow:ellipsis}
   #af-view .af-z.is-offen .af-z-name{font-weight:500}
-  #af-view .af-z-status .af-offen{color:var(--violet);font-weight:500}
-  #af-view .af-z.is-lauf .af-z-status{color:#026AA2}
-  #af-view .af-z.is-fertig,#af-view .af-z.is-arch{color:var(--sub)}
-  #af-view .af-z.is-fertig .type-badge,#af-view .af-z.is-arch .type-badge{opacity:.55}
+  /* Status-Pille mit Wort (30.09.2026): Offen/Geplant · Läuft (Punkt pulsiert) · Erledigt TP/SL · ruhig (Wartet/Archiv) */
+  #af-view .af-pill{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-transform:none}   /* Basis = .type-badge */
+  #af-view .af-pill i{width:6px;height:6px;border-radius:999px;flex:none}
+  #af-view .af-pill.is-offen{background:var(--af-offen-bg);border-color:var(--af-offen-bd);color:var(--af-offen-fg)}
+  #af-view .af-pill.is-offen i{background:var(--af-offen-dot);box-shadow:0 0 0 2px var(--af-offen-ring)}
+  #af-view .af-pill.is-lauf{background:var(--af-lauf-bg);border-color:var(--af-lauf-bd);color:var(--af-lauf-fg)}
+  #af-view .af-pill.is-lauf i{background:var(--af-lauf-dot);animation:afPuls 1.8s ease-in-out infinite}
+  #af-view .af-pill.is-fertig{background:var(--af-fertig-bg);border-color:var(--af-fertig-bd);color:var(--af-fertig-fg)}
+  #af-view .af-pill.is-fertig i{background:var(--af-fertig-dot);box-shadow:0 0 0 2px var(--af-fertig-ring)}
+  #af-view .af-pill .af-plus{color:#15803d}
+  #af-view .af-pill .af-minus{color:#b91c1c}
+  #af-view .af-pill.is-ruhig{background:var(--surface-tint);border-color:var(--border);color:var(--sub);font-weight:500}   /* Wartet/Archiv */
+  #af-view .af-pill.is-ruhig i{background:var(--sub-2)}
+  /* erledigte Zeilen NICHT mehr ausgrauen (Finn: wirkten deaktiviert) — nur Wartet auf Payout und Archiv bleiben ruhig grau */
+  #af-view .af-z.is-warten,#af-view .af-z.is-arch{color:var(--sub)}
+  #af-view .af-z.is-warten > .type-badge,#af-view .af-z.is-arch > .type-badge{opacity:.55}
   #af-view .af-plus{color:#15803d}
   #af-view .af-minus{color:#b91c1c}
   /* Status-Punkt nur noch bei „läuft" (Himmelblau mit kleinem Puls); erledigte Zeilen haben keinen Punkt, die Klapp-Zeile einen grauen */
   #af-view .af-p{width:7px;height:7px;border-radius:50%;background:var(--sub-2);flex:none}
-  #af-view .af-p.is-lauf{background:#0BA5EC;animation:afPuls 1.8s ease-in-out infinite}
-  @keyframes afPuls{0%,100%{box-shadow:0 0 0 0 rgba(11,165,236,.45)}50%{box-shadow:0 0 0 4px rgba(11,165,236,0)}}
+  #af-view .af-p.is-lauf{background:var(--af-lauf-bar);animation:afPuls 1.8s ease-in-out infinite}
+  #af-view .af-p.is-fertig{background:var(--af-fertig-bar)}
+  @keyframes afPuls{0%,100%{box-shadow:0 0 0 0 rgba(90,81,186,.45)}50%{box-shadow:0 0 0 4px rgba(90,81,186,0)}}   /* Indigo-Puls wie der Läuft-Punkt */
   /* Eingeklappt (erledigt erst ab mehr als 4, wartet auf Payout immer): eine graue Zeile im selben Raster */
   #af-view .af-klapp{display:grid;grid-template-columns:var(--af-typ) minmax(0,1fr) auto;column-gap:12px;align-items:center;width:100%;
     padding:7px 0;border:none;border-top:1px solid var(--border-soft);background:none;font:inherit;font-size:12px;color:var(--sub);cursor:pointer;text-align:left}
   #af-view .af-klapp:hover{color:var(--ink)}
   #af-view .af-klapp .af-p{justify-self:center}
   #af-view .af-klapp .af-pfeil{color:var(--violet)}
-  #af-view .af-geplant{color:var(--violet);font-weight:500}   /* „geplant 14:30“ am offenen Konto (30.09.2026) */
   @media (max-width:820px){
     /* Handy (v3-Maße): Panels untereinander (s. .af-grid); die Kacheln laufen über die v3-Regel .kpis (2 je Zeile) */
     #af-view{--af-typ:72px}
@@ -1639,7 +1672,7 @@
     #af-view .adm-dist .adm-row{grid-template-columns:minmax(0,1.25fr) minmax(40px,1fr) 58px 26px;gap:10px}
     #af-view .adm-row-name small{white-space:normal}
   }
-  @media (prefers-reduced-motion:reduce){#af-view .af-p.is-lauf{animation:none}}
+  @media (prefers-reduced-motion:reduce){#af-view .af-p.is-lauf,#af-view .af-pill.is-lauf i{animation:none}}
   #adm-pane-stat .kf-kpis .kpi-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #adm-pane-stat .kf-gross{margin-top:8px}
   #adm-pane-stat .kf-gross .kf-chart[hidden]{display:none}
@@ -8086,9 +8119,9 @@
       <div id="af-body" hidden>
         <!-- Kopf-Kacheln (30.09.2026, Finn: „oben könnten noch mehr Infos kommen") — Werte schreibt afKpiRender, Klick filtert „Je ID" -->
         <div class="kpis af-kpis" id="af-kpis">
-          <button type="button" class="kpi af-k is-offen" data-af-k="offen"><div class="kpi-label">Noch offen</div><div class="kpi-value">0</div><div class="kpi-delta"></div></button>
-          <button type="button" class="kpi af-k is-lauf" data-af-k="lauf"><div class="kpi-label">Läuft</div><div class="kpi-value">0</div><div class="kpi-delta"></div></button>
-          <button type="button" class="kpi af-k is-fertig" data-af-k="fertig"><div class="kpi-label">Heute erledigt</div><div class="kpi-value">0</div><div class="kpi-delta"></div></button>
+          <button type="button" class="kpi af-k is-offen" data-af-k="offen"><div class="kpi-label"><span class="type-badge af-pill is-offen"><i></i>Noch offen</span></div><div class="kpi-value">0</div><div class="kpi-delta"></div></button>
+          <button type="button" class="kpi af-k is-lauf" data-af-k="lauf"><div class="kpi-label"><span class="type-badge af-pill is-lauf"><i></i>Läuft</span></div><div class="kpi-value">0</div><div class="kpi-delta"></div></button>
+          <button type="button" class="kpi af-k is-fertig" data-af-k="fertig"><div class="kpi-label"><span class="type-badge af-pill is-fertig"><i></i>Heute erledigt</span></div><div class="kpi-value">0</div><div class="kpi-delta"></div></button>
           <button type="button" class="kpi af-k" data-af-k="ls"><div class="kpi-label">Long / Short heute</div><div class="kpi-value">–</div><span class="af-ls" id="af-ls"><span class="l"></span><span class="s"></span></span><div class="kpi-delta"></div></button>
           <button type="button" class="kpi af-k" data-af-k="warten" hidden><div class="kpi-label">Wartet auf Payout</div><div class="kpi-value">0</div><div class="kpi-delta"></div></button>
         </div>
@@ -12809,7 +12842,8 @@
       for(const x of alle){ const f = afFirmaVon(x.r); if(!jeFirma.has(f)) jeFirma.set(f, gruppe(f, f)); jeFirma.get(f)[x.z].push(x.r) }
       const nachOffen = (a, b) => (b.offen.length - a.offen.length) || String(a.name).localeCompare(String(b.name), 'de')
       // Teile mit geschütztem Leerzeichen: am Handy bricht die Unterzeile dann nur an den „·"-Trennern um, nie mitten in „1 S"
-      const zaehl = g => [g.lauf.length ? `${g.lauf.length}\u00a0läuft` : '', g.fertig.length ? `${g.fertig.length}\u00a0erledigt` : '']
+      // Teile [Text, Zustand]: die Zustandswörter bekommen Farbe + Punkt wie ihr Balkenstück (ZUSTAND KLAR, 30.09.2026)
+      const zaehl = g => [g.lauf.length ? [`${g.lauf.length}\u00a0läuft`, 'lauf'] : null, g.fertig.length ? [`${g.fertig.length}\u00a0erledigt`, 'fertig'] : null].filter(Boolean)
 
       // Je ID: Klick klappt die Konten DIREKT darunter auf (mehrere gleichzeitig möglich)
       $('af-ids-titel').textContent = ['Je ID', afFirma, afKachel ? AF_KACHEL_TXT[afKachel] : ''].filter(Boolean).join(' · ')
@@ -12820,7 +12854,7 @@
         const auf = afIdAuf.has(g.key)
         const h = heuteJeId.get(g.key) || []
         const hTxt = h.length ? `heute\u00a0${h.filter(p => p.richtung === 'buy').length}\u00a0L\u00a0/\u00a0${h.filter(p => p.richtung === 'sell').length}\u00a0S` : 'heute noch kein Trade'
-        idBox.appendChild(afDistZeile(g, { dot: afFarbe(g.key), sub: [...zaehl(g), hTxt].filter(Boolean).join(' · '), on: auf,
+        idBox.appendChild(afDistZeile(g, { dot: afFarbe(g.key), sub: [...zaehl(g), [hTxt, '']], on: auf,
           titel: auf ? 'zum Zuklappen klicken' : 'zum Aufklappen klicken',
           klick: () => { if(afIdAuf.has(g.key)) afIdAuf.delete(g.key); else afIdAuf.add(g.key); afRender() } }))
         if(auf) idBox.appendChild(afKonten(g))
@@ -12830,7 +12864,7 @@
       // Je Firma: Klick filtert die IDs (und die Summenzeile) auf diese Firma, zweiter Klick hebt auf
       const fBox = $('af-firmen'); fBox.innerHTML = ''
       for(const g of [...jeFirma.values()].sort(nachOffen))
-        fBox.appendChild(afDistZeile(g, { sub: zaehl(g).filter(Boolean).join(' · ') || 'heute\u00a0noch\u00a0nichts', on: afFirma === g.key,
+        fBox.appendChild(afDistZeile(g, { sub: zaehl(g).length ? zaehl(g) : [['heute\u00a0noch\u00a0nichts', '']], on: afFirma === g.key,
           titel: afFirma === g.key ? 'Filter aufheben' : 'links nur diese Firma zeigen',
           klick: () => { afFirma = afFirma === g.key ? '' : g.key; afRender() } }))
       if(!jeFirma.size) fBox.innerHTML = '<div class="adm-empty">Keine Accounts.</div>'
@@ -12849,7 +12883,13 @@
         + '<div class="adm-val"></div><div class="adm-pct"></div>'
       if(o.dot){ const d = document.createElement('span'); d.className = 'adm-dot'; d.style.background = o.dot; row.querySelector('.adm-row-name').prepend(d) }
       row.querySelector('.nm').textContent = g.name
-      row.querySelector('small').textContent = o.sub
+      // Unterzeile aus Teilen [Text, Zustand] — Zustandsteile farbig mit Punkt, Rest normal, getrennt durch „ · "
+      const sm = row.querySelector('small')
+      o.sub.forEach(([t, z], i) => {
+        if(i) sm.append(' · ')
+        if(!z){ sm.append(t); return }
+        const w = document.createElement('span'); w.className = 'af-w is-' + z; w.innerHTML = '<i></i>'; w.append(t); sm.appendChild(w)
+      })
       const val = row.querySelector('.adm-val')
       val.textContent = g.offen.length + ' offen'; val.classList.add(g.offen.length ? 'is-offen' : 'is-null')
       const n = aktiv + g.warten.length
@@ -12915,10 +12955,10 @@
       const nach = (a, b) => (afRang(a) - afRang(b)) || afFirmaVon(a).localeCompare(afFirmaVon(b), 'de')
         || String(a.name).localeCompare(String(b.name), 'de', { numeric:true })
       // Eingeklappte Gruppe: eine graue Zeile im Raster, „zeigen" klappt die Konten darunter auf
-      const klapp = (set, text) => {
+      const klapp = (set, text, punkt) => {
         const auf = set.has(g.key)
         const b = document.createElement('button'); b.type = 'button'; b.className = 'af-klapp' + (auf ? ' is-auf' : '')
-        b.innerHTML = '<span class="af-p"></span><span></span><span class="af-pfeil"></span>'
+        b.innerHTML = `<span class="af-p${punkt ? ' ' + punkt : ''}"></span><span></span><span class="af-pfeil"></span>`
         b.children[1].textContent = text
         b.children[2].textContent = auf ? 'ausblenden' : 'zeigen'   // Wort statt ▾ — der Pfeil war bei 12 px nur ein Punkt
         b.addEventListener('click', () => { if(set.has(g.key)) set.delete(g.key); else set.add(g.key); afRender() })
@@ -12929,7 +12969,7 @@
       for(const r of g.lauf.sort(nach)) k.appendChild(afZeile(r, 'lauf'))
       g.fertig.sort(nach)
       const nTp = g.fertig.filter(r => afHeute(r).ergebnis === 'tp').length, nSl = g.fertig.filter(r => afHeute(r).ergebnis === 'sl').length
-      if(g.fertig.length <= 4 || klapp(afFertigAuf, `${g.fertig.length} heute erledigt` + [nTp ? ` · ${nTp} TP` : '', nSl ? ` · ${nSl} SL` : ''].join('')))
+      if(g.fertig.length <= 4 || klapp(afFertigAuf, `${g.fertig.length} heute erledigt` + [nTp ? ` · ${nTp} TP` : '', nSl ? ` · ${nSl} SL` : ''].join(''), 'is-fertig'))
         for(const r of g.fertig) k.appendChild(afZeile(r, 'fertig'))
       if(g.warten.length && klapp(afWartetAuf, `${g.warten.length} ${g.warten.length === 1 ? 'wartet' : 'warten'} auf Payout`))
         for(const r of g.warten.sort(nach)) k.appendChild(afZeile(r, 'warten'))
@@ -12940,7 +12980,7 @@
     // Eine Konto-Zeile im gemeinsamen Raster: Typ · Name · Firma · Status. Balance, P&L, Payout-Datum im Tooltip.
     function afZeile(r, z){
       const d = document.createElement('div')
-      d.className = 'af-z ' + ({ offen:'is-offen', lauf:'is-lauf', fertig:'is-fertig', warten:'is-fertig', arch:'is-arch' }[z] || '')
+      d.className = 'af-z ' + ({ offen:'is-offen', lauf:'is-lauf', fertig:'is-fertig', warten:'is-warten', arch:'is-arch' }[z] || '')
       d.innerHTML = '<span class="type-badge"></span><span class="af-z-name"></span><span class="af-z-firma"></span><span class="af-z-status"></span>'
       const ph = afPhase(r.type)
       const badge = d.firstElementChild
@@ -12951,34 +12991,36 @@
       d.querySelector('.af-z-firma').textContent = afFirmaVon(r)
 
       const st = d.querySelector('.af-z-status')
-      const punkt = kl => { const i = document.createElement('span'); i.className = 'af-p' + (kl ? ' ' + kl : ''); st.appendChild(i) }
-      const text = (t, kl) => { const s = document.createElement('span'); s.textContent = t; if(kl) s.className = kl; st.appendChild(s); return s }
+      // Status als Pille MIT WORT (ZUSTAND KLAR, 30.09.2026, Finn: „Hä, was ist das Dunkelblaue, was das Blaue, was das Graue?"):
+      // Offen/Geplant (Lila) · Läuft (Indigo, Punkt pulsiert) · Erledigt (Grün, Betrag grün/rot) · ruhig grau für Wartet/Archiv
+      const pill = (kl, zeichen, text) => {
+        const s = document.createElement('span'); s.className = 'type-badge af-pill ' + kl   // Badge-Form wie die Typ-Spalte (Finn: „das Ticket nehmen")
+        const i = document.createElement('i'); if(zeichen) i.textContent = zeichen; s.appendChild(i)
+        s.append(text); st.appendChild(s); return s
+      }
       const ccy = r.balance_ccy || 'USD'
       const geplant = afGeplant(r)
-      if(z === 'offen') text(geplant || 'offen', geplant ? 'af-geplant' : 'af-offen')
+      if(z === 'offen') pill('is-offen', '', geplant ? 'Geplant' + geplant.slice(7) : 'Offen')
       else if(z === 'lauf'){
         const tr = r.im_trade
-        punkt('is-lauf')
         const seit = afZeit(tr.seit)
-        // kurz „Short NDX · 04:48", voll im title „Short NDX100 · seit 04:48"
-        const kurz = [tr.rolle === 'slave' ? 'Hedge' : '', [afRichtung(tr.richtung), afSymKurz(tr.symbol)].filter(Boolean).join(' '), seit].filter(Boolean).join(' · ') || 'im Trade'
+        // kurz „Läuft · Short NDX 04:48", voll im title „Short NDX100 · seit 04:48"
+        const kurz = [tr.rolle === 'slave' ? 'Hedge' : '', afRichtung(tr.richtung), afSymKurz(tr.symbol), seit].filter(Boolean).join(' ')
         const voll = [tr.rolle === 'slave' ? 'Hedge' : '', [afRichtung(tr.richtung), tr.symbol].filter(Boolean).join(' '), seit ? 'seit ' + seit : ''].filter(Boolean).join(' · ') || 'im Trade'
         st.title = voll
-        text(kurz)
+        pill('is-lauf', '', kurz ? 'Läuft · ' + kurz : 'Läuft')
       }else if(z === 'fertig'){
-        // „TP 12:40 · +272 $" — Betrag klein grün/rot, Rest gedämpft
-        // erledigt = ruhig grau, KEIN Punkt (30.09.2026, Finn: „läuft" und „erledigt" sahen gleich aus) — nur der Betrag grün/rot
+        // „Erledigt · SL 06:11 · −2.500 $" — Pille immer grün (erledigt, wie Live), nur der Betrag danach grün bzw. rot
         const e = afHeute(r)
-        const was = (e.ergebnis === 'tp' ? '✓ TP' : e.ergebnis === 'sl' ? 'SL' : 'beendet') + ' ' + afZeit(e.at)
-        const s = text(was)
+        const s = pill('is-fertig', '', 'Erledigt · ' + (e.ergebnis === 'tp' ? 'TP' : e.ergebnis === 'sl' ? 'SL' : 'beendet') + ' ' + afZeit(e.at))
         if(e.pl != null){
           s.append(' · ')
           const b = document.createElement('span'); b.className = e.pl >= 0 ? 'af-plus' : 'af-minus'
           b.textContent = (e.pl >= 0 ? '+' : '−') + afGeld(Math.abs(e.pl), ccy); s.appendChild(b)
         }
-        if(e.blown) s.append(' · geblowt')
-      }else if(z === 'warten') text('wartet seit ' + afZeit(r.waiting_payout_since))
-      else text({ blown:'geblowt', passed:'bestanden', passed_pending:'bestanden' }[r.arch_grund] || 'archiviert')
+        if(e.blown) st.title = 'geblowt'   // im Tooltip — in der Pille hätte „· geblowt" den Betrag abgeschnitten
+      }else if(z === 'warten') pill('is-ruhig', '', 'Wartet seit ' + afZeit(r.waiting_payout_since))
+      else pill('is-ruhig', '', { blown:'geblowt', passed:'bestanden', passed_pending:'bestanden' }[r.arch_grund] || 'archiviert')
 
       // Tooltip: alles, was die Zeile weglässt (voller Name, Größe, Kontonummer, Balance, P&L seit Start, Payout)
       const size = r.size > 0 ? Number(r.size) : admAccGroesse(r.name, r.balance)
@@ -36347,7 +36389,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.872'
+  const OS_TAB_BUILD = '2026-09-22.873'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
