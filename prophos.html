@@ -2126,6 +2126,11 @@
   #dashboard-view .wdl-z-punkt{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:9px;vertical-align:1px;background:var(--wdl-id,#98A2B3)}
   #dashboard-view .wdl-z-ri{grid-area:ri;color:var(--sub)}
   #dashboard-view .wdl-z-ri em{display:inline-block;min-width:34px;margin-right:6px;padding:1px 0;border-radius:4px;background:var(--surface-tint);color:var(--ink-2);font-style:normal;font-size:10.5px;font-weight:600;letter-spacing:.03em;text-align:center}
+  /* BUY/SELL leicht grün/rot (30.09.2026, Finn: „in diesem Rot und Grün" von Prophos): Tint wie die BUY/SELL-Chips der Trade-Karten
+     (rgba(18,183,106,.12) / rgba(240,68,56,.10)); deren Schrift #0E9757/#D92D20 hätte auf dem Tint nur 3,3 bzw. 4,2:1 — deshalb
+     die vorhandenen dunkleren Töne #047857 (Puls-Pille aktiv, 4,9:1) und #b91c1c (P&L-Rot des Radars, 5,7:1) */
+  #dashboard-view .wdl-z-ri em.is-buy{background:rgba(18,183,106,.12);color:#047857}
+  #dashboard-view .wdl-z-ri em.is-sell{background:rgba(240,68,56,.10);color:#b91c1c}
   #dashboard-view .wdl-z-mi{grid-area:mi;text-align:right}
   #dashboard-view .wdl-z-pl{grid-area:pl;text-align:right;font-weight:600}
   #dashboard-view .wdl-z-zeit{grid-area:zeit;text-align:right;color:var(--sub)}
@@ -24251,6 +24256,11 @@
    * kurs_jetzt ≈ aus Equity − Balance, pl_live aus MT5. Eigene Sektion unter Orbit, gleiches Raster, gleiche Spanne. Kein NQ-Chart
    * (CFD-Preise passen nicht auf NQ/MNQ): keine Linien, keine Auswahl; der 2-s-Takt (NQ-Kurs) lässt Echo aus. */
   function wdlIstEcho(t){ return !!t && t.plattform === 'echo' }
+  // Plattform fürs Radar (30.09.2026, Finn: „Die Topstep-Trades sollen nicht als Orbit erscheinen, sondern als Topstep"): das Backend
+  // liefert für Topstep V2 plattform 'orbit' — hier aus route 'tsv2' abgeleitet. Nur Anzeige (Pille, Block); Chart, Spanne, Liq,
+  // Demo und Nachlesen bleiben für Topstep wie für Orbit (NQ/MNQ).
+  const WDL_PF = [['orbit', 'Orbit'], ['topstep', 'Topstep'], ['echo', 'Echo']]   // Reihenfolge der Blöcke je Gruppe
+  function wdlPf(t){ return wdlIstEcho(t) ? 'echo' : (t && t.route === 'tsv2') ? 'topstep' : 'orbit' }
   // Linien für mklChartZeichnen: Entry durchgezogen, TP gestrichelt, Liquidation gepunktet, SL lang gestrichelt (nur wenn gesetzt)
   const WDL_SKALA_PKT = 600   // ≈ 2 % NQ — typische WD-Liquidationen (≤ 400 Pkt) bleiben im Bild, Funded-Liquidationen nicht
   function wdlChartLinien(){
@@ -24536,8 +24546,8 @@
       const tip = echo ? [k.name || konto, 'Echo (MT5)', t.symbol || ''].filter(Boolean).join(' · ')
         : [k.name || konto, slE != null ? 'SL ' + f2(slE) : '', lq != null ? 'Liquidation ' + f2(lq) : ''].filter(Boolean).join(' · ') + ` — klicken: Level im Chart ${an ? 'ausblenden' : 'einblenden'}`
       const lots = v => num(v) == null ? '?' : Number(v).toLocaleString('de-DE', { maximumFractionDigits: 2 })
-      const ri = echo ? zelle('ri', `<em>${buy ? 'BUY' : sell ? 'SELL' : '?'}</em>${lots(t.lots)} Lot${t.symbol ? `<span class="wdl-z-sym"> ${escapeHtml(t.symbol)}</span>` : ''}`, { tip: `${lots(t.lots)} Lot${t.symbol ? ' ' + t.symbol : ''}` })
-        : zelle('ri', `<em>${buy ? 'BUY' : sell ? 'SELL' : '?'}</em>${t.kt != null ? f0(t.kt) : '?'} × ${escapeHtml(t.symbol_root || '?')}`)
+      const ri = echo ? zelle('ri', `<em${buy ? ' class="is-buy"' : sell ? ' class="is-sell"' : ''}>${buy ? 'BUY' : sell ? 'SELL' : '?'}</em>${lots(t.lots)} Lot${t.symbol ? `<span class="wdl-z-sym"> ${escapeHtml(t.symbol)}</span>` : ''}`, { tip: `${lots(t.lots)} Lot${t.symbol ? ' ' + t.symbol : ''}` })
+        : zelle('ri', `<em${buy ? ' class="is-buy"' : sell ? ' class="is-sell"' : ''}>${buy ? 'BUY' : sell ? 'SELL' : '?'}</em>${t.kt != null ? f0(t.kt) : '?'} × ${escapeHtml(t.symbol_root || '?')}`)
       let art, miZ, plZ, zeitZ
       if(offen){
         art = 'lauf'
@@ -24607,7 +24617,7 @@
         zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
       }
       return `<div class="wdl-z wdl-z-${art}${echo ? ' wdl-z-echo' : ''}${an ? ' is-aktiv' : ''}${extra ? ' ' + extra : ''}" style="--wdl-id:${wdlIdFarbe(t)}" data-wdl-trade="${escapeHtml(wdlTid(t))}" title="${escapeHtml(tip)}">`
-        + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><i class="wdl-pf">${echo ? 'Echo' : 'Orbit'}</i><small>${escapeHtml(konto)}</small></span>`
+        + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><i class="wdl-pf">${(WDL_PF.find(x => x[0] === wdlPf(t)) || WDL_PF[0])[1]}</i><small>${escapeHtml(konto)}</small></span>`
         + ri + miZ + plZ + zeitZ + '</div>'
     }
     // Gruppe = ein Kasten, oben einmal die Spaltenköpfe im selben Raster wie die Zeilen
@@ -24619,7 +24629,8 @@
     // „Beendet" die 5 neuesten Orbit-Zeilen alle Plätze und Echo wäre wieder versteckt (der Anlass für die Kürzung).
     const gruppe = (titel, arr, sp, cls, mehr) => {
       if(!arr.length) return ''
-      const bloecke = [arr.filter(t => !wdlIstEcho(t)), arr.filter(wdlIstEcho)].filter(b => b.length)
+      // seit 30.09.2026 drei Blöcke: Orbit · Topstep · Echo (wdlPf)
+      const bloecke = WDL_PF.map(([k]) => arr.filter(t => wdlPf(t) === k)).filter(b => b.length)
       const lang = bloecke.some(b => b.length > WDL_BEENDET_KURZ)
       const alle = !mehr || (wdl.alleZu || {})[mehr] || !lang
       const zeilen = bloecke.map((b, i) => (alle ? b : b.slice(0, WDL_BEENDET_KURZ)).map((t, j) => zeile(t, i && !j ? 'wdl-z-pfneu' : '')).join('')).join('')
