@@ -36417,7 +36417,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.875'
+  const OS_TAB_BUILD = '2026-09-22.876'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -36611,6 +36611,10 @@
     catch(e){ if(!gemeldet){ gemeldet = true; try{ await fern.melde({ ok:false, unklar:true, msg: '⚠ Ergebnis UNKLAR — Lauf am PC abgebrochen: ' + String(e && e.message || e) }) }catch(_){} } }
     finally{ if(!gemeldet){ try{ await fern.melde({ ok:false, unklar:true, msg: '⚠ Lauf am PC ohne Abschluss beendet — erst in TradingView nachsehen.' }) }catch(_){} } }
   }
+  // CDP-UMBAU (30.09.2026, Vertrag mit Terminal 3): der Bot antwortet code 'cdp_folgt', wenn auf diesem PC der neue TopstepX-Weg
+  // (Puls-Chrome) gewählt ist, die nötige Etappe aber noch fehlt — gesendet:false, retry_ok:false. Nie „nichts gesendet" mit Neustart:
+  // der Plan bleibt stehen, bis die Etappe da ist (oder von Hand in TopstepX).
+  const tsxCdpFolgtText = r => `Topstep-Puls wird gerade umgebaut${r && r.etappe ? ' (Etappe ' + String(r.etappe).slice(0, 12) + ')' : ''} — dieser Schritt kommt noch. Plan bleibt stehen, NICHT erneut starten; bis dahin von Hand in TopstepX.`
   async function tpOrbitStartenKern(planId, fern, opts){
     let plan = tradePlans.find(x => String(x.id) === String(planId))
     const toast = (t, art) => { if(typeof atToast === 'function') atToast(t, art) }
@@ -36663,6 +36667,7 @@
         _pfSet('ob-order', 'err', escapeHtml(text))
         pfEnde(false, /^✗ von TopstepX abgelehnt/.test(text) ? '✗ Von TopstepX abgelehnt — Plan bleibt Geplant.'
           : /^⚠ Order geklickt, keine Position/.test(text) ? '⚠ Order geklickt, keine Position — erst in TopstepX unter Orders nachsehen. Plan bleibt Geplant.'
+          : /^Topstep-Puls wird gerade umgebaut/.test(text) ? '⏸ Topstep-Puls wird umgebaut — Plan bleibt stehen, nicht erneut starten.'
           : /UNKLAR/.test(text) ? `⚠ Ergebnis UNKLAR — erst in ${pulsPlattform(plan)} nachsehen, NICHT blind erneut starten.` : '✗ Nichts platziert — Meldung oben.')
         return
       }
@@ -36746,7 +36751,8 @@
           }catch(e){ r0 = { ok: false, msg: String((e && e.message) || e) } }
           const b0 = tvBalanceAus(r0 && r0.summary), pos = Array.isArray(r0 && r0.positionen) ? r0.positionen.length : null
           const probe = !!(r0 && !r0._nurLesen)
-          const txt = (r0 && (r0.ok || b0.balance != null))
+          const txt = (r0 && r0.code === 'cdp_folgt') ? tsxCdpFolgtText(r0)
+            : (r0 && (r0.ok || b0.balance != null))
             ? `${probe ? (r0.msg || 'Probe bis vor den Knopf') + ' — keine Order' : 'Nur gelesen (keine Order, Probe-Route fehlt noch)'}: Konto ${r0.konto_aktiv || extId}${b0.balance != null ? ' · Balance ' + b0.balance.toLocaleString('de-DE', { minimumFractionDigits: 2 }) + ' $' : ''}${pos != null ? ' · ' + pos + ' Position(en)' : ''}`
             : (probe ? 'Probe fehlgeschlagen' + (r0 && r0.schritt ? ' bei „' + r0.schritt + '"' : '') + ': ' : 'Lesen fehlgeschlagen: ') + String((r0 && (r0.msg || r0.code)) || 'keine Antwort')
           if(b0.balance != null && (!r0.konto_aktiv || String(r0.konto_aktiv).includes(extId))) tvKontoBalanceSchreiben(plan.masterAccountId, b0, new Date().toISOString())
@@ -36850,6 +36856,7 @@
       //  · fetch warf (TypeError, Backend weg) oder das Panel kennt die Route nicht (404 vor jedem Klick) → nichts gesendet
       //  · Proxy-502 / Zeitlimit / kein JSON → UNKLAR: Plan bleibt, NICHT erneut starten, erst in TopstepX nachsehen
       if(plan.route === 'tsv2' && r && !r.ok && !r.gesendet){
+        if(r.code === 'cdp_folgt'){ await fehler(tsxCdpFolgtText(r), Object.assign({}, r, { retry_ok: false })); return }
         if(r._nichtGesendet){
           await fehler('Lokales Backend nicht erreichbar (' + String(r.error || '').slice(0, 80) + ') — nichts gesendet, Plan bleibt Geplant.', r)
           return

@@ -10136,7 +10136,13 @@ def puls_inventar_schreiben(pc_id):
 # (Lesestand/Inventar aus augen.js) schreibt der Puls über POST /puls-augen/<pc_id> in puls_augen (RLS an, nur Service-Key).
 # SQL: sql/2026-09-29_puls_augen.sql. E0 = nur lesen, kein Klick.
 PULS_AUGEN_MAX = 60_000
-_PULS_REGEL_CACHE = {"at": 0.0, "cdp": [], "gut": False}
+_PULS_REGEL_CACHE = {"at": 0.0, "cdp": [], "tsx": [], "gut": False, "tsx_gut": False}
+# TopstepX-Arten (30.09.2026, Topstep-Paket B, sql/2026-09-30_puls-augen-tsx.sql — live ausgeführt, derselbe DB-Check):
+# 'stand_tsx', 'inventar_tsx' und 'inventar_tsx_<teil>' (1–16 Kleinbuchstaben, z. B. _grund/_konto/_bracket) — eine Zeile je
+# Zustand (PK pc_id + art), je Zeile eigener 60-KB-Deckel (der Bot kürzt selbst darunter); die TV-/Tradovate-Zeilen
+# 'stand'/'inventar' werden nie überschrieben. Dazu die daten-Schlüssel 'zustand' und 'bot'.
+PULS_AUGEN_ARTEN = ("stand", "inventar", "stand_tsx", "inventar_tsx")
+_PULS_AUGEN_ART_TEIL = re.compile(r"inventar_tsx_[a-z]{1,16}")
 
 
 def puls_augen_modus(pc_id, cdp_liste):
@@ -10147,10 +10153,12 @@ def puls_augen_modus(pc_id, cdp_liste):
 def puls_augen_saeubern(d):
     """REIN RECHNEND (testbar): {art, daten} mit bekannter Art, daten nur als Objekt mit bekannten Schlüsseln, Größendeckel.
     -> (art, daten) | None"""
-    if not isinstance(d, dict) or d.get("art") not in ("stand", "inventar") or not isinstance(d.get("daten"), dict):
+    art = d.get("art") if isinstance(d, dict) else None
+    if not isinstance(art, str) or not (art in PULS_AUGEN_ARTEN or _PULS_AUGEN_ART_TEIL.fullmatch(art)) or not isinstance(d.get("daten"), dict):
         return None
     erlaubt = ("v", "ts", "url", "titel", "geo", "sichtbar", "fokus", "popups", "konto", "ticket", "kauf_knopf", "positionen",
-               "orders", "toasts", "konto_summary", "inventar", "fehler", "dauer_ms", "target", "chrome")
+               "orders", "toasts", "konto_summary", "inventar", "fehler", "dauer_ms", "target", "chrome",
+               "zustand", "bot")   # zustand/bot seit 30.09.2026 (TopstepX-Inventare je Zustand, Bot-Version)
     daten = {k: v for k, v in d["daten"].items() if k in erlaubt}
     if len(json.dumps(daten, ensure_ascii=False)) > PULS_AUGEN_MAX:
         return None
@@ -10165,8 +10173,19 @@ def puls_regel_lesen(pc_id):
         return jsonify({"ok": False, "msg": "pc_id ungültig"}), 400
     if time.time() - _PULS_REGEL_CACHE["at"] > 60:
         try:
-            zeilen = sb_select("wd_farmer_regeln", {"id": "eq.1", "select": "puls_augen_cdp"})
+            # puls_topstep_pcs (30.09.2026, Topstep-Paket B, sql/2026-09-30_puls-topstep-pcs.sql): Schalter je PC für den Topstep-Puls
+            # → tsx 'cdp' | 'uia'. Fehlt die Spalte noch, NICHT die ganze Regel verlieren (die Augen-Regel trägt Orbit auf allen PCs):
+            # dann ohne sie lesen — und tsx NICHT ausdrücklich 'uia' melden (Vertrag wie bei augen): letzter guter Stand, sonst ohne
+            # den Schlüssel (der Bot behält seine gemerkte Regel).
+            tsx_da = True
+            try:
+                zeilen = sb_select("wd_farmer_regeln", {"id": "eq.1", "select": "puls_augen_cdp,puls_topstep_pcs"})
+            except Exception:
+                zeilen, tsx_da = sb_select("wd_farmer_regeln", {"id": "eq.1", "select": "puls_augen_cdp"}), False
             _PULS_REGEL_CACHE["cdp"] = (zeilen[0].get("puls_augen_cdp") if zeilen else None) or []
+            if tsx_da:
+                _PULS_REGEL_CACHE["tsx"] = (zeilen[0].get("puls_topstep_pcs") if zeilen else None) or []
+                _PULS_REGEL_CACHE["tsx_gut"] = True
             _PULS_REGEL_CACHE["at"], _PULS_REGEL_CACHE["gut"] = time.time(), True
         except Exception:
             # DB weg / Spalte fehlt: NIE ausdrücklich 'uia' melden (29.09.2026, Finns Live-Test 14:44 UTC — ein ausdrückliches 'uia'
@@ -10175,7 +10194,11 @@ def puls_regel_lesen(pc_id):
             if not _PULS_REGEL_CACHE["gut"]:
                 return jsonify({"ok": False, "msg": "Regel gerade nicht lesbar"}), 503
             _PULS_REGEL_CACHE["at"] = time.time() - 50
-    return jsonify({"ok": True, "augen": puls_augen_modus(pc_id, _PULS_REGEL_CACHE["cdp"])})
+    out = {"ok": True, "augen": puls_augen_modus(pc_id, _PULS_REGEL_CACHE["cdp"])}
+    if _PULS_REGEL_CACHE["tsx_gut"]:
+        out["tsx"] = puls_augen_modus(pc_id, _PULS_REGEL_CACHE["tsx"])   # 'cdp' genau dann, wenn pc in puls_topstep_pcs (Vertrag T3)
+        out["topstep_pc"] = out["tsx"] == "cdp"                          # dasselbe als bool (erste Fassung, falls jemand es liest)
+    return jsonify(out)
 
 
 # ── PULS-ERGEBNISSE (29.09.2026, Finns Live-Test 15:49–15:50 UTC, Plan 5ab15b24) ───────────────────────────────────────
@@ -10184,11 +10207,14 @@ def puls_regel_lesen(pc_id):
 # Klick stufe 'geklickt', am Ende 'ende'); der PC-Tab des Besitzers übernimmt nie verarbeitete Ergebnisse. Eine Zeile je Plan+Art,
 # jede Meldung setzt abgeholt_at zurück (ein neuer Lauf desselben Plans zählt wieder). SQL: sql/2026-09-29_puls_ergebnisse.sql.
 PULS_ERGEBNIS_MAX = 30_000
+# KANONISCH (30.09.2026, Topstep-Paket B): dieselbe Liste 1:1 in mt5-copier/order_bot.py (PULS_ERGEBNIS_FELDER) — neu für TopstepX:
+# mll, rpl, tp_level, sl_level, positionen, plattform. Reihenfolge egal, Menge muss gleich sein (app.py zuerst deployen, dann Bot).
 PULS_ERGEBNIS_FELDER = ("ok", "code", "schritt", "msg", "gesendet", "bestaetigt", "bestaetigung", "geklickt", "retry_ok",
                         "einstieg", "einstieg_quelle", "tp_limit", "tp_limit_quelle", "sl_limit", "sl_limit_quelle", "order_klick_ms",
                         "klick_at", "balance_start", "equity_start", "today_pnl_start", "today_pnl", "balance_end", "equity_end",
                         "tv_symbol", "menge", "konto_aktiv", "pruefung", "meldung_roh", "positionen_danach", "close_fill", "storniert",
-                        "symbol", "richtung", "konto", "trail_ende", "quelle")
+                        "symbol", "richtung", "konto", "trail_ende", "quelle",
+                        "mll", "rpl", "tp_level", "sl_level", "positionen", "plattform")
 _PLAN_ID_MUSTER = re.compile(r"[A-Za-z0-9-]{8,64}")
 
 
@@ -10208,8 +10234,9 @@ def puls_ergebnis_saeubern(d, pc_id):
         e["at_ms"] = int(d["at_ms"])
     if isinstance(e.get("meldung_roh"), list):
         e["meldung_roh"] = [str(x)[:300] for x in e["meldung_roh"][:14]]
-    if isinstance(e.get("positionen_danach"), list):
-        e["positionen_danach"] = e["positionen_danach"][:10]
+    for k in ("positionen_danach", "positionen"):     # TopstepX-Positionen (30.09.2026) wie positionen_danach gekappt
+        if isinstance(e.get(k), list):
+            e[k] = e[k][:10]
     for k in ("msg", "trail_ende"):
         if isinstance(e.get(k), str):
             e[k] = e[k][:1500]
