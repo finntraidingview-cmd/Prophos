@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.9.2
+// @version      0.9.3
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt. Seit 0.5 auch die KONTO-ZUSAMMENFASSUNG (Balance, Today's P&L …) fuer den Orbit-V2-Rundgang.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -28,6 +28,14 @@
 // kommt ueber @updateURL/@downloadURL (GitHub-raw) von selbst.
 //
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
+//   0.9.3  01.10.2026  Puls-Chrome: Hand-Schliessen/Liquidation muss ankommen (Live-Befund Moritz 01.10.2026 23:19 UTC, erster Orbit-V3-
+//                      Trade: Master in TV von Hand zu, Fusion blieb offen — echoplus_live zeigte konto null, positionen_ok false).
+//                      (1) Eigene Tab-Kennung 'puls-…' (sessionStorage prophos_tab_id_puls): der reader-server merkt sich jede
+//                      tab_id, die einmal als 'feed' kam, 7 Tage als Feed (feed_tabs.json) — der Puls-Chrome-Tab hatte sich vor
+//                      0.9.1 so gemeldet und wurde seitdem als Positions-Quelle ignoriert. (2) Im Puls-Chrome nie Rolle 'feed':
+//                      ohne Konto 'broker' + blind („kein Konto angemeldet") — kein Urteil, Hedge bleibt stehen. (3) Flach nur mit
+//                      Beweis: Reiter Positions aktiv UND TradingViews Leer-Text („no open positions"); dann auch im verdeckten/
+//                      minimierten Tab eine Aussage (sonst blieb die alte Verdeckt-Regel 0.4.1 = blind). Ohne Beweis = blind.
 //   0.9.2  01.10.2026  Konto-Umschalter wie augen.js 0.7.4 (Live-Befund Moritz 01.10.2026: Badge „kein Konto angemeldet", obwohl
 //                      TDFYSL… im Umschalter stand — [data-name=account-manager-account-select] gibt es nicht mehr): Rueckfall =
 //                      Knopf, dessen TEXT eine Kontonummer ist, an der Broker-Leiste (#footer-chart-panel, auch maximiert oben),
@@ -109,7 +117,7 @@
   // dreimal ein Update vermutet, das gar nicht aktiv war (31.08.2026), und von
   // aussen war das nur an FEHLENDEN Feldern zu erraten. Ab jetzt sagt jeder
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
-  const VERSION    = '0.9.2';
+  const VERSION    = '0.9.3';
   // 0.9.0: Puls-Chrome-Modus (Orbit V3) — je Chrome-Profil gespeichert, siehe CHANGELOG
   let PULS_CHROME = false;
   try { PULS_CHROME = GM_getValue('prophos_puls_chrome', false) === true; } catch (_) {}
@@ -311,11 +319,13 @@
   const kontoMerk = { text: null, ts: 0 };
   // 0.8.5: stabile Kennung dieses Tabs (ueberlebt F5 im selben Tab, nicht einen neuen Tab)
   const TAB_ID = (() => {
+    // 0.9.3: Puls-Chrome mit eigener Kennung — nie eine vom reader-server als Feed gemerkte tab_id weiterverwenden
+    const key = PULS_CHROME ? 'prophos_tab_id_puls' : 'prophos_tab_id';
     let id = null;
-    try { id = sessionStorage.getItem('prophos_tab_id'); } catch (_) {}
+    try { id = sessionStorage.getItem(key); } catch (_) {}
     if (!id) {
-      id = 't' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-      try { sessionStorage.setItem('prophos_tab_id', id); } catch (_) {}
+      id = (PULS_CHROME ? 'puls-' : 't') + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+      try { sessionStorage.setItem(key, id); } catch (_) {}
     }
     return id;
   })();
@@ -331,7 +341,8 @@
     try { return sessionStorage.getItem('prophos_feed_tab') === '1'; } catch (_) { return false; }
   }
   function tabRolle(jetzt) {
-    if (feedMarkiert() && !PULS_CHROME) return 'feed';   // 0.9.1: im Puls-Chrome zaehlt nur das Konto
+    if (PULS_CHROME) return 'broker';   // 0.9.3: nie 'feed' (sonst merkt der reader-server den Tab 7 Tage als Feed); ohne Konto = blind
+    if (feedMarkiert()) return 'feed';
     return kontoAngemeldet(jetzt) ? 'broker' : 'feed';
   }
   // 0.9.2: 'NR NR USD' / 'NRNRUSD' (versteckte Kopie im Knopf) → einmal — gleiche Regel wie augen.js entdoppeln()
@@ -984,7 +995,28 @@
    * schon flach, darf auch der verdeckte Tab flach bleiben. */
   let sichtbarePosZahl = null;   // Positionszahl der letzten SICHTBAREN, nicht blinden Lesung
 
+  // 0.9.3 (Puls-Chrome): positiver Leer-Beweis — Reiter Positions aktiv UND TradingViews Leer-Text im Panel
+  const RX_LEER_POS = /no open positions|keine offenen positionen|keine positionen/i;
+  function leerBeweis() {
+    try {
+      const r = document.getElementById('positions');
+      if (!r || r.getAttribute('aria-selected') !== 'true') return false;
+      const lauf = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      let k;
+      while ((k = lauf.nextNode())) {
+        const t = k.nodeValue;
+        if (t && t.length < 120 && RX_LEER_POS.test(t)) return true;
+      }
+    } catch (_) {}
+    return false;
+  }
   function blindGrund(positionen) {
+    if (PULS_CHROME) {   // 0.9.3: strenger — ohne Konto kein Urteil, flach nur mit Beweis (auch verdeckt)
+      if (!kontoAngemeldet(Date.now())) return 'kein Konto angemeldet';
+      if (leseBefund.unklar) return 'pnl unlesbar in ' + leseBefund.unklar + ' Zeile(n)';
+      if (positionen.length) return null;
+      return leerBeweis() ? null : 'kein Leer-Beweis (Reiter Positions nicht aktiv oder Leer-Text fehlt)';
+    }
     // 0.8.4: Zeilen mit Symbol + Menge ohne lesbaren G&V = die Liste kann einen offenen Master verbergen
     if (leseBefund.unklar) return leseBefund.pnl_spalte
       ? ('pnl leer in ' + leseBefund.unklar + ' Zeile(n) mit Symbol + Menge')
