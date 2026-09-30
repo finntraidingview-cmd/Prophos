@@ -7977,9 +7977,13 @@ def _wd_ende_upd(plan, jetzt_iso, datum, grund=None):
     -> (upd, None) oder (None, (http_code, fehler))"""
     if not isinstance(plan, dict) or not plan.get("id"):
         return None, (404, "Plan nicht gefunden")
-    if str(plan.get("route") or "") != "tvv2" or str(plan.get("status") or "") != "open":
-        return None, (409, "nicht offen")
     alt = plan.get("mt5_baseline") if isinstance(plan.get("mt5_baseline"), dict) else {}
+    # Topstep V2 (K5, 30.09.2026): nur von Puls gestartete Pläne (tv.puls == 'tsx') — dort folgt die Nachlesung wie bei Orbit V2;
+    # Handpläne beendet niemand automatisch über diesen Weg
+    route = str(plan.get("route") or "")
+    tsx_puls = route == "tsv2" and isinstance(alt.get("tv"), dict) and alt["tv"].get("puls") == "tsx"
+    if (route != "tvv2" and not tsx_puls) or str(plan.get("status") or "") != "open":
+        return None, (409, "nicht offen")
     fin = {"today_pnl": None, "datum": datum, "at": jetzt_iso, "quelle": "hand",
            "grund": (str(grund).strip()[:60] if grund else "hand")}
     live = dict(alt.get("live") or {}) if isinstance(alt.get("live"), dict) else {}
@@ -8056,7 +8060,8 @@ def _wd_erledigt_upd(plan, master_pl, slave_pl, jetzt_iso, datum):
     Route 'tvv2', seit 30.09.2026 auch 'mt5v2' (Echo V2) und 'tsv2' (Topstep V2) — Finn will im Radar ALLES abhaken, auch
     Trades fremder IDs (Anlass: Echo-Trade von Mike, Knopf gesperrt). Status open/review (completed = Korrektur, idempotent:
     completed_at bleibt). Setzt master_pl ($), slave_pl (€ | null), status 'completed', completed_at; ended_at, falls leer;
-    mt5_baseline.final wie bei 'ende', falls noch keins (nur tvv2 — Echo/Topstep behalten ihre Baseline).
+    mt5_baseline.final wie bei 'ende', falls noch keins (tvv2 und seit K5 tsv2 mit tv.puls 'tsx' — Echo und Topstep-Handpläne
+    behalten ihre Baseline).
     Fusion-P&L (slave_pl) gibt es nur bei Orbit V2 / Winning Days: sonst 400, damit keine falsche wd_hedge-Buchung entsteht.
     -> (upd, None) oder (None, (http_code, fehler))"""
     if not isinstance(plan, dict) or not plan.get("id"):
@@ -8291,7 +8296,7 @@ def admin_wd_plaene():
                                                _cme_handelstag(), daten.get("grund"))
                     if fehler:
                         return jsonify({"error": fehler[1], "plan_id": pid}), fehler[0]
-                    filt = {"id": f"eq.{pid}", "status": "eq.open", "route": "eq.tvv2"}
+                    filt = {"id": f"eq.{pid}", "status": "eq.open", "route": "in.(tvv2,tsv2)"}   # tsv2 nur mit Puls, s. _wd_ende_upd
                     if rows[0].get("updated_at"):
                         filt["updated_at"] = f"eq.{rows[0]['updated_at']}"
                     z = sb_update("trade_plans", filt, upd)

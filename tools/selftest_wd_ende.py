@@ -4,7 +4,7 @@
 Aufruf:  python3 tools/selftest_wd_ende.py
 Laedt _wd_ende_upd per Quelltext aus app.py. Prueft: offen → review mit final/live in der Frontend-Form
 (tvV2EndeSetzen + atMoveToReview), hedge und andere Baseline-Felder unveraendert; schon review → 409;
-falsche Route → 409; kein Plan → 404; Grund gekuerzt, Standard 'hand'."""
+falsche Route → 409; Topstep V2 nur mit tv.puls 'tsx' (K5, 30.09.2026); kein Plan → 404; Grund gekuerzt, Standard 'hand'."""
 import copy
 import os
 import sys
@@ -51,7 +51,21 @@ def main():
     check(g == lang.strip()[:60] and len(g) == 60 and not g.startswith(" "),
           "grund getrimmt, max. 60 Zeichen")
     check(f(dict(plan, status="review"), "t", "d")[1] == (409, "nicht offen"), "schon review → 409 nicht offen")
-    check(f(dict(plan, route="tsv2"), "t", "d")[1] == (409, "nicht offen"), "falsche Route (tsv2) → 409")
+    check(f(dict(plan, route="tsv2"), "t", "d")[1] == (409, "nicht offen"), "Topstep V2 ohne Puls (Handplan) → 409")
+    check(f(dict(plan, route="mt5v2"), "t", "d")[1] == (409, "nicht offen"), "falsche Route (mt5v2) → 409")
+    ts = copy.deepcopy(plan)
+    ts["route"] = "tsv2"
+    ts["mt5_baseline"]["tv"]["puls"] = "tsx"
+    upd3, err3 = f(ts, "t", "d")
+    check(err3 is None and upd3["status"] == "review" and upd3["mt5_baseline"]["tv"]["puls"] == "tsx"
+          and upd3["mt5_baseline"]["final"]["quelle"] == "hand",
+          "Topstep V2 mit Puls (tv.puls 'tsx') → review wie Orbit V2 (K5)")
+    ts2 = copy.deepcopy(ts)
+    ts2["mt5_baseline"]["tv"]["puls"] = "tv"
+    check(f(ts2, "t", "d")[1] == (409, "nicht offen"), "Topstep V2 mit fremdem puls-Wert → 409")
+    src = open(APP, encoding="utf-8").read()
+    check('"route": "in.(tvv2,tsv2)"' in src and '"route": "eq.tvv2"' not in src[src.index('get("aktion") == "ende"'):src.index('get("aktion") == "ende"') + 4000],
+          "PATCH ende: Filter nimmt tvv2 und tsv2 (die Puls-Prüfung macht _wd_ende_upd)")
     check(f(None, "t", "d")[1][0] == 404 and f({}, "t", "d")[1][0] == 404, "kein Plan → 404")
     ohne = f({"id": "x" * 12, "route": "tvv2", "status": "open", "mt5_baseline": None}, "t", "d")[0]
     check(ohne and ohne["mt5_baseline"]["final"]["quelle"] == "hand" and ohne["mt5_baseline"]["live"] == {"offen": False, "at": "t"},

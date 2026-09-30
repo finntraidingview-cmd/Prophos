@@ -57,11 +57,18 @@ def main():
           and a["_wd_erledigt_upd"](None, 1, 1, T, D)[1][0] == 404, "planned / falsche Route → 409, kein Plan → 404")
     # 30.09.2026: Echo V2 und Topstep V2 abhakbar (Radar, auch fremde IDs) — ohne Fusion-P&L, ohne Baseline-Umbau
     for rt in ("mt5v2", "tsv2"):
-        u, e = a["_wd_erledigt_upd"](dict(offen, route=rt, status="review", mt5_baseline={"tv": {"puls": "tsx"}}), -1692.4, None, T, D)
+        u, e = a["_wd_erledigt_upd"](dict(offen, route=rt, status="review", mt5_baseline={"tv": {}}), -1692.4, None, T, D)
         check(e is None and u["status"] == "completed" and u["master_pl"] == -1692.4 and u["slave_pl"] is None and "mt5_baseline" not in u,
-              f"{rt}: erledigt ohne Fusion, Baseline unberührt")
+              f"{rt}: erledigt ohne Fusion, Baseline unberührt (Topstep-Handplan)")
         check(a["_wd_erledigt_upd"](dict(offen, route=rt), 100, -5, T, D)[1] == (400, "Fusion-P&L gibt es nur bei Orbit V2 / Winning Days"),
               f"{rt}: Fusion-P&L → 400 (keine falsche wd_hedge-Buchung)")
+    # K5 (30.09.2026): Topstep V2 mit Puls (tv.puls 'tsx') wie Orbit V2 — final + live.offen false, falls noch kein final
+    u, e = a["_wd_erledigt_upd"](dict(offen, route="tsv2", status="open", mt5_baseline={"tv": {"puls": "tsx"}}), -1692.4, None, T, D)
+    check(e is None and u["mt5_baseline"]["final"]["grund"] == "erledigt" and u["mt5_baseline"]["tv"] == {"puls": "tsx"}
+          and u["mt5_baseline"]["live"]["offen"] is False, "tsv2 mit Puls: erledigt legt final an wie Orbit V2")
+    u, e = a["_wd_erledigt_upd"](dict(offen, route="tsv2", status="review",
+                                      mt5_baseline={"tv": {"puls": "tsx"}, "final": {"quelle": "close", "today_pnl": -1692.4}}), -1692.4, None, T, D)
+    check(e is None and "mt5_baseline" not in u, "tsv2 mit Puls und final (quelle close): Baseline unberührt")
     check(a["_wd_zahl"]("−4,20".replace("−", "-")) == -4.2 and a["_wd_zahl"](True) is None and a["_wd_zahl"]("x") is None
           and a["_wd_zahl"](250) == 250.0, "Zahl: Komma, bool/Text keine Zahl")
 

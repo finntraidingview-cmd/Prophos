@@ -19927,7 +19927,10 @@
    * Kopfzeile VOR dem Klick schon gelesen (balance/mll/rpl oben, balance_start) und nach dem Beweis summary + positionen + klick_at.
    * Bisher fuhr v2AufOpen danach noch ein zweites tsx-lesen (~1 min Chrome, Plan so lange „Geplant") und warf alles andere weg.
    * Einstieg: Fill vom Bot (einstieg, heute noch null), sonst der Reader-Kurs direkt nach dem Klick — Quelle steht dabei. */
-  function tsxBaselineAusOrder(plan, r){
+  // K4 (30.09.2026, Topstep-Paket Plan v2): einstieg aus dem „Order Filled"-Toast bzw. der Positions-Avg → einstieg_quelle 'fill', der
+  // Beleg (r.einstieg_quelle des Bots) steht in einstieg_beleg; TP/SL aus den Toasts „Limit @" / „Stop Market @" (tp_level/sl_level).
+  // opts.ohneReader: nachgeholt aus puls_ergebnisse (≥ 2 min später) — der Reader-Kurs von JETZT wäre kein Einstieg mehr.
+  function tsxBaselineAusOrder(plan, r, opts){
     const zahl = v => (typeof v === 'number' && isFinite(v)) ? v : null
     const at = (r && r.klick_at) || new Date().toISOString()
     const tv = { konto: tvV2Konto(plan) || (r && r.konto) || null, today_pnl_start: null, datum_start: tvV2Handelstag(), at, puls: 'tsx',
@@ -19935,11 +19938,13 @@
                  balance_start: zahl(r.balance_start), mll_start: zahl(r.mll), rpl_start: zahl(r.rpl),
                  // echte Bracket-Orders aus dem TopstepX-Reiter „Orders" (Backend F28, 0030ba6) — Heuristik, kann Montag noch null sein
                  tp_level_nq: zahl(r.tp_level) > 1000 ? r.tp_level : null, sl_level_nq: zahl(r.sl_level) > 1000 ? r.sl_level : null,
+                 tp_level_quelle: zahl(r.tp_level) > 1000 ? String(r.tp_level_quelle || 'tsx_toast') : null,
+                 sl_level_quelle: zahl(r.sl_level) > 1000 ? String(r.sl_level_quelle || 'tsx_toast') : null,
                  positionen: Array.isArray(r.positionen) ? r.positionen.slice(0, 5) : null,
                  lesen_trail: String(r.trail || '').slice(0, 2000), lesen_at: new Date().toISOString() }
     const ein = r.einstieg != null ? tvKursZahl(r.einstieg) : null
-    if(ein > 1000){ tv.einstieg_nq = ein; tv.einstieg_quelle = 'fill'; tv.einstieg_symbol = r.tv_symbol || null }
-    else {
+    if(ein > 1000){ tv.einstieg_nq = ein; tv.einstieg_quelle = 'fill'; tv.einstieg_beleg = (r && r.einstieg_quelle) || null; tv.einstieg_symbol = r.tv_symbol || null }
+    else if(!(opts && opts.ohneReader)){
       const wurzel = /^MNQ/i.test(String(plan.masterSymbol || plan.masterSymbolRoot || '')) ? 'MNQ' : 'NQ'
       const k = (typeof wdKursJetzt === 'function') ? wdKursJetzt(wurzel, 15000) : null
       if(k && k.preis > 1000){ tv.einstieg_nq = k.preis; tv.einstieg_quelle = 'reader_klick'; tv.einstieg_symbol = k.wurzel }
@@ -21257,8 +21262,8 @@
     const erg = tvV2EndlesungAuswerten(r, w.symbol, dir)
     const name = p0.masterName || 'Plan'
     if(erg.offen){
-      if(typeof atToast === 'function') atToast(`${name}: Order läuft laut TradingView noch — nichts geändert`, 'start')
-      return { ok: false, offen: true, msg: 'Order läuft laut TradingView noch — Plan bleibt „Läuft"' }
+      if(typeof atToast === 'function') atToast(`${name}: Order läuft laut ${pulsPlattform(p0)} noch — nichts geändert`, 'start')
+      return { ok: false, offen: true, msg: `Order läuft laut ${pulsPlattform(p0)} noch — Plan bleibt „Läuft"` }
     }
     if(!erg.ok) return { ok: false, msg: 'Puls konnte den Stand nicht lesen: ' + erg.fehler }
     const nowIso = new Date().toISOString()
@@ -21274,7 +21279,7 @@
     try{
       const { data } = await supabase.from('trade_plans').select('*').eq('id', pid).maybeSingle()
       if(data){ const pn = rowToPlan(data); const { m } = await tvV2MasterPlAusBalance(pid, pn, {}, pn.mt5Baseline)
-        if(m != null) msg = `beendet · Master-P&L ${m >= 0 ? '+' : '−'}${Math.abs(m).toLocaleString('de-DE', { minimumFractionDigits: 2 })} $ aus TradingView` }
+        if(m != null) msg = `beendet · Master-P&L ${m >= 0 ? '+' : '−'}${Math.abs(m).toLocaleString('de-DE', { minimumFractionDigits: 2 })} $ aus ${pulsPlattform(p0)}` }
     }catch(e){ console.warn('[beendet] P&L', e) }
     if(typeof atToast === 'function') atToast(`✓ ${name}: ${msg}`, 'end')
     try{ renderTradePlans() }catch(_){}
@@ -36396,7 +36401,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.877'
+  const OS_TAB_BUILD = '2026-09-22.878'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -37800,7 +37805,7 @@
     if(!neuB){ if(typeof loadTradePlansFromSupabase === 'function') loadTradePlansFromSupabase(); return false }
     const fresh = tradePlans.find(x => String(x.id) === String(plan.id)) || Object.assign({}, plan, { mt5Baseline: neuB })
     try{ tvV2Poll.wasOpen.delete(String(plan.id)); tvV2Poll.streak.delete(String(plan.id)) }catch(_){}
-    if(fin.today_pnl == null && fin.balance_end == null && fin.quelle !== 'level' && fin.quelle !== 'demo' && typeof atToast === 'function') atToast(`⚠ Orbit V2: geschlossen, aber kein Today's P&L gelesen — Puls liest nach (${plan.masterName || '—'})`, 'end')
+    if(fin.today_pnl == null && fin.balance_end == null && fin.quelle !== 'level' && fin.quelle !== 'demo' && typeof atToast === 'function') atToast(`⚠ ${plan.route === 'tsv2' ? 'Topstep V2' : 'Orbit V2'}: geschlossen, aber kein Today's P&L gelesen — Puls liest nach (${plan.masterName || '—'})`, 'end')
     if(typeof atShowEndPrompt === 'function') atShowEndPrompt(fresh)
     // JEDES Ende ohne Zahl (Level, Master weg laut Reader, Schließen/Auto-Close ohne Today's P&L) → Puls-Endlesung (25.09.2026)
     if(fin.today_pnl == null && fin.balance_end == null && typeof tvV2EndlesungAnstossen === 'function') tvV2EndlesungAnstossen(plan.id)
@@ -37862,6 +37867,7 @@
         const finExtra = {}
         if(zahl(r.balance_end) != null) finExtra.balance_end = r.balance_end
         if(zahl(r.equity_end) != null) finExtra.equity_end = r.equity_end
+        if(danach) finExtra.positionen_danach = danach.slice(0, 10)   // Flach-Beweis mit am Plan (K5, 30.09.2026 — tsx-close wie tv-close)
         let beendet = false
         try{ beendet = await tvV2EndeSetzen(plan, todayPnl, 'close', Object.keys(finExtra).length ? finExtra : undefined) }catch(e){ console.warn('[v2-close] final', e) }
         return { ok:true, beendet, profit: todayPnl, trail: r.trail || null,
@@ -37941,16 +37947,22 @@
         const name = plan.masterName || 'Plan'
         if(z.art === 'order'){
           if(plan.status !== 'planned' || !(e.gesendet || e.ok)){ await pulsErgebnisAbgeholt(z.plan_id, 'order'); continue }
+          // Topstep V2 (K4, 30.09.2026): nur ein BEWIESEN gesendeter Klick zählt — eine Probe (scharf:false, schritt 'probe') meldet ok:true
+          // ohne gesendet und darf NIE „Läuft" setzen (der Bot sendet sie ohnehin nicht, das hier ist der Riegel im Tab)
+          if(plan.route === 'tsv2' && (!e.gesendet || e.schritt === 'probe' || e.code === 'probe')){ await pulsErgebnisAbgeholt(z.plan_id, 'order'); continue }
           const kms = Number(e.order_klick_ms)
           const klickIso = (kms > 1e12 && kms <= Date.now() + 60000) ? new Date(kms).toISOString() : (e.klick_at || z.at)
           let tvb = null
-          if(typeof e.balance_start === 'number' && isFinite(e.balance_start)) tvb = tvV2BaselineAusOrder(plan, Object.assign({}, e, { trail: e.trail_ende || '' }))
+          // Topstep V2: Baseline wie am PC nach dem Klick (tsxBaselineAusOrder, puls 'tsx', quelle 'tsx_order') — sonst würde der Plan
+          // mit puls 'tv' zum Handplan (kein Puls-Schließen, keine Nachlesung). Einstieg nur aus dem Fill, nie der Reader-Kurs von jetzt.
+          if(plan.route === 'tsv2') tvb = tsxBaselineAusOrder(plan, Object.assign({}, e, { trail: e.trail_ende || '', klick_at: klickIso }), { ohneReader: true })
+          else if(typeof e.balance_start === 'number' && isFinite(e.balance_start)) tvb = tvV2BaselineAusOrder(plan, Object.assign({}, e, { trail: e.trail_ende || '' }))
           else tvb = Object.assign({ konto: tvV2Konto(plan), today_pnl_start: null, datum_start: tvV2Handelstag(), at: klickIso, puls: 'tv',
                                      pc: z.pc_id || null, quelle: 'puls_ergebnis', grund: 'kein_today_pnl: Ergebnis ohne Start-Werte' }, tvV2OrderLevel(e))
           tvb.klick_at = klickIso
           tvb.nachgeholt = 'puls_ergebnisse'
           await v2PlanAufOpen(plan.id, null, tvb)
-          try{ const lv = tvV2OrderLevel(e); if(Object.keys(lv).length) await baselinePatchIn(plan.id, 'tv', lv) }catch(_){}
+          if(plan.route !== 'tsv2'){ try{ const lv = tvV2OrderLevel(e); if(Object.keys(lv).length) await baselinePatchIn(plan.id, 'tv', lv) }catch(_){} }   // tsv2: Level stehen schon in tvb
           try{ await supabase.from('order_signale').insert({ plan_id: String(plan.id), status: e.ok ? 'fertig' : 'fehler', pc: z.pc_id || '',
             params: { aktion: 'orbit', lokal: true, nachgeholt: true },
             ergebnis: { ok: !!e.ok, gesendet: !!e.gesendet, msg: 'Nachgeholt aus puls_ergebnisse (Antwort an den Tab verloren): ' + String(e.msg || ''),
@@ -37966,13 +37978,14 @@
           const nochOffen = danach ? danach.some(x => x && tvSymbolPasst(x.symbol, sym)) : null
           if(!(e.ok || e.code === 'schon_flach') || nochOffen === true){
             await pulsErgebnisAbgeholt(z.plan_id, 'close')
-            if(e.geklickt && typeof atToast === 'function') atToast(`⚠ ${name}: Schließen ohne Beweis (${String(e.code || e.msg || 'unklar').slice(0, 80)}) — in TradingView nachsehen`, 'end')
+            if(e.geklickt && typeof atToast === 'function') atToast(`⚠ ${name}: Schließen ohne Beweis (${String(e.code || e.msg || 'unklar').slice(0, 80)}) — in ${pulsPlattform(plan)} nachsehen`, 'end')
             continue
           }
           const zahl = v => (typeof v === 'number' && isFinite(v)) ? v : null
           const fx = {}
           if(zahl(e.balance_end) != null) fx.balance_end = e.balance_end
           if(zahl(e.equity_end) != null) fx.equity_end = e.equity_end
+          if(danach) fx.positionen_danach = danach.slice(0, 10)
           fx.nachgeholt = 'puls_ergebnisse'
           await tvV2EndeSetzen(plan, zahl(e.today_pnl), 'close', fx)
           await pulsErgebnisAbgeholt(z.plan_id, 'close')
