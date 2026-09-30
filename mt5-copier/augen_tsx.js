@@ -17,10 +17,13 @@
  * (puls_augen 'inventar_tsx_*') — bis dahin bleiben konto/ticket/kauf_knopf/konto_summary null, positionen/orders leer.
  * STAND 0.2 (30.09.2026, K1-Vertrag von T3): Gerüst für konto/kopf/positionen/positionen_sichtbar/flach — Felder da, Werte null,
  * bis die Anker aus dem K0-Inventar von Mikes PC stehen (Abschnitt „K1 Lesen").
+ * STAND 0.3 (30.09.2026, TSX-ANKER-K1): echte Anker aus dem K0-Inventar (puls_augen, 30.09.2026) für Konto-Auslöser, Kopfzeile,
+ * „No Active Position" und die Konto-Liste (konto.liste für K2); ticket.anzeigen als Rohtext. Die Anzeige einer OFFENEN Position
+ * ist noch nicht belegt (Inventar war flach). inventar(): Overlays (Liste/Dialog) zuerst, SVG-Innereien raus.
  */
 var PROPHOS_AUGEN_TSX = (function () {
   'use strict';
-  var VERSION = 'tsx-0.2.1';
+  var VERSION = 'tsx-0.3.1';
 
   // ── Grundwerkzeuge (wie augen.js) ──────────────────────────────────────────
   function sichtbar(el) {
@@ -40,7 +43,10 @@ var PROPHOS_AUGEN_TSX = (function () {
     return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)];
   }
   // textContent statt innerText: innerText braucht Layout und liefert in einem verdeckten Tab Leeres (Reader-Fund 01.09.2026)
-  function txt(el) { return String((el && el.textContent) || '').replace(/\s+/g, ' ').trim(); }
+  // Null-Breite-Zeichen raus: MUI-Selects tragen ein „\u200b" in einem Hilfs-Span (K0-Inventar 30.09.2026: der Hüll-Text des Auslösers endet darauf)
+  function txt(el) { return String((el && el.textContent) || '').replace(/[\u200b-\u200d\ufeff]/g, '').replace(/\s+/g, ' ').trim(); }
+  function klasse(e) { var c = typeof e.className === 'string' ? e.className : (e.className && e.className.baseVal) || ''; return c.replace(/\s+/g, ' ').trim().slice(0, 80); }
+  function hatKlasse(e, k) { try { return !!(e.classList && e.classList.contains(k)); } catch (_) { return false; } }
   function attr(el, n) { try { return el.getAttribute(n) || ''; } catch (_) { return ''; } }
   function alle(sel, wurzel) {
     try { return Array.prototype.slice.call((wurzel || document).querySelectorAll(sel)); } catch (_) { return []; }
@@ -242,15 +248,14 @@ var PROPHOS_AUGEN_TSX = (function () {
   // ── K1 Lesen: Konto, Kopfzeile, Positionen (Vertrag T3, 30.09.2026) ────────
   /* Danach richtet sich der Bot:
    *   konto {aktiv: Text des Konto-Auslösers, kontonr: volle ID oder sichtbare Kennung, abgekuerzt: bool}
-   *   kopf {balance|mll|rpl|upl: {text, wert}}   (Kopfzeile BAL / MLL / RP&L / UP&L)
+   *   kopf {balance|mll|rpl|upl: {text, wert}}   (Kopfzeile BAL / MLL / RP&L / UP&L) + kopf.balance_relativ (true|false|null)
    *   positionen [{symbol, seite: 'buy'|'sell', menge, avg, pl_text}]
    *   positionen_sichtbar: true, wenn der Positions-Bereich zu sehen ist (Zeilen oder „No Active Position")
    *   flach: true | false | null
-   * STAND 0.2 = GERÜST: K1_ANKER steht auf false, bis das K0-Inventar von Mikes PC (puls_augen inventar_tsx_*) die DOM-Anker belegt —
-   * bis dahin liefert stand() überall null (positionen leer). Geraten wird nichts: ein falscher Anker hieße, der Bot hält ein fremdes
-   * Konto für das richtige oder ein offenes Konto für flach. Die TEXTREGELN dagegen sind schon belegt (UIA-Inventar Mike, B18/B22 in
-   * order_bot.py) und hier 1:1 nachgebaut, damit JS und Python dieselben Texte gleich lesen. */
-  var K1_ANKER = false;
+   * Geraten wird nichts: ein falscher Anker hieße, der Bot hält ein fremdes Konto für das richtige oder ein offenes Konto für
+   * flach. K1_ANKER false = Gerüst (alles null), true seit 0.3 (Anker belegt, s. „ANKER" unten). Die TEXTREGELN sind aus dem
+   * UIA-Inventar belegt (B18/B22 in order_bot.py) und hier nachgebaut, damit JS und Python dieselben Texte gleich lesen. */
+  var K1_ANKER = true;
   var KOPF_LABELS = { 'BAL': 'balance', 'MLL': 'mll', 'RP&L': 'rpl', 'UP&L': 'upl' };
   var RX_KOPF = /^(BAL|MLL|RP&L|UP&L)\s*:?\s*(.*)$/i;
   var RX_VORSATZ = /^[-−(]?\s*\$?\s*[-−]?$/;   // Knoten nur aus Vorzeichen/Klammer/„$" (Teil eines zerlegten Werts)
@@ -323,37 +328,119 @@ var PROPHOS_AUGEN_TSX = (function () {
     return out;
   }
 
-  // ANKER — kommen mit dem K0-Inventar (je Anker ein Kommentar mit Beleg: Inventar-Art + Datum). Bis dahin null bzw. leer.
-  function ankerKonto() { return null; }            // Konto-Auslöser oben links
-  function ankerKopf() { return null; }             // Kopfzeile BAL / MLL / RP&L / UP&L
-  function ankerPositionen() { return null; }       // Positions-Bereich (Zeilen oder „No Active Position")
-  function positionsZeilen(bereich) { return []; }  // Zeilen im Positions-Bereich
-  function positionAus(zeile) { return null; }      // eine Zeile → {symbol, seite: 'buy'|'sell', menge, avg, pl_text}
+  /* ANKER — belegt durch das K0-Inventar vom 30.09.2026 (puls_augen: inventar_tsx_grund, inventar_tsx_konto, stand_tsx; ein
+   * Express-Konto, flach — Kontonummern stehen bewusst nicht im Code). TopstepX ist eine MUI-Oberfläche mit
+   * durchgehenden data-testid — gesucht wird IMMER erst über data-testid, dann role, zuletzt über den Text:
+   *   Konto-Auslöser  [data-testid="account-selector-input-select-account"] → darin [role="combobox"]. Text = Label · „|" · VOLLE
+   *                   Kontonummer in drei Spans (optisch abgeschnitten, im DOM vollständig → abgekuerzt false)
+   *   Kopfzeile       [data-testid="balance-display-value-amount" | "max-loss-display-value-amount" |
+   *                   "realized-pnl-display-value-amount" | "unrealized-pnl-display-value-amount"], je zwei Spans („BAL:" · „$0.00");
+   *                   MLL steht als „$-4,500.00" (Minus HINTER dem Dollar). Rückfall: Texte in [data-testid="navbar-container"]
+   *   Liste offen     aria-expanded am Auslöser („false" im Grundzustand, „true" bei offener Liste)
+   *   flach           [data-testid="order-card-display-value-no-position"] mit „No Active Position" (Order-Karte rechts) UND
+   *                   [data-testid="order-card-click-button-close-position"] disabled — beides zusammen (Regel T3)
+   *   Konto-Liste     li[role="option"] (416×30 px, Overlay am Ende von body), Text „$150K Express|EXPRESS-V2-…" bzw.
+   *                   „$150K Trading Combine|150KTC-SKU-V2-… (Ineligible)"
+   * NICHT belegt (das Inventar war flach, unten lief der Reiter „Trades", die Liste fiel dem Größendeckel zum Opfer):
+   *   - die Anzeige einer OFFENEN Position: positionsZeilen/positionAus bleiben leer. Ohne „No Active Position" meldet stand()
+   *     positionen_sichtbar false und flach null — nie geraten „nicht flach". ticket.anzeigen schreibt dafür alle
+   *     order-card-display-value-* mit: die erste stand_tsx-Zeile mit offener Position liefert den Anker.
+   *   - die Markierung in der Liste: aria-selected / Mui-selected sind MUI-Standard, im Inventar aber nicht zu sehen →
+   *     markiert null, wenn in der ganzen Liste keines von beiden vorkommt. */
+  function tid(id) { return '[data-testid="' + id + '"]'; }
+  function q1(sel, wurzel) { var a = alle(sel, wurzel).filter(sichtbar); return a.length ? a[0] : null; }
+  var KOPF_TID = { balance: 'balance-display-value-amount', mll: 'max-loss-display-value-amount',
+                   rpl: 'realized-pnl-display-value-amount', upl: 'unrealized-pnl-display-value-amount' };
+  var RX_LISTE = /^\s*(\$\s*\d+(?:[.,]\d+)?\s*K\b[^|]*?)\s*\|\s*([A-Z0-9][A-Z0-9-]{5,})\s*(?:\(([^)]*)\))?\s*$/i;
+
+  function ankerKonto() {                            // Konto-Auslöser oben links
+    var w = q1(tid('account-selector-input-select-account')) || q1(tid('account-selector-container'));
+    return w ? (q1('[role="combobox"]', w) || w) : null;
+  }
+  function ankerKopf() { return q1(tid('navbar-container')); }                               // Kopfzeile (Rückfall über Texte)
+  function ankerPositionen() { return q1(tid('order-card-display-value-no-position')); }   // „No Active Position"
+  function positionsZeilen() { return []; }          // Zeilen einer offenen Position — Anker noch nicht belegt (s. oben)
+  function positionAus(zeile) { return null; }       // eine Zeile → {symbol, seite: 'buy'|'sell', menge, avg, pl_text}
 
   var KONTO_LEER = function () { return { aktiv: null, kontonr: null, abgekuerzt: null }; };
   var KOPF_LEER = function () { return { balance: null, mll: null, rpl: null, upl: null }; };
 
+  // Offene Konto-Liste (für K2): nur Einträge, die wie ein Konto aussehen (Label|Kennung) — die Order-Typ-/Contract-Listen
+  // sind auch role=option. rect = ganze Zeile (Klickziel), zu = verdeckt/disabled, hinweis = Klammer-Zusatz („Ineligible").
+  function kontoListe() {
+    var out = [], belegt = false;
+    alle('[role="listbox"] [role="option"],li[role="option"]').filter(sichtbar).slice(0, 40).forEach(function (li) {
+      var t = txt(li), m = RX_LISTE.exec(t);
+      if (!m) return;
+      var sel = attr(li, 'aria-selected'), hinweis = m[3] ? m[3].trim() : null;
+      var mark = sel ? sel === 'true' : (hatKlasse(li, 'Mui-selected') ? true : null);
+      if (mark !== null) belegt = true;
+      out.push({ text: t, label: m[1].replace(/\s+/g, ' ').trim(), id: m[2].toUpperCase(), markiert: mark, ineligible: /ineligible/i.test(hinweis || ''),
+                 hinweis: hinweis, aus: attr(li, 'aria-disabled') === 'true' || hatKlasse(li, 'Mui-disabled'), rect: rect(li), zu: zustand(li) });
+    });
+    if (belegt) out.forEach(function (o) { if (o.markiert === null) o.markiert = false; });
+    return out;
+  }
+
+  // -> {aktiv, kontonr, abgekuerzt, rect, zu, liste_offen, liste}; rect/zu = Auslöser (Klickziel für K2, zu.verdeckt bei offener Liste)
   function kontoLesen() {
-    if (!K1_ANKER) return KONTO_LEER();
+    var k = KONTO_LEER();
+    if (!K1_ANKER) return k;
     var el = ankerKonto();
-    return el && sichtbar(el) ? kontoAusText(txt(el)) : KONTO_LEER();
+    if (el) { k = kontoAusText(txt(el)); k.rect = rect(el); k.zu = zustand(el); }
+    k.liste = kontoListe();
+    var offen = el ? attr(el, 'aria-expanded') : '';      // belegt: „false"/„true" am Auslöser; fehlt es, zählen die Zeilen
+    k.liste_offen = offen === 'true' ? true : (offen === 'false' ? false : k.liste.length > 0);
+    return k;
   }
+  // Je Feld sein eigener data-testid; es zählt nur das EIGENE Label (ein BAL-Feld mit „MLL:"-Text bleibt null). Fehlen alle vier
+  // Felder (TopstepX benennt um), lesen die Textregeln die Kopfzeile als Ganzes.
   function kopfLesen() {
-    if (!K1_ANKER) return KOPF_LEER();
-    var w = ankerKopf();
-    return w && sichtbar(w) ? kopfAusTexten(blattTexte(w)) : KOPF_LEER();
+    var out = KOPF_LEER(), da = 0;
+    if (!K1_ANKER) return out;
+    Object.keys(KOPF_TID).forEach(function (k) {
+      var el = q1(tid(KOPF_TID[k]));
+      if (!el) return;
+      da++;
+      out[k] = kopfAusTexten(blattTexte(el, 8))[k] || kopfAusTexten([txt(el)])[k];
+    });
+    if (!da) { var nav = ankerKopf(); if (nav) out = kopfAusTexten(blattTexte(nav, 60)); }
+    return out;
   }
-  // -> {sichtbar, zeilen, flach}. Ohne Anker (Gerüst) alles null; Bereich nicht zu sehen → sichtbar false, flach null.
-  // flach nur aus einem eindeutigen Bild: „No Active Position" ohne Zeilen = true, Zeilen ohne den Text = false, sonst null.
+  // -> {sichtbar, zeilen, flach}. Gerüst: alles null. „No Active Position" zu sehen = sichtbar true; flach true NUR, wenn dazu
+  // „Close Position" disabled ist (belegt: bei flachem Konto disabled) — widersprechen sich die beiden oder fehlt der Knopf, bleibt
+  // flach null. Sonst (Position offen ODER Order-Karte nicht zu sehen): sichtbar/flach false nur mit gelesenen Zeilen, sonst null.
   function positionenLesen() {
     if (!K1_ANKER) return { sichtbar: null, zeilen: [], flach: null };
-    var b = ankerPositionen();
-    if (!b || !sichtbar(b)) return { sichtbar: false, zeilen: [], flach: null };
+    var keine = ankerPositionen();
+    if (keine && RX_KEINE_POS.test(txt(keine))) {
+      var zu = q1(tid('order-card-click-button-close-position'));
+      return { sichtbar: true, zeilen: [], flach: zu && zustand(zu).disabled ? true : null };
+    }
     var zeilen = [];
-    positionsZeilen(b).forEach(function (z) { var p = positionAus(z); if (p) zeilen.push(p); });
-    var keine = RX_KEINE_POS.test(txt(b));
-    return { sichtbar: keine || zeilen.length > 0, zeilen: zeilen,
-             flach: keine && !zeilen.length ? true : (!keine && zeilen.length ? false : null) };
+    positionsZeilen().forEach(function (z) { var p = positionAus(z); if (p) zeilen.push(p); });
+    return { sichtbar: zeilen.length > 0, zeilen: zeilen, flach: zeilen.length ? false : null };
+  }
+  // Express-Konten zeigen die Balance RELATIV (K0 30.09.2026: „$150K Express" mit BAL $0.00 und MLL $-4,500.00), Combine-Konten
+  // absolut (UIA-Inventar B22: BAL $154,504.88). Der Rohwert bleibt, wie er ist — hier nur das Merkmal: true = relativ,
+  // false = absolut, null = nicht erkennbar. Erkennbar an einem negativen MLL (ein absolutes MLL ist ein Kontostand) oder daran,
+  // dass die Balance unter der halben Kontogröße aus dem Label („$150K") liegt: so tief steht kein absoluter Stand, das Konto
+  // wäre längst am MLL.
+  function balanceRelativ(aktiv, kopf) {
+    var bal = kopf && kopf.balance ? kopf.balance.wert : null, mll = kopf && kopf.mll ? kopf.mll.wert : null;
+    if (typeof mll === 'number' && mll < 0) return true;
+    var m = /\$\s*(\d+(?:[.,]\d+)?)\s*K\b/i.exec(String(aktiv || ''));
+    var gr = m ? Number(m[1].replace(',', '.')) * 1000 : null;
+    if (typeof bal !== 'number' || !gr) return null;
+    return bal < gr * 0.5;
+  }
+  // Order-Karte rechts ([data-testid="order-card-container"]): vorerst nur die Anzeige-Felder order-card-display-value-*
+  // (bid, last-price, ask, no-position …) als Rohtext. Der Vertrag für Contract/Menge/Kauf-Knopf folgt mit K2/K3.
+  function ticketLesen() {
+    if (!K1_ANKER || !q1(tid('order-card-container'))) return null;
+    return { anzeigen: alle('[data-testid^="order-card-display-value-"]').filter(sichtbar).slice(0, 12).map(function (e) {
+      return { testid: testid(e), text: txt(e).slice(0, 80), rect: rect(e) };
+    }) };
   }
 
   // ── Öffentliche Funktionen ─────────────────────────────────────────────────
@@ -370,6 +457,8 @@ var PROPHOS_AUGEN_TSX = (function () {
     try { o.kopf = kopfLesen(); } catch (e) { o.kopf = KOPF_LEER(); fehler.push('kopf: ' + e); }
     try { var pl = positionenLesen(); o.positionen = pl.zeilen; o.positionen_sichtbar = pl.sichtbar; o.flach = pl.flach; }
     catch (e) { fehler.push('positionen: ' + e); }
+    try { o.kopf.balance_relativ = K1_ANKER ? balanceRelativ(o.konto.aktiv, o.kopf) : null; } catch (e) { o.kopf.balance_relativ = null; }
+    try { o.ticket = ticketLesen(); } catch (e) { fehler.push('ticket: ' + e); }
     try { o.toasts = toasts(); } catch (e) { fehler.push('toasts: ' + e); }
     try { o.popups = dialoge(); } catch (e) { fehler.push('popups: ' + e); }
     try {
@@ -401,9 +490,18 @@ var PROPHOS_AUGEN_TSX = (function () {
       var r = e.getBoundingClientRect();
       return r.top < 90 ? 'kopf' : r.left > window.innerWidth * 0.66 ? 'rechts' : r.top > window.innerHeight * 0.6 ? 'unten' : r.left < window.innerWidth * 0.2 ? 'links' : 'mitte';
     }
-    function klasse(e) { var c = typeof e.className === 'string' ? e.className : (e.className && e.className.baseVal) || ''; return c.replace(/\s+/g, ' ').trim().slice(0, 80); }
     var sel = 'button,a[href],[role],input,select,textarea,[data-testid],[data-test],[data-cy],[aria-label],[id],[name],[title],th,label';
-    var els = alle(sel).filter(sichtbar), liste = [];
+    // Rauschen raus (K0 30.09.2026: 209 Elemente, davon ~60 SVG-Innereien „Group_160"/„Path_101" und DataGrid-Hüllen) — und
+    // Overlays ZUERST: Konto-Liste und Dialoge hängen am Ende von body und fielen dem Größendeckel (Kürzen von hinten) zum Opfer
+    var SVG_INNEN = /^(g|path|rect|circle|ellipse|line|polyline|polygon|use|defs|clippath|mask|lineargradient|stop|title|desc)$/;
+    var UEBER = '[role="dialog"],[role="alertdialog"],[aria-modal="true"],[role="listbox"],[role="menu"],.MuiModal-root,.MuiPopover-root,.MuiPopper-root';
+    function ueber(e) { try { return !!e.closest(UEBER); } catch (_) { return false; } }
+    function vornan(a) { return a.filter(ueber).concat(a.filter(function (e) { return !ueber(e); })); }
+    var els = vornan(alle(sel).filter(sichtbar).filter(function (e) {
+      if (testid(e) || attr(e, 'aria-label')) return true;
+      if (SVG_INNEN.test(e.tagName.toLowerCase())) return false;
+      return !(attr(e, 'role') === 'presentation' && e.closest('[role="grid"]'));
+    })), liste = [];
     for (var i = 0; i < els.length && liste.length < 450; i++) {
       var e = els[i], t = txt(e);
       if (t.length > 120 && !attr(e, 'role') && !testid(e)) continue;   // Hüllen mit viel Text sind Rauschen
@@ -412,8 +510,8 @@ var PROPHOS_AUGEN_TSX = (function () {
     }
     // Blatt-Texte: sichtbare Elemente ohne Element-Kinder mit kurzem Text (Kopfzahlen, Symbole, Reiter-Namen)
     var blatt = [];
-    alle('body *').forEach(function (e) {
-      if (blatt.length >= 320 || e.children.length || !sichtbar(e)) return;
+    vornan(alle('body *').filter(function (e) { return !e.children.length && sichtbar(e); })).forEach(function (e) {
+      if (blatt.length >= 320) return;
       var t = txt(e); if (!t || t.length > 40) return;
       blatt.push({ tag: e.tagName.toLowerCase(), text: t, rect: rect(e), zone: zone(e), cls: klasse(e).slice(0, 40) || undefined });
     });
@@ -428,9 +526,9 @@ var PROPHOS_AUGEN_TSX = (function () {
               iframes: alle('iframe').map(function (f) { return { src: String(f.src || '').slice(0, 120), rect: sichtbar(f) ? rect(f) : null }; }),
               shadow: alle('*').filter(function (x) { return !!x.shadowRoot; }).slice(0, 20).map(function (x) { return x.tagName.toLowerCase(); }),
               canvas: alle('canvas').filter(sichtbar).length,
-              anzahl: els.length, elemente: liste, blatt: blatt, kaestchen: kaestchen };
+              anzahl: els.length, ueber: els.filter(ueber).length, elemente: liste, blatt: blatt, kaestchen: kaestchen };
     try { o.stand = stand(opts); } catch (e2) { o.stand = { fehler: String(e2) }; }
-    // Größen-Riegel: erst Blatt-Texte, dann Elemente von hinten kürzen — nie den Kopf
+    // Größen-Riegel: erst Blatt-Texte, dann Elemente von hinten kürzen — Overlays stehen vorn und bleiben
     try {
       var n = 0;
       while (JSON.stringify(o).length > INVENTAR_MAX && n++ < 40) {
@@ -445,7 +543,7 @@ var PROPHOS_AUGEN_TSX = (function () {
   }
 
   return { v: VERSION, version: VERSION, plattform: 'topstepx', stand: stand, inventar: inventar,
-           _meldungAus: meldungAus, _geld: geld, _kopfAusTexten: kopfAusTexten, _kontoAusText: kontoAusText };   // _…: nur für Tests (reine Textregeln)
+           _meldungAus: meldungAus, _geld: geld, _kopfAusTexten: kopfAusTexten, _kontoAusText: kontoAusText, _balanceRelativ: balanceRelativ };   // _…: nur für Tests (reine Textregeln)
 })();
 // Vertrag T3: globalThis.prophosAugen = { v, stand(), inventar() } — wie augen.js; im TopstepX-Tab gilt diese Datei.
 globalThis.prophosAugen = PROPHOS_AUGEN_TSX;
