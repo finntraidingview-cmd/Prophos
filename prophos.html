@@ -23307,8 +23307,11 @@
   /* KANÄLE NUR, WO SIE GEBRAUCHT WERDEN (30.09.2026, Supabase hat das Projekt gedrosselt: Realtime Messages 8,2 Mio. von 5 Mio.
    * im Pro-Kontingent, Spend Cap an). Supabase zählt jede Nachricht JE ABONNENT — markt-live lief in jedem eingeloggten Tab
    * (Mac, Handy, Hintergrund-Tabs) mit jeder tv_kurse-Zeile beider Wurzeln von allen Liefer-PCs, auch ohne offenen Radar.
-   *   tv_kurse (markt-live): am PC-Tab (MT5_LOCAL = Prophos über localhost vom lokalen Backend) IMMER — hedgeFeedPuffern
-   *     braucht den Kurs zum Puls-Kauf-Klick (Rückfall-Einstieg, Vorfall 28.09.2026), der Tab läuft dort oft minimiert.
+   *   tv_kurse (markt-live): am PC-Tab (MT5_LOCAL = Prophos über localhost vom lokalen Backend) nur, solange er den Kurs
+   *     wirklich braucht (mklPcBrauchtKurs, seit 01.10.2026 — vorher IMMER: realtime.subscription zeigte 7 Abos auf tv_kurse,
+   *     6 davon PC-Tabs im Leerlauf, jede der ~1.600 Zeilen/h an jeden Abonnenten ≈ 270k Nachrichten/Tag). Gebraucht wird er
+   *     für hedgeFeedPuffern (Kurs zum Puls-Kauf-Klick, Vorfall 28.09.2026) und hedgeWacheTick (Fusion-Hedge am TP/Liq-Level);
+   *     der Tab läuft dort oft minimiert, darum hier ohne Sichtbarkeits-Bedingung.
    *     Sonst nur, solange Radar/Live Trades offen UND der Tab sichtbar ist; 60 s nach dem Verlassen wieder abgemeldet,
    *     dann übernimmt das Polling der View (mklPollMs 5 s). Die Karten-Chips (wdKursJetzt) fallen dann auf den Cloud-Cache.
    *     NICHT nach Wurzel gefiltert: hedgeFeedAmKlick/hedgeKursAktuell nehmen bei fehlender Plan-Wurzel die andere, und die
@@ -23317,7 +23320,40 @@
    *     (der Chart zeichnet nur mkl.wurzel); Wurzelwechsel = neu abonnieren. Name mit Wurzel, weil supabase-js zu einem Namen,
    *     dessen Abbau noch läuft, den alten Kanal zurückgibt; aus demselben Grund wartet ein neuer Aufbau auf das Ende des Abbaus. */
   const mklSichtbar = () => typeof document === 'undefined' || document.visibilityState !== 'hidden'
-  const mklKursKanalGewollt = () => (typeof MT5_LOCAL !== 'undefined' && MT5_LOCAL) || (mklAktiv() && mklSichtbar())
+  /* PC-TAB BRAUCHT DEN LIVE-KURS (01.10.2026, Supabase-Realtime-Kontingent: 7 Abos auf tv_kurse, 6 davon PC-Tabs, die den Kanal
+   * auch im Leerlauf hielten → ~270k Nachrichten/Tag). Wahr nur, wenn hier ein Nutzer des Kurses läuft oder gleich laufen kann:
+   *   (a) Puls-Lauf aktiv — dieselben Riegel wie osPipelineAktiv (_osActive = geclaimtes Signal vom Mac/Handy, _tpOrbitLaeuft =
+   *       Orbit-Start am PC, _suLaeuft = Startzeit-Lauf, _rsAktiv), aber OHNE dessen 10-min-Nachlauf/Anlaufschutz nach dem
+   *       Tab-Start — sonst hielte jedes Neuladen das Abo 10 min offen. Jeder Riegel steht, bevor Puls den Kauf-Knopf klickt;
+   *       Puls braucht bis zum Klick Sekunden (TV nach vorn, Konto, Symbol, Order-Panel), der Kanal steht nach ~1–2 s.
+   *   (b) Fusion-Hedge dieses PCs offen/öffnet/schließt — GENAU die Auswahl von hedgeWacheTick (route tvv2, hedge.pc ===
+   *       hedgePcId()), unabhängig vom Plan-Status (der Wächter liest den Kurs über hedgeKursAktuell).
+   *   (c) offener Orbit-V2-Plan (tvv2, inkl. Winning Days) — Wächter/Handstart-Einstieg (tvV2HandstartEinstieg) nehmen den Puffer.
+   *       Echo V2/Topstep V2 lesen keinen tv_kurse-Kurs und halten das Abo nicht.
+   *   (d) geplanter Plan mit start_um in ≤ 5 min bzw. fällig und ≤ 15 min überfällig (wie OS_START_VORLAUF_MS/_NACHLAUF_MS),
+   *       damit der Puffer schon 5 min VOR dem Klick läuft (Farmer + Startzeit).
+   *   (e) eigener Winning-Days-Block dieser ID gewürfelt oder läuft (_wd.eigeneAktiv aus wdTick, keine eigene Abfrage) — auch ein
+   *       Handstart in dieser Nacht hat dann Kurse im Puffer.
+   * Fehlt eine Variable (Modul noch nicht durch), lieber abonnieren (true). Abbau wie bisher 60 s nach dem letzten „wahr". */
+  function mklPcBrauchtKurs(){
+    try{ if(_osActive || _tpOrbitLaeuft || _suLaeuft || _rsAktiv) return true }catch(_){ return true }
+    let tp; try{ tp = tradePlans || [] }catch(_){ return true }
+    const jetzt = Date.now(), pcId = (typeof hedgePcId === 'function') ? hedgePcId() : ''
+    for(const p of tp){
+      if(!p) continue
+      const h = p.mt5Baseline && p.mt5Baseline.hedge
+      if(p.route === 'tvv2' && h && ['offen', 'oeffnet', 'schliesst'].includes(h.status) && h.pc === pcId) return true
+      if(p.status === 'open' && p.route === 'tvv2') return true
+      if(p.status === 'planned' && p.startUm && !p.startUmGestartetAt){
+        const d = new Date(p.startUm).getTime() - jetzt
+        if(d <= 5 * 60000 && d >= -15 * 60000) return true
+      }
+    }
+    try{ if(_wd && _wd.eigeneAktiv) return true }catch(_){}
+    return false
+  }
+  window._mklPcBrauchtKurs = mklPcBrauchtKurs   // Diagnose: warum hält dieser PC-Tab das Kurs-Abo?
+  const mklKursKanalGewollt = () => (typeof MT5_LOCAL !== 'undefined' && MT5_LOCAL && mklPcBrauchtKurs()) || (mklAktiv() && mklSichtbar())
   let _mklRtWeg = 0, _mklRtAbbau = null, _mklRtKWurzel = null, _mklRtKAbbau = null
   function mklKerzenKanal(){
     if(mkl.stub || !currentUserId || typeof supabase.channel !== 'function') return
@@ -23375,6 +23411,12 @@
           _mklRtStatus = status
           mklPollSetzen()
           console.log('[markt-live] Realtime', status)
+          // Frisch aufgebaut (01.10.2026, Abo am PC-Tab nur noch bei Bedarf): einmal die aktuellen tv_kurse-Zeilen in den Klick-Puffer,
+          // damit er nicht erst mit der nächsten Änderung beginnt — ein Puls-Klick kurz nach dem Aufbau hat so schon einen Kurs davor.
+          if(status === 'SUBSCRIBED' && typeof MT5_LOCAL !== 'undefined' && MT5_LOCAL){
+            Promise.resolve(supabase.from('tv_kurse').select('*').gte('updated_at', new Date(Date.now() - HEDGE_FEED_KLICK_LUECKE_MS).toISOString()).limit(20))
+              .then(({ data }) => { for(const x of (data || [])) hedgeFeedPuffern(x, Date.parse((x && x.updated_at) || '') || 0) }).catch(() => {})
+          }
         })
       }catch(e){ console.warn('[markt-live] Realtime', e); _mklRt = null; _mklRtStatus = null; mklPollSetzen() }
       return
@@ -23386,7 +23428,7 @@
     _mklRt = null; _mklRtStatus = null; _mklRtWeg = 0; mklPollSetzen()
     try{ _mklRtAbbau = Promise.resolve(supabase.removeChannel(ch)).catch(() => {}).finally(() => { _mklRtAbbau = null }) }catch(_){ _mklRtAbbau = null }
   }
-  window._mklRealtimeStatus = () => _mklRtStatus   // null = kein Kurs-Abo (weder PC-Tab noch Radar sichtbar)
+  window._mklRealtimeStatus = () => _mklRtStatus   // null = kein Kurs-Abo (PC-Tab ohne Bedarf laut mklPcBrauchtKurs, kein Radar sichtbar)
   window._mklKerzenStatus = () => _mklRtKStatus   // Test-/Diagnose-Zugriff: null = kein Kerzen-Abo (kein Chart offen)
   // Ein 1-s-Prüfer für beide Kanäle (vorher markt-live alle 15 s nur „aufbauen, falls fehlt") — Radar öffnen abonniert sofort
   setInterval(() => { mklRealtimeStart(); mklKerzenKanal() }, 1000)
