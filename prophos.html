@@ -1841,20 +1841,22 @@
      kühle Farbwelt, in OKLCH gerechnet mit gleicher Helligkeit/Buntheit je Rolle (Schrift L .46 · Rand L .86), nur der
      Farbton wandert: Live Grün · WD Mint · Challenge Aqua · Phase Blau · Funded CFD Indigo · Funded Lila. Weiß mit 1-px-Rand,
      keine Füllung. Challenge liegt am weitesten von den Phasen weg; Phase 2 = dieselbe Farbe kräftiger (Rand + Schrift).
-     Waiting for Payout ist ein Zustand von Funded CFD: dessen Ton mit Punkt, wie Live. Schrift auf Weiß ≥ 6:1. */
-  #dashboard-view .type-challenge{border-color:#90E1EA;color:#006B7D}
-  #dashboard-view .type-phase1{border-color:#AED4FF;color:#1157A4}
-  #dashboard-view .type-phase2{border-color:#7CB4FC;color:#003E8F}
-  #dashboard-view .type-funded{border-color:#DFC3FA;color:#6E3D93}
-  #dashboard-view .type-funded_cfd{border-color:#C9CBFF;color:#5049A2}
-  #dashboard-view .type-waiting_payout{border-color:#817CE9;color:#5049A2}
+     Waiting for Payout ist ein Zustand von Funded CFD: dessen Ton mit Punkt, wie Live.
+     Dazu ein GANZ leichter Tint im eigenen Ton (30.09.2026, Finn: „ganz leichter Hintergrund … sähe auch geil aus"),
+     für alle gleich hell (OKLCH L .975 · C .02), deutlich zarter als eine Tint-Pille; Schrift darauf 5,8–9,4:1. */
+  #dashboard-view .type-challenge{background:#E8FBFD;border-color:#90E1EA;color:#006B7D}
+  #dashboard-view .type-phase1{background:#EEF8FF;border-color:#AED4FF;color:#1157A4}
+  #dashboard-view .type-phase2{background:#EEF8FF;border-color:#7CB4FC;color:#003E8F}
+  #dashboard-view .type-funded{background:#FAF3FF;border-color:#DFC3FA;color:#6E3D93}
+  #dashboard-view .type-funded_cfd{background:#F4F5FF;border-color:#C9CBFF;color:#5049A2}
+  #dashboard-view .type-waiting_payout{background:#F4F5FF;border-color:#817CE9;color:#5049A2}
   #dashboard-view .type-waiting_payout::before{content:'';width:6px;height:6px;border-radius:999px;background:#5A51BA;box-shadow:0 0 0 2px #E8EAFF}
-  #dashboard-view .type-winning_days{border-color:#9AE3CB;color:#006F4F}
+  #dashboard-view .type-winning_days{background:#EAFBF5;border-color:#9AE3CB;color:#006F4F}
   #dashboard-view .acc-wd-toggle{margin-left:6px;padding:2px 7px;border-radius:6px;border:1px dashed var(--border);background:transparent;color:var(--sub);font-size:10.5px;font-weight:600;cursor:pointer;white-space:nowrap;vertical-align:middle}
   #dashboard-view .acc-wd-toggle:hover{border-color:#006F4F;color:#006F4F;background:rgba(0,111,79,.06)}   /* Mint wie .type-winning_days (30.09.2026) */
   #dashboard-view .acc-wd-toggle:disabled{opacity:.5;cursor:default}
   #dashboard-view .acc-wd-toggle.acc-wp-toggle:hover{border-color:#5049A2;color:#5049A2;background:rgba(80,73,162,.06)}   /* Indigo wie Funded CFD / Waiting for Payout (30.09.2026) */
-  #dashboard-view .type-live{border-color:#B4DFAE;color:#1B6A14}
+  #dashboard-view .type-live{background:#F0FAEE;border-color:#B4DFAE;color:#1B6A14}
   #dashboard-view .type-live::before{
     content:'';width:6px;height:6px;border-radius:999px;background:#4AA342;
     box-shadow:0 0 0 2px #DDF5D9;
@@ -2257,7 +2259,7 @@
   #dashboard-view .tc2-sys-tsx{background:rgba(71,85,105,.11);color:#475569}
   /* V2-Wege (23.09.2026): gleiche Farbe wie Echo/Orbit, gestrichelter Rand = „ohne Hedge" */
   #dashboard-view .tc2-sys-mt5v2{background:rgba(14,151,149,.15);color:#0E7A78;outline:1px dashed rgba(14,122,120,.55);outline-offset:-1px}
-  #dashboard-view .tc2-sys-wd{background:rgba(22,200,198,.14);color:#0E7A78;outline:1px dashed rgba(14,122,120,.55);outline-offset:-1px}   /* Winning Day: Teal der Kontoart-Chips (25.09.2026) */
+  #dashboard-view .tc2-sys-wd{background:rgba(0,168,129,.12);color:#006F4F;outline:1px dashed rgba(0,111,79,.45);outline-offset:-1px}   /* Winning Day: Ton der Kontoart-Chips (25.09.2026; seit 30.09.2026 Mint der Typ-Palette) */
   #dashboard-view .tc2-sys-tvv2{background:rgba(124,58,237,.12);color:#7C3AED;outline:1px dashed rgba(124,58,237,.55);outline-offset:-1px}
   #dashboard-view .tc2-sys-tsv2{background:rgba(234,88,12,.12);color:#C2410C;outline:1px dashed rgba(234,88,12,.55);outline-offset:-1px}
   #dashboard-view .tc2-actions{display:flex;align-items:center;gap:3px;flex-shrink:0}
@@ -35995,7 +35997,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.849'
+  const OS_TAB_BUILD = '2026-09-22.850'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -43490,11 +43492,12 @@
   function zielLabel(a){ return (zielKonfig(a)?.kind || a.goalKind) === 'winning_days' ? 'Winning Days' : 'Trading Days' }
 
   // Punkte-Reihe ●●●○○ — nur bis 10 Ziel-Tage, darüber trägt die Zahl allein
-  // Winning Days (29.09.2026, Finn: „in einer anderen Farbe, ein bisschen grün“): Türkis #0E7A78 wie der Chip „Winning Days“ — als
+  // Winning Days (29.09.2026, Finn: „in einer anderen Farbe, ein bisschen grün“): wie der Chip „Winning Days“ — seit 30.09.2026 Mint
+  // #006F4F (Typ-Palette Outline, vorher Türkis #0E7A78) — als
   // Literal in den Funktionen, keine Modul-Konstante: renderAccounts läuft schon beim ersten Render, bevor das Modul hier ankommt (TDZ)
   function zielDotsHtml(f){
     if(!f || f.target > 10) return ''
-    const farbe = f.done ? 'var(--good)' : f.kind === 'winning_days' ? '#0E7A78' : 'var(--violet)'
+    const farbe = f.done ? 'var(--good)' : f.kind === 'winning_days' ? '#006F4F' : 'var(--violet)'
     let s = '<span style="display:inline-flex;gap:3px;align-items:center;margin-left:6px;vertical-align:middle">'
     for(let i = 0; i < f.target; i++){
       s += `<span style="width:6px;height:6px;border-radius:50%;background:${i < f.count ? farbe : 'var(--border)'}"></span>`
@@ -43506,7 +43509,7 @@
   function zielBadgeHtml(a, klickbar){
     const f = zielFortschritt(a)
     if(!f) return ''
-    const farbe = f.done ? 'var(--good)' : f.kind === 'winning_days' ? '#0E7A78' : 'var(--violet)'
+    const farbe = f.done ? 'var(--good)' : f.kind === 'winning_days' ? '#006F4F' : 'var(--violet)'
     const stand = `${Math.min(f.count, f.target)}/${f.target}`
     // Ziel erreicht + Winning Days = Payout-Fenster offen (15.09.2026, Finn:
     // „sobald ich bei 5 angekommen bin, ist der Payout anfragbar")
