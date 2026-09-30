@@ -5,7 +5,7 @@ Aufruf:  python3 tools/selftest_puls_augen_tsx.py
 Prüft: puls_augen_saeubern nimmt die TopstepX-Arten (stand_tsx, inventar_tsx, inventar_tsx_<teil>, wie der live ausgeführte
 DB-Check) an und nichts sonst, die daten-Schlüssel zustand/bot bleiben, 60-KB-Deckel je Zeile; /puls-regel meldet tsx 'cdp'|'uia'
 über puls_augen_modus (Schalter je PC); PULS_ERGEBNIS_FELDER enthält die neuen TopstepX-Felder und puls_ergebnis_saeubern kappt
-positionen wie positionen_danach."""
+positionen wie positionen_danach; warnung/unklar (B37) bleiben erhalten."""
 import json
 import os
 import re
@@ -69,6 +69,13 @@ def main():
     e = z["ergebnis"]
     check(e["mll"] == 146000 and e["plattform"] == "tsx" and len(e["positionen"]) == 10 and "fremd" not in e,
           "Ergebnis: TopstepX-Felder bleiben, positionen auf 10 gekappt, fremde fallen weg")
+    z2 = a["puls_ergebnis_saeubern"]({"plan_id": "69cc4322-aaaa-bbbb", "art": "order", "stufe": "ende",
+                                      "ergebnis": {"ok": True, "gesendet": True, "warnung": "SL-Bracket abgelehnt " + "x" * 400}}, "pc-l5o8bv")
+    z3 = a["puls_ergebnis_saeubern"]({"plan_id": "69cc4322-aaaa-bbbb", "art": "order", "stufe": "ende",
+                                      "ergebnis": {"ok": False, "gesendet": True, "unklar": True, "code": "beweis", "retry_ok": False}}, "pc-l5o8bv")
+    check("warnung" in F and "unklar" in F and z2["ergebnis"]["warnung"].startswith("SL-Bracket") and len(z2["ergebnis"]["warnung"]) == 300
+          and z3["ergebnis"]["unklar"] is True and z3["ergebnis"]["code"] == "beweis",
+          "B37: warnung (auf 300 gekappt) und unklar überleben das Säubern (Nachholen braucht beide)")
 
     print("\nALLES OK" if ok else "\nFEHLER")
     sys.exit(0 if ok else 1)

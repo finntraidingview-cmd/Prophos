@@ -10219,7 +10219,10 @@ PULS_ERGEBNIS_FELDER = ("ok", "code", "schritt", "msg", "gesendet", "bestaetigt"
                         "klick_at", "balance_start", "equity_start", "today_pnl_start", "today_pnl", "balance_end", "equity_end",
                         "tv_symbol", "menge", "konto_aktiv", "pruefung", "meldung_roh", "positionen_danach", "close_fill", "storniert",
                         "symbol", "richtung", "konto", "trail_ende", "quelle",
-                        "mll", "rpl", "tp_level", "sl_level", "positionen", "plattform")
+                        "mll", "rpl", "tp_level", "sl_level", "positionen", "plattform",
+                        # B37 (30.09.2026): Warnung trotz ok (z. B. SL-Bracket abgelehnt) + unklar (Klick raus, Position nicht belegbar) — das
+                        # Tab braucht beide auch beim Nachholen (Karten-Chip bzw. UNKLAR-Marke); order_bot.py führt dieselbe Liste
+                        "warnung", "unklar")
 _PLAN_ID_MUSTER = re.compile(r"[A-Za-z0-9-]{8,64}")
 
 
@@ -10245,6 +10248,8 @@ def puls_ergebnis_saeubern(d, pc_id):
     for k in ("msg", "trail_ende"):
         if isinstance(e.get(k), str):
             e[k] = e[k][:1500]
+    if isinstance(e.get("warnung"), str):
+        e["warnung"] = e["warnung"][:300]
     if len(json.dumps(e, ensure_ascii=False, default=str)) > PULS_ERGEBNIS_MAX:
         e.pop("pruefung", None)
         e.pop("trail_ende", None)

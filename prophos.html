@@ -33263,9 +33263,9 @@
               ? 'Puls meldete die Order als platziert, Duplikum hat sie aber noch nicht erkannt — erst in TradingView nachsehen, dann erneut starten'
               : 'Der Start wurde ausgelöst, aber nichts kam zurück (PC nicht bereit?) — Klick stößt den Start erneut an'}">Neu starten</button>`
         : ''
-      const _tsxUnklar = p.route === 'tsv2' && p.status === 'planned' && p.mt5Baseline && p.mt5Baseline.puls_unklar
-      const orbitBtn = _tsxUnklar
-        ? `<button class="btn btn-ghost tc2-btn rsq-card-wait" data-plan-tsx-unklar="${p.id}" style="color:#B45309" title="Letzter Start: Puls hat geklickt, die Position steht vermutlich (${escapeHtml(String(_tsxUnklar.msg || _tsxUnklar.code || ''))}). Erst in TopstepX nachsehen — steht sie, „Läuft" setzen; ist nichts offen, Klick hier gibt „Starten" wieder frei.">⚠ UNKLAR · in TopstepX nachsehen</button>`
+      const _pulsUnklar = (p.route === 'tsv2' || p.route === 'tvv2') && p.status === 'planned' && p.mt5Baseline && p.mt5Baseline.puls_unklar
+      const orbitBtn = _pulsUnklar
+        ? `<button class="btn btn-ghost tc2-btn rsq-card-wait" data-plan-puls-unklar="${p.id}" style="color:#B45309" title="Letzter Start endete UNKLAR — die Order liegt vielleicht (${escapeHtml(String(_pulsUnklar.msg || _pulsUnklar.code || ''))}). Erst in ${pulsPlattform(p)} nachsehen — steht sie, „Läuft" setzen; ist nichts offen, Klick hier gibt „Starten" wieder frei.">⚠ UNKLAR · in ${pulsPlattform(p)} nachsehen</button>`
         : (!MT5_LOCAL && qs && qs.laeuft)
         ? `<span class="rsq-card-run" title="Signal läuft — Live-Schritte im Auto-Start-Panel unten rechts">📡 startet gerade…</span>`
         : (!MT5_LOCAL && qs)
@@ -33716,11 +33716,12 @@
     document.querySelectorAll('[data-plan-start-um-x]').forEach(btn => {
       btn.addEventListener('click', () => { if(typeof tpStartUmEntfernen === 'function') tpStartUmEntfernen(btn.dataset.planStartUmX) })
     })
-    // Topstep-UNKLAR-Marke lösen (B37, 30.09.2026) — eigener Handler; nur nach Rückfrage, weil danach „Starten" wieder klickt
-    document.querySelectorAll('[data-plan-tsx-unklar]').forEach(btn => {
+    // UNKLAR-Marke lösen (B37, 30.09.2026; Topstep V2 und Orbit V2) — eigener Handler; nur nach Rückfrage, weil danach „Starten" wieder klickt
+    document.querySelectorAll('[data-plan-puls-unklar]').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if(!confirm('In TopstepX nachgesehen und KEINE Position offen?\n\nDann wird „Starten" wieder frei. Steht die Position, stattdessen „Läuft" setzen.')) return
-        try{ await baselinePatch(btn.dataset.planTsxUnklar, { puls_unklar: null }, 'planned'); renderTradePlans() }
+        const pl = tradePlans.find(x => String(x.id) === String(btn.dataset.planPulsUnklar))
+        if(!confirm(`In ${pl ? pulsPlattform(pl) : 'TradingView/TopstepX'} nachgesehen und KEINE Position/Order offen?\n\nDann wird „Starten" wieder frei. Steht die Position, stattdessen „Läuft" setzen.`)) return
+        try{ await baselinePatch(btn.dataset.planPulsUnklar, { puls_unklar: null }, 'planned'); renderTradePlans() }
         catch(e){ if(typeof atToast === 'function') atToast('UNKLAR-Marke nicht gelöst: ' + ((e && e.message) || e), 'end') }
       })
     })
@@ -36440,7 +36441,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.880'
+  const OS_TAB_BUILD = '2026-09-22.881'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -36626,8 +36627,10 @@
   // zurück in die Signal-Zeile statt in ein Popup (am PC sitzt dann niemand).
   // Wrapper (25.09.2026, Live-Befund: Remote-Signal 39bb477f blieb auf 'laeuft'): meldet ein Remote-Lauf (fern) nichts,
   // weil ein Pfad ohne fern.melde endet oder wirft, schließt der Wrapper die Signal-Zeile ab — nie 'laeuft' liegen lassen.
-  // Topstep-UNKLAR-Marke setzen (B37, 30.09.2026) — nur solange der Plan „Geplant" ist (Guard im RPC); Fehler still, die Meldung kommt ohnehin
-  async function tsxUnklarMarke(planId, r){
+  // UNKLAR-Marke setzen (B37, 30.09.2026; seit dem Folgeauftrag für Topstep V2 UND Orbit V2) — überall, wo ein Start mit
+  // „⚠ … UNKLAR … NICHT erneut starten" endet: Proxy-502/Zeitlimit, retry_ok false, Verbindung abgerissen, Lauf am PC abgebrochen,
+  // Tab-Neustart während eines Orbit-Signals. Nur solange der Plan „Geplant" ist (Guard im RPC); Fehler still, die Meldung kommt ohnehin
+  async function pulsUnklarMarke(planId, r){
     try{
       await baselinePatch(planId, { puls_unklar: { at: new Date().toISOString(), code: (r && r.code) || 'unklar', msg: String((r && (r.msg || r.error)) || '').slice(0, 200),
         pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : null } }, 'planned')
@@ -36638,9 +36641,10 @@
     if(!fern) return tpOrbitStartenKern(planId, null, opts)
     let gemeldet = false
     const f2 = Object.assign({}, fern, { melde: x => { gemeldet = true; return fern.melde(x) } })
+    const markeV2 = async msg => { const p = tradePlans.find(x => String(x.id) === String(planId)); if(p && (p.route === 'tvv2' || p.route === 'tsv2')) await pulsUnklarMarke(planId, { code: 'abgebrochen', msg }) }
     try{ return await tpOrbitStartenKern(planId, f2, opts) }
-    catch(e){ if(!gemeldet){ gemeldet = true; try{ await fern.melde({ ok:false, unklar:true, msg: '⚠ Ergebnis UNKLAR — Lauf am PC abgebrochen: ' + String(e && e.message || e) }) }catch(_){} } }
-    finally{ if(!gemeldet){ try{ await fern.melde({ ok:false, unklar:true, msg: '⚠ Lauf am PC ohne Abschluss beendet — erst in TradingView nachsehen.' }) }catch(_){} } }
+    catch(e){ if(!gemeldet){ gemeldet = true; const t = '⚠ Ergebnis UNKLAR — Lauf am PC abgebrochen: ' + String(e && e.message || e); await markeV2(t); try{ await fern.melde({ ok:false, unklar:true, msg: t }) }catch(_){} } }
+    finally{ if(!gemeldet){ const t = '⚠ Lauf am PC ohne Abschluss beendet — erst in TradingView nachsehen.'; await markeV2(t); try{ await fern.melde({ ok:false, unklar:true, msg: t }) }catch(_){} } }
   }
   // CDP-UMBAU (30.09.2026, Vertrag mit Terminal 3): der Bot antwortet code 'cdp_folgt', wenn auf diesem PC der neue TopstepX-Weg
   // (Puls-Chrome) gewählt ist, die nötige Etappe aber noch fehlt — gesendet:false, retry_ok:false. Nie „nichts gesendet" mit Neustart:
@@ -36662,10 +36666,10 @@
       if(data){ const frisch = rowToPlan(data); const i = tradePlans.findIndex(x => String(x.id) === String(plan.id)); if(i >= 0) tradePlans[i] = frisch; plan = frisch }
     }catch(_){ /* offline: mit dem Cache weiter */ }
     if(plan.status !== 'planned'){ if(fern) fern.melde({ ok:false, msg: 'Plan ist nicht (mehr) „Geplant" — nichts gestartet.' }); return }
-    // Topstep-UNKLAR-Marke (B37, 30.09.2026): der letzte Start hat geklickt, die Position steht vermutlich — kein zweiter Klick,
-    // egal ob Karte, Startzeit oder Signal vom Mac. Gelöst wird die Marke nur bewusst über den Chip auf der Karte.
-    if(plan.route === 'tsv2' && plan.mt5Baseline && plan.mt5Baseline.puls_unklar){
-      const t = '⚠ UNKLAR — beim letzten Start ist die Position vermutlich offen geblieben: erst in TopstepX nachsehen, dann auf der Karte „⚠ UNKLAR" lösen. Nichts gestartet.'
+    // UNKLAR-Marke (B37, 30.09.2026; Topstep V2 und Orbit V2): der letzte Start endete UNKLAR, die Order liegt vielleicht — kein zweiter
+    // Klick, egal ob Karte, Startzeit oder Signal vom Mac. Gelöst wird die Marke nur bewusst über den Chip auf der Karte.
+    if((plan.route === 'tsv2' || plan.route === 'tvv2') && plan.mt5Baseline && plan.mt5Baseline.puls_unklar){
+      const t = `⚠ UNKLAR — der letzte Start endete unklar, die Order liegt vielleicht: erst in ${pulsPlattform(plan)} nachsehen, dann auf der Karte „⚠ UNKLAR" lösen. Nichts gestartet.`
       if(fern) fern.melde({ ok:false, unklar:true, msg: t }); else toast(t, 'end')
       return
     }
@@ -36696,6 +36700,8 @@
       if(foot) foot.style.display = 'flex'
     }
     const fehler = async (text, r) => {
+      // UNKLAR = der Klick kann raus sein → Marke am Plan, die Karte zeigt kein „Starten" mehr (B37-Folgeauftrag, 30.09.2026)
+      if(pv2 && /^⚠ (Ergebnis )?UNKLAR/.test(String(text))) await pulsUnklarMarke(plan.id, { code: (r && r.code) || 'unklar', msg: text })
       // Diagnose mitschicken (23.09.2026, Moritz-PC: der Dump lag nur auf dem PC, vom Mac
       // aus war 'steht dort eine Fehlermeldung?' nicht zu beantworten) — per SQL lesbar.
       if(fern) return fern.melde({ ok:false, unklar: !!(r && r.retry_ok === false) || /^⚠ Ergebnis UNKLAR/.test(text),
@@ -36981,8 +36987,7 @@
       if(plan.route === 'tsv2' && r && !r.ok && r.code === 'beweis' && r.unklar){
         // B37 (Terminal 3, 30.09.2026): „No Active Position" ist weg, aber weder Fill noch Positionszeile lesbar — die Position steht
         // vermutlich. Plan bleibt stehen, KEIN Neustart (retry_ok false sperrt Weiter/Erneut), erst in TopstepX nachsehen.
-        // Marke am Plan (mt5_baseline.puls_unklar): die Karte zeigt statt „Starten" den UNKLAR-Chip, jeder weitere Start wird abgewiesen
-        await tsxUnklarMarke(plan.id, r)
+        // Marke am Plan (mt5_baseline.puls_unklar, setzt fehler()): die Karte zeigt statt „Starten" den UNKLAR-Chip, jeder weitere Start wird abgewiesen
         await fehler('⚠ UNKLAR — Position vermutlich offen: Puls hat geklickt, „No Active Position" ist weg, aber weder Fill noch Positionszeile lesbar. In TopstepX nachsehen, NICHT erneut starten.',
           Object.assign({}, r, { retry_ok: false }))
         return
@@ -38025,7 +38030,7 @@
           // Seit B37 (30.09.2026) auch: abgelehnt / beweis (gesendet:true, ok:false) und unklar setzen NIE „Läuft" — nur ok UND gesendet
           if(plan.route === 'tsv2' && (!e.ok || !e.gesendet || e.unklar || e.schritt === 'probe' || e.code === 'probe')){
             await pulsErgebnisAbgeholt(z.plan_id, 'order')
-            if(e.gesendet && e.unklar && plan.status === 'planned') await tsxUnklarMarke(plan.id, e)
+            if(e.gesendet && e.unklar && plan.status === 'planned') await pulsUnklarMarke(plan.id, e)
             if(e.gesendet && (e.unklar || e.code === 'beweis') && typeof atToast === 'function')
               atToast(`⚠ ${name}: Puls hatte geklickt, Ergebnis UNKLAR (${String(e.code || 'unklar')}) — in TopstepX nachsehen, NICHT erneut starten`, 'end')
             continue
@@ -38345,7 +38350,7 @@
     try{ sessionStorage.removeItem(OS_CLAIMS_KEY) }catch(_){}
     const ids = l.filter(x => x && x.id).map(x => x.id)
     if(!ids.length || !pcAlle.length) return
-    const { data } = await supabase.from('order_signale').select('id,params').in('id', ids).eq('status', 'laeuft').in('pc', pcAlle)
+    const { data } = await supabase.from('order_signale').select('id,params,plan_id').in('id', ids).eq('status', 'laeuft').in('pc', pcAlle)
     for(const z of (data || [])){
       const aktion = String(((z.params || {}).aktion) || '')
       const lesend = OS_LESEND.includes(aktion)
@@ -38353,6 +38358,17 @@
         ? { ok: false, msg: 'Tab neu geladen — Lesung abgebrochen, Ergebnis verloren. Bitte erneut anstoßen.', tab_neu: true }
         : { ok: false, unklar: true, tab_neu: true, msg: '⚠ Stand UNBEKANNT: Der Tab lud während einer Order neu — erst in TradingView/TopstepX nachsehen, ob die Order liegt bzw. zu ist, NICHT blind erneut starten.' }
       try{ await supabase.from('order_signale').update({ status: 'fehler', updated_at: new Date().toISOString(), ergebnis }).eq('id', z.id).eq('status', 'laeuft') }catch(_){}
+    }
+    await osUnklarMarken(data, 'tab_neu')
+  }
+  // Orbit-Start-Signale, die als UNKLAR abgeschlossen werden (Tab neu geladen, Lauf abgerissen) → UNKLAR-Marke am Plan (B37-Folgeauftrag,
+  // 30.09.2026). Nur aktion 'orbit' — Lesungen und Schließen setzen nie eine Start-Sperre; der RPC-Guard nimmt nur „Geplant"
+  async function osUnklarMarken(rows, code){
+    for(const z of (rows || [])){
+      if(!z || !z.plan_id || String(((z.params || {}).aktion) || '') !== 'orbit') continue
+      const p = tradePlans.find(x => String(x.id) === String(z.plan_id))
+      if(p && p.route !== 'tvv2' && p.route !== 'tsv2') continue
+      await pulsUnklarMarke(z.plan_id, { code, msg: 'Start-Signal ohne Abschluss (Tab neu geladen oder Lauf abgerissen)' })
     }
   }
   async function orderSignalTick(){
@@ -38389,9 +38405,12 @@
           const pcIch0 = (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : ''
           const pcAlle0 = [pcIch0, ...((typeof pcIdFrueher === 'function') ? pcIdFrueher() : [])].filter(Boolean)
           try{ await osEigeneClaimsAbschliessen(pcAlle0) }catch(e){ console.warn('[signal] eigene Claims', e) }   // 29.09.2026: sofort, ohne 4-min-Grenze
-          if(pcAlle0.length) await supabase.from('order_signale').update({ status: 'fehler', updated_at: new Date().toISOString(),
-              ergebnis: { ok: false, unklar: true, msg: '⚠ abgebrochen (Tab neu gestartet) — bei einer Order erst in TradingView/TopstepX nachsehen' } })
-            .eq('status', 'laeuft').in('pc', pcAlle0).lt('updated_at', new Date(Date.now() - 4 * 60000).toISOString())
+          if(pcAlle0.length){
+            const { data: alt0 } = await supabase.from('order_signale').update({ status: 'fehler', updated_at: new Date().toISOString(),
+                ergebnis: { ok: false, unklar: true, msg: '⚠ abgebrochen (Tab neu gestartet) — bei einer Order erst in TradingView/TopstepX nachsehen' } })
+              .eq('status', 'laeuft').in('pc', pcAlle0).lt('updated_at', new Date(Date.now() - 4 * 60000).toISOString()).select('plan_id,params')
+            await osUnklarMarken(alt0, 'tab_neu')
+          }
         }catch(_){}
       }
       // Verwaiste Läufe (25.09.2026): 'laeuft' auf DIESEM PC, seit > 6 min ohne Abschluss, und hier läuft gerade nichts —
@@ -38406,9 +38425,12 @@
           const pcIch = (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : ''
           const grenze = new Date(Date.now() - 6 * 60000).toISOString()
           const pcAlle = [pcIch, ...((typeof pcIdFrueher === 'function') ? pcIdFrueher() : [])].filter(Boolean)   // frühere Kennung (Panel .570)
-          if(pcIch) await supabase.from('order_signale').update({ status: 'fehler', updated_at: new Date().toISOString(),
-              ergebnis: { ok: false, unklar: true, msg: '⚠ Lauf ohne Abschluss (Tab neu geladen oder abgerissen) — erst in TradingView nachsehen.' } })
-            .eq('status', 'laeuft').in('pc', pcAlle).lt('updated_at', grenze)
+          if(pcIch){
+            const { data: verw } = await supabase.from('order_signale').update({ status: 'fehler', updated_at: new Date().toISOString(),
+                ergebnis: { ok: false, unklar: true, msg: '⚠ Lauf ohne Abschluss (Tab neu geladen oder abgerissen) — erst in TradingView nachsehen.' } })
+              .eq('status', 'laeuft').in('pc', pcAlle).lt('updated_at', grenze).select('plan_id,params')
+            await osUnklarMarken(verw, 'verwaist')
+          }
         }
       }catch(_){}
       const { data: sigs, error } = await supabase.from('order_signale')
