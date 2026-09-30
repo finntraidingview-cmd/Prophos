@@ -21200,6 +21200,57 @@
     }catch(e){ console.warn('[hedge] Einstieg nachtragen', e) }
   }
   window._hedgeEinstiegNachtragen = hedgeEinstiegNachtragen
+  /* FRÜHER FUSION-HEDGE (01.10.2026, Finn nach einem WD-Trade 30.09.2026 22:13 UTC: „Sobald die Order bei TradingView reinkommt, soll sie auch
+   * direkt bei Fusion reinkommen" — gemessen: Fill 22:13:26,5, Fusion 22:13:41,6, weil der Hedge erst nach dem ganzen Puls-Lauf kam:
+   * Show more, Reiter Orders/Positions, Endprüfung, Heimweg). Der Bot meldet seit heute den ERSTEN Fill-Beweis mit Einstieg sofort als
+   * 'geklickt'-Zeile (bestaetigt, einstieg, order_klick_ms) nach puls_ergebnisse. Diese Wache schaut während des tv-konto-Laufs alle
+   * 0,5–0,8 s nach genau dieser Zeile und öffnet dann den Hedge — Einstieg = echter Fill, TP ab Fill (fill_rechnung) oder schon das
+   * TP-Limit, falls die Meldung mit da war. Nur Zeilen DIESES Laufs (order_klick_ms ab Laufstart; Bot und Tab = derselbe PC, eine Uhr).
+   * Höchstens EIN Open; der spätere Aufruf in v2AufOpen wartet darauf und trifft den Doppel-Open-Riegel.
+   * -> {stop, gefeuert, promise} */
+  function hedgeFruehWache(plan, t0){
+    const w = { stop: false, gefeuert: false, promise: null }
+    w.promise = (async () => {
+      const bis = Date.now() + 90000
+      while(!w.stop && Date.now() < bis){
+        await new Promise(ok => setTimeout(ok, 500 + Math.random() * 300))
+        if(w.stop) break
+        let z = null
+        try{ const { data } = await supabase.from('puls_ergebnisse').select('stufe, ergebnis').eq('plan_id', String(plan.id)).eq('art', 'order').maybeSingle(); z = data }catch(_){ continue }
+        const e = (z && z.ergebnis) || null
+        if(!e || !e.bestaetigt || !e.gesendet) continue
+        const kms = Number(e.order_klick_ms)
+        if(!(kms >= t0 - 2000) || !(tvKursZahl(String(e.einstieg || '')) > 1000)) continue
+        if(w.stop) break                    // Antwort kam während der Abfrage — dann öffnet v2AufOpen wie bisher
+        w.gefeuert = true
+        console.info('[hedgeFrueh] Fill-Beweis', e.einstieg, e.einstieg_quelle, '— Fusion wird geöffnet', Date.now() - kms, 'ms nach dem Klick')
+        return await hedgeSoloOeffnen(plan, Object.assign({}, e, { klick_at: new Date(kms).toISOString() }))
+      }
+      return null
+    })().catch(err => { console.warn('[hedgeFrueh]', err); return null })
+    return w
+  }
+  /* TP-LIMIT NACHTRAGEN nach dem frühen Hedge (01.10.2026): kam die TradingView-Meldung „Take Profit order placed … at" erst nach dem
+   * ersten Fill-Beweis, steht am Hedge TP = Fill ± Distanz. TradingView verankert die Bracket aber am Kurs beim ABSENDEN — der echte
+   * TP ist der Limit-Preis aus der Endantwort. Nur an einem offenen Hedge, nie über Hand-Werte oder einen schon echten TP (tv_*),
+   * nur plausibel (hedgeTpPreisPasst gegen den Einstieg). Schreiben atomar über baselinePatchIn('hedge'). */
+  async function hedgeTpNachtragenAusOrder(plan, r){
+    try{
+      const tp = (r && r.tp_limit != null) ? Number(r.tp_limit) : NaN
+      if(!(tp > 1000)) return
+      const { data: z } = await supabase.from('trade_plans').select('mt5_baseline').eq('id', plan.id).maybeSingle()
+      const h = z && z.mt5_baseline && z.mt5_baseline.hedge
+      if(!h || h.status !== 'offen') return
+      const q = String(h.tp_quelle || '')
+      if(/hand/.test(q) || /^(tv_limit|tv_toast|tv_orders)$/.test(q)) return
+      if(!hedgeTpPreisPasst(tp, Number(h.einstieg_nq), plan.richtung, Number(h.punkte))) return
+      const tpNeu = Math.round(tp * 100) / 100
+      await baselinePatchIn(plan.id, 'hedge', { tp_level_vorher: h.tp_level_nq ?? null, schliesst_bei_vorher: h.schliesst_bei_nq ?? null,
+        tp_level_nq: tpNeu, schliesst_bei_nq: hedgeSchliesstBei(plan.richtung, tpNeu, hedgePuffer()), puffer_punkte: hedgePuffer(), puffer_ohne_fill: null,
+        tp_limit_tv: tpNeu, tp_quelle: /^(tv_toast|tv_orders)$/.test(String(r.tp_limit_quelle || '')) ? r.tp_limit_quelle : 'tv_limit',
+        tv_meldung_roh: Array.isArray(r.meldung_roh) ? r.meldung_roh.slice(0, 14) : (h.tv_meldung_roh || null), tp_nachgetragen_at: new Date().toISOString() })
+    }catch(e){ console.warn('[hedge] TP nachtragen', e) }
+  }
   /* PULS-ENDLESUNG (25.09.2026, Finn über die Koordination: „Das Einzige, was ich brauche: einmal den Profit, jedes Mal wenn der
    * Trade beendet wird. Der Anfangs-P&L ist immer gleich … Daraus schließt sich alles."). Regel „eine Position pro Konto und Tag":
    * Today's P&L (Realized) des Kontos NACH dem Ende = Profit des Trades inkl. Gebühren; ein früherer erfasster Trade desselben
@@ -36728,7 +36779,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.904'
+  const OS_TAB_BUILD = '2026-09-22.905'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -37171,6 +37222,9 @@
       // Panel-Timeout. Streuung 8–14 s, höchstens ~150 s. Alte Panels ohne 'code' erkennt der Meldungstext.
       let r = null
       const _tvT0 = Date.now()
+      // FRÜHER FUSION-HEDGE (01.10.2026, Finn nach einem WD-Trade): schon während des Laufs auf den ersten Fill-Beweis des Bots
+      // schauen (puls_ergebnisse 'geklickt' mit bestaetigt + Einstieg) und Fusion sofort öffnen — nicht erst nach Endprüfung.
+      const _hedgeFrueh = (plan.route === 'tvv2' && plan.hedgeEur > 0 && MT5_LOCAL && typeof hedgeFruehWache === 'function') ? hedgeFruehWache(plan, _tvT0) : null
       for(;;){
         // Topstep V2 (F23): TopstepX-Order über /api/tsx-konto (Vertrag B16, Etappe 2), sonst TradingView wie bisher.
         // Kennt das Panel die Route noch nicht (404 vor jedem Klick), ehrlich „kommt mit Etappe 2" — nichts gesendet.
@@ -37184,6 +37238,7 @@
         if(imPopup) _pfSet('ob-order', 'warn', `⏳ Puls ist gerade beschäftigt (Rundgang/Schließen in TradingView) — die Order wartet, neuer Versuch gleich… (${sek}s)`)
         await new Promise(res => setTimeout(res, 8000 + Math.random() * 6000))
       }
+      if(_hedgeFrueh) _hedgeFrueh.stop = true   // Lauf zu Ende: nicht mehr schauen (ein schon ausgelöster Open läuft zu Ende)
       // „nichts gesendet" NUR, wenn es beweisbar ist (30.09.2026, Topstep-Paket S — vorher meldete jeder Proxy-502/Zeitabbruch
       // „nichts gesendet, bleibt Geplant", während der Bot unter dem Lock weiterklickte; ein neuer Start hätte doppelt platziert):
       //  · fetch warf (TypeError, Backend weg) oder das Panel kennt die Route nicht (404 vor jedem Klick) → nichts gesendet
@@ -37232,7 +37287,12 @@
         if(plan.hedgeEur > 0 && typeof hedgeSoloOeffnen === 'function'){
           if(imPopup) _pfSet('ob-order', 'warn', '⏳ Order platziert — Fusion-Gegenhedge wird geöffnet…')
           const klickAt = (r && (r.beweis_at || r.klick_at || r.at)) || new Date().toISOString()
+          // Früher Hedge schon ausgelöst: erst abwarten — danach greift im Kern der Doppel-Open-Riegel (kein zweiter Open), und das
+          // TP-Limit aus der Endantwort wird nachgetragen. Scheiterte der frühe Open, öffnet dieser Aufruf wie bisher.
+          const frueh = !!(_hedgeFrueh && _hedgeFrueh.gefeuert)
+          if(frueh){ try{ await _hedgeFrueh.promise }catch(_){} }
           try{ await hedgeSoloOeffnen(plan, Object.assign({}, r || {}, { klick_at: klickAt })) }catch(e){ console.warn('[hedgeSolo]', e) }
+          if(frueh && typeof hedgeTpNachtragenAusOrder === 'function') await hedgeTpNachtragenAusOrder(plan, r)
         }
         let tvb = null
         // Topstep V2 (F28): Start-Werte stecken schon in der tsx-konto-Antwort — kein zweiter Chrome-Lauf

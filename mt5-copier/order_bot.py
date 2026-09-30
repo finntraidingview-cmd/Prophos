@@ -17274,6 +17274,24 @@ def modus_tvkette_cdp(cmd):
                 continue
             neu = k3_neue_meldungen(vorher_m, (st.get("toasts") or {}).get("meldungen"))
             b = cdp_order_beweis(neu, k3_zeilen(st.get("positionen"), root), plan, menge0)
+            if b["bestaetigt"] and not erst_ok and b.get("einstieg") is not None:
+                # FRÜHER FILL-BEWEIS (01.10.2026, Finn nach einem WD-Trade 30.09.2026 22:13 UTC: Fill in TradingView 22:13:26,5, Fusion erst
+                # 22:13:41,6 — 15 s, weil der Tab auf das Ende dieses Laufs wartete: Show more, Orders, Positions, Endprüfung). Sobald
+                # der erste Beweis MIT Einstieg steht, geht er als zweite 'geklickt'-Meldung raus (gleiche Zeile plan+art, bestätigt +
+                # Einstieg); der PC-Tab öffnet daraus sofort den Fusion-Hedge. Im Thread — der Lauf wartet nicht auf Railway.
+                try:
+                    import threading
+                    frueh = dict(res, bestaetigt=True, menge=float(plan["menge"]), tv_symbol=b.get("symbol") or sym_k,
+                                 einstieg=str(b["einstieg"]), einstieg_quelle=b.get("einstieg_quelle"),
+                                 meldung_roh=[cdp_meldung_text(m) for m in neu][:14])
+                    if b.get("tp") is not None:
+                        frueh.update(tp_limit=b["tp"], tp_limit_quelle="tv_toast")
+                    if b.get("sl") is not None:
+                        frueh.update(sl_limit=b["sl"], sl_limit_quelle="tv_toast")
+                    trail.append(f"Fill-Beweis früh gemeldet: Einstieg {b['einstieg']} ({b.get('einstieg_quelle')})")
+                    threading.Thread(target=_puls_ergebnis_senden, args=("order", "geklickt", cmd, frueh, list(trail)), daemon=True).start()
+                except Exception as e_:
+                    trail.append(f"Fill-Beweis früh melden: {type(e_).__name__}")
             if b["bestaetigt"]:
                 erst_ok = erst_ok or time.time()
                 # TP/SL-Meldungen kommen oft kurz nach dem Fill — höchstens 4 s darauf warten; „Show more" erst gedrückt oder
