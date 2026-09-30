@@ -2284,6 +2284,14 @@
   #dashboard-view .mwd-erl-hilfe{font-size:11px;color:var(--sub-2);margin-top:4px;line-height:1.35}
   #dashboard-view .mwd-erl-summe{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:4px 12px;margin-top:14px;padding:9px 12px;border-radius:8px;background:var(--bg);font-size:12.5px}
   #dashboard-view .mwd-erl-buchung{font-size:11.5px;color:var(--sub)}
+  /* P/L-Felder der Erledigt-Popups (30.09.2026, Finn: „kann man kein Minus reinschreiben" — type=number verwarf „−"/„–"/„500-" still):
+     Textfeld + „±"-Knopf daneben, ungültige Eingabe kurz rot mit Hinweis */
+  #dashboard-view .pl-feld{display:flex;gap:6px;align-items:stretch}
+  #dashboard-view .pl-feld .input{flex:1;min-width:0}
+  #dashboard-view .pl-feld .pl-pm{flex:0 0 auto;min-width:40px;padding:0 11px;justify-content:center;font-family:var(--mono);font-size:15px;font-weight:600;line-height:1}
+  #dashboard-view .input.pl-falsch{border-color:#c03128;box-shadow:0 0 0 3px rgba(192,49,40,.12)}
+  #dashboard-view .pl-hinweis{font-size:11px;color:#c03128;margin-top:4px;line-height:1.35}
+  #dashboard-view .pl-hinweis:empty{display:none}
   #dashboard-view #mwdErledigtModal .modal-msg:empty{display:none}
   #dashboard-view .mwd-fehler{flex-basis:100%;color:#b91c1c;font-weight:600}
   #dashboard-view .mwd-aktionen{display:inline-flex;align-items:center;gap:6px;margin-left:8px}
@@ -6642,12 +6650,20 @@
           <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:14px;margin-top:14px">
             <div class="field">
               <label>P/L Master ($)</label>
-              <input type="number" class="input mono" id="tc-master-pl" step="10" placeholder="±0">
+              <div class="pl-feld">
+                <input type="text" inputmode="decimal" autocomplete="off" class="input mono" id="tc-master-pl" placeholder="±0">
+                <button type="button" class="btn btn-ghost pl-pm" id="tc-master-pm" title="Vorzeichen umdrehen (Plus ↔ Minus)" aria-label="Vorzeichen umdrehen">±</button>
+              </div>
+              <div class="pl-hinweis" id="tc-master-hinweis"></div>
               <div id="tc-lesung"></div>
             </div>
             <div class="field">
               <label>P/L Slave (<span id="tc-slave-cur">€</span>)</label>
-              <input type="number" class="input mono" id="tc-slave-pl" step="10" placeholder="±0">
+              <div class="pl-feld">
+                <input type="text" inputmode="decimal" autocomplete="off" class="input mono" id="tc-slave-pl" placeholder="±0">
+                <button type="button" class="btn btn-ghost pl-pm" id="tc-slave-pm" title="Vorzeichen umdrehen (Plus ↔ Minus)" aria-label="Vorzeichen umdrehen">±</button>
+              </div>
+              <div class="pl-hinweis" id="tc-slave-hinweis"></div>
             </div>
             <div class="field" style="grid-column:span 2">
               <div class="tc-net" id="tc-net-display">Net: —</div>
@@ -9947,12 +9963,20 @@
           <div class="mwd-erl-felder">
             <div class="field">
               <label>Master ($)</label>
-              <input type="number" class="input mono" id="mwd-erl-master" step="0.01" placeholder="z.B. 250">
+              <div class="pl-feld">
+                <input type="text" inputmode="decimal" autocomplete="off" class="input mono" id="mwd-erl-master" placeholder="z.B. 250">
+                <button type="button" class="btn btn-ghost pl-pm" id="mwd-erl-master-pm" title="Vorzeichen umdrehen (Plus ↔ Minus)" aria-label="Vorzeichen umdrehen">±</button>
+              </div>
+              <div class="pl-hinweis" id="mwd-erl-master-hinweis"></div>
               <div class="mwd-erl-hilfe">aus TradingView eintragen</div>
             </div>
             <div class="field">
               <label>Fusion (€)</label>
-              <input type="number" class="input mono" id="mwd-erl-fusion" step="0.01" placeholder="z.B. −101,47">
+              <div class="pl-feld">
+                <input type="text" inputmode="decimal" autocomplete="off" class="input mono" id="mwd-erl-fusion" placeholder="z.B. −101,47">
+                <button type="button" class="btn btn-ghost pl-pm" id="mwd-erl-fusion-pm" title="Vorzeichen umdrehen (Plus ↔ Minus)" aria-label="Vorzeichen umdrehen">±</button>
+              </div>
+              <div class="pl-hinweis" id="mwd-erl-fusion-hinweis"></div>
               <div class="mwd-erl-hilfe" id="mwd-erl-quelle"></div>
             </div>
           </div>
@@ -20541,6 +20565,57 @@
     const v = Number(s)
     return isFinite(v) ? (neg ? -v : v) : null
   }
+  /* P/L-EINGABE (30.09.2026, Finn per Screenshot von einem anderen PC: „im Erledigt-Popup kann man kein Minus reinschreiben").
+   * Die Felder waren type=number: der Browser verwirft dort ungültige Zeichen STILL — „−"/„–" (Gedankenstrich, z. B. aus TradingView
+   * kopiert), ein Minus am Ende („500-"), „/" bei falschem Tastatur-Layout; am Handy hat die Zahlentastatur gar kein Minus. Jetzt
+   * Textfelder (inputmode decimal) mit dieser Lesefunktion, einem „±"-Knopf je Feld und sichtbarem Hinweis statt stillem Verwerfen.
+   * plZahl: „-500" · „−500" · „–500" · „500-" → −500 · „+500" → 500 · „1.234,50" / „1,234.50" → 1234.5 · Trenner-Regel wie
+   * tvKursZahl (letzter Trenner = Dezimalzeichen, reine Dreiergruppen = Tausender). -> Zahl | null (leer) | NaN (keine Zahl) */
+  const PL_MINUS = /[−–—‐‑]/g
+  function plZahl(text){
+    const t = String(text == null ? '' : text).replace(PL_MINUS, '-').replace(/[\s  $€'’]/g, '')
+    if(!t) return null
+    const m = /^([+-]?)([\d.,]+)(-?)$/.exec(t)
+    if(!m || (m[1] && m[3])) return NaN
+    const z = /^0[.,]\d+$/.test(m[2]) ? Number(m[2].replace(',', '.')) : tvKursZahl(m[2])
+    if(z == null || !isFinite(z)) return NaN
+    return (m[1] === '-' || m[3] === '-') ? -z : z
+  }
+  window._plZahl = plZahl   // Test-Haken (Stub)
+  // Feldwert wie früher parseFloat: NaN = leer oder keine Zahl
+  function plFeldZahl(id){ const v = plZahl(document.getElementById(id)?.value); return v == null ? NaN : v }
+  // Vorbelegung: Zahl mit höchstens zwei Nachkommastellen (nie „1.234" mit drei — das läse plZahl als Tausender)
+  function plFeldText(v){ if(v == null || v === '') return ''; const n = Number(v); return isFinite(n) ? String(Math.round(n * 100) / 100) : '' }
+  // beim Öffnen eines Popups: Rot und Hinweis vom letzten Mal weg
+  function plFeldRuhe(inputId, hinweisId){ document.getElementById(inputId)?.classList.remove('pl-falsch'); const h = document.getElementById(hinweisId); if(h) h.textContent = '' }
+  // EIN Feld verdrahten (je Feld ein eigener Aufruf — kein Sammel-Handler über Modals): ungültige Zeichen raus + Hinweis,
+  // Gedankenstriche zu „-", „500-" beim Verlassen zu „-500", „±" dreht das Vorzeichen (auch im leeren Feld: setzt „-")
+  function plFeldVerdrahten(inputId, knopfId, hinweisId){
+    const el = document.getElementById(inputId), kn = document.getElementById(knopfId), hi = document.getElementById(hinweisId)
+    if(!el) return
+    let t = null
+    const zeig = text => { el.classList.add('pl-falsch'); if(hi) hi.textContent = text; clearTimeout(t); t = setTimeout(() => { el.classList.remove('pl-falsch'); if(hi) hi.textContent = '' }, 3200) }
+    el.addEventListener('input', () => {
+      const roh = el.value, sauber = roh.replace(PL_MINUS, '-').replace(/[^\d.,+\-\s]/g, '')
+      if(sauber === roh) return
+      const falsch = roh.replace(PL_MINUS, '-') !== sauber
+      el.value = sauber
+      if(falsch) zeig('nur Zahl — Minus mit „±"')
+      el.dispatchEvent(new Event('input', { bubbles: true }))   // Netto-Anzeige rechnet mit dem bereinigten Wert
+    })
+    el.addEventListener('change', () => {
+      const v = plZahl(el.value)
+      if(v != null && isNaN(v)) return zeig('keine Zahl — z. B. -500 oder 1.234,50')
+      const w = el.value.trim()
+      if(v != null && /-$/.test(w)) el.value = '-' + w.replace(/-$/, '')
+    })
+    if(kn) kn.addEventListener('click', () => {
+      const w = el.value.trim().replace(PL_MINUS, '-'), neg = /^-/.test(w) || /-$/.test(w), kern = w.replace(/^[+-]/, '').replace(/-$/, '')
+      el.value = neg ? kern : '-' + kern
+      el.dispatchEvent(new Event('input', { bubbles: true }))
+      try{ el.focus() }catch(_){}
+    })
+  }
   // $-je-Punkt je Kontrakt aus der Symbolwurzel (Puls tippt den TP in $ — der Preisabstand ist TP / (ppl × Kt))
   function hedgePplFuer(symbol){ const w = (typeof tvSymbolWurzel === 'function') ? tvSymbolWurzel(symbol) : ''; return w === 'NQ' ? 20 : w === 'MNQ' ? 2 : 0 }
   // Jüngster Kurs über alle PCs (tv_kurse), 3 s gecacht. → {preis, symbol, wurzel, pc, alter_ms} | null
@@ -24281,12 +24356,13 @@
     _mwdErlOhneHedge = pw.route === 'mt5v2' || pw.route === 'tsv2' || pw.plattform === 'echo' || (pw.route === 'tvv2' && !mitHedge)
     const plVor = (pw.pl_balance != null && isFinite(Number(pw.pl_balance))) ? Number(pw.pl_balance)
       : (pw.master_pl && pw.master_pl.wert != null && isFinite(Number(pw.master_pl.wert))) ? Number(pw.master_pl.wert) : null
-    const m = document.getElementById('mwd-erl-master'); if(m) m.value = plVor != null ? String(plVor) : ''
+    const m = document.getElementById('mwd-erl-master'); if(m) m.value = plFeldText(plVor)
     const mHilfe = m && m.closest('.field') && m.closest('.field').querySelector('.mwd-erl-hilfe')
     if(mHilfe) mHilfe.textContent = pw.route === 'mt5v2' ? (pw.pl_balance != null ? 'MT5-Balance nachher − vorher' : 'aus MetaTrader eintragen')
       : pw.route === 'tsv2' ? (pw.pl_balance != null ? 'Balance nachher − vorher' : 'aus TopstepX eintragen')
       : pw.pl_balance != null ? 'Balance nachher − vorher' : 'aus TradingView eintragen'
-    const f = document.getElementById('mwd-erl-fusion'); if(f) f.value = (!_mwdErlOhneHedge && hPl != null) ? String(hPl) : ''
+    const f = document.getElementById('mwd-erl-fusion'); if(f) f.value = (!_mwdErlOhneHedge && hPl != null) ? plFeldText(hPl) : ''
+    plFeldRuhe('mwd-erl-master', 'mwd-erl-master-hinweis'); plFeldRuhe('mwd-erl-fusion', 'mwd-erl-fusion-hinweis')
     const fFeld = f && f.closest('.field'); if(fFeld) fFeld.hidden = _mwdErlOhneHedge
     const q = document.getElementById('mwd-erl-quelle'); if(q) q.textContent = hPl != null ? 'aus MetaTrader' : 'im Hedge-Terminal nachsehen'
     _mwdErlKonto = (pw.hedge && pw.hedge.hedge_login) ? `das Fusion-Konto ${pw.hedge.hedge_login}` : 'das Fusion-Konto des PCs'
@@ -24299,7 +24375,7 @@
   function mklWdErlSumme(){
     const el = document.getElementById('mwd-erl-summe'); if(!el) return
     if(_mwdErlOhneHedge){ el.innerHTML = '<span class="mwd-erl-buchung">P&amp;L in $ — ohne Fusion-Buchung</span>'; return }   // Echo/Topstep/Orbit ohne Hedge
-    const zahl = id => { const v = String(document.getElementById(id)?.value || '').trim().replace(',', '.').replace('−', '-'); return v === '' ? null : Number(v) }
+    const zahl = id => plZahl(document.getElementById(id)?.value)   // null = leer, NaN = keine Zahl (30.09.2026: „−", „500-", „1.234,50")
     const mpl = zahl('mwd-erl-master'), spl = zahl('mwd-erl-fusion')
     const fx = (Number(window._fxUsdEur) > 0) ? Number(window._fxUsdEur) : 0.85
     const fmtE = v => `${v < 0 ? '−' : '+'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
@@ -24309,12 +24385,15 @@
   }
   document.getElementById('mwd-erl-master')?.addEventListener('input', mklWdErlSumme)
   document.getElementById('mwd-erl-fusion')?.addEventListener('input', mklWdErlSumme)
+  // P/L-Felder tolerant + „±" (30.09.2026) — je Feld eigene Verdrahtung, kein Sammel-Handler
+  plFeldVerdrahten('mwd-erl-master', 'mwd-erl-master-pm', 'mwd-erl-master-hinweis')
+  plFeldVerdrahten('mwd-erl-fusion', 'mwd-erl-fusion-pm', 'mwd-erl-fusion-hinweis')
   function mklWdErledigtZu(){ document.getElementById('mwdErledigtModal')?.classList.remove('open'); _mwdErlId = null }
   async function mklWdErledigtSpeichern(){
     const pid = _mwdErlId; if(!pid) return
     const msg = document.getElementById('mwdErledigtMsg'), btn = document.getElementById('mwdErledigtSave')
     const say = (t, k) => { if(msg){ msg.textContent = t; msg.className = 'modal-msg' + (k ? ' ' + k : '') } }
-    const zahl = id => { const v = String(document.getElementById(id)?.value || '').trim().replace(',', '.').replace('−', '-'); return v === '' ? null : Number(v) }
+    const zahl = id => plZahl(document.getElementById(id)?.value)
     const mpl = zahl('mwd-erl-master'), spl = _mwdErlOhneHedge ? null : zahl('mwd-erl-fusion')   // ohne Hedge: nie slave_pl
     if(mpl == null || !isFinite(mpl)) return say('Master-P&L eintragen ($).', 'err')
     if(spl != null && !isFinite(spl)) return say('Fusion-P&L ist keine Zahl.', 'err')
@@ -36510,7 +36589,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.892'
+  const OS_TAB_BUILD = '2026-09-22.893'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -44507,7 +44586,8 @@
     if(tcSlaveField) tcSlaveField.style.display = (tcV2 && !tcGehedgt) ? 'none' : ''
     if(tcMasterField) tcMasterField.style.gridColumn = (tcV2 && !tcGehedgt) ? 'span 2' : ''
     document.getElementById('tc-slave-cur').textContent = tcGehedgt ? '€' : slavePreset.currency
-    document.getElementById('tc-master-pl').value = p.masterPl ?? ''
+    document.getElementById('tc-master-pl').value = plFeldText(p.masterPl)
+    plFeldRuhe('tc-master-pl', 'tc-master-hinweis'); plFeldRuhe('tc-slave-pl', 'tc-slave-hinweis')
     tcLesungZeichnen(p.id)   // Endlesung-Stand unter dem Master-Feld (25.09.2026)
     // Herkunft des Master-Werts merken (24.09.2026, pl_quelle): in „Überprüfen" steht nur der Auto-Wert
     // (atMoveToReview), bei „Bearbeiten" die gespeicherte Quelle; der Auto-Nachlader (apply) überschreibt.
@@ -44518,8 +44598,8 @@
             : (p.masterPl != null && p.status === 'completed') ? { wert: Number(p.masterPl), quelle: p.plQuelle || null }
             : null
     document.getElementById('tc-slave-pl').value  = tcGehedgt
-      ? (() => { const h = p.mt5Baseline && p.mt5Baseline.hedge; return (h && h.status === 'geschlossen' && h.pl != null) ? Number(h.pl).toFixed(2) : (p.slavePl ?? '') })()
-      : ((preFillSlavePl != null && p.slavePl == null) ? preFillSlavePl.toFixed(2) : (p.slavePl ?? ''))
+      ? (() => { const h = p.mt5Baseline && p.mt5Baseline.hedge; return (h && h.status === 'geschlossen' && h.pl != null) ? Number(h.pl).toFixed(2) : plFeldText(p.slavePl) })()
+      : ((preFillSlavePl != null && p.slavePl == null) ? preFillSlavePl.toFixed(2) : plFeldText(p.slavePl))
     document.getElementById('tc-result-notes').value = p.resultNotes || ''
     // Trade-Datum (24.09.2026 abends): aus „Geplant" = jetzt (änderbar zum Nachtragen), „Bearbeiten" = gespeichertes Datum
     const tcDatumWrap = document.getElementById('tc-datum-wrap'), tcDatum = document.getElementById('tc-datum')
@@ -44937,8 +45017,8 @@
     if(!_completingPlanId) return
     const p = tradePlans.find(x => String(x.id) === String(_completingPlanId))
     if(!p) return
-    const mPl = parseFloat(document.getElementById('tc-master-pl').value)
-    const sPl = parseFloat(document.getElementById('tc-slave-pl').value)
+    const mPl = plFeldZahl('tc-master-pl')   // wie früher parseFloat: NaN = leer oder keine Zahl (30.09.2026, plZahl)
+    const sPl = plFeldZahl('tc-slave-pl')
     const masterAcc = accounts.find(a => String(a.id) === String(p.masterAccountId))
     const slaveAcc  = accounts.find(a => String(a.id) === String(p.slaveAccountId))
 
@@ -45145,6 +45225,9 @@
   ;['tc-master-pl','tc-slave-pl'].forEach(id => {
     document.getElementById(id)?.addEventListener('input', tcRecompute)
   })
+  // P/L-Felder tolerant + „±" (30.09.2026) — je Feld eigene Verdrahtung, kein Sammel-Handler
+  plFeldVerdrahten('tc-master-pl', 'tc-master-pm', 'tc-master-hinweis')
+  plFeldVerdrahten('tc-slave-pl', 'tc-slave-pm', 'tc-slave-hinweis')
 
   document.getElementById('tradeCompleteCancel')?.addEventListener('click', closeTradeCompleteModal)
   document.getElementById('tradeCompleteCancel2')?.addEventListener('click', closeTradeCompleteModal)
@@ -45203,7 +45286,7 @@
     const p = tradePlans.find(x => String(x.id) === String(_completingPlanId))
     if(!p) return
 
-    const mPl = parseFloat(document.getElementById('tc-master-pl').value)
+    const mPl = plFeldZahl('tc-master-pl')
     // V2 (24.09.2026): kein Slave — slave_pl fest 0, das Feld ist ausgeblendet; nur der Master ist Pflicht
     const tcV2Save = routeIstV2(p.route)
     // Winning Days Farm (24.09.2026 spät, Daten-Integrität): slave_pl trägt den vom Hedge geschriebenen Fusion-P&L (Deal-
@@ -45212,7 +45295,7 @@
     // Mit Fusion-Gegenhedge ist das Slave-Feld sichtbar (vorbelegt aus hedge.pl, Finn kann es korrigieren): leer = Hedge noch
     // offen / P&L folgt → slave_pl fliegt aus dem Update; sonst gilt der Feldwert. Nie auf 0 zwingen.
     const tcGehedgtSave = tcV2Save && p.hedgeEur > 0
-    const sPlFeld = parseFloat(document.getElementById('tc-slave-pl').value)
+    const sPlFeld = plFeldZahl('tc-slave-pl')
     const tcSlaveLassen = tcGehedgtSave && isNaN(sPlFeld)
     const sPl = tcV2Save ? (tcGehedgtSave && !isNaN(sPlFeld) ? sPlFeld : 0) : sPlFeld
     // Neue Status-Auswahl (3 Radios) + welcher Account
