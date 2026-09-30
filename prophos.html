@@ -12673,6 +12673,15 @@
     const afZeit = at => { const d = new Date(at); if(!at || isNaN(d)) return ''
       return afIstHeute(at) ? d.toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' }) : d.toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit' }) }
     const afRichtung = x => x === 'buy' ? 'Long' : x === 'sell' ? 'Short' : (x || '')
+    // Kurzes Symbol für die Statusspalte (30.09.2026, „Short NDX100 · seit 04:48" wurde in den 150 px abgeschnitten): Wurzel statt
+    // vollem Namen — Futures-Kontrakt MNQZ2026 → MNQ, CFD NDX100/NAS100 → NDX/NAS; zwei Buchstaben (US30, US100) bleiben ganz.
+    // Der volle Text steht im title der Statuszelle.
+    const afSymKurz = sym => {
+      const t = String(sym || '').toUpperCase().split(/[.\s_-]/)[0]
+      const fut = t.match(/^([A-Z]{1,3})[FGHJKMNQUVXZ](\d{1,2}|20\d{2})$/); if(fut) return fut[1]
+      const cfd = t.match(/^([A-Z]{3,})\d+$/); if(cfd) return cfd[1]
+      return t
+    }
     const afFirmaVon = r => r.firm || '—'
     // „geplant 14:30" (heute) bzw. „geplant 02.10. 14:30" (späterer Tag); ein nie gestarteter Plan eines VERGANGENEN
     // Tags (Farmer-Rest) zeigt nichts — der Server kennt die Ortszeit nicht, deshalb entscheidet das hier
@@ -12890,7 +12899,11 @@
         const tr = r.im_trade
         punkt('is-lauf')
         const seit = afZeit(tr.seit)
-        text([tr.rolle === 'slave' ? 'Hedge' : '', [afRichtung(tr.richtung), tr.symbol].filter(Boolean).join(' '), seit ? 'seit ' + seit : ''].filter(Boolean).join(' · ') || 'im Trade')
+        // kurz „Short NDX · 04:48", voll im title „Short NDX100 · seit 04:48"
+        const kurz = [tr.rolle === 'slave' ? 'Hedge' : '', [afRichtung(tr.richtung), afSymKurz(tr.symbol)].filter(Boolean).join(' '), seit].filter(Boolean).join(' · ') || 'im Trade'
+        const voll = [tr.rolle === 'slave' ? 'Hedge' : '', [afRichtung(tr.richtung), tr.symbol].filter(Boolean).join(' '), seit ? 'seit ' + seit : ''].filter(Boolean).join(' · ') || 'im Trade'
+        st.title = voll
+        text(kurz)
       }else if(z === 'fertig'){
         // „TP 12:40 · +272 $" — Betrag klein grün/rot, Rest gedämpft
         // erledigt = ruhig grau, KEIN Punkt (30.09.2026, Finn: „läuft" und „erledigt" sahen gleich aus) — nur der Betrag grün/rot
@@ -36173,7 +36186,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.861'
+  const OS_TAB_BUILD = '2026-09-22.862'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
