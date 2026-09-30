@@ -14176,6 +14176,10 @@ TSX_K0_ZUSTAENDE = ("grund", "konto", "bracket")
 TSX_INVENTAR_MAX = 58_000          # Railway deckelt je puls_augen-Zeile bei 60 KB — der Bot kürzt selbst darunter
 TSX_LOGIN_SPERRE_S = 30 * 60.0     # nach einem Login-Klick 30 min kein zweiter (auch nicht im nächsten Lauf)
 TSX_K0_WACHHUND_S = 120.0          # Panel beendet den Bot nach 150 s — vorher ehrlich raus, Sperre lösen, Fenster minimieren
+TSX_K1_WACHHUND_S = 140.0          # K1+K2 (01.10.2026): die ganze Kette in EINEM Lauf (kalt, ohne Tab, ausgeloggt, falsches Konto) —
+                                   # Panel beendet nach 150 s, 10 s Luft für die ehrliche Antwort
+TSX_K2_AKTIV = True                # K2 (01.10.2026): steht in TopstepX ein anderes Konto, wechselt K1 es im Dropdown (Windows-Maus,
+                                   # nur Konto — KEINE Order). False = K1 endet wie vor K2 mit code 'konto'.
 TSX_K1_AKTIV = True                # K1-Lesen über CDP an (Finn 30.09.2026; Anker belegt, augen_tsx.js tsx-0.3.1) — wirkt nur auf PCs in puls_topstep_pcs
 
 
@@ -14285,9 +14289,11 @@ def _tsx_tab_sicher(trail, warten_s=20.0):
     if t:
         if len(t) > 1:
             trail.append(f"Puls-Chrome: {len(t)} TopstepX-Tabs ({[str(x.get('url'))[:40] for x in t][:4]}) — nehme den ersten (angemeldet vor Login-Seite)")
-        return t[0]
+        # ein Tab ohne webSocketDebuggerUrl (anderer DevTools-Client hängt dran) wäre ein cdp_fehler — einen verbindbaren vorziehen
+        return ([x for x in t if x.get("webSocketDebuggerUrl")] or t)[0]
     neu = _cdp_http("/json/new?" + TSX_URL, methode="PUT")
-    trail.append("Puls-Chrome: TopstepX-Tab geöffnet (topstepx.com/trade)")
+    trail.append("Puls-Chrome: TopstepX-Tab geöffnet (topstepx.com/trade)" if isinstance(neu, dict) and neu.get("id")
+                 else "Puls-Chrome: TopstepX-Tab öffnen ohne Antwort (/json/new) — warte trotzdem auf die Tab-Liste")
     if isinstance(neu, dict) and neu.get("id"):
         # vom Bot geöffnete Tabs merken — nur SOLCHE darf er später als toten Login-Tab schließen (nie einen Tab des Menschen)
         eigene = [x for x in ((_augen_json_lesen("tsx_tabs.json") or {}).get("ids") or []) if isinstance(x, str)][-9:]
@@ -14660,6 +14666,13 @@ def _tsx_cdp_login(s, trail):
     lg = blick()
     if not lg.get("seite"):
         return True
+    # 01.10.2026 (Kette in einem Lauf): nach dem Kaltstart liegt das Puls-Chrome minimiert — Chrome füllt ein Formular im minimierten
+    # Fenster womöglich nicht aus. Vor dem Warten auf die Autofill-Markierung das Fenster nach vorn (nur Fenster, kein Klick).
+    if _WIN_EINGABE:
+        try:
+            s._win_vorn()
+        except Exception as e_:
+            trail.append(f"Login: Fenster nicht nach vorn ({type(e_).__name__})")
     # Live 30.09.2026 11:11/11:15 UTC (erster Topstep-PC): „Benutzer LEER, Passwort LEER" — beim ersten Mal 2,6 s nach dem Öffnen des Tabs
     # (Chrome füllt ein spät gezeichnetes Formular erst etwas später aus), beim zweiten Mal stand der Tab noch auf der ALTEN Login-Seite,
     # obwohl der Nutzer sich inzwischen in einem anderen Tab desselben Puls-Chrome angemeldet hatte (TopstepX lädt sich nicht selbst neu).
@@ -14845,14 +14858,17 @@ def tsx_frisch_urteil(f):
     return ok, f"Seite {'frisch' if ok else 'NICHT frisch'} (sichtbar {f.get('sichtbar') or '?'}, Frames {'ja' if f.get('raf') else 'nein'}, {f.get('ms', '?')} ms)"
 
 
-TSX_K1_BEREIT_S = 8.0               # so lange wartet K1 auf Konto-Auslöser + BAL (Seite baut sich nach dem Laden noch auf)
+TSX_K1_BEREIT_S = 20.0              # so lange wartet K1 auf Konto-Auslöser + BAL (Seite baut sich nach dem Laden noch auf) — 01.10.2026
+                                    # von 8 auf 20 s: K0 sah 7,1 s nach dem Login noch eine leere Seite; die Kette „kalt → Login → K2" in
+                                    # einem Lauf braucht das Fenster nach Kaltstart, Login und Kontowechsel. Ist die Seite bereit, geht es sofort weiter.
 
 
-def _tsx_bereit_warten(s, trail, opts=None):
+def _tsx_bereit_warten(s, trail, opts=None, sek=None):
     """Bereit-Probe für K0 und K1 — nur lesen, kein Klick: bis TSX_K1_BEREIT_S auf Konto-Auslöser + BAL warten (K0 30.09.2026: 0,8 s
     nach dem Start stand noch „Loading the Ultimate Trading Experience", 7,1 s nach dem Login war die Seite noch leer — 2 Elemente,
     Konto-Auslöser 0 Kandidaten). -> (stand, bereit)"""
-    t_ende = time.time() + TSX_K1_BEREIT_S
+    grenze = TSX_K1_BEREIT_S if sek is None else float(sek)
+    t_ende = time.time() + grenze
     runden = 0
     while True:
         runden += 1
@@ -14862,7 +14878,7 @@ def _tsx_bereit_warten(s, trail, opts=None):
         _warte(0.5, 0.4)
     bereit = tsx_k1_bereit(st)
     if runden > 1:
-        trail.append(f"Bereit-Probe: {runden} Lesungen" + ("" if bereit else f" — nach {int(TSX_K1_BEREIT_S)} s NICHT bereit"))
+        trail.append(f"Bereit-Probe: {runden} Lesungen" + ("" if bereit else f" — nach {int(grenze)} s NICHT bereit"))
     return st, bereit
 
 
@@ -14881,10 +14897,64 @@ def _tsx_wert(x):
     return float(x) if isinstance(x, (int, float)) and not isinstance(x, bool) else tsx_geld(x)
 
 
+def tsx_konto_urteil(ko, ext):
+    """REIN RECHNEND (testbar): steht in TopstepX das Konto ext? konto aus augen_tsx.js → 'ja' | 'vielleicht' | 'nein' | 'fehlt'.
+    Aus tsx_cdp_lesung herausgezogen (K2 01.10.2026), damit Lesen und Kontowechsel dieselbe Regel nutzen. 'ja' nur mit VOLLER
+    Kennung (kontonr == External ID und nicht abgekürzt; augen_tsx.js liest sie aus dem DOM des Auslösers)."""
+    ko = ko if isinstance(ko, dict) else {}
+    aktiv = str(ko.get("kontonr") or ko.get("aktiv") or "")
+    if not aktiv.strip():
+        return "fehlt"
+    nr = _nur_alnum(ko.get("kontonr"))
+    if not nr:
+        return tsx_konto_steht(ko.get("aktiv"), ext)           # nur der Auslöser-Text ('$150K … | KENNUNG')
+    if nr == _nur_alnum(ext) and ko.get("abgekuerzt") is not True:
+        return "ja"
+    # abgekürzt beweist nichts — auch nicht, wenn der sichtbare Teil zufällig genau die External ID ist (K1-Prüfer: …-1 vs …-1…)
+    return "vielleicht" if ko.get("abgekuerzt") and _nur_alnum(ext).startswith(nr) else "nein"
+
+
+def tsx_k2_eintrag(liste, ext):
+    """REIN RECHNEND (testbar, K2 01.10.2026): Zeile der OFFENEN TopstepX-Konto-Liste (augen_tsx.js konto.liste: {text, label, id,
+    ineligible, aus, rect, zu}) → (eintrag | None, anzahl, grund). Genau EINE Zeile, deren volle Kennung die External ID ist; „(Ineligible)"
+    ist zum LESEN erlaubt (Entscheidung 01.10.2026 — der Hinweis geht in die Antwort; handeln geht auf so einem Konto ohnehin nicht);
+    gesperrte (aus/disabled) oder verdeckte Zeilen und Zeilen ohne Rechteck nie."""
+    ziel = _nur_alnum(ext)
+    if len(ziel) < 5:
+        return None, 0, "External ID fehlt"
+    treffer = [x for x in (liste or []) if isinstance(x, dict) and _nur_alnum(x.get("id")) == ziel]
+    if not treffer:
+        return None, 0, "Konto nicht in der Liste"
+    if len(treffer) > 1:
+        return None, len(treffer), f"Konto {len(treffer)}× in der Liste — nicht eindeutig"
+    x = treffer[0]
+    zu = x.get("zu") if isinstance(x.get("zu"), dict) else {}
+    if x.get("aus") or zu.get("disabled"):
+        return None, 1, "Zeile gesperrt"
+    if zu.get("verdeckt"):
+        return None, 1, f"Zeile verdeckt ({str((zu.get('oben') or {}).get('text') if isinstance(zu.get('oben'), dict) else zu.get('oben') or '')[:30]})"
+    r = cdp_rect(x.get("rect"))
+    if not (isinstance(r, (list, tuple)) and len(r) >= 4 and r[2] >= 2 and r[3] >= 2):
+        return None, 1, "Zeile ohne Rechteck"
+    return x, 1, ""
+
+
+def tsx_kopf_gleich(a, b):
+    """REIN RECHNEND (testbar, K2-Beweis 3): zwei Lesungen mit derselben Kopfzeile (BAL/MLL/RP&L/UP&L) und lesbarer BAL — TopstepX lädt
+    die Werte nach dem Kontowechsel nach; erst zwei gleiche Lesungen hintereinander zählen als frisch."""
+    ka = (a or {}).get("kopf") if isinstance(a, dict) else None
+    kb = (b or {}).get("kopf") if isinstance(b, dict) else None
+    if not (isinstance(ka, dict) and isinstance(kb, dict)):
+        return False
+    wa = [_tsx_wert(ka.get(k)) for k in ("balance", "mll", "rpl", "upl")]
+    wb = [_tsx_wert(kb.get(k)) for k in ("balance", "mll", "rpl", "upl")]
+    return wa[0] is not None and wa == wb
+
+
 def tsx_cdp_lesung(stand, ext):
     """REIN RECHNEND (testbar): stand_tsx (augen_tsx.js) → Antwortfelder im tv-lesen-Vertrag. -> (felder, code, msg)
-    code '' = gelesen; 'anker_fehlt' (augen_tsx.js liefert Konto/Kopf/Positionen noch nicht); 'konto' (ein anderes Konto steht — Wechsel
-    kommt mit K2); 'balance' (BAL unlesbar); 'tabelle_unklar' (Positions-Bereich nicht sichtbar ODER „flach" nicht bewiesen).
+    code '' = gelesen; 'anker_fehlt' (augen_tsx.js liefert Konto/Kopf/Positionen noch nicht); 'konto' (ein anderes Konto steht — der
+    Wechsel davor ist K2, _tsx_konto_sichern); 'balance' (BAL unlesbar); 'tabelle_unklar' (Positions-Bereich nicht sichtbar ODER „flach" nicht bewiesen).
     Vertrag augen_tsx.js tsx-0.3.1 (Terminal 2, 30.09.2026): kopf.balance_relativ ist true|false|null und KEIN {text, wert} — wird als
     balance_relativ DURCHGEREICHT, hier nie umgerechnet (Express zeigt BAL relativ: „$0.00" bei MLL „$-4,500.00"; was das Frontend daraus
     macht, entscheidet das Frontend). flach ist nur true bei „No Active Position" UND gesperrtem „Close Position"; eine OFFENE Position
@@ -14900,17 +14970,10 @@ def tsx_cdp_lesung(stand, ext):
     if not aktiv.strip():
         # Konto-Auslöser gar nicht gelesen: Seite noch im Lade-Schirm oder TopstepX hat den Anker umbenannt — das ist KEIN „anderes Konto"
         return {}, "anker_fehlt", "Konto-Auslöser in TopstepX nicht gefunden (Seite lädt noch oder Anker geändert). Nichts gelesen."
-    nr = _nur_alnum(ko.get("kontonr"))
-    if not nr:
-        steht = tsx_konto_steht(ko.get("aktiv"), ext)          # nur der Auslöser-Text ('$150K … | KENNUNG')
-    elif nr == _nur_alnum(ext) and ko.get("abgekuerzt") is not True:
-        steht = "ja"
-    else:
-        # abgekürzt beweist nichts — auch nicht, wenn der sichtbare Teil zufällig genau die External ID ist (K1-Prüfer: …-1 vs …-1…)
-        steht = "vielleicht" if ko.get("abgekuerzt") and _nur_alnum(ext).startswith(nr) else "nein"
+    steht = tsx_konto_urteil(ko, ext)
     if steht != "ja":
-        return {"konto_aktiv": aktiv[:80]}, "konto", (f"Im Puls-Chrome steht nicht {ext} ('{aktiv[:40] or '-'}', {steht}) — Konto wechseln kommt "
-                                                      "mit Etappe K2. Nichts gelesen.")
+        return {"konto_aktiv": aktiv[:80]}, "konto", (f"Im Puls-Chrome steht nicht {ext} ('{aktiv[:40] or '-'}', {steht}) — Konto nicht "
+                                                      "gewechselt (K2). Nichts gelesen.")
     w = {k: _tsx_wert(kopf.get(k)) for k in ("balance", "mll", "rpl", "upl")}
     rel = kopf.get("balance_relativ")
     # konto_aktiv = External ID wie im UIA-Weg (das Konto ist hier bewiesen; das Frontend prüft includes(ext)), die angezeigte
@@ -14959,9 +15022,132 @@ class _EineAntwort:
             self._fertig.set()
 
 
+def _tsx_konto_sichern(s, ext, st, trail):
+    """K2 (01.10.2026, „das mit dem Dropdown"): steht in TopstepX nicht das Konto ext, per Windows-Maus wechseln — NUR Konto, keine
+    Order, kein Order-Ticket. -> (ok, code, msg, stand, extra); extra.konto_gewechselt = {von, zu} nach einem Wechsel.
+    Muster wie _cdp_konto_sichern (Orbit): Auslöser höchstens EINMAL (ein zweiter Klick schlösse die Liste wieder), eine Liste zählt nur,
+    wenn DIESER Lauf sie geöffnet hat (fremd offen → EINMAL Esc, neu lesen, nie daraus wählen — Regression .865), genau EINE Zeile
+    (tsx_k2_eintrag), jeder Druck mit Ziel-Beweis (win_ziel_pruef_js: Hover + das klickbare Element dort ist die Zeile mit der vollen
+    Kennung, kein Order-/Close-Wort), jeder Fehlschlag schließt die Liste mit Esc (nie bei fremdem Dialog), nach jedem Schritt neu lesen,
+    alle Pausen über _warte (Jitter). Beweis nach dem Wechsel: (1) Liste zu (aria-expanded), (2) Auslöser trägt die volle Ziel-Kennung
+    (tsx_konto_urteil 'ja'), (3) die Kopfzeile macht der Aufrufer frisch (Bereit-Probe + zwei gleiche Lesungen, tsx_kopf_gleich)."""
+    st = st if isinstance(st, dict) else {}
+    geklickt = False
+    fremd_esc = False
+    gewaehlt = None
+    ko0 = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+    von = str(ko0.get("kontonr") or ko0.get("aktiv") or "")[:80]
+
+    def _zeilen(ko_):
+        return [str(x.get("text"))[:60] for x in (ko_.get("liste") or []) if isinstance(x, dict)][:12]
+
+    def _raus(code, msg, st_, **ex):
+        return False, code, msg, st_, ex
+    for _runde in range(6):
+        ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+        aktiv = str(ko.get("kontonr") or ko.get("aktiv") or "")
+        if tsx_konto_urteil(ko, ext) == "ja":
+            if ko.get("liste_offen"):
+                _cdp_esc(s, st, trail, "Konto-Liste nach dem Wechsel noch offen")
+                _warte(0.6, 0.3)
+                st = s.stand()
+                if (st.get("konto") or {}).get("liste_offen"):
+                    return _raus("konto_nicht_erreicht", f"Konto {ext} steht, aber die Konto-Liste geht mit Esc nicht zu — nichts gelesen.",
+                                 st, konto_zeilen=_zeilen(ko))
+            ex = {"konto_aktiv": aktiv[:80]}
+            if gewaehlt is not None:
+                ex["konto_gewechselt"] = {"von": von, "zu": str(gewaehlt.get("id") or ext)[:80]}
+                if gewaehlt.get("ineligible"):
+                    ex["konto_hinweis"] = "Ineligible"
+                trail.append(f"K2: Konto gewechselt '{von[:40]}' → '{aktiv[:40]}' (Liste zu, volle Kennung bewiesen)")
+            return True, "", "", st, ex
+        if ko.get("liste_offen") and not geklickt:
+            zl = _zeilen(ko)
+            if fremd_esc:
+                return _raus("konto_nicht_erreicht", (f"Konto-Liste steht ohne eigenen Klick offen und bleibt es nach Esc (aktiv "
+                                                      f"'{aktiv[:40] or '-'}', Zeilen {zl[:4]}) — nichts gewählt."), st, konto_zeilen=zl)
+            fremd_esc = True
+            _cdp_esc(s, st, trail, f"Konto-Liste stand schon offen, nicht von diesem Lauf ({len(zl)} Zeilen), neu lesen")
+            _warte(0.6, 0.3)
+            st = s.stand()
+            continue
+        if ko.get("liste_offen"):
+            if gewaehlt is not None:
+                # Zeile gedrückt, Liste noch offen und Konto nicht gewechselt: nicht noch einmal drücken — zu und ehrlich raus
+                _cdp_esc(s, st, trail, "Konto-Liste nach dem Zeilen-Klick noch offen")
+                return _raus("konto_nicht_erreicht", f"Konto-Zeile {ext} gedrückt, Liste blieb offen, Konto nicht gewechselt — Esc, nichts gelesen.",
+                             st, konto_zeilen=_zeilen(ko))
+            x, n, grund = tsx_k2_eintrag(ko.get("liste"), ext)
+            if not x:
+                _cdp_esc(s, st, trail, "Konto-Liste schließen")
+                return _raus("konto_nicht_erreicht", f"Konto {ext} in der TopstepX-Liste: {grund} ({n}×) — nichts gewählt, Esc.", st,
+                             konto_zeilen=_zeilen(ko), konto_treffer=n)
+            r = list(cdp_rect(x.get("rect")))[:4]
+            pruef = {"rect": r, "text": str(x.get("id") or ext)[:60], "aria": "", "tabu": TSX_K0_TABU.pattern}
+            if not s.klick(r, f"Konto {ext}", pruef=pruef):
+                _cdp_esc(s, st, trail, "Konto-Zeile nicht gedrückt")
+                return _raus("konto_nicht_erreicht", f"Konto-Zeile {ext} nicht gedrückt (Klick ohne Beweis) — Liste mit Esc zu, nichts gewechselt.",
+                             st, konto_zeilen=_zeilen(ko))
+            gewaehlt = x
+            # TopstepX schaltet das Konto nach dem Klick um (Liste zu, Auslöser neu) — bis ~4 s lesen, bis es steht oder die Liste offen bleibt
+            for _ in range(4):
+                _warte(1.0, 0.5)
+                st = s.stand()
+                k2 = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+                if tsx_konto_urteil(k2, ext) == "ja" or k2.get("liste_offen"):
+                    break
+            continue
+        if gewaehlt is not None:
+            return _raus("konto_nicht_erreicht", (f"Konto-Zeile {ext} gedrückt, Liste zu, aber im Auslöser steht '{aktiv[:40] or '-'}' — "
+                                                  "nicht gewechselt, nichts gelesen."), st)
+        if geklickt:
+            return _raus("konto_nicht_erreicht", (f"Konto-Auslöser geklickt, Liste nicht erkannt (aktiv '{aktiv[:40] or '-'}') — nichts gewählt."),
+                         st, popups=st.get("popups"))
+        r = cdp_rect(ko.get("rect"))
+        if not (isinstance(r, (list, tuple)) and len(r) >= 4 and r[2] >= 2 and r[3] >= 2):
+            return _raus("konto_nicht_erreicht", "Konto-Auslöser ohne Rechteck (augen_tsx.js) — nichts geklickt.", st)
+        zu = ko.get("zu") if isinstance(ko.get("zu"), dict) else {}
+        if zu.get("disabled") or zu.get("verdeckt"):
+            oben = zu.get("oben") if isinstance(zu.get("oben"), dict) else {}
+            return _raus("konto_nicht_erreicht", (f"Konto-Auslöser {'gesperrt' if zu.get('disabled') else 'verdeckt'} "
+                                                  f"('{str(oben.get('text') or oben.get('tag') or '')[:40]}') — Dialog offen? Nichts geklickt."),
+                         st, popups=st.get("popups"))
+        geklickt = True
+        r = list(r)[:4]
+        # Ziel-Beweis mit dem Auslöser-TEXT ('$150K … | KENNUNG' → volle Kennung), nicht der nackten kontonr (tsx_k0_pruef erkennt die
+        # Kennung nur im Auslöser-Format, sonst nähme es die ersten 24 Zeichen)
+        if not s.klick(r, "Konto-Auslöser", pruef=tsx_k0_pruef({"rect": r, "text": str(ko.get("aktiv") or aktiv), "aria": ""})):
+            return _raus("konto_nicht_erreicht", "Konto-Auslöser nicht gedrückt (Klick ohne Beweis) — nichts gewechselt.", st)
+        _warte(0.9, 0.4)
+        st = s.stand()
+        if not (st.get("konto") or {}).get("liste_offen"):
+            _warte(1.0, 0.4)
+            st = s.stand()
+    ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+    if ko.get("liste_offen"):
+        _cdp_esc(s, st, trail, "Konto-Liste nach der letzten Runde")
+    return _raus("konto_nicht_erreicht", f"Konto {ext} nicht aktiv (steht: '{str(ko.get('kontonr') or ko.get('aktiv') or '-')[:40]}')", st)
+
+
+def _tsx_kopf_frisch(s, st, ext, trail, runden=4):
+    """K2-Beweis 3: nach dem Wechsel die Kopfzeile ZWEIMAL hintereinander gleich gelesen (BAL lesbar), Konto weiter das Ziel, Liste zu.
+    -> (stand, frisch)"""
+    for _ in range(runden):
+        _warte(0.8, 0.4)
+        st2 = s.stand()
+        k2 = st2.get("konto") if isinstance(st2.get("konto"), dict) else {}
+        if tsx_kopf_gleich(st, st2) and tsx_konto_urteil(k2, ext) == "ja" and not k2.get("liste_offen"):
+            return st2, True
+        st = st2
+    trail.append(f"K2: Kopfzeile nach dem Wechsel nicht zweimal gleich ({runden} Lesungen)")
+    return st, False
+
+
 def modus_tsxlesen_cdp(cmd):
-    """K1 (Vorbau): TopstepX im Puls-Chrome lesen — Tab, Login (Beweis), Tab nach vorn + Frische-Beweis, EIN stand(), Vertrag wie
-    tv-lesen. Kein Klick außer dem Login-Weg; Konto wechseln kommt mit K2. Wachhund 120 s."""
+    """K1: TopstepX im Puls-Chrome lesen — die ganze Kette in EINEM Lauf (Entscheidung 01.10.2026): Puls-Chrome starten, TopstepX-Tab öffnen,
+    Login (ein Klick mit Autofill-Beweis), Tab nach vorn + Frische-Beweis, Bereit-Probe, bei falschem Konto K2 (_tsx_konto_sichern:
+    Konto im Dropdown per Windows-Maus wechseln, KEINE Order), dann EIN stand() im Vertrag wie tv-lesen. Klicks nur Login + K2 (Hand-
+    lauf-Sperre gesetzt, damit kein anderer Lauf dazwischen klickt). Wachhund TSX_K1_WACHHUND_S (140 s)."""
     res = {"ok": False, "code": "", "msg": "", "trail": "", "schritt": "start", "weg": "cdp", "etappe": "K1", "quelle": "cdp",
            "konto": "", "balance": None, "balance_relativ": None, "mll": None, "rpl": None, "upl": None, "position": None, "alter_s": None}
     trail = _StempelSpur()
@@ -14987,6 +15173,8 @@ def modus_tsxlesen_cdp(cmd):
         return raus("befehl", "Feld 'konto' (External ID) fehlt", "befehl")
     if _handlauf_aktiv():
         return raus("handlauf", "Im Puls-Chrome läuft gerade ein Hand-Lauf — nichts gelesen, gleich erneut.", "sperre")
+    # K2 klickt (Login, Konto-Auslöser, Konto-Zeile): Sperre wie K0 setzen, damit kein zweiter Puls-Chrome-Lauf dazwischen klickt
+    _handlauf_setzen(True)
 
     def _schliessen():
         try:
@@ -14996,13 +15184,14 @@ def modus_tsxlesen_cdp(cmd):
             pass
 
     def _wachhund():
-        trail.append(f"Wachhund: nach {int(TSX_K0_WACHHUND_S)} s abgebrochen (Schritt {res.get('schritt')})")
+        trail.append(f"Wachhund: nach {int(TSX_K1_WACHHUND_S)} s abgebrochen (Schritt {res.get('schritt')})")
         try:
-            raus("haenger", f"TopstepX-Lesen hing nach {int(TSX_K0_WACHHUND_S)} s — abgebrochen.", "haenger", zuerst=_schliessen)
+            raus("haenger", f"TopstepX-Lesen hing nach {int(TSX_K1_WACHHUND_S)} s — abgebrochen.", "haenger", zuerst=_schliessen)
         finally:
             _schliessen()
+            _handlauf_setzen(False)
             os._exit(0)
-    wh = threading.Timer(TSX_K0_WACHHUND_S, _wachhund)
+    wh = threading.Timer(TSX_K1_WACHHUND_S, _wachhund)
     wh.daemon = True
     wh.start()
     try:
@@ -15032,8 +15221,36 @@ def modus_tsxlesen_cdp(cmd):
         res["schritt"] = "lesen"
         # Bereit-Probe (K0 30.09.2026: 0,8 s nach Laufbeginn stand noch „Loading the Ultimate Trading Experience" in der Seite):
         # bis TSX_K1_BEREIT_S auf Konto-Auslöser + BAL warten, erst dann zählt die Lesung. Nur lesen, kein Klick.
-        st, _ = _tsx_bereit_warten(s, trail, {"kontoTexte": [ext]})
-        if isinstance(st, dict) and isinstance(st.get("konto"), dict) and st["konto"].get("liste_offen"):
+        st, bereit = _tsx_bereit_warten(s, trail)
+        if not bereit:
+            # Ladephase nach Kaltstart/Neuladen (01.10.2026): _tsx_cdp_login sah vielleicht noch den Lade-Schirm („Loading the Ultimate
+            # Trading Experience") statt der Login-Seite. Steht JETZT die Login-Seite da, einmal den Login-Weg (ein Klick, Beweis,
+            # 30-min-Sperre) und die Bereit-Probe noch einmal — sonst ehrlich weiter (tsx_cdp_lesung meldet anker_fehlt).
+            bl = s.lese_js(TSX_K0_BLICK_JS) or {}
+            if isinstance(bl, dict) and isinstance(bl.get("login"), dict) and bl["login"].get("seite"):
+                res["schritt"] = "login"
+                trail.append("Nach der Ladephase steht die TopstepX-Login-Seite da — Login-Weg")
+                lg2 = _tsx_cdp_login(s, trail)
+                if lg2 is not True:
+                    return raus("login", lg2, "login")
+                res["schritt"] = "lesen"
+                st, bereit = _tsx_bereit_warten(s, trail)
+        ko = st.get("konto") if isinstance(st, dict) and isinstance(st.get("konto"), dict) else {}
+        if bereit and TSX_K2_AKTIV and tsx_konto_urteil(ko, ext) in ("nein", "vielleicht"):
+            res["schritt"] = "konto"
+            trail.append(f"K2: im Puls-Chrome steht '{str(ko.get('kontonr') or ko.get('aktiv') or '-')[:40]}', Ziel {ext} — Konto wechseln")
+            ok2, c2, m2, st, ex2 = _tsx_konto_sichern(s, ext, st, trail)
+            res.update({k: v for k, v in ex2.items() if k in ("konto_gewechselt", "konto_hinweis", "konto_zeilen", "konto_treffer", "popups")})
+            if not ok2:
+                return raus(c2, m2, "konto")
+            if ex2.get("konto_gewechselt"):
+                res["schritt"] = "lesen"
+                st, bereit = _tsx_bereit_warten(s, trail)
+                st, frisch_k = _tsx_kopf_frisch(s, st, ext, trail)
+                if not frisch_k:
+                    return raus("kopf_unruhig", (f"Konto auf {ext} gewechselt, aber die Kopfzeile stand nicht zweimal gleich — nichts gelesen, "
+                                                 "gleich erneut (das Konto steht jetzt)."), "lesen")
+        elif isinstance(st, dict) and ko.get("liste_offen"):
             trail.append("Konto-Liste steht offen (nicht von diesem Lauf) — nur gelesen, nichts geklickt")
         felder, code, msg = tsx_cdp_lesung(st, ext)
         res.update(felder)
@@ -15045,11 +15262,16 @@ def modus_tsxlesen_cdp(cmd):
             res["exit_diag"] = {"fehler": "Exit-Fill über CDP kommt mit K5"}
         trail.append(f"gelesen (CDP): BAL {res.get('balance')} · RP&L {res.get('rpl')} · UP&L {res.get('upl')} · {len(res.get('positionen') or [])} Pos"
                      + ("" if frisch else " — NICHT frisch (alter_s leer, das Frontend zählt die Lesung nicht)"))
+        if res.get("konto_gewechselt"):
+            msg += f" — Konto gewechselt (von {str(res['konto_gewechselt'].get('von') or '-')[:40]})"
+        if res.get("konto_hinweis"):
+            msg += f" — Konto „{res['konto_hinweis']}“ (nur gelesen)"
         return raus("", msg + ("" if frisch else " — Seite nicht frisch bewiesen"), "fertig", ok=True)
     except Exception as e:
         return raus("cdp_fehler", f"TopstepX-Lesen abgebrochen: {type(e).__name__}: {str(e)[:160]}", "absturz")
     finally:
         wh.cancel()
+        _handlauf_setzen(False)
         if sitz[0]:
             sitz[0].zu()
 
@@ -15450,7 +15672,9 @@ class _AugenSitzung:
         self.trail = trail
         # K0 (30.09.2026): js_datei 'augen_tsx.js' für den TopstepX-Tab; tv_riegel=False = ohne TradingView-Werbung/-Meldungen wegräumen
         self.tv_riegel = tv_riegel
-        if not _puls_chrome_sicher(trail):
+        # 01.10.2026 (Kette in einem Lauf): stirbt das Puls-Chrome zwischen zwei Schritten, startet es für den TopstepX-Tab mit
+        # TopstepX — nie mit dem TradingView-Chart (K0-Prüfer: Kaltstart mit TopstepX)
+        if not _puls_chrome_sicher(trail, url=(TSX_URL if js_datei == "augen_tsx.js" else AUGEN_TV_URL)):
             raise RuntimeError("Puls-Chrome nicht erreichbar (Port 9333)")
         # ziel: ein bestimmter Tab (Auto-Login 29.09.2026: der neue Tab mit ?trade-now) — sonst wie bisher die Chart-Seite
         ziel = ziel or augen_target_waehlen(_cdp_http("/json/list"))
@@ -16859,7 +17083,7 @@ PULS_ERGEBNIS_FELDER = ("ok", "code", "schritt", "msg", "gesendet", "bestaetigt"
                         "tv_symbol", "menge", "konto_aktiv", "pruefung", "meldung_roh", "positionen_danach", "close_fill", "storniert",
                         "symbol", "richtung", "konto", "trail_ende", "quelle",
                         "mll", "rpl", "tp_level", "sl_level", "positionen", "plattform",
-                        "warnung", "unklar")
+                        "warnung", "unklar", "balance", "upl", "balance_relativ")
 
 
 def puls_ergebnis_paket(art, stufe, cmd, res, trail=None, jetzt_ms=None):

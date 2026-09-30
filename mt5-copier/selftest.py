@@ -1885,6 +1885,7 @@ def main():
     results.append(test_cdp_konto_regression_865())
     results.append(test_tsx_k0())
     results.append(test_tsx_k1_vorbau())
+    results.append(test_tsx_k2())
     results.append(test_puls_win_maus())
     results.append(test_puls_nie_chrome_schliessen())
     results.append(test_tsx_konto_abgekuerzt())
@@ -4118,7 +4119,7 @@ def test_tsx_k1_vorbau():
              "kopf": {"balance": None, "mll": None, "rpl": None, "upl": None, "balance_relativ": None}, "positionen_sichtbar": None,
              "positionen": [], "flach": None}
     namen = ("_puls_chrome_sicher", "_tsx_sitzung_waehlen", "_handlauf_aktiv", "_puls_diagnose_senden", "_warte", "_WIN_EINGABE",
-             "TSX_K1_BEREIT_S", "puls_bot_stand")
+             "TSX_K1_BEREIT_S", "puls_bot_stand", "_handlauf_setzen")
     alt_m = {n: getattr(ob, n) for n in namen}
     import threading as _th
     alt_timer = _th.Timer
@@ -4140,6 +4141,7 @@ def test_tsx_k1_vorbau():
         gewartet = []
         ob._puls_chrome_sicher = lambda trail, **k: chrome
         ob._handlauf_aktiv = lambda: handlauf
+        ob._handlauf_setzen = lambda an: None            # K2 (01.10.2026): K1 setzt die Sperre jetzt selbst — im Test nie als Datei
         ob._puls_diagnose_senden = lambda *a, **k: None
 
         def warte(a, b):
@@ -4333,6 +4335,288 @@ def test_tsx_k1_vorbau():
     chk(kk["rpl"] == -50.0 and kb["balance"] is None, f"Vorsatz-Knoten: leer + - + $ → -50.00; nur „$“ → None ({kk['rpl']}, {kb['balance']})")
     if ok:
         print("✓ TSX-K1-Vorbau: Vertrag wie tv-lesen, balance_relativ durchgereicht, flach nur mit Beweis, Bereit-Probe, Schalter aus")
+    return ok
+
+
+def test_tsx_k2():
+    """K2 (01.10.2026, „das mit dem Dropdown"): TopstepX-Konto im Dropdown wechseln — nur Konto, KEINE Order. Reine Regeln, der
+    Wechsel gegen eine nachgebildete TopstepX-Seite (4 Konten wie beim ersten Topstep-PC: 2× Express, 2× Combine „Ineligible"; nur
+    erfundene Kennungen) und die ganze Kette in EINEM Lauf: kalt (Chrome aus), ohne Tab, ausgeloggt, falsches Konto."""
+    import order_bot as ob
+    import io
+    import json
+    import contextlib
+    import tempfile
+    import threading as _th
+    ok = True
+
+    def chk(bed, text):
+        nonlocal ok
+        if not bed:
+            print("  ✗ TSX-K2: " + text)
+            ok = False
+    E1, E2 = "EXPRESS-V2-000000-00000001", "EXPRESS-V2-000000-00000002"
+    C3, C4 = "150KTC-SKU-V2-000000-00000003", "150KTC-SKU-V2-000000-00000004"
+    LABEL = {E1: "$150K Express", E2: "$150K Express", C3: "$150K Trading Combine", C4: "$150K Trading Combine"}
+    INELIG = {C3, C4}
+
+    def zeile(i, kid, **extra):
+        z = {"text": LABEL.get(kid, "$150K Express") + "|" + kid + (" (Ineligible)" if kid in INELIG else ""), "label": LABEL.get(kid, "$150K Express"),
+             "id": kid, "markiert": None, "ineligible": kid in INELIG, "hinweis": "Ineligible" if kid in INELIG else None, "aus": False,
+             "rect": [17, 47 + 30 * i, 416, 30], "zu": {"disabled": False, "readonly": False, "verdeckt": False, "oben": None}}
+        z.update(extra)
+        return z
+    # ── reine Regeln ──
+    U = ob.tsx_konto_urteil
+    chk(U({"aktiv": "$150K Express|" + E1, "kontonr": E1, "abgekuerzt": False}, E1) == "ja"
+        and U({"aktiv": "$150K Express|" + E1, "kontonr": E1, "abgekuerzt": False}, E2) == "nein"
+        and U({"aktiv": "$150K Express|EXPRESS-…", "kontonr": "EXPRESS", "abgekuerzt": True}, E1) == "vielleicht"
+        and U({"aktiv": None, "kontonr": None}, E1) == "fehlt" and U(None, E1) == "fehlt", "Konto-Urteil ja/nein/vielleicht/fehlt")
+    W = ob.tsx_k2_eintrag
+    liste = [zeile(0, E1), zeile(1, E2), zeile(2, C3), zeile(3, C4)]
+    x, n, g = W(liste, E2)
+    chk(x is not None and x["id"] == E2 and n == 1 and g == "", f"Treffer genau einmal ({g})")
+    x, n, g = W(liste, C3)
+    chk(x is not None and x["ineligible"] is True, "Ineligible zum LESEN wählbar (Hinweis kommt in die Antwort)")
+    x, n, g = W(liste, "EXPRESS-V2-000000-00000009")
+    chk(x is None and n == 0 and "nicht in der Liste" in g, f"kein Treffer ({g})")
+    x, n, g = W(liste + [zeile(4, E2)], E2)
+    chk(x is None and n == 2 and "nicht eindeutig" in g, f"zwei Treffer ({g})")
+    x, n, g = W([zeile(0, E2, aus=True)], E2)
+    x2, _, g2 = W([zeile(0, E2, zu={"verdeckt": True, "oben": {"text": "Dialog"}})], E2)
+    x3, _, g3 = W([zeile(0, E2, rect=None)], E2)
+    chk(x is None and x2 is None and x3 is None and "gesperrt" in g and "verdeckt" in g2 and "Rechteck" in g3, f"gesperrt/verdeckt/ohne Rechteck nie ({g}, {g2}, {g3})")
+    chk(W(liste, "abc")[0] is None and W(liste, E1)[0]["id"] == E1, "kurze Kennung nie, volle Kennung exakt (kein Präfix-Treffer)")
+    kopf = lambda b: {"kopf": {"balance": {"text": f"${b:,.2f}", "wert": b}, "mll": {"text": "$-4,500.00", "wert": -4500}, "rpl": {"wert": 0}, "upl": {"wert": 0}}}
+    chk(ob.tsx_kopf_gleich(kopf(0.0), kopf(0.0)) and not ob.tsx_kopf_gleich(kopf(0.0), kopf(12.5))
+        and not ob.tsx_kopf_gleich({"kopf": {"balance": None}}, {"kopf": {"balance": None}}), "Kopfzeile zweimal gleich (BAL lesbar)")
+
+    # ── nachgebildete TopstepX-Seite: stand() folgt dem Zustand, klick()/taste() verändern ihn ──
+    class _Tsx:
+        def __init__(self, aktiv=E1, ids=(E1, E2, C3, C4), offen=False, esc_wirkt=True, zeile_druck=True, bleibt_offen=False,
+                     ausloeser_verdeckt=False, eingeloggt=True, bal=None):
+            self.aktiv, self.ids, self.offen, self.esc_wirkt = aktiv, list(ids), offen, esc_wirkt
+            self.zeile_druck, self.bleibt_offen, self.ausloeser_verdeckt, self.eingeloggt = zeile_druck, bleibt_offen, ausloeser_verdeckt, eingeloggt
+            self.bal = bal or {E1: 0.0, E2: 1250.0, C3: 150210.5, C4: 149000.0}
+            self.klicks, self.pruef, self.ws, self.geschlossen = [], [], self, 0
+
+        def rufe(self, m, par=None, timeout=10.0):
+            if m == "Page.navigate":
+                self.klicks.append("Neuladen")
+            return {}
+
+        def stand(self, opts=None):
+            if not self.eingeloggt:
+                return {"konto": {"aktiv": None, "kontonr": None, "abgekuerzt": None, "liste_offen": False, "liste": []},
+                        "kopf": {"balance": None, "mll": None, "rpl": None, "upl": None, "balance_relativ": None}, "positionen_sichtbar": None,
+                        "positionen": [], "flach": None, "popups": []}
+            ko = {"aktiv": LABEL.get(self.aktiv, "$150K Express") + "|" + self.aktiv, "kontonr": self.aktiv, "abgekuerzt": False,
+                  "rect": [68, 4, 194, 34], "zu": {"disabled": False, "readonly": False, "verdeckt": self.offen or self.ausloeser_verdeckt, "oben": None},
+                  "liste_offen": self.offen, "liste": [zeile(i, k) for i, k in enumerate(self.ids)] if self.offen else []}
+            b = self.bal.get(self.aktiv, 0.0)
+            return {"konto": ko, "kopf": {"balance": {"text": f"${b:,.2f}", "wert": b}, "mll": {"text": "$-4,500.00", "wert": -4500},
+                                          "rpl": {"text": "$0.00", "wert": 0}, "upl": {"text": "$0.00", "wert": 0}, "balance_relativ": b < 75000},
+                    "positionen_sichtbar": True, "positionen": [], "flach": True, "popups": []}
+
+        def klick(self, r, name, toast_ok=False, pruef=None):
+            self.klicks.append(name)
+            self.pruef.append(pruef)
+            if name.startswith("PLATFORM LOGIN"):
+                self.eingeloggt = True
+                return True
+            if name == "Konto-Auslöser":
+                if not self.ausloeser_verdeckt:
+                    self.offen = True
+                return True
+            if name.startswith("Konto "):
+                if not self.zeile_druck:
+                    return False
+                if not self.bleibt_offen:
+                    self.aktiv, self.offen = name.split(" ", 1)[1], False
+                return True
+            return True
+
+        def taste(self, k, modifiers=0):
+            self.klicks.append("Taste " + k)
+            if k == "Escape" and self.esc_wirkt:
+                self.offen = False
+
+        def lese_js(self, ausdruck, timeout=8):
+            if ausdruck == ob.TSX_FRISCH_JS:
+                return {"raf": True, "sichtbar": "visible", "ms": 30}
+            if ausdruck == ob.TSX_K0_BLICK_JS:
+                return {"login": {"seite": not self.eingeloggt, "knopf": {"rect": [900, 600, 200, 40], "text": "PLATFORM LOGIN"},
+                                  "user": {"autofill": True, "gefuellt": True}, "pw": {"autofill": True, "gefuellt": True}, "knoepfe": 1}}
+            return None
+
+        def _win_vorn(self):
+            return 11, ""
+
+        def _seite_abwarten(self, sek=25.0):
+            return None
+
+        def _augen_laden(self):
+            return None
+
+        def zu(self):
+            self.geschlossen += 1
+    alt_w = ob._warte
+    ob._warte = lambda a, b: None
+    try:
+        def sichern(sz, ziel):
+            t = []
+            r = ob._tsx_konto_sichern(sz, ziel, sz.stand(), t)
+            return r, t
+        a = _Tsx()
+        (ok_a, c_a, m_a, st_a, ex_a), t_a = sichern(a, E2)
+        chk(ok_a and a.klicks == ["Konto-Auslöser", "Konto " + E2] and ex_a.get("konto_gewechselt") == {"von": E1, "zu": E2}
+            and st_a["konto"]["kontonr"] == E2 and not st_a["konto"]["liste_offen"] and "konto_hinweis" not in ex_a,
+            f"Treffer: Auslöser → Zeile → Konto steht, Liste zu ({a.klicks}, {ex_a})")
+        chk(a.pruef[0]["text"] == E1 and a.pruef[1]["text"] == E2 and a.pruef[1]["rect"] == [17, 77, 416, 30] and "flatten" in a.pruef[1]["tabu"],
+            f"jeder Druck mit Ziel-Beweis: Auslöser-Kennung, volle Ziel-Kennung, Rechteck der Zeile, Tabu-Wörter ({a.pruef})")
+        b = _Tsx()
+        (ok_b, c_b, m_b, st_b, ex_b), _ = sichern(b, "EXPRESS-V2-000000-00000009")
+        chk(not ok_b and c_b == "konto_nicht_erreicht" and b.klicks == ["Konto-Auslöser", "Taste Escape"] and not b.offen and ex_b.get("konto_treffer") == 0
+            and "nicht in der Liste" in m_b, f"kein Treffer: Esc, nichts gewählt ({b.klicks}, {m_b})")
+        c = _Tsx(ids=(E1, E2, C3, E2))
+        (ok_c, c_c, m_c, _, ex_c), _ = sichern(c, E2)
+        chk(not ok_c and c.klicks == ["Konto-Auslöser", "Taste Escape"] and ex_c.get("konto_treffer") == 2 and "nicht eindeutig" in m_c,
+            f"zwei Treffer: Esc, nichts gewählt ({c.klicks})")
+        d = _Tsx(bleibt_offen=True)
+        (ok_d, c_d, m_d, _, _), _ = sichern(d, E2)
+        chk(not ok_d and d.klicks == ["Konto-Auslöser", "Konto " + E2, "Taste Escape"] and not d.offen and "blieb offen" in m_d,
+            f"Liste bleibt nach dem Zeilen-Klick offen: EIN Zeilen-Druck, dann Esc ({d.klicks})")
+        e_ = _Tsx()
+        (ok_e, _, _, _, ex_e), _ = sichern(e_, C3)
+        chk(ok_e and ex_e.get("konto_hinweis") == "Ineligible" and ex_e["konto_gewechselt"]["zu"] == C3, f"Ineligible: gewechselt, Hinweis ({ex_e})")
+        f_ = _Tsx(offen=True)
+        (ok_f, _, _, _, _), t_f = sichern(f_, E2)
+        chk(ok_f and f_.klicks == ["Taste Escape", "Konto-Auslöser", "Konto " + E2] and any("nicht von diesem Lauf" in x_ for x_ in t_f),
+            f"fremd offene Liste: erst Esc, nie daraus wählen, dann selbst öffnen ({f_.klicks})")
+        f2 = _Tsx(offen=True, esc_wirkt=False)
+        (ok_f2, c_f2, _, _, _), _ = sichern(f2, E2)
+        chk(not ok_f2 and c_f2 == "konto_nicht_erreicht" and f2.klicks == ["Taste Escape"], f"fremd offen + Esc wirkt nicht: EIN Esc, raus ({f2.klicks})")
+        g_ = _Tsx(ausloeser_verdeckt=True)
+        (ok_g, c_g, m_g, _, _), _ = sichern(g_, E2)
+        chk(not ok_g and g_.klicks == [] and "verdeckt" in m_g, f"Auslöser verdeckt (Dialog): kein Klick ({m_g})")
+        h = _Tsx(aktiv=E2)
+        (ok_h, _, _, _, ex_h), _ = sichern(h, E2)
+        chk(ok_h and h.klicks == [] and "konto_gewechselt" not in ex_h, "Konto steht schon: kein Klick")
+        i_ = _Tsx(zeile_druck=False)
+        (ok_i, _, m_i, _, _), _ = sichern(i_, E2)
+        chk(not ok_i and i_.klicks == ["Konto-Auslöser", "Konto " + E2, "Taste Escape"] and "nicht gedrückt" in m_i and not i_.offen,
+            f"Zeile ohne Druck (kein Ziel-Beweis): Esc, nichts gewechselt ({i_.klicks})")
+        j = _Tsx()
+        j.klick = lambda r, name, toast_ok=False, pruef=None: (j.klicks.append(name), False)[1]
+        (ok_j, _, m_j, _, _), _ = sichern(j, E2)
+        chk(not ok_j and j.klicks == ["Konto-Auslöser"] and "Auslöser nicht gedrückt" in m_j, f"Auslöser ohne Druck: nichts weiter ({j.klicks})")
+        # Kopfzeile nach dem Wechsel: erst zweimal gleich zählt (BAL lädt nach)
+        k = _Tsx(aktiv=E2)
+        seq = [dict(k.stand(), kopf=dict(k.stand()["kopf"], balance={"text": "$0.00", "wert": 0.0})), k.stand(), k.stand()]
+        k.stand = lambda opts=None: seq.pop(0) if seq else _Tsx(aktiv=E2).stand()
+        st_k, frisch_k = ob._tsx_kopf_frisch(k, {"kopf": {"balance": {"wert": 0.0}}, "konto": {}}, E2, [])
+        chk(frisch_k and st_k["kopf"]["balance"]["wert"] == 1250.0, f"Kopfzeile: nachgeladene BAL erst nach zwei gleichen Lesungen ({st_k['kopf']['balance']})")
+    finally:
+        ob._warte = alt_w
+
+    # ── ganze Kette in EINEM Lauf: kalt, ohne Tab, ausgeloggt, falsches Konto → Chrome mit TopstepX, Tab auf, EIN Login-Klick, K2, K1 ──
+    namen = ("_puls_chrome_sicher", "_cdp_http", "_AugenSitzung", "_handlauf_aktiv", "_handlauf_setzen", "_puls_diagnose_senden", "_warte",
+             "_WIN_EINGABE", "puls_bot_stand", "_AUGEN_HIER", "_augen_js_holen", "TSX_K2_AKTIV")
+    alt_m = {n: getattr(ob, n) for n in namen}
+    alt_timer = _th.Timer
+
+    class _Timer:
+        def __init__(self, s_, f_):
+            self.s = s_
+
+        def start(self):
+            wachhund.append(self.s)
+
+        def cancel(self):
+            pass
+        daemon = True
+    wachhund = []
+    try:
+        def kette(seite, tabs_da=False, chrome_an=False, k2=True):
+            log = {"chrome": [], "neu": 0, "sperre": []}
+            tab = {"id": "T1", "type": "page", "url": ob.TSX_URL, "title": "TopstepX", "webSocketDebuggerUrl": "ws://127.0.0.1:9333/devtools/page/T1"}
+            zustand = {"tabs": [tab] if tabs_da else [], "chrome": chrome_an}
+
+            def chrome(trail, **k):
+                log["chrome"].append(k.get("url"))
+                zustand["chrome"] = True
+                return True
+
+            def http(pfad, *a, **k):
+                if not zustand["chrome"]:
+                    return None
+                if pfad.startswith("/json/new?"):
+                    log["neu"] += 1
+                    zustand["tabs"] = [tab]
+                    return {"id": "T1"}
+                if pfad == "/json/list":
+                    return list(zustand["tabs"])
+                return {}
+            ob._puls_chrome_sicher = chrome
+            ob._cdp_http = http
+            ob._AugenSitzung = lambda trail, ziel=None, js_datei="augen.js", tv_riegel=True: seite
+            ob._handlauf_aktiv = lambda: False
+            ob._handlauf_setzen = lambda an: log["sperre"].append(an)
+            ob._puls_diagnose_senden = lambda *a, **k: None
+            ob._warte = lambda a, b: None
+            ob._WIN_EINGABE = False
+            ob.puls_bot_stand = lambda: "Bot Test"
+            ob._AUGEN_HIER = tempfile.mkdtemp()
+            ob.TSX_K2_AKTIV = k2
+            _th.Timer = _Timer
+            o_ = io.StringIO()
+            with contextlib.redirect_stdout(o_):
+                ob.modus_tsxlesen_cdp({"konto": E2, "firma": "Topstep"})
+            return json.loads(o_.getvalue().strip().splitlines()[-1]), log
+        s1 = _Tsx(aktiv=E1, eingeloggt=False)
+        r1, l1 = kette(s1)
+        chk(r1["ok"] and r1["code"] == "" and r1["konto"] == E2 and r1["balance"] == 1250.0 and r1["konto_gewechselt"] == {"von": E1, "zu": E2}
+            and s1.klicks == ["PLATFORM LOGIN (Autofill bewiesen)", "Konto-Auslöser", "Konto " + E2] and l1["chrome"] and l1["chrome"][0] == ob.TSX_URL
+            and l1["neu"] == 1 and l1["sperre"] == [True, False] and s1.geschlossen >= 1 and "Konto gewechselt" in r1["msg"]
+            and "TopstepX-Tab geöffnet" in r1["trail"] and "K2: Konto gewechselt" in r1["trail"],
+            f"Kette kalt → Tab auf → EIN Login-Klick → K2 → gelesen ({r1.get('code')}, {s1.klicks}, {l1}, {r1.get('msg')})")
+        chk(wachhund and all(w_ == ob.TSX_K1_WACHHUND_S for w_ in wachhund) and ob.TSX_K1_WACHHUND_S < 150, f"Wachhund {wachhund} unter 150 s (Panel)")
+        s2 = _Tsx(aktiv=E2)
+        r2, l2 = kette(s2, tabs_da=True, chrome_an=True)
+        chk(r2["ok"] and s2.klicks == [] and l2["neu"] == 0 and "konto_gewechselt" not in r2, f"alles schon da: kein Klick, kein neuer Tab ({s2.klicks}, {l2})")
+        s3 = _Tsx(aktiv=E1)
+        r3, _ = kette(s3, tabs_da=True, chrome_an=True, k2=False)
+        chk(not r3["ok"] and r3["code"] == "konto" and s3.klicks == [], f"K2 aus: ehrlich code 'konto', kein Klick ({r3['code']})")
+        s4 = _Tsx(aktiv=E1, ids=(E1, C3, C4))
+        r4, l4 = kette(s4, tabs_da=True, chrome_an=True)
+        chk(not r4["ok"] and r4["code"] == "konto_nicht_erreicht" and r4["schritt"] == "konto" and s4.klicks == ["Konto-Auslöser", "Taste Escape"]
+            and r4.get("konto_treffer") == 0 and r4["balance"] is None and l4["sperre"] == [True, False],
+            f"Ziel nicht in der Liste: Esc, nichts gelesen, Sperre wieder frei ({r4['code']}, {s4.klicks})")
+        s5 = _Tsx(aktiv=E1)
+        r5, _ = kette(s5, tabs_da=True, chrome_an=True)
+        chk(r5["ok"] and r5["konto"] == E2 and r5["etappe"] == "K1" and r5["position"] == "keine", f"falsches Konto im offenen Tab: gewechselt, gelesen ({r5['code']})")
+    finally:
+        for n_, v_ in alt_m.items():
+            setattr(ob, n_, v_)
+        _th.Timer = alt_timer
+    # Quelltext-Riegel: K2 klickt nie ein Order-/Close-Wort, keine Order-Funktion im Konto-Schritt
+    import inspect
+    q = inspect.getsource(ob._tsx_konto_sichern)
+    chk("TSX_K0_TABU" in q and "pruef=" in q and not any(w_ in q for w_ in ("kaufen(", "order_senden", "flatten", "Buy", "Sell")),
+        "K2: jeder Druck mit Tabu-Wörtern, keine Order-Wege")
+    felder = ob.PULS_ERGEBNIS_FELDER
+    chk(all(f_ in felder for f_ in ("balance", "upl", "balance_relativ")) and len(set(felder)) == len(felder),
+        "PULS_ERGEBNIS_FELDER: balance/upl/balance_relativ dabei, keine Doppelten")
+    # T1-Nachtrag: Vorzeichen im UIA-Weg (Drei-/Vier-Knoten-Form, Minus hinter dem Dollar)
+    G = ob.tsx_geld
+    K = lambda namen_: ob.tsx_kopf_werte([(n_, None, "Text") for n_ in namen_])
+    chk(G("$-300.00") == -300.0 and G("-$300.00") == -300.0 and G("($300.00)") == -300.0 and G("$300.00") == 300.0
+        and K(["RP&L:", "$", "-50.00"])["rpl"] == -50.0 and K(["RP&L:", "-", "$", "50.00"])["rpl"] == -50.0
+        and K(["BAL:", "$", "154,504.88", "MLL:", "$-4,500.00"]) == {"balance": 154504.88, "mll": -4500.0, "rpl": None, "upl": None},
+        "Vorzeichen: $-300.00 / -$300.00 / ($300.00) / RP&L $·-50.00 / -·$·50.00")
+    if ok:
+        print("✓ TSX-K2: Konto im Dropdown wechseln (Treffer, kein Treffer, doppelt, bleibt offen, Ineligible, fremd offen, verdeckt), "
+              "Kopfzeile frisch, ganze Kette in einem Lauf (kalt, ohne Tab, ausgeloggt, falsches Konto), Felder, Vorzeichen")
     return ok
 
 
