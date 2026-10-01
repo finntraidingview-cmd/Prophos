@@ -713,8 +713,7 @@ def duplikum_session():
         return jsonify({"ok": False, "error": "Nicht angemeldet"}), 401
     uid = ""
     try:
-        r = _sb_anfrage("GET", f"{SUPABASE_URL}/auth/v1/user", dienst="auth", timeout=12,
-                         headers={"apikey": SUPABASE_ANON_KEY, "Authorization": f"Bearer {token}"})
+        r = _auth_user_anfrage(token)
         uid = str((r.json() or {}).get("id") or "") if r.status_code == 200 else ""
         if not uid:
             return jsonify({"ok": False, "error": "Nicht angemeldet"}), 401
@@ -728,7 +727,7 @@ def duplikum_session():
     creds = None
     if SUPABASE_SERVICE_KEY:
         try:
-            rows = [c for c in sb_select("duplikum_credentials", {"select": "*"})
+            rows = [c for c in dup_creds_lesen()   # 60-s-Cache, geteilt mit dem Wächter (01.10.2026)
                     if (c.get("email") or "").strip()]
             creds = next((c for c in rows if str(c.get("user_id")) == uid), None) \
                 or (rows[0] if rows else None)
@@ -2656,6 +2655,8 @@ SUPABASE_SERVICE_KEY = (os.environ.get("SUPABASE_SERVICE_KEY")
 # manuell nachgetragen werden. Bewusster Tausch gegen Zuverlässigkeit.
 WATCHER_INTERVAL = max(10, int(os.environ.get("WATCHER_INTERVAL") or "30"))
 WATCHER_DISABLED = bool(os.environ.get("WATCHER_DISABLED"))
+# Leerlauf-Takt (01.10.2026, SUPABASE-DIÄT B): ohne geplanten/offenen Plan reicht eine Runde je Minute
+WATCHER_LEERLAUF_S = max(WATCHER_INTERVAL, int(os.environ.get("WATCHER_LEERLAUF_S") or "60"))
 
 _watcher_state = {}       # (uid, plan_id) -> {was_open, notified, baseline, streak, base_tickets, tickets}
 _watcher_pnl_tries = {}   # (uid, plan_id) -> Anzahl P&L-Nachversuche
@@ -3049,6 +3050,124 @@ def sb_upsert(table, body, kritisch=False):
     _sb_pruefen(r)
 
 
+# ── Kurz-Caches für Login-Prüfung & Co. (01.10.2026, SUPABASE-DIÄT B) ───────────────────────────────────────────────────────
+# Lage: Compute NANO (0,5 GB), die DB hing in Wellen (12:10/12:30/12:50 UTC, PGRST003 „Timed out acquiring connection").
+# Edge-Logs 09:00–12:50 UTC, nur dieses Backend: auth/v1/user 504, auth/v1/admin/users 487, admin_zugang 490,
+# duplikum_credentials 462 — fast alles dieselbe Antwort im Abstand von Sekunden (jeder PC-Tab fragt /admin/live-trades
+# alle 55–70 s, jede Anfrage prüfte das Login neu, holte admin_zugang und die komplette Nutzerliste).
+# Regeln: nur ERFOLGE werden gemerkt (401/5xx/Netzfehler nie — die nächste Anfrage fragt wieder), Login je Token-Hash
+# höchstens 45 s und nie über das exp des Tokens hinaus; ein abgemeldetes Token gilt also höchstens 45 s weiter.
+# Kein Lesen auf Vorrat — die Caches füllen sich nur, wenn sowieso gefragt wird.
+AUTH_USER_CACHE_S = 45
+AUTH_LISTE_CACHE_S = 60
+_auth_user_cache = {}       # sha256(token) → (bis_epoch, user_dict)
+_auth_liste_cache = {"bis": 0.0, "users": None}
+_admin_zugang_cache = {}    # uid → (bis_epoch, nur_eigene)
+_dup_creds_cache = {"bis": 0.0, "rows": None}
+_kurz_cache_lock = threading.Lock()
+
+
+class _CacheAntwort:
+    """Antwort-Attrappe mit status_code/json() — damit die Aufrufer unverändert r.status_code / r.json() lesen."""
+    def __init__(self, status_code, daten):
+        self.status_code = status_code
+        self._daten = daten
+
+    def json(self):
+        return self._daten
+
+
+def _jwt_exp(token):
+    """exp-Claim (epoch) aus dem JWT lesen, OHNE Prüfung — nur als Obergrenze für den Cache. 0 = unbekannt."""
+    try:
+        teil = token.split(".")[1]
+        teil += "=" * (-len(teil) % 4)
+        return float(json.loads(base64.urlsafe_b64decode(teil.encode())).get("exp") or 0)
+    except Exception:
+        return 0.0
+
+
+def auth_cache_bis(jetzt, exp, dauer_s=AUTH_USER_CACHE_S):
+    """REIN RECHNEND (testbar): bis wann ein bestätigtes Login gemerkt wird — jetzt+dauer_s, aber nie über exp hinaus."""
+    bis = jetzt + dauer_s
+    return min(bis, exp) if exp else bis
+
+
+def _auth_user_anfrage(token):
+    """GET /auth/v1/user mit 45-s-Cache je Token. Rückgabe wie _sb_anfrage (status_code/json()); Ausnahmen wie bisher."""
+    schluessel = hashlib.sha256(token.encode()).hexdigest()
+    jetzt = time.time()
+    with _kurz_cache_lock:
+        treffer = _auth_user_cache.get(schluessel)
+        if treffer and treffer[0] > jetzt:
+            return _CacheAntwort(200, treffer[1])
+    r = _sb_anfrage("GET", f"{SUPABASE_URL}/auth/v1/user", dienst="auth", timeout=12,
+                     headers={"apikey": SUPABASE_ANON_KEY, "Authorization": f"Bearer {token}"})
+    if r.status_code == 200:
+        try:
+            u = r.json() or {}
+        except Exception:
+            u = {}
+        bis = auth_cache_bis(jetzt, _jwt_exp(token))
+        if u.get("id") and bis > jetzt:
+            with _kurz_cache_lock:
+                if len(_auth_user_cache) > 500:   # Abgelaufenes wegräumen, Deckel gegen schleichendes Wachsen
+                    for k in [k for k, v in _auth_user_cache.items() if v[0] <= jetzt] or list(_auth_user_cache)[:250]:
+                        _auth_user_cache.pop(k, None)
+                _auth_user_cache[schluessel] = (bis, u)
+    return r
+
+
+def _auth_liste_anfrage():
+    """GET /auth/v1/admin/users?per_page=200 mit 60-s-Cache (Namen/E-Mails ändern sich praktisch nie). Rückgabe wie
+    _sb_anfrage; gemerkt wird nur eine 200er-Antwort mit mindestens einem Nutzer."""
+    jetzt = time.time()
+    with _kurz_cache_lock:
+        if _auth_liste_cache["users"] is not None and _auth_liste_cache["bis"] > jetzt:
+            return _CacheAntwort(200, {"users": _auth_liste_cache["users"]})
+    r = _sb_anfrage("GET", f"{SUPABASE_URL}/auth/v1/admin/users?per_page=200", dienst="auth",
+                     headers=_sb_headers(), timeout=12)
+    if r.status_code == 200:
+        try:
+            users = (r.json() or {}).get("users")
+        except Exception:
+            users = None
+        if isinstance(users, list) and users:
+            with _kurz_cache_lock:
+                _auth_liste_cache.update(bis=jetzt + AUTH_LISTE_CACHE_S, users=users)
+    return r
+
+
+def admin_zugang_nur_eigene(uid):
+    """admin_zugang.nur_eigene je uid, 60 s gemerkt. Fehler werfen wie sb_select (der Aufrufer antwortet 502)."""
+    jetzt = time.time()
+    with _kurz_cache_lock:
+        treffer = _admin_zugang_cache.get(uid)
+        if treffer and treffer[0] > jetzt:
+            return treffer[1]
+    z = sb_select("admin_zugang", {"select": "nur_eigene", "user_id": f"eq.{uid}"})
+    nur = bool(isinstance(z, list) and z and z[0].get("nur_eigene"))
+    with _kurz_cache_lock:
+        _admin_zugang_cache[uid] = (jetzt + AUTH_LISTE_CACHE_S, nur)
+    return nur
+
+
+def dup_creds_lesen():
+    """duplikum_credentials (select *) mit 60-s-Cache — Wächter-Zyklus (30 s) und /duplikum/session teilen sich die Zeilen.
+    Die Zugänge ändern sich nur beim Verbinden/Trennen im Frontend; der Token lebt ohnehin im Speicher (_watcher_tokens).
+    Gibt eine flache Kopie der Liste zurück (Aufrufer filtern sie)."""
+    jetzt = time.time()
+    with _kurz_cache_lock:
+        if _dup_creds_cache["rows"] is not None and _dup_creds_cache["bis"] > jetzt:
+            return list(_dup_creds_cache["rows"])
+    rows = sb_select("duplikum_credentials", {"select": "*"})
+    if isinstance(rows, list):
+        with _kurz_cache_lock:
+            _dup_creds_cache.update(bis=jetzt + AUTH_LISTE_CACHE_S, rows=rows)
+        return list(rows)
+    return rows
+
+
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -3110,8 +3229,7 @@ def push_uid(req):
     if not token:
         return ""
     try:
-        r = _sb_anfrage("GET", f"{SUPABASE_URL}/auth/v1/user", dienst="auth", timeout=12,
-                         headers={"apikey": SUPABASE_ANON_KEY, "Authorization": f"Bearer {token}"})
+        r = _auth_user_anfrage(token)
         return str((r.json() or {}).get("id") or "") if r.status_code == 200 else ""
     except Exception:
         return ""
@@ -3951,17 +4069,20 @@ def _push_frisch(p, feld, sekunden=240):
         return False
 
 
-def push_trade_wache():
-    """Ein Push je Statuswechsel. Wirft nie."""
+def push_trade_wache(rows=None):
+    """Ein Push je Statuswechsel. Wirft nie.
+    rows (01.10.2026, SUPABASE-DIÄT B): die trade_plans-Zeilen (planned/open/review, alle IDs, select *) aus derselben
+    Wächter-Runde — vorher eine eigene, inhaltsgleiche Abfrage alle 30 s. Ohne rows liest die Wache selbst."""
     global _push_wache_erste_runde
     if not push_bereit():
         return
     try:
-        rows = sb_select("trade_plans", {
-            "select": "id,user_id,status,master_name,slave_name,master_symbol,"
-                      "master_pl,slave_pl,started_at,ended_at",
-            "status": "in.(planned,open,review)",
-        })
+        if rows is None:
+            rows = sb_select("trade_plans", {
+                "select": "id,user_id,status,master_name,slave_name,master_symbol,"
+                          "master_pl,slave_pl,started_at,ended_at",
+                "status": "in.(planned,open,review)",
+            })
     except Exception as e:
         print(f"[push] ⚠️ Wache lesen: {type(e).__name__}: {e}", flush=True)
         return
@@ -4047,13 +4168,16 @@ def wt_finish_plan(uid, token, plan, dup_slave, dup_master, label, started_epoch
     return True
 
 
-def wt_check_user(uid, creds, memo):
+def wt_check_user(uid, creds, memo, plans=None):
     label = (creds.get("email") or uid)[:24]
-    plans = sb_select("trade_plans", {
-        "select": "*",
-        "user_id": f"eq.{uid}",
-        "status": "in.(planned,open,review)",
-    })
+    # plans (01.10.2026, SUPABASE-DIÄT B): watcher_cycle liest EINMAL für alle IDs und reicht je User seine Zeilen
+    # herein — vorher eine Abfrage je User und Runde (10 User + Push-Wache = 11 GET trade_plans alle 30 s).
+    if plans is None:
+        plans = sb_select("trade_plans", {
+            "select": "*",
+            "user_id": f"eq.{uid}",
+            "status": "in.(planned,open,review)",
+        })
     # MT5-Route (15.08.2026): Pläne mit route='mt5' laufen über den lokalen MT5-Copier,
     # nicht über Duplikum — die gehören der Browser-Zustandsmaschine (mt5PlanPoll in
     # prophos.html). Filter DIREKT nach dem Select, damit weder die Erkennung unten
@@ -4115,8 +4239,12 @@ def wt_check_user(uid, creds, memo):
         lv = m["links"] or {}
         mapped = {str(v) for v in lv.values()}
         return any(str(p.get("slave_account_id")) not in mapped for p in active)
-    if active and (time.time() - meta["at"]) > 5 and _slave_unlinked(meta):
+    # Höchstens EINMAL je 60-s-Cache-Stand (01.10.2026, SUPABASE-DIÄT B): ein Plan, dessen Slave dauerhaft ohne
+    # Verknüpfung ist, lud vorher JEDE Runde user_settings + accounts neu (Edge-Logs: 591/631 GETs in 3 h 50 min).
+    # Frisch verknüpft wird weiter sofort erkannt — der erste Nachlader nach dem Regel-Laden greift wie bisher.
+    if active and (time.time() - meta["at"]) > 5 and not meta.get("nachgeladen") and _slave_unlinked(meta):
         meta = _load_meta()
+        meta["nachgeladen"] = True
     links = meta["links"]
     if not links:
         return
@@ -4394,7 +4522,8 @@ def wt_check_user(uid, creds, memo):
 
 
 def watcher_cycle():
-    creds_rows = sb_select("duplikum_credentials", {"select": "*"})
+    """Eine Wächter-Runde. Rückgabe: alle trade_plans-Zeilen planned/open/review (für Push-Wache + Leerlauf-Takt)."""
+    creds_rows = dup_creds_lesen()   # 60-s-Cache (01.10.2026, SUPABASE-DIÄT B)
     _watcher_info["users"] = len(creds_rows)
     # State von Usern, deren duplikum_credentials-Zeile gelöscht wurde (Duplikum im
     # Frontend getrennt), aufräumen — sonst schleichender Leak über Monate Uptime.
@@ -4426,9 +4555,19 @@ def watcher_cycle():
     memo = {}
     failed = 0
     rows = [c for c in creds_rows if c.get("user_id")]
+    # EINE Abfrage für alle IDs (01.10.2026, SUPABASE-DIÄT B) statt je User eine plus eine eigene der Push-Wache.
+    # Gleiche Spalten (*) und gleicher Status-Filter wie vorher je User; 21 Zeilen ≈ 9 KB (Messung 01.10.2026).
+    # Scheitert sie, wirft der Zyklus wie zuvor „alle User fehlgeschlagen" → last_run bleibt stehen → Browser übernimmt.
+    alle_plaene = sb_select("trade_plans", {"select": "*", "status": "in.(planned,open,review)"})
+    if not isinstance(alle_plaene, list):
+        raise RuntimeError("trade_plans: unerwartete Antwort")
+    plaene_je_user = {}
+    for p in alle_plaene:
+        plaene_je_user.setdefault(str(p.get("user_id") or ""), []).append(p)
     if rows:
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(rows))) as pool:
-            futs = {pool.submit(wt_check_user, c["user_id"], c, memo): c for c in rows}
+            futs = {pool.submit(wt_check_user, c["user_id"], c, memo,
+                                plaene_je_user.get(str(c["user_id"]), [])): c for c in rows}
             for f in concurrent.futures.as_completed(futs):
                 c = futs[f]
                 try:
@@ -4441,22 +4580,40 @@ def watcher_cycle():
     # übernimmt. Einzelne User-Fehler sind dagegen normal.
     if rows and failed == len(rows):
         raise RuntimeError(f"alle {failed} User fehlgeschlagen")
+    return alle_plaene
+
+
+def watcher_leerlauf(plaene):
+    """REIN RECHNEND (testbar): True, wenn der Wächter im Leerlauf-Takt laufen darf — kein Plan planned/open (egal welche
+    Route: Puls, Fusion-Hedge und geplante start_um zählen alle als „läuft gleich/läuft") und kein Duplikum-Plan in
+    review, dem noch ein P&L fehlt (die Nachversuche bleiben im schnellen Takt). None (Runde gescheitert) = kein Leerlauf."""
+    if plaene is None:
+        return False
+    for p in plaene:
+        st = p.get("status")
+        if st in ("planned", "open"):
+            return False
+        if st == "review" and (p.get("route") or "") not in ("mt5", "mt5v2", "tvv2", "tsv2") \
+           and (p.get("master_pl") is None or p.get("slave_pl") is None):
+            return False
+    return True
 
 
 def watcher_loop():
-    print(f"[watcher] 🚀 Server-Wächter läuft (Intervall {WATCHER_INTERVAL}s, parallel)", flush=True)
+    print(f"[watcher] 🚀 Server-Wächter läuft (Intervall {WATCHER_INTERVAL}s, Leerlauf {WATCHER_LEERLAUF_S}s, parallel)", flush=True)
     db_n = 0   # DB-Fehler in Folge (01.10.2026, AUSFALL-BREMSE)
     while True:
         started = time.time()
         db_fehler = False
+        plaene = None
         try:
-            watcher_cycle()
+            plaene = watcher_cycle()
             # Handy-Meldungen: eigener Schritt NACH dem Zyklus und in eigenem
             # try, damit eine fehlgeschlagene Meldung nie den Zyklus als
             # gescheitert stempelt (last_run bliebe stehen -> fresh kippt ->
             # alle Browser schalten ihre Erkennung ab).
             try:
-                push_trade_wache()
+                push_trade_wache(plaene)
             except Exception as e:
                 print(f"[push] ⚠️ Wache: {type(e).__name__}: {e}", flush=True)
             # WICHTIG (Review-Finding): last_run NUR nach erfolgreichem Zyklus stempeln.
@@ -4474,7 +4631,11 @@ def watcher_loop():
         db_n = db_n + 1 if db_fehler else 0
         # Supabase gestört: KEIN Exponential (sonst fallen kurze Trades durch und dup_live altert) — Takt, mindestens bis die
         # Sicherung wieder fragt, höchstens 120 s; schließt sie, geht es sofort weiter. Nicht-DB-Fehler (Duplikum) wie bisher.
-        _schleife_schlafen(schleifen_pause(max(1.0, WATCHER_INTERVAL - (time.time() - started)), db_n, sb_bremse_rest_s(), 120,
+        # Leerlauf-Takt (01.10.2026, SUPABASE-DIÄT B): nichts geplant/offen → WATCHER_LEERLAUF_S statt WATCHER_INTERVAL.
+        # Sobald ein Plan planned/open ist, gilt wieder der schnelle Takt (spätestens eine Leerlauf-Runde später).
+        takt = WATCHER_LEERLAUF_S if watcher_leerlauf(plaene) else WATCHER_INTERVAL
+        _watcher_info["takt_s"] = takt
+        _schleife_schlafen(schleifen_pause(max(1.0, takt - (time.time() - started)), db_n, sb_bremse_rest_s(), 120,
                                            verdoppeln=False), db_pause=db_n > 0)
 
 
@@ -4692,8 +4853,7 @@ def _admin_basis():
     disp = {}
     names_ok = False
     try:
-        r = _sb_anfrage("GET", f"{SUPABASE_URL}/auth/v1/admin/users?per_page=200", dienst="auth",
-                         headers=_sb_headers(), timeout=12)
+        r = _auth_liste_anfrage()
         for u in (r.json() or {}).get("users", []):
             uid = str(u.get("id"))
             mail = u.get("email") or uid[:8]
@@ -6300,8 +6460,7 @@ def _admin_auth():
     if not token:
         return None, (jsonify({"error": "Nicht angemeldet"}), 401)
     try:
-        r = _sb_anfrage("GET", f"{SUPABASE_URL}/auth/v1/user", dienst="auth", timeout=12,
-                         headers={"apikey": SUPABASE_ANON_KEY, "Authorization": f"Bearer {token}"})
+        r = _auth_user_anfrage(token)
         u = r.json() or {}
         if r.status_code != 200 or not u.get("id"):
             return None, (jsonify({"error": "Nicht angemeldet"}), 401)
@@ -6805,8 +6964,7 @@ def _acc_plan_personen(accs):
     ids = {str(a.get("user_id")) for a in accs if a.get("user_id")}
     namen, mails = {}, {}
     try:
-        r = _sb_anfrage("GET", f"{SUPABASE_URL}/auth/v1/admin/users?per_page=200", dienst="auth",
-                         headers=_sb_headers(), timeout=12)
+        r = _auth_liste_anfrage()
         for u in (r.json() or {}).get("users", []):
             uid = str(u.get("id"))
             mail = str(u.get("email") or "")
@@ -7088,15 +7246,14 @@ def _wd_login():
     if not token:
         return None, (jsonify({"error": "Nicht angemeldet"}), 401)
     try:
-        r = _sb_anfrage("GET", f"{SUPABASE_URL}/auth/v1/user", dienst="auth", timeout=12,
-                         headers={"apikey": SUPABASE_ANON_KEY, "Authorization": f"Bearer {token}"})
+        r = _auth_user_anfrage(token)
         u = r.json() or {}
         if r.status_code != 200 or not u.get("id"):
             return None, (jsonify({"error": "Nicht angemeldet"}), 401)
         # Nur eigene Daten (27.09.2026): gilt für diese eine Anfrage. Ist admin_zugang nicht
         # lesbar, greift das except unten (502) — nie still alles ausliefern.
-        z = sb_select("admin_zugang", {"select": "nur_eigene", "user_id": f"eq.{u['id']}"})
-        if isinstance(z, list) and z and z[0].get("nur_eigene"):
+        # admin_zugang 60 s gemerkt (01.10.2026, SUPABASE-DIÄT B) — Fehler werfen weiter ins except (502)
+        if admin_zugang_nur_eigene(str(u["id"])):
             g.admin_nur_uid = str(u["id"])
         return str(u["id"]), None
     except Exception:
@@ -7107,8 +7264,7 @@ def _wd_personen():
     """user_id → Anzeigename (user_metadata.name, sonst E-Mail-Kürzel) und die
     Menge der ausgeblendeten Personen (ADMIN_EXCLUDE_EMAILS) — wie in der Übersicht."""
     disp, excluded = {}, set()
-    r = _sb_anfrage("GET", f"{SUPABASE_URL}/auth/v1/admin/users?per_page=200", dienst="auth",
-                     headers=_sb_headers(), timeout=12)
+    r = _auth_liste_anfrage()
     for u in (r.json() or {}).get("users", []):
         uid = str(u.get("id"))
         mail = str(u.get("email") or "")
@@ -8999,7 +9155,8 @@ def watcher_status():
     # 45s-Mindestfenster: ein einzelner langsamer Zyklus (P&L-Nachversuche schlafen
     # je 1s) darf fresh nicht kurz kippen lassen — Flapping würde die Browser-Engines
     # unnötig an- und wieder abschalten.
-    fresh = _watcher_info["started"] and (time.time() - _watcher_info["last_run"]) < max(45, WATCHER_INTERVAL * 4)
+    # Leerlauf-Takt mitrechnen (01.10.2026): sonst kippte fresh zwischen zwei 60-s-Runden nicht, aber knapp — Luft für langsame Runden
+    fresh = _watcher_info["started"] and (time.time() - _watcher_info["last_run"]) < max(45, WATCHER_INTERVAL * 4, WATCHER_LEERLAUF_S * 2 + 30)
     # Review-Finding: keine Nutzerzahl und keine rohen Fehlertexte nach außen
     # (Endpoint ist offen + CORS *) — error nur als Flag, Details stehen im Railway-Log.
     return jsonify({
@@ -10543,8 +10700,7 @@ def _login_uid_mail():
     if not token:
         return None, None, (jsonify({"error": "Nicht angemeldet"}), 401)
     try:
-        r = _sb_anfrage("GET", f"{SUPABASE_URL}/auth/v1/user", dienst="auth", timeout=12,
-                         headers={"apikey": SUPABASE_ANON_KEY, "Authorization": f"Bearer {token}"})
+        r = _auth_user_anfrage(token)
         u = r.json() or {}
         if r.status_code != 200 or not u.get("id"):
             return None, None, (jsonify({"error": "Nicht angemeldet"}), 401)
