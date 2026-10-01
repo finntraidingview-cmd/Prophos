@@ -2932,6 +2932,12 @@ def test_puls_cdp_login():
         and not ob.cdp_login_noetig("konto_nicht_erreicht", {"konto_treffer": 2}) and not ob.cdp_login_noetig("konto_nicht_erreicht", {})
         and not ob.cdp_login_noetig("cdp_fehler", {"konto_treffer": 0}) and not ob.cdp_login_noetig("", None),
         "Login nur bei kein Broker oder 0 Treffern im Dropdown (mehrdeutig/Dropdown nicht erkannt = nie abmelden)")
+    tv = "https://www.tradingview.com/chart/abc/?trade-now=TRADOVATE"
+    chk(ob.cdp_seite_bereit("complete", tv, None) and ob.cdp_seite_bereit("interactive", tv, 1.5)
+        and not ob.cdp_seite_bereit("interactive", tv, 1.4) and not ob.cdp_seite_bereit("interactive", tv, None)
+        and not ob.cdp_seite_bereit("loading", tv, 30.0) and not ob.cdp_seite_bereit("complete", "about:blank", None)
+        and not ob.cdp_seite_bereit("interactive", "https://evil.io/tradingview.com/", 30.0),
+        "Tab bereit: complete sofort, interactive erst nach 1,5 s stabil, loading/fremde Seite nie (Jacob 01.10.2026)")
     st_ok = {"konto": {"schalter": {"rect": [70, 900, 180, 28]}, "aktiv": "APEX0000000000024 USD"}}
     chk(ob.cdp_konto_verbunden(st_ok) == "APEX0000000000024 USD" and ob.cdp_konto_verbunden({"konto": {"aktiv": "APEX0000000000024"}}) == ""
         and ob.cdp_konto_verbunden({"konto": {"schalter": {"rect": [1, 1, 50, 20]}, "aktiv": "Tradovate"}}) == ""

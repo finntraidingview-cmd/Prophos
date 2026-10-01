@@ -16022,8 +16022,11 @@ class _AugenSitzung:
     def _seite_abwarten(self, sek=25.0):
         """Erst weiter, wenn die Seite fertig geladen ist (29.09.2026 14:45 UTC, frisch gestartetes Puls-Chrome: augen.js lag in der
         noch LADENDEN Seite, TradingView lud fertig, prophosAugen war weg → „stand() wirft: Uncaught"). Fertig = readyState
-        'complete' und die Seite schon > 3 s alt oder dieselbe Adresse zwei Blicke lang. -> True/False (False = trotzdem weiter)"""
-        ende, vorher = time.time() + sek, None
+        'complete' und die Seite schon > 3 s alt oder dieselbe Adresse zwei Blicke lang. Seit 01.10.2026 (Jacob/Moritz: TradingView
+        bleibt im Puls-Chrome bei 'interactive' hängen, Connect ist trotzdem klickbar) reicht auch 'interactive' auf derselben
+        TradingView-Adresse CDP_INTERAKTIV_REICHT_S lang (cdp_seite_bereit) — sonst 25 s Leerlauf vor jedem Klick.
+        -> True/False (False = trotzdem weiter)"""
+        ende, vorher, interaktiv = time.time() + sek, None, None
         while time.time() < ende:
             try:
                 r = self.ws.rufe("Runtime.evaluate", {"expression": "[document.readyState, String(location.href), performance.now()]",
@@ -16037,6 +16040,14 @@ class _AugenSitzung:
                 vorher = v[1]
             else:
                 vorher = None
+            if isinstance(v, list) and len(v) == 3 and v[0] == "interactive":
+                if not interaktiv or interaktiv[0] != v[1]:
+                    interaktiv = (v[1], time.time())
+                if cdp_seite_bereit("interactive", v[1], time.time() - interaktiv[1]):
+                    self.trail.append("Seite 'interactive' (nicht 'complete') — reicht, weiter")
+                    return True
+            else:
+                interaktiv = None
             _warte(0.4, 0.2)
         self.trail.append(f"Seite nach {sek:.0f} s nicht fertig geladen — weiter")
         return False
@@ -19171,16 +19182,39 @@ def _cdp_tab_neu(url, trail):
     return None
 
 
-def _cdp_seite_geladen(ziel, trail, warten_s=30.0):
-    """Wartet, bis der Tab fertig geladen auf tradingview.com steht (document.readyState) — augen.js vorher zu laden hieße, es in
-    eine Seite zu legen, die gleich ersetzt wird. -> True/False"""
+# Live-Befund Jacob 01.10.2026 12:38 UTC: nach dem Abmelden stand im neuen ?trade-now-Tab der Tradovate-Connect-Dialog längst
+# da, der Bot wartete aber 30 s auf readyState „complete" und brach ab („neuer TradingView-Tab lädt nicht fertig"). TradingView
+# kommt im Puls-Chrome oft nie über „interactive" hinaus (Moritz 01.10. 11:49–12:10 dasselbe auf dem Order-Weg). „interactive"
+# heißt: Dokument geparst, wird nicht mehr ersetzt — steht es kurz stabil auf tradingview.com, reicht das (Finn: „Connect kann
+# man da schon drücken, nicht insta, 1–2 s warten"). Bleibt der Tab ganz hängen, geht es nach CDP_TAB_WARTEN_S trotzdem weiter:
+# _cdp_nach_link sucht den Dialog noch bis zu 40 s und klickt nur bei genau einem Dialog.
+CDP_INTERAKTIV_REICHT_S = 1.5
+CDP_TAB_WARTEN_S = 15.0
+
+
+def cdp_seite_bereit(zustand, url, interaktiv_seit_s):
+    """REIN RECHNEND (testbar): Ist der Tab bereit für augen.js? „complete" sofort, „interactive" erst nach
+    CDP_INTERAKTIV_REICHT_S Sekunden auf derselben TradingView-Adresse, alles andere (loading, fremde Seite) nie."""
+    if not CDP_RX_TV_SEITE.match(str(url or "")):
+        return False
+    if zustand == "complete":
+        return True
+    return zustand == "interactive" and interaktiv_seit_s is not None and interaktiv_seit_s >= CDP_INTERAKTIV_REICHT_S
+
+
+def _cdp_seite_geladen(ziel, trail, warten_s=CDP_TAB_WARTEN_S):
+    """Wartet, bis der Tab auf tradingview.com bereit steht (cdp_seite_bereit) — augen.js vorher zu laden hieße, es in eine Seite
+    zu legen, die gleich ersetzt wird. -> True/False"""
     try:
         ws = _CdpVerbindung(ziel.get("webSocketDebuggerUrl"), timeout=8.0)
     except Exception as e:
         trail.append(f"[Login] Tab nicht erreichbar ({type(e).__name__})")
         return False
     try:
-        ende = time.time() + warten_s
+        start = time.time()
+        ende = start + warten_s
+        interaktiv = None                     # (url, seit) — „interactive" auf derselben Adresse
+        zuletzt = ""
         while time.time() < ende:
             _warte(0.6, 0.3)
             try:
@@ -19189,8 +19223,23 @@ def _cdp_seite_geladen(ziel, trail, warten_s=30.0):
             except Exception:
                 continue
             v = (r.get("result") or {}).get("value")
-            if isinstance(v, list) and len(v) == 2 and v[0] == "complete" and CDP_RX_TV_SEITE.match(str(v[1])):
+            if not (isinstance(v, list) and len(v) == 2):
+                continue
+            zustand, url = str(v[0]), str(v[1])
+            zuletzt = url
+            if zustand == "interactive":
+                if not interaktiv or interaktiv[0] != url:
+                    interaktiv = (url, time.time())
+            else:
+                interaktiv = None
+            seit = time.time() - interaktiv[1] if interaktiv else None
+            if cdp_seite_bereit(zustand, url, seit):
+                if zustand != "complete":
+                    trail.append(f"[Login] Tab nach {time.time() - start:.0f} s 'interactive' (nicht 'complete') — reicht, weiter")
                 return True
+        if CDP_RX_TV_SEITE.match(zuletzt):
+            trail.append(f"[Login] Tab nach {warten_s:.0f} s nicht fertig geladen — steht auf TradingView, weiter (Dialog-Suche entscheidet)")
+            return True
         trail.append(f"[Login] Tab nach {warten_s:.0f} s nicht fertig geladen")
         return False
     finally:
