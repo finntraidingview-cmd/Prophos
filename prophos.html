@@ -23235,11 +23235,20 @@
         else if(n === alt && echt.length === _mklLw.nEcht && daten[0].time === _mklLw.erste && daten[n - 1].time === _mklLw.letzte){ s.update(daten[n - 1]) }
         else if(n === alt + 1 && echt.length === _mklLw.nEcht + 1 && daten[0].time === _mklLw.erste && daten[n - 2].time === _mklLw.letzte && daten[n - 1].time > _mklLw.letzte){ s.update(daten[n - 2]); s.update(daten[n - 1]); _mklLw.nEcht = echt.length }
         else {
-          // Ausschnitt nur neu setzen, wenn er vorher am rechten Rand stand — hat Finn zurückgescrollt oder gezoomt, bleibt es so
-          let amRand = true
-          try{ const vr = _mklLw.chart.timeScale().getVisibleRange(); amRand = !vr || Number(vr.to) >= _mklLw.letzte - 120 }catch(_){}
+          // ZOOM BLEIBT (01.10.2026, Finn: „der Chart soll nicht immer automatisch resetten, wenn ich rauszoome"): vorher sprang der
+          // Ausschnitt bei jedem vollen Neuladen auf die Standard-Stunde zurück, sobald sein rechter Rand bei „jetzt" lag — beim
+          // Herauszoomen bleibt der aber genau dort. Jetzt: Breite (Zoom) bleibt immer; am rechten Rand wandert der Ausschnitt um die
+          // neuen Kerzen mit, zurückgescrollt bleibt er auf derselben Zeit. Nur Wurzel/Darstellung wechseln setzen ihn neu (oben).
+          const ts_ = _mklLw.chart.timeScale()
+          let vr0 = null, lr0 = null
+          try{ vr0 = ts_.getVisibleRange(); lr0 = ts_.getVisibleLogicalRange() }catch(_){}
+          const amRand = !vr0 || Number(vr0.to) >= _mklLw.letzte - 120, nAlt = _mklLw.n
           s.setData(daten); _mklLw.n = n; _mklLw.nEcht = echt.length; _mklLw.erste = daten[0].time; _mklLw.letzte = daten[n - 1].time
-          if(amRand) mklSichtbarSetzen()
+          try{
+            if(amRand && lr0 && isFinite(lr0.from) && isFinite(lr0.to)){ const d = n - nAlt; ts_.setVisibleLogicalRange({ from: lr0.from + d, to: lr0.to + d }) }
+            else if(!amRand && vr0) ts_.setVisibleRange(vr0)
+            else mklSichtbarSetzen()
+          }catch(_){ mklSichtbarSetzen() }
         }
       }catch(e){
         // Lightweight-Fehler (z. B. „Cannot update oldest data") nicht schlucken: einmal komplett neu aufbauen (25.09.2026)
@@ -37199,7 +37208,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.939'
+  const OS_TAB_BUILD = '2026-09-22.940'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
