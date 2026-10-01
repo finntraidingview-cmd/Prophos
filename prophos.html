@@ -2154,6 +2154,12 @@
   #dashboard-view .wdl-z-mi{grid-area:mi;text-align:right}
   #dashboard-view .wdl-z-pl{grid-area:pl;text-align:right;font-weight:600}
   #dashboard-view .wdl-z-slave{display:block;margin-top:1px;font-size:11px;font-weight:500}   /* Slave-P&L unter dem Master (01.10.2026) */
+  /* Modell-Leiste im Radar (01.10.2026 abends, Finn: „ein Tab je Modell, schön geordnet") — Gruppen wie im Plan-Popup */
+  #dashboard-view .wdl-modelle{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;margin:0 0 12px}
+  #dashboard-view .wdl-modelle .wdl-mg{display:flex;align-items:center;gap:6px}
+  #dashboard-view .wdl-modelle .wdl-mg > span{font-size:11px;color:var(--sub)}
+  #dashboard-view .wdl-modelle .seg button b{margin-left:6px;font-variant-numeric:tabular-nums;color:#15803d}
+  #dashboard-view .wdl-modelle .seg button.is-leer{opacity:.55}
   #dashboard-view .wdl-z-zeit{grid-area:zeit;text-align:right;color:var(--sub)}
   /* Zweite Runde (30.09.2026, Finn am Radar .846: „Einstieg muss nicht dastehen, TP auch nicht. Lieber wieder diese eine Spanne …
      die Werte gern ein Tick größer"): Einstieg + TP werden EINE Spalte (228 px = vorher 104 + 20 + 104, P&L und Zeit bleiben
@@ -6302,7 +6308,7 @@
                 <button type="button" id="tp-route-mt5">Echo</button>
                 <!-- Orbit (= Orbit V3, 01.10.2026): tvv2 + Fusion-Gegenhedge mit der Farm-Rechnung, jedes Futures-Konto, KEIN Winning Day
                      (trade_plans.orbit_v3); Userscript im Puls-Chrome schließt, Radar als Backup. -->
-                <button type="button" id="tp-route-o3" title="Orbit V3 — Puls platziert in TradingView, Fusion-Gegenhedge; schließt, sobald das Userscript im Puls-Chrome die Position nicht mehr sieht, Radar (TP/SL) als Backup">Orbit</button>
+                <button type="button" id="tp-route-o3" title="Orbit — Puls platziert in TradingView, Fusion-Gegenhedge; schließt, sobald das Userscript im Puls-Chrome die Position nicht mehr sieht, Radar (TP/SL) als Backup">Orbit</button>
                 <!-- Winning Day (24.09.2026 abends): technisch Orbit V2 (route tvv2) + Fusion-Gegenhedge; nur Funded-Futures-Konten. -->
                 <button type="button" id="tp-route-wd" title="Winning Day: Orbit V2 + Fusion-Gegenhedge (Faktor, TP- und SL-Level in MetaTrader) — Dropdown zeigt nur Funded-Futures-Konten">Winning Day</button>
                 <button type="button" id="tp-route-topstep">Topstep</button>
@@ -8107,6 +8113,9 @@
            farblich zuordnen … oben alle IDs, wie viele Trades jeder gerade hat"): KEIN zweiter Chart — #mkl-wrap aus „Markt live" wird beim
            Betreten hierher umgehängt (wdlOnEnter) und beim Betreten der Markt-View zurück (mklHeim). Linien je Trade zeichnet mklChartZeichnen
            über wdlChartLinien. -->
+      <!-- Modell-Leiste (01.10.2026 abends, Finn: „ein Tab für jedes einzelne Modell … schön geordnet"): Alle · Mit Hedge (Echo, Orbit,
+           Winning Day) · Ohne Hedge (Echo V2, Orbit V2, Topstep V2) — filtert Liste und ID-Leiste, gezeichnet in wdlModelleRender -->
+      <div class="wdl-modelle" id="wdl-modelle"></div>
       <div class="adm-vl-legend wdl-ids" id="wdl-ids" style="margin:0 0 10px"></div>
       <div id="wdl-chart-slot"></div>
       <!-- #wdl-kopf zeigt seit 30.09.2026 nur noch einen Ladefehler (Statistik-Zeile + Legende entfallen, Finn), sonst ausgeblendet -->
@@ -18358,7 +18367,7 @@
     try{ const a = (accounts || []).find(x => String(x.id) === String(p.masterAccountId)); if(a && String(a.type || '').toLowerCase() === 'winning_days') return true }catch(_){}
     return false
   }
-  const wegLabel = p => tpIstWdPlan(p) ? 'Winning Day' : tpIstOrbitV3(p) ? 'Orbit V3' : p && p.route === 'mt5v2' ? 'Echo V2' : p && p.route === 'tsv2' ? 'Topstep V2' : 'Orbit V2'   // Weg-Label für Anzeigen (25.09.2026)
+  const wegLabel = p => tpIstWdPlan(p) ? 'Winning Day' : tpIstOrbitV3(p) ? 'Orbit' : p && p.route === 'mt5v2' ? 'Echo V2' : p && p.route === 'tsv2' ? 'Topstep V2' : 'Orbit V2'   // Weg-Label für Anzeigen (25.09.2026)
   const SYS_STICKER = {
     dup:    ['Duplikium', 'Duplikium — Kopie Master → Slave über den Duplikium-Wächter'],
     mt5:    ['Echo',      'Echo — dein MT5-Hedge-Copier auf dem PC'],
@@ -18366,7 +18375,7 @@
     mt5v2:  ['Echo V2',   'Echo V2 — Puls platziert im Master-Terminal, kein Hedge, kein Copier'],
     tvv2:   ['Orbit V2',  'Orbit V2 — Puls platziert in TradingView, kein Duplikum, kein Hedge'],
     wd:     ['Winning Day', 'Winning Days Farm — Puls platziert in TradingView, Fusion-Gegenhedge (intern Orbit V2)'],
-    tvv3:   ['Orbit V3',  'Orbit V3 — Puls platziert in TradingView, Fusion-Gegenhedge; schließt über das Userscript im Puls-Chrome, Radar als Backup'],
+    tvv3:   ['Orbit',  'Orbit — Puls platziert in TradingView, Fusion-Gegenhedge; schließt über das Userscript im Puls-Chrome, Radar als Backup'],
     tsv2:   ['Topstep V2', 'Topstep V2 — Puls platziert in TopstepX (Schalter „Puls für Topstep"), kein Hedge; P&L aus der Balance wie Orbit V2'],
     mirror: ['Mirror',    'Topstep Mirror — TopstepX-Master auf MetaApi-Slave'],
     tsx:    ['TopstepX',  'TopstepX — Position direkt auf dem Topstep-Konto']
@@ -25234,16 +25243,16 @@
   // orbit_v3/konto_typ liefert /admin/live-trades seit .917; ein älteres Backend ohne die Felder → eigener Plan aus tradePlans
   function wdlWeg(t){
     if(!t) return 'Orbit V2'
-    if(wdlIstEcho(t)) return 'Echo V2'
+    if(wdlIstEcho(t)) return t.route === 'mt5' ? 'Echo' : 'Echo V2'   // route mt5 = Echo mit Fusion-Hedge (seit 01.10.2026 abends im Radar)
     if(t.route === 'tsv2') return 'Topstep V2'
     let eigen = null; try{ eigen = (tradePlans || []).find(x => String(x.id) === String(wdlTid(t))) }catch(_){}
-    if(t.orbit_v3 || (eigen && eigen.orbitV3)) return 'Orbit V3'
+    if(t.orbit_v3 || (eigen && eigen.orbitV3)) return 'Orbit'   // früher „Orbit V3" — heißt wie im Plan-Popup (01.10.2026)
     if(Number(t.hedge_eur) > 0 || t.quelle === 'farmer' || String(t.konto_typ || '').toLowerCase() === 'winning_days') return 'Winning Day'
     return eigen ? wegLabel(eigen) : 'Orbit V2'
   }
   // Slave-P&L (Fusion-Gegenhedge, €) eines beendeten Hedge-Trades: Wert am Plan, sonst der geschlossene Hedge; ohne Hedge null
   function wdlSlavePl(t){
-    if(!t || wdlIstEcho(t)) return null
+    if(!t || (wdlIstEcho(t) && t.route !== 'mt5')) return null   // Echo V2 hat keinen Hedge, Echo (mt5) schon
     const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
     if(n(t.slave_pl) != null) return n(t.slave_pl)
     const h = t.hedge && typeof t.hedge === 'object' ? t.hedge : null
@@ -25273,6 +25282,40 @@
       if(sb != null && t.status === 'open' && h.status && !['geschlossen', 'fehler', 'abgelehnt', 'zu'].includes(String(h.status))) l(sb, '#7C3AED', 2, 2)
     }
     return out
+  }
+  // MODELLE (01.10.2026 abends): Schlüssel = Weg-Label (wdlWeg), Gruppen wie im Plan-Popup. Topstep (klassisch) und Duplikum liefert
+  // das Backend nicht — sie fehlen hier bewusst statt als ewig leere Reiter.
+  const WDL_MODELLE = [['Mit Hedge', ['Echo', 'Orbit', 'Winning Day']], ['Ohne Hedge', ['Echo V2', 'Orbit V2', 'Topstep V2']]]
+  const wdlModellPasst = t => !wdl.modell || wdlWeg(t) === wdl.modell
+  try{ const m = localStorage.getItem('prophos_wdl_modell'); if(m && WDL_MODELLE.some(([, l]) => l.includes(m))) wdl.modell = m }catch(_){}
+  function wdlModelleRender(trades){
+    const bar = document.getElementById('wdl-modelle'); if(!bar) return
+    const n = new Map(), lauf = new Map()
+    for(const t of trades){ const k = wdlWeg(t); n.set(k, (n.get(k) || 0) + 1); if(t.status === 'open') lauf.set(k, (lauf.get(k) || 0) + 1) }
+    const knopf = (k, label) => {
+      const an = (wdl.modell || '') === k, z = lauf.get(k) || 0, alle = k ? (n.get(k) || 0) : trades.length
+      return `<button type="button" data-wdl-modell="${escapeHtml(k)}" class="${an ? 'active' : ''}${k && !alle ? ' is-leer' : ''}" title="${escapeHtml(`${alle} im Zeitraum · ${z} laufen gerade`)}">${escapeHtml(label)}${z ? `<b>${z}</b>` : ''}</button>`
+    }
+    bar.innerHTML = `<div class="seg">${knopf('', 'Alle')}</div>`
+      + WDL_MODELLE.map(([g, l]) => `<div class="wdl-mg"><span>${g}</span><div class="seg">${l.map(k => knopf(k, k)).join('')}</div></div>`).join('')
+  }
+  document.getElementById('wdl-modelle')?.addEventListener('click', ev => {
+    const b = ev.target.closest('[data-wdl-modell]'); if(!b) return
+    wdl.modell = b.getAttribute('data-wdl-modell') || null
+    try{ localStorage.setItem('prophos_wdl_modell', wdl.modell || '') }catch(_){}
+    const sel = wdl.auswahl ? ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === wdl.auswahl) : null
+    if(sel && !wdlModellPasst(sel)) wdl.auswahl = null
+    wdlRender()
+  })
+  // Fusion-P&L live (slave_pl_live vom Backend, 15-s-Abruf) in die laufenden Zeilen schreiben — ohne Neuaufbau
+  function wdlFusionLive(){
+    if(!wdl.daten) return
+    for(const el of document.querySelectorAll('#wdl-liste [data-wdl-fusion]')){
+      const t = (wdl.daten.trades || []).find(x => wdlTid(x) === el.getAttribute('data-wdl-fusion')); if(!t) continue
+      const v = (t.slave_pl_live == null || !isFinite(Number(t.slave_pl_live))) ? null : Number(t.slave_pl_live)
+      el.textContent = v == null ? 'Fusion –' : `Fusion ${v < 0 ? '−' : '+'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
+      el.style.color = v == null ? 'var(--sub)' : v >= 0 ? '#15803d' : '#b91c1c'
+    }
   }
   function wdlIdsRender(trades){
     const bar = document.getElementById('wdl-ids'); if(!bar) return
@@ -25324,9 +25367,9 @@
     // auch ohne neue Daten — mitten im Scrollen/Tippen gingen Tipps verloren, die Karten flackerten). Live-Zahlen schreibt
     // wdlLiveTick alle 2 s nach; die Minuten-Texte („Nachlesung in n min") hält der Neuaufbau spätestens alle 60 s frisch.
     // Echo-Live-Werte (Kurs ≈, P&L, Alter) ändern sich bei jedem Abruf — sie zählen nicht zur Signatur, wdlEchoLive schreibt sie nach
-    const ohneEchoLive = t => wdlIstEcho(t) ? Object.assign({}, t, { kurs_jetzt: null, pl_live: null, mt5_alter_s: null, konto_balance: null, konto_balance_at: null }) : t
+    const ohneEchoLive = t => Object.assign({}, t, wdlIstEcho(t) ? { kurs_jetzt: null, pl_live: null, mt5_alter_s: null, konto_balance: null, konto_balance_at: null } : {}, { slave_pl_live: null })
     const sig = JSON.stringify([((wdl.daten && wdl.daten.trades) || []).map(ohneEchoLive), wdl.fehler])
-    if(!voll && sig === wdl.sig && Date.now() - (wdl.renderAt || 0) < 60000){ wdlEchoLive(); return }
+    if(!voll && sig === wdl.sig && Date.now() - (wdl.renderAt || 0) < 60000){ wdlEchoLive(); wdlFusionLive(); return }
     wdl.sig = sig
     wdlRender()
   }
@@ -25444,7 +25487,7 @@
     for(const c of document.querySelectorAll('#wdl-liste .wdl-z-echo.wdl-z-lauf[data-wdl-trade]')){
       const t = (wdl.daten.trades || []).find(x => wdlTid(x) === c.getAttribute('data-wdl-trade')); if(!t) continue
       const P = wdlEchoPl(t), sp = wdlSpanne(t), pkt = wdlEchoPunkt(t, sp), pos = sp && pkt ? wdlSpPos(sp, pkt.v) : null
-      const pl = c.querySelector('.wdl-z-pl'); if(pl){ pl.textContent = P.txt; pl.style.color = P.farbe; pl.title = P.tip }
+      const pl = c.querySelector('.wdl-z-pl .wdl-pl-m') || c.querySelector('.wdl-z-pl'); if(pl){ pl.textContent = P.txt; pl.style.color = P.farbe; pl.title = P.tip }
       const pk = c.querySelector('.wdl-sp-punkt'); if(pk){ pk.style.display = pos == null ? 'none' : ''; if(pos != null) pk.style.left = pos.toFixed(2) + '%'; pk.style.background = P.farbe }
       const spEl = c.querySelector('.wdl-sp'); if(spEl && sp) spEl.title = wdlEchoSpTip(t, sp, pkt)
     }
@@ -25518,8 +25561,10 @@
     const alleTrades = ((wdl.daten && wdl.daten.trades) || []).filter(t => t.status !== 'planned')
     // Auswahl, deren Trade aus den Daten gefallen ist, aufheben — sonst bliebe sie unsichtbar gesetzt (30.09.2026, s. mklAuswahlTrade)
     if(wdl.auswahl && wdl.daten && !alleTrades.some(x => wdlTid(x) === wdl.auswahl)) wdl.auswahl = null
-    wdlIdsRender(alleTrades)
-    const trades = alleTrades.filter(wdlPasst)
+    wdlModelleRender(alleTrades)
+    const modellTrades = alleTrades.filter(wdlModellPasst)
+    wdlIdsRender(modellTrades)
+    const trades = modellTrades.filter(wdlPasst)
     const num = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
     const f2 = v => num(v) == null ? '–' : Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     const f0 = v => num(v) == null ? '–' : Number(v).toLocaleString('de-DE', { maximumFractionDigits: 0 })
@@ -25547,7 +25592,23 @@
     const zelle = (art, inhalt, o = {}) => `<span class="wdl-z-${art}"${o.lv ? ` data-wdl-lv="${o.lv}"` : ''}${o.tip ? ` title="${escapeHtml(o.tip)}"` : ''}${o.f ? ` style="color:${o.f}"` : ''}>${inhalt}</span>`
     const jetzt = Date.now(), minTxt = ms => { const m = Math.max(1, Math.ceil(ms / 60000)), h = Math.floor(m / 60); return m < 60 ? `${m} min` : `${h} h${m % 60 ? ` ${m % 60} min` : ''}` }   // wie wdlDauer
     // Master + Slave (01.10.2026, Finn: „wenn gegengehedgt wurde, sieht man auch den Slave-P&L"): zweite, kleine Zeile in der P&L-Zelle
-    const slaveZ = t => { const v = wdlSlavePl(t); return v == null ? '' : `<small class="wdl-z-slave" style="color:${col(v)}" title="Slave (Fusion-Gegenhedge)">Slave ${sig(v, '€', 2)}</small>` }
+    const slaveZ = t => { const v = wdlSlavePl(t); return v == null ? '' : `<small class="wdl-z-slave" style="color:${col(v)}" title="Fusion-Gegenhedge">Fusion ${sig(v, '€', 2)}</small>` }
+    // SCHLIESS-WEG (01.10.2026 abends, Finn: „bei Modellen mit Gegenhedge immer sehen, durch welchen Weg geschlossen wurde —
+    // Userscript, Radar oder das 110-%-Level"): aus hedge.grund, kurz; der lange Text (hedgeGrundText) steht im Tooltip
+    const ZU_WEG = { master_ende_reader: 'Userscript', tp_feed: 'Radar · TP', sl_feed: 'Radar · SL', level_tp: 'Terminal · Notfall 110 %', level_sl: 'Terminal · Master-SL',
+      level_mt5: 'Terminal', master_ende: 'Plan-Ende', hand: 'von Hand', master_nie_da: 'Master nie gefüllt', stopout: 'Stop-out', close: 'Close-Auftrag' }
+    const zuWegZ = t => {
+      const h = t.hedge && typeof t.hedge === 'object' ? t.hedge : null
+      if(!h || h.status !== 'geschlossen' || !h.grund) return ''
+      const g = String(h.grund), txt = ZU_WEG[g] || g, lang = typeof hedgeGrundText === 'function' ? hedgeGrundText(g, h) : g
+      return `<small class="wdl-z-slave" style="color:var(--sub)" title="${escapeHtml(lang)}">zu über ${escapeHtml(txt)}</small>`
+    }
+    // laufend (01.10.2026 abends, Finn: „bei Modellen mit Gegenhedge live beide P&Ls"): Fusion schwebend aus mt5_live, wdlFusionLive schreibt nach
+    const fusionLiveZ = t => {
+      const hedgeModell = ['Echo', 'Orbit', 'Winning Day'].includes(wdlWeg(t)); if(!hedgeModell) return ''
+      const v = num(t.slave_pl_live)
+      return `<small class="wdl-z-slave" data-wdl-fusion="${escapeHtml(wdlTid(t))}" style="color:${v == null ? 'var(--sub)' : col(v)}" title="Fusion-Gegenhedge live (schwebend, aus MT5)">Fusion ${v == null ? '–' : sig(v, '€', 2)}</small>`
+    }
     const zeile = (t, extra) => {
       const k = t.konto || {}, buy = t.richtung === 'buy', sell = t.richtung === 'sell', offen = t.status === 'open', gepl = t.status === 'planned'
       // Echo (30.09.2026): kein Chart, kein „Wartet" (siehe gruppen), Lots + CFD-Symbol statt „3 × NQ"
@@ -25567,7 +25628,7 @@
           const sp = wdlSpanne(t), pkt = wdlEchoPunkt(t, sp), P = wdlEchoPl(t)
           miZ = sp ? wdlSpanneHtml(sp, pkt ? pkt.v : null, P.farbe, wdlEchoSpTip(t, sp, pkt))
             : zelle('mi', '–', { tip: t.position_offen ? 'SL oder TP fehlt an der MT5-Position' : 'keine frische MT5-Position' })
-          plZ = zelle('pl', P.txt, { f: P.farbe, tip: P.tip })
+          plZ = zelle('pl', `<span class="wdl-pl-m" style="color:${P.farbe}">${P.txt}</span>${fusionLiveZ(t)}`, { tip: P.tip })
         } else {
         const LT = wdlLiveTexte(wdlLive(t, kp), kp)   // Live-P&L (F28); der 2-s-Takt schreibt denselben Text nach
         const sp = wdlSpanne(t)
@@ -25577,7 +25638,7 @@
           const spTip = `${sp.art === 'SL' ? 'SL' : 'Liquidation'} ${f2(sp.links)}${lg(sp.plLinks)}${sp.regel ? (sp.regelPur ? ' · ' : ' · Regel: ') + sp.regel : ''}${sp.ein != null ? ' · Einstieg ' + f2(sp.ein) + naeh : ''} · TP ${f2(sp.rechts)}${lg(sp.plRechts)}${kp != null ? ' · Kurs ' + f2(kp) : ''}${demoTip(d) ? ' · ' + demoTip(d) : ''}`
           miZ = wdlSpanneHtml(sp, kp, LT.plFarbe, spTip)
         } else miZ = zelle('mi', '–', { tip: num(t.tp_level_nq) == null ? 'kein TP gespeichert' : 'keine Liquidation/SL gespeichert' })
-        plZ = zelle('pl', LT.pl, { f: LT.plFarbe, lv: 'pl' })
+        plZ = zelle('pl', `<span data-wdl-lv="pl" style="color:${LT.plFarbe}">${LT.pl}</span>${fusionLiveZ(t)}`)
         }
         // „läuft seit 03:24 · 40 min" (Finn 30.09.2026) — an einem anderen Tag „29.09. · 1 T 3 h"; am Handy nur die Laufzeit
         const ab = new Date(t.started_at || ''), abTxt = isNaN(ab) ? '' : ab.toDateString() === heute ? zeit(t.started_at) : tag(ab)
@@ -25602,7 +25663,7 @@
           { tip: wt.login === 'pruefen' ? `Puls kam ${wt.loginN}× nicht durch den Login/die Verbindung${wt.loginCode ? ' (' + wt.loginCode + ')' : ''} und liest nicht mehr von selbst — Login am PC prüfen, dann „Jetzt lesen"`
               : wt.login === 'pause' ? `Login-/Verbindungsfehler${wt.loginCode ? ' (' + wt.loginCode + ')' : ''} — nächster automatischer Versuch frühestens ${zeit(wt.bis)} (kein schneller neuer Login)`
               : wt.versuche ? `${wt.versuche}. Leseversuch` : 'Puls liest die Balance 1–120 min nach dem Ende' })
-        plZ = zelle('pl', '–', { tip: num(d.pl_usd) != null ? `Demo ${sig(d.pl_usd, '$', 0)} · exakt nach der Nachlesung` : 'exakt nach der Nachlesung' })
+        plZ = zelle('pl', '–' + slaveZ(t) + zuWegZ(t), { tip: num(d.pl_usd) != null ? `Demo ${sig(d.pl_usd, '$', 0)} · exakt nach der Nachlesung` : 'exakt nach der Nachlesung' })
         zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
       } else if(t.status === 'review'){
         // ÜBERPRÜFEN (30.09.2026, Finn: „Läuft → Wartet → Überprüfen (P&L ist eingetragen, ich muss nur noch abhaken) → Erledigt"):
@@ -25614,7 +25675,7 @@
         const erg = echo ? '' : d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : ''
         miZ = zelle('mi wdl-z-akt', `${erg ? `<span>${erg}</span>` : ''}<button type="button" class="btn btn-ghost el-knopf" data-wdl-abhaken="${escapeHtml(pid)}"${sperre ? ' disabled' : ''} title="${escapeHtml(sperre || 'Abhaken — P&L prüfen und Trade erledigen')}">Abhaken</button>`,
           { tip: echo ? '' : demoTip(d) })
-        plZ = zelle('pl', sig(pb, '$', 2) + slaveZ(t), { f: col(pb), tip: num(t.pl_balance) != null ? (echo ? 'MT5-Balance' : 'Balance') + ' nachher − vorher' : pb != null ? 'P&L am Plan' : 'noch kein P&L — beim Abhaken eintragen' })
+        plZ = zelle('pl', sig(pb, '$', 2) + slaveZ(t) + zuWegZ(t), { f: col(pb), tip: num(t.pl_balance) != null ? (echo ? 'MT5-Balance' : 'Balance') + ' nachher − vorher' : pb != null ? 'P&L am Plan' : 'noch kein P&L — beim Abhaken eintragen' })
         zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
       } else {
         art = 'zu'
@@ -25623,11 +25684,11 @@
           // Echo: keine Demo → kein Ergebnis-Wort; P&L = MT5-Balance nachher − vorher, sonst der P&L am Plan
           const pb = num(t.pl_balance) != null ? num(t.pl_balance) : num(t.master_pl && t.master_pl.wert)
           miZ = zelle('mi', '–', { tip: 'Echo: kein Demo-Ergebnis — der P&L kommt aus der MT5-Balance' })
-          plZ = zelle('pl', sig(pb, '$', 2), { f: col(pb), tip: num(t.pl_balance) != null ? 'MT5-Balance nachher − vorher' : pb != null ? 'P&L am Plan' : 'noch keine End-Balance' })
+          plZ = zelle('pl', sig(pb, '$', 2) + slaveZ(t), { f: col(pb), tip: num(t.pl_balance) != null ? 'MT5-Balance nachher − vorher' : pb != null ? 'P&L am Plan' : 'noch keine End-Balance' })
         } else {
         const erg = d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : '–'
         miZ = zelle('mi', erg, { tip: demoTip(d) })
-        plZ = zelle('pl', sig(t.pl_balance, '$', 2) + slaveZ(t), { f: col(t.pl_balance), tip: num(t.pl_balance) != null ? 'Balance nachher − vorher' : 'keine End-Balance' })
+        plZ = zelle('pl', sig(t.pl_balance, '$', 2) + slaveZ(t) + zuWegZ(t), { f: col(t.pl_balance), tip: num(t.pl_balance) != null ? 'Balance nachher − vorher' : 'keine End-Balance' })
         }
         zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
       }
@@ -25672,7 +25733,7 @@
         + gruppe('Erledigt', nachEnde(er), ['Ergebnis', 'P&amp;L', 'Zu'], '', 'erledigt')
     }
     liste.innerHTML = trades.length ? gruppen(trades)
-      : `<div class="mwd-leer">${wdl.daten ? 'Keine Trades im Zeitraum.' : (wdl.fehler ? 'Nicht ladbar: ' + escapeHtml(wdl.fehler) : 'Lade Radar…')}</div>`
+      : `<div class="mwd-leer">${wdl.daten ? (wdl.modell ? `Keine ${escapeHtml(wdl.modell)}-Trades im Zeitraum.` : 'Keine Trades im Zeitraum.') : (wdl.fehler ? 'Nicht ladbar: ' + escapeHtml(wdl.fehler) : 'Lade Radar…')}</div>`
     try{ if(wdlAktiv() && typeof mklChartZeichnen === 'function') mklChartZeichnen() }catch(_){}
   }
   // Klick auf eine Karte (oder ihren Punkt) schaltet die Linien dieses Trades — eigener Handler am Listen-Container
@@ -37453,7 +37514,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.956'
+  const OS_TAB_BUILD = '2026-09-22.957'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -37699,7 +37760,7 @@
       const _fin = document.getElementById('pf-final'); if(_fin) _fin.style.display = 'none'
       const _ft = document.getElementById('pf-foot'); if(_ft) _ft.style.display = 'none'
       _pfEchoKnopf(false)
-      const _inf = document.getElementById('pf-plan-info'); if(_inf) _inf.textContent = plan.route === 'tsv2' ? `Topstep V2 · ${plan.masterName || '—'} — Puls in TopstepX${tsPulsModus() === 'lesen' ? ' (nur lesen)' : ''}` : tpIstWdPlan(plan) ? `Winning Day · ${plan.masterName || '—'} — Puls in TradingView, Fusion-Gegenhedge` : tpIstOrbitV3(plan) ? `Orbit V3 · ${plan.masterName || '—'} — Puls in TradingView, Fusion-Gegenhedge, Userscript im Puls-Chrome schließt` : `Orbit V2 · ${plan.masterName || '—'} — ohne Duplikum, ohne Hedge`
+      const _inf = document.getElementById('pf-plan-info'); if(_inf) _inf.textContent = plan.route === 'tsv2' ? `Topstep V2 · ${plan.masterName || '—'} — Puls in TopstepX${tsPulsModus() === 'lesen' ? ' (nur lesen)' : ''}` : tpIstWdPlan(plan) ? `Winning Day · ${plan.masterName || '—'} — Puls in TradingView, Fusion-Gegenhedge` : tpIstOrbitV3(plan) ? `Orbit · ${plan.masterName || '—'} — Puls in TradingView, Fusion-Gegenhedge, Userscript im Puls-Chrome schließt` : `Orbit V2 · ${plan.masterName || '—'} — ohne Duplikum, ohne Hedge`
       document.getElementById('tpPreflightModal')?.classList.add('open')
     }
     const imPopup = !fern && document.getElementById('tpPreflightModal')?.classList.contains('open')
@@ -38316,7 +38377,7 @@
     if(!plan) return 'Plan ' + String(pid).slice(0, 8)
     if(routeIstOrbit(plan.route) && typeof tpOrbitWerte === 'function'){   // Orbit (23.09.2026)
       const w = tpOrbitWerte(plan)
-      const vor = tpIstWdPlan(plan) ? 'Winning Day · ' : tpIstOrbitV3(plan) ? 'Orbit V3 · ' : ''
+      const vor = tpIstWdPlan(plan) ? 'Winning Day · ' : tpIstOrbitV3(plan) ? 'Orbit · ' : ''
       return w.dir ? `${vor}${plan.masterName || '—'} · ${w.dir.toUpperCase()} ${w.lots} ${w.symbol}` : `${vor}${plan.masterName || '—'}`
     }
     const { order } = _tpOrderAusPlan(plan)
@@ -42618,14 +42679,14 @@
         if(k && k.lauf && k.lauf !== (_tpDir === 'sell' ? 'short' : 'long')){ msg(k.text + ' — nicht gespeichert (Richtungs-Schutz).', 'err'); return }
       }
       if(_tpWd || _tpO3){
-        if(!masterTp){ msg(`${_tpO3 ? 'Orbit V3' : 'Winning Day'} braucht einen Take Profit in $ (die Fusion-Gegenposition schließt an dieser Distanz).`, 'err'); return }
+        if(!masterTp){ msg(`${_tpO3 ? 'Orbit' : 'Winning Day'} braucht einen Take Profit in $ (die Fusion-Gegenposition schließt an dieser Distanz).`, 'err'); return }
         if(!(mult > 0)){ msg('Multiplikator nicht rechenbar — Risiko Master ($), Kontrakte und Risiko Slave (€) prüfen.', 'err'); return }
         // Multiplikator-Logik wie bisher (Finn 24.09.2026 spät): hedge_faktor = Multiplikator (Chip/Bearbeiten), hedge_eur =
         // Lots × 0,85 × TP-Punkte = Fusion-Verlust am Master-TP (die Bedeutung, die Copier-Lots und Farmer-Abgleich kennen)
         v2Extra.hedge_faktor = Math.round(mult * 1000) / 1000
         // Orbit V3: kein Staffel-Rückfall — ohne rechenbaren Betrag gibt es keinen Hedge, also nicht speichern
         v2Extra.hedge_eur = tpWdHedgeEurAus(tpWdRechnung()) ?? (_tpO3 ? null : tpWdHedgeEur(masterId, _editPlan && _editPlan.hedgeEur))
-        if(_tpO3 && !(v2Extra.hedge_eur > 0)){ msg('Orbit V3: Hedge-Betrag nicht rechenbar — Take Profit, Kontrakte und Risiko prüfen.', 'err'); return }
+        if(_tpO3 && !(v2Extra.hedge_eur > 0)){ msg('Orbit: Hedge-Betrag nicht rechenbar — Take Profit, Kontrakte und Risiko prüfen.', 'err'); return }
       } else v2Extra.hedge_faktor = null
       // Orbit V3 → hedge_eur MUSS weg, wenn derselbe Plan auf Orbit V2 zurückgestellt wird: sonst wäre er ab jetzt ein Winning Day
       if(!_tpWd && !_tpO3 && _editPlan && _editPlan.orbitV3) v2Extra.hedge_eur = null
