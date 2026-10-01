@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.9.4
+// @version      0.9.5
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt. Seit 0.5 auch die KONTO-ZUSAMMENFASSUNG (Balance, Today's P&L …) fuer den Orbit-V2-Rundgang.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -28,6 +28,11 @@
 // kommt ueber @updateURL/@downloadURL (GitHub-raw) von selbst.
 //
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
+//   0.9.5  01.10.2026  Puls-Chrome: Leer-Beweis billig (Befund Moritz 11:49–12:10 UTC: TradingView im Puls-Chrome lud nicht mehr fertig,
+//                      Puls: „Seite nach 25 s nicht fertig geladen" + Verbindungsabbruch). Die Suche nach „no open positions" lief
+//                      seit 0.9.3 als TreeWalker über die GANZE Seite, seit 0.9.4 zehnmal je Sekunde. Jetzt nur noch vom Reiter
+//                      #positions aufwärts im Panel (höchstens 8 Ebenen, kleinster Bereich mit dem Text), Ergebnis 0,5 s gemerkt;
+//                      solange die Seite lädt (readyState != complete), liest der Puls-Modus gar nicht.
 //   0.9.4  01.10.2026  Puls-Chrome liest alle 0,1 s (Finn: „Fusion so schnell wie es geht"); Konto/Bedienfeld weiter alle 0,5 s.
 //   0.9.3  01.10.2026  Puls-Chrome: Hand-Schliessen/Liquidation muss ankommen (Live-Befund Moritz 01.10.2026 23:19 UTC, erster Orbit-V3-
 //                      Trade: Master in TV von Hand zu, Fusion blieb offen — echoplus_live zeigte konto null, positionen_ok false).
@@ -118,7 +123,7 @@
   // dreimal ein Update vermutet, das gar nicht aktiv war (31.08.2026), und von
   // aussen war das nur an FEHLENDEN Feldern zu erraten. Ab jetzt sagt jeder
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
-  const VERSION    = '0.9.4';
+  const VERSION    = '0.9.5';
   // 0.9.0: Puls-Chrome-Modus (Orbit V3) — je Chrome-Profil gespeichert, siehe CHANGELOG
   let PULS_CHROME = false;
   try { PULS_CHROME = GM_getValue('prophos_puls_chrome', false) === true; } catch (_) {}
@@ -998,18 +1003,23 @@
 
   // 0.9.3 (Puls-Chrome): positiver Leer-Beweis — Reiter Positions aktiv UND TradingViews Leer-Text im Panel
   const RX_LEER_POS = /no open positions|keine offenen positionen|keine positionen/i;
+  let leerMerk = { ms: 0, wert: false };
   function leerBeweis() {
+    const jetzt = Date.now();
+    if (jetzt - leerMerk.ms < 500) return leerMerk.wert;   // 0.9.5: höchstens alle 0,5 s neu suchen
+    let wert = false;
     try {
       const r = document.getElementById('positions');
-      if (!r || r.getAttribute('aria-selected') !== 'true') return false;
-      const lauf = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-      let k;
-      while ((k = lauf.nextNode())) {
-        const t = k.nodeValue;
-        if (t && t.length < 120 && RX_LEER_POS.test(t)) return true;
+      if (r && r.getAttribute('aria-selected') === 'true') {
+        // 0.9.5: nur im Panel — vom Reiter aufwärts, bis ein Vorfahr den Leer-Text enthält (höchstens 8 Ebenen), nie die ganze Seite
+        let el = r.parentElement;
+        for (let i = 0; el && i < 8 && el !== document.body; i++, el = el.parentElement) {
+          if (RX_LEER_POS.test(el.textContent || '')) { wert = true; break; }
+        }
       }
     } catch (_) {}
-    return false;
+    leerMerk = { ms: jetzt, wert };
+    return wert;
   }
   function blindGrund(positionen) {
     if (PULS_CHROME) {   // 0.9.3: strenger — ohne Konto kein Urteil, flach nur mit Beweis (auch verdeckt)
@@ -1515,6 +1525,7 @@
   }
 
   function tick() {
+    if (PULS_CHROME && document.readyState !== 'complete') return;   // 0.9.5: Seite lädt — Puls-Chrome nicht zusätzlich belasten
     // 0.8.7: Rolle ZUERST — ein Feed-Tab (kein Broker-Konto im Umschalter) liest keine Positionen und ist nie 'blind';
     // er liefert nur Kurse/Kerzen (die Positions-Felder schickt er seit 0.8.5 ohnehin nicht)
     if ((tickNr % BF_JEDER) === 0) liesKonto();
