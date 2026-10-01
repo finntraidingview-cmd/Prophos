@@ -14,7 +14,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from copier import (plan_actions, check_fleet, compute_startup_skip,  # noqa: E402
-                    plan_sltp, find_notfall_deals, read_snapshot,
+                    plan_sltp, broker_abstand, find_notfall_deals, read_snapshot,
                     magic_umzug_ziel, MAGIC_UMZUG, FAMILIE_MIN, FAMILIE_MAX)
 
 # Fusion-Markets-typische Symboldaten (beide Testkonten beim selben Broker)
@@ -1455,6 +1455,22 @@ def main():
         return plan_sltp(mp, faktor=faktor, min_puffer_punkte=puffer,
                          point=point, digits=digits)
 
+    # Kursabstand der Broker (01.10.2026, Finns Screenshots): The5ers SELL 24 @ 30355,08, Ask 30339,07
+    # → P&L +384,24 $; Fusion 30372,06/30372,86 → Abstand +33,39
+    chk("ABSTAND: The5ers SELL 24 Lot, Equity−Balance +384,24, Fusion-Mitte 30372,46 → +33,39",
+        broker_abstand({"type": 1, "price_open": 30355.08, "volume": 24, "contract_size": 1}, 1, 200000.0, 200384.24, "USD", 30372.46) == 33.39)
+    chk("ABSTAND: BUY 1 Lot cs 20, P&L −200 → Master 30354,6; Fusion 30360 → +5,4",
+        broker_abstand({"type": 0, "price_open": 30364.6, "volume": 1, "contract_size": 20}, 1, 1000.0, 800.0, "USD", 30360.0) == 5.4)
+    chk("ABSTAND: zwei Master-Positionen → Rueckfall Hedge-Entry − Master-Entry",
+        broker_abstand({"type": 1, "price_open": 30355.08, "volume": 24, "contract_size": 1}, 2, 1.0, 2.0, "USD", 30372.46, 30382.61) == 27.53)
+    chk("ABSTAND: EUR-Konto ohne Hedge-Entry → None (wie bisher, keine Verschiebung)",
+        broker_abstand({"type": 1, "price_open": 30355.08, "volume": 24, "contract_size": 1}, 1, 1.0, 2.0, "EUR", 30372.46) is None)
+    chk("ABSTAND: > 400 Pkt (falsches Symbol) → None",
+        broker_abstand({"type": 0, "price_open": 28904.96, "volume": 2, "contract_size": 10}, 1, 0.0, 0.0, "USD", 30372.0) is None)
+    # Ende-zu-Ende mit Finns Zahlen: verschobene Master-Level → Fusion-SL 30346,55 / -TP 30449,29
+    _mp = {"type": 1, "price_open": 30355.08 + 33.39, "sl": 30410.37 + 33.39, "tp": 30316.97 + 33.39}
+    chk("ABSTAND: The5ers-Trade auf Fusion → Hedge-SL 30346,55 (TP+10 % dahinter), Hedge-TP 30449,29 (SL+10 %)",
+        sltp(_mp) == {"sl": 30346.55, "tp": 30449.29})
     chk("NOTFALL: LONG-Master, SL 2490/TP 2520 @ Entry 2500 → Hedge-TP 2489, Hedge-SL 2522 (gekreuzt, 10% dahinter)",
         sltp({"type": 0, "price_open": 2500.0, "sl": 2490.0, "tp": 2520.0})
         == {"tp": 2489.0, "sl": 2522.0})

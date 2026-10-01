@@ -1061,6 +1061,42 @@ def plan_actions(positions, hedges, *, multiplier, symbol_map, sym_info,
 # seinen SL — ohne eigene Level liefe der Hedge endlos weiter. Deshalb bekommt
 # der Hedge Notfall-Level, die der BROKER serverseitig ausfuehrt, auch wenn der
 # ganze PC weg ist. Im Normalfall spiegelt Echo den Close lange vorher.
+def broker_abstand(mp, n_positionen, balance, equity, waehrung, hedge_mitte, hedge_entry=None):
+    """REIN RECHNEND (testbar): Kursabstand Hedge-Broker − Master-Broker in Punkten.
+    Anlass 01.10.2026 (Finn, Screenshots The5ers ↔ Fusion): The5ers NAS100 30.337/30.339,
+    Fusion NAS100 30.372/30.373 — 34 Punkte auseinander. plan_sltp rechnet in MASTER-Preisen,
+    die Level landeten 1:1 auf Fusion: Fusion-TP ~35 Pkt VOR dem Master-SL (Master ungehedgt),
+    Notfall-SL ~35 Pkt zu weit weg. Seit 27.08. so, frueher fiel es nicht auf, weil die
+    Broker-Kurse nah beieinander lagen.
+    Master-Kurs JETZT aus dem Snapshot: Entry ± (Equity − Balance) / (Lots × Kontraktgroesse)
+    — nur bei genau EINER Master-Position und USD-Konto (Index-CFD in USD, dieselbe Basis wie
+    berechne_sl_tp im Order-Bot). Sonst Rueckfall Hedge-Entry − Master-Entry (beide oeffnen
+    in derselben Sekunde). Nichts belastbar oder > 400 Pkt (falsches Symbol?) → None."""
+    try:
+        entry = float(mp.get("price_open") or 0)
+        lots, cs = float(mp.get("volume") or 0), float(mp.get("contract_size") or 0)
+        lang = int(mp.get("type", 0)) == 0
+    except (TypeError, ValueError):
+        return None
+    if not entry > 0:
+        return None
+    a = None
+    try:
+        if (n_positionen == 1 and balance is not None and equity is not None and lots > 0 and cs > 0
+                and (waehrung or "USD").upper() == "USD" and float(hedge_mitte or 0) > 0):
+            je_pkt = lots * cs
+            pl = float(equity) - float(balance)
+            master_jetzt = entry + pl / je_pkt if lang else entry - pl / je_pkt
+            a = float(hedge_mitte) - master_jetzt
+    except (TypeError, ValueError, ZeroDivisionError):
+        a = None
+    if a is None and hedge_entry is not None and float(hedge_entry or 0) > 0:
+        a = float(hedge_entry) - entry
+    if a is None or abs(a) > 400:
+        return None
+    return round(a, 2)
+
+
 def plan_sltp(mp, *, faktor, min_puffer_punkte, point, digits):
     """REIN RECHNEND (testbar in selftest.py): Notfall-SL/TP fuer die
     Hedge-Position zu einer Master-Position.
@@ -1167,6 +1203,7 @@ class Master:
         # Cooldown, damit eine Broker-Ablehnung (z.B. stops_level) den Log
         # nicht im 0,5-s-Takt flutet.
         self.sltp_last = {}
+        self.broker_abstand = {}   # Hedge-Ticket → Kursabstand Hedge − Master in Punkten (01.10.2026)
         self.blocked = set()
         self.last_status = 0.0
         # closed_hedges (15.08.2026, Etappe 3): Beweisquelle fuer den Hedge-P&L in
@@ -1515,6 +1552,7 @@ def main():
                 # schwebender P&L der Position — Prophos zeigt ihn auf laufenden
                 # Trade-Karten live an (15.08.2026, Etappe 3)
                 "profit": float(p.profit),
+                "price_open": float(getattr(p, "price_open", 0.0) or 0.0),   # Rueckfall fuer broker_abstand (01.10.2026)
                 # Ist-Stand der Notfall-Level (27.08.2026): 0.0 = keiner gesetzt.
                 # Der Nachzieh-Block vergleicht dagegen und modifiziert nur bei
                 # echter Abweichung — sonst wuerde jeder Tick senden.
@@ -2640,7 +2678,34 @@ def main():
                     si = sym_info(hsym) if hsym else None
                     if si is None:
                         continue
-                    ziel = plan_sltp(mp, faktor=m.notfall_faktor,
+                    # KURSABSTAND der Broker (01.10.2026, Finn: The5ers ↔ Fusion 34 Pkt): Master-Level in
+                    # Hedge-Preise verschieben. EINMAL je Hedge-Ticket gemessen (nicht jeden Tick, sonst
+                    # wanderten die Level mit jedem Kurs-Zucken); ohne belastbare Messung wie bisher (0).
+                    abst = None
+                    for h in hs:
+                        if h["ticket"] in m.broker_abstand:
+                            abst = m.broker_abstand[h["ticket"]]
+                            break
+                    if abst is None:
+                        try:
+                            tk_ = mt5.symbol_info_tick(hsym)
+                            mitte = (float(tk_.bid) + float(tk_.ask)) / 2.0 if tk_ and tk_.bid and tk_.ask else 0.0
+                        except Exception:
+                            mitte = 0.0
+                        abst = broker_abstand(mp, len(snap["positions"]), snap.get("balance"), snap.get("equity"),
+                                              snap.get("currency"), mitte, hs[0].get("price_open"))
+                        if abst is not None:
+                            for h in hs:
+                                m.broker_abstand[h["ticket"]] = abst
+                            log(f"[{m.file}] Kursabstand {hsym} − {mp['symbol']}: {abst:+.2f} Pkt "
+                                f"(Hedge-Mitte {mitte}, Master-Entry {mp.get('price_open')}) — Notfall-Level verschoben")
+                    mp_h = mp
+                    if abst:
+                        mp_h = dict(mp)
+                        for k_ in ("price_open", "sl", "tp"):
+                            if mp_h.get(k_):
+                                mp_h[k_] = float(mp_h[k_]) + abst
+                    ziel = plan_sltp(mp_h, faktor=m.notfall_faktor,
                                      min_puffer_punkte=m.notfall_puffer,
                                      point=si["point"], digits=si["digits"])
                     if ziel is None:
