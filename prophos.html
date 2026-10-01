@@ -2155,6 +2155,7 @@
   #dashboard-view .wdl-z-pl{grid-area:pl;text-align:right;font-weight:600}
   #dashboard-view .wdl-z-slave{display:block;margin-top:1px;font-size:11px;font-weight:500}   /* Slave-P&L unter dem Master (01.10.2026) */
   /* Modell-Leiste im Radar (01.10.2026 abends, Finn: „ein Tab je Modell, schön geordnet") — Gruppen wie im Plan-Popup */
+  #dashboard-view .wdl-z-modell{padding:8px 16px 4px;font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--sub);border-top:1px solid var(--border-soft)}
   #dashboard-view .wdl-modelle{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;margin:0 0 12px}
   #dashboard-view .wdl-modelle .wdl-mg{display:flex;align-items:center;gap:6px}
   #dashboard-view .wdl-modelle .wdl-mg > span{font-size:11px;color:var(--sub)}
@@ -25715,11 +25716,14 @@
     // „Beendet" die 5 neuesten Orbit-Zeilen alle Plätze und Echo wäre wieder versteckt (der Anlass für die Kürzung).
     const gruppe = (titel, arr, sp, cls, mehr) => {
       if(!arr.length) return ''
-      // seit 30.09.2026 drei Blöcke: Orbit · Topstep · Echo (wdlPf)
-      const bloecke = WDL_PF.map(([k]) => arr.filter(t => wdlPf(t) === k)).filter(b => b.length)
-      const lang = bloecke.some(b => b.length > WDL_BEENDET_KURZ)
+      // Blöcke je MODELL (01.10.2026 abends, Finn: „die Modelle hier unten in der Liste separieren"): Reihenfolge wie die Leiste oben
+      // (Echo · Orbit · Winning Day · Echo V2 · Orbit V2 · Topstep V2), je Block eine kleine Überschrift „Orbit · 2" — nur in „Alle"
+      const reihe = WDL_MODELLE.flatMap(([, l]) => l), modellVon = t => reihe.includes(wdlWeg(t)) ? wdlWeg(t) : 'Weitere'
+      const bloecke = [...reihe, 'Weitere'].map(k => [k, arr.filter(t => modellVon(t) === k)]).filter(([, b]) => b.length)
+      const lang = bloecke.some(([, b]) => b.length > WDL_BEENDET_KURZ)
       const alle = !mehr || (wdl.alleZu || {})[mehr] || !lang
-      const zeilen = bloecke.map((b, i) => (alle ? b : b.slice(0, WDL_BEENDET_KURZ)).map((t, j) => zeile(t, i && !j ? 'wdl-z-pfneu' : '')).join('')).join('')
+      const kopfZ = (k, b) => wdl.modell ? '' : `<div class="wdl-z-modell">${escapeHtml(k)} · ${b.length}</div>`
+      const zeilen = bloecke.map(([k, b]) => kopfZ(k, b) + (alle ? b : b.slice(0, WDL_BEENDET_KURZ)).map(t => zeile(t, '')).join('')).join('')
       const fuss = mehr && lang ? `<button type="button" class="wdl-mehr" data-wdl-mehr="${mehr}">${alle ? 'weniger' : `alle ${arr.length} zeigen`}</button>` : ''
       return `<div class="wdl-tab${cls ? ' ' + cls : ''}"><div class="wdl-z wdl-z-kopf"><span class="wdl-z-wer">${titel} · ${arr.length}</span><span class="wdl-z-ri"></span>`
         + sp.map((x, i) => `<span class="wdl-z-${['mi', 'pl', 'zeit'][i]}">${x}</span>`).join('') + `</div>${zeilen}${fuss}</div>`
@@ -37524,7 +37528,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.959'
+  const OS_TAB_BUILD = '2026-09-22.961'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
