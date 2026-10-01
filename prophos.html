@@ -18250,9 +18250,27 @@
    * Order), 'scharf' = Order. Standard 'lesen', bis Finn nach dem Live-Test scharf schaltet (fehlt die Spalte: 'lesen'). */
   var _tsPulsModus = 'lesen'   // var + function: routeIstOrbit darf das auch vor dieser Zeile fragen (kein TDZ)
   function tsPulsModus(){ return _tsPulsModus || 'lesen' }
-  async function tsPulsModusLaden(){
-    try{ const { data, error } = await supabase.from('wd_farmer_regeln').select('*').eq('id', 1).maybeSingle()
-         if(!error && data && ['aus', 'lesen', 'scharf'].includes(data.puls_topstep)) _tsPulsModus = data.puls_topstep }catch(_){}
+  /* wd_farmer_regeln GETEILT LESEN (01.10.2026, Supabase-Diät — Edge-Logs 09:00–12:50 UTC: 1.738 GET wd_farmer_regeln von den
+   * PC-Tabs, select=* und select=scharf getrennt, je Tab mehrere Leser mit eigener Uhr: Puls-Topstep-Schalter alle 5 min,
+   * Farmer-Schalter alle 1–5 min, WD-Plan im Radar-Block alle 60 s, beim Start zweimal binnen 1 s). Jetzt EINE Zeile je Tab im
+   * Speicher: jeder Leser sagt, wie alt sie höchstens sein darf (dieselben Grenzen wie bisher), eine laufende Abfrage wird
+   * geteilt. Fehler → werfen, der Leser entscheidet wie bisher (kein Cache-Eintrag). Schreiben (Admin-Schalter) setzt neu. */
+  var _wdRegeln = null, _wdRegelnHolt = null   // { at, row } — var: Leser weiter unten im Modul (kein TDZ)
+  async function wdRegelnGeteilt(maxAlterMs){
+    if(_wdRegeln && Date.now() - _wdRegeln.at < (maxAlterMs || 0)) return _wdRegeln.row
+    if(_wdRegelnHolt) return _wdRegelnHolt
+    _wdRegelnHolt = (async () => {
+      const { data, error } = await supabase.from('wd_farmer_regeln').select('*').eq('id', 1).maybeSingle()
+      if(error) throw error
+      _wdRegeln = { at: Date.now(), row: data || null }
+      return _wdRegeln.row
+    })()
+    try{ return await _wdRegelnHolt }finally{ _wdRegelnHolt = null }
+  }
+  function wdRegelnVergessen(){ _wdRegeln = null }
+  async function tsPulsModusLaden(maxAlterMs){
+    try{ const data = await wdRegelnGeteilt(maxAlterMs == null ? 60000 : maxAlterMs)
+         if(data && ['aus', 'lesen', 'scharf'].includes(data.puls_topstep)) _tsPulsModus = data.puls_topstep }catch(_){}
     return _tsPulsModus
   }
   setTimeout(() => { if(currentUserId) tsPulsModusLaden() }, 4000); setInterval(() => { if(currentUserId) tsPulsModusLaden() }, 5 * 60000)
@@ -18261,14 +18279,15 @@
   ;(function tsPulsSchalter(){
     const sel = document.getElementById('wd-puls-topstep'), st = document.getElementById('wd-puls-topstep-stand'); if(!sel) return
     const zeig = t => { if(st) st.textContent = t || '' }
-    const fuellen = async () => { await tsPulsModusLaden(); sel.value = tsPulsModus(); zeig('') }
+    const fuellen = async () => { await tsPulsModusLaden(0); sel.value = tsPulsModus(); zeig('') }   // Admin öffnet: frisch
     document.querySelector('.adm-tab[data-admtab="wd"]')?.addEventListener('click', () => setTimeout(fuellen, 300))
-    setTimeout(() => { if(currentUserId) fuellen() }, 5000)
+    setTimeout(() => { if(currentUserId) tsPulsModusLaden().then(() => { sel.value = tsPulsModus() }) }, 5000)   // Start: teilt die Abfrage von 4 s
     sel.addEventListener('change', async () => {
       const v = sel.value; zeig('speichert …')
       try{
         const { error } = await supabase.from('wd_farmer_regeln').update({ puls_topstep: v, updated_at: new Date().toISOString() }).eq('id', 1)
         if(error) throw error
+        wdRegelnVergessen()
         _tsPulsModus = v; zeig(v === 'scharf' ? '✓ scharf — Puls platziert in TopstepX' : v === 'lesen' ? '✓ nur lesen — keine Order' : '✓ aus — Topstep V2 von Hand')
         try{ renderTradePlans() }catch(_){}
       }catch(e){ sel.value = tsPulsModus(); zeig('nicht gespeichert: ' + String((e && e.message) || e).slice(0, 80)) }
@@ -23718,8 +23737,7 @@
     if(mkl.stub || Date.now() - mkl.wd.plan.at < 60000) return
     mkl.wd.plan.at = Date.now()
     try{
-      const { data: r, error: e1 } = await supabase.from('wd_farmer_regeln').select('*').eq('id', 1).maybeSingle()
-      if(e1) throw e1
+      const r = await wdRegelnGeteilt(60000)   // geteilt (01.10.2026, Supabase-Diät) — höchstens 60 s alt wie bisher
       const j = wdJetzt((r && r.tz) || WD_TZ_STD); if(!j) return
       const naechster = wdNaechsterTag(r || {}, j)
       const { data: rows, error: e2 } = await supabase.from('wd_tagesplan').select('tag,user_id,name,konten,status,start_um,richtung,reihenfolge').in('tag', [...new Set([j.tag, naechster])])
@@ -24605,8 +24623,16 @@
   window._feedLuecken = feedLuecken
   const feedWache = { steht: false, alter_s: null, gemeldet: false, pc: '', luecken: null, lueckenAt: 0, laeuft: false }
   const feedWacheDarf = () => { try{ return localStorage.getItem('prophos_wd_admin') === '1' }catch(_){ return false } }
+  // Takt (01.10.2026, Supabase-Diät — Edge-Logs 09:00–12:50 UTC: 1.687 GET tv_kurse?select=updated_at&limit=1, alle 30 s je
+  // Admin-Tab): nur LESEN für die Warn-Pille, Radar/Chart/Feed hängen nicht daran. 30 s weiter, solange der Radar offen ist oder
+  // der Feed gerade steht; sonst bei offenem Markt alle 90 s (Warnung kommt dann nach 2–3,5 statt 2–2,5 min), Markt zu 5 min.
+  let _fwAt = 0
   async function feedWacheTick(){
     if(!currentUserId || mkl.stub || !feedWacheDarf()) return
+    let takt = 30000
+    try{ if(!feedWache.steht && !mklAktiv()) takt = cmeMarktOffen(Date.now()) ? 90000 : 300000 }catch(_){}
+    if(Date.now() - _fwAt < takt - 1000) return
+    _fwAt = Date.now()
     try{
       const { data, error } = await supabase.from('tv_kurse').select('updated_at,pc_name,wurzel').order('updated_at', { ascending: false }).limit(1)
       if(error) return
@@ -26766,17 +26792,56 @@
    * Priorität ist Zuverlässigkeit, nicht Tempo. Nur eigener User, nur
    * sichtbarer Tab → billig. */
   const planPoll = { INTERVAL: 15_000, inFlight: false }
-  async function planPollTick(){
+  /* SUPABASE-DIÄT (01.10.2026, Compute NANO, DB hing in Wellen mit PGRST003 — Edge-Logs 09:00–12:50 UTC: 8.356 GET trade_plans
+   * + 3.693 OPTIONS von den PC-Tabs, fast alles dieser Poll: ALLE Pläne der ID mit select=* (inkl. mt5_baseline-jsonb, auch
+   * die abgeschlossenen) alle 15 s je sichtbarem Tab, obwohl sich meist nichts geändert hatte).
+   *  - Vorab-Probe: nur id + updated_at (der Trigger trade_plans_set_updated_at stempelt JEDES Update, auch die
+   *    mt5_baseline-RPCs). Gleich wie beim letzten vollen Laden → fertig; nur bei einer Änderung (neu, gelöscht, geändert)
+   *    kommt der volle Abruf wie bisher. Gleiche Übergänge/Toasts wie vorher, nur ohne die schwere Antwort im Normalfall.
+   *  - Ruhe: kein offener Plan und kein Lauf/keine Startzeit nah (osPipelineAktiv) → alle 30 s statt 15 s. Neue Pläne von
+   *    Mac/Handy sind damit spätestens nach 30 s da; feuern tut tpStartUmTick ohnehin erst zur Startzeit.
+   *  - Fehler-Bremse: DB-Fehler → 30 s / 60 s / 120 s Pause statt weiter alle 15 s. */
+  planPoll.RUHE_MS = 30_000
+  planPoll.sig = null; planPoll.sigUid = null; planPoll.at = 0; planPoll.fehlerN = 0; planPoll.fehlerBis = 0
+  const planPollSig = rows => (rows || []).map(r => String(r.id) + '@' + String(r.updated_at || '')).join('|')
+  const planPollFehler = f => {
+    if(!f){ planPoll.fehlerN = 0; planPoll.fehlerBis = 0; return }
+    planPoll.fehlerN = Math.min(planPoll.fehlerN + 1, 3)
+    planPoll.fehlerBis = Date.now() + 15_000 * Math.pow(2, planPoll.fehlerN)
+  }
+  async function planPollTick(sofort){
     if(!serverWatch.active || planPoll.inFlight) return
     if(typeof document !== 'undefined' && document.hidden) return
     if(!currentUserId) return
+    const jetzt = Date.now()
+    if(jetzt < planPoll.fehlerBis) return
+    let ruhe = false
+    try{
+      ruhe = !(tradePlans || []).some(p => p && p.status === 'open')
+        && !(typeof osPipelineAktiv === 'function' && osPipelineAktiv())
+    }catch(_){ ruhe = false }
+    if(ruhe && !sofort && jetzt - planPoll.at < planPoll.RUHE_MS - 1000) return
+    planPoll.at = jetzt
+    const uid = currentUserId
     planPoll.inFlight = true
     try{
+      // alle 5 min trotzdem voll (Sicherheitsnetz: ein lokal abweichender Stand ohne DB-Änderung kommt so wie früher zurück)
+      if(planPoll.sig != null && planPoll.sigUid === uid && jetzt - (planPoll.vollAt || 0) < 5 * 60_000){
+        const { data: pr, error: pe } = await supabase
+          .from('trade_plans').select('id,updated_at')
+          .eq('user_id', uid)
+          .order('created_at', { ascending: false })
+        if(pe || !pr){ planPollFehler(true); return }
+        planPollFehler(false)
+        if(planPollSig(pr) === planPoll.sig) return   // nichts geändert — kein voller Abruf
+      }
       const { data, error } = await supabase
         .from('trade_plans').select('*')
-        .eq('user_id', currentUserId)
+        .eq('user_id', uid)
         .order('created_at', { ascending: false })
-      if(error || !data) return
+      if(error || !data){ planPollFehler(true); return }
+      planPollFehler(false)
+      planPoll.sig = planPollSig(data); planPoll.sigUid = uid; planPoll.vollAt = Date.now()
       const fresh = data.map(rowToPlan).filter(Boolean)
       const oldById = new Map((tradePlans || []).map(p => [String(p.id), p]))
       let changed = fresh.length !== (tradePlans || []).length
@@ -26820,7 +26885,7 @@
     setInterval(() => planPollTick().catch(() => {}), planPoll.INTERVAL)
   })
   document.addEventListener('visibilitychange', () => {
-    if(!document.hidden && serverWatch.active) planPollTick().catch(() => {})
+    if(!document.hidden && serverWatch.active) planPollTick(true).catch(() => {})
   })
 
   const autoTrack = {
@@ -37087,7 +37152,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.936'
+  const OS_TAB_BUILD = '2026-09-22.937'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -38798,6 +38863,8 @@
   // Schnell (30 s wie bisher) nach denselben Regeln wie der Signal-Empfänger (osPipelineAktiv: Signal/Puls-Lauf in den letzten
   // 10 min, offener Plan, Startzeit in ≤ 5 min) — eine verlorene Antwort gehört fast immer zu einem Lauf dieses Tabs, der den
   // schnellen Takt ohnehin hält. Nachgeholt wird ohnehin erst 2 min nach der Meldung (PE_GNADE_MS).
+  // Seit der Supabase-Diät (01.10.2026) hält nur noch ein offener PULS-Plan (planIstPuls, z. B. Orbit V3 mit Fusion-Hedge) den
+  // 30-s-Takt, ein offener Echo-Plan allein nicht mehr — Puls-Ergebnisse gibt es nur zu Puls-Läufen.
   let _pePollAt = 0
   setInterval(() => {
     if(typeof osPipelineAktiv === 'function' && !osPipelineAktiv() && Date.now() - _pePollAt < 90000) return
@@ -39148,7 +39215,8 @@
         if(!_tpOrbitLaeuft && Date.now() - _osVerwaistAt >= (osPipelineAktiv() ? 60000 : 300000)){
           _osVerwaistAt = Date.now()
           const pcIch = (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : ''
-          const grenze = new Date(Date.now() - 6 * 60000).toISOString()
+          // Grenze auf die volle Minute (01.10.2026, Supabase-Diät): gleiche Adresse je Minute statt je Millisekunde → weniger OPTIONS
+          const grenze = new Date(Math.floor((Date.now() - 6 * 60000) / 60000) * 60000).toISOString()
           const pcAlle = [pcIch, ...((typeof pcIdFrueher === 'function') ? pcIdFrueher() : [])].filter(Boolean)   // frühere Kennung (Panel .570)
           if(pcIch){
             const { data: verw } = await supabase.from('order_signale').update({ status: 'fehler', updated_at: new Date().toISOString(),
@@ -39160,7 +39228,8 @@
       }catch(_){}
       const { data: sigs, error } = await supabase.from('order_signale')
         .select('*').eq('status', 'wartet').order('created_at', { ascending: true })
-      if(error){ _osStand = 'db-fehler: ' + String(error.message || error.code || '?').slice(0, 60); return }
+      if(error){ _osStand = 'db-fehler: ' + String(error.message || error.code || '?').slice(0, 60); osFehlerBremse(true); return }   // Bremse: 01.10.2026
+      osFehlerBremse(false)
       if(!sigs || !sigs.length){ _osStand = 'ok-leer'; return }
       _osAktivAt = Date.now()   // Signal da → 10 min voller Takt (osPipelineAktiv)
       const dd = await window.mtcApi('instances')
@@ -39518,20 +39587,88 @@
    * (setInterval(tpStartUmTick, 1000)) und claimt über trade_plans.start_um_gestartet_at, nicht über order_signale. */
   // Überfällige, nie gestartete Pläne zählen nur 15 min nach startUm (Gegenprüfung 01.10.2026: Farmer-Pläne bei Schalter AUS
   // bleiben sonst den ganzen Tag „fällig" und hielten den schnellen Takt dauerhaft — gleiche Grenze wie zuSpaet).
-  const OS_TAKT_LEERLAUF_MS = 15000, OS_NACHLAUF_MS = 10 * 60000, OS_START_VORLAUF_MS = 5 * 60000, OS_START_NACHLAUF_MS = 15 * 60000
-  let _osAktivAt = Date.now(), _osPollAt = 0
-  function osPipelineAktiv(){
+  /* SUPABASE-DIÄT (01.10.2026, Compute NANO, DB hing in Wellen 12:10/12:30/12:50 UTC mit PGRST003 — Edge-Logs 09:00–12:50 UTC:
+   * 19.295 GET order_signale ?status=eq.wartet + 4.889 OPTIONS von den PC-Tabs; die meisten Tabs liefen trotz Leerlauf-Takt im
+   * 5-s-Takt, weil JEDER offene Plan ihn hielt — und Echo-/Echo-V2-Pläne stehen oft stundenlang offen). Neu:
+   *  - Wecker: ein Realtime-Abo NUR auf INSERT in order_signale (eigene ID, RLS wie der Poll) weckt den Empfänger sofort, ein
+   *    Signal vom Mac/Handy wird damit ohne Poll-Wartezeit geclaimt. Ein Kanal je PC-Tab, nur am PC (MT5_LOCAL + Copier-Proxy).
+   *  - Der Poll bleibt als Reserve: steht der Wecker (SUBSCRIBED), alle 15 s; steht er nicht, exakt der alte Takt.
+   *  - Schnell (5 s) bleibt, solange hier wirklich etwas läuft: Signal/Puls-Lauf (+10 min Nachlauf), Startzeit ≤ 5 min bzw.
+   *    fällig, offener Puls-Plan (Orbit V2/V3, Topstep mit Puls — planIstPuls). Ein offener Echo-Plan allein hält ihn nur noch
+   *    ohne Wecker (sein „Schließen" vom Mac ist ein INSERT und weckt).
+   *  - Fehler-Bremse: DB-Fehler/5xx beim Poll → 10/20/40/60 s Pause statt weiter im 5-s-Takt auf eine hängende DB. */
+  const OS_TAKT_LEERLAUF_MS = 15000, OS_TAKT_RESERVE_MS = 15000, OS_NACHLAUF_MS = 10 * 60000, OS_START_VORLAUF_MS = 5 * 60000, OS_START_NACHLAUF_MS = 15 * 60000
+  let _osAktivAt = Date.now(), _osPollAt = 0, _osFehlerN = 0, _osFehlerBis = 0
+  // mitAllenOffenen: true = jeder offene Plan zählt (alter Maßstab, nur ohne Wecker); sonst nur offene Puls-Pläne
+  function osPipelineAktiv(mitAllenOffenen){
     const jetzt = Date.now()
     try{ if(_osActive || _tpOrbitLaeuft || _suLaeuft || _rsAktiv) _osAktivAt = jetzt }catch(_){ return true }   // _osBusy nicht: das ist nur der Poll selbst
     if(jetzt - _osAktivAt < OS_NACHLAUF_MS) return true
     try{
-      return (tradePlans || []).some(p => p && (p.status === 'open'
+      return (tradePlans || []).some(p => p && ((p.status === 'open' && (mitAllenOffenen === true || planIstPuls(p)))
         || (p.status === 'planned' && p.startUm && !p.startUmGestartetAt && (() => { const d = new Date(p.startUm).getTime() - jetzt
               return d <= OS_START_VORLAUF_MS && d >= -OS_START_NACHLAUF_MS })())))
     }catch(_){ return true }
   }
+  function osFehlerBremse(fehler){
+    if(!fehler){ _osFehlerN = 0; _osFehlerBis = 0; return }
+    _osFehlerN = Math.min(_osFehlerN + 1, 4)
+    _osFehlerBis = Date.now() + Math.min(60000, 5000 * Math.pow(2, _osFehlerN))
+  }
+  // Wecker (s. o.): Kanal-Zustand; Neuaufbau nach Fehler mit eigener Pause (30 s … 10 min) — realtime-js würde sonst alle
+  // 1–10 s neu beitreten, und jeder Beitritt mit postgres_changes schreibt eine Zeile in realtime.subscription (DB-Last).
+  const _osRt = { kanal: null, uid: null, status: null, versuchAt: 0, fehler: 0 }
+  function osWeckerLebt(){ return !!_osRt.kanal && _osRt.status === 'SUBSCRIBED' }
+  function osWeckerAbbauen(){
+    const ch = _osRt.kanal
+    _osRt.kanal = null; _osRt.uid = null; _osRt.status = null
+    if(ch){ try{ Promise.resolve(supabase.removeChannel(ch)).catch(() => {}) }catch(_){} }
+  }
+  let _osWeckT = null
+  function osWecken(n){
+    if(_osWeckT) return
+    _osWeckT = setTimeout(() => {
+      _osWeckT = null
+      if(_osBusy){ if(n < 20) osWecken(n + 1); return }   // ein Tick läuft schon (evtl. vor dem INSERT gestartet) — direkt danach
+      _osPollAt = Date.now()
+      orderSignalTick()
+    }, n ? 500 : 50)
+  }
+  function osWeckerPruefen(){
+    if(typeof MT5_LOCAL === 'undefined' || !MT5_LOCAL || typeof window.mtcApi !== 'function' || typeof supabase.channel !== 'function') return
+    let uid; try{ uid = currentUserId }catch(_){ uid = null }
+    if(_osRt.kanal && _osRt.uid !== uid) osWeckerAbbauen()   // Profilwechsel/Abmelden: Abo gehört zur alten ID
+    if(!uid || _osRt.kanal) return
+    if(Date.now() - _osRt.versuchAt < (_osRt.fehler ? Math.min(10 * 60000, 30000 * Math.pow(2, _osRt.fehler - 1)) : 0)) return
+    _osRt.versuchAt = Date.now()
+    try{
+      const ch = supabase.channel('os-wecker-' + String(uid).slice(0, 8))
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'order_signale', filter: 'user_id=eq.' + uid }, m => {
+          if(_osRt.kanal !== ch) return
+          const r = m && m.new
+          if(r && r.status && r.status !== 'wartet') return
+          osWecken(0)
+        })
+      _osRt.kanal = ch; _osRt.uid = uid; _osRt.status = null
+      ch.subscribe(st => {
+        if(_osRt.kanal !== ch) return
+        _osRt.status = st
+        console.log('[signal] Wecker', st)
+        if(st === 'SUBSCRIBED'){ _osRt.fehler = 0; osWecken(0); return }   // frisch verbunden: einmal nachsehen, was in der Lücke kam
+        if(st === 'CHANNEL_ERROR' || st === 'TIMED_OUT' || st === 'CLOSED'){ _osRt.fehler = Math.min(_osRt.fehler + 1, 6); osWeckerAbbauen() }
+      })
+    }catch(e){ console.warn('[signal] Wecker', e); _osRt.fehler = Math.min(_osRt.fehler + 1, 6); osWeckerAbbauen() }
+  }
+  window._osWecker = () => ({ status: _osRt.status, fehler: _osRt.fehler, takt_ms: osTaktMs() })   // Diagnose
+  function osTaktMs(){
+    if(osPipelineAktiv()) return 5000
+    if(osWeckerLebt()) return OS_TAKT_RESERVE_MS
+    return osPipelineAktiv(true) ? 5000 : OS_TAKT_LEERLAUF_MS
+  }
   setInterval(() => {
-    if(!osPipelineAktiv() && Date.now() - _osPollAt < OS_TAKT_LEERLAUF_MS) return
+    try{ osWeckerPruefen() }catch(_){}
+    if(Date.now() < _osFehlerBis) return
+    if(Date.now() - _osPollAt < osTaktMs() - 1000) return
     _osPollAt = Date.now()
     orderSignalTick()
   }, 5000)
@@ -40129,7 +40266,7 @@
     if(_suScharf && Date.now() - _suScharf.at < (maxAlter || WD_SCHARF_NAH_MS)) return _suScharf.an
     if(_suScharfHolt) return _suScharfHolt
     _suScharfHolt = (async () => {
-      try{ const { data } = await supabase.from('wd_farmer_regeln').select('scharf').eq('id', 1).maybeSingle(); _suScharf = { at: Date.now(), an: !!(data && data.scharf) } }
+      try{ const data = await wdRegelnGeteilt(maxAlter || WD_SCHARF_NAH_MS); _suScharf = { at: (_wdRegeln && _wdRegeln.at) || Date.now(), an: !!(data && data.scharf) } }   // geteilt (01.10.2026), Alter = das der Zeile
       catch(_){ _suScharf = { at: Date.now(), an: false } }
       return _suScharf.an
     })()
