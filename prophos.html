@@ -18483,7 +18483,13 @@
       // app.py Echo ≤ 90 s, Feed-Diagnose < 2 min) — 12 s bleibt sicher darunter. Läuft ein Trade, ändern sich P&L/Positionen bei
       // jedem Tick → weiter alle 5 s. kurs_bruecke (Diagnose mit Zeitstempeln je Brücken-Tick) zählt nicht als Änderung, reist aber mit.
       const fp = JSON.stringify(rows.map(r => [r.id, r.master_login, r.hedge_login, r.alive, Object.assign({}, r.status, { kurs_bruecke: null })]))
-      const faellig = fp !== _fleetPushFp || (Date.now() - _fleetPushAt) >= MT5_LIVE_LEBENSZEICHEN_MS
+      // Leerlauf 12 → 30 s (01.10.2026, Supabase-Diät Teil C, NANO-Compute hing in Wellen: 382 POST mt5_live in 10 min = jeder der
+      // 8 PCs alle 12,5 s, fast nur Lebenszeichen). Schnell (12 s) bleibt es, sobald es etwas zu beweisen gibt: Master-Positionen,
+      // Hedges, Solo-Hedge, fremde Hedge-Positionen, ein geclaimtes Signal (_osActive) oder ein Orbit-Lauf in diesem Tab. Leser,
+      // die auch Leerlauf-Zeilen werten, nehmen dafür mt5LiveFrischMs (45 s ohne Positionen, sonst 25 s).
+      const schnell = rows.some(r => mt5LiveZeileAktiv(r))
+        || (typeof _osActive !== 'undefined' && !!_osActive) || (typeof _tpOrbitLaeuft !== 'undefined' && !!_tpOrbitLaeuft)
+      const faellig = fp !== _fleetPushFp || (Date.now() - _fleetPushAt) >= (schnell ? MT5_LIVE_LEBENSZEICHEN_MS : MT5_LIVE_LEERLAUF_MS)
       if(rows.length && faellig){
         const { error } = await supabase.from('mt5_live').upsert(rows)
         if(!error){ _fleetPushFp = fp; _fleetPushAt = Date.now() }
@@ -18491,8 +18497,22 @@
     }catch(_){ /* still — naechster Tick */ }
     finally{ _fleetPushBusy = false }
   }
-  const MT5_LIVE_LEBENSZEICHEN_MS = 12000
+  const MT5_LIVE_LEBENSZEICHEN_MS = 12000, MT5_LIVE_LEERLAUF_MS = 30000
   let _fleetPushFp = '', _fleetPushAt = 0
+  // Hat eine mt5_live-Zeile etwas Laufendes? (Positionen, Hedges, Solo-Hedge, fremde Hedge-Positionen) — dann pusht der PC alle 12 s
+  function mt5LiveZeileAktiv(r){
+    const s = (r && r.status) || {}
+    const voll = x => Array.isArray(x) ? x.length > 0 : !!(x && typeof x === 'object' && Object.keys(x).length)
+    return voll(s.master_positions) || voll(s.hedges) || voll(s.hedge_solo) || voll(s.hedge_fremde)
+  }
+  // Frische-Grenze für Cloud-Zeilen: Leerlauf-Zeilen kommen nur alle 30 s (+ 5-s-Tick + Abfrage) → 45 s; laufende wie bisher 25 s
+  function mt5LiveFrischMs(r){ return mt5LiveZeileAktiv(r) ? 25000 : 45000 }
+  window.mt5LiveFrischMs = mt5LiveFrischMs
+  // Stabile Abfrage-Grenze (01.10.2026, Supabase-Diät): ein Zeitstempel auf die Millisekunde macht jede URL neu → der Browser schickt
+  // vor JEDEM GET eine OPTIONS-Vorabfrage. Auf die volle Minute abgerundet bleibt die URL 60 s gleich (Vorabfrage gecacht); das Fenster
+  // wird dabei höchstens 60 s weiter — wer echte Frische braucht, prüft updated_at ohnehin selbst.
+  function grenzeMinute(msZurueck){ return new Date(Math.floor((Date.now() - (msZurueck || 0)) / 60000) * 60000).toISOString() }
+  window.grenzeMinute = grenzeMinute
   setInterval(mt5FleetPushTick, 5000)
 
   // esc gab es bisher NUR innerhalb der Echo-Panel-IIFE (Zeile ~23300) — der
@@ -18673,7 +18693,7 @@
       // Flotte) — nach einem Profilwechsel wäre der Cache noch der alte.
       const { data: { session } } = await supabase.auth.getSession()
       const meUid = String(session?.user?.id || '')
-      const grenze = new Date(Date.now() - 10 * 60 * 1000).toISOString()
+      const grenze = grenzeMinute(10 * 60 * 1000)   // stabile URL (01.10.2026)
       const [ml, dl] = await Promise.all([
         supabase.from('mt5_live').select('*').gte('updated_at', grenze),
         supabase.from('dup_live').select('*').gte('updated_at', grenze)
@@ -18757,6 +18777,7 @@
   // Personen-Chips samt Auswahl sind seit der kompakten Ansicht (25.08.2026
   // nachts) raus — eine Zeile pro Person braucht keinen Umschalter mehr.
   let _fleetRenderBusy = false, _fleetRenderAt = 0
+  let _fleetFpCache = { at: 0, res: null }   // flotte_offene_plaene, 20 s (01.10.2026)
   async function mt5FleetRenderTick(force){
     const box = document.getElementById('lt-fleet')
     if(!box || _fleetRenderBusy) return
@@ -18778,7 +18799,7 @@
     if(!dupState.token) dupEnsureSession()   // Duplikium-Zeilen selbstheilend
     _fleetRenderBusy = true
     try{
-      const grenze = new Date(Date.now() - 10 * 60 * 1000).toISOString()
+      const grenze = grenzeMinute(10 * 60 * 1000)   // stabile URL → keine OPTIONS-Vorabfrage je Tick (01.10.2026)
       const jetzt = Date.now()
       // 8s-Deckel pro Query: haengt eine Abfrage, wuerde _fleetRenderBusy
       // sonst nie zurueckgesetzt und der Block bliebe fuer immer unsichtbar —
@@ -18793,7 +18814,12 @@
       const [ml, dl, fp] = await Promise.all([
         mitTimeout(supabase.from('mt5_live').select('*').gte('updated_at', grenze), 8000),
         mitTimeout(supabase.from('dup_live').select('*').gte('updated_at', grenze), 8000),
-        mitTimeout(Promise.resolve().then(() => supabase.rpc('flotte_offene_plaene')), 8000).catch(e => ({ data: null, error: e }))
+        // 20 s gecacht (01.10.2026, Supabase-Diät, ~1.000 RPC/h): nur Anzeige fremder offener V2-Pläne, ein neuer fremder Plan
+        // erscheint höchstens 20 s später. Fehler werden nicht gecacht.
+        (_fleetFpCache.res && Date.now() - _fleetFpCache.at < 20000) ? Promise.resolve(_fleetFpCache.res)
+          : mitTimeout(Promise.resolve().then(() => supabase.rpc('flotte_offene_plaene')), 8000)
+              .then(r => { if(r && !r.error) _fleetFpCache = { at: Date.now(), res: r }; return r })
+              .catch(e => ({ data: null, error: e }))
       ])
       const rows = (!ml.error && Array.isArray(ml.data))
         ? ml.data.sort((a, b) => String(a.instance).localeCompare(String(b.instance))) : []
@@ -19184,7 +19210,7 @@
         if(p.route === 'mt5v2'){
           const ext = (_fleetPers.extJe || {})[uid + '|' + kName.toLowerCase()] || ''
           // lesen: Lese-Instanz des Panels ohne Copier (25.09.2026) — genau der Echo-V2-Normalfall
-          const zeile = ext ? rows.find(r => r && (r.alive || (r.status && r.status.lesen)) && String(r.master_login || '') === String(ext) && Date.now() - (Date.parse(r.updated_at || '') || 0) <= 25000) : null
+          const zeile = ext ? rows.find(r => r && (r.alive || (r.status && r.status.lesen)) && String(r.master_login || '') === String(ext) && Date.now() - (Date.parse(r.updated_at || '') || 0) <= mt5LiveFrischMs(r)) : null
           const x = zeile ? mt5V2PnlAus(zeile.status || {}, (p.master_balance != null && isFinite(Number(p.master_balance))) ? Number(p.master_balance) : null) : null
           v2Chip = x ? mt5V2PnlChip(x.v, x.ccy, x.lots, x.schwebend ? 'Schwebender P&L der offenen Position (Equity − Balance jetzt) — ohne Start-Balance' : 'Live-P&L des Masters: Equity − Balance beim Start', x.schwebend)
             : `<span class="mono" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:var(--bg);border:1px solid var(--border-soft)" title="${esc(ext ? `Keine frische Zeile für Konto ${ext} (mt5_live) — das Master-Terminal (Lese-EA) liefert nicht, oder der Prophos-Tab auf dem PC ist älter als .600 und muss einmal neu geladen werden` : 'Konto ohne External ID — keine Zuordnung zur Copier-Zeile möglich')}">`
@@ -19538,7 +19564,7 @@
         for(const r of (window._mt5CloudRows || [])){
           if(!r || !(r.alive || (r.status && r.status.lesen))) continue
           const ts = Date.parse(r.updated_at || '') || 0
-          if(!ts || (Date.now() - ts) > 25000) continue
+          if(!ts || (Date.now() - ts) > window.mt5LiveFrischMs(r)) continue   // Leerlauf-Zeilen 45 s (Push-Takt 30 s, 01.10.2026)
           cloud.push({ file: r.config_file, alive: true, fetchedAt: ts,
             status: Object.assign({}, r.status || {}, { master_login: r.master_login }) })
         }
@@ -19587,7 +19613,7 @@
         for(const r of (window._mt5CloudRows || [])){
           if(!r || !r.alive) continue
           const ts = Date.parse(r.updated_at || '') || 0
-          if(!ts || (Date.now() - ts) > 25000) continue
+          if(!ts || (Date.now() - ts) > window.mt5LiveFrischMs(r)) continue   // Leerlauf-Zeilen 45 s (Push-Takt 30 s, 01.10.2026)
           cloud.push({ file: r.config_file, alive: true, fetchedAt: ts,
             status: Object.assign({}, r.status || {},
               { master_login: r.master_login, hedge_login: r.hedge_login }) })
@@ -19879,11 +19905,13 @@
     return { login: String(s.master_login), balance: bal, equity: (eq != null && isFinite(eq)) ? eq : null, ccy: s.master_currency || null }
   }
   const _mt5BalGeschrieben = new Map()   // accountId → {bal, t} — Drossel für den 5-s-Flotten-Takt
+  const MT5_BAL_LEBENSZEICHEN_MS = 5 * 60000
   async function mt5KontoBalanceSchreiben(accountId, b, opts){
     if(!accountId || !b || !(typeof b.balance === 'number' && isFinite(b.balance) && b.balance > 0)) return false
     const id = String(accountId), jetzt = Date.now(), alt = _mt5BalGeschrieben.get(id)
-    // Flotten-Takt: nur bei Änderung oder alle 60 s (der Zeitstempel trägt „Live" vs. „zuletzt HH:MM" in der Accounts-Spalte)
-    if(opts && opts.drossel && alt && Math.abs(alt.bal - b.balance) < 0.005 && jetzt - alt.t < 60000) return false
+    // Flotten-Takt: nur bei Änderung oder alle 5 min (01.10.2026, Supabase-Diät: ~460 PATCH accounts/h von den PCs, je Konto jede
+    // Minute dieselbe Zahl). Der Zeitstempel trägt „Live" vs. „zuletzt HH:MM" in der Accounts-Spalte — Grenze dort 6 min.
+    if(opts && opts.drossel && alt && Math.abs(alt.bal - b.balance) < 0.005 && jetzt - alt.t < MT5_BAL_LEBENSZEICHEN_MS) return false
     _mt5BalGeschrieben.set(id, { bal: b.balance, t: jetzt })
     const at = new Date().toISOString()
     try{
@@ -22755,7 +22783,7 @@
     if(!offen) return
     _hedgeRowsLaeuft = true
     try{
-      const { data, error } = await supabase.from('mt5_live').select('*').gte('updated_at', new Date(Date.now() - 10 * 60 * 1000).toISOString())
+      const { data, error } = await supabase.from('mt5_live').select('*').gte('updated_at', window.grenzeMinute(10 * 60 * 1000))
       if(!error && Array.isArray(data)){
         window._mt5CloudRows = data.sort((a, b) => String(a.instance).localeCompare(String(b.instance)))
         window._mt5CloudRowsAt = Date.now()
@@ -25492,8 +25520,10 @@
       // riss die Chips mit — Finns Fund, um 19:02 da, um 19:52 weg. Kein Token
       // nötig, funktioniert in jedem Profil auf jeder Origin. Die Positions-
       // Rohfelder (account_id, id_master, amountLot, side) sind identisch.
-      const { data, error } = await supabase.from('dup_live').select('*')
-        .gte('updated_at', new Date(Date.now() - dupLots.FRESH_MS).toISOString())
+      // Grenze auf die Minute (stabile URL, 01.10.2026) — das Fenster wird bis zu 60 s weiter, deshalb hier selbst auf FRESH_MS filtern
+      const { data: roh, error } = await supabase.from('dup_live').select('*')
+        .gte('updated_at', window.grenzeMinute(dupLots.FRESH_MS))
+      const data = Array.isArray(roh) ? roh.filter(r => Date.now() - (Date.parse(r.updated_at) || 0) <= dupLots.FRESH_MS) : roh
       if(!error && Array.isArray(data) && data.length){
         dupLots.positions = data.flatMap(r => Array.isArray(r.positions) ? r.positions : [])
         dupLots.fetchedAt = Math.min(...data.map(r => Date.parse(r.updated_at) || 0))
@@ -26402,10 +26432,16 @@
     if(stat) stat.textContent = '⟳ Lädt …'
 
     try {
+      // dup_live nur, wenn die alte Live-Trades-Ansicht (#livetrades) sichtbar ist (01.10.2026, Supabase-Diät Teil C, Edge-Logs
+      // 12–13 UTC: ~2.470 GET dup_live?id=eq.… je Stunde von den PC-Tabs + ~400 vom Mac — der Aggregator läuft alle 5 s, solange
+      // der Trades-Tab offen ist, auch im Hintergrund). Die Duplikium-Liste liest NUR ltRender; der Flotten-Block im Trades-Tab
+      // holt dup_live selbst (mt5FleetRenderTick), die Flotte nimmt von hier nur die TopstepX-Zeilen. Beim Öffnen von
+      // #livetrades startet ltStart sofort einen frischen Lauf.
+      const ltSicht = !!document.querySelector('.view[data-view="livetrades"].active')
       const [tsx, mt, dup] = await Promise.all([
         ltFetchTsxPositions(),
         ltFetchMtPositions(),
-        ltFetchDupPositions()
+        ltSicht ? ltFetchDupPositions() : Promise.resolve(ltState.positions.dup || [])
       ])
       ltState.positions = { tsx, mt, dup }
       ltState.lastUpdate = new Date()
@@ -27493,10 +27529,13 @@
 
     let plans = [], accById = new Map(), links = {}
     try{
+      // Server-Wächter aktiv → nur die Pläne (für mpHedgeOffen) und unten der Review-Zähler; accounts + dup_links braucht nur die
+      // Browser-Erkennung (01.10.2026, Supabase-Diät: je Profil und Minute vier Abfragen vom Mac, ~1.600/h)
+      const nur = serverWatch.active
       const [pRes, aRes, lRes] = await Promise.all([
         sb.from('trade_plans').select('*').in('status', ['planned','open']),
-        sb.from('accounts').select('id,topstep_account_id,meta_api_account_id'),
-        sb.from('user_settings').select('value').eq('user_id', uid).eq('key', 'dup_links').maybeSingle()
+        nur ? Promise.resolve({ data: [] }) : sb.from('accounts').select('id,topstep_account_id,meta_api_account_id'),
+        nur ? Promise.resolve({ data: null }) : sb.from('user_settings').select('value').eq('user_id', uid).eq('key', 'dup_links').maybeSingle()
       ])
       if(pRes.error) throw pRes.error
       plans   = (pRes.data || []).map(rowToPlan).filter(Boolean)
@@ -27615,10 +27654,14 @@
     }
   }
 
+  let _mpLeichtAt = 0
   async function mpTick(){
     if(!autoTrack.enabled) return
     if(mpWatch.running)    return
     if(!mpIsLeader())      return
+    // Server-Wächter aktiv → Railway erkennt für alle Profile, hier bleiben nur Review-Zähler + mpHedgeOffen: alle 5 min reichen
+    // (01.10.2026, Supabase-Diät). Fällt der Server-Wächter aus, läuft der Takt sofort wieder jede Minute.
+    if(serverWatch.active){ if(Date.now() - _mpLeichtAt < 5 * 60000) return; _mpLeichtAt = Date.now() }
     // Aktives Profil ausschließen — das bedient atCheck. currentUserId zusätzlich,
     // falls PROF_ACTIVE mal nicht gesetzt ist (sonst liefen beide Engines auf
     // denselben Plänen).
@@ -28828,10 +28871,13 @@
    * nur den Haken setzen (Spalten-Grant auf erledigt/erledigt_am). Über den
    * Admin-Endpoint ginge es gar nicht — der verlangt ADMIN_EMAILS.
    * Eigene Verdrahtung, kein Sammel-Handler (Projektregel). */
-  let _todoBusy = false
-  async function todoLaden(){
+  let _todoBusy = false, _todoAt = 0
+  // force = nach dem eigenen Haken. Sonst höchstens alle 5 min (01.10.2026, Supabase-Diät: ~240 GET acc_plan/h — renderAccounts
+  // ruft das bei jedem Neuzeichnen, auf den PC-Tabs also bei jedem Balance-Tick; die Liste ändert sich nur über den Admin)
+  async function todoLaden(force){
     const karte = document.getElementById('todoCard'); if(!karte || _todoBusy) return
-    _todoBusy = true
+    if(!force && Date.now() - _todoAt < 5 * 60000) return
+    _todoBusy = true; _todoAt = Date.now()
     try{
       const { data, error } = await supabase.from('acc_plan')
         .select('id,firma,notiz,erledigt').order('created_at', { ascending: false })
@@ -28865,10 +28911,10 @@
         .update({ erledigt, erledigt_am: erledigt ? new Date().toISOString() : null })
         .eq('id', id)
       if(error) throw error
-      todoLaden()
+      todoLaden(true)
     }catch(e){
       alert('Haken nicht gespeichert: ' + (e && e.message || e))
-      todoLaden()
+      todoLaden(true)
     }
   }
 
@@ -29276,9 +29322,10 @@
             mt5Gespeichert = true
           }
         }
-        // „Live" nur, solange der gespeicherte Stand ≤ 90 s alt ist (der PC-Tab schreibt bei offenem Terminal mindestens jede Minute)
+        // „Live" nur, solange der gespeicherte Stand ≤ 6 min alt ist (der PC-Tab schreibt bei offenem Terminal jede Änderung sofort,
+        // sonst alle 5 min — vorher jede Minute / 90 s, 01.10.2026 Supabase-Diät)
         const mt5GespMs = mt5Gespeichert ? (Date.parse(a.tvBalanceAt || '') || 0) : 0
-        const mt5GespLive = mt5Gespeichert && mt5GespMs && Date.now() - mt5GespMs <= 90000
+        const mt5GespLive = mt5Gespeichert && mt5GespMs && Date.now() - mt5GespMs <= 6 * 60000
         const mt5Zuletzt = (mt5Gespeichert && !mt5GespLive && mt5GespMs) ? (() => {
           const d = new Date(mt5GespMs), heute = new Date().toDateString() === d.toDateString()
           return 'zuletzt ' + (heute ? '' : d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) + ' ') + d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
@@ -37114,7 +37161,7 @@
     _osRxCache.t = Date.now()
     try{
       let uid; try{ uid = currentUserId }catch(_){ uid = null }
-      const grenze = new Date(Date.now() - 30000).toISOString()
+      const grenze = window.grenzeMinute(45000)   // Leerlauf-Push 30 s (01.10.2026), stabile URL
       const { data } = await supabase.from('mt5_live').select('pc_name,status,updated_at').gte('updated_at', grenze)
       const je = new Map()
       for(const r of data || []){
@@ -37152,7 +37199,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.937'
+  const OS_TAB_BUILD = '2026-09-22.938'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -38252,11 +38299,11 @@
       && Number(p.type) === (order.richtung === 'buy' ? 0 : 1)
     const liveRows = async pc => {
       try{
-        const grenze = new Date(Date.now() - 25000).toISOString()
-        let q = supabase.from('mt5_live').select('*').gte('updated_at', grenze)
+        // Stabile URL + eigener Frische-Filter (01.10.2026): Leerlauf-Zeilen kommen nur alle 30 s (mt5LiveFrischMs 45 s), laufende 25 s
+        let q = supabase.from('mt5_live').select('*').gte('updated_at', window.grenzeMinute(45000))
         if(pc) q = q.eq('pc_name', pc)
         const { data } = await q
-        return data || []
+        return (data || []).filter(r => Date.now() - (Date.parse(r.updated_at || '') || 0) <= window.mt5LiveFrischMs(r))
       }catch(_){ return [] }
     }
     // Merge statt Ersetzen: eine Zeile, deren Push kurz einschläft, behält
@@ -40416,14 +40463,14 @@
     _pulsFern.laeuft = true
     _pulsFern.versuch = Date.now()
     try{
-      const ab = new Date(Date.now() - PULS_SIGNAL_MAX_MS).toISOString()
+      const ab = window.grenzeMinute(PULS_SIGNAL_MAX_MS)   // stabile URL (01.10.2026, Supabase-Diät: OPTIONS ≈ GET) — 1 min weiter, Signale älter als 10 min sind ohnehin erledigt
       const mitReview = Date.now() - _pulsFern.reviewAt >= 60000
       const [sig, pl, rv] = await Promise.all([
         supabase.from('order_signale').select('id,plan_id,params,status,created_at').eq('user_id', uid)
           .in('status', ['wartet', 'laeuft']).gte('created_at', ab).order('created_at', { ascending: false }).limit(5),
         // ab 65 min vor jetzt: Farmer-Fenster 60 min + Claim-Dauer — ältere nie gefeuerte Pläne würden sonst den Deckel füllen
         supabase.from('trade_plans').select('*').eq('user_id', uid).eq('status', 'planned')
-          .gte('start_um', new Date(Date.now() - 65 * 60000).toISOString()).order('start_um', { ascending: true }).limit(PULS_FERN_MAX),
+          .gte('start_um', window.grenzeMinute(65 * 60000)).order('start_um', { ascending: true }).limit(PULS_FERN_MAX),
         // offene Bestätigungen — 1× je Minute reicht, die Nachlese-Zeiten liegen minutengenau
         mitReview ? supabase.from('trade_plans').select(PULS_REVIEW_SPALTEN).eq('user_id', uid).eq('status', 'review').in('route', ['tvv2', 'tsv2'])
           .is('mt5_baseline->final->>balance_end', null).order('ended_at', { ascending: false }).limit(PULS_REVIEW_MAX) : null
@@ -40538,7 +40585,11 @@
   setInterval(() => {
     try{ if(!_pulsScharfHolt && (!_suScharf || Date.now() - _suScharf.at > WD_SCHARF_RUHE_MS)){ _pulsScharfHolt = true; tpFarmerScharf(WD_SCHARF_RUHE_MS).catch(() => {}).finally(() => { _pulsScharfHolt = false }) } }catch(_){}   // Pille: 5 min (01.10.2026)
     const seitVersuch = Date.now() - _pulsFern.versuch
-    if(seitVersuch >= 15000 || (!_pulsFern.at && seitVersuch >= 3000)) pulsFernLaden().catch(() => {})
+    // 15 s, solange etwas läuft/wartet oder ein Termin in ≤ 10 min ansteht, sonst 30 s (01.10.2026, Supabase-Diät) — die Pille rechnet
+    // Countdown und „in X min" jede Sekunde aus dem Speicher, neue Termine weiter weg dürfen 30 s später erscheinen
+    let pulsRuhig = false
+    try{ const j = Date.now(), n0 = pulsTermine(j)[0]; pulsRuhig = !pulsAktivJetzt(j) && !(_pulsFern.signale || []).length && !(n0 && n0.t - j <= 10 * 60000) }catch(_){}
+    if(seitVersuch >= (pulsRuhig ? 30000 : 15000) || (!_pulsFern.at && seitVersuch >= 3000)) pulsFernLaden().catch(() => {})
     try{ pulsNaechsterZeichnen() }catch(_){}
   }, 1000)
   document.addEventListener('visibilitychange', () => { if(!document.hidden) pulsFernLaden().catch(() => {}) })
@@ -51236,7 +51287,8 @@
       if(Date.now() < _echoLoesch.next) return
       const insts = (d && d.instances) || []
       if(!insts.length) return
-      _echoLoesch.next = Date.now() + 30 * 1000
+      // 30 s → 2 min (01.10.2026, Supabase-Diät: ~290 GET/h von 8 PCs) — ein Terminal nach dem Archivieren 2 min später zu schließen ist egal
+      _echoLoesch.next = Date.now() + 120 * 1000
       const { data } = await supabase.from('echo_loesch_auftraege')
         .select('mt5_login,grund,account_name').is('erledigt_am', null)
       if(!data || !data.length) return
