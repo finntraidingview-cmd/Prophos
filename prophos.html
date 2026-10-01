@@ -21087,7 +21087,7 @@
         hedge_login: res.hedge_login || hedgeLoginDiesesPcs(),   // Konto, auf dem der Hedge liegt — WD-Hedge-Buchung sucht danach (25.09.2026)
         // Feed-Wächter schließt bei schliesst_bei_nq (pufferFelder oben): TP ± 8 Ticks mit echtem Fill/Hand, sonst TP ± (Puffer + Zuschlag)
         sl_fehler: res.sl_fehler || null, tp_fehler: res.tp_fehler || null, symbol: res.symbol || 'NAS100',
-        wert_pro_punkt: res.wert_pro_punkt, waehrung: res.waehrung || 'EUR', nas_bid: res.nas_bid, opened_at: new Date().toISOString(), cmd_id: res.cmd_id || null, msg: res.msg || '',
+        wert_pro_punkt: res.wert_pro_punkt, waehrung: res.waehrung || 'EUR', nas_bid: res.nas_bid, nas_ask: res.nas_ask || null, opened_at: new Date().toISOString(), cmd_id: res.cmd_id || null, msg: res.msg || '',
         open_grund: res.open_grund || null })
       // schon_offen (Copier-Riegel): Level aus tv.einstieg_nq (Puls-Fill) wie bei der Selbstheilung, falls der Einstieg oben nur vom Feed kam
       if(res.open_grund === 'schon_offen' && !echterEinstieg && !echterTp && !handWaehrend){   // nie über Hand-Werte (28.09.2026)
@@ -22237,32 +22237,57 @@
   window._hedgeFeedPufferStand = () => ({ NQ: _hedgeFeedPuffer.NQ.length, MNQ: _hedgeFeedPuffer.MNQ.length })   // Diagnose
   /* TERMINAL-LEVEL AM ECHTEN TRADINGVIEW-FILL (01.10.2026, Finn: „Die Level müssen anhand des TradingView-Fills angepasst werden,
    * nicht anhand des Fusion-Kurses — der Fusion-Fill ist manchmal anders als der TradingView-Fill"). Der Copier setzt beim Open
-   * Notfall-SL und Level am Master-SL ab dem FUSION-Fill ± Punkte. Der Master füllt aber anders (Klick vs. Fill, TradingView rechnet
-   * die Bracket ab dem Absende-Kurs). Sobald tp_level_nq echt ist (TP-Limit aus „Show more", Fill, Hand), setzt der PC-Tab beide
-   * NAS100-Level neu: NAS-Level = NQ-Level + Basis, Basis = Fusion-Fill − NQ-Feed im Moment des Fusion-Fills (zeiten_ms.gefuellt).
-   * Ohne Feed in diesem Moment keine Basis → die Level bleiben ab dem Fusion-Fill (nie raten). Das Level am Master-SL nur mit
-   * echtem Einstieg (sl_level_nq hängt am Einstieg). Höchstens 3 Fehlversuche je Hedge, dann bleibt es beim alten Level. */
+   * vorläufige Level ab dem FUSION-Fill ± Punkte. Sobald TradingViews echte Brackets da sind, setzt der PC-Tab beide NAS100-Level neu.
+   * NQ-LEVEL: TP = tp_level_nq (Limit aus „Show more"/Fill/Hand). SL = der echte Stop aus TradingViews Meldung (tv.sl_level_nq), sonst
+   *   aus dem TP-Anker (TradingView verankert die Bracket am Kurs beim ABSENDEN: SL = TP ∓ (TP-Distanz + SL-Distanz)), sonst mit echtem
+   *   Einstieg hedge.sl_level_nq. Live-Befund Plan 824daa43 (01.10.2026): Fill 30586, Absende-Kurs 30589,25 → echter SL 30625,25,
+   *   Fill ± 36 hätte 30622 ergeben (3,25 Pkt zu früh). Winning Day (Liquidation) bleibt bei hedge.sl_level_nq.
+   * NQ → NAS100 über das VERHÄLTNIS, nicht über einen festen Abstand: Fusions NAS100 läuft am Kassa-Index (~250 Pkt unter dem
+   *   Future, Plan 824daa43: NAS 30340 / MNQ 30591 = 0,9918) — 44 NQ-Punkte sind dort ~43,6. Verhältnis = NAS100-Mitte (bid/ask beim
+   *   Senden) ÷ NQ-Feed zum selben Moment (letzter Kurs bis + 0,8 s Feed-Verzug, höchstens 3 s alt). Ohne Feed → kein Abgleich
+   *   (die vorläufigen, weiten Level bleiben — nie raten). Höchstens 3 Fehlversuche je Hedge. */
   function hedgeFeedZumZeitpunkt(wurzel, ms){
-    const w = wurzel === 'MNQ' ? 'MNQ' : 'NQ', andere = w === 'NQ' ? 'MNQ' : 'NQ', t = Number(ms)
-    if(!(t > 0)) return null
+    const w = wurzel === 'MNQ' ? 'MNQ' : 'NQ', andere = w === 'NQ' ? 'MNQ' : 'NQ', ziel = Number(ms) + HEDGE_FEED_KLICK_VERZUG_MS
+    if(!(Number(ms) > 0)) return null
     for(const ww of [w, andere]){
       let best = null
-      for(const x of (_hedgeFeedPuffer[ww] || [])){ if(x && Math.abs(x.t - t) <= 3000 && (!best || Math.abs(x.t - t) < Math.abs(best.t - t))) best = x }
-      if(best) return { preis: best.preis, t: best.t, wurzel: ww }
+      for(const x of (_hedgeFeedPuffer[ww] || [])){ if(x && x.t <= ziel && (!best || x.t >= best.t)) best = x }
+      if(best && ziel - best.t <= 3000) return { preis: best.preis, t: best.t, wurzel: ww }
     }
     return null
   }
   // REIN RECHNEND (Test-Haken window._hedgeTerminalLevelZiel): NAS100-Level aus den NQ-Leveln. Notfall-SL so weit hinter dem Master-TP
-  // wie copier.solo_notfall_sl (max(TP × Faktor, TP + 1) − TP), Level am Master-SL Puffer dahinter wie copier.solo_level_tp.
-  function hedgeTerminalLevelZiel(richtungMaster, tpNq, slNq, basis, notfallFaktor, tpPunkte, puffer){
+  // wie copier.solo_notfall_sl (max(TP × Faktor, TP + 1) − TP), Level am Master-SL Puffer dahinter wie copier.solo_level_tp; beides in
+  // NQ-Punkten, dann × Verhältnis (NAS100/NQ) auf Fusion umgerechnet.
+  function hedgeTerminalLevelZiel(richtungMaster, tpNq, slNq, verhaeltnis, notfallFaktor, tpPunkte, puffer){
     const plus = richtungMaster === 'buy' ? 1 : richtungMaster === 'sell' ? -1 : 0
-    if(!plus || !(tpNq > 1000) || !isFinite(basis) || !(tpPunkte > 0)) return null
+    const v = Number(verhaeltnis)
+    if(!plus || !(tpNq > 1000) || !(v > 0.9 && v < 1.1) || !(tpPunkte > 0)) return null
     const f = (notfallFaktor >= 1 && notfallFaktor <= 2) ? notfallFaktor : hedgeNotfallFaktorFuer(tpPunkte)
     const hinter = Math.max(tpPunkte * f, tpPunkte + 1) - tpPunkte
-    const r = v => Math.round(v * 100) / 100
-    return { sl: r(tpNq + plus * hinter + basis), tp: (slNq > 1000) ? r(slNq - plus * Math.max(0, Number(puffer) || 0) + basis) : 0, hinter: r(hinter) }
+    const r = x => Math.round(x * 100) / 100
+    return { sl: r((tpNq + plus * hinter) * v), tp: (slNq > 1000) ? r((slNq - plus * Math.max(0, Number(puffer) || 0)) * v) : 0, hinter: r(hinter) }
   }
   window._hedgeTerminalLevelZiel = hedgeTerminalLevelZiel
+  // REIN RECHNEND (Test-Haken window._hedgeSlNqEcht): echter Master-SL in NQ → {sl, quelle} | null (Rangfolge siehe oben)
+  function hedgeSlNqEcht(richtungMaster, h, tv){
+    const plus = richtungMaster === 'buy' ? 1 : richtungMaster === 'sell' ? -1 : 0
+    const slp = Number(h && h.sl_punkte), tpp = Number(h && h.punkte), tp = Number(h && h.tp_level_nq)
+    if(!plus || !(slp > 0)) return null
+    const einEcht = /^fill$|avg_fill|^hand/.test(String((h && h.einstieg_quelle) || ''))
+    if(h.sl_art === 'liquidation') return (einEcht && Number(h.sl_level_nq) > 1000) ? { sl: Number(h.sl_level_nq), quelle: 'liquidation' } : null
+    const ein = Number(h.einstieg_nq)
+    // plausibel: auf der richtigen Seite, Abstand zum Einstieg ≈ SL-Distanz (wie hedgeTpPreisPasst)
+    const passt = x => { const d = plus * (ein - x); return !(ein > 1000) || (d > 0 && Math.abs(d - slp) <= Math.max(8, slp * 0.4)) }
+    const tvSl = Number(tv && tv.sl_level_nq)
+    if(tvSl > 1000 && passt(tvSl)) return { sl: Math.round(tvSl * 100) / 100, quelle: (tv && tv.sl_level_quelle) || 'tv_toast' }
+    if(/^(tv_limit|tv_toast|tv_orders)$/.test(String(h.tp_quelle || '')) && tp > 1000 && tpp > 0){
+      const x = Math.round((tp - plus * (tpp + slp)) * 100) / 100
+      if(passt(x)) return { sl: x, quelle: 'tp_anker' }
+    }
+    return (einEcht && Number(h.sl_level_nq) > 1000) ? { sl: Number(h.sl_level_nq), quelle: 'einstieg' } : null
+  }
+  window._hedgeSlNqEcht = hedgeSlNqEcht
   const _hedgeLevelAbgleich = new Map()   // plan_id → { key, versuche, busy, basisFehlt }
   async function hedgeTerminalLevelAbgleich(p, h){
     const pid = String(p.id), st = _hedgeLevelAbgleich.get(pid) || { key: null, versuche: 0, busy: false, basisFehlt: false }
@@ -22271,24 +22296,30 @@
     if(!/tv_limit|tv_toast|tv_orders|fill_|hand/.test(String(h.tp_quelle || ''))) return   // TP nur geschätzt → warten
     st.busy = true
     try{
-      let basis = (h.basis_nas != null) ? Number(h.basis_nas) : NaN
-      if(!isFinite(basis)){
+      let vh = (h.nas_nq_verhaeltnis != null) ? Number(h.nas_nq_verhaeltnis) : NaN
+      if(!(vh > 0)){
         if(st.basisFehlt) return
         const wz = (typeof tvSymbolWurzel === 'function' && tvSymbolWurzel(h.symbol_nq || '')) || 'NQ'
-        const tFill = Number(h.zeiten_ms && h.zeiten_ms.gefuellt) || Date.parse(h.opened_at || '') || 0
-        const x = hedgeFeedZumZeitpunkt(wz, tFill)
-        if(!x){
+        const z = h.zeiten_ms || {}
+        const tNas = Number(z.send_vor) || Number(z.gefuellt) || Date.parse(h.opened_at || '') || 0
+        const x = hedgeFeedZumZeitpunkt(wz, tNas)
+        const nasMitte = (Number(h.nas_bid) > 0 && Number(h.nas_ask) > 0) ? (Number(h.nas_bid) + Number(h.nas_ask)) / 2 : Number(h.fill)
+        if(!x || !(nasMitte > 1000)){
           st.basisFehlt = true
-          await hedgeAmPlanSchreiben(p.id, { level_abgleich: { at: new Date().toISOString(), ok: false, msg: 'kein NQ-Kurs zum Fusion-Fill — Level bleiben ab dem Fusion-Fill' } })
+          await hedgeAmPlanSchreiben(p.id, { level_abgleich: { at: new Date().toISOString(), ok: false, msg: 'kein NQ-Kurs zum Fusion-Fill — vorläufige Level bleiben' } })
           return
         }
-        basis = Math.round((Number(h.fill) - x.preis) * 100) / 100
-        await hedgeAmPlanSchreiben(p.id, { basis_nas: basis, basis_feed_nq: x.preis, basis_feed_wurzel: x.wurzel, basis_abstand_ms: Math.round(x.t - tFill) })
+        vh = Math.round(nasMitte / x.preis * 1e6) / 1e6
+        await hedgeAmPlanSchreiben(p.id, { nas_nq_verhaeltnis: vh, nas_mitte: Math.round(nasMitte * 100) / 100, verhaeltnis_feed_nq: x.preis, verhaeltnis_feed_wurzel: x.wurzel, verhaeltnis_abstand_ms: Math.round(x.t - tNas) })
       }
-      const einEcht = /^fill$|avg_fill|^hand/.test(String(h.einstieg_quelle || ''))
-      const ziel = hedgeTerminalLevelZiel(p.richtung, Number(h.tp_level_nq), einEcht ? Number(h.sl_level_nq) : 0, basis, hedgeNotfallFaktorFuer(Number(h.punkte)), Number(h.punkte), hedgePuffer())   // normaler Faktor, nie der vorläufige vom Open
+      const tv = p.mt5Baseline && p.mt5Baseline.tv
+      const slE = hedgeSlNqEcht(p.richtung, h, tv)
+      // Radar soll am echten SL schließen, nicht am Fill-SL (sl_feed): sl_level_nq nachziehen (nie bei Liquidation)
+      if(slE && slE.quelle !== 'liquidation' && slE.quelle !== 'einstieg' && Math.abs(slE.sl - Number(h.sl_level_nq || 0)) >= 0.25)
+        await hedgeAmPlanSchreiben(p.id, { sl_level_nq: slE.sl, sl_level_quelle: slE.quelle, sl_level_vor_abgleich: (h.sl_level_nq != null) ? h.sl_level_nq : null })
+      const ziel = hedgeTerminalLevelZiel(p.richtung, Number(h.tp_level_nq), slE ? slE.sl : 0, vh, hedgeNotfallFaktorFuer(Number(h.punkte)), Number(h.punkte), hedgePuffer())   // normaler Faktor, nie der vorläufige vom Open
       if(!ziel) return
-      const tpNeu = (einEcht && ziel.tp > 0) ? ziel.tp : (Number(h.tp) || 0)
+      const tpNeu = (slE && ziel.tp > 0) ? ziel.tp : (Number(h.tp) || 0)
       const key = `${ziel.sl}|${tpNeu}`
       if(st.key === key) return
       const nah = (a, b) => Math.abs(Number(a || 0) - Number(b || 0)) < 0.5
@@ -22296,11 +22327,11 @@
       let res
       try{ res = await window.mtcApi('hedge-solo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ aktion: 'level', ticket: h.ticket, sl: ziel.sl, tp: tpNeu }), timeoutMs: 15000 }) }
       catch(e){ res = { ok: false, msg: String(e && e.message || e) } }
-      const info = { at: new Date().toISOString(), basis, tp_nq: Number(h.tp_level_nq), sl_nq: einEcht ? Number(h.sl_level_nq) || null : null, tp_quelle: h.tp_quelle || null, einstieg_quelle: h.einstieg_quelle || null }
+      const info = { at: new Date().toISOString(), verhaeltnis: vh, tp_nq: Number(h.tp_level_nq), sl_nq: slE ? slE.sl : null, sl_quelle: slE ? slE.quelle : null, tp_quelle: h.tp_quelle || null }
       if(res && res.ok){
         st.key = key; st.versuche = 0
         await hedgeAmPlanSchreiben(p.id, { sl: res.sl, tp: res.tp, sl_fusion_fill: (h.sl_fusion_fill != null) ? h.sl_fusion_fill : (Number(h.sl) || 0), tp_fusion_fill: (h.tp_fusion_fill != null) ? h.tp_fusion_fill : (Number(h.tp) || 0),
-          notfall_faktor: hedgeNotfallFaktorFuer(Number(h.punkte)), level_vorlaeufig: !(einEcht || !(Number(h.sl_level_nq) > 0)),
+          notfall_faktor: hedgeNotfallFaktorFuer(Number(h.punkte)), level_vorlaeufig: !(slE || !(Number(h.sl_punkte) > 0)),
           level_abgleich: Object.assign(info, { ok: true, sl: res.sl, tp: res.tp, sl_alt: res.sl_alt, tp_alt: res.tp_alt }) })
       } else {
         st.versuche++
@@ -24514,7 +24545,7 @@
     }
     // Balance nach dem Trade gelesen (seit .625 statt Today's P&L; F21 27.09.2026) — P&L exakt setzt endlesungZeileHtml mit der Start-Balance
     if(typeof fin.balance_end === 'number' && isFinite(fin.balance_end))
-      return { art: 'gelesen', text: `✓ Puls hat bestätigt ${uhr(fin.puls_at || fin.at)} (Balance ${n2(fin.balance_end)} $${fin.balance_quelle === 'folgetrade' ? ', aus dem Folgetrade' : ''})${exText}`, tip: tip.join('\n'), bisMs: null, knopf: false }
+      return { art: 'gelesen', text: `✓ ${fin.balance_quelle === 'reader' ? 'Userscript hat gelesen' : 'Puls hat bestätigt'} ${uhr(fin.puls_at || fin.at)} (Balance ${n2(fin.balance_end)} $${fin.balance_quelle === 'folgetrade' ? ', aus dem Folgetrade' : ''})${exText}`, tip: tip.join('\n'), bisMs: null, knopf: false }
     if(planStatus !== 'review') return null
     const versuche = Number(fin.puls_versuche) || (fin.puls_at ? 1 : 0)
     // Warte auf Puls (F21, Finn 27.09.2026: „Warte auf Puls. Wird so und so viele Minuten später abgecheckt, je nach Zufall"): vor dem
@@ -24549,7 +24580,7 @@
     try{ const tvb = (plan && plan.mt5Baseline && plan.mt5Baseline.tv) || {}, bs = tvb.balance_start
          // TopstepX (01.10.2026, TSV2-PNL): Start und Ende nur verrechnen, wenn die Balance-Basis gleich ist (Express 0-basiert)
          const basisGleich = !(typeof tvb.balance_relativ === 'boolean' && typeof fin.balance_relativ === 'boolean' && tvb.balance_relativ !== fin.balance_relativ)
-         if(st.art === 'gelesen' && typeof fin.balance_end === 'number' && typeof bs === 'number' && basisGleich){ const d = Math.round((fin.balance_end - bs) * 100) / 100; st.text = st.text.replace(/^✓ Puls hat bestätigt /, `✓ Puls hat bestätigt · P&L exakt ${d >= 0 ? '+' : '−'}${Math.abs(d).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $ · `) } }catch(_){}
+         if(st.art === 'gelesen' && typeof fin.balance_end === 'number' && typeof bs === 'number' && basisGleich){ const d = Math.round((fin.balance_end - bs) * 100) / 100; st.text = st.text.replace(/^✓ (Puls hat bestätigt|Userscript hat gelesen) /, (_m, wer) => `✓ ${wer} · P&L exakt ${d >= 0 ? '+' : '−'}${Math.abs(d).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $ · `) } }catch(_){}
     const busy = _elBusy.has(String(pid))
     let sperre = ''
     try{ const g = window._tvV2Endlesung && window._tvV2Endlesung.grund; if(plan && typeof g === 'function') sperre = String(g(plan, Date.now(), true) || '') }catch(_){}
@@ -37359,7 +37390,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.945'
+  const OS_TAB_BUILD = '2026-09-22.946'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
