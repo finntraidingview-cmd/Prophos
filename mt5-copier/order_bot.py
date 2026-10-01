@@ -16500,6 +16500,7 @@ def cdp_positionen_vertrag(pos):
 # Rechts im Panel-Kopf stehen „—" = [data-name=toggle-visibility-button] (Collapse/Open panel) und „⌐" =
 # [data-name=toggle-maximize-button] (aria „Maximize panel"), beide im Inventar pc-cccccc/pc-jjjjjj belegt. Finns Regel: Panel nicht
 # zu sehen → rechts aufklappen und nochmal; ist auch das Symbol nicht da, ist kein Konto verbunden → Login-Weg.
+CDP_NIE_MAXIMIEREN = True   # Finn 01.10.2026: „nie wieder Maximize panel, immer nur Open panel" — alter Maximize-Weg bleibt nur als Code
 CDP_PANEL_MIN_H = 150       # px unter der Broker-Leiste: Platz für Reiter + Kontoliste (gut: 320, Vorfall: 49)
 CDP_PANEL_LAGE_JS = r"""(function () {
   function r(e) { if (!e) return null; var b = e.getBoundingClientRect(); return (b.width > 0 && b.height > 0) ? [b.x, b.y, b.width, b.height] : null; }
@@ -16534,6 +16535,12 @@ def _cdp_panel_aufklappen(s, trail, ohne_max=False):
     if lage != "eingeklappt":
         return lage, d
     h = d.get("unter_leiste")
+    # NIE MAXIMIEREN (Finn 01.10.2026 11:29 UTC, Orbit V3 bei Moritz: „nie wieder Maximize, immer nur Open panel" — Puls maximierte, weil
+    # das OFFENE Panel dort nur 113 px hoch ist (< CDP_PANEL_MIN_H), und scheiterte dann am Kontextmenü „Tradovate ▾" oben in der
+    # maximierten Ansicht → Login-Wechsel nicht geschafft). Offenes Panel (Kopf-Knopf „Collapse panel") zählt jetzt als ok, egal wie hoch.
+    va0 = str(((d.get("vis_knopf") if isinstance(d.get("vis_knopf"), dict) else {}) or {}).get("aria") or "")
+    if CDP_NIE_MAXIMIEREN and re.search(r"collapse|close|schlie|hide|ausblenden|einklappen|zuklappen", va0, re.I):
+        return "ok", d
     # ERST „Open panel" (Finn 01.10.2026, Live-Befund Moritz 23:08 UTC, Orbit V3: nach „Maximize panel" war der Chart weg, das Symbol
     # ließ sich nicht einstellen — „nur auf Open Panel, das Dropdown sieht man da perfekt"). Normale Höhe, Chart bleibt sichtbar;
     # „Maximize panel" nur noch als Rückfall, wenn das offene Panel zu niedrig bleibt (Vorfall pc-cccccc 30.09.: 49 px trotz „offen").
@@ -16553,15 +16560,16 @@ def _cdp_panel_aufklappen(s, trail, ohne_max=False):
                 for _ in range(5):                        # Treffer ≠ Wirkung (Regel .835)
                     _warte(0.6, 0.3)
                     d2 = s.lese_js(CDP_PANEL_LAGE_JS)
-                    if cdp_panel_lage(d2) == "ok":
+                    va2 = str(((d2.get("vis_knopf") if isinstance(d2, dict) and isinstance(d2.get("vis_knopf"), dict) else {}) or {}).get("aria") or "")
+                    if cdp_panel_lage(d2) == "ok" or (CDP_NIE_MAXIMIEREN and re.search(r"collapse|close|schlie|hide|ausblenden|einklappen", va2, re.I)):
                         s._panel_aufgeklappt = True
-                        trail.append(f"Order-Panel offen ({d2.get('unter_leiste')} px, Chart bleibt sichtbar)")
+                        trail.append(f"Order-Panel offen ({(d2 or {}).get('unter_leiste')} px, Chart bleibt sichtbar)")
                         return "aufgeklappt", d2
                     if isinstance(d2, dict):
                         d = d2
                 trail.append(f"Order-Panel nach „Open panel“ zu niedrig ({(d or {}).get('unter_leiste')} px) → Rückfall „Maximize panel“")
                 h = (d or {}).get("unter_leiste")
-    if ohne_max:   # 01.10.2026 (Finn): Konto steht schon → nie maximieren, der Chart bleibt sichtbar
+    if ohne_max or CDP_NIE_MAXIMIEREN:   # 01.10.2026 (Finn): nie maximieren, der Chart bleibt sichtbar
         return "bleibt_eingeklappt", d
     if getattr(s, "_panel_max_versucht", False):
         return "bleibt_eingeklappt", d

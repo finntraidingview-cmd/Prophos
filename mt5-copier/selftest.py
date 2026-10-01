@@ -3230,6 +3230,7 @@ def test_puls_cdp_login():
                 self.aktiv, self.offen = "PAAPEX0000000000008USD", False
             return True
     ob._warte = lambda a_, b_: None
+    ob.CDP_NIE_MAXIMIEREN = False   # alter Maximize-Rückfall (Code bleibt) — seit 01.10.2026 per Schalter aus, unten geprüft
     try:
         k1_, t1_ = _SK(), []
         r1_ = ob._cdp_konto_sichern(k1_, "PAAPEX0000000000008", {}, t1_)
@@ -3278,6 +3279,27 @@ def test_puls_cdp_login():
         ro2_ = ob._cdp_konto_sichern(ko2_, "PAAPEX0000000000008", {}, to2_)
     finally:
         ob._warte = alt_w
+        ob.CDP_NIE_MAXIMIEREN = True
+    # NIE MAXIMIEREN (Finn 01.10.2026 11:29 UTC, Moritz: offenes Panel 113 px → Maximize → Kontextmenü oben nicht klickbar → Login-Wechsel tot)
+    class _SN(_SO):
+        def __init__(self, zu=False, **kw):
+            _SO.__init__(self, open_reicht=False, **kw); self.zu = zu
+        def klick(self, r, n, toast_ok=False):
+            if n == "Konto-Umschalter":
+                self.klicks.append(n); self.offen = True; return True   # Liste geht auch im niedrigen Panel auf
+            return _SO.klick(self, r, n, toast_ok)
+    ob._warte = lambda a_, b_: None
+    try:
+        kn1_, tn1_ = _SN(zu=False), []
+        rn1_ = ob._cdp_konto_sichern(kn1_, "PAAPEX0000000000008", {}, tn1_)
+        kn2_, tn2_ = _SN(zu=True), []
+        rn2_ = ob._cdp_konto_sichern(kn2_, "PAAPEX0000000000008", {}, tn2_)
+    finally:
+        ob._warte = alt_w
+    chk(rn1_[0] and kn1_.klicks == ["Konto-Umschalter", "Konto PAAPEX0000000000008"] and not kn1_.gross,
+        f"nie maximieren: Panel offen (49 px, „Collapse panel“) zählt als ok → direkt Umschalter → Konto ({kn1_.klicks})")
+    chk(rn2_[0] and kn2_.klicks == ["Order-Panel öffnen (Open panel)", "Konto-Umschalter", "Konto PAAPEX0000000000008"]
+        and not any("Maximize" in x for x in kn2_.klicks), f"nie maximieren: Panel zu → nur „Open panel“, auch wenn es niedrig bleibt ({kn2_.klicks})")
     chk(ro1_[0] and ko1_.klicks == ["Order-Panel öffnen (Open panel)", "Konto-Umschalter", "Konto PAAPEX0000000000008"]
         and not any("Maximize" in x for x in ko1_.klicks), f"eingeklappt → „Open panel“ reicht → kein Maximize ({ko1_.klicks})")
     chk(ro2_[0] and ko2_.klicks[:2] == ["Order-Panel öffnen (Open panel)", "Order-Panel aufklappen (Maximize panel)"]
