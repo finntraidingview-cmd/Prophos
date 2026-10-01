@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.9.6
+// @version      0.9.7
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt. Seit 0.5 auch die KONTO-ZUSAMMENFASSUNG (Balance, Today's P&L …) fuer den Orbit-V2-Rundgang.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -28,6 +28,8 @@
 // kommt ueber @updateURL/@downloadURL (GitHub-raw) von selbst.
 //
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
+//   0.9.7  01.10.2026  Puls-Chrome-Modus wartet auf readyState 'complete' höchstens 15 s ab Script-Start — Live-Befund Chris
+//                      01.10.2026 21:04: TradingView blieb dauerhaft 'interactive', Abzeichen hing bei „Prophos-Reader startet …“
 //   0.9.6  01.10.2026  Puls-Chrome schneller beim Schliessen: Takt 0,05 s, Leer-Beweis-Merkzeit 0,15 s (vorher 0,5 s — konnte das
 //                      „Position weg" um bis zu 0,5 s verzoegern). Suche bleibt auf das Panel beschraenkt (billig).
 //   0.9.5  01.10.2026  Puls-Chrome: Leer-Beweis billig (Befund Moritz 11:49–12:10 UTC: TradingView im Puls-Chrome lud nicht mehr fertig,
@@ -125,7 +127,8 @@
   // dreimal ein Update vermutet, das gar nicht aktiv war (31.08.2026), und von
   // aussen war das nur an FEHLENDEN Feldern zu erraten. Ab jetzt sagt jeder
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
-  const VERSION    = '0.9.6';
+  const VERSION    = '0.9.7';
+  const SCRIPT_START_MS = Date.now();   // 0.9.7: Bezug für die Lade-Schonfrist im Puls-Chrome
   // 0.9.0: Puls-Chrome-Modus (Orbit V3) — je Chrome-Profil gespeichert, siehe CHANGELOG
   let PULS_CHROME = false;
   try { PULS_CHROME = GM_getValue('prophos_puls_chrome', false) === true; } catch (_) {}
@@ -1527,7 +1530,7 @@
   }
 
   function tick() {
-    if (PULS_CHROME && document.readyState !== 'complete') return;   // 0.9.5: Seite lädt — Puls-Chrome nicht zusätzlich belasten
+    if (PULS_CHROME && document.readyState !== 'complete' && Date.now() - SCRIPT_START_MS < 15000) return;   // 0.9.5/0.9.7: Seite lädt — höchstens 15 s schonen
     // 0.8.7: Rolle ZUERST — ein Feed-Tab (kein Broker-Konto im Umschalter) liest keine Positionen und ist nie 'blind';
     // er liefert nur Kurse/Kerzen (die Positions-Felder schickt er seit 0.8.5 ohnehin nicht)
     if ((tickNr % BF_JEDER) === 0) liesKonto();
