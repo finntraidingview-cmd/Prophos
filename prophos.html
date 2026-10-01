@@ -37393,7 +37393,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.950'
+  const OS_TAB_BUILD = '2026-09-22.951'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -41267,6 +41267,9 @@
             // Winning Days Farm (25.09.2026): NUR Konten der Kontoart 'winning_days' mit External ID (vorher Funded/Live bei Futures-Firmen)
             if(_tpRoute === 'tvv2' && _tpWd && role === 'master'
                && !(typeof tpIstWinningDays === 'function' && tpIstWinningDays(a) && String(a.externalId || '').trim())) return false
+            // Orbit (= Orbit V3, 01.10.2026 abends, Finn): keine Topstep-Konten im Master-Dropdown — Topstep läuft über TopstepX
+            // (eigene Wege Topstep / Topstep V2), nicht über TradingView, wo Puls für Orbit platziert
+            if(_tpRoute === 'tvv2' && _tpO3 && role === 'master' && /topstep/i.test(String(a.firm || ''))) return false
             // Orbit V2 (23.09.2026): Master braucht keine Duplikum-Verknüpfung — Puls erkennt das Konto an der External ID.
             if(!_dupIds.has(String(a.id)) && _tpRoute !== 'tvv2' && _tpRoute !== 'tsv2') return false
             // Slave = nur der echte Duplikium-Slave; und der kann umgekehrt
