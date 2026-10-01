@@ -3440,6 +3440,26 @@ def test_puls_cdp_login():
         ob._augen_json_lesen, ob._augen_regel_holen, ob._augen_pc_id = _alt_l, _alt_h, _alt_p
     chk(m_alt == "cdp" and m_fehlt == "cdp" and n_vorher == 2 and m_frisch == "cdp" and m_uia == "uia" and n_nachher == 2,
         f"Regel alt/fehlt → einmal Railway fragen (cdp), frisch cdp/uia → kein Netz ({m_alt}, {m_fehlt}, {m_frisch}, {m_uia}, {gefragt_})")
+    # Seite: erster Klick ohne Hover-Beweis (kein Druck) → zweiter Versuch mit frischem Rechteck (Moritz 01.10.2026 12:50 UTC)
+    class _SS(_ST):
+        def __init__(self): _ST.__init__(self); self.seite, self.n = "buy", 0
+        def stand(self, opts=None):
+            d = _ST.stand(self, opts); d["kauf_knopf"] = {"symbol": "MNQZ6", "seite": self.seite, "text": ("Sell" if self.seite == "sell" else "Buy") + " 1 MNQZ6 MARKET", "rect": [1340, 820, 280, 50]}; return d
+        def klick(self, r, n, toast_ok=False):
+            self.klicks.append(n)
+            if n.startswith("Seite SELL"):
+                self.n += 1
+                if self.n >= 2: self.seite = "sell"
+                return self.n >= 2
+            return True
+    ob._warte = lambda a_, b_: None
+    try:
+        ss_, ts_ = _SS(), []
+        rs_ = ob._cdp_ticket_fuellen(ss_, ss_.stand(), {"richtung": "sell", "menge": 1, "tp": None, "sl": None}, "MNQZ6", {}, ts_)
+    finally:
+        ob._warte = alt_w
+    chk(ss_.klicks[:2] == ["Seite SELL", "Seite SELL (Versuch 2)"] and "Seite = SELL" in ts_ and "Seite steht" not in str(rs_[2]),
+        f"Seite: erster Klick ohne Hover → zweiter Versuch klappt ({ss_.klicks}, {rs_[1]}, {rs_[2][:60]})")
     fj_ = ob.cdp_panel_frei_js([1482, 907, 38, 38])
     chk("elementFromPoint(1501.0,926.0)" in fj_ and "toggle-visibility-button" in fj_ and "#overlap-manager-root" in fj_ and "toastGroup-" in fj_,
         "Frei-Probe: Knopfmitte, Dialog/Overlay verdeckt, Meldungen frei")

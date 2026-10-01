@@ -17032,15 +17032,20 @@ def _cdp_ticket_fuellen(s, st, plan, symbol, opts, trail):
     if not ticket().get("da"):
         return False, "ticket", "Order-Ticket im Puls-Chrome nicht offen — nichts getippt.", "ticket", st, None
     # --- Seite
-    if str(knopf().get("seite") or ticket().get("seite") or "") != plan["richtung"]:
+    # Bis zu 3 Versuche, jedes Mal mit frisch gelesenem Rechteck (Live-Befund Moritz 01.10.2026 12:50 UTC, Orbit V3, Plan SELL, Ticket stand
+    # vom vorigen Trade auf Buy: direkt nach dem Login-Wechsel meldete TradingView an der SELL-Kachel 1,6 s lang kein :hover → kein Druck,
+    # EIN Versuch, Abbruch „Seite steht nicht auf SELL"). Der Hover-Riegel bleibt: ohne Beweis nie ein Druck.
+    for _sv in range(3):
+        if str(knopf().get("seite") or ticket().get("seite") or "") == plan["richtung"]:
+            break
         kachel = ticket().get("kaufen" if plan["richtung"] == "buy" else "verkaufen")
         if not cdp_rect(kachel):
             return False, "ticket", f"Seiten-Kachel {plan['richtung'].upper()} nicht gefunden.", "ticket", st, None
-        s.klick(cdp_rect(kachel), f"Seite {plan['richtung'].upper()}")
+        s.klick(cdp_rect(kachel), f"Seite {plan['richtung'].upper()}" + (f" (Versuch {_sv + 1})" if _sv else ""))
         _warte(0.6, 0.3)
         st = s.stand(opts)
-        if str(knopf().get("seite") or ticket().get("seite") or "") != plan["richtung"]:
-            return False, "ticket", f"Seite steht nicht auf {plan['richtung'].upper()} ('{knopf().get('text') or '-'}').", "ticket", st, None
+    if str(knopf().get("seite") or ticket().get("seite") or "") != plan["richtung"]:
+        return False, "ticket", f"Seite steht nicht auf {plan['richtung'].upper()} ('{knopf().get('text') or '-'}', 3 Versuche).", "ticket", st, None
     trail.append(f"Seite = {plan['richtung'].upper()}")
     # --- Order-Typ Market
     m_, aktiv_ = cdp_ticket_typ_market(ticket().get("typen"))
