@@ -22898,18 +22898,22 @@
       const f = v => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 2 })   // Level: max. 2 Nachkommastellen (Float-Rauschen wie 30.749,778)
       // Anzeige (25.09.2026): Schließ-Level über den Kurs-Feed (Master-TP ± 8 Ticks) zuerst, das Notfall-Netz im Terminal dahinter
       const sbNq = h.schliesst_bei_nq > 0 ? Number(h.schliesst_bei_nq) : hedgeSchliesstBei(p.richtung, Number(h.tp_level_nq) || 0, (typeof h.puffer_punkte === 'number') ? h.puffer_punkte : hedgePuffer())
-      const lvl = ((h.waechter_stand && h.waechter_stand.kerzen_luecke_seit) ? ' · ⚠ Kerzen-Lücke' : '') + (h.master_teil != null ? ` · ⚠ Master teilweise zu (${h.master_teil} Kt)` : '') + (sbNq > 0 ? ` · schließt bei NQ ${f(sbNq)}` : ' · ⚠ kein NQ-Level') + (h.sl > 0 ? ` · Notfall ${f(h.sl)}${h.tp > 0 ? ` / ${f(h.tp)}` : (h.tp_fehler || h.sl_punkte > 0) ? ' / ⚠' : ''}` : ' · ⚠ kein Notfall-SL')
+      // Sichtbar nur noch Warnungen (Finn 01.10.2026: „visuell ein bisschen viel Info — schließt bei NQ, Notfall, Master-weg-Schutz
+      // ist unnötig"); die Level stehen weiter im Tooltip des Chips
+      const lvl = ((h.waechter_stand && h.waechter_stand.kerzen_luecke_seit) ? ' · ⚠ Kerzen-Lücke' : '') + (h.master_teil != null ? ` · ⚠ Master teilweise zu (${h.master_teil} Kt)` : '') + (sbNq > 0 ? '' : ' · ⚠ kein NQ-Level') + (h.sl > 0 ? ((h.tp > 0 || !(h.tp_fehler || h.sl_punkte > 0)) ? '' : ' · ⚠ Master-SL-Level fehlt') : ' · ⚠ kein Notfall-SL')
+      const lvlTitel = (sbNq > 0 ? `schließt bei NQ ${f(sbNq)}` : '') + (h.sl > 0 ? ` · Notfall ${f(h.sl)}${h.tp > 0 ? ` / ${f(h.tp)}` : ''}${h.level_vorlaeufig ? ' (vorläufig)' : ''}` : '')
       const box = (inner, bg, title) => `<span class="mono tc2-hedge" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:${bg};border:1px solid var(--border-soft)" title="${escapeHtml(title || '')}"><span style="font-size:9.5px;font-weight:600;color:var(--sub);letter-spacing:.02em">FUSION</span>${inner}</span>`
       if(h.status === 'offen' || h.status === 'schliesst'){
         const live = hedgeSoloLive(h.ticket)
         const pl = live ? Number(live.profit) : NaN
         const plHtml = isFinite(pl) ? `<b style="font-size:12px;color:${pl >= 0 ? '#15803d' : '#b91c1c'}">${fmtE(pl)}</b>` : `<span style="font-size:11px;color:var(--sub)">${h.status === 'schliesst' ? 'schließt…' : 'offen'}</span>`
-        return box(`<span style="font-size:11px;color:var(--sub)">${escapeHtml(String(h.richtung || '').toUpperCase())} ${Number(h.lots || 0).toLocaleString('de-DE')} Lot</span>${plHtml}<span style="font-size:10px;color:var(--sub)">${lvl}</span>${hedgeMasterWegHtml(p, h)}`,
+        return box(`<span style="font-size:11px;color:var(--sub)">${escapeHtml(String(h.richtung || '').toUpperCase())} ${Number(h.lots || 0).toLocaleString('de-DE')} Lot</span>${plHtml}${lvl ? `<span style="font-size:10px;color:#B45309">${lvl}</span>` : ''}`,
           isFinite(pl) ? (pl >= 0 ? 'rgba(18,183,106,.10)' : 'rgba(240,68,56,.08)') : 'var(--bg)',
           (() => { const ws = h.waechter_stand || {}, x = p.richtung === 'sell' ? ws.tief_seit_open : ws.hoch_seit_open
                    const qTxt = ws.kerzen_wurzel ? ` (${ws.kerzen_wurzel} ${ws.kerzen_quelle === 'ws' ? 'Chart-Serie' : ws.kerzen_quelle === 'gemischt' ? 'Chart-Serie + Ticks/andere Wurzel mit Basis-Ausgleich' : ws.kerzen_quelle === 'andere-ohne-basis' ? '— nur andere Wurzel ohne Basis, zählt nicht' : 'aus Ticks — kurze Ausschläge evtl. nicht erfasst'})` : ''
                    const lTxt = ws.kerzen_luecke_seit ? `⚠ Kerzen-Lücke seit ${new Date(ws.kerzen_luecke_seit).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} — ` : ''
-                   return lTxt + hedgeMasterWegTitel(p, h) + ((x > 0 && sbNq > 0) ? `${p.richtung === 'sell' ? 'Tief' : 'Hoch'} seit Open ${f(x)}${qTxt} · schließt bei ${f(sbNq)} — ` : '') })()
+                   const mwTxt = (() => { const m = hedgeMasterWegHtml(p, h); return m ? '✓ Master-weg-Schutz aktiv — ' : '' })()
+                   return lTxt + mwTxt + (lvlTitel ? lvlTitel + ' — ' : '') + hedgeMasterWegTitel(p, h) + ((x > 0 && sbNq > 0) ? `${p.richtung === 'sell' ? 'Tief' : 'Hoch'} seit Open ${f(x)}${qTxt} · schließt bei ${f(sbNq)} — ` : '') })()
           + `Fusion-Gegenhedge Ticket ${h.ticket}${h.klick_at && h.opened_at ? ` · ${((Date.parse(h.opened_at) - Date.parse(h.klick_at)) / 1000).toLocaleString('de-DE', { maximumFractionDigits: 1 })} s nach dem Klick` : ''} · ${h.eur} €${h.hedge_faktor > 0 ? ` (Multiplikator ${Number(h.hedge_faktor).toFixed(3)}${h.lots_soll ? `, ${f(h.lots_soll)} Lot angefragt` : ''})` : ''} über ${h.punkte} Pkt${h.sl_punkte > 0 ? ` / SL ${h.sl_punkte} Pkt` : ''} · Fill NAS100 ${h.fill ?? '?'}${h.sl ? ` · Level in MetaTrader: ${f(h.sl)} = Master-TP + ${hedgePuffer()} Pkt${h.tp > 0 ? ` · ${f(h.tp)} = Master-SL` : (h.tp_fehler ? ` · Master-SL-Level FEHLT (${h.tp_fehler})` : ' · kein Master-SL → endet mit dem Master')}` : ' · KEIN Schließ-Level gesetzt — von Hand beobachten'} · Master-TP ≈ NQ ${h.tp_level_nq ?? '?'}${h.sl_level_nq ? (h.sl_art === 'liquidation' ? ` · Liquidation ≈ NQ ${h.sl_level_nq} (Balance ${h.liq_balance ?? '?'} $, Start-Balance aus ${h.liq_quelle === 'balance_start' ? 'der Lesung beim Platzieren' : h.liq_quelle === 'konto_balance' ? 'dem Konto' : '?'})` : ` · Master-SL ≈ NQ ${h.sl_level_nq}`) : (h.sl_hinweis ? ` · ${h.sl_hinweis}` : '')} · PC ${h.pc || '?'}${h.close_fehler ? ` · letzter Close-Fehler: ${h.close_fehler}${h.close_versuche > 0 ? ` (${h.close_versuche}× · Backoff)` : ''}` : ''}${h.feed_fehlt_seit && Date.now() - (Date.parse(h.feed_fehlt_seit) || 0) > 15000 ? ` · ⚠ Feed fehlt seit ${Math.round((Date.now() - Date.parse(h.feed_fehlt_seit)) / 1000)} s — Wächter kann nicht schließen` : ''}${h.waechter_stand && h.waechter_stand.kurs ? ` · Wächter: ${Number(h.waechter_stand.kurs).toLocaleString('de-DE')} (${h.waechter_stand.wurzel}, ${h.waechter_stand.quelle})` : ''}${h.master_teil != null ? ` · ⚠ Master teilweise zu (noch ${h.master_teil} Kt laut Reader) — Hedge bleibt bis 0` : ''}`)
       }
       if(h.status === 'geschlossen'){
@@ -37390,7 +37394,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.946'
+  const OS_TAB_BUILD = '2026-09-22.947'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
