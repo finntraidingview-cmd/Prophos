@@ -959,6 +959,55 @@ def _leerlauf_waechter():
             print(f"[panel] Leerlauf-Waechter: {type(e).__name__}: {e}", flush=True)
 
 
+# MT5-Update ohne UAC-Abfrage (01.10.2026, Finn: "Client Terminal AVX2 …
+# /updateadmin" kam wieder) — Begruendung und Schutz in provision.py beim
+# Block "MT5-Update still". Der Waechter richtet die geplante Aufgabe einmal
+# ein (die letzte Ja-Abfrage, "Windows PowerShell") und spielt danach neue
+# Builds NUR im Leerlauf ein: kein Plan geplant/laufend, Terminal zu. Nein
+# geklickt -> erst nach 24 h wieder fragen, bis dahin bleibt alles wie bisher.
+# getattr-Riegel: provision.py kommt ueber die Copier-Schleife, ein frisches
+# Panel auf altem provision-Stand darf nicht sterben.
+UPDATE_ABGELEHNT = os.path.join(HERE, ".mt5-update-abgelehnt")
+
+
+def _update_abwarten(install_dir):
+    getattr(provision, "update_abwarten", lambda d: None)(install_dir)
+
+
+def _mt5_update_waechter():
+    if os.name != "nt":
+        return
+    time.sleep(90 + random.uniform(0, 60))
+    while True:
+        try:
+            einspielen = getattr(provision, "mt5_updates_einspielen", None)
+            if einspielen and not provision.update_aufgabe_ok():
+                try:
+                    abgelehnt = time.time() - os.path.getmtime(UPDATE_ABGELEHNT) < 86400
+                except OSError:
+                    abgelehnt = False
+                if not abgelehnt:
+                    print("[mt5-update] Richte die stille MT5-Update-Aufgabe ein — am PC einmal "
+                          "'Ja' klicken (Windows PowerShell). Danach kommt die "
+                          "MT5-Update-Abfrage nicht mehr.", flush=True)
+                    if provision.update_aufgabe_einrichten():
+                        print("[mt5-update] Aufgabe eingerichtet.", flush=True)
+                    else:
+                        with open(UPDATE_ABGELEHNT, "w") as f:
+                            f.write(datetime.now().isoformat())
+                        print("[mt5-update] Nicht eingerichtet (Nein oder Zeitablauf) — "
+                              "neuer Versuch in 24 h.", flush=True)
+            if einspielen and provision.update_aufgabe_ok():
+                with PLANS_LOCK:
+                    aktiv = any(p["status"] in ("geplant", "laufend") for p in _load_plans())
+                if not aktiv:
+                    for zeile in einspielen():
+                        print(f"[mt5-update] {zeile}", flush=True)
+        except Exception as e:
+            print(f"[mt5-update] {type(e).__name__}: {e}", flush=True)
+        time.sleep(600 + random.uniform(0, 300))
+
+
 # ── Provisionierung: "Account hinzufuegen" ─────────────────────────────────────
 # Ein Job zur Zeit. Das Passwort liegt NUR im Speicher des Worker-Threads und in
 # der transienten Startdatei, die provision.py garantiert loescht — im Job-Status
@@ -1170,6 +1219,7 @@ def _heal_ea_inner(fname, cfg, install_dir, started_ts, wait_s, schnell_wenn_nie
     # erneut). Terminal ist aus, die .chr liegen still. Klappt die Injektion,
     # reicht der nackte Start; [StartUp] bleibt nur als Fallback (z.B. frische
     # Installation ohne Profil-Ordner).
+    _update_abwarten(install_dir)  # stilles MT5-Update gerade dran? (01.10.2026)
     if _inject_ea_into_profile(fname, cfg, install_dir):
         subprocess.Popen([os.path.join(install_dir, "terminal64.exe")], cwd=install_dir)
         return
@@ -1624,6 +1674,7 @@ def start_terminal(fname, creds=None):
             return True, (f"Terminal läuft, aber im FALSCHEN Konto ({wrong} statt {expected or '?'}) — "
                           f"im Terminal Datei → „Bei Handelskonto anmelden“ auf das richtige Konto wechseln.")
         return True, "Terminal läuft — EA wird geprüft und notfalls automatisch aufgezogen"
+    _update_abwarten(install_dir)  # stilles MT5-Update gerade dran? (01.10.2026)
     try:
         if creds:
             # Login-Zwang: [Common]-only-ini (KEIN [StartUp] — das wuerde bei jedem
@@ -3163,6 +3214,7 @@ class Handler(BaseHTTPRequestHandler):
                 print("[panel] Hedge-Terminal-Prozess ohne Fenster (Zombie) — beende und starte kalt neu.", flush=True)
                 for pid in provision.terminal_pids(install_dir):
                     provision._taskkill(pid, grace_s=5)
+            _update_abwarten(install_dir)  # stilles MT5-Update gerade dran? (01.10.2026)
             subprocess.Popen([hpath], cwd=install_dir)
             _front_when_up(install_dir)
             print(f"[panel] Hedge-Terminal gestartet: {hpath}", flush=True)
@@ -3876,6 +3928,8 @@ def main():
         print(f"[panel] Terminal-Zu nachholen: {type(e).__name__}: {e}", flush=True)
     # Leerlauf-Waechter (22.09.2026): Terminal ohne Trade geht nach ~15 min von selbst zu
     threading.Thread(target=_leerlauf_waechter, daemon=True).start()
+    # MT5-Update ohne UAC-Abfrage (01.10.2026) — Details bei _mt5_update_waechter
+    threading.Thread(target=_mt5_update_waechter, daemon=True).start()
     # UAC-Haken an allen terminal64.exe wegraeumen (09.09.2026, Finns Fund:
     # Benutzerkontensteuerung beim Terminal-Start ueber Echo — Details im
     # Docstring von provision.uac_haken_entfernen). getattr-Riegel, weil die

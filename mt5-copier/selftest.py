@@ -1866,6 +1866,7 @@ def main():
 
     # ── Slave-Terminal nach vorn (24.09.2026): Prozess-Erkennung ohne wmic ────
     results.append(test_terminal_pids_ohne_wmic())
+    results.append(test_mt5_update_still())
     results.append(test_vordergrund_waechter_ohne_windows())
     results.append(test_kerze_fortschreiben())
     results.append(test_solo_level_und_grund())
@@ -1907,6 +1908,71 @@ def main():
     print(f"{ok}/{len(results)} Tests bestanden")
     return 0 if ok == len(results) else 1
 
+
+
+def test_mt5_update_still():
+    """01.10.2026: MT5-Update ohne UAC-Abfrage ueber eine geplante Aufgabe."""
+    import base64
+    import re
+    import time
+    import provision as pv
+    ok = True
+    # Nur X:\MT5-... — Programme-Ordner, Unterordner, Sonderzeichen nie.
+    for p, soll in ((r"C:\MT5-Hedge", True), (r"d:\MT5-ftmo1", True),
+                    (r"C:\Program Files\MetaTrader 5", False), (r"C:\MT5-a\b", False),
+                    (r"C:\MT5-", False), ("", False), (None, False)):
+        if pv.ist_mt5_ordner(p) != soll:
+            print(f"✗ ist_mt5_ordner({p!r}) != {soll}"); ok = False
+    # Nur echt NEUERE Builds, nie zurueck, nie ohne lesbare Version.
+    if not (pv.build_neuer((5, 0, 0, 5200), (5, 0, 0, 5260))
+            and not pv.build_neuer((5, 0, 0, 5260), (5, 0, 0, 5260))
+            and not pv.build_neuer((5, 0, 0, 5260), (5, 0, 0, 5200))
+            and not pv.build_neuer(None, (5, 0, 0, 5260))
+            and not pv.build_neuer((5, 0, 0, 5200), None)):
+        print("✗ build_neuer vergleicht falsch"); ok = False
+    # Python-Filter und Aufgaben-Skript benutzen dieselbe Ordner-Regel.
+    if pv._MT5_ORDNER_RE.pattern not in pv._MT5_UPDATE_PS:
+        print("✗ Ordner-Regel im Aufgaben-Skript weicht vom Python-Filter ab"); ok = False
+    # Schutz-Bausteine im Skript: Merker, Signatur, laeuft-Pruefung.
+    for teil in ("prophos-update.lock", "Get-AuthenticodeSignature", "MetaQuotes",
+                 "'Valid'", "$neu -le $alt", "Where-Object { $_.Path -eq $exe }"):
+        if teil not in pv._MT5_UPDATE_PS:
+            print(f"✗ Aufgaben-Skript ohne {teil!r}"); ok = False
+    # Einrichtung: Admin-only-Ordner per SID, Aufgabe mit hoechsten Rechten,
+    # eingebettetes Skript ist byte-gleich mit dem Original.
+    s = pv.setup_ps()
+    for teil in ("*S-1-5-32-544", "/inheritance:r", "-RunLevel Highest",
+                 f"-TaskName '{pv.MT5_UPDATE_TASK}'"):
+        if teil not in s:
+            print(f"✗ Einrichtung ohne {teil!r}"); ok = False
+    b64 = re.search(r"FromBase64String\('([^']+)'\)", s)
+    if not b64 or base64.b64decode(b64.group(1)).decode("utf-8") != pv._MT5_UPDATE_PS:
+        print("✗ eingebettetes Skript nicht byte-gleich"); ok = False
+    if len(base64.b64encode(s.encode("utf-16-le"))) > 30000:
+        print("✗ -EncodedCommand zu lang fuer die Kommandozeile"); ok = False
+    # Ohne Windows: alles still und folgenlos.
+    if (pv.update_ausstehend() != [] or pv.update_aufgabe_ok()
+            or pv.update_aufgabe_einrichten(warte_s=0) or pv._datei_version(__file__) is not None):
+        print("✗ MT5-Update tut ohne Windows etwas"); ok = False
+    # Kein Merker / alter Merker -> sofort weiter; frischer Merker -> wartet.
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        t0 = time.time(); pv.update_abwarten(td, max_s=5)
+        if time.time() - t0 > 1:
+            print("✗ update_abwarten wartet ohne Merker"); ok = False
+        lock = os.path.join(td, pv.UPDATE_LOCK)
+        open(lock, "w").close()
+        os.utime(lock, (time.time() - 700, time.time() - 700))
+        t0 = time.time(); pv.update_abwarten(td, max_s=5)
+        if time.time() - t0 > 1:
+            print("✗ update_abwarten wartet auf einen Rest-Merker (>10 min)"); ok = False
+        os.utime(lock, None)
+        t0 = time.time(); pv.update_abwarten(td, max_s=3)
+        if time.time() - t0 < 2.5:
+            print("✗ update_abwarten wartet nicht auf einen frischen Merker"); ok = False
+    if ok:
+        print("✓ MT5-Update still: Ordner-Regel, nur neuere Builds, Schutz im Skript, Admin-only-Einrichtung, Merker-Warten")
+    return ok
 
 
 def test_terminal_pids_ohne_wmic():

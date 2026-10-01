@@ -649,6 +649,259 @@ def uac_haken_entfernen():
             print(f"[uac] Pruefung uebersprungen ({type(e).__name__}: {e})", flush=True)
 
 
+# ------------------------------------------------------------ MT5-Update still
+
+# 01.10.2026, Finns Screenshot: wieder Benutzerkontensteuerung "Client
+# Terminal AVX2" — diesmal NICHT das Admin-Haekchen (das raeumt
+# uac_haken_entfernen weg), sondern der MT5-Updater: Programmpfad
+# "<Datenordner>\liveupdate\terminal64.exe /updateadmin /path:C:\MT5-...".
+# Hat MetaQuotes einen neuen Build, liegt er nach dem Download im
+# liveupdate-Ordner, und beim naechsten Start will das Terminal ihn ERHOEHT
+# einspielen — einmal pro Terminal und pro Build. Ordnerrechte sind es nicht:
+# Finns Schreibtest am selben Tag lief durch (Authentifizierte Benutzer: M),
+# MT5 fragt trotzdem. Wegklicken kann es kein Programm (Secure Desktop).
+#
+# Der Weg ohne Abfrage (von Finn ausdruecklich freigegeben): eine geplante
+# Aufgabe "mit hoechsten Rechten", EINMAL pro PC angelegt (das ist die letzte
+# Ja-Abfrage, Windows vergibt Adminrechte nur so). Danach darf der Benutzer
+# sie per schtasks /run ohne Abfrage starten. Echo spielt so jeden neuen Build
+# im Leerlauf selbst ein, BEVOR ein Trade das Terminal startet — beim Start
+# ist dann nichts mehr zu tun.
+#
+# Damit die Aufgabe kein Einfallstor fuer beliebige Software wird: ihr Skript
+# liegt in einem Ordner, den nur Admins aendern duerfen, und es startet NUR
+# eine MetaQuotes-signierte liveupdate\terminal64.exe, NUR fuer Ordner
+# X:\MT5-..., NUR wenn dort Echos Merker prophos-update.lock liegt, das
+# Terminal nicht laeuft und der Build wirklich neuer ist.
+MT5_UPDATE_TASK = "Prophos MT5-Update"
+UPDATE_LOCK = "prophos-update.lock"
+_MT5_ORDNER_RE = re.compile(r'^[A-Za-z]:\\MT5-[^\\/:*?"<>|]+$')
+
+# Inhalt der Aufgabe. Jede Aenderung hier loest auf jedem PC eine neue
+# Einrichtung (= eine Ja-Abfrage) aus — nur aendern, wenn es sein muss.
+_MT5_UPDATE_PS = r"""# Prophos MT5-Update - angelegt von Echo (mt5-copier/provision.py).
+# Laeuft erhoeht als geplante Aufgabe, spielt neue MT5-Builds ohne UAC-Abfrage ein.
+$ErrorActionPreference = 'Continue'
+$d = Join-Path $env:ProgramData 'Prophos\mt5-update'
+$log = Join-Path $d 'mt5-update.log'
+function L($t) { Add-Content -LiteralPath $log -Value ((Get-Date -Format s) + ' ' + $t) }
+function V($p) { $i = (Get-Item -LiteralPath $p).VersionInfo; [version]('{0}.{1}.{2}.{3}' -f $i.FileMajorPart, $i.FileMinorPart, $i.FileBuildPart, $i.FilePrivatePart) }
+$root = Join-Path $env:APPDATA 'MetaQuotes\Terminal'
+foreach ($dd in Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue) {
+  try {
+    $o = Join-Path $dd.FullName 'origin.txt'
+    if (-not (Test-Path -LiteralPath $o)) { continue }
+    $inst = ((Get-Content -LiteralPath $o -Raw) -replace '^\uFEFF', '').Trim()
+    if ($inst -notmatch '^[A-Za-z]:\\MT5-[^\\/:*?"<>|]+$') { continue }
+    if (-not (Test-Path -LiteralPath (Join-Path $inst 'prophos-update.lock'))) { continue }
+    $exe = Join-Path $inst 'terminal64.exe'
+    $upd = Join-Path $dd.FullName 'liveupdate\terminal64.exe'
+    if (-not (Test-Path -LiteralPath $exe) -or -not (Test-Path -LiteralPath $upd)) { continue }
+    $alt = V $exe; $neu = V $upd
+    if ($neu -le $alt) { continue }
+    $sig = Get-AuthenticodeSignature -LiteralPath $upd
+    if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'MetaQuotes') { L "ABGELEHNT $inst Signatur $($sig.Status)"; continue }
+    if (Get-Process terminal64 -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe }) { L "UEBERSPRUNGEN $inst laeuft"; continue }
+    $t0 = Get-Date
+    $p = Start-Process -FilePath $upd -ArgumentList ('/updateadmin /path:"' + $inst + '"') -PassThru
+    $p | Wait-Process -Timeout 300 -ErrorAction SilentlyContinue
+    # Startet der Updater danach selbst ein Terminal, liefe es ERHOEHT und
+    # ausserhalb von Echo (Puls kaeme nicht an die Tastatur) - beenden, Echo
+    # startet es beim naechsten Trade normal.
+    Get-Process terminal64 -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe -and $_.StartTime -ge $t0 } | Stop-Process -Force
+    L "OK $inst $alt -> $(V $exe)"
+  } catch { L "FEHLER $($dd.Name) $($_.Exception.Message)" }
+}
+"""
+
+
+def _update_dir():
+    return os.path.join(os.environ.get("ProgramData") or r"C:\ProgramData",
+                        "Prophos", "mt5-update")
+
+
+def ist_mt5_ordner(install_dir):
+    """Nur X:\\MT5-... — dieselbe Regel wie im Aufgaben-Skript. Rein."""
+    return bool(_MT5_ORDNER_RE.match(install_dir or ""))
+
+
+def build_neuer(alt, neu):
+    """Versions-Tupel: liegt im liveupdate-Ordner ein NEUERER Build? Rein.
+    Nie zurueck auf einen aelteren Rest im liveupdate-Ordner."""
+    return bool(alt and neu and tuple(neu) > tuple(alt))
+
+
+def _datei_version(path):
+    """(a, b, c, d) aus der Versions-Ressource einer Exe, sonst None."""
+    if os.name != "nt" or not os.path.isfile(path):
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+        ver = ctypes.windll.version
+        n = ver.GetFileVersionInfoSizeW(path, None)
+        if not n:
+            return None
+        buf = ctypes.create_string_buffer(n)
+        if not ver.GetFileVersionInfoW(path, 0, n, buf):
+            return None
+        ptr, ln = ctypes.c_void_p(), wintypes.UINT()
+        if not ver.VerQueryValueW(buf, "\\", ctypes.byref(ptr), ctypes.byref(ln)):
+            return None
+
+        class _Fix(ctypes.Structure):  # Anfang von VS_FIXEDFILEINFO
+            _fields_ = [(k, wintypes.DWORD) for k in ("sig", "struc", "ms", "ls")]
+        f = ctypes.cast(ptr, ctypes.POINTER(_Fix)).contents
+        return (f.ms >> 16, f.ms & 0xFFFF, f.ls >> 16, f.ls & 0xFFFF)
+    except Exception:
+        return None
+
+
+def update_ausstehend(installs=None):
+    """[(install_dir, alt, neu)] — Terminals, fuer die MetaQuotes schon einen
+    neueren Build in den liveupdate-Ordner gelegt hat."""
+    if os.name != "nt":
+        return []
+    if installs is None:
+        installs = map_installs(terminals_root())
+    out = []
+    for inst, data_dir in installs.items():
+        if not ist_mt5_ordner(inst):
+            continue
+        alt = _datei_version(os.path.join(inst, "terminal64.exe"))
+        neu = _datei_version(os.path.join(data_dir, "liveupdate", "terminal64.exe"))
+        if build_neuer(alt, neu):
+            out.append((inst, alt, neu))
+    return out
+
+
+def _run_still(cmd, timeout=30):
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+
+
+def update_aufgabe_ok():
+    """Aufgabe angelegt UND ihr Skript ist der aktuelle Stand?"""
+    if os.name != "nt":
+        return False
+    try:
+        with open(os.path.join(_update_dir(), "mt5-update.ps1"), encoding="utf-8-sig") as f:
+            ist = f.read().replace("\r\n", "\n")
+        if ist != _MT5_UPDATE_PS:
+            return False
+        return _run_still(["schtasks", "/Query", "/TN", MT5_UPDATE_TASK]).returncode == 0
+    except Exception:
+        return False
+
+
+def setup_ps():
+    """Einrichtungs-Skript (laeuft EINMAL erhoeht): Ordner nur fuer Admins
+    schreibbar (SIDs statt Namen — deutsches Windows heisst 'Administratoren'),
+    Skript hinein, Aufgabe als dieser Benutzer mit hoechsten Rechten. Rein."""
+    import base64
+    b64 = base64.b64encode(_MT5_UPDATE_PS.encode("utf-8")).decode("ascii")
+    return (
+        "$d = Join-Path $env:ProgramData 'Prophos\\mt5-update'\n"
+        "New-Item -ItemType Directory -Force -Path $d | Out-Null\n"
+        "icacls $d /setowner '*S-1-5-32-544' /T /C /Q | Out-Null\n"
+        "icacls $d /inheritance:r /grant:r '*S-1-5-32-544:(OI)(CI)F' "
+        "'*S-1-5-18:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX' /T /C /Q | Out-Null\n"
+        "[IO.File]::WriteAllText((Join-Path $d 'mt5-update.ps1'), "
+        f"[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{b64}')))\n"
+        "$a = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "
+        "('-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"' + "
+        "(Join-Path $d 'mt5-update.ps1') + '\"')\n"
+        "$p = New-ScheduledTaskPrincipal -UserId \"$env:USERDOMAIN\\$env:USERNAME\" "
+        "-LogonType Interactive -RunLevel Highest\n"
+        "$s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries "
+        "-DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew "
+        "-ExecutionTimeLimit (New-TimeSpan -Minutes 30)\n"
+        f"Register-ScheduledTask -TaskName '{MT5_UPDATE_TASK}' -Action $a "
+        "-Principal $p -Settings $s -Force | Out-Null\n"
+    )
+
+
+def update_aufgabe_einrichten(warte_s=180):
+    """Legt die Aufgabe an — EINE Ja-Abfrage ("Windows PowerShell"). True,
+    sobald sie steht; False bei Nein/Zeitablauf (dann bleibt alles wie bisher)."""
+    if os.name != "nt":
+        return False
+    import base64
+    import ctypes
+    enc = base64.b64encode(setup_ps().encode("utf-16-le")).decode("ascii")
+    rc = ctypes.windll.shell32.ShellExecuteW(
+        None, "runas", "powershell.exe",
+        f"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand {enc}",
+        None, 0)
+    if rc <= 32:
+        return False  # Nein geklickt oder Start fehlgeschlagen
+    ende = time.time() + warte_s
+    while time.time() < ende:
+        if update_aufgabe_ok():
+            return True
+        time.sleep(3)
+    return False
+
+
+def update_abwarten(install_dir, max_s=300):
+    """Vor jedem Terminal-Start: laeuft fuer DIESE Installation gerade das
+    stille Update, kurz warten (sonst startet die halb ersetzte Exe). Ein
+    Merker aelter als 10 min ist ein Rest (Panel-Absturz) und zaehlt nicht."""
+    lock = os.path.join(install_dir, UPDATE_LOCK)
+    ende = time.time() + max_s
+    while time.time() < ende:
+        try:
+            if time.time() - os.path.getmtime(lock) > 600:
+                return
+        except OSError:
+            return
+        time.sleep(2)
+
+
+def mt5_updates_einspielen(ausstehend=None, max_s=420):
+    """Spielt alle ausstehenden Builds still ein (nur Terminals, die nicht
+    laufen). Gibt die neuen Log-Zeilen der Aufgabe zurueck. Voraussetzung:
+    update_aufgabe_ok()."""
+    if ausstehend is None:
+        ausstehend = update_ausstehend()
+    ziel = [(i, a, n) for i, a, n in ausstehend if not terminal_pids(i)]
+    if not ziel:
+        return []
+    log = os.path.join(_update_dir(), "mt5-update.log")
+    try:
+        vorher = os.path.getsize(log)
+    except OSError:
+        vorher = 0
+    locks = []
+    try:
+        for inst, _, _ in ziel:
+            p = os.path.join(inst, UPDATE_LOCK)
+            with open(p, "w") as f:
+                f.write(str(os.getpid()))
+            locks.append(p)
+        if _run_still(["schtasks", "/Run", "/TN", MT5_UPDATE_TASK]).returncode != 0:
+            return ["schtasks /Run fehlgeschlagen"]
+        ende = time.time() + max_s
+        offen = list(ziel)
+        while offen and time.time() < ende:
+            time.sleep(5)
+            offen = [(i, a, n) for i, a, n in offen
+                     if build_neuer(_datei_version(os.path.join(i, "terminal64.exe")), n)]
+        time.sleep(5)  # die Aufgabe schreibt ihre Log-Zeile nach dem Updater
+    finally:
+        for p in locks:
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+    try:
+        with open(log, encoding="utf-8-sig", errors="replace") as f:
+            f.seek(vorher)
+            return [z.strip() for z in f.read().splitlines() if z.strip()]
+    except OSError:
+        return []
+
+
 # ------------------------------------------------------------------- der Job
 
 def run_provision(*, name, login, password, server, template_exe,
