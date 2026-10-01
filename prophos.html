@@ -25165,6 +25165,9 @@
     if(mpl == null || !isFinite(mpl)) return say('Master-P&L eintragen ($).', 'err')
     if(spl != null && !isFinite(spl)) return say('Fusion-P&L ist keine Zahl.', 'err')
     if(btn) btn.disabled = true; say('')
+    // SOFORT ZU (01.10.2026 abends, Finn: „Abhaken dauert 5–6 s"): Popup zu und Zeile nach „Erledigt", das Backend speichert dahinter;
+    // scheitert es, Hinweis + Liste neu laden (die Zeile springt zurück) — das Popup lässt sich dann erneut öffnen
+    mklWdErledigtZu(); wdlSofortErledigt(pid)
     try{
       const tok = await _pushTok(); if(!tok) throw new Error('nicht angemeldet')
       const r = await fetch(`${WATCHER_HOME}/admin/wd-plaene`, { method: 'PATCH', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
@@ -25175,13 +25178,15 @@
       // Antwort (Backend .541): {ok, plan_id, status:'completed', buchung:{amount, …}|null, buchung_fehler?} — ist der Plan zu, die
       // Buchung aber gescheitert, bleibt das Popup offen: ein zweites „Erledigt" ist idempotent und holt die Buchung nach.
       wdlSofortErledigt(pid)   // Plan ist zu (auch bei Buchungsfehler) → Live Trades sofort nach „Erledigt"
-      if(d.buchung_fehler){ say(`Plan ist erledigt, die Buchung in Finanzen aber nicht: ${d.buchung_fehler} — „Erledigt" noch einmal drücken.`, 'err'); return }
+      if(d.buchung_fehler){ if(typeof atToast === 'function') atToast(`Plan ist erledigt, die Buchung in Finanzen aber nicht: ${d.buchung_fehler} — im Radar noch einmal abhaken.`, 'end'); return }
       const bu = d.buchung || null, betrag = (bu && isFinite(Number(bu.amount))) ? Number(bu.amount) : null
       if(typeof atToast === 'function') atToast(bu ? `Erledigt · Fusion ${betrag != null ? fmtE(betrag) : ''} auf „${bu.account_name || 'Hedge-Konto'}" gebucht` : _mwdErlOhneHedge ? 'Erledigt' : 'Erledigt · ohne Fusion-Buchung', 'ok')
-      mklWdErledigtZu()
       try{ mkl.wd.at = 0; await mklWdLaden() }catch(_){}
       mklWdRender(); mklChartZeichnen()
-    }catch(e){ say('Nicht gespeichert: ' + (e && e.message || e), 'err') }
+    }catch(e){
+      if(typeof atToast === 'function') atToast('Abhaken nicht gespeichert: ' + (e && e.message || e) + ' — bitte noch einmal', 'end')
+      try{ if(typeof wdlLaden === 'function') wdlLaden(true) }catch(_){}
+    }
     finally{ if(btn) btn.disabled = false }
   }
   document.getElementById('mwdErledigtClose')?.addEventListener('click', mklWdErledigtZu)
@@ -37528,7 +37533,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.961'
+  const OS_TAB_BUILD = '2026-09-22.962'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -45848,6 +45853,7 @@
     tcRecompute()
     document.getElementById('tradeCompleteModal').classList.add('open')
   }
+  let _tcSchonZu = false   // Popup nach dem Plan-Update schon zu, Rest läuft noch (01.10.2026)
   function closeTradeCompleteModal(){
     _completingPlanId = null
     document.getElementById('tradeCompleteModal').classList.remove('open')
@@ -46555,6 +46561,10 @@
       if(idx >= 0) tradePlans[idx] = rowToPlan(data)
       planKontoTypMerken(idx >= 0 ? tradePlans[idx] : rowToPlan(data))   // Kontotyp zum Zeitpunkt des Trades (25.09.2026)
       if(data && data.status === 'completed') wdlSofortErledigt(_completingPlanId)   // Live Trades sofort nach „Erledigt" (01.10.2026)
+      // SOFORT ZU (01.10.2026 abends, Finn: „Abhaken dauert 5–6 s, bis das Popup schließt"): der Plan ist gespeichert — das Popup geht
+      // jetzt schon zu, die Buchungen in Finanzen und Zähler laufen dahinter weiter (Fehler danach als Hinweis, nicht im Popup)
+      document.getElementById('tradeCompleteModal')?.classList.remove('open')
+      _tcSchonZu = true
 
       // pendingFinish erst JETZT löschen — nach erfolgreichem Speichern, nicht schon beim Öffnen des Modals
       if(autoTrack?.pendingFinish?.has(String(_completingPlanId))){
@@ -46675,7 +46685,10 @@
       const el = document.getElementById('tradeCompleteMsg')
       el.textContent = 'Fehler: ' + (e.message || e)
       el.className = 'modal-msg err'
+      // Popup schon zu (Plan gespeichert, Fehler bei Buchung/Zählern): Hinweis statt unsichtbarer Meldung
+      if(_tcSchonZu && typeof atToast === 'function') atToast('Erledigt gespeichert, aber: ' + (e.message || e), 'end')
     }
+    finally{ _tcSchonZu = false }
   })
 
   // Trade Sub-Tab Switching
