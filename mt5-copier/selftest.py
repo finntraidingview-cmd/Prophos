@@ -2729,8 +2729,8 @@ def test_puls_augen_cdp():
     q_tl = _i3.getsource(ob.modus_tvlesen)
     chk(q_tl.lstrip().startswith("def modus_tvlesen(cmd):\n    if augen_modus_lauf() == \"cdp\":") and "modus_tvlesen_cdp(cmd)" in q_tl,
         "tvlesen: einzige Änderung vor dem alten Pfad ist die lokale Weiche")
-    chk("_augen_regel_holen" not in _i3.getsource(ob.augen_modus_lauf) and "urllib" not in _i3.getsource(ob.augen_modus_lauf),
-        "Weiche liest nie Netz")
+    chk("urllib" not in _i3.getsource(ob.augen_modus_lauf) and "augen_regel_entscheid(rd" in _i3.getsource(ob.augen_modus_lauf),
+        "Weiche: Netz nur über _augen_regel_holen und nur bei fehlender/alter Regel (seit 01.10.2026)")
     r_ = _rnd.Random(7)
     bahn = ob.cdp_klick_bahn((0, 0), (100, 50), rnd=r_)
     chk(len(bahn) == 8 and bahn[-1] == (100.0, 50.0) and bahn[0] != (100.0, 50.0), "Klick-Bahn: mehrere Schritte, letzter exakt am Ziel")
@@ -3414,6 +3414,26 @@ def test_puls_cdp_login():
         ob._warte = alt_w
     chk(sy_.klicks[:1] == ["Seite BUY (vor dem Symbol)"] and ry_[1] != "asset" and "Symbol steht: MNQZ6" in ty_,
         f"Ticket ohne Seite: erst BUY, dann Symbol lesbar — kein „Symbol nicht einstellbar“ ({sy_.klicks}, {ry_[1]}, {ty_[:3]})")
+    # Erster Lauf nach > 12 h (Finn 01.10.2026 12:28 UTC): Merk-Datei alt → vor dem Lauf Railway fragen, nicht stumm UIA
+    _alt_l, _alt_h, _alt_p = ob._augen_json_lesen, ob._augen_regel_holen, ob._augen_pc_id
+    gefragt_ = []
+    try:
+        ob._augen_pc_id = lambda: "pc-test01"
+        ob._augen_regel_holen = lambda pc: (gefragt_.append(pc), "cdp")[1]
+        ob._augen_json_lesen = lambda n: {"augen": "cdp", "at": ob.time.time() - 13 * 3600, "pc": "pc-test01"}
+        m_alt = ob.augen_modus_lauf()
+        ob._augen_json_lesen = lambda n: None
+        m_fehlt = ob.augen_modus_lauf()
+        n_vorher = len(gefragt_)
+        ob._augen_json_lesen = lambda n: {"augen": "cdp", "at": ob.time.time() - 60, "pc": "pc-test01"}
+        m_frisch = ob.augen_modus_lauf()
+        ob._augen_json_lesen = lambda n: {"augen": "uia", "at": ob.time.time() - 60, "pc": "pc-test01"}
+        m_uia = ob.augen_modus_lauf()
+        n_nachher = len(gefragt_)
+    finally:
+        ob._augen_json_lesen, ob._augen_regel_holen, ob._augen_pc_id = _alt_l, _alt_h, _alt_p
+    chk(m_alt == "cdp" and m_fehlt == "cdp" and n_vorher == 2 and m_frisch == "cdp" and m_uia == "uia" and n_nachher == 2,
+        f"Regel alt/fehlt → einmal Railway fragen (cdp), frisch cdp/uia → kein Netz ({m_alt}, {m_fehlt}, {m_frisch}, {m_uia}, {gefragt_})")
     fj_ = ob.cdp_panel_frei_js([1482, 907, 38, 38])
     chk("elementFromPoint(1501.0,926.0)" in fj_ and "toggle-visibility-button" in fj_ and "#overlap-manager-root" in fj_ and "toastGroup-" in fj_,
         "Frei-Probe: Knopfmitte, Dialog/Overlay verdeckt, Meldungen frei")

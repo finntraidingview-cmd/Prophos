@@ -15700,9 +15700,17 @@ def augen_regel_weiche(regel_datei, jetzt, pc_id):
 
 
 def augen_modus_lauf():
-    """'cdp' | 'uia' für DIESEN Lauf — nur lokal gelesen, nie Netz. Jeder Fehler = 'uia'."""
+    """'cdp' | 'uia' für DIESEN Lauf. Frische lokale Regel (≤ 12 h) → ohne Netz wie bisher. Fehlt sie oder ist sie alt, EINMAL Railway
+    fragen (_augen_regel_holen, 2 s, schreibt die Datei; Netzfehler → letzte gemerkte Regel). Live-Befund Finn 01.10.2026 12:28 UTC
+    (pc-…, auf der CDP-Liste): der PC war > 12 h ohne Puls-Lauf, die Merk-Datei veraltet → der ERSTE Lauf nahm den alten UIA-Weg im
+    normalen Chrome; aufgefrischt wurde die Regel bisher erst NACH dem Lauf (augen_anstossen). Jeder Fehler = 'uia'."""
     try:
-        return augen_regel_weiche(_augen_json_lesen("augen_regel.json"), time.time(), _augen_pc_id())
+        pc = _augen_pc_id()
+        rd = _augen_json_lesen("augen_regel.json")
+        m = augen_regel_weiche(rd, time.time(), pc)
+        if m != "cdp" and pc and augen_regel_entscheid(rd, time.time()):   # fehlt/alt (ein FRISCHES 'uia' fragt nicht)
+            m = _augen_regel_holen(pc)
+        return m if m in ("cdp", "uia") else "uia"
     except Exception:
         return "uia"
 
