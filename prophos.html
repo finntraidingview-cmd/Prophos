@@ -37533,7 +37533,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.962'
+  const OS_TAB_BUILD = '2026-09-22.963'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -46427,7 +46427,9 @@
 
     // Winning Days Farm (25.09.2026, Design-Rundgang, von der Koordination freigegeben): der Symmetrie-Block der
     // Hedge-Ära („Stark asymmetrisch", „mehr auf Live") ist hier Rauschen — der Fusion-Hedge ist absichtlich klein.
-    if(routeIstV2(p.route) && p.hedgeEur > 0) planHtml = ''
+    // Orbit (V3) bekommt den Kasten zurück (01.10.2026, Finn: „wie symmetrisch der Trade ist, wie viel Over-/Undershoot — wie mit der
+    // alten Logik"): dort ist der Hedge ein echter Gegenhedge (Risiko Slave = Plan), nur die Winning-Days-Farm bleibt ohne
+    if(routeIstV2(p.route) && p.hedgeEur > 0 && !tpIstOrbitV3(p)) planHtml = ''
     document.getElementById('tc-net-display').innerHTML = realisedHtml + planHtml
   }
   ;['tc-master-pl','tc-slave-pl'].forEach(id => {
