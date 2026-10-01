@@ -20965,6 +20965,14 @@
         console.warn('[hedgeSolo] nicht erneut geöffnet — Hedge steht schon auf', hz.status)
         return hz
       }
+      // EIN HEDGE JE START (01.10.2026, Live Moritz 14:08 + 14:10 UTC, TP 15/25 \$: der Sofort-Hedge öffnete beim Klick, das Level im
+      // Terminal schloss ihn nach Sekunden, und der Aufruf am Lauf-Ende öffnete einen ZWEITEN — der Riegel oben kannte 'geschlossen'
+      // nicht). Ein Hedge mit Ticket, der vor < 10 min geöffnet wurde, gilt auch geschlossen als „dieser Start hatte seinen Hedge".
+      const geoeffnetMs = hz ? (Date.parse(hz.opened_at || '') || 0) : 0
+      if(hz && hz.ticket && hz.status === 'geschlossen' && geoeffnetMs && Date.now() - geoeffnetMs < 10 * 60000){
+        console.warn('[hedgeSolo] nicht erneut geöffnet — dieser Start hatte schon einen Hedge (Ticket', hz.ticket, ', geschlossen)')
+        return hz
+      }
     }catch(_){}
     const symbol = (r && r.tv_symbol) || (typeof tpOrbitWerte === 'function' ? tpOrbitWerte(plan).symbol : plan.masterSymbol) || ''
     const ppl = hedgePplFuer(symbol), kt = Number(plan.masterContracts) || 0, tp = Number(plan.masterTp) || 0, sl = Number(plan.masterSl) || 0
@@ -21064,7 +21072,7 @@
       const pufferFelder = handWaehrend ? {} : { schliesst_bei_nq: schliesstBeiOpen, puffer_punkte: echterTp ? hedgePuffer() : hedgePuffer() + hedgePufferOhneFill(),
         puffer_ohne_fill: echterTp ? null : hedgePufferOhneFill() }
       // sl = Fusion-Level am Master-TP (Fusion im Minus), tp = Fusion-Level am Master-SL (Fusion im Plus), 0 ohne Master-SL
-      const h = await hedgeAmPlanSchreiben(plan.id, { ...pufferFelder, status: 'offen', ticket: res.ticket, lots: res.lots, lots_soll: res.lots_soll || null, lots_quelle: res.lots_quelle || null, fill: res.fill, sl: res.sl || 0, tp: res.tp || 0,
+      const h = await hedgeAmPlanSchreiben(plan.id, { ...pufferFelder, zeiten_ms: res.zeiten_ms ? Object.assign({ tab_auftrag: t0, tab_antwort: Date.now() }, res.zeiten_ms) : null, status: 'offen', ticket: res.ticket, lots: res.lots, lots_soll: res.lots_soll || null, lots_quelle: res.lots_quelle || null, fill: res.fill, sl: res.sl || 0, tp: res.tp || 0,
         notfall_faktor: res.notfall_faktor || hedgeNotfallFaktorFuer(punkte), sl_distanz_punkte: res.sl_distanz_punkte || null,
         hedge_login: res.hedge_login || hedgeLoginDiesesPcs(),   // Konto, auf dem der Hedge liegt — WD-Hedge-Buchung sucht danach (25.09.2026)
         // Feed-Wächter schließt bei schliesst_bei_nq (pufferFelder oben): TP ± 8 Ticks mit echtem Fill/Hand, sonst TP ± (Puffer + Zuschlag)
@@ -37263,7 +37271,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.942'
+  const OS_TAB_BUILD = '2026-09-22.943'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -37778,8 +37786,12 @@
           // Früher Hedge schon ausgelöst: erst abwarten — danach greift im Kern der Doppel-Open-Riegel (kein zweiter Open), und das
           // TP-Limit aus der Endantwort wird nachgetragen. Scheiterte der frühe Open, öffnet dieser Aufruf wie bisher.
           const frueh = !!(_hedgeFrueh && _hedgeFrueh.gefeuert)
-          if(frueh){ try{ await _hedgeFrueh.promise }catch(_){} }
-          try{ await hedgeSoloOeffnen(plan, Object.assign({}, r || {}, { klick_at: klickAt })) }catch(e){ console.warn('[hedgeSolo]', e) }
+          let fruehErg = null
+          if(frueh){ try{ fruehErg = await _hedgeFrueh.promise }catch(_){} }
+          // Sofort-Hedge hat geöffnet → am Lauf-Ende NIE ein zweiter Open (01.10.2026, doppelte Fusion-Orders bei engem TP); nur wenn er scheiterte
+          if(!(frueh && fruehErg && (fruehErg.ticket || fruehErg.status === 'offen' || fruehErg.status === 'geschlossen'))){
+            try{ await hedgeSoloOeffnen(plan, Object.assign({}, r || {}, { klick_at: klickAt })) }catch(e){ console.warn('[hedgeSolo]', e) }
+          }
           if(frueh && typeof hedgeTpNachtragenAusOrder === 'function') await hedgeTpNachtragenAusOrder(plan, r)
           // Hedge öffnete schon beim Senden-Klick (Feed zum Klick) → Einstieg + Level aus dem echten Fill der Endantwort (01.10.2026)
           if(frueh && r && r.ok && typeof hedgeEinstiegNachtragen === 'function'){

@@ -1869,7 +1869,9 @@ def main():
                "price": price, "deviation": m.deviation, "magic": SOLO_MAGIC,
                "comment": solo_kommentar(a.get("plan_id")), "type_time": mt5.ORDER_TIME_GTC,
                "type_filling": filling_for(m, sym)}
+        _t_send = time.time()   # Zeitmessung (01.10.2026, Finn: „Fusion ~1 s am Handy — was dauert da?")
         r = send(m, req, f"SOLO OPEN {richtung.upper()} {lots} {sym} ({a.get('eur')} € / {a.get('punkte')} Pkt)")
+        _t_gefuellt = time.time()
         if r is None:
             le = mt5.last_error()
             return {"ok": False, "code": "abgelehnt", "retry_ok": False, "lots": lots, "wert_pro_punkt": wert,
@@ -1926,6 +1928,7 @@ def main():
                         erg["sl_fehler"] = str(getattr(m, "letzter_fehler", None) or mt5.last_error())
         except Exception as e:
             erg["sl_fehler"] = erg.get("sl_fehler") or f"{type(e).__name__}: {e}"
+        erg["_z"] = {"send_vor": round(_t_send * 1000), "gefuellt": round(_t_gefuellt * 1000), "level_fertig": round(time.time() * 1000)}
         return erg
 
     def solo_close(m, a):
@@ -1981,6 +1984,7 @@ def main():
         for a in offen:
             cid = str(a["cmd_id"])
             m0 = masters[0]
+            _t_liest = time.time()
             try:
                 if a.get("aktion") == "open":
                     if is_paused():
@@ -1995,6 +1999,13 @@ def main():
             except Exception as e:
                 erg = {"ok": False, "code": "absturz", "retry_ok": a.get("aktion") == "close",
                        "msg": f"{type(e).__name__}: {str(e)[:200]}"}
+            # Zeitstempel in ms (01.10.2026): Panel schreibt den Auftrag → Copier liest → Order raus → gefüllt → Level gesetzt → fertig
+            try:
+                z_ = erg.pop("_z", None) if isinstance(erg, dict) else None
+                erg["zeiten_ms"] = dict({"panel": round(float(a.get("at")) * 1000) if a.get("at") else None,
+                                         "copier_liest": round(_t_liest * 1000), "fertig": round(time.time() * 1000)}, **(z_ or {}))
+            except Exception:
+                pass
             log(f"[solo] {a.get('aktion')} {cid[:8]}: {'OK' if erg.get('ok') else 'FEHLER'} — {str(erg.get('msg') or '')[:160]}")
             solo_ergebnis_schreiben(alle, cid, erg)
 
