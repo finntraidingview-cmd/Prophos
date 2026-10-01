@@ -21267,6 +21267,9 @@
     // bewiesen flach, gilt seine Balance (gleiche Regeln wie beim Reader-Ende: Balance = Equity, zwei Lesungen gleich) — dann keine Nachlesung.
     let _balL = null
     try{
+      // Orbit V3 (Finn 01.10.2026: „bei Orbit V3 muss Puls gar nicht mehr nachlesen — das Tampermonkey-Script hat den P&L"): das Level im
+      // Fusion-Terminal schließt oft ~1 s BEVOR TradingView die Master-Position als weg zeigt (Live 14:12 UTC) — bis 6 s auf den Reader warten
+      if(p.orbitV3 && typeof hedgeReaderMasterDa === 'function'){ for(let i = 0; i < 12 && hedgeReaderMasterDa(p) !== false; i++) await new Promise(ok => setTimeout(ok, 500)) }
       if(typeof hedgeReaderMasterDa === 'function' && hedgeReaderMasterDa(p) === false){
         const accL = (accounts || []).find(a => String(a.id) === String(p.masterAccountId))
         const ktoL = accL ? String(accL.externalId || '').trim() : ''
@@ -21284,7 +21287,7 @@
     try{ const pf = tradePlans.find(x => String(x.id) === pid); if(pf && pf.status === 'open' && typeof atMoveToReview === 'function') await atMoveToReview(pf) }catch(e){ console.warn('[hedgeReview] Überprüfen', e) }
     if(typeof atToast === 'function') atToast(`✓ ${p.masterName || 'Plan'}: ${art === 'tp' ? 'Master-TP' : (h.sl_art === 'liquidation' ? 'Liquidations-Level' : 'Master-SL')} erreicht → Überprüfen`
       + (_balL ? ' · Master-P&L aus der Balance (Userscript)' : schaetzung != null ? ` · Master ${schaetzung >= 0 ? '+' : '−'}${Math.abs(schaetzung).toLocaleString('de-DE', { minimumFractionDigits: 2 })} $ geschätzt, Puls liest nach` : ' · Master-P&L: Puls liest nach'), 'end')
-    if(!_balL) setTimeout(() => { hedgeReviewPulsLesen(pid).catch(e => console.warn('[hedgeReview] Puls', e)) }, 10000 + Math.random() * 10000)
+    if(!_balL && !p.orbitV3) setTimeout(() => { hedgeReviewPulsLesen(pid).catch(e => console.warn('[hedgeReview] Puls', e)) }, 10000 + Math.random() * 10000)   // V3: Nachtrag aus dem Userscript (hedgeV3BalanceNachtrag)
     return true
   }
   // Die EINE Puls-Lesung nach dem Level-Ende. Eine Maus: läuft eine Order/ein Schließen (_tpOrbitLaeuft) oder der Rundgang
@@ -21511,6 +21514,9 @@
     if(p.status !== 'review') return `Plan ist nicht in „Überprüfen" (Status ${p.status || '?'})`
     const fin = p.mt5Baseline && p.mt5Baseline.final
     if(!fin) return 'Plan hat noch kein Ende'
+    // Orbit V3 (01.10.2026, Finn): P&L kommt aus dem Userscript (hedgeV3BalanceNachtrag) — Puls liest nur als Notlösung, 10 min nach dem Ende
+    if(p.orbitV3 && !force && !(typeof fin.balance_end === 'number' && isFinite(fin.balance_end))
+       && Date.now() - (Date.parse(fin.at || p.endedAt || '') || 0) < 10 * 60000) return 'Orbit V3: P&L kommt aus dem Userscript (Puls erst nach 10 min als Notlösung)'
     // Topstep V2 (01.10.2026, TSV2-PNL): today_pnl ist dort der RP&L des ganzen Tages — erst die Balance macht das Ende „gelesen"
     if(p.route === 'tsv2' ? (typeof fin.balance_end === 'number' && isFinite(fin.balance_end))
        : ((typeof fin.today_pnl === 'number' && isFinite(fin.today_pnl)) || (typeof fin.balance_end === 'number' && isFinite(fin.balance_end)) || fin.quelle === 'puls')) return 'Ende ist schon gelesen'
@@ -22390,6 +22396,40 @@
     }catch(_){ return null }
   }
   window._hedgeReaderMasterDa = hedgeReaderMasterDa
+  /* ORBIT V3: P&L-NACHTRAG AUS DEM USERSCRIPT (01.10.2026, Finn: „bei Orbit V3 soll der P&L automatisch aus dem Tampermonkey-Script kommen,
+   * nicht geschätzt, und Puls muss nicht nachlesen — nur bei Orbit V2"). Steht ein V3-Plan in „Überprüfen" ohne End-Balance (Ende über Level/
+   * Radar, bevor der Reader flach zeigte), holt dieser Takt sie, sobald der Puls-Chrome-Reader das Plan-Konto bewiesen flach zeigt: final
+   * (balance_quelle reader) + accounts.tv_balance + master_pl über tvV2MasterPlAusBalance (ersetzt nur null oder die Schätzung). Nur am PC
+   * des Hedges, nur bis 30 min nach dem Ende; je Plan ein Lauf zur Zeit. */
+  const _v3NachtragLaeuft = new Set()
+  async function hedgeV3BalanceNachtrag(){
+    if(!(MT5_LOCAL && typeof window.mtcApi === 'function')) return
+    let tp; try{ tp = tradePlans }catch(_){ return }
+    const pc = hedgePcId(), jetzt = Date.now()
+    for(const p of (tp || [])){
+      if(!p || !p.orbitV3 || p.route !== 'tvv2' || p.status !== 'review') continue
+      const b = p.mt5Baseline || {}, fin = b.final, h = b.hedge
+      if(!fin || (typeof fin.balance_end === 'number' && isFinite(fin.balance_end)) || (h && h.pc && h.pc !== pc)) continue
+      if(jetzt - (Date.parse(fin.at || p.endedAt || '') || 0) > 30 * 60000) continue
+      const pid = String(p.id)
+      if(_v3NachtragLaeuft.has(pid) || hedgeReaderMasterDa(p) !== false) continue
+      _v3NachtragLaeuft.add(pid)
+      try{
+        const acc = (accounts || []).find(a => String(a.id) === String(p.masterAccountId))
+        const kto = acc ? String(acc.externalId || '').trim() : ''
+        const bal = kto ? await hedgeReaderEndBalance(kto) : null
+        if(!bal) continue
+        const neu = await baselinePatchIn(pid, 'final', bal, 'review')
+        if(!neu) continue
+        try{ tvKontoBalanceSchreiben(p.masterAccountId, { balance: bal.balance_end, equity: bal.equity_end, relativ: false }, bal.balance_at) }catch(_){}
+        const { m } = await tvV2MasterPlAusBalance(pid, p, fin, neu)
+        if(m != null && typeof atToast === 'function') atToast(`✓ ${p.masterName || 'Plan'}: Master-P&L ${m >= 0 ? '+' : '−'}${Math.abs(m).toLocaleString('de-DE', { minimumFractionDigits: 2 })} $ aus der Balance (Userscript)`, 'end')
+        try{ renderTradePlans() }catch(_){}
+      }catch(e){ console.warn('[v3-nachtrag]', e) }
+      finally{ _v3NachtragLaeuft.delete(pid) }
+    }
+  }
+  setInterval(() => { hedgeV3BalanceNachtrag().catch(() => {}) }, 2000)
   /* END-BALANCE AUS DEM USERSCRIPT (01.10.2026, Orbit V3): das Userscript im Puls-Chrome liest die Kacheln „Account Balance / Equity" des
    * Tradovate-Panels mit (summary, textContent — auch im Hintergrund), der reader-server reicht sie in /positions durch. Nach „Master weg"
    * gilt eine Lesung als End-Balance nur, wenn: Konto = Plan-Konto, Zusammenfassung ≤ 2 s alt, Balance = Equity (nichts mehr offen, ±1 Cent)
@@ -37223,7 +37263,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.941'
+  const OS_TAB_BUILD = '2026-09-22.942'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
