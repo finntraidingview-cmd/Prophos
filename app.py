@@ -7304,7 +7304,7 @@ def wd_sl_zeile(p, acc, hedge, tv, einstieg, richtung, ppl, kt, sl_usd, vorher=N
     start_bal, liq_quelle, _start_at = wd_start_balance(p, tv, acc, vorher)
     liq = _lt_liq(acc, p, start_bal, einstieg, richtung, ppl, kt)
     typ = str((acc or {}).get("account_type") or "").lower()
-    wd = typ == "winning_days" or str(p.get("konto_typ") or "") == "winning_days" or (_wd_num(p.get("hedge_eur")) or 0) > 0
+    wd = plan_ist_wd(p, typ)
     if wd:
         # Rechnung zuerst (mit balance_start, sobald da), dann das beim Open eingefrorene Hedge-Level
         h_lvl = _wd_num(hedge.get("sl_level_nq"))
@@ -7542,7 +7542,7 @@ def admin_wd_heute():
         disp, excluded = _wd_personen()
         seit = datetime.fromtimestamp(datetime.now(timezone.utc).timestamp() - 3 * 86400, timezone.utc).isoformat()
         felder = ("id,user_id,master_account_id,master_name,master_firm,route,notes,status,richtung,master_contracts,"
-                  "master_symbol,master_symbol_root,master_tp,master_sl,master_pl,hedge_eur,hedge_faktor,start_um,"
+                  "master_symbol,master_symbol_root,master_tp,master_sl,master_pl,hedge_eur,hedge_faktor,start_um,orbit_v3,"
                   "start_um_gestartet_at,orbit_gesendet_at,started_at,ended_at,completed_at,planned_for,created_at,mt5_baseline,"
                   "slave_pl,pl_quelle")
         # PostgREST: verschachteltes Oder heisst or(...) OHNE Punkt — "or.(...)" gab 400 Bad Request
@@ -7657,11 +7657,22 @@ def _kurs_jetzt():
         return {}
 
 
+def plan_ist_wd(plan, typ=""):
+    """REIN RECHNEND (testbar): Winning-Day-Plan? Kontoart/konto_typ 'winning_days' oder Fusion-Hedge (hedge_eur > 0) — AUSSER Orbit V3
+    (trade_plans.orbit_v3, 01.10.2026): tvv2 + Fusion-Hedge, aber normaler Master-SL statt Liquidations-Level. Finn am Radar: „die Order hat
+    einen Stop Loss — statt Liquidationspreis soll der Stop Loss angezeigt werden". Gleiche Regel wie tpIstWdPlan/hedgeIstWd im Frontend."""
+    plan = plan or {}
+    if plan.get("orbit_v3") is True:
+        return False
+    return (str(typ or "").lower() == "winning_days" or str(plan.get("konto_typ") or "") == "winning_days"
+            or (_wd_num(plan.get("hedge_eur")) or 0) > 0)
+
+
 def _lt_liq_balance(acc, plan, balance_start):
     """REIN RECHNEND (testbar): Balance, bei der das Konto blowt → (wert, regel) oder (None, grund).
     B25: Topstep Express startet bei 0 $ — dort nie „Kontogröße + 100", sondern wie jedes andere Konto Max-Drawdown."""
     typ = str((acc or {}).get("account_type") or "").lower()
-    wd = typ == "winning_days" or str(plan.get("konto_typ") or "") == "winning_days" or (_wd_num(plan.get("hedge_eur")) or 0) > 0
+    wd = plan_ist_wd(plan, typ)
     if wd and not ist_topstep_express(acc, plan_balance_relativ(plan)):
         g = _wd_konto_groesse(acc)
         return (g + LT_WD_BLOW_PLUS, f"Winning Day: Kontogröße {g:,.0f} + {LT_WD_BLOW_PLUS:,.0f} $".replace(",", ".")) if g else (None, "Kontogröße unbekannt")
@@ -7678,7 +7689,7 @@ def _lt_liq(acc, plan, balance_start, einstieg, richtung, ppl, kt):
     Start-Balance; pl_usd bei Liquidation = −Max-Drawdown."""
     liq_bal, regel = _lt_liq_balance(acc, plan, balance_start)
     typ = str((acc or {}).get("account_type") or "").lower()
-    wd = typ == "winning_days" or str(plan.get("konto_typ") or "") == "winning_days" or (_wd_num(plan.get("hedge_eur")) or 0) > 0
+    wd = plan_ist_wd(plan, typ)
     if wd and not ist_topstep_express(acc, plan_balance_relativ(plan)):
         level = None
         if balance_start is not None and liq_bal is not None and balance_start > liq_bal:
@@ -7945,7 +7956,7 @@ def liq_regel_felder(regeln, acc, plan, start_bal, tagesstart, einstieg, richtun
     dort liegt der Boden der Regel (Größe + 100) ohnehin gleich oder enger."""
     a = acc or {}
     typ = str(a.get("account_type") or "").lower()
-    wd = typ == "winning_days" or str(plan.get("konto_typ") or "") == "winning_days" or (_wd_num(plan.get("hedge_eur")) or 0) > 0
+    wd = plan_ist_wd(plan, typ)
     groesse = _wd_konto_groesse(a)
     regel, weg = liq_regel_waehlen(regeln, a.get("firm"), "winning_days" if wd else (typ or None), groesse)
     r_bal, r_text = liq_aus_regel(regel, groesse, start_bal, tagesstart)
@@ -8249,7 +8260,7 @@ def admin_live_trades():
         disp, excluded = _wd_personen()
         seit = datetime.fromtimestamp(datetime.now(timezone.utc).timestamp() - tage * 86400, timezone.utc).isoformat()
         felder = ("id,user_id,master_account_id,master_name,master_firm,route,notes,status,richtung,master_contracts,master_symbol,"
-                  "master_symbol_root,master_tp,master_sl,master_pl,hedge_eur,hedge_faktor,start_um,start_um_gestartet_at,orbit_gesendet_at,"
+                  "master_symbol_root,master_tp,master_sl,master_pl,hedge_eur,hedge_faktor,start_um,start_um_gestartet_at,orbit_gesendet_at,orbit_v3,"
                   "started_at,ended_at,completed_at,planned_for,created_at,mt5_baseline,slave_pl,pl_quelle,konto_typ,orbit_v3")
         basis_f = {"select": felder, "route": "in.(tvv2,tsv2,mt5v2)" if mit_echo else "in.(tvv2,tsv2)"}   # B16: Topstep V2 wie Orbit V2
         if nur_eigene:

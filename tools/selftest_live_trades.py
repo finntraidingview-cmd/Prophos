@@ -26,7 +26,7 @@ def lade():
         return re.search(rf"^{name} = .*$", src, re.M).group(0)
     exec("\n".join([const("LT_WD_BLOW_PLUS"), const("WD_HEUTE_PPL")]
                    + [block(f) for f in ("_wd_num", "_wd_level", "_wd_konto_groesse", "ist_topstep_express", "plan_balance_relativ", "konto_basis_balance",
-                                           "_lt_liq_balance", "_lt_liq", "_lt_demo", "kurs_jetzt_wahl", "tsx_zeile_ueberlagern",
+                                           "plan_ist_wd", "_lt_liq_balance", "_lt_liq", "_lt_demo", "kurs_jetzt_wahl", "tsx_zeile_ueberlagern",
                                            "tv_bracket_ueberlagern")]), ns)
     return ns
 
@@ -41,6 +41,11 @@ def main():
         ok = ok and bool(bed)
 
     liq, ppl = a["_lt_liq"], a["WD_HEUTE_PPL"]
+    # Orbit V3 (01.10.2026): tvv2 + Fusion-Hedge, aber KEIN Winning Day → Radar zeigt den Master-SL statt der Liquidation
+    w_ = a["plan_ist_wd"]
+    check(w_({"hedge_eur": 5}) and not w_({"hedge_eur": 5, "orbit_v3": True}) and w_({}, "winning_days")
+          and not w_({"orbit_v3": True, "konto_typ": "winning_days"}, "winning_days") and not w_({}),
+          "plan_ist_wd: Hedge/WD-Konto = WD, Orbit V3 nie, normaler Plan nie")
     tradeify = {"account_type": "funded", "max_drawdown": 4500, "starting_balance": 150000, "name": "Tradeify 150k"}
     plan = {"konto_typ": "funded"}
     # BUY NQ 1 Kontrakt, ohne Start-Balance: 4.500 $ / (20 $ × 1) = 225 Punkte unter dem Einstieg

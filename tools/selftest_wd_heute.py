@@ -28,9 +28,9 @@ def lade():
         m = re.search(rf"^{name} = .*$", src, re.M)
         return m.group(0)
 
-    code = "\n".join([const("WD_HEUTE_PPL"), const("LT_WD_BLOW_PLUS"), block("ist_topstep_express"), block("plan_balance_relativ"), block("konto_basis_balance"), block("_lt_liq_balance"), block("_lt_liq"),
+    code = "\n".join([const("WD_HEUTE_PPL"), const("LT_WD_BLOW_PLUS"), block("ist_topstep_express"), block("plan_balance_relativ"), block("konto_basis_balance"), block("plan_ist_wd"), block("_lt_liq_balance"), block("_lt_liq"),
                       block("wd_start_balance"), block("wd_vorher_waehlen"), block("wd_sl_zeile"), block("_wd_num"), block("_symbol_wurzel"), block("_cme_handelstag"),
-                      block("_wd_level"), block("tsx_zeile_ueberlagern"), block("tv_bracket_ueberlagern"), block("_wd_konto_groesse"), block("_wd_endlesung_zeile"), block("_wd_heute_zeile"),
+                      block("_wd_level"), block("tsx_zeile_ueberlagern"), block("tv_bracket_ueberlagern"), block("_wd_konto_groesse"), block("_wd_endlesung_zeile"), const("WD_GOOD_DAY_MIN"), block("_wd_good_day"), block("_wd_heute_zeile"),
                       block("_wd_heute_behalten"), block("_wd_heute_sortkey"), block("_wd_heute_sortieren"), block("_wd_ohne_master_sl")])
     exec(code, ns)
     return ns
