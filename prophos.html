@@ -18347,6 +18347,9 @@
   // route 'tvv2', erkennbar an hedge_eur > 0, der Farmer-Notiz oder der Kontoart 'winning_days' des Master-Kontos.
   // Orbit V3 (01.10.2026): tvv2 + Fusion-Hedge, aber kein Winning Day — die Kennung gewinnt vor hedge_eur > 0
   const tpIstOrbitV3 = p => !!(p && p.route === 'tvv2' && p.orbitV3)
+  // P&L aus dem Userscript statt Puls-Nachlesung (01.10.2026 abends, Finn: „bei Winning Days dieselbe Logik wie bei Orbit") —
+  // Orbit V3 UND Winning Day (tvv2 + Fusion-Hedge): bis 6 s auf die Reader-Balance warten, Nachtrag, Puls erst nach 10 min
+  const planPlUserscript = p => !!(p && p.route === 'tvv2' && (p.orbitV3 || Number(p.hedgeEur) > 0))
   function tpIstWdPlan(p){
     if(!p || p.route !== 'tvv2') return false
     if(p.orbitV3) return false
@@ -21323,7 +21326,7 @@
     try{
       // Orbit V3 (Finn 01.10.2026: „bei Orbit V3 muss Puls gar nicht mehr nachlesen — das Tampermonkey-Script hat den P&L"): das Level im
       // Fusion-Terminal schließt oft ~1 s BEVOR TradingView die Master-Position als weg zeigt (Live 14:12 UTC) — bis 6 s auf den Reader warten
-      if(p.orbitV3 && typeof hedgeReaderMasterDa === 'function'){ for(let i = 0; i < 12 && hedgeReaderMasterDa(p) !== false; i++) await new Promise(ok => setTimeout(ok, 500)) }
+      if(planPlUserscript(p) && typeof hedgeReaderMasterDa === 'function'){ for(let i = 0; i < 12 && hedgeReaderMasterDa(p) !== false; i++) await new Promise(ok => setTimeout(ok, 500)) }
       if(typeof hedgeReaderMasterDa === 'function' && hedgeReaderMasterDa(p) === false){
         const accL = (accounts || []).find(a => String(a.id) === String(p.masterAccountId))
         const ktoL = accL ? String(accL.externalId || '').trim() : ''
@@ -21341,7 +21344,7 @@
     try{ const pf = tradePlans.find(x => String(x.id) === pid); if(pf && pf.status === 'open' && typeof atMoveToReview === 'function') await atMoveToReview(pf) }catch(e){ console.warn('[hedgeReview] Überprüfen', e) }
     if(typeof atToast === 'function') atToast(`✓ ${p.masterName || 'Plan'}: ${art === 'tp' ? 'Master-TP' : (h.sl_art === 'liquidation' ? 'Liquidations-Level' : 'Master-SL')} erreicht → Überprüfen`
       + (_balL ? ' · Master-P&L aus der Balance (Userscript)' : schaetzung != null ? ` · Master ${schaetzung >= 0 ? '+' : '−'}${Math.abs(schaetzung).toLocaleString('de-DE', { minimumFractionDigits: 2 })} $ geschätzt, Puls liest nach` : ' · Master-P&L: Puls liest nach'), 'end')
-    if(!_balL && !p.orbitV3) setTimeout(() => { hedgeReviewPulsLesen(pid).catch(e => console.warn('[hedgeReview] Puls', e)) }, 10000 + Math.random() * 10000)   // V3: Nachtrag aus dem Userscript (hedgeV3BalanceNachtrag)
+    if(!_balL && !planPlUserscript(p)) setTimeout(() => { hedgeReviewPulsLesen(pid).catch(e => console.warn('[hedgeReview] Puls', e)) }, 10000 + Math.random() * 10000)   // V3: Nachtrag aus dem Userscript (hedgeV3BalanceNachtrag)
     return true
   }
   // Die EINE Puls-Lesung nach dem Level-Ende. Eine Maus: läuft eine Order/ein Schließen (_tpOrbitLaeuft) oder der Rundgang
@@ -21569,8 +21572,8 @@
     const fin = p.mt5Baseline && p.mt5Baseline.final
     if(!fin) return 'Plan hat noch kein Ende'
     // Orbit V3 (01.10.2026, Finn): P&L kommt aus dem Userscript (hedgeV3BalanceNachtrag) — Puls liest nur als Notlösung, 10 min nach dem Ende
-    if(p.orbitV3 && !force && !(typeof fin.balance_end === 'number' && isFinite(fin.balance_end))
-       && Date.now() - (Date.parse(fin.at || p.endedAt || '') || 0) < 10 * 60000) return 'Orbit V3: P&L kommt aus dem Userscript (Puls erst nach 10 min als Notlösung)'
+    if(planPlUserscript(p) && !force && !(typeof fin.balance_end === 'number' && isFinite(fin.balance_end))
+       && Date.now() - (Date.parse(fin.at || p.endedAt || '') || 0) < 10 * 60000) return 'Orbit/Winning Day: P&L kommt aus dem Userscript (Puls erst nach 10 min als Notlösung)'
     // Topstep V2 (01.10.2026, TSV2-PNL): today_pnl ist dort der RP&L des ganzen Tages — erst die Balance macht das Ende „gelesen"
     if(p.route === 'tsv2' ? (typeof fin.balance_end === 'number' && isFinite(fin.balance_end))
        : ((typeof fin.today_pnl === 'number' && isFinite(fin.today_pnl)) || (typeof fin.balance_end === 'number' && isFinite(fin.balance_end)) || fin.quelle === 'puls')) return 'Ende ist schon gelesen'
@@ -22577,7 +22580,7 @@
     let tp; try{ tp = tradePlans }catch(_){ return }
     const pc = hedgePcId(), jetzt = Date.now()
     for(const p of (tp || [])){
-      if(!p || !p.orbitV3 || p.route !== 'tvv2' || p.status !== 'review') continue
+      if(!p || !planPlUserscript(p) || p.route !== 'tvv2' || p.status !== 'review') continue
       const b = p.mt5Baseline || {}, fin = b.final, h = b.hedge
       if(!fin || (typeof fin.balance_end === 'number' && isFinite(fin.balance_end)) || (h && h.pc && h.pc !== pc)) continue
       if(jetzt - (Date.parse(fin.at || p.endedAt || '') || 0) > 30 * 60000) continue
@@ -37450,7 +37453,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.955'
+  const OS_TAB_BUILD = '2026-09-22.956'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
