@@ -25307,12 +25307,21 @@
     if(sel && !wdlModellPasst(sel)) wdl.auswahl = null
     wdlRender()
   })
-  // Fusion-P&L live (slave_pl_live vom Backend, 15-s-Abruf) in die laufenden Zeilen schreiben — ohne Neuaufbau
+  // Fusion-P&L live: Backend-Wert (slave_pl_live, alle IDs) — sonst wie die Trade-Karte aus dem Copier-Status dieses Kontos
+  // (hedgeSoloLive: Panel am PC, mt5_live am Mac). Live-Befund 01.10.2026: Karte zeigte +156 €, Radar „Fusion –".
+  function wdlFusionWert(t){
+    const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
+    if(n(t && t.slave_pl_live) != null) return n(t.slave_pl_live)
+    const h = t && t.hedge && typeof t.hedge === 'object' ? t.hedge : null
+    if(!h || !h.ticket || !['offen', 'schliesst'].includes(String(h.status || ''))) return null
+    try{ const x = typeof hedgeSoloLive === 'function' ? hedgeSoloLive(h.ticket) : null; return x ? (n(x.pl_live) != null ? n(x.pl_live) : n(x.profit)) : null }catch(_){ return null }
+  }
+  // Fusion-P&L live in die laufenden Zeilen schreiben — ohne Neuaufbau (15-s-Abruf und 2-s-Takt)
   function wdlFusionLive(){
     if(!wdl.daten) return
     for(const el of document.querySelectorAll('#wdl-liste [data-wdl-fusion]')){
       const t = (wdl.daten.trades || []).find(x => wdlTid(x) === el.getAttribute('data-wdl-fusion')); if(!t) continue
-      const v = (t.slave_pl_live == null || !isFinite(Number(t.slave_pl_live))) ? null : Number(t.slave_pl_live)
+      const v = wdlFusionWert(t)
       el.textContent = v == null ? 'Fusion –' : `Fusion ${v < 0 ? '−' : '+'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
       el.style.color = v == null ? 'var(--sub)' : v >= 0 ? '#15803d' : '#b91c1c'
     }
@@ -25536,6 +25545,7 @@
     }
   }
   setInterval(wdlLiveTick, 2000)
+  setInterval(() => { if(wdlAktiv()) wdlFusionLive() }, 2000)   // Fusion-P&L aus dem Copier-Status alle 2 s (01.10.2026)
   // Sperren der Radar-Knöpfe (30.09.2026): nur anbieten, was der vorhandene Weg auch kann. Fremde Pläne gehen über
   // /admin/wd-plaene — seit TSX-S-B (30.09.2026 nachts) nimmt das Backend „erledigt" für Orbit V2, Echo V2 und Topstep V2 an,
   // „endlesung" für Orbit V2 und von Puls gestartete Topstep-V2-Pläne (Handpläne lehnt es ehrlich ab). Echo hat keinen
@@ -25606,7 +25616,7 @@
     // laufend (01.10.2026 abends, Finn: „bei Modellen mit Gegenhedge live beide P&Ls"): Fusion schwebend aus mt5_live, wdlFusionLive schreibt nach
     const fusionLiveZ = t => {
       const hedgeModell = ['Echo', 'Orbit', 'Winning Day'].includes(wdlWeg(t)); if(!hedgeModell) return ''
-      const v = num(t.slave_pl_live)
+      const v = wdlFusionWert(t)
       return `<small class="wdl-z-slave" data-wdl-fusion="${escapeHtml(wdlTid(t))}" style="color:${v == null ? 'var(--sub)' : col(v)}" title="Fusion-Gegenhedge live (schwebend, aus MT5)">Fusion ${v == null ? '–' : sig(v, '€', 2)}</small>`
     }
     const zeile = (t, extra) => {
@@ -37514,7 +37524,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.958'
+  const OS_TAB_BUILD = '2026-09-22.959'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
