@@ -8306,6 +8306,46 @@ def _lt_zeile(p, acc, disp, kerzen_je_wurzel, vorher=None, regeln=None, fruehere
 # offene des Kontos ist (sonst null) — Swap/Spread machen ihn zu einem ≈-Wert, quelle 'mt5_equity'. Opt-in über ?echo=1,
 # damit PC-Tab-Takt, Winning Days und Live Trades unverändert bleiben (kein Mehr-Read für sie).
 LT_ECHO_MAX_ALTER_S = 90       # ältere mt5_live-Zeilen gelten nicht als live (Position kann längst zu sein)
+LT_ECHO_ROUTEN = ("mt5v2", "mt5")   # Echo V2 und (seit 01.10.2026 abends) das klassische Echo mit Fusion-Hedge
+
+
+def lt_fusion_pl_echo(live, jetzt_ts):
+    """REIN RECHNEND (testbar): schwebender Fusion-P&L eines klassischen Echo-Trades = Summe profit aller Hedges der Instanz
+    (mt5_live.status.hedges {ident: [{profit, …}]}). Nur frisch (≤ LT_ECHO_MAX_ALTER_S) und mit mindestens einem Hedge, sonst None."""
+    if not live:
+        return None
+    try:
+        alter = jetzt_ts - datetime.fromisoformat(str(live.get("updated_at")).replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError):
+        return None
+    hd = live.get("hd")
+    if alter > LT_ECHO_MAX_ALTER_S or not isinstance(hd, dict):
+        return None
+    werte = [_wd_num(h.get("profit")) for hs in hd.values() if isinstance(hs, list) for h in hs if isinstance(h, dict)]
+    werte = [w for w in werte if w is not None]
+    return round(sum(werte), 2) if werte else None
+
+
+def lt_fusion_pl_solo(hedge, solo_je_pc, jetzt_ts):
+    """REIN RECHNEND (testbar): schwebender Fusion-P&L eines Orbit-/Winning-Day-Hedges aus mt5_live.status.hedge_solo des
+    Hedge-PCs (solo_je_pc = {pc: {updated_at, solo: [{ticket, profit|pl_live}]}}). Nur offener Hedge mit Ticket, frisch, sonst None."""
+    h = hedge if isinstance(hedge, dict) else {}
+    if str(h.get("status") or "") not in ("offen", "schliesst") or not h.get("ticket") or not h.get("pc"):
+        return None
+    z = (solo_je_pc or {}).get(str(h.get("pc")))
+    if not z:
+        return None
+    try:
+        alter = jetzt_ts - datetime.fromisoformat(str(z.get("updated_at")).replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError):
+        return None
+    if alter > LT_ECHO_MAX_ALTER_S:
+        return None
+    for q in (z.get("solo") or []):
+        if isinstance(q, dict) and str(q.get("ticket")) == str(h.get("ticket")):
+            v = _wd_num(q.get("pl_live")) if _wd_num(q.get("pl_live")) is not None else _wd_num(q.get("profit"))
+            return round(v, 2) if v is not None else None
+    return None
 
 
 def lt_echo_live_wahl(zeilen):
@@ -8384,6 +8424,8 @@ def _lt_echo_zeile(p, acc, disp, live_je_login, firm_sym, jetzt_ts, vorher=None)
     z.pop("_tsx", None)
     login = str((acc or {}).get("external_id") or "").strip()
     z.update(lt_echo_felder(p, live_je_login.get(login) if login else None, jetzt_ts))
+    if str(p.get("route") or "") == "mt5" and str(p.get("status") or "") == "open":
+        z["slave_pl_live"] = lt_fusion_pl_echo(live_je_login.get(login) if login else None, jetzt_ts)
     # NQ-/Futures-Felder gelten für Echo nicht — leer statt gerechnet (die Max-Drawdown-Liquidation ist eine Futures-Regel)
     for k in ("einstieg_nq", "einstieg_quelle", "tp_level_nq", "sl_level_nq", "sl_art", "schliesst_bei_nq", "liq_level_nq",
               "liq_balance", "liq_regel", "liq_quelle", "sl_hinweis", "punktwert", "symbol_root"):
@@ -8418,7 +8460,9 @@ def admin_live_trades():
         felder = ("id,user_id,master_account_id,master_name,master_firm,route,notes,status,richtung,master_contracts,master_symbol,"
                   "master_symbol_root,master_tp,master_sl,master_pl,hedge_eur,hedge_faktor,start_um,start_um_gestartet_at,orbit_gesendet_at,orbit_v3,"
                   "started_at,ended_at,completed_at,planned_for,created_at,mt5_baseline,slave_pl,pl_quelle,konto_typ,orbit_v3")
-        basis_f = {"select": felder, "route": "in.(tvv2,tsv2,mt5v2)" if mit_echo else "in.(tvv2,tsv2)"}   # B16: Topstep V2 wie Orbit V2
+        # B16: Topstep V2 wie Orbit V2. Seit 01.10.2026 abends (Finn: „ein Tab je Modell im Radar") mit ?echo=1 auch das klassische
+        # Echo mit Fusion-Hedge (route mt5) — gleiche Felder wie Echo V2 aus mt5_live, dazu der Fusion-P&L (slave_pl_live)
+        basis_f = {"select": felder, "route": "in.(tvv2,tsv2,mt5v2,mt5)" if mit_echo else "in.(tvv2,tsv2)"}
         if nur_eigene:
             basis_f["user_id"] = f"eq.{me}"
         if nur_offen:
@@ -8442,7 +8486,7 @@ def admin_live_trades():
                                             "id": f"in.({','.join(ids[i:i + 80])})"}):
                 accs[str(a["id"])] = a
         # Kerzen je Wurzel ab dem frühesten Start (eine Abfrage je Wurzel)
-        orbit = [p for p in plaene if str(p.get("route") or "") != "mt5v2"]      # Echo rechnet keine NQ-Demo
+        orbit = [p for p in plaene if str(p.get("route") or "") not in LT_ECHO_ROUTEN]      # Echo rechnet keine NQ-Demo
         starts = [str(p.get("started_at")) for p in orbit if p.get("started_at")]
         kerzen = {}
         if starts:
@@ -8462,7 +8506,7 @@ def admin_live_trades():
         liq_regeln = _liq_regeln_laden()             # LIQ-REGELN (30.09.2026): einmal je Abruf, 60 s gecacht
         liq_verlauf = _liq_verlauf_laden(ids)        # KONTO-BODEN (30.09.2026): belegte Balances je Konto, 60 s gecacht
         # Echo (?echo=1): EIN Read auf mt5_live für die Master-Logins laufender Echo-Pläne — nur die nötigen JSON-Teile
-        echo = [p for p in plaene if str(p.get("route") or "") == "mt5v2"]
+        echo = [p for p in plaene if str(p.get("route") or "") in LT_ECHO_ROUTEN]
         live_je_login, firm_sym = {}, {}
         logins = sorted({str((accs.get(str(p.get("master_account_id") or "")) or {}).get("external_id") or "").strip()
                          for p in echo if p.get("status") == "open"} - {""})
@@ -8470,15 +8514,30 @@ def admin_live_trades():
             try:
                 live_je_login = lt_echo_live_wahl(sb_select("mt5_live", {
                     "select": "master_login,updated_at,pos:status->master_positions,bal:status->master_balance,eq:status->master_equity,"
-                              "ccy:status->>master_currency,note:status->>note",
+                              "ccy:status->>master_currency,note:status->>note,hd:status->hedges",
                     "master_login": f"in.({','.join(logins)})"}) or [])
             except Exception as e:
                 print(f"[live-trades] ⚠️ mt5_live (Echo): {type(e).__name__}: {e}", flush=True)
+        # Fusion-P&L live für Orbit/Winning Day (01.10.2026 abends, Finn: „bei Modellen mit Gegenhedge im Radar live beide P&Ls"):
+        # EIN Read auf mt5_live.status.hedge_solo für die Hedge-PCs offener Pläne (nur mit ?echo=1 — der PC-Tab-Takt fragt ohne)
+        solo_je_pc = {}
+        if mit_echo:
+            pcs = sorted({str(((p.get("mt5_baseline") or {}).get("hedge") or {}).get("pc") or "") for p in plaene
+                          if p.get("status") == "open" and isinstance(p.get("mt5_baseline"), dict)
+                          and isinstance(p["mt5_baseline"].get("hedge"), dict) and p["mt5_baseline"]["hedge"].get("status") in ("offen", "schliesst")} - {""})
+            if pcs:
+                try:
+                    for zl in sb_select("mt5_live", {"select": "pc_name,updated_at,solo:status->hedge_solo", "pc_name": f"in.({','.join(pcs)})"}) or []:
+                        k = str(zl.get("pc_name") or "")
+                        if k and isinstance(zl.get("solo"), list) and (k not in solo_je_pc or str(zl.get("updated_at") or "") > str(solo_je_pc[k].get("updated_at") or "")):
+                            solo_je_pc[k] = zl
+                except Exception as e:
+                    print(f"[live-trades] ⚠️ mt5_live (Fusion-Solo): {type(e).__name__}: {e}", flush=True)
         jetzt_ts = datetime.now(timezone.utc).timestamp()
         trades = []
         for p in plaene:
             acc, vorher = accs.get(str(p.get("master_account_id") or "")), wd_vorher_waehlen(p, fruehere)
-            if str(p.get("route") or "") == "mt5v2":
+            if str(p.get("route") or "") in LT_ECHO_ROUTEN:
                 try:
                     z = _lt_echo_zeile(p, acc, disp, live_je_login, firm_sym, jetzt_ts, vorher)
                 except Exception as e:     # eine kaputte Echo-Zeile darf Orbit nicht mitreißen
@@ -8499,6 +8558,8 @@ def admin_live_trades():
             else:
                 z = _lt_zeile(p, acc, disp, kerzen, vorher, regeln=liq_regeln, fruehere=fruehere, verlauf=liq_verlauf)
                 z["plattform"] = "orbit"
+                if p.get("status") == "open" and solo_je_pc:
+                    z["slave_pl_live"] = lt_fusion_pl_solo((p.get("mt5_baseline") or {}).get("hedge") if isinstance(p.get("mt5_baseline"), dict) else None, solo_je_pc, jetzt_ts)
                 trades.append(z)
         rang = {"open": 0, "planned": 1, "review": 2, "completed": 3}
         trades.sort(key=lambda z: (rang.get(z.get("status"), 9), str(z.get("started_at") or z.get("start_um") or "")), reverse=False)
