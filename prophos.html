@@ -2155,6 +2155,16 @@
   #dashboard-view .wdl-z-pl{grid-area:pl;text-align:right;font-weight:600}
   #dashboard-view .wdl-z-slave{display:block;margin-top:1px;font-size:11px;font-weight:500}   /* Slave-P&L unter dem Master (01.10.2026) */
   /* Modell-Leiste im Radar (01.10.2026 abends, Finn: „ein Tab je Modell, schön geordnet") — Gruppen wie im Plan-Popup */
+  /* Vorprüfliste (02.10.2026) — Karte unten rechts, Bedeutungsfarben wie die Echo-Vorprüfung */
+  .vc-karte{position:fixed;right:16px;bottom:16px;z-index:9000;width:min(380px,calc(100vw - 32px));background:var(--surface,#fff);border:1px solid var(--border-soft);border-radius:12px;box-shadow:0 12px 32px rgba(15,23,42,.18);padding:10px 12px 8px;font-size:12.5px}
+  .vc-karte[hidden]{display:none}
+  .vc-karte .vc-kopf{display:flex;align-items:center;justify-content:space-between;font-weight:700;font-size:13px;margin-bottom:2px}
+  .vc-karte .vc-k-ok{color:#15803d}.vc-karte .vc-k-wartet,.vc-karte .vc-k-stopp,.vc-karte .vc-k-verpasst{color:#b91c1c}.vc-karte .vc-k-pruefe{color:var(--sub)}
+  .vc-karte .vc-zu{border:0;background:none;font-size:16px;line-height:1;color:var(--sub);cursor:pointer;padding:2px 4px}
+  .vc-karte .vc-plan{color:var(--sub);font-size:11.5px;margin-bottom:6px}
+  .vc-karte .vc-z{display:grid;grid-template-columns:16px auto 1fr;gap:2px 8px;align-items:baseline;padding:4px 0;border-top:1px solid var(--border-soft)}
+  .vc-karte .vc-z b{font-weight:800}.vc-karte .vc-z small{grid-column:2 / 4;color:var(--sub);font-size:11px}
+  .vc-karte .vc-ok b{color:#15803d}.vc-karte .vc-err b{color:#b91c1c}.vc-karte .vc-warn b{color:#B45309}
   #dashboard-view .wdl-z-modell{padding:8px 16px 4px;font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--sub);border-top:1px solid var(--border-soft)}
   #dashboard-view .wdl-modelle{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;margin:0 0 12px}
   #dashboard-view .wdl-modelle .wdl-mg{display:flex;align-items:center;gap:6px}
@@ -37533,7 +37543,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.966'
+  const OS_TAB_BUILD = '2026-09-22.967'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -37946,9 +37956,11 @@
       .map(a => String(a.externalId).trim())
     // Slave-Vorprüfung auch für Hand-Start und Fern-Signal (29.09.2026) — VOR dem Riegel _tpOrbitLaeuft, sonst bliebe er hängen
     if(vorcheckNoetig(plan) && MT5_LOCAL){
+      vorcheckKarteZeigen(plan, null, 'pruefe')
       const vc = await slaveBereitPruefen()
+      vorcheckKarteZeigen(plan, vc, vc.ok ? 'ok' : 'stopp')
       if(!vc.ok){
-        try{ await vorcheckMelden(plan, 'slave_nicht_bereit', vc.grund) }catch(_){}
+        try{ await vorcheckMelden(plan, 'slave_nicht_bereit', vc.grund, vc.checks) }catch(_){}
         await fehler(`✗ Slave-Terminal (Fusion-Copier) nicht bereit — ${vc.grund}. Nichts geklickt, Plan bleibt Geplant. Copier auf diesem PC starten, dann erneut.`)
         return
       }
@@ -40940,15 +40952,68 @@
    * Alarm höchstens alle 10 min, neuer Versuch in 20–40 s; nach dem Start-Fenster 'verpasst_slave' — NIE ohne Hedge starten. */
   const _vorcheckNaechst = new Map()   // planId → frühester nächster Versuch (ms)
   const vorcheckNoetig = p => !!p && p.route === 'tvv2' && Number(p.hedgeEur) > 0
+  /* VORPRÜFLISTE (02.10.2026, Finn: „bevor Puls die Order platziert — Fusion verbunden, MT5-Copier läuft, Algo-Handel an — als visuelle
+   * Prüfliste, die zur Startzeit kommt; erst wenn alles passt, startet der Trade"). Vorher prüfte die Slave-Vorprüfung nur „irgendein
+   * Copier frisch". Jetzt einzeln aus /api/instances (dieselben Felder wie die Echo-Vorprüfung tpPreflightMt5): Panel, Copier, Hedge-
+   * Terminal im Fusion-Konto (hedge_login = hedge_expected, sonst Server „Fusion"), Algo-Handel im Hedge-Terminal (nur explizites AUS
+   * blockt, wie bei Echo), dazu der Puls-Chrome-Reader als HINWEIS (Radar schließt als Backup — kein Stopp). Anlass: EzPoker 01.10.2026,
+   * Hedge-Terminal im Master-Konto → Copier brach ab, die alte Prüfung sagte nur „kein Copier mit frischem Status". */
   async function slaveBereitPruefen(){
-    if(!MT5_LOCAL || typeof window.mtcApi !== 'function') return { ok: false, grund: 'Copier-API im Tab nicht geladen' }
+    const checks = [], add = (k, label, st, txt) => checks.push({ k, label, st, txt: txt || '' })
+    const fertig = () => { const err = checks.find(c => c.st === 'err'); return { ok: !err, grund: err ? `${err.label}: ${err.txt}` : '', checks } }
+    if(!MT5_LOCAL || typeof window.mtcApi !== 'function'){ add('panel', 'Panel', 'err', 'Copier-API im Tab nicht geladen — Prophos über localhost:5000 öffnen'); return fertig() }
     let d = null
     try{ d = await window.mtcApi('instances', { timeoutMs: 6000 }) }catch(_){ d = null }
-    if(!d || d.copier_offline || d._httpFail || !Array.isArray(d.instances)) return { ok: false, grund: 'Panel nicht erreichbar' }
-    if(d.instances.some(i => i && i.alive)) return { ok: true }
-    return { ok: false, grund: d.instances.length ? 'kein Copier mit frischem Status (Slave-Terminal zu?)' : 'keine Copier-Instanz auf diesem PC' }
+    if(!d || d.copier_offline || d._httpFail || !Array.isArray(d.instances)){ add('panel', 'Panel', 'err', 'nicht erreichbar — start-alles.bat auf diesem PC'); return fertig() }
+    add('panel', 'Panel', 'ok', 'erreichbar')
+    const inst = d.instances.find(i => i && i.alive) || null
+    if(!d.instances.length) add('copier', 'MT5-Copier', 'err', 'keine Copier-Instanz auf diesem PC (Echo → „＋ Account hinzufügen“)')
+    else if(!inst){
+      const ab = typeof _pfCopierAbbruch === 'function' ? _pfCopierAbbruch(d) : null
+      add('copier', 'MT5-Copier', 'err', ab ? 'gestoppt — ' + ab.zeilen.join(' · ') : 'läuft nicht (kein frischer Status) — start-alles.bat')
+    } else add('copier', 'MT5-Copier', 'ok', 'läuft, frischer Status')
+    const st = (inst && inst.status) || {}
+    if(!inst) add('fusion', 'Fusion verbunden', 'warn', 'nicht prüfbar, solange der Copier steht')
+    else {
+      const exp = inst.hedge_expected != null ? String(inst.hedge_expected) : '', lg = st.hedge_login != null ? String(st.hedge_login) : '', srv = String(st.hedge_server || '')
+      const passt = exp ? lg === exp : /fusion/i.test(srv)
+      add('fusion', 'Fusion verbunden', passt ? 'ok' : 'err', passt ? `Hedge-Terminal im Konto ${lg || '?'}${srv ? ' · ' + srv : ''}` : `Hedge-Terminal im Konto ${lg || '?'}${srv ? ' (' + srv + ')' : ''} statt ${exp || 'Fusion'} — im Terminal umloggen`)
+    }
+    if(!inst) add('algo', 'Algo-Handel (Fusion)', 'warn', 'nicht prüfbar, solange der Copier steht')
+    else if(st.hedge_algo === false) add('algo', 'Algo-Handel (Fusion)', 'err', 'AUS — oben im Fusion-Terminal den „Algo-Handel“-Knopf grün schalten')
+    else if(st.hedge_algo === true) add('algo', 'Algo-Handel (Fusion)', 'ok', 'an')
+    else add('algo', 'Algo-Handel (Fusion)', 'warn', 'nicht prüfbar (alter Copier-Stand)')
+    try{
+      if(typeof window._epLokalHolen === 'function') await window._epLokalHolen()
+      const rs = (typeof epLokal !== 'undefined' && epLokal && epLokal.stand) ? epLokal.stand : null
+      const frisch = !!(rs && (typeof rs.positionen_alter_s === 'number' ? rs.positionen_alter_s <= 10 : Date.now() - (epLokal.ab || 0) <= 10000))
+      const puls = !!(rs && /^puls-/.test(String(rs.positionen_tab || '')))
+      add('reader', 'Userscript (Puls-Chrome)', (frisch && puls) ? 'ok' : 'warn', (frisch && puls) ? 'sieht das Puls-Chrome' : 'kein frischer Stand — Radar schließt als Backup (kein Stopp)')
+    }catch(_){ add('reader', 'Userscript (Puls-Chrome)', 'warn', 'nicht prüfbar — Radar schließt als Backup') }
+    return fertig()
   }
-  async function vorcheckMelden(plan, status, grund){
+  // Sichtbare Prüfliste unten rechts (eigenes Element #vc-karte, eigene Verdrahtung): phase 'pruefe' | 'ok' | 'wartet' | 'verpasst' | 'stopp'
+  let _vcKarteTimer = null
+  function vorcheckKarteZeigen(plan, res, phase){
+    let el = document.getElementById('vc-karte')
+    if(!el){
+      el = document.createElement('div'); el.id = 'vc-karte'; el.className = 'vc-karte'; el.setAttribute('role', 'status')
+      document.body.appendChild(el)
+      el.addEventListener('click', ev => { if(ev.target.closest('[data-vc-zu]')){ el.hidden = true; if(_vcKarteTimer){ clearTimeout(_vcKarteTimer); _vcKarteTimer = null } } })
+    }
+    const start = plan && plan.startUm ? new Date(plan.startUm).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : ''
+    const icon = { ok: '✓', err: '✗', warn: '!' }
+    const kopf = phase === 'pruefe' ? 'Vorprüfung läuft…' : phase === 'ok' ? 'Alles bereit — Puls startet' : phase === 'wartet' ? 'Nicht bereit — neuer Versuch in 20–40 s'
+      : phase === 'verpasst' ? 'Nicht gestartet — Start-Fenster verpasst' : 'Nicht bereit — nichts geklickt'
+    const zeilen = ((res && res.checks) || []).map(c => `<div class="vc-z vc-${c.st}"><b>${icon[c.st] || '·'}</b><span>${escapeHtml(c.label)}</span><small>${escapeHtml(c.txt)}</small></div>`).join('')
+    el.innerHTML = `<div class="vc-kopf vc-k-${phase}"><span>${escapeHtml(kopf)}</span><button type="button" class="vc-zu" data-vc-zu title="ausblenden">×</button></div>`
+      + `<div class="vc-plan">${escapeHtml(plan && plan.masterName || 'Plan')}${start ? ' · Start ' + start : ''}</div>${zeilen || '<div class="vc-z"><small>prüfe Panel, Copier, Fusion, Algo-Handel…</small></div>'}`
+    el.hidden = false
+    if(_vcKarteTimer){ clearTimeout(_vcKarteTimer); _vcKarteTimer = null }
+    if(phase === 'ok') _vcKarteTimer = setTimeout(() => { el.hidden = true }, 6000)
+  }
+  window._vorcheckKarte = vorcheckKarteZeigen   // Test-Haken
+  async function vorcheckMelden(plan, status, grund, checks){
     const alt = (plan.mt5Baseline && plan.mt5Baseline.vorcheck) || null, jetzt = new Date().toISOString()
     const pc = (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : ''
     const start = plan.startUm ? new Date(plan.startUm).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '—'
@@ -40970,6 +41035,7 @@
         try{ if(typeof pushAnsHandy === 'function') pushAnsHandy('Slave-Terminal nicht bereit', text, 'https://prophos.pages.dev/prophos#trades', 'vorcheck-' + String(plan.id).slice(0, 8)) }catch(_){}
       }
     }
+    if(Array.isArray(checks)) vc.checks = checks.map(c => ({ k: c.k, st: c.st, txt: String(c.txt || '').slice(0, 160) }))   // Prüfliste am Plan (02.10.2026)
     try{ await baselinePatchIn(plan.id, 'vorcheck', vc) }catch(e){ console.warn('[vorcheck] schreiben', e) }
     try{ renderTradePlans() }catch(_){}
   }
@@ -40998,20 +41064,24 @@
       const verspaetet = now - new Date(plan.startUm).getTime()
       // SLAVE-VORPRÜFUNG VOR dem Claim — der Claim verbraucht den Plan (start_um_gestartet_at), ein späterer Riegel ließe ihn nie wieder zu
       if(vorcheckNoetig(plan)){
+        vorcheckKarteZeigen(plan, null, 'pruefe')
         const vc = await slaveBereitPruefen()
         if(!vc.ok){
           if(verspaetet > (tpIstFarmerPlan(plan) ? 60 : 10) * 60 * 1000){
             const { data: dv } = await supabase.from('trade_plans').update({ start_um_gestartet_at: new Date().toISOString() })
               .eq('id', plan.id).eq('status', 'planned').is('start_um_gestartet_at', null).select('*')
-            if(dv && dv.length){ const iv = tradePlans.findIndex(x => String(x.id) === String(plan.id)); if(iv >= 0) tradePlans[iv] = rowToPlan(dv[0]); await vorcheckMelden(plan, 'verpasst_slave', vc.grund) }
+            if(dv && dv.length){ const iv = tradePlans.findIndex(x => String(x.id) === String(plan.id)); if(iv >= 0) tradePlans[iv] = rowToPlan(dv[0]); await vorcheckMelden(plan, 'verpasst_slave', vc.grund, vc.checks) }
+            vorcheckKarteZeigen(plan, vc, 'verpasst')
             return
           }
           _vorcheckNaechst.set(String(plan.id), Date.now() + 20000 + Math.floor(Math.random() * 20000))
-          await vorcheckMelden(plan, 'slave_nicht_bereit', vc.grund)
+          await vorcheckMelden(plan, 'slave_nicht_bereit', vc.grund, vc.checks)
+          vorcheckKarteZeigen(plan, vc, 'wartet')
           return
         }
         _vorcheckNaechst.delete(String(plan.id))
-        await vorcheckMelden(plan, 'ok')
+        await vorcheckMelden(plan, 'ok', '', vc.checks)
+        vorcheckKarteZeigen(plan, vc, 'ok')
       }
       // Claim: nur der Tab, dessen Update eine Zeile trifft, darf feuern
       const { data } = await supabase.from('trade_plans').update({ start_um_gestartet_at: new Date().toISOString() })
