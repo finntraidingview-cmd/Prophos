@@ -17524,6 +17524,12 @@ def _puls_ergebnis_senden(art, stufe, cmd, res, trail):
     try:
         ordner = os.path.join(_AUGEN_HIER, "puls_ergebnisse")
         os.makedirs(ordner, exist_ok=True)
+        # ZUERST die feste Datei letzt_<art>.json (01.10.2026, Finn: „Fusion sofort beim Knopfdruck, an Supabase vorbei"): das Panel
+        # liefert sie unter /api/puls-klick aus, der Prophos-Tab dieses PCs fragt dort alle 0,1 s — atomar ersetzt (nie halb gelesen)
+        letzt = os.path.join(ordner, f"letzt_{art}.json")
+        with open(letzt + ".tmp", "w", encoding="utf-8") as f:
+            json.dump(paket, f, ensure_ascii=False, default=str)
+        os.replace(letzt + ".tmp", letzt)
         with open(os.path.join(ordner, f"{time.strftime('%Y%m%d_%H%M%S')}_{art}_{stufe}_{paket['plan_id'] or 'ohne-plan'}.json"),
                   "w", encoding="utf-8") as f:
             json.dump(paket, f, ensure_ascii=False, default=str)
@@ -17532,6 +17538,23 @@ def _puls_ergebnis_senden(art, stufe, cmd, res, trail):
     pc = _augen_pc_id()
     if not pc:
         return
+    if stufe == "geklickt":
+        # Klick-Meldung: Railway im Hintergrund — der Lauf (Show more, Fill-Beweis) wartet nicht bis zu 3 s auf die Cloud;
+        # der Prozess lebt danach noch Sekunden (Beweis, Endprüfung), der Thread kommt sicher durch
+        try:
+            import threading
+
+            def _bg():
+                try:
+                    body_ = json.dumps(paket, ensure_ascii=False, default=str).encode("utf-8")
+                    urllib.request.urlopen(urllib.request.Request(f"{PULS_BACKEND}/puls-ergebnis/{pc}", data=body_,
+                                                                  headers={"Content-Type": "application/json"}), timeout=3.0).read()
+                except Exception:
+                    pass
+            threading.Thread(target=_bg, daemon=True).start()
+            return
+        except Exception:
+            pass
     try:
         body = json.dumps(paket, ensure_ascii=False, default=str).encode("utf-8")
         req = urllib.request.Request(f"{PULS_BACKEND}/puls-ergebnis/{pc}", data=body, headers={"Content-Type": "application/json"})

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.9.3
+// @version      0.9.4
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt. Seit 0.5 auch die KONTO-ZUSAMMENFASSUNG (Balance, Today's P&L …) fuer den Orbit-V2-Rundgang.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -28,6 +28,7 @@
 // kommt ueber @updateURL/@downloadURL (GitHub-raw) von selbst.
 //
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
+//   0.9.4  01.10.2026  Puls-Chrome liest alle 0,1 s (Finn: „Fusion so schnell wie es geht"); Konto/Bedienfeld weiter alle 0,5 s.
 //   0.9.3  01.10.2026  Puls-Chrome: Hand-Schliessen/Liquidation muss ankommen (Live-Befund Moritz 01.10.2026 23:19 UTC, erster Orbit-V3-
 //                      Trade: Master in TV von Hand zu, Fusion blieb offen — echoplus_live zeigte konto null, positionen_ok false).
 //                      (1) Eigene Tab-Kennung 'puls-…' (sessionStorage prophos_tab_id_puls): der reader-server merkt sich jede
@@ -117,7 +118,7 @@
   // dreimal ein Update vermutet, das gar nicht aktiv war (31.08.2026), und von
   // aussen war das nur an FEHLENDEN Feldern zu erraten. Ab jetzt sagt jeder
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
-  const VERSION    = '0.9.3';
+  const VERSION    = '0.9.4';
   // 0.9.0: Puls-Chrome-Modus (Orbit V3) — je Chrome-Profil gespeichert, siehe CHANGELOG
   let PULS_CHROME = false;
   try { PULS_CHROME = GM_getValue('prophos_puls_chrome', false) === true; } catch (_) {}
@@ -130,8 +131,8 @@
   const ENDPOINT   = 'http://127.0.0.1:8790/positions';
   const BEDIENFELD = 'http://127.0.0.1:8790/bedienfeld';
   const KERZEN     = 'http://127.0.0.1:8790/kerzen';       // 0.8.0: Bars aus dem Socket, gebuendelt
-  const INTERVALMS = 250;    // wie oft gelesen + gesendet wird (0,25 s — niedrige Hedge-Latenz)
-  const BF_JEDER   = 2;      // Bedienfeld nur jeden n-ten Tick (500 ms) — die
+  const INTERVALMS = PULS_CHROME ? 100 : 250;   // wie oft gelesen + gesendet wird (0,25 s; 0.9.4: Puls-Chrome 0,1 s — dort loesen die Positionen das Hedge-Schliessen aus)
+  const BF_JEDER   = PULS_CHROME ? 5 : 2;      // Bedienfeld nur jeden n-ten Tick (500 ms) — die
                              // Steuerelement-Suche geht durchs halbe DOM, das
                              // muss nicht im Hedge-Takt laufen. Puls wartet
                              // ohnehin auf einen Stand, der JUENGER ist als

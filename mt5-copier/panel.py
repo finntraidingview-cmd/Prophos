@@ -2236,6 +2236,16 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, PAGE, "text/html; charset=utf-8")
         if path == "/api/instances":
             return self._send(200, json.dumps(snapshot(), ensure_ascii=False))
+        if path == "/api/puls-klick":
+            # Klick-/Fill-Meldung von Puls LOKAL (01.10.2026, Finn: „Fusion sofort beim Knopfdruck, an Supabase vorbei"): order_bot.py
+            # legt jede Order-Meldung zusätzlich als puls_ergebnisse/letzt_order.json ab (überschrieben). Der Prophos-Tab dieses PCs fragt
+            # während eines Laufs alle 0,1 s hier statt alle 0,6 s in Supabase (puls_ergebnisse via Railway) — nur lesen, nie schreiben.
+            q = parse_qs(urlparse(self.path).query)
+            pid = (q.get("plan_id") or [""])[0].strip()
+            d = read_json(os.path.join(HERE, "puls_ergebnisse", "letzt_order.json"), None)
+            if not pid or not isinstance(d, dict) or str(d.get("plan_id") or "") != pid:
+                return self._send(200, json.dumps({"ok": False, "plan_id": pid or None}))
+            return self._send(200, json.dumps({"ok": True, "paket": d}, ensure_ascii=False, default=str))
         if path == "/api/pc-id":
             # PC-Kennung für alle Browser-Profile dieses PCs (25.09.2026) — null, solange keine eingetragen ist
             import socket
@@ -3105,7 +3115,7 @@ class Handler(BaseHTTPRequestHandler):
             ende = time.time() + 14.0
             erg = None
             while time.time() < ende:
-                time.sleep(0.3)
+                time.sleep(0.05)   # 01.10.2026: 0,3 → 0,05 s — die Quittung des Copiers (Ticket, Fill) kommt so ~0,25 s früher beim Tab an
                 alle = read_json(erg_pfad, {}) or {}
                 if isinstance(alle, dict) and auftrag["cmd_id"] in alle:
                     erg = alle[auftrag["cmd_id"]]

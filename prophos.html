@@ -21235,11 +21235,22 @@
     const w = { stop: false, gefeuert: false, promise: null }
     w.promise = (async () => {
       const bis = Date.now() + 90000
+      let cloudAt = 0
       while(!w.stop && Date.now() < bis){
-        await new Promise(ok => setTimeout(ok, 500 + Math.random() * 300))
+        // LOKAL ZUERST (01.10.2026, Finn: „alles rausholen, an Supabase vorbei"): Puls legt die Klick-Meldung als letzt_order.json ab,
+        // das Panel liefert sie unter /api/puls-klick — alle 0,1 s, nur localhost. Supabase (über Railway) nur noch alle 2 s als Rückfall
+        // (älteres Panel/Bot ohne die Datei) — vorher alle 0,5–0,8 s, also auch weniger Last.
+        await new Promise(ok => setTimeout(ok, 100))
         if(w.stop) break
         let z = null
-        try{ const { data } = await supabase.from('puls_ergebnisse').select('stufe, ergebnis').eq('plan_id', String(plan.id)).eq('art', 'order').maybeSingle(); z = data }catch(_){ continue }
+        try{
+          const lo = await window.mtcApi('puls-klick?plan_id=' + encodeURIComponent(String(plan.id)), { timeoutMs: 1500 })
+          if(lo && lo.ok && lo.paket && lo.paket.ergebnis) z = { ergebnis: lo.paket.ergebnis }
+        }catch(_){}
+        if(!z && Date.now() - cloudAt >= 2000){
+          cloudAt = Date.now()
+          try{ const { data } = await supabase.from('puls_ergebnisse').select('stufe, ergebnis').eq('plan_id', String(plan.id)).eq('art', 'order').maybeSingle(); z = data }catch(_){ continue }
+        }
         const e = (z && z.ergebnis) || null
         // SOFORT BEIM KLICK (01.10.2026, Finn: „sobald die Order platziert wird, muss sie direkt auf Fusion — das Verhältnis steht schon,
         // SL/TP kann man nach ‚Show more' anpassen"): schon die erste 'geklickt'-Meldung (gesendet, order_klick_ms, noch ohne Fill) öffnet.
@@ -22205,7 +22216,7 @@
    * Hedges DIESES PCs, nur mit Puls-Chrome-Reader (positionen_tab 'puls-…', flach nur mit Beweis), Stand direkt vom lokalen Reader
    * (keine Cloud). Schließt, wenn das Plan-Konto ≥ 0,6 s flach ist (mehrere Lesungen), der Stand ≤ 1,5 s alt, das Konto ≥ 2 s stabil,
    * der Hedge ≥ 3 s offen und die Master-Position seit dem Open schon gesehen war. Alles andere bleibt beim 1-s-Wächter. */
-  const _hedgeSchnellLeer = new Map(), _hedgeSchnellKonto = new Map()
+  const _hedgeSchnellLeer = new Map(), _hedgeSchnellKonto = new Map(), _hedgeFillAusReader = new Set()
   let _hedgeSchnellBusy = false
   async function hedgeReaderSchnellTick(){
     if(_hedgeSchnellBusy || !(MT5_LOCAL && typeof window.mtcApi === 'function')) return
@@ -22219,7 +22230,7 @@
       if(typeof window._epLokalHolen === 'function'){ try{ await window._epLokalHolen() }catch(_){} }
       const st = (epLokal && epLokal.stand) ? epLokal.stand : null
       if(!st || st.an === false || st.positionen_ok === false || !Array.isArray(st.positionen) || !/^puls-/.test(String(st.positionen_tab || ''))) return
-      if(!(typeof st.positionen_alter_s === 'number' && st.positionen_alter_s <= 1.5)) return
+      if(!(typeof st.positionen_alter_s === 'number' && st.positionen_alter_s <= 1.0)) return
       const jetzt = Date.now()
       for(const p of meine){
         const pid = String(p.id), h = p.mt5Baseline.hedge
@@ -22229,12 +22240,26 @@
         if(!_hedgeSchnellKonto.has(pid)) _hedgeSchnellKonto.set(pid, jetzt)
         const wz = ((typeof tvSymbolWurzel === 'function') && tvSymbolWurzel(h.symbol_nq || '')) === 'MNQ' ? 'MNQ' : 'NQ'
         const richtung = (p.richtung === 'buy' || p.richtung === 'sell') ? p.richtung : null
-        if(hedgeMasterTeilweise(st.positionen, wz, richtung, 1e9) != null){ _hedgeMasterGesehen.add(pid); _hedgeSchnellLeer.delete(pid); continue }
+        if(hedgeMasterTeilweise(st.positionen, wz, richtung, 1e9) != null){
+          _hedgeMasterGesehen.add(pid); _hedgeSchnellLeer.delete(pid)
+          // FILL SOFORT (01.10.2026): der Hedge öffnete beim Senden-Klick mit dem Kurs zum Klick — der echte Avg Fill steht ~0,1–0,3 s nach
+          // dem Fill in der Positions-Tabelle des Puls-Chrome; damit Entry + Level am Hedge, ohne auf „Show more" (~3 s) zu warten
+          if(/^feed/.test(String(h.einstieg_quelle || '')) && !_hedgeFillAusReader.has(pid) && typeof hedgeEinstiegNachtragen === 'function'){
+            const pos = st.positionen.find(x => x && (x.wurzel || ((typeof tvSymbolWurzel === 'function') ? tvSymbolWurzel(x.symbol || '') : '')) === wz && (!richtung || !x.richtung || x.richtung === richtung))
+            const af = pos ? Number(pos.avg_fill) : NaN
+            if(af > 1000 && richtung){ _hedgeFillAusReader.add(pid); hedgeEinstiegNachtragen(p, { avg_fill_je_wurzel: { [wz]: { avg_fill: af, seite: richtung } } }).catch(() => {}) }
+          }
+          continue
+        }
         if(st.positionen.some(x => x && x.pnl_unklar)) continue
         if(!_hedgeMasterGesehen.has(pid)) continue
         if(!_hedgeSchnellLeer.has(pid)) _hedgeSchnellLeer.set(pid, jetzt)
         const offenSeit = jetzt - (Date.parse(h.opened_at || h.at || '') || jetzt)
-        if(jetzt - _hedgeSchnellLeer.get(pid) >= 600 && jetzt - _hedgeSchnellKonto.get(pid) >= 2000 && offenSeit >= 3000 && p.status === 'open'){
+        // 0,3 s flach (≈ 3 Lesungen bei 0,1-s-Takt); läuft auf diesem PC gerade ein Puls-Lauf/Rundgang (Kontowechsel → die Tabelle kann kurz
+        // leer flackern), vorsichtig 1,5 s
+        let unruhig = false; try{ unruhig = !!_tpOrbitLaeuft || !!(tvV2Poll && tvV2Poll.busy) }catch(_){}
+        const leerMin = unruhig ? 1500 : 300
+        if(jetzt - _hedgeSchnellLeer.get(pid) >= leerMin && jetzt - _hedgeSchnellKonto.get(pid) >= 2000 && offenSeit >= 3000 && p.status === 'open'){
           _hedgeSchnellLeer.delete(pid)
           console.info('[hedgeSchnell] Master weg laut Reader — Fusion wird geschlossen', p.masterName || pid)
           await hedgeMasterWegAusfuehren(p, kontoPlan, null)
@@ -22243,7 +22268,7 @@
     }catch(e){ console.warn('[hedgeSchnell]', e) }
     finally{ _hedgeSchnellBusy = false }
   }
-  setInterval(hedgeReaderSchnellTick, 300)
+  setInterval(hedgeReaderSchnellTick, 100)   // 01.10.2026: 0,3 → 0,1 s (nur lokale Abfrage, nur bei offenem Hedge dieses PCs)
   /* MASTER LAUT READER (01.10.2026, Live-Befund Moritz 00:55 UTC: Order platziert, Antwort an den Tab verloren, Position zwei Minuten
    * später schon wieder zu — die Übernahme hätte danach einen Fusion-Hedge für eine geschlossene Position nachgeholt). Vor jedem
    * NACHGEHOLTEN Hedge-Open fragen: true = Reader zeigt die Master-Position, false = Puls-Chrome-Reader (flach nur mit Beweis) zeigt
@@ -37023,7 +37048,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.927'
+  const OS_TAB_BUILD = '2026-09-22.928'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

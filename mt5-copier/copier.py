@@ -1687,6 +1687,29 @@ def main():
     solo_erg_pfad = os.path.join(here, SOLO_ERGEBNIS)
     solo_zu_pfad = os.path.join(here, SOLO_ZU)
 
+    # Sofort-Wecker (01.10.2026, Finn: „Fusion so schnell wie es geht — beim Öffnen und beim Schließen"): die Takt-Pause endet, sobald
+    # das Panel hedge_solo_auftrag.json neu schreibt (Änderungszeit, alle 20 ms geprüft) — vorher lag ein Auftrag bis zu poll (0,5 s)
+    # ungelesen. Der nächste Tick arbeitet ihn dann sofort ab (solo_abarbeiten); sonst bleibt der Takt wie bisher.
+    try:
+        _solo_mtime = [os.path.getmtime(solo_pfad)]
+    except OSError:
+        _solo_mtime = [0.0]
+
+    def schlaf_bis_auftrag(sek):
+        ende = time.time() + sek
+        while True:
+            try:
+                mt = os.path.getmtime(solo_pfad)
+            except OSError:
+                mt = 0.0
+            if mt > _solo_mtime[0]:
+                _solo_mtime[0] = mt
+                return
+            rest = ende - time.time()
+            if rest <= 0:
+                return
+            time.sleep(min(0.02, rest))
+
     # Selbst erkannte Abschluesse (24.09.2026 spaet): Datei {zu: [Ring], bekannt: {ticket: …}} — beim Start
     # gelesen, damit auch Positionen zaehlen, die WAEHREND eines Copier-Neustarts gefuellt wurden.
     def solo_zu_laden():
@@ -2606,7 +2629,7 @@ def main():
                     if os.path.exists(m.cfg_path):
                         write_status(m.status_path, master_status(m, snap, hedges, True))
 
-            time.sleep(poll)
+            schlaf_bis_auftrag(poll)
     except KeyboardInterrupt:
         log("Gestoppt.")
     finally:
