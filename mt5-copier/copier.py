@@ -1931,6 +1931,38 @@ def main():
         erg["_z"] = {"send_vor": round(_t_send * 1000), "gefuellt": round(_t_gefuellt * 1000), "level_fertig": round(time.time() * 1000)}
         return erg
 
+    def solo_level(m, a):
+        """Level am offenen Solo-Hedge neu setzen (01.10.2026, Finn: „Die Level muessen anhand des TradingView-Fills
+        angepasst werden, nicht anhand des Fusion-Kurses"). solo_open setzt Notfall-SL/Master-SL-Level ab dem
+        FUSION-Fill ± Punkte; der PC-Tab rechnet sie nach, sobald Master-Fill bzw. TP-Limit aus TradingView da sind,
+        und schickt absolute NAS100-Preise: sl = Notfall-SL hinter dem Master-TP, tp = Level am Master-SL (0 = keins).
+        Nur Positionen mit SOLO_MAGIC. Abgelehnt (z. B. Level vom Kurs schon ueberholt) → die alten Level bleiben."""
+        try:
+            ticket = int(a.get("ticket") or 0)
+            sl = float(a.get("sl") or 0)
+            tp = float(a.get("tp") or 0)
+        except (TypeError, ValueError):
+            return {"ok": False, "code": "befehl", "retry_ok": False, "msg": "ticket/sl/tp keine Zahlen"}
+        if ticket <= 0 or not sl > 0 or tp < 0:
+            return {"ok": False, "code": "befehl", "retry_ok": False, "msg": "ticket und sl > 0 noetig"}
+        pos = mt5.positions_get(ticket=ticket)
+        if not pos:
+            return {"ok": False, "code": "weg", "retry_ok": False, "ticket": ticket, "msg": f"Position {ticket} nicht (mehr) offen"}
+        p = pos[0]
+        if int(getattr(p, "magic", 0) or 0) != SOLO_MAGIC:
+            return {"ok": False, "code": "fremd", "retry_ok": False, "ticket": ticket, "msg": f"Ticket {ticket} ist kein Solo-Hedge"}
+        si = sym_info(p.symbol)
+        dg = int(si["digits"]) if si else 2
+        sl, tp = round(sl, dg), round(tp, dg)
+        sl_alt, tp_alt = float(p.sl or 0.0), float(p.tp or 0.0)
+        ok = send(m, {"action": mt5.TRADE_ACTION_SLTP, "symbol": p.symbol, "position": ticket, "sl": sl, "tp": tp, "magic": SOLO_MAGIC},
+                  f"SOLO LEVEL NEU SL {sl} / TP {tp or '—'} {p.symbol} (Ticket {ticket}, vorher {sl_alt} / {tp_alt or '—'})")
+        if not ok:
+            return {"ok": False, "code": "abgelehnt", "retry_ok": True, "ticket": ticket, "sl_alt": sl_alt, "tp_alt": tp_alt,
+                    "msg": f"Level abgelehnt ({getattr(m, 'letzter_fehler', None) or mt5.last_error()}) — alte Level bleiben"}
+        return {"ok": True, "ticket": ticket, "sl": sl, "tp": tp, "sl_alt": sl_alt, "tp_alt": tp_alt,
+                "msg": f"Level neu: SL {sl} / TP {tp or '—'} (vorher {sl_alt} / {tp_alt or '—'})"}
+
     def solo_close(m, a):
         try:
             ticket = int(a.get("ticket") or 0)
@@ -1994,6 +2026,8 @@ def main():
                         erg = solo_open(m0, a)
                 elif a.get("aktion") == "close":
                     erg = solo_close(m0, a)
+                elif a.get("aktion") == "level":
+                    erg = solo_level(m0, a)
                 else:
                     erg = {"ok": False, "code": "befehl", "msg": f"unbekannte aktion {a.get('aktion')!r}"}
             except Exception as e:

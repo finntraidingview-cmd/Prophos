@@ -3079,9 +3079,9 @@ class Handler(BaseHTTPRequestHandler):
                 bis = hedge_bereit_setzen(body.get("sekunden") if body.get("sekunden") is not None else 180,
                                           str(body.get("grund") or "frontend")[:60])
                 return self._send(200, json.dumps({"ok": True, "bis": bis, "rest_s": round(bis - time.time(), 1)}))
-            if aktion not in ("open", "close"):
+            if aktion not in ("open", "close", "level"):
                 return self._send(400, json.dumps({"ok": False, "code": "befehl",
-                    "msg": "aktion muss open/close/ergebnis/bereit sein"}, ensure_ascii=False))
+                    "msg": "aktion muss open/close/level/ergebnis/bereit sein"}, ensure_ascii=False))
             auftrag = {"cmd_id": f"{int(time.time())}-{random.randrange(10**6):06d}", "at": time.time(), "aktion": aktion}
             if aktion == "open":
                 richtung = str(body.get("richtung") or "").strip().lower()
@@ -3124,6 +3124,18 @@ class Handler(BaseHTTPRequestHandler):
                 auftrag.update({"richtung": richtung, "symbol": symbol, "eur": eur, "punkte": punkte, "tp_punkte": punkte,
                                 "sl_punkte": sl_punkte, "puffer": puffer, "notfall_faktor": notfall_faktor, "lots": lots,
                                 "plan_id": str(body.get("plan_id") or "")[:64]})
+            elif aktion == "level":
+                # Level am offenen Solo-Hedge neu setzen (01.10.2026): absolute NAS100-Preise vom PC-Tab, gerechnet ab dem
+                # echten TradingView-Fill/TP-Limit statt ab dem Fusion-Fill. {aktion:'level', ticket, sl (>0), tp (0 = keins)}
+                try:
+                    ticket = int(body.get("ticket") or 0)
+                    sl = float(body.get("sl") or 0)
+                    tp = float(body.get("tp") or 0)
+                except (TypeError, ValueError):
+                    return self._send(400, json.dumps({"ok": False, "code": "befehl", "msg": "ticket/sl/tp keine Zahlen"}))
+                if ticket <= 0 or not sl > 0 or tp < 0:
+                    return self._send(400, json.dumps({"ok": False, "code": "befehl", "msg": "ticket und sl > 0 noetig"}))
+                auftrag.update({"ticket": ticket, "sl": sl, "tp": tp})
             else:
                 try:
                     ticket = int(body.get("ticket") or 0)
