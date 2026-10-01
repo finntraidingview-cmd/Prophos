@@ -77,22 +77,27 @@ rem gelesen, ein Austausch ist gefahrlos. Die .bat dort werden hier NICHT
 rem angefasst -- sie koennten in diesem Moment selbst laufen, und eine
 rem laufende Batchdatei zu ueberschreiben ist unter Windows undefiniert.
 rem Sie halten sich seit .190 selbst aktuell (Update in ihrem eigenen Start).
-if exist "C:\tv-reader\reader-server.py" (
-  powershell -NoProfile -Command "$ProgressPreference='SilentlyContinue';$b='https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/main/tv-reader/';$d='C:\tv-reader\';foreach($f in @('reader-server.py','tv_verbinder.py','tv_snapshot.py')){try{Invoke-RestMethod ($b+$f) -OutFile ($d+$f+'.newa') -TimeoutSec 25}catch{}}"
-  call :swap "C:\tv-reader\reader-server.py" 4000
-  call :swap "C:\tv-reader\tv_verbinder.py" 4000
-  call :swap "C:\tv-reader\tv_snapshot.py" 4000
+rem Reader-Ordner (01.10.2026): alt C:\tv-reader, seit der Userscript-Einrichtung per PowerShell C:\Prophos\tv-reader
+set "_tvr=C:\tv-reader"
+if not exist "C:\tv-reader\start-reader.bat" if exist "C:\Prophos\tv-reader\start-reader.bat" set "_tvr=C:\Prophos\tv-reader"
+if exist "%_tvr%\reader-server.py" (
+  powershell -NoProfile -Command "$ProgressPreference='SilentlyContinue';$b='https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/main/tv-reader/';$d='%_tvr%\';foreach($f in @('reader-server.py','tv_verbinder.py','tv_snapshot.py')){try{Invoke-RestMethod ($b+$f) -OutFile ($d+$f+'.newa') -TimeoutSec 25}catch{}}"
+  call :swap "%_tvr%\reader-server.py" 4000
+  call :swap "%_tvr%\tv_verbinder.py" 4000
+  call :swap "%_tvr%\tv_snapshot.py" 4000
 )
 
 rem Orbit (28.08.2026, Fund von PC 1): "Alles neu starten" killt ALLE
 rem python.exe -- auf PCs mit TV-Reader starben Reader + Verbinder mit und
 rem blieben tot, weil sie hier fehlten. Deshalb: mitstarten, wenn der
 rem Ordner existiert. PCs ohne tv-reader bleiben unberuehrt.
-if exist "C:\tv-reader\start-reader.bat" (
-  start "Prophos TV-Reader" cmd /c "C:\tv-reader\start-reader.bat"
+rem Reader nur, wenn er nicht schon laeuft (Port 8790) — sonst kreiste ein zweites Fenster im 10-s-Neustart
+call :portbelegt 8790
+if errorlevel 1 if exist "%_tvr%\start-reader.bat" (
+  start "Prophos TV-Reader" /d "%_tvr%" cmd /c start-reader.bat
 )
-if exist "C:\tv-reader\start-verbinder.bat" (
-  start "Prophos TV-Verbinder" cmd /c "C:\tv-reader\start-verbinder.bat"
+if exist "%_tvr%\start-verbinder.bat" (
+  start "Prophos TV-Verbinder" /d "%_tvr%" cmd /c start-verbinder.bat
 )
 rem (15.08.2026) Nur PCs mit ALTEM Backend-Setup betrifft das -- seit 01.09.2026
 rem steht der Hinweis deshalb hinter einer Pruefung, statt auf jedem frischen
@@ -143,6 +148,10 @@ if exist "%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe" set _chrome=
 if exist "%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe" set _chrome=%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe
 if defined _chrome start "" "%_chrome%" "http://localhost:5000"
 if not defined _chrome start "" "http://localhost:5000"
+rem Puls-Chrome gleich mit oeffnen (01.10.2026, Finn: „was passiert, wenn der PC mal ausgeht") — darin laeuft das
+rem Orbit-Userscript, ohne Puls-Chrome schliesst nach einem Neustart nur Radar. Nur auf PCs mit Puls (order_bot.py + pc_id.json);
+rem laeuft es schon, kehrt „augen start" sofort zurueck.
+if exist "order_bot.py" if exist "pc_id.json" start "Puls-Chrome" /min cmd /c "timeout /t 15 >nul & python order_bot.py augen start"
 timeout /t 8 >nul
 exit /b
 
