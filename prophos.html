@@ -21262,14 +21262,29 @@
     if(!art || h.status !== 'geschlossen' || p.route !== 'tvv2' || p.status !== 'open' || (h.pc && h.pc !== hedgePcId())) return false
     const schaetzung = hedgeLevelSchaetzung(p, art)
     const extra = { grund: h.grund, art, master_pl_schaetzung: schaetzung, hedge_pl: (h.pl != null && isFinite(Number(h.pl))) ? Number(h.pl) : null }
+    // END-BALANCE AUCH HIER AUS DEM USERSCRIPT (01.10.2026, Live Moritz 14:08 UTC, Orbit V3 mit TP 15 $: das Notfall-Level im Fusion-Terminal
+    // schloss nach 2 s VOR dem Userscript → dieser Level-Weg, nur Schätzung + Puls-Nachlesung). Zeigt der Puls-Chrome-Reader das Plan-Konto
+    // bewiesen flach, gilt seine Balance (gleiche Regeln wie beim Reader-Ende: Balance = Equity, zwei Lesungen gleich) — dann keine Nachlesung.
+    let _balL = null
+    try{
+      if(typeof hedgeReaderMasterDa === 'function' && hedgeReaderMasterDa(p) === false){
+        const accL = (accounts || []).find(a => String(a.id) === String(p.masterAccountId))
+        const ktoL = accL ? String(accL.externalId || '').trim() : ''
+        if(ktoL) _balL = await hedgeReaderEndBalance(ktoL)
+      }
+    }catch(_){}
+    if(_balL){
+      Object.assign(extra, _balL)
+      try{ if(typeof tvKontoBalanceSchreiben === 'function') tvKontoBalanceSchreiben(p.masterAccountId, { balance: _balL.balance_end, equity: _balL.equity_end, relativ: false }, _balL.balance_at) }catch(_){}
+    }
     let beendet = false
     try{ beendet = await tvV2EndeSetzen(p, null, 'level', extra) }catch(e){ console.warn('[hedgeReview] Ende', e); return false }
     if(!beendet) return false
     // atShowEndPrompt schiebt schon auf Überprüfen — explizit nachziehen, falls das Popup für diesen Plan schon gemeldet war
     try{ const pf = tradePlans.find(x => String(x.id) === pid); if(pf && pf.status === 'open' && typeof atMoveToReview === 'function') await atMoveToReview(pf) }catch(e){ console.warn('[hedgeReview] Überprüfen', e) }
     if(typeof atToast === 'function') atToast(`✓ ${p.masterName || 'Plan'}: ${art === 'tp' ? 'Master-TP' : (h.sl_art === 'liquidation' ? 'Liquidations-Level' : 'Master-SL')} erreicht → Überprüfen`
-      + (schaetzung != null ? ` · Master ${schaetzung >= 0 ? '+' : '−'}${Math.abs(schaetzung).toLocaleString('de-DE', { minimumFractionDigits: 2 })} $ geschätzt, Puls liest nach` : ' · Master-P&L: Puls liest nach'), 'end')
-    setTimeout(() => { hedgeReviewPulsLesen(pid).catch(e => console.warn('[hedgeReview] Puls', e)) }, 10000 + Math.random() * 10000)
+      + (_balL ? ' · Master-P&L aus der Balance (Userscript)' : schaetzung != null ? ` · Master ${schaetzung >= 0 ? '+' : '−'}${Math.abs(schaetzung).toLocaleString('de-DE', { minimumFractionDigits: 2 })} $ geschätzt, Puls liest nach` : ' · Master-P&L: Puls liest nach'), 'end')
+    if(!_balL) setTimeout(() => { hedgeReviewPulsLesen(pid).catch(e => console.warn('[hedgeReview] Puls', e)) }, 10000 + Math.random() * 10000)
     return true
   }
   // Die EINE Puls-Lesung nach dem Level-Ende. Eine Maus: läuft eine Order/ein Schließen (_tpOrbitLaeuft) oder der Rundgang
@@ -37208,7 +37223,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.940'
+  const OS_TAB_BUILD = '2026-09-22.941'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
