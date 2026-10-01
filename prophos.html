@@ -22174,6 +22174,30 @@
     return (m > 0 && m < kontrakte) ? m : null
   }
   window._hedgeMasterWegEntscheid = hedgeMasterWegEntscheid
+  /* END-BALANCE AUS DEM USERSCRIPT (01.10.2026, Orbit V3): das Userscript im Puls-Chrome liest die Kacheln „Account Balance / Equity" des
+   * Tradovate-Panels mit (summary, textContent — auch im Hintergrund), der reader-server reicht sie in /positions durch. Nach „Master weg"
+   * gilt eine Lesung als End-Balance nur, wenn: Konto = Plan-Konto, Zusammenfassung ≤ 2 s alt, Balance = Equity (nichts mehr offen, ±1 Cent)
+   * und zwei Lesungen hintereinander gleich (Tradovate bucht Gebühren mitunter eine Sekunde später). Höchstens ~3,5 s warten.
+   * -> {balance_end, equity_end, balance_quelle:'reader', balance_at, balance_relativ:false} | null (dann liest Puls nach) */
+  function hedgeReaderBalanceEntscheid(st, kontoPlan, vorher){
+    if(!st || st.an === false || !kontoPlan || !hedgeKontoPasst(st.konto, kontoPlan)) return { ok: false }
+    if(!(typeof st.summary_alter_s === 'number' && st.summary_alter_s <= 2)) return { ok: false }
+    const b = (typeof tvBalanceAus === 'function') ? tvBalanceAus(st.summary) : { balance: null, equity: null }
+    if(!(typeof b.balance === 'number' && b.balance > 1000) || !(typeof b.equity === 'number') || Math.abs(b.balance - b.equity) > 0.011) return { ok: false, b }
+    return { ok: !!(vorher && vorher.balance === b.balance && vorher.equity === b.equity), b }
+  }
+  window._hedgeReaderBalanceEntscheid = hedgeReaderBalanceEntscheid
+  async function hedgeReaderEndBalance(kontoPlan){
+    let vorher = null
+    for(let i = 0; i < 8; i++){
+      const st = (epLokal && epLokal.stand) ? epLokal.stand : null
+      const e = hedgeReaderBalanceEntscheid(st, kontoPlan, vorher)
+      if(e.ok) return { balance_end: e.b.balance, equity_end: e.b.equity, balance_quelle: 'reader', balance_at: new Date().toISOString(), balance_relativ: false }
+      vorher = e.b && typeof e.b.balance === 'number' ? e.b : null
+      await new Promise(ok => setTimeout(ok, 450))
+    }
+    return null
+  }
   window._hedgeKontoPasst = hedgeKontoPasst
   const _hedgeLeerSeit = new Map()
   const _hedgeKontoSeit = new Map()
@@ -22377,7 +22401,12 @@
               _hedgeLeerSeit.delete(String(p.id))
               await hedgeSoloSchliessen(p, 'master_ende_reader', kurs)
               // Plan auf Überprüfen wie beim Orbit-V2-Ende: P&L holt der Rundgang / „P&L holen" nach, Grund reader_leer
-              try{ if(typeof tvV2EndeSetzen === 'function'){ await tvV2EndeSetzen(p, null, 'reader_leer'); if(typeof atMoveToReview === 'function'){ const pf = tradePlans.find(x => String(x.id) === String(p.id)) || p; await atMoveToReview(pf) } } }catch(e){ console.warn('[hedgeWache] Plan-Ende', e) }
+              // End-Balance direkt aus dem Userscript (Finn 01.10.2026: „sobald der Trade beendet ist, einfach die jetzige Balance an Prophos —
+              // davon die Differenz; ohne dass Puls sich noch mal einloggen muss"). Nur mit Beweis, sonst wie bisher Puls-Nachlesung.
+              let _balR = null
+              try{ _balR = await hedgeReaderEndBalance(kontoPlan) }catch(_){}
+              try{ if(_balR && typeof tvKontoBalanceSchreiben === 'function') tvKontoBalanceSchreiben(p.masterAccountId, { balance: _balR.balance_end, equity: _balR.equity_end, relativ: false }, _balR.balance_at) }catch(_){}
+              try{ if(typeof tvV2EndeSetzen === 'function'){ await tvV2EndeSetzen(p, null, 'reader_leer', _balR || undefined); if(typeof atMoveToReview === 'function'){ const pf = tradePlans.find(x => String(x.id) === String(p.id)) || p; await atMoveToReview(pf) } } }catch(e){ console.warn('[hedgeWache] Plan-Ende', e) }
               continue
             }
           }catch(e){ console.warn('[hedgeWache] Reader-Abgleich', e) }
@@ -36875,7 +36904,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.920'
+  const OS_TAB_BUILD = '2026-09-22.921'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
