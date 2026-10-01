@@ -8250,7 +8250,7 @@ def admin_live_trades():
         seit = datetime.fromtimestamp(datetime.now(timezone.utc).timestamp() - tage * 86400, timezone.utc).isoformat()
         felder = ("id,user_id,master_account_id,master_name,master_firm,route,notes,status,richtung,master_contracts,master_symbol,"
                   "master_symbol_root,master_tp,master_sl,master_pl,hedge_eur,hedge_faktor,start_um,start_um_gestartet_at,orbit_gesendet_at,"
-                  "started_at,ended_at,completed_at,planned_for,created_at,mt5_baseline,slave_pl,pl_quelle,konto_typ")
+                  "started_at,ended_at,completed_at,planned_for,created_at,mt5_baseline,slave_pl,pl_quelle,konto_typ,orbit_v3")
         basis_f = {"select": felder, "route": "in.(tvv2,tsv2,mt5v2)" if mit_echo else "in.(tvv2,tsv2)"}   # B16: Topstep V2 wie Orbit V2
         if nur_eigene:
             basis_f["user_id"] = f"eq.{me}"
@@ -8335,6 +8335,12 @@ def admin_live_trades():
                 trades.append(z)
         rang = {"open": 0, "planned": 1, "review": 2, "completed": 3}
         trades.sort(key=lambda z: (rang.get(z.get("status"), 9), str(z.get("started_at") or z.get("start_um") or "")), reverse=False)
+        # Weg je Zeile (01.10.2026, Finn am Radar: „immer sehen, mit welchem Modell der gestartet wurde"): Orbit V3 und Winning Day
+        # sind beide tvv2 + hedge_eur — unterscheiden lässt sie nur die Kennung orbit_v3; konto_typ für den Winning-Day-Rückfall
+        je_id = {str(p.get("id")): p for p in plaene}
+        for z in trades:
+            q = je_id.get(str(z.get("id"))) or {}
+            z["orbit_v3"], z["konto_typ"] = bool(q.get("orbit_v3")), q.get("konto_typ")
         kj = _kurs_jetzt()                       # B35/F28: aktueller Kurs je Wurzel (Radar-Weg Topstep)
         for z in trades:
             if z.get("plattform") != "echo":     # Echo trägt seinen eigenen (CFD-)Kurs aus lt_echo_felder

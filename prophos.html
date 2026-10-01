@@ -2153,6 +2153,7 @@
   #dashboard-view .wdl-z-ri em.is-sell{background:rgba(240,68,56,.10);color:#b91c1c}
   #dashboard-view .wdl-z-mi{grid-area:mi;text-align:right}
   #dashboard-view .wdl-z-pl{grid-area:pl;text-align:right;font-weight:600}
+  #dashboard-view .wdl-z-slave{display:block;margin-top:1px;font-size:11px;font-weight:500}   /* Slave-P&L unter dem Master (01.10.2026) */
   #dashboard-view .wdl-z-zeit{grid-area:zeit;text-align:right;color:var(--sub)}
   /* Zweite Runde (30.09.2026, Finn am Radar .846: „Einstieg muss nicht dastehen, TP auch nicht. Lieber wieder diese eine Spanne …
      die Werte gern ein Tick größer"): Einstieg + TP werden EINE Spalte (228 px = vorher 104 + 20 + 104, P&L und Zeit bleiben
@@ -24796,6 +24797,26 @@
   // Demo und Nachlesen bleiben für Topstep wie für Orbit (NQ/MNQ).
   const WDL_PF = [['orbit', 'Orbit'], ['topstep', 'Topstep'], ['echo', 'Echo']]   // Reihenfolge der Blöcke je Gruppe
   function wdlPf(t){ return wdlIstEcho(t) ? 'echo' : (t && t.route === 'tsv2') ? 'topstep' : 'orbit' }
+  // Weg je Zeile (01.10.2026, Finn am Radar: „dass man hier immer sieht, mit welchem Modell der gestartet wurde"): die Pille sagt
+  // Orbit V2 / Orbit V3 / Winning Day / Topstep V2 / Echo V2 statt nur der Plattform — Blöcke bleiben nach wdlPf sortiert.
+  // orbit_v3/konto_typ liefert /admin/live-trades seit .917; ein älteres Backend ohne die Felder → eigener Plan aus tradePlans
+  function wdlWeg(t){
+    if(!t) return 'Orbit V2'
+    if(wdlIstEcho(t)) return 'Echo V2'
+    if(t.route === 'tsv2') return 'Topstep V2'
+    let eigen = null; try{ eigen = (tradePlans || []).find(x => String(x.id) === String(wdlTid(t))) }catch(_){}
+    if(t.orbit_v3 || (eigen && eigen.orbitV3)) return 'Orbit V3'
+    if(Number(t.hedge_eur) > 0 || t.quelle === 'farmer' || String(t.konto_typ || '').toLowerCase() === 'winning_days') return 'Winning Day'
+    return eigen ? wegLabel(eigen) : 'Orbit V2'
+  }
+  // Slave-P&L (Fusion-Gegenhedge, €) eines beendeten Hedge-Trades: Wert am Plan, sonst der geschlossene Hedge; ohne Hedge null
+  function wdlSlavePl(t){
+    if(!t || wdlIstEcho(t)) return null
+    const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
+    if(n(t.slave_pl) != null) return n(t.slave_pl)
+    const h = t.hedge && typeof t.hedge === 'object' ? t.hedge : null
+    return (h && h.status === 'geschlossen' && n(h.pl) != null) ? n(h.pl) : null
+  }
   // Linien für mklChartZeichnen: Entry durchgezogen, TP gestrichelt, Liquidation gepunktet, SL lang gestrichelt (nur wenn gesetzt)
   const WDL_SKALA_PKT = 600   // ≈ 2 % NQ — typische WD-Liquidationen (≤ 400 Pkt) bleiben im Bild, Funded-Liquidationen nicht
   function wdlChartLinien(){
@@ -25083,6 +25104,8 @@
     // Zelle; lv = Feld, das wdlLiveTick alle 2 s nachschreibt (die Zelle bzw. das Element trägt dann nur diesen Text)
     const zelle = (art, inhalt, o = {}) => `<span class="wdl-z-${art}"${o.lv ? ` data-wdl-lv="${o.lv}"` : ''}${o.tip ? ` title="${escapeHtml(o.tip)}"` : ''}${o.f ? ` style="color:${o.f}"` : ''}>${inhalt}</span>`
     const jetzt = Date.now(), minTxt = ms => { const m = Math.max(1, Math.ceil(ms / 60000)), h = Math.floor(m / 60); return m < 60 ? `${m} min` : `${h} h${m % 60 ? ` ${m % 60} min` : ''}` }   // wie wdlDauer
+    // Master + Slave (01.10.2026, Finn: „wenn gegengehedgt wurde, sieht man auch den Slave-P&L"): zweite, kleine Zeile in der P&L-Zelle
+    const slaveZ = t => { const v = wdlSlavePl(t); return v == null ? '' : `<small class="wdl-z-slave" style="color:${col(v)}" title="Slave (Fusion-Gegenhedge)">Slave ${sig(v, '€', 2)}</small>` }
     const zeile = (t, extra) => {
       const k = t.konto || {}, buy = t.richtung === 'buy', sell = t.richtung === 'sell', offen = t.status === 'open', gepl = t.status === 'planned'
       // Echo (30.09.2026): kein Chart, kein „Wartet" (siehe gruppen), Lots + CFD-Symbol statt „3 × NQ"
@@ -25149,7 +25172,7 @@
         const erg = echo ? '' : d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : ''
         miZ = zelle('mi wdl-z-akt', `${erg ? `<span>${erg}</span>` : ''}<button type="button" class="btn btn-ghost el-knopf" data-wdl-abhaken="${escapeHtml(pid)}"${sperre ? ' disabled' : ''} title="${escapeHtml(sperre || 'Abhaken — P&L prüfen und Trade erledigen')}">Abhaken</button>`,
           { tip: echo ? '' : demoTip(d) })
-        plZ = zelle('pl', sig(pb, '$', 2), { f: col(pb), tip: num(t.pl_balance) != null ? (echo ? 'MT5-Balance' : 'Balance') + ' nachher − vorher' : pb != null ? 'P&L am Plan' : 'noch kein P&L — beim Abhaken eintragen' })
+        plZ = zelle('pl', sig(pb, '$', 2) + slaveZ(t), { f: col(pb), tip: num(t.pl_balance) != null ? (echo ? 'MT5-Balance' : 'Balance') + ' nachher − vorher' : pb != null ? 'P&L am Plan' : 'noch kein P&L — beim Abhaken eintragen' })
         zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
       } else {
         art = 'zu'
@@ -25162,12 +25185,12 @@
         } else {
         const erg = d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : '–'
         miZ = zelle('mi', erg, { tip: demoTip(d) })
-        plZ = zelle('pl', sig(t.pl_balance, '$', 2), { f: col(t.pl_balance), tip: num(t.pl_balance) != null ? 'Balance nachher − vorher' : 'keine End-Balance' })
+        plZ = zelle('pl', sig(t.pl_balance, '$', 2) + slaveZ(t), { f: col(t.pl_balance), tip: num(t.pl_balance) != null ? 'Balance nachher − vorher' : 'keine End-Balance' })
         }
         zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
       }
       return `<div class="wdl-z wdl-z-${art}${echo ? ' wdl-z-echo' : ''}${an ? ' is-aktiv' : ''}${extra ? ' ' + extra : ''}" style="--wdl-id:${wdlIdFarbe(t)}" data-wdl-trade="${escapeHtml(wdlTid(t))}" title="${escapeHtml(tip)}">`
-        + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><i class="wdl-pf">${(WDL_PF.find(x => x[0] === wdlPf(t)) || WDL_PF[0])[1]}</i><small>${escapeHtml(konto)}</small></span>`
+        + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><i class="wdl-pf">${escapeHtml(wdlWeg(t))}</i><small>${escapeHtml(konto)}</small></span>`
         + ri + miZ + plZ + zeitZ + '</div>'
     }
     // Gruppe = ein Kasten, oben einmal die Spaltenköpfe im selben Raster wie die Zeilen
@@ -36930,7 +36953,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.924'
+  const OS_TAB_BUILD = '2026-09-22.925'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
