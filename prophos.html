@@ -22175,6 +22175,26 @@
     return (m > 0 && m < kontrakte) ? m : null
   }
   window._hedgeMasterWegEntscheid = hedgeMasterWegEntscheid
+  /* MASTER LAUT READER (01.10.2026, Live-Befund Moritz 00:55 UTC: Order platziert, Antwort an den Tab verloren, Position zwei Minuten
+   * später schon wieder zu — die Übernahme hätte danach einen Fusion-Hedge für eine geschlossene Position nachgeholt). Vor jedem
+   * NACHGEHOLTEN Hedge-Open fragen: true = Reader zeigt die Master-Position, false = Puls-Chrome-Reader (flach nur mit Beweis) zeigt
+   * dieses Konto frisch und flach, null = keine Aussage (anderes Konto, alt, kein Reader) → wie bisher öffnen. */
+  function hedgeReaderMasterDa(plan){
+    try{
+      const st = (epLokal && epLokal.stand && epLokal.stand.an !== false) ? epLokal.stand : null
+      if(!st || st.positionen_ok === false || !Array.isArray(st.positionen)) return null
+      if(!(typeof st.positionen_alter_s === 'number' && st.positionen_alter_s <= 5)) return null
+      const acc = (accounts || []).find(a => String(a.id) === String(plan && plan.masterAccountId))
+      const kontoPlan = acc ? String(acc.externalId || '').trim() : ''
+      if(!kontoPlan || !hedgeKontoPasst(st.konto, kontoPlan)) return null
+      const sym = (plan.mt5Baseline && plan.mt5Baseline.tv && plan.mt5Baseline.tv.einstieg_symbol) || ((typeof tpOrbitWerte === 'function') ? tpOrbitWerte(plan).symbol : plan.masterSymbol) || ''
+      const wz = ((typeof tvSymbolWurzel === 'function') && tvSymbolWurzel(sym)) || 'NQ'
+      const richtung = (plan.richtung === 'buy' || plan.richtung === 'sell') ? plan.richtung : null
+      if(hedgeMasterTeilweise(st.positionen, wz, richtung, 1e9) != null) return true
+      return /^puls-/.test(String(st.positionen_tab || '')) ? false : null   // flach zählt nur aus dem Puls-Chrome (Beweis-Modus)
+    }catch(_){ return null }
+  }
+  window._hedgeReaderMasterDa = hedgeReaderMasterDa
   /* END-BALANCE AUS DEM USERSCRIPT (01.10.2026, Orbit V3): das Userscript im Puls-Chrome liest die Kacheln „Account Balance / Equity" des
    * Tradovate-Panels mit (summary, textContent — auch im Hintergrund), der reader-server reicht sie in /positions durch. Nach „Master weg"
    * gilt eine Lesung als End-Balance nur, wenn: Konto = Plan-Konto, Zusammenfassung ≤ 2 s alt, Balance = Equity (nichts mehr offen, ±1 Cent)
@@ -22273,6 +22293,10 @@
           } else {
             // Einstieg aus dem Puls-Fill (mt5_baseline.tv.einstieg_nq), nicht der Feed-Kurs von jetzt — sonst liegen die Level falsch
             const ein = p.mt5Baseline && p.mt5Baseline.tv && Number(p.mt5Baseline.tv.einstieg_nq)
+            if(hedgeReaderMasterDa(p) === false){   // Master laut Reader schon flach → kein Hedge mehr nachholen (01.10.2026)
+              try{ await hedgeAmPlanSchreiben(p.id, { status: 'uebersprungen', grund_code: 'master_flach', pc: hedgePcId(), at: new Date().toISOString(), msg: 'Hedge nicht nachgeholt: der Reader zeigt das Master-Konto schon flach' }) }catch(_){}
+              continue
+            }
             try{ await hedgeSoloOeffnen(p, { klick_at: p.startedAt || null, nachgeholt: true, einstieg: (ein > 1000) ? String(ein) : null, tv_symbol: (p.mt5Baseline.tv && p.mt5Baseline.tv.einstieg_symbol) || undefined }) }catch(e){ console.warn('[hedgeWache] nachholen', e) }
           }
         }
@@ -36906,7 +36930,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.923'
+  const OS_TAB_BUILD = '2026-09-22.924'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -38507,6 +38531,7 @@
    * Meldung, nie während auf diesem PC ein Puls-Lauf läuft, Plan frisch aus der DB und nur im Zustand VOR dem Lauf ('planned' bzw.
    * 'open'). Alles andere (schon verarbeitet, nichts gesendet, unklar) → nur abgeholt_at, bei unklar mit Hinweis. */
   const PE_GNADE_MS = 120000
+  const PE_GNADE_HEDGE_MS = 15000
   let _peLaeuft = false
   async function pulsErgebnisAbgeholt(planId, art){
     try{ await supabase.from('puls_ergebnisse').update({ abgeholt_at: new Date().toISOString() }).eq('plan_id', String(planId)).eq('art', art) }catch(_){}
@@ -38522,9 +38547,13 @@
       if(error || !Array.isArray(data)) return
       for(const z of data){
         const e = (z && z.ergebnis) || {}, alt = Date.now() - (Date.parse(z.at || '') || Date.now())
-        if(alt < PE_GNADE_MS) continue                                   // der normale Weg ist vielleicht noch dran
+        if(alt < PE_GNADE_HEDGE_MS) continue                             // der normale Weg ist vielleicht noch dran
         const { data: row } = await supabase.from('trade_plans').select('*').eq('id', z.plan_id).maybeSingle()
         if(!row){ await pulsErgebnisAbgeholt(z.plan_id, z.art); continue }
+        // Order mit Fusion-Hedge (01.10.2026, Orbit V3): schon nach 15 s — jede Minute ohne Hedge ist ungedeckt; dieser Tab hat
+        // keinen eigenen Puls-Lauf offen (Riegel oben), einen zweiten Open desselben Plans lehnt der Copier ab (schon_offen)
+        const _peHedge = z.art === 'order' && row.route === 'tvv2' && Number(row.hedge_eur) > 0
+        if(alt < PE_GNADE_MS && !_peHedge) continue
         const plan = rowToPlan(row), i = tradePlans.findIndex(x => String(x.id) === String(plan.id))
         if(i >= 0) tradePlans[i] = plan; else tradePlans.push(plan)
         const name = plan.masterName || 'Plan'
@@ -38559,6 +38588,19 @@
               trail: e.trail_ende || null, einstieg: e.einstieg || null, einstieg_quelle: e.einstieg_quelle || null, tp_limit: e.tp_limit || null,
               sl_limit: e.sl_limit || null, order_klick_ms: e.order_klick_ms || null } }) }catch(_){}
           await pulsErgebnisAbgeholt(z.plan_id, 'order')
+          // Fusion-Hedge gleich hier öffnen (01.10.2026) — die Selbstheilung im Wächter greift nur 20 s–3 min nach dem Start
+          if(_peHedge){
+            try{
+              const pf = tradePlans.find(x => String(x.id) === String(plan.id)) || plan
+              const hx = pf.mt5Baseline && pf.mt5Baseline.hedge
+              if(!hx && typeof hedgeSoloOeffnen === 'function'){
+                if(hedgeReaderMasterDa(pf) === false){
+                  try{ await hedgeAmPlanSchreiben(pf.id, { status: 'uebersprungen', grund_code: 'master_flach', pc: hedgePcId(), at: new Date().toISOString(), msg: 'Hedge nicht nachgeholt: der Reader zeigt das Master-Konto schon flach' }) }catch(_){}
+                  if(typeof atToast === 'function') atToast(`⚠ ${name}: Antwort verloren und Master schon flach — KEIN Fusion-Hedge nachgeholt`, 'end')
+                } else await hedgeSoloOeffnen(pf, Object.assign({}, e, { klick_at: klickIso, nachgeholt: true }))
+              }
+            }catch(err){ console.warn('[puls-ergebnisse] Hedge', err) }
+          }
           if(typeof atToast === 'function') atToast(`⚠ ${name}: Puls hatte die Order platziert, die Antwort ging verloren — Plan jetzt „Läuft"${e.einstieg ? ' (Einstieg ' + e.einstieg + ')' : ''}${plan.hedgeEur > 0 ? ' · Fusion-Hedge wird nachgeholt' : ''}${(plan.route === 'tsv2' && e.warnung) ? ' · ⚠ Brackets in TopstepX prüfen' : ''}`, 'start')
           try{ renderTradePlans() }catch(_){}
         } else if(z.art === 'close'){
