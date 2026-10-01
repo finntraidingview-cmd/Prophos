@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.9.5
+// @version      0.9.6
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt. Seit 0.5 auch die KONTO-ZUSAMMENFASSUNG (Balance, Today's P&L …) fuer den Orbit-V2-Rundgang.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -28,6 +28,8 @@
 // kommt ueber @updateURL/@downloadURL (GitHub-raw) von selbst.
 //
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
+//   0.9.6  01.10.2026  Puls-Chrome schneller beim Schliessen: Takt 0,05 s, Leer-Beweis-Merkzeit 0,15 s (vorher 0,5 s — konnte das
+//                      „Position weg" um bis zu 0,5 s verzoegern). Suche bleibt auf das Panel beschraenkt (billig).
 //   0.9.5  01.10.2026  Puls-Chrome: Leer-Beweis billig (Befund Moritz 11:49–12:10 UTC: TradingView im Puls-Chrome lud nicht mehr fertig,
 //                      Puls: „Seite nach 25 s nicht fertig geladen" + Verbindungsabbruch). Die Suche nach „no open positions" lief
 //                      seit 0.9.3 als TreeWalker über die GANZE Seite, seit 0.9.4 zehnmal je Sekunde. Jetzt nur noch vom Reiter
@@ -123,7 +125,7 @@
   // dreimal ein Update vermutet, das gar nicht aktiv war (31.08.2026), und von
   // aussen war das nur an FEHLENDEN Feldern zu erraten. Ab jetzt sagt jeder
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
-  const VERSION    = '0.9.5';
+  const VERSION    = '0.9.6';
   // 0.9.0: Puls-Chrome-Modus (Orbit V3) — je Chrome-Profil gespeichert, siehe CHANGELOG
   let PULS_CHROME = false;
   try { PULS_CHROME = GM_getValue('prophos_puls_chrome', false) === true; } catch (_) {}
@@ -136,8 +138,8 @@
   const ENDPOINT   = 'http://127.0.0.1:8790/positions';
   const BEDIENFELD = 'http://127.0.0.1:8790/bedienfeld';
   const KERZEN     = 'http://127.0.0.1:8790/kerzen';       // 0.8.0: Bars aus dem Socket, gebuendelt
-  const INTERVALMS = PULS_CHROME ? 100 : 250;   // wie oft gelesen + gesendet wird (0,25 s; 0.9.4: Puls-Chrome 0,1 s — dort loesen die Positionen das Hedge-Schliessen aus)
-  const BF_JEDER   = PULS_CHROME ? 5 : 2;      // Bedienfeld nur jeden n-ten Tick (500 ms) — die
+  const INTERVALMS = PULS_CHROME ? 50 : 250;   // wie oft gelesen + gesendet wird (0,25 s; 0.9.4: Puls-Chrome 0,1 s — dort loesen die Positionen das Hedge-Schliessen aus)
+  const BF_JEDER   = PULS_CHROME ? 10 : 2;      // Bedienfeld nur jeden n-ten Tick (500 ms) — die
                              // Steuerelement-Suche geht durchs halbe DOM, das
                              // muss nicht im Hedge-Takt laufen. Puls wartet
                              // ohnehin auf einen Stand, der JUENGER ist als
@@ -1006,7 +1008,7 @@
   let leerMerk = { ms: 0, wert: false };
   function leerBeweis() {
     const jetzt = Date.now();
-    if (jetzt - leerMerk.ms < 500) return leerMerk.wert;   // 0.9.5: höchstens alle 0,5 s neu suchen
+    if (jetzt - leerMerk.ms < 150) return leerMerk.wert;   // 0.9.6: höchstens alle 0,15 s neu suchen (0.9.5: 0,5 s)
     let wert = false;
     try {
       const r = document.getElementById('positions');

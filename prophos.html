@@ -21034,7 +21034,9 @@
                                             : { sl_art: 'liquidation', liq_balance: liqWd.liq_balance || null, sl_hinweis: liqWd.hinweis }) : {}
     if(liqWd && liqWd.hinweis && typeof atToast === 'function') atToast(`⚠ Fusion-Hedge: ${liqWd.hinweis} (Wächter trägt das Level nach, sobald die Start-Balance gelesen ist)`, 'end')
     // Merker VOR dem Auftrag: bleibt die Antwort aus, sieht man am Plan, dass ein Open unterwegs war
-    try{ await hedgeAmPlanSchreiben(plan.id, Object.assign({ status: 'oeffnet', klick_at: (r && r.klick_at) || at, richtung: gegen, eur: plan.hedgeEur, hedge_faktor: plan.hedgeFaktor ?? null, punkte, sl_punkte: slPunkte, einstieg_nq: einstieg, einstieg_quelle: quelle, einstieg_wurzel: einstiegWurzel, tp_level_nq: tpLevel, sl_level_nq: slLevel, symbol_nq: symbol, pc: hedgePcId(), at }, herkunft, liqFelder)) }catch(_){}
+    // ÖFFNEN ZUERST (01.10.2026, Finn: „instant"): der 'oeffnet'-Merker geht parallel zur Order in die DB, nicht mehr davor (eine
+    // Supabase-Rundreise weniger vor dem Copier); vor jedem weiteren Hedge-Eintrag wird er abgewartet, damit nichts zurückfällt.
+    const oeffnetP = hedgeAmPlanSchreiben(plan.id, Object.assign({ status: 'oeffnet', klick_at: (r && r.klick_at) || at, richtung: gegen, eur: plan.hedgeEur, hedge_faktor: plan.hedgeFaktor ?? null, punkte, sl_punkte: slPunkte, einstieg_nq: einstieg, einstieg_quelle: quelle, einstieg_wurzel: einstiegWurzel, tp_level_nq: tpLevel, sl_level_nq: slLevel, symbol_nq: symbol, pc: hedgePcId(), at }, herkunft, liqFelder)).catch(() => null)
     // lots (Backend .484): Kontrakte × Multiplikator — die klassische Rechnung aus Popup 1 (Finn: „genauso wie bisher");
     // überstimmt eur/tp_punkte, der Copier rundet aufs Broker-Raster. eur/tp_punkte/sl_punkte reisen weiter mit (Anzeige, Alt-Weg).
     // Vertrag .470: tp_punkte (Pflicht) + sl_punkte (0 = kein zweites Level); 'punkte' bleibt als alter Name.
@@ -21052,6 +21054,7 @@
         res = await window.mtcApi('hedge-solo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: openBody, timeoutMs: 38000 })
         if(res && res.ok && lotsSoll) res.lots_soll = lotsSoll
       }catch(e){ res = { ok: false, code: 'verbindung', msg: String(e && e.message || e) } }
+      try{ await oeffnetP }catch(_){}   // 'oeffnet' steht in der DB, bevor 'offen'/'wartet'/'fehler' geschrieben wird
       if(res && res.ok) break
       // Copier-Riegel (Backend): für diesen Plan liegt schon eine Solo-Position → übernehmen, nie zweiter Open
       if(res && res.code === 'schon_offen' && res.ticket){ res = Object.assign({}, res, { ok: true, open_grund: 'schon_offen', msg: 'schon offen — übernommen (Copier-Riegel)' }); break }
@@ -21139,21 +21142,22 @@
     }
     _hedgeBusy.add(pid)
     try{
-      // Zwei Wächter auf demselben Hedge (zwei Profile, gleiche PC-Kennung seit .571 — Prüfliste 10): frisch lesen; schließt gerade ein
-      // anderer Tab (< 60 s) oder ist der Hedge schon zu, nichts tun — Grund/P&L/Auslöser des ersten Close bleiben stehen
-      try{
-        const { data: z } = await supabase.from('trade_plans').select('mt5_baseline').eq('id', plan.id).maybeSingle()
-        const hf = z && z.mt5_baseline && z.mt5_baseline.hedge
-        if(hf && hf.status === 'geschlossen') return { ok: false, msg: 'schon geschlossen' }
-      }catch(_){}
-      // atomar (RPC mt5_baseline_sperre, 60 s): nur EIN Tab schließt — der zweite bekommt false, bevor er irgendetwas schreibt
-      if(!(await hedgeSperre(plan.id, 'close_sperre', 60))) return { ok: false, msg: 'schließt gerade in einem anderen Tab' }
-      try{ await hedgeAmPlanSchreiben(plan.id, Object.assign({ status: 'schliesst', grund, kurs_bei_close: kurs != null ? kurs : null, close_at: new Date().toISOString(), close_tab: HEDGE_TAB_ID }, zusatz || {})) }catch(_){}
-      let res = null
-      try{
-        res = await window.mtcApi('hedge-solo', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ aktion: 'close', ticket: h.ticket, grund }), timeoutMs: 38000 })
-      }catch(e){ res = { ok: false, code: 'verbindung', msg: String(e && e.message || e) } }
+      // CLOSE ZUERST (01.10.2026, Finn: „das Userscript schließt 95 % der Trades — eine Sekunde ist zu viel, das muss instant gehen"):
+      // vorher liefen VOR dem Close drei Supabase-Rundreisen nacheinander (Hedge frisch lesen, RPC-Sperre, Status 'schliesst' schreiben),
+      // je 0,1–0,5 s, bei langsamer DB mehr. Jetzt geht der Close sofort an das lokale Panel/den Copier; die Buchhaltung läuft parallel.
+      // Zwei Tabs, die gleichzeitig schließen, sind harmlos: der Copier schließt das Ticket einmal, der zweite Auftrag meldet schon_zu.
+      const closeAt = new Date().toISOString()
+      const closeP = window.mtcApi('hedge-solo', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ aktion: 'close', ticket: h.ticket, grund }), timeoutMs: 38000 })
+        .catch(e => ({ ok: false, code: 'verbindung', msg: String(e && e.message || e) }))
+      const schliesstP = hedgeAmPlanSchreiben(plan.id, Object.assign({ status: 'schliesst', grund, kurs_bei_close: kurs != null ? kurs : null, close_at: closeAt, close_tab: HEDGE_TAB_ID }, zusatz || {})).catch(() => null)
+      let res = await closeP
+      try{ await schliesstP }catch(_){}   // 'schliesst' muss VOR 'geschlossen' in der DB stehen (sonst fiele der Status zurück)
+      if(res && res.ok && res.schon_zu){
+        // anderer Tab war schneller: dessen Grund/P&L bleiben stehen
+        try{ const { data: z } = await supabase.from('trade_plans').select('mt5_baseline').eq('id', plan.id).maybeSingle(); const hf = z && z.mt5_baseline && z.mt5_baseline.hedge
+          if(hf && hf.status === 'geschlossen' && hf.close_tab && hf.close_tab !== HEDGE_TAB_ID) return { ok: true, pl: (typeof hf.pl === 'number') ? hf.pl : null } }catch(_){}
+      }
       if(res && res.ok){
         const pl = (typeof res.pl === 'number' && isFinite(res.pl)) ? res.pl : null
         // slave_pl = realisierter Fusion-P&L (Deal-Historie) — IMMER aus hedge.pl (bewiesener Wert), auch über eine 0 hinweg:
@@ -22373,7 +22377,7 @@
         // 0,3 s flach (≈ 3 Lesungen bei 0,1-s-Takt); läuft auf diesem PC gerade ein Puls-Lauf/Rundgang (Kontowechsel → die Tabelle kann kurz
         // leer flackern), vorsichtig 1,5 s
         let unruhig = false; try{ unruhig = !!_tpOrbitLaeuft || !!(tvV2Poll && tvV2Poll.busy) }catch(_){}
-        const leerMin = unruhig ? 1500 : 300
+        const leerMin = unruhig ? 1500 : 100   // 01.10.2026: 0,3 → 0,1 s (Finn: „eine Sekunde ist zu viel"); flach zählt nur mit Beweis
         if(jetzt - _hedgeSchnellLeer.get(pid) >= leerMin && jetzt - _hedgeSchnellKonto.get(pid) >= 2000 && offenSeit >= 3000 && p.status === 'open'){
           _hedgeSchnellLeer.delete(pid)
           console.info('[hedgeSchnell] Master weg laut Reader — Fusion wird geschlossen', p.masterName || pid)
@@ -22383,7 +22387,7 @@
     }catch(e){ console.warn('[hedgeSchnell]', e) }
     finally{ _hedgeSchnellBusy = false }
   }
-  setInterval(hedgeReaderSchnellTick, 100)   // 01.10.2026: 0,3 → 0,1 s (nur lokale Abfrage, nur bei offenem Hedge dieses PCs)
+  setInterval(hedgeReaderSchnellTick, 50)   // 01.10.2026: 0,3 → 0,1 → 0,05 s (nur lokale Abfrage, nur bei offenem Hedge dieses PCs)
   /* MASTER LAUT READER (01.10.2026, Live-Befund Moritz 00:55 UTC: Order platziert, Antwort an den Tab verloren, Position zwei Minuten
    * später schon wieder zu — die Übernahme hätte danach einen Fusion-Hedge für eine geschlossene Position nachgeholt). Vor jedem
    * NACHGEHOLTEN Hedge-Open fragen: true = Reader zeigt die Master-Position, false = Puls-Chrome-Reader (flach nur mit Beweis) zeigt
@@ -37271,7 +37275,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.943'
+  const OS_TAB_BUILD = '2026-09-22.944'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
