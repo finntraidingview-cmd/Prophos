@@ -3460,6 +3460,26 @@ def test_puls_cdp_login():
         ob._warte = alt_w
     chk(ss_.klicks[:2] == ["Seite SELL", "Seite SELL (Versuch 2)"] and "Seite = SELL" in ts_ and "Seite steht" not in str(rs_[2]),
         f"Seite: erster Klick ohne Hover → zweiter Versuch klappt ({ss_.klicks}, {rs_[1]}, {rs_[2][:60]})")
+    # Symbolwechsel setzt das Ticket auf „Start creating order" zurück → Seite NACH dem Watchlist-Klick wählen (01.10.2026 13:50 UTC)
+    class _SW(_ST):
+        def __init__(self): _ST.__init__(self); self.sym, self.seite = "MNQZ6", "buy"
+        def stand(self, opts=None):
+            kk = {"symbol": self.sym, "seite": self.seite, "text": f"Buy 1 {self.sym} MARKET", "rect": [1340, 820, 280, 50]} if self.seite else {}
+            return {"ticket": {"da": True, "symbol": None, "kaufen": {"rect": [1540, 230, 90, 40]}, "verkaufen": {"rect": [1340, 230, 90, 40]},
+                               "symbolsuche": {"watchlist": [{"symbol": "NQZ2026", "rect": [2380, 250, 80, 20]}]}}, "kauf_knopf": kk}
+        def klick(self, r, n, toast_ok=False):
+            self.klicks.append(n)
+            if n.startswith("Watchlist"): self.sym, self.seite = "NQZ6", None      # Ticket zurückgesetzt, Knopf ohne Symbol
+            elif n.startswith("Seite BUY"): self.seite = "buy"
+            return True
+    ob._warte = lambda a_, b_: None
+    try:
+        sw_, tw_ = _SW(), []
+        rw_ = ob._cdp_ticket_fuellen(sw_, sw_.stand(), {"richtung": "buy", "menge": 1, "tp": None, "sl": None}, "NQZ6", {}, tw_)
+    finally:
+        ob._warte = alt_w
+    chk("Seite BUY (nach dem Symbol)" in sw_.klicks and any(x.startswith("Symbol steht: NQZ6") for x in tw_) and rw_[1] != "asset",
+        f"Symbolwechsel → Ticket ohne Seite → Seite nachgewählt → Symbol lesbar ({sw_.klicks}, {rw_[1]}, {[x for x in tw_ if 'Symbol' in x]})")
     fj_ = ob.cdp_panel_frei_js([1482, 907, 38, 38])
     chk("elementFromPoint(1501.0,926.0)" in fj_ and "toggle-visibility-button" in fj_ and "#overlap-manager-root" in fj_ and "toastGroup-" in fj_,
         "Frei-Probe: Knopfmitte, Dialog/Overlay verdeckt, Meldungen frei")

@@ -17024,11 +17024,22 @@ def _cdp_ticket_fuellen(s, st, plan, symbol, opts, trail):
                     f"{'1' if wl else '0'}).", "asset", st, None)
         s.klick(cdp_rect(wl), f"Watchlist {wl.get('symbol')}")
         # Bis ~6 s auf das neue Symbol warten (Live-Befund Moritz 01.10.2026: EIN Blick nach 1,2 s sah '-', kurz danach stand MNQZ6 im Ticket)
+        _seite_nach = False
         for _b in range(6):
             _warte(1.0, 0.4)
             st = s.stand(opts)
-            if tv_symbol_root(str(knopf().get("symbol") or ticket().get("symbol") or "")) == ziel:
+            sym_jetzt = tv_symbol_root(str(knopf().get("symbol") or ticket().get("symbol") or ""))
+            if sym_jetzt == ziel:
                 break
+            # Symbolwechsel setzt das Ticket auf „Start creating order" zurück (Live-Befund 01.10.2026 13:42 + 13:50 UTC, Moritz und Jakob,
+            # Plan NQ, Chart MNQ: Watchlist-Klick wirkte, Ticket-Kopf „NQZ6", aber ohne Seite steht das Symbol nicht im Knopf → '-' →
+            # „Symbol NQ nicht einstellbar"). Dann EINMAL die Seite des Plans wählen — danach zeigt der Knopf „Buy 3 NQZ6 MARKET".
+            if not sym_jetzt and not _seite_nach and ticket().get("da"):
+                kachel_n = ticket().get("kaufen" if plan["richtung"] == "buy" else "verkaufen")
+                if cdp_rect(kachel_n):
+                    _seite_nach = True
+                    trail.append("Symbol nach dem Wechsel nicht lesbar (Ticket ohne Seite) → Seite " + plan["richtung"].upper())
+                    s.klick(cdp_rect(kachel_n), f"Seite {plan['richtung'].upper()} (nach dem Symbol)")
     if not ticket().get("da"):
         return False, "ticket", "Order-Ticket im Puls-Chrome nicht offen — nichts getippt.", "ticket", st, None
     # --- Seite
