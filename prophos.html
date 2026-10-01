@@ -6292,20 +6292,20 @@
                  verlinkten Accounts; bei MT5 ist der Slave fix der Hedge dieses PCs. -->
             <div class="field" style="grid-column:1 / -1">
               <label>Weg</label>
-              <!-- Reihenfolge seit 01.10.2026 spät (Finn): Mit Hedge · V3 oben, Ohne Hedge Mitte, Mit Hedge · klassisch unten;
-                   „Winning Days Farm" heißt auf dem Knopf „Winning Day", Orbit (Puls) / Duplikum (manuell) beschriftet.
-                   Drei Gruppen (01.10.2026, Finn: „es gibt jetzt drei grobe Wege"): ohne Hedge (V2), mit Hedge neu (V3 =
-                   Winning Days Farm + Orbit V3, der neue Weg) und die alten Hedge-Wege. Nur Markup — die Knopf-IDs sind
-                   unverändert, die Verdrahtung hängt an den IDs, nicht an den Containern.
+              <!-- Gruppen seit 01.10.2026 abends (Finn: „nur visuell anders aufbauen, am Modell ändert sich nichts"):
+                   Mit Hedge (Echo · Orbit · Winning Day · Topstep), Ohne Hedge (V2), Alte Modelle (Orbit (Puls), Duplikum).
+                   „Orbit" ist auf dem Knopf der bisherige Orbit V3 (tp-route-o3, intern weiter orbit_v3). Nur Markup —
+                   die Knopf-IDs sind unverändert, die Verdrahtung hängt an den IDs, nicht an den Containern.
                    V2: Echo V2 = Puls im Master-Terminal, Orbit V2 = Puls in TradingView, Topstep V2 = Puls/von Hand. -->
-              <div class="tp-route-gruppe">Mit Hedge · V3</div>
+              <div class="tp-route-gruppe">Mit Hedge</div>
               <div class="seg" id="tp-route-seg-v3">
-                <!-- Winning Day (24.09.2026 abends): technisch Orbit V2 (route tvv2) + Fusion-Gegenhedge; nur Funded-Futures-Konten.
-                     Umbenannt „Winning Days Farm" (24.09.2026 spät): Gegenhedge als Faktor, beide Schließ-Level in MetaTrader. -->
-                <button type="button" id="tp-route-wd" title="Winning Day: Orbit V2 + Fusion-Gegenhedge (Faktor, TP- und SL-Level in MetaTrader) — Dropdown zeigt nur Funded-Futures-Konten">Winning Day</button>
-                <!-- Orbit V3 (01.10.2026): tvv2 + Fusion-Gegenhedge mit der Farm-Rechnung, jedes Futures-Konto, KEIN Winning Day
+                <button type="button" id="tp-route-mt5">Echo</button>
+                <!-- Orbit (= Orbit V3, 01.10.2026): tvv2 + Fusion-Gegenhedge mit der Farm-Rechnung, jedes Futures-Konto, KEIN Winning Day
                      (trade_plans.orbit_v3); Userscript im Puls-Chrome schließt, Radar als Backup. -->
-                <button type="button" id="tp-route-o3" title="Orbit V3 — Puls platziert in TradingView, Fusion-Gegenhedge; schließt, sobald das Userscript im Puls-Chrome die Position nicht mehr sieht, Radar (TP/SL) als Backup">Orbit V3</button>
+                <button type="button" id="tp-route-o3" title="Orbit V3 — Puls platziert in TradingView, Fusion-Gegenhedge; schließt, sobald das Userscript im Puls-Chrome die Position nicht mehr sieht, Radar (TP/SL) als Backup">Orbit</button>
+                <!-- Winning Day (24.09.2026 abends): technisch Orbit V2 (route tvv2) + Fusion-Gegenhedge; nur Funded-Futures-Konten. -->
+                <button type="button" id="tp-route-wd" title="Winning Day: Orbit V2 + Fusion-Gegenhedge (Faktor, TP- und SL-Level in MetaTrader) — Dropdown zeigt nur Funded-Futures-Konten">Winning Day</button>
+                <button type="button" id="tp-route-topstep">Topstep</button>
               </div>
               <div class="tp-route-gruppe">Ohne Hedge</div>
               <div class="seg tp-route-seg-v2" id="tp-route-seg-v2">
@@ -6313,12 +6313,9 @@
                 <button type="button" id="tp-route-tvv2">Orbit V2</button>
                 <button type="button" id="tp-route-tsv2" title="Topstep V2 — Puls platziert in TopstepX (Schalter „Puls für Topstep" unter Admin → Winning Days; aus = von Hand)">Topstep V2</button>
               </div>
-              <!-- Alte Wege der Hedge-Ära (Reihenfolge Orbit · Topstep · Echo · Duplikum seit 22.09.2026) -->
-              <div class="tp-route-gruppe">Mit Hedge · klassisch</div>
+              <div class="tp-route-gruppe">Alte Modelle</div>
               <div class="seg" id="tp-route-seg" style="opacity:.85">
                 <button type="button" id="tp-route-tvplus">Orbit (Puls)</button>
-                <button type="button" id="tp-route-topstep">Topstep</button>
-                <button type="button" id="tp-route-mt5">Echo</button>
                 <button type="button" id="tp-route-dup">Duplikum (manuell)</button>
               </div>
             </div>
@@ -37394,7 +37391,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.948'
+  const OS_TAB_BUILD = '2026-09-22.949'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
