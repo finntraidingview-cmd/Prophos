@@ -34204,7 +34204,7 @@
       + (istV2Karte
           // Winning Days Farm (24.09.2026 spät): tvv2 mit hedge_eur ist GEHEDGT — der gestrichelte V2-Rand meint „ohne Hedge",
           // der Untertitel sagt es deshalb ausdrücklich (der 🛡-Chip trägt Betrag und Zustand)
-          ? ((p.route === 'tvv2' && p.hedgeEur > 0) ? ` <span style="color:var(--sub-2)">·</span> <span title="Fusion-Gegenhedge: ${Number(p.hedgeEur).toLocaleString('de-DE')} € Verlust am Master-TP${p.multiplier > 0 ? ` · Multiplikator ${Number(p.multiplier).toFixed(3)}` : ''} — beide Schließ-Level in MetaTrader">Winning Days Farm · Fusion-Gegenhedge</span>` : '')
+          ? ((p.route === 'tvv2' && p.hedgeEur > 0) ? ` <span style="color:var(--sub-2)">·</span> <span title="Fusion-Gegenhedge: ${Number(p.hedgeEur).toLocaleString('de-DE')} € Verlust am Master-TP${p.multiplier > 0 ? ` · Multiplikator ${Number(p.multiplier).toFixed(3)}` : ''} — beide Schließ-Level in MetaTrader">${tpIstOrbitV3(p) ? 'Orbit' : 'Winning Days Farm'} · Fusion-Gegenhedge</span>` : '')   // Orbit (V3) ist kein Winning Day (01.10.2026)
           : ` <span style="color:var(--sub-2)">→</span> ${escapeHtml(p.slaveFirm||'–')}`
             + ` · ×<b style="color:var(--violet)">${mult}</b>`
             + ` · <b>$${(p.masterRisk||0).toLocaleString('de-DE')}</b>/<b>${sCur}${(p.slaveRisk||0).toLocaleString('de-DE')}</b>`)
@@ -37514,7 +37514,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.957'
+  const OS_TAB_BUILD = '2026-09-22.958'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
