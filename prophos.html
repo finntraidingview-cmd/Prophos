@@ -15930,20 +15930,49 @@
     const bwNrV = v => { const m = /^(\d{4}-\d{2}-\d{2})\.(\d+)$/.exec(v || ''); return m ? [m[1], Number(m[2])] : null }
     const bwNeuerV = (a, b) => { const x = bwNrV(a), y = bwNrV(b); if(!x || !y) return false; return x[0] !== y[0] ? x[0] > y[0] : x[1] > y[1] }
     const bwSeitenBuild = {}   // VERSION → OS_TAB_BUILD der frischen Seite (null = nicht lesbar)
+    /* NUR ECHTER NEUER INHALT (01.10.2026, Finn: „Knöpfe laden einfach nicht", Supabase-Edge-Logs): das Versions-Ritual setzt
+     * OS_TAB_BUILD bei JEDEM Commit, auch bei reinen Puls-/Echo-/Userscript-Pushes, die an prophos.html sonst nichts ändern.
+     * Jeder solche Push ließ alle PC-Tabs der Flotte binnen ~2 min neu laden, jeder Neustart lädt Accounts, Pläne, Finanzen,
+     * Kapitel … komplett — die Micro-DB stand danach 2–4 min (12:11/12:32/12:53 UTC Push → 12:13/12:34/12:54 Antworten bis
+     * 26/57/73 s, auch „Account speichern"). Jetzt zählt eine frische Seite nur, wenn sie sich OHNE die Nummern-Zeile von der
+     * laufenden unterscheidet. Den eigenen Inhalt liest der Wächter einmal beim Start; passt dessen OS_TAB_BUILD nicht zum
+     * laufenden Code (Push genau dazwischen), bleibt er unbekannt → altes Verhalten (neu laden). */
+    const bwKern = async t => {
+      const k = String(t || '').replace(/const OS_TAB_BUILD = '[0-9.-]+'/, '')
+      try{ const h = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(k)); return Array.from(new Uint8Array(h), x => x.toString(16).padStart(2, '0')).join('') }
+      catch(_){ return null }   // ohne crypto.subtle kein Vergleich → altes Verhalten
+    }
+    const bwSeitenKern = {}    // VERSION → Kern der frischen Seite
+    let bwEigenKern = null
     const seiteBuild = async v => {
       if(v in bwSeitenBuild) return bwSeitenBuild[v]
       let b = null
       try{
         const u = location.pathname + (location.pathname.includes('?') ? '&' : '?') + 'bwcheck=' + encodeURIComponent(v) + '.' + Date.now()
         const r = await fetch(u, { cache: 'no-store' })
-        if(r.ok){ const m = /const OS_TAB_BUILD = '([0-9.-]+)'/.exec(await r.text()); b = m ? m[1] : null }
+        if(r.ok){ const t = await r.text(); const m = /const OS_TAB_BUILD = '([0-9.-]+)'/.exec(t); b = m ? m[1] : null; if(b) bwSeitenKern[v] = await bwKern(t) }
       }catch(_){ b = null }
       bwSeitenBuild[v] = b
       return b
     }
     const eigenBuild = () => { try{ return OS_TAB_BUILD }catch(_){ return basis } }
-    // Liefert die Ziel-Build-Nummer, wenn die frische Seite wirklich neuer ist als dieser Tab — sonst null
-    const echtNeu = async v => { if(!v) return null; const b = await seiteBuild(v); return (b && bwNeuerV(b, eigenBuild())) ? b : null }
+    ;(async () => {
+      try{
+        const r = await fetch(location.pathname + (location.pathname.includes('?') ? '&' : '?') + 'bwself=' + Date.now(), { cache: 'no-store' })
+        if(!r.ok) return
+        const t = await r.text(), m = /const OS_TAB_BUILD = '([0-9.-]+)'/.exec(t)
+        if(m && m[1] === eigenBuild()) bwEigenKern = await bwKern(t)
+      }catch(_){}
+    })()
+    // Liefert die Ziel-Build-Nummer, wenn die frische Seite wirklich neuer ist als dieser Tab — sonst null.
+    // Gleicher Inhalt (nur Nummer anders) → null; window._bwGleich zeigt, mit welchem Build dieser Tab inhaltsgleich ist.
+    const echtNeu = async v => {
+      if(!v) return null
+      const b = await seiteBuild(v)
+      if(!(b && bwNeuerV(b, eigenBuild()))) return null
+      if(bwEigenKern && bwSeitenKern[v] === bwEigenKern){ window._bwGleich = b; return null }
+      return b
+    }
     // Neu laden mit Cache-Bust (?v=<build>), Hash bleibt — der Browser/pages.dev liefert so sicher die neue Datei
     // Nur laden, wenn die Seite gerade wirklich kommt (28.09.2026, Vorfall pc-usq1i6 13:45 UTC: fällt das Neuladen in den Neustart
     // des lokalen Backends nach einem Update, bleibt eine Chrome-Fehlerseite ohne JS stehen — nichts heilt sich mehr). Probe = die
@@ -16020,6 +16049,7 @@
     const bwVersuche = ziel => { try{ const o = JSON.parse(localStorage.getItem(BW_KEY) || 'null'); return (o && o.ziel === ziel) ? o : { ziel, n: 0, at: 0 } }catch(_){ return { ziel, n: 0, at: 0 } } }
     const bwLaden = window._bwLadenHaken || (ziel => frischLaden(ziel))
     let bwWarteSeit = 0, bwTimer = null
+    const bwStreuBis = {}   // Zielversion → frühester Neulade-Zeitpunkt dieses Tabs
     const bwPruefen = async () => {
       if(bwTimer){ clearTimeout(bwTimer); bwTimer = null }
       const vRoh = await holen()
@@ -16029,6 +16059,15 @@
       const vs = bwVersuche(v)
       // PC-Tabs zeigen NIE die Pille (28.09.2026) — nach 3 Versuchen bzw. innerhalb von 5 min still weiter warten
       if(vs.n >= 3 || Date.now() - vs.at < 5 * 60 * 1000){ window._bwStatus = { ziel: v, grund: vs.n >= 3 ? '3 Versuche — wartet auf nächste Version' : 'Pause nach Neuladen' }; return }
+      // Streuung (01.10.2026, s. bwKern oben): auch ein ECHTES Frontend-Update soll nicht alle PC-Tabs in derselben Minute
+      // neu laden lassen — je Tab und Zielversion ein zufälliger Zeitpunkt 0–8 min nach dem Erkennen.
+      if(!bwStreuBis[v]) bwStreuBis[v] = Date.now() + Math.round(Math.random() * 8 * 60 * 1000)
+      if(Date.now() < bwStreuBis[v]){
+        const ms = bwStreuBis[v] - Date.now()
+        window._bwStatus = { ziel: v, grund: 'Streuung', naechster: bwStreuBis[v] }
+        bwTimer = setTimeout(bwPruefen, ms)
+        return
+      }
       if(!bwWarteSeit) bwWarteSeit = Date.now()
       const grund = bwGrund(Date.now() - bwWarteSeit)
       if(grund){
@@ -37048,7 +37087,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.934'
+  const OS_TAB_BUILD = '2026-09-22.935'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
