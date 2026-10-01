@@ -911,6 +911,57 @@ def leerlauf_entscheidung(schliessbar, seit, jetzt, schwelle_s):
     return seit, (jetzt - seit) >= schwelle_s
 
 
+# ── Nach dem PC-Start: Master-Terminals mit laufendem Trade wieder oeffnen (01.10.2026) ─────
+# Finn: „wenn ich starte, soll alles hochfahren, was ich irgendwie brauche". Master-Terminals oeffnen sonst nur beim
+# Trade-Start — lief beim Ausschalten ein Echo-Trade, blieb sein Terminal nach dem Neustart zu und der Copier sah den Master
+# nicht mehr. Die Status-Datei der Instanz ueberlebt den Neustart: stand dort zuletzt eine Master-Position oder ein Hedge,
+# wird das Terminal (ohne Login-Zwang, MT5 nimmt das Konto des Ordners) einmal gestartet. NUR kurz nach dem Hochfahren
+# (Windows-Laufzeit < BOOT_FENSTER_S) — ein Panel-Neustart durch ein Update oeffnet nichts. Ohne Trade schliesst der
+# Leerlauf-Waechter es wie gewohnt wieder.
+BOOT_FENSTER_S = 15 * 60
+
+
+def boot_terminal_noetig(st):
+    """REIN RECHNEND (testbar): hatte die Instanz beim letzten Status eine Master-Position oder einen Hedge?"""
+    if not isinstance(st, dict):
+        return False
+    hd = st.get("hedges")
+    if isinstance(hd, dict) and any(hd.values()):
+        return True
+    return bool(st.get("master_positions"))
+
+
+def _windows_laufzeit_s():
+    try:
+        import ctypes
+        return ctypes.windll.kernel32.GetTickCount64() / 1000.0
+    except Exception:
+        return None
+
+
+def _boot_terminals():
+    try:
+        lz = _windows_laufzeit_s()
+        if lz is None or lz > BOOT_FENSTER_S:
+            return
+        time.sleep(20 + random.uniform(0, 10))   # Copier/Hedge-Terminal zuerst hochkommen lassen
+        for i in instances():
+            fname = i["config_file"]
+            cfg = read_json(os.path.join(HERE, fname), {}) or {}
+            pfad = str(cfg.get("master_terminal_path") or "").strip()
+            if not pfad:
+                continue
+            if provision.terminal_pids(os.path.dirname(os.path.abspath(pfad))):
+                continue
+            if not boot_terminal_noetig(read_json(os.path.join(HERE, i["status_file"]), {}) or {}):
+                continue
+            ok, msg = start_terminal(fname)
+            print(f"[panel] {fname}: Master-Terminal nach PC-Start geoeffnet (lief ein Trade) -> {msg}", flush=True)
+            time.sleep(5 + random.uniform(0, 3))
+    except Exception as e:
+        print(f"[panel] Boot-Terminals: {type(e).__name__}: {e}", flush=True)
+
+
 def _leerlauf_waechter():
     while True:
         try:
@@ -3940,6 +3991,7 @@ def main():
         print(f"[panel] Terminal-Zu nachholen: {type(e).__name__}: {e}", flush=True)
     # Leerlauf-Waechter (22.09.2026): Terminal ohne Trade geht nach ~15 min von selbst zu
     threading.Thread(target=_leerlauf_waechter, daemon=True).start()
+    threading.Thread(target=_boot_terminals, daemon=True).start()   # 01.10.2026: Master mit laufendem Trade nach PC-Start
     # MT5-Update ohne UAC-Abfrage (01.10.2026) — Details bei _mt5_update_waechter
     threading.Thread(target=_mt5_update_waechter, daemon=True).start()
     # UAC-Haken an allen terminal64.exe wegraeumen (09.09.2026, Finns Fund:
