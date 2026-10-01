@@ -10630,13 +10630,44 @@
     }
     return out
   }
-  // Aktuellen lokalen Zustand ins Bucket des Profils sichern und aus dem LS entfernen
-  function profSnapshotAndClear(userId){
+  /* SPEICHER VOLL (01.10.2026, Finn: „ich kann keine ID wechseln, es lädt einfach / passiert nix"): 10 IDs × Bucket mit
+   * Boot-Cache (prophos_cache_plans allein ~600 KB je ID) füllten die ~5 MB des localStorage (gemessen 5,2 MB) — setItem
+   * warf QuotaExceededError, profSwitchTo brach ohne Meldung ab. Die prophos_cache_* sind nur Sofort-Anzeige, Supabase lädt
+   * sie frisch nach → bei vollem Speicher zuerst aus den Buckets der ANDEREN IDs werfen, dann notfalls aus dem eigenen.
+   * Echte Keys werden nie verworfen; reicht es auch ohne Caches nicht, wirft setItem weiter und nichts ist gelöscht. */
+  const PROF_CACHE = 'prophos_cache_'
+  const _profVoll = e => !!e && (e.name === 'QuotaExceededError' || e.code === 22 || e.code === 1014)
+  function _profCachesAusBuckets(schonen){
+    const ks = []
+    for(let i = 0; i < localStorage.length; i++){ const k = localStorage.key(i); if(k && k.startsWith(PROF_BUCKET) && !schonen.some(u => u && k === PROF_BUCKET + u)) ks.push(k) }
+    for(const k of ks){
+      try{
+        const b = JSON.parse(localStorage.getItem(k) || 'null'); if(!b) continue
+        const cs = Object.keys(b).filter(c => c.startsWith(PROF_CACHE)); if(!cs.length) continue
+        for(const c of cs) delete b[c]
+        localStorage.setItem(k, JSON.stringify(b))   // kleiner als vorher — passt immer
+      }catch(_){}
+    }
+  }
+  // Aktuellen lokalen Zustand ins Bucket des Profils sichern und aus dem LS entfernen (ziel = ID, deren Cache geschont wird)
+  function profSnapshotAndClear(userId, ziel){
     const keys = _profAppKeys()
     if(userId){
       const bucket = {}
       for(const k of keys) bucket[k] = localStorage.getItem(k)
-      localStorage.setItem(PROF_BUCKET + userId, JSON.stringify(bucket))
+      const schreiben = () => localStorage.setItem(PROF_BUCKET + userId, JSON.stringify(bucket))
+      try{ schreiben() }
+      catch(e){
+        if(!_profVoll(e)) throw e
+        console.warn('[profil] localStorage voll — Boot-Caches anderer IDs werden verworfen')
+        _profCachesAusBuckets([userId, ziel])
+        try{ schreiben() }
+        catch(e2){
+          if(!_profVoll(e2)) throw e2
+          for(const k of Object.keys(bucket)) if(k.startsWith(PROF_CACHE)) delete bucket[k]
+          schreiben()
+        }
+      }
     }
     for(const k of keys) localStorage.removeItem(k)
   }
@@ -10696,6 +10727,11 @@
     document.body.appendChild(hinweis)
     let neuLaden = false
     try{ neuLaden = (await profSwitchToKern(userId)) === 'neu_laden' }
+    catch(e){
+      // nie mehr stumm (01.10.2026): vorher verschwand nur der Hinweis, der Wechsel „passierte nicht"
+      console.warn('[profil] Wechsel gescheitert', e)
+      if(typeof atToast === 'function') atToast(`ID-Wechsel gescheitert: ${(e && e.message) || e}`, 'warn')
+    }
     finally{ if(!neuLaden){ hinweis.remove(); _profWechselLaeuft = false } }
   }
   async function profSwitchToKern(userId){
@@ -10717,7 +10753,7 @@
     }
 
     // 1. Aktuellen Stand sichern + lokalen Zustand leeren, 2. Ziel-Bucket einspielen
-    profSnapshotAndClear(curId)
+    profSnapshotAndClear(curId, userId)
     profRestore(userId)
 
     if(!sess?.refresh_token){
@@ -37403,7 +37439,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.952'
+  const OS_TAB_BUILD = '2026-09-22.953'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
