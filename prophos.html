@@ -21016,7 +21016,7 @@
     if(h && h.sl_art === 'liquidation' && (g === 'sl_feed' || g === 'level_sl')) return g === 'sl_feed' ? 'am Liquidations-Level über den Kurs-Feed geschlossen' : 'am Liquidations-Level geschlossen (Fusion-TP im Terminal gefüllt)'
     return g === 'tp_feed' ? 'am Master-TP über den Kurs-Feed geschlossen' : g === 'sl_feed' ? 'am Master-SL über den Kurs-Feed geschlossen'
       : g === 'level_tp' ? 'Notfall-SL gefüllt (Master-TP erreicht, Fusion-SL im Terminal)' : g === 'level_sl' ? 'Master-SL erreicht (Fusion-TP im Terminal gefüllt)'
-      : g === 'level_mt5' ? 'Level in MetaTrader erreicht' : g === 'master_ende_reader' ? 'Master zu (Reader) → Hedge geschlossen' : g === 'master_ende' ? 'Master beendet' : g === 'hand' ? 'von Hand'
+      : g === 'level_mt5' ? 'Level in MetaTrader erreicht' : g === 'master_ende_reader' ? 'Master zu (Reader) → Hedge geschlossen' : g === 'master_nie_da' ? 'Master-Position kam nie an → Hedge geschlossen' : g === 'master_ende' ? 'Master beendet' : g === 'hand' ? 'von Hand'
       : g === 'stopout' ? 'Stop-out durch den Broker' : g === 'close' ? 'Close-Auftrag' : g === 'tp' ? 'TP erreicht' : g === 'unbekannt' ? 'Grund unbekannt' : (g || '?')
   }
   // Schließen (Grund: level_sl | level_tp | master_ende | hand | …). Nur der PC, der geöffnet hat, kann schließen (Terminal dort).
@@ -21241,12 +21241,16 @@
         let z = null
         try{ const { data } = await supabase.from('puls_ergebnisse').select('stufe, ergebnis').eq('plan_id', String(plan.id)).eq('art', 'order').maybeSingle(); z = data }catch(_){ continue }
         const e = (z && z.ergebnis) || null
-        if(!e || !e.bestaetigt || !e.gesendet) continue
+        // SOFORT BEIM KLICK (01.10.2026, Finn: „sobald die Order platziert wird, muss sie direkt auf Fusion — das Verhältnis steht schon,
+        // SL/TP kann man nach ‚Show more' anpassen"): schon die erste 'geklickt'-Meldung (gesendet, order_klick_ms, noch ohne Fill) öffnet.
+        // Einstieg dann = Feed zum Klick (feed_klick); der echte Fill + TP/SL-Limit werden nach dem Lauf nachgetragen. Kam die Master-
+        // Position nie zustande, schließt der Wächter den Hedge wieder (master_nie_da).
+        if(!e || !e.gesendet) continue
         const kms = Number(e.order_klick_ms)
-        if(!(kms >= t0 - 2000) || !(tvKursZahl(String(e.einstieg || '')) > 1000)) continue
+        if(!(kms >= t0 - 2000)) continue
         if(w.stop) break                    // Antwort kam während der Abfrage — dann öffnet v2AufOpen wie bisher
         w.gefeuert = true
-        console.info('[hedgeFrueh] Fill-Beweis', e.einstieg, e.einstieg_quelle, '— Fusion wird geöffnet', Date.now() - kms, 'ms nach dem Klick')
+        console.info('[hedgeFrueh]', e.bestaetigt ? 'Fill-Beweis' : 'Senden-Klick', e.einstieg || '(Feed zum Klick)', '— Fusion wird geöffnet', Date.now() - kms, 'ms nach dem Klick')
         return await hedgeSoloOeffnen(plan, Object.assign({}, e, { klick_at: new Date(kms).toISOString() }))
       }
       return null
@@ -22176,6 +22180,70 @@
     return (m > 0 && m < kontrakte) ? m : null
   }
   window._hedgeMasterWegEntscheid = hedgeMasterWegEntscheid
+  /* Master weg laut Reader → Hedge zu + Plan-Ende (aus hedgeWacheTick herausgezogen, 01.10.2026): gemeinsam für den 1-s-Wächter und den
+   * Schnell-Wächter; je Plan höchstens EIN Lauf gleichzeitig (_hedgeWegLaeuft) — nie zweimal Ende setzen. */
+  const _hedgeWegLaeuft = new Set()
+  async function hedgeMasterWegAusfuehren(p, kontoPlan, kurs){
+    const pid = String(p.id)
+    if(_hedgeWegLaeuft.has(pid)) return
+    _hedgeWegLaeuft.add(pid)
+    try{
+      await hedgeSoloSchliessen(p, 'master_ende_reader', kurs)
+      // Plan auf Überprüfen wie beim Orbit-V2-Ende, Grund reader_leer.
+      // End-Balance direkt aus dem Userscript (Finn 01.10.2026: „sobald der Trade beendet ist, einfach die jetzige Balance an Prophos —
+      // davon die Differenz; ohne dass Puls sich noch mal einloggen muss"). Nur mit Beweis, sonst wie bisher Puls-Nachlesung.
+      const pa = tradePlans.find(x => String(x.id) === pid) || p
+      if(pa.status !== 'open') return   // schon beendet (anderer Weg) — kein zweites Ende
+      let _balR = null
+      try{ _balR = await hedgeReaderEndBalance(kontoPlan) }catch(_){}
+      try{ if(_balR && typeof tvKontoBalanceSchreiben === 'function') tvKontoBalanceSchreiben(p.masterAccountId, { balance: _balR.balance_end, equity: _balR.equity_end, relativ: false }, _balR.balance_at) }catch(_){}
+      try{ if(typeof tvV2EndeSetzen === 'function'){ await tvV2EndeSetzen(pa, null, 'reader_leer', _balR || undefined); if(typeof atMoveToReview === 'function'){ const pf = tradePlans.find(x => String(x.id) === pid) || pa; await atMoveToReview(pf) } } }catch(e){ console.warn('[hedgeWache] Plan-Ende', e) }
+    } finally { _hedgeWegLaeuft.delete(pid) }
+  }
+  /* SCHNELL-WÄCHTER (01.10.2026, Finn: „Auch beim Schließen — ob manuell oder Take Profit — muss Fusion direkt zu, so schnell wie es geht").
+   * Der 1-s-Wächter holte den Reader-Stand nur einmal pro Sekunde und verlangte 1 s „leer" → ~3–5 s. Hier: alle 0,3 s, nur für offene
+   * Hedges DIESES PCs, nur mit Puls-Chrome-Reader (positionen_tab 'puls-…', flach nur mit Beweis), Stand direkt vom lokalen Reader
+   * (keine Cloud). Schließt, wenn das Plan-Konto ≥ 0,6 s flach ist (mehrere Lesungen), der Stand ≤ 1,5 s alt, das Konto ≥ 2 s stabil,
+   * der Hedge ≥ 3 s offen und die Master-Position seit dem Open schon gesehen war. Alles andere bleibt beim 1-s-Wächter. */
+  const _hedgeSchnellLeer = new Map(), _hedgeSchnellKonto = new Map()
+  let _hedgeSchnellBusy = false
+  async function hedgeReaderSchnellTick(){
+    if(_hedgeSchnellBusy || !(MT5_LOCAL && typeof window.mtcApi === 'function')) return
+    let tp; try{ tp = tradePlans }catch(_){ return }
+    const pc = hedgePcId()
+    const meine = (tp || []).filter(p => p && p.route === 'tvv2' && (p.status === 'open' || p.status === 'planned') && p.mt5Baseline && p.mt5Baseline.hedge
+      && p.mt5Baseline.hedge.status === 'offen' && p.mt5Baseline.hedge.pc === pc)
+    if(!meine.length) return
+    _hedgeSchnellBusy = true
+    try{
+      if(typeof window._epLokalHolen === 'function'){ try{ await window._epLokalHolen() }catch(_){} }
+      const st = (epLokal && epLokal.stand) ? epLokal.stand : null
+      if(!st || st.an === false || st.positionen_ok === false || !Array.isArray(st.positionen) || !/^puls-/.test(String(st.positionen_tab || ''))) return
+      if(!(typeof st.positionen_alter_s === 'number' && st.positionen_alter_s <= 1.5)) return
+      const jetzt = Date.now()
+      for(const p of meine){
+        const pid = String(p.id), h = p.mt5Baseline.hedge
+        const acc = (accounts || []).find(a => String(a.id) === String(p.masterAccountId))
+        const kontoPlan = acc ? String(acc.externalId || '').trim() : ''
+        if(!kontoPlan || !hedgeKontoPasst(st.konto, kontoPlan)){ _hedgeSchnellKonto.delete(pid); _hedgeSchnellLeer.delete(pid); continue }
+        if(!_hedgeSchnellKonto.has(pid)) _hedgeSchnellKonto.set(pid, jetzt)
+        const wz = ((typeof tvSymbolWurzel === 'function') && tvSymbolWurzel(h.symbol_nq || '')) === 'MNQ' ? 'MNQ' : 'NQ'
+        const richtung = (p.richtung === 'buy' || p.richtung === 'sell') ? p.richtung : null
+        if(hedgeMasterTeilweise(st.positionen, wz, richtung, 1e9) != null){ _hedgeMasterGesehen.add(pid); _hedgeSchnellLeer.delete(pid); continue }
+        if(st.positionen.some(x => x && x.pnl_unklar)) continue
+        if(!_hedgeMasterGesehen.has(pid)) continue
+        if(!_hedgeSchnellLeer.has(pid)) _hedgeSchnellLeer.set(pid, jetzt)
+        const offenSeit = jetzt - (Date.parse(h.opened_at || h.at || '') || jetzt)
+        if(jetzt - _hedgeSchnellLeer.get(pid) >= 600 && jetzt - _hedgeSchnellKonto.get(pid) >= 2000 && offenSeit >= 3000 && p.status === 'open'){
+          _hedgeSchnellLeer.delete(pid)
+          console.info('[hedgeSchnell] Master weg laut Reader — Fusion wird geschlossen', p.masterName || pid)
+          await hedgeMasterWegAusfuehren(p, kontoPlan, null)
+        }
+      }
+    }catch(e){ console.warn('[hedgeSchnell]', e) }
+    finally{ _hedgeSchnellBusy = false }
+  }
+  setInterval(hedgeReaderSchnellTick, 300)
   /* MASTER LAUT READER (01.10.2026, Live-Befund Moritz 00:55 UTC: Order platziert, Antwort an den Tab verloren, Position zwei Minuten
    * später schon wieder zu — die Übernahme hätte danach einen Fusion-Hedge für eine geschlossene Position nachgeholt). Vor jedem
    * NACHGEHOLTEN Hedge-Open fragen: true = Reader zeigt die Master-Position, false = Puls-Chrome-Reader (flach nur mit Beweis) zeigt
@@ -22423,16 +22491,18 @@
               kontoPlan, kontoAktiv, kontenAnzahl, kontoStabilMs,
               leerSeitMs: _hedgeLeerSeit.has(String(p.id)) ? Date.now() - _hedgeLeerSeit.get(String(p.id)) : 0,
               schnell, gesehen: _hedgeMasterGesehen.has(pidK) })
+            // Hedge öffnete beim Senden-Klick, die Master-Position tauchte aber nie auf (Order abgelehnt / nicht gefüllt): Puls-Chrome-Reader
+            // (Beweis-Modus) zeigt das Plan-Konto ≥ 10 s flach, Konto ≥ 10 s stabil, Open ≥ 30 s her → Fusion wieder zu (01.10.2026)
+            if(schnell && !_hedgeMasterGesehen.has(pidK) && listeLeer && kontoStabilMs >= 10000 && _hedgeLeerSeit.has(pidK) && Date.now() - _hedgeLeerSeit.get(pidK) >= 10000
+               && (Date.now() - (Date.parse(h.opened_at || h.at || '') || Date.now())) >= 30000){
+              _hedgeLeerSeit.delete(pidK)
+              await hedgeSoloSchliessen(p, 'master_nie_da', kurs)
+              if(typeof atToast === 'function') atToast(`⚠ ${p.masterName || 'Plan'}: Master-Position kam in TradingView nie an — Fusion-Hedge wieder geschlossen`, 'end')
+              continue
+            }
             if(weg){
               _hedgeLeerSeit.delete(String(p.id))
-              await hedgeSoloSchliessen(p, 'master_ende_reader', kurs)
-              // Plan auf Überprüfen wie beim Orbit-V2-Ende: P&L holt der Rundgang / „P&L holen" nach, Grund reader_leer
-              // End-Balance direkt aus dem Userscript (Finn 01.10.2026: „sobald der Trade beendet ist, einfach die jetzige Balance an Prophos —
-              // davon die Differenz; ohne dass Puls sich noch mal einloggen muss"). Nur mit Beweis, sonst wie bisher Puls-Nachlesung.
-              let _balR = null
-              try{ _balR = await hedgeReaderEndBalance(kontoPlan) }catch(_){}
-              try{ if(_balR && typeof tvKontoBalanceSchreiben === 'function') tvKontoBalanceSchreiben(p.masterAccountId, { balance: _balR.balance_end, equity: _balR.equity_end, relativ: false }, _balR.balance_at) }catch(_){}
-              try{ if(typeof tvV2EndeSetzen === 'function'){ await tvV2EndeSetzen(p, null, 'reader_leer', _balR || undefined); if(typeof atMoveToReview === 'function'){ const pf = tradePlans.find(x => String(x.id) === String(p.id)) || p; await atMoveToReview(pf) } } }catch(e){ console.warn('[hedgeWache] Plan-Ende', e) }
+              await hedgeMasterWegAusfuehren(p, kontoPlan, kurs)
               continue
             }
           }catch(e){ console.warn('[hedgeWache] Reader-Abgleich', e) }
@@ -36953,7 +37023,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.925'
+  const OS_TAB_BUILD = '2026-09-22.926'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -37471,6 +37541,15 @@
           if(frueh){ try{ await _hedgeFrueh.promise }catch(_){} }
           try{ await hedgeSoloOeffnen(plan, Object.assign({}, r || {}, { klick_at: klickAt })) }catch(e){ console.warn('[hedgeSolo]', e) }
           if(frueh && typeof hedgeTpNachtragenAusOrder === 'function') await hedgeTpNachtragenAusOrder(plan, r)
+          // Hedge öffnete schon beim Senden-Klick (Feed zum Klick) → Einstieg + Level aus dem echten Fill der Endantwort (01.10.2026)
+          if(frueh && r && r.ok && typeof hedgeEinstiegNachtragen === 'function'){
+            try{
+              const ein = (typeof tvKursZahl === 'function') ? tvKursZahl(String(r.einstieg || '')) : Number(r.einstieg)
+              const wz = (typeof tvSymbolWurzel === 'function') ? tvSymbolWurzel(String(r.tv_symbol || symbol || '')) : ''
+              const pf = tradePlans.find(x => String(x.id) === String(plan.id)) || plan
+              if(ein > 1000 && (wz === 'NQ' || wz === 'MNQ')) await hedgeEinstiegNachtragen(pf, { avg_fill_je_wurzel: { [wz]: { avg_fill: ein, seite: dir } } })
+            }catch(e){ console.warn('[hedgeFrueh] Einstieg nachtragen', e) }
+          }
         }
         let tvb = null
         // Topstep V2 (F28): Start-Werte stecken schon in der tsx-konto-Antwort — kein zweiter Chrome-Lauf
@@ -51975,6 +52054,7 @@
   // Kurse + laufende Kerze gehen NUR bei Änderung in die Cloud (sonst alle 5 s als Lebenszeichen), Positionen/echoplus_live
   // bleiben bei 5 s (Wächter cloudAt). Keine Tick-Ströme: höchstens 2 Kurs- + 2 Kerzen-Zeilen je Sekunde.
   setInterval(epBrueckeTick, 1000)
+  window._epLokalHolen = epLokalHolen   // Schnell-Wächter (01.10.2026) holt den lokalen Reader-Stand selbst, alle 0,3 s
   if(typeof MT5_LOCAL !== 'undefined' && MT5_LOCAL){
     try{
       const w = new Worker(URL.createObjectURL(new Blob(['setInterval(() => postMessage(0), 1000)'], { type: 'text/javascript' })))
