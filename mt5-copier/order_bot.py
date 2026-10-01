@@ -16973,6 +16973,18 @@ def _cdp_ticket_fuellen(s, st, plan, symbol, opts, trail):
                         "rechts auf „Trade“ klicken, sodass Market/Limit/Stop und Units zu sehen sind.", "asset", st, None)
             trail.append("Order-Ticket offen (bewiesen)")
 
+    # --- Seite VOR dem Symbol, wenn das Ticket noch „Start creating order" zeigt (Live-Befund Moritz 01.10.2026 00:51 UTC, zweimal:
+    # Chart MNQZ2026, Ticket-Kopf MNQZ6 — alles richtig, aber ohne gewählte Seite steht das Symbol nicht im Senden-Knopf, augen.js las
+    # '-' → „Symbol MNQ nicht einstellbar — nichts gesendet"). Erst die Kachel BUY/SELL, dann zeigt der Knopf „Buy 1 MNQZ6 MARKET" und
+    # das Symbol ist lesbar. Die exakte Knopf-Prüfung vor dem Senden bleibt der Beweis.
+    if ticket().get("da") and not tv_symbol_root(str(knopf().get("symbol") or ticket().get("symbol") or "")):
+        kachel0 = ticket().get("kaufen" if plan["richtung"] == "buy" else "verkaufen")
+        if cdp_rect(kachel0):
+            trail.append("Symbol im Ticket nicht lesbar (keine Seite gewählt) → erst Seite " + plan["richtung"].upper())
+            s.klick(cdp_rect(kachel0), f"Seite {plan['richtung'].upper()} (vor dem Symbol)")
+            _warte(0.6, 0.3)
+            st = s.stand(opts)
+
     # --- Symbol
     for _v in range(2):
         ist = tv_symbol_root(str(knopf().get("symbol") or ticket().get("symbol") or ""))

@@ -3305,6 +3305,27 @@ def test_puls_cdp_login():
         f"Ende: maximiert → EIN Restore-Klick, sonst nichts ({sr1_.klicks}, {tr1_})")
     chk(sum(_i.getsource(f_).count("_cdp_panel_zurueck(sitz[0], trail)") for f_ in (ob.modus_tvlesen_cdp, ob.modus_tvkette_cdp, ob.modus_tvclose_cdp)) == 3,
         "Restore am Ende in Lesen, Order und Schließen (Orbit), nicht in Topstep")
+    # Ticket „Start creating order" (keine Seite, Symbol unlesbar) → erst Seite, dann ist das Symbol im Knopf (Moritz 01.10.2026 00:51 UTC)
+    class _ST:
+        def __init__(self): self.seite, self.klicks = None, []
+        def stand(self, opts=None):
+            kk = {"symbol": "MNQZ6", "seite": "buy", "text": "Buy 1 MNQZ6 MARKET", "rect": [1340, 820, 280, 50]} if self.seite else {}
+            return {"ticket": {"da": True, "symbol": None, "kaufen": {"rect": [1540, 230, 90, 40]}, "verkaufen": {"rect": [1340, 230, 90, 40]}},
+                    "kauf_knopf": kk}
+        def klick(self, r, n, toast_ok=False):
+            self.klicks.append(n)
+            if n.startswith("Seite BUY"): self.seite = "buy"
+            return True
+        def lese_js(self, a, timeout=8): return {}
+        def taste(self, k, modifiers=0): pass
+    ob._warte = lambda a_, b_: None
+    try:
+        sy_, ty_ = _ST(), []
+        ry_ = ob._cdp_ticket_fuellen(sy_, sy_.stand(), {"richtung": "buy", "menge": 1, "tp": None, "sl": None}, "MNQZ6", {}, ty_)
+    finally:
+        ob._warte = alt_w
+    chk(sy_.klicks[:1] == ["Seite BUY (vor dem Symbol)"] and ry_[1] != "asset" and "Symbol steht: MNQZ6" in ty_,
+        f"Ticket ohne Seite: erst BUY, dann Symbol lesbar — kein „Symbol nicht einstellbar“ ({sy_.klicks}, {ry_[1]}, {ty_[:3]})")
     fj_ = ob.cdp_panel_frei_js([1482, 907, 38, 38])
     chk("elementFromPoint(1501.0,926.0)" in fj_ and "toggle-visibility-button" in fj_ and "#overlap-manager-root" in fj_ and "toastGroup-" in fj_,
         "Frei-Probe: Knopfmitte, Dialog/Overlay verdeckt, Meldungen frei")
