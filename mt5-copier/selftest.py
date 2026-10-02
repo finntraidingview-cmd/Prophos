@@ -2743,7 +2743,7 @@ def test_puls_augen_cdp():
         "Weiche: veraltet/fehlt/uia/ohne pc_id → uia (alter Pfad unverändert)")
     import inspect as _i3
     q_tl = _i3.getsource(ob.modus_tvlesen)
-    chk(q_tl.lstrip().startswith("def modus_tvlesen(cmd):\n    if augen_modus_lauf() == \"cdp\":") and "modus_tvlesen_cdp(cmd)" in q_tl,
+    chk(q_tl.lstrip().startswith("def modus_tvlesen(cmd):\n    if augen_modus_lauf() == \"cdp\":") and ("modus_tvlesen_cdp(cmd)" in q_tl or "tvlesen_cdp_mit_wiederholung(cmd)" in q_tl),
         "tvlesen: einzige Änderung vor dem alten Pfad ist die lokale Weiche")
     chk("urllib" not in _i3.getsource(ob.augen_modus_lauf) and "augen_regel_entscheid(rd" in _i3.getsource(ob.augen_modus_lauf),
         "Weiche: Netz nur über _augen_regel_holen und nur bei fehlender/alter Regel (seit 01.10.2026)")
@@ -3665,6 +3665,17 @@ def test_cdp_konto_regression_865():
         and not ob.cdp_ein_konto_beleg("-", "TDFYSL150200000000") and not ob.cdp_ein_konto_beleg("", "TDFYSL150200000000")
         and not ob.cdp_ein_konto_beleg("PAAPEX0000000000007USD", "PAAPEX0000000000008"),
         "Login mit einem Konto: lesbar + anderes Konto = Beleg, gleiches/unlesbares nie")
+    import io as _io, contextlib as _cl, json
+    _n = {"n": 0}
+    def _lauf_to(c):
+        _n["n"] += 1
+        print(json.dumps({"ok": False, "code": "cdp_fehler", "msg": "Puls-Chrome/CDP: TimeoutError: timed out", "trail": "a"} if _n["n"] == 1
+                         else {"ok": True, "code": "", "msg": "gelesen", "trail": "b"}))
+    _b = _io.StringIO()
+    with _cl.redirect_stdout(_b):
+        ob.tvlesen_cdp_mit_wiederholung({}, lauf=_lauf_to)
+    _r = json.loads(_b.getvalue().strip().splitlines()[-1])
+    chk(_n["n"] == 2 and _r.get("ok") is True and "1. Versuch" in _r.get("trail", ""), "Lesen: Timeout → einmal neu, Ergebnis des zweiten Laufs")
     B = ob.cdp_liste_beleg
     ko_v = {"liste_voll": True, "eintraege": [{"text": TD1 + "USD"}]}
     chk(B({}, Z8 + "USD", TD1) == (True, "") and B({}, Z8 + "USD", "PAAPEX1111110000002") == (True, "")

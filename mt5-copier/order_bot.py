@@ -8150,7 +8150,7 @@ def _tv_exit_fill_lesen(w, trail, symbol, richtung):
 
 def modus_tvlesen(cmd):
     if augen_modus_lauf() == "cdp":          # nur CDP-Test-PC (29.09.2026, K1): lokal gelesen, ohne Netz; sonst unverändert
-        return modus_tvlesen_cdp(cmd)
+        return tvlesen_cdp_mit_wiederholung(cmd)
     res = {"ok": False, "code": "", "msg": "", "trail": "", "schritt": "start",
            "konto_aktiv": "", "konto_quelle": None, "quelle": None}
     trail = _StempelSpur()
@@ -16842,6 +16842,41 @@ def _cdp_today_aus_reiter(s, opts, trail):
         _warte(0.5, 0.2)
     trail.append(f"Today aus „Account summary\": {today} ('{lab}')")
     return summary, today, lab, txt
+
+
+def tvlesen_cdp_mit_wiederholung(cmd, lauf=None):
+    """Lesen mit EINEM zweiten Versuch bei Zeitüberschreitung (02.10.2026, Mike: „Puls-Chrome/CDP: TimeoutError: timed out" beim
+    Balance-Lesen — die TradingView-Seite antwortete 10 s nicht). Nur Lesen, nie Order: ein zweiter Lauf klickt nichts, was handelt.
+    Das Ergebnis des ersten Laufs wird nur gedruckt, wenn kein zweiter folgt."""
+    import io
+    lauf = lauf or modus_tvlesen_cdp
+
+    def einmal():
+        puffer, echt = io.StringIO(), sys.stdout
+        sys.stdout = puffer
+        try:
+            lauf(cmd)
+        finally:
+            sys.stdout = echt
+        roh = puffer.getvalue().strip()
+        try:
+            return roh, (json.loads(roh.splitlines()[-1]) if roh else {})
+        except (ValueError, IndexError):
+            return roh, {}
+
+    roh1, r1 = einmal()
+    if r1.get("code") == "cdp_fehler" and "Timeout" in str(r1.get("msg") or ""):
+        _warte(3.0, 1.0)
+        roh2, r2 = einmal()
+        if r2:
+            r2["trail"] = "1. Versuch: " + str(r1.get("msg") or "")[:120] + " → neu verbunden > " + str(r2.get("trail") or "")
+            try:
+                print(json.dumps(r2, ensure_ascii=False))
+            except UnicodeEncodeError:
+                print(json.dumps(r2, ensure_ascii=True))
+            return
+        roh1 = roh2 or roh1
+    print(roh1)
 
 
 def modus_tvlesen_cdp(cmd):
