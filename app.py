@@ -8326,6 +8326,23 @@ def lt_fusion_pl_echo(live, jetzt_ts):
     return round(sum(werte), 2) if werte else None
 
 
+def lt_fusion_lots_echo(live, jetzt_ts):
+    """REIN RECHNEND (testbar): Fusion-Lots eines klassischen Echo-Trades = Summe volume aller Hedges der Instanz (wie
+    lt_fusion_pl_echo, 02.10.2026 für die Radar-Zuordnung „welcher Fusion-Trade gehört zu welchem"). Nur frisch, sonst None."""
+    if not live:
+        return None
+    try:
+        alter = jetzt_ts - datetime.fromisoformat(str(live.get("updated_at")).replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError):
+        return None
+    hd = live.get("hd")
+    if alter > LT_ECHO_MAX_ALTER_S or not isinstance(hd, dict):
+        return None
+    werte = [_wd_num(h.get("volume")) for hs in hd.values() if isinstance(hs, list) for h in hs if isinstance(h, dict)]
+    werte = [w for w in werte if w is not None]
+    return round(sum(werte), 2) if werte else None
+
+
 def lt_fusion_pl_solo(hedge, solo_je_pc, jetzt_ts):
     """REIN RECHNEND (testbar): schwebender Fusion-P&L eines Orbit-/Winning-Day-Hedges aus mt5_live.status.hedge_solo des
     Hedge-PCs (solo_je_pc = {pc: {updated_at, solo: [{ticket, profit|pl_live}]}}). Nur offener Hedge mit Ticket, frisch, sonst None."""
@@ -8426,6 +8443,7 @@ def _lt_echo_zeile(p, acc, disp, live_je_login, firm_sym, jetzt_ts, vorher=None)
     z.update(lt_echo_felder(p, live_je_login.get(login) if login else None, jetzt_ts))
     if str(p.get("route") or "") == "mt5" and str(p.get("status") or "") == "open":
         z["slave_pl_live"] = lt_fusion_pl_echo(live_je_login.get(login) if login else None, jetzt_ts)
+        z["slave_lots_live"] = lt_fusion_lots_echo(live_je_login.get(login) if login else None, jetzt_ts)
     # NQ-/Futures-Felder gelten für Echo nicht — leer statt gerechnet (die Max-Drawdown-Liquidation ist eine Futures-Regel)
     for k in ("einstieg_nq", "einstieg_quelle", "tp_level_nq", "sl_level_nq", "sl_art", "schliesst_bei_nq", "liq_level_nq",
               "liq_balance", "liq_regel", "liq_quelle", "sl_hinweis", "punktwert", "symbol_root"):

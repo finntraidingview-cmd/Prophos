@@ -25384,13 +25384,24 @@
     if(!h || !h.ticket || !['offen', 'schliesst'].includes(String(h.status || ''))) return null
     try{ const x = typeof hedgeSoloLive === 'function' ? hedgeSoloLive(h.ticket) : null; return x ? (n(x.pl_live) != null ? n(x.pl_live) : n(x.profit)) : null }catch(_){ return null }
   }
+  // Fusion-Lots (02.10.2026, Finn: „immer die Lotanzahl der Fusion hinschreiben, damit man zuordnen kann, welcher zu welchem
+  // gehört"): Orbit/Winning Day aus dem Hedge am Plan (hedge.lots), Echo aus mt5_live (slave_lots_live, Summe der Hedges)
+  function wdlFusionLots(t){
+    const n = v => (v == null || v === '' || !isFinite(Number(v)) || Number(v) <= 0) ? null : Number(v)
+    const h = t && t.hedge && typeof t.hedge === 'object' ? t.hedge : null
+    return n(t && t.slave_lots_live) ?? n(h && h.lots)
+  }
+  const wdlFusionText = (t, v) => {
+    const l = wdlFusionLots(t)
+    return `Fusion${l != null ? ' ' + l.toLocaleString('de-DE', { maximumFractionDigits: 2 }) + ' Lot' : ''} ${v == null ? '–' : `${v < 0 ? '−' : '+'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`}`
+  }
   // Fusion-P&L live in die laufenden Zeilen schreiben — ohne Neuaufbau (15-s-Abruf und 2-s-Takt)
   function wdlFusionLive(){
     if(!wdl.daten) return
     for(const el of document.querySelectorAll('#wdl-liste [data-wdl-fusion]')){
       const t = (wdl.daten.trades || []).find(x => wdlTid(x) === el.getAttribute('data-wdl-fusion')); if(!t) continue
       const v = wdlFusionWert(t)
-      el.textContent = v == null ? 'Fusion –' : `Fusion ${v < 0 ? '−' : '+'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
+      el.textContent = wdlFusionText(t, v)
       el.style.color = v == null ? 'var(--sub)' : v >= 0 ? '#15803d' : '#b91c1c'
     }
   }
@@ -25686,7 +25697,7 @@
     const fusionLiveZ = t => {
       const hedgeModell = ['Echo', 'Orbit', 'Winning Day'].includes(wdlWeg(t)); if(!hedgeModell) return ''
       const v = wdlFusionWert(t)
-      return `<small class="wdl-z-slave" data-wdl-fusion="${escapeHtml(wdlTid(t))}" style="color:${v == null ? 'var(--sub)' : col(v)}" title="Fusion-Gegenhedge live (schwebend, aus MT5)">Fusion ${v == null ? '–' : sig(v, '€', 2)}</small>`
+      return `<small class="wdl-z-slave" data-wdl-fusion="${escapeHtml(wdlTid(t))}" style="color:${v == null ? 'var(--sub)' : col(v)}" title="Fusion-Gegenhedge live (schwebend, aus MT5)">${escapeHtml(wdlFusionText(t, v))}</small>`
     }
     const zeile = (t, extra) => {
       const k = t.konto || {}, buy = t.richtung === 'buy', sell = t.richtung === 'sell', offen = t.status === 'open', gepl = t.status === 'planned'
@@ -37596,7 +37607,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.980'
+  const OS_TAB_BUILD = '2026-09-22.981'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
