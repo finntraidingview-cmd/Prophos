@@ -10033,6 +10033,25 @@
             </div>
           </div>
           <div class="mwd-erl-summe" id="mwd-erl-summe"></div>
+          <!-- Account-Status wie im großen Erledigt-Popup (02.10.2026, Finn: „muss auch die Möglichkeit haben, Account wurde geblowt");
+               das Backend archiviert beim Besitzer der ID (auch fremde Trades) -->
+          <div class="field" style="margin-top:12px">
+            <label style="font-size:11.5px;font-weight:600;color:var(--ink-2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;display:block">Account-Status</label>
+            <div style="display:flex;flex-direction:column;gap:6px">
+              <label class="tc-status-opt" style="display:flex;align-items:center;gap:10px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;cursor:pointer">
+                <input type="radio" name="mwd-erl-status" value="none" checked>
+                <span style="color:var(--ink)">Nichts ändern — Account bleibt</span>
+              </label>
+              <label class="tc-status-opt" style="display:flex;align-items:center;gap:10px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;cursor:pointer">
+                <input type="radio" name="mwd-erl-status" value="blown">
+                <span style="color:var(--ink)">💀 Account wurde geblowt — archivieren</span>
+              </label>
+              <label class="tc-status-opt" style="display:flex;align-items:center;gap:10px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;cursor:pointer">
+                <input type="radio" name="mwd-erl-status" value="passed">
+                <span style="color:var(--ink)">✅ Phase bestanden — Nachfolger anlegen</span>
+              </label>
+            </div>
+          </div>
           <div class="modal-msg" id="mwdErledigtMsg"></div>
       </div>
       <div class="modal-foot">
@@ -25171,6 +25190,7 @@
     _mwdErlKonto = (pw.hedge && pw.hedge.hedge_login) ? `das Fusion-Konto ${pw.hedge.hedge_login}` : 'das Fusion-Konto des PCs'
     mklWdErlSumme()
     const msg = document.getElementById('mwdErledigtMsg'); if(msg){ msg.textContent = ''; msg.className = 'modal-msg' }
+    const stNone = document.querySelector('input[name="mwd-erl-status"][value="none"]'); if(stNone) stNone.checked = true
     document.getElementById('mwdErledigtModal')?.classList.add('open')
     setTimeout(() => { try{ (m && !m.value ? m : f)?.focus() }catch(_){} }, 60)
   }
@@ -25200,14 +25220,17 @@
     const mpl = zahl('mwd-erl-master'), spl = _mwdErlOhneHedge ? null : zahl('mwd-erl-fusion')   // ohne Hedge: nie slave_pl
     if(mpl == null || !isFinite(mpl)) return say('Master-P&L eintragen ($).', 'err')
     if(spl != null && !isFinite(spl)) return say('Fusion-P&L ist keine Zahl.', 'err')
+    const kontoStatus = document.querySelector('input[name="mwd-erl-status"]:checked')?.value || 'none'
     if(btn) btn.disabled = true; say('')
     // SOFORT ZU (01.10.2026 abends, Finn: „Abhaken dauert 5–6 s"): Popup zu und Zeile nach „Erledigt", das Backend speichert dahinter;
     // scheitert es, Hinweis + Liste neu laden (die Zeile springt zurück) — das Popup lässt sich dann erneut öffnen
     mklWdErledigtZu(); wdlSofortErledigt(pid)
+    // Sofort-Rückmeldung (02.10.2026, Finn: „hängt 3–4 s, bis unten rechts Erledigt kommt") — die Antwort ersetzt sie mit dem Buchungs-Ergebnis
+    if(typeof atToast === 'function') atToast('✓ Erledigt · wird gebucht …', 'ok')
     try{
       const tok = await _pushTok(); if(!tok) throw new Error('nicht angemeldet')
       const r = await fetch(`${WATCHER_HOME}/admin/wd-plaene`, { method: 'PATCH', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ aktion: 'erledigt', plan_id: pid, master_pl: mpl, slave_pl: spl }) })
+        body: JSON.stringify({ aktion: 'erledigt', plan_id: pid, master_pl: mpl, slave_pl: spl, konto_status: kontoStatus }) })
       const d = await r.json().catch(() => ({}))
       if(!r.ok || d.ok === false) throw new Error(d.error || ('HTTP ' + r.status))
       const fmtE = v => `${v < 0 ? '−' : '+'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
@@ -25216,7 +25239,10 @@
       wdlSofortErledigt(pid)   // Plan ist zu (auch bei Buchungsfehler) → Live Trades sofort nach „Erledigt"
       if(d.buchung_fehler){ if(typeof atToast === 'function') atToast(`Plan ist erledigt, die Buchung in Finanzen aber nicht: ${d.buchung_fehler} — im Radar noch einmal abhaken.`, 'end'); return }
       const bu = d.buchung || null, betrag = (bu && isFinite(Number(bu.amount))) ? Number(bu.amount) : null
-      if(typeof atToast === 'function') atToast(bu ? `Erledigt · Fusion ${betrag != null ? fmtE(betrag) : ''} auf „${bu.account_name || 'Hedge-Konto'}" gebucht` : _mwdErlOhneHedge ? 'Erledigt' : 'Erledigt · ohne Fusion-Buchung', 'ok')
+      const ar = d.archiv || null
+      if(ar && ar.fehler && typeof atToast === 'function') atToast(ar.fehler, 'end')
+      const arTxt = (ar && ar.archiviert) ? (ar.grund === 'blown' ? ' · 💀 Account archiviert' : ' · ✅ bestanden — Nachfolger beim Besitzer nachtragen') : ''
+      if(typeof atToast === 'function') atToast((bu ? `Erledigt · Fusion ${betrag != null ? fmtE(betrag) : ''} auf „${bu.account_name || 'Hedge-Konto'}" gebucht` : _mwdErlOhneHedge ? 'Erledigt' : 'Erledigt · ohne Fusion-Buchung') + arTxt, 'ok')
       try{ mkl.wd.at = 0; await mklWdLaden() }catch(_){}
       mklWdRender(); mklChartZeichnen()
     }catch(e){
@@ -37570,7 +37596,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.979'
+  const OS_TAB_BUILD = '2026-09-22.980'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

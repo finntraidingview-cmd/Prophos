@@ -9000,6 +9000,13 @@ def admin_wd_plaene():
             pid = str(daten.get("plan_id") or "").strip()
             mpl = _wd_zahl(daten.get("master_pl"))
             spl = None if daten.get("slave_pl") in (None, "") else _wd_zahl(daten.get("slave_pl"))
+            # Account-Status wie im großen Erledigt-Popup (02.10.2026, Finn im Radar bei einem fremden Trade): 'none' = Konto bleibt,
+            # 'blown' = Plan blown + Master-Konto im Archiv des BESITZERS ('blown'), 'passed' = Archiv 'passed_pending' — der Besitzer
+            # trägt den Nachfolger bei sich nach („🎉 Account-Daten nachtragen"). Serverseitig, weil der Mac fremde Archive nicht schreibt.
+            konto_status = str(daten.get("konto_status") or "none")
+            if konto_status not in ("none", "blown", "passed"):
+                return jsonify({"error": "konto_status unbekannt"}), 400
+            blown = konto_status == "blown"
             if len(pid) < 10:
                 return jsonify({"error": "plan_id fehlt"}), 400
             if mpl is None:
@@ -9007,93 +9014,167 @@ def admin_wd_plaene():
             if daten.get("slave_pl") not in (None, "") and spl is None:
                 return jsonify({"error": "slave_pl ist keine Zahl"}), 400
             try:
-                disp, _excl = _wd_personen()
-                uid = konto = person = None
-                konto_quelle = login_quelle = None
-                for _versuch in range(3):
-                    rows = sb_select("trade_plans", {"select": "id,route,status,user_id,master_account_id,master_name,mt5_baseline,"
-                                                               "updated_at,ended_at,completed_at", "id": f"eq.{pid}", "limit": "1"})
-                    plan = rows[0] if rows else None
-                    jetzt = datetime.now(timezone.utc)
-                    jetzt_iso = jetzt.isoformat().replace("+00:00", "Z")
-                    upd, fehler = _wd_erledigt_upd(plan, mpl, spl, jetzt_iso, _cme_handelstag())
-                    if fehler:
-                        return jsonify({"error": fehler[1], "plan_id": pid}), fehler[0]
-                    if uid is None:
-                        uid = str(plan.get("user_id") or "")
-                        if not uid and plan.get("master_account_id"):
-                            macc = sb_select("accounts", {"select": "user_id", "id": f"eq.{plan.get('master_account_id')}", "limit": "1"})
-                            uid = str((macc[0] if macc else {}).get("user_id") or "")
-                        person = disp.get(uid, uid[:8])
-                        if spl is not None:
-                            h = ((plan.get("mt5_baseline") or {}).get("hedge") or {}) if isinstance(plan.get("mt5_baseline"), dict) else {}
-                            login = str(h.get("hedge_login") or "").strip()
-                            if not login and h.get("pc"):
-                                ml = sb_select("mt5_live", {"select": "hedge_login,updated_at", "pc_name": f"eq.{h.get('pc')}",
-                                                            "hedge_login": "neq.", "order": "updated_at.desc", "limit": "1"})
-                                login = str((ml[0] if ml else {}).get("hedge_login") or "").strip()
-                            konten = sb_select("accounts", {"select": "id,user_id,name,firm,account_type,external_id,created_at,"
-                                                                      "meta_api_account_id,meta_api_login",
-                                                            "user_id": f"eq.{uid}"}) if uid else []
-                            konto, konto_quelle = _wd_hedge_konto(konten, login or WD_HEDGE_LOGIN, _acc_plan_archiviert())
-                            login_quelle = login or f"{WD_HEDGE_LOGIN} (Standard)"
-                    filt = {"id": f"eq.{pid}", "route": f"in.({','.join(WD_ERLEDIGT_ROUTEN)})", "status": "in.(open,review,completed)"}
-                    if plan.get("updated_at"):
-                        filt["updated_at"] = f"eq.{plan['updated_at']}"
-                    z = sb_update("trade_plans", filt, upd)
-                    if z:
-                        break
-                else:
-                    return jsonify({"error": "Plan wurde gleichzeitig geändert — bitte erneut versuchen", "plan_id": pid}), 409
-                # Kontotyp zum Zeitpunkt des Trades festhalten (25.09.2026) — ein Winning Day ist immer 'winning_days'; nur wenn leer,
-                # und still, falls die Spalte noch fehlt
-                if str(plan.get("route") or "") == "tvv2":   # Echo/Topstep (30.09.2026) sind keine Winning Days
-                    try:
-                        sb_update("trade_plans", {"id": f"eq.{pid}", "konto_typ": "is.null"}, {"konto_typ": "winning_days"})
-                    except Exception:
-                        pass
-                # Buchung (idempotent)
-                buchung, buchung_fehler = None, None
+                # Tempo (02.10.2026, Finn: „dauert 5 Sekunden, bis es eingebucht ist"): vorher 9–12 Supabase-Anfragen
+                # NACHEINANDER. Jetzt in vier Wellen — was voneinander unabhängig ist, läuft gleichzeitig. Reihenfolge und
+                # Regeln wie bisher: Konto vor dem Plan-Update auflösen, Plan mit optimistischer Sperre, Buchung idempotent.
+                # _wd_personen bleibt im Request-Thread (liest g über _admin_nur_uid), die Pool-Threads fassen g nie an.
+                pool = concurrent.futures.ThreadPoolExecutor(max_workers=6)
                 try:
-                    alt = sb_select("transactions", {"select": "id,amount", "kind": "eq.wd_hedge", "auto_generated": "is.true",
-                                                     "notes": f"like.{_wd_hedge_schluessel(pid)}*"})
-                    if spl is None:
-                        for t in alt:
-                            _sb_anfrage("DELETE", f"{SUPABASE_URL}/rest/v1/transactions", params={"id": f"eq.{t['id']}"},
-                                            headers=_sb_headers(), timeout=12).raise_for_status()
+                    plan_sel = {"select": "id,route,status,user_id,master_account_id,master_name,mt5_baseline,"
+                                          "updated_at,ended_at,completed_at", "id": f"eq.{pid}", "limit": "1"}
+                    # Welle 1: nur die plan_id nötig
+                    f_plan = pool.submit(sb_select, "trade_plans", plan_sel)
+                    f_alt = pool.submit(sb_select, "transactions", {"select": "id,amount", "kind": "eq.wd_hedge", "auto_generated": "is.true",
+                                                                   "notes": f"like.{_wd_hedge_schluessel(pid)}*"})
+                    f_archiv = pool.submit(_acc_plan_archiviert) if spl is not None else None
+                    disp, _excl = _wd_personen()
+                    uid = konto = person = None
+                    konto_quelle = login_quelle = None
+                    f_kk = None
+                    rows = f_plan.result()
+                    for _versuch in range(3):
+                        if _versuch:
+                            rows = sb_select("trade_plans", plan_sel)
+                        plan = rows[0] if rows else None
+                        jetzt = datetime.now(timezone.utc)
+                        jetzt_iso = jetzt.isoformat().replace("+00:00", "Z")
+                        upd, fehler = _wd_erledigt_upd(plan, mpl, spl, jetzt_iso, _cme_handelstag())
+                        if fehler:
+                            return jsonify({"error": fehler[1], "plan_id": pid}), fehler[0]
+                        if blown:
+                            upd["blown"] = True
+                        if uid is None:
+                            # Welle 2: was den Plan braucht — Good-Day-Konto, Konten der ID, Hedge-Login
+                            if plan.get("master_account_id"):
+                                f_kk = pool.submit(sb_select, "accounts", {"select": "id,name,firm,account_type,goal_done_offset,goal_manual_last,goal_target",
+                                                                           "id": f"eq.{plan.get('master_account_id')}", "limit": "1"})
+                            uid = str(plan.get("user_id") or "")
+                            if not uid and plan.get("master_account_id"):
+                                macc = sb_select("accounts", {"select": "user_id", "id": f"eq.{plan.get('master_account_id')}", "limit": "1"})
+                                uid = str((macc[0] if macc else {}).get("user_id") or "")
+                            person = disp.get(uid, uid[:8])
+                            if spl is not None:
+                                h = ((plan.get("mt5_baseline") or {}).get("hedge") or {}) if isinstance(plan.get("mt5_baseline"), dict) else {}
+                                login = str(h.get("hedge_login") or "").strip()
+                                f_konten = pool.submit(sb_select, "accounts", {"select": "id,user_id,name,firm,account_type,external_id,created_at,"
+                                                                                         "meta_api_account_id,meta_api_login",
+                                                                               "user_id": f"eq.{uid}"}) if uid else None
+                                if not login and h.get("pc"):
+                                    ml = sb_select("mt5_live", {"select": "hedge_login,updated_at", "pc_name": f"eq.{h.get('pc')}",
+                                                                "hedge_login": "neq.", "order": "updated_at.desc", "limit": "1"})
+                                    login = str((ml[0] if ml else {}).get("hedge_login") or "").strip()
+                                konten = f_konten.result() if f_konten else []
+                                konto, konto_quelle = _wd_hedge_konto(konten, login or WD_HEDGE_LOGIN, f_archiv.result())
+                                login_quelle = login or f"{WD_HEDGE_LOGIN} (Standard)"
+                        # Welle 3: der Plan selbst
+                        filt = {"id": f"eq.{pid}", "route": f"in.({','.join(WD_ERLEDIGT_ROUTEN)})", "status": "in.(open,review,completed)"}
+                        if plan.get("updated_at"):
+                            filt["updated_at"] = f"eq.{plan['updated_at']}"
+                        z = sb_update("trade_plans", filt, upd)
+                        if z:
+                            break
                     else:
-                        zeile = _wd_hedge_buchung(pid, uid, konto, person, spl, jetzt.date().isoformat())
-                        if alt:
-                            r = sb_update("transactions", {"id": f"eq.{alt[0]['id']}"}, zeile)
-                            for t in alt[1:]:   # Altlast: Doppelte weg, genau eine Buchung je Plan
-                                _sb_anfrage("DELETE", f"{SUPABASE_URL}/rest/v1/transactions", params={"id": f"eq.{t['id']}"},
-                                                headers=_sb_headers(), timeout=12).raise_for_status()
-                        else:
-                            r = sb_insert("transactions", zeile)
-                        r0 = (r[0] if isinstance(r, list) and r else r) or {}
-                        buchung = {"id": r0.get("id"), "amount": zeile["amount"], "account_id": zeile["account_id"],
-                                   "account_name": zeile["account_name"], "user_id": zeile["user_id"], "neu": not alt,
-                                   "konto_quelle": konto_quelle, "hedge_login": login_quelle}
-                except Exception as e:
-                    buchung_fehler = f"Buchung fehlgeschlagen ({type(e).__name__}) — erneut 'erledigt' senden, der Plan bleibt completed"
-                # Good Day (01.10.2026): Tradeify-WD mit Master-P&L über 250 $ → Plan winning_day = true und Winning Day +1 am
-                # Konto (einmal je Berlin-Tag). Fehler hier stoppen das Abhaken nicht — sie stehen in der Antwort.
-                good_day = None
-                if plan.get("master_account_id"):
-                    try:
-                        kr = sb_select("accounts", {"select": "id,name,firm,account_type,goal_done_offset,goal_manual_last,goal_target",
-                                                    "id": f"eq.{plan.get('master_account_id')}", "limit": "1"})
-                        kk = kr[0] if kr else None
-                        if _wd_good_day(kk, mpl):
+                        return jsonify({"error": "Plan wurde gleichzeitig geändert — bitte erneut versuchen", "plan_id": pid}), 409
+
+                    # Welle 4 (gleichzeitig): Kontotyp, Buchung, Good Day — jede für sich, Fehler stoppen das Abhaken nicht
+
+                    def _konto_typ():
+                        # Kontotyp zum Zeitpunkt des Trades festhalten (25.09.2026) — ein Winning Day ist immer 'winning_days'; nur wenn
+                        # leer, und still, falls die Spalte noch fehlt. Echo/Topstep (30.09.2026) sind keine Winning Days.
+                        try:
+                            sb_update("trade_plans", {"id": f"eq.{pid}", "konto_typ": "is.null"}, {"konto_typ": "winning_days"})
+                        except Exception:
+                            pass
+
+                    def _buchen():
+                        # Buchung (idempotent über den notes-Schlüssel)
+                        try:
+                            alt = f_alt.result()
+                            if spl is None:
+                                for t in alt:
+                                    _sb_anfrage("DELETE", f"{SUPABASE_URL}/rest/v1/transactions", params={"id": f"eq.{t['id']}"},
+                                                    headers=_sb_headers(), timeout=12).raise_for_status()
+                                return None, None
+                            zeile = _wd_hedge_buchung(pid, uid, konto, person, spl, jetzt.date().isoformat())
+                            if alt:
+                                r = sb_update("transactions", {"id": f"eq.{alt[0]['id']}"}, zeile)
+                                for t in alt[1:]:   # Altlast: Doppelte weg, genau eine Buchung je Plan
+                                    _sb_anfrage("DELETE", f"{SUPABASE_URL}/rest/v1/transactions", params={"id": f"eq.{t['id']}"},
+                                                    headers=_sb_headers(), timeout=12).raise_for_status()
+                            else:
+                                r = sb_insert("transactions", zeile)
+                            r0 = (r[0] if isinstance(r, list) and r else r) or {}
+                            return {"id": r0.get("id"), "amount": zeile["amount"], "account_id": zeile["account_id"],
+                                    "account_name": zeile["account_name"], "user_id": zeile["user_id"], "neu": not alt,
+                                    "konto_quelle": konto_quelle, "hedge_login": login_quelle}, None
+                        except Exception as e:
+                            return None, f"Buchung fehlgeschlagen ({type(e).__name__}) — erneut 'erledigt' senden, der Plan bleibt completed"
+
+                    def _good_day():
+                        # Good Day (01.10.2026): Tradeify-WD mit Master-P&L über 250 $ → Plan winning_day = true und Winning Day +1 am
+                        # Konto (einmal je Berlin-Tag). Fehler hier stoppen das Abhaken nicht — sie stehen in der Antwort.
+                        if f_kk is None:
+                            return None
+                        try:
+                            kr = f_kk.result()
+                            kk = kr[0] if kr else None
+                            if not _wd_good_day(kk, mpl):
+                                return None
                             sb_update("trade_plans", {"id": f"eq.{pid}"}, {"winning_day": True})
                             k_upd = _wd_good_day_konto_upd(kk, _berlin_heute())
                             if k_upd:
                                 sb_update("accounts", {"id": f"eq.{kk['id']}"}, k_upd)
-                            good_day = {"gezaehlt": bool(k_upd), "stand": (k_upd or {}).get("goal_done_offset", kk.get("goal_done_offset")),
-                                        "ziel": (k_upd or {}).get("goal_target", kk.get("goal_target") or 5), "konto": kk.get("name")}
-                    except Exception as e:
-                        good_day = {"fehler": f"Winning Day nicht gezählt ({type(e).__name__}) — im Account von Hand +1"}
+                            return {"gezaehlt": bool(k_upd), "stand": (k_upd or {}).get("goal_done_offset", kk.get("goal_done_offset")),
+                                    "ziel": (k_upd or {}).get("goal_target", kk.get("goal_target") or 5), "konto": kk.get("name")}
+                        except Exception as e:
+                            return {"fehler": f"Winning Day nicht gezählt ({type(e).__name__}) — im Account von Hand +1"}
+
+                    def _archivieren():
+                        # Archiv = user_settings key 'archive' des Plan-Besitzers ({konto_id: {archived, reason, at}}), lesen → ergänzen →
+                        # upsert. Bestehende Einträge bleiben; ein schon archiviertes Konto wird nicht überschrieben.
+                        aid = str(plan.get("master_account_id") or "")
+                        if not aid or not uid:
+                            return {"fehler": "Konto nicht archiviert (Plan ohne Master-Konto) — im Account von Hand archivieren"}
+                        try:
+                            z = sb_select("user_settings", {"select": "value", "user_id": f"eq.{uid}", "key": "eq.archive", "limit": "1"})
+                            v = (z[0] if z else {}).get("value")
+                            if isinstance(v, str):
+                                v = json.loads(v)
+                            arch = v if isinstance(v, dict) else {}
+                            if not (isinstance(arch.get(aid), dict) and arch[aid].get("archived")):
+                                arch[aid] = {"archived": True, "reason": "blown" if blown else "passed_pending", "at": jetzt_iso}
+                                _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/user_settings", params={"on_conflict": "user_id,key"},
+                                            json={"user_id": uid, "key": "archive", "value": arch, "updated_at": jetzt_iso},
+                                            headers=_sb_headers("resolution=merge-duplicates,return=minimal"), timeout=12).raise_for_status()
+                            # Echo-Konto: Terminal-Löschauftrag wie archiveAccount() im Frontend (07.09.2026) — still, falls keins verknüpft
+                            try:
+                                ml = sb_select("mt5_links", {"select": "mt5_login", "account_id": f"eq.{aid}", "limit": "1"})
+                                if ml and ml[0].get("mt5_login"):
+                                    _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/echo_loesch_auftraege", params={"on_conflict": "mt5_login"},
+                                                json={"mt5_login": str(ml[0]["mt5_login"]), "grund": "blown" if blown else "passed_pending",
+                                                      "account_name": plan.get("master_name"), "angelegt_am": jetzt_iso,
+                                                      "erledigt_am": None, "erledigt_info": None},
+                                                headers=_sb_headers("resolution=merge-duplicates,return=minimal"), timeout=12).raise_for_status()
+                            except Exception as e:
+                                print(f"[erledigt] ⚠️ Echo-Löschauftrag {aid}: {type(e).__name__}: {e}", flush=True)
+                            return {"archiviert": True, "konto_id": aid, "grund": konto_status}
+                        except Exception as e:
+                            return {"fehler": f"Konto nicht archiviert ({type(e).__name__}) — im Account von Hand archivieren"}
+
+                    f_typ = pool.submit(_konto_typ) if str(plan.get("route") or "") == "tvv2" else None
+                    f_buch = pool.submit(_buchen)
+                    f_gd = pool.submit(_good_day)
+                    f_arch = pool.submit(_archivieren) if konto_status != "none" else None
+                    buchung, buchung_fehler = f_buch.result()
+                    good_day = f_gd.result()
+                    if f_typ:
+                        f_typ.result()
+                    archiv = f_arch.result() if f_arch else None
+                finally:
+                    pool.shutdown(wait=False)
                 out = {"ok": True, "plan_id": pid, "status": "completed", "buchung": buchung}
+                if archiv:
+                    out["archiv"] = archiv
                 if good_day:
                     out["good_day"] = good_day
                 if buchung_fehler:
