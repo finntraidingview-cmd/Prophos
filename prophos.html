@@ -25634,7 +25634,8 @@
     const zelle = (art, inhalt, o = {}) => `<span class="wdl-z-${art}"${o.lv ? ` data-wdl-lv="${o.lv}"` : ''}${o.tip ? ` title="${escapeHtml(o.tip)}"` : ''}${o.f ? ` style="color:${o.f}"` : ''}>${inhalt}</span>`
     const jetzt = Date.now(), minTxt = ms => { const m = Math.max(1, Math.ceil(ms / 60000)), h = Math.floor(m / 60); return m < 60 ? `${m} min` : `${h} h${m % 60 ? ` ${m % 60} min` : ''}` }   // wie wdlDauer
     // Master + Slave (01.10.2026, Finn: „wenn gegengehedgt wurde, sieht man auch den Slave-P&L"): zweite, kleine Zeile in der P&L-Zelle
-    const slaveZ = t => { const v = wdlSlavePl(t); return v == null ? '' : `<small class="wdl-z-slave" style="color:${col(v)}" title="Fusion-Gegenhedge">Fusion ${sig(v, '€', 2)}</small>` }
+    // nur bei Modellen MIT Fusion-Hedge (02.10.2026: Orbit V2 ohne Hedge zeigte „Fusion +0,00 €")
+    const slaveZ = t => { if(!['Echo', 'Orbit', 'Winning Day'].includes(wdlWeg(t))) return ''; const v = wdlSlavePl(t); return v == null ? '' : `<small class="wdl-z-slave" style="color:${col(v)}" title="Fusion-Gegenhedge">Fusion ${sig(v, '€', 2)}</small>` }
     // SCHLIESS-WEG (01.10.2026 abends, Finn: „bei Modellen mit Gegenhedge immer sehen, durch welchen Weg geschlossen wurde —
     // Userscript, Radar oder das 110-%-Level"): aus hedge.grund, kurz; der lange Text (hedgeGrundText) steht im Tooltip
     const ZU_WEG = { master_ende_reader: 'Userscript', tp_feed: 'Radar · TP', sl_feed: 'Radar · SL', level_tp: 'Terminal · Notfall 110 %', level_sl: 'Terminal · Master-SL',
@@ -37559,7 +37560,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.973'
+  const OS_TAB_BUILD = '2026-09-22.974'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
