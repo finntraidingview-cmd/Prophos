@@ -37657,7 +37657,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.985'
+  const OS_TAB_BUILD = '2026-09-22.986'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -42767,7 +42767,8 @@
       [/tradeify/i, 1000, 4500],
       [/fundednext(?!.*futures)/i, 1000, 10000],
       [/fundingpips|funding pips/i, 1500, 12000],
-      [/apex/i, 550, 4000]
+      [/apex/i, 550, 4000],
+      [/the\s*5/i, 500, 10000]   // The5%ers (02.10.2026): 100k = 500 €, 200k = 1.000 € — gleicher Satz bei 10 % DD
     ]
     if(!master || !(master.type === 'funded' || master.type === 'funded_cfd') || !(Number(master.maxDrawdown) > 0)) return null
     if(typeof tpWdAktiv === 'function' && tpWdAktiv()) return null
