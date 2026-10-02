@@ -20542,6 +20542,12 @@
     const lbl = `<span style="font-size:9.5px;font-weight:600;color:var(--sub);letter-spacing:.02em">MASTER</span>`
     const fE = v => Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     const k = wdKursJetzt(wurzel, 10000)
+    // Kurs selbst holen (02.10.2026, Finn: „mal P&L, mal Kurs fehlt"): am Mac läuft der tv_kurse-Kanal nur bei offenem Radar —
+    // im Trades-Reiter wurde der Kurs nach 10 s alt. Dann höchstens alle 5 s eine kleine Abfrage (hedgeKursLesen, 3-s-Cache,
+    // _hedgeKurs ist Quelle 3 in wdKursJetzt) — der nächste Tick des Chips zeigt den P&L
+    if(!k && typeof hedgeKursLesen === 'function' && Date.now() - (wdMasterChipInner._holAt || 0) > 5000){
+      wdMasterChipInner._holAt = Date.now(); hedgeKursLesen().catch(() => {})
+    }
     const r = k ? wdMasterLive(p.richtung, einstieg, kt, wurzel, k.preis) : null
     if(!r){
       return `<span class="mono tc2-hedge" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:var(--bg);border:1px solid var(--border-soft)" title="${escapeHtml(`Kein frischer NQ/MNQ-Kurs (≤ 10 s) — Master-P&L folgt mit dem Feed · Einstieg ${fE(einstieg)} (${eq})`)}">${lbl}<span style="font-size:11px;color:var(--sub)">${escapeHtml(kopf)} · Kurs fehlt</span></span>`
@@ -37612,7 +37618,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.982'
+  const OS_TAB_BUILD = '2026-09-22.983'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
