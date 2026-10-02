@@ -21218,7 +21218,10 @@
     if(_hedgeBusy.has(pid)) return { ok: false, msg: 'läuft schon' }
     // Backoff nach abgelehntem Close (Gegenprüfung 25.09.2026): 10 / 20 / 40 / 60 s — sonst hämmert der 1-s-Wächter Aufträge ins Panel
     if(h.close_fehler_at){
-      const n = Math.max(1, Number(h.close_versuche) || 1), warte = Math.min(60000, 10000 * Math.pow(2, n - 1))
+      // Panel/Copier NICHT ERREICHBAR (02.10.2026, Moritz: Close lief in den Panel-Neustart, nächster Versuch erst nach 10 s → Finn schloss
+      // Fusion von Hand): der Auftrag kam gar nicht an — dann jede Sekunde neu. Langes Backoff nur bei echten Ablehnungen des Brokers.
+      const n = Math.max(1, Number(h.close_versuche) || 1)
+      const warte = h.close_fehler_art === 'verbindung' ? 1000 : Math.min(60000, 10000 * Math.pow(2, n - 1))
       if(Date.now() - (Date.parse(h.close_fehler_at) || 0) < warte) return { ok: false, msg: `Backoff ${Math.round(warte / 1000)} s nach Close-Fehler` }
     }
     _hedgeBusy.add(pid)
@@ -21252,8 +21255,11 @@
         return { ok: true, pl }
       }
       const msg = String((res && (res.msg || res.error)) || 'keine Antwort')
-      await hedgeAmPlanSchreiben(plan.id, { status: 'offen', close_fehler: msg, close_fehler_at: new Date().toISOString(), close_versuche: (Number(h.close_versuche) || 0) + 1 })
-      if(typeof atToast === 'function') atToast('⚠ Fusion-Hedge NICHT geschlossen: ' + msg, 'end')
+      const verbindung = !res || ['verbindung', 'copier_alt', 'copier_stumm'].includes(String(res.code || '')) || /nicht erreichbar|ConnectionError|Failed to fetch|NetworkError|timeout|abort/i.test(msg)
+      await hedgeAmPlanSchreiben(plan.id, { status: 'offen', close_fehler: msg, close_fehler_at: new Date().toISOString(), close_versuche: (Number(h.close_versuche) || 0) + 1,
+        close_fehler_art: verbindung ? 'verbindung' : 'abgelehnt' })
+      // bei Verbindungsfehlern nicht jede Sekunde einen Hinweis — nur beim ersten Versuch
+      if(typeof atToast === 'function' && !(verbindung && (Number(h.close_versuche) || 0) > 0)) atToast('⚠ Fusion-Hedge NICHT geschlossen: ' + msg + (verbindung ? ' — neuer Versuch jede Sekunde' : ''), 'end')
       return { ok: false, msg }
     }finally{ _hedgeBusy.delete(pid) }
   }
@@ -37564,7 +37570,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.976'
+  const OS_TAB_BUILD = '2026-09-22.977'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
