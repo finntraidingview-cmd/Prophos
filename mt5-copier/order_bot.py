@@ -16448,6 +16448,18 @@ def cdp_konto_familie(nr):
     return ""
 
 
+def cdp_ein_konto_beleg(aktiv, ext):
+    """REIN RECHNEND (testbar): Umschalter geklickt, keine Liste — belegt das einen anderen Tradovate-Login? Nur wenn das aktive Konto
+    als Kontonummer lesbar ist und NICHT das Ziel (02.10.2026, Login mit nur einem Konto)."""
+    nr = cdp_kontonr(aktiv)
+    if not (nr and ext) or cdp_konto_passt(str(aktiv or ""), ext):
+        return False
+    fa, fz = cdp_konto_familie(nr), cdp_konto_familie(ext)
+    if fa and fa == fz and fa.startswith("apex:"):
+        return False   # derselbe Apex-User = derselbe Login (viele Konten) — die Liste wurde nur nicht erkannt
+    return True
+
+
 def cdp_konto_eintrag(eintraege, ext):
     """REIN RECHNEND (testbar): GENAU EIN Dropdown-Eintrag mit dieser External ID (cdp_konto_passt). -> (eintrag|None, anzahl)"""
     treffer = [e for e in (eintraege or []) if isinstance(e, dict) and cdp_konto_passt(str(e.get("text") or ""), ext)]
@@ -16781,6 +16793,13 @@ def _cdp_konto_sichern(s, ext, opts, trail):
         # offenes Dropdown wieder). Danach zweimal lesen; bleibt es zu, ehrlich raus MIT dem Stand für T1.
         if geklickt_umschalter:
             _cdp_esc(s, st, trail, "Dropdown nicht erkannt")   # was auch immer aufging: nicht offen stehen lassen (Prüfer 30.09.2026)
+            # LOGIN MIT NUR EINEM KONTO (02.10.2026, Moritz, Balance-Lesen: aktiv TDFYSL…, Umschalter-Klick öffnet keine Liste): ist das
+            # aktive Konto als Kontonummer lesbar und ein ANDERES als das Ziel, gilt das als Beleg „anderer Tradovate-Login" — wie beim
+            # Order-Weg. Lesbarkeit ist der Schutz aus .865 (dort war aktiv '-'); cdp_abmelden_erlaubt prüft vor dem Abmelden noch einmal.
+            if cdp_ein_konto_beleg(aktiv, ext):
+                trail.append(f"Umschalter öffnet keine Liste, aktiv {cdp_kontonr(aktiv)} ≠ Ziel {ext} → anderer Tradovate-Login (Login mit einem Konto)")
+                return False, "konto_nicht_erreicht", (f"Konto {ext} nicht im aktiven Tradovate-Login (der hat nur {cdp_kontonr(aktiv)}) — Login-Wechsel."), st, \
+                    {"konto_treffer": 0, "liste_aktiv": aktiv[:80], "ein_konto": True}
             return False, "konto_nicht_erreicht", (f"Konto-Umschalter geklickt, Dropdown nicht erkannt (aktiv '{aktiv[:40] or '-'}') — "
                                                    "augen.js sieht die Liste nicht (Selektoren?), der Klick trifft nicht, oder der Login hat "
                                                    "nur dieses eine Konto" + (f"; Order-Panel {lage} ({(pd or {}).get('unter_leiste')} px)" if lage else "")

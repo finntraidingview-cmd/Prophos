@@ -3661,6 +3661,10 @@ def test_cdp_konto_regression_865():
     chk(F("FNFTCH0000000000000") == "fundednext" and F("MFFUEVPRO000000000") == "mff"
         and ob.cdp_liste_beleg({"liste_voll": False}, "FTDFYSLX150200000000", "FNFTCH0000000000000") == (True, ""),
         "Login-Familie FundedNext Futures / MyFundedFutures — Wechsel von Tradeify auch bei scrollbarer Liste")
+    chk(ob.cdp_ein_konto_beleg("TDFYSL150100000000USD", "TDFYSL150200000000") and not ob.cdp_ein_konto_beleg("TDFYSL150100000000USD", "TDFYSL150100000000")
+        and not ob.cdp_ein_konto_beleg("-", "TDFYSL150200000000") and not ob.cdp_ein_konto_beleg("", "TDFYSL150200000000")
+        and not ob.cdp_ein_konto_beleg("PAAPEX0000000000007USD", "PAAPEX0000000000008"),
+        "Login mit einem Konto: lesbar + anderes Konto = Beleg, gleiches/unlesbares nie")
     B = ob.cdp_liste_beleg
     ko_v = {"liste_voll": True, "eintraege": [{"text": TD1 + "USD"}]}
     chk(B({}, Z8 + "USD", TD1) == (True, "") and B({}, Z8 + "USD", "PAAPEX1111110000002") == (True, "")
