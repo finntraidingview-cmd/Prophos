@@ -37618,7 +37618,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.983'
+  const OS_TAB_BUILD = '2026-09-22.984'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -42490,6 +42490,10 @@
       // mit 4.000 $ (Multiplikator 0,059). Hier gilt nur die Farmer-Vorgabe wd_sl bzw. die Staffel (tpWdSlaveRiskVorbelegen).
       _tpRiskAuto.master = String(master.id)
       setTimeout(() => { try{ tpWdSlaveRiskVorbelegen(); tpWdVorschau() }catch(_){} }, 0)
+    } else if(master && !_tpRiskAuto.manuell && _tpRiskAuto.master !== String(master.id) && tpFundedHedgeVorgabe(master)){
+      // Funded mit fester Gegenhedge-Vorgabe (02.10.2026) — statt Gesamtkosten/Auto-Vorschlag
+      _tpRiskAuto.master = String(master.id)
+      setTimeout(() => { try{ tpFundedHedgeAnwenden() }catch(_){} }, 0)
     } else if(master && !_tpRiskAuto.manuell && _tpRiskAuto.master !== String(master.id)){
       _tpRiskAuto.master = String(master.id)
       const istFut = (typeof tpFirmIstFutures === 'function') && tpFirmIstFutures(master.firm)
@@ -42712,6 +42716,43 @@
       tpRecompute()
     }
   })
+  /* Funded-Gegenhedge fest je Firma (02.10.2026, Finn: „bei den Fundeds immer genau die Gesamtkosten über den Multiplikator"):
+   * Satz = € Gegenhedge je $ Max Drawdown, aus Finns Werten (Topstep 900 € auf 4.500 $, Tradeify 1.000 € auf 4.500 $, FundedNext
+   * 1.000 € auf 10.000 $, FundingPips 1.500 € auf 12.000 $, Apex 550 € auf 4.000 $). Als Satz, damit andere Größen mitgehen
+   * (FundedNext 200k = 20.000 $ DD → 2.000 €). Risiko Master = Max Drawdown des Kontos, Risiko Slave = Satz × Drawdown.
+   * Nur funded/funded_cfd; Winning Days haben ihre eigene Vorgabe (tpWdAktiv). Feld bleibt von Hand änderbar. */
+  function tpFundedHedgeVorgabe(master){
+    // Liste in der Funktion (nicht als const davor): tpRecompute kann vor dieser Zeile laufen
+    const FUNDED_HEDGE_SAETZE = [
+      [/topstep/i, 900, 4500],
+      [/tradeify/i, 1000, 4500],
+      [/fundednext(?!.*futures)/i, 1000, 10000],
+      [/fundingpips|funding pips/i, 1500, 12000],
+      [/apex/i, 550, 4000]
+    ]
+    if(!master || !(master.type === 'funded' || master.type === 'funded_cfd') || !(Number(master.maxDrawdown) > 0)) return null
+    if(typeof tpWdAktiv === 'function' && tpWdAktiv()) return null
+    const z = FUNDED_HEDGE_SAETZE.find(([re]) => re.test(String(master.firm || '')))
+    if(!z) return null
+    const satz = z[1] / z[2]
+    return { satz, dd: Number(master.maxDrawdown), eur: Math.round(satz * Number(master.maxDrawdown) * 100) / 100 }
+  }
+  function tpFundedHedgeAnwenden(){
+    const master = accounts.find(a => String(a.id) === String(document.getElementById('tp-master')?.value))
+    const v = tpFundedHedgeVorgabe(master); if(!v) return false
+    tpAutoSelectLiveSlaveIfEmpty()
+    tpFillMasterRiskFromDD()
+    const slave = accounts.find(a => String(a.id) === String(document.getElementById('tp-slave')?.value))
+    let wert = v.eur
+    if(slave){
+      const sp = FIRM_PRESETS[firmToPreset(slave.firm)] || FIRM_PRESETS.projectx
+      if(sp.currency !== '€') wert = v.eur / (window._fxUsdEur || 0.85)
+    }
+    const el = document.getElementById('tp-slave-risk')
+    if(el){ el.value = wert.toFixed(2); el.title = `Funded-Vorgabe: ${v.eur.toLocaleString('de-DE')} € Gegenhedge auf ${v.dd.toLocaleString('de-DE')} $ Max Drawdown` }
+    tpRecompute()
+    return true
+  }
   // Gesamtkosten übernehmen (voller Reingesteckt-Betrag, unskaliert)
   document.getElementById('tp-gesamtkosten-apply')?.addEventListener('click', () => {
     tpAutoSelectLiveSlaveIfEmpty()
