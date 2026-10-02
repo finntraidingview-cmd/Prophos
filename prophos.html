@@ -2153,6 +2153,9 @@
   #dashboard-view .wdl-z-ri em.is-sell{background:rgba(240,68,56,.10);color:#b91c1c}
   #dashboard-view .wdl-z-mi{grid-area:mi;text-align:right}
   #dashboard-view .wdl-z-pl{grid-area:pl;text-align:right;font-weight:600}
+  /* Konto-Spalte nur in Überprüfen/Erledigt (02.10.2026) */
+  #dashboard-view .wdl-tab-konto .wdl-z{grid-template-columns:minmax(0,1fr) 150px 196px 110px 150px 136px;grid-template-areas:"wer ri mi konto pl zeit"}
+  #dashboard-view .wdl-z-konto{grid-area:konto;text-align:right;color:var(--sub);white-space:nowrap}
   #dashboard-view .wdl-z-slave{display:block;margin-top:1px;font-size:11px;font-weight:500;white-space:nowrap}
   /* „Ansehen" unter der Laufzeit (02.10.2026) */
   #dashboard-view .wdl-ansehen{display:block;margin:3px 0 0 auto;padding:1px 8px;font:inherit;font-size:11px;font-weight:500;color:var(--violet);background:none;border:1px solid var(--border);border-radius:6px;cursor:pointer}
@@ -2203,7 +2206,8 @@
   /* Handy: zwei Zeilen, dasselbe Raster für Kopf und Zeilen — oben wer + P&L, darunter Richtung · Spanne/Ergebnis · Zeit */
   @media (max-width:820px){
     #dashboard-view .wdl-tab{border:none;border-radius:var(--m-r-card,16px);box-shadow:var(--shadow-mob-card,0 1px 2px rgba(16,24,40,.05))}
-    #dashboard-view .wdl-z{grid-template-columns:84px minmax(0,1fr) minmax(0,1fr) 88px;grid-template-areas:"wer wer wer pl" "ri mi mi zeit";column-gap:4px;row-gap:5px;padding:10px 12px;font-size:12px}
+    #dashboard-view .wdl-z, #dashboard-view .wdl-tab-konto .wdl-z{grid-template-columns:84px minmax(0,1fr) minmax(0,1fr) 88px;grid-template-areas:"wer wer wer pl" "ri mi mi zeit";column-gap:4px;row-gap:5px;padding:10px 12px;font-size:12px}
+    #dashboard-view .wdl-z-konto{display:none}   /* Handy: kein Platz — Ergebnis-Wort zeigt den Blow */
     #dashboard-view .wdl-z-lauf .wdl-z-pl{font-size:14px}
     #dashboard-view .wdl-z > .wdl-sp{gap:6px;padding:0 4px}
     #dashboard-view .wdl-sp small i:not(:only-child){display:none}   /* Handy: nur der Betrag, das Label nur ohne Betrag */
@@ -25686,15 +25690,18 @@
     const geblowt = liq != null && bal <= liq + 25
     return { bal, quelle, liq, tagLiq, geblowt, softBreach: !geblowt && tagLiq != null && bal <= tagLiq + 25 }
   }
-  function wdlBlowZ(t){
+  // Eigene Spalten (02.10.2026, Finn: „eine eigene Spalte für den Kontostand und eine für geblowt/Take Profit"): Ergebnis-Wort
+  // („💀 geblowt" / „⚠ Tageslimit" schlägt SL/Liq der Demo) und Konto-Zelle
+  function wdlBlowErg(t){
     const b = wdlBlowStand(t); if(!b) return ''
+    return b.geblowt ? '<b style="color:#b91c1c">💀 geblowt</b>' : b.softBreach ? '<b style="color:#b45309">⚠ Tageslimit</b>' : ''
+  }
+  function wdlKontoZ(t){
+    const b = wdlBlowStand(t)
+    if(!b) return '<span class="wdl-z-konto" title="noch keine Balance nach dem Trade gelesen">–</span>'
     const f0 = v => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 0 })
     const tip = `${b.quelle}: ${f0(b.bal)} $${b.liq != null ? ` · Blow (Max Drawdown) bei ${f0(b.liq)} $` : ''}${b.tagLiq != null ? ` · Tageslimit bei ${f0(b.tagLiq)} $ (Soft-Breach, Konto lebt)` : ''}`
-    return b.geblowt
-      ? `<small class="wdl-z-slave" style="color:#b91c1c;font-weight:700" title="${escapeHtml(tip)}">💀 geblowt · ${f0(b.bal)} $</small>`
-      : b.softBreach
-        ? `<small class="wdl-z-slave" style="color:#b45309;font-weight:600" title="${escapeHtml(tip)}">⚠ Tageslimit · ${f0(b.bal)} $</small>`
-        : `<small class="wdl-z-slave" style="color:var(--sub)" title="${escapeHtml(tip)}">Konto ${f0(b.bal)} $</small>`
+    return `<span class="wdl-z-konto" title="${escapeHtml(tip)}"${b.geblowt ? ' style="color:#b91c1c"' : ''}>${f0(b.bal)} $</span>`
   }
   /* ANSEHEN (02.10.2026, Finn: „Ansehen bei allen laufenden Trades — Puls navigiert am jeweiligen PC zu dem Trade, damit ich ihn
    * visuell sehe; ist er schon zu, wird er direkt abgehakt"). Railway legt das Signal im Namen des Plan-Besitzers an (aktion
@@ -25800,7 +25807,7 @@
       const lots = v => num(v) == null ? '?' : Number(v).toLocaleString('de-DE', { maximumFractionDigits: 2 })
       const ri = echo ? zelle('ri', `<em${buy ? ' class="is-buy"' : sell ? ' class="is-sell"' : ''}>${buy ? 'BUY' : sell ? 'SELL' : '?'}</em>${lots(t.lots)} Lot${t.symbol ? `<span class="wdl-z-sym"> ${escapeHtml(t.symbol)}</span>` : ''}`, { tip: `${lots(t.lots)} Lot${t.symbol ? ' ' + t.symbol : ''}` })
         : zelle('ri', `<em${buy ? ' class="is-buy"' : sell ? ' class="is-sell"' : ''}>${buy ? 'BUY' : sell ? 'SELL' : '?'}</em>${t.kt != null ? f0(t.kt) : '?'} × ${escapeHtml(t.symbol_root || '?')}`)
-      let art, miZ, plZ, zeitZ
+      let art, miZ, plZ, zeitZ, kontoZ = ''
       if(offen){
         art = 'lauf'
         if(echo){
@@ -25855,10 +25862,11 @@
         art = 'pruef'
         const pid = wdlTid(t), sperre = wdlAbhakenSperre(t)
         const pb = num(t.pl_balance) != null ? num(t.pl_balance) : num(t.master_pl && t.master_pl.wert)
-        const erg = echo ? '' : d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : ''
+        const erg = wdlBlowErg(t) || (echo ? '' : d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : '')
+        kontoZ = wdlKontoZ(t)
         miZ = zelle('mi wdl-z-akt', `${erg ? `<span>${erg}</span>` : ''}<button type="button" class="btn btn-ghost el-knopf" data-wdl-abhaken="${escapeHtml(pid)}"${sperre ? ' disabled' : ''} title="${escapeHtml(sperre || 'Abhaken — P&L prüfen und Trade erledigen')}">Abhaken</button>`,
           { tip: echo ? '' : demoTip(d) })
-        plZ = zelle('pl', sig(pb, '$', 2) + slaveZ(t) + zuWegZ(t) + wdlBlowZ(t), { f: col(pb), tip: num(t.pl_balance) != null ? (echo ? 'MT5-Balance' : 'Balance') + ' nachher − vorher' : pb != null ? 'P&L am Plan' : 'noch kein P&L — beim Abhaken eintragen' })
+        plZ = zelle('pl', sig(pb, '$', 2) + slaveZ(t) + zuWegZ(t), { f: col(pb), tip: num(t.pl_balance) != null ? (echo ? 'MT5-Balance' : 'Balance') + ' nachher − vorher' : pb != null ? 'P&L am Plan' : 'noch kein P&L — beim Abhaken eintragen' })
         zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
       } else {
         art = 'zu'
@@ -25866,18 +25874,20 @@
         if(echo){
           // Echo: keine Demo → kein Ergebnis-Wort; P&L = MT5-Balance nachher − vorher, sonst der P&L am Plan
           const pb = num(t.pl_balance) != null ? num(t.pl_balance) : num(t.master_pl && t.master_pl.wert)
-          miZ = zelle('mi', '–', { tip: 'Echo: kein Demo-Ergebnis — der P&L kommt aus der MT5-Balance' })
+          miZ = zelle('mi', wdlBlowErg(t) || '–', { tip: 'Echo: kein Demo-Ergebnis — der P&L kommt aus der MT5-Balance' })
+          kontoZ = wdlKontoZ(t)
           plZ = zelle('pl', sig(pb, '$', 2) + slaveZ(t), { f: col(pb), tip: num(t.pl_balance) != null ? 'MT5-Balance nachher − vorher' : pb != null ? 'P&L am Plan' : 'noch keine End-Balance' })
         } else {
-        const erg = d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : '–'
+        const erg = wdlBlowErg(t) || (d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : '–')
         miZ = zelle('mi', erg, { tip: demoTip(d) })
-        plZ = zelle('pl', sig(t.pl_balance, '$', 2) + slaveZ(t) + zuWegZ(t) + wdlBlowZ(t), { f: col(t.pl_balance), tip: num(t.pl_balance) != null ? 'Balance nachher − vorher' : 'keine End-Balance' })
+        kontoZ = wdlKontoZ(t)
+        plZ = zelle('pl', sig(t.pl_balance, '$', 2) + slaveZ(t) + zuWegZ(t), { f: col(t.pl_balance), tip: num(t.pl_balance) != null ? 'Balance nachher − vorher' : 'keine End-Balance' })
         }
         zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
       }
       return `<div class="wdl-z wdl-z-${art}${echo ? ' wdl-z-echo' : ''}${an ? ' is-aktiv' : ''}${extra ? ' ' + extra : ''}" style="--wdl-id:${wdlIdFarbe(t)}" data-wdl-trade="${escapeHtml(wdlTid(t))}" title="${escapeHtml(tip)}">`
         + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><i class="wdl-pf">${escapeHtml(wdlWeg(t))}</i><small>${escapeHtml(konto)}</small></span>`
-        + ri + miZ + plZ + zeitZ + '</div>'
+        + ri + miZ + kontoZ + plZ + zeitZ + '</div>'
     }
     // Gruppe = ein Kasten, oben einmal die Spaltenköpfe im selben Raster wie die Zeilen
     // mehr = Schlüssel für „Beendet" (30.09.2026, Finn sah die Echo-Sektion nicht — sie stand unter Orbits „Beendet · 42"): nur die
@@ -25898,7 +25908,7 @@
       const zeilen = bloecke.map(([k, b]) => kopfZ(k, b) + (alle ? b : b.slice(0, WDL_BEENDET_KURZ)).map(t => zeile(t, '')).join('')).join('')
       const fuss = mehr && lang ? `<button type="button" class="wdl-mehr" data-wdl-mehr="${mehr}">${alle ? 'weniger' : `alle ${arr.length} zeigen`}</button>` : ''
       return `<div class="wdl-tab${cls ? ' ' + cls : ''}"><div class="wdl-z wdl-z-kopf"><span class="wdl-z-wer">${titel} · ${arr.length}</span><span class="wdl-z-ri"></span>`
-        + sp.map((x, i) => `<span class="wdl-z-${['mi', 'pl', 'zeit'][i]}">${x}</span>`).join('') + `</div>${zeilen}${fuss}</div>`
+        + sp.map((x, i) => `<span class="wdl-z-${(sp.length === 4 ? ['mi', 'konto', 'pl', 'zeit'] : ['mi', 'pl', 'zeit'])[i]}">${x}</span>`).join('') + `</div>${zeilen}${fuss}</div>`
     }
     const nachEnde = arr => arr.sort((a, b) => String(b.ended_at || '').localeCompare(String(a.ended_at || '')))
     const nachStart = arr => arr.sort((a, b) => String(a.started_at || '').localeCompare(String(b.started_at || '')))
@@ -25915,8 +25925,8 @@
       const wa = rv.filter(t => !wdlIstEcho(t) && wdlWartet(t)), pr = rv.filter(t => !wa.includes(t))
       return gruppe('Läuft', nachStart(la), ['Spanne', 'P&amp;L', 'Seit'], 'wdl-tab-lauf')
         + gruppe('Wartet', nachEnde(wa), ['Nachlesung', 'P&amp;L', 'Zu'])
-        + gruppe('Überprüfen', nachEnde(pr), ['', 'P&amp;L', 'Zu'])
-        + gruppe('Erledigt', nachEnde(er), ['Ergebnis', 'P&amp;L', 'Zu'], '', 'erledigt')
+        + gruppe('Überprüfen', nachEnde(pr), ['Ergebnis', 'Konto', 'P&amp;L', 'Zu'], 'wdl-tab-konto')
+        + gruppe('Erledigt', nachEnde(er), ['Ergebnis', 'Konto', 'P&amp;L', 'Zu'], 'wdl-tab-konto', 'erledigt')
     }
     liste.innerHTML = trades.length ? gruppen(trades)
       : `<div class="mwd-leer">${wdl.daten ? (wdl.modell ? `Keine ${escapeHtml(wdl.modell)}-Trades im Zeitraum.` : 'Keine Trades im Zeitraum.') : (wdl.fehler ? 'Nicht ladbar: ' + escapeHtml(wdl.fehler) : 'Lade Radar…')}</div>`
@@ -37702,7 +37712,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.989'
+  const OS_TAB_BUILD = '2026-09-22.990'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
