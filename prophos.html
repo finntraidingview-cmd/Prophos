@@ -2132,7 +2132,7 @@
   #dashboard-view .wdl-pf{display:inline-block;margin:0 0 0 8px;padding:1px 6px;border-radius:4px;background:var(--surface-tint);color:var(--sub);font-size:10px;font-weight:600;letter-spacing:.03em;font-style:normal;vertical-align:1px}
   #dashboard-view .wdl-z-echo{cursor:default}
   #dashboard-view .wdl-z-sym{color:var(--sub-2)}   /* Richtung-Spalte 150 px (vorher 112): „SELL 0,5 Lot NDX100" passt ganz */
-  #dashboard-view .wdl-z{display:grid;grid-template-columns:minmax(0,1fr) 150px 256px 112px 136px;grid-template-areas:"wer ri mi pl zeit";align-items:center;column-gap:16px;padding:11px 16px;font-size:13px;color:var(--ink-2);font-variant-numeric:tabular-nums;cursor:pointer;transition:background .12s}
+  #dashboard-view .wdl-z{display:grid;grid-template-columns:minmax(0,1fr) 150px 256px 150px 136px;grid-template-areas:"wer ri mi pl zeit";align-items:center;column-gap:16px;padding:11px 16px;font-size:13px;color:var(--ink-2);font-variant-numeric:tabular-nums;cursor:pointer;transition:background .12s}
   #dashboard-view .wdl-z + .wdl-z{border-top:1px solid var(--border-soft)}
   #dashboard-view .wdl-z + .wdl-z.wdl-z-pfneu{border-top:2px solid var(--border)}   /* Wechsel Orbit → Echo in einer Gruppe (30.09.2026, .869) */
   #dashboard-view .wdl-z:not(.wdl-z-kopf):hover{background:var(--bg)}
@@ -2153,7 +2153,11 @@
   #dashboard-view .wdl-z-ri em.is-sell{background:rgba(240,68,56,.10);color:#b91c1c}
   #dashboard-view .wdl-z-mi{grid-area:mi;text-align:right}
   #dashboard-view .wdl-z-pl{grid-area:pl;text-align:right;font-weight:600}
-  #dashboard-view .wdl-z-slave{display:block;margin-top:1px;font-size:11px;font-weight:500}   /* Slave-P&L unter dem Master (01.10.2026) */
+  #dashboard-view .wdl-z-slave{display:block;margin-top:1px;font-size:11px;font-weight:500;white-space:nowrap}
+  /* „Ansehen" unter der Laufzeit (02.10.2026) */
+  #dashboard-view .wdl-ansehen{display:block;margin:3px 0 0 auto;padding:1px 8px;font:inherit;font-size:11px;font-weight:500;color:var(--violet);background:none;border:1px solid var(--border);border-radius:6px;cursor:pointer}
+  #dashboard-view .wdl-ansehen:hover{border-color:var(--violet)}
+  #dashboard-view .wdl-ansehen:disabled{color:var(--sub);cursor:default}   /* Slave-P&L unter dem Master (01.10.2026) */
   /* Modell-Leiste im Radar (01.10.2026 abends, Finn: „ein Tab je Modell, schön geordnet") — Gruppen wie im Plan-Popup */
   /* Vorprüfung Orbit/WD (02.10.2026): Abschlusszeile unter den pf-Zeilen */
   #vcModal .vc-final{margin-top:12px;padding:10px 12px;border-radius:8px;font-size:13px;font-weight:600;line-height:1.45}
@@ -25647,6 +25651,36 @@
     try{ const g = window._tvV2Endlesung && window._tvV2Endlesung.grund; if(eigen && typeof g === 'function') return String(g(eigen, Date.now(), true) || '') }catch(_){}
     return ''
   }
+  /* ANSEHEN (02.10.2026, Finn: „Ansehen bei allen laufenden Trades — Puls navigiert am jeweiligen PC zu dem Trade, damit ich ihn
+   * visuell sehe; ist er schon zu, wird er direkt abgehakt"). Railway legt das Signal im Namen des Plan-Besitzers an (aktion
+   * 'ansehen'): TradingView/TopstepX = Endlesung mit Prüfen (Konto anzeigen, flach → „Überprüfen"), Echo = MT5-Terminal nach vorn.
+   * Stand über endlesung_stand, höchstens 4 min. */
+  const _wdlAnsehenBusy = new Set()
+  async function wdlAnsehen(pid){
+    pid = String(pid || ''); if(!pid || _wdlAnsehenBusy.has(pid)) return
+    const t = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === pid)
+    const wer = t ? `${t.person || '?'} · ${(t.konto && t.konto.firma) || ''}${t.konto && t.konto.kontonr_ende ? ' …' + t.konto.kontonr_ende : ''}` : 'Trade'
+    _wdlAnsehenBusy.add(pid); wdlRender()
+    const ende = (txt, art) => { _wdlAnsehenBusy.delete(pid); try{ wdlRender() }catch(_){} if(typeof atToast === 'function') atToast(txt, art) }
+    try{
+      const tok = await _pushTok(); if(!tok) throw new Error('nicht angemeldet')
+      const ruf = body => fetch(`${WATCHER_HOME}/admin/wd-plaene`, { method: 'PATCH', headers: { 'sb-token': tok, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+        .then(r => r.json().then(d => ({ r, d })).catch(() => ({ r, d: {} })))
+      const { r, d } = await ruf({ aktion: 'ansehen', plan_id: pid })
+      if(!r.ok || !d.signal_id) throw new Error(d.error || ('HTTP ' + r.status))
+      const echoArt = d.art === 'mt5_terminal'
+      if(typeof atToast === 'function') atToast(`👁 ${wer}: ${echoArt ? 'MT5-Terminal wird am PC geöffnet …' : 'Puls springt am PC auf das Konto …'}`, 'ok')
+      const t0 = Date.now()
+      while(Date.now() - t0 < 240000){
+        await new Promise(res => setTimeout(res, 4000))
+        const { d: st } = await ruf({ aktion: 'endlesung_stand', signal_id: d.signal_id })
+        const s = st && st.status, msg = String((st && st.ergebnis && (st.ergebnis.msg || st.ergebnis.grund)) || '')
+        if(s === 'fertig'){ ende(`👁 ${wer}: ${msg || (echoArt ? 'Terminal offen' : 'Konto angezeigt')}${st.pc ? ` (PC ${st.pc})` : ''}`, 'ok'); try{ wdlLaden(true) }catch(_){} return }
+        if(['fehler', 'verfallen', 'verworfen'].includes(s)){ ende(`👁 ${wer}: ${msg || s}`, 'end'); try{ wdlLaden(true) }catch(_){} return }
+      }
+      ende(`👁 ${wer}: kein PC hat geantwortet — läuft Prophos am PC dieser ID?`, 'end')
+    }catch(e){ ende('Ansehen nicht gesendet: ' + String((e && e.message) || e), 'end') }
+  }
   function wdlAbhakenSperre(t){
     // seit 30.09.2026 (Finn wollte einen Echo-Trade von Mike abhaken, Knopf war gesperrt): Orbit/Echo/Topstep V2 aller IDs
     // seit 02.10.2026 auch Echo mit Fusion-Hedge (mt5) und Duplikum (tvplus) — Finn: „natürlich will ich auch Echo-Trades hier abhaken"
@@ -25743,7 +25777,10 @@
         }
         // „läuft seit 03:24 · 40 min" (Finn 30.09.2026) — an einem anderen Tag „29.09. · 1 T 3 h"; am Handy nur die Laufzeit
         const ab = new Date(t.started_at || ''), abTxt = isNaN(ab) ? '' : ab.toDateString() === heute ? zeit(t.started_at) : tag(ab)
-        zeitZ = zelle('zeit', `${abTxt ? `<span class="wdl-z-ab">${abTxt} · </span>` : ''}<span class="wdl-z-dauer" data-wdl-lv="dauer">${wdlDauer(t.started_at)}</span>`, { tip: 'läuft seit ' + zeit(t.started_at) })
+        // „Ansehen" (02.10.2026): Puls springt am PC dieser ID auf das Konto — Echo: MT5-Terminal nach vorn
+        const apid = wdlTid(t), aBusy = _wdlAnsehenBusy.has(apid)
+        const aKnopf = `<button type="button" class="wdl-ansehen" data-wdl-ansehen="${escapeHtml(apid)}"${aBusy ? ' disabled' : ''} title="${escapeHtml(echo ? 'MT5-Terminal dieses Kontos am PC der ID nach vorn holen — keine Order' : 'Puls springt am PC der ID in TradingView auf dieses Konto — ist die Position schon zu, geht der Trade auf „Überprüfen"')}">${aBusy ? 'öffnet …' : 'Ansehen'}</button>`
+        zeitZ = zelle('zeit', `${abTxt ? `<span class="wdl-z-ab">${abTxt} · </span>` : ''}<span class="wdl-z-dauer" data-wdl-lv="dauer">${wdlDauer(t.started_at)}</span>${aKnopf}`, { tip: 'läuft seit ' + zeit(t.started_at) })
       } else if(gepl){
         art = 'plan'
         miZ = zelle('mi', num(t.master_tp) != null ? f0(t.master_tp) + ' $' : '–')
@@ -25853,6 +25890,8 @@
       Promise.resolve(lauf).finally(() => wdlLaden(true))
       return
     }
+    const an = ev.target.closest('[data-wdl-ansehen]')
+    if(an){ if(!an.disabled) wdlAnsehen(an.getAttribute('data-wdl-ansehen')); return }
     const ab = ev.target.closest('[data-wdl-abhaken]')
     if(ab){
       if(ab.disabled) return
@@ -37618,7 +37657,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.984'
+  const OS_TAB_BUILD = '2026-09-22.985'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

@@ -8796,7 +8796,7 @@ def admin_wd_plaene():
                 tab, key = "order_signale", str(d.get("signal_id") or "").strip()
             elif akt == "farm":
                 tab, key = "accounts", str(d.get("account_id") or "").strip()
-            elif akt in ("ende", "endlesung", "erledigt"):
+            elif akt in ("ende", "endlesung", "erledigt", "ansehen"):
                 tab, key = "trade_plans", str(d.get("plan_id") or "").strip()
             else:
                 tab, key = "trade_plans", str(d.get("id") or request.args.get("id") or "").strip()
@@ -8985,6 +8985,44 @@ def admin_wd_plaene():
                 return jsonify({"error": "Plan wurde gleichzeitig geändert — bitte erneut versuchen", "plan_id": pid}), 409
             except Exception as e:
                 return jsonify({"error": f"Nicht beendet ({type(e).__name__})"}), 502
+        if daten.get("aktion") == "ansehen":
+            # „Ansehen" im Radar (02.10.2026, Finn: „Puls navigiert am PC zu dem Trade, damit ich ihn visuell sehe — falls er schon
+            # zu ist, wird er direkt abgehakt"). Kein neuer PC-Weg, nur vorhandene Signale im Namen des Plan-Besitzers:
+            # TradingView/TopstepX (Orbit, Winning Day, Orbit V2, Puls-Topstep V2) = Endlesung mit Prüfen — Puls springt aufs Konto,
+            # ist die Position zu, geht der Plan auf „Überprüfen"; Echo/Echo V2 = 'mt5_terminal' — das MT5-Terminal des Masters kommt
+            # nach vorn (keine Order). Stand wie bei „Jetzt lesen" über endlesung_stand.
+            pid = str(daten.get("plan_id") or "").strip()
+            if len(pid) < 10:
+                return jsonify({"error": "plan_id fehlt"}), 400
+            try:
+                rows = sb_select("trade_plans", {"select": "id,route,status,user_id,master_account_id,master_name,mt5_baseline",
+                                                 "id": f"eq.{pid}", "limit": "1"})
+                plan = rows[0] if rows else None
+                if not plan:
+                    return jsonify({"error": "Plan nicht gefunden", "plan_id": pid}), 404
+                route, uid = str(plan.get("route") or ""), str(plan.get("user_id") or "")
+                if len(uid) < 10:
+                    return jsonify({"error": "Plan ohne Besitzer", "plan_id": pid}), 409
+                if route in ("mt5", "mt5v2"):
+                    aid = str(plan.get("master_account_id") or "")
+                    acc = sb_select("accounts", {"select": "id,name,firm,external_id", "id": f"eq.{aid}", "limit": "1"}) if aid else []
+                    ml = sb_select("mt5_links", {"select": "mt5_login", "account_id": f"eq.{aid}", "limit": "1"}) if aid else []
+                    a0 = acc[0] if acc else {}
+                    login = str((ml[0] if ml else {}).get("mt5_login") or a0.get("external_id") or "").strip()
+                    if not aid or not login:
+                        return jsonify({"error": "Master ohne MT5-Login — Terminal nicht auffindbar", "plan_id": pid}), 409
+                    zeile = {"user_id": uid, "plan_id": f"konto:{aid}", "status": "wartet",
+                             "params": {"aktion": "mt5_terminal", "account_id": aid, "login": login, "external_id": a0.get("external_id"),
+                                        "firm": a0.get("firm"), "name": a0.get("name") or plan.get("master_name"), "von": "admin"}}
+                else:
+                    zeile, fehler = _wd_endlesung_signal(plan)
+                    if fehler:
+                        return jsonify({"error": fehler[1], "plan_id": pid}), fehler[0]
+                sig = sb_insert("order_signale", zeile)
+                return jsonify({"ok": True, "plan_id": pid, "signal_id": str((sig or {}).get("id") or ""),
+                                "art": zeile["params"]["aktion"]})
+            except Exception as e:
+                return jsonify({"error": f"Signal nicht angelegt ({type(e).__name__})"}), 502
         if daten.get("aktion") == "endlesung":
             # „Jetzt lesen" (25.09.2026): Signal im Namen des Plan-Besitzers — sein PC-Tab liest Today's P&L + Exit-Fill
             pid = str(daten.get("plan_id") or "").strip()
@@ -9006,7 +9044,7 @@ def admin_wd_plaene():
                 return jsonify({"error": "signal_id fehlt"}), 400
             try:
                 rows = sb_select("order_signale", {"select": "id,status,ergebnis,pc,updated_at,params", "id": f"eq.{sid}", "limit": "1"})
-                if not rows or (rows[0].get("params") or {}).get("aktion") != "endlesung":
+                if not rows or (rows[0].get("params") or {}).get("aktion") not in ("endlesung", "mt5_terminal"):   # mt5_terminal: „Ansehen"
                     return jsonify({"error": "Signal nicht gefunden"}), 404
                 z = rows[0]
                 return jsonify({"ok": True, "status": z.get("status"), "ergebnis": z.get("ergebnis"), "pc": z.get("pc"), "updated_at": z.get("updated_at")})
