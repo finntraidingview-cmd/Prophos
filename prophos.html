@@ -25216,7 +25216,9 @@
     _mwdErlKonto = (pw.hedge && pw.hedge.hedge_login) ? `das Fusion-Konto ${pw.hedge.hedge_login}` : 'das Fusion-Konto des PCs'
     mklWdErlSumme()
     const msg = document.getElementById('mwdErledigtMsg'); if(msg){ msg.textContent = ''; msg.className = 'modal-msg' }
-    const stNone = document.querySelector('input[name="mwd-erl-status"][value="none"]'); if(stNone) stNone.checked = true
+    // Blow erkannt (02.10.2026): „geblowt" vorbelegen — Balance nach dem Trade an/unter der Liquidation; Finn kann umstellen
+    const _bl = (typeof wdlBlowStand === 'function') ? wdlBlowStand(pw) : null
+    const stVor = document.querySelector(`input[name="mwd-erl-status"][value="${_bl && _bl.geblowt ? 'blown' : 'none'}"]`); if(stVor) stVor.checked = true
     document.getElementById('mwdErledigtModal')?.classList.add('open')
     setTimeout(() => { try{ (m && !m.value ? m : f)?.focus() }catch(_){} }, 60)
   }
@@ -25663,6 +25665,31 @@
     try{ const g = window._tvV2Endlesung && window._tvV2Endlesung.grund; if(eigen && typeof g === 'function') return String(g(eigen, Date.now(), true) || '') }catch(_){}
     return ''
   }
+  /* BLOW ERKENNEN (02.10.2026, Finn: „Puls soll automatisch lesen, ob der Account geblown/liquidiert wurde — oder ich sehe die Live-
+   * Balance bei Überprüfen/Erledigt"). Keine neue Lesung: Balance = End-Balance der Nachlesung (balance_end), sonst die Konto-Balance
+   * aus TradingView (konto_balance), aber nur, wenn sie NACH dem Ende gelesen wurde. Liquidation = effektive Liq-Balance des Radars
+   * (liq_regel_balance: engere von Regel und Konto-Boden, sonst liq_balance). Geblowt = Balance ≤ Liq + 25 $ (Slippage/Gebühren).
+   * Echo hat keine Liq im Radar → nur die Balance. -> {bal, quelle, liq, geblowt} | null */
+  function wdlBlowStand(t){
+    const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
+    if(!t || t.status === 'open' || t.status === 'planned') return null
+    let bal = n(t.balance_end), quelle = 'Balance nach dem Trade'
+    if(bal == null){
+      const kb = n(t.konto_balance), kAt = Date.parse(t.konto_balance_at || '') || 0, ende = Date.parse(t.ended_at || t.completed_at || '') || 0
+      if(kb != null && kAt && (!ende || kAt >= ende)){ bal = kb; quelle = 'Konto-Balance ' + new Date(kAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) }
+    }
+    if(bal == null) return null
+    const liq = n(t.liq_regel_balance) ?? n(t.liq_balance)
+    return { bal, quelle, liq, geblowt: liq != null && bal <= liq + 25 }
+  }
+  function wdlBlowZ(t){
+    const b = wdlBlowStand(t); if(!b) return ''
+    const f0 = v => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 0 })
+    const tip = `${b.quelle}: ${f0(b.bal)} $${b.liq != null ? ` · Liquidation bei ${f0(b.liq)} $` : ''}`
+    return b.geblowt
+      ? `<small class="wdl-z-slave" style="color:#b91c1c;font-weight:700" title="${escapeHtml(tip)}">💀 geblowt · ${f0(b.bal)} $</small>`
+      : `<small class="wdl-z-slave" style="color:var(--sub)" title="${escapeHtml(tip)}">Konto ${f0(b.bal)} $</small>`
+  }
   /* ANSEHEN (02.10.2026, Finn: „Ansehen bei allen laufenden Trades — Puls navigiert am jeweiligen PC zu dem Trade, damit ich ihn
    * visuell sehe; ist er schon zu, wird er direkt abgehakt"). Railway legt das Signal im Namen des Plan-Besitzers an (aktion
    * 'ansehen'): TradingView/TopstepX = Endlesung mit Prüfen (Konto anzeigen, flach → „Überprüfen"), Echo = MT5-Terminal nach vorn.
@@ -25825,7 +25852,7 @@
         const erg = echo ? '' : d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : ''
         miZ = zelle('mi wdl-z-akt', `${erg ? `<span>${erg}</span>` : ''}<button type="button" class="btn btn-ghost el-knopf" data-wdl-abhaken="${escapeHtml(pid)}"${sperre ? ' disabled' : ''} title="${escapeHtml(sperre || 'Abhaken — P&L prüfen und Trade erledigen')}">Abhaken</button>`,
           { tip: echo ? '' : demoTip(d) })
-        plZ = zelle('pl', sig(pb, '$', 2) + slaveZ(t) + zuWegZ(t), { f: col(pb), tip: num(t.pl_balance) != null ? (echo ? 'MT5-Balance' : 'Balance') + ' nachher − vorher' : pb != null ? 'P&L am Plan' : 'noch kein P&L — beim Abhaken eintragen' })
+        plZ = zelle('pl', sig(pb, '$', 2) + slaveZ(t) + zuWegZ(t) + wdlBlowZ(t), { f: col(pb), tip: num(t.pl_balance) != null ? (echo ? 'MT5-Balance' : 'Balance') + ' nachher − vorher' : pb != null ? 'P&L am Plan' : 'noch kein P&L — beim Abhaken eintragen' })
         zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
       } else {
         art = 'zu'
@@ -25838,7 +25865,7 @@
         } else {
         const erg = d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : '–'
         miZ = zelle('mi', erg, { tip: demoTip(d) })
-        plZ = zelle('pl', sig(t.pl_balance, '$', 2) + slaveZ(t) + zuWegZ(t), { f: col(t.pl_balance), tip: num(t.pl_balance) != null ? 'Balance nachher − vorher' : 'keine End-Balance' })
+        plZ = zelle('pl', sig(t.pl_balance, '$', 2) + slaveZ(t) + zuWegZ(t) + wdlBlowZ(t), { f: col(t.pl_balance), tip: num(t.pl_balance) != null ? 'Balance nachher − vorher' : 'keine End-Balance' })
         }
         zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
       }
@@ -37669,7 +37696,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.987'
+  const OS_TAB_BUILD = '2026-09-22.988'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
