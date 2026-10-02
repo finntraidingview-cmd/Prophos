@@ -8728,7 +8728,9 @@ def _berlin_heute():
         return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
-WD_ERLEDIGT_ROUTEN = ("tvv2", "mt5v2", "tsv2")   # 30.09.2026: Abhaken im Radar für Orbit, Echo und Topstep V2
+WD_ERLEDIGT_ROUTEN = ("tvv2", "mt5v2", "tsv2", "mt5", "tvplus")   # 30.09.2026: Orbit, Echo V2, Topstep V2 — seit 02.10.2026 auch
+# Echo mit Fusion-Hedge (mt5) und Duplikum (tvplus), Finn: „natürlich will ich auch Echo-Trades hier abhaken"
+WD_FUSION_AM_PLAN = ("mt5", "tvplus")   # Fusion-P&L nur als slave_pl am Plan — wie das große Erledigt-Popup, KEINE wd_hedge-Buchung
 
 
 def _wd_erledigt_upd(plan, master_pl, slave_pl, jetzt_iso, datum):
@@ -8746,8 +8748,8 @@ def _wd_erledigt_upd(plan, master_pl, slave_pl, jetzt_iso, datum):
     route = str(plan.get("route") or "")
     if route not in WD_ERLEDIGT_ROUTEN or st not in ("open", "review", "completed"):
         return None, (409, "nicht offen")
-    if route != "tvv2" and slave_pl is not None:
-        return None, (400, "Fusion-P&L gibt es nur bei Orbit V2 / Winning Days")
+    if route not in ("tvv2",) + WD_FUSION_AM_PLAN and slave_pl is not None:
+        return None, (400, "Fusion-P&L gibt es nur bei Orbit, Winning Days, Echo und Duplikum")
     upd = {"status": "completed", "master_pl": master_pl, "slave_pl": slave_pl}
     if st != "completed" or not plan.get("completed_at"):
         upd["completed_at"] = jetzt_iso
@@ -9071,7 +9073,7 @@ def admin_wd_plaene():
                                 macc = sb_select("accounts", {"select": "user_id", "id": f"eq.{plan.get('master_account_id')}", "limit": "1"})
                                 uid = str((macc[0] if macc else {}).get("user_id") or "")
                             person = disp.get(uid, uid[:8])
-                            if spl is not None:
+                            if spl is not None and str(plan.get("route") or "") == "tvv2":   # Echo/Duplikum: nur slave_pl am Plan
                                 h = ((plan.get("mt5_baseline") or {}).get("hedge") or {}) if isinstance(plan.get("mt5_baseline"), dict) else {}
                                 login = str(h.get("hedge_login") or "").strip()
                                 f_konten = pool.submit(sb_select, "accounts", {"select": "id,user_id,name,firm,account_type,external_id,created_at,"
@@ -9106,6 +9108,8 @@ def admin_wd_plaene():
 
                     def _buchen():
                         # Buchung (idempotent über den notes-Schlüssel)
+                        if str(plan.get("route") or "") in WD_FUSION_AM_PLAN:
+                            return None, None   # Fusion-P&L steht als slave_pl am Plan, Finanzen zählt ihn von dort
                         try:
                             alt = f_alt.result()
                             if spl is None:

@@ -25150,10 +25150,14 @@
    * Buchung auf 'wd_hedge' um); fremder Plan → kompaktes Popup mwdErledigtModal → PATCH /admin/wd-plaene {aktion:'erledigt',
    * plan_id, master_pl, slave_pl} (Backend .541, geht aus open und review; auf completed = Korrektur). Fusion vorbelegt mit hedge.pl
    * aus der Deal-Historie. */
-  let _mwdErlId = null, _mwdErlKonto = '', _mwdErlOhneHedge = false
+  let _mwdErlId = null, _mwdErlKonto = '', _mwdErlOhneHedge = false, _mwdErlFusionAmPlan = false
   function mklWdErledigtOeffnen(pid, extra){
     const pw = Object.assign({}, (mkl.wd.plaene || []).find(x => String(x.id) === String(pid)) || {}, extra || {})
-    const hPl = (pw.hedge && pw.hedge.pl != null && isFinite(Number(pw.hedge.pl))) ? Number(pw.hedge.pl) : null
+    // Echo/Duplikum (02.10.2026): kein Solo-Hedge am Plan — Fusion-P&L aus dem Live-Wert (slave_pl_live) bzw. dem slave_pl am Plan
+    const _fz = v => (v != null && v !== '' && isFinite(Number(v))) ? Number(v) : null
+    _mwdErlFusionAmPlan = pw.route === 'mt5' || pw.route === 'tvplus'
+    const hPl = (pw.hedge && _fz(pw.hedge.pl) != null) ? _fz(pw.hedge.pl)
+      : _mwdErlFusionAmPlan ? (_fz(pw.slave_pl_live) ?? _fz(pw.slave_pl)) : null
     const eigen = mklWdEigenerPlan(pid)
     if(eigen && typeof openTradeCompleteModal === 'function'){ mkl.wd.at = 0; openTradeCompleteModal(pid, hPl != null ? hPl : undefined); return }
     _mwdErlId = String(pid)
@@ -25175,7 +25179,7 @@
     // Orbit V2 ohne Gegenhedge (30.09.2026, Finn: „kommt trotzdem das Pop-up, wo ich den Fusion-P&L eingebe, obwohl gar kein Fusion-
     // Account getradet wurde"): tvv2 zählt nur mit Fusion-Hedge (hedge_eur > 0 oder Hedge am Plan = Winning Days) als gehedgt
     const mitHedge = Number(pw.hedge_eur) > 0 || !!pw.hedge
-    _mwdErlOhneHedge = pw.route === 'mt5v2' || pw.route === 'tsv2' || pw.plattform === 'echo' || (pw.route === 'tvv2' && !mitHedge)
+    _mwdErlOhneHedge = !_mwdErlFusionAmPlan && (pw.route === 'mt5v2' || pw.route === 'tsv2' || pw.plattform === 'echo' || (pw.route === 'tvv2' && !mitHedge))
     const plVor = (pw.pl_balance != null && isFinite(Number(pw.pl_balance))) ? Number(pw.pl_balance)
       : (pw.master_pl && pw.master_pl.wert != null && isFinite(Number(pw.master_pl.wert))) ? Number(pw.master_pl.wert) : null
     const m = document.getElementById('mwd-erl-master'); if(m) m.value = plFeldText(plVor)
@@ -25204,7 +25208,7 @@
     const fmtE = v => `${v < 0 ? '−' : '+'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
     const summe = (mpl != null && isFinite(mpl)) ? mpl * fx + ((spl != null && isFinite(spl)) ? spl : 0) : null
     el.innerHTML = `<span>zusammen ≈ <b class="mono" style="color:${summe == null ? 'var(--sub)' : summe >= 0 ? '#15803d' : '#b91c1c'}">${summe == null ? '–' : fmtE(summe)}</b></span>`
-      + `<span class="mwd-erl-buchung">${(spl != null && isFinite(spl)) ? `wird als WD-Hedge auf ${escapeHtml(_mwdErlKonto)} gebucht` : 'ohne Fusion-Buchung'}</span>`
+      + `<span class="mwd-erl-buchung">${(spl != null && isFinite(spl)) ? (_mwdErlFusionAmPlan ? 'Fusion-P&amp;L wird am Trade eingetragen' : `wird als WD-Hedge auf ${escapeHtml(_mwdErlKonto)} gebucht`) : 'ohne Fusion-Buchung'}</span>`
   }
   document.getElementById('mwd-erl-master')?.addEventListener('input', mklWdErlSumme)
   document.getElementById('mwd-erl-fusion')?.addEventListener('input', mklWdErlSumme)
@@ -25242,7 +25246,7 @@
       const ar = d.archiv || null
       if(ar && ar.fehler && typeof atToast === 'function') atToast(ar.fehler, 'end')
       const arTxt = (ar && ar.archiviert) ? (ar.grund === 'blown' ? ' · 💀 Account archiviert' : ' · ✅ bestanden — Nachfolger beim Besitzer nachtragen') : ''
-      if(typeof atToast === 'function') atToast((bu ? `Erledigt · Fusion ${betrag != null ? fmtE(betrag) : ''} auf „${bu.account_name || 'Hedge-Konto'}" gebucht` : _mwdErlOhneHedge ? 'Erledigt' : 'Erledigt · ohne Fusion-Buchung') + arTxt, 'ok')
+      if(typeof atToast === 'function') atToast((bu ? `Erledigt · Fusion ${betrag != null ? fmtE(betrag) : ''} auf „${bu.account_name || 'Hedge-Konto'}" gebucht` : _mwdErlOhneHedge ? 'Erledigt' : (_mwdErlFusionAmPlan && spl != null) ? `Erledigt · Fusion ${fmtE(spl)} am Trade` : 'Erledigt · ohne Fusion-Buchung') + arTxt, 'ok')
       try{ mkl.wd.at = 0; await mklWdLaden() }catch(_){}
       mklWdRender(); mklChartZeichnen()
     }catch(e){
@@ -25639,7 +25643,8 @@
   }
   function wdlAbhakenSperre(t){
     // seit 30.09.2026 (Finn wollte einen Echo-Trade von Mike abhaken, Knopf war gesperrt): Orbit/Echo/Topstep V2 aller IDs
-    if(mklWdEigenerPlan(wdlTid(t)) || ['tvv2', 'mt5v2', 'tsv2'].includes(t.route)) return ''
+    // seit 02.10.2026 auch Echo mit Fusion-Hedge (mt5) und Duplikum (tvplus) — Finn: „natürlich will ich auch Echo-Trades hier abhaken"
+    if(mklWdEigenerPlan(wdlTid(t)) || ['tvv2', 'mt5v2', 'tsv2', 'mt5', 'tvplus'].includes(t.route)) return ''
     return 'Dieser Weg lässt sich hier nicht abhaken — im Trades-Reiter der ID erledigen'
   }
   function wdlRender(){
@@ -37607,7 +37612,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.981'
+  const OS_TAB_BUILD = '2026-09-22.982'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
