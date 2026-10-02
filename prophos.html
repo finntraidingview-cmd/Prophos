@@ -37570,7 +37570,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.977'
+  const OS_TAB_BUILD = '2026-09-22.978'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -41517,6 +41517,9 @@
         const isProtected = protectedIds.has(String(a.id)) && !orbitSlaveStreng
         if(orbitSlaveStreng && !(_dupSlaveIds && _dupSlaveIds.has(String(a.id)))) return false
         if(archive[a.id]?.archived && !isProtected) return false
+        // Waiting for Payout (02.10.2026, Finn: „gar nicht erst ins Drop-Down"): auf so einem Konto wird nicht
+        // mehr gehandelt — nur der Master des gerade bearbeiteten Plans bleibt drin (geschützt)
+        if(role === 'master' && a.waitingPayoutSince && !isProtected) return false
         if(!isProtected){
           if(routeIstEcho(_tpRoute)){   // Echo V2 (23.09.2026): dieselben Master wie Echo, nur ohne Hedge
             if(!_mt5Ids.has(String(a.id))) return false
