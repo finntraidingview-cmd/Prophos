@@ -16429,8 +16429,8 @@ def cdp_kontonr(text):
 
 def cdp_konto_familie(nr):
     """REIN RECHNEND (testbar): Zu welchem Tradovate-Login gehört eine Kontonummer? DB-Stand 30.09.2026: Apex immer (PA)APEX + 6-stellige
-    User-ID + 7-stelliger Zähler (58/58, 7 User; Username APEX_<User-ID>), Tradeify immer (F)TDFY…, Lucid LFE…/TOF…. -> 'apex:<id>' |
-    'tradeify' | 'lucid' | '' (unbekannt). Tradeify/Lucid tragen keine User-ID in der Nummer."""
+    User-ID + 7-stelliger Zähler (58/58, 7 User; Username APEX_<User-ID>), Tradeify immer (F)TDFY…, Lucid LFE…/TOF…, seit 02.10.2026
+    FundedNext Futures FNFT… und MyFundedFutures MFFU…. -> 'apex:<id>' | 'tradeify' | 'lucid' | 'fundednext' | 'mff' | '' (unbekannt). Tradeify/Lucid tragen keine User-ID in der Nummer."""
     u = _nur_alnum(nr).upper()
     m = re.match(r"^(?:PA)?APEX(\d{6})\d{7}$", u)
     if m:
@@ -16439,6 +16439,12 @@ def cdp_konto_familie(nr):
         return "tradeify"
     if re.match(r"^(LFE|TOF)", u):
         return "lucid"
+    # 02.10.2026 (Finn + Pascal: Balance-Lesen FundedNext Futures scheiterte mit „kein Login-Beleg", weil die lange Tradeify-Liste
+    # scrollbar war): FundedNext Futures (FNFT…) und MyFundedFutures (MFFU…) haben je einen eigenen Tradovate-Login
+    if re.match(r"^FNFT", u):
+        return "fundednext"
+    if re.match(r"^MFFU", u):
+        return "mff"
     return ""
 
 

@@ -3658,6 +3658,9 @@ def test_cdp_konto_regression_865():
         and F("TDFYSL150300000000") == F("FTDFYSLX150200000000") == "tradeify" and F("LFE10000000000000") == "lucid"
         and F("EXPRESS-V2-000000-00000000") == "" and F("APEX00000000000") == "" and F(None) == "",
         "Login-Familie aus der Kontonummer (Apex mit User-ID, Tradeify, Lucid)")
+    chk(F("FNFTCH0000000000000") == "fundednext" and F("MFFUEVPRO000000000") == "mff"
+        and ob.cdp_liste_beleg({"liste_voll": False}, "FTDFYSLX150200000000", "FNFTCH0000000000000") == (True, ""),
+        "Login-Familie FundedNext Futures / MyFundedFutures — Wechsel von Tradeify auch bei scrollbarer Liste")
     B = ob.cdp_liste_beleg
     ko_v = {"liste_voll": True, "eintraege": [{"text": TD1 + "USD"}]}
     chk(B({}, Z8 + "USD", TD1) == (True, "") and B({}, Z8 + "USD", "PAAPEX1111110000002") == (True, "")
