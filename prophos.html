@@ -22616,10 +22616,14 @@
     let tp; try{ tp = tradePlans }catch(_){ return }
     const pc = hedgePcId(), jetzt = Date.now()
     for(const p of (tp || [])){
-      if(!p || !planPlUserscript(p) || p.route !== 'tvv2' || p.status !== 'review') continue
+      // Orbit V2 ohne Hedge auch (02.10.2026, Finn: „wenn im Puls-Chrome das Konto eh schon angezeigt wird, kann das Userscript den P&L
+      // lesen, statt auf Puls zu warten") — nur wenn genau dieses Konto im Puls-Chrome steht und nachweislich flach ist (hedgeReaderMasterDa
+      // false + hedgeReaderEndBalance prüft das Konto); sonst bleibt die Puls-Nachlesung (1–150 min) wie gehabt
+      const v2Ohne = !!(p && p.route === 'tvv2' && !(Number(p.hedgeEur) > 0) && !p.orbitV3)
+      if(!p || !(planPlUserscript(p) || v2Ohne) || p.route !== 'tvv2' || p.status !== 'review') continue
       const b = p.mt5Baseline || {}, fin = b.final, h = b.hedge
       if(!fin || (typeof fin.balance_end === 'number' && isFinite(fin.balance_end)) || (h && h.pc && h.pc !== pc)) continue
-      if(jetzt - (Date.parse(fin.at || p.endedAt || '') || 0) > 30 * 60000) continue
+      if(jetzt - (Date.parse(fin.at || p.endedAt || '') || 0) > (v2Ohne ? 150 : 30) * 60000) continue
       const pid = String(p.id)
       if(_v3NachtragLaeuft.has(pid) || hedgeReaderMasterDa(p) !== false) continue
       _v3NachtragLaeuft.add(pid)
@@ -37560,7 +37564,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.974'
+  const OS_TAB_BUILD = '2026-09-22.975'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
