@@ -8142,7 +8142,10 @@ def liq_regel_felder(regeln, acc, plan, start_bal, tagesstart, einstieg, richtun
         vergleich = " · ".join([teil(b_bal, b_text, "boden"), "Regel: " + teil(r_bal, r_text, "regel")])
     return {"liq_regel_balance": bal, "liq_regel_level_nq": level, "liq_regel_text": text, "liq_gilt": gilt,
             "liq_regel_nur_balance": r_bal, "liq_boden_balance": b_bal, "liq_boden_text": b_text, "liq_maxdd": dd,
-            "liq_maxdd_art": art, "liq_vergleich_text": vergleich}
+            "liq_maxdd_art": art, "liq_vergleich_text": vergleich,
+            # Art der Regel (02.10.2026, Finn: „Apex Daily Loss ist nur ein Soft-Breach, kein Blow") — 'tagesstart'/'stufen' sind
+            # Tageslimits: Positionen zu, Konto lebt. Echter Blow nur am Konto-Boden (liq_boden_balance). Das Radar trennt danach.
+            "liq_regel_art": (regel or {}).get("art"), "liq_regel_soft": (regel or {}).get("art") in ("tagesstart", "stufen")}
 
 
 def lt_demo_liq(liq_level, liq_pl_alt, regel_f, start_bal, einstieg, richtung, ppl, kt):

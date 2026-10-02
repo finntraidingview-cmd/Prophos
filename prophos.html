@@ -25679,16 +25679,22 @@
       if(kb != null && kAt && (!ende || kAt >= ende)){ bal = kb; quelle = 'Konto-Balance ' + new Date(kAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) }
     }
     if(bal == null) return null
-    const liq = n(t.liq_regel_balance) ?? n(t.liq_balance)
-    return { bal, quelle, liq, geblowt: liq != null && bal <= liq + 25 }
+    // Tageslimit (Apex Daily Loss, liq_regel_soft) = Soft-Breach: Konto lebt — echter Blow nur am Konto-Boden (Max Drawdown)
+    const soft = !!t.liq_regel_soft
+    const liq = soft ? n(t.liq_boden_balance) : (n(t.liq_regel_balance) ?? n(t.liq_balance))
+    const tagLiq = soft ? n(t.liq_regel_nur_balance) : null
+    const geblowt = liq != null && bal <= liq + 25
+    return { bal, quelle, liq, tagLiq, geblowt, softBreach: !geblowt && tagLiq != null && bal <= tagLiq + 25 }
   }
   function wdlBlowZ(t){
     const b = wdlBlowStand(t); if(!b) return ''
     const f0 = v => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 0 })
-    const tip = `${b.quelle}: ${f0(b.bal)} $${b.liq != null ? ` · Liquidation bei ${f0(b.liq)} $` : ''}`
+    const tip = `${b.quelle}: ${f0(b.bal)} $${b.liq != null ? ` · Blow (Max Drawdown) bei ${f0(b.liq)} $` : ''}${b.tagLiq != null ? ` · Tageslimit bei ${f0(b.tagLiq)} $ (Soft-Breach, Konto lebt)` : ''}`
     return b.geblowt
       ? `<small class="wdl-z-slave" style="color:#b91c1c;font-weight:700" title="${escapeHtml(tip)}">💀 geblowt · ${f0(b.bal)} $</small>`
-      : `<small class="wdl-z-slave" style="color:var(--sub)" title="${escapeHtml(tip)}">Konto ${f0(b.bal)} $</small>`
+      : b.softBreach
+        ? `<small class="wdl-z-slave" style="color:#b45309;font-weight:600" title="${escapeHtml(tip)}">⚠ Tageslimit · ${f0(b.bal)} $</small>`
+        : `<small class="wdl-z-slave" style="color:var(--sub)" title="${escapeHtml(tip)}">Konto ${f0(b.bal)} $</small>`
   }
   /* ANSEHEN (02.10.2026, Finn: „Ansehen bei allen laufenden Trades — Puls navigiert am jeweiligen PC zu dem Trade, damit ich ihn
    * visuell sehe; ist er schon zu, wird er direkt abgehakt"). Railway legt das Signal im Namen des Plan-Besitzers an (aktion
@@ -37696,7 +37702,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.988'
+  const OS_TAB_BUILD = '2026-09-22.989'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
