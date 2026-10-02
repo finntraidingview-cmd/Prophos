@@ -96,9 +96,9 @@ call :portbelegt 8790
 if errorlevel 1 if exist "%_tvr%\start-reader.bat" (
   start "Prophos TV-Reader" /d "%_tvr%" cmd /c start-reader.bat
 )
-if exist "%_tvr%\start-verbinder.bat" (
-  start "Prophos TV-Verbinder" /d "%_tvr%" cmd /c start-verbinder.bat
-)
+rem TV-Verbinder NICHT mehr mitstarten (02.10.2026): er speist die alte Copier-Instanz „tvplus" (Echo + / alter Orbit vor dem
+rem 28.08.) und spiegelte bei Moritz einen Orbit-V2-Trade OHNE Hedge als ungewollten Fusion-Hedge (3,69 Lot). Wer ihn wirklich braucht,
+rem startet start-verbinder.bat von Hand.
 rem (15.08.2026) Nur PCs mit ALTEM Backend-Setup betrifft das -- seit 01.09.2026
 rem steht der Hinweis deshalb hinter einer Pruefung, statt auf jedem frischen
 rem Rechner Ratlosigkeit zu stiften (Finn am neuen PC: "warum geht es nicht mehr").
