@@ -6431,6 +6431,18 @@
               <label>Risiko Slave (<span id="tp-slave-cur">€</span>)</label>
               <input type="number" class="input mono" id="tp-slave-risk" min="0" step="5" placeholder="z.B. 350">
               <div class="tp-wd-hilfe" id="tp-wd-hilfe-slave">auf Fusion · Staffel-Vorschlag</div>
+              <!-- Funded-Vorgabe (02.10.2026, Finn: „so ein Feld, von Schablonen nehmen"): fester Gegenhedge je Firma
+                   (tpFundedHedgeVorgabe) — nur bei Funded-Mastern mit Satz sichtbar -->
+              <div id="tp-funded-suggest" style="display:none;margin-top:6px;padding:8px 12px;background:rgba(18,183,106,.08);border:1px solid rgba(18,183,106,.25);border-radius:6px;font-size:12px;line-height:1.4">
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+                  <div style="color:var(--ink)">
+                    <span style="color:#15803d;font-weight:700">🎯 Funded-Vorgabe:</span>
+                    <span id="tp-funded-value" style="font-family:var(--mono);font-weight:600">—</span>
+                  </div>
+                  <button type="button" id="tp-funded-apply" class="btn btn-ghost" style="padding:4px 10px;font-size:11px">Übernehmen</button>
+                </div>
+                <div id="tp-funded-detail" style="font-size:11px;color:var(--sub);margin-top:4px"></div>
+              </div>
               <div id="tp-slave-suggest" style="display:none;margin-top:6px;padding:8px 12px;background:rgba(139,92,246,.08);border:1px solid rgba(139,92,246,.2);border-radius:6px;font-size:12px;line-height:1.4">
                 <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
                   <div style="color:var(--ink)">
@@ -37657,7 +37669,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.986'
+  const OS_TAB_BUILD = '2026-09-22.987'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -42423,6 +42435,17 @@
     // Winning Days Farm: kein Acquisition-Cost-Vorschlag — das Slave-Risiko kommt aus der Farmer-Staffel
     if(suggestEl && typeof tpWdAktiv === 'function' && tpWdAktiv()) suggestEl.style.display = 'none'
 
+    // ── Funded-Vorgabe (02.10.2026): fester Gegenhedge je Firma, eigene Box mit „Übernehmen"
+    { const fEl = document.getElementById('tp-funded-suggest'), fv = master ? tpFundedHedgeVorgabe(master) : null
+      if(fEl){
+        fEl.style.display = fv ? 'block' : 'none'
+        if(fv){
+          const de0 = v => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 2 })
+          const v1 = document.getElementById('tp-funded-value'); if(v1) v1.textContent = '€' + de0(fv.eur)
+          const d1 = document.getElementById('tp-funded-detail')
+          if(d1) d1.textContent = `Fester Gegenhedge ${master.firm || ''} Funded: ${de0(fv.basisEur)} € auf ${de0(fv.basisDd)} $ Max Drawdown — dieses Konto ${de0(fv.dd)} $ → ${de0(fv.eur)} €`
+        }
+      } }
     // ── Gesamtkosten (volle Vorgänger-Kette) — flacher Gesamtbetrag, unabhängig vom Risk-Anteil.
     // Erscheint sofort sobald ein Master gewählt ist, auch ohne Slave/Risiko.
     const gkEl  = document.getElementById('tp-gesamtkosten-suggest')
@@ -42775,7 +42798,7 @@
     const z = FUNDED_HEDGE_SAETZE.find(([re]) => re.test(String(master.firm || '')))
     if(!z) return null
     const satz = z[1] / z[2]
-    return { satz, dd: Number(master.maxDrawdown), eur: Math.round(satz * Number(master.maxDrawdown) * 100) / 100 }
+    return { satz, basisEur: z[1], basisDd: z[2], dd: Number(master.maxDrawdown), eur: Math.round(satz * Number(master.maxDrawdown) * 100) / 100 }
   }
   function tpFundedHedgeAnwenden(){
     const master = accounts.find(a => String(a.id) === String(document.getElementById('tp-master')?.value))
@@ -42793,6 +42816,7 @@
     tpRecompute()
     return true
   }
+  document.getElementById('tp-funded-apply')?.addEventListener('click', () => { tpFundedHedgeAnwenden() })
   // Gesamtkosten übernehmen (voller Reingesteckt-Betrag, unskaliert)
   document.getElementById('tp-gesamtkosten-apply')?.addEventListener('click', () => {
     tpAutoSelectLiveSlaveIfEmpty()
