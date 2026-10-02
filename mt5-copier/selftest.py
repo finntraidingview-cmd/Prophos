@@ -3758,7 +3758,7 @@ def test_cdp_konto_regression_865():
     js = open(_os.path.join(_os.path.dirname(_os.path.abspath(ob.__file__)), "augen.js"), encoding="utf-8").read()
     chk("function kontoSchalter()" in js and "r.top >= lr.top - 4" in js and "var s = kontoSchalter();" in js
         and "(eintraege.length === 1 && !!s.el && !eintraege[0].aktiv)" in js and "panel_lage: lage" in js
-        and "VERSION = '0.7.4'" in js, "augen.js 0.7.4: Umschalter unter der Broker-Leiste (beide Lagen), panel_lage, Liste nur mit Umschalter")
+        and "VERSION = '0.7.5'" in js, "augen.js 0.7.4+: Umschalter unter der Broker-Leiste (beide Lagen), panel_lage, Liste nur mit Umschalter")
     chk("warnung" in ob.PULS_ERGEBNIS_FELDER and "unklar" in ob.PULS_ERGEBNIS_FELDER, "Ergebnis-Paket trägt warnung + unklar")
     # Login-Abriss (30.09.2026 03:23 UTC): Verbindung weg nach „Anmelden" → Spur mit Chrome-Zustand, EINMAL neu anhängen
     import inspect as _ia
