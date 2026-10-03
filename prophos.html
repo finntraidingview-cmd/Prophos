@@ -31227,11 +31227,18 @@
       if(bulkPaste.bloecke.length) bulkPasteRender()
     }
 
+    // Vorlagen nach Prop-Firma gruppiert (03.10.2026, Finn: „nach Propfirm unterteilt, man erkennt ja nichts mehr") — eine
+    // <optgroup> je Firma, Firmen alphabetisch, innerhalb der Firma die gespeicherte Sortierung
+    function bulkVorlagenGruppiert(optFn){
+      const je = new Map()
+      for(const v of bulkZentral){ const f = String(v.firm || 'Sonstige'); if(!je.has(f)) je.set(f, []); je.get(f).push(v) }
+      return [...je.keys()].sort((a, b) => a.localeCompare(b, 'de')).map(f => `<optgroup label="${escapeHtml(f)}">${je.get(f).map(optFn).join('')}</optgroup>`).join('')
+    }
     function renderTplSelect(){
       const prev = bEl.tplSelect.value
       const opt = (v, n) => `<option value="${escapeHtml(v)}">${escapeHtml(n)}</option>`
       bEl.tplSelect.innerHTML = '<option value="">— Keine Vorlage —</option>' +
-        bulkZentral.map(v => opt('z:' + v.id, v.name)).join('')   // nur zentrale Vorlagen (F15)
+        bulkVorlagenGruppiert(v => opt('z:' + v.id, v.name))   // nur zentrale Vorlagen (F15)
       if(prev && [...bEl.tplSelect.options].some(o => o.value === prev)) bEl.tplSelect.value = prev
       bEl.tplDelete.disabled = !bEl.tplSelect.value || (bEl.tplSelect.value.startsWith('z:') && !bulkIstAdmin())
       const zb = document.getElementById('bulk-template-zentral'); if(zb) zb.style.display = bulkIstAdmin() ? '' : 'none'
@@ -31587,7 +31594,7 @@
           <span style="min-width:0"><span class="id">${escapeHtml(x.id)}</span>
           ${(x.titel || x.status) ? `<span class="m">${escapeHtml(x.titel || '–')}${x.status ? ' · ' + escapeHtml(x.status) : ''}</span>` : ''}
           <span class="m">${sperre ? escapeHtml(sperre) : `${escapeHtml(firma)} · ${bulkTypLabel(typ)} · ${Number(gr).toLocaleString('de-DE')}${x.plattform ? ' · ' + escapeHtml(x.plattform) : ''}`}</span>
-          ${sperre || !bulkZentral.length ? '' : `<select class="input" data-bpv="${escapeHtml(x.id)}" style="margin-top:4px;padding:3px 8px;font-size:11.5px;height:auto;width:auto;max-width:100%"><option value="">ohne Vorlage</option>${bulkZentral.map(z => `<option value="${escapeHtml(String(z.id))}" ${v && String(v.id) === String(z.id) ? 'selected' : ''}>${escapeHtml(z.name)}</option>`).join('')}</select>`}</span>
+          ${sperre || !bulkZentral.length ? '' : `<select class="input" data-bpv="${escapeHtml(x.id)}" style="margin-top:4px;padding:3px 8px;font-size:11.5px;height:auto;width:auto;max-width:100%"><option value="">ohne Vorlage</option>${bulkVorlagenGruppiert(z => `<option value="${escapeHtml(String(z.id))}" ${v && String(v.id) === String(z.id) ? 'selected' : ''}>${escapeHtml(z.name)}</option>`)}</select>`}</span>
           <span class="bal">${x.balance != null ? '$' + de(x.balance) : ''}</span></label>`
       }).join('')
       bpEl.vs.querySelectorAll('[data-bp]').forEach(cb => cb.addEventListener('change', () => { bulkPaste.an.set(cb.dataset.bp, cb.checked); bulkPasteRender() }))
@@ -37815,7 +37822,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.994'
+  const OS_TAB_BUILD = '2026-09-22.995'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
