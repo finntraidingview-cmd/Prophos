@@ -6442,6 +6442,225 @@ def admin_kapitel():
 
 
 # ════════════════════════════════════════════════════════════════════════════
+# PROP-BAUM (03.10.2026, Auftrag von Pascal, Finn: „bau es mal in Prophos rein … fass nix
+# bestehendes an"). Admin-Reiter: alle aktiven Prop-Accounts als Baum Firma → Stufe → ID →
+# Account, Pascal arbeitet sie täglich ab. Reine Anzeige plus Haken — keine Bewertung.
+# Eigener Endpoint statt /admin/overview erweitern: die Übersicht bleibt unberührt, und der
+# Baum braucht nur einen Bruchteil ihrer Rechnung. Die Stufen rechnet das Frontend (eine
+# Logik für aktuellen Stand und Tages-Schnappschuss), der Server liefert Rohwerte.
+# Tabellen: sql/2026-10-03_prop_baum.sql (nur Service-Key, RLS ohne Policy).
+# ════════════════════════════════════════════════════════════════════════════
+
+def pb_handelstag(jetzt=None):
+    """REIN RECHNEND (testbar): Handelstag zum Zeitpunkt jetzt (UTC) → (tag 'JJJJ-MM-TT', start_utc, ende_utc).
+    Wechsel um 17:45 America/New_York (15 min vor Globex-Open 18:00 ET, Pascal 03.10.2026): alles ab 17:45 ET
+    zählt zum nächsten Tag. Start/Ende je über die NY-Zeitzone gerechnet, damit Sommer-/Winterzeit stimmen."""
+    from zoneinfo import ZoneInfo
+    from datetime import timedelta
+    ny_tz = ZoneInfo("America/New_York")
+    ny = (jetzt or datetime.now(timezone.utc)).astimezone(ny_tz)
+    tag = ny.date()
+    if ny.hour * 60 + ny.minute >= 17 * 60 + 45:
+        tag = tag + timedelta(days=1)
+    vor = tag - timedelta(days=1)
+    start = datetime(vor.year, vor.month, vor.day, 17, 45, tzinfo=ny_tz).astimezone(timezone.utc)
+    ende = datetime(tag.year, tag.month, tag.day, 17, 45, tzinfo=ny_tz).astimezone(timezone.utc)
+    return tag.isoformat(), start, ende
+
+
+def _pb_iso(t):
+    return t.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def admin_build_prop_baum():
+    b = _admin_basis()
+    accounts, archived, arch_info = b["accounts"], b["archived"], b.get("arch_info") or {}
+    by_id, names, disp, excluded_ids = b["by_id"], b["names"], b["disp"], b["excluded_ids"]
+    tag, start, ende = pb_handelstag()
+    start_iso = _pb_iso(start)
+    jetzt_ts = datetime.now(timezone.utc).timestamp()
+
+    def _alter_s(at):
+        try:
+            return jetzt_ts - datetime.fromisoformat(str(at).replace("Z", "+00:00")).timestamp()
+        except Exception:
+            return None
+
+    # Balance wie die Übersicht (acc_balance_wahl, dieselbe Rangfolge). Die Reads von dup_live/mt5_live
+    # liefern hier zugleich die offenen Positionen (= „heute gehandelt").
+    dup_bal, echo_bal, offen_logins = {}, {}, set()
+    try:
+        for row in _sb_all("dup_live", {"select": "accounts,positions,updated_at"}):
+            at = str(row.get("updated_at") or "")
+            acc_login = {}
+            for da in (row.get("accounts") or []):
+                if not isinstance(da, dict):
+                    continue
+                lg = str(da.get("login") or "").strip()
+                acc_login[str(da.get("account_id"))] = lg
+                if lg and da.get("balance") not in (None, "") and (lg not in dup_bal or at > str(dup_bal[lg][2] or "")):
+                    dup_bal[lg] = (da.get("balance"), da.get("ccy") or "USD", at)
+            # Positionen nur aus einem frischen Spiegel (Wächter schreibt ~30 s) — ein eingefrorener zählt nicht
+            alter = _alter_s(at)
+            if alter is not None and alter <= 120:
+                for p in (row.get("positions") or []):
+                    lg = acc_login.get(str((p or {}).get("account_id")), "")
+                    if lg:
+                        offen_logins.add(lg)
+    except Exception as e:
+        print(f"[prop-baum] ⚠️ dup_live: {type(e).__name__}: {e}", flush=True)
+    try:
+        for row in _sb_all("mt5_live", {"select": "master_login,updated_at,bal:status->>master_balance,"
+                                                  "ccy:status->>master_currency,pos:status->master_positions"}):
+            lg = str(row.get("master_login") or "").strip()
+            if not lg:
+                continue
+            at = str(row.get("updated_at") or "")
+            if row.get("bal") not in (None, "") and (lg not in echo_bal or at > echo_bal[lg][2]):
+                echo_bal[lg] = (row.get("bal"), row.get("ccy") or "USD", at)
+            alter = _alter_s(at)
+            if isinstance(row.get("pos"), list) and row["pos"] and alter is not None and alter <= 120:
+                offen_logins.add(lg)
+    except Exception as e:
+        print(f"[prop-baum] ⚠️ mt5_live: {type(e).__name__}: {e}", flush=True)
+
+    # Trades im laufenden Handelstag: Master ODER Slave, open/review/completed, Zeitanker started_at
+    # (von Hand nachgetragene Pläne ohne started_at: created_at) — wie trades_start der Übersicht.
+    gehandelt = set()
+    try:
+        for p in _sb_all("trade_plans", {"select": "id,master_account_id,slave_account_id",
+                                         "status": "in.(open,review,completed)",
+                                         "or": f"(started_at.gte.{start_iso},and(started_at.is.null,created_at.gte.{start_iso}))"}):
+            for k in ("master_account_id", "slave_account_id"):
+                if p.get(k):
+                    gehandelt.add(str(p[k]))
+    except Exception as e:
+        print(f"[prop-baum] ⚠️ trade_plans: {type(e).__name__}: {e}", flush=True)
+    # Winning Day von Hand gezählt (goal_manual_last = Tag) — fehlt in _admin_basis, deshalb ein schmaler Read
+    try:
+        for a in _sb_all("accounts", {"select": "id", "goal_manual_last": f"eq.{tag}"}):
+            gehandelt.add(str(a.get("id")))
+    except Exception as e:
+        print(f"[prop-baum] ⚠️ goal_manual_last: {type(e).__name__}: {e}", flush=True)
+
+    def _zeile(a):
+        aid, uid = str(a["id"]), str(a.get("user_id"))
+        bal, _ccy, _src, at = acc_balance_wahl(a, echo_bal, dup_bal)
+        login = str(a.get("external_id") or "").strip()
+        return {
+            "id": aid, "user_id": uid, "person": disp.get(uid) or names.get(uid, uid[:8]),
+            "firm": _firm_norm(a.get("firm")), "type": a.get("account_type") or "",
+            "name": a.get("name") or "", "ext": a.get("external_id") or "",
+            # groesse = Kontogröße (150k), basis = Start-Balance (Topstep Express startet bei 0 $)
+            "groesse": _wd_konto_groesse(a), "basis": konto_basis_balance(a),
+            "balance": round(bal, 2) if bal is not None else None, "balance_at": at or None,
+            "wd_farm": bool(a.get("wd_farm")),
+            "traded_today": aid in gehandelt or bool(login and login in offen_logins),
+        }
+
+    zeilen = []
+    for a in accounts:
+        aid, uid = str(a["id"]), str(a.get("user_id"))
+        if (a.get("account_type") or "") == "live" or uid in excluded_ids or aid in archived:
+            continue
+        zeilen.append(_zeile(a))
+
+    # Tages-Schnappschuss: erster Stand je Account am Handelstag. Fehlende Zeilen nachtragen (ignore-duplicates —
+    # zwei gleichzeitige Aufrufe überschreiben nie den ersten Stand). Schlägt das fehl, gibt es eben keinen Pfeil.
+    snap = {}
+    try:
+        for s in _sb_all("prop_baum_schnappschuss", {"select": "account_id,daten", "handelstag": f"eq.{tag}",
+                                                      "order": "account_id.asc"}):
+            snap[str(s.get("account_id"))] = s.get("daten") or {}
+        neu = [{"account_id": z["id"], "handelstag": tag, "daten": z} for z in zeilen if z["id"] not in snap]
+        if neu:
+            r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/prop_baum_schnappschuss",
+                            params={"on_conflict": "account_id,handelstag"}, json=neu,
+                            headers=_sb_headers("resolution=ignore-duplicates,return=minimal"))
+            _sb_pruefen(r)
+            for z in neu:
+                snap.setdefault(z["account_id"], z["daten"])
+    except Exception as e:
+        print(f"[prop-baum] ⚠️ Schnappschuss: {type(e).__name__}: {e}", flush=True)
+
+    # Heute raus: im Schnappschuss des Tages, inzwischen archiviert → Grund aus dem Archiv-Eintrag
+    # (blown / passed / passed_pending / manual — das Frontend macht daraus „geblowt" bzw. „bestanden").
+    raus = []
+    for aid, d in snap.items():
+        if aid not in archived:
+            continue
+        a = by_id.get(aid) or {}
+        uid = str(a.get("user_id") or d.get("user_id") or "")
+        if uid in excluded_ids:
+            continue
+        raus.append(dict(d, id=aid, user_id=uid, grund=(arch_info.get(aid) or {}).get("reason") or ""))
+
+    haken = {}
+    try:
+        for h in _sb_all("prop_baum_haken", {"select": "account_id,art", "handelstag": f"eq.{tag}",
+                                             "order": "account_id.asc"}):
+            haken[str(h.get("account_id"))] = h.get("art")
+    except Exception as e:
+        print(f"[prop-baum] ⚠️ Haken: {type(e).__name__}: {e}", flush=True)
+    sichtbar = {z["id"] for z in zeilen} | {r["id"] for r in raus}
+
+    people = sorted([{"user_id": u, "name": disp.get(u) or names.get(u, u[:8])}
+                     for u in {z["user_id"] for z in zeilen} | {r["user_id"] for r in raus}],
+                    key=lambda p: str(p["name"]).lower())
+    return {"handelstag": tag, "wechsel_um": _pb_iso(ende), "accounts": zeilen,
+            "schnappschuss": {k: v for k, v in snap.items() if k in sichtbar},
+            "raus": raus, "haken": {k: v for k, v in haken.items() if k in sichtbar},
+            "people": people, "generated": _wt_now_iso()}
+
+
+@app.route("/admin/prop-baum", methods=["GET", "POST", "OPTIONS"])
+def admin_prop_baum():
+    """GET = Baum des laufenden Handelstags. POST {account_id, art: 'done'|'skip'|null} setzt bzw. löscht den
+    Haken des Accounts für den laufenden Handelstag (die Server-Uhr entscheidet den Tag). Gate wie /admin/overview,
+    „nur eigene" (admin_zugang) darf nur eigene Accounts abhaken."""
+    if request.method == "OPTIONS":
+        return "", 200
+    uid, err = _wd_login()
+    if err:
+        return err
+    if request.method == "GET":
+        try:
+            return jsonify(admin_build_prop_baum())
+        except Exception as e:
+            print(f"[prop-baum] ⚠️ GET: {type(e).__name__}: {e}", flush=True)
+            return jsonify({"error": str(e)}), 500
+    body = request.get_json(silent=True) or {}
+    aid = str(body.get("account_id") or "").strip()
+    art = body.get("art")
+    if not re.match(r"^[0-9a-fA-F-]{36}$", aid):
+        return jsonify({"error": "account_id fehlt"}), 400
+    if art not in ("done", "skip", None):
+        return jsonify({"error": "art muss done, skip oder null sein"}), 400
+    try:
+        acc = sb_select("accounts", {"select": "id,user_id", "id": f"eq.{aid}"}) or []
+        if not acc:
+            return jsonify({"error": "Account unbekannt"}), 404
+        nur = _admin_nur_uid()
+        if nur and str(acc[0].get("user_id")) != nur:
+            return jsonify({"error": "nur eigene Accounts"}), 403
+        tag = pb_handelstag()[0]
+        if art is None:
+            r = _sb_anfrage("DELETE", f"{SUPABASE_URL}/rest/v1/prop_baum_haken",
+                            params={"account_id": f"eq.{aid}", "handelstag": f"eq.{tag}"}, headers=_sb_headers())
+        else:
+            r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/prop_baum_haken",
+                            params={"on_conflict": "account_id,handelstag"},
+                            json={"account_id": aid, "handelstag": tag, "art": art, "created_by": uid,
+                                  "created_at": _wt_now_iso()},
+                            headers=_sb_headers("resolution=merge-duplicates,return=minimal"))
+        _sb_pruefen(r)
+        return jsonify({"ok": True, "handelstag": tag, "account_id": aid, "art": art})
+    except Exception as e:
+        print(f"[prop-baum] ⚠️ POST: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"error": str(e)}), 500
+
+
+# ════════════════════════════════════════════════════════════════════════════
 # RECHNUNGEN für die Abrechnungen der gemanagten IDs (28.08.2026, Finns Wunsch).
 # Erstellen nur für Admins (ADMIN_EMAILS), die ID-Person liest ihre Rechnungen
 # per RLS direkt aus Supabase. Der Datensatz wird beim Erstellen EINGEFROREN

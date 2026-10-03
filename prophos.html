@@ -1468,6 +1468,53 @@
   #adm-pane-kompass .kp-woche .pz{font-size:11px;font-weight:600;font-variant-numeric:tabular-nums}
   #adm-pane-kompass .kp-woche .kw{font-size:10px;color:var(--sub);white-space:nowrap}
   @media (max-width:960px){#adm-pane-kompass .kp-zeile-bar{grid-template-columns:96px 1fr 80px}}
+  /* Prop-Baum im Admin (03.10.2026, Auftrag von Pascal): je Firma eine Karte, Spalten = Stufen, Zeilen = IDs, Zellen = Account-Chips.
+     Erledigte bleiben in ihrer Stufe und leuchten grün, heute archivierte stehen rot bis zum Handelstag-Wechsel (17:45 New York). */
+  #adm-pane-propbaum .pb-kopf{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 10px}
+  #adm-pane-propbaum .pb-sub{font-weight:400;color:var(--sub);font-size:12px}
+  #adm-pane-propbaum .btn-mini{padding:4px 11px;font-size:12px;height:auto}
+  #adm-pane-propbaum .pb-ids{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px}
+  #adm-pane-propbaum .pb-id{border:1px solid var(--border);background:var(--surface);color:var(--sub);border-radius:999px;padding:3px 11px;font-size:12px;cursor:pointer}
+  #adm-pane-propbaum .pb-id b{font-weight:500;color:var(--sub-2);margin-left:3px}
+  #adm-pane-propbaum .pb-id.an{color:var(--violet);border-color:var(--violet);background:var(--violet-tint)}
+  #adm-pane-propbaum .pb-id.an b{color:var(--violet)}
+  #adm-pane-propbaum .pb-zahlen{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:0 0 14px}
+  #adm-pane-propbaum .pb-zahl{border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface);padding:8px 12px}
+  #adm-pane-propbaum .pb-zahl span{display:block;font-size:11.5px;color:var(--sub)}
+  #adm-pane-propbaum .pb-zahl b{font-size:20px;font-weight:600;font-variant-numeric:tabular-nums}
+  #adm-pane-propbaum .pb-zahl.gut b{color:var(--good)}
+  #adm-pane-propbaum .pb-zahl.rot b{color:var(--danger)}
+  #adm-pane-propbaum .pb-firma{margin:0 0 12px}
+  #adm-pane-propbaum .pb-firma-kopf{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px}
+  #adm-pane-propbaum .pb-firma-kopf .pb-sub{font-size:11.5px}
+  #adm-pane-propbaum .pb-scroll{overflow-x:auto}
+  #adm-pane-propbaum table.pb-tab{width:100%;border-collapse:collapse;font-size:12.5px}
+  #adm-pane-propbaum table.pb-tab th{text-align:left;font-weight:600;color:var(--sub);font-size:11.5px;padding:5px 8px;border-bottom:1px solid var(--border);white-space:nowrap}
+  #adm-pane-propbaum table.pb-tab th small{font-weight:500;color:var(--sub-2);margin-left:3px}
+  #adm-pane-propbaum table.pb-tab td{padding:5px 8px;border-bottom:1px solid var(--border-soft);vertical-align:top}
+  #adm-pane-propbaum table.pb-tab td.pb-wer{font-weight:600;white-space:nowrap}
+  #adm-pane-propbaum .pb-leer{color:var(--sub-2)}
+  #adm-pane-propbaum .pb-chip{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;
+    padding:2px 4px 2px 8px;border-radius:8px;border:1px solid var(--border);background:var(--surface);margin:2px 4px 2px 0;white-space:nowrap}
+  #adm-pane-propbaum .pb-chip .d{color:var(--sub)}
+  #adm-pane-propbaum .pb-chip .plus{color:var(--good)}
+  #adm-pane-propbaum .pb-chip .minus{color:var(--danger)}
+  #adm-pane-propbaum .pb-chip .warn{color:var(--warn)}
+  #adm-pane-propbaum .pb-chip .mv{font-family:'Inter',sans-serif;font-size:10.5px;color:var(--warn)}
+  #adm-pane-propbaum .pb-chip.moved{border-color:var(--warn)}
+  #adm-pane-propbaum .pb-chip.done{border-color:var(--good);background:rgba(18,183,106,.08);box-shadow:0 0 0 1px rgba(18,183,106,.25),0 0 8px rgba(18,183,106,.22)}
+  #adm-pane-propbaum .pb-chip.raus{border-color:var(--danger);background:rgba(240,68,56,.07);color:var(--danger)}
+  #adm-pane-propbaum .pb-chip.raus .grund{font-family:'Inter',sans-serif;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;padding-right:4px}
+  #adm-pane-propbaum .pb-ok{border:1px solid var(--border);background:none;color:var(--sub);border-radius:6px;font-size:11px;padding:1px 6px;line-height:1.4;cursor:pointer}
+  #adm-pane-propbaum .pb-ok:hover{background:var(--good);border-color:var(--good);color:#fff}
+  #adm-pane-propbaum .pb-chip.done .pb-ok{background:var(--good);border-color:var(--good);color:#fff}
+  #adm-pane-propbaum .pb-chip.done .pb-ok.ask{background:var(--danger);border-color:var(--danger);font-family:'Inter',sans-serif;font-weight:600}
+  #adm-pane-propbaum .pb-ok:disabled{opacity:.5;cursor:default}
+  @keyframes pbPuls{0%,100%{box-shadow:0 0 0 0 rgba(84,71,206,0)}50%{box-shadow:0 0 0 4px rgba(84,71,206,.45)}}
+  #adm-pane-propbaum .pb-chip.fokus{border-color:var(--violet);animation:pbPuls 1s ease-in-out 4}
+  #adm-pane-propbaum .pb-fuss{font-size:11.5px;color:var(--sub);line-height:1.5;margin-top:6px}
+  #adm-pane-propbaum .pb-fehler{color:var(--danger);font-size:12.5px;margin:0 0 10px}
+  @media (max-width:960px){#adm-pane-propbaum .pb-zahlen{grid-template-columns:repeat(2,1fr)}}
   #adm-pane-kompass .kp-erg{white-space:nowrap;font-variant-numeric:tabular-nums}
   #adm-pane-kompass .kp-erg.hit{color:#2a9d5c}
   #adm-pane-kompass .kp-erg.miss{color:var(--danger)}
@@ -8495,6 +8542,8 @@
         <div class="subtabs">
           <button class="subtab active adm-tab" data-admtab="overview">Übersicht</button>
           <button class="subtab adm-tab" data-admtab="wd">Winning Days</button>
+          <!-- Prop-Baum (03.10.2026, Auftrag von Pascal): täglich alle Prop-Accounts abhaken -->
+          <button class="subtab adm-tab" data-admtab="propbaum">Prop-Baum</button>
           <!-- Kapitel/Statistik ohne Emojis (Finn 30.09.2026: „die Emojis weg, die nerven") -->
           <button class="subtab adm-tab" data-admtab="kapitel">Kapitel</button>
           <button class="subtab adm-tab" data-admtab="stat">Statistik</button>
@@ -8801,6 +8850,30 @@
             <div class="panel-title" style="margin-bottom:8px">Verlauf (7 Tage)</div>
             <div id="wd-verlauf" style="font-size:12.5px"></div>
           </div>
+        </div>
+        <!-- PROP-BAUM (03.10.2026, Auftrag von Pascal): alle aktiven Prop-Accounts als Baum Firma → Stufe → ID → Account,
+             je Handelstag abhaken (Wechsel 17:45 New York). Reine Anzeige plus Haken. Daten: /admin/prop-baum,
+             eigene Verdrahtung im Modul (Sektion PROP-BAUM), kein Sammel-Handler. -->
+        <div id="adm-pane-propbaum" hidden>
+          <div class="pb-kopf">
+            <div class="panel-title">Prop-Baum <span class="pb-sub" id="pb-stand"></span></div>
+            <div class="vp-zeile">
+              <button class="btn btn-ghost btn-mini" id="pbNaechster" title="springt zum ersten nicht erledigten Account">Nächster offener</button>
+              <button class="btn btn-ghost btn-mini" id="pbNeu">Neu laden</button>
+            </div>
+          </div>
+          <div class="pb-fehler" id="pb-fehler" hidden></div>
+          <div class="pb-ids" id="pb-ids"></div>
+          <div class="pb-zahlen">
+            <div class="pb-zahl"><span>Heute offen</span><b id="pb-n-offen">—</b></div>
+            <div class="pb-zahl gut"><span>Heute erledigt</span><b id="pb-n-erledigt">—</b></div>
+            <div class="pb-zahl"><span>Aktive Accounts</span><b id="pb-n-aktiv">—</b></div>
+            <div class="pb-zahl" id="pb-raus-kachel"><span>Heute raus</span><b id="pb-n-raus">—</b></div>
+          </div>
+          <div id="pb-baum"></div>
+          <div class="pb-fuss">Erledigt = heute ein Trade in Prophos oder von Hand abgehakt; bleibt in der Stufe und leuchtet grün. Haken entfernen: zweimal klicken („Sicher?“, 6 s).
+            „TP“ = geplanter Gewinn des nächsten Trades, „noch“ = Rest bis zum Phasenziel, ⚠ = Balance älter als 24 h, Pfeil = Stufe heute gewechselt.
+            Der Handelstag wechselt um 17:45 New York, dann sind Haken, Pfeile und rote Chips weg.</div>
         </div>
         <!-- KOMPASS (23.09.2026, Finn: „bau eine Seite in Prophos unter Admin, wo ich die Daten immer live
              bekomme + alles in die DB packen immer"): Pascals Nasdaq-Forecasts. Oben je Session der neueste
@@ -11231,7 +11304,7 @@
      * Payouts und Meta Wallet sehen, den Rest nicht"). Die übrigen Reiter nur ausblenden
      * (Markierung data-nur-eigene-aus, damit ein Profilwechsel sie zurückholt); die Daten
      * grenzen Backend (_admin_nur_uid) und RLS (admin_nur_eigene) ohnehin ein. */
-    const KASSE_REITER_EIGENE = new Set(['overview', 'fin', 'wallet'])
+    const KASSE_REITER_EIGENE = new Set(['overview', 'fin', 'wallet', 'propbaum'])   // Prop-Baum (03.10.2026): Backend liefert nur eigene Accounts
     function kasseReiterFuer(ec){
       document.querySelectorAll('.adm-tab').forEach(b => {
         if(!ec){
@@ -15758,10 +15831,13 @@
         $('adm-pane-kompass').hidden  = name !== 'kompass'
         $('adm-pane-kapitel').hidden  = name !== 'kapitel'
         $('adm-pane-stat').hidden     = name !== 'stat'
+        $('adm-pane-propbaum').hidden = name !== 'propbaum'   // Prop-Baum (03.10.2026)
         if(name === 'kapitel' || name === 'stat') admKapitelOeffnen()   // lädt /admin/kapitel beim ersten Öffnen (24.09.2026), danach Cache
         if(name === 'kompass' && typeof window._kpTabOeffnen === 'function') window._kpTabOeffnen()
         else if(typeof window._kpTabSchliessen === 'function') window._kpTabSchliessen()
         if(name === 'wd' && typeof window._wdTabOeffnen === 'function') window._wdTabOeffnen()
+        if(name === 'propbaum' && typeof window._pbTabOeffnen === 'function') window._pbTabOeffnen()
+        else if(typeof window._pbTabSchliessen === 'function') window._pbTabSchliessen()
         admHedgeModus()   // Kapitel ohne Hedge: Staffel-Karte/Weg-Chip im Farmer, Hedge-Spalten (24.09.2026)
         if(name === 'wallet') walOpen()
         if(name === 'buys') admBuysRender()   // Daten kommen aus admLoad — hier nur neu zeichnen
@@ -37718,7 +37794,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.990'
+  const OS_TAB_BUILD = '2026-09-22.992'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -53250,6 +53326,272 @@
     btn.textContent = '⏳ schaltet…'
     epSchalten(btn.getAttribute('data-ep-schalter'), btn.getAttribute('data-ep-an') === '1')
   })
+})()
+/* ── PROP-BAUM (03.10.2026, Auftrag von Pascal, Finn: „bau es mal in Prophos rein … fass nix bestehendes an") ──
+ * Admin-Reiter: alle aktiven Prop-Accounts als Baum Firma → Stufe → ID → Account. Pascal arbeitet damit täglich seine
+ * Accounts ab — reine Anzeige plus Haken, keine Bewertung, keine Vorschläge. Stufenlogik, Handelstag, Chips und die
+ * Zwei-Klick-Rückfrage stammen aus Pascals Kompass-Vorlage (lifeplanner-eps.pages.dev, Tab „Prop-Baum"); Login,
+ * Konfiguration und Beispieldaten der Vorlage sind bewusst nicht übernommen. Daten + Haken über /admin/prop-baum
+ * (Gate wie /admin/overview, „nur eigene" greift dort). ID-Auswahl je Nutzer in user_settings ('prop_baum_ids').
+ * Eigene Verdrahtung: nur #adm-pane-propbaum und seine Knöpfe, kein Sammel-Handler. */
+;(() => {
+  const PB_FIRMEN = {
+    tradeify:    { label: 'Tradeify',    art: 'fut', grenzen: [1800, 5400], plan: [3600, 3600, 1800], fundedTag: 'Simfunded',
+                   stufen: [['neu','Neu'],['s1','+3.600'],['s2','+7.200'],['big','Big Trade'],['wd','Winning Days']] },
+    // Nur eine Zwischenstufe (Pascal 04.10.2026): ein Combine bei +9.000 ist bestanden und zählt schon als Big Trade
+    topstep:     { label: 'Topstep',     art: 'fut', grenzen: [2250, 6750], plan: [4500, 4500], fundedTag: 'XFA',
+                   stufen: [['neu','Neu'],['s1','+4.500'],['big','Big Trade'],['wd','Winning Days']] },
+    fundednext:  { label: 'FundedNext',  art: 'cfd', ziele: { p1: 0.08, p2: 0.05 }, stufen: [['p1','Phase 1'],['p2','Phase 2'],['funded','Funded']] },
+    fundingpips: { label: 'FundingPips', art: 'cfd', ziele: { p1: 0.10, p2: 0.06 }, stufen: [['p1','Phase 1'],['p2','Phase 2'],['funded','Master']] },
+  }
+  const PB_SONST = [['challenge','Challenge'],['p1','Phase 1'],['p2','Phase 2'],['funded','Funded'],['wd','Winning Days']]
+  const PB_WD_PUFFER = 4500   // Futures-Funded ab diesem Puffer = Winning Days, sonst Big Trade (oder wd_farm gesetzt)
+  const PB_GRUND = { blown: 'geblowt', passed: 'bestanden', passed_pending: 'bestanden' }
+  const _pb = { daten: null, ids: null, idsGeladen: false, timer: null, laedt: false, fehler: '', askT: null, offen: false }
+  const pbEsc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+  const pbK = n => Math.round(n).toLocaleString('de-DE')
+  const pbNum = n => (n > 0 ? '+' : n < 0 ? '−' : '±') + Math.abs(Math.round(n)).toLocaleString('de-DE')
+  const pbExt = e => { const x = String(e || ''); return x.length > 8 ? '…' + x.slice(-6) : x }
+  const pbGroesseTxt = g => g ? (g >= 1000 ? Math.round(g / 1000) + 'k' : pbK(g)) : ''
+
+  // „FundedNext Futures" ist ein eigener Topf (andere Plattform) — fällt in „übrige Firmen", nicht unter FundedNext.
+  function pbFirmKey(firm){
+    const f = String(firm || '').toLowerCase().replace(/\s+/g, '')
+    if(f.includes('futur')) return null
+    for(const k of Object.keys(PB_FIRMEN)) if(f.includes(k)) return k
+    return null
+  }
+  const pbIstFunded = t => ['funded', 'funded_cfd', 'winning_days', 'live'].includes(t)
+
+  /* Stufe eines Accounts aus Rohwerten (aktueller Stand wie Tages-Schnappschuss — eine Logik für beides).
+   * CFD: aus account_type. Futures-Evaluation: Balance minus Start (Tradeify < 1.800 Neu, < 5.400 +3.600, sonst +7.200;
+   * Topstep < 2.250 Neu, < 6.750 +4.500, ab 6.750 Big Trade „bestanden"). Futures-Funded: Winning Days bei wd_farm,
+   * Kontotyp winning_days oder Puffer ≥ 4.500, sonst Big Trade (Simfunded/XFA). */
+  function pbStufe(a, fk){
+    const t = String(a.type || '').toLowerCase()
+    const f = fk ? PB_FIRMEN[fk] : null
+    const bal = a.balance == null ? null : Number(a.balance)
+    const basis = a.basis != null ? Number(a.basis) : (a.groesse != null ? Number(a.groesse) : null)
+    const d = (bal != null && basis != null) ? bal - basis : null
+    if(!f){
+      const key = t === 'winning_days' ? 'wd' : pbIstFunded(t) ? 'funded' : ({ phase1: 'p1', phase2: 'p2' })[t] || 'challenge'
+      return { key, delta: d }
+    }
+    if(f.art === 'cfd'){
+      if(pbIstFunded(t)) return { key: 'funded', delta: d }
+      const key = t === 'phase2' ? 'p2' : 'p1'
+      const ziel = (a.groesse || 0) * (f.ziele[key] || 0)
+      return { key, einStep: t === 'challenge', delta: d, rest: (d != null && ziel) ? Math.max(0, ziel - d) : null }
+    }
+    if(pbIstFunded(t)){
+      const wd = !!a.wd_farm || t === 'winning_days' || (d != null && d >= PB_WD_PUFFER)
+      return { key: wd ? 'wd' : 'big', delta: d, tag: f.fundedTag }
+    }
+    if(d == null) return { key: 'neu', unbekannt: true, tp: f.plan[0] }
+    const [g1, g2] = f.grenzen
+    if(fk === 'topstep'){
+      if(d >= g2) return { key: 'big', delta: d, tag: 'bestanden' }
+      const k = d >= g1 ? 's1' : 'neu'
+      return { key: k, delta: d, tp: f.plan[k === 's1' ? 1 : 0] }
+    }
+    const k = d >= g2 ? 's2' : d >= g1 ? 's1' : 'neu'
+    return { key: k, delta: d, tp: f.plan[{ neu: 0, s1: 1, s2: 2 }[k]] }
+  }
+  const pbStufen = fk => fk ? PB_FIRMEN[fk].stufen : PB_SONST
+  const pbStufeLabel = (fk, key) => (pbStufen(fk).find(([k]) => k === key) || [])[1] || key
+  const pbStufeIdx = (fk, key) => pbStufen(fk).findIndex(([k]) => k === key)
+
+  // Erledigt = Prophos kennt heute einen Trade (traded_today, außer von Hand auf 'skip' gesetzt) ODER Haken 'done'.
+  const pbErledigt = a => { const h = (_pb.daten?.haken || {})[a.id]; return h === 'done' || (!!a.traded_today && h !== 'skip') }
+
+  async function pbToken(){
+    const { data: { session } } = await supabase.auth.getSession()
+    const tok = session?.access_token
+    if(!tok) throw new Error('nicht angemeldet')
+    return tok
+  }
+
+  async function pbIdsLaden(){
+    if(_pb.idsGeladen || !currentUserId) return
+    try{
+      const { data, error } = await supabase.from('user_settings').select('value').eq('user_id', currentUserId).eq('key', 'prop_baum_ids').maybeSingle()
+      if(!error){ _pb.ids = Array.isArray(data?.value?.ids) ? data.value.ids.map(String) : null; _pb.idsGeladen = true }
+    }catch(_){}
+  }
+  async function pbIdsSpeichern(){
+    if(!currentUserId) return
+    try{
+      const { error } = await supabase.from('user_settings').upsert({ user_id: currentUserId, key: 'prop_baum_ids', value: { ids: _pb.ids || [] }, updated_at: new Date().toISOString() }, { onConflict: 'user_id,key' })
+      if(error) console.warn('[prop-baum] ID-Auswahl nicht gespeichert:', error.message)
+    }catch(e){ console.warn('[prop-baum] ID-Auswahl nicht gespeichert:', e) }
+  }
+
+  async function pbLaden(){
+    if(_pb.laedt) return
+    _pb.laedt = true
+    const st = document.getElementById('pb-stand'); if(st && !_pb.daten) st.textContent = '· lädt …'
+    try{
+      await pbIdsLaden()
+      const r = await fetch(`${WATCHER_HOME}/admin/prop-baum`, { headers: { 'sb-token': await pbToken() }, cache: 'no-store' })
+      const d = await r.json().catch(() => ({}))
+      if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
+      if(!Array.isArray(d.accounts)) throw new Error('unerwartete Antwort')
+      _pb.daten = d; _pb.fehler = ''; _pb.stand = new Date()
+    }catch(e){ _pb.fehler = 'Laden fehlgeschlagen: ' + (e.message || e) }
+    _pb.laedt = false
+    pbRender()
+  }
+
+  function pbAuswahl(){
+    const people = _pb.daten?.people || []
+    return new Set(_pb.ids == null ? people.map(p => p.user_id) : _pb.ids)
+  }
+
+  function pbRender(){
+    const fe = document.getElementById('pb-fehler')
+    if(fe){ fe.hidden = !_pb.fehler; fe.textContent = _pb.fehler }
+    const d = _pb.daten, baum = document.getElementById('pb-baum')
+    if(!d || !baum) return
+    const st = document.getElementById('pb-stand')
+    if(st) st.textContent = `· Handelstag ${d.handelstag} (wechselt 17:45 New York) · Stand ${(_pb.stand || new Date()).toLocaleTimeString('de-DE')}`
+    const sel = pbAuswahl(), people = d.people || []
+    const anz = uid => (d.accounts || []).filter(a => a.user_id === uid).length
+    document.getElementById('pb-ids').innerHTML = people.map(p =>
+      `<button class="pb-id${sel.has(p.user_id) ? ' an' : ''}" data-pb-id="${pbEsc(p.user_id)}">${pbEsc(p.name)}<b>${anz(p.user_id)}</b></button>`).join('')
+      || '<span class="pb-leer">keine IDs</span>'
+
+    const rows = (d.accounts || []).filter(a => sel.has(a.user_id))
+    const raus = (d.raus || []).filter(a => sel.has(a.user_id))
+    const snap = d.schnappschuss || {}
+    const nErl = rows.filter(pbErledigt).length
+    document.getElementById('pb-n-offen').textContent = rows.length - nErl
+    document.getElementById('pb-n-erledigt').textContent = nErl
+    document.getElementById('pb-n-aktiv').textContent = rows.length
+    document.getElementById('pb-n-raus').textContent = raus.length
+    document.getElementById('pb-raus-kachel').classList.toggle('rot', raus.length > 0)
+
+    const jetzt = Date.now()
+    const chip = (a, s, fk) => {
+      const erl = pbErledigt(a), h = (d.haken || {})[a.id]
+      const vor = snap[a.id] ? pbStufe(snap[a.id], fk) : null
+      const moved = vor && vor.key !== s.key
+      const dl = s.delta != null ? `<span class="${s.delta >= 0 ? 'plus' : 'minus'}">${pbNum(s.delta)}</span>`
+               : (s.unbekannt ? '<span class="d" title="Prophos kennt keine Balance">?</span>' : '')
+      const extra = s.tp ? `<span class="d">TP ${pbK(s.tp)}</span>`
+                  : (s.rest != null ? `<span class="d">noch ${pbK(s.rest)}</span>` : (s.tag ? `<span class="d">${pbEsc(s.tag)}</span>` : ''))
+      const alt = a.balance_at && (jetzt - Date.parse(a.balance_at) > 24 * 3600 * 1000)
+      const warn = alt ? `<span class="warn" title="Balance zuletzt ${pbEsc(new Date(a.balance_at).toLocaleString('de-DE'))}">⚠</span>` : ''
+      const mv = moved ? `<span class="mv" title="heute von ${pbEsc(pbStufeLabel(fk, vor.key))} hierher">${pbStufeIdx(fk, s.key) > pbStufeIdx(fk, vor.key) ? '↑' : '↓'} ${pbEsc(pbStufeLabel(fk, vor.key))}</span>` : ''
+      const btn = erl
+        ? `<button class="pb-ok" data-pb-weg="${pbEsc(a.id)}" title="${h === 'done' ? 'von Hand abgehakt' : 'Trade heute in Prophos erkannt'} · zweimal klicken entfernt den Haken">✓</button>`
+        : `<button class="pb-ok" data-pb-hak="${pbEsc(a.id)}" title="heute erledigt">✓</button>`
+      const tip = `${a.name}${a.ext ? ' · ' + a.ext : ''}${a.balance != null ? ' · Balance ' + Number(a.balance).toLocaleString('de-DE') : ''}${erl ? ' · heute erledigt' : ''}`
+      return `<span class="pb-chip${erl ? ' done' : ''}${moved ? ' moved' : ''}" data-pb-chip="${pbEsc(a.id)}" title="${pbEsc(tip)}">`
+        + `${pbGroesseTxt(a.groesse)}${a.ext ? ' <span class="d">' + pbEsc(pbExt(a.ext)) + '</span>' : ''}${dl ? ' ' + dl : ''}${extra ? ' ' + extra : ''}`
+        + `${s.einStep ? ' <span class="d">1-Step</span>' : ''}${warn}${mv}${btn}</span>`
+    }
+    const rausChip = (a, fk) => {
+      const grund = PB_GRUND[String(a.grund || '').toLowerCase()] || 'raus'
+      return `<span class="pb-chip raus" title="${pbEsc(a.name)}${a.ext ? ' · ' + pbEsc(a.ext) : ''} · heute archiviert">`
+        + `${pbGroesseTxt(a.groesse)}${a.ext ? ' ' + pbEsc(pbExt(a.ext)) : ''} <span class="grund">${grund}</span></span>`
+    }
+    const karte = (label, fk, liste, rausListe) => {
+      // Übrige Firmen: nur Stufen mit Inhalt, sonst stünden fünf leere Spalten da
+      const stufen = fk ? pbStufen(fk) : PB_SONST.filter(([k]) => liste.some(x => x.s.key === k) || rausListe.some(x => x.s.key === k))
+      const ids = people.filter(p => sel.has(p.user_id) && (liste.some(x => x.a.user_id === p.user_id) || rausListe.some(x => x.a.user_id === p.user_id)))
+      const nOffen = liste.filter(x => !pbErledigt(x.a)).length
+      const zelle = (uid, k) => liste.filter(x => x.s.key === k && x.a.user_id === uid).map(x => chip(x.a, x.s, fk)).join('')
+        + rausListe.filter(x => x.s.key === k && x.a.user_id === uid).map(x => rausChip(x.a, fk)).join('')
+      const body = ids.length
+        ? `<div class="pb-scroll"><table class="pb-tab"><thead><tr><th>ID</th>${stufen.map(([k, l]) => `<th>${l}<small>${liste.filter(x => x.s.key === k).length}</small></th>`).join('')}</tr></thead>`
+          + `<tbody>${ids.map(p => `<tr><td class="pb-wer">${pbEsc(p.name)}</td>${stufen.map(([k]) => `<td>${zelle(p.user_id, k) || '<span class="pb-leer">–</span>'}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`
+        : '<div class="pb-leer" style="font-size:12.5px">Keine Accounts.</div>'
+      return `<div class="panel pb-firma"><div class="pb-firma-kopf"><div class="panel-title">${pbEsc(label)}</div>`
+        + `<span class="pb-sub">${nOffen} offen · ${liste.length - nOffen} erledigt${rausListe.length ? ' · ' + rausListe.length + ' raus' : ''}</span></div>${body}</div>`
+    }
+    const gruppen = {}, sonst = {}
+    const einsortieren = (a, istRaus) => {
+      const fk = pbFirmKey(a.firm), s = pbStufe(a, fk)
+      const ziel = fk ? (gruppen[fk] = gruppen[fk] || { liste: [], raus: [] }) : (sonst[a.firm] = sonst[a.firm] || { liste: [], raus: [] })
+      ziel[istRaus ? 'raus' : 'liste'].push({ a, s })
+    }
+    rows.forEach(a => einsortieren(a, false))
+    raus.forEach(a => einsortieren(a, true))
+    baum.innerHTML = Object.keys(PB_FIRMEN).filter(fk => gruppen[fk]).map(fk => karte(PB_FIRMEN[fk].label, fk, gruppen[fk].liste, gruppen[fk].raus)).join('')
+      + Object.keys(sonst).sort((x, y) => x.localeCompare(y)).map(f => karte(f, null, sonst[f].liste, sonst[f].raus)).join('')
+      || '<div class="pb-leer" style="font-size:13px;padding:12px 2px">Keine aktiven Prop-Accounts für die gewählten IDs.</div>'
+  }
+
+  // Haken setzen/entfernen: lokal sofort, dann Server; schlägt der Server fehl, alter Stand zurück + Meldung.
+  async function pbHakenSetzen(aid, art){
+    const d = _pb.daten; if(!d) return
+    d.haken = d.haken || {}
+    const alt = d.haken[aid]
+    if(art) d.haken[aid] = art; else delete d.haken[aid]
+    pbRender()
+    try{
+      const r = await fetch(`${WATCHER_HOME}/admin/prop-baum`, { method: 'POST', cache: 'no-store',
+        headers: { 'sb-token': await pbToken(), 'Content-Type': 'application/json' }, body: JSON.stringify({ account_id: aid, art: art || null }) })
+      const j = await r.json().catch(() => ({}))
+      if(!r.ok) throw new Error(j.error || ('HTTP ' + r.status))
+      // Server-Handelstag ist gekippt (Klick genau um 17:45 New York) → frisch laden statt alten Tag zu zeigen
+      if(j.handelstag && j.handelstag !== d.handelstag) pbLaden()
+    }catch(e){
+      if(alt) d.haken[aid] = alt; else delete d.haken[aid]
+      _pb.fehler = 'Haken nicht gespeichert: ' + (e.message || e)
+      pbRender()
+    }
+  }
+
+  document.getElementById('pb-baum')?.addEventListener('click', e => {
+    const hak = e.target.closest('[data-pb-hak]')
+    if(hak){
+      // Nicht erledigt: ein 'skip' (Prophos-Erkennung von Hand aufgehoben) wird entfernt, sonst Haken 'done'
+      const aid = hak.dataset.pbHak
+      pbHakenSetzen(aid, (_pb.daten?.haken || {})[aid] === 'skip' ? null : 'done')
+      return
+    }
+    const weg = e.target.closest('[data-pb-weg]')
+    if(!weg) return
+    // Rückfrage im Chip statt confirm() (Pascal 03.10.2026): erster Klick „Sicher?", zweiter binnen 6 s entfernt den Haken
+    if(!weg.classList.contains('ask')){
+      document.querySelectorAll('#adm-pane-propbaum .pb-ok.ask').forEach(x => { x.classList.remove('ask'); x.textContent = '✓' })
+      weg.classList.add('ask'); weg.textContent = 'Sicher?'
+      clearTimeout(_pb.askT)
+      _pb.askT = setTimeout(() => { if(weg.isConnected){ weg.classList.remove('ask'); weg.textContent = '✓' } }, 6000)
+      return
+    }
+    clearTimeout(_pb.askT)
+    const aid = weg.dataset.pbWeg
+    const a = (_pb.daten?.accounts || []).find(x => x.id === aid)
+    // Von Prophos erkannt → 'skip' für diesen Handelstag; nur von Hand gesetzt → Haken löschen
+    pbHakenSetzen(aid, a && a.traded_today ? 'skip' : null)
+  })
+  document.getElementById('pb-ids')?.addEventListener('click', e => {
+    const b = e.target.closest('[data-pb-id]'); if(!b) return
+    const set = pbAuswahl(), id = b.dataset.pbId
+    set.has(id) ? set.delete(id) : set.add(id)
+    _pb.ids = [...set]
+    pbRender(); pbIdsSpeichern()
+  })
+  document.getElementById('pbNeu')?.addEventListener('click', pbLaden)
+  document.getElementById('pbNaechster')?.addEventListener('click', () => {
+    document.querySelectorAll('#adm-pane-propbaum .pb-chip.fokus').forEach(c => c.classList.remove('fokus'))
+    const c = document.querySelector('#adm-pane-propbaum .pb-chip:not(.done):not(.raus)')
+    if(!c) return
+    void c.offsetWidth
+    c.classList.add('fokus'); c.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    setTimeout(() => c.classList.remove('fokus'), 4000)
+  })
+
+  // Offen: sofort laden, dann jede Minute; nach dem Handelstag-Wechsel lädt der nächste Takt den neuen Tag.
+  window._pbTabOeffnen = () => {
+    _pb.offen = true
+    if(_pb.daten) pbRender()
+    pbLaden()
+    clearInterval(_pb.timer); _pb.timer = setInterval(pbLaden, 60000)
+  }
+  window._pbTabSchliessen = () => { _pb.offen = false; clearInterval(_pb.timer); _pb.timer = null }
 })()
 </script>
 <!-- Yahoo-Markt-Block (mk-*) entfernt am 25.09.2026 (Finn: „Den unteren Chart wegmachen und NQ/MNQ unten auch weg") — die Live-Daten
