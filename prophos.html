@@ -10564,6 +10564,13 @@
         <!-- bei Futures-Firmen ausgeblendet (F13, 27.09.2026) — bulkFuturesUmschalten -->
         <div class="field" style="grid-column:1/-1" id="bulk-creds-box">
           <label>Zugangsdaten (optional)</label>
+          <!-- Je Kennung eine Zeile (03.10.2026, Finn: „für jede External ID gleich die Login-Daten eintragen und automatisch in Echo
+               verbinden") — Login = Kennung; das Textfeld darunter bleibt für Fälle ohne erkannte Kennung -->
+          <div id="bulk-creds-rows" style="display:none;flex-direction:column;gap:6px"></div>
+          <label id="bulk-echo-box" style="display:none;align-items:center;gap:9px;cursor:pointer;margin:8px 0 0;font-size:13px;font-weight:600">
+            <input type="checkbox" id="bulk-echo-create" checked style="width:16px;height:16px;flex-shrink:0">
+            <span>⚡ Direkt in Echo einrichten (MT5-Terminal je Account, am PC dieser ID)</span>
+          </label>
           <textarea class="input" id="bulk-creds" rows="4" placeholder="Eine Zeile pro Account:  Login  Passwort  Server&#10;z.B.  510023456  AbcPwd!23  ThinkMarkets-Live&#10;Trennung per Tab, Semikolon, Komma oder mehreren Leerzeichen" style="font-family:var(--mono);font-size:12.5px;resize:vertical" autocomplete="off"></textarea>
           <div style="font-size:11px;color:var(--sub);margin-top:4px">Zeile für Zeile den neuen CFD-Kennungen zugeordnet (1. Zeile → 1. neue CFD-Kennung, …). Reihenfolge: <code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">Login Passwort Server</code>. Server leer → wird aus der Firma vorausgefüllt. Plattform = MT5 (Standard).</div>
         </div>
@@ -30942,6 +30949,57 @@
   }
   window._mt5CreateAccountInCopier = mt5CreateAccountInCopier
 
+  /* ECHO NACH DER BULK-ANLAGE (03.10.2026, Finn: „von jedem einzelnen die Login-Daten eintragen und dann automatisch direkt in Echo
+   * verbunden"). Das Panel richtet nur EIN Terminal gleichzeitig ein (prov_start: „läuft schon") → nacheinander, je Konto auf das
+   * Job-Ende warten (höchstens 6 min). Am PC mit Panel direkt; sonst (Mac/Handy) ein Signal 'mt5_provision' je Konto an den PC-Tab
+   * dieser ID — der richtet dort genauso nacheinander ein. Zugangsdaten stehen am Konto (cred_*), das Signal trägt nur die ID. */
+  async function mt5ProvJobWarten(maxMs){
+    const t0 = Date.now()
+    while(Date.now() - t0 < maxMs){
+      let dd = null; try{ dd = await window.mtcApi('instances') }catch(_){}
+      const job = dd && dd.job
+      if(!job || job.done) return job || { done: true }
+      await new Promise(r => setTimeout(r, 4000))
+    }
+    return null
+  }
+  async function mt5EchoEinrichtenEines(acc){
+    if(typeof window.mtcApi !== 'function') return { ok: false, msg: 'kein Copier-Panel' }
+    if(!await mt5ProvJobWarten(360000)) return { ok: false, msg: 'Panel ist noch mit einer anderen Einrichtung beschäftigt' }
+    const r = await mt5CreateAccountInCopier(acc)
+    if(r.error) return { ok: false, msg: r.error }
+    if(r.skipped) return { ok: false, msg: 'übersprungen (' + r.skipped + ')' }
+    if(r.existing) return { ok: true, msg: 'schon in Echo — verknüpft' }
+    const job = await mt5ProvJobWarten(360000)
+    if(!job) return { ok: false, msg: 'Einrichtung läuft noch nach 6 min — im Echo-Panel nachsehen' }
+    return job.error ? { ok: false, msg: String(job.error) } : { ok: true, msg: 'eingerichtet' }
+  }
+  async function mt5EchoEinrichtenListe(accs){
+    const banner = (t, k) => { if(typeof showSyncBanner === 'function') showSyncBanner(t, k) }
+    const amPc = (location.hostname === 'localhost' || location.hostname === '127.0.0.1') && typeof window.mtcApi === 'function'
+    if(!amPc){
+      let n = 0
+      for(const a of accs){
+        try{
+          const { error } = await supabase.from('order_signale').insert({ plan_id: 'konto:' + a.id, params: { aktion: 'mt5_provision', account_id: String(a.id), login: String((a.creds || {}).login || ''), name: a.name, von: 'bulk' } })
+          if(!error) n++
+        }catch(_){}
+      }
+      banner(`⚡ Echo: ${n} von ${accs.length} Konto(s) an den PC dieser ID geschickt — dort werden die Terminals nacheinander eingerichtet`, n === accs.length ? 'ok' : 'err')
+      if(typeof hideSyncBannerSoon === 'function') hideSyncBannerSoon(8000)
+      return
+    }
+    let ok = 0; const fehl = []
+    for(let k = 0; k < accs.length; k++){
+      banner(`⚡ Echo richtet ein … ${k + 1}/${accs.length} (${accs[k].name})`, 'ok')
+      const r = await mt5EchoEinrichtenEines(accs[k])
+      if(r.ok) ok++; else fehl.push(`${accs[k].name}: ${r.msg}`)
+    }
+    banner(`⚡ Echo: ${ok}/${accs.length} eingerichtet${fehl.length ? ' · ' + fehl.join(' · ') : ''}`, fehl.length ? 'err' : 'ok')
+    if(typeof hideSyncBannerSoon === 'function') hideSyncBannerSoon(fehl.length ? 15000 : 8000)
+  }
+  window.mt5EchoEinrichtenListe = mt5EchoEinrichtenListe
+
   if(accEls.modal)   accEls.modal.addEventListener('click', e => {
     if(e.target === accEls.modal) closeAccountModal()
   })
@@ -31442,8 +31500,37 @@
       if(b.length) return bulkCfdBloecke(b.filter(bulkIstNeu)).length > 0
       return (typeof tpFirmIstCfd === 'function') && tpFirmIstCfd(bEl.firm.value.trim())
     }
+    // Zugangsdaten je neuer CFD-Kennung (03.10.2026): eine Zeile Kennung · Passwort · Server; Eingaben bleiben beim Neuaufbau erhalten
+    function bulkCredZeilenIds(){
+      const b = (typeof bulkPaste !== 'undefined' && bulkPaste.bloecke) || []
+      return b.length ? bulkCfdBloecke(b.filter(bulkIstNeu)).map(x => String(x.id)) : []
+    }
+    function bulkCredZeilenRender(){
+      const box = document.getElementById('bulk-creds-rows'); if(!box) return
+      const ids = bulkCredZeilenIds()
+      const alt = {}
+      box.querySelectorAll('[data-bcr]').forEach(r => { alt[r.getAttribute('data-bcr')] = { pw: r.querySelector('[data-bcr-pw]').value, srv: r.querySelector('[data-bcr-srv]').value } })
+      const std = (typeof serverForFirm === 'function') ? (serverForFirm(bEl.firm?.value.trim()) || '') : ''
+      box.innerHTML = ids.map(id => {
+        const a = alt[id] || {}
+        return `<div data-bcr="${escapeHtml(id)}" style="display:grid;grid-template-columns:110px 1fr 1fr;gap:6px;align-items:center">`
+          + `<span class="mono" style="font-size:12.5px;color:var(--ink)">${escapeHtml(id)}</span>`
+          + `<input class="input mono" data-bcr-pw type="text" placeholder="Passwort" autocomplete="off" style="font-size:12.5px" value="${escapeHtml(a.pw || '')}">`
+          + `<input class="input mono" data-bcr-srv type="text" placeholder="Server" autocomplete="off" style="font-size:12.5px" value="${escapeHtml(a.srv != null ? a.srv : std)}">`
+          + `</div>`
+      }).join('')
+      box.style.display = ids.length ? 'flex' : 'none'
+      if(bEl.creds) bEl.creds.style.display = ids.length ? 'none' : ''
+      const eb = document.getElementById('bulk-echo-box'); if(eb) eb.style.display = ids.length ? 'flex' : 'none'
+    }
+    function bulkCredAusZeile(id){
+      const r = document.querySelector(`#bulk-creds-rows [data-bcr="${CSS.escape(String(id))}"]`); if(!r) return null
+      const pw = r.querySelector('[data-bcr-pw]').value.trim(), srv = r.querySelector('[data-bcr-srv]').value.trim()
+      return pw ? { login: String(id), password: pw, server: srv, platform: 'MT5' } : null
+    }
     function bulkFuturesUmschalten(){
       const zeigen = bulkZeigtZugang(), cb = document.getElementById('bulk-creds-box')
+      try{ bulkCredZeilenRender() }catch(_){}
       if(cb) cb.style.display = zeigen ? '' : 'none'
       if(bEl.dupCreateBox){
         const dupOn = typeof dupState !== 'undefined' && !!dupState.token
@@ -31647,7 +31734,7 @@
       let created = 0, errors = 0, anyExtId = false, ohneQuelle = false
       const dupCandidates = []  // { acc } für Accounts mit vollständigen Zugangsdaten
       for(let i = 0; i < wahl.length; i++){
-        const x = wahl[i], cred = cfdIdx.has(x.id) ? (credList[cfdIdx.get(x.id)] || null) : null
+        const x = wahl[i], cred = bulkCredAusZeile(x.id) || (cfdIdx.has(x.id) ? (credList[cfdIdx.get(x.id)] || null) : null)
         // Werte: zentrale Vorlage des Blocks (F12) > Erkennung aus dem Text > Formular; Größe Text > Vorlage > 150.000 (F14)
         const v = bulkPasteVorlage(x), vv = (k, sonst) => (v && v[k] != null) ? v[k] : sonst
         const firm = vv('firm', x.firma || firmaForm), gr = x.groesse || vv('starting_balance', null) || vv('account_size', null) || BULK_STD_GROESSE
@@ -31713,6 +31800,11 @@
         if(dupOk && typeof dupAutoPushSymbolMappings === 'function'){
           try{ dupAutoPushSymbolMappings(dupCandidates.map(a => a.name)) }catch(_){}
         }
+      }
+
+      // Echo direkt einrichten (03.10.2026): je Account mit vollständigen Zugangsdaten ein MT5-Terminal — läuft im Hintergrund weiter
+      if(zugang && document.getElementById('bulk-echo-create')?.checked && dupCandidates.length && typeof mt5EchoEinrichtenListe === 'function'){
+        mt5EchoEinrichtenListe(dupCandidates.slice())
       }
 
       renderAccounts()
@@ -37822,7 +37914,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.995'
+  const OS_TAB_BUILD = '2026-09-22.996'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -39800,7 +39892,7 @@
    * Signals neu — das F24-Aufräumen nahm nur Zeilen älter als 4 min, das Signal blieb auf 'laeuft'). sessionStorage überlebt das Neuladen
    * im SELBEN Tab: was hier steht und beim Start noch 'laeuft' ist, gehörte sicher dem vorigen Leben dieses Tabs — sofort abschließen. */
   const OS_CLAIMS_KEY = 'prophos_os_claims'
-  const OS_LESEND = ['konto_balance', 'balance_lesen', 'endlesung', 'rundgang', 'tsx_inventar', 'mt5_balance', 'mt5_terminal']
+  const OS_LESEND = ['konto_balance', 'balance_lesen', 'endlesung', 'rundgang', 'tsx_inventar', 'mt5_balance', 'mt5_terminal', 'mt5_provision']
   function osClaimMerken(sig){
     try{
       const jetzt = Date.now()
@@ -39960,6 +40052,27 @@
         // Terminal öffnen auf Zuruf (29.09.2026, Knopf „Terminal öffnen" in der Accounts-Spalte VERKNÜPFUNGEN): plan_id 'konto:<id>',
         // params {aktion:'mt5_terminal', account_id, login}. Claim-Regel wie mt5_balance — nur der PC mit einer Instanz dieses Logins.
         // Nur /api/start-terminal, kein Lesen, KEINE Order.
+        // Echo einrichten auf Zuruf (03.10.2026, Bulk-Anlage vom Mac): Konto mit Zugangsdaten → MT5-Terminal hier provisionieren.
+        // Nacheinander: läuft schon eine Einrichtung (dieser Tab), bleibt das Signal liegen und kommt im nächsten Takt dran.
+        if(String((sig.params || {}).aktion || '') === 'mt5_provision'){
+          if(window._mt5ProvLaeuft) continue
+          const { data: clP } = await supabase.from('order_signale')
+            .update({ status:'laeuft', pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : '', updated_at: new Date().toISOString() })
+            .eq('id', sig.id).eq('status', 'wartet').select()
+          if(!clP || !clP.length){ _osStand = 'claim-verloren'; continue }
+          osClaimMerken(sig)
+          _osStand = 'claim-mt5-provision: ' + String(sig.id).slice(0, 8)
+          window._mt5ProvLaeuft = true
+          ;(async () => {
+            let acc = (accounts || []).find(a => String(a.id) === String((sig.params || {}).account_id))
+            if(!acc){ try{ const { data } = await supabase.from('accounts').select('*').eq('id', (sig.params || {}).account_id).maybeSingle(); if(data) acc = rowToAccount(data) }catch(_){} }
+            return acc ? await mt5EchoEinrichtenEines(acc) : { ok: false, msg: 'Konto nicht gefunden' }
+          })()
+            .then(er => supabase.from('order_signale').update({ status: er && er.ok ? 'fertig' : 'fehler', updated_at: new Date().toISOString(), ergebnis: er || { ok: false, msg: 'keine Antwort' } }).eq('id', sig.id))
+            .catch(e => supabase.from('order_signale').update({ status: 'fehler', updated_at: new Date().toISOString(), ergebnis: { ok: false, msg: String((e && e.message) || e) } }).eq('id', sig.id))
+            .finally(() => { window._mt5ProvLaeuft = false })
+          continue
+        }
         if(String((sig.params || {}).aktion || '') === 'mt5_terminal'){
           const pm = sig.params || {}, lg = String(pm.login || '').trim()
           const hier = !!lg && (dd.instances || []).some(x => x && String(((x.status || {}).master_login) || x.master_expected || '') === lg)
