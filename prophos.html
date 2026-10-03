@@ -1484,15 +1484,27 @@
   #adm-pane-propbaum .pb-zahl b{font-size:20px;font-weight:600;font-variant-numeric:tabular-nums}
   #adm-pane-propbaum .pb-zahl.gut b{color:var(--good)}
   #adm-pane-propbaum .pb-zahl.rot b{color:var(--danger)}
-  #adm-pane-propbaum .pb-firma{margin:0 0 12px}
-  #adm-pane-propbaum .pb-firma-kopf{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px}
+  /* Abgrenzung (03.10.2026 abends, Finn: „Abgrenzungen zwischen den Prop-Firms … die Striche deutlich besser erkennbar … zwischen
+     3.600 und 7.200 auch so eine cleane Abtrennung"): jede Firma eine eigene umrandete Karte mit Abstand, Zeilen- UND Spaltenlinien
+     in kräftigerem Grau, Stufen-Spalten gleich breit (table-layout fixed), Kopfzeile in Versalien wie in Pascals Vorlage. */
+  #adm-pane-propbaum{--pb-linie:#D0D5DD}
+  #adm-pane-propbaum .pb-firma{margin:0 0 18px;border:1px solid var(--pb-linie);border-radius:var(--r-lg);background:var(--surface);padding:14px 16px 10px;box-shadow:var(--shadow-card)}
+  #adm-pane-propbaum .pb-firma-kopf{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:10px}
+  #adm-pane-propbaum .pb-firma-kopf .panel-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em}
   #adm-pane-propbaum .pb-firma-kopf .pb-sub{font-size:11.5px}
   #adm-pane-propbaum .pb-scroll{overflow-x:auto}
-  #adm-pane-propbaum table.pb-tab{width:100%;border-collapse:collapse;font-size:12.5px}
-  #adm-pane-propbaum table.pb-tab th{text-align:left;font-weight:600;color:var(--sub);font-size:11.5px;padding:5px 8px;border-bottom:1px solid var(--border);white-space:nowrap}
-  #adm-pane-propbaum table.pb-tab th small{font-weight:500;color:var(--sub-2);margin-left:3px}
-  #adm-pane-propbaum table.pb-tab td{padding:5px 8px;border-bottom:1px solid var(--border-soft);vertical-align:top}
-  #adm-pane-propbaum table.pb-tab td.pb-wer{font-weight:600;white-space:nowrap}
+  #adm-pane-propbaum table.pb-tab{width:100%;border-collapse:collapse;table-layout:fixed;font-size:12.5px}
+  #adm-pane-propbaum table.pb-tab th{text-align:left;font-weight:600;color:var(--sub);font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;
+    padding:6px 10px;border-bottom:1.5px solid var(--pb-linie);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #adm-pane-propbaum table.pb-tab th:first-child{width:80px}
+  #adm-pane-propbaum table.pb-tab th small{font-weight:600;color:var(--sub-2);margin-left:4px}
+  #adm-pane-propbaum table.pb-tab td{padding:7px 10px;border-bottom:1px solid var(--pb-linie);vertical-align:middle}
+  #adm-pane-propbaum table.pb-tab tbody tr:last-child td{border-bottom:0}
+  #adm-pane-propbaum table.pb-tab th + th,#adm-pane-propbaum table.pb-tab td + td{border-left:1px solid var(--pb-linie)}
+  #adm-pane-propbaum table.pb-tab tbody tr:hover td{background:rgba(84,71,206,.03)}
+  #adm-pane-propbaum table.pb-tab td.pb-wer{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* Chip bleibt in seiner Spalte: zu breit → bricht innerhalb um, ragt nie in die Nachbarstufe */
+  #adm-pane-propbaum table.pb-tab td .pb-chip{max-width:100%;flex-wrap:wrap;row-gap:1px;gap:4px;font-size:11px;padding:2px 3px 2px 7px}
   #adm-pane-propbaum .pb-leer{color:var(--sub-2)}
   #adm-pane-propbaum .pb-chip{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;
     padding:2px 4px 2px 8px;border-radius:8px;border:1px solid var(--border);background:var(--surface);margin:2px 4px 2px 0;white-space:nowrap}
@@ -37794,7 +37806,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.992'
+  const OS_TAB_BUILD = '2026-09-22.993'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -53503,7 +53515,7 @@
       const zelle = (uid, k) => liste.filter(x => x.s.key === k && x.a.user_id === uid).map(x => chip(x.a, x.s, fk)).join('')
         + rausListe.filter(x => x.s.key === k && x.a.user_id === uid).map(x => rausChip(x.a, fk)).join('')
       const body = ids.length
-        ? `<div class="pb-scroll"><table class="pb-tab"><thead><tr><th>ID</th>${stufen.map(([k, l]) => `<th>${l}<small>${liste.filter(x => x.s.key === k).length}</small></th>`).join('')}</tr></thead>`
+        ? `<div class="pb-scroll"><table class="pb-tab" style="min-width:${80 + stufen.length * 205}px"><thead><tr><th>ID</th>${stufen.map(([k, l]) => `<th>${l}<small>${liste.filter(x => x.s.key === k).length}</small></th>`).join('')}</tr></thead>`
           + `<tbody>${ids.map(p => `<tr><td class="pb-wer">${pbEsc(p.name)}</td>${stufen.map(([k]) => `<td>${zelle(p.user_id, k) || '<span class="pb-leer">–</span>'}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`
         : '<div class="pb-leer" style="font-size:12.5px">Keine Accounts.</div>'
       return `<div class="panel pb-firma"><div class="pb-firma-kopf"><div class="panel-title">${pbEsc(label)}</div>`
