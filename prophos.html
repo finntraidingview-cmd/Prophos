@@ -1614,16 +1614,18 @@
   #af-view .adm-row-btn.is-on{background:var(--surface-tint)}   /* aufgeklappte ID / gewählte Firma: neutral */
   #af-view .adm-row-btn.is-on .adm-row-name{color:var(--ink)}
   /* Aufgeklappte Konten einer ID direkt unter ihrer Zeile: festes Raster [Typ | Name | Firma | Status], alle Zeilen bündig */
-  #af-view{--af-typ:80px;--af-firma:92px;--af-status:212px}   /* Status 212 px (vorher 150): „Erledigt · TP 00:01 · +1.875 $" als Pille ganz */   /* so breit, dass der Name (mit Kontonummer) im linken Panel meist ganz passt */
+  #af-view{--af-typ:80px;--af-firma:92px;--af-bal:96px;--af-status:212px}   /* Balance-Spalte seit 03.10.2026 (Finn: „kannst du da die Balance noch reinbringen") */   /* Status 212 px (vorher 150): „Erledigt · TP 00:01 · +1.875 $" als Pille ganz */   /* so breit, dass der Name (mit Kontonummer) im linken Panel meist ganz passt */
   #af-view .af-konten{padding:0 0 8px;border-bottom:1px solid var(--border-soft)}
   #af-view .af-leer{font-size:12.5px;color:var(--sub);padding:8px 0 6px}
-  #af-view .af-z{display:grid;grid-template-columns:var(--af-typ) minmax(0,1fr) var(--af-firma) var(--af-status);
-    grid-template-areas:"typ name firma status";column-gap:12px;align-items:center;min-width:0;padding:6px 0;
+  #af-view .af-z{display:grid;grid-template-columns:var(--af-typ) minmax(0,1fr) var(--af-firma) var(--af-bal) var(--af-status);
+    grid-template-areas:"typ name firma bal status";column-gap:12px;align-items:center;min-width:0;padding:6px 0;
     border-top:1px solid var(--border-soft);font-size:13px}
   #af-view .af-konten > :first-child{border-top:none}
   #af-view .af-z > .type-badge{grid-area:typ;width:100%;justify-content:center;padding:2px 4px;font-size:10.5px;white-space:nowrap;overflow:hidden}
   #af-view .af-z-name{grid-area:name;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   #af-view .af-z-firma{grid-area:firma;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--sub)}
+  #af-view .af-z-bal{grid-area:bal;min-width:0;text-align:right;white-space:nowrap;font-size:12.5px;font-weight:500;color:var(--ink);font-variant-numeric:tabular-nums}
+  #af-view .af-z-bal.is-leer{color:var(--sub-2);font-weight:400}
   #af-view .af-z-status{grid-area:status;min-width:0;display:flex;align-items:center;justify-content:flex-end;gap:6px;font-size:12px;color:var(--sub);white-space:nowrap;font-variant-numeric:tabular-nums}
   #af-view .af-z-status > span:last-child{overflow:hidden;text-overflow:ellipsis}
   #af-view .af-z.is-offen .af-z-name{font-weight:500}
@@ -1649,8 +1651,8 @@
     /* Handy (v3-Maße): Panels untereinander (s. .af-grid); die Kacheln laufen über die v3-Regel .kpis (2 je Zeile) */
     #af-view{--af-typ:72px}
     /* Konto-Zeile zweizeilig, weiter im Raster: oben Typ + Name, darunter Firma (unter dem Namen) + Status rechts */
-    #af-view .af-z{grid-template-columns:var(--af-typ) minmax(0,1fr) auto;grid-template-areas:"typ name name" ". firma status";column-gap:10px;row-gap:2px;padding:7px 0}
-    #af-view .af-z-firma,#af-view .af-z-status{font-size:11.5px}
+    #af-view .af-z{grid-template-columns:var(--af-typ) minmax(0,1fr) auto auto;grid-template-areas:"typ name name name" ". firma bal status";column-gap:10px;row-gap:2px;padding:7px 0}
+    #af-view .af-z-firma,#af-view .af-z-bal,#af-view .af-z-status{font-size:11.5px}
     /* Name darf am Handy zweizeilig werden: am Ende steht meist die Kontonummer, und einen Tooltip gibt es hier nicht */
     #af-view .af-z-name{white-space:normal;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-height:1.35}
     #af-view .af-klapp{grid-template-columns:var(--af-typ) minmax(0,1fr) auto;column-gap:10px}
@@ -13135,11 +13137,11 @@
       if(!k.children.length){ const l = document.createElement('div'); l.className = 'af-leer'; l.textContent = 'Keine Konten.'; k.appendChild(l) }
       return k
     }
-    // Eine Konto-Zeile im gemeinsamen Raster: Typ · Name · Firma · Status. Balance, P&L, Payout-Datum im Tooltip.
+    // Eine Konto-Zeile im gemeinsamen Raster: Typ · Name · Firma · Balance · Status. P&L seit Start, Payout-Datum im Tooltip.
     function afZeile(r, z){
       const d = document.createElement('div')
       d.className = 'af-z ' + ({ offen:'is-offen', lauf:'is-lauf', fertig:'is-fertig', warten:'is-warten', arch:'is-arch' }[z] || '')
-      d.innerHTML = '<span class="type-badge"></span><span class="af-z-name"></span><span class="af-z-firma"></span><span class="af-z-status"></span>'
+      d.innerHTML = '<span class="type-badge"></span><span class="af-z-name"></span><span class="af-z-firma"></span><span class="af-z-bal"></span><span class="af-z-status"></span>'
       const ph = afPhase(r.type)
       const badge = d.firstElementChild
       badge.classList.add('type-' + (r.type || 'sonst')); badge.textContent = ph[1]; badge.title = ph[2]
@@ -13147,6 +13149,10 @@
       const name = r.name || '—'
       d.querySelector('.af-z-name').textContent = ext && !name.includes(ext) ? `${name} · #${ext}` : name
       d.querySelector('.af-z-firma').textContent = afFirmaVon(r)
+      // Balance als eigene Spalte (03.10.2026, Finn) — dieselbe r.balance wie im Tooltip, ohne Live-Wert ein grauer Strich
+      const balZ = d.querySelector('.af-z-bal'), balV = r.balance == null ? null : Number(r.balance)
+      if(balV != null && isFinite(balV)) balZ.textContent = afGeld(balV, r.balance_ccy || 'USD')
+      else { balZ.textContent = '–'; balZ.classList.add('is-leer') }
 
       const st = d.querySelector('.af-z-status')
       // Status als TEXT wie im Radar (30.09.2026, Finn: „Hellgrau, Violett und Grün zusammen ist hässlich"): offen/geplant grau,
