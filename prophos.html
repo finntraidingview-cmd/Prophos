@@ -1470,63 +1470,63 @@
   @media (max-width:960px){#adm-pane-kompass .kp-zeile-bar{grid-template-columns:96px 1fr 80px}}
   /* Prop-Baum im Admin (03.10.2026, Auftrag von Pascal): je Firma eine Karte, Spalten = Stufen, Zeilen = IDs, Zellen = Account-Chips.
      Erledigte bleiben in ihrer Stufe und leuchten grün, heute archivierte stehen rot bis zum Handelstag-Wechsel (17:45 New York). */
-  #adm-pane-propbaum .pb-kopf{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 10px}
-  #adm-pane-propbaum .pb-sub{font-weight:400;color:var(--sub);font-size:12px}
-  #adm-pane-propbaum .btn-mini{padding:4px 11px;font-size:12px;height:auto}
-  #adm-pane-propbaum .pb-ids{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px}
-  #adm-pane-propbaum .pb-id{border:1px solid var(--border);background:var(--surface);color:var(--sub);border-radius:999px;padding:3px 11px;font-size:12px;cursor:pointer}
-  #adm-pane-propbaum .pb-id b{font-weight:500;color:var(--sub-2);margin-left:3px}
-  #adm-pane-propbaum .pb-id.an{color:var(--violet);border-color:var(--violet);background:var(--violet-tint)}
-  #adm-pane-propbaum .pb-id.an b{color:var(--violet)}
-  #adm-pane-propbaum .pb-zahlen{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:0 0 14px}
-  #adm-pane-propbaum .pb-zahl{border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface);padding:8px 12px}
-  #adm-pane-propbaum .pb-zahl span{display:block;font-size:11.5px;color:var(--sub)}
-  #adm-pane-propbaum .pb-zahl b{font-size:20px;font-weight:600;font-variant-numeric:tabular-nums}
-  #adm-pane-propbaum .pb-zahl.gut b{color:var(--good)}
-  #adm-pane-propbaum .pb-zahl.rot b{color:var(--danger)}
+  #pb-ansicht .pb-kopf{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 10px}
+  #pb-ansicht .pb-sub{font-weight:400;color:var(--sub);font-size:12px}
+  #pb-ansicht .btn-mini,#dashboard-view .view[data-view="propbaum"] .view-head .btn-mini{padding:4px 11px;font-size:12px;height:auto}
+  #pb-ansicht .pb-ids{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px}
+  #pb-ansicht .pb-id{border:1px solid var(--border);background:var(--surface);color:var(--sub);border-radius:999px;padding:3px 11px;font-size:12px;cursor:pointer}
+  #pb-ansicht .pb-id b{font-weight:500;color:var(--sub-2);margin-left:3px}
+  #pb-ansicht .pb-id.an{color:var(--violet);border-color:var(--violet);background:var(--violet-tint)}
+  #pb-ansicht .pb-id.an b{color:var(--violet)}
+  #pb-ansicht .pb-zahlen{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:0 0 14px}
+  #pb-ansicht .pb-zahl{border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface);padding:8px 12px}
+  #pb-ansicht .pb-zahl span{display:block;font-size:11.5px;color:var(--sub)}
+  #pb-ansicht .pb-zahl b{font-size:20px;font-weight:600;font-variant-numeric:tabular-nums}
+  #pb-ansicht .pb-zahl.gut b{color:var(--good)}
+  #pb-ansicht .pb-zahl.rot b{color:var(--danger)}
   /* Abgrenzung (03.10.2026 abends, Finn: „Abgrenzungen zwischen den Prop-Firms … die Striche deutlich besser erkennbar … zwischen
      3.600 und 7.200 auch so eine cleane Abtrennung"): jede Firma eine eigene umrandete Karte mit Abstand, Zeilen- UND Spaltenlinien
      in kräftigerem Grau, Stufen-Spalten gleich breit (table-layout fixed), Kopfzeile in Versalien wie in Pascals Vorlage. */
-  #adm-pane-propbaum{--pb-linie:#D0D5DD}
-  #adm-pane-propbaum .pb-firma{margin:0 0 18px;border:1px solid var(--pb-linie);border-radius:var(--r-lg);background:var(--surface);padding:14px 16px 10px;box-shadow:var(--shadow-card)}
-  #adm-pane-propbaum .pb-firma-kopf{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:10px}
-  #adm-pane-propbaum .pb-firma-kopf .panel-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em}
-  #adm-pane-propbaum .pb-firma-kopf .pb-sub{font-size:11.5px}
-  #adm-pane-propbaum .pb-scroll{overflow-x:auto}
-  #adm-pane-propbaum table.pb-tab{width:100%;border-collapse:collapse;table-layout:fixed;font-size:12.5px}
-  #adm-pane-propbaum table.pb-tab th{text-align:left;font-weight:600;color:var(--sub);font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;
+  #pb-ansicht{--pb-linie:#D0D5DD}
+  #pb-ansicht .pb-firma{margin:0 0 18px;border:1px solid var(--pb-linie);border-radius:var(--r-lg);background:var(--surface);padding:14px 16px 10px;box-shadow:var(--shadow-card)}
+  #pb-ansicht .pb-firma-kopf{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:10px}
+  #pb-ansicht .pb-firma-kopf .panel-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em}
+  #pb-ansicht .pb-firma-kopf .pb-sub{font-size:11.5px}
+  #pb-ansicht .pb-scroll{overflow-x:auto}
+  #pb-ansicht table.pb-tab{width:100%;border-collapse:collapse;table-layout:fixed;font-size:12.5px}
+  #pb-ansicht table.pb-tab th{text-align:left;font-weight:600;color:var(--sub);font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;
     padding:6px 10px;border-bottom:1.5px solid var(--pb-linie);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  #adm-pane-propbaum table.pb-tab th:first-child{width:80px}
-  #adm-pane-propbaum table.pb-tab th small{font-weight:600;color:var(--sub-2);margin-left:4px}
-  #adm-pane-propbaum table.pb-tab td{padding:7px 10px;border-bottom:1px solid var(--pb-linie);vertical-align:middle}
-  #adm-pane-propbaum table.pb-tab tbody tr:last-child td{border-bottom:0}
-  #adm-pane-propbaum table.pb-tab th + th,#adm-pane-propbaum table.pb-tab td + td{border-left:1px solid var(--pb-linie)}
-  #adm-pane-propbaum table.pb-tab tbody tr:hover td{background:rgba(84,71,206,.03)}
-  #adm-pane-propbaum table.pb-tab td.pb-wer{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #pb-ansicht table.pb-tab th:first-child{width:80px}
+  #pb-ansicht table.pb-tab th small{font-weight:600;color:var(--sub-2);margin-left:4px}
+  #pb-ansicht table.pb-tab td{padding:7px 10px;border-bottom:1px solid var(--pb-linie);vertical-align:middle}
+  #pb-ansicht table.pb-tab tbody tr:last-child td{border-bottom:0}
+  #pb-ansicht table.pb-tab th + th,#pb-ansicht table.pb-tab td + td{border-left:1px solid var(--pb-linie)}
+  #pb-ansicht table.pb-tab tbody tr:hover td{background:rgba(84,71,206,.03)}
+  #pb-ansicht table.pb-tab td.pb-wer{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   /* Chip bleibt in seiner Spalte: zu breit → bricht innerhalb um, ragt nie in die Nachbarstufe */
-  #adm-pane-propbaum table.pb-tab td .pb-chip{max-width:100%;flex-wrap:wrap;row-gap:1px;gap:4px;font-size:11px;padding:2px 3px 2px 7px}
-  #adm-pane-propbaum .pb-leer{color:var(--sub-2)}
-  #adm-pane-propbaum .pb-chip{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;
+  #pb-ansicht table.pb-tab td .pb-chip{max-width:100%;flex-wrap:wrap;row-gap:1px;gap:4px;font-size:11px;padding:2px 3px 2px 7px}
+  #pb-ansicht .pb-leer{color:var(--sub-2)}
+  #pb-ansicht .pb-chip{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;
     padding:2px 4px 2px 8px;border-radius:8px;border:1px solid var(--border);background:var(--surface);margin:2px 4px 2px 0;white-space:nowrap}
-  #adm-pane-propbaum .pb-chip .d{color:var(--sub)}
-  #adm-pane-propbaum .pb-chip .plus{color:var(--good)}
-  #adm-pane-propbaum .pb-chip .minus{color:var(--danger)}
-  #adm-pane-propbaum .pb-chip .warn{color:var(--warn)}
-  #adm-pane-propbaum .pb-chip .mv{font-family:'Inter',sans-serif;font-size:10.5px;color:var(--warn)}
-  #adm-pane-propbaum .pb-chip.moved{border-color:var(--warn)}
-  #adm-pane-propbaum .pb-chip.done{border-color:var(--good);background:rgba(18,183,106,.08);box-shadow:0 0 0 1px rgba(18,183,106,.25),0 0 8px rgba(18,183,106,.22)}
-  #adm-pane-propbaum .pb-chip.raus{border-color:var(--danger);background:rgba(240,68,56,.07);color:var(--danger)}
-  #adm-pane-propbaum .pb-chip.raus .grund{font-family:'Inter',sans-serif;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;padding-right:4px}
-  #adm-pane-propbaum .pb-ok{border:1px solid var(--border);background:none;color:var(--sub);border-radius:6px;font-size:11px;padding:1px 6px;line-height:1.4;cursor:pointer}
-  #adm-pane-propbaum .pb-ok:hover{background:var(--good);border-color:var(--good);color:#fff}
-  #adm-pane-propbaum .pb-chip.done .pb-ok{background:var(--good);border-color:var(--good);color:#fff}
-  #adm-pane-propbaum .pb-chip.done .pb-ok.ask{background:var(--danger);border-color:var(--danger);font-family:'Inter',sans-serif;font-weight:600}
-  #adm-pane-propbaum .pb-ok:disabled{opacity:.5;cursor:default}
+  #pb-ansicht .pb-chip .d{color:var(--sub)}
+  #pb-ansicht .pb-chip .plus{color:var(--good)}
+  #pb-ansicht .pb-chip .minus{color:var(--danger)}
+  #pb-ansicht .pb-chip .warn{color:var(--warn)}
+  #pb-ansicht .pb-chip .mv{font-family:'Inter',sans-serif;font-size:10.5px;color:var(--warn)}
+  #pb-ansicht .pb-chip.moved{border-color:var(--warn)}
+  #pb-ansicht .pb-chip.done{border-color:var(--good);background:rgba(18,183,106,.08);box-shadow:0 0 0 1px rgba(18,183,106,.25),0 0 8px rgba(18,183,106,.22)}
+  #pb-ansicht .pb-chip.raus{border-color:var(--danger);background:rgba(240,68,56,.07);color:var(--danger)}
+  #pb-ansicht .pb-chip.raus .grund{font-family:'Inter',sans-serif;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;padding-right:4px}
+  #pb-ansicht .pb-ok{border:1px solid var(--border);background:none;color:var(--sub);border-radius:6px;font-size:11px;padding:1px 6px;line-height:1.4;cursor:pointer}
+  #pb-ansicht .pb-ok:hover{background:var(--good);border-color:var(--good);color:#fff}
+  #pb-ansicht .pb-chip.done .pb-ok{background:var(--good);border-color:var(--good);color:#fff}
+  #pb-ansicht .pb-chip.done .pb-ok.ask{background:var(--danger);border-color:var(--danger);font-family:'Inter',sans-serif;font-weight:600}
+  #pb-ansicht .pb-ok:disabled{opacity:.5;cursor:default}
   @keyframes pbPuls{0%,100%{box-shadow:0 0 0 0 rgba(84,71,206,0)}50%{box-shadow:0 0 0 4px rgba(84,71,206,.45)}}
-  #adm-pane-propbaum .pb-chip.fokus{border-color:var(--violet);animation:pbPuls 1s ease-in-out 4}
-  #adm-pane-propbaum .pb-fuss{font-size:11.5px;color:var(--sub);line-height:1.5;margin-top:6px}
-  #adm-pane-propbaum .pb-fehler{color:var(--danger);font-size:12.5px;margin:0 0 10px}
-  @media (max-width:960px){#adm-pane-propbaum .pb-zahlen{grid-template-columns:repeat(2,1fr)}}
+  #pb-ansicht .pb-chip.fokus{border-color:var(--violet);animation:pbPuls 1s ease-in-out 4}
+  #pb-ansicht .pb-fuss{font-size:11.5px;color:var(--sub);line-height:1.5;margin-top:6px}
+  #pb-ansicht .pb-fehler{color:var(--danger);font-size:12.5px;margin:0 0 10px}
+  @media (max-width:960px){#pb-ansicht .pb-zahlen{grid-template-columns:repeat(2,1fr)}}
   #adm-pane-kompass .kp-erg{white-space:nowrap;font-variant-numeric:tabular-nums}
   #adm-pane-kompass .kp-erg.hit{color:#2a9d5c}
   #adm-pane-kompass .kp-erg.miss{color:var(--danger)}
@@ -5107,6 +5107,11 @@
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
         Accounts <span class="sb-badge" id="sb-badge-accounts" hidden>0</span>
       </button>
+      <!-- Prop-Baum (03.10.2026 abends, Finn: zwischen Accounts und Radar) -->
+      <button class="sb-link" data-view="propbaum">
+        <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="5" rx="1"/><rect x="2" y="17" width="6" height="5" rx="1"/><rect x="16" y="17" width="6" height="5" rx="1"/><path d="M12 7v5M5 17v-3h14v3"/></svg>
+        Prop-Baum
+      </button>
       <!-- Radar (vorher „Live Trades", 26.09.2026). Seit 30.09.2026 direkt nach Accounts, vor Winning Days (Finn: „Trades · Accounts ·
            Radar · Winning Days · Accounts je Firma") — nur Markup verschoben, data-view="wdlive" und Handler unverändert -->
       <button class="sb-link" data-view="wdlive">
@@ -8196,6 +8201,36 @@
         <p>Klick „↻ Aktualisieren" — der Kalender kommt vom öffentlichen Forex-Factory-Feed.</p>
       </div>
     </section>
+    <!-- PROP-BAUM (03.10.2026, Auftrag von Pascal): alle aktiven Prop-Accounts als Baum Firma → Stufe → ID → Account,
+         je Handelstag abhaken (Wechsel 17:45 New York). Reine Anzeige plus Haken. Seit 03.10.2026 abends eigene Ansicht zwischen
+         Accounts und Radar statt Admin-Reiter (Finn: „aus Admin rausmachen und einfügen zwischen Accounts und Radar").
+         Daten: /admin/prop-baum, Verdrahtung im Modul (Sektion PROP-BAUM), kein Sammel-Handler. -->
+    <section class="view" data-view="propbaum">
+      <div class="view-head">
+        <div>
+          <h1 class="view-title">Prop-Baum</h1>
+          <p class="view-sub" id="pb-stand">Alle Prop-Accounts je Firma und Stufe</p>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="btn btn-ghost btn-mini" id="pbNaechster" title="springt zum ersten nicht erledigten Account">Nächster offener</button>
+          <button class="btn btn-ghost btn-mini" id="pbNeu">Neu laden</button>
+        </div>
+      </div>
+      <div id="pb-ansicht">
+        <div class="pb-fehler" id="pb-fehler" hidden></div>
+        <div class="pb-ids" id="pb-ids"></div>
+        <div class="pb-zahlen">
+          <div class="pb-zahl"><span>Heute offen</span><b id="pb-n-offen">—</b></div>
+          <div class="pb-zahl gut"><span>Heute erledigt</span><b id="pb-n-erledigt">—</b></div>
+          <div class="pb-zahl"><span>Aktive Accounts</span><b id="pb-n-aktiv">—</b></div>
+          <div class="pb-zahl" id="pb-raus-kachel"><span>Heute raus</span><b id="pb-n-raus">—</b></div>
+        </div>
+        <div id="pb-baum"></div>
+        <div class="pb-fuss">Erledigt = heute ein Trade in Prophos oder von Hand abgehakt; bleibt in der Stufe und leuchtet grün. Haken entfernen: zweimal klicken („Sicher?“, 6 s).
+          „TP“ = geplanter Gewinn des nächsten Trades, „noch“ = Rest bis zum Phasenziel, ⚠ = Balance älter als 24 h, Pfeil = Stufe heute gewechselt.
+          Der Handelstag wechselt um 17:45 New York, dann sind Haken, Pfeile und rote Chips weg.</div>
+      </div>
+    </section>
 
     <!-- MARKT (30.08.2026, Finns Wunsch „NQ-Live-Stand ablesen") — reine
          ANZEIGE der beiden Instrumente, die Orbit hedgt. Bewusst keine
@@ -8554,8 +8589,6 @@
         <div class="subtabs">
           <button class="subtab active adm-tab" data-admtab="overview">Übersicht</button>
           <button class="subtab adm-tab" data-admtab="wd">Winning Days</button>
-          <!-- Prop-Baum (03.10.2026, Auftrag von Pascal): täglich alle Prop-Accounts abhaken -->
-          <button class="subtab adm-tab" data-admtab="propbaum">Prop-Baum</button>
           <!-- Kapitel/Statistik ohne Emojis (Finn 30.09.2026: „die Emojis weg, die nerven") -->
           <button class="subtab adm-tab" data-admtab="kapitel">Kapitel</button>
           <button class="subtab adm-tab" data-admtab="stat">Statistik</button>
@@ -8862,30 +8895,6 @@
             <div class="panel-title" style="margin-bottom:8px">Verlauf (7 Tage)</div>
             <div id="wd-verlauf" style="font-size:12.5px"></div>
           </div>
-        </div>
-        <!-- PROP-BAUM (03.10.2026, Auftrag von Pascal): alle aktiven Prop-Accounts als Baum Firma → Stufe → ID → Account,
-             je Handelstag abhaken (Wechsel 17:45 New York). Reine Anzeige plus Haken. Daten: /admin/prop-baum,
-             eigene Verdrahtung im Modul (Sektion PROP-BAUM), kein Sammel-Handler. -->
-        <div id="adm-pane-propbaum" hidden>
-          <div class="pb-kopf">
-            <div class="panel-title">Prop-Baum <span class="pb-sub" id="pb-stand"></span></div>
-            <div class="vp-zeile">
-              <button class="btn btn-ghost btn-mini" id="pbNaechster" title="springt zum ersten nicht erledigten Account">Nächster offener</button>
-              <button class="btn btn-ghost btn-mini" id="pbNeu">Neu laden</button>
-            </div>
-          </div>
-          <div class="pb-fehler" id="pb-fehler" hidden></div>
-          <div class="pb-ids" id="pb-ids"></div>
-          <div class="pb-zahlen">
-            <div class="pb-zahl"><span>Heute offen</span><b id="pb-n-offen">—</b></div>
-            <div class="pb-zahl gut"><span>Heute erledigt</span><b id="pb-n-erledigt">—</b></div>
-            <div class="pb-zahl"><span>Aktive Accounts</span><b id="pb-n-aktiv">—</b></div>
-            <div class="pb-zahl" id="pb-raus-kachel"><span>Heute raus</span><b id="pb-n-raus">—</b></div>
-          </div>
-          <div id="pb-baum"></div>
-          <div class="pb-fuss">Erledigt = heute ein Trade in Prophos oder von Hand abgehakt; bleibt in der Stufe und leuchtet grün. Haken entfernen: zweimal klicken („Sicher?“, 6 s).
-            „TP“ = geplanter Gewinn des nächsten Trades, „noch“ = Rest bis zum Phasenziel, ⚠ = Balance älter als 24 h, Pfeil = Stufe heute gewechselt.
-            Der Handelstag wechselt um 17:45 New York, dann sind Haken, Pfeile und rote Chips weg.</div>
         </div>
         <!-- KOMPASS (23.09.2026, Finn: „bau eine Seite in Prophos unter Admin, wo ich die Daten immer live
              bekomme + alles in die DB packen immer"): Pascals Nasdaq-Forecasts. Oben je Session der neueste
@@ -11183,6 +11192,7 @@
     notes:     ['Notizzettel', 'Schneller Zettel — geräteübergreifend synchron'],
     markt:     ['Winning Days', 'NQ & MNQ live · Winning Days des Handelstags'],
     firmen:    ['Accounts je Firma', 'Je ID: was heute noch offen ist'],
+    propbaum:  ['Prop-Baum', 'Alle Prop-Accounts je Firma und Stufe'],   // 03.10.2026
     wdlive:    ['Radar', 'Trades aller IDs'],   // seit 30.09.2026 auch Echo (CFD)
     news:      ['News', 'USD-Kalender & Alerts (Forex Factory)'],
     kasse:     ['Admin', 'Kapitalverteilung über alle Personen'],
@@ -11234,6 +11244,8 @@
     if(name === 'kasse' && typeof kasseOnEnter === 'function') kasseOnEnter()
     if(name === 'wdlive' && typeof window.wdlOnEnter === 'function') window.wdlOnEnter()   // Live Trades (26.09.2026)
     if(name === 'firmen' && typeof window.afOnEnter === 'function') window.afOnEnter()      // Accounts je Firma (27.09.2026)
+    if(name === 'propbaum'){ if(typeof window._pbTabOeffnen === 'function') window._pbTabOeffnen() }   // Prop-Baum (03.10.2026)
+    else if(typeof window._pbTabSchliessen === 'function') window._pbTabSchliessen()
     if(name === 'markt' && typeof window.mklHeim === 'function') window.mklHeim()          // Chart zurück aus Live Trades (F6)
     // Eigene Rechnungen beim Betreten der Finanzen laden (28.08.2026) — über
     // window, weil finRgLoad in der Modul-Reihenfolge erst später definiert wird.
@@ -11316,7 +11328,7 @@
      * Payouts und Meta Wallet sehen, den Rest nicht"). Die übrigen Reiter nur ausblenden
      * (Markierung data-nur-eigene-aus, damit ein Profilwechsel sie zurückholt); die Daten
      * grenzen Backend (_admin_nur_uid) und RLS (admin_nur_eigene) ohnehin ein. */
-    const KASSE_REITER_EIGENE = new Set(['overview', 'fin', 'wallet', 'propbaum'])   // Prop-Baum (03.10.2026): Backend liefert nur eigene Accounts
+    const KASSE_REITER_EIGENE = new Set(['overview', 'fin', 'wallet'])
     function kasseReiterFuer(ec){
       document.querySelectorAll('.adm-tab').forEach(b => {
         if(!ec){
@@ -15843,13 +15855,10 @@
         $('adm-pane-kompass').hidden  = name !== 'kompass'
         $('adm-pane-kapitel').hidden  = name !== 'kapitel'
         $('adm-pane-stat').hidden     = name !== 'stat'
-        $('adm-pane-propbaum').hidden = name !== 'propbaum'   // Prop-Baum (03.10.2026)
         if(name === 'kapitel' || name === 'stat') admKapitelOeffnen()   // lädt /admin/kapitel beim ersten Öffnen (24.09.2026), danach Cache
         if(name === 'kompass' && typeof window._kpTabOeffnen === 'function') window._kpTabOeffnen()
         else if(typeof window._kpTabSchliessen === 'function') window._kpTabSchliessen()
         if(name === 'wd' && typeof window._wdTabOeffnen === 'function') window._wdTabOeffnen()
-        if(name === 'propbaum' && typeof window._pbTabOeffnen === 'function') window._pbTabOeffnen()
-        else if(typeof window._pbTabSchliessen === 'function') window._pbTabSchliessen()
         admHedgeModus()   // Kapitel ohne Hedge: Staffel-Karte/Weg-Chip im Farmer, Hedge-Spalten (24.09.2026)
         if(name === 'wallet') walOpen()
         if(name === 'buys') admBuysRender()   // Daten kommen aus admLoad — hier nur neu zeichnen
@@ -37806,7 +37815,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.993'
+  const OS_TAB_BUILD = '2026-09-22.994'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -53345,7 +53354,7 @@
  * Zwei-Klick-Rückfrage stammen aus Pascals Kompass-Vorlage (lifeplanner-eps.pages.dev, Tab „Prop-Baum"); Login,
  * Konfiguration und Beispieldaten der Vorlage sind bewusst nicht übernommen. Daten + Haken über /admin/prop-baum
  * (Gate wie /admin/overview, „nur eigene" greift dort). ID-Auswahl je Nutzer in user_settings ('prop_baum_ids').
- * Eigene Verdrahtung: nur #adm-pane-propbaum und seine Knöpfe, kein Sammel-Handler. */
+ * Eigene Verdrahtung: nur #pb-ansicht und seine Knöpfe, kein Sammel-Handler. */
 ;(() => {
   const PB_FIRMEN = {
     tradeify:    { label: 'Tradeify',    art: 'fut', grenzen: [1800, 5400], plan: [3600, 3600, 1800], fundedTag: 'Simfunded',
@@ -53441,7 +53450,7 @@
   async function pbLaden(){
     if(_pb.laedt) return
     _pb.laedt = true
-    const st = document.getElementById('pb-stand'); if(st && !_pb.daten) st.textContent = '· lädt …'
+    const st = document.getElementById('pb-stand'); if(st && !_pb.daten) st.textContent = 'lädt …'
     try{
       await pbIdsLaden()
       const r = await fetch(`${WATCHER_HOME}/admin/prop-baum`, { headers: { 'sb-token': await pbToken() }, cache: 'no-store' })
@@ -53465,7 +53474,7 @@
     const d = _pb.daten, baum = document.getElementById('pb-baum')
     if(!d || !baum) return
     const st = document.getElementById('pb-stand')
-    if(st) st.textContent = `· Handelstag ${d.handelstag} (wechselt 17:45 New York) · Stand ${(_pb.stand || new Date()).toLocaleTimeString('de-DE')}`
+    if(st) st.textContent = `Handelstag ${d.handelstag} (wechselt 17:45 New York) · Stand ${(_pb.stand || new Date()).toLocaleTimeString('de-DE')}`
     const sel = pbAuswahl(), people = d.people || []
     const anz = uid => (d.accounts || []).filter(a => a.user_id === uid).length
     document.getElementById('pb-ids').innerHTML = people.map(p =>
@@ -53567,7 +53576,7 @@
     if(!weg) return
     // Rückfrage im Chip statt confirm() (Pascal 03.10.2026): erster Klick „Sicher?", zweiter binnen 6 s entfernt den Haken
     if(!weg.classList.contains('ask')){
-      document.querySelectorAll('#adm-pane-propbaum .pb-ok.ask').forEach(x => { x.classList.remove('ask'); x.textContent = '✓' })
+      document.querySelectorAll('#pb-ansicht .pb-ok.ask').forEach(x => { x.classList.remove('ask'); x.textContent = '✓' })
       weg.classList.add('ask'); weg.textContent = 'Sicher?'
       clearTimeout(_pb.askT)
       _pb.askT = setTimeout(() => { if(weg.isConnected){ weg.classList.remove('ask'); weg.textContent = '✓' } }, 6000)
@@ -53588,8 +53597,8 @@
   })
   document.getElementById('pbNeu')?.addEventListener('click', pbLaden)
   document.getElementById('pbNaechster')?.addEventListener('click', () => {
-    document.querySelectorAll('#adm-pane-propbaum .pb-chip.fokus').forEach(c => c.classList.remove('fokus'))
-    const c = document.querySelector('#adm-pane-propbaum .pb-chip:not(.done):not(.raus)')
+    document.querySelectorAll('#pb-ansicht .pb-chip.fokus').forEach(c => c.classList.remove('fokus'))
+    const c = document.querySelector('#pb-ansicht .pb-chip:not(.done):not(.raus)')
     if(!c) return
     void c.offsetWidth
     c.classList.add('fokus'); c.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -53604,6 +53613,8 @@
     clearInterval(_pb.timer); _pb.timer = setInterval(pbLaden, 60000)
   }
   window._pbTabSchliessen = () => { _pb.offen = false; clearInterval(_pb.timer); _pb.timer = null }
+  // Seite direkt mit #propbaum geöffnet und die Ansicht war schon aktiv, bevor dieser Block lief → jetzt nachholen
+  if(document.querySelector('#dashboard-view .view[data-view="propbaum"].active')) window._pbTabOeffnen()
 })()
 </script>
 <!-- Yahoo-Markt-Block (mk-*) entfernt am 25.09.2026 (Finn: „Den unteren Chart wegmachen und NQ/MNQ unten auch weg") — die Live-Daten
