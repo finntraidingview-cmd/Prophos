@@ -34282,8 +34282,7 @@
           <span style="color:var(--sub)">⏰ ${fenster}</span> ${sep}
           <span>TP <b style="color:#2a9d5c">${geld(tp)}</b>${sl > 0 ? ` · SL <b style="color:var(--danger)">${geld(sl)}</b>` : ''}</span> ${sep}
           ${nichtLive ? `<span style="color:var(--warn);font-weight:600">⚠ ${nichtLive} Balance${nichtLive === 1 ? '' : 's'} nicht live</span>` : `<span style="color:var(--good);font-weight:600">● alle live</span>`}
-          <span style="flex:1"></span>
-          ${offen.length ? `<button class="btn btn-primary tc2-btn" data-ap-firma-ok="${offen.map(p => p.id).join(',')}" title="Alle offenen Auto-Vorschläge dieser Firma freigeben">✓ ${escapeHtml(g.firma)} bestätigen (${offen.length})</button>` : ''}
+          ${offen.length ? `${sep} <span style="color:var(--danger);font-weight:600">${offen.length} offen</span>` : ''}
         </div>` + ps.map(p => renderTradePlanCard(p)).join('')
     }).join('')
   }
@@ -34732,13 +34731,11 @@
       // long/short läuft. tpDirHintsFill füllt den Platzhalter asynchron —
       // dieselbe Quelle wie der Trade-Start-Check (firmLiveRichtungen, seit
       // .126 nur die eingeloggte ID).
-      // Auto-Planer (05.10.2026): Vorschlag bis zur Bestätigung, danach startet der PC-Tab zur Startzeit
-      const autoChip = !p.autoPlan ? '' : p.autoBestaetigtAt
-        ? `<span class="tc2-chip" style="background:rgba(99,102,241,.10);color:#4F46E5" title="${escapeHtml(p.notes || 'Auto-Planer')}">🤖 Auto ✓</span>`
-        : `<span class="tc2-chip" style="background:rgba(245,158,11,.14);color:#b45309" title="${escapeHtml((p.notes || 'Auto-Planer') + ' — startet erst nach Bestätigung')}">🤖 Auto · unbestätigt</span>`
-      metric = `${autoChip}${mirrorBadge}${pfBadge}`
+      // Auto-Planer (05.10.2026, Finn: „viel zu viele Kästchen, man erkennt gar nichts — einfach nur Grün und Rot"): kein Auto-Chip,
+      // kein Datum — der Zustand steht als Farbe am linken Kartenrand (rot = unbestätigt, grün = bestätigt)
+      metric = `${mirrorBadge}${pfBadge}`
         + `<span class="tc2-chip tc2-dir-hint" data-dir-firm="${escapeHtml(p.masterFirm || '')}" style="display:none;background:rgba(245,158,11,.14);color:#b45309"></span>`
-        + `<span class="tc2-date">${dateStr}</span>`
+        + (p.autoPlan ? '' : `<span class="tc2-date">${dateStr}</span>`)
     } else if(isOpen){
       if(isPending){
         metric = `<span class="tc2-pending-lbl">🔴 beendet — eintragen</span>`
@@ -34860,12 +34857,17 @@
       // Geplant gibt es seit 24.09.2026 abends doch (Finn: „ich will hier direkt auf Erledigt drücken
       // können, obwohl er noch geplant ist, und Trades im Nachhinein eintragen, wenn was schiefgeht —
       // bei Echo V2 und Orbit V2"): P&L von Hand, Trade-Datum im Abschluss-Popup wählbar. Hedge-Karten unverändert.
-      const autoOkBtn = (p.autoPlan && !p.autoBestaetigtAt)
-        ? `<button class="btn btn-primary tc2-btn" data-plan-auto-ok="${p.id}" title="Auto-Planer-Vorschlag freigeben — der PC-Tab startet ihn dann zur Startzeit">✓ Bestätigen</button>` : ''
-      actions = istV2Karte ? `
+      // Auto-Karte (05.10.2026): nur Bearbeiten, Löschen, Uhrzeit, Bestätigen/Bestätigt — „Läuft"/„Erledigt" bleiben über ✎ erreichbar
+      const autoOkBtn = !p.autoPlan ? '' : !p.autoBestaetigtAt
+        ? `<button class="btn btn-primary tc2-btn" data-plan-auto-ok="${p.id}" title="Freigeben — der PC-Tab startet den Trade dann zur Startzeit">Bestätigen</button>`
+        : `<button class="btn btn-ghost tc2-btn" data-plan-auto-zurueck="${p.id}" style="color:var(--good);font-weight:600" title="Bestätigt — Klick nimmt die Freigabe zurück">✓ Bestätigt</button>`
+      actions = (istV2Karte && p.autoPlan) ? `
         <button class="btn btn-ghost icon-btn tc2-ab" data-plan-edit="${p.id}" title="Bearbeiten">${svgEdit}</button>
         <button class="btn btn-ghost icon-btn tc2-ab" data-plan-del="${p.id}" title="Löschen">${svgDel}</button>
-        ${autoOkBtn}
+        ${jetztBtn}
+        ${autoOkBtn}` : istV2Karte ? `
+        <button class="btn btn-ghost icon-btn tc2-ab" data-plan-edit="${p.id}" title="Bearbeiten">${svgEdit}</button>
+        <button class="btn btn-ghost icon-btn tc2-ab" data-plan-del="${p.id}" title="Löschen">${svgDel}</button>
         ${(p.route === 'tsv2' && tsPulsModus() === 'aus')
           ? `<button class="btn btn-primary tc2-btn" data-plan-start="${p.id}" title="Topstep V2: du hast in TopstepX platziert — Plan als laufend markieren">Läuft</button>`
           // „Läuft" ohne Puls auch bei Echo V2/Orbit V2 (24.09.2026 abends, Finn: „ich plane manuell, starte manuell oder
@@ -34911,8 +34913,10 @@
     }
 
     const cls = `tc2 tc2-${p.status}${isPending ? ' tc2-is-pending' : ''}${sysBadge ? ' tc2-has-sys' : ''}`
+    // Auto-Plan: Rand links rot (wartet auf Bestätigung) / grün (bestätigt) — 05.10.2026
+    const autoRand = (isPlanned && p.autoPlan) ? ` style="box-shadow:inset 4px 0 0 ${p.autoBestaetigtAt ? 'var(--good)' : 'var(--danger)'}"` : ''
     return `
-      <div class="${cls}" data-plan-id="${p.id}">
+      <div class="${cls}" data-plan-id="${p.id}"${autoRand}>
         ${sysBadge}
         <span class="${dotCls}"></span>
         <div class="tc2-main">
@@ -35282,6 +35286,9 @@
     // Auto-Planer-Vorschlag bestätigen (05.10.2026) — eigener Handler; Firmen-Kopf bestätigt alle offenen der Firma
     document.querySelectorAll('[data-plan-auto-ok]').forEach(btn => {
       btn.addEventListener('click', () => apBestaetigen([btn.dataset.planAutoOk]))
+    })
+    document.querySelectorAll('[data-plan-auto-zurueck]').forEach(btn => {
+      btn.addEventListener('click', () => apZuruecknehmen(btn.dataset.planAutoZurueck))
     })
     document.querySelectorAll('[data-plan-start-um-edit]').forEach(btn => {
       btn.addEventListener('click', () => tpStartUmBearbeiten(btn))
@@ -38031,7 +38038,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1016'
+  const OS_TAB_BUILD = '2026-09-22.1017'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -41738,6 +41745,15 @@
         : '⚠ Nichts bestätigt — schon bestätigt, gestartet oder nicht mehr geplant', (data || []).length ? 'start' : 'end')
     }catch(e){ if(typeof atToast === 'function') atToast('Bestätigen fehlgeschlagen: ' + ((e && e.message) || e), 'end') }
   }
+  async function apZuruecknehmen(id){
+    try{
+      const { data, error } = await supabase.from('trade_plans').update({ auto_bestaetigt_at: null })
+        .eq('id', id).eq('status', 'planned').is('start_um_gestartet_at', null).select('*')
+      if(error) throw error
+      for(const row of (data || [])){ const i = tradePlans.findIndex(x => String(x.id) === String(row.id)); if(i >= 0) tradePlans[i] = rowToPlan(row) }
+      renderTradePlans()
+    }catch(e){ if(typeof atToast === 'function') atToast('Zurücknehmen fehlgeschlagen: ' + ((e && e.message) || e), 'end') }
+  }
   async function apJetztPlanen(trocken){
     if(_ap.laeuft) return
     if(!trocken && !confirm('Auto-Planer jetzt laufen lassen?\n\nUnbestätigte Auto-Vorschläge aller Test-IDs werden ersetzt, Startzeiten frühestens in 10 min.')) return
@@ -41750,14 +41766,6 @@
     }catch(e){ if(typeof atToast === 'function') atToast('Auto-Planer: ' + ((e && e.message) || e), 'end') }
     finally{ _ap.laeuft = false; apLeisteZeichnen() }
   }
-  // Firmen-Kopf „✓ <Firma> bestätigen" (05.10.2026): am Dokument in der Capture-Phase, NUR für dieses Attribut — Finn: der Knopf
-  // tat nichts („nur blaue Kästen"), die Bindung je Render kam offenbar nicht an; so erreicht ihn der Klick in jedem Fall
-  document.addEventListener('click', e => {
-    const btn = e.target && e.target.closest ? e.target.closest('[data-ap-firma-ok]') : null
-    if(!btn) return
-    e.preventDefault()
-    apBestaetigen(String(btn.dataset.apFirmaOk || '').split(',').filter(Boolean))
-  }, true)
   function apLeisteZeichnen(){
     const el = document.getElementById('apLeiste'); if(!el) return
     if(currentUserId && _ap.geladenFuer !== currentUserId){ _ap.geladenFuer = currentUserId; apLetztenLaden(); return }
@@ -41775,7 +41783,6 @@
         <b>🤖 Auto-Planer</b>
         <span style="color:var(--sub)">${vorschlaege.length ? `${vorschlaege.length} Vorschlag${vorschlaege.length === 1 ? '' : 'e'} warten auf Bestätigung` : 'keine offenen Vorschläge'}${bestaetigt ? ` · ${bestaetigt} bestätigt` : ''}</span>
         <span style="flex:1"></span>
-        ${vorschlaege.length ? `<button class="btn btn-primary tc2-btn" id="apAlleOk">✓ Alle bestätigen (${vorschlaege.length})</button>` : ''}
         ${_ap.imPlaner ? `<button class="btn btn-ghost tc2-btn" id="apProbe" ${_ap.laeuft ? 'disabled' : ''} title="Nur rechnen, nichts anlegen">Probelauf</button>
         <button class="btn btn-ghost tc2-btn" id="apJetzt" ${_ap.laeuft ? 'disabled' : ''} title="Jetzt für alle Test-IDs planen (ersetzt unbestätigte Vorschläge)">${_ap.laeuft ? 'plant…' : 'Jetzt planen'}</button>` : ''}
         <button class="btn btn-ghost tc2-btn" id="apDetails">${_ap.offen ? 'Details ▴' : 'Details ▾'}</button>
@@ -41783,7 +41790,6 @@
       ${_ap.offen ? `<div style="margin-top:8px;font-size:12px"><div style="color:var(--sub);margin-bottom:4px">${lauf}</div>
         ${gep.length ? `<div style="font-weight:600;margin:6px 0 2px">Geplant</div>${gep.map(x => zeile(x, true)).join('')}` : ''}
         ${aus.length ? `<div style="font-weight:600;margin:6px 0 2px">Ausgelassen</div>${aus.map(x => zeile(x, false)).join('')}` : ''}</div>` : ''}`
-    document.getElementById('apAlleOk')?.addEventListener('click', () => apBestaetigen(vorschlaege.map(p => p.id)))
     document.getElementById('apProbe')?.addEventListener('click', () => apJetztPlanen(true))
     document.getElementById('apJetzt')?.addEventListener('click', () => apJetztPlanen(false))
     document.getElementById('apDetails')?.addEventListener('click', () => { _ap.offen = !_ap.offen; apLeisteZeichnen() })
