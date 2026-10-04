@@ -36889,6 +36889,8 @@
   // auch für Orbit V3; alles Winning-Day-Eigene (Staffel, Kontoart-Filter, TP-Spanne, kein SL) hängt an _tpWd allein.
   const tpWdAktiv = () => _tpRoute === 'tvv2' && (_tpWd || _tpO3)
   const tpO3Aktiv = () => _tpRoute === 'tvv2' && _tpO3
+  // Winning Day ohne Orbit V3: Hedge = Staffel-€ gegen die TP-Summe (Lot-Basis = Take Profit, nicht Risiko Master) — 05.10.2026
+  const tpWdNurTp = () => _tpRoute === 'tvv2' && _tpWd && !_tpO3
   // Alles Rechenbare aus den Feldern von Popup 1
   /* Multiplikator von Hand (25.09.2026, Koordination: Finn testet mit ×0,01 — Jacobs Plan wurde mit 250 $ / 60 € gespeichert, ×0,56,
    * 0,56 Lot, der Broker lehnte ab): Klick auf den Multiplikator-Kasten → Zahl eintippen; der Wert gilt, bis Risiko Master oder
@@ -36907,10 +36909,14 @@
     // Handwert endet, sobald Risiko Master oder Risiko Slave anders dastehen als beim Setzen/Zurückschreiben — unabhängig davon,
     // welcher input-Listener zuerst läuft (erste Fassung schrieb Risiko Slave mit dem neuen Risiko Master noch einmal um)
     if(_tpWdHand.mult > 0 && (r.risk !== _tpWdHand.risk || (_tpWdHand.slaveGeschrieben != null && r.slaveRisk !== _tpWdHand.slaveGeschrieben))) _tpWdHand.mult = null
+    // Winning Day (05.10.2026, Vorfall Jacob 02:07 Dubai: 0,09/0,11 Lot statt ~2): Staffel-€ gegen die TP-SUMME — Basis der Lot-Rechnung
+    // ist der Take Profit, nie Risiko Master. Das Popup las beim Bearbeiten Risiko Master = 4.500 $ (Max DD) aus dem Plan → Multiplikator
+    // 0,031. Orbit V3 rechnet weiter über Risiko Master (= echter Stop Loss).
+    const nurTp = tpWdNurTp(), basisPkt = nurTp ? r.tpPkt : r.slPkt
     if(_tpWdHand.mult > 0){
       r.mult = _tpWdHand.mult; r.hand = true
-      if(r.slPkt > 0 && r.kt > 0) r.slaveRisk = Math.round(r.mult * r.kt * r.slPkt * r.slavePpl * 100) / 100
-    } else r.mult = tpCalcMultiplier(master.firm, TP_WD_SLAVE_FIRM, r.risk, r.kt, r.slaveRisk)
+      if(basisPkt > 0 && r.kt > 0) r.slaveRisk = Math.round(r.mult * r.kt * basisPkt * r.slavePpl * 100) / 100
+    } else r.mult = tpCalcMultiplier(master.firm, TP_WD_SLAVE_FIRM, nurTp ? r.tp : r.risk, r.kt, r.slaveRisk)
     r.lots = (r.mult > 0 && r.kt > 0) ? Math.round(r.kt * r.mult * 100) / 100 : 0
     return r
   }
@@ -38025,7 +38031,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1012'
+  const OS_TAB_BUILD = '2026-09-22.1013'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -43428,13 +43434,15 @@
     const wd = _tpRoute === 'tvv2' && _tpWd
     // Orbit V3 (01.10.2026): dieselbe Multiplikator-Rechnung wie die Farm, aber Risiko Master = echter Stop Loss in TradingView
     const o3 = tpO3Aktiv(), mitHedge = wd || o3
-    if(((!masterRisk || !slaveRisk) && (!v2 || mitHedge)) || !masterQty){
+    // Winning Day (05.10.2026): Staffel-€ gegen die TP-Summe — Risiko Master ist dafür kein Pflichtfeld und keine Rechengröße
+    if(wd && !o3 && slaveRisk && masterQty && !(masterTp > 0)){ msg('Winning Day braucht einen Take Profit in $ — der Gegenhedge rechnet sich gegen die TP-Summe.', 'err'); return }
+    if(((!(wd && !o3 ? masterTp : masterRisk) || !slaveRisk) && (!v2 || mitHedge)) || !masterQty){
       msg(mitHedge ? 'Risiko Master ($), Kontrakte und Risiko Slave (€) ausfüllen — daraus rechnet sich der Multiplikator.' : 'Risiko und Anzahl ausfüllen.', 'err'); return
     }
 
     const master = accounts.find(a => String(a.id) === String(masterId))
     const slave  = v2 ? null : accounts.find(a => String(a.id) === String(slaveId))
-    const mult = mitHedge ? (_tpWdHand.mult > 0 ? _tpWdHand.mult : tpCalcMultiplier(master.firm, TP_WD_SLAVE_FIRM, masterRisk, masterQty, slaveRisk))   // Hand-Multiplikator gewinnt (25.09.2026)
+    const mult = mitHedge ? (_tpWdHand.mult > 0 ? _tpWdHand.mult : tpCalcMultiplier(master.firm, TP_WD_SLAVE_FIRM, (wd && !o3) ? masterTp : masterRisk, masterQty, slaveRisk))   // Hand-Multiplikator gewinnt (25.09.2026); WD: Basis = TP (05.10.2026)
                : v2 ? null : tpCalcMultiplier(master.firm, slave.firm, masterRisk, masterQty, slaveRisk)
 
     const planObj = {
@@ -44228,15 +44236,17 @@
     const aus = () => { pr.hedge_eur = null; pr.hedge_faktor = null; pr.multiplier = null; pr.slave_risk = null; return '' }
     if(!an || !(slaveEur > 0)) return aus()
     const kt = Number(pr.master_contracts) || 0, tp = Number(pr.master_tp) || 0, ppl = tpMasterPpl(pr.master_firm) || 0
-    const mult = (riskMaster > 0 && kt > 0) ? tpCalcMultiplier(pr.master_firm, TP_WD_SLAVE_FIRM, riskMaster, kt, slaveEur) : null
+    // Staffel-€ gegen die TP-SUMME (05.10.2026, Finn: „so wie es immer war") — Basis ist der Take Profit, nicht riskMaster (wd_sl);
+    // riskMaster bleibt nur als Wert am Plan stehen, wenn eine SL-Vorgabe da ist
+    const mult = (tp > 0 && kt > 0) ? tpCalcMultiplier(pr.master_firm, TP_WD_SLAVE_FIRM, tp, kt, slaveEur) : null
     if(mult > 0 && ppl > 0 && tp > 0){
       const lots = Math.round(kt * mult * 100) / 100, tpPkt = tp / (ppl * kt)
-      pr.multiplier = mult; pr.hedge_faktor = Math.round(mult * 1000) / 1000; pr.slave_risk = slaveEur; pr.master_risk = riskMaster
+      pr.multiplier = mult; pr.hedge_faktor = Math.round(mult * 1000) / 1000; pr.slave_risk = slaveEur; if(riskMaster > 0) pr.master_risk = riskMaster
       pr.hedge_eur = Math.round(lots * tpWdSlavePpl() * tpPkt * 100) / 100
       return ''
     }
     pr.hedge_eur = Math.round(slaveEur * 100) / 100; pr.hedge_faktor = null; pr.multiplier = null; pr.slave_risk = slaveEur
-    return 'ohne SL-Vorgabe (Risiko Master) kein Multiplikator — Hedge nur über den Staffel-Betrag'
+    return 'ohne Take Profit kein Multiplikator — Hedge nur über den Staffel-Betrag'
   }
   async function wdVorplanRegelnSpeichern(v){
     const { data: { user } } = await supabase.auth.getUser()
