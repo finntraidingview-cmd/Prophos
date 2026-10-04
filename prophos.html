@@ -34242,6 +34242,45 @@
     }
     return { live: !ende || (!!balAt && balAt >= ende), ende }
   }
+  /* Firmen-Blöcke der Spalte Geplant (05.10.2026): die Liste ist schon nach Firma + Startzeit sortiert. Kopf je Firma:
+   * Anzahl, Weg, Richtung, Zeitfenster, TP-/SL-Summe, Balance-Status, „✓ Firma bestätigen" für die offenen Auto-Vorschläge. */
+  function planFirmenBloecke(list){
+    const gruppen = []
+    for(const p of list){
+      const k = String(p.masterFirm || '–')
+      if(!gruppen.length || gruppen[gruppen.length - 1].firma !== k) gruppen.push({ firma: k, plaene: [] })
+      gruppen[gruppen.length - 1].plaene.push(p)
+    }
+    const geld = v => Math.round(v).toLocaleString('de-DE') + ' $'
+    const hhmm = t => new Date(t).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
+    return gruppen.map(g => {
+      const ps = g.plaene
+      const wege = [...new Set(ps.map(p => p.route === 'tvv2' ? 'Orbit V2' : p.route === 'mt5v2' ? 'Echo V2' : (p.route || 'Duplikum')))].join(' + ')
+      const buy = ps.filter(p => p.richtung === 'buy').length, sell = ps.filter(p => p.richtung === 'sell').length
+      const chip = (txt, gut) => `<span class="tc2-chip" style="font-family:var(--mono);font-weight:700;${gut ? 'background:rgba(18,183,106,.12);color:#0E9757' : 'background:rgba(240,68,56,.10);color:#D92D20'}">${txt}</span>`
+      const richtung = (buy ? chip(sell ? `BUY ${buy}` : 'BUY', true) : '') + (sell ? chip(buy ? `SELL ${sell}` : 'SELL', false) : '')
+      const zeiten = ps.map(p => Date.parse(p.startUm || '')).filter(Boolean).sort((a, b) => a - b)
+      const fenster = !zeiten.length ? 'ohne Startzeit' : zeiten.length === 1 || hhmm(zeiten[0]) === hhmm(zeiten[zeiten.length - 1]) ? hhmm(zeiten[0]) : `${hhmm(zeiten[0])}–${hhmm(zeiten[zeiten.length - 1])}`
+      const tp = ps.reduce((s, p) => s + (Number(p.masterTp) || 0), 0), sl = ps.reduce((s, p) => s + (Number(p.masterSl) || 0), 0)
+      let nichtLive = 0
+      for(const p of ps){
+        const b = routeIstV2(p.route) ? planKontoBalance(accounts.find(a => String(a.id) === String(p.masterAccountId))) : null
+        if(b && !planBalanceLive(p.masterAccountId, b.at).live) nichtLive++
+      }
+      const offen = ps.filter(p => p.autoPlan && !p.autoBestaetigtAt)
+      const sep = '<span style="color:var(--sub-2)">·</span>'
+      return `<div class="plan-firma-kopf" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:14px 2px 6px;font-size:13px">
+          <b style="font-size:14px">${escapeHtml(g.firma)}</b>
+          <span style="color:var(--sub)">${ps.length} Trade${ps.length === 1 ? '' : 's'} · ${escapeHtml(wege)}</span>
+          ${richtung} ${sep}
+          <span style="color:var(--sub)">⏰ ${fenster}</span> ${sep}
+          <span>TP <b style="color:#2a9d5c">${geld(tp)}</b>${sl > 0 ? ` · SL <b style="color:var(--danger)">${geld(sl)}</b>` : ''}</span> ${sep}
+          ${nichtLive ? `<span style="color:var(--warn);font-weight:600">⚠ ${nichtLive} Balance${nichtLive === 1 ? '' : 's'} nicht live</span>` : `<span style="color:var(--good);font-weight:600">● alle live</span>`}
+          <span style="flex:1"></span>
+          ${offen.length ? `<button class="btn btn-primary tc2-btn" data-ap-firma-ok="${offen.map(p => p.id).join(',')}" title="Alle offenen Auto-Vorschläge dieser Firma freigeben">✓ ${escapeHtml(g.firma)} bestätigen (${offen.length})</button>` : ''}
+        </div>` + ps.map(p => renderTradePlanCard(p)).join('')
+    }).join('')
+  }
   function fmtDupBalance(info){
     if(!info) return ''
     const sign = info.balance >= 0 ? '' : '-'
@@ -34426,7 +34465,8 @@
         }
       }else{
         if(empty) empty.style.display = 'none'
-        target.innerHTML = list.map(p => renderTradePlanCard(p)).join('')
+        // Geplant in Firmen-Blöcken mit Kopf (05.10.2026, Finn: „erst Firma A alle Trades, dann Firma B, mehr drauf eingehen")
+        target.innerHTML = lane.status === 'planned' ? planFirmenBloecke(list) : list.map(p => renderTradePlanCard(p)).join('')
       }
 
       // Filter-Count-Hinweis
@@ -35232,9 +35272,12 @@
     // Orbit-„Starten" (22.09.2026): fährt die Puls-Kette in TradingView. Doppelklick-Schutz
     // sitzt in tpOrbitStarten (_tpOrbitLaeuft) — es gibt genau eine Maus.
     // Geplante Startzeit auf der Karte entfernen (22.09.2026) — eigener Handler.
-    // Auto-Planer-Vorschlag bestätigen (05.10.2026) — eigener Handler
+    // Auto-Planer-Vorschlag bestätigen (05.10.2026) — eigener Handler; Firmen-Kopf bestätigt alle offenen der Firma
     document.querySelectorAll('[data-plan-auto-ok]').forEach(btn => {
       btn.addEventListener('click', () => apBestaetigen([btn.dataset.planAutoOk]))
+    })
+    document.querySelectorAll('[data-ap-firma-ok]').forEach(btn => {
+      btn.addEventListener('click', () => apBestaetigen(String(btn.dataset.apFirmaOk || '').split(',').filter(Boolean)))
     })
     document.querySelectorAll('[data-plan-start-um-x]').forEach(btn => {
       btn.addEventListener('click', () => { if(typeof tpStartUmEntfernen === 'function') tpStartUmEntfernen(btn.dataset.planStartUmX) })
@@ -37975,7 +38018,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1008'
+  const OS_TAB_BUILD = '2026-09-22.1009'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
