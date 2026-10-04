@@ -38038,7 +38038,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1017'
+  const OS_TAB_BUILD = '2026-09-22.1018'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -41931,6 +41931,14 @@
         const tvAt = Date.parse(a.tvBalanceAt || '') || 0
         const altAt = Number(alt.at) || 0
         if(alt.src === 'init' || alt.src === 'Dup' || !altAt || tvAt > altAt) return { val: Number(a.tvBalance), src: 'TV', ccy: 'USD', at: tvAt || null }
+      }
+      // MT5-Konten (05.10.2026, Finn: Blue Guardian zeigte im Dropdown „–", in der Accounts-Spalte „Stand · MT5"): der gespeicherte
+      // Stand aus accounts.tv_balance (Quelle mt5, Echo-Flottentakt) gilt wie dort, wenn keine jüngere Live-Quelle da ist
+      if(!istFut && a && a.tvBalance != null && isFinite(Number(a.tvBalance)) && a.tvBalanceQuelle !== 'dashboard'){
+        const tvAt = Date.parse(a.tvBalanceAt || '') || 0
+        const altAt = Number(alt.at) || Date.parse(alt.at || '') || 0
+        if(alt.src === 'init' || alt.src === 'Dup' || (!altAt && alt.src !== 'TSX' && alt.src !== 'MT5' && alt.src !== 'MT5-Copier') || (altAt && tvAt > altAt))
+          return { val: Number(a.tvBalance), src: 'MT5-Konto', ccy: a.mt5BalCcy || 'USD', at: tvAt || null }
       }
       return alt
     }
