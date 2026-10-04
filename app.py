@@ -42,7 +42,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-10-05.1"
+APP_BUILD = "2026-10-05.2"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -11739,21 +11739,23 @@ def ap_zeiten_verteilen(tranchen, zeiten, rnd, frueheste_min=0):
     return out
 
 
-def ap_richtungen(tranchen_zeit, offen_netto, rnd):
-    """REIN RECHNEND: Richtung je Tranche in Zeitreihenfolge. tranchen_zeit = [{key, gewicht, fest}] (fest = 'buy'/'sell'
-    durch Richtungsschutz). Greedy gegen das Netto aus laufenden + schon verteilten Trades (Finn: „unter allen Trades zu
-    9/10 neutralisieren"), Zufall nur, wenn das Netto klein ist. → {key: 'buy'|'sell'}."""
-    netto, out = float(offen_netto or 0), {}
-    for t in tranchen_zeit:
-        if t.get("fest") in ("buy", "sell"):
-            r = t["fest"]
-        elif abs(netto) < 0.5 * float(t["gewicht"] or 0):
-            r = rnd.choice(("buy", "sell"))
-        else:
-            r = "sell" if netto > 0 else "buy"
-        netto += float(t["gewicht"] or 0) * (1 if r == "buy" else -1)
-        out[t["key"]] = r
-    return out
+def ap_richtungen(tranchen_zeit, offen_netto, rnd, versuche=3000):
+    """REIN RECHNEND: Richtung je Tranche. tranchen_zeit = [{key, gewicht, fest}] (fest = 'buy'/'sell' durch Richtungsschutz).
+    Finn: „unter allen Trades zu 9/10 neutralisieren" — gewürfelt werden ganze Verteilungen, genommen wird die mit dem
+    kleinsten Tages-Netto (laufende Trades eingerechnet); unter gleich guten entscheidet der Zufall.
+    05.10.2026: die erste Fassung (der Reihe nach, Zufall bei kleinem Netto) endete im ersten Nachtlauf bei 38k long gegen
+    24k short — zwei große Tranchen (200k-CFD, Apex) lassen sich der Reihe nach nicht mehr ausgleichen. → {key: 'buy'|'sell'}."""
+    ts = list(tranchen_zeit or [])
+    if not ts:
+        return {}
+    basis = float(offen_netto or 0)
+    best, best_n = None, None
+    for _ in range(max(1, int(versuche))):
+        r = {t["key"]: (t["fest"] if t.get("fest") in ("buy", "sell") else rnd.choice(("buy", "sell"))) for t in ts}
+        n = abs(basis + sum(float(t["gewicht"] or 0) * (1 if r[t["key"]] == "buy" else -1) for t in ts))
+        if best_n is None or n < best_n - 1e-6:
+            best, best_n = r, n
+    return best
 
 
 def _ap_tz(name):
@@ -11850,10 +11852,14 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None):
                                      "user_id": in_uids, "created_at": "gte." + (jetzt - timedelta(days=30)).isoformat()})
     archiv = _ap_archiviert()
     echo_bal, dup_bal = _ap_balance_karten()
-    try:
-        namen = _wd_personen()[0]
-    except Exception:
-        namen = {}
+    namen = {}
+    try:   # direkt aus der Nutzerliste — _wd_personen braucht einen Request (Nachtlauf hat keinen)
+        for u in (_auth_liste_anfrage().json() or {}).get("users", []):
+            meta = str((u.get("user_metadata") or {}).get("name") or "").strip()
+            mail = str(u.get("email") or "")
+            namen[str(u.get("id"))] = meta or (mail.split("@")[0] if "@" in mail else str(u.get("id"))[:8])
+    except Exception as e:
+        print(f"[auto-plan] ⚠️ Namen: {type(e).__name__}: {e}", flush=True)
     rnd = random.Random()
 
     je_konto = {}
