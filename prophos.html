@@ -19695,6 +19695,7 @@
       if(_mt5BalCache.size > vorher && typeof renderAccounts === 'function'
          && typeof accounts !== 'undefined' && accounts && accounts.length){
         try{ renderAccounts() }catch(_){}
+        try{ renderTradePlans() }catch(_){}   // Plan-Karten zeigen die Balance auch (05.10.2026)
       }
     })
   }
@@ -34213,6 +34214,21 @@
     }
   }
 
+  /* Live-Balance eines Kontos für die Plan-Karte (05.10.2026) — dieselbe Rangfolge wie die Accounts-Spalte, kurz gefasst:
+   * Topstep-Sync → MetaApi → jüngere von MT5-Cloud (mt5_live) und gespeicherter Lesung (accounts.tv_balance: Puls/Echo).
+   * → { val, tip } oder null. */
+  function planKontoBalance(a){
+    if(!a) return null
+    const zeit = t => { const ms = Date.parse(t || '') || Number(t) || 0; return ms ? new Date(ms).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '' }
+    if(a.topstep && a.topstep.balance != null) return { val: Number(a.topstep.balance), tip: 'TopstepX ' + zeit(a.topstep.lastCheck) }
+    if(a.ma && a.ma.balance != null) return { val: Number(a.ma.balance), tip: 'MetaApi ' + zeit(a.ma.lastChecked) }
+    const c = (typeof mt5BalFuerAccount === 'function') ? mt5BalFuerAccount(a.id) : null
+    const tv = (a.tvBalance != null && isFinite(Number(a.tvBalance))) ? { val: Number(a.tvBalance), at: Date.parse(a.tvBalanceAt || '') || 0 } : null
+    const cAt = c ? (Date.parse(c.at || '') || Number(c.at) || 0) : 0
+    if(c && c.bal != null && (!tv || cAt >= tv.at)) return { val: Number(c.bal), tip: 'MT5 ' + zeit(c.at) }
+    if(tv) return { val: tv.val, tip: (a.tvBalanceQuelle === 'mt5' ? 'MT5-Konto ' : 'TradingView ') + zeit(a.tvBalanceAt) }
+    return null
+  }
   function fmtDupBalance(info){
     if(!info) return ''
     const sign = info.balance >= 0 ? '' : '-'
@@ -34326,6 +34342,7 @@
   function renderTradePlans(){
     try{ if(typeof atToggleSichtbarkeit === 'function') atToggleSichtbarkeit() }catch(_){}
     try{ apLeisteZeichnen() }catch(_){}   // Auto-Planer-Leiste (05.10.2026)
+    try{ mt5BalCacheAnstossen() }catch(_){}   // Live-Balance der geplanten Karten (planKontoBalance), höchstens 1×/min
     try{ pulsNaechsterZeichnen() }catch(_){}   // Kopfzeilen-Pille „Puls · in n min" (29.09.2026) mit den frischen Plänen
     const lanes = [
       { status:'planned',   target:'tradeCardsPlanned',   empty:'tradeEmptyPlanned',   countId:'tradetab-count-planned' },
@@ -34359,7 +34376,16 @@
         // der Comparator O(n·log n) mal läuft.
         const sysOrder = { mt5:0, tvplus:1, mirror:2, tsx:3, dup:4, wd:1 }
         const sysOf = new Map(list.map(p => [p, sysOrder[planSysKey(p)] ?? 9]))
+        // Geplant nach Prop-Firma, darin nach Startzeit (05.10.2026, Finn am Auto-Planer: „ein bisschen sortieren nach Propfirm") —
+        // Offen bleibt nach System gruppiert
+        const firmKey = p => String(p.masterFirm || '').toLowerCase()
         list.sort((a,b) => {
+          if(lane.status === 'planned'){
+            const fo = firmKey(a).localeCompare(firmKey(b))
+            if(fo !== 0) return fo
+            const ta = a.startUm ? Date.parse(a.startUm) : Infinity, tb = b.startUm ? Date.parse(b.startUm) : Infinity
+            if(ta !== tb) return ta - tb
+          }
           const so = sysOf.get(a) - sysOf.get(b)
           if(so !== 0) return so
           const pw = priorityWeight(a.priority) - priorityWeight(b.priority)
@@ -34602,7 +34628,12 @@
     const istV2Karte = routeIstV2(p.route)
     // Review-Findings K14/K15 (24.09.2026): „ohne Hedge" hängt an der Route (nicht am leeren Slave-Namen);
     // BUY/SELL-Chip über routeIstEcho, damit Echo V2 ihn wie Echo bekommt.
-    const sub = `${escapeHtml(p.masterFirm||'–')}${mExt ? ` <span class="mono" style="opacity:.6" title="${escapeHtml(mExtTitle)}">${_mTsxName ? '' : '#'}${escapeHtml(String(mExt).slice(0,18))}</span>` : ''}`
+    // Geplante V2-Karte: Live-Balance statt External ID (05.10.2026, Finn: „die External kannst du weglassen, das Live-Balance
+    // hinschreiben, damit ich es grob einschätzen kann") — die ID bleibt im Tooltip; ohne bekannte Balance wie bisher die ID
+    const _mBal = (isPlanned && routeIstV2(p.route)) ? planKontoBalance(_m) : null
+    const sub = `${escapeHtml(p.masterFirm||'–')}${_mBal
+        ? ` <span class="mono" style="opacity:.75" title="${escapeHtml((mExtTitle ? '#' + mExtTitle + ' · ' : '') + _mBal.tip)}">${Math.round(_mBal.val).toLocaleString('de-DE')} $</span>`
+        : mExt ? ` <span class="mono" style="opacity:.6" title="${escapeHtml(mExtTitle)}">${_mTsxName ? '' : '#'}${escapeHtml(String(mExt).slice(0,18))}</span>` : ''}`
       + (istV2Karte
           // Winning Days Farm (24.09.2026 spät): tvv2 mit hedge_eur ist GEHEDGT — der gestrichelte V2-Rand meint „ohne Hedge",
           // der Untertitel sagt es deshalb ausdrücklich (der 🛡-Chip trägt Betrag und Zustand)
@@ -37927,7 +37958,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1006'
+  const OS_TAB_BUILD = '2026-09-22.1007'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
