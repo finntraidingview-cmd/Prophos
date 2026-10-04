@@ -1511,6 +1511,8 @@
   #pb-ansicht .pb-chip .d{color:var(--sub)}
   #pb-ansicht .pb-chip .plus{color:var(--good)}
   #pb-ansicht .pb-chip .bal{color:var(--ink);font-weight:600}
+  #pb-ansicht .pb-chip .bal.plus{color:var(--good)}
+  #pb-ansicht .pb-chip .bal.minus{color:var(--danger)}
   #pb-ansicht .pb-chip .minus{color:var(--danger)}
   #pb-ansicht .pb-chip .warn{color:var(--warn)}
   #pb-ansicht .pb-chip .mv{font-family:'Inter',sans-serif;font-size:10.5px;color:var(--warn)}
@@ -37915,7 +37917,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.997'
+  const OS_TAB_BUILD = '2026-09-22.998'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -53478,7 +53480,7 @@
  * Eigene Verdrahtung: nur #pb-ansicht und seine Knöpfe, kein Sammel-Handler. */
 ;(() => {
   const PB_FIRMEN = {
-    tradeify:    { label: 'Tradeify',    art: 'fut', grenzen: [1800, 5400], plan: [3600, 3600, 1800], fundedTag: 'Simfunded',
+    tradeify:    { label: 'Tradeify',    art: 'fut', grenzen: [1800, 5400], plan: [3600, 3600, 1800], fundedTag: 'Funded',   // Tradeify sagt „Sim Funded" — am Chip nur „Funded" (Finn 04.10.2026)
                    stufen: [['neu','Neu'],['s1','+3.600'],['s2','+7.200'],['big','Big Trade'],['wd','Winning Days']] },
     // Nur eine Zwischenstufe (Pascal 04.10.2026): ein Combine bei +9.000 ist bestanden und zählt schon als Big Trade
     topstep:     { label: 'Topstep',     art: 'fut', grenzen: [2250, 6750], plan: [4500, 4500], fundedTag: 'XFA',
@@ -53497,6 +53499,19 @@
   const pbExt = (e, fk) => { const x = String(e || ''); return (fk && PB_FIRMEN[fk].art === 'fut' && x.length > 4) ? '…' + x.slice(-4) : x }
   // Balance am Chip in Kontowährung ohne Nachkommastellen (151.240)
   const pbBal = b => Math.round(Number(b)).toLocaleString('de-DE')
+  /* CFD-Startgröße aus der Balance gedacht (04.10.2026, Finn: „es gibt bei uns nur 50, 100, 200k CFDs — alle Balances unter 75k sind
+   * 50k-Accounts, über 75k und unter 125k 100k, alles andere 200k"): bewusst NICHT aus starting_balance/Name, die sind nicht überall
+   * gepflegt. Die Grenzen liegen je in der Mitte zweier Größen, kein Drawdown reicht bis dorthin. */
+  const pbCfdStart = b => b < 75000 ? 50000 : b < 125000 ? 100000 : 200000
+  // CFD = FundedNext/FundingPips, bei übrigen Firmen die reinen CFD-Kontotypen (Futures-Evaluationen laufen als 'challenge',
+  // Futures-Funded als 'funded' — siehe Kontotyp funded_cfd seit 29.09.2026)
+  const pbIstCfd = (a, fk) => fk ? PB_FIRMEN[fk].art === 'cfd' : ['phase1', 'phase2', 'funded_cfd'].includes(String(a.type || '').toLowerCase())
+  // Größe am Chip: Tradeify/Topstep ohne (sind alle 150k, Finn 04.10.2026), CFD aus der Balance gedacht, sonst wie gespeichert
+  const pbGroesseChip = (a, fk) => {
+    if(fk && PB_FIRMEN[fk].art === 'fut') return ''
+    if(pbIstCfd(a, fk) && a.balance != null) return pbGroesseTxt(pbCfdStart(Number(a.balance)))
+    return pbGroesseTxt(a.groesse)
+  }
   const pbGroesseTxt = g => g ? (g >= 1000 ? Math.round(g / 1000) + 'k' : pbK(g)) : ''
 
   // „FundedNext Futures" ist ein eigener Topf (andere Plattform) — fällt in „übrige Firmen", nicht unter FundedNext.
@@ -53624,7 +53639,10 @@
       // Account-Balance, die Prophos kennt, Stand nach dem letzten Trade"): dieselbe Quelle wie die Übersicht (acc_balance_wahl —
       // Puls-Lesung vor/nach dem Trade, Echo-Balance ohne offene P&L), deshalb springt sie während eines Trades nicht mit.
       // Stufe, „TP" und „noch" rechnet pbStufe weiter, sie erscheinen nur nicht mehr am Chip.
-      const dl = a.balance != null ? `<span class="bal">${pbBal(a.balance)}</span>`
+      // CFD: grün über, rot unter der gedachten Startgröße (Finn 04.10.2026); Futures neutral
+      const cfdStart = (pbIstCfd(a, fk) && a.balance != null) ? pbCfdStart(Number(a.balance)) : null
+      const balKl = cfdStart == null ? 'bal' : Number(a.balance) > cfdStart ? 'bal plus' : Number(a.balance) < cfdStart ? 'bal minus' : 'bal'
+      const dl = a.balance != null ? `<span class="${balKl}"${cfdStart != null ? ` title="Start ${pbBal(cfdStart)}"` : ''}>${pbBal(a.balance)}</span>`
                : '<span class="d" title="Prophos kennt keine Balance">?</span>'
       const extra = s.tag ? `<span class="d">${pbEsc(s.tag)}</span>` : ''
       const alt = a.balance_at && (jetzt - Date.parse(a.balance_at) > 24 * 3600 * 1000)
@@ -53635,13 +53653,13 @@
         : `<button class="pb-ok" data-pb-hak="${pbEsc(a.id)}" title="heute erledigt">✓</button>`
       const tip = `${a.name}${a.ext ? ' · ' + a.ext : ''}${a.balance != null ? ' · Balance ' + Number(a.balance).toLocaleString('de-DE') : ''}${erl ? ' · heute erledigt' : ''}`
       return `<span class="pb-chip${erl ? ' done' : ''}${moved ? ' moved' : ''}" data-pb-chip="${pbEsc(a.id)}" title="${pbEsc(tip)}">`
-        + `${pbGroesseTxt(a.groesse)}${a.ext ? ' <span class="d">' + pbEsc(pbExt(a.ext, fk)) + '</span>' : ''}${dl ? ' ' + dl : ''}${extra ? ' ' + extra : ''}`
+        + [pbGroesseChip(a, fk), a.ext ? '<span class="d">' + pbEsc(pbExt(a.ext, fk)) + '</span>' : '', dl, extra].filter(Boolean).join(' ')
         + `${s.einStep ? ' <span class="d">1-Step</span>' : ''}${warn}${mv}${btn}</span>`
     }
     const rausChip = (a, fk) => {
       const grund = PB_GRUND[String(a.grund || '').toLowerCase()] || 'raus'
       return `<span class="pb-chip raus" title="${pbEsc(a.name)}${a.ext ? ' · ' + pbEsc(a.ext) : ''} · heute archiviert">`
-        + `${pbGroesseTxt(a.groesse)}${a.ext ? ' ' + pbEsc(pbExt(a.ext, fk)) : ''} <span class="grund">${grund}</span></span>`
+        + [pbGroesseChip(a, fk), a.ext ? pbEsc(pbExt(a.ext, fk)) : '', `<span class="grund">${grund}</span>`].filter(Boolean).join(' ') + '</span>'
     }
     const karte = (label, fk, liste, rausListe) => {
       // Übrige Firmen: nur Stufen mit Inhalt, sonst stünden fünf leere Spalten da
