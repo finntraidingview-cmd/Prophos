@@ -1820,6 +1820,9 @@
   #adm-pane-wd .wd-ablauf-tab tr.offen td{background:var(--violet-tint);border-bottom:0}
   #adm-pane-wd .wd-ablauf-tab tr.offen td:nth-child(4){color:var(--violet)}
   #adm-pane-wd .wd-ablauf-tab td.pfeil{width:14px;color:var(--sub)}
+  #adm-pane-wd .wd-ablauf-tab button.wd-dir-flip{border:0;font:inherit;cursor:pointer}
+  #adm-pane-wd .wd-ablauf-tab button.wd-dir-flip:hover{filter:brightness(.94)}
+  #adm-pane-wd .wd-ablauf-tab button.wd-dir-flip:disabled{cursor:default;filter:none}
   #adm-pane-wd .wd-ablauf-tab tr.wd-detail>td{padding:0 0 12px 18px;background:var(--surface-tint)}
   #adm-pane-wd .wd-ablauf-tab tr.wd-detail .wd-karte{border-color:var(--violet);margin-top:2px;background:var(--surface, #fff)}
   #adm-pane-wd .wd-konten tr.wd-ohne td{border-bottom:0;padding-top:6px}
@@ -37924,7 +37927,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1005'
+  const OS_TAB_BUILD = '2026-09-22.1006'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -45113,6 +45116,43 @@
       wdCacheSchreiben(x.tag)
     }catch(e){ wdSay('Nicht gespeichert: ' + (e.message || e), 'err') }
   }
+  /* RICHTUNG PER KLICK (05.10.2026, Finn: „wenn ich hier drauf drücke soll es immer die Richtung ändern"). Gilt für die GANZE ID
+   * wie in mklWdPlanSpeichern: Farmer-Mac und PC-Tab ziehen richtung aus der Tagesplan-Zeile nach — deshalb Zeile UND alle noch
+   * geplanten, nicht gestarteten Pläne sofort umdrehen. Läuft/fertig/verpasst oder noch nicht eingetragen: gesperrt. */
+  function wdRichtungChip(x, erw){
+    const fest = erw || x.status === 'laeuft' || x.status === 'fertig' || x.status === 'verpasst'
+    const txt = x.richtung === 'buy' ? '▲ BUY' : x.richtung === 'sell' ? '▼ SELL' : '—'
+    const kl = x.richtung === 'buy' ? 'chip-good' : x.richtung === 'sell' ? 'chip-bad' : ''
+    if(fest) return x.richtung ? `<span class="chip ${kl}">${txt}</span>` : '<span class="kf">—</span>'
+    return `<button type="button" class="chip ${kl} wd-dir-flip" data-wd-flip="${escapeHtml(String(x.user_id))}" title="anklicken: Richtung für alle Konten von ${escapeHtml(x.name || 'dieser ID')} umdrehen">${txt}</button>`
+  }
+  async function wdRichtungUmschalten(uid){
+    const x = (_wd.rows || []).find(q => String(q.user_id) === String(uid)); if(!x || x._dirBusy) return
+    if(x.status === 'laeuft' || x.status === 'fertig' || x.status === 'verpasst') return wdSay('Block läuft schon — Richtung nicht mehr änderbar.', 'err')
+    const alt = x.richtung || null, neu = alt === 'buy' ? 'sell' : 'buy'
+    x._dirBusy = true; x.richtung = neu; wdAblauf(_wd.rows || [], wdFehlend())
+    const hinweise = []
+    try{
+      const { data, error } = await supabase.from('wd_tagesplan').update({ richtung: neu, updated_at: new Date().toISOString() })
+        .eq('tag', x.tag).eq('user_id', x.user_id).not('status', 'in', '(laeuft,fertig,verpasst)').select('user_id')
+      if(error) throw error
+      if(!data || !data.length) throw new Error('Block läuft schon oder ist weg')
+      if(_wd.daten && _wd.daten.rail){
+        for(const k of (x.konten || [])){
+          const p = wdPlanLive(k); if(!p || p.status !== 'planned' || p.start_um_gestartet_at || p.richtung === neu) continue
+          try{ const r = await wdApi('PATCH', { id: String(k.plan_id), upd: { richtung: neu } }); if(r && r.geaendert) p.richtung = neu; else hinweise.push(`${k.name || 'Konto'}: schon gestartet`) }
+          catch(e){ hinweise.push(`${k.name || 'Konto'}: ${(e && e.message) || e}`) }
+        }
+      }
+      wdSay(`${x.name || 'ID'}: Richtung jetzt ${neu === 'buy' ? 'BUY' : 'SELL'}${hinweise.length ? ' · Plan nicht gedreht: ' + hinweise.join(' · ') : ''}`, hinweise.length ? 'err' : 'ok')
+      wdCacheSchreiben(x.tag)
+    }catch(e){
+      x.richtung = alt
+      wdSay('Richtung nicht gespeichert: ' + ((e && e.message) || e), 'err')
+    }finally{
+      x._dirBusy = false; wdAblauf(_wd.rows || [], wdFehlend())
+    }
+  }
   // Ebene 1: eine Zeile je ID (Block-Reihenfolge, ungewürfelte alphabetisch), Klick klappt die Konten der ID auf
   function wdAblauf(rows, fehlend){
     const box = document.getElementById('wd-ablauf'); if(!box) return
@@ -45142,7 +45182,7 @@
           <td class="pfeil">${offen ? '▾' : '▸'}</td><td>${x.reihenfolge ? `<span class="wd-blk">${x.reihenfolge}</span>` : '<span class="kf">—</span>'}</td>
           <td class="mono" style="font-weight:600">${x.start_um ? wdHhmm(x.start_um) : '—:—'}${x.start_um ? `<span class="kf"> – ${wdHhmm(new Date(ende).toISOString())}</span>` : ''}</td>
           <td style="font-weight:600">${escapeHtml(x.name || '?')}</td>
-          <td>${x.richtung === 'buy' ? '<span class="chip chip-good">▲ BUY</span>' : x.richtung === 'sell' ? '<span class="chip chip-bad">▼ SELL</span>' : '<span class="kf">—</span>'}</td>
+          <td>${wdRichtungChip(x, erw)}</td>
           <td class="mono">${n}<span class="kf"> / ${k.length}</span><span class="wd-bar"><i style="width:${k.length ? Math.round(n / k.length * 100) : 0}%"></i></span></td><td class="mono">${wdSum}</td>
           <td class="mono">${n ? `<span style="color:${mitPlan >= n ? '#2a9d5c' : 'var(--danger)'};font-weight:600">${mitPlan}</span><span class="kf"> / ${n}</span>` : '<span class="kf">—</span>'}</td>
           <td>${chipHtml}${gestartet ? `<span class="kf"> · ${gestartet} gestartet</span>` : ''}${!n && k.length ? `<span class="kf"> · ${escapeHtml(wdGruende(k))}</span>` : ''}</td></tr>`
@@ -45153,6 +45193,11 @@
       const uid = tr.dataset.wdOpen
       _wd.offen = _wd.offen === uid ? null : uid
       wdAblauf(_wd.rows || [], wdFehlend())
+    }))
+    // Richtungs-Chip in der ID-Zeile: Klick dreht BUY↔SELL (05.10.2026) — eigene Verdrahtung, Zeilen-Klick ignoriert Knöpfe
+    box.querySelectorAll('[data-wd-flip]').forEach(b => b.addEventListener('click', ev => {
+      ev.stopPropagation()
+      if(!b.disabled) wdRichtungUmschalten(b.dataset.wdFlip)
     }))
     box.querySelectorAll('[data-wd-dir]').forEach(b => b.addEventListener('click', () => {
       if(b.disabled) return
