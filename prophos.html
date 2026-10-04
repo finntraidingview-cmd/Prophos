@@ -932,6 +932,33 @@
   }
   #dashboard-view .adm-toolbar .adm-search{flex:1;min-width:170px}
   #dashboard-view .adm-dist{display:flex;flex-direction:column}
+  /* AUFTRAG (05.10.2026): Admin-Reiter Wochenauftrag — Soll/Ist je Firma und ID. Nur #adm-pane-auftrag, eigene auf-*-Klassen. */
+  #adm-pane-auftrag .auf-kopf{display:flex;align-items:center;gap:10px;margin:2px 0 14px;font-size:12.5px;color:var(--sub)}
+  #adm-pane-auftrag .auf-kopf button{margin-left:auto;border:1px solid var(--border);background:var(--surface);border-radius:8px;padding:5px 10px;font:inherit;cursor:pointer;color:var(--ink-2)}
+  #adm-pane-auftrag .auf-gut{color:var(--good)} #adm-pane-auftrag .auf-halb{color:var(--warn)} #adm-pane-auftrag .auf-null{color:var(--danger)}
+  #adm-pane-auftrag .auf-woche{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;position:relative;margin-top:6px}
+  #adm-pane-auftrag .auf-band{position:absolute;left:0;right:0;background:rgba(18,183,106,.09);border-top:1px dashed rgba(18,183,106,.55);border-bottom:1px dashed rgba(18,183,106,.55);pointer-events:none}
+  #adm-pane-auftrag .auf-tag{display:flex;flex-direction:column;align-items:center;border:0;background:none;font:inherit;cursor:pointer;padding:0;border-radius:8px;position:relative;z-index:1}
+  #adm-pane-auftrag .auf-plot{height:124px;width:100%;display:flex;flex-direction:column;align-items:center;justify-content:flex-end}
+  #adm-pane-auftrag .auf-tag .auf-saeule{width:62%;border-radius:6px 6px 2px 2px;min-height:3px}
+  #adm-pane-auftrag .auf-tag .auf-zahl{font-size:12px;font-weight:600;margin-bottom:3px}
+  #adm-pane-auftrag .auf-tag .auf-dat{font-size:11px;color:var(--sub);height:22px;line-height:22px}
+  #adm-pane-auftrag .auf-tag.aktiv .auf-dat{color:var(--violet);font-weight:600}
+  #adm-pane-auftrag .auf-tag.aktiv{background:var(--violet-tint)}
+  #adm-pane-auftrag .auf-firmen{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px;margin-top:14px}
+  #adm-pane-auftrag .auf-karte .panel-head{align-items:flex-start}
+  #adm-pane-auftrag .auf-ist{font-size:26px;font-weight:700;line-height:1;white-space:nowrap}
+  #adm-pane-auftrag .auf-ist small{font-size:12px;font-weight:500;color:var(--sub);margin-left:4px}
+  #adm-pane-auftrag .auf-mini{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;align-items:end;height:34px;margin:10px 0 12px}
+  #adm-pane-auftrag .auf-mini i{display:block;border-radius:3px;min-height:2px}
+  #adm-pane-auftrag .auf-ids{display:flex;flex-direction:column}
+  #adm-pane-auftrag .auf-id{display:grid;grid-template-columns:minmax(70px,1fr) 64px 64px minmax(90px,1.3fr);gap:8px;align-items:center;padding:7px 0;border-top:1px solid var(--border-soft);font-size:12.5px}
+  #adm-pane-auftrag .auf-id.kopf{color:var(--sub-2);font-size:11px;border-top:0;padding-top:0}
+  #adm-pane-auftrag .auf-id .auf-n{font-weight:600}
+  #adm-pane-auftrag .auf-id .auf-w{color:var(--sub);font-weight:400;font-size:11px}
+  #adm-pane-auftrag .auf-id .auf-f{color:var(--sub);font-size:11.5px}
+  #adm-pane-auftrag .auf-fehlt{color:var(--sub-2);font-style:italic}
+  #adm-pane-auftrag .auf-hinweis{font-size:11.5px;color:var(--sub);margin-top:12px}
   #dashboard-view .adm-row{
     display:grid;grid-template-columns:minmax(120px,1.4fr) minmax(60px,1.6fr) auto 42px;
     align-items:center;gap:12px;padding:10px 0;
@@ -8591,6 +8618,7 @@
         </div>
         <div class="subtabs">
           <button class="subtab active adm-tab" data-admtab="overview">Übersicht</button>
+          <button class="subtab adm-tab" data-admtab="auftrag">Auftrag</button>
           <button class="subtab adm-tab" data-admtab="wd">Winning Days</button>
           <!-- Kapitel/Statistik ohne Emojis (Finn 30.09.2026: „die Emojis weg, die nerven") -->
           <button class="subtab adm-tab" data-admtab="kapitel">Kapitel</button>
@@ -8904,6 +8932,11 @@
              Forecast als Karte (Richtung, Konfidenz, Alter, Text zum Aufklappen), darunter das Archiv aus
              kompass_forecasts. Der Tab holt den Worker-Feed selbst und trägt fehlende Zeilen in die DB
              nach — unabhängig vom Railway-Sammler. Eigene Verdrahtung (kein Sammel-Handler). -->
+        <!-- AUFTRAG (05.10.2026, Finn: „eine Übersicht, wo ich sehe, was er macht … ich will ihn tracken"): Soll/Ist des Wochenauftrags
+             an Pascal je Firma und ID. Inhalt baut die Sektion AUFTRAG im Modul, Daten /admin/auftrag. -->
+        <div id="adm-pane-auftrag" hidden>
+          <div id="auf-root" style="color:var(--sub);font-size:13px;padding:22px 2px">Lade Auftrag…</div>
+        </div>
         <div id="adm-pane-kompass" hidden>
           <!-- Kopf (23.09.2026, Finn: „oben den ganzen Quatsch weglassen, kleiner, einfach sagen was der Bot gerade
                sagt — die langen Texte jucken mich nicht"): eine Zeile, Status im Tooltip des Chips. -->
@@ -15853,6 +15886,8 @@
         $('adm-pane-kompass').hidden  = name !== 'kompass'
         $('adm-pane-kapitel').hidden  = name !== 'kapitel'
         $('adm-pane-stat').hidden     = name !== 'stat'
+        $('adm-pane-auftrag').hidden  = name !== 'auftrag'
+        if(name === 'auftrag') window._aufTabOeffnen?.(); else window._aufTabSchliessen?.()   // Wochenauftrag (05.10.2026)
         if(name === 'kapitel' || name === 'stat') admKapitelOeffnen()   // lädt /admin/kapitel beim ersten Öffnen (24.09.2026), danach Cache
         if(name === 'kompass' && typeof window._kpTabOeffnen === 'function') window._kpTabOeffnen()
         else if(typeof window._kpTabSchliessen === 'function') window._kpTabSchliessen()
@@ -37869,7 +37904,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1001'
+  const OS_TAB_BUILD = '2026-09-22.1002'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -53728,6 +53763,140 @@
   window._pbTabSchliessen = () => { _pb.offen = false; clearInterval(_pb.timer); _pb.timer = null }
   // Seite direkt mit #propbaum geöffnet und die Ansicht war schon aktiv, bevor dieser Block lief → jetzt nachholen
   if(document.querySelector('#dashboard-view .view[data-view="propbaum"].active')) window._pbTabOeffnen()
+})()
+/* ── AUFTRAG (05.10.2026, Finn: „eine Übersicht, wo ich sehe, was er macht in Prophos … er macht mir zu wenig, ich will ihn tracken") ──
+ * Admin-Reiter zum Wochenauftrag an Pascal: je Firma die Account-Käufe pro Handelstag gegen Finns Soll-Spanne, dazu die getradeten
+ * Accounts und der Funded-Stand je ID. Soll-Spannen und ID-Listen 1:1 aus Finns Auftrag (Doc „Pascal – Wochenauftrag Prop-Firms"),
+ * hinterlegt in der Tabelle auftrag_plan; gezählt wird nur, was in Prophos angelegt ist. Reine Zählung — keine Bewertung, keine Vorschläge. Klick auf einen Tag im
+ * Wochenbalken stellt alle Karten auf diesen Tag. Eigene Verdrahtung: nur #auf-root, kein Sammel-Handler. */
+;(() => {
+  // Soll je Firma + ID-Liste kommen aus der Tabelle auftrag_plan (über /admin/auftrag) — Namen nie im Code, das Repo ist öffentlich.
+  // Form: [{ label, firm (Schreibweise _firm_norm), soll: [min, max], ziel, ids: [Anzeigename, …] }]
+  let AUF_FIRMEN = [], AUF_SOLL = [0, 0]
+  const _auf = { daten: null, tag: null, laedt: false, fehler: '', timer: null, stand: null }
+  const aufEsc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+  const aufNorm = s => String(s || '').toLowerCase().replace(/[^a-z]/g, '')
+  const aufK = n => n >= 1000 ? (Math.round(n / 100) / 10).toLocaleString('de-DE') + 'k' : Math.round(n).toLocaleString('de-DE')
+  const aufTagTxt = t => { const d = new Date(t + 'T12:00:00Z'); return ['So','Mo','Di','Mi','Do','Fr','Sa'][d.getUTCDay()] + ' ' + d.getUTCDate() + '.' }
+  // Ampel gegen die Soll-Spanne: ab Untergrenze grün, angefangen gelb, nichts rot
+  const aufKlasse = (n, soll) => n >= soll[0] ? 'auf-gut' : n > 0 ? 'auf-halb' : 'auf-null'
+  const aufFarbe = (n, soll) => n >= soll[0] ? 'var(--good)' : n > 0 ? 'var(--warn)' : 'var(--danger)'
+  const aufIstFunded = t => ['funded', 'funded_cfd', 'winning_days'].includes(String(t || '').toLowerCase())
+
+  async function aufLaden(){
+    if(_auf.laedt) return
+    _auf.laedt = true
+    try{
+      const { data: { session } } = await supabase.auth.getSession()
+      if(!session?.access_token) throw new Error('nicht angemeldet')
+      const r = await fetch(`${WATCHER_HOME}/admin/auftrag`, { headers: { 'sb-token': session.access_token }, cache: 'no-store' })
+      const d = await r.json().catch(() => ({}))
+      if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
+      if(!Array.isArray(d.tage)) throw new Error('unerwartete Antwort')
+      AUF_FIRMEN = Array.isArray(d.plan?.firmen) ? d.plan.firmen.filter(f => f && f.firm && Array.isArray(f.soll) && Array.isArray(f.ids)) : []
+      AUF_SOLL = AUF_FIRMEN.reduce((s, f) => [s[0] + Number(f.soll[0]), s[1] + Number(f.soll[1])], [0, 0])
+      _auf.daten = d; _auf.fehler = ''; _auf.stand = new Date()
+      if(!_auf.tag || !d.tage.includes(_auf.tag)) _auf.tag = d.handelstag
+    }catch(e){ _auf.fehler = 'Laden fehlgeschlagen: ' + (e.message || e) }
+    _auf.laedt = false
+    aufRender()
+  }
+
+  function aufRender(){
+    const root = document.getElementById('auf-root')
+    if(!root) return
+    const d = _auf.daten
+    if(!d){ root.textContent = _auf.fehler || 'Lade Auftrag…'; return }
+    if(!AUF_FIRMEN.length){ root.textContent = 'Kein Auftrag hinterlegt (Tabelle auftrag_plan leer).'; return }
+    root.removeAttribute('style')
+    // ID-Name → user_id (Schreibweise egal: Leerzeichen/Groß-Klein zählen nicht)
+    const uidVon = {}
+    for(const p of d.people || []) uidVon[aufNorm(p.name)] = uidVon[aufNorm(p.name)] || p.user_id
+    const zaehl = (liste, firm, uid, tag) => liste.filter(e => e.firm === firm && (!uid || e.user_id === uid) && (!tag || e.tag === tag)).length
+    const imAuftrag = (e, f) => f.ids.some(n => uidVon[aufNorm(n)] === e.user_id)
+    const kaeufeF = f => d.kaeufe.filter(e => e.firm === f.firm && imAuftrag(e, f))
+    const tradesF = f => d.trades.filter(e => e.firm === f.firm && imAuftrag(e, f))
+    const tagSumme = t => AUF_FIRMEN.reduce((s, f) => s + kaeufeF(f).filter(e => e.tag === t).length, 0)
+    const tag = _auf.tag, istHeute = tag === d.handelstag
+    const kaeufeTag = tagSumme(tag)
+    const kaeufeWoche = d.tage.reduce((s, t) => s + tagSumme(t), 0)
+    const tradesTag = AUF_FIRMEN.reduce((s, f) => s + tradesF(f).filter(e => e.tag === tag).length, 0)
+    const tageImSoll = d.tage.filter(t => t !== d.handelstag && tagSumme(t) >= AUF_SOLL[0]).length
+    const sollWoche = [AUF_SOLL[0] * d.tage.length, AUF_SOLL[1] * d.tage.length]
+
+    // Wochenbalken: Summe der Käufe je Handelstag, grünes Band = Soll-Spanne
+    // Feste Pixel statt Prozent: Balken und Soll-Band teilen dieselbe Skala (100 px = höchster Wert, darüber Platz für die Zahl)
+    const maxW = Math.max(AUF_SOLL[1] * 1.1, ...d.tage.map(tagSumme))
+    const px = n => Math.round(n / maxW * 100)
+    const woche = d.tage.map(t => {
+      const n = tagSumme(t)
+      return `<button class="auf-tag${t === tag ? ' aktiv' : ''}" data-auf-tag="${t}" title="${aufTagTxt(t)}: ${n} Käufe">
+        <span class="auf-plot"><span class="auf-zahl ${aufKlasse(n, AUF_SOLL)}">${n}</span>
+        <span class="auf-saeule" style="height:${Math.max(3, px(n))}px;background:${aufFarbe(n, AUF_SOLL)}"></span></span>
+        <span class="auf-dat">${t === d.handelstag ? 'heute' : aufTagTxt(t)}</span></button>`
+    }).join('')
+
+    const karten = AUF_FIRMEN.map(f => {
+      const kf = kaeufeF(f), tf = tradesF(f)
+      const nTag = kf.filter(e => e.tag === tag).length
+      const maxM = Math.max(f.soll[1], ...d.tage.map(t => kf.filter(e => e.tag === t).length))
+      const mini = d.tage.map(t => {
+        const n = kf.filter(e => e.tag === t).length
+        return `<i title="${aufTagTxt(t)}: ${n}" style="height:${Math.max(6, n / maxM * 100)}%;background:${aufFarbe(n, f.soll)};opacity:${t === tag ? 1 : .45}"></i>`
+      }).join('')
+      const zeilen = f.ids.map(name => {
+        const uid = uidVon[aufNorm(name)]
+        if(!uid) return `<div class="auf-id"><span class="auf-n">${aufEsc(name)}</span><span class="auf-fehlt" style="grid-column:2/5">keine ID in Prophos</span></div>`
+        const kT = zaehl(d.kaeufe, f.firm, uid, tag), kW = zaehl(d.kaeufe, f.firm, uid)
+        const tT = zaehl(d.trades, f.firm, uid, tag), tW = zaehl(d.trades, f.firm, uid)
+        const fu = d.aktiv.filter(a => a.firm === f.firm && a.user_id === uid && aufIstFunded(a.type))
+        const fuGr = fu.reduce((s, a) => s + (Number(a.groesse) || 0), 0)
+        const fuGw = fu.reduce((s, a) => s + (Number(a.gewinn) || 0), 0)
+        const funded = fu.length ? `${fu.length} ×${fuGr > 0 ? ' · ' + aufK(fuGr) : ''}${fu.some(a => a.gewinn != null) ? ` · ${fuGw >= 0 ? '+' : ''}${aufK(fuGw)}` : ''}` : '–'
+        const kKl = kW === 0 ? 'auf-null' : ''
+        return `<div class="auf-id"><span class="auf-n ${kKl}">${aufEsc(name)}</span>
+          <span><b>${kT}</b> <span class="auf-w">/ ${kW}</span></span>
+          <span><b>${tT}</b> <span class="auf-w">/ ${tW}</span></span>
+          <span class="auf-f">${funded}</span></div>`
+      }).join('')
+      return `<div class="panel auf-karte">
+        <div class="panel-head"><div><div class="panel-title">${aufEsc(f.label)}</div>
+          <div class="panel-sub">Soll ${f.soll[0]}–${f.soll[1]} Käufe/Tag · Ziel: ${aufEsc(f.ziel)}</div></div>
+          <div class="auf-ist ${aufKlasse(nTag, f.soll)}">${nTag}<small>/ ${f.soll[0]}–${f.soll[1]}</small></div></div>
+        <div class="auf-mini">${mini}</div>
+        <div class="auf-ids"><div class="auf-id kopf"><span>ID</span><span>Käufe ${istHeute ? 'heute' : aufTagTxt(tag)} / 7 T.</span><span>Trades ${istHeute ? 'heute' : aufTagTxt(tag)} / 7 T.</span><span>Funded aktiv · Größe · Gewinn</span></div>${zeilen}</div>
+      </div>`
+    }).join('')
+
+    const stand = _auf.stand ? _auf.stand.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : ''
+    root.innerHTML = `
+      <div class="auf-kopf"><span>Handelstag ${aufEsc(istHeute ? 'heute (' + aufTagTxt(tag) + ')' : aufTagTxt(tag))} · Wechsel 17:45 New York · Stand ${stand}</span>
+        ${_auf.fehler ? `<span class="auf-null">${aufEsc(_auf.fehler)}</span>` : ''}<button id="auf-neu">↻ Aktualisieren</button></div>
+      <div class="kpis">
+        <div class="kpi"><div class="kpi-label">Käufe ${istHeute ? 'heute' : aufTagTxt(tag)}</div>
+          <div class="kpi-value ${aufKlasse(kaeufeTag, AUF_SOLL)}">${kaeufeTag}</div><div class="kpi-delta delta-neutral">Soll ${AUF_SOLL[0]}–${AUF_SOLL[1]}</div></div>
+        <div class="kpi"><div class="kpi-label">Käufe 7 Tage</div>
+          <div class="kpi-value ${aufKlasse(kaeufeWoche, sollWoche)}">${kaeufeWoche}</div><div class="kpi-delta delta-neutral">Soll ${sollWoche[0]}–${sollWoche[1]}</div></div>
+        <div class="kpi"><div class="kpi-label">Tage im Soll</div>
+          <div class="kpi-value">${tageImSoll} <span style="font-size:14px;color:var(--sub)">/ ${d.tage.length - 1}</span></div><div class="kpi-delta delta-neutral">abgeschlossene Handelstage</div></div>
+        <div class="kpi"><div class="kpi-label">Getradete Accounts ${istHeute ? 'heute' : aufTagTxt(tag)}</div>
+          <div class="kpi-value">${tradesTag}</div><div class="kpi-delta delta-neutral">nur IDs aus dem Auftrag</div></div>
+      </div>
+      <div class="panel"><div class="panel-head"><div><div class="panel-title">Käufe je Handelstag</div>
+        <div class="panel-sub">grünes Band = Soll ${AUF_SOLL[0]}–${AUF_SOLL[1]} · Tag anklicken = alle Karten auf diesen Tag</div></div></div>
+        <div class="auf-woche"><div class="auf-band" style="bottom:${22 + px(AUF_SOLL[0])}px;height:${px(AUF_SOLL[1]) - px(AUF_SOLL[0])}px"></div>${woche}</div></div>
+      <div class="auf-firmen">${karten}</div>
+      <div class="auf-hinweis">Kauf = in Prophos neu angelegter Account ohne Vorgänger (Phase 2/Funded als Nachfolger zählt nicht). Trade = Account in einem Trade-Plan des Tages. Was nicht in Prophos angelegt ist, fehlt hier.</div>`
+    root.querySelectorAll('[data-auf-tag]').forEach(b => b.addEventListener('click', () => { _auf.tag = b.dataset.aufTag; aufRender() }))
+    document.getElementById('auf-neu')?.addEventListener('click', aufLaden)
+  }
+
+  window._aufTabOeffnen = () => {
+    if(_auf.daten) aufRender()
+    aufLaden()
+    clearInterval(_auf.timer); _auf.timer = setInterval(aufLaden, 120000)
+  }
+  window._aufTabSchliessen = () => { clearInterval(_auf.timer); _auf.timer = null }
 })()
 </script>
 <!-- Yahoo-Markt-Block (mk-*) entfernt am 25.09.2026 (Finn: „Den unteren Chart wegmachen und NQ/MNQ unten auch weg") — die Live-Daten

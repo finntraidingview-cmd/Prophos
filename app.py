@@ -6661,6 +6661,112 @@ def admin_prop_baum():
 
 
 # ════════════════════════════════════════════════════════════════════════════
+# AUFTRAG (05.10.2026, Finn: „eine Übersicht, wo ich sehe, was er macht … ich will ihn tracken"). Admin-Reiter
+# zum Wochenauftrag an Pascal (Accounts kaufen + Trades machen je Firma/ID). Reine Zählung, keine Bewertung: die
+# Soll-Spannen und ID-Listen stehen in der Tabelle auftrag_plan (nicht im Code), der Server liefert sie plus Rohereignisse der
+# letzten 7 Handelstage (Wechsel 17:45 NY wie der Prop-Baum) plus den Stand der aktiven Accounts.
+# Kauf = neu angelegter Account ohne Vorgänger (ein Nachfolger Phase 2/Funded ist kein Kauf), nie 'live'.
+# Trade = Prop-Account in einem Trade-Plan (Master ODER Slave), Zeitanker started_at, sonst created_at.
+# Gezählt wird nur, was in Prophos steht — ein gekaufter, aber nicht angelegter Account ist hier unsichtbar.
+# ════════════════════════════════════════════════════════════════════════════
+
+AUFTRAG_TAGE = 7
+
+
+def admin_build_auftrag():
+    from datetime import timedelta
+    b = _admin_basis()
+    accounts, archived, preds_of = b["accounts"], b["archived"], b["preds_of"]
+    by_id, names, disp, excluded_ids = b["by_id"], b["names"], b["disp"], b["excluded_ids"]
+    heute, _start, ende = pb_handelstag()
+    fenster_start = ende - timedelta(days=AUFTRAG_TAGE)
+    fenster_iso = _pb_iso(fenster_start)
+    tage = [(datetime.fromisoformat(heute) - timedelta(days=i)).date().isoformat() for i in range(AUFTRAG_TAGE - 1, -1, -1)]
+    im_fenster = set(tage)
+
+    def _tag(ts):
+        try:
+            return pb_handelstag(datetime.fromisoformat(str(ts).replace("Z", "+00:00")))[0]
+        except Exception:
+            return None
+
+    def _zaehlt(a):
+        return a and (a.get("account_type") or "") != "live" and str(a.get("user_id")) not in excluded_ids
+
+    kaeufe = []
+    for a in accounts:
+        aid = str(a["id"])
+        if not _zaehlt(a) or aid in preds_of or str(a.get("created_at") or "") < fenster_iso[:10]:
+            continue
+        t = _tag(a.get("created_at"))
+        if t in im_fenster:
+            kaeufe.append({"tag": t, "firm": _firm_norm(a.get("firm")), "user_id": str(a.get("user_id")),
+                           "type": a.get("account_type") or "", "kosten": a.get("purchase_cost")})
+
+    # Ein Account zählt je Handelstag höchstens einmal als „getradet", egal wie viele Pläne
+    trades, gesehen = [], set()
+    try:
+        for p in _sb_all("trade_plans", {"select": "master_account_id,slave_account_id,started_at,created_at",
+                                         "status": "in.(open,review,completed)",
+                                         "or": f"(started_at.gte.{fenster_iso},and(started_at.is.null,created_at.gte.{fenster_iso}))"}):
+            t = _tag(p.get("started_at") or p.get("created_at"))
+            if t not in im_fenster:
+                continue
+            for k in ("master_account_id", "slave_account_id"):
+                a = by_id.get(str(p.get(k) or ""))
+                if not _zaehlt(a) or (str(a["id"]), t) in gesehen:
+                    continue
+                gesehen.add((str(a["id"]), t))
+                trades.append({"tag": t, "firm": _firm_norm(a.get("firm")), "user_id": str(a.get("user_id")),
+                               "account_id": str(a["id"])})
+    except Exception as e:
+        print(f"[auftrag] ⚠️ trade_plans: {type(e).__name__}: {e}", flush=True)
+
+    # Aktive Accounts (nicht archiviert): Stand je ID für die Ziel-Spalte (Funded-Größe, Funded-Gewinn).
+    # Balance ohne Live-Spiegel (acc_balance_wahl mit leeren dup/echo) — für die Wochenübersicht reicht der gespeicherte Stand.
+    aktiv = []
+    for a in accounts:
+        aid = str(a["id"])
+        if not _zaehlt(a) or aid in archived:
+            continue
+        bal = acc_balance_wahl(a, {}, {})[0]
+        basis = konto_basis_balance(a)
+        aktiv.append({"firm": _firm_norm(a.get("firm")), "user_id": str(a.get("user_id")), "type": a.get("account_type") or "",
+                      "groesse": _wd_konto_groesse(a),
+                      "gewinn": round(bal - basis, 2) if (bal is not None and basis is not None) else None})
+
+    # Soll je Firma + ID-Liste aus der DB (sql/2026-10-05_auftrag_plan.sql) — die Namen gehören nicht ins öffentliche Repo
+    plan = {"firmen": []}
+    try:
+        zeile = _sb_all("auftrag_plan", {"select": "plan", "id": "eq.1"})
+        if zeile and isinstance(zeile[0].get("plan"), dict):
+            plan = zeile[0]["plan"]
+    except Exception as e:
+        print(f"[auftrag] ⚠️ auftrag_plan: {type(e).__name__}: {e}", flush=True)
+
+    people = sorted([{"user_id": u, "name": disp.get(u) or names.get(u, u[:8])}
+                     for u in (set(names) if names else {str(a.get("user_id")) for a in accounts}) - excluded_ids],
+                    key=lambda p: str(p["name"]).lower())
+    return {"handelstag": heute, "wechsel_um": _pb_iso(ende), "tage": tage, "people": people, "plan": plan,
+            "kaeufe": kaeufe, "trades": trades, "aktiv": aktiv, "generated": _wt_now_iso()}
+
+
+@app.route("/admin/auftrag", methods=["GET", "OPTIONS"])
+def admin_auftrag():
+    """GET = Käufe, Trades und aktiver Stand der letzten 7 Handelstage. Gate wie /admin/prop-baum."""
+    if request.method == "OPTIONS":
+        return "", 200
+    _uid, err = _wd_login()
+    if err:
+        return err
+    try:
+        return jsonify(admin_build_auftrag())
+    except Exception as e:
+        print(f"[auftrag] ⚠️ GET: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"error": str(e)}), 500
+
+
+# ════════════════════════════════════════════════════════════════════════════
 # RECHNUNGEN für die Abrechnungen der gemanagten IDs (28.08.2026, Finns Wunsch).
 # Erstellen nur für Admins (ADMIN_EMAILS), die ID-Person liest ihre Rechnungen
 # per RLS direkt aus Supabase. Der Datensatz wird beim Erstellen EINGEFROREN
