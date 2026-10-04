@@ -34837,7 +34837,8 @@
         ? vorcheckChip + (p.route === 'tsv2'
           // Topstep V2: bis Etappe K4 kein automatischer Start (30.09.2026) — die Zeit ist nur Erinnerung, „Starten" von Hand bleibt
           ? `<button class="btn btn-ghost tc2-btn rsq-card-wait" data-plan-start-um-x="${p.id}" title="Topstep V2 startet bis Etappe K4 NICHT von selbst — die Zeit ist nur eine Erinnerung. Klick nimmt sie raus.">⏰ ${tpStartUmText(p.startUm)} · von Hand ✕</button> ${orbitBtn}`
-          : `<button class="btn btn-ghost tc2-btn rsq-card-wait" data-plan-start-um-x="${p.id}" title="Der PC-Tab startet zu dieser Zeit von selbst (Duplikum-Check → Puls). Klick nimmt die Startzeit wieder raus.">⏰ ${tpStartUmText(p.startUm)} ✕</button>`)
+          // Uhrzeit per Klick ändern, ✕ nimmt sie raus (05.10.2026, Finn: „wenn ich auf die Uhrzeit klicke, die Uhrzeit ändern")
+          : `<span style="display:inline-flex;gap:2px"><button class="btn btn-ghost tc2-btn rsq-card-wait" data-plan-start-um-edit="${p.id}" title="${p.autoPlan && !p.autoBestaetigtAt ? 'Startet erst nach Bestätigung. ' : 'Der PC-Tab startet zu dieser Zeit von selbst (Duplikum-Check → Puls). '}Klick: Uhrzeit ändern">⏰ ${tpStartUmText(p.startUm)}</button><button class="btn btn-ghost tc2-btn rsq-card-wait" data-plan-start-um-x="${p.id}" title="Startzeit entfernen" style="padding-left:6px;padding-right:6px">✕</button></span>`)
         : vorcheckChip && _vc.status === 'verpasst_slave' ? vorcheckChip + neuBtn
         : (p.startUm && p.startUmGestartetAt && gestVor < 15 * 60 * 1000 && !wartetDup && !qs)
           ? `<span class="rsq-card-run" title="Der PC-Tab hat die geplante Startzeit ausgelöst — kommt binnen 2 min nichts zurück, erscheint „Neu starten"">⏰ gestartet ${tpStartUmText(p.startUmGestartetAt)}</span>${neuBtn}`
@@ -35276,8 +35277,8 @@
     document.querySelectorAll('[data-plan-auto-ok]').forEach(btn => {
       btn.addEventListener('click', () => apBestaetigen([btn.dataset.planAutoOk]))
     })
-    document.querySelectorAll('[data-ap-firma-ok]').forEach(btn => {
-      btn.addEventListener('click', () => apBestaetigen(String(btn.dataset.apFirmaOk || '').split(',').filter(Boolean)))
+    document.querySelectorAll('[data-plan-start-um-edit]').forEach(btn => {
+      btn.addEventListener('click', () => tpStartUmBearbeiten(btn))
     })
     document.querySelectorAll('[data-plan-start-um-x]').forEach(btn => {
       btn.addEventListener('click', () => { if(typeof tpStartUmEntfernen === 'function') tpStartUmEntfernen(btn.dataset.planStartUmX) })
@@ -38018,7 +38019,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1010'
+  const OS_TAB_BUILD = '2026-09-22.1011'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -41065,6 +41066,37 @@
     if(d.getTime() < Date.now() - 10 * 60 * 1000) return `verpasst (${uhr})`
     return gleicherTag ? uhr : `${d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })} ${uhr}`
   }
+  /* Startzeit auf der Karte ändern (05.10.2026): Knopf → Zeitfeld; Enter/Verlassen speichert, Esc bricht ab. Vergangene Uhrzeit =
+   * morgen (tpStartUmAusZeit, wie im Plan-Popup). Nur solange der Plan geplant und nicht geclaimt ist; der Claim bleibt null. */
+  function tpStartUmBearbeiten(btn){
+    const id = btn.dataset.planStartUmEdit
+    const pl = tradePlans.find(x => String(x.id) === String(id))
+    if(!pl) return
+    const inp = document.createElement('input')
+    inp.type = 'time'; inp.value = tpStartUmZeit(pl.startUm) || ''
+    inp.className = 'btn btn-ghost tc2-btn'; inp.style.cssText = 'width:96px;padding:2px 6px;font-family:var(--mono)'
+    let fertig = false
+    const ende = async speichern => {
+      if(fertig) return; fertig = true
+      if(speichern && inp.value && inp.value !== tpStartUmZeit(pl.startUm)) await tpStartUmSetzen(id, inp.value)
+      else renderTradePlans()
+    }
+    inp.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); ende(true) } else if(e.key === 'Escape'){ e.preventDefault(); ende(false) } })
+    inp.addEventListener('blur', () => ende(true))
+    btn.replaceWith(inp); inp.focus()
+  }
+  async function tpStartUmSetzen(planId, hhmm){
+    const d = tpStartUmAusZeit(hhmm)
+    if(!d){ if(typeof atToast === 'function') atToast('Uhrzeit nicht lesbar: ' + hhmm, 'end'); renderTradePlans(); return }
+    try{
+      const { data, error } = await supabase.from('trade_plans').update({ start_um: d.toISOString(), start_um_gestartet_at: null })
+        .eq('id', planId).eq('status', 'planned').is('start_um_gestartet_at', null).select('*')
+      if(error) throw error
+      if(data && data.length){ const i = tradePlans.findIndex(x => String(x.id) === String(planId)); if(i >= 0) tradePlans[i] = rowToPlan(data[0]) }
+      else if(typeof atToast === 'function') atToast('Startzeit nicht geändert — der Plan ist schon gestartet oder nicht mehr geplant', 'end')
+    }catch(e){ if(typeof atToast === 'function') atToast('Startzeit nicht geändert: ' + (e.message || e), 'end') }
+    renderTradePlans()
+  }
   async function tpStartUmEntfernen(planId){
     try{
       const { data, error } = await supabase.from('trade_plans').update({ start_um: null, start_um_gestartet_at: null })
@@ -41682,13 +41714,16 @@
   async function apBestaetigen(ids){
     ids = (ids || []).map(String)
     if(!ids.length) return
+    if(ids.length > 1 && typeof atToast === 'function') atToast(`🤖 bestätige ${ids.length} Auto-Pläne …`, 'start')
     try{
       const { data, error } = await supabase.from('trade_plans').update({ auto_bestaetigt_at: new Date().toISOString() })
         .in('id', ids).eq('status', 'planned').eq('auto_plan', true).is('auto_bestaetigt_at', null).select('*')
       if(error) throw error
       for(const row of (data || [])){ const i = tradePlans.findIndex(x => String(x.id) === String(row.id)); if(i >= 0) tradePlans[i] = rowToPlan(row) }
       renderTradePlans()
-      if(typeof atToast === 'function') atToast(`✓ ${(data || []).length} Auto-Plan${(data || []).length === 1 ? '' : 'e'} bestätigt — startet zur Startzeit`, 'start')
+      if(typeof atToast === 'function') atToast((data || []).length
+        ? `✓ ${(data || []).length} Auto-Plan${(data || []).length === 1 ? '' : 'e'} bestätigt — startet zur Startzeit`
+        : '⚠ Nichts bestätigt — schon bestätigt, gestartet oder nicht mehr geplant', (data || []).length ? 'start' : 'end')
     }catch(e){ if(typeof atToast === 'function') atToast('Bestätigen fehlgeschlagen: ' + ((e && e.message) || e), 'end') }
   }
   async function apJetztPlanen(trocken){
@@ -41703,6 +41738,14 @@
     }catch(e){ if(typeof atToast === 'function') atToast('Auto-Planer: ' + ((e && e.message) || e), 'end') }
     finally{ _ap.laeuft = false; apLeisteZeichnen() }
   }
+  // Firmen-Kopf „✓ <Firma> bestätigen" (05.10.2026): am Dokument in der Capture-Phase, NUR für dieses Attribut — Finn: der Knopf
+  // tat nichts („nur blaue Kästen"), die Bindung je Render kam offenbar nicht an; so erreicht ihn der Klick in jedem Fall
+  document.addEventListener('click', e => {
+    const btn = e.target && e.target.closest ? e.target.closest('[data-ap-firma-ok]') : null
+    if(!btn) return
+    e.preventDefault()
+    apBestaetigen(String(btn.dataset.apFirmaOk || '').split(',').filter(Boolean))
+  }, true)
   function apLeisteZeichnen(){
     const el = document.getElementById('apLeiste'); if(!el) return
     if(currentUserId && _ap.geladenFuer !== currentUserId){ _ap.geladenFuer = currentUserId; apLetztenLaden(); return }
