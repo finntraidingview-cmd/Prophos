@@ -37904,7 +37904,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1002'
+  const OS_TAB_BUILD = '2026-09-22.1003'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -53794,7 +53794,10 @@
       if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
       if(!Array.isArray(d.tage)) throw new Error('unerwartete Antwort')
       AUF_FIRMEN = Array.isArray(d.plan?.firmen) ? d.plan.firmen.filter(f => f && f.firm && Array.isArray(f.soll) && Array.isArray(f.ids)) : []
-      AUF_SOLL = AUF_FIRMEN.reduce((s, f) => [s[0] + Number(f.soll[0]), s[1] + Number(f.soll[1])], [0, 0])
+      // Gesamt-Soll pro Tag: eigene Vorgabe plan.gesamt (Finn 05.10.2026: „30–35 Acc pro Tag"), sonst Summe der Firmen-Spannen
+      const ges = d.plan?.gesamt
+      AUF_SOLL = (Array.isArray(ges) && ges.length === 2 && ges.every(n => Number(n) > 0)) ? ges.map(Number)
+        : AUF_FIRMEN.reduce((s, f) => [s[0] + Number(f.soll[0]), s[1] + Number(f.soll[1])], [0, 0])
       _auf.daten = d; _auf.fehler = ''; _auf.stand = new Date()
       if(!_auf.tag || !d.tage.includes(_auf.tag)) _auf.tag = d.handelstag
     }catch(e){ _auf.fehler = 'Laden fehlgeschlagen: ' + (e.message || e) }

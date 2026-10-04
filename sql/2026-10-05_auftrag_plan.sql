@@ -1,5 +1,6 @@
 -- AUFTRAG (05.10.2026): Wochenauftrag je Firma (Soll-Käufe pro Tag, ID-Liste, Ziel) für den Admin-Reiter „Auftrag".
--- Eine Zeile (id = 1), plan = {"firmen": [{"label", "firm", "soll": [min, max], "ziel", "ids": [Anzeigename, …]}]}.
+-- Eine Zeile (id = 1), plan = {"gesamt": [min, max], "firmen": [{"label", "firm", "soll": [min, max], "ziel", "ids": [Anzeigename, …]}]}.
+-- gesamt (optional) = Soll-Käufe pro Tag über alle Firmen; fehlt es, gilt die Summe der Firmen-Spannen.
 -- Die ID-Namen stehen bewusst NUR hier in der DB, nie im Code (Repo ist öffentlich). firm = Schreibweise nach _firm_norm.
 -- Lesen nur über /admin/auftrag (Service-Key) — RLS an, keine Policy.
 create table if not exists public.auftrag_plan (
