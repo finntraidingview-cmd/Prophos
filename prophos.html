@@ -12634,7 +12634,8 @@
      * angefragte Payouts des Accounts, 0 → Refund zählt). Fester Betrag
      * (payout_override) gewinnt über alles. Balance-Quelle und Stand-Zeit
      * kommen vom Backend (Echo-Snapshot → TSX → Duplikum → manuell). */
-    const admPayoutPctDefault = firm => /tradeify/i.test(String(firm || '')) ? 90 : 80
+    // Blue Guardian 85/15 (2-Step Standard ohne 90-%-Add-on, Finn 04.10.2026) — sonst fiele die Firma auf 80
+    const admPayoutPctDefault = firm => /tradeify/i.test(String(firm || '')) ? 90 : /blue\s*guardian/i.test(String(firm || '')) ? 85 : 80
     const admIstFundedNext = firm => /f(ou|u)nded\s*next/i.test(String(firm || ''))
     function admAccGroesse(name, balance){
       const m = String(name || '').match(/(\d{2,3})\s*k\b/i)
@@ -37917,7 +37918,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.999'
+  const OS_TAB_BUILD = '2026-09-22.1000'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
