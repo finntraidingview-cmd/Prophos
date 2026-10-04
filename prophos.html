@@ -1943,6 +1943,12 @@
   #tradePlanModal .modal{zoom:.9;max-height:96vh}   /* .84 → .9 (22.09.2026, Finn: „ein bisschen größer reinzoomen") */
   #tradePlanModal #tp-slave-suggest,#tradePlanModal #tp-gesamtkosten-suggest,#tradePlanModal #tp-vorgaenger-suggest{padding:6px 10px !important;line-height:1.35 !important}
   #tradePlanModal #tp-slave-suggest-detail,#tradePlanModal #tp-gesamtkosten-detail,#tradePlanModal #tp-vorgaenger-detail{margin-top:2px !important}
+  /* Kosten-Boxen nur noch bei Emin (05.10.2026, Finn: „ab jetzt nur noch die Funded-Vorgabe — nicht löschen, nur visuell, bei Emin
+     lassen"): Auto-Vorschlag, Gesamtkosten, Fixkosten bleiben im DOM und rechnen weiter (Auto-Anwenden klickt die Knöpfe auch
+     unsichtbar), sind aber bei allen anderen IDs ausgeblendet. Klasse setzt tpRecompute. */
+  html.tp-kosten-aus #tradePlanModal #tp-slave-suggest,
+  html.tp-kosten-aus #tradePlanModal .field:has(> #tp-gesamtkosten-suggest),
+  html.tp-kosten-aus #tradePlanModal .field:has(> #tp-vorgaenger-suggest){display:none !important}
   #tradePlanModal .tp-slave-out{padding:10px 16px}
   #tradePlanModal .tp-mult-out{padding:8px 16px}
   #tradePlanModal .calc-slave-value{font-size:32px}
@@ -38019,7 +38025,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1011'
+  const OS_TAB_BUILD = '2026-09-22.1012'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -42852,6 +42858,8 @@
   const _tpRiskAuto = { master: null, manuell: false }
   document.getElementById('tp-slave-risk')?.addEventListener('input', () => { _tpRiskAuto.manuell = true })
   function tpRecompute(){
+    // Kosten-Boxen nur bei Emin sichtbar (05.10.2026, Finn) — rein visuell, s. CSS html.tp-kosten-aus
+    try{ document.documentElement.classList.toggle('tp-kosten-aus', !String(currentUserId || '').startsWith('6cceb3f3')) }catch(_){}
     const masterId = document.getElementById('tp-master').value
     const slaveId  = document.getElementById('tp-slave').value
     const masterRisk = parseFloat(document.getElementById('tp-master-risk').value) || 0
