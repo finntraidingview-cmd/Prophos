@@ -37917,7 +37917,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.998'
+  const OS_TAB_BUILD = '2026-09-22.999'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -53513,6 +53513,22 @@
     return pbGroesseTxt(a.groesse)
   }
   const pbGroesseTxt = g => g ? (g >= 1000 ? Math.round(g / 1000) + 'k' : pbK(g)) : ''
+  /* Start-Balance für Grün/Rot am Chip (04.10.2026, Finn: „bei allen Future-Prop-Firms genau wie bei CFD — über Start grün, darunter
+   * rot, die neuen ungetradeten bleiben neutral"). CFD: aus der Balance gedacht (pbCfdStart). Topstep Express zählt 0-basiert
+   * (Server-basis 0, ist_topstep_express). Tradeify/Topstep: immer 150k. Übrige Futures (Apex, Lucid …): gespeicherte Größe
+   * (starting_balance, sonst „150k" im Namen), ohne beides die nächste Standardgröße zur Balance. */
+  const pbStart = (a, fk) => {
+    if(a.balance == null) return null
+    if(pbIstCfd(a, fk)) return pbCfdStart(Number(a.balance))
+    if(a.basis != null && Number(a.basis) === 0) return 0
+    if(fk) return 150000
+    const g = Number(a.basis != null ? a.basis : a.groesse)
+    if(g > 0) return g
+    // Ohne gespeicherte Größe (real: einzelne Apex/Lucid): nächste Standardgröße zur Balance — Futures-Drawdowns (≤ 7.500) sind
+    // viel kleiner als die Abstände zwischen den Größen
+    const bal = Number(a.balance)
+    return [25000, 50000, 100000, 150000, 250000, 300000].reduce((x, y) => Math.abs(y - bal) < Math.abs(x - bal) ? y : x)
+  }
 
   // „FundedNext Futures" ist ein eigener Topf (andere Plattform) — fällt in „übrige Firmen", nicht unter FundedNext.
   function pbFirmKey(firm){
@@ -53639,10 +53655,10 @@
       // Account-Balance, die Prophos kennt, Stand nach dem letzten Trade"): dieselbe Quelle wie die Übersicht (acc_balance_wahl —
       // Puls-Lesung vor/nach dem Trade, Echo-Balance ohne offene P&L), deshalb springt sie während eines Trades nicht mit.
       // Stufe, „TP" und „noch" rechnet pbStufe weiter, sie erscheinen nur nicht mehr am Chip.
-      // CFD: grün über, rot unter der gedachten Startgröße (Finn 04.10.2026); Futures neutral
-      const cfdStart = (pbIstCfd(a, fk) && a.balance != null) ? pbCfdStart(Number(a.balance)) : null
-      const balKl = cfdStart == null ? 'bal' : Number(a.balance) > cfdStart ? 'bal plus' : Number(a.balance) < cfdStart ? 'bal minus' : 'bal'
-      const dl = a.balance != null ? `<span class="${balKl}"${cfdStart != null ? ` title="Start ${pbBal(cfdStart)}"` : ''}>${pbBal(a.balance)}</span>`
+      // Grün über, rot unter der Start-Balance, genau auf Start (neu, noch kein Trade) neutral — CFD und Futures (Finn 04.10.2026)
+      const start = pbStart(a, fk)
+      const balKl = start == null ? 'bal' : Number(a.balance) > start ? 'bal plus' : Number(a.balance) < start ? 'bal minus' : 'bal'
+      const dl = a.balance != null ? `<span class="${balKl}"${start != null ? ` title="Start ${pbBal(start)}"` : ''}>${pbBal(a.balance)}</span>`
                : '<span class="d" title="Prophos kennt keine Balance">?</span>'
       const extra = s.tag ? `<span class="d">${pbEsc(s.tag)}</span>` : ''
       const alt = a.balance_at && (jetzt - Date.parse(a.balance_at) > 24 * 3600 * 1000)
