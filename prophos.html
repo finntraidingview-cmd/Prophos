@@ -38031,7 +38031,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1015'
+  const OS_TAB_BUILD = '2026-09-22.1016'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -43744,7 +43744,17 @@
     return /EXPRESS|XFA/i.test(ext + ' ' + name) || typ === 'funded' || typ === 'winning_days'
   }
   window._kontoIstTopstepExpress = kontoIstTopstepExpress   // Test-Haken
-  function tpKontoGroesseAusName(name){ const m = /(\d{2,3})\s*k\b/i.exec(String(name || '')); return m ? (+m[1]) * 1000 : 0 }
+  /* Kontogröße (05.10.2026, Vorfall Aurel …2766: 164.492 $ Balance, aber Staffel 50 € statt 90 € — Name „FTDFYSLX150115112766→ Funded"
+   * ohne „150k", keine starting_balance → Plus 0 → kleinste Stufe. Finn: „es soll immer mit der Balance rechnen"). Reihenfolge:
+   * „150k" im Namen → Größe aus der Tradeify-Kontonummer (…TDFY…150 + 9 Ziffern) → mit Live-Balance die nächstliegende Standardgröße. */
+  function tpKontoGroesseAusName(name, live){
+    const t = String(name || '')
+    const m = /(\d{2,3})\s*k\b/i.exec(t); if(m) return (+m[1]) * 1000
+    const td = /TDFY[A-Z]*?(25|50|100|150|200|250|300)\d{9}(?!\d)/i.exec(t); if(td) return (+td[1]) * 1000
+    const l = Number(live)
+    if(l > 0){ const std = [25000, 50000, 100000, 150000, 200000, 250000, 300000]; return std.reduce((b, g) => Math.abs(g - l) < Math.abs(b - l) ? g : b, std[0]) }
+    return 0
+  }
   function tpVorplanSlaveWaehrung(eur, slaveCurrency, fxUsdEur){
     return Math.round((slaveCurrency !== '€' ? eur / (fxUsdEur || 0.85) : eur) * 100) / 100
   }
@@ -43775,8 +43785,8 @@
       // Kontogröße aus starting_balance, sonst aus dem Namen — accounts.balance (manuelle Balance) wird nicht mehr gelesen (F9, 26.09.2026)
       const startRoh = Number(acc.startingBalance) || 0
       const express = kontoIstTopstepExpress(acc)   // Topstep Express: Stand über 0 $ = die Balance selbst (F27)
-      groesse = express ? 0 : startRoh > 0 ? startRoh : tpKontoGroesseAusName(acc.name)
       live = (typeof o.live === 'number' && isFinite(o.live)) ? o.live : null
+      groesse = express ? 0 : startRoh > 0 ? startRoh : tpKontoGroesseAusName(acc.name, live)   // mit Balance-Rückfall (05.10.2026)
       if(live == null){ plus = 0; hinweis = 'kein Live-Stand — kleinste Stufe' }
       else if(!(groesse > 0) && !express){ plus = 0; hinweis = 'Kontogröße unbekannt („150k" in den Namen) — kleinste Stufe' }
       else plus = Math.round(live - groesse)
@@ -45133,7 +45143,7 @@
       const slFeld = sperren ? `<span class="mono">${slWert ? '$' + de(slWert) : '—'}</span>` : `<input type="number" class="input mono vp-in wd-in" data-wd-sl="${escapeHtml(String(k.id))}" value="${slWert ? escapeHtml(String(slWert)) : ''}" placeholder="—" title="SL in $ — leer = kein SL">`
       const live = kd.live_balance != null ? kd.live_balance : (k.live != null ? k.live : null)
       const express = kontoIstTopstepExpress({ firm: kd.firm, ext: kd.ext, name: kd.name || k.name, type: kd.type })   // F27: Basis 0
-      const groesse = express ? 0 : kd.starting_balance > 0 ? kd.starting_balance : tpKontoGroesseAusName(k.name)   // nie die manuelle Balance (F9)
+      const groesse = express ? 0 : kd.starting_balance > 0 ? kd.starting_balance : tpKontoGroesseAusName(kd.name || k.name, live)   // nie die manuelle Balance (F9); Live-Balance nur als Rückfall (05.10.2026)
       const plus = live != null && (groesse > 0 || express) ? Math.round(live - groesse) : (k.plus != null ? k.plus : null)
       const bal = live != null ? `$${de(live)}${plus != null ? `<div class="kf" style="color:${plus >= 0 ? '#2a9d5c' : 'var(--danger)'}">${plus >= 0 ? '+' : ''}${de(plus)} über ${express ? '0 (Express)' : groesse ? de(groesse) : '?'}</div>` : ''}` : '<span class="kf">kein Live-Stand</span>'
       const dd = kd.max_drawdown ? `$${de(kd.max_drawdown)}` : '—'
