@@ -38031,7 +38031,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1013'
+  const OS_TAB_BUILD = '2026-09-22.1014'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -44452,16 +44452,19 @@
   }
   // Startzeiten je Konto im Block: Blockstart, dann je weiterem aktiven Konto + Abstand (einmal gewürfelt,
   // dann am Konto gemerkt — sonst spränge die Zeit bei jedem Abgleich). → Map id → ISO, .geaendert
+  const WD_KONTO_ABSTAND_MS = 80000   // 1:20 min je Konto innerhalb einer ID (Finn 05.10.2026)
   function wdKontoZeiten(konten, startUm, r){
     const aMin = Math.max(0, +((r || {}).abstand_min) || 0), aMax = Math.max(aMin, +((r || {}).abstand_max) || 0)
     let t = new Date(startUm).getTime(), i = 0
     const out = new Map(); out.geaendert = false
     for(const k of konten){
       if(!wdAktiv(k)) continue
-      // Kein Abstand mehr (27.09.2026): alle Konten der ID zur Blockzeit, die Warteschlange des PCs startet sie nacheinander.
-      // Alte, schon gewürfelte k.abstand_min bleiben am Konto stehen, wirken aber nicht mehr.
+      // Wieder versetzt (05.10.2026, Vorfall Jacob 02:03 Dubai: drei Konten zur selben Sekunde → Login-Wechsel im Puls-Chrome
+      // scheiterte, Puls-Chrome neu gestartet, ein Konto nie gefeuert, Reader sah nach dem Kontowechsel „flach“). Finn: 1:20 min
+      // zwischen den Winning Days einer ID. Die Warteschlange des PCs (27.09.2026) bleibt der Riegel dahinter.
+      // Alte, schon gewürfelte k.abstand_min bleiben am Konto stehen, wirken aber nicht.
       void aMin; void aMax
-      out.set(String(k.id), new Date(t).toISOString()); i++
+      out.set(String(k.id), new Date(t + i * WD_KONTO_ABSTAND_MS).toISOString()); i++
     }
     return out
   }
