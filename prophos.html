@@ -34220,14 +34220,27 @@
   function planKontoBalance(a){
     if(!a) return null
     const zeit = t => { const ms = Date.parse(t || '') || Number(t) || 0; return ms ? new Date(ms).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '' }
-    if(a.topstep && a.topstep.balance != null) return { val: Number(a.topstep.balance), tip: 'TopstepX ' + zeit(a.topstep.lastCheck) }
-    if(a.ma && a.ma.balance != null) return { val: Number(a.ma.balance), tip: 'MetaApi ' + zeit(a.ma.lastChecked) }
+    const ms = t => Date.parse(t || '') || Number(t) || 0
+    if(a.topstep && a.topstep.balance != null) return { val: Number(a.topstep.balance), at: ms(a.topstep.lastCheck), tip: 'TopstepX ' + zeit(a.topstep.lastCheck) }
+    if(a.ma && a.ma.balance != null) return { val: Number(a.ma.balance), at: ms(a.ma.lastChecked), tip: 'MetaApi ' + zeit(a.ma.lastChecked) }
     const c = (typeof mt5BalFuerAccount === 'function') ? mt5BalFuerAccount(a.id) : null
     const tv = (a.tvBalance != null && isFinite(Number(a.tvBalance))) ? { val: Number(a.tvBalance), at: Date.parse(a.tvBalanceAt || '') || 0 } : null
     const cAt = c ? (Date.parse(c.at || '') || Number(c.at) || 0) : 0
-    if(c && c.bal != null && (!tv || cAt >= tv.at)) return { val: Number(c.bal), tip: 'MT5 ' + zeit(c.at) }
-    if(tv) return { val: tv.val, tip: (a.tvBalanceQuelle === 'mt5' ? 'MT5-Konto ' : 'TradingView ') + zeit(a.tvBalanceAt) }
+    if(c && c.bal != null && (!tv || cAt >= tv.at)) return { val: Number(c.bal), at: cAt, tip: 'MT5 ' + zeit(c.at) }
+    if(tv) return { val: tv.val, at: tv.at, tip: (a.tvBalanceQuelle === 'mt5' ? 'MT5-Konto ' : 'TradingView ') + zeit(a.tvBalanceAt) }
     return null
+  }
+  /* Ist die Balance live? (05.10.2026, Finn: „wenn sie nach dem letzten Trade neu gelesen wurde, dann ist sie live — wichtig,
+   * damit man weiß, ob der Tradeplan so stimmt"). Gleiche Regel wie der Auto-Planer (app.py ap_planen): Lesung nach dem Ende
+   * des letzten Trades dieses Kontos (ended_at, sonst completed_at). Kein früherer Trade → live. → { live, ende } */
+  function planBalanceLive(accId, balAt){
+    let ende = 0
+    for(const q of (tradePlans || [])){
+      if(!q || String(q.masterAccountId) !== String(accId) || (q.status !== 'review' && q.status !== 'completed')) continue
+      const t = Date.parse(q.endedAt || q.completedAt || '') || 0
+      if(t > ende) ende = t
+    }
+    return { live: !ende || (!!balAt && balAt >= ende), ende }
   }
   function fmtDupBalance(info){
     if(!info) return ''
@@ -34631,8 +34644,12 @@
     // Geplante V2-Karte: Live-Balance statt External ID (05.10.2026, Finn: „die External kannst du weglassen, das Live-Balance
     // hinschreiben, damit ich es grob einschätzen kann") — die ID bleibt im Tooltip; ohne bekannte Balance wie bisher die ID
     const _mBal = (isPlanned && routeIstV2(p.route)) ? planKontoBalance(_m) : null
+    const _mBalLive = _mBal ? planBalanceLive(p.masterAccountId, _mBal.at) : null
     const sub = `${escapeHtml(p.masterFirm||'–')}${_mBal
         ? ` <span class="mono" style="opacity:.75" title="${escapeHtml((mExtTitle ? '#' + mExtTitle + ' · ' : '') + _mBal.tip)}">${Math.round(_mBal.val).toLocaleString('de-DE')} $</span>`
+          + (_mBalLive.live
+            ? ` <span style="color:var(--good);font-weight:600" title="Balance nach dem letzten Trade gelesen — der Plan rechnet mit dem echten Stand">● live</span>`
+            : ` <span style="color:var(--warn);font-weight:600" title="Seit dem letzten Trade (Ende ${new Date(_mBalLive.ende).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}) nicht neu gelesen — TP/SL im Plan können falsch sein">⚠ nicht live</span>`)
         : mExt ? ` <span class="mono" style="opacity:.6" title="${escapeHtml(mExtTitle)}">${_mTsxName ? '' : '#'}${escapeHtml(String(mExt).slice(0,18))}</span>` : ''}`
       + (istV2Karte
           // Winning Days Farm (24.09.2026 spät): tvv2 mit hedge_eur ist GEHEDGT — der gestrichelte V2-Rand meint „ohne Hedge",
@@ -37958,7 +37975,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1007'
+  const OS_TAB_BUILD = '2026-09-22.1008'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
