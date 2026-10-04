@@ -8051,6 +8051,11 @@ def admin_wd_heute():
         zeilen = []
         fruehere = _wd_fruehere_trades(acc_ids)       # B14: für den Balance-Vorläufer (konto_balance)
         for p in plaene:
+            # Orbit V3 ist nie ein Winning Day (05.10.2026, Finn: „Orbit-Pläne mit Fusion-Hedge sind separat von Winning Days … die
+            # kommen ganz normal ins Radar") — Chris' Apex-Funded-Trades standen unter „Läuft gerade", weil hedge_eur > 0 reichte.
+            # Gilt auch auf Winning-Days-Konten; wie plan_ist_wd.
+            if p.get("orbit_v3") is True:
+                continue
             z = _wd_heute_zeile(p, accs.get(str(p.get("master_account_id") or "")), disp, wd_vorher_waehlen(p, fruehere))
             z.pop("_tsx", None)
             if _wd_heute_behalten(z, tag):
