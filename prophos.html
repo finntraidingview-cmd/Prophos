@@ -1510,6 +1510,7 @@
     padding:2px 4px 2px 8px;border-radius:8px;border:1px solid var(--border);background:var(--surface);margin:2px 4px 2px 0;white-space:nowrap}
   #pb-ansicht .pb-chip .d{color:var(--sub)}
   #pb-ansicht .pb-chip .plus{color:var(--good)}
+  #pb-ansicht .pb-chip .bal{color:var(--ink);font-weight:600}
   #pb-ansicht .pb-chip .minus{color:var(--danger)}
   #pb-ansicht .pb-chip .warn{color:var(--warn)}
   #pb-ansicht .pb-chip .mv{font-family:'Inter',sans-serif;font-size:10.5px;color:var(--warn)}
@@ -8227,7 +8228,7 @@
         </div>
         <div id="pb-baum"></div>
         <div class="pb-fuss">Erledigt = heute ein Trade in Prophos oder von Hand abgehakt; bleibt in der Stufe und leuchtet grün. Haken entfernen: zweimal klicken („Sicher?“, 6 s).
-          „TP“ = geplanter Gewinn des nächsten Trades, „noch“ = Rest bis zum Phasenziel, ⚠ = Balance älter als 24 h, Pfeil = Stufe heute gewechselt.
+          Zahl im Chip = Balance nach dem letzten Trade, ⚠ = Balance älter als 24 h, Pfeil = Stufe heute gewechselt.
           Der Handelstag wechselt um 17:45 New York, dann sind Haken, Pfeile und rote Chips weg.</div>
       </div>
     </section>
@@ -37914,7 +37915,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.996'
+  const OS_TAB_BUILD = '2026-09-22.997'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -53491,8 +53492,11 @@
   const _pb = { daten: null, ids: null, idsGeladen: false, timer: null, laedt: false, fehler: '', askT: null, offen: false }
   const pbEsc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
   const pbK = n => Math.round(n).toLocaleString('de-DE')
-  const pbNum = n => (n > 0 ? '+' : n < 0 ? '−' : '±') + Math.abs(Math.round(n)).toLocaleString('de-DE')
-  const pbExt = e => { const x = String(e || ''); return x.length > 8 ? '…' + x.slice(-6) : x }
+  // Login am Chip (04.10.2026, Finn: „bei Topstep/Tradeify nicht die ganze ID, nur … und die letzten vier Stellen — bei den CFDs kann die
+  // ganze Login-ID bleiben"): Futures-Firmen gekürzt, CFD und übrige voll. Die volle Kennung steht weiter im Tooltip.
+  const pbExt = (e, fk) => { const x = String(e || ''); return (fk && PB_FIRMEN[fk].art === 'fut' && x.length > 4) ? '…' + x.slice(-4) : x }
+  // Balance am Chip in Kontowährung ohne Nachkommastellen (151.240)
+  const pbBal = b => Math.round(Number(b)).toLocaleString('de-DE')
   const pbGroesseTxt = g => g ? (g >= 1000 ? Math.round(g / 1000) + 'k' : pbK(g)) : ''
 
   // „FundedNext Futures" ist ein eigener Topf (andere Plattform) — fällt in „übrige Firmen", nicht unter FundedNext.
@@ -53616,10 +53620,13 @@
       const erl = pbErledigt(a), h = (d.haken || {})[a.id]
       const vor = snap[a.id] ? pbStufe(snap[a.id], fk) : null
       const moved = vor && vor.key !== s.key
-      const dl = s.delta != null ? `<span class="${s.delta >= 0 ? 'plus' : 'minus'}">${pbNum(s.delta)}</span>`
-               : (s.unbekannt ? '<span class="d" title="Prophos kennt keine Balance">?</span>' : '')
-      const extra = s.tp ? `<span class="d">TP ${pbK(s.tp)}</span>`
-                  : (s.rest != null ? `<span class="d">noch ${pbK(s.rest)}</span>` : (s.tag ? `<span class="d">${pbEsc(s.tag)}</span>` : ''))
+      // Chip zeigt die Balance (04.10.2026, Finn: „+3.538 TP 3.600 weg — das Ziel steht ja schon in der Spalte; stattdessen die
+      // Account-Balance, die Prophos kennt, Stand nach dem letzten Trade"): dieselbe Quelle wie die Übersicht (acc_balance_wahl —
+      // Puls-Lesung vor/nach dem Trade, Echo-Balance ohne offene P&L), deshalb springt sie während eines Trades nicht mit.
+      // Stufe, „TP" und „noch" rechnet pbStufe weiter, sie erscheinen nur nicht mehr am Chip.
+      const dl = a.balance != null ? `<span class="bal">${pbBal(a.balance)}</span>`
+               : '<span class="d" title="Prophos kennt keine Balance">?</span>'
+      const extra = s.tag ? `<span class="d">${pbEsc(s.tag)}</span>` : ''
       const alt = a.balance_at && (jetzt - Date.parse(a.balance_at) > 24 * 3600 * 1000)
       const warn = alt ? `<span class="warn" title="Balance zuletzt ${pbEsc(new Date(a.balance_at).toLocaleString('de-DE'))}">⚠</span>` : ''
       const mv = moved ? `<span class="mv" title="heute von ${pbEsc(pbStufeLabel(fk, vor.key))} hierher">${pbStufeIdx(fk, s.key) > pbStufeIdx(fk, vor.key) ? '↑' : '↓'} ${pbEsc(pbStufeLabel(fk, vor.key))}</span>` : ''
@@ -53628,13 +53635,13 @@
         : `<button class="pb-ok" data-pb-hak="${pbEsc(a.id)}" title="heute erledigt">✓</button>`
       const tip = `${a.name}${a.ext ? ' · ' + a.ext : ''}${a.balance != null ? ' · Balance ' + Number(a.balance).toLocaleString('de-DE') : ''}${erl ? ' · heute erledigt' : ''}`
       return `<span class="pb-chip${erl ? ' done' : ''}${moved ? ' moved' : ''}" data-pb-chip="${pbEsc(a.id)}" title="${pbEsc(tip)}">`
-        + `${pbGroesseTxt(a.groesse)}${a.ext ? ' <span class="d">' + pbEsc(pbExt(a.ext)) + '</span>' : ''}${dl ? ' ' + dl : ''}${extra ? ' ' + extra : ''}`
+        + `${pbGroesseTxt(a.groesse)}${a.ext ? ' <span class="d">' + pbEsc(pbExt(a.ext, fk)) + '</span>' : ''}${dl ? ' ' + dl : ''}${extra ? ' ' + extra : ''}`
         + `${s.einStep ? ' <span class="d">1-Step</span>' : ''}${warn}${mv}${btn}</span>`
     }
     const rausChip = (a, fk) => {
       const grund = PB_GRUND[String(a.grund || '').toLowerCase()] || 'raus'
       return `<span class="pb-chip raus" title="${pbEsc(a.name)}${a.ext ? ' · ' + pbEsc(a.ext) : ''} · heute archiviert">`
-        + `${pbGroesseTxt(a.groesse)}${a.ext ? ' ' + pbEsc(pbExt(a.ext)) : ''} <span class="grund">${grund}</span></span>`
+        + `${pbGroesseTxt(a.groesse)}${a.ext ? ' ' + pbEsc(pbExt(a.ext, fk)) : ''} <span class="grund">${grund}</span></span>`
     }
     const karte = (label, fk, liste, rausListe) => {
       // Übrige Firmen: nur Stufen mit Inhalt, sonst stünden fünf leere Spalten da
