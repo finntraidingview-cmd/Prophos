@@ -240,6 +240,45 @@ def main():
     check(zk["liq_regel_balance"] == 145500.0 and zk["liq_gilt"] == "boden",
           f"Tradeify ohne Größe im Namen: Boden 145.500 aus dem Kürzel schlägt fest 142.500 → {zk['liq_regel_balance']}")
 
+    # 10) FUNDEDNEXT FUTURES (LIQ-FNF, 05.10.2026, Finn: Futures Flex 150K Challenge, Max loss limit 4.000 $ EOD-trailing, Boden steigt
+    #     nie über die Startgröße) — Regelzeile nach sql/2026-10-05_liq_regeln_fundednext_futures.sql. Anlass: Radar zeigte bei
+    #     Balance 153.198 einen Abstand von 7.198 $ (Zeile stand als Annahme auf statisch → Boden 146.000).
+    FN_ALT = {"id": 12, "firma": "FundedNext Futures", "kontotyp": None, "art": None, "maxdd_art": "statisch"}
+    FN_NEU = dict(FN_ALT, maxdd_art="eod_trailing", maxdd_usd=4000, maxdd_lock_ueber_groesse_usd=0)
+    RF = RB + [FN_NEU]
+    fn = {"id": "fn1", "firm": "FundedNext Futures", "account_type": "challenge", "name": "150k FundedNextFutres FNFTCH000000000",
+          "starting_balance": "0.00", "max_drawdown": "4000"}
+    check(G(fn) == 150000 and a["liq_regel_waehlen"](RF, fn["firm"], "challenge", G(fn))[0]["id"] == 12,
+          "FNF: Größe 150.000 aus dem Namen 150k …FNFTCH… (starting_balance 0), Zeile FundedNext Futures gewählt (nicht FundedNext CFD)")
+    zalt = F(RB + [FN_ALT], fn, {"id": "f0"}, 153198.0, None, 30000, "buy", 20, 2, peak=153198.0)
+    check(zalt["liq_regel_balance"] == 146000.0 and 153198.0 - zalt["liq_regel_balance"] == 7198.0,
+          f"FNF alt (statisch): 153.198 → Boden 146.000, Abstand 7.198 $ — der Befund im Radar → {zalt['liq_regel_balance']}")
+    for bal, soll_boden, soll_abst in ((150000.0, 146000.0, 4000.0), (153198.0, 149198.0, 4000.0),
+                                       (154000.0, 150000.0, 4000.0), (156000.0, 150000.0, 6000.0)):
+        z = F(RF, fn, {"id": "f1"}, bal, None, 30000, "buy", 20, 2, peak=P({"id": "f1"}, fn, bal, []))
+        check(z["liq_regel_balance"] == soll_boden and bal - z["liq_regel_balance"] == soll_abst and z["liq_gilt"] == "boden"
+              and z["liq_maxdd_art"] == "eod_trailing" and z["liq_regel_level_nq"] == 30000 - soll_abst / 40,
+              f"FNF Balance {bal:,.0f} → Boden {soll_boden:,.0f}, Abstand {soll_abst:,.0f} $ → {z['liq_regel_balance']} "
+              f"/ Level {z['liq_regel_level_nq']} ({z['liq_boden_text']})")
+    check("Lock bei 150.000 $" in F(RF, fn, {"id": "f1"}, 156000.0, None, 30000, "buy", 20, 2, peak=156000.0)["liq_boden_text"]
+          and "Lock" not in F(RF, fn, {"id": "f1"}, 153198.0, None, 30000, "buy", 20, 2, peak=153198.0)["liq_boden_text"],
+          "FNF: Text nennt den Lock erst ab 154.000")
+    # Rückgang 153.198 → 151.000: der Höchststand kommt aus den belegten Balances früherer Pläne derselben Phase
+    fn_verlauf = [{"id": "g1", "master_account_id": "fn1", "konto_typ": "challenge", "started_at": "2026-10-02T14:00:00+00:00",
+                   "ended_at": "2026-10-02T15:00:00+00:00", "bal_start": 150000.0, "bal_end": 153198.0},
+                  {"id": "g2", "master_account_id": "fn1", "konto_typ": "challenge", "started_at": "2026-10-05T14:00:00+00:00",
+                   "ended_at": "2026-10-05T15:00:00+00:00", "bal_start": 153198.0, "bal_end": 151000.0}]
+    fn_heute = {"id": "g3", "master_account_id": "fn1", "started_at": "2026-10-06T14:00:00+00:00"}
+    pkf = P(fn_heute, fn, 151000.0, fn_verlauf)
+    zrk = F(RF, fn, fn_heute, 151000.0, None, 30000, "buy", 20, 2, peak=pkf)
+    check(pkf == 153198.0 and zrk["liq_regel_balance"] == 149198.0 and 151000.0 - zrk["liq_regel_balance"] == 1802.0,
+          f"FNF nach Rückgang auf 151.000: Höchststand 153.198 bleibt → Boden 149.198, Abstand 1.802 $ → {pkf} / {zrk['liq_regel_balance']}")
+    # Grenze der Belege: ohne belegten Höchststand (keine früheren Pläne mit Balance) rechnet der Boden ab der Start-Balance
+    zob = F(RF, fn, fn_heute, 151000.0, None, 30000, "buy", 20, 2, peak=P(fn_heute, fn, 151000.0, []))
+    check(zob["liq_regel_balance"] == 147000.0, f"FNF ohne belegten Höchststand: 151.000 − 4.000 = 147.000 (zu weit, bekannt) → {zob['liq_regel_balance']}")
+    zfb = F(RF, dict(fn, max_drawdown=None), {"id": "f1"}, 150000.0, None, 30000, "buy", 20, 2, peak=150000.0)
+    check(zfb["liq_regel_balance"] == 146000.0 and zfb["liq_maxdd"] == 4000, f"FNF ohne Max DD am Konto: maxdd_usd 4.000 der Zeile → {zfb['liq_regel_balance']}")
+
     print("\nALLES OK" if ok else "\nFEHLER")
     sys.exit(0 if ok else 1)
 
