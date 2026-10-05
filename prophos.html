@@ -2507,6 +2507,7 @@
   #dashboard-view .el-gelesen .el-dot{background:#16a34a}
   #dashboard-view .el-aufgegeben .el-dot{background:#dc2626}
   #dashboard-view .el-aufgegeben .el-text{color:#b91c1c}
+  #dashboard-view .el-kontoweg .el-dot{background:#f59e0b}   /* Konto weg (05.10.2026): ruhig — gelber Punkt, Text in der normalen Farbe */
   #dashboard-view .el-zeile .el-text{min-width:0;overflow:hidden;text-overflow:ellipsis}
   #dashboard-view .el-knopf{padding:2px 9px;font-size:11px;line-height:1.5;border-radius:6px}
   #dashboard-view .mwd-abh{margin-top:8px;padding:10px 12px;border-radius:10px;border:1px solid var(--border-soft);background:var(--surface)}
@@ -21860,6 +21861,21 @@
     const at = Date.parse(fin.puls_login_at || '') || 0, bis = at ? at + TV_ENDLESUNG_LOGIN_PAUSE_S * 1000 : 0
     return (bis && jetzt < bis) ? { n, pruefen: false, bis, code: String(fin.puls_login_code || '') } : null
   }
+  /* KONTO WEG (05.10.2026, Finn am Radar bei „Wartet · Login prüfen": „Die Accounts wurden beide geblowt. Bei manchen Prop-Firmen werden
+   * geblowte Accounts gar nicht mehr angezeigt … dann soll er direkt checken: die wurden geblowt, die gibt es gar nicht mehr.").
+   * Vertrag mit dem Bot: steht das Konto im (frisch angemeldeten) Tradovate-Login nicht mehr, kommt code 'konto_weg' (ok false,
+   * retry_ok false). NUR dieser Code zählt — der alte Fehlertext („konto_nicht_erreicht … nicht im aktiven Tradovate-Login") bleibt
+   * ein gewöhnlicher Fehler bzw. Login-Fehler, daraus wird nichts geschlossen.
+   * Folge in tvV2EndlesungVersuch: keine weitere automatische Lesung (puls_aufgegeben), kein Login-Fehler-Zähler; der Plan steht
+   * damit unter „Überprüfen" (Radar: nicht mehr „Wartet", Trades: nicht mehr „Warte auf Puls"). Vermerk in mt5_baseline.final:
+   * konto_weg true + konto_weg_at; puls_fehler trägt wie bei jedem Fehlversuch „<code>: <msg>" — daran erkennt auch der Radar
+   * fremder IDs den Fall (das Backend reicht puls_fehler/puls_aufgegeben durch, ein neues Feld nicht). final.quelle bleibt die
+   * Quelle des ENDES (level/demo/…): an ihr hängen die „≈ geschätzt"-Kennzeichen des Master-P&L. */
+  const tvV2KontoWegAntwort = r => !!(r && !r.ok && r.code === 'konto_weg')
+  // REIN RECHNEND: sagt final (bzw. der endlesung-Auszug von /admin/live-trades), dass das Konto beim Broker nicht mehr existiert?
+  function tvV2KontoWeg(fin){
+    return !!(fin && typeof fin === 'object' && (fin.konto_weg === true || (fin.puls_aufgegeben && /^konto_weg(:|$)/.test(String(fin.puls_fehler || '')))))
+  }
   const _tvEndlesungLaeuft = new Set()
   // REIN RECHNEND: alle offenen G&V-Felder („Unrealized P&L" / „Nicht realisiert") der Zusammenfassung sind genau 0 — und es gibt eins
   function tvUnrealNull(summary){
@@ -22048,6 +22064,7 @@
   window._tvV2Endlesung = { auswerten: tvV2EndlesungAuswerten, faellig: tvV2EndlesungFaellig, grund: tvV2EndlesungGrund, frueher: tvV2FruehereAmTag,
     spaeter: tvV2SpaetererTrade, unrealNull: tvUnrealNull, max: TV_ENDLESUNG_MAX, pause: TV_ENDLESUNG_PAUSE_S.slice(),
     loginFehler: tvV2LoginFehler, loginFehlerCode: tvV2LoginFehlerCode, loginBremse: tvV2LoginBremse, loginPauseS: TV_ENDLESUNG_LOGIN_PAUSE_S, loginMax: TV_ENDLESUNG_LOGIN_MAX,
+    kontoWeg: tvV2KontoWeg, kontoWegAntwort: tvV2KontoWegAntwort,
     versuch: (pid, opts) => tvV2EndlesungVersuch(pid, opts), wartet: p => planWartetAufPuls(p) }   // Test-Haken (Stub)
   function tvV2EndlesungAnstossen(pid){
     if(!MT5_LOCAL) return
@@ -22196,7 +22213,10 @@
       if(erg.ok && p0.route === 'tsv2'){ const rel = tsxBalanceRelativ(r); if(rel != null) patch.balance_relativ = rel; patch.plattform = 'tsx' }   // TSV2-PNL
       else Object.assign(patch, { puls_fehler: erg.fehler, puls_diagnose: tvJsonKurz((r && r.befund) || null, 2200) })
       // Login-Bremse: Login-/Verbindungsfehler zählen (auch beim Knopf „Jetzt lesen" — jeder Lauf ist ein Login)
-      const _lf = erg.ok ? '' : tvV2LoginFehlerCode(r)
+      // Konto weg (05.10.2026): kein Login-Fehler und kein weiterer Versuch — die Lesung ist für diesen Plan beendet (s. tvV2KontoWeg)
+      const kontoWeg = !erg.ok && tvV2KontoWegAntwort(r)
+      if(kontoWeg) Object.assign(patch, { puls_aufgegeben: true, konto_weg: true, konto_weg_at: nowIso })
+      const _lf = (erg.ok || kontoWeg) ? '' : tvV2LoginFehlerCode(r)
       if(_lf) Object.assign(patch, { puls_login_fehler: (Number(fin0.puls_login_fehler) || 0) + 1, puls_login_at: nowIso, puls_login_code: _lf.slice(0, 40) })
       // (B) Exit-Fill aus der Order-Historie (Bot, Ende-Modus) — unabhängig davon, ob Today's P&L gelesen wurde
       if(r && r.exit_fill && typeof r.exit_fill === 'object') patch.exit_fill = tvJsonKurz(r.exit_fill, 400)
@@ -22215,6 +22235,11 @@
       const name = p1.masterName || 'Plan'
       const exitTxt = patch.exit_fill ? ` · Exit-Fill ${patch.exit_fill.preis}` : ''
       if(!erg.ok){
+        if(kontoWeg){
+          if(typeof atToast === 'function') atToast(`${name}: Konto bei Tradovate nicht mehr vorhanden — vermutlich geblowt. Der Trade steht unter „Überprüfen".`, 'end')
+          try{ renderTradePlans() }catch(_){}
+          return { ok: false, konto_weg: true, msg: 'Konto weg · vermutlich geblowt — der Trade steht unter „Überprüfen"' }
+        }
         if(erg.offen && versuch === 1 && typeof atToast === 'function') atToast(`⚠ ${name}: Puls sieht die Master-Position noch offen — in TradingView prüfen`, 'end')
         if(!force && versuch >= TV_ENDLESUNG_MAX && typeof atToast === 'function') atToast(`⚠ ${name}: Today's P&L nach ${versuch} Versuchen nicht gelesen (${erg.fehler}) — Master-P&L bitte selbst eintragen`, 'end')
         // Login-Bremse: beim zweiten Login-/Verbindungsfehler einmal deutlich sagen, dass Puls jetzt nicht mehr von selbst liest
@@ -24969,6 +24994,8 @@
       if(ab > jetzt) return { art: 'laeuft', text: `Profit geschätzt aus Radar · Puls bestätigt ab ${uhr(ab)} (noch ${Math.max(1, Math.ceil((ab - jetzt) / 60000))} min)`, tip: tip.join('\n'), bisMs: null, knopf: true }
     }
     // Login-Bremse (30.09.2026): nach zwei Login-/Verbindungsfehlern liest Puls nicht mehr von selbst — „Jetzt lesen" bleibt
+    // Konto weg (05.10.2026): die Lesung ist beendet — ruhig sagen, was Puls gefunden hat, statt „Lesung aufgegeben — konto_weg: …"
+    if(typeof tvV2KontoWeg === 'function' && tvV2KontoWeg(fin)) return { art: 'kontoweg', text: 'Konto weg · vermutlich geblowt', tip: tip.join('\n'), bisMs: null, knopf: true }
     const lb = (!fin.puls_aufgegeben && typeof tvV2LoginBremse === 'function') ? tvV2LoginBremse(fin, jetzt) : null
     if(lb && lb.pruefen) return { art: 'aufgegeben', text: `Wartet · Login prüfen — ${lb.n} Lesungen scheiterten am Login/an der Verbindung${lb.code ? ' (' + lb.code + ')' : ''}`, tip: tip.join('\n'), bisMs: null, knopf: true }
     if(fin.puls_aufgegeben || versuche >= max){
@@ -25479,9 +25506,14 @@
     _mwdErlOhneHedge = !_mwdErlFusionAmPlan && (pw.route === 'mt5v2' || pw.route === 'tsv2' || pw.plattform === 'echo' || (pw.route === 'tvv2' && !mitHedge))
     const plVor = (pw.pl_balance != null && isFinite(Number(pw.pl_balance))) ? Number(pw.pl_balance)
       : (pw.master_pl && pw.master_pl.wert != null && isFinite(Number(pw.master_pl.wert))) ? Number(pw.master_pl.wert) : null
-    const m = document.getElementById('mwd-erl-master'); if(m) m.value = plFeldText(plVor)
+    // Konto weg (05.10.2026): P&L nicht mehr lesbar — steht keiner am Plan, Vorschlag ≈ Start-Balance bis Liquidation (überschreibbar)
+    const _kw = (typeof wdlKontoWeg === 'function') && wdlKontoWeg(pw)
+    const _kwSch = (_kw && plVor == null) ? wdlKontoWegSchaetzung(pw) : null
+    const m = document.getElementById('mwd-erl-master'); if(m) m.value = plFeldText(plVor != null ? plVor : _kwSch)
     const mHilfe = m && m.closest('.field') && m.closest('.field').querySelector('.mwd-erl-hilfe')
-    if(mHilfe) mHilfe.textContent = pw.route === 'mt5v2' ? (pw.pl_balance != null ? 'MT5-Balance nachher − vorher' : 'aus MetaTrader eintragen')
+    if(mHilfe) mHilfe.textContent = _kwSch != null ? '≈ geschätzt: Start-Balance bis Liquidation (Konto weg) — bitte prüfen'
+      : (_kw && plVor == null) ? 'Konto weg — nichts mehr lesbar, bitte eintragen'
+      : pw.route === 'mt5v2' ? (pw.pl_balance != null ? 'MT5-Balance nachher − vorher' : 'aus MetaTrader eintragen')
       : pw.route === 'tsv2' ? (pw.pl_balance != null ? 'Balance nachher − vorher' : 'aus TopstepX eintragen')
       : pw.pl_balance != null ? 'Balance nachher − vorher' : 'aus TradingView eintragen'
     const f = document.getElementById('mwd-erl-fusion'); if(f) f.value = (!_mwdErlOhneHedge && hPl != null) ? plFeldText(hPl) : ''
@@ -25493,7 +25525,8 @@
     const msg = document.getElementById('mwdErledigtMsg'); if(msg){ msg.textContent = ''; msg.className = 'modal-msg' }
     // Blow erkannt (02.10.2026): „geblowt" vorbelegen — Balance nach dem Trade an/unter der Liquidation; Finn kann umstellen
     const _bl = (typeof wdlBlowStand === 'function') ? wdlBlowStand(pw) : null
-    const stVor = document.querySelector(`input[name="mwd-erl-status"][value="${_bl && _bl.geblowt ? 'blown' : 'none'}"]`); if(stVor) stVor.checked = true
+    // Konto weg (05.10.2026): ebenfalls „geblowt" vorbelegen — das Konto gibt es beim Broker nicht mehr
+    const stVor = document.querySelector(`input[name="mwd-erl-status"][value="${((_bl && _bl.geblowt) || _kw) ? 'blown' : 'none'}"]`); if(stVor) stVor.checked = true
     document.getElementById('mwdErledigtModal')?.classList.add('open')
     setTimeout(() => { try{ (m && !m.value ? m : f)?.focus() }catch(_){} }, 60)
   }
@@ -25987,8 +26020,22 @@
     const b = wdlBlowStand(t); if(!b) return ''
     return b.geblowt ? '<b style="color:#b91c1c">💀 geblowt</b>' : b.softBreach ? '<b style="color:#b45309">⚠ Tageslimit</b>' : ''
   }
+  // Konto weg (05.10.2026): Ergebnis-Wort für Überprüfen/Erledigt — kurz, der ganze Satz im Tooltip; die Konto-Spalte daneben
+  // sagt „vermutl. geblowt" (wdlKontoZ). Erkennung am endlesung-Auszug der Zeile (tvV2KontoWeg).
+  const wdlKontoWeg = t => !!(t && typeof tvV2KontoWeg === 'function' && tvV2KontoWeg(t.endlesung))
+  const WDL_KONTO_WEG_ERG = '<span style="color:#b45309" title="Konto bei Tradovate nicht mehr vorhanden — vermutlich geblowt. Nichts mehr lesbar.">Konto weg</span>'
+  /* Schätzung für den Abhak-Dialog bei „Konto weg": Verlust von der Start-Balance des Trades bis zur Liquidation — dieselbe
+   * Liq-Balance wie wdlBlowStand (Regel/Konto-Boden; beim Tageslimit der Konto-Boden). Nur wenn beide Werte an der Zeile stehen
+   * und die Liq unter dem Start liegt, sonst null (Feld bleibt leer — nicht raten). */
+  function wdlKontoWegSchaetzung(t){
+    const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
+    if(!t) return null
+    const bs = n(t.balance_start), liq = t.liq_regel_soft ? n(t.liq_boden_balance) : (n(t.liq_regel_balance) ?? n(t.liq_balance))
+    return (bs != null && liq != null && liq < bs) ? Math.round((liq - bs) * 100) / 100 : null
+  }
   function wdlKontoZ(t){
     const b = wdlBlowStand(t)
+    if(!b && wdlKontoWeg(t)) return '<span class="wdl-z-konto" title="Konto bei Tradovate nicht mehr vorhanden — keine Balance mehr lesbar">vermutl. geblowt</span>'
     if(!b) return '<span class="wdl-z-konto" title="noch keine Balance nach dem Trade gelesen">–</span>'
     const f0 = v => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 0 })
     const tip = `${b.quelle}: ${f0(b.bal)} $${b.liq != null ? ` · Blow (Max Drawdown) bei ${f0(b.liq)} $` : ''}${b.tagLiq != null ? ` · Tageslimit bei ${f0(b.tagLiq)} $ (Soft-Breach, Konto lebt)` : ''}`
@@ -26153,7 +26200,7 @@
         art = 'pruef'
         const pid = wdlTid(t), sperre = wdlAbhakenSperre(t)
         const pb = num(t.pl_balance) != null ? num(t.pl_balance) : num(t.master_pl && t.master_pl.wert)
-        const erg = wdlBlowErg(t) || (echo ? '' : d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : '')
+        const erg = wdlBlowErg(t) || (wdlKontoWeg(t) ? WDL_KONTO_WEG_ERG : echo ? '' : d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : '')
         kontoZ = wdlKontoZ(t)
         miZ = zelle('mi wdl-z-akt', `${erg ? `<span>${erg}</span>` : ''}<button type="button" class="btn btn-ghost el-knopf" data-wdl-abhaken="${escapeHtml(pid)}"${sperre ? ' disabled' : ''} title="${escapeHtml(sperre || 'Abhaken — P&L prüfen und Trade erledigen')}">Abhaken</button>`,
           { tip: echo ? '' : demoTip(d) })
@@ -26169,7 +26216,7 @@
           kontoZ = wdlKontoZ(t)
           plZ = zelle('pl', sig(pb, '$', 2) + slaveZ(t), { f: col(pb), tip: num(t.pl_balance) != null ? 'MT5-Balance nachher − vorher' : pb != null ? 'P&L am Plan' : 'noch keine End-Balance' })
         } else {
-        const erg = wdlBlowErg(t) || (d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : '–')
+        const erg = wdlBlowErg(t) || (wdlKontoWeg(t) ? WDL_KONTO_WEG_ERG : d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : '–')
         miZ = zelle('mi', erg, { tip: demoTip(d) })
         kontoZ = wdlKontoZ(t)
         plZ = zelle('pl', sig(t.pl_balance, '$', 2) + slaveZ(t) + zuWegZ(t), { f: col(t.pl_balance), tip: num(t.pl_balance) != null ? 'Balance nachher − vorher' : 'keine End-Balance' })
@@ -38327,7 +38374,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1032'
+  const OS_TAB_BUILD = '2026-09-22.1033'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -47039,7 +47086,8 @@
     // Balance-Nachlesung steht noch aus (F5, 26.09.2026): Erledigt ist trotzdem möglich. Seit 29.09.2026 (Finn: erledigt = fertig)
     // entfällt die Nachlesung damit — der Hinweis sagt das VOR dem Klick. Gleiche Rechnung wie Live Trades/Accounts (tvV2NachleseAb).
     { const b = p.mt5Baseline || {}, fin = b.final
-      if(p.status === 'review' && planIstPuls(p) && fin && b.tv && typeof b.tv.balance_start === 'number' && !(typeof fin.balance_end === 'number' && isFinite(fin.balance_end)) && typeof tvV2NachleseAb === 'function'){
+      if(p.status === 'review' && planIstPuls(p) && fin && b.tv && typeof b.tv.balance_start === 'number' && !(typeof fin.balance_end === 'number' && isFinite(fin.balance_end)) && typeof tvV2NachleseAb === 'function'
+         && !(typeof tvV2KontoWeg === 'function' && tvV2KontoWeg(fin))){   // Konto weg (05.10.2026): Puls liest nicht mehr nach — kein „liest gerade nach"
         const ab = tvV2NachleseAb(p.id, fin.at || p.endedAt), hEl = document.getElementById('tc-nachlese-hint')
         if(ab && hEl){
           hEl.textContent = (fin.hinweis ? fin.hinweis + ' · ' : '') + (ab > Date.now() ? `Puls liest die Balance ab ${new Date(ab).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} nach` : 'Puls liest die Balance gerade nach') + ' — mit „Erledigt" entfällt das, der P&L oben gilt'   // hinweis: Demo TP+Liq in einer Minute (F21)
@@ -47050,6 +47098,22 @@
     if(typeof tcPopulateStatusAccountPicker === 'function'){
       tcPopulateStatusAccountPicker(p)
     }
+    // Konto weg (05.10.2026): „geblowt" vorbelegen (Finn kann umstellen). Steht kein Master-P&L am Plan, Vorschlag ≈ Start-Balance bis
+    // Liquidation aus der Radar-Zeile dieses Plans (nur wenn der Radar sie geladen hat) — sonst bleibt das Feld leer.
+    { const finKw = (planIstPuls(p) && p.mt5Baseline && p.mt5Baseline.final) || null
+      if(p.status === 'review' && typeof tvV2KontoWeg === 'function' && tvV2KontoWeg(finKw)){
+        const rb = document.querySelector('input[name="tc-status"][value="blown"]')
+        if(rb){ rb.checked = true; if(typeof tcUpdateStatusUI === 'function') tcUpdateStatusUI() }
+        if(p.masterPl == null){
+          let sch = null
+          try{ const tr = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === String(p.id)); sch = tr ? wdlKontoWegSchaetzung(tr) : null }catch(_){}
+          const feld = document.getElementById('tc-master-pl'), msgEl = document.getElementById('tradeCompleteMsg')
+          if(sch != null && feld && !feld.value) feld.value = plFeldText(sch)
+          if(msgEl){ msgEl.textContent = sch != null ? '≈ Master-P&L geschätzt: Start-Balance bis Liquidation (Konto weg, nichts mehr lesbar) — bitte prüfen'
+                                                     : 'Konto weg · vermutlich geblowt — Master-P&L nicht mehr lesbar, bitte eintragen'
+                     msgEl.className = 'modal-msg' }
+        }
+      } }
 
     // Manueller Winning Day (15.09.2026): Häkchen nur, wenn ein Account des
     // Plans manuell zählt — sonst bleibt die Box unsichtbar.
@@ -47383,7 +47447,10 @@
         // Sind durch den Cache schon beide Felder gefüllt → fertig, kein Live-Nachladen nötig
         if((mEl && mEl.value !== '') && (sEl && sEl.value !== '')) return
 
-        if(msgEl){ msgEl.textContent = planIstPuls(plan) ? '⏳ Auto-PnL aus der Balance (Puls)…' : isMt5Plan ? '⏳ Auto-PnL aus MT5-Baseline…' : isMirrorPlan ? '⏳ Auto-PnL aus Mirror/TSX…' : '⏳ Auto-PnL aus Duplikum…'; msgEl.className = 'modal-msg muted' }
+        // Konto weg (05.10.2026): dort steht schon der Hinweis „≈ geschätzt …"/„bitte eintragen" aus openTradeCompleteModal — der Lade-Text
+        // würde ihn überschreiben und bliebe stehen (das Feld ist vorbelegt, also räumt ihn unten niemand weg). Geladen wird trotzdem.
+        const _kwPlan = planIstPuls(plan) && typeof tvV2KontoWeg === 'function' && tvV2KontoWeg(plan.mt5Baseline && plan.mt5Baseline.final)
+        if(msgEl && !_kwPlan){ msgEl.textContent = planIstPuls(plan) ? '⏳ Auto-PnL aus der Balance (Puls)…' : isMt5Plan ? '⏳ Auto-PnL aus MT5-Baseline…' : isMirrorPlan ? '⏳ Auto-PnL aus Mirror/TSX…' : '⏳ Auto-PnL aus Duplikum…'; msgEl.className = 'modal-msg muted' }
         _autoPnlFetch(plan).then(res => {
           if(apply(res)) return
           // Retry nach 1,5s (Duplikum-Latenz — Finns "kurz warten"-Idee)
