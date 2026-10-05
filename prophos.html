@@ -20880,7 +20880,7 @@
     if(!fin || typeof fin.today_pnl !== 'number' || !isFinite(fin.today_pnl)){
       // Ende aus dem Hedge-Level (25.09.2026, hedgePlanAufReview): vorläufiger Master-P&L = ±TP/SL in $, gekennzeichnet
       if(fin && (fin.quelle === 'level' || fin.quelle === 'demo') && typeof fin.master_pl_schaetzung === 'number' && isFinite(fin.master_pl_schaetzung))
-        return { slavePnl: null, slaveCcy: '', masterPnl: fin.master_pl_schaetzung, masterCcy: '$', quelle: 'level', hinweis: 'geschätzt aus TP/SL-Level — Today\'s P&L nicht gelesen' }
+        return { slavePnl: null, slaveCcy: '', masterPnl: fin.master_pl_schaetzung, masterCcy: '$', quelle: 'level', hinweis: tsx ? 'geschätzt aus TP/SL-Level — Balance noch nicht gelesen' : 'geschätzt aus TP/SL-Level — Today\'s P&L nicht gelesen' }   // TopstepX: gelesen ist dort erst die Balance (T1-B 05.10.2026)
       return null
     }
     // Topstep V2: Start ist der RP&L vor dem Klick (B5) — bei älteren Plänen nur als rpl_start abgelegt
@@ -20917,7 +20917,7 @@
       }
     }
     if(masterPnl != null) masterPnl = Number(masterPnl.toFixed(2))
-    if(fin.quelle === 'puls' && !hinweis) hinweis = 'aus TradingView gelesen (Today\'s P&L nach dem Ende)'
+    if(fin.quelle === 'puls' && !hinweis) hinweis = tsx ? 'aus TopstepX gelesen (RP&L ab dem Klick)' : 'aus TradingView gelesen (Today\'s P&L nach dem Ende)'   // T1-B 05.10.2026
     // Winning Days Farm (24.09.2026 spät): mit Fusion-Gegenhedge ist der Slave-P&L NICHT 0, sondern kommt vom Hedge-Wächter
     // (hedge.pl → slave_pl) — null lässt atMoveToReview das Feld in Ruhe, statt 0 zu schreiben, bevor der Hedge zu ist.
     return { slavePnl: (plan && plan.hedgeEur > 0) ? null : 0, slaveCcy: '', masterPnl, masterCcy: '$', hinweis,
@@ -21868,8 +21868,9 @@
    * ein gewöhnlicher Fehler bzw. Login-Fehler, daraus wird nichts geschlossen.
    * Folge in tvV2EndlesungVersuch: keine weitere automatische Lesung (puls_aufgegeben), kein Login-Fehler-Zähler; der Plan steht
    * damit unter „Überprüfen" (Radar: nicht mehr „Wartet", Trades: nicht mehr „Warte auf Puls"). Vermerk in mt5_baseline.final:
-   * konto_weg true + konto_weg_at; puls_fehler trägt wie bei jedem Fehlversuch „<code>: <msg>" — daran erkennt auch der Radar
-   * fremder IDs den Fall (das Backend reicht puls_fehler/puls_aufgegeben durch, ein neues Feld nicht). final.quelle bleibt die
+   * konto_weg true + konto_weg_at; puls_fehler trägt wie bei jedem Fehlversuch „<code>: <msg>". Erkannt wird ZUERST am Feld
+   * konto_weg — seit .1035 reicht das Backend es im Endlesungs-Auszug durch (konto_weg, konto_weg_at), auch für fremde IDs —
+   * und nur als Rückfall für ältere Auszüge am Präfix von puls_fehler (06.10.2026). final.quelle bleibt die
    * Quelle des ENDES (level/demo/…): an ihr hängen die „≈ geschätzt"-Kennzeichen des Master-P&L. */
   const tvV2KontoWegAntwort = r => !!(r && !r.ok && r.code === 'konto_weg')
   // REIN RECHNEND: sagt final (bzw. der endlesung-Auszug von /admin/live-trades), dass das Konto beim Broker nicht mehr existiert?
@@ -22123,6 +22124,9 @@
       if(typeof atToast === 'function') atToast(`${name}: Order läuft laut ${pulsPlattform(p0)} noch — nichts geändert`, 'start')
       return { ok: false, offen: true, msg: `Order läuft laut ${pulsPlattform(p0)} noch — Plan bleibt „Läuft"` }
     }
+    // TopstepX (T1-B 05.10.2026): bei offener Position antwortet tsx-lesen mit 'tabelle_unklar' — das ist kein Lesefehler, es fehlt nur
+    // der Flach-Beweis. Klar sagen, nichts ableiten (kein offen:true, kein Schluss aus dem offenen G&V); der Plan bleibt „Läuft".
+    if(!erg.ok && p0.route === 'tsv2' && r && r.code === 'tabelle_unklar') return { ok: false, msg: 'TopstepX zeigt keinen Flach-Beweis (Position offen oder Positions-Bereich nicht sichtbar) — Plan bleibt „Läuft"' }
     if(!erg.ok) return { ok: false, msg: 'Puls konnte den Stand nicht lesen: ' + erg.fehler }
     const nowIso = new Date().toISOString()
     const extra = { grund: 'beendet_knopf', puls_at: nowIso, puls_versuche: 1, puls_flach: erg.flach, puls_fehler: null, puls_konto: (r && r.konto_aktiv) || null,
@@ -22240,8 +22244,8 @@
           try{ renderTradePlans() }catch(_){}
           return { ok: false, konto_weg: true, msg: 'Konto weg · vermutlich geblowt — der Trade steht unter „Überprüfen"' }
         }
-        if(erg.offen && versuch === 1 && typeof atToast === 'function') atToast(`⚠ ${name}: Puls sieht die Master-Position noch offen — in TradingView prüfen`, 'end')
-        if(!force && versuch >= TV_ENDLESUNG_MAX && typeof atToast === 'function') atToast(`⚠ ${name}: Today's P&L nach ${versuch} Versuchen nicht gelesen (${erg.fehler}) — Master-P&L bitte selbst eintragen`, 'end')
+        if(erg.offen && versuch === 1 && typeof atToast === 'function') atToast(`⚠ ${name}: Puls sieht die Master-Position noch offen — in ${pulsPlattform(p0)} prüfen`, 'end')
+        if(!force && versuch >= TV_ENDLESUNG_MAX && typeof atToast === 'function') atToast(`⚠ ${name}: ${p0.route === 'tsv2' ? 'Balance' : "Today's P&L"} nach ${versuch} Versuchen nicht gelesen (${erg.fehler}) — Master-P&L bitte selbst eintragen`, 'end')
         // Login-Bremse: beim zweiten Login-/Verbindungsfehler einmal deutlich sagen, dass Puls jetzt nicht mehr von selbst liest
         if(patch.puls_login_fehler === TV_ENDLESUNG_LOGIN_MAX && typeof atToast === 'function') atToast(`⚠ ${name}: Puls kam ${TV_ENDLESUNG_LOGIN_MAX}× nicht durch den Login/die Verbindung (${patch.puls_login_code}) — Login am PC prüfen, dann „Jetzt lesen"`, 'end')
         try{ renderTradePlans() }catch(_){}
@@ -22250,7 +22254,7 @@
       const { m, res } = await tvV2MasterPlAusBalance(pid, p1, fin0, neu)
       let msg = erg.balance != null ? `Balance ${erg.balance}${exitTxt}` : `Today's P&L ${erg.today}${exitTxt}`
       if(m != null){
-        msg = `Master-P&L ${m >= 0 ? '+' : '−'}${Math.abs(m).toLocaleString('de-DE', { minimumFractionDigits: 2 })} $ aus TradingView${exitTxt}`
+        msg = `Master-P&L ${m >= 0 ? '+' : '−'}${Math.abs(m).toLocaleString('de-DE', { minimumFractionDigits: 2 })} $ aus ${pulsPlattform(p0)}${exitTxt}`
         if(typeof atToast === 'function') atToast(`✓ ${name}: ${msg}`, 'end')
       } else if(res && res.hinweis){
         msg += ' — ' + res.hinweis
@@ -24959,7 +24963,8 @@
    * Drei Stellen, je eigener Handler: Karte (data-plan-lesen), Zum Abhaken (data-mwd-lesen), Trade-Popup (#tc-lesung). */
   const _elBusy = new Set()
   // REIN RECHNEND (window._endlesungStatus): Stand einer Endlesung → {art, text, tip, bisMs, knopf} oder null (nichts zu zeigen)
-  function endlesungStatus(fin, planStatus, jetzt, pid){
+  // route / mitStartBalance (optional, T1-B 05.10.2026): nur für den Handelstag-Zweig unten — ohne sie alles wie bisher
+  function endlesungStatus(fin, planStatus, jetzt, pid, route, mitStartBalance){
     if(!fin || typeof fin !== 'object') return null
     jetzt = jetzt == null ? Date.now() : jetzt
     const cfg = window._tvV2Endlesung || {}
@@ -25002,8 +25007,10 @@
       return { art: 'aufgegeben', text: 'Lesung aufgegeben — ' + (fin.puls_fehler ? String(fin.puls_fehler) : 'ohne Grund'), tip: tip.join('\n'), bisMs: null, knopf: true }
     }
     // Lesung nur am Handelstag des Endes (danach springt Today's P&L auf 0) — dann hilft auch „Jetzt lesen" nicht mehr
+    // Topstep V2 mit Start-Balance (T1-B 05.10.2026): die Balance ist tagesunabhängig, tvV2EndlesungGrund liest dort auch nach dem
+    // Handelstag weiter — die Zeile behauptete trotzdem „nicht gelesen — Handelstag vorbei" und nahm „Jetzt lesen" weg
     let tagVorbei = false
-    try{ if(typeof tvV2Handelstag === 'function') tagVorbei = (fin.datum || tvV2Handelstag(fin.at || jetzt)) !== tvV2Handelstag(jetzt) }catch(_){}
+    try{ if(typeof tvV2Handelstag === 'function' && !(route === 'tsv2' && mitStartBalance === true)) tagVorbei = (fin.datum || tvV2Handelstag(fin.at || jetzt)) !== tvV2Handelstag(jetzt) }catch(_){}
     if(tagVorbei) return { art: 'aus', text: 'nicht gelesen — Handelstag vorbei, Master-P&L bitte selbst eintragen', tip: tip.join('\n'), bisMs: null, knopf: false }
     const letzte = Date.parse(fin.puls_at || '') || 0
     const bis = (versuche > 0 && letzte) ? letzte + pause[Math.min(versuche - 1, pause.length - 1)] * 1000 : null
@@ -25015,7 +25022,8 @@
   // HTML der Zeile; attr = Datenattribut des Knopfs der jeweiligen Stelle (eigener Handler je Stelle). plan (nur eigene Pläne):
   // hilft „Jetzt lesen" nicht (window._tvV2Endlesung.grund mit force ≠ ''), ist der Knopf grau und nennt den Grund im Tooltip
   function endlesungZeileHtml(pid, fin, planStatus, attr, plan){
-    const st = endlesungStatus(fin, planStatus, null, pid)
+    const st = endlesungStatus(fin, planStatus, null, pid, plan ? plan.route : undefined,
+      plan ? !!(plan.mt5Baseline && plan.mt5Baseline.tv && typeof plan.mt5Baseline.tv.balance_start === 'number') : undefined)
     if(!st) return ''
     // P&L exakt aus Balance nachher − vorher, wenn die Start-Balance am eigenen Plan steht (F21)
     try{ const tvb = (plan && plan.mt5Baseline && plan.mt5Baseline.tv) || {}, bs = tvb.balance_start
@@ -26009,8 +26017,13 @@
     if(bal == null) return null
     // Tageslimit (Apex Daily Loss, liq_regel_soft) = Soft-Breach: Konto lebt — echter Blow nur am Konto-Boden (Max Drawdown)
     const soft = !!t.liq_regel_soft
-    const liq = soft ? n(t.liq_boden_balance) : (n(t.liq_regel_balance) ?? n(t.liq_balance))
-    const tagLiq = soft ? n(t.liq_regel_nur_balance) : null
+    // Topstep V2 (T1-B 05.10.2026): TopstepX zeigt Express-Konten ab 0 (balance_relativ). Stammt die Balance aus der Nachlesung und
+    // hat sie eine andere Basis als der Start (tv.balance_relativ ≠ final.balance_relativ), lässt sie sich nicht mit der Liq-Balance
+    // vergleichen — −300 (ab 0) gegen 148.000 hieße sonst „geblowt". Dann keine Blow-Aussage; die Balance bleibt in der Konto-Spalte.
+    const _ra = t.tv && t.tv.balance_relativ, _rb = t.final && t.final.balance_relativ
+    const basisVerschieden = n(t.balance_end) != null && t.route === 'tsv2' && typeof _ra === 'boolean' && typeof _rb === 'boolean' && _ra !== _rb
+    const liq = basisVerschieden ? null : soft ? n(t.liq_boden_balance) : (n(t.liq_regel_balance) ?? n(t.liq_balance))
+    const tagLiq = basisVerschieden ? null : soft ? n(t.liq_regel_nur_balance) : null
     const geblowt = liq != null && bal <= liq + 25
     return { bal, quelle, liq, tagLiq, geblowt, softBreach: !geblowt && tagLiq != null && bal <= tagLiq + 25 }
   }
@@ -38374,7 +38387,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1035'
+  const OS_TAB_BUILD = '2026-09-22.1036'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -39886,7 +39899,7 @@
     if(!neuB){ if(typeof loadTradePlansFromSupabase === 'function') loadTradePlansFromSupabase(); return false }
     const fresh = tradePlans.find(x => String(x.id) === String(plan.id)) || Object.assign({}, plan, { mt5Baseline: neuB })
     try{ tvV2Poll.wasOpen.delete(String(plan.id)); tvV2Poll.streak.delete(String(plan.id)) }catch(_){}
-    if(fin.today_pnl == null && fin.balance_end == null && fin.quelle !== 'level' && fin.quelle !== 'demo' && typeof atToast === 'function') atToast(`⚠ ${plan.route === 'tsv2' ? 'Topstep V2' : 'Orbit V2'}: geschlossen, aber kein Today's P&L gelesen — Puls liest nach (${plan.masterName || '—'})`, 'end')
+    if(fin.today_pnl == null && fin.balance_end == null && fin.quelle !== 'level' && fin.quelle !== 'demo' && typeof atToast === 'function') atToast(`⚠ ${plan.route === 'tsv2' ? 'Topstep V2' : 'Orbit V2'}: geschlossen, aber ${plan.route === 'tsv2' ? 'keine Balance' : "kein Today's P&L"} gelesen — Puls liest nach (${plan.masterName || '—'})`, 'end')
     if(typeof atShowEndPrompt === 'function') atShowEndPrompt(fresh)
     // JEDES Ende ohne Zahl (Level, Master weg laut Reader, Schließen/Auto-Close ohne Today's P&L) → Puls-Endlesung (25.09.2026)
     if(fin.today_pnl == null && fin.balance_end == null && typeof tvV2EndlesungAnstossen === 'function') tvV2EndlesungAnstossen(plan.id)
@@ -41655,7 +41668,10 @@
       if(!planIstPuls(p) || p.status !== 'review') continue
       const b = p.mt5Baseline || {}, fin = b.final
       if(!fin || !b.tv || typeof b.tv.balance_start !== 'number') continue
-      if(typeof fin.balance_end === 'number' || typeof fin.today_pnl === 'number' || fin.quelle === 'puls' || fin.puls_aufgegeben) continue
+      // Topstep V2 (T1-B 05.10.2026): today_pnl ist dort der RP&L des ganzen Tages — gelesen ist erst die Balance, wie in
+      // tvV2EndlesungGrund und wdlWartet; sonst fehlte die anstehende Bestätigung in der Pille, obwohl Puls noch liest
+      if(p.route === 'tsv2' ? (typeof fin.balance_end === 'number' || fin.puls_aufgegeben)
+         : (typeof fin.balance_end === 'number' || typeof fin.today_pnl === 'number' || fin.quelle === 'puls' || fin.puls_aufgegeben)) continue
       const ende = Date.parse(fin.at || p.endedAt || '') || 0
       if(!ende) continue
       const vers = Number(fin.puls_versuche) || (fin.puls_at ? 1 : 0)
@@ -47078,7 +47094,7 @@
       const msgEl = document.getElementById('tradeCompleteMsg')
       if(msgEl){
         msgEl.textContent = '✨ P&L automatisch erfasst — bitte prüfen & bestätigen'
-          + (_tcSchaetzung ? (_tcFin.quelle === 'demo' ? ' · Master-P&L geschätzt aus der Demo (TP/Liquidation)' : ' · Master-P&L geschätzt aus TP/SL-Level (Today\'s P&L nicht gelesen)') : (_tcFin && _tcFin.quelle === 'puls') ? ' · Master-P&L aus TradingView gelesen' : '')
+          + (_tcSchaetzung ? (_tcFin.quelle === 'demo' ? ' · Master-P&L geschätzt aus der Demo (TP/Liquidation)' : ' · Master-P&L geschätzt aus TP/SL-Level (Today\'s P&L nicht gelesen)') : (_tcFin && _tcFin.quelle === 'puls') ? ` · Master-P&L aus ${pulsPlattform(p)} gelesen` : '')
         msgEl.className = 'modal-msg ok'
       }
     }
@@ -47400,7 +47416,9 @@
         // Topstep V2 (24.09.2026 abends, Finn: „das Popup soll genau so sein wie das andere, nur P&L angeben —
         // da wird noch der Live-P&L abgefragt, das ist ein Bug"): es gibt keine Auto-Quelle (kein Bot, keine API,
         // keine Baseline) — gar nicht erst „⏳ Auto-PnL…" zeigen und nichts nachladen. P&L kommt von Hand.
-        if(plan.route === 'tsv2') return
+        // T1-B 05.10.2026: seit 01.10. gibt es für von Puls gestartete Topstep-V2-Pläne eine Quelle (Balance nachher − vorher,
+        // _autoPnlTvV2Gelesen) — das Popup nimmt nur noch den Handplan aus; der bleibt wie beschrieben Handarbeit.
+        if(plan.route === 'tsv2' && !planIstPuls(plan)) return
         // V2 ohne Baseline (von Hand gestartet oder direkt aus Geplant erledigt, 24.09.2026 abends): es gibt nichts
         // nachzuladen — kein „⏳ Auto-PnL…", P&L von Hand.
         if(routeIstV2(plan.route) && !plan.mt5Baseline) return
