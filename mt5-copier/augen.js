@@ -23,7 +23,8 @@
  */
 var PROPHOS_AUGEN = (function () {
   'use strict';
-  var VERSION = '0.7.7';   // 0.7.7 (05.10.2026): Kontonummern mit nur 4 Endziffern (mindestens 10 Buchstaben davor) zählen als Konto-Zeile und Umschalter (kontoNrAus, RX_KONTO) — vorher „0x im Dropdown“. 0.7.6 (05.10.2026, Finn: „erkennt das falsche Tradovate-Konto und bricht einfach ab"): konto.liste_kurz — eine kurze Liste (≤ 8 Zeilen) mit Platz darüber und darunter ist ganz zu sehen, auch wenn listeVoll am Container scheitert; konto.liste_voll_grund nennt, woran
+  var VERSION = '0.7.8';   // 0.7.8 (05.10.2026, Finn: „auch diese kleinen Ads unten links automatisch wegklicken"): toasts.werbung — kleine Werbe-Kachel #charting-ad mit ihrem Knopf „Close ad" (nur Diagnose, geschlossen wird sie im Bot)
+    // 0.7.7 (05.10.2026): Kontonummern mit nur 4 Endziffern (mindestens 10 Buchstaben davor) zählen als Konto-Zeile und Umschalter (kontoNrAus, RX_KONTO) — vorher „0x im Dropdown“. 0.7.6 (05.10.2026, Finn: „erkennt das falsche Tradovate-Konto und bricht einfach ab"): konto.liste_kurz — eine kurze Liste (≤ 8 Zeilen) mit Platz darüber und darunter ist ganz zu sehen, auch wenn listeVoll am Container scheitert; konto.liste_voll_grund nennt, woran
     // 0.7.5 (02.10.2026, Finn + Pascal): Kontonummern mit 5 End-Ziffern (FundedNext Futures) — Umschalter nach dem Login sonst „kein Konto“
     // 0.7.4 (30.09.2026, Regression .865): Konto-Umschalter relativ zur Broker-Leiste (auch maximiert oben), konto.panel_lage, keine Ein-Zeilen-Liste ohne Umschalter, konto.liste_voll (ganze Liste im Bild)   // 0.7.3 (29.09.2026, K3): kurz() gibt geheime Felder (Passwort, Login-Formular) nie mit Wert zurück   // 0.7.2 (29.09.2026): Aufnahme stoppt nach 10 min von selbst   // 0.7.1 (29.09.2026, K2 für T3): kauf_knopf.disabled, tp/sl.einheit/wert/neben, summary_reiter   // 0.7.0 (29.09.2026, Aufnahme 00:52): Kontoliste ohne Rollen, Meldungs-Status, Watchlist, Dialog-Knöpfe   // 0.6.1 (29.09.2026): aufnahme_letzte() als Rettungskopie, T3-Banner 'prophos-aufnahme' ausgeblendet   // 0.6.0 (29.09.2026, Aufnahme 00:36 leer): window-capture, roh-Zähler, tab_id, Sichtbarkeit   // 0.5.3 (29.09.2026, Lesung 00:22:50): Konto-Anker Kontonummer zuerst, Summary Total P/L = today   // 0.5.2 (29.09.2026, Lesung 00:22): Panel 'Collapse panel'/Manager-Knopf, Konto entdoppelt + kontonr   // 0.5.1 (29.09.2026, Lesung 00:17 pc-cccccc): Schalter-Rechteck, ticket.seite/bereit, Legende, veraltete Zeilen   // 0.5.0 (29.09.2026): Aufnahme-Modus (Finn klickt den Ablauf einmal selbst, jede Aktion wird mitgeschrieben)   // 0.4.0 (29.09.2026, K1–K4 für T3): positionen, orders, konto_summary, symbolsuche, toasts.meldungen   // 0.3.0 (29.09.2026, erste echte Lesung pc-cccccc): TP/SL-Zustand, Konto-Leiste, Toast-Rückfall   // 0.2.0 (29.09.2026): Vertrag mit T3 — globalThis.prophosAugen, Schlüssel-Whitelist, popups, kauf_knopf
 
@@ -285,7 +286,19 @@ var PROPHOS_AUGEN = (function () {
     }
     var log = alle('[role="log"]').map(function (l) { return { text: txt(l).slice(0, 400), live: attr(l, 'aria-live') }; })
       .filter(function (l) { return l.text; });
-    return { gruppen: gruppen, log: log };
+    // Kleine Werbe-Kachel im Meldungsbereich (05.10.2026, Inventar eines Orbit-PCs: div#charting-ad 460×150 unten links, darin eine
+    // Google-Anzeige im fremden iframe und EIN Knopf „Close ad" 10×10 px). Nur Diagnose — geschlossen wird sie im Bot (_cdp_kachel_weg).
+    // Bewusst NICHT unter popups: ein Eintrag dort unterdrückt im Konto-Schritt das Esc („Dialog offen").
+    var werbung = null;
+    try {
+      var ad = document.getElementById('charting-ad');
+      if (ad && sichtbar(ad)) {
+        var xk = alle('button,[role="button"]', ad).filter(sichtbar).filter(function (e) {
+          return /\bclose ad\b|(?:anzeige|werbung) schlie(?:ß|ss)en/i.test(txt(e) + ' ' + attr(e, 'aria-label') + ' ' + attr(e, 'title')); });
+        werbung = { rect: rect(ad), x: xk.length === 1 ? rect(xk[0]) : null, x_anzahl: xk.length };
+      }
+    } catch (_) {}
+    return { gruppen: gruppen, log: log, werbung: werbung };
   }
 
   // ── Dialoge / Popups / Overlays mit ihrem X ────────────────────────────────

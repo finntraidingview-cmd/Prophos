@@ -3781,7 +3781,7 @@ def test_cdp_konto_regression_865():
     js = open(_os.path.join(_os.path.dirname(_os.path.abspath(ob.__file__)), "augen.js"), encoding="utf-8").read()
     chk("function kontoSchalter()" in js and "r.top >= lr.top - 4" in js and "var s = kontoSchalter();" in js
         and "(eintraege.length === 1 && !!s.el && !eintraege[0].aktiv)" in js and "panel_lage: lage" in js
-        and "VERSION = '0.7.7'" in js, "augen.js 0.7.4+: Umschalter unter der Broker-Leiste (beide Lagen), panel_lage, Liste nur mit Umschalter")
+        and "VERSION = '0.7.8'" in js, "augen.js 0.7.4+: Umschalter unter der Broker-Leiste (beide Lagen), panel_lage, Liste nur mit Umschalter")
     chk("warnung" in ob.PULS_ERGEBNIS_FELDER and "unklar" in ob.PULS_ERGEBNIS_FELDER, "Ergebnis-Paket trägt warnung + unklar")
     # Login-Abriss (30.09.2026 03:23 UTC): Verbindung weg nach „Anmelden" → Spur mit Chrome-Zustand, EINMAL neu anhängen
     import inspect as _ia
@@ -3884,6 +3884,83 @@ def test_cdp_konto_regression_865():
     q_ab = _i.getsource(ob._cdp_abmelden)
     chk(q_ab.index("K3_RX_ABMELDEN") < q_ab.index("cdp_abgemeldet") and 's.taste("Escape")' in q_ab,
         "Abmelden: nach dem Pfeil-Klick nur mit eindeutigem Log out, sonst Esc; abgemeldet wird bewiesen")
+    # KLEINE WERBE-KACHEL (05.10.2026, Finn: „auch diese kleinen Ads unten links automatisch wegklicken") — div#charting-ad mit EINEM
+    # Knopf „Close ad"; geschlossen nur über dieses X, nur vor dem Konto- und dem Login-Schritt.
+    import re as _re
+    KW = ob.cdp_kachel_wahl
+    kach = {"id": "charting-ad", "box": [64, 568, 460, 150], "x": [497, 585, 10, 10], "wort": "close ad"}
+    chk(KW([kach])["x"] == [497.0, 585.0, 10.0, 10.0] and KW([dict(kach, wort="anzeige schließen")]) is not None
+        and KW([dict(kach, wort="close")]) is None and KW([dict(kach, wort="close position")]) is None and KW([dict(kach, wort="")]) is None
+        and KW([dict(kach, x=[497, 585, 60, 60])]) is None and KW([dict(kach, x=[900, 585, 10, 10])]) is None and KW([dict(kach, x=None)]) is None
+        and KW([dict(kach, x=["a", 1, 2, 3])]) is None and KW({"leiste": [1, 2, 3, 4]}) is None and KW(None) is None and KW([]) is None
+        and KW(["x"]) is None, "Werbe-Kachel: nur mit Schließen-Wort, kleinem X und X im Kasten; alles andere (auch Attrappen-Antworten) nie")
+
+    class _KS:
+        def __init__(self, folgen, druck=True, tv=True, wirft=0):
+            self.folgen, self.druck, self.tv_riegel, self.wirft, self.klicks, self.gelesen = list(folgen), druck, tv, wirft, [], 0
+
+        def lese_js(self, ausdruck, timeout=8):
+            if ausdruck != ob.CDP_KACHEL_JS:
+                return None
+            self.gelesen += 1
+            if self.wirft and self.gelesen >= self.wirft:
+                raise RuntimeError("Verbindung weg")
+            return self.folgen.pop(0) if self.folgen else []
+
+        def _win_klick(self, rect, name, druck=True, toast_ok=False, pruef=None):
+            self.klicks.append((list(rect), name, toast_ok, dict(pruef or {})))
+            return self.druck
+    alt_kw, alt_kwin = ob._warte, ob._WIN_EINGABE
+    ob._warte = lambda a, b: None
+    try:
+        ob._WIN_EINGABE = True
+        k1, t1 = _KS([[kach], []]), []
+        n1 = ob._cdp_kachel_weg(k1, t1)
+        k2, t2 = _KS([[kach]], druck=False), []
+        n2 = ob._cdp_kachel_weg(k2, t2)
+        k3, t3 = _KS([[kach], [kach]]), []
+        n3 = ob._cdp_kachel_weg(k3, t3)
+        k4, t4 = _KS([[]]), []
+        n4_ = ob._cdp_kachel_weg(k4, t4)
+        k5, t5 = _KS([[kach], []], tv=False), []
+        n5 = ob._cdp_kachel_weg(k5, t5)
+        k6, t6 = _KS([[kach]], wirft=1), []
+        n6 = ob._cdp_kachel_weg(k6, t6)
+        k6b, t6b = _KS([[kach]], wirft=2), []
+        n6b = ob._cdp_kachel_weg(k6b, t6b)
+        k7, t7 = _KS([[kach], [], [kach], []]), []
+        n7 = ob._cdp_kachel_weg(k7, t7)
+        k8, t8 = _KS([{"leiste": [56, 0, 1194, 38]}]), []
+        n8 = ob._cdp_kachel_weg(k8, t8)
+        k10, t10 = _KS([[kach], [], [kach], [], [kach], []]), []
+        n10 = ob._cdp_kachel_weg(k10, t10)
+        ob._WIN_EINGABE = False
+        k9, t9 = _KS([[kach], []]), []
+        n9 = ob._cdp_kachel_weg(k9, t9)
+    finally:
+        ob._warte, ob._WIN_EINGABE = alt_kw, alt_kwin
+    pr1 = k1.klicks[0][3] if k1.klicks else {}
+    chk(n1 == 1 and len(k1.klicks) == 1 and k1.klicks[0][0] == [497.0, 585.0, 10.0, 10.0] and k1.klicks[0][2] is True
+        and pr1.get("text") == "close ad" and pr1.get("aria") == "close ad" and pr1.get("rect") == [497.0, 585.0, 10.0, 10.0]
+        and _re.search(pr1.get("tabu") or "x^", "close position") and not _re.search(pr1["tabu"], "close ad")
+        and any("weg bewiesen" in z for z in t1), f"Kachel da: EIN Klick auf ihr X mit Ziel-Beweis close ad, weg bewiesen ({t1})")
+    chk(n2 == 0 and len(k2.klicks) == 1 and any("nicht gedrückt" in z for z in t2) and n3 == 0 and len(k3.klicks) == 1
+        and any("noch da" in z for z in t3), "X nicht gedrückt / Kachel bleibt: genau ein Versuch, ehrlich weiter")
+    chk(n4_ == 0 and not k4.klicks and not t4 and n5 == 0 and k5.gelesen == 0 and n9 == 0 and k9.gelesen == 0 and n8 == 0 and not k8.klicks,
+        "keine Kachel / TopstepX-Tab / ohne Windows-Maus / Attrappen-Antwort: kein Klick, nichts in der Spur")
+    chk(n6 == 0 and not k6.klicks and any("übersprungen" in z for z in t6) and n6b == 0 and len(k6b.klicks) == 1
+        and any("übersprungen" in z for z in t6b) and n7 == 2 and len(k7.klicks) == 2 and n10 == 2 and len(k10.klicks) == 2,
+        "Lese-Fehler (vor und nach dem Klick) wirft nicht; höchstens zwei Kacheln und zwei Klicks je Aufruf")
+    q_ks, q_tv, q_kl = _i.getsource(ob._cdp_konto_sichern), _i.getsource(ob._cdp_tradovate_verbinden), _i.getsource(ob._AugenSitzung.klick)
+    chk(q_ks.count("_cdp_kachel_weg(s, trail)") == 1 and q_ks.index("_cdp_kachel_weg(s, trail)") < q_ks.index("s.stand(opts)")
+        and q_tv.count("_cdp_kachel_weg(s, trail)") == 1 and q_tv.index("_cdp_kachel_weg(s, trail)") < q_tv.index(".blick()")
+        and "kachel" not in q_kl and "charting-ad" not in ob.CDP_WERBUNG_JS and "charting-ad" not in ob.CDP_TOAST_ZU_JS,
+        "Kachel nur VOR Konto- und Login-Schritt (vor dem ersten Lesen); klick(), Sale-Modal- und Meldungs-Logik unverändert")
+    kj = ob.CDP_KACHEL_JS
+    chk("getElementById('charting-ad')" in kj and "xs.length !== 1" in kj and "elementFromPoint" in kj and "q.width > 44" in kj
+        and "click(" not in kj and "dispatchEvent" not in kj and ".remove(" not in kj and "style." not in kj
+        and "werbung: werbung" in js and "getElementById('charting-ad')" in js,
+        "Kachel-Blick: nur der Kasten #charting-ad, genau EIN unverdecktes kleines X, liest nur; augen.js meldet toasts.werbung")
     q_tk = _i.getsource(ob._cdp_ticket_fuellen) if hasattr(ob, "_cdp_ticket_fuellen") else ""
     chk(not q_tk or ("chart_frei and bw > 200" in q_tk and "s._panel_max_versucht, s._panel_open_versucht = True, False" in q_tk
                      and "chart_frei = restored" in q_tk and "Treffer ≠ Wirkung" in q_tk and "for _b in range(6):" in q_tk),

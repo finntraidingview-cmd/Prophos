@@ -15878,6 +15878,96 @@ CDP_TOAST_ZU_JS = r"""(function () {
 })()"""
 
 
+# KLEINE WERBE-KACHEL (05.10.2026, Finn: „jedes Mal, wenn unten eine Ad … kommt, die per X weggeklickt werden kann, soll er auch diese
+# kleinen Ads unten links automatisch wegklicken"). Inventar eines Orbit-PCs vom selben Abend: TradingView hängt im Meldungsbereich unten
+# links einen Kasten div#charting-ad (460×150) ein — darin eine Google-Anzeige im iframe fremder Herkunft (ihr Text ist für die Seite
+# nicht lesbar, darum sieht CDP_WERBUNG_JS sie nicht: es verlangt zwei Werbe-Wörter) und EIN Knopf mit dem Text „Close ad" (10×10 px,
+# oben rechts). Der Kasten liegt über den Reitern Positions/Orders/Account summary und dort, wo die Kontoliste aufklappt. Gesucht wird
+# NUR dieser Kasten (id; sonst der Elternkasten einer div-gpt-ad-toast-ad-Anzeige) und darin NUR genau ein sichtbarer, unverdeckter
+# Knopf ≤ 44 px mit der Beschriftung „Close ad" (bzw. „Anzeige/Werbung schließen"). Nie ein anderes X. Nur lesen.
+CDP_KACHEL_JS = r"""(function () {
+  var RX = /\bclose ad\b|(?:anzeige|werbung) schlie(?:ß|ss)en/i;
+  function sb(e) { try { var s = getComputedStyle(e); if (s.visibility === 'hidden' || s.display === 'none' || s.opacity === '0') return false;
+    var r = e.getBoundingClientRect(); return r.width > 2 && r.height > 2 && r.bottom > 0 && r.right > 0 && r.left < innerWidth && r.top < innerHeight; } catch (_) { return false; } }
+  function R(e) { var r = e.getBoundingClientRect(); return [r.left, r.top, r.width, r.height]; }
+  function W(e) { return ((e.getAttribute('aria-label') || '') + ' ' + (e.getAttribute('title') || '') + ' ' + (e.textContent || '')).replace(/\s+/g, ' ').trim(); }
+  var boxen = [], a = document.getElementById('charting-ad');
+  if (a) boxen.push(a);
+  Array.prototype.slice.call(document.querySelectorAll('[id^="div-gpt-ad-toast-ad"]')).forEach(function (g) {
+    var p = g.parentElement;
+    if (p && p !== document.body && p !== document.documentElement && !boxen.some(function (b) { return b === p || b.contains(p); })) boxen.push(p); });
+  var out = [];
+  boxen.forEach(function (b) {
+    if (out.length >= 2 || !sb(b)) return;
+    var r = b.getBoundingClientRect();
+    if (r.width < 120 || r.height < 40 || r.width > 800 || r.height > 500) return;
+    var xs = Array.prototype.slice.call(b.querySelectorAll('button,[role="button"]')).filter(function (e) {
+      if (!sb(e) || !RX.test(W(e))) return false;
+      var q = e.getBoundingClientRect();
+      if (q.width < 6 || q.height < 6 || q.width > 44 || q.height > 44 || q.left < 0 || q.top < 0 || q.right > innerWidth || q.bottom > innerHeight) return false;
+      var oben = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2);
+      return !!oben && (oben === e || e.contains(oben));
+    });
+    xs = xs.filter(function (e) { return !xs.some(function (f) { return f !== e && e.contains(f); }); });
+    if (xs.length !== 1) return;
+    out.push({ id: String(b.id || '').slice(0, 40), box: R(b), x: R(xs[0]), wort: RX.exec(W(xs[0]))[0].toLowerCase() });
+  });
+  return out;
+})()"""
+CDP_KACHEL_RX = re.compile(r"^(close ad|(anzeige|werbung) schlie(ß|ss)en)$", re.I)
+CDP_KACHEL_TABU = r"\b(buy|sell|order|position|flatten|cancel|log ?out|connect|kauf|verkauf)\b"
+
+
+def cdp_kachel_wahl(roh):
+    """REIN RECHNEND (testbar): erste gültige Werbe-Kachel aus CDP_KACHEL_JS -> {x, box, wort, id} | None. Gültig nur mit Schließen-
+    Wort, einem X von 6–44 px und dem X-Mittelpunkt IM Kasten — alles andere (auch eine Attrappen-Antwort) ist keine Kachel."""
+    for k in (roh if isinstance(roh, list) else []):
+        if not isinstance(k, dict):
+            continue
+        x, box, wort = k.get("x"), k.get("box"), str(k.get("wort") or "").strip().lower()
+        if not (isinstance(x, (list, tuple)) and len(x) >= 4 and isinstance(box, (list, tuple)) and len(box) >= 4):
+            continue
+        try:
+            x, box = [float(v) for v in x[:4]], [float(v) for v in box[:4]]
+        except (TypeError, ValueError):
+            continue
+        if not CDP_KACHEL_RX.match(wort) or not (6 <= x[2] <= 44 and 6 <= x[3] <= 44):
+            continue
+        mx, my = x[0] + x[2] / 2.0, x[1] + x[3] / 2.0
+        if not (box[0] <= mx <= box[0] + box[2] and box[1] <= my <= box[1] + box[3]):
+            continue
+        return {"x": x, "box": box, "wort": wort, "id": str(k.get("id") or "")[:40]}
+    return None
+
+
+def _cdp_kachel_weg(s, trail):
+    """Kleine TradingView-Werbe-Kachel (CDP_KACHEL_JS) über genau IHR X schließen — echte Maus, Ziel-Beweis auf den Knopftext
+    („Close ad", win_ziel_pruef_js), danach „Kachel weg" bewiesen. Aufgerufen VOR dem Konto-Schritt und VOR dem Login-Schritt, also
+    bevor ein Rechteck gelesen wird, das der Klick auf das X verschieben oder schließen könnte (bewusst nicht in klick(): dort stünde
+    womöglich schon die Kontoliste offen). Wirft nie; ohne Windows-Maus und im TopstepX-Tab nichts. -> Anzahl geschlossener Kacheln"""
+    if not _WIN_EINGABE or not getattr(s, "tv_riegel", True):
+        return 0
+    weg = 0
+    try:
+        for _ in range(2):
+            k = cdp_kachel_wahl(s.lese_js(CDP_KACHEL_JS))
+            if not k:
+                break
+            pruef = {"rect": k["x"], "text": k["wort"], "aria": k["wort"], "tabu": CDP_KACHEL_TABU}
+            if not s._win_klick(k["x"], "Werbe-Kachel schließen (X)", toast_ok=True, pruef=pruef):
+                trail.append("Werbe-Kachel unten links: X nicht gedrückt (kein Beweis) — weiter, Kachel bleibt")
+                break
+            _warte(0.6, 0.3)
+            if cdp_kachel_wahl(s.lese_js(CDP_KACHEL_JS)):
+                trail.append("Werbe-Kachel steht nach dem Klick auf ihr X noch da — weiter ohne")
+                break
+            trail.append("Werbe-Kachel unten links geschlossen (ihr X, weg bewiesen)")
+            weg += 1
+    except Exception as e_:                            # darf keinen Lauf verhindern — schlimmstenfalls bleibt die Kachel stehen
+        trail.append(f"Werbe-Kachel-Prüfung übersprungen ({type(e_).__name__})")
+    return weg
+
+
 # WERBUNG IM PULS-CHROME (30.09.2026, Finn an PC von ID C pc-iiiiii, Screenshot „Don't miss this Autumn sale · Up to 80% off · Explore
 # offers"): TradingViews Sale-Modal legte sich über den Connect-Dialog und verschluckte den Klick; der neue Puls kannte — anders als der
 # alte (_tv_popups_weg) — kein Wegklicken. Gesucht werden sichtbare Kästen (kleinster zuerst, höchstens 80 % des Bilds) mit
@@ -16736,6 +16826,7 @@ def _cdp_konto_sichern(s, ext, opts, trail):
     Aufrufer _cdp_konto_mit_login). Gilt für jeden CDP-Lauf mit Konto-Schritt (Lesen, Order, Schließen).
     Seit der Regression .865 (30.09.2026): eine Liste zählt nur, wenn DIESER Lauf den Umschalter geklickt hat; 0 Treffer sind nur mit
     cdp_liste_beleg ein Login-Beleg (extra liste_aktiv, sonst konto_treffer None); Konto-Abgleich streng (cdp_konto_passt)."""
+    _cdp_kachel_weg(s, trail)                             # kleine Werbe-Kachel unten links zuerst weg (05.10.2026) — dann erst lesen
     st = s.stand(opts)
     geklickt_umschalter = False
     wiederholt = False
@@ -19908,6 +19999,7 @@ def _cdp_tradovate_verbinden(sitz, cmd, opts, trail, beleg=None):
     beleg = extra des letzten Konto-Schritts (cdp_abmelden_erlaubt). code 'login_unlesbar' = verbunden, Konto nicht lesbar."""
     benutzer = str(cmd.get("tv_username") or "").strip()
     s = sitz[0]
+    _cdp_kachel_weg(s, trail)                             # Werbe-Kachel vor dem Login-Schritt weg (05.10.2026)
     bl = _K3Ort("TradingView-Seite", s.ws, s, benutzer).blick()
     if cdp_connect_dialog(bl):
         trail.append("[Login] Connect-Dialog steht schon da — direkt verbinden")
