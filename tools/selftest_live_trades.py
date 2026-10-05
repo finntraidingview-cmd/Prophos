@@ -27,7 +27,7 @@ def lade():
     exec("\n".join([const("LT_WD_BLOW_PLUS"), const("WD_HEUTE_PPL")]
                    + [block(f) for f in ("_wd_num", "_wd_level", "_wd_konto_groesse", "ist_topstep_express", "plan_balance_relativ", "konto_basis_balance",
                                            "plan_ist_wd", "_lt_liq_balance", "_lt_liq", "_lt_demo", "kurs_jetzt_wahl", "tsx_zeile_ueberlagern",
-                                           "tv_bracket_ueberlagern")]), ns)
+                                           "tv_bracket_ueberlagern", "lt_pl_balance")]), ns)
     return ns
 
 
@@ -158,6 +158,31 @@ def main():
     check(tb("tvv2", {"einstieg_nq": 30682.25}, None) == {} and tb("tsv2", tvo, None) == {} and tb("tvv2", None, None) == {},
           "tvv2 ohne Brackets / andere Wege → nichts")
     check(tb("tvv2", {"tp_level_nq": 30516.5}, {}) == {"tp_level_nq": 30516.5, "level_quelle": "tv_toast"}, "leerer Hedge = kein Hedge, nur TP")
+
+    # pl_balance der Radar-Zeile (05.10.2026, Topstep V2 im Radar): tsv2 nie über zwei verschiedene Balance-Basen
+    pb = a["lt_pl_balance"]
+    check(pb("tsv2", {"balance_start": 0, "balance_relativ": True}, {"balance_end": -300, "balance_relativ": True}) == -300.0
+          and pb("tsv2", {"balance_start": 150000, "balance_relativ": False}, {"balance_end": 150250.5, "balance_relativ": False}) == 250.5,
+          "pl_balance tsv2: gleiche Basis → Differenz (Express 0 → −300, absolut +250,50)")
+    check(pb("tsv2", {"balance_start": 150000, "balance_relativ": False}, {"balance_end": -300, "balance_relativ": True}) is None
+          and pb("tsv2", {"balance_start": 0, "balance_relativ": True}, {"balance_end": 150400, "balance_relativ": False}) is None,
+          "pl_balance tsv2: verschiedene Basis (beide angegeben) → keine Differenz")
+    check(pb("tsv2", {"balance_start": 0}, {"balance_end": -300, "balance_relativ": True}) == -300.0
+          and pb("tsv2", {"balance_start": 150000, "balance_relativ": False}, {"balance_end": 150100}) == 100.0
+          and pb("tsv2", {"balance_start": 150000, "balance_relativ": None}, {"balance_end": 150100, "balance_relativ": "ja"}) == 100.0,
+          "pl_balance tsv2: Angabe fehlt auf einer Seite (oder ist kein bool) → Differenz wie bisher")
+    faelle = [({"balance_start": 150000, "balance_relativ": False}, {"balance_end": 150400, "balance_relativ": True}),
+              ({"balance_start": "150000"}, {"balance_end": "149812.4"}), ({"balance_start": 0}, {"balance_end": 0}),
+              ({"balance_start": None}, {"balance_end": 1}), ({"balance_start": 1}, {}), ({}, {}), ({"balance_start": "x"}, {"balance_end": 5})]
+    n_ = a["_wd_num"]
+
+    def bisher(tv, fin):   # Rechnung in _lt_zeile bis .1031
+        bs, be = n_(tv.get("balance_start")), n_(fin.get("balance_end"))
+        return round(be - bs, 2) if (bs is not None and be is not None) else None
+    check(all(pb(r, tv, fin) == bisher(tv, fin) for r in ("tvv2", "mt5v2", "mt5", None) for tv, fin in faelle)
+          and pb("tvv2", *faelle[0]) == 400.0, "pl_balance andere Wege (Orbit V2, Echo): exakt wie bisher, auch bei verschiedenen Basis-Feldern")
+    check(pb("tsv2", None, None) is None and pb("tsv2", {"balance_start": 1}, None) is None and pb("tsv2", {}, {"balance_end": 1}) is None,
+          "pl_balance: ohne Start- oder End-Balance → None")
 
     print("\nALLES GRUEN" if ok else "\nFEHLER")
     return 0 if ok else 1

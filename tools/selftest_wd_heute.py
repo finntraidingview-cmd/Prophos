@@ -30,7 +30,7 @@ def lade():
 
     code = "\n".join([const("WD_HEUTE_PPL"), const("LT_WD_BLOW_PLUS"), block("ist_topstep_express"), block("plan_balance_relativ"), block("konto_basis_balance"), block("plan_ist_wd"), block("_lt_liq_balance"), block("_lt_liq"),
                       block("wd_start_balance"), block("wd_vorher_waehlen"), block("wd_sl_zeile"), block("_wd_num"), block("_symbol_wurzel"), block("_cme_handelstag"),
-                      block("_wd_level"), block("tsx_zeile_ueberlagern"), block("tv_bracket_ueberlagern"), block("_wd_konto_groesse"), block("_wd_endlesung_zeile"), const("WD_GOOD_DAY_MIN"), block("_wd_good_day"), block("_wd_heute_zeile"),
+                      block("_wd_level"), block("tsx_zeile_ueberlagern"), block("tv_bracket_ueberlagern"), block("_wd_konto_groesse"), block("_wd_endlesung_zeile"), const("WD_GOOD_DAY_MIN"), block("_wd_good_day"), block("wd_tsx_master_pl"), block("_wd_heute_zeile"),
                       block("_wd_heute_behalten"), block("_wd_heute_sortkey"), block("_wd_heute_sortieren"), block("_wd_ohne_master_sl")])
     exec(code, ns)
     return ns
@@ -114,6 +114,23 @@ def main():
         check(zl["sl_level_nq"] is None and zl["tp_level_nq"] == 30140.5, f"wd-heute: master_sl {leer!r} → sl_level_nq null, TP-Level bleibt")
     p3 = dict(p2, id="p3", master_pl="55.5", completed_at="2026-09-25T01:00:00Z", status="completed")
     check(a["_wd_heute_zeile"](p3, None, {})["master_pl"]["quelle"] == "plan", "Zeile: fertiger master_pl schlaegt alles")
+
+    # Puls-Merker nur für Topstep V2 (05.10.2026): tv.puls geht NUR bei route tsv2 in die Zeile; Orbit V2 trägt am Plan auch
+    # tv.puls ('tv'), dessen Zeile bleibt wie vorher. tsv2 ohne master_pl/live.pnl läuft über wd_tsx_master_pl.
+    tvx = {"einstieg_nq": 30000.25, "einstieg_quelle": "fill", "balance_start": 0, "balance_relativ": True, "datum_start": "2026-09-25"}
+    pt = dict(p2, id="pt", route="tsv2", status="review",
+              mt5_baseline={"tv": dict(tvx, puls="tsx"), "final": {"balance_end": -300, "balance_relativ": True, "at": "x", "plattform": "tsx"}})
+    zt = a["_wd_heute_zeile"](pt, None, {})
+    check(zt["tv"].get("puls") == "tsx" and zt["tv"]["balance_start"] == 0 and zt["route"] == "tsv2"
+          and zt["master_pl"] == {"wert": -300.0, "at": "x", "quelle": "final", "art": "balance"},
+          "Topstep V2: tv.puls 'tsx' steht in der Zeile (Master-P&L über wd_tsx_master_pl)")
+    zt2 = a["_wd_heute_zeile"](dict(pt, id="pt2", mt5_baseline={"tv": dict(tvx), "final": pt["mt5_baseline"]["final"]}), None, {})
+    check("puls" not in zt2["tv"] and zt2["tv"] == {k: v for k, v in zt["tv"].items() if k != "puls"},
+          "Topstep V2 ohne puls am Plan (Handstart): Zeile trägt das Feld nicht")
+    po = dict(pt, id="po", route="tvv2")
+    zo = a["_wd_heute_zeile"](dict(po, mt5_baseline={"tv": dict(tvx, puls="tv"), "final": pt["mt5_baseline"]["final"]}), None, {})
+    zo_ohne = a["_wd_heute_zeile"](dict(po, mt5_baseline={"tv": dict(tvx), "final": pt["mt5_baseline"]["final"]}), None, {})
+    check("puls" not in zo["tv"] and zo == zo_ohne, "Orbit V2 mit tv.puls 'tv': Feld NICHT in der Zeile, Zeile wie ohne das Feld")
 
     zeilen = [{"status": "completed", "ended_at": "2026-09-24T05:00:00Z"}, {"status": "planned", "start_um": "2026-09-24T12:00:00Z"},
               {"status": "open", "started_at": "2026-09-24T09:00:00Z"}, {"status": "review", "ended_at": "2026-09-24T07:00:00Z"},

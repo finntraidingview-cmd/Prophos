@@ -7910,6 +7910,12 @@ def _wd_heute_zeile(p, acc, disp, vorher=None):
         # Endlesung (25.09.2026): Stand der Puls-Lesung nach dem Ende (Versuche, Fehler, Befund, Exit-Fill) — Statuszeile + „Jetzt lesen" (Design)
         "endlesung": _wd_endlesung_zeile(final),
     }
+    # Puls-Merker NUR für Topstep V2 (05.10.2026, Topstep V2 im Radar): tv.puls 'tsx' = Puls hat den Plan in TopstepX gestartet;
+    # ein von Hand gestarteter tsv2-Plan trägt das Feld nicht. Das Frontend braucht den Unterschied für die Radar-Zeile. Bewusst
+    # nicht im Auszug oben: der gilt für jede Route, und Orbit V2 trägt am Plan ebenfalls tv.puls ('tv') — dessen Zeile bleibt
+    # hier und in /admin/live-trades unverändert.
+    if p.get("route") == "tsv2" and "puls" in tv:
+        zeile["tv"]["puls"] = tv.get("puls")
     # F28: Topstep V2 — echte Brackets/MLL aus TopstepX vor gerechneten Werten (liq_level_nq/liq_pl_usd nur für live-trades)
     ueber = tsx_zeile_ueberlagern(p.get("route"), tv, einstieg, richtung, ppl, kt) or tv_bracket_ueberlagern(p.get("route"), tv, hedge)
     zeile.update({k: v for k, v in ueber.items() if k not in ("liq_level_nq", "liq_regel", "liq_pl_usd")})
@@ -8571,6 +8577,23 @@ def _lt_kerze_start(kerzen, start_iso):
     return None if best is None else round((best[1] + best[2]) / 2 * 4) / 4
 
 
+def lt_pl_balance(route, tv, fin):
+    """REIN RECHNEND (testbar, 05.10.2026, Topstep V2 im Radar): pl_balance der Radar-Zeile = Balance nachher − vorher → Zahl | None.
+    Topstep V2 (tsv2): TopstepX zeigt ein Express-Konto 0-basiert (balance_relativ), sonst die volle Balance. Sagen Start- und
+    End-Lesung ausdrücklich verschiedene Basen (beide bool, ungleich), gibt es KEINE Differenz — sonst stünde die Kontogröße als
+    P&L in der Zeile. Dieselbe Bedingung wie wd_tsx_master_pl; fehlt die Angabe auf einer Seite, wird gerechnet wie bisher.
+    Jede andere Route: unverändert die einfache Differenz."""
+    tv, fin = tv or {}, fin or {}
+    bs, be = _wd_num(tv.get("balance_start")), _wd_num(fin.get("balance_end"))
+    if bs is None or be is None:
+        return None
+    if route == "tsv2":
+        ra, rb = tv.get("balance_relativ"), fin.get("balance_relativ")
+        if isinstance(ra, bool) and isinstance(rb, bool) and ra != rb:
+            return None
+    return round(be - bs, 2)
+
+
 def _lt_zeile(p, acc, disp, kerzen_je_wurzel, vorher=None, regeln=None, fruehere=None, verlauf=None):
     z = _wd_heute_zeile(p, acc, disp, vorher)
     base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
@@ -8622,7 +8645,7 @@ def _lt_zeile(p, acc, disp, kerzen_je_wurzel, vorher=None, regeln=None, fruehere
     elif demo.get("status") == "liquidiert":
         demo["pl_usd"] = demo_liq_pl
     z.update({"balance_start": bs, "equity_start": _wd_num(tv.get("equity_start")), "balance_end": be,
-              "pl_balance": round(be - bs, 2) if (bs is not None and be is not None) else None,
+              "pl_balance": lt_pl_balance(p.get("route"), tv, fin),
               "liq_balance": liq_bal, "liq_regel": liq_regel, "liq_level_nq": liq_level, "demo": demo,
               "liq_quelle": liq_quelle if liq_level is not None else None,
               "konto_balance": _wd_num((acc or {}).get("tv_balance")), "konto_balance_at": (acc or {}).get("tv_balance_at")})
