@@ -6858,6 +6858,7 @@
                 <div class="tp-slave-label">Slave kaufen</div>
                 <div class="tp-slave-value tnum" id="tp-slave-qty">—</div>
                 <div class="tp-slave-unit" id="tp-slave-unit">—</div>
+                <div class="tp-wd-marge" id="tp-mt5-marge"></div>
               </div>
               <div class="tp-mult-out">
                 <div class="tp-multi-label">Multiplier</div>
@@ -18835,6 +18836,7 @@
             lesen: !!inst.lesen,
             hedge_balance: s.hedge_balance ?? null, hedge_equity: s.hedge_equity ?? null,
             hedge_currency: s.hedge_currency ?? null,
+            hedge_konto: s.hedge_konto ?? null,   // Fusion-Marge (06.10.2026): {margin_free, marge_je_lot, …} für den Popup-Hinweis am Mac/Handy
             hedge_fremde: s.hedge_fremde ?? null,
             // Solo-Hedge (25.09.2026): offene Positionen + Abschluss-Ring — fehlten im Push, der Mac konnte Live-P&L und Ring nie sehen
             hedge_solo: Array.isArray(s.hedge_solo) ? s.hedge_solo : null,
@@ -36526,6 +36528,7 @@
 
     _pfAddRow('m5link', 'MT5-Verlinkung')
     _pfAddRow('m5run',  'Copier läuft')
+    _pfAddRow('m5marge', 'Fusion-Marge')
     _pfAddRow('m5dup',  'Doppel-Hedge-Schutz')
     _pfAddRow('m5dir',  'Richtungs-Schutz')
     _pfAddRow('m5push', 'Werte pushen')
@@ -36590,6 +36593,14 @@
         _pfSet('m5run', 'ok', 'Copier läuft und liefert frische Daten'
           + (sAlgo.hedge_algo === true ? ' · Hedge-Algo AN.' : '.'))
       }
+    }
+
+    // ── 2b. Fusion-Marge (06.10.2026): freie Marge am Hedge-Terminal gegen die Plan-Lots (Kontrakte × Multiplikator) ──
+    if(offline || !route || !route.inst.alive) _pfSet('m5marge', 'warn', 'Nicht prüfbar, solange der Copier steht.')
+    else {
+      const mr = fusionMargePruefen(plan, route.inst.status || {}, null, { echo: true })
+      _pfSet('m5marge', mr.st, escapeHtml(mr.txt) + (mr.was ? `<br><b>Was tun:</b> ${escapeHtml(mr.was)}` : ''))
+      if(mr.st === 'err') hardFail = true
     }
 
     // ── 3. Doppel-Hedge-Schutz ── NUR der MASTER zählt (Korrektur 04.09.2026,
@@ -37360,7 +37371,9 @@
     // Margen-Hinweis (nur Anzeige): Lots × Kurs × €/Pkt ÷ Hebel — NAS100 ≈ NQ-Kurs aus dem Reader-Feed, Hebel 1:100 als Annahme
     { const mg = document.getElementById('tp-wd-marge'); if(mg){ let kurs = null
         try{ const je = (typeof mkl !== 'undefined' && mkl.kursJe) || {}; const k = je.NQ || je.MNQ; if(k && hedgeKursAlterJetzt(k) <= 600000 && k.preis > 0) kurs = k.preis }catch(_){}   // echtes Alter (25.09.2026)
-        mg.textContent = kurs ? `braucht ca. ${n(r.lots * kurs * r.slavePpl / 100, 0)} € Marge (1:100)` : '' } }
+        // echte Marge vom Fusion-Terminal (06.10.2026, FUSION-MARGE) — ohne Lesung wie bisher die Schätzung
+        const echt = (typeof fusionMargePopupText === 'function') ? fusionMargePopupText(r.lots) : null
+        mg.textContent = echt || (kurs ? `braucht ca. ${n(r.lots * kurs * r.slavePpl / 100, 0)} € Marge (1:100)` : '') } }
     const puffer = (typeof hedgePuffer === 'function') ? hedgePuffer() : HEDGE_PUFFER_STD
     const kachel = (titel, master, fusion, sub) => { const netto = master * fx + fusion; const bg = netto >= 0 ? 'rgba(18,183,106,.06)' : 'rgba(240,68,56,.06)'
       return `<div class="tp-wd-kachel" style="background:${bg}">
@@ -38390,7 +38403,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1039'
+  const OS_TAB_BUILD = '2026-09-22.1040'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -38804,7 +38817,7 @@
     // Slave-Vorprüfung auch für Hand-Start und Fern-Signal (29.09.2026) — VOR dem Riegel _tpOrbitLaeuft, sonst bliebe er hängen
     if(vorcheckNoetig(plan) && MT5_LOCAL){
       vorcheckKarteZeigen(plan, null, 'pruefe')
-      const vc = await slaveBereitPruefen()
+      const vc = await slaveBereitPruefen(plan)
       vorcheckKarteZeigen(plan, vc, vc.ok ? 'ok' : 'stopp')
       if(!vc.ok){
         try{ await vorcheckMelden(plan, 'slave_nicht_bereit', vc.grund, vc.checks) }catch(_){}
@@ -41879,13 +41892,70 @@
    * Alarm höchstens alle 10 min, neuer Versuch in 20–40 s; nach dem Start-Fenster 'verpasst_slave' — NIE ohne Hedge starten. */
   const _vorcheckNaechst = new Map()   // planId → frühester nächster Versuch (ms)
   const vorcheckNoetig = p => !!p && p.route === 'tvv2' && Number(p.hedgeEur) > 0
+  /* FUSION-MARGE (06.10.2026, Finn: vor jedem Trade mit Fusion-Gegenhedge prüfen, ob die freie Marge auf dem Fusion-Konto für die
+   * Hedge-Lots reicht — im Start-Check und im Plan-Popup). Vertrag mit dem Copier: status.hedge_konto = {balance, equity, margin,
+   * margin_free, margin_level, marge_je_lot: {NAS100: Marge für 1,0 Lot}, waehrung, at}. Fehlt das Feld (älterer Copier-Stand), heißt
+   * es „Marge unbekannt" — gelb, blockiert nichts. Lots je Weg = Kontrakte × Multiplikator, dieselbe Rechnung wie der Hedge-Open
+   * (lotsSoll, Orbit V3/Winning Day) und der Echo-Copier (multiplier). margin_free des Terminals enthält alle schon offenen Hedges auf
+   * dem Fusion-Konto; ein zweiter Plan, der in derselben Minute startet, steckt noch nicht drin (bewusst so, Stand .1039). */
+  const FUSION_MARGE_RESERVE = 0.20                     // 20 % Luft über der nötigen Marge, darunter „knapp"
+  const FUSION_MARGE_LESUNG_MAX_MS = 2 * 60 * 1000      // ältere Lesung → „Marge-Lesung alt" (gelb)
+  const fusionMargeEur = (v, w) => `${Math.round(Number(v) || 0).toLocaleString('de-DE')} ${w || '€'}`
+  function fusionMargeLesung(status, updatedAt){
+    const hk = status && status.hedge_konto
+    if(!hk || typeof hk !== 'object') return null
+    const frei = Number(hk.margin_free)
+    if(!isFinite(frei)) return null
+    const jeLot = Number((hk.marge_je_lot || {}).NAS100)
+    let at = typeof hk.at === 'number' ? (hk.at > 1e12 ? hk.at : hk.at * 1000) : (Date.parse(hk.at || '') || 0)
+    if(!at) at = Date.parse(updatedAt || '') || 0
+    const w0 = hk.waehrung || status.hedge_currency || 'EUR', w = w0 === 'EUR' ? '€' : w0 === 'USD' ? '$' : w0
+    return { frei, jeLot: jeLot > 0 ? jeLot : null, w, at, alterMs: at ? Math.max(0, Date.now() - at) : null }
+  }
+  // PC: Instanz-Cache des Panels (ohne Netz); Mac/Handy: mt5_live-Zeilen (Push der PC-Tabs) — die jüngste Lesung gewinnt
+  function fusionMargeQuelle(){
+    let best = null
+    const nimm = l => { if(l && (!best || l.at > best.at)) best = l }
+    try{ for(const i of Object.values((typeof window.mtcInstances === 'function' && window.mtcInstances()) || {})) if(i && i.alive) nimm(fusionMargeLesung(i.status, null)) }catch(_){}
+    try{ for(const r of (window._mt5CloudRows || [])) if(r) nimm(fusionMargeLesung(r.status, r.updated_at)) }catch(_){}
+    return best
+  }
+  // Hedge-Lots am Plan: Kontrakte × Multiplikator (Echo wie Orbit V3/Winning Day) — null, wenn eines fehlt
+  function fusionHedgeLots(plan){
+    const kt = Number(plan && plan.masterContracts), m = Number(plan && plan.multiplier)
+    return (kt > 0 && m > 0) ? Math.round(kt * m * 100) / 100 : null
+  }
+  // Zeile fürs Prüffenster: { st: 'ok'|'warn'|'err', txt, was }. o.echo = Beschriftung „Plan-Lots" (Kontrakte × Multiplikator)
+  function fusionMargePruefen(plan, status, updatedAt, o){
+    const lots = fusionHedgeLots(plan), les = fusionMargeLesung(status, updatedAt)
+    const n2 = v => Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    // Echo: „Plan-Lots 2 Kt × 1,055" dazu — so sieht man, woher die Lots kommen (Multiplikator × Kontrakte, wie der Copier rechnet)
+    const planLots = (o && o.echo && lots != null) ? `Plan-Lots ${Number(plan.masterContracts)} Kt × ${Number(plan.multiplier).toLocaleString('de-DE', { maximumFractionDigits: 3 })}` : ''
+    const lotsTxt = lots == null ? 'Lots unbekannt' : `${n2(lots)} Lot${planLots ? ` (${planLots})` : ''}`
+    if(!les) return { st: 'warn', txt: `Marge unbekannt — der Copier meldet die Fusion-Marge noch nicht. Hedge: ${lotsTxt}.`, was: '' }
+    if(lots == null) return { st: 'warn', txt: `frei ${fusionMargeEur(les.frei, les.w)} · Hedge-Lots am Plan unbekannt (Kontrakte/Multiplikator fehlen).`, was: '' }
+    if(!les.jeLot) return { st: 'warn', txt: `frei ${fusionMargeEur(les.frei, les.w)} · Marge je Lot NAS100 unbekannt — nötig für ${lotsTxt} nicht rechenbar.`, was: '' }
+    const noetig = lots * les.jeLot
+    const txt = `frei ${fusionMargeEur(les.frei, les.w)} · nötig ${fusionMargeEur(noetig, les.w)} für ${n2(lots)} Lot (${planLots ? planLots + ' · ' : ''}≈ ${fusionMargeEur(les.jeLot, les.w)}/Lot) · Reserve ${Math.round(FUSION_MARGE_RESERVE * 100)} %`
+    if(les.alterMs != null && les.alterMs > FUSION_MARGE_LESUNG_MAX_MS) return { st: 'warn', txt: `Marge-Lesung alt (${Math.round(les.alterMs / 60000)} min) — zuletzt ${txt}`, was: '' }
+    if(les.frei < noetig) return { st: 'err', txt: `${txt} — zu wenig`, was: 'Fusion-Konto aufladen oder Risiko Slave im Plan kleiner stellen (weniger Lots), dann ↻.' }
+    if(les.frei < noetig * (1 + FUSION_MARGE_RESERVE)) return { st: 'warn', txt: `${txt} — knapp`, was: '' }
+    return { st: 'ok', txt, was: '' }
+  }
+  // Infozeile fürs Plan-Popup: „Marge nötig ≈ X € · frei Y €" — null ohne Lesung (dann bleibt die bisherige Schätzung stehen)
+  function fusionMargePopupText(lots){
+    const les = fusionMargeQuelle(); if(!les || !(lots > 0)) return null
+    const alt = (les.alterMs != null && les.alterMs > FUSION_MARGE_LESUNG_MAX_MS) ? ` · Lesung vor ${Math.round(les.alterMs / 60000)} min` : ''
+    return les.jeLot ? `Marge nötig ≈ ${fusionMargeEur(lots * les.jeLot, les.w)} · frei ${fusionMargeEur(les.frei, les.w)}${alt}` : `Marge frei ${fusionMargeEur(les.frei, les.w)}${alt}`
+  }
+  window._fusionMarge = { pruefen: fusionMargePruefen, lesung: fusionMargeLesung, quelle: fusionMargeQuelle, popup: fusionMargePopupText }   // Test-Haken
   /* VORPRÜFLISTE (02.10.2026, Finn: „bevor Puls die Order platziert — Fusion verbunden, MT5-Copier läuft, Algo-Handel an — als visuelle
    * Prüfliste, die zur Startzeit kommt; erst wenn alles passt, startet der Trade"). Vorher prüfte die Slave-Vorprüfung nur „irgendein
    * Copier frisch". Jetzt einzeln aus /api/instances (dieselben Felder wie die Echo-Vorprüfung tpPreflightMt5): Panel, Copier, Hedge-
    * Terminal im Fusion-Konto (hedge_login = hedge_expected, sonst Server „Fusion"), Algo-Handel im Hedge-Terminal (nur explizites AUS
    * blockt, wie bei Echo), dazu der Puls-Chrome-Reader als HINWEIS (Radar schließt als Backup — kein Stopp). Anlass: EzPoker 01.10.2026,
    * Hedge-Terminal im Master-Konto → Copier brach ab, die alte Prüfung sagte nur „kein Copier mit frischem Status". */
-  async function slaveBereitPruefen(){
+  async function slaveBereitPruefen(plan){
     const checks = [], add = (k, label, st, txt, was) => checks.push({ k, label, st, txt: txt || '', was: was || '' })
     const fertig = () => { const err = checks.find(c => c.st === 'err'); return { ok: !err, grund: err ? `${err.label}: ${err.txt}` : '', checks } }
     if(!MT5_LOCAL || typeof window.mtcApi !== 'function'){ add('panel', 'Copier-Panel', 'err', 'Dieser Prophos-Tab hat keine Verbindung zum Panel auf dem PC.', 'Prophos auf dem PC über http://localhost:5000 öffnen (nicht pages.dev).'); return fertig() }
@@ -41915,6 +41985,11 @@
     else if(st.hedge_algo === false) add('algo', 'Algo-Handel im Fusion-Terminal', 'err', 'Algo-Handel ist AUS — der Copier darf so keine Fusion-Order senden.', 'Oben im Fusion-Terminal den Knopf „Algo-Handel“ anklicken, bis er grün ist.')
     else if(st.hedge_algo === true) add('algo', 'Algo-Handel im Fusion-Terminal', 'ok', 'an')
     else add('algo', 'Algo-Handel im Fusion-Terminal', 'warn', 'Nicht prüfbar (älterer Copier-Stand).')
+    // Fusion-Marge (06.10.2026): reicht die freie Marge für die Hedge-Lots? Ohne Plan (alter Aufruf) keine Zeile — die Liste bleibt wie bisher
+    if(plan){
+      if(!inst) add('marge', 'Fusion-Marge', 'warn', 'Nicht prüfbar, solange der Copier steht.')
+      else { const r = fusionMargePruefen(plan, st, null); add('marge', 'Fusion-Marge', r.st, r.txt, r.was) }
+    }
     try{
       if(typeof window._epLokalHolen === 'function') await window._epLokalHolen()
       const rs = (typeof epLokal !== 'undefined' && epLokal && epLokal.stand) ? epLokal.stand : null
@@ -41944,7 +42019,7 @@
     const rows = document.getElementById('vc-rows'), fin = document.getElementById('vc-final')
     const checks = (res && res.checks) || []
     if(phase === 'pruefe' || !checks.length){
-      rows.innerHTML = ['Copier-Panel', 'MT5-Copier', 'Fusion verbunden', 'Algo-Handel im Fusion-Terminal', 'Userscript im Puls-Chrome'].map(l =>
+      rows.innerHTML = ['Copier-Panel', 'MT5-Copier', 'Fusion verbunden', 'Algo-Handel im Fusion-Terminal', 'Fusion-Marge', 'Userscript im Puls-Chrome'].map(l =>
         `<div class="pf-row"><div class="pf-ico"><div class="pf-spinner"></div></div><div class="pf-body"><div class="pf-label">${escapeHtml(l)}</div><div class="pf-sub">prüfe…</div></div></div>`).join('')
       fin.style.display = 'none'
     } else {
@@ -41979,7 +42054,7 @@
     const plan = _vcPlan; if(!plan) return
     _vorcheckNaechst.delete(String(plan.id))   // geplanter Start: der nächste Takt prüft ohne Wartezeit
     vorcheckKarteZeigen(plan, null, 'pruefe')
-    const vc = await slaveBereitPruefen()
+    const vc = await slaveBereitPruefen(plan)
     vorcheckKarteZeigen(plan, vc, vc.ok ? 'ok' : (_vcPhase === 'stopp' ? 'stopp' : 'wartet'))
     if(vc.ok && _vcPhase === 'ok' && !plan.startUm && typeof tpOrbitStarten === 'function'){ try{ tpOrbitStarten(plan.id) }catch(_){} }   // Hand-Start: jetzt wirklich starten
   })
@@ -42038,7 +42113,7 @@
       // SLAVE-VORPRÜFUNG VOR dem Claim — der Claim verbraucht den Plan (start_um_gestartet_at), ein späterer Riegel ließe ihn nie wieder zu
       if(vorcheckNoetig(plan)){
         vorcheckKarteZeigen(plan, null, 'pruefe')
-        const vc = await slaveBereitPruefen()
+        const vc = await slaveBereitPruefen(plan)
         if(!vc.ok){
           if(verspaetet > (tpIstFarmerPlan(plan) ? 60 : 10) * 60 * 1000){
             const { data: dv } = await supabase.from('trade_plans').update({ start_um_gestartet_at: new Date().toISOString() })
@@ -43509,6 +43584,7 @@
       out.textContent = '—'
       if(slaveQtyEl) slaveQtyEl.textContent = '—'
       eq.textContent = master && slave ? 'Risiko und Anzahl ausfüllen' : 'Master und Slave wählen'
+      { const mg = document.getElementById('tp-mt5-marge'); if(mg) mg.textContent = '' }
       if(typeof window.tpDupMaybeFetchCurrent === 'function') window.tpDupMaybeFetchCurrent()
       if(typeof window.tpDupPushRender === 'function') window.tpDupPushRender()
       return
@@ -43518,6 +43594,7 @@
       out.textContent = '—'
       if(slaveQtyEl) slaveQtyEl.textContent = '—'
       eq.textContent = '–'
+      { const mg = document.getElementById('tp-mt5-marge'); if(mg) mg.textContent = '' }
       if(typeof window.tpDupMaybeFetchCurrent === 'function') window.tpDupMaybeFetchCurrent()
       if(typeof window.tpDupPushRender === 'function') window.tpDupPushRender()
       return
@@ -43525,6 +43602,8 @@
     const slaveQty = masterQty * mult
     out.textContent = mult.toFixed(3)
     if(slaveQtyEl) slaveQtyEl.textContent = slaveQty.toLocaleString('de-DE', { minimumFractionDigits:2, maximumFractionDigits:2 })
+    // Fusion-Marge (06.10.2026): echte Lesung vom Hedge-Terminal, nur wenn der Slave Fusion ist
+    { const mg = document.getElementById('tp-mt5-marge'); if(mg) mg.textContent = (firmToPreset(slave.firm) === 'fusion' && typeof fusionMargePopupText === 'function') ? (fusionMargePopupText(slaveQty) || '') : '' }
     const slavePreset = FIRM_PRESETS[firmToPreset(slave.firm)] || FIRM_PRESETS.projectx
     const masterPreset = FIRM_PRESETS[firmToPreset(master.firm)] || FIRM_PRESETS.projectx
     // NQ/MNQ-Toggle: effektives Symbol für Master und Slave anzeigen
