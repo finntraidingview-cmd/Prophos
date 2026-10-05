@@ -38403,7 +38403,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1041'
+  const OS_TAB_BUILD = '2026-09-22.1042'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -38598,6 +38598,31 @@
         pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : null } }, 'planned')
       try{ renderTradePlans() }catch(_){}
     }catch(e){ console.warn('[tsx-unklar] Marke', (e && e.message) || e) }
+  }
+  /* KONTO WEG BEIM START (06.10.2026, Master nach fb858d3/.1038: der Bot meldet code 'konto_weg' seitdem auch beim Orbit-Start — Konto
+   * steht nicht mehr im frisch angemeldeten Tradovate-Login, nichts platziert, ok false, retry_ok false, Felder konten_im_login/
+   * einzelkonto). Ohne eigenen Zweig landete das im UNKLAR-Text samt Marke, obwohl beweisbar nichts gesendet wurde. Hier derselbe
+   * Zustand wie bei der Endlesung (tvV2EndlesungVersuch): Plan nach „Überprüfen" (vermutlich geblowt), final.konto_weg + konto_weg_at,
+   * puls_aufgegeben (keine Lesung, keine Wiederholung — der Plan ist nicht mehr „Geplant", also startet ihn weder Karte noch Startzeit
+   * noch Signal erneut), puls_fehler „konto_weg: <msg>". Status-Guard 'planned': war der Plan inzwischen anders, nichts überschreiben.
+   * Rückgabe true = Plan steht unter „Überprüfen". Nur lesend an der Order-Start-Logik — reine Antwort-Auswertung. */
+  async function v2KontoWegBeimStart(plan, r){
+    const nowIso = new Date().toISOString()
+    try{
+      const { data, error } = await supabase.from('trade_plans').update({ status: 'review', ended_at: nowIso })
+        .eq('id', plan.id).eq('status', 'planned').select('*').single()
+      if(error) throw error
+      const row = Array.isArray(data) ? data[0] : data   // .single() liefert ein Objekt; Schutz gegen eine Liste (Stub/alte Lib), sonst stünde eine leere Karte unter Geplant
+      if(!row || !row.id) return false
+      const i = tradePlans.findIndex(x => String(x.id) === String(plan.id)); if(i >= 0) tradePlans[i] = rowToPlan(row)
+      try{
+        await baselinePatchIn(plan.id, 'final', { at: nowIso, grund: 'konto_weg', konto_weg: true, konto_weg_at: nowIso, puls_aufgegeben: true,
+          puls_at: nowIso, puls_fehler: 'konto_weg: ' + String((r && (r.msg || r.error)) || '').slice(0, 300), puls_konto: (r && r.konto_aktiv) || null,
+          konten_im_login: (r && r.konten_im_login != null) ? r.konten_im_login : null, einzelkonto: (r && r.einzelkonto != null) ? r.einzelkonto : null }, 'review')
+      }catch(e){ console.warn('[konto-weg] final-Vermerk', (e && e.message) || e) }
+      try{ renderTradePlans() }catch(_){}
+      return true
+    }catch(e){ console.warn('[konto-weg] Status→review', (e && e.message) || e); return false }
   }
   async function tpOrbitStarten(planId, fern, opts){
     if(!fern) return tpOrbitStartenKern(planId, null, opts)
@@ -39011,6 +39036,14 @@
       } else if(r && r.ok){
         // ok OHNE gesendet = der Bot am PC ist noch der alte (kennt „scharf" nicht, kommt in ~20 s nach).
         await fehler(`${r.msg || ''} Gesendet wurde NICHTS — der Puls am PC ist noch der alte Stand. Kurz warten, dann erneut „Starten".`, r)
+      } else if(plan.route === 'tvv2' && r && !r.gesendet && tvV2KontoWegAntwort(r)){
+        // KONTO WEG (06.10.2026): nichts platziert, Konto nicht mehr im Login → wie bei der Endlesung nach „Überprüfen", keine UNKLAR-Marke,
+        // kein zweiter Versuch (s. v2KontoWegBeimStart). Nur code 'konto_weg' — jeder andere Fehler läuft unverändert in die Zweige darunter.
+        const kw = await v2KontoWegBeimStart(plan, r)
+        const t = `Konto bei Tradovate nicht mehr vorhanden — vermutlich geblowt, nichts platziert. ${kw ? 'Der Plan steht unter „Überprüfen".' : 'Der Plan ließ sich nicht nach „Überprüfen" setzen — bitte von Hand „Erledigt".'} · ${r.msg || ''}`
+        if(fern) return fern.melde({ ok:false, konto_weg: true, msg: t, trail: r.trail || null })
+        if(imPopup){ _pfSet('ob-order', 'err', escapeHtml(t)); pfEnde(false, '✕ Konto weg · vermutlich geblowt — nichts platziert' + (kw ? ', Plan steht unter „Überprüfen".' : '.')); return }
+        toast(t, 'end')
       } else if(r && r.retry_ok === false){
         // retry_ok=false kommt vom Bot: der Kauf-Klick KANN raus sein. Dieselbe Regel wie auf
         // der MT5-Route (18.08.2026) — erst nachsehen, nie blind wiederholen, sonst liegt die
