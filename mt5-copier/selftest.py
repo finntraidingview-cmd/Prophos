@@ -4804,6 +4804,48 @@ def test_tsx_k2():
         g_ = _Tsx(ausloeser_verdeckt=True)
         (ok_g, c_g, m_g, _, _), _ = sichern(g_, E2)
         chk(not ok_g and g_.klicks == [] and "verdeckt" in m_g, f"Auslöser verdeckt (Dialog): kein Klick ({m_g})")
+        # TSX-LADEN (05.10.2026): Lade-Schirm über dem Auslöser = warten und neu lesen, jede andere Verdeckung = sofort raus wie bisher
+        LADE = {"disabled": False, "readonly": False, "verdeckt": True,
+                "oben": {"tag": "div", "role": "", "text": "Loading the Ultimate Trading Experience", "rect": [0, 0, 1920, 945]}}
+
+        class _TsxL(_Tsx):
+            def __init__(self, lade_n, **k):
+                super().__init__(**k)
+                self.lade_n, self.staende = lade_n, 0
+
+            def stand(self, opts=None):
+                st_ = super().stand(opts)
+                self.staende += 1
+                if self.lade_n > 0 and isinstance(st_.get("konto"), dict) and st_["konto"].get("aktiv"):
+                    self.lade_n -= 1
+                    st_["konto"]["zu"] = dict(LADE)
+                return st_
+        LS, B1 = ob.tsx_ladeschirm, ob.tsx_k1_bereit
+        chk(LS({"zu": LADE}) and not LS({"zu": dict(LADE, verdeckt=False)}) and not LS({"zu": {"verdeckt": True, "oben": {"text": "Dialog"}}})
+            and not LS({"zu": {"verdeckt": True, "oben": "ausserhalb"}}) and not LS({"zu": {"verdeckt": True, "oben": None}}) and not LS(None)
+            and not LS({}), "Lade-Schirm nur mit seinem Text über dem Auslöser (Dialog/außerhalb/leer nie)")
+        l0 = _TsxL(1)
+        st_l = l0.stand()
+        l0b = _TsxL(0)
+        chk(not B1(st_l) and B1(l0b.stand()) and st_l["kopf"]["balance"] is not None,
+            "Bereit-Probe: Konto + BAL lesbar, aber Lade-Schirm darüber → noch nicht bereit; ohne ihn bereit wie bisher")
+        l1 = _TsxL(4)                                    # 1 Lesung im Aufruf + 3 im Warten, dann frei
+        (ok_l, c_l, m_l, st_l1, ex_l), t_l = sichern(l1, E2)
+        chk(ok_l and l1.klicks == ["Konto-Auslöser", "Konto " + E2] and ex_l.get("konto_gewechselt") == {"von": E1, "zu": E2}
+            and any("Lade-Schirm" in x and "weiter" in x for x in t_l),
+            f"Lade-Schirm geht weg → danach derselbe Weg wie immer: Auslöser → Zeile ({l1.klicks}, {t_l})")
+        alt_ls = ob.TSX_LADEN_K2_S
+        ob.TSX_LADEN_K2_S = 0.05
+        try:
+            l2 = _TsxL(10 ** 9)
+            (ok_l2, c_l2, m_l2, _, _), _ = sichern(l2, E2)
+        finally:
+            ob.TSX_LADEN_K2_S = alt_ls
+        chk(not ok_l2 and c_l2 == "konto_nicht_erreicht" and l2.klicks == [] and "TopstepX lädt noch" in m_l2 and "Dialog offen" not in m_l2,
+            f"Lade-Schirm bleibt → kein Klick, ehrliche Meldung lädt noch ({m_l2})")
+        l3 = _TsxL(2, aktiv=E2)
+        (ok_l3, _, _, _, ex_l3), _ = sichern(l3, E2)
+        chk(ok_l3 and l3.klicks == [] and "konto_gewechselt" not in ex_l3, "richtiges Konto steht schon → kein Warten, kein Klick (wie bisher)")
         h = _Tsx(aktiv=E2)
         (ok_h, _, _, _, ex_h), _ = sichern(h, E2)
         chk(ok_h and h.klicks == [] and "konto_gewechselt" not in ex_h, "Konto steht schon: kein Klick")

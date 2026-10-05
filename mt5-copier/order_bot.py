@@ -14903,11 +14903,29 @@ def _tsx_bereit_warten(s, trail, opts=None, sek=None):
     return st, bereit
 
 
+# TSX-LADEN (05.10.2026, Finn: „der Tab wird wieder minimiert, obwohl TopstepX noch lädt"): Live-Lauf auf einem Topstep-PC — 7,5 s
+# nach dem Kaltstart waren Konto-Auslöser und BAL schon lesbar (Bereit-Probe bestanden, 3 Lesungen), der Lade-Schirm lag aber noch
+# darüber; K2 brach sofort ab: „Konto-Auslöser verdeckt ('Loading the Ultimate Trading Experience') — Dialog offen?". Der Text ist der
+# aus diesem Lauf (augen_tsx.js zustand(): oberstes Element am Mittelpunkt des Auslösers). Nur DIESE Verdeckung heißt „lädt noch";
+# jede andere (echter Dialog) bleibt wie bisher ein sofortiger Abbruch.
+TSX_LADEN_RX = re.compile(r"^\s*loading the ultimate", re.I)
+TSX_LADEN_K2_S = 10.0               # so lange wartet K2 selbst noch (die Bereit-Probe davor hat schon bis TSX_K1_BEREIT_S gewartet)
+
+
+def tsx_ladeschirm(ko):
+    """REIN RECHNEND (testbar): liegt über dem Konto-Auslöser der TopstepX-Lade-Schirm? ko = stand.konto (zu.verdeckt + zu.oben.text)."""
+    zu = ko.get("zu") if isinstance(ko, dict) and isinstance(ko.get("zu"), dict) else {}
+    oben = zu.get("oben") if isinstance(zu.get("oben"), dict) else {}
+    return bool(zu.get("verdeckt") and TSX_LADEN_RX.search(str(oben.get("text") or "")))
+
+
 def tsx_k1_bereit(stand):
-    """REIN RECHNEND (testbar): TopstepX aufgebaut? Konto-Auslöser gelesen UND BAL lesbar (beides kommt erst nach dem Lade-Schirm)."""
+    """REIN RECHNEND (testbar): TopstepX aufgebaut? Konto-Auslöser gelesen UND BAL lesbar (beides kommt erst nach dem Lade-Schirm) —
+    und seit 05.10.2026: der Lade-Schirm liegt nicht mehr über dem Auslöser (tsx_ladeschirm)."""
     st = stand if isinstance(stand, dict) else {}
     ko, kopf = st.get("konto"), st.get("kopf")
-    return bool(isinstance(ko, dict) and ko.get("aktiv") and isinstance(kopf, dict) and _tsx_wert(kopf.get("balance")) is not None)
+    return bool(isinstance(ko, dict) and ko.get("aktiv") and isinstance(kopf, dict) and _tsx_wert(kopf.get("balance")) is not None
+                and not tsx_ladeschirm(ko))
 
 
 def _tsx_wert(x):
@@ -15159,6 +15177,7 @@ def _tsx_konto_sichern(s, ext, st, trail):
     geklickt = False
     fremd_esc = False
     gewaehlt = None
+    lade_gewartet = False
     ko0 = st.get("konto") if isinstance(st.get("konto"), dict) else {}
     von = str(ko0.get("kontonr") or ko0.get("aktiv") or "")[:80]
 
@@ -15232,6 +15251,21 @@ def _tsx_konto_sichern(s, ext, st, trail):
         if not (isinstance(r, (list, tuple)) and len(r) >= 4 and r[2] >= 2 and r[3] >= 2):
             return _raus("konto_nicht_erreicht", "Konto-Auslöser ohne Rechteck (augen_tsx.js) — nichts geklickt.", st)
         zu = ko.get("zu") if isinstance(ko.get("zu"), dict) else {}
+        if not zu.get("disabled") and tsx_ladeschirm(ko) and not lade_gewartet:
+            # TSX-LADEN (05.10.2026): über dem Auslöser liegt noch der Lade-Schirm — EINMAL in kurzen Schritten warten und neu lesen,
+            # dann die Runde von vorn (das Konto kann inzwischen stehen). Kein Klick; bleibt er, ehrlich „lädt noch".
+            lade_gewartet = True
+            t_l = time.time()
+            while tsx_ladeschirm(ko) and time.time() - t_l < TSX_LADEN_K2_S:
+                _warte(0.6, 0.4)
+                st = s.stand()
+                ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+            n_l = int(round(time.time() - t_l))
+            if tsx_ladeschirm(ko):
+                return _raus("konto_nicht_erreicht", (f"TopstepX lädt noch (Lade-Schirm über dem Konto-Auslöser, weitere {n_l} s gewartet) — "
+                                                      "nichts geklickt, gleich erneut."), st, popups=st.get("popups"))
+            trail.append(f"K2: Lade-Schirm über dem Konto-Auslöser ist weg ({n_l} s gewartet) — weiter")
+            continue
         if zu.get("disabled") or zu.get("verdeckt"):
             oben = zu.get("oben") if isinstance(zu.get("oben"), dict) else {}
             return _raus("konto_nicht_erreicht", (f"Konto-Auslöser {'gesperrt' if zu.get('disabled') else 'verdeckt'} "
@@ -15548,7 +15582,9 @@ def modus_tsxlesen_cdp(cmd, order=None, order_cmd=None):
                 res["schritt"] = "lesen"
                 st, bereit = _tsx_bereit_warten(s, trail)
         ko = st.get("konto") if isinstance(st, dict) and isinstance(st.get("konto"), dict) else {}
-        if bereit and TSX_K2_AKTIV and tsx_konto_urteil(ko, ext) in ("nein", "vielleicht"):
+        # TSX-LADEN (05.10.2026): steht nach der Bereit-Probe nur noch der Lade-Schirm im Weg, trotzdem in den Konto-Schritt — der wartet
+        # dort noch einmal kurz und meldet sonst ehrlich „lädt noch" (ohne das läse K1 unter dem Lade-Schirm das falsche Konto an)
+        if (bereit or tsx_ladeschirm(ko)) and TSX_K2_AKTIV and tsx_konto_urteil(ko, ext) in ("nein", "vielleicht"):
             res["schritt"] = "konto"
             trail.append(f"K2: im Puls-Chrome steht '{str(ko.get('kontonr') or ko.get('aktiv') or '-')[:40]}', Ziel {ext} — Konto wechseln")
             ok2, c2, m2, st, ex2 = _tsx_konto_sichern(s, ext, st, trail)
