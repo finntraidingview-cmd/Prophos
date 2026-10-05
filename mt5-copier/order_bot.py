@@ -16881,6 +16881,7 @@ def _cdp_konto_sichern(s, ext, opts, trail):
         if ko.get("liste_offen"):
             e, n = cdp_konto_eintrag(ko.get("eintraege"), ext)
             if not e:
+                im_text = _cdp_ziel_im_text(s, ext) if n == 0 else None   # VOR dem Esc, solange die Liste offen ist (cdp_konto_weg)
                 _cdp_esc(s, st, trail, "Konto-Liste schließen")
                 ex = {"konto_eintraege": _eintr(ko), "konto_treffer": n}
                 grund = ""
@@ -16890,6 +16891,7 @@ def _cdp_konto_sichern(s, ext, opts, trail):
                     ja, grund = cdp_liste_beleg(ko, aktiv, ext)
                     if ja:
                         ex["liste_aktiv"] = aktiv[:80]
+                        ex["ziel_im_text"] = im_text
                     else:
                         ex["konto_treffer"] = None
                 return False, "konto_nicht_erreicht", (f"Konto {ext} steht im Dropdown {n}x (nicht genau einmal) — nichts geklickt"
@@ -16933,7 +16935,7 @@ def _cdp_konto_sichern(s, ext, opts, trail):
             if cdp_ein_konto_beleg(aktiv, ext):
                 trail.append(f"Umschalter öffnet keine Liste, aktiv {cdp_kontonr(aktiv)} ≠ Ziel {ext} → anderer Tradovate-Login (Login mit einem Konto)")
                 return False, "konto_nicht_erreicht", (f"Konto {ext} nicht im aktiven Tradovate-Login (der hat nur {cdp_kontonr(aktiv)}) — Login-Wechsel."), st, \
-                    {"konto_treffer": 0, "liste_aktiv": aktiv[:80], "ein_konto": True}
+                    {"konto_treffer": 0, "liste_aktiv": aktiv[:80], "ein_konto": True, "ziel_im_text": _cdp_ziel_im_text(s, ext)}
             return False, "konto_nicht_erreicht", (f"Konto-Umschalter geklickt, Dropdown nicht erkannt (aktiv '{aktiv[:40] or '-'}') — "
                                                    "augen.js sieht die Liste nicht (Selektoren?), der Klick trifft nicht, oder der Login hat "
                                                    "nur dieses eine Konto" + (f"; Order-Panel {lage} ({(pd or {}).get('unter_leiste')} px)" if lage else "")
@@ -19212,6 +19214,62 @@ def cdp_login_noetig(code, extra):
     return code == "konto_nicht_erreicht" and isinstance(extra, dict) and extra.get("konto_treffer") == 0
 
 
+# KONTO WEG (05.10.2026, Finn: zwei Endlesungen geblowter FundedNext-Futures-Konten endeten als Login-Fehler „… auch nach dem
+# Tradovate-Login. Gehört der Username wirklich zu dieser Firma?" — der Login stimmte, die Konten gab es bei Tradovate nicht mehr).
+# Der Bot sieht nirgends, mit welchem Benutzer Tradovate verbunden ist. Sicher weiß er es nur, wenn er sich in DIESEM Lauf selbst über
+# das Tradovate-Formular angemeldet hat (Username dort exakt bewiesen, _cdp_anmelden ohne Fehler — nicht bei „ohne Anmeldeseite
+# verbunden" und nicht bei einer gemerkten Sitzung). Steht das Ziel danach zweimal hintereinander nicht im Login, endet der Lauf mit
+# dem eigenen Code 'konto_weg' statt 'konto_nicht_erreicht'. Am selben Abend stand ein Konto sichtbar in der Liste und galt wegen
+# einer Erkennungslücke (vier Endziffern) als „0×" — deshalb zählt zusätzlich nur, wenn das Ziel nirgends im sichtbaren Text der Seite
+# stand (cdp_ziel_im_text_js, gelesen bei offener Liste).
+def cdp_ziel_schluessel(ext):
+    """REIN RECHNEND (testbar): die letzten 8 Zeichen der External ID (nur Buchstaben/Ziffern, groß) — damit wird das Ziel im
+    sichtbaren Text gesucht. Unter 6 Zeichen '' (zu kurz für einen Beweis)."""
+    u = _nur_alnum(str(ext or "")).upper()
+    return u[-8:] if len(u) >= 6 else ""
+
+
+def cdp_ziel_im_text_js(ext):
+    """Steht das Ziel irgendwo im sichtbaren Text der Seite (ohne Trennzeichen verglichen)? Liest nur. -> JS-Ausdruck | ''"""
+    k = cdp_ziel_schluessel(ext)
+    if not k:
+        return ""
+    return ("(function(){var t=((document.body&&document.body.innerText)||'').replace(/[^A-Za-z0-9]/g,'').toUpperCase();"
+            "return t.indexOf(" + json.dumps(k) + ")>=0;})()")
+
+
+def _cdp_ziel_im_text(s, ext):
+    """-> True (steht da) | False (steht nirgends) | None (nicht prüfbar — zählt nie als Beweis). Wirft nie."""
+    js = cdp_ziel_im_text_js(ext)
+    if not js:
+        return None
+    try:
+        v = s.lese_js(js)
+    except Exception:
+        return None
+    return v if isinstance(v, bool) else None
+
+
+def cdp_konto_weg(extra, formular, ext):
+    """REIN RECHNEND (testbar): Belegt der Konto-Schritt NACH dem eigenen Formular-Login, dass es das Ziel bei Tradovate nicht mehr
+    gibt? -> (ja, konten_im_login, einzelkonto). Nur wenn alles gilt: formular (s. Block-Kopf) · Ziel 0× mit Beleg (konto_treffer 0 +
+    liste_aktiv: selbst geöffnete Liste bzw. Login mit genau einem lesbaren anderen Konto) · das aktive Konto gehört zur selben Firma
+    wie das Ziel (sonst stimmt der hinterlegte Username nicht — alte Meldung; damit zählt in der Listen-Variante auch nur die
+    vollständige Liste, cdp_liste_beleg) · Ziel stand nirgends im sichtbaren Text (ziel_im_text genau False)."""
+    nein = (False, None, False)
+    if formular is not True or not isinstance(extra, dict) or extra.get("konto_treffer") != 0 or not extra.get("liste_aktiv"):
+        return nein
+    if extra.get("ziel_im_text") is not False:
+        return nein
+    fa, fz = cdp_konto_familie(cdp_kontonr(extra.get("liste_aktiv"))), cdp_konto_familie(ext)
+    if not fa or fa != fz:
+        return nein
+    if extra.get("ein_konto") is True:
+        return True, 1, True
+    n = len([x for x in (extra.get("konto_eintraege") or []) if x])
+    return (True, n, False) if n >= 1 else nein
+
+
 def cdp_abmelden_erlaubt(aktiv, beleg):
     """REIN RECHNEND (testbar): Darf der Login-Weg die laufende Tradovate-Sitzung abmelden? -> (ja, grund)
     Regression .865 (30.09.2026, pc-cccccc, Plan …): der Login-Weg las den aktuellen Login als '-' und klickte „Log out" —
@@ -19991,12 +20049,14 @@ def _cdp_anmelden(s, ort, benutzer, opts, trail, vorher=None, sitz=None):
     return "verbunden", "Nach dem Login zeigt TradingView kein Konto (40 s) — Puls-Chrome ansehen."
 
 
-def _cdp_tradovate_verbinden(sitz, cmd, opts, trail, beleg=None):
+def _cdp_tradovate_verbinden(sitz, cmd, opts, trail, beleg=None, merk=None):
     """Schritte [2]–[5]: einmal Tradovate mit dem Login der Firma verbinden. sitz = [Sitzung], wird beim Tab-Tausch ersetzt.
     -> (code, text, wie) — code '' = TradingView zeigt danach ein Tradovate-Konto (welches, klärt der Aufrufer über das Dropdown);
     wie 'login' = selbst angemeldet, 'selbst' = eine gemerkte Sitzung hat sich von allein verbunden, 'steht' = ein Konto ist zu
     sehen, aber ohne Beleg für einen fremden Login (nichts abgemeldet, der Aufrufer macht den Konto-Schritt neu).
-    beleg = extra des letzten Konto-Schritts (cdp_abmelden_erlaubt). code 'login_unlesbar' = verbunden, Konto nicht lesbar."""
+    beleg = extra des letzten Konto-Schritts (cdp_abmelden_erlaubt). code 'login_unlesbar' = verbunden, Konto nicht lesbar.
+    merk (05.10.2026, cdp_konto_weg): bekommt formular=True NUR, wenn die Anmeldung über das Tradovate-Formular mit genau diesem
+    Username durchlief — der einzige Beweis, mit welchem Benutzer Tradovate jetzt verbunden ist."""
     benutzer = str(cmd.get("tv_username") or "").strip()
     s = sitz[0]
     _cdp_kachel_weg(s, trail)                             # Werbe-Kachel vor dem Login-Schritt weg (05.10.2026)
@@ -20056,6 +20116,8 @@ def _cdp_tradovate_verbinden(sitz, cmd, opts, trail, beleg=None):
                         trail.append("[Login] Tradovate-Tab geschlossen")
                     ort.zu()
             if code != "abgebrochen":
+                if not code and isinstance(merk, dict):
+                    merk["formular"] = True
                 return code, text, "login"
         if versuch == 1:
             # TradingView hat den Login abgebrochen („Error! The login operation has been canceled") — Dialog steht mit Connect
@@ -20128,11 +20190,11 @@ def _cdp_konto_mit_login(sitz, ext, opts, cmd, trail, res):
                              "(Einstellungen > Prop Firms > Firma bearbeiten > 'Tradovate-Username für TradingView')."), st, extra
     t0 = time.time()
     res["login"] = {"username": benutzer, "anlass": code, "durchgaenge": 0}
-    wege = []
+    wege, merk = [], {}
     for durchgang in (1, 2, 3):
         res["login"]["durchgaenge"] = durchgang
         trail.append(f"[Login] {durchgang}. Durchgang: Konto {ext} im Puls-Chrome nicht erreichbar ({code}) → Tradovate mit '{benutzer}' verbinden")
-        c2, m2, wie = _cdp_tradovate_verbinden(sitz, cmd, opts, trail, beleg=extra)
+        c2, m2, wie = _cdp_tradovate_verbinden(sitz, cmd, opts, trail, beleg=extra, merk=merk)
         if c2 == "login_unlesbar":
             # Regression .865 (30.09.2026): nichts abgemeldet — ehrlich raus mit dem Befund, kein „Login nicht geschafft"
             res["login"].update(ok=False, code=c2)
@@ -20153,11 +20215,33 @@ def _cdp_konto_mit_login(sitz, ext, opts, cmd, trail, res):
         if (ok or not cdp_login_noetig(code, extra) or wie not in ("selbst", "steht") or time.time() - t0 > CDP_LOGIN_ZWEITER_BIS_S
                 or wege.count("steht") > 1 or echte >= 2):
             break
+    # KONTO WEG (Block-Kopf bei cdp_konto_weg): eigener Formular-Login war der letzte Schritt, das Ziel steht danach nicht im Login →
+    # nach einer Pause EIN zweiter Konto-Schritt (die Kontoliste kann nach dem Login noch nachladen). Kommt das Konto dabei doch,
+    # läuft der Lauf normal weiter; nur zwei gleiche Befunde ergeben 'konto_weg'. Danach kein weiterer Abmelde-/Login-Versuch.
+    weg = (False, None, False)
+    if not ok and merk.get("formular") is True and wege and wege[-1] == "login":
+        erst = cdp_konto_weg(extra, True, ext)
+        if erst[0]:
+            trail.append(f"[Login] Ziel {ext} steht nach dem eigenen Login nicht im Login ({erst[1]} Konto/Konten) — zweiter Blick")
+            _warte(2.5, 1.0)
+            ok, code, msg, st, extra = _cdp_konto_sichern(sitz[0], ext, opts, trail)
+            zweit = (False, None, False) if ok else cdp_konto_weg(extra, True, ext)
+            if zweit[0] and zweit[1:] == erst[1:]:
+                weg = zweit
     res["login"].update(ok=bool(ok), code="" if ok else code)
     noetig = not ok and cdp_login_noetig(code, extra)
     if not ok and code == "kein_broker":
         code = "konto_nicht_erreicht"          # nach dem Login-Weg gilt der Vertrag des Docstrings (Panel 409 „Konto ?")
-    if noetig:
+    if weg[0]:
+        code = "konto_weg"
+        # Kontonummer hier nur mit den letzten vier Stellen: msg landet in puls_fehler und im Radar-Tooltip (Master 06.10.2026)
+        msg = (f"Konto …{str(ext)[-4:]} bei Tradovate nicht mehr vorhanden (im Login des Kontos "
+               + ("steht 1 Konto" if weg[1] == 1 else f"stehen {weg[1]} Konten") + ", dieses nicht) — vermutlich geblowt.")
+        extra = dict(extra, retry_ok=False, konten_im_login=weg[1], einzelkonto=bool(weg[2]))
+        res["login"]["code"] = code
+        trail.append(f"[Login] Konto weg: nach dem eigenen Login mit '{benutzer}' zweimal gelesen — {weg[1]} Konto/Konten im Login, "
+                     "Ziel nicht dabei, kein weiterer Login-Versuch")
+    elif noetig:
         if "login" in wege:
             msg += f" — auch nach dem Tradovate-Login '{benutzer}'. Gehört der Username wirklich zu dieser Firma?"
         elif "selbst" in wege:

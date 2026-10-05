@@ -1900,6 +1900,7 @@ def main():
     results.append(test_puls_k3())
     results.append(test_puls_cdp_login())
     results.append(test_cdp_konto_regression_865())
+    results.append(test_cdp_konto_weg())
     results.append(test_tsx_k0())
     results.append(test_tsx_k1_vorbau())
     results.append(test_tsx_k2())
@@ -3967,6 +3968,161 @@ def test_cdp_konto_regression_865():
         "Shift+T: Chart-Klick nur nach gedrücktem Restore, danach NICHT wieder maximiert (höchstens Open panel); Symbol bis ~6 s warten")
     if ok:
         print("✓ Regression .865: fremde Liste kein Beleg, Abmelden nur mit Beleg, unlesbar = ehrlich raus, Umschalter auch maximiert")
+    return ok
+
+
+def test_cdp_konto_weg():
+    """KONTO WEG (05.10.2026, Finn): zwei Endlesungen geblowter Konten endeten als Login-Fehler („… auch nach dem Tradovate-Login.
+    Gehört der Username wirklich zu dieser Firma?") — der Login stimmte, die Konten gab es bei Tradovate nicht mehr. Geprüft: eigener
+    Code 'konto_weg' nur nach eigenem Formular-Login + zwei gleichen Befunden + Ziel nirgends im sichtbaren Text + gleiche Firma;
+    alles andere bleibt wie bisher. Alle Kennungen erfunden."""
+    import order_bot as ob, inspect as _i, re
+    ok = True
+
+    def chk(bed, text):
+        nonlocal ok
+        if not bed:
+            print("  ✗ Konto weg: " + text)
+            ok = False
+    FN1, FN2, FN3, TD1 = "FNFTCHMUSTERMANNMAX10001", "FNFTCHMUSTERMANNMAX20002", "FNFTCHMUSTERMANNMAX3003", "TDFYSL150300000000"
+    W, S = ob.cdp_konto_weg, ob.cdp_ziel_schluessel
+    ein = {"konto_treffer": 0, "liste_aktiv": FN1 + "USD", "ein_konto": True, "ziel_im_text": False}
+    lst = {"konto_treffer": 0, "liste_aktiv": FN1 + "USD", "konto_eintraege": [FN1 + "USD", FN3 + "USD"], "ziel_im_text": False}
+    chk(W(ein, True, FN2) == (True, 1, True) and W(lst, True, FN2) == (True, 2, False), "Einzelkonto und vollständige Liste zählen")
+    chk(not W(ein, False, FN2)[0] and not W(ein, None, FN2)[0] and not W(ein, 1, FN2)[0], "ohne eigenen Formular-Login nie")
+    chk(not W(dict(ein, ziel_im_text=True), True, FN2)[0] and not W(dict(ein, ziel_im_text=None), True, FN2)[0]
+        and not W({k: v for k, v in ein.items() if k != "ziel_im_text"}, True, FN2)[0], "Ziel im sichtbaren Text oder nicht prüfbar → nie")
+    chk(not W(dict(ein, konto_treffer=None), True, FN2)[0] and not W(dict(ein, konto_treffer=2), True, FN2)[0]
+        and not W(dict(ein, liste_aktiv=""), True, FN2)[0] and not W(None, True, FN2)[0], "ohne Beleg des Konto-Schritts nie")
+    chk(not W(dict(ein, liste_aktiv=TD1 + "USD"), True, FN2)[0] and not W(dict(ein, liste_aktiv="EXPRESS-V2-000000-00000000"), True, "EXPRESS-V2-000000-00000001")[0]
+        and not W(dict(lst, konto_eintraege=[]), True, FN2)[0], "andere Firma / unbekannte Firma / leere Liste → nie")
+    chk(S(FN3) == "NMAX3003" and S("fnftch musterMannMax 3003") == "NMAX3003" and S("AB12") == "" and S(None) == "", "Such-Schlüssel: letzte 8 Zeichen, zu kurz = keiner")
+    js = ob.cdp_ziel_im_text_js(FN3)
+    chk('"NMAX3003"' in js and "innerText" in js and ".click(" not in js and not re.search(r"\.value\s*=[^=]", js) and ob.cdp_ziel_im_text_js("AB") == "",
+        "Text-Probe liest nur")
+
+    class _P:
+        def __init__(self, w):
+            self.w = w
+
+        def lese_js(self, a, timeout=8):
+            if isinstance(self.w, Exception):
+                raise self.w
+            return self.w
+    chk(ob._cdp_ziel_im_text(_P(True), FN2) is True and ob._cdp_ziel_im_text(_P(False), FN2) is False and ob._cdp_ziel_im_text(_P({"a": 1}), FN2) is None
+        and ob._cdp_ziel_im_text(_P(RuntimeError("x")), FN2) is None and ob._cdp_ziel_im_text(_P(False), "AB") is None and ob._cdp_ziel_im_text(object(), FN2) is None,
+        "Text-Probe: True/False, sonst None, wirft nie")
+
+    # Konto-Schritt mit Attrappe: Probe läuft VOR dem Esc (Liste noch offen) und landet in extra
+    MAX = {"leiste": [56, 0, 1194, 38], "unter_leiste": 735, "max_knopf": {"rect": [1212, 0, 38, 38], "aria": "Restore panel"}}
+
+    class _S:
+        ws = None
+
+        def __init__(self, zeilen, im_text=False, liste=True):
+            self.zeilen, self.im_text, self.liste, self.offen, self.spur = zeilen, im_text, liste, False, []
+
+        def stand(self, opts=None):
+            e = [{"text": z + "USD", "rect": [78, 90 + 32 * i, 228, 32], "aktiv": i == 0} for i, z in enumerate(self.zeilen)]
+            return {"konto": {"panel": "offen", "panel_lage": "maximiert", "schalter": {"rect": [72, 59, 199, 28]}, "aktiv": self.zeilen[0] + "USD",
+                              "liste_offen": self.offen, "liste_voll": self.offen, "eintraege": e if self.offen else []}}
+
+        def lese_js(self, a, timeout=8):
+            if "innerText" in a:
+                self.spur.append("probe:" + ("offen" if self.offen else "zu"))
+                return self.im_text
+            return {"frei": True, "was": ""} if "elementFromPoint" in a else dict(MAX)
+
+        def werbung_weg(self, zwang=False):
+            return 0
+
+        def taste(self, k, modifiers=0):
+            self.spur.append("Taste " + k)
+            self.offen = False
+
+        def klick(self, r, n, toast_ok=False):
+            self.spur.append(n)
+            if n == "Konto-Umschalter" and self.liste:
+                self.offen = True
+            elif n.startswith("Konto "):
+                z = n.split(" ", 1)[1]
+                self.zeilen, self.offen = [z] + [x for x in self.zeilen if x != z], False
+            return True
+    alt = {n: getattr(ob, n) for n in ("_warte", "_cdp_konto_sichern", "_cdp_tradovate_verbinden", "_cdp_login_sichern", "_cdp_sitzung_zurueck")}
+    ob._warte = lambda a_, b_: None
+    try:
+        s1 = _S([FN1, FN3])
+        r1 = ob._cdp_konto_sichern(s1, FN2, {}, [])
+        s2 = _S([FN1], liste=False)
+        r2 = ob._cdp_konto_sichern(s2, FN2, {}, [])
+        s3 = _S([FN1, FN3], im_text=True)
+        r3 = ob._cdp_konto_sichern(s3, FN2, {}, [])
+        s4 = _S([FN1, FN2])
+        r4 = ob._cdp_konto_sichern(s4, FN2, {}, [])
+
+        # Login-Weg mit Attrappen: Folge von Konto-Schritt-Ergebnissen, Verbinden meldet 'login' mit/ohne Formular
+        def kn(extra, msg="Ziel fehlt"):
+            return (False, "konto_nicht_erreicht", msg, {}, dict(extra))
+
+        def lauf(folge, formular=True, wie="login"):
+            n = {"k": 0, "v": 0}
+
+            def _ks(s, ext, opts, trail):
+                n["k"] += 1
+                return folge[min(n["k"], len(folge)) - 1]
+
+            def _tv(sitz, cmd, opts, trail, beleg=None, merk=None):
+                n["v"] += 1
+                if formular and isinstance(merk, dict):
+                    merk["formular"] = True
+                return "", "", wie
+            ob._cdp_konto_sichern, ob._cdp_tradovate_verbinden = _ks, _tv
+            ob._cdp_login_sichern, ob._cdp_sitzung_zurueck = (lambda res, trail: None), (lambda s, o, t: False)
+            res, tr = {}, []
+            aus = ob._cdp_konto_mit_login([object()], FN2, {}, {"tv_username": "FNFT_MUSTER"}, tr, res)
+            return aus, res, tr, n
+        a, res_a, tr_a, n_a = lauf([kn(ein), kn(ein), kn(ein)])
+        b, res_b, tr_b, n_b = lauf([kn(ein), kn(dict(lst, konto_eintraege=[FN1, FN3, TD1])), kn(dict(lst, konto_eintraege=[FN1, FN3, TD1]))])
+        c, res_c, tr_c, n_c = lauf([kn(ein), kn(ein), kn(ein)], formular=False)
+        d, res_d, tr_d, n_d = lauf([kn(ein), kn(ein), (True, "", "", {"x": 1}, {"konto_aktiv": FN2 + "USD"})])
+        e, res_e, tr_e, n_e = lauf([kn(ein), kn(ein), kn(lst)])
+        f, res_f, tr_f, n_f = lauf([kn(ein), kn(dict(ein, ziel_im_text=True)), kn(dict(ein, ziel_im_text=True))])
+        g, res_g, tr_g, n_g = lauf([kn(ein), kn(dict(ein, liste_aktiv=TD1 + "USD")), kn(dict(ein, liste_aktiv=TD1 + "USD"))])
+        h, res_h, tr_h, n_h = lauf([kn(ein), kn(ein), kn(ein), kn(ein)], wie="selbst")
+    finally:
+        for n_, f_ in alt.items():
+            setattr(ob, n_, f_)
+    chk(r1[1] == "konto_nicht_erreicht" and r1[4].get("konto_treffer") == 0 and r1[4].get("ziel_im_text") is False and r1[4].get("liste_aktiv")
+        and "probe:offen" in s1.spur and s1.spur.index("probe:offen") < s1.spur.index("Taste Escape"),
+        f"Liste ohne Ziel: Text-Probe bei offener Liste vor dem Esc, Ergebnis in extra ({s1.spur}, {r1[4]})")
+    chk(r2[4].get("ein_konto") is True and r2[4].get("ziel_im_text") is False and any(x.startswith("probe:") for x in s2.spur),
+        f"Login mit einem Konto: Text-Probe läuft ({s2.spur}, {r2[4]})")
+    chk(r3[4].get("ziel_im_text") is True and not W(r3[4], True, FN2)[0] and W(r1[4], True, FN2) == (True, 2, False), "Ziel im Text sichtbar → kein Beweis")
+    chk(r4[0] is True and not any(x.startswith("probe:") for x in s4.spur), f"Konto in der Liste: wie bisher gewählt, keine Probe ({s4.spur})")
+    chk(a[1] == "konto_weg" and a[4].get("retry_ok") is False and a[4].get("konten_im_login") == 1 and a[4].get("einzelkonto") is True
+        and "nicht mehr vorhanden" in a[2] and "steht 1 Konto" in a[2] and "vermutlich geblowt" in a[2] and "Gehört der Username" not in a[2]
+        and FN2 not in a[2] and "Konto …0002 bei" in a[2]
+        and res_a["login"].get("code") == "konto_weg" and res_a["login"].get("ok") is False and n_a == {"k": 3, "v": 1}
+        and any("Konto weg" in x for x in tr_a), f"Einzelkonto nach eigenem Login, zweimal gleich → konto_weg, EIN Login ({a[1]}, {a[2]}, {n_a})")
+    chk(b[1] == "konto_weg" and b[4].get("konten_im_login") == 3 and b[4].get("einzelkonto") is False and "stehen 3 Konten" in b[2] and n_b == {"k": 3, "v": 1},
+        f"vollständige Liste ohne Ziel → konto_weg mit Anzahl ({b[1]}, {b[2]})")
+    chk(c[1] == "konto_nicht_erreicht" and "auch nach dem Tradovate-Login" in c[2] and "retry_ok" not in c[4] and n_c == {"k": 2, "v": 1},
+        f"ohne Formular-Login (Tradovate war noch angemeldet) → alte Meldung, kein zweiter Blick ({c[1]}, {n_c})")
+    chk(d[0] is True and d[1] == "" and res_d["login"].get("ok") is True and n_d == {"k": 3, "v": 1}, f"zweiter Blick findet das Konto → Lauf geht normal weiter ({d[:3]})")
+    chk(e[1] == "konto_nicht_erreicht" and "auch nach dem Tradovate-Login" in e[2] and "retry_ok" not in e[4], f"zweiter Blick anders als der erste → alte Meldung ({e[1]}, {e[2]})")
+    chk(f[1] == "konto_nicht_erreicht" and n_f == {"k": 2, "v": 1} and g[1] == "konto_nicht_erreicht" and "Gehört der Username" in g[2] and n_g == {"k": 2, "v": 1},
+        "Ziel im Text sichtbar bzw. Login einer anderen Firma → alte Meldung, kein zweiter Blick")
+    chk(h[1] == "konto_nicht_erreicht" and "gemerkte Tradovate-Sitzung" in h[2] and "retry_ok" not in h[4], f"gemerkte Sitzung → nie konto_weg ({h[2]})")
+    q_tv, q_km, q_ks = _i.getsource(ob._cdp_tradovate_verbinden), _i.getsource(ob._cdp_konto_mit_login), _i.getsource(ob._cdp_konto_sichern)
+    chk(q_tv.count('merk["formular"] = True') == 1 and q_tv.index("_cdp_anmelden(") < q_tv.index('merk["formular"] = True')
+        and "if not code and isinstance(merk, dict):" in q_tv, "Formular-Beweis nur nach _cdp_anmelden ohne Fehler")
+    chk(q_km.index('code = "konto_weg"') > q_km.index("zweit[1:] == erst[1:]") and 'wege[-1] == "login"' in q_km
+        and q_km.count("_cdp_tradovate_verbinden(") == 1 and q_ks.index("_cdp_ziel_im_text(s, ext) if n == 0") < q_ks.index('"Konto-Liste schließen"'),
+        "konto_weg nur nach zwei gleichen Befunden; Probe vor dem Esc")
+    for m in (ob.modus_tvlesen_cdp, ob.modus_tvkette_cdp, ob.modus_tvclose_cdp):
+        chk('**{k: v for k, v in extra.items() if k != "konto_aktiv"}' in _i.getsource(m), f"{m.__name__}: Code, retry_ok und Zähler reisen ins Ergebnis")
+    if ok:
+        print("✓ Konto weg: eigener Code nur nach eigenem Formular-Login + zwei gleichen Befunden + Ziel nirgends im Text; sonst alles wie bisher")
     return ok
 
 
