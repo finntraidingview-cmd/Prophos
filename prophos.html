@@ -2140,7 +2140,7 @@
      viele Daten, sehr unübersichtlich") ── Je Firma ein Kasten, darin EINMAL die Spaltenköpfe und eine schlanke Zeile je V2-Plan ohne
      Hedge (Orbit V2/Echo V2, Auto und von Hand). Gleiche Sprache wie die Radar-Tabelle (wdl-z, .844): Graustufen, tabular-nums,
      Beträge rechtsbündig, Grün/Rot nur für TP/SL. Weg, Richtung und Firma stehen einmal im Firmen-Kopf, nicht in jeder Zeile.
-     Raster über subgrid: die Aktions-Spalte ist so breit wie ihr breitester Inhalt, trotzdem steht alles exakt untereinander.
+     Raster über subgrid mit festen Spalten — in jedem Firmen-Block steht alles exakt untereinander.
      Karten mit Hedge (tc2: Echo/Orbit, Winning Days, Topstep V2) bleiben, wie sie sind. */
   #dashboard-view .pz-kopf{display:flex;align-items:center;gap:4px 10px;flex-wrap:wrap;margin:12px 2px -2px;font-size:12.5px;color:var(--sub);font-variant-numeric:tabular-nums}
   #dashboard-view .pz-kopf:first-child{margin-top:2px}
@@ -2149,7 +2149,7 @@
   #dashboard-view .pz-kopf .pz-sl{color:#b91c1c;font-weight:600}
   #dashboard-view .pz-kopf .pz-warn{color:#B45309;font-weight:600}
   #dashboard-view .pz-kopf i{font-style:normal;color:var(--sub-2)}
-  #dashboard-view .pz-tab{display:grid;grid-template-columns:96px minmax(90px,.8fr) minmax(170px,1.4fr) minmax(118px,.6fr) 64px 80px 80px minmax(168px,auto);column-gap:12px;border:1px solid var(--border-soft);border-radius:10px;background:var(--surface);overflow:hidden}
+  #dashboard-view .pz-tab{display:grid;grid-template-columns:88px minmax(162px,.7fr) minmax(210px,1.4fr) minmax(118px,.6fr) 60px 76px 76px 168px;column-gap:10px;border:1px solid var(--border-soft);border-radius:10px;background:var(--surface);overflow:hidden}
   #dashboard-view .pz-z{display:grid;grid-template-columns:subgrid;grid-column:1/-1;align-items:center;min-height:42px;padding:6px 14px;font-size:13px;color:var(--ink-2);font-variant-numeric:tabular-nums;transition:background .12s}
   #dashboard-view .pz-z + .pz-z{border-top:1px solid var(--border-soft)}
   #dashboard-view .pz-z:not(.pz-z-kopf):hover{background:var(--bg)}
@@ -2162,6 +2162,9 @@
   #dashboard-view .pz-zeit-x:hover{color:var(--ink-2)}
   #dashboard-view .pz-konto b{font-weight:600;color:var(--ink)}
   #dashboard-view .pz-konto small{margin-left:6px;font-size:12px;color:var(--sub)}
+  /* Phasen-Chip (05.10.2026): die Typ-Farben der Accounts-Liste (.type-*), nur kleiner; Handy-Kurzform nur am Handy */
+  #dashboard-view .pz-typ{margin-left:8px;padding:1px 6px;font-size:10.5px;vertical-align:1px;white-space:nowrap}
+  #dashboard-view .pz-typ-m{display:none}
   #dashboard-view .pz-z > .pz-bal{display:flex;flex-direction:column;gap:4px}
   #dashboard-view .pz-bal-t{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #dashboard-view .pz-bal-t em{font-style:normal;color:var(--sub-2);margin:0 2px}
@@ -2175,16 +2178,18 @@
   #dashboard-view .pz-z:not(.pz-z-kopf) > .pz-tp{font-weight:600;color:#15803d}
   #dashboard-view .pz-z:not(.pz-z-kopf) > .pz-sl{font-weight:600;color:#b91c1c}
   #dashboard-view .pz-z:not(.pz-z-kopf) > .is-leer{font-weight:400;color:var(--sub-2)}
-  #dashboard-view .pz-z > .pz-akt{display:flex;align-items:center;justify-content:flex-end;gap:4px;overflow:visible;min-width:max-content}   /* sonst rechnet die auto-Spalte mit 0 und die Knöpfe liegen über dem SL */
+  /* Aktionen: feste 168 px in JEDEM Firmen-Block (gleiches Raster überall); die fünf Knöpfe einer von Hand geplanten Zeile
+     brechen in zwei Reihen um, statt über den Rand oder über den SL zu laufen (05.10.2026) */
+  #dashboard-view .pz-z > .pz-akt{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:4px;overflow:visible;white-space:normal}
   #dashboard-view .pz-akt .tc2-ab{padding:4px 6px}
   #dashboard-view .pz-akt .tc2-btn{padding:3px 10px;font-size:11.5px;white-space:nowrap}
   /* Bestätigen klein als Outline, bestätigt nur noch als ruhiges Wort — kein roter/grüner Kartenrand mehr. Die Hülle .pz-zustand ist
      der Platz, an dem später der Start-Zustand („startet 08:44") steht. */
   #dashboard-view .pz-ok{border:1px solid var(--border);color:var(--ink-2);font-weight:500}
   #dashboard-view .pz-ok.is-ok{border-color:transparent;color:#15803d}
-  /* Schmales Fenster (Seitenleiste + Tabelle unter ~1000 px): die Art-Spalte weicht, damit die Knöpfe nie über den Rand laufen */
-  @media (max-width:1240px){
-    #dashboard-view .pz-tab{grid-template-columns:96px minmax(80px,.8fr) minmax(130px,1.4fr) 64px 80px 80px minmax(168px,auto)}
+  /* Schmales Fenster (Tabelle unter ~1060 px): Art-Spalte und „· Rest" weichen, damit nichts über den Rand läuft */
+  @media (max-width:1359px){
+    #dashboard-view .pz-tab{grid-template-columns:88px minmax(162px,.7fr) minmax(130px,1.4fr) 60px 76px 76px 168px}
     #dashboard-view .pz-z > .pz-art,#dashboard-view .pz-bal-t .pz-rest{display:none}
   }
   /* Handy: zwei Zeilen — oben Start · Konto · Größe · TP · SL, darunter Balance → Ziel und die Knöpfe. Art steht im Tooltip. */
@@ -2198,6 +2203,8 @@
     #dashboard-view .pz-zeit{grid-area:zeit} #dashboard-view .pz-konto{grid-area:konto} #dashboard-view .pz-bal{grid-area:bal}
     #dashboard-view .pz-gr{grid-area:gr} #dashboard-view .pz-z > .pz-tp{grid-area:tp} #dashboard-view .pz-z > .pz-sl{grid-area:sl} #dashboard-view .pz-akt{grid-area:akt}
     #dashboard-view .pz-zeit-k{margin-left:-4px;padding:2px 3px}
+    #dashboard-view .pz-konto .pz-typ{display:none}
+    #dashboard-view .pz-typ-m{display:inline-flex;margin:0 6px 0 0;padding:0 5px;font-size:10px;vertical-align:1px}
     #dashboard-view .pz-z .btn{min-height:0}   /* spezifischer als die Handy-Regel für .btn (42 px) — die Zeile bleibt schlank */
     #dashboard-view .pz-akt .tc2-btn{padding:5px 10px;border-radius:8px}
     #dashboard-view .pz-akt .tc2-ab{padding:5px 7px}
@@ -33706,6 +33713,7 @@
       // zum Master-TP. Wie hedge_eur bewusst nicht in planToRow — geschrieben nur vom Plan-Popup auf dem Weg WD-Farm.
       hedgeFaktor: row.hedge_faktor != null ? Number(row.hedge_faktor) : null,
       orbitV3: row.orbit_v3 === true,
+      kontoTyp: row.konto_typ || null,   // Kontotyp am Plan (nur Lesen — Rückfall für den Phasen-Chip der Geplant-Tabelle, 05.10.2026)
       // Auto-Planer (05.10.2026, sql/2026-10-05_auto_planer.sql): vom Planer angelegt; ohne Bestätigung startet der Plan nie
       // von selbst (tpStartUmTick). Wie hedge_eur bewusst nicht in planToRow — ein Modal-Edit darf die Kennung nicht löschen.
       autoPlan: row.auto_plan === true,
@@ -34349,12 +34357,20 @@
       ? `<b>${groesse ? (groesse / 1000) + 'k' : escapeHtml(String(o.name || '').slice(0, 14))}</b><small>…${escapeHtml(nummer.slice(-4))}</small>`
       : `<b>${escapeHtml(String(o.name || '–'))}</b>`
     const kontoTitel = String(o.name || '') + (o.extTitle ? ' · #' + o.extTitle : '')
+    // Phase des Kontos (05.10.2026, Finn an der neuen Tabelle: „Da muss auf jeden Fall hin, welche Phase es ist"): Typ-Chip der
+    // Accounts-Liste (type-badge, Outline-Palette) direkt hinter dem Konto. Quelle ist das geladene Konto, konto_typ am Plan nur
+    // als Rückfall; nichts bekannt → kein Chip. Am Handy steht die Kurzform (P1/P2/CH) vor der Balance in der zweiten Zeile.
+    const typ = String((konto && konto.type) || p.kontoTyp || '').toLowerCase()
+    const typName = typ ? ((typeof typeLabel === 'function' && typeLabel(typ)) || typ) : ''
+    const typKurz = { challenge: 'CH', phase1: 'P1', phase2: 'P2', funded: 'F', funded_cfd: 'CFD', winning_days: 'WD', live: 'Live' }[typ] || typName
+    const typChip = typ ? `<span class="type-badge type-${escapeHtml(typ)} pz-typ">${escapeHtml(typName)}</span>` : ''
+    const typChipHandy = typ ? `<span class="type-badge type-${escapeHtml(typ)} pz-typ pz-typ-m" title="${escapeHtml(typName)}">${escapeHtml(typKurz)}</span>` : ''
     // Start: Uhrzeit klickbar (ändern), ✕ nimmt sie raus — dieselben Handler wie auf der Karte
     const zeit = (p.startUm && !p.startUmGestartetAt)
       ? `<button class="pz-zeit-k" data-plan-start-um-edit="${p.id}" title="${p.autoPlan && !p.autoBestaetigtAt ? 'Startet erst nach Bestätigung. ' : 'Der PC-Tab startet zu dieser Zeit von selbst. '}Klick: Uhrzeit ändern">${tpStartUmText(p.startUm)}</button><button class="pz-zeit-x" data-plan-start-um-x="${p.id}" title="Startzeit entfernen">✕</button>`
       : p.startUm ? `<span title="Der PC-Tab hat die Startzeit ausgelöst">gestartet ${tpStartUmText(p.startUmGestartetAt)}</span>` : '–'
     // Balance → Ziel · Rest, darunter der Weg vom Start zum Ziel als dünner Balken (nur wenn Start und Ziel bekannt sind)
-    let balHtml = '<span class="pz-bal-t is-leer">–</span>'
+    let balHtml = `<span class="pz-bal-t is-leer">${typChipHandy}–</span>`
     if(bal){
       const liveZ = live.live
         ? `<i class="pz-live" title="Balance nach dem letzten Trade gelesen · ${escapeHtml(bal.tip)}">●</i>`
@@ -34362,7 +34378,7 @@
       const ziel = notiz ? notiz.ziel : 0
       const mitBahn = ziel > 0 && groesse > 0 && ziel > groesse && ziel <= groesse * 1.2
       const anteil = mitBahn ? Math.max(0, Math.min(1, (bal.val - groesse) / (ziel - groesse))) : 0
-      balHtml = `<span class="pz-bal-t">${liveZ}${de(bal.val)}${ziel ? `<em>→</em>${de(ziel)}<span class="pz-rest"> · Rest ${de(Math.max(0, ziel - bal.val))}</span>` : ' $'}</span>`
+      balHtml = `<span class="pz-bal-t">${typChipHandy}${liveZ}${de(bal.val)}${ziel ? `<em>→</em>${de(ziel)}<span class="pz-rest"> · Rest ${de(Math.max(0, ziel - bal.val))}</span>` : ' $'}</span>`
         + (mitBahn ? `<i class="pz-bahn" title="Start ${de(groesse)} → Ziel ${de(ziel)}"><i style="width:${(anteil * 100).toFixed(1)}%"></i></i>` : '')
     }
     const menge = Number(p.masterContracts) || 0
@@ -34372,7 +34388,7 @@
     return `
       <div class="pz-z${p.autoPlan ? '' : ' pz-z-hand'}" data-plan-id="${p.id}">
         <span class="pz-zeit">${zeit}</span>
-        <span class="pz-konto" title="${escapeHtml(kontoTitel)}">${kontoKurz}</span>
+        <span class="pz-konto" title="${escapeHtml(kontoTitel)}">${kontoKurz}${typChip}</span>
         <span class="pz-bal">${balHtml}</span>
         <span class="pz-art" title="${notiz ? escapeHtml(notiz.stufe) : ''}">${notiz ? escapeHtml(notiz.art) + (notiz.gekappt ? ' · SL gekappt' : '') : ''}</span>
         <span class="pz-gr">${gr}</span>
@@ -38195,7 +38211,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1020'
+  const OS_TAB_BUILD = '2026-09-22.1021'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
