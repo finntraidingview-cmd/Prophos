@@ -38403,7 +38403,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1040'
+  const OS_TAB_BUILD = '2026-09-22.1041'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -41936,7 +41936,8 @@
     if(lots == null) return { st: 'warn', txt: `frei ${fusionMargeEur(les.frei, les.w)} · Hedge-Lots am Plan unbekannt (Kontrakte/Multiplikator fehlen).`, was: '' }
     if(!les.jeLot) return { st: 'warn', txt: `frei ${fusionMargeEur(les.frei, les.w)} · Marge je Lot NAS100 unbekannt — nötig für ${lotsTxt} nicht rechenbar.`, was: '' }
     const noetig = lots * les.jeLot
-    const txt = `frei ${fusionMargeEur(les.frei, les.w)} · nötig ${fusionMargeEur(noetig, les.w)} für ${n2(lots)} Lot (${planLots ? planLots + ' · ' : ''}≈ ${fusionMargeEur(les.jeLot, les.w)}/Lot) · Reserve ${Math.round(FUSION_MARGE_RESERVE * 100)} %`
+    // „nötig ≈": die Marge je Lot schwankt mit dem Kurs (Gegenprobe Master 06.10.2026: Fusion EUR, 0,01 Lot = 2,77 € → ≈ 277 €/Lot bei ~31.130)
+    const txt = `frei ${fusionMargeEur(les.frei, les.w)} · nötig ≈ ${fusionMargeEur(noetig, les.w)} für ${n2(lots)} Lot (${planLots ? planLots + ' · ' : ''}≈ ${fusionMargeEur(les.jeLot, les.w)}/Lot) · Reserve ${Math.round(FUSION_MARGE_RESERVE * 100)} %`
     if(les.alterMs != null && les.alterMs > FUSION_MARGE_LESUNG_MAX_MS) return { st: 'warn', txt: `Marge-Lesung alt (${Math.round(les.alterMs / 60000)} min) — zuletzt ${txt}`, was: '' }
     if(les.frei < noetig) return { st: 'err', txt: `${txt} — zu wenig`, was: 'Fusion-Konto aufladen oder Risiko Slave im Plan kleiner stellen (weniger Lots), dann ↻.' }
     if(les.frei < noetig * (1 + FUSION_MARGE_RESERVE)) return { st: 'warn', txt: `${txt} — knapp`, was: '' }
