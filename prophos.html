@@ -2337,6 +2337,24 @@
   #dashboard-view .wdl-z.is-aktiv,#dashboard-view .wdl-z.is-aktiv:hover{background:var(--surface-tint)}
   #dashboard-view .wdl-z-kopf{padding-top:9px;padding-bottom:8px;font-size:10.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--sub-2);cursor:default}
   #dashboard-view .wdl-z-kopf .wdl-z-wer{color:var(--sub)}
+  /* Personen-Chips im Gruppen-Kopf (05.10.2026). Breites Fenster (ab 1360 px): die Chips stehen direkt rechts neben dem Titel in
+     der Namens- und der im Kopf leeren Richtungs-Spalte und brechen dort einzeln um; die Spaltenköpfe rechts bleiben über ihren
+     Spalten (unten ausgerichtet, direkt über der ersten Zeile). Schmaler ist dieser Platz nur noch 200–260 px breit — acht Chips
+     stapelten sich dort in drei bis vier kurze Zeilen; darunter bekommen sie deshalb eine eigene Zeile über die ganze Breite
+     (s. max-width:1359px), am Handy waagrecht wischbar. Chips = adm-vl-chip wie die ID-Leiste (#wdl-ids), Punkt rund wie in den Zeilen. */
+  #dashboard-view .wdl-z-kopf-kp{align-items:end}
+  #dashboard-view .wdl-z-kopf > .wdl-z-wer-kp{grid-column:wer-start / ri-end;display:flex;flex-wrap:wrap;align-items:center;gap:1px 2px;overflow:visible;white-space:normal}
+  #dashboard-view .wdl-kp-t{flex:none;margin-right:8px;white-space:nowrap}
+  #dashboard-view .wdl-kp{display:contents;font-size:11.5px;font-weight:400;letter-spacing:0;text-transform:none}
+  #dashboard-view .wdl-kp .adm-vl-chip{padding:1px 6px;white-space:nowrap}
+  #dashboard-view .wdl-kp .adm-vl-chip b{margin-left:5px;font-variant-numeric:tabular-nums}
+  #dashboard-view .wdl-kp .adm-dot{width:7px;height:7px;border-radius:50%;margin-right:5px}
+  @media (max-width:1359px){
+    #dashboard-view .wdl-z-kopf-kp{align-items:center;row-gap:3px}
+    #dashboard-view .wdl-z-kopf > .wdl-z-wer-kp{display:contents}
+    #dashboard-view .wdl-kp-t{grid-area:wer;margin-right:0;color:var(--sub)}
+    #dashboard-view .wdl-kp{display:flex;flex-wrap:wrap;align-items:center;gap:1px 2px;grid-column:1 / -1;grid-row:2;min-width:0;margin:0 -6px}
+  }
   #dashboard-view .wdl-z > span{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #dashboard-view .wdl-z-wer{grid-area:wer}
   #dashboard-view .wdl-z-wer b{font-weight:600;color:var(--ink)}
@@ -2415,6 +2433,10 @@
     #dashboard-view .wdl-sp-bahn{min-width:24px}
     #dashboard-view .wdl-z-wart .wdl-z-mi{white-space:normal;line-height:1.3}   /* „wird gelesen · seit 1 h 52 min" passt nicht in eine Zeile */
     #dashboard-view .wdl-z-kopf{padding-top:8px;padding-bottom:7px}
+    /* Personen-Chips am Handy: eigene dritte Zeile unter den Spaltenköpfen, waagrecht wischbar statt Umbruch */
+    #dashboard-view .wdl-kp{grid-row:3;flex-wrap:nowrap;margin:0 -4px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+    #dashboard-view .wdl-kp::-webkit-scrollbar{display:none}
+    #dashboard-view .wdl-kp .adm-vl-chip{flex:none;padding:5px 8px}
     #dashboard-view .wdl-z-wer b{font-size:12.5px}
     #dashboard-view .wdl-z-wer small{font-size:12px}
     #dashboard-view .wdl-z-ri em{min-width:28px;margin-right:4px;letter-spacing:0}
@@ -25701,15 +25723,35 @@
       b.querySelector('.nm').textContent = String(x.name)
       b.querySelector('b').textContent = x.lauf ? String(x.lauf) : ''
       b.title = wdl.person === u ? 'Filter aufheben' : `${x.lauf} laufen gerade · ${x.zu} beendet im Zeitraum — klicken zeigt nur diese ID`
-      b.addEventListener('click', () => {
-        wdl.person = wdl.person === u ? null : u
-        // Filterwechsel hebt eine Auswahl auf, die nicht mehr sichtbar ist (30.09.2026, Finn: Zone + P&L-Kästchen blieben stehen)
-        const sel = wdl.auswahl ? ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === wdl.auswahl) : null
-        if(sel && !wdlPasst(sel)) wdl.auswahl = null
-        wdlRender()
-      })
+      b.addEventListener('click', () => wdlPersonUmschalten(u))
       bar.appendChild(b)
     }
+  }
+  /* EIN Personen-Filter für den ganzen Radar (wdl.person, nur im Speicher — Seite neu laden = alle). Zwei Zugänge, derselbe Zustand:
+   * die ID-Leiste oben und seit 05.10.2026 die Chips im Kopf jeder Zustands-Gruppe (wdlKopfChips). Zweiter Klick auf dieselbe ID
+   * hebt den Filter auf, Klick auf eine andere wechselt direkt. */
+  function wdlPersonUmschalten(u){
+    wdl.person = wdl.person === u ? null : u
+    // Filterwechsel hebt eine Auswahl auf, die nicht mehr sichtbar ist (30.09.2026, Finn: Zone + P&L-Kästchen blieben stehen)
+    const sel = wdl.auswahl ? ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === wdl.auswahl) : null
+    if(sel && !wdlPasst(sel)) wdl.auswahl = null
+    wdlRender()
+  }
+  /* Personen-Chips im Kopf einer Gruppe (05.10.2026, Finn am Radar: „rechts von ‚Überprüfen' auf die jeweilige Person klicken …
+   * und dann nach Personen filtern", kurz darauf „das Gleiche bei Läuft"). Je ID mit mindestens einer Zeile in DIESER Gruppe ein
+   * Chip „● Name n" — n zählt die Gruppe ohne Personen-Filter (sonst verschwänden unter dem Filter alle anderen Chips und man
+   * könnte nicht direkt wechseln), Reihenfolge nach Anzahl. Stil und Markierung wie die ID-Leiste (adm-vl-chip, is-on/is-off).
+   * Nur eine ID in der Gruppe und kein Filter aktiv → keine Chips (nichts zu filtern). → HTML oder ''. */
+  function wdlKopfChips(titel, alleArr){
+    const je = new Map()
+    for(const t of (alleArr || [])){ const u = wdlUid(t); const x = je.get(u) || { name: t.person || '?', n: 0 }; x.n++; je.set(u, x) }
+    if(!je.size || (je.size < 2 && !wdl.person)) return ''
+    const reihe = [...je.keys()].sort((a, b) => (je.get(b).n - je.get(a).n) || String(je.get(a).name).localeCompare(String(je.get(b).name), 'de'))
+    return reihe.map(u => {
+      const x = je.get(u), an = wdl.person === u
+      return `<button type="button" class="adm-vl-chip${wdl.person ? (an ? ' is-on' : ' is-off') : ''}" data-wdl-person="${escapeHtml(u)}" title="${an ? 'Filter aufheben — wieder alle IDs zeigen' : escapeHtml(`${x.n} in „${titel}" — klicken zeigt im Radar nur diese ID`)}">`
+        + `<span class="adm-dot" style="background:${idFarbe(u)}"></span><span class="nm">${escapeHtml(String(x.name))}</span><b>${x.n}</b></button>`
+    }).join('')
   }
   const wdlAktiv = () => { const v = document.querySelector('#dashboard-view .view[data-view="wdlive"]'); return !!(v && v.classList.contains('active')) }
   async function wdlLaden(voll){
@@ -26145,7 +26187,7 @@
     // durcheinander. Sonst erkennen wir gar nichts"): je Gruppe zwei Blöcke in der bisherigen Reihenfolge (Läuft nach Start,
     // Beendet nach Ende), zwischen ihnen eine etwas kräftigere Linie (wdl-z-pfneu). Gekürzt wird JE BLOCK — sonst belegten bei
     // „Beendet" die 5 neuesten Orbit-Zeilen alle Plätze und Echo wäre wieder versteckt (der Anlass für die Kürzung).
-    const gruppe = (titel, arr, sp, cls, mehr) => {
+    const gruppe = (titel, arr, sp, cls, mehr, alleArr) => {
       if(!arr.length) return ''
       // Blöcke je MODELL (01.10.2026 abends, Finn: „die Modelle hier unten in der Liste separieren"): Reihenfolge wie die Leiste oben
       // (Echo · Orbit · Winning Day · Echo V2 · Orbit V2 · Topstep V2), je Block eine kleine Überschrift „Orbit · 2" — nur in „Alle"
@@ -26156,7 +26198,13 @@
       const kopfZ = (k, b) => wdl.modell ? '' : `<div class="wdl-z-modell">${escapeHtml(k)} · ${b.length}</div>`
       const zeilen = bloecke.map(([k, b]) => kopfZ(k, b) + (alle ? b : b.slice(0, WDL_BEENDET_KURZ)).map(t => zeile(t, '')).join('')).join('')
       const fuss = mehr && lang ? `<button type="button" class="wdl-mehr" data-wdl-mehr="${mehr}">${alle ? 'weniger' : `alle ${arr.length} zeigen`}</button>` : ''
-      return `<div class="wdl-tab${cls ? ' ' + cls : ''}"><div class="wdl-z wdl-z-kopf"><span class="wdl-z-wer">${titel} · ${arr.length}</span><span class="wdl-z-ri"></span>`
+      // Kopf mit Personen-Chips (05.10.2026): Titel + Chips teilen sich die Namens- und die (im Kopf leere) Richtungs-Spalte und
+      // brechen dort um; die Spaltenköpfe rechts bleiben über ihren Spalten. Ohne Chips das alte Markup.
+      const chips = wdlKopfChips(titel, alleArr)
+      const kopfLinks = chips
+        ? `<span class="wdl-z-wer wdl-z-wer-kp"><span class="wdl-kp-t">${titel} · ${arr.length}</span><span class="wdl-kp" data-wdl-kp="${escapeHtml(titel)}">${chips}</span></span>`
+        : `<span class="wdl-z-wer">${titel} · ${arr.length}</span><span class="wdl-z-ri"></span>`
+      return `<div class="wdl-tab${cls ? ' ' + cls : ''}"><div class="wdl-z wdl-z-kopf${chips ? ' wdl-z-kopf-kp' : ''}">${kopfLinks}`
         + sp.map((x, i) => `<span class="wdl-z-${(sp.length === 4 ? ['mi', 'konto', 'pl', 'zeit'] : ['mi', 'pl', 'zeit'])[i]}">${x}</span>`).join('') + `</div>${zeilen}${fuss}</div>`
     }
     const nachEnde = arr => arr.sort((a, b) => String(b.ended_at || '').localeCompare(String(a.ended_at || '')))
@@ -26169,20 +26217,31 @@
     // Seit .869 innerhalb jeder Gruppe erst Orbit, dann Echo — nicht mehr gemischt (s. gruppe).
     // Ablauf (30.09.2026, Finn): Läuft → Wartet (Nachlesung) → Überprüfen (P&L steht, abhaken) → Erledigt; „Geplant" ist raus.
     // Echo hat kein Wartet: review geht direkt nach Überprüfen.
-    const gruppen = arr => {
+    const teile = arr => {
       const la = arr.filter(t => t.status === 'open'), rv = arr.filter(t => t.status === 'review'), er = arr.filter(t => t.status === 'completed')
       const wa = rv.filter(t => !wdlIstEcho(t) && wdlWartet(t)), pr = rv.filter(t => !wa.includes(t))
-      return gruppe('Läuft', nachStart(la), ['Spanne', 'P&amp;L', 'Seit'], 'wdl-tab-lauf')
-        + gruppe('Wartet', nachEnde(wa), ['Nachlesung', 'P&amp;L', 'Zu'])
-        + gruppe('Überprüfen', nachEnde(pr), ['Ergebnis', 'Konto', 'P&amp;L', 'Zu'], 'wdl-tab-konto')
-        + gruppe('Erledigt', nachEnde(er), ['Ergebnis', 'Konto', 'P&amp;L', 'Zu'], 'wdl-tab-konto', 'erledigt')
+      return { la, wa, pr, er }
     }
-    liste.innerHTML = trades.length ? gruppen(trades)
+    // arr = was gezeigt wird (Modell + Person), alleArr = dieselbe Liste ohne Personen-Filter — nur für die Chips im Kopf
+    const gruppen = (arr, alleArr) => {
+      const g = teile(arr), a = teile(alleArr)
+      return gruppe('Läuft', nachStart(g.la), ['Spanne', 'P&amp;L', 'Seit'], 'wdl-tab-lauf', null, a.la)
+        + gruppe('Wartet', nachEnde(g.wa), ['Nachlesung', 'P&amp;L', 'Zu'], '', null, a.wa)
+        + gruppe('Überprüfen', nachEnde(g.pr), ['Ergebnis', 'Konto', 'P&amp;L', 'Zu'], 'wdl-tab-konto', null, a.pr)
+        + gruppe('Erledigt', nachEnde(g.er), ['Ergebnis', 'Konto', 'P&amp;L', 'Zu'], 'wdl-tab-konto', 'erledigt', a.er)
+    }
+    // Wischstand der Chip-Reihen (Handy) über den Neuaufbau retten — die Liste wird im Lade-Takt komplett neu gezeichnet
+    const kpScroll = new Map([...liste.querySelectorAll('[data-wdl-kp]')].map(e => [e.getAttribute('data-wdl-kp'), e.scrollLeft]))
+    liste.innerHTML = trades.length ? gruppen(trades, modellTrades)
       : `<div class="mwd-leer">${wdl.daten ? (wdl.modell ? `Keine ${escapeHtml(wdl.modell)}-Trades im Zeitraum.` : 'Keine Trades im Zeitraum.') : (wdl.fehler ? 'Nicht ladbar: ' + escapeHtml(wdl.fehler) : 'Lade Radar…')}</div>`
+    for(const e of liste.querySelectorAll('[data-wdl-kp]')){ const x = kpScroll.get(e.getAttribute('data-wdl-kp')); if(x) e.scrollLeft = x }
     try{ if(wdlAktiv() && typeof mklChartZeichnen === 'function') mklChartZeichnen() }catch(_){}
   }
   // Klick auf eine Karte (oder ihren Punkt) schaltet die Linien dieses Trades — eigener Handler am Listen-Container
   document.getElementById('wdl-liste')?.addEventListener('click', ev => {
+    // Personen-Chip im Gruppen-Kopf (05.10.2026): derselbe Filter wie die ID-Leiste oben
+    const kp = ev.target.closest('[data-wdl-person]')
+    if(kp){ wdlPersonUmschalten(kp.getAttribute('data-wdl-person')); return }
     const m = ev.target.closest('[data-wdl-mehr]')
     if(m){ const k = m.getAttribute('data-wdl-mehr'); wdl.alleZu = Object.assign({}, wdl.alleZu, { [k]: !(wdl.alleZu || {})[k] }); wdlRender(); return }
     // „Jetzt lesen" (Wartet) und „Abhaken" (Überprüfen), 30.09.2026 — vorhandene Wege, keine Auswahl der Zeile
@@ -38268,7 +38327,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1029'
+  const OS_TAB_BUILD = '2026-09-22.1030'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
