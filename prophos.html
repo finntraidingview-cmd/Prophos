@@ -38195,7 +38195,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1019'
+  const OS_TAB_BUILD = '2026-09-22.1020'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -41871,11 +41871,15 @@
    * ich drücke nur noch Bestätigen") ══
    * Geplant wird auf Railway (app.py ap_planen, nachts 01–02 Uhr Dubai oder „Jetzt planen"); hier nur Anzeige + Bestätigen.
    * Ein Vorschlag (auto_plan, ohne auto_bestaetigt_at) startet NIE von selbst — tpStartUmTick lässt ihn aus. Die Leiste zeigt
-   * offene Vorschläge, den letzten Lauf und die ausgelassenen Konten mit Grund (Ziel erreicht, Balance nicht live, …). */
-  const _ap = { letzter: null, geladenFuer: null, laeuft: false, offen: false, imPlaner: false }
+   * offene Vorschläge und vom letzten Lauf nur Zahlen der EIGENEN ID (05.10.2026, Finn an der aufgeklappten Details-Liste mit den
+   * Konten aller IDs: „das oben mies hässlich kann weg und es soll immer nur für die eigene ID planen"): „4 geplant · 7 ausgelassen",
+   * die Gründe gezählt statt je Konto. Gefiltert wird hier, auch wenn das Backend noch alle IDs liefert. */
+  const _ap = { letzter: null, geladenFuer: null, laeuft: false, imPlaner: false, ich: null }
   async function apApi(method, body){
     const { data: { session } } = await supabase.auth.getSession()
     const tok = session?.access_token; if(!tok) throw new Error('nicht angemeldet')
+    // eigener Anzeigename wie im Backend (ap_planen: user_metadata.name, sonst Teil vor dem @) — für den Filter auf die eigene ID
+    try{ const u = session.user || {}; _ap.ich = { id: String(u.id || ''), name: String(u.user_metadata?.name || '').trim() || String(u.email || '').split('@')[0] } }catch(_){}
     const r = await fetch(`${WATCHER_HOME}/admin/auto-plan`, { method, headers: { 'sb-token': tok, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
     const d = await r.json().catch(() => ({}))
     if(!r.ok || d.ok === false) throw new Error(d.msg || d.error || ('HTTP ' + r.status))
@@ -41913,15 +41917,31 @@
   }
   async function apJetztPlanen(trocken){
     if(_ap.laeuft) return
-    if(!trocken && !confirm('Auto-Planer jetzt laufen lassen?\n\nUnbestätigte Auto-Vorschläge aller Test-IDs werden ersetzt, Startzeiten frühestens in 10 min.')) return
+    if(!trocken && !confirm('Auto-Planer jetzt laufen lassen?\n\nUnbestätigte Auto-Vorschläge werden ersetzt, Startzeiten frühestens in 10 min.')) return
     _ap.laeuft = true; apLeisteZeichnen()
     try{
       const d = await apApi('POST', { trocken: !!trocken })
-      _ap.letzter = d; _ap.offen = true
+      _ap.letzter = d
       if(!trocken && typeof loadTradePlansFromSupabase === 'function') await loadTradePlansFromSupabase()
-      if(typeof atToast === 'function') atToast(d.msg ? `🤖 ${d.msg}` : `🤖 ${trocken ? 'Probelauf' : 'Geplant'}: ${(d.geplant || []).length} Trades, ${(d.ausgelassen || []).length} ausgelassen`, 'start')
+      const e = apEigenes(d)
+      if(typeof atToast === 'function') atToast(d.msg ? `🤖 ${d.msg}` : `🤖 ${trocken ? 'Probelauf' : 'Auto-Planer'}: ${e.geplant.length} geplant · ${e.ausgelassen.length} ausgelassen`, 'start')
     }catch(e){ if(typeof atToast === 'function') atToast('Auto-Planer: ' + ((e && e.message) || e), 'end') }
     finally{ _ap.laeuft = false; apLeisteZeichnen() }
+  }
+  /* Nur die Zeilen der eigenen ID aus einem Lauf-Ergebnis. Neues Backend: user_id je Zeile bzw. ohnehin nur der eigene Lauf;
+   * altes Backend: alle IDs mit Anzeigename im Feld user → Vergleich mit dem eigenen Namen. Ohne erkennbaren Namen: nichts zeigen. */
+  function apEigenes(l){
+    const ich = _ap.ich || {}
+    const mein = x => !!x && (x.user_id != null ? String(x.user_id) === ich.id : (!!ich.name && String(x.user || '') === ich.name))
+    return { geplant: (Array.isArray(l && l.geplant) ? l.geplant : []).filter(mein), ausgelassen: (Array.isArray(l && l.ausgelassen) ? l.ausgelassen : []).filter(mein) }
+  }
+  /* Gründe des Planers (app.py ap_planen/ap_konto_rechnen) als kurzes Wort — gezählt statt je Konto aufgelistet */
+  function apGrundKurz(g){
+    const t = String(g || '')
+    return /geplanten\/laufenden Plan/.test(t) ? 'laufen schon' : /keine Regel/.test(t) ? 'ohne Regel' : /nicht live/.test(t) ? 'Balance nicht live'
+      : /noch nicht erledigt/.test(t) ? 'in Überprüfen' : /keine Balance/.test(t) ? 'ohne Balance' : /Ziel erreicht/.test(t) ? 'Ziel erreicht'
+      : /bis zum Ziel/.test(t) ? 'kurz vor Ziel' : /Kontogröße/.test(t) ? 'Größe unklar' : /Zeitfenster/.test(t) ? 'kein Zeitfenster'
+      : /Boden/.test(t) ? 'am Boden' : (t.split(/[—(]/)[0].trim() || 'sonstige')
   }
   function apLeisteZeichnen(){
     const el = document.getElementById('apLeiste'); if(!el) return
@@ -41929,27 +41949,23 @@
     const vorschlaege = (tradePlans || []).filter(p => p && p.status === 'planned' && p.autoPlan && !p.autoBestaetigtAt)
     const bestaetigt = (tradePlans || []).filter(p => p && p.status === 'planned' && p.autoPlan && p.autoBestaetigtAt).length
     if(!_ap.imPlaner && !vorschlaege.length && !bestaetigt){ el.style.display = 'none'; return }
-    const l = _ap.letzter || {}
-    const aus = Array.isArray(l.ausgelassen) ? l.ausgelassen : [], gep = Array.isArray(l.geplant) ? l.geplant : []
-    const lauf = l.tag ? `Letzter Lauf ${escapeHtml(String(l.tag))}${l.at ? ' · ' + new Date(l.at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : ''}${l.trocken ? ' (Probe)' : ''}: ${gep.length} geplant, ${aus.length} ausgelassen` : 'Noch kein Lauf'
-    const zeile = (x, mitPlan) => `<div style="display:flex;gap:8px;padding:2px 0;color:var(--ink-2)"><span style="min-width:62px;color:var(--sub)">${escapeHtml(String(x.user || ''))}</span><span style="min-width:150px">${escapeHtml(String(x.konto || ''))} · ${escapeHtml(String(x.firma || ''))}</span>`
-      + (mitPlan ? `<span style="font-family:var(--mono)">${escapeHtml(String(x.start || ''))} ${x.richtung === 'buy' ? 'BUY' : 'SELL'} · ${x.menge} · TP ${Number(x.tp).toLocaleString('de-DE')} $${x.sl ? ' · SL ' + Number(x.sl).toLocaleString('de-DE') + ' $' : ''}</span><span style="color:var(--sub)">${escapeHtml(String(x.stufe || ''))}</span>`
-                 : `<span style="color:var(--sub)">${escapeHtml(String(x.grund || ''))}</span>`) + `</div>`
+    const l = _ap.letzter || {}, e = apEigenes(l)
+    const gruende = new Map()
+    for(const x of e.ausgelassen){ const k = apGrundKurz(x.grund); gruende.set(k, (gruende.get(k) || 0) + 1) }
+    const lauf = !l.tag || (!e.geplant.length && !e.ausgelassen.length) ? ''
+      : `${l.trocken ? 'Probelauf' : 'Letzter Lauf'}${l.at ? ' ' + new Date(l.at).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}: ${e.geplant.length} geplant · ${e.ausgelassen.length} ausgelassen`
+        + (gruende.size ? ` (${[...gruende].sort((a, b) => b[1] - a[1]).map(([k, n]) => `${n} ${escapeHtml(k)}`).join(' · ')})` : '')
     el.style.display = ''
-    el.innerHTML = `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    el.innerHTML = `<div style="display:flex;align-items:center;gap:6px 10px;flex-wrap:wrap">
         <b>🤖 Auto-Planer</b>
-        <span style="color:var(--sub)">${vorschlaege.length ? `${vorschlaege.length} Vorschlag${vorschlaege.length === 1 ? '' : 'e'} warten auf Bestätigung` : 'keine offenen Vorschläge'}${bestaetigt ? ` · ${bestaetigt} bestätigt` : ''}</span>
+        <span style="color:var(--sub)">${vorschlaege.length ? `${vorschlaege.length} ${vorschlaege.length === 1 ? 'Vorschlag wartet' : 'Vorschläge warten'} auf Bestätigung` : 'keine offenen Vorschläge'}${bestaetigt ? ` · ${bestaetigt} bestätigt` : ''}</span>
         <span style="flex:1"></span>
         ${_ap.imPlaner ? `<button class="btn btn-ghost tc2-btn" id="apProbe" ${_ap.laeuft ? 'disabled' : ''} title="Nur rechnen, nichts anlegen">Probelauf</button>
-        <button class="btn btn-ghost tc2-btn" id="apJetzt" ${_ap.laeuft ? 'disabled' : ''} title="Jetzt für alle Test-IDs planen (ersetzt unbestätigte Vorschläge)">${_ap.laeuft ? 'plant…' : 'Jetzt planen'}</button>` : ''}
-        <button class="btn btn-ghost tc2-btn" id="apDetails">${_ap.offen ? 'Details ▴' : 'Details ▾'}</button>
+        <button class="btn btn-ghost tc2-btn" id="apJetzt" ${_ap.laeuft ? 'disabled' : ''} title="Jetzt planen (ersetzt unbestätigte Vorschläge)">${_ap.laeuft ? 'plant…' : 'Jetzt planen'}</button>` : ''}
       </div>
-      ${_ap.offen ? `<div style="margin-top:8px;font-size:12px"><div style="color:var(--sub);margin-bottom:4px">${lauf}</div>
-        ${gep.length ? `<div style="font-weight:600;margin:6px 0 2px">Geplant</div>${gep.map(x => zeile(x, true)).join('')}` : ''}
-        ${aus.length ? `<div style="font-weight:600;margin:6px 0 2px">Ausgelassen</div>${aus.map(x => zeile(x, false)).join('')}` : ''}</div>` : ''}`
+      ${lauf ? `<div style="margin-top:4px;font-size:12px;color:var(--sub);font-variant-numeric:tabular-nums">${lauf}</div>` : ''}`
     document.getElementById('apProbe')?.addEventListener('click', () => apJetztPlanen(true))
     document.getElementById('apJetzt')?.addEventListener('click', () => apJetztPlanen(false))
-    document.getElementById('apDetails')?.addEventListener('click', () => { _ap.offen = !_ap.offen; apLeisteZeichnen() })
   }
   /* ══ ENDE AUTO-PLANER ══ */
 
