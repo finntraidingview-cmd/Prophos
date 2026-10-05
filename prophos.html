@@ -2182,8 +2182,11 @@
   #dashboard-view .pz-bal-t .pz-rest{color:var(--sub)}
   #dashboard-view .pz-live{display:inline-block;width:14px;font-style:normal;font-size:9px;vertical-align:1px;color:var(--good)}
   #dashboard-view .pz-live.is-alt{font-size:12px;vertical-align:0;color:var(--warn)}
-  #dashboard-view .pz-bahn{display:block;height:3px;max-width:230px;border-radius:2px;background:var(--border-soft);overflow:hidden}
-  #dashboard-view .pz-bahn > i{display:block;height:100%;border-radius:2px;background:var(--sub-2)}
+  #dashboard-view .pz-bahn{display:flex;height:3px;max-width:230px;border-radius:2px;background:var(--border-soft);overflow:hidden}
+  #dashboard-view .pz-bahn > i{display:block;flex:none;height:100%;border-radius:2px;background:var(--sub-2)}
+  /* Stück „nach TP" (05.10.2026): schließt direkt an den Stand an — das TP-Grün der Tabelle (#15803d), deutlich heller */
+  #dashboard-view .pz-bahn > i:first-child:not(:last-child){border-radius:2px 0 0 2px}
+  #dashboard-view .pz-bahn > .pz-bahn-tp{border-radius:0 2px 2px 0;background:rgba(21,128,61,.42)}
   #dashboard-view .pz-z:not(.pz-z-kopf) > .pz-art{font-size:12px;color:var(--sub)}
   #dashboard-view .pz-gr,#dashboard-view .pz-z > .pz-tp,#dashboard-view .pz-z > .pz-sl{text-align:right}
   #dashboard-view .pz-z:not(.pz-z-kopf) > .pz-tp{font-weight:600;color:#15803d}
@@ -34419,8 +34422,16 @@
       const ziel = notiz ? notiz.ziel : 0
       const mitBahn = ziel > 0 && groesse > 0 && ziel > groesse && ziel <= groesse * 1.2
       const anteil = mitBahn ? Math.max(0, Math.min(1, (bal.val - groesse) / (ziel - groesse))) : 0
+      // „Nach TP" (05.10.2026, Finn am Balken: „… und dann so eine leichte andere Farbe, wo wir wären, wenn wir den Trade
+      // gewinnen"): helles Stück direkt hinter dem Stand — von der Balance bis Balance + TP, am Ziel gedeckelt (reicht es bis
+      // ans Ziel, endet es am rechten Rand). Balance unter der Startgröße: das Stück zeigt nur den Teil über dem Start, liegt
+      // auch Balance + TP darunter, gibt es keins. Ohne TP bleibt der Balken wie bisher. Nur der Gewinnfall, keine Bewertung.
+      const tpUsd = Number(p.masterTp) > 0 ? Number(p.masterTp) : 0
+      const anteilTp = (mitBahn && tpUsd) ? Math.max(0, Math.min(1, (bal.val + tpUsd - groesse) / (ziel - groesse))) : 0
+      const stueckTp = Math.max(0, anteilTp - anteil)
+      const bahnTitel = tpUsd ? `jetzt ${de(bal.val)} $ · nach TP ${de(bal.val + tpUsd)} $ · Ziel ${de(ziel)} $` : `Start ${de(groesse)} → Ziel ${de(ziel)}`
       balHtml = `<span class="pz-bal-t">${typChipHandy}${liveZ}${de(bal.val)}${ziel ? `<em>→</em>${de(ziel)}<span class="pz-rest"> · Rest ${de(Math.max(0, ziel - bal.val))}</span>` : ' $'}</span>`
-        + (mitBahn ? `<i class="pz-bahn" title="Start ${de(groesse)} → Ziel ${de(ziel)}"><i style="width:${(anteil * 100).toFixed(1)}%"></i></i>` : '')
+        + (mitBahn ? `<i class="pz-bahn" title="${bahnTitel}"><i style="width:${(anteil * 100).toFixed(1)}%"></i>${stueckTp > 0 ? `<i class="pz-bahn-tp" style="width:${(stueckTp * 100).toFixed(1)}%"></i>` : ''}</i>` : '')
     }
     const menge = Number(p.masterContracts) || 0
     const gr = !menge ? '–' : p.route === 'mt5v2'
@@ -38257,7 +38268,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1027'
+  const OS_TAB_BUILD = '2026-09-22.1028'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
