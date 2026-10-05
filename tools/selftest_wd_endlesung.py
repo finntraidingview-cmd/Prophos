@@ -65,6 +65,18 @@ def main():
     zb = zeile(dict(fin, puls_login_fehler=2, puls_login_at="2026-09-30T11:05:00Z", puls_login_code="login_unlesbar"))
     check(zb and zb["puls_login_fehler"] == 2 and zb["puls_login_at"] == "2026-09-30T11:05:00Z" and zb["puls_login_code"] == "login_unlesbar",
           "Login-Bremse (30.09.2026): Zähler, Zeit und Code kommen im Auszug mit (Radar „Wartet · Login prüfen“)")
+    # Konto weg (05.10.2026): final.konto_weg + konto_weg_at kommen im Auszug mit; ohne das Feld am Plan trägt die Zeile es nicht
+    zk = zeile(dict(fin, puls_aufgegeben=True, puls_fehler="konto_weg: Konto steht nicht mehr im Login", konto_weg=True,
+                    konto_weg_at="2026-10-05T19:40:00Z"))
+    check(zk and zk["konto_weg"] is True and zk["konto_weg_at"] == "2026-10-05T19:40:00Z" and zk["puls_aufgegeben"] is True
+          and zk["puls_fehler"].startswith("konto_weg") and zk["puls_versuche"] == 2,
+          "Konto weg: konto_weg + konto_weg_at im Auszug, übrige Felder wie bisher")
+    check("konto_weg" not in zl and "konto_weg_at" not in zl and "konto_weg" not in zb
+          and zeile(dict(fin, konto_weg=None, konto_weg_at=None)) == zeile(fin),
+          "ohne konto_weg am Plan (oder null): Zeile unverändert, kein neues Feld")
+    check(zeile({"konto_weg": True}) == {"konto_weg": True} and zeile({"konto_weg": False}) == {"konto_weg": False},
+          "konto_weg allein reicht für eine Zeile; false bleibt false")
+
     print("\nOK" if ok else "\nFEHLER")
     return 0 if ok else 1
 

@@ -7976,7 +7976,11 @@ def _wd_endlesung_zeile(final):
             "puls_login_fehler", "puls_login_at", "puls_login_code",   # Login-Bremse (30.09.2026): Radar „Wartet · Login prüfen"
             # Balance nach dem Trade (TSV2-PNL, 01.10.2026): ohne sie zeigte die Abhak-Liste „Puls liest …" trotz gelesener Balance
             # und bei TopstepX den Tages-RP&L als „gelesen"
-            "balance_end", "balance_quelle", "balance_relativ", "plattform")
+            "balance_end", "balance_quelle", "balance_relativ", "plattform",
+            # Konto weg (05.10.2026): der PC-Tab setzt final.konto_weg + konto_weg_at, wenn das Konto im frisch angemeldeten
+            # Tradovate-Login nicht mehr steht. Ohne die Felder erkannte der Radar einer fremden ID den Fall nur am Anfang
+            # des Textes in puls_fehler.
+            "konto_weg", "konto_weg_at")
     out = {k: final.get(k) for k in keys if final.get(k) is not None}
     return out or None
 
