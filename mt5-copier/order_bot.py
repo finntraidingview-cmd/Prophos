@@ -19671,6 +19671,9 @@ def _cdp_nach_link(s, opts, trail, warten_s=40.0):
 def _cdp_dialog_verbinden(s, merken, trail):
     """[4] Connect-Dialog: Demo (Pflicht) → „Don't remember me" → Connect. -> (code, text, Tab-IDs vor dem Connect-Klick)"""
     ort = _K3Ort("TradingView-Seite", s.ws, s, "")
+    # 06.10.2026 (Endlesung 23:16 Dubai: „Connect: Maus steht @…, Ziel NICHT unter dem Zeiger — kein Druck"): der Dialog steht in einem
+    # FRISCH geladenen Tab (?trade-now) — die Werbe-Kachel unten links wurde bis hier nur im alten Tab vor dem Abmelden geschlossen
+    _cdp_kachel_weg(s, trail)
     d = cdp_connect_dialog(ort.blick())
     if not d:
         return "dialog", "Connect-Dialog nicht (mehr) eindeutig zu sehen.", None
@@ -19707,7 +19710,30 @@ def _cdp_dialog_verbinden(s, merken, trail):
     vorher = {"ids": ids, "ms": time.time() * 1000.0,           # Klick-Zeit: auch ein wiederverwendeter Tab lädt danach neu
               "fehler": cdp_connect_fehler(ort.blick())}        # Fehlermeldung, die schon VOR dem Klick dastand, zählt nicht als neu
     if not s.klick(cdp_rect(d["connect"]), "Connect"):
-        return "connect", "Connect ließ sich nicht klicken (Maus nicht bewiesen über dem Knopf) — nicht verbunden.", None
+        # 06.10.2026: ein gescheiterter klick() hat nie gedrückt (kein Hover-Beweis = kein Druck). EINMAL neu: Werbe-Kachel weg, Dialog
+        # neu lesen (die Seite kann sich nach dem Laden noch verschoben haben), Demo muss weiter AN sein, derselbe Klick mit frischem
+        # Rechteck. Scheitert auch der, steht in der Spur, was am Punkt liegt (Befund für den nächsten Fall — bisher nur „NICHT unter dem Zeiger").
+        _cdp_kachel_weg(s, trail)
+        _warte(0.8, 0.5)
+        d2 = cdp_connect_dialog(ort.blick())
+        r2 = cdp_rect((d2 or {}).get("connect"))
+        demo_an = bool(d2 and len(d2["demo"]) == 1 and d2["demo"][0].get("an") is True)
+        if not (r2 and demo_an):
+            return "connect", ("Connect ließ sich nicht klicken (Maus nicht bewiesen über dem Knopf) — nicht verbunden"
+                               + ("; danach Connect-Dialog oder Demo nicht mehr eindeutig, kein zweiter Versuch" if not (r2 and demo_an) else "") + "."), None
+        trail.append("[Login] Connect nicht gedrückt — Dialog neu gelesen, Demo an: ein zweiter Versuch")
+        vorher["ms"] = time.time() * 1000.0
+        if not s.klick(r2, "Connect (2. Versuch)"):
+            was = ""
+            try:
+                v = s.lese_js(cdp_panel_frei_js(r2))
+                was = str(v.get("was") or "")[:50] if isinstance(v, dict) else ""
+            except Exception:
+                was = ""
+            if was:
+                trail.append(f"[Login] am Connect-Punkt liegt: '{was}'")
+            return "connect", ("Connect ließ sich zweimal nicht klicken (Maus nicht bewiesen über dem Knopf"
+                               + (f"; am Punkt liegt '{was}'" if was else "") + ") — nicht verbunden."), None
     return "", "", vorher
 
 

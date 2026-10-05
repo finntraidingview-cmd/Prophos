@@ -1901,6 +1901,7 @@ def main():
     results.append(test_puls_cdp_login())
     results.append(test_cdp_konto_regression_865())
     results.append(test_cdp_konto_weg())
+    results.append(test_cdp_connect_zweiter_versuch())
     results.append(test_tsx_k0())
     results.append(test_tsx_k1_vorbau())
     results.append(test_tsx_k2())
@@ -4123,6 +4124,99 @@ def test_cdp_konto_weg():
         chk('**{k: v for k, v in extra.items() if k != "konto_aktiv"}' in _i.getsource(m), f"{m.__name__}: Code, retry_ok und Zähler reisen ins Ergebnis")
     if ok:
         print("✓ Konto weg: eigener Code nur nach eigenem Formular-Login + zwei gleichen Befunden + Ziel nirgends im Text; sonst alles wie bisher")
+    return ok
+
+
+def test_cdp_connect_zweiter_versuch():
+    """WERBUNG-2 (06.10.2026): im Login-Weg scheiterte „Connect" im frisch geladenen Tab („Ziel NICHT unter dem Zeiger — kein Druck").
+    Geprüft: Werbe-Kachel wird auch im neuen Tab vor dem Dialog geschlossen; ein nicht gedrückter Connect wird nach Kachel-Prüfung,
+    Neulesen und Demo-Beweis genau EINMAL wiederholt; scheitert auch der zweite, nennt die Spur, was am Punkt liegt; ohne Demo kein
+    zweiter Klick. Alles andere unverändert (ein gelungener Klick = ein Klick)."""
+    import order_bot as ob, inspect as _i
+    ok = True
+
+    def chk(bed, text):
+        nonlocal ok
+        if not bed:
+            print("  ✗ Connect 2. Versuch: " + text)
+            ok = False
+    dlg = {"titel": "Tradovate", "rect": [700, 300, 520, 420], "netzfehler": False,
+           "knoepfe": [{"text": "Live", "role": "radio", "rect": [740, 420, 80, 30], "an": False},
+                       {"text": "Demo", "role": "radio", "rect": [830, 420, 80, 30], "an": True},
+                       {"text": "Connect", "rect": [900, 640, 120, 36]}, {"text": "", "aria": "Close", "rect": [1190, 310, 20, 20]}],
+           "nicht_merken": {"an": True, "rect": [740, 580, 180, 20], "quelle": "kaestchen"}}
+    bl = {"dialoge": [dlg], "umgebung": []}
+    dlg_aus = dict(dlg, knoepfe=[dict(k, an=False) if k.get("text") == "Demo" else k for k in dlg["knoepfe"]])
+    bl_aus = {"dialoge": [dlg_aus], "umgebung": []}
+    bl_neu = {"dialoge": [dict(dlg, knoepfe=[dict(k, rect=[900, 660, 120, 36]) if k.get("text") == "Connect" else k for k in dlg["knoepfe"]])], "umgebung": []}
+    blicke = [[bl]]
+
+    class _Ort:
+        def __init__(self, *a, **k):
+            pass
+
+        def blick(self):
+            q = blicke[0]
+            return q.pop(0) if len(q) > 1 else q[0]
+
+    class _S:
+        ws = None
+
+        def __init__(self, folge):
+            self.folge, self.klicks, self.js = list(folge), [], []
+
+        def klick(self, r, name, toast_ok=False, pruef=None):
+            self.klicks.append((name, [float(x) for x in r]))
+            return self.folge.pop(0) if self.folge else True
+
+        def lese_js(self, a, timeout=8):
+            self.js.append(a[:60])
+            return {"frei": False, "was": "div.toastItem-abc"}
+    kachel = {"n": 0}
+
+    def _kw(s_, trail):
+        kachel["n"] += 1
+        return 0
+    alt = {n: getattr(ob, n) for n in ("_K3Ort", "_cdp_kachel_weg", "_cdp_http", "_puls_diagnose_senden", "_warte")}
+    ob._K3Ort, ob._cdp_kachel_weg = _Ort, _kw
+    ob._cdp_http = lambda pfad, *a, **k: []
+    ob._puls_diagnose_senden = lambda *a, **k: None
+    ob._warte = lambda a_, b_: None
+    try:
+        blicke[0] = [bl, bl, bl_neu]                      # 1. Blick, Fehler-Blick vor dem Klick, Neulesen nach dem Fehlversuch (Knopf verschoben)
+        s1, t1 = _S([False, True]), []
+        r1 = ob._cdp_dialog_verbinden(s1, False, t1)
+        k1 = kachel["n"]
+        blicke[0] = [bl]
+        s2, t2 = _S([False, False]), []
+        r2 = ob._cdp_dialog_verbinden(s2, False, t2)
+        blicke[0] = [bl]
+        kachel["n"] = 0
+        s3, t3 = _S([True]), []
+        r3 = ob._cdp_dialog_verbinden(s3, False, t3)
+        k3 = kachel["n"]
+        blicke[0] = [bl, bl, bl_aus]
+        s4, t4 = _S([False, True]), []
+        r4 = ob._cdp_dialog_verbinden(s4, False, t4)
+        blicke[0] = [bl, bl, {"dialoge": [], "umgebung": []}]
+        s5, t5 = _S([False, True]), []
+        r5 = ob._cdp_dialog_verbinden(s5, False, t5)
+    finally:
+        for n_, f_ in alt.items():
+            setattr(ob, n_, f_)
+    chk(r1[0] == "" and isinstance(r1[2], dict) and [k[0] for k in s1.klicks] == ["Connect", "Connect (2. Versuch)"] and s1.klicks[1][1][1] == 660.0
+        and k1 == 2 and any("zweiter Versuch" in x for x in t1), f"Connect nicht gedrückt → Kachel-Prüfung, Neulesen, EIN zweiter Klick mit frischem Rechteck ({s1.klicks}, {t1})")
+    chk(r2[0] == "connect" and "zweimal" in r2[1] and "div.toastItem-abc" in r2[1] and len(s2.klicks) == 2 and any("am Connect-Punkt liegt" in x for x in t2)
+        and any("elementFromPoint" in a for a in s2.js), f"zweimal nicht gedrückt → Fehler mit dem, was am Punkt liegt ({r2[1]})")
+    chk(r3[0] == "" and len(s3.klicks) == 1 and k3 == 1, f"gelungener Klick: wie bisher ein Klick, Kachel einmal vor dem Dialog geprüft ({s3.klicks}, {k3})")
+    chk(r4[0] == "connect" and len(s4.klicks) == 1 and "kein zweiter Versuch" in r4[1], f"Demo nach dem Fehlversuch nicht an → kein zweiter Klick ({r4[1]})")
+    chk(r5[0] == "connect" and len(s5.klicks) == 1, "Dialog nach dem Fehlversuch weg → kein zweiter Klick")
+    q = _i.getsource(ob._cdp_dialog_verbinden)
+    chk(q.index("_cdp_kachel_weg(s, trail)") < q.index("cdp_connect_dialog(ort.blick())") and q.count("_cdp_kachel_weg(s, trail)") == 2
+        and q.count('"Connect (2. Versuch)"') == 1 and q.index('"Connect")') < q.index('"Connect (2. Versuch)"'),
+        "Kachel vor dem Dialog und vor dem zweiten Versuch; genau ein zweiter Connect-Klick")
+    if ok:
+        print("✓ Connect 2. Versuch: Kachel auch im neuen Tab weg, nicht gedrückter Connect genau einmal neu (Demo bewiesen), Spur nennt den Blocker")
     return ok
 
 
