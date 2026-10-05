@@ -26182,7 +26182,10 @@
         const ab = new Date(t.started_at || ''), abTxt = isNaN(ab) ? '' : ab.toDateString() === heute ? zeit(t.started_at) : tag(ab)
         // „Ansehen" (02.10.2026): Puls springt am PC dieser ID auf das Konto — Echo: MT5-Terminal nach vorn
         const apid = wdlTid(t), aBusy = _wdlAnsehenBusy.has(apid)
-        const aKnopf = `<button type="button" class="wdl-ansehen" data-wdl-ansehen="${escapeHtml(apid)}"${aBusy ? ' disabled' : ''} title="${escapeHtml(echo ? 'MT5-Terminal dieses Kontos am PC der ID nach vorn holen — keine Order' : 'Puls springt am PC der ID in TradingView auf dieses Konto — ist die Position schon zu, geht der Trade auf „Überprüfen"')}">${aBusy ? 'öffnet …' : 'Ansehen'}</button>`
+        // Topstep-Handplan (T1-C 06.10.2026): tsv2 ohne tv.puls 'tsx' hat Puls nicht gestartet — /admin/live-trades reicht den Merker
+        // seit .1032 nur bei Puls-Plänen durch. Dort sieht Puls nicht nach: Knopf gesperrt, Tooltip sagt es; Puls-Pläne wie bisher.
+        const aHand = t.route === 'tsv2' && ((t.tv || {}).puls !== 'tsx')
+        const aKnopf = `<button type="button" class="wdl-ansehen" data-wdl-ansehen="${escapeHtml(apid)}"${(aBusy || aHand) ? ' disabled' : ''} title="${escapeHtml(aHand ? 'Topstep-Handplan — Puls sieht hier nicht nach' : echo ? 'MT5-Terminal dieses Kontos am PC der ID nach vorn holen — keine Order' : 'Puls springt am PC der ID in TradingView auf dieses Konto — ist die Position schon zu, geht der Trade auf „Überprüfen"')}">${aBusy ? 'öffnet …' : 'Ansehen'}</button>`
         zeitZ = zelle('zeit', `${abTxt ? `<span class="wdl-z-ab">${abTxt} · </span>` : ''}<span class="wdl-z-dauer" data-wdl-lv="dauer">${wdlDauer(t.started_at)}</span>${aKnopf}`, { tip: 'läuft seit ' + zeit(t.started_at) })
       } else if(gepl){
         art = 'plan'
@@ -38387,7 +38390,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1036'
+  const OS_TAB_BUILD = '2026-09-22.1037'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
