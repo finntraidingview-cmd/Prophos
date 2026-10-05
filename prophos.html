@@ -2136,6 +2136,73 @@
   #dashboard-view .trade-card.completed{opacity:.85}
   #dashboard-view .trade-card.completed:hover{opacity:1}
 
+  /* ── Geplant als ruhige Tabelle (pz-*, 05.10.2026, Finn am Auto-Planer .1018: „sehr viel hingeklatscht, man erkennt nicht gerade so
+     viele Daten, sehr unübersichtlich") ── Je Firma ein Kasten, darin EINMAL die Spaltenköpfe und eine schlanke Zeile je V2-Plan ohne
+     Hedge (Orbit V2/Echo V2, Auto und von Hand). Gleiche Sprache wie die Radar-Tabelle (wdl-z, .844): Graustufen, tabular-nums,
+     Beträge rechtsbündig, Grün/Rot nur für TP/SL. Weg, Richtung und Firma stehen einmal im Firmen-Kopf, nicht in jeder Zeile.
+     Raster über subgrid: die Aktions-Spalte ist so breit wie ihr breitester Inhalt, trotzdem steht alles exakt untereinander.
+     Karten mit Hedge (tc2: Echo/Orbit, Winning Days, Topstep V2) bleiben, wie sie sind. */
+  #dashboard-view .pz-kopf{display:flex;align-items:center;gap:4px 10px;flex-wrap:wrap;margin:12px 2px -2px;font-size:12.5px;color:var(--sub);font-variant-numeric:tabular-nums}
+  #dashboard-view .pz-kopf:first-child{margin-top:2px}
+  #dashboard-view .pz-kopf .pz-firma{font-size:14px;font-weight:600;color:var(--ink)}
+  #dashboard-view .pz-kopf .pz-tp{color:#15803d;font-weight:600}
+  #dashboard-view .pz-kopf .pz-sl{color:#b91c1c;font-weight:600}
+  #dashboard-view .pz-kopf .pz-warn{color:#B45309;font-weight:600}
+  #dashboard-view .pz-kopf i{font-style:normal;color:var(--sub-2)}
+  #dashboard-view .pz-tab{display:grid;grid-template-columns:96px minmax(90px,.8fr) minmax(170px,1.4fr) minmax(118px,.6fr) 64px 80px 80px minmax(168px,auto);column-gap:12px;border:1px solid var(--border-soft);border-radius:10px;background:var(--surface);overflow:hidden}
+  #dashboard-view .pz-z{display:grid;grid-template-columns:subgrid;grid-column:1/-1;align-items:center;min-height:42px;padding:6px 14px;font-size:13px;color:var(--ink-2);font-variant-numeric:tabular-nums;transition:background .12s}
+  #dashboard-view .pz-z + .pz-z{border-top:1px solid var(--border-soft)}
+  #dashboard-view .pz-z:not(.pz-z-kopf):hover{background:var(--bg)}
+  #dashboard-view .pz-z-kopf{min-height:0;padding-top:8px;padding-bottom:7px;font-size:10.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--sub-2)}
+  #dashboard-view .pz-z > span{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #dashboard-view .pz-z > .pz-zeit{display:flex;align-items:center;gap:2px;overflow:visible;color:var(--sub)}
+  #dashboard-view .pz-zeit-k{font:inherit;font-weight:600;color:var(--ink);background:none;border:1px solid transparent;border-radius:6px;padding:2px 6px;margin-left:-7px;cursor:pointer}
+  #dashboard-view .pz-zeit-k:hover{border-color:var(--border)}
+  #dashboard-view .pz-zeit-x{font:inherit;font-size:11px;color:var(--sub-2);background:none;border:none;padding:2px 4px;cursor:pointer}
+  #dashboard-view .pz-zeit-x:hover{color:var(--ink-2)}
+  #dashboard-view .pz-konto b{font-weight:600;color:var(--ink)}
+  #dashboard-view .pz-konto small{margin-left:6px;font-size:12px;color:var(--sub)}
+  #dashboard-view .pz-z > .pz-bal{display:flex;flex-direction:column;gap:4px}
+  #dashboard-view .pz-bal-t{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #dashboard-view .pz-bal-t em{font-style:normal;color:var(--sub-2);margin:0 2px}
+  #dashboard-view .pz-bal-t .pz-rest{color:var(--sub)}
+  #dashboard-view .pz-live{display:inline-block;width:14px;font-style:normal;font-size:9px;vertical-align:1px;color:var(--good)}
+  #dashboard-view .pz-live.is-alt{font-size:12px;vertical-align:0;color:var(--warn)}
+  #dashboard-view .pz-bahn{display:block;height:3px;max-width:230px;border-radius:2px;background:var(--border-soft);overflow:hidden}
+  #dashboard-view .pz-bahn > i{display:block;height:100%;border-radius:2px;background:var(--sub-2)}
+  #dashboard-view .pz-z:not(.pz-z-kopf) > .pz-art{font-size:12px;color:var(--sub)}
+  #dashboard-view .pz-gr,#dashboard-view .pz-z > .pz-tp,#dashboard-view .pz-z > .pz-sl{text-align:right}
+  #dashboard-view .pz-z:not(.pz-z-kopf) > .pz-tp{font-weight:600;color:#15803d}
+  #dashboard-view .pz-z:not(.pz-z-kopf) > .pz-sl{font-weight:600;color:#b91c1c}
+  #dashboard-view .pz-z:not(.pz-z-kopf) > .is-leer{font-weight:400;color:var(--sub-2)}
+  #dashboard-view .pz-z > .pz-akt{display:flex;align-items:center;justify-content:flex-end;gap:4px;overflow:visible;min-width:max-content}   /* sonst rechnet die auto-Spalte mit 0 und die Knöpfe liegen über dem SL */
+  #dashboard-view .pz-akt .tc2-ab{padding:4px 6px}
+  #dashboard-view .pz-akt .tc2-btn{padding:3px 10px;font-size:11.5px;white-space:nowrap}
+  /* Bestätigen klein als Outline, bestätigt nur noch als ruhiges Wort — kein roter/grüner Kartenrand mehr. Die Hülle .pz-zustand ist
+     der Platz, an dem später der Start-Zustand („startet 08:44") steht. */
+  #dashboard-view .pz-ok{border:1px solid var(--border);color:var(--ink-2);font-weight:500}
+  #dashboard-view .pz-ok.is-ok{border-color:transparent;color:#15803d}
+  /* Schmales Fenster (Seitenleiste + Tabelle unter ~1000 px): die Art-Spalte weicht, damit die Knöpfe nie über den Rand laufen */
+  @media (max-width:1240px){
+    #dashboard-view .pz-tab{grid-template-columns:96px minmax(80px,.8fr) minmax(130px,1.4fr) 64px 80px 80px minmax(168px,auto)}
+    #dashboard-view .pz-z > .pz-art,#dashboard-view .pz-bal-t .pz-rest{display:none}
+  }
+  /* Handy: zwei Zeilen — oben Start · Konto · Größe · TP · SL, darunter Balance → Ziel und die Knöpfe. Art steht im Tooltip. */
+  @media (max-width:820px){
+    #dashboard-view .pz-kopf{margin:12px 4px -2px;font-size:12px}
+    #dashboard-view .pz-tab{display:block;border:none;border-radius:var(--m-r-card,16px);box-shadow:var(--shadow-mob-card,0 1px 2px rgba(16,24,40,.05))}
+    #dashboard-view .pz-z{grid-template-columns:auto minmax(0,1fr) auto 66px 58px;grid-template-areas:"zeit konto gr tp sl" "bal bal akt akt akt";column-gap:8px;row-gap:6px;min-height:0;padding:10px 12px;font-size:12px}
+    #dashboard-view .pz-z + .pz-z{border-top-color:var(--m-hair,rgba(16,24,40,.07))}
+    #dashboard-view .pz-z-hand{grid-template-areas:"zeit konto gr tp sl" "bal bal bal bal bal" "akt akt akt akt akt"}
+    #dashboard-view .pz-z-kopf,#dashboard-view .pz-z > .pz-art,#dashboard-view .pz-bal-t .pz-rest{display:none}
+    #dashboard-view .pz-zeit{grid-area:zeit} #dashboard-view .pz-konto{grid-area:konto} #dashboard-view .pz-bal{grid-area:bal}
+    #dashboard-view .pz-gr{grid-area:gr} #dashboard-view .pz-z > .pz-tp{grid-area:tp} #dashboard-view .pz-z > .pz-sl{grid-area:sl} #dashboard-view .pz-akt{grid-area:akt}
+    #dashboard-view .pz-zeit-k{margin-left:-4px;padding:2px 3px}
+    #dashboard-view .pz-z .btn{min-height:0}   /* spezifischer als die Handy-Regel für .btn (42 px) — die Zeile bleibt schlank */
+    #dashboard-view .pz-akt .tc2-btn{padding:5px 10px;border-radius:8px}
+    #dashboard-view .pz-akt .tc2-ab{padding:5px 7px}
+  }
+
   /* ── Kompakte Trade-Zeilen (tc2) — dichter, mehr Infos, mit Live-Animation ── */
   #dashboard-view .tc2{display:flex;align-items:center;gap:11px;padding:8px 13px;background:var(--surface);border:1px solid var(--border);border-radius:10px;transition:border-color .12s,background .12s;position:relative;overflow:hidden}
   #dashboard-view .tc2:hover{border-color:#d1d5db;background:var(--surface-tint)}
@@ -34248,8 +34315,76 @@
     }
     return { live: !ende || (!!balAt && balAt >= ende), ende }
   }
-  /* Firmen-Blöcke der Spalte Geplant (05.10.2026): die Liste ist schon nach Firma + Startzeit sortiert. Kopf je Firma:
-   * Anzahl, Weg, Richtung, Zeitfenster, TP-/SL-Summe, Balance-Status, „✓ Firma bestätigen" für die offenen Auto-Vorschläge. */
+  /* Zeile statt Karte (05.10.2026, AP-DESIGN): geplanter V2-Plan ohne Hedge — Orbit V2/Echo V2, vom Auto-Planer und von Hand.
+   * Topstep V2, Winning Days und Orbit (V3, Fusion-Hedge) behalten ihre Karte. */
+  function planIstZeile(p){
+    return !!p && p.status === 'planned' && (p.route === 'tvv2' || p.route === 'mt5v2') && !(Number(p.hedgeEur) > 0)
+      && !(typeof tpIstWdPlan === 'function' && tpIstWdPlan(p))
+  }
+  /* Was der Auto-Planer in die notes schreibt (app.py ap_planen): „Auto-Planer · <stufe> · Rest 9.039 $ bis Ziel · Balance 149.961 (…)".
+   * Daraus die Art (Etappe / letzter Trade) und das Ziel (= Balance + Rest von damals). Nicht lesbar → null: die Zeile lässt Art
+   * und Ziel dann weg, statt zu raten. Keine Backend-Abfrage. */
+  function planAutoNotiz(notes){
+    const m = /Auto-Planer · (.+?) · Rest ([\d.]+) \$ bis Ziel · Balance ([\d.]+)/.exec(String(notes || ''))
+    if(!m) return null
+    const zahl = t => Number(String(t).replace(/\./g, ''))
+    const rest = zahl(m[2]), bal = zahl(m[3])
+    if(!(rest > 0) || !(bal > 0)) return null
+    const stufe = m[1].trim()
+    return { stufe, art: /^letzter Trade/i.test(stufe) ? 'letzter Trade' : /^Etappe/i.test(stufe) ? 'Etappe' : stufe,
+             gekappt: /SL auf Boden gekappt/i.test(stufe), ziel: Math.round((bal + rest) / 5) * 5 }   // beide Zahlen sind gerundet → auf 5 $ glätten
+  }
+  /* Eine Zeile der Geplant-Tabelle. o = { name, ext, extTitle, chips, akt } aus renderTradePlanCard (dieselben Knöpfe und
+   * data-plan-*-Attribute wie die Karte → bindTradePlanCardActions läuft unverändert). */
+  function planZeileHtml(p, konto, o){
+    const de = v => Math.round(Number(v)).toLocaleString('de-DE')
+    const bal = planKontoBalance(konto)
+    const live = bal ? planBalanceLive(p.masterAccountId, bal.at) : null
+    const notiz = p.autoPlan ? planAutoNotiz(p.notes) : null
+    // Kontogröße wie überall: gespeicherte starting_balance, sonst Name/Kontonummer, sonst nächste Standardgröße zur Balance
+    const groesse = (konto && konto.startingBalance > 0) ? konto.startingBalance : tpKontoGroesseAusName(o.name, bal ? bal.val : 0)
+    // Konto kurz: Größe + letzte 4 Zeichen der Nummer, voller Name im Tooltip. Ohne Nummer bleibt der Name stehen.
+    const nummer = String(o.ext || '').replace(/[^A-Za-z0-9]/g, '') || ((/\d{6,}/.exec(String(o.name || '')) || [''])[0])
+    const kontoKurz = nummer
+      ? `<b>${groesse ? (groesse / 1000) + 'k' : escapeHtml(String(o.name || '').slice(0, 14))}</b><small>…${escapeHtml(nummer.slice(-4))}</small>`
+      : `<b>${escapeHtml(String(o.name || '–'))}</b>`
+    const kontoTitel = String(o.name || '') + (o.extTitle ? ' · #' + o.extTitle : '')
+    // Start: Uhrzeit klickbar (ändern), ✕ nimmt sie raus — dieselben Handler wie auf der Karte
+    const zeit = (p.startUm && !p.startUmGestartetAt)
+      ? `<button class="pz-zeit-k" data-plan-start-um-edit="${p.id}" title="${p.autoPlan && !p.autoBestaetigtAt ? 'Startet erst nach Bestätigung. ' : 'Der PC-Tab startet zu dieser Zeit von selbst. '}Klick: Uhrzeit ändern">${tpStartUmText(p.startUm)}</button><button class="pz-zeit-x" data-plan-start-um-x="${p.id}" title="Startzeit entfernen">✕</button>`
+      : p.startUm ? `<span title="Der PC-Tab hat die Startzeit ausgelöst">gestartet ${tpStartUmText(p.startUmGestartetAt)}</span>` : '–'
+    // Balance → Ziel · Rest, darunter der Weg vom Start zum Ziel als dünner Balken (nur wenn Start und Ziel bekannt sind)
+    let balHtml = '<span class="pz-bal-t is-leer">–</span>'
+    if(bal){
+      const liveZ = live.live
+        ? `<i class="pz-live" title="Balance nach dem letzten Trade gelesen · ${escapeHtml(bal.tip)}">●</i>`
+        : `<i class="pz-live is-alt" title="Nicht live: seit dem letzten Trade (Ende ${new Date(live.ende).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}) nicht neu gelesen — TP/SL im Plan können falsch sein · ${escapeHtml(bal.tip)}">⚠</i>`
+      const ziel = notiz ? notiz.ziel : 0
+      const mitBahn = ziel > 0 && groesse > 0 && ziel > groesse && ziel <= groesse * 1.2
+      const anteil = mitBahn ? Math.max(0, Math.min(1, (bal.val - groesse) / (ziel - groesse))) : 0
+      balHtml = `<span class="pz-bal-t">${liveZ}${de(bal.val)}${ziel ? `<em>→</em>${de(ziel)}<span class="pz-rest"> · Rest ${de(Math.max(0, ziel - bal.val))}</span>` : ' $'}</span>`
+        + (mitBahn ? `<i class="pz-bahn" title="Start ${de(groesse)} → Ziel ${de(ziel)}"><i style="width:${(anteil * 100).toFixed(1)}%"></i></i>` : '')
+    }
+    const menge = Number(p.masterContracts) || 0
+    const gr = !menge ? '–' : p.route === 'mt5v2'
+      ? menge.toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 2 }) + ' Lot'
+      : menge.toLocaleString('de-DE') + ' ' + escapeHtml(String(p.masterSymbol || '').replace(/[FGHJKMNQUVXZ]\d{1,2}$/, '') || 'Kt')
+    return `
+      <div class="pz-z${p.autoPlan ? '' : ' pz-z-hand'}" data-plan-id="${p.id}">
+        <span class="pz-zeit">${zeit}</span>
+        <span class="pz-konto" title="${escapeHtml(kontoTitel)}">${kontoKurz}</span>
+        <span class="pz-bal">${balHtml}</span>
+        <span class="pz-art" title="${notiz ? escapeHtml(notiz.stufe) : ''}">${notiz ? escapeHtml(notiz.art) + (notiz.gekappt ? ' · SL gekappt' : '') : ''}</span>
+        <span class="pz-gr">${gr}</span>
+        <span class="pz-tp${p.masterTp > 0 ? '' : ' is-leer'}">${p.masterTp > 0 ? de(p.masterTp) + ' $' : '–'}</span>
+        <span class="pz-sl${p.masterSl > 0 ? '' : ' is-leer'}">${p.masterSl > 0 ? de(p.masterSl) + ' $' : '–'}</span>
+        <span class="pz-akt">${o.chips || ''}${o.akt || ''}</span>
+      </div>`
+  }
+  /* Firmen-Blöcke der Spalte Geplant (05.10.2026): die Liste ist schon nach Firma + Startzeit sortiert. Kopf je Firma EINE Zeile:
+   * Firma · Anzahl · Weg · Richtung · Zeitfenster · TP-/SL-Summe (+ Warnung nur, wenn eine Balance nicht live ist; + Richtungs-Hinweis).
+   * Darunter die V2-Pläne ohne Hedge als Tabelle (planZeileHtml), alle anderen wie bisher als Karte.
+   * AP-DESIGN 05.10.2026: „N offen" in Rot ist weg (kein Fehler), „● alle live" ebenso (der Normalfall braucht kein Etikett). */
   function planFirmenBloecke(list){
     const gruppen = []
     for(const p of list){
@@ -34273,17 +34408,21 @@
         const b = routeIstV2(p.route) ? planKontoBalance(accounts.find(a => String(a.id) === String(p.masterAccountId))) : null
         if(b && !planBalanceLive(p.masterAccountId, b.at).live) nichtLive++
       }
-      const offen = ps.filter(p => p.autoPlan && !p.autoBestaetigtAt)
-      const sep = '<span style="color:var(--sub-2)">·</span>'
-      return `<div class="plan-firma-kopf" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:14px 2px 6px;font-size:13px">
-          <b style="font-size:14px">${escapeHtml(g.firma)}</b>
-          <span style="color:var(--sub)">${ps.length} Trade${ps.length === 1 ? '' : 's'} · ${escapeHtml(wege)}</span>
+      const zeilen = ps.filter(planIstZeile), karten = ps.filter(p => !planIstZeile(p))
+      const sep = '<i>·</i>'
+      return `<div class="pz-kopf plan-firma-kopf">
+          <span class="pz-firma">${escapeHtml(g.firma)}</span>
+          <span>${ps.length} Trade${ps.length === 1 ? '' : 's'}</span> ${sep} <span>${escapeHtml(wege)}</span>
           ${richtung} ${sep}
-          <span style="color:var(--sub)">⏰ ${fenster}</span> ${sep}
-          <span>TP <b style="color:#2a9d5c">${geld(tp)}</b>${sl > 0 ? ` · SL <b style="color:var(--danger)">${geld(sl)}</b>` : ''}</span> ${sep}
-          ${nichtLive ? `<span style="color:var(--warn);font-weight:600">⚠ ${nichtLive} Balance${nichtLive === 1 ? '' : 's'} nicht live</span>` : `<span style="color:var(--good);font-weight:600">● alle live</span>`}
-          ${offen.length ? `${sep} <span style="color:var(--danger);font-weight:600">${offen.length} offen</span>` : ''}
-        </div>` + ps.map(p => renderTradePlanCard(p)).join('')
+          <span>${fenster}</span> ${sep}
+          <span>TP <span class="pz-tp">${geld(tp)}</span>${sl > 0 ? ` · SL <span class="pz-sl">${geld(sl)}</span>` : ''}</span>
+          ${nichtLive ? `${sep} <span class="pz-warn">⚠ ${nichtLive} Balance${nichtLive === 1 ? '' : 's'} nicht live</span>` : ''}
+          ${zeilen.length ? `<span class="tc2-chip tc2-dir-hint" data-dir-firm="${escapeHtml(g.firma === '–' ? '' : g.firma)}" style="display:none;background:rgba(245,158,11,.14);color:#b45309"></span>` : ''}
+        </div>`
+        + (zeilen.length ? `<div class="pz-tab">
+          <div class="pz-z pz-z-kopf"><span>Start</span><span>Konto</span><span>Balance → Ziel</span><span class="pz-art">Art</span><span class="pz-gr">Größe</span><span class="pz-tp">TP</span><span class="pz-sl">SL</span><span></span></div>`
+          + zeilen.map(p => renderTradePlanCard(p)).join('') + `</div>` : '')
+        + karten.map(p => renderTradePlanCard(p)).join('')
     }).join('')
   }
   function fmtDupBalance(info){
@@ -34715,6 +34854,7 @@
 
     // Rechte Metrik je Status
     let metric = ''
+    let zeileChips = '', zeileAkt = ''   // nur für die Geplant-Tabelle (planIstZeile), siehe planZeileHtml
     if(isPlanned){
       const dateStr = p.plannedFor ? new Date(p.plannedFor).toLocaleDateString('de-DE',{day:'2-digit',month:'short'}) : '—'
       const pf = _pfCheckStatus[String(p.id)]
@@ -34736,6 +34876,7 @@
       metric = `${mirrorBadge}${pfBadge}`
         + `<span class="tc2-chip tc2-dir-hint" data-dir-firm="${escapeHtml(p.masterFirm || '')}" style="display:none;background:rgba(245,158,11,.14);color:#b45309"></span>`
         + (p.autoPlan ? '' : `<span class="tc2-date">${dateStr}</span>`)
+      zeileChips = `${mirrorBadge}${pfBadge}`   // Geplant-Tabelle: der Richtungs-Hinweis steht dort einmal im Firmen-Kopf
     } else if(isOpen){
       if(isPending){
         metric = `<span class="tc2-pending-lbl">🔴 beendet — eintragen</span>`
@@ -34879,6 +35020,20 @@
         <button class="btn btn-ghost tc2-btn" data-plan-start="${p.id}" title="Nur als laufend markieren (ohne Puls)">Läuft</button>
         ${jetztBtn}
         <button class="btn ${jetztBtn ? 'btn-ghost' : 'btn-primary'} tc2-btn" data-plan-complete="${p.id}">Erledigt</button>`
+      // Geplant-Tabelle (AP-DESIGN 05.10.2026): die Uhrzeit hat dort ihre eigene Spalte — steht sie noch aus, bleibt hier nur ein
+      // etwaiger Vorprüf-Hinweis; sonst derselbe Knopf wie auf der Karte (Starten / Warteschlange / gestartet · Neu starten).
+      // Auto-Plan: ✎ 🗑 + Zustand (Bestätigen klein bzw. „✓ bestätigt", Klick nimmt zurück). Von Hand: wie die V2-Karte.
+      if(planIstZeile(p)){
+        const rest = (p.startUm && !p.startUmGestartetAt) ? vorcheckChip : jetztBtn
+        const kopf = `<button class="btn btn-ghost icon-btn tc2-ab" data-plan-edit="${p.id}" title="Bearbeiten">${svgEdit}</button>`
+          + `<button class="btn btn-ghost icon-btn tc2-ab" data-plan-del="${p.id}" title="Löschen">${svgDel}</button>`
+        zeileAkt = kopf + (p.autoPlan
+          ? `${rest}<span class="pz-zustand">${!p.autoBestaetigtAt
+              ? `<button class="btn btn-ghost tc2-btn pz-ok" data-plan-auto-ok="${p.id}" title="Freigeben — der PC-Tab startet den Trade dann zur Startzeit">Bestätigen</button>`
+              : `<button class="btn btn-ghost tc2-btn pz-ok is-ok" data-plan-auto-zurueck="${p.id}" title="Bestätigt — startet zur Startzeit. Klick nimmt die Freigabe zurück">✓ bestätigt</button>`}</span>`
+          : `<button class="btn btn-ghost tc2-btn" data-plan-start="${p.id}" title="Von Hand gestartet — nur als laufend markieren (ohne Puls, ohne Baseline: P&L später von Hand)">Läuft</button>${rest}`
+            + `<button class="btn btn-ghost tc2-btn" data-plan-complete="${p.id}" title="Direkt abschließen — P&L und Trade-Datum von Hand eintragen (auch aus Geplant)">Erledigt</button>`)
+      }
     } else if(isOpen){
       // Remote-Close (28.08.2026, Finns Feature): „Schließen" nur für Echo-
       // Pläne — lokal schließt Puls direkt im Terminal, am Handy/Mac geht ein
@@ -34912,6 +35067,8 @@
         <button class="btn btn-ghost icon-btn tc2-ab" data-plan-del="${p.id}" title="Löschen">${svgDel}</button>`
     }
 
+    // Geplant-Tabelle (AP-DESIGN 05.10.2026): V2-Plan ohne Hedge als schlanke Zeile statt Karte
+    if(planIstZeile(p)) return planZeileHtml(p, _m, { name: masterName, ext: _mTsxName ? '' : mExt, extTitle: mExtTitle, chips: zeileChips, akt: zeileAkt })
     const cls = `tc2 tc2-${p.status}${isPending ? ' tc2-is-pending' : ''}${sysBadge ? ' tc2-has-sys' : ''}`
     // Auto-Plan: Rand links rot (wartet auf Bestätigung) / grün (bestätigt) — 05.10.2026
     const autoRand = (isPlanned && p.autoPlan) ? ` style="box-shadow:inset 4px 0 0 ${p.autoBestaetigtAt ? 'var(--good)' : 'var(--danger)'}"` : ''
@@ -38038,7 +38195,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1018'
+  const OS_TAB_BUILD = '2026-09-22.1019'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
