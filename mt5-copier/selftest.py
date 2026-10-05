@@ -1906,6 +1906,7 @@ def main():
     results.append(test_tsx_k1_vorbau())
     results.append(test_tsx_k2())
     results.append(test_tsx_k3a())
+    results.append(test_tsx_k4())
     results.append(test_puls_win_maus())
     results.append(test_puls_nie_chrome_schliessen())
     results.append(test_tsx_konto_abgekuerzt())
@@ -4308,8 +4309,16 @@ def test_tsx_k0():
         ob.TSX_K1_AKTIV = True
         ob.modus_tsxlesen({"konto": "EXPRESS-V2-000000-10000001"})
         o2 = io.StringIO()
+        alt_k4_an = ob.TSX_K4_AKTIV
         with contextlib.redirect_stdout(o2):
+            ob.TSX_K4_AKTIV = False             # Notschalter K4 aus: scharf antwortet wie vor K4
             ob.modus_tsxorder({"ext_id": "150KTC-SKU-V2-000000-20000000", "symbol": "MNQ", "richtung": "buy", "volumen": 1, "tp_usd": 40, "scharf": True})
+        ob.TSX_K4_AKTIV = True                  # K4 (05.10.2026): scharf läuft dieselbe Kette, mit dem Original-Befehl für Risk / To Make
+        auf4, alt_kette = [], ob.modus_tsxlesen_cdp
+        ob.modus_tsxlesen_cdp = lambda c, **kw: auf4.append((c, kw.get("order"), kw.get("order_cmd")))
+        ob.modus_tsxorder({"ext_id": "150KTC-SKU-V2-000000-20000000", "symbol": "MNQ", "richtung": "sell", "volumen": 2, "tp_usd": 40, "sl_usd": 20,
+                           "scharf": True, "plan_id": "p-1"})
+        ob.modus_tsxlesen_cdp, ob.TSX_K4_AKTIV = alt_kette, alt_k4_an
         o3 = io.StringIO()
         with contextlib.redirect_stdout(o3):
             ob.TSX_K3_AKTIV = False
@@ -4334,7 +4343,10 @@ def test_tsx_k0():
     j1, j2, j3 = (json.loads(o.getvalue()) for o in (o1, o2, o3))
     chk(j1["code"] == "cdp_folgt" and j1["etappe"] == "K1", f"tsxlesen auf cdp-PC, K1 aus → cdp_folgt K1 ({j1})")
     chk(("k1", {"konto": "EXPRESS-V2-000000-10000001"}) in auf, "tsxlesen auf cdp-PC, K1 an → K1-Weg (nie UIA im Alltags-Chrome)")
-    chk(j2["code"] == "cdp_folgt" and j2["etappe"] == "K4" and j2["gesendet"] is False, f"tsxorder scharf → K4, nichts gesendet ({j2})")
+    chk(j2["code"] == "cdp_folgt" and j2["etappe"] == "K4" and j2["gesendet"] is False, f"tsxorder scharf, K4 aus → cdp_folgt K4, nichts gesendet ({j2})")
+    chk(len(auf4) == 1 and auf4[0][1].get("scharf") is True and auf4[0][1].get("richtung") == "sell" and auf4[0][1].get("menge") == 2
+        and auf4[0][2].get("tp_usd") == 40 and auf4[0][2].get("sl_usd") == 20 and auf4[0][2].get("plan_id") == "p-1",
+        f"tsxorder scharf, K4 an → Kette mit scharf und dem Original-Befehl (TP/SL in $, plan_id) ({auf4})")
     chk(j3["etappe"] == "K3", "tsxorder Probe, K3 aus → cdp_folgt K3")
     k3 = [a for a in auf if a[0] == "k3"]
     chk(len(k3) == 2 and k3[0][1] == {"konto": "150KTC-SKU-V2-000000-20000000", "firma": None}
@@ -5630,14 +5642,461 @@ def test_tsx_k3a():
     chk("hover_pause = TSX_HOVER_PAUSE if js_datei == \"augen_tsx.js\"" in _i.getsource(ob._AugenSitzung.__init__),
         "Hover-Pause nur für die TopstepX-Sitzung (augen_tsx.js)")
     js = open(os.path.join(os.path.dirname(os.path.abspath(ob.__file__)), "augen_tsx.js"), encoding="utf-8").read()
-    chk("var VERSION = 'tsx-0.5.0'" in js and "contract-selector-input-select-contract" in js and "order-card-input-field-contracts" in js
+    chk("var VERSION = 'tsx-0.6.1'" in js and "contract-selector-input-select-contract" in js and "order-card-input-field-contracts" in js
         and "order-card-click-button-buy" in js and "k3: true" in js
         and "filter(function (z) { return RX_CODE.test(z); })" in js    # DOM-Test 01.10.2026: vor dem Code steht „■" — nie nur Zeile 1
         and ".click(" not in js.split("function contractLesen")[1].split("function ticketLesen")[0],
-        "augen_tsx.js tsx-0.5.0: Contract/Menge/Knöpfe gelesen, nur lesend")
+        "augen_tsx.js (seit tsx-0.5.0): Contract/Menge/Knöpfe gelesen, nur lesend")
     if ok:
         print("✓ TSX-K3a: Contract per Tastatur + Vorschlag (MNQ ≠ NQ, Front-Monat), Menge ersetzen + Rücklesung, Probe ohne Order-Knopf, "
               "menschliche Pausen, Kette im tsx-konto-Vertrag")
+    return ok
+
+
+def test_tsx_k4():
+    """K4 (05.10.2026, Finn: „Market buy bzw. sell … unten auf Position gehen, Doppelklicken auf Risk und da eine Zahl eingeben"):
+    scharfer Order-Knopf genau einmal, gesendet/retry_ok vor dem Klick, Fill-Beweis, Risk / To Make über die Positions-Tabelle.
+    Nachbau der TopstepX-Seite als Zustands-Attrappe; reine Regeln + echte Schritte. Kennungen erfunden."""
+    import order_bot as ob
+    import inspect as _i
+    import os
+    import re
+    import time as _t
+    ok = True
+
+    def chk(bed, text):
+        nonlocal ok
+        if not bed:
+            print("  ✗ TSX-K4: " + text)
+            ok = False
+    E = "EXPRESS-V2-000000-30000003"
+    # ── reine Regeln ──────────────────────────────────────────────────────────
+    B = ob.tsx_k4_betraege
+    chk(B({"tp_usd": 198, "sl_usd": 21}) == (198.0, 21.0) and B({"tp_usd": "40,5"}) == (40.5, None) and B({"tp_usd": 0, "sl_usd": -3}) == (None, None)
+        and B({"sl_usd": "x"}) == (None, None) and B(None) == (None, None), "Beträge: nur Zahlen > 0, sonst None (Winning Days ohne SL)")
+    BT, WG = ob.tsx_k4_betrag_text, ob.tsx_k4_wert_gleich
+    chk(BT(27) == "27" and BT(3456.0) == "3456" and BT(199.5) == "199.50" and WG("27", 27) and WG("199.50", 199.5) and WG("199,5", 199.5)
+        and not WG("2127", 27) and not WG("", 27) and not WG("27a", 27) and not WG(None, 27), "Tipp-Text und Rücklesung des Eingabefelds")
+    L, TOL = ob.tsx_k4_level, ob.tsx_k4_toleranz
+    # Finns Bild 05.10.2026: −6 MNQ @ 31.339,50 · Risk 21 $ → SL 31.341,25 · To Make 198 $ → TP 31.323,00
+    chk(L(31339.5, "sell", 21, "MNQ", 6, "sl") == 31341.25 and L(31339.5, "sell", 198, "MNQ", 6, "tp") == 31323.0
+        and L(31000, "buy", 4000, "NQ", 2, "tp") == 31100.0 and L(31000, "buy", 2000, "NQ", 2, "sl") == 30950.0
+        and L(31000, "buy", 10, "ES", 1, "tp") is None and L(None, "buy", 10, "MNQ", 1, "tp") is None,
+        "Level aus Einstieg und Dollar der ganzen Position (MNQ 2 $/Pkt, NQ 20 $/Pkt), unbekannte Wurzel → None")
+    chk(abs(TOL("MNQ", 6) - 3.01) < 1e-9 and abs(TOL("NQ", 2) - 10.01) < 1e-9, "Spiel der Rücklesung = ein Tick der ganzen Position")
+    bf = {"richtung": "sell", "menge": 6, "wurzel": "MNQ", "ext": E, "scharf": True}
+    fill = {"art": "fill", "status": "ausgefuehrt", "aktiv": True, "seite": "sell", "menge": 6, "symbol": "MNQZ26", "typ": "market",
+            "preis": 31339.5, "erst_gesehen": 10_000}
+    F, MS = ob.tsx_k4_fill, ob.tsx_k4_meldung_schluessel
+    st_f = {"toasts": {"meldungen": [fill]}, "positionen": []}
+    chk(F(st_f, bf, set(), 9_800) == (31339.5, "fill", "") and F(st_f, bf, MS(st_f), 9_800)[0] is None
+        and F({"toasts": {"meldungen": [dict(fill, erst_gesehen=5_000)]}}, bf, set(), 9_800)[0] is None
+        and F({"toasts": {"meldungen": [dict(fill, seite="buy")]}}, bf, set(), 9_800)[0] is None
+        and F({"toasts": {"meldungen": [dict(fill, symbol="NQZ26")]}}, bf, set(), 9_800)[0] is None
+        and F({"toasts": {"meldungen": [dict(fill, menge=3)]}}, bf, set(), 9_800)[0] is None,
+        "Fill-Beweis nur mit NEUER Meldung (nicht im Vorher-Stand, nach dem Klick gesehen), Richtung, Wurzel (MNQ ≠ NQ) und Menge")
+    pos = {"symbol": "MNQ", "seite": "sell", "menge": 6, "avg": 31339.5}
+    chk(F({"positionen": [pos]}, bf, set(), 0) == (31339.5, "position", "") and F({"positionen": [dict(pos, menge=3)]}, bf, set(), 0)[0] is None
+        and F({"positionen": [dict(pos, seite="buy")]}, bf, set(), 0)[0] is None and F({"positionen": [dict(pos, symbol="NQZ26")]}, bf, set(), 0)[0] is None
+        and F({"positionen": [dict(pos, avg=None)]}, bf, set(), 0)[0] is None and F(None, bf, set(), 0) == (None, "", ""),
+        "Positions-Beweis nur mit Wurzel, Richtung und GENAU der Plan-Menge (Teil-Fill zählt nicht)")
+    abg = {"art": "order", "status": "abgelehnt", "aktiv": False, "seite": "sell", "menge": 6, "symbol": "MNQZ26", "typ": "market", "preis": None,
+           "text": "Order Rejected | Market closed", "erst_gesehen": 10_000}
+    chk(F({"toasts": {"meldungen": [abg]}}, bf, set(), 9_800)[2].startswith("Order Rejected")
+        and F({"toasts": {"meldungen": [abg]}}, bf, MS({"toasts": {"meldungen": [abg]}}), 9_800) == (None, "", ""),
+        "neue Ablehnung → abgelehnt_text; eine alte Ablehnung zählt nicht")
+    bein = {"art": "stop", "status": "abgelehnt", "aktiv": False, "seite": "buy", "menge": 6, "symbol": "MNQZ26", "typ": "stop market", "preis": 31341.25,
+            "text": "Order Rejected | +6 MNQZ26 Stop Market @ 31,341.25", "erst_gesehen": 10_000}
+    chk(F({"toasts": {"meldungen": [bein, fill]}}, bf, set(), 9_800) == (31339.5, "fill", "")
+        and F({"toasts": {"meldungen": [bein]}, "positionen": [pos]}, bf, set(), 9_800) == (31339.5, "position", "")
+        and F({"toasts": {"meldungen": [abg]}, "positionen": [pos]}, bf, set(), 9_800) == (31339.5, "position", "")
+        and F({"toasts": {"meldungen": [abg, fill]}}, bf, set(), 9_800) == (31339.5, "fill", "")
+        and F({"toasts": {"meldungen": [bein]}}, bf, set(), 9_800) == (None, "", "")
+        and F({"toasts": {"meldungen": [dict(abg, symbol="ESZ26")]}}, bf, set(), 9_800) == (None, "", "")
+        and F({"toasts": {"meldungen": [dict(abg, seite="buy")]}}, bf, set(), 9_800) == (None, "", "")
+        and F({"toasts": {"meldungen": [dict(abg, symbol=None, seite=None, typ=None)]}}, bf, set(), 9_800)[2].startswith("Order Rejected")
+        and F({"toasts": {"meldungen": [dict(fill, typ="limit")]}}, bf, set(), 9_800)[0] is None,
+        "Prüfer 06.10.2026: Beweis gewinnt — Bracket-Bein/fremde Ablehnung nie 'abgelehnt', nur die eigene Market-Order ohne Fill und Position")
+    AB = ob.tsx_k4_ablehnungen
+    chk(AB({"toasts": {"meldungen": [bein, fill, abg]}}, set(), 9_800) == [bein["text"], abg["text"]]
+        and AB({"toasts": {"meldungen": [bein]}}, MS({"toasts": {"meldungen": [bein]}}), 9_800) == []
+        and AB({"toasts": {"meldungen": [dict(bein, erst_gesehen=5_000)]}}, set(), 9_800) == [] and AB(None, set(), 0) == [],
+        "Ablehnungen eines Blicks: nur neu + frisch — Warnung neben dem Fill")
+    alt_fill = dict(fill, erst_gesehen=5_000)
+    st_vor, st_nach = {"toasts": {"meldungen": [alt_fill]}}, {"toasts": {"meldungen": [alt_fill, dict(alt_fill)]}}
+    chk(F(st_nach, bf, MS(st_vor), 9_800) == (31339.5, "fill", "") and F(st_vor, bf, MS(st_vor), 9_800)[0] is None
+        and MS(st_nach) == {ob._tsx_k4_key(fill): 2} and AB({"toasts": {"meldungen": [dict(abg, erst_gesehen=5_000)] * 2}}, MS({"toasts": {"meldungen": [dict(abg, erst_gesehen=5_000)]}}), 9_800) == [abg["text"]],
+        "Nachprüfer 06.10.2026: alter gleich lautender Toast bleibt stehen → der zweite Knoten zählt über die gewachsene Anzahl als neu")
+
+    def gitter(zeilen, da=True):
+        return {"ticket": {"k4": True, "gitter": {"da": da, "zeilen": zeilen, "grund": None if da else "keine Tabelle"}}}
+    Z = ob.tsx_k4_zeile
+    z6 = {"symbol": "MNQ", "menge": -6}
+    chk(Z(gitter([z6]), bf)[0] is z6 and Z(gitter([dict(z6, menge=6)]), bf)[0] is None and Z(gitter([z6, dict(z6)]), bf)[0] is None
+        and Z(gitter([dict(z6, symbol="NQ")]), bf)[0] is None and Z(gitter([], da=False), bf) == (None, "keine Tabelle") and Z({}, bf)[0] is None,
+        "Plan-Zeile: genau eine mit Wurzel, Vorzeichen und Menge — sonst keine")
+    chk(re.search(ob.TSX_K4_TABU, "close position") and re.search(ob.TSX_K4_TABU, "flatten all") and re.search(ob.TSX_K4_TABU, "reverse position")
+        and re.search(ob.TSX_K4_TABU, "cancel orders") and re.search(ob.TSX_K4_TABU, "join bid")
+        and not re.search(ob.TSX_K4_TABU, "sell -6 @ market") and not re.search(ob.TSX_K4_TABU, "buy +3 @ market")
+        and not re.search(ob.TSX_K4_TABU, "positions") and not re.search(ob.TSX_K4_TABU, "$21.00"),
+        "K4-Tabu: alles, was schließt/dreht/storniert — der Order-Knopf, der Reiter und die Zellen selbst nicht")
+
+    # ── nachgebildete Seite ───────────────────────────────────────────────────
+    RK, RV, RT = [1640, 416, 120, 26], [1766, 416, 120, 26], [156, 746, 69, 28]
+    RR, RM, RC = [1000, 766, 200, 22], [1300, 766, 200, 22], [1850, 766, 60, 22]
+
+    class _T4:
+        def __init__(self, richtung="sell", menge=6, avg=31339.5, **kw):
+            self.o = dict(fill_nach=1, fill_toast=True, abgelehnt=False, order_druck=True, reiter=False, risk=None, to_make=None, edit_geht=True,
+                          strg_a=True, tipp_extra="", enter_wirkt=True, flach_ohne_pos=True, markt_zu=False, popup_nach_enter=False, edit_fokus=True,
+                          wirft_nach_klick=False, tippen_wirft=False, tasten_wirken=True, k4=True, reiter_da=True, bein_abgelehnt=False, zeile_nach=0, klick_wirft="",
+                          abl_ohne_zeile=False)
+            self.o.update(kw)
+            self.richtung, self.menge, self.avg = richtung, menge, avg
+            self.pos, self.lesungen, self.t_klick, self.reiter = False, None, 0, self.o["reiter"]
+            self.n_reiter = 0
+            self.werte = {"risk": self.o["risk"], "to_make": self.o["to_make"]}
+            self.edit, self.eingabe, self.markiert, self.popup = None, "", False, False
+            self.klicks, self.pruef, self.tasten = [], [], []
+
+        def _feld(self, name, rect):
+            if self.edit == name:
+                return {"text": "", "wert": None, "rect": rect, "zu": {"disabled": False, "verdeckt": False},
+                        "edit": {"offen": True, "wert": self.eingabe, "rect": rect, "fokus": bool(self.o["edit_fokus"]), "typ": "number"}}
+            w = self.werte[name]
+            return {"text": "" if w is None else f"${w:,.2f}", "wert": w, "rect": rect, "zu": {"disabled": False, "verdeckt": False}, "edit": {"offen": False}}
+
+        def stand(self, opts=None):
+            if self.lesungen is not None:
+                self.lesungen += 1
+                if self.o["wirft_nach_klick"]:
+                    raise RuntimeError("CDP weg")
+                if self.o["fill_nach"] and self.lesungen >= self.o["fill_nach"] and not self.o["abgelehnt"]:
+                    self.pos = True
+            if self.reiter:
+                self.n_reiter += 1
+            n = self.menge
+            meld = []
+            if self.pos and self.o["fill_toast"]:
+                meld.append({"art": "fill", "status": "ausgefuehrt", "aktiv": True, "seite": self.richtung, "menge": n, "symbol": "MNQZ26",
+                             "typ": "market", "preis": self.avg, "erst_gesehen": self.t_klick + 300})
+            if self.o["abl_ohne_zeile"] and self.lesungen:
+                meld.insert(0, {"art": "order", "status": "abgelehnt", "aktiv": False, "seite": None, "menge": None, "symbol": None, "typ": None,
+                                "preis": None, "text": "Order Rejected | Price: 31,341.25", "erst_gesehen": self.t_klick + 250})
+            if self.pos and self.o["bein_abgelehnt"]:
+                meld.insert(0, {"art": "stop", "status": "abgelehnt", "aktiv": False, "seite": "buy" if self.richtung == "sell" else "sell", "menge": n,
+                                "symbol": "MNQZ26", "typ": "stop market", "preis": 31341.25, "text": "Order Rejected | Stop Market @ 31,341.25",
+                                "erst_gesehen": self.t_klick + 320})
+            if self.o["abgelehnt"] and self.lesungen:
+                meld.append({"art": "order", "status": "abgelehnt", "aktiv": False, "seite": self.richtung, "menge": n, "symbol": "MNQZ26",
+                             "typ": "market", "preis": None, "text": "Order Rejected | Not allowed", "erst_gesehen": self.t_klick + 300})
+            zeile = {"symbol": "MNQ", "menge": -n if self.richtung == "sell" else n, "seite": self.richtung, "avg": self.avg, "pl_text": "$0.00",
+                     "risk": self._feld("risk", RR), "to_make": self._feld("to_make", RM), "close_rect": RC, "rect": [69, 766, 1930, 22]}
+            kt = "MARKET CLOSED" if self.o["markt_zu"] else None
+            return {"v": "tsx-0.6.0",
+                    "konto": {"aktiv": f"$150K Express|{E}", "kontonr": E, "abgekuerzt": False, "liste_offen": False, "liste": []},
+                    "kopf": {"balance": {"text": "$19.08", "wert": 19.08}, "mll": {"text": "$-4,500.00", "wert": -4500.0},
+                             "rpl": {"text": "$-4.92", "wert": -4.92}, "upl": {"text": "$24.00", "wert": 24.0}, "balance_relativ": True},
+                    "positionen": [{"symbol": "MNQZ26", "seite": self.richtung, "menge": n, "avg": self.avg, "pl_text": None}] if self.pos else [],
+                    "positionen_sichtbar": True, "flach": False if self.pos else (True if self.o["flach_ohne_pos"] else None),
+                    "popups": [{"titel": "Confirm Order", "text": "Confirm Order"}] if self.popup else [],
+                    "toasts": {"gruppen": [], "meldungen": meld},
+                    "ticket": {"k3": True, "k4": bool(self.o["k4"]), "ordertyp": {"text": "Market"},
+                               "contract": {"wert": "MNQZ26", "offen": False, "fokus": False, "rect": [1582, 92, 376, 28], "zu": {}},
+                               "menge": {"wert": str(n), "rect": [1567, 188, 470, 40], "fokus": False, "zu": {}}, "vorschlaege": [],
+                               "kauf": {"text": kt or f"BUY +{n} @ MARKET", "rect": RK, "zu": {"disabled": False, "verdeckt": False}},
+                               "verkauf": {"text": kt or f"SELL -{n} @ MARKET", "rect": RV, "zu": {"disabled": False, "verdeckt": False}},
+                               "reiter": ({"positions": {"rect": RT, "aktiv": self.reiter, "text": "Positions", "zu": {"disabled": False, "verdeckt": False}}}
+                                          if self.o["reiter_da"] else {}),
+                               "gitter": {"da": bool(self.reiter and self.o["reiter_da"]), "spalten": ["symbol", "position", "entry price", "risk", "to make", "close"],
+                                          "zeilen": [zeile] if (self.pos and self.reiter and self.n_reiter > self.o["zeile_nach"]) else [],
+                                          "grund": None if self.reiter else "keine Tabelle mit den Spalten Risk und To Make im Bild"}}}
+
+        def klick(self, r, name, toast_ok=False, pruef=None, doppel=False):
+            self.klicks.append((name, bool(doppel), [float(x) for x in r]))
+            self.pruef.append(pruef)
+            if name.startswith("ORDER-Knopf"):
+                if self.o["klick_wirft"] == "vor":
+                    raise RuntimeError("CDP riss vor dem Druck")
+                if self.o["klick_wirft"] == "nach":
+                    self._druck_versucht = True
+                    raise RuntimeError("CDP riss nach dem Druck")
+                if not self.o["order_druck"]:
+                    return False
+                self.lesungen, self.t_klick = 0, int(_t.time() * 1000)
+            elif name == "Reiter Positions":
+                self.reiter = True
+            elif name.startswith("Risk-Zelle") or name.startswith("To Make-Zelle"):
+                feld = "risk" if name.startswith("Risk") else "to_make"
+                if doppel and self.o["edit_geht"] and self.o["edit_geht"] != ("nur_" + ("to_make" if feld == "risk" else "risk")):
+                    w = self.werte[feld]
+                    self.edit, self.eingabe, self.markiert = feld, ("" if w is None else str(int(w))), False
+            else:
+                raise AssertionError("unerwarteter Klick " + name)
+            return True
+
+        def taste(self, k, modifiers=0):
+            if not self.o["tasten_wirken"]:
+                raise RuntimeError("Tastatur: Puls-Chrome nicht vorn")
+            self.tasten.append(("Strg+" if modifiers == 2 else "") + k)
+            if k == "a" and modifiers == 2:
+                self.markiert = bool(self.o["strg_a"])
+            elif k == "Backspace" and self.edit:
+                self.eingabe, self.markiert = ("" if self.markiert else self.eingabe[:-1]), False
+            elif k == "Escape":
+                self.edit, self.eingabe = None, ""
+            elif k == "Enter" and self.edit:
+                if self.o["popup_nach_enter"]:
+                    self.popup = True
+                elif self.o["enter_wirkt"]:
+                    tw = 0.5 * self.menge                      # MNQ: ein Tick der ganzen Position in $
+                    self.werte[self.edit] = round(round(float(self.eingabe) / tw) * tw, 2)
+                self.edit, self.eingabe = None, ""
+
+        def tippen(self, t):
+            if self.o["tippen_wirft"]:
+                raise RuntimeError("Tastatur: Puls-Chrome nicht vorn")
+            self.tasten.append("tippe " + t)
+            if self.edit:
+                self.eingabe = (t if self.markiert else self.eingabe + t) + self.o["tipp_extra"]
+                self.markiert = False
+
+        def lese_js(self, a, timeout=8):
+            return None
+
+    gesendet_log = []
+    alt = {n: getattr(ob, n) for n in ("_warte", "_puls_diagnose_senden", "_puls_ergebnis_senden", "TSX_K4_BEWEIS_S", "_tsx_k3_ticket")}
+
+    def lauf(seite, tp=198, sl=21, richtung="sell", menge=6, spur_alt=0.0, ueber_probe=False, scharf=True):
+        res = {"ok": False, "code": "", "msg": "", "schritt": "lesen", "etappe": "K3", "gesendet": False, "retry_ok": True, "scharf": False,
+               "balance": 19.08, "mll": -4500.0, "rpl": -4.92, "upl": 0.0}
+        t = ob._StempelSpur()
+        t._t0 -= spur_alt
+        befehl = {"richtung": richtung, "menge": menge, "wurzel": "MNQ", "ext": E, "scharf": scharf, "plan_id": "p-1"}
+        cmd = {"ext_id": E, "symbol": "MNQ", "richtung": richtung, "volumen": menge, "tp_usd": tp, "sl_usd": sl, "plan_id": "p-1", "scharf": scharf}
+
+        def raus(code, msg, schritt, ok=False, **ex):
+            res.update(ok=ok, code=code, msg=msg, schritt=schritt, **ex)
+            return res
+        st0 = seite.stand()
+        if ueber_probe:
+            ob._tsx_k3_probe(seite, st0, befehl, res, t, raus, cmd)
+        else:
+            _ok, _f, kn, _mz = ob.tsx_k3_vor_klick(st0, befehl, "MNQZ26", E)
+            ob._tsx_k4_senden(seite, st0, befehl, "MNQZ26", kn, res, t, raus, cmd)
+        return res, list(t)
+    try:
+        ob._warte = lambda a, b: None
+        ob._puls_diagnose_senden = lambda *a, **k: None
+        ob._puls_ergebnis_senden = lambda art, stufe, cmd, res, trail: gesendet_log.append((art, stufe, cmd.get("plan_id"), res.get("gesendet"), res.get("ok")))
+        ob._tsx_k3_ticket = lambda s_, st_, b_, t_: (True, "", "", st_, "MNQZ26")
+        # 1) der ganze Weg (Finns Bild: Sell 6 MNQ, Risk 21 $, To Make 198 $)
+        s1 = _T4()
+        r1, t1 = lauf(s1)
+        namen = [k[0] for k in s1.klicks]
+        chk(r1["ok"] is True and r1["schritt"] == "fertig" and r1["gesendet"] is True and r1["retry_ok"] is False and r1["etappe"] == "K4"
+            and r1["einstieg"] == 31339.5 and r1["einstieg_quelle"] == "fill" and r1["sl_level"] == 31341.25 and r1["tp_level"] == 31323.0
+            and r1["sl_level_quelle"] == r1["tp_level_quelle"] == "tsx_rechnung" and "warnung" not in r1 and r1["klick_at"].endswith("Z")
+            and isinstance(r1["order_klick_ms"], int) and r1["positionen"] and r1["rpl"] == -4.92 and r1["upl"] == 0.0,
+            f"ganzer Weg: gesendet, Einstieg aus der Fill-Meldung, SL/TP-Level wie in Finns Bild, Start-Werte von VOR dem Klick ({r1})")
+        chk(namen == ["ORDER-Knopf 'SELL -6 @ MARKET'", "Reiter Positions", "Risk-Zelle (Doppelklick)", "To Make-Zelle (Doppelklick)"]
+            and [k[1] for k in s1.klicks] == [False, False, True, True], f"genau vier Klicks: Order einmal, Reiter, zwei Doppelklicks ({namen})")
+        chk(s1.pruef[0]["text"] == "sell -6 @ market" and s1.pruef[0]["rect"] == RV and all(p and p.get("tabu") == ob.TSX_K4_TABU for p in s1.pruef)
+            and s1.pruef[2]["rect"] == RR and s1.pruef[3]["rect"] == RM, "jeder Klick mit Ziel-Beweis: exakter Knopftext, Zellen-Rechteck, K4-Tabu")
+        zr, zm = s1.klicks[2][2], s1.klicks[3][2]
+        chk(zr[0] >= RR[0] and zr[0] + zr[2] <= RR[0] + RR[2] * 0.5 and zm[0] + zm[2] <= RM[0] + RM[2] * 0.5
+            and all(k[2][0] + k[2][2] < RC[0] for k in s1.klicks[1:]), "Doppelklick ins LINKE Stück der Zelle — nie der Stift, nie die Close-Spalte")
+        chk(s1.tasten == ["Strg+a", "Backspace", "tippe 21", "Enter", "Strg+a", "Backspace", "tippe 198", "Enter"] and s1.werte == {"risk": 21.0, "to_make": 198.0},
+            f"je Zelle: alles markieren, löschen, Betrag tippen, Enter ({s1.tasten})")
+        chk([g[:2] for g in gesendet_log] == [("order", "geklickt"), ("order", "ende")] and gesendet_log[0][2] == "p-1" and gesendet_log[0][3] is True
+            and gesendet_log[1][4] is True, f"Ergebnis-Meldung: geklickt sofort nach dem Druck, ende am Schluss ({gesendet_log})")
+        # 2) Kauf, Beweis über die Positionszeile, Reiter schon offen
+        s2 = _T4(richtung="buy", menge=3, avg=31000.0, fill_toast=False, reiter=True)
+        r2, _ = lauf(s2, tp=60, sl=30, richtung="buy", menge=3)
+        chk(r2["ok"] and r2["einstieg_quelle"] == "position" and r2["tp_level"] == 31010.0 and r2["sl_level"] == 30995.0
+            and [k[0] for k in s2.klicks] == ["ORDER-Knopf 'BUY +3 @ MARKET'", "Risk-Zelle (Doppelklick)", "To Make-Zelle (Doppelklick)"],
+            f"Kauf: Beweis über die Positionszeile, Reiter schon offen → kein Reiter-Klick ({r2.get('msg')})")
+        # 3) Winning Day: nur To Make, Risk wird nie angefasst
+        s3 = _T4()
+        r3, _ = lauf(s3, tp=198, sl=None)
+        chk(r3["ok"] and "sl_level" not in r3 and r3["tp_level"] == 31323.0 and not any("Risk" in k[0] for k in s3.klicks) and "warnung" not in r3,
+            "Winning Day (kein SL): nur To Make, die Risk-Zelle bleibt unberührt")
+        s3b = _T4(risk=45.0)
+        r3b, _ = lauf(s3b, tp=198, sl=None)
+        chk(r3b["ok"] and "Risk steht auf 45 $" in r3b.get("warnung", "") and not any("Risk" in k[0] for k in s3b.klicks),
+            "Plan ohne SL, TopstepX hat selbst einen gesetzt → Hinweis, nichts überschrieben")
+        s3c = _T4()
+        r3c, _ = lauf(s3c, tp=None, sl=None)
+        chk(r3c["ok"] and [k[0] for k in s3c.klicks] == ["ORDER-Knopf 'SELL -6 @ MARKET'"] and "tp_level" not in r3c, "ohne TP und SL: nur die Order")
+        # 4) Knopf nicht gedrückt → nachweislich nichts gesendet
+        s4 = _T4(order_druck=False)
+        r4, _ = lauf(s4)
+        chk(r4["code"] == "knopf" and r4["gesendet"] is False and r4["retry_ok"] is True and len(s4.klicks) == 1, f"Order-Knopf ohne Druck: gesendet false, retry ok ({r4})")
+        # 5) kein Beweis / Ablehnung
+        ob.TSX_K4_BEWEIS_S = 0.05
+        s5 = _T4(fill_nach=0, flach_ohne_pos=False)
+        r5, _ = lauf(s5)
+        s5b = _T4(fill_nach=0)
+        r5b, _ = lauf(s5b)
+        s5c = _T4(abgelehnt=True)
+        r5c, _ = lauf(s5c)
+        ob.TSX_K4_BEWEIS_S = alt["TSX_K4_BEWEIS_S"]
+        chk(r5["code"] == "beweis" and r5["unklar"] is True and r5["gesendet"] is True and r5["retry_ok"] is False and len(s5.klicks) == 1
+            and "NICHT erneut starten" in r5["msg"], f"kein Beweis, flach nicht bewiesen → UNKLAR, kein zweiter Klick ({r5['msg']})")
+        chk(r5b["code"] == "beweis" and r5b["unklar"] is False and r5b["gesendet"] is True and len(s5b.klicks) == 1,
+            "kein Beweis, aber „No Active Position“ steht → beweis ohne unklar")
+        chk(r5c["code"] == "abgelehnt" and "Order Rejected" in r5c.get("abgelehnt_text", "") and len(s5c.klicks) == 1, "Ablehnung → code abgelehnt, nichts weiter")
+        # 6) Brackets scheitern NACH dem Fill → Order steht, ok + warnung
+        s6 = _T4(edit_geht=False)
+        r6, _ = lauf(s6)
+        chk(r6["ok"] is True and r6["gesendet"] is True and "Risk 21 $ nicht gesetzt" in r6["warnung"] and "To Make 198 $ nicht gesetzt" in r6["warnung"]
+            and "sl_level" not in r6 and r6["einstieg"] == 31339.5 and sum(1 for k in s6.klicks if k[0].startswith("ORDER")) == 1
+            and sum(1 for k in s6.klicks if k[0].startswith("Risk")) == 2,
+            f"Eingabefeld geht nicht auf: je Zelle zwei Versuche, dann Warnung „Brackets prüfen“ — die Order bleibt bewiesen ({r6.get('warnung')})")
+        s6b = _T4(tipp_extra="9")
+        r6b, _ = lauf(s6b)
+        chk(r6b["ok"] and "nicht gesetzt" in r6b["warnung"] and s6b.werte == {"risk": None, "to_make": None} and "Enter" not in s6b.tasten
+            and s6b.tasten.count("Escape") == 4, f"falscher Wert im Feld: nie Enter, Esc, Warnung ({s6b.tasten})")
+        s6c = _T4(enter_wirkt=False)
+        r6c, _ = lauf(s6c)
+        chk(r6c["ok"] and "nach Enter" in r6c["warnung"] and "sl_level" not in r6c, "Enter ohne Wirkung → Rücklesung scheitert, Warnung")
+        s6d = _T4(popup_nach_enter=True)
+        r6d, _ = lauf(s6d)
+        chk(r6d["ok"] and "fragt nach dem Eintragen" in r6d["warnung"] and "To Make 198 $ nicht gesetzt (Dialog offen)" in r6d["warnung"]
+            and not any(k[0].startswith("To Make") for k in s6d.klicks) and s6d.tasten.count("Enter") == 1,
+            f"Dialog nach Enter: nichts bestätigt, unter dem Dialog nichts mehr angeklickt ({r6d.get('warnung')})")
+        s6e = _T4(edit_fokus=False)
+        r6e, _ = lauf(s6e)
+        chk(r6e["ok"] and "kein Eingabefeld mit Fokus" in r6e["warnung"] and not any(x.startswith("tippe") for x in s6e.tasten),
+            "Eingabefeld ohne Fokus: nie getippt")
+        # 7) Sonderfälle der Zelle
+        s7 = _T4(risk=21.0, to_make=198.0)
+        r7, t7 = lauf(s7)
+        chk(r7["ok"] and len(s7.klicks) == 2 and not s7.tasten and r7["sl_level"] == 31341.25 and any("steht schon" in x for x in t7),
+            "Werte stehen schon (TopstepX-Bracket = Plan): kein Doppelklick, Level trotzdem gemeldet")
+        s7b = _T4(risk=45.0, strg_a=False)
+        r7b, _ = lauf(s7b, tp=None, sl=21)
+        chk(r7b["ok"] and s7b.werte["risk"] == 21.0 and s7b.tasten.count("Backspace") >= 3 and "tippe 21" in s7b.tasten,
+            f"alter Wert, Strg+A greift nicht → Zeichen für Zeichen gelöscht, dann getippt ({s7b.tasten})")
+        s7c = _T4()
+        r7c, _ = lauf(s7c, tp=200, sl=20)                 # 6 MNQ: ein Tick = 3 $ → TopstepX rundet 200 → 201, 20 → 21
+        chk(r7c["ok"] and s7c.werte == {"risk": 21.0, "to_make": 201.0} and r7c["tp_usd_ist"] == 201.0 and r7c["sl_usd_ist"] == 21.0
+            and r7c["tp_level"] == 31322.75 and "warnung" not in r7c, f"TopstepX rundet auf Ticks: Rücklesung mit einem Tick Spiel, gemeldet wird der Ist-Wert ({r7c.get('msg')})")
+        # 8) Riegel vor dem Klick
+        s8 = _T4()
+        r8, _ = lauf(s8, spur_alt=ob.TSX_K3_WACHHUND_S - ob.TSX_K4_REST_S + 5)
+        chk(r8["code"] == "zeit" and r8["gesendet"] is False and r8["retry_ok"] is True and not s8.klicks, f"zu wenig Restzeit: nichts gesendet ({r8['msg']})")
+        s8b = _T4(markt_zu=True)
+        r8b, _ = lauf(s8b, ueber_probe=True)
+        chk(r8b["code"] == "markt_zu" and not s8b.klicks and r8b["gesendet"] is False, f"Markt zu: Knopf trägt nicht Buy/Sell → nie gedrückt ({r8b['msg']})")
+        s8c = _T4()
+        r8c, _ = lauf(s8c, ueber_probe=True, scharf=False)
+        chk(r8c["ok"] and r8c["schritt"] == "probe" and not s8c.klicks and r8c["gesendet"] is False, "Probe (scharf false) bleibt Probe: kein Order-Klick")
+        s8d = _T4()
+        r8d, _ = lauf(s8d, ueber_probe=True)
+        chk(r8d["ok"] and r8d["schritt"] == "fertig" and r8d["gesendet"] is True, "scharf über die Probe → K4")
+        alt_k4 = ob.TSX_K4_AKTIV
+        ob.TSX_K4_AKTIV = False
+        s8e = _T4()
+        r8e, _ = lauf(s8e, ueber_probe=True)
+        ob.TSX_K4_AKTIV = alt_k4
+        chk(r8e["schritt"] == "probe" and not s8e.klicks, "Notschalter TSX_K4_AKTIV aus: auch scharf endet als Probe")
+        # 9) Prüfer 06.10.2026
+        ob.TSX_K4_BEWEIS_S = 0.05
+        s9 = _T4(wirft_nach_klick=True)
+        r9, _ = lauf(s9)
+        ob.TSX_K4_BEWEIS_S = alt["TSX_K4_BEWEIS_S"]
+        chk(r9["code"] == "beweis" and r9["unklar"] is True and r9["gesendet"] is True and r9["retry_ok"] is False and len(s9.klicks) == 1
+            and "NICHT erneut starten" in r9["msg"], f"nach dem Klick keine Lesung gelungen → UNKLAR, nie „No Active Position“ aus dem alten Blick ({r9['msg']})")
+        s9b = _T4(tippen_wirft=True)
+        r9b, _ = lauf(s9b)
+        chk(r9b["ok"] is True and r9b["gesendet"] is True and "Risk 21 $ nicht gesetzt (abgebrochen: RuntimeError" in r9b["warnung"]
+            and "To Make 198 $ nicht gesetzt (abgebrochen" in r9b["warnung"] and s9b.tasten.count("Escape") == 2 and gesendet_log[-1][1] == "ende"
+            and any(k[0].startswith("To Make") for k in s9b.klicks) and "tp_level" not in r9b and r9b["code"] == "" and r9b["einstieg"] == 31339.5,
+            f"Ausnahme in der Zelle NACH dem Fill → ok + Warnung statt cdp_fehler, Esc je Feld, zweite Zelle noch versucht, 'ende' gesendet ({r9b.get('warnung')})")
+        s9c = _T4(tippen_wirft=True, tasten_wirken=False)
+        r9c, _ = lauf(s9c)
+        chk(r9c["ok"] is True and "nicht mehr versucht" in r9c["warnung"] and not any(k[0].startswith("To Make") for k in s9c.klicks) and "sl_level" not in r9c,
+            f"Esc wirkt nicht (Feld könnte offen sein) → keine zweite Zelle ({r9c.get('warnung')})")
+        s9d = _T4(k4=False)
+        r9d, _ = lauf(s9d)
+        chk(r9d["code"] == "anker_fehlt" and not s9d.klicks and r9d["gesendet"] is False and r9d["retry_ok"] is True, f"alte Augen ohne K4-Vertrag → kein Klick ({r9d['msg']})")
+        s9e = _T4(reiter_da=False)
+        r9e, _ = lauf(s9e)
+        chk(r9e["code"] == "anker_fehlt" and not s9e.klicks and r9e["gesendet"] is False, "Reiter Positions nicht gefunden + TP/SL → kein Klick")
+        s9f = _T4(reiter_da=False)
+        r9f, _ = lauf(s9f, tp=None, sl=None)
+        chk(r9f["ok"] and len(s9f.klicks) == 1, "ohne TP/SL braucht es den Reiter nicht")
+        s9g = _T4(bein_abgelehnt=True)
+        r9g, _ = lauf(s9g)
+        chk(r9g["ok"] is True and "TopstepX hat eine Order abgelehnt: Order Rejected | Stop Market" in r9g["warnung"] and r9g["einstieg"] == 31339.5
+            and s9g.werte == {"risk": 21.0, "to_make": 198.0} and r9g["code"] == "", f"abgelehntes Bracket-Bein neben dem Fill → Order bewiesen, Warnung, Zellen gesetzt ({r9g.get('warnung')})")
+        s9h = _T4(zeile_nach=3)
+        r9h, _ = lauf(s9h)
+        chk(r9h["ok"] and "warnung" not in r9h and s9h.werte == {"risk": 21.0, "to_make": 198.0}, f"Positions-Zeile erscheint erst nach ein paar Lesungen → abgewartet ({r9h.get('warnung')})")
+        s9i = _T4(risk=0.0)
+        r9i, _ = lauf(s9i, tp=None, sl=2)
+        chk(r9i["ok"] and any(k[0].startswith("Risk") for k in s9i.klicks) and s9i.werte["risk"] == 3.0, f"0 $ in der Zelle zählt nie als „steht schon“ ({s9i.werte})")
+        s9j = _T4(klick_wirft="vor")
+        r9j, _ = lauf(s9j)
+        chk(r9j["code"] == "knopf" and r9j["gesendet"] is False and r9j["retry_ok"] is True and "vor dem Druck" in r9j["msg"], f"Ausnahme VOR dem Druck → nichts gesendet ({r9j['msg']})")
+        s9k = _T4(klick_wirft="nach")
+        try:
+            lauf(s9k)
+            wirft = False
+        except RuntimeError:
+            wirft = True
+        chk(wirft, "Ausnahme NACH dem Druck-Merker → bleibt Absturz (gesendet true, retry_ok false)")
+        s9m = _T4(abl_ohne_zeile=True, fill_nach=2)
+        r9m, _ = lauf(s9m)
+        chk(r9m["ok"] is True and r9m["code"] == "" and r9m["einstieg"] == 31339.5 and "TopstepX hat eine Order abgelehnt: Order Rejected | Price" in r9m["warnung"]
+            and s9m.werte == {"risk": 21.0, "to_make": 198.0}, f"Ablehnung ohne Order-Zeile im ersten Blick, Fill im zweiten → Fill gewinnt, Ablehnung nur Warnung ({r9m.get('warnung')})")
+        ob.TSX_K4_BEWEIS_S = 0.05
+        s9n = _T4(abl_ohne_zeile=True, fill_nach=0, flach_ohne_pos=False)
+        r9n, _ = lauf(s9n)
+        ob.TSX_K4_BEWEIS_S = alt["TSX_K4_BEWEIS_S"]
+        chk(r9n["code"] == "abgelehnt" and "Price" in r9n.get("abgelehnt_text", "") and len(s9n.klicks) == 1, f"Ablehnung ohne Order-Zeile und nie ein Fill → am Ende abgelehnt ({r9n['code']})")
+        s9l = _T4()
+        st_l = s9l.stand()
+        st_l["positionen"] = [{"symbol": "NQZ26", "seite": "buy", "menge": 1, "avg": 31000.0}]
+        ok_l, f_l, _k, _m = ob.tsx_k3_vor_klick(st_l, bf, "MNQZ26", E)
+        chk(not ok_l and any("offene Position gelesen" in x for x in f_l), f"Vor-Klick: gelesene Position in einem anderen Contract → keine Order ({f_l})")
+        st_0 = s9l.stand()
+        st_0["ticket"]["gitter"] = {"da": True, "zeilen": [{"symbol": "MNQZ26", "menge": 0, "seite": None}], "grund": None}
+        ok_0, f_0, _k, _m = ob.tsx_k3_vor_klick(st_0, bf, "MNQZ26", E)
+        st_1 = s9l.stand()
+        st_1["ticket"]["gitter"] = {"da": True, "zeilen": [{"symbol": "NQZ26", "menge": 1, "seite": "buy"}], "grund": None}
+        chk(ok_0 and not ob.tsx_k3_vor_klick(st_1, bf, "MNQZ26", E)[0], f"Vor-Klick: 0-Zeile der Tabelle ist keine Position, Zeile mit Menge ≠ 0 in anderem Contract schon ({f_0})")
+    finally:
+        for n, v in alt.items():
+            setattr(ob, n, v)
+    # ── Quelltext-Riegel ──────────────────────────────────────────────────────
+    q4 = _i.getsource(ob._tsx_k4_senden)
+    chk(q4.count("s.klick(") == 1 and q4.index("res.update(gesendet=True, retry_ok=False)") < q4.index("s.klick(")
+        and q4.index("s.klick(") < q4.index("res.update(gesendet=False, retry_ok=True)") < q4.index('_puls_ergebnis_senden("order", "geklickt"'),
+        "K4: genau EIN Order-Klick; gesendet/retry_ok davor gesetzt, nur ohne Druck zurückgenommen")
+    qk = "".join(_i.getsource(f) for f in (ob._tsx_k4_senden, ob._tsx_k4_feld, ob._tsx_k4_reiter, ob._tsx_k4_feld_aus))
+    chk("close_rect" not in qk and qk.count("TSX_K4_TABU") == 3 and qk.count("pruef=") == 3 and "doppel=True" in _i.getsource(ob._tsx_k4_feld)
+        and "time.sleep" not in qk, "K4-Schritte: jeder Klick mit Ziel-Beweis + Tabu, Close-Zelle nie benutzt, keine festen Pausen")
+    sig = _i.signature(ob._AugenSitzung.klick)
+    chk(sig.parameters["doppel"].default is False and "doppel=bool(doppel and pruef)" in _i.getsource(ob._AugenSitzung._win_klick),
+        "Hand: Doppelklick nur als Zusatz mit Ziel-Beweis, Standard unverändert ein Klick")
+    js = open(os.path.join(os.path.dirname(os.path.abspath(ob.__file__)), "augen_tsx.js"), encoding="utf-8").read()
+    neu_js = js.split("function reiterLesen()")[1].split("function positionAus")[0]
+    chk("var VERSION = 'tsx-0.6.1'" in js and "-tab-positionTab$" in neu_js and "'risk'" in neu_js and "'to make'" in neu_js and "close_rect" in neu_js
+        and "o.ticket.k4 = true" in js and ".click(" not in neu_js and "dispatchEvent" not in neu_js and ".focus(" not in neu_js
+        and not re.search(r"\.value\s*=[^=]", neu_js), "augen_tsx.js tsx-0.6.x: Reiter + Positions-Tabelle (Risk / To Make, Bearbeiten-Zustand) — nur lesend")
+    chk("zuletzt" in js and "15000" in js and "e.zuletzt = jetzt; m.erst_gesehen = e.erst;" in js, "augen_tsx.js 0.6.1: Meldungs-Merker vergisst nach 15 s (Prüfer 06.10.2026)")
+    chk("s._druck_versucht = False" in q4 and q4.index("s._druck_versucht = False") < q4.index("s.klick(") and "< 30.0" in q4
+        and "< 27.0" in _i.getsource(ob._tsx_k4_feld) and q4.index('raus("", msg, "fertig", ok=True)') < q4.index('_puls_ergebnis_senden("order", "ende"')
+        and q4.index("if einstieg is None and abg:") < q4.index('raus("abgelehnt"') and "offen_tab" in _i.getsource(ob.tsx_k3_vor_klick)
+        and _i.getsource(ob._AugenSitzung.klick).index("self._druck_versucht = False") < _i.getsource(ob._AugenSitzung.klick).index("self._win_klick(") and "self._druck_versucht = True" in _i.getsource(ob._AugenSitzung._win_klick)
+        and "self._druck_versucht = True" in _i.getsource(ob._AugenSitzung.klick) and "tsx_k4_ablehnungen(st, vorher, klick_ms)" in q4
+        and 'raus("tabelle_unklar", f"Konto {ext} hat eine offene Position' in _i.getsource(ob.modus_tsxlesen_cdp)
+        and "offene Position gelesen" in _i.getsource(ob.tsx_k3_vor_klick),
+        "Prüfer 06.10.2026: Druck-Merker vor dem Druck (je Ziel), Zeit-Schwellen 30/27 s, Antwort vor den Netz-Sendungen, Ablehnung erst am Ende, 0-Zeilen keine Position")
+    if ok:
+        print("✓ TSX-K4: Order-Knopf genau einmal mit Fill-Beweis, Risk / To Make per Doppelklick + Rücklesung, Warnung statt Abbruch nach dem Fill")
     return ok
 
 

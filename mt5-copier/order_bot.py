@@ -13358,10 +13358,11 @@ def modus_tsxorder(cmd):
         return
     # K0-Riegel VOR dem Lese-Zweig (Master-Vertrag): eine Order landet auf einem Topstep-CDP-PC nie im UIA-Weg
     if tsx_weg_lauf() == "cdp":
-        if befehl.get("scharf") or not TSX_K3_AKTIV or not TSX_K1_AKTIV:   # K1 aus = auch keine Kette für die Probe
+        if (befehl.get("scharf") and not TSX_K4_AKTIV) or not TSX_K3_AKTIV or not TSX_K1_AKTIV:   # K1 aus = auch keine Kette für die Probe
             print(json.dumps(tsx_cdp_folgt("tsxorder" if befehl.get("scharf") else "tsxprobe"), ensure_ascii=False))
             return
-        # K3a (01.10.2026): dieselbe Kette wie K1/K2 (Chrome, Login, Konto, Lesen), danach das Ticket füllen — Probe, nie ein Order-Knopf
+        # K3a (01.10.2026): dieselbe Kette wie K1/K2 (Chrome, Login, Konto, Lesen), danach das Ticket füllen — Probe, nie ein Order-Knopf.
+        # K4 (05.10.2026): mit scharf:true drückt _tsx_k4_senden danach den Order-Knopf und trägt Risk / To Make ein.
         return modus_tsxlesen_cdp({"konto": befehl["ext"], "firma": (cmd or {}).get("firma")}, order=befehl, order_cmd=cmd)
     befehl, f = tsx_order_befehl(cmd)                    # UIA-Weg: TP Pflicht (Bracket-Dialog)
     if f:
@@ -14192,6 +14193,18 @@ TSX_K1_AKTIV = True                # K1-Lesen über CDP an (Finn 30.09.2026; Ank
 TSX_K3_AKTIV = True                # K3a (Finn 01.10.2026: „richtiges Asset auswählen, richtige Lotanzahl"): Probe über das Puls-Chrome —
                                    # Contract + Menge setzen und beweisen, KEIN Order-Knopf. False = cdp_folgt wie vor K3
 TSX_K3_WACHHUND_S = 158.0          # Panel /api/tsx-konto beendet den Bot nach 170 s OHNE finally (Sperre bliebe 15 min) — vorher ehrlich raus
+# K4 (05.10.2026, Finn im Terminal-3-Fenster: „Market buy bzw. market sell … unten auf Position gehen, Doppelklicken auf Risk und da
+# eine Zahl eingeben. Das ist ja so viel einfacher."): scharfer Order-Knopf + Fill-Beweis + SL/TP als Dollar-Betrag in den Zellen
+# Risk / To Make der Positions-Tabelle. Ersetzt den Plan „SL/TP im Chart ziehen". Wirkt nur bei scharf:true (Schalter puls_topstep
+# 'scharf') auf PCs in puls_topstep_pcs. False = scharf antwortet wieder cdp_folgt K4.
+TSX_K4_AKTIV = True
+TSX_K4_REST_S = 75.0               # so viel Zeit muss bis zum Wachhund noch sein — sonst wird NICHT gesendet (Order + Beweis + zwei Zellen)
+TSX_K4_BEWEIS_S = 15.0             # so lange nach dem Klick auf Fill-Meldung oder Position warten (wie Orbit K4)
+TSX_PUNKTWERT = {"MNQ": 2.0, "NQ": 20.0}   # $ je Punkt und Kontrakt
+TSX_TICK = 0.25
+# Ziel-Beweis der K4-Klicks: der Order-Knopf trägt selbst „buy/sell/market" (TSX_K0_TABU würde ihn ablehnen) — verboten bleibt alles,
+# was schließt, dreht oder storniert
+TSX_K4_TABU = r"\b(close|flatten|cancel|reverse|join|log ?out|abmelden|delete|löschen|reset)\b"
 # Menschliches Tempo (Finn 01.10.2026: beim Kontowechsel ging das Dropdown „in einer Millisekunde" auf und zu): zwischen den Schritten
 # 1–2 s, vor jedem Druck 0,3–0,8 s über dem Ziel stehen — beides über _warte (Streuung). Gilt für K2, Login und das Ticket.
 TSX_SCHRITT_PAUSE = (1.0, 1.0)
@@ -15112,6 +15125,13 @@ def tsx_k3_vor_klick(stand, befehl, code, ext):
         f.append("Dialog offen ('" + str((st["popups"][0] or {}).get("titel") or (st["popups"][0] or {}).get("text") or "")[:40] + "')")
     if st.get("flach") is not True:
         f.append("Konto nicht flach bewiesen (keine zweite Order auf eine offene Position)")
+    g = t.get("gitter") if isinstance(t.get("gitter"), dict) else {}
+    # Nachprüfer 06.10.2026: eine Tabellenzeile zählt nur mit Menge ≠ 0 — augen_tsx.js lässt 0-Zeilen in positionAus selbst weg
+    offen_tab = [z for z in (g.get("zeilen") or []) if isinstance(z, dict) and isinstance(z.get("menge"), (int, float)) and z["menge"] != 0]
+    if st.get("positionen") or (g.get("da") and offen_tab):
+        # Prüfer 06.10.2026: „flach" gilt nur für den Contract der Order-Karte — eine Zeile der Positions-Tabelle / Order-Karte in
+        # irgendeinem Contract ist eine offene Position auf diesem Konto
+        f.append("offene Position gelesen (Positions-Tabelle/Order-Karte) — keine zweite Order")
     ot = str((t.get("ordertyp") or {}).get("text") or "").strip() if isinstance(t.get("ordertyp"), dict) else ""
     if ot.lower() != "market":
         f.append(f"Order-Typ '{ot or '-'}' statt Market")
@@ -15455,9 +15475,483 @@ def _tsx_k3_ticket(s, st, befehl, trail):
     return True, "", "", st, ziel
 
 
-def _tsx_k3_probe(s, st, befehl, res, trail, raus):
+# ══ K4: SCHARFER ORDER-KNOPF + RISK / TO MAKE (05.10.2026, Finn im Terminal-3-Fenster, sechs Schritte: „1. Konto auswählen
+# 2. Contract auswählen 3. Number of contract auswählen 4. Market buy to market sell 5. Unten auf diese Leiste auf Position gehen
+# 6. Doppelklicken auf Risk und da eine Zahl eingeben — das ist ja so viel einfacher."). Schritte 1–3 sind K2/K3a. Hier 4–6:
+# EIN Klick auf den Order-Knopf (gesendet/retry_ok VOR dem Klick gesetzt, wie Orbit K4), Beweis über die Fill-Meldung oder die
+# Positionszeile, dann im Reiter „Positions" Risk (SL) und To Make (TP) als Dollar-Betrag der ganzen Position eintippen — belegt durch
+# Finns Bild: −6 MNQ, Risk 21 $ = 1,75 Pkt, To Make 198 $ = 16,5 Pkt. TopstepX rundet auf Ticks; darum zählt die Rücklesung der Zelle
+# mit einem Tick Spiel. Scheitert Risk/To Make NACH dem Fill, bleibt die Order stehen: ok + warnung („Brackets in TopstepX prüfen").
+# Nie geklickt: das Kreuz der Spalte Close, Close/Reverse/Flatten/Cancel der Order-Karte. Reine Regeln zuerst (testbar).
+
+def tsx_k4_betraege(cmd):
+    """REIN RECHNEND (testbar): (tp_usd, sl_usd) aus dem Befehl — je float > 0 oder None (Winning Days: SL fehlt)."""
+    def z(v):
+        try:
+            f = float(str(v).replace(",", ".")) if v not in (None, "") else 0.0
+        except (TypeError, ValueError):
+            return None
+        return f if f > 0 else None
+    c = cmd if isinstance(cmd, dict) else {}
+    return z(c.get("tp_usd")), z(c.get("sl_usd"))
+
+
+def tsx_k4_betrag_text(usd):
+    """REIN RECHNEND (testbar): der Text, den die Hand tippt — ganze Dollar ohne Nachkommastellen, sonst zwei Stellen mit Punkt."""
+    f = float(usd)
+    return str(int(round(f))) if abs(f - round(f)) < 0.005 else f"{f:.2f}"
+
+
+def tsx_k4_wert_gleich(feldwert, usd):
+    """REIN RECHNEND (testbar): steht im Eingabefeld genau der getippte Betrag? ('27' == 27; '', '2127', '27a' nie)"""
+    t = str(feldwert if feldwert is not None else "").strip().replace(",", ".")
+    if not re.fullmatch(r"\d+(\.\d+)?", t):
+        return False
+    return abs(float(t) - float(usd)) < 0.005
+
+
+def tsx_k4_toleranz(wurzel, menge):
+    """REIN RECHNEND (testbar): Spiel der Rücklesung in $ — ein Tick der ganzen Position (TopstepX rundet den Betrag auf Ticks)."""
+    return TSX_PUNKTWERT.get(str(wurzel or "").upper(), 20.0) * TSX_TICK * max(1, int(menge or 1)) + 0.01
+
+
+def tsx_k4_level(einstieg, richtung, usd, wurzel, menge, art):
+    """REIN RECHNEND (testbar): Preis-Level aus Einstieg und Dollar-Betrag der ganzen Position, auf den Tick gerundet.
+    art 'sl' liegt gegen die Richtung, 'tp' mit ihr. -> float | None"""
+    try:
+        pw = TSX_PUNKTWERT[str(wurzel).upper()]
+        pkt = float(usd) / (pw * int(menge))
+        vz = (1 if str(richtung).lower() == "buy" else -1) * (1 if art == "tp" else -1)
+        return round(round((float(einstieg) + vz * pkt) / TSX_TICK) * TSX_TICK, 2)
+    except (KeyError, TypeError, ValueError, ZeroDivisionError):
+        return None
+
+
+def _tsx_k4_key(m):
+    return "|".join(str(m.get(k)) for k in ("art", "status", "seite", "menge", "symbol", "typ", "preis"))
+
+
+def _tsx_k4_anzahl(meldungen):
+    """REIN RECHNEND: Schlüssel → Anzahl Knoten dieses Blicks."""
+    n = {}
+    for m in meldungen or []:
+        if isinstance(m, dict):
+            k = _tsx_k4_key(m)
+            n[k] = n.get(k, 0) + 1
+    return n
+
+
+def tsx_k4_meldung_schluessel(stand):
+    """REIN RECHNEND (testbar): Schlüssel → Anzahl aller Meldungen dieses Blicks — der Vorher-Stand vor dem Klick (eine alte, gleich
+    lautende Fill-Meldung darf nie als Beweis der neuen Order gelten). Nachprüfer 06.10.2026: Anzahl statt Menge — bleibt ein alter
+    gleich lautender Toast im DOM stehen, gibt augen_tsx.js dem neuen Knoten dasselbe erst_gesehen; neu ist er dann nur an der
+    gewachsenen Anzahl erkennbar."""
+    t = stand.get("toasts") if isinstance(stand, dict) and isinstance(stand.get("toasts"), dict) else {}
+    return _tsx_k4_anzahl(t.get("meldungen"))
+
+
+def _tsx_k4_neu(m, key, jetzt_n, vorher, klick_ms):
+    """REIN RECHNEND: Ist diese Meldung NEU (nach dem Klick entstanden)? Schlüssel vorher unbekannt → nur, wenn erst nach dem Klick
+    gesehen; Schlüssel vorher da → nur, wenn jetzt mehr Knoten dieses Schlüssels stehen als vorher. vorher: dict (Anzahl) oder Menge."""
+    v = vorher.get(key, 0) if isinstance(vorher, dict) else (1 if key in (vorher or ()) else 0)
+    if v == 0:
+        try:
+            return float(m.get("erst_gesehen") or 0) >= float(klick_ms) - 500
+        except (TypeError, ValueError):
+            return False
+    return (jetzt_n or {}).get(key, 0) > v
+
+
+def tsx_k4_fill(stand, befehl, vorher, klick_ms):
+    """REIN RECHNEND (testbar): Beweis nach dem Klick aus EINEM Blick -> (einstieg | None, quelle, abgelehnt_text).
+    1. NEUE Meldung „Order Filled" (nicht im Vorher-Stand, erst nach dem Klick gesehen) mit Richtung, Wurzel und Menge des Plans →
+       Execute Price, quelle 'fill'. 2. Positionszeile (Tabelle unten oder Order-Karte) mit Wurzel, Richtung und GENAU der Plan-Menge →
+       Entry Price, quelle 'position' (das Konto war vor dem Klick flach bewiesen). Eine neue Meldung „Order Rejected" → abgelehnt_text —
+       Prüfer 06.10.2026: NUR die Ablehnung der eigenen Market-Order (Seite des Plans, Typ Market, Wurzel; eine Meldung ohne diese Angaben
+       zählt) und NUR, wenn derselbe Blick weder Fill noch Position zeigt. Ein abgelehntes Bracket-Bein (Gegenseite, Stop/Limit — Vorfall
+       B37 30.09.2026: „SL-Bracket abgelehnt, Position steht") hätte sonst 'abgelehnt' gemeldet, der Plan blieb „Geplant" bei offener
+       Position (tsx_k4_ablehnungen macht daraus eine Warnung)."""
+    st = stand if isinstance(stand, dict) else {}
+    b = befehl if isinstance(befehl, dict) else {}
+    r, w, n = str(b.get("richtung") or "").lower(), str(b.get("wurzel") or "").upper(), b.get("menge")
+    t = st.get("toasts") if isinstance(st.get("toasts"), dict) else {}
+    abg = ""
+    jetzt_n = _tsx_k4_anzahl(t.get("meldungen"))
+    for m in (t.get("meldungen") or []):
+        if not isinstance(m, dict):
+            continue
+        if not _tsx_k4_neu(m, _tsx_k4_key(m), jetzt_n, vorher, klick_ms):
+            continue
+        typ_market = str(m.get("typ") or "market").strip().lower() == "market"
+        if m.get("status") == "abgelehnt":
+            if (not abg and m.get("seite") in (None, r) and typ_market
+                    and (not m.get("symbol") or tv_symbol_root(str(m.get("symbol"))) == w)):
+                abg = str(m.get("text") or m.get("titel") or "Order Rejected")[:120]
+            continue
+        if (m.get("art") == "fill" and m.get("seite") == r and tv_symbol_root(str(m.get("symbol") or "")) == w and typ_market
+                and isinstance(m.get("preis"), (int, float)) and m.get("preis") > 0 and m.get("menge") in (None, n, float(n or 0))):
+            return float(m["preis"]), "fill", ""
+    for p in (st.get("positionen") or []):
+        if (isinstance(p, dict) and p.get("seite") == r and tv_symbol_root(str(p.get("symbol") or "")) == w
+                and isinstance(p.get("menge"), (int, float)) and int(p["menge"]) == int(n or 0) and p["menge"] == int(p["menge"])
+                and isinstance(p.get("avg"), (int, float)) and p["avg"] > 0):
+            return float(p["avg"]), "position", ""
+    return None, "", abg
+
+
+def tsx_k4_ablehnungen(stand, vorher, klick_ms):
+    """REIN RECHNEND (testbar): Texte aller NEUEN, nach dem Klick gesehenen Meldungen „Order Rejected" eines Blicks (gleich welcher Order) —
+    neben einem bewiesenen Fill eine Warnung „Brackets in TopstepX prüfen", nie ein Urteil über die Order. -> [text, …]"""
+    st = stand if isinstance(stand, dict) else {}
+    t = st.get("toasts") if isinstance(st.get("toasts"), dict) else {}
+    aus = []
+    jetzt_n = _tsx_k4_anzahl(t.get("meldungen"))
+    for m in (t.get("meldungen") or []):
+        if not isinstance(m, dict) or m.get("status") != "abgelehnt":
+            continue
+        if not _tsx_k4_neu(m, _tsx_k4_key(m), jetzt_n, vorher, klick_ms):
+            continue
+        x = str(m.get("text") or m.get("titel") or "Order Rejected")[:120]
+        if x not in aus:
+            aus.append(x)
+    return aus[:4]
+
+
+def tsx_k4_zeile(stand, befehl):
+    """REIN RECHNEND (testbar): GENAU EINE Zeile der Positions-Tabelle zum Plan (Wurzel, Vorzeichen und Menge) -> (zeile | None, grund)"""
+    g = _tsx_tk(stand).get("gitter") if isinstance(_tsx_tk(stand).get("gitter"), dict) else {}
+    if not g.get("da"):
+        return None, str(g.get("grund") or "Positions-Tabelle nicht im Bild")[:90]
+    b = befehl if isinstance(befehl, dict) else {}
+    soll = int(b.get("menge") or 0) * (1 if str(b.get("richtung") or "").lower() == "buy" else -1)
+    w = str(b.get("wurzel") or "").upper()
+    tr = [z for z in (g.get("zeilen") or []) if isinstance(z, dict) and tv_symbol_root(str(z.get("symbol") or "")) == w
+          and isinstance(z.get("menge"), (int, float)) and z["menge"] == soll]
+    if len(tr) != 1:
+        da = [f"{z.get('symbol')} {z.get('menge')}" for z in (g.get("zeilen") or []) if isinstance(z, dict)][:4]
+        return None, f"Zeile {w} {soll:+d} {len(tr)}× in der Positions-Tabelle (dort: {da or '-'})"
+    return tr[0], ""
+
+
+def _tsx_k4_reiter(s, st, trail):
+    """K4 Schritt 5: Reiter „Positions" unten offen und die Tabelle mit Risk / To Make im Bild. Höchstens EIN Klick auf den Reiter
+    (Ziel-Beweis), danach neu lesen. -> (ok, stand, grund)"""
+    geklickt = False
+    for _ in range(6):
+        t = _tsx_tk(st)
+        rt = (t.get("reiter") or {}).get("positions") if isinstance(t.get("reiter"), dict) else None
+        g = t.get("gitter") if isinstance(t.get("gitter"), dict) else {}
+        if not t.get("k4"):
+            return False, st, "augen_tsx.js liest die Positions-Tabelle noch nicht (Stand ohne K4-Felder)"
+        if g.get("da") and (not isinstance(rt, dict) or rt.get("aktiv")):
+            return True, st, ""
+        if isinstance(rt, dict) and not rt.get("aktiv") and not geklickt:
+            r = cdp_rect(rt.get("rect"))
+            zu = rt.get("zu") if isinstance(rt.get("zu"), dict) else {}
+            if not r or zu.get("verdeckt") or zu.get("disabled"):
+                return False, st, "Reiter „Positions“ unten verdeckt oder ohne Rechteck"
+            r = list(r)[:4]
+            _tsx_pause()
+            if not s.klick(r, "Reiter Positions", pruef={"rect": r, "text": "positions", "aria": "", "tabu": TSX_K4_TABU}):
+                return False, st, "Reiter „Positions“ nicht gedrückt (Klick ohne Beweis)"
+            geklickt = True
+        elif not isinstance(rt, dict) and not g.get("da"):
+            return False, st, "Reiter „Positions“ unten nicht gefunden"
+        _warte(0.7, 0.4)
+        st = s.stand()
+    return False, st, "Reiter „Positions“ offen, aber die Tabelle mit Risk / To Make ist nicht zu sehen"
+
+
+def _tsx_k4_feld_aus(st, befehl, feld):
+    z, grund = tsx_k4_zeile(st, befehl)
+    f = z.get(feld) if isinstance(z, dict) and isinstance(z.get(feld), dict) else None
+    return f, (grund if not z else ("" if f else "Zelle nicht gefunden"))
+
+
+def _tsx_k4_feld(s, st, befehl, feld, usd, name, trail):
+    """K4 Schritt 6: EINE Zelle (Risk bzw. To Make) der Plan-Zeile setzen — Doppelklick ins linke Stück der Zelle (nie der Stift, nie
+    die Close-Spalte), Eingabefeld MIT Fokus beweisen, alten Wert weg (Strg+A, Rücktaste — leer bewiesen), Betrag tippen, Rücklesung
+    des Felds, Enter, Rücklesung der Zelle (ein Tick Spiel). Höchstens zwei Versuche; ein offenes Eingabefeld wird mit Esc verlassen.
+    -> (ok, ist_usd | None, grund, stand)"""
+    tol = tsx_k4_toleranz(befehl.get("wurzel"), befehl.get("menge"))
+    text = tsx_k4_betrag_text(usd)
+    letzter = ""
+    for versuch in range(2):
+        if versuch == 1 and TSX_K3_WACHHUND_S - trail.sekunden() < 27.0:
+            # Prüfer 06.10.2026: ein zweiter Versuch braucht bis ~19 s — der Wachhund (os._exit) träfe sonst mitten ins Tippen
+            letzter += " — kein zweiter Versuch (Zeitlimit des Laufs)"
+            break
+        f, grund = _tsx_k4_feld_aus(st, befehl, feld)
+        if not f and versuch == 0:
+            # Prüfer 06.10.2026: nach einem Fill über die Meldung zeigt die Positions-Tabelle die Zeile womöglich erst Sekunden später
+            for _ in range(4):
+                _warte(0.7, 0.4)
+                st = s.stand()
+                f, grund = _tsx_k4_feld_aus(st, befehl, feld)
+                if f:
+                    break
+        if not f:
+            return False, None, f"{name}: {grund}", st
+        e = f.get("edit") if isinstance(f.get("edit"), dict) else {}
+        if not e.get("offen"):
+            w = f.get("wert")
+            if isinstance(w, (int, float)) and w > 0 and abs(w - usd) <= tol:   # 0 $ (kein Bracket) zählt nie als „steht schon"
+                trail.append(f"{name} steht schon auf {w:g} $")
+                return True, float(w), "", st
+            r = cdp_rect(f.get("rect"))
+            zu = f.get("zu") if isinstance(f.get("zu"), dict) else {}
+            if not r or r[2] < 30 or zu.get("verdeckt") or zu.get("disabled"):
+                return False, None, f"{name}-Zelle verdeckt, gesperrt oder ohne Rechteck", st
+            r = list(r)[:4]
+            links = [r[0] + 4.0, r[1], max(12.0, r[2] * 0.4), r[3]]      # linkes Stück: der Stift sitzt rechts neben dem Wert
+            _tsx_pause()
+            if not s.klick(links, f"{name}-Zelle (Doppelklick)", pruef={"rect": r, "text": "", "aria": "", "tabu": TSX_K4_TABU}, doppel=True):
+                return False, None, f"{name}-Zelle nicht gedrückt (Klick ohne Beweis)", st
+            _warte(0.5, 0.3)
+            st = s.stand()
+            f, grund = _tsx_k4_feld_aus(st, befehl, feld)
+            e = f.get("edit") if isinstance(f, dict) and isinstance(f.get("edit"), dict) else {}
+        if not e.get("offen") or e.get("fokus") is not True:
+            letzter = f"{name}: nach dem Doppelklick kein Eingabefeld mit Fokus"
+            trail.append(letzter + (" — zweiter Versuch" if versuch == 0 else ""))
+            if e.get("offen"):
+                _cdp_esc(s, st, trail, f"{name}-Feld ohne Fokus")
+            _warte(0.6, 0.3)
+            st = s.stand()
+            continue
+        # alten Wert weg: Strg+A + Rücktaste, danach muss das Feld LEER sein (sonst hinge der Betrag an der alten Zahl)
+        s.taste("a", modifiers=2)
+        _warte(0.2, 0.2)
+        s.taste("Backspace")
+        _warte(0.3, 0.2)
+        st = s.stand()
+        f, _g = _tsx_k4_feld_aus(st, befehl, feld)
+        e = f.get("edit") if isinstance(f, dict) and isinstance(f.get("edit"), dict) else {}
+        rest = str(e.get("wert") or "")
+        if e.get("offen") and e.get("fokus") is True and rest and len(rest) <= 12:
+            for _ in range(len(rest) + 1):                # Strg+A griff nicht: Zeichen für Zeichen (der Zeiger steht am Ende)
+                s.taste("Backspace")
+            _warte(0.3, 0.2)
+            st = s.stand()
+            f, _g = _tsx_k4_feld_aus(st, befehl, feld)
+            e = f.get("edit") if isinstance(f, dict) and isinstance(f.get("edit"), dict) else {}
+        if not e.get("offen") or e.get("fokus") is not True or str(e.get("wert") or ""):
+            letzter = f"{name}: Eingabefeld nicht leer oder ohne Fokus ('{e.get('wert')}') — nichts getippt"
+            trail.append(letzter + (" — zweiter Versuch" if versuch == 0 else ""))
+            if e.get("offen"):
+                _cdp_esc(s, st, trail, f"{name}-Feld nicht leer")
+            _warte(0.6, 0.3)
+            st = s.stand()
+            continue
+        s.tippen(text)
+        _warte(0.5, 0.3)
+        st = s.stand()
+        f, _g = _tsx_k4_feld_aus(st, befehl, feld)
+        e = f.get("edit") if isinstance(f, dict) and isinstance(f.get("edit"), dict) else {}
+        if not (e.get("offen") and e.get("fokus") is True and tsx_k4_wert_gleich(e.get("wert"), usd)):
+            letzter = f"{name}: im Eingabefeld steht '{e.get('wert')}', erwartet {text} — nicht bestätigt"
+            trail.append(letzter + (" — zweiter Versuch" if versuch == 0 else ""))
+            if e.get("offen"):
+                _cdp_esc(s, st, trail, f"{name}-Feld mit falschem Wert")
+            _warte(0.6, 0.3)
+            st = s.stand()
+            continue
+        s.taste("Enter")
+        f = {}
+        for _ in range(5):
+            _warte(0.7, 0.3)
+            st = s.stand()
+            if st.get("popups"):
+                titel = str((st["popups"][0] or {}).get("titel") or (st["popups"][0] or {}).get("text") or "")[:50]
+                return False, None, f"{name}: TopstepX fragt nach dem Eintragen etwas ('{titel}') — nichts bestätigt, bitte ansehen", st
+            f, _g = _tsx_k4_feld_aus(st, befehl, feld)
+            f = f if isinstance(f, dict) else {}
+            if not (f.get("edit") or {}).get("offen") and isinstance(f.get("wert"), (int, float)) and f["wert"] > 0 and abs(f["wert"] - usd) <= tol:
+                trail.append(f"{name} {text} $ eingetragen — Rücklesung {f['wert']:g} $")
+                return True, float(f["wert"]), "", st
+        letzter = f"{name}: nach Enter steht '{f.get('text') or '-'}' statt {text} $"
+        trail.append(letzter + (" — zweiter Versuch" if versuch == 0 else ""))
+        if (f.get("edit") or {}).get("offen"):
+            _cdp_esc(s, st, trail, f"{name}-Feld blieb offen")
+            _warte(0.6, 0.3)
+            st = s.stand()
+    return False, None, letzter or f"{name} nicht gesetzt", st
+
+
+def _tsx_k4_feld_retten(s, st, befehl, name, trail):
+    """Nach einer Ausnahme in einer Zelle: Stand frisch lesen, ein offenes Eingabefeld mit Esc verlassen (_cdp_esc fängt selbst, nie über
+    einem Dialog), noch einmal lesen. -> (stand, abbruch) — abbruch True, wenn die Plan-Zeile nicht lesbar ist oder ein Feld noch offen
+    steht: dann wird keine weitere Zelle angeklickt (ein Klick daneben übernähme den halben Betrag). Wirft nie."""
+    try:
+        try:
+            st = s.stand()
+        except Exception:
+            pass
+        _cdp_esc(s, st, trail, f"{name}-Feld nach Abbruch")
+        _warte(0.5, 0.3)
+        try:
+            st = s.stand()
+        except Exception:
+            return st, True
+        z, _g = tsx_k4_zeile(st, befehl)
+        if not isinstance(z, dict):
+            return st, True
+        offen = any(isinstance(z.get(k), dict) and isinstance(z[k].get("edit"), dict) and z[k]["edit"].get("offen") for k in ("risk", "to_make"))
+        return st, bool(offen)
+    except Exception:
+        return st, True
+
+
+def _tsx_k4_senden(s, st, befehl, ziel, kn, res, trail, raus, order_cmd):
+    """K4: aus dem bestandenen Vor-Klick-Blick (tsx_k3_vor_klick) EIN Klick auf den Order-Knopf, Fill beweisen, Risk / To Make
+    eintragen. Nach dem Klick gibt es nur noch Lesen und die zwei Zellen — nie einen zweiten Order-Klick, nie ein Close."""
+    res["schritt"] = "senden"
+    res.update(etappe="K4", scharf=True)
+    ktext = " ".join(str(kn.get("text") or "").split())
+    rest = TSX_K3_WACHHUND_S - trail.sekunden()
+    if rest < TSX_K4_REST_S:
+        return raus("zeit", (f"Ticket bereit ({ktext}), aber nur noch {int(rest)} s bis zum Zeitlimit — nichts gesendet. "
+                             "Bitte erneut starten (TopstepX ist jetzt offen und angemeldet)."), "senden")
+    tp, sl = tsx_k4_betraege(order_cmd)
+    # Prüfer 06.10.2026: der K4-Vertrag der Augen VOR dem unumkehrbaren Klick — mit einer alten augen_tsx.js (ohne Reiter/Tabelle)
+    # ginge die Order sonst raus und Risk / To Make blieben leer
+    t4 = _tsx_tk(st)
+    if not t4.get("k4"):
+        return raus("anker_fehlt", ("Ticket bereit, aber augen_tsx.js liest die Positions-Tabelle noch nicht (Stand "
+                                    f"{str(st.get('v') if isinstance(st, dict) else '-')[:12]} ohne K4-Felder) — nichts gesendet. Bitte erneut starten."), "senden")
+    rt = (t4.get("reiter") or {}).get("positions") if isinstance(t4.get("reiter"), dict) else None
+    g4 = t4.get("gitter") if isinstance(t4.get("gitter"), dict) else {}
+    if (tp or sl) and not isinstance(rt, dict) and not g4.get("da"):
+        return raus("anker_fehlt", "Reiter „Positions“ unten nicht gefunden — Risk / To Make wären nicht setzbar, nichts gesendet.", "senden")
+    vorher = tsx_k4_meldung_schluessel(st)
+    r = list(cdp_rect(kn.get("rect")))[:4]
+    try:                                               # Spur VOR dem unumkehrbaren Klick sichern, ohne ihn aufzuhalten
+        import threading
+        threading.Thread(target=_puls_diagnose_senden, args=(list(trail), "tsx_order_cdp"), daemon=True).start()
+    except Exception:
+        pass
+    res.update(gesendet=True, retry_ok=False)          # VOR dem Klick: Wachhund/Absturz danach melden nie „nichts gesendet"
+    klick_ms = int(time.time() * 1000)
+    s._druck_versucht = False                          # die Hand setzt ihn unmittelbar vor dem Druck (Prüfer 06.10.2026)
+    try:
+        gedrueckt = s.klick(r, f"ORDER-Knopf '{ktext}'", pruef={"rect": r, "text": ktext.lower(), "aria": "", "tabu": TSX_K4_TABU})
+    except Exception as e_:
+        if getattr(s, "_druck_versucht", True):
+            raise                                      # Druck versucht: gesendet true / retry_ok false bleiben (wie Wachhund/Absturz)
+        res.update(gesendet=False, retry_ok=True)      # Ausnahme nachweislich VOR dem Druck (Lesen über CDP riss ab)
+        return raus("knopf", f"Order-Knopf '{ktext}' nicht gedrückt ({type(e_).__name__} vor dem Druck) — nichts gesendet.", "senden")
+    if not gedrueckt:
+        res.update(gesendet=False, retry_ok=True)      # nachweislich kein Druck
+        return raus("knopf", f"Order-Knopf '{ktext}' nicht gedrückt (Klick ohne Beweis) — nichts gesendet.", "senden")
+    res.update(klick_at=time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(klick_ms / 1000)) + "Z", order_klick_ms=klick_ms, geklickt=True)
+    _puls_ergebnis_senden("order", "geklickt", order_cmd, res, trail)
+    res["schritt"] = "beweis"
+    einstieg, quelle, abg = None, "", ""
+    nach, t_nach = None, 0.0                           # nur ein gelungener, junger Blick NACH dem Klick darf „flach" belegen (Prüfer 06.10.2026)
+    ende = time.time() + TSX_K4_BEWEIS_S
+    while time.time() < ende:
+        _warte(0.5, 0.25)
+        try:
+            st = s.stand()
+        except Exception as e_:
+            trail.append(f"Lesen nach dem Klick: {type(e_).__name__}")
+            nach = None
+            continue
+        nach, t_nach = st, time.time()
+        einstieg, quelle, abg_ = tsx_k4_fill(st, befehl, vorher, klick_ms)
+        # Nachprüfer 06.10.2026: eine Ablehnung ohne Seite/Typ/Symbol (Toast ohne Order-Zeile) kann ein Bracket-Bein sein — nur merken,
+        # weiterlesen; ein Fill/Position im nächsten Blick gewinnt. Kostet im echten Ablehnungsfall höchstens die Beweiszeit (nur Lesen).
+        abg = abg_ or abg
+        if einstieg is not None:
+            break
+    if einstieg is None and abg:
+        return raus("abgelehnt", f"TopstepX hat die Order abgelehnt: {abg}", "beweis", abgelehnt_text=abg)
+    if einstieg is None:
+        # vor dem Klick war flach PFLICHT — ein alter Stand bewiese hier nichts: ohne jungen Blick nach dem Klick immer UNKLAR
+        jung = isinstance(nach, dict) and (time.time() - t_nach) <= 3.0
+        flach = nach.get("flach") if jung else None
+        return raus("beweis", (f"Order-Knopf '{ktext}' gedrückt, aber in {int(TSX_K4_BEWEIS_S)} s weder Fill-Meldung noch Position gelesen"
+                               + (" — TopstepX zeigt „No Active Position“." if flach is True else
+                                  " — ⚠ Ergebnis UNKLAR: in TopstepX nachsehen, NICHT erneut starten.")),
+                    "beweis", unklar=(flach is not True))
+    pos = cdp_positionen_vertrag(st.get("positionen"))
+    res.update(einstieg=einstieg, einstieg_quelle=quelle, positionen=pos, offen=True, position="offen")
+    trail.append(f"Fill bewiesen ({quelle}): {befehl['richtung'].upper()} {befehl['menge']} {ziel} @ {einstieg:g}")
+    warn, ist, abbruch = [], {}, False
+    for a_ in tsx_k4_ablehnungen(st, vorher, klick_ms):   # abgelehntes Bracket-Bein neben dem Fill (B37) → Warnung, kein Urteil
+        warn.append(f"TopstepX hat eine Order abgelehnt: {a_}")
+    if abg and not any(abg in w_ for w_ in warn):     # in einem früheren Blick gemerkte Ablehnung (Toast evtl. schon weg)
+        warn.append(f"TopstepX hat eine Order abgelehnt: {abg}")
+    # Ab hier ist die Order bewiesen: KEINE Ausnahme darf den Lauf noch als 'cdp_fehler' enden lassen (Prüfer 06.10.2026 — Tastatur
+    # wirft, wenn das Puls-Chrome nicht vorn ist; ein halb getippter Betrag bliebe im offenen Feld). Jeder Fehler wird Warnung, ein
+    # offenes Eingabefeld wird mit Esc verlassen, und solange es offen sein könnte, wird keine zweite Zelle angeklickt.
+    if tp or sl:
+        res["schritt"] = "brackets"
+        if isinstance(st, dict) and st.get("popups"):       # ein Dialog nach dem Fill: nichts darunter anklicken
+            ok_r, grund_r = False, "nach dem Fill steht ein Dialog offen — Risk / To Make nicht gesetzt"
+        else:
+            try:
+                ok_r, st, grund_r = _tsx_k4_reiter(s, st, trail)
+            except Exception as e_:
+                ok_r, grund_r = False, f"Reiter Positions abgebrochen ({type(e_).__name__}: {str(e_)[:80]})"
+        if not ok_r:
+            warn.append(grund_r)
+        else:
+            for feld, usd, name in (("risk", sl, "Risk"), ("to_make", tp, "To Make")):
+                if not usd:
+                    continue
+                if abbruch:
+                    warn.append(f"{name} {tsx_k4_betrag_text(usd)} $ nicht gesetzt (nach dem Abbruch nicht mehr versucht — ein Eingabefeld könnte offen sein)")
+                    continue
+                if isinstance(st, dict) and st.get("popups"):
+                    warn.append(f"{name} {tsx_k4_betrag_text(usd)} $ nicht gesetzt (Dialog offen)")
+                    continue
+                if TSX_K3_WACHHUND_S - trail.sekunden() < 30.0:      # eine Zelle mit zwei Versuchen + Zeilen-Warten braucht bis ~29 s (Nachprüfer 06.10.2026)
+                    warn.append(f"{name} {tsx_k4_betrag_text(usd)} $ nicht gesetzt (Zeitlimit des Laufs)")
+                    continue
+                try:
+                    ok_f, wert, grund_f, st = _tsx_k4_feld(s, st, befehl, feld, usd, name, trail)
+                except Exception as e_:
+                    ok_f, wert, grund_f = False, None, f"abgebrochen: {type(e_).__name__}: {str(e_)[:80]} — Eingabefeld evtl. offen"
+                    trail.append(f"{name}: {grund_f}")
+                    st, abbruch = _tsx_k4_feld_retten(s, st, befehl, name, trail)
+                if ok_f:
+                    ist[feld] = wert
+                else:
+                    warn.append(f"{name} {tsx_k4_betrag_text(usd)} $ nicht gesetzt ({grund_f})")
+    z, _g = tsx_k4_zeile(st, befehl)
+    if not sl and isinstance(z, dict) and isinstance((z.get("risk") or {}).get("wert"), (int, float)) and z["risk"]["wert"] > 0:
+        warn.append(f"Risk steht auf {z['risk']['wert']:g} $ (TopstepX-Bracket), der Plan hat keinen SL")
+    if not tp and isinstance(z, dict) and isinstance((z.get("to_make") or {}).get("wert"), (int, float)) and z["to_make"]["wert"] > 0:
+        warn.append(f"To Make steht auf {z['to_make']['wert']:g} $ (TopstepX-Bracket), der Plan hat keinen TP")
+    for feld, key, art in (("risk", "sl_level", "sl"), ("to_make", "tp_level", "tp")):
+        if feld in ist:
+            lv = tsx_k4_level(einstieg, befehl["richtung"], ist[feld], befehl["wurzel"], befehl["menge"], art)
+            if lv:
+                res[key], res[key + "_quelle"] = lv, "tsx_rechnung"
+            res[("sl" if art == "sl" else "tp") + "_usd_ist"] = ist[feld]
+    # balance/mll/rpl/upl bleiben die Werte der Lesung VOR dem Klick (flach, UP&L 0) — das Frontend nimmt rpl + upl als Start des
+    # Tages-P&L (tsxBaselineAusOrder); ein Wert nach dem Fill trüge schon den laufenden Trade
+    if warn:
+        res["warnung"] = "Brackets in TopstepX prüfen: " + "; ".join(warn)
+    msg = (f"Order platziert: {befehl['richtung'].upper()} {befehl['menge']} {ziel} @ {einstieg:g}"
+           + (f" · Risk {ist['risk']:g} $" if "risk" in ist else "") + (f" · To Make {ist['to_make']:g} $" if "to_make" in ist else "")
+           + (f" — ⚠ {res['warnung']}" if warn else "") + f" (bewiesen: {'Fill-Meldung' if quelle == 'fill' else 'Positionszeile'})")
+    # Nachprüfer 06.10.2026: Antwort ZUERST — der Wachhund (158 s, os._exit) kann sie dann nicht mehr als 'haenger' überschreiben; die
+    # beiden Netz-Sendungen (bis 2 s + 3 s) laufen danach, letzt_order.json liegt ohnehin vor dem Netz atomar auf der Platte
+    r_ = raus("", msg, "fertig", ok=True)
+    try:
+        _puls_diagnose_senden(list(trail), "tsx_order_cdp")
+    except Exception:
+        pass
+    _puls_ergebnis_senden("order", "ende", order_cmd, dict(res, ok=True, code="", schritt="fertig", msg=msg), trail)
+    return r_
+
+
+def _tsx_k3_probe(s, st, befehl, res, trail, raus, order_cmd=None):
     """K3a nach der K1/K2-Kette (Konto steht, Kopf gelesen, flach): Ticket füllen, dann aus EINEM frischen Blick prüfen
-    (tsx_k3_vor_klick) und ehrlich enden — „Ticket bereit (nicht gesendet)". Klickt nie einen Order-Knopf."""
+    (tsx_k3_vor_klick) und ehrlich enden — „Ticket bereit (nicht gesendet)". Klickt nie einen Order-Knopf.
+    Seit K4 (05.10.2026): bei scharf:true übergibt die Probe nach bestandener Vorprüfung an _tsx_k4_senden."""
     res["schritt"] = "ticket"
     res["balance_start"] = res.get("balance")
     ok, code, msg, st, ziel = _tsx_k3_ticket(s, st, befehl, trail)
@@ -15471,6 +15965,10 @@ def _tsx_k3_probe(s, st, befehl, res, trail, raus):
     nur_markt = markt_zu and len(fehler) == 1
     if not ok and not nur_markt:
         return raus("vorpruefung", "Ticket gefüllt, aber es passt noch nicht: " + "; ".join(fehler), "probe")
+    if befehl.get("scharf") is True and TSX_K4_AKTIV:
+        if not ok:                                    # Markt zu: der Knopf trägt nicht „Buy/Sell ±n @ Market" — nie drücken
+            return raus("markt_zu", f"Ticket gefüllt, aber der Markt ist zu (Knopf zeigt '{ktext[:40]}') — nichts gesendet.", "probe")
+        return _tsx_k4_senden(s, st, befehl, ziel, kn, res, trail, raus, order_cmd if isinstance(order_cmd, dict) else {})
     trail.append(f"Knopf '{ktext}' — nicht geklickt (Probe)")
     try:
         _puls_diagnose_senden(list(trail), "tsx_probe_cdp")
@@ -15492,11 +15990,12 @@ def modus_tsxlesen_cdp(cmd, order=None, order_cmd=None):
     if order:
         # tsx-konto-Vertrag: das Panel ergänzt nichts — gesendet/retry_ok kommen vom Bot (Prüfer K3a: sonst fehlten sie)
         res.update(etappe="K3", gesendet=False, retry_ok=True, scharf=False, plattform="tsx")
+    k4 = bool(order and order.get("scharf") is True and TSX_K4_AKTIV)     # K4 (05.10.2026): scharfer Lauf — die Kette davor ist dieselbe
     wachhund_s = TSX_K3_WACHHUND_S if order else TSX_K1_WACHHUND_S
-    diag_art = "tsx_probe_cdp" if order else "tsx_lesen_cdp"
+    diag_art = "tsx_order_cdp" if k4 else "tsx_probe_cdp" if order else "tsx_lesen_cdp"
     trail = _StempelSpur()
     trail.append(puls_bot_stand())
-    trail.append("Weg: Puls-Chrome (CDP) — " + (f"K3a Probe TopstepX ({order.get('richtung')} {order.get('menge')} {order.get('wurzel')})"
+    trail.append("Weg: Puls-Chrome (CDP) — " + (f"{'K4 SCHARF' if k4 else 'K3a Probe'} TopstepX ({order.get('richtung')} {order.get('menge')} {order.get('wurzel')})"
                                                  if order else "K1 Lesen TopstepX"))
     ext = str((cmd or {}).get("konto") or (cmd or {}).get("ext_id") or "").strip()
     sitz = [None]
@@ -15531,7 +16030,7 @@ def modus_tsxlesen_cdp(cmd, order=None, order_cmd=None):
     def _wachhund():
         trail.append(f"Wachhund: nach {int(wachhund_s)} s abgebrochen (Schritt {res.get('schritt')})")
         try:
-            raus("haenger", f"TopstepX-{'Probe' if order else 'Lesen'} hing nach {int(wachhund_s)} s — abgebrochen.", "haenger",
+            raus("haenger", f"TopstepX-{'Order' if k4 else 'Probe' if order else 'Lesen'} hing nach {int(wachhund_s)} s — abgebrochen.", "haenger",
                  zuerst=_schliessen)
         finally:
             _schliessen()
@@ -15607,7 +16106,11 @@ def modus_tsxlesen_cdp(cmd, order=None, order_cmd=None):
         res.update(alter_s=0.0, gelesen_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
                    sprache_fremd=False, userscript=None, summary_fehler=None)
         if order:
-            return _tsx_k3_probe(s, st, order, res, trail, raus)
+            if res.get("offen") or res.get("positionen"):
+                # Prüfer 06.10.2026: seit die Augen Positionen lesen (tsx-0.6), endete K1 bei offener Position nicht mehr — die Probe
+                # hätte Contract/Menge auf ein nicht flaches Konto getippt. Wie vor K4: ehrlich bei „lesen" enden, Ticket unberührt.
+                return raus("tabelle_unklar", f"Konto {ext} hat eine offene Position — Ticket nicht angefasst, nichts gesendet.", "lesen")
+            return _tsx_k3_probe(s, st, order, res, trail, raus, order_cmd)
         if (cmd or {}).get("ende"):
             res["exit_diag"] = {"fehler": "Exit-Fill über CDP kommt mit K5"}
         trail.append(f"gelesen (CDP): BAL {res.get('balance')} · RP&L {res.get('rpl')} · UP&L {res.get('upl')} · {len(res.get('positionen') or [])} Pos"
@@ -16199,16 +16702,18 @@ class _AugenSitzung:
             raise RuntimeError("stand() wirft: " + text[:120])
         return {}
 
-    def klick(self, rect, name, toast_ok=False, pruef=None):
+    def klick(self, rect, name, toast_ok=False, pruef=None, doppel=False):
         """pruef (K0, 30.09.2026): {rect, text, aria, tabu} — gedrückt wird nur, wenn am Zielpunkt genau dieser Kandidat liegt
-        (win_ziel_pruef_js); ohne pruef wie bisher (nur :hover)."""
+        (win_ziel_pruef_js); ohne pruef wie bisher (nur :hover). doppel (K4, 05.10.2026): Doppelklick, nur zusammen mit pruef
+        (Zellen Risk / To Make der TopstepX-Positions-Tabelle) — Standard False = unverändert ein Klick."""
         if _WIN_EINGABE:
             tv = getattr(self, "tv_riegel", True)          # TopstepX-Tab (K0): nichts TradingView-Eigenes wegklicken
             if tv:
                 self.werbung_weg()                        # Werbe-Modal zuerst weg (30.09.2026, PC von ID C: Autumn-Sale über Connect)
             self._verdeckt = False
+            self._druck_versucht = False                  # nur ein Druck auf DIESES Ziel zählt (ein Werbung-X davor nicht; K4)
             if pruef:
-                return self._win_klick(rect, name, toast_ok=toast_ok, pruef=pruef)
+                return self._win_klick(rect, name, toast_ok=toast_ok, pruef=pruef, doppel=bool(doppel))
             ok = self._win_klick(rect, name, toast_ok=toast_ok)
             if tv and not ok and self._verdeckt and not toast_ok and self._toasts_weg():
                 self._verdeckt = False
@@ -16231,11 +16736,19 @@ class _AugenSitzung:
             if not (isinstance(v, dict) and v.get("passt")):
                 self.trail.append(f"{name}: am Zielpunkt liegt nicht das Ziel ('{(v or {}).get('was') if isinstance(v, dict) else '-'}') — kein Druck")
                 return False
+        self._druck_versucht = True                   # ab hier KANN gedrückt sein (K4: Ausnahme davor = nichts gesendet)
         self.ws.rufe("Input.dispatchMouseEvent", {"type": "mousePressed", "x": p[0], "y": p[1], "button": "left",
                                                   "buttons": 1, "clickCount": 1, "force": 0.5}, timeout=3)
         _warte(0.07, 0.06)
         self.ws.rufe("Input.dispatchMouseEvent", {"type": "mouseReleased", "x": p[0], "y": p[1], "button": "left",
                                                   "buttons": 0, "clickCount": 1}, timeout=3)
+        if doppel and pruef:                           # K4: zweiter Druck als Doppelklick (clickCount 2)
+            _warte(0.06, 0.05)
+            self.ws.rufe("Input.dispatchMouseEvent", {"type": "mousePressed", "x": p[0], "y": p[1], "button": "left",
+                                                      "buttons": 1, "clickCount": 2, "force": 0.5}, timeout=3)
+            _warte(0.07, 0.06)
+            self.ws.rufe("Input.dispatchMouseEvent", {"type": "mouseReleased", "x": p[0], "y": p[1], "button": "left",
+                                                      "buttons": 0, "clickCount": 2}, timeout=3)
         self.maus = p
         self.trail.append(f"{name} geklickt @{int(p[0])},{int(p[1])} (CDP)")
         return True
@@ -16404,7 +16917,7 @@ class _AugenSitzung:
             self.trail.append("Meldungen über dem Ziel, aber kein Schließen-Knopf im Bild")
         return geklickt
 
-    def _win_klick(self, rect, name, druck=True, toast_ok=False, pruef=None):
+    def _win_klick(self, rect, name, druck=True, toast_ok=False, pruef=None, doppel=False):
         """Echte Windows-Maus: Punkt im inneren Drittel → Bildschirm-Pixel (Breiten-Abgleich), Zeiger sichtbar hinfahren, :hover des
         Ziels beweisen, dann EIN SendInput-Druck. Ohne Beweis kein Druck. druck=False = nur hinfahren (Hover)."""
         hwnd, grund = self._win_vorn()
@@ -16489,7 +17002,8 @@ class _AugenSitzung:
         if _win_vordergrund() != int(hwnd):
             self.trail.append(f"{name}: Puls-Chrome nicht mehr vorn — kein Druck")
             return False
-        if not _klick_absolut(punkt[0], punkt[1]):
+        self._druck_versucht = True                   # ab hier KANN gedrückt sein (K4: Ausnahme davor = nichts gesendet)
+        if not _klick_absolut(punkt[0], punkt[1], doppel=bool(doppel and pruef)):   # doppel nur mit Ziel-Beweis (K4)
             self.trail.append(f"{name}: SendInput abgelehnt")
             return False
         self.trail.append(f"{name} geklickt @{punkt[0]},{punkt[1]} (Windows-Maus, Hover bewiesen)")

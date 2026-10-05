@@ -23,10 +23,14 @@
  * STAND 0.3 (30.09.2026, TSX-ANKER-K1): echte Anker aus dem K0-Inventar (puls_augen, 30.09.2026) für Konto-Auslöser, Kopfzeile,
  * „No Active Position" und die Konto-Liste (konto.liste für K2); ticket.anzeigen als Rohtext. Die Anzeige einer OFFENEN Position
  * ist noch nicht belegt (Inventar war flach). inventar(): Overlays (Liste/Dialog) zuerst, SVG-Innereien raus.
+ * STAND 0.6 (05.10.2026, K4 — Finn: „unten auf Position gehen, Doppelklick auf Risk und da eine Zahl eingeben; das ist so viel
+ * einfacher"): SL/TP NICHT mehr über das Ziehen im Chart, sondern über die Positions-Tabelle unten. Neu, nur lesend: ticket.reiter
+ * (Reiter „Positions"), ticket.gitter (Tabelle mit Symbol, Position, Entry Price, Risk, To Make samt Bearbeiten-Zustand der Zellen),
+ * ticket.k4 = Vertrag da; positionen liest jetzt eine OFFENE Position (Tabelle, sonst die Zeile „-6 @ 31,339.50" der Order-Karte).
  */
 var PROPHOS_AUGEN_TSX = (function () {
   'use strict';
-  var VERSION = 'tsx-0.5.0';
+  var VERSION = 'tsx-0.6.1';
 
   // ── Grundwerkzeuge (wie augen.js) ──────────────────────────────────────────
   function sichtbar(el) {
@@ -217,7 +221,13 @@ var PROPHOS_AUGEN_TSX = (function () {
     // erst_gesehen je Meldung (wie augen.js): Merker überlebt mehrfaches Evaluate im selben Tab, neu geladen = neu
     try {
       var merk = globalThis.__prophosAugenTsxGesehen = globalThis.__prophosAugenTsxGesehen || {}, jetzt = Date.now();
-      meldungen.forEach(function (m) { var s = [m.art, m.status, m.seite, m.menge, m.symbol, m.typ, m.preis].join('|'); if (!merk[s]) merk[s] = jetzt; m.erst_gesehen = merk[s]; });
+      // 0.6.1 (Prüfer 06.10.2026): je Schlüssel {erst, zuletzt}; stand die Meldung > 15 s in keinem Blick, gilt sie beim Wiederkommen
+      // als neu (gleich lautende Ablehnung oder Fill im nächsten Lauf desselben Tabs zählte sonst nie mehr). Zahlen-Einträge von tsx-0.5/0.6.0 werden ersetzt.
+      meldungen.forEach(function (m) {
+        var s = [m.art, m.status, m.seite, m.menge, m.symbol, m.typ, m.preis].join('|'), e = merk[s];
+        if (!e || typeof e !== 'object' || jetzt - e.zuletzt > 15000) e = merk[s] = { erst: jetzt, zuletzt: jetzt };
+        e.zuletzt = jetzt; m.erst_gesehen = e.erst;
+      });
     } catch (_) {}
     return { gruppen: gruppen, meldungen: meldungen.slice(0, 20), bracket: bracketAus(meldungen) };
   }
@@ -362,8 +372,88 @@ var PROPHOS_AUGEN_TSX = (function () {
   }
   function ankerKopf() { return q1(tid('navbar-container')); }                               // Kopfzeile (Rückfall über Texte)
   function ankerPositionen() { return q1(tid('order-card-display-value-no-position')); }   // „No Active Position"
-  function positionsZeilen() { return []; }          // Zeilen einer offenen Position — Anker noch nicht belegt (s. oben)
-  function positionAus(zeile) { return null; }       // eine Zeile → {symbol, seite: 'buy'|'sell', menge, avg, pl_text}
+  /* POSITIONEN UNTEN (05.10.2026, K4, Finn: „unten auf diese Leiste auf Position gehen, Doppelklicken auf Risk und da eine Zahl
+   * eingeben"). Belegt durch das K0-Inventar (30.09.2026): die Reiterleiste unten ist rc-dock — je Reiter div.dock-tab-btn[role=tab]
+   * mit id „rc-tabs-N-tab-<name>" (accountsTab, positionTab, ordersTab, trades, quotesTab, terminalTab) und aria-selected; die Tabellen
+   * sind MUI-DataGrids (role=grid, Spaltenköpfe role=columnheader mit aria-label). Belegt durch Finns Bilder (05.10.2026): die Spalten
+   * Time · Symbol („/MNQ") · Position („-6") · Entry Price („31,339.50") · Risk („$21.00" + Stift) · To Make („$198.00" + Stift) · P&L ·
+   * Close (Kreuz), im Bearbeiten ein Zahlenfeld in der Zelle; in der Order-Karte „-6 @ 31,339.50".
+   * NICHT live gelesen sind die Zellen selbst — darum dreifach gesucht: über data-field des Spaltenkopfs, sonst aria-colindex, sonst
+   * die Lage (Zellenmitte unter dem Spaltenkopf). Fehlt etwas: grund, nichts geraten. Nur lesen — geklickt und getippt wird im Bot.
+   * Die Close-Zelle wird nur als Rechteck gemeldet (close_rect), damit der Bot ihr fernbleiben kann. */
+  var RX_KARTE_POS = /^([+\-−]?\s*\d+)\s*@\s*([\d.,]+)/;
+  function reiterLesen() {
+    var t = null;
+    alle('[role="tab"]').filter(sichtbar).some(function (e) { if (/-tab-positionTab$/.test(e.id || '')) { t = e; return true; } return false; });
+    if (!t) {
+      var k = alle('[role="tab"]').filter(sichtbar).filter(function (e) { return hatKlasse(e, 'dock-tab-btn') && /^positions?$/i.test(txt(e)); });
+      if (k.length === 1) t = k[0];
+    }
+    return { positions: t ? { rect: rect(t), aktiv: attr(t, 'aria-selected') === 'true', text: txt(t).slice(0, 20), zu: zustand(t) } : null };
+  }
+  function kopfName(h) { return (attr(h, 'aria-label') || txt(h)).replace(/\s+/g, ' ').trim().toLowerCase(); }
+  function gitterLesen() {
+    var o = { da: false, spalten: [], zeilen: [], grund: null };
+    var g = null, koepfe = null;
+    alle('[role="grid"]').filter(sichtbar).some(function (x) {
+      var hs = alle('[role="columnheader"]', x), namen = hs.map(kopfName);
+      if (namen.indexOf('risk') >= 0 && namen.indexOf('to make') >= 0) { g = x; koepfe = hs; return true; }
+      return false;
+    });
+    if (!g) { o.grund = 'keine Tabelle mit den Spalten Risk und To Make im Bild (Reiter Positions offen?)'; return o; }
+    o.da = true; o.rect = rect(g);
+    var sp = {};
+    koepfe.forEach(function (h) {
+      var n = kopfName(h), r = h.getBoundingClientRect();
+      if (n && !sp[n]) sp[n] = { field: attr(h, 'data-field') || null, col: attr(h, 'aria-colindex') || null, x0: r.left, x1: r.right };
+    });
+    o.spalten = Object.keys(sp).slice(0, 14);
+    function zelle(row, name) {
+      var c = sp[name]; if (!c) return null;
+      var zs = alle('[role="cell"],[role="gridcell"]', row), z = null;
+      if (c.field) zs.some(function (e) { if (attr(e, 'data-field') === c.field) { z = e; return true; } return false; });
+      if (!z && c.col) zs.some(function (e) { if (attr(e, 'aria-colindex') === c.col) { z = e; return true; } return false; });
+      if (!z) zs.some(function (e) { var r = e.getBoundingClientRect(), m = r.left + r.width / 2; if (r.width > 2 && m >= c.x0 && m <= c.x1) { z = e; return true; } return false; });
+      return z;
+    }
+    // Risk / To Make: Wert, Rechteck der Zelle und Bearbeiten-Zustand (Zahlenfeld in der Zelle, Fokus genau auf diesem Feld)
+    function feld(row, name) {
+      var z = zelle(row, name); if (!z || !sichtbar(z)) return null;
+      var inp = alle('input', z).filter(function (i) { var t = String(i.type || '').toLowerCase(); return t !== 'checkbox' && t !== 'radio' && t !== 'hidden'; })[0] || null;
+      var t = txt(z);
+      return { text: t.slice(0, 30), wert: inp ? null : geld(t), rect: rect(z), zu: zustand(z),
+               edit: inp ? { offen: true, wert: String(inp.value == null ? '' : inp.value).slice(0, 20), rect: rect(inp), fokus: aktivIst(inp), typ: String(inp.type || '').slice(0, 12) }
+                         : { offen: false } };
+    }
+    alle('[role="row"]', g).filter(sichtbar).forEach(function (row) {
+      if (o.zeilen.length >= 12 || row.querySelector('[role="columnheader"]')) return;
+      var zs = zelle(row, 'symbol'), zp = zelle(row, 'position');
+      if (!zs || !zp) return;
+      var sym = txt(zs).replace(/^\//, '').toUpperCase(), m = zahl(txt(zp));
+      if (!sym || m === null) return;
+      var ze = zelle(row, 'entry price'), zl = zelle(row, 'p&l'), zc = zelle(row, 'close');
+      o.zeilen.push({ symbol: sym.slice(0, 16), menge: m, seite: m > 0 ? 'buy' : m < 0 ? 'sell' : null, avg: ze ? zahl(txt(ze)) : null,
+                      pl_text: zl ? txt(zl).slice(0, 20) : null, risk: feld(row, 'risk'), to_make: feld(row, 'to make'),
+                      close_rect: zc && sichtbar(zc) ? rect(zc) : null, rect: rect(row) });
+    });
+    return o;
+  }
+  // Offene Position(en) für den K1-Vertrag: erst die Tabelle unten, sonst die Zeile der Order-Karte („-6 @ 31,339.50", Symbol =
+  // das Contract-Feld). Menge positiv, die Richtung steht in seite. Ohne beides: [] (dann bleibt flach null — nie geraten).
+  function positionsZeilen() {
+    var g = gitterLesen();
+    if (g.da && g.zeilen.length) return g.zeilen.map(function (z) { return { symbol: z.symbol, seite: z.seite, menge: Math.abs(z.menge), avg: z.avg, pl_text: z.pl_text, quelle: 'tabelle' }; });
+    var out = [];
+    alle('[data-testid^="order-card-display-value-"]').filter(sichtbar).some(function (e) {
+      var m = RX_KARTE_POS.exec(txt(e)); if (!m) return false;
+      var n = zahl(m[1].replace(/\s/g, '')), c = contractLesen();
+      if (n === null || n === 0) return false;
+      out.push({ symbol: c && c.wert ? String(c.wert).toUpperCase().slice(0, 16) : null, seite: n > 0 ? 'buy' : 'sell', menge: Math.abs(n), avg: zahl(m[2]), pl_text: null, quelle: 'order_karte' });
+      return true;
+    });
+    return out;
+  }
+  function positionAus(zeile) { return zeile && zeile.seite && typeof zeile.menge === 'number' ? zeile : null; }
 
   var KONTO_LEER = function () { return { aktiv: null, kontonr: null, abgekuerzt: null }; };
   var KOPF_LEER = function () { return { balance: null, mll: null, rpl: null, upl: null }; };
@@ -904,6 +994,8 @@ var PROPHOS_AUGEN_TSX = (function () {
     catch (e) { fehler.push('positionen: ' + e); }
     try { o.kopf.balance_relativ = K1_ANKER ? balanceRelativ(o.konto.aktiv, o.kopf) : null; } catch (e) { o.kopf.balance_relativ = null; }
     try { o.ticket = ticketLesen(); } catch (e) { fehler.push('ticket: ' + e); }
+    // K4 (05.10.2026): Reiter und Positions-Tabelle unten — unter ticket, weil die Route puls_augen nur bekannte Oberschlüssel durchlässt
+    try { if (o.ticket) { o.ticket.reiter = reiterLesen(); o.ticket.gitter = gitterLesen(); o.ticket.k4 = true; } } catch (e) { fehler.push('gitter: ' + e); }
     try { o.toasts = toasts(); } catch (e) { fehler.push('toasts: ' + e); }
     try { o.popups = dialoge(); } catch (e) { fehler.push('popups: ' + e); }
     try {
