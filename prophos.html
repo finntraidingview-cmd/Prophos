@@ -2161,6 +2161,13 @@
   #dashboard-view .pz-z > span{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #dashboard-view .pz-z > .pz-zeit{display:flex;align-items:center;gap:2px;overflow:visible;color:var(--sub)}
   #dashboard-view .pz-zeit-k{font:inherit;font-weight:600;color:var(--ink);background:none;border:1px solid transparent;border-radius:6px;padding:2px 6px;margin-left:-7px;cursor:pointer}
+  /* Zusatz unter der Uhrzeit (AP-FIX 05.10.2026): Datum eines anderen Tages, „verpasst", „gestartet" — klein, eigene Zeile,
+     damit die 88-px-Spalte reicht und nichts in die Konto-Spalte läuft */
+  #dashboard-view .pz-zeit-k,#dashboard-view .pz-zeit-t{display:inline-flex;flex-direction:column;align-items:flex-start;line-height:1.1;text-align:left}
+  #dashboard-view .pz-zeit-k{padding-top:1px;padding-bottom:1px}
+  #dashboard-view .pz-zeit-t{font-weight:600;color:var(--ink-2)}
+  #dashboard-view .pz-zeit small{font-size:10.5px;font-weight:500;color:var(--sub);white-space:nowrap}
+  #dashboard-view .pz-zeit small.is-verpasst{color:#B45309}
   #dashboard-view .pz-zeit-k:hover{border-color:var(--border)}
   #dashboard-view .pz-zeit-x{font:inherit;font-size:11px;color:var(--sub-2);background:none;border:none;padding:2px 4px;cursor:pointer}
   #dashboard-view .pz-zeit-x:hover{color:var(--ink-2)}
@@ -2196,22 +2203,32 @@
     #dashboard-view .pz-tab{grid-template-columns:88px minmax(162px,.7fr) minmax(130px,1.4fr) 60px 76px 76px 168px}
     #dashboard-view .pz-z > .pz-art,#dashboard-view .pz-bal-t .pz-rest{display:none}
   }
-  /* Handy: zwei Zeilen — oben Start · Konto · Größe · TP · SL, darunter Balance → Ziel und die Knöpfe. Art steht im Tooltip. */
+  /* Handy: zwei Zeilen — oben Start · Konto · Größe · TP · SL, darunter Phase + Balance → Ziel und die Knöpfe. Art steht im Tooltip.
+     AP-FIX 05.10.2026: vorher ein Raster mit festen Bereichen — die zweite Zeile hing an den Spalten der ersten, bei 375 px
+     wurden die letzten vier Stellen des Kontos und das Ziel abgeschnitten („150k …08…", „150.000 → 15…"). Jetzt Flex mit
+     Umbruch: Konto und Balance → Ziel schrumpfen nie (max-content), TP/SL behalten feste Breite (stehen untereinander),
+     und was nicht mehr in die Zeile passt, bricht um, statt abgeschnitten zu werden — die Knöpfe einer Zeile mit vier oder
+     fünf Knöpfen (von Hand; Auto ohne Startzeit) rutschen dadurch von selbst in eine dritte Zeile. */
   @media (max-width:820px){
     #dashboard-view .pz-kopf{margin:12px 4px -2px;font-size:12px}
     #dashboard-view .pz-tab{display:block;border:none;border-radius:var(--m-r-card,16px);box-shadow:var(--shadow-mob-card,0 1px 2px rgba(16,24,40,.05))}
-    #dashboard-view .pz-z{grid-template-columns:auto minmax(0,1fr) auto 66px 58px;grid-template-areas:"zeit konto gr tp sl" "bal bal akt akt akt";column-gap:8px;row-gap:6px;min-height:0;padding:10px 12px;font-size:12px}
+    #dashboard-view .pz-z{display:flex;flex-wrap:wrap;align-items:center;column-gap:6px;row-gap:6px;min-height:0;padding:10px 12px;font-size:12px}
     #dashboard-view .pz-z + .pz-z{border-top-color:var(--m-hair,rgba(16,24,40,.07))}
-    #dashboard-view .pz-z-hand{grid-template-areas:"zeit konto gr tp sl" "bal bal bal bal bal" "akt akt akt akt akt"}
     #dashboard-view .pz-z-kopf,#dashboard-view .pz-z > .pz-art,#dashboard-view .pz-bal-t .pz-rest{display:none}
-    #dashboard-view .pz-zeit{grid-area:zeit} #dashboard-view .pz-konto{grid-area:konto} #dashboard-view .pz-bal{grid-area:bal}
-    #dashboard-view .pz-gr{grid-area:gr} #dashboard-view .pz-z > .pz-tp{grid-area:tp} #dashboard-view .pz-z > .pz-sl{grid-area:sl} #dashboard-view .pz-akt{grid-area:akt}
+    #dashboard-view .pz-z > .pz-zeit{order:1;flex:none}
+    #dashboard-view .pz-z > .pz-konto{order:2;flex:1 1 0;min-width:max-content;overflow:visible}
+    #dashboard-view .pz-z > .pz-gr{order:3;flex:none}
+    #dashboard-view .pz-z > .pz-tp{order:4;flex:none;width:56px}
+    #dashboard-view .pz-z > .pz-sl{order:5;flex:none;width:48px}
+    #dashboard-view .pz-z > .pz-bal{order:6;flex:0 0 auto;overflow:visible}
+    #dashboard-view .pz-z > .pz-akt{order:7;flex:1 1 auto;min-width:0}
+    #dashboard-view .pz-bal-t{overflow:visible}
     #dashboard-view .pz-zeit-k{margin-left:-4px;padding:2px 3px}
     #dashboard-view .pz-konto .pz-typ{display:none}
-    #dashboard-view .pz-typ-m{display:inline-flex;margin:0 6px 0 0;padding:0 5px;font-size:10px;vertical-align:1px}
+    #dashboard-view .pz-typ-m{display:inline-flex;margin:0 5px 0 0;padding:0 5px;font-size:10px;vertical-align:1px}
     #dashboard-view .pz-z .btn{min-height:0}   /* spezifischer als die Handy-Regel für .btn (42 px) — die Zeile bleibt schlank */
-    #dashboard-view .pz-akt .tc2-btn{padding:5px 10px;border-radius:8px}
-    #dashboard-view .pz-akt .tc2-ab{padding:5px 7px}
+    #dashboard-view .pz-akt .tc2-btn{padding:5px 8px;border-radius:8px}
+    #dashboard-view .pz-akt .tc2-ab{padding:5px 6px}
   }
 
   /* ── Kompakte Trade-Zeilen (tc2) — dichter, mehr Infos, mit Live-Animation ── */
@@ -34373,9 +34390,26 @@
     const typChip = typ ? `<span class="type-badge type-${escapeHtml(typ)} pz-typ">${escapeHtml(typName)}</span>` : ''
     const typChipHandy = typ ? `<span class="type-badge type-${escapeHtml(typ)} pz-typ pz-typ-m" title="${escapeHtml(typName)}">${escapeHtml(typKurz)}</span>` : ''
     // Start: Uhrzeit klickbar (ändern), ✕ nimmt sie raus — dieselben Handler wie auf der Karte
-    const zeit = (p.startUm && !p.startUmGestartetAt)
-      ? `<button class="pz-zeit-k" data-plan-start-um-edit="${p.id}" title="${p.autoPlan && !p.autoBestaetigtAt ? 'Startet erst nach Bestätigung. ' : 'Der PC-Tab startet zu dieser Zeit von selbst. '}Klick: Uhrzeit ändern">${tpStartUmText(p.startUm)}</button><button class="pz-zeit-x" data-plan-start-um-x="${p.id}" title="Startzeit entfernen">✕</button>`
-      : p.startUm ? `<span title="Der PC-Tab hat die Startzeit ausgelöst">gestartet ${tpStartUmText(p.startUmGestartetAt)}</span>` : '–'
+    // AP-FIX 05.10.2026: tpStartUmText liefert an einem anderen Tag „06.10. 02:01" bzw. „verpasst (16:40)" — das lief in die
+    // Konto-Spalte. Hier deshalb zweizeilig: die Uhrzeit wie immer, der Zusatz (Datum / verpasst / gestartet) klein darunter;
+    // gleiche Schwelle wie tpStartUmText (verpasst = mehr als 10 min her). Das volle Datum steht im Tooltip.
+    const zeitTeile = iso => {
+      const d = new Date(iso); if(!isFinite(d)) return { uhr: '?', tag: '', verpasst: false, voll: '' }
+      const andererTag = d.toDateString() !== new Date().toDateString()
+      return { uhr: d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }),
+               tag: andererTag ? d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) : '',
+               verpasst: d.getTime() < Date.now() - 10 * 60 * 1000,
+               voll: d.toLocaleString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) }
+    }
+    let zeit = '–'
+    if(p.startUm && !p.startUmGestartetAt){
+      const z = zeitTeile(p.startUm)
+      const klein = z.verpasst ? `<small class="is-verpasst">verpasst</small>` : z.tag ? `<small>${z.tag}</small>` : ''
+      zeit = `<button class="pz-zeit-k" data-plan-start-um-edit="${p.id}" title="${escapeHtml(z.voll)}${z.verpasst ? ' — verpasst, nicht gestartet' : ''} · ${p.autoPlan && !p.autoBestaetigtAt ? 'Startet erst nach Bestätigung. ' : 'Der PC-Tab startet zu dieser Zeit von selbst. '}Klick: Uhrzeit ändern">${z.uhr}${klein}</button><button class="pz-zeit-x" data-plan-start-um-x="${p.id}" title="Startzeit entfernen">✕</button>`
+    } else if(p.startUm){
+      const z = zeitTeile(p.startUmGestartetAt)
+      zeit = `<span class="pz-zeit-t" title="Der PC-Tab hat die Startzeit ausgelöst (${escapeHtml(z.voll)}) — kommt binnen 2 min nichts zurück, erscheint „Neu starten"">${z.uhr}<small>gestartet${z.tag ? ' ' + z.tag : ''}</small></span>`
+    }
     // Balance → Ziel · Rest, darunter der Weg vom Start zum Ziel als dünner Balken (nur wenn Start und Ziel bekannt sind)
     let balHtml = `<span class="pz-bal-t is-leer">${typChipHandy}–</span>`
     if(bal){
@@ -35047,7 +35081,12 @@
       // etwaiger Vorprüf-Hinweis; sonst derselbe Knopf wie auf der Karte (Starten / Warteschlange / gestartet · Neu starten).
       // Auto-Plan: ✎ 🗑 + Zustand (Bestätigen klein bzw. „✓ bestätigt", Klick nimmt zurück). Von Hand: wie die V2-Karte.
       if(planIstZeile(p)){
-        const rest = (p.startUm && !p.startUmGestartetAt) ? vorcheckChip : jetztBtn
+        // AP-FIX 05.10.2026: frisch gestartet (≤ 15 min, nichts zurück) zeigt die Start-Spalte selbst („03:36 gestartet") — der
+        // gleichlautende Chip „⏰ gestartet …" aus der Karte entfiele hier doppelt und ließ die 168-px-Spalte auf vier Reihen
+        // umbrechen (119 px hohe Zeile). In der Zeile bleibt davon nur „Neu starten" (erscheint wie bisher nach 2 min).
+        const gestartetFrisch = !!(p.startUm && p.startUmGestartetAt && gestVor < 15 * 60 * 1000 && !wartetDup && !qs
+                                   && !(vorcheckChip && _vc.status === 'verpasst_slave'))
+        const rest = (p.startUm && !p.startUmGestartetAt) ? vorcheckChip : gestartetFrisch ? neuBtn : jetztBtn
         const kopf = `<button class="btn btn-ghost icon-btn tc2-ab" data-plan-edit="${p.id}" title="Bearbeiten">${svgEdit}</button>`
           + `<button class="btn btn-ghost icon-btn tc2-ab" data-plan-del="${p.id}" title="Löschen">${svgDel}</button>`
         zeileAkt = kopf + (p.autoPlan
@@ -38218,7 +38257,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1026'
+  const OS_TAB_BUILD = '2026-09-22.1027'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
