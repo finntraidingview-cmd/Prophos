@@ -22,7 +22,12 @@ def lade():
         i = src.index(f"def {name}(")
         return src[i:src.find("\n\n\n", i)]
 
-    exec("\n".join(['WD_HEDGE_LOGIN = "488579"', 'WD_ERLEDIGT_ROUTEN = ("tvv2", "mt5v2", "tsv2")'] + [block(n) for n in (
+    def const(name):
+        return re.search(rf"^{name} = .*$", src, re.M).group(0)
+    # 05.10.2026: die Routen-Konstanten kommen aus app.py statt als Kopie im Test. Seit 02.10.2026 (Abhaken auch für Echo mit
+    # Fusion-Hedge und Duplikum) nutzt _wd_erledigt_upd WD_FUSION_AM_PLAN — der Test lud sie nicht und brach mit NameError ab,
+    # und die Kopie von WD_ERLEDIGT_ROUTEN kannte die zwei neuen Wege nicht.
+    exec("\n".join(['WD_HEDGE_LOGIN = "488579"', const("WD_ERLEDIGT_ROUTEN"), const("WD_FUSION_AM_PLAN")] + [block(n) for n in (
         "_wd_ende_upd", "_wd_hedge_schluessel", "_wd_hedge_konto", "_wd_zahl", "_wd_erledigt_upd", "_wd_hedge_buchung",
         "_wd_good_day", "_wd_good_day_konto_upd")] + ['WD_GOOD_DAY_MIN = {"tradeify": 250.0}']), ns)
     return ns
@@ -61,8 +66,13 @@ def main():
         u, e = a["_wd_erledigt_upd"](dict(offen, route=rt, status="review", mt5_baseline={"tv": {}}), -1692.4, None, T, D)
         check(e is None and u["status"] == "completed" and u["master_pl"] == -1692.4 and u["slave_pl"] is None and "mt5_baseline" not in u,
               f"{rt}: erledigt ohne Fusion, Baseline unberührt (Topstep-Handplan)")
-        check(a["_wd_erledigt_upd"](dict(offen, route=rt), 100, -5, T, D)[1] == (400, "Fusion-P&L gibt es nur bei Orbit V2 / Winning Days"),
+        check(a["_wd_erledigt_upd"](dict(offen, route=rt), 100, -5, T, D)[1] == (400, "Fusion-P&L gibt es nur bei Orbit, Winning Days, Echo und Duplikum"),
               f"{rt}: Fusion-P&L → 400 (keine falsche wd_hedge-Buchung)")
+    # 02.10.2026: Echo mit Fusion-Hedge (mt5) und Duplikum (tvplus) abhakbar — Fusion-P&L steht als slave_pl am Plan, Baseline unberührt
+    for rt in a["WD_FUSION_AM_PLAN"]:
+        u, e = a["_wd_erledigt_upd"](dict(offen, route=rt, status="review", ended_at="x", mt5_baseline={"hedge": hedge}), 120.0, -35.5, T, D)
+        check(e is None and u == {"status": "completed", "master_pl": 120.0, "slave_pl": -35.5, "completed_at": T},
+              f"{rt}: erledigt mit Fusion-P&L am Plan, Baseline unberührt")
     # K5 (30.09.2026): Topstep V2 mit Puls (tv.puls 'tsx') wie Orbit V2 — final + live.offen false, falls noch kein final
     u, e = a["_wd_erledigt_upd"](dict(offen, route="tsv2", status="open", mt5_baseline={"tv": {"puls": "tsx"}}), -1692.4, None, T, D)
     check(e is None and u["mt5_baseline"]["final"]["grund"] == "erledigt" and u["mt5_baseline"]["tv"] == {"puls": "tsx"}
