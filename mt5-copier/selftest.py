@@ -3653,6 +3653,18 @@ def test_cdp_konto_regression_865():
     chk(ob.cdp_kontonr("PAAPEX0000000000008USD") == "PAAPEX0000000000008" and ob.cdp_kontonr("Konto wählen") == "" and ob.cdp_kontonr(None) == ""
         and ob.cdp_kontonr("Apex · PAAPEX0000000000009USD") == "PAAPEX0000000000009" and ob.cdp_kontonr("TDFYSL150300000000 USD") == "TDFYSL150300000000",
         "Kontonummer aus dem Umschalter-Text (auch mit Beiwerk davor)")
+    # 05.10.2026: Nummer mit nur VIER Endziffern (mindestens 10 Buchstaben davor) — vorher „steht im Dropdown 0x“
+    V4 = "FNFTCHABCDEFGHIJKLMN1234"
+    chk(ob.cdp_kontonr(V4 + "USD") == V4 and ob.cdp_kontonr(V4 + " USD") == V4 and ob.k3_kontonr({"text": V4 + " USD"}) == V4
+        and ob.cdp_kontonr("NQZ2026") == "" and ob.cdp_kontonr("MNQZ2026") == "" and ob.cdp_kontonr("MNQZ26") == ""
+        and ob.cdp_kontonr("ACCOUNTS") == "" and ob.cdp_kontonr("ABCDEFGHIJ12") == "" and ob.cdp_kontonr("ABCDEFGHI1234") == ""
+        and ob.cdp_kontonr("FNFTCHABCDEFGHIJKLMN12345USD") == "FNFTCHABCDEFGHIJKLMN12345"
+        and ob.k3_nr_treffer("TDFYSL150300000000").group(0) == "TDFYSL150300000000" and ob.k3_nr_treffer("NQZ2026") is None,
+        "Kontonummer mit 4 Endziffern erkannt (mindestens 10 Buchstaben davor), Kontrakte und kurze Wörter nicht; alte Regel zuerst")
+    chk(ob.cdp_liste_beleg({"liste_kurz": True, "eintraege": [{"text": V4 + "USD"}, {"text": "FNFTCHABCDEFGHIJKLMN56789USD"}]},
+                           V4 + "USD", "FNFTCHZZZZZZZZZZZZZZ54321") == (True, "")
+        and ob.cdp_konto_eintrag([{"text": V4 + "USD"}, {"text": "FNFTCHABCDEFGHIJKLMN56789USD"}], V4)[1] == 1,
+        "aktives Konto mit 4 Endziffern ist lesbar (Login-Beleg) und als Listenzeile genau einmal zu finden")
     F = ob.cdp_konto_familie
     chk(F("PAAPEX0000000000008") == F("APEX0000000000007") == "apex:000000" and F("PAAPEX1111110000002") == "apex:111111"
         and F("TDFYSL150300000000") == F("FTDFYSLX150200000000") == "tradeify" and F("LFE10000000000000") == "lucid"
@@ -3769,7 +3781,7 @@ def test_cdp_konto_regression_865():
     js = open(_os.path.join(_os.path.dirname(_os.path.abspath(ob.__file__)), "augen.js"), encoding="utf-8").read()
     chk("function kontoSchalter()" in js and "r.top >= lr.top - 4" in js and "var s = kontoSchalter();" in js
         and "(eintraege.length === 1 && !!s.el && !eintraege[0].aktiv)" in js and "panel_lage: lage" in js
-        and "VERSION = '0.7.6'" in js, "augen.js 0.7.4+: Umschalter unter der Broker-Leiste (beide Lagen), panel_lage, Liste nur mit Umschalter")
+        and "VERSION = '0.7.7'" in js, "augen.js 0.7.4+: Umschalter unter der Broker-Leiste (beide Lagen), panel_lage, Liste nur mit Umschalter")
     chk("warnung" in ob.PULS_ERGEBNIS_FELDER and "unklar" in ob.PULS_ERGEBNIS_FELDER, "Ergebnis-Paket trägt warnung + unklar")
     # Login-Abriss (30.09.2026 03:23 UTC): Verbindung weg nach „Anmelden" → Spur mit Chrome-Zustand, EINMAL neu anhängen
     import inspect as _ia

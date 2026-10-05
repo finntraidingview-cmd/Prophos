@@ -23,7 +23,7 @@
  */
 var PROPHOS_AUGEN = (function () {
   'use strict';
-  var VERSION = '0.7.6';   // 0.7.6 (05.10.2026, Finn: „erkennt das falsche Tradovate-Konto und bricht einfach ab"): konto.liste_kurz — eine kurze Liste (≤ 8 Zeilen) mit Platz darüber und darunter ist ganz zu sehen, auch wenn listeVoll am Container scheitert; konto.liste_voll_grund nennt, woran
+  var VERSION = '0.7.7';   // 0.7.7 (05.10.2026): Kontonummern mit nur 4 Endziffern (mindestens 10 Buchstaben davor) zählen als Konto-Zeile und Umschalter (kontoNrAus, RX_KONTO) — vorher „0x im Dropdown“. 0.7.6 (05.10.2026, Finn: „erkennt das falsche Tradovate-Konto und bricht einfach ab"): konto.liste_kurz — eine kurze Liste (≤ 8 Zeilen) mit Platz darüber und darunter ist ganz zu sehen, auch wenn listeVoll am Container scheitert; konto.liste_voll_grund nennt, woran
     // 0.7.5 (02.10.2026, Finn + Pascal): Kontonummern mit 5 End-Ziffern (FundedNext Futures) — Umschalter nach dem Login sonst „kein Konto“
     // 0.7.4 (30.09.2026, Regression .865): Konto-Umschalter relativ zur Broker-Leiste (auch maximiert oben), konto.panel_lage, keine Ein-Zeilen-Liste ohne Umschalter, konto.liste_voll (ganze Liste im Bild)   // 0.7.3 (29.09.2026, K3): kurz() gibt geheime Felder (Passwort, Login-Formular) nie mit Wert zurück   // 0.7.2 (29.09.2026): Aufnahme stoppt nach 10 min von selbst   // 0.7.1 (29.09.2026, K2 für T3): kauf_knopf.disabled, tp/sl.einheit/wert/neben, summary_reiter   // 0.7.0 (29.09.2026, Aufnahme 00:52): Kontoliste ohne Rollen, Meldungs-Status, Watchlist, Dialog-Knöpfe   // 0.6.1 (29.09.2026): aufnahme_letzte() als Rettungskopie, T3-Banner 'prophos-aufnahme' ausgeblendet   // 0.6.0 (29.09.2026, Aufnahme 00:36 leer): window-capture, roh-Zähler, tab_id, Sichtbarkeit   // 0.5.3 (29.09.2026, Lesung 00:22:50): Konto-Anker Kontonummer zuerst, Summary Total P/L = today   // 0.5.2 (29.09.2026, Lesung 00:22): Panel 'Collapse panel'/Manager-Knopf, Konto entdoppelt + kontonr   // 0.5.1 (29.09.2026, Lesung 00:17 pc-cccccc): Schalter-Rechteck, ticket.seite/bereit, Legende, veraltete Zeilen   // 0.5.0 (29.09.2026): Aufnahme-Modus (Finn klickt den Ablauf einmal selbst, jede Aktion wird mitgeschrieben)   // 0.4.0 (29.09.2026, K1–K4 für T3): positionen, orders, konto_summary, symbolsuche, toasts.meldungen   // 0.3.0 (29.09.2026, erste echte Lesung pc-cccccc): TP/SL-Zustand, Konto-Leiste, Toast-Rückfall   // 0.2.0 (29.09.2026): Vertrag mit T3 — globalThis.prophosAugen, Schlüssel-Whitelist, popups, kauf_knopf
 
@@ -165,7 +165,15 @@ var PROPHOS_AUGEN = (function () {
   var RX_SL = /stop[\s-]*loss|verlustbegrenzung/i;
   var RX_SENDEN = /^(buy|sell|kauf(en)?|verkauf(en)?)\s+[\d.,]+\s+\S+\s+(market|markt|limit|stop|stop[\s-]*limit)\b/i;
   var RX_SCHLIESSEN = /close|schlie(ß|ss)en|^[×✕✖]$|dismiss|ausblenden/i;
-  var RX_KONTO = /[A-Z]{3,}[A-Z0-9]*\d{5,}/;   // 0.7.5 (02.10.2026): 5 statt 6 Ziffern — FundedNext Futures FNFTCH…48898 endet mit 5
+  var RX_KONTO = /[A-Z]{3,}[A-Z0-9]*\d{5,}|[A-Z]{10,}\d{4}(?!\d)/;   // 0.7.5 (02.10.2026): 5 statt 6 Ziffern — FundedNext Futures FNFTCH…48898 endet mit 5
+  // 0.7.7 (05.10.2026, Finn: „er sieht den Account in der Liste, klickt aber nicht drauf“): eine FundedNext-Futures-Nummer endet auf
+  // nur VIER Ziffern (FNFTCH + Name + 4 Ziffern). Die Zeile fiel durch RX_KONTO, fehlte in konto.eintraege, der Bot meldete „steht im
+  // Dropdown 0x“ und wollte den Login wechseln, obwohl das Konto im selben Login stand. Zusatzregel NUR für diesen Fall: mindestens
+  // 10 Buchstaben am Stück, dann genau 4 Ziffern. Kontrakte („NQZ2026“, „MNQZ2026“) haben höchstens 4 Buchstaben davor.
+  // kontoNrAus: die alte Regel läuft ZUERST und unverändert — jede bisher erkannte Nummer wird bitgleich erkannt, die neue greift
+  // nur, wenn die alte nichts findet.
+  var RX_KONTONR = /[A-Z]{2,}[A-Z0-9_-]*?\d{5,}/, RX_KONTONR4 = /[A-Z]{10,}\d{4}(?!\d)/;
+  function kontoNrAus(t) { t = String(t || ''); return t.match(RX_KONTONR) || t.match(RX_KONTONR4); }
 
   // ── Ticket (Order-Panel des Brokers) ───────────────────────────────────────
   function ticket() {
@@ -365,7 +373,7 @@ var PROPHOS_AUGEN = (function () {
         if (ohne && (e === ohne || ohne.contains(e) || e.contains(ohne))) return;
         var rr = e.getBoundingClientRect();
         if (rr.height < 24 || rr.height > 44 || rr.width < 150) return;
-        var m = entdoppeln(txt(e)).match(/[A-Z]{2,}[A-Z0-9_-]*?\d{5,}/);
+        var m = kontoNrAus(entdoppeln(txt(e)));
         if (m) nrs[m[0]] = 1;
       });
       if (Object.keys(nrs).length > els.length) return nein(Object.keys(nrs).length + ' Konto-Zeilen im DOM, ' + els.length + ' gemeldet');             // mehr Konto-Zeilen im DOM als gemeldet (auch unsichtbare)
@@ -397,7 +405,7 @@ var PROPHOS_AUGEN = (function () {
       var rr = e.getBoundingClientRect();
       if (rr.height < 24 || rr.height > 44 || rr.width < 150 || rr.width > 340) return;
       var t = entdoppeln(txt(e)); if (t.length > 60 || /[A-Z]\d{4}\d*[.,]\d/.test(t.replace(/\s/g, ''))) return;
-      var m = t.match(/[A-Z]{2,}[A-Z0-9_-]*?\d{5,}/);
+      var m = kontoNrAus(t);
       if (m) nrs[m[0]] = 1;
     });
     return Object.keys(nrs).length <= els.length;
@@ -419,7 +427,7 @@ var PROPHOS_AUGEN = (function () {
     kand = kand.filter(function (k) { return !kand.some(function (m) { return m !== k && k.el.contains(m.el); }); });
     var jeNr = {};
     kand.forEach(function (k) {
-      var nr = (k.t.match(/[A-Z]{2,}[A-Z0-9_-]*?\d{5,}/) || [k.t])[0];
+      var nr = (kontoNrAus(k.t) || [k.t])[0];
       var d = sr ? Math.abs(k.r.top - sr.top) : 0;
       if (!jeNr[nr] || d < jeNr[nr].d) jeNr[nr] = { k: k, d: d, nr: nr };
     });
@@ -510,7 +518,7 @@ var PROPHOS_AUGEN = (function () {
     var schalter = s.el ? kurz(s.el, { quelle: s.quelle }) : null;
     // Lesung 00:22: textContent las 'PAAPEX0000000000009USDPAAPEX0000000000009USD' (versteckter Doppel-Text) — entdoppeln, Nummer extra
     var aktivText = s.el ? entdoppeln(txt(s.el)).slice(0, 60) : '';
-    var kontonrM = aktivText.match(/[A-Z]{2,}[A-Z0-9_-]*?\d{5,}/);
+    var kontonrM = kontoNrAus(aktivText);
     eintraege.forEach(function (e) { e.text = entdoppeln(e.text); });
     eintraege.forEach(function (e) {
       var n1 = String(e.text || '').replace(/[^a-z0-9]/gi, '').toUpperCase(), n2 = aktivText.replace(/[^a-z0-9]/gi, '').toUpperCase();

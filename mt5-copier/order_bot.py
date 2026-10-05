@@ -16457,7 +16457,7 @@ def cdp_kontonr(text):
     """REIN RECHNEND (testbar): Kontonummer aus einem Umschalter-/Listen-Text ('PAAPEX0000000000008USD' → 'PAAPEX0000000000008') | ''
     Je Wort (Beiwerk davor wie 'Apex · PAAPEX…' klebt sonst an der Nummer, Prüfer Runde 2)."""
     for w in re.split(r"[^A-Za-z0-9_-]+", str(text or "")):
-        m = K3_RX_KONTONR.match(w.upper())
+        m = k3_nr_treffer(w.upper(), am_anfang=True)
         if m:
             return m.group(0)
     return ""
@@ -17967,6 +17967,20 @@ K3_PUNKTWERT = {"MNQ": 2.0}                  # $ je Punkt und Kontrakt — K3 ke
 K3_RX_APEX = re.compile(r"^(PA)?APEX\d", re.I)
 K3_RX_TRADEIFY = re.compile(r"^F?TDFY", re.I)
 K3_RX_KONTONR = re.compile(r"[A-Z]{2,}[A-Z0-9_-]*?\d{5,}")
+# 05.10.2026 (Finn: „er sieht den Account in der Liste, klickt aber nicht drauf“ — Orbit-Start meldete „steht im Dropdown 0x“): eine
+# FundedNext-Futures-Nummer endet auf nur VIER Ziffern. Zusatzregel wie in augen.js 0.7.7: mindestens 10 Buchstaben am Stück + genau
+# 4 Ziffern. Sie läuft immer NACH der alten Regel (k3_nr_treffer) — jede bisher erkannte Nummer bleibt bitgleich. Kontrakte wie
+# „NQZ2026“ haben höchstens 4 Buchstaben davor.
+K3_RX_KONTONR4 = re.compile(r"[A-Z]{10,}\d{4}(?!\d)")
+
+
+def k3_nr_treffer(text, am_anfang=False):
+    """REIN RECHNEND (testbar): Kontonummer-Treffer — erst die alte Regel (mindestens 5 Ziffern), nur ohne Treffer die Zusatzregel
+    (mindestens 10 Buchstaben + genau 4 Ziffern). am_anfang = wie re.match (für ein einzelnes Wort), sonst wie re.search."""
+    t = str(text or "")
+    if am_anfang:
+        return K3_RX_KONTONR.match(t) or K3_RX_KONTONR4.match(t)
+    return K3_RX_KONTONR.search(t) or K3_RX_KONTONR4.search(t)
 K3_RX_CLOSE = re.compile(r"\bclose\b|flatten|schlie(ß|ss)en|glattstell", re.I)
 K3_RX_KREUZ = re.compile(r"^[×✕✖]$")
 K3_RX_NICHT_CLOSE = re.compile(r"reverse|umkehr|protect|bracket|schutz|modify|edit|(ä|ae)ndern|setting|einstell|manager", re.I)
@@ -18337,7 +18351,7 @@ def k3_eindeutig(items, rx):
 
 
 def k3_kontonr(e):
-    m = K3_RX_KONTONR.search(re.sub(r"\s", "", str((e or {}).get("kontonr") or (e or {}).get("text") or "")).upper())
+    m = k3_nr_treffer(re.sub(r"\s", "", str((e or {}).get("kontonr") or (e or {}).get("text") or "")).upper())
     return m.group(0) if m else ""
 
 
@@ -18597,7 +18611,7 @@ def _k3_login_wechsel(s, anfang, opts, trail, res):
         _warte(0.9, 0.3)
         st = s.stand(opts)
         ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
-        if not ko.get("schalter") and not K3_RX_KONTONR.search(str(ko.get("aktiv") or "")):
+        if not ko.get("schalter") and not k3_nr_treffer(str(ko.get("aktiv") or "")):
             getrennt = True
             break
         b = ort_tv.blick()
@@ -18716,7 +18730,7 @@ def _k3_login_wechsel(s, anfang, opts, trail, res):
             _warte(1.0, 0.4)
             st = s.stand(opts)
             ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
-            if ko.get("schalter") and K3_RX_KONTONR.search(str(ko.get("aktiv") or "")):
+            if ko.get("schalter") and k3_nr_treffer(str(ko.get("aktiv") or "")):
                 verbunden = True
                 break
             bo = ort.blick()
@@ -19114,7 +19128,7 @@ def cdp_abmelden_erlaubt(aktiv, beleg):
     (beleg konto_treffer 0 + liste_aktiv), und das aktive Konto ist jetzt lesbar und dasselbe wie beim Beleg.
     grund: 'unlesbar' (nie abmelden, ehrlich abbrechen) | 'ohne_beleg' / 'anders' (nicht abmelden, Konto-Schritt neu) | ''"""
     a = _nur_alnum(aktiv).upper()
-    if not a or not K3_RX_KONTONR.search(a):
+    if not a or not k3_nr_treffer(a):
         return False, "unlesbar"
     b = beleg if isinstance(beleg, dict) else {}
     if b.get("konto_treffer") != 0 or not b.get("liste_aktiv"):
@@ -19128,7 +19142,7 @@ def cdp_konto_verbunden(stand):
     """REIN RECHNEND (testbar): Zeigt TradingView ein Tradovate-Konto (Umschalter + Kontonummer)? -> Kontotext | ''"""
     ko = (stand or {}).get("konto") if isinstance(stand, dict) and isinstance(stand.get("konto"), dict) else {}
     aktiv = str(ko.get("aktiv") or "")
-    return aktiv if cdp_rect(ko.get("schalter")) and K3_RX_KONTONR.search(re.sub(r"\s", "", aktiv).upper()) else ""
+    return aktiv if cdp_rect(ko.get("schalter")) and k3_nr_treffer(re.sub(r"\s", "", aktiv).upper()) else ""
 
 
 def cdp_panel_zu(stand):
@@ -19194,7 +19208,7 @@ def _cdp_verbunden_lesen(s, opts, trail):
 def cdp_abgemeldet(stand):
     """REIN RECHNEND (testbar): nach „Log out" — weder Umschalter noch Kontonummer zu sehen (Bedingung des K3-Laufs 12:27 UTC)."""
     ko = (stand or {}).get("konto") if isinstance(stand, dict) and isinstance(stand.get("konto"), dict) else {}
-    return not ko.get("schalter") and not K3_RX_KONTONR.search(re.sub(r"\s", "", str(ko.get("aktiv") or "")).upper())
+    return not ko.get("schalter") and not k3_nr_treffer(re.sub(r"\s", "", str(ko.get("aktiv") or "")).upper())
 
 
 def cdp_innerste(items):
