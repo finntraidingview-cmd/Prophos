@@ -18,8 +18,10 @@ var harness = "var store={}, sess={}; var sessionStorage={getItem:function(k){re
   "var localStorage={getItem:function(k){return k in store?store[k]:null},setItem:function(k,v){store[k]=String(v)}};" +
   "var location={origin:'https://www.tradingview.com',pathname:'/chart/AbC123/',href:''};" +
   "var PULS_CHROME=false; var kontoMerk={text:null,ts:0}; var kursMerk={}; var letzteEingabeMs=0; var EINGABE_RUHE_MS=120000;" +
-  "var geplant=[]; function setTimeout(f){ geplant.push(f); }" + code +
+  "var geplant=[]; function setTimeout(f){ geplant.push(f); }" +
+  "var knoepfe=[]; var sichtbar=function(){return true}; var window={innerHeight:1000}; var document={getElementById:function(){return null},querySelectorAll:function(){return knoepfe}};" + code +
   "; return {feedPflegen:feedPflegen, feedHeilen:feedHeilen, tabRolle:tabRolle, feedMarkiert:feedMarkiert, kontoAngemeldet:kontoAngemeldet," +
+  " kontoIstEcht:kontoIstEcht, kontoNrAus:kontoNrAus, kontoNummerAmSchalter:kontoNummerAmSchalter, knoepfe:knoepfe," +
   " sess:sess, store:store, kontoMerk:kontoMerk, kursMerk:kursMerk, location:location, geplant:geplant, setEingabe:function(t){letzteEingabeMs=t}, setPuls:function(b){PULS_CHROME=b}};";
 var h = new Function(harness)();
 function check(b, t) { aus.push((b ? "OK   " : "FEHL ") + t); }
@@ -67,6 +69,26 @@ h3.sess.prophos_feed_tab = "1"; h3.kontoMerk.text = "TDFYTEST0000000001"; h3.kon
 check(h3.tabRolle(T + 1000) === "feed", "ohne Puls-Modus: markierter Tab bleibt feed (wie 0.8.8)");
 h3.setPuls(true);
 check(h3.tabRolle(T + 1000) === "broker", "Puls-Modus: markierter Tab mit Konto → broker");
+// 0.9.8 (05.10.2026): Kontonummern mit nur 4 Endziffern (mindestens 10 Grossbuchstaben davor) — nur erfundene Kennungen
+var h4 = new Function(harness)();
+var K4 = "FNFTCHMUSTERMUSTERAB0000";   // 20 Buchstaben + 4 Ziffern
+check(h4.kontoIstEcht(K4), "4 Endziffern: Kennung zaehlt als Konto");
+h4.kontoMerk.text = K4; h4.kontoMerk.ts = T;
+check(h4.kontoAngemeldet(T + 1000) && h4.tabRolle(T + 1000) === "broker", "4 Endziffern: kontoAngemeldet, Rolle broker");
+check((h4.kontoNrAus(K4 + "USD") || [])[0] === K4 && (h4.kontoNrAus(K4 + K4 + "USD") || [])[0] === K4, "4 Endziffern: Nummer aus dem Knopf-Text ohne Leerzeichen (auch doppelt)");
+var RX_ALT_ECHT = /[A-Z]{2,}[A-Z0-9_-]*\d{5,}/i, RX_ALT_NR = /[A-Z]{2,}[A-Z0-9_-]*?\d{5,}/i;   // Regeln bis 0.9.7
+var bisher = ["TDFYTEST0000000001", "tdfytest0000000001", "APEX-000000-01", "TDFYTEST0000000001USD", "ABCDEFGHIJ12345", "MFFUTEST00000", "XY_00000-1"];
+var gleich = bisher.every(function (t) { var a = t.match(RX_ALT_NR), n = h4.kontoNrAus(t); return RX_ALT_ECHT.test(t) && h4.kontoIstEcht(t) && a && n && a[0] === n[0] && a.index === n.index; });
+check(gleich, "5+ Endziffern: erkannt und Nummer bitgleich wie bis 0.9.7");
+var nie = ["NQZ2026", "MNQZ2026", "MNQZ26", "NQ1!", "MNQ1! 30,700", "Positions", "Paper Trading", "Account Manager", "ABCDEFGHI1234", "ABCDEFGHIJ123", "abcdefghijkl1234", "Orders 1234", "TRADOVATE 2026"];
+check(nie.every(function (t) { return !h4.kontoIstEcht(t) && !h4.kontoNrAus(t); }), "Kontrakte, Reiter, Paper Trading, 9 Buchstaben, 3 Ziffern, Kleinbuchstaben: nie Konto");
+function knopf(text) { return { textContent: text, closest: function () { return null; }, contains: function () { return false; }, getBoundingClientRect: function () { return { top: 800, left: 10 }; } }; }
+h4.knoepfe.length = 0; h4.knoepfe.push(knopf("Positions"), knopf(K4 + " " + K4 + " USD"), knopf("MNQZ2026"));
+check(h4.kontoNummerAmSchalter() === K4, "Umschalter-Knopf mit 4 Endziffern → reine Kontonummer");
+h4.knoepfe.length = 0; h4.knoepfe.push(knopf("TDFYTEST0000000001 TDFYTEST0000000001 USD"));
+check(h4.kontoNummerAmSchalter() === "TDFYTEST0000000001", "Umschalter-Knopf mit 5+ Endziffern wie bisher");
+h4.knoepfe.length = 0; h4.knoepfe.push(knopf("Positions"), knopf("NQZ2026"), knopf("Paper Trading"));
+check(h4.kontoNummerAmSchalter() === "", "kein Konto-Knopf → leer");
 var fehl = aus.filter(function (z) { return z.indexOf("FEHL") === 0; }).length;
 return aus.join("\n") + "\n" + (fehl ? "FEHLER (" + fehl + ")" : "alle Tests bestanden");
 }

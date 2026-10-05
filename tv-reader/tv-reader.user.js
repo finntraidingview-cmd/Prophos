@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.9.7
+// @version      0.9.8
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt. Seit 0.5 auch die KONTO-ZUSAMMENFASSUNG (Balance, Today's P&L …) fuer den Orbit-V2-Rundgang.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -28,6 +28,10 @@
 // kommt ueber @updateURL/@downloadURL (GitHub-raw) von selbst.
 //
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
+//   0.9.8  05.10.2026  Kontonummern mit nur VIER Endziffern zaehlen als Konto (Zusatzregel wie augen.js 0.7.7: mindestens 10
+//                      Buchstaben am Stueck + genau 4 Ziffern). Anlass 05.10.2026: ein FundedNext-Futures-Konto dieser Form
+//                      stand als aktives Konto im Umschalter, fuer den Reader galt „kein Konto angemeldet" — keine Positions-
+//                      Meldungen fuer genau dieses Konto. Die alte Regel (mindestens 5 Ziffern) laeuft zuerst und unveraendert.
 //   0.9.7  01.10.2026  Puls-Chrome-Modus wartet auf readyState 'complete' höchstens 15 s ab Script-Start — Live-Befund Chris
 //                      01.10.2026 21:04: TradingView blieb dauerhaft 'interactive', Abzeichen hing bei „Prophos-Reader startet …“
 //   0.9.6  01.10.2026  Puls-Chrome schneller beim Schliessen: Takt 0,05 s, Leer-Beweis-Merkzeit 0,15 s (vorher 0,5 s — konnte das
@@ -127,7 +131,7 @@
   // dreimal ein Update vermutet, das gar nicht aktiv war (31.08.2026), und von
   // aussen war das nur an FEHLENDEN Feldern zu erraten. Ab jetzt sagt jeder
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
-  const VERSION    = '0.9.7';
+  const VERSION    = '0.9.8';
   const SCRIPT_START_MS = Date.now();   // 0.9.7: Bezug für die Lade-Schonfrist im Puls-Chrome
   // 0.9.0: Puls-Chrome-Modus (Orbit V3) — je Chrome-Profil gespeichert, siehe CHANGELOG
   let PULS_CHROME = false;
@@ -343,9 +347,19 @@
   // Echte Broker-Konto-Kennung (Tradovate: Buchstaben + mindestens 5 Ziffern). 'Paper Trading' o. ae. zaehlt
   // nicht — sonst hielte sich ein Feed-Konto mit Paper-Trading-Leiste fuer einen Broker und meldete 'flach'.
   const RX_KONTO_ECHT = /[A-Z]{2,}[A-Z0-9_-]*\d{5,}/i;
+  // 0.9.8 (05.10.2026): eine FundedNext-Futures-Nummer endet auf nur VIER Ziffern (Kuerzel + Name + 4 Ziffern). Sie fiel durch
+  // RX_KONTO_ECHT: stand sie als aktives Konto im Umschalter, galt „kein Konto angemeldet" — der Tab meldete fuer dieses Konto
+  // keine Positionen (Positions-Ende, Orbit-V3-Schliessen). Zusatzregel NUR fuer diesen Fall, gleich wie augen.js 0.7.7 und
+  // order_bot.py: mindestens 10 GROSSBUCHSTABEN am Stueck, dann genau 4 Ziffern. Kontrakte („NQZ2026", „MNQZ2026") haben
+  // hoechstens 4 Buchstaben davor und zaehlen nie. Die alte Regel laeuft ZUERST und unveraendert — jede bisher erkannte
+  // Kennung wird bitgleich erkannt, die neue greift nur, wenn die alte nichts findet.
+  const RX_KONTO_ECHT4 = /[A-Z]{10,}\d{4}(?!\d)/;
+  const RX_KONTONR = /[A-Z]{2,}[A-Z0-9_-]*?\d{5,}/i;   // Kontonummer aus dem Knopf-Text (0.9.2, unveraendert)
+  function kontoIstEcht(t) { t = String(t || ''); return RX_KONTO_ECHT.test(t) || RX_KONTO_ECHT4.test(t); }
+  function kontoNrAus(t) { t = String(t || ''); return t.match(RX_KONTONR) || t.match(RX_KONTO_ECHT4); }
   // Konto im Umschalter angemeldet? (Rohwert — vor 0.8.8 war das allein die Rolle)
   function kontoAngemeldet(jetzt) {
-    return !!(kontoMerk.text && RX_KONTO_ECHT.test(kontoMerk.text) && (jetzt - kontoMerk.ts) < 30000);
+    return !!(kontoMerk.text && kontoIstEcht(kontoMerk.text) && (jetzt - kontoMerk.ts) < 30000);
   }
   // 0.8.8: ein markierter Feed-Tab bleibt Feed, auch wenn sich jemand (Puls) darin anmeldet
   function feedMarkiert() {
@@ -370,7 +384,7 @@
     const lr = leiste && sichtbar(leiste) ? leiste.getBoundingClientRect() : null;
     const tc = (e) => kontoEntdoppeln(String((e && e.textContent) || '').replace(/\s+/g, ' ').trim());
     let kand = [...document.querySelectorAll('button,[role="button"]')].filter(sichtbar).filter((e) => {
-      if (!RX_KONTO_ECHT.test(tc(e))) return false;
+      if (!kontoIstEcht(tc(e))) return false;   // 0.9.8: auch 4 Endziffern
       if (e.closest('[data-name="order-panel"],table,[role="listbox"],[role="menu"],[data-name="menu-inner"],[data-name="popup-menu-container"]')) return false;
       const r = e.getBoundingClientRect();
       return lr ? (r.top >= lr.top - 4 && r.left <= lr.left + 400) : r.top > window.innerHeight * 0.3;
@@ -378,14 +392,14 @@
     kand = kand.filter((k) => !kand.some((m) => m !== k && k.contains(m)));   // innerster Knopf
     if (!kand.length || (!lr && kand.length > 1)) return '';
     if (lr) kand.sort((a, b) => (a.getBoundingClientRect().top - lr.top) - (b.getBoundingClientRect().top - lr.top));
-    const m = tc(kand[0]).replace(/\s/g, '').match(/[A-Z]{2,}[A-Z0-9_-]*?\d{5,}/i);
+    const m = kontoNrAus(tc(kand[0]).replace(/\s/g, ''));   // 0.9.8: alte Regel zuerst, sonst 4 Endziffern
     return m ? m[0] : '';
   }
   function liesKonto() {
     try {
       const k = suche(SIG_KONTO_SCHALTER);
       let t = k && k.text ? String(k.text).replace(/\s+/g, ' ').trim().slice(0, 64) : '';
-      if (!RX_KONTO_ECHT.test(t)) { const nr = kontoNummerAmSchalter(); if (nr) t = nr; }   // 0.9.2
+      if (!kontoIstEcht(t)) { const nr = kontoNummerAmSchalter(); if (nr) t = nr; }   // 0.9.2 / 0.9.8
       if (t) { kontoMerk.text = t; kontoMerk.ts = Date.now(); }
     } catch (_) {}
     return kontoMerk;
