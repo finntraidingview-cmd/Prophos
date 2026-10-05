@@ -3769,7 +3769,7 @@ def test_cdp_konto_regression_865():
     js = open(_os.path.join(_os.path.dirname(_os.path.abspath(ob.__file__)), "augen.js"), encoding="utf-8").read()
     chk("function kontoSchalter()" in js and "r.top >= lr.top - 4" in js and "var s = kontoSchalter();" in js
         and "(eintraege.length === 1 && !!s.el && !eintraege[0].aktiv)" in js and "panel_lage: lage" in js
-        and "VERSION = '0.7.5'" in js, "augen.js 0.7.4+: Umschalter unter der Broker-Leiste (beide Lagen), panel_lage, Liste nur mit Umschalter")
+        and "VERSION = '0.7.6'" in js, "augen.js 0.7.4+: Umschalter unter der Broker-Leiste (beide Lagen), panel_lage, Liste nur mit Umschalter")
     chk("warnung" in ob.PULS_ERGEBNIS_FELDER and "unklar" in ob.PULS_ERGEBNIS_FELDER, "Ergebnis-Paket trägt warnung + unklar")
     # Login-Abriss (30.09.2026 03:23 UTC): Verbindung weg nach „Anmelden" → Spur mit Chrome-Zustand, EINMAL neu anhängen
     import inspect as _ia
@@ -3850,7 +3850,28 @@ def test_cdp_konto_regression_865():
     chk("liste_voll" in js and "function listeVoll(els, ohne)" in js and "liste_voll: !!(offenListe && voll)" in js
         and "listeVoll(zeilenEl, schalterEl)" in js and js.index("if (ar.bottom > H + 1") < js.index("ab hier kein Listen-Container mehr"),
         "augen.js meldet liste_voll (auch der hohe Container wird geprüft)")
-    chk("c === document.body" in js and "if (t > 2) return false;" in js, "listeVoll: Ausreißer außerhalb des Listen-Containers → nicht voll")
+    chk("c === document.body" in js and "if (t > 2) return nein(" in js, "listeVoll: Ausreißer außerhalb des Listen-Containers → nicht voll")
+    # LOGIN-WECHSEL BEIM LESEN (05.10.2026, Finn: „erkennt das falsche Tradovate-Konto und bricht einfach ab") — zwei Live-Befunde:
+    # (A) kurze, ganz sichtbare Liste ohne Ziel galt als „nicht vollständig" (FundedNext↔FundedNext) → kein Beleg → Abbruch;
+    # (B) der Pfeil neben „Tradovate" trägt keine Beschriftung mehr → ctx None → „nicht abgemeldet".
+    FN1, FN2, FN3 = "FNFTCH000000000011111", "FNFTCH000000000022222", "FNFTCH000000000033333"
+    ko_k = {"liste_voll": False, "liste_kurz": True, "liste_voll_grund": "Container scrollt (120 > 100, Ebene 1)",
+            "eintraege": [{"text": FN1 + "USD"}, {"text": FN2 + "USD"}]}
+    chk(B(ko_k, FN1 + "USD", FN3) == (True, "") and not B(dict(ko_k, liste_kurz=False), FN1 + "USD", FN3)[0]
+        and "augen.js: Container scrollt" in B(dict(ko_k, liste_kurz=False), FN1 + "USD", FN3)[1]
+        and not B(dict(ko_k, eintraege=[{"text": FN2 + "USD"}]), FN1 + "USD", FN3)[0]
+        and not B(dict(ko_k, eintraege=[{"text": Z8 + "USD"}]), Z8 + "USD", Z7)[0],
+        "kurze, ganz sichtbare Liste (liste_kurz) = Beleg bei gleicher Familie; ohne aktives Konto darin / gleicher Apex-User nie; Grund im Text")
+    chk("function listeKurz(els, ohne)" in js and "els.length > 8" in js and "liste_kurz: !!(offenListe && kurzOk)" in js
+        and "liste_voll_grund:" in js and "if (oben < hz + 8 || H - unten < hz + 8) return false;" in js,
+        "augen.js 0.7.6: liste_kurz (≤ 8 Zeilen, Platz darüber und darunter) + liste_voll_grund")
+    lb = ob.K3_LOGIN_BLICK_JS
+    chk("ctxq = 'pfeil'" in lb and "mg.length === 1" in lb and "e.hasAttribute('aria-expanded')" in lb
+        and lb.index("context\\s*menu") < lb.index("ctxq = 'pfeil'") and "{ mehrdeutig: ctx.length }" in lb,
+        "Login-Blick: Pfeil neben dem Broker-Knopf auch ohne Beschriftung (genau einer, sonst mehrdeutig/None)")
+    q_ab = _i.getsource(ob._cdp_abmelden)
+    chk(q_ab.index("K3_RX_ABMELDEN") < q_ab.index("cdp_abgemeldet") and 's.taste("Escape")' in q_ab,
+        "Abmelden: nach dem Pfeil-Klick nur mit eindeutigem Log out, sonst Esc; abgemeldet wird bewiesen")
     q_tk = _i.getsource(ob._cdp_ticket_fuellen) if hasattr(ob, "_cdp_ticket_fuellen") else ""
     chk(not q_tk or ("chart_frei and bw > 200" in q_tk and "s._panel_max_versucht, s._panel_open_versucht = True, False" in q_tk
                      and "chart_frei = restored" in q_tk and "Treffer ≠ Wirkung" in q_tk and "for _b in range(6):" in q_tk),

@@ -23,7 +23,8 @@
  */
 var PROPHOS_AUGEN = (function () {
   'use strict';
-  var VERSION = '0.7.5';   // 0.7.5 (02.10.2026, Finn + Pascal): Kontonummern mit 5 End-Ziffern (FundedNext Futures) — Umschalter nach dem Login sonst „kein Konto“
+  var VERSION = '0.7.6';   // 0.7.6 (05.10.2026, Finn: „erkennt das falsche Tradovate-Konto und bricht einfach ab"): konto.liste_kurz — eine kurze Liste (≤ 8 Zeilen) mit Platz darüber und darunter ist ganz zu sehen, auch wenn listeVoll am Container scheitert; konto.liste_voll_grund nennt, woran
+    // 0.7.5 (02.10.2026, Finn + Pascal): Kontonummern mit 5 End-Ziffern (FundedNext Futures) — Umschalter nach dem Login sonst „kein Konto“
     // 0.7.4 (30.09.2026, Regression .865): Konto-Umschalter relativ zur Broker-Leiste (auch maximiert oben), konto.panel_lage, keine Ein-Zeilen-Liste ohne Umschalter, konto.liste_voll (ganze Liste im Bild)   // 0.7.3 (29.09.2026, K3): kurz() gibt geheime Felder (Passwort, Login-Formular) nie mit Wert zurück   // 0.7.2 (29.09.2026): Aufnahme stoppt nach 10 min von selbst   // 0.7.1 (29.09.2026, K2 für T3): kauf_knopf.disabled, tp/sl.einheit/wert/neben, summary_reiter   // 0.7.0 (29.09.2026, Aufnahme 00:52): Kontoliste ohne Rollen, Meldungs-Status, Watchlist, Dialog-Knöpfe   // 0.6.1 (29.09.2026): aufnahme_letzte() als Rettungskopie, T3-Banner 'prophos-aufnahme' ausgeblendet   // 0.6.0 (29.09.2026, Aufnahme 00:36 leer): window-capture, roh-Zähler, tab_id, Sichtbarkeit   // 0.5.3 (29.09.2026, Lesung 00:22:50): Konto-Anker Kontonummer zuerst, Summary Total P/L = today   // 0.5.2 (29.09.2026, Lesung 00:22): Panel 'Collapse panel'/Manager-Knopf, Konto entdoppelt + kontonr   // 0.5.1 (29.09.2026, Lesung 00:17 pc-cccccc): Schalter-Rechteck, ticket.seite/bereit, Legende, veraltete Zeilen   // 0.5.0 (29.09.2026): Aufnahme-Modus (Finn klickt den Ablauf einmal selbst, jede Aktion wird mitgeschrieben)   // 0.4.0 (29.09.2026, K1–K4 für T3): positionen, orders, konto_summary, symbolsuche, toasts.meldungen   // 0.3.0 (29.09.2026, erste echte Lesung pc-cccccc): TP/SL-Zustand, Konto-Leiste, Toast-Rückfall   // 0.2.0 (29.09.2026): Vertrag mit T3 — globalThis.prophosAugen, Schlüssel-Whitelist, popups, kauf_knopf
 
   // ── Grundwerkzeuge ─────────────────────────────────────────────────────────
@@ -324,12 +325,15 @@ var PROPHOS_AUGEN = (function () {
    * GANZ zu sehen ist. Bei 358 px unter der Leiste passen ~10 Zeilen, APEX_000000 hat 32 Konten — der Rest liegt unter dem Fensterrand
    * (sichtbar() wirft ihn raus) oder in einem Scroll-Container. Nein, wenn eine Zeile aus dem Fenster ragt, ein enger Container darum
    * scrollt oder abgeschnitten ist, oder darin mehr Konto-Zeilen (auch unsichtbare) stehen als gemeldet. -> true | false */
+  var lvGrund = '';   // woran listeVoll zuletzt scheiterte (konto.liste_voll_grund, 05.10.2026 — vorher war ein Nein nicht nachvollziehbar)
   function listeVoll(els, ohne) {
-    if (!els || !els.length) return false;
+    lvGrund = '';
+    function nein(g) { lvGrund = g; return false; }
+    if (!els || !els.length) return nein('keine Zeilen');
     var H = window.innerHeight, W = window.innerWidth, oben = Infinity, unten = -Infinity, i;
     for (i = 0; i < els.length; i++) {
       var r = els[i].getBoundingClientRect();
-      if (r.top < 0 || r.bottom > H + 1 || r.left < 0 || r.right > W + 1) return false;
+      if (r.top < 0 || r.bottom > H + 1 || r.left < 0 || r.right > W + 1) return nein('Zeile ragt aus dem Fenster');
       oben = Math.min(oben, r.top); unten = Math.max(unten, r.bottom);
     }
     var c = els[0].parentElement;
@@ -337,25 +341,25 @@ var PROPHOS_AUGEN = (function () {
     // Prüfer Runde 3 (30.09.2026): ein gemeldetes Element AUSSERHALB des Listen-Containers (z. B. der Fokus-Container [6,30] mit der
     // aktiven Nummer) zieht den gemeinsamen Vorfahren bis zum Portal/body hoch — dann prüfte die Schleife den Scroll-Container nie.
     // Zeilen einer Liste liegen eng beieinander im DOM: gemeinsamer Vorfahr body oder mehr als 3 Ebenen über einer Zeile → nicht voll.
-    if (!c || c === document.body || c === document.documentElement) return false;
+    if (!c || c === document.body || c === document.documentElement) return nein('gemeinsamer Vorfahr ist body');
     for (i = 0; i < els.length; i++) {
       for (var t = 0, p = els[i]; p && p !== c; t++) {
         p = p.parentElement;
         if (!p || p === c) break;
         // auch ZWISCHEN Zeile und Vorfahr: Scroll-Container bzw. hoher Innen-Wrapper einer virtualisierten Liste (Probe E4)
         var pr = p.getBoundingClientRect(), ps = window.getComputedStyle(p);
-        if (pr.bottom > H + 1 || pr.top < -1) return false;
-        if (/(auto|scroll|hidden)/.test(ps.overflowY + ' ' + ps.overflow) && p.scrollHeight > p.clientHeight + 2) return false;
+        if (pr.bottom > H + 1 || pr.top < -1) return nein('Wrapper ragt aus dem Fenster');
+        if (/(auto|scroll|hidden)/.test(ps.overflowY + ' ' + ps.overflow) && p.scrollHeight > p.clientHeight + 2) return nein('Wrapper scrollt (' + p.scrollHeight + ' > ' + p.clientHeight + ')');
       }
-      if (t > 2) return false;                                              // t = Ebenen ZWISCHEN Zeile und Vorfahr (höchstens 3 Schritte)
+      if (t > 2) return nein('Zeile liegt ' + (t + 1) + ' Ebenen unter dem Vorfahren');                                             // t = Ebenen ZWISCHEN Zeile und Vorfahr (höchstens 3 Schritte)
     }
     // Prüfer Runde 2 (30.09.2026): nicht beim ersten HOHEN Vorfahren aufhören, sondern auch ihn prüfen — genau der hohe Listen-Container
     // (32 Zeilen, 1024 px, Rand zufällig auf einer Zeilengrenze; virtualisierte Liste) trägt die unsichtbaren Zeilen.
     for (var n = 0, a = c; a && a !== document.body && n < 8; n++, a = a.parentElement) {
       var ar = a.getBoundingClientRect();
-      if (ar.bottom > H + 1 || ar.top < -1) return false;                  // Container ragt aus dem Fenster → Zeilen darin können fehlen
+      if (ar.bottom > H + 1 || ar.top < -1) return nein('Container ragt aus dem Fenster');                 // Container ragt aus dem Fenster → Zeilen darin können fehlen
       var st = window.getComputedStyle(a);
-      if (/(auto|scroll|hidden)/.test(st.overflowY + ' ' + st.overflow) && a.scrollHeight > a.clientHeight + 2) return false;
+      if (/(auto|scroll|hidden)/.test(st.overflowY + ' ' + st.overflow) && a.scrollHeight > a.clientHeight + 2) return nein('Container scrollt (' + a.scrollHeight + ' > ' + a.clientHeight + ', Ebene ' + n + ')');
       var nrs = {};
       alle('div,li,button,a,[tabindex]', a).forEach(function (e) {
         if (ohne && (e === ohne || ohne.contains(e) || e.contains(ohne))) return;
@@ -364,10 +368,39 @@ var PROPHOS_AUGEN = (function () {
         var m = entdoppeln(txt(e)).match(/[A-Z]{2,}[A-Z0-9_-]*?\d{5,}/);
         if (m) nrs[m[0]] = 1;
       });
-      if (Object.keys(nrs).length > els.length) return false;              // mehr Konto-Zeilen im DOM als gemeldet (auch unsichtbare)
+      if (Object.keys(nrs).length > els.length) return nein(Object.keys(nrs).length + ' Konto-Zeilen im DOM, ' + els.length + ' gemeldet');             // mehr Konto-Zeilen im DOM als gemeldet (auch unsichtbare)
       if (ar.height > (unten - oben) + 160 || ar.width > 600) break;       // ab hier kein Listen-Container mehr (geprüft ist er trotzdem)
     }
     return true;
+  }
+  /* KURZE LISTE GANZ IM BILD? (05.10.2026, Finn + Pascal, Endlesung FundedNext Futures: Liste mit 3 Konten, ganz zu sehen — listeVoll
+   * sagte trotzdem nein, der Bot hatte keinen Beleg für den fremden Login und brach ab.) Zweiter, rein geometrischer Beweis nur für
+   * kurze Listen: höchstens 8 Zeilen, alle ganz im Fenster, über der ersten und unter der letzten ist Platz für eine weitere Zeile
+   * (eine abgeschnittene Liste reicht bis an den Fensterrand — Regression .865: 21 von 32 Zeilen), die Zeilen stehen lückenlos
+   * (höchstens ein Gruppen-Kopf dazwischen), und im ganzen Dokument steht keine weitere Konto-Zeile (auch keine unsichtbare in einem
+   * Scroll-Container). -> true | false */
+  function listeKurz(els, ohne) {
+    if (!els || !els.length || els.length > 8) return false;
+    var H = window.innerHeight, W = window.innerWidth, oben = Infinity, unten = -Infinity, hz = 0, rs = [], i;
+    for (i = 0; i < els.length; i++) {
+      var r = els[i].getBoundingClientRect();
+      if (r.top < 0 || r.bottom > H || r.left < 0 || r.right > W) return false;
+      oben = Math.min(oben, r.top); unten = Math.max(unten, r.bottom); hz = Math.max(hz, r.height); rs.push(r);
+    }
+    if (oben < hz + 8 || H - unten < hz + 8) return false;
+    rs.sort(function (a, b) { return a.top - b.top; });
+    for (i = 1; i < rs.length; i++) if (rs[i].top - rs[i - 1].bottom > hz + 24) return false;
+    var nrs = {};
+    alle('div,li,button,a,[tabindex]').forEach(function (e) {
+      if (ohne && (e === ohne || ohne.contains(e) || e.contains(ohne))) return;
+      if (e.closest('table,[data-name="order-panel"],#footer-chart-panel,[data-name="symbol-list-wrap"],[data-name="tree"],[data-name^="toast-group-"]')) return;
+      var rr = e.getBoundingClientRect();
+      if (rr.height < 24 || rr.height > 44 || rr.width < 150 || rr.width > 340) return;
+      var t = entdoppeln(txt(e)); if (t.length > 60 || /[A-Z]\d{4}\d*[.,]\d/.test(t.replace(/\s/g, ''))) return;
+      var m = t.match(/[A-Z]{2,}[A-Z0-9_-]*?\d{5,}/);
+      if (m) nrs[m[0]] = 1;
+    });
+    return Object.keys(nrs).length <= els.length;
   }
   function kontoZeilen(schalterEl) {
     var sr = schalterEl ? schalterEl.getBoundingClientRect() : null;
@@ -406,7 +439,8 @@ var PROPHOS_AUGEN = (function () {
         gruppen.push({ text: t, rect: rect(e) });
       });
     }
-    return { zeilen: zeilen.slice(0, 40), gruppen: gruppen, voll: zeilen.length <= 40 && listeVoll(zeilenEl, schalterEl) };
+    var vollZ = zeilen.length <= 40 && listeVoll(zeilenEl, schalterEl);
+    return { zeilen: zeilen.slice(0, 40), gruppen: gruppen, voll: vollZ, grund: vollZ ? '' : (zeilen.length > 40 ? 'mehr als 40 Zeilen' : lvGrund), kurz: listeKurz(zeilenEl, schalterEl) };
   }
   /* KONTO-UMSCHALTER RELATIV ZUR BROKER-LEISTE (30.09.2026, Regression .865 bei pc-cccccc, Inventar 03:13 UTC): maximiert steht
    * #footer-chart-panel OBEN ([56,0,1194,38], Knopf „Restore panel") und der Umschalter direkt darunter ([72,59,199,28] 'PAAPEX…0008USD');
@@ -443,8 +477,8 @@ var PROPHOS_AUGEN = (function () {
     var optEl = alle('[role="listbox"] [role="option"],[role="menu"] [role="menuitem"],[data-name="menu-inner"] [role="option"],[data-name="popup-menu-container"] [role="menuitem"]')
       .filter(sichtbar);
     var eintraege = optEl.slice(0, 40).map(function (e) { return kurz(e); });
-    var gruppen = [], voll = optEl.length <= 40 && listeVoll(optEl, s.el);
-    if (!eintraege.length) { var kl = kontoZeilen(s.el); eintraege = kl.zeilen; gruppen = kl.gruppen; voll = kl.voll; }
+    var gruppen = [], voll = optEl.length <= 40 && listeVoll(optEl, s.el), vollGrund = voll ? '' : lvGrund, kurzOk = listeKurz(optEl, s.el);
+    if (!eintraege.length) { var kl = kontoZeilen(s.el); eintraege = kl.zeilen; gruppen = kl.gruppen; voll = kl.voll; vollGrund = kl.grund; kurzOk = kl.kurz; }
     // External IDs als Text suchen (Reader-Lehre 21.09.2026: eine 17-stellige Kontonummer kann TradingView nicht umbenennen)
     var treffer = [];
     var nadeln = (texte || []).map(function (x) { return String(x || '').replace(/[^a-z0-9]/gi, '').toUpperCase(); })
@@ -493,6 +527,7 @@ var PROPHOS_AUGEN = (function () {
     return { schalter: schalter, aktiv: aktivText, kontonr: kontonrM ? kontonrM[0] : null, gruppen: gruppen, liste_offen: offenListe, eintraege: eintraege, treffer: treffer, notiz: s.notiz,
              broker: mgr.el ? txt(mgr.el).slice(0, 30) : (leiste ? txt(leiste).slice(0, 30) : ''), manager_knopf: mgr.el ? kurz(mgr.el) : null,
              panel: panel, panel_knopf: tog && sichtbar(tog) ? kurz(tog) : null, panel_lage: lage, liste_voll: !!(offenListe && voll),
+             liste_kurz: !!(offenListe && kurzOk), liste_voll_grund: offenListe && !voll ? String(vollGrund || '').slice(0, 80) : '',
              hinweis: (!s.el && !treffer.length && panel === 'zu') ? 'Broker-Panel zu — Kontonummer nicht sichtbar (panel_knopf öffnet es)' : null };
   }
 

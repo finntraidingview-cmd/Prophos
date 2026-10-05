@@ -16471,7 +16471,8 @@ def cdp_liste_beleg(ko, aktiv, ext=""):
     Prüfer 30.09.2026 (Regression .865): eine abgeschnittene Liste (maximiert ≈ 21 Zeilen, APEX_000000 hat 32 Konten) zeigte das Ziel
     0× — „Log out" einer richtigen Sitzung. Deshalb zuerst die Nummern selbst (cdp_konto_familie): andere Firma bzw. anderer Apex-User
     = sicher ein anderer Login (so bleibt der live grüne Wechsel Apex↔Tradeify auch bei 94 Konten möglich); derselbe Apex-User = nie
-    (das Ziel steht nur außer Sicht). Sonst (Tradeify↔Tradeify, unbekannt) nur mit vollständiger Liste (augen.js liste_voll ≥ 0.7.4)
+    (das Ziel steht nur außer Sicht). Sonst (Tradeify↔Tradeify, unbekannt) nur mit vollständiger Liste (augen.js liste_voll ≥ 0.7.4
+    oder, seit 05.10.2026, liste_kurz ≥ 0.7.6 — auch FundedNext↔FundedNext: die Nummer verrät dort den Login nicht)
     UND dem aktiven Konto selbst als Zeile darin."""
     nr = cdp_kontonr(aktiv)
     if not nr:
@@ -16481,8 +16482,14 @@ def cdp_liste_beleg(ko, aktiv, ext=""):
         return True, ""
     if fa and fa == fz and fa.startswith("apex:"):
         return False, f"Ziel und aktives Konto gehören zum selben Apex-Login (User {fa[5:]}) — das Ziel steht nur nicht sichtbar in der Liste"
-    if (ko or {}).get("liste_voll") is not True:
-        return False, "Liste nicht vollständig im Bild (abgeschnitten/scrollbar oder augen.js < 0.7.4)"
+    # 05.10.2026 (Finn + Pascal, Endlesung zweier FundedNext-Futures-Konten bei verbundenem anderem FundedNext-Login): die Liste hatte
+    # drei Zeilen und war ganz zu sehen, liste_voll sagte trotzdem nein → kein Beleg → Abbruch statt Login-Wechsel. Seit augen.js 0.7.6
+    # zählt auch liste_kurz (≤ 8 Zeilen, Platz darüber und darunter, keine weitere Konto-Zeile im Dokument); liste_voll_grund nennt,
+    # woran liste_voll scheiterte.
+    if (ko or {}).get("liste_voll") is not True and (ko or {}).get("liste_kurz") is not True:
+        g = str((ko or {}).get("liste_voll_grund") or "")[:80]
+        return False, ("Liste nicht vollständig im Bild (abgeschnitten/scrollbar oder augen.js < 0.7.6"
+                       + (f"; augen.js: {g}" if g else "") + ")")
     if not any(isinstance(x, dict) and cdp_konto_passt(str(x.get("text") or ""), nr) for x in (ko or {}).get("eintraege") or []):
         return False, f"aktives Konto {nr} steht nicht in der Liste"
     return True, ""
@@ -18369,7 +18376,25 @@ K3_LOGIN_BLICK_JS = r"""(function (anfang) {
   var fp = document.getElementById('footer-chart-panel');
   o.leiste = fp ? T(fp).slice(0, 60) : null;
   var ctx = innen(Q('button,[role="button"]', fp || document).filter(sb).filter(function (e) { return /context\s*menu|kontextmen/i.test(A(e, 'title') + ' ' + A(e, 'aria-label')); }));
-  o.ctx = ctx.length === 1 ? K(ctx[0]) : (ctx.length ? { mehrdeutig: ctx.length } : null);
+  // 05.10.2026 (Finn + Pascal, Endlesung Tradeify bei verbundenem FundedNext-Futures-Login: „Kontextmenü-Knopf … nicht eindeutig (None)"):
+  // der Pfeil trägt keine Beschriftung „context menu" mehr. Inventar desselben Laufs: Leiste [56,587,1199,38], Knopf „Tradovate"
+  // (aria „Close account manager") [56,587,140,38], darin ein namenloser button role=button aria-expanded=false [166,595,22,22].
+  // Rückfall deshalb über die Lage: genau EIN kleiner Knopf ohne Text mit aria-expanded/-haspopup in der rechten Hälfte des
+  // Broker-Knopfs (oder direkt rechts daneben). Der Beweis bleibt das Menü danach: ohne eindeutiges „Log out" Esc, nichts abgemeldet.
+  var ctxq = ctx.length ? 'beschriftung' : '';
+  if (!ctx.length && fp) {
+    var mg = Q('button', fp).filter(sb).filter(function (e) { return /account\s*manager|konto(-|\s*)?manager|kontoverwaltung/i.test(A(e, 'aria-label') + ' ' + A(e, 'title')); });
+    if (mg.length === 1) {
+      var mr = mg[0].getBoundingClientRect();
+      ctx = innen(Q('button,[role="button"]', fp).filter(sb).filter(function (e) {
+        if (e === mg[0] || T(e) || /toggle-(visibility|maximize)/.test(A(e, 'data-name'))) return false;
+        if (!e.hasAttribute('aria-expanded') && !e.hasAttribute('aria-haspopup')) return false;
+        var r = e.getBoundingClientRect(), mx = r.left + r.width / 2, my = r.top + r.height / 2;
+        return r.width <= 34 && r.height <= 34 && my >= mr.top && my <= mr.bottom && mx >= mr.left + mr.width / 2 && mx <= mr.right + 16; }));
+      ctxq = 'pfeil';
+    }
+  }
+  o.ctx = ctx.length === 1 ? Object.assign(K(ctx[0]), { quelle: ctxq }) : (ctx.length ? { mehrdeutig: ctx.length } : null);
   var tp = Q('button,[role="button"]', fp || document).filter(sb).filter(function (e) { return /^(trading\s*panel|handelspanel)$/i.test(T(e) || A(e, 'aria-label')); });
   o.panel_knopf = tp.length === 1 ? K(tp[0]) : null;
   o.menue = innen(Q('[role="menuitem"],[role="menuitemcheckbox"],[role="menuitemradio"],[data-role="menuitem"],[data-name="menu-inner"] [role],[data-name="popup-menu-container"] [role]').filter(sb))
