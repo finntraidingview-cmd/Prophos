@@ -147,6 +147,10 @@
   .rsq-title{display:flex;align-items:center;gap:7px;font-weight:600;color:var(--ink);font-size:12.5px;line-height:1.4}
   .rsq-x{margin-left:auto;flex-shrink:0;background:none;border:0;cursor:pointer;color:var(--sub);font-size:14px;line-height:1;padding:2px 5px;border-radius:6px}
   .rsq-x:hover{background:rgba(239,68,68,.10);color:#ef4444}
+  /* ✕ im Kopf (05.10.2026): blendet das Panel nur aus — neutraler Hover, das Rot der anderen ✕ heißt „entfernen/abbrechen" */
+  .rsq-kopf-r{display:inline-flex;align-items:center;gap:4px}
+  #rsq-zu{margin-left:0;padding:5px 8px;font-size:15px}   /* etwas größer als die Zeilen-✕: auch am Handy treffbar */
+  #rsq-zu:hover{background:var(--line);color:var(--ink)}
   .rsq-steps{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
   .rsq-chip{font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:20px;background:var(--line);color:var(--sub)}
   .rsq-chip.ok{background:rgba(16,185,129,.14);color:#0d9668}
@@ -7211,7 +7215,10 @@
          Verdrahtung bei den REMOTE-TRADE-SIGNALEN (eigene Handler, Modal-Regel). -->
     <div id="rs-queue" style="display:none">
       <div class="rsq-head"><span>📡 Auto-Start</span>
-        <button class="btn btn-ghost" id="rsq-stop" style="font-size:11.5px;padding:4px 10px">Alle stoppen</button>
+        <span class="rsq-kopf-r">
+          <button class="btn btn-ghost" id="rsq-stop" style="font-size:11.5px;padding:4px 10px">Alle stoppen</button>
+          <button class="rsq-x" id="rsq-zu" title="Ausblenden — stoppt nichts und löscht nichts. Der Kasten kommt wieder, sobald es etwas Neues gibt (neuer Start, neuer Fehler)." aria-label="Auto-Start ausblenden">✕</button>
+        </span>
       </div>
       <div id="rsq-halt" class="rsq-halt" style="display:none"></div>
       <div id="rsq-items"></div>
@@ -38211,7 +38218,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1024'
+  const OS_TAB_BUILD = '2026-09-22.1025'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -39071,6 +39078,21 @@
   let _rsQueueHaltDetails = null  // planId, dessen stiller Duplikum-Check rot war → „Details" öffnet das Check-Popup (23.09.2026)
   let _rsqDone = []        // erledigte Läufe fürs Panel: { ok, label, msg }
   let _rsSende = false     // Riegel, solange das Insert eines Starts unterwegs ist (Doppelklick-Race)
+  /* Ausblenden per ✕ (05.10.2026, Finn: „Mach für dieses Pop-up einfach einen kleinen X-Button, damit ich es schließen kann. Das
+   * verschwindet nicht, ich muss immer die Seite neu laden" — ein roter Eintrag oder der Halt hält das Panel sonst offen, bis
+   * „Alle stoppen"). Das ✕ ändert NICHTS an der Schlange: es merkt sich nur, was beim Schließen im Panel stand (laufender Start,
+   * wartende Pläne, erledigte Zeilen, Halt-Text). Solange nichts NEUES dazukommt, bleibt das Panel zu — auch wenn etwas
+   * verschwindet (grüne Zeile nach 8 s, Plan aus der Schlange genommen). Neuer Start, neuer Fehler, neuer Lauf → wieder da.
+   * Der Halt bleibt bestehen, bis „▶ Weiter" oder „Alle stoppen" gedrückt wird. */
+  let _rsqZu = null        // null = Panel zeigt sich wie immer; sonst Set dessen, was beim ✕ zu sehen war
+  function _rsqInhalt(){
+    const s = new Set()
+    if(_rsAktiv && _rsAktiv.planLabel) s.add('a:' + String(_rsAktiv.planId || _rsAktiv.planLabel))
+    for(const pid of _rsQueue) s.add('q:' + String(pid))
+    for(const d of _rsqDone) s.add(d)   // das Objekt selbst: jede erledigte Zeile ist ein eigener Eintrag
+    if(_rsQueueHalt) s.add('h:' + String(_rsQueueHalt))
+    return s
+  }
 
   function _rsPlanLabel(plan, pid){
     if(!plan) return 'Plan ' + String(pid).slice(0, 8)
@@ -39140,8 +39162,16 @@
     // Ein Close-Lauf belegt _rsAktiv auch, gehört aber dem Check-Popup —
     // das Panel zeigt nur Start-Läufe (erkennbar am planLabel).
     const aktiv = !!(_rsAktiv && _rsAktiv.planLabel)
-    if(!aktiv && !_rsQueue.length && !_rsqDone.length && !_rsQueueHalt){ box.style.display = 'none'; return }
-    box.style.display = ''
+    if(!aktiv && !_rsQueue.length && !_rsqDone.length && !_rsQueueHalt){ _rsqZu = null; box.style.display = 'none'; return }
+    // Per ✕ ausgeblendet (05.10.2026): zu bleiben, bis etwas dazukommt, das beim Schließen nicht da war. Verschwundenes wird
+    // vergessen — kommt derselbe Plan später wieder in die Schlange, ist das neu.
+    if(_rsqZu){
+      const jetzt = _rsqInhalt()
+      let neu = false
+      for(const k of jetzt){ if(!_rsqZu.has(k)){ neu = true; break } }
+      _rsqZu = neu ? null : jetzt
+    }
+    box.style.display = _rsqZu ? 'none' : ''
     const halt = document.getElementById('rsq-halt')
     if(halt){
       halt.style.display = _rsQueueHalt ? '' : 'none'
@@ -39239,6 +39269,8 @@
     }
     _rsQueueRender()
   })
+  // ✕ im Kopf: nur ausblenden (siehe _rsqZu) — stoppt nichts, setzt nichts fort, löscht nichts
+  document.getElementById('rsq-zu')?.addEventListener('click', () => { _rsqZu = _rsqInhalt(); _rsQueueRender() })
   document.getElementById('rsq-halt')?.addEventListener('click', ev => {
     if(ev.target.closest('#rsq-details')){
       // Verborgenes Check-Popup mit den Zeilen dieses Plans zeigen — nur, wenn es noch seine
