@@ -2020,6 +2020,10 @@
   #vr-view .vr-h-satz{margin:8px 0 0;font-size:13px;color:var(--sub);line-height:1.5}
   #vr-view .vr-h-chips{margin:14px 0 0}
   #vr-view .vr-h-liste{margin-top:14px}
+  #vr-view .vr-h-filter{display:inline-flex;align-items:center;gap:6px;margin:10px 0 0;font-size:12.5px;color:var(--ink);background:var(--surface-tint);border-radius:8px;padding:3px 4px 3px 10px}
+  #vr-view .vr-h-filter button{border:0;background:transparent;color:var(--sub);font:inherit;font-size:15px;line-height:1;cursor:pointer;padding:0 5px}
+  #vr-view .vr-h-filter button:hover{color:var(--ink)}
+  #vr-view .vr-heute{margin-top:6px}
   /* je Person ein Kasten: Kopf „● Name — heute 4 Konten · ≈ 1.200 €", darin die Zeilen */
   #vr-view .vr-h-person{border:1px solid var(--border-soft);border-radius:12px;padding:4px 16px 2px;margin-bottom:12px;background:var(--surface)}
   #vr-view .vr-h-pkopf{display:flex;align-items:baseline;gap:8px;padding:12px 0 8px;font-size:15px}
@@ -38786,7 +38790,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1057'
+  const OS_TAB_BUILD = '2026-09-22.1058'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -55391,7 +55395,7 @@
   const VR_SCHLOSS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/></svg>'
   const VR_PAUSE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 5v14M15 5v14"/></svg>'
   const VR_PLAY = '<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M7 5v14l11-7z"/></svg>'
-  const _vr = { daten: null, laedt: false, fehler: '', timer: null, stand: 0, kachel: '', firma: '', auf: new Set(), sendet: 0, offen: new Set(), sichert: false, uebersicht: false, einst: false, hPerson: '' }
+  const _vr = { daten: null, laedt: false, fehler: '', timer: null, stand: 0, kachel: '', firma: '', auf: new Set(), sendet: 0, offen: new Set(), sichert: false, uebersicht: true, einst: false, hPerson: '' }
   // Stufe 2 (06.10.2026, Vertrag .claude/master/vorrat-vertrag.md): je Zelle nachkauf {n, einheit, dringlichkeit, n_roh, teile},
   // score 0–100 + score_teile [{name, wert, einheit}] (Finn: Dringlichkeit als Zahl, aus den Zahlen begründet), sperre
   // 'daten_fehlen'|'unsicher', bestellt {id, anzahl, offen, verfall} + zustand 'bestellt', bestand_gewichtet/erwartet, konten = LISTE
@@ -55399,6 +55403,9 @@
   // d.dringlichkeiten, wenn geliefert). Liefert der Server keine Zelle mit nachkauf, bleibt die Seite still bei Stufe 1 — nichts erfunden.
   const VR_DRING = { jetzt: ['Jetzt kaufen', 'jetzt', 0], bald: ['Bald', 'bald', 1], gedeckt: ['Gedeckt', 'gedeckt', 2] }
   const VR_DFARBE = { jetzt: 'var(--danger)', bald: 'var(--warn)', gedeckt: 'var(--good)' }
+  // Klappzustand der Bereiche (Master 06.10.2026: Übersicht oben und standardmäßig offen, Einstellungen zu) — je Gerät gemerkt
+  const VR_KLAPP_LS = 'prophos_vorrat_klapp'
+  try{ const k = JSON.parse(localStorage.getItem(VR_KLAPP_LS) || 'null'); if(k && typeof k === 'object'){ _vr.uebersicht = k.uebersicht !== false; _vr.einst = !!k.einst } }catch(_){}
   const vrS2 = d => (d?.zellen || []).some(z => z.nachkauf && typeof z.nachkauf === 'object')
   // Anzahl Konten: Stufe 1 lieferte konten als Zahl, ab Stufe 2 heißt die Zahl konten_n und konten ist die Liste — beides lesen,
   // solange auf Railway noch das Stufe-1-Backend laufen kann
@@ -55659,26 +55666,33 @@
 
     root.innerHTML = (d.hinweis ? `<div class="vr-hinweis">${vrEsc(d.hinweis)}</div>` : '')
       + (_vr.fehler ? `<div class="vr-fehler">${vrEsc(_vr.fehler)}</div>` : '')
-      + vrHeuteHtml(d, s2, name, firma)
       + `<details class="vr-klapp" data-vr-klapp="uebersicht"${_vr.uebersicht ? ' open' : ''}><summary>Übersicht je Person</summary>`
       + `<div class="kpis vr-kpis">${kpis}</div>`
       + (d.ki_text ? `<div class="vr-kz-txt vr-ki">${vrEsc(d.ki_text)}${vrUhr(d.ki_text_um) ? ` <span>· Text von ${vrUhr(d.ki_text_um)}</span>` : ''}</div>` : '')
       + `<div class="grid-2 vr-grid">
           <div class="panel"><div class="panel-head"><div><div class="panel-title">${vrEsc(titel)}</div><div class="panel-sub">Balken: je Firma ein Stück — voll gesichert, hell mit Funnel, gegen die Untergrenze. Klick klappt auf.</div></div></div>
             <div class="adm-dist" id="vr-ids">${ids.map(idZeile).join('') || '<div class="adm-empty">Keine ID für diese Auswahl.</div>'}</div></div>
-          <div class="panel"><div class="panel-head"><div><div class="panel-title">Je Firma</div><div class="panel-sub">Klick filtert links</div></div>${legende}</div>
+          <div class="panel"><div class="panel-head"><div><div class="panel-title">Je Firma</div><div class="panel-sub">Klick filtert links und die Kaufliste</div></div>${legende}</div>
             <div class="adm-dist" id="vr-firmen">${fListe.map(fZeile).join('') || '<div class="adm-empty">Keine Firma.</div>'}</div></div>
         </div>`
       + `<div class="vr-fuss">Punkte je Konto: grün = Chance ab 50 %, gelb 20–50 %, rot darunter, violett = im Vorrat, gestrichelt = Daten fehlen, oranger Ring = nah am Boden.
         Firmen-Balken: grünes Band = Ziel-Spanne. ✓ = bestellt (zählt 48 h), ‖ pausiert (gerade nichts kaufen), Schloss sperrt. Klick auf eine Firmenzeile zeigt die Rechnung.</div></details>`
+      + vrHeuteHtml(d, s2, name, firma)
       + `<details class="vr-klapp" data-vr-klapp="einst"${_vr.einst ? ' open' : ''}><summary>Einstellungen</summary>`
       + `<div class="vr-einst"><div class="vr-einst-kopf">Wie sicher soll das Ziel erreicht werden?</div><div id="vr-sich" class="vr-sich"></div>`
       + `<div class="vr-einst-kopf">Freigeschaltet je ID und Firma <span>Klick wechselt: frei → pausiert → gesperrt → frei</span></div>${vrMatrixHtml(d, name)}</div></details>`
     vrSichRender(d, s2)
-    root.querySelectorAll('[data-vr-klapp]').forEach(el => el.addEventListener('toggle', () => { _vr[el.dataset.vrKlapp] = el.open }))
+    root.querySelectorAll('[data-vr-klapp]').forEach(el => el.addEventListener('toggle', () => {
+      _vr[el.dataset.vrKlapp] = el.open
+      try{ localStorage.setItem(VR_KLAPP_LS, JSON.stringify({ uebersicht: _vr.uebersicht, einst: _vr.einst })) }catch(_){}
+    }))
     root.querySelectorAll('[data-vr-hp]').forEach(b => b.addEventListener('click', () => { _vr.hPerson = _vr.hPerson === b.dataset.vrHp ? '' : b.dataset.vrHp; vrRender() }))
     root.querySelectorAll('[data-vr-k]').forEach(b => b.addEventListener('click', () => { const key = b.dataset.vrK; _vr.kachel = _vr.kachel === key ? '' : key; vrRender() }))
-    root.querySelectorAll('[data-vr-auf]').forEach(b => b.addEventListener('click', () => { const u = b.dataset.vrAuf; if(_vr.auf.has(u)) _vr.auf.delete(u); else _vr.auf.add(u); vrRender() }))
+    root.querySelectorAll('[data-vr-auf]').forEach(b => b.addEventListener('click', () => {
+      const u = b.dataset.vrAuf
+      if(_vr.auf.has(u)){ _vr.auf.delete(u); if(_vr.hPerson === u) _vr.hPerson = '' } else { _vr.auf.add(u); _vr.hPerson = u }
+      vrRender()
+    }))
     root.querySelectorAll('[data-vr-f-filter]').forEach(b => b.addEventListener('click', () => { const f = b.dataset.vrFFilter; _vr.firma = _vr.firma === f ? '' : f; vrRender() }))
     root.querySelectorAll('[data-vr-s]').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); vrSchalten(b.dataset.vrU, b.dataset.vrF, b.dataset.vrS) }))
     root.querySelectorAll('[data-vr-b]').forEach(b => b.addEventListener('click', ev => {
@@ -55823,7 +55837,11 @@
     const kasten = p => { const [n, preis] = summe(p.zeilen.filter(x => !gekauft(x) && x.stufe === 'heute')), [nW] = summe(p.zeilen.filter(x => !gekauft(x) && x.stufe === 'woche'))
       const was = n ? `heute ${vrKonten(n)}${geld(preis)}` : nW ? `diese Woche ${vrKonten(nW)}` : 'alles gekauft'
       return `<div class="vr-h-person"><div class="vr-h-pkopf"><i style="background:${vrFarbe(p.uid)}"></i><b>${vrEsc(p.wer)}</b><span>— ${was}</span></div>${p.zeilen.map(zeile).join('')}</div>` }
-    return `<div class="panel vr-heute">${kopf}${chips}<div class="vr-h-liste">${personen.filter(p => !_vr.hPerson || p.uid === _vr.hPerson).map(kasten).join('')}</div></div>`
+    // Filter: Person (Chip oder Klick in „Je ID") und Firma (Klick in „Je Firma") — der Rang bleibt der über alle Zeilen
+    const sicht = personen.filter(p => !_vr.hPerson || p.uid === _vr.hPerson)
+      .map(p => ({ ...p, zeilen: p.zeilen.filter(x => !_vr.firma || x.firma === _vr.firma) })).filter(p => p.zeilen.length)
+    const filterTxt = _vr.firma ? `<div class="vr-h-filter">nur ${vrEsc(_vr.firma)} <button type="button" data-vr-f-filter="${vrEsc(_vr.firma)}" title="Firmen-Filter aufheben">×</button></div>` : ''
+    return `<div class="panel vr-heute">${kopf}${chips}${filterTxt}<div class="vr-h-liste">${sicht.map(kasten).join('') || '<div class="vr-leer">Für diese Auswahl heute nichts zu kaufen.</div>'}</div></div>`
   }
   // Sperr-Matrix (Einstellungen): je ID eine Zeile, je Firma ein Chip im Zustand frei · pausiert (‖) · gesperrt (Schloss); Klick wechselt
   // reihum (vrSchalten wie bisher). Chips brechen um — am Handy kein waagerechtes Scrollen.
