@@ -49,7 +49,7 @@ REIN = ("_ap_norm", "ap_regel_finden", "ap_groesse", "_ap_spanne", "_ap_runden",
         "ap_richtung_konflikte", "lt_echo_live_wahl", "lt_echo_felder")
 IO = ("_ap_gehedgt_plan", "_ap_bewerten", "_ap_iso_min", "_ap_stand_laden", "_ap_stand_plaene", "_ap_min_iso",
       "_ap_umplanungen_heute", "_ap_bot_stand", "ap_delta_antwort", "_ap_aenderungen_anwenden", "ap_ausgleichen",
-      "_ap_probelauf", "ap_planen", "_ap_tz", "_ap_eur_bei", "ap_einsatz_kontext", "ap_richtung_fest_plan", "_ap_rk_flag",
+      "_ap_probelauf", "ap_planen", "_ap_tz", "_ap_eur_bei", "ap_einsatz_kontext", "ap_richtung_fest_plan", "ap_letzter_trade_geblasen", "_ap_rk_flag",
       "ap_richtungsschutz")
 
 
@@ -188,10 +188,10 @@ def main():
                                          {"user_id": "z", "name": "FTMO", "ppl": "1.0"}])
     check(je_firma["ftmo"][0] == 0.85 and je_id[("z", "ftmo")][0] == 1.0, "firm_specs: eigene ID vor häufigstem Firmenwert")
     pa = a["ap_ausgleich_param"]({})
-    check(pa == {"aktiv": False, "takt_min": 10, "zielband_pct": 15.0, "auto_start": False, "gross_ab_eur": 300.0},
+    check(pa == {"aktiv": False, "takt_min": 10, "zielband_pct": 15.0, "auto_start": False, "gross_ab_eur": 300.0, "laufzeit_min": 180},
           "Standard: Bot aus, 10 min, Band 15 %, ohne Auto-Start, groß ab 300 €")
     check(a["ap_ausgleich_param"]({"ausgleich": {"aktiv": "true", "takt_min": 1, "zielband_pct": 500}})
-          == {"aktiv": False, "takt_min": 2, "zielband_pct": 100.0, "auto_start": False, "gross_ab_eur": 300.0},
+          == {"aktiv": False, "takt_min": 2, "zielband_pct": 100.0, "auto_start": False, "gross_ab_eur": 300.0, "laufzeit_min": 180},
           "nur echtes true schaltet ein, Werte geklemmt")
 
     # ── A2 Keine Firma × Tag-Regel mehr, nur Richtungsschutz + weicher Malus (Finn 06.10.2026 abends) ─────────────────────

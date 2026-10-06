@@ -75,6 +75,31 @@ def main():
     check(r["A|tradeify"] == r["B|tradeify"] and r["C|apex"] == r["D|apex"] and w[0] == 0,
           "Malus stark: gleiche Firma nicht gegenläufig < 10 min, auch wenn das Netto dann größer ist")
 
+    # ── 2b Laufzeit (Master 07.10.2026: „frühe Starts gemischt long/short, kein Block aus 4 Shorts")
+    el = lage(419, [(102, -49), (103, -30), (317, -163), (431, -657), (694, 271), (706, 164)], 300)
+    check(el["netto_eur_max_abs"] == 480, f"Live-Plan 07.10. kumuliert bis Tagesende: max |Netto| 480 € — sah ausgeglichen aus ({el})")
+    el = lage(419, [(102, -49), (103, -30), (317, -163), (431, -657), (694, 271), (706, 164)], 300, laufzeit_min=180)
+    check(el["netto_eur_max_abs"] == 820, f"mit Laufzeit 180 min: Tradeify −657 € um 07:11 ohne Gegengewicht = −820 € ({el})")
+    tr = {f"S{i}": T(None, f"U{i}", f"f{i}", 60 + 120 * i, 1.0, e) for i, e in enumerate([49, 30, 163, 657, 271, 164, 124, 391])}
+    r, _m, w = a["ap_richtungen_delta"](tr, 0, 0, random.Random(7), 25, einsatz=dict(EK, laufzeit=180), mit_wert=True)
+    morgens = [r[k] for k in sorted(tr, key=lambda k: tr[k]["start"])][:4]
+    check(len(set(morgens)) == 2, f"Laufzeit-Modell: die ersten 4 Starts gemischt ({morgens})")
+    v = a["ap_verlauf"](100, 100, [(60, 50), (90, -50)], 25, laufzeit_min=60)
+    check([(x["min"], x["netto_delta"]) for x in v["verlauf"]] == [(0, 100.0), (60, 50.0), (90, 0.0), (120, -50.0), (150, 0.0)],
+          f"ap_verlauf mit Laufzeit: Basis endet nach 60, Trades nach 60 min ({[(x['min'], x['netto_delta']) for x in v['verlauf']]})")
+
+    # ── 2c Geblasen über den letzten Trade
+    regel_t = {"groessen": [150000], "dd_usd": 4500}
+    fin = lambda pnl, ende: {"ended_at": ende, "final": {"today_pnl": pnl, "grund": "demo_liq"}}
+    gb = a["ap_letzter_trade_geblasen"](regel_t, 149046, [fin(3500, "2026-10-02T14:50"), fin(-4521.52, "2026-10-05T17:44")])
+    check(gb and "geblasen" in gb, f"Tradeify letzter Trade −4.522 $ ≥ 95 % von 4.500 → {gb}")
+    gb = a["ap_letzter_trade_geblasen"](regel_t, 153000, [fin(-4521.52, "2026-10-02T14:50"), fin(3500, "2026-10-05T17:44")])
+    check(gb is None, "danach ein Gewinn → nicht geblasen")
+    gb = a["ap_letzter_trade_geblasen"]({"groessen": [150000], "dd_usd": 4000}, 148097, [fin(-1884.3, "2026-10-06T17:00")])
+    check(gb is None, "Apex Tagesstopp −1.884 $ (Ende „liq“) → nicht geblasen")
+    gb = a["ap_letzter_trade_geblasen"]({"groessen": [100000], "dd_pct": 10}, 90400, [{"ended_at": "x", "final": {"master_pl_schaetzung": -9600}}])
+    check(gb and "geblasen" in gb, "CFD 100k: −9.600 $ ≥ 95 % von 10 % → geblasen?")
+
     # ── 3 Bot greift über dem €-Band
     plaene = [{"plan_id": "p1", "user_id": "A", "firma": "tradeify", "richtung": "sell", "start_min": 620, "delta_abs": 3.0,
                "aenderbar": True, "einsatz_abs": 720},
