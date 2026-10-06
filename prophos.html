@@ -4213,6 +4213,17 @@
      Drawer samt Hamburger), Modals docken als Sheets unten an,
      Inputs 16px (sonst zoomt iOS beim Fokus in die Seite).
   ============================================================ */
+  /* Kontowert-Spalte + Kachel „Gesamtwert" (07.10.2026) — Zahl wie die Balance (mono, ink), Stufe klein grau darunter */
+  #dashboard-view .acc-kw-mob{display:none}
+  #dashboard-view .acc-kw-wert{font-weight:600;color:var(--ink);font-family:var(--mono);white-space:nowrap}
+  #dashboard-view .acc-kw-stufe{font-size:11px;color:var(--sub);margin-top:2px;white-space:nowrap}
+  #dashboard-view .acc-kw-leer{color:var(--sub-2);font-family:var(--mono);cursor:help}
+  #dashboard-view .acc-kw-kachel{display:inline-flex;align-items:baseline;gap:8px;padding:6px 12px;border:1px solid var(--border);
+    border-radius:var(--r-md);background:var(--surface);white-space:nowrap}
+  #dashboard-view .acc-kw-kachel[hidden]{display:none}
+  #dashboard-view .acc-kw-k-label{font-size:11.5px;color:var(--sub);font-weight:500}
+  #dashboard-view .acc-kw-summe{font-size:16px;font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+  #dashboard-view .acc-kw-n{font-size:11px;color:var(--sub-2);font-variant-numeric:tabular-nums}
   #dashboard-view .mobile-toggle{display:none}
   #dashboard-view .mob-nav{display:none}
   @keyframes mob-sheet-in{from{opacity:.5;transform:translateY(26px)}to{opacity:1;transform:none}}
@@ -4409,8 +4420,11 @@
     #dashboard-view [data-pane="manual"] .t td:nth-child(2){grid-column:1;grid-row:2;font-size:12px;color:var(--sub)}
     #dashboard-view [data-pane="manual"] .t td:nth-child(3){grid-column:2;grid-row:2;justify-self:end}
     #dashboard-view [data-pane="manual"] .t td:nth-child(4){grid-column:2;grid-row:1;text-align:right}
-    #dashboard-view [data-pane="manual"] .t td:nth-child(5){grid-column:1;grid-row:3;align-self:center}
-    #dashboard-view [data-pane="manual"] .t td:nth-child(6){grid-column:2;grid-row:3;text-align:right !important;white-space:nowrap}
+    /* Kontowert-Spalte (07.10.2026): am Handy steht der Wert unter der Balance (.acc-kw-mob in Zelle 4), die eigene Spalte 5 fällt weg */
+    #dashboard-view [data-pane="manual"] .t td:nth-child(5){display:none !important}
+    #dashboard-view [data-pane="manual"] .t .acc-kw-mob{display:block;margin-top:4px}
+    #dashboard-view [data-pane="manual"] .t td:nth-child(6){grid-column:1;grid-row:3;align-self:center}
+    #dashboard-view [data-pane="manual"] .t td:nth-child(7){grid-column:2;grid-row:3;text-align:right !important;white-space:nowrap}
 
     /* — Trade-Plan-Modal: Master und Slave als Gruppen-Karten in voller
          Breite (Inline-„1fr 1fr" am form-grid schlägt die 760px-Query).
@@ -6375,6 +6389,12 @@
             </label>
           </div>
           <div style="display:flex;align-items:center;gap:14px">
+            <!-- Kontowert-Kachel (07.10.2026): Summe der sichtbaren (gefilterten) Konten, Daten aus /admin/kontowerte -->
+            <div class="acc-kw-kachel" id="accKwGesamt" hidden title="Summe der Kontowerte aller sichtbaren Konten (Filter und Suche gelten)">
+              <span class="acc-kw-k-label">Gesamtwert</span>
+              <span class="acc-kw-summe">—</span>
+              <span class="acc-kw-n"></span>
+            </div>
             <span id="archived-counter" style="font-size:12px;color:var(--sub)" hidden></span>
             <label style="display:inline-flex;align-items:center;gap:8px;font-size:12.5px;color:var(--sub);cursor:pointer">
               <input type="checkbox" id="acc-show-archived" style="margin:0">
@@ -6391,6 +6411,7 @@
                   <th>Firm</th>
                   <th>Typ</th>
                   <th>Balance</th>
+                  <th title="Kontowert mit Gegenhedge (Kaufpreis + Hedge-Kosten der gewonnenen Etappen) — Rechnung im Backend wie Probelauf/Vorrat">Wert</th>
                   <th>Verknüpfungen</th>
                   <th style="padding-right:20px"></th>
                 </tr>
@@ -12160,6 +12181,7 @@
       if(typeof window.acOnEnterSettings === 'function') window.acOnEnterSettings()   // Auto-Close (22.09.2026)
       if(typeof window.pushOnEnterSettings === 'function') window.pushOnEnterSettings()  // Handy-Push (22.09.2026)
     }
+    if(name === 'accounts' && typeof window.kwOnEnter === 'function') window.kwOnEnter()   // Kontowert-Spalte (07.10.2026): einmal je Öffnen
     if(name === 'news' && typeof newsOnEnterView === 'function') newsOnEnterView()
     if(name === 'kasse' && typeof kasseOnEnter === 'function') kasseOnEnter()
     if(name === 'wdlive' && typeof window.wdlOnEnter === 'function') window.wdlOnEnter()   // Live Trades (26.09.2026)
@@ -30861,6 +30883,71 @@
     }
     setTimeout(tick, 1500)
   }
+
+  /* KONTOWERT-SPALTE (07.10.2026, Finn: der Kontowert ist seine neue Kennzahl — jedes Konto zeigt ihn in der Accounts-Übersicht).
+   * Wert = hypothetischer Wert „mit Gegenhedge" (Kaufpreis + Hedge-Kosten der gewonnenen Etappen), gerechnet NUR im Backend
+   * (GET /admin/kontowerte → ap_kontowert, dieselbe Rechnung wie Probelauf und Vorrat). Hier keine Formel, nur Anzeige.
+   * Geladen einmal beim Öffnen der Accounts-Ansicht (switchView) bzw. beim ersten Malen nach dem Login/ID-Wechsel, keine
+   * Realtime, kein Takt. Nach dem Laden werden nur die Wert-Zellen + die Kachel nachgemalt, nicht die ganze Tabelle. */
+  // Zustand über eine Funktions-Deklaration (gehoben): renderAccounts kann beim Boot schon vor dieser Zeile laufen — ein const hier
+  // wäre dann noch in der TDZ und der ReferenceError würde das ganze Modul anhalten
+  function kwSt(){ return window._kwStand || (window._kwStand = { werte: null, uid: null, laedt: false, fehler: '', sichtbar: [] }) }
+  function kwEur(v){ return Math.round(Number(v)).toLocaleString('de-DE') + ' €' }
+  async function kwLaden(){
+    const uid = (typeof currentUserId !== 'undefined') ? currentUserId : null
+    if(!uid || kwSt().laedt) return
+    kwSt().laedt = true
+    try{
+      const { data: { session } } = await supabase.auth.getSession()
+      if(!session?.access_token) throw new Error('nicht angemeldet')
+      const r = await fetch(`${WATCHER_HOME}/admin/kontowerte`, { headers: { 'sb-token': session.access_token }, cache: 'no-store' })
+      const d = await r.json().catch(() => ({}))
+      if(!r.ok || !d.ok) throw new Error(d.error || ('HTTP ' + r.status))
+      kwSt().werte = d.werte || {}; kwSt().uid = uid; kwSt().fehler = ''
+    }catch(e){
+      kwSt().fehler = String(e?.message || e); kwSt().uid = uid
+      console.warn('[kontowert] nicht geladen:', kwSt().fehler)
+    }finally{ kwSt().laedt = false }
+    kwNachmalen()
+  }
+  // Erstes Malen nach Login/ID-Wechsel bei offener Accounts-Ansicht: einmal laden (renderAccounts läuft oft — lädt nur, wenn die ID neu ist)
+  function kwSicherstellen(){
+    const uid = (typeof currentUserId !== 'undefined') ? currentUserId : null
+    if(!uid || kwSt().laedt || kwSt().uid === uid) return
+    if(document.querySelector('#dashboard-view .view.active')?.dataset.view !== 'accounts') return
+    kwSt().werte = null
+    kwLaden()
+  }
+  window.kwOnEnter = () => kwLaden()
+  function kwZelleHtml(id){
+    const w = kwSt().werte ? kwSt().werte[String(id)] : null
+    if(!kwSt().werte){
+      return kwSt().fehler ? `<span class="acc-kw-leer" title="Kontowert nicht geladen: ${escapeHtml(kwSt().fehler)}">—</span>`
+        : `<span class="acc-kw-leer">…</span>`
+    }
+    if(!w || w.wert_eur == null){
+      return `<span class="acc-kw-leer" title="${escapeHtml(w?.hinweis || 'noch nicht berechnet — Accounts neu öffnen')}">—</span>`
+    }
+    const tip = [w.wie, w.kauf_eur != null ? `Kauf ${kwEur(w.kauf_eur)} (${w.quelle === 'kauf_echt' ? 'echter Kauf' : 'Kernwerte'})` : '',
+      w.satz_eur_pro_usd != null ? `Satz ${Number(w.satz_eur_pro_usd).toLocaleString('de-DE', { maximumFractionDigits: 4 })} €/$` : '',
+      w.balance_usd != null ? `Balance ${Math.round(w.balance_usd).toLocaleString('de-DE')} $` : ''].filter(Boolean).join(' · ')
+    return `<div class="acc-kw-wert" title="${escapeHtml(tip)}">${kwEur(w.wert_eur)}</div><div class="acc-kw-stufe">${escapeHtml(w.stufe || '')}</div>`
+  }
+  // Kachel „Gesamtwert" = Summe der sichtbaren (gefilterten) Konten mit Wert
+  function kwKachelMalen(){
+    const el = document.getElementById('accKwGesamt'); if(!el) return
+    if(!kwSt().werte){ el.hidden = true; return }
+    let summe = 0, n = 0
+    for(const id of kwSt().sichtbar){ const w = kwSt().werte[String(id)]; if(w && w.wert_eur != null){ summe += Number(w.wert_eur); n++ } }
+    el.hidden = false
+    el.querySelector('.acc-kw-summe').textContent = kwEur(summe)
+    el.querySelector('.acc-kw-n').textContent = `${n} von ${kwSt().sichtbar.length} Konten`
+  }
+  function kwNachmalen(){
+    document.querySelectorAll('#accountsTable [data-kw-zelle]').forEach(z => { z.innerHTML = kwZelleHtml(z.dataset.kwZelle) })
+    kwKachelMalen()
+  }
+
   function renderAccounts(){
     if(!accEls.table) return
     if(typeof tsAutoLinkSoon === 'function') tsAutoLinkSoon()  // Auto-Verlinkung per External ID (17.09.2026)
@@ -30870,6 +30957,7 @@
     // nach dem Öffnen des Trade-planen-Modals zur Verfügung, und genau deshalb
     // war die Tabelle hier weiter auf $0.
     if(typeof mt5BalCacheAnstossen === 'function') mt5BalCacheAnstossen()
+    kwSicherstellen()   // Kontowert-Spalte (07.10.2026): einmal je ID laden
 
     // Wenn die Detail-View gerade offen ist, parallel neu rendern
     // (z.B. nach Live-Balance-Sync, Archive-Toggle, Edit-Save)
@@ -30922,6 +31010,8 @@
       if(qNorm && !accHaystack(a).includes(qNorm)) return false
       return true
     }))
+    kwSt().sichtbar = visible.map(a => a.id)
+    kwKachelMalen()
     const archivedCount = accounts.filter(a => archive[a.id]?.archived).length
     const archCounter = document.getElementById('archived-counter')
     if(archCounter){
@@ -31137,7 +31227,8 @@
             </td>
             <td>${escapeHtml(a.firm || '–')}</td>
             <td>${accTypChipHtml(a)}${accConsChipHtml(a)}${accWdToggleHtml(a)}</td>
-            <td>${balCell}</td>
+            <td>${balCell}<div class="acc-kw-mob" data-kw-zelle="${a.id}">${kwZelleHtml(a.id)}</div></td>
+            <td class="acc-kw-td" data-kw-zelle="${a.id}">${kwZelleHtml(a.id)}</td>
             <td>${(_mtcLogin && !isArchived && typeof mt5KontoIst === 'function' && mt5KontoIst(a)) ? `<div>${accTermBtnHtml(a.id)}</div>` : ''}${linksHtml}${accTermStatusHtml(a.id)}</td>
             <td style="padding-right:20px;text-align:right;white-space:nowrap" data-stop-row-click="1">
               <button class="btn btn-ghost icon-btn" data-acc-cred="${a.id}" title="Zugangsdaten${a.creds ? '' : ' (leer)'}" style="padding:5px 8px${a.creds ? ';color:var(--violet)' : ''}">
@@ -39354,7 +39445,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1097'
+  const OS_TAB_BUILD = '2026-09-22.1098'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

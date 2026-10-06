@@ -14258,6 +14258,124 @@ def _ap_gehedgt(p):
     return False, (hs or None)
 
 
+# ── KONTOWERT-SPALTE (07.10.2026, Finn: Kontowert ist seine neue Kennzahl — jedes Konto zeigt ihn in der normalen
+# Accounts-Übersicht). GET /admin/kontowerte rechnet je Konto GENAU wie Probelauf (_ap_bewerten): ap_kw_param aus
+# auto_plan_regeln.regeln.firmen[] + ap_kontowert(typ, Live-Balance, Kernwerte, echter Kauf der Kette) — keine zweite Rechnung.
+# Hier kommt nur die Anzeige dazu (Stufe/Herkunft, Grund ohne Wert). Ergebnis 60 s im Prozess gemerkt (je Sicht: alle bzw. eine
+# ID), das Frontend fragt nur beim Öffnen der Accounts-Ansicht, keine Realtime.
+AP_KW_TYP_NAME = {"challenge": "Challenge", "phase1": "Phase 1", "phase2": "Phase 2", "funded": "Funded",
+                  "funded_cfd": "Funded CFD", "winning_days": "Winning Days"}
+AP_KW_CACHE_S = 60
+_ap_kw_cache = {}                 # sicht ('*' = alle) → (bis_epoch, antwort)
+_ap_kw_cache_lock = threading.Lock()
+
+
+def _ap_kw_usd(v):
+    return f"{abs(v):,.0f}".replace(",", ".") + " $"
+
+
+def ap_kw_stufe(typ, balance, p, kv):
+    """REIN RECHNEND: Stufe/Herkunft zur Anzeige unter dem Wert — „Challenge · nach Etappe 1", „Phase 1 · frisch",
+    „Phase 2 · +2.300 $", „Funded · −800 $". Gewinn seit Start wie ap_kontowert (Topstep Express relativ ab 0). Etappen nur bei
+    nachziehendem Boden — nur dort rechnet ap_kontowert je Etappe."""
+    name = AP_KW_TYP_NAME.get(typ, typ or "—")
+    if not kv or not p or balance is None:
+        return name
+    b, gr = float(balance), p.get("groessen") or []
+    start = 0.0 if (typ in AP_KW_FUNDED and gr and b < min(gr) / 2) else float(kv.get("groesse") or 0)
+    g = b - start
+    if abs(g) < 1:
+        return f"{name} · {'bestanden' if typ in AP_KW_FUNDED else 'frisch'}"
+    if g > 0 and p.get("boden") == "nachziehend" and typ not in AP_KW_FUNDED:
+        dd = float(p.get("dd_usd") or 0) or float(kv.get("groesse") or 0) * float(p.get("dd_pct") or 0) / 100.0
+        etappe = float(p.get("etappe_usd") or dd or 0)
+        n = int((g + 1e-9) // etappe) if etappe > 0 else 0
+        if n >= 1:
+            return f"{name} · nach Etappe {n}"
+    return f"{name} · {'+' if g > 0 else '−'}{_ap_kw_usd(g)}"
+
+
+def ap_kontowert_konto(a, bal, firmen, kauf_eur=None, archiviert=False):
+    """REIN RECHNEND: Zeile der Kontowert-Spalte → {wert_eur, stufe, satz_eur_pro_usd, quelle, hinweis, wie, kauf_eur,
+    balance_usd}. Wert = ap_kontowert wie im Probelauf (echter Kauf der Kette nur, wenn plausibel — entscheidet ap_kontowert).
+    quelle: 'kauf_echt' (echter Kauf trägt den Wert) oder 'kernwerte' (Kaufpreis der Firma). Ohne Wert: wert_eur None + hinweis."""
+    a = a or {}
+    typ = a.get("account_type") or ""
+    leer = {"wert_eur": None, "stufe": AP_KW_TYP_NAME.get(typ, typ or "—"), "satz_eur_pro_usd": None, "quelle": None,
+            "hinweis": None, "wie": None, "kauf_eur": None, "balance_usd": bal}
+    if archiviert:
+        return dict(leer, hinweis="archiviert")
+    if typ == "live":
+        return dict(leer, hinweis="Live-Konto — kein Kontowert")
+    p = ap_kw_param(ap_regel_finden(firmen, a.get("firm")))
+    if not p:
+        return dict(leer, hinweis=f"keine Kernwerte für {a.get('firm') or 'diese Firma'} (auto_plan_regeln)")
+    if bal is None:
+        return dict(leer, hinweis="keine Live-Balance")
+    kv = ap_kontowert(typ, bal, p, kauf_eur)
+    if not kv:
+        return dict(leer, hinweis=("Kontotyp ohne Kontowert" if typ not in AP_KW_FUNDED + AP_KW_PHASEN
+                                   else f"Balance {_ap_kw_usd(float(bal))} passt zu keiner Größe der Kernwerte"))
+    echt = bool(kauf_eur) and round(float(kauf_eur)) == kv["kauf"]
+    return {"wert_eur": kv["wert"], "stufe": ap_kw_stufe(typ, bal, p, kv), "satz_eur_pro_usd": kv["satz"],
+            "quelle": "kauf_echt" if echt else "kernwerte", "hinweis": None, "wie": kv["wie"], "kauf_eur": kv["kauf"],
+            "balance_usd": bal}
+
+
+def admin_build_kontowerte(sicht=None):
+    """Kontowerte aller Konten (sicht None) bzw. nur der eigenen (sicht = user_id) → {account_id: Zeile}. Nur Lesen:
+    Kernwerte, Konten, Archiv, Balance-Spiegel (Echo/Duplikum), echte Käufe der Ketten."""
+    reg = (sb_select("auto_plan_regeln", {"select": "regeln", "id": "eq.1"}) or [{}])[0]
+    firmen = (reg.get("regeln") or {}).get("firmen") or []
+    q = {"select": AP_KONTO_FELDER}
+    if sicht:
+        q["user_id"] = f"eq.{sicht}"
+    konten = _sb_all("accounts", q)
+    archiv = _ap_archiviert()
+    echo_bal, dup_bal = _ap_balance_karten()
+    aktiv = [str(a["id"]) for a in konten if str(a["id"]) not in archiv and (a.get("account_type") or "") != "live"]
+    kauf = _ap_kauf_echt(aktiv) if aktiv else {}
+    werte = {}
+    for a in konten:
+        aid = str(a["id"])
+        bal = acc_balance_wahl(a, echo_bal, dup_bal)[0]
+        werte[aid] = ap_kontowert_konto(a, bal, firmen, kauf.get(aid), archiviert=aid in archiv)
+    return werte
+
+
+@app.route("/admin/kontowerte", methods=["GET", "OPTIONS"])
+def admin_kontowerte():
+    """GET → {ok, werte: {account_id: {wert_eur, stufe, satz_eur_pro_usd, quelle, hinweis, …}}}. Admin (ADMIN_EMAILS): alle
+    Konten; „nur eigene" (admin_zugang) und jeder andere Login: nur die eigenen. 60 s im Prozess gemerkt (je Sicht)."""
+    if request.method == "OPTIONS":
+        return "", 200
+    _mail, err = _admin_auth()
+    if err is None:
+        uid = str(request.environ.get("prophos.admin_uid") or "")
+        try:
+            sicht = uid if admin_zugang_nur_eigene(uid) else None
+        except Exception:
+            return jsonify({"ok": False, "error": "Anmeldung nicht prüfbar"}), 502
+    else:
+        uid, err2 = _wd_login()
+        if err2:
+            return err2
+        sicht = uid
+    schluessel = sicht or "*"
+    try:
+        with _ap_kw_cache_lock:            # Single-Flight: zwei Tabs gleichzeitig rechnen nicht doppelt
+            treffer = _ap_kw_cache.get(schluessel)
+            if treffer and treffer[0] > time.time():
+                werte = treffer[1]
+            else:
+                werte = admin_build_kontowerte(sicht)
+                _ap_kw_cache[schluessel] = (time.time() + AP_KW_CACHE_S, werte)
+        return jsonify({"ok": True, "werte": werte, "alle": sicht is None})
+    except Exception as e:
+        print(f"[kontowerte] ⚠️ GET: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 500
+
+
 def _ap_hhmm_txt(m):
     return f"{int(m) // 60:02d}:{int(m) % 60:02d}"
 
