@@ -30442,6 +30442,15 @@
    * 29.09.2026), bekommt hier aber einen eigenen Rang — accTypRang erkennt es wie accTypChipHtml. */
   const ACC_TYPE_RANG = { challenge: 0, phase1: 1, phase2: 2, funded: 3, winning_days: 4, funded_cfd: 5, waiting_payout: 6, live: 7 }
   const accTypRang = a => ACC_TYPE_RANG[a && a.type === 'funded_cfd' && a.waitingPayoutSince ? 'waiting_payout' : a?.type] ?? 9
+  // Dieselbe Reihenfolge überall, wo Konten flach aufgelistet werden (06.10.2026, Finn am Echo-Popup „Account hinzufügen":
+  // „auch nach Prophos sortieren, wie es überall ist"): Kontoart-Rang, dann Firma (ohne Firma ans Ende), dann stabil.
+  // Nutzer: Accounts-Liste (renderAccounts) und das Prefill-Dropdown im Echo-Popup (mtcPrefillFill).
+  function accSortiert(list){
+    return (list || []).map((a, i) => [a, i]).sort((x, y) => accTypRang(x[0]) - accTypRang(y[0])
+      || (!x[0].firm - !y[0].firm)
+      || String(x[0].firm || '').localeCompare(String(y[0].firm || ''), 'de', { sensitivity: 'base' })
+      || x[1] - y[1]).map(x => x[0])
+  }
   /* Vierte Kontoart „Winning Days" (Finn 25.09.2026; Koordination: die Migration stellte nur ein Konto um, 94 Funded-Konten
    * muss Finn selbst zuordnen): kleiner Knopf neben dem Typ-Chip — bei Funded-Konten einer Futures-Firma „→ Winning Days",
    * bei Winning-Days-Konten „→ Funded". Schreibt account_type + Notiz-Zeile mit Datum auf DIESELBE Zeile (accWdUmstellen),
@@ -30724,22 +30733,18 @@
       ].filter(Boolean).join(' '))
     }
 
-    const visible = accounts.filter(a => {
+    // Reihenfolge nach Kontoart (Koordination 25.09.2026; seit 30.09.2026 jede Art eigene Gruppe inkl. Waiting for Payout,
+    // s. ACC_TYPE_RANG), innerhalb einer Art nach Firma (06.10.2026, Finn: „nicht mal ein FundedNext-Account, mal ein
+    // FundedNext-Account" — die Firmen lagen in Funded CFD durcheinander), innerhalb der Firma bisherige Reihenfolge (stabil).
+    // Konten ohne Firma ans Ende ihrer Art. Der Vergleich steht seit 06.10.2026 in accSortiert (auch Echo-Prefill-Dropdown).
+    const visible = accSortiert(accounts.filter(a => {
       const isArch = !!archive[a.id]?.archived
       if(!showArchived && isArch) return false
       if(filters.firm && a.firm !== filters.firm) return false
       if(filters.type && a.type !== filters.type) return false
       if(qNorm && !accHaystack(a).includes(qNorm)) return false
       return true
-    })
-    // Reihenfolge nach Kontoart (Koordination 25.09.2026; seit 30.09.2026 jede Art eigene Gruppe inkl. Waiting for Payout,
-    // s. ACC_TYPE_RANG), innerhalb einer Art nach Firma (06.10.2026, Finn: „nicht mal ein FundedNext-Account, mal ein
-    // FundedNext-Account" — die Firmen lagen in Funded CFD durcheinander), innerhalb der Firma bisherige Reihenfolge (stabil).
-    // Konten ohne Firma ans Ende ihrer Art.
-    .map((a, i) => [a, i]).sort((x, y) => accTypRang(x[0]) - accTypRang(y[0])
-      || (!x[0].firm - !y[0].firm)
-      || String(x[0].firm || '').localeCompare(String(y[0].firm || ''), 'de', { sensitivity: 'base' })
-      || x[1] - y[1]).map(x => x[0])
+    }))
     const archivedCount = accounts.filter(a => archive[a.id]?.archived).length
     const archCounter = document.getElementById('archived-counter')
     if(archCounter){
@@ -39031,7 +39036,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1081'
+  const OS_TAB_BUILD = '2026-09-22.1082'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -43413,8 +43418,12 @@
           return
         }
         let mHtml = '<option value="">— wählen —</option>'
+        // Kontoart je Weg (06.10.2026): verlinkte Konten wie im normalen Dropdown (nur Funded/Winning Days); unverlinkte
+        // tragen keine Prophos-Kontoart und bleiben. Der Master eines bearbeiteten Plans bleibt wie unten geschützt.
+        const _tsMasterGeschuetzt = _editingPlanId ? String((tradePlans.find(x => String(x.id) === String(_editingPlanId)) || {}).masterAccountId || '') : ''
         for(const t of tsxAccs){
           const linked = (accounts || []).find(a => a.topstep && String(a.topstep.id) === String(t.id))
+          if(linked && String(linked.id) !== _tsMasterGeschuetzt && !tpKontoartPasstZumWeg(linked)) continue
           const balStr = fmtMoney(t.balance)
           if(linked){
             // Tages-P&L auch hier (08.09.2026): geht nur bei verlinkten Accounts,
@@ -43510,6 +43519,8 @@
         if(orbitSlaveStreng && !(_dupSlaveIds && _dupSlaveIds.has(String(a.id)))) return false
         if(archive[a.id]?.archived && !isProtected) return false
         if(!isProtected){
+          // Kontoart je Weg (06.10.2026): mit Hedge nur Fundeds/Winning Days, ohne Hedge nur Challenges — s. tpKontoartPasstZumWeg
+          if(role === 'master' && !tpKontoartPasstZumWeg(a)) return false
           if(routeIstEcho(_tpRoute)){   // Echo V2 (23.09.2026): dieselben Master wie Echo, nur ohne Hedge
             if(!_mt5Ids.has(String(a.id))) return false
             if(role === 'slave' && _tpMt5HedgeAccId && String(a.id) !== String(_tpMt5HedgeAccId)) return false
@@ -43649,7 +43660,9 @@
         html += orbitSlaveStreng
           ? (_dupSlaveIds ? '<option value="" disabled>(Kein Duplikum-Slave — Accounts → Duplikum verknüpfen)</option>'
                           : '<option value="" disabled>(Duplikum-Kontoliste nicht geladen — Accounts → Duplikum verbinden)</option>')
-          : _tpRoute === 'tsv2' ? '<option value="" disabled>(Kein aktives Topstep-Konto — bei Accounts eines mit Firma Topstep anlegen)</option>'
+          : _tpRoute === 'tsv2' ? '<option value="" disabled>(Kein aktives Topstep-Challenge-Konto (Phase 1/2) — Fundeds laufen mit Hedge über „Topstep")</option>'
+          : role === 'master' && tpWegMitHedge() ? '<option value="" disabled>(Kein Funded-/Winning-Days-Konto für diesen Weg — Challenges laufen ohne Hedge)</option>'
+          : role === 'master' && routeIstV2(_tpRoute) ? '<option value="" disabled>(Kein Challenge-Konto (Phase 1/2) für diesen Weg — Fundeds laufen mit Hedge)</option>'
           : '<option value="" disabled>(Keine Accounts mit diesen Filtern)</option>'
       } else if(groups.length === 1){
         // Nur eine Firma → keine Gruppe nötig, flache Liste
@@ -45093,6 +45106,19 @@
   // Kontoart 'winning_days' (25.09.2026, Finn: vierte Kontoart „Winning Days") zählt überall als Funded; tpIstWinningDays ist das Geschwister
   function tpVorplanIstFunded(acc){ const t = String((acc && acc.type) || '').toLowerCase(); return t === 'funded' || t === 'funded_cfd' || t === 'live' || t === 'winning_days' }
   function tpIstWinningDays(acc){ return String((acc && acc.type) || '').toLowerCase() === 'winning_days' }
+  /* Kontoart je Weg im Master-Dropdown (06.10.2026, Finn: „Fundeds — ganz egal ob Winning Day, Funded CFD oder Funded Future —
+   * sind alle immer nur mit Hedge; die sollen nur bei Echo, Orbit, Winning Day, Topstep. Genau das Gleiche: ohne Hedge sollen
+   * dort nur die Challenges angezeigt werden, Phase 1 und Phase 2"). Mit Hedge (Echo · Orbit · Winning Day · Topstep ·
+   * Duplikum (Puls)) → funded, funded_cfd, winning_days; Ohne Hedge (Echo V2 · Orbit V2 · Topstep V2) → phase1, phase2
+   * (+ Alt-Wert challenge). Alte Modelle (Duplikum manuell) bleiben ungefiltert. Live-Konten sind auf keinem Weg Master;
+   * der Master eines bearbeiteten Plans bleibt beim Aufrufer wie bisher geschützt. Slave-Dropdown unberührt. */
+  function tpWegMitHedge(){ return _tpRoute === 'mt5' || _tpRoute === 'tvplus' || _tpRoute === 'topstep' || (_tpRoute === 'tvv2' && (_tpWd || _tpO3)) }
+  function tpKontoartPasstZumWeg(a){
+    const t = String((a && a.type) || '').toLowerCase()
+    if(tpWegMitHedge()) return t === 'funded' || t === 'funded_cfd' || t === 'winning_days'
+    if(routeIstV2(_tpRoute)) return t === 'phase1' || t === 'phase2' || t === 'challenge'
+    return true
+  }
   function tpVorplanSpanne(von, bis){ const v = Math.max(0, Number(von) || 0); return [v, Math.max(v, Number(bis) || v)] }
   // Staffel: „wie viel auf der Balance drauf ist" ($, = Live-Balance − Kontogröße) → Slave-Betrag (€).
   // Grenzen wie von Finn genannt: „über 8000" = 90, „6000-8000" = 80 … 23.09.2026: vorher stand hier ein
@@ -53996,7 +54022,8 @@
     const sel = $('mtc-add-prefill'); if(!sel) return
     const keep = sel.value
     sel.innerHTML = '<option value="">— manuell eingeben —</option>' +
-      mtcPrefillCandidates().map(a =>
+      // Reihenfolge wie die Accounts-Liste (06.10.2026, Finn: „auch nach Prophos sortieren, wie es überall ist") — vorher Ladereihenfolge
+      (typeof accSortiert === 'function' ? accSortiert(mtcPrefillCandidates()) : mtcPrefillCandidates()).map(a =>
         `<option value="${esc(a.id)}">${esc(a.name)} — ${esc(a.creds.login)} @ ${esc(a.creds.server)}</option>`).join('')
     sel.value = keep
     if(sel.value !== keep) sel.value = ''
