@@ -1957,6 +1957,56 @@
     #af-view .adm-row-name small{white-space:normal}
   }
   @media (prefers-reduced-motion:reduce){#af-view .af-s.is-lauf i{animation:none}}
+  /* VORRAT NEU (06.10.2026 abends, Finn: „ich erkenne nichts, eine ewig lange Liste" — Design wie „Accounts je Firma"):
+     Steht HINTER den #dashboard-view-/#af-view-Regeln (gleiche Spezifität, die spätere gewinnt). Kacheln wie .af-kpis, zwei Panels (.af-grid-Maße), Zeilen = .adm-row wie dort. Rechte Zahl „N kaufen" rot (jetzt) bzw. gelb (bald),
+     „gedeckt" grau. Personen-Balken: je Firma ein gleich breites Stück (2 px Lücke), voll = gesichert, hell = Funnel erwartet. */
+  #vr-view .vr-kpis{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+  #vr-view .vr-grid{grid-template-columns:minmax(0,2.1fr) minmax(0,1fr);align-items:start}
+  @media (max-width:960px){#vr-view .vr-grid{grid-template-columns:minmax(0,1fr)}}
+  #vr-view .adm-row{grid-template-columns:minmax(0,1.3fr) minmax(48px,1.4fr) 82px 14px}
+  #vr-view #vr-firmen .adm-row{grid-template-columns:minmax(0,1.6fr) minmax(36px,1fr) 74px}
+  #vr-view .adm-row-name small{white-space:normal}
+  #vr-view .adm-row-btn.is-on{background:var(--surface-tint)}
+  #vr-view .adm-row-btn.is-on .adm-row-name{color:var(--ink)}
+  #vr-view .adm-val.is-jetzt{color:#B42318;font-weight:700}
+  #vr-view .adm-val.is-bald{color:#B54708;font-weight:700}
+  #vr-view .adm-val.is-null{color:var(--sub-2);font-weight:500}
+  #vr-view #vr-ids .adm-pct{color:var(--sub);font-size:13px;text-align:center}
+  #vr-view .adm-track.af-drei{display:flex;background:var(--surface-tint)}
+  #vr-view .af-drei .adm-fill{border-radius:0;flex:none;box-sizing:border-box}
+  #vr-view .af-drei .adm-fill + .adm-fill{border-left:2px solid var(--surface)}
+  #vr-view .af-legende{display:inline-flex;align-items:center;gap:4px 10px;font-size:11px;color:var(--sub-2);white-space:nowrap}
+  #vr-view .af-legende i{display:inline-block;width:7px;height:7px;border-radius:2px;margin-right:4px;vertical-align:0}
+  #vr-view .adm-track.vr-seg{display:flex;gap:2px;background:none}
+  #vr-view .vr-seg > span{flex:1 1 0;position:relative;height:8px;border-radius:999px;background:var(--surface-tint);overflow:hidden;min-width:6px}
+  #vr-view .vr-seg i{position:absolute;left:0;top:0;bottom:0}
+  #vr-view .vr-seg i.erw{opacity:.32}
+  /* aufgeklappte Person: je Firma eine kompakte Zeile im festen Raster [Firma | Kette | Ziel | Menge | Pille + Knöpfe] */
+  #vr-view .vr-fz-box{padding:0 0 8px;border-bottom:1px solid var(--border-soft)}
+  #vr-view .vr-fz{display:grid;grid-template-columns:minmax(84px,128px) minmax(0,1fr) minmax(60px,120px) minmax(0,auto) auto;
+    grid-template-areas:"firma kette bar menge rechts";column-gap:12px;align-items:center;padding:7px 0;border-top:1px solid var(--border-soft);font-size:13px;cursor:pointer}
+  #vr-view .vr-fz-box > :first-child{border-top:none}
+  #vr-view .vr-fz:hover .vr-fz-firma span{text-decoration:underline;text-decoration-color:var(--sub-2);text-underline-offset:2px}
+  #vr-view .vr-fz-firma{grid-area:firma;display:flex;align-items:center;gap:7px;min-width:0;font-weight:500}
+  #vr-view .vr-fz-firma i{width:8px;height:8px;border-radius:3px;flex:none}
+  #vr-view .vr-fz-firma span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #vr-view .vr-fz-kette{grid-area:kette;display:flex;flex-wrap:wrap;align-items:center;gap:3px;min-width:0}
+  #vr-view .vr-fz-bar{grid-area:bar;min-width:0}
+  #vr-view .vr-fz-menge{grid-area:menge;font-size:12px;color:var(--ink);white-space:nowrap;text-align:right;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis}
+  #vr-view .vr-fz-rechts{grid-area:rechts;display:flex;align-items:center;gap:4px;justify-content:flex-end}
+  #vr-view .vr-fz-rechts .vr-d{margin-right:2px}
+  #vr-view .vr-fz .vr-schloss{width:26px;height:26px}
+  #vr-view .vr-fz .vr-bknopf{margin-left:0;padding:3px 8px}
+  #vr-view .vr-fz.pausiert .vr-fz-kette,#vr-view .vr-fz.pausiert .vr-fz-bar,#vr-view .vr-fz.pausiert .vr-fz-menge{opacity:.45}
+  #vr-view .vr-fz > .vr-detail{grid-column:1/-1;margin-top:7px;cursor:default}
+  #vr-view .vr-fz-zu{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:8px 0 2px;border-top:1px solid var(--border-soft);font-size:11.5px;color:var(--sub)}
+  @media (max-width:760px){
+    /* Handy: Personen-Zeile wie #af-view am Handy (Zahl fest, Balken bündig), Firmenzeile zweizeilig */
+    #vr-view .adm-dist .adm-row{grid-template-columns:minmax(0,1.25fr) minmax(40px,1fr) 70px 12px;gap:10px}
+    #vr-view #vr-firmen .adm-row{grid-template-columns:minmax(0,1.4fr) minmax(36px,1fr) 70px;gap:10px}
+    #vr-view .vr-fz{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"firma rechts" "kette menge" "bar bar";row-gap:6px;column-gap:10px}
+    #vr-view .vr-fz-bar{max-width:none}
+  }
   #adm-pane-stat .kf-kpis .kpi-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #adm-pane-stat .kf-gross{margin-top:8px}
   #adm-pane-stat .kf-gross .kf-chart[hidden]{display:none}
@@ -38661,7 +38711,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1052'
+  const OS_TAB_BUILD = '2026-09-22.1053'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -55255,7 +55305,10 @@
  * vorrat_rechnen) — hier nur Anzeige, Filter und der Sperr-Klick. Bewusst noch KEINE Nachkauf-Aussage (Stufe 2, die Rechenregel
  * bestätigt Finn): die Seite sagt nur „fehlt bis Ziel". Je Firma ein Block (nur Firmen mit Ziel-Zeile), je ID eine Zeile; pausierte
  * Zeilen (frei, aber gerade nichts kaufen — Finn 06.10.2026) stehen gelb markiert am Blockende, gesperrte Kombinationen als graue
- * Chips darunter (Klick schaltet frei). Eigene Verdrahtung: nur #vr-root und #vrNeu, kein Sammel-Handler. */
+ * Chips darunter (Klick schaltet frei). Eigene Verdrahtung: nur #vr-root und #vrNeu, kein Sammel-Handler.
+ * Seit 06.10.2026 abends (Finn: „ich erkenne nichts … den Score ‚100' versteh ich nicht") im Aufbau von „Accounts je Firma":
+ * Kacheln · links „Je ID" (aufklappbar, je Firma eine kompakte Zeile) · rechts „Je Firma" (Klick filtert). Einkaufsliste mit
+ * Score-Ring und Firmen-Blöcke sind weg; Dringlichkeit nur als Wort-Pille, der Score steht im Tooltip. */
 ;(() => {
   // Stufen-Kette [Schlüssel, Wort, Kontotypen]: funded und funded_cfd sind dieselbe Stufe „Funded" (Futures vor dem Big Trade bzw. Funded CFD)
   const VR_STUFEN = [['challenge', 'Challenge', ['challenge']], ['phase1', 'Phase 1', ['phase1']], ['phase2', 'Phase 2', ['phase2']],
@@ -55263,7 +55316,7 @@
   const VR_SCHLOSS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/></svg>'
   const VR_PAUSE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 5v14M15 5v14"/></svg>'
   const VR_PLAY = '<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M7 5v14l11-7z"/></svg>'
-  const _vr = { daten: null, laedt: false, fehler: '', timer: null, stand: 0, kachel: '', person: '', sendet: 0, offen: new Set(), sichert: false }
+  const _vr = { daten: null, laedt: false, fehler: '', timer: null, stand: 0, kachel: '', firma: '', auf: new Set(), sendet: 0, offen: new Set(), sichert: false }
   // Stufe 2 (06.10.2026, Vertrag .claude/master/vorrat-vertrag.md): je Zelle nachkauf {n, einheit, dringlichkeit, n_roh, teile},
   // score 0–100 + score_teile [{name, wert, einheit}] (Finn: Dringlichkeit als Zahl, aus den Zahlen begründet), sperre
   // 'daten_fehlen'|'unsicher', bestellt {id, anzahl, offen, verfall} + zustand 'bestellt', bestand_gewichtet/erwartet, konten = LISTE
@@ -55312,7 +55365,6 @@
   const vrStueck = (n, groesse) => groesse ? `${n} × ${vrK(groesse)}` : vrKonten(n)
   const vrFarbe = uid => typeof idFarbe === 'function' ? idFarbe(uid) : 'var(--sub-2)'
   const vrTypTxt = typen => (typen || []).includes('winning_days') ? 'Winning Days' : 'Funded'
-  const vrIstVorrat = (f, typen) => (f.ziel?.typen || []).some(t => typen.includes(t))
 
   function vrZielTxt(z){
     if(!z) return 'kein Ziel hinterlegt — nur Funnel'
@@ -55321,73 +55373,6 @@
     if(z.art === 'plus_ueber_start') return `Ziel je ID: +${vrK(z.von)} bis +${vrK(z.bis)} über Start bei ${wo}${kauf}`
     if(z.art === 'groessen_summe') return `Ziel je ID: ${vrK(z.von)} bis ${vrK(z.bis)} ${wo} (Summe der Kontogrößen)${kauf}`
     return `Ziel je ID: ${(z.groessen || []).map(t => vrStueck(t.stueck, t.groesse)).join(' + ')} bei ${wo}${kauf}`
-  }
-
-  // Stufen einer Firma: die feste Kette ihrer Art (CFD Phase 1 → Phase 2 → Funded, Futures Challenge → Funded → Winning Days),
-  // dazu jede Stufe, in der bei irgendeiner ID ein Konto liegt (z. B. Ein-Schritt-Challenge bei einer CFD-Firma)
-  function vrStufenVon(f, zellenFirma){
-    const hat = new Set(f.cfd ? ['phase1', 'phase2', 'funded'] : ['challenge', 'funded', 'wd'])
-    for(const z of zellenFirma) for(const [k, , typen] of VR_STUFEN) if(typen.some(t => z.funnel?.[t]?.n)) hat.add(k)
-    return VR_STUFEN.filter(([k]) => hat.has(k))
-  }
-
-  function vrFunnelHtml(z, f, stufen){
-    return stufen.map(([k, wort, typen], i) => {
-      const n = typen.reduce((s, t) => s + (z.funnel?.[t]?.n || 0), 0)
-      const gr = typen.reduce((s, t) => s + (z.funnel?.[t]?.groesse || 0), 0)
-      const wart = k === 'funded' ? (z.funnel?.waiting?.n || 0) : 0
-      const vorrat = vrIstVorrat(f, typen)
-      // Stufe 2: ein Punkt je Konto dieser Stufe (Farbe = Bestehens-Chance), höchstens sechs, Rest als „+n"; Titel listet alle
-      const ks = vrListe(z).filter(x => typen.includes(vrStufe(x)))
-      const pks = ks.length ? `<span class="vr-pks">${ks.slice(0, 6).map(x => `<i class="vr-pk ${vrPkKl(x)}"></i>`).join('')}${ks.length > 6 ? `<span class="vr-pmehr">+${ks.length - 6}</span>` : ''}</span>` : ''
-      const titel = `${wort}: ${n ? vrKonten(n) + (gr ? ' · ' + vrK(gr) + ' Kontogröße' : '') : 'kein Konto'}${wart ? ` · davon ${wart} Waiting for Payout` : ''}${vorrat ? ' · zählt als Vorrat' : ''}`
-        + ks.map(x => '\n' + vrKontoTitel(x)).join('')
-      return `${i ? '<span class="vr-pf">›</span>' : ''}<span class="vr-st${n ? '' : ' leer'}${vorrat ? ' vorrat' : ''}" title="${vrEsc(titel)}"><b>${n}</b>${wort}${wart ? `<small>⏳ ${wart}</small>` : ''}${pks}</span>`
-    }).join('')
-  }
-
-  // Bestand gegen Ziel: Balken mit grünem Band (Untergrenze bis Obergrenze) bzw. bei Stückzahlen ein Kästchen je verlangtem Konto
-  function vrMitteHtml(z, f){
-    const ziel = f.ziel
-    if(!ziel) return '<span class="vr-kein">kein Ziel</span>'
-    if(ziel.art === 'stueck'){
-      return '<div class="vr-slots">' + (z.teile || []).map(t => {
-        const wort = t.groesse ? vrK(t.groesse) : 'Konto'
-        let s = ''
-        for(let i = 0; i < Math.max(t.soll, t.ist); i++)
-          s += `<span class="vr-slot${i < t.ist ? ' da' : ''}" title="${i < t.ist ? (i < t.soll ? 'vorhanden' : 'über dem Ziel') : 'fehlt'}">${wort}${i < t.ist ? ' ✓' : ''}</span>`
-        return s
-      }).join('') + '</div>'
-    }
-    const plus = ziel.art === 'plus_ueber_start' ? '+' : ''
-    const max = Math.max(Number(ziel.bis) * 1.25, Number(z.bestand) || 0) || 1
-    const pct = n => Math.max(0, Math.min(100, Number(n) / max * 100))
-    const wartend = Number(z.wartend) || 0
-    const titel = `Bestand ${plus}${vrK(z.bestand)}${wartend ? ` (davon ${vrK(wartend)} Waiting for Payout)` : ''} · Ziel ${plus}${vrK(ziel.von)} bis ${plus}${vrK(ziel.bis)}`
-      + (z.lage === 'unter' ? ` · fehlt ${vrK(z.fehlt)} bis zur Untergrenze, ${vrK(z.bis_voll)} bis zur Obergrenze` : z.lage === 'im_ziel' ? ` · Platz bis zur Obergrenze: ${vrK(z.bis_voll)}` : ' · über der Obergrenze')
-    const farbe = z.lage === 'unter' ? 'var(--warn)' : 'var(--good)'
-    // Waiting for Payout zählt zum Bestand (Finn 05.10.2026), aber als eigener, hellerer Anteil am Ende des Balkens erkennbar
-    const wart = wartend ? `<span class="vr-fill vr-wart" style="left:${pct(z.bestand - wartend)}%;width:${pct(z.bestand) - pct(z.bestand - wartend)}%;background:${farbe}"></span>` : ''
-    return `<div class="vr-bar" title="${vrEsc(titel)}"><span class="vr-band" style="left:${pct(ziel.von)}%;width:${pct(ziel.bis) - pct(ziel.von)}%"></span>`
-      + `<span class="vr-fill" style="width:${pct(z.bestand)}%;background:${farbe}"></span>${wart}</div>`
-  }
-
-  function vrWertHtml(z, f){
-    const ziel = f.ziel
-    if(!ziel) return `<small>${vrKonten(vrN(z))}</small>`
-    const haupt = ziel.art === 'stueck' ? `${z.bestand} / ${z.von}` : (ziel.art === 'plus_ueber_start' ? '+' : '') + vrK(z.bestand)
-    const fehlt = ziel.art === 'stueck' ? (z.teile || []).filter(t => t.fehlt).map(t => vrStueck(t.fehlt, t.groesse)).join(' + ') : vrK(z.fehlt)
-    let neben = z.lage === 'unter' ? `<small class="vr-rot">fehlt ${fehlt}</small>` : z.lage === 'ueber' ? '<small>über Ziel</small>' : '<small class="vr-gut">im Ziel</small>'
-    // Stufe 2: die Nachkauf-Aussage ersetzt „fehlt …" (unter Ziel, aber der Funnel deckt es = „gedeckt")
-    if(z.nachkauf){
-      const dr = vrDr(z)
-      if(vrBestellt(z)) neben = `<small class="vr-blau" title="bestellt ${z.bestellt.anzahl || ''}${z.bestellt.offen != null ? ', offen ' + z.bestellt.offen : ''}">bestellt${vrUhr(z.bestellt.verfall) ? ' · bis ' + vrUhr(z.bestellt.verfall) : ''}</small>`
-      else if(z.sperre) neben = `<small class="vr-grau">${z.sperre === 'unsicher' ? 'Unsicher' : 'Daten fehlen'}</small>`
-      else if(vrKauf(z)) neben = `<small class="vr-${dr[1]}" title="${vrEsc(dr[0] + ': ' + vrMenge(z, f))}">nachkaufen ${vrEsc(vrMenge(z, f, true))}</small>`
-      else if(z.lage === 'unter' && dr?.[1] === 'gedeckt') neben = '<small class="vr-gut" title="unter Ziel, aber der Funnel deckt es">gedeckt</small>'
-    }
-    const unklar = z.unklar ? `<small title="Konten ohne bekannte Balance bzw. Größe — zählen nicht mit">⚠ ${z.unklar} ohne Wert</small>` : ''
-    return `<b>${haupt}</b>${neben}${unklar}`
   }
 
   async function vrToken(){
@@ -55439,121 +55424,221 @@
     vrRender()
   }
 
+  // NEU 06.10.2026 (Finn zur Seite „Vorrat": „ich erkenne nichts, eine ewig lange Liste, den Score ‚100' versteh ich nicht" — er will
+  // das Design von „Accounts je Firma"): Kacheln oben (Klick filtert), links „Je ID" (eine Zeile je Person, Balken = je Firma ein
+  // gleich breites Stück, gefüllt bis gesichert, heller bis Funnel erwartet, gemessen an der Untergrenze; Klick klappt die Firmen der
+  // Person auf), rechts „Je Firma" (Klick filtert links). Dieselben Bausteine wie dort (kpi, adm-row, adm-track, ID-Punkt), Dringlichkeit
+  // nur noch als Wort-Pille — der Score steht höchstens im Tooltip, die Bausteine erst beim Klick auf die Firmenzeile.
+  const VR_FIRMA_PAL = ['#5447CE', '#0EA5E9', '#16A34A', '#E0891F', '#A855F7', '#14B8A6', '#F59E0B', '#64748B', '#0F766E', '#7C3AED']
+  // Firmenfarbe wie afFirmaFarbe (Accounts je Firma): derselbe Hash über die Firmen-Palette, ohne Rot/Pink (Rot heißt hier „kaufen")
+  const vrFirmaFarbe = firm => { let h = 0; for(const ch of String(firm || '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return VR_FIRMA_PAL[h % VR_FIRMA_PAL.length] }
+  const VR_STUFUNG = { jetzt: 100, bald: 55, gedeckt: 22 }    // Abstufung der Firmenfarbe im Firmen-Balken wie AF_STUFE
+  const vrStufung = (farbe, z) => VR_STUFUNG[z] >= 100 ? farbe : `color-mix(in srgb, ${farbe} ${VR_STUFUNG[z]}%, #fff)`
+  // Zustand einer Zelle: jetzt · bald · gedeckt · bestellt · daten (kein Vorschlag) · pausiert · gesperrt; ohne Stufe 2 aus der Lage
+  function vrZustand(z, s2){
+    if(z.status === 'gesperrt') return 'gesperrt'
+    if(z.status === 'pausiert') return 'pausiert'
+    if(!s2) return z.lage === 'unter' ? 'bald' : 'gedeckt'
+    if(vrBestellt(z)) return 'bestellt'
+    if(z.sperre) return 'daten'
+    if(vrKauf(z)) return z.nachkauf.dringlichkeit
+    return 'gedeckt'
+  }
+  const VR_PILLE = { jetzt: ['Jetzt kaufen', 'jetzt'], bald: ['Bald', 'bald'], gedeckt: ['Gedeckt', 'gedeckt'], bestellt: ['Bestellt', 'blau'],
+                     daten: ['Daten fehlen', 'grau'], pausiert: ['Pausiert', 'grau'] }
+  function vrPille(z, zst, s2){
+    let [wort, kl] = VR_PILLE[zst] || ['–', 'grau']
+    if(zst === 'daten' && z.sperre === 'unsicher') wort = 'Unsicher'
+    if(!s2 && zst === 'bald') wort = 'Unter Ziel'
+    if(!s2 && zst === 'gedeckt') wort = 'Im Ziel'
+    const dr = vrDr(z); if(dr && (zst === 'jetzt' || zst === 'bald' || zst === 'gedeckt')) wort = dr[0]
+    const titel = [z.score != null ? `Dringlichkeit ${Math.round(z.score)} von 100` : '', zst === 'bestellt' && vrUhr(z.bestellt?.verfall) ? 'zählt bis ' + vrUhr(z.bestellt.verfall) : '',
+      zst === 'daten' ? (z.sperre === 'unsicher' ? 'Lesung älter als 2 Handelstage — kein Vorschlag' : 'Konten ohne Lesung — kein Vorschlag') : ''].filter(Boolean).join(' · ')
+    return `<span class="vr-d vr-d-${kl}"${titel ? ` title="${vrEsc(titel)}"` : ''}>${vrEsc(wort)}</span>`
+  }
+  // Gesichert/erwartet gegen das Ziel in den Einheiten der Firma (Plus über Start, Summe der Kontogrößen bzw. Stück)
+  function vrZielZahlen(z, f){
+    const ziel = f?.ziel
+    if(!ziel) return null
+    const ges = Math.max(0, Number(z.bestand_gewichtet ?? z.bestand) || 0)
+    const erw = Math.max(ges, Number(z.erwartet) || 0)
+    const von = Number(ziel.art === 'stueck' ? z.von : ziel.von) || 0, bis = Number(ziel.art === 'stueck' ? z.von : ziel.bis) || von
+    const fmt = n => ziel.art === 'stueck' ? String(Math.round(n * 10) / 10).replace('.', ',') : (ziel.art === 'plus_ueber_start' ? '+' : '') + vrK(n)
+    return { ges, erw, von, bis, fmt, stueck: ziel.art === 'stueck' }
+  }
+  function vrZielTitel(z, f){
+    const q = vrZielZahlen(z, f)
+    if(!q) return 'kein Ziel hinterlegt'
+    return `gesichert ${q.fmt(q.ges)}${q.erw > q.ges ? ` · mit Funnel erwartet ${q.fmt(q.erw)}` : ''} · Ziel ${q.fmt(q.von)}${q.bis > q.von ? '–' + q.fmt(q.bis) : ''}${q.stueck ? ' Konten' : ''}`
+  }
+  // Kleiner Bestand/Ziel-Balken der Firmenzeile: grünes Band = Ziel-Spanne, voll = gesichert, hell = Funnel erwartet
+  function vrFzBar(z, f, farbe){
+    const q = vrZielZahlen(z, f)
+    if(!q) return '<span class="vr-kein">kein Ziel</span>'
+    const max = Math.max(q.bis * 1.15, q.erw, q.ges, 1)
+    const pct = n => Math.max(0, Math.min(100, n / max * 100))
+    return `<div class="vr-bar" title="${vrEsc(vrZielTitel(z, f))}"><span class="vr-band" style="left:${pct(q.von)}%;width:${Math.max(pct(q.bis) - pct(q.von), 1.5)}%"></span>`
+      + `<span class="vr-fill vr-erw" style="width:${pct(q.erw)}%;background:${farbe}"></span><span class="vr-fill" style="width:${pct(q.ges)}%;background:${farbe}"></span></div>`
+  }
+  // Funnel-Kette: ein Punkt je Konto (Farbe = Chance, violett = im Vorrat), Stufen in ihrer Reihenfolge durch „›" getrennt
+  function vrKette(z){
+    const ks = vrListe(z)
+    if(!ks.length) return `<span class="vr-kein">${vrN(z) ? vrKonten(vrN(z)) : 'kein Konto'}</span>`
+    const teile = []
+    for(const [, wort, typen] of VR_STUFEN){
+      const st = ks.filter(k => typen.includes(vrStufe(k)))
+      if(!st.length) continue
+      teile.push(`<span class="vr-pks" title="${vrEsc(wort + ': ' + vrKonten(st.length) + st.map(k => '\n' + vrKontoTitel(k)).join(''))}">${st.slice(0, 8).map(k => `<i class="vr-pk ${vrPkKl(k)}"></i>`).join('')}${st.length > 8 ? `<span class="vr-pmehr">+${st.length - 8}</span>` : ''}</span>`)
+    }
+    return teile.join('<span class="vr-pf">›</span>')
+  }
+
+  // Kachel-Filter (Kopf): welche Zellen eine Kachel meint — Person/Firma bleibt sichtbar, wenn mindestens eine freie Zelle passt
+  const VR_KACHEL = { jetzt: x => x.zst === 'jetzt', bald: x => x.zst === 'bald', gedeckt: x => x.zst === 'gedeckt',
+                      vorrat: x => (x.z.bestand_n || 0) > 0, funnel: x => vrListe(x.z).some(k => !k.im_bestand) || (!x.s2 && vrN(x.z) > (x.z.bestand_n || 0)) }
+  const VR_KACHEL_WORT = { jetzt: 'Jetzt kaufen', bald: 'Bald', gedeckt: 'Gedeckt', vorrat: 'mit Vorrat', funnel: 'mit Funnel' }
+  const VR_NB = '\u00a0'
+
   function vrRender(){
     const root = document.getElementById('vr-root')
     if(!root) return
     const d = _vr.daten
     if(!d){ root.textContent = _vr.fehler || 'Lade Vorrat…'; return }
     root.removeAttribute('style')
-    const st = document.getElementById('vr-stand')
     const s2 = vrS2(d)
-    // Stufe 2: Stand = letzter Rechenlauf des Servers (alle ~6 h bzw. „Jetzt aktualisieren"), dazu der nächste geplante Lauf
-    if(st) st.textContent = 'Je ID und Firma: Funnel und sicherer Bestand gegen das Ziel' + (s2 && vrUhr(d.gerechnet_um)
-      ? ' · gerechnet ' + vrUhr(d.gerechnet_um) + (vrUhr(d.naechster_lauf) ? ' · nächster Lauf ≈ ' + vrUhr(d.naechster_lauf) : '')
-      : _vr.stand ? ' · Stand ' + new Date(_vr.stand).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '')
+    const st = document.getElementById('vr-stand')
+    if(st) st.textContent = s2 && vrUhr(d.gerechnet_um)
+      ? 'Gerechnet ' + vrUhr(d.gerechnet_um) + (vrUhr(d.naechster_lauf) ? ' · nächster Lauf ≈ ' + vrUhr(d.naechster_lauf) : '')
+      : 'Je ID und Firma: Funnel und Bestand gegen das Ziel' + (_vr.stand ? ' · Stand ' + vrUhr(new Date(_vr.stand).toISOString()) : '')
     vrSichRender(d, s2)
     const name = new Map((d.people || []).map(p => [p.user_id, p.name]))
-    if(_vr.person && !name.has(_vr.person)) _vr.person = ''
-    // Zustände (Finn 06.10.2026): frei · pausiert (freigeschaltet, aber gerade nichts kaufen) · gesperrt. Kacheln, rote Zahlen an
-    // den ID-Chips und die Summen je Firma zählen nur freie Zellen — pausierte sind eine eigene Zahl und stehen am Blockende vor den Chips
-    const istFrei = z => z.status === 'frei', istPause = z => z.status === 'pausiert', istZu = z => z.status === 'gesperrt'
-    const imZielF = z => z.lage === 'im_ziel' || z.lage === 'ueber'
-    const zellen = d.zellen.filter(z => !_vr.person || z.user_id === _vr.person)
-    const frei = zellen.filter(istFrei), pausiert = zellen.filter(istPause), gesperrt = zellen.filter(istZu)
-    const unter = frei.filter(z => z.lage === 'unter'), imZiel = frei.filter(imZielF)
-    const nVorrat = frei.reduce((s, z) => s + (z.bestand_n || 0), 0)
-    const nKonten = frei.reduce((s, z) => s + vrN(z), 0)
-    // Nachkaufen: nur freie Zellen (pausiert heißt „gerade nichts kaufen"), ohne bestellt und ohne „Daten fehlen"
-    const kauf = s2 ? frei.filter(vrKauf) : []
-    const nKauf = kauf.reduce((s, z) => s + z.nachkauf.n, 0)
-    const nJetzt = kauf.filter(z => z.nachkauf.dringlichkeit === 'jetzt').reduce((s, z) => s + z.nachkauf.n, 0)
-    const passt = { kauf: kauf.length, unter: unter.length, ziel: imZiel.length, vorrat: nVorrat, pausiert: pausiert.length, gesperrt: gesperrt.length }
-    if(_vr.kachel && !passt[_vr.kachel]) _vr.kachel = ''      // Filter ohne Treffer hebt sich selbst auf (wie „Accounts je Firma")
-    const k = _vr.kachel
-    const nb = ' '
+    const firma = new Map(d.firmen.map(f => [f.firma, f]))
+    const nb = VR_NB
+    if(_vr.firma && !firma.has(_vr.firma)) _vr.firma = ''
+    // Zellen mit Zustand; Kacheln und Summen zählen nur freie Zellen (pausiert = „gerade nichts kaufen", gesperrt = nie)
+    const alle = d.zellen.map(z => ({ z, zst: vrZustand(z, s2), f: firma.get(z.firma), s2 }))
+    const sicht = alle.filter(x => !_vr.firma || x.z.firma === _vr.firma)
+    const istFrei = x => x.z.status === 'frei'
+    const frei = sicht.filter(istFrei)
+    const nKauf = zst => frei.filter(x => x.zst === zst).reduce((s, x) => s + (x.z.nachkauf?.n || 0), 0)
+    const idsVon = zst => new Set(frei.filter(x => x.zst === zst).map(x => x.z.user_id)).size
+    const eur = feld => frei.reduce((s, x) => s + (Number(x.z[feld]) || 0), 0)
+    const hatEur = frei.some(x => x.z.bestand_eur != null || x.z.funnel_eur != null)
+    const nVorratK = frei.reduce((s, x) => s + (x.z.bestand_n || 0), 0)
+    const nFunnelK = frei.reduce((s, x) => s + vrListe(x.z).filter(k => !k.im_bestand).length, 0)
+    if(_vr.kachel && !frei.some(VR_KACHEL[_vr.kachel] || (() => false))) _vr.kachel = ''      // Filter ohne Treffer hebt sich auf
+    const kf = _vr.kachel ? VR_KACHEL[_vr.kachel] : null
+    const passt = x => istFrei(x) && (!kf || kf(x))
 
-    const kachel = (key, label, wert, sub, kl) => `<button type="button" class="kpi vr-k${k && k === key ? ' is-on' : ''}${wert ? '' : ' is-leer'}" data-vr-k="${key}" title="${key ? (k === key ? 'Filter aufheben' : 'nur diese zeigen') : 'alle zeigen'}">
-      <div class="kpi-label">${label}</div><div class="kpi-value ${wert ? kl : ''}">${wert}</div><div class="kpi-delta">${sub}</div></button>`
-    const nUeber = imZiel.filter(z => z.lage === 'ueber').length
-    const nBestellt = s2 ? frei.filter(vrBestellt).length : 0
-    const kpis = (s2 ? kachel('kauf', 'Nachkaufen', nKauf, nKauf ? `davon${nb}${nJetzt}${nb}jetzt${nBestellt ? ` · ${nBestellt}${nb}bestellt` : ''}` : (nBestellt ? `${nBestellt}${nb}bestellt` : 'alles gedeckt'), 'vr-rot') : '')
-      + kachel('', 'Freigeschaltet', frei.length, `${new Set(frei.map(z => z.user_id)).size}${nb}IDs · ${new Set(frei.map(z => z.firma)).size}${nb}Firmen`, '')
-      + kachel('unter', 'Unter Ziel', unter.length, `von${nb}${frei.length}${nb}freien`, 'vr-rot')
-      + kachel('ziel', 'Im Ziel', imZiel.length, nUeber ? `davon${nb}${nUeber}${nb}über der Obergrenze` : `von${nb}${frei.length}${nb}freien`, 'vr-gut')
-      + kachel('vorrat', 'Konten im Vorrat', nVorrat, `${Math.max(0, nKonten - nVorrat)}${nb}weitere im${nb}Funnel`, '')
-      + kachel('pausiert', 'Pausiert', pausiert.length, 'frei, aber gerade nichts kaufen', 'vr-gelb')
-      + kachel('gesperrt', 'Gesperrt', gesperrt.length, 'Kombinationen', '')
+    const kachel = (key, label, wert, sub, kl) => `<button type="button" class="kpi vr-k${_vr.kachel === key ? ' is-on' : ''}${wert && wert !== '–' && wert !== '0 €' ? '' : ' is-leer'}" data-vr-k="${key}" title="${_vr.kachel === key ? 'Filter aufheben' : 'nur diese zeigen'}">
+      <div class="kpi-label">${label}</div><div class="kpi-value ${kl}">${wert}</div><div class="kpi-delta">${sub}</div></button>`
+    const nBest = frei.filter(x => x.zst === 'bestellt').length
+    const kpis = kachel('jetzt', 'Jetzt kaufen', nKauf('jetzt'), nKauf('jetzt') ? `in${nb}${idsVon('jetzt')}${nb}${idsVon('jetzt') === 1 ? 'ID' : 'IDs'}${nBest ? ` · ${nBest}${nb}bestellt` : ''}` : (nBest ? `${nBest}${nb}bestellt` : 'nichts dringend'), nKauf('jetzt') ? 'vr-rot' : '')
+      + kachel('bald', 'Bald', nKauf('bald'), nKauf('bald') ? `in${nb}${idsVon('bald')}${nb}${idsVon('bald') === 1 ? 'ID' : 'IDs'}` : 'nichts', nKauf('bald') ? 'vr-gelb' : '')
+      + kachel('gedeckt', 'Gedeckt', frei.filter(x => x.zst === 'gedeckt').length, `von${nb}${frei.length}${nb}Kombinationen`, 'vr-gut')
+      + kachel('vorrat', 'Wert im Vorrat', hatEur ? vrEur(eur('bestand_eur')) : '–', `${vrKonten(nVorratK)}${nb}im${nb}Vorrat`, '')
+      + kachel('funnel', 'Im Funnel', hatEur ? vrEur(eur('funnel_eur')) : '–', `${vrKonten(nFunnelK)}${nb}unterwegs`, '')
 
-    // ID-Chips: Klick zeigt nur diese ID; die rote Zahl = ihre freien Kombinationen unter Ziel (über alle Firmen, unabhängig vom Filter),
-    // mit Stufe 2 die Konten, die sie nachkaufen soll
-    const unterJe = new Map()
-    for(const z of d.zellen) if(istFrei(z) && (s2 ? vrKauf(z) : z.lage === 'unter')) unterJe.set(z.user_id, (unterJe.get(z.user_id) || 0) + (s2 ? z.nachkauf.n : 1))
-    const ids = (d.people || []).map(p => `<button type="button" class="vr-id${_vr.person === p.user_id ? ' an' : ''}" data-vr-p="${vrEsc(p.user_id)}" title="${_vr.person === p.user_id ? 'alle IDs zeigen' : 'nur diese ID zeigen'}">
-      <i style="background:${vrFarbe(p.user_id)}"></i>${vrEsc(p.name)}${unterJe.get(p.user_id) ? ` <b>${unterJe.get(p.user_id)}</b>` : ''}</button>`).join('')
-
-    const rang = z => s2 && vrKauf(z) ? VR_DRING[z.nachkauf.dringlichkeit]?.[2] ?? 1
-      : (s2 ? 2 : 0) + (z.lage === 'unter' ? 0 : z.lage === 'im_ziel' ? 1 : z.lage === 'ueber' ? 2 : 3)
-    const luecke = z => z.von ? (z.fehlt || 0) / z.von : 0
-    const nachName = (a, b) => String(name.get(a.user_id) || '').localeCompare(String(name.get(b.user_id) || ''), 'de')
+    // ── Je ID ──
+    const ids = (d.people || []).map(p => {
+      const meine = sicht.filter(x => x.z.user_id === p.user_id)
+      const fr = meine.filter(istFrei)
+      return { p, meine, fr, jetzt: fr.filter(x => x.zst === 'jetzt'), bald: fr.filter(x => x.zst === 'bald'),
+               n: fr.reduce((s, x) => s + (vrKauf(x.z) ? x.z.nachkauf.n : 0), 0), vorrat: fr.reduce((s, x) => s + (Number(x.z.bestand_eur) || 0), 0) }
+    }).filter(g => g.meine.length && (!kf || g.fr.some(passt)))
+    ids.sort((a, b) => (b.jetzt.length ? 1 : 0) - (a.jetzt.length ? 1 : 0) || b.n - a.n || b.bald.length - a.bald.length
+      || String(a.p.name).localeCompare(String(b.p.name), 'de'))
     const aus = d.bereit ? '' : ' disabled'
-    const bloecke = d.firmen.map(f => {
-      const meine = zellen.filter(z => z.firma === f.firma)
-      let zeilen = meine.filter(istFrei)
-      if(k === 'kauf') zeilen = zeilen.filter(vrKauf)
-      else if(k === 'unter') zeilen = zeilen.filter(z => z.lage === 'unter')
-      else if(k === 'ziel') zeilen = zeilen.filter(imZielF)
-      else if(k === 'vorrat') zeilen = zeilen.filter(z => z.bestand_n > 0)
-      else if(k === 'gesperrt' || k === 'pausiert') zeilen = []
-      const pause = (!k || k === 'pausiert') ? meine.filter(istPause).sort(nachName) : []
-      const zu = (!k || k === 'gesperrt') ? meine.filter(istZu).sort(nachName) : []
-      if(!zeilen.length && !pause.length && !zu.length) return ''
-      zeilen.sort((a, b) => rang(a) - rang(b) || (s2 ? (b.score || 0) - (a.score || 0) : 0) || luecke(b) - luecke(a) || nachName(a, b))
-      const stufen = vrStufenVon(f, d.zellen.filter(z => z.firma === f.firma))
-      const fa = vrEsc(f.firma)
-      // Knöpfe je Zeile: frei → ‖ pausieren oder Schloss sperren; pausiert → ▶ freischalten oder Schloss sperren; gesperrt = Chip (Klick = frei)
-      const knopf = (z, nm, status, icon, wort) => `<button type="button" class="vr-schloss" data-vr-s="${status}" data-vr-u="${vrEsc(z.user_id)}" data-vr-f="${fa}" title="${d.bereit ? `${nm} bei ${fa} ${wort}` : 'SQL noch nicht eingespielt'}"${aus}>${icon}</button>`
-      // Stufe 2: Zeile aufklappbar (KI-Text + Konten mit Chance), Marken „bestellt" und „gefährdet" am Namen
-      const zeile = z => { const nm = vrEsc(name.get(z.user_id) || z.user_id.slice(0, 8)), p = istPause(z), key = z.user_id + '|' + z.firma
-        const auf = s2 && _vr.offen.has(key), gef = s2 ? vrGef(z) : 0
-        return `<div class="vr-zeile${p ? ' pausiert' : ''}${s2 ? ' klick' : ''}"${s2 ? ` data-vr-o="${vrEsc(key)}" title="Klick: Begründung und Konten"` : ''}>
-        <div class="vr-name"><i style="background:${vrFarbe(z.user_id)}"></i><span title="${nm}">${nm}</span>${p ? '<em class="vr-pause">pausiert</em>' : ''}${gef ? `<em class="vr-gef" title="${gef} Vorrats-Konto nah am Boden">⚠ ${gef}</em>` : ''}</div>
-        <div class="vr-funnel">${vrFunnelHtml(z, f, stufen)}</div>
-        <div class="vr-mitte">${vrMitteHtml(z, f)}</div>
-        <div class="vr-wert">${vrWertHtml(z, f)}</div>
-        <div class="vr-knoepfe">${p ? knopf(z, nm, 'frei', VR_PLAY, 'wieder freischalten') : knopf(z, nm, 'pausiert', VR_PAUSE, 'pausieren (gerade nichts kaufen)')}${knopf(z, nm, 'gesperrt', VR_SCHLOSS, 'sperren')}</div>
-        ${auf ? vrDetailHtml(z, f) : ''}
-      </div>` }
-      const zeilenHtml = zeilen.map(zeile).join('') + pause.map(zeile).join('')
-      const zuHtml = zu.length ? `<div class="vr-gesperrt"><span>Gesperrt${nb}·${nb}${zu.length}</span>${zu.map(z => { const nm = vrEsc(name.get(z.user_id) || z.user_id.slice(0, 8)); return `<button type="button" class="vr-gchip" data-vr-s="frei" data-vr-u="${vrEsc(z.user_id)}" data-vr-f="${fa}" title="${d.bereit ? `${nm} bei ${fa} freischalten` : 'SQL noch nicht eingespielt'}${vrN(z) ? ' · ' + vrKonten(vrN(z)) + ' dort' : ''}"${aus}><i></i>${nm}${vrN(z) ? ' · ' + vrKonten(vrN(z)) : ''}</button>` }).join('')}</div>` : ''
-      const fz = meine.filter(istFrei)
-      const nU = fz.filter(z => z.lage === 'unter').length, nZ = fz.filter(imZielF).length
-      const nK = s2 ? fz.filter(vrKauf).reduce((s, z) => s + z.nachkauf.n, 0) : 0
-      const sum = f.ziel ? [nK ? `<span class="vr-rot">${nK}${nb}nachkaufen</span>` : '', nU ? `<span class="${s2 ? '' : 'vr-rot'}">${nU}${nb}unter Ziel</span>` : '', nZ ? `<span class="vr-gut">${nZ}${nb}im Ziel</span>` : ''].filter(Boolean).join(' · ') : ''
-      return `<div class="panel vr-firma"><div class="panel-head"><div><div class="panel-title">${fa}</div><div class="panel-sub">${vrEsc(vrZielTxt(f.ziel))}</div></div><div class="vr-sum">${sum}</div></div>${zeilenHtml}${zuHtml}</div>`
-    }).join('')
+    const idZeile = g => {
+      const uid = g.p.user_id, auf = _vr.auf.has(uid), farbe = vrFarbe(uid)
+      const sub = [g.jetzt.length ? `${g.jetzt.length}${nb}${g.jetzt.length === 1 ? 'Firma' : 'Firmen'}${nb}jetzt` : '', g.bald.length ? `${g.bald.length}${nb}bald` : '',
+        !g.jetzt.length && !g.bald.length ? 'alles gedeckt' : '', hatEur ? `Vorrat${nb}${vrEur(g.vorrat).replace(' ', nb)}` : ''].filter(Boolean).join(' · ')
+      // Balken: je freie Firma mit Ziel ein gleich breites Stück, Füllung = Anteil an der Untergrenze (gesichert voll, Funnel hell)
+      const seg = g.fr.filter(x => x.f?.ziel).sort((a, b) => a.z.firma.localeCompare(b.z.firma, 'de')).map(x => {
+        const q = vrZielZahlen(x.z, x.f), voll = n => Math.max(0, Math.min(100, q.von ? n / q.von * 100 : 100))
+        const fa = vrFirmaFarbe(x.z.firma)
+        return `<span title="${vrEsc(x.z.firma + ': ' + vrZielTitel(x.z, x.f))}"><i class="erw" style="width:${voll(q.erw)}%;background:${fa}"></i><i style="width:${voll(q.ges)}%;background:${fa}"></i></span>`
+      }).join('')
+      const val = g.n ? `${g.n}${nb}kaufen` : 'gedeckt'
+      const valKl = g.jetzt.length ? 'is-jetzt' : g.n ? 'is-bald' : 'is-null'
+      return `<button type="button" class="adm-row adm-row-btn${auf ? ' is-on' : ''}" data-vr-auf="${vrEsc(uid)}" title="${vrEsc(g.p.name)} — ${auf ? 'zuklappen' : 'Firmen aufklappen'}">
+        <div class="adm-row-name"><span class="adm-dot" style="background:${farbe}"></span><span class="nm">${vrEsc(g.p.name)}</span><small>${sub}</small></div>
+        <div class="adm-track vr-seg">${seg}</div><div class="adm-val ${valKl}">${val}</div><div class="adm-pct">${auf ? '▾' : '▸'}</div></button>`
+        + (auf ? vrPersonAuf(g, d, s2, aus) : '')
+    }
+    // ── Je Firma ──
+    const fListe = d.firmen.map(f => {
+      const fr = alle.filter(x => x.z.firma === f.firma && istFrei(x) && (!kf || kf(x)))
+      const c = zst => fr.filter(x => x.zst === zst).length
+      return { f, fr, jetzt: c('jetzt'), bald: c('bald'), gedeckt: c('gedeckt'), n: fr.reduce((s, x) => s + (vrKauf(x.z) ? x.z.nachkauf.n : 0), 0) }
+    }).filter(g => g.fr.length).sort((a, b) => b.n - a.n || b.jetzt - a.jetzt || a.f.firma.localeCompare(b.f.firma, 'de'))
+    const fZeile = g => {
+      const fa = vrFirmaFarbe(g.f.firma), ges = g.jetzt + g.bald + g.gedeckt || 1, on = _vr.firma === g.f.firma
+      const teile = ['jetzt', 'bald', 'gedeckt'].filter(k => g[k]).map(k => `<div class="adm-fill" style="width:${(100 * g[k] / ges).toFixed(2)}%;background:${vrStufung(fa, k)}"></div>`).join('')
+      const sub = [g.jetzt ? `${g.jetzt}${nb}jetzt` : '', g.bald ? `${g.bald}${nb}bald` : '', g.gedeckt ? `${g.gedeckt}${nb}gedeckt` : ''].filter(Boolean).join(' · ') || 'keine freie ID'
+      return `<button type="button" class="adm-row adm-row-btn${on ? ' is-on' : ''}" data-vr-f-filter="${vrEsc(g.f.firma)}" title="${vrEsc(g.f.firma)} · ${g.fr.length} freie IDs — ${on ? 'Filter aufheben' : 'links nur diese Firma zeigen'}">
+        <div class="adm-row-name"><span class="adm-dot" style="background:${fa}"></span><span class="nm">${vrEsc(g.f.firma)}</span><small>${sub}</small></div>
+        <div class="adm-track af-drei">${teile}</div><div class="adm-val ${g.jetzt ? 'is-jetzt' : g.n ? 'is-bald' : 'is-null'}">${g.n ? `${g.n}${nb}kaufen` : 'gedeckt'}</div></button>`
+    }
+    const titel = ['Je ID', _vr.firma, VR_KACHEL_WORT[_vr.kachel] || ''].filter(Boolean).join(' · ')
+    const legende = `<span class="af-legende"><span><i style="background:var(--sub)"></i>jetzt</span><span><i style="background:${vrStufung('var(--sub)', 'bald')}"></i>bald</span><span><i style="background:${vrStufung('var(--sub)', 'gedeckt')}"></i>gedeckt</span></span>`
 
     root.innerHTML = (d.hinweis ? `<div class="vr-hinweis">${vrEsc(d.hinweis)}</div>` : '')
       + (_vr.fehler ? `<div class="vr-fehler">${vrEsc(_vr.fehler)}</div>` : '')
-      + (s2 ? vrListeHtml(zellen.filter(istFrei), d, name) : '')
-      + `<div class="kpis vr-kpis">${kpis}</div><div class="vr-ids">${ids}</div>`
-      + (bloecke || '<div class="adm-empty">Keine Kombination für diese Auswahl.</div>')
-      + `<div class="vr-fuss">Violett = die Stufe, die als Vorrat zählt: bei Futures-Firmen die Winning-Days-Konten, bei CFD-Firmen die Funded-Konten. Alles davor ist Funnel.
-        Grünes Band am Balken = Ziel-Spanne (Untergrenze bis Obergrenze). ‖ pausiert eine ID bei einer Firma (frei, aber gerade nichts kaufen), das Schloss sperrt sie; ein Klick auf den grauen Chip schaltet sie wieder frei.${s2 ? `
-        Punkte je Konto: grün = Chance ab 50 %, gelb 20–50 %, rot unter 20 %, gestrichelt = Daten fehlen, oranger Ring = Vorrats-Konto nah am Boden. Klick auf eine Zeile zeigt Begründung und Konten.` : ''}</div>`
-    root.querySelectorAll('[data-vr-k]').forEach(b => b.addEventListener('click', () => { const key = b.dataset.vrK; _vr.kachel = (!key || _vr.kachel === key) ? '' : key; vrRender() }))
-    root.querySelectorAll('[data-vr-p]').forEach(b => b.addEventListener('click', () => { _vr.person = _vr.person === b.dataset.vrP ? '' : b.dataset.vrP; vrRender() }))
+      + `<div class="kpis vr-kpis">${kpis}</div>`
+      + (d.ki_text ? `<div class="vr-kz-txt vr-ki">${vrEsc(d.ki_text)}${vrUhr(d.ki_text_um) ? ` <span>· Text von ${vrUhr(d.ki_text_um)}</span>` : ''}</div>` : '')
+      + `<div class="grid-2 vr-grid">
+          <div class="panel"><div class="panel-head"><div><div class="panel-title">${vrEsc(titel)}</div><div class="panel-sub">Balken: je Firma ein Stück — voll gesichert, hell mit Funnel, gegen die Untergrenze. Klick klappt auf.</div></div></div>
+            <div class="adm-dist" id="vr-ids">${ids.map(idZeile).join('') || '<div class="adm-empty">Keine ID für diese Auswahl.</div>'}</div></div>
+          <div class="panel"><div class="panel-head"><div><div class="panel-title">Je Firma</div><div class="panel-sub">Klick filtert links</div></div>${legende}</div>
+            <div class="adm-dist" id="vr-firmen">${fListe.map(fZeile).join('') || '<div class="adm-empty">Keine Firma.</div>'}</div></div>
+        </div>`
+      + `<div class="vr-fuss">Punkte je Konto: grün = Chance ab 50 %, gelb 20–50 %, rot darunter, violett = im Vorrat, gestrichelt = Daten fehlen, oranger Ring = nah am Boden.
+        Firmen-Balken: grünes Band = Ziel-Spanne. ✓ = bestellt (zählt 48 h), ‖ pausiert (gerade nichts kaufen), Schloss sperrt. Klick auf eine Firmenzeile zeigt die Rechnung.</div>`
+    root.querySelectorAll('[data-vr-k]').forEach(b => b.addEventListener('click', () => { const key = b.dataset.vrK; _vr.kachel = _vr.kachel === key ? '' : key; vrRender() }))
+    root.querySelectorAll('[data-vr-auf]').forEach(b => b.addEventListener('click', () => { const u = b.dataset.vrAuf; if(_vr.auf.has(u)) _vr.auf.delete(u); else _vr.auf.add(u); vrRender() }))
+    root.querySelectorAll('[data-vr-f-filter]').forEach(b => b.addEventListener('click', () => { const f = b.dataset.vrFFilter; _vr.firma = _vr.firma === f ? '' : f; vrRender() }))
     root.querySelectorAll('[data-vr-s]').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); vrSchalten(b.dataset.vrU, b.dataset.vrF, b.dataset.vrS) }))
     root.querySelectorAll('[data-vr-b]').forEach(b => b.addEventListener('click', ev => {
       ev.stopPropagation()
       const [uid, ...rest] = b.dataset.vrB.split('|')
       vrBestellen(uid, rest.join('|'), !!b.dataset.vrWeg)
     }))
-    // Aufklappen (Stufe 2): Einkaufsliste und Firmenzeile teilen sich denselben Schlüssel ID|Firma
-    root.querySelectorAll('[data-vr-o]').forEach(el => el.addEventListener('click', () => {
+    root.querySelectorAll('[data-vr-o]').forEach(el => el.addEventListener('click', ev => {
+      if(ev.target.closest('button')) return
       const key = el.dataset.vrO
       if(_vr.offen.has(key)) _vr.offen.delete(key); else _vr.offen.add(key)
       vrRender()
     }))
+  }
+
+  // Aufgeklappte Person: je Firma EINE kompakte Zeile (Firma · Funnel-Kette · Bestand/Ziel · Menge · Pille · Knöpfe), dringende zuerst;
+  // pausierte am Ende, gesperrte nur als graue Chips („gesperrt: Topstep, FTMO", Klick = frei). Klick auf eine Zeile: Rechnung.
+  function vrPersonAuf(g, d, s2, aus){
+    const RANG = { jetzt: 0, bald: 1, daten: 2, bestellt: 3, gedeckt: 4, pausiert: 5 }
+    const kf = _vr.kachel ? VR_KACHEL[_vr.kachel] : null
+    // mit Kachel-Filter nur die passenden freien Firmen, ohne Filter alle (pausierte am Ende, gesperrte als Chips)
+    const zeigen = g.meine.filter(x => x.zst !== 'gesperrt' && (!kf || (x.zst !== 'pausiert' && kf(x))))
+      .sort((a, b) => RANG[a.zst] - RANG[b.zst] || (b.z.score || 0) - (a.z.score || 0) || a.z.firma.localeCompare(b.z.firma, 'de'))
+    const zu = g.meine.filter(x => x.zst === 'gesperrt').sort((a, b) => a.z.firma.localeCompare(b.z.firma, 'de'))
+    const nm = vrEsc(g.p.name)
+    const knopf = (z, status, icon, wort) => `<button type="button" class="vr-schloss" data-vr-s="${status}" data-vr-u="${vrEsc(z.user_id)}" data-vr-f="${vrEsc(z.firma)}" title="${d.bereit ? `${nm} bei ${vrEsc(z.firma)} ${wort}` : 'SQL noch nicht eingespielt'}"${aus}>${icon}</button>`
+    const best = (z, weg) => `<button type="button" class="vr-bknopf" data-vr-b="${vrEsc(z.user_id + '|' + z.firma)}"${weg ? ' data-vr-weg="1"' : ''} title="${d.bereit ? (weg ? 'Bestellung zurücknehmen' : 'als bestellt markieren — zählt 48 h als unterwegs, kein Doppelkauf') : 'SQL noch nicht eingespielt'}"${aus}>${weg ? '↺' : '✓'}</button>`
+    const zeile = x => {
+      const z = x.z, f = x.f, key = z.user_id + '|' + z.firma, offen = _vr.offen.has(key), fa = vrFirmaFarbe(z.firma)
+      const menge = vrKauf(z) ? vrMenge(z, f) : x.zst === 'bestellt' ? `${z.bestellt.anzahl || ''} × ${vrEsc(z.bestellt.einheit || z.nachkauf?.einheit || 'Konto')}` : ''
+      const gef = vrGef(z)
+      return `<div class="vr-fz${x.zst === 'pausiert' ? ' pausiert' : ''}" data-vr-o="${vrEsc(key)}" title="Klick: ${offen ? 'zuklappen' : 'Rechnung und Konten'}">
+        <div class="vr-fz-firma"><i style="background:${fa}"></i><span>${vrEsc(z.firma)}</span>${gef ? `<em class="vr-gef" title="${gef} Vorrats-Konto nah am Boden">⚠${VR_NB}${gef}</em>` : ''}</div>
+        <div class="vr-fz-kette">${vrKette(z)}</div>
+        <div class="vr-fz-bar">${vrFzBar(z, f, fa)}</div>
+        <div class="vr-fz-menge">${vrEsc(menge)}</div>
+        <div class="vr-fz-rechts">${vrPille(z, x.zst, s2)}${vrKauf(z) ? best(z) : x.zst === 'bestellt' ? best(z, true) : ''}${x.zst === 'pausiert' ? knopf(z, 'frei', VR_PLAY, 'wieder freischalten') : knopf(z, 'pausiert', VR_PAUSE, 'pausieren (gerade nichts kaufen)')}${knopf(z, 'gesperrt', VR_SCHLOSS, 'sperren')}</div>
+        ${offen ? vrDetailHtml(z, f, `<p>${vrEsc(vrZielTxt(f?.ziel))}</p>${vrTeileHtml(z)}${vrEurHtml(z)}${vrHinweisHtml(z)}`) : ''}
+      </div>`
+    }
+    const zuHtml = zu.length && !kf ? `<div class="vr-fz-zu"><span>gesperrt:</span>${zu.map(x => `<button type="button" class="vr-gchip" data-vr-s="frei" data-vr-u="${vrEsc(x.z.user_id)}" data-vr-f="${vrEsc(x.z.firma)}" title="${d.bereit ? `${nm} bei ${vrEsc(x.z.firma)} freischalten` : 'SQL noch nicht eingespielt'}"${aus}><i></i>${vrEsc(x.z.firma)}</button>`).join('')}</div>` : ''
+    return `<div class="vr-fz-box">${zeigen.map(zeile).join('') || '<div class="vr-leer">Nichts für diese Auswahl.</div>'}${zuHtml}</div>`
   }
 
   // Sicherheits-Auswahl (Finn 06.10.2026): wie sicher das Ziel erreicht sein soll — 50 bis 90 %, Standard 80 %. Speichert per
@@ -55585,22 +55670,6 @@
       return
     }catch(e){ d.sicherheit_ziel = alt; _vr.fehler = 'Sicherheit nicht gespeichert: ' + (e.message || e) }
     _vr.sichert = false; vrRender()
-  }
-
-  // Bestand gegen Ziel als Balken (Einkaufsliste): gesichert (gewichtet) voll, Funnel-Erwartung heller dahinter, grünes Band = Ziel-Spanne.
-  // Stück-Ziele (The5ers) zeigen die Kästchen aus Stufe 1.
-  function vrLueckeHtml(z, f){
-    const ziel = f?.ziel
-    if(!ziel) return ''
-    if(ziel.art === 'stueck') return `<div class="vr-kz-bar">${vrMitteHtml(z, f)}</div>`
-    const plus = ziel.art === 'plus_ueber_start' ? '+' : ''
-    const ges = Number(z.bestand_gewichtet ?? z.bestand) || 0, erw = Math.max(ges, Number(z.erwartet) || 0)
-    const max = Math.max(Number(ziel.bis) * 1.15, erw, ges) || 1
-    const pct = n => Math.max(0, Math.min(100, Number(n) / max * 100))
-    const farbe = VR_DFARBE[z.nachkauf?.dringlichkeit] || 'var(--sub-2)'
-    return `<div class="vr-kz-bar"><div class="vr-bar"><span class="vr-band" style="left:${pct(ziel.von)}%;width:${pct(ziel.bis) - pct(ziel.von)}%"></span>`
-      + `<span class="vr-fill vr-erw" style="width:${pct(erw)}%;background:${farbe}"></span><span class="vr-fill" style="width:${pct(ges)}%;background:${farbe}"></span></div>`
-      + `<div class="vr-bar-txt"><span><b>${plus}${vrK(ges)}</b> gesichert</span>${erw > ges ? `<span><b>+${vrK(erw - ges)}</b> Funnel erwartet</span>` : ''}<span>Ziel <b>${plus}${vrK(ziel.von)}–${vrK(ziel.bis)}</b></span></div></div>`
   }
 
   // Bausteine des Scores (score_teile, Server): kleine Kennzahl-Chips, Wert fett — keine Tabelle
@@ -55647,7 +55716,7 @@
 
   // Aufgeklappte Firmenzeile: KI-Text (wenn da), je Konto ein Chip mit Stufe, Balance, Chance; darunter die Sicherheit ohne/mit Kauf
   // und die Chance, dass mindestens ein Funnel-Konto durchkommt (1 − Produkt der Gegenchancen, Finns Rechenregel 05.10.2026)
-  function vrDetailHtml(z, f){
+  function vrDetailHtml(z, f, vorne){
     const ks = vrListe(z)
     const txt = z.ki_text ? `<p>${vrEsc(z.ki_text)}</p>` : ''
     const chips = ks.length ? `<div class="vr-kcs">${ks.map(k => `<span class="vr-kc" title="${vrEsc(vrKontoTitel(k))}"><i class="vr-pk ${vrPkKl(k)}"></i><b>${vrEsc(k.name || 'Konto')}</b>${vrEsc(vrTypWort(vrStufe(k)))}${k.balance != null ? ' · ' + Math.round(k.balance).toLocaleString('de-DE') : ''} · ${k.daten_fehlen ? 'Daten fehlen' : k.im_bestand ? 'Vorrat' : k.chance != null ? vrProz(k.chance) : '–'}${k.wert_eur != null ? ' · ' + vrEur(k.wert_eur) : ''}${k.gefaehrdet ? ' · gefährdet' : ''}${k.unsicher ? ' · alt' : ''}</span>`).join('')}</div>` : '<div>Keine Konten bei dieser Firma.</div>'
@@ -55657,43 +55726,7 @@
     if(fn.length > 1) zeilen.push(`Mindestens eines der ${fn.length} Funnel-Konten kommt durch: <b>${vrProz(1 - fn.reduce((p, k) => p * (1 - k.chance), 1))}</b>`)
     if(z.nachkauf?.n_roh != null && z.nachkauf.n != null && z.nachkauf.n_roh !== z.nachkauf.n && !z.sperre) zeilen.push(`Dieser Lauf rechnet ${z.nachkauf.n_roh}, die Zahl wechselt erst, wenn der nächste Lauf dasselbe sagt.`)
     if(vrBestellt(z)) zeilen.push(`Bestellt: ${z.bestellt.anzahl || ''}${z.bestellt.offen != null ? `, davon ${z.bestellt.offen} noch nicht angelegt` : ''}${vrUhr(z.bestellt.verfall) ? `, zählt bis ${vrUhr(z.bestellt.verfall)}` : ''}.`)
-    return `<div class="vr-detail">${txt}${chips}${zeilen.map(t => `<div class="vr-mind">${t}</div>`).join('')}</div>`
-  }
-
-  // Einkaufsliste oben (Stufe 2, Finn: Dringlichkeits-Score aus den Zahlen): je freie ID × Firma mit Nachkauf eine Karte, nach Score
-  // sortiert — Ring mit Score in der Dringlichkeitsfarbe, Menge groß, Balken gesichert/erwartet gegen Ziel, Bausteine als Chips, KI-Satz
-  // nur wenn vorhanden. Danach „Daten fehlen"/„Unsicher" (kein Vorschlag) und „bestellt" (blau). Pausiert/gesperrt stehen hier nie.
-  function vrListeHtml(frei, d, name){
-    const firma = new Map(d.firmen.map(f => [f.firma, f]))
-    const dr = z => vrDr(z) || VR_DRING.bald
-    const offen = frei.filter(vrKauf).sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || dr(a)[2] - dr(b)[2] || b.nachkauf.n - a.nachkauf.n)
-    const gesperrt = frei.filter(z => z.nachkauf && z.sperre && !vrBestellt(z))
-    const best = frei.filter(z => z.nachkauf && vrBestellt(z))
-    const aus = d.bereit ? '' : ' disabled'
-    const wer = z => `<span class="vr-kz-wer"><i style="background:${vrFarbe(z.user_id)}"></i><b>${vrEsc(name.get(z.user_id) || z.user_id.slice(0, 8))}</b><span>bei ${vrEsc(z.firma)}</span></span>`
-    const txt = z => z.ki_text ? `<div class="vr-kz-txt">${vrEsc(z.ki_text)}</div>` : ''
-    const key = z => z.user_id + '|' + z.firma
-    const attr = z => `data-vr-o="${vrEsc(key(z))}" title="Klick: Konten und Rechnung ${_vr.offen.has(key(z)) ? 'zuklappen' : 'zeigen'}"`
-    const kl = z => _vr.offen.has(key(z)) ? ' offen' : ''
-    const ring = z => z.score != null ? `<div class="vr-ring" style="--p:${Math.max(0, Math.min(100, Number(z.score)))};--c:${VR_DFARBE[z.nachkauf?.dringlichkeit] || 'var(--sub-2)'}" title="Dringlichkeits-Score ${Math.round(z.score)} von 100"><b>${Math.round(z.score)}</b></div>` : '<div class="vr-ring leer"></div>'
-    const knopf = (z, weg) => `<button type="button" class="vr-bknopf" data-vr-b="${vrEsc(key(z))}"${weg ? ' data-vr-weg="1"' : ''} title="${d.bereit ? (weg ? 'Bestellung zurücknehmen' : 'als bestellt markieren — zählt 48 h als unterwegs, kein Doppelkauf') : 'SQL noch nicht eingespielt'}"${aus}>${weg ? 'zurücknehmen' : '✓<span class="vr-bwort"> bestellt</span>'}</button>`
-    const karten = offen.map(z => { const w = dr(z), gef = vrGef(z), f = firma.get(z.firma)
-        return `<div class="vr-kz${kl(z)}" ${attr(z)}>${ring(z)}
-          <div class="vr-kz-kopf"><span class="vr-d vr-d-${w[1]}">${vrEsc(w[0])}</span>${wer(z)}${knopf(z)}</div>
-          <div class="vr-kz-menge">${vrEsc(vrMenge(z, f))}${z.nachkauf.n_erwartung != null && z.nachkauf.n_erwartung !== z.nachkauf.n ? `<small class="vr-mind-n" title="Mindestkauf nach Erwartungswert; die große Zahl gilt für das gewählte Sicherheitsniveau">mind. ${z.nachkauf.n_erwartung}</small>` : ''}${gef ? `<small>⚠ ${gef} gefährdet</small>` : ''}</div>
-          ${vrLueckeHtml(z, f)}${vrTeileHtml(z)}${vrEurHtml(z)}${vrHinweisHtml(z)}${txt(z)}${_vr.offen.has(key(z)) ? vrDetailHtml(z, f) : ''}</div>` })
-      .concat(gesperrt.map(z => { const n = vrListe(z).filter(k => z.sperre === 'unsicher' ? k.unsicher : k.daten_fehlen).length
-        return `<div class="vr-kz grau${kl(z)}" ${attr(z)}><div class="vr-ring leer"></div>
-          <div class="vr-kz-kopf"><span class="vr-d vr-d-grau">${z.sperre === 'unsicher' ? 'Unsicher' : 'Daten fehlen'}</span>${wer(z)}</div>
-          <div class="vr-kz-menge">kein Vorschlag${n ? ` — ${vrKonten(n)} ${z.sperre === 'unsicher' ? 'mit alter Lesung' : 'ohne Lesung'}` : ''}</div>${vrEurHtml(z)}${vrHinweisHtml(z)}${txt(z)}${_vr.offen.has(key(z)) ? vrDetailHtml(z, firma.get(z.firma)) : ''}</div>` }))
-      .concat(best.map(z => `<div class="vr-kz grau${kl(z)}" ${attr(z)}><div class="vr-ring leer"></div>
-          <div class="vr-kz-kopf"><span class="vr-d vr-d-blau">Bestellt</span>${wer(z)}${knopf(z, true)}</div>
-          <div class="vr-kz-menge">${z.bestellt.anzahl ? z.bestellt.anzahl + ' × ' + vrEsc(z.bestellt.einheit || z.nachkauf.einheit || 'Konto') : 'bestellt'}${vrUhr(z.bestellt.verfall) ? `<small class="vr-grau">zählt bis ${vrUhr(z.bestellt.verfall)}</small>` : ''}</div>${_vr.offen.has(key(z)) ? vrDetailHtml(z, firma.get(z.firma)) : ''}</div>`))
-    const n = offen.reduce((s, z) => s + z.nachkauf.n, 0), nj = offen.filter(z => z.nachkauf.dringlichkeit === 'jetzt').reduce((s, z) => s + z.nachkauf.n, 0)
-    const sub = n ? `${vrKonten(n)} nachkaufen${nj ? ` · davon ${nj} jetzt` : ''} · nach Score sortiert` : 'nichts offen'
-    const ki = d.ki_text ? `<div class="vr-kz-txt vr-ki">${vrEsc(d.ki_text)}${vrUhr(d.ki_text_um) ? ` <span>· Text von ${vrUhr(d.ki_text_um)}</span>` : ''}</div>` : ''
-    return `<div class="panel vr-liste"><div class="panel-head"><div><div class="panel-title">Einkaufsliste</div><div class="panel-sub">${sub}</div></div></div>${ki}`
-      + (karten.length ? karten.join('') : '<div class="vr-leer">Nichts nachzukaufen: jede freie Kombination ist gedeckt.</div>') + '</div>'
+    return `<div class="vr-detail">${vorne || ''}${txt}${chips}${zeilen.map(t => `<div class="vr-mind">${t}</div>`).join('')}</div>`
   }
 
   document.getElementById('vrNeu')?.addEventListener('click', () => vrLaden(true))
