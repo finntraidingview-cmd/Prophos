@@ -6975,7 +6975,7 @@ def admin_vorrat():
         except Exception as e:
             print(f"[vorrat] ⚠️ rechnen: {type(e).__name__}: {e}", flush=True)
             return jsonify({"error": str(e)}), 500
-    if aktion in ("einstellung", "bestellt", "bestellt_weg"):
+    if aktion in ("einstellung", "bestellt", "bestellt_weg", "ziel", "ziel_neu"):
         return _vorrat2_aktion(aktion, body, uid)
     ziel_uid = str(body.get("user_id") or "").strip().lower()
     firma = _firm_norm(str(body.get("firma") or "")[:80])
@@ -8113,14 +8113,128 @@ def _vorrat_antwort(erg1):
         z.setdefault("konten", [])
     out.setdefault("dringlichkeiten", VORRAT2_DRINGLICHKEITEN)
     out.setdefault("heute", [])
+    # Ziele zum Bearbeiten (Finn 06.10.2026): alle Spalten von vorrat_ziele, nach reihe
+    try:
+        out["ziele"] = sb_select("vorrat_ziele", {"select": "firma,art,typen,von,bis,groessen,kauf_einheit,kauf_groesse,reihe",
+                                                  "order": "reihe.asc"})
+    except requests.exceptions.HTTPError:
+        try:
+            out["ziele"] = sb_select("vorrat_ziele", {"select": "firma,art,typen,von,bis,groessen,kauf_einheit,reihe",
+                                                      "order": "reihe.asc"})
+        except requests.exceptions.HTTPError:
+            out["ziele"] = []
     out.setdefault("luecke_gesamt", None)
     return out
+
+
+def vorrat_ziel_pruefen(alt, body, neu=False):
+    """REIN RECHNEND (testbar): Ziel-Änderung von der Seite prüfen (Finn über den Master 06.10.2026: Ziele direkt auf der
+    Vorrat-Seite bearbeiten). alt = bisherige vorrat_ziele-Zeile ({} bei neu), body = POST. Erlaubt: von, bis, groessen,
+    kauf_einheit, kauf_groesse; bei neu zusätzlich art und typen. Die Art einer bestehenden Zeile bleibt (sonst passen Bestand
+    und Ziel nicht mehr zusammen). → (felder zum Schreiben, None) oder (None, Klartext-Fehler)"""
+    out = {}
+    if neu:
+        art = body.get("art")
+        if art not in ("plus_ueber_start", "groessen_summe", "stueck"):
+            return None, "art muss plus_ueber_start, groessen_summe oder stueck sein"
+        typen = body.get("typen")
+        if not isinstance(typen, list) or not typen or any(t not in VORRAT_TYPEN for t in typen):
+            return None, "typen muss eine Liste aus " + ", ".join(VORRAT_TYPEN) + " sein"
+        out.update(art=art, typen=list(dict.fromkeys(typen)))
+    else:
+        art = (alt or {}).get("art")
+    for k in ("von", "bis"):
+        if k in body:
+            v = body.get(k)
+            if v is None or v == "":
+                out[k] = None
+                continue
+            f = _vr2_num(v)
+            if f is None or f < 0:
+                return None, f"{k} muss eine Zahl ≥ 0 sein"
+            out[k] = f
+    if "groessen" in body:
+        g = body.get("groessen")
+        if g in (None, []):
+            out["groessen"] = None
+        else:
+            if not isinstance(g, list) or len(g) > 10:
+                return None, "groessen muss eine Liste [{groesse, stueck}] sein (höchstens 10)"
+            sauber = []
+            for t in g:
+                if not isinstance(t, dict):
+                    return None, "groessen: jeder Eintrag braucht groesse und stueck"
+                gr, st = t.get("groesse"), t.get("stueck")
+                grf = None if gr in (None, "") else _vr2_num(gr)
+                if gr not in (None, "") and (grf is None or grf <= 0):
+                    return None, "groessen: groesse muss > 0 sein (oder leer = jede Größe)"
+                if not isinstance(st, int) or isinstance(st, bool) or st < 0:
+                    return None, "groessen: stueck muss eine ganze Zahl ≥ 0 sein"
+                sauber.append({"groesse": grf, "stueck": st})
+            out["groessen"] = sauber
+    if "kauf_einheit" in body:
+        out["kauf_einheit"] = (str(body.get("kauf_einheit") or "").strip()[:80]) or None
+    if "kauf_groesse" in body:
+        v = body.get("kauf_groesse")
+        f = None if v in (None, "") else _vr2_num(v)
+        if v not in (None, "") and (f is None or f <= 0):
+            return None, "kauf_groesse muss > 0 sein"
+        out["kauf_groesse"] = f
+    ges = dict(alt or {}, **out)
+    if art == "stueck":
+        if not ges.get("groessen"):
+            return None, "bei art stueck sind groessen [{groesse, stueck}] Pflicht"
+    else:
+        if ges.get("von") is None or ges.get("bis") is None:
+            return None, "von und bis sind Pflicht"
+        if float(ges["von"]) > float(ges["bis"]):
+            return None, "von muss ≤ bis sein"
+    if not out:
+        return None, "nichts zu ändern"
+    return out, None
 
 
 def _vorrat2_aktion(aktion, body, uid):
     """POST-Aktionen der Seite: einstellung {sicherheit} · bestellt {user_id, firma, anzahl, einheit} · bestellt_weg {id}."""
     nur = _admin_nur_uid()
     try:
+        if aktion in ("ziel", "ziel_neu"):
+            # Ziele gelten für alle IDs — „nur eigene"-Nutzer dürfen sie nicht ändern (wie die Sicherheit)
+            if nur:
+                return jsonify({"error": "nur Admin"}), 403
+            firma = _firm_norm(str(body.get("firma") or "")[:80])
+            if firma == "—":
+                return jsonify({"error": "firma fehlt"}), 400
+            try:
+                rows = sb_select("vorrat_ziele", {"select": "*"})
+            except requests.exceptions.HTTPError as e:
+                if getattr(e.response, "status_code", 0) == 404:
+                    return jsonify({"error": f"SQL noch nicht eingespielt ({VORRAT_SQL})"}), 503
+                raise
+            alt = next((r for r in rows if _firm_norm(r.get("firma")) == firma), None)
+            if aktion == "ziel" and not alt:
+                return jsonify({"error": f"{firma} hat noch kein Ziel — erst anlegen (aktion ziel_neu)"}), 404
+            if aktion == "ziel_neu":
+                if alt:
+                    return jsonify({"error": f"{firma} hat schon ein Ziel — ändern mit aktion ziel"}), 409
+                firmen_regeln, _p, _o, _ok = _vorrat2_tabellen()
+                if not ap_kw_param(ap_regel_finden(firmen_regeln, firma)):
+                    return jsonify({"error": f"{firma} hat keine Kernwerte in auto_plan_regeln (Drawdown, Ziele, Kaufpreis) — "
+                                             f"ohne sie lässt sich keine Chance rechnen. Erst die Kernwerte anlegen."}), 400
+            felder, fehler = vorrat_ziel_pruefen(alt or {}, body, neu=(aktion == "ziel_neu"))
+            if fehler:
+                return jsonify({"error": fehler}), 400
+            felder["updated_at"] = _wt_now_iso()
+            if aktion == "ziel":
+                neu_row = (sb_update("vorrat_ziele", {"firma": f"eq.{alt['firma']}"}, felder) or [None])[0]
+            else:
+                reihe = max([int(r.get("reihe") or 0) for r in rows] + [0]) + 1
+                neu_row = sb_insert("vorrat_ziele", dict(felder, firma=firma, reihe=reihe))
+            try:
+                vorrat2_lauf("hand")            # sofort neu rechnen wie „Jetzt aktualisieren"
+            except Exception as e:
+                print(f"[vorrat2] ⚠️ Lauf nach Ziel-Änderung: {type(e).__name__}: {e}", flush=True)
+            return jsonify({"ok": True, "ziel": neu_row})
         if aktion == "einstellung":
             if nur:
                 return jsonify({"error": "nur Admin"}), 403

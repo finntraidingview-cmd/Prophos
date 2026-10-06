@@ -63,12 +63,13 @@ def lade():
     i = src.index("VORRAT2_SQL = ")
     konst = src[i:src.index("_vr2_info = ", i)]
     i = src.index("AP_GROESSE_TOLERANZ = ")
-    teile = ["import random\nimport zlib\nimport re", konst, src[i:src.index("\n", i)], block("pb_handelstag")]
+    k1 = src.index("VORRAT_TYPEN = (")
+    teile = ["import random\nimport zlib\nimport re", src[k1:src.index("\n", k1)], konst, src[i:src.index("\n", i)], block("pb_handelstag")]
     j = src.index("AP_KW_FUNDED = ")
     teile.append(src[j:src.index("\n\n\n", j)])
     teile += [block(f) for f in ("_ap_norm", "ap_regel_finden", "ap_groesse", "ap_kw_param", "_ap_kw_kauf", "_ap_kw_wachsen",
                                  "ap_kontowert", "vorrat_stufen_aus_kernwerten")]
-    teile += [block(f) for f in ("_vr2_k", "vorrat_satz", "vorrat_tagesliste", "_vr2_num", "vorrat_chance_stufe", "vorrat_chance_kette", "vorrat_bestand_konto",
+    teile += [block(f) for f in ("vorrat_ziel_pruefen", "_vr2_k", "vorrat_satz", "vorrat_tagesliste", "_vr2_num", "vorrat_chance_stufe", "vorrat_chance_kette", "vorrat_bestand_konto",
                                  "vorrat_alter_handelstage", "vorrat_mc", "vorrat_score", "vorrat_totband", "vorrat_anzeige_n",
                                  "vorrat_quoten", "vorrat2_zelle", "vorrat2_slot")]
     exec("\n\n".join(teile), ns)
@@ -276,6 +277,28 @@ def main():
           (6, []))
     pruef("Tagesliste-Eintrag: Stückpreis, Zeilenkosten, Satz", (h[0]["preis_eur"], h[0]["kosten_eur"], h[0]["satz"].endswith(".")),
           (500, 500 * h[0]["anzahl"], True))
+
+    # ── Ziele bearbeiten (Finn 06.10.2026) ──
+    zp = ns["vorrat_ziel_pruefen"]
+    fn_alt = {"firma": "FundedNext", "art": "groessen_summe", "typen": ["funded_cfd"], "von": 200000, "bis": 300000}
+    pruef("Ziel ändern: von/bis", zp(fn_alt, {"von": 150000, "bis": "250000"}), ({"von": 150000.0, "bis": 250000.0}, None))
+    pruef("Ziel: von > bis abgelehnt", zp(fn_alt, {"von": 400000})[1], "von muss ≤ bis sein")
+    pruef("Ziel: negative Zahl abgelehnt", zp(fn_alt, {"bis": -1})[1], "bis muss eine Zahl ≥ 0 sein")
+    pruef("Ziel: Text statt Zahl abgelehnt", zp(fn_alt, {"von": "viel"})[1], "von muss eine Zahl ≥ 0 sein")
+    pruef("Ziel: nichts zu ändern", zp(fn_alt, {})[1], "nichts zu ändern")
+    pruef("Ziel: Kauf-Einheit und -Größe", zp(fn_alt, {"kauf_einheit": " 100k Stellar ", "kauf_groesse": 100000})[0],
+          {"kauf_einheit": "100k Stellar", "kauf_groesse": 100000.0})
+    t5_alt = {"firma": "The5%ers", "art": "stueck", "typen": ["funded_cfd"], "groessen": [{"groesse": 100000, "stueck": 1}]}
+    pruef("Stück-Ziel: groessen sauber", zp(t5_alt, {"groessen": [{"groesse": "200000", "stueck": 2}, {"groesse": None, "stueck": 1}]})[0],
+          {"groessen": [{"groesse": 200000.0, "stueck": 2}, {"groesse": None, "stueck": 1}]})
+    pruef("Stück-Ziel: stueck keine ganze Zahl", zp(t5_alt, {"groessen": [{"groesse": 100000, "stueck": 1.5}]})[1],
+          "groessen: stueck muss eine ganze Zahl ≥ 0 sein")
+    pruef("Stück-Ziel: groessen leeren abgelehnt", zp(t5_alt, {"groessen": []})[1], "bei art stueck sind groessen [{groesse, stueck}] Pflicht")
+    pruef("Art bleibt bei Änderung", "art" in (zp(fn_alt, {"art": "stueck", "von": 1, "bis": 2})[0] or {}), False)
+    pruef("Neu: Firma mit Summen-Ziel", zp({}, {"art": "groessen_summe", "typen": ["funded_cfd"], "von": 100000, "bis": 200000}, neu=True),
+          ({"art": "groessen_summe", "typen": ["funded_cfd"], "von": 100000.0, "bis": 200000.0}, None))
+    pruef("Neu: falscher Typ abgelehnt", zp({}, {"art": "groessen_summe", "typen": ["gold"], "von": 1, "bis": 2}, neu=True)[1].startswith("typen muss"), True)
+    pruef("Neu: ohne von/bis abgelehnt", zp({}, {"art": "plus_ueber_start", "typen": ["winning_days"]}, neu=True)[1], "von und bis sind Pflicht")
 
     # ── Score ──
     sc = ns["vorrat_score"]
