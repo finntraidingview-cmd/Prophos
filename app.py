@@ -7238,6 +7238,7 @@ def vorrat_stufen_aus_kernwerten(regel, param=None):
         stufen["winning_days"] = {"modell": "bestand",
                                   "boden_ueber_start_usd": (p.get("wd_boden_ueber_start_usd") or {}).get(key)}
     stufen["_erste"] = phasen[0]
+    stufen["_groesse"] = min(kw.get("groessen") or [100000])     # Bezugsgröße für den Formel-Startwert (vorrat_quoten)
     return stufen
 
 
@@ -7441,9 +7442,13 @@ def vorrat_quoten(faelle, stufen_alle, param=None):
         z[0 if aus == "bestanden" else 1] += 1
     out = {}
     for (firma, stufe), (b, gb) in zaehl.items():
-        regel = (stufen_alle.get(firma) or {}).get(stufe)
+        st_f = stufen_alle.get(firma) or {}
+        regel = st_f.get(stufe)
         n = b + gb
-        e = vorrat_chance_stufe(regel, 100000, 100000, 100000) if regel else {"chance": None}
+        # Startwert bei der echten Kontogröße der Firma (06.10.2026 live: mit festen 100k rechnete Tradeify 6.000 statt 9.000 Ziel
+        # → Formel 36 % statt 22 %, Faktor 0,66 statt 0,84, Chance je neues Konto 3,5 % statt 4,4 %)
+        g0 = float(st_f.get("_groesse") or 100000)
+        e = vorrat_chance_stufe(regel, g0, g0, g0) if regel else {"chance": None}
         formel = e.get("chance")
         q = b / n if n else None
         w, fk = 0.0, None
@@ -7813,16 +7818,27 @@ def vorrat2_rechnen_lauf(quelle):
 
 def vorrat2_lauf(quelle="hand", slot=None):
     """Lauf mit Protokoll-Zeile. Takt: die Zeile mit slot ist der Claim (Unique-Index) — eine zweite Instanz bekommt 409 und lässt
-    es. → Lauf-Zeile {id, at, quelle, ergebnis} oder None (Slot schon vergeben)."""
-    with _vr2_lock:
+    es. → Lauf-Zeile {id, at, quelle, ergebnis} oder None (Slot schon vergeben).
+    Immer in einem EIGENEN App-Kontext (06.10.2026, erster Takt auf Railway: „Working outside of application context" —
+    _admin_basis liest über _admin_nur_uid Flasks g, das es im Takt-Thread nicht gibt). Der frische Kontext hat ein leeres g:
+    der Lauf sieht alle IDs, auch wenn ein „nur eigene"-Nutzer „Jetzt aktualisieren" drückt — sonst speicherte sein Klick einen
+    Lauf nur mit seinen Zellen für alle."""
+    with _vr2_lock, app.app_context():
         try:
             row = sb_insert("vorrat_lauf", {"quelle": quelle, "slot": slot})
         except requests.exceptions.HTTPError as e:
             if getattr(e.response, "status_code", 0) == 409:
-                return None
-            if getattr(e.response, "status_code", 0) == 404:
+                # Slot schon geclaimt. Ist er gescheitert (fehler gesetzt, kein Ergebnis), übernimmt dieser Versuch die Zeile —
+                # der Guard im PATCH sorgt dafür, dass das genau EINE Instanz tut (06.10.2026: Slot 11:00 blieb mit Fehler stehen)
+                neu = sb_update("vorrat_lauf", {"quelle": "eq.takt", "slot": f"eq.{slot}", "ergebnis": "is.null",
+                                                "fehler": "not.is.null"}, {"fehler": None, "at": _wt_now_iso()})
+                if not neu:
+                    return None
+                row = neu[0]
+            elif getattr(e.response, "status_code", 0) == 404:
                 raise RuntimeError(f"SQL noch nicht eingespielt ({VORRAT2_SQL})")
-            raise
+            else:
+                raise
         try:
             erg = vorrat2_rechnen_lauf(quelle)
             erg["lauf_id"] = row.get("id")
@@ -7832,6 +7848,7 @@ def vorrat2_lauf(quelle="hand", slot=None):
             return row
         except Exception as e:
             try:
+                # fehler gesetzt = der Slot darf von einem späteren Versuch übernommen werden (siehe 409 oben)
                 sb_update("vorrat_lauf", {"id": f"eq.{row['id']}"}, {"fehler": f"{type(e).__name__}: {e}"[:500]})
             except Exception:
                 pass

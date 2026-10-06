@@ -282,6 +282,11 @@ def main():
     pruef("1-Step-Konto (CFD als challenge) rechnet wie Phase 1", kette(S["FundedNext"], "challenge", 100000, 100000)["chance"],
           kette(S["FundedNext"], "phase1", 100000, 100000)["chance"], 1e-12)
     pruef("Firma ohne Kernwerte → leer", ak(rf(KERN, "Lucid")), {})
+    f31 = [("Tradeify", "challenge", "bestanden")] * 5 + [("Tradeify", "challenge", "geblowt")] * 26
+    r = ns["vorrat_quoten"](f31, {"Tradeify": S["Tradeify"]})[("Tradeify", "challenge")]
+    p_ch = (4500 / 8100) ** 2 * (4500 / 6300)
+    pruef("Quoten Tradeify (live 06.10.): Formel bei 150k = 22 %, nicht 36 % (100k)", round(r["formel"], 6), round(p_ch, 6))
+    pruef("… Faktor = (31/51 × 5/31 + 20/51 × 22 %) ÷ 22 %", r["faktor"], ((31 / 51) * (5 / 31) + (20 / 51) * p_ch) / p_ch, 1e-9)
     pruef("kein Funded-Weg im Parameter → daten_fehlen", ak(rf(KERN, "Tradeify"), {"funded_wege": {}})["funded"]["daten_fehlen"], True)
     kwf = ns["ap_kw_param"](rf(KERN, "FundedNext"))
     q = zelle(ZIEL_FN, S["FundedNext"], idf, "frei", seed=11, kw=kwf)
