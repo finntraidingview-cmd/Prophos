@@ -1537,79 +1537,126 @@ def _cursor_set(x, y):
 def maus_bahn(cx, cy, x, y, schritte=None, zufall=None):
     """REIN RECHNEND (testbar): Punkte einer menschlichen Mausbahn von (cx, cy) nach (x, y) — Finn 06.10.2026: „wenn man eine Maus
     immer so an einer Linie fährt … das wäre besser, wenn die Maus ganz normal das Tempo verändert und nicht immer genau den gleichen
-    Punkt trifft". Leichte Kurve (quadratische Bézier mit einem gewürfelten Kontrollpunkt seitlich der Geraden, Ausschlag ≤ ~12 % der
-    Strecke, höchstens 60 px), Tempo mit Anlauf und Abbremsen (Smoothstep: langsam los, schnell in der Mitte, weich ins Ziel) und ein
-    kleines Zittern (≤ 1 px) unterwegs. Der LETZTE Punkt ist immer exakt (x, y) — der Hover-Beweis danach bleibt unberührt.
-    Schrittzahl nach Strecke (6 … 28), zufall = random.Random für Tests. -> [(px, py), …], mindestens ein Punkt."""
+    Punkt trifft", dann „die Maus komplett aus Zufallsprinzip bewegen, Geschwindigkeit anpassen, richtig menschlich". Je Fahrt wird
+    alles neu gewürfelt: kubische Bézier-Kurve mit ZWEI Stützpunkten seitlich der Geraden (Ausschlag je 8–18 % der Strecke, ≤ 90 px),
+    Tempo-Profil mit Anlauf und Abbremsen in wechselnder Schärfe (Exponent 1,4–3), Schrittzahl nach Strecke mit Streuung, Zittern
+    0,3–1,5 px unterwegs, bei Wegen über 120 px in rund einem Drittel der Fälle ein leichtes Überschießen (3–12 px über das Ziel
+    hinaus) mit Korrektur zurück. Der LETZTE Punkt ist immer exakt (x, y) — der Hover-Beweis danach bleibt unberührt.
+    zufall = random.Random für Tests. -> [(px, py), …], mindestens ein Punkt."""
     import math
     rnd = zufall or random
     cx, cy, x, y = float(cx), float(cy), float(x), float(y)
     dx, dy = x - cx, y - cy
     strecke = math.hypot(dx, dy)
-    if schritte is None:
-        schritte = max(6, min(28, int(6 + strecke / 45.0)))
     if strecke < 1.0:
         return [(int(round(x)), int(round(y)))]
-    # Kontrollpunkt: Mitte der Geraden, seitlich versetzt (Normale), Richtung und Maß gewürfelt
-    nx, ny = -dy / strecke, dx / strecke
-    aus = min(60.0, strecke * 0.12) * rnd.uniform(-1.0, 1.0)
-    kx, ky = cx + dx * rnd.uniform(0.35, 0.65) + nx * aus, cy + dy * rnd.uniform(0.35, 0.65) + ny * aus
+    if schritte is None:
+        schritte = max(6, min(40, int(4 + strecke / rnd.uniform(30.0, 60.0)) + rnd.randint(0, 4)))
+    schritte = max(1, int(schritte))
+    nx, ny = -dy / strecke, dx / strecke                       # Normale zur Geraden
+    a1 = min(90.0, strecke * rnd.uniform(0.08, 0.18)) * rnd.choice((-1.0, 1.0))
+    a2 = min(90.0, strecke * rnd.uniform(0.08, 0.18)) * rnd.choice((-1.0, 1.0))
+    s1, s2 = rnd.uniform(0.2, 0.4), rnd.uniform(0.6, 0.8)
+    k1 = (cx + dx * s1 + nx * a1, cy + dy * s1 + ny * a1)
+    k2 = (cx + dx * s2 + nx * a2, cy + dy * s2 + ny * a2)
+    # Ziel der Kurve: bei längeren Wegen manchmal leicht über das Ziel hinaus, danach Korrektur zurück
+    ueber = strecke > 120.0 and rnd.random() < 0.35
+    if ueber:
+        f = rnd.uniform(3.0, 12.0) / strecke
+        zx, zy = x + dx * f + nx * rnd.uniform(-3.0, 3.0), y + dy * f + ny * rnd.uniform(-3.0, 3.0)
+    else:
+        zx, zy = x, y
+    p = rnd.uniform(1.4, 3.0)                                  # Schärfe von Anlauf/Abbremsen
+    zit = rnd.uniform(0.3, 1.5)
     pts = []
     for i in range(1, schritte + 1):
         u = i / schritte
-        t = u * u * (3.0 - 2.0 * u)                           # Smoothstep: Anlauf + Abbremsen
-        px = (1 - t) ** 2 * cx + 2 * (1 - t) * t * kx + t * t * x
-        py = (1 - t) ** 2 * cy + 2 * (1 - t) * t * ky + t * t * y
+        t = (u ** p) / (u ** p + (1.0 - u) ** p)               # Ease-in-out, symmetrisch, Exponent gewürfelt
+        m = 1.0 - t
+        px = m ** 3 * cx + 3 * m * m * t * k1[0] + 3 * m * t * t * k2[0] + t ** 3 * zx
+        py = m ** 3 * cy + 3 * m * m * t * k1[1] + 3 * m * t * t * k2[1] + t ** 3 * zy
         if i < schritte:
-            px += rnd.uniform(-1.0, 1.0)
-            py += rnd.uniform(-1.0, 1.0)
+            px += rnd.uniform(-zit, zit)
+            py += rnd.uniform(-zit, zit)
         pts.append((int(round(px)), int(round(py))))
+    if ueber:                                                  # Korrektur: 2–4 kurze Schritte vom Überschuss zurück ins Ziel
+        n = rnd.randint(2, 4)
+        for j in range(1, n + 1):
+            v = j / n
+            pts.append((int(round(zx + (x - zx) * v + rnd.uniform(-0.5, 0.5))), int(round(zy + (y - zy) * v + rnd.uniform(-0.5, 0.5)))))
     pts[-1] = (int(round(x)), int(round(y)))
     return pts
+
+
+def maus_takt(n, zufall=None):
+    """REIN RECHNEND (testbar): Wartezeit (s) nach jedem der n Schritte einer Fahrt — Grundtempo je Fahrt 0,7–1,6× gewürfelt auf
+    8–22 ms je Schritt, dazu in rund 15 % der Fahrten EIN kurzes Zögern (40–120 ms) irgendwo mitten auf dem Weg. -> [s, …] (Länge n)"""
+    rnd = zufall or random
+    n = max(0, int(n))
+    tempo = rnd.uniform(0.7, 1.6)
+    out = [rnd.uniform(0.008, 0.022) * tempo for _ in range(n)]
+    if n >= 4 and rnd.random() < 0.15:
+        out[rnd.randint(1, n - 2)] += rnd.uniform(0.04, 0.12)
+    return out
 
 
 def _maus_fahren(x, y, schritte=None):
     """Den ECHTEN Mauszeiger sichtbar hinfahren (nicht teleportieren) — Finns
     Ansage: man soll sehen, wie der Bot die Kontrolle uebernimmt. SetCursorPos
     statt pywinauto.mouse (Parsec-Doppelcursor, s.o.). Seit 06.10.2026 auf der
-    Bahn aus maus_bahn (Kurve, Anlauf/Abbremsen, Zittern) statt 8 gleicher
-    Schritte auf der Geraden; je Schritt 8–22 ms gewuerfelt (vorher fix 12 ms)."""
+    Bahn aus maus_bahn (Kurve, Anlauf/Abbremsen, Zittern, Ueberschiessen) im
+    Takt aus maus_takt statt 8 gleicher Schritte auf der Geraden je fix 12 ms."""
     try:
         cx, cy = _cursor_pos()
     except Exception:
         cx, cy = x, y
-    for px, py in maus_bahn(cx, cy, x, y, schritte=schritte):
+    pts = maus_bahn(cx, cy, x, y, schritte=schritte)
+    for (px, py), dt in zip(pts, maus_takt(len(pts))):
         try:
             _cursor_set(px, py)
         except Exception:
             break
-        time.sleep(random.uniform(0.008, 0.022))
+        time.sleep(dt)
 
 
 def _maus_zittern(dauer):
-    """Waehrend einer Pause nicht erstarren (Finn 06.10.2026: „dass die Maus sich die ganze Zeit nur so ein bisschen bewegt"):
-    ein paar kleine, unregelmaessige Bewegungen (2–7 px) um den aktuellen Punkt, dazwischen Stillstand — nur Windows, nie waehrend
-    eines Klicks (wird allein aus Pausen aufgerufen, VOR der naechsten Fahrt zum Ziel; der Hover-Beweis liegt immer nach der Fahrt).
+    """Waehrend einer Pause nicht erstarren (Finn 06.10.2026: „dass die Maus sich die ganze Zeit nur so ein bisschen bewegt … komplett
+    aus Zufallsprinzip"): je Zug wird gewuerfelt — Stillstand (0,15–0,7 s), kleines Zittern (2–7 px) oder langsames Wandern
+    (15–50 px weg, spaeter wieder in die Naehe zurueck), jeweils auf einer maus_bahn im maus_takt. Nur Windows, nie waehrend eines
+    Klicks (wird allein aus Pausen aufgerufen, VOR der naechsten Fahrt zum Ziel; der Hover-Beweis liegt immer nach der Fahrt).
     Faellt still auf reines Warten zurueck, wenn der Zeiger nicht lesbar ist."""
+    import math
     ende = time.time() + max(0.0, float(dauer))
     try:
         cx, cy = _cursor_pos()
     except Exception:
         time.sleep(max(0.0, ende - time.time()))
         return
+    heim = (cx, cy)
     while True:
         rest = ende - time.time()
         if rest <= 0:
             break
-        time.sleep(min(rest, random.uniform(0.15, 0.6)))        # Stillstand zwischen zwei Zuckern
+        time.sleep(min(rest, random.uniform(0.15, 0.7)))         # Stillstand zwischen zwei Zuegen
         if ende - time.time() <= 0.05:
             break
-        zx, zy = cx + random.randint(-7, 7), cy + random.randint(-7, 7)
+        art = random.random()
+        if art < 0.3:
+            continue                                            # nur stehen
+        if art < 0.75:
+            zx, zy = cx + random.randint(-7, 7), cy + random.randint(-7, 7)
+        elif math.hypot(cx - heim[0], cy - heim[1]) > 30:
+            zx, zy = heim[0] + random.randint(-8, 8), heim[1] + random.randint(-8, 8)   # zurueck in die Naehe
+        else:
+            w = random.uniform(15.0, 50.0)
+            ang = random.uniform(0.0, 6.2832)
+            zx, zy = cx + w * math.cos(ang), cy + w * math.sin(ang)
         try:
-            for px, py in maus_bahn(cx, cy, zx, zy, schritte=random.randint(3, 6)):
+            pts = maus_bahn(cx, cy, zx, zy, schritte=random.randint(3, 9))
+            for (px, py), dt in zip(pts, maus_takt(len(pts))):
                 _cursor_set(px, py)
-                time.sleep(random.uniform(0.008, 0.02))
-            cx, cy = zx, zy
+                time.sleep(dt)
+            cx, cy = pts[-1]
         except Exception:
             time.sleep(max(0.0, ende - time.time()))
             return
