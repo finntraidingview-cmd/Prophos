@@ -1184,6 +1184,18 @@
   #dashboard-view .adm-num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
   #dashboard-view .adm-scroll{max-height:440px;overflow:auto}
   #dashboard-view .adm-empty{padding:26px 4px;text-align:center;color:var(--sub);font-size:13px}
+  /* Geparkt nach Kontowert (07.10.2026): Firmen-Kacheln (Muster .kpi) + Konten-Balken (grün gezahlt, violett Rest) */
+  #dashboard-view .adm-gp-kacheln{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px}
+  #dashboard-view .adm-gp-kachel{font:inherit;color:inherit;text-align:left;cursor:pointer;border:1px solid var(--border-soft);box-shadow:none}
+  #dashboard-view .adm-gp-kachel.is-on{border-color:var(--violet);background:var(--violet-tint)}
+  #dashboard-view .adm-gp-kachel .kpi-value{font-size:19px}
+  #dashboard-view .adm-gp-kachel small{display:block;font-size:11px;color:var(--sub);margin-top:2px;font-variant-numeric:tabular-nums}
+  #dashboard-view .adm-gp-konten .adm-row{grid-template-columns:minmax(150px,1.5fr) minmax(70px,1.6fr) auto 64px}
+  #dashboard-view .adm-gp-spur{display:flex;height:8px;border-radius:999px;background:var(--surface-tint);overflow:hidden}
+  #dashboard-view .adm-gp-spur > span{height:100%}
+  #dashboard-view .adm-gp-konten .adm-row.is-plus{opacity:.5}
+  @media (max-width:640px){#dashboard-view .adm-gp-konten .adm-row{grid-template-columns:minmax(0,1fr) auto;row-gap:6px}
+    #dashboard-view .adm-gp-konten .adm-gp-spur{grid-column:1 / -1;order:3}}
 
   #dashboard-view .table-wrap{overflow-x:auto}
   #dashboard-view table.t{width:100%;border-collapse:collapse;font-size:13px}
@@ -9609,7 +9621,20 @@
               <div class="adm-vl-legend" id="adm-person-legend"></div>
             </div>
 
-            <div class="panel" style="margin-top:14px">
+            <!-- GEPARKT NACH KONTOWERT (07.10.2026, Finn: seit 24.09. ohne Hedge → keine Hedge-Kosten mehr, geparkt = Wert des
+                 Kontos): je Firma eine Kachel statt Zahlentabelle, Klick klappt die Konten als Balken auf (Wert · gezahlt · Rest).
+                 Nur im Modus „Nur aktive" mit gp_* vom Server sichtbar; dann tritt „Kosten je Firma" zurück (admGpRender). -->
+            <div class="panel" style="margin-top:14px" id="adm-gp-panel" hidden>
+              <div class="panel-head">
+                <div>
+                  <div class="panel-title">Geparktes Kapital je Firma</div>
+                  <div class="panel-sub" id="adm-gp-sub">Wert = echte Kosten (Kauf + Hedge) + Kontowert-Zuwachs ohne Hedge · Payouts ≥ Wert = raus</div>
+                </div>
+              </div>
+              <div class="adm-gp-kacheln" id="adm-gp-kacheln"></div>
+            </div>
+
+            <div class="panel" style="margin-top:14px" id="adm-kosten-panel">
               <div class="panel-head">
                 <div>
                   <div class="panel-title">Kosten je Firma</div>
@@ -9676,7 +9701,9 @@
                 </div>
                 <button class="btn btn-ghost" id="adm-acc-back" style="padding:7px 12px">Alle anzeigen</button>
               </div>
-              <div class="table-wrap adm-scroll">
+              <!-- Geparkt nach Kontowert (07.10.2026): Konten als Balken (grün = gezahlt, violett = Rest) statt Tabelle -->
+              <div class="adm-dist adm-gp-konten" id="adm-gp-konten" hidden></div>
+              <div class="table-wrap adm-scroll" id="adm-acc-tabelle">
                 <table class="t">
                   <thead><tr>
                     <th>Account</th>
@@ -12473,12 +12500,25 @@
     // Vorgänger zweimal drin — einmal in der Kette seines Nachfolgers, einmal
     // als eigene Zeile. Dort sind deshalb die Eigen-Zahlen richtig.
     const admChainMode = () => $('adm-status').value === 'active'
+    /* GEPARKT NACH KONTOWERT (07.10.2026, Finn: „Neue Konten haben seit 24.09. keine Hedge-Kosten mehr" + Crosscheck: echte
+     * Fusion-Hedge-Kosten von Funded/WD zählen voll). Der Server rechnet je aktivem Konto gp_wert = echte Gesamtkosten der Kette
+     * (Kauf + Hedge) + Kontowert-Zuwachs der Trades ohne Hedge, gp_gezahlt = Payouts der Kette, gp_plus = Payouts ≥ Wert.
+     * Ein Konto im Plus zählt weder mit noch gegen (Finn bestätigt). Gilt nur im Modus „Nur aktive" und nur, wenn der Server
+     * gp_aktiv liefert (ohne Kapitel-Filter) — sonst die alte Kosten-Rechnung. */
+    const admGpModus = () => admChainMode() && !!(admData && admData.gp_aktiv)
     function admVals(r){
-      return admChainMode()
+      if(admGpModus() && r.gp_wert != null)
+        return { buy:r.c_buy ?? r.buy, hedge:r.c_hedge ?? r.hedge, payouts:r.c_payouts ?? r.payouts,
+                 parked: r.gp_plus ? 0 : (Number(r.gp_rest) || 0), plus: !!r.gp_plus }
+      const v = admChainMode()
         ? { buy:r.c_buy ?? r.buy, hedge:r.c_hedge ?? r.hedge,
             payouts:r.c_payouts ?? r.payouts, parked:r.c_parked ?? r.parked }
         : { buy:r.buy, hedge:r.hedge, payouts:r.payouts, parked:r.parked }
+      v.plus = (Number(v.parked) || 0) < 0   // alte Regel: Kosten − Payouts unter 0 = im Plus
+      return v
     }
+    // Was ein Konto zur Geparkt-Summe beiträgt: im Plus 0, sonst nie unter 0 (26.08.2026 / 07.10.2026)
+    const admParkedOf = v => v.plus ? 0 : Math.max(0, Number(v.parked) || 0)
 
     function admFiltered(){
       const fPerson = $('adm-person').value
@@ -12521,12 +12561,16 @@
       const m = new Map()
       for(const r of rows){
         const k = r[key] || '—'
-        const g = m.get(k) || { key:k, label: r[labelKey] || k, accounts:0, buy:0, hedge:0, payouts:0, parked:0, net:0, mpl:0, mplDa:false }
+        const g = m.get(k) || { key:k, label: r[labelKey] || k, accounts:0, buy:0, hedge:0, payouts:0, parked:0, net:0, mpl:0, mplDa:false,
+                                plusN:0, gpWert:0, gpGez:0, gpN:0 }
         const v = admVals(r)
         g.accounts++; g.buy += v.buy; g.hedge += v.hedge; g.payouts += v.payouts
         if(r.master_pl_k != null){ g.mpl += Number(r.master_pl_k) || 0; g.mplDa = true }   // Kapitel ohne Hedge (24.09.2026)
-        g.parked += Math.max(0, v.parked)
-        g.net    += v.parked
+        g.parked += admParkedOf(v)
+        // Kontowert-Modus (07.10.2026): ein Konto im Plus wird auch nicht gegengerechnet — net bleibt ohne es
+        g.net    += (admGpModus() && v.plus) ? 0 : v.parked
+        if(v.plus) g.plusN++
+        if(admGpModus() && r.gp_wert != null && !v.plus){ g.gpWert += Number(r.gp_wert) || 0; g.gpGez += Number(r.gp_gezahlt) || 0; g.gpN++ }
         m.set(k, g)
       }
       // Gleichstand bei 0 (alle Accounts im Plus): der mit dem groessten Plus nach oben.
@@ -13519,7 +13563,7 @@
         const share = admShare(g, posTotal)
         // parked ist seit dem Kappen nie negativ — „im Plus" heisst jetzt:
         // KEIN einziger Account bindet noch Kapital (26.08.2026).
-        const imPlus = g.parked === 0 && g.net < 0
+        const imPlus = g.parked === 0 && g.plusN > 0   // 07.10.2026: über die Plus-Konten statt über net (Kontowert-Modus rechnet sie nicht gegen)
         const row = document.createElement('button')
         row.type = 'button'
         row.className = 'adm-row adm-row-btn' + (String(active) === String(g.key) ? ' is-on' : '')
@@ -13536,8 +13580,15 @@
           nm.insertAdjacentHTML('afterbegin', admDot(g.key))   // Farbe wie im Verlauf
           nm.insertAdjacentHTML('beforeend', admMplUnterzeile(g))   // Kapitel ohne Hedge: Master-P&L statt Hedge (24.09.2026)
         }
+        if(filterId === 'adm-firm' && admGpModus()){
+          // Kontowert-Modus (07.10.2026): Wert · gezahlt der zählenden Konten als Unterzeile
+          const s = document.createElement('small')
+          s.textContent = `Wert ${admEur.format(g.gpWert)} · gezahlt ${admEur.format(g.gpGez)}` + (g.plusN ? ` · ${g.plusN} im Plus` : '')
+          nm.appendChild(s)
+        }
         row.title = `${g.label} · ${g.accounts} Account${g.accounts === 1 ? '' : 's'}`
-          + (g.net < 0 ? ` · ${admEur.format(-g.net)} im Plus (zählt nicht gegen die Summe)` : '')
+          + (admGpModus() ? (g.plusN ? ` · ${g.plusN} im Plus (zählt nicht mit, nicht gegen)` : '')
+                          : (g.net < 0 ? ` · ${admEur.format(-g.net)} im Plus (zählt nicht gegen die Summe)` : ''))
           + ' — zum Aufklappen klicken'
         row.addEventListener('click', () => {
           const sel = $(filterId)
@@ -13696,6 +13747,76 @@
       }
     }
 
+    /* ── Geparkt nach Kontowert: Firmen-Kacheln (07.10.2026, Finn: „Summe + Aufschlüsselung je Firma, Kacheln/Balken im Stil von
+     * Finanzen, keine Zahlentabelle; Klick auf eine Firma zeigt die Konten mit Wert, gezahlt, Rest"). Klick setzt den Firmen-Filter
+     * wie der Balken in „Verteilung nach Prop-Firma" (gleicher Zustand, gleiche Aufklappung). Eigene Verdrahtung je Kachel. */
+    function admGpKacheln(list, posTotal){
+      const box = $('adm-gp-kacheln'); if(!box) return
+      box.innerHTML = ''
+      if(!list.length){ box.innerHTML = '<div class="adm-empty">Nichts für diesen Filter.</div>'; return }
+      const aktiv = $('adm-firm').value
+      for(const g of list){
+        const share = admShare(g, posTotal)
+        const b = document.createElement('button')
+        b.type = 'button'
+        b.className = 'kpi adm-gp-kachel' + (String(aktiv) === String(g.key) ? ' is-on' : '')
+        b.innerHTML = '<div class="kpi-label"></div><div class="kpi-value tnum"></div><small class="gp-w"></small>' +
+                      '<div class="kpi-bar"><div class="kpi-bar-fill"></div></div><small class="gp-n"></small>'
+        b.querySelector('.kpi-label').textContent = g.label
+        const val = b.querySelector('.kpi-value')
+        val.textContent = admEur.format(g.parked)
+        if(!g.parked) val.style.color = 'var(--good)'
+        b.querySelector('.gp-w').textContent = `Wert ${admEur.format(g.gpWert)} · gezahlt ${admEur.format(g.gpGez)}`
+        const fill = b.querySelector('.kpi-bar-fill')
+        fill.style.width = Math.min(100, share).toFixed(1) + '%'
+        fill.style.background = admCol(share)
+        b.querySelector('.gp-n').textContent = `${share.toFixed(0)} % · ${g.gpN} ${g.gpN === 1 ? 'Konto' : 'Konten'}` + (g.plusN ? ` · ${g.plusN} im Plus` : '')
+        b.title = `${g.label}: geparkt ${admEur.format(g.parked)} = Wert ${admEur.format(g.gpWert)} − gezahlt ${admEur.format(g.gpGez)}`
+          + (g.plusN ? ` · ${g.plusN} ${g.plusN === 1 ? 'Konto' : 'Konten'} im Plus zählen nicht` : '') + ' — Klick zeigt die Konten'
+        b.addEventListener('click', () => {
+          const sel = $('adm-firm')
+          sel.value = (String(sel.value) === String(g.key)) ? '' : g.key   // nochmal klicken = zu
+          admRender()
+          if(sel.value) $('adm-acc-panel').scrollIntoView({ behavior:'smooth', block:'nearest' })
+        })
+        box.appendChild(b)
+      }
+    }
+
+    /* Konten der Aufklappung als Balken (07.10.2026): Spur = Wert, grün = gezahlt, violett = Rest (= geparkt). Konten im Plus
+     * gedämpft am Ende mit „im Plus" — sie zählen nicht. Herleitung (Kosten, Kontowert-Zuwachs, Trades ohne Hedge) im Tooltip. */
+    function admGpKonten(accs){
+      const box = $('adm-gp-konten'); if(!box) return
+      box.innerHTML = ''
+      const liste = accs.filter(r => r.gp_wert != null).sort((a, b) =>
+        (Number(!!a.gp_plus) - Number(!!b.gp_plus)) || ((Number(b.gp_geparkt) || 0) - (Number(a.gp_geparkt) || 0))
+        || ((Number(b.gp_wert) || 0) - (Number(a.gp_wert) || 0)))
+      for(const r of liste){
+        const wert = Number(r.gp_wert) || 0, gez = Number(r.gp_gezahlt) || 0, rest = Number(r.gp_rest) || 0
+        const gezPct = wert > 0 ? Math.min(100, 100 * gez / wert) : (gez > 0 ? 100 : 0)
+        const row = document.createElement('div')
+        row.className = 'adm-row' + (r.gp_plus ? ' is-plus' : '')
+        row.innerHTML =
+          '<div class="adm-row-name"><span class="nm"></span><small></small></div>' +
+          `<div class="adm-gp-spur"><span style="width:${gezPct.toFixed(1)}%;background:var(--good)"></span>` +
+          `<span style="width:${(wert > 0 ? 100 - gezPct : 0).toFixed(1)}%;background:var(--violet)"></span></div>` +
+          '<div class="adm-val"></div><div class="adm-pct"></div>'
+        row.querySelector('.nm').textContent = r.name || '—'
+        row.querySelector('small').textContent = `${admShortName(r.person || '—')} · Wert ${admEur.format(wert)} · gezahlt ${admEur.format(gez)}`
+        const val = row.querySelector('.adm-val'), pct = row.querySelector('.adm-pct')
+        if(r.gp_plus){ val.textContent = '—'; pct.textContent = 'im Plus'; pct.style.color = 'var(--good)' }
+        else { val.textContent = admEur.format(Math.max(0, rest)); pct.textContent = gez > 0 ? `${gezPct.toFixed(0)} %` : '' }
+        const zuw = Number(r.gp_zuwachs) || 0
+        row.title = `Wert ${admEur.format(wert)} = Kosten ${admEur.format(Number(r.gp_kosten) || 0)}`
+          + ` (Kauf ${admEur.format(Number(r.c_buy) || 0)} + Hedge ${admEur.format(Number(r.c_hedge) || 0)}${r.preds ? `, ${r.preds} abgelöst` : ''})`
+          + ` ${zuw < 0 ? '−' : '+'} Kontowert ohne Hedge ${admEur.format(Math.abs(zuw))} (${r.gp_n || 0} Trade${r.gp_n === 1 ? '' : 's'})`
+          + (r.gp_offen ? ` · ${r.gp_offen} ohne Wert: ${r.gp_hinweis || '—'}` : '')
+          + `\nGezahlt ${admEur.format(gez)} · Rest ${admEur.format(rest)}${r.gp_plus ? ' → im Plus, zählt nicht' : ''}`
+        box.appendChild(row)
+      }
+      if(!liste.length && accs.length) box.innerHTML = '<div class="adm-empty">Keine aktiven Accounts für diesen Filter.</div>'
+    }
+
     function admRender(){
       if(!admData) return
       admHedgeModus()   // Kapitel ohne Hedge: Klasse + WD-Sichtbarkeit (24.09.2026)
@@ -13704,13 +13825,21 @@
       const sum = k => rows.reduce((a, r) => a + (Number(admVals(r)[k]) || 0), 0)
       // Gleiche Kappung wie in admGroup: die KPI muss zur Summe der Firmen-/
       // Personen-Zeilen passen, sonst stimmt die Seite mit sich selbst nicht.
-      const totalParked = rows.reduce((a, r) => a + Math.max(0, Number(admVals(r).parked) || 0), 0)
-      const nPlusAccs   = rows.filter(r => (Number(admVals(r).parked) || 0) < 0).length
+      const totalParked = rows.reduce((a, r) => a + admParkedOf(admVals(r)), 0)
+      const nPlusAccs   = rows.filter(r => admVals(r).plus).length
       const nArch = rows.filter(r => r.archived).length
       const nPred = admChainMode() ? rows.reduce((a, r) => a + (Number(r.preds) || 0), 0) : 0
+      const gp = admGpModus()
 
       $('adm-k-parked').textContent = admEur.format(totalParked)
-      $('adm-k-parked-sub').textContent = `${admEur.format(sum('buy'))} Kauf` + (admOhneHedge() ? '' : ` · ${admEur.format(sum('hedge'))} Hedge`)
+      if(gp){
+        // Kontowert-Modus (07.10.2026): Wert und gezahlt nur der zählenden Konten (Plus-Konten sind ganz raus)
+        const zaehlt = rows.filter(r => r.gp_wert != null && !r.gp_plus)
+        const sw = zaehlt.reduce((a, r) => a + (Number(r.gp_wert) || 0), 0), sg = zaehlt.reduce((a, r) => a + (Number(r.gp_gezahlt) || 0), 0)
+        $('adm-k-parked-sub').textContent = `Wert ${admEur.format(sw)} · gezahlt ${admEur.format(sg)}` + (nPlusAccs ? ` · ${nPlusAccs} im Plus raus` : '')
+      } else {
+        $('adm-k-parked-sub').textContent = `${admEur.format(sum('buy'))} Kauf` + (admOhneHedge() ? '' : ` · ${admEur.format(sum('hedge'))} Hedge`)
+      }
       admV2Kacheln(rows, 'adm-k-mpl', 'adm-k-trades')   // Master-P&L / Trades · Blows, nur hedge-frei sichtbar
       $('adm-k-accs').textContent = rows.length
       $('adm-k-accs-sub').textContent = nArch
@@ -13722,7 +13851,10 @@
         ? ` ${nPlusAccs} Account${nPlusAccs === 1 ? '' : 's'} steht im Plus und zählt in den Summen mit 0 — wer sein Kapital zurückgeholt hat, verrechnet sich nicht gegen die anderen.`
         : ''
       const hz = admOhneHedge() ? '' : ' + Hedge-Verluste'   // Kapitel ohne Hedge: kein Hedge-Wort im Text (24.09.2026)
-      $('adm-mode-note').textContent = (admChainMode()
+      $('adm-mode-note').textContent = gp
+        ? `Geparkt = Wert je aktivem Account − Payouts der Kette. Wert = echte Kosten der Kette (Kauf + Hedge, ${nPred} abgelöste eingerechnet) + Kontowert-Zuwachs der Trades ohne Hedge. Payouts ≥ Wert = im Plus, zählt weder mit noch gegen.`
+          + (admData.gp_fehler ? ` ⚠ ${admData.gp_fehler}` : '')
+        : (admChainMode()
         ? `Geparkt = Gesamtkosten je aktivem Account: Kaufpreis${hz} − Payouts, inklusive der abgelösten Vorgänger-Accounts (${nPred} eingerechnet).`
         : `Geparkt = Kaufpreis${hz} − Payouts, jeder Account für sich. Vorgänger werden hier NICHT in den Nachfolger gerechnet, sonst stünden sie doppelt drin.`
         ) + plusNote
@@ -13757,6 +13889,11 @@
         admVlSerien(vlIds, admOhneHedge() ? { kauf:1, payout:-1 } : { kauf:1, hedge:1, payout:-1 }), $('adm-person').value,
         key => { const sel = $('adm-person'); sel.value = (String(sel.value) === String(key)) ? '' : key; admRender() })
 
+      // Kontowert-Modus (07.10.2026): Firmen-Kacheln statt Kosten-Tabelle
+      $('adm-kosten-panel').hidden = gp
+      $('adm-gp-panel').hidden = !gp
+      if(gp) admGpKacheln(byFirm, posTotal)
+
       // Kosten-Tabelle je Firma
       const ftb = $('adm-firm-rows'); ftb.innerHTML = ''
       for(const g of byFirm){
@@ -13788,6 +13925,10 @@
       const accs = rows.slice().sort((a,b) => admVals(b).parked - admVals(a).parked)
       $('adm-acc-count').textContent = accs.length + (accs.length === 1 ? ' Account' : ' Accounts')
       $('adm-acc-empty').hidden = accs.length > 0
+      // Kontowert-Modus (07.10.2026): Konten als Balken (Wert · gezahlt · Rest) statt Tabelle
+      $('adm-acc-tabelle').hidden = gp
+      $('adm-gp-konten').hidden = !gp
+      if(gp) admGpKonten(accs)
       const tb = $('adm-acc-rows'); tb.innerHTML = ''
       for(const r of accs){
         const v = admVals(r)
@@ -39445,7 +39586,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1098'
+  const OS_TAB_BUILD = '2026-09-22.1099'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

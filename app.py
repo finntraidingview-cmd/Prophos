@@ -5493,6 +5493,102 @@ def acc_balance_wahl(a, echo_bal, dup_bal):
     return None, None, None, ""
 
 
+# ══ GEPARKTES KAPITAL NACH KONTOWERT (07.10.2026, Finn: „Neue Konten haben seit 24.09. keine Gegen-/Hedge-Kosten mehr, weil
+# ohne Hedge gehandelt wird" — geparkt war bis dahin nur Kauf + Hedge − Payouts, ein frisch bestandenes Konto ohne Hedge stand
+# also mit dem Kaufpreis drin). Crosscheck Finn/Master am selben Tag: Funded-Big-Trades und Winning Days laufen weiter mit
+# echtem Fusion-Hedge — deren ECHTE Kosten (Kachel „Gesamtkosten" im Account-Detail, Kette Kauf + Hedge-Verluste − Hedge-Gewinne,
+# z. B. Tradeify-WD 207 + 2.454,04 = 2.661,04 €) zählen voll. Regel je aktivem Konto (Kette über successorId wie c_*):
+#   Wert = echte Gesamtkosten der Kette + Kontowert-Zuwachs der UNGEHEDGTEN Trades (trade_plans.ohne_hedge) aller Kettenglieder.
+#   Zuwachs je ungehedgtem Trade = ap_kontowert(Balance nachher) − ap_kontowert(Balance vorher) — dieselbe Funktion wie Probelauf
+#   und Kontowert-Spalte, keine zweite Rechnung. Ein gehedgter Schritt steckt schon mit seinem echten Hedge-Verlust in den Kosten
+#   und bekommt KEINEN hypothetischen Zuwachs (keine Doppelzählung). Verlust-Trades ohne Hedge senken den Wert (wie ein Hedge-Gewinn).
+#   Balance-Verlauf: vom aktuellen Live-Stand rückwärts über master_pl (aktives Konto), sonst vorwärts ab Kontogröße (abgelöste
+#   Vorgänger, kein Live-Stand). Warum nicht „höherer von Kosten/Kontowert": bei Ketten mit echtem Fusion-Hedge nach dem 24.09.
+#   (WD, Funded-Big-Trades) zählte sonst entweder der echte Hedge nicht oder der Kontowert doppelt; und einen Kontowert-Stand zum
+#   24.09. gibt es nicht (keine Balance-Historie) — die Trade-Kette mit master_pl ist dagegen vollständig.
+#   Raus (Finn bestätigt): Payouts der Kette ≥ Wert → im Plus, zählt weder mit noch gegen (auch nicht mit Restwert), sonst Rest.
+# Geblasene/archivierte Konten: unverändert (nicht aktiv → nicht geparkt; ihre Kosten bleiben Verlust in Finanzen).
+def gp_zuwachs_konto(typ, p, bal, start, trades, kauf_eur=None):
+    """REIN RECHNEND (testbar): Kontowert-Zuwachs (€) der ungehedgten Trades EINES Kontos.
+    typ = account_type, p = ap_kw_param(regel) oder None, bal = Live-Balance ($) oder None, start = Kontogröße als Rückfall
+    (Vorwärts-Rechnung; Topstep Express 0), trades = [(master_pl $, ohne_hedge bool)] in Zeitfolge, kauf_eur = echter Kauf der Kette.
+    → (zuwachs_eur, n_gerechnet, n_offen): n_offen = ungehedgte Trades ohne Wert (keine Kernwerte, Balance passt zu keiner Größe)."""
+    ohne = [t for t in trades if t[1]]
+    if not ohne:
+        return 0.0, 0, 0
+    if not p:
+        return 0.0, 0, len(ohne)
+    pls = [_wd_num(pl) for pl, _oh in trades]
+    if bal is not None:
+        b = float(bal) - sum(x for x in pls if x is not None)
+    elif start is not None:
+        b = float(start)
+    else:
+        return 0.0, 0, len(ohne)
+    zuwachs, n, offen = 0.0, 0, 0
+    for (pl_roh, oh), pl in zip(trades, pls):
+        if pl is None:
+            offen += 1 if oh else 0
+            continue
+        b2 = b + pl
+        if oh:
+            k1, k2 = ap_kontowert(typ, b, p, kauf_eur), ap_kontowert(typ, b2, p, kauf_eur)
+            if k1 and k2:
+                zuwachs += float(k2["wert"]) - float(k1["wert"])
+                n += 1
+            else:
+                offen += 1
+        b = b2
+    return round(zuwachs, 2), n, offen
+
+
+def gp_konto_geparkt(kosten, zuwachs, gezahlt):
+    """REIN RECHNEND (testbar): geparkt eines aktiven Kontos. kosten = echte Gesamtkosten der Kette (Kauf + Hedge, €), zuwachs =
+    Kontowert-Zuwachs ohne Hedge (€), gezahlt = Payouts der Kette (€). Wert nie unter 0. Payouts ≥ Wert (> 0) → im Plus: zählt
+    gar nicht (geparkt 0, kein Gegenrechnen). → {wert, gezahlt, rest, plus, geparkt}"""
+    wert = max(0.0, float(kosten or 0) + float(zuwachs or 0))
+    gezahlt = float(gezahlt or 0)
+    plus = gezahlt > 0 and gezahlt >= wert
+    rest = wert - gezahlt
+    return {"wert": round(wert, 2), "gezahlt": round(gezahlt, 2), "rest": round(rest, 2), "plus": plus,
+            "geparkt": 0.0 if plus else round(max(0.0, rest), 2)}
+
+
+def _gp_zuwachs_karte(accounts, archived, plans, aktive_ketten):
+    """Kontowert-Zuwachs je Kettenglied für die Übersicht. aktive_ketten = {aktive_id: [ketten_ids]}. Liest Kernwerte
+    (auto_plan_regeln), Balance-Spiegel (Echo/Duplikum) und echte Käufe nur, wenn es ungehedgte Trades gibt.
+    → {konto_id: (zuwachs_eur, n, offen, hinweis)}"""
+    by_id = {str(a["id"]): a for a in accounts}
+    trades = {}
+    for p in sorted(plans, key=lambda p: (str(p.get("ended_at") or p.get("completed_at") or ""), str(p.get("id") or ""))):
+        trades.setdefault(str(p.get("master_account_id") or ""), []).append((p.get("master_pl"), bool(p.get("ohne_hedge"))))
+    glieder = {c for k in aktive_ketten.values() for c in k if any(oh for _pl, oh in trades.get(c, ()))}
+    if not glieder:
+        return {}
+    reg = (sb_select("auto_plan_regeln", {"select": "regeln", "id": "eq.1"}) or [{}])[0]
+    firmen = (reg.get("regeln") or {}).get("firmen") or []
+    echo_bal, dup_bal = _ap_balance_karten()
+    kauf = _ap_kauf_echt(sorted(glieder))
+    out = {}
+    for c in glieder:
+        a = by_id.get(c) or {}
+        typ = a.get("account_type") or ""
+        p = ap_kw_param(ap_regel_finden(firmen, a.get("firm")))
+        # Live-Stand nur am aktiven Konto selbst; abgelöste Vorgänger rechnen vorwärts ab Kontogröße (Express ab 0)
+        bal = acc_balance_wahl(a, echo_bal, dup_bal)[0] if c not in archived else None
+        start = 0.0 if ist_topstep_express(a) else _wd_konto_groesse(a)
+        if start is None and p and len(p.get("groessen") or []) == 1:
+            start = float(p["groessen"][0])      # Name ohne „150k" (z. B. nur die Kontonummer): einzige Größe der Kernwerte
+        z, n, offen = gp_zuwachs_konto(typ, p, bal, start, trades.get(c, []), kauf.get(c))
+        hinweis = None
+        if offen:
+            hinweis = (f"keine Kernwerte für {a.get('firm') or 'diese Firma'}" if not p
+                       else "Balance passt zu keiner Größe der Kernwerte" if (bal is not None or start is not None)
+                       else "keine Balance und keine Kontogröße")
+        out[c] = (z, n, offen, hinweis)
+    return out
+
+
 def admin_build_overview(kapitel_id=None):
     # KAPITEL (24.09.2026, Finn: „Ab jetzt wird es nicht mehr gegengehedgt mit
     # Realmoney … dass wir das Ganze zeitlich trennen können mit den vorherigen
@@ -5523,6 +5619,8 @@ def admin_build_overview(kapitel_id=None):
     plans_select = "master_account_id,user_id,master_pl,blown"
     if not hedge_aus:
         plans_select += ",slave_account_id,slave_pl,completed_at,hedge_eur"   # hedge_eur: Solo-Hedge ohne Slave-Konto (24.09.2026 spät)
+    if kapitel_id is None:
+        plans_select += ",id,ohne_hedge,ended_at"   # Geparkt nach Kontowert (07.10.2026): Trade-Folge je Konto, nur ohne Kapitel-Filter
     plans     = _sb_all("trade_plans", {"select": plans_select,
                                         "status": "eq.completed", **kf})
     # Select bewusst breiter als die Summen-Aggregation braucht (11.09.2026,
@@ -5685,6 +5783,33 @@ def admin_build_overview(kapitel_id=None):
             "trades_k": trades_k.get(aid, 0),
             "blown_k": blown_k.get(aid, 0),
         })
+
+    # GEPARKT NACH KONTOWERT (07.10.2026, Regel bei gp_zuwachs_konto): nur ohne Kapitel-Filter (Finn sieht immer „Alle"; im Kapitel
+    # fehlen die Vorgänger-Trades) und nur für aktive Konten. gp_* je Zeile, gp_aktiv oben — ohne gp_aktiv rechnet das Frontend wie
+    # bisher. Fällt das Lesen der Kernwerte/Balances aus, bleibt der Zuwachs 0 (Wert = echte Kosten) und gp_fehler sagt es.
+    gp_aktiv, gp_fehler = kapitel_id is None, None
+    if gp_aktiv:
+        aktive = {r["id"]: r["chain_ids"] for r in rows if not r["archived"]}
+        try:
+            zuw = _gp_zuwachs_karte(accounts, archived, plans, aktive)
+        except Exception as e:
+            zuw, gp_fehler = {}, f"Kontowert nicht lesbar ({type(e).__name__}) — Wert = echte Kosten"
+            print(f"[admin] ⚠️ geparkt/kontowert: {type(e).__name__}: {e}", flush=True)
+        for r in rows:
+            if r["archived"]:
+                continue
+            z = n = offen = 0
+            hinweise = []
+            for c in r["chain_ids"]:
+                zc, nc, oc, hc = zuw.get(c, (0.0, 0, 0, None))
+                z += zc; n += nc; offen += oc
+                if hc and hc not in hinweise:
+                    hinweise.append(hc)
+            kosten = r["c_buy"] + r["c_hedge"]
+            gp = gp_konto_geparkt(kosten, z, r["c_payouts"])
+            r.update({"gp_kosten": round(kosten, 2), "gp_zuwachs": round(z, 2), "gp_wert": gp["wert"], "gp_gezahlt": gp["gezahlt"],
+                      "gp_rest": gp["rest"], "gp_plus": gp["plus"], "gp_geparkt": gp["geparkt"], "gp_n": n, "gp_offen": offen,
+                      "gp_hinweis": "; ".join(hinweise) or None})
 
     # VERLAUF je Person (23.09.2026, Finn: „Charts, wo man den Verlauf von jeder
     # Person farblich markiert sieht — gleiche Logik für Übersicht, Saldo und
@@ -6122,6 +6247,8 @@ def admin_build_overview(kapitel_id=None):
             "trades_heute": trades_heute,
             "trades_start": trades_start,   # Tages-Überblick „Accounts je Firma" (28.09.2026)
             "fx_usd_eur": fx, "generated": _wt_now_iso(),
+            # Geparkt nach Kontowert (07.10.2026): gp_* an jeder aktiven Zeile gültig; gp_fehler = Kontowert-Teil ausgefallen
+            "gp_aktiv": gp_aktiv, "gp_fehler": gp_fehler,
             "excluded": sorted(excluded_names),
             "excluded_uids": sorted(excluded_ids),
             # Kapitel (24.09.2026): aktiver Filter + alle Kapitel für den Umschalter;
