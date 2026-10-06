@@ -6850,7 +6850,8 @@ def vorrat_rechnen(konten, ziele, matrix, personen, standard="frei", waiting_zae
     matrix   = {(user_id, firma): 'frei' | 'pausiert' | 'gesperrt'} — fehlt = standard
     personen = [user_id, …]. Jede ID bekommt bei jeder Firma mit Ziel eine Zelle (auch ohne Konten: Bestand 0, darum geht es).
     Funnel je Kontotyp {n, groesse}; 'waiting' = davon „Waiting for Payout" (zählt zusätzlich in seinem Typ).
-    → {"firmen": [{firma, ziel, cfd}], "zellen": [{user_id, firma, status, gesetzt, konten, funnel, bestand_n, …vorrat_bestand}]}"""
+    → {"firmen": [{firma, ziel, cfd}], "zellen": [{user_id, firma, status, gesetzt, konten_n, funnel, bestand_n, …vorrat_bestand}]}
+    konten_n = Anzahl Konten (bis 06.10.2026 „konten" — der Name gehört seit Stufe 2 der Liste je Konto)."""
     cfd_firmen = {f for f, z in ziele.items() if "funded_cfd" in (z.get("typen") or [])}
     cfd_firmen |= {k["firma"] for k in konten if k.get("typ") in VORRAT_CFD_TYPEN}
     je = {}
@@ -6880,7 +6881,7 @@ def vorrat_rechnen(konten, ziele, matrix, personen, standard="frei", waiting_zae
                     e["groesse"] += x["groesse"] or 0.0
             stock = [x for x in liste if x["typ"] in typen and (waiting_zaehlt or not x["waiting"])]
             z = {"user_id": uid, "firma": f, "status": gesetzt if gesetzt in VORRAT_STATUS else standard,
-                 "gesetzt": gesetzt in VORRAT_STATUS, "konten": len(liste), "funnel": funnel, "bestand_n": len(stock)}
+                 "gesetzt": gesetzt in VORRAT_STATUS, "konten_n": len(liste), "funnel": funnel, "bestand_n": len(stock)}
             z.update(vorrat_bestand(ziel, stock))
             zellen.append(z)
     return {"firmen": [{"firma": f, "ziel": ziele[f], "cfd": f in cfd_firmen} for f in firmen], "zellen": zellen}
@@ -6921,13 +6922,26 @@ def admin_build_vorrat():
             continue
         konten.append({"user_id": uid, "firma": _firm_norm(a.get("firm")), "typ": a.get("account_type") or "",
                        "groesse": _wd_konto_groesse(a), "balance": acc_balance_wahl(a, echo_bal, dup_bal)[0],
-                       "express": ist_topstep_express(a), "waiting": bool(a.get("waiting_payout_since"))})
+                       "express": ist_topstep_express(a), "waiting": bool(a.get("waiting_payout_since")),
+                       "created_at": a.get("created_at")})
+    # IDs, die nicht auf die Seite gehören (Finn 06.10.2026: zwei IDs raus) — stehen nur in der DB (Repo öffentlich)
+    try:
+        ohne = (sb_select("vorrat_einstellung", {"select": "ohne_ids", "id": "eq.1"}) or [{}])[0].get("ohne_ids") or []
+        excluded_ids = excluded_ids | {str(u) for u in ohne}
+        konten = [k for k in konten if k["user_id"] not in excluded_ids]
+    except requests.exceptions.HTTPError:
+        pass                                   # Stufe-2-SQL noch nicht eingespielt: Spalte fehlt (400)
     # Jede ID aus der Nutzerliste (auch ohne Konten — eine freigeschaltete ID ohne Bestand ist gerade der Fall, der zählt)
     uids = (set(names) | {k["user_id"] for k in konten}) - excluded_ids
     people = sorted([{"user_id": u, "name": disp.get(u) or names.get(u, u[:8])} for u in uids],
                     key=lambda p: str(p["name"]).lower())
     standard = ein.get("standard_status") if ein.get("standard_status") in ("frei", "gesperrt") else "frei"
     erg = vorrat_rechnen(konten, ziele, matrix, [p["user_id"] for p in people], standard=standard)
+    angelegt = {}
+    for k in konten:
+        angelegt.setdefault((k["user_id"], k["firma"]), []).append(k.get("created_at"))
+    for z in erg["zellen"]:
+        z["_angelegt"] = angelegt.get((z["user_id"], z["firma"]), [])     # nur für vorrat2_anhaengen, wird dort entfernt
     hinweis = "" if bereit else f"SQL noch nicht eingespielt ({VORRAT_SQL}) — ohne die Ziele-Tabelle stehen noch keine Firmen auf der Seite."
     return dict(erg, bereit=bereit, hinweis=hinweis, standard=standard, people=people, generated=_wt_now_iso())
 
@@ -6944,17 +6958,25 @@ def admin_vorrat():
         return err
     if request.method == "GET":
         try:
-            return jsonify(admin_build_vorrat())
+            return jsonify(_vorrat_antwort(admin_build_vorrat()))
         except Exception as e:
             print(f"[vorrat] ⚠️ GET: {type(e).__name__}: {e}", flush=True)
             return jsonify({"error": str(e)}), 500
     body = request.get_json(silent=True) or {}
-    if body.get("aktion") == "rechnen":
+    aktion = body.get("aktion")
+    if aktion == "rechnen":
+        # Stufe 2 (06.10.2026): „Jetzt aktualisieren" = neuer Lauf (quelle hand), dann dieselbe Antwort wie GET
         try:
-            return jsonify(admin_build_vorrat())
+            try:
+                vorrat2_lauf("hand")
+            except RuntimeError as e:          # Stufe-2-SQL fehlt: Stufe 1 antwortet trotzdem, Hinweis kommt aus dem Anhängen
+                print(f"[vorrat2] ⚠️ rechnen: {e}", flush=True)
+            return jsonify(dict(_vorrat_antwort(admin_build_vorrat()), ok=True))
         except Exception as e:
             print(f"[vorrat] ⚠️ rechnen: {type(e).__name__}: {e}", flush=True)
             return jsonify({"error": str(e)}), 500
+    if aktion in ("einstellung", "bestellt", "bestellt_weg"):
+        return _vorrat2_aktion(aktion, body, uid)
     ziel_uid = str(body.get("user_id") or "").strip().lower()
     firma = _firm_norm(str(body.get("firma") or "")[:80])
     status = body.get("status")
@@ -6979,6 +7001,1077 @@ def admin_vorrat():
     except Exception as e:
         print(f"[vorrat] ⚠️ POST: {type(e).__name__}: {e}", flush=True)
         return jsonify({"error": str(e)}), 500
+
+# ════════════════════════════════════════════════════════════════════════════
+# VORRAT STUFE 2 (06.10.2026, Finn über den Master): Bestehens-Chance je Konto und Kette, sicherer Bestand gewichtet
+# („gefährdet" zählt halb), Sicherheit per Monte Carlo mit festem Seed, Nachkauf je ID × Firma mit Score 0–100 und
+# Dringlichkeit, Totband, „bestellt" gegen Doppelkauf, „Daten fehlen"/„unsicher" sperren den Vorschlag, Lauf alle 6 h +
+# „Jetzt aktualisieren". Rechenregel Finn 05.10.2026 („1:8-Trade", Markt ohne Vorteil): Chance je Trade = Polster ÷
+# (Polster + Abstand zum Ziel). Ziel, Boden, Drawdown, Etappe und Kaufpreis kommen aus EINER Quelle: den Kernwerten in
+# auto_plan_regeln (ap_kw_param, Finn 06.10.2026: „pro Firma müssen nur vier Werte stimmen"), daraus baut
+# vorrat_stufen_aus_kernwerten die Stufen-Kette. Was dort bewusst nicht steht (Funded-Wege der Futures, WD-Boden, normaler SL
+# ohne Planer-Spanne), sind Parameter (VORRAT2_STD, überschreibbar in vorrat_einstellung.parameter).
+# vorrat_chance_stufe / vorrat_chance_kette sind die EINE Stelle für die Chance eines Kontos (der Auto-Planer ruft sie für den
+# Long/Short-Ausgleich mit, Master 06.10.2026: keine zweite Variante bauen).
+# Doppelkauf (Master 06.10.2026, so entschieden): die Kaufzahl steigt erst nach zwei gleichen Läufen, sinkt aber sofort; Konten,
+# die nach dem Lauf angelegt wurden, und offene Bestellungen zieht die Anzeige sofort ab — sonst zeigte die Seite nach dem Kauf
+# bis zum nächsten Lauf weiter „2 kaufen".
+# ════════════════════════════════════════════════════════════════════════════
+import random
+import zlib
+
+VORRAT2_SQL = "sql/2026-10-06_vorrat_stufe2.sql"
+VORRAT2_STD = {
+    "sicherheit": 0.8,                 # P(Bestand ≥ Untergrenze), Finn am Frontend einstellbar (vorrat_einstellung.sicherheit)
+    "mc_ziehungen": 2000, "mc_seed": 20261006,
+    "min_faelle": 20, "prior_gewicht": 20,          # gemessene Quote (Kapitel ohne Hedge) erst ab 20 Fällen, Gewicht n ÷ (n + 20)
+    "mess_stufen": ["challenge", "phase1", "phase2"],  # nur Stufen, deren Bestehen einen Nachfolger anlegt (Funded→WD ist nicht messbar)
+    "gefaehrdet_faktor": 0.5, "mindest_funnel": 1, "bestellt_h": 48,
+    "totband_laeufe": 2, "totband_nur_hoch": True,
+    "alter_handelstage_max": 2, "n_max_kauf": 10, "ziel_erreicht_chance": 0.95, "chance_max": 0.98,
+    "tranche_gemeinsam": False,        # Finn offen: Konten einer Tranche fallen gemeinsam — bis zur Antwort unabhängig (seine Rechnung)
+    "takt_utc": ["23:00", "05:00", "11:00", "17:00"],  # = Dubai 03/09/15/21 Uhr
+    # Futures nach dem Bestehen bis Winning Days (Finn 05./06.10.2026), Risiko = dd_usd der Firma. Schlüssel = _ap_norm(Firma).
+    "funded_wege": {
+        "tradeify": {"modell": "trades", "tps_usd": [14500]},                    # Big Trade 4.500 gegen 13.000–16.000
+        "topstep": {"modell": "trades", "tps_usd": [4500, 14500]},               # ein Trade wie im Combine, dann Big Trade
+        "apextrader": {"modell": "siege", "tages_usd": 2500, "tp_tag_usd": 7500, "ziel_usd": 15000, "verlusttage_max": 2},
+    },
+    "wd_boden_ueber_start_usd": {"tradeify": 100},    # Liquidation 150.100, sobald zu Winning Days verschoben
+    "sl_normal_std_usd": 2500,                         # „normaler SL" je 100k, wo der Planer keine SL-Spanne führt (FTMO)
+}
+VORRAT2_DRINGLICHKEITEN = [
+    {"wert": "jetzt", "wort": "Jetzt kaufen", "farbe": "rot", "score_von": 67, "score_bis": 100},
+    {"wert": "bald", "wort": "Bald", "farbe": "gelb", "score_von": 34, "score_bis": 66},
+    {"wert": "gedeckt", "wort": "Gedeckt", "farbe": "gruen", "score_von": 0, "score_bis": 33},
+]
+_vr2_info = {"started": False, "slot": None, "last_run": None, "last_error": "", "runs": 0}
+_vr2_started = False
+_vr2_lock = threading.Lock()
+
+
+def _vr2_num(v):
+    try:
+        f = float(v)
+        return f if f == f else None
+    except (TypeError, ValueError):
+        return None
+
+
+def vorrat_chance_stufe(regel, balance, groesse, start=None, max_dd=None):
+    """REIN RECHNEND (testbar): Chance, die aktuelle Stufe EINES Kontos zu bestehen.
+    regel = eine Stufe aus vorrat_stufen_aus_kernwerten, balance = Balance jetzt, groesse = Kontogröße, start = Startbalance (Standard Größe,
+    Topstep Express 0), max_dd = Drawdown des Kontos (nur, wenn die Regel keinen Boden kennt: Boden = Größe − max_dd).
+    → {chance (0..1 | None), erreicht, boden, ziel, polster, abstand, trades [{polster, tp, p}], daten_fehlen, hinweis}
+    modell statisch: Boden = Größe × (1 − boden_pct), Ziel = Größe × (1 + ziel_pct), Chance = (Balance − Boden) ÷ (Ziel − Boden)
+        — Finn: FundedNext 100k bei 92.000 → 2.000 ÷ 18.000 = 11 %.
+    modell trades: mitwandernder Boden (Tradeify/Topstep). Je Trade Polster ÷ (Polster + TP), Polster = risiko_usd (wandert
+        mit), unter dem Start um den Verlust kleiner; tps_usd = die Trades der Stufe (Summe = Ziel über Start), schon erreichtes
+        Plus überspringt Trades — Finn: Tradeify 3.500/3.500/2.000 gegen 4.500 → 56 % × 56 % × 69 % ≈ 22 %.
+    modell tage: Apex-Evaluation (Finn 06.10.2026): je Tag ein Trade ohne SL auf Rest + puffer_usd,
+        Tagesverlust tages_usd ist Soft Breach (Tag stoppt, Konto lebt), Gesamt-Drawdown gesamt_usd statisch. Chance =
+        1 − Π(1 − p_Tag) — frisch 2.000 ÷ 11.100, nach einem Verlusttag 2.000 ÷ 13.100 → ≈ 30 %.
+    modell siege: Apex Funded → Winning Days (Finn 06.10.2026): je Tag
+        tages_usd Risiko gegen tp_tag_usd, Ziel ziel_usd über Start; ein Verlusttag tötet nicht, verlusttage_max Verlusttage
+        schon — Chance, W Siege vor L Verlusttagen zu holen: Σ_{j<L} C(W−1+j, j) · p^W · (1−p)^j (+15.000 in 2 Tagen à 2.500
+        gegen 7.500, 2 Verlusttage tödlich: 0,25² + 2 · 0,25² · 0,75 = 15,6 %). vorlaeufig an der Regel = Hinweis in der Zelle.
+    Dollarwerte gelten für 100k und wachsen mit der Größe, wenn skaliert."""
+    r = regel or {}
+    out = {"chance": None, "erreicht": False, "boden": None, "ziel": None, "polster": None, "abstand": None, "trades": [],
+           "daten_fehlen": False, "hinweis": ""}
+    bal, gr = _vr2_num(balance), _vr2_num(groesse)
+    if r.get("daten_fehlen"):
+        return dict(out, daten_fehlen=True, hinweis="Regel der Stufe fehlt noch")
+    if bal is None or gr is None:
+        return dict(out, daten_fehlen=True, hinweis="keine Balance" if bal is None else "keine Kontogröße")
+    st = gr if start is None else float(start)
+    f = gr / 100000.0 if r.get("skaliert") else 1.0
+    modell = r.get("modell")
+    if modell == "statisch":
+        zp, bp = _vr2_num(r.get("ziel_pct")), _vr2_num(r.get("boden_pct"))
+        if zp is None:
+            return dict(out, daten_fehlen=True, hinweis="Ziel der Stufe fehlt")
+        ziel = gr * (1 + zp / 100.0)
+        if bp is not None:
+            boden = gr * (1 - bp / 100.0)
+        elif _vr2_num(r.get("boden_usd")):
+            boden = gr - float(r["boden_usd"]) * f
+        elif _vr2_num(max_dd):
+            boden = gr - float(max_dd)
+        else:
+            return dict(out, daten_fehlen=True, hinweis="Boden der Stufe fehlt")
+        out.update(boden=round(boden, 2), ziel=round(ziel, 2), polster=round(bal - boden, 2), abstand=round(ziel - bal, 2))
+        if bal >= ziel:
+            return dict(out, chance=1.0, erreicht=True, hinweis="Ziel erreicht, noch nicht umgestellt")
+        if bal <= boden:
+            return dict(out, chance=0.0, hinweis="auf/unter dem Boden — geblasen?")
+        out["chance"] = (bal - boden) / (ziel - boden)
+        return out
+    if modell == "trades":
+        dd = (_vr2_num(r.get("risiko_usd")) or 0.0) * f
+        tps = [float(x) * f for x in (r.get("tps_usd") or []) if _vr2_num(x)]
+        if not tps and _vr2_num(r.get("ziel_pct")):
+            # Kernwerte: Ziel = Größe × ziel_pct in Etappen zu etappe_usd (Tradeify 9.000 / 3.600 → 3.600 · 3.600 · 1.800)
+            rest_z, et = gr * float(r["ziel_pct"]) / 100.0, (_vr2_num(r.get("etappe_usd")) or dd) * f
+            while rest_z > 1e-6 and et > 0 and len(tps) < 50:
+                tps.append(min(et, rest_z))
+                rest_z -= et
+        if dd <= 0 or not tps:
+            return dict(out, daten_fehlen=True, hinweis="Risiko/Trades der Stufe fehlen")
+        plus = bal - st
+        polster = min(dd, dd + plus)
+        out.update(boden=round(bal - polster, 2), ziel=round(st + sum(tps), 2), polster=round(polster, 2),
+                   abstand=round(st + sum(tps) - bal, 2))
+        if plus >= sum(tps):
+            return dict(out, chance=1.0, erreicht=True, hinweis="Ziel erreicht, noch nicht umgestellt")
+        if polster <= 0:
+            return dict(out, chance=0.0, hinweis="Polster aufgebraucht — geblasen?")
+        p, cum, erst = 1.0, 0.0, True
+        for tp in tps:
+            lo, cum = cum, cum + tp
+            if cum <= plus:
+                continue
+            rest = cum - max(lo, plus)
+            pol = polster if erst else dd
+            q = pol / (pol + rest)
+            out["trades"].append({"polster": round(pol, 2), "tp": round(rest, 2), "p": q})
+            p *= q
+            erst = False
+        out["chance"] = p
+        return out
+    if modell == "tage":
+        tag, ges = (_vr2_num(r.get("tages_usd")) or 0.0) * f, (_vr2_num(r.get("gesamt_usd")) or 0.0) * f
+        ziel_usd = _vr2_num(r.get("ziel_usd"))
+        if ziel_usd is None and _vr2_num(r.get("ziel_pct")):
+            ziel_usd = gr * float(r["ziel_pct"]) / 100.0 / f
+        if tag <= 0 or ges <= 0 or ziel_usd is None:
+            return dict(out, daten_fehlen=True, hinweis="Tagesverlust/Gesamt-Drawdown/Ziel der Stufe fehlen")
+        puffer = (_vr2_num(r.get("puffer_usd")) or 0.0) * f
+        ziel, boden = st + ziel_usd * f, st - ges
+        out.update(boden=round(boden, 2), ziel=round(ziel, 2), polster=round(bal - boden, 2), abstand=round(ziel - bal, 2))
+        if bal >= ziel:
+            return dict(out, chance=1.0, erreicht=True, hinweis="Ziel erreicht, noch nicht umgestellt")
+        if bal <= boden:
+            return dict(out, chance=0.0, hinweis="auf/unter dem Boden — geblasen?")
+        b, fail = bal, 1.0
+        while b > boden + 0.005 and len(out["trades"]) < 60:
+            pol = min(tag, b - boden)          # letzter Tag: nur noch der Rest bis zum Gesamt-Boden
+            rest = ziel + puffer - b
+            q = pol / (pol + rest)
+            out["trades"].append({"polster": round(pol, 2), "tp": round(rest, 2), "p": q})
+            fail *= (1.0 - q)
+            b -= pol
+        out["chance"] = 1.0 - fail
+        return out
+    if modell == "siege":
+        tag, tp_tag = (_vr2_num(r.get("tages_usd")) or 0.0) * f, (_vr2_num(r.get("tp_tag_usd")) or 0.0) * f
+        ziel_usd, lmax = _vr2_num(r.get("ziel_usd")), int(_vr2_num(r.get("verlusttage_max")) or 0)
+        if tag <= 0 or tp_tag <= 0 or ziel_usd is None or lmax < 1:
+            return dict(out, daten_fehlen=True, hinweis="Risiko/TP je Tag/Ziel/Verlusttage der Stufe fehlen")
+        rest = st + ziel_usd * f - bal
+        out.update(ziel=round(st + ziel_usd * f, 2), polster=round(tag, 2), abstand=round(rest, 2))
+        if rest <= 0:
+            return dict(out, chance=1.0, erreicht=True, hinweis="Ziel erreicht, noch nicht umgestellt")
+        from math import comb, ceil
+        w, q = int(ceil(rest / tp_tag - 1e-9)), tag / (tag + tp_tag)
+        out["trades"] = [{"polster": round(tag, 2), "tp": round(tp_tag, 2), "p": q}] * w
+        out["chance"] = sum(comb(w - 1 + j, j) * q ** w * (1 - q) ** j for j in range(lmax))
+        return out
+    if modell == "bestand":
+        return dict(out, hinweis="Bestand")
+    return dict(out, daten_fehlen=True, hinweis=f"unbekanntes Modell {modell!r}")
+
+
+def vorrat_stufen_aus_kernwerten(regel, param=None):
+    """REIN RECHNEND (testbar): Stufen-Kette EINER Firma aus ihren Kernwerten (auto_plan_regeln.regeln.firmen[], ap_kw_param).
+    → {stufe: regel} für vorrat_chance_kette, leer = Firma ohne Kernwerte. Je Phase aus ziel_pct (challenge/phase1/phase2):
+      CFD (dd_pct)                       statisch: Boden = Größe × (1 − dd_pct), Ziel = Größe × (1 + ziel_pct)
+      Futures, boden nachziehend         trades: Risiko dd_usd je Etappe (tp_max, sonst ganze DD)
+      Futures statisch + daily_usd soft  tage: Apex — Tag ohne SL, Tagesverlust weich, Gesamt-Drawdown dd_usd
+      Futures statisch ohne daily        statisch mit Boden = Größe − dd_usd
+    Danach: CFD → funded_cfd (Bestand, Boden dd_pct, normaler SL = Mitte der Planer-SL-Spanne, sonst sl_normal_std_usd);
+    Futures → funded (Weg aus param funded_wege, Risiko dd_usd) → winning_days (Bestand). Ein 1-Step-Konto (CFD als
+    challenge) rechnet wie die erste Phase — wie ap_kontowert."""
+    p = dict(VORRAT2_STD, **(param or {}))
+    kw = ap_kw_param(regel)
+    if not kw:
+        return {}
+    zp = kw.get("ziel_pct") or {}
+    phasen = [x for x in AP_KW_PHASEN if x in zp]
+    if not phasen:
+        return {}
+    key = _ap_norm(((regel or {}).get("namen") or [""])[0])
+    cfd = bool(kw.get("dd_pct"))
+    nachz = kw.get("boden") == "nachziehend"
+    ph_reg = (regel or {}).get("phasen") or {}
+    sk = bool((regel or {}).get("skaliert"))
+    stufen = {}
+    for i, ph in enumerate(phasen):
+        folge = phasen[i + 1] if i + 1 < len(phasen) else ("funded_cfd" if cfd else "funded")
+        if cfd:
+            r = {"modell": "statisch", "ziel_pct": zp[ph], "boden_pct": kw["dd_pct"]}
+        elif nachz:
+            r = {"modell": "trades", "ziel_pct": zp[ph], "risiko_usd": kw["dd_usd"], "etappe_usd": kw.get("etappe_usd")}
+        elif kw.get("daily_usd") and (regel or {}).get("soft"):
+            pu = (ph_reg.get(ph) or {}).get("puffer") or [0]
+            r = {"modell": "tage", "ziel_pct": zp[ph], "tages_usd": kw["daily_usd"], "gesamt_usd": kw["dd_usd"],
+                 "puffer_usd": (float(pu[0]) + float(pu[-1])) / 2.0}
+        else:
+            r = {"modell": "statisch", "ziel_pct": zp[ph], "boden_usd": kw["dd_usd"]}
+        r["folge"] = folge
+        stufen[ph] = r
+    if "challenge" not in stufen:
+        stufen["challenge"] = stufen[phasen[0]]
+    if cfd:
+        sl_sp = (ph_reg.get(phasen[-1]) or {}).get("sl")
+        if sl_sp:
+            b = {"modell": "bestand", "boden_pct": kw["dd_pct"], "skaliert": sk,
+                 "sl_normal_usd": (float(sl_sp[0]) + float(sl_sp[-1])) / 2.0}
+        else:
+            b = {"modell": "bestand", "boden_pct": kw["dd_pct"], "skaliert": True, "sl_normal_usd": p["sl_normal_std_usd"]}
+        stufen["funded_cfd"] = b
+        stufen["funded"] = b                      # Altbestand: CFD-Funded mit Typ funded
+    else:
+        weg = (p.get("funded_wege") or {}).get(key)
+        stufen["funded"] = (dict(weg, risiko_usd=kw["dd_usd"], folge="winning_days") if weg
+                            else {"daten_fehlen": True, "folge": "winning_days"})
+        stufen["winning_days"] = {"modell": "bestand",
+                                  "boden_ueber_start_usd": (p.get("wd_boden_ueber_start_usd") or {}).get(key)}
+    stufen["_erste"] = phasen[0]
+    return stufen
+
+
+def vorrat_chance_kette(stufen, stufe, balance, groesse, start=None, faktoren=None, param=None, max_dd=None):
+    """REIN RECHNEND (testbar): Chance, dass ein Konto von seiner Stufe bis in den Vorrat kommt (Kette über regel.folge bis zur
+    Stufe mit modell 'bestand'). stufen = {stufe: regel} EINER Firma. Die aktuelle Stufe rechnet mit der echten Balance, jede
+    folgende frisch (Balance = Start). faktoren = {stufe: Faktor aus den gemessenen Quoten} (vorrat_quoten), sonst 1.
+    „Ziel erreicht, noch nicht umgestellt" zählt mit ziel_erreicht_chance (95 %), jede Stufe höchstens chance_max (98 %).
+    → {chance, chance_stufe, kette [{stufe, chance, roh, faktor, hinweis}], ziel_stufe, wert_usd, daten_fehlen, hinweis}
+    wert_usd = Plus über Start beim Ankommen (Futures-Vorrat): wert_usd der letzten Stufe, sonst Summe ihrer Trades."""
+    p = dict(VORRAT2_STD, **(param or {}))
+    out = {"chance": None, "chance_stufe": None, "kette": [], "ziel_stufe": None, "wert_usd": None, "daten_fehlen": False,
+           "hinweis": "", "vorlaeufig": []}
+    s, bal, st, md, ges, gesehen = stufe, balance, start, max_dd, 1.0, set()
+    while True:
+        r = (stufen or {}).get(s)
+        if not r:
+            return dict(out, daten_fehlen=True, hinweis=f"keine Stufenregel für {s}")
+        if r.get("modell") == "bestand":
+            break
+        if s in gesehen:
+            return dict(out, daten_fehlen=True, hinweis="Stufen-Kette im Kreis")
+        gesehen.add(s)
+        e = vorrat_chance_stufe(r, bal, groesse, st, md)
+        if e["daten_fehlen"]:
+            return dict(out, daten_fehlen=True, hinweis=f"{s}: {e['hinweis']}")
+        if r.get("vorlaeufig"):
+            out["vorlaeufig"].append(r.get("notiz") or f"{s} vorläufig")
+        roh = float(p["ziel_erreicht_chance"]) if e["erreicht"] else float(e["chance"])
+        fk = None if e["erreicht"] else (faktoren or {}).get(s)      # „Ziel erreicht" korrigiert keine Quote
+        c = max(0.0, min(float(p["chance_max"]), roh * (fk if fk else 1.0)))
+        out["kette"].append({"stufe": s, "chance": c, "roh": roh, "faktor": fk, "hinweis": e["hinweis"]})
+        ges *= c
+        w = _vr2_num(r.get("wert_usd"))
+        if w is None and r.get("modell") == "trades":
+            w = sum(float(x) for x in (r.get("tps_usd") or []) if _vr2_num(x))
+        if w is None and r.get("modell") == "siege":
+            w = _vr2_num(r.get("ziel_usd"))
+        if w is not None:
+            out["wert_usd"] = w * ((float(groesse) / 100000.0) if (r.get("skaliert") and _vr2_num(groesse)) else 1.0)
+        s = r.get("folge")
+        if not s:
+            break
+        bal, st, md = groesse, groesse, None          # folgende Stufe frisch
+    out.update(chance=ges, chance_stufe=(out["kette"][0]["chance"] if out["kette"] else 1.0), ziel_stufe=s)
+    return out
+
+
+def vorrat_bestand_konto(regel, balance, groesse, start=None):
+    """REIN RECHNEND (testbar): Bestandskonto „gefährdet" = weniger als ein normaler Firmen-SL (sl_normal_usd) vor dem Boden
+    (Master 06.10.2026: zählt zur Hälfte). Boden: boden_pct der Größe (CFD statisch) oder Start + boden_ueber_start_usd
+    (Tradeify Winning Days 150.100). Ohne Boden oder SL in der Regel: nie gefährdet. → {gefaehrdet, boden, abstand}"""
+    r = regel or {}
+    bal, gr = _vr2_num(balance), _vr2_num(groesse)
+    if bal is None or gr is None:
+        return {"gefaehrdet": False, "boden": None, "abstand": None}
+    st = gr if start is None else float(start)
+    f = gr / 100000.0 if r.get("skaliert") else 1.0
+    if _vr2_num(r.get("boden_pct")) is not None:
+        boden = gr * (1 - float(r["boden_pct"]) / 100.0)
+    elif _vr2_num(r.get("boden_ueber_start_usd")) is not None:
+        boden = st + float(r["boden_ueber_start_usd"])
+    else:
+        return {"gefaehrdet": False, "boden": None, "abstand": None}
+    sl = _vr2_num(r.get("sl_normal_usd"))
+    ab = bal - boden
+    return {"gefaehrdet": bool(sl is not None and ab < sl * f), "boden": round(boden, 2), "abstand": round(ab, 2)}
+
+
+def vorrat_alter_handelstage(at_iso, jetzt=None):
+    """REIN RECHNEND (testbar): Handelstage (Wechsel 17:45 New York, pb_handelstag) zwischen einer Lesung und jetzt, nur Mo–Fr
+    gezählt — ein Wochenende macht eine Freitags-Lesung nicht alt (Kritik 06.10.2026: 48 h warfen jeden Montag alles raus).
+    Ohne/kaputten Zeitstempel → None."""
+    from datetime import date, timedelta as _td
+    if not at_iso:
+        return None
+    try:
+        at = datetime.fromisoformat(str(at_iso).replace("Z", "+00:00"))
+        if at.tzinfo is None:
+            at = at.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    a = date.fromisoformat(pb_handelstag(at)[0])
+    b = date.fromisoformat(pb_handelstag(jetzt or datetime.now(timezone.utc))[0])
+    n, d = 0, a
+    while d < b and n < 400:
+        d = d + _td(days=1)
+        if d.weekday() < 5:
+            n += 1
+    return n
+
+
+def vorrat_mc(faecher, n_max, ziehungen, seed, gemeinsam=False):
+    """REIN RECHNEND (testbar): Monte Carlo je Zelle mit festem Seed (gleiche Daten → gleiche Zahl). faecher = [{soll, fest,
+    funnel [(p, wert, gruppe)], neu (p, wert)}] — ein Fach je Ziel-Größe (Stück-Ziele), sonst genau eins. Gleiche Zufallszahlen
+    für alle Kaufzahlen (Common Random Numbers → P steigt mit n monoton). gemeinsam = Konten derselben Gruppe (Stufe) ziehen
+    EINE Zahl (Tranche fällt gemeinsam). → Funktion ok(fach_i, n_kauf, fest_minus=0) → P und joint(n_je_fach, minus_je_fach) → P."""
+    rnd = random.Random(seed)
+    F = len(faecher)
+    summe = [[0.0] * ziehungen for _ in range(F)]
+    neu_kum = [[[0.0] * (n_max + 1) for _ in range(ziehungen)] for _ in range(F)]
+    for d in range(ziehungen):
+        geteilt = {}
+        for i, fa in enumerate(faecher):
+            s = 0.0
+            for (p, wert, gruppe) in fa.get("funnel") or []:
+                if gemeinsam:
+                    u = geteilt.setdefault(gruppe, rnd.random())
+                else:
+                    u = rnd.random()
+                if u < p:
+                    s += wert
+            summe[i][d] = s
+            pn, wn = fa.get("neu") or (0.0, 0.0)
+            k, row = 0.0, neu_kum[i][d]
+            un = geteilt.setdefault(("neu", i), rnd.random()) if gemeinsam else None
+            for j in range(1, n_max + 1):
+                u = un if gemeinsam else rnd.random()
+                if u < pn:
+                    k += wn
+                row[j] = k
+
+    def _ok_d(i, d, n, minus):
+        fa = faecher[i]
+        return fa["fest"] - minus + summe[i][d] + neu_kum[i][d][n] >= fa["soll"] - 1e-6
+
+    def ok(i, n=0, minus=0.0):
+        return sum(1 for d in range(ziehungen) if _ok_d(i, d, n, minus)) / float(ziehungen)
+
+    def joint(ns=None, minus=None):
+        ns = ns or [0] * F
+        minus = minus or [0.0] * F
+        return sum(1 for d in range(ziehungen) if all(_ok_d(i, d, ns[i], minus[i]) for i in range(F))) / float(ziehungen)
+
+    return ok, joint
+
+
+def vorrat_score(lage, s_wert, sicherheit):
+    """REIN RECHNEND (testbar): Score 0–100 aus der Sicherheit (Vertrag §3, Finn rechnet nach):
+    jetzt   = 67 + 33 × (1 − S ÷ s*)          S = P(Bestand + Funnel ≥ Untergrenze) ohne Kauf
+    bald    = 34 + 32 × (1 − S ÷ s*)          S = dasselbe, wenn das größte Bestandskonto blowt (Mindest-Funnel allein: 34)
+    gedeckt = 33 × (1 − S) ÷ (1 − s*)         S = die engste der beiden Sicherheiten
+    s* = Sicherheitsniveau (0,8). Die Dringlichkeit ist das Band, in das der Score fällt."""
+    s_st = max(0.01, float(sicherheit))
+    S = max(0.0, min(1.0, float(s_wert if s_wert is not None else 1.0)))
+    if lage == "jetzt":
+        return int(round(max(67.0, min(100.0, 67 + 33 * (1 - S / s_st)))))
+    if lage == "bald":
+        return int(round(max(34.0, min(66.0, 34 + 32 * (1 - S / s_st)))))
+    if s_st >= 1:
+        return 0
+    return int(round(max(0.0, min(33.0, 33 * (1 - S) / (1 - s_st)))))
+
+
+def vorrat_totband(n_roh, vorher, lauf_at, param=None):
+    """REIN RECHNEND (testbar): Kaufzahl gegen Springen. vorher = {n_tb, n_seit, folge} der Zelle aus dem letzten Lauf (oder None).
+    Steigen erst, wenn n_roh in totband_laeufe Läufen in Folge gleich war; Sinken sofort (totband_nur_hoch, Master 06.10.2026).
+    n_seit = Zeitpunkt des Laufs, dessen Daten n_tb tragen — Konten, die danach angelegt wurden, zieht die Anzeige ab.
+    → {n_tb, n_seit, folge}"""
+    p = dict(VORRAT2_STD, **(param or {}))
+    k = max(1, int(p["totband_laeufe"]))
+    v = vorher or {}
+    folge = ([x for x in (v.get("folge") or []) if isinstance(x, int)] + [int(n_roh)])[-k:]
+    alt = v.get("n_tb")
+    if not isinstance(alt, int):
+        return {"n_tb": int(n_roh), "n_seit": lauf_at, "folge": folge}
+    if n_roh == alt or (n_roh < alt and p["totband_nur_hoch"]) or (len(folge) >= k and len(set(folge)) == 1):
+        return {"n_tb": int(n_roh), "n_seit": lauf_at, "folge": folge}
+    return {"n_tb": alt, "n_seit": v.get("n_seit") or lauf_at, "folge": folge}
+
+
+def vorrat_anzeige_n(n_tb, n_seit, konten_angelegt, bestellungen, jetzt_iso):
+    """REIN RECHNEND (testbar): angezeigte Kaufzahl = n_tb − Konten der Zelle, die nach n_seit angelegt wurden − offene
+    Bestellungen (je Bestellung: anzahl − seit ihr angelegte Konten, solange nicht verfallen/zurückgenommen).
+    → {n, neu_seit_lauf, bestellt (die jüngste aktive Bestellung mit offen) | None}"""
+    neu = sum(1 for c in konten_angelegt if c and n_seit and str(c) > str(n_seit))
+    offen_ges, info = 0, None
+    for b in sorted(bestellungen or [], key=lambda x: str(x.get("at") or "")):
+        if b.get("weg_at") or str(b.get("verfall_at") or "") <= str(jetzt_iso):
+            continue
+        offen = max(0, int(b.get("anzahl") or 0) - sum(1 for c in konten_angelegt if c and str(c) > str(b.get("at") or "")))
+        offen_ges += offen
+        if offen > 0:
+            info = {"id": b.get("id"), "anzahl": int(b.get("anzahl") or 0), "offen": offen, "einheit": b.get("einheit"),
+                    "von": b.get("von_name") or b.get("von"), "at": b.get("at"), "verfall": b.get("verfall_at")}
+    n = None if n_tb is None else max(0, int(n_tb) - neu - offen_ges)
+    return {"n": n, "neu_seit_lauf": neu, "bestellt": info, "offen": offen_ges}
+
+
+def vorrat_quoten(faelle, stufen_alle, param=None):
+    """REIN RECHNEND (testbar): gemessene Bestehens-Quoten aus dem Kapitel ohne Hedge (Kritik 06.10.2026: die Hedge-Ära misst
+    Münzwürfe) und der Faktor, mit dem sie die Formel korrigieren. faelle = [(firma, stufe, 'bestanden'|'geblowt')].
+    Unter min_faelle: Faktor 1 (nur Formel). Ab da: q_mix = w × gemessen + (1 − w) × Formel-Startwert, w = n ÷ (n + prior),
+    Faktor = q_mix ÷ Formel-Startwert. → {(firma, stufe): {bestanden, geblowt, n, gemessen, formel, gewicht, faktor}}"""
+    p = dict(VORRAT2_STD, **(param or {}))
+    zaehl = {}
+    for firma, stufe, aus in faelle:
+        if stufe not in p["mess_stufen"]:
+            continue
+        z = zaehl.setdefault((firma, stufe), [0, 0])
+        z[0 if aus == "bestanden" else 1] += 1
+    out = {}
+    for (firma, stufe), (b, gb) in zaehl.items():
+        regel = (stufen_alle.get(firma) or {}).get(stufe)
+        n = b + gb
+        e = vorrat_chance_stufe(regel, 100000, 100000, 100000) if regel else {"chance": None}
+        formel = e.get("chance")
+        q = b / n if n else None
+        w, fk = 0.0, None
+        if formel and n >= int(p["min_faelle"]):
+            w = n / float(n + float(p["prior_gewicht"]))
+            fk = (w * q + (1 - w) * formel) / formel
+        out[(firma, stufe)] = {"bestanden": b, "geblowt": gb, "n": n, "gemessen": q, "formel": formel, "gewicht": round(w, 3),
+                               "faktor": fk}
+    return out
+
+
+def vorrat2_zelle(ziel, stufen, konten, status, param=None, faktoren=None, seed=0, kw=None):
+    """REIN RECHNEND (testbar): Stufe 2 EINER Zelle (ID × Firma).
+    ziel   = vorrat_ziele-Zeile (+ kauf_groesse, kauf_stufe), stufen = {stufe: regel} der Firma, status = frei|pausiert|gesperrt
+    konten = [{account_id, name, typ, groesse, balance, balance_at, alter_tage, express, waiting, created_at, max_dd}]
+    kw     = ap_kw_param der Firma → je Konto wert_eur (ap_kontowert, Finns Kosten-Regel) und Summen bestand_eur/funnel_eur
+    → Felder laut Vertrag: nachkauf{n_roh, n_erwartung, n_max, einheit, teile, grund}, lage (jetzt|bald|gedeckt), score,
+      score_teile, sperre, sicherheit, sicherheit_nach, bestand_gewichtet, erwartet, bestfall, konten[]. n/dringlichkeit setzt
+      erst der Lauf (Totband) bzw. die Anzeige (bestellt)."""
+    p = dict(VORRAT2_STD, **(param or {}))
+    s_st = float(p["sicherheit"])
+    art, typen = ziel.get("art"), ziel.get("typen") or []
+    stueck = art == "stueck"
+    einheit_wert = "Stück" if stueck else "USD"
+    if stueck:
+        faecher = [{"groesse": (_vr2_num(t.get("groesse")) or None), "soll": float(t.get("stueck") or 0), "fest": 0.0,
+                    "gef": 0.0, "groesstes": 0.0, "funnel": [], "neu": (0.0, 0.0)} for t in (ziel.get("groessen") or [])]
+    else:
+        faecher = [{"groesse": None, "soll": float(ziel.get("von") or 0), "fest": 0.0, "gef": 0.0, "groesstes": 0.0,
+                    "funnel": [], "neu": (0.0, 0.0)}]
+    feste = {fa["groesse"] for fa in faecher if fa["groesse"] is not None}
+
+    def fach_von(gr):
+        for i, fa in enumerate(faecher):
+            if fa["groesse"] is not None and gr == fa["groesse"]:
+                return i
+        for i, fa in enumerate(faecher):
+            if fa["groesse"] is None and gr not in feste:
+                return i
+        return None
+
+    aus, df_any, uns_any, funnel_n, hinweise = [], False, False, 0, []
+    for k in konten:
+        typ, gr, bal = k.get("typ"), _vr2_num(k.get("groesse")), _vr2_num(k.get("balance"))
+        start = 0.0 if k.get("express") else gr
+        alter = k.get("alter_tage")
+        df = bal is None or gr is None
+        uns = (not df) and alter is not None and alter > int(p["alter_handelstage_max"])
+        im_bestand = typ in typen
+        z = {"account_id": k.get("account_id"), "name": k.get("name"), "typ": typ, "stufe": typ, "groesse": gr, "balance": bal,
+             "balance_at": k.get("balance_at"), "alter_tage": alter, "im_bestand": im_bestand, "chance": None,
+             "chance_stufe": None, "wert": None, "gefaehrdet": False, "unsicher": uns, "daten_fehlen": df, "hinweis": "",
+             "wert_eur": None}
+        if kw and bal is not None:
+            kv = ap_kontowert(typ, bal, kw)
+            z["wert_eur"] = kv["wert"] if kv else None
+        i = fach_von(gr)
+        if im_bestand:
+            regel = stufen.get(typ) or stufen.get("funded_cfd" if typ == "funded" else typ) or {}
+            if stueck:
+                wert = 1.0
+            elif art == "plus_ueber_start":
+                wert = max(0.0, (bal or 0.0) - (start or 0.0)) if not df else 0.0
+            else:
+                wert = gr or 0.0
+            g = vorrat_bestand_konto(regel, bal, gr, start)
+            z["gefaehrdet"] = g["gefaehrdet"]
+            z["chance"] = float(p["gefaehrdet_faktor"]) if g["gefaehrdet"] else 1.0
+            z["wert"] = wert
+            if g["abstand"] is not None:
+                z["hinweis"] = f"Boden {g['abstand']:,.0f} $ entfernt".replace(",", ".")
+            if df:
+                z["hinweis"] = "keine Lesung"
+            if i is not None and not df:
+                fa = faecher[i]
+                fa["fest"] += wert * z["chance"]
+                fa["gef"] += wert if g["gefaehrdet"] else 0.0
+                fa["groesstes"] = max(fa["groesstes"], wert * z["chance"])
+        else:
+            funnel_n += 1
+            rb = start if uns else bal
+            e = vorrat_chance_kette(stufen, typ, rb, gr, start, faktoren, p, k.get("max_dd"))
+            if e["daten_fehlen"]:
+                df = True
+                z["daten_fehlen"] = True
+                z["hinweis"] = e["hinweis"]
+            else:
+                if stueck:
+                    wert = 1.0
+                elif art == "plus_ueber_start":
+                    wert = e["wert_usd"] or 0.0
+                else:
+                    wert = gr or 0.0
+                hinweise += [h for h in e.get("vorlaeufig") or [] if h not in hinweise]
+                z.update(chance=e["chance"], chance_stufe=e["chance_stufe"], wert=wert,
+                         hinweis=("Startwert (Lesung alt) · " if uns else "") + "; ".join(x["hinweis"] for x in e["kette"] if x["hinweis"]))
+                if i is not None:
+                    faecher[i]["funnel"].append((e["chance"], wert, typ))
+        df_any |= bool(z["daten_fehlen"])
+        uns_any |= bool(z["unsicher"])
+        aus.append(z)
+
+    # Kauf-Einheit: Chance und Wert eines frisch gekauften Kontos
+    kauf_stufe = ziel.get("kauf_stufe") or stufen.get("_erste")
+    neu_df = False
+    for fa in faecher:
+        g_neu = fa["groesse"] or _vr2_num(ziel.get("kauf_groesse"))
+        if not kauf_stufe or not g_neu:
+            neu_df = True
+            continue
+        e = vorrat_chance_kette(stufen, kauf_stufe, g_neu, g_neu, g_neu, faktoren, p)
+        if e["daten_fehlen"] or not e["chance"]:
+            neu_df = True
+            continue
+        hinweise += [h for h in e.get("vorlaeufig") or [] if h not in hinweise]
+        w = 1.0 if stueck else (e["wert_usd"] or 0.0) if art == "plus_ueber_start" else g_neu
+        fa["neu"] = (e["chance"], w)
+        fa["kauf_groesse"] = g_neu
+    sperre = "daten_fehlen" if (df_any or neu_df) else ("unsicher" if uns_any else None)
+
+    n_max_kauf = int(p["n_max_kauf"])
+    ok, joint = vorrat_mc(faecher, n_max_kauf, int(p["mc_ziehungen"]), int(p["mc_seed"]) + seed, bool(p["tranche_gemeinsam"]))
+    teile, n_roh_ges, lage_ges, s_jetzt, s_bald, s_eng = [], 0, "gedeckt", [], [], []
+    ns, n_erw_ges, n_max_ges, grund, deckel = [], 0, 0, "gedeckt", False
+    for i, fa in enumerate(faecher):
+        pn, wn = fa["neu"]
+        e_funnel = sum(p_ * w_ for p_, w_, _ in fa["funnel"])
+        s0 = ok(i, 0)
+        n_i, lage_i = 0, "gedeckt"
+        if fa["fest"] < fa["soll"] - 1e-6:
+            s_eng.append(s0)
+            if s0 < s_st:
+                lage_i = "jetzt"
+                s_jetzt.append(s0)
+                n_i = next((n for n in range(n_max_kauf + 1) if ok(i, n) >= s_st), n_max_kauf)
+                if ok(i, n_i) < s_st:
+                    deckel = True
+        elif fa["groesstes"] > 0 and fa["fest"] - fa["groesstes"] < fa["soll"] - 1e-6:
+            sb = ok(i, 0, fa["groesstes"])
+            s_eng.append(sb)
+            if sb < s_st:
+                lage_i = "bald"
+                s_bald.append(sb)
+                n_i = next((n for n in range(n_max_kauf + 1) if ok(i, n, fa["groesstes"]) >= s_st), n_max_kauf)
+                if ok(i, n_i, fa["groesstes"]) < s_st:
+                    deckel = True
+        # Erwartungswert-Regel (Konzept, Finns „ID F × FundedNext → 2"): so viele, bis der ERWARTETE Bestand die Untergrenze trifft
+        luecke = fa["soll"] - fa["fest"] - e_funnel
+        n_erw = 0 if luecke <= 1e-6 else (int(-(-luecke // (pn * wn))) if pn * wn > 0 else n_max_kauf)
+        oben = (float(ziel.get("bis") or 0) if not stueck else fa["soll"]) - fa["fest"] - e_funnel
+        n_mx = max(0, int(oben // (pn * wn))) if pn * wn > 0 else 0
+        ns.append(n_i)
+        n_roh_ges += n_i
+        n_erw_ges += min(n_erw, n_max_kauf)
+        n_max_ges += n_mx
+        if lage_i == "jetzt" or (lage_i == "bald" and lage_ges == "gedeckt"):
+            lage_ges = lage_i
+        g_t = fa["groesse"] or fa.get("kauf_groesse")
+        teile.append({"groesse": g_t, "einheit": (f"{int(g_t // 1000)}k" if g_t else None), "soll": fa["soll"],
+                      "fest": round(fa["fest"], 2), "n": n_i, "lage": lage_i, "chance_neu": pn})
+    if lage_ges != "gedeckt":
+        grund = "unter_ziel" if lage_ges == "jetzt" else "blow_reserve"
+    if deckel and status == "frei":
+        # Apex 06.10.2026: ein neues Konto kommt nur mit ≈ 5 % bis Winning Days — für 80 % bräuchte es > 30 Käufe
+        hinweise.append(f"Deckel {n_max_kauf} Käufe erreicht — auch damit unter {round(s_st * 100)} % Sicherheit")
+    # Mindest-Funnel (Master 06.10.2026): immer mindestens 1 Konto unterwegs, solange der Bestand nicht über der Obergrenze ist
+    best = sum(fa["fest"] for fa in faecher)
+    ueber = (best >= sum(fa["soll"] for fa in faecher)) if stueck else (best >= float(ziel.get("bis") or 0))
+    mindest = int(p["mindest_funnel"])
+    if funnel_n < mindest and not ueber:
+        fehlt = mindest - funnel_n
+        if n_roh_ges < fehlt:
+            j = min(range(len(faecher)), key=lambda x: faecher[x]["fest"] - faecher[x]["soll"])
+            ns[j] += fehlt - n_roh_ges
+            teile[j]["n"] = ns[j]
+            n_roh_ges = fehlt
+            if lage_ges == "gedeckt":
+                lage_ges, grund = "bald", "mindest_funnel"
+    s_ohne = joint()
+    s_nach = joint(ns)
+    if lage_ges == "jetzt":
+        score = vorrat_score("jetzt", min(s_jetzt), s_st)
+    elif lage_ges == "bald":
+        score = vorrat_score("bald", min(s_bald) if s_bald else s_st, s_st)
+    else:
+        score = vorrat_score("gedeckt", min(s_eng) if s_eng else 1.0, s_st)
+    erwartet = best + sum(sum(p_ * w_ for p_, w_, _ in fa["funnel"]) for fa in faecher)
+    bestfall = best + sum(sum(w_ for _, w_, _ in fa["funnel"]) for fa in faecher)
+    soll = sum(fa["soll"] for fa in faecher)
+    pn0 = faecher[0]["neu"][0] if faecher else 0.0
+    score_teile = [
+        {"name": "Gesicherter Bestand", "wert": round(best, 2), "einheit": einheit_wert},
+        {"name": "Untergrenze", "wert": soll, "einheit": einheit_wert},
+        {"name": "Gefährdeter Bestand", "wert": round(sum(fa["gef"] for fa in faecher), 2), "einheit": einheit_wert},
+        {"name": "Erwarteter Zufluss (Funnel)", "wert": round(erwartet - best, 2), "einheit": einheit_wert},
+        {"name": "Sicherheit ohne Kauf", "wert": round(s_ohne * 100, 1), "einheit": "%"},
+    ]
+    if s_bald:
+        score_teile.append({"name": "Sicherheit, wenn das größte Konto blowt", "wert": round(min(s_bald) * 100, 1), "einheit": "%"})
+    score_teile += [
+        {"name": "Sicherheitsniveau", "wert": round(s_st * 100, 1), "einheit": "%"},
+        {"name": "Chance je neues Konto", "wert": round(pn0 * 100, 1), "einheit": "%"},
+        {"name": "Lücke in Kauf-Einheiten", "wert": n_roh_ges, "einheit": "Konten"},
+    ]
+    einheit = ziel.get("kauf_einheit")
+    g_kauf = _vr2_num(ziel.get("kauf_groesse")) or (faecher[0].get("kauf_groesse") if faecher else None)
+    preis = (_ap_kw_kauf(kw, g_kauf) if (kw and g_kauf) else None) if not stueck else None
+    if stueck and kw:
+        for t in teile:
+            t["preis_eur"] = round(_ap_kw_kauf(kw, t["groesse"])) if t.get("groesse") else None
+        preis = (round(sum(t["preis_eur"] * t["n"] for t in teile if t.get("preis_eur")) / max(1, sum(t["n"] for t in teile)))
+                 if any(t.get("preis_eur") for t in teile) else None)
+    if preis is not None:
+        preis = round(preis)
+    nachkauf = {"n_roh": n_roh_ges, "n_erwartung": n_erw_ges, "n_max": n_max_ges, "einheit": einheit,
+                "teile": teile if stueck else None, "grund": grund, "preis_eur": preis}
+    if status != "frei":
+        nachkauf.update(n_roh=0, grund=status)
+        lage_ges, score = None, None
+    elif sperre:
+        nachkauf.update(n_roh=None, grund=sperre)
+        lage_ges, score = None, None
+    return {"nachkauf": nachkauf, "lage": lage_ges, "score": score, "score_teile": score_teile, "sperre": sperre,
+            "sicherheit": round(s_ohne, 4), "sicherheit_nach": round(s_nach, 4), "bestand_gewichtet": round(best, 2),
+            "erwartet": round(erwartet, 2), "bestfall": round(bestfall, 2), "hinweise": hinweise,
+            "bestand_eur": round(sum(k["wert_eur"] or 0 for k in aus if k["im_bestand"])),
+            "funnel_eur": round(sum(k["wert_eur"] or 0 for k in aus if not k["im_bestand"])), "konten": aus}
+
+
+def vorrat2_slot(jetzt, takt_utc):
+    """REIN RECHNEND (testbar): (letzter Takt ≤ jetzt, nächster Takt > jetzt) als UTC-datetime aus den Uhrzeiten takt_utc."""
+    from datetime import timedelta as _td
+    zeiten = sorted({(int(t.split(":")[0]) * 60 + int(t.split(":")[1])) for t in takt_utc})
+    tag0 = jetzt.replace(hour=0, minute=0, second=0, microsecond=0)
+    kand = [tag0 + _td(days=dd, minutes=m) for dd in (-1, 0, 1) for m in zeiten]
+    return max(k for k in kand if k <= jetzt), min(k for k in kand if k > jetzt)
+
+
+def _vorrat2_tabellen():
+    """Kernwerte (auto_plan_regeln, EINE Quelle), Parameter → (firmen_regeln [firmen[]-Einträge], param, ohne_ids, bereit).
+    Fehlen die Stufe-2-Spalten (SQL nicht eingespielt): bereit False."""
+    try:
+        reg = (sb_select("auto_plan_regeln", {"select": "regeln", "id": "eq.1"}) or [{}])[0]
+        stufen = (reg.get("regeln") or {}).get("firmen") or []
+        ein = (sb_select("vorrat_einstellung", {"select": "parameter,sicherheit,ohne_ids", "id": "eq.1"}) or [{}])[0]
+    except requests.exceptions.HTTPError as e:
+        if getattr(e.response, "status_code", 0) in (400, 404):
+            return [], dict(VORRAT2_STD), set(), False
+        raise
+    param = dict(VORRAT2_STD, **(ein.get("parameter") or {}))
+    if _vr2_num(ein.get("sicherheit")):
+        param["sicherheit"] = float(ein["sicherheit"])
+    return stufen, param, {str(u) for u in (ein.get("ohne_ids") or [])}, True
+
+
+def _vorrat2_bestellungen():
+    try:
+        return _sb_all("vorrat_bestellt", {"select": "id,user_id,firma,anzahl,einheit,von,at,verfall_at,weg_at",
+                                            "weg_at": "is.null", "verfall_at": f"gt.{_wt_now_iso()}", "order": "at.asc"})
+    except requests.exceptions.HTTPError as e:
+        if getattr(e.response, "status_code", 0) == 404:
+            return []
+        raise
+
+
+def vorrat2_rechnen_lauf(quelle):
+    """Ein Lauf: Daten holen, je freier Zelle rechnen, Totband gegen den letzten Lauf, Ergebnis in vorrat_lauf. → Lauf-Zeile."""
+    jetzt = datetime.now(timezone.utc)
+    jetzt_iso = jetzt.isoformat()
+    firmen_regeln, param, ohne_ids, bereit = _vorrat2_tabellen()
+    if not bereit:
+        raise RuntimeError(f"SQL noch nicht eingespielt ({VORRAT2_SQL})")
+    b = _admin_basis()
+    accounts, archived, arch_info = b["accounts"], b["archived"], b.get("arch_info") or {}
+    excluded_ids = b["excluded_ids"] | ohne_ids
+    ziele, matrix, ein, _ = _vorrat_tabellen()
+    try:
+        ziele_ext = {_firm_norm(z.get("firma")): z for z in sb_select("vorrat_ziele", {"select": "firma,kauf_groesse"})}
+    except requests.exceptions.HTTPError:
+        ziele_ext = {}
+    for f, z in ziele.items():
+        z.update({k: (ziele_ext.get(f) or {}).get(k) for k in ("kauf_groesse",)})
+    # Stufen-Kette und Kernwerte je Vorrats-Firma aus auto_plan_regeln (ap_regel_finden: Vergleich nach _ap_norm über namen[])
+    stufen, kws = {}, {}
+    for f in ziele:
+        rg = ap_regel_finden(firmen_regeln, f)
+        stufen[f] = vorrat_stufen_aus_kernwerten(rg, param)
+        kws[f] = ap_kw_param(rg)
+    standard = ein.get("standard_status") if ein.get("standard_status") in ("frei", "gesperrt") else "frei"
+    try:
+        echo_bal, dup_bal = _ap_balance_karten()
+    except Exception as e:
+        echo_bal, dup_bal = {}, {}
+        print(f"[vorrat2] ⚠️ Balance-Spiegel: {type(e).__name__}: {e}", flush=True)
+    # Gemessene Quoten: nur Kapitel ohne Hedge (Spalte kapitel_id), Archiv-Grund passed/passed_pending = bestanden, blown = geblowt
+    try:
+        ohne_hedge = {int(k["id"]) for k in sb_select("kapitel", {"select": "id,hedge"}) if k.get("hedge") is False}
+    except Exception:
+        ohne_hedge = set()
+    faelle = []
+    for a in accounts:
+        aid = str(a["id"])
+        if aid not in archived or _kapitel_int(a.get("kapitel_id")) not in ohne_hedge:
+            continue
+        grund = (arch_info.get(aid) or {}).get("reason") or ""
+        aus = "bestanden" if grund in ("passed", "passed_pending") else "geblowt" if grund == "blown" else None
+        if aus:
+            faelle.append((_firm_norm(a.get("firm")), a.get("account_type") or "", aus))
+    quoten = vorrat_quoten(faelle, stufen, param)
+    faktoren = {}
+    for (firma, stufe), q in quoten.items():
+        if q["faktor"]:
+            faktoren.setdefault(firma, {})[stufe] = q["faktor"]
+    # Konten je Zelle (Lesart wie Stufe 1)
+    cfd_firmen = {f for f, z in ziele.items() if "funded_cfd" in (z.get("typen") or [])}
+    je = {}
+    for a in accounts:
+        aid, uid = str(a["id"]), str(a.get("user_id"))
+        if (a.get("account_type") or "") == "live" or uid in excluded_ids or aid in archived:
+            continue
+        firma = _firm_norm(a.get("firm"))
+        if firma not in ziele:
+            continue
+        bal, _ccy, _src, at = acc_balance_wahl(a, echo_bal, dup_bal)
+        express = ist_topstep_express(a)
+        typ = a.get("account_type") or ""
+        je.setdefault((uid, firma), []).append({
+            "account_id": aid, "name": a.get("name"), "typ": typ if typ in VORRAT_TYPEN else "challenge",
+            "groesse": vorrat_groesse(_wd_konto_groesse(a), None if express else bal,
+                                      firma in cfd_firmen or typ in VORRAT_CFD_TYPEN),
+            "balance": bal, "balance_at": at or None, "alter_tage": vorrat_alter_handelstage(at, jetzt) if at else None,
+            "express": express, "waiting": bool(a.get("waiting_payout_since")), "created_at": a.get("created_at")})
+    uids = sorted((set(b["names"]) | {u for u, _ in je}) - excluded_ids)
+    # Totband-Vorlauf: letzte fertige Zeile
+    try:
+        alt = (sb_select("vorrat_lauf", {"select": "id,ergebnis", "ergebnis": "not.is.null", "order": "id.desc", "limit": "1"})
+               or [{}])[0]
+    except requests.exceptions.HTTPError:
+        alt = {}
+    vorher = {(z.get("user_id"), z.get("firma")): z.get("totband") for z in ((alt.get("ergebnis") or {}).get("zellen") or [])}
+    bestellungen = _vorrat2_bestellungen()
+    zellen = []
+    for f in sorted(ziele, key=lambda x: (float(ziele[x].get("reihe") or 0), x)):
+        for uid in uids:
+            gesetzt = matrix.get((uid, f))
+            status = gesetzt if gesetzt in VORRAT_STATUS else standard
+            liste = je.get((uid, f), [])
+            seed = zlib.crc32(f"{uid}|{f}".encode("utf-8")) % 1000003
+            z = vorrat2_zelle(ziele[f], stufen.get(f) or {}, liste, status, param, faktoren.get(f), seed, kws.get(f))
+            nr = z["nachkauf"]["n_roh"]
+            tb = vorrat_totband(nr, vorher.get((uid, f)), jetzt_iso, param) if isinstance(nr, int) else None
+            z["totband"] = tb
+            if tb:
+                an = vorrat_anzeige_n(tb["n_tb"], tb["n_seit"], [k.get("created_at") for k in liste],
+                                      [x for x in bestellungen if str(x.get("user_id")) == uid and _firm_norm(x.get("firma")) == f],
+                                      jetzt_iso)
+                z["nachkauf"]["n"] = an["n"]
+            else:
+                z["nachkauf"]["n"] = 0 if nr == 0 else None
+            z["nachkauf"]["dringlichkeit"] = z["lage"]
+            z.update(user_id=uid, firma=f)
+            zellen.append(z)
+    _, naechster = vorrat2_slot(jetzt, param["takt_utc"])
+    return {"zellen": zellen, "quoten": [dict(firma=k[0], stufe=k[1], **v) for k, v in quoten.items()],
+            "parameter": param, "gerechnet_um": jetzt_iso, "naechster_lauf": naechster.isoformat(), "quelle": quelle}
+
+
+def vorrat2_lauf(quelle="hand", slot=None):
+    """Lauf mit Protokoll-Zeile. Takt: die Zeile mit slot ist der Claim (Unique-Index) — eine zweite Instanz bekommt 409 und lässt
+    es. → Lauf-Zeile {id, at, quelle, ergebnis} oder None (Slot schon vergeben)."""
+    with _vr2_lock:
+        try:
+            row = sb_insert("vorrat_lauf", {"quelle": quelle, "slot": slot})
+        except requests.exceptions.HTTPError as e:
+            if getattr(e.response, "status_code", 0) == 409:
+                return None
+            if getattr(e.response, "status_code", 0) == 404:
+                raise RuntimeError(f"SQL noch nicht eingespielt ({VORRAT2_SQL})")
+            raise
+        try:
+            erg = vorrat2_rechnen_lauf(quelle)
+            erg["lauf_id"] = row.get("id")
+            sb_update("vorrat_lauf", {"id": f"eq.{row['id']}"},
+                      {"ergebnis": erg, "parameter": erg["parameter"], "quoten": erg["quoten"], "fehler": None})
+            row.update(ergebnis=erg)
+            return row
+        except Exception as e:
+            try:
+                sb_update("vorrat_lauf", {"id": f"eq.{row['id']}"}, {"fehler": f"{type(e).__name__}: {e}"[:500]})
+            except Exception:
+                pass
+            raise
+
+
+def vorrat2_loop():
+    """Takt: je Takt-Zeitpunkt (takt_utc) genau ein Lauf; ein verpasster Takt (Neustart) wird nachgeholt, bis der nächste dran ist."""
+    print("[vorrat2] 📦 Takt bereit (" + ", ".join(VORRAT2_STD["takt_utc"]) + " UTC)", flush=True)
+    takt, takt_at = list(VORRAT2_STD["takt_utc"]), 0.0
+    while True:
+        try:
+            if time.time() - takt_at > 600:            # Parameter höchstens alle 10 min lesen
+                try:
+                    _, prm, _, ok_ = _vorrat2_tabellen()
+                    takt = list(prm.get("takt_utc") or takt) if ok_ else takt
+                except Exception:
+                    pass
+                takt_at = time.time()
+            slot, _ = vorrat2_slot(datetime.now(timezone.utc), takt)
+            s = slot.isoformat()
+            if _vr2_info.get("slot") != s:
+                vorrat2_lauf("takt", s)
+                _vr2_info.update(slot=s, last_run=time.time(), runs=_vr2_info["runs"] + 1)
+            _vr2_info["last_error"] = ""
+        except Exception as e:
+            _vr2_info["last_error"] = f"{type(e).__name__}: {e}"
+            print(f"[vorrat2] ⚠️ {e}", flush=True)
+            _schleife_schlafen(240)
+        _schleife_schlafen(60)
+
+
+def start_vorrat2():
+    global _vr2_started
+    if _vr2_started or not SUPABASE_SERVICE_KEY:
+        return
+    if (os.environ.get("PROPHOS_FRONTEND") or "").strip():
+        return          # PC-Backend: kein Takt (nur Railway rechnet, sonst rechnet jeder PC)
+    _vr2_started = True
+    _vr2_info["started"] = True
+    threading.Thread(target=vorrat2_loop, daemon=True).start()
+
+
+def vorrat2_anhaengen(erg1):
+    """Stufe-1-Antwort (admin_build_vorrat) + Stufe-2-Felder aus dem letzten Lauf. Gibt es noch keinen Lauf, läuft einmal einer.
+    Bestellungen und seit dem Lauf angelegte Konten wirken sofort (vorrat_anzeige_n)."""
+    try:
+        rows = sb_select("vorrat_lauf", {"select": "id,at,quelle,ergebnis", "ergebnis": "not.is.null", "order": "id.desc",
+                                         "limit": "1"})
+    except requests.exceptions.HTTPError as e:
+        if getattr(e.response, "status_code", 0) == 404:
+            return dict(erg1, stufe2_bereit=False, stufe2_hinweis=f"SQL noch nicht eingespielt ({VORRAT2_SQL})")
+        raise
+    lauf = rows[0] if rows else vorrat2_lauf("hand")
+    if not lauf or not lauf.get("ergebnis"):
+        return dict(erg1, stufe2_bereit=False, stufe2_hinweis="noch kein Lauf")
+    e2 = lauf["ergebnis"]
+    try:
+        ki = (sb_select("vorrat_lauf", {"select": "id,ki_text,ki_zeilen,ki_um", "ki_um": "not.is.null", "order": "id.desc",
+                                        "limit": "1"}) or [{}])[0]
+    except requests.exceptions.HTTPError:
+        ki = {}
+    jetzt_iso = _wt_now_iso()
+    bestellungen = _vorrat2_bestellungen()
+    z2 = {(z.get("user_id"), z.get("firma")): z for z in (e2.get("zellen") or [])}
+    stufen_skala = {d["wert"]: d for d in VORRAT2_DRINGLICHKEITEN}
+    for z in erg1.get("zellen") or []:
+        s = z2.get((z["user_id"], z["firma"]))
+        if not s:
+            z.update(nachkauf=None, konten=[], score=None, score_teile=[], sperre=None, zustand=None, bestellt=None,
+                     dringlichkeit=None, ki_text=None)
+            continue
+        nk = dict(s.get("nachkauf") or {})
+        tb = s.get("totband")
+        an = vorrat_anzeige_n(tb["n_tb"], tb["n_seit"], z.get("_angelegt") or [],
+                              [b for b in bestellungen if str(b.get("user_id")) == z["user_id"]
+                               and _firm_norm(b.get("firma")) == z["firma"]], jetzt_iso) if tb else None
+        if an:
+            nk["n"] = an["n"]
+        nk["kosten_eur"] = (round(nk["n"] * nk["preis_eur"], 2) if isinstance(nk.get("n"), int) and nk.get("preis_eur") else None)
+        lage = s.get("lage")
+        nk["dringlichkeit"] = lage if lage in stufen_skala else None
+        z.update(nachkauf=nk, konten=s.get("konten") or [], score=s.get("score"), score_teile=s.get("score_teile") or [],
+                 sperre=s.get("sperre"), sicherheit=s.get("sicherheit"), sicherheit_nach=s.get("sicherheit_nach"),
+                 bestand_gewichtet=s.get("bestand_gewichtet"), erwartet=s.get("erwartet"), bestfall=s.get("bestfall"),
+                 hinweise=s.get("hinweise") or [], bestand_eur=s.get("bestand_eur"), funnel_eur=s.get("funnel_eur"),
+                 bestellt=(an or {}).get("bestellt"), zustand=("bestellt" if (an or {}).get("bestellt") else None),
+                 ki_text=((ki.get("ki_zeilen") or {}).get(f"{z['user_id']}|{z['firma']}")))
+        z.pop("_angelegt", None)
+    return dict(erg1, stufe2_bereit=True, stufe2_hinweis="", gerechnet_um=e2.get("gerechnet_um"),
+                naechster_lauf=vorrat2_slot(datetime.now(timezone.utc), (e2.get("parameter") or VORRAT2_STD)["takt_utc"])[1].isoformat(),
+                lauf_id=lauf.get("id"), lauf_quelle=lauf.get("quelle"), sicherheit_ziel=(e2.get("parameter") or {}).get("sicherheit"),
+                dringlichkeiten=VORRAT2_DRINGLICHKEITEN, ki_text=ki.get("ki_text"), ki_text_um=ki.get("ki_um"),
+                ki_text_lauf_id=ki.get("id"))
+
+
+def _vorrat_antwort(erg1):
+    """GET-/rechnen-Antwort: Stufe 1 + Stufe 2. Scheitert Stufe 2 (SQL fehlt, DB-Fehler), kommt Stufe 1 trotzdem — mit Hinweis."""
+    try:
+        out = vorrat2_anhaengen(erg1)
+    except Exception as e:
+        print(f"[vorrat2] ⚠️ anhängen: {type(e).__name__}: {e}", flush=True)
+        out = dict(erg1, stufe2_bereit=False, stufe2_hinweis=f"Stufe 2: {type(e).__name__}: {e}"[:300])
+    for z in out.get("zellen") or []:
+        z.pop("_angelegt", None)
+        z.setdefault("konten", [])
+    out.setdefault("dringlichkeiten", VORRAT2_DRINGLICHKEITEN)
+    return out
+
+
+def _vorrat2_aktion(aktion, body, uid):
+    """POST-Aktionen der Seite: einstellung {sicherheit} · bestellt {user_id, firma, anzahl, einheit} · bestellt_weg {id}."""
+    nur = _admin_nur_uid()
+    try:
+        if aktion == "einstellung":
+            if nur:
+                return jsonify({"error": "nur Admin"}), 403
+            s = _vr2_num(body.get("sicherheit"))
+            if s is None or not (0.5 <= s <= 0.95):
+                return jsonify({"error": "sicherheit muss zwischen 0,5 und 0,95 liegen (Anteil)"}), 400
+            r = _sb_anfrage("PATCH", f"{SUPABASE_URL}/rest/v1/vorrat_einstellung", params={"id": "eq.1"},
+                            json={"sicherheit": round(s, 3), "updated_at": _wt_now_iso()},
+                            headers=_sb_headers("return=minimal"))
+            if r.status_code in (400, 404):
+                return jsonify({"error": f"SQL noch nicht eingespielt ({VORRAT2_SQL})"}), 503
+            _sb_pruefen(r)
+            return jsonify({"ok": True, "sicherheit": round(s, 3)})
+        if aktion == "bestellt":
+            ziel_uid = str(body.get("user_id") or "").strip().lower()
+            firma = _firm_norm(str(body.get("firma") or "")[:80])
+            anzahl = body.get("anzahl")
+            if not re.match(r"^[0-9a-f-]{36}$", ziel_uid) or firma == "—":
+                return jsonify({"error": "user_id/firma fehlt"}), 400
+            if not isinstance(anzahl, int) or not (1 <= anzahl <= 20):
+                return jsonify({"error": "anzahl muss 1–20 sein"}), 400
+            if nur and ziel_uid != nur:
+                return jsonify({"error": "nur eigene ID"}), 403
+            _, prm, _, _ok = _vorrat2_tabellen()
+            from datetime import timedelta as _td
+            verfall = (datetime.now(timezone.utc) + _td(hours=float(prm.get("bestellt_h") or 48))).isoformat()
+            try:
+                row = sb_insert("vorrat_bestellt", {"user_id": ziel_uid, "firma": firma, "anzahl": anzahl,
+                                                    "einheit": (str(body.get("einheit") or "")[:80] or None), "von": uid,
+                                                    "verfall_at": verfall})
+            except requests.exceptions.HTTPError as e:
+                if getattr(e.response, "status_code", 0) == 404:
+                    return jsonify({"error": f"SQL noch nicht eingespielt ({VORRAT2_SQL})"}), 503
+                raise
+            return jsonify({"ok": True, "bestellt": {"id": row.get("id"), "anzahl": anzahl, "offen": anzahl,
+                                                     "einheit": row.get("einheit"), "at": row.get("at"), "verfall": verfall}})
+        bid = body.get("id")
+        if not isinstance(bid, int):
+            return jsonify({"error": "id fehlt"}), 400
+        params = {"id": f"eq.{bid}", "weg_at": "is.null"}
+        if nur:
+            params["user_id"] = f"eq.{nur}"
+        r = sb_update("vorrat_bestellt", params, {"weg_at": _wt_now_iso()})
+        if not r:
+            return jsonify({"error": "Bestellung nicht gefunden"}), 404
+        return jsonify({"ok": True, "id": bid})
+    except Exception as e:
+        print(f"[vorrat2] ⚠️ {aktion}: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"error": str(e)}), 500
+
+
+def _vorrat2_code_ok():
+    """X-Vorrat-Code gegen vorrat_einstellung.ki_code_sha256 (Finn setzt den Code per SQL, nie im Repo). Vergleich zeitkonstant."""
+    code = (request.headers.get("X-Vorrat-Code") or "").strip()
+    if not code:
+        return False
+    try:
+        h = ((sb_select("vorrat_einstellung", {"select": "ki_code_sha256", "id": "eq.1"}) or [{}])[0].get("ki_code_sha256") or "")
+    except Exception:
+        return False
+    return bool(h) and hmac.compare_digest(hashlib.sha256(code.encode("utf-8")).hexdigest(), str(h).strip().lower())
+
+
+@app.route("/admin/vorrat/lauf", methods=["GET", "OPTIONS"])
+def admin_vorrat_lauf():
+    """Ein Lauf komplett (Mac-Skript für den Text, Master 06.10.2026: kein Service-Key auf dem Mac). ?lauf_id=N, ohne = neuester."""
+    if request.method == "OPTIONS":
+        return "", 200
+    if not _vorrat2_code_ok():
+        _uid, err = _wd_login()
+        if err:
+            return err
+        if _admin_nur_uid():
+            return jsonify({"error": "nur Admin"}), 403
+    lid = str(request.args.get("lauf_id") or "").strip()
+    params = {"select": "id,at,quelle,slot,parameter,quoten,ergebnis,fehler,ki_text,ki_zeilen,ki_um", "order": "id.desc", "limit": "1"}
+    if lid:
+        if not lid.isdigit():
+            return jsonify({"error": "lauf_id muss eine Zahl sein"}), 400
+        params["id"] = f"eq.{lid}"
+    else:
+        params["ergebnis"] = "not.is.null"
+    try:
+        rows = sb_select("vorrat_lauf", params)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    if not rows:
+        return jsonify({"error": "kein Lauf"}), 404
+    return jsonify(dict(rows[0], lauf_id=rows[0].get("id")))
+
+
+@app.route("/admin/vorrat/ki", methods=["POST", "OPTIONS"])
+def admin_vorrat_ki():
+    """Text zu einem Lauf schreiben — NUR Textfelder (ki_text, ki_zeilen), nie eine Zahl. {lauf_id, text, zeilen{"uid|firma": text}}"""
+    if request.method == "OPTIONS":
+        return "", 200
+    if not _vorrat2_code_ok():
+        _uid, err = _wd_login()
+        if err:
+            return err
+        if _admin_nur_uid():
+            return jsonify({"error": "nur Admin"}), 403
+    body = request.get_json(silent=True) or {}
+    lid = body.get("lauf_id")
+    if not isinstance(lid, int):
+        return jsonify({"error": "lauf_id fehlt"}), 400
+    zeilen = body.get("zeilen") or {}
+    if not isinstance(zeilen, dict) or len(zeilen) > 300:
+        return jsonify({"error": "zeilen ungültig"}), 400
+    sauber = {}
+    for k, v in zeilen.items():
+        if not re.match(r"^[0-9a-f-]{36}\|.{1,80}$", str(k)):
+            return jsonify({"error": f"Schlüssel {str(k)[:40]!r} ungültig (user_id|firma)"}), 400
+        sauber[str(k)] = str(v or "")[:1000]
+    try:
+        r = sb_update("vorrat_lauf", {"id": f"eq.{lid}"},
+                      {"ki_text": str(body.get("text") or "")[:4000] or None, "ki_zeilen": sauber, "ki_um": _wt_now_iso()})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    if not r:
+        return jsonify({"error": "Lauf nicht gefunden"}), 404
+    return jsonify({"ok": True, "lauf_id": lid})
+
+
+# Takt (06.10.2026) — nur Railway, siehe VORRAT STUFE 2 oben
+start_vorrat2()
 
 
 # ════════════════════════════════════════════════════════════════════════════

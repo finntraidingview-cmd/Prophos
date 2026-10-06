@@ -82,7 +82,7 @@ def main():
     pruef("Tradeify A: im Ziel (20–30k)", (z["lage"], z["fehlt"], z["bis_voll"]), ("im_ziel", 0.0, 6000.0))
     pruef("Tradeify A: Funded vor dem Big Trade ist Funnel, kein Vorrat", (z["bestand_n"], z["funnel"]["funded"]["n"]), (2, 1))
     pruef("Tradeify A: Funnel Challenge 2 × 150k", z["funnel"]["challenge"], {"n": 2, "groesse": 300000.0})
-    pruef("Tradeify A: 5 Konten", z["konten"], 5)
+    pruef("Tradeify A: 5 Konten", z["konten_n"], 5)
     z = zelle(erg, B, "Topstep")
     pruef("Topstep B: Express 3.000 → +3.000", z["bestand"], 3000.0)
     pruef("Topstep B: unter Ziel, fehlt 17.000, bis voll 27.000", (z["lage"], z["fehlt"], z["bis_voll"]), ("unter", 17000.0, 27000.0))
@@ -91,7 +91,7 @@ def main():
     pruef("Tradeify C: Konto unter Start zählt 0, nie negativ", z["bestand"], 0.0)
     pruef("Tradeify C: Konto ohne Balance = unklar", z["unklar"], 1)
     z = zelle(erg, B, "Tradeify")
-    pruef("Tradeify B: ID ohne Konten hat trotzdem eine Zelle", (z["konten"], z["bestand"], z["lage"], z["fehlt"]), (0, 0.0, "unter", 20000.0))
+    pruef("Tradeify B: ID ohne Konten hat trotzdem eine Zelle", (z["konten_n"], z["bestand"], z["lage"], z["fehlt"]), (0, 0.0, "unter", 20000.0))
     pruef("Reihenfolge der Firmen = reihe", [f["firma"] for f in erg["firmen"]],
           ["Tradeify", "Topstep", "Apex Trader", "FTMO", "FundedNext", "FundingPips", "The5%ers"])
     pruef("Futures-Firma ist nicht CFD, CFD-Firma schon",
