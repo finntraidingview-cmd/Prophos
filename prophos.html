@@ -2655,6 +2655,9 @@
   #dashboard-view .acc-wd-toggle:hover{border-color:#006F4F;color:#006F4F;background:rgba(0,111,79,.06)}   /* Mint wie .type-winning_days (30.09.2026) */
   #dashboard-view .acc-wd-toggle:disabled{opacity:.5;cursor:default}
   #dashboard-view .acc-wd-toggle.acc-wp-toggle:hover{border-color:#5049A2;color:#5049A2;background:rgba(80,73,162,.06)}   /* Indigo wie Funded CFD / Waiting for Payout (30.09.2026) */
+  /* Consistency-Chip neben dem Typ (07.10.2026): nur bei gesetztem accounts.consistency_pct, neutral im Outline-Stil der Typ-Chips */
+  #dashboard-view .type-badge.acc-cons-chip{margin-left:6px;background:#fff;border-color:var(--border);color:var(--ink-2);vertical-align:middle}
+  #dashboard-view #ac-cons-row[hidden],#dashboard-view #ac-cons-frei[hidden],#dashboard-view #bulk-cons-row[hidden],#dashboard-view #bulk-cons-frei[hidden]{display:none}
   #dashboard-view .type-live{background:#F0FAEE;border-color:#B4DFAE;color:#1B6A14}
   #dashboard-view .type-live::before{
     content:'';width:6px;height:6px;border-radius:999px;background:#4AA342;
@@ -11121,6 +11124,21 @@
           <input class="input mono" id="ac-max-drawdown" type="number" step="100" placeholder="z.B. 10000 (10% von 100K Account)" autocomplete="off">
           <div style="font-size:11px;color:var(--sub);margin-top:4px">Für die Auto-Hedge-Berechnung. Bei FundingPips 100K = 10K. Bei 150K Topstep = 4.5K. Trade-Plan rechnet damit den Slave-Risk so aus, dass bei Master-Stop-Out der Account-Kaufpreis (+ akkumulierte Verluste) zurückgeholt wird.</div>
         </div>
+        <!-- Consistency je Konto (07.10.2026, Finn: Futures-Challenges haben standardmäßig 40 % — größter Tag ≤ 40 % des Ziels —,
+             mit Addon gekauft sind es 50 %). Spalte accounts.consistency_pct, leer = Standard. Nur Futures-Firma + Challenge/Phase,
+             Sichtbarkeit in toggleAcBloecke, Lesen/Schreiben über acConsWert/acConsSetzen. -->
+        <div class="field" style="grid-column:1/-1" id="ac-cons-row" hidden>
+          <label>Consistency <span style="font-weight:400;color:var(--sub)">(optional)</span></label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <select class="input" id="ac-cons" style="flex:1">
+              <option value="">Standard (40 %)</option>
+              <option value="50">50 %</option>
+              <option value="frei">Andere Zahl …</option>
+            </select>
+            <input class="input mono" id="ac-cons-frei" type="number" step="1" min="1" max="100" placeholder="%" autocomplete="off" style="width:90px" hidden>
+          </div>
+          <div style="font-size:11px;color:var(--sub);margin-top:4px">Größter Tag ≤ so viel % des Ziels. 50 % z. B. bei Konten mit Addon.</div>
+        </div>
         <div class="field" style="grid-column:1/-1" id="ac-ext-id-row">
           <label>External ID <span style="font-weight:400;color:var(--sub)">(optional)</span></label>
           <input class="input mono" id="ac-ext-id" placeholder="z.B. TDFYSL150305023594" autocomplete="off">
@@ -11433,6 +11451,19 @@
         <div class="field">
           <label>Max Drawdown ($)</label>
           <input class="input mono" id="bulk-maxdd" type="number" step="100" placeholder="optional" autocomplete="off">
+        </div>
+        <!-- Consistency (07.10.2026) wie im Konto-Popup — nur sichtbar, wenn Futures-Challenges im Batch sind, und nur auf die
+             geschrieben (bulkConsWert in saveBulkAccounts). Leer = Standard 40 %. -->
+        <div class="field" style="grid-column:1/-1" id="bulk-cons-row" hidden>
+          <label>Consistency <span style="font-weight:400;color:var(--sub)">(Futures-Challenges · optional)</span></label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <select class="input" id="bulk-cons" style="flex:1">
+              <option value="">Standard (40 %)</option>
+              <option value="50">50 %</option>
+              <option value="frei">Andere Zahl …</option>
+            </select>
+            <input class="input mono" id="bulk-cons-frei" type="number" step="1" min="1" max="100" placeholder="%" autocomplete="off" style="width:90px" hidden>
+          </div>
         </div>
         <div class="field" style="grid-column:1/-1">
           <div style="height:1px;background:var(--border);margin:4px 0 2px"></div>
@@ -30021,6 +30052,8 @@
       payoutReadyAt:  row.payout_ready_at || null,
       // Waiting for Payout (29.09.2026): seit wann, null = nein — nur Funded CFD
       waitingPayoutSince: row.waiting_payout_since || null,
+      // Consistency je Konto (07.10.2026): null = Standard der Firma (40 %), sonst z. B. 50 bei Addon-Konten
+      consistencyPct: row.consistency_pct != null ? Number(row.consistency_pct) : null,
       creds: (row.cred_login || row.cred_password || row.cred_server || row.cred_platform || row.cred_notes) ? {
         login:    row.cred_login    || '',
         password: row.cred_password || '',
@@ -30145,6 +30178,9 @@
     payoutSec:     document.getElementById('ac-payout-section'),
     wartetPayout:    document.getElementById('ac-wartet-payout'),
     wartetPayoutRow: document.getElementById('ac-wartet-payout-row'),
+    consRow:  document.getElementById('ac-cons-row'),    // Consistency (07.10.2026)
+    cons:     document.getElementById('ac-cons'),
+    consFrei: document.getElementById('ac-cons-frei'),
     maSec:    document.getElementById('ac-ma-section'),
     maTok:    document.getElementById('ac-ma-token'),
     maAcc:    document.getElementById('ac-ma-account'),
@@ -30578,6 +30614,35 @@
       ? ` <button type="button" class="acc-wd-toggle acc-wp-toggle" data-acc-wartet="${escapeHtml(String(a.id))}" data-ziel="aus" data-stop-row-click="1" title="Zurück auf Funded CFD — Waiting for Payout aus (sofort gespeichert)">→ Funded CFD</button>`
       : ` <button type="button" class="acc-wd-toggle acc-wp-toggle" data-acc-wartet="${escapeHtml(String(a.id))}" data-ziel="an" data-stop-row-click="1" title="Konto ist im Plus und wartet nur auf den Payout (sofort gespeichert) — springt beim Payout-Anfragen von selbst zurück">→ Waiting for Payout</button>`
     return ''
+  }
+  /* Consistency je Konto (07.10.2026, Finn: Futures-Challenges haben standardmäßig 40 % — größter Tag ≤ 40 % des Ziels —, manche
+   * Konten kauft er mit Addon und bekommt 50 %). Spalte accounts.consistency_pct, null = Standard. Legt der Master per SQL an —
+   * solange sie fehlt, speichern Popup und Bulk OHNE das Feld (PostgREST meldet „Could not find the 'consistency_pct' column"),
+   * mit Hinweis in der Konsole; _accConsSpalteFehlt spart danach den Fehlversuch. Bewusst NICHT in accountToRow: Nachfolger &
+   * Co. sollen nicht an einer fehlenden Spalte scheitern. */
+  let _accConsSpalteFehlt = false
+  const accConsFehlt = error => /consistency_pct/.test(String((error && (error.message || error.details)) || ''))
+  const accConsZahl = v => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 2 }) + ' %'
+  function accConsSichtbar(firm, typ){
+    return (typeof tpFirmIstFutures === 'function') && tpFirmIstFutures(firm) && (typ === 'challenge' || typ === 'phase1' || typ === 'phase2')
+  }
+  // Auswahl „Standard / 50 % / Andere Zahl" lesen: { ok, wert } — wert null = Standard
+  function accConsLesen(sel, frei){
+    const w = sel ? sel.value : ''
+    if(!w) return { ok: true, wert: null }
+    if(w !== 'frei') return { ok: true, wert: Number(w) }
+    const n = parseFloat(String(frei?.value || '').replace(',', '.'))
+    return (isFinite(n) && n > 0 && n <= 100) ? { ok: true, wert: n } : { ok: false, wert: null }
+  }
+  function accConsSetzen(sel, frei, wert){
+    if(!sel) return
+    const v = wert != null && isFinite(Number(wert)) ? Number(wert) : null
+    sel.value = v == null ? '' : v === 50 ? '50' : 'frei'
+    if(frei){ frei.value = (v != null && v !== 50) ? String(v) : ''; frei.hidden = sel.value !== 'frei' }
+  }
+  function accConsChipHtml(a){
+    if(!a || a.consistencyPct == null || !isFinite(a.consistencyPct)) return ''
+    return ` <span class="type-badge acc-cons-chip" title="Consistency ${accConsZahl(a.consistencyPct)} — größter Tag ≤ ${accConsZahl(a.consistencyPct)} des Ziels (Standard 40 %)">${accConsZahl(a.consistencyPct)}</span>`
   }
   // Typ-Chip der Accounts-Tabelle: Funded CFD mit Waiting for Payout zeigt den Zustand statt des Typs (29.09.2026), „seit" im Tooltip
   function accTypChipHtml(a){
@@ -31071,7 +31136,7 @@
               ${meta}
             </td>
             <td>${escapeHtml(a.firm || '–')}</td>
-            <td>${accTypChipHtml(a)}${accWdToggleHtml(a)}</td>
+            <td>${accTypChipHtml(a)}${accConsChipHtml(a)}${accWdToggleHtml(a)}</td>
             <td>${balCell}</td>
             <td>${(_mtcLogin && !isArchived && typeof mt5KontoIst === 'function' && mt5KontoIst(a)) ? `<div>${accTermBtnHtml(a.id)}</div>` : ''}${linksHtml}${accTermStatusHtml(a.id)}</td>
             <td style="padding-right:20px;text-align:right;white-space:nowrap" data-stop-row-click="1">
@@ -31240,6 +31305,7 @@
       if(accEls.wdTarget) accEls.wdTarget.value = editAccount.goalTarget > 0 ? editAccount.goalTarget : ''
       if(accEls.payoutReady) accEls.payoutReady.value = editAccount.payoutReadyAt ? String(editAccount.payoutReadyAt).slice(0,10) : ''
       if(accEls.wartetPayout) accEls.wartetPayout.checked = !!editAccount.waitingPayoutSince
+      accConsSetzen(accEls.cons, accEls.consFrei, editAccount.consistencyPct)   // Consistency (07.10.2026), null = Standard
       // MetaApi-Felder vorausfüllen wenn vorhanden
       accEls.maTok.value = editAccount.ma?.token     || ''
       accEls.maAcc.value = editAccount.ma?.accountId || ''
@@ -31269,6 +31335,7 @@
       if(accEls.wdTarget) accEls.wdTarget.value = ''
       if(accEls.payoutReady) accEls.payoutReady.value = ''
       if(accEls.wartetPayout) accEls.wartetPayout.checked = false
+      accConsSetzen(accEls.cons, accEls.consFrei, null)
     }
     // Passwort-Feld immer verdeckt starten
     // Passwort standardmäßig SICHTBAR (Finn, 15.08.2026) — Toggle kann weiter verbergen
@@ -31324,6 +31391,8 @@
     if(accEls.wdSec)     accEls.wdSec.hidden     = !(istFunded && istFutures && !istCfd)
     if(accEls.payoutSec) accEls.payoutSec.hidden = !((istFunded && !istFutures) || istCfd)
     if(accEls.wartetPayoutRow) accEls.wartetPayoutRow.hidden = !istCfd
+    // Consistency (07.10.2026): nur Futures-Firma + Challenge/Phase
+    if(accEls.consRow) accEls.consRow.hidden = !accConsSichtbar(firm, typ)
     // Futures · Live (26.09.2026): nur Futures-Firma und nur beim Bearbeiten (ein neues Konto hat noch keine Lesung)
     const tvSec = document.getElementById('ac-tvlive-section'); if(tvSec) tvSec.hidden = !(istFutures && _editingAccountId)
     // „Im WD-Farm" nur beim Bearbeiten, nie beim Anlegen (F17-Ergänzung, 27.09.2026)
@@ -31463,6 +31532,11 @@
     if(!name){ setModalMsg('Name ist Pflicht.', 'err'); return }
     if(!firm){ setModalMsg('Firm ist Pflicht.', 'err'); return }
     if(!currentUserId){ setModalMsg('Nicht eingeloggt — bitte Seite neu laden.', 'err'); return }
+
+    // Consistency (07.10.2026): nur wenn das Feld sichtbar ist — ausgeblendet bleibt der Bestand unangetastet (Muster Blöcke 15.09.)
+    const consOn = !!accEls.consRow && !accEls.consRow.hidden
+    const cons = consOn ? accConsLesen(accEls.cons, accEls.consFrei) : { ok: true, wert: null }
+    if(!cons.ok){ setModalMsg('Consistency: eine Zahl zwischen 1 und 100 eintragen — oder „Standard (40 %)" wählen.', 'err'); return }
 
     const externalIdVal = accEls.extId?.value.trim() || null
     // Fortschritts-Ziel (10.09.2026): ohne Zieltyp werden alle goal_*-Felder
@@ -31628,16 +31702,30 @@
           updateRow.meta_api_equity     = null
           updateRow.meta_api_last_check = null
         }
-        const { data, error } = await supabase
+        // Consistency (07.10.2026): sichtbar = schreiben (auch null = zurück auf Standard); Spalte fehlt → ohne Feld nochmal
+        if(consOn && !_accConsSpalteFehlt) updateRow.consistency_pct = cons.wert
+        let { data, error } = await supabase
           .from('accounts').update(updateRow).eq('id', _editingAccountId).select('*').single()
+        if(error && 'consistency_pct' in updateRow && accConsFehlt(error)){
+          _accConsSpalteFehlt = true; delete updateRow.consistency_pct
+          console.warn('[konto] Spalte accounts.consistency_pct fehlt noch — gespeichert ohne Consistency (SQL vom Master steht aus)')
+          ;({ data, error } = await supabase.from('accounts').update(updateRow).eq('id', _editingAccountId).select('*').single())
+        }
         if(error) throw error
 
         const idx = accounts.findIndex(x => String(x.id) === String(_editingAccountId))
         if(idx >= 0) accounts[idx] = rowToAccount(data)
       }else{
-        // INSERT
-        const { data, error } = await supabase
-          .from('accounts').insert(accountToRow(acc)).select('*').single()
+        // INSERT — Consistency (07.10.2026) nur, wenn etwas anderes als Standard gewählt ist; Spalte fehlt → ohne Feld nochmal
+        const insRow = accountToRow(acc)
+        if(consOn && cons.wert != null && !_accConsSpalteFehlt) insRow.consistency_pct = cons.wert
+        let { data, error } = await supabase
+          .from('accounts').insert(insRow).select('*').single()
+        if(error && 'consistency_pct' in insRow && accConsFehlt(error)){
+          _accConsSpalteFehlt = true; delete insRow.consistency_pct
+          console.warn('[konto] Spalte accounts.consistency_pct fehlt noch — angelegt ohne Consistency (SQL vom Master steht aus)')
+          ;({ data, error } = await supabase.from('accounts').insert(insRow).select('*').single())
+        }
         if(error) throw error
         const newAcc = rowToAccount(data)
         accounts.unshift(newAcc)
@@ -31752,6 +31840,12 @@
   if(accEls.save)    accEls.save.addEventListener('click', saveAccount)
   if(accEls.type)    accEls.type.addEventListener('change', toggleMaSection)
   if(accEls.type)    accEls.type.addEventListener('change', toggleAcBloecke)
+  // Consistency (07.10.2026): „Andere Zahl …" blendet das Zahlenfeld ein (eigene Verdrahtung, nur dieses Popup)
+  accEls.cons?.addEventListener('change', () => {
+    if(!accEls.consFrei) return
+    accEls.consFrei.hidden = accEls.cons.value !== 'frei'
+    if(accEls.cons.value === 'frei') accEls.consFrei.focus()
+  })
 
   /* ── Server automatisch vorausfüllen, sobald die Firma gewählt ist (Punkt 2, 24.07.2026) ──
    * Bleibt frei bearbeitbar: hat der User den Server selbst angefasst, wird nicht überschrieben.
@@ -32467,6 +32561,7 @@
       bEl.totalCost.textContent = ''
       bEl.saveBtn.disabled = false
       bEl.saveLabel.textContent = 'Accounts anlegen'
+      accConsSetzen(document.getElementById('bulk-cons'), document.getElementById('bulk-cons-frei'), null)   // Consistency (07.10.2026): Standard
       bEl.modal.classList.add('open')
       bulkPasteRender()
       loadBulkTemplates()
@@ -32533,7 +32628,23 @@
       const zeigen = bulkZeigtZugang(), cb = document.getElementById('bulk-creds-box')
       try{ bulkCredZeilenRender() }catch(_){}
       if(cb) cb.style.display = zeigen ? '' : 'none'
+      try{ bulkConsUmschalten() }catch(_){}
     }
+    /* Consistency im Bulk (07.10.2026): sichtbar, sobald im Batch eine Futures-Challenge steckt (Formular oder eingefügte Blöcke,
+     * dieselbe Auflösung Vorlage > Text > Formular wie beim Speichern); geschrieben wird der Wert nur auf diese Konten. */
+    function bulkConsTrifft(){
+      const firmaForm = bEl.firm.value.trim(), typForm = bEl.type.value
+      if(accConsSichtbar(firmaForm, typForm)) return true
+      return (bulkPaste.bloecke || []).some(x => { const v = bulkPasteVorlage(x); return accConsSichtbar((v && v.firm) || x.firma || firmaForm, (v && v.account_type) || x.typ || typForm) })
+    }
+    function bulkConsUmschalten(){
+      const row = document.getElementById('bulk-cons-row'); if(row) row.hidden = !bulkConsTrifft()
+    }
+    document.getElementById('bulk-cons')?.addEventListener('change', ev => {
+      const frei = document.getElementById('bulk-cons-frei'); if(!frei) return
+      frei.hidden = ev.target.value !== 'frei'
+      if(!frei.hidden) frei.focus()
+    })
     function setBulkMsg(text, kind){
       bEl.msg.textContent = text || ''
       bEl.msg.className = 'modal-msg' + (kind ? ' ' + kind : '')
@@ -32713,6 +32824,10 @@
       let wahl = bulkWahl()
       if(!wahl.length){ setBulkMsg('External IDs ist Pflicht — mindestens eine neue Kennung einfügen.', 'err'); return }
       if(wahl.length > 50){ setBulkMsg('Maximal 50 auf einmal.', 'err'); return }
+      // Consistency (07.10.2026): nur wenn das Feld sichtbar ist; Wert geht nur an Futures-Challenges des Batches
+      const consRow = document.getElementById('bulk-cons-row')
+      const consB = (consRow && !consRow.hidden) ? accConsLesen(document.getElementById('bulk-cons'), document.getElementById('bulk-cons-frei')) : { ok: true, wert: null }
+      if(!consB.ok){ setBulkMsg('Consistency: eine Zahl zwischen 1 und 100 eintragen — oder „Standard (40 %)" wählen.', 'err'); return }
       bEl.saveBtn.disabled = true
       bEl.saveBtn.classList.add('ts-btn-loading')
       // Direkt vor dem Anlegen noch einmal über ALLE Nutzer prüfen (F16-Ergänzung) — ohne Antwort der Route wird nichts angelegt
@@ -32751,10 +32866,18 @@
         if(cred && (cred.login || cred.password || cred.server)){
           row.cred_login = cred.login || null; row.cred_password = cred.password || null; row.cred_server = cred.server || null; row.cred_platform = cred.platform || 'MT5'
         }
+        if(consB.wert != null && !_accConsSpalteFehlt && accConsSichtbar(firm, row.account_type)) row.consistency_pct = consB.wert
         if(bEl.saveLabel) bEl.saveLabel.textContent = `Anlegen… ${i + 1}/${wahl.length}`
         try{
           let { data, error } = await supabase.from('accounts').insert(row).select('*').single()
           if(error && /tv_balance_quelle/.test(String(error.message || ''))){ ohneQuelle = true; delete row.tv_balance_quelle; ({ data, error } = await supabase.from('accounts').insert(row).select('*').single()) }
+          // Spalte consistency_pct fehlt noch (07.10.2026) → ohne Feld anlegen, Hinweis in der Konsole
+          if(error && 'consistency_pct' in row && accConsFehlt(error)){
+            _accConsSpalteFehlt = true; delete row.consistency_pct
+            console.warn('[bulk] Spalte accounts.consistency_pct fehlt noch — angelegt ohne Consistency (SQL vom Master steht aus)')
+            ;({ data, error } = await supabase.from('accounts').insert(row).select('*').single())
+            if(error && 'tv_balance_quelle' in row && /tv_balance_quelle/.test(String(error.message || ''))){ ohneQuelle = true; delete row.tv_balance_quelle; ({ data, error } = await supabase.from('accounts').insert(row).select('*').single()) }
+          }
           if(error) throw error
           const newAcc = rowToAccount(data)
           accounts.unshift(newAcc)
@@ -39231,7 +39354,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1095'
+  const OS_TAB_BUILD = '2026-09-22.1096'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
