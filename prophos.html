@@ -35818,6 +35818,11 @@
         + `<span class="tc2-chip tc2-dir-hint" data-dir-firm="${escapeHtml(p.masterFirm || '')}" style="display:none;background:rgba(245,158,11,.14);color:#b45309"></span>`
         + (p.autoPlan ? '' : `<span class="tc2-date">${dateStr}</span>`)
       zeileChips = `${mirrorBadge}${pfBadge}`   // Geplant-Tabelle: der Richtungs-Hinweis steht dort einmal im Firmen-Kopf
+      // Richtungskonflikt am Start (07.10.2026): in der Tabelle als kleiner Chip — wartet (Neuversuch) · aufgegeben · vom Bot markiert
+      { const f = rkFlag(p)
+        const t = !f ? '' : f.status === 'wartet' ? `⇅ Richtungskonflikt · Versuch ${Number(f.versuche) || 1}` : rkAufgegeben(p) ? '✗ nicht gestartet: Richtungskonflikt'
+          : f.status === 'konflikt' ? `⇅ Richtungskonflikt: ${f.gegen === 'sell' ? 'SHORT' : f.gegen === 'buy' ? 'LONG' : '?'} ${f.durch === 'geplant' ? 'vorher geplant' : 'läuft'}` : ''
+        if(t) zeileChips += `<span class="tc2-chip tc2-chip-issue" title="${escapeHtml(String(f.text || ''))}${f.status === 'wartet' ? ' — neuer Versuch zur Startzeit' : ''}">${escapeHtml(t)}</span>` }
     } else if(isOpen){
       if(isPending){
         metric = `<span class="tc2-pending-lbl">🔴 beendet — eintragen</span>`
@@ -35918,8 +35923,15 @@
       const _vc = p.status === 'planned' && p.mt5Baseline && p.mt5Baseline.vorcheck
       const vorcheckChip = (_vc && _vc.status === 'slave_nicht_bereit') ? `<span class="rsq-card-run" style="color:var(--danger)" title="${escapeHtml(String(_vc.grund || ''))}">⚠ Slave-Terminal nicht bereit · seit ${tpStartUmText(_vc.seit)} · ${Number(_vc.versuche) || 1} Versuche</span>`
         : (_vc && _vc.status === 'verpasst_slave') ? `<span class="rsq-card-run" style="color:var(--danger)" title="${escapeHtml(String(_vc.grund || ''))}">✗ nicht gestartet — Slave-Terminal war nicht bereit</span>` : ''
+      // Richtungskonflikt am Start (07.10.2026): wartet auf Neuversuch · aufgegeben · vom Ausgleichs-Bot markiert (bestätigt/Hand)
+      const _rk = p.status === 'planned' ? rkFlag(p) : null
+      const rkChip = !_rk ? ''
+        : _rk.status === 'wartet' ? `<span class="rsq-card-run" style="color:#B45309" title="${escapeHtml(String(_rk.text || ''))}">⇅ Richtungskonflikt · neuer Versuch ${tpStartUmText(p.startUm)} · Versuch ${Number(_rk.versuche) || 1}</span>`
+        : rkAufgegeben(p) ? `<span class="rsq-card-run" style="color:var(--danger)" title="${escapeHtml(String(_rk.text || ''))}">✗ nicht gestartet: Richtungskonflikt — von Hand starten oder Uhrzeit ändern</span>`
+        : _rk.status === 'konflikt' ? `<span class="rsq-card-run" style="color:var(--danger)" title="${escapeHtml(String(_rk.text || ''))}">⇅ Richtungskonflikt: ${escapeHtml(String(_rk.gegen === 'sell' ? 'SHORT' : _rk.gegen === 'buy' ? 'LONG' : '?'))} ${_rk.durch === 'geplant' ? 'vorher geplant' : 'läuft'}</span>`
+        : ''
       const startUmBtn = (p.startUm && !p.startUmGestartetAt)
-        ? vorcheckChip + (p.route === 'tsv2'
+        ? vorcheckChip + rkChip + (p.route === 'tsv2'
           // Topstep V2: bis Etappe K4 kein automatischer Start (30.09.2026) — die Zeit ist nur Erinnerung, „Starten" von Hand bleibt
           ? `<button class="btn btn-ghost tc2-btn rsq-card-wait" data-plan-start-um-x="${p.id}" title="Topstep V2 startet bis Etappe K4 NICHT von selbst — die Zeit ist nur eine Erinnerung. Klick nimmt sie raus.">⏰ ${tpStartUmText(p.startUm)} · von Hand ✕</button> ${orbitBtn}`
           // Uhrzeit per Klick ändern, ✕ nimmt sie raus (05.10.2026, Finn: „wenn ich auf die Uhrzeit klicke, die Uhrzeit ändern")
@@ -37112,8 +37124,9 @@
     document.getElementById('tpPreflightModal').classList.add('open')
     const offenUndMeiner = () => document.getElementById('tpPreflightModal')?.classList.contains('open') && String(_pfPlanId) === String(plan.id)
     const po = (_tpPendingOrder && String(_tpPendingOrder.planId) === String(plan.id)) ? _tpPendingOrder : (_tpOrderAusPlan(plan).order || null)
-    let hardFail = false
-    const fail = (key, html) => { _pfSet(key, 'err', html); hardFail = true }
+    let hardFail = false, rkSperre = null
+    const failKeys = [], vonTick = _rkTickStart.delete(String(plan.id))   // Start zur Startzeit (tpStartUmTick, 07.10.2026)
+    const fail = (key, html) => { _pfSet(key, 'err', html); hardFail = true; failKeys.push(key) }
     const abschluss = (ok, text, retry) => {
       if(finalEl){ finalEl.style.display = 'block'; finalEl.className = 'pf-final ' + (ok ? 'ok' : 'err'); finalEl.textContent = text }
       const cb = document.getElementById('pf-cancel'); if(cb) cb.textContent = 'Schließen'
@@ -37166,13 +37179,13 @@
       let kPlan = null; try{ kPlan = await v2RichtungKonflikt({ firm: plan.masterFirm, ohneId: plan.id, frisch: true }) }catch(_){}
       const dirs = await window.firmLiveRichtungen(plan.masterFirm)
       let laufDir = dirs.long.length ? 'LONG' : dirs.short.length ? 'SHORT' : null
-      if(kPlan && kPlan.lauf && meine && kPlan.lauf.toUpperCase() !== meine){ fail('v2dir', `${escapeHtml(kPlan.text)} — nicht gestartet (Richtungs-Schutz).`) }
-      else if(laufDir && meine && laufDir !== meine) fail('v2dir', `${fName} läuft bereits <b>${laufDir}</b> — deine <b>${meine}</b>-Order wäre die GEGENRICHTUNG (Selbst-Hedge). Nicht gestartet.`)
+      if(kPlan && kPlan.lauf && meine && kPlan.lauf.toUpperCase() !== meine){ rkSperre = kPlan; fail('v2dir', `${escapeHtml(kPlan.text)} — nicht gestartet (Richtungs-Schutz).`) }
+      else if(laufDir && meine && laufDir !== meine){ rkSperre = { lauf: laufDir.toLowerCase(), text: `${plan.masterFirm || '—'} läuft bereits ${laufDir}` }; fail('v2dir', `${fName} läuft bereits <b>${laufDir}</b> — deine <b>${meine}</b>-Order wäre die GEGENRICHTUNG (Selbst-Hedge). Nicht gestartet.`) }
       else if(laufDir) _pfSet('v2dir', 'ok', `${fName} läuft bereits ${laufDir} — gleiche Richtung ✓`)
       else {
         const gep = (typeof firmGeplanteRichtungen === 'function') ? firmGeplanteRichtungen(plan.masterFirm, plan.id) : { long: [], short: [] }
         const gepDir = (gep.long.length && gep.short.length) ? null : gep.long.length ? 'LONG' : gep.short.length ? 'SHORT' : null
-        if(gepDir && meine && gepDir !== meine) fail('v2dir', `${fName} hat einen gespeicherten Plan auf <b>${gepDir}</b> — deine <b>${meine}</b>-Order wäre die Gegenrichtung. Nicht gestartet.`)
+        if(gepDir && meine && gepDir !== meine){ rkSperre = { lauf: gepDir.toLowerCase(), quelle: 'plan', text: `${plan.masterFirm || '—'}: gespeicherter Plan auf ${gepDir}` }; fail('v2dir', `${fName} hat einen gespeicherten Plan auf <b>${gepDir}</b> — deine <b>${meine}</b>-Order wäre die Gegenrichtung. Nicht gestartet.`) }
         else _pfSet('v2dir', 'ok', gepDir ? `Kein laufender Trade bei ${fName} — gespeicherter Plan ebenfalls ${gepDir} ✓` : `Kein laufender Trade bei ${fName} — Richtung frei.`)
       }
     }catch(_){ _pfSet('v2dir', 'warn', 'Richtungs-Schutz nicht prüfbar (keine Flotten-Daten) — Richtung selbst im Blick behalten.') }
@@ -37200,6 +37213,12 @@
     }
     if(hardFail){
       _pfRemoteMelde(plan.id, { ok:false, check_fail:true, msg: 'Echo-V2-Check rot — nichts platziert: ' + _pfErrLog.join(' · ') })
+      // RICHTUNG AM START (07.10.2026): war NUR der Richtungs-Schutz rot und kam der Start von der Startzeit → erneut wie „verschieben"
+      if(vonTick && rkSperre && failKeys.every(x => x === 'v2dir') && rkGilt(plan)){
+        const w = await rkVerschieben(plan, rkSperre, true, 'puls')
+        abschluss(false, w === 'verschoben' ? '⇅ Richtungskonflikt — nichts platziert, neuer Versuch in 10–20 min.' : w === 'aufgegeben' ? '⇅ Richtungskonflikt bis Fensterende — nicht gestartet, von Hand starten.' : '✗ Nichts platziert — Zeilen oben prüfen.', !w)
+        return
+      }
       abschluss(false, '✗ Nichts platziert — Zeilen oben prüfen.', true)
       return
     }
@@ -38742,7 +38761,7 @@
     if(!L && !S) return null
     if(L && S) return { lauf: null, widerspruch: true, text: `Laufende/geplante Trades widersprechen sich (LONG und SHORT) — Richtung selbst prüfen.` }
     const seite = L ? 'long' : 'short', b0 = quelle[seite][0]
-    return { lauf: seite, widerspruch: false,
+    return { lauf: seite, widerspruch: false, quelle: quelle === lauf ? 'lauf' : 'plan',   // quelle: Richtung am Start (07.10.2026)
       text: `Achtung: ${b0.name || '?'}${b0.firm ? ` (${b0.firm})` : ''} ${b0.verb} ${seite.toUpperCase()} — ${seite === 'long' ? 'SELL' : 'BUY'} wäre gegen den ${quelle === lauf ? 'laufenden' : 'geplanten'} Trade` }
   }
   window._v2RichtungKonflikt = v2RichtungKonflikt   // Entwickler-Haken wie _mklStub: Regel ohne Popup prüfbar
@@ -39212,7 +39231,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1092'
+  const OS_TAB_BUILD = '2026-09-22.1093'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -39547,6 +39566,12 @@
       if(k && k.lauf && k.lauf !== (dir === 'sell' ? 'short' : 'long')){
         const t = k.text + ' — nicht gestartet (Richtungs-Schutz).'
         if(fern) return fern.melde({ ok:false, msg: t })
+        // RICHTUNG AM START (07.10.2026): Start zur Startzeit → Grund an den Plan, Claim zurück, in 10–20 min erneut (wie verschieben)
+        if(opts && opts.vonStartUm && rkGilt(plan)){
+          const w = await rkVerschieben(plan, k, true, 'puls')
+          if(imPopup) pfEnde(false, t + (w === 'verschoben' ? ' Neuer Versuch in 10–20 min.' : w === 'aufgegeben' ? ' Bis Fensterende nicht lösbar — von Hand starten.' : ''))
+          return
+        }
         toast(t, 'end'); return
       }
     }
@@ -42930,6 +42955,103 @@
   }
   window._vorcheck = { pruefen: slaveBereitPruefen, noetig: vorcheckNoetig }   // Test-Haken
 
+  /* ══ RICHTUNG AM START (07.10.2026, Finn: „ein geplanter Auto-Trade soll nicht einfach ausfallen, weil bei derselben ID+Firma
+   * inzwischen eine gegenläufige Position läuft" — z. B. ein Short aus einem Winning Day oder einem Hand-Plan). Der Richtungsschutz
+   * bleibt hart; aufgelöst wird vorher, dreifach: (1) Ausgleichs-Bot auf Railway (app.py ap_richtungsschutz, nächste 60 min),
+   * (2) hier kurz vor dem Start — Auto-Plan: auf die laufende Richtung drehen und starten (TP/SL bleiben $-Beträge, die Levels
+   * rechnet Puls aus der Richtung wie bei jedem Plan dieser Richtung); Hand-Plan (oder Drehen scheitert): Start um 10–20 min
+   * (Zufall) verschieben und neu prüfen, höchstens bis Ende des Startfensters, danach Toast + Handy „nicht gestartet:
+   * Richtungskonflikt" — nie still verwerfen. (3) Die harte Sperre direkt vor der Order (tpOrbitStartenKern / Echo-V2-Check) bleibt;
+   * greift sie bei einem Start zur Startzeit, steht der Grund am Plan und es geht weiter wie (2) „verschieben".
+   * Nur Orbit V2 / Echo V2 ohne Hedge (keine Winning Days, kein Orbit V3). Zustand in mt5_baseline.richtung_konflikt
+   * { quelle 'start'|'puls'|'bot', status 'wartet'|'aufgegeben'|'gedreht'|'konflikt', erst_start, versuche, gegen, text, … }. */
+  const _rkTickStart = new Set()   // Echo V2: Plan-IDs, die tpStartUmTick gestartet hat — die Sperre im Check-Popup meldet sich so zurück
+  function rkGilt(p){
+    return !!p && (p.route === 'tvv2' || p.route === 'mt5v2') && !tpIstWdPlan(p) && !tpIstOrbitV3(p) && (p.richtung === 'buy' || p.richtung === 'sell')
+  }
+  const rkFlag = p => (p && p.mt5Baseline && p.mt5Baseline.richtung_konflikt) || null
+  // aufgegeben gilt nur für genau die Startzeit, bei der aufgegeben wurde — eine neue Uhrzeit von Hand startet wieder normal
+  const rkAufgegeben = p => { const f = rkFlag(p); return !!(f && f.status === 'aufgegeben' && p.startUm && Date.parse(f.start) === Date.parse(p.startUm)) }
+  /* Ende des Startfensters (deutsche Zeit, auto_plan_regeln.zeiten.fenster aus dem Delta-Monitor, sonst 00:00–14:30 · 14:30–17:30 ·
+   * 17:30–19:30), in dem der ursprüngliche Start lag → ms. Außerhalb aller Fenster: ursprünglicher Start + 60 min. */
+  function rkFensterEnde(erstIso){
+    const t0 = Date.parse(erstIso), m = apPrHm(erstIso)
+    const fen = (_apd && _apd.d && Array.isArray(_apd.d.fenster) && _apd.d.fenster.length) ? _apd.d.fenster : AP_DELTA_FENSTER
+    if(m != null) for(const f of fen){
+      const a = apPrHm(f.von), b0 = apPrHm(f.bis), b = b0 === 0 ? 1440 : b0
+      if(a != null && b != null && m >= a && m < b) return t0 + (b - m) * 60000
+    }
+    return t0 + 60 * 60000
+  }
+  async function rkProtokoll(plan, eintrag){   // auto_plan_umplanung (quelle 'start') — nur der Service-Key schreibt, daher über Railway
+    try{
+      const { data: { session } } = await supabase.auth.getSession()
+      const tok = session?.access_token; if(!tok) return
+      await fetch(`${WATCHER_HOME}/admin/auto-plan/start-protokoll`, { method: 'POST', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan_id: plan.id, ...eintrag }) })
+    }catch(e){ console.warn('[richtung-start] Protokoll', (e && e.message) || e) }
+  }
+  function rkPlanErsetzen(row){ const neu = rowToPlan(row); const i = tradePlans.findIndex(x => String(x.id) === String(row.id)); if(i >= 0) tradePlans[i] = neu; return neu }
+  /* (2b)/(3): Start verschieben (10–20 min Zufall) oder — nach Fensterende — aufgeben. nachClaim = der Claim ist schon gesetzt
+   * (Sperre direkt vor der Order) und wird zurückgenommen, solange Puls nichts gesendet hat. → 'verschoben' | 'aufgegeben' | false */
+  async function rkVerschieben(plan, k, nachClaim, quelle){
+    const alt = rkFlag(plan), jetzt = new Date().toISOString(), name = plan.masterName || 'Plan'
+    const erst = (alt && alt.status === 'wartet' && alt.erst_start) ? alt.erst_start : plan.startUm
+    const versuche = ((alt && alt.status === 'wartet' && Number(alt.versuche)) || 0) + 1
+    const neuMs = Date.now() + (10 + Math.random() * 10) * 60000
+    const gegen = String((k && k.lauf) || '?').toUpperCase(), grundTxt = (k && k.text) || 'Gegenrichtung bei derselben ID+Firma'
+    const aufgeben = neuMs > rkFensterEnde(erst)
+    let q = supabase.from('trade_plans').update(aufgeben ? { start_um_gestartet_at: null } : { start_um: new Date(neuMs).toISOString(), start_um_gestartet_at: null })
+      .eq('id', plan.id).eq('status', 'planned')
+    q = nachClaim ? q.is('orbit_gesendet_at', null) : q.is('start_um_gestartet_at', null)
+    const { data, error } = await q.select('*')
+    if(error || !data || !data.length){ console.warn('[richtung-start] Plan nicht mehr verschiebbar', plan.id, error); return false }
+    const neu = rkPlanErsetzen(data[0])
+    const flag = { quelle, status: aufgeben ? 'aufgegeben' : 'wartet', um: jetzt, erst_start: erst, versuche, gegen: (k && k.lauf) || null,
+      text: grundTxt + (quelle === 'puls' ? ' (letzte Prüfung vor der Order)' : ''), start: neu.startUm, pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : null }
+    try{ await baselinePatch(plan.id, { richtung_konflikt: flag }, 'planned') }catch(e){ console.warn('[richtung-start] Flag', (e && e.message) || e) }
+    if(aufgeben){
+      const t = `„${name}" nicht gestartet: Richtungskonflikt — ${grundTxt}. ${versuche - 1} Neuversuch${versuche - 1 === 1 ? '' : 'e'} bis Fensterende; Plan bleibt Geplant, Start von Hand.`
+      if(typeof atToast === 'function') atToast('⇅ ' + t, 'end')
+      try{ if(typeof pushAnsHandy === 'function') pushAnsHandy('Nicht gestartet: Richtungskonflikt', t, 'https://prophos.pages.dev/prophos#trades', 'richtung-' + String(plan.id).slice(0, 8)) }catch(_){}
+    } else {
+      if(typeof atToast === 'function') atToast(`⇅ Richtungskonflikt — „${name}": ${gegen} läuft bei dieser ID+Firma. Neuer Versuch um ${tpStartUmText(neu.startUm)} (Versuch ${versuche}).`, 'end')
+      rkProtokoll(plan, { von_richtung: plan.richtung, nach_richtung: plan.richtung, von_start: plan.startUm, nach_start: neu.startUm,
+        grund: `Richtungsschutz${quelle === 'puls' ? ' (Sperre vor der Order)' : ' am Start'}: ${grundTxt} — Start verschoben (Versuch ${versuche})` })
+    }
+    try{ renderTradePlans() }catch(_){}
+    return aufgeben ? 'aufgegeben' : 'verschoben'
+  }
+  /* (2) frische Prüfung kurz vor dem Start (vor Slave-Vorprüfung und Claim). → null (frei) | { plan } (gedreht, frische Zeile) | 'verschoben' */
+  async function rkVorStart(plan){
+    if(!rkGilt(plan)) return null
+    let k = null
+    try{ k = await v2RichtungKonflikt({ firm: plan.masterFirm, ohneId: plan.id, frisch: true }) }catch(_){ return null }
+    const meine = plan.richtung === 'sell' ? 'short' : 'long', alt = rkFlag(plan)
+    if(!k || !k.lauf || k.lauf === meine){
+      if(alt && alt.status !== 'konflikt'){ try{ await baselinePatch(plan.id, { richtung_konflikt: null }, 'planned') }catch(_){} }   // aufgelöst
+      return null
+    }
+    const ziel = k.lauf === 'short' ? 'sell' : 'buy'
+    if(plan.autoPlan){
+      const { data, error } = await supabase.from('trade_plans').update({ richtung: ziel })
+        .eq('id', plan.id).eq('status', 'planned').eq('auto_plan', true).eq('richtung', plan.richtung).is('start_um_gestartet_at', null).select('*')
+      if(!error && data && data.length){
+        rkPlanErsetzen(data[0])
+        const durch = k.quelle === 'plan' ? 'vorher geplant' : 'läuft schon'
+        try{ await baselinePatch(plan.id, { richtung_konflikt: { quelle: 'start', status: 'gedreht', um: new Date().toISOString(), von: plan.richtung, nach: ziel, text: k.text } }, 'planned') }catch(_){}
+        if(typeof atToast === 'function') atToast(`⇅ Richtungsschutz — „${plan.masterName || 'Plan'}": bei dieser ID+Firma ${durch} ${k.lauf.toUpperCase()} → Auto-Plan auf ${ziel.toUpperCase()} gedreht und gestartet (TP/SL in $ unverändert).`, 'start')
+        rkProtokoll(plan, { von_richtung: plan.richtung, nach_richtung: ziel, von_start: plan.startUm, nach_start: plan.startUm,
+          grund: `Richtungsschutz am Start: ${durch} ${k.lauf} — Auto-Plan gedreht` })
+        try{ renderTradePlans() }catch(_){}
+        return { plan: tradePlans.find(x => String(x.id) === String(plan.id)) || rowToPlan(data[0]) }
+      }
+    }
+    await rkVerschieben(plan, k, false, 'start')
+    return 'verschoben'
+  }
+  window._rk = { vorStart: rkVorStart, verschieben: rkVerschieben, fensterEnde: rkFensterEnde, aufgegeben: rkAufgegeben }   // Test-Haken (Stub)
+
   async function tpStartUmTick(){
     if(!MT5_LOCAL || _suLaeuft) return
     let uid; try{ uid = currentUserId }catch(_){ uid = null }
@@ -42947,12 +43069,19 @@
       && p.route !== 'tsv2'
       // Auto-Planer (05.10.2026, Finn: „ich muss die Trades trotzdem noch manuell confirmen"): Vorschlag ohne Bestätigung nie
       && !(p.autoPlan && !p.autoBestaetigtAt)
-      && !((_vorcheckNaechst.get(String(p.id)) || 0) > now))   // Slave-Vorprüfung: wartender Plan erst nach seinem Jitter wieder
+      && !((_vorcheckNaechst.get(String(p.id)) || 0) > now)   // Slave-Vorprüfung: wartender Plan erst nach seinem Jitter wieder
+      && !rkAufgegeben(p))   // Richtungskonflikt bis Fensterende nicht lösbar (07.10.2026) — Start nur noch von Hand bzw. mit neuer Uhrzeit
     if(!faellig.length) return
-    const plan = faellig.sort((a, b) => new Date(a.startUm) - new Date(b.startUm))[0]
+    let plan = faellig.sort((a, b) => new Date(a.startUm) - new Date(b.startUm))[0]
     _suLaeuft = true
     try{
       const verspaetet = now - new Date(plan.startUm).getTime()
+      // RICHTUNG AM START (07.10.2026): frisch prüfen, VOR Slave-Vorprüfung und Claim — Auto-Plan dreht, sonst verschieben
+      if(verspaetet <= (tpIstFarmerPlan(plan) ? 60 : 10) * 60 * 1000){
+        const rk = await rkVorStart(plan)
+        if(rk === 'verschoben') return
+        if(rk && rk.plan) plan = rk.plan
+      }
       // SLAVE-VORPRÜFUNG VOR dem Claim — der Claim verbraucht den Plan (start_um_gestartet_at), ein späterer Riegel ließe ihn nie wieder zu
       if(vorcheckNoetig(plan)){
         vorcheckKarteZeigen(plan, null, 'pruefe')
@@ -43000,8 +43129,8 @@
         ? `⏰ Geplante Startzeit erreicht — „${plan.masterName || '—'}" startet in ${Math.round(jitter / 1000)} s (etwas anderes läuft noch).`
         : `⏰ Geplante Startzeit erreicht — „${plan.masterName || '—'}" startet jetzt.`, 'start')
       if(jitter) await new Promise(r => setTimeout(r, jitter))
-      if(routeIstOrbit(plan.route) && typeof tpOrbitStarten === 'function') await tpOrbitStarten(plan.id)
-      else if(routeIstEcho(plan.route) && typeof tpJetztStarten === 'function') await tpJetztStarten(plan.id)
+      if(routeIstOrbit(plan.route) && typeof tpOrbitStarten === 'function') await tpOrbitStarten(plan.id, null, { vonStartUm: true })
+      else if(routeIstEcho(plan.route) && typeof tpJetztStarten === 'function'){ _rkTickStart.add(String(plan.id)); await tpJetztStarten(plan.id) }
     }catch(e){ console.warn('[start-um]', e) }
     finally{ _suLaeuft = false }
   }
@@ -43627,7 +43756,10 @@
            <button type="button" class="knopf" data-apd-x="1" title="Abbrechen">✕</button>`
         : `<button type="button" class="knopf" data-apd-tausch="${escapeHtml(id)}" title="${fest ? 'Richtung fest: ' + escapeHtml(String(x.fest_durch)) : 'Richtung tauschen'}"${busy || fest ? ' disabled' : ''}>${fest ? '🔒' : '⇅'}</button>
            <button type="button" class="knopf" data-apd-start="${escapeHtml(id)}" title="Start verschieben"${busy ? ' disabled' : ''}>🕑</button>`
-      return `<div class="apd-z"><span class="zeit">${x.min != null ? apPrUhr(x.min) : '—'}</span>${apdFirmaZelle(x)}${x.bestaetigt ? '<span class="apd-gut" title="bestätigt" style="font-size:11px">✓</span>' : ''}${apdRi(x.long)}<span class="dl">${apdPkt(x.wert)}</span>${knoepfe}</div>`
+      // Richtungskonflikt (07.10.2026): vom Bot markiert (bestätigt/Hand) oder vom PC-Tab verschoben/aufgegeben
+      const rk = x.richtung_konflikt && x.richtung_konflikt.status !== 'gedreht' ? x.richtung_konflikt : null
+      const rkZ = rk ? `<span class="apd-rot" style="font-size:11px" title="${escapeHtml(String(rk.text || 'Richtungskonflikt'))}">⇅${rk.status === 'aufgegeben' ? '✗' : '!'}</span>` : ''
+      return `<div class="apd-z"><span class="zeit">${x.min != null ? apPrUhr(x.min) : '—'}</span>${apdFirmaZelle(x)}${x.bestaetigt ? '<span class="apd-gut" title="bestätigt" style="font-size:11px">✓</span>' : ''}${rkZ}${apdRi(x.long)}<span class="dl">${apdPkt(x.wert)}</span>${knoepfe}</div>`
     }).join('')
     const m = _apd.meldung && _apd.meldung.ort === 'geplant' ? `<div class="apd-fehler">⚠ ${escapeHtml(_apd.meldung.text)}</div>` : ''
     return `<div class="apd-liste"><div class="apd-h">Geplant <b>${v.geplant.length}</b><span style="flex:1"></span>€/Pkt</div>${zeilen || '<div class="apd-leer">—</div>'}${m}</div>`
@@ -43643,7 +43775,7 @@
   const apdGrundKurz = g => { const t = String(g || '').trim(); return t.length > 42 ? t.slice(0, 40) + '…' : t }
   function apdUmplHtml(v){
     const zeilen = v.umpl.map(u => `<div class="apd-z"><span class="zeit">${apdUhr(u.um)}</span>${apdFirmaZelle(u)}
-        <span class="wechsel">${u.quelle === 'hand' ? '✋ ' : ''}${apdWechsel(u)}</span><span class="grund" title="${escapeHtml(u.grund || '')}">${escapeHtml(apdGrundKurz(u.grund))}</span></div>`).join('')
+        <span class="wechsel">${u.quelle === 'hand' ? '✋ ' : u.quelle === 'start' ? '⏰ ' : ''}${apdWechsel(u)}</span><span class="grund" title="${escapeHtml(u.grund || '')}">${escapeHtml(apdGrundKurz(u.grund))}</span></div>`).join('')
     return `<div class="apd-liste breit"><div class="apd-h">Umplanungen heute <b>${v.umpl.length}</b></div>${zeilen || '<div class="apd-leer">—</div>'}</div>`
   }
   /* Vorschau „Jetzt ausgleichen": was der Bot jetzt ändern würde (trocken), erst „Übernehmen" ändert wirklich */
@@ -49015,7 +49147,8 @@
         if(plan.route === 'tsv2' && !planIstPuls(plan)) return
         // V2 ohne Baseline (von Hand gestartet oder direkt aus Geplant erledigt, 24.09.2026 abends): es gibt nichts
         // nachzuladen — kein „⏳ Auto-PnL…", P&L von Hand.
-        if(routeIstV2(plan.route) && !plan.mt5Baseline) return
+        // 07.10.2026: eine Baseline, die nur das Richtungskonflikt-Flag trägt (RICHTUNG AM START), zählt als keine
+        if(routeIstV2(plan.route) && (!plan.mt5Baseline || Object.keys(plan.mt5Baseline).every(k => k === 'richtung_konflikt'))) return
         const isMirrorPlan = (typeof planMirrorRoute === 'function') && !!planMirrorRoute(plan)
         // MT5-Route (15.08.2026): braucht weder Duplikum-Token noch Mirror — die
         // Werte kommen aus der eingefrorenen Baseline (_autoPnlFetchMt5).

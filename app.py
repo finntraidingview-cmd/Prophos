@@ -15215,6 +15215,76 @@ def ap_eingriff_pruefen(plan_id, aktion, plaene, jetzt_min, zeiten, id_fest=None
     return None, "aktion = richtung_tauschen | start"
 
 
+# RICHTUNG AM START (07.10.2026, Finn: ein geplanter Auto-Trade soll NICHT ausfallen, nur weil bei derselben ID+Firma inzwischen
+# eine gegenläufige Position läuft — z. B. ein Short aus einem Winning Day oder einem Hand-Plan. Der Richtungsschutz bleibt hart,
+# aufgelöst wird der Konflikt vorher, dreifach: (1) hier im Ausgleichs-Bot bei jedem Takt für die nächsten 60 min,
+# (2) im PC-Tab kurz vor dem Start (tpStartUmTick), (3) die harte Sperre direkt vor der Order bleibt, ihr Treffer wird erneut versucht).
+AP_RS_HORIZONT_MIN = 60     # Pläne, die in den nächsten 60 min starten
+AP_RS_NACHLAUF_MIN = 10     # … und fällige, die der PC-Tab noch nicht gestartet hat (bis 10 min zurück)
+AP_RS_ROUTEN = ("tvv2", "mt5v2")   # nur V2-Wege ohne Hedge — Hedge-Wege (WD/Orbit V3/Echo klassisch) bleiben unberührt
+
+
+def ap_richtung_konflikte(plaene, offen, jetzt_min, horizont_min=AP_RS_HORIZONT_MIN):
+    """REIN RECHNEND (RICHTUNG AM START, Finn 07.10.2026). plaene = heutige geplante Pläne [{plan_id, user_id, user, firma (Schlüssel),
+    firma_name, richtung, start_min, route, gehedgt, auto_plan, bestaetigt, aenderbar, fest_durch, richtung_konflikt}], offen = laufende
+    Trades [{user_id, firma (Schlüssel), richtung}]. Für jeden V2-Plan ohne Hedge, der in [jetzt − 10, jetzt + horizont] startet: läuft
+    bei derselben ID+Firma die Gegenrichtung (offen oder schon geclaimt), bzw. — wenn dort nichts läuft — ist sie VOR seinem Start
+    geplant, dann
+      unbestätigter, änderbarer Auto-Plan → drehen (auf die laufende/vorher geplante Richtung),
+      sonst (bestätigt, Hand-Plan)        → markieren (Flag richtung_konflikt, nie still drehen).
+    Pläne werden in Startreihenfolge abgearbeitet; ein gedrehter Plan zählt für spätere Pläne mit seiner neuen Richtung.
+    Läuft dort long UND short (Widerspruch), wird nichts entschieden.
+    → {drehen [wie ap_umplanen, art 'richtung'], markieren [{plan_id, user_id, firma, gegen, durch, text}], frei [plan_id mit altem Bot-Flag]}"""
+    jetzt_min = float(jetzt_min)
+    lauf = {}
+    for o in offen or ():
+        if o.get("richtung") in ("buy", "sell"):
+            lauf.setdefault(f"{o['user_id']}|{o['firma']}", set()).add(o["richtung"])
+    # geplant, aber vom PC-Tab schon geclaimt (Start läuft) = läuft
+    for p in plaene or ():
+        if p.get("fest_durch") == "schon gestartet" and p.get("richtung") in ("buy", "sell"):
+            lauf.setdefault(f"{p['user_id']}|{p['firma']}", set()).add(p["richtung"])
+    eff = {p["plan_id"]: p.get("richtung") for p in plaene or ()}
+    reihe = sorted([p for p in plaene or () if p.get("start_min") is not None], key=lambda p: (float(p["start_min"]), str(p["plan_id"])))
+    drehen, markieren, frei = [], [], []
+    for p in reihe:
+        r = eff.get(p["plan_id"])
+        alt_flag = p.get("richtung_konflikt") if isinstance(p.get("richtung_konflikt"), dict) else None
+        if (str(p.get("route") or "") not in AP_RS_ROUTEN or p.get("gehedgt") or r not in ("buy", "sell")
+                or p.get("fest_durch") == "schon gestartet"
+                or not (jetzt_min - AP_RS_NACHLAUF_MIN <= float(p["start_min"]) <= jetzt_min + float(horizont_min))):
+            continue
+        k = f"{p['user_id']}|{p['firma']}"
+        ziel, durch = None, None
+        rs = lauf.get(k) or set()
+        if len(rs) == 1:
+            ziel, durch = next(iter(rs)), "läuft"
+        elif not rs:
+            vorher = {eff[q["plan_id"]] for q in reihe
+                      if q["plan_id"] != p["plan_id"] and f"{q['user_id']}|{q['firma']}" == k
+                      and (float(q["start_min"]), str(q["plan_id"])) < (float(p["start_min"]), str(p["plan_id"]))
+                      and eff.get(q["plan_id"]) in ("buy", "sell")}
+            if len(vorher) == 1:
+                ziel, durch = next(iter(vorher)), "geplant"
+        name = p.get("firma_name") or p["firma"]
+        if ziel is None or ziel == r:
+            if alt_flag and alt_flag.get("quelle") == "bot":
+                frei.append(p["plan_id"])
+            continue
+        txt_durch = "läuft schon" if durch == "läuft" else "vorher geplant"
+        if p.get("auto_plan") and not p.get("bestaetigt") and p.get("aenderbar"):
+            drehen.append({"plan_id": p["plan_id"], "user_id": p["user_id"], "firma": p["firma"], "art": "richtung",
+                           "von_richtung": r, "nach_richtung": ziel, "von_start_min": p["start_min"], "nach_start_min": p["start_min"],
+                           "grund": f"Richtungsschutz: {txt_durch} {AP_RICHTUNG_TXT[ziel]} ({name} bei "
+                                    f"{p.get('user') or str(p['user_id'])[:8]}, {AP_RICHTUNG_TXT[r]} → {AP_RICHTUNG_TXT[ziel]})"})
+            eff[p["plan_id"]] = ziel
+        else:
+            markieren.append({"plan_id": p["plan_id"], "user_id": p["user_id"], "firma": p["firma"], "gegen": ziel, "durch": durch,
+                              "text": (f"Richtungskonflikt: {name} dieser ID {txt_durch} {AP_RICHTUNG_TXT[ziel]} — "
+                                       f"{'bestätigter Auto-Plan' if p.get('auto_plan') else 'Hand-Plan'} {AP_RICHTUNG_TXT[r]} wird nicht still gedreht")})
+    return {"drehen": drehen, "markieren": markieren, "frei": frei}
+
+
 def _ap_namen():
     """user_id → Anzeigename und die ausgeblendeten Personen (ADMIN_EXCLUDE_EMAILS) — ohne Request (Nachtlauf/Bot-Thread),
     Nutzerliste 60 s gecacht (_auth_liste_anfrage)."""
@@ -15298,7 +15368,8 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
     ersetzt = ersetzt or (lambda p: False)
     offen = [p for p in _sb_all("trade_plans", {"select": AP_STAND_FELDER + ",mt5_baseline", "status": "eq.open", "order": "id.asc"})
              if str(p.get("user_id")) not in ausgeblendet]
-    geplant_alle = [p for p in _sb_all("trade_plans", {"select": AP_STAND_FELDER + ",hedge:mt5_baseline->hedge->>status",
+    geplant_alle = [p for p in _sb_all("trade_plans", {"select": AP_STAND_FELDER + ",hedge:mt5_baseline->hedge->>status,"
+                                                                 "rk:mt5_baseline->richtung_konflikt",
                                                        "status": "eq.planned", "order": "id.asc",
                                                        "created_at": "gte." + (jetzt - timedelta(days=30)).isoformat()})
                     if str(p.get("user_id")) not in ausgeblendet and not ersetzt(p)]
@@ -15419,7 +15490,8 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
         z.update(start=p.get("start_um"), start_min=round(m, 2) if m is not None else None, start_txt=_ap_hhmm_txt(m) if m is not None else None,
                  auto_plan=bool(p.get("auto_plan")), bestaetigt=bestaetigt, aenderbar=fest is None, fest_durch=fest,
                  gehedgt=gh, hedge=art, delta_abs=abs(b["delta_eur_pkt"]) if b["delta_eur_pkt"] is not None else None,
-                 einsatz_abs=0.0 if gh else float(z.get("verlust_eur") or 0))
+                 einsatz_abs=0.0 if gh else float(z.get("verlust_eur") or 0),
+                 richtung_konflikt=p.get("rk") if isinstance(p.get("rk"), dict) else None)   # RICHTUNG AM START (07.10.2026)
         geplant_rows.append(z)
         if b["hinweis"]:
             hinweise.append({"plan_id": z["plan_id"], "user_id": z["user_id"], "user": z["user"], "firma": z["firma"],
@@ -15456,7 +15528,10 @@ def _ap_stand_plaene(stand):
     return [{"plan_id": z["plan_id"], "user_id": z["user_id"], "user": z["user"], "firma": z["firma_key"], "firma_name": z["firma"],
              "richtung": z["richtung"],
              "start_min": z["start_min"], "delta_abs": z["delta_abs"], "aenderbar": z["aenderbar"], "fest_durch": z["fest_durch"],
-             "einsatz_abs": z.get("einsatz_abs") or 0.0}
+             "einsatz_abs": z.get("einsatz_abs") or 0.0,
+             # RICHTUNG AM START (07.10.2026): für ap_richtung_konflikte
+             "route": z.get("route"), "gehedgt": z.get("gehedgt"), "auto_plan": z.get("auto_plan"), "bestaetigt": z.get("bestaetigt"),
+             "richtung_konflikt": z.get("richtung_konflikt")}
             for z in stand["geplant"] if z.get("start_min") is not None]
 
 
@@ -15511,7 +15586,7 @@ def ap_delta_antwort(stand, sicht_uid=None):
     geplant = [{k: z.get(k) for k in ("plan_id", "user_id", "user", "firma", "richtung", "start", "delta_eur_pkt", "fest_durch", "bestaetigt",
                                       "start_txt", "start_min", "aenderbar", "auto_plan", "richtung_fest_durch", "tp_punkte", "sl_punkte",
                                       "konto", "ende4", "typ", "route", "menge", "usd_pro_pkt", "punktwert_quelle", "wert_eur", "gehedgt",
-                                      "hinweis")} for z in sorted(stand["geplant"], key=lambda z: (z.get("start_min") or 0, z["plan_id"]))]
+                                      "hinweis", "richtung_konflikt")} for z in sorted(stand["geplant"], key=lambda z: (z.get("start_min") or 0, z["plan_id"]))]
     hinweise = list(stand["hinweise"]) + ([{"grund": h_umpl}] if h_umpl else [])
     # Master 06.10.2026 (Frontend .1084 schon live): band als ZAHL in €/Pkt (± um null, jetzt), Details in band_info; je
     # Verlaufspunkt zusätzlich band (= band_delta); fenster[] aus auto_plan_regeln.zeiten für die Grenzlinien im Chart
@@ -15533,10 +15608,11 @@ def ap_delta_antwort(stand, sicht_uid=None):
     return out
 
 
-def _ap_aenderungen_anwenden(stand, aenderungen, quelle):
+def _ap_aenderungen_anwenden(stand, aenderungen, quelle, nur_unbestaetigt=False):
     """Schreibt Umplanungen: nur Plan-Zeilen, die noch geplant, ungestartet, Auto-Plan, in der alten Richtung und nicht
     bestätigt-und-fällig sind (Guard in derselben PATCH-Anfrage), danach je Plan eine Zeile in auto_plan_umplanung.
-    → (geschrieben [{um, plan_id, …}], fehler | None). Ohne Protokoll-Tabelle wird NICHTS geändert (Vertrag §3: jede Änderung protokolliert)."""
+    → (geschrieben [{um, plan_id, …}], fehler | None). Ohne Protokoll-Tabelle wird NICHTS geändert (Vertrag §3: jede Änderung protokolliert).
+    nur_unbestaetigt (RICHTUNG AM START, 07.10.2026): Guard verlangt auto_bestaetigt_at IS NULL — Bestätigtes wird nie still gedreht."""
     if not aenderungen:
         return [], None
     try:
@@ -15562,10 +15638,14 @@ def _ap_aenderungen_anwenden(stand, aenderungen, quelle):
             upd["start_um"] = nach_start
         if not upd:
             continue
-        rows = sb_update("trade_plans", {"id": f"eq.{a['plan_id']}", "status": "eq.planned", "auto_plan": "eq.true",
-                                         "start_um_gestartet_at": "is.null", "started_at": "is.null", "orbit_gesendet_at": "is.null",
-                                         "richtung": f"eq.{a['von_richtung']}",
-                                         "or": f"(auto_bestaetigt_at.is.null,start_um.gt.{faellig})"}, upd)
+        guard = {"id": f"eq.{a['plan_id']}", "status": "eq.planned", "auto_plan": "eq.true",
+                 "start_um_gestartet_at": "is.null", "started_at": "is.null", "orbit_gesendet_at": "is.null",
+                 "richtung": f"eq.{a['von_richtung']}"}
+        if nur_unbestaetigt:
+            guard["auto_bestaetigt_at"] = "is.null"
+        else:
+            guard["or"] = f"(auto_bestaetigt_at.is.null,start_um.gt.{faellig})"
+        rows = sb_update("trade_plans", guard, upd)
         if not rows:
             continue                  # inzwischen gestartet/bestätigt/geändert — Guard hat gegriffen, nichts protokolliert
         zeile = {"um": um, "plan_id": a["plan_id"], "user_id": a["user_id"], "firma": z.get("firma"),
@@ -15584,6 +15664,77 @@ def _ap_aenderungen_anwenden(stand, aenderungen, quelle):
     return geschrieben, None
 
 
+def _ap_rk_flag(plan_id, wert):
+    """mt5_baseline.richtung_konflikt am geplanten Plan setzen (dict) oder löschen (None) — atomar über das RPC mt5_baseline_patch
+    (merged in der DB, kein anderer Schreiber verliert Felder), Status-Guard 'planned'. → True, wenn eine Zeile geschrieben wurde."""
+    r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/rpc/mt5_baseline_patch", headers=_sb_headers(), timeout=(5, 15),
+                    json={"p_plan": str(plan_id), "p_patch": {"richtung_konflikt": wert}, "p_status": "planned"})
+    _sb_pruefen(r)
+    try:
+        return r.json() is not None
+    except ValueError:
+        return False
+
+
+def ap_richtungsschutz(stand, trocken=False, quelle="bot"):
+    """Vorab-Prüfung RICHTUNG AM START (Finn 07.10.2026) — bei jedem Bot-Takt, auch wenn das Band hält. Unbestätigte Auto-Pläne
+    (änderbar) werden auf die laufende Richtung gedreht (Guard: auto_bestaetigt_at IS NULL, protokolliert in auto_plan_umplanung,
+    Grund „Richtungsschutz: läuft schon short"), Bestätigte und Hand-Pläne bekommen nur das Flag mt5_baseline.richtung_konflikt
+    (quelle 'bot') — der Delta-Monitor zeigt es. Ein Bot-Flag ohne Konflikt wird gelöscht; Flags des PC-Tabs (quelle 'start'/'puls')
+    fasst der Bot nicht an. Danach steht die neue Richtung auch im Stand (für den Ausgleich im selben Lauf).
+    → {gedreht [Umplanungen], markiert [plan_id …], frei [plan_id …], fehler}"""
+    offen = [{"user_id": z["user_id"], "firma": z["firma_key"], "richtung": z.get("richtung")} for z in stand["offen"]]
+    erg = ap_richtung_konflikte(_ap_stand_plaene(stand), offen, max(0.0, stand["jetzt_min"]))
+    je = {z["plan_id"]: z for z in stand["geplant"]}
+    out = {"gedreht": [], "markiert": [], "frei": [], "fehler": None, "konflikte": erg}
+    if trocken:
+        out["gedreht"] = [{"plan_id": a["plan_id"], "user_id": a["user_id"], "user": (je.get(a["plan_id"]) or {}).get("user"),
+                           "firma": (je.get(a["plan_id"]) or {}).get("firma"), "art": "richtung", "von_richtung": a["von_richtung"],
+                           "nach_richtung": a["nach_richtung"], "grund": a["grund"]} for a in erg["drehen"]]
+        geschrieben = erg["drehen"]
+    else:
+        out["gedreht"], out["fehler"] = _ap_aenderungen_anwenden(stand, erg["drehen"], quelle, nur_unbestaetigt=True)
+        geschrieben = [a for a in erg["drehen"] if any(g["plan_id"] == a["plan_id"] for g in out["gedreht"])]
+    for a in geschrieben:          # Stand nachziehen: der Ausgleich im selben Lauf rechnet mit der neuen Richtung
+        z = je.get(a["plan_id"])
+        if z:
+            z["richtung"] = a["nach_richtung"]
+            if z.get("delta_eur_pkt") is not None:
+                z["delta_eur_pkt"] = abs(z["delta_eur_pkt"]) * (1 if a["nach_richtung"] == "buy" else -1)
+    jetzt_iso = stand["jetzt"].isoformat()
+    for m in erg["markieren"]:
+        alt = (je.get(m["plan_id"]) or {}).get("richtung_konflikt")
+        if isinstance(alt, dict) and (alt.get("quelle") not in (None, "bot")
+                                      or (alt.get("gegen") == m["gegen"] and alt.get("durch") == m["durch"])):
+            continue               # PC-Tab-Zustand (wartet/aufgegeben) oder schon so markiert — nichts schreiben
+        wert = {"quelle": "bot", "status": "konflikt", "um": jetzt_iso, "gegen": m["gegen"], "durch": m["durch"], "text": m["text"]}
+        if trocken:
+            out["markiert"].append(m["plan_id"])
+            continue
+        try:
+            if _ap_rk_flag(m["plan_id"], wert):
+                out["markiert"].append(m["plan_id"])
+                if je.get(m["plan_id"]):
+                    je[m["plan_id"]]["richtung_konflikt"] = wert
+        except Exception as e:
+            print(f"[auto-plan] ⚠️ Richtungskonflikt-Flag {m['plan_id']}: {type(e).__name__}: {e}", flush=True)
+    for pid in erg["frei"]:
+        if trocken:
+            out["frei"].append(pid)
+            continue
+        try:
+            if _ap_rk_flag(pid, None):
+                out["frei"].append(pid)
+                if je.get(pid):
+                    je[pid]["richtung_konflikt"] = None
+        except Exception as e:
+            print(f"[auto-plan] ⚠️ Richtungskonflikt-Flag löschen {pid}: {type(e).__name__}: {e}", flush=True)
+    if erg["drehen"] or erg["markieren"]:
+        print(f"[auto-plan] Richtungsschutz{' trocken' if trocken else ''}: {len(out['gedreht'])} gedreht, "
+              f"{len(out['markiert'])} markiert", flush=True)
+    return out
+
+
 def ap_ausgleichen(trocken=False, quelle="bot", jetzt=None, seed=None):
     """Ausgleichs-Bot einmal (Takt, Extra-Lauf 14:00 oder POST /admin/auto-plan/ausgleichen). trocken = nur rechnen.
     Ändert nur geplante, nicht gestartete Auto-Pläne (ap_umplanen) — nie laufende Trades, nie Orders.
@@ -15593,6 +15744,12 @@ def ap_ausgleichen(trocken=False, quelle="bot", jetzt=None, seed=None):
         return {"ok": False, "msg": "auto_plan_regeln fehlt"}
     stand = _ap_stand_laden(reg, jetzt)
     param = stand["param"]
+    # RICHTUNG AM START (07.10.2026): erst der Richtungsschutz der nächsten 60 min — läuft bei jedem Takt, auch wenn das Band hält
+    try:
+        rs = ap_richtungsschutz(stand, trocken=trocken, quelle="bot")
+    except Exception as e:
+        rs = {"gedreht": [], "markiert": [], "frei": [], "fehler": f"{type(e).__name__}: {e}"}
+        print(f"[auto-plan] ⚠️ Richtungsschutz: {rs['fehler']}", flush=True)
     seed = int(seed) if seed not in (None, "") else random.SystemRandom().randrange(1, 2 ** 31)
     erg = ap_umplanen(_ap_stand_plaene(stand), stand["basis_netto"], stand["basis_brutto"], max(0.0, stand["jetzt_min"]),
                       stand["zeiten"], param["zielband_pct"], random.Random(seed), gestartet=stand["starts_heute"],
@@ -15606,13 +15763,16 @@ def ap_ausgleichen(trocken=False, quelle="bot", jetzt=None, seed=None):
         fehler = None
     else:
         umpl, fehler = _ap_aenderungen_anwenden(stand, erg["aenderungen"], quelle)
+    umpl = list(rs["gedreht"]) + list(umpl)       # Richtungsschutz-Drehungen zuerst (stehen auch im Protokoll)
+    fehler = fehler or rs.get("fehler")
     out = {"ok": fehler is None, "trocken": bool(trocken), "tag": stand["tag"], "seed": seed, "umplanungen": umpl,
            "netto_vorher": erg["vorher"]["netto_max_abs"], "netto_nachher": erg["nachher"]["netto_max_abs"],
            "ueber_band_vorher": erg["vorher"]["ueber_band"], "ueber_band_nachher": erg["nachher"]["ueber_band"],
            "ueber_eur_vorher": erg["vorher"].get("ueber_eur"), "ueber_eur_nachher": erg["nachher"].get("ueber_eur"),
            "paar_fehlt_vorher": erg["vorher"].get("paar_fehlt"), "paar_fehlt_nachher": erg["nachher"].get("paar_fehlt"),
            "netto_jetzt": round(stand["basis_netto"], 2), "band_pct": param["zielband_pct"], "ausloeser": erg["ausloeser"],
-           "hinweise": stand["hinweise"]}
+           "hinweise": stand["hinweise"],
+           "richtungsschutz": {"gedreht": rs["gedreht"], "markiert": rs["markiert"], "frei": rs["frei"], "fehler": rs["fehler"]}}
     if fehler:
         out["msg"] = fehler
     print(f"[auto-plan] Ausgleich {quelle}{' trocken' if trocken else ''}: {len(umpl)} Umplanung(en), "
@@ -15644,6 +15804,7 @@ def _ap_bot_tick(d):
         erg = ap_ausgleichen(quelle="bot")
         _ap_bot["letztes"] = {k: erg.get(k) for k in ("tag", "netto_vorher", "netto_nachher", "ausloeser", "msg")}
         _ap_bot["letztes"]["umplanungen"] = len(erg.get("umplanungen") or [])
+        _ap_bot["letztes"]["richtungsschutz"] = {k: len((erg.get("richtungsschutz") or {}).get(k) or []) for k in ("gedreht", "markiert")}
         _ap_bot["letztes"]["extra"] = bool(extra)
         _ap_bot["fehler"] = ""
     except Exception as e:
@@ -15746,6 +15907,68 @@ def admin_auto_plan_eingriff():
         if not umpl:
             return jsonify({"ok": False, "msg": "Plan hat sich inzwischen geändert (gestartet/bestätigt) — nichts geändert"}), 409
         return jsonify({"ok": True, "umplanungen": umpl, "msg": fehler})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"{type(e).__name__}: {e}"}), 502
+
+
+def ap_start_protokoll_zeile(plan, body, jetzt_iso):
+    """REIN (RICHTUNG AM START, 07.10.2026): Protokollzeile für auto_plan_umplanung aus dem Eintrag des PC-Tabs → (zeile, None) oder
+    (None, Klartext). Richtungen nur buy/sell/leer, Startzeiten ISO, Grund ≤ 500 Zeichen, quelle 'start'."""
+    def ri(x):
+        x = str(x or "").strip().lower()
+        return x if x in ("buy", "sell") else None if not x else False
+
+    def zeit(x):
+        if x in (None, ""):
+            return None
+        try:
+            return datetime.fromisoformat(str(x).replace("Z", "+00:00")).astimezone(timezone.utc).isoformat()
+        except (TypeError, ValueError):
+            return False
+    von_r, nach_r, von_s, nach_s = ri(body.get("von_richtung")), ri(body.get("nach_richtung")), zeit(body.get("von_start")), zeit(body.get("nach_start"))
+    if False in (von_r, nach_r):
+        return None, "von_richtung/nach_richtung = buy | sell"
+    if False in (von_s, nach_s):
+        return None, "von_start/nach_start = ISO-Zeit"
+    grund = str(body.get("grund") or "").strip()
+    if not grund:
+        return None, "grund fehlt"
+    return {"um": jetzt_iso, "plan_id": str(plan.get("id")), "user_id": str(plan.get("user_id")), "firma": plan.get("master_firm"),
+            "von_richtung": von_r, "nach_richtung": nach_r, "von_start": von_s, "nach_start": nach_s,
+            "grund": grund[:500], "quelle": "start"}, None
+
+
+@app.route("/admin/auto-plan/start-protokoll", methods=["POST", "OPTIONS"])
+def admin_auto_plan_start_protokoll():
+    """POST {plan_id, von_richtung, nach_richtung, von_start, nach_start, grund} — RICHTUNG AM START (Finn 07.10.2026): der PC-Tab
+    hat einen Plan kurz vor dem Start wegen Richtungsschutz gedreht oder verschoben (die Änderung selbst schreibt er mit eigenem
+    Guard über die RLS seiner ID) und protokolliert sie hier in auto_plan_umplanung (quelle 'start'; die Tabelle hat keine Policy,
+    nur der Service-Key schreibt). Nur der Besitzer des Plans. Ist die quelle 'start' noch nicht freigeschaltet
+    (sql/2026-10-07_umplanung_quelle_start.sql), steht die Zeile als quelle 'bot' mit „[Start]" vor dem Grund drin."""
+    if request.method == "OPTIONS":
+        return "", 200
+    uid, err = _wd_login()
+    if err:
+        return err
+    body = request.get_json(silent=True) or {}
+    pid = str(body.get("plan_id") or "").strip()
+    if not re.match(r"^[0-9a-f-]{36}$", pid):
+        return jsonify({"ok": False, "msg": "plan_id fehlt"}), 400
+    try:
+        plan = (sb_select("trade_plans", {"select": "id,user_id,master_firm", "id": f"eq.{pid}"}) or [None])[0]
+        if not plan or str(plan.get("user_id")) != str(uid):
+            return jsonify({"ok": False, "msg": "Plan nicht gefunden oder nicht deiner"}), 404
+        zeile, fehler = ap_start_protokoll_zeile(plan, body, datetime.now(timezone.utc).isoformat())
+        if fehler:
+            return jsonify({"ok": False, "msg": fehler}), 400
+        r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/auto_plan_umplanung", json=[zeile],
+                        headers=_sb_headers("return=minimal"), timeout=(5, 20))
+        if r.status_code == 400 and "quelle" in (r.text or ""):
+            zeile = dict(zeile, quelle="bot", grund=("[Start] " + zeile["grund"])[:500])
+            r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/auto_plan_umplanung", json=[zeile],
+                            headers=_sb_headers("return=minimal"), timeout=(5, 20))
+        _sb_pruefen(r)
+        return jsonify({"ok": True, "quelle": zeile["quelle"]})
     except Exception as e:
         return jsonify({"ok": False, "msg": f"{type(e).__name__}: {e}"}), 502
 
