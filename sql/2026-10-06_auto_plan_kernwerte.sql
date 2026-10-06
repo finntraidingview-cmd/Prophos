@@ -11,14 +11,19 @@
 --   wert_groessen  Größen nur für den Kontowert (FundedNext/FundingPips 50k), der Planer plant weiter nur groessen
 --   planen:false  nur Kernwerte, der Nachtlauf lässt die Firma aus (Topstep, FTMO)
 -- Kaufpreise: Durchschnitt laut Finn (Tradeify 215, Topstep 237, Apex 150), CFD Median der Käufe seit 08/2026 bis Finn ändert.
--- FundingPips: dd_pct 12 nach Regel — an den Konten steht max_drawdown gemischt 6.000/10.000/12.000, Finn klärt (nicht geändert).
+-- FundingPips (Finn 06.10.2026, verbindlich): 2-Step 100k Standard = Ziel P1 8 %, P2 5 %, Max Loss 10 % statisch (Boden 90.000)
+-- — vorher 10 %/8 %/12 %. Planer-Phasen angeglichen; die 50-%-Regel aus Finns Diktat bleibt als Anteil vom Ziel: tp_max P1 4.000,
+-- P2 2.500, TP-Spannen auf diese Deckel gekappt (P1 3.500–4.000, P2 2.000–2.500).
 -- Wiederholbar: vorhandene Einträge werden ergänzt/überschrieben, Topstep/FTMO nie doppelt angehängt.
 update auto_plan_regeln set regeln = jsonb_set(regeln, '{firmen}', (
   select coalesce(jsonb_agg(case
       when f->'namen' ? 'tradeify'    then f || '{"kauf_eur":215,"dd_usd":4500,"boden":"nachziehend","ziel_pct":{"challenge":6}}'
       when f->'namen' ? 'apextrader'  then f || '{"kauf_eur":150,"dd_usd":4000,"boden":"statisch","daily_usd":2000,"soft":true,"ziel_pct":{"challenge":6}}'
       when f->'namen' ? 'fundednext'  then f || '{"kauf_eur":{"50000":261,"100000":500},"dd_pct":10,"boden":"statisch","ziel_pct":{"phase1":8,"phase2":5},"wert_groessen":[50000,100000]}'
-      when f->'namen' ? 'fundingpips' then f || '{"kauf_eur":{"50000":240,"100000":464},"dd_pct":12,"boden":"statisch","ziel_pct":{"phase1":10,"phase2":8},"wert_groessen":[50000,100000]}'
+      when f->'namen' ? 'fundingpips' then jsonb_set(jsonb_set(
+             f || '{"kauf_eur":{"50000":240,"100000":464},"dd_pct":10,"boden":"statisch","ziel_pct":{"phase1":8,"phase2":5},"wert_groessen":[50000,100000]}',
+             '{phasen,phase1}', coalesce(f->'phasen'->'phase1', '{}') || '{"ziel_pct":8,"boden_pct":10,"tp_max":4000,"tp":[3500,4000]}'),
+             '{phasen,phase2}', coalesce(f->'phasen'->'phase2', '{}') || '{"ziel_pct":5,"boden_pct":10,"tp_max":2500,"tp":[2000,2500]}')
       when f->'namen' ? 'the5ers'     then f || '{"kauf_eur":{"100000":146,"200000":226},"dd_pct":10,"boden":"statisch","ziel_pct":{"phase1":8,"phase2":5}}'
       else f end order by ord) filter (where not (f->'namen' ?| array['topstep','ftmo'])), '[]'::jsonb)
   from jsonb_array_elements(regeln->'firmen') with ordinality as x(f, ord)
