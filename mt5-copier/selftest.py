@@ -5451,6 +5451,29 @@ def test_tsx_k3a():
         and "maus_hand_text" in _i.getsource(ob.modus_tsxinventar),
         "Riegel: Fahrt über maus_bahn im maus_takt; TopstepX-Pause zittert nur mit Windows-Eingabe; Schrittpause, Hover-Pause, Tipp-Takt, "
         "Klickpunkt (UIA + CDP) und Zögern vor dem Druck je Hand; Hand steht in der Spur")
+    # Nach der Order im Tab bleiben (06.10.2026, Finn: „nicht insta raus, 15 Sekunden bis ein paar Minuten")
+    import time as _tm
+    bd_ = [ob.tsx_bleiben_dauer(zufall=_rd.Random(i_), hand=H1) for i_ in range(300)]
+    j_ = _tm.time()
+    bb = ob.tsx_bleiben_befehl
+    bw = ob.tsx_bleiben_weiter
+    chk(all(15.0 <= d_ <= 240.0 for d_ in bd_) and any(d_ < 60 for d_ in bd_) and any(d_ > 120 for d_ in bd_) and len(set(round(d_) for d_ in bd_)) >= 100
+        and 40 <= sum(1 for d_ in bd_ if d_ < 60) <= 140,
+        f"Bleiben: 15 s–4 min je Hand, rund ein Viertel kurz ({sum(1 for d_ in bd_ if d_ < 60)}/300 unter 60 s), Rest 1–4 min")
+    chk(bb(123, j_ + 90, 0) == {"hwnd": 123, "bis": j_ + 90, "pid": 0} and bb(0, j_ + 90, 0) is None and bb(123, j_ - 1, 0) is None
+        and bb("x", j_ + 9, 0) is None and bb(None, None, None) is None,
+        "Bleiben: Befehl nur mit Fenster und Zeit in der Zukunft")
+    m_ = {"hwnd": 123, "bis": j_ + 60, "pid": 77}
+    chk(bw(m_, 77, False, True, j_) is True and bw(m_, 77, False, True, j_ + 61) is False
+        and bw(m_, 78, False, True, j_) is None and bw(m_, 77, True, True, j_) is None and bw(m_, 77, False, False, j_) is None
+        and bw(None, 77, False, True, j_) is None and bw({"pid": 77, "bis": "x"}, 77, False, True, j_) is None,
+        "Bleiben: weiter warten / Zeit um → minimieren / abgelöst, neuer Lauf, Fenster weg oder kaputt → aufhören ohne Minimieren")
+    chk("_bleiben" in _i.getsource(ob._AugenSitzung.zu) and "_tsx_bleiben_starten" in _i.getsource(ob.modus_tsxlesen_cdp)
+        and 'res.get("gesendet")' in _i.getsource(ob.modus_tsxlesen_cdp) and "tsxbleiben" in _i.getsource(ob.main)
+        and "tsx_bleiben_weiter" in _i.getsource(ob.modus_tsxbleiben) and "_handlauf_aktiv" in _i.getsource(ob.modus_tsxbleiben)
+        and "_win_zeigen(hwnd, 7)" in _i.getsource(ob.modus_tsxbleiben) and "res.get(\"gesendet\")" in _i.getsource(ob._tsx_bleiben_starten)
+        and ob.TSX_BLEIBEN_S == (15.0, 240.0),
+        "Riegel: zu() lässt das Fenster bei _bleiben stehen; Kind nur nach gesendeter Order, prüft Marke/Sperre/Fenster, minimiert mit SW_SHOWMINNOACTIVE")
     mp = ob.tsx_k3_menge_passt
     chk(mp("1", 1) and mp(" 15 ", 15) and mp("3", 3) and not mp("3", 1) and not mp("", 1) and not mp("1.5", 1) and not mp(None, 1)
         and not mp("15a", 15), "Menge: genau die Zahl, sonst nie")

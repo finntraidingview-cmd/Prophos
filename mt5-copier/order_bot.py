@@ -14459,6 +14459,126 @@ def tsx_hover_pause(zufall=None, hand=None):
     return TSX_HOVER_PAUSE[0] + rnd.uniform(0.0, 0.1), rnd.uniform(0.15, 0.7) * h["pause"]
 
 
+# ── NACH DER ORDER IM TAB BLEIBEN (06.10.2026, Finn: „wenn die Order platziert ist, ist es nicht immer direkt nach einer Millisekunde
+# raus, sondern es bleibt aus Zufallsprinzip noch im Tab … 15 Sekunden bis ein paar Minuten, und geht nicht insta raus"). Bisher
+# minimierte zu() das Puls-Chrome im selben Moment, in dem die Antwort stand. Das Panel wartet aber auf das PROZESS-Ende des Bots
+# (subprocess.run) — darum bleibt nicht der Lauf, sondern ein ABGEKOPPELTES Kind (modus_tsxbleiben): der Lauf antwortet sofort wie
+# bisher (Fill → Prophos → Hedge unverändert), das Kind lässt das Puls-Chrome stehen und minimiert es erst nach der gewürfelten
+# Zeit. Deckel 240 s: ab 5 min verdecktem Fenster drosselt Chrome den Reader-Tab daneben stark (deshalb wurde überhaupt minimiert).
+# Nur nach GESENDETER Order (res.gesendet) — Probe/Lesen minimieren wie bisher sofort. Nur der CDP-Weg (Puls-Chrome).
+TSX_BLEIBEN_S = (15.0, 240.0)
+TSX_BLEIBEN_MARKE = "puls_tsx_bleiben.json"
+
+
+def tsx_bleiben_dauer(zufall=None, hand=None):
+    """REIN RECHNEND (testbar): wie lange der Bot nach einer gesendeten Order noch im TopstepX-Tab bleibt (s). In rund einem Viertel
+    der Fälle kurz (15–60 s), sonst 1–4 min, mal Pausen-Faktor der Hand, immer innerhalb TSX_BLEIBEN_S."""
+    rnd = zufall or random
+    h = hand or _hand()
+    d = rnd.uniform(15.0, 60.0) if rnd.random() < 0.25 else rnd.uniform(60.0, 240.0)
+    return max(TSX_BLEIBEN_S[0], min(TSX_BLEIBEN_S[1], d * h["pause"]))
+
+
+def tsx_bleiben_befehl(hwnd, bis, pid):
+    """REIN RECHNEND (testbar): Marke/Befehl des Kindes {hwnd, bis, pid}; None bei Unsinn (kein Fenster, Zeit schon vorbei)."""
+    try:
+        hwnd, bis, pid = int(hwnd), float(bis), int(pid)
+    except (TypeError, ValueError):
+        return None
+    if hwnd <= 0 or bis <= time.time():
+        return None
+    return {"hwnd": hwnd, "bis": bis, "pid": pid}
+
+
+def tsx_bleiben_weiter(marke, pid, handlauf, fenster_da, jetzt):
+    """REIN RECHNEND (testbar): soll das Kind weiter warten (True), aufhören OHNE zu minimieren (None) oder jetzt minimieren (False)?
+    Abgelöst (Marke trägt eine andere pid — ein neuerer Lauf hat ein neues Kind), neuer Lauf (Hand-Lauf-Sperre: der minimiert am Ende
+    selbst) oder Fenster weg/schon minimiert → None; Zeit um → False; sonst True."""
+    if not isinstance(marke, dict) or marke.get("pid") != pid or handlauf or not fenster_da:
+        return None
+    try:
+        return True if float(marke.get("bis") or 0) > float(jetzt) else False
+    except (TypeError, ValueError):
+        return None
+
+
+def _tsx_bleiben_starten(s, res, trail):
+    """Nach einer gesendeten Order (res.gesendet): Puls-Chrome NICHT sofort minimieren — Kind-Prozess übernimmt das später. Setzt
+    s._bleiben, damit zu() das Fenster stehen lässt. Nur Windows mit bekanntem Fenster; nie ein Fehler nach außen."""
+    try:
+        hwnd = getattr(s, "_win_hwnd", None)
+        if not (_WIN_EINGABE and hwnd and res.get("gesendet")):
+            return
+        dauer = tsx_bleiben_dauer()
+        marke = tsx_bleiben_befehl(hwnd, time.time() + dauer, 0)
+        if not marke:
+            return
+        import subprocess
+        flags = 0x00000008 | 0x00000200 | 0x08000000 | 0x00004000   # DETACHED, NEW_PROCESS_GROUP, NO_WINDOW, BELOW_NORMAL (wie augen_anstossen)
+        subprocess.Popen([sys.executable, os.path.abspath(__file__), "tsxbleiben", json.dumps(marke)], creationflags=flags,
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
+        s._bleiben = True
+        res["bleibt_s"] = int(dauer)
+        trail.append(f"bleibt noch ~{int(dauer)} s im TopstepX-Tab (Kind-Prozess minimiert später)")
+    except Exception as e:
+        trail.append(f"Bleiben im Tab nicht gestartet ({type(e).__name__}) — Fenster wird wie bisher minimiert")
+
+
+def modus_tsxbleiben(cmd):
+    """Kind-Prozess nach einer gesendeten TopstepX-Order: lässt das Puls-Chrome bis 'bis' stehen (die Maus zuckt ab und zu, solange das
+    Fenster vorn ist), prüft alle 2–4 s die Marke (abgelöst?), die Hand-Lauf-Sperre (ein neuer Lauf minimiert selbst) und das Fenster,
+    und minimiert erst dann (SW_SHOWMINNOACTIVE wie zu()). Keine Ausgabe, kein Fehler nach außen, auf dem Mac sofort zu Ende."""
+    try:
+        hwnd, bis = int((cmd or {}).get("hwnd") or 0), float((cmd or {}).get("bis") or 0)
+    except (TypeError, ValueError):
+        return
+    if not _WIN_EINGABE or hwnd <= 0:
+        return
+    import ctypes
+    p = os.path.join(_AUGEN_HIER, TSX_BLEIBEN_MARKE)
+    pid = os.getpid()
+    try:
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump({"hwnd": hwnd, "bis": bis, "pid": pid}, f)
+    except OSError:
+        return
+
+    def marke():
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return None
+
+    def fenster_da():
+        try:
+            return bool(ctypes.windll.user32.IsWindow(hwnd)) and not _win_minimiert(hwnd)
+        except Exception:
+            return False
+    while True:
+        w = tsx_bleiben_weiter(marke(), pid, _handlauf_aktiv(), fenster_da(), time.time())
+        if w is None:
+            return
+        if w is False:
+            break
+        if random.random() < 0.3:
+            try:
+                if _win_vordergrund() == hwnd:
+                    _maus_zittern(random.uniform(0.6, 2.5))
+            except Exception:
+                pass
+        time.sleep(min(max(0.5, bis - time.time()), random.uniform(2.0, 4.0)))
+    try:
+        _win_zeigen(hwnd, 7)
+    except Exception:
+        pass
+    try:
+        if (marke() or {}).get("pid") == pid:
+            os.remove(p)
+    except OSError:
+        pass
+
+
 def _tsx_pause():
     """Pause zwischen zwei TopstepX-Schritten (Finn 01.10.2026: 1–2 s, gewürfelt, nie fix; seit 06.10.2026 Länge aus tsx_pause_dauer je
     Hand). Die Maus steht dabei nicht still (kleine Zucker, _maus_zittern) — nur mit echter Windows-Eingabe, sonst reines Warten."""
@@ -16297,6 +16417,8 @@ def modus_tsxlesen_cdp(cmd, order=None, order_cmd=None):
     def raus(code, msg, schritt, ok=False, zuerst=None, **extra):
         if not antwort.nehmen():
             return
+        if sitz[0] and res.get("gesendet"):
+            _tsx_bleiben_starten(sitz[0], res, trail)        # 06.10.2026: nach gesendeter Order im Tab bleiben (Kind minimiert später)
         if zuerst:
             zuerst()                                          # Wachhund: erst die Sitzung schließen (Hauptpfad anhalten), dann antworten
         res.update(ok=ok, code=code, msg=msg, schritt=schritt, **extra)
@@ -17324,7 +17446,8 @@ class _AugenSitzung:
         return ((r.get("result") or {}).get("value")) if not r.get("exceptionDetails") else None
 
     def zu(self):
-        if _WIN_EINGABE and getattr(self, "_win_hwnd", None):
+        # 06.10.2026: nach einer gesendeten Order bleibt das Fenster stehen (_bleiben) — das Kind aus _tsx_bleiben_starten minimiert später
+        if _WIN_EINGABE and getattr(self, "_win_hwnd", None) and not getattr(self, "_bleiben", False):
             try:
                 _win_zeigen(self._win_hwnd, 7)          # SW_SHOWMINNOACTIVE: wieder minimiert, nichts aktiviert — Reader frei
             except Exception:
@@ -21158,6 +21281,17 @@ def main():
         a = sys.argv[2:]
         modus_tvkette_cdp({"ext_id": a[0], "symbol": a[1], "richtung": a[2].lower(), "volumen": a[3],
                            "tp_usd": a[4] if len(a) > 4 else None, "sl_usd": a[5] if len(a) > 5 else None, "scharf": False})
+        return 0
+    if len(sys.argv) >= 3 and sys.argv[1] == "tsxbleiben":
+        # Kind nach gesendeter TopstepX-Order (06.10.2026): Puls-Chrome stehen lassen, später minimieren — keine Ausgabe
+        try:
+            cmd = json.loads(sys.argv[2])
+        except ValueError:
+            cmd = {}
+        try:
+            modus_tsxbleiben(cmd if isinstance(cmd, dict) else {})
+        except Exception:
+            pass
         return 0
     if len(sys.argv) >= 2 and sys.argv[1] == "augen":
         # Puls-Augen über CDP (29.09.2026, E0): nur lesen, entkoppelt angestoßen; 'augen {"start": true}' = Puls-Chrome
