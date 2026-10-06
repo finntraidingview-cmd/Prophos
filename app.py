@@ -7090,6 +7090,8 @@ def vorrat_chance_stufe(regel, balance, groesse, start=None, max_dd=None):
     modell trades: mitwandernder Boden (Tradeify/Topstep). Je Trade Polster ÷ (Polster + TP), Polster = risiko_usd (wandert
         mit), unter dem Start um den Verlust kleiner; tps_usd = die Trades der Stufe (Summe = Ziel über Start), schon erreichtes
         Plus überspringt Trades — Finn: Tradeify 3.500/3.500/2.000 gegen 4.500 → 56 % × 56 % × 69 % ≈ 22 %.
+        lock_bei_start (FundedNext Futures, 07.10.2026): Boden nie über dem Start → 3.200/3.200/1.600 gegen 4.000 → 56 % × 56 %
+        × 80 % (Polster 6.400 nach dem Lock) ≈ 25 %.
     modell tage: Apex-Evaluation (Finn 06.10.2026): je Tag ein Trade ohne SL auf Rest + puffer_usd,
         Tagesverlust tages_usd ist Soft Breach (Tag stoppt, Konto lebt), Gesamt-Drawdown gesamt_usd statisch. Chance =
         1 − Π(1 − p_Tag) — frisch 2.000 ÷ 11.100, nach einem Verlusttag 2.000 ÷ 13.100 → ≈ 30 %.
@@ -7142,19 +7144,28 @@ def vorrat_chance_stufe(regel, balance, groesse, start=None, max_dd=None):
             return dict(out, daten_fehlen=True, hinweis="Risiko/Trades der Stufe fehlen")
         plus = bal - st
         polster = min(dd, dd + plus)
+        lock = r.get("lock_bei_start") is True
+        if lock:
+            # 07.10.2026 FundedNext Futures: Boden zieht nach, aber nie über den Start (146.000 → 149.200 → 150.000 fest) —
+            # über Start + DD wächst das Polster mit der Balance (156.400 → 6.400)
+            polster = bal - max(st - dd, min(st, bal - dd))
         out.update(boden=round(bal - polster, 2), ziel=round(st + sum(tps), 2), polster=round(polster, 2),
                    abstand=round(st + sum(tps) - bal, 2))
         if plus >= sum(tps):
             return dict(out, chance=1.0, erreicht=True, hinweis="Ziel erreicht, noch nicht umgestellt")
         if polster <= 0:
             return dict(out, chance=0.0, hinweis="Polster aufgebraucht — geblasen?")
-        p, cum, erst = 1.0, 0.0, True
+        p, cum, erst, bod = 1.0, 0.0, True, bal - polster
         for tp in tps:
             lo, cum = cum, cum + tp
             if cum <= plus:
                 continue
             rest = cum - max(lo, plus)
-            pol = polster if erst else dd
+            if lock and not erst:
+                bod = max(bod, min(st, st + lo - dd))       # Tagesend nach dem vorigen Trade, gedeckelt beim Start
+                pol = st + lo - bod
+            else:
+                pol = polster if erst else dd
             q = pol / (pol + rest)
             out["trades"].append({"polster": round(pol, 2), "tp": round(rest, 2), "p": q})
             p *= q
@@ -7234,6 +7245,8 @@ def vorrat_stufen_aus_kernwerten(regel, param=None):
             r = {"modell": "statisch", "ziel_pct": zp[ph], "boden_pct": kw["dd_pct"]}
         elif nachz:
             r = {"modell": "trades", "ziel_pct": zp[ph], "risiko_usd": kw["dd_usd"], "etappe_usd": kw.get("etappe_usd")}
+            if kw.get("lock_bei_start"):
+                r["lock_bei_start"] = True       # FundedNext Futures 07.10.2026: Boden höchstens bis zum Start
         elif kw.get("daily_usd") and (regel or {}).get("soft"):
             pu = (ph_reg.get(ph) or {}).get("puffer") or [0]
             r = {"modell": "tage", "ziel_pct": zp[ph], "tages_usd": kw["daily_usd"], "gesamt_usd": kw["dd_usd"],
@@ -13840,6 +13853,11 @@ def ap_konto_rechnen(regel, phase, balance, u):
     ziel = groesse * (1 + float(zp if zp is not None else (ph.get("ziel_pct") or 0)) / 100.0)
     bp = regel.get("dd_pct") if regel.get("boden") == "statisch" and regel.get("dd_pct") else ph.get("boden_pct")
     boden = groesse * (1 - float(bp) / 100.0) if bp else None
+    if boden is None and regel.get("boden") == "nachziehend" and regel.get("lock_bei_start") is True and regel.get("dd_usd"):
+        # 07.10.2026 FundedNext Futures: nachziehend mit Lock beim Start — aus der Balance (= Tagesend-Stand) folgt der Boden
+        # Start − DD … höchstens Start (146.000 → 149.200 → 150.000 fest); Tradeify ohne Lock bleibt ohne Boden
+        dd = float(regel["dd_usd"]) * f
+        boden = max(groesse - dd, min(groesse, balance - dd))
     rest = ziel - balance
     if rest <= 0:
         return None, "Ziel erreicht — Phase umstellen"
@@ -13949,7 +13967,8 @@ def ap_kw_param(regel):
     TP-Ziel Phase 1, TP-Ziel Phase 2, Kaufpreis; alles andere wird daraus gerechnet") aus auto_plan_regeln.regeln.firmen[] —
     EINE Quelle für Planer, Kontowert und Vorrat: kauf_eur (Zahl = kleinste Größe, skaliert; oder {größe: €}), dd_usd ODER
     dd_pct, boden 'statisch'/'nachziehend', ziel_pct {challenge|phase1|phase2: %}. Dazu, wo vorhanden: groessen,
-    Etappe = tp_max der Planer-Phase (Tradeify 3.600, sonst ganze DD), daily_usd (weicher Tagesstopp, Apex).
+    Etappe = tp_max der Planer-Phase (Tradeify 3.600, sonst ganze DD), daily_usd (weicher Tagesstopp, Apex),
+    lock_bei_start (nachziehender Boden steigt nie über die Startgröße — FundedNext Futures, 07.10.2026).
     Kontowerte am Konto (accounts.max_drawdown) zählen NICHT — dort stehen Einzelfehler (Apex 400, FTMO 100000 …). None = ohne Wert."""
     if not regel or regel.get("kauf_eur") in (None, "") or not (regel.get("dd_usd") or regel.get("dd_pct")) \
             or not isinstance(regel.get("ziel_pct"), dict) or not (regel.get("wert_groessen") or regel.get("groessen")):
@@ -13958,7 +13977,7 @@ def ap_kw_param(regel):
     return {"kauf_eur": regel["kauf_eur"], "dd_usd": regel.get("dd_usd"), "dd_pct": regel.get("dd_pct"),
             "boden": regel.get("boden") or "statisch", "ziel_pct": regel["ziel_pct"],
             "groessen": sorted(float(g) for g in (regel.get("wert_groessen") or regel["groessen"])), "etappe_usd": ch.get("tp_max") or regel.get("tp_max") or regel.get("etappe_usd"),
-            "daily_usd": regel.get("daily_usd")}
+            "daily_usd": regel.get("daily_usd"), "lock_bei_start": regel.get("lock_bei_start") is True}
 
 
 def _ap_kw_kauf(p, groesse):
@@ -13979,6 +13998,24 @@ def _ap_kw_wachsen(wert, gewinn, dd, etappe):
         wert *= 1 + etappe / dd
         rest -= etappe
     return wert * (1 + max(rest, 0) / dd)
+
+
+def _ap_kw_lock(wert, gewinn, dd, etappe):
+    """Nachziehender Boden mit Lock bei der Startgröße (lock_bei_start, FundedNext Futures, Finn 07.10.2026: „der Boden steigt
+    NIE über 150.000"): Boden = Start − DD, zieht End-of-Day mit, bis er beim Start festsitzt. Solange er nachzieht, je Etappe
+    × (1 + Etappe/DD) wie Tradeify; Lock, sobald der Gewinn (je abgeschlossener Etappe = Handelstag) die DD erreicht. Ab dann
+    statisch: Wert_Lock × (Balance − Start) ÷ Polster zum Lock-Zeitpunkt (= Gewinn beim Lock) — r bleibt. 150k/4.000/3.200:
+    Boden 146.000 → 149.200 → 150.000 fest, Polster 6.400. → (wert, polster, gelockt)"""
+    rest, fertig = gewinn, 0.0
+    while rest >= etappe - 1e-9:
+        wert *= 1 + etappe / dd
+        rest -= etappe
+        fertig += etappe
+        if fertig >= dd - 1e-9:
+            return wert * gewinn / fertig, gewinn, True
+    wert *= 1 + max(rest, 0) / dd
+    # angebrochene Etappe: Balance gilt als Tagesend-Stand — reicht der Gewinn schon für den Lock, sitzt der Boden beim Start
+    return (wert, gewinn, True) if gewinn >= dd - 1e-9 else (wert, dd, False)
 
 
 def ap_kontowert(typ, balance, p, kauf_eur=None):
@@ -14002,6 +14039,7 @@ def ap_kontowert(typ, balance, p, kauf_eur=None):
     if kauf_eur and kauf and 0.5 <= float(kauf_eur) / kauf <= 2:
         kauf = float(kauf_eur)      # echter Kauf nur, wenn plausibel (0,5–2× Firmenwert) — sonst Gebühr/Sammelbuchung, Firmenwert gilt
     nachz = p.get("boden") == "nachziehend"
+    lock = nachz and p.get("lock_bei_start") is True      # 07.10.2026 FundedNext Futures: Boden höchstens bis zum Start
     etappe = float(p.get("etappe_usd") or dd)
     zp = p.get("ziel_pct") or {}
     phasen = [x for x in AP_KW_PHASEN if x in zp]
@@ -14013,6 +14051,13 @@ def ap_kontowert(typ, balance, p, kauf_eur=None):
         ziel = groesse * float(zp[ph]) / 100.0
         if ph == typ:
             g = b - start
+            if nachz and lock and g >= 0:
+                v, pol, fest = _ap_kw_lock(wert, g, dd, etappe)
+                return {"wert": round(v), "satz": round(v / pol, 4), "polster": round(pol), "groesse": groesse, "kauf": round(kauf),
+                        "wie": (f"{'Kauf' if ph == phasen[0] else 'Phasenstart'} {wert:.0f} × (1+Etappe/{dd:,.0f}) bis Lock, "
+                                f"dann × Polster/Polster beim Lock" if fest else
+                                f"{'Kauf' if ph == phasen[0] else 'Phasenstart'} {wert:.0f} × (1+Etappe/{dd:,.0f}) bis +{g:,.0f} $, "
+                                f"Boden zieht noch nach").replace(",", ".")}
             if nachz and g >= 0:
                 v = _ap_kw_wachsen(wert, g, dd, etappe)
                 return {"wert": round(v), "satz": round(v / dd, 4), "polster": round(dd), "groesse": groesse, "kauf": round(kauf),
@@ -14020,7 +14065,8 @@ def ap_kontowert(typ, balance, p, kauf_eur=None):
             polster = max(0.0, dd + g)
             return {"wert": round(wert * polster / dd), "satz": round(wert / dd, 4), "polster": round(polster), "groesse": groesse,
                     "kauf": round(kauf), "wie": f"{'Kauf' if ph == phasen[0] else 'Phasenstart'} {wert:.0f} × Polster/{dd:,.0f}".replace(",", ".")}
-        wert = _ap_kw_wachsen(wert, ziel, dd, etappe) if nachz else wert * (dd + ziel) / dd
+        wert = (_ap_kw_lock(wert, ziel, dd, etappe)[0] if lock else _ap_kw_wachsen(wert, ziel, dd, etappe)) if nachz \
+            else wert * (dd + ziel) / dd
     if typ in AP_KW_FUNDED:
         polster = max(0.0, b - start + dd)
         return {"wert": round(wert * polster / dd), "satz": round(wert / dd, 4), "polster": round(polster), "groesse": groesse,

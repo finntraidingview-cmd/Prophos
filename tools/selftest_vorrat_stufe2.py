@@ -50,6 +50,10 @@ KERN = [
      "ziel_pct": {"challenge": 6}, "groessen": [150000]},
     {"namen": ["ftmo"], "planen": False, "kauf_eur": 446, "dd_pct": 10, "boden": "statisch", "ziel_pct": {"phase1": 10, "phase2": 5},
      "groessen": [100000, 200000]},
+    # 07.10.2026 nach sql/2026-10-07_fundednext_futures_regel.sql: nachziehend mit Lock beim Start, ohne Funded-Weg/Vorrats-Ziel
+    {"namen": ["fundednextfutures"], "groessen": [150000], "kauf_eur": 258, "dd_usd": 4000, "boden": "nachziehend",
+     "lock_bei_start": True, "ziel_pct": {"challenge": 5.333333333333334},
+     "phasen": {"challenge": {"ziel_pct": 5.333333333333334, "dd_usd": 4000, "tp_max": 3200}}},
 ]
 
 
@@ -67,7 +71,7 @@ def lade():
     teile = ["import random\nimport zlib\nimport re", src[k1:src.index("\n", k1)], konst, src[i:src.index("\n", i)], block("pb_handelstag")]
     j = src.index("AP_KW_FUNDED = ")
     teile.append(src[j:src.index("\n\n\n", j)])
-    teile += [block(f) for f in ("_ap_norm", "ap_regel_finden", "ap_groesse", "ap_kw_param", "_ap_kw_kauf", "_ap_kw_wachsen",
+    teile += [block(f) for f in ("_ap_norm", "ap_regel_finden", "ap_groesse", "ap_kw_param", "_ap_kw_kauf", "_ap_kw_wachsen", "_ap_kw_lock",
                                  "ap_kontowert", "vorrat_stufen_aus_kernwerten")]
     j2 = src.index("VORRAT_KI_PRIO = ")
     teile.append(src[j2:src.index("\n", j2)])
@@ -610,6 +614,20 @@ def main():
     pruef("1-Step-Konto (CFD als challenge) rechnet wie Phase 1", kette(S["FundedNext"], "challenge", 100000, 100000)["chance"],
           kette(S["FundedNext"], "phase1", 100000, 100000)["chance"], 1e-12)
     pruef("Firma ohne Kernwerte → leer", ak(rf(KERN, "Lucid")), {})
+    # FundedNext Futures (Finn 07.10.2026): Boden 146.000 zieht nach, sitzt bei 150.000 fest
+    fnf = ak(rf(KERN, "FundedNext Futures"))
+    e = st(fnf["challenge"], 150000, 150000)
+    pruef("FN Futures: Etappen 3.200/3.200/1.600", [round(t["tp"], 6) for t in e["trades"]], [3200.0, 3200.0, 1600.0])
+    pruef("FN Futures: Polster je Trade 4.000/4.000/6.400 (Boden 146.000 → 149.200 → 150.000)",
+          [round(t["polster"], 6) for t in e["trades"]], [4000.0, 4000.0, 6400.0])
+    pruef("FN Futures frisch ≈ 56 % × 56 % × 80 %", e["chance"], (4000 / 7200) ** 2 * (6400 / 8000), 1e-9)
+    pruef("FN Futures Boden frisch/+3.200/+6.400/+7.200", [st(fnf["challenge"], b, 150000)["boden"] for b in (150000, 153200, 156400, 157200)],
+          [146000.0, 149200.0, 150000.0, 150000.0])
+    pruef("FN Futures unter Start: Boden bleibt 146.000", st(fnf["challenge"], 148000, 150000)["boden"], 146000.0)
+    pruef("FN Futures nach Lock: letzter Trade gegen Polster 6.400", st(fnf["challenge"], 156400, 150000)["chance"], 6400 / 8000, 1e-9)
+    pruef("FN Futures ohne Funded-Weg → Kette daten_fehlen", kette(fnf, "challenge", 150000, 150000)["daten_fehlen"], True)
+    pruef("Tradeify-Stufe ohne Lock-Feld", "lock_bei_start" in S["Tradeify"]["challenge"], False)
+    pruef("FN Futures Kontowert frisch = 258 €", ns["ap_kontowert"]("challenge", 150000, ns["ap_kw_param"](rf(KERN, "FundedNext Futures")))["wert"], 258)
     f31 = [("Tradeify", "challenge", "bestanden")] * 5 + [("Tradeify", "challenge", "geblowt")] * 26
     r = ns["vorrat_quoten"](f31, {"Tradeify": S["Tradeify"]})[("Tradeify", "challenge")]
     p_ch = (4500 / 8100) ** 2 * (4500 / 6300)

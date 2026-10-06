@@ -38,6 +38,11 @@ FIRMEN = [
     {"namen": ["ftmo"], "planen": False, "route": "mt5v2", "groessen": [100000, 200000], "kauf_eur": 446, "dd_pct": 10,
      "boden": "statisch", "ziel_pct": {"phase1": 10, "phase2": 5}},
     {"namen": ["altefirma"], "groessen": [100000], "phasen": {"phase1": {"ziel_pct": 8}}},   # ohne Kernwerte
+    # 07.10.2026 nach sql/2026-10-07_fundednext_futures_regel.sql: nachziehend mit Lock beim Start (Boden nie über 150.000)
+    {"namen": ["fundednextfutures"], "route": "tvv2", "symbol": "NQ", "groessen": [150000], "kauf_eur": 258, "dd_usd": 4000,
+     "boden": "nachziehend", "lock_bei_start": True, "ziel_pct": {"challenge": 5.333333333333334},
+     "phasen": {"challenge": {"sl": None, "tp": [3050, 3150], "menge": [2, 3], "dd_usd": 4000, "tp_max": 3200,
+                              "ziel_pct": 5.333333333333334, "menge_schritt": 1, "puffer_je_menge": {"2": [15, 25], "3": [25, 40]}}}},
 ]
 
 
@@ -54,7 +59,7 @@ def lade():
         return m.group(0)
     exec("\n".join([konst(k) for k in ("AP_REST_MIN", "AP_GROESSE_TOLERANZ", "AP_KW_FUNDED", "AP_KW_PHASEN")] + [block(f) for f in (
         "_ap_norm", "ap_regel_finden", "ap_groesse", "_ap_spanne", "_ap_runden", "ap_konto_rechnen", "ap_zeiten_verteilen",
-        "ap_kw_param", "_ap_kw_kauf", "_ap_kw_wachsen", "ap_kontowert", "ap_trade_gewicht", "ap_sicht", "_ap_hhmm")]), ns)
+        "ap_kw_param", "_ap_kw_kauf", "_ap_kw_wachsen", "_ap_kw_lock", "ap_kontowert", "ap_trade_gewicht", "ap_sicht", "_ap_hhmm")]), ns)
     return ns
 
 
@@ -126,6 +131,34 @@ def main():
     check(grund and "Boden" in grund, "FundedNext unter Boden (dd_pct) → ausgelassen")
     w, grund = a["ap_konto_rechnen"](regel("Tradeify"), "challenge", 153600, u)
     check(not grund and w["ziel"] == 159000, "Tradeify Ziel 159.000 aus ziel_pct")
+
+    # 6b) FundedNext Futures (Finn 07.10.2026): Kauf 258, DD 4.000 nachziehend mit Lock bei 150.000, Ziel +8.000 in 3.200er Etappen
+    check(regel("FundedNext Futures")["namen"] == ["fundednextfutures"] and regel("FundedNext")["namen"] == ["fundednext"],
+          "„FundedNext Futures\" ≠ „FundedNext\" (eigene Regel)")
+    f = [W("FundedNext Futures", "challenge", b) for b in (150000, 153200, 156400, 157200, 158000)]
+    check(f[0]["wert"] == 258 and f[0]["polster"] == 4000, "FN Futures frisch = 258 €, Polster 4.000")
+    check(f[1]["wert"] == round(258 * 1.8) and f[1]["polster"] == 4000, f"FN Futures +3.200 → 258 × 1,8 = {f[1]['wert']} € (Boden 149.200)")
+    wl = 258 * 1.8 * 1.8
+    check(f[2]["wert"] == round(wl) and f[2]["polster"] == 6400, f"FN Futures +6.400 → Lock: {f[2]['wert']} €, Polster 6.400 (Boden 150.000)")
+    check(f[3]["wert"] == round(wl * 7200 / 6400) and f[4]["wert"] == round(wl * 8000 / 6400),
+          f"FN Futures nach Lock statisch: 157.200 → {f[3]['wert']} €, 158.000 → {f[4]['wert']} €")
+    check(nahe(f[2]["satz"], f[4]["satz"], 1e-4), "FN Futures nach Lock: Satz r bleibt (statisch)")
+    check(W("FundedNext Futures", "challenge", 148000)["wert"] == round(258 * 2000 / 4000), "FN Futures unter Start: Polster schrumpft")
+    check(W("FundedNext Futures", "funded", 150000)["wert"] == round(wl * 8000 / 6400), "FN Futures Funded-Start = Wert am Ziel")
+    check(W("Tradeify", "challenge", 157200)["wert"] == 697 and "lock_bei_start" in P("Tradeify") and not P("Tradeify")["lock_bei_start"],
+          "Tradeify ohne Lock unverändert")
+    et = []
+    for b in (150000, 153100, 156200):
+        w, grund = a["ap_konto_rechnen"](regel("FundedNext Futures"), "challenge", b, u)
+        et.append((w["tp"], w["stufe"]) if w else grund)
+    check(et[0][0] == 3100 and et[1][0] == 3100 and et[2][1].startswith("letzter Trade"),
+          f"FN Futures Planer: Etappe 3.100 · 3.100 · Rest (ist {et})")
+    w, grund = a["ap_konto_rechnen"](regel("FundedNext Futures"), "challenge", 146000, u)
+    check(grund and "Boden" in grund, "FN Futures auf Boden 146.000 → ausgelassen")
+    w, grund = a["ap_konto_rechnen"](regel("FundedNext Futures"), "challenge", 157990, u)
+    check(grund and "Hand" in grund, "FN Futures 10 $ vor Ziel → von Hand")
+    w, grund = a["ap_konto_rechnen"](regel("FundedNext Futures"), "challenge", 158000, u)
+    check(grund and "Ziel erreicht" in grund, "FN Futures 158.000 = Ziel erreicht")
 
     # 7) Zeitverteilung: info ändert nichts am Ergebnis (Probelauf = Nachtlauf bei gleichem seed)
     tr = [{"key": f"u{i}|f{i % 3}", "user": f"u{i % 4}", "firma": f"f{i % 3}", "dauer_min": 3} for i in range(9)]
