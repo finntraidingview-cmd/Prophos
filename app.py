@@ -8058,7 +8058,7 @@ def vorrat_gesamt(zellen, heute=None, vorher_score=None):
         ist = float(r.get("bestand") or 0) + float(r.get("funnel_zaehlt") or 0)
         anteile.append(max(0.0, min(1.0, ist / soll)))
     abdeckung = sum(anteile) / len(anteile) if anteile else None
-    score = int(round(100 * (1 - abdeckung))) if abdeckung is not None else None
+    score = int(100 * (1 - abdeckung) + 0.5 + 1e-9) if abdeckung is not None else None   # kaufmännisch runden (62,5 → 63)
     wort = (None if score is None else "entspannt" if score < 25 else "mittel" if score < 50
             else "dringend" if score < 75 else "sehr dringend")
     h = [e for e in (heute or []) if e.get("stufe") == "heute"]
@@ -8197,6 +8197,18 @@ def vorrat_ki_anwenden(zellen, ki_zeilen, namen, ki_um):
     for e in heute:
         e.pop("_r", None)
     return heute
+
+
+def vorrat_score_gruppen(zellen, heute, schluessel):
+    """REIN RECHNEND (testbar): Dringlichkeits-Score je Gruppe (Finn über den Master 06.10.2026: „auch je ID und je Firma") — dieselbe
+    Formel wie gesamt (vorrat_gesamt), nur über die freien Zellen mit Daten dieser Gruppe. schluessel = 'user_id' | 'firma'.
+    → {wert: {score, wort ('—' ohne Daten), abdeckung_pct, heute, gesamt}}"""
+    out = {}
+    for w in {z.get(schluessel) for z in zellen or []}:
+        g = vorrat_gesamt([z for z in zellen if z.get(schluessel) == w], [e for e in heute or [] if e.get(schluessel) == w])
+        out[w] = {"score": g["score"], "wort": g["wort"] or "—", "abdeckung_pct": g["abdeckung_pct"], "heute": g["kaeufe_heute"],
+                  "gesamt": g["kaeufe_gesamt"]}
+    return out
 
 
 def vorrat_personen(zellen, namen):
@@ -8561,8 +8573,16 @@ def vorrat2_anhaengen(erg1):
                           if z.get("quelle") == "ki" else z for z in erg1.get("zellen") or []]
         gesamt.update(kaeufe_heute=sum(e["anzahl"] for e in heute),
                       kosten_heute_eur=round(sum(float(e.get("kosten_eur") or 0) for e in heute)))
+    # Score je Person und je Firma (Finn 06.10.2026) — gesamt aus den Regel-Zahlen, heute aus heute[] (KI oder Regel)
+    personen = vorrat_personen(personen_basis, namen)
+    je_person = vorrat_score_gruppen(erg1.get("zellen") or [], heute, "user_id")
+    for p_ in personen:
+        p_.update(je_person.get(p_["user_id"]) or {"score": None, "wort": "—", "abdeckung_pct": None, "heute": 0, "gesamt": 0})
+    je_firma = vorrat_score_gruppen(erg1.get("zellen") or [], heute, "firma")
+    for f_ in erg1.get("firmen") or []:
+        f_.update(je_firma.get(f_["firma"]) or {"score": None, "wort": "—", "abdeckung_pct": None, "heute": 0, "gesamt": 0})
     return dict(erg1, stufe2_bereit=True, stufe2_hinweis="", gerechnet_um=e2.get("gerechnet_um"),
-                heute=heute, luecke_gesamt=luecke_ges, tages_max=tmax, personen=vorrat_personen(personen_basis, namen),
+                heute=heute, luecke_gesamt=luecke_ges, tages_max=tmax, personen=personen,
                 heute_quelle=("ki" if ki_aktiv else "regel"), ki_um=(ki.get("ki_um") if ki_aktiv else None),
                 gesamt=gesamt,
                 kauf_regel=(e2.get("parameter") or {}).get("kauf_regel"), mitte=(e2.get("parameter") or {}).get("mitte"),

@@ -71,7 +71,7 @@ def lade():
                                  "ap_kontowert", "vorrat_stufen_aus_kernwerten")]
     j2 = src.index("VORRAT_KI_PRIO = ")
     teile.append(src[j2:src.index("\n", j2)])
-    teile += [block(f) for f in ("vorrat_ziel_pruefen", "_vr2_k", "_vr2_usd", "_vr2_unterwegs_txt", "vorrat_satz_nominal", "vorrat_satz", "vorrat_personen", "vorrat_regel_satz", "vorrat_gesamt", "vorrat_fakten_text", "vorrat_ki_pruefen",
+    teile += [block(f) for f in ("vorrat_ziel_pruefen", "_vr2_k", "_vr2_usd", "_vr2_unterwegs_txt", "vorrat_satz_nominal", "vorrat_satz", "vorrat_personen", "vorrat_regel_satz", "vorrat_gesamt", "vorrat_score_gruppen", "vorrat_fakten_text", "vorrat_ki_pruefen",
                                  "vorrat_ki_anwenden", "vorrat_tagesliste", "_vr2_num", "vorrat_chance_stufe", "vorrat_chance_kette", "vorrat_bestand_konto",
                                  "vorrat_alter_handelstage", "vorrat_mc", "vorrat_score", "vorrat_totband", "vorrat_anzeige_n",
                                  "vorrat_quoten", "vorrat2_zelle", "vorrat2_slot")]
@@ -481,6 +481,24 @@ def main():
     pruef("FTMO leer, Ziel 100k: 1 × 100k (Kette 33 % ≥ 25 %), Einheit konkret", (q["nachkauf"]["n_roh"], q["nachkauf"]["einheit"]), (1, "100k"))
     q = zelle(dict(ziel_ftmo, von=200000, bis=300000), ftmo_st, [], "frei", kw=kw_ftmo)
     pruef("FTMO Lücke 200k → Einheit 200k", (q["nachkauf"]["einheit"], q["nachkauf"]["preis_eur"]), ("200k", 892))
+    # Score je Person / je Firma (Finn 06.10.2026)
+    sg = ns["vorrat_score_gruppen"]
+    def gz2(uid, firma, best, soll, status="frei", n=0, sperre=None):
+        return {"user_id": uid, "firma": firma, "status": status, "sperre": sperre, "nachkauf": {"n": n},
+                "rechnung": {"bestand": best, "funnel_zaehlt": 0, "untergrenze": soll}}
+    zg2 = [gz2("a", "Tradeify", 0, 20000, n=3), gz2("a", "FTMO", 100000, 100000), gz2("b", "Tradeify", 15000, 20000, n=1),
+           gz2("c", "FTMO", 0, 100000, status="pausiert", n=1)]
+    hz2 = [{"user_id": "a", "firma": "Tradeify", "stufe": "heute", "anzahl": 3, "kosten_eur": 645},
+           {"user_id": "b", "firma": "Tradeify", "stufe": "heute", "anzahl": 1, "kosten_eur": 215}]
+    r = sg(zg2, hz2, "user_id")
+    pruef("Score je Person: A (0 % + 100 %) → 50 dringend, heute 3, gesamt 3", r["a"], {"score": 50, "wort": "dringend",
+          "abdeckung_pct": 50.0, "heute": 3, "gesamt": 3})
+    pruef("Score je Person: B 75 % → 25 mittel", (r["b"]["score"], r["b"]["wort"]), (25, "mittel"))
+    pruef("Score je Person: nur pausiert → —", (r["c"]["score"], r["c"]["wort"], r["c"]["gesamt"]), (None, "—", 0))
+    r = sg(zg2, hz2, "firma")
+    pruef("Score je Firma: Tradeify (0 % + 75 %) → 63, heute 4, gesamt 4", (r["Tradeify"]["score"], r["Tradeify"]["heute"],
+          r["Tradeify"]["gesamt"]), (63, 4, 4))
+    pruef("Score je Firma: FTMO nur A (100 %) → 0 entspannt", (r["FTMO"]["score"], r["FTMO"]["wort"]), (0, "entspannt"))
     rs = ns["vorrat_regel_satz"]
     pruef("Regel-Satz mitte 0,5", rs("mitte", 0.5).startswith("Jedes laufende Konto zählt halb so, als käme es sicher durch, und halb mit"), True)
     pruef("Regel-Satz mitte 0,7", "zu 70 % so, als käme es sicher durch, und zu 30 %" in rs("mitte", 0.7), True)
