@@ -2020,6 +2020,33 @@
   #vr-view .vr-h-satz{margin:8px 0 0;font-size:13px;color:var(--sub);line-height:1.5}
   #vr-view .vr-h-chips{margin:14px 0 0}
   #vr-view .vr-h-liste{margin-top:14px}
+  /* Deine Ziele (06.10.2026): kompakte Karte ganz oben, eine Zeile je Firma, ✎ macht die Zeile zum Formular */
+  #vr-view .vr-zk{background:var(--surface);border:1px solid var(--border-soft);border-radius:12px;padding:6px 18px 10px;margin-bottom:6px}
+  #vr-view .vr-zl{display:flex;align-items:center;gap:8px;padding:9px 0;border-top:1px solid var(--border-soft);font-size:13.5px;min-width:0}
+  #vr-view .vr-zk > .vr-zl:first-child{border-top:none}
+  #vr-view .vr-zl > i{width:9px;height:9px;border-radius:3px;flex:none}
+  #vr-view .vr-zl > b{font-weight:600;color:var(--ink);white-space:nowrap}
+  #vr-view .vr-zl-txt{color:var(--ink-2);flex:1 1 auto;min-width:0}
+  #vr-view .vr-zl-edit{flex:none;border:1px solid transparent;background:transparent;color:var(--sub);border-radius:7px;width:30px;height:28px;font-size:14px;cursor:pointer}
+  #vr-view .vr-zl-edit:hover{border-color:var(--border);color:var(--ink)}
+  #vr-view .vr-zl-edit:disabled{opacity:.4;cursor:default}
+  #vr-view .vr-zl-form{flex-wrap:wrap;align-items:flex-end;background:var(--surface-tint);margin:4px -10px;padding:10px;border-radius:10px;border-top:none}
+  #vr-view .vr-zl-form > b,#vr-view .vr-zl-form > i{align-self:center}
+  #vr-view .vr-zl-felder{display:flex;flex-wrap:wrap;gap:8px 10px;flex:1 1 300px;min-width:0}
+  #vr-view .vr-zl-felder label{display:flex;flex-direction:column;gap:3px;font-size:11.5px;color:var(--sub)}
+  #vr-view .vr-zl-felder input{width:118px;font:inherit;font-size:13px;padding:6px 8px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--ink)}
+  #vr-view .vr-zl-felder label.breit input{width:190px}
+  #vr-view .vr-zl-knoepfe{display:flex;gap:6px}
+  #vr-view .vr-zk-hinweis{margin:6px 0 0;font-size:12px;color:var(--sub)}
+  @media (max-width:760px){
+    #vr-view .vr-zk{padding:4px 12px 8px}
+    #vr-view .vr-zl{flex-wrap:wrap;row-gap:2px}
+    #vr-view .vr-zl-txt{flex-basis:calc(100% - 50px);order:3;padding-left:17px;font-size:13px}
+    #vr-view .vr-zl-edit{margin-left:auto}
+    #vr-view .vr-zl-felder input{width:120px}
+    #vr-view .vr-zl-felder label.breit input{width:100%}
+    #vr-view .vr-zl-felder label.breit{flex:1 1 100%}
+  }
   #vr-view .vr-h-filter{display:inline-flex;align-items:center;gap:6px;margin:10px 0 0;font-size:12.5px;color:var(--ink);background:var(--surface-tint);border-radius:8px;padding:3px 4px 3px 10px}
   #vr-view .vr-h-filter button{border:0;background:transparent;color:var(--sub);font:inherit;font-size:15px;line-height:1;cursor:pointer;padding:0 5px}
   #vr-view .vr-h-filter button:hover{color:var(--ink)}
@@ -38790,7 +38817,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1059'
+  const OS_TAB_BUILD = '2026-09-22.1060'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -55395,7 +55422,7 @@
   const VR_SCHLOSS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/></svg>'
   const VR_PAUSE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 5v14M15 5v14"/></svg>'
   const VR_PLAY = '<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M7 5v14l11-7z"/></svg>'
-  const _vr = { daten: null, laedt: false, fehler: '', timer: null, stand: 0, kachel: '', firma: '', auf: new Set(), sendet: 0, offen: new Set(), sichert: false, uebersicht: true, einst: false, hPerson: '' }
+  const _vr = { daten: null, laedt: false, fehler: '', timer: null, stand: 0, kachel: '', firma: '', auf: new Set(), sendet: 0, offen: new Set(), sichert: false, uebersicht: true, einst: false, ziele: true, hPerson: '', zielEdit: '', zielSendet: false }
   // Stufe 2 (06.10.2026, Vertrag .claude/master/vorrat-vertrag.md): je Zelle nachkauf {n, einheit, dringlichkeit, n_roh, teile},
   // score 0–100 + score_teile [{name, wert, einheit}] (Finn: Dringlichkeit als Zahl, aus den Zahlen begründet), sperre
   // 'daten_fehlen'|'unsicher', bestellt {id, anzahl, offen, verfall} + zustand 'bestellt', bestand_gewichtet/erwartet, konten = LISTE
@@ -55405,7 +55432,7 @@
   const VR_DFARBE = { jetzt: 'var(--danger)', bald: 'var(--warn)', gedeckt: 'var(--good)' }
   // Klappzustand der Bereiche (Master 06.10.2026: Übersicht oben und standardmäßig offen, Einstellungen zu) — je Gerät gemerkt
   const VR_KLAPP_LS = 'prophos_vorrat_klapp'
-  try{ const k = JSON.parse(localStorage.getItem(VR_KLAPP_LS) || 'null'); if(k && typeof k === 'object'){ _vr.uebersicht = k.uebersicht !== false; _vr.einst = !!k.einst } }catch(_){}
+  try{ const k = JSON.parse(localStorage.getItem(VR_KLAPP_LS) || 'null'); if(k && typeof k === 'object'){ _vr.uebersicht = k.uebersicht !== false; _vr.einst = !!k.einst; _vr.ziele = k.ziele !== false } }catch(_){}
   const vrS2 = d => (d?.zellen || []).some(z => z.nachkauf && typeof z.nachkauf === 'object')
   // Anzahl Konten: Stufe 1 lieferte konten als Zahl, ab Stufe 2 heißt die Zahl konten_n und konten ist die Liste — beides lesen,
   // solange auf Railway noch das Stufe-1-Backend laufen kann
@@ -55666,6 +55693,7 @@
 
     root.innerHTML = (d.hinweis ? `<div class="vr-hinweis">${vrEsc(d.hinweis)}</div>` : '')
       + (_vr.fehler ? `<div class="vr-fehler">${vrEsc(_vr.fehler)}</div>` : '')
+      + vrZieleHtml(d)
       + `<details class="vr-klapp" data-vr-klapp="uebersicht"${_vr.uebersicht ? ' open' : ''}><summary>Übersicht je Person</summary>`
       + `<div class="kpis vr-kpis">${kpis}</div>`
       + (d.ki_text ? `<div class="vr-kz-txt vr-ki">${vrEsc(d.ki_text)}${vrUhr(d.ki_text_um) ? ` <span>· Text von ${vrUhr(d.ki_text_um)}</span>` : ''}</div>` : '')
@@ -55684,8 +55712,9 @@
     vrSichRender(d, s2)
     root.querySelectorAll('[data-vr-klapp]').forEach(el => el.addEventListener('toggle', () => {
       _vr[el.dataset.vrKlapp] = el.open
-      try{ localStorage.setItem(VR_KLAPP_LS, JSON.stringify({ uebersicht: _vr.uebersicht, einst: _vr.einst })) }catch(_){}
+      try{ localStorage.setItem(VR_KLAPP_LS, JSON.stringify({ uebersicht: _vr.uebersicht, einst: _vr.einst, ziele: _vr.ziele })) }catch(_){}
     }))
+    vrZieleVerdrahten(root)
     root.querySelectorAll('[data-vr-hp]').forEach(b => b.addEventListener('click', () => { _vr.hPerson = _vr.hPerson === b.dataset.vrHp ? '' : b.dataset.vrHp; vrRender() }))
     root.querySelectorAll('[data-vr-k]').forEach(b => b.addEventListener('click', () => { const key = b.dataset.vrK; _vr.kachel = _vr.kachel === key ? '' : key; vrRender() }))
     root.querySelectorAll('[data-vr-auf]').forEach(b => b.addEventListener('click', () => {
@@ -55842,6 +55871,74 @@
       .map(p => ({ ...p, zeilen: p.zeilen.filter(x => !_vr.firma || x.firma === _vr.firma) })).filter(p => p.zeilen.length)
     const filterTxt = _vr.firma ? `<div class="vr-h-filter">nur ${vrEsc(_vr.firma)} <button type="button" data-vr-f-filter="${vrEsc(_vr.firma)}" title="Firmen-Filter aufheben">×</button></div>` : ''
     return `<div class="panel vr-heute">${kopf}${chips}${filterTxt}<div class="vr-h-liste">${sicht.map(kasten).join('') || '<div class="vr-leer">Für diese Auswahl heute nichts zu kaufen.</div>'}</div></div>`
+  }
+  // ── DEINE ZIELE (06.10.2026, Finn: „Schreib das Ziel rein, eine Liste, die ich auch bearbeiten kann: Wo will ich wie viele Konten
+  // haben?"). Ganz oben, je Firma eine Zeile in Klartext, ✎ macht sie editierbar (von/bis bzw. Anzahl je Größe + Nachkauf-Einheit).
+  // Quelle: d.ziele[] {firma, art, typen, von, bis, groessen[{groesse | null = jede Größe, stueck}], kauf_einheit, reihe} (T2, Vertrag
+  // §3c); solange es das Feld nicht gibt, die Ziele aus d.firmen[].ziel. Speichern: POST {aktion:'ziel', firma, von, bis | groessen,
+  // kauf_einheit} — die art bleibt fest, der Server rechnet sofort neu, hier nur GET neu; Fehler ({error}) unverändert anzeigen.
+  function vrZieleListe(d){
+    if(Array.isArray(d.ziele)) return d.ziele.filter(z => z && z.firma)
+    return (d.firmen || []).filter(f => f.ziel).map(f => ({ firma: f.firma, ...f.ziel }))
+  }
+  function vrZielKlartext(z){
+    const wo = vrTypTxt(z.typen), kauf = z.kauf_einheit ? ` · Nachkauf ${vrEinheitKurz(z.kauf_einheit, z.firma)}` : ''
+    const gr = (z.groessen || []).filter(t => Number(t.stueck) > 0)
+    if(z.art === 'plus_ueber_start') return `je ID +${Number(z.von || 0).toLocaleString('de-DE')} bis +${Number(z.bis || 0).toLocaleString('de-DE')} $ Plus in ${wo}${kauf}`
+    if(z.art === 'groessen_summe') return `je ID ${vrK(z.von)} bis ${vrK(z.bis)} in ${wo}${kauf}`
+    if(gr.length === 1 && Number(gr[0].stueck) === 1 && wo === 'Winning Days') return `je ID 1 Winning-Days-Konto${kauf}`
+    return `je ID ${gr.map(t => t.groesse ? `${t.stueck} × ${vrK(t.groesse)}` : vrKonten(Number(t.stueck))).join(' + ') || 'kein Konto'} ${wo}${kauf}`
+  }
+  function vrZieleHtml(d){
+    const zs = vrZieleListe(d)
+    if(!zs.length) return ''
+    const aus = d.bereit && !_vr.zielSendet ? '' : ' disabled'
+    const zeile = z => {
+      const fa = vrEsc(z.firma), farbe = vrFirmaFarbe(z.firma)
+      if(_vr.zielEdit !== z.firma) return `<div class="vr-zl"><i style="background:${farbe}"></i><b>${fa}</b><span class="vr-zl-txt">— ${vrEsc(vrZielKlartext(z))}</span>
+        <button type="button" class="vr-zl-edit" data-vr-ze="${fa}" title="Ziel für ${fa} bearbeiten"${aus}>✎</button></div>`
+      // Bearbeiten: Spanne (Plus über Start in $ bzw. Summe der Kontogrößen in $) oder Anzahl je Größe, dazu die Nachkauf-Einheit
+      const zahl = (feld, wert, titel) => `<label>${titel}<input type="number" min="0" step="any" inputmode="decimal" data-feld="${feld}" value="${vrEsc(wert ?? '')}"></label>`
+      const felder = z.art === 'stueck'
+        ? (z.groessen || []).map((t, i) => zahl('stueck:' + i, t.stueck, t.groesse ? `Anzahl ${vrK(t.groesse)}` : 'Anzahl Konten')).join('')
+        : zahl('von', z.von, z.art === 'plus_ueber_start' ? 'von (+$)' : 'von ($)') + zahl('bis', z.bis, z.art === 'plus_ueber_start' ? 'bis (+$)' : 'bis ($)')
+      return `<form class="vr-zl vr-zl-form" data-vr-zform="${fa}"><i style="background:${farbe}"></i><b>${fa}</b>
+        <div class="vr-zl-felder">${felder}<label class="breit">Nachkauf<input type="text" data-feld="kauf_einheit" value="${vrEsc(z.kauf_einheit || '')}"></label></div>
+        <div class="vr-zl-knoepfe"><button type="submit" class="btn btn-mini"${aus}>${_vr.zielSendet ? 'speichert …' : 'Speichern'}</button><button type="button" class="btn btn-ghost btn-mini" data-vr-zc="1">Abbrechen</button></div></form>`
+    }
+    return `<details class="vr-klapp vr-ziele" data-vr-klapp="ziele"${_vr.ziele ? ' open' : ''}><summary>Deine Ziele (je ID)</summary>
+      <div class="vr-zk">${zs.map(zeile).join('')}<p class="vr-zk-hinweis">Gilt für jede ID einzeln. Gesperrte/pausierte Kombinationen unter Einstellungen.</p></div></details>`
+  }
+  function vrZieleVerdrahten(root){
+    root.querySelectorAll('[data-vr-ze]').forEach(b => b.addEventListener('click', () => { _vr.zielEdit = b.dataset.vrZe; vrRender()
+      root.querySelector('[data-vr-zform] input')?.focus() }))
+    root.querySelectorAll('[data-vr-zc]').forEach(b => b.addEventListener('click', () => { _vr.zielEdit = ''; vrRender() }))
+    root.querySelectorAll('[data-vr-zform]').forEach(fm => fm.addEventListener('submit', ev => { ev.preventDefault(); vrZielSpeichern(fm) }))
+  }
+  async function vrZielSpeichern(fm){
+    const d = _vr.daten, firma = fm.dataset.vrZform
+    const z = vrZieleListe(d || {}).find(x => x.firma === firma)
+    if(!z || !d?.bereit || _vr.zielSendet) return
+    const wert = feld => { const el = fm.querySelector(`[data-feld="${feld}"]`); return el ? el.value.trim() : '' }
+    const num = feld => { const v = Number(String(wert(feld)).replace(',', '.')); return isFinite(v) && v >= 0 ? v : NaN }
+    const body = { aktion: 'ziel', firma, kauf_einheit: wert('kauf_einheit') || null }
+    if(z.art === 'stueck'){
+      body.groessen = (z.groessen || []).map((t, i) => ({ groesse: t.groesse, stueck: Math.round(num('stueck:' + i)) }))
+      if(body.groessen.some(t => !isFinite(t.stueck))){ _vr.fehler = 'Ziel nicht gespeichert: Anzahl muss eine Zahl ab 0 sein'; vrRender(); return }
+    }else{
+      body.von = num('von'); body.bis = num('bis')
+      if(!isFinite(body.von) || !isFinite(body.bis) || body.von > body.bis){ _vr.fehler = 'Ziel nicht gespeichert: „von" und „bis" als Zahlen, von höchstens bis'; vrRender(); return }
+    }
+    _vr.zielSendet = true; vrRender()
+    try{
+      const r = await fetch(`${WATCHER_HOME}/admin/vorrat`, { method: 'POST', headers: { 'sb-token': await vrToken(), 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      const a = await r.json().catch(() => ({}))
+      if(!r.ok || !a.ok){ _vr.fehler = a.error || a.msg || ('Ziel nicht gespeichert (HTTP ' + r.status + ')'); _vr.zielSendet = false; vrRender(); return }
+      _vr.fehler = ''; _vr.zielEdit = ''; _vr.zielSendet = false
+      await vrLaden(false)     // der Server hat schon neu gerechnet — nur neu lesen
+      return
+    }catch(e){ _vr.fehler = 'Ziel nicht gespeichert: ' + (e.message || e) }
+    _vr.zielSendet = false; vrRender()
   }
   // Sperr-Matrix (Einstellungen): je ID eine Zeile, je Firma ein Chip im Zustand frei · pausiert (‖) · gesperrt (Schloss); Klick wechselt
   // reihum (vrSchalten wie bisher). Chips brechen um — am Handy kein waagerechtes Scrollen.
