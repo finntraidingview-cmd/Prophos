@@ -7021,6 +7021,7 @@ import random
 import zlib
 
 VORRAT2_SQL = "sql/2026-10-06_vorrat_stufe2.sql"
+VORRAT2_RECHEN_STAND = 2               # hochzählen, wenn ein Lauf neue Felder bekommt — GET rechnet ältere Läufe dann einmal neu
 VORRAT2_STD = {
     "sicherheit": 0.8,                 # P(Bestand ≥ Untergrenze), Finn am Frontend einstellbar (vorrat_einstellung.sicherheit)
     "mc_ziehungen": 2000, "mc_seed": 20261006,
@@ -7921,7 +7922,7 @@ def vorrat2_rechnen_lauf(quelle):
     uids = sorted((set(b["names"]) | {u for u, _ in je}) - excluded_ids)
     # Totband-Vorlauf: letzte fertige Zeile
     try:
-        alt = (sb_select("vorrat_lauf", {"select": "id,ergebnis", "ergebnis": "not.is.null", "order": "id.desc", "limit": "1"})
+        alt = (sb_select("vorrat_lauf", {"select": "id,ergebnis", "ergebnis": "not.is.null", "order": "at.desc,id.desc", "limit": "1"})
                or [{}])[0]
     except requests.exceptions.HTTPError:
         alt = {}
@@ -7949,7 +7950,7 @@ def vorrat2_rechnen_lauf(quelle):
             z.update(user_id=uid, firma=f)
             zellen.append(z)
     _, naechster = vorrat2_slot(jetzt, param["takt_utc"])
-    return {"zellen": zellen, "quoten": [dict(firma=k[0], stufe=k[1], **v) for k, v in quoten.items()],
+    return {"zellen": zellen, "stand": VORRAT2_RECHEN_STAND, "quoten": [dict(firma=k[0], stufe=k[1], **v) for k, v in quoten.items()],
             "parameter": param, "gerechnet_um": jetzt_iso, "naechster_lauf": naechster.isoformat(), "quelle": quelle}
 
 
@@ -8033,13 +8034,20 @@ def vorrat2_anhaengen(erg1):
     """Stufe-1-Antwort (admin_build_vorrat) + Stufe-2-Felder aus dem letzten Lauf. Gibt es noch keinen Lauf, läuft einmal einer.
     Bestellungen und seit dem Lauf angelegte Konten wirken sofort (vorrat_anzeige_n)."""
     try:
-        rows = sb_select("vorrat_lauf", {"select": "id,at,quelle,ergebnis", "ergebnis": "not.is.null", "order": "id.desc",
+        rows = sb_select("vorrat_lauf", {"select": "id,at,quelle,ergebnis", "ergebnis": "not.is.null", "order": "at.desc,id.desc",
                                          "limit": "1"})
     except requests.exceptions.HTTPError as e:
         if getattr(e.response, "status_code", 0) == 404:
             return dict(erg1, stufe2_bereit=False, stufe2_hinweis=f"SQL noch nicht eingespielt ({VORRAT2_SQL})")
         raise
     lauf = rows[0] if rows else vorrat2_lauf("hand")
+    if lauf and (lauf.get("ergebnis") or {}).get("stand") != VORRAT2_RECHEN_STAND:
+        # Lauf stammt aus älterem Code (06.10.2026: nach dem Push von .1055 fehlten untergrenze/chance_neu bis zum nächsten Takt —
+        # die Sätze der Tagesliste lauteten „Ziel 0") → einmal neu rechnen; scheitert das, bleibt der alte Lauf
+        try:
+            lauf = vorrat2_lauf("hand") or lauf
+        except Exception as e:
+            print(f"[vorrat2] ⚠️ Neurechnung nach Code-Wechsel: {type(e).__name__}: {e}", flush=True)
     if not lauf or not lauf.get("ergebnis"):
         return dict(erg1, stufe2_bereit=False, stufe2_hinweis="noch kein Lauf")
     e2 = lauf["ergebnis"]
@@ -8188,7 +8196,7 @@ def admin_vorrat_lauf():
         if _admin_nur_uid():
             return jsonify({"error": "nur Admin"}), 403
     lid = str(request.args.get("lauf_id") or "").strip()
-    params = {"select": "id,at,quelle,slot,parameter,quoten,ergebnis,fehler,ki_text,ki_zeilen,ki_um", "order": "id.desc", "limit": "1"}
+    params = {"select": "id,at,quelle,slot,parameter,quoten,ergebnis,fehler,ki_text,ki_zeilen,ki_um", "order": "at.desc,id.desc", "limit": "1"}
     if lid:
         if not lid.isdigit():
             return jsonify({"error": "lauf_id muss eine Zahl sein"}), 400
