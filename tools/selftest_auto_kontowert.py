@@ -97,6 +97,8 @@ def main():
     check(W("FundedNext", "phase1", 48000)["wert"] == round(261 * 3000 / 5000), "FundedNext 50k (wert_groessen) 48.000 → 157 €")
     check(W("The5%ers", "phase1", 200000)["wert"] == 226 and W("The5ers", "phase1", 100000)["wert"] == 146, "The5ers Kauf je Größe")
     check(W("FundedNext", "phase1", 100000, kauf=480)["wert"] == 480, "echter Kauf hat Vorrang")
+    check(W("Topstep", "winning_days", 13489, kauf=2986)["wert"] == W("Topstep", "winning_days", 13489)["wert"],
+          "unplausibler Kauf (2.986 € an Topstep-WD = Gebühr/Sammelbuchung) → Firmenwert")
 
     # 4) planen:false-Firmen haben Werte, ohne Kernwerte kein Wert
     ts = W("Topstep", "winning_days", 13489)

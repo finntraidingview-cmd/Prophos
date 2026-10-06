@@ -11869,7 +11869,9 @@ def ap_kontowert(typ, balance, p, kauf_eur=None):
     dd = float(p.get("dd_usd") or 0) * (groesse / min(gr) if p.get("skaliert") else 1) or groesse * float(p.get("dd_pct") or 0) / 100.0
     if dd <= 0:
         return None
-    kauf = float(kauf_eur) if kauf_eur else _ap_kw_kauf(p, groesse)
+    kauf = _ap_kw_kauf(p, groesse)
+    if kauf_eur and kauf and 0.5 <= float(kauf_eur) / kauf <= 2:
+        kauf = float(kauf_eur)      # echter Kauf nur, wenn plausibel (0,5–2× Firmenwert) — sonst Gebühr/Sammelbuchung, Firmenwert gilt
     nachz = p.get("boden") == "nachziehend"
     etappe = float(p.get("etappe_usd") or dd)
     zp = p.get("ziel_pct") or {}
@@ -11969,7 +11971,9 @@ AP_KONTO_FELDER = ("id,user_id,name,firm,account_type,external_id,max_drawdown,t
 
 def _ap_kauf_echt(ids):
     """Echter Kaufpreis (€, account_purchase) je Konto — über die Kette (user_settings.parents, Kind → Eltern) bis zur Wurzel,
-    denn bei P2/Funded liegt der Kauf am ersten Konto. → {konto_id: € oder None}."""
+    denn bei P2/Funded liegt der Kauf am ersten Konto. Genommen wird der Kauf an der WURZEL-nächsten Stelle: Live-Daten 06.10.2026
+    zeigten Buchungen direkt an Funded/WD-Konten (Topstep-WD 2.986 €, FTMO-Funded 1.000 €, The5ers-Funded 550 € — Aktivierung
+    oder Sammelbuchung), die sonst den Startwert ersetzt hätten. → {konto_id: € oder None}."""
     eltern = {}
     for row in _sb_all("user_settings", {"select": "value", "key": "eq.parents"}):
         v = row.get("value")
@@ -11994,7 +11998,7 @@ def _ap_kauf_echt(ids):
                                           "account_id": "in.(" + ",".join(liste[j:j + 150]) + ")"}):
             a = str(t.get("account_id"))
             kauf[a] = kauf.get(a, 0.0) - float(t.get("amount") or 0)
-    return {i: next((round(kauf[c], 2) for c in k if kauf.get(c, 0) > 0), None) for i, k in ketten.items()}
+    return {i: next((round(kauf[c], 2) for c in reversed(k) if kauf.get(c, 0) > 0), None) for i, k in ketten.items()}
 
 
 def _ap_gehedgt(p):
