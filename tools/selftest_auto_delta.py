@@ -45,11 +45,11 @@ REIN = ("_ap_norm", "ap_regel_finden", "ap_groesse", "_ap_spanne", "_ap_runden",
         "_wd_num", "_symbol_wurzel", "_wd_level", "_wd_futures_frontcode", "_ap_gehedgt", "_ap_ende4",
         "ap_ausgleich_param", "ap_firma_key", "ap_ppl_karte", "ap_punktwert", "ap_usd_pro_pkt", "ap_delta", "ap_punkte",
         "ap_rest_punkte", "ap_verlauf", "_ap_gegen_dicht", "ap_dicht_paare", "ap_richtungen_delta", "ap_fenster_von",
-        "_ap_tranchen", "_ap_tranche_frei", "ap_umplanen", "ap_eingriff_pruefen",
+        "_ap_tranchen", "_ap_tranche_frei", "ap_umplanen", "ap_eingriff_pruefen", "ap_start_bis", "ap_einsatz_lage",
         "lt_echo_live_wahl", "lt_echo_felder")
 IO = ("_ap_gehedgt_plan", "_ap_bewerten", "_ap_iso_min", "_ap_stand_laden", "_ap_stand_plaene", "_ap_min_iso",
       "_ap_umplanungen_heute", "_ap_bot_stand", "ap_delta_antwort", "_ap_aenderungen_anwenden", "ap_ausgleichen",
-      "_ap_probelauf", "ap_planen", "_ap_tz")
+      "_ap_probelauf", "ap_planen", "_ap_tz", "ap_einsatz_kontext", "ap_richtung_fest_plan")
 
 
 def lade():
@@ -65,7 +65,7 @@ def lade():
         return re.search(rf"^{name} = .*$", src, re.M).group(0)
     konstanten = ("AP_REST_MIN", "AP_GROESSE_TOLERANZ", "AP_KW_FUNDED", "AP_KW_PHASEN", "AP_TYPEN", "AP_TZ_LAUF", "AP_STILL_FIRMEN",
                   "AP_AUSGLEICH_STANDARD", "AP_TZ_TAG", "AP_BOT_ENDE_MIN", "AP_BOT_EXTRA_MIN", "AP_FAELLIG_MIN", "AP_BOT_SCHRITTE",
-                  "AP_RICHTUNG_TXT", "AP_GEGEN_DICHT_MIN", "AP_GEGEN_WUERFE", "_ap_bot", "_ap_info", "WD_HEUTE_PPL", "LT_ECHO_ROUTEN", "LT_ECHO_MAX_ALTER_S")
+                  "AP_RICHTUNG_TXT", "AP_GEGEN_DICHT_MIN", "AP_GEGEN_WUERFE", "AP_PAAR_MIN", "AP_START_BIS_STANDARD", "_ap_bot", "_ap_info", "WD_HEUTE_PPL", "LT_ECHO_ROUTEN", "LT_ECHO_MAX_ALTER_S")
     exec("\n".join([konst(k) for k in konstanten] + [block(f) for f in REIN + IO]), ns)
     return ns
 
@@ -186,9 +186,11 @@ def main():
                                          {"user_id": "z", "name": "FTMO", "ppl": "1.0"}])
     check(je_firma["ftmo"][0] == 0.85 and je_id[("z", "ftmo")][0] == 1.0, "firm_specs: eigene ID vor häufigstem Firmenwert")
     pa = a["ap_ausgleich_param"]({})
-    check(pa == {"aktiv": False, "takt_min": 10, "zielband_pct": 15.0, "auto_start": False}, "Standard: Bot aus, 10 min, Band 15 %, ohne Auto-Start")
+    check(pa == {"aktiv": False, "takt_min": 10, "zielband_pct": 15.0, "auto_start": False, "max_netto_eur": 800.0, "paar_ab_eur": 300.0},
+          "Standard: Bot aus, 10 min, Band 15 %, ohne Auto-Start, max Netto-Einsatz 800 €, Paar ab 300 €")
     check(a["ap_ausgleich_param"]({"ausgleich": {"aktiv": "true", "takt_min": 1, "zielband_pct": 500}})
-          == {"aktiv": False, "takt_min": 2, "zielband_pct": 100.0, "auto_start": False}, "nur echtes true schaltet ein, Werte geklemmt")
+          == {"aktiv": False, "takt_min": 2, "zielband_pct": 100.0, "auto_start": False, "max_netto_eur": 800.0, "paar_ab_eur": 300.0},
+          "nur echtes true schaltet ein, Werte geklemmt")
 
     # ── A2 Keine Firma × Tag-Regel mehr, nur Richtungsschutz + weicher Malus (Finn 06.10.2026 abends) ─────────────────────
     T = lambda fest, user, firma, start, d: {"fest": fest, "user": user, "firma": firma, "start": start, "delta_abs": d}
@@ -209,12 +211,16 @@ def main():
     paare = a["ap_dicht_paare"]({"A|x": T(None, "A", "x", 100, 1)}, [{"user_id": "B", "firma": "x", "start": 105, "richtung": "sell"}])
     check(a["_ap_gegen_dicht"]({"A|x": "buy"}, paare) == 1 and a["_ap_gegen_dicht"]({"A|x": "sell"}, paare) == 0,
           "Malus auch gegen schon gestartete Trades derselben Firma")
-    # 07.10.2026 (Finn: „Tradeify long bei Jacob, eine Minute später Tradeify short bei Moritz" praktisch nie): Malus VOR dem
-    # Netto — lieber schlechter ausgeglichen als dicht gegenläufig
+    # 07.10.2026 (Finn: „Tradeify long bei Jacob, eine Minute später Tradeify short bei Moritz" praktisch nie): innerhalb des
+    # Delta-Bands geht der Malus vor dem kleinsten Netto — lieber schlechter ausgeglichen als dicht gegenläufig
     tr = {"A|tradeify": T(None, "A", "tradeify", 100, 3.0), "B|tradeify": T(None, "B", "tradeify", 101, 3.0)}
     for s in range(5):
-        r, m = a["ap_richtungen_delta"](tr, 0, 0, random.Random(s), 25)
-        check(r["A|tradeify"] == r["B|tradeify"] and m == 6.0, f"Malus vor Netto (seed {s}): dicht gleich gerichtet, Netto 6 statt 3")
+        r, m = a["ap_richtungen_delta"](tr, 0, 0, random.Random(s), 100)
+        check(r["A|tradeify"] == r["B|tradeify"] and m == 6.0, f"Malus vor Netto im Band (seed {s}): dicht gleich gerichtet, Netto 6 statt 0")
+    # Reihenfolge Finn 07.10.2026 (Klumpen-Auftrag): erst max_netto_eur, dann Delta-Band, dann Malus — reißt gleich gerichtet das
+    # Band, gewinnt das Band
+    r, m = a["ap_richtungen_delta"](tr, 0, 0, random.Random(1), 25)
+    check(r["A|tradeify"] != r["B|tradeify"], "Delta-Band vor Malus: gegenläufig, wenn gleich gerichtet das Band reißt")
     # nur wenn es gar nicht anders geht (beide Richtungen fest) bleibt das Paar — nie eine Ablehnung
     tr = {"A|tradeify": T("buy", "A", "tradeify", 100, 3.0), "B|tradeify": T("sell", "B", "tradeify", 101, 3.0)}
     r, m = a["ap_richtungen_delta"](tr, 0, 0, random.Random(2), 25)
