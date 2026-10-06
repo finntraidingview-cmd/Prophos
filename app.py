@@ -13774,7 +13774,7 @@ import random
 from datetime import timedelta
 
 AP_TYPEN = ("challenge", "phase1", "phase2")
-AP_TZ_LAUF = "Asia/Dubai"            # Hand-Lauf ohne tag: Dubai-Datum. Nachtlauf seit 06.10.2026 um 00:00 dt (AP_TZ_TAG, Delta-Vertrag)
+AP_TZ_LAUF = "Asia/Dubai"            # Hand-Lauf ohne tag: Dubai-Datum. Nachtlauf seit 07.10.2026 nach zeiten.nachtlauf (AP_NACHT_STANDARD)
 AP_REST_MIN = 100                    # weniger Rest bis Ziel → kein Auto-Trade, Finn prüft selbst
 AP_GROESSE_TOLERANZ = 0.15           # Balance weiter als 15 % von jeder Regel-Größe weg → „stimmt was nicht"
 # Firmen, die der Planer still auslässt (kein „keine Regel"-Eintrag). Finn 06.10.2026: Fusion-Markets-Konten sind nur
@@ -15490,26 +15490,104 @@ def admin_auto_plan_ausgleich_einstellung():
     return jsonify({"ok": True, "ausgleich": neu, "bot": _ap_bot_stand(neu)})
 
 
+# Nachtlauf-Uhrzeit (07.10.2026, Finn: „heute Nacht schon planen" — 01:00 Dubai statt 00:00 dt, = 23:00 dt Sommer / 22:00 dt
+# Winter am Vorabend). Parameter auto_plan_regeln.zeiten.nachtlauf {uhr, tz}; fehlt er, gilt genau dieser Standard. Geplant wird
+# der Handelstag (Mo–Fr, deutsches Datum), dessen Fenster ab 00:00 dt beginnen: Lauf für Tag T = letztes uhr@tz vor/um T 00:00 dt
+# (Di 01:00 Dubai = Mo 23:00 dt → Dienstag). Verpasst (Deploy, Neustart, Railway weg) → sofort nachholen, solange T in dt noch
+# läuft. Nie doppelt: der Claim in auto_plan_lauf (Unique-Index tag where quelle='nacht', ap_planen) — auch bei zwei Instanzen.
+AP_NACHT_STANDARD = {"uhr": "01:00", "tz": "Asia/Dubai"}
+
+
+def ap_nacht_param(zeiten):
+    """zeiten.nachtlauf → {uhr 'HH:MM', tz}; Ungültiges fällt einzeln auf AP_NACHT_STANDARD zurück."""
+    n = (zeiten or {}).get("nachtlauf") if isinstance(zeiten, dict) else None
+    n = n if isinstance(n, dict) else {}
+    uhr, tz = str(n.get("uhr") or "").strip(), str(n.get("tz") or "").strip()
+    m = re.match(r"^(\d{1,2}):(\d{2})$", uhr)
+    if not m or int(m.group(1)) > 23 or int(m.group(2)) > 59:
+        uhr = AP_NACHT_STANDARD["uhr"]
+    else:
+        uhr = f"{int(m.group(1)):02d}:{m.group(2)}"
+    try:
+        _ap_tz(tz)
+    except Exception:
+        tz = AP_NACHT_STANDARD["tz"]
+    return {"uhr": uhr, "tz": tz}
+
+
+def ap_nacht_lauf_um(tag, param):
+    """Lauf-Zeitpunkt (UTC) für den Handelstag `tag` (date, deutsches Datum): das letzte uhr@tz vor/um tag 00:00 dt."""
+    beginn = datetime(tag.year, tag.month, tag.day, tzinfo=_ap_tz(AP_TZ_TAG))
+    tz = _ap_tz(param["tz"])
+    h, mi = (int(x) for x in param["uhr"].split(":"))
+    lokal = beginn.astimezone(tz).date()
+    um = datetime(lokal.year, lokal.month, lokal.day, h, mi, tzinfo=tz)
+    if um > beginn:
+        vortag = lokal - timedelta(days=1)
+        um = datetime(vortag.year, vortag.month, vortag.day, h, mi, tzinfo=tz)
+    return um.astimezone(timezone.utc)
+
+
+def ap_nacht_ziel(jetzt, param):
+    """→ (faellig, naechster): faellig = (tag, lauf_um) des jüngsten Handelstags, dessen Lauf-Zeitpunkt vorbei ist und der in dt
+    noch nicht zu Ende ist (sonst None); naechster = (tag, lauf_um) des kommenden Laufs."""
+    tz_tag = _ap_tz(AP_TZ_TAG)
+    heute = jetzt.astimezone(tz_tag).date()
+    faellig = naechster = None
+    for i in range(-3, 5):
+        t = heute + timedelta(days=i)
+        if t.weekday() >= 5:
+            continue
+        um = ap_nacht_lauf_um(t, param)
+        ende = datetime(t.year, t.month, t.day, tzinfo=tz_tag) + timedelta(days=1)   # Wanduhr-Mitternacht, auch bei Umstellung
+        if um <= jetzt < ende:
+            faellig = (t, um)
+        elif um > jetzt and naechster is None:
+            naechster = (t, um)
+    return faellig, naechster
+
+
+def ap_nacht_tick(jetzt, zustand):
+    """Ein Takt des Nachtlaufs. zustand (= _ap_info) merkt im Speicher den erledigten Tag + die Parameter (alle 10 min neu
+    gelesen); der dauerhafte Merker ist der Claim in ap_planen — nach einem Neustart prüft der erste Takt, ob schon gelaufen."""
+    if time.time() - (zustand.get("nacht_gelesen") or 0) > 600:
+        reg = (sb_select("auto_plan_regeln", {"select": "zeiten", "id": "eq.1"}) or [{}])[0]
+        zustand["nacht_param"], zustand["nacht_gelesen"] = ap_nacht_param(reg.get("zeiten")), time.time()
+    param = zustand.get("nacht_param") or dict(AP_NACHT_STANDARD)
+    faellig, naechster = ap_nacht_ziel(jetzt, param)
+    zustand["nachtlauf"] = dict(param, naechster_tag=naechster[0].isoformat() if naechster else None,
+                                naechster_um=naechster[1].isoformat() if naechster else None)
+    if not faellig:
+        return None
+    tag = faellig[0].isoformat()
+    if zustand.get("letzter_tag") == tag:
+        return None
+    reg = (sb_select("auto_plan_regeln", {"select": "aktiv", "id": "eq.1"}) or [{}])[0]
+    erg = None
+    if reg.get("aktiv"):
+        erg = ap_planen(tag, quelle="nacht")
+        spaet = int((jetzt - faellig[1]).total_seconds() // 60)
+        if str(erg.get("msg") or "").startswith("schon geplant"):
+            print(f"[auto-plan] {tag} nacht: schon geplant (Claim vorhanden)", flush=True)
+        elif spaet >= 2:
+            print(f"[auto-plan] Nachtlauf {tag} nachgeholt (fällig seit {spaet} min, {param['uhr']} {param['tz']}): "
+                  f"{len(erg.get('geplant') or [])} geplant · {erg.get('msg') or 'ok'}", flush=True)
+        zustand["last_run"] = time.time()
+        zustand["runs"] = (zustand.get("runs") or 0) + 1
+        zustand["letzter"] = {k: erg.get(k) for k in ("tag", "msg")}
+    zustand["letzter_tag"] = tag      # aktiv aus → heute nicht mehr fragen (wie bisher); nach Neustart wird neu geprüft
+    return erg
+
+
 def ap_loop():
-    """Nachtlauf: einmal je Tag um 00:00 deutscher Zeit (Delta-Vertrag 06.10.2026, vorher 01–02 Uhr Dubai; Minute 0–4
-    gewürfelt), nur wenn auto_plan_regeln.aktiv; Sa/So lässt ap_planen aus. Dazu jede Minute der Takt-Check des
-    Ausgleichs-Bots (_ap_bot_tick, nur wenn regeln.ausgleich.aktiv)."""
-    print("[auto-plan] 🤖 Nachtlauf bereit (00:00 dt) · Ausgleichs-Bot nach regeln.ausgleich", flush=True)
-    ziel_min, ziel_tag = None, None
+    """Nachtlauf nach zeiten.nachtlauf (Standard 01:00 Dubai, 07.10.2026; vorher 00:00 dt) mit Nachholen, nur wenn
+    auto_plan_regeln.aktiv; Sa/So gibt es keinen Zieltag. Dazu jede Minute der Takt-Check des Ausgleichs-Bots
+    (_ap_bot_tick, nur wenn regeln.ausgleich.aktiv)."""
+    print("[auto-plan] 🤖 Nachtlauf bereit (zeiten.nachtlauf, Standard 01:00 Asia/Dubai, mit Nachholen) · "
+          "Ausgleichs-Bot nach regeln.ausgleich", flush=True)
     while True:
         try:
-            d = datetime.now(_ap_tz(AP_TZ_TAG))
-            tag = d.strftime("%Y-%m-%d")
-            if ziel_tag != tag:
-                ziel_tag, ziel_min = tag, random.randint(0, 4)
-            if d.hour == 0 and d.minute >= ziel_min and _ap_info.get("letzter_tag") != tag:
-                reg = (sb_select("auto_plan_regeln", {"select": "aktiv", "id": "eq.1"}) or [{}])[0]
-                if reg.get("aktiv"):
-                    erg = ap_planen(tag, quelle="nacht")
-                    _ap_info["last_run"] = time.time()
-                    _ap_info["runs"] += 1
-                    _ap_info["letzter"] = {k: erg.get(k) for k in ("tag", "msg")}
-                _ap_info["letzter_tag"] = tag
+            ap_nacht_tick(datetime.now(timezone.utc), _ap_info)
             _ap_info["last_error"] = ""
         except Exception as e:
             _ap_info["last_error"] = f"{type(e).__name__}: {e}"
