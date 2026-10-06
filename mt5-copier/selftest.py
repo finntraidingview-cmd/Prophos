@@ -2769,6 +2769,9 @@ def test_puls_augen_cdp():
     chk(_n == 1 and _n2 == 0 and any("Werbung weg (bewiesen)" in z for z in _ws.trail), "werbung_weg: X geklickt, weg bewiesen, danach 3 s gedrosselt")
     pt = ob.cdp_klickpunkt([100, 200, 60, 30], rnd=_rnd.Random(3))
     chk(pt and 110 <= pt[0] <= 150 and 205 <= pt[1] <= 225 and ob.cdp_klickpunkt([1, 1, 1, 1]) is None, "Klickpunkt im inneren Drittel, Mini-Rect → None")
+    kps_ = [ob.cdp_klickpunkt([0, 0, 200, 40], rnd=_rnd.Random(i_)) for i_ in range(100)]
+    chk(len(set(kps_)) >= 40 and sum(1 for p_ in kps_ if p_ == (100.0, 20.0)) <= 5 and all(isinstance(p_[0], float) and 0 <= p_[0] <= 200 for p_ in kps_),
+        "Klickpunkt (CDP, 06.10.2026): über klick_punkt — streut, selten exakt die Mitte, Gleitkomma wie bisher")
     sm = ob.cdp_summary({"balance": {"label": "Account Balance", "text": "153,756.96", "wert": 153756.96}, "equity": {"label": None, "text": "153,700.00"},
                          "today_pnl": {"label": "Total P/L", "text": "-56.96"}, "texte": {"Realized P&L": "0.00"}})
     chk(sm == {"Realized P&L": "0.00", "Account Balance": "153,756.96", "Equity": "153,700.00", "Total P/L": "-56.96"}
@@ -5369,38 +5372,85 @@ def test_tsx_k3a():
         and not cs({"wert": "NQZ26", "offen": False}, "MNQZ26", "MNQ", T)[0]                    # fremder Code im Feld → nie
         and not cs(None, "MNQZ26", "MNQ", T)[0] and not cs({"wert": "MNQZ26", "offen": False}, "", "MNQ", T)[0],
         "Contract steht NICHT: Liste offen, falsche Wurzel, Chart auf anderem Contract, kein Titel, halb/fremd getippt")
-    # Menschliche Mausbahn (06.10.2026, Finn: Tempo variieren, nie dieselbe Linie/denselben Punkt)
+    # Menschliche Mausbahn (06.10.2026, Finn: Tempo variieren, nie dieselbe Linie/denselben Punkt; v3: Hand je Lauf, Anflug, Klickpunkt,
+    # Pausen und Tipp-Takt je Hand — „einen Tick mehr unterschiedlich", Schwerpunkt TopstepX)
     import random as _rd
-    mb = ob.maus_bahn
+    H1, H2 = ob.maus_hand(_rd.Random(11)), ob.maus_hand(_rd.Random(12))
+    chk(set(H1) == {"tempo", "zug_x", "zug_y", "streu", "kurve", "pause", "zoegern", "ueber", "zittern"} and H1 != H2
+        and 0.75 <= H1["tempo"] <= 1.35 and -0.3 <= H1["zug_x"] <= 0.3 and 0.8 <= H1["pause"] <= 1.5 and 0.08 <= H1["zoegern"] <= 0.3
+        and ob.maus_hand(_rd.Random(11)) == H1 and "Hand: Tempo" in ob.maus_hand_text(H1) and "Zug" in ob.maus_hand_text(H1),
+        "Hand je Lauf: neun Größen in ihren Spannen, zwei Hände verschieden, reproduzierbar, Spur-Zeile")
+    mb = lambda *a_, **k_: ob.maus_bahn(*a_, hand=H1, **k_)
     b1 = mb(100, 100, 700, 400, zufall=_rd.Random(1)); b2 = mb(100, 100, 700, 400, zufall=_rd.Random(2))
     kurz = mb(100, 100, 130, 110, zufall=_rd.Random(3))
     chk(b1[-1] == (700, 400) and kurz[-1] == (130, 110) and mb(50, 50, 50, 50) == [(50, 50)] and mb(50, 50, 50.4, 50.4) == [(50, 50)],
         "Mausbahn: letzter Punkt exakt das Ziel; Nullstrecke = genau ein Punkt")
-    laengen = [len(mb(100, 100, 700, 400, zufall=_rd.Random(i_))) for i_ in range(40)]
-    chk(6 <= len(kurz) <= 10 and all(14 <= l_ <= 45 for l_ in laengen) and len(set(laengen)) >= 5
-        and 36 <= len(mb(0, 0, 3000, 0, zufall=_rd.Random(4))) <= 45 and len(mb(0, 0, 0, 0, schritte=5)) == 1,
-        f"Mausbahn: Schrittzahl nach Strecke, gewürfelt (≥ 5 verschiedene bei 40 Fahrten), Deckel 40 + Korrektur ({len(kurz)}, {sorted(set(laengen))[:6]}…)")
-    chk(b1 != b2 and any(p_ != q_ for p_, q_ in zip(b1, b2)) and mb(100, 100, 700, 400, zufall=_rd.Random(1)) == b1,
-        "Mausbahn: zwei Fahrten unterscheiden sich, mit festem Zufall reproduzierbar")
-    alle_ = [p_ for i_ in range(40) for p_ in mb(100, 100, 700, 400, zufall=_rd.Random(i_))]
-    chk(all(100 - 100 <= px <= 700 + 100 and 100 - 100 <= py <= 400 + 100 for px, py in alle_)
+    laengen = [len(mb(100, 100, 700, 400, zufall=_rd.Random(i_))) for i_ in range(60)]
+    chk(6 <= len(kurz) <= 11 and all(14 <= l_ <= 50 for l_ in laengen) and len(set(laengen)) >= 8
+        and all(40 <= len(mb(0, 0, 3000, 0, zufall=_rd.Random(i_))) <= 53 for i_ in range(20)) and len(mb(0, 0, 0, 0, schritte=5)) == 1,
+        f"Mausbahn: Schrittzahl nach Strecke, gewürfelt (≥ 8 verschiedene bei 60 Fahrten), Deckel 44 + Korrektur/Anflug ({len(kurz)}, {sorted(set(laengen))[:6]}…)")
+    chk(b1 != b2 and any(p_ != q_ for p_, q_ in zip(b1, b2)) and mb(100, 100, 700, 400, zufall=_rd.Random(1)) == b1
+        and ob.maus_bahn(100, 100, 700, 400, zufall=_rd.Random(1), hand=H2) != b1,
+        "Mausbahn: zwei Fahrten unterscheiden sich, mit festem Zufall reproduzierbar, andere Hand = andere Bahn")
+    alle_ = [p_ for i_ in range(120) for p_ in mb(100, 100, 700, 400, zufall=_rd.Random(i_))]
+    chk(all(0 <= px <= 800 and 0 <= py <= 500 for px, py in alle_)
         and max(abs((px - 100) * 300 - (py - 100) * 600) / 670.8 for px, py in alle_) <= 95.0
-        and all(mb(100, 100, 700, 400, zufall=_rd.Random(i_))[-1] == (700, 400) for i_ in range(40)),
-        "Mausbahn: 40 Fahrten bleiben nahe der Geraden (Ausschlag ≤ 90 px + Zittern, Überschuss ≤ 12 px), Endpunkt immer exakt")
+        and all(mb(100, 100, 700, 400, zufall=_rd.Random(i_))[-1] == (700, 400) for i_ in range(120)),
+        "Mausbahn: 120 Fahrten bleiben nahe der Geraden (Ausschlag ≤ 90 px bzw. Anflug 40 + 45 px, Überschuss ≤ 14 px), Endpunkt immer exakt")
     # Anlauf + Abbremsen: der erste Schritt ist kürzer als der mittlere, die letzten Schritte kurz (Abbremsen bzw. Korrektur)
     import math as _m
     def _d(b): return [_m.hypot(b[i][0] - b[i - 1][0], b[i][1] - b[i - 1][1]) for i in range(1, len(b))]
-    chk(all((lambda d: d[0] < max(d) and d[-1] < max(d))(_d(mb(100, 100, 700, 400, zufall=_rd.Random(i_)))) for i_ in range(40)),
-        "Mausbahn: langsam los, schnell in der Mitte, weich ins Ziel (40 Fahrten)")
-    tk = ob.maus_takt
-    t1 = tk(20, zufall=_rd.Random(1)); tl = [tk(20, zufall=_rd.Random(i_)) for i_ in range(60)]
-    chk(len(t1) == 20 and all(0.0056 <= v_ <= 0.0353 or v_ <= 0.16 for v_ in t1) and tk(0) == [] and len(set(round(sum(t_), 4) for t_ in tl)) >= 30
-        and any(max(t_) > 0.04 for t_ in tl) and all(max(t_) <= 0.16 for t_ in tl),
-        "Maus-Takt: 8–22 ms × Tempo 0,7–1,6 je Fahrt, manchmal ein Zögern 40–120 ms, Gesamtdauer streut")
+    chk(all((lambda d: d[0] < max(d) and d[-1] < max(d))(_d(mb(100, 100, 700, 400, zufall=_rd.Random(i_)))) for i_ in range(120)),
+        "Mausbahn: langsam los, schnell in der Mitte, weich ins Ziel (120 Fahrten)")
+    # Anflug in zwei Zügen: mitten auf dem Weg wird die Fahrt kurz langsam (Zwischenziel) und danach wieder schnell
+    def _anflug(b):
+        d = _d(b); mx_ = max(d)
+        return any(d[i] < 0.25 * mx_ and d[i + 1] < 0.25 * mx_ and max(d[:i]) > 0.6 * mx_ and max(d[i + 2:-3]) > 0.6 * mx_
+                   for i in range(4, len(d) - 6))
+    n_anflug = sum(1 for i_ in range(200) if _anflug(mb(100, 100, 700, 400, zufall=_rd.Random(i_))))
+    chk(8 <= n_anflug <= 90, f"Mausbahn: Anflug in zwei Zügen bei einem Teil der langen Fahrten ({n_anflug}/200)")
+    tk = lambda n_, **k_: ob.maus_takt(n_, hand=H1, **k_)
+    t1 = tk(20, zufall=_rd.Random(1)); tl = [tk(20, zufall=_rd.Random(i_)) for i_ in range(80)]
+    chk(len(t1) == 20 and all(0.0028 <= v_ <= 0.65 for t_ in tl for v_ in t_) and tk(0) == [] and len(set(round(sum(t_), 4) for t_ in tl)) >= 50
+        and any(max(t_) > 0.03 for t_ in tl) and sum(1 for t_ in tl if max(t_) > 0.03) < 60,
+        "Maus-Takt: 7–24 ms × Tempo 0,55–1,9 × Hand je Fahrt, manchmal Zögern/Zielen, Gesamtdauer streut")
+    kp = lambda *a_, **k_: ob.klick_punkt(*a_, hand=H1, **k_)
+    pts_ = [kp(100, 200, 160, 230, zufall=_rd.Random(i_)) for i_ in range(300)]
+    tiny = [kp(10, 10, 13, 12, zufall=_rd.Random(i_)) for i_ in range(50)]
+    HL, HR = dict(H1, zug_x=-0.3, streu=0.6), dict(H1, zug_x=0.3, streu=0.6)
+    xl = [ob.klick_punkt(0, 0, 400, 40, zufall=_rd.Random(i_), hand=HL)[0] for i_ in range(200)]
+    xr = [ob.klick_punkt(0, 0, 400, 40, zufall=_rd.Random(i_), hand=HR)[0] for i_ in range(200)]
+    n_mitte = sum(1 for p_ in pts_ if p_ == (130, 215))
+    chk(all(110 <= x_ <= 150 and 205 <= y_ <= 225 for x_, y_ in pts_) and len(set(pts_)) >= 60 and n_mitte <= 15
+        and kp(100, 200, 160, 230, zufall=_rd.Random(5)) == kp(100, 200, 160, 230, zufall=_rd.Random(5))
+        and kp(160, 230, 100, 200, zufall=_rd.Random(5)) == kp(100, 200, 160, 230, zufall=_rd.Random(5))
+        and all(10 <= x_ <= 13 and 10 <= y_ <= 12 for x_, y_ in tiny)
+        and sum(xr) / 200 - sum(xl) / 200 > 10.0 and all(abs(x_ - 200) <= 60 for x_ in xl + xr),
+        f"Klickpunkt: Saum 12 %/2 px, selten exakt die Mitte ({n_mitte}/300), ≥ 60 verschiedene Punkte, winzig = Mitte ± 1, vertauschte Ecken ok, "
+        f"Zug der Hand verschiebt den Schwerpunkt ({sum(xl) / 200:.0f} → {sum(xr) / 200:.0f}), Deckel 60 px seitlich")
+    pd_ = [ob.tsx_pause_dauer(zufall=_rd.Random(i_), hand=H1) for i_ in range(500)]
+    hp_ = [ob.tsx_hover_pause(zufall=_rd.Random(i_), hand=H1) for i_ in range(100)]
+    tt_ = [ob.tipp_takt(6, zufall=_rd.Random(i_), hand=H1) for i_ in range(100)]
+    kz_ = [ob.klick_zoegern(zufall=_rd.Random(i_), hand=H1) for i_ in range(100)]
+    chk(all(1.0 <= d_ <= 6.8 for d_ in pd_) and 1.5 <= sum(pd_) / len(pd_) <= 2.6 and sum(1 for d_ in pd_ if d_ > 2.5) >= 20
+        and len(set(round(d_, 3) for d_ in pd_)) >= 400
+        and all(0.3 <= a_ <= 0.4 and 0.12 <= s_ <= 1.05 for a_, s_ in hp_) and len(set(hp_)) >= 90
+        and all(len(t_) == 6 and all(0.026 <= v_ <= 0.85 for v_ in t_) for t_ in tt_) and len(set(round(sum(t_), 4) for t_ in tt_)) >= 80
+        and ob.tipp_takt(0) == []
+        and all(0.03 <= a_ <= 0.6 and 0.07 <= s_ <= 0.41 for a_, s_ in kz_) and len(set(kz_)) >= 90,
+        f"TopstepX je Hand: Schrittpause ≥ 1 s, schief verteilt (Mittel {sum(pd_) / len(pd_):.2f} s), manchmal Nachdenken; Hover-Pause ≥ 0,3 s streut; "
+        f"Tipp-Takt je Zeichen; Zögern vor dem Druck")
     chk("maus_bahn(" in _i.getsource(ob._maus_fahren) and "maus_takt(" in _i.getsource(ob._maus_fahren)
-        and "_maus_zittern" in _i.getsource(ob._tsx_pause) and "_WIN_EINGABE" in _i.getsource(ob._tsx_pause)
-        and "maus_bahn(" in _i.getsource(ob._maus_zittern) and "heim" in _i.getsource(ob._maus_zittern),
-        "Fahrt über maus_bahn im maus_takt; TopstepX-Pause zittert nur mit Windows-Eingabe (stehen / zittern / wandern + zurück)")
+        and "_maus_zittern" in _i.getsource(ob._tsx_pause) and "_WIN_EINGABE" in _i.getsource(ob._tsx_pause) and "tsx_pause_dauer" in _i.getsource(ob._tsx_pause)
+        and "maus_bahn(" in _i.getsource(ob._maus_zittern) and "heim" in _i.getsource(ob._maus_zittern) and '"zittern"' in _i.getsource(ob._maus_zittern)
+        and "klick_punkt(" in _i.getsource(ob._tsx_klick) and "// 2" not in _i.getsource(ob._tsx_klick)
+        and "klick_punkt(" in _i.getsource(ob.cdp_klickpunkt)
+        and "klick_zoegern" in _i.getsource(ob._tv_uia_klick)
+        and "tsx_hover_pause" in _i.getsource(ob._AugenSitzung._win_klick) and "tsx_hover_pause" in _i.getsource(ob._AugenSitzung.klick)
+        and "tipp_takt" in _i.getsource(ob._tsx_tippen) and "tipp_takt" in _i.getsource(ob._AugenSitzung.tippen)
+        and "maus_hand_text" in _i.getsource(ob.modus_tsxinventar),
+        "Riegel: Fahrt über maus_bahn im maus_takt; TopstepX-Pause zittert nur mit Windows-Eingabe; Schrittpause, Hover-Pause, Tipp-Takt, "
+        "Klickpunkt (UIA + CDP) und Zögern vor dem Druck je Hand; Hand steht in der Spur")
     mp = ob.tsx_k3_menge_passt
     chk(mp("1", 1) and mp(" 15 ", 15) and mp("3", 3) and not mp("3", 1) and not mp("", 1) and not mp("1.5", 1) and not mp(None, 1)
         and not mp("15a", 15), "Menge: genau die Zahl, sonst nie")
@@ -5524,10 +5574,12 @@ def test_tsx_k3a():
         chk(k.rects[1] == V[0]["code_rect"] and k.pruef[1].get("wort") == "mnqz26",
             "Vorschlag: Klick GENAU im Code-Text, Beweis verlangt den Code als ganzes Wort am Punkt (nqz26 ≠ mnqz26)")
         vor = [ereignisse[i - 1] for i, e_ in enumerate(ereignisse) if e_[0] == "klick" and i > 0]
-        chk(vor[0] == ("warte", ob.TSX_SCHRITT_PAUSE) and vor[2] == ("warte", ob.TSX_SCHRITT_PAUSE) and vor[1] == ("warte", (0.6, 0.6)),
-            f"Pause steht direkt VOR jedem Klick (Feld 1–2 s, Vorschlag 0,6–1,2 s, Menge 1–2 s) ({vor})")
-        chk(sum(1 for g in gew if g == ob.TSX_SCHRITT_PAUSE) >= 3 and all(b_ > 0 for a_, b_ in gew),
-            f"menschliche Pausen 1–2 s zwischen den Schritten, alle mit Streuung ({gew[:6]}…)")
+        # seit 06.10.2026 (Hand je Lauf): Schrittpause = (tsx_pause_dauer, 0,05) mit 1 s ≤ Dauer ≤ 6,8 s statt fix (1,0, 1,0)
+        sp_ = lambda e_: e_[0] == "warte" and ob.TSX_SCHRITT_PAUSE[0] <= e_[1][0] <= 6.8 and e_[1][1] == 0.05
+        chk(sp_(vor[0]) and sp_(vor[2]) and vor[1] == ("warte", (0.6, 0.6)),
+            f"Pause steht direkt VOR jedem Klick (Feld ≥ 1 s je Hand, Vorschlag 0,6–1,2 s, Menge ≥ 1 s je Hand) ({vor})")
+        chk(sum(1 for g in gew if sp_(("warte", g))) >= 3 and all(b_ > 0 for a_, b_ in gew),
+            f"menschliche Pausen ≥ 1 s je Hand zwischen den Schritten, alle mit Streuung ({gew[:6]}…)")
         o, k, _, _ = probe(seite(contract="MNQZ26", menge="3"), richtung="sell", menge=15, wurzel="NQ")
         chk(o["ok"] and "Sell -15 @ Market · NQZ26" in o["msg"] and k.klicks[1] == "Contract NQZ26", f"NQ SELL 15 → NQZ26, Menge 15 ({o})")
         o, k, _, _ = probe(seite(menge="3"), menge=3)
@@ -5693,7 +5745,7 @@ def test_tsx_k3a():
         s_.trail, s_.ws, s_.js, s_.maus, s_.target_id, s_.tv_riegel = [], _Ws2(), "/* augen_tsx.js */", (0.0, 0.0), "T", False
         s_.hover_pause = ob.TSX_HOVER_PAUSE
         pr = {"rect": [1582, 92, 376, 28], "text": "", "aria": "", "tabu": ob.TSX_K0_TABU.pattern}
-        chk(s_.klick([1582, 92, 376, 28], "Contract-Feld", pruef=pr) is True and len(zs["klicks"]) == 1 and ob.TSX_HOVER_PAUSE in zs["warte"]
+        chk(s_.klick([1582, 92, 376, 28], "Contract-Feld", pruef=pr) is True and len(zs["klicks"]) == 1 and any(ob.TSX_HOVER_PAUSE[0] <= a_ <= 0.4 and 0.12 <= b_ <= 1.05 for a_, b_ in zs["warte"])
             and zs["proben"] == 2, f"TopstepX: Hover-Pause 0,3–0,8 s vor dem Druck, Ziel danach neu bewiesen ({zs['proben']} Proben)")
         zs.update(proben=0, passt=[True, False], warte=[])
         chk(s_.klick([1582, 92, 376, 28], "Contract-Feld", pruef=pr) is False and len(zs["klicks"]) == 1
@@ -6904,7 +6956,7 @@ def test_tsx_order():
             setattr(ob, k, v)
         if pw_alt is not None: _s2.modules["pywinauto"] = pw_alt
         else: _s2.modules.pop("pywinauto", None)
-    chk(f"B33: Contract mit offener Vorschlagsliste getippt, ohne Liste nicht ({t1})", g1 and "nq" in t1
+    chk(f"B33: Contract mit offener Vorschlagsliste getippt, ohne Liste nicht ({t1})", g1 and "".join(t1).endswith("nq") and t1[-2:] == ["n", "q"]
         and any("Vorschlagsliste offen" in x for x in sp2) and g0 is False)
     chk(f"B32: Risk bei ListItem-Fokus NICHT getippt ({t2})", g2 is False and not t2)
     mp = ob.tsx_menge_plan

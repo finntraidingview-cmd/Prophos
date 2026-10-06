@@ -1534,40 +1534,141 @@ def _cursor_set(x, y):
     ctypes.windll.user32.SetCursorPos(int(x), int(y))
 
 
-def maus_bahn(cx, cy, x, y, schritte=None, zufall=None):
+# ── MAUS-„HAND" JE LAUF (06.10.2026, dritte Runde — Finn: „einen Tick mehr unterschiedlich … das Zufallsprinzip, die Geschwindigkeit,
+# wohin man genau klickt: alles ein bisschen zufällig machen, weil bei mir der PC manchmal buggt, weil immer das Gleiche ist",
+# Schwerpunkt TopstepX). Jeder Bot-Lauf ist ein eigener Prozess: beim ersten Griff zur Maus wird EINMAL eine Hand gewürfelt
+# (Grundtempo, Zug zur Seite beim Klicken, Streuung, Kurvenlust, Pausen-Länge, Zöger-Neigung, Zittern). Jede Fahrt, jeder Klick,
+# jede Pause und jedes getippte Zeichen würfelt darauf noch einmal neu. So fühlen sich zwei Läufe an wie zwei verschiedene
+# Personen, und innerhalb eines Laufs ist trotzdem nichts zweimal gleich. Die Hand steht als Zeile in der Spur (maus_hand_text).
+_MAUS_HAND = None
+
+
+def maus_hand(zufall=None):
+    """REIN RECHNEND (testbar): eine Hand würfeln. tempo 0,75–1,35 (mal auf alle Schritt-Takte, Tipp-Abstände und das Zögern vor
+    dem Druck), zug_x/zug_y −0,3…0,3 (wohin diese Hand im Knopf tendenziell greift, Anteil der halben Breite/Höhe), streu 0,6–1,4
+    (wie weit die Klickpunkte um den Zug streuen), kurve 0,5–1,6 (Ausschlag der Bahn), pause 0,8–1,5 (mal auf die TopstepX-Pausen
+    und die Hover-Pause), zoegern 0,08–0,3 (Anteil Fahrten mit Zögerer), ueber 0,2–0,45 (Anteil langer Fahrten mit Überschießen),
+    zittern 0,6–1,5 (Zucker in den Pausen)."""
+    rnd = zufall or random
+    return {"tempo": rnd.uniform(0.75, 1.35), "zug_x": rnd.uniform(-0.3, 0.3), "zug_y": rnd.uniform(-0.3, 0.3),
+            "streu": rnd.uniform(0.6, 1.4), "kurve": rnd.uniform(0.5, 1.6), "pause": rnd.uniform(0.8, 1.5),
+            "zoegern": rnd.uniform(0.08, 0.3), "ueber": rnd.uniform(0.2, 0.45), "zittern": rnd.uniform(0.6, 1.5)}
+
+
+def _hand():
+    """Die Hand dieses Laufs — beim ersten Aufruf gewürfelt, danach fest."""
+    global _MAUS_HAND
+    if _MAUS_HAND is None:
+        _MAUS_HAND = maus_hand()
+    return _MAUS_HAND
+
+
+def maus_hand_text(hand=None):
+    """Spur-Zeile: welche Hand lief (damit in puls_diagnose nachlesbar ist, warum sich ein Lauf anders anfühlte als der davor)."""
+    h = hand or _hand()
+    return (f"Hand: Tempo {h['tempo']:.2f} · Zug {h['zug_x']:+.2f}/{h['zug_y']:+.2f} · Streu {h['streu']:.2f} · Kurve {h['kurve']:.2f}"
+            f" · Pause {h['pause']:.2f} · Zögern {h['zoegern']:.2f}")
+
+
+def klick_punkt(links, oben, rechts, unten, zufall=None, hand=None, deckel=(60.0, 28.0)):
+    """REIN RECHNEND (testbar): Klickpunkt in einem Rechteck (Bildschirm- oder CSS-Pixel) — nie einfach die Mitte. Vom Rand bleibt ein
+    Saum frei (12 % der Kante, mindestens 2 px); im Rest zieht die Hand (zug) den Punkt zur Seite und streut ihn glockenförmig
+    (gauss, von der Hand skaliert, höchstens 85 % des nutzbaren Halbmaßes), in rund 12 % der Fälle liegt er gleichverteilt irgendwo
+    im Inneren. Bei breiten Knöpfen bleibt der Punkt trotzdem nahe der Beschriftung (deckel: höchstens 60 px seitlich, 28 px hoch
+    von der Mitte weg); winzige Knöpfe (< 6 px) Mitte ± 1 px. -> (x, y) ganzzahlig, immer innerhalb des Rechtecks."""
+    rnd = zufall or random
+    h = hand or _hand()
+    l, t, r, b = float(links), float(oben), float(rechts), float(unten)
+    if r < l:
+        l, r = r, l
+    if b < t:
+        t, b = b, t
+    mx, my = (l + r) / 2.0, (t + b) / 2.0
+
+    def achse(halb, zug, max_weg):
+        if halb < 3.0:
+            return rnd.uniform(-min(1.0, halb), min(1.0, halb))
+        nutz = min(max(0.5, halb - max(2.0, 0.24 * halb)), max_weg)      # Saum 12 % der Kante (= 24 % des Halbmaßes), min. 2 px
+        if rnd.random() < 0.12:
+            return rnd.uniform(-0.85, 0.85) * nutz
+        a = zug + rnd.gauss(0.0, 0.32 * h["streu"])
+        return max(-0.85, min(0.85, a)) * nutz
+    x = min(max(mx + achse((r - l) / 2.0, h["zug_x"], float(deckel[0])), l), r)
+    y = min(max(my + achse((b - t) / 2.0, h["zug_y"], float(deckel[1])), t), b)
+    return int(round(x)), int(round(y))
+
+
+def klick_zoegern(zufall=None, hand=None):
+    """REIN RECHNEND (testbar): (minimum, streuung) in s für _warte — angekommen, kurz stehen, DANN drücken (eine Hand klickt nicht im
+    selben Moment, in dem sie ankommt): 40 ms × Tempo plus 0–(100–300 ms) × Tempo, in rund 8 % der Fälle ein längeres Zögern
+    (+0,2–0,5 s)."""
+    rnd = zufall or random
+    h = hand or _hand()
+    minimum = 0.04 * h["tempo"]
+    streu = rnd.uniform(0.1, 0.3) * h["tempo"]
+    if rnd.random() < 0.08:
+        minimum += rnd.uniform(0.2, 0.5)
+    return minimum, streu
+
+
+def tipp_takt(n, zufall=None, hand=None):
+    """REIN RECHNEND (testbar): Abstände (s) nach jedem von n getippten Zeichen — je Zeichen 50–200 ms mal Tempo (0,7–1,4 je Wort mal
+    Hand), in rund 12 % der Zeichen ein Stocken (+0,2–0,45 s). Vorher fix 60–120 ms (CDP-Weg) bzw. 30 ms in einem Rutsch (UIA-Weg).
+    -> Liste der Länge n."""
+    rnd = zufall or random
+    h = hand or _hand()
+    n = max(0, int(n))
+    tempo = rnd.uniform(0.7, 1.4) * h["tempo"]
+    return [rnd.uniform(0.05, 0.2) * tempo + (rnd.uniform(0.2, 0.45) if rnd.random() < 0.12 else 0.0) for _ in range(n)]
+
+
+def maus_bahn(cx, cy, x, y, schritte=None, zufall=None, hand=None, ausschlag_max=90.0):
     """REIN RECHNEND (testbar): Punkte einer menschlichen Mausbahn von (cx, cy) nach (x, y) — Finn 06.10.2026: „wenn man eine Maus
     immer so an einer Linie fährt … das wäre besser, wenn die Maus ganz normal das Tempo verändert und nicht immer genau den gleichen
-    Punkt trifft", dann „die Maus komplett aus Zufallsprinzip bewegen, Geschwindigkeit anpassen, richtig menschlich". Je Fahrt wird
-    alles neu gewürfelt: kubische Bézier-Kurve mit ZWEI Stützpunkten seitlich der Geraden (Ausschlag je 8–18 % der Strecke, ≤ 90 px),
-    Tempo-Profil mit Anlauf und Abbremsen in wechselnder Schärfe (Exponent 1,4–3), Schrittzahl nach Strecke mit Streuung, Zittern
-    0,3–1,5 px unterwegs, bei Wegen über 120 px in rund einem Drittel der Fälle ein leichtes Überschießen (3–12 px über das Ziel
-    hinaus) mit Korrektur zurück. Der LETZTE Punkt ist immer exakt (x, y) — der Hover-Beweis danach bleibt unberührt.
-    zufall = random.Random für Tests. -> [(px, py), …], mindestens ein Punkt."""
-    import math
+    Punkt trifft", dann „komplett aus Zufallsprinzip, richtig menschlich", dann (v3) „einen Tick mehr unterschiedlich". Je Fahrt
+    wird alles neu gewürfelt: kubische Bézier mit ZWEI Stützpunkten seitlich der Geraden (Ausschlag je 5–22 % der Strecke mal
+    Kurvenlust der Hand, ≤ ausschlag_max px; in rund 15 % fast gerade, 1–4 %), Lage der Stützpunkte 15–45 % / 55–85 %, Tempo-Profil
+    mit Anlauf und Abbremsen in wechselnder Schärfe (Exponent 1,2–3,5), Schrittzahl nach Strecke mit Streuung (6–44), Zittern
+    0,2–1,8 px unterwegs, bei Wegen über 120 px je nach Hand in 20–45 % ein Überschießen (2–14 px über das Ziel hinaus) mit 2–4
+    Korrekturschritten zurück. Neu v3: ANFLUG in zwei Zügen (rund 18 % der Fahrten über 150 px) — erst grob in die Nähe
+    (Zwischenziel bei 70–88 % des Wegs, 8–40 px seitlich), dort kurz langsam, dann der Rest. Der LETZTE Punkt ist immer exakt
+    (x, y) — der Hover-Beweis danach bleibt unberührt. zufall = random.Random für Tests, hand = Hand des Laufs.
+    -> [(px, py), …], mindestens ein Punkt."""
     rnd = zufall or random
+    h = hand or _hand()
     cx, cy, x, y = float(cx), float(cy), float(x), float(y)
     dx, dy = x - cx, y - cy
     strecke = math.hypot(dx, dy)
     if strecke < 1.0:
         return [(int(round(x)), int(round(y)))]
     if schritte is None:
-        schritte = max(6, min(40, int(4 + strecke / rnd.uniform(30.0, 60.0)) + rnd.randint(0, 4)))
+        schritte = max(6, min(44, int(5 + strecke / rnd.uniform(24.0, 64.0)) + rnd.randint(0, 5)))
     schritte = max(1, int(schritte))
     nx, ny = -dy / strecke, dx / strecke                       # Normale zur Geraden
-    a1 = min(90.0, strecke * rnd.uniform(0.08, 0.18)) * rnd.choice((-1.0, 1.0))
-    a2 = min(90.0, strecke * rnd.uniform(0.08, 0.18)) * rnd.choice((-1.0, 1.0))
-    s1, s2 = rnd.uniform(0.2, 0.4), rnd.uniform(0.6, 0.8)
+    if strecke > 150.0 and schritte >= 10 and ausschlag_max >= 90.0 and rnd.random() < 0.18:
+        # Anflug in zwei Zügen; die Teilbahnen biegen weniger aus (≤ 45 px), damit der Weg insgesamt nahe der Geraden bleibt
+        s = rnd.uniform(0.7, 0.88)
+        ab = rnd.uniform(8.0, 40.0) * rnd.choice((-1.0, 1.0))
+        zx, zy = cx + dx * s + nx * ab, cy + dy * s + ny * ab
+        n1 = max(5, int(schritte * s))
+        erst = maus_bahn(cx, cy, zx, zy, schritte=n1, zufall=rnd, hand=h, ausschlag_max=45.0)
+        rest = maus_bahn(erst[-1][0], erst[-1][1], x, y, schritte=max(4, schritte - n1), zufall=rnd, hand=h, ausschlag_max=45.0)
+        return erst + rest
+    spanne = (0.01, 0.04) if rnd.random() < 0.15 else (0.05, 0.22)
+    a1 = min(ausschlag_max, strecke * rnd.uniform(*spanne) * h["kurve"]) * rnd.choice((-1.0, 1.0))
+    a2 = min(ausschlag_max, strecke * rnd.uniform(*spanne) * h["kurve"]) * rnd.choice((-1.0, 1.0))
+    s1, s2 = rnd.uniform(0.15, 0.45), rnd.uniform(0.55, 0.85)
     k1 = (cx + dx * s1 + nx * a1, cy + dy * s1 + ny * a1)
     k2 = (cx + dx * s2 + nx * a2, cy + dy * s2 + ny * a2)
     # Ziel der Kurve: bei längeren Wegen manchmal leicht über das Ziel hinaus, danach Korrektur zurück
-    ueber = strecke > 120.0 and rnd.random() < 0.35
+    ueber = strecke > 120.0 and rnd.random() < h["ueber"]
     if ueber:
-        f = rnd.uniform(3.0, 12.0) / strecke
+        f = rnd.uniform(2.0, 14.0) / strecke
         zx, zy = x + dx * f + nx * rnd.uniform(-3.0, 3.0), y + dy * f + ny * rnd.uniform(-3.0, 3.0)
     else:
         zx, zy = x, y
-    p = rnd.uniform(1.4, 3.0)                                  # Schärfe von Anlauf/Abbremsen
-    zit = rnd.uniform(0.3, 1.5)
+    p = rnd.uniform(1.2, 3.5)                                  # Schärfe von Anlauf/Abbremsen
+    zit = rnd.uniform(0.2, 1.8)
     pts = []
     for i in range(1, schritte + 1):
         u = i / schritte
@@ -1588,15 +1689,21 @@ def maus_bahn(cx, cy, x, y, schritte=None, zufall=None):
     return pts
 
 
-def maus_takt(n, zufall=None):
-    """REIN RECHNEND (testbar): Wartezeit (s) nach jedem der n Schritte einer Fahrt — Grundtempo je Fahrt 0,7–1,6× gewürfelt auf
-    8–22 ms je Schritt, dazu in rund 15 % der Fahrten EIN kurzes Zögern (40–120 ms) irgendwo mitten auf dem Weg. -> [s, …] (Länge n)"""
+def maus_takt(n, zufall=None, hand=None):
+    """REIN RECHNEND (testbar): Wartezeit (s) nach jedem der n Schritte einer Fahrt — Grundtempo je Fahrt 0,55–1,9× mal Hand-Tempo auf
+    7–24 ms je Schritt; je nach Hand in 8–30 % der Fahrten EIN Zögern (30–180 ms) mitten auf dem Weg (selten zwei), in rund 8 % kurz
+    vor dem Ziel noch einmal Zielen (60–200 ms). -> [s, …] (Länge n)"""
     rnd = zufall or random
+    h = hand or _hand()
     n = max(0, int(n))
-    tempo = rnd.uniform(0.7, 1.6)
-    out = [rnd.uniform(0.008, 0.022) * tempo for _ in range(n)]
-    if n >= 4 and rnd.random() < 0.15:
-        out[rnd.randint(1, n - 2)] += rnd.uniform(0.04, 0.12)
+    tempo = rnd.uniform(0.55, 1.9) * h["tempo"]
+    out = [rnd.uniform(0.007, 0.024) * tempo for _ in range(n)]
+    if n >= 4:
+        if rnd.random() < h["zoegern"]:
+            for _ in range(2 if rnd.random() < 0.1 else 1):
+                out[rnd.randint(1, n - 2)] += rnd.uniform(0.03, 0.18)
+        if rnd.random() < 0.08:
+            out[max(1, n - rnd.randint(2, 3))] += rnd.uniform(0.06, 0.2)
     return out
 
 
@@ -1604,8 +1711,9 @@ def _maus_fahren(x, y, schritte=None):
     """Den ECHTEN Mauszeiger sichtbar hinfahren (nicht teleportieren) — Finns
     Ansage: man soll sehen, wie der Bot die Kontrolle uebernimmt. SetCursorPos
     statt pywinauto.mouse (Parsec-Doppelcursor, s.o.). Seit 06.10.2026 auf der
-    Bahn aus maus_bahn (Kurve, Anlauf/Abbremsen, Zittern, Ueberschiessen) im
-    Takt aus maus_takt statt 8 gleicher Schritte auf der Geraden je fix 12 ms."""
+    Bahn aus maus_bahn (Kurve, Anlauf/Abbremsen, Zittern, Ueberschiessen, Anflug)
+    im Takt aus maus_takt, beides je Hand des Laufs — statt 8 gleicher Schritte
+    auf der Geraden je fix 12 ms."""
     try:
         cx, cy = _cursor_pos()
     except Exception:
@@ -1621,34 +1729,35 @@ def _maus_fahren(x, y, schritte=None):
 
 def _maus_zittern(dauer):
     """Waehrend einer Pause nicht erstarren (Finn 06.10.2026: „dass die Maus sich die ganze Zeit nur so ein bisschen bewegt … komplett
-    aus Zufallsprinzip"): je Zug wird gewuerfelt — Stillstand (0,15–0,7 s), kleines Zittern (2–7 px) oder langsames Wandern
-    (15–50 px weg, spaeter wieder in die Naehe zurueck), jeweils auf einer maus_bahn im maus_takt. Nur Windows, nie waehrend eines
-    Klicks (wird allein aus Pausen aufgerufen, VOR der naechsten Fahrt zum Ziel; der Hover-Beweis liegt immer nach der Fahrt).
+    aus Zufallsprinzip"): je Zug wird gewuerfelt — Stillstand (0,1–0,9 s), kleines Zittern (bis ±7 px mal Hand) oder langsames Wandern
+    (15–50 px mal Hand weg, spaeter wieder in die Naehe zurueck), jeweils auf einer maus_bahn im maus_takt. Nur Windows, nie waehrend
+    eines Klicks (wird allein aus Pausen aufgerufen, VOR der naechsten Fahrt zum Ziel; der Hover-Beweis liegt immer nach der Fahrt).
     Faellt still auf reines Warten zurueck, wenn der Zeiger nicht lesbar ist."""
-    import math
     ende = time.time() + max(0.0, float(dauer))
     try:
         cx, cy = _cursor_pos()
     except Exception:
         time.sleep(max(0.0, ende - time.time()))
         return
+    z = _hand()["zittern"]
     heim = (cx, cy)
     while True:
         rest = ende - time.time()
         if rest <= 0:
             break
-        time.sleep(min(rest, random.uniform(0.15, 0.7)))         # Stillstand zwischen zwei Zuegen
+        time.sleep(min(rest, random.uniform(0.1, 0.9)))          # Stillstand zwischen zwei Zuegen
         if ende - time.time() <= 0.05:
             break
         art = random.random()
         if art < 0.3:
             continue                                            # nur stehen
         if art < 0.75:
-            zx, zy = cx + random.randint(-7, 7), cy + random.randint(-7, 7)
+            k = max(2, int(round(7 * z)))
+            zx, zy = cx + random.randint(-k, k), cy + random.randint(-k, k)
         elif math.hypot(cx - heim[0], cy - heim[1]) > 30:
             zx, zy = heim[0] + random.randint(-8, 8), heim[1] + random.randint(-8, 8)   # zurueck in die Naehe
         else:
-            w = random.uniform(15.0, 50.0)
+            w = random.uniform(15.0, 50.0) * z
             ang = random.uniform(0.0, 6.2832)
             zx, zy = cx + w * math.cos(ang), cy + w * math.sin(ang)
         try:
@@ -1660,7 +1769,6 @@ def _maus_zittern(dauer):
         except Exception:
             time.sleep(max(0.0, ende - time.time()))
             return
-
 
 def _bildschirm_groesse():
     import ctypes
@@ -3362,6 +3470,7 @@ def _tv_uia_klick(el, name, trail):
         pass
     x, y = el["punkt"]
     _maus_fahren(x, y)
+    _warte(*klick_zoegern())                      # angekommen, kurz stehen, dann drücken (06.10.2026, je Hand)
     if not _klick_absolut(x, y):
         trail.append(f"{name}: SendInput abgelehnt")
         return False, f"Klick auf {name} wurde von Windows abgelehnt"
@@ -12225,7 +12334,9 @@ def tsx_felder_kurz(felder, max_n=120):
 
 
 def _tsx_klick(e, name, trail):
-    return _tv_uia_klick({"punkt": ((e[1][0] + e[1][2]) // 2, (e[1][1] + e[1][3]) // 2)}, name, trail)
+    # 06.10.2026 (Finn: „wohin man genau klickt … alles ein bisschen zufällig"): nie mehr exakt die Rechteck-Mitte — Punkt je Klick
+    # aus klick_punkt (Hand des Laufs, Zug, Streuung, Saum zum Rand)
+    return _tv_uia_klick({"punkt": klick_punkt(e[1][0], e[1][1], e[1][2], e[1][3])}, name, trail)
 
 
 def _tsx_vorbereiten(w, trail):
@@ -12276,6 +12387,7 @@ def modus_tsxinventar(cmd):
     res = {"ok": False, "code": "", "msg": "", "trail": "", "schritt": "start", "inventar": {}}
     trail = _StempelSpur()
     trail.append(puls_bot_stand())                    # B33: erste Spur-Zeile = welcher Bot lief
+    trail.append(maus_hand_text())                 # 06.10.2026: welche Hand lief
     try:
         from pywinauto import Desktop  # noqa: F401
     except ImportError:
@@ -12386,6 +12498,7 @@ def modus_tsxlesen(cmd, weiter=None, wachhund_s=100.0, weg=None):
            "mll": None, "rpl": None, "upl": None, "position": None}
     trail = _StempelSpur()
     trail.append(puls_bot_stand())                    # B33: erste Spur-Zeile = welcher Bot lief
+    trail.append(maus_hand_text())                 # 06.10.2026: welche Hand lief
     ext = str((cmd or {}).get("konto") or (cmd or {}).get("ext_id") or "").strip()
     if len(_nur_alnum(ext)) < 5:
         res.update(code="befehl", msg="Feld 'konto' (External ID) fehlt")
@@ -13003,7 +13116,10 @@ def _tsx_tippen(feld, text, trail, name, ist=None, liste_ok=False, klick=True, v
         keyboard.send_keys("{DELETE}")
         _warte(0.15, 0.1)
     if text:
-        keyboard.send_keys(tv_tasten_escape(str(text)), with_spaces=True, pause=0.03)
+        # 06.10.2026: Zeichen für Zeichen im Tipp-Takt der Hand (50–200 ms, manchmal ein Stocken) statt eines Rutsches mit 30 ms
+        for ch, dt in zip(str(text), tipp_takt(len(str(text)))):
+            keyboard.send_keys(tv_tasten_escape(ch), with_spaces=True, pause=0.02)
+            _warte(dt, 0.02)
         _warte(0.2, 0.15)
     # B36: Tippen selbst in die Spur (ID F 30.09.2026: nach „Feld Profit geklickt" fehlte jeder Beleg, dass 33 getippt wurde)
     trail.append(f"Feld {name} getippt: '{text}'" if text else f"Feld {name} geleert")
@@ -14322,13 +14438,35 @@ TSX_SCHRITT_PAUSE = (1.0, 1.0)
 TSX_HOVER_PAUSE = (0.3, 0.5)
 
 
+def tsx_pause_dauer(zufall=None, hand=None):
+    """REIN RECHNEND (testbar): Länge einer Pause zwischen zwei TopstepX-Schritten (s). Mindestens TSX_SCHRITT_PAUSE[0] (1 s — was die
+    Seite braucht, nie kürzer), obendrauf schief verteilt 0–1,8 s mal Pausen-Faktor der Hand (kurze Zugaben häufiger als lange,
+    u^1,7), in rund 10 % ein längeres Nachdenken (+1,5–3 s). Vorher fix 1 + 0–1 s (Finn 06.10.2026: „alles ein bisschen zufällig")."""
+    rnd = zufall or random
+    h = hand or _hand()
+    d = TSX_SCHRITT_PAUSE[0] + (rnd.random() ** 1.7) * 1.8 * h["pause"]
+    if rnd.random() < 0.10:
+        d += rnd.uniform(1.5, 3.0)
+    return d
+
+
+def tsx_hover_pause(zufall=None, hand=None):
+    """REIN RECHNEND (testbar): (minimum, streuung) in s für die Hover-Pause vor dem Druck auf TopstepX (Finn 01.10.2026: erst über dem
+    Ziel stehen, dann drücken). Minimum bleibt TSX_HOVER_PAUSE[0] (0,3 s) plus 0–0,1 s, Streuung 0,15–0,7 s mal Pausen-Faktor der
+    Hand — jede Hover-Pause anders lang. Vorher fix (0,3, 0,5)."""
+    rnd = zufall or random
+    h = hand or _hand()
+    return TSX_HOVER_PAUSE[0] + rnd.uniform(0.0, 0.1), rnd.uniform(0.15, 0.7) * h["pause"]
+
+
 def _tsx_pause():
-    """1–2 s Pause zwischen zwei TopstepX-Schritten (Finn 01.10.2026) — gewürfelt, nie fix. Seit 06.10.2026 steht die Maus dabei
-    nicht still (kleine Zucker, _maus_zittern) — nur mit echter Windows-Eingabe, sonst reines Warten über _warte."""
+    """Pause zwischen zwei TopstepX-Schritten (Finn 01.10.2026: 1–2 s, gewürfelt, nie fix; seit 06.10.2026 Länge aus tsx_pause_dauer je
+    Hand). Die Maus steht dabei nicht still (kleine Zucker, _maus_zittern) — nur mit echter Windows-Eingabe, sonst reines Warten."""
+    d = tsx_pause_dauer()
     if _WIN_EINGABE:
-        _maus_zittern(TSX_SCHRITT_PAUSE[0] + random.uniform(0.0, TSX_SCHRITT_PAUSE[1]))
+        _maus_zittern(d)
     else:
-        _warte(*TSX_SCHRITT_PAUSE)
+        _warte(d, 0.05)
 
 
 def tsx_regel_weiche(regel_datei, pc_id):
@@ -16148,6 +16286,7 @@ def modus_tsxlesen_cdp(cmd, order=None, order_cmd=None):
     diag_art = "tsx_order_cdp" if k4 else "tsx_probe_cdp" if order else "tsx_lesen_cdp"
     trail = _StempelSpur()
     trail.append(puls_bot_stand())
+    trail.append(maus_hand_text())                 # 06.10.2026: welche Hand lief
     trail.append("Weg: Puls-Chrome (CDP) — " + (f"{'K4 SCHARF' if k4 else 'K3a Probe'} TopstepX ({order.get('richtung')} {order.get('menge')} {order.get('wurzel')})"
                                                  if order else "K1 Lesen TopstepX"))
     ext = str((cmd or {}).get("konto") or (cmd or {}).get("ext_id") or "").strip()
@@ -16288,6 +16427,7 @@ def modus_tsxinventar_cdp(cmd):
     res = {"ok": False, "code": "", "msg": "", "trail": "", "schritt": "start", "weg": "cdp", "etappe": "K0", "arts": []}
     trail = _StempelSpur()
     trail.append(puls_bot_stand())
+    trail.append(maus_hand_text())                 # 06.10.2026: welche Hand lief
     trail.append("Weg: Puls-Chrome (CDP) — K0 Inventar TopstepX")
     pc = _augen_pc_id()
     sitz = [None]
@@ -16428,17 +16568,17 @@ def cdp_klick_bahn(von, nach, schritte=8, streu=2.0, rnd=None):
     return out
 
 
-def cdp_klickpunkt(rect, rnd=None):
-    """REIN RECHNEND (testbar): Punkt im inneren Drittel eines [x, y, w, h]-Rechtecks (CSS-px). None bei Unsinn."""
-    import random as _r
-    rnd = rnd or _r
+def cdp_klickpunkt(rect, rnd=None, hand=None):
+    """REIN RECHNEND (testbar): Klickpunkt in einem [x, y, w, h]-Rechteck (CSS-px) — seit 06.10.2026 über klick_punkt (Hand des Laufs,
+    Zug, Streuung, Saum zum Rand), nie einfach die Mitte; vorher gleichverteilt im inneren Drittel. None bei Unsinn."""
     try:
         x, y, w, h = [float(v) for v in rect[:4]]
     except (TypeError, ValueError, IndexError):
         return None
     if w < 2 or h < 2:
         return None
-    return (round(x + w / 2 + rnd.uniform(-w / 6, w / 6), 1), round(y + h / 2 + rnd.uniform(-h / 6, h / 6), 1))
+    px, py = klick_punkt(x, y, x + w, y + h, zufall=rnd, hand=hand)
+    return (float(px), float(py))
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -16883,7 +17023,7 @@ class _AugenSitzung:
             _warte(0.018, 0.02)
         _warte(0.08, 0.08)
         if getattr(self, "hover_pause", None):
-            _warte(*self.hover_pause)                 # wie im Windows-Weg (Finn 01.10.2026): erst stehen, dann drücken
+            _warte(*tsx_hover_pause())                # wie im Windows-Weg (Finn 01.10.2026): erst stehen, dann drücken — je Klick anders
         if pruef:
             v = self.lese_js(win_ziel_pruef_js(p[0], p[1], pruef))
             if not (isinstance(v, dict) and v.get("passt")):
@@ -16916,7 +17056,7 @@ class _AugenSitzung:
             if t is None:
                 raise RuntimeError(f"Taste '{key}' ohne Windows-Entsprechung")
             self._win_key(t)
-            _warte(0.05, 0.04)
+            _warte(0.04, 0.14)                        # 06.10.2026: breiter gestreut (vorher 50–90 ms)
             return
         vk = self._VK.get(key, 0)
         code = {"a": "KeyA"}.get(key, key)
@@ -16929,9 +17069,9 @@ class _AugenSitzung:
 
     def tippen(self, text):
         if _WIN_EINGABE:
-            for ch in str(text):
+            for ch, dt in zip(str(text), tipp_takt(len(str(text)))):   # 06.10.2026: Tipp-Takt der Hand statt fix 60–120 ms
                 self._win_key(tv_tasten_escape(ch))
-                _warte(0.06, 0.06)
+                _warte(dt, 0.02)
             return
         for ch in str(text):
             vk = ord(ch.upper()) if ch.isalnum() else (190 if ch == "." else 188 if ch == "," else 0)
@@ -17144,8 +17284,9 @@ class _AugenSitzung:
         hp = getattr(self, "hover_pause", None)
         if hp:
             # Menschliches Tempo (Finn 01.10.2026, TopstepX: das Dropdown ging „in einer Millisekunde" auf und zu): erst über dem Ziel
-            # stehen bleiben, dann drücken — und das Ziel danach NEU beweisen, in der Pause kann sich die Seite bewegt haben
-            _warte(*hp)
+            # stehen bleiben, dann drücken — und das Ziel danach NEU beweisen, in der Pause kann sich die Seite bewegt haben.
+            # Seit 06.10.2026 ist die Länge je Klick anders (tsx_hover_pause, Hand des Laufs).
+            _warte(*tsx_hover_pause())
             if pruef:
                 v2 = self.lese_js(win_ziel_pruef_js(p[0], p[1], pruef))
                 if not (isinstance(v2, dict) and v2.get("hover") and v2.get("passt")):
