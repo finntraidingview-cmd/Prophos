@@ -39829,7 +39829,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1104'
+  const OS_TAB_BUILD = '2026-09-22.1105'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -43671,12 +43671,29 @@
    *       „geplant, nicht gestartet" ist — eigene start_um egal (Anzeige / frühester Zeitpunkt des Farmers). Streng: wartet ein
    *       früherer (z. B. Slave-Vorprüfung rot), wartet die Kette mit.
    *   (6) Hänger-Riegel: ein Lauf ohne Ende (supabase-js kennt keinen Timeout) gilt nach 10 min als tot, solange kein Orbit-Start läuft.
-   * Claim (start_um_gestartet_at, Guard planned + IS NULL) bleibt der einzige Schutz gegen Doppelstart — unverändert. */
+   * Claim (start_um_gestartet_at, Guard planned + IS NULL) bleibt der einzige Schutz gegen Doppelstart — unverändert.
+   *   (7) CLAIM-VORSCHLAG (07.10.2026, Befund Terminal 2 über den Master): zwei unbestätigte Auto-Vorschläge des Nachtlaufs 05.10.
+   *       (CFD, Startzeit 16:55/16:56 dt) wurden am 06.10. 21:28 dt von einem Mac-Tab auf localhost:5000 geclaimt — 0,8 s
+   *       nacheinander, ohne Vorcheck-Spur, nie gestartet (Edge-Logs: PATCH nur mit Guard status + start_um_gestartet_at). Der Mac
+   *       liefert unter localhost:5000 die lokale prophos.html des Checkouts aus, nicht pages.dev — ein alter Stand ohne den
+   *       Vorschlag-Filter vom 05.10. claimt überfällige Pläne, um sie „verpasst" zu stempeln. Folge: app.py _vorschlag zählt
+   *       geclaimte Vorschläge nicht mehr als ersetzbar → die Konten bekamen nachts keinen Plan mehr. Grundsatz (Finn, fest):
+   *       Bestätigen tut nur Finn — ein unbestätigter Vorschlag (auto_plan ohne auto_bestaetigt_at) wird NIE geclaimt und NIE
+   *       gestartet. Der Riegel steht deshalb zusätzlich IM Claim-Update (DB-Guard: auto_plan null/false ODER auto_bestaetigt_at
+   *       gesetzt) — er greift für jeden Tab mit diesem Stand, egal was im Speicher steht. Überfällige unbestätigte Vorschläge
+   *       bleiben unberührt in der Schlange; je Plan und Tag genau eine Meldung „unbestätigt, nicht gestartet" (Merker im
+   *       localStorage, kein Toast-Spam). */
   const SU_PAUSE_MIN_MS = 5000, SU_PAUSE_STREU_MS = 25000, SU_CLAIM_PAUSE_MS = 30000, SU_HAENGER_MS = 10 * 60000
   let _suPauseBis = 0, _suLetzterLauf = 0, _suLauf = 0, _suLaufSeit = 0
   const _suClaimPause = new Map()   // planId → frühester nächster Claim-Versuch (ms) nach einem Fehlgriff
   const suKettenTag = p => String((p && p.plannedFor) || '') || (p && p.startUm ? String(p.startUm).slice(0, 10) : '')
   const suNichtGestartet = p => !!p && p.status === 'planned' && !p.startUmGestartetAt
+  // Unbestätigter Auto-Vorschlag (Punkt 7) — dasselbe Kennzeichen wie app.py _vorschlag / ap_bestaetigen und die Trade-Planer-Seite:
+  // auto_plan true ohne auto_bestaetigt_at (rowToPlan: autoPlan / autoBestaetigtAt). Bestätigen tut nur Finn (apBestaetigen).
+  const suUnbestaetigt = p => !!p && p.autoPlan === true && !p.autoBestaetigtAt
+  // DB-Guard für jedes Claim-Update dieser Sektion (Punkt 7): PostgREST-or über die Spalten selbst — ein Vorschlag ohne Bestätigung
+  // trifft keine Zeile, der Claim bleibt aus, auch wenn der Tab den Plan für einen Hand-Plan hält
+  const SU_CLAIM_GUARD = 'auto_plan.is.null,auto_plan.eq.false,auto_bestaetigt_at.not.is.null'
   // Winning-Day-Kette: ist der Farmer-Plan p jetzt dran? (rein, ohne DB — Test-Haken window._su.ketteFrei)
   function suKetteFrei(p, plaene, now){
     const tag = suKettenTag(p)
@@ -43696,7 +43713,7 @@
       // der Plan bleibt mit seiner Startzeit stehen, Starten nur von Hand
       && p.route !== 'tsv2'
       // Auto-Planer (05.10.2026, Finn: „ich muss die Trades trotzdem noch manuell confirmen"): Vorschlag ohne Bestätigung nie
-      && !(p.autoPlan && !p.autoBestaetigtAt)
+      && !suUnbestaetigt(p)
       && !((_vorcheckNaechst.get(String(p.id)) || 0) > now)   // Slave-Vorprüfung: wartender Plan erst nach seinem Jitter wieder
       && !((_suClaimPause.get(String(p.id)) || 0) > now)      // Claim ging ins Leere: kurz zurückstellen, die Schlange läuft weiter
       && !rkAufgegeben(p)   // Richtungskonflikt bis Fensterende nicht lösbar (07.10.2026) — Start nur noch von Hand bzw. mit neuer Uhrzeit
@@ -43717,6 +43734,31 @@
       } else if(i >= 0) tradePlans[i] = rowToPlan(data[0])
       try{ renderTradePlans() }catch(_){}
     }catch(e){ console.warn('[start-um] Plan nach Fehlgriff nicht lesbar', plan.id, (e && e.message) || e) }
+  }
+  // Punkt 7: überfällige unbestätigte Vorschläge melden — je Plan und Tag genau einmal (Merker planId → Tag im localStorage, damit ein
+  // Neuladen des Tabs nicht erneut meldet; der Plan selbst bleibt unberührt: kein Claim, kein Start, Startzeit steht)
+  const SU_VORSCHLAG_LS = 'prophos_su_vorschlag_gemeldet'
+  let _suVorschlagGemeldet = null   // planId → 'JJJJ-MM-TT'
+  function suVorschlagGemeldetLaden(){
+    if(_suVorschlagGemeldet) return _suVorschlagGemeldet
+    _suVorschlagGemeldet = new Map()
+    try{ const o = JSON.parse(localStorage.getItem(SU_VORSCHLAG_LS) || 'null'); if(o && typeof o === 'object') for(const [k, v] of Object.entries(o)) _suVorschlagGemeldet.set(String(k), String(v)) }catch(_){}
+    return _suVorschlagGemeldet
+  }
+  function suVorschlaegeMelden(plaene, now){
+    const heute = new Date(now).toISOString().slice(0, 10), m = suVorschlagGemeldetLaden()
+    let neu = false
+    for(const p of (plaene || [])){
+      if(!suUnbestaetigt(p) || !suNichtGestartet(p) || !p.startUm || p.route === 'tsv2' || !(routeIstOrbit(p.route) || routeIstEcho(p.route))) continue
+      if(new Date(p.startUm).getTime() > now || m.get(String(p.id)) === heute) continue
+      m.set(String(p.id), heute); neu = true
+      if(typeof atToast === 'function') atToast(`🤖 Vorschlag „${p.masterName || '—'}" (${tpStartUmText(p.startUm)}) ist unbestätigt — nicht gestartet, nicht geclaimt. Im Trade-Planer bestätigen oder löschen.`, 'end')
+    }
+    if(neu){
+      for(const [k, v] of [...m.entries()]) if(v < heute) m.delete(k)   // alte Tage vergessen, der Merker bleibt klein
+      try{ localStorage.setItem(SU_VORSCHLAG_LS, JSON.stringify(Object.fromEntries(m))) }catch(_){}
+    }
+    return neu
   }
   async function tpStartUmTick(){
     if(!MT5_LOCAL) return
@@ -43741,6 +43783,7 @@
     if(_suLaeuft) return                      // während des Wartens hat ein anderer Takt angefangen
     now = Date.now()
     const faellig = suKandidaten(_tp, { scharf, now })
+    try{ suVorschlaegeMelden(_tp, now) }catch(e){ console.warn('[start-um] Vorschlag-Meldung', (e && e.message) || e) }
     if(!faellig.length) return
     let plan = faellig[0]
     const lauf = ++_suLauf
@@ -43762,7 +43805,7 @@
         if(!vc.ok){
           if(verspaetet > fenster){
             const { data: dv } = await supabase.from('trade_plans').update({ start_um_gestartet_at: new Date().toISOString() })
-              .eq('id', plan.id).eq('status', 'planned').is('start_um_gestartet_at', null).select('*')
+              .eq('id', plan.id).eq('status', 'planned').is('start_um_gestartet_at', null).or(SU_CLAIM_GUARD).select('*')
             if(dv && dv.length){ const iv = tradePlans.findIndex(x => String(x.id) === String(plan.id)); if(iv >= 0) tradePlans[iv] = rowToPlan(dv[0]); await vorcheckMelden(plan, 'verpasst_slave', vc.grund, vc.checks) }
             else await suClaimFehlgriff(plan, null)
             vorcheckKarteZeigen(plan, vc, 'verpasst')
@@ -43781,7 +43824,7 @@
       try{ if(_tpOrbitLaeuft || _osActive) return }catch(_){}
       // Claim: nur der Tab, dessen Update eine Zeile trifft, darf feuern
       const { data, error: eClaim } = await supabase.from('trade_plans').update({ start_um_gestartet_at: new Date().toISOString() })
-        .eq('id', plan.id).eq('status', 'planned').is('start_um_gestartet_at', null).select('*')
+        .eq('id', plan.id).eq('status', 'planned').is('start_um_gestartet_at', null).or(SU_CLAIM_GUARD).select('*')
       if(eClaim || !data || !data.length){ await suClaimFehlgriff(plan, eClaim); return }
       _suClaimPause.delete(String(plan.id))
       const i = tradePlans.findIndex(x => String(x.id) === String(plan.id)); if(i >= 0) tradePlans[i] = rowToPlan(data[0])
@@ -43818,7 +43861,8 @@
       }
     }
   }
-  window._su = { kandidaten: suKandidaten, ketteFrei: suKetteFrei, fehlgriff: suClaimFehlgriff, tick: tpStartUmTick,
+  window._su = { kandidaten: suKandidaten, ketteFrei: suKetteFrei, fehlgriff: suClaimFehlgriff, tick: tpStartUmTick, unbestaetigt: suUnbestaetigt,
+    vorschlaegeMelden: suVorschlaegeMelden, claimGuard: SU_CLAIM_GUARD, gemeldetReset: () => { _suVorschlagGemeldet = null; try{ localStorage.removeItem(SU_VORSCHLAG_LS) }catch(_){} },
     stand: () => ({ laeuft: _suLaeuft, pauseBis: _suPauseBis, claimPause: [..._suClaimPause.entries()] }) }   // Test-Haken (Stub)
   setInterval(tpStartUmTick, 1000)   // 15 s → 1 s (23.09.2026): die Prüfung ist rein lokal, die DB sieht nur den Claim
   /* ══ ENDE GEPLANTE STARTZEIT ══ */
