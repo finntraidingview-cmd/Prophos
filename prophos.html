@@ -11334,7 +11334,6 @@
         <div class="field">
           <label>Max Drawdown ($, optional)</label>
           <input class="input mono" id="ac-max-drawdown" type="number" step="100" placeholder="z.B. 10000 (10% von 100K Account)" autocomplete="off">
-          <div style="font-size:11px;color:var(--sub);margin-top:4px">Für die Auto-Hedge-Berechnung. Bei FundingPips 100K = 10K. Bei 150K Topstep = 4.5K. Trade-Plan rechnet damit den Slave-Risk so aus, dass bei Master-Stop-Out der Account-Kaufpreis (+ akkumulierte Verluste) zurückgeholt wird.</div>
         </div>
         <!-- Consistency je Konto (07.10.2026, Finn: Futures-Challenges haben standardmäßig 40 % — größter Tag ≤ 40 % des Ziels —,
              mit Addon gekauft sind es 50 %). Spalte accounts.consistency_pct, leer = Standard. Nur Futures-Firma + Challenge/Phase,
@@ -39829,7 +39828,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1105'
+  const OS_TAB_BUILD = '2026-09-22.1106'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
