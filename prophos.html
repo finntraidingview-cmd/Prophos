@@ -2188,6 +2188,8 @@
   #vr-view .vr-h-quelle{flex-basis:100%;font-style:normal;font-size:12px;color:var(--sub)}
   #vr-view .vr-fz-satz{grid-column:1/-1;font-size:12px;color:var(--sub);line-height:1.45;margin-top:3px}
   #vr-view .vr-re-ki{margin:0 0 8px;font-size:12.5px;color:var(--sub);line-height:1.5}
+  #vr-view .vr-einst .vr-zk{border:0;background:none;padding:0;margin:0 0 18px}   /* Ziele in „Einstellungen": ohne eigenen Kasten */
+  #vr-view .vr-einst .vr-zl-form{margin:4px 0}
   #adm-pane-stat .kf-kpis .kpi-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #adm-pane-stat .kf-gross{margin-top:8px}
   #adm-pane-stat .kf-gross .kf-chart[hidden]{display:none}
@@ -38891,7 +38893,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1066'
+  const OS_TAB_BUILD = '2026-09-22.1067'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -55798,7 +55800,6 @@
 
     root.innerHTML = (d.hinweis ? `<div class="vr-hinweis">${vrEsc(d.hinweis)}</div>` : '')
       + (_vr.fehler ? `<div class="vr-fehler">${vrEsc(_vr.fehler)}</div>` : '')
-      + vrZieleHtml(d)
       + `<details class="vr-klapp" data-vr-klapp="uebersicht"${_vr.uebersicht ? ' open' : ''}><summary>Übersicht je Person</summary>`
       + `<div class="kpis vr-kpis">${kpis}</div>`
       + (d.ki_text ? `<div class="vr-kz-txt vr-ki">${vrEsc(d.ki_text)}${vrUhr(d.ki_text_um) ? ` <span>· Text von ${vrUhr(d.ki_text_um)}</span>` : ''}</div>` : '')
@@ -55813,7 +55814,7 @@
       + vrHeuteHtml(d, s2, name, firma)
       + vrRechnungHtml(d, s2, name, firma)
       + `<details class="vr-klapp" data-vr-klapp="einst"${_vr.einst ? ' open' : ''}><summary>Einstellungen</summary>`
-      + `<div class="vr-einst"><div class="vr-einst-kopf">Wie sicher soll das Ziel erreicht werden?</div><div id="vr-sich" class="vr-sich"></div>`
+      + `<div class="vr-einst">${vrZieleHtml(d)}<div class="vr-einst-kopf">Wie sicher soll das Ziel erreicht werden?</div><div id="vr-sich" class="vr-sich"></div>`
       + `<div class="vr-einst-kopf">Freigeschaltet je ID und Firma <span>Klick wechselt: frei → pausiert → gesperrt → frei</span></div>${vrMatrixHtml(d, name)}</div></details>`
     vrSichRender(d, s2)
     root.querySelectorAll('[data-vr-klapp]').forEach(el => el.addEventListener('toggle', () => {
@@ -56017,8 +56018,10 @@
         <div class="vr-zl-felder">${felder}<label class="breit">Nachkauf<input type="text" data-feld="kauf_einheit" value="${vrEsc(z.kauf_einheit || '')}"></label></div>
         <div class="vr-zl-knoepfe"><button type="submit" class="btn btn-mini"${aus}>${_vr.zielSendet ? 'speichert …' : 'Speichern'}</button><button type="button" class="btn btn-ghost btn-mini" data-vr-zc="1">Abbrechen</button></div></form>`
     }
-    return `<details class="vr-klapp vr-ziele" data-vr-klapp="ziele"${_vr.ziele ? ' open' : ''}><summary>Deine Ziele (je ID)</summary>
-      <div class="vr-zk">${zs.map(zeile).join('')}<p class="vr-zk-hinweis">Gilt für jede ID einzeln. Gesperrte/pausierte Kombinationen unter Einstellungen.</p></div></details>`
+    // seit 06.10.2026 spät als erster Block in „Einstellungen" (Finn: die Karte oben „kannst du weglassen, ist unnötig" — die Seite
+    // beginnt mit der Übersicht); Funktion unverändert
+    return `<div class="vr-einst-kopf">Ziele je ID</div>
+      <div class="vr-zk">${zs.map(zeile).join('')}<p class="vr-zk-hinweis">Gilt für jede ID einzeln. Gesperrte/pausierte Kombinationen weiter unten.</p></div>`
   }
   function vrZieleVerdrahten(root){
     root.querySelectorAll('[data-vr-ze]').forEach(b => b.addEventListener('click', () => { _vr.zielEdit = b.dataset.vrZe; vrRender()
