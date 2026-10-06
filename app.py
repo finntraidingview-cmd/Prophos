@@ -7021,19 +7021,32 @@ import random
 import zlib
 
 VORRAT2_SQL = "sql/2026-10-06_vorrat_stufe2.sql"
-VORRAT2_RECHEN_STAND = 6               # hochzählen, wenn ein Lauf neue Felder bekommt — GET rechnet ältere Läufe dann einmal neu
+VORRAT2_RECHEN_STAND = 8               # hochzählen, wenn ein Lauf neue Felder bekommt — GET rechnet ältere Läufe dann einmal neu
 VORRAT2_STD = {
-    "sicherheit": 0.8,                 # P(Bestand ≥ Untergrenze), Finn am Frontend einstellbar (vorrat_einstellung.sicherheit)
+    "sicherheit": 0.25,                # P(Bestand ≥ Untergrenze) — Finn 06.10.2026 spät, Hauptregel für alle Firmen: „ca. 25 %, darunter
+                                       # nachkaufen, lieber einen Tick zu wenig"; am Frontend einstellbar (vorrat_einstellung.sicherheit)
     "mc_ziehungen": 2000, "mc_seed": 20261006,
     "min_faelle": 20, "prior_gewicht": 20,          # gemessene Quote (Kapitel ohne Hedge) erst ab 20 Fällen, Gewicht n ÷ (n + 20)
     "mess_stufen": ["challenge", "phase1", "phase2"],  # nur Stufen, deren Bestehen einen Nachfolger anlegt (Funded→WD ist nicht messbar)
-    "gefaehrdet_faktor": 0.5, "mindest_funnel": 1, "bestellt_h": 48,
+    "gefaehrdet_faktor": 0.5, "mindest_funnel": 0, "bestellt_h": 48,   # Mindest-Funnel aus (Finn: „lieber zu wenig als zu viel")
     "totband_laeufe": 2, "totband_nur_hoch": True,
     "alter_handelstage_max": 2, "n_max_kauf": 10, "ziel_erreicht_chance": 0.95, "chance_max": 0.98,
-    "kauf_regel": "mitte",             # 'mitte' (Standard, Finn 06.10.2026 abends: „die gute Mitte" zwischen erwartung und nominal) =
+    "kauf_regel": "sicherheit",        # 'sicherheit' (Standard seit 06.10.2026 spät, Finn: Wahrscheinlichkeit ≈ 25 %) = Monte Carlo, n bis
+                                       # P(Bestand + Funnel + neu ≥ Untergrenze) ≥ sicherheit; vorher Toleranz (≥ 85 % gedeckt → nichts) ·
+                                       # 'mitte' (Finn 06.10.2026 abends: „die gute Mitte" zwischen erwartung und nominal) =
                                        # jedes lebende Konto zählt mit w = mitte + (1 − mitte) × Chance, ein neues genauso · 'nominal' =
                                        # alles Lebende zählt voll · 'erwartung' = nur mit Chance · 'sicherheit' = Monte Carlo bis P ≥ sicherheit
     "mitte": 0.5,                      # 0 = wie erwartung (mehr Reserve), 1 = wie nominal (vorsichtiger) — Finn dreht hier
+    # Tages-Tempo (Finn 06.10.2026, Leitfaden: „täglich nachkaufen, nicht in einer Tranche"): je Zelle höchstens so viele Konten
+    # pro Tag — nach Abdeckung (Bestand + Zählwert ÷ Untergrenze): unter grenzen[0] die erste Zahl, bis grenzen[1] die zweite, darüber 0.
+    # Firmen in nur_eins_firmen (Apex: „nur 1 Konto nötig") bekommen 0, solange irgendein Konto lebt, sonst nur_eins.
+    "tagesrate": {"futures": [3, 1], "cfd": [2, 1], "grenzen": [0.5, 0.85], "nur_eins": 2},
+    "nur_eins_firmen": [],             # Apex-Ausnahme „nichts, solange etwas lebt" — Finn 06.10.2026 spät: fällt weg, Apex läuft über die 25 %
+    "eins_vor_gewicht": 0.8,           # Konto eins vor der nächsten Stufe zählt mindestens so (Leitfaden Punkt 4)
+    "eins_vor_chance": 0.75,           # statischer Boden: so nah am Ziel gilt als „eins vor" (CFD-Phase kurz vor dem Ziel)
+    "kurz_vor_blow_chance": 0.2,       # aktuelle Stufe unter dieser Chance = „kurz vor Blow" (nur Fakt für die KI)
+    "ki_gueltig_h": 8,                 # KI-Antwort zum neuesten Lauf gilt so lange für heute[] (danach wieder die Regel)
+    "ki_max_tag": 30, "ki_max_zelle": 5,
     "toleranz_pct": 15,                # 'mitte': knapp unter der Untergrenze ist „perfekt" (Finn: Tradeify +20k, 18k passt, ab ~16k
                                        # nachkaufen) — gekauft wird erst unter Untergrenze × (1 − toleranz), dann bis zur vollen Untergrenze
     "funded_anteilig": True,           # Futures-Funded vor dem Big Trade zählt mit Wert × Chance schon zum Bestand (Variante c)
@@ -7247,6 +7260,7 @@ def vorrat_stufen_aus_kernwerten(regel, param=None):
         stufen["winning_days"] = {"modell": "bestand",
                                   "boden_ueber_start_usd": (p.get("wd_boden_ueber_start_usd") or {}).get(key)}
     stufen["_erste"] = phasen[0]
+    stufen["_key"] = key
     stufen["_groesse"] = min(kw.get("groessen") or [100000])     # Bezugsgröße für den Formel-Startwert (vorrat_quoten)
     return stufen
 
@@ -7279,7 +7293,9 @@ def vorrat_chance_kette(stufen, stufe, balance, groesse, start=None, faktoren=No
         roh = float(p["ziel_erreicht_chance"]) if e["erreicht"] else float(e["chance"])
         fk = None if e["erreicht"] else (faktoren or {}).get(s)      # „Ziel erreicht" korrigiert keine Quote
         c = max(0.0, min(float(p["chance_max"]), roh * (fk if fk else 1.0)))
-        out["kette"].append({"stufe": s, "chance": c, "roh": roh, "faktor": fk, "hinweis": e["hinweis"]})
+        out["kette"].append({"stufe": s, "chance": c, "roh": roh, "faktor": fk, "hinweis": e["hinweis"], "modell": r.get("modell"),
+                             "rest_trades": len(e.get("trades") or []), "polster": e.get("polster"), "abstand": e.get("abstand"),
+                             "erreicht": e.get("erreicht")})
         ges *= c
         w = _vr2_num(r.get("wert_usd"))
         if w is None and r.get("modell") == "trades":
@@ -7504,10 +7520,16 @@ def vorrat2_zelle(ziel, stufen, konten, status, param=None, faktoren=None, seed=
     regel_kauf = p.get("kauf_regel") or "mitte"
     g_m = max(0.0, min(1.0, float(p.get("mitte", 0.5))))
 
-    def gewicht(chance):
-        """Gewicht eines lebenden Kontos unterwegs nach der Kaufregel (Box „So wird gerechnet")."""
+    def gewicht(chance, eins_vor=False):
+        """Gewicht eines lebenden Kontos unterwegs nach der Kaufregel (Box „So wird gerechnet"). Bei 'mitte' zählt ein Konto eins vor
+        der nächsten Stufe mindestens eins_vor_gewicht (Leitfaden: „zwei Challenges eins vor Funded kommen sehr wahrscheinlich durch")."""
         c = float(chance or 0)
-        return 1.0 if regel_kauf == "nominal" else (g_m + (1 - g_m) * c) if regel_kauf == "mitte" else c
+        if regel_kauf == "nominal":
+            return 1.0
+        if regel_kauf == "mitte":
+            w = g_m + (1 - g_m) * c
+            return max(w, float(p.get("eins_vor_gewicht") or 0)) if eins_vor else w
+        return c
     stufen_n = {}                      # unterwegs je Stufe (für den Satz: „1 Funded + 2 Challenges")
     for k in konten:
         typ, gr, bal = k.get("typ"), _vr2_num(k.get("groesse")), _vr2_num(k.get("balance"))
@@ -7519,7 +7541,7 @@ def vorrat2_zelle(ziel, stufen, konten, status, param=None, faktoren=None, seed=
         z = {"account_id": k.get("account_id"), "name": k.get("name"), "typ": typ, "stufe": typ, "groesse": gr, "balance": bal,
              "balance_at": k.get("balance_at"), "alter_tage": alter, "im_bestand": im_bestand, "chance": None,
              "chance_stufe": None, "wert": None, "gefaehrdet": False, "unsicher": uns, "daten_fehlen": df, "hinweis": "",
-             "wert_eur": None}
+             "wert_eur": None, "waiting": bool(k.get("waiting"))}
         if kw and bal is not None:
             kv = ap_kontowert(typ, bal, kw)
             z["wert_eur"] = kv["wert"] if kv else None
@@ -7538,6 +7560,7 @@ def vorrat2_zelle(ziel, stufen, konten, status, param=None, faktoren=None, seed=
             z["wert"] = wert
             z["gewicht"] = z["chance"]
             z["zaehlt_usd"] = round(wert * z["chance"], 2) if not df else 0.0
+            z.update(eins_vor=False, kurz_vor_blow=bool(g["gefaehrdet"]), abstand_boden=g["abstand"], abstand_ziel=None)
             if g["abstand"] is not None:
                 z["hinweis"] = f"Boden {g['abstand']:,.0f} $ entfernt".replace(",", ".")
             if df:
@@ -7567,7 +7590,10 @@ def vorrat2_zelle(ziel, stufen, konten, status, param=None, faktoren=None, seed=
                          hinweis=("Startwert (Lesung alt) · " if uns else "") + "; ".join(x["hinweis"] for x in e["kette"] if x["hinweis"]))
                 # Variante c (Finn über den Master 06.10.2026): ein Futures-Funded vor dem Big Trade ist schon fast Vorrat — es zählt
                 # mit Wert × Chance bis Winning Days zum gesicherten Bestand statt als Zufallszug im Funnel (bleibt „unterwegs")
-                anteilig = bool(p.get("funded_anteilig")) and typ == "funded" and "winning_days" in typen
+                # nur bei 'erwartung' — die Zufallsrechnung ('sicherheit') braucht das Funded als echten Zug (Apex: 1 Funded + 2 Evals
+                # ≈ 23 %, als fester Anteil wären es ≈ 9 %), 'mitte'/'nominal' zählen es über ihr Gewicht
+                anteilig = (bool(p.get("funded_anteilig")) and typ == "funded" and "winning_days" in typen
+                            and regel_kauf == "erwartung")
                 z["anteilig"] = anteilig
                 if i is not None and anteilig:
                     fa = faecher[i]
@@ -7577,11 +7603,19 @@ def vorrat2_zelle(ziel, stufen, konten, status, param=None, faktoren=None, seed=
                 elif i is not None:
                     faecher[i]["funnel"].append((e["chance"], wert, typ))
                 # nominal: jedes LEBENDE Konto unterwegs zählt mit seinem vollen Beitrag (Chance 0 = auf/unter dem Boden)
-                z["gewicht"] = round(gewicht(e["chance"]), 4) if e["chance"] > 0 else 0.0
-                z["zaehlt_usd"] = round(gewicht(e["chance"]) * wert, 2) if e["chance"] > 0 else 0.0
+                # Fakten zur aktuellen Stufe (Leitfaden): eins vor der nächsten Stufe (Futures-Challenge mit 1 Trade Rest, CFD-Phase
+                # nahe am Ziel, Ziel schon erreicht) · kurz vor Blow · Abstand zu Boden und Ziel in $
+                k0 = (e.get("kette") or [{}])[0]
+                eins_vor = typ in ("challenge", "phase1", "phase2") and bool(
+                    k0.get("erreicht") or (k0.get("modell") == "trades" and k0.get("rest_trades") == 1)
+                    or (k0.get("modell") == "statisch" and float(k0.get("roh") or 0) >= float(p.get("eins_vor_chance") or 1)))
+                z.update(eins_vor=eins_vor, kurz_vor_blow=float(k0.get("roh") if k0.get("roh") is not None else 1)
+                         < float(p.get("kurz_vor_blow_chance") or 0), abstand_boden=k0.get("polster"), abstand_ziel=k0.get("abstand"))
+                z["gewicht"] = round(gewicht(e["chance"], eins_vor), 4) if e["chance"] > 0 else 0.0
+                z["zaehlt_usd"] = round(gewicht(e["chance"], eins_vor) * wert, 2) if e["chance"] > 0 else 0.0
                 if i is not None and e["chance"] > 0:
                     faecher[i]["nom"] += wert
-                    faecher[i]["lebend"].append((e["chance"], wert))     # für 'mitte' (auch anteilig gezählte Funded)
+                    faecher[i]["lebend"].append((e["chance"], wert, eins_vor))     # für 'mitte' (auch anteilig gezählte Funded)
                     stufen_n[typ] = stufen_n.get(typ, 0) + 1
         df_any |= bool(z["daten_fehlen"])
         uns_any |= bool(z["unsicher"])
@@ -7590,8 +7624,15 @@ def vorrat2_zelle(ziel, stufen, konten, status, param=None, faktoren=None, seed=
     # Kauf-Einheit: Chance und Wert eines frisch gekauften Kontos
     kauf_stufe = ziel.get("kauf_stufe") or stufen.get("_erste")
     neu_df = False
+    # „100k oder 200k" (FTMO) konkret machen (Finn 06.10.2026: der Satz nennt nie „oder"): Lücke bis zur Untergrenze ≤ kleinste
+    # Größe → die kleinste, sonst die größte (Größen aus den Kernwerten)
+    groesse_wahl = None
+    if not stueck and " oder " in str(ziel.get("kauf_einheit") or "") and kw and kw.get("groessen"):
+        gs = sorted(float(x) for x in kw["groessen"])
+        luecke_fest = sum(fa["soll"] - fa["fest"] for fa in faecher)
+        groesse_wahl = gs[0] if luecke_fest <= gs[0] + 1e-6 else gs[-1]
     for fa in faecher:
-        g_neu = fa["groesse"] or _vr2_num(ziel.get("kauf_groesse"))
+        g_neu = fa["groesse"] or groesse_wahl or _vr2_num(ziel.get("kauf_groesse"))
         if not kauf_stufe or not g_neu:
             neu_df = True
             continue
@@ -7621,7 +7662,7 @@ def vorrat2_zelle(ziel, stufen, konten, status, param=None, faktoren=None, seed=
             # es sicher durch, halb mit seiner echten Chance), ein neues Konto genauso. Bestand + Σ w × Beitrag ≥ Untergrenze → nichts
             # kaufen, sonst aufrunden(Lücke ÷ (w_neu × Beitrag)). Keine Blow-Reserve, kein Mindest-Funnel.
             echt = fa["fest"] - fa["anteil_gew"]
-            fa["funnel_zaehlt"] = sum((g_m + (1 - g_m) * p_) * w_ for p_, w_ in fa["lebend"])
+            fa["funnel_zaehlt"] = sum(gewicht(p_, ev) * w_ for p_, w_, ev in fa["lebend"])
             basis_m = echt + fa["funnel_zaehlt"]
             w_neu = (g_m + (1 - g_m) * pn) * wn
             fa["zaehlt_neu"] = w_neu
@@ -7671,6 +7712,10 @@ def vorrat2_zelle(ziel, stufen, konten, status, param=None, faktoren=None, seed=
                 n_i = int(-(-luecke_i // (pn * wn))) if pn * wn > 0 else n_max_kauf + 1
                 if n_i > n_max_kauf:
                     n_i, deckel = n_max_kauf, True
+        elif (regel_kauf == "sicherheit" and not stueck and fa["fest"] < fa["soll"] - 1e-6
+              and fa["fest"] + e_funnel >= fa["soll"] * (1 - max(0.0, min(0.9, float(p.get("toleranz_pct") or 0) / 100.0))) - 1e-6):
+            fa["toleranz"] = True              # Finn: schon ≥ 85 % (Bestand + erwarteter Funnel) → nah genug, nichts kaufen
+            s_eng.append(s0)
         elif fa["fest"] < fa["soll"] - 1e-6:
             s_eng.append(s0)
             if s0 < s_st:
@@ -7756,8 +7801,24 @@ def vorrat2_zelle(ziel, stufen, konten, status, param=None, faktoren=None, seed=
         {"name": "Chance je neues Konto", "wert": round(pn0 * 100, 1), "einheit": "%"},
         {"name": "Lücke in Kauf-Einheiten", "wert": n_roh_ges, "einheit": "Konten"},
     ]
-    einheit = ziel.get("kauf_einheit")
-    g_kauf = _vr2_num(ziel.get("kauf_groesse")) or (faecher[0].get("kauf_groesse") if faecher else None)
+    einheit = f"{int(groesse_wahl // 1000)}k" if groesse_wahl else ziel.get("kauf_einheit")
+    # Tages-Tempo (Leitfaden: „täglich nachkaufen, nicht in einer Tranche"): höchstens tagesrate Konten heute je Zelle
+    tr = p.get("tagesrate") or {}
+    nur_eins_lebt = False
+    bestand_echt_z = sum(fa["fest"] - fa["anteil_gew"] for fa in faecher)
+    zaehlt_z = sum(fa.get("funnel_zaehlt", sum(gewicht(p_, ev) * w_ for p_, w_, ev in fa["lebend"])) for fa in faecher)
+    soll_z = sum(fa["soll"] for fa in faecher)
+    abdeckung = min(1.0, (bestand_echt_z + zaehlt_z) / soll_z) if soll_z > 0 else 1.0
+    if stufen.get("_key") and stufen.get("_key") in (p.get("nur_eins_firmen") or []):
+        # Apex (Leitfaden Punkt 6): solange irgendein Konto lebt — auch angefressen — nichts; erst wenn alles weg ist, wieder 2 am Tag
+        lebt = bestand_echt_z > 1e-9 or any(fa["lebend"] for fa in faecher) or any(fa["anteil_gew"] > 0 for fa in faecher)
+        tagesrate = 0 if lebt else int(tr.get("nur_eins", 2))
+        nur_eins_lebt = lebt
+    else:
+        raten = tr.get("cfd" if "funded_cfd" in typen else "futures") or [1, 1]
+        grenzen = tr.get("grenzen") or [0.5, 0.85]
+        tagesrate = int(raten[0]) if abdeckung < float(grenzen[0]) else int(raten[1]) if abdeckung < float(grenzen[1]) else 0
+    g_kauf = groesse_wahl or _vr2_num(ziel.get("kauf_groesse")) or (faecher[0].get("kauf_groesse") if faecher else None)
     preis = (_ap_kw_kauf(kw, g_kauf) if (kw and g_kauf) else None) if not stueck else None
     if stueck and kw:
         for t in teile:
@@ -7784,12 +7845,13 @@ def vorrat2_zelle(ziel, stufen, konten, status, param=None, faktoren=None, seed=
             "bestand_echt": round(sum(fa["fest"] - fa["anteil_gew"] for fa in faecher), 2),   # ohne anteilig gezählte Funded
             # Box „So wird gerechnet" (Master 06.10.2026): Bestand + funnel_zaehlt gegen die Untergrenze, n = Lücke ÷ zaehlt_neu_usd
             "toleranz": any(fa.get("toleranz") for fa in faecher),
+            "tagesrate": tagesrate, "abdeckung": round(abdeckung, 4), "nur_eins_lebt": nur_eins_lebt,
             "rechnung": {"kauf_regel": regel_kauf, "mitte": g_m, "untergrenze": soll,
                          "toleranz_pct": (0 if stueck else float(p.get("toleranz_pct") or 0)) if regel_kauf == "mitte" else 0,
                          "schwelle": (round(soll * (1 - (0 if stueck else float(p.get("toleranz_pct") or 0)) / 100.0), 2)
                                       if regel_kauf == "mitte" else soll),
                          "bestand": round(sum(fa["fest"] - fa["anteil_gew"] for fa in faecher), 2),
-                         "funnel_zaehlt": round(sum(fa.get("funnel_zaehlt", sum(gewicht(p_) * w_ for p_, w_ in fa["lebend"]))
+                         "funnel_zaehlt": round(sum(fa.get("funnel_zaehlt", sum(gewicht(p_, ev) * w_ for p_, w_, ev in fa["lebend"]))
                                                     for fa in faecher), 2),
                          "zaehlt_neu_usd": round(sum(fa.get("zaehlt_neu", gewicht(fa["neu"][0]) * fa["neu"][1]) for fa in faecher)
                                                  / max(1, len(faecher)), 2),
@@ -7919,6 +7981,7 @@ def vorrat_tagesliste(zellen, namen, tages_max=25):
     als stufe 'woche'. → (heute [{user_id, user, firma, anzahl, einheit, preis_eur (Stück), kosten_eur (Zeile), stufe, satz}],
     luecke_gesamt (Konten))"""
     kand = [z for z in zellen if z.get("status") == "frei" and not z.get("sperre") and z.get("zustand") != "bestellt"
+            and z.get("tagesrate") != 0
             and isinstance((z.get("nachkauf") or {}).get("n"), int) and z["nachkauf"]["n"] > 0]
 
     def rang(z):
@@ -7939,7 +8002,8 @@ def vorrat_tagesliste(zellen, namen, tages_max=25):
         for z in kand:
             if rest <= 0:
                 break
-            if heute[id(z)] < z["nachkauf"]["n"]:
+            cap = z["nachkauf"]["n"] if not isinstance(z.get("tagesrate"), int) else min(z["nachkauf"]["n"], z["tagesrate"])
+            if heute[id(z)] < cap:
                 heute[id(z)] += 1
                 rest -= 1
                 vergeben = True
@@ -8004,6 +8068,135 @@ def vorrat_gesamt(zellen, heute=None, vorher_score=None):
             "zellen": len(anteile), "kaeufe_heute": sum(int(e.get("anzahl") or 0) for e in h),
             "kaeufe_gesamt": gesamt_n, "kosten_heute_eur": round(sum(float(e.get("kosten_eur") or 0) for e in h)),
             "trend": vorher_score}
+
+
+VORRAT_KI_PRIO = ("hoch", "mittel", "niedrig")
+
+
+def vorrat_fakten_text(z, name, firma, ziel, status="frei"):
+    """REIN RECHNEND (testbar): alle Fakten EINER Zelle in Klartext für den KI-Bot (Master 06.10.2026, Leitfaden
+    .claude/master/vorrat-ki-leitfaden.md). Keine Kontonamen/-nummern — nur Stufe, Größe, Balance, Abstände, Chance, Merker."""
+    art = (ziel or {}).get("art")
+    wd = "winning_days" in ((ziel or {}).get("typen") or [])
+    def betrag(x):
+        return _vr2_k(x) if art == "groessen_summe" else (f"{float(x or 0):.0f} Stück" if art == "stueck" else _vr2_usd(x))
+    if art == "stueck":
+        ziel_txt = " + ".join(f"{t.get('stueck')} × {_vr2_k(t['groesse']) if t.get('groesse') else 'jede Größe'}"
+                              for t in ((ziel or {}).get("groessen") or [])) + (" Winning Days" if wd else " Funded")
+    elif art == "plus_ueber_start":
+        ziel_txt = f"{_vr2_usd((ziel or {}).get('von'))}–{_vr2_usd((ziel or {}).get('bis'))} Plus in Winning Days"
+    else:
+        ziel_txt = f"{_vr2_k((ziel or {}).get('von'))}–{_vr2_k((ziel or {}).get('bis'))} Funded"
+    z_ = [f"{name} · {firma} · Ziel {ziel_txt} · {status}"]
+    if status != "frei":
+        z_.append(f"Zelle {status} — nicht kaufen.")
+        return "\n".join(z_)
+    wort = {"challenge": "Challenge", "phase1": "Phase 1", "phase2": "Phase 2", "funded": "Funded", "funded_cfd": "Funded",
+            "winning_days": "Winning Days"}
+    vor, unt = [], []
+    for k in z.get("konten") or []:
+        teile = [f"{wort.get(k.get('stufe'), k.get('stufe'))} {_vr2_k(k.get('groesse')) if k.get('groesse') else ''}".strip()]
+        if k.get("daten_fehlen"):
+            teile.append("keine Balance-Lesung")
+        else:
+            teile.append(f"Balance {_vr2_usd(k.get('balance'))}")
+            if k.get("abstand_boden") is not None:
+                teile.append(f"bis Boden {_vr2_usd(k.get('abstand_boden'))}")
+            if k.get("abstand_ziel") is not None and not k.get("im_bestand"):
+                teile.append(f"bis Ziel der Stufe {_vr2_usd(max(0, float(k.get('abstand_ziel') or 0)))}")
+            if not k.get("im_bestand") and k.get("chance") is not None:
+                teile.append(f"Chance bis Vorrat {round(100 * float(k['chance']))} %")
+        if k.get("unsicher"):
+            teile.append("Lesung älter als 2 Handelstage")
+        if k.get("eins_vor"):
+            teile.append("eins vor der nächsten Stufe")
+        if k.get("kurz_vor_blow"):
+            teile.append("kurz vor Blow")
+        if k.get("waiting"):
+            teile.append("Waiting for Payout")
+        (vor if k.get("im_bestand") else unt).append(" · ".join(teile))
+    z_.append("Vorrat: " + (f"{betrag(z.get('bestand_echt'))} — " + "; ".join(vor) if vor else "nichts"))
+    z_.append("Unterwegs: " + ("; ".join(unt) if unt else "nichts"))
+    b = z.get("bestellt")
+    if b:
+        z_.append(f"Bestellt: {b.get('anzahl')} × {b.get('einheit') or ''}, davon {b.get('offen')} noch nicht angelegt".replace(" × ,", ","))
+    nk = z.get("nachkauf") or {}
+    if z.get("sperre"):
+        z_.append("Regel: kein Vorschlag (" + ("Daten fehlen" if z["sperre"] == "daten_fehlen" else "Lesung zu alt") + ")")
+    else:
+        regel = f"Regel: {nk.get('n') or 0} × {nk.get('einheit') or 'Konto'} kaufen, heute höchstens {z.get('tagesrate')}"
+        regel += f", Abdeckung {round(100 * float(z.get('abdeckung') or 0))} %"
+        if z.get("toleranz"):
+            regel += ", nah genug am Ziel"
+        z_.append(regel)
+    return "\n".join(z_)
+
+
+def vorrat_ki_pruefen(lauf_zellen, zeilen, max_summe=30, max_je_zelle=5):
+    """REIN RECHNEND (testbar): KI-Antwort prüfen (Master 06.10.2026). zeilen = {"user_id|firma": {heute, einheit, prio, satz}}.
+    Jede Zeile muss eine Zelle des Laufs treffen, die frei ist; heute ganzzahlig 0–max_je_zelle, bei „Daten fehlen"/„unsicher" nur 0;
+    prio hoch|mittel|niedrig; Summe heute ≤ max_summe. → (saubere zeilen, None) oder (None, Klartext-Fehler)"""
+    if not isinstance(zeilen, dict) or len(zeilen) > 300:
+        return None, "zeilen muss ein Objekt {\"user_id|firma\": {heute, einheit, prio, satz}} sein"
+    idx = {f"{z.get('user_id')}|{z.get('firma')}": z for z in lauf_zellen or []}
+    sauber, summe = {}, 0
+    for k, v in zeilen.items():
+        z = idx.get(str(k))
+        if not z:
+            return None, f"Zelle {str(k)[:60]!r} gibt es in diesem Lauf nicht"
+        if z.get("status", "frei") != "frei":
+            return None, f"Zelle {str(k)[:60]!r} ist {z.get('status')} — keine Empfehlung"
+        if not isinstance(v, dict):
+            return None, f"Zeile {str(k)[:60]!r}: erwartet {{heute, einheit, prio, satz}}"
+        n = v.get("heute", 0)
+        if not isinstance(n, int) or isinstance(n, bool) or not (0 <= n <= max_je_zelle):
+            return None, f"Zeile {str(k)[:60]!r}: heute muss eine ganze Zahl 0–{max_je_zelle} sein"
+        if n and z.get("sperre"):
+            return None, f"Zeile {str(k)[:60]!r}: ohne aktuelle Lesung kein Kauf (heute muss 0 sein)"
+        if n and z.get("nur_eins_lebt"):
+            # Leitfaden Punkt 6 (Apex: nur 1 Konto nötig): solange irgendein Konto lebt, wird nichts gekauft — auch nicht von der KI
+            return None, f"Zeile {str(k)[:60]!r}: es lebt noch ein Konto — bei dieser Firma heute nichts kaufen (heute muss 0 sein)"
+        prio = v.get("prio") or "mittel"
+        if prio not in VORRAT_KI_PRIO:
+            return None, f"Zeile {str(k)[:60]!r}: prio muss hoch, mittel oder niedrig sein"
+        summe += n
+        sauber[str(k)] = {"heute": n, "einheit": (str(v.get("einheit") or "").strip()[:80] or None), "prio": prio,
+                          "satz": str(v.get("satz") or "").strip()[:300] or None}
+    if summe > max_summe:
+        return None, f"zusammen {summe} Käufe — höchstens {max_summe} am Tag"
+    return sauber, None
+
+
+def vorrat_ki_anwenden(zellen, ki_zeilen, namen, ki_um):
+    """REIN RECHNEND (testbar): KI-Antwort auf die angezeigten Zellen legen (Master 06.10.2026). Je bewerteter Zelle: satz = KI-Satz,
+    quelle 'ki', ki {heute, prio}; sonst quelle 'regel'. → heute[] aus den KI-Zeilen mit heute > 0 (nur freie Zellen ohne Sperre und
+    ohne offenes „bestellt"), sortiert nach prio, dann Regel-Score; jeder Eintrag mit quelle 'ki' und ki_um."""
+    rang = {p_: i for i, p_ in enumerate(VORRAT_KI_PRIO)}
+    heute = []
+    for z in zellen or []:
+        k = (ki_zeilen or {}).get(f"{z['user_id']}|{z['firma']}")
+        if not isinstance(k, dict):
+            z["quelle"] = "regel"
+            continue
+        z["quelle"] = "ki"
+        z["ki"] = {"heute": k.get("heute", 0), "prio": k.get("prio")}
+        if k.get("satz"):
+            z["satz"] = k["satz"]
+        n = int(k.get("heute") or 0)
+        if n <= 0 or z.get("status") != "frei" or z.get("sperre") or z.get("zustand") == "bestellt":
+            continue
+        nk = z.get("nachkauf") or {}
+        preis = nk.get("preis_eur")
+        name = namen.get(z["user_id"]) or z["user_id"][:8]
+        heute.append({"user_id": z["user_id"], "user": name, "firma": z["firma"], "anzahl": n,
+                      "einheit": k.get("einheit") or nk.get("einheit"), "preis_eur": preis,
+                      "kosten_eur": (round(n * float(preis)) if preis is not None else None), "stufe": "heute",
+                      "satz": z.get("satz"), "prio": k.get("prio"), "quelle": "ki", "ki_um": ki_um,
+                      "_r": (rang.get(k.get("prio"), 9), -(z.get("score") or 0))})
+    heute.sort(key=lambda e: e["_r"])
+    for e in heute:
+        e.pop("_r", None)
+    return heute
 
 
 def vorrat_personen(zellen, namen):
@@ -8172,10 +8365,15 @@ def vorrat2_rechnen_lauf(quelle):
                                       [x for x in bestellungen if str(x.get("user_id")) == uid and _firm_norm(x.get("firma")) == f],
                                       jetzt_iso)
                 z["nachkauf"]["n"] = an["n"]
+                z["bestellt"] = an["bestellt"]
             else:
                 z["nachkauf"]["n"] = 0 if nr == 0 else None
             z["nachkauf"]["dringlichkeit"] = z["lage"]
-            z.update(user_id=uid, firma=f, status=status)
+            z["nachkauf"]["heute"] = (min(z["nachkauf"]["n"], z["tagesrate"]) if isinstance(z["nachkauf"]["n"], int) else None)
+            name = b["disp"].get(uid) or b["names"].get(uid) or uid[:8]
+            z.update(user_id=uid, firma=f, status=status, user=name)
+            # Fakten in Klartext für den KI-Bot (Master 06.10.2026) — liegen im Lauf, /admin/vorrat/lauf liefert sie aus
+            z["fakten_text"] = vorrat_fakten_text(z, name, f, ziele[f], status)
             zellen.append(z)
     _, naechster = vorrat2_slot(jetzt, param["takt_utc"])
     return {"zellen": zellen, "stand": VORRAT2_RECHEN_STAND, "gesamt_score": vorrat_gesamt(zellen)["score"], "quoten": [dict(firma=k[0], stufe=k[1], **v) for k, v in quoten.items()],
@@ -8280,10 +8478,17 @@ def vorrat2_anhaengen(erg1):
         return dict(erg1, stufe2_bereit=False, stufe2_hinweis="noch kein Lauf")
     e2 = lauf["ergebnis"]
     try:
-        ki = (sb_select("vorrat_lauf", {"select": "id,ki_text,ki_zeilen,ki_um", "ki_um": "not.is.null", "order": "id.desc",
-                                        "limit": "1"}) or [{}])[0]
+        # KI-Antwort gehört zum angezeigten (neuesten) Lauf — eine Antwort zu einem älteren Lauf rechnet mit alten Zahlen
+        ki = (sb_select("vorrat_lauf", {"select": "id,ki_text,ki_zeilen,ki_um", "id": f"eq.{lauf.get('id')}"}) or [{}])[0]
     except requests.exceptions.HTTPError:
         ki = {}
+    ki_aktiv = False
+    if ki.get("ki_um") and isinstance(ki.get("ki_zeilen"), dict) and ki["ki_zeilen"]:
+        try:
+            alter_h = (datetime.now(timezone.utc) - datetime.fromisoformat(str(ki["ki_um"]).replace("Z", "+00:00"))).total_seconds() / 3600
+            ki_aktiv = alter_h < float((e2.get("parameter") or {}).get("ki_gueltig_h") or VORRAT2_STD["ki_gueltig_h"])
+        except ValueError:
+            ki_aktiv = False
     jetzt_iso = _wt_now_iso()
     bestellungen = _vorrat2_bestellungen()
     z2 = {(z.get("user_id"), z.get("firma")): z for z in (e2.get("zellen") or [])}
@@ -8313,13 +8518,16 @@ def vorrat2_anhaengen(erg1):
                  unterwegs_stufen=s.get("unterwegs_stufen") or {}, kauf_regel=s.get("kauf_regel"),
                  unterwegs_nominal=s.get("unterwegs_nominal"), bestand_echt=s.get("bestand_echt"),
                  rechnung=(dict(s.get("rechnung") or {}, n=nk.get("n")) if s.get("rechnung") else None),
+                 tagesrate=s.get("tagesrate"), abdeckung=s.get("abdeckung"),
                  toleranz=bool(s.get("toleranz")),
                  # flach für die Box „So wird gerechnet" (T1 06.10.2026) — dieselben Zahlen wie in rechnung
                  zaehlt_neu_usd=(s.get("rechnung") or {}).get("zaehlt_neu_usd"), wert_neu_usd=s.get("wert_neu"),
                  unterwegs_zaehlt_usd=(s.get("rechnung") or {}).get("funnel_zaehlt"),
                  regel_g=(s.get("rechnung") or {}).get("mitte"),
                  bestellt=(an or {}).get("bestellt"), zustand=("bestellt" if (an or {}).get("bestellt") else None),
-                 ki_text=((ki.get("ki_zeilen") or {}).get(f"{z['user_id']}|{z['firma']}")))
+                 ki_text=None)
+        nk["heute"] = (min(nk["n"], s["tagesrate"]) if isinstance(nk.get("n"), int) and isinstance(s.get("tagesrate"), int)
+                       else nk.get("n"))
         z.pop("_angelegt", None)
     # Tagesliste „Heute kaufen" (Master 06.10.2026) aus den angezeigten Zahlen — Bestellungen und neu angelegte Konten wirken sofort
     ziele_a = {f.get("firma"): f.get("ziel") or {} for f in erg1.get("firmen") or []}
@@ -8329,6 +8537,8 @@ def vorrat2_anhaengen(erg1):
     namen = {p_["user_id"]: p_["name"] for p_ in erg1.get("people") or []}
     tmax = int(((e2.get("parameter") or {}).get("tages_max")) or VORRAT2_STD["tages_max"])
     heute, luecke_ges = vorrat_tagesliste(erg1.get("zellen") or [], namen, tmax)
+    for e in heute:
+        e.update(quelle="regel", ki_um=None)
     # Overall-Score mit Trend gegen den vorigen Lauf (der Lauf davor nach Zeitpunkt, mit gespeichertem gesamt_score)
     try:
         vor = [r for r in sb_select("vorrat_lauf", {"select": "id,gs:ergebnis->gesamt_score", "ergebnis": "not.is.null",
@@ -8342,16 +8552,26 @@ def vorrat2_anhaengen(erg1):
         n = (z.get("nachkauf") or {}).get("n")
         z["satz"] = (vorrat_satz(z, namen.get(z["user_id"]) or z["user_id"][:8], n or 0)
                      if z.get("status") == "frei" and not z.get("sperre") and isinstance(n, int) else None)
+        z["quelle"] = "regel"
+    personen_basis = erg1.get("zellen") or []
+    if ki_aktiv:
+        # KI-Bot (Master 06.10.2026): heute[], Satz und Personen-Zeile aus der KI; die Regel-Zahlen bleiben in nachkauf stehen
+        heute = vorrat_ki_anwenden(erg1.get("zellen") or [], ki["ki_zeilen"], namen, ki.get("ki_um"))
+        personen_basis = [dict(z, nachkauf=dict(z.get("nachkauf") or {}, n=(z.get("ki") or {}).get("heute", 0)))
+                          if z.get("quelle") == "ki" else z for z in erg1.get("zellen") or []]
+        gesamt.update(kaeufe_heute=sum(e["anzahl"] for e in heute),
+                      kosten_heute_eur=round(sum(float(e.get("kosten_eur") or 0) for e in heute)))
     return dict(erg1, stufe2_bereit=True, stufe2_hinweis="", gerechnet_um=e2.get("gerechnet_um"),
-                heute=heute, luecke_gesamt=luecke_ges, tages_max=tmax, personen=vorrat_personen(erg1.get("zellen") or [], namen),
+                heute=heute, luecke_gesamt=luecke_ges, tages_max=tmax, personen=vorrat_personen(personen_basis, namen),
+                heute_quelle=("ki" if ki_aktiv else "regel"), ki_um=(ki.get("ki_um") if ki_aktiv else None),
                 gesamt=gesamt,
                 kauf_regel=(e2.get("parameter") or {}).get("kauf_regel"), mitte=(e2.get("parameter") or {}).get("mitte"),
                 regel_satz=vorrat_regel_satz((e2.get("parameter") or {}).get("kauf_regel"), (e2.get("parameter") or {}).get("mitte", 0.5),
                                              (e2.get("parameter") or {}).get("sicherheit", 0.8)),
                 naechster_lauf=vorrat2_slot(datetime.now(timezone.utc), (e2.get("parameter") or VORRAT2_STD)["takt_utc"])[1].isoformat(),
                 lauf_id=lauf.get("id"), lauf_quelle=lauf.get("quelle"), sicherheit_ziel=(e2.get("parameter") or {}).get("sicherheit"),
-                dringlichkeiten=VORRAT2_DRINGLICHKEITEN, ki_text=ki.get("ki_text"), ki_text_um=ki.get("ki_um"),
-                ki_text_lauf_id=ki.get("id"))
+                dringlichkeiten=VORRAT2_DRINGLICHKEITEN, ki_text=(ki.get("ki_text") if ki_aktiv else None),
+                ki_text_um=(ki.get("ki_um") if ki_aktiv else None), ki_text_lauf_id=(ki.get("id") if ki_aktiv else None))
 
 
 def _vorrat_antwort(erg1):
@@ -8494,8 +8714,8 @@ def _vorrat2_aktion(aktion, body, uid):
             if nur:
                 return jsonify({"error": "nur Admin"}), 403
             s = _vr2_num(body.get("sicherheit"))
-            if s is None or not (0.5 <= s <= 0.95):
-                return jsonify({"error": "sicherheit muss zwischen 0,5 und 0,95 liegen (Anteil)"}), 400
+            if s is None or not (0.1 <= s <= 0.95):
+                return jsonify({"error": "sicherheit muss zwischen 0,1 und 0,95 liegen (Anteil)"}), 400
             r = _sb_anfrage("PATCH", f"{SUPABASE_URL}/rest/v1/vorrat_einstellung", params={"id": "eq.1"},
                             json={"sicherheit": round(s, 3), "updated_at": _wt_now_iso()},
                             headers=_sb_headers("return=minimal"))
@@ -8583,7 +8803,10 @@ def admin_vorrat_lauf():
 
 @app.route("/admin/vorrat/ki", methods=["POST", "OPTIONS"])
 def admin_vorrat_ki():
-    """Text zu einem Lauf schreiben — NUR Textfelder (ki_text, ki_zeilen), nie eine Zahl. {lauf_id, text, zeilen{"uid|firma": text}}"""
+    """KI-Antwort zu einem Lauf (Master 06.10.2026: KI-Bot, der wie Finn denkt — Routine in der Cloud ruft Railway).
+    {lauf_id, text, zeilen: {"user_id|firma": {heute, einheit, prio, satz}}} — geprüft mit vorrat_ki_pruefen (Zelle des Laufs, frei,
+    heute 0–5, ohne Lesung nur 0, Summe ≤ 30) und in vorrat_lauf.ki_zeilen/ki_text/ki_um gespeichert. GET /admin/vorrat baut
+    heute[] daraus, solange die Antwort zum neuesten Lauf gehört und jünger als ki_gueltig_h ist."""
     if request.method == "OPTIONS":
         return "", 200
     if not _vorrat2_code_ok():
@@ -8596,14 +8819,17 @@ def admin_vorrat_ki():
     lid = body.get("lauf_id")
     if not isinstance(lid, int):
         return jsonify({"error": "lauf_id fehlt"}), 400
-    zeilen = body.get("zeilen") or {}
-    if not isinstance(zeilen, dict) or len(zeilen) > 300:
-        return jsonify({"error": "zeilen ungültig"}), 400
-    sauber = {}
-    for k, v in zeilen.items():
-        if not re.match(r"^[0-9a-f-]{36}\|.{1,80}$", str(k)):
-            return jsonify({"error": f"Schlüssel {str(k)[:40]!r} ungültig (user_id|firma)"}), 400
-        sauber[str(k)] = str(v or "")[:1000]
+    try:
+        rows = sb_select("vorrat_lauf", {"select": "id,zellen:ergebnis->zellen", "id": f"eq.{lid}"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    if not rows or not rows[0].get("zellen"):
+        return jsonify({"error": "Lauf nicht gefunden oder ohne Ergebnis"}), 404
+    _, prm, _, _ok = _vorrat2_tabellen()
+    sauber, fehler = vorrat_ki_pruefen(rows[0]["zellen"], body.get("zeilen") or {}, int(prm.get("ki_max_tag") or 30),
+                                       int(prm.get("ki_max_zelle") or 5))
+    if fehler:
+        return jsonify({"error": fehler}), 400
     try:
         r = sb_update("vorrat_lauf", {"id": f"eq.{lid}"},
                       {"ki_text": str(body.get("text") or "")[:4000] or None, "ki_zeilen": sauber, "ki_um": _wt_now_iso()})
@@ -8611,7 +8837,7 @@ def admin_vorrat_ki():
         return jsonify({"error": str(e)}), 500
     if not r:
         return jsonify({"error": "Lauf nicht gefunden"}), 404
-    return jsonify({"ok": True, "lauf_id": lid})
+    return jsonify({"ok": True, "lauf_id": lid, "zeilen": len(sauber), "heute": sum(v["heute"] for v in sauber.values())})
 
 
 # Takt (06.10.2026) — nur Railway, siehe VORRAT STUFE 2 oben

@@ -69,7 +69,10 @@ def lade():
     teile.append(src[j:src.index("\n\n\n", j)])
     teile += [block(f) for f in ("_ap_norm", "ap_regel_finden", "ap_groesse", "ap_kw_param", "_ap_kw_kauf", "_ap_kw_wachsen",
                                  "ap_kontowert", "vorrat_stufen_aus_kernwerten")]
-    teile += [block(f) for f in ("vorrat_ziel_pruefen", "_vr2_k", "_vr2_usd", "_vr2_unterwegs_txt", "vorrat_satz_nominal", "vorrat_satz", "vorrat_personen", "vorrat_regel_satz", "vorrat_gesamt", "vorrat_tagesliste", "_vr2_num", "vorrat_chance_stufe", "vorrat_chance_kette", "vorrat_bestand_konto",
+    j2 = src.index("VORRAT_KI_PRIO = ")
+    teile.append(src[j2:src.index("\n", j2)])
+    teile += [block(f) for f in ("vorrat_ziel_pruefen", "_vr2_k", "_vr2_usd", "_vr2_unterwegs_txt", "vorrat_satz_nominal", "vorrat_satz", "vorrat_personen", "vorrat_regel_satz", "vorrat_gesamt", "vorrat_fakten_text", "vorrat_ki_pruefen",
+                                 "vorrat_ki_anwenden", "vorrat_tagesliste", "_vr2_num", "vorrat_chance_stufe", "vorrat_chance_kette", "vorrat_bestand_konto",
                                  "vorrat_alter_handelstage", "vorrat_mc", "vorrat_score", "vorrat_totband", "vorrat_anzeige_n",
                                  "vorrat_quoten", "vorrat2_zelle", "vorrat2_slot")]
     exec("\n\n".join(teile), ns)
@@ -157,11 +160,17 @@ def main():
 
     # ── Zelle: ID F × FundedNext (Konzept 05.10.2026) ──
     zelle = ns["vorrat2_zelle"]
+
+    def mit(regel):
+        """zelle mit fester Kaufregel (Standard ist seit 06.10.2026 spät 'sicherheit' 25 %)"""
+        return lambda *a, param=None, **kw: zelle(*a, param=dict(regel, **(param or {})), **kw)
+    zelleS80 = mit({"kauf_regel": "sicherheit", "sicherheit": 0.8, "toleranz_pct": 0, "mindest_funnel": 1})
+    zelleM = mit({"kauf_regel": "mitte", "nur_eins_firmen": ["apextrader"]})
     idf = [{"account_id": "k1", "typ": "phase2", "groesse": 50000, "balance": 53934, "alter_tage": 0},
              {"account_id": "k2", "typ": "phase2", "groesse": 100000, "balance": 92208, "alter_tage": 0}] + \
             [{"account_id": f"k{3 + i}", "typ": "phase1", "groesse": 100000, "balance": 100000, "alter_tage": 0} for i in range(3)]
     # Master 06.10.2026: reine Formel (Finns Regel), keine Korrektur — Finns „→ 2" war geschätzt (Konzept mit P2 × 0,90)
-    z = zelle(ZIEL_FN, FN, idf, "frei", param={"kauf_regel": "sicherheit"}, seed=11)
+    z = zelleS80(ZIEL_FN, FN, idf, "frei", seed=11)
     erw = 0.95 * 50000 + (2208 / 15000) * 100000 + 3 * (10 / 18) * (10 / 15) * 100000
     pruef("ID F × FundedNext: erwartet ≈ 173k (reine Formel)", z["erwartet"], erw, 1)
     pruef("… nach Erwartungswert 1 × 100k", z["nachkauf"]["n_erwartung"], 1)
@@ -188,7 +197,7 @@ def main():
     p_neu = (4500 / 8100) ** 2 * (4500 / 6300) * (4500 / 19000)
     pruef("a) Tradeify +18,4k gegen 20k: n = 1.637 ÷ (Chance × 14.500)", zt["nachkauf"]["n_roh"],
           -(-(20000 - 18363) // (p_neu * 14500)))
-    z60 = zelle(ZIEL_FN, FN, idf, "frei", param={"sicherheit": 0.55, "kauf_regel": "sicherheit"}, seed=11)
+    z60 = zelleS80(ZIEL_FN, FN, idf, "frei", param={"sicherheit": 0.55}, seed=11)
     pruef("Sicherheit 55 % → weniger Käufe als 80 %", z60["nachkauf"]["n_roh"] < z["nachkauf"]["n_roh"], True)
     pruef("pausiert: kein Kauf, keine Dringlichkeit", (lambda q: (q["nachkauf"]["n_roh"], q["lage"], q["nachkauf"]["grund"]))(
         zelle(ZIEL_FN, FN, idf, "pausiert")), (0, None, "pausiert"))
@@ -202,10 +211,10 @@ def main():
     gedeckt = [{"account_id": f"f{i}", "typ": "funded_cfd", "groesse": 100000, "balance": 101000, "alter_tage": 0} for i in range(3)]
     q = zelle(ZIEL_FN, FN, gedeckt, "frei")
     pruef("300k Funded = über dem Ziel → gedeckt, kein Kauf", (q["lage"], q["nachkauf"]["n_roh"], q["score"]), ("gedeckt", 0, 0))
-    q = zelle(ZIEL_FN, FN, gedeckt[:2], "frei", param={"kauf_regel": "sicherheit"})
+    q = zelleS80(ZIEL_FN, FN, gedeckt[:2], "frei")
     pruef("200k Funded, kein Funnel: Blow drückt unter 200k → bald + Nachkauf", (q["lage"], q["nachkauf"]["grund"],
           q["nachkauf"]["n_roh"]), ("bald", "blow_reserve", 4))
-    q = zelle(dict(ZIEL_FN, von=100000), FN, gedeckt[:2], "frei", param={"kauf_regel": "sicherheit"})
+    q = zelleS80(dict(ZIEL_FN, von=100000), FN, gedeckt[:2], "frei")
     pruef("Mindest-Funnel: 200k bei Untergrenze 100k, nichts unterwegs → 1 Konto, bald",
           (q["lage"], q["nachkauf"]["grund"], q["nachkauf"]["n_roh"], q["score"]), ("bald", "mindest_funnel", 1, 34))
     gef = [{"account_id": "g", "typ": "funded_cfd", "groesse": 100000, "balance": 91000, "alter_tage": 0}]
@@ -236,12 +245,12 @@ def main():
     ziel_tr = {"art": "plus_ueber_start", "typen": ["winning_days"], "von": 20000, "bis": 30000, "kauf_groesse": 150000,
                "kauf_stufe": "challenge", "kauf_einheit": "150k Select"}
     fd = [{"account_id": "f", "typ": "funded", "groesse": 150000, "balance": 150000, "alter_tage": 0}]
-    qc = zelle(ziel_tr, TRADEIFY, fd, "frei")
+    qc = zelle(ziel_tr, TRADEIFY, fd, "frei", param={"kauf_regel": "erwartung"})
     pbig = 4500 / 19000
     pruef("c) Tradeify-Funded zählt mit 14.500 × 23,7 % zum Bestand", (qc["bestand_gewichtet"], qc["konten"][0]["anteilig"],
           qc["unterwegs_n"]), (round(14500 * pbig, 2), True, 1))
-    pruef("c) aus: Funded bleibt reiner Funnel", zelle(ziel_tr, TRADEIFY, fd, "frei", param={"funded_anteilig": False})["bestand_gewichtet"], 0.0)
-    pruef("c) erwartet gleich (nur umgebucht)", zelle(ziel_tr, TRADEIFY, fd, "frei", param={"funded_anteilig": False})["erwartet"],
+    pruef("c) aus: Funded bleibt reiner Funnel", zelle(ziel_tr, TRADEIFY, fd, "frei", param={"funded_anteilig": False, "kauf_regel": "erwartung"})["bestand_gewichtet"], 0.0)
+    pruef("c) erwartet gleich (nur umgebucht)", zelle(ziel_tr, TRADEIFY, fd, "frei", param={"funded_anteilig": False, "kauf_regel": "erwartung"})["erwartet"],
           qc["erwartet"])
     sz = ns["vorrat_satz"]
     zf = dict(zelle(ZIEL_FN, FN, [idf[2]], "frei", param={"kauf_regel": "erwartung"}, seed=11), firma="FundedNext",
@@ -337,17 +346,17 @@ def main():
     pruef("nominal: kein Mindest-Funnel über der Untergrenze", zelle(dict(ZIEL_FN, von=100000), FN, gedeckt[:2], "frei", param=NOM)["nachkauf"]["n_roh"], 0)
 
     # ── Kaufregel mitte (Standard, Finn 06.10.2026 abends) — Kontrollfälle des Masters ──
-    pruef("Standard kauf_regel = mitte, g = 0,5", (ns["VORRAT2_STD"]["kauf_regel"], ns["VORRAT2_STD"]["mitte"]), ("mitte", 0.5))
-    q = zelle(ziel_apex, APEX, apex_k, "frei")
+    pruef("Standard: kauf_regel sicherheit 25 %, mitte-g 0,5", (ns["VORRAT2_STD"]["kauf_regel"], ns["VORRAT2_STD"]["sicherheit"], ns["VORRAT2_STD"]["mitte"]), ("sicherheit", 0.25, 0.5))
+    q = zelleM(ziel_apex, APEX, apex_k, "frei")
     pruef("mitte Apex: 1 Funded + 2 Eval, Ziel 1 WD → 0", (q["nachkauf"]["n_roh"], q["lage"]), (0, "gedeckt"))
     pruef("… Satz ohne Rechnung", ns["vorrat_satz"](dict(q, firma="Apex Trader", art="stueck", typen=["winning_days"]), "ID X", 0),
           "ID X hat bei Apex Trader 1 Funded + 2 Evaluations unterwegs — reicht, nichts kaufen.")
-    q = zelle(ziel_tr, TRADEIFY, [], "frei")
+    q = zelleM(ziel_tr, TRADEIFY, [], "frei")
     pruef("mitte Tradeify leer, Ziel 20k → 3, jetzt", (q["nachkauf"]["n_roh"], q["lage"]), (3, "jetzt"))
     pruef("… Satz", ns["vorrat_satz"](dict(q, firma="Tradeify", art="plus_ueber_start", typen=["winning_days"]), "ID M", 3),
           "ID M hat bei Tradeify nichts im Vorrat und nichts unterwegs — 3 kaufen.")
-    pruef("mitte Tradeify 3 frische Challenges → 0", zelle(ziel_tr, TRADEIFY, tr3, "frei")["nachkauf"]["n_roh"], 0)
-    q = zelle(ziel_tr, TRADEIFY, tr3[:2], "frei")
+    pruef("mitte Tradeify 3 frische Challenges → 0", zelleM(ziel_tr, TRADEIFY, tr3, "frei")["nachkauf"]["n_roh"], 0)
+    q = zelleM(ziel_tr, TRADEIFY, tr3[:2], "frei")
     pruef("mitte Tradeify 2 frische → 1, bald", (q["nachkauf"]["n_roh"], q["lage"]), (1, "bald"))
     pruef("… Satz", ns["vorrat_satz"](dict(q, firma="Tradeify", art="plus_ueber_start", typen=["winning_days"]), "ID M", 1),
           "ID M hat bei Tradeify nichts im Vorrat und 2 Challenges unterwegs — das reicht noch nicht, 1 kaufen.")
@@ -361,18 +370,18 @@ def main():
     # Toleranz (Finn 06.10.2026: Tradeify +20k — 18k passt, ab ~16k nachkaufen), Standard 15 %
     def wd(b):
         return [{"account_id": f"w{b}", "typ": "winning_days", "groesse": 150000, "balance": 150000 + b, "alter_tage": 0}]
-    q = zelle(ziel_tr, TRADEIFY, wd(18362), "frei")
+    q = zelleM(ziel_tr, TRADEIFY, wd(18362), "frei")
     pruef("Toleranz: Tradeify 18.362, Funnel leer → 0, gedeckt", (q["nachkauf"]["n_roh"], q["lage"], q["toleranz"]), (0, "gedeckt", True))
     pruef("… Satz", ns["vorrat_satz"](dict(q, firma="Tradeify", art="plus_ueber_start", typen=["winning_days"]), "ID C", 0),
           "ID C hat bei Tradeify 18.362 $ von 20.000 $ — nah genug am Ziel, nichts kaufen.")
-    pruef("Toleranz: 16.000 → 1 (bis zur vollen Untergrenze)", zelle(ziel_tr, TRADEIFY, wd(16000), "frei")["nachkauf"]["n_roh"], 1)
-    pruef("Toleranz: 12.000 → 2", zelle(ziel_tr, TRADEIFY, wd(12000), "frei")["nachkauf"]["n_roh"], 2)
+    pruef("Toleranz: 16.000 → 1 (bis zur vollen Untergrenze)", zelleM(ziel_tr, TRADEIFY, wd(16000), "frei")["nachkauf"]["n_roh"], 1)
+    pruef("Toleranz: 12.000 → 2", zelleM(ziel_tr, TRADEIFY, wd(12000), "frei")["nachkauf"]["n_roh"], 2)
     pruef("Toleranz: Schwelle 17.000 in der Rechnung", (q["rechnung"]["toleranz_pct"], q["rechnung"]["schwelle"]), (15.0, 17000.0))
-    pruef("Toleranz 0 → 18.362 kauft 1", zelle(ziel_tr, TRADEIFY, wd(18362), "frei", param={"toleranz_pct": 0})["nachkauf"]["n_roh"], 1)
-    pruef("Toleranz gilt nicht bei Stück-Zielen", zelle(ZIEL_T5, T5, t5, "frei")["toleranz"], False)
+    pruef("Toleranz 0 → 18.362 kauft 1", zelleM(ziel_tr, TRADEIFY, wd(18362), "frei", param={"toleranz_pct": 0})["nachkauf"]["n_roh"], 1)
+    pruef("Toleranz gilt nicht bei Stück-Zielen", zelleM(ZIEL_T5, T5, t5, "frei")["toleranz"], False)
     fn150 = [{"account_id": "a", "typ": "funded_cfd", "groesse": 100000, "balance": 101000, "alter_tage": 0},
              {"account_id": "b", "typ": "funded_cfd", "groesse": 50000, "balance": 51000, "alter_tage": 0}]
-    q = zelle(dict(ZIEL_FN, von=175000), FN, fn150, "frei")
+    q = zelleM(dict(ZIEL_FN, von=175000), FN, fn150, "frei")
     pruef("Toleranz bei Summen-Zielen: FundedNext 150k gegen 175k (Schwelle 148.750) → 0", (q["nachkauf"]["n_roh"], q["toleranz"]), (0, True))
     # Overall-Score (Finn 06.10.2026)
     vg = ns["vorrat_gesamt"]
@@ -389,16 +398,99 @@ def main():
     pruef("Gesamt: Wort-Grenzen", [vg([gz(b_, 0, 100)])["wort"] for b_ in (100, 76, 75, 51, 50, 26, 25, 0)],
           ["entspannt", "entspannt", "mittel", "mittel", "dringend", "dringend", "sehr dringend", "sehr dringend"])
     pruef("Gesamt: ohne Zellen → None", (vg([])["score"], vg([])["wort"]), (None, None))
+    # ── Tages-Tempo, „eins vor", Fakten, KI (Master 06.10.2026, Leitfaden) ──
+    q = zelleM(ziel_tr, TRADEIFY, [], "frei")
+    pruef("Tagesrate Futures leer (Abdeckung 0) → 3", (q["tagesrate"], q["abdeckung"]), (3, 0.0))
+    q = zelleM(ziel_tr, TRADEIFY, wd(12000), "frei")
+    pruef("Tagesrate Futures 60 % → 1", (q["tagesrate"], q["abdeckung"]), (1, 0.6))
+    pruef("Tagesrate Futures 18.362 (> 85 %) → 0", zelleM(ziel_tr, TRADEIFY, wd(18362), "frei")["tagesrate"], 0)
+    pruef("Tagesrate CFD leer → 2", zelleM(ZIEL_FN, FN, [], "frei")["tagesrate"], 2)
+    APEX_K = dict(APEX, _key="apextrader")
+    q = zelleM(ziel_apex, APEX_K, [{"account_id": "a", "typ": "funded", "groesse": 150000, "balance": 146500, "alter_tage": 0}], "frei")
+    pruef("Apex angefressen (lebt noch) → Tagesrate 0", q["tagesrate"], 0)
+    q_apex_lebt = q["nur_eins_lebt"]
+    pruef("Apex alles weg → Tagesrate 2", zelleM(ziel_apex, APEX_K, [], "frei")["tagesrate"], 2)
+    eins = [{"account_id": "e", "typ": "challenge", "groesse": 150000, "balance": 157500, "alter_tage": 0}]
+    q = zelleM(ziel_tr, TRADEIFY, eins, "frei")
+    pruef("Tradeify-Challenge mit 1 Etappe Rest = eins vor, zählt ≥ 0,8", (q["konten"][0]["eins_vor"], q["konten"][0]["gewicht"] >= 0.8),
+          (True, True))
+    pruef("frische Challenge ist nicht eins vor", zelleM(ziel_tr, TRADEIFY, tr3[:1], "frei")["konten"][0]["eins_vor"], False)
+    p1n = [{"account_id": "n", "typ": "phase1", "groesse": 100000, "balance": 106000, "alter_tage": 0}]
+    pruef("CFD-Phase nahe am Ziel (16/18 = 89 %) = eins vor", zelleM(ZIEL_FN, FN, p1n, "frei")["konten"][0]["eins_vor"], True)
+    kvb = [{"account_id": "k", "typ": "phase1", "groesse": 100000, "balance": 91000, "alter_tage": 0}]
+    pruef("CFD-Phase 1.000 vor Boden = kurz vor Blow", zelleM(ZIEL_FN, FN, kvb, "frei")["konten"][0]["kurz_vor_blow"], True)
+    ft = ns["vorrat_fakten_text"]
+    q = zelleM(ziel_tr, TRADEIFY, wd(18362) + eins, "frei")
+    txt = ft(q, "ID A", "Tradeify", ziel_tr)
+    pruef("Fakten: Kopf, Vorrat, Unterwegs, Regel", [txt.split("\n")[i].split(" ")[0] for i in range(4)], ["ID", "Vorrat:", "Unterwegs:", "Regel:"])
+    pruef("Fakten: eins vor + Abstände in $", ("eins vor der nächsten Stufe" in txt, "bis Boden 4.500 $" in txt), (True, True))
+    pruef("Fakten: pausiert", ft(q, "ID A", "Tradeify", ziel_tr, "pausiert").endswith("Zelle pausiert — nicht kaufen."), True)
+    kp = ns["vorrat_ki_pruefen"]
+    lz = [{"user_id": "a", "firma": "Tradeify", "status": "frei"}, {"user_id": "a", "firma": "FundingPips", "status": "frei"},
+          {"user_id": "c", "firma": "Apex Trader", "status": "frei"}, {"user_id": "c", "firma": "FTMO", "status": "pausiert"},
+          {"user_id": "d", "firma": "FundedNext", "status": "frei", "sperre": "daten_fehlen"}]
+    finn = {"a|Tradeify": {"heute": 0, "prio": "niedrig", "satz": "18k von 20k — passt perfekt, nichts kaufen."},
+            "a|FundingPips": {"heute": 2, "einheit": "100k 2-Step", "prio": "hoch", "satz": "Nur 1 × 50k Funded — heute 2 × 100k."},
+            "c|Apex Trader": {"heute": 0, "prio": "niedrig", "satz": "Alles angefressen, aber es lebt noch — nichts kaufen."}}
+    sauber, f = kp(lz, finn)
+    pruef("KI: Finns Beispiele gültig", (f, sauber["a|FundingPips"]["heute"], sauber["c|Apex Trader"]["heute"]), (None, 2, 0))
+    pruef("KI: Summe > 30 → Fehler", kp(lz, {"a|Tradeify": {"heute": 5}, **{f"a|FundingPips": {"heute": 5}}}, max_summe=8)[1],
+          "zusammen 10 Käufe — höchstens 8 am Tag")
+    pruef("KI: heute 6 → Fehler", kp(lz, {"a|Tradeify": {"heute": 6}})[1], "Zeile 'a|Tradeify': heute muss eine ganze Zahl 0–5 sein")
+    pruef("KI: pausierte Zelle → Fehler", kp(lz, {"c|FTMO": {"heute": 0}})[1].endswith("ist pausiert — keine Empfehlung"), True)
+    pruef("KI: ohne Lesung nur 0", kp(lz, {"d|FundedNext": {"heute": 1}})[1].endswith("(heute muss 0 sein)"), True)
+    pruef("KI: unbekannte Zelle → Fehler", kp(lz, {"x|Tradeify": {"heute": 1}})[1].startswith("Zelle 'x|Tradeify' gibt es"), True)
+    pruef("KI: Apex lebt noch → nur 0 erlaubt", kp([{"user_id": "c", "firma": "Apex Trader", "status": "frei", "nur_eins_lebt": True}],
+          {"c|Apex Trader": {"heute": 2}})[1].endswith("heute nichts kaufen (heute muss 0 sein)"), True)
+    pruef("Apex angefressen: Zelle merkt sich „lebt noch\"", q_apex_lebt, True)
+    pruef("KI: falsche prio → Fehler", kp(lz, {"a|Tradeify": {"heute": 1, "prio": "sofort"}})[1].endswith("hoch, mittel oder niedrig sein"), True)
+    ka = ns["vorrat_ki_anwenden"]
+    zz = [{"user_id": "a", "firma": "Tradeify", "status": "frei", "score": 10, "nachkauf": {"preis_eur": 215, "einheit": "150k"}},
+          {"user_id": "a", "firma": "FundingPips", "status": "frei", "score": 80, "nachkauf": {"preis_eur": 464, "einheit": "100k"}},
+          {"user_id": "c", "firma": "Apex Trader", "status": "frei", "score": 90, "nachkauf": {"preis_eur": 150}},
+          {"user_id": "e", "firma": "FTMO", "status": "frei", "score": 50, "nachkauf": {"preis_eur": 446}}]
+    h = ka(zz, dict(sauber, **{"e|FTMO": {"heute": 1, "prio": "mittel", "satz": "1 × 100k."}}), {"a": "ID A"}, "2026-10-06T17:00:00Z")
+    pruef("KI: heute nur mit heute > 0, Reihenfolge prio, Apex 0 bleibt 0",
+          [(e["firma"], e["anzahl"], e["quelle"], e["kosten_eur"]) for e in h], [("FundingPips", 2, "ki", 928), ("FTMO", 1, "ki", 446)])
+    pruef("KI: Satz und Quelle je Zelle, unbewertet = regel", [(z["firma"], z["quelle"], z.get("satz", "")[:5]) for z in zz],
+          [("Tradeify", "ki", "18k v"), ("FundingPips", "ki", "Nur 1"), ("Apex Trader", "ki", "Alles"), ("FTMO", "ki", "1 × 1")])
+    zz2 = [{"user_id": "z", "firma": "Topstep", "status": "frei", "nachkauf": {}}]
+    ka(zz2, {}, {}, None)
+    pruef("KI: ohne Zeile → quelle regel", zz2[0]["quelle"], "regel")
+    zb_ = [dict(zz[1], zustand="bestellt")]
+    pruef("KI: bestellt → nicht in heute", ka(zb_, sauber, {}, None), [])
+    # ── Hauptregel 25 % (Standard, Finn 06.10.2026 spät) — Kontrollfälle des Masters ──
+    q = zelle(ziel_apex, APEX, apex_k, "frei")
+    pruef("25 %: Apex 1 Funded + 2 Eval (≈ 23 %) → 1", (q["nachkauf"]["n_roh"], round(q["sicherheit"], 2) < 0.25, q["sicherheit_nach"] >= 0.25),
+          (1, True, True))
+    pruef("25 %: Apex läuft ohne Ausnahme über die Tagesrate der Futures", (q["tagesrate"], q["nur_eins_lebt"]), (3, False))
+    q = zelle(ziel_tr, TRADEIFY, wd(18362), "frei")
+    pruef("25 %: Tradeify 18.362 → 0 (Toleranz)", (q["nachkauf"]["n_roh"], q["toleranz"]), (0, True))
+    q = zelle(ziel_tr, TRADEIFY, [], "frei")
+    pruef("25 %: Tradeify leer → Deckel 10 (zwei Erfolge à 14.500 nötig, je ≈ 5 %)", (q["nachkauf"]["n_roh"], q["hinweise"][-1][:6]), (10, "Deckel"))
+    q = zelle(ZIEL_FN, FN, [], "frei")
+    pruef("25 %: FundedNext leer, Ziel 200k → 3 × 100k (2 ergäben nur 14 %)", (q["nachkauf"]["n_roh"], q["sicherheit_nach"] >= 0.25), (3, True))
+    pruef("25 %: FundedNext 100k + 1 P1 → 0 (37 % ≥ 25 %)", zelle(ZIEL_FN, FN, fn2, "frei")["nachkauf"]["n_roh"], 0)
+    pruef("25 %: kein Mindest-Funnel", zelle(dict(ZIEL_FN, von=100000), FN, gedeckt[:2], "frei")["nachkauf"]["n_roh"], 0)
+    # FTMO „100k oder 200k" konkret (Finn 06.10.2026)
+    ftmo_st = ns["vorrat_stufen_aus_kernwerten"](ns["ap_regel_finden"](KERN, "FTMO"))
+    kw_ftmo = ns["ap_kw_param"](ns["ap_regel_finden"](KERN, "FTMO"))
+    ziel_ftmo = {"art": "groessen_summe", "typen": ["funded_cfd", "funded"], "von": 100000, "bis": 200000, "kauf_groesse": 100000,
+                 "kauf_einheit": "100k oder 200k"}
+    q = zelle(ziel_ftmo, ftmo_st, [], "frei", kw=kw_ftmo)
+    pruef("FTMO leer, Ziel 100k: 1 × 100k (Kette 33 % ≥ 25 %), Einheit konkret", (q["nachkauf"]["n_roh"], q["nachkauf"]["einheit"]), (1, "100k"))
+    q = zelle(dict(ziel_ftmo, von=200000, bis=300000), ftmo_st, [], "frei", kw=kw_ftmo)
+    pruef("FTMO Lücke 200k → Einheit 200k", (q["nachkauf"]["einheit"], q["nachkauf"]["preis_eur"]), ("200k", 892))
     rs = ns["vorrat_regel_satz"]
     pruef("Regel-Satz mitte 0,5", rs("mitte", 0.5).startswith("Jedes laufende Konto zählt halb so, als käme es sicher durch, und halb mit"), True)
     pruef("Regel-Satz mitte 0,7", "zu 70 % so, als käme es sicher durch, und zu 30 %" in rs("mitte", 0.7), True)
     pruef("Regel-Satz Sicherheit", rs("sicherheit", sicherheit=0.8).startswith("Es wird so viel gekauft, dass das Ziel mit 80 %"), True)
-    pruef("mitte FundedNext leer, Ziel 200k → 3 × 100k", zelle(ZIEL_FN, FN, [], "frei")["nachkauf"]["n_roh"], 3)
-    pruef("mitte FundedNext 100k Vorrat + 1 P1 → 1", zelle(ZIEL_FN, FN, fn2, "frei")["nachkauf"]["n_roh"], 1)
-    pruef("mitte g = 1 wie nominal (FundedNext 100k + P1 → 0)", zelle(ZIEL_FN, FN, fn2, "frei", param={"mitte": 1})["nachkauf"]["n_roh"], 0)
-    pruef("mitte g = 0 wie erwartung (Tradeify leer)", zelle(ziel_tr, TRADEIFY, [], "frei", param={"mitte": 0})["nachkauf"]["n_roh"],
-          zelle(ziel_tr, TRADEIFY, [], "frei", param={"kauf_regel": "erwartung"})["nachkauf"]["n_roh"])
-    pruef("mitte: Konto unter dem Boden zählt nicht", zelle(ZIEL_FN, FN, tot, "frei")["nachkauf"]["n_roh"], 3)
+    pruef("mitte FundedNext leer, Ziel 200k → 3 × 100k", zelleM(ZIEL_FN, FN, [], "frei")["nachkauf"]["n_roh"], 3)
+    pruef("mitte FundedNext 100k Vorrat + 1 P1 → 1", zelleM(ZIEL_FN, FN, fn2, "frei")["nachkauf"]["n_roh"], 1)
+    pruef("mitte g = 1 wie nominal (FundedNext 100k + P1 → 0)", zelleM(ZIEL_FN, FN, fn2, "frei", param={"mitte": 1})["nachkauf"]["n_roh"], 0)
+    pruef("mitte g = 0 wie erwartung (Tradeify leer)", zelleM(ziel_tr, TRADEIFY, [], "frei", param={"mitte": 0})["nachkauf"]["n_roh"],
+          zelleM(ziel_tr, TRADEIFY, [], "frei", param={"kauf_regel": "erwartung"})["nachkauf"]["n_roh"])
+    pruef("mitte: Konto unter dem Boden zählt nicht", zelleM(ZIEL_FN, FN, tot, "frei")["nachkauf"]["n_roh"], 3)
 
     # ── Zusammenfassung je Person (06.10.2026 live: „alles gedeckt" bei pausiert bzw. ohne Lesung) ──
     vp = ns["vorrat_personen"]
