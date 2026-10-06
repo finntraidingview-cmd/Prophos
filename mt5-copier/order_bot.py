@@ -15091,6 +15091,28 @@ def tsx_k3_contract_ziel(vorschlaege, wurzel, jetzt=None):
     return None, f"mehrere Monate ({', '.join(codes)}), Front-Monat {front} nicht dabei"
 
 
+def tsx_k3_contract_steht(contract, code, wurzel, titel):
+    """REIN RECHNEND (testbar): Gilt der Contract als gewählt? -> (ok, wie). Zwei Beweise, die Liste muss immer zu sein:
+    (a) das Feld zeigt genau den Code („MNQZ26") → 'feld'. (b) Finn live 06.10.2026 (Chris-PC): nach dem Klick auf den Vorschlag
+    blieb im Feld die getippte Wurzel („mnq") stehen, die Auswahl galt trotzdem — der Chart stand schon auf MNQ („das kann man
+    cross-checken, indem auf dem Chart einfach schon MNQ drauf ist"). Der Seitentitel des TopstepX-Tabs trägt den Chart-Contract
+    („MNQZ26 $31,516.00 ▲ +0.63%"); der Contract-Wähler oben treibt Chart UND Order-Karte. Beweis (b) = Feld leer oder genau die
+    Wurzel, Titel beginnt mit genau dem Code UND die Wurzel des Codes ist die getippte („nq" bestätigt nie MNQZ26) → 'chart'.
+    Ein beliebiger anderer Feldtext (halb getippt, fremder Code) zählt nie."""
+    c = contract if isinstance(contract, dict) else None
+    cd = str(code or "").strip().upper()
+    if c is None or "wert" not in c or not cd or c.get("offen"):   # kein gelesenes Feld → auch der Titel beweist nichts
+        return False, ""
+    wert = str(c.get("wert") or "").strip().upper()
+    if wert == cd:
+        return True, "feld"
+    w = str(wurzel or "").strip().upper()
+    kopf = str(titel or "").strip().split(" ")[0].strip().upper() if titel else ""
+    if w and wert in ("", w) and kopf == cd and tv_symbol_root(cd) == w:
+        return True, "chart"
+    return False, ""
+
+
 def tsx_k3_menge_passt(wert, menge):
     """REIN RECHNEND (testbar): steht im Mengenfeld genau die Plan-Menge? („3" == 3; „", „3a", „1.5" nie)"""
     m = re.fullmatch(r"\s*(\d{1,3})\s*", str(wert if wert is not None else ""))
@@ -15136,10 +15158,10 @@ def tsx_k3_vor_klick(stand, befehl, code, ext):
     if ot.lower() != "market":
         f.append(f"Order-Typ '{ot or '-'}' statt Market")
     c = t.get("contract") if isinstance(t.get("contract"), dict) else {}
-    if str(c.get("wert") or "").strip().upper() != str(code or "").upper() or not code:
-        f.append(f"Contract '{c.get('wert') or '-'}' statt {code or '-'}")
     if c.get("offen"):
         f.append("Contract-Liste noch offen")
+    elif not tsx_k3_contract_steht(c, code, b.get("wurzel"), st.get("titel"))[0]:   # Feld = Code, oder Wurzel im Feld + Chart-Titel = Code (06.10.2026)
+        f.append(f"Contract '{c.get('wert') or '-'}' statt {code or '-'}")
     m = t.get("menge") if isinstance(t.get("menge"), dict) else {}
     if not tsx_k3_menge_passt(m.get("wert"), b.get("menge")):
         f.append(f"Menge '{m.get('wert') if m.get('wert') is not None else '-'}' statt {b.get('menge')}")
@@ -15400,14 +15422,22 @@ def _tsx_k3_contract(s, st, wurzel, trail):
             _warte(0.6, 0.3)
             st = s.stand()
             continue
-        c2 = {}
-        for _ in range(4):
+        c2, esc_getan = {}, False
+        for _ in range(6):
             _warte(0.6, 0.3)
             st = s.stand()
             c2 = _tsx_tk(st).get("contract") if isinstance(_tsx_tk(st).get("contract"), dict) else {}
-            if str(c2.get("wert") or "").strip().upper() == str(x.get("code")).upper() and not c2.get("offen"):
-                trail.append(f"Contract {x.get('code')} gewählt — Rücklesung '{c2.get('wert')}', Liste zu")
+            # Finn live 06.10.2026 (Chris-PC, Lauf 17:33 UTC): 1. Versuch — Feld blieb 'mnq', Liste zu, Chart längst auf MNQZ26 (galt);
+            # 2. Versuch — Feld 'MNQZ26', aber die Liste blieb offen → beides endete als „nichts getan". Jetzt: Beweis über Feld ODER
+            # Wurzel + Chart-Titel (tsx_k3_contract_steht); eine nach der Auswahl offen gebliebene Liste wird EINMAL mit Esc geschlossen.
+            steht, wie = tsx_k3_contract_steht(c2, x.get("code"), wurzel, st.get("titel") if isinstance(st, dict) else None)
+            if steht:
+                trail.append(f"Contract {x.get('code')} gewählt — Rücklesung '{c2.get('wert')}', Liste zu"
+                             + (f", Chart-Titel '{str(st.get('titel') or '')[:20]}'" if wie == "chart" else ""))
                 return True, "", "", st, str(x.get("code")).upper()
+            if c2.get("offen") and not esc_getan:
+                esc_getan = True
+                _cdp_esc(s, st, trail, "Contract-Liste nach der Auswahl noch offen")
         letzter = f"Contract nach dem Klick '{c2.get('wert') or '-'}'{' (Liste offen)' if c2.get('offen') else ''}, erwartet {x.get('code')}"
         if c2.get("offen"):
             _cdp_esc(s, st, trail, letzter)

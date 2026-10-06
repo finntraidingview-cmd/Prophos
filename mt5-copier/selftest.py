@@ -5353,6 +5353,22 @@ def test_tsx_k3a():
     chk(z(V[1:2], "MNQ")[0] is None and z([], "NQ")[0] is None and z(V[:1], "MNQ")[0]["code"] == "MNQZ26"
         and z([{"code": "MNQZ26X"}], "MNQ")[0] is None, "kein passender Code → None (nie NQZ26 für MNQ, nie Teilstring)")
     chk(z([V[0], {"code": "MNQU26"}], "MNQ", ts(2026, 12, 11))[0] is None, "zwei Monate ohne den Front-Monat → None")
+    # Contract gewählt? (06.10.2026, Finn live: Feld blieb 'mnq', Chart stand auf MNQZ26) — Feld = Code ODER Wurzel + Chart-Titel = Code
+    cs = ob.tsx_k3_contract_steht
+    T = "MNQZ26 $31,516.00 ▲ +0.63%"
+    chk(cs({"wert": "MNQZ26", "offen": False}, "MNQZ26", "MNQ", None) == (True, "feld")
+        and cs({"wert": "mnq", "offen": False}, "MNQZ26", "MNQ", T) == (True, "chart")
+        and cs({"wert": "", "offen": False}, "MNQZ26", "MNQ", T) == (True, "chart")
+        and cs({"wert": "mnqz26", "offen": False}, "MNQZ26", "MNQ", None)[0], "Contract steht: Feld = Code; Wurzel/leer im Feld + Chart-Titel = Code")
+    chk(not cs({"wert": "MNQZ26", "offen": True}, "MNQZ26", "MNQ", T)[0]                       # Liste offen zählt nie
+        and not cs({"wert": "nq", "offen": False}, "MNQZ26", "NQ", T)[0]                        # „nq" getippt, Chart MNQ → nie
+        and not cs({"wert": "mnq", "offen": False}, "NQZ26", "MNQ", "NQZ26 $31,500.00")[0]      # Code NQZ26, Wurzel MNQ → nie
+        and not cs({"wert": "mnq", "offen": False}, "MNQZ26", "MNQ", "NQZ26 $31,500.00")[0]     # Chart auf NQ → nie
+        and not cs({"wert": "mnq", "offen": False}, "MNQZ26", "MNQ", None)[0]                   # ohne Titel kein Chart-Beweis
+        and not cs({"wert": "mn", "offen": False}, "MNQZ26", "MNQ", T)[0]                       # halb getippt → nie
+        and not cs({"wert": "NQZ26", "offen": False}, "MNQZ26", "MNQ", T)[0]                    # fremder Code im Feld → nie
+        and not cs(None, "MNQZ26", "MNQ", T)[0] and not cs({"wert": "MNQZ26", "offen": False}, "", "MNQ", T)[0],
+        "Contract steht NICHT: Liste offen, falsche Wurzel, Chart auf anderem Contract, kein Titel, halb/fremd getippt")
     mp = ob.tsx_k3_menge_passt
     chk(mp("1", 1) and mp(" 15 ", 15) and mp("3", 3) and not mp("3", 1) and not mp("", 1) and not mp("1.5", 1) and not mp(None, 1)
         and not mp("15a", 15), "Menge: genau die Zahl, sonst nie")
@@ -5431,7 +5447,7 @@ def test_tsx_k3a():
                     self.fokus = None
             elif k == "Backspace" and self.fokus == "menge" and self.markiert:
                 self.z["menge"], self.markiert = "", False
-            elif k == "Escape":
+            elif k == "Escape" and not self.z.get("esc_wirkt_nicht"):
                 self.z["offen"] = False
 
         def tippen(self, t):
@@ -5494,9 +5510,13 @@ def test_tsx_k3a():
         o, k, _, _ = probe(seite(fokus_weg_nach_strg_a=True))
         chk(not o["ok"] and o["code"] == "contract" and not any(t_.startswith("tippe") for t_ in k.tasten),
             "Fokus nach Strg+A verloren → nichts getippt")
+        # 06.10.2026 (Finn live, Chris-PC): Feld zeigt den Code, Liste bleibt nach der Auswahl offen → EINMAL Esc; zu + Code = gewählt
         o, k, _, _ = probe(seite(liste_bleibt_offen=True))
+        chk(o["ok"] and k.tasten.count("Escape") == 1 and "# of Contracts" in k.klicks and k.klicks.count("Contract-Feld") == 1,
+            f"Wert steht, Liste bleibt offen → ein Esc, dann als gewählt gezählt, weiter zur Menge ({o.get('code')}: {str(o.get('msg'))[:60]})")
+        o, k, _, _ = probe(seite(liste_bleibt_offen=True, esc_wirkt_nicht=True))
         chk(not o["ok"] and o["code"] == "contract" and "# of Contracts" not in k.klicks and "Escape" in k.tasten,
-            "Wert steht, aber die Liste bleibt offen → nicht als gewählt gezählt, Esc, Menge nie angefasst")
+            "Liste bleibt auch nach Esc offen → nie als gewählt gezählt, Menge nie angefasst, ehrlich raus")
         o, k, _, _ = probe(seite(menge_klemmt=True))
         chk(not o["ok"] and o["code"] == "menge" and k.klicks.count("# of Contracts") == 2, "Menge wird nicht übernommen → zwei Versuche, dann ehrlich raus")
         o, k, _, _ = probe(seite(kauf_text="Buy +3 @ Market"))
@@ -5506,8 +5526,10 @@ def test_tsx_k3a():
         chk(o["ok"] and "Markt zu" in o["msg"], "Markt zu (Knopf „Market Closed“) → Probe bis hierher bestanden, mit Hinweis")
         o, k, _, _ = probe(seite(knopf_gesperrt=True))
         chk(not o["ok"] and "gesperrt" in o["msg"], "Order-Knopf gesperrt → nicht bereit")
-        o, k, _, _ = probe(seite(klick_wirkt=False))
-        chk(not o["ok"] and o["code"] == "contract" and k.klicks.count("Contract-Feld") == 2, "Vorschlag wirkt nicht → zweiter Versuch, dann ehrlich raus")
+        # Start auf NQZ26 (06.10.2026): stünde die Karte schon auf MNQZ26, zeigte das Feld nach Esc den richtigen Code — das wäre kein Fehler
+        o, k, _, _ = probe(seite(klick_wirkt=False, contract="NQZ26"))
+        chk(not o["ok"] and o["code"] == "contract" and k.klicks.count("Contract-Feld") == 2 and "# of Contracts" not in k.klicks,
+            "Vorschlag wirkt nicht (Feld bleibt NQZ26) → zweiter Versuch, dann ehrlich raus")
         o, k, _, _ = probe(seite(ordertyp="Limit"))
         chk(not o["ok"] and o["code"] == "ordertyp" and not k.klicks, "Order-Typ nicht Market → nichts angefasst")
         o, k, _, _ = probe(seite(alt=True))
@@ -5520,6 +5542,13 @@ def test_tsx_k3a():
         bf = {"richtung": "buy", "menge": 1}
         s_ok = stand_aus(dict(seite(menge="1")), "", None)
         chk(vk(s_ok, bf, "MNQZ26", E)[0] and not vk(s_ok, bf, "NQZ26", E)[0], "Urteil: Contract muss genau der gewählte Code sein")
+        # 06.10.2026: im Feld nur die getippte Wurzel — mit Chart-Titel auf dem Code bereit, ohne Titel / falscher Chart nicht
+        s_wz = dict(s_ok, ticket=dict(s_ok["ticket"], contract=dict(s_ok["ticket"]["contract"], wert="mnq")))
+        bfw = dict(bf, wurzel="MNQ")
+        chk(vk(dict(s_wz, titel="MNQZ26 $31,516.00 ▲ +0.63%"), bfw, "MNQZ26", E)[0]
+            and not vk(s_wz, bfw, "MNQZ26", E)[0] and not vk(dict(s_wz, titel="NQZ26 $31,500.00"), bfw, "MNQZ26", E)[0]
+            and not vk(dict(s_wz, titel="MNQZ26 $31,516.00"), bf, "MNQZ26", E)[0],
+            "Urteil: Wurzel im Feld + Chart-Titel = Code bereit; ohne Titel, Chart auf NQ oder ohne Wurzel im Befehl nicht")
         s_pop = dict(s_ok, popups=[{"titel": "Session disconnected"}])
         s_off = stand_aus(dict(seite(menge="1", contract="MNQZ26", offen=True)), "MNQZ26", None)
         chk(any("Dialog" in f_ for f_ in vk(s_pop, bf, "MNQZ26", E)[1]) and any("Liste noch offen" in f_ for f_ in vk(s_off, bf, "MNQZ26", E)[1])
