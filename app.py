@@ -6767,6 +6767,221 @@ def admin_auftrag():
 
 
 # ════════════════════════════════════════════════════════════════════════════
+# VORRAT (05.10.2026, Finn: „je ID und Prop-Firma festlegen, ob die ID dort freigeschaltet oder gesperrt ist … wo jede ID bei
+# jeder Firma im Funnel steht und was bis zum Ziel fehlt"). Stufe 1: Sperr-Matrix + Ist-Funnel + sicherer Bestand gegen das Ziel
+# der Firma. Noch KEINE Bestehens-Wahrscheinlichkeit und KEINE Nachkauf-Liste — das ist Stufe 2, die Rechenregel bestätigt Finn.
+# Sicherer Bestand in der Einheit der Firma (Finn 05.10.2026):
+#   plus_ueber_start  Summe „Plus über der Startgröße" der Winning-Days-Konten (164.000 bei 150k → +14.000, Topstep Express
+#                     zählt ab 0). Ein Konto unter Start zählt 0, nie negativ. Funded vor dem Big Trade ist Funnel, kein Vorrat.
+#   groessen_summe    Summe der Kontogrößen der Funded-CFD-Konten
+#   stueck            Stückzahl, wahlweise je Kontogröße (1 × 100k + 1 × 200k)
+# Spanne: unter der Untergrenze fehlt Vorrat, aufgefüllt wird bis zur Obergrenze. Die Ziele gelten je ID einzeln. Funded-CFD-Konten
+# mit „Waiting for Payout" zählen zum Bestand (Finn 05.10.2026) und werden als eigener Anteil mitgeliefert (wartend).
+# POST {aktion: 'rechnen'} = Knopf „Jetzt aktualisieren": in Stufe 1 rechnet er sofort neu (wie GET), in Stufe 2 stößt er den
+# gespeicherten Lauf an — dieselbe Route, kein Umbau im Frontend.
+# Ziele, Sperren und Schalter stehen in der DB (sql/2026-10-05_vorrat.sql), hier nur die Rechnung. Eigener Endpoint wie der
+# Prop-Baum: /admin/overview und /admin/auftrag bleiben unberührt. Auf der Seite stehen NUR Firmen mit Ziel-Zeile (Finn
+# 06.10.2026: FundedNext Futures, Lucid, Blue Guardian, MyFundedFutures, Fusion Markets bleiben ganz weg) und keine der
+# ausgeblendeten Personen (excluded_ids wie in jeder Admin-Auswertung). Zustände je Zelle: frei · pausiert (freigeschaltet, aber
+# gerade nichts kaufen) · gesperrt.
+# ════════════════════════════════════════════════════════════════════════════
+
+VORRAT_TYPEN = ("challenge", "phase1", "phase2", "funded", "funded_cfd", "winning_days")
+VORRAT_CFD_TYPEN = ("phase1", "phase2", "funded_cfd")
+VORRAT_STATUS = ("frei", "pausiert", "gesperrt")
+VORRAT_STD_GROESSEN = (25000, 50000, 100000, 150000, 250000, 300000)
+VORRAT_SQL = "sql/2026-10-05_vorrat.sql"
+
+
+def vorrat_groesse(gespeichert, balance, cfd):
+    """REIN RECHNEND (testbar): Kontogröße eines Kontos oder None. CFD: aus der Balance gedacht wie der Prop-Baum (pbCfdStart,
+    Finn 04.10.2026: „es gibt bei uns nur 50, 100, 200k CFDs" — unter 75k = 50k, unter 125k = 100k, sonst 200k), weil
+    starting_balance/Name dort nicht überall gepflegt sind; ohne Balance die gespeicherte Größe. Futures: gespeicherte Größe,
+    sonst die nächste Standardgröße zur Balance (Drawdowns sind viel kleiner als die Abstände zwischen den Größen)."""
+    g = float(gespeichert) if gespeichert else None
+    b = float(balance) if balance else None
+    if cfd:
+        if b is None:
+            return g
+        return 50000.0 if b < 75000 else 100000.0 if b < 125000 else 200000.0
+    if g:
+        return g
+    if b is None:
+        return None
+    return float(min(VORRAT_STD_GROESSEN, key=lambda s: abs(s - b)))
+
+
+def vorrat_bestand(ziel, stock):
+    """REIN RECHNEND (testbar): sicherer Bestand EINER Zelle (ID × Firma) gegen das Ziel der Firma. stock = die Konten, die als
+    Vorrat zählen: [{groesse, plus}] (plus = Balance − Start, None = Balance unbekannt).
+    → {bestand, von, bis, fehlt, bis_voll, lage, unklar, wartend, teile}. lage: 'unter' (unter der Untergrenze) · 'im_ziel' · 'ueber'.
+    fehlt = Abstand zur Untergrenze, bis_voll = Abstand zur Obergrenze, unklar = Konten ohne Wert (Balance/Größe unbekannt),
+    wartend = Anteil „Waiting for Payout" am Bestand (Stückzahl bei stueck, sonst USD)."""
+    art = ziel.get("art")
+    if art == "stueck":
+        # Je Größe ein Fach; ein Fach ohne Größe nimmt jedes Konto, das in kein Größen-Fach gehört. Der Bestand ist je Fach
+        # gedeckelt — zwei 100k-Konten ersetzen kein fehlendes 200k-Konto.
+        faecher = [(float(t["groesse"]) if t.get("groesse") else None, int(t.get("stueck") or 0)) for t in (ziel.get("groessen") or [])]
+        feste = {g for g, _ in faecher if g is not None}
+        teile = []
+        for g, soll in faecher:
+            ist = sum(1 for x in stock if (x.get("groesse") == g if g is not None else x.get("groesse") not in feste))
+            teile.append({"groesse": g, "soll": soll, "ist": ist, "fehlt": max(0, soll - ist)})
+        soll_ges = sum(t["soll"] for t in teile)
+        fehlt = sum(t["fehlt"] for t in teile)
+        lage = "unter" if fehlt else ("ueber" if sum(t["ist"] for t in teile) > soll_ges else "im_ziel")
+        return {"bestand": sum(min(t["ist"], t["soll"]) for t in teile), "von": soll_ges, "bis": soll_ges, "fehlt": fehlt,
+                "bis_voll": fehlt, "lage": lage, "unklar": 0, "wartend": sum(1 for x in stock if x.get("waiting")), "teile": teile}
+    feld = "plus" if art == "plus_ueber_start" else "groesse"
+    werte = [x.get(feld) for x in stock]
+    bestand = round(sum(max(0.0, float(w)) for w in werte if w is not None), 2)
+    wartend = round(sum(max(0.0, float(x.get(feld))) for x in stock if x.get("waiting") and x.get(feld) is not None), 2)
+    von, bis = float(ziel.get("von") or 0), float(ziel.get("bis") or 0)
+    lage = "unter" if bestand < von else ("ueber" if bestand > bis else "im_ziel")
+    return {"bestand": bestand, "von": von, "bis": bis, "fehlt": round(max(0.0, von - bestand), 2),
+            "bis_voll": round(max(0.0, bis - bestand), 2), "lage": lage, "unklar": sum(1 for w in werte if w is None),
+            "wartend": wartend, "teile": None}
+
+
+def vorrat_rechnen(konten, ziele, matrix, personen, standard="frei", waiting_zaehlt=True):
+    """REIN RECHNEND (testbar): Funnel und sicherer Bestand je ID × Firma.
+    konten   = aktive Prop-Konten [{user_id, firma, typ, groesse (gespeichert), balance, express, waiting}]
+    ziele    = {firma: {art, typen, von, bis, groessen, kauf_einheit, reihe}} — NUR diese Firmen stehen auf der Seite
+    matrix   = {(user_id, firma): 'frei' | 'pausiert' | 'gesperrt'} — fehlt = standard
+    personen = [user_id, …]. Jede ID bekommt bei jeder Firma mit Ziel eine Zelle (auch ohne Konten: Bestand 0, darum geht es).
+    Funnel je Kontotyp {n, groesse}; 'waiting' = davon „Waiting for Payout" (zählt zusätzlich in seinem Typ).
+    → {"firmen": [{firma, ziel, cfd}], "zellen": [{user_id, firma, status, gesetzt, konten, funnel, bestand_n, …vorrat_bestand}]}"""
+    cfd_firmen = {f for f, z in ziele.items() if "funded_cfd" in (z.get("typen") or [])}
+    cfd_firmen |= {k["firma"] for k in konten if k.get("typ") in VORRAT_CFD_TYPEN}
+    je = {}
+    for k in konten:
+        typ = k.get("typ") if k.get("typ") in VORRAT_TYPEN else "challenge"
+        bal = k.get("balance")
+        # Topstep Express zeigt die Balance 0-basiert — daraus lässt sich keine Größe denken, und der Start ist 0
+        gr = vorrat_groesse(k.get("groesse"), None if k.get("express") else bal, k["firma"] in cfd_firmen)
+        start = 0.0 if k.get("express") else gr
+        plus = float(bal) - start if (bal is not None and start is not None) else None
+        je.setdefault((str(k["user_id"]), k["firma"]), []).append(
+            {"typ": typ, "groesse": gr, "plus": plus, "waiting": bool(k.get("waiting"))})
+    ids = [str(u) for u in personen]
+    firmen = sorted(ziele, key=lambda f: (float(ziele[f].get("reihe") or 0), f))
+    zellen = []
+    for f in firmen:
+        ziel = ziele[f]
+        typen = ziel.get("typen") or []
+        for uid in ids:
+            liste = je.get((uid, f), [])
+            gesetzt = matrix.get((uid, f))
+            funnel = {}
+            for x in liste:
+                for key in ((x["typ"], "waiting") if x["waiting"] else (x["typ"],)):
+                    e = funnel.setdefault(key, {"n": 0, "groesse": 0.0})
+                    e["n"] += 1
+                    e["groesse"] += x["groesse"] or 0.0
+            stock = [x for x in liste if x["typ"] in typen and (waiting_zaehlt or not x["waiting"])]
+            z = {"user_id": uid, "firma": f, "status": gesetzt if gesetzt in VORRAT_STATUS else standard,
+                 "gesetzt": gesetzt in VORRAT_STATUS, "konten": len(liste), "funnel": funnel, "bestand_n": len(stock)}
+            z.update(vorrat_bestand(ziel, stock))
+            zellen.append(z)
+    return {"firmen": [{"firma": f, "ziel": ziele[f], "cfd": f in cfd_firmen} for f in firmen], "zellen": zellen}
+
+
+def _vorrat_tabellen():
+    """Ziele, Sperr-Matrix und Schalter aus der DB → (ziele, matrix, einstellung, bereit). Fehlt eine Tabelle (PostgREST 404,
+    SQL noch nicht eingespielt): bereit False und leere Werte — der Funnel kommt trotzdem, nur ohne Ziele und Sperren."""
+    try:
+        ziele = {}
+        for z in sb_select("vorrat_ziele", {"select": "firma,art,typen,von,bis,groessen,kauf_einheit,reihe", "order": "reihe.asc"}):
+            ziele[_firm_norm(z.get("firma"))] = {k: z.get(k) for k in ("art", "typen", "von", "bis", "groessen", "kauf_einheit", "reihe")}
+        matrix = {(str(m.get("user_id")), _firm_norm(m.get("firma"))): m.get("status")
+                  for m in _sb_all("vorrat_matrix", {"select": "user_id,firma,status", "order": "user_id.asc,firma.asc"})}
+        ein = (sb_select("vorrat_einstellung", {"select": "standard_status", "id": "eq.1"}) or [{}])[0]
+        return ziele, matrix, ein, True
+    except requests.exceptions.HTTPError as e:
+        if getattr(e.response, "status_code", 0) == 404:
+            return {}, {}, {}, False
+        raise
+
+
+def admin_build_vorrat():
+    b = _admin_basis()
+    accounts, archived = b["accounts"], b["archived"]
+    names, disp, excluded_ids = b["names"], b["disp"], b["excluded_ids"]
+    ziele, matrix, ein, bereit = _vorrat_tabellen()
+    # Live-Spiegel (Echo, Duplikum) für die Balance wie im Prop-Baum; fehlen sie, reicht der gespeicherte Stand am Konto
+    try:
+        echo_bal, dup_bal = _ap_balance_karten()
+    except Exception as e:
+        echo_bal, dup_bal = {}, {}
+        print(f"[vorrat] ⚠️ Balance-Spiegel: {type(e).__name__}: {e}", flush=True)
+    konten = []
+    for a in accounts:
+        aid, uid = str(a["id"]), str(a.get("user_id"))
+        if (a.get("account_type") or "") == "live" or uid in excluded_ids or aid in archived:
+            continue
+        konten.append({"user_id": uid, "firma": _firm_norm(a.get("firm")), "typ": a.get("account_type") or "",
+                       "groesse": _wd_konto_groesse(a), "balance": acc_balance_wahl(a, echo_bal, dup_bal)[0],
+                       "express": ist_topstep_express(a), "waiting": bool(a.get("waiting_payout_since"))})
+    # Jede ID aus der Nutzerliste (auch ohne Konten — eine freigeschaltete ID ohne Bestand ist gerade der Fall, der zählt)
+    uids = (set(names) | {k["user_id"] for k in konten}) - excluded_ids
+    people = sorted([{"user_id": u, "name": disp.get(u) or names.get(u, u[:8])} for u in uids],
+                    key=lambda p: str(p["name"]).lower())
+    standard = ein.get("standard_status") if ein.get("standard_status") in ("frei", "gesperrt") else "frei"
+    erg = vorrat_rechnen(konten, ziele, matrix, [p["user_id"] for p in people], standard=standard)
+    hinweis = "" if bereit else f"SQL noch nicht eingespielt ({VORRAT_SQL}) — ohne die Ziele-Tabelle stehen noch keine Firmen auf der Seite."
+    return dict(erg, bereit=bereit, hinweis=hinweis, standard=standard, people=people, generated=_wt_now_iso())
+
+
+@app.route("/admin/vorrat", methods=["GET", "POST", "OPTIONS"])
+def admin_vorrat():
+    """GET = Funnel und sicherer Bestand je ID × Firma. POST {aktion: 'rechnen'} = „Jetzt aktualisieren" (Stufe 1: sofort neu
+    rechnen und liefern; Stufe 2 stößt hier den gespeicherten Lauf an). POST {user_id, firma, status: 'frei'|'pausiert'|'gesperrt'}
+    schaltet eine Zelle der Sperr-Matrix. Gate wie /admin/prop-baum, „nur eigene" (admin_zugang) darf nur eigene Zellen schalten."""
+    if request.method == "OPTIONS":
+        return "", 200
+    uid, err = _wd_login()
+    if err:
+        return err
+    if request.method == "GET":
+        try:
+            return jsonify(admin_build_vorrat())
+        except Exception as e:
+            print(f"[vorrat] ⚠️ GET: {type(e).__name__}: {e}", flush=True)
+            return jsonify({"error": str(e)}), 500
+    body = request.get_json(silent=True) or {}
+    if body.get("aktion") == "rechnen":
+        try:
+            return jsonify(admin_build_vorrat())
+        except Exception as e:
+            print(f"[vorrat] ⚠️ rechnen: {type(e).__name__}: {e}", flush=True)
+            return jsonify({"error": str(e)}), 500
+    ziel_uid = str(body.get("user_id") or "").strip().lower()
+    firma = _firm_norm(str(body.get("firma") or "")[:80])
+    status = body.get("status")
+    if not re.match(r"^[0-9a-f-]{36}$", ziel_uid):
+        return jsonify({"error": "user_id fehlt"}), 400
+    if firma == "—":
+        return jsonify({"error": "firma fehlt"}), 400
+    if status not in VORRAT_STATUS:
+        return jsonify({"error": "status muss frei, pausiert oder gesperrt sein"}), 400
+    nur = _admin_nur_uid()
+    if nur and ziel_uid != nur:
+        return jsonify({"error": "nur eigene ID"}), 403
+    try:
+        r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/vorrat_matrix", params={"on_conflict": "user_id,firma"},
+                        json={"user_id": ziel_uid, "firma": firma, "status": status, "geaendert_von": uid,
+                              "geaendert_at": _wt_now_iso()},
+                        headers=_sb_headers("resolution=merge-duplicates,return=minimal"))
+        if r.status_code == 404:
+            return jsonify({"error": f"SQL noch nicht eingespielt ({VORRAT_SQL})"}), 503
+        _sb_pruefen(r)
+        return jsonify({"ok": True, "user_id": ziel_uid, "firma": firma, "status": status})
+    except Exception as e:
+        print(f"[vorrat] ⚠️ POST: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"error": str(e)}), 500
+
+
+# ════════════════════════════════════════════════════════════════════════════
 # RECHNUNGEN für die Abrechnungen der gemanagten IDs (28.08.2026, Finns Wunsch).
 # Erstellen nur für Admins (ADMIN_EMAILS), die ID-Person liest ihre Rechnungen
 # per RLS direkt aus Supabase. Der Datensatz wird beim Erstellen EINGEFROREN

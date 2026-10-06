@@ -963,6 +963,82 @@
   #adm-pane-auftrag .auf-id .auf-f{color:var(--sub);font-size:11.5px}
   #adm-pane-auftrag .auf-fehlt{color:var(--sub-2);font-style:italic}
   #adm-pane-auftrag .auf-hinweis{font-size:11.5px;color:var(--sub);margin-top:12px}
+  /* VORRAT (05.10.2026): Seite „Vorrat" — je Firma ein Block, je ID eine Zeile: Funnel-Kette, Bestand gegen Ziel, Sperr-Schalter.
+     Nur #vr-view, eigene vr-*-Klassen. Farbe sparsam wie „Accounts je Firma": ID-Punkt, Ampel nur am Bestand (grün im Ziel, gelb
+     darunter), Rot nur am Wort „fehlt". Gesperrte Kombinationen als graue Chip-Zeile am Blockende (eingeklappt). */
+  #vr-view .view-head .btn-mini{padding:4px 11px;font-size:12px;height:auto}
+  #vr-view .vr-hinweis{border:1px solid color-mix(in srgb,var(--warn) 40%,var(--border));background:color-mix(in srgb,var(--warn) 7%,var(--surface));border-radius:10px;padding:9px 12px;font-size:12.5px;color:var(--ink);margin:0 0 14px}
+  #vr-view .vr-fehler{color:var(--danger);font-size:12.5px;margin:0 0 10px}
+  #vr-view .vr-kpis{grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:14px}
+  #vr-view .vr-k{display:flex;flex-direction:column;justify-content:flex-start;width:100%;min-width:0;font:inherit;color:inherit;text-align:left;cursor:pointer}
+  #vr-view .vr-k .kpi-value{font-variant-numeric:tabular-nums;white-space:nowrap}
+  #vr-view .vr-k .kpi-delta{display:block;color:var(--sub);line-height:1.4}
+  #vr-view .vr-k.is-on{border-color:var(--sub);box-shadow:0 0 0 2px color-mix(in srgb,var(--sub) 18%,transparent)}
+  #vr-view .vr-k.is-leer .kpi-value{color:var(--sub-2)}
+  #vr-view .vr-rot{color:var(--danger)} #vr-view .vr-gut{color:#067647} #vr-view .vr-gelb{color:#B54708}
+  #vr-view .vr-ids{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px}
+  #vr-view .vr-id{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);background:var(--surface);color:var(--ink);border-radius:999px;padding:3px 11px;font:inherit;font-size:12px;cursor:pointer}
+  #vr-view .vr-id i{width:8px;height:8px;border-radius:3px;flex:none}
+  #vr-view .vr-id b{font-weight:600;color:var(--danger);font-variant-numeric:tabular-nums}
+  #vr-view .vr-id.an{border-color:var(--violet);background:var(--violet-tint);color:var(--violet)}
+  #vr-view .vr-firma{margin-bottom:14px}
+  #vr-view .vr-firma .panel-head{margin-bottom:4px;align-items:flex-start}
+  #vr-view .vr-sum{font-size:12px;color:var(--sub);white-space:nowrap;text-align:right}
+  #vr-view .vr-zeile{display:grid;grid-template-columns:minmax(92px,150px) minmax(0,1.3fr) minmax(120px,1fr) 118px 60px;
+    grid-template-areas:"name funnel bar wert schloss";gap:14px;align-items:center;padding:9px 0;border-top:1px solid var(--border)}
+  #vr-view .vr-zeile:first-of-type{border-top:0}
+  #vr-view .vr-name{grid-area:name;display:flex;align-items:center;gap:7px;font-size:13px;font-weight:600;min-width:0}
+  #vr-view .vr-name i{width:8px;height:8px;border-radius:3px;flex:none}
+  #vr-view .vr-name span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #vr-view .vr-funnel{grid-area:funnel;display:flex;flex-wrap:wrap;align-items:center;gap:4px 5px;font-size:12px;color:var(--sub);min-width:0}
+  #vr-view .vr-st{display:inline-flex;align-items:baseline;gap:5px;border:1px solid var(--border);border-radius:8px;padding:2px 8px;white-space:nowrap;background:var(--surface)}
+  #vr-view .vr-st b{font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums}
+  #vr-view .vr-st.leer{border-style:dashed;color:var(--sub-2)}
+  #vr-view .vr-st.leer b{color:var(--sub-2);font-weight:500}
+  #vr-view .vr-st.vorrat{border-color:color-mix(in srgb,var(--violet) 45%,var(--border));color:var(--violet)}
+  #vr-view .vr-st.vorrat b{color:var(--violet)}
+  #vr-view .vr-st.vorrat.leer{border-style:dashed;color:color-mix(in srgb,var(--violet) 55%,var(--sub-2))}
+  #vr-view .vr-st.vorrat.leer b{color:inherit}
+  #vr-view .vr-st small{font-size:10.5px;color:var(--sub-2)}
+  #vr-view .vr-pf{color:var(--sub-2);font-size:11px}
+  #vr-view .vr-mitte{grid-area:bar;min-width:0}
+  #vr-view .vr-bar{position:relative;height:8px;border-radius:999px;background:var(--surface-tint)}
+  #vr-view .vr-band{position:absolute;top:-4px;bottom:-4px;background:rgba(18,183,106,.10);border-left:1px dashed rgba(18,183,106,.65);border-right:1px dashed rgba(18,183,106,.65)}
+  #vr-view .vr-fill{position:absolute;left:0;top:0;bottom:0;border-radius:999px}
+  #vr-view .vr-wart{opacity:.45;border-radius:0 999px 999px 0}
+  #vr-view .vr-slots{display:flex;gap:6px;flex-wrap:wrap}
+  #vr-view .vr-slot{font-size:11.5px;border-radius:7px;padding:2px 8px;border:1px dashed color-mix(in srgb,var(--danger) 45%,var(--border));color:var(--sub);white-space:nowrap}
+  #vr-view .vr-slot.da{border:1px solid rgba(18,183,106,.5);background:rgba(18,183,106,.09);color:#067647}
+  #vr-view .vr-kein{font-size:11.5px;color:var(--sub-2)}
+  #vr-view .vr-wert{grid-area:wert;text-align:right;line-height:1.3;font-variant-numeric:tabular-nums;min-width:0}
+  #vr-view .vr-wert b{font-size:14px;font-weight:600;display:block}
+  #vr-view .vr-wert small{font-size:11.5px;color:var(--sub);display:block;white-space:nowrap}
+  #vr-view .vr-wert small.vr-rot{color:var(--danger);font-weight:500}
+  #vr-view .vr-wert small.vr-gut{color:#067647}
+  #vr-view .vr-knoepfe{grid-area:schloss;display:flex;gap:4px;justify-content:flex-end}
+  #vr-view .vr-schloss{width:28px;height:28px;border:1px solid var(--border);background:var(--surface);border-radius:8px;display:inline-flex;align-items:center;justify-content:center;color:var(--sub-2);cursor:pointer;padding:0;flex:none}
+  #vr-view .vr-schloss:hover{color:var(--ink);border-color:var(--sub-2)}
+  #vr-view .vr-schloss:disabled{opacity:.4;cursor:default}
+  #vr-view .vr-schloss svg{width:14px;height:14px}
+  /* pausiert (Finn 06.10.2026): frei, aber gerade nichts kaufen — gelbe Marke, Inhalt leicht zurückgenommen, nicht grau wie gesperrt */
+  #vr-view .vr-pause{font-style:normal;font-size:10.5px;font-weight:600;color:#B54708;background:rgba(247,144,9,.13);border-radius:6px;padding:1px 6px;flex:none}
+  #vr-view .vr-zeile.pausiert .vr-funnel,#vr-view .vr-zeile.pausiert .vr-mitte,#vr-view .vr-zeile.pausiert .vr-wert{opacity:.72}
+  #vr-view .vr-zeile.pausiert .vr-schloss:first-child{color:#B54708;border-color:rgba(247,144,9,.5);background:rgba(247,144,9,.08)}
+  #vr-view .vr-gesperrt{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:9px 0 0;border-top:1px solid var(--border);font-size:12px;color:var(--sub-2)}
+  #vr-view .vr-zeile + .vr-gesperrt{margin-top:0}
+  #vr-view .vr-firma .vr-gesperrt:first-child{border-top:0;padding-top:2px}
+  #vr-view .vr-gchip{display:inline-flex;align-items:center;gap:6px;border:1px dashed var(--border);background:transparent;color:var(--sub);border-radius:999px;padding:2px 9px;font:inherit;font-size:11.5px;cursor:pointer}
+  #vr-view .vr-gchip i{width:7px;height:7px;border-radius:3px;background:var(--sub-2);opacity:.55;flex:none}
+  #vr-view .vr-gchip:hover{border-style:solid;color:var(--ink)}
+  #vr-view .vr-gchip:disabled{cursor:default;opacity:.6}
+  #vr-view .vr-fuss{font-size:11.5px;color:var(--sub);margin-top:4px;line-height:1.5}
+  @media (max-width:760px){
+    #vr-view .vr-zeile{grid-template-columns:minmax(0,1fr) auto 60px;grid-template-areas:"name wert schloss" "funnel funnel funnel" "bar bar bar";gap:7px 10px;padding:11px 0}
+    #vr-view .vr-wert{display:flex;gap:8px;align-items:baseline;justify-content:flex-end}
+    #vr-view .vr-wert b{display:inline}
+    #vr-view .vr-wert small{display:inline}
+    #vr-view .vr-sum{white-space:normal}
+  }
   #dashboard-view .adm-row{
     display:grid;grid-template-columns:minmax(120px,1.4fr) minmax(60px,1.6fr) auto 42px;
     align-items:center;gap:12px;padding:10px 0;
@@ -5329,6 +5405,11 @@
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
         Accounts je Firma
       </button>
+      <!-- Vorrat (05.10.2026, Finn: Übersicht je ID und Firma — Funnel, Bestand gegen Ziel, freigeschaltet/gesperrt) -->
+      <button class="sb-link" data-view="vorrat">
+        <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 12l9 4 9-4"/><path d="M3 17l9 4 9-4"/></svg>
+        Vorrat
+      </button>
       <button class="sb-link" data-view="payouts">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
         Finanzen
@@ -8464,6 +8545,22 @@
       </div>
     </section>
 
+    <!-- VORRAT (05.10.2026, Finn: „je ID und Prop-Firma festlegen, ob die ID dort freigeschaltet oder gesperrt ist … wo jede ID bei jeder
+         Firma im Funnel steht und was bis zum Ziel fehlt"). Stufe 1: Sperr-Matrix, Ist-Funnel, sicherer Bestand gegen das Ziel der Firma.
+         Daten: GET/POST /admin/vorrat (Railway), Verdrahtung im Modul (Sektion VORRAT am Modulende), eigene IDs/Klassen vr-*. -->
+    <section class="view" data-view="vorrat" id="vr-view">
+      <div class="view-head">
+        <div>
+          <h1 class="view-title">Vorrat</h1>
+          <p class="view-sub" id="vr-stand">Je ID und Firma: Funnel und sicherer Bestand gegen das Ziel</p>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="btn btn-ghost btn-mini" id="vrNeu" title="rechnet sofort neu — neu angelegte Konten sind dann drin">Jetzt aktualisieren</button>
+        </div>
+      </div>
+      <div id="vr-root" style="color:var(--sub);font-size:13px;padding:22px 2px">Lade Vorrat…</div>
+    </section>
+
     <!-- MARKT (30.08.2026, Finns Wunsch „NQ-Live-Stand ablesen") — reine
          ANZEIGE der beiden Instrumente, die Orbit hedgt. Bewusst keine
          Signale, keine Schwellen, keine Empfehlung: Prophos ist
@@ -11425,6 +11522,7 @@
     markt:     ['Winning Days', 'NQ & MNQ live · Winning Days des Handelstags'],
     firmen:    ['Accounts je Firma', 'Je ID: was heute noch offen ist'],
     propbaum:  ['Prop-Baum', 'Alle Prop-Accounts je Firma und Stufe'],   // 03.10.2026
+    vorrat:    ['Vorrat', 'Je ID und Firma: Funnel und Bestand gegen das Ziel'],   // 05.10.2026
     wdlive:    ['Radar', 'Trades aller IDs'],   // seit 30.09.2026 auch Echo (CFD)
     news:      ['News', 'USD-Kalender & Alerts (Forex Factory)'],
     kasse:     ['Admin', 'Kapitalverteilung über alle Personen'],
@@ -11478,6 +11576,8 @@
     if(name === 'firmen' && typeof window.afOnEnter === 'function') window.afOnEnter()      // Accounts je Firma (27.09.2026)
     if(name === 'propbaum'){ if(typeof window._pbTabOeffnen === 'function') window._pbTabOeffnen() }   // Prop-Baum (03.10.2026)
     else if(typeof window._pbTabSchliessen === 'function') window._pbTabSchliessen()
+    if(name === 'vorrat'){ if(typeof window._vrTabOeffnen === 'function') window._vrTabOeffnen() }       // Vorrat (05.10.2026)
+    else if(typeof window._vrTabSchliessen === 'function') window._vrTabSchliessen()
     if(name === 'markt' && typeof window.mklHeim === 'function') window.mklHeim()          // Chart zurück aus Live Trades (F6)
     // Eigene Rechnungen beim Betreten der Finanzen laden (28.08.2026) — über
     // window, weil finRgLoad in der Modul-Reihenfolge erst später definiert wird.
@@ -55061,6 +55161,239 @@
     clearInterval(_auf.timer); _auf.timer = setInterval(aufLaden, 120000)
   }
   window._aufTabSchliessen = () => { clearInterval(_auf.timer); _auf.timer = null }
+})()
+/* ── VORRAT (05.10.2026, Finn: „je ID und Prop-Firma festlegen, ob die ID dort freigeschaltet oder gesperrt ist … eine schöne Übersicht,
+ * wo jede ID bei jeder Firma im Funnel steht und was bis zum Ziel fehlt") ──
+ * Stufe 1: Sperr-Matrix, Ist-Funnel und sicherer Bestand gegen das Ziel der Firma. Alles rechnet der Server (/admin/vorrat,
+ * vorrat_rechnen) — hier nur Anzeige, Filter und der Sperr-Klick. Bewusst noch KEINE Nachkauf-Aussage (Stufe 2, die Rechenregel
+ * bestätigt Finn): die Seite sagt nur „fehlt bis Ziel". Je Firma ein Block (nur Firmen mit Ziel-Zeile), je ID eine Zeile; pausierte
+ * Zeilen (frei, aber gerade nichts kaufen — Finn 06.10.2026) stehen gelb markiert am Blockende, gesperrte Kombinationen als graue
+ * Chips darunter (Klick schaltet frei). Eigene Verdrahtung: nur #vr-root und #vrNeu, kein Sammel-Handler. */
+;(() => {
+  // Stufen-Kette [Schlüssel, Wort, Kontotypen]: funded und funded_cfd sind dieselbe Stufe „Funded" (Futures vor dem Big Trade bzw. Funded CFD)
+  const VR_STUFEN = [['challenge', 'Challenge', ['challenge']], ['phase1', 'Phase 1', ['phase1']], ['phase2', 'Phase 2', ['phase2']],
+                     ['funded', 'Funded', ['funded', 'funded_cfd']], ['wd', 'Winning Days', ['winning_days']]]
+  const VR_SCHLOSS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/></svg>'
+  const VR_PAUSE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 5v14M15 5v14"/></svg>'
+  const VR_PLAY = '<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M7 5v14l11-7z"/></svg>'
+  const _vr = { daten: null, laedt: false, fehler: '', timer: null, stand: 0, kachel: '', person: '', sendet: 0 }
+  const vrEsc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+  const vrK = n => { const a = Math.abs(Number(n) || 0); return a >= 1000 ? (Math.round(a / 100) / 10).toLocaleString('de-DE') + 'k' : Math.round(a).toLocaleString('de-DE') }
+  const vrKonten = n => n === 1 ? '1 Konto' : n + ' Konten'
+  const vrStueck = (n, groesse) => groesse ? `${n} × ${vrK(groesse)}` : vrKonten(n)
+  const vrFarbe = uid => typeof idFarbe === 'function' ? idFarbe(uid) : 'var(--sub-2)'
+  const vrTypTxt = typen => (typen || []).includes('winning_days') ? 'Winning Days' : 'Funded'
+  const vrIstVorrat = (f, typen) => (f.ziel?.typen || []).some(t => typen.includes(t))
+
+  function vrZielTxt(z){
+    if(!z) return 'kein Ziel hinterlegt — nur Funnel'
+    const wo = vrTypTxt(z.typen)
+    const kauf = z.kauf_einheit ? ` · Nachkauf: ${z.kauf_einheit}` : ''
+    if(z.art === 'plus_ueber_start') return `Ziel je ID: +${vrK(z.von)} bis +${vrK(z.bis)} über Start bei ${wo}${kauf}`
+    if(z.art === 'groessen_summe') return `Ziel je ID: ${vrK(z.von)} bis ${vrK(z.bis)} ${wo} (Summe der Kontogrößen)${kauf}`
+    return `Ziel je ID: ${(z.groessen || []).map(t => vrStueck(t.stueck, t.groesse)).join(' + ')} bei ${wo}${kauf}`
+  }
+
+  // Stufen einer Firma: die feste Kette ihrer Art (CFD Phase 1 → Phase 2 → Funded, Futures Challenge → Funded → Winning Days),
+  // dazu jede Stufe, in der bei irgendeiner ID ein Konto liegt (z. B. Ein-Schritt-Challenge bei einer CFD-Firma)
+  function vrStufenVon(f, zellenFirma){
+    const hat = new Set(f.cfd ? ['phase1', 'phase2', 'funded'] : ['challenge', 'funded', 'wd'])
+    for(const z of zellenFirma) for(const [k, , typen] of VR_STUFEN) if(typen.some(t => z.funnel?.[t]?.n)) hat.add(k)
+    return VR_STUFEN.filter(([k]) => hat.has(k))
+  }
+
+  function vrFunnelHtml(z, f, stufen){
+    return stufen.map(([k, wort, typen], i) => {
+      const n = typen.reduce((s, t) => s + (z.funnel?.[t]?.n || 0), 0)
+      const gr = typen.reduce((s, t) => s + (z.funnel?.[t]?.groesse || 0), 0)
+      const wart = k === 'funded' ? (z.funnel?.waiting?.n || 0) : 0
+      const vorrat = vrIstVorrat(f, typen)
+      const titel = `${wort}: ${n ? vrKonten(n) + (gr ? ' · ' + vrK(gr) + ' Kontogröße' : '') : 'kein Konto'}${wart ? ` · davon ${wart} Waiting for Payout` : ''}${vorrat ? ' · zählt als Vorrat' : ''}`
+      return `${i ? '<span class="vr-pf">›</span>' : ''}<span class="vr-st${n ? '' : ' leer'}${vorrat ? ' vorrat' : ''}" title="${vrEsc(titel)}"><b>${n}</b>${wort}${wart ? `<small>⏳ ${wart}</small>` : ''}</span>`
+    }).join('')
+  }
+
+  // Bestand gegen Ziel: Balken mit grünem Band (Untergrenze bis Obergrenze) bzw. bei Stückzahlen ein Kästchen je verlangtem Konto
+  function vrMitteHtml(z, f){
+    const ziel = f.ziel
+    if(!ziel) return '<span class="vr-kein">kein Ziel</span>'
+    if(ziel.art === 'stueck'){
+      return '<div class="vr-slots">' + (z.teile || []).map(t => {
+        const wort = t.groesse ? vrK(t.groesse) : 'Konto'
+        let s = ''
+        for(let i = 0; i < Math.max(t.soll, t.ist); i++)
+          s += `<span class="vr-slot${i < t.ist ? ' da' : ''}" title="${i < t.ist ? (i < t.soll ? 'vorhanden' : 'über dem Ziel') : 'fehlt'}">${wort}${i < t.ist ? ' ✓' : ''}</span>`
+        return s
+      }).join('') + '</div>'
+    }
+    const plus = ziel.art === 'plus_ueber_start' ? '+' : ''
+    const max = Math.max(Number(ziel.bis) * 1.25, Number(z.bestand) || 0) || 1
+    const pct = n => Math.max(0, Math.min(100, Number(n) / max * 100))
+    const wartend = Number(z.wartend) || 0
+    const titel = `Bestand ${plus}${vrK(z.bestand)}${wartend ? ` (davon ${vrK(wartend)} Waiting for Payout)` : ''} · Ziel ${plus}${vrK(ziel.von)} bis ${plus}${vrK(ziel.bis)}`
+      + (z.lage === 'unter' ? ` · fehlt ${vrK(z.fehlt)} bis zur Untergrenze, ${vrK(z.bis_voll)} bis zur Obergrenze` : z.lage === 'im_ziel' ? ` · Platz bis zur Obergrenze: ${vrK(z.bis_voll)}` : ' · über der Obergrenze')
+    const farbe = z.lage === 'unter' ? 'var(--warn)' : 'var(--good)'
+    // Waiting for Payout zählt zum Bestand (Finn 05.10.2026), aber als eigener, hellerer Anteil am Ende des Balkens erkennbar
+    const wart = wartend ? `<span class="vr-fill vr-wart" style="left:${pct(z.bestand - wartend)}%;width:${pct(z.bestand) - pct(z.bestand - wartend)}%;background:${farbe}"></span>` : ''
+    return `<div class="vr-bar" title="${vrEsc(titel)}"><span class="vr-band" style="left:${pct(ziel.von)}%;width:${pct(ziel.bis) - pct(ziel.von)}%"></span>`
+      + `<span class="vr-fill" style="width:${pct(z.bestand)}%;background:${farbe}"></span>${wart}</div>`
+  }
+
+  function vrWertHtml(z, f){
+    const ziel = f.ziel
+    if(!ziel) return `<small>${vrKonten(z.konten || 0)}</small>`
+    const haupt = ziel.art === 'stueck' ? `${z.bestand} / ${z.von}` : (ziel.art === 'plus_ueber_start' ? '+' : '') + vrK(z.bestand)
+    const fehlt = ziel.art === 'stueck' ? (z.teile || []).filter(t => t.fehlt).map(t => vrStueck(t.fehlt, t.groesse)).join(' + ') : vrK(z.fehlt)
+    const neben = z.lage === 'unter' ? `<small class="vr-rot">fehlt ${fehlt}</small>` : z.lage === 'ueber' ? '<small>über Ziel</small>' : '<small class="vr-gut">im Ziel</small>'
+    const unklar = z.unklar ? `<small title="Konten ohne bekannte Balance bzw. Größe — zählen nicht mit">⚠ ${z.unklar} ohne Wert</small>` : ''
+    return `<b>${haupt}</b>${neben}${unklar}`
+  }
+
+  async function vrToken(){
+    const { data: { session } } = await supabase.auth.getSession()
+    if(!session?.access_token) throw new Error('nicht angemeldet')
+    return session.access_token
+  }
+
+  // sofort = Knopf „Jetzt aktualisieren": POST {aktion: 'rechnen'} — in Stufe 1 rechnet der Server sofort neu (wie GET), in Stufe 2
+  // stößt derselbe Aufruf den gespeicherten Lauf an; neu angelegte Konten sind so ohne Warten drin
+  async function vrLaden(sofort){
+    if(_vr.laedt || _vr.sendet) return
+    _vr.laedt = true
+    const knopf = document.getElementById('vrNeu')
+    if(sofort && knopf){ knopf.disabled = true; knopf.textContent = 'rechnet …' }
+    try{
+      const tok = await vrToken()
+      const r = await fetch(`${WATCHER_HOME}/admin/vorrat`, sofort
+        ? { method: 'POST', headers: { 'sb-token': tok, 'Content-Type': 'application/json' }, body: JSON.stringify({ aktion: 'rechnen' }) }
+        : { headers: { 'sb-token': tok }, cache: 'no-store' })
+      const d = await r.json().catch(() => ({}))
+      if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
+      if(!Array.isArray(d.zellen) || !Array.isArray(d.firmen)) throw new Error('unerwartete Antwort')
+      // Ein Sperr-Klick, der während des Ladens losging, gewinnt — sein Stand steht schon in der Anzeige
+      if(!_vr.sendet){ _vr.daten = d; _vr.stand = Date.now() }
+      _vr.fehler = ''
+    }catch(e){ _vr.fehler = 'Laden fehlgeschlagen: ' + (e.message || e) }
+    _vr.laedt = false
+    if(knopf){ knopf.disabled = false; knopf.textContent = 'Jetzt aktualisieren' }
+    vrRender()
+  }
+
+  // Eine Zelle der Sperr-Matrix schalten: sofort anzeigen, dann speichern; schlägt das Speichern fehl, springt die Zelle zurück
+  async function vrSchalten(uid, firma, status){
+    const d = _vr.daten
+    const z = d?.zellen.find(c => c.user_id === uid && c.firma === firma)
+    if(!z || !d.bereit || z.status === status) return
+    const alt = { status: z.status, gesetzt: z.gesetzt }
+    z.status = status; z.gesetzt = true; _vr.sendet++
+    vrRender()
+    try{
+      const r = await fetch(`${WATCHER_HOME}/admin/vorrat`, { method: 'POST', headers: { 'sb-token': await vrToken(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: uid, firma, status }) })
+      const a = await r.json().catch(() => ({}))
+      if(!r.ok || !a.ok) throw new Error(a.error || ('HTTP ' + r.status))
+      _vr.fehler = ''
+    }catch(e){ z.status = alt.status; z.gesetzt = alt.gesetzt; _vr.fehler = 'Sperre nicht gespeichert: ' + (e.message || e) }
+    _vr.sendet--
+    vrRender()
+  }
+
+  function vrRender(){
+    const root = document.getElementById('vr-root')
+    if(!root) return
+    const d = _vr.daten
+    if(!d){ root.textContent = _vr.fehler || 'Lade Vorrat…'; return }
+    root.removeAttribute('style')
+    const st = document.getElementById('vr-stand')
+    if(st) st.textContent = 'Je ID und Firma: Funnel und sicherer Bestand gegen das Ziel' + (_vr.stand ? ' · Stand ' + new Date(_vr.stand).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '')
+    const name = new Map((d.people || []).map(p => [p.user_id, p.name]))
+    if(_vr.person && !name.has(_vr.person)) _vr.person = ''
+    // Zustände (Finn 06.10.2026): frei · pausiert (freigeschaltet, aber gerade nichts kaufen) · gesperrt. Kacheln, rote Zahlen an
+    // den ID-Chips und die Summen je Firma zählen nur freie Zellen — pausierte sind eine eigene Zahl und stehen am Blockende vor den Chips
+    const istFrei = z => z.status === 'frei', istPause = z => z.status === 'pausiert', istZu = z => z.status === 'gesperrt'
+    const imZielF = z => z.lage === 'im_ziel' || z.lage === 'ueber'
+    const zellen = d.zellen.filter(z => !_vr.person || z.user_id === _vr.person)
+    const frei = zellen.filter(istFrei), pausiert = zellen.filter(istPause), gesperrt = zellen.filter(istZu)
+    const unter = frei.filter(z => z.lage === 'unter'), imZiel = frei.filter(imZielF)
+    const nVorrat = frei.reduce((s, z) => s + (z.bestand_n || 0), 0)
+    const nKonten = frei.reduce((s, z) => s + (z.konten || 0), 0)
+    const passt = { unter: unter.length, ziel: imZiel.length, vorrat: nVorrat, pausiert: pausiert.length, gesperrt: gesperrt.length }
+    if(_vr.kachel && !passt[_vr.kachel]) _vr.kachel = ''      // Filter ohne Treffer hebt sich selbst auf (wie „Accounts je Firma")
+    const k = _vr.kachel
+    const nb = ' '
+
+    const kachel = (key, label, wert, sub, kl) => `<button type="button" class="kpi vr-k${k && k === key ? ' is-on' : ''}${wert ? '' : ' is-leer'}" data-vr-k="${key}" title="${key ? (k === key ? 'Filter aufheben' : 'nur diese zeigen') : 'alle zeigen'}">
+      <div class="kpi-label">${label}</div><div class="kpi-value ${wert ? kl : ''}">${wert}</div><div class="kpi-delta">${sub}</div></button>`
+    const nUeber = imZiel.filter(z => z.lage === 'ueber').length
+    const kpis = kachel('', 'Freigeschaltet', frei.length, `${new Set(frei.map(z => z.user_id)).size}${nb}IDs · ${new Set(frei.map(z => z.firma)).size}${nb}Firmen`, '')
+      + kachel('unter', 'Unter Ziel', unter.length, `von${nb}${frei.length}${nb}freien`, 'vr-rot')
+      + kachel('ziel', 'Im Ziel', imZiel.length, nUeber ? `davon${nb}${nUeber}${nb}über der Obergrenze` : `von${nb}${frei.length}${nb}freien`, 'vr-gut')
+      + kachel('vorrat', 'Konten im Vorrat', nVorrat, `${Math.max(0, nKonten - nVorrat)}${nb}weitere im${nb}Funnel`, '')
+      + kachel('pausiert', 'Pausiert', pausiert.length, 'frei, aber gerade nichts kaufen', 'vr-gelb')
+      + kachel('gesperrt', 'Gesperrt', gesperrt.length, 'Kombinationen', '')
+
+    // ID-Chips: Klick zeigt nur diese ID; die rote Zahl = ihre freien Kombinationen unter Ziel (über alle Firmen, unabhängig vom Filter)
+    const unterJe = new Map()
+    for(const z of d.zellen) if(istFrei(z) && z.lage === 'unter') unterJe.set(z.user_id, (unterJe.get(z.user_id) || 0) + 1)
+    const ids = (d.people || []).map(p => `<button type="button" class="vr-id${_vr.person === p.user_id ? ' an' : ''}" data-vr-p="${vrEsc(p.user_id)}" title="${_vr.person === p.user_id ? 'alle IDs zeigen' : 'nur diese ID zeigen'}">
+      <i style="background:${vrFarbe(p.user_id)}"></i>${vrEsc(p.name)}${unterJe.get(p.user_id) ? ` <b>${unterJe.get(p.user_id)}</b>` : ''}</button>`).join('')
+
+    const rang = z => z.lage === 'unter' ? 0 : z.lage === 'im_ziel' ? 1 : z.lage === 'ueber' ? 2 : 3
+    const luecke = z => z.von ? (z.fehlt || 0) / z.von : 0
+    const nachName = (a, b) => String(name.get(a.user_id) || '').localeCompare(String(name.get(b.user_id) || ''), 'de')
+    const aus = d.bereit ? '' : ' disabled'
+    const bloecke = d.firmen.map(f => {
+      const meine = zellen.filter(z => z.firma === f.firma)
+      let zeilen = meine.filter(istFrei)
+      if(k === 'unter') zeilen = zeilen.filter(z => z.lage === 'unter')
+      else if(k === 'ziel') zeilen = zeilen.filter(imZielF)
+      else if(k === 'vorrat') zeilen = zeilen.filter(z => z.bestand_n > 0)
+      else if(k === 'gesperrt' || k === 'pausiert') zeilen = []
+      const pause = (!k || k === 'pausiert') ? meine.filter(istPause).sort(nachName) : []
+      const zu = (!k || k === 'gesperrt') ? meine.filter(istZu).sort(nachName) : []
+      if(!zeilen.length && !pause.length && !zu.length) return ''
+      zeilen.sort((a, b) => rang(a) - rang(b) || luecke(b) - luecke(a) || nachName(a, b))
+      const stufen = vrStufenVon(f, d.zellen.filter(z => z.firma === f.firma))
+      const fa = vrEsc(f.firma)
+      // Knöpfe je Zeile: frei → ‖ pausieren oder Schloss sperren; pausiert → ▶ freischalten oder Schloss sperren; gesperrt = Chip (Klick = frei)
+      const knopf = (z, nm, status, icon, wort) => `<button type="button" class="vr-schloss" data-vr-s="${status}" data-vr-u="${vrEsc(z.user_id)}" data-vr-f="${fa}" title="${d.bereit ? `${nm} bei ${fa} ${wort}` : 'SQL noch nicht eingespielt'}"${aus}>${icon}</button>`
+      const zeile = z => { const nm = vrEsc(name.get(z.user_id) || z.user_id.slice(0, 8)), p = istPause(z); return `<div class="vr-zeile${p ? ' pausiert' : ''}">
+        <div class="vr-name"><i style="background:${vrFarbe(z.user_id)}"></i><span title="${nm}">${nm}</span>${p ? '<em class="vr-pause">pausiert</em>' : ''}</div>
+        <div class="vr-funnel">${vrFunnelHtml(z, f, stufen)}</div>
+        <div class="vr-mitte">${vrMitteHtml(z, f)}</div>
+        <div class="vr-wert">${vrWertHtml(z, f)}</div>
+        <div class="vr-knoepfe">${p ? knopf(z, nm, 'frei', VR_PLAY, 'wieder freischalten') : knopf(z, nm, 'pausiert', VR_PAUSE, 'pausieren (gerade nichts kaufen)')}${knopf(z, nm, 'gesperrt', VR_SCHLOSS, 'sperren')}</div>
+      </div>` }
+      const zeilenHtml = zeilen.map(zeile).join('') + pause.map(zeile).join('')
+      const zuHtml = zu.length ? `<div class="vr-gesperrt"><span>Gesperrt${nb}·${nb}${zu.length}</span>${zu.map(z => { const nm = vrEsc(name.get(z.user_id) || z.user_id.slice(0, 8)); return `<button type="button" class="vr-gchip" data-vr-s="frei" data-vr-u="${vrEsc(z.user_id)}" data-vr-f="${fa}" title="${d.bereit ? `${nm} bei ${fa} freischalten` : 'SQL noch nicht eingespielt'}${z.konten ? ' · ' + vrKonten(z.konten) + ' dort' : ''}"${aus}><i></i>${nm}${z.konten ? ' · ' + vrKonten(z.konten) : ''}</button>` }).join('')}</div>` : ''
+      const fz = meine.filter(istFrei)
+      const nU = fz.filter(z => z.lage === 'unter').length, nZ = fz.filter(imZielF).length
+      const sum = f.ziel ? [nU ? `<span class="vr-rot">${nU}${nb}unter Ziel</span>` : '', nZ ? `<span class="vr-gut">${nZ}${nb}im Ziel</span>` : ''].filter(Boolean).join(' · ') : ''
+      return `<div class="panel vr-firma"><div class="panel-head"><div><div class="panel-title">${fa}</div><div class="panel-sub">${vrEsc(vrZielTxt(f.ziel))}</div></div><div class="vr-sum">${sum}</div></div>${zeilenHtml}${zuHtml}</div>`
+    }).join('')
+
+    root.innerHTML = (d.hinweis ? `<div class="vr-hinweis">${vrEsc(d.hinweis)}</div>` : '')
+      + (_vr.fehler ? `<div class="vr-fehler">${vrEsc(_vr.fehler)}</div>` : '')
+      + `<div class="kpis vr-kpis">${kpis}</div><div class="vr-ids">${ids}</div>`
+      + (bloecke || '<div class="adm-empty">Keine Kombination für diese Auswahl.</div>')
+      + `<div class="vr-fuss">Violett = die Stufe, die als Vorrat zählt: bei Futures-Firmen die Winning-Days-Konten, bei CFD-Firmen die Funded-Konten. Alles davor ist Funnel.
+        Grünes Band am Balken = Ziel-Spanne (Untergrenze bis Obergrenze). ‖ pausiert eine ID bei einer Firma (frei, aber gerade nichts kaufen), das Schloss sperrt sie; ein Klick auf den grauen Chip schaltet sie wieder frei.</div>`
+    root.querySelectorAll('[data-vr-k]').forEach(b => b.addEventListener('click', () => { const key = b.dataset.vrK; _vr.kachel = (!key || _vr.kachel === key) ? '' : key; vrRender() }))
+    root.querySelectorAll('[data-vr-p]').forEach(b => b.addEventListener('click', () => { _vr.person = _vr.person === b.dataset.vrP ? '' : b.dataset.vrP; vrRender() }))
+    root.querySelectorAll('[data-vr-s]').forEach(b => b.addEventListener('click', () => vrSchalten(b.dataset.vrU, b.dataset.vrF, b.dataset.vrS)))
+  }
+
+  document.getElementById('vrNeu')?.addEventListener('click', () => vrLaden(true))
+  window._vrStub = d => { _vr.daten = d; _vr.stand = Date.now(); _vr.fehler = ''; vrRender() }   // Stub ohne Login (Design-Prüfung)
+  // Offen: Stand zeigen, laden, wenn er älter als eine Minute ist; danach alle 5 min (die Zahlen ändern sich langsam), nur im sichtbaren Tab
+  window._vrTabOeffnen = () => {
+    if(_vr.daten) vrRender()
+    if(Date.now() - _vr.stand > 60000) vrLaden(false)
+    clearInterval(_vr.timer); _vr.timer = setInterval(() => { if(document.visibilityState === 'visible') vrLaden(false) }, 300000)
+  }
+  window._vrTabSchliessen = () => { clearInterval(_vr.timer); _vr.timer = null }
+  // Seite direkt mit #vorrat geöffnet und die Ansicht war schon aktiv, bevor dieser Block lief → jetzt nachholen
+  if(document.querySelector('#dashboard-view .view[data-view="vorrat"].active')) window._vrTabOeffnen()
 })()
 </script>
 <!-- Yahoo-Markt-Block (mk-*) entfernt am 25.09.2026 (Finn: „Den unteren Chart wegmachen und NQ/MNQ unten auch weg") — die Live-Daten
