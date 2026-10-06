@@ -65,7 +65,7 @@ def lade():
         return re.search(rf"^{name} = .*$", src, re.M).group(0)
     konstanten = ("AP_REST_MIN", "AP_GROESSE_TOLERANZ", "AP_KW_FUNDED", "AP_KW_PHASEN", "AP_TYPEN", "AP_TZ_LAUF", "AP_STILL_FIRMEN",
                   "AP_AUSGLEICH_STANDARD", "AP_TZ_TAG", "AP_BOT_ENDE_MIN", "AP_BOT_EXTRA_MIN", "AP_FAELLIG_MIN", "AP_BOT_SCHRITTE",
-                  "AP_RICHTUNG_TXT", "AP_GEGEN_DICHT_MIN", "_ap_bot", "_ap_info", "WD_HEUTE_PPL", "LT_ECHO_ROUTEN", "LT_ECHO_MAX_ALTER_S")
+                  "AP_RICHTUNG_TXT", "AP_GEGEN_DICHT_MIN", "AP_GEGEN_WUERFE", "_ap_bot", "_ap_info", "WD_HEUTE_PPL", "LT_ECHO_ROUTEN", "LT_ECHO_MAX_ALTER_S")
     exec("\n".join([konst(k) for k in konstanten] + [block(f) for f in REIN + IO]), ns)
     return ns
 
@@ -209,10 +209,16 @@ def main():
     paare = a["ap_dicht_paare"]({"A|x": T(None, "A", "x", 100, 1)}, [{"user_id": "B", "firma": "x", "start": 105, "richtung": "sell"}])
     check(a["_ap_gegen_dicht"]({"A|x": "buy"}, paare) == 1 and a["_ap_gegen_dicht"]({"A|x": "sell"}, paare) == 0,
           "Malus auch gegen schon gestartete Trades derselben Firma")
-    # gegenläufig dicht bleibt erlaubt, wenn nur so das Band hält (Malus ist nie Verbot)
+    # 07.10.2026 (Finn: „Tradeify long bei Jacob, eine Minute später Tradeify short bei Moritz" praktisch nie): Malus VOR dem
+    # Netto — lieber schlechter ausgeglichen als dicht gegenläufig
     tr = {"A|tradeify": T(None, "A", "tradeify", 100, 3.0), "B|tradeify": T(None, "B", "tradeify", 101, 3.0)}
-    r, m = a["ap_richtungen_delta"](tr, 0, 0, random.Random(2), 15)
-    check(r["A|tradeify"] != r["B|tradeify"] and m == 3.0, "Malus zählt erst nach dem Netto — nie eine Ablehnung")
+    for s in range(5):
+        r, m = a["ap_richtungen_delta"](tr, 0, 0, random.Random(s), 25)
+        check(r["A|tradeify"] == r["B|tradeify"] and m == 6.0, f"Malus vor Netto (seed {s}): dicht gleich gerichtet, Netto 6 statt 3")
+    # nur wenn es gar nicht anders geht (beide Richtungen fest) bleibt das Paar — nie eine Ablehnung
+    tr = {"A|tradeify": T("buy", "A", "tradeify", 100, 3.0), "B|tradeify": T("sell", "B", "tradeify", 101, 3.0)}
+    r, m = a["ap_richtungen_delta"](tr, 0, 0, random.Random(2), 25)
+    check(r["A|tradeify"] == "buy" and r["B|tradeify"] == "sell", "beide fest → bleibt gegenläufig (Malus ist nie Verbot)")
     # PC: Zeitverteilung belegt je ID nie zwei Starts gleichzeitig, auch gegen schon geplante; keine Firmen-Pause
     zt = {"fenster": [["10:00", "10:30", 1]], "abstand_id_min": 3}
     trz = [{"key": f"A|f{i}", "user": "A", "firma": f"f{i}", "dauer_min": 4} for i in range(3)] + \

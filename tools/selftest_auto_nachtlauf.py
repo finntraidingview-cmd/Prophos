@@ -27,7 +27,7 @@ def lade():
     def konst(name):
         return re.search(rf"^{name} = .*$", src, re.M).group(0)
     exec("\n".join([konst(k) for k in ("AP_TZ_TAG", "AP_NACHT_STANDARD")] + [block(f) for f in (
-        "_ap_tz", "ap_nacht_param", "ap_nacht_lauf_um", "ap_nacht_ziel", "ap_nacht_tick")]), ns)
+        "_ap_tz", "ap_nacht_param", "ap_nacht_lauf_um", "ap_nacht_ziel", "ap_nacht_tick", "ap_richtung_fest_plan")]), ns)
     return ns
 
 
@@ -123,6 +123,23 @@ def main():
     pruef("aktiv aus → an im selben Prozess: erst nach Neustart", laeufe, ["2026-10-07", "2026-10-08"])
     tick(utc("2026-10-08T21:07"), {})
     pruef("nach Neustart mit aktiv: Freitag nachgeholt", laeufe, ["2026-10-07", "2026-10-08", "2026-10-09"])
+
+    # ── Richtungsschutz nur gleichzeitig (Finn 07.10.2026): laufend / am selben Tag geplant = fest, sonst frei
+    fest = ns["ap_richtung_fest_plan"]
+    tz = ns["_ap_tz"]("Europe/Berlin")
+    pruef("läuft (open) → fest", fest({"status": "open", "richtung": "buy"}, "2026-10-07", tz), True)
+    pruef("beendet (review/completed) → frei", [fest({"status": s, "richtung": "buy"}, "2026-10-07", tz) for s in ("review", "completed")],
+          [False, False])
+    pruef("geplant heute 10:00 dt → fest", fest({"status": "planned", "richtung": "sell", "start_um": "2026-10-07T08:00:00+00:00"},
+                                               "2026-10-07", tz), True)
+    pruef("geplant 23:30 dt Vortag (21:30 UTC) → anderer Tag, frei",
+          fest({"status": "planned", "richtung": "sell", "start_um": "2026-10-06T21:30:00+00:00"}, "2026-10-07", tz), False)
+    pruef("geplant 00:30 dt (06.10. 22:30 UTC) → heute, fest",
+          fest({"status": "planned", "richtung": "sell", "start_um": "2026-10-06T22:30:00+00:00"}, "2026-10-07", tz), True)
+    pruef("geplant morgen (planned_for) → frei", fest({"status": "planned", "richtung": "buy", "planned_for": "2026-10-08"},
+                                                     "2026-10-07", tz), False)
+    pruef("geplant ohne Tag/Start → vorsichtshalber fest", fest({"status": "planned", "richtung": "buy"}, "2026-10-07", tz), True)
+    pruef("ohne Richtung → nie fest", fest({"status": "open", "richtung": None}, "2026-10-07", tz), False)
 
     print()
     if FEHLER:

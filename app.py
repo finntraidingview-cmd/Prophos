@@ -13858,13 +13858,24 @@ def ap_konto_rechnen(regel, phase, balance, u):
         # Start − DD … höchstens Start (146.000 → 149.200 → 150.000 fest); Tradeify ohne Lock bleibt ohne Boden
         dd = float(regel["dd_usd"]) * f
         boden = max(groesse - dd, min(groesse, balance - dd))
+    boden_blow = boden
+    if boden_blow is None and regel.get("dd_usd"):
+        # 07.10.2026 (Finn: „Es wird immer nur mit Konten gearbeitet, deren Balance auf dem Live-Stand ist" — geblasene raus):
+        # statisch (Apex) = Start − DD; nachziehend ohne Lock (Tradeify) = mindestens Start − DD (der nachgezogene Stand ist
+        # hier nicht bekannt) — nur für die Geblasen-Prüfung, der SL bleibt ungekappt wie bisher
+        boden_blow = groesse - float(regel["dd_usd"]) * f
+        if regel.get("boden") == "statisch":
+            boden = boden_blow
     rest = ziel - balance
     if rest <= 0:
         return None, "Ziel erreicht — Phase umstellen"
     if rest < AP_REST_MIN:
-        # 05.10.2026: ein Konto 2 $ unter dem Ziel bekäme sonst einen TP von ~20 $ ohne SL (volles Liquidationsrisiko)
+        # 05.10.2026: ein Konto 2 $ unter dem Ziel bekäme sonst einen TP von ~20 $ ohne SL (volles Liquidationsrisiko).
+        # 07.10.2026: Futures-Challenge mit Rest < 100 $ zählt als Ziel erreicht (Phase umstellen)
+        if phase == "challenge":
+            return None, f"Ziel erreicht — Phase umstellen (nur noch {rest:.0f} $)"
         return None, f"nur noch {rest:.0f} $ bis zum Ziel — von Hand prüfen"
-    if boden is not None and balance <= boden:
+    if boden_blow is not None and balance <= boden_blow:
         return None, "Balance auf/unter dem Boden — geblasen?"
     menge = _ap_runden(_ap_spanne(ph.get("menge"), u["menge"], f), ph.get("menge_schritt") or 1)
     pjm = ph.get("puffer_je_menge")
@@ -14349,6 +14360,29 @@ def ap_sicht(erg, uid):
     return out
 
 
+def ap_richtung_fest_plan(p, tag, tz):
+    """REIN RECHNEND (07.10.2026, Richtungsschutz nur gleichzeitig): legt Plan p die Richtung seiner ID+Firma für den Tag `tag`
+    (deutsches Datum) fest? Ja, wenn er läuft (open) oder am selben Tag geplant ist (planned_for bzw. Start in dt) — ohne
+    beides vorsichtshalber ja. Beendete Trades und Pläne anderer Tage nie."""
+    if p.get("richtung") not in ("buy", "sell"):
+        return False
+    if p.get("status") == "open":
+        return True
+    if p.get("status") != "planned":
+        return False
+    if p.get("start_um"):
+        try:
+            t = datetime.fromisoformat(str(p["start_um"]).replace("Z", "+00:00"))
+            if t.tzinfo is None:
+                t = t.replace(tzinfo=timezone.utc)
+            return t.astimezone(tz).strftime("%Y-%m-%d") == tag
+        except ValueError:
+            pass
+    if p.get("planned_for"):
+        return str(p["planned_for"])[:10] == tag
+    return True
+
+
 def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, sicht_uid=None, fingerabdruck=None):
     """Plant den Tag `tag` (Dubai-Datum, Standard heute) für alle IDs aus auto_plan_regeln. trocken = nur rechnen.
     quelle 'nacht' claimt den Tag (ein Lauf je Tag). Hand-Lauf am selben Tag: unbestätigte Auto-Pläne werden ersetzt,
@@ -14396,7 +14430,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
                                   "account_type": "in.(" + ",".join(AP_TYPEN) + ")"})
     plaene = [p for p in _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_firm,status,richtung,master_tp,"
                                                            "ended_at,completed_at,auto_plan,auto_bestaetigt_at,start_um_gestartet_at,"
-                                                           "mt5_baseline->final", "order": "id.asc",
+                                                           "start_um,planned_for,mt5_baseline->final", "order": "id.asc",
                                                  "user_id": in_uids, "created_at": "gte." + (jetzt - timedelta(days=30)).isoformat()})
               if not _vorschlag(p)]
     archiv = _ap_archiviert()
@@ -14472,9 +14506,11 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
             continue
         # Richtungsschutz: läuft/steht an derselben Firma bei derselben ID schon eine Richtung, gilt sie für die Tranche
         firm_n = key.split("|", 1)[1]
+        # 07.10.2026 (Finn: Richtungsschutz gilt nur GLEICHZEITIG — nie Long und Short derselben ID+Firma zur selben Zeit offen;
+        # ist der Long beendet, darf später Short): fest nur durch einen laufenden Plan oder einen geplanten an DIESEM Tag
+        # (ohne Tag/Startzeit vorsichtshalber auch); geplante Pläne anderer Tage überlappen nie (ap_richtung_fest_plan)
         fest_p = next((p for p in plaene if str(p.get("user_id")) == key.split("|")[0]
-                       and _ap_norm(p.get("master_firm")) == firm_n and p.get("status") in ("planned", "open")
-                       and p.get("richtung") in ("buy", "sell")), None)
+                       and _ap_norm(p.get("master_firm")) == firm_n and ap_richtung_fest_plan(p, tag, tz)), None)
         fest = fest_p.get("richtung") if fest_p else None
         abst = zeiten.get("abstand_konto_s") or [60, 120]
         versatz = [0]
@@ -14491,24 +14527,34 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
                         "fkey": ap_firma_key(firmen, rechnung[0][0]["a"].get("firm")),
                         "delta_abs": round(sum(abs(dinfo[(key, str(k["a"]["id"]))]["delta_eur_pkt"] or 0) for k, _ in rechnung), 3)}
         plan_roh += [(key, k, w, versatz[i]) for i, (k, w) in enumerate(rechnung)]
-    zinfo = {}
     # PC je ID: heute schon geplante Pläne derselben ID belegen ihren Start (nie zwei Puls-Starts gleichzeitig)
-    minuten = ap_zeiten_verteilen(list(tr_info.values()), zeiten, rnd, frueheste_min=frueh, info=zinfo,
-                                  bestehend=[{"user": z["user_id"], "start": z["start_min"], "dauer_min": 2} for z in stand["geplant"]
-                                             if z.get("start_min") is not None])
+    # Richtung je TRANCHE nach Delta (06.10.2026, ersetzt das Würfeln nach TP-$; Korrektur Finn abends: keine Firma × Tag-Regel):
+    # kleinstes größtes |Netto| über den Tag, laufende Trades aller IDs und heute schon geplante Pläne eingerechnet; fest nur
+    # durch Richtungsschutz (ID+Firma). 07.10.2026: bleibt trotz bester Richtungen ein dicht gegenläufiges Paar derselben Firma
+    # (z. B. beide Richtungen fest), werden die Zeiten neu gewürfelt (bis AP_GEGEN_WUERFE) — der Lauf mit dem kleinsten Malus gilt
+    fest_ev = [(z["start_min"], z["delta_eur_pkt"]) for z in stand["geplant"]
+               if z.get("start_min") is not None and z.get("delta_eur_pkt") is not None]
+    bestehend_pc = [{"user": z["user_id"], "start": z["start_min"], "dauer_min": 2} for z in stand["geplant"]
+                    if z.get("start_min") is not None]
+    bester = None
+    for _wurf in range(AP_GEGEN_WUERFE):
+        zinfo_w = {}
+        minuten_w = ap_zeiten_verteilen(list(tr_info.values()), zeiten, rnd, frueheste_min=frueh, info=zinfo_w,
+                                        bestehend=bestehend_pc)
+        tr_w = {key: {"fest": tr_info[key]["fest"], "user": tr_info[key]["user"], "firma": tr_info[key]["fkey"],
+                      "start": minuten_w[key], "delta_abs": tr_info[key]["delta_abs"]} for key in minuten_w}
+        richtung_w, netto_w = ap_richtungen_delta(tr_w, stand["basis_netto"], stand["basis_brutto"], rnd, param["zielband_pct"],
+                                                  fest_ev, bestehende=stand["starts_heute"])
+        malus_w = _ap_gegen_dicht(richtung_w, ap_dicht_paare(tr_w, stand["starts_heute"]))
+        if bester is None or (malus_w, -len(minuten_w)) < (bester[0], -len(bester[1])):
+            bester = (malus_w, minuten_w, zinfo_w, richtung_w, netto_w)
+        if malus_w == 0:
+            break
+    _m, minuten, zinfo, richtung, netto_max = bester
     for key in [k for k in tr_info if k not in minuten]:
         for (kk, k, _w, _v) in plan_roh:
             if kk == key:
                 ausgelassen.append(dict(k["zeile"], grund="kein freies Zeitfenster mehr"))
-    # Richtung je TRANCHE nach Delta (06.10.2026, ersetzt das Würfeln nach TP-$; Korrektur Finn abends: keine Firma × Tag-Regel):
-    # kleinstes größtes |Netto| über den Tag, laufende Trades aller IDs und heute schon geplante Pläne eingerechnet; fest nur
-    # durch Richtungsschutz (ID+Firma); dicht gegenläufige Starts derselben Firma = weicher Malus
-    fest_ev = [(z["start_min"], z["delta_eur_pkt"]) for z in stand["geplant"]
-               if z.get("start_min") is not None and z.get("delta_eur_pkt") is not None]
-    richtung, netto_max = ap_richtungen_delta(
-        {key: {"fest": tr_info[key]["fest"], "user": tr_info[key]["user"], "firma": tr_info[key]["fkey"], "start": minuten[key],
-               "delta_abs": tr_info[key]["delta_abs"]} for key in minuten},
-        stand["basis_netto"], stand["basis_brutto"], rnd, param["zielband_pct"], fest_ev, bestehende=stand["starts_heute"])
 
     frontcode = _wd_futures_frontcode(mitternacht.astimezone(timezone.utc))
     zeilen, geplant = [], []
@@ -14594,6 +14640,7 @@ AP_BOT_SCHRITTE = 3                  # höchstens so viele Umplanungen (Tranche 
 # Firma in der gleichen Minute long gehen, ist das halt so"): zwei gegenläufige Starts derselben Firma bei verschiedenen IDs
 # dichter als das zählen im Optimierer als Malus (lieber anders würfeln) — nie Verbot, nie Ablehnung, kein DB-Parameter
 AP_GEGEN_DICHT_MIN = 10
+AP_GEGEN_WUERFE = 6                  # 07.10.2026: so oft würfelt der Planer die Zeiten neu, solange ein dicht gegenläufiges Paar bleibt
 AP_RICHTUNG_TXT = {"buy": "long", "sell": "short"}
 _ap_bot = {"letzter_lauf": None, "letztes": None, "extra_tag": None, "fehler": "", "param": None, "gelesen": 0.0}
 
@@ -14761,7 +14808,7 @@ def ap_richtungen_delta(tranchen, basis_netto, basis_brutto, rnd, band_pct, fest
     weicher Malus, wenn zwei gegenläufige derselben Firma dichter als AP_GEGEN_DICHT_MIN starten (dann lieber anders würfeln).
     tranchen = {key: {fest ('buy'|'sell'|None = Richtungsschutz ID+Firma), user, firma, start, delta_abs}}, fest_ereignisse =
     [(minute, delta signiert)] schon geplanter Pläne, bestehende = heutige Starts für den Malus. Zielfunktion: größtes
-    |Netto-Delta| über den Tag (auf 0,1 €/Pkt), dann der Malus, dann das Netto am Tagesende. Bis 12 freie Tranchen alle
+    |Netto-Delta| über den Tag (auf 0,1 €/Pkt), dann das Netto am Tagesende — davor (seit 07.10.2026) der Malus. Bis 12 freie Tranchen alle
     Verteilungen, darüber `versuche` Würfe + Einzeltausch, bis keiner mehr verbessert; Gleichstand entscheidet der Zufall.
     → ({key: 'buy'|'sell'}, netto_max_abs)"""
     namen = sorted(tranchen or {})
@@ -14773,7 +14820,9 @@ def ap_richtungen_delta(tranchen, basis_netto, basis_brutto, rnd, band_pct, fest
         ev = list(fest_ereignisse or ()) + [(tranchen[k]["start"], float(tranchen[k].get("delta_abs") or 0) * (1 if z[k] == "buy" else -1))
                                             for k in namen]
         v = ap_verlauf(basis_netto, basis_brutto, ev, band_pct)
-        return (round(v["netto_max_abs"], 1), _ap_gegen_dicht(z, paare), round(abs(v["verlauf"][-1]["netto_delta"]), 3)), v["netto_max_abs"]
+        # 07.10.2026 (Finn: „Tradeify long bei Jacob, eine Minute später Tradeify short bei Moritz" soll praktisch nie vorkommen,
+        # perfekter Ausgleich ist nicht nötig): der Malus steht VOR dem Netto — gewählt nur, wenn keine Verteilung ohne ihn geht
+        return (_ap_gegen_dicht(z, paare), round(v["netto_max_abs"], 1), round(abs(v["verlauf"][-1]["netto_delta"]), 3)), v["netto_max_abs"]
 
     def zuteilung(bits):
         z = dict(basis)
@@ -14910,9 +14959,10 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                 kandidaten.append((strafe(z), "start", t["firma"], ids, z))
         if not kandidaten:
             break
-        kandidaten.sort(key=lambda x: x[0])
+        # 07.10.2026: Malus (dicht gegenläufig, gleiche Firma) vor Band und Netto — der Bot baut so ein Paar nie selbst ein
+        kandidaten.sort(key=lambda x: (x[0][2], x[0][0], x[0][1]))
         k_neu, art, f, ids, z = kandidaten[0]
-        if k_neu >= aktuell:
+        if (k_neu[2], k_neu[0], k_neu[1]) >= (aktuell[2], aktuell[0], aktuell[1]):
             break
         for i in ids:
             von, nach = zustand[i], z[i]
@@ -15191,11 +15241,12 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
         if b["hinweis"]:
             hinweise.append({"plan_id": z["plan_id"], "user_id": z["user_id"], "user": z["user"], "firma": z["firma"],
                              "konto": z["konto"], "grund": b["hinweis"]})
+    # 07.10.2026 (Finn: Richtungsschutz gilt nur GLEICHZEITIG): fest ist eine ID+Firma nur, solange dort ein Trade läuft —
+    # Pläne anderer Tage überlappen nie und legen heute nichts mehr fest (vorher: andere_tage = ganzer Tag gesperrt)
     id_fest = {}
-    for p in andere_tage:
-        if p.get("richtung") in ("buy", "sell"):
-            id_fest.setdefault(f"{p.get('user_id')}|{fkey(p)}", {"richtung": p["richtung"],
-                                                                "durch": f"geplant {str(p.get('start_um') or 'ohne Startzeit')[:16]}"})
+    for z in offen_rows:
+        if z.get("richtung") in ("buy", "sell"):
+            id_fest.setdefault(f"{z['user_id']}|{z['firma_key']}", {"richtung": z["richtung"], "durch": "läuft gerade"})
     for z in geplant_rows:
         ff = id_fest.get(f"{z['user_id']}|{z['firma_key']}")
         z["richtung_fest_durch"] = ff["durch"] if ff else None
