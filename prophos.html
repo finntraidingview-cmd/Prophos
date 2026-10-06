@@ -1423,6 +1423,46 @@
   #tpVorplanModal .vp-in,#adm-pane-wd .vp-in{width:62px;padding:3px 6px;height:auto;font-size:12px;text-align:right}
   #tpVorplanModal .vp-zeile,#adm-pane-wd .vp-zeile{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;font-size:12.5px}
   #tpVorplanModal .vp-zeile>b{min-width:118px;font-weight:600}
+  /* Probelauf Auto-Planer (06.10.2026, Finn hat 0/13 Nacht-Vorschläge bestätigt, weil er Startzeit, Richtung und Ausgleich
+     nicht sehen konnte): Kopf, Long/Short-Balken, Zeitleiste je ID mit Netto-Kurve, Tranchen aufklappbar. Nur dieses Modal. */
+  #apProbeModal .modal{max-width:780px}
+  #apProbeModal .apx-kopf{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;font-size:13px;margin:12px 0 10px}
+  #apProbeModal .apx-kopf b{font-size:15px}
+  #apProbeModal .apx-id{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:600;color:var(--ink-2)}
+  #apProbeModal .apx-id::before{content:'';width:8px;height:8px;border-radius:50%;background:var(--c,#98A2B3)}
+  #apProbeModal .apx-sub{color:var(--sub);font-size:12px}
+  #apProbeModal .apx-karte{border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface);padding:10px 12px;margin-bottom:10px}
+  #apProbeModal .apx-bal-zahlen{display:flex;justify-content:space-between;gap:8px;font-size:13px;font-weight:600;font-variant-numeric:tabular-nums}
+  #apProbeModal .apx-bal-balken{position:relative;display:flex;height:12px;border-radius:6px;overflow:hidden;background:var(--surface-tint);margin:6px 0 4px}
+  #apProbeModal .apx-bal-balken::after{content:'';position:absolute;left:50%;top:-2px;bottom:-2px;width:2px;background:var(--ink);opacity:.35}
+  #apProbeModal .apx-bal-mitte{text-align:center;font-size:12px;color:var(--sub);font-variant-numeric:tabular-nums}
+  #apProbeModal .apx-achse{position:relative;height:16px;font-size:10.5px;color:var(--sub-2);font-variant-numeric:tabular-nums}
+  #apProbeModal .apx-achse span{position:absolute;transform:translateX(-50%);white-space:nowrap}
+  #apProbeModal .apx-band{position:relative}
+  #apProbeModal .apx-fenster{position:absolute;top:0;bottom:0;border-left:1px dashed var(--border);pointer-events:none}
+  #apProbeModal .apx-fenster.dunkel{background:var(--surface-tint)}
+  #apProbeModal .apx-fenster i{position:absolute;top:1px;right:3px;font-style:normal;font-size:10px;color:var(--sub-2);white-space:nowrap}
+  #apProbeModal .apx-achse span.rechts{transform:translateX(-100%)}
+  @media (max-width:640px){   /* Handy: nur jede zweite Uhrzeit, keine %-Marken in schmalen Fenstern (15:30–16:30 ≈ 20 px) */
+    #apProbeModal .apx-achse span.nb,#apProbeModal .apx-fenster.schmal i{display:none}
+  }
+  #apProbeModal .apx-spur{position:relative;height:30px;border-top:1px solid var(--border-soft)}
+  #apProbeModal .apx-spur>.apx-id{position:absolute;left:4px;top:1px;font-size:10.5px;font-weight:500;color:var(--sub);z-index:1}
+  #apProbeModal .apx-mark{position:absolute;bottom:2px;transform:translateX(-50%);border:0;background:none;padding:0 1px;font-size:11px;line-height:1.1;font-weight:700;cursor:pointer;white-space:nowrap;font-family:inherit}
+  #apProbeModal .apx-mark.long{color:var(--good)} #apProbeModal .apx-mark.short{color:var(--danger)}
+  #apProbeModal .apx-kurve{display:block;width:100%;height:56px;border-top:1px solid var(--border-soft)}
+  #apProbeModal .apx-kurve-txt{display:flex;justify-content:space-between;font-size:11px;color:var(--sub);font-variant-numeric:tabular-nums}
+  #apProbeModal details.apx-tr{border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface);margin-bottom:6px}
+  #apProbeModal details.apx-tr>summary{list-style:none;cursor:pointer;display:flex;flex-wrap:wrap;align-items:center;gap:2px 10px;padding:8px 10px;font-size:13px}
+  #apProbeModal details.apx-tr>summary::-webkit-details-marker{display:none}
+  #apProbeModal details.apx-tr>summary::after{content:'›';margin-left:auto;color:var(--sub-2);transition:transform .15s var(--ease)}
+  #apProbeModal details.apx-tr[open]>summary::after{transform:rotate(90deg)}
+  #apProbeModal .apx-ri{font-weight:700;font-size:12px} #apProbeModal .apx-ri.long{color:var(--good)} #apProbeModal .apx-ri.short{color:var(--danger)}
+  #apProbeModal .apx-warum{padding:0 10px 8px;font-size:12px;color:var(--sub);line-height:1.5}
+  #apProbeModal .apx-konto{display:flex;flex-wrap:wrap;gap:2px 12px;padding:6px 10px;border-top:1px solid var(--border-soft);font-size:12px;font-variant-numeric:tabular-nums}
+  #apProbeModal .apx-konto>b{min-width:64px;font-weight:600}
+  #apProbeModal .apx-h{font-size:12px;font-weight:600;color:var(--sub);margin:14px 0 6px;text-transform:uppercase;letter-spacing:.04em}
+  #apProbeModal .apx-leer{padding:24px 8px;text-align:center;color:var(--sub);font-size:13px}
   /* Winning-Day-Farmer im Admin (23.09.2026, Finn: „mach alles in Admin und mehr Überblick"; dann „mies
      hässlich und man checkt nix — erklär mal visuell"; 01:xx: „der Erklärblock und der Zeitstrahl sind
      mies hässlich, man erkennt da gar nichts"): Kopf eine Zeile, Ablauf als Tabelle, je Block eine
@@ -6440,6 +6480,30 @@
         <div class="modal-foot">
           <button class="btn btn-ghost" id="tpVorplanCancel">Abbrechen</button>
           <button class="btn btn-primary" id="tpVorplanGo">Pläne anlegen</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Probelauf Auto-Planer (06.10.2026): „so würde der Auto-Planer planen" — nur gerechnet, nichts angelegt.
+         Inhalt zeichnet apPrZeichnen (Sektion AUTO-PLANER), eigene Verdrahtung dort. -->
+    <div class="modal-bg" id="apProbeModal">
+      <div class="modal">
+        <div class="modal-head">
+          <h3>Probelauf Auto-Planer</h3>
+          <button class="modal-x" id="apProbeX" aria-label="Schließen">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="seg" id="ap-pr-tag">
+            <button type="button" data-ap-tag="morgen" class="active">morgen</button>
+            <button type="button" data-ap-tag="heute">heute ab jetzt</button>
+          </div>
+          <div id="ap-pr-inhalt"></div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-ghost" id="apProbeZu">Schließen</button>
+          <button class="btn btn-primary" id="apProbeGo">So planen →</button>
         </div>
       </div>
     </div>
@@ -38410,7 +38474,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1048'
+  const OS_TAB_BUILD = '2026-09-22.1049'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -42221,7 +42285,7 @@
     try{ const u = session.user || {}; _ap.ich = { id: String(u.id || ''), name: String(u.user_metadata?.name || '').trim() || String(u.email || '').split('@')[0] } }catch(_){}
     const r = await fetch(`${WATCHER_HOME}/admin/auto-plan`, { method, headers: { 'sb-token': tok, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
     const d = await r.json().catch(() => ({}))
-    if(!r.ok || d.ok === false) throw new Error(d.msg || d.error || ('HTTP ' + r.status))
+    if(!r.ok || d.ok === false){ const f = new Error(d.msg || d.error || ('HTTP ' + r.status)); f.daten = d; throw f }   // daten: z. B. abweichung (Probelauf)
     return d
   }
   async function apLetztenLaden(){
@@ -42254,17 +42318,24 @@
       renderTradePlans()
     }catch(e){ if(typeof atToast === 'function') atToast('Zurücknehmen fehlgeschlagen: ' + ((e && e.message) || e), 'end') }
   }
-  async function apJetztPlanen(trocken){
-    if(_ap.laeuft) return
-    if(!trocken && !confirm('Auto-Planer jetzt laufen lassen?\n\nUnbestätigte Auto-Vorschläge werden ersetzt, Startzeiten frühestens in 10 min.')) return
+  // extra (06.10.2026, Probelauf-Modal): { tag, seed, fingerabdruck } — „So planen →" legt genau den gezeigten Stand an: gleicher
+  // Seed, und das Backend legt nichts an, wenn der Fingerabdruck nicht mehr passt. Ergebnis true = angelegt, 'abweichung' = nichts angelegt.
+  async function apJetztPlanen(trocken, extra){
+    if(_ap.laeuft) return false
+    const tagTxt = extra && extra.tag ? ` für ${apPrTagText(extra.tag)}` : ''
+    if(!trocken && !confirm(`Auto-Planer jetzt laufen lassen${tagTxt}?\n\nUnbestätigte Auto-Vorschläge werden ersetzt, Startzeiten frühestens in 10 min.`)) return false
     _ap.laeuft = true; apLeisteZeichnen()
     try{
-      const d = await apApi('POST', { trocken: !!trocken })
+      const d = await apApi('POST', { trocken: !!trocken, ...(extra || {}) })
       _ap.letzter = d
       if(!trocken && typeof loadTradePlansFromSupabase === 'function') await loadTradePlansFromSupabase()
       const e = apEigenes(d)
       if(typeof atToast === 'function') atToast(d.msg ? `🤖 ${d.msg}` : `🤖 ${trocken ? 'Probelauf' : 'Auto-Planer'}: ${e.geplant.length} geplant · ${e.ausgelassen.length} ausgelassen`, 'start')
-    }catch(e){ if(typeof atToast === 'function') atToast('Auto-Planer: ' + ((e && e.message) || e), 'end') }
+      return true
+    }catch(e){
+      if(typeof atToast === 'function') atToast('Auto-Planer: ' + ((e && e.message) || e), 'end')
+      return e && e.daten && e.daten.abweichung ? 'abweichung' : false   // Stand seit dem Probelauf geändert, nichts angelegt
+    }
     finally{ _ap.laeuft = false; apLeisteZeichnen() }
   }
   /* Nur die Zeilen der eigenen ID aus einem Lauf-Ergebnis. Neues Backend: user_id je Zeile bzw. ohnehin nur der eigene Lauf;
@@ -42303,9 +42374,245 @@
         <button class="btn btn-ghost tc2-btn" id="apJetzt" ${_ap.laeuft ? 'disabled' : ''} title="Jetzt planen (ersetzt unbestätigte Vorschläge)">${_ap.laeuft ? 'plant…' : 'Jetzt planen'}</button>` : ''}
       </div>
       ${lauf ? `<div style="margin-top:4px;font-size:12px;color:var(--sub);font-variant-numeric:tabular-nums">${lauf}</div>` : ''}`
-    document.getElementById('apProbe')?.addEventListener('click', () => apJetztPlanen(true))
+    document.getElementById('apProbe')?.addEventListener('click', apProbeOeffnen)
     document.getElementById('apJetzt')?.addEventListener('click', () => apJetztPlanen(false))
   }
+
+  /* ── Probelauf-Ansicht (06.10.2026, Finn hat 0/13 Nacht-Vorschläge bestätigt, weil er Startzeit, Richtung und Ausgleich nicht
+   * prüfen konnte → „so würde der Auto-Planer morgen planen"). Eigenes Modal #apProbeModal statt Toast, nur gerechnet (trocken),
+   * nichts angelegt. Daten: POST /admin/auto-plan {trocken:true, tag} → tranchen[] + ausgleich{} (Vertrag
+   * .claude/master/autoplan-probelauf-vertrag.md). Altes Backend ohne tranchen: aus geplant[] je ID × Firma zusammengesetzt —
+   * dann ohne €-Gewichte („$ TP" statt „€ im Spiel") und ohne „warum". Admin (d.admin) sieht alle IDs, sonst nur die eigene;
+   * der Long/Short-Ausgleich gilt immer über alle IDs (so rechnet der Planer). Zeiten = deutsche Zeit wie im Planer. */
+  const _apPr = { modus: 'morgen', laeuft: false, d: null, tag: null, fehler: '', hinweis: '', nr: 0 }
+  const AP_PR_VON = 120, AP_PR_BIS = 1050            // Zeitleiste 02:00–17:30 deutscher Zeit (letzter Start 17:30, Finn 05.10.2026)
+  const AP_PR_FENSTER = [{ von: '02:00', bis: '14:00', anteil: 37 }, { von: '14:00', bis: '15:30', anteil: 25 },
+                         { von: '15:30', bis: '16:30', anteil: 18 }, { von: '16:30', bis: '17:30', anteil: 20 }]   // Standard ohne fenster im Ergebnis
+  const apPrGeld = (x, euro) => (Number(x) < 0 ? '−' : '') + Math.round(Math.abs(Number(x) || 0)).toLocaleString('de-DE') + (euro ? ' €' : ' $')
+  const apPrGeldVz = (x, euro) => (Number(x) > 0 ? '+' : '') + apPrGeld(x, euro)
+  function apPrHm(s){   // „HH:MM" oder ISO-Zeit → Minuten seit 00:00 deutscher Zeit
+    const t = String(s || '')
+    let m = /^(\d{1,2}):(\d{2})$/.exec(t)
+    if(!m && t.length > 8){ const d = new Date(t); if(!isNaN(d)) m = /(\d{2}):(\d{2})/.exec(d.toLocaleTimeString('de-DE', { timeZone: 'Europe/Berlin', hour: '2-digit', minute: '2-digit', hour12: false })) }
+    return m ? (+m[1]) * 60 + (+m[2]) : null
+  }
+  const apPrUhr = min => String(Math.floor(min / 60)).padStart(2, '0') + ':' + String(Math.round(min % 60)).padStart(2, '0')
+  const apPrX = min => Math.max(0, Math.min(100, (min - AP_PR_VON) / (AP_PR_BIS - AP_PR_VON) * 100))
+  /* „morgen" = nächster Handelstag Mo–Fr als Dubai-Datum (ap_planen: Tag = Dubai-Datum) — freitags sonst immer „Wochenende" */
+  function apPrTag(modus){
+    if(modus !== 'morgen') return null
+    const d = new Date(new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Dubai' }) + 'T12:00:00Z')
+    do { d.setUTCDate(d.getUTCDate() + 1) } while(d.getUTCDay() === 0 || d.getUTCDay() === 6)
+    return d.toISOString().slice(0, 10)
+  }
+  function apPrTagText(tag){
+    const d = new Date(String(tag || '') + 'T12:00:00Z'); if(isNaN(d)) return String(tag || 'heute')
+    return d.toLocaleDateString('de-DE', { timeZone: 'UTC', weekday: 'short', day: '2-digit', month: '2-digit' })
+  }
+  /* Firmen-Kürzel für die Zeitleiste — kurz genug, dass zwei Tranchen nah beieinander lesbar bleiben */
+  function apPrKurz(f){
+    const t = String(f || '').toLowerCase().replace(/[^a-z0-9%]/g, '')
+    return t.includes('tradeify') ? 'TF' : t.includes('apex') ? 'AP' : t.includes('fundednext') ? 'FN' : t.includes('fundingpips') ? 'FP'
+      : t.includes('5ers') || t.includes('5%ers') ? '5%' : t.includes('ftmo') ? 'FT' : t.includes('blueguardian') ? 'BG' : t.includes('topstep') ? 'TS'
+      : (String(f || '?').replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() || '?')
+  }
+  async function apProbeOeffnen(){
+    document.getElementById('apProbeModal')?.classList.add('open')
+    apPrSegSetzen()
+    apPrLaden()
+  }
+  function apProbeZu(){ _apPr.nr++; _apPr.laeuft = false; _apPr.hinweis = ''; document.getElementById('apProbeModal')?.classList.remove('open') }
+  function apPrSegSetzen(){
+    document.querySelectorAll('#ap-pr-tag [data-ap-tag]').forEach(b => b.classList.toggle('active', b.dataset.apTag === _apPr.modus))
+  }
+  async function apPrLaden(){
+    const nr = ++_apPr.nr, tag = apPrTag(_apPr.modus)
+    _apPr.laeuft = true; _apPr.fehler = ''; _apPr.d = null; _apPr.tag = tag; apPrZeichnen()
+    try{
+      const d = await apApi('POST', tag ? { trocken: true, tag } : { trocken: true })
+      if(nr !== _apPr.nr) return            // inzwischen umgeschaltet oder geschlossen
+      _apPr.d = d; _apPr.tag = d.tag || tag
+    }catch(e){ if(nr === _apPr.nr) _apPr.fehler = (e && e.message) || String(e) }
+    finally{ if(nr === _apPr.nr){ _apPr.laeuft = false; apPrZeichnen() } }
+  }
+  /* Ergebnis → Anzeige-Daten: Tranchen (gefiltert, sortiert, mit Gewicht), Ausgelassene, Long/Short, Netto-Verlauf */
+  function apPrDaten(d){
+    const ich = _ap.ich || {}, alle = !!(d && d.admin)
+    const mein = x => alle || (!!x && (x.user_id != null ? String(x.user_id) === ich.id : (!!ich.name && String(x.user || '') === ich.name)))
+    let tr = Array.isArray(d && d.tranchen) ? d.tranchen : null
+    const euro = !!tr && tr.some(t => t && (t.gewicht_eur != null || (t.konten || []).some(k => k && k.gewicht_eur != null)))
+    if(!tr){
+      const m = new Map()
+      for(const g of ((d && d.geplant) || [])){
+        const k = String(g.user_id || g.user) + '|' + String(g.firma || '').toLowerCase()
+        if(!m.has(k)) m.set(k, { key: k, user_id: g.user_id, user: g.user, firma: g.firma, start: g.start, richtung: g.richtung, konten: [] })
+        const t = m.get(k)
+        if((apPrHm(g.start) ?? 9999) < (apPrHm(t.start) ?? 9999)) t.start = g.start
+        t.konten.push({ konto: g.konto, tp: g.tp, sl: g.sl, menge: g.menge, stufe: g.stufe, balance: g.balance })
+      }
+      tr = [...m.values()]
+    }
+    tr = tr.filter(mein).map((t, i) => {
+      const konten = Array.isArray(t.konten) ? t.konten : []
+      const wert = euro ? (t.gewicht_eur != null ? Number(t.gewicht_eur) : konten.reduce((s, k) => s + (Number(k.gewicht_eur) || 0), 0))
+                        : konten.reduce((s, k) => s + (Number(k.tp) || 0), 0)
+      return { ...t, key: String(t.key || i), min: t.start_min != null ? Number(t.start_min) : apPrHm(t.start), konten, wert: wert || 0, long: t.richtung === 'buy' }
+    }).sort((a, b) => (a.min ?? 9999) - (b.min ?? 9999))
+    const aus = ((d && d.ausgelassen) || []).filter(mein)
+    const ids = [...new Map(tr.map(t => [String(t.user_id || t.user), { key: String(t.user_id || ''), name: t.user || '?' }])).values()]
+    // Ausgleich: Backend (alle IDs, laufende Trades eingerechnet) — sonst aus den sichtbaren Tranchen
+    const a = d && d.ausgleich, mitA = !!a && a.plan_long_eur != null
+    const L = mitA ? (Number(a.offen_long_eur) || 0) + (Number(a.plan_long_eur) || 0) : tr.filter(t => t.long).reduce((s, t) => s + t.wert, 0)
+    const S = mitA ? (Number(a.offen_short_eur) || 0) + (Number(a.plan_short_eur) || 0) : tr.filter(t => !t.long).reduce((s, t) => s + t.wert, 0)
+    const start0 = mitA ? (Number(a.offen_long_eur) || 0) - (Number(a.offen_short_eur) || 0) : 0
+    let verlauf = mitA && Array.isArray(a.verlauf) && a.verlauf.length
+      ? a.verlauf.map(p => ({ min: Number(p.min), netto: Number(p.netto_eur) || 0 })).filter(p => isFinite(p.min)).sort((x, y) => x.min - y.min) : null
+    if(!verlauf){
+      let n = start0; verlauf = [{ min: AP_PR_VON, netto: n }]
+      for(const t of tr) if(t.min != null){ n += t.long ? t.wert : -t.wert; verlauf.push({ min: t.min, netto: n }) }
+    }
+    // „vorher → nachher" je Tranche: vom Backend (netto_vorher_eur), sonst aus dem Verlauf (letzter Punkt VOR der Tranche)
+    for(const t of tr){
+      const vor = verlauf.filter(p => p.min < (t.min ?? 0)).pop()
+      t.vorher = t.netto_vorher_eur != null ? Number(t.netto_vorher_eur) : (vor ? vor.netto : start0)
+      t.nachher = t.netto_nachher_eur != null ? Number(t.netto_nachher_eur) : t.vorher + (t.long ? t.wert : -t.wert)
+    }
+    return { tr, aus, euro: mitA || euro, ids, alle, L, S, mitA, offenN: mitA ? a.offen_anzahl : null, verlauf, start0 }
+  }
+  function apPrZeichnen(){
+    const box = document.getElementById('ap-pr-inhalt'); if(!box) return
+    const go = document.getElementById('apProbeGo')
+    if(_apPr.laeuft){ box.innerHTML = `<div class="apx-leer">rechnet ${_apPr.tag ? 'für ' + escapeHtml(apPrTagText(_apPr.tag)) : 'für heute ab jetzt'} …</div>`; if(go) go.disabled = true; return }
+    if(_apPr.fehler){ box.innerHTML = `<div class="apx-leer">⚠ ${escapeHtml(_apPr.fehler)}</div>`; if(go) go.disabled = true; return }
+    const d = _apPr.d || {}, v = apPrDaten(d)
+    if(go){ go.disabled = !v.tr.length; go.textContent = _ap.laeuft ? 'plant…' : 'So planen →' }
+    const tagTxt = apPrTagText(_apPr.tag || d.tag)
+    const nTrades = v.tr.reduce((s, t) => s + t.konten.length, 0)
+    const idChips = v.ids.map(i => `<span class="apx-id" style="--c:${idFarbe(i.key)}">${escapeHtml(i.name)}</span>`).join(' ')
+    const kopf = `<div class="apx-kopf"><b>${escapeHtml(tagTxt)}</b><span>· ${nTrades} Trade${nTrades === 1 ? '' : 's'} in ${v.tr.length} Tranche${v.tr.length === 1 ? '' : 'n'}</span>${idChips ? '<span>·</span>' + idChips : ''}</div>`
+    if(!v.tr.length){
+      box.innerHTML = kopf + `<div class="apx-leer">${escapeHtml(d.msg || 'Nichts zu planen.')}</div>` + apPrAusHtml(v)
+      return
+    }
+    const ein = v.euro ? '€ im Spiel' : '$ TP'
+    // 1) Long gegen Short
+    const sum = v.L + v.S, anteilL = sum > 0 ? v.L / sum * 100 : 50
+    const netto = v.L - v.S, neutral = sum > 0 ? Math.round((1 - Math.abs(netto) / sum) * 100) : 100
+    const bal = `<div class="apx-karte">
+        <div class="apx-bal-zahlen"><span style="color:var(--good)">▲ Long ${apPrGeld(v.L, v.euro)}</span><span style="color:var(--danger)">Short ${apPrGeld(v.S, v.euro)} ▼</span></div>
+        <div class="apx-bal-balken"><i style="width:${anteilL.toFixed(1)}%;background:var(--good)"></i><i style="flex:1;background:var(--danger)"></i></div>
+        <div class="apx-bal-mitte">Netto <b style="color:var(--ink)">${apPrGeldVz(netto, v.euro)}</b> · ≈ ${neutral} % neutral · ${v.mitA
+          ? `laufend eingerechnet: ${v.offenN != null ? v.offenN + ' offene Trade' + (Number(v.offenN) === 1 ? '' : 's') : 'offene Trades'} · über alle IDs`
+          : `nur diese Tranchen (${ein}), ohne laufende Trades`}</div>
+      </div>`
+    // 2) Zeitleiste: Fenster schattiert, je ID eine Spur, ▲/▼ je Tranche, darunter Netto-Kurve
+    const fenster = (() => {
+      const m = new Map()
+      for(const t of v.tr){ const f = t.fenster; if(f && f.von && f.bis) m.set(f.von + '-' + f.bis, f) }
+      return m.size ? [...m.values()] : AP_PR_FENSTER
+    })().map(f => ({ ...f, a: apPrHm(f.von), b: apPrHm(f.bis) })).filter(f => f.a != null && f.b != null).sort((x, y) => x.a - y.a)
+    const fensterHtml = fenster.map((f, i) => `<div class="apx-fenster${i % 2 ? '' : ' dunkel'}${apPrX(f.b) - apPrX(f.a) < 10 ? ' schmal' : ''}" style="left:${apPrX(f.a)}%;width:${apPrX(f.b) - apPrX(f.a)}%"
+        title="${escapeHtml(f.von)}–${escapeHtml(f.bis)}${f.anteil != null ? ' · ' + f.anteil + ' %' : ''}${f.belegt != null ? ' · ' + f.belegt + ' belegt' : ''}">${f.anteil != null ? `<i>${Math.round(f.anteil)} %</i>` : ''}</div>`).join('')
+    const achse = [240, 360, 480, 600, 720, 840, 930, 1050]   // 16:30 ohne Zahl (klebt an 17:30), die Fenstergrenze zeigt die Linie
+      .map(m => `<span class="${[360, 600, 930].includes(m) ? 'nb' : ''}${m === AP_PR_BIS ? ' rechts' : ''}" style="left:${apPrX(m)}%">${apPrUhr(m)}</span>`).join('')
+    const spuren = v.ids.map(i => {
+      const marks = v.tr.filter(t => String(t.user_id || t.user) === (i.key || i.name) && t.min != null).map(t =>
+        `<button type="button" class="apx-mark ${t.long ? 'long' : 'short'}" style="left:${apPrX(t.min)}%" data-apx-ziel="${escapeHtml(t.key)}"
+          title="${escapeHtml(apPrUhr(t.min) + ' · ' + (t.firma || '') + ' · ' + t.konten.length + ' Konten · ' + (t.long ? 'Long' : 'Short') + ' · ' + apPrGeld(t.wert, v.euro))}">${t.long ? '▲' : '▼'}${escapeHtml(apPrKurz(t.firma))}</button>`).join('')
+      return `<div class="apx-spur">${v.ids.length > 1 ? `<span class="apx-id" style="--c:${idFarbe(i.key)}">${escapeHtml(i.name)}</span>` : ''}${marks}</div>`
+    }).join('')
+    const kurve = (() => {
+      const pts = [...v.verlauf.filter(p => p.min <= AP_PR_BIS)]
+      if(!pts.length || pts[0].min > AP_PR_VON) pts.unshift({ min: AP_PR_VON, netto: v.start0 })
+      pts.push({ min: AP_PR_BIS, netto: pts[pts.length - 1].netto })
+      const max = Math.max(1, ...pts.map(p => Math.abs(p.netto)))
+      const y = n => (28 - n / max * 24).toFixed(1)
+      let pfad = '', vorY = null
+      for(const p of pts){ const x = (apPrX(p.min) * 10).toFixed(1); pfad += vorY == null ? `M${x},${y(p.netto)}` : `H${x}V${y(p.netto)}`; vorY = y(p.netto) }
+      const ende = pts[pts.length - 1].netto
+      return `<svg class="apx-kurve" viewBox="0 0 1000 56" preserveAspectRatio="none" aria-hidden="true">
+          <line x1="0" y1="28" x2="1000" y2="28" stroke="var(--sub-2)" stroke-width="1" stroke-dasharray="4 4" vector-effect="non-scaling-stroke"/>
+          <path d="${pfad}" fill="none" stroke="var(--violet)" stroke-width="2" vector-effect="non-scaling-stroke"/>
+        </svg>
+        <div class="apx-kurve-txt"><span title="Long − Short, ${v.euro ? '€' : '$ TP'}">Netto über den Tag</span><span>±${apPrGeld(max, v.euro)} · Ende <b style="color:${ende >= 0 ? 'var(--good)' : 'var(--danger)'}">${apPrGeldVz(ende, v.euro)}</b></span></div>`
+    })()
+    const zeit = `<div class="apx-karte">
+        <div class="apx-achse">${achse}</div>
+        <div class="apx-band">${fensterHtml}${spuren}</div>
+        ${kurve}
+      </div>`
+    // 3) Tranchen chronologisch, aufklappbar
+    const liste = v.tr.map(t => {
+      // Begründung: fertige Sätze vom Backend (warum[], inkl. „ausgewichen" und Mindestpause), sonst hier aus den Feldern
+      // Minus des Backends („-1.240 €", Python-Format) als echtes Minuszeichen wie im Rest der Ansicht; „TP-$" bleibt
+      const warum = Array.isArray(t.warum) && t.warum.length ? t.warum.map(x => escapeHtml(String(x).replace(/(^|[\s(])-(?=\d)/g, '$1−'))) : []
+      if(!warum.length && t.fenster && t.fenster.von) warum.push(`Fenster ${escapeHtml(t.fenster.von)}–${escapeHtml(t.fenster.bis)}${t.fenster.anteil != null ? ` (${Math.round(t.fenster.anteil)} %${t.fenster.belegt != null ? ' · ' + escapeHtml(String(t.fenster.belegt)) + ' belegt' : ''})` : ''}`)
+      if(!(Array.isArray(t.warum) && t.warum.length)){
+        if(t.fest_durch) warum.push(`Richtung fest: ${escapeHtml(String(t.fest_durch))}`)
+        else if(v.mitA || v.tr.length > 1) warum.push(`Ausgleich ${apPrGeldVz(t.vorher, v.euro)} → ${apPrGeldVz(t.nachher, v.euro)}`)
+        const pause = t.pause_firma_ist_min ?? t.pause_firma_min, abst = t.abstand_id_ist_min ?? t.abstand_id_min
+        if(pause != null) warum.push(`${Math.round(pause)} min zur ${escapeHtml(t.firma || 'Firma')}-Tranche anderer ID`)
+        if(abst != null) warum.push(`${Math.round(abst)} min zur nächsten eigenen Tranche`)
+      }
+      const konten = t.konten.map(k => {
+        const name = k.ende4 ? '…' + k.ende4 : String(k.konto || '?')
+        // gewinn_eur/verlust_eur: was das Konto bei TP gewinnt bzw. bei SL verliert (Kontowert-Formel, Finn 06.10.2026)
+        const gv = k.gewinn_eur != null || k.verlust_eur != null
+          ? `<span style="color:var(--good)">+${apPrGeld(k.gewinn_eur || 0, true)}</span> / <span style="color:var(--danger)">−${apPrGeld(Math.abs(k.verlust_eur || 0), true)}</span>` : ''
+        const teile = [k.start && k.start !== t.start ? `Start ${escapeHtml(String(k.start))}` : '', k.stufe ? escapeHtml(k.stufe) : '',
+          `TP ${apPrGeld(k.tp, false)}`, `SL ${k.sl != null ? apPrGeld(k.sl, false) : '—'}`,
+          k.menge != null ? `Größe ${escapeHtml(String(k.menge).replace('.', ','))}` : '', k.wert_eur != null ? `Kontowert ${apPrGeld(k.wert_eur, true)}` : '',
+          k.chance != null ? `Chance ${Math.round(Number(k.chance) <= 1 ? Number(k.chance) * 100 : Number(k.chance))} %` : '', gv,
+          k.gewicht_eur != null ? `im Spiel ${apPrGeld(k.gewicht_eur, true)}` : (k.balance != null ? `Balance ${apPrGeld(k.balance, false)}` : '')].filter(Boolean)
+        return `<div class="apx-konto"><b class="mono">${escapeHtml(name)}</b>${teile.map(x => `<span>${x}</span>`).join('')}</div>`
+      }).join('')
+      return `<details class="apx-tr" data-key="${escapeHtml(t.key)}">
+          <summary><span class="mono" style="font-weight:600">${t.min != null ? apPrUhr(t.min) : '—'}</span>
+            ${v.ids.length > 1 || v.alle ? `<span class="apx-id" style="--c:${idFarbe(String(t.user_id || ''))}">${escapeHtml(t.user || '?')}</span>` : ''}
+            <b>${escapeHtml(t.firma || '?')}</b><span class="apx-sub">${t.konten.length} ${t.konten.length === 1 ? 'Konto' : 'Konten'}</span>
+            <span class="apx-ri ${t.long ? 'long' : 'short'}">${t.long ? '▲ Long' : '▼ Short'}</span>
+            <span><span class="mono" style="font-weight:600">${apPrGeld(t.wert, v.euro)}</span> <span class="apx-sub">${v.euro ? 'im Spiel' : 'TP'}</span></span></summary>
+          ${warum.length ? `<div class="apx-warum">${warum.join(Array.isArray(t.warum) && t.warum.length ? '<br>' : ' · ')}</div>` : ''}
+          ${konten}
+        </details>`
+    }).join('')
+    const hinweise = [_apPr.hinweis, d.probelauf_fehler ? 'Zusatzdaten fehlen (' + d.probelauf_fehler + ') — Ansicht aus geplant[]' : '']
+      .filter(Boolean).map(x => `<div class="apx-karte" style="border-color:var(--warn);font-size:12.5px">⚠ ${escapeHtml(x)}</div>`).join('')
+    box.innerHTML = kopf + hinweise + bal + zeit + `<div class="apx-h">Tranchen</div>` + liste + apPrAusHtml(v)
+  }
+  // 5) Nicht geplant: gezählt nach Grund, aufklappbar je Konto
+  function apPrAusHtml(v){
+    if(!v.aus.length) return ''
+    const g = new Map(); for(const x of v.aus){ const k = apGrundKurz(x.grund); g.set(k, (g.get(k) || 0) + 1) }
+    const zaehl = [...g].sort((a, b) => b[1] - a[1]).map(([k, n]) => `${n} ${escapeHtml(k)}`).join(' · ')
+    const zeilen = v.aus.map(x => `<div class="apx-konto"><b>${escapeHtml(String(x.konto || '?'))}</b><span>${escapeHtml(x.firma || '')}</span>${v.alle ? `<span class="apx-id" style="--c:${idFarbe(String(x.user_id || ''))}">${escapeHtml(x.user || '')}</span>` : ''}<span class="apx-sub">${escapeHtml(x.grund || '')}</span></div>`).join('')
+    return `<details class="apx-tr" style="margin-top:12px"><summary><b>${v.aus.length} nicht geplant</b><span class="apx-sub">${zaehl}</span></summary>${zeilen}</details>`
+  }
+  async function apPrPlanen(){
+    const d = _apPr.d || {}
+    const extra = {}; if(_apPr.modus === 'morgen' && _apPr.tag) extra.tag = _apPr.tag
+    if(d.seed != null) extra.seed = d.seed
+    if(d.fingerabdruck) extra.fingerabdruck = d.fingerabdruck
+    const go = document.getElementById('apProbeGo'); if(go){ go.disabled = true; go.textContent = 'plant…' }
+    const erg = await apJetztPlanen(false, extra)
+    if(erg === true){ _apPr.hinweis = ''; apProbeZu() }
+    else if(erg === 'abweichung'){ _apPr.hinweis = 'Stand hat sich seit dem Probelauf geändert — nichts angelegt, hier neu gerechnet. Bitte noch einmal ansehen.'; apPrLaden() }
+    else apPrZeichnen()
+  }
+  // Verdrahtung nur dieses Modals (keine Sammel-Handler über .modal-bg)
+  document.getElementById('apProbeX')?.addEventListener('click', apProbeZu)
+  document.getElementById('apProbeZu')?.addEventListener('click', apProbeZu)
+  document.getElementById('apProbeGo')?.addEventListener('click', apPrPlanen)
+  document.getElementById('apProbeModal')?.addEventListener('click', e => { if(e.target === e.currentTarget) apProbeZu() })
+  document.getElementById('ap-pr-tag')?.addEventListener('click', e => {
+    const b = e.target.closest('[data-ap-tag]'); if(!b || b.dataset.apTag === _apPr.modus) return
+    _apPr.modus = b.dataset.apTag; _apPr.hinweis = ''; apPrSegSetzen(); apPrLaden()
+  })
+  document.getElementById('ap-pr-inhalt')?.addEventListener('click', e => {   // Klick auf ▲/▼ in der Zeitleiste → Tranche aufklappen
+    const m = e.target.closest('[data-apx-ziel]'); if(!m) return
+    const det = [...document.querySelectorAll('#ap-pr-inhalt details.apx-tr')].find(x => x.dataset.key === m.dataset.apxZiel)
+    if(det){ det.open = true; det.scrollIntoView({ block: 'nearest', behavior: 'smooth' }) }
+  })
   /* ══ ENDE AUTO-PLANER ══ */
 
   setInterval(acTick, 20000)
