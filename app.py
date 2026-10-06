@@ -7021,7 +7021,7 @@ import random
 import zlib
 
 VORRAT2_SQL = "sql/2026-10-06_vorrat_stufe2.sql"
-VORRAT2_RECHEN_STAND = 4               # hochzählen, wenn ein Lauf neue Felder bekommt — GET rechnet ältere Läufe dann einmal neu
+VORRAT2_RECHEN_STAND = 5               # hochzählen, wenn ein Lauf neue Felder bekommt — GET rechnet ältere Läufe dann einmal neu
 VORRAT2_STD = {
     "sicherheit": 0.8,                 # P(Bestand ≥ Untergrenze), Finn am Frontend einstellbar (vorrat_einstellung.sicherheit)
     "mc_ziehungen": 2000, "mc_seed": 20261006,
@@ -7034,6 +7034,8 @@ VORRAT2_STD = {
                                        # jedes lebende Konto zählt mit w = mitte + (1 − mitte) × Chance, ein neues genauso · 'nominal' =
                                        # alles Lebende zählt voll · 'erwartung' = nur mit Chance · 'sicherheit' = Monte Carlo bis P ≥ sicherheit
     "mitte": 0.5,                      # 0 = wie erwartung (mehr Reserve), 1 = wie nominal (vorsichtiger) — Finn dreht hier
+    "toleranz_pct": 15,                # 'mitte': knapp unter der Untergrenze ist „perfekt" (Finn: Tradeify +20k, 18k passt, ab ~16k
+                                       # nachkaufen) — gekauft wird erst unter Untergrenze × (1 − toleranz), dann bis zur vollen Untergrenze
     "funded_anteilig": True,           # Futures-Funded vor dem Big Trade zählt mit Wert × Chance schon zum Bestand (Variante c)
     "tages_max": 25,                   # Tagesliste „Heute kaufen": höchstens so viele Konten je Tag
     "tranche_gemeinsam": False,        # Finn offen: Konten einer Tranche fallen gemeinsam — bis zur Antwort unabhängig (seine Rechnung)
@@ -7623,7 +7625,10 @@ def vorrat2_zelle(ziel, stufen, konten, status, param=None, faktoren=None, seed=
             basis_m = echt + fa["funnel_zaehlt"]
             w_neu = (g_m + (1 - g_m) * pn) * wn
             fa["zaehlt_neu"] = w_neu
-            if basis_m < fa["soll"] - 1e-6:
+            tol = max(0.0, min(0.9, float(p.get("toleranz_pct") or 0) / 100.0)) if not stueck else 0.0
+            if fa["soll"] * (1 - tol) - 1e-6 <= basis_m < fa["soll"] - 1e-6:
+                fa["toleranz"] = True          # nah genug am Ziel: nichts kaufen (Stück-Ziele ohne Toleranz)
+            elif basis_m < fa["soll"] - 1e-6:
                 luecke_i = fa["soll"] - basis_m
                 lage_i = "jetzt" if (echt <= 1e-6 and not fa["lebend"]) else "bald"
                 (a_jetzt if lage_i == "jetzt" else a_bald).append(luecke_i / fa["soll"] if fa["soll"] else 1.0)
@@ -7778,7 +7783,11 @@ def vorrat2_zelle(ziel, stufen, konten, status, param=None, faktoren=None, seed=
             "unterwegs_nominal": round(sum(fa["nom"] for fa in faecher), 2),
             "bestand_echt": round(sum(fa["fest"] - fa["anteil_gew"] for fa in faecher), 2),   # ohne anteilig gezählte Funded
             # Box „So wird gerechnet" (Master 06.10.2026): Bestand + funnel_zaehlt gegen die Untergrenze, n = Lücke ÷ zaehlt_neu_usd
+            "toleranz": any(fa.get("toleranz") for fa in faecher),
             "rechnung": {"kauf_regel": regel_kauf, "mitte": g_m, "untergrenze": soll,
+                         "toleranz_pct": (0 if stueck else float(p.get("toleranz_pct") or 0)) if regel_kauf == "mitte" else 0,
+                         "schwelle": (round(soll * (1 - (0 if stueck else float(p.get("toleranz_pct") or 0)) / 100.0), 2)
+                                      if regel_kauf == "mitte" else soll),
                          "bestand": round(sum(fa["fest"] - fa["anteil_gew"] for fa in faecher), 2),
                          "funnel_zaehlt": round(sum(fa.get("funnel_zaehlt", sum(gewicht(p_) * w_ for p_, w_ in fa["lebend"]))
                                                     for fa in faecher), 2),
@@ -7841,6 +7850,10 @@ def vorrat_satz_nominal(z, name, anzahl, rechnung=True):
         fmt, ziel_txt, vorrat_txt = _vr2_k, _vr2_k(soll), f"{_vr2_k(best)} im Vorrat"
     unterwegs = _vr2_unterwegs_txt(z.get("unterwegs_stufen"), firma)
     leer_v, leer_u = best <= 1e-6, unterwegs == "nichts"
+    if not anzahl and z.get("toleranz"):
+        # Finn 06.10.2026: „ID C hat bei Tradeify 18.362 $ von 20.000 $ — nah genug am Ziel, nichts kaufen."
+        mit = "" if leer_u else f" und {unterwegs} unterwegs"
+        return f"{name} hat bei {firma} {fmt(best)} von {fmt(soll)}{mit} — nah genug am Ziel, nichts kaufen."
     if anzahl and leer_v and leer_u:
         return (f"{name} hat bei {firma} nichts im Vorrat und nichts unterwegs — {anzahl} kaufen"
                 + (f" ({anzahl} × {fmt(wn)} ≥ {ziel_txt} Ziel)." if rechnung else "."))
@@ -8272,6 +8285,7 @@ def vorrat2_anhaengen(erg1):
                  unterwegs_stufen=s.get("unterwegs_stufen") or {}, kauf_regel=s.get("kauf_regel"),
                  unterwegs_nominal=s.get("unterwegs_nominal"), bestand_echt=s.get("bestand_echt"),
                  rechnung=(dict(s.get("rechnung") or {}, n=nk.get("n")) if s.get("rechnung") else None),
+                 toleranz=bool(s.get("toleranz")),
                  # flach für die Box „So wird gerechnet" (T1 06.10.2026) — dieselben Zahlen wie in rechnung
                  zaehlt_neu_usd=(s.get("rechnung") or {}).get("zaehlt_neu_usd"), wert_neu_usd=s.get("wert_neu"),
                  unterwegs_zaehlt_usd=(s.get("rechnung") or {}).get("funnel_zaehlt"),

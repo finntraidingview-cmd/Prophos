@@ -358,6 +358,22 @@ def main():
     pruef("Box: Rechnung der Zelle", (r["kauf_regel"], r["mitte"], r["untergrenze"], r["bestand"], r["funnel_zaehlt"], r["zaehlt_neu_usd"],
           r["luecke"], r["n"]), ("mitte", 0.5, 20000.0, 0.0, round(2 * w2 * 14500, 2), round(w2 * 14500, 2),
           round(20000 - 2 * w2 * 14500, 2), 1))
+    # Toleranz (Finn 06.10.2026: Tradeify +20k — 18k passt, ab ~16k nachkaufen), Standard 15 %
+    def wd(b):
+        return [{"account_id": f"w{b}", "typ": "winning_days", "groesse": 150000, "balance": 150000 + b, "alter_tage": 0}]
+    q = zelle(ziel_tr, TRADEIFY, wd(18362), "frei")
+    pruef("Toleranz: Tradeify 18.362, Funnel leer → 0, gedeckt", (q["nachkauf"]["n_roh"], q["lage"], q["toleranz"]), (0, "gedeckt", True))
+    pruef("… Satz", ns["vorrat_satz"](dict(q, firma="Tradeify", art="plus_ueber_start", typen=["winning_days"]), "ID C", 0),
+          "ID C hat bei Tradeify 18.362 $ von 20.000 $ — nah genug am Ziel, nichts kaufen.")
+    pruef("Toleranz: 16.000 → 1 (bis zur vollen Untergrenze)", zelle(ziel_tr, TRADEIFY, wd(16000), "frei")["nachkauf"]["n_roh"], 1)
+    pruef("Toleranz: 12.000 → 2", zelle(ziel_tr, TRADEIFY, wd(12000), "frei")["nachkauf"]["n_roh"], 2)
+    pruef("Toleranz: Schwelle 17.000 in der Rechnung", (q["rechnung"]["toleranz_pct"], q["rechnung"]["schwelle"]), (15.0, 17000.0))
+    pruef("Toleranz 0 → 18.362 kauft 1", zelle(ziel_tr, TRADEIFY, wd(18362), "frei", param={"toleranz_pct": 0})["nachkauf"]["n_roh"], 1)
+    pruef("Toleranz gilt nicht bei Stück-Zielen", zelle(ZIEL_T5, T5, t5, "frei")["toleranz"], False)
+    fn150 = [{"account_id": "a", "typ": "funded_cfd", "groesse": 100000, "balance": 101000, "alter_tage": 0},
+             {"account_id": "b", "typ": "funded_cfd", "groesse": 50000, "balance": 51000, "alter_tage": 0}]
+    q = zelle(dict(ZIEL_FN, von=175000), FN, fn150, "frei")
+    pruef("Toleranz bei Summen-Zielen: FundedNext 150k gegen 175k (Schwelle 148.750) → 0", (q["nachkauf"]["n_roh"], q["toleranz"]), (0, True))
     rs = ns["vorrat_regel_satz"]
     pruef("Regel-Satz mitte 0,5", rs("mitte", 0.5).startswith("Jedes laufende Konto zählt halb so, als käme es sicher durch, und halb mit"), True)
     pruef("Regel-Satz mitte 0,7", "zu 70 % so, als käme es sicher durch, und zu 30 %" in rs("mitte", 0.7), True)
