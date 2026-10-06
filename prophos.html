@@ -39586,7 +39586,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1099'
+  const OS_TAB_BUILD = '2026-09-22.1100'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -42833,7 +42833,7 @@
   /* NÄCHSTER PULS-EINSATZ (29.09.2026, Finn: „oben rechts unter Jacob: Nächster Puls-Impuls um die Uhrzeit, in so und so viel
    * Minuten — das gibt Puls den Spielraum, den er braucht"). Pille #tb-puls in der Kopfzeile, je ID aus den eigenen Plänen:
    *   (1) Start: geplanter Plan mit Startzeit, noch nicht gestartet, Orbit/Echo-Route (Farmer-Pläne nur bei scharfem Farmer)
-   *       — dieselbe Auswahl wie tpStartUmTick; überfällig über das Start-Fenster hinaus (10 min, Farmer 60 min) zählt nicht mehr,
+   *       — dieselbe Auswahl wie tpStartUmTick; überfällig über das Start-Fenster hinaus (30 min, Farmer 60 min) zählt nicht mehr,
    *       tpStartUmTick feuert solche Pläne nie (vorher stand dann ewig „jetzt")
    *   (2) Bestätigung: Puls-Plan nach dem Ende ohne gelesene Balance — Nachlesung ab tvV2NachleseAb, nach einem Fehlversuch
    *       der nächste Versuch (TV_ENDLESUNG_PAUSE_S); aufgegeben/8 Versuche/erledigt zählen nicht (erledigt = fertig, 29.09.2026)
@@ -42851,7 +42851,8 @@
   const PULS_SIGNAL_MAX_MS = 10 * 60000, PULS_CLAIM_MAX_MS = 4 * 60000, PULS_FERN_MAX = 100
   const _pulsFern = { at: 0, versuch: 0, laeuft: false, signale: [], plaene: null, review: null, reviewAt: 0 }
   const _pulsSeit = {}   // Quelle → erster Moment, in dem sie „läuft" meldete (die lokalen Riegel tragen keine Uhrzeit)
-  const pulsStartFenster = p => (tpIstFarmerPlan(p) ? 60 : 10) * 60000
+  // Start-Fenster der geplanten Startzeit: 30 min, Farmer 60 min (07.10.2026 Warteschlange, vorher 10 min) — gilt für tpStartUmTick UND die Pille
+  const pulsStartFenster = p => (tpIstFarmerPlan(p) ? 60 : 30) * 60000
   // Offene Bestätigungen frisch aus der DB (29.09.2026): Puls-Pläne in „Überprüfen" ohne End-Balance, schmal (nur was pulsTermine und
   // die Karte brauchen) — am Mac rechnete die Pille mit dem Login-Stand von tradePlans und zeigte einen längst erledigten Plan
   const PULS_REVIEW_MAX = 20
@@ -43407,32 +43408,106 @@
   }
   window._rk = { vorStart: rkVorStart, verschieben: rkVerschieben, fensterEnde: rkFensterEnde, aufgegeben: rkAufgegeben }   // Test-Haken (Stub)
 
-  async function tpStartUmTick(){
-    if(!MT5_LOCAL || _suLaeuft) return
-    let uid; try{ uid = currentUserId }catch(_){ uid = null }
-    if(!uid) return
-    let _tp; try{ _tp = tradePlans }catch(_){ _tp = [] }
-    const now = Date.now()
-    // Schalter frisch (≤ 60 s) nur, wenn ein Farmer-Plan in ≤ 10 min fällig ist oder schon fällig wartet — sonst ≤ 5 min (01.10.2026)
-    const farmerNah = (_tp || []).some(p => p && p.status === 'planned' && p.startUm && !p.startUmGestartetAt && tpIstFarmerPlan(p)
-      && new Date(p.startUm).getTime() - now <= 10 * 60000)
-    const scharf = await tpFarmerScharf(farmerNah ? WD_SCHARF_NAH_MS : WD_SCHARF_RUHE_MS)
-    const faellig = (_tp || []).filter(p => p && p.status === 'planned' && p.startUm && !p.startUmGestartetAt
-      && new Date(p.startUm).getTime() <= now && (routeIstOrbit(p.route) || routeIstEcho(p.route)) && (scharf || !tpIstFarmerPlan(p))
+  /* STARTZEIT-WARTESCHLANGE (07.10.2026, Finn: „seit zwei Tagen gehen der zweite und dritte nie los, weil der erste zu lang dauert —
+   * die gehen in die Warteschlange"). Live-Befund Jacob 07.10.2026 (Dubai): Plan A 02:05:00 geclaimt, Puls fertig 02:06:22; B (02:06)
+   * und C (02:07) blieben „Geplant" ohne Claim, ohne Signal. Edge-Logs: ab 02:06:23 versuchte dieser Tick JEDE SEKUNDE (445× bis
+   * 02:14) den Claim auf einen Plan, den es in der DB nicht mehr gab (vom Farmer neu angelegt/gelöscht, im Tab noch im Cache) —
+   * frühester fälliger Plan = immer derselbe Geist, Claim trifft 0 Zeilen → return, B und C kamen nie an die Reihe.
+   * Jetzt:
+   *   (1) Claim trifft 0 Zeilen → Plan frisch aus der DB: weg = aus dem Cache, sonst Cache ersetzen (anderer Tab war schneller,
+   *       Startzeit verschoben, nicht mehr geplant). Danach 30–60 s Pause NUR für diesen Plan — er kann die Schlange nie mehr anhalten.
+   *   (2) Warteschlange: fällig + noch nicht gestartet bleibt stehen und startet, sobald der PC frei ist (kein Lauf dieses Ticks,
+   *       kein Orbit-Start, kein Signal vom Mac/Handy) — in der Reihenfolge der Startzeit. Vorher wurde bei laufendem Orbit-Start
+   *       geclaimt und tpOrbitStartenKern brach still ab (Plan geclaimt, nie gestartet).
+   *   (3) Zwischen zwei Läufen 5–30 s Zufall (Jitter-Regel), kein fester Abstand.
+   *   (4) Start-Fenster großzügig: 30 min (vorher 10), Farmer 60 min — danach sichtbare Meldung (Toast + Handy) statt stillem Liegen.
+   *   (5) Winning Days als KETTE je ID (Finn über den Master 07.10.2026: „nur der erste startet zu seiner Startzeit, der zweite, sobald
+   *       der erste fertig ist, plus kurzer Zufalls-Abstand, der dritte nach dem zweiten — unabhängig von den start_um der Folge-Pläne").
+   *       Kette = Farmer-Pläne dieses Profils mit Startzeit am selben Tag (planned_for), sortiert nach Startzeit. Der Kopf startet zur
+   *       Startzeit; ein Folge-Plan ist dran, sobald die Startzeit des Kopfs erreicht ist und kein früherer Plan der Kette mehr
+   *       „geplant, nicht gestartet" ist — eigene start_um egal (Anzeige / frühester Zeitpunkt des Farmers). Streng: wartet ein
+   *       früherer (z. B. Slave-Vorprüfung rot), wartet die Kette mit.
+   *   (6) Hänger-Riegel: ein Lauf ohne Ende (supabase-js kennt keinen Timeout) gilt nach 10 min als tot, solange kein Orbit-Start läuft.
+   * Claim (start_um_gestartet_at, Guard planned + IS NULL) bleibt der einzige Schutz gegen Doppelstart — unverändert. */
+  const SU_PAUSE_MIN_MS = 5000, SU_PAUSE_STREU_MS = 25000, SU_CLAIM_PAUSE_MS = 30000, SU_HAENGER_MS = 10 * 60000
+  let _suPauseBis = 0, _suLetzterLauf = 0, _suLauf = 0, _suLaufSeit = 0
+  const _suClaimPause = new Map()   // planId → frühester nächster Claim-Versuch (ms) nach einem Fehlgriff
+  const suKettenTag = p => String((p && p.plannedFor) || '') || (p && p.startUm ? String(p.startUm).slice(0, 10) : '')
+  const suNichtGestartet = p => !!p && p.status === 'planned' && !p.startUmGestartetAt
+  // Winning-Day-Kette: ist der Farmer-Plan p jetzt dran? (rein, ohne DB — Test-Haken window._su.ketteFrei)
+  function suKetteFrei(p, plaene, now){
+    const tag = suKettenTag(p)
+    const kette = (plaene || []).filter(x => x && tpIstFarmerPlan(x) && x.startUm && suKettenTag(x) === tag)
+      .sort((a, b) => (new Date(a.startUm) - new Date(b.startUm)) || String(a.id).localeCompare(String(b.id)))
+    const i = kette.findIndex(x => String(x.id) === String(p.id))
+    if(i <= 0) return new Date(p.startUm).getTime() <= now                     // Kopf (oder nicht in der Kette): zur eigenen Startzeit
+    if(new Date(kette[0].startUm).getTime() > now) return false                 // die Nacht dieser ID hat noch nicht begonnen
+    return !kette.slice(0, i).some(suNichtGestartet)                             // alle davor sind durch (gestartet, verpasst, beendet)
+  }
+  // Fällige Pläne in Startreihenfolge (rein — Test-Haken window._su.kandidaten). o = { scharf, now }
+  function suKandidaten(plaene, o){
+    const now = o.now, scharf = !!o.scharf
+    return (plaene || []).filter(p => p && suNichtGestartet(p) && p.startUm
+      && (routeIstOrbit(p.route) || routeIstEcho(p.route)) && (scharf || !tpIstFarmerPlan(p))
       // Topstep V2 startet NICHT von selbst, bis Etappe K4 (scharf über CDP) grün ist (30.09.2026, Topstep-Paket, Plan v2) —
       // der Plan bleibt mit seiner Startzeit stehen, Starten nur von Hand
       && p.route !== 'tsv2'
       // Auto-Planer (05.10.2026, Finn: „ich muss die Trades trotzdem noch manuell confirmen"): Vorschlag ohne Bestätigung nie
       && !(p.autoPlan && !p.autoBestaetigtAt)
       && !((_vorcheckNaechst.get(String(p.id)) || 0) > now)   // Slave-Vorprüfung: wartender Plan erst nach seinem Jitter wieder
-      && !rkAufgegeben(p))   // Richtungskonflikt bis Fensterende nicht lösbar (07.10.2026) — Start nur noch von Hand bzw. mit neuer Uhrzeit
+      && !((_suClaimPause.get(String(p.id)) || 0) > now)      // Claim ging ins Leere: kurz zurückstellen, die Schlange läuft weiter
+      && !rkAufgegeben(p)   // Richtungskonflikt bis Fensterende nicht lösbar (07.10.2026) — Start nur noch von Hand bzw. mit neuer Uhrzeit
+      && (tpIstFarmerPlan(p) ? suKetteFrei(p, plaene, now) : new Date(p.startUm).getTime() <= now))
+      .sort((a, b) => (new Date(a.startUm) - new Date(b.startUm)) || String(a.id).localeCompare(String(b.id)))
+  }
+  // Claim ging ins Leere → Plan frisch lesen: weg = aus dem Cache, sonst Cache ersetzen; in jedem Fall 30–60 s zurückstellen
+  async function suClaimFehlgriff(plan, fehler){
+    _suClaimPause.set(String(plan.id), Date.now() + SU_CLAIM_PAUSE_MS + Math.floor(Math.random() * SU_CLAIM_PAUSE_MS))
+    if(fehler){ console.warn('[start-um] Claim-Fehler', plan.id, (fehler && fehler.message) || fehler); return }
+    try{
+      const { data, error } = await supabase.from('trade_plans').select('*').eq('id', plan.id).limit(1)
+      if(error) throw error
+      const i = tradePlans.findIndex(x => String(x.id) === String(plan.id))
+      if(!data || !data.length){
+        if(i >= 0) tradePlans.splice(i, 1)
+        console.warn('[start-um] Plan gibt es nicht mehr — aus der lokalen Liste genommen', plan.id, plan.masterName || '')
+      } else if(i >= 0) tradePlans[i] = rowToPlan(data[0])
+      try{ renderTradePlans() }catch(_){}
+    }catch(e){ console.warn('[start-um] Plan nach Fehlgriff nicht lesbar', plan.id, (e && e.message) || e) }
+  }
+  async function tpStartUmTick(){
+    if(!MT5_LOCAL) return
+    let orbitLaeuft = false; try{ orbitLaeuft = !!_tpOrbitLaeuft || !!_osActive }catch(_){ orbitLaeuft = true }
+    if(_suLaeuft){
+      if(orbitLaeuft || Date.now() - _suLaufSeit < SU_HAENGER_MS) return
+      console.warn('[start-um] Lauf ohne Ende seit', Math.round((Date.now() - _suLaufSeit) / 60000), 'min — Riegel frei')
+      _suLaeuft = false
+    }
+    if(orbitLaeuft) return                    // PC beschäftigt (Orbit-Start, Signal vom Mac/Handy): fällige Pläne warten in der Schlange
+    if(Date.now() < _suPauseBis) return       // Zufalls-Abstand nach dem letzten Lauf
+    let uid; try{ uid = currentUserId }catch(_){ uid = null }
+    if(!uid) return
+    let _tp; try{ _tp = tradePlans }catch(_){ _tp = [] }
+    let now = Date.now()
+    // Schalter frisch (≤ 60 s) nur, wenn ein Farmer-Plan in ≤ 10 min fällig ist oder schon fällig wartet — sonst ≤ 5 min (01.10.2026).
+    // Höchstens 8 s warten: eine hängende Abfrage darf den Takt nicht anhalten — dann gilt der letzte bekannte Stand
+    const farmerNah = (_tp || []).some(p => suNichtGestartet(p) && p.startUm && tpIstFarmerPlan(p)
+      && new Date(p.startUm).getTime() - now <= 10 * 60000)
+    const scharf = await Promise.race([tpFarmerScharf(farmerNah ? WD_SCHARF_NAH_MS : WD_SCHARF_RUHE_MS),
+      new Promise(r => setTimeout(() => r(!!(_suScharf && _suScharf.an)), 8000))])
+    if(_suLaeuft) return                      // während des Wartens hat ein anderer Takt angefangen
+    now = Date.now()
+    const faellig = suKandidaten(_tp, { scharf, now })
     if(!faellig.length) return
-    let plan = faellig.sort((a, b) => new Date(a.startUm) - new Date(b.startUm))[0]
-    _suLaeuft = true
+    let plan = faellig[0]
+    const lauf = ++_suLauf
+    _suLaeuft = true; _suLaufSeit = Date.now()
+    let gelaufen = false
     try{
       const verspaetet = now - new Date(plan.startUm).getTime()
+      const fenster = pulsStartFenster(plan)
       // RICHTUNG AM START (07.10.2026): frisch prüfen, VOR Slave-Vorprüfung und Claim — Auto-Plan dreht, sonst verschieben
-      if(verspaetet <= (tpIstFarmerPlan(plan) ? 60 : 10) * 60 * 1000){
+      if(verspaetet <= fenster){
         const rk = await rkVorStart(plan)
         if(rk === 'verschoben') return
         if(rk && rk.plan) plan = rk.plan
@@ -43442,10 +43517,11 @@
         vorcheckKarteZeigen(plan, null, 'pruefe')
         const vc = await slaveBereitPruefen(plan)
         if(!vc.ok){
-          if(verspaetet > (tpIstFarmerPlan(plan) ? 60 : 10) * 60 * 1000){
+          if(verspaetet > fenster){
             const { data: dv } = await supabase.from('trade_plans').update({ start_um_gestartet_at: new Date().toISOString() })
               .eq('id', plan.id).eq('status', 'planned').is('start_um_gestartet_at', null).select('*')
             if(dv && dv.length){ const iv = tradePlans.findIndex(x => String(x.id) === String(plan.id)); if(iv >= 0) tradePlans[iv] = rowToPlan(dv[0]); await vorcheckMelden(plan, 'verpasst_slave', vc.grund, vc.checks) }
+            else await suClaimFehlgriff(plan, null)
             vorcheckKarteZeigen(plan, vc, 'verpasst')
             return
           }
@@ -43458,37 +43534,49 @@
         await vorcheckMelden(plan, 'ok', '', vc.checks)
         vorcheckKarteZeigen(plan, vc, 'ok')
       }
+      // Während Vorprüfung/Richtungsprüfung kann ein Orbit-Start/Signal angelaufen sein → nicht claimen, Plan bleibt in der Schlange
+      try{ if(_tpOrbitLaeuft || _osActive) return }catch(_){}
       // Claim: nur der Tab, dessen Update eine Zeile trifft, darf feuern
-      const { data } = await supabase.from('trade_plans').update({ start_um_gestartet_at: new Date().toISOString() })
+      const { data, error: eClaim } = await supabase.from('trade_plans').update({ start_um_gestartet_at: new Date().toISOString() })
         .eq('id', plan.id).eq('status', 'planned').is('start_um_gestartet_at', null).select('*')
-      if(!data || !data.length) return
+      if(eClaim || !data || !data.length){ await suClaimFehlgriff(plan, eClaim); return }
+      _suClaimPause.delete(String(plan.id))
       const i = tradePlans.findIndex(x => String(x.id) === String(plan.id)); if(i >= 0) tradePlans[i] = rowToPlan(data[0])
       renderTradePlans()
-      // Farmer-Pläne einer ID werden seit 27.09.2026 gleichzeitig fällig und laufen nacheinander — der letzte in der Schlange ist
-      // bei ~10 Konten × 40–60 s leicht über 10 min „spät". Für sie gilt 60 min, für alle anderen weiter 10 min.
-      if(verspaetet > (tpIstFarmerPlan(plan) ? 60 : 10) * 60 * 1000){
-        if(typeof atToast === 'function') atToast(`⏰ Startzeit von „${plan.masterName || '—'}" um ${Math.round(verspaetet / 60000)} min verpasst — NICHT gestartet. Von Hand starten.`, 'end')
+      // Start-Fenster: 30 min, Farmer 60 min (07.10.2026, vorher 10 min) — eine Schlange aus mehreren Konten darf nie verfallen.
+      // Danach sichtbar melden (Toast + Handy) statt still liegen lassen; der Claim bleibt, damit nichts später unbemerkt nachfeuert.
+      if(verspaetet > fenster){
+        const t = `„${plan.masterName || '—'}" NICHT gestartet — Startzeit ${tpStartUmText(plan.startUm)} um ${Math.round(verspaetet / 60000)} min verpasst (Start-Fenster ${Math.round(fenster / 60000)} min). Plan bleibt Geplant, von Hand starten.`
+        if(typeof atToast === 'function') atToast('⏰ ' + t, 'end')
+        try{ if(typeof pushAnsHandy === 'function') pushAnsHandy('Startzeit verpasst', t, 'https://prophos.pages.dev/prophos#trades', 'startum-' + String(plan.id).slice(0, 8)) }catch(_){}
         return
       }
-      // Pünktlich statt Zufall (23.09.2026 04:1x, Finn: „wenn ich den Trade auf 4:30 plane, soll er
-      // auch um 4:30 starten, wenn gerade keine anderen Orders oder eine Queue da sind — nicht noch
-      // ein paar Sekunden warten, das ist unnötig"). Bisher: 15-s-Takt + 0–60 s Zufall = 30–40 s.
-      // Jetzt: 1-s-Takt, und Versatz NUR, wenn wirklich etwas anderes ansteht (zweiter fälliger
-      // Plan, Echo-Warteschlange, laufender Remote-/Orbit-Lauf) — dann 5–30 s, damit zwei Läufe
-      // nicht im selben Sekundenraster losgehen. Die Streuung ZWISCHEN den IDs kommt beim Farmer
-      // ohnehin aus den gewürfelten Startzeiten, nicht aus dem Versatz hier.
+      // Pünktlich statt Zufall (23.09.2026 04:1x, Finn: „wenn ich den Trade auf 4:30 plane, soll er auch um 4:30 starten, wenn gerade
+      // keine anderen Orders oder eine Queue da sind"). Versatz 5–30 s nur, wenn wirklich etwas anderes ansteht: Echo-Warteschlange,
+      // Remote-Lauf, oder ein zweiter fälliger Plan, ohne dass gerade schon die Pause nach einem Lauf gewürfelt wurde (sonst doppelt).
       let anderes = false
-      try{ anderes = faellig.length > 1 || (_rsQueue && _rsQueue.length > 0) || !!_rsAktiv || !!_tpOrbitLaeuft }catch(_){ anderes = false }
-      const jitter = anderes ? 5000 + Math.floor(Math.random() * 25000) : 0
+      const nachLauf = _suLetzterLauf > 0 && Date.now() - _suLetzterLauf < 2 * 60000
+      try{ anderes = (faellig.length > 1 && !nachLauf) || (_rsQueue && _rsQueue.length > 0) || !!_rsAktiv }catch(_){ anderes = false }
+      const jitter = anderes ? SU_PAUSE_MIN_MS + Math.floor(Math.random() * SU_PAUSE_STREU_MS) : 0
+      const rest = faellig.length - 1
       if(typeof atToast === 'function') atToast(jitter
         ? `⏰ Geplante Startzeit erreicht — „${plan.masterName || '—'}" startet in ${Math.round(jitter / 1000)} s (etwas anderes läuft noch).`
-        : `⏰ Geplante Startzeit erreicht — „${plan.masterName || '—'}" startet jetzt.`, 'start')
+        : `⏰ ${verspaetet > 0 ? 'Geplante Startzeit erreicht' : 'Nächster Winning Day der Kette'} — „${plan.masterName || '—'}" startet jetzt${rest > 0 ? ` (danach noch ${rest} in der Warteschlange)` : ''}.`, 'start')
       if(jitter) await new Promise(r => setTimeout(r, jitter))
+      gelaufen = true
       if(routeIstOrbit(plan.route) && typeof tpOrbitStarten === 'function') await tpOrbitStarten(plan.id, null, { vonStartUm: true })
       else if(routeIstEcho(plan.route) && typeof tpJetztStarten === 'function'){ _rkTickStart.add(String(plan.id)); await tpJetztStarten(plan.id) }
     }catch(e){ console.warn('[start-um]', e) }
-    finally{ _suLaeuft = false }
+    finally{
+      if(lauf === _suLauf){
+        _suLaeuft = false
+        // Nach einem Lauf: Zufalls-Abstand, bevor der nächste aus der Schlange startet (Jitter-Regel, nie fest)
+        if(gelaufen){ _suLetzterLauf = Date.now(); _suPauseBis = _suLetzterLauf + SU_PAUSE_MIN_MS + Math.floor(Math.random() * SU_PAUSE_STREU_MS) }
+      }
+    }
   }
+  window._su = { kandidaten: suKandidaten, ketteFrei: suKetteFrei, fehlgriff: suClaimFehlgriff, tick: tpStartUmTick,
+    stand: () => ({ laeuft: _suLaeuft, pauseBis: _suPauseBis, claimPause: [..._suClaimPause.entries()] }) }   // Test-Haken (Stub)
   setInterval(tpStartUmTick, 1000)   // 15 s → 1 s (23.09.2026): die Prüfung ist rein lokal, die DB sieht nur den Claim
   /* ══ ENDE GEPLANTE STARTZEIT ══ */
 
