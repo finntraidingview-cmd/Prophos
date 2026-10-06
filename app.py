@@ -6975,7 +6975,7 @@ def admin_vorrat():
         except Exception as e:
             print(f"[vorrat] ⚠️ rechnen: {type(e).__name__}: {e}", flush=True)
             return jsonify({"error": str(e)}), 500
-    if aktion in ("einstellung", "bestellt", "bestellt_weg", "ziel", "ziel_neu"):
+    if aktion in ("einstellung", "bestellt", "bestellt_weg", "ziel", "ziel_neu", "ki_hinweis", "ki_hinweis_weg"):
         return _vorrat2_aktion(aktion, body, uid)
     ziel_uid = str(body.get("user_id") or "").strip().lower()
     firma = _firm_norm(str(body.get("firma") or "")[:80])
@@ -7978,7 +7978,8 @@ def vorrat_tagesliste(zellen, namen, tages_max=25):
     ohne Sperre, ohne offenes „bestellt". Reihenfolge: zuerst leer (nichts im Vorrat UND nichts unterwegs), dann die größte Lücke
     im Verhältnis zur Untergrenze, dann das beste Verhältnis Chance × Wert ÷ Preis. Verteilt wird reihum (jede Zelle erst 1 Konto,
     dann die zweite Runde …), bis tages_max erreicht ist — so kommen viele IDs an einem Tag dran statt eine mit 10. Der Rest steht
-    als stufe 'woche'. → (heute [{user_id, user, firma, anzahl, einheit, preis_eur (Stück), kosten_eur (Zeile), stufe, satz}],
+    als stufe 'woche'. Je Zelle EIN Eintrag: anzahl = heute, rest = n − heute.
+    → (heute [{user_id, user, firma, anzahl, rest, einheit, preis_eur (Stück), kosten_eur (Zeile, heute), stufe, satz}],
     luecke_gesamt (Konten))"""
     kand = [z for z in zellen if z.get("status") == "frei" and not z.get("sperre") and z.get("zustand") != "bestellt"
             and z.get("tagesrate") != 0
@@ -8009,17 +8010,19 @@ def vorrat_tagesliste(zellen, namen, tages_max=25):
                 vergeben = True
         if not vergeben:
             break
+    # Je Zelle EIN Eintrag (Master 06.10.2026): anzahl = heute, rest = n − heute; erst alle mit heute > 0 (stufe 'heute'),
+    # dann die nur für später (stufe 'woche', anzahl 0) — Reihenfolge innerhalb wie oben
     out = []
     for stufe in ("heute", "woche"):
         for z in kand:
-            n = heute[id(z)] if stufe == "heute" else z["nachkauf"]["n"] - heute[id(z)]
-            if n <= 0:
+            n_h = heute[id(z)]
+            if (stufe == "heute") != (n_h > 0):
                 continue
             name = namen.get(z["user_id"]) or z["user_id"][:8]
-            preis = (z.get("nachkauf") or {}).get("preis_eur")       # Stückpreis je Konto; kosten_eur = die ganze Zeile
-            out.append({"user_id": z["user_id"], "user": name, "firma": z["firma"], "anzahl": n,
-                        "einheit": (z.get("nachkauf") or {}).get("einheit"), "preis_eur": preis,
-                        "kosten_eur": (round(n * float(preis)) if preis is not None else None),
+            preis = (z.get("nachkauf") or {}).get("preis_eur")       # Stückpreis je Konto; kosten_eur = Zeile (nur heute)
+            out.append({"user_id": z["user_id"], "user": name, "firma": z["firma"], "anzahl": n_h,
+                        "rest": z["nachkauf"]["n"] - n_h, "einheit": (z.get("nachkauf") or {}).get("einheit"), "preis_eur": preis,
+                        "kosten_eur": (round(n_h * float(preis)) if preis is not None else None),
                         "stufe": stufe, "satz": vorrat_satz(z, name, z["nachkauf"]["n"])})
     return out, luecke
 
@@ -8189,6 +8192,7 @@ def vorrat_ki_anwenden(zellen, ki_zeilen, namen, ki_um):
         preis = nk.get("preis_eur")
         name = namen.get(z["user_id"]) or z["user_id"][:8]
         heute.append({"user_id": z["user_id"], "user": name, "firma": z["firma"], "anzahl": n,
+                      "rest": max(0, int(nk.get("n") or 0) - n) if isinstance(nk.get("n"), int) else 0,
                       "einheit": k.get("einheit") or nk.get("einheit"), "preis_eur": preis,
                       "kosten_eur": (round(n * float(preis)) if preis is not None else None), "stufe": "heute",
                       "satz": z.get("satz"), "prio": k.get("prio"), "quelle": "ki", "ki_um": ki_um,
@@ -8209,6 +8213,18 @@ def vorrat_score_gruppen(zellen, heute, schluessel):
         out[w] = {"score": g["score"], "wort": g["wort"] or "—", "abdeckung_pct": g["abdeckung_pct"], "heute": g["kaeufe_heute"],
                   "gesamt": g["kaeufe_gesamt"]}
     return out
+
+
+def vorrat_ki_hinweis(liste, text, von, jetzt_iso, neue_id, max_n=50):
+    """REIN RECHNEND (testbar): Hinweis von Finn an den KI-Bot anhängen (Master 06.10.2026: „Finn will mit der KI interagieren").
+    → (neue Liste, None) oder (None, Fehler). Höchstens max_n Hinweise — der älteste fällt raus; Text 1–300 Zeichen."""
+    t = str(text or "").strip()
+    if not t:
+        return None, "text fehlt"
+    if len(t) > 300:
+        return None, "text höchstens 300 Zeichen"
+    neu = [h for h in (liste or []) if isinstance(h, dict)] + [{"id": neue_id, "text": t, "von": von, "at": jetzt_iso}]
+    return neu[-max_n:], None
 
 
 def vorrat_personen(zellen, namen):
@@ -8273,6 +8289,15 @@ def _vorrat2_tabellen():
     if _vr2_num(ein.get("sicherheit")):
         param["sicherheit"] = float(ein["sicherheit"])
     return stufen, param, {str(u) for u in (ein.get("ohne_ids") or [])}, True
+
+
+def _vorrat2_ki_hinweise():
+    """Finns Hinweise an den KI-Bot (vorrat_einstellung.parameter.ki_hinweise), live gelesen — leer, wenn nichts da ist."""
+    try:
+        ein = (sb_select("vorrat_einstellung", {"select": "parameter", "id": "eq.1"}) or [{}])[0]
+    except Exception:
+        return []
+    return [h for h in ((ein.get("parameter") or {}).get("ki_hinweise") or []) if isinstance(h, dict)]
 
 
 def _vorrat2_bestellungen():
@@ -8581,7 +8606,10 @@ def vorrat2_anhaengen(erg1):
     je_firma = vorrat_score_gruppen(erg1.get("zellen") or [], heute, "firma")
     for f_ in erg1.get("firmen") or []:
         f_.update(je_firma.get(f_["firma"]) or {"score": None, "wort": "—", "abdeckung_pct": None, "heute": 0, "gesamt": 0})
+    naechster = vorrat2_slot(datetime.now(timezone.utc), (e2.get("parameter") or VORRAT2_STD)["takt_utc"])[1]
+    hinweise_ki = [dict(h, von_name=namen.get(str(h.get("von"))) or None) for h in _vorrat2_ki_hinweise()]
     return dict(erg1, stufe2_bereit=True, stufe2_hinweis="", gerechnet_um=e2.get("gerechnet_um"),
+                ki_hinweise=hinweise_ki, naechster_ki_lauf=(naechster + timedelta(minutes=15)).isoformat(),
                 heute=heute, luecke_gesamt=luecke_ges, tages_max=tmax, personen=personen,
                 heute_quelle=("ki" if ki_aktiv else "regel"), ki_um=(ki.get("ki_um") if ki_aktiv else None),
                 gesamt=gesamt,
@@ -8608,6 +8636,7 @@ def _vorrat_antwort(erg1):
     out.setdefault("heute", [])
     out.setdefault("personen", [])
     out.setdefault("gesamt", None)
+    out.setdefault("ki_hinweise", [])
     # Ziele zum Bearbeiten (Finn 06.10.2026): alle Spalten von vorrat_ziele, nach reihe
     try:
         out["ziele"] = sb_select("vorrat_ziele", {"select": "firma,art,typen,von,bis,groessen,kauf_einheit,kauf_groesse,reihe",
@@ -8693,6 +8722,28 @@ def _vorrat2_aktion(aktion, body, uid):
     """POST-Aktionen der Seite: einstellung {sicherheit} · bestellt {user_id, firma, anzahl, einheit} · bestellt_weg {id}."""
     nur = _admin_nur_uid()
     try:
+        if aktion in ("ki_hinweis", "ki_hinweis_weg"):
+            # Hinweise an den KI-Bot (Finn 06.10.2026) — gelten für alle IDs, „nur eigene"-Nutzer dürfen nicht
+            if nur:
+                return jsonify({"error": "nur Admin"}), 403
+            try:
+                ein = (sb_select("vorrat_einstellung", {"select": "parameter", "id": "eq.1"}) or [{}])[0]
+            except requests.exceptions.HTTPError:
+                return jsonify({"error": f"SQL noch nicht eingespielt ({VORRAT2_SQL})"}), 503
+            prm = dict(ein.get("parameter") or {})
+            liste = prm.get("ki_hinweise") or []
+            if aktion == "ki_hinweis":
+                liste, fehler = vorrat_ki_hinweis(liste, body.get("text"), uid, _wt_now_iso(), uuid.uuid4().hex[:12])
+                if fehler:
+                    return jsonify({"error": fehler}), 400
+            else:
+                hid = str(body.get("id") or "")
+                if not any(isinstance(h, dict) and h.get("id") == hid for h in liste):
+                    return jsonify({"error": "Hinweis nicht gefunden"}), 404
+                liste = [h for h in liste if not (isinstance(h, dict) and h.get("id") == hid)]
+            prm["ki_hinweise"] = liste
+            sb_update("vorrat_einstellung", {"id": "eq.1"}, {"parameter": prm, "updated_at": _wt_now_iso()})
+            return jsonify({"ok": True, "ki_hinweise": liste})
         if aktion in ("ziel", "ziel_neu"):
             # Ziele gelten für alle IDs — „nur eigene"-Nutzer dürfen sie nicht ändern (wie die Sicherheit)
             if nur:
@@ -8818,7 +8869,8 @@ def admin_vorrat_lauf():
         return jsonify({"error": str(e)}), 500
     if not rows:
         return jsonify({"error": "kein Lauf"}), 404
-    return jsonify(dict(rows[0], lauf_id=rows[0].get("id")))
+    # Finns Hinweise an den KI-Bot (06.10.2026) — die Routine liest sie hier mit
+    return jsonify(dict(rows[0], lauf_id=rows[0].get("id"), ki_hinweise=_vorrat2_ki_hinweise()))
 
 
 @app.route("/admin/vorrat/ki", methods=["POST", "OPTIONS"])

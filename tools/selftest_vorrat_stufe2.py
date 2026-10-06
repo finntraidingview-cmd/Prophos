@@ -71,7 +71,7 @@ def lade():
                                  "ap_kontowert", "vorrat_stufen_aus_kernwerten")]
     j2 = src.index("VORRAT_KI_PRIO = ")
     teile.append(src[j2:src.index("\n", j2)])
-    teile += [block(f) for f in ("vorrat_ziel_pruefen", "_vr2_k", "_vr2_usd", "_vr2_unterwegs_txt", "vorrat_satz_nominal", "vorrat_satz", "vorrat_personen", "vorrat_regel_satz", "vorrat_gesamt", "vorrat_score_gruppen", "vorrat_fakten_text", "vorrat_ki_pruefen",
+    teile += [block(f) for f in ("vorrat_ziel_pruefen", "_vr2_k", "_vr2_usd", "_vr2_unterwegs_txt", "vorrat_satz_nominal", "vorrat_satz", "vorrat_personen", "vorrat_regel_satz", "vorrat_gesamt", "vorrat_score_gruppen", "vorrat_ki_hinweis", "vorrat_fakten_text", "vorrat_ki_pruefen",
                                  "vorrat_ki_anwenden", "vorrat_tagesliste", "_vr2_num", "vorrat_chance_stufe", "vorrat_chance_kette", "vorrat_bestand_konto",
                                  "vorrat_alter_handelstage", "vorrat_mc", "vorrat_score", "vorrat_totband", "vorrat_anzeige_n",
                                  "vorrat_quoten", "vorrat2_zelle", "vorrat2_slot")]
@@ -276,13 +276,17 @@ def main():
           tz("u-sperr", "FundedNext", 4, sperre="daten_fehlen"),
           tz("u-klein", "FundedNext", 1, best=150000, unterwegs=1, luecke=10000)]
     h, lg = tl(zl, {"u-leer": "ID L", "u-voll": "ID V"}, 3)
-    pruef("Tagesliste: leer zuerst, dann größte Lücke, reihum, Deckel 3",
-          [(e["user"], e["anzahl"], e["stufe"]) for e in h],
-          [("ID L", 1, "heute"), ("ID V", 1, "heute"), ("u-klein", 1, "heute"), ("ID L", 1, "woche"), ("ID V", 2, "woche")])
+    pruef("Tagesliste: leer zuerst, dann größte Lücke, reihum, Deckel 3 — EIN Eintrag je Zelle mit heute + rest",
+          [(e["user"], e["anzahl"], e["rest"], e["stufe"]) for e in h],
+          [("ID L", 1, 1, "heute"), ("ID V", 1, 2, "heute"), ("u-klein", 1, 0, "heute")])
+    h2, _ = tl(zl, {"u-leer": "ID L", "u-voll": "ID V"}, 2)
+    pruef("Tagesliste Deckel 2: dritte Zelle nur für später (anzahl 0, rest 1, woche)",
+          [(e["user"], e["anzahl"], e["rest"], e["stufe"], e["kosten_eur"]) for e in h2],
+          [("ID L", 1, 1, "heute", 500), ("ID V", 1, 2, "heute", 500), ("u-klein", 0, 1, "woche", 0)])
     pruef("Tagesliste: bestellt/pausiert/gesperrt draußen, Gesamtlücke = 6 Konten", lg, 6)
     h, _ = tl(zl, {}, 25)
-    pruef("Tagesliste: genug Platz → alles heute", (sum(e["anzahl"] for e in h if e["stufe"] == "heute"), [e for e in h if e["stufe"] == "woche"]),
-          (6, []))
+    pruef("Tagesliste: genug Platz → alles heute, rest 0", (sum(e["anzahl"] for e in h if e["stufe"] == "heute"), [e["rest"] for e in h]),
+          (6, [0, 0, 0]))
     pruef("Tagesliste-Eintrag: Stückpreis, Zeilenkosten, Satz", (h[0]["preis_eur"], h[0]["kosten_eur"], h[0]["satz"].endswith(".")),
           (500, 500 * h[0]["anzahl"], True))
 
@@ -499,6 +503,16 @@ def main():
     pruef("Score je Firma: Tradeify (0 % + 75 %) → 63, heute 4, gesamt 4", (r["Tradeify"]["score"], r["Tradeify"]["heute"],
           r["Tradeify"]["gesamt"]), (63, 4, 4))
     pruef("Score je Firma: FTMO nur A (100 %) → 0 entspannt", (r["FTMO"]["score"], r["FTMO"]["wort"]), (0, "entspannt"))
+    # KI-Hinweise (Finn 06.10.2026)
+    kh = ns["vorrat_ki_hinweis"]
+    l1, f = kh([], " Tradeify diese Woche ruhiger angehen ", "u", "2026-10-06T17:00Z", "h1")
+    pruef("KI-Hinweis anlegen (Text getrimmt)", (f, l1), (None, [{"id": "h1", "text": "Tradeify diese Woche ruhiger angehen", "von": "u",
+          "at": "2026-10-06T17:00Z"}]))
+    pruef("KI-Hinweis leer → Fehler", kh(l1, "  ", "u", "x", "h2")[1], "text fehlt")
+    pruef("KI-Hinweis > 300 Zeichen → Fehler", kh(l1, "x" * 301, "u", "x", "h2")[1], "text höchstens 300 Zeichen")
+    voll = [{"id": f"a{i}", "text": "t"} for i in range(50)]
+    l2, _ = kh(voll, "neu", "u", "x", "neu")
+    pruef("KI-Hinweise höchstens 50, ältester fällt raus", (len(l2), l2[0]["id"], l2[-1]["id"]), (50, "a1", "neu"))
     rs = ns["vorrat_regel_satz"]
     pruef("Regel-Satz mitte 0,5", rs("mitte", 0.5).startswith("Jedes laufende Konto zählt halb so, als käme es sicher durch, und halb mit"), True)
     pruef("Regel-Satz mitte 0,7", "zu 70 % so, als käme es sicher durch, und zu 30 %" in rs("mitte", 0.7), True)
