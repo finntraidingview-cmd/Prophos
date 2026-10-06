@@ -2015,23 +2015,32 @@
   #vr-view .vr-h-titel h2{margin:0;font-size:24px;font-weight:700;letter-spacing:-.01em;color:var(--ink)}
   #vr-view .vr-h-titel span{font-size:15px;color:var(--ink-2);font-variant-numeric:tabular-nums}
   #vr-view .vr-h-leg{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--sub);white-space:nowrap;margin-top:6px}
-  #vr-view .vr-h-leg i{display:inline-block;width:10px;height:10px;border-radius:3px}
-  #vr-view .vr-h-leg i.woche{margin-left:8px}
-  #vr-view .vr-h-leg i.heute,#vr-view .vr-h-z.vr-h-heute::before{background:#F04438}
-  #vr-view .vr-h-leg i.woche,#vr-view .vr-h-z.vr-h-woche::before{background:#F79009}
+  #vr-view .vr-h-leg i{display:inline-block;width:9px;height:9px;border-radius:3px;margin-left:6px}
+  #vr-view .vr-h-leg i.hoch{background:#F04438} #vr-view .vr-h-leg i.mittel{background:#F79009} #vr-view .vr-h-leg i.niedrig{background:var(--sub-2)}
   #vr-view .vr-h-satz{margin:8px 0 0;font-size:13px;color:var(--sub);line-height:1.5}
+  #vr-view .vr-h-chips{margin:14px 0 0}
   #vr-view .vr-h-liste{margin-top:14px}
-  #vr-view .vr-h-z{position:relative;display:flex;align-items:center;gap:16px;padding:16px 0 16px 18px;border-top:1px solid var(--border-soft)}
-  #vr-view .vr-h-z::before{content:'';position:absolute;left:0;top:14px;bottom:14px;width:4px;border-radius:4px}
-  #vr-view .vr-h-z.gekauft::before{background:var(--border)}
+  /* je Person ein Kasten: Kopf „● Name — heute 4 Konten · ≈ 1.200 €", darin die Zeilen */
+  #vr-view .vr-h-person{border:1px solid var(--border-soft);border-radius:12px;padding:4px 16px 2px;margin-bottom:12px;background:var(--surface)}
+  #vr-view .vr-h-pkopf{display:flex;align-items:baseline;gap:8px;padding:12px 0 8px;font-size:15px}
+  #vr-view .vr-h-pkopf i{width:10px;height:10px;border-radius:3px;flex:none;align-self:center}
+  #vr-view .vr-h-pkopf b{font-weight:600;color:var(--ink)}
+  #vr-view .vr-h-pkopf span{color:var(--sub);font-size:13.5px;font-variant-numeric:tabular-nums}
+  #vr-view .vr-h-z{display:flex;align-items:center;gap:14px;padding:13px 0;border-top:1px solid var(--border-soft)}
+  #vr-view .vr-h-rang{flex:0 0 34px;text-align:center}
+  #vr-view .vr-h-rang b{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;font-size:14px;font-weight:700;font-variant-numeric:tabular-nums}
+  #vr-view .prio-hoch .vr-h-rang b{background:rgba(240,68,56,.12);color:#B42318}
+  #vr-view .prio-mittel .vr-h-rang b{background:rgba(247,144,9,.14);color:#B54708}
+  #vr-view .prio-niedrig .vr-h-rang b{background:var(--surface-tint);color:var(--sub)}
+  #vr-view .vr-h-z.gekauft .vr-h-rang b{background:var(--surface-tint);color:var(--sub-2)}
   #vr-view .vr-h-z.gekauft .vr-h-main{opacity:.5}
   #vr-view .vr-h-main{flex:1 1 auto;min-width:0}
-  #vr-view .vr-h-wer{display:flex;align-items:center;gap:8px;font-size:13.5px;min-width:0}
-  #vr-view .vr-h-wer i{width:9px;height:9px;border-radius:3px;flex:none}
-  #vr-view .vr-h-wer b{font-weight:600;color:var(--ink)}
-  #vr-view .vr-h-wer span{color:var(--sub)}
-  #vr-view .vr-h-wer span::before{content:'· ';color:var(--sub-2)}
-  #vr-view .vr-h-menge{margin-top:4px;font-size:19px;font-weight:600;color:var(--ink);line-height:1.3;font-variant-numeric:tabular-nums}
+  #vr-view .vr-h-wer{display:flex;align-items:center;flex-wrap:wrap;gap:4px 10px;font-size:12.5px;min-width:0}
+  #vr-view .vr-h-prio{font-weight:600}
+  #vr-view .prio-hoch .vr-h-prio{color:#B42318} #vr-view .prio-mittel .vr-h-prio{color:#B54708} #vr-view .prio-niedrig .vr-h-prio{color:var(--sub)}
+  #vr-view .vr-h-woche{color:var(--sub);background:var(--surface-tint);border-radius:6px;padding:1px 7px}
+  #vr-view .vr-h-firma{color:var(--sub)}
+  #vr-view .vr-h-menge{margin-top:3px;font-size:18px;font-weight:600;color:var(--ink);line-height:1.3;font-variant-numeric:tabular-nums}
   #vr-view .vr-h-menge span{margin-left:12px;font-size:15px;font-weight:500;color:var(--sub);white-space:nowrap}
   #vr-view .vr-h-txt{margin-top:5px;font-size:12.5px;color:var(--sub);line-height:1.5}
   #vr-view .vr-h-knopf{flex:none;border:1px solid var(--border);background:var(--surface);color:var(--ink);border-radius:10px;padding:9px 16px;font:inherit;font-size:13.5px;font-weight:600;cursor:pointer;white-space:nowrap}
@@ -2065,7 +2074,9 @@
   @media (max-width:760px){
     #vr-view .vr-heute{padding:16px 14px 6px}
     #vr-view .vr-h-titel h2{font-size:21px}
-    #vr-view .vr-h-z{flex-wrap:wrap;gap:10px;padding:14px 0 14px 14px}
+    #vr-view .vr-h-z{flex-wrap:wrap;gap:8px 10px;padding:12px 0}
+    #vr-view .vr-h-person{padding:2px 12px}
+    #vr-view .vr-h-main{flex:1 1 calc(100% - 50px)}
     #vr-view .vr-h-menge{font-size:17px}
     #vr-view .vr-h-menge span{display:block;margin:2px 0 0}
     #vr-view .vr-h-knopf{margin-left:auto}
@@ -38775,7 +38786,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1056'
+  const OS_TAB_BUILD = '2026-09-22.1057'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -55380,7 +55391,7 @@
   const VR_SCHLOSS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/></svg>'
   const VR_PAUSE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 5v14M15 5v14"/></svg>'
   const VR_PLAY = '<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M7 5v14l11-7z"/></svg>'
-  const _vr = { daten: null, laedt: false, fehler: '', timer: null, stand: 0, kachel: '', firma: '', auf: new Set(), sendet: 0, offen: new Set(), sichert: false, uebersicht: false, einst: false }
+  const _vr = { daten: null, laedt: false, fehler: '', timer: null, stand: 0, kachel: '', firma: '', auf: new Set(), sendet: 0, offen: new Set(), sichert: false, uebersicht: false, einst: false, hPerson: '' }
   // Stufe 2 (06.10.2026, Vertrag .claude/master/vorrat-vertrag.md): je Zelle nachkauf {n, einheit, dringlichkeit, n_roh, teile},
   // score 0–100 + score_teile [{name, wert, einheit}] (Finn: Dringlichkeit als Zahl, aus den Zahlen begründet), sperre
   // 'daten_fehlen'|'unsicher', bestellt {id, anzahl, offen, verfall} + zustand 'bestellt', bestand_gewichtet/erwartet, konten = LISTE
@@ -55665,6 +55676,7 @@
       + `<div class="vr-einst-kopf">Freigeschaltet je ID und Firma <span>Klick wechselt: frei → pausiert → gesperrt → frei</span></div>${vrMatrixHtml(d, name)}</div></details>`
     vrSichRender(d, s2)
     root.querySelectorAll('[data-vr-klapp]').forEach(el => el.addEventListener('toggle', () => { _vr[el.dataset.vrKlapp] = el.open }))
+    root.querySelectorAll('[data-vr-hp]').forEach(b => b.addEventListener('click', () => { _vr.hPerson = _vr.hPerson === b.dataset.vrHp ? '' : b.dataset.vrHp; vrRender() }))
     root.querySelectorAll('[data-vr-k]').forEach(b => b.addEventListener('click', () => { const key = b.dataset.vrK; _vr.kachel = _vr.kachel === key ? '' : key; vrRender() }))
     root.querySelectorAll('[data-vr-auf]').forEach(b => b.addEventListener('click', () => { const u = b.dataset.vrAuf; if(_vr.auf.has(u)) _vr.auf.delete(u); else _vr.auf.add(u); vrRender() }))
     root.querySelectorAll('[data-vr-f-filter]').forEach(b => b.addEventListener('click', () => { const f = b.dataset.vrFFilter; _vr.firma = _vr.firma === f ? '' : f; vrRender() }))
@@ -55715,52 +55727,103 @@
   // sieht man nicht" — Master: „er öffnet die Seite und weiß in 3 Sekunden, was er heute kaufen soll"). Eine ruhige Liste: Streifen
   // rot = heute / gelb = diese Woche, Person · Firma, groß die Menge, Preis, EIN Knopf „✓ gekauft" (= bestellt), darunter ein Satz.
   // Quelle: Server heute[] {user_id, user, firma, anzahl, einheit, preis_eur, stufe 'heute'|'woche', satz} + luecke_gesamt (T2, Vertrag §3b):
-  // Reihenfolge kommt fertig vom Server (leere Zellen zuerst, dann Lücke, dann Chance × Wert ÷ Preis) und bleibt so; preis_eur = Preis der
-  // ganzen Zeile. Dieselbe Zelle kann zweimal stehen (heute + Rest diese Woche). Ohne Feld (älteres Backend) aus den Zellen: Nachkauf
+  // Reihenfolge kommt fertig vom Server (leere Zellen zuerst, dann Lücke, dann Chance × Wert ÷ Preis) und bleibt so. Zeilenpreis =
+  // kosten_eur (T2 .1055, anzahl × preis_eur fertig gerundet); preis_eur ist der STÜCKPREIS (T2 06.10.2026: deb0643 zeigte
+  // „10 × 150k EOD ≈ 150 €" statt 1.500 €) — fehlt kosten_eur (älterer Server), gilt anzahl × preis_eur. Dieselbe Zelle kann zweimal stehen (heute + Rest diese Woche). Ohne Feld (älteres Backend) aus den Zellen: Nachkauf
   // jetzt = heute, bald = diese Woche. Gekaufte bleiben grau stehen (rückgängig), bis der nächste Lauf sie herausnimmt.
   function vrSatz(z, f, wer){
     const q = vrZielZahlen(z, f), nV = z.bestand_n || 0, nF = vrListe(z).filter(k => !k.im_bestand).length
     const wo = (f?.ziel?.typen || []).includes('winning_days') ? 'Winning-Days-Konto' : 'Funded-Konto'
     const hat = nV ? `${vrKonten(nV)} im Vorrat` : `noch kein ${wo}`
-    return `${wer} hat bei ${z.firma} ${hat}${nF ? `, ${vrKonten(nF)} unterwegs` : ''}${q ? ` — Ziel ${q.fmt(q.von)}${q.bis > q.von ? '–' + q.fmt(q.bis) : ''}${q.stueck ? ' Konten' : ''}` : ''}.`
+    return `${wer} hat bei ${z.firma} ${hat}${nF ? `, ${vrKonten(nF)} unterwegs` : ''}${q ? ` — Ziel ${q.stueck ? vrKonten(q.von) : q.fmt(q.von) + (q.bis > q.von ? '–' + q.fmt(q.bis) : '')}` : ''}.`
+  }
+  // Deckel und Priorität (Master 06.10.2026 spät, Finn live auf .1054 mit dem Zellen-Rückfall: „389 Konten · 103.331 €, eine komplette
+  // lange Liste, keine ID sortiert, nicht erkennbar, wie wichtig was ist"): höchstens VR_TAGES_MAX Konten am Tag, je Zeile höchstens
+  // VR_ZEILE_MAX, gruppiert je Person, links eine Rangzahl über alle + „Priorität hoch / mittel / niedrig".
+  // hoch = nichts im Vorrat und nichts unterwegs · niedrig = knapp unter Ziel (Lücke < 25 % der Untergrenze) · sonst mittel.
+  const VR_TAGES_MAX = 25, VR_ZEILE_MAX = 3
+  const VR_PRIO_RANG = { hoch: 0, mittel: 1, niedrig: 2 }
+  function vrPrio(z){
+    if(!z) return 'mittel'
+    const vN = z.vorrat_n ?? z.bestand_n ?? 0
+    const uN = z.unterwegs_n ?? vrListe(z).filter(k => !k.im_bestand).length
+    if(!vN && !uN) return 'hoch'
+    const lu = Number(z.luecke ?? z.fehlt) || 0, ug = Number(z.untergrenze ?? z.von) || 0
+    return ug && lu / ug < 0.25 ? 'niedrig' : 'mittel'
+  }
+  // Kauf-Einheit kurz (Finn: „(selten 50k)" weg, Topstep „Konto" → „150k Combine")
+  function vrEinheitKurz(e, firma, f){
+    const weg = t => String(t || '').replace(/\s*\([^)]*\)/g, '').replace(/\s+/g, ' ').trim()
+    let t = weg(e)
+    if(!t || /^konto$/i.test(t)) t = weg(f?.ziel?.kauf_einheit)
+    if((!t || /^konto$/i.test(t)) && /topstep/i.test(firma)) t = '150k Combine'
+    return t || 'Konto'
   }
   function vrHeuteListe(d, name, firma){
     const zelle = (u, fi) => d.zellen.find(z => z.user_id === u && z.firma === fi)
-    let l
-    if(Array.isArray(d.heute)) l = d.heute.map(h => ({ uid: h.user_id, wer: h.user || name.get(h.user_id) || String(h.user_id).slice(0, 8), firma: h.firma,
-      anzahl: h.anzahl, einheit: h.einheit, menge: `${h.anzahl} × ${h.einheit || 'Konto'}`, preis: h.preis_eur, stufe: h.stufe === 'heute' ? 'heute' : 'woche',
-      satz: h.satz || '', z: zelle(h.user_id, h.firma) }))
-    else l = d.zellen.filter(z => z.status === 'frei' && !z.sperre && ['jetzt', 'bald'].includes(z.nachkauf?.dringlichkeit) && (vrKauf(z) || vrBestellt(z))).map(z => {
-      const nk = z.nachkauf, wer = name.get(z.user_id) || z.user_id.slice(0, 8), f = firma.get(z.firma)
-      const n = vrBestellt(z) ? (z.bestellt.anzahl || nk.n) : nk.n
-      return { uid: z.user_id, wer, firma: z.firma, anzahl: n, einheit: nk.einheit, menge: vrBestellt(z) ? `${n} × ${nk.einheit || 'Konto'}` : vrMenge(z, f),
-        preis: nk.kosten_eur ?? (nk.preis_eur != null ? nk.preis_eur * n : null), stufe: nk.dringlichkeit === 'jetzt' ? 'heute' : 'woche', satz: z.ki_text || vrSatz(z, f, wer), z }
-    })
-    if(Array.isArray(d.heute)) return l
-    return l.sort((a, b) => (a.stufe === b.stufe ? 0 : a.stufe === 'heute' ? -1 : 1) || String(a.wer).localeCompare(String(b.wer), 'de') || a.firma.localeCompare(b.firma, 'de'))
+    const zeile = (z, uid, fi, wer, anzahl, einheit, preis, stufe, satz) => ({ uid, wer, firma: fi, anzahl, einheit: vrEinheitKurz(einheit, fi, firma.get(fi)),
+      preis, stufe, satz, z, prio: vrPrio(z) })
+    let l, offenGesamt = null
+    if(Array.isArray(d.heute)){
+      // Server: Reihenfolge = Rang; Zeilenpreis = kosten_eur, preis_eur ist der STÜCKPREIS (T2 06.10.2026 — deb0643 zeigte
+      // „10 × 150k EOD ≈ 150 €" statt 1.500 €); fehlt kosten_eur (älterer Server), gilt anzahl × preis_eur
+      l = d.heute.map(h => zeile(zelle(h.user_id, h.firma), h.user_id, h.firma, h.user || name.get(h.user_id) || String(h.user_id).slice(0, 8), h.anzahl, h.einheit,
+        h.kosten_eur != null ? h.kosten_eur : (h.preis_eur != null ? h.preis_eur * (Number(h.anzahl) || 1) : null), h.stufe === 'heute' ? 'heute' : 'woche', h.satz || ''))
+    }else{
+      // Rückfall (älteres Backend): Zellen mit Nachkauf nach Priorität, dann Lücke ÷ Untergrenze; gedeckelt wie der Server
+      const kand = d.zellen.filter(z => z.status === 'frei' && !z.sperre && ['jetzt', 'bald'].includes(z.nachkauf?.dringlichkeit) && (vrKauf(z) || vrBestellt(z)))
+      const anteil = z => { const ug = Number(z.untergrenze ?? z.von) || 0; return ug ? (Number(z.luecke ?? z.fehlt) || 0) / ug : 0 }
+      kand.sort((a, b) => VR_PRIO_RANG[vrPrio(a)] - VR_PRIO_RANG[vrPrio(b)] || anteil(b) - anteil(a) || (a.nachkauf.dringlichkeit === 'jetzt' ? -1 : 1) - (b.nachkauf.dringlichkeit === 'jetzt' ? -1 : 1))
+      offenGesamt = kand.filter(z => !vrBestellt(z)).reduce((s, z) => s + (z.nachkauf.n || 0), 0)
+      let rest = VR_TAGES_MAX
+      l = []
+      for(const z of kand){
+        const nk = z.nachkauf, wer = name.get(z.user_id) || z.user_id.slice(0, 8), f = firma.get(z.firma)
+        const best = vrBestellt(z), n = best ? (z.bestellt.anzahl || 1) : Math.min(VR_ZEILE_MAX, nk.n || 0, rest)
+        if(!best && n <= 0) continue
+        if(!best) rest -= n
+        const stueck = nk.preis_eur ?? (nk.kosten_eur != null && nk.n ? nk.kosten_eur / nk.n : null)
+        l.push(zeile(z, z.user_id, z.firma, wer, n, best ? (z.bestellt.einheit || nk.einheit) : nk.einheit, stueck != null ? stueck * n : null, 'heute', z.ki_text || vrSatz(z, f, wer)))
+        if(rest <= 0 && !kand.some(y => vrBestellt(y))) break
+      }
+    }
+    l.forEach((x, i) => { x.rang = i + 1 })
+    return { l, offenGesamt }
   }
   function vrHeuteHtml(d, s2, name, firma){
     if(!s2) return ''      // ohne Stufe 2 gibt es keine Kaufzahl (Server: heute = [], luecke_gesamt = null) — kein falsches „alles gedeckt"
-    const l = vrHeuteListe(d, name, firma), aus = d.bereit ? '' : ' disabled'
+    const { l, offenGesamt } = vrHeuteListe(d, name, firma), aus = d.bereit ? '' : ' disabled'
     // „bestellt" gilt je Zelle: stehen heute und der Rest diese Woche beide da, wird nur die Heute-Zeile grau
     const gekauft = x => !!x.z && vrBestellt(x.z) && (x.stufe === 'heute' || !l.some(y => y !== x && y.z === x.z && y.stufe === 'heute'))
-    const offen = l.filter(x => !gekauft(x)), heute = offen.filter(x => x.stufe === 'heute'), woche = offen.filter(x => x.stufe === 'woche')
-    const nH = heute.reduce((s, x) => s + (Number(x.anzahl) || 0), 0), pH = heute.reduce((s, x) => s + (Number(x.preis) || 0), 0)
-    const lg = d.luecke_gesamt, lgN = typeof lg === 'object' && lg ? (lg.konten ?? lg.n) : lg
-    const zahl = heute.length ? `${vrKonten(nH)}${pH ? ` · ca. ${vrEur(pH)}` : ''}` : l.length ? 'heute nichts dringend' : ''
-    const kopf = `<div class="vr-h-kopf"><div class="vr-h-titel"><h2>Heute kaufen</h2><span>${zahl}${woche.length ? ` · diese Woche ${woche.reduce((s, x) => s + (Number(x.anzahl) || 0), 0)}` : ''}</span></div>`
-      + `<span class="vr-h-leg"><i class="heute"></i>heute <i class="woche"></i>diese Woche</span></div>`
-      + (lgN ? `<p class="vr-h-satz">Gesamt fehlen noch ~${Math.round(Number(lgN)).toLocaleString('de-DE')} Konten, bis alle Ziele voll sind — die Liste zeigt nur, was heute dran ist.</p>` : '')
+    const offen = l.filter(x => !gekauft(x)), heute = offen.filter(x => x.stufe === 'heute')
+    const summe = xs => [xs.reduce((s, x) => s + (Number(x.anzahl) || 0), 0), xs.reduce((s, x) => s + (Number(x.preis) || 0), 0)]
+    const [nH, pH] = summe(heute)
+    const lg = d.luecke_gesamt, lgN = (typeof lg === 'object' && lg ? (lg.konten ?? lg.n) : lg) ?? offenGesamt
+    const geld = p => p ? ` · ≈${VR_NB}${vrEur(p).replace(' ', VR_NB)}` : ''
+    const kopf = `<div class="vr-h-kopf"><div class="vr-h-titel"><h2>Heute kaufen</h2>${heute.length ? `<span>${vrKonten(nH)}${geld(pH)}</span>` : l.length ? '<span>heute nichts dringend</span>' : ''}</div>`
+      + `<span class="vr-h-leg">Priorität <i class="hoch"></i>hoch <i class="mittel"></i>mittel <i class="niedrig"></i>niedrig</span></div>`
+      + (lgN && l.length ? `<p class="vr-h-satz">Gesamt fehlen noch ~${Math.round(Number(lgN)).toLocaleString('de-DE')} Konten, bis alle Ziele voll sind — hier stehen nur die wichtigsten ${VR_TAGES_MAX} für heute.</p>` : '')
     if(!l.length) return `<div class="panel vr-heute">${kopf}<div class="vr-h-leer"><b>✓</b>Heute nichts zu kaufen — alle Ziele gedeckt.</div></div>`
+    // Personen: sortiert nach ihrer wichtigsten Zeile (kleinster Rang); Filter-Chips oben wie die ID-Chips
+    const personen = []
+    for(const x of l){ let p = personen.find(q => q.uid === x.uid); if(!p){ p = { uid: x.uid, wer: x.wer, zeilen: [] }; personen.push(p) } p.zeilen.push(x) }
+    if(_vr.hPerson && !personen.some(p => p.uid === _vr.hPerson)) _vr.hPerson = ''
+    const chips = personen.length > 1 ? `<div class="vr-ids vr-h-chips">${personen.map(p => { const [n] = summe(p.zeilen.filter(x => !gekauft(x) && x.stufe === 'heute'))
+      return `<button type="button" class="vr-id${_vr.hPerson === p.uid ? ' an' : ''}" data-vr-hp="${vrEsc(p.uid)}" title="${_vr.hPerson === p.uid ? 'alle zeigen' : 'nur ' + vrEsc(p.wer) + ' zeigen'}"><i style="background:${vrFarbe(p.uid)}"></i>${vrEsc(p.wer)}${n ? ` <b>${n}</b>` : ''}</button>` }).join('')}</div>` : ''
+    const PW = { hoch: 'Priorität hoch', mittel: 'Priorität mittel', niedrig: 'Priorität niedrig' }
     const zeile = x => { const g = gekauft(x), key = vrEsc(x.uid + '|' + x.firma)
-      return `<div class="vr-h-z vr-h-${x.stufe}${g ? ' gekauft' : ''}">
-        <div class="vr-h-main"><div class="vr-h-wer"><i style="background:${vrFarbe(x.uid)}"></i><b>${vrEsc(x.wer)}</b><span>${vrEsc(x.firma)}</span></div>
-          <div class="vr-h-menge">${vrEsc(x.menge)}${x.preis ? `<span>≈ ${vrEur(x.preis)}</span>` : ''}</div>
+      return `<div class="vr-h-z prio-${x.prio}${g ? ' gekauft' : ''}">
+        <div class="vr-h-rang"><b>${x.rang}</b></div>
+        <div class="vr-h-main"><div class="vr-h-wer"><span class="vr-h-prio">${PW[x.prio]}</span>${x.stufe === 'woche' ? '<span class="vr-h-woche">diese Woche</span>' : ''}<span class="vr-h-firma">${vrEsc(x.firma)}</span></div>
+          <div class="vr-h-menge">${vrEsc(x.anzahl)} × ${vrEsc(x.einheit)}${x.preis ? `<span>≈ ${vrEur(x.preis)}</span>` : ''}</div>
           ${x.satz ? `<div class="vr-h-txt">${vrEsc(x.satz)}</div>` : ''}</div>
         ${g ? `<button type="button" class="vr-h-knopf weg" data-vr-b="${key}" data-vr-weg="1" title="${d.bereit ? 'Kauf zurücknehmen' : 'SQL noch nicht eingespielt'}"${aus}>gekauft ✓ <span>· rückgängig</span></button>`
             : `<button type="button" class="vr-h-knopf" data-vr-b="${key}" data-vr-n="${vrEsc(x.anzahl)}" data-vr-e="${vrEsc(x.einheit || '')}" title="${d.bereit ? 'als gekauft markieren — zählt 48 h als unterwegs, bis das Konto angelegt ist' : 'SQL noch nicht eingespielt'}"${aus}>✓ gekauft</button>`}
       </div>` }
-    return `<div class="panel vr-heute">${kopf}<div class="vr-h-liste">${l.map(zeile).join('')}</div></div>`
+    const kasten = p => { const [n, preis] = summe(p.zeilen.filter(x => !gekauft(x) && x.stufe === 'heute')), [nW] = summe(p.zeilen.filter(x => !gekauft(x) && x.stufe === 'woche'))
+      const was = n ? `heute ${vrKonten(n)}${geld(preis)}` : nW ? `diese Woche ${vrKonten(nW)}` : 'alles gekauft'
+      return `<div class="vr-h-person"><div class="vr-h-pkopf"><i style="background:${vrFarbe(p.uid)}"></i><b>${vrEsc(p.wer)}</b><span>— ${was}</span></div>${p.zeilen.map(zeile).join('')}</div>` }
+    return `<div class="panel vr-heute">${kopf}${chips}<div class="vr-h-liste">${personen.filter(p => !_vr.hPerson || p.uid === _vr.hPerson).map(kasten).join('')}</div></div>`
   }
   // Sperr-Matrix (Einstellungen): je ID eine Zeile, je Firma ein Chip im Zustand frei · pausiert (‖) · gesperrt (Schloss); Klick wechselt
   // reihum (vrSchalten wie bisher). Chips brechen um — am Handy kein waagerechtes Scrollen.
