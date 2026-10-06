@@ -88,6 +88,8 @@ def main():
     regeln = {"aktiv": True, "zeiten": {"tz": "Europe/Berlin"}}
 
     def sb_select(tabelle, params):
+        if tabelle == "auto_plan_lauf":
+            return [{"id": 1}] if params.get("tag", "")[3:] in claims else []
         return [dict(regeln)]
 
     def ap_planen(tag, quelle="hand"):
@@ -140,6 +142,22 @@ def main():
                                                      "2026-10-07", tz), False)
     pruef("geplant ohne Tag/Start → vorsichtshalber fest", fest({"status": "planned", "richtung": "buy"}, "2026-10-07", tz), True)
     pruef("ohne Richtung → nie fest", fest({"status": "open", "richtung": None}, "2026-10-07", tz), False)
+
+    # Neuplanen per SQL (Claim umbenannt) ohne Neustart: nach 10 min Nachsehen läuft der Tag noch einmal, sonst nie doppelt
+    d = {}
+    tick(utc("2026-10-08T21:30"), d)
+    n0 = len(laeufe)
+    tick(utc("2026-10-08T21:31"), d)
+    pruef("Claim da, < 10 min: kein Nachsehen, kein Lauf", len(laeufe), n0)
+    d["claim_geprueft"] = 0
+    tick(utc("2026-10-08T21:41"), d)
+    pruef("Claim da nach 10 min: weiter kein Lauf", len(laeufe), n0)
+    claims.discard("2026-10-09")
+    d["claim_geprueft"] = 0
+    tick(utc("2026-10-08T21:52"), d)
+    pruef("Claim umbenannt: Freitag einmal neu geplant", laeufe[n0:], ["2026-10-09"])
+    tick(utc("2026-10-08T21:53"), d)
+    pruef("… und nicht noch einmal", laeufe[n0:], ["2026-10-09"])
 
     print()
     if FEHLER:

@@ -100,6 +100,29 @@ def main():
     gb = a["ap_letzter_trade_geblasen"]({"groessen": [100000], "dd_pct": 10}, 90400, [{"ended_at": "x", "final": {"master_pl_schaetzung": -9600}}])
     check(gb and "geblasen" in gb, "CFD 100k: −9.600 $ ≥ 95 % von 10 % → geblasen?")
 
+    # ── 2d Consistency je Konto (accounts.consistency_pct, Finn 07.10.2026)
+    tdfy = next(r for r in sd.FIRMEN if "tradeify" in r["namen"])
+    rk = a["ap_regel_konto"]
+    r50 = rk(tdfy, {"consistency_pct": 50}, 150000)
+    ch = r50["phasen"]["challenge"]
+    check(ch["tp_max"] == 4500 and ch["tp"] == [4350, 4450], f"Tradeify 50 %: größter Tag 4.500, TP-Spanne [4.350, 4.450] ({ch['tp_max']}, {ch['tp']})")
+    check(tdfy["phasen"]["challenge"]["tp_max"] == 3600, "Firmen-Regel bleibt unverändert (Kopie)")
+    r40 = rk(tdfy, {"consistency_pct": 40}, 150000)
+    check(r40["phasen"]["challenge"]["tp_max"] == 3600 and r40["phasen"]["challenge"]["tp"] == [3450, 3550], "40 % = Firmen-Standard 3.600")
+    check(rk(tdfy, {"consistency_pct": None}, 150000) is tdfy, "ohne consistency_pct: Firmen-Regel")
+    u = {"tp": 0.5, "sl": 0.5, "menge": 0.0, "puffer": 0.5}
+    w, _g = a["ap_konto_rechnen"](r50, "challenge", 150000, u)
+    check(w and 4350 <= w["tp"] <= 4450 and w["stufe"] == "Etappe", f"50 % frisch: Etappe {w and w['tp']}")
+    w, _g = a["ap_konto_rechnen"](r50, "challenge", 154400, u)
+    check(w and 4350 <= w["tp"] <= 4450, f"50 % nach 4.400: Rest 4.600 → noch eine Etappe ({w and w['tp']} · {w and w['stufe']})")
+    w, _g = a["ap_konto_rechnen"](r50, "challenge", 155000, u)
+    check(w and w["tp"] > 4000 and w["tp"] <= 4500 and "letzter" in w["stufe"], f"50 % bei 155.000: letzter Trade Rest 4.000 + Puffer ({w and w['tp']})")
+    w, _g = a["ap_konto_rechnen"](tdfy, "challenge", 155000, u)
+    check(w and w["tp"] <= 3600 and "Etappe" not in w["stufe"] or (w and w["tp"] <= 3600), f"ohne Addon bei 155.000: höchstens 3.600 ({w and w['tp']})")
+    check(a["ap_kw_param"](r50)["etappe_usd"] == 4500 and a["ap_kw_param"](tdfy)["etappe_usd"] == 3600,
+          "Kontowert-Etappe liest die Konto-Consistency (4.500 statt 3.600)")
+    check(a["ap_consistency_etappe"](6, {"consistency_pct": 50}, 150000) == 4500, "Vorrat: Etappe = 50 % × 9.000")
+
     # ── 3 Bot greift über dem €-Band
     plaene = [{"plan_id": "p1", "user_id": "A", "firma": "tradeify", "richtung": "sell", "start_min": 620, "delta_abs": 3.0,
                "aenderbar": True, "einsatz_abs": 720},
@@ -112,6 +135,41 @@ def main():
     ruhig = a["ap_umplanen"]([dict(plaene[0], richtung="buy")], 0.0, 0.0, 600, sd.ZEITEN, 25, random.Random(4),
                              einsatz=dict(EK, basis=-700.0, brutto=700.0))
     check(ruhig["aenderungen"] == [], "Bot: Gegengewicht schon geplant → keine Änderung")
+
+    # ── 3b Live-Befund 22:12 UTC: geteilte Tranche (gleiche ID+Firma, 00:52 und 15:09) schob der Bot als EINE auf den Folgetag
+    tp = [{"plan_id": "t1", "user_id": "F", "firma": "tradeify", "richtung": "sell", "start_min": 52, "delta_abs": 5.8,
+           "aenderbar": True, "einsatz_abs": 657, "route": "tvv2"},
+          {"plan_id": "t2", "user_id": "F", "firma": "tradeify", "richtung": "sell", "start_min": 909, "delta_abs": 5.7,
+           "aenderbar": True, "einsatz_abs": 636, "route": "tvv2"},
+          {"plan_id": "f1", "user_id": "J", "firma": "fundednext", "richtung": "sell", "start_min": 173, "delta_abs": 2.2,
+           "aenderbar": True, "einsatz_abs": 307, "route": "mt5v2"}]
+    tr2 = a["_ap_tranchen"](tp)
+    check(sorted(tr2) == ["F|tradeify#1", "F|tradeify#2", "J|fundednext"] and tr2["F|tradeify#1"]["teile"] == 2,
+          f"Pläne derselben ID+Firma 14 h auseinander = zwei Teil-Tranchen ({sorted(tr2)})")
+    z16 = {"fenster": [["00:00", "14:30", 50], ["14:30", "16:30", 50]], "abstand_id_min": 3}
+    for sd_ in range(6):
+        erg = a["ap_umplanen"](tp, 0.0, 0.0, 0, z16, 25, random.Random(sd_), einsatz=dict(EK, basis=419.0, brutto=419.0, laufzeit=180))
+        neu = {c["plan_id"]: c for c in erg["aenderungen"]}
+        ok = all(c["nach_start_min"] < 16 * 60 + 30 for c in erg["aenderungen"]) \
+            and not any(c["art"] == "richtung" and c["plan_id"] in ("t1", "t2") for c in erg["aenderungen"]) \
+            and erg["nachher"]["netto_max_abs"] <= erg["vorher"]["netto_max_abs"] \
+            and all(c["nach_start_min"] >= 20 for c in erg["aenderungen"] if c["plan_id"] == "f1")
+        check(ok, f"Bot (seed {sd_}): kein Start nach 16:30/Folgetag, geteilte ID+Firma nie gedreht, max |Netto| nie schlechter, CFD ≥ 00:20 "
+                  f"({[(c['plan_id'], c['art'], c['nach_start_min']) for c in erg['aenderungen']]}, {erg['vorher']['netto_max_abs']}→{erg['nachher']['netto_max_abs']})")
+    aend, f = a["ap_eingriff_pruefen"]("t1", "richtung_tauschen", [dict(x, user="Eins") for x in tp], 0, z16)
+    check(not f and sorted(x["plan_id"] for x in aend) == ["t1", "t2"], "Eingriff: Richtung tauschen dreht beide Teil-Tranchen (eine Richtung je ID+Firma)")
+    aend, f = a["ap_eingriff_pruefen"]("t2", "start", [dict(x, user="Eins") for x in tp], 0, z16, neu_start_min=600)
+    check(not f and [(x["plan_id"], x["nach_start_min"]) for x in aend] == [("t2", 600)], "Eingriff: Start verschiebt nur die eigene Teil-Tranche")
+    _x, f = a["ap_eingriff_pruefen"]("f1", "start", [dict(x, user="Eins") for x in tp], 0, z16, neu_start_min=10)
+    check(f and "CFD" in f, f"Eingriff: CFD vor 00:20 → 400: {f}")
+
+    # ── 3c CFD erst ab 00:20 im Planer
+    trc = [{"key": f"c{i}", "user": f"U{i}", "firma": "f", "dauer_min": 2, "ab_min": 20} for i in range(30)] + \
+          [{"key": f"t{i}", "user": f"V{i}", "firma": "t", "dauer_min": 2, "ab_min": 0} for i in range(30)]
+    m = a["ap_zeiten_verteilen"](trc, {"fenster": [["00:00", "00:40", 1]], "abstand_id_min": 3}, random.Random(9))
+    check(all(m[f"c{i}"] >= 20 for i in range(30) if f"c{i}" in m) and any(m[f"t{i}"] < 20 for i in range(30) if f"t{i}" in m),
+          "ap_zeiten_verteilen: CFD nie vor 00:20, Futures auch davor")
+    check(a["ap_cfd_ab"]({}) == 20 and a["ap_cfd_ab"]({"cfd_ab": "00:30"}) == 30, "zeiten.cfd_ab, Standard 00:20")
 
     # ── 4 Startfenster bis 16:30
     z = {"fenster": [["00:00", "14:30", 50], ["14:30", "16:30", 50]], "abstand_id_min": 3}

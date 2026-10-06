@@ -4795,7 +4795,14 @@ def _admin_basis():
     nicht möglich ist (Auth-API weg) — wie die Übersicht vorher auch."""
     # kapitel_id seit 24.09.2026 mit (per Trigger nach created_at gesetzt, backfilled).
     # waiting_payout_since seit 30.09.2026 mit: „Accounts je Firma" zählt solche Konten nicht als „noch offen".
-    accounts = _sb_all("accounts", {"select": "id,user_id,firm,account_type,purchase_cost,name,external_id,created_at,payout_ready_at,goal_kind,goal_target,goal_done_offset,goal_manual,balance,topstep_balance,meta_api_balance,payout_pct,payout_override,topstep_last_check,meta_api_last_check,wd_farm,kapitel_id,account_size,starting_balance,tv_balance,tv_balance_at,waiting_payout_since"})
+    # consistency_pct seit 07.10.2026 (Vorrat: Challenge-Etappe je Konto) — solange die Spalte fehlt, ohne sie
+    felder = "id,user_id,firm,account_type,purchase_cost,name,external_id,created_at,payout_ready_at,goal_kind,goal_target,goal_done_offset,goal_manual,balance,topstep_balance,meta_api_balance,payout_pct,payout_override,topstep_last_check,meta_api_last_check,wd_farm,kapitel_id,account_size,starting_balance,tv_balance,tv_balance_at,waiting_payout_since"
+    try:
+        accounts = _sb_all("accounts", {"select": felder + ",consistency_pct"})
+    except requests.exceptions.HTTPError as e:
+        if "consistency_pct" not in str(getattr(e.response, "text", "") or e):
+            raise
+        accounts = _sb_all("accounts", {"select": felder})
     arch_rows = _sb_all("user_settings", {"select": "value", "key": "eq.archive"})
     fx_rows   = _sb_all("user_settings", {"select": "value", "key": "eq.fx_usd_eur"})
 
@@ -7682,12 +7689,20 @@ def vorrat2_zelle(ziel, stufen, konten, status, param=None, faktoren=None, seed=
              "balance_at": k.get("balance_at"), "alter_tage": alter, "im_bestand": im_bestand, "chance": None,
              "chance_stufe": None, "wert": None, "gefaehrdet": False, "unsicher": uns, "daten_fehlen": df, "hinweis": "",
              "wert_eur": None, "waiting": bool(k.get("waiting"))}
-        if kw and bal is not None:
-            kv = ap_kontowert(typ, bal, kw)
+        # Consistency des Kontos (07.10.2026): Challenge-Etappe = consistency_pct × Ziel-$ für Kontowert und Chance
+        stufen_k, kw_k = stufen, kw
+        cp_et = ap_consistency_etappe(((stufen.get("challenge") or {}).get("ziel_pct")), k, gr) if typ == "challenge" else None
+        if cp_et:
+            if (stufen.get("challenge") or {}).get("modell") == "trades":
+                stufen_k = dict(stufen, challenge=dict(stufen["challenge"], etappe_usd=cp_et))
+            if kw:
+                kw_k = dict(kw, etappe_usd=cp_et)
+        if kw_k and bal is not None:
+            kv = ap_kontowert(typ, bal, kw_k)
             z["wert_eur"] = kv["wert"] if kv else None
         i = fach_von(gr)
         if im_bestand:
-            regel = stufen.get(typ) or stufen.get("funded_cfd" if typ == "funded" else typ) or {}
+            regel = stufen_k.get(typ) or stufen_k.get("funded_cfd" if typ == "funded" else typ) or {}
             if stueck:
                 wert = 1.0
             elif art == "plus_ueber_start":
@@ -7713,7 +7728,7 @@ def vorrat2_zelle(ziel, stufen, konten, status, param=None, faktoren=None, seed=
         else:
             funnel_n += 1
             rb = start if uns else bal
-            e = vorrat_chance_kette(stufen, typ, rb, gr, start, faktoren, p, k.get("max_dd"))
+            e = vorrat_chance_kette(stufen_k, typ, rb, gr, start, faktoren, p, k.get("max_dd"))
             if e["daten_fehlen"]:
                 df = True
                 z["daten_fehlen"] = True
@@ -8516,7 +8531,8 @@ def vorrat2_rechnen_lauf(quelle):
             "groesse": vorrat_groesse(_wd_konto_groesse(a), None if express else bal,
                                       firma in cfd_firmen or typ in VORRAT_CFD_TYPEN),
             "balance": bal, "balance_at": at or None, "alter_tage": vorrat_alter_handelstage(at, jetzt) if at else None,
-            "express": express, "waiting": bool(a.get("waiting_payout_since")), "created_at": a.get("created_at")})
+            "express": express, "waiting": bool(a.get("waiting_payout_since")), "created_at": a.get("created_at"),
+            "consistency_pct": a.get("consistency_pct")})
     uids = sorted((set(b["names"]) | {u for u, _ in je}) - excluded_ids)
     # Totband-Vorlauf: letzte fertige Zeile
     try:
@@ -14085,6 +14101,18 @@ def ap_start_bis(zeiten):
         return _ap_hhmm(AP_START_BIS_STANDARD)
 
 
+AP_CFD_AB_STANDARD = "00:20"           # Finn 07.10.2026: CFD (Echo V2/mt5v2) erst ab 00:20 dt — vorher ist der CFD-Markt zu
+AP_CFD_ROUTEN = ("mt5v2", "mt5")
+
+
+def ap_cfd_ab(zeiten):
+    """Früheste Startminute (dt) für CFD-Trades aus zeiten.cfd_ab, Standard 00:20. Futures dürfen ab 00:00."""
+    try:
+        return _ap_hhmm((zeiten or {}).get("cfd_ab") or AP_CFD_AB_STANDARD)
+    except (ValueError, AttributeError):
+        return _ap_hhmm(AP_CFD_AB_STANDARD)
+
+
 def ap_zeiten_verteilen(tranchen, zeiten, rnd, frueheste_min=0, info=None, bestehend=None):
     """REIN RECHNEND: Startminute (ab 00:00 deutscher Zeit) je Tranche. tranchen = [{key, user, firma, dauer_min}].
     Fenster nach Anteil (größter Rest), dann reiner Zufall im Fenster. Einzige Zeitregel: dieselbe ID (= PC) nie überlappend
@@ -14129,6 +14157,7 @@ def ap_zeiten_verteilen(tranchen, zeiten, rnd, frueheste_min=0, info=None, beste
             a, b, _ = fenster[j]
             treffer = None
             ober = b - 1 - int(max(0.0, float(t.get("dauer_min") or 2) - 2))   # letztes Konto der Tranche startet noch im Fenster
+            a = max(a, int(t.get("ab_min") or 0))                              # CFD erst ab zeiten.cfd_ab (07.10.2026)
             if ober < a:
                 continue
             for _ in range(300):
@@ -14158,6 +14187,42 @@ def ap_zeiten_verteilen(tranchen, zeiten, rnd, frueheste_min=0, info=None, beste
 # nach TP-$, bis Finn die €-Gewichte in der Ansicht freigibt.
 AP_KW_FUNDED = ("funded", "funded_cfd", "winning_days")
 AP_KW_PHASEN = ("challenge", "phase1", "phase2")
+
+
+def ap_consistency_etappe(ziel_pct, konto, groesse):
+    """Größter Tag in $ aus der Consistency des Kontos (Finn 07.10.2026: accounts.consistency_pct, null = Firmen-Standard):
+    consistency_pct × Ziel-$ der Challenge — Tradeify 150k Ziel 9.000: 40 % → 3.600, mit Addon 50 % → 4.500. → $ oder None."""
+    try:
+        pct = float((konto or {}).get("consistency_pct"))
+    except (TypeError, ValueError):
+        return None
+    if not pct or pct <= 0 or not ziel_pct or not groesse:
+        return None
+    return round(float(groesse) * float(ziel_pct) / 100.0 * float(pct) / 100.0)
+
+
+def ap_regel_konto(regel, konto, balance):
+    """Firmen-Regel mit der Consistency des Kontos (07.10.2026): phasen.challenge.tp_max = consistency_pct × Ziel-$, die TP-Spanne
+    rückt um dieselbe Differenz mit (Tradeify 3.600 [3.450, 3.550] → 50 %: 4.500 [4.350, 4.450]). Ohne consistency_pct oder ohne
+    Challenge-Phase: die Regel unverändert. Planer, Kontowert (ap_kw_param liest tp_max) und Probelauf nutzen dieselbe Regel."""
+    ch = ((regel or {}).get("phasen") or {}).get("challenge")
+    if not ch or not _wd_num((konto or {}).get("consistency_pct")):
+        return regel
+    groesse = (ap_groesse(regel.get("groessen"), balance) if balance else None) or (regel.get("groessen") or [None])[0]
+    zp = (regel.get("ziel_pct") or {}).get("challenge") if isinstance(regel.get("ziel_pct"), dict) else None
+    et = ap_consistency_etappe(zp if zp is not None else ch.get("ziel_pct"), konto, groesse)
+    if not et:
+        return regel
+    f = float(groesse) / 100000.0 if regel.get("skaliert") else 1.0
+    neu = et / f
+    alt = _wd_num(ch.get("tp_max"))
+    tp = ch.get("tp")
+    if alt is None and tp:
+        alt = float(tp[-1]) + 50
+    ch2 = dict(ch, tp_max=neu)
+    if tp and alt is not None:
+        ch2["tp"] = [round(float(x) + neu - alt) for x in tp]
+    return dict(regel, phasen=dict(regel.get("phasen") or {}, challenge=ch2))
 
 
 def ap_kw_param(regel):
@@ -14339,7 +14404,19 @@ def _ap_archiviert():
 
 
 AP_KONTO_FELDER = ("id,user_id,name,firm,account_type,external_id,max_drawdown,topstep_balance,topstep_last_check,"
-                   "meta_api_balance,meta_api_last_check,tv_balance,tv_balance_at")
+                   "meta_api_balance,meta_api_last_check,tv_balance,tv_balance_at,consistency_pct")
+AP_KONTO_FELDER_OHNE_CONS = AP_KONTO_FELDER.replace(",consistency_pct", "")
+
+
+def _ap_konten_laden(params):
+    """accounts für den Planer — mit consistency_pct (07.10.2026); solange die Spalte fehlt (SQL noch nicht eingespielt),
+    ohne sie, damit der Nachtlauf nicht stehen bleibt."""
+    try:
+        return _sb_all("accounts", dict(params, select=AP_KONTO_FELDER))
+    except requests.exceptions.HTTPError as e:
+        if "consistency_pct" not in str(getattr(e.response, "text", "") or e):
+            raise
+        return _sb_all("accounts", dict(params, select=AP_KONTO_FELDER_OHNE_CONS))
 
 
 def _ap_kauf_echt(ids):
@@ -14791,7 +14868,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     def _vorschlag(p):
         return p.get("auto_plan") is True and p.get("status") == "planned" and not p.get("auto_bestaetigt_at") \
             and not p.get("start_um_gestartet_at")
-    konten = _sb_all("accounts", {"select": AP_KONTO_FELDER, "user_id": in_uids, "order": "id.asc",
+    konten = _ap_konten_laden({"user_id": in_uids, "order": "id.asc",
                                   "account_type": "in.(" + ",".join(AP_TYPEN) + ")"})
     plaene = [p for p in _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_firm,status,richtung,master_tp,"
                                                            "ended_at,completed_at,auto_plan,auto_bestaetigt_at,start_um_gestartet_at,"
@@ -14816,6 +14893,8 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
             continue                                   # archiviert = weg, keine Meldung
         if _ap_norm(a.get("firm")) in AP_STILL_FIRMEN:
             continue                                   # Gegenhedge-Konto (Fusion), nie planen, keine Meldung
+        if ist_topstep_express(a):
+            continue                                   # Topstep Express/XFA (Finn 07.10.2026: nur Combine im Auto-Plan), keine Meldung
         regel = ap_regel_finden(firmen, a.get("firm"))
         if not regel or regel.get("planen") is False:      # planen:false = nur Kernwerte (Kontowert/Vorrat), z. B. Topstep, FTMO
             ausgelassen.append(dict(zeile, grund="keine Regel für diese Firma"))
@@ -14846,7 +14925,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
         if gb:
             ausgelassen.append(dict(zeile, grund=gb))
             continue
-        kandidaten.append({"a": a, "regel": regel, "bal": float(bal), "bal_quelle": quelle_b, "zeile": zeile,
+        kandidaten.append({"a": a, "regel": ap_regel_konto(regel, a, float(bal)), "bal": float(bal), "bal_quelle": quelle_b, "zeile": zeile,
                            "tkey": str(a["user_id"]) + "|" + _ap_norm(a.get("firm"))})
 
     # DELTA (06.10.2026, Vertrag §2): Live-Stand ALLER IDs — laufende Trades, heute schon geplante Pläne (ohne die Vorschläge,
@@ -14882,7 +14961,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
                        and _ap_norm(p.get("master_firm")) == firm_n and ap_richtung_fest_plan(p, tag, tz)), None)
         fest = fest_p.get("richtung") if fest_p else None
         route_t = rechnung[0][0]["regel"].get("route") or "mt5v2"
-        sym_t = str(rechnung[0][0]["regel"].get("symbol") or "NQ") if route_t == "tvv2" else None
+        sym_t = str(rechnung[0][0]["regel"].get("symbol") or "NQ") if route_t in ("tvv2", "tsv2") else None
         bew = {}
         for k, w in rechnung:      # Delta + Einsatz je Konto (Betrag; das Vorzeichen kommt mit der Richtung)
             bew[str(k["a"]["id"])] = _ap_bewerten(stand["ctx"], k["a"], k["bal"], w["menge"], route_t, sym_t, "buy", w["tp"], w["sl"])
@@ -14906,6 +14985,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
             for k, _w in r_teil:
                 dinfo[(ukey, str(k["a"]["id"]))] = bew[str(k["a"]["id"])]
             tr_info[ukey] = {"key": ukey, "user": key.split("|")[0], "firma": firm_n, "fest": fest, "gruppe": key,
+                             "ab_min": ap_cfd_ab(zeiten) if (r_teil[0][0]["regel"].get("route") or "mt5v2") in AP_CFD_ROUTEN else 0,
                              "fest_durch": (("laufender Plan" if fest_p.get("status") == "open" else "geplanter Plan") if fest_p else None),
                              "dauer_min": versatz[-1] / 60.0 + 2, "gewicht": sum(w["tp"] for _, w in r_teil),
                              "fkey": ap_firma_key(firmen, r_teil[0][0]["a"].get("firm")),
@@ -14969,7 +15049,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
             "user_id": a["user_id"], "master_account_id": a["id"], "master_name": a.get("name"), "master_firm": a.get("firm"),
             "master_contracts": w["menge"], "master_risk": w["risiko"] if w["risiko"] is not None else _wd_num(a.get("max_drawdown")),
             "master_tp": w["tp"], "master_sl": w["sl"], "richtung": richtung[key], "route": route,
-            "master_symbol": (str(regel.get("symbol") or "NQ") + frontcode) if route == "tvv2" else None,
+            "master_symbol": (str(regel.get("symbol") or "NQ") + frontcode) if route in ("tvv2", "tsv2") else None,   # tsv2 = Topstep V2 (07.10.2026)
             "start_um": start.astimezone(timezone.utc).isoformat(), "status": "planned", "priority": "medium",
             "planned_for": tag, "auto_plan": True,
             "notes": f"Auto-Planer · {w['stufe']} · Rest {rest_txt} $ bis Ziel · Balance {k['bal']:,.0f} ({k['bal_quelle']})".replace(",", ".")})
@@ -15348,21 +15428,39 @@ def ap_fenster_von(zeiten, minute):
     return None
 
 
+AP_TRANCHE_LUECKE_MIN = 15             # Pläne derselben ID+Firma, die weiter auseinander starten, sind eigene Tranchen (Teil-Tranchen)
+
+
 def _ap_tranchen(plaene):
     """Tranchen (ID × Firma) der heutigen geplanten Pläne [{plan_id, user_id, firma, start_min, aenderbar, fest_durch}] →
-    {key: {key, user_id, firma, plan_ids, start, ende, aenderbar, fest_durch}}. Ein nicht änderbarer Plan sperrt die Tranche."""
-    out = {}
+    {key: {key, user_id, firma, plan_ids, start, ende, aenderbar, fest_durch, teile}}. Ein nicht änderbarer Plan sperrt die Tranche.
+    07.10.2026 (Live-Befund 22:12 UTC: der Bot schob die zwei geteilten Tradeify-Konten einer ID — 00:52 und 15:09 dt — als EINE
+    Tranche um +11:06 h, der zweite Plan landete auf dem Folgetag): Pläne derselben ID+Firma, die mehr als AP_TRANCHE_LUECKE_MIN
+    auseinander starten, sind eigene Teil-Tranchen (Schlüssel ID|Firma#n); teile = Anzahl Teil-Tranchen dieser ID+Firma."""
+    je = {}
     for p in plaene or ():
-        if p.get("start_min") is None:
-            continue
-        k = f"{p['user_id']}|{p['firma']}"
-        t = out.setdefault(k, {"key": k, "user_id": p["user_id"], "firma": p["firma"], "plan_ids": [], "start": p["start_min"],
-                               "ende": p["start_min"], "aenderbar": True, "fest_durch": None})
-        t["plan_ids"].append(p["plan_id"])
-        t["start"], t["ende"] = min(t["start"], p["start_min"]), max(t["ende"], p["start_min"])
-        if not p.get("aenderbar"):
-            t["aenderbar"] = False
-            t["fest_durch"] = t["fest_durch"] or p.get("fest_durch") or "nicht änderbar"
+        if p.get("start_min") is not None:
+            je.setdefault(f"{p['user_id']}|{p['firma']}", []).append(p)
+    out = {}
+    for basis, liste in je.items():
+        liste.sort(key=lambda p: (float(p["start_min"]), str(p["plan_id"])))
+        gruppen, letzte = [], None
+        for p in liste:
+            if letzte is None or float(p["start_min"]) - letzte > AP_TRANCHE_LUECKE_MIN:
+                gruppen.append([])
+            gruppen[-1].append(p)
+            letzte = float(p["start_min"])
+        for n, g in enumerate(gruppen):
+            k = basis if len(gruppen) == 1 else f"{basis}#{n + 1}"
+            t = out.setdefault(k, {"key": k, "user_id": g[0]["user_id"], "firma": g[0]["firma"], "plan_ids": [],
+                                   "start": g[0]["start_min"], "ende": g[0]["start_min"], "aenderbar": True, "fest_durch": None,
+                                   "teile": len(gruppen)})
+            for p in g:
+                t["plan_ids"].append(p["plan_id"])
+                t["start"], t["ende"] = min(t["start"], p["start_min"]), max(t["ende"], p["start_min"])
+                if not p.get("aenderbar"):
+                    t["aenderbar"] = False
+                    t["fest_durch"] = t["fest_durch"] or p.get("fest_durch") or "nicht änderbar"
     return out
 
 
@@ -15441,7 +15539,8 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
             if not t["aenderbar"]:
                 continue
             ids = sorted(t["plan_ids"])
-            if f"{t['user_id']}|{t['firma']}" not in id_fest and len({zustand[i]["richtung"] for i in ids}) == 1:
+            # geteilte ID+Firma (Teil-Tranchen) dreht der Bot nicht — eine Richtung je ID+Firma (Richtungsschutz)
+            if f"{t['user_id']}|{t['firma']}" not in id_fest and len({zustand[i]["richtung"] for i in ids}) == 1 and t.get("teile", 1) == 1:
                 z = {i: dict(v) for i, v in zustand.items()}
                 for i in ids:
                     z[i]["richtung"] = "sell" if z[i]["richtung"] == "buy" else "buy"
@@ -15450,12 +15549,14 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
             if not fen:
                 continue
             lo, hi = int(max(fen[0], jetzt_min + AP_FAELLIG_MIN + 5)) + 1, int(fen[1]) - 1
+            if any(je[i].get("route") in AP_CFD_ROUTEN for i in ids):
+                lo = max(lo, ap_cfd_ab(zeiten))           # CFD nie vor zeiten.cfd_ab (07.10.2026)
             if hi <= lo:
                 continue
             for _v in range(12):
                 neu = float(rnd.randint(lo, hi))
-                if abs(neu - t["start"]) < 1 or _ap_tranche_frei(t, neu, tr, zeiten):
-                    continue
+                if abs(neu - t["start"]) < 1 or t["ende"] + (neu - t["start"]) >= fen[1] or _ap_tranche_frei(t, neu, tr, zeiten):
+                    continue                     # auch das letzte Konto der Tranche bleibt im Fenster (nie auf den Folgetag)
                 z = {i: dict(v) for i, v in zustand.items()}
                 for i in ids:
                     z[i]["start"] += neu - t["start"]
@@ -15464,6 +15565,11 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
             break
         # 07.10.2026 (Finn): Malus (dicht gegenläufig gleiche Firma — baut der Bot nie selbst ein), Band (€ Einsatz), große gleich
         # gerichtet hintereinander, max |Netto|
+        # 07.10.2026 (Live-Befund: Band der nächsten 60 min gehalten, dafür max |Netto| des Tages 573 → 810 €): ein Schritt darf das
+        # größte |Netto| bis Tagesende nie verschlechtern
+        kandidaten = [c for c in kandidaten if c[0][3] <= aktuell[3] + 1e-9]
+        if not kandidaten:
+            break
         kandidaten.sort(key=lambda x: x[0])
         k_neu, art, f, ids, z = kandidaten[0]
         if k_neu >= aktuell:
@@ -15501,7 +15607,12 @@ def ap_eingriff_pruefen(plan_id, aktion, plaene, jetzt_min, zeiten, id_fest=None
     f, u = p["firma"], p["user_id"]
     name = p.get("firma_name") or f
     tr = _ap_tranchen(plaene)
-    t = tr[f"{u}|{f}"]
+    t = next(x for x in tr.values() if p["plan_id"] in x["plan_ids"])
+    if aktion == "richtung_tauschen":
+        # eine Richtung je ID+Firma: Teil-Tranchen (geteilte Tranche, 07.10.2026) drehen gemeinsam
+        teile = [x for x in tr.values() if x["user_id"] == u and x["firma"] == f]
+        t = dict(t, plan_ids=[i for x in teile for i in x["plan_ids"]], aenderbar=all(x["aenderbar"] for x in teile),
+                 fest_durch=next((x["fest_durch"] for x in teile if not x["aenderbar"]), None))
     if not t["aenderbar"]:
         return None, f"Tranche {name} dieser ID hat einen nicht änderbaren Plan ({t['fest_durch']}) — eine Tranche = eine Richtung"
     plan_ids = sorted(t["plan_ids"])
@@ -15528,10 +15639,14 @@ def ap_eingriff_pruefen(plan_id, aktion, plaene, jetzt_min, zeiten, id_fest=None
                           f"({_ap_hhmm_txt(min(a for a, _ in fen))}–{_ap_hhmm_txt(max(b for _, b in fen))})")
         if neu < float(jetzt_min) + AP_FAELLIG_MIN:
             return None, f"Start zu früh — frühestens {_ap_hhmm_txt(int(float(jetzt_min)) + AP_FAELLIG_MIN + 1)}"
+        if p.get("route") in AP_CFD_ROUTEN and neu < ap_cfd_ab(zeiten):
+            return None, f"CFD erst ab {_ap_hhmm_txt(ap_cfd_ab(zeiten))} — vorher ist der CFD-Markt zu"
         grund = _ap_tranche_frei(t, neu, tr, zeiten)
         if grund:
             return None, grund
         versatz = neu - t["start"]
+        if t["ende"] + versatz >= max(b for _, b in fen):
+            return None, f"letztes Konto der Tranche startete um {_ap_hhmm_txt(t['ende'] + versatz)} — nach dem Startfenster"
         return [{"plan_id": i, "user_id": u, "firma": f, "art": "start", "von_richtung": je[i]["richtung"],
                  "nach_richtung": je[i]["richtung"], "von_start_min": je[i]["start_min"], "nach_start_min": je[i]["start_min"] + versatz,
                  "grund": f"von Hand: Tranche {name} {_ap_hhmm_txt(t['start'])} → {_ap_hhmm_txt(neu)}"} for i in plan_ids], None
@@ -15640,7 +15755,7 @@ def _ap_gehedgt_plan(p):
 def _ap_bewerten(ctx, a, bal, menge, route, symbol, richtung, tp, sl, gehedgt=False):
     """Kontowert, Gewicht (€) und Delta eines Trades aus dem Kontext des Stands (Kernwerte, echte Käufe, firm_specs)."""
     a = a or {}
-    regel = ap_regel_finden(ctx["firmen"], a.get("firm"))
+    regel = ap_regel_konto(ap_regel_finden(ctx["firmen"], a.get("firm")), a, bal)
     p = ap_kw_param(regel)
     kw = ap_kontowert(a.get("account_type"), bal, p, ctx["kauf"].get(str(a.get("id")))) if a and bal else None
     fk = _ap_norm(_firm_norm(a.get("firm")))
@@ -15708,7 +15823,7 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
                  | {str(x) for x in extra_konten or ()})
     konten = {}
     for j in range(0, len(ids), 150):
-        for a in _sb_all("accounts", {"select": AP_KONTO_FELDER, "id": "in.(" + ",".join(ids[j:j + 150]) + ")"}):
+        for a in _ap_konten_laden({"id": "in.(" + ",".join(ids[j:j + 150]) + ")"}):
             konten[str(a["id"])] = a
     if echo_bal is None or dup_bal is None:
         echo_bal, dup_bal = _ap_balance_karten()
@@ -16436,7 +16551,14 @@ def ap_nacht_tick(jetzt, zustand):
         return None
     tag = faellig[0].isoformat()
     if zustand.get("letzter_tag") == tag:
-        return None
+        # 07.10.2026 (Neuplanen per sql/…_neu_planen.sql ohne Railway-Neustart): alle 10 min nachsehen, ob der Claim noch da ist —
+        # wurde er umbenannt (oder war der Planer aus und ist jetzt an), läuft der Tag noch einmal
+        if time.time() - (zustand.get("claim_geprueft") or 0) < 600:
+            return None
+        zustand["claim_geprueft"] = time.time()
+        if sb_select("auto_plan_lauf", {"select": "id", "tag": f"eq.{tag}", "quelle": "eq.nacht", "limit": "1"}):
+            return None
+        zustand["letzter_tag"] = None
     reg = (sb_select("auto_plan_regeln", {"select": "aktiv", "id": "eq.1"}) or [{}])[0]
     erg = None
     if reg.get("aktiv"):
@@ -16450,7 +16572,8 @@ def ap_nacht_tick(jetzt, zustand):
         zustand["last_run"] = time.time()
         zustand["runs"] = (zustand.get("runs") or 0) + 1
         zustand["letzter"] = {k: erg.get(k) for k in ("tag", "msg")}
-    zustand["letzter_tag"] = tag      # aktiv aus → heute nicht mehr fragen (wie bisher); nach Neustart wird neu geprüft
+    zustand["letzter_tag"] = tag      # aktiv aus → erst beim Claim-Nachsehen (10 min) bzw. nach Neustart wieder fragen
+    zustand["claim_geprueft"] = time.time()
     return erg
 
 

@@ -72,7 +72,7 @@ def lade():
     j = src.index("AP_KW_FUNDED = ")
     teile.append(src[j:src.index("\n\n\n", j)])
     teile += [block(f) for f in ("_ap_norm", "ap_regel_finden", "ap_groesse", "ap_kw_param", "_ap_kw_kauf", "_ap_kw_wachsen", "_ap_kw_lock",
-                                 "ap_kontowert", "vorrat_stufen_aus_kernwerten")]
+                                 "ap_kontowert", "vorrat_stufen_aus_kernwerten", "ap_consistency_etappe")]
     j2 = src.index("VORRAT_KI_PRIO = ")
     teile.append(src[j2:src.index("\n", j2)])
     teile += [block(f) for f in ("vorrat_ziel_pruefen", "_vr2_k", "_vr2_usd", "_vr2_unterwegs_txt", "vorrat_satz_nominal", "vorrat_satz", "vorrat_personen", "vorrat_regel_satz", "vorrat_gesamt", "vorrat_score_gruppen", "vorrat_ki_hinweis", "vorrat_fakten_text", "vorrat_ki_pruefen",
