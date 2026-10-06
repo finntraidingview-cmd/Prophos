@@ -1625,6 +1625,102 @@
   #apProbeModal .apx-konto>b{min-width:64px;font-weight:600}
   #apProbeModal .apx-h{font-size:12px;font-weight:600;color:var(--sub);margin:14px 0 6px;text-transform:uppercase;letter-spacing:.04em}
   #apProbeModal .apx-leer{padding:24px 8px;text-align:center;color:var(--sub);font-size:13px}
+  /* Probelauf delta-neutral (06.10.2026, Vertrag autoplan-delta-vertrag.md): Gewicht = €/Pkt statt € im Spiel, Band um die Null-Linie */
+  #apProbeModal .apx-chips{display:flex;flex-wrap:wrap;justify-content:center;gap:4px 12px;font-size:12px;color:var(--sub);font-variant-numeric:tabular-nums}
+  #apProbeModal .apx-chips b{color:var(--ink);font-weight:600}
+  #apProbeModal .apx-pkt{font-size:11px;color:var(--sub-2);font-variant-numeric:tabular-nums;white-space:nowrap}
+  #apProbeModal .apx-pkt .tp{color:var(--good)} #apProbeModal .apx-pkt .sl{color:var(--danger)}
+  /* DELTA-MONITOR (06.10.2026, Finn: über alle IDs den ganzen Tag delta-neutral — Long ≈ Short): eigene Karte über „Geplant",
+     Kacheln + Netto-Kurve mit Band + Waage je Firma + drei schlanke Listen. Firmentöne wie die Vorrat-Seite (--vr-f0 … --vr-f6),
+     hier für #apDelta noch einmal gesetzt, weil die Töne dort nur in #vr-view gelten. Nur #apDelta, eigene apd-*-Klassen. */
+  #apDelta{--vr-f0:var(--violet);--vr-f1:color-mix(in oklch,var(--violet) 70%,var(--blue));--vr-f2:color-mix(in oklch,var(--violet) 45%,var(--blue));
+    --vr-f3:color-mix(in oklch,var(--violet) 75%,var(--violet-soft));--vr-f4:color-mix(in oklch,var(--violet) 75%,var(--danger));
+    --vr-f5:color-mix(in oklch,var(--violet) 50%,var(--sub));--vr-f6:color-mix(in oklch,var(--violet) 60%,var(--sub-2))}
+  @supports (color: oklch(from red l c h)){
+    #apDelta{--vr-f1:oklch(from var(--violet) l c calc(h - 14));--vr-f2:oklch(from var(--violet) l c calc(h - 28));
+      --vr-f3:oklch(from var(--violet) l calc(c * .8) calc(h + 14));--vr-f4:oklch(from var(--violet) l c calc(h + 32));
+      --vr-f5:oklch(from var(--violet) l calc(c * .55) calc(h - 40));--vr-f6:oklch(from var(--violet) l calc(c * .4) h)}
+  }
+  #apDelta{margin:0 0 10px;padding:10px 12px 12px;border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface);font-size:13px;min-width:0}
+  #apDelta .apd-kopf{display:flex;align-items:center;gap:6px 10px;flex-wrap:wrap;margin-bottom:8px}
+  #apDelta .apd-kopf .apd-um{color:var(--sub-2);font-size:11.5px;font-variant-numeric:tabular-nums}
+  #apDelta .apd-kopf .tc2-btn{padding:4px 10px;font-size:12px}
+  #apDelta .kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:10px}
+  #apDelta .kpi{padding:9px 11px;box-shadow:none;min-width:0;border-radius:var(--r-md)}
+  #apDelta .kpi:hover{box-shadow:none}
+  #apDelta .kpi-label{font-size:11.5px;margin-bottom:2px}
+  #apDelta .kpi-value{font-size:18px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #apDelta .kpi-value small{font-size:11px;font-weight:500;color:var(--sub);margin-left:3px}
+  #apDelta .kpi-delta{display:block;font-size:11px;color:var(--sub);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #apDelta .apd-gut{color:var(--good)} #apDelta .apd-rot{color:var(--danger)} #apDelta .apd-grau{color:var(--sub-2)}
+  #apDelta .apd-mess{position:relative;height:6px;border-radius:3px;background:var(--surface-tint);margin:5px 0 3px;overflow:hidden}
+  #apDelta .apd-mess .band{position:absolute;top:0;bottom:0;background:color-mix(in srgb,var(--good) 26%,var(--surface))}
+  #apDelta .apd-mess .null{position:absolute;top:-1px;bottom:-1px;left:50%;width:1px;background:var(--sub-2)}
+  #apDelta .apd-mess .pkt{position:absolute;top:-1px;bottom:-1px;width:3px;margin-left:-1.5px;border-radius:2px;background:var(--ink)}
+  #apDelta .apd-ls{display:flex;height:6px;border-radius:3px;overflow:hidden;margin:5px 0 3px;background:var(--surface-tint)}
+  #apDelta .apd-ls i{display:block;height:100%}
+  #apDelta .apd-schalter{display:flex;gap:10px;flex-wrap:wrap;margin-top:5px;font-size:11px;color:var(--sub)}
+  #apDelta .apd-schalter label{display:inline-flex;align-items:center;gap:5px;cursor:pointer;user-select:none}
+  #apDelta .apd-schalter .switch{width:28px;height:16px}
+  #apDelta .apd-schalter .switch-slider::before{width:12px;height:12px}
+  #apDelta .apd-schalter .switch input:checked + .switch-slider::before{transform:translateX(12px)}
+  #apDelta .apd-schalter .switch input:disabled + .switch-slider{opacity:.55;cursor:default}
+  #apDelta .apd-chart{position:relative;margin:0 0 10px}
+  #apDelta .apd-chart svg{display:block;width:100%;height:110px}
+  #apDelta .apd-achse{position:relative;height:15px;font-size:10.5px;color:var(--sub-2);font-variant-numeric:tabular-nums}
+  #apDelta .apd-achse span{position:absolute;transform:translateX(-50%);white-space:nowrap}
+  #apDelta .apd-achse span.links{transform:none} #apDelta .apd-achse span.rechts{transform:translateX(-100%)}
+  #apDelta .apd-jetzt{position:absolute;top:0;transform:translateX(-50%);font-size:10px;font-weight:600;color:var(--ink);background:var(--surface);padding:0 3px;border-radius:4px;white-space:nowrap;pointer-events:none}
+  #apDelta .apd-fen{position:absolute;top:0;font-size:10px;color:var(--sub-2);pointer-events:none;white-space:nowrap}
+  #apDelta .apd-skala{position:absolute;left:2px;font-size:10px;color:var(--sub-2);font-variant-numeric:tabular-nums;pointer-events:none}
+  #apDelta .apd-waage{margin:0 0 12px}
+  #apDelta .apd-waage-zahlen{display:flex;justify-content:space-between;gap:8px;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums}
+  #apDelta .apd-waage-balken{position:relative;display:flex;height:14px;margin:4px 0 3px}
+  #apDelta .apd-waage-balken>div{flex:1 1 50%;display:flex;min-width:0;background:var(--surface-tint)}
+  #apDelta .apd-waage-balken>div:first-child{justify-content:flex-end;border-radius:7px 0 0 7px}
+  #apDelta .apd-waage-balken>div:last-child{border-radius:0 7px 7px 0}
+  #apDelta .apd-waage-balken>div>i{display:block;height:100%;min-width:2px;border-right:1px solid var(--surface)}
+  #apDelta .apd-waage-balken::after{content:'';position:absolute;left:50%;top:-3px;bottom:-3px;width:2px;margin-left:-1px;background:var(--ink);opacity:.45}
+  #apDelta .apd-legende{display:flex;flex-wrap:wrap;gap:2px 10px;font-size:11px;color:var(--sub)}
+  #apDelta .apd-legende i,#apDelta .apd-f{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:4px;vertical-align:0}
+  #apDelta .apd-listen{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  #apDelta .apd-listen>.apd-liste.breit{grid-column:1/-1}   /* Umplanungen über die volle Breite: Grund braucht Platz */
+  #apDelta .apd-liste{border:1px solid var(--border-soft);border-radius:var(--r-md);min-width:0;overflow:hidden}
+  #apDelta .apd-h{display:flex;align-items:center;gap:6px;padding:6px 10px;font-size:11.5px;font-weight:600;color:var(--sub);text-transform:uppercase;letter-spacing:.04em;background:var(--surface-tint)}
+  #apDelta .apd-h b{color:var(--ink);font-weight:600}
+  #apDelta .apd-z{display:flex;align-items:center;gap:8px;padding:5px 10px;border-top:1px solid var(--border-soft);font-size:12.5px;font-variant-numeric:tabular-nums;min-height:32px}
+  #apDelta .apd-z:first-of-type{border-top:0}
+  #apDelta .apd-z .zeit{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600;flex:0 0 auto}
+  #apDelta .apd-z .firma{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #apDelta .apd-z .id{display:inline-block;width:8px;height:8px;border-radius:50%;margin-left:5px;vertical-align:0}
+  #apDelta .apd-z .ri{flex:0 0 auto;font-weight:700;font-size:12px} #apDelta .apd-z .ri.long{color:var(--good)} #apDelta .apd-z .ri.short{color:var(--danger)}
+  #apDelta .apd-z .dl{flex:0 0 auto;min-width:52px;text-align:right;font-weight:600}
+  #apDelta .apd-z .grund{flex:1 1 40%;min-width:0;color:var(--sub);font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #apDelta .apd-z .wechsel{flex:0 0 auto;font-size:12px;white-space:nowrap}
+  #apDelta .apd-z .knopf{flex:0 0 auto;border:1px solid var(--border);background:var(--surface);border-radius:7px;width:28px;height:26px;padding:0;font-size:13px;line-height:1;color:var(--ink-2);cursor:pointer}
+  #apDelta .apd-z .knopf:hover:not(:disabled){border-color:var(--sub-2);background:var(--surface-tint)}
+  #apDelta .apd-z .knopf:disabled{opacity:.4;cursor:default}
+  #apDelta .apd-z input[type=time]{height:26px;padding:0 6px;font-size:12px;width:96px}
+  #apDelta .apd-tpsl{flex:0 0 112px;display:flex;flex-direction:column;gap:1px}
+  #apDelta .apd-tpsl .zahlen{display:flex;justify-content:space-between;font-size:10.5px;line-height:1.1}
+  #apDelta .apd-tpsl .bar{display:flex;height:5px;border-radius:3px;overflow:hidden;background:var(--surface-tint)}
+  #apDelta .apd-tpsl .bar i{display:block;height:100%}
+  #apDelta .apd-tpsl .bar i+i{border-left:2px solid var(--ink)}
+  #apDelta .apd-leer{padding:10px;color:var(--sub-2);font-size:12px;text-align:center}
+  #apDelta .apd-fehler{padding:6px 10px;border-top:1px solid var(--border-soft);background:color-mix(in srgb,var(--danger) 7%,var(--surface));color:var(--danger);font-size:12px;font-weight:500}
+  #apDelta .apd-vorschau{border:1px solid color-mix(in srgb,var(--violet) 35%,var(--border));border-radius:var(--r-md);margin:0 0 10px;overflow:hidden}
+  #apDelta .apd-vorschau .apd-h{background:var(--violet-tint);color:var(--violet)}
+  #apDelta .apd-vorschau-fuss{display:flex;justify-content:flex-end;gap:8px;padding:8px 10px;border-top:1px solid var(--border-soft)}
+  #apDelta .apd-vorschau-fuss .btn{padding:5px 12px;font-size:12.5px}
+  @media (max-width:760px){
+    #apDelta .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+    #apDelta .apd-achse span.nb{display:none}
+    #apDelta .apd-listen{grid-template-columns:minmax(0,1fr)}
+    #apDelta .apd-tpsl{flex-basis:84px}
+    #apDelta .apd-z{gap:6px;padding:5px 8px}
+    #apDelta .apd-liste.breit .apd-z,#apDelta .apd-vorschau .apd-z{flex-wrap:wrap;row-gap:0}
+    #apDelta .apd-liste.breit .grund,#apDelta .apd-vorschau .grund{flex:1 1 100%;padding-left:46px}
+  }
   /* Winning-Day-Farmer im Admin (23.09.2026, Finn: „mach alles in Admin und mehr Überblick"; dann „mies
      hässlich und man checkt nix — erklär mal visuell"; 01:xx: „der Erklärblock und der Zeitstrahl sind
      mies hässlich, man erkennt da gar nichts"): Kopf eine Zeile, Ablauf als Tabelle, je Block eine
@@ -6822,6 +6918,9 @@
       <div class="subtab-pane active" data-tradepane="planned">
         <!-- Auto-Planer (05.10.2026): Vorschläge bestätigen, jetzt planen, ausgelassene Konten mit Grund — eigene Verdrahtung (ap*) -->
         <div id="apLeiste" style="display:none;margin:0 0 10px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface);font-size:13px"></div>
+        <!-- Delta-Monitor (06.10.2026, Vertrag .claude/master/autoplan-delta-vertrag.md): Netto-Delta über alle IDs, Ausgleichs-Bot,
+             Eingriffe je geplantem Plan — eigene Verdrahtung (apd*), nur sichtbar, wenn GET /admin/auto-plan/delta antwortet -->
+        <div id="apDelta" style="display:none"></div>
         <div class="trade-cards" id="tradeCardsPlanned"></div>
         <div class="empty" id="tradeEmptyPlanned" style="display:none;border:none;background:transparent">
           <div class="empty-icon">
@@ -39036,7 +39135,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1083'
+  const OS_TAB_BUILD = '2026-09-22.1084'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -42839,7 +42938,7 @@
    * offene Vorschläge und vom letzten Lauf nur Zahlen der EIGENEN ID (05.10.2026, Finn an der aufgeklappten Details-Liste mit den
    * Konten aller IDs: „das oben mies hässlich kann weg und es soll immer nur für die eigene ID planen"): „4 geplant · 7 ausgelassen",
    * die Gründe gezählt statt je Konto. Gefiltert wird hier, auch wenn das Backend noch alle IDs liefert. */
-  const _ap = { letzter: null, geladenFuer: null, laeuft: false, imPlaner: false, ich: null }
+  const _ap = { letzter: null, geladenFuer: null, laeuft: false, imPlaner: false, ich: null, admin: null }
   async function apApi(method, body){
     const { data: { session } } = await supabase.auth.getSession()
     const tok = session?.access_token; if(!tok) throw new Error('nicht angemeldet')
@@ -42852,9 +42951,10 @@
   }
   async function apLetztenLaden(){
     _ap.geladenFuer = currentUserId
-    try{ const d = await apApi('GET'); _ap.letzter = d.letzter || null; _ap.imPlaner = !!d.im_planer }
-    catch(_){ _ap.letzter = null; _ap.imPlaner = false }
+    try{ const d = await apApi('GET'); _ap.letzter = d.letzter || null; _ap.imPlaner = !!d.im_planer; _ap.admin = d.admin != null ? !!d.admin : null }
+    catch(_){ _ap.letzter = null; _ap.imPlaner = false; _ap.admin = null }
     apLeisteZeichnen()
+    try{ _apd.d = null; _apd.vorschau = null; _apd.edit = null; apdLaden(true) }catch(_){}   // Delta-Monitor (06.10.2026): je Login frisch, nie Daten der vorigen ID
   }
   async function apBestaetigen(ids){
     ids = (ids || []).map(String)
@@ -42947,7 +43047,20 @@
    * dann ohne €-Gewichte („$ TP" statt „€ im Spiel") und ohne „warum". Admin (d.admin) sieht alle IDs, sonst nur die eigene;
    * der Long/Short-Ausgleich gilt immer über alle IDs (so rechnet der Planer). Zeiten = deutsche Zeit wie im Planer. */
   const _apPr = { modus: 'morgen', laeuft: false, d: null, tag: null, fehler: '', hinweis: '', nr: 0 }
-  const AP_PR_VON = 120, AP_PR_BIS = 1050            // Zeitleiste 02:00–17:30 deutscher Zeit (letzter Start 17:30, Finn 05.10.2026)
+  let AP_PR_VON = 120, AP_PR_BIS = 1050              // Zeitleiste 02:00–17:30 deutscher Zeit (letzter Start 17:30, Finn 05.10.2026)
+  // Delta-neutral (06.10.2026, Vertrag autoplan-delta-vertrag.md §2): Nachtlauf um 00:00 dt, Fenster 00:00–14:30 · 14:30–17:30 · 17:30–19:30
+  // mit 40/40/20 % — Zeitleiste dann 00:00–19:30. Nur Rückfall, wenn die Antwort keine Fenster mitschickt.
+  const AP_DELTA_VON = 0, AP_DELTA_BIS = 1170
+  const AP_DELTA_FENSTER = [{ von: '00:00', bis: '14:30', anteil: 40 }, { von: '14:30', bis: '17:30', anteil: 40 }, { von: '17:30', bis: '19:30', anteil: 20 }]
+  /* €/Pkt-Format (Delta je NQ-Punkt): eine Nachkommastelle, unter 10 mit Komma, sonst ganz */
+  const apdPkt = x => { const n = Math.abs(Number(x) || 0); return (Number(x) < 0 ? '−' : '') + n.toLocaleString('de-DE', { maximumFractionDigits: n < 10 ? 1 : 0, minimumFractionDigits: n > 0 && n < 10 ? 1 : 0 }) }
+  const apdPktVz = x => (Number(x) > 0 ? '+' : '') + apdPkt(x)
+  /* Band aus der Antwort: Zahl (€/Pkt) oder Objekt ({abs|eur_pkt|wert, pct}); ohne Wert aus zielband_pct × brutto */
+  function apdBandWert(b, brutto, pct){
+    if(b != null && typeof b === 'object') b = b.abs ?? b.eur_pkt ?? b.wert ?? (b.pct != null && brutto != null ? Number(b.pct) / 100 * Number(brutto) : null)
+    if(b != null && isFinite(Number(b))) return Math.abs(Number(b))
+    return pct != null && brutto != null ? Math.abs(Number(pct) / 100 * Number(brutto)) : null
+  }
   const AP_PR_FENSTER = [{ von: '02:00', bis: '14:00', anteil: 37 }, { von: '14:00', bis: '15:30', anteil: 25 },
                          { von: '15:30', bis: '16:30', anteil: 18 }, { von: '16:30', bis: '17:30', anteil: 20 }]   // Standard ohne fenster im Ergebnis
   const apPrGeld = (x, euro) => (Number(x) < 0 ? '−' : '') + Math.round(Math.abs(Number(x) || 0)).toLocaleString('de-DE') + (euro ? ' €' : ' $')
@@ -43003,6 +43116,12 @@
     const mein = x => alle || (!!x && (x.user_id != null ? String(x.user_id) === ich.id : (!!ich.name && String(x.user || '') === ich.name)))
     let tr = Array.isArray(d && d.tranchen) ? d.tranchen : null
     const euro = !!tr && tr.some(t => t && (t.gewicht_eur != null || (t.konten || []).some(k => k && k.gewicht_eur != null)))
+    // Delta-neutral (06.10.2026): Gewicht = |delta_eur_pkt| (€ je NQ-Punkt) statt € im Spiel. Fehlen die Felder (altes Backend),
+    // bleibt alles wie bisher (€ im Spiel bzw. $ TP).
+    const a0 = d && d.ausgleich
+    const delta = (!!tr && tr.some(t => t && (t.delta_eur_pkt != null || (t.konten || []).some(k => k && k.delta_eur_pkt != null))))
+      || (!!a0 && (a0.plan_delta_long != null || a0.offen_delta_long != null))
+    AP_PR_VON = delta ? AP_DELTA_VON : 120; AP_PR_BIS = delta ? AP_DELTA_BIS : 1050   // Zeitleiste je nach Planer-Stand
     if(!tr){
       const m = new Map()
       for(const g of ((d && d.geplant) || [])){
@@ -43016,14 +43135,37 @@
     }
     tr = tr.filter(mein).map((t, i) => {
       const konten = Array.isArray(t.konten) ? t.konten : []
-      const wert = euro ? (t.gewicht_eur != null ? Number(t.gewicht_eur) : konten.reduce((s, k) => s + (Number(k.gewicht_eur) || 0), 0))
-                        : konten.reduce((s, k) => s + (Number(k.tp) || 0), 0)
-      return { ...t, key: String(t.key || i), min: t.start_min != null ? Number(t.start_min) : apPrHm(t.start), konten, wert: wert || 0, long: t.richtung === 'buy' }
+      const wert = delta ? Math.abs(t.delta_eur_pkt != null ? Number(t.delta_eur_pkt) : konten.reduce((s, k) => s + (Number(k.delta_eur_pkt) || 0), 0))
+        : euro ? (t.gewicht_eur != null ? Number(t.gewicht_eur) : konten.reduce((s, k) => s + (Number(k.gewicht_eur) || 0), 0))
+        : konten.reduce((s, k) => s + (Number(k.tp) || 0), 0)
+      // TP/SL-Abstand in NQ-Punkten je Tranche: Feld der Tranche, sonst Spanne über die Konten
+      const pk = f => { if(t[f] != null) return [Number(t[f]), Number(t[f])]
+        const w = konten.map(k => Number(k[f])).filter(x => isFinite(x) && x > 0); return w.length ? [Math.min(...w), Math.max(...w)] : null }
+      return { ...t, key: String(t.key || i), min: t.start_min != null ? Number(t.start_min) : apPrHm(t.start), konten, wert: wert || 0, long: t.richtung === 'buy',
+        tpPkt: pk('tp_punkte'), slPkt: pk('sl_punkte') }
     }).sort((a, b) => (a.min ?? 9999) - (b.min ?? 9999))
     const aus = ((d && d.ausgelassen) || []).filter(mein)
     const ids = [...new Map(tr.map(t => [String(t.user_id || t.user), { key: String(t.user_id || ''), name: t.user || '?' }])).values()]
     // Ausgleich: Backend (alle IDs, laufende Trades eingerechnet) — sonst aus den sichtbaren Tranchen
-    const a = d && d.ausgleich, mitA = !!a && a.plan_long_eur != null
+    const a = d && d.ausgleich
+    if(delta && a && a.plan_delta_long != null){
+      const ab = x => Math.abs(Number(x) || 0)
+      const oL = ab(a.offen_delta_long), oS = ab(a.offen_delta_short)
+      const L = oL + ab(a.plan_delta_long), S = oS + ab(a.plan_delta_short)
+      let verlauf = Array.isArray(a.verlauf) && a.verlauf.length
+        ? a.verlauf.map(p => ({ min: Number(p.min), netto: Number(p.netto_delta ?? p.netto) || 0, band: p.band != null ? Number(p.band) : null })).filter(p => isFinite(p.min)).sort((x, y) => x.min - y.min) : null
+      const start0 = oL - oS
+      if(!verlauf){ let n = start0; verlauf = [{ min: AP_DELTA_VON, netto: n }]; for(const t of tr) if(t.min != null){ n += t.long ? t.wert : -t.wert; verlauf.push({ min: t.min, netto: n }) } }
+      for(const t of tr){
+        const vor = verlauf.filter(p => p.min < (t.min ?? 0)).pop()
+        t.vorher = t.netto_vorher_delta != null ? Number(t.netto_vorher_delta) : (vor ? vor.netto : start0)
+        t.nachher = t.netto_nachher_delta != null ? Number(t.netto_nachher_delta) : t.vorher + (t.long ? t.wert : -t.wert)
+      }
+      const band = apdBandWert(a.band, L + S, a.zielband_pct)
+      return { tr, aus, euro: false, delta: true, ids, alle, L, S, mitA: true, offenN: a.offen_anzahl ?? null, verlauf, start0, band,
+        maxAbs: a.netto_max_abs != null ? Math.abs(Number(a.netto_max_abs)) : Math.max(0, ...verlauf.map(p => Math.abs(p.netto))) }
+    }
+    const mitA = !delta && !!a && a.plan_long_eur != null   // Delta-Tranchen ohne Delta-Ausgleich: nicht mit €-Summen mischen
     const L = mitA ? (Number(a.offen_long_eur) || 0) + (Number(a.plan_long_eur) || 0) : tr.filter(t => t.long).reduce((s, t) => s + t.wert, 0)
     const S = mitA ? (Number(a.offen_short_eur) || 0) + (Number(a.plan_short_eur) || 0) : tr.filter(t => !t.long).reduce((s, t) => s + t.wert, 0)
     const start0 = mitA ? (Number(a.offen_long_eur) || 0) - (Number(a.offen_short_eur) || 0) : 0
@@ -43039,7 +43181,7 @@
       t.vorher = t.netto_vorher_eur != null ? Number(t.netto_vorher_eur) : (vor ? vor.netto : start0)
       t.nachher = t.netto_nachher_eur != null ? Number(t.netto_nachher_eur) : t.vorher + (t.long ? t.wert : -t.wert)
     }
-    return { tr, aus, euro: mitA || euro, ids, alle, L, S, mitA, offenN: mitA ? a.offen_anzahl : null, verlauf, start0 }
+    return { tr, aus, euro: !delta && (mitA || euro), delta, ids, alle, L, S, mitA, offenN: mitA ? a.offen_anzahl : null, verlauf, start0, band: null, maxAbs: null }
   }
   function apPrZeichnen(){
     const box = document.getElementById('ap-pr-inhalt'); if(!box) return
@@ -43056,47 +43198,66 @@
       box.innerHTML = kopf + `<div class="apx-leer">${escapeHtml(d.msg || 'Nichts zu planen.')}</div>` + apPrAusHtml(v)
       return
     }
-    const ein = v.euro ? '€ im Spiel' : '$ TP'
+    const ein = v.delta ? '€/Pkt' : v.euro ? '€ im Spiel' : '$ TP'
+    // Betragsformat je Modus: Delta (€/Pkt) · € im Spiel · $ TP
+    const fW = x => v.delta ? apdPkt(x) + ' €/Pkt' : apPrGeld(x, v.euro)
+    const fWVz = x => v.delta ? apdPktVz(x) + ' €/Pkt' : apPrGeldVz(x, v.euro)
     // 1) Long gegen Short
     const sum = v.L + v.S, anteilL = sum > 0 ? v.L / sum * 100 : 50
     const netto = v.L - v.S, neutral = sum > 0 ? Math.round((1 - Math.abs(netto) / sum) * 100) : 100
     const bal = `<div class="apx-karte">
-        <div class="apx-bal-zahlen"><span style="color:var(--good)">▲ Long ${apPrGeld(v.L, v.euro)}</span><span style="color:var(--danger)">Short ${apPrGeld(v.S, v.euro)} ▼</span></div>
+        <div class="apx-bal-zahlen"><span style="color:var(--good)">▲ Long ${fW(v.L)}</span><span style="color:var(--danger)">Short ${fW(v.S)} ▼</span></div>
         <div class="apx-bal-balken"><i style="width:${anteilL.toFixed(1)}%;background:var(--good)"></i><i style="flex:1;background:var(--danger)"></i></div>
-        <div class="apx-bal-mitte">Netto <b style="color:var(--ink)">${apPrGeldVz(netto, v.euro)}</b> · ≈ ${neutral} % neutral · ${v.mitA
+        ${v.delta ? `<div class="apx-chips"><span>Netto <b style="color:${v.band != null && Math.abs(netto) > v.band ? 'var(--danger)' : 'var(--ink)'}">${fWVz(netto)}</b></span>
+          ${v.band != null ? `<span>Band <b>±${apdPkt(v.band)}</b></span>` : ''}
+          ${v.maxAbs != null ? `<span title="größtes |Netto| über den Tag">max <b style="color:${v.band != null ? (v.maxAbs > v.band ? 'var(--danger)' : 'var(--good)') : 'var(--ink)'}">${apdPkt(v.maxAbs)}</b></span>` : ''}
+          <span>≈ <b>${neutral} %</b> neutral</span>${v.offenN != null ? `<span><b>${v.offenN}</b> offen</span>` : ''}${v.mitA ? '<span>alle IDs</span>' : ''}</div>` : `<div class="apx-bal-mitte">Netto <b style="color:var(--ink)">${apPrGeldVz(netto, v.euro)}</b> · ≈ ${neutral} % neutral · ${v.mitA
           ? `laufend eingerechnet: ${v.offenN != null ? v.offenN + ' offene Trade' + (Number(v.offenN) === 1 ? '' : 's') : 'offene Trades'} · über alle IDs`
-          : `nur diese Tranchen (${ein}), ohne laufende Trades`}</div>
+          : `nur diese Tranchen (${ein}), ohne laufende Trades`}</div>`}
       </div>`
     // 2) Zeitleiste: Fenster schattiert, je ID eine Spur, ▲/▼ je Tranche, darunter Netto-Kurve
     const fenster = (() => {
       const m = new Map()
-      for(const t of v.tr){ const f = t.fenster; if(f && f.von && f.bis) m.set(f.von + '-' + f.bis, f) }
-      return m.size ? [...m.values()] : AP_PR_FENSTER
+      const ausAntwort = (d.ausgleich && Array.isArray(d.ausgleich.fenster) && d.ausgleich.fenster) || (Array.isArray(d.fenster) && d.fenster) || []
+      for(const f of ausAntwort) if(f && f.von && f.bis) m.set(f.von + '-' + f.bis, f)
+      if(!m.size) for(const t of v.tr){ const f = t.fenster; if(f && f.von && f.bis) m.set(f.von + '-' + f.bis, f) }
+      return m.size ? [...m.values()] : (v.delta ? AP_DELTA_FENSTER : AP_PR_FENSTER)
     })().map(f => ({ ...f, a: apPrHm(f.von), b: apPrHm(f.bis) })).filter(f => f.a != null && f.b != null).sort((x, y) => x.a - y.a)
     const fensterHtml = fenster.map((f, i) => `<div class="apx-fenster${i % 2 ? '' : ' dunkel'}${apPrX(f.b) - apPrX(f.a) < 10 ? ' schmal' : ''}" style="left:${apPrX(f.a)}%;width:${apPrX(f.b) - apPrX(f.a)}%"
         title="${escapeHtml(f.von)}–${escapeHtml(f.bis)}${f.anteil != null ? ' · ' + f.anteil + ' %' : ''}${f.belegt != null ? ' · ' + f.belegt + ' belegt' : ''}">${f.anteil != null ? `<i>${Math.round(f.anteil)} %</i>` : ''}</div>`).join('')
-    const achse = [240, 360, 480, 600, 720, 840, 930, 1050]   // 16:30 ohne Zahl (klebt an 17:30), die Fenstergrenze zeigt die Linie
-      .map(m => `<span class="${[360, 600, 930].includes(m) ? 'nb' : ''}${m === AP_PR_BIS ? ' rechts' : ''}" style="left:${apPrX(m)}%">${apPrUhr(m)}</span>`).join('')
+    const achse = (v.delta ? [0, 180, 360, 540, 720, 870, 1050, 1170] : [240, 360, 480, 600, 720, 840, 930, 1050])   // alt: 16:30 ohne Zahl (klebt an 17:30)
+      .map(m => `<span class="${(v.delta ? [180, 540, 1050] : [360, 600, 930]).includes(m) ? 'nb' : ''}${m === AP_PR_BIS ? ' rechts' : ''}" style="left:${apPrX(m)}%${m === AP_PR_VON ? ';transform:none' : ''}">${apPrUhr(m)}</span>`).join('')
     const spuren = v.ids.map(i => {
       const marks = v.tr.filter(t => String(t.user_id || t.user) === (i.key || i.name) && t.min != null).map(t =>
         `<button type="button" class="apx-mark ${t.long ? 'long' : 'short'}" style="left:${apPrX(t.min)}%" data-apx-ziel="${escapeHtml(t.key)}"
-          title="${escapeHtml(apPrUhr(t.min) + ' · ' + (t.firma || '') + ' · ' + t.konten.length + ' Konten · ' + (t.long ? 'Long' : 'Short') + ' · ' + apPrGeld(t.wert, v.euro))}">${t.long ? '▲' : '▼'}${escapeHtml(apPrKurz(t.firma))}</button>`).join('')
+          title="${escapeHtml(apPrUhr(t.min) + ' · ' + (t.firma || '') + ' · ' + t.konten.length + ' Konten · ' + (t.long ? 'Long' : 'Short') + ' · ' + fW(t.wert))}">${t.long ? '▲' : '▼'}${escapeHtml(apPrKurz(t.firma))}</button>`).join('')
       return `<div class="apx-spur">${v.ids.length > 1 ? `<span class="apx-id" style="--c:${idFarbe(i.key)}">${escapeHtml(i.name)}</span>` : ''}${marks}</div>`
     }).join('')
     const kurve = (() => {
       const pts = [...v.verlauf.filter(p => p.min <= AP_PR_BIS)]
       if(!pts.length || pts[0].min > AP_PR_VON) pts.unshift({ min: AP_PR_VON, netto: v.start0 })
       pts.push({ min: AP_PR_BIS, netto: pts[pts.length - 1].netto })
-      const max = Math.max(1, ...pts.map(p => Math.abs(p.netto)))
+      // Delta-Modus: Band ±band schattiert (je Punkt, falls das Backend es mitschickt), Skala so, dass das Band sichtbar bleibt
+      const bandMax = v.delta ? Math.max(v.band || 0, ...pts.map(p => p.band || 0)) : 0
+      const max = Math.max(1, bandMax * 1.15, ...pts.map(p => Math.abs(p.netto)))
       const y = n => (28 - n / max * 24).toFixed(1)
       let pfad = '', vorY = null
       for(const p of pts){ const x = (apPrX(p.min) * 10).toFixed(1); pfad += vorY == null ? `M${x},${y(p.netto)}` : `H${x}V${y(p.netto)}`; vorY = y(p.netto) }
+      let bandSvg = ''
+      if(v.delta && bandMax > 0){
+        const bp = pts.map(p => ({ x: (apPrX(p.min) * 10).toFixed(1), b: p.band != null ? p.band : (v.band || 0) }))
+        let oben = '', unten = ''
+        bp.forEach((p, i) => { oben += i ? `H${p.x}V${y(p.b)}` : `M${p.x},${y(p.b)}` })
+        for(let i = bp.length - 1; i >= 0; i--) unten += `V${y(-bp[i].b)}H${bp[i].x}`
+        bandSvg = `<path d="${oben}${unten}Z" fill="var(--good)" fill-opacity=".13" stroke="none"/>`
+      }
       const ende = pts[pts.length - 1].netto
-      return `<svg class="apx-kurve" viewBox="0 0 1000 56" preserveAspectRatio="none" aria-hidden="true">
+      return `<svg class="apx-kurve" viewBox="0 0 1000 56" preserveAspectRatio="none" aria-hidden="true"${v.delta ? ' style="height:68px"' : ''}>
+          ${bandSvg}
           <line x1="0" y1="28" x2="1000" y2="28" stroke="var(--sub-2)" stroke-width="1" stroke-dasharray="4 4" vector-effect="non-scaling-stroke"/>
           <path d="${pfad}" fill="none" stroke="var(--violet)" stroke-width="2" vector-effect="non-scaling-stroke"/>
         </svg>
-        <div class="apx-kurve-txt"><span title="Long − Short, ${v.euro ? '€' : '$ TP'}">Netto über den Tag</span><span>±${apPrGeld(max, v.euro)} · Ende <b style="color:${ende >= 0 ? 'var(--good)' : 'var(--danger)'}">${apPrGeldVz(ende, v.euro)}</b></span></div>`
+        <div class="apx-kurve-txt"><span title="Long − Short, ${ein}">Netto ${v.delta ? 'Δ €/Pkt' : 'über den Tag'}</span><span>${v.delta && v.band != null ? `Band ±${apdPkt(v.band)} · ` : ''}±${v.delta ? apdPkt(max) : apPrGeld(max, v.euro)} · Ende <b style="color:${ende >= 0 ? 'var(--good)' : 'var(--danger)'}">${fWVz(ende)}</b></span></div>`
     })()
     const zeit = `<div class="apx-karte">
         <div class="apx-achse">${achse}</div>
@@ -43111,7 +43272,7 @@
       if(!warum.length && t.fenster && t.fenster.von) warum.push(`Fenster ${escapeHtml(t.fenster.von)}–${escapeHtml(t.fenster.bis)}${t.fenster.anteil != null ? ` (${Math.round(t.fenster.anteil)} %${t.fenster.belegt != null ? ' · ' + escapeHtml(String(t.fenster.belegt)) + ' belegt' : ''})` : ''}`)
       if(!(Array.isArray(t.warum) && t.warum.length)){
         if(t.fest_durch) warum.push(`Richtung fest: ${escapeHtml(String(t.fest_durch))}`)
-        else if(v.mitA || v.tr.length > 1) warum.push(`Ausgleich ${apPrGeldVz(t.vorher, v.euro)} → ${apPrGeldVz(t.nachher, v.euro)}`)
+        else if(v.mitA || v.tr.length > 1) warum.push(`Ausgleich ${fWVz(t.vorher)} → ${fWVz(t.nachher)}`)
         const pause = t.pause_firma_ist_min ?? t.pause_firma_min, abst = t.abstand_id_ist_min ?? t.abstand_id_min
         if(pause != null) warum.push(`${Math.round(pause)} min zur ${escapeHtml(t.firma || 'Firma')}-Tranche anderer ID`)
         if(abst != null) warum.push(`${Math.round(abst)} min zur nächsten eigenen Tranche`)
@@ -43125,7 +43286,9 @@
           `TP ${apPrGeld(k.tp, false)}`, `SL ${k.sl != null ? apPrGeld(k.sl, false) : '—'}`,
           k.menge != null ? `Größe ${escapeHtml(String(k.menge).replace('.', ','))}` : '', k.wert_eur != null ? `Kontowert ${apPrGeld(k.wert_eur, true)}` : '',
           k.chance != null ? `Chance ${Math.round(Number(k.chance) <= 1 ? Number(k.chance) * 100 : Number(k.chance))} %` : '', gv,
-          k.gewicht_eur != null ? `im Spiel ${apPrGeld(k.gewicht_eur, true)}` : (k.balance != null ? `Balance ${apPrGeld(k.balance, false)}` : '')].filter(Boolean)
+          k.delta_eur_pkt != null ? `Δ <b>${apdPkt(Math.abs(Number(k.delta_eur_pkt)))}</b> €/Pkt` : '',
+          k.tp_punkte != null || k.sl_punkte != null ? `<span class="apx-pkt"><span class="tp">TP ${k.tp_punkte != null ? Math.round(k.tp_punkte) : '—'}</span> · <span class="sl">SL ${k.sl_punkte != null ? Math.round(k.sl_punkte) : '—'}</span> Pkt</span>` : '',
+          k.gewicht_eur != null && !v.delta ? `im Spiel ${apPrGeld(k.gewicht_eur, true)}` : (k.balance != null ? `Balance ${apPrGeld(k.balance, false)}` : '')].filter(Boolean)
         return `<div class="apx-konto"><b class="mono">${escapeHtml(name)}</b>${teile.map(x => `<span>${x}</span>`).join('')}</div>`
       }).join('')
       return `<details class="apx-tr" data-key="${escapeHtml(t.key)}">
@@ -43133,7 +43296,8 @@
             ${v.ids.length > 1 || v.alle ? `<span class="apx-id" style="--c:${idFarbe(String(t.user_id || ''))}">${escapeHtml(t.user || '?')}</span>` : ''}
             <b>${escapeHtml(t.firma || '?')}</b><span class="apx-sub">${t.konten.length} ${t.konten.length === 1 ? 'Konto' : 'Konten'}</span>
             <span class="apx-ri ${t.long ? 'long' : 'short'}">${t.long ? '▲ Long' : '▼ Short'}</span>
-            <span><span class="mono" style="font-weight:600">${apPrGeld(t.wert, v.euro)}</span> <span class="apx-sub">${v.euro ? 'im Spiel' : 'TP'}</span></span></summary>
+            <span><span class="mono" style="font-weight:600">${v.delta ? apdPkt(t.wert) : apPrGeld(t.wert, v.euro)}</span> <span class="apx-sub">${v.delta ? '€/Pkt' : v.euro ? 'im Spiel' : 'TP'}</span></span>
+            ${t.tpPkt || t.slPkt ? `<span class="apx-pkt"><span class="tp">TP ${apPrSpanne(t.tpPkt)}</span> · <span class="sl">SL ${apPrSpanne(t.slPkt)}</span> Pkt</span>` : ''}</summary>
           ${warum.length ? `<div class="apx-warum">${warum.join(Array.isArray(t.warum) && t.warum.length ? '<br>' : ' · ')}</div>` : ''}
           ${konten}
         </details>`
@@ -43142,6 +43306,7 @@
       .filter(Boolean).map(x => `<div class="apx-karte" style="border-color:var(--warn);font-size:12.5px">⚠ ${escapeHtml(x)}</div>`).join('')
     box.innerHTML = kopf + hinweise + bal + zeit + `<div class="apx-h">Tranchen</div>` + liste + apPrAusHtml(v)
   }
+  const apPrSpanne = p => !p ? '—' : Math.round(p[0]) === Math.round(p[1]) ? String(Math.round(p[0])) : Math.round(p[0]) + '–' + Math.round(p[1])
   // 5) Nicht geplant: gezählt nach Grund, aufklappbar je Konto
   function apPrAusHtml(v){
     if(!v.aus.length) return ''
@@ -43174,6 +43339,345 @@
     const m = e.target.closest('[data-apx-ziel]'); if(!m) return
     const det = [...document.querySelectorAll('#ap-pr-inhalt details.apx-tr')].find(x => x.dataset.key === m.dataset.apxZiel)
     if(det){ det.open = true; det.scrollIntoView({ block: 'nearest', behavior: 'smooth' }) }
+  })
+  /* ── DELTA-MONITOR (06.10.2026, Finn: „über alle IDs den ganzen Tag möglichst delta-neutral im Markt, Long ≈ Short"; Vertrag
+   * .claude/master/autoplan-delta-vertrag.md §3–4) ── Eigene Karte #apDelta über „Geplant": Kacheln (Netto jetzt nach Band, Long/Short,
+   * Brutto, Bot), Netto-Delta über den Tag (gelaufen durchgezogen, geplant gestrichelt, Band schattiert, Jetzt-Linie), Waage Long gegen
+   * Short je Firma in den Firmentönen der Vorrat-Seite, Listen Offen / Geplant / Umplanungen heute. Eingriffe nur Admin: ⇅ Richtung
+   * tauschen und 🕑 Start verschieben (POST /admin/auto-plan/plan, Regelverstoß kommt als 400 mit Klartext und steht dann wörtlich
+   * unter der Liste), „Jetzt ausgleichen" erst trocken mit Vorschau, Schalter Bot + Auto-Start. Laden: GET /admin/auto-plan/delta alle
+   * 60 s, nur bei sichtbarer Geplant-Liste und sichtbarem Tab — keine Realtime-Abos (Supabase-Kontingent, Ausfall 30.09.2026).
+   * Antwortet die Route nicht (altes Backend, 404), bleibt die Karte unsichtbar; neuer Versuch nach 10 min. */
+  const _apd = { d: null, geladen: 0, laeuft: false, weg: 0, fehler: '', edit: null, busy: new Set(), meldung: null, vorschau: null, vLaeuft: false }
+  const APD_TAKT = 60000
+  async function apdApi(method, pfad, body){
+    const { data: { session } } = await supabase.auth.getSession()
+    const tok = session?.access_token; if(!tok) throw new Error('nicht angemeldet')
+    const r = await fetch(`${WATCHER_HOME}/admin/auto-plan${pfad}`, { method, headers: { 'sb-token': tok, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+    const d = await r.json().catch(() => ({}))
+    if(!r.ok || d.ok === false){ const f = new Error(d.msg || d.error || d.fehler || ('HTTP ' + r.status)); f.status = r.status; f.daten = d; throw f }
+    return d
+  }
+  async function apdLaden(sofort){
+    if(!currentUserId || _apd.laeuft) return
+    if(!sofort && _apd.weg && Date.now() - _apd.weg < 600000) return
+    _apd.laeuft = true
+    try{
+      const d = await apdApi('GET', '/delta')
+      _apd.d = d; _apd.fehler = ''; _apd.weg = 0
+    }catch(e){
+      if(e && (e.status === 404 || e.status === 405)){ _apd.d = null; _apd.weg = Date.now() }   // Route fehlt: alte Anzeige, Karte aus
+      else _apd.fehler = (e && e.message) || String(e)                                         // alter Stand bleibt sichtbar, ⚠ im Kopf
+    }finally{ _apd.laeuft = false; _apd.geladen = Date.now(); apdZeichnen() }
+  }
+  function apdTick(){
+    if(!currentUserId || document.hidden) return
+    const el = document.getElementById('apDelta'), pane = el && el.parentElement
+    if(!pane || !pane.offsetParent) return                  // Geplant-Liste nicht sichtbar → nichts laden
+    if(_apd.edit) return                                    // Startzeit wird gerade eingegeben — nicht dazwischen neu zeichnen
+    if(Date.now() - _apd.geladen >= APD_TAKT) apdLaden(false)
+  }
+  setInterval(apdTick, 15000)   // prüft alle 15 s, lädt höchstens alle 60 s — so ist der Stand beim Wechsel auf „Geplant" höchstens 15 s alt
+  const apdAdmin = () => { const d = _apd.d || {}; return d.admin != null ? !!d.admin : _ap.admin === true }
+  /* user_id zum Anzeigenamen (die Delta-Antwort trägt laut Vertrag nur „user"): aus den Läufen, die der Planer schon geliefert hat */
+  function apdUid(x){
+    if(x && x.user_id) return String(x.user_id)
+    const n = String((x && x.user) || ''); if(!n) return ''
+    const quellen = [(_ap.letzter && _ap.letzter.geplant) || [], (_ap.letzter && _ap.letzter.ausgelassen) || [], (_apPr.d && _apPr.d.tranchen) || [], (_apPr.d && _apPr.d.geplant) || []]
+    for(const q of quellen) for(const y of q) if(y && y.user_id && String(y.user || '') === n) return String(y.user_id)
+    if(_ap.ich && _ap.ich.name === n) return _ap.ich.id
+    return ''
+  }
+  function apdFirmaTon(f){
+    try{ if(typeof vrFirmaFarbe === 'function') return vrFirmaFarbe(f) }catch(_){}
+    let h = 0; for(const ch of String(f || '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0
+    return `var(--vr-f${h % 7})`
+  }
+  /* Vorzeichen: delta_eur_pkt kommt mit Vorzeichen (+ long, − short); fehlt es, entscheidet die Richtung */
+  const apdLong = x => x && (x.richtung === 'buy' || x.richtung === 'long' || (x.richtung == null && Number(x.delta_eur_pkt) > 0))
+  const apdBetrag = x => Math.abs(Number(x && x.delta_eur_pkt) || 0)
+  const apdUhr = s => { const m = apPrHm(s); return m == null ? '—' : apPrUhr(m) }
+  function apdDaten(){
+    const d = _apd.d || {}
+    const offen = (Array.isArray(d.offen) ? d.offen : []).map(x => ({ ...x, long: apdLong(x), wert: apdBetrag(x) }))
+    const geplant = (Array.isArray(d.geplant) ? d.geplant : []).map(x => ({ ...x, long: apdLong(x), wert: apdBetrag(x), min: apPrHm(x.start) }))
+      .sort((a, b) => (a.min ?? 9999) - (b.min ?? 9999))
+    const umpl = (Array.isArray(d.umplanungen) ? d.umplanungen : []).slice().sort((a, b) => String(b.um || '').localeCompare(String(a.um || '')))
+    const L = offen.filter(x => x.long).reduce((s, x) => s + x.wert, 0), S = offen.filter(x => !x.long).reduce((s, x) => s + x.wert, 0)
+    const netto = d.netto_jetzt != null ? Number(d.netto_jetzt) : L - S
+    const brutto = d.brutto_jetzt != null ? Math.abs(Number(d.brutto_jetzt)) : L + S
+    const band = apdBandWert(d.band, brutto, d.zielband_pct ?? (d.bot && d.bot.zielband_pct))
+    const jetzt = apPrHm(d.um || new Date().toISOString())
+    const verlauf = (Array.isArray(d.verlauf) ? d.verlauf : []).map(p => ({ min: Number(p.min), netto: Number(p.netto_delta ?? p.netto) || 0, band: p.band != null ? Math.abs(Number(p.band)) : null }))
+      .filter(p => isFinite(p.min)).sort((a, b) => a.min - b.min)
+    const bot = d.bot || {}
+    const autoStart = bot.auto_start ?? (d.einstellung && d.einstellung.auto_start) ?? (d.ausgleich && d.ausgleich.auto_start) ?? null
+    return { d, offen, geplant, umpl, L, S, netto, brutto, band, jetzt, verlauf, bot, autoStart, imBand: band == null ? null : Math.abs(netto) <= band + 1e-9 }
+  }
+  function apdZeichnen(){
+    const el = document.getElementById('apDelta'); if(!el) return
+    if(!_apd.d){ el.style.display = 'none'; el.innerHTML = ''; return }
+    const v = apdDaten(), admin = apdAdmin()
+    el.style.display = ''
+    const um = v.d.um ? apdUhr(v.d.um) : ''
+    const kopf = `<div class="apd-kopf"><b>⚖︎ Delta-Monitor</b><span class="apd-um">${um ? 'Stand ' + um : ''}${_apd.laeuft ? ' · lädt …' : ''}</span>
+        ${_apd.fehler ? `<span class="apd-rot" style="font-size:11.5px" title="${escapeHtml(_apd.fehler)}">⚠ ${escapeHtml(_apd.fehler.slice(0, 60))}</span>` : ''}
+        <span style="flex:1"></span>
+        <button type="button" class="btn btn-ghost tc2-btn" data-apd="neu" title="Neu laden">↻</button>
+        ${admin ? `<button type="button" class="btn btn-ghost tc2-btn" data-apd="ausgleichen" ${_apd.vLaeuft ? 'disabled' : ''} title="Bot einmal laufen lassen — erst Vorschau, nichts geändert">${_apd.vLaeuft ? 'rechnet …' : 'Jetzt ausgleichen'}</button>` : ''}
+      </div>`
+    el.innerHTML = kopf + apdVorschauHtml(v) + apdKachelnHtml(v, admin) + apdChartHtml(v) + apdWaageHtml(v)
+      + `<div class="apd-listen">${apdOffenHtml(v)}${apdGeplantHtml(v, admin)}${apdUmplHtml(v)}</div>`
+  }
+  function apdKachelnHtml(v, admin){
+    const farbe = v.imBand == null ? '' : v.imBand ? 'apd-gut' : 'apd-rot'
+    // Mini-Messlatte: Netto als Strich auf −max … +max, Band grün hinterlegt
+    const skala = Math.max(1, (v.band || 0) * 1.6, Math.abs(v.netto) * 1.15)
+    const pos = n => Math.max(0, Math.min(100, 50 + n / skala * 50))
+    const mess = `<div class="apd-mess">${v.band != null ? `<span class="band" style="left:${pos(-v.band).toFixed(1)}%;right:${(100 - pos(v.band)).toFixed(1)}%"></span>` : ''}<span class="null"></span><span class="pkt" style="left:${pos(v.netto).toFixed(1)}%"></span></div>`
+    const k1 = `<div class="kpi"><div class="kpi-label">Netto jetzt</div><div class="kpi-value ${farbe}">${apdPktVz(v.netto)}<small>€/Pkt</small></div>${mess}
+        <span class="kpi-delta">${v.band != null ? `Band ±${apdPkt(v.band)}${v.imBand ? '' : ` · <b class="apd-rot" title="über dem Band">+${apdPkt(Math.abs(v.netto) - v.band)}</b>`}` : 'Band —'}</span></div>`
+    const sum = v.L + v.S, anteilL = sum > 0 ? v.L / sum * 100 : 50
+    const k2 = `<div class="kpi"><div class="kpi-label">Long · Short</div><div class="kpi-value"><span class="apd-gut">▲${apdPkt(v.L)}</span> <span class="apd-rot">▼${apdPkt(v.S)}</span></div>
+        <div class="apd-ls"><i style="width:${anteilL.toFixed(1)}%;background:var(--good)"></i><i style="flex:1;background:var(--danger)"></i></div>
+        <span class="kpi-delta">€/Pkt · ${Math.round(anteilL)} : ${Math.round(100 - anteilL)}</span></div>`
+    const nOffen = v.offen.length, nGepl = v.geplant.length
+    const planL = v.geplant.filter(x => x.long).reduce((s, x) => s + x.wert, 0), planS = v.geplant.filter(x => !x.long).reduce((s, x) => s + x.wert, 0)
+    const k3 = `<div class="kpi"><div class="kpi-label">Brutto</div><div class="kpi-value">${apdPkt(v.brutto)}<small>€/Pkt</small></div>
+        <div class="apd-ls">${sum + planL + planS > 0 ? `<i style="width:${(v.brutto / Math.max(v.brutto + planL + planS, 1e-9) * 100).toFixed(1)}%;background:var(--violet)"></i><i style="flex:1;background:color-mix(in srgb,var(--violet) 28%,var(--surface))"></i>` : ''}</div>
+        <span class="kpi-delta">${nOffen} offen · ${nGepl} geplant <span class="apd-grau">+${apdPkt(planL + planS)}</span></span></div>`
+    const b = v.bot, an = !!b.aktiv
+    const zeiten = [b.letzter_lauf ? `↺ ${apdUhr(b.letzter_lauf)}` : '', b.naechster_lauf && an ? `→ ${apdUhr(b.naechster_lauf)}` : '', b.takt_min ? `${b.takt_min} min` : ''].filter(Boolean).join(' · ')
+    const sperre = admin ? '' : ' disabled'
+    const k4 = `<div class="kpi"><div class="kpi-label">Bot</div><div class="kpi-value ${an ? 'apd-gut' : 'apd-grau'}">${an ? 'an' : 'aus'}</div>
+        <span class="kpi-delta" title="letzter Lauf · nächster Lauf · Takt">${zeiten || '—'}</span>
+        <div class="apd-schalter">
+          <label title="${admin ? 'Ausgleichs-Bot an/aus' : 'nur Admin'}"><span class="switch"><input type="checkbox" data-apd-schalter="aktiv"${an ? ' checked' : ''}${sperre || (_apd.busy.has('aktiv') ? ' disabled' : '')}><span class="switch-slider"></span></span>Bot</label>
+          <label title="${admin ? 'Auto-Start: Pläne starten ohne Bestätigung' : 'nur Admin'}${v.autoStart == null ? ' · Stand unbekannt' : ''}"><span class="switch"><input type="checkbox" data-apd-schalter="auto_start"${v.autoStart ? ' checked' : ''}${sperre || (_apd.busy.has('auto_start') ? ' disabled' : '')}><span class="switch-slider"></span></span>Auto-Start</label>
+        </div>
+        ${_apd.meldung && _apd.meldung.ort === 'bot' ? `<span class="kpi-delta apd-rot" style="white-space:normal" title="${escapeHtml(_apd.meldung.text)}">⚠ ${escapeHtml(_apd.meldung.text)}</span>` : ''}</div>`
+    return `<div class="kpis">${k1}${k2}${k3}${k4}</div>`
+  }
+  /* Netto-Delta über den Tag: x 00:00–19:30 dt, gelaufen durchgezogen, ab jetzt gestrichelt, Band ±band grün hinterlegt */
+  function apdChartHtml(v){
+    const VON = AP_DELTA_VON, BIS = AP_DELTA_BIS, W = 1000, H = 110, M = H / 2
+    const X = m => Math.max(0, Math.min(W, (m - VON) / (BIS - VON) * W))
+    let pts = v.verlauf.filter(p => p.min >= VON && p.min <= BIS)
+    if(!pts.length) pts = [{ min: VON, netto: 0, band: null }, { min: v.jetzt ?? VON, netto: v.netto, band: null }]
+    if(pts[0].min > VON) pts.unshift({ min: VON, netto: pts[0].netto, band: pts[0].band })
+    if(pts[pts.length - 1].min < BIS) pts.push({ min: BIS, netto: pts[pts.length - 1].netto, band: pts[pts.length - 1].band })
+    const bandMax = Math.max(v.band || 0, ...pts.map(p => p.band || 0))
+    const max = Math.max(1, bandMax * 1.25, ...pts.map(p => Math.abs(p.netto)) ) * 1.08
+    const Y = n => (M - n / max * (M - 6)).toFixed(1)
+    const jetzt = v.jetzt != null ? Math.max(VON, Math.min(BIS, v.jetzt)) : null
+    // Treppen-Pfad (Netto springt mit jedem Start/Ende), getrennt an der Jetzt-Linie
+    const treppe = arr => { let p = ''; arr.forEach((q, i) => { p += i ? `H${X(q.min).toFixed(1)}V${Y(q.netto)}` : `M${X(q.min).toFixed(1)},${Y(q.netto)}` }); return p }
+    let vor = pts, nach = []
+    if(jetzt != null){
+      vor = pts.filter(p => p.min <= jetzt); nach = pts.filter(p => p.min > jetzt)
+      const letzter = vor.length ? vor[vor.length - 1] : pts[0]
+      vor = [...vor, { min: jetzt, netto: letzter.netto }]
+      nach = [{ min: jetzt, netto: letzter.netto }, ...nach]
+    }
+    let bandSvg = ''
+    if(bandMax > 0){
+      const bp = pts.map(p => ({ x: X(p.min).toFixed(1), b: p.band != null ? p.band : (v.band || 0) }))
+      let oben = '', unten = ''
+      bp.forEach((p, i) => { oben += i ? `H${p.x}V${Y(p.b)}` : `M${p.x},${Y(p.b)}` })
+      for(let i = bp.length - 1; i >= 0; i--) unten += `V${Y(-bp[i].b)}H${bp[i].x}`
+      bandSvg = `<path d="${oben}${unten}Z" fill="var(--good)" fill-opacity=".12" stroke="none"/>`
+    }
+    const fenster = ((Array.isArray(v.d.fenster) && v.d.fenster.length ? v.d.fenster : null) || AP_DELTA_FENSTER)
+      .map(f => ({ ...f, a: apPrHm(f.von), b: apPrHm(f.bis) })).filter(f => f.a != null && f.b != null)
+    const grenzen = fenster.slice(1).map(f => `<line x1="${X(f.a).toFixed(1)}" y1="0" x2="${X(f.a).toFixed(1)}" y2="${H}" stroke="var(--border)" stroke-width="1" stroke-dasharray="3 3" vector-effect="non-scaling-stroke"/>`).join('')
+    const fenTxt = fenster.map(f => f.anteil != null ? `<span class="apd-fen" style="left:calc(${(X(f.b) / 10).toFixed(2)}% - 4px);transform:translateX(-100%)" title="${escapeHtml(f.von)}–${escapeHtml(f.bis)}">${Math.round(f.anteil)} %</span>` : '').join('')
+    const svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+        ${bandSvg}${grenzen}
+        <line x1="0" y1="${M}" x2="${W}" y2="${M}" stroke="var(--sub-2)" stroke-width="1" stroke-dasharray="4 4" vector-effect="non-scaling-stroke"/>
+        ${vor.length > 1 ? `<path d="${treppe(vor)}" fill="none" stroke="var(--violet)" stroke-width="2" vector-effect="non-scaling-stroke"/>` : ''}
+        ${nach.length > 1 ? `<path d="${treppe(nach)}" fill="none" stroke="var(--violet)" stroke-width="2" stroke-dasharray="5 4" stroke-opacity=".8" vector-effect="non-scaling-stroke"/>` : ''}
+        ${jetzt != null ? `<line x1="${X(jetzt).toFixed(1)}" y1="0" x2="${X(jetzt).toFixed(1)}" y2="${H}" stroke="var(--ink)" stroke-width="1.5" stroke-opacity=".55" vector-effect="non-scaling-stroke"/>` : ''}
+      </svg>`
+    const achse = [0, 180, 360, 540, 720, 870, 1050, 1170].map(m => `<span class="${[180, 540, 1050].includes(m) ? 'nb' : ''}${m === VON ? ' links' : m === BIS ? ' rechts' : ''}" style="left:${(X(m) / 10).toFixed(2)}%">${apPrUhr(m)}</span>`).join('')
+    const skala = `<span class="apd-skala" style="top:0">±${apdPkt(max)} €/Pkt</span>`
+    return `<div class="apd-chart" title="Netto-Delta (Long − Short) in €/Pkt · grün = Band">${fenTxt}${skala}
+        ${jetzt != null ? `<span class="apd-jetzt" style="left:${(X(jetzt) / 10).toFixed(2)}%;top:auto;bottom:18px">jetzt</span>` : ''}
+        ${svg}<div class="apd-achse">${achse}</div></div>`
+  }
+  /* Waage: links Long, rechts Short, je Firma gestapelt im Firmenton; offen voll, geplant hell */
+  function apdWaageHtml(v){
+    const firmen = new Map()
+    const add = (x, art) => { const k = String(x.firma || '?'); if(!firmen.has(k)) firmen.set(k, { firma: k, L: 0, S: 0, pL: 0, pS: 0 })
+      const f = firmen.get(k); if(art === 'o'){ x.long ? f.L += x.wert : f.S += x.wert } else { x.long ? f.pL += x.wert : f.pS += x.wert } }
+    v.offen.forEach(x => add(x, 'o')); v.geplant.forEach(x => add(x, 'p'))
+    const liste = [...firmen.values()].sort((a, b) => (b.L + b.S + b.pL + b.pS) - (a.L + a.S + a.pL + a.pS))
+    if(!liste.length) return ''
+    const L = liste.reduce((s, f) => s + f.L, 0), S = liste.reduce((s, f) => s + f.S, 0)
+    const pL = liste.reduce((s, f) => s + f.pL, 0), pS = liste.reduce((s, f) => s + f.pS, 0)
+    const max = Math.max(L + pL, S + pS, 1e-9)
+    const seg = (w, f, hell, wo) => w > 0 ? `<i style="width:${(w / max * 100).toFixed(2)}%;background:${hell ? `color-mix(in srgb, ${apdFirmaTon(f.firma)} 32%, var(--surface))` : apdFirmaTon(f.firma)}"
+        title="${escapeHtml(f.firma)} · ${wo} ${hell ? 'geplant' : 'offen'} ${apdPkt(w)} €/Pkt"></i>` : ''
+    // Long-Hälfte rechtsbündig zur Mitte: geplant (hell) außen, offen (voll) innen; Short-Hälfte gespiegelt
+    const links = [...liste].reverse().map(f => seg(f.pL, f, true, 'Long')).join('') + [...liste].reverse().map(f => seg(f.L, f, false, 'Long')).join('')
+    const rechts = liste.map(f => seg(f.S, f, false, 'Short')).join('') + liste.map(f => seg(f.pS, f, true, 'Short')).join('')
+    return `<div class="apd-waage">
+        <div class="apd-waage-zahlen"><span class="apd-gut">▲ ${apdPkt(L)}${pL ? ` <span class="apd-grau">+${apdPkt(pL)}</span>` : ''}</span><span class="apd-rot">${pS ? `<span class="apd-grau">+${apdPkt(pS)}</span> ` : ''}${apdPkt(S)} ▼</span></div>
+        <div class="apd-waage-balken"><div>${links}</div><div>${rechts}</div></div>
+        <div class="apd-legende">${liste.map(f => `<span><i style="background:${apdFirmaTon(f.firma)}"></i>${escapeHtml(f.firma)}</span>`).join('')}<span class="apd-grau">voll offen · hell geplant</span></div>
+      </div>`
+  }
+  const apdIdPunkt = x => { const uid = apdUid(x); return `<i class="id" style="background:${idFarbe(uid || String(x.user || ''))}" title="${escapeHtml(x.user || '')}"></i>` }
+  const apdFirmaZelle = x => `<span class="firma"><i class="apd-f" style="background:${apdFirmaTon(x.firma)}"></i>${escapeHtml(x.firma || '?')}${apdIdPunkt(x)}</span>`
+  const apdRi = long => `<span class="ri ${long ? 'long' : 'short'}">${long ? '▲' : '▼'}</span>`
+  function apdOffenHtml(v){
+    const zeilen = v.offen.slice().sort((a, b) => b.wert - a.wert).map(x => {
+      const tp = x.tp_punkte_rest != null ? Math.max(0, Number(x.tp_punkte_rest)) : null, sl = x.sl_punkte_rest != null ? Math.max(0, Number(x.sl_punkte_rest)) : null
+      const ges = (tp || 0) + (sl || 0)
+      const bar = tp != null || sl != null ? `<span class="apd-tpsl" title="Punkte bis SL · bis TP (Strich = Kurs jetzt)">
+          <span class="zahlen"><span class="apd-rot">SL ${sl != null ? Math.round(sl) : '—'}</span><span class="apd-gut">TP ${tp != null ? Math.round(tp) : '—'}</span></span>
+          <span class="bar">${ges > 0 ? `<i style="width:${((sl || 0) / ges * 100).toFixed(1)}%;background:color-mix(in srgb,var(--danger) 55%,var(--surface))"></i><i style="flex:1;background:color-mix(in srgb,var(--good) 60%,var(--surface))"></i>` : ''}</span></span>` : '<span class="apd-tpsl"></span>'
+      return `<div class="apd-z">${apdFirmaZelle(x)}${apdRi(x.long)}<span class="dl">${apdPkt(x.wert)}</span>${bar}</div>`
+    }).join('')
+    return `<div class="apd-liste"><div class="apd-h">Offen <b>${v.offen.length}</b><span style="flex:1"></span>€/Pkt</div>${zeilen || '<div class="apd-leer">—</div>'}</div>`
+  }
+  function apdGeplantHtml(v, admin){
+    const zeilen = v.geplant.map(x => {
+      const id = String(x.plan_id || ''), busy = _apd.busy.has(id), ed = _apd.edit && _apd.edit.id === id
+      const fest = !!x.fest_durch
+      const knoepfe = !admin ? '' : ed
+        ? `<input type="time" class="input mono" data-apd-zeit="${escapeHtml(id)}" value="${escapeHtml(_apd.edit.wert || '')}">
+           <button type="button" class="knopf" data-apd-ok="${escapeHtml(id)}" title="Start setzen"${busy ? ' disabled' : ''}>✓</button>
+           <button type="button" class="knopf" data-apd-x="1" title="Abbrechen">✕</button>`
+        : `<button type="button" class="knopf" data-apd-tausch="${escapeHtml(id)}" title="${fest ? 'Richtung fest: ' + escapeHtml(String(x.fest_durch)) : 'Richtung tauschen'}"${busy || fest ? ' disabled' : ''}>${fest ? '🔒' : '⇅'}</button>
+           <button type="button" class="knopf" data-apd-start="${escapeHtml(id)}" title="Start verschieben"${busy ? ' disabled' : ''}>🕑</button>`
+      return `<div class="apd-z"><span class="zeit">${x.min != null ? apPrUhr(x.min) : '—'}</span>${apdFirmaZelle(x)}${x.bestaetigt ? '<span class="apd-gut" title="bestätigt" style="font-size:11px">✓</span>' : ''}${apdRi(x.long)}<span class="dl">${apdPkt(x.wert)}</span>${knoepfe}</div>`
+    }).join('')
+    const m = _apd.meldung && _apd.meldung.ort === 'geplant' ? `<div class="apd-fehler">⚠ ${escapeHtml(_apd.meldung.text)}</div>` : ''
+    return `<div class="apd-liste"><div class="apd-h">Geplant <b>${v.geplant.length}</b><span style="flex:1"></span>€/Pkt</div>${zeilen || '<div class="apd-leer">—</div>'}${m}</div>`
+  }
+  /* „von → nach": Richtung (▲→▼) und/oder Start (14:05→14:40), nur was sich geändert hat */
+  function apdWechsel(u){
+    const teile = []
+    if(u.von_richtung && u.nach_richtung && u.von_richtung !== u.nach_richtung)
+      teile.push(`${apdRi(apdLong({ richtung: u.von_richtung }))}→${apdRi(apdLong({ richtung: u.nach_richtung }))}`)
+    if(u.von_start && u.nach_start && apPrHm(u.von_start) !== apPrHm(u.nach_start)) teile.push(`<span class="mono">${apdUhr(u.von_start)}→${apdUhr(u.nach_start)}</span>`)
+    return teile.join(' ') || '—'
+  }
+  const apdGrundKurz = g => { const t = String(g || '').trim(); return t.length > 42 ? t.slice(0, 40) + '…' : t }
+  function apdUmplHtml(v){
+    const zeilen = v.umpl.map(u => `<div class="apd-z"><span class="zeit">${apdUhr(u.um)}</span>${apdFirmaZelle(u)}
+        <span class="wechsel">${u.quelle === 'hand' ? '✋ ' : ''}${apdWechsel(u)}</span><span class="grund" title="${escapeHtml(u.grund || '')}">${escapeHtml(apdGrundKurz(u.grund))}</span></div>`).join('')
+    return `<div class="apd-liste breit"><div class="apd-h">Umplanungen heute <b>${v.umpl.length}</b></div>${zeilen || '<div class="apd-leer">—</div>'}</div>`
+  }
+  /* Vorschau „Jetzt ausgleichen": was der Bot jetzt ändern würde (trocken), erst „Übernehmen" ändert wirklich */
+  function apdVorschauHtml(){
+    const p = _apd.vorschau; if(!p) return ''
+    const m = _apd.meldung && _apd.meldung.ort === 'ausgleich' ? `<div class="apd-fehler">⚠ ${escapeHtml(_apd.meldung.text)}</div>` : ''
+    if(p.fehler) return `<div class="apd-vorschau"><div class="apd-h">Vorschau</div><div class="apd-fehler">⚠ ${escapeHtml(p.fehler)}</div>
+        <div class="apd-vorschau-fuss"><button type="button" class="btn btn-ghost" data-apd="v-zu">Schließen</button></div></div>`
+    const u = Array.isArray(p.umplanungen) ? p.umplanungen : []
+    const nv = p.netto_vorher != null ? Number(p.netto_vorher) : null, nn = p.netto_nachher != null ? Number(p.netto_nachher) : null
+    const band = apdDaten().band
+    const farbe = n => band == null || n == null ? 'var(--ink)' : Math.abs(n) <= band ? 'var(--good)' : 'var(--danger)'
+    return `<div class="apd-vorschau"><div class="apd-h" style="flex-wrap:wrap">Vorschau <b>${u.length}</b><span style="flex:1"></span>
+        <span style="text-transform:none;letter-spacing:0;font-variant-numeric:tabular-nums">Netto <b style="color:${farbe(nv)}">${nv != null ? apdPktVz(nv) : '—'}</b> → <b style="color:${farbe(nn)}">${nn != null ? apdPktVz(nn) : '—'}</b> €/Pkt</span></div>
+        ${u.map(x => `<div class="apd-z"><span class="zeit">${apdUhr(x.nach_start || x.von_start)}</span>${apdFirmaZelle(x)}<span class="wechsel">${apdWechsel(x)}</span><span class="grund" title="${escapeHtml(x.grund || '')}">${escapeHtml(apdGrundKurz(x.grund))}</span></div>`).join('') || '<div class="apd-leer">0 Änderungen</div>'}
+        ${m}
+        <div class="apd-vorschau-fuss"><button type="button" class="btn btn-ghost" data-apd="v-zu">Abbrechen</button>
+          ${u.length ? `<button type="button" class="btn btn-primary" data-apd="v-ok"${_apd.vLaeuft ? ' disabled' : ''}>${_apd.vLaeuft ? 'übernimmt …' : 'Übernehmen'}</button>` : ''}</div></div>`
+  }
+  async function apdNachEingriff(){
+    try{ if(typeof loadTradePlansFromSupabase === 'function') await loadTradePlansFromSupabase() }catch(_){}
+    await apdLaden(true)
+  }
+  async function apdPlanAktion(id, aktion, start){
+    if(_apd.busy.has(id)) return
+    _apd.busy.add(id); _apd.meldung = null; apdZeichnen()
+    try{
+      const body = { plan_id: id, aktion }
+      if(aktion === 'start'){ body.start = start; body.start_min = apPrHm(start) }   // „HH:MM" deutsche Zeit (wie start im Probelauf)
+      await apdApi('POST', '/plan', body)
+      _apd.edit = null
+      if(typeof atToast === 'function') atToast(aktion === 'start' ? `🕑 Start ${start} gesetzt` : '⇅ Richtung getauscht', 'start')
+      _apd.busy.delete(id)
+      await apdNachEingriff()
+    }catch(e){
+      _apd.busy.delete(id)
+      _apd.meldung = { ort: 'geplant', text: (e && e.message) || String(e) }   // Regelverstoß wörtlich vom Server
+      apdZeichnen()
+    }
+  }
+  async function apdAusgleichen(trocken){
+    if(_apd.vLaeuft) return
+    _apd.vLaeuft = true; _apd.meldung = null
+    if(trocken) _apd.vorschau = null
+    apdZeichnen()
+    try{
+      const d = await apdApi('POST', '/ausgleichen', { trocken: !!trocken })
+      if(trocken) _apd.vorschau = d
+      else{
+        _apd.vorschau = null
+        const n = Array.isArray(d.umplanungen) ? d.umplanungen.length : 0
+        if(typeof atToast === 'function') atToast(`⚖︎ Ausgleich: ${n} Umplanung${n === 1 ? '' : 'en'}${d.netto_nachher != null ? ' · Netto ' + apdPktVz(d.netto_nachher) + ' €/Pkt' : ''}`, 'start')
+      }
+    }catch(e){
+      if(trocken) _apd.vorschau = { fehler: (e && e.message) || String(e) }
+      else _apd.meldung = { ort: 'ausgleich', text: (e && e.message) || String(e) }
+    }finally{ _apd.vLaeuft = false; apdZeichnen() }
+    if(!trocken && !_apd.vorschau) await apdNachEingriff()
+  }
+  async function apdEinstellung(feld, wert){
+    if(_apd.busy.has(feld)) return
+    _apd.busy.add(feld); _apd.meldung = null
+    try{
+      await apdApi('POST', '/ausgleich-einstellung', { [feld]: !!wert })
+      if(_apd.d){   // sofort zeigen, der nächste GET bestätigt
+        if(feld === 'aktiv') _apd.d.bot = { ...(_apd.d.bot || {}), aktiv: !!wert }
+        else _apd.d.bot = { ...(_apd.d.bot || {}), auto_start: !!wert }
+      }
+      _apd.busy.delete(feld)
+      await apdLaden(true)
+    }catch(e){
+      _apd.busy.delete(feld)
+      _apd.meldung = { ort: 'bot', text: (e && e.message) || String(e) }
+      apdZeichnen()
+    }
+  }
+  // Verdrahtung nur dieser Karte (ein Listener am eigenen Element, kein Sammel-Handler)
+  document.getElementById('apDelta')?.addEventListener('click', e => {
+    const t = e.target.closest('button'); if(!t || t.disabled) return
+    const a = t.dataset.apd
+    if(a === 'neu'){ apdLaden(true); return }
+    if(a === 'ausgleichen'){ apdAusgleichen(true); return }
+    if(a === 'v-zu'){ _apd.vorschau = null; _apd.meldung = null; apdZeichnen(); return }
+    if(a === 'v-ok'){ apdAusgleichen(false); return }
+    if(t.dataset.apdTausch){ apdPlanAktion(t.dataset.apdTausch, 'richtung_tauschen'); return }
+    if(t.dataset.apdStart){
+      const x = (apdDaten().geplant || []).find(g => String(g.plan_id) === t.dataset.apdStart)
+      _apd.edit = { id: t.dataset.apdStart, wert: x && x.min != null ? apPrUhr(x.min) : '' }; _apd.meldung = null; apdZeichnen()
+      setTimeout(() => document.querySelector(`#apDelta [data-apd-zeit]`)?.focus(), 0)
+      return
+    }
+    if(t.dataset.apdOk){
+      const wert = (_apd.edit && _apd.edit.wert) || ''
+      if(!/^\d{2}:\d{2}$/.test(wert)){ _apd.meldung = { ort: 'geplant', text: 'Startzeit HH:MM fehlt' }; apdZeichnen(); return }
+      apdPlanAktion(t.dataset.apdOk, 'start', wert); return
+    }
+    if(t.dataset.apdX){ _apd.edit = null; _apd.meldung = null; apdZeichnen() }
+  })
+  document.getElementById('apDelta')?.addEventListener('input', e => {
+    const z = e.target.closest('[data-apd-zeit]'); if(z && _apd.edit) _apd.edit.wert = z.value
+  })
+  document.getElementById('apDelta')?.addEventListener('keydown', e => {
+    const z = e.target.closest('[data-apd-zeit]'); if(!z || !_apd.edit) return
+    if(e.key === 'Enter'){ e.preventDefault(); document.querySelector(`#apDelta [data-apd-ok]`)?.click() }
+    else if(e.key === 'Escape'){ _apd.edit = null; apdZeichnen() }
+  })
+  document.getElementById('apDelta')?.addEventListener('change', e => {
+    const z = e.target.closest('[data-apd-zeit]'); if(z && _apd.edit){ _apd.edit.wert = z.value; return }
+    const s = e.target.closest('[data-apd-schalter]'); if(!s) return
+    if(!apdAdmin()){ s.checked = !s.checked; return }
+    apdEinstellung(s.dataset.apdSchalter, s.checked)
   })
   /* ══ ENDE AUTO-PLANER ══ */
 
