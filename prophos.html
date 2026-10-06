@@ -5427,7 +5427,9 @@
 
     <!-- Kapitel-Umschalter (24.09.2026): Hedge-Ära / Ohne Hedge / Alle — Knöpfe
          rendert kapitelRenderSeg() aus der Tabelle kapitel -->
-    <div class="seg seg-kapitel" id="kapitel-seg" title="Kapitel"></div>
+    <!-- Seit 06.10.2026 ausgeblendet, Prophos steht immer auf „Alle" (Finn: „bringt sehr viel Verwirrung rein" —
+         Moritz' Payout-Anfragen auf Hedge-Ära-Konten fehlten unter „Neue Ära") -->
+    <div class="seg seg-kapitel" id="kapitel-seg" title="Kapitel" hidden style="display:none"></div>
 
     <!-- Wachhund Kurs-Feed (25.09.2026): feedWacheTick blendet ihn ein, wenn tv_kurse bei offenem Markt > 2 min steht -->
     <button type="button" class="tb-feedwarn" id="tb-feedwarn" hidden>Kurs-Feed steht</button>
@@ -38403,7 +38405,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1043'
+  const OS_TAB_BUILD = '2026-09-22.1044'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -48224,19 +48226,13 @@
     if(typeof renderTradePlans === 'function') { try { renderTradePlans() } catch(e){ console.warn('[kapitel] renderTradePlans:', e) } }
     try { document.dispatchEvent(new CustomEvent('prophos:kapitel', { detail: { id: kapitelAktiv } })) } catch(_){}
   }
-  function kapitelSetzen(idOderAlle){ kapitelAnwenden(idOderAlle, true) }
-  // Gespeicherten Wert lesen; ohne Wert gilt das Kapitel von heute (= 2).
-  function kapitelAusLS(){
-    try {
-      const v = JSON.parse(localStorage.getItem(KAPITEL_LS) || 'null')
-      if(v && (v.id === 'alle' || Number.isFinite(Number(v.id)))) return v.id === 'alle' ? 'alle' : Number(v.id)
-    } catch(_){}
-    return null
-  }
+  // Seit 06.10.2026 fest auf „Alle" (Finn: der Kapitel-Filter „bringt sehr viel Verwirrung rein" — Moritz'
+  // Payout-Anfragen auf Hedge-Ära-Konten fehlten unter „Neue Ära"). Umschalter ist ausgeblendet; auch ein
+  // Klick auf eine Kapitel-Karte im Admin darf den Filter nicht mehr unsichtbar umstellen.
+  function kapitelSetzen(_idOderAlle){ kapitelAnwenden('alle', false) }
   // Nach initialSyncFromSupabase (Cloud gewinnt) Umschalter + Renderer nachziehen
   function kapitelNachSync(){
-    const v = kapitelAusLS()
-    kapitelAnwenden(v == null ? kapitelHeute() : v, false)
+    kapitelAnwenden('alle', false)   // gespeicherter Wert zählt seit 06.10.2026 nicht mehr
   }
   // Tabelle kapitel laden — beim Login. Fehler oder leer → Fallback bleibt stehen.
   async function kapitelLaden(){
@@ -48268,7 +48264,7 @@
   })()
   // Startzustand: gespeichert oder Kapitel von heute — nur Zustand + Topbar,
   // die Sichten rendern beim Laden ihrer Daten ohnehin selbst
-  kapitelAktiv = (() => { const v = kapitelAusLS(); return v == null ? kapitelHeute() : (v === 'alle' || kapitelObj(v) ? v : kapitelHeute()) })()
+  kapitelAktiv = 'alle'   // seit 06.10.2026 immer „Alle" beim Login (gespeicherter Wert wird ignoriert)
   kapitelRenderSeg()
   // Schnittstelle für den Admin-Tab (zweiter Bauabschnitt, hängt sich hier ein)
   window._kapitel = {
