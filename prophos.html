@@ -2267,6 +2267,32 @@
     #vr-view .adm-dist .adm-row > .adm-row-name{grid-area:name} #vr-view .adm-dist .adm-row > .adm-track{grid-area:track}
     #vr-view .adm-dist .adm-row > .vr-sc{grid-area:sc} #vr-view .adm-dist .adm-row > .adm-val{grid-area:val} #vr-view .adm-dist .adm-row > .adm-pct{grid-area:pct}
   }
+  /* Heute kaufen, Feinschliff (06.10.2026 spät, Finn: „komisch verpackt"): EINE Zeile je Firma, nichts abschneiden, Satz umbrechen,
+     Raster min 360 px, einzelne Karte volle Breite; Hinweis-Feld an die KI im Kopf */
+  #vr-view .vr-hk-raster{grid-template-columns:repeat(auto-fill,minmax(360px,1fr))}
+  #vr-view .vr-hk-raster.eins{grid-template-columns:1fr}
+  #vr-view .vr-hk-z{grid-template-columns:9px minmax(0,1fr) auto 8px 26px}
+  #vr-view .vr-hk-firma{white-space:normal;overflow:visible;overflow-wrap:anywhere}
+  #vr-view .vr-hk-menge{white-space:normal;text-align:right}
+  #vr-view .vr-hk-satz{white-space:normal;overflow:visible;color:var(--sub);font-size:12px;line-height:1.45}
+  #vr-view .vr-hk-satz b{font-weight:500;color:var(--ink-2)}
+  #vr-view .vr-h-kopf{align-items:flex-start}
+  #vr-view .vr-h-titel{flex:1 1 360px}
+  #vr-view .vr-h-titel .vr-h-leg{flex-basis:100%;margin-top:4px}
+  #vr-view .vr-ki{flex:0 1 420px;min-width:0}
+  #vr-view .vr-ki-form{display:flex;gap:6px}
+  #vr-view .vr-ki-form input{flex:1 1 auto;min-width:0;font:inherit;font-size:13px;padding:7px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--ink)}
+  #vr-view .vr-ki-form input:focus{outline:none;border-color:var(--vr-akzent);box-shadow:var(--shadow-input-focus)}
+  #vr-view .vr-ki-liste{list-style:none;margin:8px 0 0;padding:0;font-size:12.5px;color:var(--ink-2)}
+  #vr-view .vr-ki-liste li{display:flex;align-items:baseline;gap:8px;padding:3px 0}
+  #vr-view .vr-ki-liste li span{color:var(--sub-2);font-size:11.5px;white-space:nowrap;font-variant-numeric:tabular-nums}
+  #vr-view .vr-ki-liste li button{margin-left:auto;border:0;background:none;color:var(--sub-2);cursor:pointer;font-size:12px;padding:0 4px}
+  #vr-view .vr-ki-liste li button:hover{color:var(--ink)}
+  #vr-view .vr-ki-txt{margin:6px 0 0;font-size:11.5px;color:var(--sub)}
+  @media (max-width:760px){
+    #vr-view .vr-hk-raster{grid-template-columns:1fr}
+    #vr-view .vr-ki{flex:1 1 100%}
+  }
   #adm-pane-stat .kf-kpis .kpi-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #adm-pane-stat .kf-gross{margin-top:8px}
   #adm-pane-stat .kf-gross .kf-chart[hidden]{display:none}
@@ -38970,7 +38996,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1072'
+  const OS_TAB_BUILD = '2026-09-22.1073'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -55575,7 +55601,7 @@
   const VR_SCHLOSS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/></svg>'
   const VR_PAUSE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 5v14M15 5v14"/></svg>'
   const VR_PLAY = '<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M7 5v14l11-7z"/></svg>'
-  const _vr = { daten: null, laedt: false, fehler: '', timer: null, stand: 0, kachel: '', firma: '', auf: new Set(), sendet: 0, offen: new Set(), sichert: false, uebersicht: true, einst: false, ziele: true, rechnung: true, rechKey: '', hPerson: '', zielEdit: '', zielSendet: false }
+  const _vr = { daten: null, laedt: false, fehler: '', timer: null, stand: 0, kachel: '', firma: '', auf: new Set(), sendet: 0, offen: new Set(), sichert: false, uebersicht: true, einst: false, ziele: true, rechnung: true, rechKey: '', hPerson: '', zielEdit: '', zielSendet: false, kiEntwurf: '', kiSendet: false }
   // Stufe 2 (06.10.2026, Vertrag .claude/master/vorrat-vertrag.md): je Zelle nachkauf {n, einheit, dringlichkeit, n_roh, teile},
   // score 0–100 + score_teile [{name, wert, einheit}] (Finn: Dringlichkeit als Zahl, aus den Zahlen begründet), sperre
   // 'daten_fehlen'|'unsicher', bestellt {id, anzahl, offen, verfall} + zustand 'bestellt', bestand_gewichtet/erwartet, konten = LISTE
@@ -55931,6 +55957,9 @@
       try{ localStorage.setItem(VR_KLAPP_LS, JSON.stringify({ uebersicht: _vr.uebersicht, einst: _vr.einst, ziele: _vr.ziele, rechnung: _vr.rechnung })) }catch(_){}
     }))
     vrZieleVerdrahten(root)
+    root.querySelector('[data-vr-kiin]')?.addEventListener('input', ev => { _vr.kiEntwurf = ev.target.value })
+    root.querySelector('[data-vr-kiform]')?.addEventListener('submit', ev => { ev.preventDefault(); vrKiHinweis(_vr.kiEntwurf) })
+    root.querySelectorAll('[data-vr-kiweg]').forEach(b => b.addEventListener('click', () => vrKiHinweis(null, b.dataset.vrKiweg)))
     root.querySelector('[data-vr-rech]')?.addEventListener('change', ev => { _vr.rechKey = ev.target.value; vrRender() })
     root.querySelectorAll('[data-vr-hp]').forEach(b => b.addEventListener('click', () => { _vr.hPerson = _vr.hPerson === b.dataset.vrHp ? '' : b.dataset.vrHp; vrRender() }))
     root.querySelectorAll('[data-vr-k]').forEach(b => b.addEventListener('click', () => { const key = b.dataset.vrK; _vr.kachel = _vr.kachel === key ? '' : key; vrRender() }))
@@ -56024,13 +56053,14 @@
   function vrHeuteListe(d, name, firma){
     const zelle = (u, fi) => d.zellen.find(z => z.user_id === u && z.firma === fi)
     const zeile = (z, uid, fi, wer, anzahl, einheit, preis, stufe, satz, quelle, ki_um) => ({ uid, wer, firma: fi, anzahl, einheit: vrEinheitKurz(einheit, fi, firma.get(fi)),
-      preis, stufe, satz, z, prio: vrPrio(z), quelle: quelle || 'regel', ki_um: ki_um || null })
+      preis, stufe, satz, z, prio: vrPrio(z), quelle: quelle || 'regel', ki_um: ki_um || null, rest: null })
     let l, offenGesamt = null
     if(Array.isArray(d.heute)){
       // Server: Reihenfolge = Rang; Zeilenpreis = kosten_eur, preis_eur ist der STÜCKPREIS (T2 06.10.2026 — deb0643 zeigte
       // „10 × 150k EOD ≈ 150 €" statt 1.500 €); fehlt kosten_eur (älterer Server), gilt anzahl × preis_eur
       l = d.heute.map(h => zeile(zelle(h.user_id, h.firma), h.user_id, h.firma, h.user || name.get(h.user_id) || String(h.user_id).slice(0, 8), h.anzahl, h.einheit,
         h.kosten_eur != null ? h.kosten_eur : (h.preis_eur != null ? h.preis_eur * (Number(h.anzahl) || 1) : null), h.stufe === 'heute' ? 'heute' : 'woche', h.satz || '', h.quelle, h.ki_um))
+      l.forEach((x, i) => { const h = d.heute[i]; if(h && h.rest != null) x.rest = Number(h.rest) || 0 })
     }else{
       // Rückfall (älteres Backend): Zellen mit Nachkauf nach Priorität, dann Lücke ÷ Untergrenze; gedeckelt wie der Server
       const kand = d.zellen.filter(z => z.status === 'frei' && !z.sperre && ['jetzt', 'bald'].includes(z.nachkauf?.dringlichkeit) && (vrKauf(z) || vrBestellt(z)))
@@ -56065,44 +56095,74 @@
     // KI-Bot (T2, heute[].quelle 'ki'|'regel' + ki_um): woher die Liste kommt, dezent unter dem Titel — ohne Feld „Rechnung"
     const ki = l.filter(x => x.quelle === 'ki'), kiUm = ki.map(x => x.ki_um).filter(Boolean).sort().pop()
     const quelle = ki.length ? `🤖 KI-Einschätzung${vrUhr(kiUm || d.gerechnet_um) ? ' · Stand ' + vrUhr(kiUm || d.gerechnet_um) : ''}` : `Rechnung${vrUhr(d.gerechnet_um) ? ' · Stand ' + vrUhr(d.gerechnet_um) : ''}`
-    const kopf = `<div class="vr-h-kopf"><div class="vr-h-titel"><h2>Heute kaufen</h2>${heute.length ? `<span>${vrKonten(nH)}${geld(pH)}</span>` : l.length ? '<span>heute nichts dringend</span>' : ''}<em class="vr-h-quelle">${quelle}</em></div>`
+    // Hinweis an die KI (Finn 06.10.2026: z. B. „Bei Ina erst mal kein Topstep"): POST aktion 'ki_hinweis' {text} / 'ki_hinweis_weg' {id},
+    // GET ki_hinweise[] {id, text, at} (T2). Der Entwurf bleibt beim Neuzeichnen erhalten (_vr.kiEntwurf).
+    const hinweise = Array.isArray(d.ki_hinweise) ? d.ki_hinweise : []
+    const kiForm = `<form class="vr-ki-form" data-vr-kiform><input type="text" maxlength="300" placeholder="Hinweis an die KI, z. B. „Bei Ina erst mal kein Topstep"" value="${vrEsc(_vr.kiEntwurf || '')}" data-vr-kiin${aus}>`
+      + `<button type="submit" class="btn btn-mini"${aus || (_vr.kiSendet ? ' disabled' : '')}>${_vr.kiSendet ? 'sendet …' : 'Senden'}</button></form>`
+    const kiListe = hinweise.length ? `<ul class="vr-ki-liste">${hinweise.map(h => `<li><span>${vrEsc(h.at ? new Date(h.at).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '')}${h.von_name ? ' · ' + vrEsc(h.von_name) : ''}</span>${vrEsc(h.text)}<button type="button" data-vr-kiweg="${vrEsc(h.id)}" title="Hinweis löschen"${aus}>✕</button></li>`).join('')}</ul>` : ''
+    const kiLauf = d.naechster_ki_lauf || d.naechster_lauf
+    const kiTxt = `<p class="vr-ki-txt">Die KI berücksichtigt das beim nächsten Lauf${vrUhr(kiLauf) ? ` (${vrUhr(kiLauf)})` : ''}.</p>`
+    const kopf = `<div class="vr-h-kopf"><div class="vr-h-titel"><h2>Heute kaufen</h2>${heute.length ? `<span>${vrKonten(nH)}${geld(pH)}</span>` : l.length ? '<span>heute nichts dringend</span>' : ''}<em class="vr-h-quelle">${quelle}</em>`
       + `<span class="vr-h-leg">Priorität <i class="hoch"></i>hoch <i class="mittel"></i>mittel <i class="niedrig"></i>niedrig</span></div>`
+      + `<div class="vr-ki">${kiForm}${kiListe}${kiTxt}</div></div>`
       + (lgN && l.length ? `<p class="vr-h-satz">Gesamt fehlen noch ~${Math.round(Number(lgN)).toLocaleString('de-DE')} Konten, bis alle Ziele voll sind — hier stehen nur die wichtigsten ${VR_TAGES_MAX} für heute.</p>` : '')
     if(!l.length) return `<div class="vr-heute">${kopf}<div class="vr-hk vr-h-leer"><b>✓</b>Heute nichts zu kaufen — alle Ziele gedeckt.</div></div>`
-    // Personen: sortiert nach ihrer wichtigsten Zeile (kleinster Rang); Filter-Chips oben wie die ID-Chips
+    // EINE Zeile je Firma (Finn: dieselbe Firma stand zweimal — heute 1 + „Woche" 9): heute- und Woche-Einträge derselben Zelle
+    // zusammengeführt → „heute 1 × 100k" + „noch ~9 in den nächsten Tagen". Menge nur mit der Größe („1 × 100k · 1 × 200k"), die volle
+    // Kauf-Einheit im Tooltip. Personen in der Reihenfolge ihrer wichtigsten Zeile; Filter-Chips oben wie die ID-Chips.
+    const PR = { hoch: 0, mittel: 1, niedrig: 2 }
+    // nur die Größe („100k"), wenn die Einheit genau eine nennt — „100k / 200k Summer Plan" bleibt als Kurz-Einheit stehen
+    const groesse = e => { const t = String(e || '').match(/\d+(?:[.,]\d+)?\s*k\b/gi) || []; return t.length === 1 ? t[0].replace(/\s+/g, '') : vrEinheitKurz(e) }
     const personen = []
-    for(const x of l){ let p = personen.find(q => q.uid === x.uid); if(!p){ p = { uid: x.uid, wer: x.wer, zeilen: [] }; personen.push(p) } p.zeilen.push(x) }
+    for(const x of l){
+      let p = personen.find(q => q.uid === x.uid); if(!p){ p = { uid: x.uid, wer: x.wer, zeilen: [] }; personen.push(p) }
+      let r = p.zeilen.find(y => y.firma === x.firma)
+      if(!r){ r = { firma: x.firma, uid: x.uid, z: x.z, prio: x.prio, heute: 0, woche: 0, preis: 0, satz: '', quelle: x.quelle, einh: new Map(), einheiten: new Set() }; p.zeilen.push(r) }
+      if(PR[x.prio] < PR[r.prio]) r.prio = x.prio
+      const a = Number(x.anzahl) || 0
+      // T2 §3i: ein Eintrag je Zelle mit anzahl (= heute) und rest (= n − heute); ältere Server: getrennte Woche-Einträge
+      if(x.rest != null) r.woche += Number(x.rest) || 0
+      if(x.stufe === 'heute' && a){ r.heute += a; r.preis += Number(x.preis) || 0; const g = groesse(x.einheit); r.einh.set(g, (r.einh.get(g) || 0) + a); if(!r.satz) r.satz = x.satz }
+      else if(x.rest == null) r.woche += a
+      if(!r.satz && x.satz) r.satz = x.satz
+      if(x.einheit) r.einheiten.add(x.einheit)
+      if(x.quelle === 'ki') r.quelle = 'ki'
+    }
+    const gekauftR = r => !!r.z && vrBestellt(r.z)
+    const nHeute = p => p.zeilen.filter(r => !gekauftR(r)).reduce((s, r) => s + r.heute, 0)
+    const preisHeute = p => p.zeilen.filter(r => !gekauftR(r)).reduce((s, r) => s + r.preis, 0)
     if(_vr.hPerson && !personen.some(p => p.uid === _vr.hPerson)) _vr.hPerson = ''
-    const chips = personen.length > 1 ? `<div class="vr-ids vr-h-chips">${personen.map(p => { const [n] = summe(p.zeilen.filter(x => !gekauft(x) && x.stufe === 'heute'))
+    const chips = personen.length > 1 ? `<div class="vr-ids vr-h-chips">${personen.map(p => { const n = nHeute(p)
       return `<button type="button" class="vr-id${_vr.hPerson === p.uid ? ' an' : ''}" data-vr-hp="${vrEsc(p.uid)}" title="${_vr.hPerson === p.uid ? 'alle zeigen' : 'nur ' + vrEsc(p.wer) + ' zeigen'}"><i style="background:${vrFarbe(p.uid)}"></i>${vrEsc(p.wer)}${n ? ` <b>${n}</b>` : ''}</button>` }).join('')}</div>` : ''
-    // KARTEN je Person (06.10.2026 spät, Finn: die Liste „richtig hässlich"): Raster aus Prophos-Kacheln (Desktop 2–3 Spalten, Handy 1).
-    // Kopf: Punkt + Name + „heute 4 Konten · ≈ 1.200 €" + Score klein + „3/4 gekauft"; je Firma eine ruhige Zeile: Firmenpunkt im
-    // Firmenton · Firma · Menge · Prioritätspunkt (rot/amber/grau) · runde Checkbox „gekauft" (= bestellt). Satz klein grau darunter,
-    // ganz im Tooltip. Keine Rangzahlen mehr — die Reihenfolge bleibt (Personen nach wichtigster Zeile, Zeilen nach Priorität).
     const PW = { hoch: 'Priorität hoch', mittel: 'Priorität mittel', niedrig: 'Priorität niedrig' }
-    const zeile = x => { const g = gekauft(x), key = vrEsc(x.uid + '|' + x.firma)
-      const titel = [PW[x.prio], x.stufe === 'woche' ? 'diese Woche' : '', x.preis ? '≈ ' + vrEur(x.preis) : '', x.satz].filter(Boolean).join(' · ')
-      return `<div class="vr-hk-z prio-${x.prio}${g ? ' gekauft' : ''}" title="${vrEsc(titel)}">
-        <i class="vr-hk-f" style="background:${vrFirmaFarbe(x.firma)}"></i><span class="vr-hk-firma">${vrEsc(x.firma)}</span>
-        <span class="vr-hk-menge">${vrEsc(x.anzahl)} × ${vrEsc(x.einheit)}${x.stufe === 'woche' ? ' <em>Woche</em>' : ''}</span>
-        <i class="vr-hk-p" aria-label="${PW[x.prio]}"></i>
-        ${g ? `<button type="button" class="vr-hk-check an" data-vr-b="${key}" data-vr-weg="1" title="${d.bereit ? 'gekauft — Klick nimmt es zurück' : 'SQL noch nicht eingespielt'}"${aus}>✓</button>`
-            : `<button type="button" class="vr-hk-check" data-vr-b="${key}" data-vr-n="${vrEsc(x.anzahl)}" data-vr-e="${vrEsc(x.einheit || '')}" title="${d.bereit ? 'als gekauft markieren — zählt 48 h als unterwegs' : 'SQL noch nicht eingespielt'}"${aus}></button>`}
-        ${x.satz ? `<div class="vr-hk-satz">${x.quelle === 'ki' ? '🤖 ' : ''}${vrEsc(x.satz)}</div>` : ''}
+    const zeile = r => { const g = gekauftR(r), key = vrEsc(r.uid + '|' + r.firma)
+      const menge = r.heute ? [...r.einh].map(([e, c]) => `${c} × ${e}`).join(' · ') : '—'
+      const ein = [...r.einheiten][0] || ''
+      const rest = r.woche ? `${r.heute ? 'noch ' : ''}~${r.woche} in den nächsten Tagen` : ''
+      const titel = [PW[r.prio], [...r.einheiten].join(', '), r.preis ? '≈ ' + vrEur(r.preis) : ''].filter(Boolean).join(' · ')
+      return `<div class="vr-hk-z prio-${r.prio}${g ? ' gekauft' : ''}" title="${vrEsc(titel)}">
+        <i class="vr-hk-f" style="background:${vrFirmaFarbe(r.firma)}"></i><span class="vr-hk-firma">${vrEsc(r.firma)}</span>
+        <span class="vr-hk-menge">${r.heute ? 'heute ' : ''}${vrEsc(menge)}</span>
+        <i class="vr-hk-p" aria-label="${PW[r.prio]}"></i>
+        ${!r.heute && !g ? '<span></span>' : g ? `<button type="button" class="vr-hk-check an" data-vr-b="${key}" data-vr-weg="1" title="${d.bereit ? 'gekauft — Klick nimmt es zurück' : 'SQL noch nicht eingespielt'}"${aus}>✓</button>`
+            : `<button type="button" class="vr-hk-check" data-vr-b="${key}" data-vr-n="${vrEsc(r.heute)}" data-vr-e="${vrEsc(ein)}" title="${d.bereit ? 'als gekauft markieren — zählt 48 h als unterwegs' : 'SQL noch nicht eingespielt'}"${aus}></button>`}
+        ${rest || r.satz ? `<div class="vr-hk-satz">${rest ? `<b>${vrEsc(rest)}</b>${r.satz ? ' · ' : ''}` : ''}${r.satz ? (r.quelle === 'ki' ? '🤖 ' : '') + vrEsc(r.satz) : ''}</div>` : ''}
       </div>` }
-    const kasten = p => { const [n, preis] = summe(p.zeilen.filter(x => !gekauft(x) && x.stufe === 'heute')), [nW] = summe(p.zeilen.filter(x => !gekauft(x) && x.stufe === 'woche'))
-      const nG = p.zeilen.filter(gekauft).length
-      const was = n ? `heute ${vrKonten(n)}${geld(preis)}` : nW ? `diese Woche ${vrKonten(nW)}` : 'alles gekauft'
+    const kasten = p => { const n = nHeute(p), preis = preisHeute(p), nW = p.zeilen.reduce((s, r) => s + r.woche, 0)
+      const nG = p.zeilen.filter(gekauftR).length
+      const was = n ? `heute ${vrKonten(n)}${geld(preis)}` : nW ? `in den nächsten Tagen ~${vrKonten(nW)}` : 'alles gekauft'
       const ps = (d.personen || []).find(x => String(x.user_id) === String(p.uid))
       const sc = ps && ps.score != null && ps.wort !== '—' ? ps : vrScoreAus(d.zellen.filter(z => z.user_id === p.uid), firma)
       const scTxt = sc && sc.score != null ? `<span class="vr-hk-sc vr-g-${vrWortKl(sc.wort || vrWortAus(sc.score))}">${Math.round(Number(sc.score))} · ${vrEsc(sc.wort || vrWortAus(sc.score))}</span>` : ''
+      const zeilen = p.zeilen.slice().sort((a, b) => (b.heute ? 1 : 0) - (a.heute ? 1 : 0) || PR[a.prio] - PR[b.prio])
       return `<div class="vr-hk"><div class="vr-hk-kopf"><i style="background:${vrFarbe(p.uid)}"></i><div><b>${vrEsc(p.wer)}</b><span>${was}</span></div>
-        <div class="vr-hk-rechts">${scTxt}${nG ? `<span class="vr-hk-stand">${nG}/${p.zeilen.length} gekauft</span>` : ''}</div></div>${p.zeilen.map(zeile).join('')}</div>` }
-    // Filter: Person (Chip oder Klick in „Je ID") und Firma (Klick in „Je Firma") — der Rang bleibt der über alle Zeilen
+        <div class="vr-hk-rechts">${scTxt}${nG ? `<span class="vr-hk-stand">${nG}/${p.zeilen.length} gekauft</span>` : ''}</div></div>${zeilen.map(zeile).join('')}</div>` }
+    // Filter: Person (Chip oder Klick in „Je ID") und Firma (Klick in „Je Firma")
     const sicht = personen.filter(p => !_vr.hPerson || p.uid === _vr.hPerson)
-      .map(p => ({ ...p, zeilen: p.zeilen.filter(x => !_vr.firma || x.firma === _vr.firma) })).filter(p => p.zeilen.length)
+      .map(p => ({ ...p, zeilen: p.zeilen.filter(r => !_vr.firma || r.firma === _vr.firma) })).filter(p => p.zeilen.length)
     const filterTxt = _vr.firma ? `<div class="vr-h-filter">nur ${vrEsc(_vr.firma)} <button type="button" data-vr-f-filter="${vrEsc(_vr.firma)}" title="Firmen-Filter aufheben">×</button></div>` : ''
-    return `<div class="vr-heute">${kopf}${chips}${filterTxt}<div class="vr-hk-raster">${sicht.map(kasten).join('') || '<div class="vr-leer">Für diese Auswahl heute nichts zu kaufen.</div>'}</div></div>`
+    return `<div class="vr-heute">${kopf}${chips}${filterTxt}<div class="vr-hk-raster${sicht.length === 1 ? ' eins' : ''}">${sicht.map(kasten).join('') || '<div class="vr-leer">Für diese Auswahl heute nichts zu kaufen.</div>'}</div></div>`
   }
   // ── DEINE ZIELE (06.10.2026, Finn: „Schreib das Ziel rein, eine Liste, die ich auch bearbeiten kann: Wo will ich wie viele Konten
   // haben?"). Ganz oben, je Firma eine Zeile in Klartext, ✎ macht sie editierbar (von/bis bzw. Anzahl je Größe + Nachkauf-Einheit).
@@ -56231,6 +56291,24 @@
           ${zeile('→', n ? `${n} kaufen` : (z.toleranz === true || r.nah_genug || z.nah_genug) ? 'nah genug am Ziel — nichts kaufen' : 'nichts kaufen — reicht für das Ziel', 'vr-re-ergebnis')}
         </div>
         ${z.satz ? `<p class="vr-re-fuss">${vrEsc(z.satz)}</p>` : ''}</div></details>`
+  }
+  // Hinweis an die KI senden bzw. löschen (T2: POST aktion 'ki_hinweis' {text} → {ok}, 'ki_hinweis_weg' {id} → {ok}); danach GET neu
+  async function vrKiHinweis(text, wegId){
+    const d = _vr.daten
+    if(!d?.bereit || _vr.kiSendet) return
+    const body = wegId ? { aktion: 'ki_hinweis_weg', id: wegId } : { aktion: 'ki_hinweis', text: String(text || '').trim() }
+    if(!wegId && !body.text) return
+    _vr.kiSendet = true; vrRender()
+    try{
+      const r = await fetch(`${WATCHER_HOME}/admin/vorrat`, { method: 'POST', headers: { 'sb-token': await vrToken(), 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      const a = await r.json().catch(() => ({}))
+      if(!r.ok || !a.ok) throw new Error(a.error || a.msg || ('HTTP ' + r.status))
+      if(!wegId) _vr.kiEntwurf = ''
+      _vr.fehler = ''; _vr.kiSendet = false
+      await vrLaden(false)
+      return
+    }catch(e){ _vr.fehler = (wegId ? 'Hinweis nicht gelöscht: ' : 'Hinweis nicht gespeichert: ') + (e.message || e) }
+    _vr.kiSendet = false; vrRender()
   }
   // Sperr-Matrix (Einstellungen): je ID eine Zeile, je Firma ein Chip im Zustand frei · pausiert (‖) · gesperrt (Schloss); Klick wechselt
   // reihum (vrSchalten wie bisher). Chips brechen um — am Handy kein waagerechtes Scrollen.
