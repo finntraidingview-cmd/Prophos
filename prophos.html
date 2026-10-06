@@ -30112,8 +30112,13 @@
       return true
     })
     // Reihenfolge nach Kontoart (Koordination 25.09.2026; seit 30.09.2026 jede Art eigene Gruppe inkl. Waiting for Payout,
-    // s. ACC_TYPE_RANG), innerhalb einer Art bleibt die bisherige Reihenfolge (stabil).
-    .map((a, i) => [a, i]).sort((x, y) => accTypRang(x[0]) - accTypRang(y[0]) || x[1] - y[1]).map(x => x[0])
+    // s. ACC_TYPE_RANG), innerhalb einer Art nach Firma (06.10.2026, Finn: „nicht mal ein FundedNext-Account, mal ein
+    // FundedNext-Account" — die Firmen lagen in Funded CFD durcheinander), innerhalb der Firma bisherige Reihenfolge (stabil).
+    // Konten ohne Firma ans Ende ihrer Art.
+    .map((a, i) => [a, i]).sort((x, y) => accTypRang(x[0]) - accTypRang(y[0])
+      || (!x[0].firm - !y[0].firm)
+      || String(x[0].firm || '').localeCompare(String(y[0].firm || ''), 'de', { sensitivity: 'base' })
+      || x[1] - y[1]).map(x => x[0])
     const archivedCount = accounts.filter(a => archive[a.id]?.archived).length
     const archCounter = document.getElementById('archived-counter')
     if(archCounter){
@@ -38405,7 +38410,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1044'
+  const OS_TAB_BUILD = '2026-09-22.1045'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
