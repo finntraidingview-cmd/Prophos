@@ -3042,6 +3042,14 @@ def sb_update(table, params, body):
     return r.json()
 
 
+def sb_delete(table, params):
+    """DELETE mit return=representation → Liste der WIRKLICH gelöschten Zeilen (leer = Guard hat gegriffen). 07.10.2026 für die
+    Admin-Eingriffe des Trade-Planers (Vorschläge fremder IDs löschen) — der Aufrufer legt den Guard in params."""
+    r = _sb_anfrage("DELETE", f"{SUPABASE_URL}/rest/v1/{table}", params=params, headers=_sb_headers("return=representation"))
+    _sb_pruefen(r)
+    return r.json()
+
+
 def sb_upsert(table, body, kritisch=False):
     """POST mit merge-duplicates = Upsert auf den Primary Key (Service-Key,
     an RLS vorbei). Fuer den dup_live-Spiegel (25.08.2026). kritisch=True: an der Supabase-Bremse vorbei."""
@@ -14779,6 +14787,63 @@ def ap_sicht(erg, uid):
     return out
 
 
+def ap_sicht_uid(admin, uid, nur_eigene, sicht):
+    """REIN RECHNEND (TRADE-PLANER-ALLE-IDS, Finn 07.10.2026 03:25 dt: „alle IDs … zusammen in diesem Zeitstrahl sehen … es ist nur
+    die ID, von der ich gerade eingeloggt bin"): welche ID die GET-Antworten von /admin/auto-plan und /admin/auto-plan/delta filtern.
+    None = alle IDs. Admin (ADMIN_EMAILS) immer alle; ?sicht=alle öffnet alle IDs für jeden Login im Planer — außer admin_zugang
+    „nur eigene" (der bleibt bei ap_sicht); ohne Parameter wie bisher nur die eigene ID (Delta-Monitor im Trade-Plan unverändert)."""
+    if admin:
+        return None
+    if str(sicht or "").strip().lower() == "alle" and not nur_eigene:
+        return None
+    return str(uid)
+
+
+def _ap_sicht_aus_anfrage(admin, uid):
+    """sicht-ID für die GET-Antwort aus ?sicht=alle (ap_sicht_uid). admin_zugang wird nur gelesen, wenn ein Nicht-Admin „alle"
+    verlangt (60-s-Cache); schlägt die Lesung fehl, bleibt es bei der eigenen Sicht — nie versehentlich alle IDs."""
+    s = request.args.get("sicht")
+    nur = False
+    if not admin and str(s or "").strip().lower() == "alle":
+        try:
+            nur = admin_zugang_nur_eigene(str(uid))
+        except Exception as e:
+            print(f"[auto-plan] admin_zugang nicht lesbar ({type(e).__name__}: {e}) — Sicht bleibt eigene", flush=True)
+            nur = True
+    return ap_sicht_uid(admin, uid, nur, s)
+
+
+AP_EINGRIFF_MAX = 200                # Pläne je Aufruf an /admin/auto-plan/bestaetigen
+
+
+def ap_eingriff_filter(aktion, plan_ids, sicht_uid=None):
+    """REIN RECHNEND (BESTÄTIGEN FÜR ALLE IDS, Master 07.10.2026 03:58 Dubai, Finn: „eine Seite, wo ich alle Trades sehe UND bestätigen
+    kann"): PostgREST-Filter + Body für die Routen /admin/auto-plan/bestaetigen | zurueck | loeschen. Dieselben Bedingungen wie das
+    Frontend per supabase-js (apBestaetigen: planned + auto_plan + unbestätigt; apZuruecknehmen/deleteTradePlan: planned + auto_plan +
+    ungestartet) als Guard in derselben Anfrage; sicht_uid (Nicht-Admin, „nur eigene") engt auf die eigene ID ein.
+    → (params, body, 'patch'|'delete') oder (None, None, Fehlertext)."""
+    bed = {"bestaetigen": ({"status": "eq.planned", "auto_plan": "eq.true", "auto_bestaetigt_at": "is.null"}, "patch"),
+           "zurueck": ({"status": "eq.planned", "auto_plan": "eq.true", "start_um_gestartet_at": "is.null"}, "patch"),
+           "loeschen": ({"status": "eq.planned", "auto_plan": "eq.true", "start_um_gestartet_at": "is.null"}, "delete")}.get(str(aktion or ""))
+    if not bed:
+        return None, None, "aktion = bestaetigen | zurueck | loeschen"
+    ids = []
+    for i in plan_ids or []:
+        t = str(i or "").strip().lower()
+        if re.match(r"^[0-9a-f-]{36}$", t) and t not in ids:
+            ids.append(t)
+    if not ids:
+        return None, None, "plan_ids: keine gültige Plan-ID"
+    if len(ids) > AP_EINGRIFF_MAX:
+        return None, None, f"höchstens {AP_EINGRIFF_MAX} Pläne je Aufruf"
+    params = dict(bed[0], id=("eq." + ids[0]) if len(ids) == 1 else ("in.(" + ",".join(ids) + ")"))
+    if sicht_uid:
+        params["user_id"] = "eq." + str(sicht_uid)
+    body = {"auto_bestaetigt_at": datetime.now(timezone.utc).isoformat()} if aktion == "bestaetigen" \
+        else {"auto_bestaetigt_at": None} if aktion == "zurueck" else None
+    return params, body, bed[1]
+
+
 def ap_letzter_trade_geblasen(regel, balance, plaene_konto):
     """REIN RECHNEND (Master 07.10.2026, Anlass Tradeify-Challenge 149.046 nach −4.521 $ = Liquidation, Boden aber nicht
     bekannt): hat der LETZTE beendete Trade des Kontos mindestens 95 % des Drawdowns verloren (final.today_pnl, sonst
@@ -16314,7 +16379,10 @@ def admin_auto_plan_delta():
     if err:
         return err
     try:
-        return jsonify(dict(ap_delta_antwort(_ap_stand_laden(reg), None if admin else uid), admin=admin))
+        # 07.10.2026 TRADE-PLANER-ALLE-IDS: ?sicht=alle → alle IDs (außer „nur eigene"), sonst wie bisher Admin alle / eigene ID
+        antwort = ap_delta_antwort(_ap_stand_laden(reg), _ap_sicht_aus_anfrage(admin, uid))
+        antwort.setdefault("sicht", "alle")
+        return jsonify(dict(antwort, admin=admin))
     except Exception as e:
         return jsonify({"ok": False, "admin": admin, "msg": f"{type(e).__name__}: {e}"}), 502
 
@@ -16609,6 +16677,59 @@ def start_auto_planer():
     threading.Thread(target=ap_loop, daemon=True).start()
 
 
+def _ap_eingriff(aktion):
+    """POST /admin/auto-plan/{bestaetigen {plan_ids} | zurueck {plan_id} | loeschen {plan_id}} (07.10.2026, Trade-Planer alle IDs).
+    Gate wie /admin/kontowerte: Admin (ADMIN_EMAILS) alle IDs, admin_zugang „nur eigene" und jeder andere Login nur die eigenen
+    (403 bei fremden Plänen). Guard-Bedingungen (ap_eingriff_filter) in derselben Anfrage; Antwort = die wirklich geänderten bzw.
+    gelöschten Zeilen. Eigene Pläne schreibt das Frontend weiter selbst per supabase-js (RLS) — diese Routen braucht nur der Admin."""
+    if request.method == "OPTIONS":
+        return "", 200
+    _mail, err = _admin_auth()
+    if err is None:
+        uid = str(request.environ.get("prophos.admin_uid") or "")
+        try:
+            sicht = uid if admin_zugang_nur_eigene(uid) else None
+        except Exception:
+            return jsonify({"ok": False, "msg": "Anmeldung nicht prüfbar"}), 502
+    else:
+        if err[1] != 403:
+            return err
+        uid, err2 = _wd_login()
+        if err2:
+            return err2
+        sicht = str(uid)
+    body = request.get_json(silent=True) or {}
+    ids = body.get("plan_ids") if isinstance(body.get("plan_ids"), list) else [body.get("plan_id")]
+    params, upd, art = ap_eingriff_filter(aktion, ids, sicht)
+    if params is None:
+        return jsonify({"ok": False, "msg": art}), 400
+    try:
+        if sicht:
+            fremd = [z for z in sb_select("trade_plans", {"select": "id,user_id", "id": params["id"]}) if str(z.get("user_id")) != sicht]
+            if fremd:
+                return jsonify({"ok": False, "msg": "nur eigene Pläne"}), 403
+        zeilen = sb_delete("trade_plans", params) if art == "delete" else sb_update("trade_plans", params, upd)
+        print(f"[auto-plan] {aktion}: {len(zeilen)} Zeile(n) durch {'Admin' if not sicht else 'ID ' + str(sicht)[:8]}", flush=True)
+        return jsonify({"ok": True, "aktion": aktion, "n": len(zeilen), "zeilen": zeilen, "alle": sicht is None})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"{type(e).__name__}: {e}"}), 502
+
+
+@app.route("/admin/auto-plan/bestaetigen", methods=["POST", "OPTIONS"])
+def admin_auto_plan_bestaetigen():
+    return _ap_eingriff("bestaetigen")
+
+
+@app.route("/admin/auto-plan/zurueck", methods=["POST", "OPTIONS"])
+def admin_auto_plan_zurueck():
+    return _ap_eingriff("zurueck")
+
+
+@app.route("/admin/auto-plan/loeschen", methods=["POST", "OPTIONS"])
+def admin_auto_plan_loeschen():
+    return _ap_eingriff("loeschen")
+
+
 @app.route("/admin/auto-plan", methods=["GET", "POST", "OPTIONS"])
 def admin_auto_plan():
     """GET: letzter Lauf (Admin: alle IDs, sonst nur die eigene). POST {trocken, tag}: jetzt planen — Admin oder eine ID,
@@ -16630,10 +16751,12 @@ def admin_auto_plan():
         return jsonify({"ok": False, "msg": "Diese ID ist nicht im Auto-Planer"}), 403
     sicht = None if admin else str(uid)        # 06.10.2026: Nicht-Admin (Test-ID) sieht nur die eigenen Zeilen
     if request.method == "GET":
+        sicht = _ap_sicht_aus_anfrage(admin, uid)   # 07.10.2026 TRADE-PLANER-ALLE-IDS: ?sicht=alle → alle IDs (außer „nur eigene")
         rows = sb_select("auto_plan_lauf", {"select": "tag,quelle,at,ergebnis", "order": "at.desc", "limit": "1"})
         erg = (rows[0].get("ergebnis") if rows else None) or {}
         return jsonify({"ok": True, "admin": admin, "aktiv": bool(reg.get("aktiv")), "ids": len(reg.get("user_ids") or []),
-                        "im_planer": im_planer or admin, "letzter": ap_sicht(erg, sicht) if sicht else erg, "info": _ap_info})
+                        "im_planer": im_planer or admin, "letzter": ap_sicht(erg, sicht) if sicht else erg,
+                        "sicht": "eigene" if sicht else "alle", "info": _ap_info})
     body = request.get_json(silent=True) or {}
     tag = str(body.get("tag") or "").strip() or None
     if tag and not re.match(r"^\d{4}-\d{2}-\d{2}$", tag):

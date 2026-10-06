@@ -1779,7 +1779,17 @@
   #tpl-view .tpl-raster i.fen{background:none;border-left:1px dashed var(--border)}
   #tpl-view .tpl-raster i.jetzt{width:2px;margin-left:-1px;bottom:0;background:var(--ink);opacity:.45}
   #tpl-view .tpl-raster .jetzt-t{position:absolute;top:-1px;transform:translateX(-50%);font-size:10px;font-weight:600;color:var(--ink);background:var(--surface);padding:0 4px;border-radius:4px;white-space:nowrap;font-variant-numeric:tabular-nums}
-  #tpl-view .tpl-spur{position:relative;display:flex;height:86px;border-top:1px solid var(--border-soft)}
+  #tpl-view .tpl-ids{margin:0 0 10px;gap:6px 8px}
+  #tpl-view .tpl-ids .adm-vl-chip{padding:3px 10px;border:1px solid var(--border);border-radius:999px;background:var(--surface);font-size:12px;line-height:1.4;color:var(--sub)}
+  #tpl-view .tpl-ids .adm-vl-chip.is-on{border-color:var(--violet);color:var(--ink)}
+  #tpl-view .tpl-ids .adm-vl-chip b{margin-left:6px;font-variant-numeric:tabular-nums;font-weight:600}
+  #tpl-view .tpl-ids .adm-dot{width:8px;height:8px;border-radius:50%}
+  #tpl-view .tpl-ids .tpl-alle-best{margin-left:auto;padding:3px 10px;font-size:12px;height:auto} #tpl-view .tpl-ids .tpl-alle-best b{margin-left:4px;font-variant-numeric:tabular-nums}
+  #tplBestModal .tpl-chips{display:flex;flex-wrap:wrap;gap:5px}
+  #tplBestModal .tpl-chip{display:inline-flex;align-items:center;gap:5px;border:1px solid color-mix(in srgb,var(--good) 45%,var(--border));border-radius:999px;padding:2px 9px;font-size:11.5px;background:color-mix(in srgb,var(--good) 8%,var(--surface))}
+  #tplBestModal .tpl-chip i{width:8px;height:8px;border-radius:50%} #tplBestModal .tpl-chip em{font-style:normal;font-weight:600;color:var(--good)}
+  /* Spur je ID: Höhe wächst mit den Lanes (--n), Pillen statt Punkte (07.10.2026) */
+  #tpl-view .tpl-spur{position:relative;display:flex;height:calc(12px + var(--n,1) * 28px);min-height:48px;border-top:1px solid var(--border-soft)}
   #tpl-view .tpl-spur.erste{border-top:0}
   #tpl-view .tpl-name{position:sticky;left:0;z-index:4;flex:0 0 var(--nw);display:flex;flex-direction:column;justify-content:center;gap:2px;padding-right:8px;background:var(--surface);font-size:12.5px;min-width:0}
   #tpl-view .tpl-name b{display:flex;align-items:center;gap:6px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -1788,23 +1798,25 @@
   #tpl-view .tpl-bahn{position:relative;flex:1 1 auto;min-width:0;z-index:1}
   #tpl-view .tpl-bahn::before{content:'';position:absolute;left:0;right:0;top:50%;height:2px;margin-top:-1px;border-radius:1px;background:var(--id,var(--sub-2));opacity:.3}
   #tpl-view .tpl-bahn .leer{position:absolute;left:8px;top:50%;transform:translateY(-130%);font-size:11px;color:var(--sub-2)}
-  #tpl-view .tpl-t{position:absolute;top:50%;width:22px;height:22px;margin:-11px 0 0 -11px;padding:0;border:0;border-radius:50%;background:none;cursor:pointer;font:inherit;color:var(--ink);z-index:1}
-  #tpl-view .tpl-t:hover,#tpl-view .tpl-t.wahl{z-index:3}
-  #tpl-view .tpl-t .g{position:relative;display:block;font-size:17px;line-height:22px;text-align:center;z-index:1}
+  #tpl-view .tpl-t{position:absolute;display:inline-flex;align-items:center;gap:5px;height:24px;max-width:180px;padding:0 8px 0 6px;border:1px solid var(--border);border-radius:999px;background:var(--surface);cursor:pointer;font:inherit;font-size:11.5px;line-height:1;color:var(--ink);white-space:nowrap;z-index:1;box-shadow:0 1px 2px rgba(16,24,40,.06)}
+  #tpl-view .tpl-t:hover,#tpl-view .tpl-t.wahl{z-index:3;border-color:var(--sub-2)}
+  #tpl-view .tpl-t.wahl{box-shadow:0 0 0 2px var(--surface),0 0 0 3.5px var(--violet)}
+  #tpl-view .tpl-t .g{font-size:12px;flex:none}
   #tpl-view .tpl-t.long .g{color:var(--good)} #tpl-view .tpl-t.short .g{color:var(--danger)}
-  #tpl-view .tpl-t.wahl::before{content:'';position:absolute;inset:-4px;border-radius:50%;background:var(--violet-tint);box-shadow:0 0 0 1.5px var(--violet)}
-  #tpl-view .tpl-t .lab{position:absolute;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;line-height:1.15;white-space:nowrap;pointer-events:none;padding:0 2px;border-radius:4px;background:color-mix(in srgb,var(--surface) 82%,transparent)}
-  #tpl-view .tpl-t.oben .lab{bottom:100%;margin-bottom:1px}
-  #tpl-view .tpl-t.unten .lab{top:100%;margin-top:1px;flex-direction:column-reverse}
-  #tpl-view .tpl-t .lab .f{font-size:10.5px;color:var(--sub);font-variant-numeric:tabular-nums}
-  #tpl-view .tpl-t .lab .f i{display:inline-block;width:6px;height:6px;border-radius:2px;margin-right:3px;vertical-align:1px}
-  #tpl-view .tpl-t .lab b{font-size:12px;font-weight:700;font-variant-numeric:tabular-nums}
-  #tpl-view .tpl-t .lab b .p{color:var(--violet);font-size:9px;vertical-align:1px;margin-right:2px}
-  #tpl-view .tpl-t.beendet,#tpl-view .tpl-t.vorbei{opacity:.45}
+  #tpl-view .tpl-t .n{display:inline-flex;align-items:center;gap:4px;color:var(--sub);font-variant-numeric:tabular-nums;flex:none}
+  #tpl-view .tpl-t .n i{display:inline-block;width:6px;height:6px;border-radius:2px;flex:none}
+  #tpl-view .tpl-t b{font-weight:700;font-variant-numeric:tabular-nums;flex:none}
+  #tpl-view .tpl-t .z{color:var(--sub-2);font-variant-numeric:tabular-nums;flex:none}
+  #tpl-view .tpl-t .p{color:var(--violet);font-size:9px;flex:none;animation:tplPuls 1.6s ease-in-out infinite}
+  @keyframes tplPuls{0%,100%{opacity:1}50%{opacity:.2}}
+  #tpl-view .tpl-t.offen{border-style:dashed;background:color-mix(in srgb,var(--surface) 75%,transparent)}
+  #tpl-view .tpl-t.offen b{font-weight:600;color:var(--sub)}
+  #tpl-view .tpl-t.bestaetigt{background:color-mix(in srgb,var(--good) 7%,var(--surface));border-color:color-mix(in srgb,var(--good) 35%,var(--border))}
+  #tpl-view .tpl-t.laeuft{background:var(--violet-tint);border-color:color-mix(in srgb,var(--violet) 45%,var(--border))}
+  #tpl-view .tpl-t.beendet,#tpl-view .tpl-t.vorbei{background:var(--surface-tint);border-color:var(--border-soft);color:var(--sub);opacity:.72}
   #tpl-view .tpl-t.beendet:hover,#tpl-view .tpl-t.vorbei:hover,#tpl-view .tpl-t.beendet.wahl,#tpl-view .tpl-t.vorbei.wahl{opacity:1}
-  #tpl-view .tpl-t.erg-gut .g,#tpl-view .tpl-t.erg-gut .lab b{color:var(--good)}
-  #tpl-view .tpl-t.erg-rot .g,#tpl-view .tpl-t.erg-rot .lab b{color:var(--danger)}
-  #tpl-view .tpl-t.erg-null .g,#tpl-view .tpl-t.vorbei .g{color:var(--sub-2)}
+  #tpl-view .tpl-t.beendet .g,#tpl-view .tpl-t.vorbei .g{color:var(--sub-2)}
+  #tpl-view .tpl-t.erg-gut b{color:var(--good)} #tpl-view .tpl-t.erg-rot b{color:var(--danger)} #tpl-view .tpl-t.erg-null b{color:var(--sub-2)}
   #tpl-view .tpl-achse{position:relative;height:18px;margin-left:var(--nw);font-size:10.5px;color:var(--sub-2);font-variant-numeric:tabular-nums;border-top:1px solid var(--border-soft)}
   #tpl-view .tpl-achse span{position:absolute;top:3px;transform:translateX(-50%);white-space:nowrap}
   #tpl-view .tpl-achse span.links{transform:none} #tpl-view .tpl-achse span.rechts{transform:translateX(-100%)}
@@ -1830,12 +1842,20 @@
   #tpl-view .tpl-akt .knopf:disabled{opacity:.4;cursor:default}
   #tpl-view .tpl-akt input[type=time]{height:30px;padding:0 6px;font-size:12.5px;width:104px}
   #tpl-view .tpl-meldung{margin-top:6px;color:var(--danger);font-size:12px;font-weight:500}
-  #tpl-view .tpl-ab-z{display:grid;grid-template-columns:170px minmax(0,1fr);gap:6px 12px;align-items:start;padding:8px 0;border-top:1px solid var(--border-soft)}
+  #tpl-view .tpl-ab-z{padding:3px 0;border-top:1px solid var(--border-soft)}
   #tpl-view .tpl-ab-z.erste{border-top:0}
-  #tpl-view .tpl-ab-kopf b{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  #tpl-view .tpl-ab-kopf b i{width:9px;height:9px;border-radius:50%;flex:none}
-  #tpl-view .tpl-ab-kopf span{display:block;font-size:11.5px;color:var(--sub);font-variant-numeric:tabular-nums;padding-left:15px;white-space:nowrap}
-  #tpl-view .tpl-ab-kopf span b{display:inline;font-size:inherit;color:var(--good)}
+  #tpl-view .tpl-ab-kopf{display:grid;grid-template-columns:170px minmax(60px,1fr) auto 16px;gap:4px 12px;align-items:center;width:100%;padding:6px 4px;border:0;border-radius:6px;background:none;font:inherit;text-align:left;cursor:pointer;color:var(--ink)}
+  #tpl-view .tpl-ab-kopf:hover{background:var(--surface-tint)}
+  #tpl-view .tpl-ab-kopf>b{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  #tpl-view .tpl-ab-kopf>b i{width:9px;height:9px;border-radius:50%;flex:none}
+  #tpl-view .tpl-ab-balken{display:flex;height:8px;border-radius:4px;overflow:hidden;background:var(--surface-tint)}
+  #tpl-view .tpl-ab-balken i{display:block;height:100%;min-width:3px}
+  #tpl-view .tpl-ab-balken i.lauf{background:var(--violet)} #tpl-view .tpl-ab-balken i.plan{background:var(--good)}
+  #tpl-view .tpl-ab-balken i.fertig{background:color-mix(in srgb,var(--sub) 35%,#fff)} #tpl-view .tpl-ab-balken i.offen{background:var(--sub-2);opacity:.45}
+  #tpl-view .tpl-ab-kopf>span.t{font-size:11.5px;color:var(--sub);font-variant-numeric:tabular-nums;white-space:nowrap}
+  #tpl-view .tpl-ab-kopf>span.t b{font-weight:600} #tpl-view .tpl-lila{color:var(--violet)}
+  #tpl-view .tpl-ab-kopf>em{font-style:normal;color:var(--sub-2);text-align:center}
+  #tpl-view .tpl-ab-z .tpl-chips{padding:2px 4px 8px}
   #tpl-view .tpl-chips{display:flex;flex-wrap:wrap;gap:5px;min-width:0}
   #tpl-view .tpl-chip{display:inline-flex;align-items:center;gap:5px;max-width:100%;border:1px solid var(--border);border-radius:999px;padding:2px 9px;font:inherit;font-size:11.5px;color:var(--sub);background:var(--surface);white-space:nowrap;font-variant-numeric:tabular-nums;cursor:default}
   #tpl-view .tpl-chip[data-tpl-t]{cursor:pointer}
@@ -1848,6 +1868,19 @@
   #tpl-view .tpl-chip.grau{background:var(--surface-tint);border-color:var(--border-soft)}
   #tpl-view .tpl-chip.grau em{font-weight:500}
   #tpl-view .tpl-leer{padding:14px 4px;color:var(--sub-2);font-size:12.5px;text-align:center}
+  /* Braucht dich (07.10.2026): ruhiger Block je ID — Zeile = Symbol · Firma · Klartext · kleine Aktion */
+  #tpl-view .tpl-bd{border-color:color-mix(in srgb,#B45309 35%,var(--border))}
+  #tpl-view .tpl-bd-id{padding:3px 0 2px;border-top:1px solid var(--border-soft)} #tpl-view .tpl-bd-id:first-of-type{border-top:0}
+  #tpl-view .tpl-bd-id>b{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;margin:2px 0 3px}
+  #tpl-view .tpl-bd-id>b i{width:9px;height:9px;border-radius:50%;flex:none} #tpl-view .tpl-bd-id>b span{font-weight:500;color:var(--sub-2);font-variant-numeric:tabular-nums}
+  #tpl-view .tpl-bd-z{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:3px 0 3px 15px;font-size:12.5px;min-width:0}
+  #tpl-view .tpl-bd-z em{font-style:normal;flex:none;width:16px;text-align:center;color:var(--sub)}
+  #tpl-view .tpl-bd-z.plan em{color:var(--danger)} #tpl-view .tpl-bd-z.balance em{color:var(--violet)}
+  #tpl-view .tpl-bd-z .k{display:inline-flex;align-items:center;gap:4px;flex:none;color:var(--sub);font-variant-numeric:tabular-nums} #tpl-view .tpl-bd-z .k i{width:7px;height:7px;border-radius:2px}
+  #tpl-view .tpl-bd-z .t{flex:1 1 220px;min-width:0;color:var(--ink)}
+  #tpl-view .tpl-bd-z .s{font-size:11.5px;color:var(--sub-2)} #tpl-view .tpl-bd-z .s.rot{color:var(--danger)}
+  #tpl-view .tpl-bd-z .knopf{border:1px solid var(--border);background:var(--surface);border-radius:7px;height:26px;padding:0 9px;font:inherit;font-size:12px;color:var(--ink-2);cursor:pointer;white-space:nowrap}
+  #tpl-view .tpl-bd-z .knopf:hover:not(:disabled){border-color:var(--sub-2);background:var(--surface-tint)}
   #tpl-view #apLeiste,#tpl-view #apDelta{margin:0 0 12px}
   @media (max-width:760px){
     #tpl-view .kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
@@ -1855,7 +1888,11 @@
     #tpl-view .kpi-delta{white-space:normal}
     #tpl-view .tpl-innen{--nw:86px}
     #tpl-view .tpl-name{font-size:12px}
-    #tpl-view .tpl-ab-z{grid-template-columns:minmax(0,1fr)}
+    #tpl-view .tpl-ab-kopf{grid-template-columns:minmax(0,1fr) minmax(50px,100px) 16px;gap:3px 8px}
+    #tpl-view .tpl-ab-kopf>span.t{grid-column:1/-1;white-space:normal}
+    #tpl-view .tpl-ab-kopf>em{grid-row:1;grid-column:3}
+    #tpl-view .tpl-t{font-size:11px;max-width:160px;padding:0 7px 0 5px}
+    #tpl-view .tpl-ids .adm-vl-chip{font-size:11.5px;padding:3px 8px}
   }
   /* Winning-Day-Farmer im Admin (23.09.2026, Finn: „mach alles in Admin und mehr Überblick"; dann „mies
      hässlich und man checkt nix — erklär mal visuell"; 01:xx: „der Erklärblock und der Zeitstrahl sind
@@ -7305,6 +7342,20 @@
 
     <!-- Probelauf Auto-Planer (06.10.2026): „so würde der Auto-Planer planen" — nur gerechnet, nichts angelegt.
          Inhalt zeichnet apPrZeichnen (Sektion AUTO-PLANER), eigene Verdrahtung dort. -->
+    <!-- Trade-Planer (07.10.2026): Rückfrage „Alle offenen bestätigen" — eigene Verdrahtung tplBest*, kein Sammel-Handler -->
+    <div class="modal-bg" id="tplBestModal">
+      <div class="modal" style="max-width:440px">
+        <div class="modal-head">
+          <h3>Vorschläge bestätigen</h3>
+          <button class="modal-x" id="tplBestX" aria-label="Schließen">✕</button>
+        </div>
+        <div class="modal-body" id="tplBestBody" style="font-size:13px"></div>
+        <div class="modal-foot">
+          <button class="btn btn-ghost" id="tplBestNein">Abbrechen</button>
+          <button class="btn btn-primary" id="tplBestJa">✓ Bestätigen</button>
+        </div>
+      </div>
+    </div>
     <div class="modal-bg" id="apProbeModal">
       <div class="modal">
         <div class="modal-head">
@@ -39830,7 +39881,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1108'
+  const OS_TAB_BUILD = '2026-09-22.1109'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -43881,7 +43932,10 @@
     const tok = session?.access_token; if(!tok) throw new Error('nicht angemeldet')
     // eigener Anzeigename wie im Backend (ap_planen: user_metadata.name, sonst Teil vor dem @) — für den Filter auf die eigene ID
     try{ const u = session.user || {}; _ap.ich = { id: String(u.id || ''), name: String(u.user_metadata?.name || '').trim() || String(u.email || '').split('@')[0] } }catch(_){}
-    const r = await fetch(`${WATCHER_HOME}/admin/auto-plan`, { method, headers: { 'sb-token': tok, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+    // TRADE-PLANER-ALLE-IDS (07.10.2026, Finn: „alle IDs … zusammen in diesem Zeitstrahl"): auf der Trade-Planer-Seite holt GET alle
+    // IDs (?sicht=alle; das Backend lässt „nur eigene"-Logins bei der eigenen Sicht), überall sonst wie bisher die eigene Sicht
+    const sicht = (method === 'GET' && typeof window._tplSicht === 'function') ? window._tplSicht() : ''
+    const r = await fetch(`${WATCHER_HOME}/admin/auto-plan${sicht}`, { method, headers: { 'sb-token': tok, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
     const d = await r.json().catch(() => ({}))
     if(!r.ok || d.ok === false){ const f = new Error(d.msg || d.error || ('HTTP ' + r.status)); f.daten = d; throw f }   // daten: z. B. abweichung (Probelauf)
     return d
@@ -44304,7 +44358,7 @@
     if(!sofort && _apd.weg && Date.now() - _apd.weg < 600000) return
     _apd.laeuft = true
     try{
-      const d = await apdApi('GET', '/delta')
+      const d = await apdApi('GET', '/delta' + (typeof window._tplSicht === 'function' ? window._tplSicht() : ''))   // Trade-Planer-Seite: alle IDs (07.10.2026)
       _apd.d = d; _apd.fehler = ''; _apd.weg = 0
     }catch(e){
       if(e && (e.status === 404 || e.status === 405)){ _apd.d = null; _apd.weg = Date.now() }   // Route fehlt: alte Anzeige, Karte aus
@@ -44590,7 +44644,13 @@
    * Zeiten: der Planer rechnet in Minuten seit 00:00 deutscher Zeit; angezeigt wird Dubai (Gerätezeit) mit dem echten Versatz des
    * Tages (Sommer 2 h, Winter 3 h). Netto-Linie: jeder Trade zählt ab Start laufzeit_min lang (aus dem Lauf, sonst 180 min) mit seinem
    * Einsatz, beendete bis zu ihrem Ende, laufende mindestens bis jetzt; gehedgte zählen 0 — wie ap_verlauf im Backend. */
-  const _tpl = { tag: 'heute', wahl: null, edit: null, busy: false, meldung: '', timer: null, geladen: 0, laeuft: false, fehler: '', weg: new Set(), stub: false }
+  const _tpl = { tag: 'heute', wahl: null, edit: null, busy: false, meldung: '', timer: null, geladen: 0, laeuft: false, fehler: '', weg: new Set(), stub: false,
+    sicht: 'alle', abAuf: new Map() }   // sicht: ID-Chip („alle" | user_id), abAuf: Konten-Abdeckung je ID auf/zu (07.10.2026)
+  try{ const s = localStorage.getItem('prophos_tpl_sicht'); if(s) _tpl.sicht = s }catch(_){}
+  // ALLE IDS (07.10.2026, Finn 03:25 dt: „Es ist nur die ID, von der ich gerade eingeloggt bin. So hässlich, man erkennt gar nichts"):
+  // solange diese Seite offen ist, fragen apApi (Lauf) und apdLaden (Delta) mit ?sicht=alle — das Backend liefert dann alle IDs
+  // (außer „nur eigene"-Logins, die bleiben bei der eigenen). Gefiltert wird nur noch hier über die ID-Chips.
+  window._tplSicht = () => document.querySelector('#tpl-view.active') ? '?sicht=alle' : ''
   const TPL_LAUFZEIT = 180                               // ap_ausgleich_param.laufzeit_min (Standard), wenn der Lauf keinen Wert mitschickt
   const TPL_TYPEN = ['challenge', 'phase1', 'phase2']   // AP_TYPEN im Planer
   const tplDatum = d => d.toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' })
@@ -44650,7 +44710,7 @@
         menge: tplNum(x.menge) ?? tplNum(g && g.menge) ?? (p ? p.masterContracts : null),
         tp: tplNum(g && g.tp) ?? (p ? p.masterTp : null), sl: tplNum(g && g.sl) ?? (p ? p.masterSl : null),
         tp_punkte: tplNum(x.tp_punkte) ?? tplNum(g && g.tp_punkte), sl_punkte: tplNum(x.sl_punkte) ?? tplNum(g && g.sl_punkte),
-        stufe: (g && g.stufe) || stufeAus(p), wert: tplNum(x.wert_eur), gehedgt: !!x.gehedgt, einsatz: ein != null ? Math.abs(ein) : null,
+        stufe: (g && g.stufe) || stufeAus(p), wert: tplNum(x.wert_eur), gehedgt: !!x.gehedgt, einsatz: ein != null ? Math.abs(ein) : null, hinweis: x.hinweis || (g && g.hinweis) || null,
         eigen: !!p, auto: x.auto_plan != null ? !!x.auto_plan : p ? !!p.autoPlan : true, ...mehr }
       t.long = t.richtung === 'buy'
       t.key = String(t.plan_id)
@@ -44751,26 +44811,34 @@
       const x = (h - VON) / (BIS - VON) * 100
       achse.push(`<span class="${x < 3 ? 'links' : x > 97 ? 'rechts' : ''}" style="left:${x.toFixed(2)}%">${tplUhr(h - v, v)}</span>`)
     }
+    // PILLEN JE SPUR (07.10.2026, Finn: „so hässlich, man erkennt gar nichts"): je Trade eine Pille mit Richtung, Firma, Einsatz und
+    // Startzeit (Dubai) statt Punkt + Schild. Pillen, die sich zeitlich überschneiden (Tranche: Konten 1–2 min versetzt), rücken in die
+    // nächste Lane derselben Spur, die Spur wächst mit (--n). Am rechten Rand hängt die Pille links an ihrer Startzeit (rechts).
+    // Beendete blass mit Ergebnis, laufende mit Puls-Punkt, unbestätigte gestrichelt. Konto-Endziffern nur im Tooltip/Detail (Platz).
+    const schmal = (window.innerWidth || 1280) <= 760, nw = schmal ? 86 : 108, rootEl = document.getElementById('tpl-root')
+    const bahnPx = Math.max(720, (rootEl && rootEl.clientWidth) || 0) - nw - 26
+    const PILL = schmal ? 120 : 142, pillMin = PILL / bahnPx * (BIS - VON), pillPct = PILL / bahnPx * 100   // typische Pillenbreite in px (Lane-Rechnung)
     const zeilen = spuren.map((s, i) => {
       const liste = D.trades.filter(t => t.user_id === s.uid)
       const n = liste.length, nl = liste.filter(t => t.status === 'laeuft').length
-      // Beschriftung über/unter der Spur: abwechselnd, wo es eng wird — die Seite mit dem größeren Abstand zum letzten Schild gewinnt
-      let lzO = -1e9, lzU = -1e9
-      const seite = liste.map(t => { const x = X(t.start), o = x - lzO, u = x - lzU
-        if(o >= 9 || o >= u){ lzO = x; return 'oben' } lzU = x; return 'unten' })
-      const marker = liste.map((t, j) => {
-        const kurz = apPrKurz(t.firma), glyph = t.long ? (t.status === 'offen' ? '△' : '▲') : (t.status === 'offen' ? '▽' : '▼')
-        const erg = t.status === 'beendet' ? (t.pnl > 0 ? ' erg-gut' : t.pnl < 0 ? ' erg-rot' : ' erg-null') : ''
-        const wert = t.gehedgt ? 'gehedgt' : t.einsatz != null ? tplEur(t.einsatz) : '—'
+      const lanes = []   // belegtes Ende (Minute Dubai) je Lane
+      const marker = liste.map(t => {
+        const m = t.start + v, x = X(t.start), rechts = x > 100 - pillPct && x > pillPct
+        const a = rechts ? m - pillMin : m, b = rechts ? m : m + pillMin
+        let lane = lanes.findIndex(e => e <= a + 0.5)
+        if(lane < 0){ lane = lanes.length; lanes.push(0) }
+        lanes[lane] = b
+        const kurz = apPrKurz(t.firma), glyph = t.long ? '▲' : '▼'
+        const erg = t.status === 'beendet' && t.pnl != null ? (t.pnl > 0 ? ' erg-gut' : t.pnl < 0 ? ' erg-rot' : ' erg-null') : ''
+        const wert = t.status === 'beendet' && t.pnl != null ? (t.pnl > 0 ? '+' : '') + tplUsd(t.pnl) : t.gehedgt ? 'gehedgt' : t.einsatz != null ? tplEur(t.einsatz) : '—'
         const titel = [`${t.user} · ${t.firma}${t.ende4 ? ' …' + t.ende4 : ''}`, `${t.long ? 'Long' : 'Short'} ${tplUhr(t.start, v)}${t.startUnklar ? ' (Start unbekannt)' : ''} · ${TPL_WORT[t.status] || t.status}`,
-          t.wert != null ? `Kontowert ${tplEur(t.wert)}` : '', `Einsatz ${wert}`, t.menge != null ? `Größe ${t.menge}` : '',
+          t.wert != null ? `Kontowert ${tplEur(t.wert)}` : '', `Einsatz ${t.gehedgt ? 'gehedgt' : t.einsatz != null ? tplEur(t.einsatz) : '—'}`, t.menge != null ? `Größe ${t.menge}` : '',
           [t.tp != null ? 'TP ' + tplUsd(t.tp) : '', t.sl != null ? 'SL ' + tplUsd(t.sl) : ''].filter(Boolean).join(' · '),
           t.stufe || '', t.status === 'beendet' && t.pnl != null ? `Ergebnis ${t.pnl > 0 ? '+' : ''}${tplUsd(t.pnl)}` : ''].filter(Boolean).join('\n')
-        return `<button type="button" class="tpl-t ${t.long ? 'long' : 'short'} ${t.status}${erg} ${seite[j]}${_tpl.wahl === t.key ? ' wahl' : ''}" style="left:${X(t.start).toFixed(2)}%" data-tpl-t="${escapeHtml(t.key)}" title="${escapeHtml(titel)}">
-            <span class="lab"><span class="f"><i style="background:${apdFirmaTon(t.firma)}"></i>${escapeHtml(kurz)}${t.ende4 ? ' …' + escapeHtml(t.ende4) : ''}</span><b>${t.status === 'laeuft' ? '<span class="p">●</span>' : ''}${wert}</b></span>
-            <span class="g">${glyph}</span></button>`
+        return `<button type="button" class="tpl-t ${t.long ? 'long' : 'short'} ${t.status}${erg}${rechts ? ' rechts' : ''}${_tpl.wahl === t.key ? ' wahl' : ''}" style="${rechts ? 'right:' + (100 - x).toFixed(2) : 'left:' + x.toFixed(2)}%;top:${6 + lane * 28}px" data-tpl-t="${escapeHtml(t.key)}" title="${escapeHtml(titel)}">
+            ${t.status === 'laeuft' ? '<span class="p">●</span>' : ''}<span class="g">${glyph}</span><span class="n"><i style="background:${apdFirmaTon(t.firma)}"></i>${escapeHtml(kurz)}</span><b>${wert}</b><span class="z">${tplUhr(t.start, v)}</span></button>`
       }).join('')
-      return `<div class="tpl-spur${i ? '' : ' erste'}" style="--id:${idFarbe(s.uid)}">
+      return `<div class="tpl-spur${i ? '' : ' erste'}" style="--id:${idFarbe(s.uid)};--n:${Math.max(1, lanes.length)}">
           <div class="tpl-name"><b title="${escapeHtml(s.name)}"><i style="background:${idFarbe(s.uid)}"></i>${escapeHtml(s.name || '—')}</b><span>${n} Trade${n === 1 ? '' : 's'}${nl ? ` · ${nl} ●` : ''}</span></div>
           <div class="tpl-bahn">${marker || '<span class="leer">—</span>'}</div></div>`
     }).join('')
@@ -44806,7 +44874,7 @@
     const vz = n => (n > 0 ? '+' : n < 0 ? '−' : '') + tplEur(n)
     const netto = `<div class="tpl-netto"><div class="tpl-name"><b>Netto</b><span>${nJetzt != null ? 'jetzt ' + vz(nJetzt) : 'max ' + tplEur(Math.max(...reihe.map(p => Math.abs(p.netto))))}</span></div>
         <div class="tpl-bahn" title="Netto-Einsatz (Long − Short) in € · grün = Band · gestrichelt = geplant"><span class="skala">±${tplEur(max)}</span>${svg}</div></div>`
-    const leg = `<span class="leg"><span><span class="g tpl-gut">▲</span> Long</span><span><span class="g tpl-rot">▼</span> Short</span><span>△▽ unbestätigt</span><span><span style="color:var(--violet)">●</span> läuft</span><span>blass = beendet</span></span>`
+    const leg = `<span class="leg"><span><span class="g tpl-gut">▲</span> Long</span><span><span class="g tpl-rot">▼</span> Short</span><span>gestrichelt = unbestätigt</span><span><span style="color:var(--violet)">●</span> läuft</span><span>blass = beendet</span></span>`
     return `<div class="tpl-karte"><div class="tpl-h">Zeitstrahl <b>${D.trades.length}</b>${leg}</div>
         <div class="tpl-scroll"><div class="tpl-innen"><div class="tpl-raster">${raster.join('')}</div>
           ${zeilen || '<div class="tpl-leer">—</div>'}${netto}<div class="tpl-achse">${achse.join('')}</div></div></div></div>`
@@ -44832,8 +44900,13 @@
       else kn.push(`<button type="button" class="knopf" data-tpl-akt="tausch"${_tpl.busy || fest ? ' disabled' : ''} title="${escapeHtml(fest ? 'Richtung fest: ' + fest : 'Richtung tauschen')}">${fest ? '🔒' : '⇅'} Richtung</button>`,
         `<button type="button" class="knopf" data-tpl-akt="start"${_tpl.busy || t.aenderbar === false ? ' disabled' : ''} title="${escapeHtml(t.aenderbar === false && t.fest ? t.fest : 'Start verschieben')}">🕑 Start</button>`)
     }
-    if(echt && t.eigen && t.status === 'offen' && t.auto) kn.push(`<button type="button" class="knopf" data-tpl-akt="ok"${_tpl.busy ? ' disabled' : ''}>✓ Bestätigen</button>`)
-    if(echt && t.eigen && vor) kn.push(`<button type="button" class="knopf" data-tpl-akt="weg"${_tpl.busy ? ' disabled' : ''} title="Plan löschen (5 s Rückgängig)">🗑</button>`)
+    // BESTÄTIGEN FÜR ALLE IDS (07.10.2026, Finn: „eine Seite, wo ich alle Trades sehe UND bestätigen kann"): eigene Pläne wie bisher per
+    // supabase-js (RLS), Vorschläge fremder IDs nur für den Admin über die Backend-Routen (tplEingriff, Gate ADMIN_EMAILS);
+    // ↶ nimmt eine Bestätigung zurück, solange der Plan nicht gestartet ist
+    const darf = t.eigen || (admin && t.auto)
+    if(echt && darf && t.status === 'offen' && t.auto) kn.push(`<button type="button" class="knopf" data-tpl-akt="ok"${_tpl.busy ? ' disabled' : ''}>✓ Bestätigen</button>`)
+    if(echt && darf && t.status === 'bestaetigt' && t.auto) kn.push(`<button type="button" class="knopf" data-tpl-akt="zurueck"${_tpl.busy ? ' disabled' : ''} title="Bestätigung zurücknehmen — der Plan startet dann nicht">↶ Zurücknehmen</button>`)
+    if(echt && darf && vor) kn.push(`<button type="button" class="knopf" data-tpl-akt="weg"${_tpl.busy ? ' disabled' : ''} title="${t.eigen ? 'Plan löschen (5 s Rückgängig)' : 'Vorschlag löschen (sofort, kein Rückgängig)'}">🗑</button>`)
     kn.push(`<span style="flex:1"></span><button type="button" class="knopf" data-tpl-akt="zu" title="Schließen">✕</button>`)
     return `<div class="tpl-detail"><div class="k"><i class="id" style="background:${idFarbe(t.user_id)}"></i><b>${escapeHtml(t.user || '—')}</b>
         <span><i class="apd-f" style="display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:4px;background:${apdFirmaTon(t.firma)}"></i>${escapeHtml(t.firma || '?')}${t.ende4 ? ' …' + escapeHtml(t.ende4) : ''}</span>
@@ -44887,19 +44960,105 @@
     return [...ids.values()]
   }
   function tplAbdeckungHtml(D, liste){
+    // JE ID EIN BLOCK, AUFKLAPPBAR (07.10.2026): Kopfzeile = ID, Balken läuft/geplant/fertig/offen, Zahlen; Chips erst beim Aufklappen.
+    // Offen ist der Block, den der Nutzer aufgeklappt hat (_tpl.abAuf), die per Chip gewählte ID oder die einzige ID der Liste.
     const roh = D.roh
     const zeilen = liste.map((o, i) => {
       const aktiv = o.chips.length, geplant = o.chips.filter(c => c.plan).length
+      const z = { lauf: o.chips.filter(c => c.kl === 'lauf').length, fertig: o.chips.filter(c => c.plan && c.kl === 'grau').length }
+      z.plan = Math.max(0, geplant - z.lauf - z.fertig); z.offen = Math.max(0, aktiv - geplant)
+      const auf = _tpl.abAuf.has(o.uid) ? !!_tpl.abAuf.get(o.uid) : (_tpl.sicht === o.uid || liste.length === 1)
       const chips = o.chips.map(c => {
         const e4 = tplEnde4(c.r)
         return `<span class="tpl-chip ${c.kl}"${c.t ? ` data-tpl-t="${escapeHtml(c.t.key)}"` : ''} title="${escapeHtml(c.titel)}"><i style="background:${apdFirmaTon(c.r.firma)}"></i>${escapeHtml(apPrKurz(c.r.firma))}${e4 ? ' …' + escapeHtml(e4) : ''} <em>${escapeHtml(c.wort)}</em></span>`
       })
       if(o.archiv.length) chips.push(`<span class="tpl-chip grau" title="${escapeHtml(o.archiv.slice(0, 30).map(a => `${a.firm} · ${a.name}`).join('\n'))}"><em>archiviert ×${o.archiv.length}</em></span>`)
-      return `<div class="tpl-ab-z${i ? '' : ' erste'}"><div class="tpl-ab-kopf"><b title="${escapeHtml(o.name)}"><i style="background:${idFarbe(o.uid)}"></i>${escapeHtml(o.name || '—')}</b>
-          <span>${aktiv} aktiv · <b>${geplant} geplant</b> · ${aktiv - geplant} offen</span></div><div class="tpl-chips">${chips.join('') || '<span class="tpl-grau">—</span>'}</div></div>`
+      const seg = (n, kl, t) => n ? `<i class="${kl}" style="flex:${n}" title="${n} ${t}"></i>` : ''
+      const balken = aktiv ? `<span class="tpl-ab-balken">${seg(z.lauf, 'lauf', 'läuft')}${seg(z.plan, 'plan', 'geplant')}${seg(z.fertig, 'fertig', 'fertig')}${seg(z.offen, 'offen', 'nicht geplant')}</span>` : '<span></span>'
+      return `<div class="tpl-ab-z${i ? '' : ' erste'}${auf ? ' auf' : ''}">
+          <button type="button" class="tpl-ab-kopf" data-tpl-ab="${escapeHtml(o.uid)}" title="${auf ? 'zuklappen' : 'aufklappen'}">
+            <b><i style="background:${idFarbe(o.uid)}"></i>${escapeHtml(o.name || '—')}</b>${balken}
+            <span class="t"><b class="tpl-gut">${geplant}</b> geplant${z.lauf ? ` · <b class="tpl-lila">${z.lauf}</b> läuft` : ''} · ${z.offen} offen · ${aktiv} aktiv${o.archiv.length ? ` · ${o.archiv.length} archiviert` : ''}</span><em>${auf ? '▾' : '▸'}</em>
+          </button>
+          ${auf ? `<div class="tpl-chips">${chips.join('') || '<span class="tpl-grau">—</span>'}</div>` : ''}</div>`
     }).join('')
     const lauf = roh ? `${roh.quelle === 'nacht' ? 'Nachtlauf' : 'Lauf'} ${apPrTagText(roh.tag)}${roh.at ? ' · ' + tplUhrIso(roh.at) : ''}` : 'kein Lauf'
     return `<div class="tpl-karte"><div class="tpl-h">Konten-Abdeckung<span class="leg">${escapeHtml(lauf)}</span></div>${zeilen || '<div class="tpl-leer">—</div>'}</div>`
+  }
+  /* BRAUCHT DICH (07.10.2026, Master-Ergänzung 05:15 Dubai, Finn: „Accounts, wo die Balance nicht live ist, automatisch erkannt; wo der
+   * Trade nicht gestartet werden kann, wo irgendein Fehler ist — dass die mir angezeigt werden, ich es kurz behebe, und der nächste Lauf
+   * plant es automatisch ein"): je ID Zeilen NUR aus Daten, die schon da sind — (1) eigene planbare Konten ohne Live-Balance oder älter
+   * als 24 h (accounts.tv_balance_at) mit „↻ Balance lesen" (accBalanceLesen, F19); fremde Konten nur aus ausgelassen[] mit Hinweis „am PC
+   * der ID lesen"; (2) heute ausgelassene Konten mit dem Grund des Planers (ohne „hat schon einen Plan"); (3) Pläne, die nicht starten
+   * konnten oder hängen: bestätigt und Start > 30 min vorbei, Puls unklar (puls_unklar-Marke), Start-Fehler (tv.fehler), Puls-Warnung
+   * (tv.warnung), Fusion-Hedge „fehler", Planer-Hinweis (Delta) — mit Sprung in die Detail-Ansicht; eigene Pläne in „Überprüfen" mit
+   * aufgegebener Endlesung / „Login prüfen" (final, tvV2LoginBremse). Unbestätigte Vorschläge sind kein Problem. Keine neue Prüfung,
+   * keine Bewertung: nur Zustand + Aktion. Das Nachplanen behobener Konten macht das Backend (10-min-Takt) — nach dem Neuladen ist die
+   * Zeile weg. */
+  const TPL_VERPASST_MIN = 30
+  function tplBraucht(D, sicht){
+    const je = new Map(), jetzt = Date.now(), ich = (_ap.ich && _ap.ich.name) || ''
+    const add = (uid, name, z) => { const k = String(uid || ''); if(!k || (sicht !== 'alle' && k !== sicht)) return
+      if(!je.has(k)) je.set(k, { uid: k, name: name || '', zeilen: [] }); const o = je.get(k); if(!o.name && name) o.name = name; o.zeilen.push(z) }
+    const roh = D.roh, tagGleich = roh && String(roh.tag || '') === D.tag, konten = new Set()
+    if(currentUserId){
+      const arch = typeof getArchive === 'function' ? (getArchive() || {}) : {}
+      for(const a of accounts || []){
+        if(!a || !TPL_TYPEN.includes(a.type) || /fusion/i.test(String(a.firm || '')) || (arch[a.id] && arch[a.id].archived)) continue
+        const at = Date.parse(a.tvBalanceAt || '') || 0
+        if(at && jetzt - at < 86400000) continue
+        const lauf = (typeof _accBalLauf !== 'undefined' && _accBalLauf.get(String(a.id))) || null
+        konten.add(tplKk(currentUserId, a.name))
+        add(currentUserId, ich, { art: 'balance', firma: a.firm, konto: a.name, ende4: String(a.externalId || '').replace(/\D/g, '').slice(-4),
+          text: at ? `Balance ${Math.round((jetzt - at) / 3600000)} h alt (${new Date(at).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })})` : 'keine Live-Balance',
+          bal: String(a.id), lauf })
+      }
+    }
+    if(tagGleich) for(const x of roh.ausgelassen || []){
+      const g = String(x.grund || '')
+      if(/geplanten\/laufenden Plan/.test(g)) continue
+      const k = tplKk(x.user_id, x.konto); if(konten.has(k)) continue; konten.add(k)
+      const bal = /keine Balance|nicht live/.test(g), fremd = String(x.user_id) !== String(currentUserId)
+      add(x.user_id, x.user, { art: bal ? 'balance' : 'ausgelassen', firma: x.firma, konto: x.konto, ende4: tplEnde4(x), text: g, hinweis: bal && fremd ? 'am PC der ID lesen' : '' })
+    }
+    for(const t of D.trades){
+      const p = t.eigen ? (tradePlans || []).find(x => String(x.id) === t.plan_id) : null, b = (p && p.mt5Baseline) || {}
+      const probleme = []
+      if(t.status === 'bestaetigt' && D.tag === D.heute && D.jetzt != null && t.start + TPL_VERPASST_MIN < D.jetzt) probleme.push(`verpasst — Start ${tplUhr(t.start, D.v)} ist vorbei, nie gestartet`)
+      if(b.puls_unklar) probleme.push(`Puls: Ergebnis unklar${b.puls_unklar.msg ? ' — ' + b.puls_unklar.msg : ''}`)
+      if(b.tv && b.tv.fehler) probleme.push(`Start-Fehler: ${b.tv.msg || b.tv.fehler}${b.tv.code ? ' (' + b.tv.code + ')' : ''}`)
+      if(b.tv && b.tv.warnung) probleme.push(`Puls: ${b.tv.warnung}`)
+      if(b.hedge && b.hedge.status === 'fehler') probleme.push(`Fusion-Hedge: ${b.hedge.msg || 'Fehler'}`)
+      if(t.hinweis) probleme.push(String(t.hinweis))
+      for(const txt of probleme) add(t.user_id, t.user, { art: 'plan', firma: t.firma, konto: t.konto, ende4: t.ende4, text: txt, key: t.key })
+    }
+    if(currentUserId) for(const p of tradePlans || []){
+      if(!p || p.status !== 'review' || !p.mt5Baseline) continue
+      const fin = p.mt5Baseline.final, b = p.mt5Baseline
+      let txt = ''
+      if(fin && fin.puls_aufgegeben) txt = 'Endlesung aufgegeben — ' + String(fin.puls_fehler || 'ohne Grund')
+      else if(fin && typeof tvV2LoginBremse === 'function'){ try{ const lb = tvV2LoginBremse(fin, jetzt); if(lb && lb.pruefen) txt = `Wartet · Login prüfen — ${lb.n} Lesungen scheiterten` }catch(_){} }
+      if(!txt && b.hedge && b.hedge.status === 'fehler') txt = `Fusion-Hedge: ${b.hedge.msg || 'Fehler'}`
+      if(txt) add(currentUserId, ich, { art: 'plan', firma: p.masterFirm, konto: p.masterName, ende4: '', text: txt })
+    }
+    return [...je.values()]
+  }
+  function tplBrauchtHtml(liste){
+    if(!liste.length) return ''
+    const n = liste.reduce((a, o) => a + o.zeilen.length, 0), ICON = { balance: '↻', ausgelassen: '⏸', plan: '⚠' }
+    const bloecke = liste.map(o => `<div class="tpl-bd-id"><b><i style="background:${idFarbe(o.uid)}"></i>${escapeHtml(o.name || '—')}<span>${o.zeilen.length}</span></b>
+      ${o.zeilen.map(z => `<div class="tpl-bd-z ${z.art}"><em>${ICON[z.art] || '•'}</em><span class="k" title="${escapeHtml(z.konto || '')}"><i style="background:${apdFirmaTon(z.firma)}"></i>${escapeHtml(apPrKurz(z.firma))}${z.ende4 ? ' …' + escapeHtml(z.ende4) : ''}</span><span class="t">${escapeHtml(z.text)}</span>
+        ${z.bal ? (z.lauf && z.lauf.laeuft ? `<span class="s">${escapeHtml(z.lauf.text || 'liest …')}</span>`
+          : `<button type="button" class="knopf" data-tpl-bal="${escapeHtml(z.bal)}">↻ Balance lesen</button>${z.lauf && z.lauf.text ? `<span class="s${z.lauf.fehler ? ' rot' : ''}">${escapeHtml(z.lauf.text)}</span>` : ''}`)
+          : z.hinweis ? `<span class="s">${escapeHtml(z.hinweis)}</span>` : z.key ? `<button type="button" class="knopf" data-tpl-t="${escapeHtml(z.key)}">→ Plan</button>` : ''}</div>`).join('')}</div>`).join('')
+    return `<div class="tpl-karte tpl-bd"><div class="tpl-h">Braucht dich <b>${n}</b><span class="leg">↻ Balance · ⏸ heute ausgelassen · ⚠ Plan hängt</span></div>${bloecke}</div>`
+  }
+  /* Sicht auf EINE ID (ID-Chip): Trades und Summen nur dieser ID — Band/Netto „jetzt" aus dem Delta bleiben über alle (so rechnet der Planer) */
+  function tplSichtFilter(D, uid){
+    const trades = D.trades.filter(t => t.user_id === uid)
+    let L = 0, S = 0
+    for(const t of trades) if(tplAktiv(t) && !t.gehedgt){ if(t.long) L += t.einsatz || 0; else S += t.einsatz || 0 }
+    return { ...D, trades, L, S }
   }
 
   function tplZeichnen(){
@@ -44918,9 +45077,24 @@
     const ohne = !D.trades.length && !ab.length && !_ap.imPlaner && _ap.admin !== true && !_tpl.stub
     // Handy: Zeitstrahl scrollt im eigenen Kasten — Position über das Neuzeichnen (60-s-Takt) halten, beim ersten Mal auf „jetzt"
     const altScroll = root.querySelector('.tpl-scroll'), scrollX = altScroll ? altScroll.scrollLeft : null
+    // ID-CHIPS (07.10.2026): „Alle" · je ID (Name + Farbe wie überall, Zahl der Trades, ● läuft) — Auswahl filtert Kacheln, Zeitstrahl,
+    // Netto-Linie und Abdeckung; gemerkt in localStorage (prophos_tpl_sicht). Fehlt die gemerkte ID im Stand, gilt „Alle".
+    const alleIds = [...spuren]
+    for(const o of ab) if(!alleIds.some(x => x.uid === o.uid)) alleIds.push({ uid: o.uid, name: o.name })
+    const sicht = _tpl.sicht !== 'alle' && alleIds.some(x => x.uid === _tpl.sicht) ? _tpl.sicht : 'alle'
+    const F = sicht === 'alle' ? D : tplSichtFilter(D, sicht)
+    const spF = sicht === 'alle' ? spuren : spuren.filter(x => x.uid === sicht), abF = sicht === 'alle' ? ab : ab.filter(o => o.uid === sicht)
+    const chip = (uid, name, l, on) => `<button type="button" class="adm-vl-chip${on ? ' is-on' : ''}" data-tpl-id="${escapeHtml(uid)}" title="${uid === 'alle' ? 'alle IDs zusammen' : 'nur diese ID — nochmal klicken = alle'}">${uid === 'alle' ? '' : `<span class="adm-dot" style="background:${idFarbe(uid)}"></span>`}<span class="nm">${escapeHtml(name)}</span>${l.length ? `<b>${l.length}${l.some(t => t.status === 'laeuft') ? ' · ' + l.filter(t => t.status === 'laeuft').length + ' ●' : ''}</b>` : ''}</button>`
+    // „Alle offenen bestätigen" (07.10.2026): offene Auto-Vorschläge der angezeigten IDs — eigene immer, fremde nur für den Admin
+    const admin = apdAdmin(), echtId = t => !t.ohnePlan && /^[0-9a-f-]{36}$/i.test(t.plan_id)
+    const offen = F.trades.filter(t => t.status === 'offen' && t.auto && echtId(t) && (t.eigen || admin))
+    _tpl.offen = { eigen: offen.filter(t => t.eigen).map(t => t.plan_id), fremd: offen.filter(t => !t.eigen).map(t => t.plan_id), je: new Map() }
+    for(const t of offen){ const k = _tpl.offen.je.get(t.user || t.user_id) || { uid: t.user_id, n: 0 }; k.n++; _tpl.offen.je.set(t.user || t.user_id, k) }
+    const alleBest = offen.length ? `<button type="button" class="btn btn-ghost btn-mini tpl-alle-best" data-tpl-akt="alle-ok"${_tpl.busy ? ' disabled' : ''} title="alle offenen Vorschläge der angezeigten IDs bestätigen (mit Rückfrage)">✓ Alle offenen bestätigen <b>${offen.length}</b></button>` : ''
+    const chips = (alleIds.length > 1 || alleBest) ? `<div class="adm-vl-legend tpl-ids">${alleIds.length > 1 ? chip('alle', 'Alle IDs', D.trades, sicht === 'alle') + alleIds.map(x => chip(x.uid, x.name || x.uid.slice(0, 8), D.trades.filter(t => t.user_id === x.uid), sicht === x.uid)).join('') : ''}${alleBest}</div>` : ''
     root.innerHTML =(_tpl.fehler ? `<div class="tpl-fehler">⚠ ${escapeHtml(_tpl.fehler)}</div>` : '')
       + (ohne ? `<div class="tpl-karte"><div class="tpl-leer">— nicht im Auto-Planer</div></div>`
-        : tplKachelnHtml(D) + tplZeitstrahlHtml(D, spuren) + tplDetailHtml(D) + tplAbdeckungHtml(D, ab))
+        : chips + tplKachelnHtml(F) + tplBrauchtHtml(tplBraucht(D, sicht)) + tplZeitstrahlHtml(F, spF) + tplDetailHtml(D) + tplAbdeckungHtml(F, abF))
     const sc = root.querySelector('.tpl-scroll')
     if(sc && sc.scrollWidth > sc.clientWidth + 4){
       if(scrollX != null && _tpl.tagScroll === _tpl.tag) sc.scrollLeft = scrollX
@@ -44950,6 +45124,41 @@
     try{ apLeisteZeichnen() }catch(_){}
     tplZeichnen()
   }
+  /* Admin-Eingriff an Vorschlägen fremder IDs (07.10.2026): POST /admin/auto-plan/bestaetigen {plan_ids} | zurueck {plan_id} |
+   * loeschen {plan_id} — Service-Key hinter dem Admin-Gate (RLS lässt den Browser nur an eigene Zeilen). Antwort n = wirklich
+   * geänderte Zeilen (Guard: planned, Auto-Plan, unbestätigt bzw. ungestartet). Eigene Pläne gehen weiter per supabase-js. */
+  async function tplEingriff(aktion, ids){
+    const d = await apdApi('POST', '/' + aktion, aktion === 'bestaetigen' ? { plan_ids: ids } : { plan_id: ids[0] })
+    const n = Number(d && d.n) || 0
+    if(typeof atToast === 'function') atToast(n ? (aktion === 'bestaetigen' ? `✓ ${n} Auto-Plan${n === 1 ? '' : 'e'} bestätigt — startet zur Startzeit` : aktion === 'zurueck' ? '↶ Bestätigung zurückgenommen' : '🗑 Vorschlag gelöscht')
+      : '⚠ Nichts geändert — schon bestätigt, gestartet oder nicht mehr geplant', n ? 'start' : 'end')
+    return n
+  }
+  /* „Alle offenen bestätigen" (07.10.2026): Rückfrage im eigenen Modal #tplBestModal (eigene Verdrahtung, kein Sammel-Handler) —
+   * Zähler und Aufteilung je ID aus dem letzten Zeichnen (_tpl.offen); eigene IDs per apBestaetigen, fremde über die Route */
+  function tplBestOeffnen(){
+    const o = _tpl.offen, m = document.getElementById('tplBestModal'), body = document.getElementById('tplBestBody'), ja = document.getElementById('tplBestJa')
+    if(!o || !m || !body || !(o.eigen.length + o.fremd.length)) return
+    const n = o.eigen.length + o.fremd.length
+    const je = [...o.je.entries()].map(([name, k]) => `<span class="tpl-chip gut"><i style="background:${idFarbe(k.uid)}"></i>${escapeHtml(name)} <em>${k.n}</em></span>`).join('')
+    body.innerHTML = `<p style="margin:0 0 8px"><b>${n}</b> offene${n === 1 ? 'r Vorschlag' : ' Vorschläge'} bestätigen? Bestätigte Pläne startet der PC-Tab zur Startzeit.</p>
+      <div class="tpl-chips">${je}</div><p style="margin:8px 0 0;font-size:12px;color:var(--sub)">Laufende und schon bestätigte Pläne bleiben unberührt.</p>`
+    if(ja) ja.textContent = `✓ ${n} bestätigen`
+    m.classList.add('open')
+  }
+  function tplBestZu(){ document.getElementById('tplBestModal')?.classList.remove('open') }
+  document.getElementById('tplBestX')?.addEventListener('click', tplBestZu)
+  document.getElementById('tplBestNein')?.addEventListener('click', tplBestZu)
+  document.getElementById('tplBestJa')?.addEventListener('click', async () => {
+    const o = _tpl.offen; if(!o || _tpl.busy) return
+    tplBestZu(); _tpl.busy = true; _tpl.meldung = ''; tplZeichnen()
+    try{
+      if(o.eigen.length) await apBestaetigen(o.eigen)
+      if(o.fremd.length) await tplEingriff('bestaetigen', o.fremd)
+      await apdLaden(true)
+    }catch(e){ _tpl.meldung = (e && e.message) || String(e) }
+    finally{ _tpl.busy = false; tplZeichnen() }
+  })
   async function tplAktion(t, aktion, wert){
     if(_tpl.busy) return
     _tpl.busy = true; _tpl.meldung = ''; tplZeichnen()
@@ -44962,8 +45171,14 @@
         if(typeof atToast === 'function') atToast(aktion === 'start' ? `🕑 Start ${tplUhr(apPrHm(wert), tplVersatz(tplTag()))} (Dubai) gesetzt` : '⇅ Richtung getauscht', 'start')
         await apdNachEingriff()
       }else if(aktion === 'ok'){
-        await apBestaetigen([t.plan_id])
+        if(t.eigen) await apBestaetigen([t.plan_id]); else await tplEingriff('bestaetigen', [t.plan_id])
         await apdLaden(true)
+      }else if(aktion === 'zurueck'){
+        if(t.eigen) await apZuruecknehmen(t.plan_id); else await tplEingriff('zurueck', [t.plan_id])
+        await apdLaden(true)
+      }else if(aktion === 'weg' && !t.eigen){
+        _tpl.weg.add(t.key); _tpl.wahl = null       // fremder Vorschlag (Admin): sofort über die Route, kein Rückgängig
+        try{ await tplEingriff('loeschen', [t.plan_id]); await apdLaden(true) }finally{ _tpl.weg.delete(t.key) }
       }else if(aktion === 'weg'){
         _tpl.weg.add(t.key); _tpl.wahl = null
         await deleteTradePlan(t.plan_id)
@@ -44976,13 +45191,22 @@
   // Verdrahtung nur dieser Seite (eigene Elemente, kein Sammel-Handler)
   const tplRoot = document.getElementById('tpl-root')
   tplRoot?.addEventListener('click', e => {
+    const c = e.target.closest('[data-tpl-id]')   // ID-Chip: Klick auf die gewählte ID oder „Alle" = alle (07.10.2026)
+    if(c){ _tpl.sicht = (c.dataset.tplId === 'alle' || _tpl.sicht === c.dataset.tplId) ? 'alle' : c.dataset.tplId
+      try{ localStorage.setItem('prophos_tpl_sicht', _tpl.sicht) }catch(_){}
+      _tpl.wahl = null; _tpl.edit = null; _tpl.meldung = ''; tplZeichnen(); return }
+    const bl = e.target.closest('[data-tpl-bal]')   // Braucht dich: ↻ Balance lesen (bestehende Aktion aus Accounts, F19)
+    if(bl){ try{ accBalanceLesen(bl.dataset.tplBal) }catch(err){ console.warn('[tpl] Balance lesen', err) } setTimeout(tplSpaeter, 500); setTimeout(tplSpaeter, 5000); return }
+    const k = e.target.closest('[data-tpl-ab]')   // Konten-Abdeckung: Block auf/zu
+    if(k){ const z = k.closest('.tpl-ab-z'); _tpl.abAuf.set(k.dataset.tplAb, !(z && z.classList.contains('auf'))); tplZeichnen(); return }
     const m = e.target.closest('[data-tpl-t]')
     if(m){ _tpl.wahl = _tpl.wahl === m.dataset.tplT ? null : m.dataset.tplT; _tpl.edit = null; _tpl.meldung = ''; tplZeichnen()
-      if(_tpl.wahl && m.classList.contains('tpl-chip')) tplRoot.querySelector('.tpl-detail')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      if(_tpl.wahl && (m.classList.contains('tpl-chip') || m.closest('.tpl-bd'))) tplRoot.querySelector('.tpl-detail')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
       return }
     const b = e.target.closest('[data-tpl-akt]'); if(!b || b.disabled) return
     const a = b.dataset.tplAkt
     if(a === 'zu'){ _tpl.wahl = null; _tpl.edit = null; _tpl.meldung = ''; tplZeichnen(); return }
+    if(a === 'alle-ok'){ tplBestOeffnen(); return }
     const D = tplDaten(), t = D.trades.find(x => x.key === _tpl.wahl); if(!t) return
     if(a === 'start'){ _tpl.edit = { id: t.plan_id, wert: tplUhr(t.start, D.v) }; _tpl.meldung = ''; tplZeichnen(); return }
     if(a === 'x'){ _tpl.edit = null; _tpl.meldung = ''; tplZeichnen(); return }

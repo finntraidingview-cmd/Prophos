@@ -41,7 +41,7 @@ ZEITEN = {"tz": "Europe/Berlin", "fenster": [["00:00", "14:30", 40], ["14:30", "
           "abstand_id_min": 3, "abstand_konto_s": [60, 120], "pause_firma_min": [25, 45]}
 
 REIN = ("_ap_norm", "ap_regel_finden", "ap_groesse", "_ap_spanne", "_ap_runden", "ap_konto_rechnen", "_ap_hhmm", "_ap_hhmm_txt",
-        "ap_zeiten_verteilen", "ap_kw_param", "_ap_kw_kauf", "_ap_kw_wachsen", "ap_kontowert", "ap_trade_gewicht", "ap_sicht",
+        "ap_zeiten_verteilen", "ap_kw_param", "_ap_kw_kauf", "_ap_kw_wachsen", "ap_kontowert", "ap_trade_gewicht", "ap_sicht", "ap_sicht_uid", "ap_eingriff_filter",
         "_wd_num", "_symbol_wurzel", "_wd_level", "_wd_futures_frontcode", "_ap_gehedgt", "_ap_ende4",
         "ap_ausgleich_param", "ap_firma_key", "ap_ppl_karte", "ap_punktwert", "ap_usd_pro_pkt", "ap_delta", "ap_punkte",
         "ap_rest_punkte", "ap_verlauf", "_ap_gegen_dicht", "ap_dicht_paare", "ap_richtungen_delta", "ap_fenster_von",
@@ -67,7 +67,7 @@ def lade():
     konstanten = ("AP_REST_MIN", "AP_GROESSE_TOLERANZ", "AP_KW_FUNDED", "AP_KW_PHASEN", "AP_TYPEN", "AP_TZ_LAUF", "AP_STILL_FIRMEN",
                   "AP_AUSGLEICH_STANDARD", "AP_TZ_TAG", "AP_BOT_ENDE_MIN", "AP_BOT_EXTRA_MIN", "AP_FAELLIG_MIN", "AP_BOT_SCHRITTE",
                   "AP_RICHTUNG_TXT", "AP_GEGEN_DICHT_MIN", "AP_GEGEN_WUERFE", "AP_EUR_STUFE", "AP_START_BIS_STANDARD", "AP_CFD_AB_STANDARD", "AP_CFD_ROUTEN", "AP_TRANCHE_LUECKE_MIN", "_ap_bot", "_ap_info", "WD_HEUTE_PPL", "LT_ECHO_ROUTEN", "LT_ECHO_MAX_ALTER_S",
-                  "AP_RS_HORIZONT_MIN", "AP_RS_NACHLAUF_MIN", "AP_RS_ROUTEN")
+                  "AP_RS_HORIZONT_MIN", "AP_RS_NACHLAUF_MIN", "AP_RS_ROUTEN", "AP_EINGRIFF_MAX")
     exec("\n".join([konst(k) for k in konstanten] + [block(f) for f in REIN + IO]), ns)
     return ns
 
@@ -379,6 +379,26 @@ def main():
     sicht = a["ap_delta_antwort"](stand, U1)
     check({x["user_id"] for x in sicht["offen"] + sicht["geplant"]} <= {U1} and sicht["netto_jetzt"] == dl["netto_jetzt"],
           "Nicht-Admin: Listen nur eigene ID, Summen über alle")
+    # TRADE-PLANER-ALLE-IDS (07.10.2026): ?sicht=alle öffnet alle IDs — außer admin_zugang „nur eigene"; ohne Parameter wie bisher
+    su = a["ap_sicht_uid"]
+    check(su(True, U1, True, None) is None and su(True, U1, False, "eigene") is None, "sicht: Admin immer alle IDs")
+    check(su(False, U1, False, "alle") is None and su(False, U1, False, " Alle ") is None, "sicht: Planer-ID mit ?sicht=alle → alle IDs")
+    check(su(False, U1, True, "alle") == U1, "sicht: nur-eigene (admin_zugang) bleibt trotz ?sicht=alle bei der eigenen ID")
+    check(su(False, U1, False, None) == U1 and su(False, U1, False, "") == U1 and su(False, U1, False, "eigene") == U1,
+          "sicht: ohne Parameter / anderer Wert → eigene ID wie bisher")
+    # BESTÄTIGEN FÜR ALLE IDS (07.10.2026): Guard-Filter der Admin-Routen = Frontend-Bedingungen, Nicht-Admin nur eigene ID
+    ef = a["ap_eingriff_filter"]
+    P1, P2 = "0a530c7a-a734-4d11-a497-b898bc3fe32e", "DE5AC8CA-B89A-4C2F-9A68-228FB8CF8C83"
+    pr, bo, art = ef("bestaetigen", [P1, P2, P1, "x", None])
+    check(pr["id"] == f"in.({P1},{P2.lower()})" and pr["status"] == "eq.planned" and pr["auto_plan"] == "eq.true" and pr["auto_bestaetigt_at"] == "is.null"
+          and "user_id" not in pr and bo["auto_bestaetigt_at"] and art == "patch", "bestaetigen: in.(…) ohne Doppelte/Müll, Guard planned+auto+unbestätigt, Admin ohne user_id")
+    pr, bo, art = ef("zurueck", [P1], U1)
+    check(pr["id"] == "eq." + P1 and pr["start_um_gestartet_at"] == "is.null" and pr["user_id"] == "eq." + U1 and bo == {"auto_bestaetigt_at": None} and art == "patch",
+          "zurueck: eq.-Filter, ungestartet, Nicht-Admin auf eigene ID, Body setzt null")
+    pr, bo, art = ef("loeschen", [P1])
+    check(pr["auto_plan"] == "eq.true" and pr["start_um_gestartet_at"] == "is.null" and bo is None and art == "delete", "loeschen: DELETE mit Guard planned+auto+ungestartet")
+    check(ef("egal", [P1])[0] is None and ef("bestaetigen", ["nix", ""])[0] is None and ef("bestaetigen", [P1] * 1 + ["%s-%03d" % (P1[:-4], i) for i in range(a["AP_EINGRIFF_MAX"])])[0] is None,
+          "Fehler: unbekannte Aktion, keine gültige ID, zu viele IDs")
     erg = a["ap_ausgleichen"](trocken=True, seed=1, jetzt=max(jetzt, mitt + timedelta(minutes=1)))
     check(erg["ok"] and geschrieben["patch"] == [] and all(u["plan_id"] == "p-g1" for u in erg["umplanungen"]),
           f"Ausgleich trocken: nichts geschrieben, höchstens der Auto-Plan umgeplant ({len(erg['umplanungen'])})")
