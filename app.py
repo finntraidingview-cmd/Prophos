@@ -7029,6 +7029,10 @@ VORRAT2_STD = {
     "gefaehrdet_faktor": 0.5, "mindest_funnel": 1, "bestellt_h": 48,
     "totband_laeufe": 2, "totband_nur_hoch": True,
     "alter_handelstage_max": 2, "n_max_kauf": 10, "ziel_erreicht_chance": 0.95, "chance_max": 0.98,
+    "kauf_regel": "erwartung",         # 'erwartung' = n bis der Erwartungswert die Untergrenze trifft, Sicherheit nur als Info
+                                       # (Finn über den Master 06.10.2026: Standard) · 'sicherheit' = n bis P ≥ sicherheit (Monte Carlo)
+    "funded_anteilig": True,           # Futures-Funded vor dem Big Trade zählt mit Wert × Chance schon zum Bestand (Variante c)
+    "tages_max": 25,                   # Tagesliste „Heute kaufen": höchstens so viele Konten je Tag
     "tranche_gemeinsam": False,        # Finn offen: Konten einer Tranche fallen gemeinsam — bis zur Antwort unabhängig (seine Rechnung)
     "takt_utc": ["23:00", "05:00", "11:00", "17:00"],  # = Dubai 03/09/15/21 Uhr
     # Futures nach dem Bestehen bis Winning Days (Finn 05./06.10.2026), Risiko = dd_usd der Firma. Schlüssel = _ap_norm(Firma).
@@ -7545,7 +7549,15 @@ def vorrat2_zelle(ziel, stufen, konten, status, param=None, faktoren=None, seed=
                 hinweise += [h for h in e.get("vorlaeufig") or [] if h not in hinweise]
                 z.update(chance=e["chance"], chance_stufe=e["chance_stufe"], wert=wert,
                          hinweis=("Startwert (Lesung alt) · " if uns else "") + "; ".join(x["hinweis"] for x in e["kette"] if x["hinweis"]))
-                if i is not None:
+                # Variante c (Finn über den Master 06.10.2026): ein Futures-Funded vor dem Big Trade ist schon fast Vorrat — es zählt
+                # mit Wert × Chance bis Winning Days zum gesicherten Bestand statt als Zufallszug im Funnel (bleibt „unterwegs")
+                anteilig = bool(p.get("funded_anteilig")) and typ == "funded" and "winning_days" in typen
+                z["anteilig"] = anteilig
+                if i is not None and anteilig:
+                    fa = faecher[i]
+                    fa["fest"] += wert * e["chance"]
+                    fa["groesstes"] = max(fa["groesstes"], wert * e["chance"])
+                elif i is not None:
                     faecher[i]["funnel"].append((e["chance"], wert, typ))
         df_any |= bool(z["daten_fehlen"])
         uns_any |= bool(z["unsicher"])
@@ -7572,13 +7584,35 @@ def vorrat2_zelle(ziel, stufen, konten, status, param=None, faktoren=None, seed=
     n_max_kauf = int(p["n_max_kauf"])
     ok, joint = vorrat_mc(faecher, n_max_kauf, int(p["mc_ziehungen"]), int(p["mc_seed"]) + seed, bool(p["tranche_gemeinsam"]))
     teile, n_roh_ges, lage_ges, s_jetzt, s_bald, s_eng = [], 0, "gedeckt", [], [], []
+    regel_kauf = p.get("kauf_regel") or "sicherheit"
+    a_jetzt, a_bald = [], []           # Lücke ÷ Untergrenze je Fach (nur kauf_regel 'erwartung')
     ns, n_erw_ges, n_max_ges, grund, deckel = [], 0, 0, "gedeckt", False
     for i, fa in enumerate(faecher):
         pn, wn = fa["neu"]
         e_funnel = sum(p_ * w_ for p_, w_, _ in fa["funnel"])
         s0 = ok(i, 0)
         n_i, lage_i = 0, "gedeckt"
-        if fa["fest"] < fa["soll"] - 1e-6:
+        if regel_kauf == "erwartung":
+            # Variante a): Lücke = Untergrenze − (gesichert + erwarteter Funnel), beim Blow-Fall ohne das größte Bestandskonto;
+            # n = Lücke ÷ (Chance × Wert) eines neuen Kontos, aufgerundet. Monte Carlo bleibt als Info (sicherheit, s_eng).
+            basis, gr_b, luecke_i = fa["fest"] + e_funnel, fa["groesstes"], 0.0
+            if fa["fest"] < fa["soll"] - 1e-6:
+                s_eng.append(s0)
+                if basis < fa["soll"] - 1e-6:
+                    lage_i, luecke_i = "jetzt", fa["soll"] - basis
+                    a_jetzt.append(luecke_i / fa["soll"])
+            elif gr_b > 0 and fa["fest"] - gr_b < fa["soll"] - 1e-6:
+                sb = ok(i, 0, gr_b)
+                s_eng.append(sb)
+                if basis - gr_b < fa["soll"] - 1e-6:
+                    lage_i, luecke_i = "bald", fa["soll"] - (basis - gr_b)
+                    a_bald.append(luecke_i / fa["soll"])
+                    s_bald.append(sb)
+            if lage_i != "gedeckt":
+                n_i = int(-(-luecke_i // (pn * wn))) if pn * wn > 0 else n_max_kauf + 1
+                if n_i > n_max_kauf:
+                    n_i, deckel = n_max_kauf, True
+        elif fa["fest"] < fa["soll"] - 1e-6:
             s_eng.append(s0)
             if s0 < s_st:
                 lage_i = "jetzt"
@@ -7613,7 +7647,8 @@ def vorrat2_zelle(ziel, stufen, konten, status, param=None, faktoren=None, seed=
         grund = "unter_ziel" if lage_ges == "jetzt" else "blow_reserve"
     if deckel and status == "frei":
         # Apex 06.10.2026: ein neues Konto kommt nur mit ≈ 5 % bis Winning Days — für 80 % bräuchte es > 30 Käufe
-        hinweise.append(f"Deckel {n_max_kauf} Käufe erreicht — auch damit unter {round(s_st * 100)} % Sicherheit")
+        hinweise.append(f"Deckel {n_max_kauf} Käufe erreicht — auch damit unter {round(s_st * 100)} % Sicherheit"
+                        if regel_kauf != "erwartung" else f"Deckel {n_max_kauf} Käufe erreicht — auch damit deckt die Erwartung die Lücke nicht")
     # Mindest-Funnel (Master 06.10.2026): immer mindestens 1 Konto unterwegs, solange der Bestand nicht über der Obergrenze ist
     best = sum(fa["fest"] for fa in faecher)
     ueber = (best >= sum(fa["soll"] for fa in faecher)) if stueck else (best >= float(ziel.get("bis") or 0))
@@ -7629,7 +7664,11 @@ def vorrat2_zelle(ziel, stufen, konten, status, param=None, faktoren=None, seed=
                 lage_ges, grund = "bald", "mindest_funnel"
     s_ohne = joint()
     s_nach = joint(ns)
-    if lage_ges == "jetzt":
+    if regel_kauf == "erwartung" and lage_ges in ("jetzt", "bald"):
+        # Score aus der Lücke nach Erwartung (Anteil an der Untergrenze): jetzt 67 + 33 × Anteil, bald 34 + 32 × Anteil
+        a = max(a_jetzt if lage_ges == "jetzt" else a_bald, default=0.0)
+        score = int(round(67 + 33 * min(1.0, a))) if lage_ges == "jetzt" else int(round(34 + 32 * min(1.0, a)))
+    elif lage_ges == "jetzt":
         score = vorrat_score("jetzt", min(s_jetzt), s_st)
     elif lage_ges == "bald":
         score = vorrat_score("bald", min(s_bald) if s_bald else s_st, s_st)
@@ -7644,6 +7683,7 @@ def vorrat2_zelle(ziel, stufen, konten, status, param=None, faktoren=None, seed=
         {"name": "Untergrenze", "wert": soll, "einheit": einheit_wert},
         {"name": "Gefährdeter Bestand", "wert": round(sum(fa["gef"] for fa in faecher), 2), "einheit": einheit_wert},
         {"name": "Erwarteter Zufluss (Funnel)", "wert": round(erwartet - best, 2), "einheit": einheit_wert},
+        {"name": "Lücke nach Erwartung", "wert": round(max(0.0, soll - erwartet), 2), "einheit": einheit_wert},
         {"name": "Sicherheit ohne Kauf", "wert": round(s_ohne * 100, 1), "einheit": "%"},
     ]
     if s_bald:
@@ -7674,8 +7714,105 @@ def vorrat2_zelle(ziel, stufen, konten, status, param=None, faktoren=None, seed=
     return {"nachkauf": nachkauf, "lage": lage_ges, "score": score, "score_teile": score_teile, "sperre": sperre,
             "sicherheit": round(s_ohne, 4), "sicherheit_nach": round(s_nach, 4), "bestand_gewichtet": round(best, 2),
             "erwartet": round(erwartet, 2), "bestfall": round(bestfall, 2), "hinweise": hinweise,
+            "untergrenze": soll, "luecke": round(max(0.0, soll - erwartet), 2), "unterwegs_n": funnel_n,
+            "vorrat_n": sum(1 for k in aus if k["im_bestand"]), "chance_neu": pn0,
+            "wert_neu": (faecher[0]["neu"][1] if faecher else 0.0), "einheit_wert": einheit_wert,
             "bestand_eur": round(sum(k["wert_eur"] or 0 for k in aus if k["im_bestand"])),
             "funnel_eur": round(sum(k["wert_eur"] or 0 for k in aus if not k["im_bestand"])), "konten": aus}
+
+
+def _vr2_k(x):
+    """200000 → „200k", 1638 → „1.638 $" (Satz in der Tagesliste)."""
+    x = float(x or 0)
+    if x >= 10000:
+        return f"{x / 1000:,.0f}k".replace(",", ".")
+    return f"{x:,.0f} $".replace(",", ".")
+
+
+def vorrat_satz(z, name, anzahl):
+    """REIN RECHNEND (testbar): EIN deutscher Satz aus den Zahlen einer Zelle, ohne Fachwörter (Master 06.10.2026: Finn
+    versteht die Seite nicht — „ID F hat bei FundedNext noch kein Funded-Konto (Ziel 200k) und nur 1 Konto unterwegs —
+    deshalb 2 kaufen."). Höchstens eine Zahl in Klammern: wie selten ein neues Konto durchkommt, wenn es unter 1 von 5 ist."""
+    firma, art = z.get("firma"), z.get("art")
+    wd = "winning_days" in (z.get("typen") or [])
+    ding = "Winning-Days-Konto" if wd else "Funded-Konto"
+    soll, best = float(z.get("untergrenze") or 0), float(z.get("bestand_gewichtet") or 0)
+    unterwegs = int(z.get("unterwegs_n") or 0)
+    u_txt = ("nichts unterwegs" if unterwegs == 0 else "nur 1 Konto unterwegs" if unterwegs == 1
+             else f"nur {unterwegs} Konten unterwegs")
+    if art == "stueck":
+        ziel_txt = f"{int(soll)} {ding}" if soll == 1 else f"{int(soll)} {ding}en"
+    elif art == "plus_ueber_start":
+        ziel_txt = _vr2_k(soll) + " Plus in Winning Days"
+    else:
+        ziel_txt = _vr2_k(soll) + " in Funded"
+    kauf = f"deshalb {anzahl} kaufen" if anzahl != 1 else "deshalb 1 kaufen"
+    grund = (z.get("nachkauf") or {}).get("grund")
+    if grund == "mindest_funnel":
+        satz = f"{name} hat bei {firma} genug im Vorrat, aber {u_txt} — {kauf} als Nachschub"
+    elif grund == "blow_reserve":
+        satz = f"{name} hat bei {firma} genug im Vorrat, aber keine Reserve: fällt das größte Konto weg, reicht es nicht — {kauf}"
+    elif best <= 0.0001:
+        satz = f"{name} hat bei {firma} noch kein {ding} (Ziel {ziel_txt}) und {u_txt} — {kauf}"
+    elif art == "plus_ueber_start":
+        satz = f"{name} fehlen bei {firma} noch {_vr2_k(max(0.0, soll - best))} bis zum Ziel ({u_txt}) — {kauf}"
+    elif art == "stueck":
+        satz = f"{name} fehlt bei {firma} noch ein {ding} ({u_txt}) — {kauf}"
+    else:
+        satz = f"{name} hat bei {firma} {_vr2_k(best)} von {_vr2_k(soll)} im Vorrat und {u_txt} — {kauf}"
+    p = float(z.get("chance_neu") or 0)
+    if 0 < p < 0.2:
+        satz += f" (ein neues Konto kommt nur etwa jedes {max(2, round(1 / p))}. Mal durch)"
+    return satz + "."
+
+
+def vorrat_tagesliste(zellen, namen, tages_max=25):
+    """REIN RECHNEND (testbar): „Heute kaufen" (Master 06.10.2026: EINE Tagesliste). Kandidaten = freie Zellen mit Kaufzahl > 0,
+    ohne Sperre, ohne offenes „bestellt". Reihenfolge: zuerst leer (nichts im Vorrat UND nichts unterwegs), dann die größte Lücke
+    im Verhältnis zur Untergrenze, dann das beste Verhältnis Chance × Wert ÷ Preis. Verteilt wird reihum (jede Zelle erst 1 Konto,
+    dann die zweite Runde …), bis tages_max erreicht ist — so kommen viele IDs an einem Tag dran statt eine mit 10. Der Rest steht
+    als stufe 'woche'. → (heute [{user_id, user, firma, anzahl, einheit, preis_eur (Stück), kosten_eur (Zeile), stufe, satz}],
+    luecke_gesamt (Konten))"""
+    kand = [z for z in zellen if z.get("status") == "frei" and not z.get("sperre") and z.get("zustand") != "bestellt"
+            and isinstance((z.get("nachkauf") or {}).get("n"), int) and z["nachkauf"]["n"] > 0]
+
+    def rang(z):
+        leer = float(z.get("bestand_gewichtet") or 0) <= 0.0001 and int(z.get("unterwegs_n") or 0) == 0
+        soll = float(z.get("untergrenze") or 0)
+        anteil = float(z.get("luecke") or 0) / soll if soll > 0 else 0.0
+        preis = float((z.get("nachkauf") or {}).get("preis_eur") or 0)
+        nutzen = float(z.get("chance_neu") or 0) * float(z.get("wert_neu") or 0) / preis if preis > 0 else 0.0
+        return (0 if leer else 1, -anteil, -nutzen)
+
+    kand.sort(key=rang)
+    luecke = sum(z["nachkauf"]["n"] for z in kand)
+    heute = {id(z): 0 for z in kand}
+    rest, runde = int(tages_max), 0
+    while rest > 0 and runde < 50:
+        runde += 1
+        vergeben = False
+        for z in kand:
+            if rest <= 0:
+                break
+            if heute[id(z)] < z["nachkauf"]["n"]:
+                heute[id(z)] += 1
+                rest -= 1
+                vergeben = True
+        if not vergeben:
+            break
+    out = []
+    for stufe in ("heute", "woche"):
+        for z in kand:
+            n = heute[id(z)] if stufe == "heute" else z["nachkauf"]["n"] - heute[id(z)]
+            if n <= 0:
+                continue
+            name = namen.get(z["user_id"]) or z["user_id"][:8]
+            preis = (z.get("nachkauf") or {}).get("preis_eur")       # Stückpreis je Konto; kosten_eur = die ganze Zeile
+            out.append({"user_id": z["user_id"], "user": name, "firma": z["firma"], "anzahl": n,
+                        "einheit": (z.get("nachkauf") or {}).get("einheit"), "preis_eur": preis,
+                        "kosten_eur": (round(n * float(preis)) if preis is not None else None),
+                        "stufe": stufe, "satz": vorrat_satz(z, name, z["nachkauf"]["n"])})
+    return out, luecke
 
 
 def vorrat2_slot(jetzt, takt_utc):
@@ -7935,10 +8072,21 @@ def vorrat2_anhaengen(erg1):
                  sperre=s.get("sperre"), sicherheit=s.get("sicherheit"), sicherheit_nach=s.get("sicherheit_nach"),
                  bestand_gewichtet=s.get("bestand_gewichtet"), erwartet=s.get("erwartet"), bestfall=s.get("bestfall"),
                  hinweise=s.get("hinweise") or [], bestand_eur=s.get("bestand_eur"), funnel_eur=s.get("funnel_eur"),
+                 untergrenze=s.get("untergrenze"), luecke=s.get("luecke"), unterwegs_n=s.get("unterwegs_n"),
+                 vorrat_n=s.get("vorrat_n"), chance_neu=s.get("chance_neu"), wert_neu=s.get("wert_neu"),
                  bestellt=(an or {}).get("bestellt"), zustand=("bestellt" if (an or {}).get("bestellt") else None),
                  ki_text=((ki.get("ki_zeilen") or {}).get(f"{z['user_id']}|{z['firma']}")))
         z.pop("_angelegt", None)
+    # Tagesliste „Heute kaufen" (Master 06.10.2026) aus den angezeigten Zahlen — Bestellungen und neu angelegte Konten wirken sofort
+    ziele_a = {f.get("firma"): f.get("ziel") or {} for f in erg1.get("firmen") or []}
+    for z in erg1.get("zellen") or []:
+        z.setdefault("art", ziele_a.get(z["firma"], {}).get("art"))
+        z.setdefault("typen", ziele_a.get(z["firma"], {}).get("typen"))
+    namen = {p_["user_id"]: p_["name"] for p_ in erg1.get("people") or []}
+    tmax = int(((e2.get("parameter") or {}).get("tages_max")) or VORRAT2_STD["tages_max"])
+    heute, luecke_ges = vorrat_tagesliste(erg1.get("zellen") or [], namen, tmax)
     return dict(erg1, stufe2_bereit=True, stufe2_hinweis="", gerechnet_um=e2.get("gerechnet_um"),
+                heute=heute, luecke_gesamt=luecke_ges, tages_max=tmax,
                 naechster_lauf=vorrat2_slot(datetime.now(timezone.utc), (e2.get("parameter") or VORRAT2_STD)["takt_utc"])[1].isoformat(),
                 lauf_id=lauf.get("id"), lauf_quelle=lauf.get("quelle"), sicherheit_ziel=(e2.get("parameter") or {}).get("sicherheit"),
                 dringlichkeiten=VORRAT2_DRINGLICHKEITEN, ki_text=ki.get("ki_text"), ki_text_um=ki.get("ki_um"),
@@ -7956,6 +8104,8 @@ def _vorrat_antwort(erg1):
         z.pop("_angelegt", None)
         z.setdefault("konten", [])
     out.setdefault("dringlichkeiten", VORRAT2_DRINGLICHKEITEN)
+    out.setdefault("heute", [])
+    out.setdefault("luecke_gesamt", None)
     return out
 
 
