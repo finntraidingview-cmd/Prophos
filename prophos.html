@@ -26627,7 +26627,8 @@
     // KONTO-BODEN (30.09.2026): liq_regel_level_nq ist seit dem Backend die ENGERE von Regel und Konto-Boden (Max DD); der Tooltip zeigt
     // beide mit „✓ gilt" (liq_vergleich_text) — sonst nur die eine, ohne „Regel:", wenn allein der Boden gilt
     const vgl = t.liq_vergleich_text ? String(t.liq_vergleich_text) : ''
-    return { links, rechts, ein, art: slE != null ? 'SL' : 'Liq', plLinks: pl(links), plRechts: pl(rechts),
+    // APEX-EVAL-SOFTBREACH (07.10.2026): gilt der weiche Tagesstopp (Apex Daily Loss), heißt das linke Ende „Tageslimit", nicht „Liq"
+    return { links, rechts, ein, art: slE != null ? 'SL' : (lqR != null && wdlLiqIstTag(t)) ? 'Tag' : 'Liq', plLinks: pl(links), plRechts: pl(rechts),
              regel: slE == null && lqR != null ? (vgl || String(t.liq_regel_text || '')) : '', regelPur: !!vgl || t.liq_gilt === 'boden' }
   }
   // Betrag kompakt für die Enden der Spanne: „−3.000 $", „+272 $", ab 10.000 „−10,5k $"; lang (Tooltip) immer ganze $
@@ -26678,7 +26679,7 @@
     // blasses Rot bis zum Einstieg, blasses Grün ab dem Einstieg (wie mwd-bar); ohne Einstieg nur der graue Track
     const bahn = pE != null ? `background:linear-gradient(90deg,rgba(240,68,56,.14) 0 ${pE.toFixed(2)}%,rgba(18,183,106,.22) ${pE.toFixed(2)}% 100%)` : ''
     const betrag = v => (v != null && isFinite(v)) ? `<b>${wdlSpBetrag(v)}</b>` : ''   // fehlt der Betrag: nur das Label
-    return `<span class="wdl-z-mi wdl-sp"${tip ? ` title="${escapeHtml(tip)}"` : ''}><small class="wdl-sp-l"><i>${sp.art === 'SL' ? 'SL' : 'Liq'}</i>${betrag(sp.plLinks)}</small><span class="wdl-sp-bahn" style="${bahn}">`
+    return `<span class="wdl-z-mi wdl-sp"${tip ? ` title="${escapeHtml(tip)}"` : ''}><small class="wdl-sp-l"><i>${sp.art === 'SL' ? 'SL' : sp.art === 'Tag' ? 'Tageslimit' : 'Liq'}</i>${betrag(sp.plLinks)}</small><span class="wdl-sp-bahn" style="${bahn}">`
       + (pE != null ? `<i class="wdl-sp-ein" style="left:${pE.toFixed(2)}%"></i>` : '')
       + `<b class="wdl-sp-punkt" style="left:${(pK != null ? pK : 0).toFixed(2)}%;background:${farbe || 'var(--sub)'}${pK == null ? ';display:none' : ''}"></b></span><small class="wdl-sp-r"><i>TP</i>${betrag(sp.plRechts)}</small></span>`
   }
@@ -26752,13 +26753,21 @@
     const liq = basisVerschieden ? null : soft ? n(t.liq_boden_balance) : (n(t.liq_regel_balance) ?? n(t.liq_balance))
     const tagLiq = basisVerschieden ? null : soft ? n(t.liq_regel_nur_balance) : null
     const geblowt = liq != null && bal <= liq + 25
-    return { bal, quelle, liq, tagLiq, geblowt, softBreach: !geblowt && tagLiq != null && bal <= tagLiq + 25 }
+    // Tagesstopp erreicht (APEX-EVAL-SOFTBREACH 07.10.2026): bis 10 % des Tageslimits darüber zählt noch — der $-SL der Order wird
+    // von TradingView auf Ticks gerundet (Apex-150k-Eval: SL 2.000 $ → −1.884,30 $, Balance 148.097 bei Tagesstopp 147.981)
+    const bs = n(t.balance_start), tagTol = (tagLiq != null && bs != null && bs > tagLiq) ? Math.max(25, (bs - tagLiq) * 0.1) : 25
+    return { bal, quelle, liq, tagLiq, geblowt, softBreach: !geblowt && tagLiq != null && bal <= tagLiq + tagTol }
   }
+  /* APEX-EVAL-SOFTBREACH (07.10.2026, Finn: „Apex 150k Evaluation: Daily Loss 2.000 $ ist ein SOFT BREACH. Der Tag stoppt, das Konto
+   * lebt weiter. Geblowt ist es erst beim Gesamt-Drawdown 4.000 $, also Balance ≤ 146.000"). Liegt das Liq-Level des Radars am weichen
+   * Tagesstopp (liq_regeln art tagesstart/stufen, das Backend sagt liq_regel_soft) und nicht am Konto-Boden, heißt es „Tageslimit". */
+  const wdlLiqIstTag = t => !!(t && t.liq_regel_soft && t.liq_gilt === 'regel')
+  const WDL_TAGESLIMIT_ERG = '<span style="color:#b45309;opacity:.8" title="Tageslimit erreicht — Soft-Breach: der Tag stoppt, das Konto lebt weiter">⏸ Tageslimit</span>'
   // Eigene Spalten (02.10.2026, Finn: „eine eigene Spalte für den Kontostand und eine für geblowt/Take Profit"): Ergebnis-Wort
-  // („💀 geblowt" / „⚠ Tageslimit" schlägt SL/Liq der Demo) und Konto-Zelle
+  // („💀 geblowt" / „⏸ Tageslimit" schlägt SL/Liq der Demo) und Konto-Zelle
   function wdlBlowErg(t){
     const b = wdlBlowStand(t); if(!b) return ''
-    return b.geblowt ? '<b style="color:#b91c1c">💀 geblowt</b>' : b.softBreach ? '<b style="color:#b45309">⚠ Tageslimit</b>' : ''
+    return b.geblowt ? '<b style="color:#b91c1c">💀 geblowt</b>' : b.softBreach ? WDL_TAGESLIMIT_ERG : ''
   }
   // Konto weg (05.10.2026): Ergebnis-Wort für Überprüfen/Erledigt — kurz, der ganze Satz im Tooltip; die Konto-Spalte daneben
   // sagt „vermutl. geblowt" (wdlKontoZ). Erkennung am endlesung-Auszug der Zeile (tvV2KontoWeg).
@@ -26881,7 +26890,7 @@
       const lq = num(t.liq_regel_level_nq) != null ? num(t.liq_regel_level_nq) : num(t.liq_level_nq), slE = wdlSlEcht(t), d = t.demo || {}, an = !echo && wdlLinienAn(t), wt = echo ? null : wdlWartet(t)
       const konto = `${k.firma || '?'}${k.kontonr_ende ? ' …' + k.kontonr_ende : ''}`
       const tip = echo ? [k.name || konto, 'Echo (MT5)', t.symbol || ''].filter(Boolean).join(' · ')
-        : [k.name || konto, slE != null ? 'SL ' + f2(slE) : '', lq != null ? 'Liquidation ' + f2(lq) : ''].filter(Boolean).join(' · ') + ` — klicken: Level im Chart ${an ? 'ausblenden' : 'einblenden'}`
+        : [k.name || konto, slE != null ? 'SL ' + f2(slE) : '', lq != null ? (wdlLiqIstTag(t) ? 'Tageslimit ' : 'Liquidation ') + f2(lq) : ''].filter(Boolean).join(' · ') + ` — klicken: Level im Chart ${an ? 'ausblenden' : 'einblenden'}`
       const lots = v => num(v) == null ? '?' : Number(v).toLocaleString('de-DE', { maximumFractionDigits: 2 })
       const ri = echo ? zelle('ri', `<em${buy ? ' class="is-buy"' : sell ? ' class="is-sell"' : ''}>${buy ? 'BUY' : sell ? 'SELL' : '?'}</em>${lots(t.lots)} Lot${t.symbol ? `<span class="wdl-z-sym"> ${escapeHtml(t.symbol)}</span>` : ''}`, { tip: `${lots(t.lots)} Lot${t.symbol ? ' ' + t.symbol : ''}` })
         : zelle('ri', `<em${buy ? ' class="is-buy"' : sell ? ' class="is-sell"' : ''}>${buy ? 'BUY' : sell ? 'SELL' : '?'}</em>${t.kt != null ? f0(t.kt) : '?'} × ${escapeHtml(t.symbol_root || '?')}`)
@@ -26900,7 +26909,7 @@
         if(sp){
           const naeh = t.einstieg_quelle === 'reader_klick' ? ' (kein Fill — Kurs beim Klick)' : t.einstieg_quelle === 'kerze_start' ? ' (kein Fill — Minutenkerze beim Start)' : ''
           const lg = v => v != null ? ' · ' + wdlSpBetrag(v, true) : ''
-          const spTip = `${sp.art === 'SL' ? 'SL' : 'Liquidation'} ${f2(sp.links)}${lg(sp.plLinks)}${sp.regel ? (sp.regelPur ? ' · ' : ' · Regel: ') + sp.regel : ''}${sp.ein != null ? ' · Einstieg ' + f2(sp.ein) + naeh : ''} · TP ${f2(sp.rechts)}${lg(sp.plRechts)}${kp != null ? ' · Kurs ' + f2(kp) : ''}${demoTip(d) ? ' · ' + demoTip(d) : ''}`
+          const spTip = `${sp.art === 'SL' ? 'SL' : sp.art === 'Tag' ? 'Tageslimit (Soft-Breach, Konto lebt)' : 'Liquidation'} ${f2(sp.links)}${lg(sp.plLinks)}${sp.regel ? (sp.regelPur ? ' · ' : ' · Regel: ') + sp.regel : ''}${sp.ein != null ? ' · Einstieg ' + f2(sp.ein) + naeh : ''} · TP ${f2(sp.rechts)}${lg(sp.plRechts)}${kp != null ? ' · Kurs ' + f2(kp) : ''}${demoTip(d) ? ' · ' + demoTip(d) : ''}`
           miZ = wdlSpanneHtml(sp, kp, LT.plFarbe, spTip)
         } else miZ = zelle('mi', '–', { tip: num(t.tp_level_nq) == null ? 'kein TP gespeichert' : 'keine Liquidation/SL gespeichert' })
         plZ = zelle('pl', `<span data-wdl-lv="pl" style="color:${LT.plFarbe}">${LT.pl}</span>${fusionLiveZ(t)}`)
@@ -26943,7 +26952,7 @@
         art = 'pruef'
         const pid = wdlTid(t), sperre = wdlAbhakenSperre(t)
         const pb = num(t.pl_balance) != null ? num(t.pl_balance) : num(t.master_pl && t.master_pl.wert)
-        const erg = wdlBlowErg(t) || (wdlKontoWeg(t) ? WDL_KONTO_WEG_ERG : echo ? '' : d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : '')
+        const erg = wdlBlowErg(t) || (wdlKontoWeg(t) ? WDL_KONTO_WEG_ERG : echo ? '' : d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : wdlLiqIstTag(t) ? WDL_TAGESLIMIT_ERG : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : '')
         kontoZ = wdlKontoZ(t)
         miZ = zelle('mi wdl-z-akt', `${erg ? `<span>${erg}</span>` : ''}<button type="button" class="btn btn-ghost el-knopf" data-wdl-abhaken="${escapeHtml(pid)}"${sperre ? ' disabled' : ''} title="${escapeHtml(sperre || 'Abhaken — P&L prüfen und Trade erledigen')}">Abhaken</button>`,
           { tip: echo ? '' : demoTip(d) })
@@ -26959,7 +26968,7 @@
           kontoZ = wdlKontoZ(t)
           plZ = zelle('pl', sig(pb, '$', 2) + slaveZ(t), { f: col(pb), tip: num(t.pl_balance) != null ? 'MT5-Balance nachher − vorher' : pb != null ? 'P&L am Plan' : 'noch keine End-Balance' })
         } else {
-        const erg = wdlBlowErg(t) || (wdlKontoWeg(t) ? WDL_KONTO_WEG_ERG : d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : '–')
+        const erg = wdlBlowErg(t) || (wdlKontoWeg(t) ? WDL_KONTO_WEG_ERG : d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : wdlLiqIstTag(t) ? WDL_TAGESLIMIT_ERG : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : '–')
         miZ = zelle('mi', erg, { tip: demoTip(d) })
         kontoZ = wdlKontoZ(t)
         plZ = zelle('pl', sig(t.pl_balance, '$', 2) + slaveZ(t) + zuWegZ(t), { f: col(t.pl_balance), tip: num(t.pl_balance) != null ? 'Balance nachher − vorher' : 'keine End-Balance' })
@@ -39203,7 +39212,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1090'
+  const OS_TAB_BUILD = '2026-09-22.1091'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

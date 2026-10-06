@@ -10498,6 +10498,24 @@ def liq_tagesstart(p, start_bal, fruehere):
     return start_bal, "Start-Balance dieses Trades"
 
 
+_liq_kw_cache = {"at": 0.0, "firmen": None}
+
+
+def _liq_kw_laden():
+    """auto_plan_regeln.regeln.firmen (Kernwerte je Firma) für den Konto-Boden weicher Tagesstopps (liq_boden_kernwerte), höchstens
+    einmal je LIQ_REGELN_CACHE_S Sekunden gelesen. Fehler → letzter Stand bzw. None (dann rechnet der Boden wie bisher)."""
+    jetzt = time.time()
+    if _liq_kw_cache["firmen"] is not None and jetzt - _liq_kw_cache["at"] < LIQ_REGELN_CACHE_S:
+        return _liq_kw_cache["firmen"]
+    try:
+        reg = (sb_select("auto_plan_regeln", {"select": "regeln", "id": "eq.1"}) or [{}])[0]
+        _liq_kw_cache.update(at=jetzt, firmen=list(((reg or {}).get("regeln") or {}).get("firmen") or []))
+    except Exception as e:
+        print(f"[liq-kernwerte] ⚠️ {type(e).__name__}: {e}", flush=True)
+        _liq_kw_cache["at"] = jetzt
+    return _liq_kw_cache["firmen"]
+
+
 # ══ KONTO-BODEN (LIQ-KONTOBODEN, 30.09.2026, Finn: „Der Account hat insgesamt 4.000 $ Drawdown. Ich habe schon 2.500 $ verloren, von
 # 150.000 auf 147.500. Beim nächsten Trade ist die Liquidation nur noch 1.500 $ entfernt, nicht wieder 4.000."). Die Regel aus liq_regeln
 # rechnet ab der Balance beim Trade-Start — nach einem Verlust ist das zu viel Luft. Daneben jetzt der absolute Boden des Kontos aus dem
@@ -10602,11 +10620,33 @@ def liq_konto_boden(regel, acc, groesse, peak, start_bal, relativ=None):
     return round(boden, 2), text, dd, art
 
 
+def liq_boden_kernwerte(regel, acc, typ, wd, kw_firmen):
+    """REIN RECHNEND (testbar): Regel, Konto und Kontogröße für liq_konto_boden → (regel, acc, groesse).
+    APEX-EVAL-SOFTBREACH (07.10.2026, Finn am Radar: Apex-150k-Eval · Orbit V2 · BUY 3×NQ · Balance 148.097 $ · −1.884,30 $ stand als
+    „💀 geblowt" — „Apex 150k Evaluation: Daily Loss 2.000 $ ist ein SOFT BREACH. Der Tag stoppt, das Konto lebt weiter. Geblowt
+    ist es erst beim Gesamt-Drawdown 4.000 $, also Balance ≤ 146.000"). Ursache: am Konto stand max_drawdown 400 statt 4.000
+    (bekannter Einzelfehler, siehe ap_kw_param) → Konto-Boden 149.600 statt 146.000. Für Konten mit weichem Tagesstopp (liq_regeln
+    art tagesstart/stufen = Apex) in der Prüfphase (challenge/phase1/phase2) gilt deshalb der Gesamt-Drawdown der Kernwerte
+    (auto_plan_regeln.regeln.firmen[], dd_usd + boden) statt accounts.max_drawdown — dieselbe Quelle wie Planer und Vorrat.
+    Ohne Kernwerte bzw. für alle anderen Firmen/Phasen (Apex Funded mit Lock, Tradeify, Topstep, CFD) unverändert."""
+    a, gr = acc or {}, liq_konto_groesse(acc)
+    if kw_firmen is None or wd or (regel or {}).get("art") not in ("tagesstart", "stufen") or typ not in ("challenge", "phase1", "phase2"):
+        return regel, a, gr
+    kw = ap_kw_param(ap_regel_finden(kw_firmen, a.get("firm")))
+    dd = _wd_num((kw or {}).get("dd_usd"))
+    if not kw or not dd or kw.get("dd_pct"):
+        return regel, a, gr
+    if not gr and len(kw.get("groessen") or []) == 1:      # Apex nur 150k: Größe aus den Kernwerten, wenn Name/Startwert sie nicht tragen
+        gr = float(kw["groessen"][0])
+    return (dict(regel, maxdd_usd=dd, maxdd_art="statisch" if kw.get("boden") == "statisch" else (regel.get("maxdd_art") or "statisch")),
+            dict(a, max_drawdown=None), gr)
+
+
 def _liq_pl_de(v):
     return None if v is None else f"{'−' if v < 0 else '+'}{_liq_de(abs(v))} $"
 
 
-def liq_regel_felder(regeln, acc, plan, start_bal, tagesstart, einstieg, richtung, ppl, kt, peak=None, mll=None):
+def liq_regel_felder(regeln, acc, plan, start_bal, tagesstart, einstieg, richtung, ppl, kt, peak=None, mll=None, kw_firmen=None):
     """REIN RECHNEND (testbar): Anzeige-Felder einer /admin/live-trades-Zeile → {liq_regel_balance, liq_regel_level_nq,
     liq_regel_text, liq_gilt, liq_regel_nur_balance, liq_boden_balance, liq_boden_text, liq_maxdd, liq_maxdd_art, liq_vergleich_text}.
     liq_regel_balance/_level_nq = die EFFEKTIVE Liquidation: die engere (höhere Balance) von Regel (liq_regeln, unverändert) und
@@ -10624,7 +10664,8 @@ def liq_regel_felder(regeln, acc, plan, start_bal, tagesstart, einstieg, richtun
     if mll is not None:
         b_bal, b_text, dd, art = mll, f"MLL TopstepX {_liq_de(mll, 2)} $", None, "mll"
     else:
-        b_bal, b_text, dd, art = liq_konto_boden(regel, a, liq_konto_groesse(a), peak, start_bal, plan_balance_relativ(plan))
+        b_regel, b_acc, b_gr = liq_boden_kernwerte(regel, a, typ, wd, kw_firmen)
+        b_bal, b_text, dd, art = liq_konto_boden(b_regel, b_acc, b_gr, peak, start_bal, plan_balance_relativ(plan))
     kand = [(v, k) for v, k in ((r_bal, "regel"), (b_bal, "boden")) if v is not None]
     bal, gilt = max(kand) if kand else (None, None)        # gleich hoch → „regel" (Tupel-Vergleich, 'regel' > 'boden')
     text = b_text if gilt == "boden" else r_text
@@ -10761,7 +10802,7 @@ def lt_pl_balance(route, tv, fin):
     return round(be - bs, 2)
 
 
-def _lt_zeile(p, acc, disp, kerzen_je_wurzel, vorher=None, regeln=None, fruehere=None, verlauf=None):
+def _lt_zeile(p, acc, disp, kerzen_je_wurzel, vorher=None, regeln=None, fruehere=None, verlauf=None, kw_firmen=None):
     z = _wd_heute_zeile(p, acc, disp, vorher)
     base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
     tv = base.get("tv") if isinstance(base.get("tv"), dict) else {}
@@ -10798,7 +10839,7 @@ def _lt_zeile(p, acc, disp, kerzen_je_wurzel, vorher=None, regeln=None, fruehere
         tagesstart, _tq = liq_tagesstart(p, start_bal, fruehere)
         # Konto-Boden (30.09.2026): Höchststand der Phase für EOD-trailing; Topstep V2 mit gelesener MLL nimmt die MLL als Boden
         regel_f = liq_regel_felder(regeln, acc, p, start_bal, tagesstart, z.get("einstieg_nq"), z.get("richtung"), ppl, kt,
-                                   peak=liq_peak(p, acc, start_bal, verlauf), mll=ub.get("liq_balance"))
+                                   peak=liq_peak(p, acc, start_bal, verlauf), mll=ub.get("liq_balance"), kw_firmen=kw_firmen)
     demo_liq, demo_liq_pl = lt_demo_liq(liq_level, liq["pl_usd"], regel_f, start_bal, z.get("einstieg_nq"), z.get("richtung"), ppl, kt)
     # Ende (B5): beendete Trades rechnen die Demo nur bis zum Ende — ended_at, sonst final.at, sonst completed_at
     ende = None if str(p.get("status") or "") == "open" else (p.get("ended_at") or fin.get("at") or p.get("completed_at"))
@@ -11046,6 +11087,7 @@ def admin_live_trades():
         fruehere = _wd_fruehere_trades(ids)          # B14: für den Balance-Vorläufer (konto_balance)
         liq_regeln = _liq_regeln_laden()             # LIQ-REGELN (30.09.2026): einmal je Abruf, 60 s gecacht
         liq_verlauf = _liq_verlauf_laden(ids)        # KONTO-BODEN (30.09.2026): belegte Balances je Konto, 60 s gecacht
+        liq_kw = _liq_kw_laden()                     # APEX-EVAL-SOFTBREACH (07.10.2026): Kernwerte je Firma, 60 s gecacht
         # Echo (?echo=1): EIN Read auf mt5_live für die Master-Logins laufender Echo-Pläne — nur die nötigen JSON-Teile
         echo = [p for p in plaene if str(p.get("route") or "") in LT_ECHO_ROUTEN]
         live_je_login, firm_sym = {}, {}
@@ -11097,7 +11139,7 @@ def admin_live_trades():
                     z = _lt_echo_zeile(p, acc, disp, live_je_login, firm_sym, jetzt_ts, vorher)
                 trades.append(z)
             else:
-                z = _lt_zeile(p, acc, disp, kerzen, vorher, regeln=liq_regeln, fruehere=fruehere, verlauf=liq_verlauf)
+                z = _lt_zeile(p, acc, disp, kerzen, vorher, regeln=liq_regeln, fruehere=fruehere, verlauf=liq_verlauf, kw_firmen=liq_kw)
                 z["plattform"] = "orbit"
                 if p.get("status") == "open" and solo_je_pc:
                     z["slave_pl_live"] = lt_fusion_pl_solo((p.get("mt5_baseline") or {}).get("hedge") if isinstance(p.get("mt5_baseline"), dict) else None, solo_je_pc, jetzt_ts)

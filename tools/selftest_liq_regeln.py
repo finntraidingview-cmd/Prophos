@@ -40,7 +40,8 @@ def lade():
     exec("\n".join([firm_rules] + [block(f) for f in (
         "_wd_num", "_wd_level", "_wd_konto_groesse", "_firm_norm", "_cme_handelstag", "liq_regel_waehlen", "liq_stufe", "_liq_de",
         "plan_ist_wd", "liq_aus_regel", "liq_tagesstart", "liq_regel_felder", "lt_demo_liq", "_lt_demo",
-        "ist_topstep_express", "plan_balance_relativ", "liq_peak", "liq_konto_groesse", "liq_konto_boden", "_liq_pl_de")]), ns)
+        "ist_topstep_express", "plan_balance_relativ", "liq_peak", "liq_konto_groesse", "liq_konto_boden", "_liq_pl_de",
+        "_ap_norm", "ap_regel_finden", "ap_kw_param", "liq_boden_kernwerte")]), ns)
     return ns
 
 
@@ -278,6 +279,46 @@ def main():
     check(zob["liq_regel_balance"] == 147000.0, f"FNF ohne belegten Höchststand: 151.000 − 4.000 = 147.000 (zu weit, bekannt) → {zob['liq_regel_balance']}")
     zfb = F(RF, dict(fn, max_drawdown=None), {"id": "f1"}, 150000.0, None, 30000, "buy", 20, 2, peak=150000.0)
     check(zfb["liq_regel_balance"] == 146000.0 and zfb["liq_maxdd"] == 4000, f"FNF ohne Max DD am Konto: maxdd_usd 4.000 der Zeile → {zfb['liq_regel_balance']}")
+
+    # 11) APEX-EVAL-SOFTBREACH (07.10.2026): Apex 150k Eval mit Tippfehler max_drawdown 400 am Konto. Tagesstopp 2.000 $ = Soft
+    # Breach, Blow erst am Gesamt-Drawdown der Kernwerte (dd_usd 4.000, statisch) → 146.000. Daten wie live (Regeln + Kernwerte).
+    RL = [dict(r) for r in REGELN]
+    for r in RL:
+        if r["firma"] == "Apex Trader":
+            r.update(maxdd_art="eod_trailing", maxdd_lock_ueber_groesse_usd=100)
+        if r["firma"] == "Tradeify" and r["kontotyp"] in ("challenge", "funded"):
+            r.update(maxdd_art="eod_trailing", maxdd_lock_ueber_groesse_usd=None if r["kontotyp"] == "challenge" else 100)
+    KW = [{"namen": ["apextrader", "apex"], "soft": True, "boden": "statisch", "dd_usd": 4000, "daily_usd": 2000, "groessen": [150000],
+           "kauf_eur": 150, "ziel_pct": {"challenge": 6}, "phasen": {"challenge": {"puffer": [100, 100]}}},
+          {"namen": ["tradeify"], "boden": "nachziehend", "dd_usd": 4500, "groessen": [150000], "kauf_eur": 100, "ziel_pct": {"challenge": 6}}]
+    aev = {"id": "ax1", "firm": "Apex Trader", "account_type": "challenge", "name": "150k Apex APEX0000000000001", "max_drawdown": "400"}
+    ip = {"id": "i1", "master_account_id": "ax1", "started_at": "2026-10-06T14:50:38+00:00"}
+    alt = F(RL, aev, ip, 149981.46, 149981.46, 31568.5, "buy", 20, 3, peak=150000.0)
+    neu = F(RL, aev, ip, 149981.46, 149981.46, 31568.5, "buy", 20, 3, peak=150000.0, kw_firmen=KW)
+    check(alt["liq_boden_balance"] == 149600.0,
+          f"vorher (Live-Befund): max_drawdown 400 am Konto → Boden 149.600 → {alt['liq_boden_balance']} (148.097 hieß geblowt)")
+    check(neu["liq_boden_balance"] == 146000.0 and neu["liq_maxdd"] == 4000 and neu["liq_maxdd_art"] == "statisch"
+          and neu["liq_regel_nur_balance"] == 147981.46 and neu["liq_regel_balance"] == 147981.46 and neu["liq_gilt"] == "regel"
+          and neu["liq_regel_soft"] is True,
+          f"Apex Eval: Boden 146.000 (Kernwerte, statisch), Tagesstopp 147.981,46 gilt, soft → {neu['liq_boden_balance']} / "
+          f"{neu['liq_regel_balance']} / {neu['liq_gilt']} ({neu['liq_boden_text']})")
+    nach = F(RL, aev, ip, 147500.0, 147500.0, 31568.5, "buy", 20, 3, peak=150000.0, kw_firmen=KW)
+    check(nach["liq_boden_balance"] == 146000.0 and nach["liq_regel_balance"] == 146000.0 and nach["liq_gilt"] == "boden",
+          f"Apex Eval nach Verlust (147.500): Boden 146.000 enger als Tagesstopp 145.500 → {nach['liq_regel_balance']} ({nach['liq_gilt']})")
+    # Apex Funded: bestehender Lock-Wert (eod_trailing + Lock 100, max_drawdown am Konto) — Kernwerte ändern nichts
+    afd = {"id": "af1", "firm": "Apex Trader", "account_type": "funded", "name": "150k Apex Funded", "max_drawdown": "4000"}
+    f1 = F(RL, afd, {"id": "f"}, 156000.0, None, 30000, "buy", 20, 1, peak=156000.0)
+    f2 = F(RL, afd, {"id": "f"}, 156000.0, None, 30000, "buy", 20, 1, peak=156000.0, kw_firmen=KW)
+    check(f1 == f2 and f2["liq_boden_balance"] == 150100.0, f"Apex Funded unverändert (Lock 150.100) → {f2['liq_boden_balance']}")
+    # Tradeify Challenge/Funded unverändert (fest, keine weiche Regel)
+    for tdy in ({"id": "t1", "firm": "Tradeify", "account_type": "challenge", "name": "150k Tradeify", "max_drawdown": "4500"},
+                {"id": "t2", "firm": "Tradeify", "account_type": "funded", "starting_balance": 150000, "max_drawdown": "4500"}):
+        x1 = F(RL, tdy, {"id": "x"}, 151000.0, None, 30000, "buy", 20, 1, peak=153000.0)
+        x2 = F(RL, tdy, {"id": "x"}, 151000.0, None, 30000, "buy", 20, 1, peak=153000.0, kw_firmen=KW)
+        check(x1 == x2, f"Tradeify {tdy['account_type']} unverändert mit Kernwerten → {x2['liq_regel_balance']}")
+    # ohne Kernwerte der Firma bzw. Ladefehler (None): wie bisher
+    check(F(RL, aev, ip, 149981.46, 149981.46, 31568.5, "buy", 20, 3, peak=150000.0, kw_firmen=[]) == alt,
+          "Kernwerte fehlen → Konto-Boden wie bisher")
 
     print("\nALLES OK" if ok else "\nFEHLER")
     sys.exit(0 if ok else 1)
