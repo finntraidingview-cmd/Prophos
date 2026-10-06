@@ -5369,6 +5369,27 @@ def test_tsx_k3a():
         and not cs({"wert": "NQZ26", "offen": False}, "MNQZ26", "MNQ", T)[0]                    # fremder Code im Feld → nie
         and not cs(None, "MNQZ26", "MNQ", T)[0] and not cs({"wert": "MNQZ26", "offen": False}, "", "MNQ", T)[0],
         "Contract steht NICHT: Liste offen, falsche Wurzel, Chart auf anderem Contract, kein Titel, halb/fremd getippt")
+    # Menschliche Mausbahn (06.10.2026, Finn: Tempo variieren, nie dieselbe Linie/denselben Punkt)
+    import random as _rd
+    mb = ob.maus_bahn
+    b1 = mb(100, 100, 700, 400, zufall=_rd.Random(1)); b2 = mb(100, 100, 700, 400, zufall=_rd.Random(2))
+    kurz = mb(100, 100, 130, 110, zufall=_rd.Random(3))
+    chk(b1[-1] == (700, 400) and kurz[-1] == (130, 110) and mb(50, 50, 50, 50) == [(50, 50)] and mb(50, 50, 50.4, 50.4) == [(50, 50)],
+        "Mausbahn: letzter Punkt exakt das Ziel; Nullstrecke = genau ein Punkt")
+    chk(6 <= len(kurz) <= 8 and 18 <= len(b1) <= 28 and len(mb(0, 0, 3000, 0, zufall=_rd.Random(4))) == 28 and len(mb(0, 0, 0, 0, schritte=5)) == 1,
+        f"Mausbahn: Schrittzahl nach Strecke, Deckel 28 ({len(kurz)}, {len(b1)})")
+    chk(b1 != b2 and any(p_ != q_ for p_, q_ in zip(b1, b2)) and mb(100, 100, 700, 400, zufall=_rd.Random(1)) == b1,
+        "Mausbahn: zwei Fahrten unterscheiden sich, mit festem Zufall reproduzierbar")
+    chk(all(100 - 62 <= px <= 700 + 62 and 100 - 62 <= py <= 400 + 62 for px, py in b1)
+        and max(abs((px - 100) * 300 - (py - 100) * 600) / 670.8 for px, py in b1) <= 62.0,
+        "Mausbahn: Kurve bleibt nahe der Geraden (seitlicher Ausschlag ≤ 60 px + Zittern)")
+    # Anlauf + Abbremsen: der erste und der letzte Schritt sind kürzer als der mittlere
+    import math as _m
+    d_ = [_m.hypot(b1[i][0] - b1[i - 1][0], b1[i][1] - b1[i - 1][1]) for i in range(1, len(b1))]
+    chk(d_[0] < d_[len(d_) // 2] and d_[-1] < d_[len(d_) // 2], f"Mausbahn: langsam los, schnell in der Mitte, weich ins Ziel ({d_[0]:.0f} < {d_[len(d_) // 2]:.0f} > {d_[-1]:.0f})")
+    chk("maus_bahn(" in _i.getsource(ob._maus_fahren) and "random.uniform(0.008, 0.022)" in _i.getsource(ob._maus_fahren)
+        and "_maus_zittern" in _i.getsource(ob._tsx_pause) and "_WIN_EINGABE" in _i.getsource(ob._tsx_pause),
+        "Fahrt über maus_bahn mit gewürfeltem Schritt-Takt; TopstepX-Pause zittert nur mit Windows-Eingabe")
     mp = ob.tsx_k3_menge_passt
     chk(mp("1", 1) and mp(" 15 ", 15) and mp("3", 3) and not mp("3", 1) and not mp("", 1) and not mp("1.5", 1) and not mp(None, 1)
         and not mp("15a", 15), "Menge: genau die Zahl, sonst nie")

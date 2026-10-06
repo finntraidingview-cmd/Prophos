@@ -1534,21 +1534,85 @@ def _cursor_set(x, y):
     ctypes.windll.user32.SetCursorPos(int(x), int(y))
 
 
-def _maus_fahren(x, y, schritte=8):
+def maus_bahn(cx, cy, x, y, schritte=None, zufall=None):
+    """REIN RECHNEND (testbar): Punkte einer menschlichen Mausbahn von (cx, cy) nach (x, y) — Finn 06.10.2026: „wenn man eine Maus
+    immer so an einer Linie fährt … das wäre besser, wenn die Maus ganz normal das Tempo verändert und nicht immer genau den gleichen
+    Punkt trifft". Leichte Kurve (quadratische Bézier mit einem gewürfelten Kontrollpunkt seitlich der Geraden, Ausschlag ≤ ~12 % der
+    Strecke, höchstens 60 px), Tempo mit Anlauf und Abbremsen (Smoothstep: langsam los, schnell in der Mitte, weich ins Ziel) und ein
+    kleines Zittern (≤ 1 px) unterwegs. Der LETZTE Punkt ist immer exakt (x, y) — der Hover-Beweis danach bleibt unberührt.
+    Schrittzahl nach Strecke (6 … 28), zufall = random.Random für Tests. -> [(px, py), …], mindestens ein Punkt."""
+    import math
+    rnd = zufall or random
+    cx, cy, x, y = float(cx), float(cy), float(x), float(y)
+    dx, dy = x - cx, y - cy
+    strecke = math.hypot(dx, dy)
+    if schritte is None:
+        schritte = max(6, min(28, int(6 + strecke / 45.0)))
+    if strecke < 1.0:
+        return [(int(round(x)), int(round(y)))]
+    # Kontrollpunkt: Mitte der Geraden, seitlich versetzt (Normale), Richtung und Maß gewürfelt
+    nx, ny = -dy / strecke, dx / strecke
+    aus = min(60.0, strecke * 0.12) * rnd.uniform(-1.0, 1.0)
+    kx, ky = cx + dx * rnd.uniform(0.35, 0.65) + nx * aus, cy + dy * rnd.uniform(0.35, 0.65) + ny * aus
+    pts = []
+    for i in range(1, schritte + 1):
+        u = i / schritte
+        t = u * u * (3.0 - 2.0 * u)                           # Smoothstep: Anlauf + Abbremsen
+        px = (1 - t) ** 2 * cx + 2 * (1 - t) * t * kx + t * t * x
+        py = (1 - t) ** 2 * cy + 2 * (1 - t) * t * ky + t * t * y
+        if i < schritte:
+            px += rnd.uniform(-1.0, 1.0)
+            py += rnd.uniform(-1.0, 1.0)
+        pts.append((int(round(px)), int(round(py))))
+    pts[-1] = (int(round(x)), int(round(y)))
+    return pts
+
+
+def _maus_fahren(x, y, schritte=None):
     """Den ECHTEN Mauszeiger sichtbar hinfahren (nicht teleportieren) — Finns
     Ansage: man soll sehen, wie der Bot die Kontrolle uebernimmt. SetCursorPos
-    statt pywinauto.mouse (Parsec-Doppelcursor, s.o.)."""
+    statt pywinauto.mouse (Parsec-Doppelcursor, s.o.). Seit 06.10.2026 auf der
+    Bahn aus maus_bahn (Kurve, Anlauf/Abbremsen, Zittern) statt 8 gleicher
+    Schritte auf der Geraden; je Schritt 8–22 ms gewuerfelt (vorher fix 12 ms)."""
     try:
         cx, cy = _cursor_pos()
     except Exception:
         cx, cy = x, y
-    for i in range(1, schritte + 1):
+    for px, py in maus_bahn(cx, cy, x, y, schritte=schritte):
         try:
-            _cursor_set(int(cx + (x - cx) * i / schritte),
-                        int(cy + (y - cy) * i / schritte))
+            _cursor_set(px, py)
         except Exception:
             break
-        time.sleep(0.012)
+        time.sleep(random.uniform(0.008, 0.022))
+
+
+def _maus_zittern(dauer):
+    """Waehrend einer Pause nicht erstarren (Finn 06.10.2026: „dass die Maus sich die ganze Zeit nur so ein bisschen bewegt"):
+    ein paar kleine, unregelmaessige Bewegungen (2–7 px) um den aktuellen Punkt, dazwischen Stillstand — nur Windows, nie waehrend
+    eines Klicks (wird allein aus Pausen aufgerufen, VOR der naechsten Fahrt zum Ziel; der Hover-Beweis liegt immer nach der Fahrt).
+    Faellt still auf reines Warten zurueck, wenn der Zeiger nicht lesbar ist."""
+    ende = time.time() + max(0.0, float(dauer))
+    try:
+        cx, cy = _cursor_pos()
+    except Exception:
+        time.sleep(max(0.0, ende - time.time()))
+        return
+    while True:
+        rest = ende - time.time()
+        if rest <= 0:
+            break
+        time.sleep(min(rest, random.uniform(0.15, 0.6)))        # Stillstand zwischen zwei Zuckern
+        if ende - time.time() <= 0.05:
+            break
+        zx, zy = cx + random.randint(-7, 7), cy + random.randint(-7, 7)
+        try:
+            for px, py in maus_bahn(cx, cy, zx, zy, schritte=random.randint(3, 6)):
+                _cursor_set(px, py)
+                time.sleep(random.uniform(0.008, 0.02))
+            cx, cy = zx, zy
+        except Exception:
+            time.sleep(max(0.0, ende - time.time()))
+            return
 
 
 def _bildschirm_groesse():
@@ -14212,8 +14276,12 @@ TSX_HOVER_PAUSE = (0.3, 0.5)
 
 
 def _tsx_pause():
-    """1–2 s Pause zwischen zwei TopstepX-Schritten (Finn 01.10.2026) — über _warte, nie fix."""
-    _warte(*TSX_SCHRITT_PAUSE)
+    """1–2 s Pause zwischen zwei TopstepX-Schritten (Finn 01.10.2026) — gewürfelt, nie fix. Seit 06.10.2026 steht die Maus dabei
+    nicht still (kleine Zucker, _maus_zittern) — nur mit echter Windows-Eingabe, sonst reines Warten über _warte."""
+    if _WIN_EINGABE:
+        _maus_zittern(TSX_SCHRITT_PAUSE[0] + random.uniform(0.0, TSX_SCHRITT_PAUSE[1]))
+    else:
+        _warte(*TSX_SCHRITT_PAUSE)
 
 
 def tsx_regel_weiche(regel_datei, pc_id):
