@@ -2192,9 +2192,44 @@
   #vr-view .vr-einst .vr-zl-form{margin:4px 0}
   /* Zell-Detail (06.10.2026 spät): Kopfzeile · ein Balken · Konten-Tabelle · „Details ▸" */
   #vr-view .vr-zd{grid-column:1/-1;margin-top:8px;padding:12px 14px;background:var(--surface-tint);border-radius:10px;cursor:default;font-size:13px}
-  #vr-view .vr-zd-kopf{color:var(--sub);line-height:1.55}
-  #vr-view .vr-zd-kopf b{font-weight:600;color:var(--ink)}
-  #vr-view .vr-zd-kopf .vr-zk-was{color:var(--vr-akzent)}
+  /* Kennzahl-Reihe statt Kopf-Satz (06.10.2026, Finn: „Zahlen, Statistiken, Charts — nie diese Sätze"): fünf kleine .kpi-Kacheln
+     in einer Zeile (Ziel · Vorrat mit Mini-Balken · Unterwegs · Chance-Ring · Kaufplan als Tagesblöcke), am Handy umbrechend.
+     Firmenton kommt als --vr-mk-f von der Zeile; Signal (rot/amber) nur gedämpft am Chance-Ring. */
+  #vr-view .vr-mk{display:flex;flex-wrap:wrap;gap:8px}
+  /* Breiten so, dass alle fünf im halben Panel „Je ID" (≈ 580 px) in eine Zeile passen; darunter brechen sie um */
+  #vr-view .vr-mk .kpi{flex:1 1 84px;min-width:0;overflow:hidden;padding:8px 10px 9px;border:1px solid var(--border-soft);border-radius:10px;box-shadow:none;background:var(--surface)}
+  #vr-view .vr-mk .kpi:hover{box-shadow:none}
+  #vr-view .vr-mk .kpi:nth-child(2){flex-basis:88px}
+  #vr-view .vr-mk .vr-mk-ziel{flex-basis:108px}
+  #vr-view .vr-mk .vr-mk-ch{flex-basis:138px}
+  #vr-view .vr-mk .vr-mk-plan{flex:1 1 120px}
+  #vr-view .vr-mk .kpi-label{font-size:11px;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #vr-view .vr-mk .kpi-value{display:flex;align-items:center;gap:5px;font-size:16px;line-height:1.25;margin:0;color:var(--ink);font-variant-numeric:tabular-nums;white-space:nowrap}
+  #vr-view .vr-mk .kpi-value b{font-weight:600}
+  #vr-view .vr-mk .kpi-delta{display:block;font-size:11px;font-weight:500;color:var(--sub);margin-top:3px;line-height:1.35}
+  #vr-view .vr-mk .kpi-bar{height:4px;margin-top:6px}
+  #vr-view .vr-mk-vor,#vr-view .vr-mk-pfeil{font-size:12px;font-weight:500;color:var(--sub)}
+  #vr-view .vr-mk-vor{margin-right:-2px}
+  #vr-view .vr-mk-grau .kpi-value{color:var(--sub)}
+  #vr-view .vr-mk-ring{width:26px;height:26px;flex:none;margin-right:2px}
+  #vr-view .vr-mk-ring .spur{stroke:var(--border)}
+  #vr-view .vr-mk-ring .wert{stroke:var(--sub)}
+  #vr-view .vr-mk-ring .marke{stroke:var(--ink-2)}
+  #vr-view .vr-mk-rot .vr-mk-ring .wert{stroke:var(--vr-rot)} #vr-view .vr-mk-rot .kpi-value b{color:var(--vr-rot)}
+  #vr-view .vr-mk-amber .vr-mk-ring .wert{stroke:var(--vr-amber)} #vr-view .vr-mk-amber .kpi-value b{color:var(--vr-amber)}
+  #vr-view .vr-mk-tage{display:flex;gap:3px;margin-top:6px}
+  #vr-view .vr-mk-tage span{flex:1 1 0;min-width:15px;max-width:32px;height:17px;border-radius:4px;display:flex;align-items:center;justify-content:center;
+    font-size:10.5px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--ink-2);background:color-mix(in srgb,var(--vr-mk-f,var(--vr-akzent)) 18%,var(--surface))}
+  #vr-view .vr-mk-tage span.heute{background:var(--vr-mk-f,var(--vr-akzent));color:#fff}
+  #vr-view .vr-mk-tage span.mehr{flex:none;min-width:0;background:none;color:var(--sub);font-weight:500}
+  #vr-view .vr-re .vr-mk{margin:0 0 2px}
+  @media (max-width:760px){   /* Handy: festes Raster 2 je Zeile (Ziel|Vorrat, Unterwegs|Chance — die Chance braucht Platz für Ring + „→ 25 %"), Kaufplan volle Breite */
+    #vr-view .vr-mk .kpi.kpi{flex:1 1 calc(44% - 4px)}
+    #vr-view .vr-mk .kpi.vr-mk-ziel{flex-basis:calc(56% - 4px)}
+    #vr-view .vr-mk .kpi:nth-child(3){flex-basis:calc(40% - 4px)}
+    #vr-view .vr-mk .kpi.vr-mk-ch{flex-basis:calc(60% - 4px)}
+    #vr-view .vr-mk .kpi.vr-mk-plan{flex-basis:100%}
+  }
   #vr-view .vr-zb{position:relative;height:10px;border-radius:999px;background:var(--surface);margin:10px 0 12px;overflow:visible}
   #vr-view .vr-zb i{position:absolute;top:0;bottom:0;border-radius:999px}
   #vr-view .vr-zb i.v{left:0}
@@ -38996,7 +39031,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1080'
+  const OS_TAB_BUILD = '2026-09-22.1081'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -56024,7 +56059,7 @@
         <div class="vr-fz-bar">${vrFzBar(z, f, fa)}</div>
         <div class="vr-fz-menge" title="${vrEsc(vrKauf(z) ? vrMenge(z, f) : '')}">${vrEsc(menge)}</div>
         <div class="vr-fz-rechts">${vrPille(z, x.zst, s2)}${vrKauf(z) ? best(z) : x.zst === 'bestellt' ? best(z, true) : ''}${x.zst === 'pausiert' ? knopf(z, 'frei', VR_PLAY, 'wieder freischalten') : knopf(z, 'pausiert', VR_PAUSE, 'pausieren (gerade nichts kaufen)')}${knopf(z, 'gesperrt', VR_SCHLOSS, 'sperren')}</div>
-        ${z.satz && (x.zst === 'gedeckt' || z.quelle === 'ki') && !vrKauf(z) ? `<div class="vr-fz-satz">${z.quelle === 'ki' ? '🤖 ' : ''}${vrEsc(z.satz)}</div>` : ''}
+        ${z.satz && !offen && (x.zst === 'gedeckt' || z.quelle === 'ki') && !vrKauf(z) ? `<div class="vr-fz-satz">${z.quelle === 'ki' ? '🤖 ' : ''}${vrEsc(z.satz)}</div>` : ''}
         ${offen ? vrZellDetail(z, f, fa) : ''}
       </div>`
     }
@@ -56282,9 +56317,7 @@
       const k = Math.round(Number(n) * 10) / 10; return k.toLocaleString('de-DE') + (k === 1 ? ' Konto' : ' Konten') }
     const regel = r.kauf_regel || z.kauf_regel || d.kauf_regel
     const satz = d.regel_satz || (VR_REGEL_SATZ[regel] || VR_REGEL_SATZ.nominal).replace('{p}', vrProz(Number(d.sicherheit_ziel) || VR_SICH_STD))
-    // Ziel als Spanne wie im Detail-Kopf (Finn 06.10.2026), gleiche Grenzen (Untergrenze aus rechnung)
-    const qz = vrZellZahlen(z, f)
-    const zielTxt = vrSpanne(ziel, qz.von, qz.bis)
+    // Ziel steht als Kachel in der Kennzahl-Reihe (vrZellKopf, Finn 06.10.2026: Zahlen statt Sätze), nicht mehr im Kopf
     const vorrat = r.bestand ?? z.bestand_gewichtet ?? z.bestand
     const unterwegs = vrListe(z).filter(k => !k.im_bestand)
     const sumU = r.funnel_zaehlt ?? z.unterwegs_zaehlt_usd ?? (unterwegs.length && unterwegs.every(k => k.zaehlt_usd != null) ? unterwegs.reduce((s, k) => s + Number(k.zaehlt_usd), 0) : null)
@@ -56296,8 +56329,9 @@
       .map(c => `<option value="${vrEsc(key(c))}"${key(c) === key(z) ? ' selected' : ''}>${vrEsc((name.get(c.user_id) || c.user_id.slice(0, 8)) + ' · ' + c.firma)}</option>`).join('')
     return `<details class="vr-klapp" data-vr-klapp="rechnung"${_vr.rechnung ? ' open' : ''}><summary>So wird gerechnet</summary>
       <div class="vr-re"><p class="vr-re-ki">🤖 Die KI liest diese Zahlen und entscheidet wie Finn (Leitfaden). Ohne KI-Antwort gilt die Rechnung.</p><p class="vr-re-satz">${vrEsc(satz)}</p>
-        <div class="vr-re-kopf"><b><i style="background:${vrFarbe(z.user_id)}"></i>${vrEsc(wer)} · ${vrEsc(z.firma)} · Ziel ${vrEsc(zielTxt)}</b>
+        <div class="vr-re-kopf"><b><i style="background:${vrFarbe(z.user_id)}"></i>${vrEsc(wer)} · ${vrEsc(z.firma)}</b>
           <label>anderes Beispiel <select data-vr-rech>${opts}</select></label></div>
+        ${vrZellKopf(z, f, vrFirmaFarbe(z.firma))}
         ${vrZellBar(z, f, vrFirmaFarbe(z.firma))}
         <div class="vr-re-rechnung">
           ${zeile('Im Vorrat', zahl(vorrat))}
@@ -56434,19 +56468,59 @@
     const kurz = n => stueck ? geld(n) : (plus ? '+' : '') + vrK(n) + (plus ? ' $' : '')
     return { von, bis, vorrat, unterwegs, geld, kurz, stueck, r, ziel }
   }
-  function vrZellKopf(z, f){
+  // KENNZAHL-REIHE statt Kopf-Satz (Finn 06.10.2026: „Ich bin immer ein Freund von Zahlen, Statistiken, Charts, nicht von irgendwelchen
+  // Sätzen. Nie diese Sätze." — gemeint war „Ziel +20–30k $ · im Vorrat +0 $ (0 %) · unterwegs 3 Konten, zählt +7,3k $ · → heute 3
+  // kaufen, danach täglich neu rechnen …"). Fünf kleine .kpi-Kacheln in einer Zeile, am Handy umbrechend: Ziel · Vorrat (Mini-Balken
+  // gegen die Untergrenze) · Unterwegs · Chance mit Bestand (Ring, Marke = eingestellte Mindest-Chance) · Kaufplan (Tagesblöcke bis n,
+  // je Tag tagesrate; erster Block kräftig im Firmenton). Pausiert/gesperrt/Daten fehlen/bestellt: Kachel 5 grau mit dem Zustand.
+  // Der Regel-/KI-Satz (z.satz) steht nur noch im Tooltip von Kachel 5. Gleiche Reihe in „So wird gerechnet".
+  function vrZellKopf(z, f, farbe){
     const q = vrZellZahlen(z, f)
-    if(!q) return '<b>kein Ziel</b>'
-    const nU = vrListe(z).filter(k => !k.im_bestand).length
+    if(!q) return '<div class="vr-mk"><div class="kpi vr-mk-grau"><div class="kpi-label">Ziel</div><div class="kpi-value">kein Ziel</div></div></div>'
+    const nb = VR_NB
+    const kachel = (label, wert, unten, kl, titel) => `<div class="kpi${kl ? ' ' + kl : ''}"${titel ? ` title="${vrEsc(titel)}"` : ''}><div class="kpi-label">${label}</div><div class="kpi-value">${wert}</div>${unten || ''}</div>`
+    const klein = t => t ? `<div class="kpi-delta">${t}</div>` : ''
+    // 1 Ziel als Spanne (Finn 06.10.2026: überall die Spanne)
+    const k1 = kachel('Ziel', vrEsc(vrSpanne(q.ziel, q.von, q.bis)), klein(vrTypTxt(q.ziel.typen)), 'vr-mk-ziel')
+    // 2 Vorrat gegen die Untergrenze (Prozent wie bisher gegen die Untergrenze)
     const pct = q.von ? Math.round(q.vorrat / q.von * 100) : 0
-    const n = q.r.n ?? z.nachkauf?.n ?? 0
-    const s1 = q.r.sicherheit ?? z.sicherheit, s2 = q.r.sicherheit_nach ?? z.sicherheit_nach
-    const was = vrBestellt(z) ? `→ bestellt (${z.bestellt.anzahl || ''})` : z.sperre ? `→ kein Vorschlag (${z.sperre === 'unsicher' ? 'Lesung alt' : 'Daten fehlen'})`
-      : z.status === 'pausiert' ? '→ pausiert' : n ? (() => { const tr = vrTranche(z), h = Math.min(tr.heute || n, n), ch = s1 != null && s2 != null ? `Chance mit Bestand ${vrProz(s1)} → ${vrProz(s2)}` : ''
-          return n > h ? `→ heute ${h} kaufen, danach täglich neu rechnen (insgesamt ~${n}${ch ? ', ' + ch : ''})` : `→ heute ${h} kaufen${ch ? ` (${ch})` : ''}` })()
-      : z.toleranz === true ? '→ nichts kaufen (nah genug am Ziel)' : '→ nichts kaufen'
-    // Ziel als Spanne „150–250k" (Finn 06.10.2026); der Prozentwert bleibt gegen die Untergrenze
-    return `Ziel <b>${vrEsc(vrSpanne(q.ziel, q.von, q.bis))}</b> · im Vorrat <b>${q.kurz(q.vorrat)}</b>${q.stueck ? '' : ` (${pct} %)`} · unterwegs <b>${nU ? vrKonten(nU) + (q.unterwegs ? ', zählt ' + q.kurz(q.unterwegs) : '') : '0'}</b> · <b class="vr-zk-was">${was}</b>`
+    const k2 = kachel('Vorrat', vrEsc(q.kurz(q.vorrat)), `<div class="kpi-bar"><div class="kpi-bar-fill" style="width:${Math.min(100, pct)}%;background:${farbe}"></div></div>${klein(pct + nb + '%')}`,
+      '', `im Vorrat ${q.geld(q.vorrat)} · Untergrenze ${q.geld(q.von)}`)
+    // 3 Unterwegs: Anzahl Konten, klein der Zählwert
+    const nU = vrListe(z).filter(k => !k.im_bestand).length
+    const k3 = kachel('Unterwegs', nU ? vrKonten(nU).replace(' ', nb) : '0', klein(nU && q.unterwegs ? `zählt${nb}${vrEsc(q.kurz(q.unterwegs)).replace(/ /g, nb)}` : ''), nU ? '' : 'vr-mk-grau')
+    // 4 Chance mit Bestand: Ring + „→ Mindest-Chance"; Farbe nach Abstand (unter der Hälfte rot, darunter amber, erreicht grau)
+    const s1 = q.r.sicherheit ?? z.sicherheit, sN = q.r.sicherheit_nach ?? z.sicherheit_nach
+    const zielCh = Number(_vr.daten?.sicherheit_ziel) || VR_SICH_STD
+    let k4
+    if(s1 == null || !isFinite(Number(s1))) k4 = kachel('Chance mit Bestand', '–', '', 'vr-mk-ch vr-mk-grau')
+    else {
+      const p = Math.max(0, Math.min(1, Number(s1))), ton = p >= zielCh ? 'vr-mk-ok' : p >= zielCh / 2 ? 'vr-mk-amber' : 'vr-mk-rot'
+      const r = 12, u = 2 * Math.PI * r, w = (zielCh * 360 - 90) * Math.PI / 180
+      const ring = `<svg class="vr-mk-ring" viewBox="0 0 32 32" aria-hidden="true"><circle class="spur" cx="16" cy="16" r="${r}" fill="none" stroke-width="4.5"/>`
+        + (p > 0 ? `<circle class="wert" cx="16" cy="16" r="${r}" fill="none" stroke-width="4.5" stroke-linecap="round" stroke-dasharray="${(p * u).toFixed(2)} ${u.toFixed(2)}" transform="rotate(-90 16 16)"/>` : '')
+        + `<line class="marke" x1="${(16 + 9.2 * Math.cos(w)).toFixed(2)}" y1="${(16 + 9.2 * Math.sin(w)).toFixed(2)}" x2="${(16 + 14.8 * Math.cos(w)).toFixed(2)}" y2="${(16 + 14.8 * Math.sin(w)).toFixed(2)}" stroke-width="1.6" stroke-linecap="round"/></svg>`
+      k4 = kachel('Chance mit Bestand', `${ring}<b>${vrProz(p).replace(' ', nb)}</b><span class="vr-mk-pfeil">→${nb}${vrProz(zielCh).replace(' ', nb)}</span>`, '', 'vr-mk-ch ' + ton,
+        `Chance mit Bestand ${vrProz(p)} · Mindest-Chance ${vrProz(zielCh)}${sN != null ? ' · nach dem Kauf ' + vrProz(sN) : ''}`)
+    }
+    // 5 Kaufplan: heute n, Tagesblöcke bis insgesamt n (je Tag tagesrate); sonst Zustand
+    const n = Number(q.r.n ?? z.nachkauf?.n ?? 0) || 0
+    const satz = z.satz ? (z.quelle === 'ki' ? '🤖 ' : '') + z.satz : ''
+    let k5
+    if(z.status === 'gesperrt' || z.status === 'pausiert') k5 = kachel('Kaufplan', z.status, '', 'vr-mk-plan vr-mk-grau', satz)
+    else if(z.sperre) k5 = kachel('Kaufplan', z.sperre === 'unsicher' ? 'Lesung alt' : 'Daten fehlen', klein('kein Vorschlag'), 'vr-mk-plan vr-mk-grau', satz)
+    else if(vrBestellt(z)) k5 = kachel('Kaufplan', `✓${nb}${vrEsc(z.bestellt.anzahl || '')}`, klein(`bestellt${vrUhr(z.bestellt.verfall) ? ` · zählt${nb}bis${nb}${vrUhr(z.bestellt.verfall)}` : ''}`), 'vr-mk-plan vr-mk-grau', satz)
+    else if(!n) k5 = kachel('Kaufplan', '0', klein(z.toleranz === true || q.r.nah_genug || z.nah_genug ? `nah${nb}genug${nb}am${nb}Ziel` : 'passt'), 'vr-mk-plan', satz)
+    else {
+      const tr = vrTranche(z), h = Math.max(1, Math.min(tr.heute || n, n)), rate = tr.rate || h
+      const bl = [h]; let rest = n - h
+      while(rest > 0 && bl.length < 60){ const x = Math.min(rate, rest); bl.push(x); rest -= x }
+      const zeig = bl.slice(0, 8), mehr = bl.length - zeig.length
+      const tage = `<div class="vr-mk-tage">${zeig.map((x, i) => `<span class="${i ? '' : 'heute'}" title="Tag ${i + 1}: ${x}">${x}</span>`).join('')}${mehr ? `<span class="mehr">+${mehr}</span>` : ''}</div>`
+      const unten = bl.length > 1 ? `insgesamt${nb}~${n} · ca.${nb}${bl.length}${nb}Tage · täglich neu gerechnet` : vrEsc(vrMenge(z, f)).replace(/ /g, nb)
+      k5 = kachel('Kaufplan', `<span class="vr-mk-vor">heute</span>${h}`, tage + klein(unten), 'vr-mk-plan', [vrMenge(z, f), satz].filter(Boolean).join('\n'))
+    }
+    return `<div class="vr-mk" style="--vr-mk-f:${farbe}">${k1}${k2}${k3}${k4}${k5}</div>`
   }
   function vrZellBar(z, f, farbe){
     const q = vrZellZahlen(z, f)
@@ -56479,7 +56553,7 @@
     const teile = (Array.isArray(z.score_teile) ? z.score_teile : []).filter(x => nicht0(x) && !doppelt(x))
     const mehr = vrTeileHtml({ score_teile: teile }) + vrEurHtml({ ...z, bestand_eur: z.bestand_eur || null, funnel_eur: z.funnel_eur || null }) + vrHinweisHtml(z)
       + (z.ki_text ? `<div class="vr-kz-txt">${vrEsc(z.ki_text)}</div>` : '')
-    return `<div class="vr-zd"><div class="vr-zd-kopf">${vrZellKopf(z, f)}</div>${vrZellBar(z, f, farbe)}<div class="vr-zd-konten">${vrKontenTabelle(z, f)}</div>`
+    return `<div class="vr-zd">${vrZellKopf(z, f, farbe)}${vrZellBar(z, f, farbe)}<div class="vr-zd-konten">${vrKontenTabelle(z, f)}</div>`
       + (mehr ? `<details class="vr-zd-mehr"><summary>Details</summary>${mehr}</details>` : '') + '</div>'
   }
 
