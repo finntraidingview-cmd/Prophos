@@ -2007,6 +2007,71 @@
     #vr-view .vr-fz{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"firma rechts" "kette menge" "bar bar";row-gap:6px;column-gap:10px}
     #vr-view .vr-fz-bar{max-width:none}
   }
+  /* HEUTE KAUFEN (06.10.2026 spät, Master: „in 3 Sekunden wissen, was heute zu kaufen ist"): ruhige Liste wie die stillsten Listen
+     in Prophos, viel Luft, ein Streifen links (rot heute, gelb diese Woche), ein Knopf. Übersicht/Einstellungen zugeklappt darunter. */
+  #vr-view .vr-heute{padding:22px 24px 10px;margin-bottom:16px}
+  #vr-view .vr-h-kopf{display:flex;align-items:flex-start;justify-content:space-between;gap:10px 16px;flex-wrap:wrap}
+  #vr-view .vr-h-titel{display:flex;align-items:baseline;gap:6px 14px;flex-wrap:wrap}
+  #vr-view .vr-h-titel h2{margin:0;font-size:24px;font-weight:700;letter-spacing:-.01em;color:var(--ink)}
+  #vr-view .vr-h-titel span{font-size:15px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+  #vr-view .vr-h-leg{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--sub);white-space:nowrap;margin-top:6px}
+  #vr-view .vr-h-leg i{display:inline-block;width:10px;height:10px;border-radius:3px}
+  #vr-view .vr-h-leg i.woche{margin-left:8px}
+  #vr-view .vr-h-leg i.heute,#vr-view .vr-h-z.vr-h-heute::before{background:#F04438}
+  #vr-view .vr-h-leg i.woche,#vr-view .vr-h-z.vr-h-woche::before{background:#F79009}
+  #vr-view .vr-h-satz{margin:8px 0 0;font-size:13px;color:var(--sub);line-height:1.5}
+  #vr-view .vr-h-liste{margin-top:14px}
+  #vr-view .vr-h-z{position:relative;display:flex;align-items:center;gap:16px;padding:16px 0 16px 18px;border-top:1px solid var(--border-soft)}
+  #vr-view .vr-h-z::before{content:'';position:absolute;left:0;top:14px;bottom:14px;width:4px;border-radius:4px}
+  #vr-view .vr-h-z.gekauft::before{background:var(--border)}
+  #vr-view .vr-h-z.gekauft .vr-h-main{opacity:.5}
+  #vr-view .vr-h-main{flex:1 1 auto;min-width:0}
+  #vr-view .vr-h-wer{display:flex;align-items:center;gap:8px;font-size:13.5px;min-width:0}
+  #vr-view .vr-h-wer i{width:9px;height:9px;border-radius:3px;flex:none}
+  #vr-view .vr-h-wer b{font-weight:600;color:var(--ink)}
+  #vr-view .vr-h-wer span{color:var(--sub)}
+  #vr-view .vr-h-wer span::before{content:'· ';color:var(--sub-2)}
+  #vr-view .vr-h-menge{margin-top:4px;font-size:19px;font-weight:600;color:var(--ink);line-height:1.3;font-variant-numeric:tabular-nums}
+  #vr-view .vr-h-menge span{margin-left:12px;font-size:15px;font-weight:500;color:var(--sub);white-space:nowrap}
+  #vr-view .vr-h-txt{margin-top:5px;font-size:12.5px;color:var(--sub);line-height:1.5}
+  #vr-view .vr-h-knopf{flex:none;border:1px solid var(--border);background:var(--surface);color:var(--ink);border-radius:10px;padding:9px 16px;font:inherit;font-size:13.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+  #vr-view .vr-h-knopf:hover{border-color:var(--sub-2);background:var(--surface-tint)}
+  #vr-view .vr-h-knopf.weg{font-weight:500;color:#067647;border-color:transparent;background:transparent;padding:9px 6px}
+  #vr-view .vr-h-knopf.weg span{color:var(--sub)}
+  #vr-view .vr-h-knopf:disabled{opacity:.5;cursor:default}
+  #vr-view .vr-h-leer{display:flex;align-items:center;gap:12px;padding:22px 0 18px;font-size:16px;color:var(--ink)}
+  #vr-view .vr-h-leer b{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50%;background:rgba(18,183,106,.13);color:#067647;font-size:18px}
+  /* zugeklappte Bereiche unter der Liste */
+  #vr-view .vr-klapp{margin:4px 0 10px}
+  #vr-view .vr-klapp > summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:6px;font-size:13.5px;font-weight:500;color:var(--sub);padding:8px 2px}
+  #vr-view .vr-klapp > summary::-webkit-details-marker{display:none}
+  #vr-view .vr-klapp > summary::after{content:'▸';font-size:12px}
+  #vr-view .vr-klapp[open] > summary::after{content:'▾'}
+  #vr-view .vr-klapp > summary:hover{color:var(--ink)}
+  #vr-view .vr-klapp[open] > summary{margin-bottom:8px}
+  #vr-view .vr-einst{background:var(--surface);border:1px solid var(--border-soft);border-radius:12px;padding:16px 18px}
+  #vr-view .vr-einst-kopf{font-size:13px;font-weight:600;color:var(--ink);margin:0 0 8px}
+  #vr-view .vr-einst-kopf span{font-weight:400;color:var(--sub);font-size:12px;margin-left:8px}
+  #vr-view .vr-einst .vr-sich{margin-bottom:18px}
+  #vr-view .vr-mx-z{display:flex;align-items:flex-start;gap:12px;padding:8px 0;border-top:1px solid var(--border-soft)}
+  #vr-view .vr-mx-n{flex:0 0 110px;display:flex;align-items:center;gap:7px;font-size:13px;font-weight:500;padding-top:3px;min-width:0}
+  #vr-view .vr-mx-n i{width:8px;height:8px;border-radius:3px;flex:none}
+  #vr-view .vr-mx-chips{display:flex;flex-wrap:wrap;gap:5px;min-width:0}
+  #vr-view .vr-mx-c{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--border);background:var(--surface);color:var(--ink);border-radius:999px;padding:3px 10px;font:inherit;font-size:12px;cursor:pointer}
+  #vr-view .vr-mx-c svg{width:11px;height:11px}
+  #vr-view .vr-mx-c.pausiert{color:#B54708;background:rgba(247,144,9,.1);border-color:rgba(247,144,9,.45)}
+  #vr-view .vr-mx-c.gesperrt{color:var(--sub);border-style:dashed;background:transparent}
+  #vr-view .vr-mx-c:disabled{cursor:default;opacity:.6}
+  @media (max-width:760px){
+    #vr-view .vr-heute{padding:16px 14px 6px}
+    #vr-view .vr-h-titel h2{font-size:21px}
+    #vr-view .vr-h-z{flex-wrap:wrap;gap:10px;padding:14px 0 14px 14px}
+    #vr-view .vr-h-menge{font-size:17px}
+    #vr-view .vr-h-menge span{display:block;margin:2px 0 0}
+    #vr-view .vr-h-knopf{margin-left:auto}
+    #vr-view .vr-mx-z{flex-direction:column;gap:6px}
+    #vr-view .vr-mx-n{flex:none}
+  }
   #adm-pane-stat .kf-kpis .kpi-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #adm-pane-stat .kf-gross{margin-top:8px}
   #adm-pane-stat .kf-gross .kf-chart[hidden]{display:none}
@@ -8691,7 +8756,6 @@
           <p class="view-sub" id="vr-stand">Je ID und Firma: Funnel und sicherer Bestand gegen das Ziel</p>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
-          <div id="vr-sich" class="vr-sich" hidden></div>
           <button class="btn btn-ghost btn-mini" id="vrNeu" title="rechnet sofort neu — neu angelegte Konten sind dann drin">Jetzt aktualisieren</button>
         </div>
       </div>
@@ -38711,7 +38775,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1053'
+  const OS_TAB_BUILD = '2026-09-22.1054'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -55316,7 +55380,7 @@
   const VR_SCHLOSS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/></svg>'
   const VR_PAUSE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 5v14M15 5v14"/></svg>'
   const VR_PLAY = '<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M7 5v14l11-7z"/></svg>'
-  const _vr = { daten: null, laedt: false, fehler: '', timer: null, stand: 0, kachel: '', firma: '', auf: new Set(), sendet: 0, offen: new Set(), sichert: false }
+  const _vr = { daten: null, laedt: false, fehler: '', timer: null, stand: 0, kachel: '', firma: '', auf: new Set(), sendet: 0, offen: new Set(), sichert: false, uebersicht: false, einst: false }
   // Stufe 2 (06.10.2026, Vertrag .claude/master/vorrat-vertrag.md): je Zelle nachkauf {n, einheit, dringlichkeit, n_roh, teile},
   // score 0–100 + score_teile [{name, wert, einheit}] (Finn: Dringlichkeit als Zahl, aus den Zahlen begründet), sperre
   // 'daten_fehlen'|'unsicher', bestellt {id, anzahl, offen, verfall} + zustand 'bestellt', bestand_gewichtet/erwartet, konten = LISTE
@@ -55510,7 +55574,6 @@
     if(st) st.textContent = s2 && vrUhr(d.gerechnet_um)
       ? 'Gerechnet ' + vrUhr(d.gerechnet_um) + (vrUhr(d.naechster_lauf) ? ' · nächster Lauf ≈ ' + vrUhr(d.naechster_lauf) : '')
       : 'Je ID und Firma: Funnel und Bestand gegen das Ziel' + (_vr.stand ? ' · Stand ' + vrUhr(new Date(_vr.stand).toISOString()) : '')
-    vrSichRender(d, s2)
     const name = new Map((d.people || []).map(p => [p.user_id, p.name]))
     const firma = new Map(d.firmen.map(f => [f.firma, f]))
     const nb = VR_NB
@@ -55585,6 +55648,8 @@
 
     root.innerHTML = (d.hinweis ? `<div class="vr-hinweis">${vrEsc(d.hinweis)}</div>` : '')
       + (_vr.fehler ? `<div class="vr-fehler">${vrEsc(_vr.fehler)}</div>` : '')
+      + vrHeuteHtml(d, s2, name, firma)
+      + `<details class="vr-klapp" data-vr-klapp="uebersicht"${_vr.uebersicht ? ' open' : ''}><summary>Übersicht je Person</summary>`
       + `<div class="kpis vr-kpis">${kpis}</div>`
       + (d.ki_text ? `<div class="vr-kz-txt vr-ki">${vrEsc(d.ki_text)}${vrUhr(d.ki_text_um) ? ` <span>· Text von ${vrUhr(d.ki_text_um)}</span>` : ''}</div>` : '')
       + `<div class="grid-2 vr-grid">
@@ -55594,7 +55659,12 @@
             <div class="adm-dist" id="vr-firmen">${fListe.map(fZeile).join('') || '<div class="adm-empty">Keine Firma.</div>'}</div></div>
         </div>`
       + `<div class="vr-fuss">Punkte je Konto: grün = Chance ab 50 %, gelb 20–50 %, rot darunter, violett = im Vorrat, gestrichelt = Daten fehlen, oranger Ring = nah am Boden.
-        Firmen-Balken: grünes Band = Ziel-Spanne. ✓ = bestellt (zählt 48 h), ‖ pausiert (gerade nichts kaufen), Schloss sperrt. Klick auf eine Firmenzeile zeigt die Rechnung.</div>`
+        Firmen-Balken: grünes Band = Ziel-Spanne. ✓ = bestellt (zählt 48 h), ‖ pausiert (gerade nichts kaufen), Schloss sperrt. Klick auf eine Firmenzeile zeigt die Rechnung.</div></details>`
+      + `<details class="vr-klapp" data-vr-klapp="einst"${_vr.einst ? ' open' : ''}><summary>Einstellungen</summary>`
+      + `<div class="vr-einst"><div class="vr-einst-kopf">Wie sicher soll das Ziel erreicht werden?</div><div id="vr-sich" class="vr-sich"></div>`
+      + `<div class="vr-einst-kopf">Freigeschaltet je ID und Firma <span>Klick wechselt: frei → pausiert → gesperrt → frei</span></div>${vrMatrixHtml(d, name)}</div></details>`
+    vrSichRender(d, s2)
+    root.querySelectorAll('[data-vr-klapp]').forEach(el => el.addEventListener('toggle', () => { _vr[el.dataset.vrKlapp] = el.open }))
     root.querySelectorAll('[data-vr-k]').forEach(b => b.addEventListener('click', () => { const key = b.dataset.vrK; _vr.kachel = _vr.kachel === key ? '' : key; vrRender() }))
     root.querySelectorAll('[data-vr-auf]').forEach(b => b.addEventListener('click', () => { const u = b.dataset.vrAuf; if(_vr.auf.has(u)) _vr.auf.delete(u); else _vr.auf.add(u); vrRender() }))
     root.querySelectorAll('[data-vr-f-filter]').forEach(b => b.addEventListener('click', () => { const f = b.dataset.vrFFilter; _vr.firma = _vr.firma === f ? '' : f; vrRender() }))
@@ -55602,7 +55672,7 @@
     root.querySelectorAll('[data-vr-b]').forEach(b => b.addEventListener('click', ev => {
       ev.stopPropagation()
       const [uid, ...rest] = b.dataset.vrB.split('|')
-      vrBestellen(uid, rest.join('|'), !!b.dataset.vrWeg)
+      vrBestellen(uid, rest.join('|'), !!b.dataset.vrWeg, b.dataset.vrN, b.dataset.vrE)
     }))
     root.querySelectorAll('[data-vr-o]').forEach(el => el.addEventListener('click', ev => {
       if(ev.target.closest('button')) return
@@ -55641,6 +55711,67 @@
     return `<div class="vr-fz-box">${zeigen.map(zeile).join('') || '<div class="vr-leer">Nichts für diese Auswahl.</div>'}${zuHtml}</div>`
   }
 
+  // ── HEUTE KAUFEN (06.10.2026 spät, Finn versteht auch das Kachel-Design nicht: „zu viele Knöpfe und Balken, wie dringend etwas ist,
+  // sieht man nicht" — Master: „er öffnet die Seite und weiß in 3 Sekunden, was er heute kaufen soll"). Eine ruhige Liste: Streifen
+  // rot = heute / gelb = diese Woche, Person · Firma, groß die Menge, Preis, EIN Knopf „✓ gekauft" (= bestellt), darunter ein Satz.
+  // Quelle: Server heute[] {user_id, user, firma, anzahl, einheit, preis_eur, stufe 'heute'|'woche', satz} + luecke_gesamt (T2, Vertrag §3b):
+  // Reihenfolge kommt fertig vom Server (leere Zellen zuerst, dann Lücke, dann Chance × Wert ÷ Preis) und bleibt so; preis_eur = Preis der
+  // ganzen Zeile. Dieselbe Zelle kann zweimal stehen (heute + Rest diese Woche). Ohne Feld (älteres Backend) aus den Zellen: Nachkauf
+  // jetzt = heute, bald = diese Woche. Gekaufte bleiben grau stehen (rückgängig), bis der nächste Lauf sie herausnimmt.
+  function vrSatz(z, f, wer){
+    const q = vrZielZahlen(z, f), nV = z.bestand_n || 0, nF = vrListe(z).filter(k => !k.im_bestand).length
+    const wo = (f?.ziel?.typen || []).includes('winning_days') ? 'Winning-Days-Konto' : 'Funded-Konto'
+    const hat = nV ? `${vrKonten(nV)} im Vorrat` : `noch kein ${wo}`
+    return `${wer} hat bei ${z.firma} ${hat}${nF ? `, ${vrKonten(nF)} unterwegs` : ''}${q ? ` — Ziel ${q.fmt(q.von)}${q.bis > q.von ? '–' + q.fmt(q.bis) : ''}${q.stueck ? ' Konten' : ''}` : ''}.`
+  }
+  function vrHeuteListe(d, name, firma){
+    const zelle = (u, fi) => d.zellen.find(z => z.user_id === u && z.firma === fi)
+    let l
+    if(Array.isArray(d.heute)) l = d.heute.map(h => ({ uid: h.user_id, wer: h.user || name.get(h.user_id) || String(h.user_id).slice(0, 8), firma: h.firma,
+      anzahl: h.anzahl, einheit: h.einheit, menge: `${h.anzahl} × ${h.einheit || 'Konto'}`, preis: h.preis_eur, stufe: h.stufe === 'heute' ? 'heute' : 'woche',
+      satz: h.satz || '', z: zelle(h.user_id, h.firma) }))
+    else l = d.zellen.filter(z => z.status === 'frei' && !z.sperre && ['jetzt', 'bald'].includes(z.nachkauf?.dringlichkeit) && (vrKauf(z) || vrBestellt(z))).map(z => {
+      const nk = z.nachkauf, wer = name.get(z.user_id) || z.user_id.slice(0, 8), f = firma.get(z.firma)
+      const n = vrBestellt(z) ? (z.bestellt.anzahl || nk.n) : nk.n
+      return { uid: z.user_id, wer, firma: z.firma, anzahl: n, einheit: nk.einheit, menge: vrBestellt(z) ? `${n} × ${nk.einheit || 'Konto'}` : vrMenge(z, f),
+        preis: nk.kosten_eur ?? (nk.preis_eur != null ? nk.preis_eur * n : null), stufe: nk.dringlichkeit === 'jetzt' ? 'heute' : 'woche', satz: z.ki_text || vrSatz(z, f, wer), z }
+    })
+    if(Array.isArray(d.heute)) return l
+    return l.sort((a, b) => (a.stufe === b.stufe ? 0 : a.stufe === 'heute' ? -1 : 1) || String(a.wer).localeCompare(String(b.wer), 'de') || a.firma.localeCompare(b.firma, 'de'))
+  }
+  function vrHeuteHtml(d, s2, name, firma){
+    if(!s2) return ''      // ohne Stufe 2 gibt es keine Kaufzahl (Server: heute = [], luecke_gesamt = null) — kein falsches „alles gedeckt"
+    const l = vrHeuteListe(d, name, firma), aus = d.bereit ? '' : ' disabled'
+    // „bestellt" gilt je Zelle: stehen heute und der Rest diese Woche beide da, wird nur die Heute-Zeile grau
+    const gekauft = x => !!x.z && vrBestellt(x.z) && (x.stufe === 'heute' || !l.some(y => y !== x && y.z === x.z && y.stufe === 'heute'))
+    const offen = l.filter(x => !gekauft(x)), heute = offen.filter(x => x.stufe === 'heute'), woche = offen.filter(x => x.stufe === 'woche')
+    const nH = heute.reduce((s, x) => s + (Number(x.anzahl) || 0), 0), pH = heute.reduce((s, x) => s + (Number(x.preis) || 0), 0)
+    const lg = d.luecke_gesamt, lgN = typeof lg === 'object' && lg ? (lg.konten ?? lg.n) : lg
+    const zahl = heute.length ? `${vrKonten(nH)}${pH ? ` · ca. ${vrEur(pH)}` : ''}` : l.length ? 'heute nichts dringend' : ''
+    const kopf = `<div class="vr-h-kopf"><div class="vr-h-titel"><h2>Heute kaufen</h2><span>${zahl}${woche.length ? ` · diese Woche ${woche.reduce((s, x) => s + (Number(x.anzahl) || 0), 0)}` : ''}</span></div>`
+      + `<span class="vr-h-leg"><i class="heute"></i>heute <i class="woche"></i>diese Woche</span></div>`
+      + (lgN ? `<p class="vr-h-satz">Gesamt fehlen noch ~${Math.round(Number(lgN)).toLocaleString('de-DE')} Konten, bis alle Ziele voll sind — die Liste zeigt nur, was heute dran ist.</p>` : '')
+    if(!l.length) return `<div class="panel vr-heute">${kopf}<div class="vr-h-leer"><b>✓</b>Heute nichts zu kaufen — alle Ziele gedeckt.</div></div>`
+    const zeile = x => { const g = gekauft(x), key = vrEsc(x.uid + '|' + x.firma)
+      return `<div class="vr-h-z vr-h-${x.stufe}${g ? ' gekauft' : ''}">
+        <div class="vr-h-main"><div class="vr-h-wer"><i style="background:${vrFarbe(x.uid)}"></i><b>${vrEsc(x.wer)}</b><span>${vrEsc(x.firma)}</span></div>
+          <div class="vr-h-menge">${vrEsc(x.menge)}${x.preis ? `<span>≈ ${vrEur(x.preis)}</span>` : ''}</div>
+          ${x.satz ? `<div class="vr-h-txt">${vrEsc(x.satz)}</div>` : ''}</div>
+        ${g ? `<button type="button" class="vr-h-knopf weg" data-vr-b="${key}" data-vr-weg="1" title="${d.bereit ? 'Kauf zurücknehmen' : 'SQL noch nicht eingespielt'}"${aus}>gekauft ✓ <span>· rückgängig</span></button>`
+            : `<button type="button" class="vr-h-knopf" data-vr-b="${key}" data-vr-n="${vrEsc(x.anzahl)}" data-vr-e="${vrEsc(x.einheit || '')}" title="${d.bereit ? 'als gekauft markieren — zählt 48 h als unterwegs, bis das Konto angelegt ist' : 'SQL noch nicht eingespielt'}"${aus}>✓ gekauft</button>`}
+      </div>` }
+    return `<div class="panel vr-heute">${kopf}<div class="vr-h-liste">${l.map(zeile).join('')}</div></div>`
+  }
+  // Sperr-Matrix (Einstellungen): je ID eine Zeile, je Firma ein Chip im Zustand frei · pausiert (‖) · gesperrt (Schloss); Klick wechselt
+  // reihum (vrSchalten wie bisher). Chips brechen um — am Handy kein waagerechtes Scrollen.
+  function vrMatrixHtml(d, name){
+    const NEXT = { frei: 'pausiert', pausiert: 'gesperrt', gesperrt: 'frei' }, aus = d.bereit ? '' : ' disabled'
+    return `<div class="vr-mx">${(d.people || []).map(p => { const nm = vrEsc(p.name)
+      const chips = d.firmen.map(f => { const z = d.zellen.find(c => c.user_id === p.user_id && c.firma === f.firma); if(!z) return ''
+        const st = z.status || 'frei', nx = NEXT[st] || 'frei'
+        return `<button type="button" class="vr-mx-c ${st}" data-vr-s="${nx}" data-vr-u="${vrEsc(p.user_id)}" data-vr-f="${vrEsc(f.firma)}" title="${d.bereit ? `${nm} bei ${vrEsc(f.firma)}: ${st} — Klick: ${nx}` : 'SQL noch nicht eingespielt'}"${aus}>${st === 'pausiert' ? VR_PAUSE : st === 'gesperrt' ? VR_SCHLOSS : ''}${vrEsc(f.firma)}</button>` }).join('')
+      return `<div class="vr-mx-z"><span class="vr-mx-n"><i style="background:${vrFarbe(p.user_id)}"></i>${nm}</span><span class="vr-mx-chips">${chips}</span></div>` }).join('')}</div>`
+  }
   // Sicherheits-Auswahl (Finn 06.10.2026): wie sicher das Ziel erreicht sein soll — 50 bis 90 %, Standard 80 %. Speichert per
   // POST {aktion: 'einstellung', sicherheit: 0,5–0,9} und rechnet danach sofort neu (wie „Jetzt aktualisieren"). Aktueller Wert aus
   // d.sicherheit_ziel (0..1); nur sichtbar, wenn der Server Stufe 2 liefert.
@@ -55697,11 +55828,12 @@
   }
 
   // „bestellt" setzen bzw. zurücknehmen (Vertrag: POST aktion bestellt / bestellt_weg). Sofort anzeigen; schlägt es fehl, zurück.
-  async function vrBestellen(uid, firma, weg){
+  async function vrBestellen(uid, firma, weg, anzahl, einheit){
     const d = _vr.daten, z = d?.zellen.find(c => c.user_id === uid && c.firma === firma)
     if(!z || !d.bereit) return
     const alt = { zustand: z.zustand, bestellt: z.bestellt }
-    const body = weg ? { aktion: 'bestellt_weg', id: z.bestellt?.id } : { aktion: 'bestellt', user_id: uid, firma, anzahl: z.nachkauf?.n || 1, einheit: z.nachkauf?.einheit || null }
+    // anzahl/einheit aus der Heute-Liste (Server heute[]), sonst aus dem Nachkauf der Zelle
+    const body = weg ? { aktion: 'bestellt_weg', id: z.bestellt?.id } : { aktion: 'bestellt', user_id: uid, firma, anzahl: Number(anzahl) || z.nachkauf?.n || 1, einheit: einheit || z.nachkauf?.einheit || null }
     if(weg){ z.zustand = null; z.bestellt = null } else { z.zustand = 'bestellt'; z.bestellt = { anzahl: body.anzahl, offen: body.anzahl, einheit: body.einheit } }
     _vr.sendet++; vrRender()
     try{
