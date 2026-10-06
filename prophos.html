@@ -2184,6 +2184,10 @@
   #vr-view .vr-g-bar i{display:block;height:100%;border-radius:999px;background:var(--sub-2)}
   #vr-view .vr-g-mittel .vr-g-bar i{background:var(--vr-amber)} #vr-view .vr-g-hoch .vr-g-bar i{background:var(--vr-rot)}
   #vr-view .vr-g-mittel .kpi-delta{color:var(--vr-amber)} #vr-view .vr-g-hoch .kpi-delta{color:var(--vr-rot)}
+  /* KI-Bot (06.10.2026): Quelle der Kaufliste dezent unter dem Titel, Sätze bewerteter Zellen in der Übersicht, Hinweis in der Rechnung */
+  #vr-view .vr-h-quelle{flex-basis:100%;font-style:normal;font-size:12px;color:var(--sub)}
+  #vr-view .vr-fz-satz{grid-column:1/-1;font-size:12px;color:var(--sub);line-height:1.45;margin-top:3px}
+  #vr-view .vr-re-ki{margin:0 0 8px;font-size:12.5px;color:var(--sub);line-height:1.5}
   #adm-pane-stat .kf-kpis .kpi-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #adm-pane-stat .kf-gross{margin-top:8px}
   #adm-pane-stat .kf-gross .kf-chart[hidden]{display:none}
@@ -38887,7 +38891,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1065'
+  const OS_TAB_BUILD = '2026-09-22.1066'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -55718,7 +55722,7 @@
     const kf = _vr.kachel ? VR_KACHEL[_vr.kachel] : null
     const passt = x => istFrei(x) && (!kf || kf(x))
 
-    const kachel = (key, label, wert, sub, kl) => `<button type="button" class="kpi vr-k${_vr.kachel === key ? ' is-on' : ''}${wert && wert !== '–' && wert !== '0 €' ? '' : ' is-leer'}" data-vr-k="${key}" title="${_vr.kachel === key ? 'Filter aufheben' : 'nur diese zeigen'}">
+    const kachel = (key, label, wert, sub, kl) => `<button type="button" class="kpi vr-k${_vr.kachel === key ? ' is-on' : ''}${wert && wert !== '–' && wert !== '0 €' ? '' : ' is-leer'}" data-vr-k="${key}">
       <div class="kpi-label">${label}</div><div class="kpi-value ${kl}">${wert}</div><div class="kpi-delta">${sub}</div></button>`
     const nBest = frei.filter(x => x.zst === 'bestellt').length
     // Overall-Dringlichkeit (Finn 06.10.2026, „wie dringend man nachkaufen muss"): nur wenn der Server gesamt{} liefert (T2) — nichts
@@ -55862,6 +55866,7 @@
         <div class="vr-fz-bar">${vrFzBar(z, f, fa)}</div>
         <div class="vr-fz-menge">${vrEsc(menge)}</div>
         <div class="vr-fz-rechts">${vrPille(z, x.zst, s2)}${vrKauf(z) ? best(z) : x.zst === 'bestellt' ? best(z, true) : ''}${x.zst === 'pausiert' ? knopf(z, 'frei', VR_PLAY, 'wieder freischalten') : knopf(z, 'pausiert', VR_PAUSE, 'pausieren (gerade nichts kaufen)')}${knopf(z, 'gesperrt', VR_SCHLOSS, 'sperren')}</div>
+        ${z.satz && (x.zst === 'gedeckt' || z.quelle === 'ki') && !vrKauf(z) ? `<div class="vr-fz-satz">${z.quelle === 'ki' ? '🤖 ' : ''}${vrEsc(z.satz)}</div>` : ''}
         ${offen ? vrDetailHtml(z, f, `<p>${vrEsc(vrZielTxt(f?.ziel))}</p>${vrTeileHtml(z)}${vrEurHtml(z)}${vrHinweisHtml(z)}`) : ''}
       </div>`
     }
@@ -55907,14 +55912,14 @@
   }
   function vrHeuteListe(d, name, firma){
     const zelle = (u, fi) => d.zellen.find(z => z.user_id === u && z.firma === fi)
-    const zeile = (z, uid, fi, wer, anzahl, einheit, preis, stufe, satz) => ({ uid, wer, firma: fi, anzahl, einheit: vrEinheitKurz(einheit, fi, firma.get(fi)),
-      preis, stufe, satz, z, prio: vrPrio(z) })
+    const zeile = (z, uid, fi, wer, anzahl, einheit, preis, stufe, satz, quelle, ki_um) => ({ uid, wer, firma: fi, anzahl, einheit: vrEinheitKurz(einheit, fi, firma.get(fi)),
+      preis, stufe, satz, z, prio: vrPrio(z), quelle: quelle || 'regel', ki_um: ki_um || null })
     let l, offenGesamt = null
     if(Array.isArray(d.heute)){
       // Server: Reihenfolge = Rang; Zeilenpreis = kosten_eur, preis_eur ist der STÜCKPREIS (T2 06.10.2026 — deb0643 zeigte
       // „10 × 150k EOD ≈ 150 €" statt 1.500 €); fehlt kosten_eur (älterer Server), gilt anzahl × preis_eur
       l = d.heute.map(h => zeile(zelle(h.user_id, h.firma), h.user_id, h.firma, h.user || name.get(h.user_id) || String(h.user_id).slice(0, 8), h.anzahl, h.einheit,
-        h.kosten_eur != null ? h.kosten_eur : (h.preis_eur != null ? h.preis_eur * (Number(h.anzahl) || 1) : null), h.stufe === 'heute' ? 'heute' : 'woche', h.satz || ''))
+        h.kosten_eur != null ? h.kosten_eur : (h.preis_eur != null ? h.preis_eur * (Number(h.anzahl) || 1) : null), h.stufe === 'heute' ? 'heute' : 'woche', h.satz || '', h.quelle, h.ki_um))
     }else{
       // Rückfall (älteres Backend): Zellen mit Nachkauf nach Priorität, dann Lücke ÷ Untergrenze; gedeckelt wie der Server
       const kand = d.zellen.filter(z => z.status === 'frei' && !z.sperre && ['jetzt', 'bald'].includes(z.nachkauf?.dringlichkeit) && (vrKauf(z) || vrBestellt(z)))
@@ -55946,7 +55951,10 @@
     const [nH, pH] = summe(heute)
     const lg = d.luecke_gesamt, lgN = (typeof lg === 'object' && lg ? (lg.konten ?? lg.n) : lg) ?? offenGesamt
     const geld = p => p ? ` · ≈${VR_NB}${vrEur(p).replace(' ', VR_NB)}` : ''
-    const kopf = `<div class="vr-h-kopf"><div class="vr-h-titel"><h2>Heute kaufen</h2>${heute.length ? `<span>${vrKonten(nH)}${geld(pH)}</span>` : l.length ? '<span>heute nichts dringend</span>' : ''}</div>`
+    // KI-Bot (T2, heute[].quelle 'ki'|'regel' + ki_um): woher die Liste kommt, dezent unter dem Titel — ohne Feld „Rechnung"
+    const ki = l.filter(x => x.quelle === 'ki'), kiUm = ki.map(x => x.ki_um).filter(Boolean).sort().pop()
+    const quelle = ki.length ? `🤖 KI-Einschätzung${vrUhr(kiUm || d.gerechnet_um) ? ' · Stand ' + vrUhr(kiUm || d.gerechnet_um) : ''}` : `Rechnung${vrUhr(d.gerechnet_um) ? ' · Stand ' + vrUhr(d.gerechnet_um) : ''}`
+    const kopf = `<div class="vr-h-kopf"><div class="vr-h-titel"><h2>Heute kaufen</h2>${heute.length ? `<span>${vrKonten(nH)}${geld(pH)}</span>` : l.length ? '<span>heute nichts dringend</span>' : ''}<em class="vr-h-quelle">${quelle}</em></div>`
       + `<span class="vr-h-leg">Priorität <i class="hoch"></i>hoch <i class="mittel"></i>mittel <i class="niedrig"></i>niedrig</span></div>`
       + (lgN && l.length ? `<p class="vr-h-satz">Gesamt fehlen noch ~${Math.round(Number(lgN)).toLocaleString('de-DE')} Konten, bis alle Ziele voll sind — hier stehen nur die wichtigsten ${VR_TAGES_MAX} für heute.</p>` : '')
     if(!l.length) return `<div class="panel vr-heute">${kopf}<div class="vr-h-leer"><b>✓</b>Heute nichts zu kaufen — alle Ziele gedeckt.</div></div>`
@@ -56087,7 +56095,7 @@
     const opts = frei.slice().sort((a, b) => String(name.get(a.user_id) || '').localeCompare(String(name.get(b.user_id) || ''), 'de') || a.firma.localeCompare(b.firma, 'de'))
       .map(c => `<option value="${vrEsc(key(c))}"${key(c) === key(z) ? ' selected' : ''}>${vrEsc((name.get(c.user_id) || c.user_id.slice(0, 8)) + ' · ' + c.firma)}</option>`).join('')
     return `<details class="vr-klapp" data-vr-klapp="rechnung"${_vr.rechnung ? ' open' : ''}><summary>So wird gerechnet</summary>
-      <div class="vr-re"><p class="vr-re-satz">${vrEsc(satz)}</p>
+      <div class="vr-re"><p class="vr-re-ki">🤖 Die KI liest diese Zahlen und entscheidet wie Finn (Leitfaden). Ohne KI-Antwort gilt die Rechnung.</p><p class="vr-re-satz">${vrEsc(satz)}</p>
         <div class="vr-re-kopf"><b><i style="background:${vrFarbe(z.user_id)}"></i>${vrEsc(wer)} · ${vrEsc(z.firma)} · Ziel ${vrEsc(zielTxt)}</b>
           <label>anderes Beispiel <select data-vr-rech>${opts}</select></label></div>
         <div class="vr-re-rechnung">
