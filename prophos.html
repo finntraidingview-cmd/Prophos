@@ -6089,11 +6089,6 @@
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-6"/></svg>
         Trades
       </button>
-      <!-- Trade-Planer (07.10.2026, Finn: Tagesplan des Auto-Planers als Zeitstrahl je ID, Long/Short im Spiel, Konten-Abdeckung) -->
-      <button class="sb-link" data-view="tplaner">
-        <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/><circle cx="8" cy="6" r="1.6" fill="currentColor"/><circle cx="15" cy="12" r="1.6" fill="currentColor"/><circle cx="11" cy="18" r="1.6" fill="currentColor"/></svg>
-        Trade-Planer
-      </button>
       <button class="sb-link active" data-view="accounts">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
         Accounts <span class="sb-badge" id="sb-badge-accounts" hidden>0</span>
@@ -6109,6 +6104,13 @@
       <button class="sb-link" data-view="propbaum">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="5" rx="1"/><rect x="2" y="17" width="6" height="5" rx="1"/><rect x="16" y="17" width="6" height="5" rx="1"/><path d="M12 7v5M5 17v-3h14v3"/></svg>
         Prop-Baum
+      </button>
+      <!-- Trade-Planer (07.10.2026, Finn: Tagesplan des Auto-Planers als Zeitstrahl je ID, Long/Short im Spiel, Konten-Abdeckung).
+           Seit 07.10.2026 02:55 hinter der Prop-Gruppe statt direkt nach Trades (Finn: „Trades, Prop-Firm, dann Trade-Planung") —
+           nur Markup verschoben, data-view, switchView, Hash-Start und Handler unverändert. -->
+      <button class="sb-link" data-view="tplaner">
+        <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/><circle cx="8" cy="6" r="1.6" fill="currentColor"/><circle cx="15" cy="12" r="1.6" fill="currentColor"/><circle cx="11" cy="18" r="1.6" fill="currentColor"/></svg>
+        Trade-Planer
       </button>
       <!-- Radar (vorher „Live Trades", 26.09.2026). Seit 30.09.2026 direkt nach Accounts, vor Winning Days (Finn: „Trades · Accounts ·
            Radar · Winning Days · Accounts je Firma") — nur Markup verschoben, data-view="wdlive" und Handler unverändert -->
@@ -39827,7 +39829,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1102'
+  const OS_TAB_BUILD = '2026-09-22.1103'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
