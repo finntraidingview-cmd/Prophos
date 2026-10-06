@@ -15448,8 +15448,12 @@ def _tsx_k3_contract(s, st, wurzel, trail):
 
 
 def _tsx_k3_menge(s, st, menge, trail):
-    """K3a Schritt 2: ins Feld „# of Contracts" klicken (Ziel-Beweis), Fokus beweisen, alte Zahl weg (Strg+A, Rücktaste), Plan-Menge
-    tippen, Rücklesung Feld = Menge. Kein Tab (der Fokus bleibt im Feld). Steht die Menge schon da: nichts tun. -> (ok, code, msg, stand)"""
+    """K3a Schritt 2: ins Feld „# of Contracts" klicken (Ziel-Beweis), Fokus beweisen, alte Zahl MARKIEREN und direkt mit der Plan-Menge
+    überschreiben — nie löschen. Finn live 06.10.2026 (Chris-PC, 18:12 UTC): Strg+A, Rücktaste, „2" ergab „12" — das MUI-Zahlenfeld
+    füllt sich nach dem Löschen sofort wieder mit „1" (Mindestwert), die getippte Zahl hängt hinten dran. 1. Versuch: Klick + Strg+A +
+    tippen (ersetzt die Markierung). 2. Versuch = Finns Handgriff („ganz leicht vor die Zahl doppelklicken, sodass sie blau markiert
+    wird, dann die Zahl eingeben"): Doppelklick ins linke Stück des Felds, tippen. Rücklesung Feld = Menge. Kein Tab (der Fokus bleibt
+    im Feld). Steht die Menge schon da: nichts tun. -> (ok, code, msg, stand)"""
     m = _tsx_tk(st).get("menge") if isinstance(_tsx_tk(st).get("menge"), dict) else {}
     if tsx_k3_menge_passt(m.get("wert"), menge):
         trail.append(f"Menge steht schon auf {menge}")
@@ -15463,17 +15467,21 @@ def _tsx_k3_menge(s, st, menge, trail):
             return False, "menge", f"Feld „# of Contracts“ {'gesperrt' if zu.get('disabled') else 'verdeckt'}.", st
         r = list(r)[:4]
         _tsx_pause()
-        if not s.klick(r, "# of Contracts", pruef={"rect": r, "text": "", "aria": "", "tabu": TSX_K0_TABU.pattern}):
-            return False, "menge", "Feld „# of Contracts“ nicht gedrückt (Klick ohne Beweis).", st
-        _warte(0.35, 0.25)
-        if not s.fokus_im(r, "# of Contracts") or not _tsx_fokus_exakt(s, "menge", trail, "# of Contracts"):
-            return False, "menge", "Feld „# of Contracts“ hat keinen Fokus — nichts getippt.", st
-        s.taste("a", modifiers=2)
-        _warte(0.2, 0.2)
-        if not _tsx_fokus_exakt(s, "menge", trail, "# of Contracts vor der Rücktaste"):
-            return False, "menge", "Feld „# of Contracts“ verlor den Fokus — nichts gelöscht.", st
-        s.taste("Backspace")                         # „die Zahl weg machen"
-        _warte(0.3, 0.3)
+        if versuch == 0:
+            if not s.klick(r, "# of Contracts", pruef={"rect": r, "text": "", "aria": "", "tabu": TSX_K0_TABU.pattern}):
+                return False, "menge", "Feld „# of Contracts“ nicht gedrückt (Klick ohne Beweis).", st
+            _warte(0.35, 0.25)
+            if not s.fokus_im(r, "# of Contracts") or not _tsx_fokus_exakt(s, "menge", trail, "# of Contracts"):
+                return False, "menge", "Feld „# of Contracts“ hat keinen Fokus — nichts getippt.", st
+            s.taste("a", modifiers=2)                 # markieren — das Tippen ersetzt die Markierung
+            _warte(0.2, 0.2)
+        else:
+            links = [r[0] + 2.0, r[1], max(12.0, min(40.0, r[2] * 0.15)), r[3]]   # die Zahl steht links im Feld (Finns Bild 06.10.2026)
+            if not s.klick(links, "# of Contracts (Doppelklick)", pruef={"rect": r, "text": "", "aria": "", "tabu": TSX_K0_TABU.pattern}, doppel=True):
+                return False, "menge", "Feld „# of Contracts“ nicht gedrückt (Doppelklick ohne Beweis).", st
+            _warte(0.35, 0.25)
+            if not s.fokus_im(r, "# of Contracts"):
+                return False, "menge", "Feld „# of Contracts“ hat nach dem Doppelklick keinen Fokus — nichts getippt.", st
         if not _tsx_fokus_exakt(s, "menge", trail, "# of Contracts vor dem Tippen"):
             return False, "menge", "Feld „# of Contracts“ verlor den Fokus — Menge nicht getippt.", st
         s.tippen(str(int(menge)))
@@ -15481,9 +15489,9 @@ def _tsx_k3_menge(s, st, menge, trail):
         st = s.stand()
         m = _tsx_tk(st).get("menge") if isinstance(_tsx_tk(st).get("menge"), dict) else {}
         if tsx_k3_menge_passt(m.get("wert"), menge):
-            trail.append(f"Menge {menge} getippt — Rücklesung '{m.get('wert')}'")
+            trail.append(f"Menge {menge} getippt — Rücklesung '{m.get('wert')}'" + (" (Doppelklick)" if versuch else ""))
             return True, "", "", st
-        trail.append(f"Menge nach dem Tippen '{m.get('wert')}', erwartet {menge}" + (" — zweiter Versuch" if versuch == 0 else ""))
+        trail.append(f"Menge nach dem Tippen '{m.get('wert')}', erwartet {menge}" + (" — zweiter Versuch (Doppelklick vor die Zahl)" if versuch == 0 else ""))
     return False, "menge", f"Menge steht auf '{m.get('wert')}', nicht {menge}.", st
 
 

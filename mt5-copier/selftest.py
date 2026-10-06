@@ -5417,7 +5417,7 @@ def test_tsx_k3a():
         def stand(self, opts=None):
             return stand_aus(self.z, self.typed, self.fokus)
 
-        def klick(self, r, name, toast_ok=False, pruef=None):
+        def klick(self, r, name, toast_ok=False, pruef=None, doppel=False):
             self.klicks.append(name)
             self.pruef.append(pruef)
             self.rects.append(list(r))
@@ -5430,6 +5430,8 @@ def test_tsx_k3a():
                     self.typed = self.z["contract"]          # das Feld zeigt den gewählten Code — auch wenn die Liste offen bleibt
             elif name == "# of Contracts":
                 self.fokus = "menge"
+            elif name == "# of Contracts (Doppelklick)" and doppel:    # 06.10.2026: Doppelklick vor die Zahl markiert sie
+                self.fokus, self.markiert = "menge", not self.z.get("doppelklick_wirkt_nicht")
             else:
                 raise AssertionError("unerwarteter Klick " + name)
             return True
@@ -5442,11 +5444,12 @@ def test_tsx_k3a():
         def taste(self, k, modifiers=0):
             self.tasten.append(("Strg+" if modifiers == 2 else "") + k)
             if k == "a" and modifiers == 2:
-                self.markiert = True
+                self.markiert = not (self.fokus == "menge" and self.z.get("strg_a_menge_wirkt_nicht"))
                 if self.z.get("fokus_weg_nach_strg_a"):
                     self.fokus = None
-            elif k == "Backspace" and self.fokus == "menge" and self.markiert:
-                self.z["menge"], self.markiert = "", False
+            elif k == "Backspace" and self.fokus == "menge":
+                # 06.10.2026 live: Löschen füllt das MUI-Zahlenfeld sofort wieder mit „1" — der Bot darf hier nie mehr löschen
+                self.z["menge"], self.markiert = "1", False
             elif k == "Escape" and not self.z.get("esc_wirkt_nicht"):
                 self.z["offen"] = False
 
@@ -5483,8 +5486,8 @@ def test_tsx_k3a():
         chk(k.klicks == ["Contract-Feld", "Contract MNQZ26", "# of Contracts"], f"genau drei Klicks, kein Order-Knopf ({k.klicks})")
         chk(all(p_ and p_["tabu"] == ob.TSX_K0_TABU.pattern for p_ in k.pruef) and k.pruef[1]["text"] == "mnqz26"
             and k.pruef[1]["rect"] == V[0]["rect"], "jeder Druck mit Ziel-Beweis + Order-Tabu; Vorschlag: Klick im Code, Beweis gegen die Zeile")
-        chk(k.tasten == ["Strg+a", "tippe mnq", "Strg+a", "Backspace", "tippe 1"] and "Tab" not in k.tasten and "Enter" not in k.tasten,
-            f"Tastatur: Strg+A + Wurzel; Strg+A, Rücktaste, Menge — nie Tab/Enter ({k.tasten})")
+        chk(k.tasten == ["Strg+a", "tippe mnq", "Strg+a", "tippe 1"] and "Tab" not in k.tasten and "Enter" not in k.tasten and "Backspace" not in k.tasten,
+            f"Tastatur: Strg+A + Wurzel; Strg+A + Menge (nie Rücktaste, 06.10.2026) — nie Tab/Enter ({k.tasten})")
         chk(res.get("tv_symbol") == "MNQZ26" and res.get("balance_start") == 0.0, "Contract + Start-Balance in der Antwort")
         chk(k.rects[1] == V[0]["code_rect"] and k.pruef[1].get("wort") == "mnqz26",
             "Vorschlag: Klick GENAU im Code-Text, Beweis verlangt den Code als ganzes Wort am Punkt (nqz26 ≠ mnqz26)")
@@ -5518,7 +5521,13 @@ def test_tsx_k3a():
         chk(not o["ok"] and o["code"] == "contract" and "# of Contracts" not in k.klicks and "Escape" in k.tasten,
             "Liste bleibt auch nach Esc offen → nie als gewählt gezählt, Menge nie angefasst, ehrlich raus")
         o, k, _, _ = probe(seite(menge_klemmt=True))
-        chk(not o["ok"] and o["code"] == "menge" and k.klicks.count("# of Contracts") == 2, "Menge wird nicht übernommen → zwei Versuche, dann ehrlich raus")
+        chk(not o["ok"] and o["code"] == "menge" and k.klicks.count("# of Contracts") == 1 and k.klicks.count("# of Contracts (Doppelklick)") == 1
+            and "Backspace" not in k.tasten, "Menge wird nicht übernommen → Strg+A-Versuch, dann Doppelklick-Versuch, dann ehrlich raus")
+        # 06.10.2026 live (Chris-PC): Strg+A greift im Zahlenfeld nicht → „12" statt „2"; der Doppelklick vor die Zahl (Finns Handgriff) rettet
+        o, k, _, _ = probe(seite(strg_a_menge_wirkt_nicht=True, menge="3"))
+        chk(o["ok"] and k.klicks.count("# of Contracts") == 1 and k.klicks.count("# of Contracts (Doppelklick)") == 1
+            and k.tasten.count("tippe 1") == 2 and "Backspace" not in k.tasten and "Tab" not in k.tasten,
+            f"Strg+A wirkt nicht (Feld '31') → Doppelklick vor die Zahl, tippen, Ticket bereit ({str(o.get('msg'))[:50]} · {k.klicks})")
         o, k, _, _ = probe(seite(kauf_text="Buy +3 @ Market"))
         chk(not o["ok"] and o["code"] == "vorpruefung" and "Knopf zeigt 'Buy +3 @ Market'" in o["msg"],
             "Knopf zeigt noch die alte Menge → Probe nicht bereit (Knopftext unabhängig vom Feld geprüft)")
@@ -5559,9 +5568,10 @@ def test_tsx_k3a():
         ob._warte, ob.tsx_frontmonat, ob._puls_diagnose_senden = alt_w, alt_fm, alt_diag
     # nie ein Order-Knopf im K3a-Code (Quelltext-Riegel)
     q = "".join(_i.getsource(f) for f in (ob._tsx_k3_probe, ob._tsx_k3_ticket, ob._tsx_k3_contract, ob._tsx_k3_menge))
-    chk(q.count("s.klick(") == 3 and q.count("TSX_K0_TABU.pattern") == 3 and "_puls_ergebnis_senden" not in q
-        and not re.search(r"gesendet[\"']?\]?\s*[=:]\s*True|gesendet=True", q) and "kauf" not in q.replace("verkauf", ""),
-        "K3a-Quelltext: genau drei Klicks (Feld, Vorschlag, Menge), alle mit Order-Tabu, nie gesendet=True, kein puls_ergebnis")
+    chk(q.count("s.klick(") == 4 and q.count("TSX_K0_TABU.pattern") == 4 and "_puls_ergebnis_senden" not in q
+        and not re.search(r"gesendet[\"']?\]?\s*[=:]\s*True|gesendet=True", q) and "kauf" not in q.replace("verkauf", "")
+        and 's.taste("Backspace")' not in _i.getsource(ob._tsx_k3_menge),
+        "K3a-Quelltext: genau vier Klicks (Feld, Vorschlag, Menge, Menge-Doppelklick), alle mit Order-Tabu, nie gesendet=True, kein puls_ergebnis, nie Rücktaste in der Menge")
 
     # ── ganze Kette: modus_tsxlesen_cdp mit order (Chrome/Tab/Login nachgebildet) ─────────────────────────────────────────
     zz = seite(menge="3")
