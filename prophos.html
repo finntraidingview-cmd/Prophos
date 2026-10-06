@@ -99,6 +99,9 @@
   .at-toast.feed{background:linear-gradient(135deg,#dc2626 0%,#b91c1c 100%)}   /* Kurs-Feed steht (Wachhund, 25.09.2026) */
   /* Toast eines Hintergrund-Profils: anklickbar → wechselt direkt zu dem Profil */
   .at-toast.mpw{pointer-events:auto;cursor:pointer}
+  /* Plan gelöscht · Rückgängig (06.10.2026): nur dieser Toast nimmt Klicks an */
+  .at-toast.undo{pointer-events:auto}
+  .at-toast .at-undo{background:none;border:none;padding:0;margin-left:2px;color:#fff;font:inherit;font-weight:700;text-decoration:underline;cursor:pointer}
   .at-prompt{
     position:fixed;bottom:28px;right:28px;z-index:9999;
     background:var(--surface);border:1px solid var(--border);border-radius:16px;
@@ -28486,7 +28489,7 @@
       if(error || !data){ planPollFehler(true); return }
       planPollFehler(false)
       planPoll.sig = planPollSig(data); planPoll.sigUid = uid; planPoll.vollAt = Date.now()
-      const fresh = data.map(rowToPlan).filter(Boolean)
+      const fresh = data.map(rowToPlan).filter(Boolean).filter(p => !_tpLoeschOffen.has(String(p.id)))   // Löschen läuft noch (Rückgängig-Fenster)
       const oldById = new Map((tradePlans || []).map(p => [String(p.id), p]))
       let changed = fresh.length !== (tradePlans || []).length
       const zielCheckIds = []   // Fortschritts-Ziel: nach dem Übernehmen prüfen
@@ -28629,6 +28632,7 @@
     el.textContent = msg
     document.body.appendChild(el)
     setTimeout(() => el.remove(), 5000)
+    return el   // für den Rückgängig-Knopf beim Plan-Löschen (06.10.2026)
   }
 
   // End-Prompt
@@ -34536,6 +34540,10 @@
 
   /* ========== TRADE PLANS ========== */
   let tradePlans = []
+  // Löschen mit Rückgängig (06.10.2026, Finn: „Wenn ich einen Trade lösche, will ich es nicht immer bestätigen müssen, sondern
+  // einfach direkt löschen"): planId → { plan, idx, farmer, timer }. Die Zeile ist sofort weg, gelöscht wird erst nach 5 s.
+  // Poll und Neuladen filtern diese IDs heraus, sonst käme der Plan in den 5 s zurück (und der PC-Tab könnte ihn starten).
+  const _tpLoeschOffen = new Map()
   let _editingPlanId = null    // null = create, else edit
   let _completingPlanId = null // when trade-complete-modal open
 
@@ -34653,7 +34661,7 @@
         .eq('user_id', currentUserId)
         .order('created_at', { ascending: false })
       if(error){ console.error('loadTradePlans:', error); return }
-      tradePlans = (data || []).map(rowToPlan).filter(Boolean)
+      tradePlans = (data || []).map(rowToPlan).filter(Boolean).filter(p => !_tpLoeschOffen.has(String(p.id)))
       renderTradePlans()
       // Fortschritts-Ziel (10.09.2026): die Accounts-Tabelle rendert beim Boot
       // evtl. VOR der Plan-Hydration — dann stünde das 🏆-Badge auf 0. Einmal
@@ -37928,10 +37936,65 @@
       alert('Das ist ein geplanter Winning-Day-Farmer-Plan.\n\nLöschen geht hier nicht mehr — bitte im Admin → Winning Days beim Konto „nur heute raus" drücken. Dann fällt der Plan sauber weg und der Tagesplan stimmt.')
       return
     }
-    if(!confirm(farmer ? `Das ist ein Winning-Day-Farmer-Plan (${p0.masterName || 'Konto'}${p0.startUm ? ', Start ' + new Date(p0.startUm).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : ''}).\n\nLöschen nimmt das Konto für diesen Tag aus dem Farmer — es startet dann NICHT.\nWirklich löschen?` : 'Trade-Plan wirklich löschen?')) return
+    // KEINE Rückfrage mehr (06.10.2026, Finn: „einfach direkt löschen"): Zeile sofort weg, Toast „Plan gelöscht · Rückgängig",
+    // das echte Löschen läuft erst nach 5 s. Farmer-Pläne (laufend/beendet) genauso — der Tagesplan wird erst beim echten Löschen
+    // ausgetragen, Rückgängig lässt ihn also unberührt.
+    const key = String(planId)
+    if(_tpLoeschOffen.has(key)) return
+    const idx = (tradePlans || []).findIndex(p => String(p.id) === key)
+    _tpLoeschOffen.set(key, { plan: p0, idx, farmer, timer: setTimeout(() => tpLoeschenAusfuehren(key), 5000) })
+    tradePlans = tradePlans.filter(p => String(p.id) !== key)
+    renderTradePlans()
+    tpLoeschToast()
+  }
+
+  // Toast mit Rückgängig — der bestehende atToast (5 s), nur mit Knopf. Mehrere Löschungen kurz hintereinander: ein Toast,
+  // Rückgängig holt alle noch offenen zurück.
+  function tpLoeschToast(){
+    const n = [..._tpLoeschOffen.values()].filter(x => !x.laeuft).length
+    if(!n) return
+    const el = atToast(n === 1 ? 'Plan gelöscht ·' : `${n} Pläne gelöscht ·`)
+    if(!el) return
+    el.classList.add('undo')
+    const b = document.createElement('button')
+    b.type = 'button'; b.className = 'at-undo'; b.textContent = 'Rückgängig'
+    b.addEventListener('click', () => { el.remove(); tpLoeschenRueckgaengig() })
+    el.appendChild(b)
+  }
+
+  function tpLoeschenRueckgaengig(){
+    let zurueck = 0
+    for(const [key, x] of [..._tpLoeschOffen]){
+      if(x.laeuft) continue   // Request schon unterwegs — nicht mehr rückholbar
+      clearTimeout(x.timer)
+      _tpLoeschOffen.delete(key)
+      if(x.plan && !tradePlans.some(p => String(p.id) === key)){
+        tradePlans.splice(Math.max(0, Math.min(x.idx < 0 ? tradePlans.length : x.idx, tradePlans.length)), 0, x.plan)
+        zurueck++
+      }
+    }
+    if(zurueck) renderTradePlans()
+  }
+
+  // Beim Verlassen der Seite offene Löschungen sofort ausführen — sonst stünde der Plan nach dem Neuladen wieder da.
+  function tpLoeschenAlleJetzt(){
+    for(const [key, x] of [..._tpLoeschOffen]) if(!x.laeuft) tpLoeschenAusfuehren(key)
+  }
+  window.addEventListener('pagehide', tpLoeschenAlleJetzt)
+  document.addEventListener('visibilitychange', () => { if(document.hidden) tpLoeschenAlleJetzt() })
+
+  // Das echte Löschen (unverändert aus deleteTradePlan, nur 5 s später)
+  // Der Eintrag bleibt bis zum Ende des Requests in der Map (laeuft) — so bringt ein Poll mittendrin den Plan nicht zurück.
+  async function tpLoeschenAusfuehren(key){
+    const ol = _tpLoeschOffen.get(key)
+    if(!ol || ol.laeuft) return
+    clearTimeout(ol.timer)
+    ol.laeuft = true
+    const planId = key, farmer = ol.farmer
     try{
       const { error } = await supabase.from('trade_plans').delete().eq('id', planId)
       if(error) throw error
+      _tpLoeschOffen.delete(key)
       tradePlans = tradePlans.filter(p => String(p.id) !== String(planId))
       if(farmer){
         try{
@@ -37948,8 +38011,13 @@
       if(typeof mirrorReleasePlan === 'function') mirrorReleasePlan(planId)
       renderTradePlans()
     }catch(e){
+      // Fehlgeschlagen → Zeile wieder zeigen, sonst wäre der Plan nur optisch weg
+      _tpLoeschOffen.delete(key)
+      if(ol.plan && !tradePlans.some(p => String(p.id) === key)){ tradePlans.splice(Math.max(0, Math.min(ol.idx < 0 ? tradePlans.length : ol.idx, tradePlans.length)), 0, ol.plan); renderTradePlans() }
       alert('Löschen fehlgeschlagen: ' + (e.message || e))
+      return
     }
+    _tpLoeschOffen.delete(key)
   }
 
   // ─────── Trade-Plan-Modal (Create + Edit) ───────
@@ -39135,7 +39203,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1086'
+  const OS_TAB_BUILD = '2026-09-22.1087'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
