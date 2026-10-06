@@ -38996,7 +38996,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1077'
+  const OS_TAB_BUILD = '2026-09-22.1078'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -55681,6 +55681,24 @@
   const vrStueck = (n, groesse) => groesse ? `${n} × ${vrK(groesse)}` : vrKonten(n)
   const vrFarbe = uid => typeof idFarbe === 'function' ? idFarbe(uid) : 'var(--sub-2)'
   const vrTypTxt = typen => (typen || []).includes('winning_days') ? 'Winning Days' : 'Funded'
+  // ZIEL-SPANNE (Finn 06.10.2026: „überall auf der Seite, wo ein Ziel steht, immer die Spanne von–bis, nicht nur die Untergrenze" —
+  // wer zwischen Unter- und Obergrenze landet, liegt im Ziel, etwas über die Untergrenze hinaus ist okay). EINE Stelle für alle
+  // Ziel-Texte: groessen_summe „150–250k", plus_ueber_start „+20–30k $", stueck wie in „Ziele je ID" („1 WD-Konto",
+  // „2 × 100k + 1 × 200k"). Unter-/Obergrenze gibt der Aufrufer mit (Zelle: rechnung.untergrenze), sonst ziel.von/ziel.bis.
+  const vrKOhne = n => vrK(n).replace(/k$/, '')
+  function vrSpanne(ziel, von, bis){
+    if(!ziel) return ''
+    von = Math.max(0, Number(von ?? ziel.von) || 0); bis = Math.max(von, Number(bis ?? ziel.bis) || von)
+    if(ziel.art === 'stueck'){
+      const gr = (ziel.groessen || []).filter(t => Number(t.stueck) > 0)
+      if(!gr.length) return vrKonten(Math.round(von * 10) / 10)
+      if(gr.length === 1 && Number(gr[0].stueck) === 1 && (ziel.typen || []).includes('winning_days')) return '1 WD-Konto'
+      return gr.map(t => t.groesse ? `${t.stueck} × ${vrK(t.groesse)}` : vrKonten(Number(t.stueck))).join(' + ')
+    }
+    // „150–250k": steht hinten ein k, vorne ohne (beide ≥ 1.000); sonst beide voll („500–1,5k")
+    const k = bis > von ? ((von >= 1000 && bis >= 1000 ? vrKOhne(von) : vrK(von)) + '–' + vrK(bis)) : vrK(von)
+    return ziel.art === 'plus_ueber_start' ? `+${k} $` : k
+  }
 
   function vrZielTxt(z){
     if(!z) return 'kein Ziel hinterlegt — nur Funnel'
@@ -55794,7 +55812,7 @@
   function vrZielTitel(z, f){
     const q = vrZielZahlen(z, f)
     if(!q) return 'kein Ziel hinterlegt'
-    return `gesichert ${q.fmt(q.ges)}${q.erw > q.ges ? ` · mit Funnel erwartet ${q.fmt(q.erw)}` : ''} · Ziel ${q.fmt(q.von)}${q.bis > q.von ? '–' + q.fmt(q.bis) : ''}${q.stueck ? ' Konten' : ''}`
+    return `gesichert ${q.fmt(q.ges)}${q.erw > q.ges ? ` · mit Funnel erwartet ${q.fmt(q.erw)}` : ''} · Ziel ${vrSpanne(f.ziel, q.von, q.bis)}`
   }
   // Kleiner Bestand/Ziel-Balken der Firmenzeile: grünes Band = Ziel-Spanne, voll = gesichert, hell = Funnel erwartet
   function vrFzBar(z, f, farbe){
@@ -56026,7 +56044,7 @@
     const q = vrZielZahlen(z, f), nV = z.bestand_n || 0, nF = vrListe(z).filter(k => !k.im_bestand).length
     const wo = (f?.ziel?.typen || []).includes('winning_days') ? 'Winning-Days-Konto' : 'Funded-Konto'
     const hat = nV ? `${vrKonten(nV)} im Vorrat` : `noch kein ${wo}`
-    return `${wer} hat bei ${z.firma} ${hat}${nF ? `, ${vrKonten(nF)} unterwegs` : ''}${q ? ` — Ziel ${q.stueck ? vrKonten(q.von) : q.fmt(q.von) + (q.bis > q.von ? '–' + q.fmt(q.bis) : '')}` : ''}.`
+    return `${wer} hat bei ${z.firma} ${hat}${nF ? `, ${vrKonten(nF)} unterwegs` : ''}${q ? ` — Ziel ${vrSpanne(f.ziel, q.von, q.bis)}` : ''}.`
   }
   // Deckel und Priorität (Master 06.10.2026 spät, Finn live auf .1054 mit dem Zellen-Rückfall: „389 Konten · 103.331 €, eine komplette
   // lange Liste, keine ID sortiert, nicht erkennbar, wie wichtig was ist"): höchstens VR_TAGES_MAX Konten am Tag, je Zeile höchstens
@@ -56257,15 +56275,16 @@
       z = erste || frei.find(c => vrListe(c).some(k => !k.im_bestand)) || frei[0]
     }
     const r = z.rechnung || {}
-    const f = firma.get(z.firma), ziel = f.ziel, stueck = ziel.art === 'stueck', plus = ziel.art === 'plus_ueber_start'
+    const f = firma.get(z.firma), ziel = f.ziel, stueck = ziel.art === 'stueck'
     const wer = name.get(z.user_id) || z.user_id.slice(0, 8)
     const zahl = n => { if(n == null || !isFinite(Number(n))) return null
       if(!stueck) return Math.round(Number(n)).toLocaleString('de-DE') + ' $'
       const k = Math.round(Number(n) * 10) / 10; return k.toLocaleString('de-DE') + (k === 1 ? ' Konto' : ' Konten') }
     const regel = r.kauf_regel || z.kauf_regel || d.kauf_regel
     const satz = d.regel_satz || (VR_REGEL_SATZ[regel] || VR_REGEL_SATZ.nominal).replace('{p}', vrProz(Number(d.sicherheit_ziel) || VR_SICH_STD))
-    const q = vrZielZahlen(z, f)
-    const zielTxt = stueck ? vrKonten(q.von) : `${plus ? '+' : ''}${Math.round(q.von).toLocaleString('de-DE')}${q.bis > q.von ? ` bis ${plus ? '+' : ''}${Math.round(q.bis).toLocaleString('de-DE')}` : ''} $`
+    // Ziel als Spanne wie im Detail-Kopf (Finn 06.10.2026), gleiche Grenzen (Untergrenze aus rechnung)
+    const qz = vrZellZahlen(z, f)
+    const zielTxt = vrSpanne(ziel, qz.von, qz.bis)
     const vorrat = r.bestand ?? z.bestand_gewichtet ?? z.bestand
     const unterwegs = vrListe(z).filter(k => !k.im_bestand)
     const sumU = r.funnel_zaehlt ?? z.unterwegs_zaehlt_usd ?? (unterwegs.length && unterwegs.every(k => k.zaehlt_usd != null) ? unterwegs.reduce((s, k) => s + Number(k.zaehlt_usd), 0) : null)
@@ -56411,7 +56430,9 @@
     const unterwegs = Math.max(0, Number(r.funnel_zaehlt ?? z.unterwegs_zaehlt_usd ?? ((Number(z.erwartet) || 0) - vorrat)) || 0)
     const geld = n => stueck ? (Math.round(n * 10) / 10).toLocaleString('de-DE') + (Math.round(n * 10) / 10 === 1 ? ' Konto' : ' Konten')
       : (plus ? '+' : '') + Math.round(n).toLocaleString('de-DE') + ' $'
-    return { von, bis, vorrat, unterwegs, geld, stueck, r }
+    // kurz für die Kopfzeile neben der Ziel-Spanne („im Vorrat 100k", „+12,5k $"), Stück wie geld
+    const kurz = n => stueck ? geld(n) : (plus ? '+' : '') + vrK(n) + (plus ? ' $' : '')
+    return { von, bis, vorrat, unterwegs, geld, kurz, stueck, r, ziel }
   }
   function vrZellKopf(z, f){
     const q = vrZellZahlen(z, f)
@@ -56424,7 +56445,8 @@
       : z.status === 'pausiert' ? '→ pausiert' : n ? (() => { const tr = vrTranche(z), h = Math.min(tr.heute || n, n), ch = s1 != null && s2 != null ? `Chance mit Bestand ${vrProz(s1)} → ${vrProz(s2)}` : ''
           return n > h ? `→ heute ${h} kaufen, danach täglich neu rechnen (insgesamt ~${n}${ch ? ', ' + ch : ''})` : `→ heute ${h} kaufen${ch ? ` (${ch})` : ''}` })()
       : z.toleranz === true ? '→ nichts kaufen (nah genug am Ziel)' : '→ nichts kaufen'
-    return `Ziel <b>${q.geld(q.von)}</b> · im Vorrat <b>${q.geld(q.vorrat)}</b>${q.stueck ? '' : ` (${pct} %)`} · unterwegs <b>${nU ? vrKonten(nU) + (q.unterwegs ? ', zählt ' + q.geld(q.unterwegs) : '') : '0'}</b> · <b class="vr-zk-was">${was}</b>`
+    // Ziel als Spanne „150–250k" (Finn 06.10.2026); der Prozentwert bleibt gegen die Untergrenze
+    return `Ziel <b>${vrEsc(vrSpanne(q.ziel, q.von, q.bis))}</b> · im Vorrat <b>${q.kurz(q.vorrat)}</b>${q.stueck ? '' : ` (${pct} %)`} · unterwegs <b>${nU ? vrKonten(nU) + (q.unterwegs ? ', zählt ' + q.kurz(q.unterwegs) : '') : '0'}</b> · <b class="vr-zk-was">${was}</b>`
   }
   function vrZellBar(z, f, farbe){
     const q = vrZellZahlen(z, f)
