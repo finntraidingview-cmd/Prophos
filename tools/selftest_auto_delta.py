@@ -3,8 +3,10 @@
 
 Aufruf:  python3 tools/selftest_auto_delta.py
 Lädt die Funktionen per Quelltext aus app.py (wie selftest_auto_kontowert: app.py zieht beim Import Flask und Threads).
-Teil A rein rechnend: Delta je Trade (Tradeify frisch 3 NQ ≈ 2,8 €/Pkt bei Kauf 207 €/Polster 4.500), Firma × Tag nie
-gegenläufig, Optimierer hält das Band, Rebalancer tauscht nur erlaubte Pläne, manueller Eingriff lehnt Regelverstöße ab.
+Teil A rein rechnend: Delta je Trade (Tradeify frisch 3 NQ ≈ 2,8 €/Pkt bei Kauf 207 €/Polster 4.500), Richtung je Tranche
+(Korrektur Finn 06.10.2026 abends: keine Firma × Tag-Regel, keine festen Minuten — nur je PC nie zwei Puls-Starts gleichzeitig
++ Richtungsschutz, dicht gegenläufig derselben Firma = weicher Malus), Optimierer hält das Band, Rebalancer tauscht nur
+erlaubte Pläne, manueller Eingriff lehnt nur Richtungsschutz/PC-Überlappung ab.
 Teil B Rauch-Lauf ohne Netz: ap_planen (Probelauf), _ap_stand_laden, ap_delta_antwort und ap_ausgleichen gegen eine
 nachgebaute DB (Fixture im Test, keine echten Konten) — prüft die Verdrahtung und die Antwortfelder des Vertrags."""
 import hashlib
@@ -42,7 +44,7 @@ REIN = ("_ap_norm", "ap_regel_finden", "ap_groesse", "_ap_spanne", "_ap_runden",
         "ap_zeiten_verteilen", "ap_kw_param", "_ap_kw_kauf", "_ap_kw_wachsen", "ap_kontowert", "ap_trade_gewicht", "ap_sicht",
         "_wd_num", "_symbol_wurzel", "_wd_level", "_wd_futures_frontcode", "_ap_gehedgt", "_ap_ende4",
         "ap_ausgleich_param", "ap_firma_key", "ap_ppl_karte", "ap_punktwert", "ap_usd_pro_pkt", "ap_delta", "ap_punkte",
-        "ap_rest_punkte", "ap_verlauf", "ap_richtungen_delta", "ap_firma_tag", "ap_firma_richtung_fest", "ap_fenster_von",
+        "ap_rest_punkte", "ap_verlauf", "_ap_gegen_dicht", "ap_dicht_paare", "ap_richtungen_delta", "ap_fenster_von",
         "_ap_tranchen", "_ap_tranche_frei", "ap_umplanen", "ap_eingriff_pruefen",
         "lt_echo_live_wahl", "lt_echo_felder")
 IO = ("_ap_gehedgt_plan", "_ap_bewerten", "_ap_iso_min", "_ap_stand_laden", "_ap_stand_plaene", "_ap_min_iso",
@@ -63,7 +65,7 @@ def lade():
         return re.search(rf"^{name} = .*$", src, re.M).group(0)
     konstanten = ("AP_REST_MIN", "AP_GROESSE_TOLERANZ", "AP_KW_FUNDED", "AP_KW_PHASEN", "AP_TYPEN", "AP_TZ_LAUF", "AP_STILL_FIRMEN",
                   "AP_AUSGLEICH_STANDARD", "AP_TZ_TAG", "AP_BOT_ENDE_MIN", "AP_BOT_EXTRA_MIN", "AP_FAELLIG_MIN", "AP_BOT_SCHRITTE",
-                  "AP_RICHTUNG_TXT", "_ap_bot", "_ap_info", "WD_HEUTE_PPL", "LT_ECHO_ROUTEN", "LT_ECHO_MAX_ALTER_S")
+                  "AP_RICHTUNG_TXT", "AP_GEGEN_DICHT_MIN", "_ap_bot", "_ap_info", "WD_HEUTE_PPL", "LT_ECHO_ROUTEN", "LT_ECHO_MAX_ALTER_S")
     exec("\n".join([konst(k) for k in konstanten] + [block(f) for f in REIN + IO]), ns)
     return ns
 
@@ -188,37 +190,55 @@ def main():
     check(a["ap_ausgleich_param"]({"ausgleich": {"aktiv": "true", "takt_min": 1, "zielband_pct": 500}})
           == {"aktiv": False, "takt_min": 2, "zielband_pct": 100.0, "auto_start": False}, "nur echtes true schaltet ein, Werte geklemmt")
 
-    # ── A2 Firma × Tag ─────────────────────────────────────────────────────────────────────────────────────────────────
-    ft = a["ap_firma_tag"]([("tradeify", "sell", "X läuft"), ("tradeify", "sell", "Y geplant"), ("apex", "buy", "Z"), ("apex", "sell", "W")])
-    check(ft["tradeify"]["richtung"] == "sell" and ft["apex"]["richtung"] == "konflikt", "Firma × Tag: eine Richtung, beide = Konflikt")
-    fest, verw = a["ap_firma_richtung_fest"](
-        [{"key": "A|tradeify", "fkey": "tradeify", "fest": "buy", "fest_durch": "geplanter Plan"},
-         {"key": "B|tradeify", "fkey": "tradeify", "fest": None},
-         {"key": "C|apex", "fkey": "apex", "fest": None},
-         {"key": "D|fundednext", "fkey": "fundednext", "fest": "sell", "fest_durch": "laufender Plan"},
-         {"key": "E|fundednext", "fkey": "fundednext", "fest": "buy", "fest_durch": "geplanter Plan"}], ft)
-    check(set(verw) == {"A|tradeify", "C|apex", "E|fundednext"} and fest["fundednext"]["richtung"] == "sell",
-          "Richtungsschutz gegen die Firma des Tages / Konflikt-Firma / zweiter Schutz gegenläufig → Tranche fällt raus")
-    gruppen = {"tradeify": {"fest": "sell", "tranchen": [(60, 2.0), (200, 3.0)]}, "apex": {"fest": None, "tranchen": [(100, 4.0)]},
-               "fundednext": {"fest": None, "tranchen": [(120, 1.5), (300, 1.5)]}}
-    r, _m = a["ap_richtungen_delta"](gruppen, 0, 0, random.Random(7), 15)
-    check(set(r) == set(gruppen) and r["tradeify"] == "sell", "Richtung je FIRMA (alle Tranchen einer Firma gleich), feste Firma bleibt")
+    # ── A2 Keine Firma × Tag-Regel mehr, nur Richtungsschutz + weicher Malus (Finn 06.10.2026 abends) ─────────────────────
+    T = lambda fest, user, firma, start, d: {"fest": fest, "user": user, "firma": firma, "start": start, "delta_abs": d}
+    tr = {"A|tradeify": T(None, "A", "tradeify", 60, 3.0), "B|tradeify": T(None, "B", "tradeify", 300, 3.0)}
+    r, m = a["ap_richtungen_delta"](tr, 0, 0, random.Random(7), 15)
+    check(r["A|tradeify"] != r["B|tradeify"] and m == 3.0,
+          "dieselbe Firma bei zwei IDs gegenläufig erlaubt, wenn es das Netto ausgleicht (kein Firma × Tag)")
+    tr = {"A|tradeify": T("buy", "A", "tradeify", 60, 3.0), "B|apex": T(None, "B", "apex", 100, 3.0)}
+    r, _m = a["ap_richtungen_delta"](tr, 0, 0, random.Random(7), 15)
+    check(r["A|tradeify"] == "buy" and r["B|apex"] == "sell", "Richtungsschutz ID+Firma bleibt fest, die andere gleicht aus")
+    # weicher Malus: zwei gleich gute Lösungen — die mit dicht gegenläufiger Firma verliert
+    tr = {"A|tradeify": T(None, "A", "tradeify", 100, 2.0), "B|tradeify": T(None, "B", "tradeify", 103, 2.0),
+          "C|apex": T(None, "C", "apex", 100, 2.0), "D|apex": T(None, "D", "apex", 103, 2.0)}
+    for s in range(5):
+        r, _m = a["ap_richtungen_delta"](tr, 0, 0, random.Random(s), 15)
+        check(r["A|tradeify"] == r["B|tradeify"] and r["C|apex"] == r["D|apex"] and r["A|tradeify"] != r["C|apex"],
+              f"Malus (seed {s}): dicht gegenläufig derselben Firma gemieden, ausgeglichen über die andere Firma")
+    paare = a["ap_dicht_paare"]({"A|x": T(None, "A", "x", 100, 1)}, [{"user_id": "B", "firma": "x", "start": 105, "richtung": "sell"}])
+    check(a["_ap_gegen_dicht"]({"A|x": "buy"}, paare) == 1 and a["_ap_gegen_dicht"]({"A|x": "sell"}, paare) == 0,
+          "Malus auch gegen schon gestartete Trades derselben Firma")
+    # gegenläufig dicht bleibt erlaubt, wenn nur so das Band hält (Malus ist nie Verbot)
+    tr = {"A|tradeify": T(None, "A", "tradeify", 100, 3.0), "B|tradeify": T(None, "B", "tradeify", 101, 3.0)}
+    r, m = a["ap_richtungen_delta"](tr, 0, 0, random.Random(2), 15)
+    check(r["A|tradeify"] != r["B|tradeify"] and m == 3.0, "Malus zählt erst nach dem Netto — nie eine Ablehnung")
+    # PC: Zeitverteilung belegt je ID nie zwei Starts gleichzeitig, auch gegen schon geplante; keine Firmen-Pause
+    zt = {"fenster": [["10:00", "10:30", 1]], "abstand_id_min": 3}
+    trz = [{"key": f"A|f{i}", "user": "A", "firma": f"f{i}", "dauer_min": 4} for i in range(3)] + \
+          [{"key": "B|f0", "user": "B", "firma": "f0", "dauer_min": 4}]
+    mz = a["ap_zeiten_verteilen"](trz, zt, random.Random(5), 0, bestehend=[{"user": "A", "start": 615, "dauer_min": 2}])
+    ss = sorted([mz[k] for k in mz if k.startswith("A|")] + [615])
+    check(all(b - a_ >= 4 + 3 for a_, b in zip(ss, ss[1:])), f"PC der ID nie doppelt belegt (Starts {ss})")
 
     # ── A3 Optimierer hält das Band ────────────────────────────────────────────────────────────────────────────────────
-    gruppen = {"a": {"fest": None, "tranchen": [(60, 3.0)]}, "b": {"fest": None, "tranchen": [(120, 3.0)]},
-               "c": {"fest": None, "tranchen": [(180, 2.0)]}, "d": {"fest": "buy", "tranchen": [(240, 1.0)]}}
+    gruppen = {"a": T(None, "A", "a", 60, 3.0), "b": T(None, "B", "b", 120, 3.0), "c": T(None, "C", "c", 180, 2.0),
+               "d": T("buy", "D", "d", 240, 1.0)}
     r, m = a["ap_richtungen_delta"](gruppen, 2.0, 20.0, random.Random(1), 15)
-    ev = [(t, dd * (1 if r[f] == "buy" else -1)) for f, g in gruppen.items() for t, dd in g["tranchen"]]
+    ev = [(g["start"], g["delta_abs"] * (1 if r[f] == "buy" else -1)) for f, g in gruppen.items()]
     v = a["ap_verlauf"](2.0, 20.0, ev, 15)
     check(v["gehalten"] and m == 2.0, f"Band 15 % gehalten über den ganzen Tag (max |Netto| {m} = laufendes Netto)")
     alle = []
     for bits in range(8):
         z = {"a": "buy" if bits & 1 else "sell", "b": "buy" if bits & 2 else "sell", "c": "buy" if bits & 4 else "sell", "d": "buy"}
-        alle.append(a["ap_verlauf"](2.0, 20.0, [(t, dd * (1 if z[f] == "buy" else -1)) for f, g in gruppen.items()
-                                                for t, dd in g["tranchen"]], 15)["netto_max_abs"])
+        alle.append(a["ap_verlauf"](2.0, 20.0, [(g["start"], g["delta_abs"] * (1 if z[f] == "buy" else -1)) for f, g in gruppen.items()],
+                                    15)["netto_max_abs"])
     check(m == min(alle), "Optimum = kleinstes größtes |Netto| aller Verteilungen")
     r2, _ = a["ap_richtungen_delta"](gruppen, 2.0, 20.0, random.Random(1), 15)
     check(r == r2, "gleicher seed → gleiche Richtungen (Probelauf = Anlegen)")
+    gross = {f"U{i}|f{i % 4}": T(None, f"U{i}", f"f{i % 4}", 60 + 20 * i, 1.0 + (i % 3)) for i in range(16)}
+    r, m = a["ap_richtungen_delta"](gross, 0, 0, random.Random(9), 15, versuche=300)
+    check(len(r) == 16 and m <= 3.0, f"16 Tranchen (Würfe + Einzeltausch): max |Netto| {m}")
     v = a["ap_verlauf"](0, 0, [(100, 2.0), (100, -2.0), (50, 1.0)], 15, ab_min=60)
     check([x["min"] for x in v["verlauf"]] == [60, 100] and v["verlauf"][0]["netto_delta"] == 1.0 and v["verlauf"][1]["brutto_delta"] == 5.0,
           "Verlauf kumuliert, früher gestartete zählen ab jetzt, gleiche Minute zusammen")
@@ -230,20 +250,22 @@ def main():
         {"plan_id": "x2", "user_id": "B", "firma": "x", "richtung": "buy", "start_min": 680, "delta_abs": 2.0, "aenderbar": True},
         {"plan_id": "y1", "user_id": "A", "firma": "y", "richtung": "buy", "start_min": 625, "delta_abs": 5.0, "aenderbar": False,
          "fest_durch": "Handplan"},
-        {"plan_id": "z1", "user_id": "C", "firma": "z", "richtung": "buy", "start_min": 630, "delta_abs": 5.0, "aenderbar": True},
         {"plan_id": "w1", "user_id": "C", "firma": "w", "richtung": "buy", "start_min": 640, "delta_abs": 5.0, "aenderbar": True},
-        {"plan_id": "w2", "user_id": "D", "firma": "w", "richtung": "buy", "start_min": 700, "delta_abs": 1.0, "aenderbar": False,
+        {"plan_id": "w2", "user_id": "C", "firma": "w", "richtung": "buy", "start_min": 641, "delta_abs": 1.0, "aenderbar": False,
          "fest_durch": "bestätigt und fällig"},
         {"plan_id": "v1", "user_id": "E", "firma": "v", "richtung": "buy", "start_min": 650, "delta_abs": 5.0, "aenderbar": True},
     ]
-    erg = a["ap_umplanen"](plaene, 0.0, 10.0, jm, ZEITEN, 15, random.Random(3), firma_fest={"z": {"richtung": "buy", "durch": "läuft"}},
+    erg = a["ap_umplanen"](plaene, 0.0, 10.0, jm, ZEITEN, 15, random.Random(3),
                            id_fest={"E|v": {"richtung": "buy", "durch": "geplant morgen"}})
     ids = {x["plan_id"] for x in erg["aenderungen"]}
     flips = {x["plan_id"] for x in erg["aenderungen"] if x["art"] == "richtung"}
-    check(erg["aenderungen"] and ids <= {"x1", "x2", "z1", "w1", "v1"}, f"nur änderbare Pläne angefasst ({sorted(ids)})")
-    check(flips <= {"x1", "x2"} and (not flips or flips == {"x1", "x2"}),
-          "Richtung nur bei Firma x getauscht — ganze Firma, nie die feste (z), die halb feste (w) oder die geschützte (v)")
+    check(erg["aenderungen"] and ids <= {"x1", "x2", "v1"}, f"nur änderbare Tranchen angefasst ({sorted(ids)})")
+    check(flips <= {"x1", "x2"}, "Richtung nur bei freien Tranchen — nie Handplan (y), halb feste Tranche (w) oder Richtungsschutz (v)")
     check(erg["nachher"]["ueber_band"] < erg["vorher"]["ueber_band"], "Umplanung verkleinert die Bandüberschreitung")
+    tr_n = {}
+    for x in plaene:
+        tr_n.setdefault(x["user_id"], []).append(next((c["nach_start_min"] for c in erg["aenderungen"] if c["plan_id"] == x["plan_id"]),
+                                                      x["start_min"]))
     for x in erg["aenderungen"]:
         if x["art"] == "start":
             fen = a["ap_fenster_von"](ZEITEN, x["von_start_min"])
@@ -252,39 +274,37 @@ def main():
     check(ruhig["aenderungen"] == [] and ruhig["ausloeser"] is None, "im Band → keine Änderung")
     nichts = a["ap_umplanen"]([dict(p, aenderbar=False) for p in plaene], 0.0, 10.0, jm, ZEITEN, 15, random.Random(3))
     check(nichts["aenderungen"] == [], "nichts änderbar → nichts geändert (auch wenn über dem Band)")
+    einzel = a["ap_umplanen"]([plaene[0], dict(plaene[1], richtung="buy")], 5.0, 5.0, jm, ZEITEN, 15, random.Random(3), schritte=1)
+    check([x["plan_id"] for x in einzel["aenderungen"]] in (["x1"], ["x2"]) and einzel["aenderungen"][0]["art"] == "richtung",
+          "Bot tauscht eine Tranche — dieselbe Firma bei der anderen ID darf gegenläufig bleiben")
 
-    # ── A5 Manueller Eingriff ──────────────────────────────────────────────────────────────────────────────────────────
+    # ── A5 Manueller Eingriff: nur Richtungsschutz oder PC-Überlappung lehnen ab ─────────────────────────────────────────
     ep = a["ap_eingriff_pruefen"]
     pl = [
         {"plan_id": "a1", "user_id": "A", "user": "Eins", "firma": "tradeify", "richtung": "buy", "start_min": 700, "aenderbar": True},
         {"plan_id": "a2", "user_id": "A", "user": "Eins", "firma": "tradeify", "richtung": "buy", "start_min": 701.5, "aenderbar": True},
-        {"plan_id": "b1", "user_id": "B", "user": "Zwei", "firma": "tradeify", "richtung": "buy", "start_min": 760, "aenderbar": True},
+        {"plan_id": "b1", "user_id": "B", "user": "Zwei", "firma": "tradeify", "richtung": "buy", "start_min": 702, "aenderbar": True},
         {"plan_id": "c1", "user_id": "A", "user": "Eins", "firma": "apex", "richtung": "sell", "start_min": 900, "aenderbar": True},
         {"plan_id": "d1", "user_id": "C", "user": "Drei", "firma": "fundednext", "richtung": "buy", "start_min": 800, "aenderbar": False,
          "fest_durch": "Handplan (nur Auto-Pläne werden umgeplant)"},
         {"plan_id": "e1", "user_id": "C", "user": "Drei", "firma": "the5ers", "richtung": "buy", "start_min": 950, "aenderbar": True},
     ]
-    _x, f = ep("a1", "richtung_tauschen", pl, 600, ZEITEN)
-    check(f and "anderen IDs" in f and "nie gegenläufig" in f, f"Tausch bei Firma mit anderer ID → 400: {f}")
-    _x, f = ep("c1", "richtung_tauschen", pl, 600, ZEITEN, firma_fest={"apex": {"richtung": "sell", "durch": "Drei läuft"}})
-    check(f and "Firma × Tag" in f, f"Tausch gegen laufende Firma → 400: {f}")
+    aend, f = ep("a1", "richtung_tauschen", pl, 600, ZEITEN)
+    check(not f and sorted(x["plan_id"] for x in aend) == ["a1", "a2"] and all(x["nach_richtung"] == "sell" for x in aend),
+          "Tausch erlaubt, obwohl dieselbe Firma bei anderer ID 2 min später long startet → ganze Tranche")
+    _x, f = ep("c1", "richtung_tauschen", pl, 600, ZEITEN, id_fest={"A|apex": {"richtung": "sell", "durch": "geplant morgen"}})
+    check(f and "Richtungsschutz" in f, f"Richtungsschutz anderer Tage → 400: {f}")
     _x, f = ep("d1", "richtung_tauschen", pl, 600, ZEITEN)
     check(f and "Handplan" in f, "Handplan → 400")
-    aend, f = ep("e1", "richtung_tauschen", pl, 600, ZEITEN)
-    check(not f and len(aend) == 1 and aend[0]["nach_richtung"] == "sell", "erlaubter Tausch → ganze Tranche")
-    _x, f = ep("c1", "richtung_tauschen", pl, 600, ZEITEN, id_fest={"A|apex": {"richtung": "sell", "durch": "geplant morgen"}})
-    check(f and "Richtungsschutz" in f, "Richtungsschutz anderer Tage → 400")
     _x, f = ep("a1", "start", pl, 600, ZEITEN, neu_start_min=20 * 60)
     check(f and "außerhalb" in f, f"Start nach 19:30 → 400: {f}")
     _x, f = ep("a1", "start", pl, 600, ZEITEN, neu_start_min=602)
     check(f and "zu früh" in f, f"Start vor jetzt + 5 min → 400: {f}")
-    _x, f = ep("a1", "start", pl, 600, ZEITEN, neu_start_min=750)
-    check(f and "Mindestpause" in f, f"Start 10 min neben anderer ID derselben Firma → 400: {f}")
     _x, f = ep("a1", "start", pl, 600, ZEITEN, neu_start_min=898)
-    check(f and "eigener Tranche" in f, f"Start überlappt eigene Tranche → 400: {f}")
-    aend, f = ep("a1", "start", pl, 600, ZEITEN, neu_start_min=650)
-    check(not f and sorted((x["plan_id"], x["nach_start_min"]) for x in aend) == [("a1", 650), ("a2", 651.5)],
-          "erlaubter Start → ganze Tranche verschoben, Abstände bleiben")
+    check(f and "nie zwei Puls-Starts gleichzeitig" in f, f"Start überlappt den PC derselben ID → 400: {f}")
+    aend, f = ep("a1", "start", pl, 600, ZEITEN, neu_start_min=703)
+    check(not f and sorted((x["plan_id"], x["nach_start_min"]) for x in aend) == [("a1", 703), ("a2", 704.5)],
+          "Start 1 min neben derselben Firma bei anderer ID erlaubt — ganze Tranche verschoben, Abstände bleiben")
     _x, f = ep("zz", "start", pl, 600, ZEITEN, neu_start_min=650)
     check(f, "unbekannter Plan → 400")
 
@@ -299,10 +319,16 @@ def main():
     erg = a["ap_planen"](tag_s, trocken=True, seed=4711)
     check(erg.get("ok") and not erg.get("probelauf_fehler"), f"Probelauf läuft durch ({erg.get('msg') or erg.get('probelauf_fehler') or 'ok'})")
     tdfy = [g for g in erg.get("geplant", []) if g["firma"] == "Tradeify"]
-    check(len(tdfy) == 2 and all(g["richtung"] == "sell" for g in tdfy),
-          "Tradeify bei beiden IDs short — läuft heute schon short bei einer dritten ID (Firma × Tag)")
+    check(len(tdfy) == 2 and all(g["richtung"] in ("buy", "sell") for g in tdfy) and "firma_tag" not in (erg.get("ausgleich") or {}),
+          "Tradeify bei beiden IDs geplant, Richtung je Tranche, kein firma_tag mehr")
     g1 = next((g for g in tdfy if g["konto_id"] == "k-1"), {})
-    check(g1.get("delta_eur_pkt") is not None and abs(g1["delta_eur_pkt"] + 2.76) < 0.01, f"geplant[] trägt delta_eur_pkt ({g1.get('delta_eur_pkt')})")
+    check(g1.get("delta_eur_pkt") is not None and abs(abs(g1["delta_eur_pkt"]) - 2.76) < 0.01, f"geplant[] trägt delta_eur_pkt ({g1.get('delta_eur_pkt')})")
+    st = {}
+    for g in erg.get("geplant", []):
+        st.setdefault(g["user_id"], []).append(g["start"])
+    check(all(len(v) == len(set(v)) for v in st.values()), "je ID keine zwei Starts in derselben Minute")
+    check(all(any(w.startswith("Pause zu") or w.startswith("keine andere ID") for w in t["warum"]) for t in erg.get("tranchen") or []),
+          "warum[] nennt „Pause zu … bei …: x min“ statt Firma × Tag")
     aus = erg.get("ausgleich") or {}
     felder = ("offen_delta_long", "offen_delta_short", "plan_delta_long", "plan_delta_short", "verlauf", "netto_max_abs", "band")
     check(all(k in aus for k in felder) and all("netto_delta" in p for p in aus["verlauf"]), "ausgleich{} mit den Vertragsfeldern")
