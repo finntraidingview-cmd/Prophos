@@ -1958,8 +1958,12 @@
      (Violett) für „noch offen", Status nur als kleine Punkte — das rote Leuchten ganzer Karten (27.09.) war das Unruhige. */
   #af-view .af-schalter{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--sub);cursor:pointer;white-space:nowrap}
   /* Admin-Reiter: einzeilig + horizontal scrollbar wie am Handy (sonst brechen die Beschriftungen zweizeilig um) */
-  #dashboard-view #kasse-content > .subtabs{overflow-x:auto;scrollbar-width:thin}
-  #dashboard-view #kasse-content > .subtabs .subtab{white-space:nowrap;flex-shrink:0}
+  #dashboard-view #kasse-content > .subtabs,#dashboard-view .nav-gruppe-tabs{overflow-x:auto;scrollbar-width:thin}
+  #dashboard-view #kasse-content > .subtabs .subtab,#dashboard-view .nav-gruppe-tabs .subtab{white-space:nowrap;flex-shrink:0}
+  /* Nav-Gruppen (07.10.2026, Finn: „wir haben langsam zu viele Navigation-Points"): die sechs Einzel-Links bleiben im DOM
+     (Klick-Handler von Echo/Orbit, Deep-Links und data-view hängen an ihnen), nur unsichtbar — „Prop" und „Copier" stehen
+     an ihrer Stelle, die Unter-Tab-Leiste oben auf jeder Seite klickt den versteckten Link. */
+  #dashboard-view .sb-nav > .sb-link:is([data-view="accounts"],[data-view="propbaum"],[data-view="firmen"],[data-view="vorrat"],[data-view="mt5copier"],[data-view="echoplus"]){display:none !important}
   /* Kompass + Rechnungen rechtsbündig unter „sperren", klein und gedämpft (30.09.2026, Finn: „wo man sie quasi nicht sieht");
      aktiv setzt der Tab-Handler die Farbe inline (violett) — dann sehen sie normal aus */
   #dashboard-view #kasse-content > .subtabs .adm-tab-rand{font-size:12px;padding-left:10px;padding-right:10px;color:var(--sub-2)}
@@ -5968,6 +5972,13 @@
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
         Accounts <span class="sb-badge" id="sb-badge-accounts" hidden>0</span>
       </button>
+      <!-- „Prop" (07.10.2026, Finn: „wir haben langsam zu viele Navigation-Points"): Gruppe für Accounts · Prop-Baum ·
+           Accounts je Firma · Vorrat. Kein data-view — die vier Einzel-Links bleiben versteckt im DOM, der Klick öffnet die
+           zuletzt benutzte Unterseite (Sektion NAV-GRUPPEN), der Badge spiegelt sb-badge-accounts. -->
+      <button class="sb-link active" data-navgruppe="prop">
+        <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+        Prop <span class="sb-badge" id="sb-badge-prop" hidden>0</span>
+      </button>
       <!-- Prop-Baum (03.10.2026 abends, Finn: zwischen Accounts und Radar) -->
       <button class="sb-link" data-view="propbaum">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="5" rx="1"/><rect x="2" y="17" width="6" height="5" rx="1"/><rect x="16" y="17" width="6" height="5" rx="1"/><path d="M12 7v5M5 17v-3h14v3"/></svg>
@@ -5998,6 +6009,11 @@
       <button class="sb-link" data-view="payouts">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
         Finanzen
+      </button>
+      <!-- „Copier" (07.10.2026, gleiche Hülle wie „Prop"): Echo + Orbit, Badge = Summe aus sb-badge-mtc und sb-badge-echoplus -->
+      <button class="sb-link" data-navgruppe="copier">
+        <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4"/><path d="M12 18v4"/><path d="M4.93 4.93l2.83 2.83"/><path d="M16.24 16.24l2.83 2.83"/><path d="M2 12h4"/><path d="M18 12h4"/><path d="M4.93 19.07l2.83-2.83"/><path d="M16.24 7.76l2.83-2.83"/></svg>
+        Copier <span class="sb-badge" id="sb-badge-copier" hidden>0</span>
       </button>
       <!-- MT5-Copier: eigener Hedge-Copier statt Duplikium (Etappe 3, 15.08.2026).
            Separater Bereich mit eigener Logik — die Duplikium-Wege bleiben
@@ -12179,6 +12195,7 @@
     document.querySelectorAll('#dashboard-view .sb-link').forEach(l =>
       l.classList.toggle('active', l.dataset.view === name)
     )
+    navGruppenSync(name)   // „Prop"/„Copier" leuchten, solange eine ihrer Unterseiten offen ist (07.10.2026)
     // Bottom-Tab-Bar (Handy) synchron halten: „Mehr" leuchtet, wenn die aktive
     // View keinen eigenen Tab in der Leiste hat (z.B. Echo, Admin, Settings).
     const mobMain = ['accounts','trades','payouts','news']
@@ -12248,6 +12265,81 @@
       if(v) switchView(v)
     })
   })
+
+  /* ========== NAV-GRUPPEN ==========
+   * 07.10.2026, Finn: „wir haben langsam zu viele Navigation-Points". „Prop" (Accounts · Prop-Baum · Accounts je Firma ·
+   * Vorrat) und „Copier" (Echo · Orbit) sind nur eine Hülle: die data-view-Namen, switchView und die sechs Einzel-Links
+   * bleiben unverändert (per CSS versteckt), weil Echo/Orbit ihr Sofort-Laden an den Klick auf genau diese Links hängen
+   * (mtcLoad, epRenderTick) und Deep-Links/#hash/Stubs auf die Views zeigen. Gruppen-Knopf und Unter-Tabs klicken deshalb
+   * den versteckten Link — derselbe Weg wie vorher ein Klick in die Seitenleiste. Als Funktionen (gehoben), weil switchView
+   * schon beim Boot läuft. */
+  function navGruppen(){
+    return {
+      prop:   [['accounts', 'Accounts'], ['propbaum', 'Prop-Baum'], ['firmen', 'Accounts je Firma'], ['vorrat', 'Vorrat']],
+      copier: [['mt5copier', 'Echo'], ['echoplus', 'Orbit']]
+    }
+  }
+  function navGruppeVon(view){
+    const g = navGruppen()
+    return Object.keys(g).find(k => g[k].some(([v]) => v === view)) || null
+  }
+  function navGruppenSync(name){
+    const g = navGruppeVon(name)
+    document.querySelectorAll('#dashboard-view .sb-link[data-navgruppe]').forEach(l => l.classList.toggle('active', l.dataset.navgruppe === g))
+    // Zuletzt benutzte Unterseite je Gruppe — nur Bequemlichkeit, ohne Speicher gilt die erste Unterseite
+    if(g){ try { localStorage.setItem('prophos_navgruppe_' + g, name) } catch(_){} }
+    // Handy: die Leiste ist wischbar — den aktiven Tab ins Bild holen (sonst steht „Vorrat" rechts außerhalb)
+    const leiste = g && document.querySelector(`#dashboard-view section.view[data-view="${name}"] .nav-gruppe-tabs`)
+    const akt = leiste && leiste.querySelector('.subtab.active')
+    if(akt && leiste.scrollWidth > leiste.clientWidth) leiste.scrollLeft += akt.getBoundingClientRect().left - leiste.getBoundingClientRect().left - 8
+  }
+  function navLinkKlicken(view){
+    document.querySelector(`#dashboard-view .sb-nav > .sb-link[data-view="${view}"]`)?.click()
+  }
+  document.querySelectorAll('#dashboard-view .sb-link[data-navgruppe]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const liste = navGruppen()[btn.dataset.navgruppe] || []
+      let ziel = null
+      try { ziel = localStorage.getItem('prophos_navgruppe_' + btn.dataset.navgruppe) } catch(_){}
+      if(!liste.some(([v]) => v === ziel)) ziel = liste[0] && liste[0][0]
+      if(ziel) navLinkKlicken(ziel)
+    })
+  })
+  // Unter-Tab-Leiste oben auf jeder Unterseite — dasselbe .subtabs/.subtab wie die Admin-Reiter (Handy: wischbar/segmentiert)
+  ;(() => {
+    const g = navGruppen()
+    for(const k of Object.keys(g)) for(const [view] of g[k]){
+      const sec = document.querySelector(`#dashboard-view section.view[data-view="${view}"]`)
+      if(!sec) continue
+      const leiste = document.createElement('div')
+      leiste.className = 'subtabs nav-gruppe-tabs'
+      leiste.dataset.navgruppe = k
+      leiste.innerHTML = g[k].map(([v, t]) => `<button class="subtab${v === view ? ' active' : ''}" data-navziel="${v}">${t}</button>`).join('')
+      leiste.addEventListener('click', e => {
+        const b = e.target.closest('.subtab[data-navziel]')
+        if(b && !b.classList.contains('active')) navLinkKlicken(b.dataset.navziel)
+      })
+      sec.prepend(leiste)
+    }
+  })()
+  // Badges: die alten IDs (sb-badge-accounts/-mtc/-echoplus) beschreibt der Code weiter, hier wird nur die Summe gespiegelt
+  function navGruppenBadges(){
+    for(const [ziel, quellen] of [['sb-badge-prop', ['sb-badge-accounts']], ['sb-badge-copier', ['sb-badge-mtc', 'sb-badge-echoplus']]]){
+      const z = document.getElementById(ziel)
+      if(!z) continue
+      const n = quellen.reduce((s, id) => { const b = document.getElementById(id); return s + (b && !b.hidden ? (Number(b.textContent) || 0) : 0) }, 0)
+      z.hidden = !n
+      z.textContent = n
+    }
+  }
+  ;(() => {
+    const mo = new MutationObserver(navGruppenBadges)
+    for(const id of ['sb-badge-accounts', 'sb-badge-mtc', 'sb-badge-echoplus']){
+      const b = document.getElementById(id)
+      if(b) mo.observe(b, { attributes: true, attributeFilter: ['hidden'], childList: true, characterData: true, subtree: true })
+    }
+    navGruppenBadges()
+  })()
 
   /* ========== KASSE — gemeinsame 50:50-Kasse (profilübergreifend) ==========
    * Eine geteilte Tabelle kasse_entries (keine user_id-Trennung), damit die
@@ -39586,7 +39678,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1100'
+  const OS_TAB_BUILD = '2026-09-22.1101'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
