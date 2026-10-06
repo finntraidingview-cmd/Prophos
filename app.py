@@ -7021,7 +7021,7 @@ import random
 import zlib
 
 VORRAT2_SQL = "sql/2026-10-06_vorrat_stufe2.sql"
-VORRAT2_RECHEN_STAND = 5               # hochzählen, wenn ein Lauf neue Felder bekommt — GET rechnet ältere Läufe dann einmal neu
+VORRAT2_RECHEN_STAND = 6               # hochzählen, wenn ein Lauf neue Felder bekommt — GET rechnet ältere Läufe dann einmal neu
 VORRAT2_STD = {
     "sicherheit": 0.8,                 # P(Bestand ≥ Untergrenze), Finn am Frontend einstellbar (vorrat_einstellung.sicherheit)
     "mc_ziehungen": 2000, "mc_seed": 20261006,
@@ -7978,6 +7978,34 @@ def vorrat_regel_satz(regel, g=0.5, sicherheit=0.8):
     return f"Jedes laufende Konto zählt {teil}. Ein neues Konto zählt genauso." + schluss
 
 
+def vorrat_gesamt(zellen, heute=None, vorher_score=None):
+    """REIN RECHNEND (testbar): Overall-Score, wie dringend insgesamt nachgekauft werden muss (Finn über den Master 06.10.2026).
+    Je freier Zelle mit Daten (status frei, keine Sperre, Untergrenze > 0, rechnung vorhanden) der Anteil
+    min(1, (rechnung.bestand + rechnung.funnel_zaehlt) ÷ Untergrenze) — so wird jede Firma in ihrer eigenen Einheit auf 0–1 normiert
+    und zählt gleich. abdeckung = Mittelwert, score = round(100 × (1 − abdeckung)): 0 = alles gedeckt, 100 = nichts da.
+    wort: entspannt < 25 · mittel 25–50 · dringend 50–75 · sehr dringend ≥ 75. trend = Score des vorigen Laufs (oder None).
+    → {abdeckung_pct, score, wort, zellen, kaeufe_heute, kaeufe_gesamt, kosten_heute_eur, trend}"""
+    anteile = []
+    for z in zellen or []:
+        r = z.get("rechnung") or {}
+        soll = float(r.get("untergrenze") or z.get("untergrenze") or 0)
+        if z.get("status") != "frei" or z.get("sperre") or soll <= 0 or not r:
+            continue
+        ist = float(r.get("bestand") or 0) + float(r.get("funnel_zaehlt") or 0)
+        anteile.append(max(0.0, min(1.0, ist / soll)))
+    abdeckung = sum(anteile) / len(anteile) if anteile else None
+    score = int(round(100 * (1 - abdeckung))) if abdeckung is not None else None
+    wort = (None if score is None else "entspannt" if score < 25 else "mittel" if score < 50
+            else "dringend" if score < 75 else "sehr dringend")
+    h = [e for e in (heute or []) if e.get("stufe") == "heute"]
+    gesamt_n = sum((z.get("nachkauf") or {}).get("n") or 0 for z in zellen or []
+                   if z.get("status") == "frei" and not z.get("sperre") and isinstance((z.get("nachkauf") or {}).get("n"), int))
+    return {"abdeckung_pct": (round(100 * abdeckung, 1) if abdeckung is not None else None), "score": score, "wort": wort,
+            "zellen": len(anteile), "kaeufe_heute": sum(int(e.get("anzahl") or 0) for e in h),
+            "kaeufe_gesamt": gesamt_n, "kosten_heute_eur": round(sum(float(e.get("kosten_eur") or 0) for e in h)),
+            "trend": vorher_score}
+
+
 def vorrat_personen(zellen, namen):
     """REIN RECHNEND (testbar): Zusammenfassung je Person (Master 06.10.2026: drei IDs standen auf „alles gedeckt", zwei davon
     waren bei allen Firmen pausiert, die dritte hatte nur Konten ohne Lesung — „gedeckt" darf nur stehen, wenn wirklich gedeckt).
@@ -8147,10 +8175,10 @@ def vorrat2_rechnen_lauf(quelle):
             else:
                 z["nachkauf"]["n"] = 0 if nr == 0 else None
             z["nachkauf"]["dringlichkeit"] = z["lage"]
-            z.update(user_id=uid, firma=f)
+            z.update(user_id=uid, firma=f, status=status)
             zellen.append(z)
     _, naechster = vorrat2_slot(jetzt, param["takt_utc"])
-    return {"zellen": zellen, "stand": VORRAT2_RECHEN_STAND, "quoten": [dict(firma=k[0], stufe=k[1], **v) for k, v in quoten.items()],
+    return {"zellen": zellen, "stand": VORRAT2_RECHEN_STAND, "gesamt_score": vorrat_gesamt(zellen)["score"], "quoten": [dict(firma=k[0], stufe=k[1], **v) for k, v in quoten.items()],
             "parameter": param, "gerechnet_um": jetzt_iso, "naechster_lauf": naechster.isoformat(), "quelle": quelle}
 
 
@@ -8301,6 +8329,14 @@ def vorrat2_anhaengen(erg1):
     namen = {p_["user_id"]: p_["name"] for p_ in erg1.get("people") or []}
     tmax = int(((e2.get("parameter") or {}).get("tages_max")) or VORRAT2_STD["tages_max"])
     heute, luecke_ges = vorrat_tagesliste(erg1.get("zellen") or [], namen, tmax)
+    # Overall-Score mit Trend gegen den vorigen Lauf (der Lauf davor nach Zeitpunkt, mit gespeichertem gesamt_score)
+    try:
+        vor = [r for r in sb_select("vorrat_lauf", {"select": "id,gs:ergebnis->gesamt_score", "ergebnis": "not.is.null",
+                                                    "order": "at.desc,id.desc", "limit": "5"}) if r.get("id") != lauf.get("id")]
+        trend = next((r.get("gs") for r in vor if isinstance(r.get("gs"), (int, float))), None)
+    except Exception:
+        trend = None
+    gesamt = vorrat_gesamt(erg1.get("zellen") or [], heute, trend)
     # Satz je freier Zelle (auch „reicht für das Ziel, nichts kaufen") — Finn soll jede Zeile in Klartext lesen können
     for z in erg1.get("zellen") or []:
         n = (z.get("nachkauf") or {}).get("n")
@@ -8308,6 +8344,7 @@ def vorrat2_anhaengen(erg1):
                      if z.get("status") == "frei" and not z.get("sperre") and isinstance(n, int) else None)
     return dict(erg1, stufe2_bereit=True, stufe2_hinweis="", gerechnet_um=e2.get("gerechnet_um"),
                 heute=heute, luecke_gesamt=luecke_ges, tages_max=tmax, personen=vorrat_personen(erg1.get("zellen") or [], namen),
+                gesamt=gesamt,
                 kauf_regel=(e2.get("parameter") or {}).get("kauf_regel"), mitte=(e2.get("parameter") or {}).get("mitte"),
                 regel_satz=vorrat_regel_satz((e2.get("parameter") or {}).get("kauf_regel"), (e2.get("parameter") or {}).get("mitte", 0.5),
                                              (e2.get("parameter") or {}).get("sicherheit", 0.8)),
@@ -8330,6 +8367,7 @@ def _vorrat_antwort(erg1):
     out.setdefault("dringlichkeiten", VORRAT2_DRINGLICHKEITEN)
     out.setdefault("heute", [])
     out.setdefault("personen", [])
+    out.setdefault("gesamt", None)
     # Ziele zum Bearbeiten (Finn 06.10.2026): alle Spalten von vorrat_ziele, nach reihe
     try:
         out["ziele"] = sb_select("vorrat_ziele", {"select": "firma,art,typen,von,bis,groessen,kauf_einheit,kauf_groesse,reihe",

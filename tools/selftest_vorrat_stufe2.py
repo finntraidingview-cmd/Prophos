@@ -69,7 +69,7 @@ def lade():
     teile.append(src[j:src.index("\n\n\n", j)])
     teile += [block(f) for f in ("_ap_norm", "ap_regel_finden", "ap_groesse", "ap_kw_param", "_ap_kw_kauf", "_ap_kw_wachsen",
                                  "ap_kontowert", "vorrat_stufen_aus_kernwerten")]
-    teile += [block(f) for f in ("vorrat_ziel_pruefen", "_vr2_k", "_vr2_usd", "_vr2_unterwegs_txt", "vorrat_satz_nominal", "vorrat_satz", "vorrat_personen", "vorrat_regel_satz", "vorrat_tagesliste", "_vr2_num", "vorrat_chance_stufe", "vorrat_chance_kette", "vorrat_bestand_konto",
+    teile += [block(f) for f in ("vorrat_ziel_pruefen", "_vr2_k", "_vr2_usd", "_vr2_unterwegs_txt", "vorrat_satz_nominal", "vorrat_satz", "vorrat_personen", "vorrat_regel_satz", "vorrat_gesamt", "vorrat_tagesliste", "_vr2_num", "vorrat_chance_stufe", "vorrat_chance_kette", "vorrat_bestand_konto",
                                  "vorrat_alter_handelstage", "vorrat_mc", "vorrat_score", "vorrat_totband", "vorrat_anzeige_n",
                                  "vorrat_quoten", "vorrat2_zelle", "vorrat2_slot")]
     exec("\n\n".join(teile), ns)
@@ -374,6 +374,21 @@ def main():
              {"account_id": "b", "typ": "funded_cfd", "groesse": 50000, "balance": 51000, "alter_tage": 0}]
     q = zelle(dict(ZIEL_FN, von=175000), FN, fn150, "frei")
     pruef("Toleranz bei Summen-Zielen: FundedNext 150k gegen 175k (Schwelle 148.750) → 0", (q["nachkauf"]["n_roh"], q["toleranz"]), (0, True))
+    # Overall-Score (Finn 06.10.2026)
+    vg = ns["vorrat_gesamt"]
+    def gz(best, funnel, soll, status="frei", sperre=None, n=0):
+        return {"status": status, "sperre": sperre, "nachkauf": {"n": n},
+                "rechnung": {"bestand": best, "funnel_zaehlt": funnel, "untergrenze": soll}}
+    zg = [gz(0, 0, 20000, n=3), gz(10000, 5000, 20000, n=1), gz(300000, 0, 200000), gz(1, 0, 1),
+          gz(0, 0, 1, status="pausiert", n=5), gz(0, 0, 200000, sperre="daten_fehlen")]
+    hz = [{"stufe": "heute", "anzahl": 3, "kosten_eur": 645}, {"stufe": "woche", "anzahl": 1, "kosten_eur": 215}]
+    r = vg(zg, hz, 40)
+    pruef("Gesamt: Abdeckung = Mittel (0 + 0,75 + 1 + 1) ÷ 4, pausiert/gesperrt draußen", (r["abdeckung_pct"], r["zellen"]), (68.8, 4))
+    pruef("Gesamt: Score 31 = mittel, Trend aus dem vorigen Lauf", (r["score"], r["wort"], r["trend"]), (31, "mittel", 40))
+    pruef("Gesamt: Käufe heute/gesamt, Kosten heute", (r["kaeufe_heute"], r["kaeufe_gesamt"], r["kosten_heute_eur"]), (3, 4, 645))
+    pruef("Gesamt: Wort-Grenzen", [vg([gz(b_, 0, 100)])["wort"] for b_ in (100, 76, 75, 51, 50, 26, 25, 0)],
+          ["entspannt", "entspannt", "mittel", "mittel", "dringend", "dringend", "sehr dringend", "sehr dringend"])
+    pruef("Gesamt: ohne Zellen → None", (vg([])["score"], vg([])["wort"]), (None, None))
     rs = ns["vorrat_regel_satz"]
     pruef("Regel-Satz mitte 0,5", rs("mitte", 0.5).startswith("Jedes laufende Konto zählt halb so, als käme es sicher durch, und halb mit"), True)
     pruef("Regel-Satz mitte 0,7", "zu 70 % so, als käme es sicher durch, und zu 30 %" in rs("mitte", 0.7), True)
