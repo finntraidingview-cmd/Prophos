@@ -11627,6 +11627,9 @@ AP_TYPEN = ("challenge", "phase1", "phase2")
 AP_TZ_LAUF = "Asia/Dubai"            # Nachtlauf 01:00–02:00 Dubai (Finn), Tag = Dubai-Datum
 AP_REST_MIN = 100                    # weniger Rest bis Ziel → kein Auto-Trade, Finn prüft selbst
 AP_GROESSE_TOLERANZ = 0.15           # Balance weiter als 15 % von jeder Regel-Größe weg → „stimmt was nicht"
+# Firmen, die der Planer still auslässt (kein „keine Regel"-Eintrag). Finn 06.10.2026: Fusion-Markets-Konten sind nur
+# Gegenhedge-Konten, auf ihnen wird nie ein Trade geplant — „Echo Demo (Master)" stand als phase1 jede Nacht im Protokoll
+AP_STILL_FIRMEN = ("fusionmarkets",)
 _ap_info = {"started": False, "last_run": None, "last_error": "", "runs": 0}
 _ap_started = False
 
@@ -11903,6 +11906,8 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None):
         zeile = {"user": wer, "konto": a.get("name"), "firma": a.get("firm"), "typ": a.get("account_type")}
         if aid in archiv:
             continue                                   # archiviert = weg, keine Meldung
+        if _ap_norm(a.get("firm")) in AP_STILL_FIRMEN:
+            continue                                   # Gegenhedge-Konto (Fusion), nie planen, keine Meldung
         regel = ap_regel_finden(firmen, a.get("firm"))
         if not regel:
             ausgelassen.append(dict(zeile, grund="keine Regel für diese Firma"))
