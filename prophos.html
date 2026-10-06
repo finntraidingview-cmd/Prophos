@@ -6095,10 +6095,12 @@
       </button>
       <!-- „Prop" (07.10.2026, Finn: „wir haben langsam zu viele Navigation-Points"): Gruppe für Accounts · Prop-Baum ·
            Accounts je Firma · Vorrat. Kein data-view — die vier Einzel-Links bleiben versteckt im DOM, der Klick öffnet die
-           zuletzt benutzte Unterseite (Sektion NAV-GRUPPEN), der Badge spiegelt sb-badge-accounts. -->
+           zuletzt benutzte Unterseite (Sektion NAV-GRUPPEN), der Badge spiegelt sb-badge-accounts.
+           Sichtbar heißt die Gruppe seit 07.10.2026 04:30 Dubai „Accounts" (Finn: „nenn den Punkt Accounts") — Desktop und
+           Handy-„Mehr" (dieselbe Seitenleiste als Bottom-Sheet); data-navgruppe="prop", localStorage-Merker und Unter-Tabs bleiben. -->
       <button class="sb-link active" data-navgruppe="prop">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
-        Prop <span class="sb-badge" id="sb-badge-prop" hidden>0</span>
+        Accounts <span class="sb-badge" id="sb-badge-prop" hidden>0</span>
       </button>
       <!-- Prop-Baum (03.10.2026 abends, Finn: zwischen Accounts und Radar) -->
       <button class="sb-link" data-view="propbaum">
@@ -39828,7 +39830,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1106'
+  const OS_TAB_BUILD = '2026-09-22.1107'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
