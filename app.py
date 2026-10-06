@@ -13774,7 +13774,7 @@ import random
 from datetime import timedelta
 
 AP_TYPEN = ("challenge", "phase1", "phase2")
-AP_TZ_LAUF = "Asia/Dubai"            # Nachtlauf 01:00–02:00 Dubai (Finn), Tag = Dubai-Datum
+AP_TZ_LAUF = "Asia/Dubai"            # Hand-Lauf ohne tag: Dubai-Datum. Nachtlauf seit 06.10.2026 um 00:00 dt (AP_TZ_TAG, Delta-Vertrag)
 AP_REST_MIN = 100                    # weniger Rest bis Ziel → kein Auto-Trade, Finn prüft selbst
 AP_GROESSE_TOLERANZ = 0.15           # Balance weiter als 15 % von jeder Regel-Größe weg → „stimmt was nicht"
 # Firmen, die der Planer still auslässt (kein „keine Regel"-Eintrag). Finn 06.10.2026: Fusion-Markets-Konten sind nur
@@ -13929,25 +13929,6 @@ def ap_zeiten_verteilen(tranchen, zeiten, rnd, frueheste_min=0, info=None):
                     info[t["key"]] = {"fenster": fenster[j], "soll": fenster[fi], "pause": t["pause"]}
                 break
     return out
-
-
-def ap_richtungen(tranchen_zeit, offen_netto, rnd, versuche=3000):
-    """REIN RECHNEND: Richtung je Tranche. tranchen_zeit = [{key, gewicht, fest}] (fest = 'buy'/'sell' durch Richtungsschutz).
-    Finn: „unter allen Trades zu 9/10 neutralisieren" — gewürfelt werden ganze Verteilungen, genommen wird die mit dem
-    kleinsten Tages-Netto (laufende Trades eingerechnet); unter gleich guten entscheidet der Zufall.
-    05.10.2026: die erste Fassung (der Reihe nach, Zufall bei kleinem Netto) endete im ersten Nachtlauf bei 38k long gegen
-    24k short — zwei große Tranchen (200k-CFD, Apex) lassen sich der Reihe nach nicht mehr ausgleichen. → {key: 'buy'|'sell'}."""
-    ts = list(tranchen_zeit or [])
-    if not ts:
-        return {}
-    basis = float(offen_netto or 0)
-    best, best_n = None, None
-    for _ in range(max(1, int(versuche))):
-        r = {t["key"]: (t["fest"] if t.get("fest") in ("buy", "sell") else rnd.choice(("buy", "sell"))) for t in ts}
-        n = abs(basis + sum(float(t["gewicht"] or 0) * (1 if r[t["key"]] == "buy" else -1) for t in ts))
-        if best_n is None or n < best_n - 1e-6:
-            best, best_n = r, n
-    return best
 
 
 # ── KONTOWERT (06.10.2026, Finn: „das ist eins zu eins, wie es mit Gegenhedgen ist, und das ist eins zu eins der Betrag,
@@ -14170,45 +14151,41 @@ def _ap_ende4(a):
     return str((a or {}).get("external_id") or (a or {}).get("name") or "")[-4:]
 
 
-def _ap_probelauf(tr_info, plan_roh, minuten, zinfo, richtung, zeiten, firmen, namen, echo_bal, dup_bal):
+def _ap_probelauf(tr_info, plan_roh, minuten, zinfo, richtung, zeiten, namen, stand, dinfo, firma_fest):
     """Zusatz für den Probelauf (06.10.2026, Vertrag .claude/master/autoplan-probelauf-vertrag.md): tranchen[] mit Fenster,
     Richtung + Grund, Abständen und Kontowert/Gewicht in € je Konto; ausgleich{} mit den laufenden Trades ALLER IDs (wie Radar),
-    Long-€/Short-€ und Netto-Verlauf über den Tag. Nur Anzeige — die Richtung würfelt ap_richtungen weiter nach TP-$."""
-    offen = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_firm,richtung,master_tp,master_sl,route,"
-                                               "slave_account_id,hedge:mt5_baseline->hedge->>status",
-                                    "status": "eq.open", "order": "id.asc"})
-    kids = sorted({str(p["master_account_id"]) for p in offen if p.get("master_account_id")})
-    konten_o = {}
-    for j in range(0, len(kids), 150):
-        for a in _sb_all("accounts", {"select": AP_KONTO_FELDER, "id": "in.(" + ",".join(kids[j:j + 150]) + ")"}):
-            konten_o[str(a["id"])] = a
-    kauf = _ap_kauf_echt(sorted({str(k["a"]["id"]) for _, k, _, _ in plan_roh}) + kids)
-
-    def bewerten(a, bal, tp, sl):
-        p = ap_kw_param(ap_regel_finden(firmen, a.get("firm")))
-        kw = ap_kontowert(a.get("account_type"), bal, p, kauf.get(str(a["id"])))
-        return kw, ap_trade_gewicht(kw, p, _wd_num(tp), _wd_num(sl))
-
+    Long-€/Short-€ und Netto-Verlauf über den Tag.
+    Delta-Vertrag (06.10.2026, .claude/master/autoplan-delta-vertrag.md): je Konto/Tranche delta_eur_pkt, tp_punkte, sl_punkte;
+    ausgleich dazu offen_/plan_/geplant_delta_long|short, verlauf[].netto_delta, netto_max_abs, band, hinweise. Laufende Trades
+    und heute schon geplante Pläne kommen aus dem Stand (_ap_stand_laden) — derselbe, nach dem ap_richtungen_delta gewürfelt hat."""
+    pct = stand["param"]["zielband_pct"]
+    de2 = lambda x: f"{x:+.2f}".replace(".", ",")
     off_long = off_short = 0.0
+    dl = dsh = 0.0
     offen_liste, eingerechnet = [], 0
-    for p in offen:
-        a = konten_o.get(str(p.get("master_account_id")))
-        if not a or p.get("richtung") not in ("buy", "sell"):
+    for z in stand["offen"]:
+        if z.get("richtung") not in ("buy", "sell"):
             continue
-        gh, art = _ap_gehedgt(p)
-        kw, g = bewerten(a, acc_balance_wahl(a, echo_bal, dup_bal)[0], p.get("master_tp"), p.get("master_sl"))
-        gew = None if not g else (0 if gh else g["gewicht_eur"])
+        gew = None if z.get("gewicht_eur") is None else (0 if z.get("gehedgt") else z["gewicht_eur"])
         if gew:
             eingerechnet += 1
-            if p["richtung"] == "buy":
+            if z["richtung"] == "buy":
                 off_long += gew
             else:
                 off_short += gew
-        offen_liste.append({"user_id": str(p.get("user_id")), "user": namen.get(str(p.get("user_id")), str(p.get("user_id"))[:8]),
-                            "firma": a.get("firm"), "konto": a.get("name"), "ende4": _ap_ende4(a), "typ": a.get("account_type"),
-                            "richtung": p["richtung"], "gehedgt": gh, "hedge": art, "wert_eur": (kw or {}).get("wert"),
-                            "gewinn_eur": (g or {}).get("gewinn_eur"), "verlust_eur": (g or {}).get("verlust_eur"),
-                            "gewicht_eur": gew})
+        d = z.get("delta_eur_pkt") or 0
+        dl, dsh = dl + max(d, 0), dsh + max(-d, 0)
+        offen_liste.append({"plan_id": z["plan_id"], "user_id": z["user_id"], "user": z["user"], "firma": z["firma"],
+                            "konto": z["konto"], "ende4": z["ende4"], "typ": z["typ"], "richtung": z["richtung"],
+                            "gehedgt": z["gehedgt"], "hedge": z["hedge"], "wert_eur": z["wert_eur"], "gewinn_eur": z["gewinn_eur"],
+                            "verlust_eur": z["verlust_eur"], "gewicht_eur": gew, "delta_eur_pkt": z["delta_eur_pkt"],
+                            "usd_pro_pkt": z["usd_pro_pkt"], "tp_punkte": z["tp_punkte"], "sl_punkte": z["sl_punkte"],
+                            "tp_punkte_rest": z.get("tp_punkte_rest"), "sl_punkte_rest": z.get("sl_punkte_rest"), "hinweis": z["hinweis"]})
+    fremd = [(z["start_min"], z["delta_eur_pkt"]) for z in stand["geplant"]
+             if z.get("start_min") is not None and z.get("delta_eur_pkt") is not None]
+    gl = sum(max(d, 0) for _, d in fremd)
+    gs = sum(max(-d, 0) for _, d in fremd)
+    hinweise = list(stand["hinweise"])
 
     fenster_alle = zeiten.get("fenster") or []
     w_summe = sum(float(x[2]) for x in fenster_alle) or 1.0
@@ -14218,28 +14195,47 @@ def _ap_probelauf(tr_info, plan_roh, minuten, zinfo, richtung, zeiten, firmen, n
         if f:
             belegt[f[1]] = belegt.get(f[1], 0) + 1
     netto = off_long - off_short
-    tranchen, verlauf = [], [{"min": 0, "netto_eur": round(netto)}]
+    tranchen, eur_schritte, tr_ev = [], [], []
     plan_long = plan_short = 0.0
+    pdl = pds = 0.0
+    netto_d_tr = 0.0                  # Delta der neuen Tranchen bis hierher (in Startreihenfolge)
     for key in sorted(minuten, key=lambda k: (minuten[k], k)):
         t, m = tr_info[key], minuten[key]
         rows = [(k, w, v) for kk, k, w, v in plan_roh if kk == key]
-        konten_out, summe = [], 0.0
+        r = richtung.get(key)
+        vz = 1 if r == "buy" else -1
+        konten_out, summe, delta_t = [], 0.0, 0.0
         for k, w, v in rows:
-            kw, g = bewerten(k["a"], k["bal"], w["tp"], w["sl"])
+            b = dinfo.get((key, str(k["a"]["id"]))) or {}
+            kw, g = b.get("kw"), b.get("g")
             summe += (g or {}).get("gewicht_eur") or 0
+            dd = b.get("delta_eur_pkt")
+            delta_t += abs(dd or 0) * vz
+            if b.get("hinweis"):
+                hinweise.append({"plan_id": None, "user_id": t["user"], "user": namen.get(t["user"], t["user"][:8]),
+                                 "firma": k["a"].get("firm"), "konto": k["a"].get("name"), "grund": b["hinweis"]})
             konten_out.append({"konto_id": str(k["a"]["id"]), "konto": k["a"].get("name"), "ende4": _ap_ende4(k["a"]),
                                "typ": k["a"].get("account_type"), "start": _ap_hhmm_txt(m + v / 60.0), "tp": w["tp"],
                                "sl": w["sl"], "menge": w["menge"], "stufe": w["stufe"], "rest": w["rest"], "balance": round(k["bal"]),
                                "wert_eur": (kw or {}).get("wert"), "satz_eur_je_usd": (kw or {}).get("satz"),
                                "wert_wie": (kw or {}).get("wie"), "gewinn_eur": (g or {}).get("gewinn_eur"),
-                               "verlust_eur": (g or {}).get("verlust_eur"), "gewicht_eur": (g or {}).get("gewicht_eur")})
-        r = richtung.get(key)
+                               "verlust_eur": (g or {}).get("verlust_eur"), "gewicht_eur": (g or {}).get("gewicht_eur"),
+                               "delta_eur_pkt": round(abs(dd) * vz, 3) if dd is not None else None, "usd_pro_pkt": b.get("usd_pro_pkt"),
+                               "punktwert_quelle": b.get("punktwert_quelle"), "tp_punkte": b.get("tp_punkte"),
+                               "sl_punkte": b.get("sl_punkte"), "delta_hinweis": b.get("hinweis")})
         vorher = netto
         netto += summe if r == "buy" else -summe
         if r == "buy":
             plan_long += summe
+            pdl += abs(delta_t)
         else:
             plan_short += summe
+            pds += abs(delta_t)
+        eur_schritte.append((m, summe * vz))
+        d_vorher = stand["basis_netto"] + sum(d for mm, d in fremd if mm <= m) + netto_d_tr
+        netto_d_tr += delta_t
+        d_nachher = d_vorher + delta_t
+        tr_ev.append((m, delta_t))
         zi = zinfo.get(key) or {}
         fen, soll = zi.get("fenster"), zi.get("soll")
         firma = rows[0][0]["a"].get("firm") if rows else t["firma"]
@@ -14253,29 +14249,44 @@ def _ap_probelauf(tr_info, plan_roh, minuten, zinfo, richtung, zeiten, firmen, n
             if soll and soll != fen:
                 txt += f", ausgewichen aus {_ap_hhmm_txt(soll[0])}–{_ap_hhmm_txt(soll[1])} (kein freier Platz)"
             warum.append(txt)
+        ff = firma_fest.get(t.get("fkey"))
         if t.get("fest"):
             warum.append(f"Richtung fest: {t.get('fest_durch') or 'Plan'} bei {firma} dieser ID (Richtungsschutz)")
+        elif ff:
+            warum.append(f"Richtung fest: {firma} heute schon {AP_RICHTUNG_TXT.get(ff['richtung'], ff['richtung'])} ({ff['durch']}) "
+                         f"— Firma × Tag, eine Richtung über alle IDs")
         else:
-            de = lambda x: f"{x:+,.0f}".replace(",", ".")
-            warum.append(f"Ausgleich: Netto {de(vorher)} € → {de(netto)} € (gewürfelt wird nach TP-$, beste von 3.000 Verteilungen)")
+            warum.append(f"Ausgleich: Netto-Delta {de2(d_vorher)} → {de2(d_nachher)} €/Pkt ({firma} über alle IDs "
+                         f"{AP_RICHTUNG_TXT.get(r, r)}; Ziel: größtes |Netto| über den Tag klein, Band ±{pct:g} %)")
         warum.append(f"nächste {firma}-Tranche anderer ID: {pause_ist} min (Mindestpause {zi.get('pause', 0):.0f} min)"
                      if pause_ist is not None else f"keine andere ID bei {firma} an diesem Tag")
         if abst_ist is not None:
             warum.append(f"nächste eigene Tranche: {abst_ist} min")
         tranchen.append({"key": key, "user_id": t["user"], "user": namen.get(t["user"], t["user"][:8]), "firma": firma,
                          "start": _ap_hhmm_txt(m), "start_min": m, "dauer_min": round(t["dauer_min"], 1), "richtung": r,
-                         "fest_durch": t.get("fest_durch"),
+                         "fest_durch": t.get("fest_durch") or ((ff or {}).get("durch") if ff else None),
                          "fenster": {"von": _ap_hhmm_txt(fen[0]), "bis": _ap_hhmm_txt(fen[1]),
                                      "anteil": round(float(fen[2]) / w_summe * 100), "belegt": belegt.get(fen[1], 0)} if fen else None,
                          "ausgewichen": bool(soll and fen and soll != fen),
                          "pause_firma_min": round(zi.get("pause", 0)), "pause_firma_ist_min": pause_ist,
                          "abstand_id_ist_min": abst_ist, "gewicht_eur": round(summe), "netto_vorher_eur": round(vorher),
-                         "netto_nachher_eur": round(netto), "warum": warum, "konten": konten_out})
-        verlauf.append({"min": m, "netto_eur": round(netto)})
+                         "netto_nachher_eur": round(netto), "delta_eur_pkt": round(delta_t, 3),
+                         "netto_delta_vorher": round(d_vorher, 2), "netto_delta_nachher": round(d_nachher, 2),
+                         "warum": warum, "konten": konten_out})
+    v = ap_verlauf(stand["basis_netto"], stand["basis_brutto"], fremd + tr_ev, pct, ab_min=0)
+    basis_eur = off_long - off_short
+    verlauf = [dict(x, netto_eur=round(basis_eur + sum(e for mm, e in eur_schritte if mm <= x["min"]))) for x in v["verlauf"]]
     return {"tranchen": tranchen,
             "ausgleich": {"offen_long_eur": round(off_long), "offen_short_eur": round(off_short), "offen_anzahl": eingerechnet,
                           "offen": offen_liste, "plan_long_eur": round(plan_long), "plan_short_eur": round(plan_short),
-                          "netto_eur": round(netto), "verlauf": verlauf, "gewichtet_nach": "tp_usd"}}
+                          "netto_eur": round(netto), "verlauf": verlauf, "gewichtet_nach": "delta_eur_pkt",
+                          "offen_delta_long": round(dl, 2), "offen_delta_short": round(dsh, 2),
+                          "plan_delta_long": round(pdl, 2), "plan_delta_short": round(pds, 2),
+                          "geplant_delta_long": round(gl, 2), "geplant_delta_short": round(gs, 2),
+                          "netto_delta": v["verlauf"][-1]["netto_delta"], "netto_max_abs": v["netto_max_abs"],
+                          "band": {"pct": pct, "gehalten": v["gehalten"], "ueber": v["ueber"][:20]},
+                          "firma_tag": {f: {"richtung": x["richtung"], "durch": x["durch"]} for f, x in sorted(firma_fest.items())},
+                          "hinweise": hinweise}}
 
 
 def ap_sicht(erg, uid):
@@ -14288,7 +14299,8 @@ def ap_sicht(erg, uid):
             out[f] = [x for x in out[f] if str((x or {}).get("user_id")) == uid]
     if isinstance(out.get("ausgleich"), dict):
         out["ausgleich"] = dict(out["ausgleich"], offen=[x for x in out["ausgleich"].get("offen") or []
-                                                         if str((x or {}).get("user_id")) == uid])
+                                                         if str((x or {}).get("user_id")) == uid],
+                                hinweise=[x for x in out["ausgleich"].get("hinweise") or [] if str((x or {}).get("user_id")) == uid])
     out["sicht"] = "eigene"
     return out
 
@@ -14301,7 +14313,8 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     wiederholbar — derselbe seed auf demselben Datenstand legt GENAU an, was der Probelauf zeigte (Konten/Pläne geordnet,
     unbestätigte Vorschläge zählen auch im Probelauf nicht, gelöscht wird erst direkt vor dem Anlegen). fingerabdruck
     (aus dem Probelauf) beim Anlegen: weicht der neue Stand ab, wird nichts gelöscht und nichts angelegt. trocken liefert
-    zusätzlich tranchen[] + ausgleich{} (Kontowert in €, nur Anzeige — gewichtet wird weiter nach TP-$).
+    zusätzlich tranchen[] + ausgleich{} (Kontowert in €, Delta €/Pkt je Konto/Tranche, Netto-Verlauf, Band).
+    06.10.2026 (Delta-Vertrag): Richtung je Firma nach delta_eur_pkt (ap_richtungen_delta), Firma × Tag über alle IDs.
     sicht_uid: Antwort nur mit den Zeilen dieser ID (Nicht-Admin); geplant wird trotzdem über alle IDs."""
     reg = (sb_select("auto_plan_regeln", {"select": "*", "id": "eq.1"}) or [None])[0]
     if not reg:
@@ -14344,14 +14357,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
               if not _vorschlag(p)]
     archiv = _ap_archiviert()
     echo_bal, dup_bal = _ap_balance_karten()
-    namen = {}
-    try:   # direkt aus der Nutzerliste — _wd_personen braucht einen Request (Nachtlauf hat keinen)
-        for u in (_auth_liste_anfrage().json() or {}).get("users", []):
-            meta = str((u.get("user_metadata") or {}).get("name") or "").strip()
-            mail = str(u.get("email") or "")
-            namen[str(u.get("id"))] = meta or (mail.split("@")[0] if "@" in mail else str(u.get("id"))[:8])
-    except Exception as e:
-        print(f"[auto-plan] ⚠️ Namen: {type(e).__name__}: {e}", flush=True)
+    namen, ausgeblendet = _ap_namen()   # direkt aus der Nutzerliste — _wd_personen braucht einen Request (Nachtlauf hat keinen)
     seed = int(seed) if seed not in (None, "") else random.SystemRandom().randrange(1, 2 ** 31)
     rnd = random.Random(seed)
 
@@ -14396,6 +14402,14 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
         kandidaten.append({"a": a, "regel": regel, "bal": float(bal), "bal_quelle": quelle_b, "zeile": zeile,
                            "tkey": str(a["user_id"]) + "|" + _ap_norm(a.get("firm"))})
 
+    # DELTA (06.10.2026, Vertrag §2): Live-Stand ALLER IDs — laufende Trades, heute schon geplante Pläne (ohne die Vorschläge,
+    # die dieser Lauf ersetzt), Firma × Tag; Kontowert + Punktwert der neuen Konten aus demselben Kontext
+    param = ap_ausgleich_param(reg.get("regeln"))
+    stand = _ap_stand_laden(reg, jetzt, tag, ersetzt=lambda p: str(p.get("user_id")) in uids and _vorschlag(p),
+                            extra_konten=[k["a"]["id"] for k in kandidaten], echo_bal=echo_bal, dup_bal=dup_bal,
+                            namen=namen, ausgeblendet=ausgeblendet)
+    dinfo = {}
+
     # Tranchen + Zufall je Tranche
     tranchen = {}
     for k in kandidaten:
@@ -14422,20 +14436,44 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
         versatz = [0]
         for _ in rechnung[1:]:
             versatz.append(versatz[-1] + rnd.randint(int(abst[0]), int(abst[1])))
+        route_t = rechnung[0][0]["regel"].get("route") or "mt5v2"
+        sym_t = str(rechnung[0][0]["regel"].get("symbol") or "NQ") if route_t == "tvv2" else None
+        for k, w in rechnung:      # Delta je Konto (Betrag; das Vorzeichen kommt mit der Richtung)
+            dinfo[(key, str(k["a"]["id"]))] = _ap_bewerten(stand["ctx"], k["a"], k["bal"], w["menge"], route_t, sym_t, "buy",
+                                                           w["tp"], w["sl"])
         tr_info[key] = {"key": key, "user": key.split("|")[0], "firma": firm_n, "fest": fest,
                         "fest_durch": (("laufender Plan" if fest_p.get("status") == "open" else "geplanter Plan") if fest_p else None),
-                        "dauer_min": versatz[-1] / 60.0 + 2, "gewicht": sum(w["tp"] for _, w in rechnung)}
+                        "dauer_min": versatz[-1] / 60.0 + 2, "gewicht": sum(w["tp"] for _, w in rechnung),
+                        "fkey": ap_firma_key(firmen, rechnung[0][0]["a"].get("firm")),
+                        "delta_abs": round(sum(abs(dinfo[(key, str(k["a"]["id"]))]["delta_eur_pkt"] or 0) for k, _ in rechnung), 3)}
         plan_roh += [(key, k, w, versatz[i]) for i, (k, w) in enumerate(rechnung)]
+    # Firma × Tag (Finn 06.10.2026: dieselbe Firma an einem Tag über IDs NIE gegenläufig): heutige Trades legen die Richtung der
+    # Firma fest; Richtungsschutz, der dem widerspricht, und Firmen, die schon in beide Richtungen laufen, fallen raus
+    firma_fest, verworfen = ap_firma_richtung_fest(list(tr_info.values()), stand["firma_tag"])
+    for key, grund in verworfen.items():
+        for (kk, k, _w, _v) in plan_roh:
+            if kk == key:
+                ausgelassen.append(dict(k["zeile"], grund=grund))
+        tr_info.pop(key, None)
+    plan_roh = [x for x in plan_roh if x[0] in tr_info]
     zinfo = {}
     minuten = ap_zeiten_verteilen(list(tr_info.values()), zeiten, rnd, frueheste_min=frueh, info=zinfo)
     for key in [k for k in tr_info if k not in minuten]:
         for (kk, k, _w, _v) in plan_roh:
             if kk == key:
                 ausgelassen.append(dict(k["zeile"], grund="kein freies Zeitfenster mehr"))
-    offen_netto = sum(float(p.get("master_tp") or 0) * (1 if p.get("richtung") == "buy" else -1)
-                      for p in plaene if p.get("status") == "open" and p.get("richtung") in ("buy", "sell"))
-    reihe = sorted([tr_info[k] for k in minuten], key=lambda t: minuten[t["key"]])
-    richtung = ap_richtungen(reihe, offen_netto, rnd)
+    # Richtung je FIRMA nach Delta (06.10.2026, ersetzt das Würfeln nach TP-$): kleinstes größtes |Netto| über den Tag, laufende
+    # Trades aller IDs und heute schon geplante Pläne eingerechnet
+    gruppen = {}
+    for key in sorted(minuten):
+        t = tr_info[key]
+        gruppen.setdefault(t["fkey"], {"fest": (firma_fest.get(t["fkey"]) or {}).get("richtung"), "tranchen": []})["tranchen"].append(
+            (minuten[key], t["delta_abs"]))
+    fest_ev = [(z["start_min"], z["delta_eur_pkt"]) for z in stand["geplant"]
+               if z.get("start_min") is not None and z.get("delta_eur_pkt") is not None]
+    richtung_firma, netto_max = ap_richtungen_delta(gruppen, stand["basis_netto"], stand["basis_brutto"], rnd,
+                                                    param["zielband_pct"], fest_ev)
+    richtung = {key: richtung_firma[tr_info[key]["fkey"]] for key in minuten}
 
     frontcode = _wd_futures_frontcode(mitternacht.astimezone(timezone.utc))
     zeilen, geplant = [], []
@@ -14454,8 +14492,14 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
             "start_um": start.astimezone(timezone.utc).isoformat(), "status": "planned", "priority": "medium",
             "planned_for": tag, "auto_plan": True,
             "notes": f"Auto-Planer · {w['stufe']} · Rest {rest_txt} $ bis Ziel · Balance {k['bal']:,.0f} ({k['bal_quelle']})".replace(",", ".")})
+        if param["auto_start"]:      # regeln.ausgleich.auto_start (Standard aus): Plan gilt sofort als bestätigt
+            zeilen[-1]["auto_bestaetigt_at"] = jetzt.isoformat()
+        d = dinfo.get((key, str(a["id"]))) or {}
+        dd = d.get("delta_eur_pkt")
         geplant.append(dict(k["zeile"], start=start.strftime("%H:%M"), richtung=richtung[key], tp=w["tp"], sl=w["sl"],
-                            menge=w["menge"], stufe=w["stufe"], rest=w["rest"], balance=round(k["bal"])))
+                            menge=w["menge"], stufe=w["stufe"], rest=w["rest"], balance=round(k["bal"]),
+                            delta_eur_pkt=(round(abs(dd), 3) * (1 if richtung[key] == "buy" else -1)) if dd is not None else None,
+                            tp_punkte=d.get("tp_punkte"), sl_punkte=d.get("sl_punkte"), bestaetigt=bool(param["auto_start"])))
     geplant.sort(key=lambda g: (g["start"], g["konto_id"]))
     fp = hashlib.sha1(json.dumps([[g["konto_id"], g["start"], g["richtung"], g["tp"], g["sl"], g["menge"]] for g in geplant],
                                  sort_keys=True).encode()).hexdigest()[:12]
@@ -14472,10 +14516,11 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
                         headers=_sb_headers("return=minimal"), timeout=(5, 30))
         _sb_pruefen(r)
     erg = {"ok": True, "tag": tag, "quelle": quelle, "trocken": bool(trocken), "at": jetzt.isoformat(), "seed": seed,
-           "fingerabdruck": fp, "geplant": geplant, "ausgelassen": ausgelassen}
+           "fingerabdruck": fp, "geplant": geplant, "ausgelassen": ausgelassen, "netto_max_abs": netto_max,
+           "band_pct": param["zielband_pct"], "auto_start": param["auto_start"]}
     if trocken:
         try:
-            erg.update(_ap_probelauf(tr_info, plan_roh, minuten, zinfo, richtung, zeiten, firmen, namen, echo_bal, dup_bal))
+            erg.update(_ap_probelauf(tr_info, plan_roh, minuten, zinfo, richtung, zeiten, namen, stand, dinfo, firma_fest))
         except Exception as e:      # die Ansicht baut notfalls aus geplant[] — der Probelauf selbst scheitert nicht daran
             print(f"[auto-plan] ⚠️ Probelauf-Zusatz: {type(e).__name__}: {e}", flush=True)
             erg["probelauf_fehler"] = f"{type(e).__name__}: {e}"
@@ -14491,17 +14536,983 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     return ap_sicht(erg, sicht_uid) if sicht_uid else erg        # Protokoll oben vollständig, Antwort nur die eigene ID
 
 
+# ════════════════════════════════════════════════════════════════════════════
+# DELTA-NEUTRAL (06.10.2026, Vertrag .claude/master/autoplan-delta-vertrag.md; Finn: „über alle IDs den ganzen Tag möglichst
+# delta-neutral im Markt — Long ≈ Short"). Maß je Trade = delta_eur_pkt: was das Konto in € seines Werts je NQ-Punkt gewinnt
+# (+ long) bzw. verliert (− short) = Satz r (Kontowert ÷ Polster, ap_kontowert) × $ je Punkt (Futures NQ 20 $ / MNQ 2 $ je
+# Kontrakt, CFD Lots × firm_specs.ppl). Ersetzt beim Würfeln der Richtung das alte Gewicht nach TP-$. Gehedgte Trades
+# (Fusion-Hedge offen, WD/Big Trade mit Hedge, klassisches Echo route mt5, Slave) zählen 0. Fehlt Kontowert oder Punktwert,
+# zählt der Trade 0 und steht als Hinweis in der Antwort — geraten wird nichts.
+# Harte Regeln: Firma × Tag EINE Richtung über alle IDs (Finn: „nie offensichtlich ID gegen ID hedgen"), Richtungsschutz je
+# ID+Firma, Tranche = eine Richtung, Mindestpause gleiche Firma über IDs. Der Ausgleichs-Bot ändert NUR geplante, nicht
+# gestartete Auto-Pläne (Richtung einer ganzen Firma des Tages / Startzeit einer Tranche im eigenen Fenster) — nie laufende
+# Trades, nie Orders. Standard aus (regeln.ausgleich.aktiv = false, auto_start = false).
+# ════════════════════════════════════════════════════════════════════════════
+AP_AUSGLEICH_STANDARD = {"aktiv": False, "takt_min": 10, "zielband_pct": 15.0, "auto_start": False}
+AP_TZ_TAG = "Europe/Berlin"          # Nachtlauf 00:00 und Bot-Takt in deutscher Zeit (Vertrag §2/§3)
+AP_BOT_ENDE_MIN = 19 * 60 + 30       # Bot-Takt 00:00–19:30 dt
+AP_BOT_EXTRA_MIN = 14 * 60           # Extra-Lauf 14:00 dt mit frischen TP-Abständen
+AP_FAELLIG_MIN = 5                   # bestätigter Plan, der in ≤ 5 min startet = fällig — Bot und Hand fassen ihn nicht mehr an
+AP_BOT_SCHRITTE = 3                  # höchstens so viele Umplanungen (Firma tauschen / Tranche schieben) je Bot-Lauf
+AP_RICHTUNG_TXT = {"buy": "long", "sell": "short"}
+_ap_bot = {"letzter_lauf": None, "letztes": None, "extra_tag": None, "fehler": "", "param": None, "gelesen": 0.0}
+
+
+def ap_ausgleich_param(regeln):
+    """auto_plan_regeln.regeln.ausgleich mit Standardwerten (aus, 10 min, Band 15 %, ohne Auto-Start), Werte geklemmt.
+    aktiv/auto_start nur bei echtem true — alles andere bleibt aus."""
+    a = (regeln or {}).get("ausgleich") if isinstance(regeln, dict) else None
+    a = a if isinstance(a, dict) else {}
+    out = dict(AP_AUSGLEICH_STANDARD)
+    out["aktiv"] = a.get("aktiv") is True
+    out["auto_start"] = a.get("auto_start") is True
+    try:
+        out["takt_min"] = max(2, min(120, int(float(a.get("takt_min")))))
+    except (TypeError, ValueError):
+        pass
+    try:
+        out["zielband_pct"] = max(1.0, min(100.0, float(a.get("zielband_pct"))))
+    except (TypeError, ValueError):
+        pass
+    return out
+
+
+def ap_firma_key(firmen, firm):
+    """Schlüssel für „Firma × Tag": Regel-Firma (erster Name — „apex"/„apextrader" sind EINE Firma), sonst der normalisierte
+    Name. „FundedNext Futures" ≠ „FundedNext" (andere Plattform, eigener Topf wie in _firm_norm)."""
+    r = ap_regel_finden(firmen, firm)
+    return _ap_norm((r.get("namen") or [firm])[0]) if r else _ap_norm(firm)
+
+
+def ap_ppl_karte(rows, norm=None):
+    """REIN RECHNEND: firm_specs-Zeilen [{user_id, name, ppl, symbol, unit}] → (je_id {(user_id, firma): (ppl, symbol, unit)},
+    je_firma {firma: (ppl, symbol, unit)} — der häufigste Wert über alle IDs, bei Gleichstand der erste). norm = Firmen-Schlüssel."""
+    norm = norm or _ap_norm
+    je_id, zaehl = {}, {}
+    for r in rows or ():
+        f = norm(r.get("name"))
+        if not f:
+            continue
+        w = (_wd_num(r.get("ppl")), r.get("symbol") or None, r.get("unit") or None)
+        je_id.setdefault((str(r.get("user_id")), f), w)
+        z = zaehl.setdefault(f, {})
+        z[w] = z.get(w, 0) + 1
+    je_firma = {f: max(z.items(), key=lambda x: x[1])[0] for f, z in zaehl.items()}
+    return je_id, je_firma
+
+
+def ap_punktwert(route, symbol, firm_ppl, futures=None):
+    """REIN RECHNEND: $ je Punkt und Kontrakt/Lot → (wert, quelle) oder (None, grund). Futures (Orbit/Topstep V2 oder Firma mit
+    Einheit Kontrakte): Wurzel des Symbols (Plan, sonst firm_specs) → NQ 20 $, MNQ 2 $; ohne erkennbare Wurzel firm_specs.ppl.
+    CFD: firm_specs.ppl (z. B. Blue Guardian 10 $/Pkt je Lot). Nichts geraten — ohne Quelle None."""
+    fut = str(route or "") in ("tvv2", "tsv2") if futures is None else bool(futures)
+    v = _wd_num(firm_ppl)
+    if fut:
+        w = _symbol_wurzel(symbol)
+        if WD_HEUTE_PPL.get(w):
+            return WD_HEUTE_PPL[w], w
+        if v and v > 0:
+            return v, "firm_specs"
+        return None, "kein Futures-Symbol (NQ/MNQ) und kein Punktwert in firm_specs"
+    if v and v > 0:
+        return v, "firm_specs"
+    return None, "kein Punktwert in firm_specs (ppl) für diese Firma"
+
+
+def ap_usd_pro_pkt(menge, punktwert):
+    """$ je NQ-Punkt des ganzen Trades = Kontrakte/Lots × Punktwert; None ohne beides."""
+    m, p = _wd_num(menge), _wd_num(punktwert)
+    return round(m * p, 4) if m and p and m > 0 and p > 0 else None
+
+
+def ap_delta(satz, usd_pro_pkt, richtung):
+    """REIN RECHNEND (Vertrag §1): delta_eur_pkt = r × $ je Punkt, + long / − short. None ohne Satz, Punktwert oder Richtung."""
+    r, u = _wd_num(satz), _wd_num(usd_pro_pkt)
+    if r is None or not u or richtung not in ("buy", "sell"):
+        return None
+    return round(r * u * (1 if richtung == "buy" else -1), 3)
+
+
+def ap_punkte(usd, usd_pro_pkt):
+    """$-Abstand → NQ-Punkte (TP/SL in $ ÷ $ je Punkt des Trades)."""
+    d, u = _wd_num(usd), _wd_num(usd_pro_pkt)
+    return round(abs(d) / u, 1) if d and u else None
+
+
+def ap_rest_punkte(kurs, tp_level, sl_level, richtung):
+    """REIN RECHNEND: Restabstand eines laufenden Trades in Punkten → (tp_rest, sl_rest); negativ = Level schon überschritten."""
+    k = _wd_num(kurs)
+    vz = 1 if richtung == "buy" else -1 if richtung == "sell" else 0
+    if k is None or not vz:
+        return None, None
+    tp, sl = _wd_num(tp_level), _wd_num(sl_level)
+    return (round((tp - k) * vz, 1) if tp else None), (round((k - sl) * vz, 1) if sl else None)
+
+
+def ap_verlauf(basis_netto, basis_brutto, ereignisse, band_pct, ab_min=0, bis_min=None):
+    """REIN RECHNEND: Netto-Delta über den Tag, kumuliert (laufende Trades + bis dahin gestartete Pläne — ein gestarteter Plan
+    zählt bis Tagesende, wann er endet, weiß vorher keiner). ereignisse = [(minute, delta signiert)], vor ab_min gestartete
+    zählen ab ab_min, nach bis_min nicht. Band (Vertrag §2): |netto| ≤ band_pct × brutto.
+    → {verlauf [{min, netto_delta, brutto_delta, band_delta}], netto_max_abs, gehalten, ueber [{min, netto_delta, band_delta}]}"""
+    pct = float(band_pct or 0) / 100.0
+    ab = float(ab_min or 0)
+    schritte = {}
+    for m, d in ereignisse or ():
+        if m is None:
+            continue
+        m = max(ab, float(m))
+        if bis_min is not None and m > float(bis_min):
+            continue
+        d = float(d or 0)
+        s = schritte.setdefault(round(m, 2), [0.0, 0.0])
+        s[0] += d
+        s[1] += abs(d)
+    netto, brutto = float(basis_netto or 0), float(basis_brutto or 0)
+    if round(ab, 2) in schritte:
+        n, b = schritte.pop(round(ab, 2))
+        netto, brutto = netto + n, brutto + b
+    punkte = [(ab, netto, brutto)]
+    for m in sorted(schritte):
+        netto += schritte[m][0]
+        brutto += schritte[m][1]
+        punkte.append((m, netto, brutto))
+    verlauf, ueber = [], []
+    for m, n, b in punkte:
+        z = {"min": round(m, 1), "netto_delta": round(n, 2), "brutto_delta": round(b, 2), "band_delta": round(pct * b, 2)}
+        verlauf.append(z)
+        if abs(n) > pct * b + 1e-6:
+            ueber.append({"min": z["min"], "netto_delta": z["netto_delta"], "band_delta": z["band_delta"]})
+    return {"verlauf": verlauf, "netto_max_abs": round(max(abs(n) for _, n, _ in punkte), 2), "gehalten": not ueber,
+            "ueber": ueber}
+
+
+def ap_richtungen_delta(gruppen, basis_netto, basis_brutto, rnd, band_pct, fest_ereignisse=(), versuche=4096):
+    """REIN RECHNEND (Vertrag §2): Richtung je FIRMA — Firma × Tag heißt eine Richtung über alle IDs, also über alle Tranchen
+    der Firma. gruppen = {firma: {"fest": 'buy'|'sell'|None, "tranchen": [(start_min, delta_abs)]}}, fest_ereignisse =
+    [(minute, delta signiert)] schon geplanter Pläne. Zielfunktion: das größte |Netto-Delta| über den Tag (ap_verlauf) so
+    klein wie möglich, danach das Netto am Tagesende. Bis 12 freie Firmen werden alle Verteilungen geprüft (2^12), darüber
+    die beste von `versuche` Würfen; Gleichstand entscheidet der Zufall (rnd). → ({firma: 'buy'|'sell'}, netto_max_abs)"""
+    namen = sorted(gruppen or {})
+    frei = [f for f in namen if gruppen[f].get("fest") not in ("buy", "sell")]
+    basis = {f: gruppen[f]["fest"] for f in namen if f not in frei}
+
+    def wert(z):
+        ev = list(fest_ereignisse or ())
+        for f in namen:
+            vz = 1 if z[f] == "buy" else -1
+            ev += [(m, vz * float(d or 0)) for m, d in gruppen[f].get("tranchen") or ()]
+        v = ap_verlauf(basis_netto, basis_brutto, ev, band_pct)
+        return (v["netto_max_abs"], abs(v["verlauf"][-1]["netto_delta"])), v["netto_max_abs"]
+
+    if len(frei) <= 12:
+        reihe = list(range(2 ** len(frei)))
+        rnd.shuffle(reihe)
+    else:
+        reihe = [rnd.getrandbits(len(frei)) for _ in range(max(1, int(versuche)))]
+    best, best_k, best_m = dict(basis), None, None
+    for bits in reihe:
+        z = dict(basis)
+        z.update({f: ("buy" if (bits >> i) & 1 else "sell") for i, f in enumerate(frei)})
+        k, m = wert(z)
+        if best_k is None or k < best_k:
+            best, best_k, best_m = z, k, m
+    return best, best_m
+
+
+def ap_firma_tag(eintraege):
+    """REIN RECHNEND: Firma × Tag (Finn 06.10.2026: dieselbe Firma an einem Tag über IDs NIE gegenläufig). eintraege =
+    [(firma, richtung, durch)] der heutigen Trades → {firma: {richtung, durch}}; stehen schon beide Richtungen da, ist die
+    Richtung 'konflikt' (von Hand klären — der Planer legt dort nichts dazu, der Bot tauscht dort nichts)."""
+    out = {}
+    for f, r, durch in eintraege or ():
+        if not f or r not in ("buy", "sell"):
+            continue
+        if f not in out:
+            out[f] = {"richtung": r, "durch": durch}
+        elif out[f]["richtung"] not in (r, "konflikt"):
+            out[f] = {"richtung": "konflikt", "durch": f"{out[f]['durch']} / {durch}"}
+    return out
+
+
+def ap_firma_richtung_fest(tranchen, firma_tag):
+    """REIN RECHNEND: feste Richtung je Firma für den Planer. tranchen = neue Tranchen [{key, fkey, fest, fest_durch}] (fest =
+    Richtungsschutz ID+Firma), firma_tag = ap_firma_tag(heutige Trades). → (fest {firma: {richtung, durch}}, verworfen
+    {key: grund}): Tranchen, deren Richtungsschutz der Firma des Tages widerspricht, und Firmen im Konflikt fallen raus."""
+    fest = {f: dict(v) for f, v in (firma_tag or {}).items()}
+    verworfen = {}
+    for t in sorted(tranchen or (), key=lambda t: str(t["key"])):
+        f = fest.get(t["fkey"])
+        if f and f["richtung"] == "konflikt":
+            verworfen[t["key"]] = f"{t['fkey']} läuft heute schon in beide Richtungen ({f['durch']}) — von Hand klären"
+        elif t.get("fest") in ("buy", "sell"):
+            if f and f["richtung"] != t["fest"]:
+                verworfen[t["key"]] = (f"Richtungsschutz {AP_RICHTUNG_TXT[t['fest']]} ({t.get('fest_durch') or 'Plan'}) widerspricht "
+                                       f"Firma × Tag: {t['fkey']} heute {AP_RICHTUNG_TXT[f['richtung']]} ({f['durch']})")
+            elif not f:
+                fest[t["fkey"]] = {"richtung": t["fest"], "durch": f"Richtungsschutz ({t.get('fest_durch') or 'Plan'})"}
+    return fest, verworfen
+
+
+def ap_fenster_von(zeiten, minute):
+    """Startfenster (von, bis) in Minuten, in dem `minute` liegt — sonst None."""
+    for f in (zeiten or {}).get("fenster") or []:
+        a, b = _ap_hhmm(f[0]), _ap_hhmm(f[1])
+        if a <= float(minute) < b:
+            return a, b
+    return None
+
+
+def _ap_tranchen(plaene):
+    """Tranchen (ID × Firma) der heutigen geplanten Pläne [{plan_id, user_id, firma, start_min, aenderbar, fest_durch}] →
+    {key: {key, user_id, firma, plan_ids, start, ende, aenderbar, fest_durch}}. Ein nicht änderbarer Plan sperrt die Tranche."""
+    out = {}
+    for p in plaene or ():
+        if p.get("start_min") is None:
+            continue
+        k = f"{p['user_id']}|{p['firma']}"
+        t = out.setdefault(k, {"key": k, "user_id": p["user_id"], "firma": p["firma"], "plan_ids": [], "start": p["start_min"],
+                               "ende": p["start_min"], "aenderbar": True, "fest_durch": None})
+        t["plan_ids"].append(p["plan_id"])
+        t["start"], t["ende"] = min(t["start"], p["start_min"]), max(t["ende"], p["start_min"])
+        if not p.get("aenderbar"):
+            t["aenderbar"] = False
+            t["fest_durch"] = t["fest_durch"] or p.get("fest_durch") or "nicht änderbar"
+    return out
+
+
+def _ap_tranche_frei(t, start, tranchen, zeiten):
+    """Darf Tranche t bei `start` beginnen? Abstand je ID (keine Überlappung + abstand_id_min) und Mindestpause derselben Firma
+    über IDs (untere Grenze von pause_firma_min) — wie ap_zeiten_verteilen. → None oder Grund als Klartext."""
+    p_lo = float(((zeiten or {}).get("pause_firma_min") or [25, 45])[0])
+    abst = float((zeiten or {}).get("abstand_id_min") or 3)
+    dauer = t["ende"] - t["start"] + 2
+    for o in (tranchen or {}).values():
+        if o["key"] == t["key"]:
+            continue
+        od = o["ende"] - o["start"] + 2
+        if o["user_id"] == t["user_id"]:
+            if start < o["start"] + od + abst and o["start"] < start + dauer + abst:
+                return f"überlappt mit eigener Tranche {o['firma']} um {_ap_hhmm_txt(o['start'])} (Abstand je ID {abst:g} min)"
+        elif o["firma"] == t["firma"] and abs(start - o["start"]) < p_lo:
+            return (f"Mindestpause {t['firma']}: andere ID startet {_ap_hhmm_txt(o['start'])} "
+                    f"({abs(start - o['start']):.0f} min < {p_lo:g} min)")
+    return None
+
+
+def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, rnd, firma_fest=None, id_fest=None,
+                schritte=AP_BOT_SCHRITTE):
+    """REIN RECHNEND (Vertrag §3): ein Lauf des Ausgleichs-Bots. plaene = heutige geplante Pläne [{plan_id, user_id, firma,
+    richtung, start_min, delta_abs, aenderbar}] — nicht änderbare zählen mit und sperren ihre Firma/Tranche. firma_fest =
+    {firma: …} aus laufenden/gestarteten/festen Trades des Tages, id_fest = {"user|firma": …} (Richtungsschutz anderer Tage).
+    Greift nur, wenn das Netto jetzt oder in den nächsten 60 min über dem Band liegt. Schritte: Richtung einer GANZEN Firma
+    tauschen (alle ihre Pläne des Tages änderbar, nichts legt sie fest, alle gleich gerichtet) oder eine Tranche im eigenen
+    Fenster verschieben (Abstand je ID, Mindestpause Firma). Je Schritt der beste (zuerst Band der nächsten 60 min, dann
+    max |Netto| bis Tagesende), höchstens `schritte`, Schluss sobald das Band hält.
+    → {aenderungen [{plan_id, user_id, firma, art, von_richtung, nach_richtung, von_start_min, nach_start_min, grund}],
+       vorher {ueber_band, netto_max_abs}, nachher {…}, ausloeser}"""
+    firma_fest, id_fest = firma_fest or {}, id_fest or {}
+    je = {p["plan_id"]: p for p in plaene or () if p.get("start_min") is not None and p.get("richtung") in ("buy", "sell")}
+    zustand = {i: {"richtung": p["richtung"], "start": float(p["start_min"])} for i, p in je.items()}
+    jetzt_min = float(jetzt_min)
+
+    def strafe(z):
+        ev = [(z[i]["start"], float(je[i].get("delta_abs") or 0) * (1 if z[i]["richtung"] == "buy" else -1)) for i in z]
+        v60 = ap_verlauf(basis_netto, basis_brutto, ev, band_pct, ab_min=jetzt_min, bis_min=jetzt_min + 60)
+        ueber = max([abs(x["netto_delta"]) - x["band_delta"] for x in v60["verlauf"]] + [0.0])
+        tag = ap_verlauf(basis_netto, basis_brutto, ev, band_pct, ab_min=jetzt_min)
+        return round(ueber, 3), round(tag["netto_max_abs"], 3)
+
+    def als_dict(k):
+        return {"ueber_band": k[0], "netto_max_abs": k[1]}
+
+    aktuell = vorher = strafe(zustand)
+    if vorher[0] <= 0:
+        return {"aenderungen": [], "vorher": als_dict(vorher), "nachher": als_dict(vorher), "ausloeser": None}
+    ausloeser = f"Netto-Delta in den nächsten 60 min bis {vorher[0]:.2f} €/Pkt über dem Band ±{float(band_pct):g} %"
+    aenderungen = []
+    for _ in range(max(0, int(schritte))):
+        if aktuell[0] <= 0:
+            break
+        kandidaten = []
+        for f in sorted({je[i]["firma"] for i in zustand}):
+            ids = sorted(i for i in zustand if je[i]["firma"] == f)
+            if f in firma_fest or not all(je[i].get("aenderbar") for i in ids):
+                continue
+            if any(f"{je[i]['user_id']}|{f}" in id_fest for i in ids) or len({zustand[i]["richtung"] for i in ids}) != 1:
+                continue
+            z = {i: dict(v) for i, v in zustand.items()}
+            for i in ids:
+                z[i]["richtung"] = "sell" if z[i]["richtung"] == "buy" else "buy"
+            kandidaten.append((strafe(z), "richtung", f, ids, z))
+        tr = _ap_tranchen([dict(je[i], start_min=zustand[i]["start"]) for i in zustand])
+        for k in sorted(tr):
+            t = tr[k]
+            fen = ap_fenster_von(zeiten, t["start"]) if t["aenderbar"] else None
+            if not fen:
+                continue
+            lo, hi = int(max(fen[0], jetzt_min + AP_FAELLIG_MIN + 5)) + 1, int(fen[1]) - 1
+            if hi <= lo:
+                continue
+            for _v in range(12):
+                neu = float(rnd.randint(lo, hi))
+                if abs(neu - t["start"]) < 1 or _ap_tranche_frei(t, neu, tr, zeiten):
+                    continue
+                z = {i: dict(v) for i, v in zustand.items()}
+                for i in t["plan_ids"]:
+                    z[i]["start"] += neu - t["start"]
+                kandidaten.append((strafe(z), "start", t["firma"], sorted(t["plan_ids"]), z))
+        if not kandidaten:
+            break
+        kandidaten.sort(key=lambda x: x[0])
+        k_neu, art, f, ids, z = kandidaten[0]
+        if k_neu >= aktuell:
+            break
+        for i in ids:
+            von, nach = zustand[i], z[i]
+            if art == "richtung":
+                grund = (f"{ausloeser}: {f} über alle IDs {AP_RICHTUNG_TXT[von['richtung']]} → {AP_RICHTUNG_TXT[nach['richtung']]} "
+                         f"(max |Netto| {aktuell[1]:.2f} → {k_neu[1]:.2f} €/Pkt)")
+            else:
+                grund = (f"{ausloeser}: Tranche {f} {_ap_hhmm_txt(von['start'])} → {_ap_hhmm_txt(nach['start'])} im eigenen Fenster "
+                         f"(max |Netto| {aktuell[1]:.2f} → {k_neu[1]:.2f} €/Pkt)")
+            aenderungen.append({"plan_id": i, "user_id": je[i]["user_id"], "firma": f, "art": art,
+                                "von_richtung": von["richtung"], "nach_richtung": nach["richtung"],
+                                "von_start_min": von["start"], "nach_start_min": nach["start"], "grund": grund})
+        zustand, aktuell = z, k_neu
+    return {"aenderungen": aenderungen, "vorher": als_dict(vorher), "nachher": als_dict(aktuell), "ausloeser": ausloeser}
+
+
+def ap_eingriff_pruefen(plan_id, aktion, plaene, jetzt_min, zeiten, firma_fest=None, id_fest=None, neu_start_min=None):
+    """REIN RECHNEND (Vertrag §4): manueller Eingriff an einem geplanten Plan mit denselben harten Regeln wie der Bot.
+    aktion 'richtung_tauschen' (ganze Tranche ID × Firma; nur wenn keine andere ID dieselbe Firma heute handelt und nichts die
+    Firma festlegt) | 'start' (ganze Tranche verschoben, Abstände bleiben; innerhalb der Fenster, nicht vor jetzt + 5 min,
+    Abstand je ID + Mindestpause Firma). → (aenderungen [wie ap_umplanen], None) oder (None, Klartext für 400)."""
+    firma_fest, id_fest = firma_fest or {}, id_fest or {}
+    p = next((x for x in plaene or () if str(x.get("plan_id")) == str(plan_id)), None)
+    if not p:
+        return None, "Plan ist kein geplanter Plan von heute"
+    if p.get("start_min") is None:
+        return None, "Plan hat keine Startzeit"
+    if not p.get("aenderbar"):
+        return None, f"Plan nicht änderbar: {p.get('fest_durch') or 'gestartet oder fällig'}"
+    f, u = p["firma"], p["user_id"]
+    tr = _ap_tranchen(plaene)
+    t = tr[f"{u}|{f}"]
+    if not t["aenderbar"]:
+        return None, f"Tranche {f} dieser ID hat einen nicht änderbaren Plan ({t['fest_durch']}) — eine Tranche = eine Richtung"
+    plan_ids = sorted(t["plan_ids"])
+    je = {x["plan_id"]: x for x in plaene if x["plan_id"] in plan_ids}
+    if aktion == "richtung_tauschen":
+        if p.get("richtung") not in ("buy", "sell"):
+            return None, "Plan hat keine Richtung"
+        andere = [x for x in plaene if x["firma"] == f and x["user_id"] != u and x.get("richtung") in ("buy", "sell")]
+        if andere:
+            wer = sorted({f"{x.get('user') or str(x['user_id'])[:8]} {AP_RICHTUNG_TXT[x['richtung']]}" for x in andere})
+            return None, f"{f} ist heute auch bei anderen IDs geplant ({', '.join(wer)}) — dieselbe Firma über IDs nie gegenläufig"
+        if f in firma_fest:
+            ff = firma_fest[f]
+            return None, (f"{f} läuft heute schon {AP_RICHTUNG_TXT.get(ff.get('richtung'), ff.get('richtung'))} "
+                          f"({ff.get('durch')}) — Firma × Tag: eine Richtung")
+        if f"{u}|{f}" in id_fest:
+            return None, f"Richtungsschutz: {f} dieser ID {id_fest[f'{u}|{f}'].get('durch') or 'ist an einem anderen Tag geplant'}"
+        if len({je[i]["richtung"] for i in plan_ids}) != 1:
+            return None, "Tranche ist gemischt gerichtet — von Hand klären"
+        neu = "sell" if p["richtung"] == "buy" else "buy"
+        return [{"plan_id": i, "user_id": u, "firma": f, "art": "richtung", "von_richtung": je[i]["richtung"], "nach_richtung": neu,
+                 "von_start_min": je[i]["start_min"], "nach_start_min": je[i]["start_min"],
+                 "grund": f"von Hand: Tranche {f} {AP_RICHTUNG_TXT[je[i]['richtung']]} → {AP_RICHTUNG_TXT[neu]}"} for i in plan_ids], None
+    if aktion == "start":
+        neu = _wd_num(neu_start_min)
+        if neu is None:
+            return None, "start fehlt (HH:MM deutscher Zeit oder ISO)"
+        fen = [(_ap_hhmm(x[0]), _ap_hhmm(x[1])) for x in (zeiten or {}).get("fenster") or []]
+        if fen and not (min(a for a, _ in fen) <= neu < max(b for _, b in fen)):
+            return None, (f"Start {_ap_hhmm_txt(neu)} außerhalb der Startfenster "
+                          f"({_ap_hhmm_txt(min(a for a, _ in fen))}–{_ap_hhmm_txt(max(b for _, b in fen))})")
+        if neu < float(jetzt_min) + AP_FAELLIG_MIN:
+            return None, f"Start zu früh — frühestens {_ap_hhmm_txt(int(float(jetzt_min)) + AP_FAELLIG_MIN + 1)}"
+        grund = _ap_tranche_frei(t, neu, tr, zeiten)
+        if grund:
+            return None, grund
+        versatz = neu - t["start"]
+        return [{"plan_id": i, "user_id": u, "firma": f, "art": "start", "von_richtung": je[i]["richtung"],
+                 "nach_richtung": je[i]["richtung"], "von_start_min": je[i]["start_min"], "nach_start_min": je[i]["start_min"] + versatz,
+                 "grund": f"von Hand: Tranche {f} {_ap_hhmm_txt(t['start'])} → {_ap_hhmm_txt(neu)}"} for i in plan_ids], None
+    return None, "aktion = richtung_tauschen | start"
+
+
+def _ap_namen():
+    """user_id → Anzeigename und die ausgeblendeten Personen (ADMIN_EXCLUDE_EMAILS) — ohne Request (Nachtlauf/Bot-Thread),
+    Nutzerliste 60 s gecacht (_auth_liste_anfrage)."""
+    namen, aus = {}, set()
+    try:
+        for u in (_auth_liste_anfrage().json() or {}).get("users", []):
+            meta = str((u.get("user_metadata") or {}).get("name") or "").strip()
+            mail = str(u.get("email") or "")
+            namen[str(u.get("id"))] = meta or (mail.split("@")[0] if "@" in mail else str(u.get("id"))[:8])
+            if mail.strip().lower() in ADMIN_EXCLUDE_EMAILS:
+                aus.add(str(u.get("id")))
+    except Exception as e:
+        print(f"[auto-plan] ⚠️ Namen: {type(e).__name__}: {e}", flush=True)
+    return namen, aus
+
+
+def _ap_gehedgt_plan(p):
+    """Zählt der Plan im Delta 0? Laufend: Fusion-Hedge offen/öffnet/schließt, Slave, klassisches Echo (route mt5).
+    Geplant: dazu jeder Plan mit hedge_eur > 0 (Winning Day / Big Trade mit Fusion-Hedge). → (bool, art)"""
+    gh, art = _ap_gehedgt(p)
+    if gh:
+        return gh, art
+    if str(p.get("route") or "") == "mt5":
+        return True, "echo_klassisch"
+    if p.get("status") == "planned" and (_wd_num(p.get("hedge_eur")) or 0) > 0:
+        return True, "hedge_eur"
+    return False, art
+
+
+def _ap_bewerten(ctx, a, bal, menge, route, symbol, richtung, tp, sl, gehedgt=False):
+    """Kontowert, Gewicht (€) und Delta eines Trades aus dem Kontext des Stands (Kernwerte, echte Käufe, firm_specs)."""
+    a = a or {}
+    regel = ap_regel_finden(ctx["firmen"], a.get("firm"))
+    p = ap_kw_param(regel)
+    kw = ap_kontowert(a.get("account_type"), bal, p, ctx["kauf"].get(str(a.get("id")))) if a and bal else None
+    fk = _ap_norm(_firm_norm(a.get("firm")))
+    ppl, fsym, unit = ctx["ppl"].get((str(a.get("user_id")), fk)) or ctx["ppl_firma"].get(fk) or (None, None, None)
+    fut = str(route or "") in ("tvv2", "tsv2") or (str(route or "") not in ("mt5", "mt5v2") and str(unit or "") == "Kontrakte")
+    ppe, pq = ap_punktwert(route, symbol or fsym, ppl, futures=fut)
+    upp = ap_usd_pro_pkt(menge, ppe)
+    g = ap_trade_gewicht(kw, p, _wd_num(tp), _wd_num(sl))
+    d = 0.0 if gehedgt else ap_delta((kw or {}).get("satz"), upp, richtung)
+    hinweis = None
+    if d is None:
+        hinweis = ("kein Kontowert (Firma ohne Kernwerte, Größe passt nicht oder keine Balance)" if not kw
+                   else pq if not ppe else "keine Menge am Plan" if not upp else "keine Richtung")
+    return {"kw": kw, "g": g, "delta_eur_pkt": d, "usd_pro_pkt": upp, "punktwert": ppe, "punktwert_quelle": pq if ppe else None,
+            "tp_punkte": ap_punkte(tp, upp), "sl_punkte": ap_punkte(sl, upp), "hinweis": hinweis}
+
+
+AP_STAND_FELDER = ("id,user_id,master_account_id,master_firm,master_name,status,richtung,master_tp,master_sl,master_contracts,"
+                   "master_symbol,master_symbol_root,route,slave_account_id,hedge_eur,start_um,started_at,start_um_gestartet_at,"
+                   "orbit_gesendet_at,auto_plan,auto_bestaetigt_at,created_at")
+
+
+def _ap_iso_min(iso, mitternacht):
+    try:
+        return (datetime.fromisoformat(str(iso).replace("Z", "+00:00")) - mitternacht).total_seconds() / 60.0
+    except (TypeError, ValueError):
+        return None
+
+
+def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), echo_bal=None, dup_bal=None, namen=None,
+                    ausgeblendet=None):
+    """Live-Stand für Delta, Bot und manuelle Eingriffe — ALLE IDs (wie Radar, ohne ADMIN_EXCLUDE_EMAILS): laufende Trades mit
+    Delta + Restabständen (Orbit: Einstieg/Level aus mt5_baseline + Reader-Kurs; Echo: mt5_live-Position), heutige geplante
+    Pläne (deutscher Tag) mit Delta + Änderbarkeit, Firma × Tag, Richtungsschutz anderer Tage. ersetzt(p) = Plan zählt nicht
+    (der Planer ersetzt seine unbestätigten Vorschläge). Nur Lesen."""
+    jetzt = jetzt or datetime.now(timezone.utc)
+    zeiten = reg.get("zeiten") or {}
+    regeln = reg.get("regeln") or {}
+    firmen = regeln.get("firmen") or []
+    param = ap_ausgleich_param(regeln)
+    tz = _ap_tz(zeiten.get("tz") or AP_TZ_TAG)
+    tag = tag or jetzt.astimezone(tz).strftime("%Y-%m-%d")
+    td = datetime.strptime(tag, "%Y-%m-%d")
+    mitternacht = datetime(td.year, td.month, td.day, tzinfo=tz)
+    jetzt_min = (jetzt - mitternacht).total_seconds() / 60.0
+    if namen is None or ausgeblendet is None:
+        namen, ausgeblendet = _ap_namen()
+    ersetzt = ersetzt or (lambda p: False)
+    offen = [p for p in _sb_all("trade_plans", {"select": AP_STAND_FELDER + ",mt5_baseline", "status": "eq.open", "order": "id.asc"})
+             if str(p.get("user_id")) not in ausgeblendet]
+    geplant_alle = [p for p in _sb_all("trade_plans", {"select": AP_STAND_FELDER + ",hedge:mt5_baseline->hedge->>status",
+                                                       "status": "eq.planned", "order": "id.asc",
+                                                       "created_at": "gte." + (jetzt - timedelta(days=30)).isoformat()})
+                    if str(p.get("user_id")) not in ausgeblendet and not ersetzt(p)]
+    gestartet = [p for p in _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_firm,richtung,status,started_at",
+                                                    "status": "in.(review,completed)", "started_at": "gte." + mitternacht.isoformat(),
+                                                    "order": "id.asc"})
+                 if str(p.get("user_id")) not in ausgeblendet and (_ap_iso_min(p.get("started_at"), mitternacht) or 0) < 24 * 60]
+    heute, andere_tage = [], []
+    for p in geplant_alle:
+        m = _ap_iso_min(p.get("start_um"), mitternacht) if p.get("start_um") else None
+        (heute if m is not None and 0 <= m < 24 * 60 else andere_tage).append(p)
+    ids = sorted({str(p["master_account_id"]) for p in offen + heute + gestartet + andere_tage if p.get("master_account_id")}
+                 | {str(x) for x in extra_konten or ()})
+    konten = {}
+    for j in range(0, len(ids), 150):
+        for a in _sb_all("accounts", {"select": AP_KONTO_FELDER, "id": "in.(" + ",".join(ids[j:j + 150]) + ")"}):
+            konten[str(a["id"])] = a
+    if echo_bal is None or dup_bal is None:
+        echo_bal, dup_bal = _ap_balance_karten()
+    ppl, ppl_firma = ap_ppl_karte(_sb_all("firm_specs", {"select": "user_id,name,symbol,ppl,unit"}),
+                                  norm=lambda n: _ap_norm(_firm_norm(n)))
+    ctx = {"firmen": firmen, "kauf": _ap_kauf_echt([i for i in ids if i in konten]), "ppl": ppl, "ppl_firma": ppl_firma,
+           "echo_bal": echo_bal, "dup_bal": dup_bal}
+
+    def konto(p):
+        return konten.get(str(p.get("master_account_id") or ""))
+
+    def fkey(p):
+        return ap_firma_key(firmen, (konto(p) or {}).get("firm") or p.get("master_firm"))
+
+    def wer(p):
+        return namen.get(str(p.get("user_id")), str(p.get("user_id"))[:8])
+
+    def bal(a):
+        return acc_balance_wahl(a, echo_bal, dup_bal)[0] if a else None
+
+    # Kurs: Reader-Minute (Orbit), mt5_live-Position (Echo) — je EIN Read, nur wenn etwas läuft
+    kj = _kurs_jetzt() if any(str(p.get("route") or "") not in LT_ECHO_ROUTEN for p in offen) else {}
+    live_je_login = {}
+    logins = sorted({str((konto(p) or {}).get("external_id") or "").strip() for p in offen
+                     if str(p.get("route") or "") in LT_ECHO_ROUTEN} - {""})
+    if logins:
+        try:
+            live_je_login = lt_echo_live_wahl(sb_select("mt5_live", {
+                "select": "master_login,updated_at,pos:status->master_positions,bal:status->master_balance,eq:status->master_equity,"
+                          "ccy:status->>master_currency,note:status->>note", "master_login": f"in.({','.join(logins)})"}) or [])
+        except Exception as e:
+            print(f"[auto-plan] ⚠️ mt5_live (Delta): {type(e).__name__}: {e}", flush=True)
+    jetzt_ts = jetzt.timestamp()
+    hinweise, tag_eintraege, fest_eintraege = [], [], []
+
+    def basiszeile(p, a, b):
+        return {"plan_id": str(p.get("id")), "user_id": str(p.get("user_id")), "user": wer(p),
+                "firma": (a or {}).get("firm") or p.get("master_firm"), "firma_key": fkey(p), "konto": (a or {}).get("name") or p.get("master_name"),
+                "ende4": _ap_ende4(a), "typ": (a or {}).get("account_type"), "route": p.get("route"), "richtung": p.get("richtung"),
+                "menge": _wd_num(p.get("master_contracts")), "delta_eur_pkt": b["delta_eur_pkt"], "usd_pro_pkt": b["usd_pro_pkt"],
+                "punktwert_quelle": b["punktwert_quelle"], "tp_punkte": b["tp_punkte"], "sl_punkte": b["sl_punkte"],
+                "wert_eur": (b["kw"] or {}).get("wert"), "satz_eur_je_usd": (b["kw"] or {}).get("satz"),
+                "gewinn_eur": (b["g"] or {}).get("gewinn_eur"), "verlust_eur": (b["g"] or {}).get("verlust_eur"),
+                "gewicht_eur": (b["g"] or {}).get("gewicht_eur"), "hinweis": b["hinweis"]}
+
+    offen_rows = []
+    for p in offen:
+        a, r = konto(p), p.get("richtung")
+        gh, art = _ap_gehedgt_plan(dict(p, hedge=((p.get("mt5_baseline") or {}).get("hedge") or {}).get("status")
+                                        if isinstance(p.get("mt5_baseline"), dict) and isinstance(p["mt5_baseline"].get("hedge"), dict) else None))
+        b = _ap_bewerten(ctx, a, bal(a), p.get("master_contracts"), p.get("route"),
+                         p.get("master_symbol_root") or p.get("master_symbol"), r, p.get("master_tp"), p.get("master_sl"), gh)
+        z = basiszeile(p, a, b)
+        base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+        stand = {"einstieg": None, "kurs": None, "tp_level": None, "sl_level": None, "quelle": None}
+        if str(p.get("route") or "") in LT_ECHO_ROUTEN:
+            ef = lt_echo_felder(p, live_je_login.get(str((a or {}).get("external_id") or "").strip()), jetzt_ts)
+            stand.update(einstieg=ef.get("einstieg"), kurs=(ef.get("kurs_jetzt") or {}).get("kurs"), tp_level=ef.get("tp_level"),
+                         sl_level=ef.get("sl_level"), quelle="mt5_position" if ef.get("position_offen") else None)
+        else:
+            hd = base.get("hedge") if isinstance(base.get("hedge"), dict) else {}
+            tv = base.get("tv") if isinstance(base.get("tv"), dict) else {}
+            root = _symbol_wurzel(p.get("master_symbol_root") or p.get("master_symbol"))
+            e = _wd_num(hd.get("einstieg_nq")) if _wd_num(hd.get("einstieg_nq")) is not None else _wd_num(tv.get("einstieg_nq"))
+            ppl_r, kt = WD_HEUTE_PPL.get(root), _wd_num(p.get("master_contracts"))
+            stand.update(einstieg=e, kurs=(kj.get(root) or {}).get("kurs"),
+                         tp_level=_wd_num(hd.get("tp_level_nq")) or _wd_level(e, r, _wd_num(p.get("master_tp")), ppl_r, kt, True),
+                         sl_level=_wd_num(hd.get("sl_level_nq")) or _wd_level(e, r, _wd_num(p.get("master_sl")), ppl_r, kt, False),
+                         quelle="reader" if e is not None else None)
+        z["tp_punkte_rest"], z["sl_punkte_rest"] = ap_rest_punkte(stand["kurs"], stand["tp_level"], stand["sl_level"], r)
+        z.update(stand=stand, gehedgt=gh, hedge=art)
+        offen_rows.append(z)
+        if b["hinweis"]:
+            hinweise.append({"plan_id": z["plan_id"], "user_id": z["user_id"], "user": z["user"], "firma": z["firma"],
+                             "konto": z["konto"], "grund": b["hinweis"]})
+        durch = f"{wer(p)} {z['firma']} …{z['ende4']} läuft"
+        tag_eintraege.append((z["firma_key"], r, durch))
+        fest_eintraege.append((z["firma_key"], r, durch))
+    for p in gestartet:
+        durch = f"{wer(p)} {(konto(p) or {}).get('firm') or p.get('master_firm')} …{_ap_ende4(konto(p))} heute gestartet"
+        tag_eintraege.append((fkey(p), p.get("richtung"), durch))
+        fest_eintraege.append((fkey(p), p.get("richtung"), durch))
+
+    geplant_rows = []
+    for p in heute:
+        a, r = konto(p), p.get("richtung")
+        gh, art = _ap_gehedgt_plan(p)
+        b = _ap_bewerten(ctx, a, bal(a), p.get("master_contracts"), p.get("route"),
+                         p.get("master_symbol_root") or p.get("master_symbol"), r, p.get("master_tp"), p.get("master_sl"), gh)
+        z = basiszeile(p, a, b)
+        m = _ap_iso_min(p.get("start_um"), mitternacht)
+        bestaetigt = bool(p.get("auto_bestaetigt_at")) if p.get("auto_plan") else True
+        if not p.get("auto_plan"):
+            fest = "Handplan (nur Auto-Pläne werden umgeplant)"
+        elif p.get("start_um_gestartet_at") or p.get("started_at") or p.get("orbit_gesendet_at"):
+            fest = "schon gestartet"
+        elif bestaetigt and m is not None and m <= jetzt_min + AP_FAELLIG_MIN:
+            fest = "bestätigt und fällig"
+        elif r not in ("buy", "sell"):
+            fest = "ohne Richtung"
+        else:
+            fest = None
+        z.update(start=p.get("start_um"), start_min=round(m, 2) if m is not None else None, start_txt=_ap_hhmm_txt(m) if m is not None else None,
+                 auto_plan=bool(p.get("auto_plan")), bestaetigt=bestaetigt, aenderbar=fest is None, fest_durch=fest,
+                 gehedgt=gh, hedge=art, delta_abs=abs(b["delta_eur_pkt"]) if b["delta_eur_pkt"] is not None else None)
+        geplant_rows.append(z)
+        if b["hinweis"]:
+            hinweise.append({"plan_id": z["plan_id"], "user_id": z["user_id"], "user": z["user"], "firma": z["firma"],
+                             "konto": z["konto"], "grund": b["hinweis"]})
+        durch = f"{wer(p)} {z['firma']} …{z['ende4']} geplant {z['start_txt']}"
+        tag_eintraege.append((z["firma_key"], r, durch))
+        if fest:
+            fest_eintraege.append((z["firma_key"], r, durch))
+    id_fest = {}
+    for p in andere_tage:
+        if p.get("richtung") in ("buy", "sell"):
+            id_fest.setdefault(f"{p.get('user_id')}|{fkey(p)}", {"richtung": p["richtung"],
+                                                                "durch": f"geplant {str(p.get('start_um') or 'ohne Startzeit')[:16]}"})
+    firma_fest = ap_firma_tag(fest_eintraege)
+    for z in geplant_rows:
+        ff = firma_fest.get(z["firma_key"]) or id_fest.get(f"{z['user_id']}|{z['firma_key']}")
+        z["richtung_fest_durch"] = ff["durch"] if ff else None
+    ds = [z["delta_eur_pkt"] for z in offen_rows if z["delta_eur_pkt"] is not None]
+    return {"tag": tag, "mitternacht": mitternacht, "jetzt": jetzt, "jetzt_min": jetzt_min, "zeiten": zeiten, "firmen": firmen,
+            "param": param, "ctx": ctx, "namen": namen, "offen": offen_rows, "geplant": geplant_rows,
+            "firma_tag": ap_firma_tag(tag_eintraege), "firma_fest": firma_fest, "id_fest": id_fest, "hinweise": hinweise,
+            "basis_netto": round(sum(ds), 3), "basis_brutto": round(sum(abs(d) for d in ds), 3)}
+
+
+def _ap_stand_plaene(stand):
+    """Geplante Pläne des Stands in der Form für ap_umplanen/ap_eingriff_pruefen (Firma = Schlüssel)."""
+    return [{"plan_id": z["plan_id"], "user_id": z["user_id"], "user": z["user"], "firma": z["firma_key"], "richtung": z["richtung"],
+             "start_min": z["start_min"], "delta_abs": z["delta_abs"], "aenderbar": z["aenderbar"], "fest_durch": z["fest_durch"]}
+            for z in stand["geplant"] if z.get("start_min") is not None]
+
+
+def _ap_min_iso(stand, m):
+    return (stand["mitternacht"] + timedelta(minutes=float(m))).astimezone(timezone.utc).isoformat() if m is not None else None
+
+
+def _ap_umplanungen_heute(stand):
+    """Protokoll des Tages aus auto_plan_umplanung → (liste, hinweis). Tabelle fehlt → [] + Hinweis (SQL einspielen)."""
+    try:
+        rows = sb_select("auto_plan_umplanung", {"select": "*", "um": "gte." + stand["mitternacht"].isoformat(), "order": "um.desc",
+                                                 "limit": "200"}) or []
+    except Exception as e:
+        return [], f"auto_plan_umplanung nicht lesbar ({type(e).__name__}) — sql/2026-10-06_auto_plan_delta.sql einspielen"
+    return [{"um": r.get("um"), "plan_id": r.get("plan_id"), "user_id": r.get("user_id"),
+             "user": stand["namen"].get(str(r.get("user_id")), str(r.get("user_id"))[:8]), "firma": r.get("firma"),
+             "von_richtung": r.get("von_richtung"), "nach_richtung": r.get("nach_richtung"), "von_start": r.get("von_start"),
+             "nach_start": r.get("nach_start"), "grund": r.get("grund"), "quelle": r.get("quelle")} for r in rows], None
+
+
+def _ap_bot_stand(param, jetzt=None):
+    """bot{} für GET /admin/auto-plan/delta: Schalter, letzter Lauf (dieser Prozess = Railway), nächster Lauf."""
+    jetzt = jetzt or datetime.now(timezone.utc)
+    letzter = _ap_bot.get("letzter_lauf")
+    naechster = None
+    if param.get("aktiv"):
+        d = jetzt.astimezone(_ap_tz(AP_TZ_TAG))
+        m = d.hour * 60 + d.minute
+        if d.weekday() < 5 and m <= AP_BOT_ENDE_MIN:
+            t = (datetime.fromisoformat(letzter) + timedelta(minutes=param["takt_min"])) if letzter else jetzt + timedelta(minutes=1)
+            naechster = max(t, jetzt).isoformat()
+        else:
+            n = d + timedelta(days=1)
+            while n.weekday() >= 5:
+                n += timedelta(days=1)
+            naechster = datetime(n.year, n.month, n.day, tzinfo=d.tzinfo).astimezone(timezone.utc).isoformat()
+    return {"aktiv": bool(param.get("aktiv")), "takt_min": param.get("takt_min"), "zielband_pct": param.get("zielband_pct"),
+            "auto_start": bool(param.get("auto_start")), "letzter_lauf": letzter, "naechster_lauf": naechster,
+            "letztes": _ap_bot.get("letztes"), "fehler": _ap_bot.get("fehler") or None, "thread": bool(_ap_info.get("started"))}
+
+
+def ap_delta_antwort(stand, sicht_uid=None):
+    """GET /admin/auto-plan/delta (Vertrag §4) aus dem Stand. Nicht-Admin: Listen nur die eigene ID, Summen über alle."""
+    pct = stand["param"]["zielband_pct"]
+    ab = max(0.0, stand["jetzt_min"])
+    v = ap_verlauf(stand["basis_netto"], stand["basis_brutto"],
+                   [(z["start_min"], z["delta_eur_pkt"]) for z in stand["geplant"] if z.get("start_min") is not None], pct, ab_min=ab)
+    umpl, h_umpl = _ap_umplanungen_heute(stand)
+    offen = [{k: z.get(k) for k in ("plan_id", "user_id", "user", "firma", "richtung", "delta_eur_pkt", "tp_punkte_rest", "sl_punkte_rest",
+                                    "stand", "tp_punkte", "sl_punkte", "konto", "ende4", "typ", "route", "menge", "usd_pro_pkt",
+                                    "punktwert_quelle", "wert_eur", "satz_eur_je_usd", "gehedgt", "hedge", "hinweis")} for z in stand["offen"]]
+    geplant = [{k: z.get(k) for k in ("plan_id", "user_id", "user", "firma", "richtung", "start", "delta_eur_pkt", "fest_durch", "bestaetigt",
+                                      "start_txt", "start_min", "aenderbar", "auto_plan", "richtung_fest_durch", "tp_punkte", "sl_punkte",
+                                      "konto", "ende4", "typ", "route", "menge", "usd_pro_pkt", "punktwert_quelle", "wert_eur", "gehedgt",
+                                      "hinweis")} for z in sorted(stand["geplant"], key=lambda z: (z.get("start_min") or 0, z["plan_id"]))]
+    hinweise = list(stand["hinweise"]) + ([{"grund": h_umpl}] if h_umpl else [])
+    # Master 06.10.2026 (Frontend .1084 schon live): band als ZAHL in €/Pkt (± um null, jetzt), Details in band_info; je
+    # Verlaufspunkt zusätzlich band (= band_delta); fenster[] aus auto_plan_regeln.zeiten für die Grenzlinien im Chart
+    w_summe = sum(float(f[2]) for f in stand["zeiten"].get("fenster") or []) or 1.0
+    out = {"ok": True, "um": stand["jetzt"].isoformat(), "tag": stand["tag"],
+           "band": round(pct / 100.0 * stand["basis_brutto"], 2), "zielband_pct": pct,
+           "band_info": {"pct": pct, "eur_pkt": round(pct / 100.0 * stand["basis_brutto"], 2), "gehalten": v["gehalten"],
+                         "netto_max_abs": v["netto_max_abs"], "ueber": v["ueber"][:20]},
+           "netto_jetzt": round(stand["basis_netto"], 2), "brutto_jetzt": round(stand["basis_brutto"], 2),
+           "offen": offen, "geplant": geplant, "verlauf": [dict(x, band=x["band_delta"]) for x in v["verlauf"]], "umplanungen": umpl,
+           "fenster": [{"von": f[0], "bis": f[1], "anteil": round(float(f[2]) / w_summe * 100, 1)}
+                       for f in stand["zeiten"].get("fenster") or []],
+           "firma_tag": {f: {"richtung": x["richtung"], "durch": x["durch"]} for f, x in sorted(stand["firma_tag"].items())},
+           "bot": _ap_bot_stand(stand["param"], stand["jetzt"]), "hinweise": hinweise}
+    if sicht_uid:
+        uid = str(sicht_uid)
+        for f in ("offen", "geplant", "umplanungen", "hinweise"):
+            out[f] = [x for x in out[f] if str(x.get("user_id")) == uid]
+        out["firma_tag"] = {}
+        out["sicht"] = "eigene"
+    return out
+
+
+def _ap_aenderungen_anwenden(stand, aenderungen, quelle):
+    """Schreibt Umplanungen: nur Plan-Zeilen, die noch geplant, ungestartet, Auto-Plan, in der alten Richtung und nicht
+    bestätigt-und-fällig sind (Guard in derselben PATCH-Anfrage), danach je Plan eine Zeile in auto_plan_umplanung.
+    → (geschrieben [{um, plan_id, …}], fehler | None). Ohne Protokoll-Tabelle wird NICHTS geändert (Vertrag §3: jede Änderung protokolliert)."""
+    if not aenderungen:
+        return [], None
+    try:
+        sb_select("auto_plan_umplanung", {"select": "id", "limit": "1"})
+    except Exception as e:
+        return [], f"auto_plan_umplanung fehlt ({type(e).__name__}) — sql/2026-10-06_auto_plan_delta.sql einspielen, nichts geändert"
+    je = {z["plan_id"]: z for z in stand["geplant"]}
+    faellig = (datetime.now(timezone.utc) + timedelta(minutes=AP_FAELLIG_MIN)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    um = datetime.now(timezone.utc).isoformat()
+    geschrieben, protokoll = [], []
+    for a in aenderungen:
+        z = je.get(a["plan_id"])
+        if not z:
+            continue
+        upd = {}
+        if a["nach_richtung"] != a["von_richtung"]:
+            upd["richtung"] = a["nach_richtung"]
+        von_start = z.get("start")
+        nach_start = von_start
+        if abs(float(a["nach_start_min"]) - float(a["von_start_min"])) >= 1e-6 and von_start:
+            nach_start = (datetime.fromisoformat(str(von_start).replace("Z", "+00:00"))
+                          + timedelta(minutes=float(a["nach_start_min"]) - float(a["von_start_min"]))).astimezone(timezone.utc).isoformat()
+            upd["start_um"] = nach_start
+        if not upd:
+            continue
+        rows = sb_update("trade_plans", {"id": f"eq.{a['plan_id']}", "status": "eq.planned", "auto_plan": "eq.true",
+                                         "start_um_gestartet_at": "is.null", "started_at": "is.null", "orbit_gesendet_at": "is.null",
+                                         "richtung": f"eq.{a['von_richtung']}",
+                                         "or": f"(auto_bestaetigt_at.is.null,start_um.gt.{faellig})"}, upd)
+        if not rows:
+            continue                  # inzwischen gestartet/bestätigt/geändert — Guard hat gegriffen, nichts protokolliert
+        zeile = {"um": um, "plan_id": a["plan_id"], "user_id": a["user_id"], "firma": z.get("firma"),
+                 "von_richtung": a["von_richtung"], "nach_richtung": a["nach_richtung"], "von_start": von_start, "nach_start": nach_start,
+                 "grund": a["grund"][:500], "quelle": quelle}
+        protokoll.append(zeile)
+        geschrieben.append(dict(zeile, user=z.get("user"), art=a.get("art")))
+    if protokoll:
+        try:
+            r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/auto_plan_umplanung", json=protokoll,
+                            headers=_sb_headers("return=minimal"), timeout=(5, 20))
+            _sb_pruefen(r)
+        except Exception as e:
+            print(f"[auto-plan] ⚠️ Umplanung-Protokoll: {type(e).__name__}: {e}", flush=True)
+            return geschrieben, f"geändert, Protokoll nicht geschrieben ({type(e).__name__})"
+    return geschrieben, None
+
+
+def ap_ausgleichen(trocken=False, quelle="bot", jetzt=None, seed=None):
+    """Ausgleichs-Bot einmal (Takt, Extra-Lauf 14:00 oder POST /admin/auto-plan/ausgleichen). trocken = nur rechnen.
+    Ändert nur geplante, nicht gestartete Auto-Pläne (ap_umplanen) — nie laufende Trades, nie Orders.
+    netto_vorher/_nachher = größtes |Netto-Delta| ab jetzt bis Tagesende (€/Pkt), ueber_band_* = Überschreitung nächste 60 min."""
+    reg = (sb_select("auto_plan_regeln", {"select": "*", "id": "eq.1"}) or [None])[0]
+    if not reg:
+        return {"ok": False, "msg": "auto_plan_regeln fehlt"}
+    stand = _ap_stand_laden(reg, jetzt)
+    param = stand["param"]
+    seed = int(seed) if seed not in (None, "") else random.SystemRandom().randrange(1, 2 ** 31)
+    erg = ap_umplanen(_ap_stand_plaene(stand), stand["basis_netto"], stand["basis_brutto"], max(0.0, stand["jetzt_min"]),
+                      stand["zeiten"], param["zielband_pct"], random.Random(seed), firma_fest=stand["firma_fest"], id_fest=stand["id_fest"])
+    je = {z["plan_id"]: z for z in stand["geplant"]}
+    if trocken:
+        umpl = [{"um": None, "plan_id": a["plan_id"], "user_id": a["user_id"], "user": (je.get(a["plan_id"]) or {}).get("user"),
+                 "firma": (je.get(a["plan_id"]) or {}).get("firma"), "art": a["art"], "von_richtung": a["von_richtung"],
+                 "nach_richtung": a["nach_richtung"], "von_start": _ap_min_iso(stand, a["von_start_min"]),
+                 "nach_start": _ap_min_iso(stand, a["nach_start_min"]), "grund": a["grund"]} for a in erg["aenderungen"]]
+        fehler = None
+    else:
+        umpl, fehler = _ap_aenderungen_anwenden(stand, erg["aenderungen"], quelle)
+    out = {"ok": fehler is None, "trocken": bool(trocken), "tag": stand["tag"], "seed": seed, "umplanungen": umpl,
+           "netto_vorher": erg["vorher"]["netto_max_abs"], "netto_nachher": erg["nachher"]["netto_max_abs"],
+           "ueber_band_vorher": erg["vorher"]["ueber_band"], "ueber_band_nachher": erg["nachher"]["ueber_band"],
+           "netto_jetzt": round(stand["basis_netto"], 2), "band_pct": param["zielband_pct"], "ausloeser": erg["ausloeser"],
+           "hinweise": stand["hinweise"]}
+    if fehler:
+        out["msg"] = fehler
+    print(f"[auto-plan] Ausgleich {quelle}{' trocken' if trocken else ''}: {len(umpl)} Umplanung(en), "
+          f"max |Netto| {out['netto_vorher']} → {out['netto_nachher']} €/Pkt", flush=True)
+    return out
+
+
+def _ap_bot_tick(d):
+    """Ein Takt-Check des Ausgleichs-Bots (aus ap_loop, jede Minute). d = jetzt in deutscher Zeit. Schalter alle 2 min frisch."""
+    m = d.hour * 60 + d.minute
+    if d.weekday() >= 5 or m > AP_BOT_ENDE_MIN:
+        return
+    if _ap_bot.get("param") is None or time.time() - _ap_bot.get("gelesen", 0) >= 120:
+        reg = (sb_select("auto_plan_regeln", {"select": "regeln", "id": "eq.1"}) or [{}])[0]
+        _ap_bot["param"], _ap_bot["gelesen"] = ap_ausgleich_param(reg.get("regeln")), time.time()
+    param = _ap_bot["param"]
+    if not param.get("aktiv"):
+        return
+    tag = d.strftime("%Y-%m-%d")
+    letzter = _ap_bot.get("letzter_lauf")
+    faellig = not letzter or (datetime.now(timezone.utc) - datetime.fromisoformat(letzter)).total_seconds() >= param["takt_min"] * 60 - 5
+    extra = m >= AP_BOT_EXTRA_MIN and _ap_bot.get("extra_tag") != tag
+    if not (faellig or extra):
+        return
+    if extra:
+        _ap_bot["extra_tag"] = tag
+    _ap_bot["letzter_lauf"] = datetime.now(timezone.utc).isoformat()
+    try:
+        erg = ap_ausgleichen(quelle="bot")
+        _ap_bot["letztes"] = {k: erg.get(k) for k in ("tag", "netto_vorher", "netto_nachher", "ausloeser", "msg")}
+        _ap_bot["letztes"]["umplanungen"] = len(erg.get("umplanungen") or [])
+        _ap_bot["letztes"]["extra"] = bool(extra)
+        _ap_bot["fehler"] = ""
+    except Exception as e:
+        _ap_bot["fehler"] = f"{type(e).__name__}: {e}"
+        print(f"[auto-plan] ⚠️ Ausgleich: {e}", flush=True)
+
+
+def _ap_zugang():
+    """Gate wie /admin/auto-plan: Admin oder eine ID, die selbst im Auto-Planer ist (nur lesen, nur eigene Zeilen).
+    → (admin, uid, reg, None) oder (…, Fehler-Antwort)."""
+    mail, err = _admin_auth()
+    uid = request.environ.get("prophos.admin_uid")
+    admin = err is None
+    if not admin:
+        if err[1] != 403:
+            return False, None, None, err
+        uid, err2 = _wd_login()
+        if err2:
+            return False, None, None, err2
+    reg = (sb_select("auto_plan_regeln", {"select": "*", "id": "eq.1"}) or [None])[0]
+    if not reg:
+        return admin, uid, None, (jsonify({"ok": False, "msg": "auto_plan_regeln fehlt"}), 503)
+    if not admin and str(uid) not in [str(u) for u in (reg.get("user_ids") or [])]:
+        return admin, uid, reg, (jsonify({"ok": False, "msg": "Diese ID ist nicht im Auto-Planer"}), 403)
+    return admin, uid, reg, None
+
+
+@app.route("/admin/auto-plan/delta", methods=["GET", "OPTIONS"])
+def admin_auto_plan_delta():
+    """GET → Delta-Stand jetzt (Vertrag §4): netto/brutto, offen[], geplant[], verlauf[], umplanungen[] (heute), bot{}."""
+    if request.method == "OPTIONS":
+        return "", 200
+    admin, uid, reg, err = _ap_zugang()
+    if err:
+        return err
+    try:
+        return jsonify(dict(ap_delta_antwort(_ap_stand_laden(reg), None if admin else uid), admin=admin))
+    except Exception as e:
+        return jsonify({"ok": False, "admin": admin, "msg": f"{type(e).__name__}: {e}"}), 502
+
+
+@app.route("/admin/auto-plan/ausgleichen", methods=["POST", "OPTIONS"])
+def admin_auto_plan_ausgleichen():
+    """POST {trocken, seed?} → Ausgleichs-Bot sofort einmal (auch wenn ausgleich.aktiv aus ist). Nur Admin."""
+    if request.method == "OPTIONS":
+        return "", 200
+    admin, uid, reg, err = _ap_zugang()
+    if err:
+        return err
+    if not admin:
+        return jsonify({"ok": False, "msg": "Nur für Admins — Eingriffe macht nur Finn"}), 403
+    body = request.get_json(silent=True) or {}
+    seed = body.get("seed")
+    if seed not in (None, "") and not re.match(r"^\d{1,10}$", str(seed)):
+        return jsonify({"ok": False, "msg": "seed = Ganzzahl"}), 400
+    try:
+        return jsonify(dict(ap_ausgleichen(trocken=bool(body.get("trocken")), quelle="bot", seed=seed), admin=True))
+    except Exception as e:
+        return jsonify({"ok": False, "admin": True, "msg": f"{type(e).__name__}: {e}"}), 502
+
+
+@app.route("/admin/auto-plan/plan", methods=["POST", "OPTIONS"])
+def admin_auto_plan_eingriff():
+    """POST {plan_id, aktion: 'richtung_tauschen'|'start', start?, start_min?} → manueller Eingriff mit denselben harten Regeln wie der Bot
+    (Verstoß = 400 Klartext). start = 'HH:MM' deutscher Zeit (heute) oder ISO. Gilt für die ganze Tranche (ID × Firma). Nur Admin."""
+    if request.method == "OPTIONS":
+        return "", 200
+    admin, uid, reg, err = _ap_zugang()
+    if err:
+        return err
+    if not admin:
+        return jsonify({"ok": False, "msg": "Nur für Admins — Eingriffe macht nur Finn"}), 403
+    body = request.get_json(silent=True) or {}
+    pid, aktion = str(body.get("plan_id") or "").strip(), str(body.get("aktion") or "").strip()
+    if not re.match(r"^[0-9a-f-]{36}$", pid):
+        return jsonify({"ok": False, "msg": "plan_id fehlt"}), 400
+    if aktion not in ("richtung_tauschen", "start"):
+        return jsonify({"ok": False, "msg": "aktion = richtung_tauschen | start"}), 400
+    try:
+        stand = _ap_stand_laden(reg)
+        neu_min = None
+        if aktion == "start":
+            # start_min (Minuten ab 00:00 dt) hat Vorrang (Frontend .1084 schickt beides), sonst start 'HH:MM' dt oder ISO
+            s = str(body.get("start") or "").strip()
+            if _wd_num(body.get("start_min")) is not None and not isinstance(body.get("start_min"), bool):
+                neu_min = _wd_num(body.get("start_min"))
+            elif re.match(r"^\d{1,2}:\d{2}$", s):
+                neu_min = _ap_hhmm(s)
+            elif s:
+                neu_min = _ap_iso_min(s, stand["mitternacht"])
+            if neu_min is None:
+                return jsonify({"ok": False, "msg": "start = HH:MM (deutsche Zeit) oder ISO"}), 400
+        aend, fehler = ap_eingriff_pruefen(pid, aktion, _ap_stand_plaene(stand), stand["jetzt_min"], stand["zeiten"],
+                                           stand["firma_fest"], stand["id_fest"], neu_min)
+        if fehler:
+            return jsonify({"ok": False, "msg": fehler}), 400
+        umpl, fehler = _ap_aenderungen_anwenden(stand, aend, "hand")
+        if fehler and not umpl:
+            return jsonify({"ok": False, "msg": fehler}), 409
+        if not umpl:
+            return jsonify({"ok": False, "msg": "Plan hat sich inzwischen geändert (gestartet/bestätigt) — nichts geändert"}), 409
+        return jsonify({"ok": True, "umplanungen": umpl, "msg": fehler})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"{type(e).__name__}: {e}"}), 502
+
+
+@app.route("/admin/auto-plan/ausgleich-einstellung", methods=["POST", "OPTIONS"])
+def admin_auto_plan_ausgleich_einstellung():
+    """POST {aktiv?, takt_min?, zielband_pct?, auto_start?} → auto_plan_regeln.regeln.ausgleich (nur genannte Felder). Nur Admin.
+    auto_plan_regeln.aktiv (Nachtlauf) bleibt unberührt."""
+    if request.method == "OPTIONS":
+        return "", 200
+    admin, uid, reg, err = _ap_zugang()
+    if err:
+        return err
+    if not admin:
+        return jsonify({"ok": False, "msg": "Nur für Admins"}), 403
+    body = request.get_json(silent=True) or {}
+    regeln = dict(reg.get("regeln") or {})
+    neu = dict(ap_ausgleich_param(regeln))
+    for k in ("aktiv", "auto_start"):
+        if k in body:
+            if not isinstance(body[k], bool):
+                return jsonify({"ok": False, "msg": f"{k} = true | false"}), 400
+            neu[k] = body[k]
+    for k, lo, hi in (("takt_min", 2, 120), ("zielband_pct", 1, 100)):
+        if k in body:
+            v = _wd_num(body[k])
+            if v is None or isinstance(body[k], bool) or not (lo <= v <= hi):
+                return jsonify({"ok": False, "msg": f"{k} = {lo}–{hi}"}), 400
+            neu[k] = int(v) if k == "takt_min" else round(v, 1)
+    regeln["ausgleich"] = neu
+    try:
+        sb_update("auto_plan_regeln", {"id": "eq.1"}, {"regeln": regeln, "updated_at": datetime.now(timezone.utc).isoformat()})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"nicht gespeichert ({type(e).__name__})"}), 502
+    _ap_bot["param"], _ap_bot["gelesen"] = ap_ausgleich_param(regeln), time.time()
+    return jsonify({"ok": True, "ausgleich": neu, "bot": _ap_bot_stand(neu)})
+
+
 def ap_loop():
-    """Nachtlauf: einmal je Tag zwischen 01:00 und 02:00 Dubai (Minute je Tag gewürfelt), nur wenn aktiv."""
-    print("[auto-plan] 🤖 Nachtlauf bereit (01:00–02:00 Dubai)", flush=True)
+    """Nachtlauf: einmal je Tag um 00:00 deutscher Zeit (Delta-Vertrag 06.10.2026, vorher 01–02 Uhr Dubai; Minute 0–4
+    gewürfelt), nur wenn auto_plan_regeln.aktiv; Sa/So lässt ap_planen aus. Dazu jede Minute der Takt-Check des
+    Ausgleichs-Bots (_ap_bot_tick, nur wenn regeln.ausgleich.aktiv)."""
+    print("[auto-plan] 🤖 Nachtlauf bereit (00:00 dt) · Ausgleichs-Bot nach regeln.ausgleich", flush=True)
     ziel_min, ziel_tag = None, None
     while True:
         try:
-            d = datetime.now(_ap_tz(AP_TZ_LAUF))
+            d = datetime.now(_ap_tz(AP_TZ_TAG))
             tag = d.strftime("%Y-%m-%d")
             if ziel_tag != tag:
-                ziel_tag, ziel_min = tag, random.randint(0, 50)
-            if d.hour == 1 and d.minute >= ziel_min and _ap_info.get("letzter_tag") != tag:
+                ziel_tag, ziel_min = tag, random.randint(0, 4)
+            if d.hour == 0 and d.minute >= ziel_min and _ap_info.get("letzter_tag") != tag:
                 reg = (sb_select("auto_plan_regeln", {"select": "aktiv", "id": "eq.1"}) or [{}])[0]
                 if reg.get("aktiv"):
                     erg = ap_planen(tag, quelle="nacht")
@@ -14513,6 +15524,11 @@ def ap_loop():
         except Exception as e:
             _ap_info["last_error"] = f"{type(e).__name__}: {e}"
             print(f"[auto-plan] ⚠️ {e}", flush=True)
+        try:
+            _ap_bot_tick(datetime.now(_ap_tz(AP_TZ_TAG)))
+        except Exception as e:
+            _ap_bot["fehler"] = f"{type(e).__name__}: {e}"
+            print(f"[auto-plan] ⚠️ Ausgleich-Takt: {e}", flush=True)
         _schleife_schlafen(60)
 
 
