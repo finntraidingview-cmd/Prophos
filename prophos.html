@@ -38661,7 +38661,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1050'
+  const OS_TAB_BUILD = '2026-09-22.1051'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -55611,6 +55611,22 @@
     return `<div class="vr-kz-teile">${t.map(x => `<span class="vr-teil">${vrEsc(x.name)} <b>${wert(x)}${x.einheit ? (x.einheit === '%' ? ' %' : ' ' + vrEsc(x.einheit)) : ''}</b></span>`).join('')}</div>`
   }
 
+  // Wert in € nach Finns Kosten-Regel (Server: ap_kontowert je Konto, Summen bestand_eur/funnel_eur je Zelle) und Kaufpreis
+  // (preis_eur/kosten_eur aus kauf_eur der Kernwerte), Master 06.10.2026: „auf einen Blick, was bei einer ID × Firma steckt".
+  // Nur, wenn der Server die Felder liefert — gleiche Chips wie die Score-Bausteine.
+  function vrEur(n){ return Math.round(Number(n) || 0).toLocaleString('de-DE') + ' €' }
+  function vrEurHtml(z){
+    const t = [], nk = z.nachkauf || {}
+    if(z.bestand_eur != null || z.funnel_eur != null) t.push(`Wert im Vorrat <b>${vrEur(z.bestand_eur)}</b>`, `im Funnel <b>${vrEur(z.funnel_eur)}</b>`)
+    if(nk.n && nk.preis_eur != null) t.push(`Kauf <b>${nk.n} × ${vrEur(nk.preis_eur)}${nk.kosten_eur != null ? ' = ' + vrEur(nk.kosten_eur) : ''}</b>`)
+    return t.length ? `<div class="vr-kz-teile">${t.map(x => `<span class="vr-teil">${x}</span>`).join('')}</div>` : ''
+  }
+  // Hinweise des Servers je Zelle (z. B. Apex 06.10.2026: „Deckel 10 Käufe erreicht — auch damit unter 80 % Sicherheit")
+  function vrHinweisHtml(z){
+    const h = Array.isArray(z.hinweise) ? z.hinweise : []
+    return h.map(x => `<div class="vr-kz-txt">⚠ ${vrEsc(x)}</div>`).join('')
+  }
+
   // „bestellt" setzen bzw. zurücknehmen (Vertrag: POST aktion bestellt / bestellt_weg). Sofort anzeigen; schlägt es fehl, zurück.
   async function vrBestellen(uid, firma, weg){
     const d = _vr.daten, z = d?.zellen.find(c => c.user_id === uid && c.firma === firma)
@@ -55634,7 +55650,7 @@
   function vrDetailHtml(z, f){
     const ks = vrListe(z)
     const txt = z.ki_text ? `<p>${vrEsc(z.ki_text)}</p>` : ''
-    const chips = ks.length ? `<div class="vr-kcs">${ks.map(k => `<span class="vr-kc" title="${vrEsc(vrKontoTitel(k))}"><i class="vr-pk ${vrPkKl(k)}"></i><b>${vrEsc(k.name || 'Konto')}</b>${vrEsc(vrTypWort(vrStufe(k)))}${k.balance != null ? ' · ' + Math.round(k.balance).toLocaleString('de-DE') : ''} · ${k.daten_fehlen ? 'Daten fehlen' : k.im_bestand ? 'Vorrat' : k.chance != null ? vrProz(k.chance) : '–'}${k.gefaehrdet ? ' · gefährdet' : ''}${k.unsicher ? ' · alt' : ''}</span>`).join('')}</div>` : '<div>Keine Konten bei dieser Firma.</div>'
+    const chips = ks.length ? `<div class="vr-kcs">${ks.map(k => `<span class="vr-kc" title="${vrEsc(vrKontoTitel(k))}"><i class="vr-pk ${vrPkKl(k)}"></i><b>${vrEsc(k.name || 'Konto')}</b>${vrEsc(vrTypWort(vrStufe(k)))}${k.balance != null ? ' · ' + Math.round(k.balance).toLocaleString('de-DE') : ''} · ${k.daten_fehlen ? 'Daten fehlen' : k.im_bestand ? 'Vorrat' : k.chance != null ? vrProz(k.chance) : '–'}${k.wert_eur != null ? ' · ' + vrEur(k.wert_eur) : ''}${k.gefaehrdet ? ' · gefährdet' : ''}${k.unsicher ? ' · alt' : ''}</span>`).join('')}</div>` : '<div>Keine Konten bei dieser Firma.</div>'
     const fn = ks.filter(k => !k.daten_fehlen && !k.im_bestand && k.chance != null)
     const zeilen = []
     if(z.sicherheit != null) zeilen.push(`Ziel sicher erreicht: <b>${vrProz(z.sicherheit)}</b> ohne Kauf${z.sicherheit_nach != null && z.nachkauf?.n ? ` · <b>${vrProz(z.sicherheit_nach)}</b> mit ${vrEsc(vrMenge(z, f, true))}` : ''}`)
@@ -55665,11 +55681,11 @@
         return `<div class="vr-kz${kl(z)}" ${attr(z)}>${ring(z)}
           <div class="vr-kz-kopf"><span class="vr-d vr-d-${w[1]}">${vrEsc(w[0])}</span>${wer(z)}${knopf(z)}</div>
           <div class="vr-kz-menge">${vrEsc(vrMenge(z, f))}${z.nachkauf.n_erwartung != null && z.nachkauf.n_erwartung !== z.nachkauf.n ? `<small class="vr-mind-n" title="Mindestkauf nach Erwartungswert; die große Zahl gilt für das gewählte Sicherheitsniveau">mind. ${z.nachkauf.n_erwartung}</small>` : ''}${gef ? `<small>⚠ ${gef} gefährdet</small>` : ''}</div>
-          ${vrLueckeHtml(z, f)}${vrTeileHtml(z)}${txt(z)}${_vr.offen.has(key(z)) ? vrDetailHtml(z, f) : ''}</div>` })
+          ${vrLueckeHtml(z, f)}${vrTeileHtml(z)}${vrEurHtml(z)}${vrHinweisHtml(z)}${txt(z)}${_vr.offen.has(key(z)) ? vrDetailHtml(z, f) : ''}</div>` })
       .concat(gesperrt.map(z => { const n = vrListe(z).filter(k => z.sperre === 'unsicher' ? k.unsicher : k.daten_fehlen).length
         return `<div class="vr-kz grau${kl(z)}" ${attr(z)}><div class="vr-ring leer"></div>
           <div class="vr-kz-kopf"><span class="vr-d vr-d-grau">${z.sperre === 'unsicher' ? 'Unsicher' : 'Daten fehlen'}</span>${wer(z)}</div>
-          <div class="vr-kz-menge">kein Vorschlag${n ? ` — ${vrKonten(n)} ${z.sperre === 'unsicher' ? 'mit alter Lesung' : 'ohne Lesung'}` : ''}</div>${txt(z)}${_vr.offen.has(key(z)) ? vrDetailHtml(z, firma.get(z.firma)) : ''}</div>` }))
+          <div class="vr-kz-menge">kein Vorschlag${n ? ` — ${vrKonten(n)} ${z.sperre === 'unsicher' ? 'mit alter Lesung' : 'ohne Lesung'}` : ''}</div>${vrEurHtml(z)}${vrHinweisHtml(z)}${txt(z)}${_vr.offen.has(key(z)) ? vrDetailHtml(z, firma.get(z.firma)) : ''}</div>` }))
       .concat(best.map(z => `<div class="vr-kz grau${kl(z)}" ${attr(z)}><div class="vr-ring leer"></div>
           <div class="vr-kz-kopf"><span class="vr-d vr-d-blau">Bestellt</span>${wer(z)}${knopf(z, true)}</div>
           <div class="vr-kz-menge">${z.bestellt.anzahl ? z.bestellt.anzahl + ' × ' + vrEsc(z.bestellt.einheit || z.nachkauf.einheit || 'Konto') : 'bestellt'}${vrUhr(z.bestellt.verfall) ? `<small class="vr-grau">zählt bis ${vrUhr(z.bestellt.verfall)}</small>` : ''}</div>${_vr.offen.has(key(z)) ? vrDetailHtml(z, firma.get(z.firma)) : ''}</div>`))
