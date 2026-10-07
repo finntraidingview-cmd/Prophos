@@ -2892,6 +2892,47 @@
   #tpl-view .ap-akt .icon-btn{width:26px;height:26px;min-height:0;padding:0}
   :is(#adm-pane-planer,#tpl-view) .ap-adm-ok.is-ok{background:var(--surface-tint);border-color:var(--border);color:var(--sub)}
   :is(#adm-pane-planer,#tpl-view) .ap-adm-ok.is-ok:hover{background:var(--bg)}
+  /* ID-Detail (08.10.2026, apIdDetailRender): Statistik + laufende Trades EINER ID unter der ID-Leiste, volle Breite, ID-Farbe als Akzent (--id) */
+  .ap-idd{border:1px solid var(--border);border-left:4px solid var(--id,var(--border));border-radius:12px;background:var(--surface,#fff);padding:14px 16px 12px;margin-bottom:14px}
+  .ap-idd-kopf{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px} .ap-idd-kopf .ap-adm-id{font-size:15px} .ap-idd-kopf>span:last-child{font-size:12px;color:var(--sub)}
+  .ap-idd .kpi-delta b{font-weight:600}
+  .ap-idd-zwei{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr);gap:12px;margin-bottom:12px}
+  .ap-idd-karte{border:1px solid var(--border-soft,var(--border));border-radius:var(--r-md,10px);padding:10px 12px;min-width:0}
+  .ap-idd>.ap-idd-karte{margin-top:0}
+  .ap-idd-h{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;font-size:12.5px;font-weight:600;color:var(--sub);margin-bottom:8px}
+  .ap-idd-h b{font-size:16px;color:var(--ink);font-variant-numeric:tabular-nums} .ap-idd-h b.tpl-gut{color:var(--good)} .ap-idd-h b.tpl-rot{color:var(--danger)}
+  .ap-idd-h span{font-weight:500;font-size:12px}
+  .ap-idd-bz{display:grid;grid-template-columns:70px minmax(0,1fr) 28px;gap:10px;align-items:center;font-size:12.5px;padding:3px 0}
+  .ap-idd-bz b{text-align:right;font-variant-numeric:tabular-nums}
+  .ap-idd-bar{height:10px;border-radius:999px;background:var(--surface-tint);overflow:hidden} .ap-idd-bar i{display:block;height:100%;border-radius:999px;min-width:2px}
+  .ap-idd-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .ap-idd-chip{font-size:11.5px;padding:2px 8px;border-radius:999px;background:var(--surface-tint);color:var(--sub)} .ap-idd-chip.gut{color:var(--good)} .ap-idd-chip.rot{color:var(--danger)}
+  .ap-idd-tage{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}
+  .ap-idd-tage .tg{display:flex;flex-direction:column;align-items:center;font-variant-numeric:tabular-nums;min-width:0}
+  .ap-idd-tage .ob,.ap-idd-tage .ub{width:24px;height:32px;display:flex;justify-content:center} .ap-idd-tage .ob{align-items:flex-end;border-bottom:1.5px solid var(--border)} .ap-idd-tage .ub{align-items:flex-start}   /* gleiche Höhe = gleiche Skala für Gewinn und Verlust */
+  .ap-idd-tage i{display:block;width:100%;border-radius:3px} .ap-idd-tage .ub i{background:var(--danger)}
+  .ap-idd-tage small{font-size:10.5px;color:var(--sub);margin-top:3px} .ap-idd-tage b{font-size:11.5px;font-weight:600;white-space:nowrap}
+  .ap-idd-lk,.ap-idd-lt{display:grid;grid-template-columns:minmax(130px,1.3fr) 76px 52px 80px minmax(100px,2fr) 96px;gap:4px 12px;align-items:center}
+  .ap-idd-lk{font-size:11px;color:var(--sub-2);text-transform:uppercase;letter-spacing:.04em;padding:0 4px 4px}
+  .ap-idd-lt{width:100%;background:none;border:0;border-top:1px solid var(--border-soft,var(--border));padding:7px 4px;font:inherit;font-size:13px;color:var(--ink);text-align:left;cursor:pointer}
+  .ap-idd-lt:hover{background:var(--surface-tint)}
+  .ap-idd-lt .k{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600} .ap-idd-lt .k em{font-style:normal;font-weight:400;color:var(--sub)}
+  .ap-idd-lt .r{font-weight:600;white-space:nowrap} .ap-idd-lt .z,.ap-idd-lt .w{color:var(--sub);white-space:nowrap;font-variant-numeric:tabular-nums}
+  .ap-idd-pl{position:relative;height:12px;border-radius:999px;background:var(--surface-tint);overflow:hidden}
+  .ap-idd-pl .null{position:absolute;left:50%;top:0;bottom:0;width:1.5px;background:var(--ink);opacity:.45}
+  .ap-idd-pl .fill{position:absolute;top:0;bottom:0;border-radius:999px;min-width:2px} .ap-idd-pl .fill.plus{background:color-mix(in srgb,var(--id,var(--good)) 60%,var(--good))} .ap-idd-pl .fill.minus{background:color-mix(in srgb,var(--id,var(--danger)) 45%,var(--danger))}
+  .ap-idd-lt>b{text-align:right;font-weight:700;white-space:nowrap;font-variant-numeric:tabular-nums} .ap-idd-lt>b small{display:block;font-size:11px;font-weight:500;color:var(--sub)}
+  .ap-idd-lt .ohne{font-weight:500;font-size:12px;color:var(--sub-2)}
+  .ap-idd-leer{font-size:12.5px;color:var(--sub);padding:2px 0 4px}
+  @media (max-width:760px){
+    .ap-idd{padding:12px 12px 10px}
+    .ap-idd-zwei{grid-template-columns:minmax(0,1fr)}
+    .ap-idd-lk{display:none}
+    .ap-idd-lt{grid-template-columns:minmax(0,1fr) auto;gap:3px 10px}
+    .ap-idd-lt .z,.ap-idd-lt .w{display:none} .ap-idd-lt .ap-idd-pl{grid-column:1 / -1;grid-row:3} .ap-idd-lt>b{grid-column:2;grid-row:1}
+    .ap-idd-lt .r{grid-column:1;grid-row:2;font-size:12px}
+    .ap-idd-tage{gap:2px} .ap-idd-tage b{font-size:9.5px;letter-spacing:-.02em} .ap-idd-tage small{font-size:9.5px}
+  }
   #tpl-view .wd-tab .is-verpasst{display:block;font-size:10.5px;color:var(--danger)}
   :is(#adm-pane-planer,#tpl-view) .ap-adm-fuss{font-size:11.5px;color:var(--sub);margin-top:8px}
   #apKontoModal .ak-z{display:grid;grid-template-columns:118px 1fr;gap:4px 10px;font-size:13px;margin-bottom:10px}
@@ -40928,7 +40969,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1234'
+  const OS_TAB_BUILD = '2026-09-22.1235'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -60338,6 +60379,106 @@
   const apKontoZu = () => document.getElementById('apKontoModal')?.classList.remove('open')
   document.getElementById('apKontoX')?.addEventListener('click', apKontoZu)
   document.getElementById('apKontoModal')?.addEventListener('click', ev => { if(ev.target === ev.currentTarget) apKontoZu() })
+  /* ══ ID-DETAIL (08.10.2026, Finn: „Standardmäßig sehe ich alle Trades, und wenn ich auf einen Namen drücke, nur die Trades dieser ID.
+   * Und dann darunter Statistiken und laufende Trades."). Vertrag mit Slave 7: die ID-Leiste setzt window._apSicht = { uid } und ruft
+   * apIdDetailRender(uid, el) mit <div id="ap-id-detail"> auf — dieser Baustein füllt nur el. Daten NUR aus dem, was der Reiter schon
+   * geladen hat: tplDaten (Delta/Lauf/eigene Pläne, Tag heute), tplHypo (Live-P&L $ × Kontowert-Satz aus /admin/live-trades + Kerzen),
+   * _tpl.bilanz (/admin/hypo-bilanz, beendete Auto-Trades 30 Tage), _ap.letzter (Lauf: Konten mit Typ + Ausgelassen-Grund). Keine neue
+   * Abfrage, nur Anzeige und Zählung — keine Bewertung. Nur Challenge/Phase 1/Phase 2 wie die ganze Planer-Sicht (WD/Funded raus). ══ */
+  const AP_IDD_WEG = { mt5v2: 'Echo V2', tvv2: 'Orbit V2', tsv2: 'Topstep V2', mt5: 'Echo', tvplus: 'Orbit', dup: 'Duplikum' }
+  function apIdDetailRender(uid, el){
+    if(!el) return
+    uid = String(uid || '')
+    if(!uid){ el.innerHTML = ''; return }
+    let D = null
+    try{ const alt = _tpl.tag; _tpl.tag = 'heute'; try{ D = tplDaten() } finally{ _tpl.tag = alt } }catch(e){ console.warn('[ap-idd] tplDaten', e) }
+    const T = ((D && D.trades) || []).filter(t => String(t.user_id) === uid && !t.wd)
+    const farbe = idFarbe(uid), name = (_apIds.rows.find(r => String(r.user_id) === uid) || {}).name || (T[0] && T[0].user) || uid.slice(0, 8)
+    const heute = (D && D.heute) || tplDatum(new Date()), v = D ? D.v : tplVersatz(heute)
+    const vzE = x => (x > 0 ? '+' : x < 0 ? '−' : '') + tplEur(x)
+    const vzU = x => (x > 0 ? '+' : '') + tplUsd(x)
+    const kl = x => x > 0 ? 'tpl-gut' : x < 0 ? 'tpl-rot' : ''
+    const n = (k, a) => `${k} ${a}${k === 1 ? '' : 's'}`
+    // ── HEUTE: geplant (offen+bestätigt) · läuft · beendet · ausgelassen — beendet fremder IDs steht nur in der Hypo-Bilanz (tag = deutsches Datum)
+    const bil = ((_tpl && _tpl.bilanz) || []).filter(z => z && String(z.user_id) === uid)
+    const bilHeute = bil.filter(z => String(z.tag || '') === heute)
+    const geplant = T.filter(t => t.status === 'offen' || t.status === 'bestaetigt'), laeuft = T.filter(t => t.status === 'laeuft')
+    const fertigIds = new Set([...T.filter(t => t.status === 'beendet').map(t => String(t.plan_id)), ...bilHeute.map(z => String(z.plan_id))])
+    const lauf = (_ap.letzter && !_ap.letzter.trocken) ? _ap.letzter : null
+    const typOk = x => !x.typ || TPL_TYPEN.includes(String(x.typ))
+    const aus = ((lauf && lauf.ausgelassen) || []).filter(x => String(x.user_id) === uid && typOk(x) && !/geplanten\/laufenden Plan/.test(String(x.grund || '')))
+    const unbest = geplant.filter(t => t.status === 'offen').length
+    const gesamt = geplant.length + laeuft.length + fertigIds.size + aus.length
+    const anteil = k => gesamt ? (k / gesamt * 100).toFixed(1) : 0
+    const zahlKachel = (lab, k, unter, farbeBar, tip) => `<div class="kpi" title="${escapeHtml(tip)}"><div class="kpi-label">${lab}</div><div class="kpi-value">${k}</div>
+        <span class="kpi-delta">${unter}</span><div class="kpi-bar"><div class="kpi-bar-fill" style="width:${anteil(k)}%;background:${farbeBar}"></div></div></div>`
+    const gruende = new Map(); for(const x of aus){ const g = tplGrund(x.grund); gruende.set(g, (gruende.get(g) || 0) + 1) }
+    const gruendeTxt = [...gruende].sort((a, b) => b[1] - a[1]).map(([g, k]) => `${k} ${g}`)
+    // ── ERGEBNIS HEUTE: beendete (Bilanz: P&L $ + hypothetisch €; eigene ohne Bilanz-Zeile nur $) + laufend jetzt (tplHypo)
+    let usdFertig = 0, eurFertig = 0, ohneEur = 0
+    for(const z of bilHeute){ usdFertig += Number(z.pl_usd) || 0; if(z.hypo_eur != null) eurFertig += Number(z.hypo_eur); else ohneEur++ }
+    for(const t of T) if(t.status === 'beendet' && t.pnl != null && !bilHeute.some(z => String(z.plan_id) === String(t.plan_id))){ usdFertig += Number(t.pnl) || 0; ohneEur++ }
+    let h = { zeilen: [], jetzt: 0 }
+    try{ if(D) h = tplHypo(tplSichtFilter(D, new Set([uid]))) }catch(e){ console.warn('[ap-idd] tplHypo', e) }
+    const usdLauf = h.zeilen.reduce((s, z) => s + (z.pl != null && isFinite(z.pl) ? z.pl : 0), 0)
+    const ergKachel = `<div class="kpi" title="${escapeHtml(`Beendete Trades heute: echter P&L $ · hypothetisch € = P&L × Kontowert-Satz${ohneEur ? ` (${ohneEur} ohne Satz)` : ''}. Darunter: laufende jetzt.`)}">
+        <div class="kpi-label">Ergebnis heute</div><div class="kpi-value ${kl(usdFertig)}">${fertigIds.size ? vzU(usdFertig) : '–'}</div>
+        <span class="kpi-delta umbruch">${fertigIds.size ? `<b class="${kl(eurFertig)}">${vzE(eurFertig)}</b>` : 'noch nichts beendet'}${h.zeilen.length ? ` · läuft <b class="${kl(h.jetzt)}">${vzE(h.jetzt)}</b>` : ''}</span></div>`
+    const kacheln = `<div class="kpis tpl-kpis5">
+        ${zahlKachel('Geplant', geplant.length, unbest ? `${unbest} unbestätigt` : geplant.length ? 'alle bestätigt' : '–', 'var(--good)', 'heute geplant, noch nicht gestartet')}
+        ${zahlKachel('Läuft', laeuft.length, laeuft.length ? `Live ${vzU(usdLauf)}` : '–', 'color-mix(in srgb,var(--good) 45%,transparent)', 'läuft gerade')}
+        ${zahlKachel('Beendet', fertigIds.size, fertigIds.size ? `${bilHeute.filter(z => Number(z.pl_usd) > 0).length} im Plus` : '–', farbe, 'heute beendet')}
+        ${zahlKachel('Ausgelassen', aus.length, gruendeTxt[0] || '–', 'var(--sub-2)', gruendeTxt.join(' · ') || 'nichts ausgelassen')}
+        ${ergKachel}</div>`
+    // ── KONTEN NACH STATUS: Konten der ID aus dem letzten Lauf (geplant[] + ausgelassen[], je Konto einmal) — Typ + Zustand (Grund)
+    const konten = new Map()
+    for(const g of (lauf && lauf.geplant) || []) if(String(g.user_id) === uid && typOk(g)) konten.set(String(g.konto_id || g.konto), { typ: g.typ, grund: null })
+    for(const a of (lauf && lauf.ausgelassen) || []) if(String(a.user_id) === uid && typOk(a)){ const k = String(a.konto_id || a.konto); if(!konten.has(k)) konten.set(k, { typ: a.typ, grund: tplGrund(a.grund) }) }
+    for(const t of T) if(!t.ohnePlan){ const k = String(t.konto_id || t.konto); if(!konten.has(k)) konten.set(k, { typ: t.typ, grund: null }) }
+    const jeTyp = TPL_TYPEN.map(ty => ({ ty, k: [...konten.values()].filter(x => String(x.typ) === ty).length }))
+    const kmax = Math.max(1, ...jeTyp.map(x => x.k))
+    const zust = new Map(); for(const x of konten.values()) if(x.grund && /Ziel erreicht|geblasen|unter Boden|kurz vor Ziel/.test(x.grund)) zust.set(x.grund, (zust.get(x.grund) || 0) + 1)
+    const kontenKarte = `<div class="ap-idd-karte"><div class="ap-idd-h">Konten <b>${konten.size}</b><span>Stand letzter Lauf${lauf && lauf.tag ? ' ' + escapeHtml(apPrTagText(lauf.tag)) : ''}</span></div>
+        ${jeTyp.map(x => `<div class="ap-idd-bz"><span>${TPL_TYP_WORT[x.ty]}</span><span class="ap-idd-bar"><i style="width:${(x.k / kmax * 100).toFixed(1)}%;background:${farbe}"></i></span><b>${x.k}</b></div>`).join('')}
+        ${zust.size ? `<div class="ap-idd-chips">${[...zust].map(([g, k]) => `<span class="ap-idd-chip${/Ziel/.test(g) ? ' gut' : /geblasen|Boden/.test(g) ? ' rot' : ''}">${escapeHtml(g)} <b>${k}</b></span>`).join('')}</div>` : ''}</div>`
+    // ── LETZTE 7 TAGE: beendete Auto-Trades dieser ID je Tag (hypothetisch €, Gewinne über / Verluste unter der Null-Linie)
+    const tage = []; { const d0 = new Date(heute + 'T12:00:00Z'); for(let i = 6; i >= 0; i--){ const d = new Date(d0); d.setUTCDate(d.getUTCDate() - i); tage.push(d.toISOString().slice(0, 10)) } }
+    const b7 = bil.filter(z => tage.includes(String(z.tag || '')))
+    const jeTag = tage.map(t => { const a = b7.filter(z => z.tag === t); return { t, n: a.length, plus: a.reduce((s, z) => s + Math.max(0, Number(z.hypo_eur) || 0), 0), minus: a.reduce((s, z) => s + Math.min(0, Number(z.hypo_eur) || 0), 0) } })
+    const tmax = Math.max(1, ...jeTag.map(x => Math.max(x.plus, -x.minus)))
+    const s7 = b7.reduce((s, z) => s + (Number(z.hypo_eur) || 0), 0), p7 = b7.filter(z => Number(z.pl_usd) > 0).length
+    const tagTxt = t => { const [, m, d] = t.split('-'); return `${d}.${m}.` }
+    const tageKarte = `<div class="ap-idd-karte"><div class="ap-idd-h">Letzte 7 Tage <b class="${kl(s7)}">${b7.length ? vzE(s7) : '–'}</b><span>${b7.length ? `${n(b7.length, 'Trade')} · ${p7} im Plus` : 'keine beendeten Auto-Trades'}</span></div>
+        <div class="ap-idd-tage">${jeTag.map(x => `<div class="tg" title="${escapeHtml(`${tagTxt(x.t)} · ${n(x.n, 'Trade')} · ${vzE(x.plus + x.minus)} hypothetisch`)}">
+          <div class="ob"><i style="height:${(x.plus / tmax * 100).toFixed(0)}%;background:${farbe}"></i></div><div class="ub"><i style="height:${(-x.minus / tmax * 100).toFixed(0)}%"></i></div>
+          <small>${tagTxt(x.t)}</small><b class="${kl(x.plus + x.minus)}">${x.n ? vzE(x.plus + x.minus) : '·'}</b></div>`).join('')}</div></div>`
+    // ── LAUFENDE TRADES JETZT: Konto · Richtung · Start · Weg · Live-P&L (Balken, Mitte = 0) · $ + € — Klick öffnet das Konto-Popup
+    const hmax = Math.max(1, ...h.zeilen.map(z => Math.abs(z.pl || 0)))
+    const lt = h.zeilen.map(z => {
+      const t = T.find(x => String(x.plan_id) === String(z.plan_id)) || {}
+      const gk = tplGroesseKurz(t), weg = AP_IDD_WEG[String(t.route || '')] || (z.echo ? 'Echo' : t.route ? String(t.route) : '–')
+      const pl = z.pl != null && isFinite(z.pl) ? z.pl : null, w = pl == null ? 0 : Math.min(50, Math.abs(pl) / hmax * 50)
+      const menge = z.kt != null ? `${Number(z.kt).toLocaleString('de-DE', { maximumFractionDigits: 2 })} ${z.echo ? 'Lot' : z.wurzel || 'NQ'}` : ''
+      return `<button type="button" class="ap-idd-lt" data-idd-plan="${escapeHtml(String(z.plan_id))}" title="${escapeHtml(`${z.firma || ''} · ${z.konto || ''}${z.ende4 ? ' …' + z.ende4 : ''} · ${menge}${z.satz != null ? ' · Satz ' + Number(z.satz).toLocaleString('de-DE', { maximumFractionDigits: 3 }) + ' €/$' : ''}${t.startUnklar ? ' · Startzeit unbekannt' : ''}`)}">
+          <span class="k">${gk ? gk + ' ' : ''}${escapeHtml(tplFirmaKurz(z.firma))}${z.ende4 ? ` <em>…${escapeHtml(z.ende4)}</em>` : ''}</span>
+          <span class="r ${z.richtung === 'buy' ? 'tpl-gut' : 'tpl-rot'}">${z.richtung === 'buy' ? '▲ Long' : '▼ Short'}</span>
+          <span class="z">${t.startUnklar ? '–' : tplUhr(z.start, v)}</span><span class="w">${escapeHtml(weg)}</span>
+          <span class="ap-idd-pl"><i class="null"></i>${pl == null ? '' : `<i class="fill ${pl >= 0 ? 'plus' : 'minus'}" style="${pl >= 0 ? 'left:50%' : 'right:50%'};width:${w.toFixed(1)}%"></i>`}</span>
+          <b class="${kl(pl)}">${pl == null ? '<span class="ohne">kein Live-Wert</span>' : vzU(pl)}${z.hypo != null ? `<small>${vzE(z.hypo)}</small>` : ''}</b></button>` }).join('')
+    const ltKarte = `<div class="ap-idd-karte"><div class="ap-idd-h">Läuft jetzt <b>${h.zeilen.length}</b>${h.zeilen.length ? `<span>Live ${vzU(usdLauf)} · hypothetisch ${vzE(h.jetzt)}</span>` : ''}</div>
+        ${lt ? `<div class="ap-idd-lk"><span>Konto</span><span>Richtung</span><span>Start</span><span>Weg</span><span>Live-P&amp;L</span><span></span></div>${lt}` : '<div class="ap-idd-leer">Nichts läuft.</div>'}</div>`
+    el.innerHTML = `<div class="ap-idd" style="--id:${farbe}"><div class="ap-idd-kopf"><span class="ap-adm-id"><i style="background:${farbe}"></i>${escapeHtml(name)}</span>
+        <span>heute · Dubai${_apd.d && _apd.d.um ? ' · Stand ' + tplUhrIso(_apd.d.um) : ''}</span></div>
+      ${kacheln}<div class="ap-idd-zwei">${kontenKarte}${tageKarte}</div>${ltKarte}</div>`
+    el.querySelectorAll('[data-idd-plan]').forEach(b => b.addEventListener('click', ev => {
+      ev.stopPropagation()
+      const z = h.zeilen.find(x => String(x.plan_id) === b.dataset.iddPlan); if(!z) return
+      const t = T.find(x => String(x.plan_id) === String(z.plan_id)) || {}
+      apKontoOeffnen(z.plan_id, { z: { plan_id: z.plan_id, user_id: uid, user: name, konto: z.konto, firma: z.firma, ende4: z.ende4, typ: t.typ, richtung: z.richtung, menge: z.kt },
+        t: { balance: t.balance, rest: t.rest, stufe: t.stufe, wert: t.wert, satz: z.satz, konto_id: t.konto_id } })
+    }))
+  }
+  window.apIdDetailRender = apIdDetailRender   // Stub-/Brücken-Haken wie window._apKontoOeffnen (Slave 7 ruft im selben Block direkt)
   function apIdsRender(){
     const root = document.getElementById('ap-ids-root'); if(!root) return
     if(_apIds.fehler){ root.innerHTML = `<div style="color:var(--danger)">⚠ ${escapeHtml(_apIds.fehler)}</div>`; return }
