@@ -16776,9 +16776,22 @@ def admin_auto_plan_ids():
     POST {user_id, drin} → ID in auto_plan_regeln.user_ids rein/raus (nur dieses Feld, Regeln/Zeiten unberührt)."""
     if request.method == "OPTIONS":
         return "", 200
+    # Gate wie die anderen Admin-Reiter (Finn 08.10.2026, als „Finn + Pascal" eingeloggt: „ich komm nicht rein — mach, dass man aus
+    # jedem Tab reinkommt, wenn der Admin-Code stimmt"): Admin (ADMIN_EMAILS) ODER jeder eingeloggte Login, der nicht admin_zugang
+    # „nur eigene" ist — den Admin-Code prüft die Oberfläche beim Entsperren, wie bei Übersicht/Auftrag/Winning Days.
     mail, err = _admin_auth()
     if err:
-        return err
+        if err[1] != 403:
+            return err
+        uid, err2 = _wd_login()
+        if err2:
+            return err2
+        try:
+            if admin_zugang_nur_eigene(str(uid)):
+                return jsonify({"ok": False, "msg": "Diese ID sieht im Admin nur sich selbst"}), 403
+        except Exception:
+            return jsonify({"ok": False, "msg": "Anmeldung nicht prüfbar"}), 502
+        mail = f"uid {str(uid)[:8]}"
     reg = (sb_select("auto_plan_regeln", {"select": "aktiv,user_ids", "id": "eq.1"}) or [None])[0]
     if not reg:
         return jsonify({"ok": False, "msg": "auto_plan_regeln fehlt"}), 503
