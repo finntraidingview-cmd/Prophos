@@ -9877,9 +9877,10 @@
           <button class="subtab adm-tab" data-admtab="planer">Trade-Planer</button>
           <button class="subtab adm-tab" data-admtab="wd">Winning Days</button>
           <!-- Kapitel/Statistik ohne Emojis (Finn 30.09.2026: „die Emojis weg, die nerven") -->
-          <button class="subtab adm-tab" data-admtab="kapitel">Kapitel</button>
+          <!-- Kapitel + Acc-Käufe ausgeblendet (Finn 08.10.2026: „Kapitel auch visuell weg und mach das einfach zu Statistik dazu" · „genau wie Acc-Käufe auch zu Statistik hinzufügen") — Inhalte stehen jetzt unter Statistik, Reiter nur display:none -->
+          <button class="subtab adm-tab" data-admtab="kapitel" style="display:none">Kapitel</button>
           <button class="subtab adm-tab" data-admtab="stat">Statistik</button>
-          <button class="subtab adm-tab" data-admtab="buys">Acc-Käufe</button>
+          <button class="subtab adm-tab" data-admtab="buys" style="display:none">Acc-Käufe</button>
           <button class="subtab adm-tab" data-admtab="fin">Payouts</button>
           <!-- Kasse ausgeblendet (Finn 24.09.2026: „mach Kasse mal weg, das nutzen wir aktuell nicht mehr") — Pane + JS bleiben, nur der Reiter ist weg -->
           <button class="subtab adm-tab" data-admtab="kasse" style="display:none">Kasse</button>
@@ -10290,50 +10291,6 @@
              /admin/kapitel (Zuordnung nur über kapitel_id), hier wird nichts nachgerechnet. Umschalten
              läuft über den Regler in der Topbar; ein Klick auf die Karte ruft nur window._kapitel.setzen.
              Neue Kapitel legt Finn per SQL an — deshalb nur Bearbeiten, kein „Neues Kapitel". -->
-        <div id="adm-pane-kapitel" hidden>
-          <div id="adm-kap-msg" style="color:var(--sub);font-size:13px;padding:22px 2px">Lade Kapitel…</div>
-          <div id="adm-kap-body" hidden>
-            <div class="panel-head" style="margin-bottom:10px">
-              <div>
-                <div class="panel-title">Kapitel im Vergleich</div>
-                <div class="panel-sub">Karte anklicken macht das Kapitel überall aktiv — wie der Regler oben</div>
-              </div>
-              <div style="display:flex;align-items:center;gap:8px">
-                <span class="mono" id="adm-kap-stand" style="font-size:11.5px;color:var(--sub)"></span>
-                <button class="btn btn-ghost" id="adm-kap-refresh" title="Neu laden" style="padding:8px 12px">↻</button>
-              </div>
-            </div>
-            <div class="kap-karten" id="adm-kap-karten"></div>
-            <div class="kap-regel" style="margin:0 0 10px">Die Auswertung „Neue Ära" (Kontrafakt, Reibung, Duplikum, Kategorien) steht im Reiter <b>Statistik</b>.</div>
-            <div class="panel">
-              <div class="panel-head">
-                <div>
-                  <div class="panel-title">Monatsverlauf</div>
-                  <div class="panel-sub">Payouts nach oben, Kauf und Hedge nach unten · Farbe = Kapitel, im Wechselmonat stehen beide übereinander</div>
-                </div>
-              </div>
-              <div class="adm-vl" style="border-top:none;margin-top:0;padding-top:0"><canvas id="adm-kap-chart"></canvas></div>
-              <div class="adm-vl-legend" id="adm-kap-legend"></div>
-            </div>
-            <div class="panel" style="margin-top:14px">
-              <div class="panel-head" style="margin-bottom:6px">
-                <div>
-                  <div class="panel-title">Kapitel bearbeiten</div>
-                  <div class="panel-sub">Name, Beginn, Ende (leer = offen), Beschreibung — speichert von allein · neue Kapitel per SQL</div>
-                </div>
-                <span class="mono" id="adm-kap-edit-stand" style="font-size:11.5px;color:var(--sub)"></span>
-              </div>
-              <div id="adm-kap-edit"></div>
-              <!-- Review-Finding 24.09.2026 (W6): kapitel_id sitzt beim Insert; neue Grenzen ordnen den Bestand nicht um -->
-              <div class="panel-sub" style="margin-top:8px;font-size:11.5px">Grenzen ändern ordnet vorhandene Zeilen nicht neu zu — Backfill per SQL (sql/2026-09-24_kapitel.sql, Abschnitt 5)</div>
-            </div>
-          </div>
-        </div>
-
-        <!-- STATISTIK (24.09.2026 abends, Finn: „mach einen komplett neuen Statistik-Tab, viel cleaner, viel übersichtlicher,
-             viel mehr — für eine Oberkategorie ein Chart, unterteilt"): das Kontrafakt-Panel aus dem Kapitel-Tab, neu geordnet in
-             Oberkategorien Verlauf · Trades · Kategorie · Reibung, je Gruppe EINE große Fläche mit Unter-Auswahl (Chips).
-             Daten = /admin/kapitel wie der Kapitel-Tab (admKapData), gezeichnet von admKfRender. -->
         <div id="adm-pane-stat" hidden>
           <div id="adm-stat-msg" style="color:var(--sub);font-size:13px;padding:22px 2px">Lade Statistik…</div>
             <div class="panel" id="adm-kf-panel" style="margin-top:14px" hidden>
@@ -10450,94 +10407,137 @@
                      (Finn 30.09.2026 am Screenshot: „der auch weg"). -->
               </div>
             </div>
-        </div>
-        <div id="adm-pane-buys" hidden>
-          <div id="adm-buys-msg" style="color:var(--sub);font-size:13px;padding:22px 2px">Lade Übersicht…</div>
-          <div id="adm-buys-body" hidden>
-            <div class="kpis">
-              <div class="kpi">
-                <div class="kpi-label">Gekaufte Accounts</div>
-                <div class="kpi-value" id="adm-b-accs">–</div>
-                <div class="kpi-delta delta-neutral" id="adm-b-accs-sub">–</div>
+          <!-- Kapitel unter Statistik (Finn 08.10.2026: „Kapitel auch visuell weg und mach das einfach zu Statistik dazu") — der Block #adm-pane-kapitel ist hierher verschoben, nicht kopiert; admKapitelOeffnen lädt bei „stat" wie bisher -->
+          <div class="panel-title" style="margin:22px 0 8px;padding-top:16px;border-top:1px solid var(--line)">Kapitel im Vergleich</div>
+          <div id="adm-pane-kapitel">
+            <div id="adm-kap-msg" style="color:var(--sub);font-size:13px;padding:22px 2px">Lade Kapitel…</div>
+            <div id="adm-kap-body" hidden>
+              <div class="panel-head" style="margin-bottom:10px">
+                <div>
+                  <div class="panel-title">Kapitel im Vergleich</div>
+                  <div class="panel-sub">Karte anklicken macht das Kapitel überall aktiv — wie der Regler oben</div>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span class="mono" id="adm-kap-stand" style="font-size:11.5px;color:var(--sub)"></span>
+                  <button class="btn btn-ghost" id="adm-kap-refresh" title="Neu laden" style="padding:8px 12px">↻</button>
+                </div>
               </div>
-              <div class="kpi">
-                <div class="kpi-label">Kaufkosten gesamt</div>
-                <div class="kpi-value" id="adm-b-sum">–</div>
-                <div class="kpi-delta delta-neutral" id="adm-b-sum-sub">–</div>
-              </div>
-            </div>
-            <div class="grid-2">
+              <div class="kap-karten" id="adm-kap-karten"></div>
+              <div class="kap-regel" style="margin:0 0 10px">Die Auswertung „Neue Ära" (Kontrafakt, Reibung, Duplikum, Kategorien) steht im Reiter <b>Statistik</b>.</div>
               <div class="panel">
                 <div class="panel-head">
                   <div>
-                    <div class="panel-title">Käufe nach Person</div>
-                    <div class="panel-sub">Zum Aufklappen auf eine Person klicken</div>
+                    <div class="panel-title">Monatsverlauf</div>
+                    <div class="panel-sub">Payouts nach oben, Kauf und Hedge nach unten · Farbe = Kapitel, im Wechselmonat stehen beide übereinander</div>
                   </div>
                 </div>
-                <div class="adm-dist" id="adm-buys-person-dist"></div>
+                <div class="adm-vl" style="border-top:none;margin-top:0;padding-top:0"><canvas id="adm-kap-chart"></canvas></div>
+                <div class="adm-vl-legend" id="adm-kap-legend"></div>
               </div>
-              <div class="panel">
+              <div class="panel" style="margin-top:14px">
+                <div class="panel-head" style="margin-bottom:6px">
+                  <div>
+                    <div class="panel-title">Kapitel bearbeiten</div>
+                    <div class="panel-sub">Name, Beginn, Ende (leer = offen), Beschreibung — speichert von allein · neue Kapitel per SQL</div>
+                  </div>
+                  <span class="mono" id="adm-kap-edit-stand" style="font-size:11.5px;color:var(--sub)"></span>
+                </div>
+                <div id="adm-kap-edit"></div>
+                <!-- Review-Finding 24.09.2026 (W6): kapitel_id sitzt beim Insert; neue Grenzen ordnen den Bestand nicht um -->
+                <div class="panel-sub" style="margin-top:8px;font-size:11.5px">Grenzen ändern ordnet vorhandene Zeilen nicht neu zu — Backfill per SQL (sql/2026-09-24_kapitel.sql, Abschnitt 5)</div>
+              </div>
+            </div>
+          </div>
+          <!-- Acc-Käufe unter Statistik (Finn 08.10.2026: „genau wie Acc-Käufe auch zu Statistik hinzufügen") — Block #adm-pane-buys verschoben, admBuysRender zeichnet beim Öffnen von „stat" -->
+          <div class="panel-title" style="margin:22px 0 8px;padding-top:16px;border-top:1px solid var(--line)">Acc-Käufe</div>
+          <div id="adm-pane-buys">
+            <div id="adm-buys-msg" style="color:var(--sub);font-size:13px;padding:22px 2px">Lade Übersicht…</div>
+            <div id="adm-buys-body" hidden>
+              <div class="kpis">
+                <div class="kpi">
+                  <div class="kpi-label">Gekaufte Accounts</div>
+                  <div class="kpi-value" id="adm-b-accs">–</div>
+                  <div class="kpi-delta delta-neutral" id="adm-b-accs-sub">–</div>
+                </div>
+                <div class="kpi">
+                  <div class="kpi-label">Kaufkosten gesamt</div>
+                  <div class="kpi-value" id="adm-b-sum">–</div>
+                  <div class="kpi-delta delta-neutral" id="adm-b-sum-sub">–</div>
+                </div>
+              </div>
+              <div class="grid-2">
+                <div class="panel">
+                  <div class="panel-head">
+                    <div>
+                      <div class="panel-title">Käufe nach Person</div>
+                      <div class="panel-sub">Zum Aufklappen auf eine Person klicken</div>
+                    </div>
+                  </div>
+                  <div class="adm-dist" id="adm-buys-person-dist"></div>
+                </div>
+                <div class="panel">
+                  <div class="panel-head">
+                    <div>
+                      <div class="panel-title">Käufe nach Prop-Firma</div>
+                      <div class="panel-sub">Zum Aufklappen auf eine Firma klicken</div>
+                    </div>
+                  </div>
+                  <div class="adm-dist" id="adm-buys-firm-dist"></div>
+                </div>
+              </div>
+  
+              <!-- Letzte Käufe (28.08.2026, Finns Wunsch): die jüngsten Einkäufe auf
+                   einen Blick — reagiert wie alles in diesem Tab auf die Balken-Filter. -->
+              <div class="panel" style="margin-top:14px">
                 <div class="panel-head">
                   <div>
-                    <div class="panel-title">Käufe nach Prop-Firma</div>
-                    <div class="panel-sub">Zum Aufklappen auf eine Firma klicken</div>
+                    <div class="panel-title">Letzte Käufe</div>
+                    <div class="panel-sub" id="adm-buys-last-sub">–</div>
                   </div>
                 </div>
-                <div class="adm-dist" id="adm-buys-firm-dist"></div>
-              </div>
-            </div>
-
-            <!-- Letzte Käufe (28.08.2026, Finns Wunsch): die jüngsten Einkäufe auf
-                 einen Blick — reagiert wie alles in diesem Tab auf die Balken-Filter. -->
-            <div class="panel" style="margin-top:14px">
-              <div class="panel-head">
-                <div>
-                  <div class="panel-title">Letzte Käufe</div>
-                  <div class="panel-sub" id="adm-buys-last-sub">–</div>
+                <div class="table-wrap">
+                  <table class="t">
+                    <thead><tr>
+                      <th>Wann</th>
+                      <th>Account</th>
+                      <th>Firma</th>
+                      <th>Person</th>
+                      <th class="adm-num">Kauf</th>
+                    </tr></thead>
+                    <tbody id="adm-buys-last-rows"></tbody>
+                  </table>
                 </div>
               </div>
-              <div class="table-wrap">
-                <table class="t">
-                  <thead><tr>
-                    <th>Wann</th>
-                    <th>Account</th>
-                    <th>Firma</th>
-                    <th>Person</th>
-                    <th class="adm-num">Kauf</th>
-                  </tr></thead>
-                  <tbody id="adm-buys-last-rows"></tbody>
-                </table>
-              </div>
-            </div>
-
-            <!-- Account-Liste nur als Aufklappung — gleiche Mechanik wie in der
-                 Übersicht: erscheint erst nach Klick auf Person oder Firma. -->
-            <div class="panel" style="margin-top:14px" id="adm-buys-acc-panel" hidden>
-              <div class="panel-head">
-                <div>
-                  <div class="panel-title" id="adm-buys-acc-title">Accounts</div>
-                  <div class="panel-sub" id="adm-buys-acc-count">–</div>
+  
+              <!-- Account-Liste nur als Aufklappung — gleiche Mechanik wie in der
+                   Übersicht: erscheint erst nach Klick auf Person oder Firma. -->
+              <div class="panel" style="margin-top:14px" id="adm-buys-acc-panel" hidden>
+                <div class="panel-head">
+                  <div>
+                    <div class="panel-title" id="adm-buys-acc-title">Accounts</div>
+                    <div class="panel-sub" id="adm-buys-acc-count">–</div>
+                  </div>
+                  <button class="btn btn-ghost" id="adm-buys-back" style="padding:7px 12px">Alle anzeigen</button>
                 </div>
-                <button class="btn btn-ghost" id="adm-buys-back" style="padding:7px 12px">Alle anzeigen</button>
+                <div class="table-wrap adm-scroll">
+                  <table class="t">
+                    <thead><tr>
+                      <th>Account</th>
+                      <th>Firma</th>
+                      <th>Person</th>
+                      <th class="adm-num">Kauf</th>
+                    </tr></thead>
+                    <tbody id="adm-buys-acc-rows"></tbody>
+                  </table>
+                </div>
               </div>
-              <div class="table-wrap adm-scroll">
-                <table class="t">
-                  <thead><tr>
-                    <th>Account</th>
-                    <th>Firma</th>
-                    <th>Person</th>
-                    <th class="adm-num">Kauf</th>
-                  </tr></thead>
-                  <tbody id="adm-buys-acc-rows"></tbody>
-                </table>
-              </div>
+  
+              <p style="font-size:11.5px;color:var(--sub);margin:14px 2px 0;line-height:1.6">
+                Zählt jeden Account mit Kaufpreis &gt; 0 — auch archivierte, gekauft ist gekauft.
+                Kostenlose Nachfolger (Phase&nbsp;2/Funded aus einer Challenge) tauchen deshalb nicht auf.
+                Beträge in $ wie beim Kauf; die Übersicht rechnet ihre eigene €-Sicht.
+              </p>
             </div>
-
-            <p style="font-size:11.5px;color:var(--sub);margin:14px 2px 0;line-height:1.6">
-              Zählt jeden Account mit Kaufpreis &gt; 0 — auch archivierte, gekauft ist gekauft.
-              Kostenlose Nachfolger (Phase&nbsp;2/Funded aus einer Challenge) tauchen deshalb nicht auf.
-              Beträge in $ wie beim Kauf; die Übersicht rechnet ihre eigene €-Sicht.
-            </p>
           </div>
         </div>
 
@@ -17409,14 +17409,14 @@
           x.style.color = on ? 'var(--violet)' : ''
         })
         $('adm-pane-overview').hidden = name !== 'overview'
-        $('adm-pane-buys').hidden     = name !== 'buys'
+        $('adm-pane-buys').hidden     = name !== 'stat'   // seit 08.10.2026 Abschnitt unter Statistik
         $('adm-pane-fin').hidden      = name !== 'fin'
         $('adm-pane-kasse').hidden    = name !== 'kasse'
         $('adm-pane-wallet').hidden   = name !== 'wallet'
         $('adm-pane-rg').hidden       = name !== 'rg'
         $('adm-pane-wd').hidden       = name !== 'wd'
         $('adm-pane-kompass').hidden  = name !== 'kompass'
-        $('adm-pane-kapitel').hidden  = name !== 'kapitel'
+        $('adm-pane-kapitel').hidden  = name !== 'stat'   // seit 08.10.2026 Abschnitt unter Statistik
         $('adm-pane-stat').hidden     = name !== 'stat'
         $('adm-pane-auftrag').hidden  = name !== 'auftrag'
         $('adm-pane-planer').hidden   = name !== 'planer'
@@ -17428,7 +17428,7 @@
         if(name === 'wd' && typeof window._wdTabOeffnen === 'function') window._wdTabOeffnen()
         admHedgeModus()   // Kapitel ohne Hedge: Staffel-Karte/Weg-Chip im Farmer, Hedge-Spalten (24.09.2026)
         if(name === 'wallet') walOpen()
-        if(name === 'buys') admBuysRender()   // Daten kommen aus admLoad — hier nur neu zeichnen
+        if(name === 'stat') admBuysRender()   // Acc-Käufe unter Statistik (08.10.2026); Daten kommen aus admLoad — hier nur neu zeichnen
         if(name === 'fin')  admFinRender()
         if(name === 'overview') admVlResize()   // Verlaufs-Chart war evtl. bei 0 px Breite gebaut (23.09.2026)
         if(name === 'rg')   rgOpen()
@@ -40452,7 +40452,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1178'
+  const OS_TAB_BUILD = '2026-09-22.1179'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
