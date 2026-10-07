@@ -27373,6 +27373,8 @@
    * und Kontotyp liefert der Server je Zeile (app.py ziel_usd/konto_typ aus der Ziel-Wache). Balance nach dem Trade wie die
    * Konto-Spalte (wdlBlowStand), in Wartet sonst Start + P&L. Challenge zählt wie im Planer schon ab < 100 $ Rest. Nur Markierung. */
   const WDL_UEBERGANG = { challenge: 'Challenge → Funded', phase1: 'Phase 1 → Phase 2', phase2: 'Phase 2 → Funded' }
+  // Ziel des Übergangs sichtbar am Wort (07.10.2026, Finn: „bestanden, ob es Road to Funded ist oder Road to Phase 2")
+  const WDL_ZIEL = { challenge: 'Funded', phase1: 'Phase 2', phase2: 'Funded' }
   function wdlBestandenChip(t){
     const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
     if(!t || t.status === 'open' || t.status === 'planned') return ''
@@ -27384,7 +27386,7 @@
     const de = v => Math.round(v).toLocaleString('de-DE')
     // seit .1141 Ergebnis-Wort in der Ergebnis-Spalte (Finn 07.10.2026: „links von Ereignis, da wo geblowt/Tageslimit steht …
     // nicht in den Namen reinpacken") — Stil wie wdlBlowErg, der Übergang steht im Tooltip
-    return `<b class="wdl-bestanden" style="color:#15803d" title="${WDL_UEBERGANG[typ]} · Balance ${de(bal)} ≥ Ziel ${de(ziel)} — sehr wahrscheinlich bestanden. Phase umstellen und neues Konto anlegen.">🎯 bestanden</b>`
+    return `<b class="wdl-bestanden" style="color:#15803d;white-space:nowrap" title="${WDL_UEBERGANG[typ]} · Balance ${de(bal)} ≥ Ziel ${de(ziel)} — sehr wahrscheinlich bestanden. Phase umstellen und neues Konto anlegen.">🎯 bestanden → ${WDL_ZIEL[typ]}</b>`
   }
   function wdlKontoZ(t){
     const b = wdlBlowStand(t)
@@ -40066,7 +40068,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1143'
+  const OS_TAB_BUILD = '2026-09-22.1144'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
