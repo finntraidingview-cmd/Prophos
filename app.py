@@ -11727,12 +11727,34 @@ def admin_wd_plaene():
             # wegraeumen (planned, nie gestartet — z.B. Farmer AUS) und melden, welche Konten wirklich belegt sind
             # (belegt: Konto → Grund) bzw. welchen Farmer-Plan es fuer diesen Tag schon gibt (plaene_tag) — damit
             # der Tab seine Zeilen selbst heilen kann, ohne dass jemand „Wuerfeln" drueckt.
-            belegt, plaene_tag = {}, []
+            belegt, plaene_tag, richtung_fest = {}, [], {}
             if tag and uids:
                 offen = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,status,route,notes,planned_for,start_um,start_um_gestartet_at,"
                                                           "orbit_gesendet_at,ended_at,master_pl,master_tp,master_sl,master_risk,slave_risk,"
-                                                          "master_contracts,multiplier,richtung,master_symbol,slave_name,master_name,updated_at",
+                                                          "master_contracts,multiplier,richtung,master_symbol,slave_name,master_name,updated_at,"
+                                                          "master_firm,auto_plan,auto_bestaetigt_at",
                                                 "status": "in.(planned,open)"})
+                # RICHTUNG ÜBERNEHMEN (Finn 08.10.2026: „solange der Apex-Short bei Ina läuft, muss bei Ina auch nur short gemacht werden;
+                # ist er per TP/SL zu, darf wieder long"): dieselbe Quelle wie der Planer (ap_id_fest) — je ID+Firma die Richtung aus
+                # laufenden Trades aller Wege und aus Plänen, die in ≤ 30 min wirklich starten. Das Würfeln im Farmer übernimmt sie
+                # statt zu würfeln (Frontend wdRichtungVorgabe); der Start-Riegel am PC bleibt die Sperre dahinter.
+                try:
+                    def _wd_iso_ts(iso):
+                        try:
+                            return datetime.fromisoformat(str(iso).replace("Z", "+00:00")).timestamp() if iso else None
+                        except (TypeError, ValueError):
+                            return None
+                    _jm = datetime.now(timezone.utc).timestamp() / 60.0
+                    richtung_fest = ap_id_fest(
+                        [{"user_id": str(o.get("user_id")), "firma_key": ap_firma_key([], o.get("master_firm")), "richtung": o.get("richtung"),
+                          "plan_id": o.get("id")} for o in offen if o.get("status") == "open"],
+                        [{"user_id": str(o.get("user_id")), "firma_key": ap_firma_key([], o.get("master_firm")), "richtung": o.get("richtung"),
+                          "plan_id": o.get("id"), "start_min": (_wd_iso_ts(o.get("start_um")) / 60.0) if _wd_iso_ts(o.get("start_um")) else None,
+                          "auto_plan": bool(o.get("auto_plan")), "bestaetigt": bool(o.get("auto_bestaetigt_at")),
+                          "geclaimt": bool(o.get("start_um_gestartet_at"))} for o in offen if o.get("status") == "planned"], _jm)
+                except Exception as e:
+                    print(f"[wd] ⚠️ richtung_fest: {type(e).__name__}: {e}", flush=True)
+                    richtung_fest = {}
                 for o in offen:
                     mid = str(o.get("master_account_id") or "")
                     farmer = (o.get("notes") or "") == "Winning-Day-Farmer"
@@ -11750,7 +11772,8 @@ def admin_wd_plaene():
                         plaene_tag.append(o)
                         continue
                     belegt[mid] = "hat schon einen geplanten/laufenden Plan"
-            return jsonify({"konten": konten, "slaves": slaves, "plaene": plaene, "fx": _wd_fx(), "belegt": belegt, "plaene_tag": plaene_tag})
+            return jsonify({"konten": konten, "slaves": slaves, "plaene": plaene, "fx": _wd_fx(), "belegt": belegt, "plaene_tag": plaene_tag,
+                            "richtung_fest": richtung_fest})
         except Exception as e:
             print(f"[wd] ⚠️ laden: {type(e).__name__}: {e}", flush=True)
             return jsonify({"error": f"Farmer-Daten nicht ladbar ({type(e).__name__}: {e})"}), 502

@@ -40674,7 +40674,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1199'
+  const OS_TAB_BUILD = '2026-09-22.1200'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -49307,7 +49307,40 @@
   /* Würfeln (rein rechnend, testbar). rows = Zeilen des Tages; Zeilen mit start_um bleiben fest
    * (außer alleNeu) und Neue werden dahinter angehängt. seed → deterministisch, null → Math.random.
    * → Map user_id → {reihenfolge, start_um, richtung, status}; Zeilen ohne aktives Konto → 'leer'. */
-  function wdWuerfeln(rows, regeln, tag, seed, alleNeu, jetztMs){
+  /* RICHTUNG ÜBERNEHMEN (Finn 08.10.2026: „solange der Apex-Short bei Ina läuft, muss bei Ina auch nur short gemacht werden; ist er per
+   * TP/SL zu, darf wieder long"). REIN RECHNEND (window._wdRichtungVorgabe): fest = richtung_fest aus GET /admin/wd-plaene (Backend
+   * ap_id_fest — dieselbe Quelle wie der Trade-Planer: laufende Trades aller Wege + Pläne, die in ≤ 30 min starten, Schlüssel
+   * user_id|Firmenschlüssel wie ap_firma_key/firmNormRichtung). Läuft bei einer Firma der aktiven Konten dieser ID etwas, wird diese
+   * Richtung übernommen statt gewürfelt; zwei Firmen mit verschiedener Richtung → die erste gewinnt, Grund nennt den Widerspruch.
+   * → { richtung, grund, firma } | null (nichts fest → würfeln wie bisher). Kein Riegel: die harte Sperre bleibt tpOrbitStartenKern. */
+  function wdRichtungVorgabe(fest, uid, konten){
+    if(!fest || typeof fest !== 'object') return null
+    const norm = (typeof firmNormRichtung === 'function') ? firmNormRichtung : f => String(f || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+    let erst = null, widerspruch = false
+    const gesehen = new Set()
+    for(const k of (konten || [])){
+      if(!k || !wdAktiv(k) || !k.firm) continue
+      const key = `${uid}|${norm(k.firm)}`
+      if(gesehen.has(key)) continue
+      gesehen.add(key)
+      const f = fest[key]
+      if(!f || (f.richtung !== 'buy' && f.richtung !== 'sell')) continue
+      if(!erst) erst = { richtung: f.richtung, firma: k.firm, durch: f.durch || 'läuft gerade' }
+      else if(erst.richtung !== f.richtung) widerspruch = true
+    }
+    if(!erst) return null
+    const seite = erst.richtung === 'buy' ? 'long' : 'short'
+    return { richtung: erst.richtung, firma: erst.firma, grund: `Richtung übernommen: ${erst.firma} ${erst.durch} ${seite}${widerspruch ? ' (andere Firma dieser ID läuft entgegen — bitte prüfen)' : ''}` }
+  }
+  window._wdRichtungVorgabe = wdRichtungVorgabe
+  // Hinweis im Block (Darstellung): übernommene Richtung bzw. Warnung, wenn die gewürfelte Richtung inzwischen gegen den Lauf steht
+  function wdRichtungGrundHtml(x){
+    const v = wdRichtungVorgabe(((_wd.daten || {}).richtung_fest) || {}, String(x.user_id), x.konten)
+    if(!v || !x.richtung) return ''
+    if(v.richtung === x.richtung) return `<span class="kf" title="${escapeHtml(v.grund)}"> · ${escapeHtml(v.grund)}</span>`
+    return `<span class="kf" style="color:var(--danger)" title="${escapeHtml(v.grund)}"> · ⚠ gegen ${escapeHtml(v.firma)} (${v.richtung === 'buy' ? 'long' : 'short'} läuft) — Start würde am Riegel scheitern</span>`
+  }
+  function wdWuerfeln(rows, regeln, tag, seed, alleNeu, jetztMs, richtungFest){
     const r = regeln || {}, rnd = seed != null ? wdMulberry(seed) : Math.random
     const nAkt = x => (x.konten || []).filter(wdAktiv).length
     const aMax = Math.max(1, +r.abstand_max || 4)
@@ -49331,7 +49364,9 @@
     }
     teil.forEach((x, i) => {
       if(i > 0) t = wdNaechsterStart(t, rnd)   // = t + dauer + luft (gleiche Rechnung, seit 08.10.2026 über wdNaechsterStart)
-      out.set(String(x.user_id), { reihenfolge: ++nr, start_um: new Date(Math.round(t / 60000) * 60000).toISOString(), richtung: rnd() < 0.5 ? 'buy' : 'sell', status: 'geplant' })
+      const gew = rnd() < 0.5 ? 'buy' : 'sell'                          // rnd() immer ziehen — Seed-Folge bleibt für alle Tabs gleich
+      const v = wdRichtungVorgabe(richtungFest, String(x.user_id), x.konten)   // RICHTUNG ÜBERNEHMEN (08.10.2026) statt würfeln
+      out.set(String(x.user_id), { reihenfolge: ++nr, start_um: new Date(Math.round(t / 60000) * 60000).toISOString(), richtung: v ? v.richtung : gew, status: 'geplant', richtung_grund: v ? v.grund : null })
     })
     for(const x of rows || []){
       if(out.has(String(x.user_id)) || x.status === 'laeuft' || x.status === 'fertig' || x.status === 'verpasst') continue
@@ -49510,7 +49545,8 @@
     const ptag = (rail && Array.isArray(rail.plaene_tag)) ? rail.plaene_tag : []
     const plaene = rail ? [...((rail.plaene) || []), ...ptag.filter(q => !((rail.plaene) || []).some(z => String(z.id) === String(q.id)))] : null
     _wd.daten = { rpc: rpcOk, konten: konten || [], slaves: (rail && rail.slaves) || {}, plaene, fx: (rail && rail.fx) || window._fxUsdEur || 0.85, rail: !!rail,
-                  belegt: (rail && rail.belegt) || {}, plaene_tag: ptag }
+                  belegt: (rail && rail.belegt) || {}, plaene_tag: ptag,
+                  richtung_fest: (rail && rail.richtung_fest && typeof rail.richtung_fest === 'object') ? rail.richtung_fest : {} }   // RICHTUNG ÜBERNEHMEN (08.10.2026)
     _wd.datenFehler = konten ? '' : _wd.datenFehler
     _wd.datenTag = tag
     return _wd.daten
@@ -49637,7 +49673,7 @@
     const offen = rows.filter(x => alleNeu ? (x.status !== 'laeuft' && x.status !== 'fertig' && x.status !== 'verpasst') : (x.status === 'geplant' && !x.start_um))
     if(!offen.length) return 0
     const seed = alleNeu ? null : tag + '|' + offen.map(x => x.user_id).sort().join(',')
-    const erg = wdWuerfeln(rows, r, tag, seed, alleNeu)
+    const erg = wdWuerfeln(rows, r, tag, seed, alleNeu, Date.now(), ((_wd.daten || {}).richtung_fest) || {})   // Richtung übernehmen (08.10.2026)
     let n = 0
     await Promise.all(offen.map(x => {   // parallel statt nacheinander (23.09.2026)
       const e = erg.get(String(x.user_id)); if(!e) return null
@@ -50389,7 +50425,8 @@
   async function wdSlotEinplanen(x){
     const r = _wd.regeln || {}
     const s = wdSlotWaehlen(_wd.rows || [], x, r, x.tag, Date.now())
-    const start = new Date(s.start_ms).toISOString(), richtung = Math.random() < 0.5 ? 'buy' : 'sell'
+    const vorgabe = wdRichtungVorgabe(((_wd.daten || {}).richtung_fest) || {}, String(x.user_id), x.konten)   // Richtung übernehmen (08.10.2026)
+    const start = new Date(s.start_ms).toISOString(), richtung = vorgabe ? vorgabe.richtung : (Math.random() < 0.5 ? 'buy' : 'sell')
     const rf = Math.max(0, ...(_wd.rows || []).map(q => +q.reihenfolge || 0)) + 1
     const konten = (x.konten || []).map(k => wdAktiv(k) ? { ...k, start_um: start } : k)
     const { data, error } = await supabase.from('wd_tagesplan').update({ start_um: start, richtung, reihenfolge: rf, status: 'geplant', konten, updated_at: new Date().toISOString() })
@@ -50400,7 +50437,7 @@
     let angelegt = 0
     if(r.scharf && _wd.daten && _wd.daten.rail){ try{ angelegt = (await wdPlaeneAnlegen(x.tag)).angelegt || 0 }catch(_){} }
     const wo = s.vor && s.nach ? ` (zwischen ${s.vor.name || '?'} und ${s.nach.name || '?'})` : s.vor ? ` (nach ${s.vor.name || '?'})` : ' (erster Block)'
-    return `${x.name || 'ID'} eingeplant: ${wdHhmm(start)} Dubai${wo} · ${richtung === 'buy' ? 'BUY' : 'SELL'}${angelegt ? ` · ${angelegt} Plan${angelegt === 1 ? '' : 'e'} angelegt` : r.scharf ? '' : ' · SCHARF aus, noch kein Plan'}`
+    return `${x.name || 'ID'} eingeplant: ${wdHhmm(start)} Dubai${wo} · ${richtung === 'buy' ? 'BUY' : 'SELL'}${vorgabe ? ' (' + vorgabe.grund + ')' : ''}${angelegt ? ` · ${angelegt} Plan${angelegt === 1 ? '' : 'e'} angelegt` : r.scharf ? '' : ' · SCHARF aus, noch kein Plan'}`
   }
   /* Haken sofort wirksam (23.09.2026, Finn: „ich drücke auf den Account, der Haken geht weg, aber die sind immer noch
    * aktiv — bei nur einem Haken soll 0 von 3 stehen"): Anzeige sofort, dann dauerhaft am Konto (rpc wd_konto_setzen),
@@ -50536,7 +50573,7 @@
             : `<span class="wd-blk-zelle"><span class="wd-blk wd-griff" draggable="true" data-wd-drag="${escapeHtml(uid)}" title="ziehen: Block auf einen anderen Platz — Zeiten folgen im Takt">⋮⋮ ${x.reihenfolge}</span><span class="wd-auf-ab"><button type="button" data-wd-rauf="${escapeHtml(uid)}" title="einen Platz nach vorn">▲</button><button type="button" data-wd-runter="${escapeHtml(uid)}" title="einen Platz nach hinten">▼</button></span></span>`) : '<span class="kf">—</span>'}</td>
           <td class="mono" style="font-weight:600">${x.start_um ? wdHhmm(x.start_um) : '—:—'}${x.start_um ? `<span class="kf"> – ${wdHhmm(new Date(ende).toISOString())}</span>` : ''}</td>
           <td style="font-weight:600">${escapeHtml(x.name || '?')}</td>
-          <td>${wdRichtungChip(x, erw)}</td>
+          <td>${wdRichtungChip(x, erw)}${wdRichtungGrundHtml(x)}</td>
           <td class="mono">${n}<span class="kf"> / ${k.length}</span><span class="wd-bar"><i style="width:${k.length ? Math.round(n / k.length * 100) : 0}%"></i></span></td><td class="mono">${wdSum}</td>
           <td class="mono">${n ? `<span style="color:${mitPlan >= n ? '#2a9d5c' : 'var(--danger)'};font-weight:600">${mitPlan}</span><span class="kf"> / ${n}</span>` : '<span class="kf">—</span>'}</td>
           <td>${chipHtml}${gestartet ? `<span class="kf"> · ${gestartet} gestartet</span>` : ''}${!n && k.length ? `<span class="kf"> · ${escapeHtml(wdGruende(k))}</span>` : ''}</td></tr>`
