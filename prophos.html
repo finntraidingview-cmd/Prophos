@@ -1890,6 +1890,16 @@
   #tpl-view .tpl-h .leg .tpl-nk-l.gestrichelt{border-top-style:dashed}
   #tpl-view .tpl-h .leg .tpl-nk-l.hypo{border-top-color:#0F766E}
   #tpl-view .tpl-h .leg .tpl-nk-b{display:inline-block;width:12px;height:10px;background:color-mix(in srgb,var(--good) 20%,var(--surface));border:1px solid color-mix(in srgb,var(--good) 45%,var(--surface));vertical-align:middle;margin-right:3px;border-radius:2px}
+  /* Hypo-P&L: Liste je Trade unter dem Chart */
+  #tpl-view .tpl-hl{margin-top:8px;border-top:1px solid var(--border-soft)}
+  #tpl-view .tpl-hl-k{padding:7px 4px 3px;font-size:10.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--sub-2)} #tpl-view .tpl-hl-k b{color:var(--sub)}
+  #tpl-view .tpl-hz{display:grid;grid-template-columns:minmax(150px,1.4fr) 120px 90px 80px 100px minmax(110px,1fr);gap:4px 10px;align-items:center;padding:5px 4px;border-top:1px solid var(--border-soft);font-size:12.5px;font-variant-numeric:tabular-nums;cursor:pointer}
+  #tpl-view .tpl-hz:hover{background:var(--surface-tint)} #tpl-view .tpl-hz.summe{cursor:default;font-weight:600;background:none;border-top:2px solid var(--border)}
+  #tpl-view .tpl-hz.ohne{opacity:.6} #tpl-view .tpl-hz.zu .w b{color:var(--sub)}
+  #tpl-view .tpl-hz .w{display:flex;align-items:center;gap:6px;min-width:0} #tpl-view .tpl-hz .w i{width:8px;height:8px;border-radius:50%;flex:none} #tpl-view .tpl-hz .w b{font-weight:600;white-space:nowrap} #tpl-view .tpl-hz .w small{color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #tpl-view .tpl-hz .r{color:var(--sub);white-space:nowrap} #tpl-view .tpl-hz .r em{display:inline-block;min-width:34px;margin-right:6px;padding:1px 0;border-radius:4px;background:var(--surface-tint);color:var(--ink-2);font-style:normal;font-size:10.5px;font-weight:700;text-align:center;letter-spacing:.04em}
+  #tpl-view .tpl-hz .r em.is-buy{background:rgba(18,183,106,.12);color:#047857} #tpl-view .tpl-hz .r em.is-sell{background:rgba(240,68,56,.10);color:#b91c1c}
+  #tpl-view .tpl-hz .p,#tpl-view .tpl-hz .s{text-align:right;color:var(--ink-2)} #tpl-view .tpl-hz .h{text-align:right;font-weight:700;font-size:13.5px} #tpl-view .tpl-hz .z{text-align:right;color:var(--sub);white-space:nowrap}
   /* Liste „Läuft / Geplant" (Radar-Zeilen wdl-z in der Planer-Karte) */
   #tpl-view .tpl-lk{padding-bottom:4px} #tpl-view .tpl-lk .tpl-h{margin:4px 0 2px} #tpl-view .tpl-lk .tpl-h + .tpl-liste{margin-bottom:8px}
   #tpl-view .tpl-liste{border:1px solid var(--border-soft);border-radius:var(--r-md);overflow:hidden}
@@ -1929,6 +1939,7 @@
     #tpl-view .tpl-ab-kopf>em{grid-row:1;grid-column:3}
     #tpl-view .tpl-m{font-size:10.5px}
     #tpl-view .tpl-bd-z{grid-template-columns:16px minmax(0,1fr) auto;gap:2px 8px}
+    #tpl-view .tpl-hz{grid-template-columns:minmax(0,1fr) auto;gap:2px 8px} #tpl-view .tpl-hz .p,#tpl-view .tpl-hz .s{display:none} #tpl-view .tpl-hz .z{grid-column:1/-1;text-align:left;font-size:11px}
     #tpl-view .tpl-bd-z .b,#tpl-view .tpl-bd-z .t{grid-column:2/-1}
     #tpl-view .tpl-bd-z .a{grid-column:1/-1;justify-content:flex-start;padding-left:24px}
     #tpl-view .tpl-ids .adm-vl-chip{font-size:11.5px;padding:3px 8px}
@@ -39920,7 +39931,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1114'
+  const OS_TAB_BUILD = '2026-09-22.1115'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -44702,7 +44713,7 @@
    * Tages (Sommer 2 h, Winter 3 h). Netto-Linie: jeder Trade zählt ab Start laufzeit_min lang (aus dem Lauf, sonst 180 min) mit seinem
    * Einsatz, beendete bis zu ihrem Ende, laufende mindestens bis jetzt; gehedgte zählen 0 — wie ap_verlauf im Backend. */
   const _tpl = { tag: 'heute', wahl: null, edit: null, busy: false, meldung: '', timer: null, geladen: 0, laeuft: false, fehler: '', weg: new Set(), stub: false,
-    sicht: 'alle', abAuf: new Map(), lt: new Map(), ltAt: 0, weitereAuf: false, kerzen: [], kerzenAt: 0, kerzenBis: '', kwAt: 0 }   // kerzen: tv_kurs_1m NQ heute (Hypo-P&L-Verlauf)   // sicht: ID-Chip („alle" | user_id), abAuf: Konten-Abdeckung je ID auf/zu, lt: Startzeiten laufender Trades aller IDs (07.10.2026)
+    sicht: 'alle', abAuf: new Map(), lt: new Map(), ltAt: 0, weitereAuf: false, kerzen: [], kerzenAt: 0, kerzenBis: '', kwAt: 0, hypoJe: new Map() }   // kerzen: tv_kurs_1m NQ heute; hypoJe: Satz/Typ/Einstieg je Plan über Ladevorgänge hinweg (Hypo-P&L)   // sicht: ID-Chip („alle" | user_id), abAuf: Konten-Abdeckung je ID auf/zu, lt: Startzeiten laufender Trades aller IDs (07.10.2026)
   try{ const s = localStorage.getItem('prophos_tpl_sicht'); if(s) _tpl.sicht = s }catch(_){}
   // ALLE IDS (07.10.2026, Finn 03:25 dt: „Es ist nur die ID, von der ich gerade eingeloggt bin. So hässlich, man erkennt gar nichts"):
   // solange diese Seite offen ist, fragen apApi (Lauf) und apdLaden (Delta) mit ?sicht=alle — das Backend liefert dann alle IDs
@@ -45242,52 +45253,66 @@
     const z = _tpl.kerzen; return z.length ? z[z.length - 1].c : null
   }
   function tplHypo(D){
-    const heute = D.tag === D.heute && D.jetzt != null
-    const kurs = tplKursJetzt(), kw = (typeof kwSt === 'function' && kwSt().werte) || {}
-    const satzVon = t => t.satz != null ? t.satz : (t.konto_id && kw[String(t.konto_id)] && kw[String(t.konto_id)].satz_eur_pro_usd != null ? Number(kw[String(t.konto_id)].satz_eur_pro_usd) : null)
+    const heute = D.tag === D.heute && D.jetzt != null, kurs = tplKursJetzt(), kw = (typeof kwSt === 'function' && kwSt().werte) || {}
+    const kz = _tpl.kerzen, cJe = new Map(kz.map(k => [Math.round(k.min), k.c])), cache = _tpl.hypoJe
+    const kontoTyp = id => id ? (((accounts || []).find(a => String(a.id) === String(id)) || {}).type || null) : null
+    const satzKw = id => id && kw[String(id)] && kw[String(id)].satz_eur_pro_usd != null ? Number(kw[String(id)].satz_eur_pro_usd) : null
+    // Satz aus dem Lauf (Auto-Pläne): delta_eur_pkt ÷ usd_pro_pkt — bleibt auch nach dem Ende verfügbar
+    const satzLauf = (uid, konto, kontoId) => { const g = ((D.lauf && D.lauf.geplant) || []).find(x => (kontoId && String(x.konto_id) === String(kontoId)) || tplKk(x.user_id, x.konto) === tplKk(uid, konto))
+      return g && tplNum(g.delta_eur_pkt) != null && tplNum(g.usd_pro_pkt) > 0 ? Math.abs(Number(g.delta_eur_pkt)) / Number(g.usd_pro_pkt) : null }
+    // Kerze an einer Minute: letzter bekannter Schluss davor
+    const cBei = m => { let c = null; for(const k of kz){ if(k.min <= m) c = k.c; else break } return c }
+    // EINSTIEG in fester Reihenfolge (Master 07.10.2026): eigener Plan mt5_baseline.tv.einstieg_nq → Radar-Zeile einstieg_nq → Kerze der Startminute
+    const einstiegVon = (p, r, start) => { const a = p && p.mt5Baseline && p.mt5Baseline.tv ? tplNum(p.mt5Baseline.tv.einstieg_nq) : null
+      if(a > 1000) return { ein: a, q: 'tv' }
+      const b = r ? tplNum(r.einstieg_nq) : null; if(b > 1000) return { ein: b, q: r.einstieg_quelle || 'radar' }
+      const c = cJe.get(Math.floor(start)) ?? cBei(Math.floor(start)); return c != null ? { ein: c, q: 'kerze' } : { ein: null, q: null } }
     let jetzt = 0, n = 0, ohne = 0, cfd = 0
-    const posten = []
-    const typVon = t => t.typ || ((accounts || []).find(a => String(a.id) === String(t.konto_id)) || {}).type || null
+    const posten = [], zeilen = []
+    const gesehen = new Set()
+    // 1) LAUFENDE (Delta offen[], nur Challenge/Phase — tplDaten hat gefiltert): Live-P&L × Satz; Satz/Typ/Einstieg je Plan merken
     for(const t of D.trades){
-      if(t.gehedgt) continue
-      const lauf = t.status === 'laeuft', ende = t.status === 'beendet'
-      if(!lauf && !ende) continue
-      if(!TPL_TYPEN.includes(String(typVon(t) || ''))) continue   // nur Challenge / Phase 1 / Phase 2 (Finn 07.10.2026): keine Winning Days, keine Funded
-      const satz = satzVon(t), r = _tpl.lt.get(String(t.plan_id)) || null
+      if(t.gehedgt || t.status !== 'laeuft') continue
+      gesehen.add(String(t.plan_id))
+      const r = _tpl.lt.get(String(t.plan_id)) || null, p = t.eigen ? (tradePlans || []).find(x => String(x.id) === t.plan_id) : null
       const echo = !!(r && r.plattform === 'echo') || /^(mt5|mt5v2)$/.test(String(t.route || ''))
       const kt = tplNum(r && r.kt) ?? t.menge, wurzel = (r && r.symbol_root) || (Number(t.usd) === 20 ? 'NQ' : 'MNQ')
       const usdPkt = t.usd != null ? t.usd : (!echo && kt != null ? kt * (wurzel === 'NQ' ? 20 : 2) : null)
+      const satz = t.satz != null ? t.satz : (cache.get(String(t.plan_id)) || {}).satz ?? satzLauf(t.user_id, t.konto, t.konto_id) ?? satzKw(t.konto_id)
+      const e = echo ? { ein: null, q: 'cfd' } : einstiegVon(p, r, t.start)
       let pl = null
-      if(lauf){
-        if(echo) pl = tplNum(r && r.pl_live)
-        else if(r && Number(r.einstieg_nq) > 1000 && kurs && kt && typeof wdMasterLive === 'function'){ const m = wdMasterLive(t.richtung, r.einstieg_nq, kt, wurzel, kurs); pl = m ? m.pl : null }
-      } else pl = t.pnl
-      if(satz == null || pl == null || !isFinite(pl)){ if(lauf) ohne++; continue }
-      if(lauf){ jetzt += satz * pl; n++; if(echo) cfd++ }
-      posten.push({ t, satz, lauf, pl, einstieg: (!echo && r && Number(r.einstieg_nq) > 1000) ? Number(r.einstieg_nq) : null, usdPkt, echo })
+      if(echo) pl = tplNum(r && r.pl_live)
+      else if(e.ein != null && kurs && kt && typeof wdMasterLive === 'function'){ const mm = wdMasterLive(t.richtung, e.ein, kt, wurzel, kurs); pl = mm ? mm.pl : null }
+      cache.set(String(t.plan_id), { satz, typ: t.typ, usdPkt, einstieg: e.ein, einQ: e.q, kt, wurzel, echo, user: t.user, user_id: t.user_id, firma: t.firma, konto: t.konto, konto_id: t.konto_id, richtung: t.richtung, start: t.start, ende4: t.ende4 })
+      const zeile = { plan_id: t.plan_id, key: t.key, user: t.user, user_id: t.user_id, firma: t.firma, konto: t.konto, ende4: t.ende4, richtung: t.richtung, kt, wurzel, echo, pl, satz, hypo: (satz != null && pl != null) ? satz * pl : null, start: t.start, ende: null, lauf: true, einQ: e.q }
+      zeilen.push(zeile)
+      if(satz == null || pl == null || !isFinite(pl)){ ohne++; continue }
+      jetzt += satz * pl; n++; if(echo) cfd++
+      posten.push({ t, satz, lauf: true, pl, einstieg: e.ein, usdPkt, echo, start: t.start })
     }
-    // Verlauf je Minute (Kerzen heute); ohne Kerzen bleibt nur der Jetzt-Wert
-    const kz = _tpl.kerzen, verlauf = []
+    // Beendete Trades zählen NICHT (Terminal 1/Finn 07.10.2026: ein Trade, der endet, fällt aus Jetzt-Wert und Verlauf — kein „letzten Wert halten")
+    // VERLAUF je Minute (Kerzen heute)
+    const verlauf = []
     if(heute && kz.length && posten.length){
-      const cJe = new Map(kz.map(k => [Math.round(k.min), k.c]))
-      const von = Math.max(0, Math.floor(Math.min(...posten.map(p => p.t.start))), Math.round(kz[0].min)), bis = Math.min(1440, Math.floor(D.jetzt))
+      const von = Math.max(0, Math.floor(Math.min(...posten.map(p => p.start))), Math.round(kz[0].min)), bis = Math.min(1440, Math.floor(D.jetzt))
       let c = null
-      for(let m = von; m <= bis; m++){
-        if(cJe.has(m)) c = cJe.get(m)
+      for(let mi = von; mi <= bis; mi++){
+        if(cJe.has(mi)) c = cJe.get(mi)
         if(c == null) continue
         let sum = 0
         for(const p of posten){
-          const s = Math.floor(p.t.start); if(m < s) continue
-          if(!p.lauf && p.t.ende != null && m >= Math.floor(p.t.ende)){ sum += p.satz * p.pl; continue }
+          const s = Math.floor(p.start); if(mi < s) continue
+          if(!p.lauf && p.t.ende != null && mi >= Math.floor(p.t.ende)){ sum += p.satz * p.pl; continue }
           if(p.einstieg == null && p.ein == null) p.ein = cJe.get(s) ?? c   // CFD ≈ NQ / ohne Einstieg: Schluss der Startminute
           const ein = p.einstieg != null ? p.einstieg : p.ein
           if(p.usdPkt == null || ein == null) continue
           sum += (c - ein) * (p.t.long ? 1 : -1) * p.usdPkt * p.satz
         }
-        verlauf.push({ min: m, eur: sum })
+        verlauf.push({ min: mi, eur: sum })
       }
     }
-    return { jetzt: Math.round(jetzt), n, ohne, cfd, verlauf, kurs }
+    zeilen.sort((a, b) => (b.lauf - a.lauf) || (a.start - b.start))
+    return { jetzt: Math.round(jetzt), n, ohne, cfd, verlauf, kurs, zeilen }
   }
   function tplHypoKachelHtml(h){
     const vz = x => (x > 0 ? '+' : x < 0 ? '−' : '') + tplEur(x)
@@ -45300,7 +45325,7 @@
   function tplHypoHtml(D){
     const a = _tpl.achse || {}; if(a.VON == null) return ''
     const h = tplHypo(D), hv = h.verlauf
-    if(!hv.length && !h.n) return ''
+    if(!hv.length && !h.n && !h.ohne) return ''
     const v = D.v, VON = a.VON, BIS = a.BIS, SPAN = BIS - VON, W = 1000, H = 150, M = H / 2
     const vz = x => (x > 0 ? '+' : x < 0 ? '−' : '') + tplEur(x)
     const max = Math.max(50, ...hv.map(p => Math.abs(p.eur))) * 1.15
@@ -45321,9 +45346,20 @@
     }
     const schritt = SPAN <= 12 * 60 ? 60 : 120, achse = []
     for(let hh = Math.ceil(VON / schritt) * schritt; hh <= BIS; hh += schritt){ const x = (hh - VON) / SPAN * 100; achse.push(`<span class="${x < 3 ? 'links' : x > 97 ? 'rechts' : ''}" style="left:${x.toFixed(2)}%">${tplUhr(hh - v, v)}</span>`) }
+    // LISTE JE TRADE (Finn 07.10.2026, Screenshot .1114): ID · Firma · Konto · Richtung/Menge · P&L $ · Satz · Hypo-€ · seit/Ende — Summe = Kachel
+    const f2 = x => Number(x).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    const usd = x => x == null ? '—' : (x < 0 ? '−' : '+') + Math.abs(Math.round(x)).toLocaleString('de-DE') + ' $'
+    const zl = z => `<div class="tpl-hz${z.lauf ? '' : ' zu'}${z.hypo == null ? ' ohne' : ''}" ${/^[0-9a-f-]{36}$/i.test(z.key) ? `data-tpl-t="${escapeHtml(z.key)}"` : ''} title="${escapeHtml(`${z.konto || ''}${z.einQ ? ' · Einstieg aus ' + z.einQ : ''}${z.plQ ? ' · P&L ' + z.plQ : ''}`)}">
+        <span class="w"><i style="background:${idFarbe(z.user_id)}"></i><b>${escapeHtml(z.user || '?')}</b><small>${escapeHtml(z.firma || '?')}${z.ende4 ? ' …' + escapeHtml(z.ende4) : ''}</small></span>
+        <span class="r"><em class="${z.richtung === 'buy' ? 'is-buy' : 'is-sell'}">${z.richtung === 'buy' ? 'BUY' : 'SELL'}</em>${z.kt != null ? Number(z.kt).toLocaleString('de-DE', { maximumFractionDigits: 2 }) : '?'} ${z.echo ? 'Lot' : '× ' + escapeHtml(z.wurzel || 'NQ')}</span>
+        <span class="p">${usd(z.pl)}</span><span class="s">${z.satz != null ? f2(z.satz) + ' €/$' : '—'}</span>
+        <b class="h ${z.hypo > 0 ? 'tpl-gut' : z.hypo < 0 ? 'tpl-rot' : ''}">${z.hypo != null ? vz(z.hypo) : 'ohne Wert'}</b>
+        <span class="z">${z.lauf ? 'seit ' + tplUhr(z.start, v) : `${tplUhr(z.start, v)} – ${tplUhr(z.ende, v)}`}</span></div>`
+    const liste = h.zeilen.length ? `<div class="tpl-hl"><div class="tpl-hl-k">Läuft <b>${h.zeilen.length}</b></div>${h.zeilen.map(zl).join('')}
+        <div class="tpl-hz summe"><span class="w"><b>Summe</b></span><span class="r"></span><span class="p"></span><span class="s"></span><b class="h ${h.jetzt > 0 ? 'tpl-gut' : h.jetzt < 0 ? 'tpl-rot' : ''}">${vz(h.jetzt)}</b><span class="z">${h.ohne ? h.ohne + ' ohne Wert' : ''}</span></div></div>` : ''
     return `<div class="tpl-karte tpl-nk tpl-hk"><div class="tpl-h">P&amp;L hypothetisch heute <b class="${h.jetzt > 0 ? 'tpl-gut' : h.jetzt < 0 ? 'tpl-rot' : ''}">jetzt ${vz(h.jetzt)}</b>
         <span class="leg"><span>${h.n} Trade${h.n === 1 ? '' : 's'}${h.ohne ? ` · ${h.ohne} ohne Wert` : ''}</span><span>Kontowert-Satz × Live-P&amp;L${h.cfd ? ' · CFD ≈ NQ' : ''}</span><span>0 = Einstand</span></span></div>
-        ${hv.length ? `<div class="tpl-nk-chart"><span class="skala oben">+${tplEur(max)}</span><span class="skala unten">−${tplEur(max)}</span>${svg}</div><div class="tpl-achse tpl-nk-achse">${achse.join('')}</div>` : '<div class="tpl-leer">noch kein Verlauf — Kerzen oder Startzeiten fehlen</div>'}</div>`
+        ${hv.length ? `<div class="tpl-nk-chart"><span class="skala oben">+${tplEur(max)}</span><span class="skala unten">−${tplEur(max)}</span>${svg}</div><div class="tpl-achse tpl-nk-achse">${achse.join('')}</div>` : '<div class="tpl-leer">noch kein Verlauf — Kerzen oder Startzeiten fehlen</div>'}${liste}</div>`
   }
   /* Sicht auf EINE ID (ID-Chip): Trades und Summen nur dieser ID — Band/Netto „jetzt" aus dem Delta bleiben über alle (so rechnet der Planer) */
   function tplSichtFilter(D, ids){
