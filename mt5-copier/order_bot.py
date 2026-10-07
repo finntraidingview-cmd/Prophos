@@ -1644,6 +1644,25 @@ def tipp_takt(n, zufall=None, hand=None):
     return [rnd.uniform(0.05, 0.2) * tempo + (rnd.uniform(0.2, 0.45) if rnd.random() < 0.12 else 0.0) for _ in range(n)]
 
 
+# ── ECHO MIT HAND (07.10.2026, Finn: „bei Echo auch ein bisschen Zufallsprinzip mit den Klicks einbauen, wo genau geklickt wird —
+# guck, wie TopstepX das macht; wenn wir immer die gleiche Abfolge nehmen, buggt es"). Der Echo-Weg (MT5, F9-Dialog) klickte bis
+# heute auf die exakte Control-Mitte und drückte im selben Moment, in dem die Maus ankam. Jetzt dieselbe Hand wie bei TopstepX:
+# klick_punkt (nie die Mitte, Saum, Zug, Streuung) + klick_zoegern vor dem Druck. Der Klick selbst bleibt der atomare
+# SendInput-Batch (_klick_absolut, Parsec-sicher). Keine Mitte-Klicks mehr bei: Titelzeile, Feld-Klick, Buy/Sell, Ändern, Zustimmen,
+# Menüpunkt. NICHT geändert: der SL/TP-Zeilen-Scan und der Handel-Tab (dort ist die Zeilen-Geometrie der Treffer, kein Knopf).
+def _echo_klickziel(r, deckel=(60.0, 28.0)):
+    """Klickpunkt in einem pywinauto-Rechteck über klick_punkt (Hand des Laufs). -> (x, y)"""
+    return klick_punkt(r.left, r.top, r.right, r.bottom, deckel=deckel)
+
+
+def _echo_klick(r, schritte=6):
+    """Hinfahren, kurz zögern, EIN atomarer SendInput-Klick auf den gewürfelten Punkt. -> True, wenn SendInput angenommen."""
+    x, y = _echo_klickziel(r)
+    _maus_fahren(x, y, schritte=schritte)
+    _warte(*klick_zoegern())
+    return _klick_absolut(x, y)
+
+
 def maus_bahn(cx, cy, x, y, schritte=None, zufall=None, hand=None, ausschlag_max=90.0):
     """REIN RECHNEND (testbar): Punkte einer menschlichen Mausbahn von (cx, cy) nach (x, y) — Finn 06.10.2026: „wenn man eine Maus
     immer so an einer Linie fährt … das wäre besser, wenn die Maus ganz normal das Tempo verändert und nicht immer genau den gleichen
@@ -1902,13 +1921,15 @@ def _fenster_betreten(w):
     w.set_focus()
     _warte(0.25, 0.3)
     try:
-        from pywinauto import mouse
         r = w.rectangle()
-        # linkes Drittel der Titelzeile — weit weg von Minimieren/Schliessen
-        x = int(r.left + (r.right - r.left) * 0.35)
-        y = int(r.top + 14)
+        # linkes Drittel der Titelzeile — weit weg von Minimieren/Schliessen. Seit 07.10.2026 gewürfelt (25–45 % der Breite,
+        # 8–20 px unter der Oberkante) und als atomarer SendInput-Klick (_klick_absolut, Parsec-sicher) statt pywinauto.mouse —
+        # der einzige Nicht-Batch-Klick, der im Echo-Weg noch übrig war.
+        x = int(r.left + (r.right - r.left) * random.uniform(0.25, 0.45))
+        y = int(r.top + random.uniform(8, 20))
         _maus_fahren(x, y)
-        mouse.click(coords=(x, y))
+        _warte(*klick_zoegern())
+        _klick_absolut(x, y)
         _warte(0.15, 0.2)
     except Exception:
         pass  # Fokus steht schon — der Klick ist der sichtbare Uebernahme-Moment
@@ -9563,7 +9584,7 @@ def _feld_tippen(el, wert, name, trail, rahmen=None):
                     return False
             except Exception:
                 return False
-        return _klick_absolut(r.mid_point().x, r.mid_point().y)
+        return _echo_klick(r, schritte=4)   # gewürfelter Punkt im Feld (07.10.2026)
 
     for _versuch in (1, 2, 3):
         try:
@@ -9593,7 +9614,12 @@ def _feld_tippen(el, wert, name, trail, rahmen=None):
                 trail.append(f"{name}-Feld leert nicht ('{rest}') — tippe ueber die Auswahl")
                 el.type_keys("^a", set_foreground=False)
                 el.type_keys("{HOME}+{END}", set_foreground=False)
-            el.type_keys(str(wert), with_spaces=False, set_foreground=False)
+            # Tippen im Hand-Takt (07.10.2026): je Zeichen ein eigener Abstand aus tipp_takt (× 0,6, damit es im Schnitt nicht
+            # langsamer wird als pywinautos festes 50-ms-Raster) — vorher tickte jedes Zeichen im exakt gleichen Abstand
+            _txt = str(wert)
+            for _ch, _dt in zip(_txt, tipp_takt(len(_txt))):
+                el.type_keys(_ch, pause=0, with_spaces=False, set_foreground=False)
+                time.sleep(_dt * 0.6)
             _warte(0.12, 0.15)
             ist = _feld_lesen(el)
             if zahl_gleich(ist, wert):
@@ -9715,8 +9741,7 @@ def _menuepunkt_ausloesen(it):
         return True
     try:
         r = it.rectangle()
-        _maus_fahren(r.mid_point().x, r.mid_point().y, schritte=3)
-        _klick_absolut(r.mid_point().x, r.mid_point().y)
+        _echo_klick(r, schritte=3)   # gewürfelter Punkt im Menüpunkt (07.10.2026)
         _warte(0.25, 0.2)
         if not _menue_offen():
             return True
@@ -9965,9 +9990,7 @@ def _einklick_haftung_annehmen(hauptfenster, trail, melden=False):
         knopf.type_keys("{SPACE}", set_foreground=False)
 
     def _weg_sendinput():
-        r = knopf.rectangle()
-        _maus_fahren(r.mid_point().x, r.mid_point().y, schritte=6)
-        if not _klick_absolut(r.mid_point().x, r.mid_point().y):
+        if not _echo_klick(knopf.rectangle(), schritte=6):   # gewürfelter Punkt (07.10.2026)
             raise RuntimeError("SendInput abgelehnt")
 
     # Dieselbe Kaskade wie beim Schliessen-/Aendern-Knopf (.52/.64): echte
@@ -10108,13 +10131,15 @@ def _mt5_login_bestaetigen(expected, trail=None):
 def _login_dann_lesen(path, expected, **kw):
     """_api_lesen mit vorgeschaltetem Login-OK (07.10.2026): steht der
     Einloggen-Dialog da, erst OK, dann bis ~15 s warten, bis das Konto
-    verbunden ist. Ohne Dialog exakt das alte _api_lesen."""
-    st = _mt5_login_bestaetigen(expected)
+    verbunden ist. Ohne Dialog exakt das alte _api_lesen.
+    trail (optional) bekommt die Login-Stempel."""
+    trail = kw.pop("trail", None)
+    st = _mt5_login_bestaetigen(expected, trail)
     lese = _api_lesen(path, expected, **kw)
     if "fehler" not in lese:
         return lese
     if st != "bestaetigt":
-        st = _mt5_login_bestaetigen(expected)
+        st = _mt5_login_bestaetigen(expected, trail)
         if st != "bestaetigt":
             return lese
     ende = time.time() + 15.0
@@ -10716,8 +10741,7 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
     except Exception:
         pass
     try:
-        r = knopf.rectangle()
-        _maus_fahren(r.mid_point().x, r.mid_point().y, schritte=8)
+        _maus_fahren(*_echo_klickziel(knopf.rectangle()), schritte=8)   # Anfahrt auf einen gewürfelten Punkt (07.10.2026)
     except Exception:
         pass
     # Ausloesen mit ECHTER Eingabe zuerst (18.08.2026, Finns Fund: .click()
@@ -10743,8 +10767,7 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
         knopf.type_keys("{SPACE}", set_foreground=False)
 
     def _k_sendinput():
-        r2 = knopf.rectangle()
-        if not _klick_absolut(r2.mid_point().x, r2.mid_point().y):
+        if not _echo_klick(knopf.rectangle(), schritte=3):   # gewürfelter Punkt (07.10.2026)
             raise RuntimeError("SendInput abgelehnt")
 
     for name, weg in (("Fokus+Leertaste", _k_leertaste),
@@ -10806,8 +10829,15 @@ def run(cfg_path, cmd):
     kauf = str(cmd["richtung"]).lower() == "buy"
     vol = float(cmd["volumen"])
 
+    # Schritt-Spur (15.08.2026): jede Station vermerken — steht bei Erfolg UND
+    # Fehler in der Meldung, damit Finn/ich sofort sieht, wo der Bot steht.
+    # Seit 01.09.2026 mit Sekunden-Stempel pro Station (s. _StempelSpur).
+    # Seit 07.10.2026 VOR Login/Lesen angelegt: diese Station (Login-OK bis ~6 s, Lesen bis 15 s, mt5.initialize ohne Limit) war
+    # die einzige ohne Stempel — in der Spur fehlten ihre Sekunden komplett, und „wo bleibt die Zeit?" war nicht zu beantworten.
+    trail = _StempelSpur()
+    trail.append(maus_hand_text())
     # 1) LESEND: Kurs + Positionsstand VORHER (+ Login-Kontrolle)
-    lese = _login_dann_lesen(path, expected, symbol=symbol)
+    lese = _login_dann_lesen(path, expected, trail=trail, symbol=symbol)
     if "fehler" in lese:
         msg = lese["fehler"]
         if _ist_verbindungsfehler(msg):
@@ -10816,11 +10846,7 @@ def run(cfg_path, cmd):
     digits = lese["digits"]
     contract_size = lese["contract_size"]
     vorher_tickets = {p["ticket"] for p in lese["positionen"]}
-
-    # Schritt-Spur (15.08.2026): jede Station vermerken — steht bei Erfolg UND
-    # Fehler in der Meldung, damit Finn/ich sofort sieht, wo der Bot steht.
-    # Seit 01.09.2026 mit Sekunden-Stempel pro Station (s. _StempelSpur).
-    trail = _StempelSpur()
+    trail.append("Login/Lesen ok")
 
     # Start-Versatz (28.08.2026, Finns Sorge): starten mehrere Flotten-Instanzen
     # im selben Moment, blieben sie trotz gestreuter Einzelschritte anfangs eng
@@ -10892,7 +10918,7 @@ def run(cfg_path, cmd):
         # Parsec den Zeiger abfaengt. Maus-Animation nur noch Kosmetik.
         sym_combo = combos[0]
         try:
-            r = sym_combo.rectangle(); _maus_fahren(r.mid_point().x, r.mid_point().y, schritte=8)
+            _maus_fahren(*_echo_klickziel(sym_combo.rectangle()), schritte=8)   # Anfahrt gewürfelt (07.10.2026)
         except Exception:
             pass
 
@@ -10975,7 +11001,7 @@ def run(cfg_path, cmd):
         # still den alten Feld-Wert, z.B. 0.01 statt 2).
         vol_el = _map_felder(dlg).get("volumen", edits[0])
         try:
-            r = vol_el.rectangle(); _maus_fahren(r.mid_point().x, r.mid_point().y, schritte=6)
+            _maus_fahren(*_echo_klickziel(vol_el.rectangle()), schritte=6)   # Anfahrt gewürfelt (07.10.2026)
         except Exception:
             pass
         if not _feld_tippen(vol_el, f"{vol:g}", "Volumen", trail, rahmen=dlg):
@@ -11057,7 +11083,7 @@ def run(cfg_path, cmd):
                 "msg": f"Kein {muster}-Knopf im Dialog gefunden — Abbruch, nichts gesendet. "
                        f"Knoepfe: {', '.join(inventar) or 'keine'} [" + _spur(trail) + "]"}
     try:
-        r = knopf.rectangle(); _maus_fahren(r.mid_point().x, r.mid_point().y, schritte=6)
+        _maus_fahren(*_echo_klickziel(knopf.rectangle()), schritte=6)   # Anfahrt auf einen gewürfelten Punkt (07.10.2026)
     except Exception:
         pass
 
@@ -11108,8 +11134,7 @@ def run(cfg_path, cmd):
         knopf.type_keys("{SPACE}", set_foreground=False)
 
     def _weg_sendinput():
-        r2 = knopf.rectangle()
-        if not _klick_absolut(r2.mid_point().x, r2.mid_point().y):
+        if not _echo_klick(knopf.rectangle(), schritte=3):   # gewürfelter Punkt (07.10.2026)
             raise RuntimeError("SendInput abgelehnt")
 
     ausgeloest = None

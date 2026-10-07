@@ -38070,6 +38070,7 @@
       _pfSet('v2order', 'warn', `⏳ Terminal noch nicht bereit — neuer Versuch in 6 s (${Math.round((Date.now() - t0) / 1000)}s): ${escapeHtml(String(r.msg || ''))}`)
       await new Promise(res => setTimeout(res, 6000))
     }
+    pulsSpurSchreiben(plan.id, r)   // Spur am Plan (07.10.2026)
     const offen = !!(r && r.price && r.ticket)
     if(r && (r.ok || offen)) await v2PlanAufOpen(plan.id, r.ticket ?? null)   // Position lesend bestätigt → „Läuft" (+ Baseline, 24.09.2026), auch wenn nur SL/TP scheiterte
     if(r && r.ok){
@@ -38530,6 +38531,7 @@
                 // Position lesend bestätigt → Plan SOFORT auf „Läuft", ohne aufs
                 // Check-Ende zu warten (18.08.2026, Finns Punkt). Gilt auch, wenn
                 // nur SL/TP scheiterte: price+ticket heißt, die Position ist offen.
+                pulsSpurSchreiben(plan.id, r)   // Spur am Plan (07.10.2026)
                 if(r && (r.ok || (r.price && r.ticket))) mt5PlanAufOpen(plan.id)
                 if(r && r.ok){
                   if(fe) fe.textContent = `✓ Order platziert: ${po.richtung.toUpperCase()} ${po.volumen} ${po.symbol} @ ${r.price}${r.sl ? ` · SL ${r.sl} · TP ${r.tp}` : ' · ohne SL/TP (von Hand setzen)'}${r.retcode === 10010 ? ' · ⚠ Teilausführung, Größe im Terminal prüfen' : ''} — Auto-Erkennung übernimmt.`
@@ -40067,7 +40069,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1148'
+  const OS_TAB_BUILD = '2026-09-22.1149'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -44024,6 +44026,19 @@
   }
   setInterval(sfTick, SF_TAKT_MS)
   window._sf = { melden: sfMelden, neu: sfNeuEinplanen, behoben: sfBehoben, tagesEnde: sfTagesEnde, tick: sfTick }   // Test-Haken
+  /* PULS-SPUR AM PLAN (07.10.2026, Finn: „Echo ein Tick schneller" — ohne Messung wird nichts gekürzt): die Stempel-Spur des
+   * Order-Bots (Station · Sekunden) kam bisher nur ins Panel-Log am PC. Jetzt steht sie am Plan in mt5_baseline.puls_spur
+   * {at, pc, ok, s, trail, msg}, ohne Status-Guard (der Plan ist je nach Weg schon „open"). Bei Fehlern steckt die Spur im
+   * Meldungstext in eckigen Klammern — die wird herausgelöst. Die Routine „Puls-Fehler" liest daraus, welche Station Zeit frisst. */
+  function pulsSpurSchreiben(planId, r){
+    try{
+      const msg = String((r && (r.msg || r.error)) || ''), sek = /·\s*(\d+)s\b/.exec(msg), klammer = /\[([^\]]{20,})\]\s*$/.exec(msg)
+      const spur = { at: new Date().toISOString(), pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : null, ok: !!(r && r.ok),
+        s: sek ? Number(sek[1]) : null, trail: String((r && r.trail) || (klammer && klammer[1]) || '').slice(0, 1500), msg: msg.slice(0, 600) }
+      if(!spur.trail && !spur.msg) return
+      baselinePatch(planId, { puls_spur: spur }, null).catch(e => console.warn('[puls-spur]', (e && e.message) || e))
+    }catch(e){ console.warn('[puls-spur]', (e && e.message) || e) }
+  }
   /* ══ ENDE START-FEHLER ══ */
 
   /* STARTZEIT-WARTESCHLANGE (07.10.2026, Finn: „seit zwei Tagen gehen der zweite und dritte nie los, weil der erste zu lang dauert —
