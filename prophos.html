@@ -39944,7 +39944,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1124'
+  const OS_TAB_BUILD = '2026-09-22.1125'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -44256,8 +44256,12 @@
     if(go){ go.disabled = !v.tr.length; go.textContent = _ap.laeuft ? 'plant…' : 'So planen →' }
     const tagTxt = apPrTagText(_apPr.tag || d.tag)
     const nTrades = v.tr.reduce((s, t) => s + t.konten.length, 0)
-    const idChips = v.ids.map(i => `<span class="apx-id" style="--c:${idFarbe(i.key)}">${escapeHtml(i.name)}</span>`).join(' ')
-    const kopf = `<div class="apx-kopf"><b>${escapeHtml(tagTxt)}</b><span>· ${nTrades} Trade${nTrades === 1 ? '' : 's'} in ${v.tr.length} Tranche${v.tr.length === 1 ? '' : 'n'}</span>${idChips ? '<span>·</span>' + idChips : ''}</div>`
+    // PROBELAUF ALLE IDS (Auftrag 07.10.2026 04:10, Kopf „Probelauf · alle IDs · n Konten"): nur, wenn die Antwort ids_benutzt[] trägt
+    // (POST {trocken:true, ids:"alle"}, Backend 3630d25) — Konten = geplant + nicht geplant, die ID-Chips dann aus ids_benutzt (alle IDs des Laufs)
+    const alleIds = Array.isArray(d.ids_benutzt) ? d.ids_benutzt : null, nKonten = nTrades + v.aus.length
+    const idChips = (alleIds ? alleIds.map(i => ({ key: String(i.user_id || ''), name: i.user || String(i.user_id || '').slice(0, 8) })) : v.ids)
+      .map(i => `<span class="apx-id" style="--c:${idFarbe(i.key)}">${escapeHtml(i.name)}</span>`).join(' ')
+    const kopf = `<div class="apx-kopf">${alleIds ? `<b>Probelauf · alle IDs</b><span>· ${alleIds.length} ID${alleIds.length === 1 ? '' : 's'} · ${nKonten} ${nKonten === 1 ? 'Konto' : 'Konten'}</span><span>·</span>` : ''}<b>${escapeHtml(tagTxt)}</b><span>· ${nTrades} Trade${nTrades === 1 ? '' : 's'} in ${v.tr.length} Tranche${v.tr.length === 1 ? '' : 'n'}</span>${idChips ? '<span>·</span>' + idChips : ''}</div>`
     if(!v.tr.length){
       box.innerHTML = kopf + `<div class="apx-leer">${escapeHtml(d.msg || 'Nichts zu planen.')}</div>` + apPrAusHtml(v)
       return
