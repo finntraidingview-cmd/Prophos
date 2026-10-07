@@ -16358,11 +16358,15 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
         return k[1] > schwelle
 
     aktuell = vorher = strafe(zustand) + (misch(zustand),)
-    if not offen_(vorher):
+    # ID-MISCHUNG OHNE BAND-ANLASS (08.10.2026, Finn: „warum ist bei Chris immer noch alles long?" — 7 Pläne von 02:02 Dubai, also vor
+    # .1220 angelegt; Nachplanen lässt bestehende stehen, der Bot drehte nur bei Band-Überschreitung): auch eine ID-Mischung > 0 weckt
+    # den Bot — die Band-Schritte unten laufen trotzdem nur, wenn das Band offen ist, danach die eigene Mischungs-Phase
+    if not offen_(vorher) and not vorher[4]:
         return {"aenderungen": [], "vorher": als_dict(vorher), "nachher": als_dict(vorher), "ausloeser": None,
                 "daempfung": {"hysterese": schwelle, "ruhe_min": AP_RUHE_JE_PLAN_MIN, "ruhig": []}}
-    ausloeser = (f"Netto-Einsatz in den nächsten 60 min bis {vorher[1]:.0f} € über dem Band ±{float(band_pct):g} %" if einsatz else
-                 f"Netto-Delta in den nächsten 60 min bis {vorher[1]:.2f} €/Pkt über dem Band ±{float(band_pct):g} %")
+    ausloeser = None if not offen_(vorher) else (
+        f"Netto-Einsatz in den nächsten 60 min bis {vorher[1]:.0f} € über dem Band ±{float(band_pct):g} %" if einsatz else
+        f"Netto-Delta in den nächsten 60 min bis {vorher[1]:.2f} €/Pkt über dem Band ±{float(band_pct):g} %")
     aenderungen = []
     for _ in range(max(0, int(schritte))):
         if not offen_(aktuell):
@@ -16431,6 +16435,67 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
             aenderungen.append({"plan_id": i, "user_id": je[i]["user_id"], "firma": f, "art": art,
                                 "von_richtung": von["richtung"], "nach_richtung": nach["richtung"],
                                 "von_start_min": von["start"], "nach_start_min": nach["start"], "grund": grund})
+        zustand, aktuell = z, k_neu
+
+    # ── ID-MISCHUNG (08.10.2026, Master/Finn): Tranche ID × Firma drehen, wenn eine ID ≥ AP_ID_MISCH_AB Pläne über ≥ 2 Firmen fast nur
+    # in eine Richtung hat (ap_id_misch). Nur Tranchen aus lauter UNBESTÄTIGTEN Auto-Vorschlägen (bestätigte und gestartete bleiben,
+    # wie Finn sie freigegeben hat), kein Richtungsschutz, Ruhezeit je Plan, keine geteilte ID+Firma. Das Band darf dabei nicht
+    # schlechter werden als die Hysterese — in den nächsten 60 min UND über den Tag (Chris' Pläne liegen oft später als 60 min),
+    # kein neuer Malus. Bevorzugt: beste Mischung, dann die kleinere Tranche (Chris 6/1: FundingPips 2× → sell = 4/3).
+    def ueber_tag(z):
+        if einsatz:
+            ev_e = [(z[i]["start"], float(je[i].get("einsatz_abs") or 0) * (1 if z[i]["richtung"] == "buy" else -1)) for i in z]
+            v = ap_verlauf(einsatz.get("basis"), einsatz.get("brutto"), ev_e, band_pct, ab_min=jetzt_min, laufzeit_min=einsatz.get("laufzeit"))
+        else:
+            ev = [(z[i]["start"], float(je[i].get("delta_abs") or 0) * (1 if z[i]["richtung"] == "buy" else -1)) for i in z]
+            v = ap_verlauf(basis_netto, basis_brutto, ev, band_pct, ab_min=jetzt_min)
+        return max([abs(x["netto_delta"]) - x["band_delta"] for x in v["verlauf"]] + [0.0])
+
+    def misch_je(z):
+        return ap_id_misch({i: z[i]["richtung"] for i in z}, {i: {"user": je[i]["user_id"], "firma": je[i]["firma"], "n_plaene": 1} for i in z})[1]
+
+    # höchstens EINE Mischungs-Drehung je Bot-Lauf, über alle IDs (Master 08.10.2026, Finn „nicht so hart", passt zur Dämpfung) —
+    # ein Zwei-Schritt-Weg (FundedNext 4× → short, dann Topstep → long) verteilt sich so auf zwei Läufe
+    for _ in range(min(1, max(0, int(schritte)))):
+        if not aktuell[4]:
+            break
+        tag_vor = ueber_tag(zustand)
+        tr = _ap_tranchen([dict(je[i], start_min=zustand[i]["start"]) for i in zustand])
+        kandidaten = []
+        for k in sorted(tr):
+            t = tr[k]
+            ids = sorted(t["plan_ids"])
+            if (not t["aenderbar"] or t.get("teile", 1) != 1 or f"{t['user_id']}|{t['firma']}" in id_fest or ruht(ids)
+                    or len({zustand[i]["richtung"] for i in ids}) != 1
+                    or not all(je[i].get("auto_plan") and not je[i].get("bestaetigt") for i in ids)):
+                continue
+            z = {i: dict(v) for i, v in zustand.items()}
+            for i in ids:
+                z[i]["richtung"] = "sell" if z[i]["richtung"] == "buy" else "buy"
+            k_neu = strafe(z) + (misch(z),)
+            if k_neu[4] >= aktuell[4] or k_neu[0] > aktuell[0] or k_neu[1] > max(schwelle, aktuell[1]) + 1e-9:
+                continue
+            tag_neu = ueber_tag(z)
+            if tag_neu > max(schwelle, tag_vor) + 1e-9:
+                continue
+            kandidaten.append(((k_neu[4], len(ids), round(tag_neu, 3), k_neu[3], k), k_neu, t, ids, z))
+        if not kandidaten:
+            break
+        kandidaten.sort(key=lambda x: x[0])
+        _key, k_neu, t, ids, z = kandidaten[0]
+        uid = str(t["user_id"])
+        m_vor, m_nach = misch_je(zustand).get(uid) or {}, misch_je(z).get(uid) or {}
+        wer = je[ids[0]].get("user") or uid[:8]
+        if ausloeser is None:
+            ausloeser = f"ID-Mischung: {wer} {m_vor.get('long')} long / {m_vor.get('short')} short"
+        for i in ids:
+            von, nach = zustand[i], z[i]
+            aenderungen.append({"plan_id": i, "user_id": je[i]["user_id"], "firma": t["firma"], "art": "richtung",
+                                "von_richtung": von["richtung"], "nach_richtung": nach["richtung"],
+                                "von_start_min": von["start"], "nach_start_min": nach["start"],
+                                "grund": (f"ID-Mischung: {je[i].get('firma_name') or t['firma']} bei {wer} "
+                                          f"{AP_RICHTUNG_TXT[von['richtung']]} → {AP_RICHTUNG_TXT[nach['richtung']]} "
+                                          f"({m_vor.get('long')}/{m_vor.get('short')} → {m_nach.get('long')}/{m_nach.get('short')} long/short)")})
         zustand, aktuell = z, k_neu
     return {"aenderungen": aenderungen, "vorher": als_dict(vorher), "nachher": als_dict(aktuell), "ausloeser": ausloeser,
             "daempfung": {"hysterese": schwelle, "ruhe_min": AP_RUHE_JE_PLAN_MIN,
