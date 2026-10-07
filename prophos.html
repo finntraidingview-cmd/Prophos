@@ -2757,6 +2757,9 @@
   #adm-pane-planer .ap-adm-grp{padding:12px 0 6px} #adm-pane-planer .ap-adm-grp .ap-adm-id{font-size:13px;font-weight:600}
   #adm-pane-planer .ap-adm-grp .btn-xs{margin-left:auto;padding:2px 9px;font-size:11.5px;height:auto;line-height:1.6;white-space:nowrap}
   #adm-pane-planer .seg button{padding:3px 10px;font-size:12px}
+  /* Nächste Payouts (08.10.2026, Finn: Schriften cleaner, Zahlen nicht in Mono): kompaktere Zeilen, Zahlen rechtsbündig + tabular */
+  #adm-f-cal-panel .t td{padding-top:7px;padding-bottom:7px;vertical-align:middle}
+  #adm-f-cal-panel .t td.adm-num{font-variant-numeric:tabular-nums}
   #adm-pane-planer .ap-konto{background:none;border:0;padding:0;font:inherit;color:var(--ink);cursor:pointer;text-align:left;white-space:nowrap}
   #adm-pane-planer .ap-konto:hover{color:var(--violet);text-decoration:underline;text-underline-offset:3px}
   #adm-pane-planer .ap-konto .mono{color:var(--sub)}
@@ -14200,7 +14203,8 @@
       if(c.bal == null){ td.textContent = '—'; td.style.color = 'var(--sub)'; td.title = 'Keine Balance-Quelle (Echo/TSX/Duplikum), manuell leer oder 0'; return }
       const manuell = r.balance_src === 'manuell'
       const stand = c.balAt ? new Date(c.balAt).toLocaleString('de-DE', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit', timeZone:'Europe/Berlin' }) : ''
-      td.innerHTML = '<span class="mono" style="font-weight:600"></span><div style="font-size:10.5px;color:var(--sub)"></div>'
+      // Typo (Finn 08.10.2026: „die Schriften cleaner, die Zahlen sind hässlich"): Balance 13 px normal + tabular-nums, Nebenzeile 11.5 px grau
+      td.innerHTML = '<span class="tnum" style="font-weight:600;font-size:13px"></span><div style="font-size:11.5px;color:var(--sub)"></div>'
       td.children[0].textContent = admGeld(c.bal, c.ccy)
       td.children[0].style.color = manuell ? 'var(--sub)' : 'var(--ink)'
       td.children[1].textContent = manuell ? 'manuell' : (c.balAlt && stand ? `${r.balance_src || ''} · ${stand}` : (r.balance_src || ''))
@@ -15199,7 +15203,11 @@
       admCalRender()
 
       function admCalRender(){
-        const cal = (admData && admData.payout_ready) || []
+        // NUR FUTURES MIT TYP WINNING DAYS / FUNDED (Finn 08.10.2026: „Hier unten sollen die Accounts nur angezeigt werden, wenn sie bei Futures
+        // als Typ Winning Day sind — nicht jede einzelne als Funded. Nur Winning Day und Funded als Typ."): Challenges/Phasen und CFD-Konten
+        // bleiben weg — reiner Anzeige-Filter auf admData.payout_ready (Raster, Summen und Tabelle gleich), keine Datenänderung.
+        const istFut = f => { try{ return typeof tpFirmIstFutures === 'function' ? !!tpFirmIstFutures(f) : true }catch(_){ return true } }
+        const cal = ((admData && admData.payout_ready) || []).filter(r => istFut(r.account_firm) && (r.type === 'winning_days' || r.type === 'funded'))
         const calPanel = $('adm-f-cal-panel')
         if(!calPanel) return
         calPanel.hidden = !cal.length
@@ -15317,7 +15325,7 @@
           const tr = document.createElement('tr')
           tr.innerHTML =
             '<td><span class="c-person" style="font-weight:600"></span></td>' +
-            '<td><span class="c-acc" style="font-size:12.5px"></span><div class="c-ext" style="font-size:11px;color:var(--sub);font-family:var(--mono)"></div></td>' +
+            '<td><span class="c-acc" style="font-size:13px"></span><div class="c-ext" style="font-size:11.5px;color:var(--sub)"></div></td>' +
             '<td><span class="c-firm" style="color:var(--sub);font-size:12.5px"></span></td>' +
             '<td class="c-stand" style="white-space:nowrap"></td>' +
             '<td class="adm-num c-bal" style="white-space:nowrap"></td>' +
@@ -15343,7 +15351,7 @@
             if(r.wd_ready){ const chip = document.createElement('span'); chip.className = 'chip chip-good'; chip.style.marginLeft = '8px'; chip.textContent = 'anfragbar'; st.appendChild(chip) }
           }
           admBalanceZelle(tr.querySelector('.c-bal'), r, c)
-          tr.querySelector('.c-size').textContent = c.size != null ? (c.size / 1000) + 'k' : '—'
+          const sz = tr.querySelector('.c-size'); sz.classList.add('tnum'); sz.style.fontSize = '13px'; sz.textContent = c.size != null ? (c.size / 1000) + 'k' : '—'
           admCalPayoutCell(tr.querySelector('.c-po'), r)
           return tr
         }
@@ -15376,7 +15384,7 @@
         v.style.cssText = 'font-weight:700;font-size:13px;color:' + (c.betrag > 0 ? 'var(--good)' : 'var(--sub)')
         v.textContent = c.betrag != null ? geld(c.betrag) : '—'
         const sub = document.createElement('div')
-        sub.style.cssText = 'font-size:10.5px;color:var(--sub)'
+        sub.style.cssText = 'font-size:11.5px;color:var(--sub);font-variant-numeric:tabular-nums'
         sub.textContent = admPayoutHerleitung(c)
         b.appendChild(v); b.appendChild(sub)
         b.addEventListener('click', () => admCalPayoutEdit(td, r))
@@ -40615,7 +40623,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1190'
+  const OS_TAB_BUILD = '2026-09-22.1191'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
