@@ -3850,6 +3850,16 @@ def test_cdp_konto_regression_865():
     # wenn die Bewegung nie ankam, und schreibt den Befund in die Spur — der Hover-Riegel bleibt (ohne :hover kein Druck)
     chk("function maus()" in js and "maus: maus," in js and "window.__prophosMaus" in js and "addEventListener('mousemove'" in js
         and "}, true);" in js and "mausMitschrift();   // beim Laden" in js, "augen.js 0.7.9: maus() + Capture-Listener einmal je Seite, beim Laden installiert")
+    # ECHO EIN TICK SCHNELLER (08.10.2026, Slave-Terminal 3, Finn 07.10.): Spuren von 14 Läufen — F9-Dialog-Suche erst die billige
+    # Kind-Suche, dann Top-Level (beide bleiben); Feld-Karte _map_felder im Order-Dialog nur einmal (Volumen + SL/TP teilen sie)
+    import inspect as _iw
+    q_fd = _iw.getsource(ob._finde_order_dialog)
+    q_rn = _iw.getsource(ob.run)
+    chk(q_fd.index("_kind_fenster(hauptfenster)") < q_fd.index('Desktop(backend="uia").windows()') and "_warte(0.3, 0.3)" in q_fd
+        and "_kind_fenster(hauptfenster, voll=True)" in q_fd, "F9-Dialog: Kind-Suche vor der Top-Level-Suche, Takt und Abschluss-Blick unverändert")
+    chk(q_rn.count("_map_felder(dlg)") == 1 and 'sl_el, tp_el = fmap.get("sl"), fmap.get("tp")' in q_rn
+        and q_rn.index("fmap = _map_felder(dlg)") < q_rn.index('vol_el = fmap.get("volumen", edits[0])')
+        and "_warte(0.3, 0.25)" in q_rn and "_warte(0.2, 0.25)" in q_rn, "run(): Feld-Karte einmal für Volumen + SL/TP, Setz-Pausen unverändert")
     chk("maus:m" in ob.win_ziel_js(1, 2) and "prophosAugen.maus()" in ob.win_ziel_js(1, 2) and "toast:!!t" in ob.win_ziel_js(1, 2)
         and "maus:m" in ob.win_ziel_pruef_js(1, 2, {"rect": [0, 0, 10, 10]}), "Ziel-Proben (mit/ohne Kandidat) tragen die Maus-Mitschrift der Seite")
     B_ = ob.maus_stups_befund

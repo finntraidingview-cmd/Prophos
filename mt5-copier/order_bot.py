@@ -9477,6 +9477,19 @@ def _finde_order_dialog(hauptfenster, timeout=10.0):
     pid = hauptfenster.element_info.process_id
     ende = time.time() + timeout
     while time.time() < ende:
+        # KIND-SUCHE ZUERST (08.10.2026, Slave-Terminal 3, Finn 07.10.: „Echo ein Tick schneller, nichts kaputt machen"): die
+        # Stempel-Spuren von 14 Läufen (7 PCs) zeigen Terminal→„F9-Dialog offen" median 2,0 s, bis 5,4 s auf dem langsamsten PC —
+        # davon sind nur ~0,6 s die Setz-Pause nach F9. Der Rest war die Top-Level-Suche (a): alle Desktop-Fenster aufzählen und je
+        # sichtbarem MT5-Fenster zwei descendants()-Scans (_ist_order_dialog), obwohl MT5 den F9-Dialog seit dem Fund vom 15.08.2026
+        # IMMER als Kind ans Hauptfenster hängt — (a) lief jeden Durchlauf ins Leere, (b) fand ihn dann in Millisekunden. Jetzt erst
+        # (b), (a) bleibt als zweiter Blick im selben Durchlauf — kein Fenster verloren, keine Wartezeit verkürzt.
+        # b) Kind-/Enkel-Fenster des Hauptfensters (billig)
+        try:
+            for d in _kind_fenster(hauptfenster):
+                if _ist_order_dialog(d):
+                    return d
+        except Exception:
+            pass
         # a) Top-Level-Fenster desselben Prozesses
         try:
             for w in Desktop(backend="uia").windows():
@@ -9487,13 +9500,6 @@ def _finde_order_dialog(hauptfenster, timeout=10.0):
                         return w
                 except Exception:
                     continue
-        except Exception:
-            pass
-        # b) Kind-/Enkel-Fenster des Hauptfensters (billig)
-        try:
-            for d in _kind_fenster(hauptfenster):
-                if _ist_order_dialog(d):
-                    return d
         except Exception:
             pass
         _warte(0.3, 0.3)
@@ -10999,7 +11005,11 @@ def run(cfg_path, cmd):
         # PC: gemalter Text kommt bei MT5 nie an, s. _feld_tippen) — und ohne
         # bestaetigtes Ruecklesen wird NICHT geklickt (sonst handelt der Bot
         # still den alten Feld-Wert, z.B. 0.01 statt 2).
-        vol_el = _map_felder(dlg).get("volumen", edits[0])
+        # FELD-KARTE EINMAL (08.10.2026, Slave-Terminal 3): _map_felder scannt den Dialog zweimal (Text + Edit) — sie lief bisher
+        # hier UND noch einmal vor SL/TP. Spuren von 6 Läufen: „Volumen getippt" → „F9-SL-Feld" median 1,3 s, davon ~0,3 s Pause,
+        # der Rest der zweite Scan. Die Karte vom Volumen-Schritt ist durch das bewiesene Tippen frisch — SL/TP nehmen sie wieder.
+        fmap = _map_felder(dlg)
+        vol_el = fmap.get("volumen", edits[0])
         try:
             _maus_fahren(*_echo_klickziel(vol_el.rectangle()), schritte=6)   # Anfahrt gewürfelt (07.10.2026)
         except Exception:
@@ -11030,8 +11040,7 @@ def run(cfg_path, cmd):
                     sl_f9, tp_f9 = berechne_sl_tp(cmd["richtung"], ref, vol,
                                                   contract_size, cmd["sl_usd"],
                                                   cmd["tp_usd"], digits)
-                    fmap = _map_felder(dlg)
-                    sl_el, tp_el = fmap.get("sl"), fmap.get("tp")
+                    sl_el, tp_el = fmap.get("sl"), fmap.get("tp")   # Karte vom Volumen-Schritt (08.10.2026), kein zweiter Scan
                     if sl_el is None or tp_el is None:
                         trail.append("F9-SL/TP-Felder nicht gefunden — Nachtrag nach Fill")
                     else:
