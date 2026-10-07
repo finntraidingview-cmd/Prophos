@@ -12089,9 +12089,28 @@
     let bucket = null
     try{ bucket = JSON.parse(localStorage.getItem(PROF_BUCKET + userId) || 'null') }catch(_){ bucket = null }
     if(!bucket) return
+    /* SPEICHER VOLL BEIM EINSPIELEN (07.10.2026, Finn: „ID-Wechsel gescheitert … 'prophos_cache_plans' exceeded the quota —
+     * ich will IMMER ID wechseln können"): der Schutz von .953 griff nur beim Wegsichern, hier warf setItem mitten im
+     * Einspielen → alte ID schon geleert, Ziel-ID halb drin. Jetzt echte Keys zuerst (bei Quota: Caches der anderen
+     * Buckets werfen, nochmal), die prophos_cache_* zuletzt und nur, wenn sie passen — sonst lädt Supabase sie frisch. */
+    const eintraege = Object.entries(bucket).filter(([, v]) => v != null)
+    const echte  = eintraege.filter(([k]) => !k.startsWith(PROF_CACHE))
+    const caches = eintraege.filter(([k]) =>  k.startsWith(PROF_CACHE))
     _profBulkWrite = true
     try{
-      for(const [k, v] of Object.entries(bucket)){ if(v != null) localStorage.setItem(k, v) }
+      for(const [k, v] of echte){
+        try{ localStorage.setItem(k, v) }
+        catch(e){
+          if(!_profVoll(e)) throw e
+          console.warn('[profil] localStorage voll beim Einspielen — Boot-Caches anderer IDs werden verworfen')
+          _profCachesAusBuckets([userId])
+          localStorage.setItem(k, v)
+        }
+      }
+      for(const [k, v] of caches){
+        try{ localStorage.setItem(k, v) }
+        catch(e){ if(!_profVoll(e)) throw e; console.warn('[profil] Boot-Cache übersprungen (Speicher voll):', k) }
+      }
     } finally { _profBulkWrite = false }
   }
 
@@ -39947,7 +39966,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1127'
+  const OS_TAB_BUILD = '2026-09-22.1128'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
