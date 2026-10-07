@@ -41034,7 +41034,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1245'
+  const OS_TAB_BUILD = '2026-09-22.1246'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -44582,7 +44582,11 @@
     el.classList.toggle('is-bald', !zaehlt && !aktiv && !!n && rest <= 10 * 60000)
     el.hidden = false
     let cd = null
-    if(!document.hidden && el.getClientRects().length){
+    // OVERLAY NUR AM AUSFÜHRENDEN PC (Finn 08.10.2026, Screenshot MacBook als Ina, Overlay mitten im Bild: „Wenn irgendwo der Puls-Bot
+    // startet, juckt es mich nicht, die Meldung am MacBook zu haben. Es reicht, wenn ich sie am PC sehe"): dasselbe Kriterium, mit dem
+    // tpStartUmTick claimt und startet — MT5_LOCAL (Prophos über das lokale Backend des PCs) + die eingeloggte ID (Pille/Takt kennen nur
+    // deren Pläne). Mac, Handy und pages.dev behalten Pille „Puls in n" und Hover-Karte, aber kein Vollbild und kein „Maus nicht bedienen".
+    if(MT5_LOCAL && !document.hidden && el.getClientRects().length){
       if(zaehlt) cd = { lbl: 'Puls startet in', zahl: String(Math.ceil(rest / 1000)), was: _pulsCd.text }
       else if(_pulsCd && jetzt - _pulsCd.ziel <= PULS_CD_NACH_MS){
         if(aktiv && !aktiv.wartet) cd = { lbl: 'Puls läuft', zahl: dauer, was: [aktiv.art, aktiv.name].filter(Boolean).join(' · '), laeuft: true }
