@@ -5748,6 +5748,16 @@ def test_tsx_k3a():
         and all(0.03 <= a_ <= 0.6 and 0.07 <= s_ <= 0.41 for a_, s_ in kz_) and len(set(kz_)) >= 90,
         f"TopstepX je Hand: Schrittpause ≥ 1 s, schief verteilt (Mittel {sum(pd_) / len(pd_):.2f} s), manchmal Nachdenken; Hover-Pause ≥ 0,3 s streut; "
         f"Tipp-Takt je Zeichen; Zögern vor dem Druck")
+    # Echo-Takt mit wandernder Maus (07.10.2026, Finn: „mal eine Sekunde Pause, mal 2,5 Sekunden, die Maus bewegt sich ein bisschen")
+    ep_ = [ob.echo_pause_dauer(zufall=_rd.Random(i_), hand=H1) for i_ in range(500)]
+    _fod = _i.getsource(ob._finde_order_dialog)
+    chk(all(1.0 <= d_ <= 2.5 for d_ in ep_) and 1.2 <= sum(ep_) / len(ep_) <= 2.1 and len(set(round(d_, 3) for d_ in ep_)) >= 300
+        and "echo_pause_dauer" in _i.getsource(ob._echo_pause) and "_maus_zittern" in _i.getsource(ob._echo_pause)
+        and "_EchoUnruhe" in _i.getsource(ob.run) and "_echo_pause(seit)" in _i.getsource(ob.run) and "unruhe.stop()" in _i.getsource(ob.run)
+        and "stopp" in _i.getsource(ob._maus_zittern) and "_kind_fenster(hauptfenster)" in _fod.split("Desktop(backend")[0]
+        and _i.getsource(ob.run).count("_map_felder(dlg)") == 1,
+        f"Echo-Takt je Hand: 1–2,5 s, schief verteilt (Mittel {sum(ep_) / len(ep_):.2f} s); Maus wandert nur beim Lesen (Unruhe-Thread, stop vor "
+        f"jedem Klick); Kind-Suche vor der Desktop-Suche; Felder einmal zugeordnet")
     chk("maus_bahn(" in _i.getsource(ob._maus_fahren) and "maus_takt(" in _i.getsource(ob._maus_fahren)
         and "_maus_zittern" in _i.getsource(ob._tsx_pause) and "_WIN_EINGABE" in _i.getsource(ob._tsx_pause) and "tsx_pause_dauer" in _i.getsource(ob._tsx_pause)
         and "maus_bahn(" in _i.getsource(ob._maus_zittern) and "heim" in _i.getsource(ob._maus_zittern) and '"zittern"' in _i.getsource(ob._maus_zittern)

@@ -1663,6 +1663,76 @@ def _echo_klick(r, schritte=6):
     return _klick_absolut(x, y)
 
 
+# ── ECHO-PAUSEN MIT WANDERNDER MAUS (07.10.2026, Finn: „die Klicks ein bisschen schneller — zwischen den jeweiligen Aktionen ist
+# immer sehr viel Pause; die Pause runterschrauben und aus Zufallsprinzip, mal eine Sekunde, mal 2,5 Sekunden, die Maus bewegt sich
+# einfach nur ein bisschen hin und her"). Die festen _warte-Schritte im Echo-Weg waren schon kurz (0,1–0,4 s) — die sichtbaren
+# Pausen sind die UIA-Suchen im Terminal (F9-Dialog finden, Felder zuordnen, Positions-Bestätigung lesen), bei denen die Maus
+# erstarrte. Jetzt: (1) zwischen zwei Aktionen gilt ein gewürfelter Takt von 1–2,5 s AB der letzten Aktion — die UIA-Arbeit zählt
+# mit, gewartet wird nur der Rest (_echo_pause); (2) während der Bot nur liest, wandert die Maus in einem eigenen Thread
+# (_EchoUnruhe, nur SetCursorPos), und zwar NIE während einer Fahrt oder eines Klicks — stop() steht vor jeder Aktion.
+ECHO_PAUSE_S = (1.0, 2.5)
+
+
+def echo_pause_dauer(zufall=None, hand=None):
+    """REIN RECHNEND (testbar): Takt zwischen zwei Echo-Aktionen (s): 1 s plus schief verteilt 0–1,5 s mal Pausen-Faktor der Hand
+    (kurze häufiger als lange, u^1,3), immer innerhalb ECHO_PAUSE_S — nie unter 1 s, nie über 2,5 s."""
+    rnd = zufall or random
+    h = hand or _hand()
+    d = ECHO_PAUSE_S[0] + (rnd.random() ** 1.3) * (ECHO_PAUSE_S[1] - ECHO_PAUSE_S[0]) * h["pause"]
+    return max(ECHO_PAUSE_S[0], min(ECHO_PAUSE_S[1], d))
+
+
+def _echo_pause(seit):
+    """Rest des Takts seit der letzten Aktion abwarten (echo_pause_dauer ab `seit`); ist er durch die UIA-Arbeit schon verbraucht,
+    bleibt nur die kurze Setz-Zeit für MT5 (0,1–0,25 s). Die Maus wandert derweil (_maus_zittern), ohne Windows reines Warten."""
+    rest = (float(seit) + echo_pause_dauer()) - time.time()
+    if rest < 0.1:
+        _warte(0.1, 0.15)
+        return
+    if _WIN_EINGABE:
+        _maus_zittern(rest)
+    else:
+        _warte(rest, 0.05)
+
+
+class _EchoUnruhe:
+    """Die Maus wandert, WÄHREND der Bot liest (F9-Dialog suchen, Positions-Bestätigung): eigener Daemon-Thread, nur
+    _maus_zittern (SetCursorPos), kein Klick, keine Taste. stop() ist idempotent und wartet das laufende Zittern ab — es steht
+    vor jeder Fahrt und jedem Klick, der Hover-/Klick-Weg bleibt unberührt. Ohne Windows-Eingabe läuft kein Thread."""
+    def __init__(self):
+        import threading
+        self._stopp = threading.Event()
+        self._t = None
+
+    def start(self):
+        if _WIN_EINGABE and self._t is None and not self._stopp.is_set():
+            import threading
+            self._t = threading.Thread(target=self._lauf, name="echo-unruhe", daemon=True)
+            self._t.start()
+        return self
+
+    def _lauf(self):
+        while not self._stopp.is_set():
+            try:
+                _maus_zittern(random.uniform(0.5, 1.5), stopp=self._stopp)
+            except Exception:
+                return
+
+    def stop(self):
+        self._stopp.set()
+        t = self._t
+        self._t = None
+        if t is not None:
+            t.join(timeout=2.0)
+
+    def __enter__(self):
+        return self.start()
+
+    def __exit__(self, *_a):
+        self.stop()
+        return False
+
+
 def maus_bahn(cx, cy, x, y, schritte=None, zufall=None, hand=None, ausschlag_max=90.0):
     """REIN RECHNEND (testbar): Punkte einer menschlichen Mausbahn von (cx, cy) nach (x, y) — Finn 06.10.2026: „wenn man eine Maus
     immer so an einer Linie fährt … das wäre besser, wenn die Maus ganz normal das Tempo verändert und nicht immer genau den gleichen
@@ -1768,12 +1838,13 @@ def _maus_fahren(x, y, schritte=None):
         time.sleep(dt)
 
 
-def _maus_zittern(dauer):
+def _maus_zittern(dauer, stopp=None):
     """Waehrend einer Pause nicht erstarren (Finn 06.10.2026: „dass die Maus sich die ganze Zeit nur so ein bisschen bewegt … komplett
     aus Zufallsprinzip"): je Zug wird gewuerfelt — Stillstand (0,1–0,9 s), kleines Zittern (bis ±7 px mal Hand) oder langsames Wandern
     (15–50 px mal Hand weg, spaeter wieder in die Naehe zurueck), jeweils auf einer maus_bahn im maus_takt. Nur Windows, nie waehrend
     eines Klicks (wird allein aus Pausen aufgerufen, VOR der naechsten Fahrt zum Ziel; der Hover-Beweis liegt immer nach der Fahrt).
-    Faellt still auf reines Warten zurueck, wenn der Zeiger nicht lesbar ist."""
+    Faellt still auf reines Warten zurueck, wenn der Zeiger nicht lesbar ist. stopp (07.10.2026, Echo-Unruhe): threading.Event —
+    gesetzt heisst sofort aufhoeren (der Hauptlauf will fahren oder klicken)."""
     ende = time.time() + max(0.0, float(dauer))
     try:
         cx, cy = _cursor_pos()
@@ -1786,7 +1857,11 @@ def _maus_zittern(dauer):
         rest = ende - time.time()
         if rest <= 0:
             break
-        time.sleep(min(rest, random.uniform(0.1, 0.9)))          # Stillstand zwischen zwei Zuegen
+        pause = min(rest, random.uniform(0.1, 0.9))                # Stillstand zwischen zwei Zuegen
+        if stopp is None:
+            time.sleep(pause)
+        elif stopp.wait(pause):
+            break
         if ende - time.time() <= 0.05:
             break
         art = random.random()
@@ -1804,6 +1879,8 @@ def _maus_zittern(dauer):
         try:
             pts = maus_bahn(cx, cy, zx, zy, schritte=random.randint(3, 9))
             for (px, py), dt in zip(pts, maus_takt(len(pts))):
+                if stopp is not None and stopp.is_set():
+                    return
                 _cursor_set(px, py)
                 time.sleep(dt)
             cx, cy = pts[-1]
@@ -10874,8 +10951,10 @@ def run(cfg_path, cmd):
 
     # 3) F9 -> Dialog -> Felder direkt setzen (cursor-unabhaengig, s.o. Parsec)
     w.type_keys("{F9}")
+    seit = time.time()                 # Echo-Takt (07.10.2026): jede Pause rechnet ab der letzten Aktion, s. _echo_pause
     _warte(0.4, 0.35)
-    dlg = _finde_order_dialog(w)
+    with _EchoUnruhe():                # die Maus wandert, während der Dialog gesucht wird (nur lesen)
+        dlg = _finde_order_dialog(w)
     if dlg is None:
         return {"ok": False, "retry_ok": True,
                 "msg": "F9-Dialog nicht gefunden — Abbruch, nichts gesendet. [" + _spur(trail) + "]"}
@@ -10886,6 +10965,8 @@ def run(cfg_path, cmd):
     # geoeffneten Dialog ungewollt Zeit, seine Felder zu verdrahten; seit der
     # Sucher in Millisekunden traf, griff der Bot ins noch bootende Feld.
     _warte(0.3, 0.25)
+    _echo_pause(seit)                  # Rest des Takts seit F9, Maus wandert (07.10.2026)
+    seit = time.time()
 
     # SL/TP-Schalter EINMAL oben bestimmen (frueher in Schritt 5 lokal) — der
     # F9-Direktweg (02.09.2026, Finns Idee) braucht ihn schon beim Tippen.
@@ -10998,7 +11079,8 @@ def run(cfg_path, cmd):
             raise RuntimeError(f"Symbol '{symbol}' steht nicht bestaetigt im Dialog "
                                f"(gelesen: '{(_feld_lesen(sym_combo) or '')[:40]}') — "
                                f"Abbruch, sonst ginge die Order aufs falsche Symbol.")
-        _warte(0.1, 0.15)
+        _echo_pause(seit)              # Takt Symbol → Volumen, Maus wandert (07.10.2026)
+        seit = time.time()
         # NUR Volumen setzen — SL/TP kommen NACH dem Einstieg aus dem echten
         # Fill-Kurs (Finns Timing-Loesung). Feld nach Beschriftung, sonst
         # Index-Fallback. ECHT tippen statt set_text (18.08.2026, Finns Fund am
@@ -11017,7 +11099,8 @@ def run(cfg_path, cmd):
         if not _feld_tippen(vol_el, f"{vol:g}", "Volumen", trail, rahmen=dlg):
             raise RuntimeError(f"Volumen-Feld uebernimmt {vol:g} nicht — "
                                f"Abbruch VOR dem Order-Knopf.")
-        _warte(0.2, 0.25)
+        _echo_pause(seit)              # Takt Volumen → SL/TP bzw. Knopf, Maus wandert (07.10.2026)
+        seit = time.time()
 
         # SL/TP SCHON HIER in den F9-Dialog tippen (02.09.2026, Finns Idee):
         # der Bot liest den Live-Kurs (ref_ask/ref_bid) ohnehin lesend vor dem
@@ -11059,7 +11142,7 @@ def run(cfg_path, cmd):
                     sl_f9 = tp_f9 = None
                     f9_getippt = False
                     trail.append(f"F9-SL/TP uebersprungen ({type(_fe).__name__}) — Nachtrag nach Fill")
-            _warte(0.15, 0.2)
+            _echo_pause(seit)          # Takt SL/TP → Knopf, Maus wandert (07.10.2026)
     except Exception as e:
         return {"ok": False, "retry_ok": True,
                 "msg": f"Abbruch VOR dem Order-Knopf (nichts platziert): {e} [" + _spur(trail) + "]"}
@@ -11114,16 +11197,17 @@ def run(cfg_path, cmd):
         # kurz, weil ein Lesen auf offener Verbindung nur noch Millisekunden
         # kostet. Was NICHT kuerzer wird: das Zeitfenster insgesamt.
         ende_s = time.time() + sekunden
-        while True:
-            st = _api_lesen(path, expected)
-            if "fehler" not in st and finde_neue_position(
-                    vorher_tickets, st["positionen"], symbol, cmd["richtung"], vol):
-                return True
-            if _dialog_weg():
-                return True
-            if time.time() >= ende_s:
-                return False
-            _warte(0.12, 0.15)
+        with _EchoUnruhe():            # nur lesen — die Maus wandert derweil (07.10.2026)
+            while True:
+                st = _api_lesen(path, expected)
+                if "fehler" not in st and finde_neue_position(
+                        vorher_tickets, st["positionen"], symbol, cmd["richtung"], vol):
+                    return True
+                if _dialog_weg():
+                    return True
+                if time.time() >= ende_s:
+                    return False
+                _warte(0.12, 0.15)
 
     # ECHTE Eingabe zuerst (18.08.2026, Live-Fund — dieselbe Lehre wie beim
     # set_text: MT5 reagiert auf echte Events. Das Volumen stand korrekt im
@@ -11173,6 +11257,7 @@ def run(cfg_path, cmd):
     # das 12-s-Fenster bleibt unveraendert, nur die Leerzeit davor faellt weg.
     ende = time.time() + 12
     _erster_blick = True
+    unruhe = _EchoUnruhe().start()     # Maus wandert, bis die Position gelesen ist — stop() vor jedem ESC/Klick (07.10.2026)
     while time.time() < ende:
         if _erster_blick:
             _erster_blick = False
@@ -11184,6 +11269,7 @@ def run(cfg_path, cmd):
         p = finde_neue_position(vorher_tickets, nachher["positionen"], symbol,
                                 cmd["richtung"], vol)
         if p:
+            unruhe.stop()
             fill = p["preis"]   # ECHTER Einstiegskurs der offenen Position
             trail.append(f"Position offen @ {fill}")
             # Schalter aus (18.08.2026): Order pur, SL/TP macht Finn von Hand —
@@ -11249,6 +11335,7 @@ def run(cfg_path, cmd):
             bestaetigt = False
             ende2 = time.time() + 10
             _erster2 = True
+            unruhe2 = _EchoUnruhe().start()   # nur lesen — Maus wandert (07.10.2026)
             while time.time() < ende2 and not bestaetigt:
                 if _erster2:
                     _erster2 = False   # sofort nachsehen, s. Schritt 5
@@ -11262,6 +11349,7 @@ def run(cfg_path, cmd):
                             and sltp_bestaetigt(q["sl"], q["tp"], sl, tp, digits):
                         bestaetigt = True
                         break
+            unruhe2.stop()
             if bestaetigt:
                 trail.append(f"SL {fmt_preis(sl, digits)} / TP {fmt_preis(tp, digits)} "
                              f"per Klick gesetzt")
@@ -11285,6 +11373,7 @@ def run(cfg_path, cmd):
                     "trail": _spur(trail), "symbol": symbol,
                     "richtung": "buy" if kauf else "sell", "volumen": p["volumen"],
                     "price": fill, "sl": sl, "tp": tp, "ticket": p["ticket"]}
+    unruhe.stop()
     # Kein neuer Positionsstand: entweder Markt zu (Wochenende) oder der Klick
     # kam nicht an. Dialog-Text auf 'geschlossen' pruefen, sonst Struktur mitgeben.
     markt_zu = False
