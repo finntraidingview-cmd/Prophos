@@ -10254,6 +10254,9 @@ def _wd_heute_zeile(p, acc, disp, vorher=None):
                                             "balance_end", "balance_relativ", "plattform") if k in final},
         # Endlesung (25.09.2026): Stand der Puls-Lesung nach dem Ende (Versuche, Fehler, Befund, Exit-Fill) — Statuszeile + „Jetzt lesen" (Design)
         "endlesung": _wd_endlesung_zeile(final),
+        # MANUELLE ARBEIT (08.10.2026, Finn: Plan aus „Überprüfen" parken — „noch ein paar Winning Days mit 0,01 fahren, Notiz dran,
+        # in zwei Tagen abhaken"): mt5_baseline.manuell {at, notiz, von} komplett oder null — das Radar baut daraus die Gruppe
+        "manuell": base.get("manuell") if isinstance(base.get("manuell"), dict) else None,
     }
     # Puls-Merker NUR für Topstep V2 (05.10.2026, Topstep V2 im Radar): tv.puls 'tsx' = Puls hat den Plan in TopstepX gestartet;
     # ein von Hand gestarteter tsv2-Plan trägt das Feld nicht. Das Frontend braucht den Unterschied für die Radar-Zeile. Bewusst
@@ -11563,7 +11566,7 @@ def admin_wd_plaene():
                 tab, key = "order_signale", str(d.get("signal_id") or "").strip()
             elif akt == "farm":
                 tab, key = "accounts", str(d.get("account_id") or "").strip()
-            elif akt in ("ende", "endlesung", "erledigt", "ansehen"):
+            elif akt in ("ende", "endlesung", "erledigt", "ansehen", "manuell", "manuell_weg"):
                 tab, key = "trade_plans", str(d.get("plan_id") or "").strip()
             else:
                 tab, key = "trade_plans", str(d.get("id") or request.args.get("id") or "").strip()
@@ -11817,6 +11820,30 @@ def admin_wd_plaene():
                 return jsonify({"ok": True, "status": z.get("status"), "ergebnis": z.get("ergebnis"), "pc": z.get("pc"), "updated_at": z.get("updated_at")})
             except Exception as e:
                 return jsonify({"error": f"Stand nicht lesbar ({type(e).__name__})"}), 502
+        if daten.get("aktion") in ("manuell", "manuell_weg"):
+            # MANUELLE ARBEIT (08.10.2026, Finn: „per Drag & Drop in die Gruppe ziehen, kurze Notiz, in zwei Tagen abhaken"): Kennzeichen
+            # mt5_baseline.manuell {at, notiz, von} nur an Plänen in „Überprüfen" (status review, sonst 409), nichts wird verbucht.
+            # Atomar über das RPC mt5_baseline_patch (merged in der DB, Service-Key) — 'manuell_weg' setzt den Schlüssel auf null.
+            pid = str(daten.get("plan_id") or "").strip()
+            if len(pid) < 10:
+                return jsonify({"error": "plan_id fehlt"}), 400
+            try:
+                rows = sb_select("trade_plans", {"select": "id,status", "id": f"eq.{pid}", "limit": "1"})
+                if not rows:
+                    return jsonify({"error": "Plan nicht gefunden"}), 404
+                if rows[0].get("status") != "review":
+                    return jsonify({"error": "Nur Pläne in Überprüfen lassen sich parken", "status": rows[0].get("status")}), 409
+                m = None
+                if daten.get("aktion") == "manuell":
+                    m = {"at": datetime.now(timezone.utc).isoformat(), "notiz": str(daten.get("notiz") or "").strip()[:300], "von": str(me)}
+                r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/rpc/mt5_baseline_patch", headers=_sb_headers(), timeout=(5, 15),
+                                json={"p_plan": pid, "p_patch": {"manuell": m}, "p_status": "review"})
+                _sb_pruefen(r)
+                if not r.json():
+                    return jsonify({"error": "Plan hat sich inzwischen geändert — nichts geschrieben"}), 409
+                return jsonify({"ok": True, "plan_id": pid, "manuell": m})
+            except Exception as e:
+                return jsonify({"error": f"nicht gespeichert ({type(e).__name__})"}), 502
         if daten.get("aktion") == "erledigt":
             # Winning Day erledigt (25.09.2026): P&L von Hand, Fusion-P&L als 'wd_hedge' in Finanzen. Reihenfolge:
             # Zielkonto auflösen (ohne Konto bei slave_pl ≠ null: 409, NICHTS geschrieben) → Plan (optimistische
