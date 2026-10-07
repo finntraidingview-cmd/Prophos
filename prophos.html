@@ -27493,7 +27493,12 @@
       // Echo (30.09.2026): kein Chart, kein „Wartet" (siehe gruppen), Lots + CFD-Symbol statt „3 × NQ"
       const echo = wdlIstEcho(t)
       const lq = num(t.liq_regel_level_nq) != null ? num(t.liq_regel_level_nq) : num(t.liq_level_nq), slE = wdlSlEcht(t), d = t.demo || {}, an = !echo && wdlLinienAn(t), wt = echo ? null : wdlWartet(t)
-      const konto = `${k.firma || '?'}${k.kontonr_ende ? ' …' + k.kontonr_ende : ''}`
+      // KONTOGRÖSSE IN DER ZEILE (08.10.2026, Finn am Radar: „schreib dazu, ob es ein 100k- oder 200k-Account war — sieht man hier
+      // nie"): groesse kommt vom Backend (starting_balance, sonst „150k" aus dem Namen); fehlt beides, Rückfall wie im Planer auf die
+      // Standardgröße, die der Start-Balance am nächsten liegt. „FundedNext 100k …0795" — keine Größe bekannt → wie bisher.
+      const grK = num(k.groesse) > 0 ? num(k.groesse) : (typeof tpKontoGroesseAusName === 'function' ? tpKontoGroesseAusName(k.name, t.balance_start) : 0)
+      const grTxt = grK > 0 ? ' ' + (grK % 1000 === 0 ? grK / 1000 : (grK / 1000).toLocaleString('de-DE', { maximumFractionDigits: 1 })) + 'k' : ''
+      const konto = `${k.firma || '?'}${grTxt}${k.kontonr_ende ? ' …' + k.kontonr_ende : ''}`
       const tip = echo ? [k.name || konto, 'Echo (MT5)', t.symbol || ''].filter(Boolean).join(' · ')
         : [k.name || konto, slE != null ? 'SL ' + f2(slE) : '', lq != null ? (wdlLiqIstTag(t) ? 'Tageslimit ' : 'Liquidation ') + f2(lq) : ''].filter(Boolean).join(' · ') + ` — klicken: Level im Chart ${an ? 'ausblenden' : 'einblenden'}`
       const lots = v => num(v) == null ? '?' : Number(v).toLocaleString('de-DE', { maximumFractionDigits: 2 })
@@ -40069,7 +40074,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1152'
+  const OS_TAB_BUILD = '2026-09-22.1153'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
