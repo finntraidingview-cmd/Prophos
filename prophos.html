@@ -40156,7 +40156,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1157'
+  const OS_TAB_BUILD = '2026-09-22.1158'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -45957,7 +45957,7 @@
     const chips = (alleIds.length > 1 || alleBest) ? `<div class="adm-vl-legend tpl-ids">${chipsIds}${alleBest}</div>` : ''
     root.innerHTML =(_tpl.fehler ? `<div class="tpl-fehler">⚠ ${escapeHtml(_tpl.fehler)}</div>` : '')
       + (ohne ? `<div class="tpl-karte"><div class="tpl-leer">— nicht im Auto-Planer</div></div>`
-        : chips + tplKachelnHtml(F) + tplBrauchtHtml(tplBraucht(D, sichtIds)) + tplZeitstrahlHtml(F, zeilen) + tplDetailHtml(D) + tplNettoHtml(F) + tplHypoHtml(F) + tplListeHtml(F) + tplAbdeckungHtml(F, abF) + tplBilanzKarteHtml(F))   // Detail direkt unter dem Zeitstrahl (Finn 07.10.2026)
+        : chips + tplKachelnHtml(F) + tplBrauchtHtml(tplBraucht(D, sichtIds)) + tplZeitstrahlHtml(F, zeilen) + tplDetailHtml(D) + tplNettoHtml(F) + tplHypoHtml(F) + tplListeHtml(F) + tplBilanzKarteHtml(F))   // Konten-Abdeckung ausgeblendet (Finn 08.10.2026: „mies unnötig, kann visuell weg“) — tplAbdeckungHtml bleibt   // Detail direkt unter dem Zeitstrahl (Finn 07.10.2026)
     const sc = root.querySelector('.tpl-scroll')
     if(sc && sc.scrollWidth > sc.clientWidth + 4){
       if(scrollX != null && _tpl.tagScroll === _tpl.tag) sc.scrollLeft = scrollX
