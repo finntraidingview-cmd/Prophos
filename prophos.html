@@ -40362,7 +40362,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1170'
+  const OS_TAB_BUILD = '2026-09-22.1171'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -40650,6 +40650,15 @@
     const fehler = async (text, r) => {
       // UNKLAR = der Klick kann raus sein → Marke am Plan, die Karte zeigt kein „Starten" mehr (B37-Folgeauftrag, 30.09.2026)
       if(pv2 && /^⚠ (Ergebnis )?UNKLAR/.test(String(text))) await pulsUnklarMarke(plan.id, { code: (r && r.code) || 'unklar', msg: text })
+      // START-FEHLER für Orbit (08.10.2026, Master/Finn: bisher schrieb nur Echo V2 start_fehler — ein Orbit-Fehlstart zur Startzeit stand in
+      // „Braucht dich" nur als „Start-Fehler: …" ohne „→ was tun", sfTick plante ihn nie neu ein). Nur zur Startzeit (vonStartUm), nicht
+      // beim Karten-Klick oder Signal vom Mac; schritt aus dem Bot (login/konto/asset/ticket/knopf/ruecklesung/popup/unklar/…), sonst code.
+      // UNKLAR bleibt UNKLAR: sfBehoben plant unklar nie von selbst neu (Doppel-Order-Gefahr).
+      if(!fern && pv2 && opts && opts.vonStartUm){
+        const unk = !!(r && r.retry_ok === false) || /UNKLAR/.test(String(text))
+        const schritt = unk ? 'unklar' : String((r && (r.schritt || r.code)) || (/nicht erreichbar|Backend/i.test(String(text)) ? 'pc' : 'puls'))
+        try{ await sfMelden(plan, { schritt, msg: String(text).replace(/\s+/g, ' '), unklar: unk }) }catch(e){ console.warn('[start-fehler] orbit', (e && e.message) || e) }
+      }
       // Diagnose mitschicken (23.09.2026, Moritz-PC: der Dump lag nur auf dem PC, vom Mac
       // aus war 'steht dort eine Fehlermeldung?' nicht zu beantworten) — per SQL lesbar.
       if(fern) return fern.melde({ ok:false, unklar: !!(r && r.retry_ok === false) || /^⚠ Ergebnis UNKLAR/.test(text),
@@ -40688,6 +40697,7 @@
     const { dir, lots, tp, sl, symbol } = w
     if(w.fehlt.length){
       if(fern) return fern.melde({ ok:false, msg:'Für den Start fehlt: ' + w.fehlt.join(', ') + ' — nichts gestartet.' })
+      if(pv2 && opts && opts.vonStartUm){ try{ await sfMelden(plan, { schritt: 'werte', msg: 'Für den Start fehlt: ' + w.fehlt.join(', ') }) }catch(_){} }   // START-FEHLER (08.10.2026)
       toast('Für „Starten" fehlt: ' + w.fehlt.join(', ') + ' — im Order-Popup speichern.', 'end')
       openTpOrderModal(planId)
       return
@@ -44274,6 +44284,9 @@
       const r = mt5V2Resolve(plan, dd.instances || [])
       return r && r.inst && r.inst.has_terminal ? `Echo-Instanz mit Terminal für Login ${r.masterLogin} da` : null
     }
+    // Orbit V2 / Topstep V2 (08.10.2026): Puls-Schritte (pc, login, konto, asset, ticket, knopf, ruecklesung, popup, werte, zeitlimit …)
+    // — keine Prüfung möglich, ob die Ursache weg ist (Puls-Chrome/TradingView sieht nur der Bot): wie bisher 15 min später neuer
+    // Versuch, höchstens SF_MAX (sfTick). 'unklar' kommt hier nie an (oben). Gilt auch für Echo-Schritte v2term/v2hedge/v2dir/v2order.
     return Date.now() - (Date.parse(f.at) || 0) >= SF_WARTE_MS ? `${Math.round(SF_WARTE_MS / 60000)} min später neuer Versuch` : null
   }
   /* Neu einplanen: Startzeit jetzt + 2–6 min (von Hand: + 1 min), Claim zurück. Guard: noch geplant, nichts gesendet.
@@ -45782,9 +45795,23 @@
       case 'v2order': return sf.unklar ? 'Erst im MT5-Terminal nachsehen, ob die Order liegt — dann von Hand starten, nie blind.'
         : /Popup geschlossen|Terminal|Verbindung|initialize|IPC|Konto/i.test(m) ? `Am PC${pc} MT5 für Login${login} öffnen und eingeloggt lassen, dann ✓ Behoben oder von Hand starten. Nichts platziert.`
         : 'Nichts platziert — Meldung prüfen, dann ✓ Behoben oder von Hand starten.'
+      // ORBIT V2 / TOPSTEP V2 (08.10.2026): Puls-Schritte aus dem CDP-Lauf (order_bot modus_tvkette_cdp / _cdp_ticket_fuellen)
+      case 'pc': return `Am PC${pc} start-alles.bat ausführen (Copier-Backend/Panel) — Puls war nicht erreichbar.`
+      case 'chrome': case 'chrome_neustart': case 'tab': case 'cdp': return `Am PC${pc} den Puls-Chrome prüfen (läuft er, ist der TradingView-Tab offen?).`
+      case 'login': return `Am PC${pc} den Puls-Chrome ansehen: Tradovate-/TradingView-Login prüfen und einloggen.`
+      case 'konto': case 'konto_weg': return `Am PC${pc} in TradingView das Konto verbinden (Trading-Panel → Konto wählen); fehlt es, Account prüfen.`
+      case 'ticket': case 'asset': return `Am PC${pc} das TradingView-Order-Panel ansehen: Asset/Kontrakt (NQ/MNQ, Front-Monat) und Felder prüfen.`
+      case 'ruecklesung': return `Am PC${pc} das Order-Panel ansehen — Werte stimmten vor dem Senden nicht; nichts gesendet.`
+      case 'popup': return `Am PC${pc} das offene Popup/den Dialog in TradingView schließen; nichts gesendet.`
+      case 'knopf': return 'Nichts tun — der Kauf-Knopf war nicht bereit/nicht gedrückt, der Bot wiederholt von selbst.'
+      case 'werte': return 'Im Order-Popup des Plans Richtung, Menge, Symbol oder TP ergänzen und speichern.'
+      case 'zeitlimit': case 'puls_beschaeftigt': return `Puls am PC${pc} war belegt oder zu langsam — nichts tun, der Bot wiederholt von selbst.`
+      case 'unklar': return `Erst in ${/Topstep/i.test(m) ? 'TopstepX' : 'TradingView'} nachsehen, ob die Order liegt — dann auf der Karte „⚠ UNKLAR" lösen; nie blind erneut starten.`
       case 'zu_spaet': return `Prophos-Tab am PC${pc} offen lassen.`
       case 'ziel_erreicht': return 'Ziel ist erreicht — kein Trade nötig. Konto ansehen (Phasenwechsel/Auszahlung), Plan löschen.'
-      default: return 'Check am PC war rot — beheben, dann ✓ Behoben.'
+      default: return sf.unklar ? 'Erst in der Plattform nachsehen, ob die Order liegt — nie blind erneut starten.'
+        : /Puls|TradingView|Tradovate/i.test(m) ? `Am PC${pc} Puls-Chrome/TradingView prüfen — Meldung lesen, dann ✓ Behoben oder von Hand starten.`
+        : 'Check am PC war rot — beheben, dann ✓ Behoben.'
     }
   }
   function tplSfAuto(sf, D){
