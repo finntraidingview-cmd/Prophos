@@ -65,7 +65,7 @@ PORT = 8790
 # < 0.7.0 (Tampermonkey prueft nur taeglich). Ab jetzt sagt jede Antwort, welcher Server und
 # welches Script wirklich laufen; die Bruecke schreibt beides nach echoplus_live, der Markt-
 # Kopf zeigt es. Bei JEDER Aenderung an dieser Datei mitbumpen.
-READER_VERSION = "0.9.9"
+READER_VERSION = "0.9.10"   # 0.9.10 (07.10.2026): Code + Userscript über Railway (Repo privat)
 HIER = os.path.dirname(os.path.abspath(__file__))
 DATEI = os.path.join(HIER, "positions.json")
 AUS_FLAG = os.path.join(HIER, "reader_aus.flag")   # Datei vorhanden = pausiert
@@ -1216,6 +1216,21 @@ class Handler(BaseHTTPRequestHandler):
                              "aufloesung_warnung": _aufl_warnung, "modus": _kerzen_modus, "delay_s": _kerzen_delay_s})
             return
 
+        # Userscript-Update (07.10.2026, Repo privat): Tampermonkey fragt @updateURL ohne Schlüssel — der Reader holt die Datei
+        # mit dem Feed-Schlüssel dieses PCs bei Railway und reicht sie durch. Nur diese eine Datei.
+        if self.path.split("?")[0] in ("/userscript/tv-reader.user.js", "/userscript/tv-reader.meta.js"):
+            data = _code_holen("/code/datei/tv-reader/tv-reader.user.js")
+            if data is None:
+                self._json(502, {"ok": False, "msg": "Userscript nicht ladbar (kein Schlüssel / Railway nicht erreichbar)"})
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "text/javascript; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
+
         # Aktuellen Stand abfragbar machen (fuer den Copier, die Orbit-View
         # oder zum Reinschauen im Browser) — inkl. Schalter-Zustand.
         self._json(200, _mit_an(_stand))
@@ -1571,8 +1586,39 @@ def _diagnose_senden(rolle):
         pass
 
 
+# CODE-QUELLE RAILWAY (07.10.2026, Repo privat): zuerst Railway mit dem Feed-Schlüssel dieses PCs (feed_token.txt — derselbe
+# signierte Schlüssel uid.pc.sig, den Railway als X-Code-Token annimmt), GitHub nur noch als Rückfall.
+CODE_QUELLE = "https://web-production-bec81.up.railway.app"
+
+
+def _code_holen(pfad_url, timeout=15):
+    """GET CODE_QUELLE + pfad_url mit X-Code-Token → Bytes (nur bei 200) oder None."""
+    import urllib.request
+    try:
+        with open(os.path.join(HIER, "feed_token.txt"), "r", encoding="utf-8") as f:
+            tok = f.read().strip()
+    except OSError:
+        return None
+    if not tok:
+        return None
+    try:
+        req = urllib.request.Request(CODE_QUELLE + pfad_url, headers={"X-Code-Token": tok, "User-Agent": "prophos-reader"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read() if r.status == 200 else None
+    except Exception:
+        return None
+
+
 def _repo_sha(timeout=8):
     import urllib.request
+    roh = _code_holen("/code/stand", timeout)
+    try:
+        sha = (json.loads(roh.decode("utf-8")) or {}).get("sha") if roh else None
+        if sha and re.fullmatch(r"[0-9a-f]{40}", sha):
+            _UPD_STATUS["sha_fehler"] = ""
+            return sha
+    except Exception:
+        pass
     try:
         req = urllib.request.Request(f"https://github.com/{_REPO}.git/info/refs?service=git-upload-pack",
                                      headers={"User-Agent": "git/2.40"})
@@ -1586,6 +1632,9 @@ def _repo_sha(timeout=8):
 
 def _repo_datei(sha, timeout=20):
     import urllib.request
+    data = _code_holen(f"/code/datei/{_REPO_PFAD}?sha={sha}", timeout)
+    if data is not None:
+        return data
     return urllib.request.urlopen(f"https://raw.githubusercontent.com/{_REPO}/{sha}/{_REPO_PFAD}", timeout=timeout).read()
 
 

@@ -21,7 +21,7 @@ goto loop
 
 :update
 rem Downloads in .newc-Dateien; bei Fehlern bleibt einfach der alte Stand.
-powershell -NoProfile -Command "$ProgressPreference='SilentlyContinue';$b='https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/main/mt5-copier/';foreach($f in @('copier.py','provision.py','VERSION','ProphosHedgeReader.mq5')){try{Invoke-RestMethod ($b+$f) -OutFile ($f+'.newc') -TimeoutSec 25}catch{}}"
+powershell -NoProfile -Command "$ProgressPreference='SilentlyContinue';$t='';try{$t=(Get-Content 'code_token.txt' -TotalCount 1 -EA Stop).Trim()}catch{};$r='https://web-production-bec81.up.railway.app/code/datei/mt5-copier/';$b='https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/main/mt5-copier/';foreach($f in @('copier.py','provision.py','VERSION','ProphosHedgeReader.mq5')){$ok=$false;if($t){try{Invoke-WebRequest ($r+$f) -Headers @{'X-Code-Token'=$t} -OutFile ($f+'.newc') -TimeoutSec 25 -UseBasicParsing;$ok=$true}catch{}};if(-not $ok){try{Invoke-RestMethod ($b+$f) -OutFile ($f+'.newc') -TimeoutSec 25}catch{}}}"
 call :swap copier.py 10000
 call :swap provision.py 5000
 call :swap VERSION 3

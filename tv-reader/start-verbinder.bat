@@ -19,7 +19,7 @@ if errorlevel 1 (
 exit /b
 
 :update
-powershell -NoProfile -Command "$ProgressPreference='SilentlyContinue';$b='https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/main/tv-reader/';foreach($f in @('tv_verbinder.py','tv_snapshot.py')){try{Invoke-RestMethod ($b+$f) -OutFile ($f+'.newc') -TimeoutSec 25}catch{}}"
+powershell -NoProfile -Command "$ProgressPreference='SilentlyContinue';$t='';try{$t=(Get-Content 'feed_token.txt' -TotalCount 1 -EA Stop).Trim()}catch{};$r='https://web-production-bec81.up.railway.app/code/datei/tv-reader/';$b='https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/main/tv-reader/';foreach($f in @('tv_verbinder.py','tv_snapshot.py')){$ok=$false;if($t){try{Invoke-WebRequest ($r+$f) -Headers @{'X-Code-Token'=$t} -OutFile ($f+'.newc') -TimeoutSec 25 -UseBasicParsing;$ok=$true}catch{}};if(-not $ok){try{Invoke-RestMethod ($b+$f) -OutFile ($f+'.newc') -TimeoutSec 25}catch{}}}"
 call :swap tv_verbinder.py 4000
 call :swap tv_snapshot.py 4000
 exit /b

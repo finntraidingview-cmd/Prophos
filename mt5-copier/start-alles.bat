@@ -81,7 +81,7 @@ rem Reader-Ordner (01.10.2026): alt C:\tv-reader, seit der Userscript-Einrichtun
 set "_tvr=C:\tv-reader"
 if not exist "C:\tv-reader\start-reader.bat" if exist "C:\Prophos\tv-reader\start-reader.bat" set "_tvr=C:\Prophos\tv-reader"
 if exist "%_tvr%\reader-server.py" (
-  powershell -NoProfile -Command "$ProgressPreference='SilentlyContinue';$b='https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/main/tv-reader/';$d='%_tvr%\';foreach($f in @('reader-server.py','tv_verbinder.py','tv_snapshot.py')){try{Invoke-RestMethod ($b+$f) -OutFile ($d+$f+'.newa') -TimeoutSec 25}catch{}}"
+  powershell -NoProfile -Command "$ProgressPreference='SilentlyContinue';$d='%_tvr%\';$t='';try{$t=(Get-Content 'code_token.txt' -TotalCount 1 -EA Stop).Trim()}catch{};$r='https://web-production-bec81.up.railway.app/code/datei/tv-reader/';$b='https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/main/tv-reader/';foreach($f in @('reader-server.py','tv_verbinder.py','tv_snapshot.py')){$ok=$false;if($t){try{Invoke-WebRequest ($r+$f) -Headers @{'X-Code-Token'=$t} -OutFile ($d+$f+'.newa') -TimeoutSec 25 -UseBasicParsing;$ok=$true}catch{}};if(-not $ok){try{Invoke-RestMethod ($b+$f) -OutFile ($d+$f+'.newa') -TimeoutSec 25}catch{}}}"
   call :swap "%_tvr%\reader-server.py" 4000
   call :swap "%_tvr%\tv_verbinder.py" 4000
   call :swap "%_tvr%\tv_snapshot.py" 4000
@@ -161,7 +161,7 @@ python -c "import socket,sys;s=socket.socket();s.settimeout(1);sys.exit(0 if s.c
 exit /b
 
 :bat_auffrischen
-powershell -NoProfile -Command "$ProgressPreference='SilentlyContinue';$b='https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/main/mt5-copier/';foreach($f in @('start-copier.bat','start-panel.bat','start-prophos.bat')){try{Invoke-RestMethod ($b+$f) -OutFile ($f+'.newa') -TimeoutSec 25}catch{}}"
+powershell -NoProfile -Command "$ProgressPreference='SilentlyContinue';$t='';try{$t=(Get-Content 'code_token.txt' -TotalCount 1 -EA Stop).Trim()}catch{};$r='https://web-production-bec81.up.railway.app/code/datei/mt5-copier/';$b='https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/main/mt5-copier/';foreach($f in @('start-copier.bat','start-panel.bat','start-prophos.bat')){$ok=$false;if($t){try{Invoke-WebRequest ($r+$f) -Headers @{'X-Code-Token'=$t} -OutFile ($f+'.newa') -TimeoutSec 25 -UseBasicParsing;$ok=$true}catch{}};if(-not $ok){try{Invoke-RestMethod ($b+$f) -OutFile ($f+'.newa') -TimeoutSec 25}catch{}}}"
 call :swap "start-copier.bat" 500
 call :swap "start-panel.bat" 500
 call :swap "start-prophos.bat" 500

@@ -40069,7 +40069,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1149'
+  const OS_TAB_BUILD = '2026-09-22.1150'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -57717,6 +57717,30 @@
       epLokal.diag = Object.assign(epLokal.diag || {}, { feed_schluessel: r2.ok ? 'übergeben ' + new Date().toISOString() : 'reader ' + r2.status })
     }catch(e){ epLokal.diag = Object.assign(epLokal.diag || {}, { feed_schluessel: 'fehler ' + String((e && e.message) || e).slice(0, 60) }) }
   }
+  /* CODE-SCHLÜSSEL FÜRS PANEL (07.10.2026, Repo privat — Finn: „Die PCs sollen immer die neusten Updates herunterladen …
+   * automatisch"). Copier, Panel, Puls und das lokale Backend holen ihren Code jetzt mit dem PC-Schlüssel bei Railway
+   * (/code/…, GitHub nur Rückfall). Es ist derselbe signierte Schlüssel wie für den Reader-Direktfeed (uid.pc.sig); dieser
+   * PC-Tab holt ihn EINMAL und legt ihn im Panel ab (code_token.txt). Alle 5 min nachsehen, ob er da ist — Mac/Handy: nichts. */
+  async function codeSchluesselTick(){
+    if(!MT5_LOCAL || typeof window.mtcApi !== 'function') return
+    try{
+      const st = await window.mtcApi('code-token')
+      if(!st || st.ok !== true || st.da) return
+      const id = await window.mtcApi('pc-id')
+      const host = String((id && id.host) || '').toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 30)
+      const pc = (id && /^pc-[a-z0-9]{4,12}$/.test(String(id.pc_id || ''))) ? id.pc_id : (host ? 'host-' + host : '')
+      if(!pc) return
+      const tok = await _pushTok(); if(!tok) return
+      const r = await fetch(`${WATCHER_HOME}/reader-feed-token`, { method: 'POST', headers: { 'sb-token': tok, 'Content-Type': 'application/json' }, body: JSON.stringify({ pc }) })
+      const j = await r.json().catch(() => ({}))
+      if(!r.ok || !j.token) return
+      const w = await window.mtcApi('code-token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: j.token }) })
+      if(w && w.ok) console.info('[code] PC-Schlüssel für Updates im Panel abgelegt')
+    }catch(_){}
+  }
+  setTimeout(codeSchluesselTick, 20000)
+  setInterval(codeSchluesselTick, 5 * 60000)
+
   async function epBrueckeTick(){
     const jetzt = Date.now()
     if(jetzt - _epTickLetzter < 700) return   // Worker + setInterval: höchstens ein Tick je Sekunde

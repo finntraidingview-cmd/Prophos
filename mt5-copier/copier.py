@@ -109,8 +109,37 @@ def is_paused():
 _REPO = "finntraidingview-cmd/Prophos"
 
 
+# CODE-QUELLE RAILWAY (07.10.2026, Repo privat): zuerst Railway mit dem PC-Schlüssel (code_token.txt, legt das Panel ab),
+# GitHub nur als Rückfall — gleiche Regeln wie panel.repo_sha / repo_datei.
+CODE_QUELLE = "https://web-production-bec81.up.railway.app"
+
+
+def _code_holen(pfad_url, timeout=10):
+    """GET CODE_QUELLE + pfad_url mit X-Code-Token → Bytes (nur bei 200) oder None."""
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "code_token.txt"), "r", encoding="utf-8") as f:
+            tok = f.read().strip()
+    except OSError:
+        return None
+    if not tok:
+        return None
+    try:
+        req = urllib.request.Request(CODE_QUELLE + pfad_url, headers={"X-Code-Token": tok, "User-Agent": "prophos-copier"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read() if r.status == 200 else None
+    except Exception:
+        return None
+
+
 def _repo_sha(timeout=8):
     """Kennung des neuesten Commits auf main (Git-Schnittstelle, kein Zwischenspeicher) — oder None."""
+    roh = _code_holen("/code/stand", timeout)
+    try:
+        sha = (json.loads(roh.decode("utf-8")) or {}).get("sha") if roh else None
+        if sha and re.fullmatch(r"[0-9a-f]{40}", sha):
+            return sha
+    except Exception:
+        pass
     try:
         req = urllib.request.Request(f"https://github.com/{_REPO}.git/info/refs?service=git-upload-pack",
                                      headers={"User-Agent": "git/2.40"})
@@ -129,8 +158,8 @@ def _copier_code_geaendert():
     if not sha:
         return True
     try:
-        neu = urllib.request.urlopen(f"https://raw.githubusercontent.com/{_REPO}/{sha}/mt5-copier/copier.py",
-                                     timeout=10).read()
+        neu = _code_holen(f"/code/datei/mt5-copier/copier.py?sha={sha}") or \
+            urllib.request.urlopen(f"https://raw.githubusercontent.com/{_REPO}/{sha}/mt5-copier/copier.py", timeout=10).read()
         if len(neu) < 10000 or b"def main" not in neu:
             return True
         with open(os.path.abspath(__file__), "rb") as f:
@@ -162,8 +191,11 @@ def _version_watcher():
     # _REMOTE_VERSION["neustart"] traegt die Entscheidung in die Hauptschleife.
     while True:
         try:
-            with urllib.request.urlopen(UPDATE_URL, timeout=10) as r:
-                remote = r.read().decode("utf-8", "replace").strip()
+            roh = _code_holen("/code/datei/mt5-copier/VERSION")
+            if roh is None:
+                with urllib.request.urlopen(UPDATE_URL, timeout=10) as r:
+                    roh = r.read()
+            remote = roh.decode("utf-8", "replace").strip()
             lokal = local_version()
             if remote and lokal and remote != lokal:
                 if _copier_code_geaendert():

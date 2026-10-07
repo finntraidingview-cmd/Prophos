@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.9.8
+// @version      0.9.9
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt. Seit 0.5 auch die KONTO-ZUSAMMENFASSUNG (Balance, Today's P&L …) fuer den Orbit-V2-Rundgang.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -12,8 +12,8 @@
 // @connect      127.0.0.1
 // @connect      localhost
 // @run-at       document-start
-// @updateURL    https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/main/tv-reader/tv-reader.user.js
-// @downloadURL  https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/main/tv-reader/tv-reader.user.js
+// @updateURL    http://127.0.0.1:8790/userscript/tv-reader.meta.js
+// @downloadURL  http://127.0.0.1:8790/userscript/tv-reader.user.js
 // ==/UserScript==
 
 // Warum GM_xmlhttpRequest statt fetch: umgeht CORS/Mixed-Content sauber
@@ -131,7 +131,8 @@
   // dreimal ein Update vermutet, das gar nicht aktiv war (31.08.2026), und von
   // aussen war das nur an FEHLENDEN Feldern zu erraten. Ab jetzt sagt jeder
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
-  const VERSION    = '0.9.8';
+  // 0.9.9 (07.10.2026): nur @updateURL/@downloadURL — Repo privat, Update kommt über den lokalen Reader (127.0.0.1:8790/userscript/…)
+  const VERSION    = '0.9.9';
   const SCRIPT_START_MS = Date.now();   // 0.9.7: Bezug für die Lade-Schonfrist im Puls-Chrome
   // 0.9.0: Puls-Chrome-Modus (Orbit V3) — je Chrome-Profil gespeichert, siehe CHANGELOG
   let PULS_CHROME = false;

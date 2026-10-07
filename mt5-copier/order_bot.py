@@ -14063,6 +14063,26 @@ def augen_stand_sha(merk, datei):
     return m.get("sha") if datei == "augen.js" else None
 
 
+def _code_quelle_holen(pfad_url, timeout=10):
+    """CODE-QUELLE RAILWAY (07.10.2026, Repo privat): GET mit dem PC-Schlüssel (code_token.txt neben dem Bot, legt das Panel ab)
+    → Bytes (nur bei 200) oder None. GitHub bleibt Rückfall."""
+    import urllib.request
+    try:
+        with open(os.path.join(_AUGEN_HIER, "code_token.txt"), "r", encoding="utf-8") as f:
+            tok = f.read().strip()
+    except OSError:
+        return None
+    if not tok:
+        return None
+    try:
+        req = urllib.request.Request("https://web-production-bec81.up.railway.app" + pfad_url,
+                                     headers={"X-Code-Token": tok, "User-Agent": "prophos-puls"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read() if r.status == 200 else None
+    except Exception:
+        return None
+
+
 def _augen_js_holen(trail, datei="augen.js"):
     """augen.js (bzw. augen_tsx.js für TopstepX) vom Repo-Stand holen (dieselbe ungecachte Commit-Abfrage wie das Panel), lokal
     zwischenspeichern, sha je Datei merken. Kein Netz → letzte lokale Kopie. -> Quelltext | None"""
@@ -14072,15 +14092,22 @@ def _augen_js_holen(trail, datei="augen.js"):
     pfad, merk = os.path.join(_AUGEN_HIER, datei), _augen_json_lesen("augen_stand.json") or {}
     sha = None
     try:
-        req = urllib.request.Request("https://github.com/finntraidingview-cmd/Prophos.git/info/refs?service=git-upload-pack",
-                                     headers={"User-Agent": "git/2.40"})
-        m = re.search(rb"([0-9a-f]{40}) refs/heads/main", urllib.request.urlopen(req, timeout=6).read())
-        sha = m.group(1).decode("ascii") if m else None
+        roh = _code_quelle_holen("/code/stand", 6)
+        sha = (json.loads(roh.decode("utf-8")) or {}).get("sha") if roh else None
+        sha = sha if sha and re.fullmatch(r"[0-9a-f]{40}", sha) else None
     except Exception:
         sha = None
+    if not sha:                      # Stand kam nicht von Railway → wie bisher GitHub fragen
+        try:
+            req = urllib.request.Request("https://github.com/finntraidingview-cmd/Prophos.git/info/refs?service=git-upload-pack",
+                                         headers={"User-Agent": "git/2.40"})
+            m = re.search(rb"([0-9a-f]{40}) refs/heads/main", urllib.request.urlopen(req, timeout=6).read())
+            sha = m.group(1).decode("ascii") if m else None
+        except Exception:
+            sha = None
     if sha and (sha != augen_stand_sha(merk, datei) or not os.path.exists(pfad)):
         try:
-            data = urllib.request.urlopen(
+            data = _code_quelle_holen(f"/code/datei/mt5-copier/{datei}?sha={sha}") or urllib.request.urlopen(
                 f"https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/{sha}/mt5-copier/{datei}", timeout=10).read()
             if len(data) > 200:
                 with open(pfad + ".tmp", "wb") as f:
@@ -14098,7 +14125,7 @@ def _augen_js_holen(trail, datei="augen.js"):
     bat = os.path.join(_AUGEN_HIER, "puls-chrome-starten.bat")
     if sha and not os.path.exists(bat):
         try:
-            data = urllib.request.urlopen(
+            data = _code_quelle_holen(f"/code/datei/mt5-copier/puls-chrome-starten.bat?sha={sha}") or urllib.request.urlopen(
                 f"https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/{sha}/mt5-copier/puls-chrome-starten.bat", timeout=10).read()
             if data.startswith(b"@echo off"):
                 with open(bat, "wb") as f:

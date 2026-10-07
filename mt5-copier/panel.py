@@ -81,11 +81,8 @@ def ensure_vorlage():
     untergegangen — ein Pflichtschritt, den man vergessen kann, ist ein Bug."""
     if base_config():
         return
-    url = ("https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/"
-           "main/mt5-copier/config.vorlage.json")
     try:
-        import urllib.request
-        data = urllib.request.urlopen(url, timeout=15).read()
+        data = repo_datei("mt5-copier/config.vorlage.json")
         if len(data) > 200 and isinstance(json.loads(data.decode("utf-8")), dict):
             tmp = os.path.join(HERE, "config.vorlage.json.tmp")
             with open(tmp, "wb") as f:
@@ -103,12 +100,9 @@ def ensure_ea_source():
     lief die alte kompilierte .ex5 — Master-P&L blieb deshalb leer. Das Panel
     laedt die .mq5 beim Start in seinen Ordner; kompiliert wird pro Terminal beim
     Kalt-Start (_ensure_ea_compiled). Best effort wie ensure_vorlage."""
-    url = ("https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/"
-           "main/mt5-copier/" + provision.EA_NAME + ".mq5")
     dst = os.path.join(HERE, provision.EA_NAME + ".mq5")
     try:
-        import urllib.request
-        data = urllib.request.urlopen(url, timeout=15).read()
+        data = repo_datei("mt5-copier/" + provision.EA_NAME + ".mq5")
         if len(data) < 500 or b"OnInit" not in data:
             return
         old = b""
@@ -147,12 +141,9 @@ def ensure_starter_source():
     Start."""
     def _spaeter():
         time.sleep(180)
-        url = ("https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/"
-               "main/mt5-copier/start-alles.bat")
         dst = os.path.join(HERE, "start-alles.bat")
         try:
-            import urllib.request
-            data = urllib.request.urlopen(url, timeout=15).read()
+            data = repo_datei("mt5-copier/start-alles.bat")
             # Positiv-Signatur statt blossem Groessencheck: eine halb geladene
             # oder falsche Datei darf den einzigen Startweg nicht ersetzen.
             if len(data) < 800 or b"start-prophos.bat" not in data:
@@ -197,8 +188,46 @@ _REPO = "finntraidingview-cmd/Prophos"
 BOT_STAND = {"sha": None, "version": None}
 
 
+# ── CODE-QUELLE RAILWAY (07.10.2026, Repo privat — Finn: „Code-Auslieferung über Railway mit PC-Schlüssel bauen"). Zuerst
+# Railway (/code/stand, /code/datei/…) mit dem PC-Schlüssel aus code_token.txt (legt der eingeloggte Prophos-Tab über
+# POST /api/code-token ab), GitHub nur noch als Rückfall. Railway deployt jeden Push — Kennung + Dateien passen zusammen.
+CODE_QUELLE = "https://web-production-bec81.up.railway.app"
+CODE_TOKEN_DATEI = os.path.join(HERE, "code_token.txt")
+CODE_TOKEN_MUSTER = re.compile(r"^[0-9a-f-]{36}\.(pc-[a-z0-9]{4,12}|host-[a-z0-9-]{1,30})\.[0-9a-f]{40}$")
+
+
+def code_token():
+    try:
+        with open(CODE_TOKEN_DATEI, "r", encoding="utf-8") as f:
+            t = f.read().strip()
+        return t if CODE_TOKEN_MUSTER.fullmatch(t) else None
+    except OSError:
+        return None
+
+
+def code_holen(pfad_url, timeout=15):
+    """GET CODE_QUELLE + pfad_url mit X-Code-Token → Bytes (nur bei 200) oder None."""
+    import urllib.request
+    tok = code_token()
+    if not tok:
+        return None
+    try:
+        req = urllib.request.Request(CODE_QUELLE + pfad_url, headers={"X-Code-Token": tok, "User-Agent": "prophos-panel"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read() if r.status == 200 else None
+    except Exception:
+        return None
+
+
 def repo_sha(timeout=8):
-    """Kennung des neuesten Commits auf main — oder None (kein Netz o.ae.)."""
+    """Kennung des neuesten Commits auf main — oder None (kein Netz o.ae.). Zuerst Railway, sonst GitHub."""
+    roh = code_holen("/code/stand", timeout)
+    try:
+        sha = (json.loads(roh.decode("utf-8")) or {}).get("sha") if roh else None
+        if sha and re.fullmatch(r"[0-9a-f]{40}", sha):
+            return sha
+    except Exception:
+        pass
     import urllib.request
     try:
         req = urllib.request.Request(
@@ -212,7 +241,10 @@ def repo_sha(timeout=8):
 
 
 def repo_datei(pfad, sha=None, timeout=15):
-    """Datei aus dem Repo — mit sha aus genau diesem Stand, sonst von main."""
+    """Datei aus dem Repo — mit sha aus genau diesem Stand, sonst von main. Zuerst Railway, sonst GitHub."""
+    data = code_holen(f"/code/datei/{pfad}" + (f"?sha={sha}" if sha else ""), timeout)
+    if data is not None:
+        return data
     import urllib.request
     url = f"https://raw.githubusercontent.com/{_REPO}/{sha or 'main'}/{pfad}"
     return urllib.request.urlopen(url, timeout=timeout).read()
@@ -2352,6 +2384,9 @@ class Handler(BaseHTTPRequestHandler):
             # PC-Kennung für alle Browser-Profile dieses PCs (25.09.2026) — null, solange keine eingetragen ist
             import socket
             return self._send(200, json.dumps({"ok": True, "pc_id": pc_id_lesen(), "host": socket.gethostname()}, ensure_ascii=False))
+        if path == "/api/code-token":
+            # Liegt der PC-Schlüssel für die Code-Quelle schon da? (07.10.2026) — nur ja/nein, nie der Schlüssel selbst
+            return self._send(200, json.dumps({"ok": True, "da": bool(code_token())}))
         self._send(404, json.dumps({"error": "not found"}))
 
     def do_POST(self):
@@ -3096,6 +3131,25 @@ class Handler(BaseHTTPRequestHandler):
             if neu:
                 print(f"[panel] PC-Kennung eingetragen: {pid}", flush=True)
             return self._send(200, json.dumps({"ok": True, "pc_id": pid, "neu": neu}, ensure_ascii=False))
+        if u.path == "/api/code-token":
+            # PC-Schlüssel für die Code-Quelle (07.10.2026, Repo privat): der eingeloggte Prophos-Tab holt ihn bei Railway
+            # (/reader-feed-token) und legt ihn hier ab. Nur das bekannte Format, atomar geschrieben.
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(n) or b"{}") if n else {}
+            except Exception as e:
+                return self._send(400, json.dumps({"ok": False, "msg": f"ungueltige Daten: {e}"}))
+            tok = str((body or {}).get("token") or "").strip()
+            if not CODE_TOKEN_MUSTER.fullmatch(tok):
+                return self._send(400, json.dumps({"ok": False, "msg": "Schluessel-Format ungueltig"}))
+            try:
+                with open(CODE_TOKEN_DATEI + ".tmp", "w", encoding="utf-8") as f:
+                    f.write(tok + "\n")
+                os.replace(CODE_TOKEN_DATEI + ".tmp", CODE_TOKEN_DATEI)
+            except OSError as e:
+                return self._send(500, json.dumps({"ok": False, "msg": f"code_token.txt nicht schreibbar: {e}"}))
+            print("[panel] PC-Schluessel fuer die Code-Quelle abgelegt.", flush=True)
+            return self._send(200, json.dumps({"ok": True}))
         if u.path == "/api/hedge-solo":
             # Solo-Hedge auf dem Fusion-Hedge-Terminal (24.09.2026 abends, Winning Days
             # gegenhedgen ohne Duplikum — Finn: „direkt nach der Puls-Order auf Fusion

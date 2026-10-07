@@ -37,7 +37,7 @@ python -m pip install flask requests signalrcore >nul 2>&1
 rem Downloads in .newb-Dateien (eigene Endung, damit sich Copier-, Panel- und
 rem Backend-Schleife nicht in die Quere kommen). ACHTUNG: app.py und
 rem prophos.html liegen im Repo-ROOT, nicht unter mt5-copier/.
-powershell -NoProfile -Command "$ProgressPreference='SilentlyContinue';$b='https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/main/';foreach($f in @('app.py','prophos.html')){try{Invoke-RestMethod ($b+$f) -OutFile ($f+'.newb') -TimeoutSec 25}catch{}}"
+powershell -NoProfile -Command "$ProgressPreference='SilentlyContinue';$t='';try{$t=(Get-Content 'code_token.txt' -TotalCount 1 -EA Stop).Trim()}catch{};$r='https://web-production-bec81.up.railway.app/code/datei/';$b='https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/main/';foreach($f in @('app.py','prophos.html')){$ok=$false;if($t){try{Invoke-WebRequest ($r+$f) -Headers @{'X-Code-Token'=$t} -OutFile ($f+'.newb') -TimeoutSec 25 -UseBasicParsing;$ok=$true}catch{}};if(-not $ok){try{Invoke-RestMethod ($b+$f) -OutFile ($f+'.newb') -TimeoutSec 25}catch{}}}"
 call :swap app.py 100000
 call :swap prophos.html 500000
 exit /b

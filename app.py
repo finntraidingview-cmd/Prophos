@@ -355,11 +355,23 @@ def index():
     # Ohne die Var bleibt das Verhalten unverändert (Railway ist damit nicht betroffen).
     # Bei jedem Fehler/Timeout: Fallback auf die lokale Datei, damit der PC offline
     # weiterarbeiten kann.
+    # SCHUTZ (07.10.2026, Finn: „dass man die Software, das Frontend und das Backend nicht kopieren kann"): auf Railway liefert
+    # „/" die Oberfläche NICHT mehr aus — sie lag dort für jeden ohne Login offen. Railway ist nur API; die Seite gibt es über
+    # pages.dev (dort davor Cloudflare Access) bzw. auf den PCs über localhost:5000.
+    if (os.environ.get("RAILWAY_ENVIRONMENT") or os.environ.get("RAILWAY_GIT_COMMIT_SHA") or "").strip():
+        return Response('<!doctype html><meta charset="utf-8"><title>Prophos</title>'
+                        '<p style="font-family:system-ui">Prophos: <a href="https://prophos.pages.dev/prophos">prophos.pages.dev</a></p>',
+                        mimetype="text/html")
     remote = (os.environ.get("PROPHOS_FRONTEND") or "").strip()
     if remote:
+        # Seit 07.10.2026 zuerst mit dem PC-Schlüssel von Railway (pages.dev steht hinter Cloudflare Access, ein Server-Abruf
+        # ohne Anmeldung bekäme dort nur die Login-Seite); pages.dev und die lokale Datei bleiben Rückfall.
+        r0 = _code_holen("/code/datei/prophos.html", timeout=15)
+        if r0 is not None and len(r0.content) > 50000 and b"OS_TAB_BUILD" in r0.content:
+            return Response(r0.content, mimetype="text/html")
         try:
             r = requests.get(remote, timeout=10)
-            if r.ok and len(r.content) > 50000:
+            if r.ok and len(r.content) > 50000 and b"OS_TAB_BUILD" in r.content:
                 return Response(r.content, mimetype="text/html")
             print(f"[frontend] Remote lieferte HTTP {r.status_code} / {len(r.content)} Bytes — nutze lokale Datei")
         except Exception as e:
@@ -387,6 +399,14 @@ def frontend_version():
         wert = None
         remote = (os.environ.get("PROPHOS_FRONTEND") or "").strip()
         if remote:
+            r0 = _code_holen("/code/stand")      # 07.10.2026: zuerst Railway (pages.dev hinter Cloudflare Access)
+            try:
+                v0 = str(((r0.json() or {}).get("version") if r0 is not None else "") or "").strip()
+                if _FRONTEND_VER_RE.match(v0):
+                    wert = v0
+            except Exception:
+                pass
+        if remote and not wert:
             try:
                 m = re.match(r"^(https?://[^/]+)", remote)
                 if m:
@@ -574,7 +594,12 @@ Start-Sleep -Seconds 2
 #    garantiert nicht offen. Best effort — schlaegt der Download fehl oder
 #    kommt er zu kurz an, bleibt schlicht der alte Stand.
 $bat = '{bat}'
-try {{ Invoke-RestMethod '{url}' -OutFile "$bat.newh" -TimeoutSec 20 }} catch {{ }}
+# Seit 07.10.2026 (Repo privat): zuerst Railway mit dem PC-Schlüssel (code_token.txt neben der .bat), sonst GitHub.
+$tok = ''
+try {{ $tok = (Get-Content (Join-Path (Split-Path -Parent $bat) 'code_token.txt') -TotalCount 1 -ErrorAction Stop).Trim() }} catch {{ }}
+$ok = $false
+if ($tok) {{ try {{ Invoke-WebRequest 'https://web-production-bec81.up.railway.app/code/datei/mt5-copier/start-alles.bat' -Headers @{{'X-Code-Token'=$tok}} -OutFile "$bat.newh" -TimeoutSec 20 -UseBasicParsing; $ok = $true }} catch {{ }} }}
+if (-not $ok) {{ try {{ Invoke-RestMethod '{url}' -OutFile "$bat.newh" -TimeoutSec 20 }} catch {{ }} }}
 if (Test-Path "$bat.newh") {{
   if ((Get-Item "$bat.newh").Length -ge 700) {{ Move-Item -Force "$bat.newh" $bat }}
   else {{ Remove-Item -Force "$bat.newh" }}
@@ -3433,6 +3458,9 @@ def push_service_worker():
     lokal = os.path.join(hier, "sw.js")
     if os.path.exists(lokal):
         return send_from_directory(hier, "sw.js", mimetype="application/javascript")
+    r0 = _code_holen("/code/datei/sw.js")       # 07.10.2026: zuerst Railway (pages.dev hinter Cloudflare Access)
+    if r0 is not None and r0.text.strip():
+        return r0.text, 200, {"Content-Type": "application/javascript", "Cache-Control": "no-store"}
     basis = (os.environ.get("PROPHOS_FRONTEND") or "https://prophos.pages.dev/prophos").strip()
     quelle = basis.rsplit("/", 1)[0] + "/sw.js"
     try:
@@ -13405,6 +13433,78 @@ def reader_feed_token():
     return jsonify({"ok": True, "token": f"{uid}.{pc}.{_reader_feed_sig(uid, pc)}"})
 
 
+# ── CODE-QUELLE (07.10.2026, Finn: „man kann Prophos ja jetzt klauen" → Repo privat; Finn im Chat: „Code-Auslieferung über
+# Railway mit PC-Schlüssel bauen"). Die PCs holten ihren Code bisher ohne Schlüssel von raw.githubusercontent.com / github.com —
+# beim privaten Repo geht das nicht mehr. Railway deployt jeden Push und hat das ganze Repo im Container (auch privat), also
+# liefert es denselben Stand aus. Zugang NUR mit dem PC-Schlüssel, den der eingeloggte Prophos-Tab ohnehin für den Reader holt
+# (uid.pc.sig, reader_feed_token_pruefen) — kein neues Geheimnis. Einzelne IDs sperren: Env CODE_SPERRE (user_ids, komma-getrennt).
+# Nur Dateien der PC-Seite (app.py, prophos.html, requirements.txt, mt5-copier/*, tv-reader/*), nie Pfade mit „..".
+CODE_PFAD_MUSTER = re.compile(r"^(app\.py|prophos\.html|sw\.js|requirements\.txt|(?:mt5-copier|tv-reader)/[A-Za-z0-9_][A-Za-z0-9_.-]{0,80})$")
+_CODE_WURZEL = os.path.dirname(os.path.abspath(__file__))
+
+
+def code_pfad_ok(pfad):
+    """REIN RECHNEND (testbar): darf dieser Repo-Pfad über /code/datei ausgeliefert werden?"""
+    return isinstance(pfad, str) and ".." not in pfad and bool(CODE_PFAD_MUSTER.fullmatch(pfad))
+
+
+def _code_zugang():
+    """(uid, pc) bei gültigem X-Code-Token einer nicht gesperrten ID, sonst None."""
+    tok = (request.headers.get("X-Code-Token") or "").strip()
+    wer = reader_feed_token_pruefen(tok) if tok else None
+    if not wer:
+        return None
+    gesperrt = {x.strip() for x in (os.environ.get("CODE_SPERRE") or "").split(",") if x.strip()}
+    return None if wer[0] in gesperrt else wer
+
+
+def _code_stand_sha():
+    return (os.environ.get("RAILWAY_GIT_COMMIT_SHA") or "").strip().lower()
+
+
+@app.route("/code/stand", methods=["GET"])
+def code_stand():
+    """Commit-Kennung + VERSION des hier ausgelieferten Stands. Nur Railway (sonst 404), Header X-Code-Token."""
+    sha = _code_stand_sha()
+    if not sha:
+        return jsonify({"ok": False, "msg": "nur auf Railway"}), 404
+    if not _code_zugang():
+        return jsonify({"ok": False, "msg": "kein gültiger Schlüssel"}), 403
+    try:
+        with open(os.path.join(_CODE_WURZEL, "mt5-copier", "VERSION"), "r", encoding="utf-8") as f:
+            ver = f.read().strip()[:30]
+    except OSError:
+        ver = None
+    resp = jsonify({"ok": True, "sha": sha, "version": ver})
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+@app.route("/code/datei/<path:pfad>", methods=["GET"])
+def code_datei(pfad):
+    """Eine Repo-Datei aus genau dem deployten Stand. ?sha=… muss (falls angegeben) dieser Stand sein, sonst 409 mit dem
+    aktuellen — der PC fragt dann neu. Header X-Code-Token."""
+    sha = _code_stand_sha()
+    if not sha:
+        return jsonify({"ok": False, "msg": "nur auf Railway"}), 404
+    if not _code_zugang():
+        return jsonify({"ok": False, "msg": "kein gültiger Schlüssel"}), 403
+    if not code_pfad_ok(pfad):
+        return jsonify({"ok": False, "msg": "Pfad nicht erlaubt"}), 400
+    will = (request.args.get("sha") or "").strip().lower()
+    if will and will != sha:
+        return jsonify({"ok": False, "msg": "anderer Stand", "sha": sha}), 409
+    ziel = os.path.join(_CODE_WURZEL, *pfad.split("/"))
+    if not os.path.isfile(ziel):
+        return jsonify({"ok": False, "msg": "nicht gefunden"}), 404
+    with open(ziel, "rb") as f:
+        daten = f.read()
+    resp = Response(daten, status=200, mimetype="application/octet-stream")
+    resp.headers["Cache-Control"] = "no-store"
+    resp.headers["X-Code-Sha"] = sha
+    return resp
+
+
 @app.route("/reader-kurs", methods=["POST", "OPTIONS"])
 def reader_kurs_schreiben():
     """POST vom reader-server (Header X-Reader-Token) → tv_kurse + tv_kurs_1m (Upsert, idempotent)."""
@@ -16073,7 +16173,7 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
     offen = [p for p in _sb_all("trade_plans", {"select": AP_STAND_FELDER + ",mt5_baseline", "status": "eq.open", "order": "id.asc"})
              if str(p.get("user_id")) not in ausgeblendet]
     geplant_alle = [p for p in _sb_all("trade_plans", {"select": AP_STAND_FELDER + ",hedge:mt5_baseline->hedge->>status,"
-                                                                 "rk:mt5_baseline->richtung_konflikt",
+                                                                 "rk:mt5_baseline->richtung_konflikt,sf:mt5_baseline->start_fehler",
                                                        "status": "eq.planned", "order": "id.asc",
                                                        "created_at": "gte." + (jetzt - timedelta(days=30)).isoformat()})
                     if str(p.get("user_id")) not in ausgeblendet and not ersetzt(p)]
@@ -16195,7 +16295,10 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
                  auto_plan=bool(p.get("auto_plan")), bestaetigt=bestaetigt, aenderbar=fest is None, fest_durch=fest,
                  gehedgt=gh, hedge=art, delta_abs=abs(b["delta_eur_pkt"]) if b["delta_eur_pkt"] is not None else None,
                  einsatz_abs=0.0 if gh else float(z.get("verlust_eur") or 0),
-                 richtung_konflikt=p.get("rk") if isinstance(p.get("rk"), dict) else None)   # RICHTUNG AM START (07.10.2026)
+                 richtung_konflikt=p.get("rk") if isinstance(p.get("rk"), dict) else None,   # RICHTUNG AM START (07.10.2026)
+                 # START-FEHLER (Finn 07.10.2026 15:07: „woher soll ich wissen, was ich bei The5ers machen muss?"): Grund eines roten
+                 # Auto-Starts, den der PC-Tab in mt5_baseline.start_fehler schreibt — der Planer zeigt ihn auch für fremde IDs
+                 start_fehler=p.get("sf") if isinstance(p.get("sf"), dict) else None, geclaimt=bool(p.get("start_um_gestartet_at")))
         z["einsatz_eur"] = z["einsatz_abs"] * (1 if r == "buy" else -1) if r in ("buy", "sell") else None
         geplant_rows.append(z)
         if b["hinweis"]:
@@ -16639,8 +16742,10 @@ def admin_auto_plan_eingriff():
     pid, aktion = str(body.get("plan_id") or "").strip(), str(body.get("aktion") or "").strip()
     if not re.match(r"^[0-9a-f-]{36}$", pid):
         return jsonify({"ok": False, "msg": "plan_id fehlt"}), 400
-    if aktion not in ("richtung_tauschen", "start"):
-        return jsonify({"ok": False, "msg": "aktion = richtung_tauschen | start"}), 400
+    if aktion not in ("richtung_tauschen", "start", "neu_starten"):
+        return jsonify({"ok": False, "msg": "aktion = richtung_tauschen | start | neu_starten"}), 400
+    if aktion == "neu_starten":
+        return _ap_neu_starten(pid)
     try:
         stand = _ap_stand_laden(reg)
         neu_min = None
@@ -16667,6 +16772,29 @@ def admin_auto_plan_eingriff():
         return jsonify({"ok": True, "umplanungen": umpl, "msg": fehler})
     except Exception as e:
         return jsonify({"ok": False, "msg": f"{type(e).__name__}: {e}"}), 502
+
+
+def _ap_neu_starten(pid):
+    """BEHOBEN → NEU EINPLANEN (Finn 07.10.2026 16:24 zu „Braucht dich": „Fehler behoben — da muss ich auf Abhaken drücken, sodass
+    der Trade frisch reingeplant wird und noch starten kann; ich kann aktuell nur auf ‚Plan' drücken"). Für Pläne fremder IDs, die der
+    Admin per RLS nicht selbst ändern darf (eigene macht der Tab direkt, sfNeuEinplanen): Startzeit jetzt + 1–3 min (Zufall), Claim
+    zurück — nur solange nichts gesendet ist (Guard: planned, started_at/orbit_gesendet_at leer). Den Start macht der PC-Tab der ID
+    mit allen Prüfungen; er gleicht seine Pläne alle 2 min ab. mt5_baseline.start_fehler → status 'neu' (Anzeige im Planer)."""
+    neu = datetime.now(timezone.utc) + timedelta(seconds=60 + random.random() * 120)
+    rows = sb_update("trade_plans", {"id": f"eq.{pid}", "status": "eq.planned", "started_at": "is.null", "orbit_gesendet_at": "is.null"},
+                     {"start_um": neu.isoformat(), "start_um_gestartet_at": None})
+    if not rows:
+        return jsonify({"ok": False, "msg": "Plan ist nicht mehr geplant oder schon gesendet — nichts geändert"}), 409
+    alt = ((rows[0].get("mt5_baseline") or {}).get("start_fehler") or {}) if isinstance(rows[0].get("mt5_baseline"), dict) else {}
+    flag = dict(alt if isinstance(alt, dict) else {}, status="neu", behoben="von Hand (Admin)", neu_at=datetime.now(timezone.utc).isoformat(),
+                neu_start=neu.isoformat(), hand=True, versuche=int((alt or {}).get("versuche") or 0) + 1)
+    try:
+        r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/rpc/mt5_baseline_patch", headers=_sb_headers(), timeout=(5, 15),
+                        json={"p_plan": str(pid), "p_patch": {"start_fehler": flag}, "p_status": "planned"})
+        _sb_pruefen(r)
+    except Exception as e:
+        print(f"[auto-plan] ⚠️ neu_starten Flag {pid}: {type(e).__name__}: {e}", flush=True)
+    return jsonify({"ok": True, "start": neu.isoformat()})
 
 
 def ap_start_protokoll_zeile(plan, body, jetzt_iso):
@@ -17159,7 +17287,35 @@ threading.Timer(3.0, _sessions_resume).start()
 _LOCAL_UPDATE_URL = ("https://raw.githubusercontent.com/finntraidingview-cmd/"
                      "Prophos/main/mt5-copier/VERSION")
 
+# Seit 07.10.2026 (Repo privat): zuerst Railway (/code/…, Schlüssel code_token.txt neben app.py — legt der Prophos-Tab über
+# das Panel ab), GitHub nur noch als Rückfall. Ohne Schlüssel / bei Fehlern still weiter wie bisher.
+CODE_QUELLE = "https://web-production-bec81.up.railway.app"
+
+
+def _code_token_lokal():
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "code_token.txt"), "r", encoding="utf-8") as f:
+            return f.read().strip()[:200] or None
+    except OSError:
+        return None
+
+
+def _code_holen(pfad_url, timeout=10):
+    """GET CODE_QUELLE + pfad_url mit X-Code-Token → Antwort (nur 200) oder None."""
+    tok = _code_token_lokal()
+    if not tok:
+        return None
+    try:
+        r = requests.get(CODE_QUELLE + pfad_url, headers={"X-Code-Token": tok}, timeout=timeout)
+        return r if r.status_code == 200 else None
+    except Exception:
+        return None
+
+
 def _local_fetch_version():
+    r = _code_holen("/code/datei/mt5-copier/VERSION")
+    if r is not None and r.text.strip():
+        return r.text.strip()
     try:
         r = requests.get(_LOCAL_UPDATE_URL, timeout=10)
         if r.ok:
@@ -17172,7 +17328,14 @@ def _local_fetch_version():
 
 def _local_repo_sha():
     # Kennung des neuesten Commits auf main (wie panel.repo_sha: Git-Schnittstelle,
-    # 0,3 s, KEIN Zwischenspeicher) — oder None.
+    # 0,3 s, KEIN Zwischenspeicher) — oder None. Seit 07.10.2026 zuerst der Stand von Railway.
+    r = _code_holen("/code/stand")
+    try:
+        sha = (r.json() or {}).get("sha") if r is not None else None
+        if sha and re.fullmatch(r"[0-9a-f]{40}", sha):
+            return sha
+    except Exception:
+        pass
     try:
         r = requests.get("https://github.com/finntraidingview-cmd/Prophos.git/info/refs?service=git-upload-pack",
                          headers={"User-Agent": "git/2.40"}, timeout=8)
@@ -17189,7 +17352,8 @@ def _local_code_geaendert():
     if not sha:
         return True
     try:
-        r = requests.get(f"https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/{sha}/app.py", timeout=10)
+        r = _code_holen(f"/code/datei/app.py?sha={sha}") or \
+            requests.get(f"https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/{sha}/app.py", timeout=10)
         if not r.ok or len(r.content) < 10000:
             return True
         with open(os.path.abspath(__file__), "rb") as f:
