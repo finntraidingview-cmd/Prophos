@@ -1845,6 +1845,26 @@
   :is(#tpl-view,#adm-pane-planer) .tpl-achse{position:relative;height:18px;margin-left:var(--nw);font-size:10.5px;color:var(--sub-2);font-variant-numeric:tabular-nums;border-top:1px solid var(--border-soft)}
   :is(#tpl-view,#adm-pane-planer) .tpl-achse span{position:absolute;top:3px;transform:translateX(-50%);white-space:nowrap}
   :is(#tpl-view,#adm-pane-planer) .tpl-achse span.links{transform:none} :is(#tpl-view,#adm-pane-planer) .tpl-achse span.rechts{transform:translateX(-100%)}
+  /* KASTEN AM TRADE (08.10.2026, Slave-Terminal 3 — Finn: „wenn ich auf den jeweiligen Trade drücke, soll sich ein kleiner Kasten öffnen, in dem
+     ich alle Infos zu dem Account und zu dem Trade sehe"): Optik wie die Puls-Karte (.tb-puls-karte), fest an der Pille, schließt beim Scrollen */
+  #dashboard-view .tpl-kasten{position:fixed;z-index:60;width:320px;max-width:calc(100vw - 32px);background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow-pop);padding:10px 12px 12px;font-size:12.5px;color:var(--sub);text-align:left}
+  #dashboard-view .tpl-kasten[hidden]{display:none}
+  #dashboard-view .tpl-kasten .tk-kopf{display:flex;align-items:center;gap:7px;color:var(--ink);font-weight:600;font-size:13px;min-height:22px}
+  #dashboard-view .tpl-kasten .tk-kopf i.id{width:8px;height:8px;border-radius:50%;flex:none}
+  #dashboard-view .tpl-kasten .tk-kopf .tk-x{margin-left:auto;border:0;background:none;color:var(--sub);font-size:15px;line-height:1;cursor:pointer;padding:2px 4px}
+  #dashboard-view .tpl-kasten .tk-st{font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--surface-tint);color:var(--sub)}
+  #dashboard-view .tpl-kasten .tk-st.laeuft{background:var(--violet-tint);color:var(--violet)} #dashboard-view .tpl-kasten .tk-st.bestaetigt{background:color-mix(in srgb,var(--good) 12%,var(--surface));color:var(--good)}
+  #dashboard-view .tpl-kasten .tk-konto{margin:3px 0 8px;color:var(--ink);font-size:13px} #dashboard-view .tpl-kasten .tk-konto small{display:block;font-size:11.5px;color:var(--sub);margin-top:1px}
+  #dashboard-view .tpl-kasten dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:5px 14px;margin:0;padding-top:8px;border-top:1px solid var(--border-soft)}
+  #dashboard-view .tpl-kasten dt{color:var(--sub)} #dashboard-view .tpl-kasten dd{margin:0;color:var(--ink);text-align:right;font-variant-numeric:tabular-nums;min-width:0;overflow-wrap:anywhere}
+  #dashboard-view .tpl-kasten dd small{color:var(--sub);font-size:11.5px} #dashboard-view .tpl-kasten .gut{color:var(--good)} #dashboard-view .tpl-kasten .rot{color:var(--danger)}
+  #dashboard-view .tpl-kasten .tk-akt{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px} #dashboard-view .tpl-kasten .tk-akt .btn{padding:4px 10px;font-size:12px;height:auto}
+  #dashboard-view .tpl-kasten .tk-hin{margin-top:8px;font-size:11.5px;color:var(--sub)} #dashboard-view .tpl-kasten .tk-hin.rot{color:var(--danger)}
+  #dashboard-view .tpl-kasten .tk-liste{display:flex;flex-direction:column;margin-top:6px}
+  #dashboard-view .tpl-kasten .tk-liste button{display:grid;grid-template-columns:14px minmax(0,1fr) auto;gap:8px;align-items:center;width:100%;padding:7px 2px;border:0;border-top:1px solid var(--border-soft);background:none;font:inherit;font-size:12.5px;color:var(--ink);text-align:left;cursor:pointer}
+  #dashboard-view .tpl-kasten .tk-liste button:first-child{border-top:0} #dashboard-view .tpl-kasten .tk-liste button:hover{background:var(--surface-tint)}
+  #dashboard-view .tpl-kasten .tk-liste span{color:var(--sub);font-size:11.5px;font-variant-numeric:tabular-nums}
+  #dashboard-view .tpl-kasten .tk-zurueck{border:0;background:none;color:var(--sub);font:inherit;font-size:12px;cursor:pointer;padding:0 4px 0 0}
   :is(#tpl-view,#adm-pane-planer) .tpl-netto{position:relative;display:flex;height:50px;border-top:1px solid var(--border-soft)}
   :is(#tpl-view,#adm-pane-planer) .tpl-netto .tpl-name span{padding-left:0}
   :is(#tpl-view,#adm-pane-planer) .tpl-netto .tpl-bahn::before{display:none}
@@ -40908,7 +40928,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1233'
+  const OS_TAB_BUILD = '2026-09-22.1234'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -46119,6 +46139,12 @@
     if(t.includes('alpha')) return 'Alpha'
     return String(f || '?').trim().split(/\s+/)[0] || '?'
   }
+  /* Kurzform, die man OHNE Legende versteht (08.10.2026, Slave-Terminal 3) — nur wenn der Firmen-Kurzname nicht in die Lücke passt; statt der
+   * Zwei-Buchstaben-Kürzel FN/FP/BG/5%, die Finn nicht lesen kann */
+  function tplFirmaMini(f){
+    const k = tplFirmaKurz(f)
+    return ({ FundedNext: 'FNext', FundingPips: 'Pips', 'Blue Guardian': 'Blue G.', The5ers: '5ers' })[k] || k
+  }
   const tplGroesseKurz = t => { let g = 0; try{ g = Number(kontoGroesseAnzeige(t.konto, null, t.balance)) || 0 }catch(_){} return g >= 1000 ? Math.round(g / 1000) + 'k' : g > 0 ? String(g) : '' }
   function tplZeitstrahlHtml(D, zeilen){
     const v = D.v, heute = D.tag === D.heute && D.jetzt != null
@@ -46138,16 +46164,17 @@
     const schmal = (window.innerWidth || 1280) <= 760, nw = schmal ? 86 : 108
     const rootEl = [document.getElementById('tpl-root'), document.getElementById('ap-ids-root')].find(e => e && e.offsetParent !== null) || document.getElementById('tpl-root')
     const bahnPx = Math.max(720, (rootEl && rootEl.clientWidth) || 0) - nw - 26, pxJeMin = bahnPx / SPAN
-    // Enge → Stufe des Pillen-Textes (08.10.2026): voll „Tradeify 150k 09:42" (≈ 128 px) · mittel „TF 150k" (≈ 72 px) · kompakt „TF" (≈ 46 px);
-    // Handy höchstens mittel. Cluster (zwei Ebenen, dann „+n") rechnen mit derselben Breite.
-    // Label-Stufe (Nacharbeit 08.10.2026): voll „Tradeify 150k" · mittel „TF 150k" · kompakt „TF" — Uhrzeit steht nur im Tooltip (die Achse
-    // zeigt sie), nie abschneiden: die Stufe fällt mit der Enge, Handy höchstens mittel. Pillenbreite je Label (≈ 6,6 px je Zeichen + 34 px
-    // für Pfeil und Innenabstand) bestimmt die Unterspur-Belegung in Minuten (+ 4 min Luft).
-    const stufe = (!schmal && pxJeMin >= 1.5) ? 'voll' : pxJeMin >= 0.9 ? 'mittel' : 'kompakt'
+    // Uhrzeit steht nur im Tooltip/Kasten (die Achse zeigt sie), nie abschneiden. Pillenbreite je Label bestimmt die Unterspur-Belegung in Minuten.
+    // JE PILLE DIE LÄNGSTE BESCHRIFTUNG, DIE PASST (08.10.2026, Slave-Terminal 3 — Finn, Admin 2000 px: „dieses ‚FN 100K' finde ich nicht schön,
+    // man erkennt da sehr wenig"; die alte globale Stufe gab bei 1,2 px/min ALLEN Pillen das Kürzel, und die Schätzung 6,6 px je Zeichen
+    // ließ die Nachbar-Pille „FN 100k" zu „FN 10C" überdecken): „FundedNext 100k" → „FundedNext" → lesbare Kurzform „FNext", erst dann „+n".
+    // Breite per Canvas gemessen (Schrift der Pille), Rückfall auf die Schätzung.
     const EB = schmal ? TPL_EBENE_Y_SCHMAL : TPL_EBENE_Y, barOff = schmal ? 8 : 9
-    const labelVon = t => { const gr = tplGroesseKurz(t); return stufe === 'voll' ? `${tplFirmaKurz(t.firma)}${gr ? ' ' + gr : ''}` : stufe === 'mittel' ? `${apPrKurz(t.firma)}${gr ? ' ' + gr : ''}` : apPrKurz(t.firma) }
-    const pillPx = text => 34 + text.length * (schmal ? 6.2 : 6.6), pillMin = text => pillPx(text) / pxJeMin + 4
-    const kompakt = stufe === 'kompakt', breiteMin = Math.max(20, pillPx('TF 150k') / pxJeMin)   // Cluster-Nähe für „+n" (Tooltip-Liste)
+    const labelsVon = t => { const f = tplFirmaKurz(t.firma), gr = tplGroesseKurz(t), m = tplFirmaMini(t.firma); return [...new Set([gr ? `${f} ${gr}` : f, f, m])] }
+    const schrift = `600 ${schmal ? 11 : 11.5}px ${(() => { try{ return getComputedStyle(document.body).fontFamily }catch(_){ return 'sans-serif' } })()}`
+    const textPx = (() => { let c = null; return s => { try{ c = c || document.createElement('canvas').getContext('2d'); c.font = schrift; return c.measureText(s).width }catch(_){ return s.length * (schmal ? 6.2 : 6.6) } } })()
+    const pillPx = text => 36 + textPx(text), pillMin = text => pillPx(text) / pxJeMin + 5
+    const breiteMin = Math.max(20, pillPx('Tradeify') / pxJeMin)   // Cluster-Nähe für „+n" (Liste im Kasten)
     const raster = []
     for(let h = Math.ceil(VON / 60) * 60; h <= BIS; h += 60) raster.push(`<i style="left:${((h - VON) / SPAN * 100).toFixed(2)}%"></i>`)
     const jetztIn = heute && D.jetzt + v >= VON && D.jetzt + v <= BIS
@@ -46164,32 +46191,45 @@
     // Pille am rechten Rand (Nacharbeit 08.10.2026, Handy: „Fundi", „Tr" abgeschnitten): hängt nach links, sobald sie mit ihrer Pixelbreite
     // über die Bahn hinausragen würde — nicht erst ab 90 %
     const rechts = (t, text) => X(t.start) + pillPx(text) / bahnPx * 100 > 99
-    const marker = (t, ebene) => {
+    const marker = (t, ebene, text) => {
       const erg = t.status === 'beendet' && t.pnl != null ? (t.pnl > 0 ? ' erg-gut' : t.pnl < 0 ? ' erg-rot' : ' erg-null') : ''
       const balken = t.status === 'laeuft' && heute && D.jetzt > t.start ? `<i class="tpl-bar ${t.long ? 'long' : 'short'}" style="left:${X(t.start).toFixed(2)}%;width:${(X(D.jetzt) - X(t.start)).toFixed(2)}%;top:${EB[ebene] + barOff}px"></i>` : ''   // Balken mittig hinter der Pille
-      const text = labelVon(t)
-      return balken + `<button type="button" class="tpl-m ${t.long ? 'long' : 'short'} ${t.status}${erg}${t.wd ? ' wd' : ''}${_tpl.wahl === t.key ? ' wahl' : ''}${rechts(t, text) ? ' rechts' : ''}" style="left:${X(t.start).toFixed(2)}%;top:${EB[ebene]}px" data-tpl-t="${escapeHtml(t.key)}" title="${escapeHtml(titelVon(t))}">
+      return balken + `<button type="button" class="tpl-m ${t.long ? 'long' : 'short'} ${t.status}${erg}${t.wd ? ' wd' : ''}${_tpl.wahl === t.key ? ' wahl' : ''}${rechts(t, text) ? ' rechts' : ''}" style="left:${X(t.start).toFixed(2)}%;top:${EB[ebene]}px" data-tpl-t="${escapeHtml(t.key)}" data-uid="${escapeHtml(String(t.user_id || ''))}" title="${escapeHtml(titelVon(t))}">
           <span class="g">${t.status === 'laeuft' ? '<i class="p"></i>' : ''}${t.long ? '▲' : '▼'}</span><span class="l"><b>${escapeHtml(text)}</b></span></button>`
     }
     const spurHtml = (z, liste, label) => {
       // Unterspuren (Nacharbeit 08.10.2026): jede Pille belegt ihre Breite in Minuten; die erste freie von drei Unterspuren nimmt sie,
       // sonst wandert sie in ein „+n" (Gruppe benachbarter Reste, Tooltip-Liste). Vorher: zwei Ebenen nach Nähe zum Vorgänger — Pillen
       // weiter hinten überlappten trotzdem, weil nur der Abstand zum letzten Start zählte, nicht die Pillenbreite.
-      const frei = EB.map(() => -Infinity), rest = []
-      let html = ''
-      for(const t of liste){
-        const text = labelVon(t), w = pillMin(text), links = rechts(t, text)   // geklappte Rand-Pille belegt [start − Breite, start]
-        const lane = frei.findIndex(ende => (links ? t.start - w : t.start) >= ende)
-        if(lane < 0){ rest.push(t); continue }
-        frei[lane] = links ? t.start + 2 : t.start + w; html += marker(t, lane)
+      // STUFE JE ZEILE (08.10.2026, Slave-Terminal 3): ob eine Pille Platz findet, hängt am Ende der VORIGEN — die eigene Beschriftung
+      // entscheidet nur, ob die NÄCHSTE noch passt. Darum je ID-Zeile die längste Stufe (voll „FundedNext 100k" → Name „FundedNext" →
+      // Kurzform „FNext"), bei der nichts in ein „+n" fällt; geht das nirgends, die Stufe mit den wenigsten Resten. Lockere Zeilen bleiben voll.
+      const sortiert = liste.slice().sort((a, b) => a.start - b.start)
+      const belegen = s => {
+        const frei = EB.map(() => -Infinity), rest = [], teile = []
+        for(const t of sortiert){
+          const ls = labelsVon(t), text = ls[Math.min(s, ls.length - 1)], w = pillMin(text), links = rechts(t, text)   // geklappte Rand-Pille belegt [start − Breite, start]
+          const lane = frei.findIndex(ende => (links ? t.start - w : t.start) >= ende)
+          if(lane < 0){ rest.push(t); continue }
+          frei[lane] = links ? t.start + 2 : t.start + w; teile.push(marker(t, lane, text))
+        }
+        return { frei, rest, teile }
       }
+      let bel = belegen(0)
+      for(let s = 1; s < 3 && bel.rest.length; s++){ const b = belegen(s); if(b.rest.length < bel.rest.length) bel = b }
+      const { frei, rest } = bel
+      let html = bel.teile.join('')
       const gruppen = []; let g = null
       for(const t of rest){ if(g && t.start - g.letzte < breiteMin){ g.items.push(t); g.letzte = t.start } else { g = { items: [t], letzte: t.start }; gruppen.push(g) } }
       for(const gr of gruppen){
-        const x = X(gr.items[0].start), lane = frei.findIndex(ende => gr.items[0].start >= ende - breiteMin / 2)   // „+n" bevorzugt eine Unterspur mit Luft, sonst die letzte
-        html += `<button type="button" class="tpl-m mehr${x + 40 / bahnPx * 100 > 99 ? ' rechts' : ''}" style="left:${x.toFixed(2)}%;top:${EB[lane < 0 ? EB.length - 1 : lane]}px" data-tpl-t="${escapeHtml(gr.items[0].key)}" title="${escapeHtml(gr.items.map(t => `${t.user} · ${apPrKurz(t.firma)} ${tplGroesseKurz(t)} ${t.long ? '▲' : '▼'} ${tplUhr(t.start, v)} · ${TPL_WORT[t.status] || t.status}`).join('\n'))}"><span class="l">+${gr.items.length}</span></button>`
+        // „+n" (Klick = Liste im Kasten) in die Unterspur, die am frühesten frei ist, direkt hinter die blockierende Pille — vorher lag es
+        // auf der letzten Unterspur über einer Pille (08.10.2026)
+        const lane = frei.reduce((best, ende, i) => ende < frei[best] ? i : best, 0), pos = Math.max(gr.items[0].start, frei[lane]), txt = '+' + gr.items.length
+        frei[lane] = pos + pillMin(txt)
+        const x = X(pos)
+        html += `<button type="button" class="tpl-m mehr${x + 40 / bahnPx * 100 > 99 ? ' rechts' : ''}" style="left:${x.toFixed(2)}%;top:${EB[lane]}px" data-tpl-t="${escapeHtml(gr.items[0].key)}" data-tpl-gruppe="${escapeHtml(gr.items.map(t => t.key).join(','))}" data-uid="${escapeHtml(String(gr.items[0].user_id || ''))}" title="${escapeHtml(gr.items.map(t => `${t.user} · ${tplFirmaKurz(t.firma)} ${tplGroesseKurz(t)} ${t.long ? '▲' : '▼'} ${tplUhr(t.start, v)} · ${TPL_WORT[t.status] || t.status}`).join('\n'))}"><span class="l">${txt}</span></button>`
       }
-      return `<div class="tpl-spur${z.sammel ? ' sammel' : ''}" style="--id:${z.uid ? idFarbe(z.uid) : 'var(--sub-2)'}">${label}<div class="tpl-bahn">${html || '<span class="leer">—</span>'}</div></div>`
+      return `<div class="tpl-spur${z.sammel ? ' sammel' : ''}" data-uid="${escapeHtml(String(z.uid || (z.sammel ? 'weitere' : '')))}" style="--id:${z.uid ? idFarbe(z.uid) : 'var(--sub-2)'}">${label}<div class="tpl-bahn">${html || '<span class="leer">—</span>'}</div></div>`
     }
     const rows = zeilen.map(z => {
       const liste = D.trades.filter(t => z.ids.includes(t.user_id))
@@ -46203,7 +46243,8 @@
       return spurHtml(z, liste, label)
     }).join('')
     _tpl.achse = { VON, BIS, jetztIn }   // der Netto-Chart (eigene Karte darunter) teilt sich die Zeitachse
-    const leg = `<span class="leg"><span><span class="g tpl-gut">▲</span> Long</span><span><span class="g tpl-rot">▼</span> Short</span><span>gestrichelt = unbestätigt</span><span><span style="color:var(--violet)">●</span> läuft (Balken = Dauer)</span><span>blass = beendet</span><span>+n = mehr im Tooltip</span></span>`
+    _tpl.zs = _tpl.zs || {}; _tpl.zs[(rootEl && rootEl.id) || 'tpl-root'] = { trades: new Map(alle.map(t => [t.key, t])), v }   // Kasten am Trade (08.10.2026): genau die gezeichneten Trades je Wurzel
+    const leg = `<span class="leg"><span><span class="g tpl-gut">▲</span> Long</span><span><span class="g tpl-rot">▼</span> Short</span><span>gestrichelt = unbestätigt</span><span><span style="color:var(--violet)">●</span> läuft (Balken = Dauer)</span><span>blass = beendet</span><span>Klick = Kasten mit allen Infos</span></span>`
     return `<div class="tpl-karte"><div class="tpl-h">Zeitstrahl <b>${alle.length}</b>${leg}</div>
         <div class="tpl-scroll"><div class="tpl-innen"><div class="tpl-raster">${raster.join('')}</div>
           ${rows || '<div class="tpl-leer">—</div>'}<div class="tpl-achse">${achse.join('')}</div></div></div></div>`
@@ -46331,6 +46372,123 @@
         <span class="tpl-pill ${t.status}">${TPL_WORT[t.status] || t.status}</span></div>
         <div class="tpl-werte tpl-werte-1">${werte1.join('')}</div><div class="tpl-werte">${werte.join('')}</div><div class="tpl-akt">${kn.join('')}</div>
         ${_tpl.meldung ? `<div class="tpl-meldung">⚠ ${escapeHtml(_tpl.meldung)}</div>` : ''}</div>`
+  }
+  /* KASTEN AM TRADE (08.10.2026, Slave-Terminal 3 — Finn, Admin-Zeitstrahl bei 2000 px: „Wenn ich auf den jeweiligen Trade drücke, soll sich
+   * wie bei unserem Trade-Planer ein kleiner Kasten öffnen, in dem ich alle Infos zu dem Account und zu dem Trade sehe"). Im Admin-Reiter tat
+   * der Klick sichtbar nichts (tplKlick zeichnete nur die verborgene Planer-Seite). EIN Element in #dashboard-view, fest an der Pille (Optik
+   * der Puls-Karte); Daten = genau die Trades, die der Zeitstrahl dieser Wurzel gezeichnet hat (_tpl.zs), nichts nachgeladen. „+n" listet
+   * seine Trades. Bestätigen nur mit Recht (wie im Detail) UND liver Balance (tplPlanLive). Planer-Seite: „Bearbeiten ▸" öffnet das alte
+   * Detail darunter (Richtung/Start/Löschen). Schließen: ✕, Klick daneben, Esc, Scrollen, Größe ändern. Eigene Verdrahtung, kein Modal-Handler. */
+  const _tk = { el: null, anker: null, root: null, key: null, gruppe: null, busy: false, meldung: '' }
+  const tkWeg = (t, r1, p1) => (r1 && typeof wdlWeg === 'function') ? wdlWeg(r1) : t.route === 'mt5v2' ? 'Echo V2' : t.route === 'mt5' ? 'Echo' : t.route === 'tsv2' ? 'Topstep V2'
+    : t.wd ? 'Winning Day' : (p1 && p1.orbitV3) ? 'Orbit V3' : 'Orbit V2'
+  function tkStand(){ const zs = _tk.root && _tpl.zs && _tpl.zs[_tk.root.id]; return zs || { trades: new Map(), v: 0 } }
+  function tkEinzelHtml(t, v){
+    const r1 = (_tpl.lt && _tpl.lt.get(String(t.plan_id))) || null, p1 = t.eigen ? (tradePlans || []).find(x => String(x.id) === t.plan_id) : null
+    const acc = t.konto_id ? (accounts || []).find(x => String(x.id) === String(t.konto_id)) : null, b = acc ? tplKontoBalance(acc) : null
+    const echt = !t.ohnePlan && /^[0-9a-f-]{36}$/i.test(String(t.plan_id || '')), darf = t.eigen || (tplDarfFremd() && t.auto), live = tplPlanLive(t)
+    const gr = tplGroesseKurz(t), typ = (t.typ && TPL_TYP_WORT[t.typ]) || t.typ || ''
+    const de = (x, d) => Number(x).toLocaleString('de-DE', { maximumFractionDigits: d == null ? 0 : d })
+    const menge = t.menge == null ? '—' : /^(mt5|mt5v2)$/.test(String(t.route || '')) ? `${de(t.menge, 2)} Lot`
+      : `${de(t.menge, 2)} × ${(r1 && r1.symbol_root) || (Number(t.usd) === 2 ? 'MNQ' : 'NQ')}`
+    const zwei = (usd, pkt) => [usd != null ? tplUsd(usd) : '', pkt != null ? Math.round(pkt) + ' Pkt' : ''].filter(Boolean).join(' · ') || '—'
+    const zeit = t.status === 'laeuft' ? `${tplUhr(t.start, v)} · läuft` : (t.status === 'beendet' || t.status === 'vorbei') && t.ende != null ? `${tplUhr(t.start, v)} – ${tplUhr(t.ende, v)}` : tplUhr(t.start, v)
+    const balZahl = b ? b.bal : t.balance
+    const balTxt = balZahl == null ? '—' : `${de(balZahl)} $${t.rest != null ? ` → ${de(balZahl + Number(t.rest))} $` : ''}`
+    const balUnter = [t.rest != null ? `noch ${de(t.rest)} $ bis Ziel` : '', b ? tplBalText(b, Date.now()).replace(/^[^·]*·\s*/, '') : t.balance != null ? 'Planer-Lauf' : ''].filter(Boolean).join(' · ')
+    const z = (l, w, kl) => `<dt>${l}</dt><dd${kl ? ` class="${kl}"` : ''}>${w}</dd>`
+    const zeilen = [z('ID', `<span class="ap-adm-id"><i style="background:${idFarbe(t.user_id)}"></i>${escapeHtml(t.user || '—')}</span>`),
+      z('Start', `${zeit}${t.startUnklar ? ' <small>(unbekannt)</small>' : ''} <small>Dubai</small>`),
+      z('Richtung', t.long ? '▲ Long' : '▼ Short', t.long ? 'gut' : 'rot'), z('Weg', escapeHtml(String(tkWeg(t, r1, p1)))), z('Menge', escapeHtml(menge)),
+      z('TP', zwei(t.tp, t.tp_punkte), 'gut'), z('SL', zwei(t.sl, t.sl_punkte), 'rot'),
+      z('Balance → Ziel', `${balTxt}${balUnter ? `<br><small>${escapeHtml(balUnter)}</small>` : ''}`), z('Schritt', escapeHtml(t.stufe || '—'))]
+    if(t.status === 'beendet' && t.pnl != null) zeilen.push(z('Ergebnis', (t.pnl > 0 ? '+' : '') + tplUsd(t.pnl), t.pnl > 0 ? 'gut' : t.pnl < 0 ? 'rot' : ''))
+    const kn = []
+    if(echt && darf && t.auto && t.status === 'offen') kn.push(`<button type="button" class="btn btn-ghost" data-tk="ok"${_tk.busy || !live ? ' disabled' : ''} title="${live ? 'Bestätigen — startet zur Startzeit' : 'Balance nicht live — erst „↻ Balance lesen" (Braucht dich), dann bestätigen'}">✓ Bestätigen</button>`)
+    if(typeof window._apKontoOeffnen === 'function') kn.push(`<button type="button" class="btn btn-ghost" data-tk="konto" title="Konto: Balance, Ziel, letzte Trades">Konto ▸</button>`)
+    if(_tk.root && _tk.root.id === 'tpl-root' && echt && (t.status === 'offen' || t.status === 'bestaetigt') && (darf || apdAdmin())) kn.push(`<button type="button" class="btn btn-ghost" data-tk="detail" title="Richtung, Start, Löschen">Bearbeiten ▸</button>`)
+    const hin = [!live && (t.status === 'offen' || t.status === 'bestaetigt') ? '<div class="tk-hin rot">Balance nicht live — erst lesen, dann bestätigen.</div>' : '',
+      _tk.meldung ? `<div class="tk-hin rot">⚠ ${escapeHtml(_tk.meldung)}</div>` : ''].join('')
+    return `<div class="tk-kopf">${_tk.gruppe ? '<button type="button" class="tk-zurueck" data-tk="liste" title="zurück zur Liste">‹</button>' : ''}<span class="${t.long ? 'gut' : 'rot'}">${t.long ? '▲' : '▼'}</span>
+        <span>${escapeHtml(tplFirmaKurz(t.firma))}${gr ? ' ' + gr : ''}</span><span class="tk-st ${t.status}">${TPL_WORT[t.status] || t.status}</span>
+        <button type="button" class="tk-x" data-tk="zu" title="Schließen (Esc)">✕</button></div>
+      <div class="tk-konto">${escapeHtml(t.firma || '?')}${gr ? ' · ' + gr : ''}${t.ende4 ? ` · …${escapeHtml(t.ende4)}` : ''}${typ ? ` · ${escapeHtml(typ)}` : ''}
+        ${t.konto && t.konto !== t.firma ? `<small>${escapeHtml(t.konto)}</small>` : ''}</div>
+      <dl>${zeilen.join('')}</dl>${kn.length ? `<div class="tk-akt">${kn.join('')}</div>` : ''}${hin}`
+  }
+  function tkListeHtml(liste, v){
+    return `<div class="tk-kopf"><span>${liste.length} Trades hier</span><button type="button" class="tk-x" data-tk="zu" title="Schließen (Esc)">✕</button></div>
+      <div class="tk-liste">${liste.map(t => `<button type="button" data-tk-t="${escapeHtml(t.key)}"><b class="${t.long ? 'gut' : 'rot'}">${t.long ? '▲' : '▼'}</b>
+        <b>${escapeHtml(t.user || '—')} · ${escapeHtml(tplFirmaKurz(t.firma))} ${tplGroesseKurz(t)}</b><span>${tplUhr(t.start, v)} · ${TPL_WORT[t.status] || t.status}</span></button>`).join('')}</div>`
+  }
+  function tkZeichnen(){
+    if(!_tk.el) return
+    const { trades, v } = tkStand(), t = _tk.key ? trades.get(_tk.key) : null
+    const liste = (_tk.gruppe || []).map(k => trades.get(k)).filter(Boolean)
+    if(!t && !liste.length){ tkZu(); return }
+    _tk.el.innerHTML = t ? tkEinzelHtml(t, v) : tkListeHtml(liste, v)
+  }
+  function tkSetzen(){
+    const el = _tk.el, a = _tk.anker; if(!el || !a || !a.isConnected) return
+    el.hidden = false
+    const r = a.getBoundingClientRect(); if(!r.width && !r.height){ tkZu(); return }   // Pille nicht sichtbar (Reiter zu) → kein Kasten in der Ecke
+    const w = el.offsetWidth, h = el.offsetHeight, rand = 16
+    const left = Math.max(rand, Math.min(window.innerWidth - rand - w, r.left - 12))
+    let top = r.bottom + 6
+    if(top + h > window.innerHeight - rand && r.top - 6 - h >= rand) top = r.top - 6 - h      // unten kein Platz → über der Pille
+    el.style.left = left + 'px'; el.style.top = Math.max(rand, top) + 'px'
+  }
+  function tkZu(){
+    if(_tk.anker) _tk.anker.classList.remove('wahl')
+    if(_tk.el) _tk.el.hidden = true
+    _tk.anker = null; _tk.key = null; _tk.gruppe = null; _tk.meldung = ''
+  }
+  function tkOeffnen(pille, root){
+    if(_tk.anker === pille && _tk.el && !_tk.el.hidden){ tkZu(); return }   // zweiter Klick auf dieselbe Pille schließt
+    if(!_tk.el){
+      _tk.el = document.createElement('div'); _tk.el.className = 'tpl-kasten'; _tk.el.hidden = true
+      ;(document.getElementById('dashboard-view') || document.body).appendChild(_tk.el)
+      _tk.el.addEventListener('click', tkKlick)
+      document.addEventListener('pointerdown', e => { if(_tk.el.hidden || _tk.el.contains(e.target) || (e.target.closest && e.target.closest('.tpl-m[data-tpl-t]'))) return; tkZu() }, true)
+      document.addEventListener('keydown', e => { if(e.key === 'Escape' && !_tk.el.hidden) tkZu() })
+      // nur ECHTES Scrollen schließt (Rad/Wischen) — das Neu-Zeichnen setzt die Bahn per tplScrollJetzt auf „jetzt" und hätte den Kasten sonst sofort zugemacht
+      const scrollZu = e => { if(!_tk.el.hidden && !_tk.el.contains(e.target)) tkZu() }
+      document.addEventListener('wheel', scrollZu, { capture: true, passive: true }); document.addEventListener('touchmove', scrollZu, { capture: true, passive: true })
+      window.addEventListener('scroll', () => { if(!_tk.el.hidden) tkZu() }, { passive: true })   // Seite selbst (ohne capture: die Bahn .tpl-scroll zählt nicht)
+      window.addEventListener('resize', () => { if(!_tk.el.hidden) tkZu() })
+    }
+    if(_tk.anker) _tk.anker.classList.remove('wahl')
+    _tk.root = root; _tk.anker = pille; _tk.meldung = ''
+    _tk.gruppe = pille.dataset.tplGruppe ? pille.dataset.tplGruppe.split(',') : null
+    _tk.key = _tk.gruppe ? null : pille.dataset.tplT
+    pille.classList.add('wahl')
+    tkZeichnen(); tkSetzen()
+  }
+  function tkKlick(e){
+    const zu = e.target.closest('[data-tk-t]')
+    if(zu){ _tk.key = zu.dataset.tkT; _tk.meldung = ''; tkZeichnen(); tkSetzen(); return }
+    const b = e.target.closest('[data-tk]'); if(!b || b.disabled) return
+    const a = b.dataset.tk
+    if(a === 'zu'){ tkZu(); return }
+    if(a === 'liste'){ _tk.key = null; tkZeichnen(); tkSetzen(); return }
+    const t = _tk.key ? tkStand().trades.get(_tk.key) : null; if(!t) return
+    if(a === 'konto'){
+      const pid = t.plan_id; tkZu()
+      window._apKontoOeffnen(pid, { z: { plan_id: pid, user_id: t.user_id, user: t.user, konto: t.konto, firma: t.firma, ende4: t.ende4, typ: t.typ, richtung: t.richtung, menge: t.menge, tp: t.tp, sl: t.sl }, t })
+      return }
+    if(a === 'detail'){
+      _tpl.wahl = t.key; _tpl.edit = null; _tpl.meldung = ''; tkZu(); tplZeichnen()
+      document.getElementById('tpl-root')?.querySelector('.tpl-detail')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      return }
+    if(a === 'ok'){
+      const root = _tk.root; _tk.busy = true; tkZeichnen()
+      ;(async () => {
+        try{ await tplAktion(t, 'ok') }finally{ _tk.busy = false }
+        if(_tpl.meldung){ _tk.meldung = _tpl.meldung; _tpl.meldung = ''; tkZeichnen(); return }
+        tkZu()
+        if(root && root.id === 'ap-ids-root' && typeof window._apIdsLaden === 'function') window._apIdsLaden()   // Admin-Reiter neu laden
+      })()
+    }
   }
 
   /* Gründe des Planers (ap_planen/ap_konto_rechnen) als kurzes Wort für die Chips; ganzer Satz im Tooltip */
@@ -47344,6 +47502,8 @@
       const pid = ak.dataset.akKonto, t = tplDaten().trades.find(x => String(x.plan_id) === String(pid)); if(!t) return
       window._apKontoOeffnen(pid, { z: { plan_id: pid, user_id: t.user_id, user: t.user, konto: t.konto, firma: t.firma, ende4: t.ende4, typ: t.typ, richtung: t.richtung, menge: t.menge, tp: t.tp, sl: t.sl }, t })
       return }
+    const pm = e.target.closest('.tpl-m[data-tpl-t]')   // Zeitstrahl-Pille (auch „+n"): Kasten am Trade (08.10.2026), statt Detail unter dem Strahl
+    if(pm && e.currentTarget && e.currentTarget.id){ tkOeffnen(pm, e.currentTarget); return }
     const m = e.target.closest('[data-tpl-t]')
     if(m){ _tpl.wahl = _tpl.wahl === m.dataset.tplT ? null : m.dataset.tplT; _tpl.edit = null; _tpl.meldung = ''; tplZeichnen()
       if(_tpl.wahl && (m.classList.contains('tpl-chip') || m.closest('.tpl-bd'))) tplRoot.querySelector('.tpl-detail')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
@@ -60174,6 +60334,7 @@
   // Haken für Planer-Seite und Radar (08.10.2026, Slave-Terminal 1): die Admin-Sektion ist ein eigener Block, apKontoOeffnen dort
   // block-scoped — außerhalb nur über window erreichbar (wie die anderen Test-/Brücken-Haken)
   window._apKontoOeffnen = apKontoOeffnen
+  window._apIdsLaden = apIdsLaden   // Kasten am Trade (Zeitstrahl, 08.10.2026): nach „Bestätigen" den Admin-Reiter neu laden
   const apKontoZu = () => document.getElementById('apKontoModal')?.classList.remove('open')
   document.getElementById('apKontoX')?.addEventListener('click', apKontoZu)
   document.getElementById('apKontoModal')?.addEventListener('click', ev => { if(ev.target === ev.currentTarget) apKontoZu() })
