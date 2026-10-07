@@ -15713,7 +15713,11 @@ def ap_firma_key(firmen, firm):
     """Schlüssel für „Firma × Tag": Regel-Firma (erster Name — „apex"/„apextrader" sind EINE Firma), sonst der normalisierte
     Name. „FundedNext Futures" ≠ „FundedNext" (andere Plattform, eigener Topf wie in _firm_norm)."""
     r = ap_regel_finden(firmen, firm)
-    return _ap_norm((r.get("namen") or [firm])[0]) if r else _ap_norm(firm)
+    if r:
+        return _ap_norm((r.get("namen") or [firm])[0])
+    # 08.10.2026 (Audit Richtungsschutz): ohne Regel erst die Schreibweisen zusammenführen (_firm_norm) — in accounts.firm stehen
+    # „MyFoundedFutures" (2 Konten) und „MyFundedFutures" (6) nebeneinander; roh normalisiert wären das zwei Firmen = Loch im Riegel
+    return _ap_norm(_firm_norm(firm))
 
 
 def ap_ppl_karte(rows, norm=None):
@@ -16337,6 +16341,46 @@ def _ap_iso_min(iso, mitternacht):
         return None
 
 
+AP_ID_FEST_HORIZONT_MIN = 30        # Pläne, die in ≤ 30 min starten, legen die Richtung ihrer ID+Firma schon fest (08.10.2026)
+
+
+def ap_id_fest(offen_rows, geplant_rows, jetzt_min, horizont_min=AP_ID_FEST_HORIZONT_MIN, nachlauf_min=AP_RS_NACHLAUF_MIN):
+    """REIN RECHNEND (testbar) — EINE Quelle der Wahrheit für den Richtungsschutz je ID+Firma (Finn 08.10.2026: „dass der Trade-Planer
+    nicht in Kollision kommt mit den Winning Days oder Trades bei Orbit oder Echo — dass er sich nicht selbst gegeneinander hedgt").
+    Fest ist eine ID+Firma (Schlüssel user_id|firma_key, ap_firma_key: „Apex"/„Apex Trader" = eine Firma, „FundedNext Futures" ≠
+    „FundedNext") durch
+      (1) jeden LAUFENDEN Trade — alle Wege und Kontoarten (Winning Days mit Hedge, Orbit V2/V3, Echo V2, Topstep V2, altes mt5/dup,
+          Hand- wie Auto-Plan), nicht nur AP_TYPEN;
+      (2) jeden geplanten Plan, der in [jetzt − nachlauf, jetzt + horizont] min startet und wirklich starten wird: Hand-Plan,
+          bestätigter Auto-Plan oder schon geclaimt — ein unbestätigter Vorschlag startet nie und legt nichts fest.
+    Vorher (bis .1192) zählten nur laufende Trades: der Ausgleichs-Bot (ap_umplanen) und „Richtung tauschen" (ap_eingriff_pruefen)
+    konnten einen Auto-Plan gegen einen WD-/Hand-Plan drehen, der 10 min später startete — der Start-Riegel am PC hätte dann den
+    späteren Start blockiert (kein Selbst-Hedge, aber ein verlorener Trade). -> {key: {richtung, durch, plan_id}}; läuft bei einer
+    ID+Firma long UND short, bleibt der erste Eintrag (Widerspruch meldet ap_richtung_konflikte)."""
+    fest = {}
+    for z in offen_rows or ():
+        if z.get("richtung") in ("buy", "sell"):
+            fest.setdefault(f"{z['user_id']}|{z['firma_key']}", {"richtung": z["richtung"], "durch": "läuft gerade", "plan_id": z.get("plan_id")})
+    try:
+        jm = float(jetzt_min)
+    except (TypeError, ValueError):
+        return fest
+    for z in sorted((g for g in geplant_rows or () if g.get("start_min") is not None), key=lambda g: float(g["start_min"])):
+        if z.get("richtung") not in ("buy", "sell"):
+            continue
+        m = float(z["start_min"])
+        if not (jm - float(nachlauf_min) <= m <= jm + float(horizont_min)):
+            continue
+        startet = (not z.get("auto_plan")) or bool(z.get("bestaetigt")) or z.get("fest_durch") == "schon gestartet" or bool(z.get("geclaimt"))
+        if not startet:
+            continue
+        rest = m - jm
+        durch = "startet gerade" if z.get("fest_durch") == "schon gestartet" or z.get("geclaimt") else \
+            (f"startet in {int(round(rest))} min" if rest >= 0.5 else "ist fällig")
+        fest.setdefault(f"{z['user_id']}|{z['firma_key']}", {"richtung": z["richtung"], "durch": durch, "plan_id": z.get("plan_id")})
+    return fest
+
+
 def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), echo_bal=None, dup_bal=None, namen=None,
                     ausgeblendet=None):
     """Live-Stand für Delta, Bot und manuelle Eingriffe — ALLE IDs (wie Radar, ohne ADMIN_EXCLUDE_EMAILS): laufende Trades mit
@@ -16493,10 +16537,8 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
                              "konto": z["konto"], "grund": b["hinweis"]})
     # 07.10.2026 (Finn: Richtungsschutz gilt nur GLEICHZEITIG): fest ist eine ID+Firma nur, solange dort ein Trade läuft —
     # Pläne anderer Tage überlappen nie und legen heute nichts mehr fest (vorher: andere_tage = ganzer Tag gesperrt)
-    id_fest = {}
-    for z in offen_rows:
-        if z.get("richtung") in ("buy", "sell"):
-            id_fest.setdefault(f"{z['user_id']}|{z['firma_key']}", {"richtung": z["richtung"], "durch": "läuft gerade"})
+    # 08.10.2026 (Finn: „nicht selbst gegeneinander hedgen"): dazu jeder Plan, der in ≤ 30 min wirklich startet (ap_id_fest)
+    id_fest = ap_id_fest(offen_rows, geplant_rows, jetzt_min)
     for z in geplant_rows:
         ff = id_fest.get(f"{z['user_id']}|{z['firma_key']}")
         z["richtung_fest_durch"] = ff["durch"] if ff else None

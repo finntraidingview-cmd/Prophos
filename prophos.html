@@ -20557,7 +20557,25 @@
    * Person"), aber das warnte auch, wenn z. B. EzPoker bei FundedNext short
    * lief und Finn dort long wollte — verschiedene IDs sind für die Firma
    * verschiedene Kunden, Selbst-Hedge gibt es nur innerhalb derselben ID. */
-  const _dirNorm = f => String(f || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+  /* FIRMEN-SCHLÜSSEL FÜR DEN RICHTUNGSSCHUTZ (08.10.2026, Audit „nicht selbst gegeneinander hedgen"): dieselben Regeln wie app.py
+   * _firm_norm + _ap_norm (ap_firma_key) — in accounts.firm stehen „MyFoundedFutures" und „MyFundedFutures" nebeneinander, „Apex" und
+   * „Apex Trader" sind eine Firma, „The 5%ers"/„The5%ers" auch; „FundedNext Futures" bleibt bewusst ≠ „FundedNext" (andere Plattform).
+   * Rein rechnend (window._firmNormRichtung). */
+  function firmNormRichtung(f){
+    const raw = String(f || '').trim(), l = raw.toLowerCase()
+    const roh = x => String(x || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+    if(!l) return ''
+    if(/5%er|5ers|five percent/.test(l)) return roh('The5%ers')
+    if(/futur/.test(l) && /fundednext|funded next|foundednext|founded next/.test(l)) return roh('FundedNext Futures')
+    if(/funded|founded/.test(l) && /futur/.test(l)) return roh('MyFundedFutures')
+    const regeln = [['apex', 'Apex Trader'], ['tradeify', 'Tradeify'], ['fundednext', 'FundedNext'], ['founded next', 'FundedNext'], ['foundednext', 'FundedNext'],
+                    ['fundingpips', 'FundingPips'], ['funding pips', 'FundingPips'], ['topstep', 'Topstep'], ['ftmo', 'FTMO'], ['alpha', 'Alpha Future'],
+                    ['fusion', 'Fusion Markets'], ['lucid', 'Lucid Trading']]
+    for(const [n, out] of regeln) if(l.includes(n)) return roh(out)
+    return roh(raw)
+  }
+  window._firmNormRichtung = firmNormRichtung
+  const _dirNorm = f => firmNormRichtung(f)   // seit 08.10.2026 dieselben Schreibweisen-Regeln wie das Backend (vorher nur a–z0–9)
   async function firmLiveRichtungen(firmName){
     const ziel = _dirNorm(firmName)
     const out = { long: [], short: [] }        // je Eintrag: {wer, quelle, symbol}
@@ -40153,7 +40171,7 @@
    * Hinweis. frisch = Pläne direkt aus der DB (Start/Speichern), sonst aus tradePlans (Popup). Kein Treffer → null.
    * → { lauf:'long'|'short'|null, widerspruch, text } */
   async function v2RichtungKonflikt(o){
-    const norm = f => String(f || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+    const norm = f => (typeof firmNormRichtung === 'function') ? firmNormRichtung(f) : String(f || '').toLowerCase().replace(/[^a-z0-9]/g, '')   // 08.10.2026: Schreibweisen wie app.py ap_firma_key
     const ziel = norm(o && o.firm), ohne = o && o.ohneId != null ? String(o.ohneId) : null
     let liste = null
     if(o && o.frisch){
@@ -40656,7 +40674,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1197'
+  const OS_TAB_BUILD = '2026-09-22.1198'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
