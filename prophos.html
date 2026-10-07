@@ -26420,6 +26420,13 @@
     const letzte = Date.parse(fin.puls_at || '') || 0
     const bis = (versuche > 0 && letzte) ? letzte + pause[Math.min(versuche - 1, pause.length - 1)] * 1000 : null
     if(lb) return { art: 'laeuft', text: `Login-/Verbindungsfehler · nächster Versuch ab ${uhr(lb.bis)}`, tip: tip.join('\n'), bisMs: lb.bis, knopf: true }
+    // Lesung verloren (08.10.2026, s. wdlLesungVerloren): 20 min nach Nachlese-Zeit bzw. letztem Versuch ohne neue Spur — nie endlos „liest …"
+    const ab0 = (pid && fin.at && typeof tvV2NachleseAb === 'function') ? tvV2NachleseAb(pid, fin.at) : 0
+    const spur = Math.max(ab0, letzte, bis || 0)
+    if(spur && jetzt - spur > 20 * 60000){
+      const m = Math.max(1, Math.round((jetzt - spur) / 60000)), seit = m < 60 ? `${m} min` : `${Math.floor(m / 60)} h${m % 60 ? ' ' + (m % 60) + ' min' : ''}`
+      return { art: 'aufgegeben', text: `Lesung verloren (PC-Tab/Puls antwortet nicht seit ${seit}) — „Jetzt lesen"`, tip: tip.join('\n'), bisMs: null, knopf: true }
+    }
     return { art: 'laeuft', text: versuche ? `Puls liest … Versuch ${versuche}/${max}` : 'Puls liest gleich …', tip: tip.join('\n'), bisMs: bis, knopf: true }
   }
   window._endlesungStatus = endlesungStatus
@@ -27379,8 +27386,20 @@
     // Login-Bremse (30.09.2026): nach zwei Login-/Verbindungsfehlern bleibt der Trade in „Wartet" („Login prüfen" + „Jetzt lesen")
     const lb = tvV2LoginBremse(e, Date.now())
     if(versuche >= TV_ENDLESUNG_MAX && !(lb && lb.pruefen)) return null
-    return { ab: tvV2NachleseAb(t.id, e.at || t.ended_at), versuche, login: lb ? (lb.pruefen ? 'pruefen' : 'pause') : null, bis: lb ? lb.bis : null, loginN: lb ? lb.n : 0, loginCode: lb ? lb.code : '' }
+    return { ab: tvV2NachleseAb(t.id, e.at || t.ended_at), versuche, letzte: Date.parse(e.puls_at || '') || 0, login: lb ? (lb.pruefen ? 'pruefen' : 'pause') : null, bis: lb ? lb.bis : null, loginN: lb ? lb.n : 0, loginCode: lb ? lb.code : '' }
   }
+  /* LESUNG VERLOREN (08.10.2026, Finn-Screenshot Radar: Mike · Tradeify …3962 stand 20 h auf „wird gelesen · seit 20 h"): die Zeile
+   * zählte stumpf ab der Nachlese-Zeit hoch, obwohl Puls nie gelesen hatte (puls_versuche leer, beide Endlesungs-Signale seit 06./07.10.
+   * auf 'wartet' ohne PC — der PC-Tab der ID lief nicht). Nachlesung und Takt bleiben unverändert; nur die Anzeige sagt ab 20 min
+   * ohne Leseversuch ehrlich „Lesung verloren" und hält „Jetzt lesen" bereit. Die Pausen zwischen Versuchen sind höchstens 15 min
+   * (TV_ENDLESUNG_PAUSE_S), 20 min ohne Spur heißt also: niemand liest. -> ms seit dem letzten erwarteten Lebenszeichen oder 0 */
+  const WDL_LESUNG_VERLOREN_MS = 20 * 60000
+  function wdlLesungVerloren(wt, jetzt){
+    if(!wt || wt.login || !wt.ab || jetzt < wt.ab) return 0
+    const seit = Math.max(wt.ab, wt.letzte || 0)
+    return (jetzt - seit > WDL_LESUNG_VERLOREN_MS) ? jetzt - seit : 0
+  }
+  window._wdlLesungVerloren = wdlLesungVerloren   // Test-Haken
   // Nur die Live-Zahlen der laufenden Karten alle 2 s nachschreiben — kein Neuaufbau (Chart-Linien, ID-Leiste bleiben stehen)
   function wdlLiveTick(){
     if(!wdl.daten || !wdlAktiv()) return
@@ -27710,7 +27729,9 @@
         // Vorsatz („ab 07:33 · " / „wird gelesen · ") in wdl-z-ab: am Handy ausgeblendet, dort bleibt „in 58 min" neben dem Knopf
         const txt = wt.login === 'pruefen' ? `<span class="wdl-z-ab">Wartet · </span>Login prüfen`
           : wt.login === 'pause' ? `<span class="wdl-z-ab">Login-Fehler · </span>ab ${zeit(wt.bis)}`
-          : wt.ab && jetzt < wt.ab ? `<span class="wdl-z-ab">ab ${zeit(wt.ab)} · </span>in ${minTxt(wt.ab - jetzt)}` : `<span class="wdl-z-ab">wird gelesen · </span>seit ${minTxt(jetzt - (wt.ab || jetzt))}`   // Kopf sagt „Nachlesung"
+          : wt.ab && jetzt < wt.ab ? `<span class="wdl-z-ab">ab ${zeit(wt.ab)} · </span>in ${minTxt(wt.ab - jetzt)}`
+          : wdlLesungVerloren(wt, jetzt) ? `<span class="wdl-z-ab">Lesung verloren · </span>seit ${minTxt(wdlLesungVerloren(wt, jetzt))}`   // 08.10.2026: kein Leseversuch seit 20 min — PC-Tab/Puls antwortet nicht
+          : `<span class="wdl-z-ab">wird gelesen · </span>seit ${minTxt(jetzt - (wt.ab || jetzt))}`   // Kopf sagt „Nachlesung"
         // „Jetzt lesen" (30.09.2026, Finn: „Mach bei Wartet einen Knopf, mit dem ich jetzt nachlesen kann"): derselbe Weg wie Karte,
         // Zum Abhaken und Trade-Popup — endlesungJetzt → window._tvV2EndlesungJetzt (am PC des Plans direkt, sonst Signal über
         // /admin/wd-plaene), Sperre _elBusy gegen Mehrfachklicks; „liest…" solange sie läuft
@@ -27718,6 +27739,7 @@
         miZ = zelle('mi wdl-z-akt', `${wdlBestandenChip(t) ? `<span>${wdlBestandenChip(t)}</span>` : ''}<span>${txt}</span><button type="button" class="btn btn-ghost el-knopf" data-wdl-lesen="${escapeHtml(pid)}"${(busy || sperre) ? ' disabled' : ''} title="${escapeHtml(sperre || 'Balance jetzt nachlesen — am PC des Plans (vom Mac/Handy per Signal)')}">${busy ? 'liest…' : 'Jetzt lesen'}</button>`,
           { tip: wt.login === 'pruefen' ? `Puls kam ${wt.loginN}× nicht durch den Login/die Verbindung${wt.loginCode ? ' (' + wt.loginCode + ')' : ''} und liest nicht mehr von selbst — Login am PC prüfen, dann „Jetzt lesen"`
               : wt.login === 'pause' ? `Login-/Verbindungsfehler${wt.loginCode ? ' (' + wt.loginCode + ')' : ''} — nächster automatischer Versuch frühestens ${zeit(wt.bis)} (kein schneller neuer Login)`
+              : wdlLesungVerloren(wt, jetzt) ? `Seit ${minTxt(wdlLesungVerloren(wt, jetzt))} kein Leseversuch (${wt.letzte ? 'letzter ' + zeit(wt.letzte) : 'noch keiner'}) — der PC-Tab dieser ID (Puls) antwortet nicht. „Jetzt lesen" stößt neu an; hilft das nicht, Prophos am PC der ID öffnen`
               : wt.versuche ? `${wt.versuche}. Leseversuch` : 'Puls liest die Balance 1–120 min nach dem Ende' })
         plZ = zelle('pl', '–' + slaveZ(t) + zuWegZ(t), { tip: num(d.pl_usd) != null ? `Demo ${sig(d.pl_usd, '$', 0)} · exakt nach der Nachlesung` : 'exakt nach der Nachlesung' })
         zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
@@ -40397,7 +40419,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1175'
+  const OS_TAB_BUILD = '2026-09-22.1176'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
