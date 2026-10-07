@@ -250,6 +250,46 @@ def main():
     check(len(ob.PULS_ERGEBNIS_FELDER) == 47 and "unklar" in ob.PULS_ERGEBNIS_FELDER and "warnung" in ob.PULS_ERGEBNIS_FELDER,
           "PULS_ERGEBNIS_FELDER unveraendert (47 Felder, unklar/warnung)")
 
+    # ── Abriss der CDP-Verbindung (08.10.2026, Muster WinError 10053): sanft neu anhängen statt Chrome-Neustart ──────────────────
+    ab = ob.cdp_abriss_erkannt
+    m10053 = "Puls-Chrome/CDP: ConnectionAbortedError: [WinError 10053] Eine bestehende Verbindung wurde softwaregesteuert abgebrochen — nichts gesendet."
+    check(ab(erg(code="cdp_fehler", schritt="cdp", msg=m10053)) and ab(erg(code="cdp_fehler", msg="Puls-Chrome/CDP: ConnectionError: CDP-Verbindung zu — nichts gesendet."))
+          and ab(erg(code="cdp_fehler", msg="Puls-Chrome/CDP: RuntimeError: CDP-Handshake abgelehnt: HTTP/1.1 500")),
+          "Abriss erkannt: 10053, CDP-Verbindung zu, Handshake")
+    check(not ab(erg(code="cdp_fehler", msg="Puls-Chrome/CDP: TimeoutError: timed out — nichts gesendet."))
+          and not ab(erg(code="konto", msg=m10053)) and not ab(erg(code="cdp_fehler", msg=m10053, gesendet=True))
+          and not ab(erg(code="unklar", msg=m10053, gesendet=True, retry_ok=False)) and not ab(erg(ok=True, msg=m10053)) and not ab(None),
+          "kein Abriss: Zeitüberschreitung, anderer Code, nach dem Klick, ok, None")
+
+    class Sanft(Attrappe):
+        def __init__(self, *a, sanft_ok=True, **k):
+            super().__init__(*a, **k)
+            self.sanft_ok, self.sanfte = sanft_ok, 0
+
+        def sanft(self, spur):
+            self.sanfte += 1
+            spur.append("Attrappe: neu anhängen")
+            return self.sanft_ok
+
+        def lauf(self, weg="tvv2", mit_lesung=True):
+            return ob._puls_mit_neustart(weg, self.erster, self.zweiter, self.lesung if mit_lesung else None, "https://x/",
+                                         neustart=self.neustart, jetzt=self.jetzt, t0=0.0, ausgeben=self.ausgeben, diagnose=self.diagnose,
+                                         neustart_sanft=self.sanft)
+    a1 = Sanft(erg(code="cdp_fehler", schritt="cdp", msg=m10053), erg(ok=True, gesendet=True, bestaetigt=True), verstrichen=30.0)
+    r = a1.lauf()
+    check(a1.sanfte == 1 and a1.neustarts == 0 and len(a1.zweite) == 1 and r.get("ok") and r.get("chrome_neustart", {}).get("neu_angehaengt") is True
+          and "neu anhängen" in r.get("trail", ""), "Abriss vor dem Klick: nur neu angehängt (kein Chrome-Neustart), zweiter Versuch läuft, ok")
+    a2 = Sanft(erg(code="cdp_fehler", schritt="cdp", msg=m10053), erg(ok=True, gesendet=True, bestaetigt=True), verstrichen=30.0, sanft_ok=False)
+    r = a2.lauf()
+    check(a2.sanfte == 1 and a2.neustarts == 1 and r.get("ok") and r.get("chrome_neustart", {}).get("neu_gestartet") is True,
+          "Chrome/Tab weg (sanft False) → harter Neustart wie bisher")
+    a3 = Sanft(erg(code="konto_nicht_erreicht", schritt="konto"), erg(ok=True, gesendet=True, bestaetigt=True), verstrichen=30.0)
+    a3.lauf()
+    check(a3.sanfte == 0 and a3.neustarts == 1, "kein Abriss (konto) → sanfter Weg nicht gefragt, Chrome-Neustart")
+    a4 = Sanft(erg(code="unklar", schritt="unklar", msg=m10053, gesendet=True, retry_ok=False), erg(ok=True), verstrichen=60.0)
+    a4.lesung_res = {"ok": False, "msg": "x"}
+    a4.lauf()
+    check(a4.sanfte == 0 and len(a4.zweite) == 0, "Abriss NACH dem Klick → kein sanfter Weg, kein zweiter Versuch (UNKLAR bleibt)")
     print("\nALLES OK" if OK else "\nFEHLER")
     return 0 if OK else 1
 

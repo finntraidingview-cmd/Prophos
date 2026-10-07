@@ -21756,6 +21756,41 @@ def neustart_entscheid(res, weg, verstrichen_s, schon=False, lesung_moeglich=Tru
     return "direkt", f"Fehler vor dem Klick (code '{code or '-'}', Schritt '{r.get('schritt') or '-'}'), nichts gesendet", rest
 
 
+CDP_ABRISS_RX = re.compile(r"ConnectionAbortedError|ConnectionResetError|BrokenPipeError|ConnectionError|WinError 1005[34]|"
+                           r"CDP-Verbindung|CDP-Handshake", re.I)
+
+
+def cdp_abriss_erkannt(res):
+    """REIN RECHNEND (testbar): War der erste Versuch ein ABRISS der CDP-Verbindung VOR dem Senden-Klick (Puls-Fehler-Muster 08.10.2026:
+    „Puls-Chrome/CDP: ConnectionAbortedError: [WinError 10053] …", 10× in 7 Tagen auf 3 PCs)? Befund aus den Spuren (01.–05.10.2026): die
+    Verbindung zum TradingView-Tab riss jeweils bei einem Seitenwechsel — neuer Tab + Tradovate-Anmeldeseite (anderer Prozess), frisch
+    gestartetes Chrome mit noch ladender Seite, Symbolwechsel über die Watchlist — das Puls-Chrome selbst lief weiter. Dafür reicht
+    es, sich neu anzuhängen; ein Chrome-Neustart (20 s + Login) ist dann unnötig. -> True nur bei code cdp_fehler, nichts gesendet,
+    Fehlertext einer abgerissenen Verbindung."""
+    r = res if isinstance(res, dict) else {}
+    if r.get("ok") or r.get("gesendet") or r.get("geklickt") or r.get("retry_ok") is False:
+        return False
+    if str(r.get("code") or "") != "cdp_fehler":
+        return False
+    return bool(CDP_ABRISS_RX.search(str(r.get("msg") or "")))
+
+
+def _puls_verbindung_neu_anhaengen(spur, url):
+    """Sanfte Erholung nach einem Abriss (cdp_abriss_erkannt): lebt das Puls-Chrome (Port 9333) und ist eine TradingView-Seite da,
+    wird NICHT neu gestartet — der zweite Versuch baut seine Sitzung ohnehin frisch auf (_cdp_sitzung_holen). -> True = sanft
+    genügt; False = Chrome oder Tab weg → der Aufrufer startet Chrome hart neu (bestehender Weg)."""
+    lebt = bool(_cdp_http("/json/version", timeout=1.5))
+    liste = _cdp_http("/json/list", timeout=1.5) or []
+    tabs = augen_tv_targets(liste)
+    if not lebt or not tabs:
+        spur.append(f"Abriss: Puls-Chrome {'läuft' if lebt else 'antwortet nicht'}, TradingView-Tabs {len(tabs)} → Chrome neu starten")
+        return False
+    spur.append(f"Abriss der CDP-Verbindung, Puls-Chrome läuft weiter ({len(tabs)} TradingView-Tab(s): "
+                f"{', '.join(str(t.get('url'))[:50] for t in tabs[:3])}) → nur neu anhängen, kein Chrome-Neustart")
+    _warte(1.5, 1.0)                              # Seite zu Ende wechseln lassen (Jitter-Regel)
+    return True
+
+
 def neustart_beleg_leer(lesung, erst):
     """REIN RECHNEND (testbar): Darf nach einem Klick ohne Beweis ein zweiter Versuch laufen? Nur wenn die Lesung nach dem Neustart
     ALLES belegt: Positions-Tabelle sichtbar, keine Position der Wurzel (auch unsichtbare Zeilen zählen), Reiter Orders gelesen und keine
@@ -21925,10 +21960,13 @@ def _puls_lauf_abfangen(fn, *args, **kw):
         return roh, {}
 
 
-def _puls_mit_neustart(weg, erster, zweiter, lesung, url, neustart=None, jetzt=None, t0=None, ausgeben=None, diagnose=None):
+def _puls_mit_neustart(weg, erster, zweiter, lesung, url, neustart=None, jetzt=None, t0=None, ausgeben=None, diagnose=None,
+                       neustart_sanft=None):
     """Kern des Neustart-Wrappers (testbar mit Attrappen). erster() und zweiter(frist_s) → (roh, res); lesung(spur) → dict für
     neustart_beleg_leer oder None (Weg ohne Order-Lesung, Topstep). Gibt GENAU EINE Antwort aus — die des letzten Versuchs; ein
-    unveränderter erster Versuch geht so raus, wie er war. Genau ein Neustart, nie zwei. -> res des ausgegebenen Versuchs"""
+    unveränderter erster Versuch geht so raus, wie er war. Genau ein Neustart, nie zwei. -> res des ausgegebenen Versuchs
+    neustart_sanft(spur) (08.10.2026, Muster WinError 10053): bei einem Abriss der CDP-Verbindung vor dem Klick (cdp_abriss_erkannt)
+    zuerst versuchen, ohne Chrome-Neustart auszukommen — True = nur neu anhängen, False = doch hart neu starten."""
     neustart = neustart or _puls_chrome_neustart
     jetzt = jetzt or time.time
     t0 = _PULS_PROZESS_T0 if t0 is None else t0
@@ -21958,9 +21996,18 @@ def _puls_mit_neustart(weg, erster, zweiter, lesung, url, neustart=None, jetzt=N
         diagnose(spur=list(spur), schritt="chrome_neustart")
         return r1
 
-    if not neustart(spur, url):
+    sanft = False
+    if art == "direkt" and neustart_sanft is not None and cdp_abriss_erkannt(r1):
+        try:
+            sanft = bool(neustart_sanft(spur))
+        except Exception as e_:
+            spur.append(f"sanfter Weg fehlgeschlagen ({type(e_).__name__}) → Chrome neu starten")
+    if sanft:
+        info["neu_angehaengt"] = True
+    elif not neustart(spur, url):
         return erster_raus("das Puls-Chrome ließ sich nicht sauber beenden oder neu starten")
-    info["neu_gestartet"] = True
+    else:
+        info["neu_gestartet"] = True
     if art == "lesung":
         leer, text = neustart_beleg_leer(lesung(spur), r1)
         if not leer:
@@ -22050,7 +22097,8 @@ def modus_tvkette_cdp_mit_neustart(cmd):
     root = tv_symbol_root(symbol)
     return _puls_mit_neustart("tvv2", lambda: _puls_lauf_abfangen(modus_tvkette_cdp, cmd),
                               lambda frist: _puls_lauf_abfangen(modus_tvkette_cdp, cmd),
-                              lambda spur: _neustart_lesung_tvv2(cmd, ext, opts, root, spur), AUGEN_TV_URL)
+                              lambda spur: _neustart_lesung_tvv2(cmd, ext, opts, root, spur), AUGEN_TV_URL,
+                              neustart_sanft=lambda spur: _puls_verbindung_neu_anhaengen(spur, AUGEN_TV_URL))   # Abriss 10053 (08.10.2026)
 
 
 def _tsx_order_cdp_mit_neustart(befehl, cmd):
