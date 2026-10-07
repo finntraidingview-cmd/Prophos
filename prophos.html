@@ -32445,6 +32445,9 @@
         // Payout-Termin (15.09.2026): "💸 Payout ab 22.09. · in 7 Tagen" / "anfragbar seit …"
         const payoutHtml = (typeof payoutReadyBadgeHtml === 'function') ? payoutReadyBadgeHtml(a) : ''
         if(payoutHtml) metaParts.push(payoutHtml)
+        // „ohne External ID" (08.10.2026, Fehler-Muster 49 Orbit-Fehlstarts): Futures-Konto ohne Tradovate-/TopstepX-Unterkonto — der Puls
+        // kann es nicht wählen, der Planer lässt es aus. Kleiner grauer Chip, Klick = Bearbeiten (gleiche Aktion wie die Zeile).
+        if(istFut && !String(a.externalId || '').trim() && !(archive[a.id] && archive[a.id].archived)) metaParts.push(`<span class="chip" style="font-size:10.5px;padding:1px 7px;color:var(--sub);border:1px solid var(--line);background:none" title="Ohne External ID kann der Puls das Unterkonto nicht wählen — der Auto-Planer lässt das Konto aus. Bearbeiten → External ID eintragen.">ohne External ID</span>`)
         // Nachfolger-Kette („↳ Nachfolger von …“ / „↗ Nachfolger: …“) steht seit 29.09.2026 nicht mehr unter dem Namen — Finn: „unnötig,
         // irritiert nur“. Die Kette selbst (parents/Archiv) bleibt; die Account-Detailansicht zeigt sie weiter als Sprung-Chips.
         const meta = metaParts.length
@@ -40808,7 +40811,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1215'
+  const OS_TAB_BUILD = '2026-09-22.1216'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -46388,6 +46391,14 @@
       const arch = typeof getArchive === 'function' ? (getArchive() || {}) : {}
       for(const a of accounts || []){
         if(!a || !TPL_TYPEN.includes(a.type) || /fusion/i.test(String(a.firm || '')) || (arch[a.id] && arch[a.id].archived)) continue
+        // EXTERNAL ID FEHLT bei eigenen Futures-Konten (08.10.2026, Fehler-Muster 49 Orbit-Fehlstarts): vorab als Zeile mit Knopf, noch bevor
+        // der Planer läuft — der Planer lässt das Konto ohnehin aus (app.py ap_ext_fehlt); die Balance-Zeile entfällt dafür
+        if(typeof tpFirmIstFutures === 'function' && tpFirmIstFutures(a.firm) && !String(a.externalId || '').trim()){
+          konten.add(tplKk(currentUserId, a.name))
+          add(currentUserId, ich, { art: 'ausgelassen', firma: a.firm, konto: a.name, typ: a.type, balance: '', ende4: '', ext: String(a.id),
+            text: 'ohne External ID — der Bot kann das Unterkonto nicht wählen', tun: 'External ID (Tradovate-/TopstepX-Unterkonto) unter Accounts eintragen — der Bot plant das Konto dann von selbst nach (alle 10 min).' })
+          continue
+        }
         const b = tplKontoBalance(a), at = b ? b.at : 0
         if(at && jetzt - at < 86400000) continue
         const lauf = (typeof _accBalLauf !== 'undefined' && _accBalLauf.get(String(a.id))) || null
@@ -46408,6 +46419,15 @@
       }
       konten.add(k)
       const bal = /keine Balance|nicht live/.test(g), fremd = String(x.user_id) !== String(currentUserId)
+      // EXTERNAL ID FEHLT (08.10.2026, Fehler-Muster: 49 Orbit-Fehlstarts „Konto hat keine External ID"): der Planer lässt das Konto jetzt
+      // vorab aus (app.py ap_ext_fehlt) — hier als Zeile mit Anleitung; eigene Konten öffnen per Knopf das Konto-Formular, fremde „am PC von X"
+      if(/External ID fehlt/i.test(g)){
+        const acc = fremd ? null : (accounts || []).find(q => String(q.id) === String(x.konto_id || '') || String(q.name || '') === String(x.konto || ''))
+        add(x.user_id, x.user, { art: 'ausgelassen', firma: x.firma, konto: x.konto, typ: x.typ, balance: '', ende4: '', text: 'ohne External ID — der Bot kann das Unterkonto nicht wählen',
+          ext: acc ? String(acc.id) : '', hinweis: fremd ? `am PC von ${x.user || 'der ID'} eintragen` : (acc ? '' : 'Konto nicht in der Liste'),
+          tun: 'External ID (Tradovate-/TopstepX-Unterkonto) unter Accounts eintragen — der Bot plant das Konto dann von selbst nach (alle 10 min).' })
+        continue
+      }
       // ↻ Balance lesen auch für FREMDE Konten (08.10.2026, Finn: „direkt hier auf Balance-Refresh drücken") — Signal im Namen des
       // Besitzers über PATCH /admin/wd-plaene {aktion:'balance'} (tplBalanceFremd); ohne konto_id (alter Backend-Stand) bleibt der Hinweis
       const balf = bal && fremd && x.konto_id ? String(x.konto_id) : ''
@@ -46492,6 +46512,7 @@
           : z.balf ? (z.lauf && z.lauf.laeuft ? `<span class="s">${escapeHtml(z.lauf.text || 'liest …')}</span>`
             : `<button type="button" class="knopf" data-tpl-balf="${escapeHtml(z.balf)}" data-tpl-uid="${escapeHtml(z.uid || '')}" title="Signal an den PC dieser ID — die Lesung läuft dort">↻ Balance lesen</button>${z.lauf && (z.lauf.html || z.lauf.text) ? `<span class="s${z.lauf.fehler ? ' rot' : ''}">${z.lauf.html || escapeHtml(z.lauf.text)}</span>` : ''}`)
           : z.haken ? `<button type="button" class="knopf" data-tpl-haken="${escapeHtml(z.haken)}" title="accounts.auto_planer an — der nächste Lauf nimmt das Konto mit">✓ Planer-Haken setzen</button>`
+          : z.ext ? `<button type="button" class="knopf" data-tpl-ext="${escapeHtml(z.ext)}" title="Konto bearbeiten — External ID eintragen">✎ External ID eintragen</button>`
           : z.hinweis ? `<span class="s">${escapeHtml(z.hinweis)}</span>`
           : `${z.neu ? `<button type="button" class="knopf" data-tpl-neu="${escapeHtml(z.neu)}" title="Startzeit in 1–3 min, Prüfungen wie immer am PC der ID">✓ Behoben – neu einplanen</button>` : ''}${z.key ? `<button type="button" class="knopf" data-tpl-t="${escapeHtml(z.key)}">→ Plan</button>` : ''}`}</span></div>`).join('')}</div>`).join('')
     return `<div class="tpl-karte tpl-bd"><div class="tpl-h">Braucht dich <b>${n}</b><span class="leg">↻ Balance · ⏸ heute ausgelassen · ⚠ Plan hängt</span></div>${bloecke}</div>`
@@ -47124,6 +47145,8 @@
     if(bl){ try{ accBalanceLesen(bl.dataset.tplBal) }catch(err){ console.warn('[tpl] Balance lesen', err) } setTimeout(tplSpaeter, 500); setTimeout(tplSpaeter, 5000); return }
     const blf = e.target.closest('[data-tpl-balf]')   // Braucht dich: ↻ Balance lesen eines FREMDEN Kontos (08.10.2026) — Signal an den PC der ID
     if(blf){ tplBalanceFremd(blf.dataset.tplBalf, blf.dataset.tplUid, blf.closest('.tpl-bd-id')?.querySelector('b')?.firstChild?.nextSibling?.textContent || '').catch(err => console.warn('[tpl] Balance fremd', err)); setTimeout(tplSpaeter, 300); return }
+    const ex = e.target.closest('[data-tpl-ext]')   // Braucht dich: ✎ External ID eintragen (08.10.2026) — eigenes Konto-Formular, wie „Bearbeiten" in Accounts
+    if(ex){ const acc = (accounts || []).find(q => String(q.id) === ex.dataset.tplExt); if(acc && typeof openAccountModal === 'function') openAccountModal(null, acc); return }
     const nk = e.target.closest('[data-tpl-neu]')   // Braucht dich: ↻ Neu starten (START-FEHLER, 07.10.2026) — Start in 1 min, alle Prüfungen am PC
     if(nk){ const t = tplDaten().trades.find(x => x.key === nk.dataset.tplNeu); if(!t) return
       nk.disabled = true; nk.textContent = 'plant neu …'

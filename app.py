@@ -14698,6 +14698,17 @@ AP_KONTO_FELDER = ("id,user_id,name,firm,account_type,external_id,max_drawdown,t
 AP_KONTO_FELDER_OHNE_CONS = AP_KONTO_FELDER.replace(",consistency_pct", "")
 
 
+AP_GRUND_EXT = "External ID fehlt (Tradovate-Unterkonto) — unter Accounts eintragen"
+
+
+def ap_ext_fehlt(a, regel):
+    """FEHLER-MUSTER „Konto hat keine External ID" (08.10.2026, 49 Orbit-Fehlstarts in 3 Wochen, Terminal 4): ein Puls-Weg (Orbit V2 tvv2 /
+    Topstep V2 tsv2) braucht die External ID, um das Tradovate-/TopstepX-Unterkonto zu wählen — ohne sie wird der Plan zur Startzeit rot.
+    Rein rechnend: True = auslassen (Grund AP_GRUND_EXT). Echo (mt5v2) braucht sie nicht."""
+    route = str((regel or {}).get("route") or "mt5v2")
+    return route in ("tvv2", "tsv2") and not str((a or {}).get("external_id") or "").strip()
+
+
 def _ap_konten_laden(params):
     """accounts für den Planer — mit consistency_pct (07.10.2026); solange die Spalte fehlt (SQL noch nicht eingespielt),
     ohne sie, damit der Nachtlauf nicht stehen bleibt."""
@@ -15468,6 +15479,9 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
         regel = ap_regel_finden(firmen, a.get("firm"))
         if not regel or regel.get("planen") is False:      # planen:false = nur Kernwerte (Kontowert/Vorrat), z. B. Topstep, FTMO
             ausgelassen.append(dict(zeile, grund="keine Regel für diese Firma"))
+            continue
+        if ap_ext_fehlt(a, regel):                         # Puls-Weg ohne External ID → sichtbar ausgelassen statt roter Start (08.10.2026)
+            ausgelassen.append(dict(zeile, grund=AP_GRUND_EXT))
             continue
         eig = je_konto.get(aid, [])
         if any(p.get("status") in ("planned", "open") for p in eig):
