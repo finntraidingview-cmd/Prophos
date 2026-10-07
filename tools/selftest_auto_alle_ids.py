@@ -116,11 +116,13 @@ def main():
     # ── B2 Bestätigen für alle IDs (Finn 07.10.2026 05:16: „jeden einzelnen Trade bestätigen können. Fertig.") ──────────────
     es, ef = a["ap_eingriff_sicht"], a["ap_eingriff_filter"]
     check(es(True, "adm", False, False) is None and es(True, "adm", False, True) == "adm", "Admin: alle IDs — mit „nur eigene“ nur die eigene")
-    check(es(False, "jac", True, False) is None, "Planer-Login (in user_ids) ohne „nur eigene“: alle IDs")
-    check(es(False, "jac", True, True) == "jac", "Planer-Login mit „nur eigene“: nur die eigene ID")
+    # seit 08.10.2026 (Finn: Planer-Seite nur die eigene ID): im_planer allein reicht nicht mehr — alle IDs nur mit sicht="admin" (Admin-Reiter)
+    check(es(False, "jac", True, False) == "jac", "Planer-Login ohne sicht=admin: nur die eigene ID (08.10.2026)")
+    check(es(False, "jac", True, False, "admin") is None, "Planer-Login mit sicht=admin (Admin-Reiter): alle IDs")
+    check(es(False, "jac", True, True, "admin") == "jac", "Planer-Login mit „nur eigene“: nur die eigene ID, auch im Admin-Reiter")
     check(es(False, "xyz", False, False) == "xyz", "Fremder Login (nicht im Planer): nur die eigene ID → fremder Plan = 403 in der Route")
     pid = "00000000-0000-0000-0000-00000000aa01"
-    prm, bod, art = ef("bestaetigen", [pid], es(False, "jac", True, False))
+    prm, bod, art = ef("bestaetigen", [pid], es(False, "jac", True, False, "admin"))
     check(prm is not None and "user_id" not in prm and bod and "auto_bestaetigt_at" in bod and art == "patch",
           "Planer-Login: Guard ohne user_id-Filter → fremder Vorschlag wird bestätigt")
     prm, _b, _a = ef("bestaetigen", [pid], es(False, "jac", True, True))

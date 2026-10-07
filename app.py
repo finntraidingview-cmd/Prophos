@@ -15164,17 +15164,33 @@ def ap_sicht_uid(admin, uid, nur_eigene, sicht):
     „nur eigene" (der bleibt bei ap_sicht); ohne Parameter wie bisher nur die eigene ID (Delta-Monitor im Trade-Plan unverändert)."""
     if admin:
         return None
-    if str(sicht or "").strip().lower() == "alle" and not nur_eigene:
+    # NUR EIGENE ID AUF DER PLANER-SEITE (Finn 08.10.2026, als Moritz eingeloggt: „Hier brauche ich immer nur die jeweilige ID. Wenn ich
+    # bei Moritz eingeloggt bin, dann immer nur die Trades von Moritz."): ?sicht=alle öffnet für Nicht-Admins NICHTS mehr; alle IDs
+    # bekommt ein Nicht-Admin nur noch mit ?sicht=admin — das schickt allein der Admin-Reiter „Trade-Planer" (Admin-Code, Gate wie
+    # /admin/auto-plan/ids seit .1167: nicht admin_zugang „nur eigene").
+    if str(sicht or "").strip().lower() == AP_SICHT_ADMIN and not nur_eigene:
         return None
     return str(uid)
 
 
-def _ap_sicht_aus_anfrage(admin, uid):
-    """sicht-ID für die GET-Antwort aus ?sicht=alle (ap_sicht_uid). admin_zugang wird nur gelesen, wenn ein Nicht-Admin „alle"
-    verlangt (60-s-Cache); schlägt die Lesung fehl, bleibt es bei der eigenen Sicht — nie versehentlich alle IDs."""
+AP_SICHT_ADMIN = "admin"           # ?sicht=admin bzw. Body {sicht:"admin"}: Alle-IDs-Sicht des Admin-Reiters (08.10.2026)
+
+
+def _ap_sicht_param():
+    """sicht aus Query (?sicht=…) oder JSON-Body ({sicht}) — klein, getrimmt."""
     s = request.args.get("sicht")
+    if s is None:
+        b = request.get_json(silent=True) if request.method in ("POST", "PATCH", "DELETE") else None
+        s = (b or {}).get("sicht") if isinstance(b, dict) else None
+    return str(s or "").strip().lower()
+
+
+def _ap_sicht_aus_anfrage(admin, uid):
+    """sicht-ID für die GET-Antwort aus ?sicht=admin (ap_sicht_uid). admin_zugang wird nur gelesen, wenn ein Nicht-Admin alle IDs
+    verlangt (60-s-Cache); schlägt die Lesung fehl, bleibt es bei der eigenen Sicht — nie versehentlich alle IDs."""
+    s = _ap_sicht_param()
     nur = False
-    if not admin and str(s or "").strip().lower() == "alle":
+    if not admin and s == AP_SICHT_ADMIN:
         try:
             nur = admin_zugang_nur_eigene(str(uid))
         except Exception as e:
@@ -15236,15 +15252,19 @@ def ap_ids_benutzt(geplant, ausgelassen, namen=None):
 AP_EINGRIFF_MAX = 200                # Pläne je Aufruf an /admin/auto-plan/bestaetigen
 
 
-def ap_eingriff_sicht(admin, uid, im_planer, nur_eigene):
+def ap_eingriff_sicht(admin, uid, im_planer, nur_eigene, sicht=None):
     """REIN RECHNEND (BESTÄTIGEN FÜR ALLE, Finn 07.10.2026 05:16 Dubai als Jacob eingeloggt: „jeden einzelnen Trade bestätigen können.
     Fertig. Das geht ja immer noch nicht, oder?" — bis .1118 durfte nur ein Admin-Login fremde Vorschläge bestätigen; Master: Weg b):
     welche ID die Eingriffs-Routen bestaetigen/zurueck/loeschen einschränken. None = alle IDs: Admin (ADMIN_EMAILS) oder jeder
     Login, der im Planer ist (auto_plan_regeln.user_ids) — außer admin_zugang „nur eigene", der bleibt bei seiner ID. Ein Login,
-    der weder Admin noch im Planer ist, bleibt ebenfalls bei der eigenen ID (die Route antwortet bei fremden Plänen 403)."""
+    der weder Admin noch im Planer ist, bleibt ebenfalls bei der eigenen ID (die Route antwortet bei fremden Plänen 403).
+    Seit 08.10.2026 (Finn: Planer-Seite nur die eigene ID): im_planer allein reicht NICHT mehr für fremde Pläne — ein Nicht-Admin
+    bekommt alle IDs nur mit sicht="admin" (Admin-Reiter „Trade-Planer", Admin-Code), weiterhin nie bei „nur eigene"."""
     if nur_eigene:
         return str(uid)
-    if admin or im_planer:
+    if admin:
+        return None
+    if im_planer and str(sicht or "").strip().lower() == AP_SICHT_ADMIN:
         return None
     return str(uid)
 
@@ -16869,7 +16889,7 @@ def admin_auto_plan_delta():
             nur = admin_zugang_nur_eigene(str(uid))
         except Exception:
             nur = True
-        return jsonify(dict(antwort, admin=admin, alle=ap_eingriff_sicht(admin, uid, True, nur) is None))
+        return jsonify(dict(antwort, admin=admin, alle=ap_eingriff_sicht(admin, uid, True, nur, _ap_sicht_param()) is None))
     except Exception as e:
         return jsonify({"ok": False, "admin": admin, "msg": f"{type(e).__name__}: {e}"}), 502
 
@@ -17506,8 +17526,8 @@ def _ap_eingriff(aktion):
                                                                        or [{}])[0].get("user_ids") or [])]
     except Exception:
         return jsonify({"ok": False, "msg": "Anmeldung nicht prüfbar"}), 502
-    sicht = ap_eingriff_sicht(admin, uid, im_planer, nur)
     body = request.get_json(silent=True) or {}
+    sicht = ap_eingriff_sicht(admin, uid, im_planer, nur, _ap_sicht_param())   # sicht:"admin" im Body = Admin-Reiter (08.10.2026)
     ids = body.get("plan_ids") if isinstance(body.get("plan_ids"), list) else [body.get("plan_id")]
     params, upd, art = ap_eingriff_filter(aktion, ids, sicht)
     if params is None:
@@ -17561,7 +17581,7 @@ def admin_auto_plan():
         return jsonify({"ok": False, "msg": "Diese ID ist nicht im Auto-Planer"}), 403
     sicht = None if admin else str(uid)        # 06.10.2026: Nicht-Admin (Test-ID) sieht nur die eigenen Zeilen
     if request.method == "GET":
-        sicht = _ap_sicht_aus_anfrage(admin, uid)   # 07.10.2026 TRADE-PLANER-ALLE-IDS: ?sicht=alle → alle IDs (außer „nur eigene")
+        sicht = _ap_sicht_aus_anfrage(admin, uid)   # seit 08.10.2026: Nicht-Admin alle IDs nur mit ?sicht=admin (Admin-Reiter), sonst eigene
         rows = sb_select("auto_plan_lauf", {"select": "tag,quelle,at,ergebnis", "order": "at.desc", "limit": "1"})
         erg = (rows[0].get("ergebnis") if rows else None) or {}
         return jsonify({"ok": True, "admin": admin, "aktiv": bool(reg.get("aktiv")), "ids": len(reg.get("user_ids") or []),

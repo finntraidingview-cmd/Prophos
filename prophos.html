@@ -40640,7 +40640,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1194'
+  const OS_TAB_BUILD = '2026-09-22.1196'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -45621,7 +45621,14 @@
   // solange diese Seite offen ist, fragen apApi (Lauf) und apdLaden (Delta) mit ?sicht=alle — das Backend liefert dann alle IDs
   // (außer „nur eigene"-Logins, die bleiben bei der eigenen). Gefiltert wird nur noch hier über die ID-Chips.
   // Seit 08.10.2026 auch der Admin-Reiter „Trade-Planer" (#adm-pane-planer sichtbar): er zeigt dieselben Kacheln + Zeitstrahl aller IDs
-  window._tplSicht = () => { const p = document.getElementById('adm-pane-planer'); return (document.querySelector('#tpl-view.active') || (p && !p.hidden && p.offsetParent !== null)) ? '?sicht=alle' : '' }
+  // NUR EIGENE ID AUF DER PLANER-SEITE (Finn 08.10.2026, als Moritz eingeloggt: „Hier brauche ich immer nur die jeweilige ID"): die Seite
+  // #tpl-view fragt alle IDs (?sicht=alle) nur noch für Admin-Logins (ADMIN_EMAILS, _ap.admin === true) — ein normaler Login bekommt vom
+  // Backend nur die eigene ID, damit auch keine ID-Chips. Der Admin-Reiter „Trade-Planer" (#adm-pane-planer, Admin-Code) schickt
+  // ?sicht=admin: dort bleibt die Alle-IDs-Sicht für jeden Login außer admin_zugang „nur eigene" (Gate wie /admin/auto-plan/ids).
+  const tplAdminReiterSichtbar = () => { const p = document.getElementById('adm-pane-planer'); return !!(p && !p.hidden && p.offsetParent !== null) }
+  window._tplSicht = () => tplAdminReiterSichtbar() ? '?sicht=admin'
+    : (document.querySelector('#tpl-view.active') && (typeof apdAdmin === 'function' ? apdAdmin() : _ap.admin === true)) ? '?sicht=alle' : ''
+  window._tplSichtParam = () => tplAdminReiterSichtbar() ? 'admin' : ''   // für POST-Bodies (tplEingriff)
   const TPL_LAUFZEIT = 180                               // ap_ausgleich_param.laufzeit_min (Standard), wenn der Lauf keinen Wert mitschickt
   const TPL_TYPEN = ['challenge', 'phase1', 'phase2']   // AP_TYPEN im Planer
   const tplDatum = d => d.toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' })
@@ -46503,7 +46510,8 @@
     _tpl.offen = { eigen: offen.filter(t => t.eigen).map(t => t.plan_id), fremd: offen.filter(t => !t.eigen).map(t => t.plan_id), je: new Map() }
     for(const t of offen){ const k = _tpl.offen.je.get(t.user || t.user_id) || { uid: t.user_id, n: 0 }; k.n++; _tpl.offen.je.set(t.user || t.user_id, k) }
     const alleBest = offen.length ? `<button type="button" class="btn btn-ghost btn-mini tpl-alle-best" data-tpl-akt="alle-ok"${_tpl.busy ? ' disabled' : ''} title="alle offenen Vorschläge der angezeigten IDs bestätigen (mit Rückfrage)">✓ Alle offenen bestätigen <b>${offen.length}</b></button>` : ''
-    const chipsIds = alleIds.length > 1 ? chip('alle', 'Alle IDs', D.trades, sicht === 'alle')
+    const chipsErlaubt = tplAdminReiterSichtbar() || apdAdmin() || _tpl.stub && _ap.admin === true   // 08.10.2026: Nicht-Admin auf der Planer-Seite ohne ID-Chips
+    const chipsIds = (alleIds.length > 1 && chipsErlaubt) ? chip('alle', 'Alle IDs', D.trades, sicht === 'alle')
       + alleIds.filter(x => planer.has(x.uid)).map(x => chip(x.uid, x.name || x.uid.slice(0, 8), D.trades.filter(t => t.user_id === x.uid), sicht === x.uid)).join('')
       + (weitere.length ? chip('weitere', 'Weitere', D.trades.filter(t => weitere.some(x => x.uid === t.user_id)), sicht === 'weitere') : '') : ''
     const chips = (alleIds.length > 1 || alleBest) ? `<div class="adm-vl-legend tpl-ids">${chipsIds}${alleBest}</div>` : ''
@@ -46633,7 +46641,9 @@
    * loeschen {plan_id} — Service-Key hinter dem Admin-Gate (RLS lässt den Browser nur an eigene Zeilen). Antwort n = wirklich
    * geänderte Zeilen (Guard: planned, Auto-Plan, unbestätigt bzw. ungestartet). Eigene Pläne gehen weiter per supabase-js. */
   async function tplEingriff(aktion, ids){
-    const d = await apdApi('POST', '/' + aktion, aktion === 'bestaetigen' ? { plan_ids: ids } : { plan_id: ids[0] })
+    // sicht:"admin" nur aus dem Admin-Reiter (08.10.2026): auf der Planer-Seite darf ein Nicht-Admin nur eigene Pläne anfassen
+    const sichtP = (typeof window._tplSichtParam === 'function' && window._tplSichtParam()) ? { sicht: 'admin' } : {}
+    const d = await apdApi('POST', '/' + aktion, Object.assign(aktion === 'bestaetigen' ? { plan_ids: ids } : { plan_id: ids[0] }, sichtP))
     const n = Number(d && d.n) || 0
     if(typeof atToast === 'function') atToast(n ? (aktion === 'bestaetigen' ? `✓ ${n} Auto-Plan${n === 1 ? '' : 'e'} bestätigt — startet zur Startzeit` : aktion === 'zurueck' ? '↶ Bestätigung zurückgenommen' : '🗑 Vorschlag gelöscht')
       : '⚠ Nichts geändert — schon bestätigt, gestartet oder nicht mehr geplant', n ? 'start' : 'end')

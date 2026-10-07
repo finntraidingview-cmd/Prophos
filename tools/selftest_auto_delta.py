@@ -67,7 +67,7 @@ def lade():
     konstanten = ("AP_REST_MIN", "AP_GROESSE_TOLERANZ", "AP_KW_FUNDED", "AP_KW_PHASEN", "AP_TYPEN", "AP_TZ_LAUF", "AP_STILL_FIRMEN",
                   "AP_AUSGLEICH_STANDARD", "AP_TZ_TAG", "AP_BOT_ENDE_MIN", "AP_BOT_EXTRA_MIN", "AP_FAELLIG_MIN", "AP_BOT_SCHRITTE",
                   "AP_RICHTUNG_TXT", "AP_GEGEN_DICHT_MIN", "AP_GEGEN_WUERFE", "AP_EUR_STUFE", "AP_START_BIS_STANDARD", "AP_CFD_AB_STANDARD", "AP_CFD_ROUTEN", "AP_TRANCHE_LUECKE_MIN", "_ap_bot", "_ap_info", "WD_HEUTE_PPL", "LT_ECHO_ROUTEN", "LT_ECHO_MAX_ALTER_S",
-                  "AP_RS_HORIZONT_MIN", "AP_RS_NACHLAUF_MIN", "AP_RS_ROUTEN", "AP_EINGRIFF_MAX")
+                  "AP_RS_HORIZONT_MIN", "AP_RS_NACHLAUF_MIN", "AP_RS_ROUTEN", "AP_EINGRIFF_MAX", "AP_SICHT_ADMIN")
     exec("\n".join([konst(k) for k in konstanten] + [block(f) for f in REIN + IO]), ns)
     return ns
 
@@ -391,8 +391,10 @@ def main():
     # TRADE-PLANER-ALLE-IDS (07.10.2026): ?sicht=alle öffnet alle IDs — außer admin_zugang „nur eigene"; ohne Parameter wie bisher
     su = a["ap_sicht_uid"]
     check(su(True, U1, True, None) is None and su(True, U1, False, "eigene") is None, "sicht: Admin immer alle IDs")
-    check(su(False, U1, False, "alle") is None and su(False, U1, False, " Alle ") is None, "sicht: Planer-ID mit ?sicht=alle → alle IDs")
-    check(su(False, U1, True, "alle") == U1, "sicht: nur-eigene (admin_zugang) bleibt trotz ?sicht=alle bei der eigenen ID")
+    # seit 08.10.2026 (Finn als Moritz: „immer nur die jeweilige ID"): ?sicht=alle öffnet für Nicht-Admins nichts mehr, nur ?sicht=admin (Admin-Reiter)
+    check(su(False, U1, False, "alle") == U1 and su(False, U1, False, " Alle ") == U1, "sicht: Planer-ID mit ?sicht=alle → nur eigene ID (08.10.2026)")
+    check(su(False, U1, False, "admin") is None and su(False, U1, False, " Admin ") is None, "sicht: Nicht-Admin mit ?sicht=admin (Admin-Reiter) → alle IDs")
+    check(su(False, U1, True, "admin") == U1 and su(False, U1, True, "alle") == U1, "sicht: nur-eigene (admin_zugang) bleibt bei der eigenen ID")
     check(su(False, U1, False, None) == U1 and su(False, U1, False, "") == U1 and su(False, U1, False, "eigene") == U1,
           "sicht: ohne Parameter / anderer Wert → eigene ID wie bisher")
     # BESTÄTIGEN FÜR ALLE IDS (07.10.2026): Guard-Filter der Admin-Routen = Frontend-Bedingungen, Nicht-Admin nur eigene ID
