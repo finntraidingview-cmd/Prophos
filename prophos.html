@@ -40963,7 +40963,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1237'
+  const OS_TAB_BUILD = '2026-09-22.1238'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -60458,7 +60458,9 @@
     const bilHeute = bil.filter(z => String(z.tag || '') === heute)
     const geplant = T.filter(t => t.status === 'offen' || t.status === 'bestaetigt'), laeuft = T.filter(t => t.status === 'laeuft')
     const fertigIds = new Set([...T.filter(t => t.status === 'beendet').map(t => String(t.plan_id)), ...bilHeute.map(z => String(z.plan_id))])
-    const lauf = (_ap.letzter && !_ap.letzter.trocken) ? _ap.letzter : null
+    // Lauf NUR für heute (D.lauf, wie die ID-Leiste seit 3ec11ba): _ap.letzter ist nach dem Nachtlauf schon der Lauf für morgen — dann
+    // widersprachen Ausgelassen/Konten der Leiste darüber (Prüfer-Befund zu cc17834, 08.10.2026). Kein Heute-Lauf → „noch kein Lauf heute"
+    const lauf = (D && D.lauf) || null
     const typOk = x => !x.typ || TPL_TYPEN.includes(String(x.typ))
     const aus = ((lauf && lauf.ausgelassen) || []).filter(x => String(x.user_id) === uid && typOk(x) && !/geplanten\/laufenden Plan/.test(String(x.grund || '')))
     const unbest = geplant.filter(t => t.status === 'offen').length
@@ -60482,7 +60484,7 @@
         ${zahlKachel('Geplant', geplant.length, unbest ? `${unbest} unbestätigt` : geplant.length ? 'alle bestätigt' : '–', 'var(--good)', 'heute geplant, noch nicht gestartet')}
         ${zahlKachel('Läuft', laeuft.length, laeuft.length ? `Live ${vzU(usdLauf)}` : '–', 'color-mix(in srgb,var(--good) 45%,transparent)', 'läuft gerade')}
         ${zahlKachel('Beendet', fertigIds.size, fertigIds.size ? `${bilHeute.filter(z => Number(z.pl_usd) > 0).length} im Plus` : '–', farbe, 'heute beendet')}
-        ${zahlKachel('Ausgelassen', aus.length, gruendeTxt[0] || '–', 'var(--sub-2)', gruendeTxt.join(' · ') || 'nichts ausgelassen')}
+        ${zahlKachel('Ausgelassen', aus.length, lauf ? (gruendeTxt[0] || '–') : 'noch kein Lauf heute', 'var(--sub-2)', lauf ? (gruendeTxt.join(' · ') || 'nichts ausgelassen') : 'Der Planer ist für heute noch nicht gelaufen')}
         ${ergKachel}</div>`
     // ── KONTEN NACH STATUS: Konten der ID aus dem letzten Lauf (geplant[] + ausgelassen[], je Konto einmal) — Typ + Zustand (Grund)
     const konten = new Map()
@@ -60492,7 +60494,7 @@
     const jeTyp = TPL_TYPEN.map(ty => ({ ty, k: [...konten.values()].filter(x => String(x.typ) === ty).length }))
     const kmax = Math.max(1, ...jeTyp.map(x => x.k))
     const zust = new Map(); for(const x of konten.values()) if(x.grund && /Ziel erreicht|geblasen|unter Boden|kurz vor Ziel/.test(x.grund)) zust.set(x.grund, (zust.get(x.grund) || 0) + 1)
-    const kontenKarte = `<div class="ap-idd-karte"><div class="ap-idd-h">Konten <b>${konten.size}</b><span>Stand letzter Lauf${lauf && lauf.tag ? ' ' + escapeHtml(apPrTagText(lauf.tag)) : ''}</span></div>
+    const kontenKarte = `<div class="ap-idd-karte"><div class="ap-idd-h">Konten <b>${konten.size}</b><span>${lauf ? 'Stand Lauf heute' + (lauf.at ? ' ' + escapeHtml(tplUhrIso(lauf.at)) : '') : 'noch kein Lauf heute'}</span></div>
         ${jeTyp.map(x => `<div class="ap-idd-bz"><span>${TPL_TYP_WORT[x.ty]}</span><span class="ap-idd-bar"><i style="width:${(x.k / kmax * 100).toFixed(1)}%;background:${farbe}"></i></span><b>${x.k}</b></div>`).join('')}
         ${zust.size ? `<div class="ap-idd-chips">${[...zust].map(([g, k]) => `<span class="ap-idd-chip${/Ziel/.test(g) ? ' gut' : /geblasen|Boden/.test(g) ? ' rot' : ''}">${escapeHtml(g)} <b>${k}</b></span>`).join('')}</div>` : ''}</div>`
     // ── LETZTE 7 TAGE: beendete Auto-Trades dieser ID je Tag (hypothetisch €, Gewinne über / Verluste unter der Null-Linie)
