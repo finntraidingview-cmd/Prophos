@@ -1660,6 +1660,8 @@
   #apDelta .apd-kopf{display:flex;align-items:center;gap:6px 10px;flex-wrap:wrap;margin-bottom:8px}
   #apDelta .apd-kopf .apd-um{color:var(--sub-2);font-size:11.5px;font-variant-numeric:tabular-nums}
   #apDelta .apd-kopf .tc2-btn{padding:4px 10px;font-size:12px}
+  #apDelta .apd-auf{border:0;background:none;font:inherit;font-size:12.5px;font-weight:600;color:var(--ink);cursor:pointer;padding:2px 4px;border-radius:6px} #apDelta .apd-auf span{font-weight:500;color:var(--sub-2)} #apDelta .apd-auf:hover{background:var(--surface-tint)}
+  #apDelta .apd-kopf.apd-zu{margin-bottom:0}
   #apDelta .kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:10px}
   #apDelta .kpi{padding:9px 11px;box-shadow:none;min-width:0;border-radius:var(--r-md)}
   #apDelta .kpi:hover{box-shadow:none}
@@ -1711,6 +1713,7 @@
   #apDelta .apd-z .ri{flex:0 0 auto;font-weight:700;font-size:12px} #apDelta .apd-z .ri.long{color:var(--good)} #apDelta .apd-z .ri.short{color:var(--danger)}
   #apDelta .apd-z .dl{flex:0 0 auto;min-width:52px;text-align:right;font-weight:600}
   #apDelta .apd-z .grund{flex:1 1 40%;min-width:0;color:var(--sub);font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #apDelta .apd-z .grund.voll{white-space:normal;overflow:visible;text-overflow:clip;flex:1 1 240px;line-height:1.35}   /* Umplanungen: voller Grund (Master 07.10.2026) */
   #apDelta .apd-z .wechsel{flex:0 0 auto;font-size:12px;white-space:nowrap}
   #apDelta .apd-z .knopf{flex:0 0 auto;border:1px solid var(--border);background:var(--surface);border-radius:7px;width:28px;height:26px;padding:0;font-size:13px;line-height:1;color:var(--ink-2);cursor:pointer}
   #apDelta .apd-z .knopf:hover:not(:disabled){border-color:var(--sub-2);background:var(--surface-tint)}
@@ -1772,8 +1775,9 @@
   #tpl-view .tpl-h b{color:var(--ink);font-weight:600}
   #tpl-view .tpl-h .leg{display:inline-flex;gap:4px 10px;flex-wrap:wrap;text-transform:none;letter-spacing:0;font-weight:500;color:var(--sub-2)}
   #tpl-view .tpl-h .leg .g{font-size:12px}
-  #tpl-view .tpl-scroll{overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain}
-  #tpl-view .tpl-innen{position:relative;min-width:720px;--nw:108px}
+  /* Desktop (Master 07.10.2026): Zeitstrahl fix auf Kartenbreite, kein Querscroll, kein Scrollbalken — nur am Handy wischbar */
+  #tpl-view .tpl-scroll{overflow:visible}
+  #tpl-view .tpl-innen{position:relative;min-width:0;--nw:108px}
   #tpl-view .tpl-raster{position:absolute;top:0;bottom:0;left:var(--nw);right:0;pointer-events:none;z-index:0}
   #tpl-view .tpl-raster i{position:absolute;top:0;bottom:18px;width:1px;background:var(--border-soft)}
   #tpl-view .tpl-raster i.fen{background:none;border-left:1px dashed var(--border)}
@@ -1788,42 +1792,46 @@
   #tplBestModal .tpl-chips{display:flex;flex-wrap:wrap;gap:5px}
   #tplBestModal .tpl-chip{display:inline-flex;align-items:center;gap:5px;border:1px solid color-mix(in srgb,var(--good) 45%,var(--border));border-radius:999px;padding:2px 9px;font-size:11.5px;background:color-mix(in srgb,var(--good) 8%,var(--surface))}
   #tplBestModal .tpl-chip i{width:8px;height:8px;border-radius:50%} #tplBestModal .tpl-chip em{font-style:normal;font-weight:600;color:var(--good)}
-  /* Spur je ID: Höhe wächst mit den Lanes (--n), Pillen statt Punkte (07.10.2026) */
-  #tpl-view .tpl-spur{position:relative;display:flex;height:calc(12px + var(--n,1) * 28px);min-height:48px;border-top:1px solid var(--border-soft)}
-  #tpl-view .tpl-spur.erste{border-top:0}
+  /* Spur je ID (TPL-UEBERSICHT-2, 07.10.2026): feste Höhe, zwei Marker-Ebenen, Balken für laufende Trades */
+  #tpl-view .tpl-spur{position:relative;display:flex;height:48px;border-top:1px solid var(--border-soft)}
+  #tpl-view .tpl-spur:first-child{border-top:0}
+  #tpl-view .tpl-spur.sammel{background:color-mix(in srgb,var(--surface-tint) 55%,var(--surface))}
   #tpl-view .tpl-name{position:sticky;left:0;z-index:4;flex:0 0 var(--nw);display:flex;flex-direction:column;justify-content:center;gap:2px;padding-right:8px;background:var(--surface);font-size:12.5px;min-width:0}
+  #tpl-view .tpl-spur.sammel .tpl-name{background:color-mix(in srgb,var(--surface-tint) 55%,var(--surface))}
   #tpl-view .tpl-name b{display:flex;align-items:center;gap:6px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #tpl-view .tpl-name b i{width:9px;height:9px;border-radius:50%;flex:none}
+  #tpl-view .tpl-name b em{font-style:normal;color:var(--sub-2);font-size:11px}
   #tpl-view .tpl-name span{font-size:11px;color:var(--sub-2);font-variant-numeric:tabular-nums;padding-left:15px;white-space:nowrap}
+  #tpl-view button.tpl-name{border:0;font:inherit;text-align:left;cursor:pointer;color:var(--ink);align-items:flex-start}
+  #tpl-view button.tpl-name:hover b{color:var(--violet)}
   #tpl-view .tpl-bahn{position:relative;flex:1 1 auto;min-width:0;z-index:1}
-  #tpl-view .tpl-bahn::before{content:'';position:absolute;left:0;right:0;top:50%;height:2px;margin-top:-1px;border-radius:1px;background:var(--id,var(--sub-2));opacity:.3}
+  #tpl-view .tpl-bahn::before{content:'';position:absolute;left:0;right:0;top:50%;height:2px;margin-top:-1px;border-radius:1px;background:var(--id,var(--sub-2));opacity:.25}
   #tpl-view .tpl-bahn .leer{position:absolute;left:8px;top:50%;transform:translateY(-130%);font-size:11px;color:var(--sub-2)}
-  #tpl-view .tpl-t{position:absolute;display:inline-flex;align-items:center;gap:5px;height:24px;max-width:180px;padding:0 8px 0 6px;border:1px solid var(--border);border-radius:999px;background:var(--surface);cursor:pointer;font:inherit;font-size:11.5px;line-height:1;color:var(--ink);white-space:nowrap;z-index:1;box-shadow:0 1px 2px rgba(16,24,40,.06)}
-  #tpl-view .tpl-t:hover,#tpl-view .tpl-t.wahl{z-index:3;border-color:var(--sub-2)}
-  #tpl-view .tpl-t.wahl{box-shadow:0 0 0 2px var(--surface),0 0 0 3.5px var(--violet)}
-  #tpl-view .tpl-t .g{font-size:12px;flex:none}
-  #tpl-view .tpl-t.long .g{color:var(--good)} #tpl-view .tpl-t.short .g{color:var(--danger)}
-  #tpl-view .tpl-t .n{display:inline-flex;align-items:center;gap:4px;color:var(--sub);font-variant-numeric:tabular-nums;flex:none}
-  #tpl-view .tpl-t .n i{display:inline-block;width:6px;height:6px;border-radius:2px;flex:none}
-  #tpl-view .tpl-t b{font-weight:700;font-variant-numeric:tabular-nums;flex:none}
-  #tpl-view .tpl-t .z{color:var(--sub-2);font-variant-numeric:tabular-nums;flex:none}
-  #tpl-view .tpl-t .p{color:var(--violet);font-size:9px;flex:none;animation:tplPuls 1.6s ease-in-out infinite}
+  #tpl-view .tpl-bar{position:absolute;height:3px;border-radius:2px;opacity:.55;z-index:0}
+  #tpl-view .tpl-bar.long{background:var(--good)} #tpl-view .tpl-bar.short{background:var(--danger)}
+  #tpl-view .tpl-m{position:absolute;display:inline-flex;align-items:center;gap:4px;height:18px;margin-left:-8px;padding:0 4px 0 0;border:0;background:none;cursor:pointer;font:inherit;font-size:11px;line-height:1;color:var(--sub);white-space:nowrap;z-index:1}
+  #tpl-view .tpl-m .g{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;font-size:10px;background:var(--surface);box-shadow:0 0 0 1px var(--border);position:relative;flex:none}
+  #tpl-view .tpl-m.long .g{color:var(--good)} #tpl-view .tpl-m.short .g{color:var(--danger)}
+  #tpl-view .tpl-m.offen .g{box-shadow:0 0 0 1px transparent;outline:1px dashed var(--sub-2);outline-offset:-1px}
+  #tpl-view .tpl-m.bestaetigt .g{box-shadow:0 0 0 1.5px color-mix(in srgb,var(--good) 55%,var(--border))}
+  #tpl-view .tpl-m.laeuft .g{box-shadow:0 0 0 1.5px var(--violet);background:var(--violet-tint)}
+  #tpl-view .tpl-m .g .p{position:absolute;top:-3px;right:-3px;width:7px;height:7px;border-radius:50%;background:var(--violet);animation:tplPuls 1.6s ease-in-out infinite}
   @keyframes tplPuls{0%,100%{opacity:1}50%{opacity:.2}}
-  #tpl-view .tpl-t.offen{border-style:dashed;background:color-mix(in srgb,var(--surface) 75%,transparent)}
-  #tpl-view .tpl-t.offen b{font-weight:600;color:var(--sub)}
-  #tpl-view .tpl-t.bestaetigt{background:color-mix(in srgb,var(--good) 7%,var(--surface));border-color:color-mix(in srgb,var(--good) 35%,var(--border))}
-  #tpl-view .tpl-t.laeuft{background:var(--violet-tint);border-color:color-mix(in srgb,var(--violet) 45%,var(--border))}
-  #tpl-view .tpl-t.beendet,#tpl-view .tpl-t.vorbei{background:var(--surface-tint);border-color:var(--border-soft);color:var(--sub);opacity:.72}
-  #tpl-view .tpl-t.beendet:hover,#tpl-view .tpl-t.vorbei:hover,#tpl-view .tpl-t.beendet.wahl,#tpl-view .tpl-t.vorbei.wahl{opacity:1}
-  #tpl-view .tpl-t.beendet .g,#tpl-view .tpl-t.vorbei .g{color:var(--sub-2)}
-  #tpl-view .tpl-t.erg-gut b{color:var(--good)} #tpl-view .tpl-t.erg-rot b{color:var(--danger)} #tpl-view .tpl-t.erg-null b{color:var(--sub-2)}
+  #tpl-view .tpl-m .l{font-variant-numeric:tabular-nums;padding:0 3px;border-radius:4px;background:color-mix(in srgb,var(--surface) 85%,transparent)}
+  #tpl-view .tpl-m .l b{font-weight:600;color:var(--ink)}
+  #tpl-view .tpl-m:hover,#tpl-view .tpl-m.wahl{z-index:3} #tpl-view .tpl-m:hover .l,#tpl-view .tpl-m.wahl .l{background:var(--violet-tint);color:var(--ink)}
+  #tpl-view .tpl-m.wahl .g{box-shadow:0 0 0 2px var(--violet)}
+  #tpl-view .tpl-m.beendet,#tpl-view .tpl-m.vorbei{opacity:.55} #tpl-view .tpl-m.beendet:hover,#tpl-view .tpl-m.vorbei:hover,#tpl-view .tpl-m.beendet.wahl,#tpl-view .tpl-m.vorbei.wahl{opacity:1}
+  #tpl-view .tpl-m.beendet .g,#tpl-view .tpl-m.vorbei .g{color:var(--sub-2)}
+  #tpl-view .tpl-m.erg-gut .l b{color:var(--good)} #tpl-view .tpl-m.erg-rot .l b{color:var(--danger)}
+  #tpl-view .tpl-m.mehr .l{background:var(--surface-tint);border:1px solid var(--border);font-weight:600;color:var(--ink);padding:1px 6px;border-radius:999px}
   #tpl-view .tpl-achse{position:relative;height:18px;margin-left:var(--nw);font-size:10.5px;color:var(--sub-2);font-variant-numeric:tabular-nums;border-top:1px solid var(--border-soft)}
   #tpl-view .tpl-achse span{position:absolute;top:3px;transform:translateX(-50%);white-space:nowrap}
   #tpl-view .tpl-achse span.links{transform:none} #tpl-view .tpl-achse span.rechts{transform:translateX(-100%)}
-  #tpl-view .tpl-netto{position:relative;display:flex;height:92px;border-top:1px solid var(--border-soft)}
+  #tpl-view .tpl-netto{position:relative;display:flex;height:50px;border-top:1px solid var(--border-soft)}
   #tpl-view .tpl-netto .tpl-name span{padding-left:0}
   #tpl-view .tpl-netto .tpl-bahn::before{display:none}
-  #tpl-view .tpl-netto svg{position:absolute;inset:6px 0;display:block;width:100%;height:calc(100% - 12px)}
+  #tpl-view .tpl-netto svg{position:absolute;inset:4px 0;display:block;width:100%;height:calc(100% - 8px)}
   #tpl-view .tpl-netto .skala{position:absolute;left:3px;top:2px;font-size:10px;color:var(--sub-2);font-variant-numeric:tabular-nums;pointer-events:none}
   #tpl-view .tpl-detail{border:1px solid color-mix(in srgb,var(--violet) 35%,var(--border));border-radius:var(--r-md);background:var(--surface);padding:10px 12px;margin:0 0 12px;min-width:0}
   #tpl-view .tpl-detail .k{display:flex;align-items:center;gap:4px 10px;flex-wrap:wrap;font-size:13px}
@@ -1868,30 +1876,56 @@
   #tpl-view .tpl-chip.grau{background:var(--surface-tint);border-color:var(--border-soft)}
   #tpl-view .tpl-chip.grau em{font-weight:500}
   #tpl-view .tpl-leer{padding:14px 4px;color:var(--sub-2);font-size:12.5px;text-align:center}
+  /* Netto-Chart (eigene Karte, volle Breite) */
+  #tpl-view .tpl-nk-chart{position:relative;height:150px;margin:2px 0 0}
+  #tpl-view .tpl-nk-chart svg{display:block;width:100%;height:100%}
+  #tpl-view .tpl-nk-chart .skala{position:absolute;left:4px;font-size:10.5px;color:var(--sub-2);font-variant-numeric:tabular-nums;pointer-events:none;background:color-mix(in srgb,var(--surface) 80%,transparent);padding:0 3px;border-radius:3px}
+  #tpl-view .tpl-nk-chart .skala.oben{top:2px} #tpl-view .tpl-nk-chart .skala.unten{bottom:2px}
+  #tpl-view .tpl-nk-achse{margin-left:0;margin-top:2px}
+  #tpl-view .tpl-h .leg .tpl-nk-l{display:inline-block;width:16px;height:0;border-top:2.5px solid var(--violet);vertical-align:middle;margin-right:3px}
+  #tpl-view .tpl-h .leg .tpl-nk-l.gestrichelt{border-top-style:dashed}
+  #tpl-view .tpl-h .leg .tpl-nk-b{display:inline-block;width:12px;height:10px;background:color-mix(in srgb,var(--good) 20%,var(--surface));border:1px solid color-mix(in srgb,var(--good) 45%,var(--surface));vertical-align:middle;margin-right:3px;border-radius:2px}
+  /* Liste „Läuft / Geplant" (Radar-Zeilen wdl-z in der Planer-Karte) */
+  #tpl-view .tpl-lk{padding-bottom:4px} #tpl-view .tpl-lk .tpl-h{margin:4px 0 2px} #tpl-view .tpl-lk .tpl-h + .tpl-liste{margin-bottom:8px}
+  #tpl-view .tpl-liste{border:1px solid var(--border-soft);border-radius:var(--r-md);overflow:hidden}
+  #tpl-view .tpl-liste .wdl-z{padding:9px 12px;cursor:pointer} #tpl-view .tpl-liste .wdl-z.is-aktiv{background:var(--violet-tint)}
+  #tpl-view .tpl-liste .wdl-z-pl{font-size:13.5px} #tpl-view .tpl-liste .wdl-z-lauf .wdl-z-pl{font-size:13.5px;font-weight:600}
+  #tpl-view .tpl-liste .tpl-l-bal{display:block;margin:1px 0 0 17px;font-size:11.5px;color:var(--sub-2);font-variant-numeric:tabular-nums}
+  #tpl-view .tpl-liste .tpl-pill{margin-left:4px}
   /* Braucht dich (07.10.2026): ruhiger Block je ID — Zeile = Symbol · Firma · Klartext · kleine Aktion */
   #tpl-view .tpl-bd{border-color:color-mix(in srgb,#B45309 35%,var(--border))}
   #tpl-view .tpl-bd-id{padding:3px 0 2px;border-top:1px solid var(--border-soft)} #tpl-view .tpl-bd-id:first-of-type{border-top:0}
   #tpl-view .tpl-bd-id>b{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;margin:2px 0 3px}
   #tpl-view .tpl-bd-id>b i{width:9px;height:9px;border-radius:50%;flex:none} #tpl-view .tpl-bd-id>b span{font-weight:500;color:var(--sub-2);font-variant-numeric:tabular-nums}
-  #tpl-view .tpl-bd-z{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:3px 0 3px 15px;font-size:12.5px;min-width:0}
-  #tpl-view .tpl-bd-z em{font-style:normal;flex:none;width:16px;text-align:center;color:var(--sub)}
+  #tpl-view .tpl-bd-z{display:grid;grid-template-columns:16px minmax(180px,1.3fr) minmax(150px,1fr) minmax(170px,1.5fr) auto;gap:4px 10px;align-items:center;padding:4px 0 4px 15px;font-size:12.5px;min-width:0;border-top:1px dashed var(--border-soft)}
+  #tpl-view .tpl-bd-z:first-of-type{border-top:0}
+  #tpl-view .tpl-bd-z em{font-style:normal;text-align:center;color:var(--sub)}
   #tpl-view .tpl-bd-z.plan em{color:var(--danger)} #tpl-view .tpl-bd-z.balance em{color:var(--violet)}
-  #tpl-view .tpl-bd-z .k{display:inline-flex;align-items:center;gap:4px;flex:none;color:var(--sub);font-variant-numeric:tabular-nums} #tpl-view .tpl-bd-z .k i{width:7px;height:7px;border-radius:2px}
-  #tpl-view .tpl-bd-z .t{flex:1 1 220px;min-width:0;color:var(--ink)}
+  #tpl-view .tpl-bd-z .k{display:flex;align-items:center;gap:6px;min-width:0;color:var(--sub)} #tpl-view .tpl-bd-z .k i{width:7px;height:7px;border-radius:2px;flex:none}
+  #tpl-view .tpl-bd-z .k .f{flex:none;font-size:11.5px} #tpl-view .tpl-bd-z .k b{font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  #tpl-view .tpl-bd-z .k .type-badge{flex:none;font-size:10px;padding:1px 6px}
+  #tpl-view .tpl-bd-z .b{font-variant-numeric:tabular-nums;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis} #tpl-view .tpl-bd-z .b.leer{color:var(--sub-2)}
+  #tpl-view .tpl-bd-z .t{min-width:0;color:var(--ink-2)}
+  #tpl-view .tpl-bd-z .a{display:flex;align-items:center;gap:6px;justify-content:flex-end;white-space:nowrap}
   #tpl-view .tpl-bd-z .s{font-size:11.5px;color:var(--sub-2)} #tpl-view .tpl-bd-z .s.rot{color:var(--danger)}
   #tpl-view .tpl-bd-z .knopf{border:1px solid var(--border);background:var(--surface);border-radius:7px;height:26px;padding:0 9px;font:inherit;font-size:12px;color:var(--ink-2);cursor:pointer;white-space:nowrap}
   #tpl-view .tpl-bd-z .knopf:hover:not(:disabled){border-color:var(--sub-2);background:var(--surface-tint)}
   #tpl-view #apLeiste,#tpl-view #apDelta{margin:0 0 12px}
+  #apLeiste .ap-alle{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--sub);cursor:pointer;user-select:none;margin-right:2px} #apLeiste .ap-alle:has(input:disabled){opacity:.55;cursor:default}
   @media (max-width:760px){
     #tpl-view .kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
     #tpl-view .kpi-value{font-size:18px}
     #tpl-view .kpi-delta{white-space:normal}
-    #tpl-view .tpl-innen{--nw:86px}
+    #tpl-view .tpl-scroll{overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain}
+    #tpl-view .tpl-innen{min-width:720px;--nw:86px}
     #tpl-view .tpl-name{font-size:12px}
     #tpl-view .tpl-ab-kopf{grid-template-columns:minmax(0,1fr) minmax(50px,100px) 16px;gap:3px 8px}
     #tpl-view .tpl-ab-kopf>span.t{grid-column:1/-1;white-space:normal}
     #tpl-view .tpl-ab-kopf>em{grid-row:1;grid-column:3}
-    #tpl-view .tpl-t{font-size:11px;max-width:160px;padding:0 7px 0 5px}
+    #tpl-view .tpl-m{font-size:10.5px}
+    #tpl-view .tpl-bd-z{grid-template-columns:16px minmax(0,1fr) auto;gap:2px 8px}
+    #tpl-view .tpl-bd-z .b,#tpl-view .tpl-bd-z .t{grid-column:2/-1}
+    #tpl-view .tpl-bd-z .a{grid-column:1/-1;justify-content:flex-start;padding-left:24px}
     #tpl-view .tpl-ids .adm-vl-chip{font-size:11.5px;padding:3px 8px}
   }
   /* Winning-Day-Farmer im Admin (23.09.2026, Finn: „mach alles in Admin und mehr Überblick"; dann „mies
@@ -39881,7 +39915,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1109'
+  const OS_TAB_BUILD = '2026-09-22.1110'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -44024,11 +44058,13 @@
         <b>🤖 Auto-Planer</b>
         <span style="color:var(--sub)">${vorschlaege.length ? `${vorschlaege.length} ${vorschlaege.length === 1 ? 'Vorschlag wartet' : 'Vorschläge warten'} auf Bestätigung` : 'keine offenen Vorschläge'}${bestaetigt ? ` · ${bestaetigt} bestätigt` : ''}</span>
         <span style="flex:1"></span>
+        ${_ap.imPlaner && _ap.admin === true ? `<label class="ap-alle" title="${AP_PROBE_ALLE_BACKEND ? 'Probelauf über alle IDs (POST /admin/auto-plan {trocken:true, ids:\'alle\'})' : 'Backend folgt — Probelauf über alle IDs kommt mit dem nächsten Backend-Stand'}"><input type="checkbox" id="apProbeAlle"${_apPr.alle ? ' checked' : ''}${AP_PROBE_ALLE_BACKEND ? '' : ' disabled'}> alle IDs</label>` : ''}
         ${_ap.imPlaner ? `<button class="btn btn-ghost tc2-btn" id="apProbe" ${_ap.laeuft ? 'disabled' : ''} title="Nur rechnen, nichts anlegen">Probelauf</button>
         <button class="btn btn-ghost tc2-btn" id="apJetzt" ${_ap.laeuft ? 'disabled' : ''} title="Jetzt planen (ersetzt unbestätigte Vorschläge)">${_ap.laeuft ? 'plant…' : 'Jetzt planen'}</button>` : ''}
       </div>
       ${lauf ? `<div style="margin-top:4px;font-size:12px;color:var(--sub);font-variant-numeric:tabular-nums">${lauf}</div>` : ''}`
     document.getElementById('apProbe')?.addEventListener('click', apProbeOeffnen)
+    document.getElementById('apProbeAlle')?.addEventListener('change', e => { _apPr.alle = !!e.target.checked })   // Probelauf über alle IDs (TPL-UEBERSICHT-2); Backend folgt
     document.getElementById('apJetzt')?.addEventListener('click', () => apJetztPlanen(false))
   }
 
@@ -44038,7 +44074,10 @@
    * .claude/master/autoplan-probelauf-vertrag.md). Altes Backend ohne tranchen: aus geplant[] je ID × Firma zusammengesetzt —
    * dann ohne €-Gewichte („$ TP" statt „€ im Spiel") und ohne „warum". Admin (d.admin) sieht alle IDs, sonst nur die eigene;
    * der Long/Short-Ausgleich gilt immer über alle IDs (so rechnet der Planer). Zeiten = deutsche Zeit wie im Planer. */
-  const _apPr = { modus: 'morgen', laeuft: false, d: null, tag: null, fehler: '', hinweis: '', nr: 0 }
+  const _apPr = { modus: 'morgen', laeuft: false, d: null, tag: null, fehler: '', hinweis: '', nr: 0, alle: false }
+  // Probelauf „alle IDs" (TPL-UEBERSICHT-2, 07.10.2026): Schalter neben dem Probelauf-Knopf (Admin), schickt ids:'alle' mit — das Backend
+  // dazu baut Terminal 1 (Vertrag folgt); bis dahin bleibt der Schalter ausgegraut (Tooltip „Backend folgt"). Auf true setzen, sobald die Route es kann.
+  const AP_PROBE_ALLE_BACKEND = false
   let AP_PR_VON = 120, AP_PR_BIS = 1050              // Zeitleiste 02:00–17:30 deutscher Zeit (letzter Start 17:30, Finn 05.10.2026)
   // Delta-neutral (06.10.2026, Vertrag autoplan-delta-vertrag.md §2): Nachtlauf um 00:00 dt, Fenster 00:00–14:30 · 14:30–17:30 · 17:30–19:30
   // mit 40/40/20 % — Zeitleiste dann 00:00–19:30. Nur Rückfall, wenn die Antwort keine Fenster mitschickt.
@@ -44096,7 +44135,7 @@
     const nr = ++_apPr.nr, tag = apPrTag(_apPr.modus)
     _apPr.laeuft = true; _apPr.fehler = ''; _apPr.d = null; _apPr.tag = tag; apPrZeichnen()
     try{
-      const d = await apApi('POST', tag ? { trocken: true, tag } : { trocken: true })
+      const d = await apApi('POST', Object.assign(tag ? { trocken: true, tag } : { trocken: true }, _apPr.alle && AP_PROBE_ALLE_BACKEND ? { ids: 'alle' } : {}))
       if(nr !== _apPr.nr) return            // inzwischen umgeschaltet oder geschlossen
       _apPr.d = d; _apPr.tag = d.tag || tag
     }catch(e){ if(nr === _apPr.nr) _apPr.fehler = (e && e.message) || String(e) }
@@ -44429,8 +44468,16 @@
         <button type="button" class="btn btn-ghost tc2-btn" data-apd="neu" title="Neu laden">↻</button>
         ${admin ? `<button type="button" class="btn btn-ghost tc2-btn" data-apd="ausgleichen" ${_apd.vLaeuft ? 'disabled' : ''} title="Bot einmal laufen lassen — erst Vorschau, nichts geändert">${_apd.vLaeuft ? 'rechnet …' : 'Jetzt ausgleichen'}</button>` : ''}
       </div>`
-    el.innerHTML = kopf + apdVorschauHtml(v) + apdWaageHtml(v)
-      + `<div class="apd-listen">${apdOffenHtml(v)}${apdGeplantHtml(v, admin)}${apdUmplHtml(v)}</div>`
+    // EINGEKLAPPT (TPL-UEBERSICHT-2, 07.10.2026, Finn: doppelt zur Übersicht): Standard eine Zeile „Details · Delta-Monitor", Zustand in
+    // localStorage (prophos_tpl_delta_auf), aufgeklappt wie bisher; geladen wird unverändert (apdTick)
+    let auf = false; try{ auf = localStorage.getItem('prophos_tpl_delta_auf') === '1' }catch(_){}
+    if(!auf){
+      el.innerHTML = `<div class="apd-kopf apd-zu"><button type="button" class="apd-auf" data-apd-auf="1" title="aufklappen">▸ Details · Delta-Monitor <span>Punkte-Abstände, Bot-Eingriffe</span></button><span class="apd-um">${um ? 'Stand ' + um : ''}${_apd.laeuft ? ' · lädt …' : ''}</span>${_apd.fehler ? `<span class="apd-rot" style="font-size:11.5px" title="${escapeHtml(_apd.fehler)}">⚠</span>` : ''}</div>`
+      return
+    }
+    // Offen/Geplant stehen seit TPL-UEBERSICHT-2 als Liste „Läuft / Geplant" unter dem Zeitstrahl (tplListeHtml) — hier nur noch Umplanungen
+    el.innerHTML = kopf.replace('<span style="flex:1"></span>', '<button type="button" class="apd-auf" data-apd-auf="0" title="einklappen">▾ einklappen</button><span style="flex:1"></span>') + apdVorschauHtml(v) + apdWaageHtml(v)
+      + `<div class="apd-listen">${apdUmplHtml(v)}</div>`
   }
   /* Bot-Kachel (Schalter Bot + Auto-Start, letzter/nächster Lauf) — steht seit 07.10.2026 in der Kachelreihe der Trade-Planer-Seite;
    * Netto/Long·Short/Brutto in €/Pkt und der €/Pkt-Verlauf sind dort durch Long/Short/Netto in € Einsatz und die Netto-Linie ersetzt.
@@ -44513,7 +44560,7 @@
   const apdGrundKurz = g => { const t = String(g || '').trim(); return t.length > 42 ? t.slice(0, 40) + '…' : t }
   function apdUmplHtml(v){
     const zeilen = v.umpl.map(u => `<div class="apd-z"><span class="zeit">${apdUhr(u.um)}</span>${apdFirmaZelle(u)}
-        <span class="wechsel">${u.quelle === 'hand' ? '✋ ' : u.quelle === 'start' ? '⏰ ' : ''}${apdWechsel(u)}</span><span class="grund" title="${escapeHtml(u.grund || '')}">${escapeHtml(apdGrundKurz(u.grund))}</span></div>`).join('')
+        <span class="wechsel">${u.quelle === 'hand' ? '✋ ' : u.quelle === 'start' ? '⏰ ' : ''}${apdWechsel(u)}</span><span class="grund voll" title="${escapeHtml(u.grund || '')}">${escapeHtml(u.grund || '')}</span></div>`).join('')   // voller Grund, umgebrochen (Master 07.10.2026)
     return `<div class="apd-liste breit"><div class="apd-h">Umplanungen heute <b>${v.umpl.length}</b></div>${zeilen || '<div class="apd-leer">—</div>'}</div>`
   }
   /* Vorschau „Jetzt ausgleichen": was der Bot jetzt ändern würde (trocken), erst „Übernehmen" ändert wirklich */
@@ -44593,6 +44640,7 @@
   // Verdrahtung nur dieser Karte (ein Listener am eigenen Element, kein Sammel-Handler)
   document.getElementById('apDelta')?.addEventListener('click', e => {
     const t = e.target.closest('button'); if(!t || t.disabled) return
+    if(t.dataset.apdAuf != null){ try{ localStorage.setItem('prophos_tpl_delta_auf', t.dataset.apdAuf) }catch(_){} apdZeichnen(); return }   // auf/zu (07.10.2026)
     const a = t.dataset.apd
     if(a === 'neu'){ apdLaden(true); return }
     if(a === 'ausgleichen'){ apdAusgleichen(true); return }
@@ -44645,7 +44693,7 @@
    * Tages (Sommer 2 h, Winter 3 h). Netto-Linie: jeder Trade zählt ab Start laufzeit_min lang (aus dem Lauf, sonst 180 min) mit seinem
    * Einsatz, beendete bis zu ihrem Ende, laufende mindestens bis jetzt; gehedgte zählen 0 — wie ap_verlauf im Backend. */
   const _tpl = { tag: 'heute', wahl: null, edit: null, busy: false, meldung: '', timer: null, geladen: 0, laeuft: false, fehler: '', weg: new Set(), stub: false,
-    sicht: 'alle', abAuf: new Map() }   // sicht: ID-Chip („alle" | user_id), abAuf: Konten-Abdeckung je ID auf/zu (07.10.2026)
+    sicht: 'alle', abAuf: new Map(), lt: new Map(), ltAt: 0, weitereAuf: false }   // sicht: ID-Chip („alle" | user_id), abAuf: Konten-Abdeckung je ID auf/zu, lt: Startzeiten laufender Trades aller IDs (07.10.2026)
   try{ const s = localStorage.getItem('prophos_tpl_sicht'); if(s) _tpl.sicht = s }catch(_){}
   // ALLE IDS (07.10.2026, Finn 03:25 dt: „Es ist nur die ID, von der ich gerade eingeloggt bin. So hässlich, man erkennt gar nichts"):
   // solange diese Seite offen ist, fragen apApi (Lauf) und apdLaden (Delta) mit ?sicht=alle — das Backend liefert dann alle IDs
@@ -44711,6 +44759,7 @@
         tp: tplNum(g && g.tp) ?? (p ? p.masterTp : null), sl: tplNum(g && g.sl) ?? (p ? p.masterSl : null),
         tp_punkte: tplNum(x.tp_punkte) ?? tplNum(g && g.tp_punkte), sl_punkte: tplNum(x.sl_punkte) ?? tplNum(g && g.sl_punkte),
         stufe: (g && g.stufe) || stufeAus(p), wert: tplNum(x.wert_eur), gehedgt: !!x.gehedgt, einsatz: ein != null ? Math.abs(ein) : null, hinweis: x.hinweis || (g && g.hinweis) || null,
+        typ: x.typ || (g && g.typ) || null, route: x.route || (g && g.route) || (p ? p.route : null), usd: tplNum(x.usd_pro_pkt) ?? tplNum(g && g.usd_pro_pkt),
         eigen: !!p, auto: x.auto_plan != null ? !!x.auto_plan : p ? !!p.autoPlan : true, ...mehr }
       t.long = t.richtung === 'buy'
       t.key = String(t.plan_id)
@@ -44721,6 +44770,9 @@
     for(const x of (delta && delta.offen) || []){
       const g = laufJe.get(tplKk(x.user_id, x.konto)), p = eigen.get(String(x.plan_id))
       let s = p ? tplMinDt(p.startedAt || p.startUm, tag) : null
+      // ECHTE STARTZEIT FREMDER TRADES (07.10.2026, Finn-Screenshot 03:48 dt: laufende Hand-/Orbit-V3-Trades dreier IDs standen alle auf
+      // „jetzt", weil das Delta keine Startzeit mitliefert): Zeile aus /admin/live-trades (alle IDs, tplLiveLaden) → started_at, sonst start_um
+      if(s == null){ const lt = _tpl.lt.get(String(x.plan_id)); if(lt) s = tplMinDt(lt.started_at || lt.start_um, tag) }
       if(s == null && g) s = apPrHm(g.start)
       neu(x, g, p, { plan_id: String(x.plan_id), status: 'laeuft', start: s ?? Math.max(0, jetzt), startUnklar: s == null,
         tp_rest: tplNum(x.tp_punkte_rest), sl_rest: tplNum(x.sl_punkte_rest) })
@@ -44792,67 +44844,99 @@
     return `<div class="kpis">${k1}${k2}${k3}${apdBotKachelHtml(apdDaten(), apdAdmin(), tplUhrIso)}</div>`
   }
 
-  function tplZeitstrahlHtml(D, spuren){
-    const v = D.v
-    // Achse: Fenster des Planers (deutsche Zeit → Dubai, auf volle Stunden), sonst 02:00–19:00 Dubai; Trades außerhalb ziehen sie auf
-    const fen = ((_apd.d && Array.isArray(_apd.d.fenster)) ? _apd.d.fenster : []).map(f => ({ a: apPrHm(f.von), b: apPrHm(f.bis) })).filter(f => f.a != null && f.b != null)
-    let VON = fen.length ? Math.floor((fen[0].a + v) / 60) * 60 : 120
-    let BIS = fen.length ? Math.ceil((fen[fen.length - 1].b + v) / 60) * 60 : 1140
-    for(const t of D.trades){ const m = t.start + v; VON = Math.min(VON, Math.floor(m / 60) * 60); BIS = Math.max(BIS, Math.ceil((m + 20) / 60) * 60) }
-    VON = Math.max(0, VON); BIS = Math.min(1440, Math.max(BIS, VON + 360))
-    const X = mDt => Math.max(0, Math.min(100, (mDt + v - VON) / (BIS - VON) * 100))
+  /* ZEITSTRAHL V2 (07.10.2026, TPL-UEBERSICHT-2, Finn: „da erkennt man nix, zu viel auf einmal, und da kommt ja nur mehr dazu"):
+   * zeilen = [{key, name, uid, ids[], sammel, auf}] — je Planer-ID eine Zeile, die übrigen IDs (nur laufende Hand-/Orbit-V3-Trades) in
+   * EINER Sammelzeile „Weitere · n laufend", aufklappbar. Je Trade ein kleiner Marker (▲ grün / ▼ rot, gestrichelt = unbestätigt,
+   * Puls-Punkt = läuft) mit Kürzel + Uhrzeit („FN 09:42"); Einsatz, Konto, TP/SL nur im Tooltip und im Klick-Detail. Laufende Trades als
+   * dünner Balken von der echten Startzeit bis jetzt. Feste Zeilenhöhe: Marker, die sich überschneiden (< 30 min bzw. näher als die
+   * Textbreite), stapeln höchstens zwei Ebenen, danach ein Sammel-Marker „+n" mit Tooltip-Liste. Achse = heutiger Bereich (frühester
+   * Start … spätester Start/jetzt, mindestens jetzt ± 1 h, volle Stunden), Stunden als zarte Spalten, Jetzt-Linie. */
+  const TPL_EBENE_Y = [5, 25]
+  function tplZeitstrahlHtml(D, zeilen){
+    const v = D.v, heute = D.tag === D.heute && D.jetzt != null
+    const alle = zeilen.flatMap(z => D.trades.filter(t => z.ids.includes(t.user_id)))
+    const endeVon = t => t.status === 'laeuft' && heute ? Math.max(t.start, D.jetzt) : t.start
+    let VON, BIS
+    if(heute){ VON = D.jetzt + v - 60; BIS = D.jetzt + v + 60 }
+    else {
+      const fen = ((_apd.d && Array.isArray(_apd.d.fenster)) ? _apd.d.fenster : []).map(f => ({ a: apPrHm(f.von), b: apPrHm(f.bis) })).filter(f => f.a != null && f.b != null)
+      VON = fen.length ? fen[0].a + v : 120; BIS = fen.length ? fen[fen.length - 1].b + v : 1140
+    }
+    for(const t of alle){ VON = Math.min(VON, t.start + v); BIS = Math.max(BIS, endeVon(t) + v + 20) }
+    VON = Math.max(0, Math.floor(VON / 60) * 60); BIS = Math.min(1440, Math.ceil(BIS / 60) * 60)
+    if(BIS - VON < 180){ BIS = Math.min(1440, VON + 180); VON = Math.max(0, BIS - 180) }
+    const SPAN = BIS - VON, X = mDt => Math.max(0, Math.min(100, (mDt + v - VON) / SPAN * 100))
+    const schmal = (window.innerWidth || 1280) <= 760, nw = schmal ? 86 : 108, rootEl = document.getElementById('tpl-root')
+    const bahnPx = Math.max(720, (rootEl && rootEl.clientWidth) || 0) - nw - 26, pxJeMin = bahnPx / SPAN
+    // Enge (Master 07.10.2026: Marker-Text kürzen statt Achse verbreitern): unter ~1,6 px/min nur noch Kürzel ohne Uhrzeit (≈ 42 px)
+    const kompakt = pxJeMin * 30 < 36, markerPx = kompakt ? 42 : 74
+    const breiteMin = Math.max(30, markerPx / pxJeMin)   // Mindestabstand in Minuten, nie unter 30 min
     const raster = []
-    for(let h = Math.ceil(VON / 60) * 60; h <= BIS; h += 60) raster.push(`<i style="left:${((h - VON) / (BIS - VON) * 100).toFixed(2)}%"></i>`)
-    for(const f of fen.slice(1)) raster.push(`<i class="fen" style="left:${X(f.a).toFixed(2)}%" title="Fenster ab ${tplUhr(f.a, v)}"></i>`)
-    const jetztIn = D.tag === D.heute && D.jetzt != null && D.jetzt + v >= VON && D.jetzt + v <= BIS
+    for(let h = Math.ceil(VON / 60) * 60; h <= BIS; h += 60) raster.push(`<i style="left:${((h - VON) / SPAN * 100).toFixed(2)}%"></i>`)
+    const jetztIn = heute && D.jetzt + v >= VON && D.jetzt + v <= BIS
     if(jetztIn) raster.push(`<i class="jetzt" style="left:${X(D.jetzt).toFixed(2)}%"></i><span class="jetzt-t" style="left:${X(D.jetzt).toFixed(2)}%">${tplUhr(D.jetzt, v)}</span>`)
-    const achse = []
-    for(let h = Math.ceil(VON / 120) * 120; h <= BIS; h += 120){
-      const x = (h - VON) / (BIS - VON) * 100
+    const schritt = SPAN <= 12 * 60 ? 60 : 120, achse = []
+    for(let h = Math.ceil(VON / schritt) * schritt; h <= BIS; h += schritt){
+      const x = (h - VON) / SPAN * 100
       achse.push(`<span class="${x < 3 ? 'links' : x > 97 ? 'rechts' : ''}" style="left:${x.toFixed(2)}%">${tplUhr(h - v, v)}</span>`)
     }
-    // PILLEN JE SPUR (07.10.2026, Finn: „so hässlich, man erkennt gar nichts"): je Trade eine Pille mit Richtung, Firma, Einsatz und
-    // Startzeit (Dubai) statt Punkt + Schild. Pillen, die sich zeitlich überschneiden (Tranche: Konten 1–2 min versetzt), rücken in die
-    // nächste Lane derselben Spur, die Spur wächst mit (--n). Am rechten Rand hängt die Pille links an ihrer Startzeit (rechts).
-    // Beendete blass mit Ergebnis, laufende mit Puls-Punkt, unbestätigte gestrichelt. Konto-Endziffern nur im Tooltip/Detail (Platz).
-    const schmal = (window.innerWidth || 1280) <= 760, nw = schmal ? 86 : 108, rootEl = document.getElementById('tpl-root')
-    const bahnPx = Math.max(720, (rootEl && rootEl.clientWidth) || 0) - nw - 26
-    const PILL = schmal ? 120 : 142, pillMin = PILL / bahnPx * (BIS - VON), pillPct = PILL / bahnPx * 100   // typische Pillenbreite in px (Lane-Rechnung)
-    const zeilen = spuren.map((s, i) => {
-      const liste = D.trades.filter(t => t.user_id === s.uid)
-      const n = liste.length, nl = liste.filter(t => t.status === 'laeuft').length
-      const lanes = []   // belegtes Ende (Minute Dubai) je Lane
-      const marker = liste.map(t => {
-        const m = t.start + v, x = X(t.start), rechts = x > 100 - pillPct && x > pillPct
-        const a = rechts ? m - pillMin : m, b = rechts ? m : m + pillMin
-        let lane = lanes.findIndex(e => e <= a + 0.5)
-        if(lane < 0){ lane = lanes.length; lanes.push(0) }
-        lanes[lane] = b
-        const kurz = apPrKurz(t.firma), glyph = t.long ? '▲' : '▼'
-        const erg = t.status === 'beendet' && t.pnl != null ? (t.pnl > 0 ? ' erg-gut' : t.pnl < 0 ? ' erg-rot' : ' erg-null') : ''
-        const wert = t.status === 'beendet' && t.pnl != null ? (t.pnl > 0 ? '+' : '') + tplUsd(t.pnl) : t.gehedgt ? 'gehedgt' : t.einsatz != null ? tplEur(t.einsatz) : '—'
-        const titel = [`${t.user} · ${t.firma}${t.ende4 ? ' …' + t.ende4 : ''}`, `${t.long ? 'Long' : 'Short'} ${tplUhr(t.start, v)}${t.startUnklar ? ' (Start unbekannt)' : ''} · ${TPL_WORT[t.status] || t.status}`,
-          t.wert != null ? `Kontowert ${tplEur(t.wert)}` : '', `Einsatz ${t.gehedgt ? 'gehedgt' : t.einsatz != null ? tplEur(t.einsatz) : '—'}`, t.menge != null ? `Größe ${t.menge}` : '',
-          [t.tp != null ? 'TP ' + tplUsd(t.tp) : '', t.sl != null ? 'SL ' + tplUsd(t.sl) : ''].filter(Boolean).join(' · '),
-          t.stufe || '', t.status === 'beendet' && t.pnl != null ? `Ergebnis ${t.pnl > 0 ? '+' : ''}${tplUsd(t.pnl)}` : ''].filter(Boolean).join('\n')
-        return `<button type="button" class="tpl-t ${t.long ? 'long' : 'short'} ${t.status}${erg}${rechts ? ' rechts' : ''}${_tpl.wahl === t.key ? ' wahl' : ''}" style="${rechts ? 'right:' + (100 - x).toFixed(2) : 'left:' + x.toFixed(2)}%;top:${6 + lane * 28}px" data-tpl-t="${escapeHtml(t.key)}" title="${escapeHtml(titel)}">
-            ${t.status === 'laeuft' ? '<span class="p">●</span>' : ''}<span class="g">${glyph}</span><span class="n"><i style="background:${apdFirmaTon(t.firma)}"></i>${escapeHtml(kurz)}</span><b>${wert}</b><span class="z">${tplUhr(t.start, v)}</span></button>`
-      }).join('')
-      return `<div class="tpl-spur${i ? '' : ' erste'}" style="--id:${idFarbe(s.uid)};--n:${Math.max(1, lanes.length)}">
-          <div class="tpl-name"><b title="${escapeHtml(s.name)}"><i style="background:${idFarbe(s.uid)}"></i>${escapeHtml(s.name || '—')}</b><span>${n} Trade${n === 1 ? '' : 's'}${nl ? ` · ${nl} ●` : ''}</span></div>
-          <div class="tpl-bahn">${marker || '<span class="leer">—</span>'}</div></div>`
+    const titelVon = t => [`${t.user} · ${t.firma}${t.ende4 ? ' …' + t.ende4 : ''}`, `${t.long ? 'Long' : 'Short'} ${tplUhr(t.start, v)}${t.startUnklar ? ' (Start unbekannt)' : ''} · ${TPL_WORT[t.status] || t.status}`,
+      t.wert != null ? `Kontowert ${tplEur(t.wert)}` : '', `Einsatz ${t.gehedgt ? 'gehedgt' : t.einsatz != null ? tplEur(t.einsatz) : '—'}`, t.menge != null ? `Größe ${t.menge}` : '',
+      [t.tp != null ? 'TP ' + tplUsd(t.tp) : '', t.sl != null ? 'SL ' + tplUsd(t.sl) : ''].filter(Boolean).join(' · '),
+      t.stufe || '', t.status === 'beendet' && t.pnl != null ? `Ergebnis ${t.pnl > 0 ? '+' : ''}${tplUsd(t.pnl)}` : ''].filter(Boolean).join('\n')
+    const marker = (t, ebene, mitName) => {
+      const erg = t.status === 'beendet' && t.pnl != null ? (t.pnl > 0 ? ' erg-gut' : t.pnl < 0 ? ' erg-rot' : ' erg-null') : ''
+      const balken = t.status === 'laeuft' && heute && D.jetzt > t.start ? `<i class="tpl-bar ${t.long ? 'long' : 'short'}" style="left:${X(t.start).toFixed(2)}%;width:${(X(D.jetzt) - X(t.start)).toFixed(2)}%;top:${TPL_EBENE_Y[ebene] + 9}px"></i>` : ''
+      return balken + `<button type="button" class="tpl-m ${t.long ? 'long' : 'short'} ${t.status}${erg}${_tpl.wahl === t.key ? ' wahl' : ''}" style="left:${X(t.start).toFixed(2)}%;top:${TPL_EBENE_Y[ebene]}px" data-tpl-t="${escapeHtml(t.key)}" title="${escapeHtml(titelVon(t))}">
+          <span class="g">${t.status === 'laeuft' ? '<i class="p"></i>' : ''}${t.long ? '▲' : '▼'}</span><span class="l"><b>${escapeHtml(apPrKurz(t.firma))}</b>${kompakt ? '' : ' ' + tplUhr(t.start, v)}</span></button>`
+    }
+    const spurHtml = (z, liste, label) => {
+      // Cluster: Marker, die näher als breiteMin am vorigen liegen, bilden eine Gruppe — 1. Ebene 0, 2. Ebene 1, Rest = „+n"
+      const gruppen = []; let g = null
+      for(const t of liste){ if(g && t.start - g.letzte < breiteMin){ g.items.push(t); g.letzte = t.start } else { g = { items: [t], letzte: t.start }; gruppen.push(g) } }
+      let html = ''
+      for(const gr of gruppen){
+        gr.items.forEach((t, i) => { if(i < 2) html += marker(t, i, true) })
+        if(gr.items.length > 2){
+          const rest = gr.items.slice(2)
+          html += `<button type="button" class="tpl-m mehr" style="left:${X(rest[0].start).toFixed(2)}%;top:${TPL_EBENE_Y[0]}px" data-tpl-t="${escapeHtml(rest[0].key)}" title="${escapeHtml(rest.map(t => `${t.user} · ${apPrKurz(t.firma)} ${t.long ? '▲' : '▼'} ${tplUhr(t.start, v)} · ${TPL_WORT[t.status] || t.status}`).join('\n'))}"><span class="l">+${rest.length}</span></button>`
+        }
+      }
+      return `<div class="tpl-spur${z.sammel ? ' sammel' : ''}" style="--id:${z.uid ? idFarbe(z.uid) : 'var(--sub-2)'}">${label}<div class="tpl-bahn">${html || '<span class="leer">—</span>'}</div></div>`
+    }
+    const rows = zeilen.map(z => {
+      const liste = D.trades.filter(t => z.ids.includes(t.user_id))
+      const zaehl = z.sammel && z.alle ? D.trades.filter(t => z.alle.includes(t.user_id)) : liste
+      const n = zaehl.length, nl = zaehl.filter(t => t.status === 'laeuft').length
+      if(z.sammel){
+        const label = `<button type="button" class="tpl-name tpl-weitere" data-tpl-weitere="1" title="${z.auf ? 'zusammenklappen' : 'aufklappen: eine Zeile je ID'}"><b><i style="background:var(--sub-2)"></i>Weitere <em>${z.auf ? '▾' : '▸'}</em></b><span>${(z.alle || z.ids).length} IDs · ${nl ? nl + ' laufend' : n + ' Trades'}</span></button>`
+        return spurHtml(z, liste, label)
+      }
+      const label = `<div class="tpl-name"><b title="${escapeHtml(z.name)}"><i style="background:${idFarbe(z.uid)}"></i>${escapeHtml(z.name || '—')}</b><span>${n} Trade${n === 1 ? '' : 's'}${nl ? ` · ${nl} ●` : ''}</span></div>`
+      return spurHtml(z, liste, label)
     }).join('')
-    // Netto-Einsatz über den Tag: gelaufen durchgezogen, ab jetzt gestrichelt, Band (zielband_pct × Brutto) grün hinterlegt
-    const W = 1000, H = 100, M = H / 2
+    _tpl.achse = { VON, BIS, jetztIn }   // der Netto-Chart (eigene Karte darunter) teilt sich die Zeitachse
+    const leg = `<span class="leg"><span><span class="g tpl-gut">▲</span> Long</span><span><span class="g tpl-rot">▼</span> Short</span><span>gestrichelt = unbestätigt</span><span><span style="color:var(--violet)">●</span> läuft (Balken = Dauer)</span><span>blass = beendet</span><span>+n = mehr im Tooltip</span></span>`
+    return `<div class="tpl-karte"><div class="tpl-h">Zeitstrahl <b>${alle.length}</b>${leg}</div>
+        <div class="tpl-scroll"><div class="tpl-innen"><div class="tpl-raster">${raster.join('')}</div>
+          ${rows || '<div class="tpl-leer">—</div>'}<div class="tpl-achse">${achse.join('')}</div></div></div></div>`
+  }
+  /* NETTO-CHART (TPL-UEBERSICHT-2, Finn: „den Chart finde ich sehr interessant, der soll immer um 0 laufen"): eigene Karte in voller
+   * Breite, doppelt so hoch wie die alte Zeile, 0-Linie kräftig, Band (zielband_pct × Brutto) als Fläche, gelaufen durchgezogen, ab jetzt
+   * gestrichelt, je Stufe ein Tooltip (von–bis · Netto · Long/Short-Anteil · Band). Zeitachse = die des Zeitstrahls (_tpl.achse). */
+  function tplNettoHtml(D){
+    const a = _tpl.achse || {}; if(a.VON == null) return ''
+    const v = D.v, VON = a.VON, BIS = a.BIS, SPAN = BIS - VON, jetztIn = !!a.jetztIn
+    const W = 1000, H = 150, M = H / 2
     const pts = tplVerlauf(D)
     const wertBei = m => { let p = { netto: 0, brutto: 0 }; for(const q of pts){ if(q.min <= m) p = q; else break } return p }
     const vonDt = VON - v, bisDt = BIS - v
     const reihe = [{ min: vonDt, ...wertBei(vonDt) }, ...pts.filter(p => p.min > vonDt && p.min < bisDt)]
     reihe.push({ min: bisDt, ...wertBei(bisDt) })
     const pct = tplNum((_apd.d && (_apd.d.zielband_pct ?? (_apd.d.bot && _apd.d.bot.zielband_pct))))
-    const max = Math.max(1, ...reihe.map(p => Math.abs(p.netto)), ...(pct ? reihe.map(p => p.brutto * pct / 100) : [])) * 1.12
-    const XS = m => ((m + v - VON) / (BIS - VON) * W).toFixed(1), Y = n => (M - n / max * (M - 4)).toFixed(1)
-    const treppe = arr => arr.map((q, i) => i ? `H${XS(q.min)}V${Y(q.netto)}` : `M${XS(q.min)},${Y(q.netto)}`).join('')
+    const max = Math.max(1, ...reihe.map(p => Math.abs(p.netto)), ...(pct ? reihe.map(p => p.brutto * pct / 100) : [])) * 1.15
+    const XS = m => ((m + v - VON) / SPAN * W), Y = n => (M - n / max * (M - 6))
+    const treppe = arr => arr.map((q, i) => i ? `H${XS(q.min).toFixed(1)}V${Y(q.netto).toFixed(1)}` : `M${XS(q.min).toFixed(1)},${Y(q.netto).toFixed(1)}`).join('')
     let vor = reihe, nach = []
     if(jetztIn){
       vor = reihe.filter(p => p.min <= D.jetzt); nach = reihe.filter(p => p.min > D.jetzt)
@@ -44862,22 +44946,30 @@
     let band = ''
     if(pct){
       let oben = '', unten = ''
-      reihe.forEach((p, i) => { oben += i ? `H${XS(p.min)}V${Y(p.brutto * pct / 100)}` : `M${XS(p.min)},${Y(p.brutto * pct / 100)}` })
-      for(let i = reihe.length - 1; i >= 0; i--) unten += `V${Y(-reihe[i].brutto * pct / 100)}H${XS(reihe[i].min)}`
-      band = `<path d="${oben}${unten}Z" fill="var(--good)" fill-opacity=".12" stroke="none"/>`
+      reihe.forEach((p, i) => { oben += i ? `H${XS(p.min).toFixed(1)}V${Y(p.brutto * pct / 100).toFixed(1)}` : `M${XS(p.min).toFixed(1)},${Y(p.brutto * pct / 100).toFixed(1)}` })
+      for(let i = reihe.length - 1; i >= 0; i--) unten += `V${Y(-reihe[i].brutto * pct / 100).toFixed(1)}H${XS(reihe[i].min).toFixed(1)}`
+      band = `<path d="${oben}${unten}Z" fill="var(--good)" fill-opacity=".14" stroke="var(--good)" stroke-opacity=".35" stroke-width="1" vector-effect="non-scaling-stroke"/>`
     }
-    const nJetzt = jetztIn ? wertBei(D.jetzt).netto : null
+    // Tooltip je Stufe: unsichtbare Rechtecke von Stufe zu Stufe
+    const stufen = reihe.map((p, i) => {
+      const bis = i + 1 < reihe.length ? reihe[i + 1].min : bisDt; if(bis <= p.min) return ''
+      const L = Math.max(0, (p.brutto + p.netto) / 2), S = Math.max(0, (p.brutto - p.netto) / 2)
+      const tip = `${tplUhr(p.min, v)}–${tplUhr(bis, v)} · Netto ${(p.netto > 0 ? '+' : p.netto < 0 ? '−' : '') + tplEur(p.netto)} · Long ${tplEur(L)} / Short ${tplEur(S)}${pct ? ` · Band ±${tplEur(p.brutto * pct / 100)}` : ''}`
+      return `<rect x="${XS(p.min).toFixed(1)}" y="0" width="${(XS(bis) - XS(p.min)).toFixed(1)}" height="${H}" fill="transparent"><title>${escapeHtml(tip)}</title></rect>`
+    }).join('')
+    const jetztX = jetztIn ? XS(D.jetzt).toFixed(1) : null
     const svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">${band}
-        <line x1="0" y1="${M}" x2="${W}" y2="${M}" stroke="var(--sub-2)" stroke-width="1" stroke-dasharray="4 4" vector-effect="non-scaling-stroke"/>
-        ${vor.length > 1 ? `<path d="${treppe(vor)}" fill="none" stroke="var(--violet)" stroke-width="2" vector-effect="non-scaling-stroke"/>` : ''}
-        ${nach.length > 1 ? `<path d="${treppe(nach)}" fill="none" stroke="var(--violet)" stroke-width="2" stroke-dasharray="5 4" stroke-opacity=".85" vector-effect="non-scaling-stroke"/>` : ''}</svg>`
-    const vz = n => (n > 0 ? '+' : n < 0 ? '−' : '') + tplEur(n)
-    const netto = `<div class="tpl-netto"><div class="tpl-name"><b>Netto</b><span>${nJetzt != null ? 'jetzt ' + vz(nJetzt) : 'max ' + tplEur(Math.max(...reihe.map(p => Math.abs(p.netto))))}</span></div>
-        <div class="tpl-bahn" title="Netto-Einsatz (Long − Short) in € · grün = Band · gestrichelt = geplant"><span class="skala">±${tplEur(max)}</span>${svg}</div></div>`
-    const leg = `<span class="leg"><span><span class="g tpl-gut">▲</span> Long</span><span><span class="g tpl-rot">▼</span> Short</span><span>gestrichelt = unbestätigt</span><span><span style="color:var(--violet)">●</span> läuft</span><span>blass = beendet</span></span>`
-    return `<div class="tpl-karte"><div class="tpl-h">Zeitstrahl <b>${D.trades.length}</b>${leg}</div>
-        <div class="tpl-scroll"><div class="tpl-innen"><div class="tpl-raster">${raster.join('')}</div>
-          ${zeilen || '<div class="tpl-leer">—</div>'}${netto}<div class="tpl-achse">${achse.join('')}</div></div></div></div>`
+        <line x1="0" y1="${M}" x2="${W}" y2="${M}" stroke="var(--ink)" stroke-opacity=".55" stroke-width="1.5" vector-effect="non-scaling-stroke"/>
+        ${jetztX != null ? `<line x1="${jetztX}" y1="0" x2="${jetztX}" y2="${H}" stroke="var(--ink)" stroke-opacity=".35" stroke-width="1.5" stroke-dasharray="3 3" vector-effect="non-scaling-stroke"/>` : ''}
+        ${vor.length > 1 ? `<path d="${treppe(vor)}" fill="none" stroke="var(--violet)" stroke-width="2.5" vector-effect="non-scaling-stroke"/>` : ''}
+        ${nach.length > 1 ? `<path d="${treppe(nach)}" fill="none" stroke="var(--violet)" stroke-width="2" stroke-dasharray="6 4" stroke-opacity=".85" vector-effect="non-scaling-stroke"/>` : ''}
+        ${stufen}</svg>`
+    const nJetzt = jetztIn ? wertBei(D.jetzt).netto : null, vz = n => (n > 0 ? '+' : n < 0 ? '−' : '') + tplEur(n)
+    const schritt = SPAN <= 12 * 60 ? 60 : 120, achse = []
+    for(let h = Math.ceil(VON / schritt) * schritt; h <= BIS; h += schritt){ const x = (h - VON) / SPAN * 100; achse.push(`<span class="${x < 3 ? 'links' : x > 97 ? 'rechts' : ''}" style="left:${x.toFixed(2)}%">${tplUhr(h - v, v)}</span>`) }
+    return `<div class="tpl-karte tpl-nk"><div class="tpl-h">Netto-Einsatz über den Tag <b>${nJetzt != null ? 'jetzt ' + vz(nJetzt) : 'max ' + tplEur(Math.max(...reihe.map(p => Math.abs(p.netto))))}</b>
+        <span class="leg"><span><i class="tpl-nk-l"></i> gelaufen</span><span><i class="tpl-nk-l gestrichelt"></i> geplant</span><span><i class="tpl-nk-b"></i> Band ±${pct != null ? pct + ' %' : '—'}</span><span>0 = ausgeglichen</span></span></div>
+        <div class="tpl-nk-chart"><span class="skala oben">+${tplEur(max)}</span><span class="skala unten">−${tplEur(max)}</span>${svg}</div><div class="tpl-achse tpl-nk-achse">${achse.join('')}</div></div>`
   }
 
   function tplDetailHtml(D){
@@ -44996,22 +45088,40 @@
    * keine Bewertung: nur Zustand + Aktion. Das Nachplanen behobener Konten macht das Backend (10-min-Takt) — nach dem Neuladen ist die
    * Zeile weg. */
   const TPL_VERPASST_MIN = 30
-  function tplBraucht(D, sicht){
+  const TPL_TYP_WORT = { challenge: 'Challenge', phase1: 'Phase 1', phase2: 'Phase 2', funded: 'Funded', funded_cfd: 'Funded CFD', winning_days: 'Winning Days', live: 'Live' }
+  /* Letzte Balance eines eigenen Kontos wie in der Accounts-Liste (verkürzt): MT5-Cloud (MetaApi) ↔ TradingView/TopstepX (accounts.tv_balance,
+   * jüngere gewinnt), sonst gespeicherter Stand mit seiner Quelle → {bal, ccy, at, src} oder null */
+  function tplKontoBalance(a){
+    let bal = null, ccy = 'USD', at = 0, src = ''
+    try{ const c = (typeof mt5BalFuerAccount === 'function') ? mt5BalFuerAccount(a.id) : null
+      if(c && c.bal != null){ bal = Number(c.bal); ccy = c.ccy || 'USD'; at = Date.parse(c.at || '') || Number(c.at) || 0; src = 'MT5-Cloud' } }catch(_){}
+    if(a.tvBalance != null && isFinite(Number(a.tvBalance))){
+      const tvAt = Date.parse(a.tvBalanceAt || '') || 0
+      if(bal == null || tvAt > at){
+        bal = Number(a.tvBalance); at = tvAt; ccy = 'USD'
+        src = a.tvBalanceQuelle === 'dashboard' ? 'Dashboard' : a.tvBalanceQuelle === 'mt5' ? 'MT5-Konto'
+          : /topstep/i.test(String(a.firm || '')) ? 'TopstepX' : ((typeof tpFirmIstFutures === 'function') && tpFirmIstFutures(a.firm)) ? 'TradingView' : 'gespeichert'
+      }
+    }
+    return bal == null ? null : { bal, ccy, at, src }
+  }
+  const tplAlter = ms => ms < 3600000 ? `${Math.max(1, Math.round(ms / 60000))} min` : ms < 48 * 3600000 ? `${Math.round(ms / 3600000)} h` : `${Math.round(ms / 86400000)} T`
+  const tplBalText = (b, jetzt) => !b ? 'keine Balance' : `${Number(b.bal).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${b.ccy === 'EUR' ? '€' : '$'}${b.at ? ' · ' + tplAlter(jetzt - b.at) : ''}${b.src ? ' · ' + b.src : ''}`
+  function tplBraucht(D, ids){   // ids = Set der sichtbaren IDs, null = alle
     const je = new Map(), jetzt = Date.now(), ich = (_ap.ich && _ap.ich.name) || ''
-    const add = (uid, name, z) => { const k = String(uid || ''); if(!k || (sicht !== 'alle' && k !== sicht)) return
+    const add = (uid, name, z) => { const k = String(uid || ''); if(!k || (ids && !ids.has(k))) return
       if(!je.has(k)) je.set(k, { uid: k, name: name || '', zeilen: [] }); const o = je.get(k); if(!o.name && name) o.name = name; o.zeilen.push(z) }
     const roh = D.roh, tagGleich = roh && String(roh.tag || '') === D.tag, konten = new Set()
     if(currentUserId){
       const arch = typeof getArchive === 'function' ? (getArchive() || {}) : {}
       for(const a of accounts || []){
         if(!a || !TPL_TYPEN.includes(a.type) || /fusion/i.test(String(a.firm || '')) || (arch[a.id] && arch[a.id].archived)) continue
-        const at = Date.parse(a.tvBalanceAt || '') || 0
+        const b = tplKontoBalance(a), at = b ? b.at : 0
         if(at && jetzt - at < 86400000) continue
         const lauf = (typeof _accBalLauf !== 'undefined' && _accBalLauf.get(String(a.id))) || null
         konten.add(tplKk(currentUserId, a.name))
-        add(currentUserId, ich, { art: 'balance', firma: a.firm, konto: a.name, ende4: String(a.externalId || '').replace(/\D/g, '').slice(-4),
-          text: at ? `Balance ${Math.round((jetzt - at) / 3600000)} h alt (${new Date(at).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })})` : 'keine Live-Balance',
-          bal: String(a.id), lauf })
+        add(currentUserId, ich, { art: 'balance', firma: a.firm, konto: a.name, typ: a.type, balance: tplBalText(b, jetzt), ende4: String(a.externalId || '').replace(/\D/g, '').slice(-4),
+          text: !b ? 'keine Live-Balance' : !at ? 'Balance ohne Zeitstempel' : `Balance ${tplAlter(jetzt - at)} alt`, bal: String(a.id), lauf })
       }
     }
     if(tagGleich) for(const x of roh.ausgelassen || []){
@@ -45019,7 +45129,7 @@
       if(/geplanten\/laufenden Plan/.test(g)) continue
       const k = tplKk(x.user_id, x.konto); if(konten.has(k)) continue; konten.add(k)
       const bal = /keine Balance|nicht live/.test(g), fremd = String(x.user_id) !== String(currentUserId)
-      add(x.user_id, x.user, { art: bal ? 'balance' : 'ausgelassen', firma: x.firma, konto: x.konto, ende4: tplEnde4(x), text: g, hinweis: bal && fremd ? 'am PC der ID lesen' : '' })
+      add(x.user_id, x.user, { art: bal ? 'balance' : 'ausgelassen', firma: x.firma, konto: x.konto, typ: x.typ, balance: '', ende4: tplEnde4(x), text: g, hinweis: bal && fremd ? 'am PC der ID lesen' : '' })
     }
     for(const t of D.trades){
       const p = t.eigen ? (tradePlans || []).find(x => String(x.id) === t.plan_id) : null, b = (p && p.mt5Baseline) || {}
@@ -45047,15 +45157,46 @@
     if(!liste.length) return ''
     const n = liste.reduce((a, o) => a + o.zeilen.length, 0), ICON = { balance: '↻', ausgelassen: '⏸', plan: '⚠' }
     const bloecke = liste.map(o => `<div class="tpl-bd-id"><b><i style="background:${idFarbe(o.uid)}"></i>${escapeHtml(o.name || '—')}<span>${o.zeilen.length}</span></b>
-      ${o.zeilen.map(z => `<div class="tpl-bd-z ${z.art}"><em>${ICON[z.art] || '•'}</em><span class="k" title="${escapeHtml(z.konto || '')}"><i style="background:${apdFirmaTon(z.firma)}"></i>${escapeHtml(apPrKurz(z.firma))}${z.ende4 ? ' …' + escapeHtml(z.ende4) : ''}</span><span class="t">${escapeHtml(z.text)}</span>
-        ${z.bal ? (z.lauf && z.lauf.laeuft ? `<span class="s">${escapeHtml(z.lauf.text || 'liest …')}</span>`
+      ${o.zeilen.map(z => `<div class="tpl-bd-z ${z.art}"><em>${ICON[z.art] || '•'}</em>
+        <span class="k"><i style="background:${apdFirmaTon(z.firma)}"></i><span class="f">${escapeHtml(z.firma || '?')}</span><b title="${escapeHtml(z.konto || '')}">${escapeHtml(z.konto || '—')}</b>${z.typ ? `<span class="type-badge type-${escapeHtml(z.typ)}">${escapeHtml(TPL_TYP_WORT[z.typ] || z.typ)}</span>` : ''}</span>
+        <span class="b${z.balance ? '' : ' leer'}">${escapeHtml(z.balance || (z.art === 'balance' ? 'keine Balance' : '—'))}</span>
+        <span class="t">${escapeHtml(z.text)}</span>
+        <span class="a">${z.bal ? (z.lauf && z.lauf.laeuft ? `<span class="s">${escapeHtml(z.lauf.text || 'liest …')}</span>`
           : `<button type="button" class="knopf" data-tpl-bal="${escapeHtml(z.bal)}">↻ Balance lesen</button>${z.lauf && z.lauf.text ? `<span class="s${z.lauf.fehler ? ' rot' : ''}">${escapeHtml(z.lauf.text)}</span>` : ''}`)
-          : z.hinweis ? `<span class="s">${escapeHtml(z.hinweis)}</span>` : z.key ? `<button type="button" class="knopf" data-tpl-t="${escapeHtml(z.key)}">→ Plan</button>` : ''}</div>`).join('')}</div>`).join('')
+          : z.hinweis ? `<span class="s">${escapeHtml(z.hinweis)}</span>` : z.key ? `<button type="button" class="knopf" data-tpl-t="${escapeHtml(z.key)}">→ Plan</button>` : ''}</span></div>`).join('')}</div>`).join('')
     return `<div class="tpl-karte tpl-bd"><div class="tpl-h">Braucht dich <b>${n}</b><span class="leg">↻ Balance · ⏸ heute ausgelassen · ⚠ Plan hängt</span></div>${bloecke}</div>`
   }
+  /* LISTE „LÄUFT / GEPLANT" (TPL-UEBERSICHT-2, Finn: „so Infos finde ich clean"): Zeilen im Stil der Radar-Zeile (Markup/Klassen wdl-z*,
+   * wdl-sp* wiederverwendet) — ID · Typ-Chip · Konto · letzte Balance mit Alter (eigene Konten) · BUY/SELL · Menge × Symbol · Spanne
+   * SL/Liq ←●→ TP in Punkten (laufend: Rest) · Einsatz € · rechts laufend „seit HH:MM · Dauer", geplant Startzeit + bestätigt/unbestätigt.
+   * Ersetzt die Listen Offen/Geplant des Delta-Monitors; Klick öffnet das bestehende Detail mit Aktionen (data-tpl-t). */
+  function tplListeHtml(D){
+    const v = D.v, heute = D.tag === D.heute && D.jetzt != null, jetzt = Date.now()
+    const lauf = D.trades.filter(t => t.status === 'laeuft'), plan = D.trades.filter(t => t.status === 'offen' || t.status === 'bestaetigt')
+    if(!lauf.length && !plan.length) return ''
+    const f0 = x => Number(x).toLocaleString('de-DE', { maximumFractionDigits: 0 })
+    const menge = t => t.menge == null ? '?' : Number(t.menge).toLocaleString('de-DE', { maximumFractionDigits: 2 })
+    const sym = t => /^(mt5|mt5v2)$/.test(String(t.route || '')) ? `${menge(t)} Lot` : `${menge(t)} × ${Number(t.usd) === 20 ? 'NQ' : Number(t.usd) === 2 ? 'MNQ' : 'NQ'}`
+    const spanne = t => {
+      const l = t.status === 'laeuft' ? t.sl_rest : t.sl_punkte, r = t.status === 'laeuft' ? t.tp_rest : t.tp_punkte
+      if(r == null && l == null) return `<span class="wdl-z-mi">–</span>`
+      const links = l != null ? 'SL' : 'Liq', pos = (l != null && r != null && l + r > 0) ? (t.status === 'laeuft' ? l / (l + r) * 100 : 0) : (t.status === 'laeuft' ? 50 : 0)
+      return `<span class="wdl-z-mi wdl-sp" title="${escapeHtml(`${links} ${l != null ? f0(l) + ' Pkt' : '—'} · TP ${r != null ? f0(r) + ' Pkt' : '—'}${t.status === 'laeuft' ? ' (Rest ab Kurs)' : ' (ab Einstieg)'}`)}"><small class="wdl-sp-l"><i>${links}</i>${l != null ? `<b>−${f0(l)}</b>` : ''}</small><span class="wdl-sp-bahn"><b class="wdl-sp-punkt" style="left:${pos.toFixed(1)}%;background:${t.long ? 'var(--good)' : 'var(--danger)'}"></b></span><small class="wdl-sp-r"><i>TP</i>${r != null ? `<b>+${f0(r)}</b>` : ''}</small></span>`
+    }
+    const bal = t => { if(!t.eigen || !t.konto_id) return ''; const a = (accounts || []).find(x => String(x.id) === String(t.konto_id)); const b = a ? tplKontoBalance(a) : null; return b ? `<small class="tpl-l-bal">${escapeHtml(tplBalText(b, jetzt))}</small>` : '' }
+    const zeile = t => `<div class="wdl-z wdl-z-${t.status === 'laeuft' ? 'lauf' : 'plan'}${_tpl.wahl === t.key ? ' is-aktiv' : ''}" style="--wdl-id:${idFarbe(t.user_id)}" data-tpl-t="${escapeHtml(t.key)}" title="${escapeHtml(t.konto || '')}">
+        <span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(t.user || '?')}</b>${t.typ ? `<i class="wdl-pf">${escapeHtml(TPL_TYP_WORT[t.typ] || t.typ)}</i>` : ''}<small>${escapeHtml(t.firma || '?')}${t.ende4 ? ' …' + escapeHtml(t.ende4) : ''}</small>${bal(t)}</span>
+        <span class="wdl-z-ri"><em class="${t.long ? 'is-buy' : 'is-sell'}">${t.long ? 'BUY' : 'SELL'}</em>${sym(t)}</span>
+        ${spanne(t)}
+        <span class="wdl-z-pl">${t.gehedgt ? '<span style="color:var(--sub);font-weight:500">gehedgt</span>' : t.einsatz != null ? tplEur(t.einsatz) : '–'}<small class="wdl-z-slave" style="color:var(--sub-2)">Einsatz</small></span>
+        <span class="wdl-z-zeit">${t.status === 'laeuft' ? `<span class="wdl-z-ab">seit ${tplUhr(t.start, v)} · </span><span class="wdl-z-dauer">${heute ? tplAlter(Math.max(60000, (D.jetzt - t.start) * 60000)) : '—'}</span>`
+          : `${tplUhr(t.start, v)} <span class="tpl-pill ${t.status}">${TPL_WORT[t.status]}</span>`}</span></div>`
+    const block = (titel, liste) => liste.length ? `<div class="tpl-h">${titel} <b>${liste.length}</b></div><div class="tpl-liste">${liste.map(zeile).join('')}</div>` : ''
+    return `<div class="tpl-karte tpl-lk">${block('Läuft', lauf)}${block('Geplant', plan)}</div>`
+  }
   /* Sicht auf EINE ID (ID-Chip): Trades und Summen nur dieser ID — Band/Netto „jetzt" aus dem Delta bleiben über alle (so rechnet der Planer) */
-  function tplSichtFilter(D, uid){
-    const trades = D.trades.filter(t => t.user_id === uid)
+  function tplSichtFilter(D, ids){
+    const trades = D.trades.filter(t => ids.has(t.user_id))
     let L = 0, S = 0
     for(const t of trades) if(tplAktiv(t) && !t.gehedgt){ if(t.long) L += t.einsatz || 0; else S += t.einsatz || 0 }
     return { ...D, trades, L, S }
@@ -45081,9 +45222,23 @@
     // Netto-Linie und Abdeckung; gemerkt in localStorage (prophos_tpl_sicht). Fehlt die gemerkte ID im Stand, gilt „Alle".
     const alleIds = [...spuren]
     for(const o of ab) if(!alleIds.some(x => x.uid === o.uid)) alleIds.push({ uid: o.uid, name: o.name })
-    const sicht = _tpl.sicht !== 'alle' && alleIds.some(x => x.uid === _tpl.sicht) ? _tpl.sicht : 'alle'
-    const F = sicht === 'alle' ? D : tplSichtFilter(D, sicht)
-    const spF = sicht === 'alle' ? spuren : spuren.filter(x => x.uid === sicht), abF = sicht === 'alle' ? ab : ab.filter(o => o.uid === sicht)
+    // PLANER-IDS vs. WEITERE (TPL-UEBERSICHT-2, 07.10.2026): Planer-ID = hat heute Auto-Vorschläge (Trades mit auto_plan) oder steht im
+    // Lauf (geplant/ausgelassen); alle übrigen IDs (nur laufende Hand-/Orbit-V3-Trades) kommen in EINE Sammelzeile „Weitere"
+    const planer = new Set([...D.trades.filter(t => t.auto).map(t => t.user_id), ...ab.map(o => o.uid)])
+    const weitere = alleIds.filter(x => !planer.has(x.uid))
+    const sichtOk = s => s === 'alle' || (s === 'weitere' && weitere.length) || alleIds.some(x => x.uid === s)
+    const sicht = sichtOk(_tpl.sicht) ? _tpl.sicht : 'alle'
+    const sichtIds = sicht === 'alle' ? null : new Set(sicht === 'weitere' ? weitere.map(x => x.uid) : [sicht])
+    const F = sichtIds ? tplSichtFilter(D, sichtIds) : D
+    const abF = sichtIds ? ab.filter(o => sichtIds.has(o.uid)) : ab
+    const zeile = x => ({ key: x.uid, name: x.name, uid: x.uid, ids: [x.uid], sammel: false })
+    let zeilen
+    if(sicht === 'alle'){
+      zeilen = spuren.filter(x => planer.has(x.uid)).map(zeile)
+      const wSp = spuren.filter(x => !planer.has(x.uid))
+      if(wSp.length) zeilen.push(_tpl.weitereAuf ? { key: 'weitere', name: 'Weitere', uid: null, ids: wSp.map(x => x.uid), sammel: true, auf: true, einzeln: wSp } : { key: 'weitere', name: 'Weitere', uid: null, ids: wSp.map(x => x.uid), sammel: true, auf: false })
+      if(_tpl.weitereAuf && wSp.length){ const k = zeilen[zeilen.length - 1]; k.alle = k.ids; k.ids = []; zeilen.push(...wSp.map(zeile)) }   // aufgeklappt: Kopfzeile ohne Marker (Zähler aus alle), darunter je ID
+    } else zeilen = spuren.filter(x => sichtIds.has(x.uid)).map(zeile)
     const chip = (uid, name, l, on) => `<button type="button" class="adm-vl-chip${on ? ' is-on' : ''}" data-tpl-id="${escapeHtml(uid)}" title="${uid === 'alle' ? 'alle IDs zusammen' : 'nur diese ID — nochmal klicken = alle'}">${uid === 'alle' ? '' : `<span class="adm-dot" style="background:${idFarbe(uid)}"></span>`}<span class="nm">${escapeHtml(name)}</span>${l.length ? `<b>${l.length}${l.some(t => t.status === 'laeuft') ? ' · ' + l.filter(t => t.status === 'laeuft').length + ' ●' : ''}</b>` : ''}</button>`
     // „Alle offenen bestätigen" (07.10.2026): offene Auto-Vorschläge der angezeigten IDs — eigene immer, fremde nur für den Admin
     const admin = apdAdmin(), echtId = t => !t.ohnePlan && /^[0-9a-f-]{36}$/i.test(t.plan_id)
@@ -45091,10 +45246,13 @@
     _tpl.offen = { eigen: offen.filter(t => t.eigen).map(t => t.plan_id), fremd: offen.filter(t => !t.eigen).map(t => t.plan_id), je: new Map() }
     for(const t of offen){ const k = _tpl.offen.je.get(t.user || t.user_id) || { uid: t.user_id, n: 0 }; k.n++; _tpl.offen.je.set(t.user || t.user_id, k) }
     const alleBest = offen.length ? `<button type="button" class="btn btn-ghost btn-mini tpl-alle-best" data-tpl-akt="alle-ok"${_tpl.busy ? ' disabled' : ''} title="alle offenen Vorschläge der angezeigten IDs bestätigen (mit Rückfrage)">✓ Alle offenen bestätigen <b>${offen.length}</b></button>` : ''
-    const chips = (alleIds.length > 1 || alleBest) ? `<div class="adm-vl-legend tpl-ids">${alleIds.length > 1 ? chip('alle', 'Alle IDs', D.trades, sicht === 'alle') + alleIds.map(x => chip(x.uid, x.name || x.uid.slice(0, 8), D.trades.filter(t => t.user_id === x.uid), sicht === x.uid)).join('') : ''}${alleBest}</div>` : ''
+    const chipsIds = alleIds.length > 1 ? chip('alle', 'Alle IDs', D.trades, sicht === 'alle')
+      + alleIds.filter(x => planer.has(x.uid)).map(x => chip(x.uid, x.name || x.uid.slice(0, 8), D.trades.filter(t => t.user_id === x.uid), sicht === x.uid)).join('')
+      + (weitere.length ? chip('weitere', 'Weitere', D.trades.filter(t => weitere.some(x => x.uid === t.user_id)), sicht === 'weitere') : '') : ''
+    const chips = (alleIds.length > 1 || alleBest) ? `<div class="adm-vl-legend tpl-ids">${chipsIds}${alleBest}</div>` : ''
     root.innerHTML =(_tpl.fehler ? `<div class="tpl-fehler">⚠ ${escapeHtml(_tpl.fehler)}</div>` : '')
       + (ohne ? `<div class="tpl-karte"><div class="tpl-leer">— nicht im Auto-Planer</div></div>`
-        : chips + tplKachelnHtml(F) + tplBrauchtHtml(tplBraucht(D, sicht)) + tplZeitstrahlHtml(F, spF) + tplDetailHtml(D) + tplAbdeckungHtml(F, abF))
+        : chips + tplKachelnHtml(F) + tplBrauchtHtml(tplBraucht(D, sichtIds)) + tplZeitstrahlHtml(F, zeilen) + tplNettoHtml(F) + tplDetailHtml(D) + tplListeHtml(F) + tplAbdeckungHtml(F, abF))
     const sc = root.querySelector('.tpl-scroll')
     if(sc && sc.scrollWidth > sc.clientWidth + 4){
       if(scrollX != null && _tpl.tagScroll === _tpl.tag) sc.scrollLeft = scrollX
@@ -45110,10 +45268,29 @@
       window._tplRaf = requestAnimationFrame(() => { window._tplRaf = 0; try{ if(!_tpl.edit) tplZeichnen() }catch(e){ console.warn('[tpl]', e) } })
     }catch(_){}
   }
+  /* Startzeiten laufender Trades ALLER IDs aus /admin/live-trades?tage=1&echo=1 (bestehende Radar-Route, Login reicht; 07.10.2026):
+   * nur plan_id → {started_at, start_um}, höchstens alle 50 s, Fehler still (dann bleibt „jetzt" mit Hinweis) */
+  async function tplLiveLaden(){
+    if(Date.now() - _tpl.ltAt < 50000) return
+    _tpl.ltAt = Date.now()
+    try{
+      const { data: { session } } = await supabase.auth.getSession()
+      const tok = session?.access_token; if(!tok) return
+      const ctrl = new AbortController(); const tm = setTimeout(() => ctrl.abort(), 12000)
+      const r = await fetch(`${WATCHER_HOME}/admin/live-trades?tage=1&echo=1`, { headers: { 'sb-token': tok }, cache: 'no-store', signal: ctrl.signal })
+      clearTimeout(tm)
+      const d = await r.json().catch(() => ({}))
+      if(!r.ok) return
+      const m = new Map()
+      for(const t of (d && d.trades) || []) if(t && t.plan_id && (t.started_at || t.start_um)) m.set(String(t.plan_id), { started_at: t.started_at || null, start_um: t.start_um || null })
+      _tpl.lt = m
+    }catch(e){ console.warn('[tpl] live-trades', (e && e.message) || e) }
+  }
   async function tplLaden(){
     if(!currentUserId || _tpl.laeuft || _tpl.stub) return
     _tpl.laeuft = true; tplZeichnen()
     try{
+      await tplLiveLaden()
       const d = await apApi('GET')
       _ap.letzter = d.letzter || null; _ap.imPlaner = !!d.im_planer; _ap.admin = d.admin != null ? !!d.admin : null; _ap.geladenFuer = currentUserId
       _tpl.fehler = ''
@@ -45195,13 +45372,15 @@
     if(c){ _tpl.sicht = (c.dataset.tplId === 'alle' || _tpl.sicht === c.dataset.tplId) ? 'alle' : c.dataset.tplId
       try{ localStorage.setItem('prophos_tpl_sicht', _tpl.sicht) }catch(_){}
       _tpl.wahl = null; _tpl.edit = null; _tpl.meldung = ''; tplZeichnen(); return }
+    const w = e.target.closest('[data-tpl-weitere]')   // Sammelzeile „Weitere" auf/zu
+    if(w){ _tpl.weitereAuf = !_tpl.weitereAuf; tplZeichnen(); return }
     const bl = e.target.closest('[data-tpl-bal]')   // Braucht dich: ↻ Balance lesen (bestehende Aktion aus Accounts, F19)
     if(bl){ try{ accBalanceLesen(bl.dataset.tplBal) }catch(err){ console.warn('[tpl] Balance lesen', err) } setTimeout(tplSpaeter, 500); setTimeout(tplSpaeter, 5000); return }
     const k = e.target.closest('[data-tpl-ab]')   // Konten-Abdeckung: Block auf/zu
     if(k){ const z = k.closest('.tpl-ab-z'); _tpl.abAuf.set(k.dataset.tplAb, !(z && z.classList.contains('auf'))); tplZeichnen(); return }
     const m = e.target.closest('[data-tpl-t]')
     if(m){ _tpl.wahl = _tpl.wahl === m.dataset.tplT ? null : m.dataset.tplT; _tpl.edit = null; _tpl.meldung = ''; tplZeichnen()
-      if(_tpl.wahl && (m.classList.contains('tpl-chip') || m.closest('.tpl-bd'))) tplRoot.querySelector('.tpl-detail')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      if(_tpl.wahl && (m.classList.contains('tpl-chip') || m.closest('.tpl-bd') || m.closest('.tpl-liste'))) tplRoot.querySelector('.tpl-detail')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
       return }
     const b = e.target.closest('[data-tpl-akt]'); if(!b || b.disabled) return
     const a = b.dataset.tplAkt
@@ -45243,8 +45422,9 @@
   }
   window._tplTabSchliessen = () => { clearInterval(_tpl.timer); _tpl.timer = null }
   // Stub ohne Login (Design-Prüfung): Lauf + Delta direkt setzen, nichts laden
-  window._tplStub = (lauf, delta, admin) => {
+  window._tplStub = (lauf, delta, admin, lt) => {
     _tpl.stub = true; _tpl.fehler = ''; _ap.letzter = lauf || null; _ap.imPlaner = true; _ap.admin = admin !== false; _ap.geladenFuer = currentUserId
+    if(Array.isArray(lt)) _tpl.lt = new Map(lt.map(t => [String(t.plan_id), { started_at: t.started_at || null, start_um: t.start_um || null }]))
     _apd.d = delta || null; _apd.fehler = ''; _apd.geladen = Date.now(); _tpl.geladen = Date.now()
     try{ apLeisteZeichnen() }catch(_){}
     apdZeichnen(); tplZeichnen()
