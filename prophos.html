@@ -1907,6 +1907,20 @@
   /* Hypo-P&L: Liste je Trade unter dem Chart */
   :is(#tpl-view,#adm-pane-planer) .tpl-hl{margin-top:8px;border-top:1px solid var(--border-soft)}
   :is(#tpl-view,#adm-pane-planer) .tpl-hl-k{padding:7px 4px 3px;font-size:10.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--sub-2)} :is(#tpl-view,#adm-pane-planer) .tpl-hl-k b{color:var(--sub)}
+  /* P&L hypothetisch — Balkenliste (08.10.2026): Mitte = 0, grün rechts, rot links, ID-Farbe am Punkt; Zahlentabelle (.tpl-hz) bleibt für „Beendet" */
+  :is(#tpl-view,#adm-pane-planer) .tpl-hb{display:grid;grid-template-columns:minmax(150px,1.2fr) minmax(120px,2fr) 96px;gap:4px 12px;align-items:center;padding:7px 4px;border-top:1px solid var(--border-soft);font-size:13px;cursor:pointer}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hb:hover{background:var(--surface-tint)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hb .w{display:flex;align-items:center;gap:7px;min-width:0} :is(#tpl-view,#adm-pane-planer) .tpl-hb .w i{width:9px;height:9px;border-radius:50%;flex:none;background:var(--c,var(--sub-2))}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hb .w span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hb .bar{position:relative;height:12px;border-radius:999px;background:var(--surface-tint);overflow:hidden}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hb .bar .null{position:absolute;left:50%;top:0;bottom:0;width:1.5px;background:var(--ink);opacity:.45}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hb .bar .fill{position:absolute;top:0;bottom:0;border-radius:999px;min-width:2px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hb .bar .fill.plus{background:color-mix(in srgb,var(--c,var(--good)) 70%,var(--good))} :is(#tpl-view,#adm-pane-planer) .tpl-hb .bar .fill.minus{background:color-mix(in srgb,var(--c,var(--danger)) 55%,var(--danger))}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hb .h{text-align:right;font-weight:700;font-size:14px;white-space:nowrap}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hb.ohne{opacity:.6;cursor:default} :is(#tpl-view,#adm-pane-planer) .tpl-hb.ohne .h{font-weight:500;color:var(--sub-2);font-size:13px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hb.summe{cursor:default;border-top:2px solid var(--border);font-weight:600} :is(#tpl-view,#adm-pane-planer) .tpl-hb.summe .bar{background:none}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hb-ohne{display:block;width:100%;text-align:left;border:0;border-top:1px solid var(--border-soft);background:none;padding:8px 4px;font:inherit;font-size:13px;color:var(--sub-2);cursor:pointer}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hb-ohne:hover{color:var(--sub)}
   :is(#tpl-view,#adm-pane-planer) .tpl-hz{display:grid;grid-template-columns:minmax(150px,1.4fr) 120px 90px 80px 100px minmax(110px,1fr);gap:4px 10px;align-items:center;padding:5px 4px;border-top:1px solid var(--border-soft);font-size:12.5px;font-variant-numeric:tabular-nums;cursor:pointer}
   :is(#tpl-view,#adm-pane-planer) .tpl-hz:hover{background:var(--surface-tint)} :is(#tpl-view,#adm-pane-planer) .tpl-hz.summe{cursor:default;font-weight:600;background:none;border-top:2px solid var(--border)}
   :is(#tpl-view,#adm-pane-planer) .kpis.tpl-bk{margin:6px 0 8px} :is(#tpl-view,#adm-pane-planer) .tpl-bk .kpi-value{font-size:17px}
@@ -1964,6 +1978,7 @@
     :is(#tpl-view,#adm-pane-planer) .tpl-m{font-size:11px;height:22px;padding:0 8px 0 6px}
     :is(#tpl-view,#adm-pane-planer) .tpl-spur{height:84px}
     :is(#tpl-view,#adm-pane-planer) .tpl-bd-z{grid-template-columns:16px minmax(0,1fr) auto;gap:2px 8px}
+    :is(#tpl-view,#adm-pane-planer) .tpl-hb{grid-template-columns:minmax(0,1.3fr) minmax(70px,1fr) 84px;gap:4px 8px} :is(#tpl-view,#adm-pane-planer) .tpl-hb .bar{height:10px}
     :is(#tpl-view,#adm-pane-planer) .tpl-hz{grid-template-columns:minmax(0,1fr) auto;gap:2px 8px} :is(#tpl-view,#adm-pane-planer) .tpl-hz .p,:is(#tpl-view,#adm-pane-planer) .tpl-hz .s{display:none} :is(#tpl-view,#adm-pane-planer) .tpl-hz .z{grid-column:1/-1;text-align:left;font-size:11px}
     :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .b,:is(#tpl-view,#adm-pane-planer) .tpl-bd-z .t{grid-column:2/-1}
     :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .a{grid-column:1/-1;justify-content:flex-start;padding-left:24px}
@@ -40720,7 +40735,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1204'
+  const OS_TAB_BUILD = '2026-09-22.1205'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -46510,17 +46525,27 @@
     }
     const schritt = SPAN <= 12 * 60 ? 60 : 120, achse = []
     for(let hh = Math.ceil(VON / schritt) * schritt; hh <= BIS; hh += schritt){ const x = (hh - VON) / SPAN * 100; achse.push(`<span class="${x < 3 ? 'links' : x > 97 ? 'rechts' : ''}" style="left:${x.toFixed(2)}%">${tplUhr(hh - v, v)}</span>`) }
-    // LISTE JE TRADE (Finn 07.10.2026, Screenshot .1114): ID · Firma · Konto · Richtung/Menge · P&L $ · Satz · Hypo-€ · seit/Ende — Summe = Kachel
+    // LISTE JE TRADE — BALKEN STATT ZAHLENTABELLE (Finn-Statistik-Design; QA S3 08.10.2026: 18 Zeilen „0,42 €/$ · ohne Wert · seit HH:MM" waren
+    // eine reine Zahlentabelle). Je laufendem Trade mit Live-Wert: ID-Punkt + Konto „100k FundingPips …9722" · horizontaler P&L-Balken in
+    // ID-Farbe (Mitte = 0, rechts grün Gewinn, links rot Verlust, Skala über alle Trades gemeinsam wie der Finanzen-Überblick) · €-Wert fett;
+    // Kontowert-Satz, P&L $, Richtung/Menge und „seit" nur im Tooltip. Zeilen ohne Live-Wert in EINER grauen Sammelzeile „n Trades ohne
+    // Live-Wert ▸" (aufklappbar, _tpl.hbOhneAuf). Summenzeile nur mit Wert. Rechnung (tplHypo) unverändert.
     const f2 = x => Number(x).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     const usd = x => x == null ? '—' : (x < 0 ? '−' : '+') + Math.abs(Math.round(x)).toLocaleString('de-DE') + ' $'
-    const zl = z => `<div class="tpl-hz${z.lauf ? '' : ' zu'}${z.hypo == null ? ' ohne' : ''}" ${/^[0-9a-f-]{36}$/i.test(z.key) ? `data-tpl-t="${escapeHtml(z.key)}"` : ''} title="${escapeHtml(`${z.konto || ''}${z.einQ ? ' · Einstieg aus ' + z.einQ : ''}${z.plQ ? ' · P&L ' + z.plQ : ''}`)}">
-        <span class="w"><i style="background:${idFarbe(z.user_id)}"></i><b>${escapeHtml(z.user || '?')}</b><small>${escapeHtml(z.firma || '?')}${z.ende4 ? ' …' + escapeHtml(z.ende4) : ''}</small></span>
-        <span class="r"><em class="${z.richtung === 'buy' ? 'is-buy' : 'is-sell'}">${z.richtung === 'buy' ? 'BUY' : 'SELL'}</em>${z.kt != null ? Number(z.kt).toLocaleString('de-DE', { maximumFractionDigits: 2 }) : '?'} ${z.echo ? 'Lot' : '× ' + escapeHtml(z.wurzel || 'NQ')}</span>
-        <span class="p">${usd(z.pl)}</span><span class="s">${z.satz != null ? f2(z.satz) + ' €/$' : '—'}</span>
-        <b class="h ${z.hypo > 0 ? 'tpl-gut' : z.hypo < 0 ? 'tpl-rot' : ''}">${z.hypo != null ? vz(z.hypo) : 'ohne Wert'}</b>
-        <span class="z">${z.lauf ? 'seit ' + tplUhr(z.start, v) : `${tplUhr(z.start, v)} – ${tplUhr(z.ende, v)}`}</span></div>`
-    const liste = h.zeilen.length ? `<div class="tpl-hl"><div class="tpl-hl-k">Läuft <b>${h.zeilen.length}</b></div>${h.zeilen.map(zl).join('')}
-        <div class="tpl-hz summe"><span class="w"><b>Summe</b></span><span class="r"></span><span class="p"></span><span class="s"></span><b class="h ${h.jetzt > 0 ? 'tpl-gut' : h.jetzt < 0 ? 'tpl-rot' : ''}">${vz(h.jetzt)}</b><span class="z">${h.ohne ? h.ohne + ' ohne Wert' : ''}</span></div></div>` : ''
+    const mitWert = h.zeilen.filter(z => z.hypo != null), ohneWert = h.zeilen.filter(z => z.hypo == null)
+    const hmax = Math.max(1, ...mitWert.map(z => Math.abs(z.hypo)))
+    const kontoTxt = z => `${escapeHtml(z.konto || z.firma || '?')}${z.ende4 ? ' …' + escapeHtml(z.ende4) : ''}`
+    const tipp = z => `${z.user || '?'} · ${z.firma || '?'}${z.konto ? ' · ' + z.konto : ''}${z.ende4 ? ' …' + z.ende4 : ''} · ${z.richtung === 'buy' ? 'BUY' : 'SELL'} ${z.kt != null ? Number(z.kt).toLocaleString('de-DE', { maximumFractionDigits: 2 }) : '?'} ${z.echo ? 'Lot' : '× ' + (z.wurzel || 'NQ')}`
+      + ` · P&L ${usd(z.pl)} · Satz ${z.satz != null ? f2(z.satz) + ' €/$' : '—'} · ${z.lauf ? 'seit ' + tplUhr(z.start, v) : tplUhr(z.start, v) + ' – ' + tplUhr(z.ende, v)}${z.einQ ? ' · Einstieg aus ' + z.einQ : ''}${z.plQ ? ' · P&L ' + z.plQ : ''}`
+    const hb = z => { const w = Math.min(50, Math.abs(z.hypo) / hmax * 50), plus = z.hypo >= 0
+      return `<div class="tpl-hb${z.lauf ? '' : ' zu'}" style="--c:${idFarbe(z.user_id)}" ${/^[0-9a-f-]{36}$/i.test(z.key) ? `data-tpl-t="${escapeHtml(z.key)}"` : ''} title="${escapeHtml(tipp(z))}">
+        <span class="w"><i></i><span>${kontoTxt(z)}</span></span>
+        <span class="bar"><i class="null"></i><i class="fill ${plus ? 'plus' : 'minus'}" style="${plus ? 'left:50%' : 'right:50%'};width:${w.toFixed(1)}%"></i></span>
+        <b class="h ${z.hypo > 0 ? 'tpl-gut' : z.hypo < 0 ? 'tpl-rot' : ''}">${vz(z.hypo)}</b></div>` }
+    const ohneZ = z => `<div class="tpl-hb ohne" ${/^[0-9a-f-]{36}$/i.test(z.key) ? `data-tpl-t="${escapeHtml(z.key)}"` : ''} title="${escapeHtml(tipp(z))}"><span class="w"><i style="background:${idFarbe(z.user_id)}"></i><span>${kontoTxt(z)}</span></span><span class="bar"></span><b class="h">ohne Wert</b></div>`
+    const ohneHtml = ohneWert.length ? `<button type="button" class="tpl-hb-ohne" data-tpl-hbohne title="${escapeHtml(ohneWert.map(z => `${z.user || '?'} · ${z.konto || z.firma || '?'}`).join('\n'))}">${ohneWert.length} Trade${ohneWert.length === 1 ? '' : 's'} ohne Live-Wert ${_tpl.hbOhneAuf ? '▾' : '▸'}</button>${_tpl.hbOhneAuf ? ohneWert.map(ohneZ).join('') : ''}` : ''
+    const liste = h.zeilen.length ? `<div class="tpl-hl"><div class="tpl-hl-k">Läuft <b>${h.zeilen.length}</b></div>${mitWert.map(hb).join('')}${ohneHtml}
+        ${mitWert.length ? `<div class="tpl-hb summe"><span class="w"><b>Summe</b></span><span class="bar"></span><b class="h ${h.jetzt > 0 ? 'tpl-gut' : h.jetzt < 0 ? 'tpl-rot' : ''}">${vz(h.jetzt)}</b></div>` : ''}</div>` : ''
     return `<div class="tpl-karte tpl-nk tpl-hk"><div class="tpl-h">P&amp;L hypothetisch heute <b class="${h.jetzt > 0 ? 'tpl-gut' : h.jetzt < 0 ? 'tpl-rot' : ''}">jetzt ${vz(h.jetzt)}</b>
         <span class="leg"><span>${h.n} Trade${h.n === 1 ? '' : 's'}${h.ohne ? ` · ${h.ohne} ohne Wert` : ''}</span><span>Kontowert-Satz × Live-P&amp;L${h.cfd ? ' · CFD ≈ NQ' : ''}</span><span>0 = Einstand</span></span></div>
         ${hv.length ? `<div class="tpl-nk-chart"><span class="skala oben">+${tplEur(max)}</span><span class="skala unten">−${tplEur(max)}</span>${svg}</div><div class="tpl-achse tpl-nk-achse">${achse.join('')}</div>` : '<div class="tpl-leer">noch kein Verlauf — Kerzen oder Startzeiten fehlen</div>'}${liste}</div>`
@@ -46933,6 +46958,7 @@
     if(m){ _tpl.wahl = _tpl.wahl === m.dataset.tplT ? null : m.dataset.tplT; _tpl.edit = null; _tpl.meldung = ''; tplZeichnen()
       if(_tpl.wahl && (m.classList.contains('tpl-chip') || m.closest('.tpl-bd'))) tplRoot.querySelector('.tpl-detail')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
       return }
+    const oh = e.target.closest('[data-tpl-hbohne]'); if(oh){ _tpl.hbOhneAuf = !_tpl.hbOhneAuf; tplZeichnen(); return }   // „n Trades ohne Live-Wert" auf/zu (08.10.2026)
     const b = e.target.closest('[data-tpl-akt]'); if(!b || b.disabled) return
     const a = b.dataset.tplAkt
     if(a === 'zu'){ _tpl.wahl = null; _tpl.edit = null; _tpl.meldung = ''; tplZeichnen(); return }
