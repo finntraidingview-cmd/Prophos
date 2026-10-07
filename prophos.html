@@ -40674,7 +40674,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1200'
+  const OS_TAB_BUILD = '2026-09-22.1201'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -60172,7 +60172,7 @@
       + `<div class="vr-fuss">Punkte je Konto: violett = im Vorrat, hellviolett = Chance ab 50 %, blass = 20–50 %, grau = darunter, gestrichelt = Daten fehlen, Ring = nah am Boden.
         Firmen-Balken: graues Band = Ziel-Spanne. ✓ = bestellt (zählt 48 h), ‖ pausiert (gerade nichts kaufen), Schloss sperrt. Klick auf eine Firmenzeile zeigt die Rechnung.</div></details>`
       + vrHeuteHtml(d, s2, name, firma)
-      + vrRechnungHtml(d, s2, name, firma)
+      // + vrRechnungHtml(d, s2, name, firma)   // Finn 08.10.2026: „So wird gerechnet“ visuell weg — Markup/Logik bleiben, Render-Aufruf aus (wie Auftrag/Konten-Abdeckung)
       + `<details class="vr-klapp" data-vr-klapp="einst"${_vr.einst ? ' open' : ''}><summary>Einstellungen</summary>`
       + `<div class="vr-einst">${vrZieleHtml(d)}<div class="vr-einst-kopf">Mindest-Chance aufs Ziel <span>nachgekauft wird, bis die Chance mit den vorhandenen Konten mindestens so hoch ist</span></div><div id="vr-sich" class="vr-sich"></div>`
       + `<div class="vr-einst-kopf">Freigeschaltet je ID und Firma <span>Klick wechselt: frei → pausiert → gesperrt → frei</span></div>${vrMatrixHtml(d, name)}</div></details>`
