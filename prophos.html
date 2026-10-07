@@ -39947,7 +39947,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1126'
+  const OS_TAB_BUILD = '2026-09-22.1127'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -46086,7 +46086,8 @@
             // ORBIT = Duplikum + automatische Order (22.09.2026): dieselben Duplikum-Regeln
             // wie darunter, der Master zusätzlich Futures-Account (Kontrakte-Spec) MIT
             // External ID — die ID ist das Konto-Matching im TradingView-Panel.
-            if(routeIstOrbit(_tpRoute) && role === 'master'){
+            // Duplikum (Puls) ausgenommen (07.10.2026, Finn): Master = jedes mit Duplikum verknüpfte Konto, s. tpKontoartPasstZumWeg
+            if(routeIstOrbit(_tpRoute) && _tpRoute !== 'tvplus' && role === 'master'){
               if(!tpFirmIstFutures(a.firm)) return false
               if(!String(a.externalId || '').trim()) return false
             }
@@ -47662,6 +47663,9 @@
   function tpWegMitHedge(){ return _tpRoute === 'mt5' || _tpRoute === 'tvplus' || _tpRoute === 'topstep' || (_tpRoute === 'tvv2' && (_tpWd || _tpO3)) }
   function tpKontoartPasstZumWeg(a){
     const t = String((a && a.type) || '').toLowerCase()
+    // Duplikum (Puls) wieder ohne Kontoart-Filter (07.10.2026, Finn am Screenshot „Kein Funded-/Winning-Days-Konto"):
+    // „alles anzeigen, was mit Duplikum verknüpft ist — wie es immer war bei Duplikum", egal ob Challenge oder Funded
+    if(_tpRoute === 'tvplus') return true
     if(tpWegMitHedge()) return t === 'funded' || t === 'funded_cfd' || t === 'winning_days'
     if(routeIstV2(_tpRoute)) return t === 'phase1' || t === 'phase2' || t === 'challenge'
     return true
