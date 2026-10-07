@@ -1843,6 +1843,7 @@
   #tpl-view .tpl-pill{font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--surface-tint);color:var(--sub);white-space:nowrap}
   #tpl-view .tpl-pill.laeuft{background:var(--violet-tint);color:var(--violet)}
   #tpl-view .tpl-pill.bestaetigt{background:color-mix(in srgb,var(--good) 12%,var(--surface));color:var(--good)}
+  #tpl-view button.tpl-pill.tpl-ok1{border:1px dashed var(--sub-2);cursor:pointer;font:inherit;font-size:11px;font-weight:600;line-height:1.4} #tpl-view button.tpl-pill.tpl-ok1 b{color:var(--good);margin-left:3px} #tpl-view button.tpl-pill.tpl-ok1:hover{background:color-mix(in srgb,var(--good) 12%,var(--surface));color:var(--good);border-color:var(--good)}
   #tpl-view .tpl-werte{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:6px;margin:8px 0}
   #tpl-view .tpl-werte-1{margin-bottom:0} #tpl-view .tpl-werte-1 + .tpl-werte{margin-top:6px}
   #tpl-view .tpl-wert{background:var(--surface-tint);border-radius:8px;padding:6px 9px;min-width:0}
@@ -39932,7 +39933,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1116'
+  const OS_TAB_BUILD = '2026-09-22.1117'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -44714,7 +44715,7 @@
    * Tages (Sommer 2 h, Winter 3 h). Netto-Linie: jeder Trade zählt ab Start laufzeit_min lang (aus dem Lauf, sonst 180 min) mit seinem
    * Einsatz, beendete bis zu ihrem Ende, laufende mindestens bis jetzt; gehedgte zählen 0 — wie ap_verlauf im Backend. */
   const _tpl = { tag: 'heute', wahl: null, edit: null, busy: false, meldung: '', timer: null, geladen: 0, laeuft: false, fehler: '', weg: new Set(), stub: false,
-    sicht: 'alle', abAuf: new Map(), lt: new Map(), ltAt: 0, weitereAuf: false, kerzen: [], kerzenAt: 0, kerzenBis: '', kwAt: 0, hypoJe: new Map() }   // kerzen: tv_kurs_1m NQ heute; hypoJe: Satz/Typ/Einstieg je Plan über Ladevorgänge hinweg (Hypo-P&L)   // sicht: ID-Chip („alle" | user_id), abAuf: Konten-Abdeckung je ID auf/zu, lt: Startzeiten laufender Trades aller IDs (07.10.2026)
+    sicht: 'alle', abAuf: new Map(), lt: new Map(), ltAt: 0, weitereAuf: false, kerzen: [], kerzenAt: 0, kerzenBis: '', kwAt: 0, hypoJe: new Map(), okLokal: new Set() }   // okLokal: eben einzeln bestätigte Vorschläge (Chip sofort „bestätigt")   // kerzen: tv_kurs_1m NQ heute; hypoJe: Satz/Typ/Einstieg je Plan über Ladevorgänge hinweg (Hypo-P&L)   // sicht: ID-Chip („alle" | user_id), abAuf: Konten-Abdeckung je ID auf/zu, lt: Startzeiten laufender Trades aller IDs (07.10.2026)
   try{ const s = localStorage.getItem('prophos_tpl_sicht'); if(s) _tpl.sicht = s }catch(_){}
   // ALLE IDS (07.10.2026, Finn 03:25 dt: „Es ist nur die ID, von der ich gerade eingeloggt bin. So hässlich, man erkennt gar nichts"):
   // solange diese Seite offen ist, fragen apApi (Lauf) und apdLaden (Delta) mit ?sicht=alle — das Backend liefert dann alle IDs
@@ -44805,7 +44806,8 @@
       const g = laufJe.get(tplKk(x.user_id, x.konto)), p = eigen.get(String(x.plan_id))
       const s = tplNum(x.start_min) ?? tplMinDt(x.start, tag)
       if(s == null) continue
-      neu(x, g, p, { plan_id: String(x.plan_id), status: x.bestaetigt ? 'bestaetigt' : 'offen', start: s, aenderbar: x.aenderbar !== false,
+      if(x.bestaetigt) _tpl.okLokal.delete(String(x.plan_id))
+      neu(x, g, p, { plan_id: String(x.plan_id), status: (x.bestaetigt || _tpl.okLokal.has(String(x.plan_id))) ? 'bestaetigt' : 'offen', start: s, aenderbar: x.aenderbar !== false,
         fest: x.fest_durch || null, richtungFest: x.richtung_fest_durch || null })
     }
     // eigene Auto-Pläne: beendete immer (nur hier steht das Ergebnis), geplante/laufende nur ohne Delta (z. B. morgen)
@@ -45242,7 +45244,9 @@
         ${spanne(t)}
         <span class="wdl-z-pl">${t.gehedgt ? '<span style="color:var(--sub);font-weight:500">gehedgt</span>' : t.einsatz != null ? tplEur(t.einsatz) : '–'}<small class="wdl-z-slave" style="color:var(--sub-2)">Einsatz</small></span>
         <span class="wdl-z-zeit">${t.status === 'laeuft' ? `<span class="wdl-z-ab">seit ${tplUhr(t.start, v)} · </span><span class="wdl-z-dauer">${heute ? tplAlter(Math.max(60000, (D.jetzt - t.start) * 60000)) : '—'}</span>`
-          : `${tplUhr(t.start, v)} <span class="tpl-pill ${t.status}">${TPL_WORT[t.status]}</span>`}</span></div>`
+          : `${tplUhr(t.start, v)} ${t.status === 'offen' && t.auto && !t.ohnePlan && /^[0-9a-f-]{36}$/i.test(t.plan_id) && (t.eigen || apdAdmin())
+            ? `<button type="button" class="tpl-pill offen tpl-ok1" data-tpl-ok1="${escapeHtml(t.key)}" title="diesen Vorschlag bestätigen">unbestätigt <b>✓</b></button>`
+            : `<span class="tpl-pill ${t.status}">${TPL_WORT[t.status]}</span>`}`}</span></div>`
     const block = (titel, liste) => liste.length ? `<div class="tpl-h">${titel} <b>${liste.length}</b></div><div class="tpl-liste">${liste.map(zeile).join('')}</div>` : ''
     return `<div class="tpl-karte tpl-lk">${block('Geplant', plan)}</div>`
   }
@@ -45424,7 +45428,7 @@
     const chips = (alleIds.length > 1 || alleBest) ? `<div class="adm-vl-legend tpl-ids">${chipsIds}${alleBest}</div>` : ''
     root.innerHTML =(_tpl.fehler ? `<div class="tpl-fehler">⚠ ${escapeHtml(_tpl.fehler)}</div>` : '')
       + (ohne ? `<div class="tpl-karte"><div class="tpl-leer">— nicht im Auto-Planer</div></div>`
-        : chips + tplKachelnHtml(F) + tplBrauchtHtml(tplBraucht(D, sichtIds)) + tplZeitstrahlHtml(F, zeilen) + tplNettoHtml(F) + tplHypoHtml(F) + tplDetailHtml(D) + tplListeHtml(F) + tplAbdeckungHtml(F, abF))
+        : chips + tplKachelnHtml(F) + tplBrauchtHtml(tplBraucht(D, sichtIds)) + tplZeitstrahlHtml(F, zeilen) + tplDetailHtml(D) + tplNettoHtml(F) + tplHypoHtml(F) + tplListeHtml(F) + tplAbdeckungHtml(F, abF))   // Detail direkt unter dem Zeitstrahl (Finn 07.10.2026)
     const sc = root.querySelector('.tpl-scroll')
     if(sc && sc.scrollWidth > sc.clientWidth + 4){
       if(scrollX != null && _tpl.tagScroll === _tpl.tag) sc.scrollLeft = scrollX
@@ -45525,6 +45529,32 @@
     }catch(e){ _tpl.meldung = (e && e.message) || String(e) }
     finally{ _tpl.busy = false; tplZeichnen() }
   })
+  /* EINZELN BESTÄTIGEN aus der Geplant-Liste (Finn 07.10.2026: „jeden unbestätigten Vorschlag einzeln bestätigen"): eigene per supabase-js
+   * (wie apBestaetigen, RLS), fremde (Admin) per POST /admin/auto-plan/bestaetigen mit einer plan_id; Chip sofort „bestätigt" (okLokal),
+   * Fehler als Toast und Chip zurück. „Alle offenen bestätigen" bleibt daneben. */
+  async function tplEinzelBestaetigen(key){
+    const D = tplDaten(), t = D.trades.find(x => x.key === key); if(!t || t.status !== 'offen') return
+    _tpl.okLokal.add(String(t.plan_id)); tplZeichnen()
+    try{
+      if(t.eigen){
+        const { data, error } = await supabase.from('trade_plans').update({ auto_bestaetigt_at: new Date().toISOString() })
+          .eq('id', t.plan_id).eq('status', 'planned').eq('auto_plan', true).is('auto_bestaetigt_at', null).select('*')
+        if(error) throw error
+        if(!(data || []).length) throw new Error('nicht bestätigt — schon bestätigt, gestartet oder nicht mehr geplant')
+        for(const row of data){ const i = tradePlans.findIndex(x => String(x.id) === String(row.id)); if(i >= 0) tradePlans[i] = rowToPlan(row) }
+        try{ renderTradePlans() }catch(_){}
+        if(typeof atToast === 'function') atToast('✓ Vorschlag bestätigt — startet zur Startzeit', 'start')
+      } else {
+        const n = await tplEingriff('bestaetigen', [t.plan_id])
+        if(!n) throw new Error('nicht bestätigt')
+      }
+      apdLaden(true)
+    }catch(e){
+      _tpl.okLokal.delete(String(t.plan_id))
+      if(typeof atToast === 'function') atToast('⚠ Bestätigen fehlgeschlagen: ' + String((e && e.message) || e).slice(0, 120), 'end')
+      tplZeichnen()
+    }
+  }
   async function tplAktion(t, aktion, wert){
     if(_tpl.busy) return
     _tpl.busy = true; _tpl.meldung = ''; tplZeichnen()
@@ -45561,6 +45591,8 @@
     if(c){ _tpl.sicht = (c.dataset.tplId === 'alle' || _tpl.sicht === c.dataset.tplId) ? 'alle' : c.dataset.tplId
       try{ localStorage.setItem('prophos_tpl_sicht', _tpl.sicht) }catch(_){}
       _tpl.wahl = null; _tpl.edit = null; _tpl.meldung = ''; tplZeichnen(); return }
+    const ok1 = e.target.closest('[data-tpl-ok1]')   // Geplant-Liste: einen Vorschlag bestätigen (Finn 07.10.2026) — ohne Rückfrage
+    if(ok1){ e.stopPropagation(); tplEinzelBestaetigen(ok1.dataset.tplOk1); return }
     const w = e.target.closest('[data-tpl-weitere]')   // Sammelzeile „Weitere" auf/zu
     if(w){ _tpl.weitereAuf = !_tpl.weitereAuf; tplZeichnen(); return }
     const bl = e.target.closest('[data-tpl-bal]')   // Braucht dich: ↻ Balance lesen (bestehende Aktion aus Accounts, F19)
