@@ -1985,23 +1985,22 @@
   #dashboard-view .pz-akt .btn:disabled{opacity:.45;cursor:default}
   @media (max-width:1359px){ #dashboard-view .pz-tab.pz-mit-id{grid-template-columns:156px 72px minmax(150px,1fr) 80px 200px 64px 76px 76px 160px} }
   @media (max-width:820px){ #dashboard-view .pz-z > .pz-wer{order:0;flex:0 0 100%} }
-  /* Braucht dich (07.10.2026): ruhiger Block je ID — Zeile = Symbol · Firma · Klartext · kleine Aktion */
+  /* Braucht dich (Neuentwurf 08.10.2026, Finn: „nicht so clean, man erkennt nix"): ID-Karten wie „Zu bestätigen" (ap-id-karte, nicht sticky),
+     je Zeile feste Spalten Konto · Label · Klartext · Aktion — alles steht in jeder Zeile an derselben x-Position */
   :is(#tpl-view,#adm-pane-planer) .tpl-bd{border-color:color-mix(in srgb,#B45309 35%,var(--border))}
-  :is(#tpl-view,#adm-pane-planer) .tpl-bd-id{padding:3px 0 2px;border-top:1px solid var(--border-soft)} :is(#tpl-view,#adm-pane-planer) .tpl-bd-id:first-of-type{border-top:0}
-  :is(#tpl-view,#adm-pane-planer) .tpl-bd-id>b{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;margin:2px 0 3px}
-  :is(#tpl-view,#adm-pane-planer) .tpl-bd-id>b i{width:9px;height:9px;border-radius:50%;flex:none} :is(#tpl-view,#adm-pane-planer) .tpl-bd-id>b span{font-weight:500;color:var(--sub-2);font-variant-numeric:tabular-nums}
-  :is(#tpl-view,#adm-pane-planer) .tpl-bd-z{display:grid;grid-template-columns:16px minmax(180px,1.3fr) minmax(150px,1fr) minmax(170px,1.5fr) auto;gap:4px 10px;align-items:center;padding:4px 0 4px 15px;font-size:12.5px;min-width:0;border-top:1px dashed var(--border-soft)}
-  :is(#tpl-view,#adm-pane-planer) .tpl-bd-z:first-of-type{border-top:0}
-  :is(#tpl-view,#adm-pane-planer) .tpl-bd-z em{font-style:normal;text-align:center;color:var(--sub)}
-  :is(#tpl-view,#adm-pane-planer) .tpl-bd-z.plan em{color:var(--danger)} :is(#tpl-view,#adm-pane-planer) .tpl-bd-z.balance em{color:var(--violet)}
-  :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .k{display:flex;align-items:center;gap:6px;min-width:0;color:var(--sub)} :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .k i{width:7px;height:7px;border-radius:2px;flex:none}
-  :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .k .f{flex:none;font-size:11.5px} :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .k b{font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bd .ap-id-karte{margin:2px 0 12px} :is(#tpl-view,#adm-pane-planer) .tpl-bd .ap-id-karte:last-child{margin-bottom:0}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bd .ap-id-karte > .ap-adm-grp{position:static;padding:6px 0 2px} :is(#tpl-view,#adm-pane-planer) .tpl-bd .ap-id-karte > .ap-adm-grp .ap-adm-id{font-size:14px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bd-z{display:grid;grid-template-columns:minmax(220px,1.1fr) 104px minmax(0,2fr) 216px;grid-template-areas:"k l t a";gap:4px 12px;align-items:center;padding:6px 0;font-size:12.5px;min-width:0;border-top:1px solid var(--border-soft)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bd .ap-adm-grp + .tpl-bd-z{border-top:0}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .k{grid-area:k;display:flex;align-items:center;gap:6px;min-width:0;white-space:nowrap;overflow:hidden}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .k>b{font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums} :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .k>small{font-size:11.5px;color:var(--sub);font-variant-numeric:tabular-nums;margin-left:-3px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .k .f{display:inline-flex;align-items:center;gap:5px;min-width:0;font-size:11.5px;color:var(--sub);overflow:hidden;text-overflow:ellipsis} :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .k .f i{width:7px;height:7px;border-radius:2px;flex:none}
   :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .k .type-badge{flex:none;font-size:10px;padding:1px 6px}
-  :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .b{font-variant-numeric:tabular-nums;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis} :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .b.leer{color:var(--sub-2)}
-  :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .t{min-width:0;color:var(--ink-2)} :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .t .tun{display:block;margin-top:1px;font-size:11.5px;color:var(--sub)}
-  :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .t .tun b{font-weight:600;color:var(--ink-2)} :is(#tpl-view,#adm-pane-planer) .tpl-bd-z.neu em{color:var(--violet)}
-  :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .a{display:flex;align-items:center;gap:6px;justify-content:flex-end;white-space:nowrap}
-  :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .s{font-size:11.5px;color:var(--sub-2)} :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .s.rot{color:var(--danger)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .l{grid-area:l;justify-self:start;font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;white-space:nowrap;background:color-mix(in srgb,currentColor 11%,transparent)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .l.vio{color:var(--violet)} :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .l.rot{color:#b91c1c} :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .l.gelb{color:#b45309} :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .l.gruen{color:#15803d} :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .l.grau{color:var(--sub)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .t{grid-area:t;min-width:0;font-size:11.5px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .a{grid-area:a;display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:3px 6px;min-width:0;text-align:right}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .s{flex-basis:100%;font-size:11px;line-height:1.3;color:var(--sub-2)} :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .s.rot{color:var(--danger)}
   :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .knopf{border:1px solid var(--border);background:var(--surface);border-radius:7px;height:26px;padding:0 9px;font:inherit;font-size:12px;color:var(--ink-2);cursor:pointer;white-space:nowrap}
   :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .knopf:hover:not(:disabled){border-color:var(--sub-2);background:var(--surface-tint)}
   :is(#tpl-view,#adm-pane-planer) #apLeiste,:is(#tpl-view,#adm-pane-planer) #apDelta{margin:0 0 12px}
@@ -2018,15 +2017,15 @@
     :is(#tpl-view,#adm-pane-planer) .tpl-ab-kopf>em{grid-row:1;grid-column:3}
     :is(#tpl-view,#adm-pane-planer) .tpl-m{font-size:11px;height:22px;padding:0 8px 0 6px}
     :is(#tpl-view,#adm-pane-planer) .tpl-spur{height:84px}
-    :is(#tpl-view,#adm-pane-planer) .tpl-bd-z{grid-template-columns:16px minmax(0,1fr) auto;gap:2px 8px}
+    /* Braucht dich am Handy: Konto oben, Label + Aktion darunter, Klartext darunter (umbrechend) */
+    :is(#tpl-view,#adm-pane-planer) .tpl-bd-z{grid-template-columns:auto minmax(0,1fr);grid-template-areas:"k k" "l a" "t t";gap:4px 8px}
+    :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .t{white-space:normal}
     /* Läuft-Liste einzeilig (QA 08.10.2026 Punkt 8): Konto links, Richtung + Wert rechts, Zeit klein dahinter — vorher drei Zeilen je Trade */
     :is(#tpl-view,#adm-pane-planer) .tpl-hz{grid-template-columns:minmax(0,1fr) auto auto auto;gap:2px 6px;padding:4px 2px} :is(#tpl-view,#adm-pane-planer) .tpl-hz .p,:is(#tpl-view,#adm-pane-planer) .tpl-hz .s{display:none}
     :is(#tpl-view,#adm-pane-planer) .tpl-hz .z{grid-column:auto;text-align:right;font-size:10.5px} :is(#tpl-view,#adm-pane-planer) .tpl-hz .h{font-size:12.5px} :is(#tpl-view,#adm-pane-planer) .tpl-hz .r{font-size:11px} :is(#tpl-view,#adm-pane-planer) .tpl-hz .r em{min-width:30px;margin-right:4px}
     :is(#tpl-view,#adm-pane-planer) .tpl-hz .w small{max-width:110px} :is(#tpl-view,#adm-pane-planer) .tpl-hz .w b{max-width:84px;overflow:hidden;text-overflow:ellipsis}
     :is(#tpl-view,#adm-pane-planer) .kpis.tpl-kpis5 .kpi-value{white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere}   /* Netto-Zahl darf umbrechen (QA Punkt 3) */
     :is(#tpl-view,#adm-pane-planer) .tpl-ids .tpl-kopf-r{margin-left:0;width:100%} :is(#tpl-view,#adm-pane-planer) .tpl-ids .tpl-lauf{white-space:normal}
-    :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .b,:is(#tpl-view,#adm-pane-planer) .tpl-bd-z .t{grid-column:2/-1}
-    :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .a{grid-column:1/-1;justify-content:flex-start;padding-left:24px}
     :is(#tpl-view,#adm-pane-planer) .tpl-ids .adm-vl-chip{font-size:11.5px;padding:3px 8px}
   }
   /* Winning-Day-Farmer im Admin (23.09.2026, Finn: „mach alles in Admin und mehr Überblick"; dann „mies
@@ -40969,7 +40968,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1235'
+  const OS_TAB_BUILD = '2026-09-22.1236'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -46821,23 +46820,83 @@
     }
     return [...je.values()]
   }
+  /* BRAUCHT DICH NEU (Finn 08.10.2026, Screenshot .1227 Admin, 5 Fälle: „Bei Braucht dich finde ich nicht so clean, man erkennt nix" —
+   * volle Kontonummern, springende Spalten, Problem und Anleitung zwei gleich große Zeilen, Icons ohne Bedeutung). Jetzt im Stil von
+   * „Zu bestätigen": je ID eine Karte mit Rand in ID-Farbe (ap-id-karte), je Zeile feste Spalten
+   * Konto („150k …0641" + Firma + Typ, volle Nummer nur im Tooltip) · Wort-Label mit Farbe · eine Zeile Klartext klein grau, was zu tun ist ·
+   * Aktion rechtsbündig in fester Breite (Knopf, darunter der Stand aus tplBalBeobachten/tplBalanceFremd). Gleiche Fälle stehen zusammen
+   * (Rang aus tplBdLabel). Nur Anzeige — welche Fälle es gibt, entscheidet weiter tplBraucht. */
+  function tplBdLabel(z){
+    const t = String(z.text || '')
+    if(z.art === 'balance') return /nicht live/i.test(t) ? { w: 'nicht live', ton: 'vio', r: 1 } : /nie gelesen/i.test(t) ? { w: 'nie gelesen', ton: 'vio', r: 1 }
+      : /\balt$/.test(t) ? { w: 'Balance alt', ton: 'vio', r: 1 } : { w: 'Balance fehlt', ton: 'vio', r: 1 }
+    if(z.art === 'neu') return { w: 'neu geplant', ton: 'gruen', r: 9 }
+    if(z.art === 'plan'){
+      if(/^nicht gestartet/i.test(t)) return { w: 'Start-Fehler', ton: 'rot', r: 6 }
+      if(/^verpasst/i.test(t)) return { w: 'verpasst', ton: 'rot', r: 6 }
+      if(/Endlesung|Ergebnis nie gelesen|Login prüfen/i.test(t)) return { w: 'Endlesung', ton: 'gelb', r: 7 }
+      if(/Hedge/i.test(t)) return { w: 'Hedge-Fehler', ton: 'rot', r: 7 }
+      return { w: 'Plan hängt', ton: 'rot', r: 8 }
+    }
+    if(/External ID/i.test(t)) return { w: 'External ID', ton: 'gelb', r: 2 }
+    if(/Ziel erreicht|bestanden/i.test(t)) return { w: 'Ziel erreicht', ton: 'gruen', r: 4 }
+    if(/geblasen|Boden|Polster aufgebraucht/i.test(t)) return { w: 'geblasen?', ton: 'rot', r: 5 }
+    if(/ausgenommen/i.test(t)) return { w: 'Haken aus', ton: 'grau', r: 3 }
+    return { w: 'ausgelassen', ton: 'grau', r: 3 }
+  }
+  // Konto kurz wie in Geplant/Zu bestätigen: Größe + letzte 4 der Nummer, Firma + Typ daneben; voller Name im Tooltip
+  function tplBdKonto(z){
+    const name = String(z.konto || '')
+    let g = 0; try{ g = Number(kontoGroesseAnzeige(name, null, null)) || 0 }catch(_){}
+    if(!g){ const m = /(\d{2,3})\s*k/i.exec(name); if(m) g = (+m[1]) * 1000 }   // „150KTC-SKU-…" (Topstep) hat kein Wortende hinter dem k
+    // Nummer nur aus echten 4+-stelligen Ziffernfolgen — „100k Apex" ergab sonst „…100", „50k The5ers" „…505"
+    const ziffern = (name.match(/\d{4,}/g) || []).pop() || '', e = String(z.ende4 || '').replace(/\D/g, '')
+    const e4 = e.length >= 4 ? e.slice(-4) : ziffern.slice(-4)
+    const gk = g >= 1000 ? Math.round(g / 1000) + 'k' : ''
+    const kurz = gk ? `<b>${gk}</b>${e4 ? `<small>…${escapeHtml(e4)}</small>` : ''}` : e4 ? `<b>…${escapeHtml(e4)}</b>` : `<b>${escapeHtml(name.slice(0, 16) || '—')}</b>`
+    return `<span class="k" title="${escapeHtml(name)}">${kurz}<span class="f"><i style="background:${apdFirmaTon(z.firma)}"></i>${escapeHtml(z.firma || '?')}</span>${z.typ ? `<span class="type-badge type-${escapeHtml(z.typ)}">${escapeHtml(TPL_TYP_WORT[z.typ] || z.typ)}</span>` : ''}</span>`
+  }
+  function tplBdAktion(z){
+    const st = z.lauf && (z.lauf.html || z.lauf.text) ? `<span class="s${z.lauf.fehler ? ' rot' : ''}">${z.lauf.html || escapeHtml(z.lauf.text)}</span>` : ''
+    if(z.bal || z.balf){
+      if(z.lauf && z.lauf.laeuft) return st || '<span class="s">liest …</span>'
+      return (z.bal ? `<button type="button" class="knopf" data-tpl-bal="${escapeHtml(z.bal)}">↻ Balance lesen</button>`
+        : `<button type="button" class="knopf" data-tpl-balf="${escapeHtml(z.balf)}" data-tpl-uid="${escapeHtml(z.uid || '')}" title="Signal an den PC dieser ID — die Lesung läuft dort">↻ Balance lesen</button>`) + st
+    }
+    if(z.haken) return `<button type="button" class="knopf" data-tpl-haken="${escapeHtml(z.haken)}" title="accounts.auto_planer an — der nächste Lauf nimmt das Konto mit">✓ Planer-Haken setzen</button>`
+    if(z.ext) return `<button type="button" class="knopf" data-tpl-ext="${escapeHtml(z.ext)}" title="Konto bearbeiten — External ID eintragen">✎ External ID eintragen</button>`
+    if(z.hinweis) return `<span class="s">${escapeHtml(z.hinweis)}</span>`
+    return `${z.neu ? `<button type="button" class="knopf" data-tpl-neu="${escapeHtml(z.neu)}" title="Startzeit in 1–3 min, Prüfungen wie immer am PC der ID">✓ Behoben – neu einplanen</button>` : ''}${z.key ? `<button type="button" class="knopf" data-tpl-t="${escapeHtml(z.key)}">→ Plan</button>` : ''}`
+  }
+  // Eine Zeile Klartext, was zu tun ist; der volle Problemtext steht im Tooltip. Balance-Fälle: eigene Anleitung (MT5/TV) bleibt, sonst ein
+  // fester Satz je Label, fremd mit „am PC von …"; Ziel erreicht / geblasen? / ausgelassen: der Grund selbst ist die Information
+  function tplBdGrau(z, l, wer){
+    const t = String(z.text || ''), tun = String(z.tun || ''), fremd = !!(z.balf || (z.hinweis && /PC/.test(z.hinweis)))
+    if(z.art === 'balance'){
+      const stand = z.balance && z.balance !== 'keine Balance' ? z.balance + ' · ' : ''
+      if(tun && !/^↻/.test(tun)) return stand + tun
+      const satz = l.w === 'nicht live' ? 'seit dem letzten Trade nicht gelesen — einmal lesen, dann rutscht der Plan nach „Zu bestätigen"'
+        : l.w === 'nie gelesen' ? 'Ergebnis nie gelesen — einmal lesen genügt' : 'einmal lesen genügt, dann plant der Bot das Konto ein'
+      return stand + satz + (fremd ? ` · am PC von ${wer || 'der ID'}` : '')
+    }
+    if(l.w === 'Ziel erreicht') return 'Phase unter Accounts umstellen — danach plant der Bot weiter'
+    if(l.w === 'geblasen?') return t.replace(/\s*[—–-]\s*geblasen\?\s*$/, '') || t
+    if(l.w === 'ausgelassen') return t
+    return tun || t
+  }
   function tplBrauchtHtml(liste){
     if(!liste.length) return ''
-    const n = liste.reduce((a, o) => a + o.zeilen.length, 0), ICON = { balance: '↻', ausgelassen: '⏸', plan: '⚠', neu: '↻' }
-    const bloecke = liste.map(o => `<div class="tpl-bd-id"><b><i style="background:${idFarbe(o.uid)}"></i>${escapeHtml(o.name || '—')}<span>${o.zeilen.length}</span></b>
-      ${o.zeilen.map(z => `<div class="tpl-bd-z ${z.art}"><em>${ICON[z.art] || '•'}</em>
-        <span class="k"><i style="background:${apdFirmaTon(z.firma)}"></i><span class="f">${escapeHtml(z.firma || '?')}</span><b title="${escapeHtml(z.konto || '')}">${escapeHtml(z.konto || '—')}</b>${z.typ ? `<span class="type-badge type-${escapeHtml(z.typ)}">${escapeHtml(TPL_TYP_WORT[z.typ] || z.typ)}</span>` : ''}</span>
-        <span class="b${z.balance ? '' : ' leer'}">${escapeHtml(z.balance || (z.art === 'balance' ? 'keine Balance' : '—'))}</span>
-        <span class="t">${escapeHtml(z.text)}${z.tun ? `<span class="tun"><b>→</b> ${escapeHtml(z.tun)}</span>` : ''}</span>
-        <span class="a">${z.bal ? (z.lauf && z.lauf.laeuft ? `<span class="s">${escapeHtml(z.lauf.text || 'liest …')}</span>`
-          : `<button type="button" class="knopf" data-tpl-bal="${escapeHtml(z.bal)}">↻ Balance lesen</button>${z.lauf && (z.lauf.html || z.lauf.text) ? `<span class="s${z.lauf.fehler ? ' rot' : ''}">${z.lauf.html || escapeHtml(z.lauf.text)}</span>` : ''}`)
-          : z.balf ? (z.lauf && z.lauf.laeuft ? `<span class="s">${escapeHtml(z.lauf.text || 'liest …')}</span>`
-            : `<button type="button" class="knopf" data-tpl-balf="${escapeHtml(z.balf)}" data-tpl-uid="${escapeHtml(z.uid || '')}" title="Signal an den PC dieser ID — die Lesung läuft dort">↻ Balance lesen</button>${z.lauf && (z.lauf.html || z.lauf.text) ? `<span class="s${z.lauf.fehler ? ' rot' : ''}">${z.lauf.html || escapeHtml(z.lauf.text)}</span>` : ''}`)
-          : z.haken ? `<button type="button" class="knopf" data-tpl-haken="${escapeHtml(z.haken)}" title="accounts.auto_planer an — der nächste Lauf nimmt das Konto mit">✓ Planer-Haken setzen</button>`
-          : z.ext ? `<button type="button" class="knopf" data-tpl-ext="${escapeHtml(z.ext)}" title="Konto bearbeiten — External ID eintragen">✎ External ID eintragen</button>`
-          : z.hinweis ? `<span class="s">${escapeHtml(z.hinweis)}</span>`
-          : `${z.neu ? `<button type="button" class="knopf" data-tpl-neu="${escapeHtml(z.neu)}" title="Startzeit in 1–3 min, Prüfungen wie immer am PC der ID">✓ Behoben – neu einplanen</button>` : ''}${z.key ? `<button type="button" class="knopf" data-tpl-t="${escapeHtml(z.key)}">→ Plan</button>` : ''}`}</span></div>`).join('')}</div>`).join('')
-    return `<div class="tpl-karte tpl-bd"><div class="tpl-h">Braucht dich <b>${n}</b><span class="leg">↻ Balance · ⏸ heute ausgelassen · ⚠ Plan hängt</span></div>${bloecke}</div>`
+    const n = liste.reduce((a, o) => a + o.zeilen.length, 0)
+    const bloecke = liste.map(o => {
+      const zeilen = o.zeilen.map(z => ({ z, l: tplBdLabel(z) })).sort((a, b) => a.l.r - b.l.r || String(a.z.firma || '').localeCompare(String(b.z.firma || ''), 'de'))
+      return `<div class="ap-id-karte tpl-bd-id" style="--id:${idFarbe(o.uid)}" data-wer="${escapeHtml(o.name || '')}"><div class="ap-adm-grp"><span class="ap-adm-id"><i style="background:${idFarbe(o.uid)}"></i>${escapeHtml(o.name || '—')}</span><span class="n">${o.zeilen.length} ${o.zeilen.length === 1 ? 'Fall' : 'Fälle'}</span></div>`
+        + zeilen.map(({ z, l }) => {
+          const grau = tplBdGrau(z, l, o.name)
+          return `<div class="tpl-bd-z ${z.art}">${tplBdKonto(z)}<span class="l ${l.ton}" title="${escapeHtml(z.text || '')}">${escapeHtml(l.w)}</span>`
+            + `<span class="t" title="${escapeHtml([z.text, z.tun].filter(Boolean).join(' — '))}">${escapeHtml(grau)}</span><span class="a">${tplBdAktion(z)}</span></div>`
+        }).join('') + `</div>`
+    }).join('')
+    return `<div class="tpl-karte tpl-bd"><div class="tpl-h">Braucht dich <b>${n}</b></div>${bloecke}</div>`
   }
   /* LISTE „GEPLANT" (TPL-UEBERSICHT-2, Finn: „so Infos finde ich clean"): Zeilen im Stil der Radar-Zeile (Markup/Klassen wdl-z*,
    * wdl-sp* wiederverwendet) — ID · Typ-Chip · Konto · letzte Balance mit Alter (eigene Konten) · BUY/SELL · Menge × Symbol · Spanne
@@ -47254,8 +47313,8 @@
       else if(document.getElementById('ap-ids-root')?.offsetParent && typeof window._apIdsLaden === 'function') window._apIdsLaden()
     }catch(_){}
   }
-  // Name der ID aus dem Block der Box („<b><i></i>Name<span>n</span></b>")
-  const tplBdWer = el => String(el.closest('.tpl-bd-id')?.querySelector('b')?.firstChild?.nextSibling?.textContent || '').trim()
+  // Name der ID aus dem Block der Box (data-wer an der ID-Karte, seit dem Neuentwurf 08.10.2026)
+  const tplBdWer = el => String(el.closest('[data-wer]')?.dataset.wer || '').trim()
   // EIGENES KONTO: accBalanceLesen meldet seinen Stand nur in _accBalLauf (+ renderAccounts) — hier beobachten und die Box bei jeder
   // Änderung neu zeichnen; nie stumm: kein neuer Stand nach 15 s → Fehler, Fehler mit PC-Punkt der ID (pcStandPunktHtml, .1180)
   function tplBalBeobachten(id, uid){
