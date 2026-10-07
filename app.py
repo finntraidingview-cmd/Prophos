@@ -14542,7 +14542,7 @@ def _ap_archiviert():
 
 
 AP_KONTO_FELDER = ("id,user_id,name,firm,account_type,external_id,max_drawdown,topstep_balance,topstep_last_check,"
-                   "meta_api_balance,meta_api_last_check,tv_balance,tv_balance_at,consistency_pct,ziel_pct_konto")
+                   "meta_api_balance,meta_api_last_check,tv_balance,tv_balance_at,consistency_pct,ziel_pct_konto,auto_planer")
 AP_KONTO_FELDER_OHNE_CONS = AP_KONTO_FELDER.replace(",consistency_pct", "")
 
 
@@ -14552,7 +14552,10 @@ def _ap_konten_laden(params):
     try:
         return _sb_all("accounts", dict(params, select=AP_KONTO_FELDER))
     except requests.exceptions.HTTPError as e:
-        if "consistency_pct" not in str(getattr(e.response, "text", "") or e):
+        txt = str(getattr(e.response, "text", "") or e)
+        if "auto_planer" in txt:       # Haken-Spalte fehlt noch (sql/2026-10-08_accounts_auto_planer.sql) → ohne sie, alle gelten als drin
+            return _sb_all("accounts", dict(params, select=AP_KONTO_FELDER.replace(",auto_planer", "")))
+        if "consistency_pct" not in txt:
             raise
         return _sb_all("accounts", dict(params, select=AP_KONTO_FELDER_OHNE_CONS))
 
@@ -15265,6 +15268,9 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
             continue                                   # Gegenhedge-Konto (Fusion), nie planen, keine Meldung
         if ist_topstep_express(a):
             continue                                   # Topstep Express/XFA (Finn 07.10.2026: nur Combine im Auto-Plan), keine Meldung
+        if a.get("auto_planer") is False:              # Haken im Konto aus (Finn 08.10.2026, accounts.auto_planer) — sichtbar ausgelassen
+            ausgelassen.append(dict(zeile, grund="vom Auto-Planer ausgenommen (Haken im Konto aus)"))
+            continue
         regel = ap_regel_finden(firmen, a.get("firm"))
         if not regel or regel.get("planen") is False:      # planen:false = nur Kernwerte (Kontowert/Vorrat), z. B. Topstep, FTMO
             ausgelassen.append(dict(zeile, grund="keine Regel für diese Firma"))

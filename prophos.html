@@ -2901,6 +2901,11 @@
   /* Ziel-Chip (07.10.2026): accounts.ziel_erreicht_at, gesetzt von der Ziel-Wache (app.py zw_tick) — Grün wie ein erreichtes Ziel */
   .type-badge.acc-ziel-chip{margin-left:6px;background:#ECFDF5;border-color:#A7F3D0;color:#047857;vertical-align:middle}
   #dashboard-view .type-badge.acc-risk-chip{margin-left:6px;background:#fff;border-color:#f3c98b;color:#b45309;vertical-align:middle}
+  /* Auto-Planer-Chip (08.10.2026): Stand des letzten Planer-Laufs je Konto — grün geplant, amber ausgelassen, grau Haken aus / nicht dabei */
+  #dashboard-view .type-badge.acc-ap-chip{margin-left:6px;background:#fff;border-color:var(--border);color:var(--sub);vertical-align:middle}
+  #dashboard-view .type-badge.acc-ap-chip.drin{background:#ECFDF5;border-color:#A7F3D0;color:#047857}
+  #dashboard-view .type-badge.acc-ap-chip.raus{background:#FFFBEB;border-color:#f3c98b;color:#b45309}
+  #dashboard-view .type-badge.acc-ap-chip.aus{text-decoration:line-through;opacity:.8}
   #dashboard-view #ac-cons-row[hidden],#dashboard-view #ac-cons-frei[hidden],#dashboard-view #bulk-cons-row[hidden],#dashboard-view #bulk-cons-frei[hidden]{display:none}
   #dashboard-view .type-live{background:#F0FAEE;border-color:#B4DFAE;color:#1B6A14}
   #dashboard-view .type-live::before{
@@ -11466,6 +11471,14 @@
           <label>Max Risiko / Trade ($, optional)</label>
           <input class="input mono" id="ac-max-risiko" type="number" step="50" min="0" placeholder="z.B. 1000 (1 % von 100K)" autocomplete="off">
           <div style="font-size:11px;color:var(--sub);margin-top:4px">Nur für dieses Konto, z. B. bei einer 1-%-Regel. Das Konto wird in der Liste markiert.</div>
+        </div>
+        <!-- Auto-Planer-Haken (08.10.2026, Finn: „unter Accounts eine grobe Übersicht, welche Accounts gerade im Auto-Planer drin
+             sind — so einen Haken: Auto-Planer"): Spalte accounts.auto_planer. Aus = Nachtlauf und Nachplanen lassen das Konto aus
+             (Grund im Lauf). Ob es sonst drin ist (Typ, Firma, Balance, Ziel), entscheidet weiter der Planer; die Liste zeigt den
+             Stand als Chip „🤖 …". -->
+        <div class="field" style="grid-column:1/-1">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="ac-auto-planer" checked> Auto-Planer darf dieses Konto einplanen</label>
+          <div style="font-size:11px;color:var(--sub);margin-top:4px">Geplant werden nur Challenge / Phase 1 / Phase 2 von Firmen mit Kernwerten. Haken aus = nie automatisch, auch wenn alles andere passt.</div>
         </div>
         <!-- Consistency je Konto (07.10.2026, Finn: Futures-Challenges haben standardmäßig 40 % — größter Tag ≤ 40 % des Ziels —,
              mit Addon gekauft sind es 50 %). Spalte accounts.consistency_pct, leer = Standard. Nur Futures-Firma + Challenge/Phase,
@@ -30609,6 +30622,7 @@
       maxLossPerTrade:   row.max_loss_per_trade   != null ? Number(row.max_loss_per_trade)   : null,
       maxProfitPerTrade: row.max_profit_per_trade != null ? Number(row.max_profit_per_trade) : null,
       maxRisikoTrade: row.max_risiko_trade != null ? Number(row.max_risiko_trade) : null,   // eigene Vorgabe je Konto (07.10.2026), nicht das Firmen-Limit
+      autoPlaner: row.auto_planer !== false,   // Auto-Planer-Haken (08.10.2026): false = nie automatisch einplanen
       wdTp: row.wd_tp != null ? Number(row.wd_tp) : null,   // TP/SL-Vorgabe des Winning-Day-Farmers (23.09.2026) — nicht die Firmen-Limits
       wdSl: row.wd_sl != null ? Number(row.wd_sl) : null,
       // Live-Balance aus TradingView (26.09.2026, Puls-Lesung bei Start/Nachlesung) — jüngste Quelle für die Hedge-Staffel
@@ -30749,6 +30763,7 @@
     purchase: document.getElementById('ac-purchase-cost'),
     maxDd:    document.getElementById('ac-max-drawdown'),
     maxRisiko: document.getElementById('ac-max-risiko'),   // Max Risiko / Trade (07.10.2026)
+    autoPlaner: document.getElementById('ac-auto-planer'),   // Auto-Planer-Haken (08.10.2026)
     extId:    document.getElementById('ac-ext-id'),
     wdFarm:   document.getElementById('ac-wd-farm'),
     goalKind:      document.getElementById('ac-goal-kind'),
@@ -31242,6 +31257,33 @@
     const b = Number(a.maxRisikoTrade).toLocaleString('de-DE', { maximumFractionDigits: 0 })
     return ` <span class="type-badge acc-risk-chip" title="Max Risiko je Trade: ${b} $ (im Konto-Popup eingetragen)">⚠ max ${b} $/Trade</span>`
   }
+  /* AUTO-PLANER-CHIP (08.10.2026, Finn: „unter Accounts eine grobe Übersicht, welche Accounts gerade im Auto-Planer drin sind"):
+   * nur Konten der Planer-Typen (challenge/phase1/phase2). Stand aus dem letzten Lauf (_ap.letzter: geplant[]/ausgelassen[] je
+   * konto_id): grün „geplant HH:MM" (Dubai), amber „ausgelassen" mit dem Grund des Planers im Tooltip, grau durchgestrichen „aus"
+   * (accounts.auto_planer = false), sonst grau „Planer" (im letzten Lauf nicht dabei / noch kein Lauf). Keine Prüfung, nur Anzeige. */
+  const AP_CHIP_TYPEN = ['challenge', 'phase1', 'phase2']
+  let _apChipVersucht = null
+  function apLetzterSicherstellen(){   // letzten Planer-Lauf einmal je ID holen, wenn die Accounts-Liste ihn noch nicht hat
+    if(!currentUserId || _apChipVersucht === currentUserId) return
+    let da = false; try{ da = !!(_ap.letzter && _ap.geladenFuer === currentUserId) }catch(_){ return }
+    _apChipVersucht = currentUserId
+    if(da) return
+    ;(async () => { try{ const d = await apApi('GET'); _ap.letzter = d.letzter || null; _ap.imPlaner = !!d.im_planer; _ap.admin = d.admin != null ? !!d.admin : null; _ap.geladenFuer = currentUserId; renderAccounts() }catch(_){} })()
+  }
+  function accAutoPlanerChipHtml(a){
+    if(!a || !AP_CHIP_TYPEN.includes(a.type)) return ''
+    if(a.autoPlaner === false) return ` <span class="type-badge acc-ap-chip aus" title="Vom Auto-Planer ausgenommen (Haken im Konto aus) — wird nie automatisch eingeplant">🤖 aus</span>`
+    let l = null; try{ l = _ap.letzter }catch(_){}
+    const id = String(a.id), tag = l && l.tag ? String(l.tag) : ''
+    const g = l && Array.isArray(l.geplant) ? l.geplant.find(x => String(x.konto_id) === id) : null
+    if(g){
+      const m = apPrHm(g.start), uhr = m != null ? tplUhr(m, typeof tplVersatz === 'function' ? tplVersatz(tag) : 120) : String(g.start || '')
+      return ` <span class="type-badge acc-ap-chip drin" title="Auto-Planer: eingeplant${uhr ? ' · Start ' + uhr + ' Dubai' : ''}${g.richtung ? ' · ' + String(g.richtung).toUpperCase() : ''} (Lauf ${escapeHtml(tag)})">🤖 geplant${uhr ? ' ' + uhr : ''}</span>`
+    }
+    const x = l && Array.isArray(l.ausgelassen) ? l.ausgelassen.find(y => String(y.konto_id) === id) : null
+    if(x) return ` <span class="type-badge acc-ap-chip raus" title="Auto-Planer: ausgelassen — ${escapeHtml(String(x.grund || ''))} (Lauf ${escapeHtml(tag)})">🤖 ausgelassen</span>`
+    return ` <span class="type-badge acc-ap-chip" title="Auto-Planer: im letzten Lauf nicht dabei${l ? ' (Lauf ' + escapeHtml(tag) + ')' : ' — noch kein Lauf geladen'}">🤖 Planer</span>`
+  }
   // Typ-Chip der Accounts-Tabelle: Funded CFD mit Waiting for Payout zeigt den Zustand statt des Typs (29.09.2026), „seit" im Tooltip
   function accTypChipHtml(a){
     if(a && a.type === 'funded_cfd' && a.waitingPayoutSince){
@@ -31534,6 +31576,7 @@
     // war die Tabelle hier weiter auf $0.
     if(typeof mt5BalCacheAnstossen === 'function') mt5BalCacheAnstossen()
     kwSicherstellen()   // Kontowert-Spalte (07.10.2026): einmal je ID laden
+    apLetzterSicherstellen()   // Auto-Planer-Chip (08.10.2026): letzten Lauf einmal je ID laden
 
     // Wenn die Detail-View gerade offen ist, parallel neu rendern
     // (z.B. nach Live-Balance-Sync, Archive-Toggle, Edit-Save)
@@ -31802,7 +31845,7 @@
               ${meta}
             </td>
             <td>${escapeHtml(a.firm || '–')}</td>
-            <td>${accTypChipHtml(a)}${accZielChipHtml(a)}${accConsChipHtml(a)}${accRisikoChipHtml(a)}${accWdToggleHtml(a)}</td>
+            <td>${accTypChipHtml(a)}${accZielChipHtml(a)}${accConsChipHtml(a)}${accRisikoChipHtml(a)}${accAutoPlanerChipHtml(a)}${accWdToggleHtml(a)}</td>
             <td>${balCell}<div class="acc-kw-mob" data-kw-zelle="${a.id}">${kwZelleHtml(a.id)}</div></td>
             <td class="acc-kw-td" data-kw-zelle="${a.id}">${kwZelleHtml(a.id)}</td>
             <td>${(_mtcLogin && !isArchived && typeof mt5KontoIst === 'function' && mt5KontoIst(a)) ? `<div>${accTermBtnHtml(a.id)}</div>` : ''}${linksHtml}${accTermStatusHtml(a.id)}</td>
@@ -31962,6 +32005,7 @@
       accEls.purchase.value = editAccount.purchaseCost != null ? editAccount.purchaseCost : ''
       accEls.maxDd.value = editAccount.maxDrawdown != null ? editAccount.maxDrawdown : ''
       if(accEls.maxRisiko) accEls.maxRisiko.value = editAccount.maxRisikoTrade != null ? editAccount.maxRisikoTrade : ''
+      if(accEls.autoPlaner) accEls.autoPlaner.checked = editAccount.autoPlaner !== false
       if(accEls.extId) accEls.extId.value = editAccount.externalId || ''
       if(accEls.wdFarm) accEls.wdFarm.checked = !!editAccount.wdFarm
       // Fortschritts-Ziel vorausfüllen (Min-Gewinn/Schon-erledigt seit 10.09. ohne Feld)
@@ -31989,6 +32033,7 @@
       accEls.purchase.value = ''
       accEls.maxDd.value = ''
       if(accEls.maxRisiko) accEls.maxRisiko.value = ''
+      if(accEls.autoPlaner) accEls.autoPlaner.checked = true   // neue Konten standardmäßig im Auto-Planer (08.10.2026)
       if(accEls.extId) accEls.extId.value = ''
       if(accEls.wdFarm) accEls.wdFarm.checked = false   // neue Konten nie im WD-Farm (F17-Ergänzung 27.09.2026, vorher Standard drin)
       accEls.maTok.value = ''
@@ -32246,6 +32291,7 @@
       maxLossPerTrade: !isNaN(maxLossPerTrade) && maxLossPerTrade > 0 ? maxLossPerTrade : null,
       maxProfitPerTrade: !isNaN(maxProfitPerTrade) && maxProfitPerTrade > 0 ? maxProfitPerTrade : null,
       maxRisikoTrade: !isNaN(maxRisiko) && maxRisiko > 0 ? maxRisiko : null,
+      autoPlaner: accEls.autoPlaner ? accEls.autoPlaner.checked : true,   // Auto-Planer-Haken (08.10.2026)
       // Ziel-Felder je nach sichtbarem Block: Winning Days (Futures-Funded,
       // manuell) / Fortschritts-Ziel (CFD-Phase, automatisch) / sonst Bestand.
       ...(wdSecOn ? {
@@ -32339,6 +32385,7 @@
           max_loss_per_trade: acc.maxLossPerTrade,
           max_profit_per_trade: acc.maxProfitPerTrade,
           max_risiko_trade: acc.maxRisikoTrade,
+          auto_planer: acc.autoPlaner !== false,   // Auto-Planer-Haken (08.10.2026)
           wd_farm: !!acc.wdFarm,
           external_id: acc.externalId,
           goal_kind:        acc.goalKind,
@@ -40074,7 +40121,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1153'
+  const OS_TAB_BUILD = '2026-09-22.1154'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
