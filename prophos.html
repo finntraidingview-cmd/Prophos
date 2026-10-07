@@ -39990,7 +39990,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1133'
+  const OS_TAB_BUILD = '2026-09-22.1134'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -45587,8 +45587,8 @@
    * Kopf „P&L hypothetisch heute · jetzt ±€". Zeitachse = die des Zeitstrahls (_tpl.achse). */
   function tplHypoHtml(D){
     const a = _tpl.achse || {}; if(a.VON == null) return ''
-    const h = tplHypo(D), hv = h.verlauf, bilanz = tplBilanzHtml(D)
-    if(!hv.length && !h.n && !h.ohne) return bilanz ? `<div class="tpl-karte tpl-nk tpl-hk"><div class="tpl-h">P&amp;L hypothetisch <b>nichts läuft</b></div>${bilanz}</div>` : ''
+    const h = tplHypo(D), hv = h.verlauf
+    if(!hv.length && !h.n && !h.ohne) return ''
     const v = D.v, VON = a.VON, BIS = a.BIS, SPAN = BIS - VON, W = 1000, H = 150, M = H / 2
     const vz = x => (x > 0 ? '+' : x < 0 ? '−' : '') + tplEur(x)
     const max = Math.max(50, ...hv.map(p => Math.abs(p.eur))) * 1.15
@@ -45622,11 +45622,13 @@
         <div class="tpl-hz summe"><span class="w"><b>Summe</b></span><span class="r"></span><span class="p"></span><span class="s"></span><b class="h ${h.jetzt > 0 ? 'tpl-gut' : h.jetzt < 0 ? 'tpl-rot' : ''}">${vz(h.jetzt)}</b><span class="z">${h.ohne ? h.ohne + ' ohne Wert' : ''}</span></div></div>` : ''
     return `<div class="tpl-karte tpl-nk tpl-hk"><div class="tpl-h">P&amp;L hypothetisch heute <b class="${h.jetzt > 0 ? 'tpl-gut' : h.jetzt < 0 ? 'tpl-rot' : ''}">jetzt ${vz(h.jetzt)}</b>
         <span class="leg"><span>${h.n} Trade${h.n === 1 ? '' : 's'}${h.ohne ? ` · ${h.ohne} ohne Wert` : ''}</span><span>Kontowert-Satz × Live-P&amp;L${h.cfd ? ' · CFD ≈ NQ' : ''}</span><span>0 = Einstand</span></span></div>
-        ${hv.length ? `<div class="tpl-nk-chart"><span class="skala oben">+${tplEur(max)}</span><span class="skala unten">−${tplEur(max)}</span>${svg}</div><div class="tpl-achse tpl-nk-achse">${achse.join('')}</div>` : '<div class="tpl-leer">noch kein Verlauf — Kerzen oder Startzeiten fehlen</div>'}${liste}${bilanz}</div>`
+        ${hv.length ? `<div class="tpl-nk-chart"><span class="skala oben">+${tplEur(max)}</span><span class="skala unten">−${tplEur(max)}</span>${svg}</div><div class="tpl-achse tpl-nk-achse">${achse.join('')}</div>` : '<div class="tpl-leer">noch kein Verlauf — Kerzen oder Startzeiten fehlen</div>'}${liste}</div>`
   }
   /* BEENDET · BILANZ DES RECHNERS (07.10.2026, Finn: „kleine Statistiken … wie gut der Rechner Long/Short ausgleicht"): Kacheln Gesamt ·
    * Long · Short · im Plus, Balken je Tag (grün über / rot unter 0), darunter die beendeten Trades (neueste oben). Nur Auto-Planer-Trades,
    * ID-Chip filtert mit. Hypothetisch = echter P&L $ × Kontowert-Satz (Lauf des Tages → Balance vorher → heute, Quelle im Tooltip). */
+  // Eigene Karte ganz unten auf der Seite (Finn 07.10.2026: „Statistik der vergangenen Tage … ganz runterpacken und nicht so hoch") — stand vorher in der Hypo-Karte
+  function tplBilanzKarteHtml(D){ const b = tplBilanzHtml(D); return b ? `<div class="tpl-karte tpl-nk tpl-hk">${b}</div>` : '' }
   function tplBilanzHtml(D){
     let b = (_tpl.bilanz || []).filter(z => z && z.hypo_eur != null)
     if(_tpl.sicht && _tpl.sicht !== 'alle') b = b.filter(z => String(z.user_id) === String(_tpl.sicht))
@@ -45717,7 +45719,7 @@
     const chips = (alleIds.length > 1 || alleBest) ? `<div class="adm-vl-legend tpl-ids">${chipsIds}${alleBest}</div>` : ''
     root.innerHTML =(_tpl.fehler ? `<div class="tpl-fehler">⚠ ${escapeHtml(_tpl.fehler)}</div>` : '')
       + (ohne ? `<div class="tpl-karte"><div class="tpl-leer">— nicht im Auto-Planer</div></div>`
-        : chips + tplKachelnHtml(F) + tplBrauchtHtml(tplBraucht(D, sichtIds)) + tplZeitstrahlHtml(F, zeilen) + tplDetailHtml(D) + tplNettoHtml(F) + tplHypoHtml(F) + tplListeHtml(F) + tplAbdeckungHtml(F, abF))   // Detail direkt unter dem Zeitstrahl (Finn 07.10.2026)
+        : chips + tplKachelnHtml(F) + tplBrauchtHtml(tplBraucht(D, sichtIds)) + tplZeitstrahlHtml(F, zeilen) + tplDetailHtml(D) + tplNettoHtml(F) + tplHypoHtml(F) + tplListeHtml(F) + tplAbdeckungHtml(F, abF) + tplBilanzKarteHtml(F))   // Detail direkt unter dem Zeitstrahl (Finn 07.10.2026)
     const sc = root.querySelector('.tpl-scroll')
     if(sc && sc.scrollWidth > sc.clientWidth + 4){
       if(scrollX != null && _tpl.tagScroll === _tpl.tag) sc.scrollLeft = scrollX
