@@ -2901,11 +2901,14 @@
   /* Ziel-Chip (07.10.2026): accounts.ziel_erreicht_at, gesetzt von der Ziel-Wache (app.py zw_tick) — Grün wie ein erreichtes Ziel */
   .type-badge.acc-ziel-chip{margin-left:6px;background:#ECFDF5;border-color:#A7F3D0;color:#047857;vertical-align:middle}
   #dashboard-view .type-badge.acc-risk-chip{margin-left:6px;background:#fff;border-color:#f3c98b;color:#b45309;vertical-align:middle}
-  /* Auto-Planer-Chip (08.10.2026): Stand des letzten Planer-Laufs je Konto — grün geplant, amber ausgelassen, grau Haken aus / nicht dabei */
-  #dashboard-view .type-badge.acc-ap-chip{margin-left:6px;background:#fff;border-color:var(--border);color:var(--sub);vertical-align:middle}
-  #dashboard-view .type-badge.acc-ap-chip.drin{background:#ECFDF5;border-color:#A7F3D0;color:#047857}
-  #dashboard-view .type-badge.acc-ap-chip.raus{background:#FFFBEB;border-color:#f3c98b;color:#b45309}
-  #dashboard-view .type-badge.acc-ap-chip.aus{text-decoration:line-through;opacity:.8}
+  /* Planer-Spalte (08.10.2026, Finn: „mies hässlich" zum Chip in der Typ-Spalte): eigene schmale Spalte — Haken (accounts.auto_planer)
+   * + kleine Zeile daneben: Startzeit grün (geplant), „ausgelassen" amber, „aus"/„–" grau. Klein, keine Pillen. */
+  #dashboard-view .acc-ap{display:inline-flex;align-items:center;gap:7px;font-size:11.5px;cursor:pointer;white-space:nowrap}
+  #dashboard-view .acc-ap input{margin:0;width:14px;height:14px;accent-color:#047857;cursor:pointer}
+  #dashboard-view .acc-ap input:disabled{cursor:default}
+  #dashboard-view .acc-ap-s{color:var(--sub);font-variant-numeric:tabular-nums}
+  #dashboard-view .acc-ap-s.drin{color:#047857;font-weight:600}
+  #dashboard-view .acc-ap-s.raus{color:#b45309}
   #dashboard-view #ac-cons-row[hidden],#dashboard-view #ac-cons-frei[hidden],#dashboard-view #bulk-cons-row[hidden],#dashboard-view #bulk-cons-frei[hidden]{display:none}
   #dashboard-view .type-live{background:#F0FAEE;border-color:#B4DFAE;color:#1B6A14}
   #dashboard-view .type-live::before{
@@ -6681,6 +6684,7 @@
                   <th style="padding-left:20px">Account</th>
                   <th>Firm</th>
                   <th>Typ</th>
+                  <th title="Auto-Planer (08.10.2026): Haken = darf eingeplant werden; darunter Startzeit des letzten Laufs (Dubai) oder der Grund, warum nicht">Planer</th>
                   <th>Balance</th>
                   <th title="Kontowert mit Gegenhedge (Kaufpreis + Hedge-Kosten der gewonnenen Etappen) — Rechnung im Backend wie Probelauf/Vorrat">Wert</th>
                   <th>Verknüpfungen</th>
@@ -31270,19 +31274,33 @@
     if(da) return
     ;(async () => { try{ const d = await apApi('GET'); _ap.letzter = d.letzter || null; _ap.imPlaner = !!d.im_planer; _ap.admin = d.admin != null ? !!d.admin : null; _ap.geladenFuer = currentUserId; renderAccounts() }catch(_){} })()
   }
-  function accAutoPlanerChipHtml(a){
-    if(!a || !AP_CHIP_TYPEN.includes(a.type)) return ''
-    if(a.autoPlaner === false) return ` <span class="type-badge acc-ap-chip aus" title="Vom Auto-Planer ausgenommen (Haken im Konto aus) — wird nie automatisch eingeplant">🤖 aus</span>`
+  function accPlanerZelleHtml(a, archiviert){
+    if(!a || !AP_CHIP_TYPEN.includes(a.type)) return '<span style="color:var(--sub-2)">—</span>'
+    const id = String(a.id), an = a.autoPlaner !== false
     let l = null; try{ l = _ap.letzter }catch(_){}
-    const id = String(a.id), tag = l && l.tag ? String(l.tag) : ''
-    const g = l && Array.isArray(l.geplant) ? l.geplant.find(x => String(x.konto_id) === id) : null
-    if(g){
-      const m = apPrHm(g.start), uhr = m != null ? tplUhr(m, typeof tplVersatz === 'function' ? tplVersatz(tag) : 120) : String(g.start || '')
-      return ` <span class="type-badge acc-ap-chip drin" title="Auto-Planer: eingeplant${uhr ? ' · Start ' + uhr + ' Dubai' : ''}${g.richtung ? ' · ' + String(g.richtung).toUpperCase() : ''} (Lauf ${escapeHtml(tag)})">🤖 geplant${uhr ? ' ' + uhr : ''}</span>`
+    const tag = l && l.tag ? String(l.tag) : ''
+    let txt = '', cls = '', tip = ''
+    if(!an){ txt = 'aus'; tip = 'Vom Auto-Planer ausgenommen — wird nie automatisch eingeplant. Haken setzen = wieder drin.' }
+    else {
+      const g = l && Array.isArray(l.geplant) ? l.geplant.find(x => String(x.konto_id) === id) : null
+      const x = !g && l && Array.isArray(l.ausgelassen) ? l.ausgelassen.find(y => String(y.konto_id) === id) : null
+      if(g){ const m = apPrHm(g.start); txt = m != null ? tplUhr(m, typeof tplVersatz === 'function' ? tplVersatz(tag) : 120) : String(g.start || 'geplant'); cls = 'drin'
+        tip = `Eingeplant · Start ${txt} Dubai${g.richtung ? ' · ' + String(g.richtung).toUpperCase() : ''} (Lauf ${tag})` }
+      else if(x){ txt = 'ausgelassen'; cls = 'raus'; tip = `Ausgelassen: ${String(x.grund || '')} (Lauf ${tag})` }
+      else { txt = '–'; tip = l ? `Im letzten Lauf (${tag}) nicht dabei` : 'Noch kein Planer-Lauf geladen' }
     }
-    const x = l && Array.isArray(l.ausgelassen) ? l.ausgelassen.find(y => String(y.konto_id) === id) : null
-    if(x) return ` <span class="type-badge acc-ap-chip raus" title="Auto-Planer: ausgelassen — ${escapeHtml(String(x.grund || ''))} (Lauf ${escapeHtml(tag)})">🤖 ausgelassen</span>`
-    return ` <span class="type-badge acc-ap-chip" title="Auto-Planer: im letzten Lauf nicht dabei${l ? ' (Lauf ' + escapeHtml(tag) + ')' : ' — noch kein Lauf geladen'}">🤖 Planer</span>`
+    return `<label class="acc-ap" title="${escapeHtml(tip)}"><input type="checkbox" data-acc-ap="${escapeHtml(id)}"${an ? ' checked' : ''}${archiviert ? ' disabled' : ''}><span class="acc-ap-s ${cls}">${escapeHtml(txt)}</span></label>`
+  }
+  // Haken umschalten: sofort gespeichert (accounts.auto_planer), Zeile neu — der nächste Planer-Lauf (10-min-Takt / Nacht) nimmt es auf
+  async function accAutoPlanerUmstellen(id, an, cb){
+    try{
+      const { data, error } = await supabase.from('accounts').update({ auto_planer: !!an }).eq('id', id).select('id')
+      if(error) throw error
+      if(!data || !data.length) throw new Error('nicht gespeichert (fremdes Konto?)')
+      const a = (accounts || []).find(x => String(x.id) === String(id)); if(a) a.autoPlaner = !!an
+      if(typeof atToast === 'function') atToast(an ? '🤖 Auto-Planer an — der nächste Lauf nimmt das Konto mit.' : '🤖 Auto-Planer aus — das Konto wird nicht mehr automatisch eingeplant.', an ? 'start' : 'end')
+      renderAccounts()
+    }catch(e){ if(cb) cb.checked = !an; if(typeof atToast === 'function') atToast('Auto-Planer nicht gespeichert: ' + ((e && e.message) || e), 'end') }
   }
   // Typ-Chip der Accounts-Tabelle: Funded CFD mit Waiting for Payout zeigt den Zustand statt des Typs (29.09.2026), „seit" im Tooltip
   function accTypChipHtml(a){
@@ -31845,7 +31863,8 @@
               ${meta}
             </td>
             <td>${escapeHtml(a.firm || '–')}</td>
-            <td>${accTypChipHtml(a)}${accZielChipHtml(a)}${accConsChipHtml(a)}${accRisikoChipHtml(a)}${accAutoPlanerChipHtml(a)}${accWdToggleHtml(a)}</td>
+            <td>${accTypChipHtml(a)}${accZielChipHtml(a)}${accConsChipHtml(a)}${accRisikoChipHtml(a)}${accWdToggleHtml(a)}</td>
+            <td data-stop-row-click="1">${accPlanerZelleHtml(a, isArchived)}</td>
             <td>${balCell}<div class="acc-kw-mob" data-kw-zelle="${a.id}">${kwZelleHtml(a.id)}</div></td>
             <td class="acc-kw-td" data-kw-zelle="${a.id}">${kwZelleHtml(a.id)}</td>
             <td>${(_mtcLogin && !isArchived && typeof mt5KontoIst === 'function' && mt5KontoIst(a)) ? `<div>${accTermBtnHtml(a.id)}</div>` : ''}${linksHtml}${accTermStatusHtml(a.id)}</td>
@@ -31947,6 +31966,11 @@
       // (Attribut data-acc-wdtyp — data-acc-wd trägt bereits der Winning-Day-Zähler-Badge im Namen, der das Bearbeiten öffnet)
       accEls.table.querySelectorAll('[data-acc-wdtyp]').forEach(btn => {
         btn.addEventListener('click', e => { e.stopPropagation(); accWdUmstellen(btn.dataset.accWdtyp, btn.dataset.ziel, { btn }) })
+      })
+      // Auto-Planer-Haken (08.10.2026): eigener Handler, sofort gespeichert
+      accEls.table.querySelectorAll('[data-acc-ap]').forEach(cb => {
+        cb.addEventListener('click', e => e.stopPropagation())
+        cb.addEventListener('change', e => { e.stopPropagation(); accAutoPlanerUmstellen(cb.dataset.accAp, cb.checked, cb) })
       })
       // Funded CFD ⇄ Waiting for Payout (29.09.2026): gleiches Muster, eigener Handler
       accEls.table.querySelectorAll('[data-acc-wartet]').forEach(btn => {
@@ -40121,7 +40145,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1154'
+  const OS_TAB_BUILD = '2026-09-22.1155'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
