@@ -40623,7 +40623,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1191'
+  const OS_TAB_BUILD = '2026-09-22.1192'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -46115,8 +46115,12 @@
       if(x.typ && !TPL_TYPEN.includes(String(x.typ))) continue   // WD-RAUS-AUS-PLANER
       const k = tplKk(x.user_id, x.konto); if(konten.has(k)) continue; konten.add(k)
       const bal = /keine Balance|nicht live/.test(g), fremd = String(x.user_id) !== String(currentUserId)
-      add(x.user_id, x.user, { art: bal ? 'balance' : 'ausgelassen', firma: x.firma, konto: x.konto, typ: x.typ, balance: '', ende4: tplEnde4(x), text: g, hinweis: bal && fremd ? 'am PC der ID lesen' : '',
-        tun: bal ? tplBalTun(null, null, fremd, x.user) : 'Beheben — der Bot plant das Konto dann von selbst nach (alle 10 min).' })
+      // ↻ Balance lesen auch für FREMDE Konten (08.10.2026, Finn: „direkt hier auf Balance-Refresh drücken") — Signal im Namen des
+      // Besitzers über PATCH /admin/wd-plaene {aktion:'balance'} (tplBalanceFremd); ohne konto_id (alter Backend-Stand) bleibt der Hinweis
+      const balf = bal && fremd && x.konto_id ? String(x.konto_id) : ''
+      add(x.user_id, x.user, { art: bal ? 'balance' : 'ausgelassen', firma: x.firma, konto: x.konto, typ: x.typ, balance: '', ende4: tplEnde4(x), text: g, hinweis: bal && fremd && !balf ? 'am PC der ID lesen' : '',
+        balf, uid: String(x.user_id || ''), lauf: balf ? (_tplBalFremd.get(balf) || null) : null,
+        tun: bal ? (balf ? `↻ Balance lesen — läuft am PC von ${x.user || 'der ID'} (Prophos-Tab dort offen?).` : tplBalTun(null, null, fremd, x.user)) : 'Beheben — der Bot plant das Konto dann von selbst nach (alle 10 min).' })
     }
     for(const t of D.trades){
       const p = t.eigen ? (tradePlans || []).find(x => String(x.id) === t.plan_id) : null, b = (p && p.mt5Baseline) || {}
@@ -46169,6 +46173,8 @@
         <span class="t">${escapeHtml(z.text)}${z.tun ? `<span class="tun"><b>→</b> ${escapeHtml(z.tun)}</span>` : ''}</span>
         <span class="a">${z.bal ? (z.lauf && z.lauf.laeuft ? `<span class="s">${escapeHtml(z.lauf.text || 'liest …')}</span>`
           : `<button type="button" class="knopf" data-tpl-bal="${escapeHtml(z.bal)}">↻ Balance lesen</button>${z.lauf && z.lauf.text ? `<span class="s${z.lauf.fehler ? ' rot' : ''}">${escapeHtml(z.lauf.text)}</span>` : ''}`)
+          : z.balf ? (z.lauf && z.lauf.laeuft ? `<span class="s">${escapeHtml(z.lauf.text || 'liest …')}</span>`
+            : `<button type="button" class="knopf" data-tpl-balf="${escapeHtml(z.balf)}" data-tpl-uid="${escapeHtml(z.uid || '')}" title="Signal an den PC dieser ID — die Lesung läuft dort">↻ Balance lesen</button>${z.lauf && (z.lauf.html || z.lauf.text) ? `<span class="s${z.lauf.fehler ? ' rot' : ''}">${z.lauf.html || escapeHtml(z.lauf.text)}</span>` : ''}`)
           : z.hinweis ? `<span class="s">${escapeHtml(z.hinweis)}</span>`
           : `${z.neu ? `<button type="button" class="knopf" data-tpl-neu="${escapeHtml(z.neu)}" title="Startzeit in 1–3 min, Prüfungen wie immer am PC der ID">✓ Behoben – neu einplanen</button>` : ''}${z.key ? `<button type="button" class="knopf" data-tpl-t="${escapeHtml(z.key)}">→ Plan</button>` : ''}`}</span></div>`).join('')}</div>`).join('')
     return `<div class="tpl-karte tpl-bd"><div class="tpl-h">Braucht dich <b>${n}</b><span class="leg">↻ Balance · ⏸ heute ausgelassen · ⚠ Plan hängt</span></div>${bloecke}</div>`
@@ -46467,6 +46473,44 @@
     if(_tpl.edit) setTimeout(() => root.querySelector('[data-tpl-zeit]')?.focus(), 0)
   }
   /* Neu zeichnen nach Daten-Änderung aus Leiste/Delta-Monitor — nur bei offener Seite, nie während eine Startzeit eingegeben wird */
+  /* ↻ BALANCE LESEN FÜR FREMDE KONTEN (08.10.2026, Finn am Trade-Planer „Braucht dich", Zeile „Mike · Topstep … keine Balance → Am PC von
+   * Mike: Prophos → Accounts → ↻ Balance": „Ich will hier direkt auf Balance-Refresh drücken können, sodass die Balance automatisch geladen
+   * wird — ohne auf Accounts zu gehen, direkt hier."). Eigene Konten gehen weiter über accBalanceLesen (Signal im eigenen Namen); fremde
+   * über PATCH /admin/wd-plaene {aktion:'balance', account_id} — das Backend legt dasselbe Signal (mt5_balance/konto_balance) im Namen
+   * des KONTO-BESITZERS an, sein PC-Tab claimt und liest. Stand über {aktion:'balance_stand'} im 5-s-Takt, höchstens 4 min; danach
+   * der PC-Lebenszeichen-Punkt der ID (pcStandPunktHtml, .1180). Nur Anzeige in der Zeile (_tplBalFremd), keine Logik an der Lesung. */
+  const _tplBalFremd = new Map()   // account_id → {laeuft, text, fehler, html}
+  function tplBalFmt(v){ const n = Number(v); return Number.isFinite(n) ? n.toLocaleString('de-DE', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + ' $' : '' }
+  async function tplBalanceFremd(accId, uid, wer){
+    accId = String(accId || ''); if(!accId || _tplBalFremd.get(accId)?.laeuft) return
+    wer = String(wer || '').trim() || 'der ID'
+    const setz = o => { _tplBalFremd.set(accId, o); tplSpaeter() }
+    const pcs = () => { try{ return (typeof window.pcStandPunktHtml === 'function') ? (window.pcStandPunktHtml(String(uid || '')) || '') : '' }catch(_){ return '' } }
+    setz({ laeuft: true, text: 'Signal wird gesendet …' })
+    try{
+      const tok = await _pushTok(); if(!tok) throw new Error('nicht angemeldet')
+      const ruf = body => fetch(`${WATCHER_HOME}/admin/wd-plaene`, { method: 'PATCH', headers: { 'sb-token': tok, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+        .then(r => r.json().then(d => ({ r, d })).catch(() => ({ r, d: {} })))
+      const { r, d } = await ruf({ aktion: 'balance', account_id: accId })
+      if(!r.ok || !d.signal_id) throw new Error(d.error || ('HTTP ' + r.status))
+      const mt5 = d.art === 'mt5_balance'
+      setz({ laeuft: true, text: `wartet auf PC von ${wer} …` })
+      const t0 = Date.now()
+      while(Date.now() - t0 < 240000){
+        await new Promise(res => setTimeout(res, 5000))
+        const { d: st } = await ruf({ aktion: 'balance_stand', signal_id: d.signal_id })
+        const s = st && st.status, e = (st && st.ergebnis) || {}
+        if(s === 'fertig'){
+          const txt = typeof e.balance === 'number' ? `gelesen ${tplBalFmt(e.balance)}` : String(e.msg || 'gelesen')
+          setz({ laeuft: false, text: txt + (st.pc ? ` (PC ${st.pc})` : '') }); try{ tplLaden && tplLaden(true) }catch(_){}; return
+        }
+        if(['fehler', 'verfallen', 'verworfen'].includes(s)){ setz({ laeuft: false, fehler: true, text: String(e.msg || s) + (st.pc ? ` (PC ${st.pc})` : '') }); return }
+        if(s === 'laeuft'){ const pl = Number(e.warteschlange) || 0
+          setz({ laeuft: true, text: mt5 ? `MT5 wird geöffnet · liest … (PC ${st.pc || '?'})` : pl > 1 ? `in der Warteschlange · Platz ${pl} (PC ${st.pc || '?'})` : `liest … (PC ${st.pc || '?'})` }) }
+      }
+      setz({ laeuft: false, fehler: true, text: 'kein PC hat übernommen (Tab offen?)', html: 'kein PC hat übernommen (Prophos-Tab bei ' + escapeHtml(wer) + ' offen?) ' + pcs() })
+    }catch(err){ setz({ laeuft: false, fehler: true, text: 'nicht gesendet: ' + String((err && err.message) || err).slice(0, 80) }) }
+  }
   function tplSpaeter(){
     try{
       if(window._tplRaf || !document.querySelector('#tpl-view.active')) return
@@ -46655,6 +46699,8 @@
     if(w){ _tpl.weitereAuf = !_tpl.weitereAuf; tplZeichnen(); return }
     const bl = e.target.closest('[data-tpl-bal]')   // Braucht dich: ↻ Balance lesen (bestehende Aktion aus Accounts, F19)
     if(bl){ try{ accBalanceLesen(bl.dataset.tplBal) }catch(err){ console.warn('[tpl] Balance lesen', err) } setTimeout(tplSpaeter, 500); setTimeout(tplSpaeter, 5000); return }
+    const blf = e.target.closest('[data-tpl-balf]')   // Braucht dich: ↻ Balance lesen eines FREMDEN Kontos (08.10.2026) — Signal an den PC der ID
+    if(blf){ tplBalanceFremd(blf.dataset.tplBalf, blf.dataset.tplUid, blf.closest('.tpl-bd-id')?.querySelector('b')?.firstChild?.nextSibling?.textContent || '').catch(err => console.warn('[tpl] Balance fremd', err)); setTimeout(tplSpaeter, 300); return }
     const nk = e.target.closest('[data-tpl-neu]')   // Braucht dich: ↻ Neu starten (START-FEHLER, 07.10.2026) — Start in 1 min, alle Prüfungen am PC
     if(nk){ const t = tplDaten().trades.find(x => x.key === nk.dataset.tplNeu); if(!t) return
       nk.disabled = true; nk.textContent = 'plant neu …'

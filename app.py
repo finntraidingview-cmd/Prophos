@@ -10320,6 +10320,36 @@ def _wd_endlesung_signal(plan):
             "params": {"aktion": "endlesung", "von": "admin"}}, None
 
 
+# BALANCE FREMDER KONTEN AUS „BRAUCHT DICH" (08.10.2026, Finn am Trade-Planer: „Ich will hier direkt auf Balance-Refresh drücken können,
+# sodass die Balance automatisch geladen wird — ohne auf Accounts zu gehen"; bisher nur der Hinweis „Am PC von Mike: Prophos → Accounts
+# → ↻ Balance"). Gleiches Signal wie der eigene Weg (accBalanceLesen): MT5-Konto → 'mt5_balance' mit Login, TradingView/Topstep →
+# 'konto_balance' — nur im Namen des KONTO-BESITZERS angelegt (order_signale-RLS), damit sein PC-Tab es claimt. Keine Logik an der
+# Lesung selbst; Stand über balance_stand (= endlesung_stand für diese beiden Aktionen).
+WD_BALANCE_FUTURES = WD_FUTURES_FIRMEN + ("alpha future", "alphafutures")   # wie tpFirmIstFutures im Frontend (Alpha Futures seit 07.10.)
+
+
+def _wd_balance_signal(acc, mt5_login=""):
+    """REIN RECHNEND (testbar): Signal-Zeile fuer „↻ Balance lesen" eines Kontos → (zeile, None) oder (None, (http, text)).
+    acc = accounts-Zeile {id, user_id, name, firm, external_id}; mt5_login = mt5_links.mt5_login (leer = keins). Futures-Firma
+    (WD_BALANCE_FUTURES) oder ohne MT5-Login → 'konto_balance' (Puls in TradingView/TopstepX), sonst 'mt5_balance' (Echo-Terminal)."""
+    if not acc:
+        return None, (404, "Konto nicht gefunden")
+    aid, uid = str(acc.get("id") or ""), str(acc.get("user_id") or "")
+    if len(aid) < 10:
+        return None, (400, "account_id fehlt")
+    if len(uid) < 10:
+        return None, (409, "Konto ohne Besitzer")
+    firm = str(acc.get("firm") or "")
+    futures = any(k in firm.lower() for k in WD_BALANCE_FUTURES)
+    login = str(mt5_login or "").strip()
+    basis = {"account_id": aid, "external_id": acc.get("external_id"), "firm": firm, "name": acc.get("name"), "von": "admin"}
+    if not futures and login:
+        params = dict(basis, aktion="mt5_balance", login=login)
+    else:
+        params = dict(basis, aktion="konto_balance")
+    return {"user_id": uid, "plan_id": f"konto:{aid}", "status": "wartet", "params": params}, None
+
+
 def _wd_endlesung_zeile(final):
     """Endlesungs-Stand fuer die wd-heute-Zeile (Design-Statuszeile, auch fuer fremde Plaene) — nur die puls-Felder."""
     final = final if isinstance(final, dict) else {}
@@ -11617,9 +11647,9 @@ def admin_wd_plaene():
         d = request.get_json(silent=True) or {}
         akt = d.get("aktion")
         try:
-            if akt == "endlesung_stand":
+            if akt in ("endlesung_stand", "balance_stand"):
                 tab, key = "order_signale", str(d.get("signal_id") or "").strip()
-            elif akt == "farm":
+            elif akt in ("farm", "balance"):
                 tab, key = "accounts", str(d.get("account_id") or "").strip()
             elif akt in ("ende", "endlesung", "erledigt", "ansehen", "manuell", "manuell_weg"):
                 tab, key = "trade_plans", str(d.get("plan_id") or "").strip()
@@ -11862,14 +11892,29 @@ def admin_wd_plaene():
                 return jsonify({"ok": True, "plan_id": pid, "signal_id": str((sig or {}).get("id") or "")})
             except Exception as e:
                 return jsonify({"error": f"Signal nicht angelegt ({type(e).__name__})"}), 502
-        if daten.get("aktion") == "endlesung_stand":
-            # Stand eines Endlesungs-Signals (der Mac liest fremde order_signale per RLS nicht)
+        if daten.get("aktion") == "balance":
+            # „↻ Balance lesen" fuer fremde Konten aus „Braucht dich" (08.10.2026, s. _wd_balance_signal): Signal im Namen des Besitzers
+            aid = str(daten.get("account_id") or "").strip()
+            if len(aid) < 10:
+                return jsonify({"error": "account_id fehlt"}), 400
+            try:
+                acc = sb_select("accounts", {"select": "id,user_id,name,firm,external_id", "id": f"eq.{aid}", "limit": "1"})
+                ml = sb_select("mt5_links", {"select": "mt5_login", "account_id": f"eq.{aid}", "limit": "1"})
+                zeile, fehler = _wd_balance_signal(acc[0] if acc else None, (ml[0] if ml else {}).get("mt5_login") or "")
+                if fehler:
+                    return jsonify({"error": fehler[1], "account_id": aid}), fehler[0]
+                sig = sb_insert("order_signale", zeile)
+                return jsonify({"ok": True, "account_id": aid, "signal_id": str((sig or {}).get("id") or ""), "art": zeile["params"]["aktion"]})
+            except Exception as e:
+                return jsonify({"error": f"Signal nicht angelegt ({type(e).__name__})"}), 502
+        if daten.get("aktion") in ("endlesung_stand", "balance_stand"):
+            # Stand eines Endlesungs-/Balance-Signals (der Mac liest fremde order_signale per RLS nicht)
             sid = str(daten.get("signal_id") or "").strip()
             if len(sid) < 10:
                 return jsonify({"error": "signal_id fehlt"}), 400
             try:
                 rows = sb_select("order_signale", {"select": "id,status,ergebnis,pc,updated_at,params", "id": f"eq.{sid}", "limit": "1"})
-                if not rows or (rows[0].get("params") or {}).get("aktion") not in ("endlesung", "mt5_terminal"):   # mt5_terminal: „Ansehen"
+                if not rows or (rows[0].get("params") or {}).get("aktion") not in ("endlesung", "mt5_terminal", "mt5_balance", "konto_balance"):   # mt5_terminal: „Ansehen"; *_balance: „↻ Balance lesen" (08.10.2026)
                     return jsonify({"error": "Signal nicht gefunden"}), 404
                 z = rows[0]
                 return jsonify({"ok": True, "status": z.get("status"), "ergebnis": z.get("ergebnis"), "pc": z.get("pc"), "updated_at": z.get("updated_at")})
