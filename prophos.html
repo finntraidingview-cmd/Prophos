@@ -5976,7 +5976,6 @@
             <div class="field">
               <div class="label-row">
                 <label for="loginPassword">Passwort</label>
-                <button type="button" class="forgot" data-go="reset">Vergessen?</button>
               </div>
               <div class="input-wrap">
                 <span class="icon-l"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>
@@ -6002,9 +6001,10 @@
             </button>
           </form>
 
-          <div class="screen-foot">
-            Noch keinen Account? <button type="button" data-go="signup">Registrieren</button>
-          </div>
+          <!-- Kein Registrieren / Passwort-vergessen mehr (07.10.2026, Finn: „Man soll keinen Account erstellen können, nur ich").
+               Supabase-Signups sind aus; neue Zugänge legt nur Finn in Supabase an. Die Screens signup/reset bleiben im DOM
+               (ihre Handler hängen daran), sind aber nicht mehr erreichbar. -->
+          <div class="screen-foot">Zugänge vergibt nur der Admin.</div>
         </section>
 
         <!-- SIGNUP SCREEN -->
@@ -11936,9 +11936,7 @@
       if(b) setLoading(b, false)
     }
     // Activate sub-screen based on hash, or default to login
-    const hash = (location.hash || '').replace('#','')
-    const screen = ['signup','reset','login'].includes(hash) ? hash : 'login'
-    goScreen(screen)
+    goScreen('login')   // #signup / #reset führen nicht mehr zu den alten Masken (07.10.2026)
   }
 
   function showDashboard(user){
@@ -40069,7 +40067,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1145'
+  const OS_TAB_BUILD = '2026-09-22.1146'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
