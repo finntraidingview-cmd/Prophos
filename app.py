@@ -10053,12 +10053,16 @@ def tv_bracket_ueberlagern(route, tv, hedge):
 
 
 def _wd_konto_groesse(acc):
-    """Kontogröße: starting_balance, sonst „150k" aus dem Namen (wie tpKontoGroesseAusName)."""
-    sb = _wd_num((acc or {}).get("starting_balance"))
-    if sb and sb > 0:
-        return sb
+    """Kontogröße: „150k" aus dem Namen zuerst, sonst starting_balance (seit 08.10.2026 dieselbe Reihenfolge wie das Frontend
+    kontoGroesseAnzeige/.1169 — Finn: ein 100k-Funding-Pips-Konto stand als „150k", weil starting_balance 150000 trug; Radar-groesse,
+    WD-Hedge-Liquidation (Größe + 100 $) und Planer-Anzeige sehen so dieselbe Zahl). SQL-Abgleich 08.10.2026: bei allen winning_days/
+    funded/funded_cfd-Konten ist starting_balance leer oder 0 — dort rechnete die Liquidation ohnehin schon aus dem Namen, nichts
+    ändert sich; abweichend sind nur Phasen-Konten (siehe Bericht Slave-Terminal)."""
     m = re.search(r"(\d{2,3})\s*k\b", str((acc or {}).get("name") or ""), re.I)
-    return float(m.group(1)) * 1000 if m else None
+    if m:
+        return float(m.group(1)) * 1000
+    sb = _wd_num((acc or {}).get("starting_balance"))
+    return sb if sb and sb > 0 else None
 
 
 def wd_start_balance(p, tv, acc, vorher):

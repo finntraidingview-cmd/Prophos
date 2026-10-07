@@ -65,6 +65,7 @@ def main():
           "Level: ohne Einstieg/Betrag/Richtung/Punktwert/Unsinn → None")
 
     check(a["_wd_konto_groesse"]({"starting_balance": 100000}) == 100000 and a["_wd_konto_groesse"]({"name": "150k Apex PAAPEX…"}) == 150000
+          and a["_wd_konto_groesse"]({"name": "100k Funding Pips …", "starting_balance": 150000}) == 100000   # Name vor starting_balance (08.10.2026)
           and a["_wd_konto_groesse"]({"name": "Konto ohne Groesse"}) is None and a["_wd_konto_groesse"](None) is None,
           "Kontogroesse: starting_balance, sonst '150k' aus dem Namen, sonst None")
 
