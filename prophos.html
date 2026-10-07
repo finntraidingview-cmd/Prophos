@@ -39944,7 +39944,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1123'
+  const OS_TAB_BUILD = '2026-09-22.1124'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -44105,8 +44105,9 @@
    * der Long/Short-Ausgleich gilt immer über alle IDs (so rechnet der Planer). Zeiten = deutsche Zeit wie im Planer. */
   const _apPr = { modus: 'morgen', laeuft: false, d: null, tag: null, fehler: '', hinweis: '', nr: 0, alle: false }
   // Probelauf „alle IDs" (TPL-UEBERSICHT-2, 07.10.2026): Schalter neben dem Probelauf-Knopf (Admin), schickt ids:'alle' mit — das Backend
-  // dazu baut Terminal 1 (Vertrag folgt); bis dahin bleibt der Schalter ausgegraut (Tooltip „Backend folgt"). Auf true setzen, sobald die Route es kann.
-  const AP_PROBE_ALLE_BACKEND = false
+  // dazu baut Terminal 1 (Vertrag folgt); bis dahin bleibt der Schalter ausgegraut (Tooltip „Backend folgt"). Seit 3630d25 (.1123) live:
+  // ids:"alle" nur mit trocken und nur Admin (ap_ids_modus, sonst 403) — der Schalter steht ohnehin nur beim Admin (07.10.2026).
+  const AP_PROBE_ALLE_BACKEND = true
   let AP_PR_VON = 120, AP_PR_BIS = 1050              // Zeitleiste 02:00–17:30 deutscher Zeit (letzter Start 17:30, Finn 05.10.2026)
   // Delta-neutral (06.10.2026, Vertrag autoplan-delta-vertrag.md §2): Nachtlauf um 00:00 dt, Fenster 00:00–14:30 · 14:30–17:30 · 17:30–19:30
   // mit 40/40/20 % — Zeitleiste dann 00:00–19:30. Nur Rückfall, wenn die Antwort keine Fenster mitschickt.
