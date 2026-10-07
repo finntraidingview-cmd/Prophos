@@ -14828,6 +14828,83 @@ def ap_letzt_je_konto(plaene):
     return out
 
 
+AP_7T_TZ = "Asia/Dubai"     # „Letzte 7 Tage" in Dubai-Tagen (Finns Betriebszeit, wie KAPITEL_TZ)
+
+
+def _ap_ts(roh):
+    """ISO-Zeit → datetime (UTC) oder None. Gleicht Postgres-Formen an („ +00", 1–6 Nachkommastellen, Z) — Python 3.9 nimmt
+    in fromisoformat nur 3 oder 6 Nachkommastellen."""
+    if not roh:
+        return None
+    t = str(roh).strip().replace(" ", "T").replace("Z", "+00:00")
+    t = re.sub(r"([+-]\d\d)$", r"\1:00", t)
+    t = re.sub(r"\.(\d{1,6})\d*(?=[+-]|$)", lambda m: "." + m.group(1).ljust(6, "0"), t)
+    try:
+        d = datetime.fromisoformat(t)
+    except ValueError:
+        return None
+    return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+
+
+def ap_sieben_tage(jetzt, konten, archiv, plaene, tz=None):
+    """REIN RECHNEND (testbar): je ID {bestanden_7t, geblasen_7t, beendet_7t} der letzten 7 Dubai-Tage (heute + 6 davor, ab 00:00)
+    — Master/Slave 8, 08.10.2026, ID-Detail-Karte „Letzte 7 Tage". Nur Challenge/Phase-Konten (AP_TYPEN). Quellen, die es schon gibt:
+      konten  = {konto_id: {user_id, account_type, ziel_erreicht_at}} (accounts; archivierte behalten ihre Kontoart),
+      archiv  = Werte von user_settings key=archive [{konto_id: {reason, at, …}}] (Archivieren mit Grund, Prop-Baum/Reibung),
+      plaene  = trade_plans [{user_id, master_account_id, konto_typ, auto_plan, status, completed_at, ended_at}].
+    bestanden = Konto im Zeitraum archiviert mit Grund passed/passed_pending (Phase mit Nachfolger umgestellt) ODER Ziel-Wache hat
+    ziel_erreicht_at im Zeitraum gesetzt (Ziel erreicht, noch nicht umgestellt) — je Konto einmal. NICHT erfasst: Phase am selben
+    Konto umgestellt ohne Archiv (kein Zeitstempel; 14 Tage bis 08.10.2026: 3 Fälle). geblasen = archiviert mit Grund blown im
+    Zeitraum. beendet = Auto-Pläne status completed mit Ende im Zeitraum, Phase des Plans (konto_typ, sonst Kontoart) in AP_TYPEN.
+    Eine Quelle None (nicht ladbar) → dieses Feld null für alle IDs. → ({uid: {…}}, ab_iso)"""
+    z = (jetzt or datetime.now(timezone.utc)).astimezone(_ap_tz(tz or AP_7T_TZ))
+    ab = datetime(z.year, z.month, z.day, tzinfo=z.tzinfo) - timedelta(days=6)
+    out = {}
+
+    def zaehl(uid, feld, wert=1):
+        e = out.setdefault(str(uid), {"bestanden_7t": 0 if None not in (konten, archiv) else None,
+                                      "geblasen_7t": 0 if None not in (konten, archiv) else None,
+                                      "beendet_7t": 0 if plaene is not None else None})
+        if e[feld] is not None:
+            e[feld] += wert
+
+    def im_fenster(roh):
+        d = _ap_ts(roh)
+        return d is not None and d >= ab
+
+    bestanden, geblasen = set(), set()
+    if konten is not None and archiv is not None:
+        erst = {}                                  # Konto → (at, reason) des frühesten Eintrags mit Grund (mehrere Nutzer tragen dasselbe)
+        for v in archiv:
+            for kid, info in (v or {}).items() if isinstance(v, dict) else ():
+                if isinstance(info, dict) and info.get("reason") and info.get("at"):
+                    d = _ap_ts(info["at"])
+                    if d and (kid not in erst or d < erst[kid][0]):
+                        erst[str(kid)] = (d, str(info["reason"]).strip().lower())
+        for kid, (d, grund) in erst.items():
+            a = konten.get(kid)
+            if not a or a.get("account_type") not in AP_TYPEN or d < ab:
+                continue
+            if grund in ("passed", "passed_pending"):
+                bestanden.add(kid)
+            elif grund == "blown":
+                geblasen.add(kid)
+        for kid, a in konten.items():
+            if a.get("account_type") in AP_TYPEN and kid not in geblasen and im_fenster(a.get("ziel_erreicht_at")):
+                bestanden.add(kid)
+        for kid in bestanden:
+            zaehl(konten[kid]["user_id"], "bestanden_7t")
+        for kid in geblasen:
+            zaehl(konten[kid]["user_id"], "geblasen_7t")
+    if plaene is not None:
+        for p in plaene:
+            typ = p.get("konto_typ") or ((konten or {}).get(str(p.get("master_account_id"))) or {}).get("account_type")
+            if p.get("auto_plan") and p.get("status") == "completed" and typ in AP_TYPEN \
+                    and im_fenster(p.get("completed_at") or p.get("ended_at")):
+                zaehl(p.get("user_id"), "beendet_7t")
+    return out, ab.isoformat()
+
+
 def ap_bal_guard(lade):
     """Bestätigen-Guard (testbar, lade injiziert): lade() → (pl, accs, letzt, echo_bal, dup_bal). → None (alles live, bestätigen)
     oder (status, msg): 400 mit den Konten, deren Balance seit dem letzten Trade nicht gelesen ist; 503, wenn das Lesen scheitert —
@@ -14844,6 +14921,47 @@ def ap_bal_guard(lade):
         print(f"[auto-plan] ⚠️ bestaetigen/balance_live: {type(e).__name__}: {e}", flush=True)
         return 503, AP_GRUND_BAL_FEHLER
     return (400, f"{AP_GRUND_BAL_LIVE}: {', '.join(tot)}") if tot else None
+
+
+def _ap_sieben_tage_laden(jetzt=None):
+    """Quellen für ap_sieben_tage laden — jede in eigenem try (Fehler → None → Feld null). → ({uid: {…}, "_ok": {feld: bool}}, ab_iso)"""
+    jetzt = jetzt or datetime.now(timezone.utc)
+    konten = archiv = plaene = None
+    try:
+        try:
+            rows = _sb_all("accounts", {"select": "id,user_id,account_type,ziel_erreicht_at", "account_type": "in.(" + ",".join(AP_TYPEN) + ")"})
+        except requests.exceptions.HTTPError as e:
+            if "ziel_erreicht_at" not in str(getattr(e.response, "text", "") or e):
+                raise
+            rows = _sb_all("accounts", {"select": "id,user_id,account_type", "account_type": "in.(" + ",".join(AP_TYPEN) + ")"})
+        konten = {str(r["id"]): r for r in rows if r.get("id")}
+    except Exception as e:
+        print(f"[auto-plan] ⚠️ 7 Tage/Konten: {type(e).__name__}: {e}", flush=True)
+    try:
+        archiv = []
+        for row in _sb_all("user_settings", {"select": "value", "key": "eq.archive"}):
+            v = row.get("value")
+            if isinstance(v, str):
+                try:
+                    v = json.loads(v)
+                except ValueError:
+                    v = None
+            if isinstance(v, dict):
+                archiv.append(v)
+    except Exception as e:
+        archiv = None
+        print(f"[auto-plan] ⚠️ 7 Tage/Archiv: {type(e).__name__}: {e}", flush=True)
+    try:
+        seit = (jetzt - timedelta(days=8)).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")   # ohne „+" (würde im or-Filter zum Leerzeichen)
+        plaene = _sb_all("trade_plans", {"select": "user_id,master_account_id,konto_typ,auto_plan,status,completed_at,ended_at",
+                                         "auto_plan": "eq.true", "status": "eq.completed",
+                                         "or": f"(completed_at.gte.{seit},ended_at.gte.{seit})"})
+    except Exception as e:
+        print(f"[auto-plan] ⚠️ 7 Tage/Pläne: {type(e).__name__}: {e}", flush=True)
+    out, ab = ap_sieben_tage(jetzt, konten, archiv, plaene)
+    ok_ka = konten is not None and archiv is not None
+    out["_ok"] = {"bestanden_7t": ok_ka, "geblasen_7t": ok_ka, "beendet_7t": plaene is not None}
+    return out, ab
 
 
 def _ap_bal_guard_laden(id_filter):
@@ -17401,6 +17519,10 @@ def admin_auto_plan_ids():
     alle = sorted(set(ap_ids_laden(aus)) | set(drin), key=lambda u: namen.get(u, u).lower())
     ids = [{"user_id": u, "name": namen.get(u, u[:8]), "drin": u in drin, "konten": konten.get(u, 0),
             "geplant": gepl.get(u, 0), "ausgelassen": ausg.get(u, 0)} for u in alle]
+    # LETZTE 7 TAGE je ID (Master/Slave 8, 08.10.2026, ID-Detail-Karte): bestanden/geblasen/beendet — jede Quelle einzeln, Fehler → null
+    sieben, sieben_ab = _ap_sieben_tage_laden()
+    for e in ids:
+        e.update(sieben.get(e["user_id"]) or {k: (0 if sieben.get("_ok", {}).get(k) else None) for k in ("bestanden_7t", "geblasen_7t", "beendet_7t")})
     # ZU BESTÄTIGEN (Finn 08.10.2026): alle unbestätigten Auto-Vorschläge aller IDs, egal welcher Tag (heute/morgen) — das Delta kennt
     # nur den heutigen Tag, die Nacht plant aber schon den nächsten. Bestätigt wird über /admin/auto-plan/bestaetigen (alle IDs).
     offen = []
@@ -17440,7 +17562,7 @@ def admin_auto_plan_ids():
                           **ap_boden_sicher(reg.get("firmen"), a, acc_balance_wahl(a, echo_bal, dup_bal)[0], peaks)})
     except Exception as e:
         print(f"[auto-plan] ⚠️ ids/offen: {type(e).__name__}: {e}", flush=True)
-    return jsonify({"ok": True, "ids": ids, "aktiv": bool(reg.get("aktiv")), "tag": tag, "offen": offen})
+    return jsonify({"ok": True, "ids": ids, "aktiv": bool(reg.get("aktiv")), "tag": tag, "offen": offen, "sieben_tage_ab": sieben_ab})
 
 
 @app.route("/admin/auto-plan/plan", methods=["POST", "OPTIONS"])
