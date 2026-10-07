@@ -18604,6 +18604,27 @@ CDP_SHOW_MORE_JS = r"""(function () {
 })()"""
 
 
+def cdp_toasts_kurz(toasts):
+    """REIN RECHNEND (testbar): Kurzbild des Meldungsbereichs für die Spur — Vorfall 07.10.2026 13:37 UTC (FundedNext, 3 NQ, pc-xxxxxx):
+    13 s lang stand nichts in der Spur, dann „Show more" geklickt und sofort „Meldungen roh: nichts" — aus der Spur war nicht zu sehen,
+    was augen.js in der Zeit überhaupt gesehen hat (Gruppen? Protokoll? nichts?). -> 'keine Meldungen' | 'gruppen: orders(zu, 3 Texte,
+    Knopf) · log 120 Z · meldungen 2'"""
+    t = toasts if isinstance(toasts, dict) else {}
+    teile = []
+    gr = [g for g in (t.get("gruppen") or []) if isinstance(g, dict)]
+    if gr:
+        teile.append("gruppen: " + ", ".join(
+            f"{g.get('gruppe') or '?'}({'offen' if g.get('offen') is True else 'zu' if g.get('offen') is False else '?'}, "
+            f"{len(g.get('texte') or [])} Texte{', Knopf' if cdp_rect(g.get('mehr')) else ''})" for g in gr[:4]))
+    lg = [l for l in (t.get("log") or []) if isinstance(l, dict) and l.get("text")]
+    if lg:
+        teile.append(f"log {sum(len(str(l.get('text') or '')) for l in lg)} Z")
+    ms = [m for m in (t.get("meldungen") or []) if isinstance(m, dict)]
+    if ms:
+        teile.append(f"meldungen {len(ms)}")
+    return " · ".join(teile) if teile else "keine Meldungen"
+
+
 def cdp_show_more_wahl(kandidaten, stapel_rect=None):
     """REIN RECHNEND (testbar): GENAU EIN „Show more" am Meldungsstapel. Schon offene (aria-expanded true) und „Show less" zählen nie.
     Mehrere: der toast-group-expand-Knopf vor Text-Treffern, dann der nächste zum Stapel (höchstens 400 px). -> Kandidat | None"""
@@ -19083,7 +19104,8 @@ def modus_tvkette_cdp(cmd):
         _puls_ergebnis_senden("order", "geklickt", cmd, res, trail)   # sofort: überlebt Absturz und einen neu geladenen Prophos-Tab
         b, neu, erst_ok, mehr = {}, [], None, {"gedrueckt": False, "versuche": 0, "hin": False, "gehalten": 0}
         b_ok = None                                   # einmal bestätigter Beweis (BEWEIS BLEIBT, 07.10.2026, s. u.)
-        ende = time.time() + 15.0
+        t_klick, erst_toast = time.time(), None
+        ende = t_klick + 15.0
         while time.time() < ende:
             _warte(0.5, 0.25)
             try:
@@ -19091,6 +19113,11 @@ def modus_tvkette_cdp(cmd):
             except Exception as e_:
                 trail.append(f"Blick nach dem Klick: {type(e_).__name__}")
                 continue
+            # Spur (Vorfall 07.10.2026 13:37 UTC, FundedNext 3 NQ, pc-xxxxxx: 13 s lang keine Zeile, dann „Show more" und sofort
+            # „Meldungen roh: nichts"): wann tauchte überhaupt die erste Meldung/Gruppe auf?
+            if erst_toast is None and cdp_toasts_kurz(st.get("toasts")) != "keine Meldungen":
+                erst_toast = time.time() - t_klick
+                trail.append(f"erste Meldung nach {erst_toast:.1f} s ({cdp_toasts_kurz(st.get('toasts'))})")
             # „Show more" (Finn 29.09.2026 nach dem ersten K4-Lauf: SL fehlte, der Meldungsstapel war eingeklappt): den Stapel aufklappen,
             # damit Fill, TP und SL sichtbar mit Preis dastehen (Radar spiegelt die Order 1:1). Zweiter Live-Lauf .804 (14:26 UTC): der
             # data-name-Knopf lag beim Blick außerhalb des Fensters (Stapel fuhr noch ein) → „nichts geklickt", und es gab keinen zweiten
@@ -19101,20 +19128,26 @@ def modus_tvkette_cdp(cmd):
                 mehr["versuche"] += 1
                 geo = st.get("geo") if isinstance(st.get("geo"), dict) else {}
                 k = cdp_show_more_wahl(s.lese_js(CDP_SHOW_MORE_JS) or [], cdp_rect(gr))
+                # NACHLESE-ZEIT (07.10.2026 13:37 UTC, FundedNext 3 NQ, pc-xxxxxx, Plan a7256d6c: Fill lag vor, der Stapel tauchte erst
+                # 13 s nach dem Klick auf, „Show more" wurde bei 15,1 s gedrückt — und die 15-s-Frist war damit um: kein frischer Blick
+                # mehr, „Meldungen roh: nichts", Ergebnis „unklar", Einstieg aus der Kerze geschätzt, später ein falsches „demo_liq"
+                # mit −4.000 $ statt TP +3.357 $). Jeder Show-more-Versuch verlängert die Frist einmal auf mindestens 4 s ab jetzt;
+                # nach einem echten Druck gibt es garantiert noch Blicke auf den offenen Stapel. Die Beweis-Regel bleibt dieselbe.
+                ende = max(ende, time.time() + 4.0)
                 if not k:
                     trail.append(f"Show more {mehr['versuche']}/4: kein Knopf ganz im Bild (augen-Knopf {cdp_rect(gr.get('mehr'))}, "
                                  f"Stapel {cdp_rect(gr)}, Seite {geo.get('innerWidth')}×{geo.get('innerHeight')})")
                     if cdp_rect(gr) and not mehr["hin"]:
                         mehr["hin"] = True
                         s.hin(cdp_rect(gr), f"Meldungsstapel '{gr.get('gruppe')}'")   # Hover blendet die Steuerleiste ein
-                    continue
-                if s.klick(cdp_rect(k), f"Show more (Meldungen '{gr.get('gruppe')}', {k.get('text') or k.get('dn')})", toast_ok=True):
+                    # kein continue: was in DIESEM Blick schon sichtbar ist (oberster Toast, Positions-Zeile), zählt als Beweis
+                elif s.klick(cdp_rect(k), f"Show more (Meldungen '{gr.get('gruppe')}', {k.get('text') or k.get('dn')})", toast_ok=True):
                     mehr["gedrueckt"] = True
                     _warte(0.6, 0.3)
                     continue                           # sofort frisch lesen — aufgeklappt
-                trail.append(f"Show more {mehr['versuche']}/4 nicht gedrückt (Knopf @{k.get('rect')}, Seite "
-                             f"{geo.get('innerWidth')}×{geo.get('innerHeight')}) — nächster Blick")
-                continue
+                else:
+                    trail.append(f"Show more {mehr['versuche']}/4 nicht gedrückt (Knopf @{k.get('rect')}, Seite "
+                                 f"{geo.get('innerWidth')}×{geo.get('innerHeight')}) — nächster Blick")
             neu = k3_neue_meldungen(vorher_m, (st.get("toasts") or {}).get("meldungen"))
             b = cdp_order_beweis(neu, k3_zeilen(st.get("positionen"), root), plan, menge0)
             # BEWEIS BLEIBT (07.10.2026, Routine „Puls-Fehler", Muster „unklar: ergebnis unklar — … in 15 s weder Fill-Meldung noch
@@ -19167,6 +19200,9 @@ def modus_tvkette_cdp(cmd):
         trail.append("Meldungen roh: " + (" | ".join(res["meldung_roh"]) or "nichts")[:600])
         if not b.get("bestaetigt"):
             pops = [p.get("titel") or p.get("text") for p in (st.get("popups") or [])][:2]
+            trail.append(f"Meldungsbereich am Ende ({time.time() - t_klick:.1f} s nach dem Klick): "
+                         + cdp_toasts_kurz(st.get("toasts") if isinstance(st, dict) else None)
+                         + (f" · erste Meldung nach {erst_toast:.1f} s" if erst_toast is not None else " · nie eine Meldung gesehen"))
             return raus("unklar", ("Senden geklickt, aber in 15 s weder Fill-Meldung noch neue Position gesehen"
                                    + (f" (Dialog offen: {pops})" if pops else "") + " — Ergebnis UNKLAR. Erst in TradingView nachsehen, "
                                    "NICHT erneut starten."), "unklar")

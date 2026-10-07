@@ -23729,21 +23729,45 @@
         try{ const { data } = await supabase.from('trade_plans').select('*').eq('id', pid).maybeSingle(); if(data) frisch = rowToPlan(data) }catch(_){}
         if(frisch.status !== 'open' || (frisch.mt5Baseline && frisch.mt5Baseline.hedge)) continue
         const beide = dm.status === 'beide_in_minute'
-        const extra = { grund: dm.status === 'tp' ? 'demo_tp' : dm.status === 'liquidiert' ? 'demo_liq' : 'demo_beide', at: dm.at || new Date().toISOString(),
-                        preis: dm.preis != null ? Number(dm.preis) : null, master_pl_schaetzung: (!beide && dm.pl_usd != null && isFinite(Number(dm.pl_usd))) ? Number(dm.pl_usd) : null,
-                        ...(beide ? { hinweis: 'TP und Liquidation in derselben Minute — Reihenfolge unbekannt, keine Schätzung' } : {}) }
+        // EINSTIEG UNBESTÄTIGT (Finn 08.10.2026, Vorfall 07.10. 17:37 Dubai, FundedNext 3 NQ, Plan a7256d6c: Puls klickte korrekt, sah aber
+        // in 15 s keine Fill-Meldung → „unklar", Einstieg aus der Startkerze geschätzt (31.219,5). Die Demo rechnete gegen diesen
+        // Schätzwert und schrieb 2 min später „demo_liq" mit −4.000 $ — der Trade lief weiter und endete 45 min später am TP mit
+        // +3.357,72 $. 40 Minuten lang stand ein falscher Verlust in Prophos). Ohne bewiesenen Einstieg sind TP-/Liq-Level nur
+        // geraten, also ist auch der Demo-Treffer nur geraten: kein Preis, keine Schätzung, Grund 'demo_unklar'. Der Plan geht
+        // trotzdem nach „Überprüfen", damit die Balance-Nachlesung läuft — die liest erst, wenn die Position laut Puls weg ist
+        // (tvV2EndlesungAuswerten: „Master-Position laut Puls noch offen"), und P&L = Balance nachher − vorher ist dann die Wahrheit.
+        const unbestaetigt = tvV2EinstiegUnbestaetigt(frisch, t)
+        const extra = unbestaetigt
+          ? { grund: 'demo_unklar', demo_status: dm.status, at: dm.at || new Date().toISOString(), preis: null, master_pl_schaetzung: null,
+              hinweis: `Demo meldet ${dm.status === 'tp' ? 'TP' : dm.status === 'liquidiert' ? (dm.stop === 'sl' ? 'SL' : 'Liquidation') : 'TP + Liquidation'}, der Einstieg ist aber nur geschätzt (${String((t && t.einstieg_quelle) || 'ohne Einstieg')}) — kein Ergebnis, Balance-Lesung abwarten` }
+          : { grund: dm.status === 'tp' ? 'demo_tp' : dm.status === 'liquidiert' ? 'demo_liq' : 'demo_beide', at: dm.at || new Date().toISOString(),
+              preis: dm.preis != null ? Number(dm.preis) : null, master_pl_schaetzung: (!beide && dm.pl_usd != null && isFinite(Number(dm.pl_usd))) ? Number(dm.pl_usd) : null,
+              ...(beide ? { hinweis: 'TP und Liquidation in derselben Minute — Reihenfolge unbekannt, keine Schätzung' } : {}) }
         let ok = false
         try{ ok = await tvV2EndeSetzen(frisch, null, 'demo', extra) }catch(e){ console.warn('[demo-ende]', e) }
         if(!ok) continue
         try{ const pf = tradePlans.find(x => String(x.id) === pid); if(pf && pf.status === 'open' && typeof atMoveToReview === 'function') await atMoveToReview(pf) }catch(e){ console.warn('[demo-ende] Überprüfen', e) }
         // Trade-Ende = Demo-Treffer (atMoveToReview stempelt „jetzt") — Live Trades rechnet die Nachlese-Zeit ab ended_at
         try{ await supabase.from('trade_plans').update({ ended_at: extra.at }).eq('id', pid).eq('status', 'review'); const pf = tradePlans.find(x => String(x.id) === pid); if(pf) pf.endedAt = extra.at }catch(_){}
-        if(typeof atToast === 'function') atToast(`✓ ${frisch.masterName || 'Plan'}: Demo ${dm.status === 'tp' ? 'TP' : dm.status === 'liquidiert' ? (dm.stop === 'sl' ? 'SL' : 'Liquidation') : 'TP + Liquidation'} erreicht → Überprüfen · Warte auf Puls`, 'end')   // stop 'sl' seit 29.09.2026 (Backend _lt_demo)
+        if(typeof atToast === 'function') atToast(unbestaetigt
+          ? `⚠ ${frisch.masterName || 'Plan'}: Demo meldet ein Ende, der Einstieg ist aber nur geschätzt → Überprüfen ohne P&L · Balance-Lesung abwarten`
+          : `✓ ${frisch.masterName || 'Plan'}: Demo ${dm.status === 'tp' ? 'TP' : dm.status === 'liquidiert' ? (dm.stop === 'sl' ? 'SL' : 'Liquidation') : 'TP + Liquidation'} erreicht → Überprüfen · Warte auf Puls`, 'end')   // stop 'sl' seit 29.09.2026 (Backend _lt_demo)
       }
     }catch(e){ console.warn('[demo-ende]', e) }
   }
   setTimeout(tvV2DemoEndeTakt, 40000 + Math.random() * 20000)
   window._tvV2DemoEndePruefen = tvV2DemoEndePruefen   // Test-Haken: ein Durchlauf ohne neuen Takt
+  // REIN RECHNEND (window._tvV2EinstiegUnbestaetigt): ist der Einstieg dieses Plans NICHT bewiesen? Bewiesen = Fill-Meldung, Avg Fill
+  // aus Tabelle/Reader, Hand-Eintrag oder Feed-Kurs zum Klick. Nur geraten = 'kerze_start' (Mitte der Startkerze, Backend _lt_kerze_start)
+  // oder gar kein Einstieg. Backend-Zeile t (live-trades) hat Vorrang, dann der eingefrorene Wert am Plan (tv.einstieg_quelle).
+  function tvV2EinstiegUnbestaetigt(p, t){
+    const tv = (p && p.mt5Baseline && p.mt5Baseline.tv) || {}
+    const q = String((t && t.einstieg_quelle) || tv.einstieg_quelle || '')
+    if(q === 'kerze_start') return true
+    const e = Number((t && t.einstieg_nq) != null ? t.einstieg_nq : tv.einstieg_nq)
+    return !(e > 1000)
+  }
+  window._tvV2EinstiegUnbestaetigt = tvV2EinstiegUnbestaetigt
   async function hedgePlNachholen(plan){
     const h = plan.mt5Baseline.hedge, pid = String(plan.id)
     if(h.pl_nachfrage_at && Date.now() - (Date.parse(h.pl_nachfrage_at) || 0) < 30000) return   // höchstens alle 30 s fragen
@@ -40156,7 +40180,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1158'
+  const OS_TAB_BUILD = '2026-09-22.1159'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -43608,6 +43632,7 @@
     if(ende) info.push('Trade beendet ' + pulsUhr(ende))
     const m = p.masterPl != null ? Number(p.masterPl) : NaN
     if(isFinite(m)) info.push('P&L bisher ' + pulsDollar(m) + (typeof fin.master_pl_schaetzung === 'number' && Math.abs(m - fin.master_pl_schaetzung) < 0.005 ? ' (geschätzt)' : ''))
+    if(fin.grund === 'demo_unklar') info.push('Demo-Ende ohne bewiesenen Einstieg — kein P&L, bis die Balance gelesen ist')   // 08.10.2026
     const vers = Number(fin.puls_versuche) || (fin.puls_at ? 1 : 0)
     if(vers) info.push(`Versuch ${vers + 1}/${TV_ENDLESUNG_MAX}`)
     info.push('entfällt mit „Erledigt"')

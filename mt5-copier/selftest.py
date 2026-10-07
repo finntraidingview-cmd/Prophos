@@ -3066,6 +3066,15 @@ def test_puls_cdp_login():
     q_mehr = _i.getsource(ob.modus_tvkette_cdp)
     chk(q_mehr.count('"Show more (Meldungen') == 1 and 'not mehr["gedrueckt"] and mehr["versuche"] < 4' in q_mehr
         and 'mehr["gedrueckt"] = True' in q_mehr, "Show more: bis 4 Versuche, nach einem echten Druck nie wieder")
+    # Nachlese-Zeit + Spur (Vorfall 07.10.2026 13:37 UTC, Plan a7256d6c: Show more bei 15,1 s gedrückt, Frist um, „Meldungen roh: nichts")
+    chk('ende = max(ende, time.time() + 4.0)' in q_mehr and q_mehr.index('ende = max(ende, time.time() + 4.0)') < q_mehr.index('"Show more (Meldungen')
+        and 'erste Meldung nach' in q_mehr and 'Meldungsbereich am Ende' in q_mehr
+        and q_mehr.count("kein Knopf ganz im Bild") == 1 and "# kein continue" in q_mehr,
+        "Show more verlängert die Frist (≥ 4 s), Beweis zählt im selben Blick, Spur nennt Meldungsbereich + erste Meldung")
+    TK = ob.cdp_toasts_kurz
+    chk(TK(None) == "keine Meldungen" and TK({"gruppen": [], "log": [], "meldungen": []}) == "keine Meldungen"
+        and TK({"gruppen": [zu_o], "log": [{"text": "abc"}], "meldungen": [{"art": "fill"}]}) == "gruppen: orders(zu, 1 Texte, Knopf) · log 3 Z · meldungen 1"
+        and TK({"gruppen": [dict(zu_o, offen=None, mehr=None)]}) == "gruppen: orders(?, 1 Texte)", "Kurzbild des Meldungsbereichs für die Spur")
     SW = ob.cdp_show_more_wahl
     dn_k = {"text": "Show more 3", "dn": "toast-group-expand-button-orders", "expanded": "false", "rect": [1500, 800, 90, 22]}
     tx_k = {"text": "Show more", "dn": "", "rect": [1500, 800, 70, 22]}
