@@ -1901,6 +1901,17 @@
   :is(#tpl-view,#adm-pane-planer) .tpl-nk-chart .skala.oben{top:2px} :is(#tpl-view,#adm-pane-planer) .tpl-nk-chart .skala.unten{bottom:2px}
   :is(#tpl-view,#adm-pane-planer) .tpl-nk-chart .skala.rechts{left:auto;right:4px;color:#0F766E}
   :is(#tpl-view,#adm-pane-planer) .tpl-nk-achse{margin-left:0;margin-top:2px}
+  /* Chart-Upgrade (08.10.2026): Skala an der Gitterlinie zentriert, Jetzt-Punkt + Wert als HTML (im gestreckten SVG würde ein Kreis zur
+     Ellipse), Stufe/Minute unter der Maus leicht abgedunkelt; Legende als Flächen: Long grün, Short rot, geplant hell, Band grau gestrichelt */
+  :is(#tpl-view,#adm-pane-planer) .tpl-nk-chart .skala{transform:translateY(-50%)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-nk-chart .pkt{position:absolute;width:8px;height:8px;border-radius:50%;transform:translate(-50%,-50%);box-shadow:0 0 0 2px var(--surface);pointer-events:none}
+  :is(#tpl-view,#adm-pane-planer) .tpl-nk-chart .jetzt-w{position:absolute;top:1px;transform:translateX(-50%);font-size:11px;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap;pointer-events:none;padding:0 4px;border-radius:3px;background:color-mix(in srgb,var(--surface) 88%,transparent)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-nk-chart .jetzt-w.re{transform:translateX(calc(-100% - 6px))} :is(#tpl-view,#adm-pane-planer) .tpl-nk-chart .jetzt-w.li{transform:translateX(6px)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-nk-chart rect.hv:hover{fill:var(--ink);fill-opacity:.05}
+  :is(#tpl-view,#adm-pane-planer) .tpl-h .leg .tpl-nk-b.long{background:color-mix(in srgb,var(--good) 32%,var(--surface));border-color:var(--good)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-h .leg .tpl-nk-b.short{background:color-mix(in srgb,var(--danger) 32%,var(--surface));border-color:var(--danger)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-h .leg .tpl-nk-b.plan{background:color-mix(in srgb,var(--good) 10%,var(--surface));border-color:color-mix(in srgb,var(--good) 55%,var(--surface))}
+  :is(#tpl-view,#adm-pane-planer) .tpl-h .leg .tpl-nk-b.band{background:color-mix(in srgb,var(--ink) 5%,var(--surface));border:1px dashed color-mix(in srgb,var(--ink) 30%,var(--surface))}
   :is(#tpl-view,#adm-pane-planer) .tpl-h .leg .tpl-nk-l{display:inline-block;width:16px;height:0;border-top:2.5px solid var(--violet);vertical-align:middle;margin-right:3px}
   :is(#tpl-view,#adm-pane-planer) .tpl-h .leg .tpl-nk-l.gestrichelt{border-top-style:dashed}
   :is(#tpl-view,#adm-pane-planer) .tpl-h .leg .tpl-nk-l.hypo{border-top-color:#0F766E}
@@ -40883,7 +40894,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1227'
+  const OS_TAB_BUILD = '2026-09-22.1228'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -46184,56 +46195,82 @@
           ${rows || '<div class="tpl-leer">—</div>'}<div class="tpl-achse">${achse.join('')}</div></div></div></div>`
   }
   /* NETTO-CHART (TPL-UEBERSICHT-2, Finn: „den Chart finde ich sehr interessant, der soll immer um 0 laufen"): eigene Karte in voller
-   * Breite, doppelt so hoch wie die alte Zeile, 0-Linie kräftig, Band (zielband_pct × Brutto) als Fläche, gelaufen durchgezogen, ab jetzt
-   * gestrichelt, je Stufe ein Tooltip (von–bis · Netto · Long/Short-Anteil · Band). Zeitachse = die des Zeitstrahls (_tpl.achse). */
-  function tplNettoHtml(D){
+   * Breite, 0-Linie kräftig, Zeitachse = die des Zeitstrahls (_tpl.achse).
+   * UPGRADE (08.10.2026, Finn: „Netto-Einsatz über den Tag, und drunter den hypothetischen P&L … ein bisschen ein Upgrade, sowohl im
+   * Trade-Planer als auch unter Admin → Trade-Planer"): Fläche um 0 statt einer violetten Linie — Long-Überhang grün oben, Short-Überhang
+   * rot unten; gelaufen satt, geplant hell mit Rand (vorher nur gestrichelt); Band grau und dezent (grün war jetzt Long); runde €-Skala
+   * mit Gitter (vorher krumme Grenzen wie ±463 €); Jetzt-Linie mit Punkt und Wert; Hover je Stufe: Uhrzeit, Netto, Long/Short und die
+   * Trades, die gerade dazu beitragen. pre = Präfix der clipPath-IDs je Wurzel (Planer-Seite 'p', Admin 'a') — fest statt Zähler, sonst
+   * ändert sich das Markup bei jedem Zeichnen und der Fingerabdruck in tplRender greift nie. */
+  function tplNettoHtml(D, pre){
     const a = _tpl.achse || {}; if(a.VON == null) return ''
     const v = D.v, VON = a.VON, BIS = a.BIS, SPAN = BIS - VON, jetztIn = !!a.jetztIn
-    const W = 1000, H = 150, M = H / 2
+    const W = 1000, H = 150, M = H / 2, id = (pre || 'p') + 'nk'
     const pts = tplVerlauf(D)
     const wertBei = m => { let p = { netto: 0, brutto: 0 }; for(const q of pts){ if(q.min <= m) p = q; else break } return p }
     const vonDt = VON - v, bisDt = BIS - v
     const reihe = [{ min: vonDt, ...wertBei(vonDt) }, ...pts.filter(p => p.min > vonDt && p.min < bisDt)]
     reihe.push({ min: bisDt, ...wertBei(bisDt) })
     const pct = tplNum((_apd.d && (_apd.d.zielband_pct ?? (_apd.d.bot && _apd.d.bot.zielband_pct))))
-    const max = Math.max(1, ...reihe.map(p => Math.abs(p.netto)), ...(pct ? reihe.map(p => p.brutto * pct / 100) : [])) * 1.15
-    const XS = m => ((m + v - VON) / SPAN * W), Y = n => (M - n / max * (M - 6))
+    const sk = tplSkala(Math.max(...reihe.map(p => Math.abs(p.netto)), ...(pct ? reihe.map(p => p.brutto * pct / 100) : [])))
+    const XS = m => ((m + v - VON) / SPAN * W), Y = n => (M - n / sk.max * (M - 8))
     const treppe = arr => arr.map((q, i) => i ? `H${XS(q.min).toFixed(1)}V${Y(q.netto).toFixed(1)}` : `M${XS(q.min).toFixed(1)},${Y(q.netto).toFixed(1)}`).join('')
-    let vor = reihe, nach = []
-    if(jetztIn){
-      vor = reihe.filter(p => p.min <= D.jetzt); nach = reihe.filter(p => p.min > D.jetzt)
-      const w = wertBei(D.jetzt).netto
-      vor = [...vor, { min: D.jetzt, netto: w }]; nach = [{ min: D.jetzt, netto: w }, ...nach]
-    } else if(D.tag > D.heute){ vor = []; nach = reihe }
+    const pfad = treppe(reihe), flaeche = `${pfad}V${M}H${XS(reihe[0].min).toFixed(1)}Z`
+    // Grenze gelaufen | geplant: jetzt (heute) · Tagesanfang (Morgen = alles geplant) · Tagesende (vergangener Tag = alles gelaufen)
+    const gX = Math.max(0, Math.min(W, jetztIn ? XS(D.jetzt) : D.tag > D.heute ? 0 : W))
+    const defs = `<defs><clipPath id="${id}O"><rect x="0" y="0" width="${W}" height="${M}"/></clipPath><clipPath id="${id}U"><rect x="0" y="${M}" width="${W}" height="${M}"/></clipPath>
+        <clipPath id="${id}G"><rect x="0" y="0" width="${gX.toFixed(1)}" height="${H}"/></clipPath><clipPath id="${id}P"><rect x="${gX.toFixed(1)}" y="0" width="${(W - gX).toFixed(1)}" height="${H}"/></clipPath></defs>`
+    const teil = (zeit, deck, strich) => `<g clip-path="url(#${id}${zeit})">
+        <path d="${flaeche}" fill="var(--good)" fill-opacity="${deck}" clip-path="url(#${id}O)"/><path d="${flaeche}" fill="var(--danger)" fill-opacity="${deck}" clip-path="url(#${id}U)"/>
+        <path d="${pfad}" fill="none" stroke="var(--good)" ${strich} vector-effect="non-scaling-stroke" clip-path="url(#${id}O)"/><path d="${pfad}" fill="none" stroke="var(--danger)" ${strich} vector-effect="non-scaling-stroke" clip-path="url(#${id}U)"/></g>`
     let band = ''
     if(pct){
       let oben = '', unten = ''
       reihe.forEach((p, i) => { oben += i ? `H${XS(p.min).toFixed(1)}V${Y(p.brutto * pct / 100).toFixed(1)}` : `M${XS(p.min).toFixed(1)},${Y(p.brutto * pct / 100).toFixed(1)}` })
       for(let i = reihe.length - 1; i >= 0; i--) unten += `V${Y(-reihe[i].brutto * pct / 100).toFixed(1)}H${XS(reihe[i].min).toFixed(1)}`
-      band = `<path d="${oben}${unten}Z" fill="var(--good)" fill-opacity=".14" stroke="var(--good)" stroke-opacity=".35" stroke-width="1" vector-effect="non-scaling-stroke"/>`
+      band = `<path d="${oben}${unten}Z" fill="var(--ink)" fill-opacity=".045" stroke="var(--ink)" stroke-opacity=".22" stroke-width="1" stroke-dasharray="3 3" vector-effect="non-scaling-stroke"/>`
     }
-    // Tooltip je Stufe: unsichtbare Rechtecke von Stufe zu Stufe
+    const vz = n => (n > 0 ? '+' : n < 0 ? '−' : '') + tplEur(n)
+    // Tooltip je Stufe: Uhrzeit, Netto, Long/Short, Band und die Trades, die in dieser Stufe wirken (größter Einsatz zuerst, höchstens 12)
     const stufen = reihe.map((p, i) => {
       const bis = i + 1 < reihe.length ? reihe[i + 1].min : bisDt; if(bis <= p.min) return ''
       const L = Math.max(0, (p.brutto + p.netto) / 2), S = Math.max(0, (p.brutto - p.netto) / 2)
-      const tip = `${tplUhr(p.min, v)}–${tplUhr(bis, v)} · Netto ${(p.netto > 0 ? '+' : p.netto < 0 ? '−' : '') + tplEur(p.netto)} · Long ${tplEur(L)} / Short ${tplEur(S)}${pct ? ` · Band ±${tplEur(p.brutto * pct / 100)}` : ''}`
-      return `<rect x="${XS(p.min).toFixed(1)}" y="0" width="${(XS(bis) - XS(p.min)).toFixed(1)}" height="${H}" fill="transparent"><title>${escapeHtml(tip)}</title></rect>`
+      const dabei = D.trades.filter(t => t.wirkt && Math.round(t.start) <= p.min && Math.round(t.bis) > p.min).sort((x, y) => Math.abs(y.wirkt) - Math.abs(x.wirkt))
+      const tip = [`${tplUhr(p.min, v)}–${tplUhr(bis, v)} · Netto ${vz(p.netto)}`, `Long ${tplEur(L)} · Short ${tplEur(S)}${pct ? ` · Band ±${tplEur(p.brutto * pct / 100)}` : ''}`,
+        ...dabei.slice(0, 12).map(t => `${t.long ? '▲' : '▼'} ${t.user || '?'} · ${apPrKurz(t.firma)} ${tplGroesseKurz(t)} · ${vz(t.wirkt)} · ${TPL_WORT[t.status] || t.status}`),
+        ...(dabei.length > 12 ? [`+ ${dabei.length - 12} weitere`] : [])].join('\n')
+      return `<rect class="hv" x="${XS(p.min).toFixed(1)}" y="0" width="${(XS(bis) - XS(p.min)).toFixed(1)}" height="${H}" fill="transparent"><title>${escapeHtml(tip)}</title></rect>`
     }).join('')
-    const jetztX = jetztIn ? XS(D.jetzt).toFixed(1) : null
-    const svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">${band}
-        <line x1="0" y1="${M}" x2="${W}" y2="${M}" stroke="var(--ink)" stroke-opacity=".55" stroke-width="1.5" vector-effect="non-scaling-stroke"/>
-        ${jetztX != null ? `<line x1="${jetztX}" y1="0" x2="${jetztX}" y2="${H}" stroke="var(--ink)" stroke-opacity=".35" stroke-width="1.5" stroke-dasharray="3 3" vector-effect="non-scaling-stroke"/>` : ''}
-        ${vor.length > 1 ? `<path d="${treppe(vor)}" fill="none" stroke="var(--violet)" stroke-width="2.5" vector-effect="non-scaling-stroke"/>` : ''}
-        ${nach.length > 1 ? `<path d="${treppe(nach)}" fill="none" stroke="var(--violet)" stroke-width="2" stroke-dasharray="6 4" stroke-opacity=".85" vector-effect="non-scaling-stroke"/>` : ''}
+    const nJetzt = jetztIn ? wertBei(D.jetzt).netto : null
+    const svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">${defs}${tplGitter(sk, W, Y)}${band}
+        ${teil('G', '.32', 'stroke-width="2"')}${teil('P', '.1', 'stroke-width="1.25" stroke-opacity=".55"')}
+        <line x1="0" y1="${M}" x2="${W}" y2="${M}" stroke="var(--ink)" stroke-opacity=".55" stroke-width="1.25" vector-effect="non-scaling-stroke"/>
+        ${jetztIn ? `<line x1="${gX.toFixed(1)}" y1="0" x2="${gX.toFixed(1)}" y2="${H}" stroke="var(--ink)" stroke-opacity=".45" stroke-width="1.25" stroke-dasharray="3 3" vector-effect="non-scaling-stroke"/>` : ''}
         ${stufen}</svg>`
-    const nJetzt = jetztIn ? wertBei(D.jetzt).netto : null, vz = n => (n > 0 ? '+' : n < 0 ? '−' : '') + tplEur(n)
     // Hypo-P&L steht seit Finns Korrektur 4 (07.10.2026: „Mach beides in separate Graphen") in einer eigenen Karte darunter (tplHypoHtml)
-    const schritt = SPAN <= 12 * 60 ? 60 : 120, achse = []
-    for(let hh = Math.ceil(VON / schritt) * schritt; hh <= BIS; hh += schritt){ const x = (hh - VON) / SPAN * 100; achse.push(`<span class="${x < 3 ? 'links' : x > 97 ? 'rechts' : ''}" style="left:${x.toFixed(2)}%">${tplUhr(hh - v, v)}</span>`) }
-    return `<div class="tpl-karte tpl-nk"><div class="tpl-h">Netto-Einsatz über den Tag <b>${nJetzt != null ? 'jetzt ' + vz(nJetzt) : 'max ' + tplEur(Math.max(...reihe.map(p => Math.abs(p.netto))))}</b>
-        <span class="leg"><span><i class="tpl-nk-l"></i> gelaufen</span><span><i class="tpl-nk-l gestrichelt"></i> geplant</span><span><i class="tpl-nk-b"></i> Band ±${pct != null ? pct + ' %' : '—'}</span><span>0 = ausgeglichen</span></span></div>
-        <div class="tpl-nk-chart"><span class="skala oben">+${tplEur(max)}</span><span class="skala unten">−${tplEur(max)}</span>${svg}</div><div class="tpl-achse tpl-nk-achse">${achse.join('')}</div></div>`
+    return `<div class="tpl-karte tpl-nk"><div class="tpl-h">Netto-Einsatz über den Tag <b class="${nJetzt > 0 ? 'tpl-gut' : nJetzt < 0 ? 'tpl-rot' : ''}">${nJetzt != null ? 'jetzt ' + vz(nJetzt) : 'max ' + tplEur(Math.max(...reihe.map(p => Math.abs(p.netto))))}</b>
+        <span class="leg"><span><i class="tpl-nk-b long"></i> Long-Überhang</span><span><i class="tpl-nk-b short"></i> Short-Überhang</span><span><i class="tpl-nk-b plan"></i> geplant</span><span><i class="tpl-nk-b band"></i> Band ±${pct != null ? pct + ' %' : '—'}</span></span></div>
+        <div class="tpl-nk-chart">${svg}${tplSkalaHtml(sk, Y, H)}${nJetzt != null ? tplJetztHtml(gX / W * 100, Y(nJetzt) / H * 100, nJetzt, vz) : ''}</div>${tplAchseHtml(VON, BIS, v)}</div>`
   }
+  /* Bausteine beider Charts (08.10.2026): runde €-Skala, Gitter, Beschriftung, Jetzt-Marke, Zeitachse — EINE Stelle für Netto und Hypo-P&L */
+  // höchster Betrag → zwei Gitterlinien je Seite mit „schönem" Schritt (1 · 1,5 · 2 · 2,5 · 3 · 4 · 5 · 6 · 8 × 10^k), mindestens ±50 €
+  function tplSkala(m){
+    const halb = Math.max(25, (Number(m) || 0) * 1.08 / 2), k = Math.pow(10, Math.floor(Math.log10(halb)))
+    const s = [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10].find(f => f * k >= halb - 1e-9) * k
+    return { max: 2 * s, schritt: s }
+  }
+  function tplGitter(sk, W, Y){ return [sk.schritt, -sk.schritt, sk.max, -sk.max].map(w => `<line x1="0" y1="${Y(w).toFixed(1)}" x2="${W}" y2="${Y(w).toFixed(1)}" stroke="var(--border)" stroke-width="1" vector-effect="non-scaling-stroke"/>`).join('') }
+  // Beschriftung als HTML (im gestreckten SVG würde Schrift verzerren)
+  function tplSkalaHtml(sk, Y, H){ return [sk.max, sk.schritt, 0, -sk.schritt, -sk.max].map(w => `<span class="skala" style="top:${(Y(w) / H * 100).toFixed(2)}%">${w > 0 ? '+' : w < 0 ? '−' : ''}${tplEur(w)}</span>`).join('') }
+  function tplJetztHtml(xp, yp, wert, vz){ return `<i class="pkt" style="left:${xp.toFixed(2)}%;top:${yp.toFixed(2)}%;background:${wert > 0 ? 'var(--good)' : wert < 0 ? 'var(--danger)' : 'var(--ink)'}"></i>`
+    + `<span class="jetzt-w${xp > 88 ? ' re' : xp < 12 ? ' li' : ''} ${wert > 0 ? 'tpl-gut' : wert < 0 ? 'tpl-rot' : ''}" style="left:${xp.toFixed(2)}%">jetzt ${vz(wert)}</span>` }
+  function tplAchseHtml(VON, BIS, v){
+    const SPAN = BIS - VON, schritt = SPAN <= 12 * 60 ? 60 : 120, achse = []
+    for(let hh = Math.ceil(VON / schritt) * schritt; hh <= BIS; hh += schritt){ const x = (hh - VON) / SPAN * 100; achse.push(`<span class="${x < 3 ? 'links' : x > 97 ? 'rechts' : ''}" style="left:${x.toFixed(2)}%">${tplUhr(hh - v, v)}</span>`) }
+    return `<div class="tpl-achse tpl-nk-achse">${achse.join('')}</div>`
+  }
+  // Beide Charts untereinander — Planer-Seite (tplRender) und Admin-Reiter (apIdsKopfHtml) hängen denselben Baustein ein
+  function tplChartsHtml(D, pre){ return tplNettoHtml(D, pre) + tplHypoHtml(D, pre) }
 
   function tplDetailHtml(D){
     const t = _tpl.wahl ? D.trades.find(x => x.key === _tpl.wahl) : null
@@ -46762,31 +46799,33 @@
   }
   /* HYPO-P&L-CHART (Finns Korrektur 4, 07.10.2026: „Mach beides in separate Graphen, nicht im gleichen Chart"): eigene Karte direkt unter
    * dem Netto-Chart, gleiche Breite und Höhe, eigene €-Achse, 0-Linie kräftig, Fläche grün über / rot unter 0, Tooltip je Minute,
-   * Kopf „P&L hypothetisch heute · jetzt ±€". Zeitachse = die des Zeitstrahls (_tpl.achse). */
-  function tplHypoHtml(D){
+   * Kopf „P&L hypothetisch heute · jetzt ±€". Zeitachse = die des Zeitstrahls (_tpl.achse).
+   * 08.10.2026 im Stil des Netto-Charts (Finn: „ein bisschen ein Upgrade"): runde €-Skala mit Gitter, Jetzt-Linie + Punkt mit Wert,
+   * clipPath-IDs je Wurzel (pre) — Planer-Seite und Admin-Reiter stehen gleichzeitig im DOM, gleiche IDs griffen sonst ins verdeckte SVG. */
+  function tplHypoHtml(D, pre){
     const a = _tpl.achse || {}; if(a.VON == null) return ''
     const h = tplHypo(D), hv = h.verlauf
     if(!hv.length && !h.n && !h.ohne) return ''
     const v = D.v, VON = a.VON, BIS = a.BIS, SPAN = BIS - VON, W = 1000, H = 150, M = H / 2
     const vz = x => (x > 0 ? '+' : x < 0 ? '−' : '') + tplEur(x)
-    const max = Math.max(50, ...hv.map(p => Math.abs(p.eur))) * 1.15
-    const XS = m => ((m + v - VON) / SPAN * W), Y = e => (M - e / max * (M - 6))
-    let svg = ''
+    const sk = tplSkala(Math.max(0, ...hv.map(p => Math.abs(p.eur)))), id = (pre || 'p') + 'hk'
+    const XS = m => ((m + v - VON) / SPAN * W), Y = e => (M - e / sk.max * (M - 8))
+    let svg = '', marke = ''
     if(hv.length){
       const pfad = hv.map((p, i) => `${i ? 'L' : 'M'}${XS(p.min).toFixed(1)},${Y(p.eur).toFixed(1)}`).join(''), l = hv[hv.length - 1], e0 = hv[0]
       const flaeche = `${pfad}L${XS(l.min).toFixed(1)},${M}L${XS(e0.min).toFixed(1)},${M}Z`
-      const tip = hv.map(p => `<rect x="${XS(p.min - 0.5).toFixed(1)}" y="0" width="${(W / SPAN).toFixed(2)}" height="${H}" fill="transparent"><title>${escapeHtml(`${tplUhr(p.min, v)} · ${vz(p.eur)} hypothetisch`)}</title></rect>`).join('')
+      const tip = hv.map(p => `<rect class="hv" x="${XS(p.min - 0.5).toFixed(1)}" y="0" width="${(W / SPAN).toFixed(2)}" height="${H}" fill="transparent"><title>${escapeHtml(`${tplUhr(p.min, v)} · ${vz(p.eur)} hypothetisch`)}</title></rect>`).join('')
+      const jX = a.jetztIn ? XS(D.jetzt) : null
       svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
-        <defs><clipPath id="tplHypoOben"><rect x="0" y="0" width="${W}" height="${M}"/></clipPath><clipPath id="tplHypoUnten"><rect x="0" y="${M}" width="${W}" height="${M}"/></clipPath></defs>
-        <path d="${flaeche}" fill="var(--good)" fill-opacity=".16" stroke="none" clip-path="url(#tplHypoOben)"/>
-        <path d="${flaeche}" fill="var(--danger)" fill-opacity=".16" stroke="none" clip-path="url(#tplHypoUnten)"/>
-        <line x1="0" y1="${M}" x2="${W}" y2="${M}" stroke="var(--ink)" stroke-opacity=".55" stroke-width="1.5" vector-effect="non-scaling-stroke"/>
-        <path d="${pfad}" fill="none" stroke="var(--good)" stroke-width="2.5" vector-effect="non-scaling-stroke" clip-path="url(#tplHypoOben)"/>
-        <path d="${pfad}" fill="none" stroke="var(--danger)" stroke-width="2.5" vector-effect="non-scaling-stroke" clip-path="url(#tplHypoUnten)"/>
-        <circle cx="${XS(l.min).toFixed(1)}" cy="${Y(l.eur).toFixed(1)}" r="4" fill="${l.eur >= 0 ? 'var(--good)' : 'var(--danger)'}"/>${tip}</svg>`
+        <defs><clipPath id="${id}O"><rect x="0" y="0" width="${W}" height="${M}"/></clipPath><clipPath id="${id}U"><rect x="0" y="${M}" width="${W}" height="${M}"/></clipPath></defs>${tplGitter(sk, W, Y)}
+        <path d="${flaeche}" fill="var(--good)" fill-opacity=".32" stroke="none" clip-path="url(#${id}O)"/>
+        <path d="${flaeche}" fill="var(--danger)" fill-opacity=".32" stroke="none" clip-path="url(#${id}U)"/>
+        <line x1="0" y1="${M}" x2="${W}" y2="${M}" stroke="var(--ink)" stroke-opacity=".55" stroke-width="1.25" vector-effect="non-scaling-stroke"/>
+        <path d="${pfad}" fill="none" stroke="var(--good)" stroke-width="2" vector-effect="non-scaling-stroke" clip-path="url(#${id}O)"/>
+        <path d="${pfad}" fill="none" stroke="var(--danger)" stroke-width="2" vector-effect="non-scaling-stroke" clip-path="url(#${id}U)"/>
+        ${jX != null ? `<line x1="${jX.toFixed(1)}" y1="0" x2="${jX.toFixed(1)}" y2="${H}" stroke="var(--ink)" stroke-opacity=".45" stroke-width="1.25" stroke-dasharray="3 3" vector-effect="non-scaling-stroke"/>` : ''}${tip}</svg>`
+      marke = tplJetztHtml(XS(l.min) / W * 100, Y(l.eur) / H * 100, l.eur, vz)
     }
-    const schritt = SPAN <= 12 * 60 ? 60 : 120, achse = []
-    for(let hh = Math.ceil(VON / schritt) * schritt; hh <= BIS; hh += schritt){ const x = (hh - VON) / SPAN * 100; achse.push(`<span class="${x < 3 ? 'links' : x > 97 ? 'rechts' : ''}" style="left:${x.toFixed(2)}%">${tplUhr(hh - v, v)}</span>`) }
     // LISTE JE TRADE — BALKEN STATT ZAHLENTABELLE (Finn-Statistik-Design; QA S3 08.10.2026: 18 Zeilen „0,42 €/$ · ohne Wert · seit HH:MM" waren
     // eine reine Zahlentabelle). Je laufendem Trade mit Live-Wert: ID-Punkt + Konto „100k FundingPips …9722" · horizontaler P&L-Balken in
     // ID-Farbe (Mitte = 0, rechts grün Gewinn, links rot Verlust, Skala über alle Trades gemeinsam wie der Finanzen-Überblick) · €-Wert fett;
@@ -46810,7 +46849,7 @@
         ${mitWert.length ? `<div class="tpl-hb summe"><span class="w"><b>Summe</b></span><span class="bar"></span><b class="h ${h.jetzt > 0 ? 'tpl-gut' : h.jetzt < 0 ? 'tpl-rot' : ''}">${vz(h.jetzt)}</b></div>` : ''}</div>` : ''
     return `<div class="tpl-karte tpl-nk tpl-hk"><div class="tpl-h">P&amp;L hypothetisch heute <b class="${h.jetzt > 0 ? 'tpl-gut' : h.jetzt < 0 ? 'tpl-rot' : ''}">jetzt ${vz(h.jetzt)}</b>
         <span class="leg"><span>${h.n} Trade${h.n === 1 ? '' : 's'}${h.ohne ? ` · ${h.ohne} ohne Wert` : ''}</span><span>Kontowert-Satz × Live-P&amp;L${h.cfd ? ' · CFD ≈ NQ' : ''}</span><span>0 = Einstand</span></span></div>
-        ${hv.length ? `<div class="tpl-nk-chart"><span class="skala oben">+${tplEur(max)}</span><span class="skala unten">−${tplEur(max)}</span>${svg}</div><div class="tpl-achse tpl-nk-achse">${achse.join('')}</div>` : '<div class="tpl-leer klein">Verlauf kommt mit der ersten Kerze des Tages</div>'}${liste}</div>`   // QA 08.10.2026 Punkt 9
+        ${hv.length ? `<div class="tpl-nk-chart">${svg}${tplSkalaHtml(sk, Y, H)}${marke}</div>${tplAchseHtml(VON, BIS, v)}` : '<div class="tpl-leer klein">Verlauf kommt mit der ersten Kerze des Tages</div>'}${liste}</div>`   // QA 08.10.2026 Punkt 9
   }
   /* BEENDET · BILANZ DES RECHNERS (07.10.2026, Finn: „kleine Statistiken … wie gut der Rechner Long/Short ausgleicht"): Kacheln Gesamt ·
    * Long · Short · im Plus, Balken je Tag (grün über / rot unter 0), darunter die beendeten Trades (neueste oben). Nur Auto-Planer-Trades,
@@ -46919,7 +46958,7 @@
     const chips = (alleIds.length > 1 || alleBest || kopfRechts) ? `<div class="adm-vl-legend tpl-ids">${chipsIds}${alleBest}${kopfRechts}</div>` : ''
     const html = (_tpl.fehler ? `<div class="tpl-fehler">⚠ ${escapeHtml(_tpl.fehler)}</div>` : '')
       + (ohne ? `<div class="tpl-karte"><div class="tpl-leer">— nicht im Auto-Planer</div></div>`
-        : chips + tplKachelnHtml(F) + tplZeitstrahlHtml(F, zeilen) + tplBrauchtHtml(tplBraucht(D, sichtIds)) + tplDetailHtml(D) + tplNettoHtml(F) + tplHypoHtml(F) + tplListeHtml(F) + tplBilanzKarteHtml(F))   // Konten-Abdeckung ausgeblendet (Finn 08.10.2026: „mies unnötig, kann visuell weg“) — tplAbdeckungHtml bleibt   // Detail direkt unter dem Zeitstrahl (Finn 07.10.2026)
+        : chips + tplKachelnHtml(F) + tplZeitstrahlHtml(F, zeilen) + tplBrauchtHtml(tplBraucht(D, sichtIds)) + tplDetailHtml(D) + tplChartsHtml(F, 'p') + tplListeHtml(F) + tplBilanzKarteHtml(F))   // Konten-Abdeckung ausgeblendet (Finn 08.10.2026: „mies unnötig, kann visuell weg“) — tplAbdeckungHtml bleibt   // Detail direkt unter dem Zeitstrahl (Finn 07.10.2026)
     // FINGERABDRUCK (08.10.2026): gleiches Markup → nichts anfassen (60-s-Takt, Delta-Takt, Balance-Stände zeichnen sonst alles neu
     // und werfen Scroll/Fokus weg); die Kopfzeile oben wird trotzdem jedes Mal aktualisiert
     if(html === _tpl.htmlAlt && root.firstChild) return
@@ -59964,7 +60003,7 @@
       const alt = _tpl.tag; _tpl.tag = tag
       let braucht = ''
       try{ if(typeof tplBraucht === 'function' && typeof tplBrauchtHtml === 'function') braucht = tplBrauchtHtml(tplBraucht(D, null)) }catch(e){ console.warn('[ap-ids] Braucht dich', e) }   // Ausgelassene je ID mit Grund + Knöpfen (08.10.2026)
-      try{ return seg + tplKachelnHtml(D) + tplZeitstrahlHtml(D, zeilen) + braucht } finally{ _tpl.tag = alt }
+      try{ return seg + tplKachelnHtml(D) + tplZeitstrahlHtml(D, zeilen) + braucht + tplChartsHtml(D, 'a') } finally{ _tpl.tag = alt }   // beide Charts wie auf der Planer-Seite (Finn 08.10.2026)
     }catch(e){ console.warn('[ap-ids] Kopf zeichnen', e); return '' }
   }
   const apKontoKurz = z => { let g = 0; try{ g = Number(kontoGroesseAnzeige(z.konto, null, null)) || 0 }catch(_){}
