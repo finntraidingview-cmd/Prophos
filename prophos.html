@@ -702,6 +702,11 @@
   .puls-cd.is-laeuft .puls-cd-karte{border-color:rgba(16,185,129,.45)}
   .puls-cd.is-laeuft .puls-cd-lbl,.puls-cd.is-laeuft .puls-cd-zahl{color:#047857}
   .puls-cd.is-laeuft .puls-cd-zahl{font-size:56px}
+  /* ✕ an der Karte (07.10.2026, Finn: „Meldung wegklicken … ich bediene vor dem MacBook oft andere IDs") — nur der Knopf fängt Klicks */
+  .puls-cd-karte{position:relative}
+  .puls-cd-zu{position:absolute;top:8px;right:8px;width:26px;height:26px;border:0;border-radius:50%;background:transparent;
+    color:var(--sub);font-size:15px;line-height:26px;cursor:pointer;pointer-events:auto}
+  .puls-cd-zu:hover{background:var(--hover,rgba(0,0,0,.05));color:var(--ink)}
   .prof-wechsel::before{content:'';width:22px;height:22px;border-radius:50%;border:2.5px solid var(--border);border-top-color:var(--violet);animation:spin .7s linear infinite}
   #dashboard-view .ud-header{
     padding:10px 12px 12px;border-bottom:1px solid var(--border-soft);
@@ -40015,7 +40020,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1136'
+  const OS_TAB_BUILD = '2026-09-22.1137'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -43452,13 +43457,17 @@
    * Pille eine Nachlesung am PC nicht laufen. Nur wo die Pille sichtbar ist (Handy hochkant nicht) und im sichtbaren Tab. */
   const PULS_CD_MS = 10000, PULS_CD_NACH_MS = 3 * 60000
   let _pulsCd = null, _pulsCdEl = null   // _pulsCd: { ziel, text } des letzten Countdowns
+  let _pulsCdWeg = null   // ziel des weggeklickten Countdowns (07.10.2026) — der nächste Termin zeigt die Karte wieder
   function pulsCountdownZeigen(cd){
     if(!cd){ if(_pulsCdEl && !_pulsCdEl.hidden){ _pulsCdEl.hidden = true; _pulsCdEl.classList.remove('is-an') } return }
     if(!_pulsCdEl){
       _pulsCdEl = document.createElement('div')
       _pulsCdEl.className = 'puls-cd'; _pulsCdEl.hidden = true; _pulsCdEl.setAttribute('aria-hidden', 'true')
-      _pulsCdEl.innerHTML = '<div class="puls-cd-karte"><div class="puls-cd-lbl"></div><div class="puls-cd-zahl"></div><div class="puls-cd-was"></div>'
+      _pulsCdEl.innerHTML = '<div class="puls-cd-karte"><button type="button" class="puls-cd-zu" title="Ausblenden — Puls läuft weiter">✕</button><div class="puls-cd-lbl"></div><div class="puls-cd-zahl"></div><div class="puls-cd-was"></div>'
         + '<div class="puls-cd-hinweis">Maus und Tastatur am PC jetzt nicht bedienen</div></div>'
+      _pulsCdEl.querySelector('.puls-cd-zu').addEventListener('click', ev => {
+        ev.stopPropagation(); _pulsCdWeg = _pulsCd ? _pulsCd.ziel : null; pulsCountdownZeigen(null)
+      })
       document.body.appendChild(_pulsCdEl)
     }
     const setz = (sel, t) => { const e = _pulsCdEl.querySelector(sel); if(e && e.textContent !== t) e.textContent = t }
@@ -43517,6 +43526,7 @@
         else if(jetzt - _pulsCd.ziel <= 15000) cd = { lbl: 'Puls startet', zahl: '0', was: _pulsCd.text }
       }
     }
+    if(cd && _pulsCd && _pulsCdWeg === _pulsCd.ziel) cd = null   // für diesen Einsatz weggeklickt, Pille oben zählt weiter
     pulsCountdownZeigen(cd)
   }
   window._pulsNaechsterZeichnen = pulsNaechsterZeichnen
