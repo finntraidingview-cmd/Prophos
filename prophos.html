@@ -2821,7 +2821,21 @@
   :is(#adm-pane-planer,#tpl-view) .wd-tab th.g{width:84px} :is(#adm-pane-planer,#tpl-view) .wd-tab th.w{width:96px} :is(#adm-pane-planer,#tpl-view) .wd-tab th.st{width:150px}
   :is(#adm-pane-planer,#tpl-view) .wd-tab th.k{width:auto}
   :is(#adm-pane-planer,#tpl-view) .ap-stufe-sub{display:block;font-size:11px;color:var(--sub-2);font-variant-numeric:tabular-nums;margin-top:1px}
-  #adm-pane-planer .ap-ids-karte{max-width:900px}
+  #adm-pane-planer .ap-ids-karte{max-width:560px}
+  /* IDs-Block als Balkenliste (08.10.2026, Slave-Terminal 3 — Finn: „man erkennt gar nichts") */
+  #adm-pane-planer .ap-il{display:flex;flex-direction:column}
+  #adm-pane-planer .ap-ir{display:grid;grid-template-columns:18px minmax(90px,140px) minmax(80px,1fr) 200px;align-items:center;gap:6px 12px;padding:7px 2px;border-top:1px solid var(--border-soft)}
+  #adm-pane-planer .ap-ir:first-child{border-top:0}
+  #adm-pane-planer .ap-ir input{width:15px;height:15px;accent-color:#047857;cursor:pointer;margin:0}
+  #adm-pane-planer .ap-ir .ap-adm-id{font-size:14px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #adm-pane-planer .ap-ib{display:flex;gap:2px;height:10px;border-radius:5px;overflow:hidden;background:var(--surface-tint)}
+  #adm-pane-planer .ap-ib i,#adm-pane-planer .ap-ileg i{display:block;min-width:4px}
+  #adm-pane-planer .ap-ib i.g,#adm-pane-planer .ap-ileg i.g{background:var(--good)} #adm-pane-planer .ap-ib i.l,#adm-pane-planer .ap-ileg i.l{background:color-mix(in srgb,var(--good) 40%,transparent)}
+  #adm-pane-planer .ap-ib i.a,#adm-pane-planer .ap-ileg i.a{background:var(--sub-2)} #adm-pane-planer .ap-ib i.n,#adm-pane-planer .ap-ileg i.n{background:var(--border)}
+  #adm-pane-planer .ap-it{font-size:12.5px;color:var(--sub);white-space:nowrap;font-variant-numeric:tabular-nums}
+  #adm-pane-planer .ap-ir.aus .ap-adm-id{color:var(--sub);font-weight:500} #adm-pane-planer .ap-ir.aus .ap-ib{opacity:.35}
+  #adm-pane-planer .ap-ileg{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:8px;font-size:11.5px;color:var(--sub)} #adm-pane-planer .ap-ileg span{display:inline-flex;align-items:center;gap:5px} #adm-pane-planer .ap-ileg i{width:10px;height:10px;border-radius:3px}
+  @media (max-width:760px){ #adm-pane-planer .ap-ir{grid-template-columns:18px minmax(0,1fr);gap:3px 10px} #adm-pane-planer .ap-ir .ap-ib{grid-column:2;grid-row:2} #adm-pane-planer .ap-ir .ap-it{grid-column:2;grid-row:3;font-size:11.5px;white-space:normal} }   /* Handy: Name ganz, Balken + Text darunter */
   #adm-pane-planer .ap-ids-tab{min-width:0}
   #adm-pane-planer .ap-ids-tab th.zahl,#adm-pane-planer .ap-ids-tab td.zahl{width:110px;padding-right:14px}
   #adm-pane-planer .ap-ids-tab th.ok,#adm-pane-planer .ap-ids-tab td.ok{width:36px}
@@ -40811,7 +40825,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1220'
+  const OS_TAB_BUILD = '2026-09-22.1221'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -59986,21 +60000,40 @@
     const root = document.getElementById('ap-ids-root'); if(!root) return
     if(_apIds.fehler){ root.innerHTML = `<div style="color:var(--danger)">⚠ ${escapeHtml(_apIds.fehler)}</div>`; return }
     const rows = _apIds.rows, drin = rows.filter(r => r.drin)
+    const lzAt = _ap.letzter && _ap.letzter.at && !_ap.letzter.trocken ? tplUhrIso(_ap.letzter.at) : ''
     const kopf = `<div class="ap-adm-kopf"><b>IDs im Trade-Planer · ${drin.length} von ${rows.length}</b>
-        <span>Nachtlauf ${_apIds.aktiv ? 'an' : 'aus'}${_apIds.tag ? ' · letzter Lauf ' + escapeHtml(String(_apIds.tag)) : ''}</span>
+        <span>Nachtlauf ${_apIds.aktiv ? 'an' : 'aus'}${lzAt ? ' · letzter Lauf ' + escapeHtml(lzAt) : _apIds.tag ? ' · letzter Lauf ' + escapeHtml(String(_apIds.tag)) : ''}</span>
         <button type="button" class="btn btn-ghost" id="ap-ids-neu" style="margin-left:auto;padding:3px 9px;font-size:12px" title="Neu laden">↻</button></div>`
     // PC-Tab-Lebenszeichen je ID (Slave 2, .1180: pcStandPunktHtml → grün/grau/rot, '' solange nichts geladen) rechts neben dem Namen
     const pcs = uid => (typeof window.pcStandPunktHtml === 'function') ? (window.pcStandPunktHtml(String(uid)) || '') : ''
-    const zeilen = rows.map(r => `<tr>
-        <td><span class="ap-adm-id"${r.drin ? '' : ' style="color:var(--sub);font-weight:500"'}><i style="background:${idFarbe(r.user_id)}"></i>${escapeHtml(String(r.name || ''))}</span> ${pcs(r.user_id)}</td>
-        <td class="zahl">${r.konten}</td>
-        <td class="zahl">${r.drin ? r.geplant : '<span style="color:var(--sub-2)">–</span>'}</td>
-        <td class="zahl">${r.drin ? r.ausgelassen : '<span style="color:var(--sub-2)">–</span>'}</td>
-        <td class="ok"><input type="checkbox" class="acc-ap" style="width:15px;height:15px;accent-color:#047857;cursor:pointer;margin:0" data-ap-id="${escapeHtml(String(r.user_id))}"${r.drin ? ' checked' : ''} title="${r.drin ? 'Im Trade-Planer — Haken weg = ab dem nächsten Lauf nicht mehr geplant' : 'Nicht im Trade-Planer — Haken setzen = ab dem nächsten Lauf (10-min-Takt / Nacht) dabei'}"></td></tr>`).join('')
+    /* EINE ZEILE JE ID MIT BALKEN (08.10.2026, Finn-Screenshot .1210: „fucking hässlich, man erkennt gar nichts" — Zahlenspalten über die
+     * ganze Breite, „geplant (letzter Lauf)" 0 bei Chris, obwohl heute 7 Pläne offen waren, Haken-Spalte ohne Kopf). Gezählt wird HEUTE:
+     * geplant/läuft/beendet aus dem geladenen Delta/Planer-Stand (tplDaten, Tag heute, ohne Winning Days), ausgelassen mit Grund aus dem
+     * letzten Lauf, der Rest der planbaren Konten = nicht planbar. Segmente: grün geplant · hellgrün läuft/beendet · grau ausgelassen
+     * (Tooltip Grund) · hell nicht planbar. Nur Darstellung + Zählung, kein Backend. */
+    let Dh = null; try{ const altT = _tpl.tag; _tpl.tag = 'heute'; try{ Dh = tplDaten() } finally{ _tpl.tag = altT } }catch(_){ Dh = null }
+    const lauf = (_ap.letzter && !_ap.letzter.trocken) ? _ap.letzter : null
+    const zeileId = r => {
+      const uid = String(r.user_id), tr = ((Dh && Dh.trades) || []).filter(t => String(t.user_id) === uid && !t.wd)
+      const geplant = tr.filter(t => t.status === 'offen' || t.status === 'bestaetigt').length, lauft = tr.filter(t => t.status === 'laeuft' || t.status === 'beendet').length   // „vorbei" = Lauf-Zeile ohne echten Plan, nie gelaufen → nicht mitzählen
+      const aus = ((lauf && lauf.ausgelassen) || []).filter(x => String(x.user_id) === uid && !/geplanten\/laufenden Plan/.test(String(x.grund || '')))
+      const konten = Math.max(Number(r.konten) || 0, geplant + lauft + aus.length), rest = Math.max(0, konten - geplant - lauft - aus.length)
+      const seg = (n, kl, tip) => n ? `<i class="${kl}" style="flex:${n}" title="${escapeHtml(tip)}"></i>` : ''
+      const gruende = new Map(); for(const x of aus){ const k = (typeof tplGrund === 'function') ? tplGrund(x.grund) : String(x.grund || ''); gruende.set(k, (gruende.get(k) || 0) + 1) }
+      const ausTip = [...gruende].map(([k, n]) => `${n} ${k}`).join(' · ')
+      const balken = konten ? `<span class="ap-ib">${seg(geplant, 'g', `${geplant} heute geplant`)}${seg(lauft, 'l', `${lauft} läuft/beendet heute`)}${seg(aus.length, 'a', `${aus.length} ausgelassen · ${ausTip}`)}${seg(rest, 'n', `${rest} nicht planbar`)}</span>` : '<span class="ap-ib leer"></span>'
+      const txt = !r.drin ? 'nicht im Planer' : !konten ? 'keine planbaren Konten'
+        : `${geplant + lauft} von ${konten} geplant${aus.length ? ` · ${aus.length} ausgelassen` : ''}`   // läuft/beendet steht im Balken + Tooltip, Text bleibt kurz (Block halb so breit)
+      return `<div class="ap-ir${r.drin ? '' : ' aus'}">
+        <input type="checkbox" class="acc-ap" data-ap-id="${escapeHtml(uid)}"${r.drin ? ' checked' : ''} title="${r.drin ? 'Im Trade-Planer — Haken weg = ab dem nächsten Lauf nicht mehr geplant' : 'Nicht im Trade-Planer — Haken setzen = ab dem nächsten Lauf (10-min-Takt / Nacht) dabei'}">
+        <span class="ap-adm-id"><i style="background:${idFarbe(uid)}"></i>${escapeHtml(String(r.name || ''))}${pcs(uid)}</span>
+        ${balken}<span class="ap-it" title="${escapeHtml(ausTip)}">${txt}</span></div>` }
+    const zeilen = rows.map(zeileId).join('')
     root.style.padding = '6px 0'; root.style.color = ''
     try{ _apIds.D = apIdsDaten() }catch(_){ _apIds.D = null }   // Trades des gewählten Tags einmal je Zeichnen (Kopf + Vorschlags-Zeilen)
     window._apOffenNichtLive = _apIds.offen.filter(z => z.balance_live === false)   // Box „Braucht dich" (tplBraucht) zeigt sie mit ↻ Balance lesen — auch für morgen, wo das Delta nichts kennt
-    root.innerHTML = apIdsKopfHtml() + apIdsOffenHtml() + `<div class="ap-adm-karte ap-ids-karte">${kopf}<div class="ap-adm-scroll"><table class="wd-tab ap-ids-tab"><thead><tr><th>ID</th><th class="zahl" title="Konten vom Typ Challenge / Phase 1 / Phase 2, nicht archiviert">Konten planbar</th><th class="zahl">geplant (letzter Lauf)</th><th class="zahl">ausgelassen</th><th class="ok" title="im Trade-Planer"></th></tr></thead><tbody>${zeilen || '<tr><td colspan="5" style="color:var(--sub)">keine ID mit planbaren Konten</td></tr>'}</tbody></table></div>
+    root.innerHTML = apIdsKopfHtml() + apIdsOffenHtml() + `<div class="ap-adm-karte ap-ids-karte">${kopf}<div class="ap-il">${zeilen || '<div style="color:var(--sub);font-size:12.5px">keine ID mit planbaren Konten</div>'}</div>
+      <div class="ap-ileg"><span><i class="g"></i>heute geplant</span><span><i class="l"></i>läuft/beendet</span><span><i class="a"></i>ausgelassen</span><span><i class="n"></i>nicht planbar</span></div>
       <div class="ap-adm-fuss">Welche Konten einer ID geplant werden, entscheiden weiter Typ, Firma (Kernwerte), Balance und der Haken je Konto unter Accounts.</div></div>`
     root.querySelector('#ap-ids-neu')?.addEventListener('click', apIdsLaden)
     if(!root.dataset.tplKlick && typeof window._tplKlick === 'function'){ root.addEventListener('click', window._tplKlick); root.dataset.tplKlick = '1' }   // Braucht-dich-Knöpfe (Balance, External ID, Haken, Neu starten) wie auf der Planer-Seite
