@@ -39966,7 +39966,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1128'
+  const OS_TAB_BUILD = '2026-09-22.1129'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -44816,7 +44816,10 @@
         konto: x.konto || (g && g.konto) || '', ende4: tplEnde4(x) || tplEnde4(g || {}), konto_id: (g && g.konto_id) || (p && p.masterAccountId) || null,
         richtung: x.richtung || (g && g.richtung) || (p && p.richtung) || null,
         menge: tplNum(x.menge) ?? tplNum(g && g.menge) ?? (p ? p.masterContracts : null),
-        tp: tplNum(g && g.tp) ?? (p ? p.masterTp : null), sl: tplNum(g && g.sl) ?? (p ? p.masterSl : null),
+        // TP/SL GEÄNDERT ÜBERNEHMEN (07.10.2026, Finn: TP im Plan auf 4.550 gesetzt, Planer zeigte weiter 4.402 aus dem Nachtlauf):
+        // gespeicherter Plan zuerst, dann der DB-Stand aus dem Delta (Punkte × $/Pkt), der Lauf nur noch als Rückfall
+        tp: (p && tplNum(p.masterTp) > 0 ? Number(p.masterTp) : null) ?? (tplNum(x.tp_punkte) != null && tplNum(x.usd_pro_pkt) > 0 ? Math.round(x.tp_punkte * x.usd_pro_pkt) : null) ?? tplNum(g && g.tp),
+        sl: (p && tplNum(p.masterSl) > 0 ? Number(p.masterSl) : null) ?? (tplNum(x.sl_punkte) != null && tplNum(x.usd_pro_pkt) > 0 ? Math.round(x.sl_punkte * x.usd_pro_pkt) : null) ?? tplNum(g && g.sl),
         tp_punkte: tplNum(x.tp_punkte) ?? tplNum(g && g.tp_punkte), sl_punkte: tplNum(x.sl_punkte) ?? tplNum(g && g.sl_punkte),
         stufe: (g && g.stufe) || stufeAus(p), wert: tplNum(x.wert_eur), gehedgt: !!x.gehedgt, einsatz: ein != null ? Math.abs(ein) : null, hinweis: x.hinweis || (g && g.hinweis) || null,
         typ: x.typ || (g && g.typ) || (p && p.kontoTyp) || (p && ((accounts || []).find(a => String(a.id) === String(p.masterAccountId)) || {}).type) || null,
