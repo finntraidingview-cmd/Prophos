@@ -37572,7 +37572,7 @@
     if(plan.route === 'mt5') return tpPreflightMt5(plan)
     // V2-Wege (23.09.2026): Echo V2 hat seinen eigenen Check ohne Copier; Orbit V2 kennt keinen Duplikum-Check —
     // „Speichern & Starten" landet im Order-Popup, „Starten" auf der Karte geht direkt zu Puls (tpOrbitStarten).
-    if(plan.route === 'mt5v2') return tpPreflightMt5V2(plan)
+    if(plan.route === 'mt5v2') return tpV2Nacheinander(plan.id, _tpPendingOrder && String(_tpPendingOrder.planId) === String(plan.id) ? _tpPendingOrder : null)   // Kette (07.10.2026)
     if(plan.route === 'tvv2' || (plan.route === 'tsv2' && tsPulsModus() !== 'aus')) return openTpOrderModal(planId)   // Topstep V2 mit Puls wie Orbit V2 (F23)
 
     // Orbit: aus Popup 1 („Speichern") geht es ins Order-Popup (Richtung/TP/SL/Lots).
@@ -40067,7 +40067,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1146'
+  const OS_TAB_BUILD = '2026-09-22.1147'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -40942,12 +40942,30 @@
       return
     }
     if(MT5_LOCAL){
+      if(plan.route === 'mt5v2'){ await tpV2Nacheinander(plan.id, order); return }   // Echo V2 (23.09.2026): ohne Copier-Zeilen
       _tpPendingOrder = order
-      if(plan.route === 'mt5v2') tpPreflightMt5V2(plan)   // Echo V2 (23.09.2026): ohne Copier-Zeilen
-      else tpPreflightMt5(plan)
+      tpPreflightMt5(plan)
       return
     }
     _rsQueueAdd(plan)
+  }
+  /* ECHO-V2-CHECKS NACHEINANDER (07.10.2026, Finn: „bitte fixen" — heute 4× „Popup geschlossen — nichts platziert": The5ers
+   * Summerplan 16:24, Blue Guardian 16:49/16:50 → geclaimt 17:02/17:03, Jacob FundingPips 18:24). Ursache: tpJetztStarten rief
+   * tpPreflightMt5V2 ohne await → tpStartUmTick hielt den Start nach Millisekunden für erledigt und feuerte 5–30 s später den nächsten
+   * fälligen Plan; dessen Check übernahm DASSELBE Popup (_pfPlanId), der erste brach in der Terminal-Warteschleife mit „Popup
+   * geschlossen" ab. Jetzt: je PC eine Kette — jeder Echo-V2-Check (Startzeit oder Klick) wartet, bis der vorige fertig ist, und der
+   * Takt wartet auf das Ende (await). Plan + Order werden erst beim Drankommen frisch gelesen. Hänger-Schutz: nach 4 min gibt die Kette
+   * frei (der Check selbst wartet höchstens ~90 s aufs Terminal). */
+  let _pfV2Kette = Promise.resolve()
+  function tpV2Nacheinander(planId, order){
+    const lauf = _pfV2Kette.then(async () => {
+      const plan = tradePlans.find(x => String(x.id) === String(planId))
+      if(!plan || plan.status !== 'planned') return
+      _tpPendingOrder = order || _tpOrderAusPlan(plan).order || null   // Remote-Signal: Werte des Absenders gewinnen
+      await tpPreflightMt5V2(plan)
+    }).catch(e => console.warn('[echo-v2] Check', (e && e.message) || e))
+    _pfV2Kette = Promise.race([lauf, new Promise(r => setTimeout(r, 4 * 60000))])
+    return lauf
   }
 
   /* ══ AUTO-START-WARTESCHLANGE (08.09.2026, Finns Wunsch: „dann kann ich
@@ -42577,7 +42595,7 @@
           }
         }, 8 * 60 * 1000)
         if(typeof atToast === 'function') atToast(`📡 Remote-Signal: ${plan.masterName || '—'} → Check startet, Puls übernimmt bei Grün`, 'start')
-        if(plan.route === 'mt5v2') tpPreflightMt5V2(plan)
+        if(plan.route === 'mt5v2') tpV2Nacheinander(plan.id, _tpPendingOrder && String(_tpPendingOrder.planId) === String(plan.id) ? _tpPendingOrder : null)   // Kette (07.10.2026): nie in einen laufenden Echo-V2-Check
         else tpPreflightMt5(plan)
         break   // ein Signal pro Lauf — der nächste wird erst nach Abschluss geclaimt (_osActive-Riegel)
       }
