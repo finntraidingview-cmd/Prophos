@@ -11835,7 +11835,8 @@ def admin_wd_plaene():
                     return jsonify({"error": "Nur Pläne in Überprüfen lassen sich parken", "status": rows[0].get("status")}), 409
                 m = None
                 if daten.get("aktion") == "manuell":
-                    m = {"at": datetime.now(timezone.utc).isoformat(), "notiz": str(daten.get("notiz") or "").strip()[:300], "von": str(me)}
+                    m = {"at": datetime.now(timezone.utc).isoformat(), "notiz": str(daten.get("notiz") or "").strip()[:300], "von": str(me),
+                         "schritt": str(daten.get("schritt") or "").strip()[:40] or None}   # nächster Schritt (Finn 08.10.2026: „→ Funded / Phase 2")
                 r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/rpc/mt5_baseline_patch", headers=_sb_headers(), timeout=(5, 15),
                                 json={"p_plan": pid, "p_patch": {"manuell": m}, "p_status": "review"})
                 _sb_pruefen(r)
