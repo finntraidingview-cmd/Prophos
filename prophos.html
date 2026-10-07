@@ -1843,7 +1843,8 @@
   #tpl-view .tpl-pill{font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--surface-tint);color:var(--sub);white-space:nowrap}
   #tpl-view .tpl-pill.laeuft{background:var(--violet-tint);color:var(--violet)}
   #tpl-view .tpl-pill.bestaetigt{background:color-mix(in srgb,var(--good) 12%,var(--surface));color:var(--good)}
-  #tpl-view button.tpl-pill.tpl-ok1{border:1px dashed var(--sub-2);cursor:pointer;font:inherit;font-size:11px;font-weight:600;line-height:1.4} #tpl-view button.tpl-pill.tpl-ok1 b{color:var(--good);margin-left:3px} #tpl-view button.tpl-pill.tpl-ok1:hover{background:color-mix(in srgb,var(--good) 12%,var(--surface));color:var(--good);border-color:var(--good)}
+  #tpl-view button.tpl-ok1{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border:1px solid color-mix(in srgb,var(--good) 55%,var(--border));border-radius:999px;background:color-mix(in srgb,var(--good) 10%,var(--surface));color:var(--good);font:inherit;font-size:11.5px;font-weight:600;line-height:1.3;cursor:pointer;white-space:nowrap}
+  #tpl-view button.tpl-ok1:hover{background:color-mix(in srgb,var(--good) 20%,var(--surface))} #tpl-view button.tpl-ok1:disabled{opacity:.5;cursor:default}
   #tpl-view .tpl-werte{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:6px;margin:8px 0}
   #tpl-view .tpl-werte-1{margin-bottom:0} #tpl-view .tpl-werte-1 + .tpl-werte{margin-top:6px}
   #tpl-view .tpl-wert{background:var(--surface-tint);border-radius:8px;padding:6px 9px;min-width:0}
@@ -1905,14 +1906,29 @@
   /* Liste „Läuft / Geplant" (Radar-Zeilen wdl-z in der Planer-Karte) */
   #tpl-view .tpl-lk{padding-bottom:4px} #tpl-view .tpl-lk .tpl-h{margin:4px 0 2px} #tpl-view .tpl-lk .tpl-h + .tpl-liste{margin-bottom:8px}
   #tpl-view .tpl-liste{border:1px solid var(--border-soft);border-radius:var(--r-md);overflow:hidden}
-  #tpl-view .tpl-liste .wdl-z{padding:9px 12px;cursor:pointer;grid-template-columns:minmax(0,1fr) 140px 230px 150px 200px} #tpl-view .tpl-liste .wdl-z.is-aktiv{background:var(--violet-tint)}   /* Spalten: Zeit breit genug für „06:24 unbestätigt ✓" */
-  #tpl-view .tpl-liste .tpl-g-zeit{white-space:nowrap}
+  #tpl-view .tpl-liste .wdl-z{padding:9px 12px;cursor:pointer;grid-template-columns:minmax(0,1fr) 130px 250px 170px 190px} #tpl-view .tpl-liste .wdl-z.is-aktiv{background:var(--violet-tint)}   /* Spalten: Konto · Richtung · Ziel (TP/SL + Rest-Balken) · Einsatz/Kontowert · Start + Bestätigen */
+  #tpl-view .tpl-liste .tpl-g-zeit{white-space:nowrap;display:flex;align-items:center;justify-content:flex-end;gap:8px}
   #tpl-view .tpl-liste .wdl-z-pl{font-size:13.5px} #tpl-view .tpl-liste .wdl-z-lauf .wdl-z-pl{font-size:13.5px;font-weight:600}
   #tpl-view .tpl-liste .tpl-l-bal{display:block;margin:1px 0 0 17px;font-size:11.5px;color:var(--sub-2);font-variant-numeric:tabular-nums}
-  #tpl-view .tpl-liste .tpl-pill{margin-left:4px}
-  #tpl-view .tpl-liste .tpl-g-mi{display:flex;flex-direction:column;align-items:flex-end;gap:1px;line-height:1.3} #tpl-view .tpl-liste .tpl-g-mi b{font-weight:600} #tpl-view .tpl-liste .tpl-g-mi small{color:var(--sub);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
-  #tpl-view .tpl-liste .tpl-g-pl{display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-weight:600;line-height:1.2} #tpl-view .tpl-liste .tpl-g-pl .wdl-z-slave{display:inline;margin-left:4px;font-weight:500}
-  #tpl-view .tpl-liste .tpl-g-start{font-size:15px;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums;margin-right:4px}
+  #tpl-view .tpl-liste .tpl-pill{margin-left:0}
+  /* ZIEL-SPALTE (TPL-ZEILE-3, Finn 07.10.2026 zu .1118: „sieht mies hässlich aus, erklärt mir gar nichts"): Zeile 1 TP $ · SL $, Zeile 2 ein
+     dünner Balken = Anteil dieses TP am Rest bis Ziel, daneben das Wort dazu — statt der Planer-Stufe als Text („Etappe", „letzter Trade (Rest bis Ziel)") */
+  #tpl-view .tpl-liste .tpl-g-mi{display:flex;flex-direction:column;align-items:stretch;gap:4px;line-height:1.25;min-width:0}
+  #tpl-view .tpl-liste .tpl-g-tpsl{display:flex;justify-content:flex-end;gap:10px;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
+  #tpl-view .tpl-liste .tpl-g-tpsl .ohne{color:var(--sub-2);font-weight:500}
+  #tpl-view .tpl-liste .tpl-g-ziel{display:flex;align-items:center;gap:7px;min-width:0}
+  #tpl-view .tpl-liste .tpl-g-ziel small{flex:none;font-size:11px;color:var(--sub);white-space:nowrap;font-variant-numeric:tabular-nums}
+  #tpl-view .tpl-liste .tpl-g-ziel small b{font-weight:600;color:var(--ink-2)}
+  #tpl-view .tpl-liste .tpl-g-bar{flex:1 1 auto;height:4px;border-radius:2px;background:var(--surface-tint);overflow:hidden;min-width:30px}
+  #tpl-view .tpl-liste .tpl-g-bar i{display:block;height:100%;border-radius:2px;background:var(--good)}
+  /* Einsatz · Kontowert: zwei kleine Kennzahlen mit Beschriftung oben, statt zwei fetter Zahlen mit grauem Wort dahinter */
+  #tpl-view .tpl-liste .tpl-g-pl{display:flex;justify-content:flex-end;gap:14px;font-weight:600;line-height:1.15}
+  #tpl-view .tpl-liste .tpl-g-stat{display:flex;flex-direction:column;align-items:flex-end;gap:2px;min-width:58px}
+  #tpl-view .tpl-liste .tpl-g-stat small{font-size:10px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--sub-2)}
+  #tpl-view .tpl-liste .tpl-g-stat b{font-size:13.5px;font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums}
+  #tpl-view .tpl-liste .tpl-g-stat b.leise{color:var(--sub);font-weight:500}
+  #tpl-view .tpl-liste .tpl-g-start{font-size:15px;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums}
+  @media (max-width:1359px){ #tpl-view .tpl-liste .tpl-g-pl{flex-direction:column;align-items:flex-end;gap:3px} #tpl-view .tpl-liste .tpl-g-stat{min-width:0} #tpl-view .tpl-liste .tpl-g-zeit{justify-content:flex-start} }   /* schmale Zeile (wdl-z klappt um): Kennzahlen untereinander */
   /* Braucht dich (07.10.2026): ruhiger Block je ID — Zeile = Symbol · Firma · Klartext · kleine Aktion */
   #tpl-view .tpl-bd{border-color:color-mix(in srgb,#B45309 35%,var(--border))}
   #tpl-view .tpl-bd-id{padding:3px 0 2px;border-top:1px solid var(--border-soft)} #tpl-view .tpl-bd-id:first-of-type{border-top:0}
@@ -39937,7 +39953,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1118'
+  const OS_TAB_BUILD = '2026-09-22.1119'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -45236,25 +45252,49 @@
     const f0 = x => Number(x).toLocaleString('de-DE', { maximumFractionDigits: 0 })
     const menge = t => t.menge == null ? '?' : Number(t.menge).toLocaleString('de-DE', { maximumFractionDigits: 2 })
     const sym = t => /^(mt5|mt5v2)$/.test(String(t.route || '')) ? `${menge(t)} Lot` : `${menge(t)} × ${Number(t.usd) === 20 ? 'NQ' : Number(t.usd) === 2 ? 'MNQ' : 'NQ'}`
-    // GEPLANT-ZEILE (Finn 07.10.2026: „zwei, drei relevante Sachen, Hauptding durchbestätigen"): TP $ / SL $ als Zahlen (kein Balken),
-    // Stufe + Rest bis Ziel, Kontowert € + Einsatz €, Balance mit Quelle für alle IDs (eigenes Konto live, sonst Planer-Stand), Start groß
-    const mitte = t => {
+    // GEPLANT-ZEILE (Finn 07.10.2026: „zwei, drei relevante Sachen, Hauptding durchbestätigen"), Fassung 3 nach Finns Urteil zu .1118
+    // („sieht mies hässlich aus, erklärt mir gar nichts"): Ziel-Spalte = TP $ · SL $ (ohne SL als Wort, kein Strich) und darunter ein
+    // Balken, welcher Anteil vom Rest bis Ziel dieser TP ist — die Planer-Stufen heißen hier auf Deutsch: „letzter Trade (Rest bis Ziel)"
+    // → „letzter Trade → Ziel" (Balken voll), „… gedeckelt" → „n % vom Rest · Tagesdeckel", „Etappe" → „n % vom Rest 9.978 $". Rest =
+    // Zielbalance − Balance laut Planer (Lauf-Zeile); fehlt er, nur Zeile 1. Einsatz/Kontowert als zwei beschriftete Kennzahlen,
+    // Erklärung im Tooltip (Einsatz = Kontowert-Anteil, der bei SL weg ist; ohne SL ganzer Kontowert; gehedgt 0).
+    const ziel = t => {
       const tp = t.tp != null ? t.tp : (t.tp_punkte != null && t.usd != null ? t.tp_punkte * t.usd : null)
       const sl = t.sl != null ? t.sl : (t.sl_punkte != null && t.usd != null ? t.sl_punkte * t.usd : null)
-      return `<span class="wdl-z-mi tpl-g-mi"><span><b class="tpl-gut">TP ${tp != null ? '+' + f0(tp) + ' $' : '—'}</b> · <b class="tpl-rot">SL ${sl != null ? '−' + f0(sl) + ' $' : '—'}</b></span><small>${escapeHtml(t.stufe || '—')}${t.rest != null ? ' · Rest ' + f0(t.rest) + ' $' : ''}</small></span>`
+      const st = String(t.stufe || ''), letzter = /letzter Trade/i.test(st), deckel = /gedeckelt/i.test(st)
+      const rest = t.rest != null && Number(t.rest) > 0 ? Number(t.rest) : null
+      const anteil = rest != null && tp != null ? Math.max(0, Math.min(1, tp / rest)) : (letzter && !deckel ? 1 : null)
+      const pct = anteil != null ? Math.round(anteil * 100) : null
+      const wort = letzter && !deckel ? 'letzter Trade → Ziel'
+        : pct != null ? `<b>${pct} %</b> vom Rest ${f0(rest)} $${deckel ? ' · Tagesdeckel' : ''}`
+        : rest != null ? `Rest ${f0(rest)} $` : ''
+      const tip = rest != null
+        ? `Rest bis Ziel ${f0(rest)} $ = Zielbalance − Balance laut Planer${pct != null ? ` · dieser TP deckt ${pct} % davon` : ''}${letzter ? ' · letzter Trade: TP = Rest bis Ziel' : ''}${deckel ? ' · auf den Tageshöchstwert gedeckelt' : ''}`
+        : 'Rest bis Ziel unbekannt — keine Planer-Balance zu diesem Konto'
+      return `<span class="wdl-z-mi tpl-g-mi" title="${escapeHtml(tip)}"><span class="tpl-g-tpsl"><b class="tpl-gut">TP ${tp != null ? '+' + f0(tp) + ' $' : '—'}</b>${sl != null
+          ? `<b class="tpl-rot">SL −${f0(sl)} $</b>` : '<b class="ohne" title="kein Stop Loss — Verlustgrenze ist der Drawdown des Kontos">ohne SL</b>'}</span>${wort
+          ? `<span class="tpl-g-ziel">${pct != null ? `<i class="tpl-g-bar"><i style="width:${pct}%"></i></i>` : ''}<small>${wort}</small></span>` : ''}</span>`
     }
+    const geld = t => `<span class="wdl-z-pl tpl-g-pl" title="Einsatz = Anteil des Kontowerts, der weg ist, wenn der SL greift (ohne SL: der ganze Kontowert · gehedgt: 0) · Kontowert = was das Konto heute in € wert ist">
+        <span class="tpl-g-stat"><small>Einsatz</small>${t.gehedgt ? '<b class="leise">gehedgt</b>' : `<b class="${t.einsatz != null ? '' : 'leise'}">${t.einsatz != null ? tplEur(t.einsatz) : '–'}</b>`}</span>
+        <span class="tpl-g-stat"><small>Kontowert</small><b class="${t.wert != null ? '' : 'leise'}">${t.wert != null ? tplEur(t.wert) : '–'}</b></span></span>`
     const bal = t => { const a = t.konto_id ? (accounts || []).find(x => String(x.id) === String(t.konto_id)) : null; const b = a ? tplKontoBalance(a) : null
       const txt = b ? tplBalText(b, jetzt) : t.balance != null ? `${f0(t.balance)} $ · Planer-Stand` : ''
       return txt ? `<small class="tpl-l-bal">${escapeHtml(txt)}</small>` : '' }
+    // Bestätigen direkt in der Zeile: eigene Pläne immer, fremde, wenn das Backend diesen Login als Planer-Admin meldet (apdAdmin —
+    // seit 07.10.2026 auch die Logins der IDs im Auto-Planer, nicht nur ADMIN_EMAILS). Hand-Pläne brauchen keine Bestätigung.
+    const darf = t => t.auto && !t.ohnePlan && /^[0-9a-f-]{36}$/i.test(t.plan_id) && (t.eigen || apdAdmin())
+    const stand = t => t.status === 'offen' && darf(t)
+        ? `<button type="button" class="tpl-ok1" data-tpl-ok1="${escapeHtml(t.key)}"${_tpl.busy ? ' disabled' : ''} title="diesen Vorschlag bestätigen — startet dann zur Startzeit">✓ Bestätigen</button>`
+        : !t.auto && t.status === 'offen' ? '<span class="tpl-pill" title="von Hand geplant — braucht keine Bestätigung">von Hand</span>'
+        : `<span class="tpl-pill ${t.status}" title="${t.status === 'offen' ? 'unbestätigt — bestätigen kann nur der Besitzer oder ein Planer-Admin' : 'bestätigt — startet zur Startzeit'}">${TPL_WORT[t.status]}</span>`
     const zeile = t => `<div class="wdl-z wdl-z-${t.status === 'laeuft' ? 'lauf' : 'plan'}${_tpl.wahl === t.key ? ' is-aktiv' : ''}" style="--wdl-id:${idFarbe(t.user_id)}" data-tpl-t="${escapeHtml(t.key)}" title="${escapeHtml(t.konto || '')}">
         <span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(t.user || '?')}</b>${t.typ ? `<i class="wdl-pf">${escapeHtml(TPL_TYP_WORT[t.typ] || t.typ)}</i>` : ''}<small>${escapeHtml(t.firma || '?')}${t.ende4 ? ' …' + escapeHtml(t.ende4) : ''}</small>${bal(t)}</span>
         <span class="wdl-z-ri"><em class="${t.long ? 'is-buy' : 'is-sell'}">${t.long ? 'BUY' : 'SELL'}</em>${sym(t)}</span>
-        ${mitte(t)}
-        <span class="wdl-z-pl tpl-g-pl"><span>${t.wert != null ? tplEur(t.wert) : '–'}<small class="wdl-z-slave" style="color:var(--sub-2)">Kontowert</small></span><span>${t.gehedgt ? '<span style="color:var(--sub);font-weight:500">gehedgt</span>' : t.einsatz != null ? tplEur(t.einsatz) : '–'}<small class="wdl-z-slave" style="color:var(--sub-2)">Einsatz</small></span></span>
+        ${ziel(t)}
+        ${geld(t)}
         <span class="wdl-z-zeit tpl-g-zeit">${t.status === 'laeuft' ? `<span class="wdl-z-ab">seit ${tplUhr(t.start, v)} · </span><span class="wdl-z-dauer">${heute ? tplAlter(Math.max(60000, (D.jetzt - t.start) * 60000)) : '—'}</span>`
-          : `<b class="tpl-g-start">${tplUhr(t.start, v)}</b> ${t.status === 'offen' && t.auto && !t.ohnePlan && /^[0-9a-f-]{36}$/i.test(t.plan_id) && (t.eigen || apdAdmin())
-            ? `<button type="button" class="tpl-pill offen tpl-ok1" data-tpl-ok1="${escapeHtml(t.key)}" title="diesen Vorschlag bestätigen">unbestätigt <b>✓</b></button>`
-            : `<span class="tpl-pill ${t.status}">${TPL_WORT[t.status]}</span>`}`}</span></div>`
+          : `<b class="tpl-g-start">${tplUhr(t.start, v)}</b>${stand(t)}`}</span></div>`
     const block = (titel, liste) => liste.length ? `<div class="tpl-h">${titel} <b>${liste.length}</b></div><div class="tpl-liste">${liste.map(zeile).join('')}</div>` : ''
     return `<div class="tpl-karte tpl-lk">${block('Geplant', plan)}</div>`
   }
