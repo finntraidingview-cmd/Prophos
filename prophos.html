@@ -23160,6 +23160,7 @@
    * (baselinePatchIn 'final', Guard review) {today_pnl, datum, quelle:'puls', ende_quelle, puls_at, puls_versuche, puls_flach}. */
   const TV_ENDLESUNG_MAX = 8
   const TV_ENDLESUNG_PAUSE_S = [20, 45, 90, 180, 300, 480, 600, 900]   // Mindestabstand vor Versuch n+1; der Takt streut obendrauf
+  const TV_ENDLESUNG_OFFEN_MAX_MS = 24 * 3600000   // Position laut Puls noch offen: so lange wartet die Nachlesung höchstens (08.10.2026)
   /* LOGIN-BREMSE (30.09.2026, Hinweis Terminal 3): die automatische Nachlesung wiederholt bis zu 6× in ~15 min — scheitert der Lauf
    * im Login-Weg, sind das 6 Tradovate-/TopstepX-Logins in 15 min. Endet eine Lesung mit einem Login-/Verbindungs-Code, gibt es KEINE
    * schnelle Wiederholung: nächster automatischer Versuch frühestens nach 30 min, höchstens 2 solche Fehlversuche je Plan — danach
@@ -23304,8 +23305,13 @@
     if(lb) return `Pause bis ${new Date(lb.bis).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} — Login-/Verbindungsfehler${lb.code ? ' (' + lb.code + ')' : ''}, kein schneller neuer Login`
     const versuche = Number(fin.puls_versuche) || (fin.puls_at ? 1 : 0)
     if(versuche >= TV_ENDLESUNG_MAX) return `${versuche} Versuche erfolglos`
+    // Position laut Puls noch offen (08.10.2026): zählt nicht als Versuch, läuft aber im selben Takt weiter (Pausen bis 15 min) —
+    // höchstens 24 h ab Ende-Erkennung, danach nur noch „Jetzt lesen" von Hand (nie endlos)
+    const offenN = Number(fin.puls_offen_n) || 0
+    if(offenN && endeMs && jetzt - endeMs > TV_ENDLESUNG_OFFEN_MAX_MS) return `Position ${offenN}× laut Puls noch offen, 24 h seit dem Ende vorbei — „Jetzt lesen" von Hand`
     const letzte = Date.parse(fin.puls_at || '') || 0
-    if(letzte && versuche >= 1 && (jetzt - letzte) < TV_ENDLESUNG_PAUSE_S[Math.min(versuche - 1, TV_ENDLESUNG_PAUSE_S.length - 1)] * 1000) return 'Pause bis zum nächsten Versuch'
+    const stufe = Math.max(versuche - 1, 0) + offenN
+    if(letzte && (versuche >= 1 || offenN) && (jetzt - letzte) < TV_ENDLESUNG_PAUSE_S[Math.min(stufe, TV_ENDLESUNG_PAUSE_S.length - 1)] * 1000) return 'Pause bis zum nächsten Versuch'
     return ''
   }
   function tvV2EndlesungFaellig(p, jetzt){ return !tvV2EndlesungGrund(p, jetzt, false) }
@@ -23547,6 +23553,12 @@
       const erg = tvV2EndlesungAuswerten(r, w.symbol, dir, p0.route === 'tsv2')
       const nowIso = new Date().toISOString()
       const patch = { puls_at: nowIso, puls_versuche: versuch, lesen_trail: String((r && r.trail) || '').slice(0, 2000), lesen_at: nowIso }   // Zeitspur (F20, B13)
+      // POSITION NOCH OFFEN = KEIN VERSUCH (Master/Finn 08.10.2026, nach dem demo_unklar-Fix .1159: ohne bewiesenen Einstieg kann die
+      // Demo zu früh „Ende" sagen, der Trade läuft noch — die Nachlesung soll dann warten, bis die Position zu ist, und erst dann die
+      // Balance lesen, statt 8 Versuche an einer offenen Position zu verbrauchen). Zähler bleibt stehen, puls_offen_n/puls_offen_at
+      // halten die Zeit; den Takt und die 24-h-Grenze entscheidet tvV2EndlesungGrund.
+      const nochOffen = !erg.ok && erg.offen === true
+      if(nochOffen) Object.assign(patch, { puls_versuche: versuch - 1, puls_offen_n: (Number(fin0.puls_offen_n) || 0) + 1, puls_offen_at: nowIso })
       if(force) patch.puls_aufgegeben = false
       if(erg.ok) Object.assign(patch, { today_pnl: erg.today, datum: tvV2Handelstag(), quelle: 'puls', ende_quelle: fin0.quelle || null,
         puls_flach: erg.flach, puls_fehler: null, puls_diagnose: null, puls_konto: (r && r.konto_aktiv) || null,
@@ -23581,7 +23593,8 @@
           try{ renderTradePlans() }catch(_){}
           return { ok: false, konto_weg: true, msg: 'Konto weg · vermutlich geblowt — der Trade steht unter „Überprüfen"' }
         }
-        if(erg.offen && versuch === 1 && typeof atToast === 'function') atToast(`⚠ ${name}: Puls sieht die Master-Position noch offen — in ${pulsPlattform(p0)} prüfen`, 'end')
+        if(nochOffen && patch.puls_offen_n === 1 && typeof atToast === 'function') atToast(`${name}: Puls sieht die Master-Position noch offen — kein Versuch verbraucht, Balance wird gelesen, sobald sie zu ist`, 'end')
+        if(nochOffen){ try{ renderTradePlans() }catch(_){}; return { ok: false, offen: true, msg: `Position laut Puls noch offen (${patch.puls_offen_n}×) — kein Versuch verbraucht, nächste Lesung im Takt${exitTxt}` } }
         if(!force && versuch >= TV_ENDLESUNG_MAX && typeof atToast === 'function') atToast(`⚠ ${name}: ${p0.route === 'tsv2' ? 'Balance' : "Today's P&L"} nach ${versuch} Versuchen nicht gelesen (${erg.fehler}) — Master-P&L bitte selbst eintragen`, 'end')
         // Login-Bremse: beim zweiten Login-/Verbindungsfehler einmal deutlich sagen, dass Puls jetzt nicht mehr von selbst liest
         if(patch.puls_login_fehler === TV_ENDLESUNG_LOGIN_MAX && typeof atToast === 'function') atToast(`⚠ ${name}: Puls kam ${TV_ENDLESUNG_LOGIN_MAX}× nicht durch den Login/die Verbindung (${patch.puls_login_code}) — Login am PC prüfen, dann „Jetzt lesen"`, 'end')
@@ -40179,7 +40192,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1162'
+  const OS_TAB_BUILD = '2026-09-22.1163'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -43634,6 +43647,7 @@
     if(fin.grund === 'demo_unklar') info.push('Demo-Ende ohne bewiesenen Einstieg — kein P&L, bis die Balance gelesen ist')   // 08.10.2026
     const vers = Number(fin.puls_versuche) || (fin.puls_at ? 1 : 0)
     if(vers) info.push(`Versuch ${vers + 1}/${TV_ENDLESUNG_MAX}`)
+    if(Number(fin.puls_offen_n) > 0) info.push(`Position laut Puls noch offen (${Number(fin.puls_offen_n)}×) — kein Versuch verbraucht, Balance wird gelesen, sobald sie zu ist`)   // 08.10.2026
     info.push('entfällt mit „Erledigt"')
     return { was: 'Profit prüfen · Balance in ' + pulsPlattform(p) + ' lesen', info }
   }
