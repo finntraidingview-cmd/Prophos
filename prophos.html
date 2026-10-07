@@ -2763,6 +2763,18 @@
   :is(#adm-pane-planer,#tpl-view) .wd-tab th.g,:is(#adm-pane-planer,#tpl-view) .wd-tab td.g{min-width:76px} :is(#adm-pane-planer,#tpl-view) .wd-tab th.w,:is(#adm-pane-planer,#tpl-view) .wd-tab td.w{min-width:88px}
   :is(#adm-pane-planer,#tpl-view) .wd-tab td.k{padding-right:18px} :is(#adm-pane-planer,#tpl-view) .wd-tab td.st{min-width:120px;padding-right:12px}
   :is(#adm-pane-planer,#tpl-view) .ap-adm-scroll .wd-tab{min-width:760px}
+  /* Design-Nacharbeit 08.10.2026 (Finn, Live .1192 auf 2000 px): feste Spaltenbreiten in „Zu bestätigen" — Konto nimmt den Rest, ✓ in jeder
+     Gruppe gleich breit und rechts; Stufe mit Nebenzeile „Rest … $"; ID-Tabelle kompakt (Zahlen je 110 px rechts, Block max. 900 px) */
+  :is(#adm-pane-planer,#tpl-view) .wd-tab th.r{width:96px} :is(#adm-pane-planer,#tpl-view) .wd-tab th.s{width:72px} :is(#adm-pane-planer,#tpl-view) .wd-tab th.m{width:64px}
+  :is(#adm-pane-planer,#tpl-view) .wd-tab th.g{width:84px} :is(#adm-pane-planer,#tpl-view) .wd-tab th.w{width:96px} :is(#adm-pane-planer,#tpl-view) .wd-tab th.st{width:150px}
+  :is(#adm-pane-planer,#tpl-view) .wd-tab th.k{width:auto}
+  :is(#adm-pane-planer,#tpl-view) .ap-stufe-sub{display:block;font-size:11px;color:var(--sub-2);font-variant-numeric:tabular-nums;margin-top:1px}
+  #adm-pane-planer .ap-ids-karte{max-width:900px}
+  #adm-pane-planer .ap-ids-tab{min-width:0}
+  #adm-pane-planer .ap-ids-tab th.zahl,#adm-pane-planer .ap-ids-tab td.zahl{width:110px;padding-right:14px}
+  #adm-pane-planer .ap-ids-tab th.ok,#adm-pane-planer .ap-ids-tab td.ok{width:36px}
+  #adm-pane-planer .ap-ids-karte .ap-adm-fuss{font-size:11px}
+  @media (max-width:820px){ #adm-pane-planer .ap-ids-tab th.zahl,#adm-pane-planer .ap-ids-tab td.zahl{width:72px;padding-right:10px} }
   :is(#adm-pane-planer,#tpl-view) .ap-adm-grp{padding:12px 0 6px} :is(#adm-pane-planer,#tpl-view) .ap-adm-grp .ap-adm-id{font-size:13px;font-weight:600}
   :is(#adm-pane-planer,#tpl-view) .ap-adm-grp .btn-xs{margin-left:auto;padding:2px 9px;font-size:11.5px;height:auto;line-height:1.6;white-space:nowrap}
   :is(#adm-pane-planer,#tpl-view) .seg button{padding:3px 10px;font-size:12px}
@@ -17475,6 +17487,9 @@
       $('kasse-refresh').addEventListener('click', kasseLoad)
       $('kasse-date').value = new Date().toISOString().slice(0,10)
       // Admin-Tabs (Übersicht / Kasse)
+      // Untertitel je Reiter (Finn 08.10.2026: „Kapitalverteilung über alle Personen" stand auch im Trade-Planer-Reiter) — nur Anzeige
+      const ADM_SUB = { overview: 'Kapitalverteilung über alle Personen', planer: 'Trade-Planer · alle IDs', wd: 'Winning-Day-Farmer · alle IDs', stat: 'Statistik · Kapitel · Acc-Käufe', fin: 'Payouts · alle IDs', wallet: 'Meta Wallet', kompass: 'Kompass · Pascals Bot', rg: 'Rechnungen', kasse: 'Kasse', auftrag: 'Auftrag', kapitel: 'Kapitel', buys: 'Acc-Käufe' }
+      const admSubSetzen = name => { const s = ADM_SUB[name] || ''; const v = document.querySelector('.view[data-view="kasse"] .view-sub'); if(v) v.textContent = s; const t = document.getElementById('topbarSub'); if(t && document.querySelector('.view[data-view="kasse"].active')) t.textContent = s }
       document.querySelectorAll('.adm-tab').forEach(t => t.addEventListener('click', () => {
         const name = t.dataset.admtab
         document.querySelectorAll('.adm-tab').forEach(x => {
@@ -17484,6 +17499,7 @@
           x.style.color = on ? 'var(--violet)' : ''
         })
         $('adm-pane-overview').hidden = name !== 'overview'
+        admSubSetzen(name)
         $('adm-pane-buys').hidden     = name !== 'stat'   // seit 08.10.2026 Abschnitt unter Statistik
         $('adm-pane-fin').hidden      = name !== 'fin'
         $('adm-pane-kasse').hidden    = name !== 'kasse'
@@ -40640,7 +40656,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1196'
+  const OS_TAB_BUILD = '2026-09-22.1197'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -59458,8 +59474,11 @@
     if(!(gruppen || []).length) return `<div class="ap-adm-karte">${opt.kopf || ''}<div style="color:var(--sub);font-size:12.5px;padding:2px 0 6px">${escapeHtml(opt.leer || 'Nichts offen.')}</div></div>`
     const th = `<thead><tr><th class="k">Konto</th><th class="r">Richtung</th><th class="zahl s">Start</th><th class="zahl m">Menge</th><th class="zahl g">TP</th><th class="zahl g">SL</th><th class="zahl w" title="Kontowert in € (Delta, sonst letzter Lauf)">Kontowert</th><th class="st">Stufe</th><th class="ok"></th></tr></thead>`
     const html = gruppen.map(g => {
-      const zeilen = g.liste.map(r => { const z = r.z || {}, st = String(r.stufe || '')
-        const stufe = st ? `<span class="ap-stufe${/letzter/i.test(st) ? ' letzter' : ''}" title="${escapeHtml(String(r.notes || ''))}">${escapeHtml(st)}</span>` : '<span style="color:var(--sub-2)">–</span>'
+      const zeilen = g.liste.map(r => { const z = r.z || {}, st0 = String(r.stufe || '').trim()
+        // Stufe lesbar (Finn 08.10.2026, Screenshot .1192: „Etappe" stand allein): der Planer kennt nur „Etappe" und „letzter Trade (…)" —
+        // Klammer-Zusatz in den Tooltip, der Rest bis Ziel aus den Notes („Rest 1.850 $ bis Ziel") als Nebenzeile; ohne Stufe bleibt die Zelle leer
+        const st = st0.replace(/\s*\(.*$/, ''), rest = /Rest ([\d.]+) \$/.exec(String(r.notes || '')), restTxt = rest ? `Rest ${rest[1]} $` : ''
+        const stufe = st ? `<span class="ap-stufe${/letzter/i.test(st) ? ' letzter' : ''}" title="${escapeHtml(String(r.notes || st0))}">${escapeHtml(st)}</span>${restTxt ? `<small class="ap-stufe-sub">${escapeHtml(restTxt)}</small>` : ''}` : ''
         return `<tr>
         <td class="k"><button type="button" class="ap-konto" ${attr}="${escapeHtml(String(z.plan_id))}" title="Konto ansehen">${apKontoKurz(z)}</button></td>
         <td class="r" style="font-weight:600;color:${z.richtung === 'buy' ? '#047857' : '#b91c1c'}">${z.richtung === 'buy' ? '▲ Long' : z.richtung === 'sell' ? '▼ Short' : '–'}</td>
@@ -59565,7 +59584,7 @@
         <td class="ok"><input type="checkbox" class="acc-ap" style="width:15px;height:15px;accent-color:#047857;cursor:pointer;margin:0" data-ap-id="${escapeHtml(String(r.user_id))}"${r.drin ? ' checked' : ''} title="${r.drin ? 'Im Trade-Planer — Haken weg = ab dem nächsten Lauf nicht mehr geplant' : 'Nicht im Trade-Planer — Haken setzen = ab dem nächsten Lauf (10-min-Takt / Nacht) dabei'}"></td></tr>`).join('')
     root.style.padding = '6px 0'; root.style.color = ''
     try{ _apIds.D = apIdsDaten() }catch(_){ _apIds.D = null }   // Trades des gewählten Tags einmal je Zeichnen (Kopf + Vorschlags-Zeilen)
-    root.innerHTML = apIdsKopfHtml() + apIdsOffenHtml() + `<div class="ap-adm-karte">${kopf}<div class="ap-adm-scroll"><table class="wd-tab"><thead><tr><th>ID</th><th class="zahl" title="Konten vom Typ Challenge / Phase 1 / Phase 2, nicht archiviert">Konten planbar</th><th class="zahl">geplant (letzter Lauf)</th><th class="zahl">ausgelassen</th><th class="ok" title="im Trade-Planer"></th></tr></thead><tbody>${zeilen || '<tr><td colspan="5" style="color:var(--sub)">keine ID mit planbaren Konten</td></tr>'}</tbody></table></div>
+    root.innerHTML = apIdsKopfHtml() + apIdsOffenHtml() + `<div class="ap-adm-karte ap-ids-karte">${kopf}<div class="ap-adm-scroll"><table class="wd-tab ap-ids-tab"><thead><tr><th>ID</th><th class="zahl" title="Konten vom Typ Challenge / Phase 1 / Phase 2, nicht archiviert">Konten planbar</th><th class="zahl">geplant (letzter Lauf)</th><th class="zahl">ausgelassen</th><th class="ok" title="im Trade-Planer"></th></tr></thead><tbody>${zeilen || '<tr><td colspan="5" style="color:var(--sub)">keine ID mit planbaren Konten</td></tr>'}</tbody></table></div>
       <div class="ap-adm-fuss">Welche Konten einer ID geplant werden, entscheiden weiter Typ, Firma (Kernwerte), Balance und der Haken je Konto unter Accounts.</div></div>`
     root.querySelector('#ap-ids-neu')?.addEventListener('click', apIdsLaden)
     root.querySelector('[data-tpl-weitere]')?.addEventListener('click', () => { _apIds.weitereAuf = !_apIds.weitereAuf; apIdsRender() })
