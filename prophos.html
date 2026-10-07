@@ -1762,6 +1762,7 @@
   #tpl-view .kpi-value{font-size:20px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #tpl-view .kpi-value small{font-size:11.5px;font-weight:500;color:var(--sub);margin-left:4px}
   #tpl-view .kpi-delta{display:block;font-size:11.5px;color:var(--sub);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #tpl-view .kpi-delta.umbruch{white-space:normal;line-height:1.3}   /* Netto-Unterzeile darf zweizeilig werden (Finn 07.10.2026: voller Wortlaut) */
   #tpl-view .tpl-gut,#tpl-view .apd-gut{color:var(--good)} #tpl-view .tpl-rot,#tpl-view .apd-rot{color:var(--danger)} #tpl-view .tpl-grau,#tpl-view .apd-grau{color:var(--sub-2)}
   #tpl-view .tpl-ls{display:flex;height:6px;border-radius:3px;overflow:hidden;margin:6px 0 4px;background:var(--surface-tint)}
   #tpl-view .tpl-ls i{display:block;height:100%}
@@ -39931,7 +39932,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1115'
+  const OS_TAB_BUILD = '2026-09-22.1116'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -44859,17 +44860,21 @@
   }
 
   function tplKachelnHtml(D){
-    const aktiv = D.trades.filter(t => tplAktiv(t) && !t.gehedgt)
-    const zahl = long => { const a = aktiv.filter(t => t.long === long); return `${a.length} Trade${a.length === 1 ? '' : 's'}${a.some(t => t.status === 'laeuft') ? ` · ${a.filter(t => t.status === 'laeuft').length} läuft` : ''}` }
-    const sum = D.L + D.S, anteil = sum > 0 ? D.L / sum * 100 : 50, N = D.L - D.S
-    const k1 = `<div class="kpi"><div class="kpi-label">Long im Spiel</div><div class="kpi-value tpl-gut">▲ ${tplEur(D.L)}</div><span class="kpi-delta">${zahl(true)}</span></div>`
-    const k2 = `<div class="kpi"><div class="kpi-label">Short im Spiel</div><div class="kpi-value tpl-rot">▼ ${tplEur(D.S)}</div><span class="kpi-delta">${zahl(false)}</span></div>`
-    // Netto jetzt + Band aus dem Delta (heute, über alle IDs, € Einsatz) — fehlen die €-Felder (altes Backend), bleibt es beim Tagesnetto
-    const d = D.delta
-    const jetztTxt = d && d.netto_eur != null ? `jetzt ${Number(d.netto_eur) > 0 ? '+' : Number(d.netto_eur) < 0 ? '−' : ''}${tplEur(d.netto_eur)}${d.band_eur != null ? ` · Band ±${tplEur(d.band_eur)}` : ''}` : `${Math.round(anteil)} : ${Math.round(100 - anteil)}`
-    const k3 = `<div class="kpi"><div class="kpi-label">Netto</div><div class="kpi-value">${N > 0 ? '+' : N < 0 ? '−' : ''}${tplEur(N)}<small>${N > 0 ? 'long' : N < 0 ? 'short' : ''}</small></div>
+    // KACHELN (Finn 07.10.2026 zu .1115): Long/Short im Spiel = nur LAUFENDE ungehedgte Trades (Einsatz € aus offen[]), geplante als
+    // Unterzeile „+ n geplant · € "; Netto: Hauptzahl laufend („jetzt"), Unterzeile „bis Tagesende mit geplanten ±€". Chart unverändert.
+    const lauf = D.trades.filter(t => t.status === 'laeuft' && !t.gehedgt), plan = D.trades.filter(t => (t.status === 'offen' || t.status === 'bestaetigt') && !t.gehedgt)
+    const summe = (liste, long) => liste.filter(t => t.long === long).reduce((a, t) => a + (t.einsatz || 0), 0)
+    const Ll = summe(lauf, true), Sl = summe(lauf, false), Lp = summe(plan, true), Sp = summe(plan, false)
+    const vz = n => (n > 0 ? '+' : n < 0 ? '−' : '') + tplEur(n)
+    const unter = long => { const a = lauf.filter(t => t.long === long).length, b = plan.filter(t => t.long === long).length
+      return `${a} laufend${b ? ` · + ${b} geplant · ${tplEur(long ? Lp : Sp)}` : ''}` }
+    const k1 = `<div class="kpi"><div class="kpi-label">Long im Spiel</div><div class="kpi-value tpl-gut">▲ ${tplEur(Ll)}</div><span class="kpi-delta" title="laufende Long-Trades (Einsatz €) · darunter die geplanten">${unter(true)}</span></div>`
+    const k2 = `<div class="kpi"><div class="kpi-label">Short im Spiel</div><div class="kpi-value tpl-rot">▼ ${tplEur(Sl)}</div><span class="kpi-delta" title="laufende Short-Trades (Einsatz €) · darunter die geplanten">${unter(false)}</span></div>`
+    const sumL = Ll + Sl, anteil = sumL > 0 ? Ll / sumL * 100 : 50, N = Ll - Sl, NT = (Ll + Lp) - (Sl + Sp)
+    const d = D.delta, band = d && d.band_eur != null ? ` · Band ±${tplEur(d.band_eur)}` : ''
+    const k3 = `<div class="kpi"><div class="kpi-label">Netto</div><div class="kpi-value ${N > 0 ? 'tpl-gut' : N < 0 ? 'tpl-rot' : ''}">jetzt ${vz(N)}<small>${N > 0 ? 'long' : N < 0 ? 'short' : ''}</small></div>
         <div class="tpl-ls"><i style="width:${anteil.toFixed(1)}%;background:var(--good)"></i><i style="flex:1;background:var(--danger)"></i></div>
-        <span class="kpi-delta" title="Netto-Einsatz jetzt (laufende Trades) · erlaubtes Band">${jetztTxt}</span></div>`
+        <span class="kpi-delta umbruch" title="Netto der laufenden Trades · darunter mit den geplanten bis Tagesende${band}">${plan.length ? `bis Tagesende mit geplanten ${vz(NT)}` : 'keine geplanten'}</span></div>`
     const hy = tplHypo(D)
     return `<div class="kpis tpl-kpis5">${k1}${k2}${k3}${tplHypoKachelHtml(hy)}${apdBotKachelHtml(apdDaten(), apdAdmin(), tplUhrIso)}</div>`
   }
