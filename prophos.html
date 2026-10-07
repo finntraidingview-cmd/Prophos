@@ -2747,6 +2747,16 @@
   #adm-pane-planer .ap-adm-scroll{overflow-x:auto} #adm-pane-planer .ap-adm-scroll .wd-tab{min-width:640px}
   #adm-pane-planer .wd-tab td{font-size:13px;vertical-align:middle;padding:7px 10px 7px 0} #adm-pane-planer .wd-tab th{font-size:11.5px;padding:4px 10px 6px 0}
   #adm-pane-planer .wd-tab td.ok,#adm-pane-planer .wd-tab th.ok{text-align:right;padding-right:2px;width:40px}
+  /* Nachbesserung 08.10.2026 (Finn: „es packt noch ein bisschen"): Zahlen in normaler Schrift, rechtsbündig mit tabular-nums, feste Mindestbreiten je Spalte */
+  #adm-pane-planer .wd-tab td.zahl,#adm-pane-planer .wd-tab th.zahl{text-align:right;font-family:inherit;font-variant-numeric:tabular-nums;padding-right:18px;white-space:nowrap}
+  #adm-pane-planer .wd-tab td.r,#adm-pane-planer .wd-tab th.r{white-space:nowrap;min-width:84px;padding-right:18px}
+  #adm-pane-planer .wd-tab th.s,#adm-pane-planer .wd-tab td.s{min-width:64px} #adm-pane-planer .wd-tab th.m,#adm-pane-planer .wd-tab td.m{min-width:56px}
+  #adm-pane-planer .wd-tab th.g,#adm-pane-planer .wd-tab td.g{min-width:76px} #adm-pane-planer .wd-tab th.w,#adm-pane-planer .wd-tab td.w{min-width:88px}
+  #adm-pane-planer .wd-tab td.k{padding-right:18px} #adm-pane-planer .wd-tab td.st{min-width:120px;padding-right:12px}
+  #adm-pane-planer .ap-adm-scroll .wd-tab{min-width:760px}
+  #adm-pane-planer .ap-adm-grp{padding:12px 0 6px} #adm-pane-planer .ap-adm-grp .ap-adm-id{font-size:13px;font-weight:600}
+  #adm-pane-planer .ap-adm-grp .btn-xs{margin-left:auto;padding:2px 9px;font-size:11.5px;height:auto;line-height:1.6;white-space:nowrap}
+  #adm-pane-planer .seg button{padding:3px 10px;font-size:12px}
   #adm-pane-planer .ap-konto{background:none;border:0;padding:0;font:inherit;color:var(--ink);cursor:pointer;text-align:left;white-space:nowrap}
   #adm-pane-planer .ap-konto:hover{color:var(--violet);text-decoration:underline;text-underline-offset:3px}
   #adm-pane-planer .ap-konto .mono{color:var(--sub)}
@@ -40551,7 +40561,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1185'
+  const OS_TAB_BUILD = '2026-09-22.1186'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -59110,7 +59120,7 @@
    * mal einen Überblick über alle IDs sehe, die ich gleichzeitig beim Trade-Planer managen kann"). Eine Zeile je ID mit planbaren
    * Konten (challenge/phase1/phase2): Haken = in auto_plan_regeln.user_ids (sofort gespeichert über /admin/auto-plan/ids), Konten,
    * im letzten Lauf geplant/ausgelassen. Nur Anzeige + Haken, keine Bewertung. Nur Admin. ══ */
-  const _apIds = { rows: [], aktiv: null, tag: null, laeuft: false, fehler: '', offen: [], offenTag: null, offenFehler: '', weitereAuf: false }
+  const _apIds = { rows: [], aktiv: null, tag: null, laeuft: false, fehler: '', offen: [], offenTag: null, offenFehler: '', weitereAuf: false, tagWahl: null, D: null }   // tagWahl: 'heute' | 'morgen' (Hand), sonst Standard = Tag mit offenen Vorschlägen
   async function apIdsLaden(){
     if(_apIds.laeuft) return
     _apIds.laeuft = true; _apIds.fehler = ''; _apIds.offenFehler = ''
@@ -59127,10 +59137,25 @@
   }
   /* Kacheln + Zeitstrahl aller IDs: Spuren = Planer-IDs (Haken im Reiter oder Auto-Trades heute), die übrigen IDs mit laufenden Hand-/Orbit-V3-
    * Trades in der Sammelzeile „Weitere" (aufklappbar wie auf der Planer-Seite, Zustand nur hier) */
+  /* TAG (Nachbesserung 08.10.2026, Finn live .1178: Zeitstrahl zeigte „Moritz · 0 Trades" auf 14:00–00:00 — tplDaten nahm „heute" (deutsche
+   * Zeit), die offenen Vorschläge lagen schon auf morgen): Heute/Morgen-Schalter wie auf der Planer-Seite; Standard = der Tag, für den es
+   * offene Vorschläge gibt (sonst heute). tplDaten liest _tpl.tag — der wird nur für die Dauer des Zeichnens umgestellt und danach
+   * zurückgesetzt, die Planer-Seite behält ihre eigene Wahl. Für „morgen" kommen die Daten wie dort aus dem letzten Lauf + eigenen Plänen. */
+  const apIdsTagBerlin = iso => { const d = new Date(iso || ''); return isNaN(d) ? '' : d.toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' }) }
+  function apIdsTag(){
+    if(_apIds.tagWahl) return _apIds.tagWahl
+    const heute = tplDatum(new Date()), tage = new Set(_apIds.offen.map(z => apIdsTagBerlin(z.start_um)).filter(Boolean))
+    if(tage.has(heute)) return 'heute'
+    return tage.size ? 'morgen' : 'heute'
+  }
+  function apIdsDaten(){
+    const alt = _tpl.tag; _tpl.tag = apIdsTag()
+    try{ return tplDaten() } finally{ _tpl.tag = alt }
+  }
   function apIdsKopfHtml(){
     if(typeof tplDaten !== 'function' || typeof tplKachelnHtml !== 'function' || typeof tplZeitstrahlHtml !== 'function') return ''
     try{
-      const D = tplDaten(), sp = new Map()
+      const D = _apIds.D || apIdsDaten(), sp = new Map()
       for(const t of D.trades) if(!sp.has(t.user_id)) sp.set(t.user_id, { uid: t.user_id, name: t.user })
       for(const r of _apIds.rows) if(r.drin && !sp.has(String(r.user_id))) sp.set(String(r.user_id), { uid: String(r.user_id), name: r.name })
       const planer = new Set([..._apIds.rows.filter(r => r.drin).map(r => String(r.user_id)), ...D.trades.filter(t => t.auto).map(t => t.user_id)])
@@ -59141,14 +59166,27 @@
         if(_apIds.weitereAuf){ zeilen.push({ key: 'weitere', name: 'Weitere', uid: null, ids: [], alle: w.map(x => x.uid), sammel: true, auf: true }); zeilen.push(...w.map(zeile)) }
         else zeilen.push({ key: 'weitere', name: 'Weitere', uid: null, ids: w.map(x => x.uid), sammel: true, auf: false })
       }
-      return tplKachelnHtml(D) + tplZeitstrahlHtml(D, zeilen)
+      const tag = apIdsTag(), seg = `<div class="ap-adm-kopf" style="margin-bottom:10px"><b>${escapeHtml(apPrTagText(D.tag))}</b><span>alle IDs · Dubai${_apd.d && _apd.d.um && tag === 'heute' ? ' · Stand ' + tplUhrIso(_apd.d.um) : ''}</span>
+          <div class="seg" style="margin-left:auto"><button type="button" data-ap-tag="heute" class="${tag === 'heute' ? 'active' : ''}">Heute</button><button type="button" data-ap-tag="morgen" class="${tag === 'morgen' ? 'active' : ''}">Morgen</button></div></div>`
+      const alt = _tpl.tag; _tpl.tag = tag
+      try{ return seg + tplKachelnHtml(D) + tplZeitstrahlHtml(D, zeilen) } finally{ _tpl.tag = alt }
     }catch(e){ console.warn('[ap-ids] Kopf zeichnen', e); return '' }
   }
   const apKontoKurz = z => { let g = 0; try{ g = Number(kontoGroesseAnzeige(z.konto, null, null)) || 0 }catch(_){}
     const gk = g >= 1000 ? Math.round(g / 1000) + 'k' : g > 0 ? String(g) : ''
     return `${gk ? gk + ' ' : ''}${escapeHtml(String(z.firma || ''))}${z.ende4 ? ` <span class="mono">…${escapeHtml(String(z.ende4))}</span>` : ''}` }
   // Trade-Zeile des Zeitstrahls (tplDaten) zur plan_id — liefert Kontowert (wert_eur aus dem Delta), Stufe (Lauf / Planer-Notes), Balance, Rest
-  const apIdsTrade = pid => { try{ return (typeof tplDaten === 'function' ? tplDaten().trades : []).find(t => String(t.plan_id) === String(pid)) || null }catch(_){ return null } }
+  const apIdsTrade = z => { try{
+      const D = _apIds.D || apIdsDaten(), kk = s => String(s || '').trim().toLowerCase()
+      return D.trades.find(t => String(t.plan_id) === String(z.plan_id))
+        || D.trades.find(t => String(t.user_id) === String(z.user_id) && (kk(t.konto) === kk(z.konto) || (z.ende4 && t.ende4 && String(t.ende4) === String(z.ende4)))) || null
+    }catch(_){ return null } }
+  // Kontowert: Delta (wert_eur, heute) → Trade-Zeile → letzter Lauf (ergebnis.geplant je ID + Konto: wert) → null
+  const apIdsWert = (z, t) => { if(t && t.wert != null) return t.wert
+    const kk = s => String(s || '').trim().toLowerCase()
+    const d = (_apd.d && (_apd.d.geplant || [])).find?.(x => String(x.plan_id) === String(z.plan_id)); if(d && d.wert_eur != null && isFinite(Number(d.wert_eur))) return Number(d.wert_eur)
+    const g = ((_ap.letzter && _ap.letzter.geplant) || []).find(x => String(x.user_id) === String(z.user_id) && kk(x.konto) === kk(z.konto))
+    const w = g && (g.wert ?? g.wert_eur); return w != null && isFinite(Number(w)) ? Number(w) : null }
   function apIdsOffenHtml(){
     const o = _apIds.offen.slice().sort((a, b) => String(a.user || '').localeCompare(String(b.user || '')) || String(a.start_um || '').localeCompare(String(b.start_um || '')))
     const heute = new Date().toLocaleDateString('de-DE', { timeZone: 'Asia/Dubai', day: '2-digit', month: '2-digit' })
@@ -59163,22 +59201,22 @@
     // je ID eine Gruppe: Kopfzeile (Farbpunkt · Name · n offen · „alle n bestätigen"), darunter die Zeilen, Haken ganz rechts
     const je = new Map()
     for(const z of o){ const k = String(z.user_id || ''); if(!je.has(k)) je.set(k, { uid: k, name: z.user || k.slice(0, 8), liste: [] }); je.get(k).liste.push(z) }
-    const th = `<thead><tr><th>Konto</th><th>Richtung</th><th class="zahl">Start</th><th class="zahl">Menge</th><th class="zahl">TP</th><th class="zahl">SL</th><th class="zahl" title="Kontowert in € (aus dem Delta)">Kontowert</th><th>Stufe</th><th class="ok"></th></tr></thead>`
+    const th = `<thead><tr><th class="k">Konto</th><th class="r">Richtung</th><th class="zahl s">Start</th><th class="zahl m">Menge</th><th class="zahl g">TP</th><th class="zahl g">SL</th><th class="zahl w" title="Kontowert in € (Delta, sonst letzter Lauf)">Kontowert</th><th class="st">Stufe</th><th class="ok"></th></tr></thead>`
     const gruppen = [...je.values()].map(g => {
-      const zeilen = g.liste.map(z => { const t = apIdsTrade(z.plan_id) || {}
-        const stufe = t.stufe ? `<span class="ap-stufe${/letzter/i.test(t.stufe) ? ' letzter' : ''}">${escapeHtml(t.stufe)}</span>` : '<span style="color:var(--sub-2)">–</span>'
+      const zeilen = g.liste.map(z => { const t = apIdsTrade(z) || {}, st = z.stufe || t.stufe || ''
+        const stufe = st ? `<span class="ap-stufe${/letzter/i.test(st) ? ' letzter' : ''}" title="${escapeHtml(String(z.notes || ''))}">${escapeHtml(st)}</span>` : '<span style="color:var(--sub-2)">–</span>'
         return `<tr>
-        <td><button type="button" class="ap-konto" data-ap-konto="${escapeHtml(String(z.plan_id))}" title="Konto ansehen">${apKontoKurz(z)}</button></td>
-        <td style="font-weight:600;color:${z.richtung === 'buy' ? '#047857' : '#b91c1c'};white-space:nowrap">${z.richtung === 'buy' ? '▲ Long' : z.richtung === 'sell' ? '▼ Short' : '–'}</td>
-        <td class="zahl mono">${escapeHtml(wann(z.start_um))}</td>
-        <td class="zahl mono">${z.menge != null ? escapeHtml(String(z.menge)) : '–'}</td>
-        <td class="zahl mono">${usd(z.tp)}</td>
-        <td class="zahl mono">${usd(z.sl)}</td>
-        <td class="zahl mono">${eur(t.wert)}</td>
-        <td>${stufe}</td>
+        <td class="k"><button type="button" class="ap-konto" data-ap-konto="${escapeHtml(String(z.plan_id))}" title="Konto ansehen">${apKontoKurz(z)}</button></td>
+        <td class="r" style="font-weight:600;color:${z.richtung === 'buy' ? '#047857' : '#b91c1c'}">${z.richtung === 'buy' ? '▲ Long' : z.richtung === 'sell' ? '▼ Short' : '–'}</td>
+        <td class="zahl s">${escapeHtml(wann(z.start_um))}</td>
+        <td class="zahl m">${z.menge != null ? escapeHtml(String(z.menge)) : '–'}</td>
+        <td class="zahl g">${usd(z.tp)}</td>
+        <td class="zahl g">${usd(z.sl)}</td>
+        <td class="zahl w">${eur(apIdsWert(z, t))}</td>
+        <td class="st">${stufe}</td>
         <td class="ok"><button type="button" class="ap-adm-ok" data-ap-ok="${escapeHtml(String(z.plan_id))}" title="Bestätigen — startet zur Startzeit">✓</button></td></tr>` }).join('')
       return `<div class="ap-adm-grp"><span class="ap-adm-id"><i style="background:${idFarbe(g.uid)}"></i>${escapeHtml(g.name)}</span><span class="n">${g.liste.length} offen</span>
-          <button type="button" class="ap-adm-ok" data-ap-ok-id="${escapeHtml(g.uid)}" title="alle offenen Vorschläge dieser ID bestätigen">✓ alle ${g.liste.length} bestätigen</button></div>
+          <button type="button" class="btn btn-ghost btn-xs" data-ap-ok-id="${escapeHtml(g.uid)}" title="alle offenen Vorschläge dieser ID bestätigen">✓ alle ${g.liste.length}</button></div>
         <div class="ap-adm-scroll"><table class="wd-tab">${th}<tbody>${zeilen}</tbody></table></div>`
     }).join('')
     return `<div class="ap-adm-karte">${kopf}${gruppen}</div>`
@@ -59237,17 +59275,21 @@
     const kopf = `<div class="ap-adm-kopf"><b>IDs im Trade-Planer · ${drin.length} von ${rows.length}</b>
         <span>Nachtlauf ${_apIds.aktiv ? 'an' : 'aus'}${_apIds.tag ? ' · letzter Lauf ' + escapeHtml(String(_apIds.tag)) : ''}</span>
         <button type="button" class="btn btn-ghost" id="ap-ids-neu" style="margin-left:auto;padding:3px 9px;font-size:12px" title="Neu laden">↻</button></div>`
+    // PC-Tab-Lebenszeichen je ID (Slave 2, .1180: pcStandPunktHtml → grün/grau/rot, '' solange nichts geladen) rechts neben dem Namen
+    const pcs = uid => (typeof window.pcStandPunktHtml === 'function') ? (window.pcStandPunktHtml(String(uid)) || '') : ''
     const zeilen = rows.map(r => `<tr>
-        <td><span class="ap-adm-id"${r.drin ? '' : ' style="color:var(--sub);font-weight:500"'}><i style="background:${idFarbe(r.user_id)}"></i>${escapeHtml(String(r.name || ''))}</span></td>
+        <td><span class="ap-adm-id"${r.drin ? '' : ' style="color:var(--sub);font-weight:500"'}><i style="background:${idFarbe(r.user_id)}"></i>${escapeHtml(String(r.name || ''))}</span> ${pcs(r.user_id)}</td>
         <td class="zahl">${r.konten}</td>
         <td class="zahl">${r.drin ? r.geplant : '<span style="color:var(--sub-2)">–</span>'}</td>
         <td class="zahl">${r.drin ? r.ausgelassen : '<span style="color:var(--sub-2)">–</span>'}</td>
         <td class="ok"><input type="checkbox" class="acc-ap" style="width:15px;height:15px;accent-color:#047857;cursor:pointer;margin:0" data-ap-id="${escapeHtml(String(r.user_id))}"${r.drin ? ' checked' : ''} title="${r.drin ? 'Im Trade-Planer — Haken weg = ab dem nächsten Lauf nicht mehr geplant' : 'Nicht im Trade-Planer — Haken setzen = ab dem nächsten Lauf (10-min-Takt / Nacht) dabei'}"></td></tr>`).join('')
     root.style.padding = '6px 0'; root.style.color = ''
+    try{ _apIds.D = apIdsDaten() }catch(_){ _apIds.D = null }   // Trades des gewählten Tags einmal je Zeichnen (Kopf + Vorschlags-Zeilen)
     root.innerHTML = apIdsKopfHtml() + apIdsOffenHtml() + `<div class="ap-adm-karte">${kopf}<div class="ap-adm-scroll"><table class="wd-tab"><thead><tr><th>ID</th><th class="zahl" title="Konten vom Typ Challenge / Phase 1 / Phase 2, nicht archiviert">Konten planbar</th><th class="zahl">geplant (letzter Lauf)</th><th class="zahl">ausgelassen</th><th class="ok" title="im Trade-Planer"></th></tr></thead><tbody>${zeilen || '<tr><td colspan="5" style="color:var(--sub)">keine ID mit planbaren Konten</td></tr>'}</tbody></table></div>
       <div class="ap-adm-fuss">Welche Konten einer ID geplant werden, entscheiden weiter Typ, Firma (Kernwerte), Balance und der Haken je Konto unter Accounts.</div></div>`
     root.querySelector('#ap-ids-neu')?.addEventListener('click', apIdsLaden)
     root.querySelector('[data-tpl-weitere]')?.addEventListener('click', () => { _apIds.weitereAuf = !_apIds.weitereAuf; apIdsRender() })
+    root.querySelectorAll('[data-ap-tag]').forEach(b => b.addEventListener('click', () => { _apIds.tagWahl = b.dataset.apTag; apIdsRender() }))
     root.querySelectorAll('[data-ap-konto]').forEach(b => b.addEventListener('click', () => apKontoOeffnen(b.dataset.apKonto)))
     // Bestätigen: eine Zeile / eine ID / alle — Admin-Route wie auf der Trade-Planer-Seite, danach neu laden
     const ok = async (ids, btn) => { if(btn) btn.disabled = true; try{ await tplEingriff('bestaetigen', ids) }catch(e){ if(typeof atToast === 'function') atToast('Nicht bestätigt: ' + ((e && e.message) || e), 'end') } finally{ apIdsLaden() } }
@@ -59262,7 +59304,7 @@
       finally{ cb.disabled = false; apIdsLaden() }
     }))
   }
-  window._apIdsTabOeffnen = () => apIdsLaden()
+  window._apIdsTabOeffnen = () => { apIdsLaden(); if(typeof window.pcStandLaden === 'function') Promise.resolve(window.pcStandLaden()).then(() => { if(!_apIds.laeuft) apIdsRender() }).catch(() => {}) }   // PC-Punkt (höchstens alle 60 s) nachziehen
   /* ══ ENDE ADMIN „TRADE-PLANER" ══ */
 
   async function aufLaden(){
