@@ -8867,6 +8867,13 @@
                 <option value="">— kein bestimmter Account —</option>
               </select>
             </div>
+            <!-- Nächster Payout (08.10.2026, Finn: „nachdem ich den Payout angefragt habe oder als erledigt eintrage, will ich direkt
+                 festlegen, wann der nächste Payout ist") — nur bei Payout mit gewähltem Account; landet in accounts.payout_ready_at
+                 (derselbe Speicherort wie Badge „💸 Payout ab …" und das ✓-Erhalten-Modal). Leer = Termin wird wie bisher geleert. -->
+            <div class="field" id="fin-next-payout-row" style="grid-column:span 2;display:none">
+              <label>Nächster Payout ab</label>
+              <input type="date" class="input" id="fin-next-payout">
+            </div>
             <div class="field">
               <label>Betrag (<span id="fin-cur-label">€</span>)</label>
               <input type="number" class="input mono" id="fin-amount" step="0.01" placeholder="z.B. 1500">
@@ -21235,6 +21242,19 @@
     })
   }
 
+  /* Nach einer abgeschlossenen Balance-Lesung (08.10.2026, Befund Finn: Konto „100k Summerplan → Funded" zeigte nach dem Payout-Antrag
+   * weiter 102.076 „Live · MT5-Cloud · gerade eben", obwohl „↻ Balance lesen" 100.076 geschrieben hatte und der Copier-Snapshot um
+   * 01:48 genauso stand): der Eintrag dieses Logins fliegt aus dem Cache, die 60-s-Sperre wird für diesen Fall umgangen und der
+   * Cache sofort neu geladen; danach Liste und Plan-Karten neu zeichnen. Kein neuer Lese-Pfad — nur der bestehende Lader. */
+  async function mt5BalCacheErneuern(prophosAccountId){
+    try{ const login = mt5LoginForAccount(prophosAccountId); if(login) _mt5BalCache.delete(String(login)) }catch(_){}
+    _mt5BalZuletzt = 0
+    if(_mt5BalLaeuft) return
+    _mt5BalLaeuft = true
+    try{ await mt5BalCacheLaden() }finally{ _mt5BalLaeuft = false; _mt5BalZuletzt = Date.now() }
+    try{ if(typeof renderAccounts === 'function') renderAccounts() }catch(_){}
+    try{ if(typeof renderTradePlans === 'function') renderTradePlans() }catch(_){}
+  }
   // Für die .tc-acc-bal-Badges der Trade-Karten: gleiches Format wie
   // getDupBalanceForAccount ({balance, currency €/$}), damit fmtDupBalance passt.
   // BEWUSST weiter über getMt5BalanceForAccount (frisches Panel, ≤15s): auf
@@ -31736,7 +31756,8 @@
   }
   async function accBalanceLesen(id){
     id = String(id)
-    const setz = (o) => { _accBalLauf.set(id, o); try{ renderAccounts() }catch(_){} }
+    // Lesung fertig und ok → MT5-Cloud-Cache dieses Logins verwerfen und neu laden (08.10.2026, s. mt5BalCacheErneuern)
+    const setz = (o) => { _accBalLauf.set(id, o); try{ renderAccounts() }catch(_){}; if(o && o.laeuft === false && !o.fehler && typeof mt5BalCacheErneuern === 'function') mt5BalCacheErneuern(id).catch(() => {}) }
     if(_accBalLauf.get(id)?.laeuft) return
     const acc = (accounts || []).find(a => String(a.id) === id); if(!acc) return
     // MT5-Konto (29.09.2026): Terminal dieses Logins öffnen + Lese-EA-Snapshot lesen. Hier am PC direkt, sofern die Instanz hier liegt —
@@ -32100,7 +32121,10 @@
         if(istMt5Konto && a.tvBalance != null && isFinite(Number(a.tvBalance)) && a.tvBalanceQuelle !== 'dashboard'){
           const tvAt = Date.parse(a.tvBalanceAt || '') || 0, altAt = liveTime ? (Date.parse(liveTime) || Number(liveTime) || 0) : 0
           const liveFrisch = liveSrc === 'TSX' || liveSrc === 'MT5' || liveSrc === 'MT5-Copier' || (liveSrc === 'MT5-Cloud' && altAt && Date.now() - altAt <= 60000)
-          if(!liveFrisch && (liveBal == null || !altAt || tvAt > altAt)){
+          // MT5-Cloud ist ein Cache-Snapshot (mt5_live.updated_at): ist die gespeicherte Lesung (tv_balance_at) jünger, gewinnt sie auch
+          // gegen einen „frischen" Cloud-Eintrag (08.10.2026, Befund „100k Summerplan → Funded": Liste hielt 102.076 statt gelesener 100.076)
+          const cloudAelter = liveSrc === 'MT5-Cloud' && altAt && tvAt > altAt
+          if((!liveFrisch || cloudAelter) && (liveBal == null || !altAt || tvAt > altAt)){
             const c = (typeof mt5BalFuerAccount === 'function') ? mt5BalFuerAccount(a.id) : null
             liveBal = Number(a.tvBalance); liveSrc = 'MT5-Konto'; liveTime = a.tvBalanceAt || null; liveCcy = a.mt5BalCcy || (c && c.ccy) || 'USD'
             mt5Gespeichert = true
@@ -32475,6 +32499,14 @@
    *   Live / Futures-Phase      → nichts davon
    * Futures = Firm-Spec mit Einheit 'Kontrakte' (tpFirmIstFutures, wie Orbit),
    * erkannt am getippten Firm-Namen — deshalb an type UND firm gehängt. */
+  // WD-Farm nur für Futures-Fundeds (08.10.2026, Finn: „CFD-Accounts sollen nie die Möglichkeit haben, in den Winning-Day-Farm zu
+  // kommen. Das fällt bei CFD komplett weg."): Futures-Firma (tpFirmIstFutures, wie der Farmer) UND Typ funded/winning_days.
+  // REIN RECHNEND, gilt für Anzeige des Blocks UND das Speichern (wd_farm sonst immer false).
+  function accWdFarmErlaubt(firm, typ){
+    const fut = (typeof tpFirmIstFutures === 'function') ? tpFirmIstFutures(String(firm || '')) : false
+    return fut && (typ === 'funded' || typ === 'winning_days')
+  }
+  window._accWdFarmErlaubt = accWdFarmErlaubt   // Test-Haken
   function toggleAcBloecke(){
     const firm = accEls.firm?.value.trim() || ''
     const typ  = accEls.type?.value || ''
@@ -32491,8 +32523,8 @@
     if(accEls.consRow) accEls.consRow.hidden = !accConsSichtbar(firm, typ)
     // Futures · Live (26.09.2026): nur Futures-Firma und nur beim Bearbeiten (ein neues Konto hat noch keine Lesung)
     const tvSec = document.getElementById('ac-tvlive-section'); if(tvSec) tvSec.hidden = !(istFutures && _editingAccountId)
-    // „Im WD-Farm" nur beim Bearbeiten, nie beim Anlegen (F17-Ergänzung, 27.09.2026)
-    const wdRow = document.getElementById('ac-wd-farm-row'); if(wdRow) wdRow.hidden = !_editingAccountId
+    // „Im WD-Farm" nur beim Bearbeiten, nie beim Anlegen (F17-Ergänzung, 27.09.2026); seit 08.10.2026 nur Futures + funded/winning_days (accWdFarmErlaubt)
+    const wdRow = document.getElementById('ac-wd-farm-row'); if(wdRow) wdRow.hidden = !(_editingAccountId && accWdFarmErlaubt(firm, typ))
   }
   // Füllt „Futures · Live" im Bearbeiten-Popup — frisch aus accounts + den letzten Plänen dieses Master-Kontos (nur lesen).
   // _acTvLiveId schützt gegen Überholen, wenn das Popup schnell für ein anderes Konto neu geöffnet wird.
@@ -32703,7 +32735,7 @@
       }),
       payoutReadyAt:  payoutReadyVal,
       waitingPayoutSince: wartetPayoutVal,
-      wdFarm:         isEdit ? !!accEls.wdFarm?.checked : false,   // neue Konten nie im WD-Farm (F17-Ergänzung, 27.09.2026)
+      wdFarm:         (isEdit && accWdFarmErlaubt(accEls.firm?.value.trim() || '', accEls.type?.value || '')) ? !!accEls.wdFarm?.checked : false,   // neue Konten nie im WD-Farm (F17-Ergänzung, 27.09.2026); CFD/Phasen immer false (08.10.2026)
       creds: hasCreds ? credObj : null,
       createdAt: new Date().toISOString(),
       ma: null
@@ -40503,7 +40535,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1181'
+  const OS_TAB_BUILD = '2026-09-22.1182'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -53347,11 +53379,10 @@
       if(dupAcc && dupAcc.balance != null) return dupFmtMoney(Number(dupAcc.balance), dupAcc.ccy || 'USD')
       return null
     }
-    accountSel.innerHTML = '<option value="">— kein bestimmter Account —</option>' + finFundedAccounts.map(a => {
-      const bal = finLiveBalStr(a)
-      const label = `${a.name} · ${a.firm||'–'}${bal ? ' · ' + bal : ''}`
-      return `<option value="${a.id}">${escapeHtml(label)}</option>`
-    }).join('')
+    // Nach Prop-Firma gruppiert (08.10.2026, Finn: „die Accounts nach Prop-Firmen sortieren, nicht alles auf einen Haufen") —
+    // kontoOptionenGruppiert, Beschriftung „150k …3526 → Funded · Balance"; Werte (a.id) unverändert
+    accountSel.innerHTML = '<option value="">— kein bestimmter Account —</option>' + kontoOptionenGruppiert(finFundedAccounts, a => { const bal = finLiveBalStr(a); return bal ? ' · ' + bal : '' })
+    const nextEl = document.getElementById('fin-next-payout'); if(nextEl) nextEl.value = ''
 
     document.getElementById('fin-amount').value = ''
     document.getElementById('fin-currency').value = 'EUR'   // Finanzen laufen in Euro
@@ -53397,8 +53428,38 @@
     const c = document.getElementById('fin-currency').value
     document.getElementById('fin-cur-label').textContent = currencySign(c)
   }
+  /* KONTO-AUSWAHL NACH PROP-FIRMA (08.10.2026, Finn im Payout-Popup: „die Accounts nach Prop-Firmen sortieren, nicht alles auf einen
+   * Haufen"): eine <optgroup> je Firma (alphabetisch), darin nach Kontogröße absteigend, dann Name. Beschriftung kurz, die Firma steht
+   * ja in der Gruppe: „150k …3526 → Funded" (Größe über kontoGroesseAnzeige wie der Planer, letzte vier Zeichen der Kontonummer aus
+   * external_id, sonst aus dem Namen, Typ-Wort aus typeLabel); zusatz(a) hängt z. B. die Live-Balance an. Werte = a.id, unverändert.
+   * Gemeinsame Hilfe für jedes Konto-<select> dieser Art (Payout eintragen / Manuell buchen = dasselbe Modal). -> HTML */
+  function kontoOptionenGruppiert(liste, zusatz){
+    const groesse = a => (typeof kontoGroesseAnzeige === 'function') ? kontoGroesseAnzeige(a.name, a.startingBalance, null) : 0
+    const je = new Map()
+    for(const a of (liste || [])){ const f = String(a.firm || 'Sonstige'); if(!je.has(f)) je.set(f, []); je.get(f).push(a) }
+    const label = a => {
+      const g = groesse(a), nr = String(a.externalId || '').replace(/[^A-Za-z0-9]/g, '') || ((/\d{4,}/.exec(String(a.name || '')) || [''])[0])
+      const kurz = (g > 0 || nr) ? `${g > 0 ? (g % 1000 === 0 ? g / 1000 : (g / 1000).toLocaleString('de-DE', { maximumFractionDigits: 1 })) + 'k' : ''}${nr ? ' …' + nr.slice(-4) : ''}`.trim() : String(a.name || '–')
+      const typ = (typeof typeLabel === 'function') ? typeLabel(a.type) : String(a.type || '')
+      return `${kurz}${typ ? ' → ' + typ : ''}${zusatz ? (zusatz(a) || '') : ''}`
+    }
+    return [...je.keys()].sort((a, b) => a.localeCompare(b, 'de')).map(f => `<optgroup label="${escapeHtml(f)}">`
+      + je.get(f).sort((a, b) => (groesse(b) - groesse(a)) || String(a.name || '').localeCompare(String(b.name || ''), 'de'))
+          .map(a => `<option value="${escapeHtml(String(a.id))}" title="${escapeHtml(String(a.name || ''))}">${escapeHtml(label(a))}</option>`).join('')
+      + '</optgroup>').join('')
+  }
+  window._kontoOptionenGruppiert = kontoOptionenGruppiert   // Test-Haken
   // Status + Liegt-bei gibt es nur bei Payouts; Liegt-bei nur solange die
   // Anfrage offen ist (bei „Bereits erhalten" ist das Geld ja schon da).
+  // Nächster Payout (08.10.2026): nur bei Payout MIT Account — vorbelegt mit dem Termin am Konto (falls in der Zukunft), sonst heute
+  // + 14 Tage (einen Firmen-Zyklus kennt Prophos nicht). Wechselt der Account, wird neu vorbelegt.
+  function finNextPayoutVorschlag(acc){
+    const heute = (typeof _deTodayStr === 'function') ? _deTodayStr() : new Date().toISOString().slice(0, 10)
+    const am = acc && acc.payoutReadyAt ? String(acc.payoutReadyAt).slice(0, 10) : ''
+    if(/^\d{4}-\d{2}-\d{2}$/.test(am) && am > heute) return am
+    const d = new Date(heute + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + 14)
+    return d.toISOString().slice(0, 10)
+  }
   function updateFinPayoutFields(){
     const isPayout = document.getElementById('fin-kind').value === 'payout'
     const isPending = document.getElementById('fin-po-status')?.value === 'pending'
@@ -53406,9 +53467,39 @@
     const liegtRow  = document.getElementById('fin-liegt-bei-row')
     if(statusRow) statusRow.style.display = isPayout ? '' : 'none'
     if(liegtRow)  liegtRow.style.display  = (isPayout && isPending) ? '' : 'none'
+    const accId = document.getElementById('fin-account')?.value || '', nextRow = document.getElementById('fin-next-payout-row'), nextEl = document.getElementById('fin-next-payout')
+    if(nextRow) nextRow.style.display = (isPayout && accId) ? '' : 'none'
+    if(nextEl && isPayout && accId && nextEl.dataset.fuer !== accId){ nextEl.value = finNextPayoutVorschlag((accounts || []).find(a => String(a.id) === accId)); nextEl.dataset.fuer = accId }
+    if(nextEl && !accId) nextEl.dataset.fuer = ''
   }
   document.getElementById('fin-kind')?.addEventListener('change', () => { updateFinTitle(); updateFinSignHint(); updateFinPayoutFields() })
   document.getElementById('fin-po-status')?.addEventListener('change', updateFinPayoutFields)
+  document.getElementById('fin-account')?.addEventListener('change', updateFinPayoutFields)
+  // Payout-Termin am Konto nach einer Payout-Buchung/-Anfrage (08.10.2026): mit Datum aus „Nächster Payout ab" → setzen (EIN Update),
+  // ohne Datum → wie bisher leeren (payoutReadyClear). Fehler benannt, die Buchung ist da schon durch.
+  // Balance nach dem Payout neu lesen (08.10.2026, Finn: „nachdem ich den Payout angefragt habe, soll sich Prophos automatisch kurz in
+  // das MT5-Terminal einloggen und die Balance aktualisieren … bei TradingView-Accounts genauso"): dieselbe Aktion wie „↻ Balance lesen"
+  // (accBalanceLesen wählt den Weg: MT5 → Echo-Terminal, TradingView/Topstep → Puls; am PC direkt, sonst per Signal an den PC der ID).
+  // Nur anstoßen, nie blockieren — der Stand läuft über _accBalLauf in der Accounts-Liste.
+  function finBalanceNachPayout(accountId){
+    if(!accountId) return
+    const a = (accounts || []).find(x => String(x.id) === String(accountId)); if(!a) return
+    if(typeof accBalanceLesen !== 'function'){ if(typeof atToast === 'function') atToast(`Balance von ${a.name} am PC der ID lesen`, 'end'); return }
+    if(typeof atToast === 'function') atToast(`Balance wird nach dem Payout neu gelesen … (${a.name})`, 'start')
+    accBalanceLesen(accountId).catch(e => { if(typeof atToast === 'function') atToast('Balance-Lesung nicht gestartet: ' + String((e && e.message) || e), 'end') })
+  }
+  async function payoutReadySetzen(accountId, nextVal){
+    if(!accountId) return
+    if(!nextVal){ if(typeof payoutReadyClear === 'function') await payoutReadyClear(accountId); return }
+    const a = (accounts || []).find(x => String(x.id) === String(accountId)); if(!a) return
+    try{
+      const { data, error } = await supabase.from('accounts').update({ payout_ready_at: nextVal }).eq('id', a.id).select('*').single()
+      if(error) throw error
+      const idx = accounts.findIndex(x => String(x.id) === String(a.id)); if(idx >= 0) accounts[idx] = rowToAccount(data)
+      if(typeof renderAccounts === 'function') renderAccounts()
+      if(typeof atToast === 'function') atToast(`💸 Nächster Payout ab ${finFmtDate(nextVal)} · ${a.name}`, 'start')
+    }catch(e){ if(typeof atToast === 'function') atToast('Payout-Termin nicht gespeichert: ' + ((e && e.message) || e) + ' — im Account-Modal setzen', 'end') }
+  }
   document.getElementById('fin-currency')?.addEventListener('change', updateFinCurLabel)
 
   // Add-Button-Bindings
@@ -53428,6 +53519,7 @@
     const occurredAt = document.getElementById('fin-date').value
     const notes = document.getElementById('fin-notes').value.trim() || null
     const accountId = document.getElementById('fin-account').value || null
+    const nextPayout = (kind === 'payout' && accountId) ? (document.getElementById('fin-next-payout')?.value || null) : null   // 08.10.2026
 
     const msgEl = document.getElementById('finModalMsg')
     if(isNaN(amount) || amount === 0){
@@ -53468,8 +53560,9 @@
         closeFinModal()
         // Winning-Day-Zähler des Accounts neu starten (10.09.2026, Finns Wunsch)
         if(typeof zielPayoutReset === 'function') await zielPayoutReset(accountId)
-        // Payout-Termin ist verbraucht (15.09.2026) — leeren, nächsten setzt Finn
-        if(typeof payoutReadyClear === 'function') await payoutReadyClear(accountId)
+        // Payout-Termin ist verbraucht (15.09.2026) — leeren, nächsten setzt Finn; seit 08.10.2026 direkt hier über „Nächster Payout ab"
+        await payoutReadySetzen(accountId, nextPayout)
+        finBalanceNachPayout(accountId)   // 08.10.2026: Balance nach der Anfrage neu lesen (Payout wird abgezogen)
         // Waiting for Payout ist mit der Anfrage erledigt (29.09.2026)
         if(typeof wartetPayoutClear === 'function') await wartetPayoutClear(accountId)
       }catch(e){
@@ -53501,7 +53594,8 @@
       // Winning-Day-Reset auch hier. Das ✓ Erhalten einer Anfrage läuft NICHT
       // hierüber (finReceivePending) und resettet bewusst nicht nochmal.
       if(kind === 'payout' && typeof zielPayoutReset === 'function') await zielPayoutReset(accountId)
-      if(kind === 'payout' && typeof payoutReadyClear === 'function') await payoutReadyClear(accountId)
+      if(kind === 'payout') await payoutReadySetzen(accountId, nextPayout)   // seit 08.10.2026 mit „Nächster Payout ab" (leer = leeren wie bisher)
+      if(kind === 'payout') finBalanceNachPayout(accountId)   // 08.10.2026: Balance nach dem Payout neu lesen
       if(kind === 'payout' && typeof wartetPayoutClear === 'function') await wartetPayoutClear(accountId)
     }catch(e){
       msgEl.textContent = 'Fehler: ' + (e.message || e); msgEl.className = 'modal-msg err'
