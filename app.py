@@ -14351,21 +14351,7 @@ def ap_konto_rechnen(regel, phase, balance, u):
     # Kontowert und Vorrat; die alten Felder in phasen{} gelten nur noch, wenn die Firma die Kernwerte nicht hat
     zp = (regel.get("ziel_pct") or {}).get(phase) if isinstance(regel.get("ziel_pct"), dict) else None
     ziel = groesse * (1 + float(zp if zp is not None else (ph.get("ziel_pct") or 0)) / 100.0)
-    bp = regel.get("dd_pct") if regel.get("boden") == "statisch" and regel.get("dd_pct") else ph.get("boden_pct")
-    boden = groesse * (1 - float(bp) / 100.0) if bp else None
-    if boden is None and regel.get("boden") == "nachziehend" and regel.get("lock_bei_start") is True and regel.get("dd_usd"):
-        # 07.10.2026 FundedNext Futures: nachziehend mit Lock beim Start — aus der Balance (= Tagesend-Stand) folgt der Boden
-        # Start − DD … höchstens Start (146.000 → 149.200 → 150.000 fest); Tradeify ohne Lock bleibt ohne Boden
-        dd = float(regel["dd_usd"]) * f
-        boden = max(groesse - dd, min(groesse, balance - dd))
-    boden_blow = boden
-    if boden_blow is None and regel.get("dd_usd"):
-        # 07.10.2026 (Finn: „Es wird immer nur mit Konten gearbeitet, deren Balance auf dem Live-Stand ist" — geblasene raus):
-        # statisch (Apex) = Start − DD; nachziehend ohne Lock (Tradeify) = mindestens Start − DD (der nachgezogene Stand ist
-        # hier nicht bekannt) — nur für die Geblasen-Prüfung, der SL bleibt ungekappt wie bisher
-        boden_blow = groesse - float(regel["dd_usd"]) * f
-        if regel.get("boden") == "statisch":
-            boden = boden_blow
+    boden, boden_blow = _ap_boden(regel, ph, groesse, balance)
     rest = ziel - balance
     if rest <= 0:
         return None, "Ziel erreicht — Phase umstellen"
@@ -14400,6 +14386,50 @@ def ap_konto_rechnen(regel, phase, balance, u):
     risiko = sl if sl else (float(ph["dd_usd"]) * f if ph.get("dd_usd") else None)
     return {"groesse": groesse, "ziel": ziel, "rest": round(rest), "menge": menge, "puffer": puffer,
             "tp": tp, "sl": sl, "risiko": risiko, "stufe": stufe}, None
+
+
+def _ap_boden(regel, ph, groesse, balance):
+    """REIN RECHNEND: (boden, boden_blow) eines Kontos — der Block aus ap_konto_rechnen, seit 08.10.2026 ausgelagert, damit der
+    Balance-Balken (Liquidations-Level → Ziel) denselben Boden zeigt, mit dem der Planer den SL kappt. boden = sicheres Level
+    (statisch, nachziehend mit Lock) oder None; boden_blow = dazu nachziehend ohne Lock die Untergrenze Start − DD."""
+    f = groesse / 100000.0 if regel.get("skaliert") else 1.0
+    bp = regel.get("dd_pct") if regel.get("boden") == "statisch" and regel.get("dd_pct") else ph.get("boden_pct")
+    boden = groesse * (1 - float(bp) / 100.0) if bp else None
+    if boden is None and regel.get("boden") == "nachziehend" and regel.get("lock_bei_start") is True and regel.get("dd_usd"):
+        # 07.10.2026 FundedNext Futures: nachziehend mit Lock beim Start — aus der Balance (= Tagesend-Stand) folgt der Boden
+        # Start − DD … höchstens Start (146.000 → 149.200 → 150.000 fest); Tradeify ohne Lock bleibt ohne Boden
+        dd = float(regel["dd_usd"]) * f
+        boden = max(groesse - dd, min(groesse, balance - dd))
+    boden_blow = boden
+    if boden_blow is None and regel.get("dd_usd"):
+        # 07.10.2026 (Finn: „Es wird immer nur mit Konten gearbeitet, deren Balance auf dem Live-Stand ist" — geblasene raus):
+        # statisch (Apex) = Start − DD; nachziehend ohne Lock (Tradeify) = mindestens Start − DD (der nachgezogene Stand ist
+        # hier nicht bekannt) — nur für die Geblasen-Prüfung, der SL bleibt ungekappt wie bisher
+        boden_blow = groesse - float(regel["dd_usd"]) * f
+        if regel.get("boden") == "statisch":
+            boden = boden_blow
+    return boden, boden_blow
+
+
+def ap_boden_konto(regel, phase, balance):
+    """REIN RECHNEND (testbar): Boden für die Anzeige (Master/Slave 4, 08.10.2026: Balance-Balken Skala Liquidations-Level → Ziel)
+    → {boden, boden_min, boden_art}. boden = Balance-Level in $, unter dem das Konto weg ist, sonst None (unbekannt);
+    boden_min = Start − DD als Untergrenze, auch wenn der nachgezogene Stand fehlt (Tradeify ohne Lock: boden None, boden_min gesetzt).
+    Quelle sind nur die Firmen-Kernwerte (ap_kw_param) — nicht accounts.max_drawdown; ohne Kernwerte, Balance oder passende
+    Größe alles None. Keine zweite Rechnung: _ap_boden wie im Planer."""
+    leer = {"boden": None, "boden_min": None, "boden_art": None}
+    b = _wd_num(balance)
+    if not regel or not ap_kw_param(regel) or not b or b <= 0:
+        return leer
+    groesse = ap_groesse(regel.get("groessen"), b)
+    if groesse is None:
+        return leer
+    ph = (regel.get("phasen") or {}).get(phase) or {}
+    boden, blow = _ap_boden(regel, ph, groesse, b)
+    art = ("statisch" if regel.get("boden") != "nachziehend" else
+           "nachziehend_lock" if regel.get("lock_bei_start") is True else "nachziehend")
+    rund = lambda x: round(float(x), 2) if x is not None else None
+    return {"boden": rund(boden), "boden_min": rund(blow), "boden_art": art}
 
 
 def _ap_hhmm(s):
@@ -14732,6 +14762,7 @@ AP_KONTO_FELDER_OHNE_CONS = AP_KONTO_FELDER.replace(",consistency_pct", "")
 
 AP_GRUND_EXT = "External ID fehlt (Tradovate-Unterkonto) — unter Accounts eintragen"
 AP_GRUND_BAL_LIVE = "Balance nicht live — erst lesen"
+AP_GRUND_BAL_FEHLER = "Balance-Prüfung gerade nicht möglich — gleich noch mal versuchen"
 
 
 def ap_balance_live(stand, letzt):
@@ -14761,6 +14792,38 @@ def ap_letzt_je_konto(plaene):
         if k and e and e > out.get(k, ""):
             out[k] = e
     return out
+
+
+def ap_bal_guard(lade):
+    """Bestätigen-Guard (testbar, lade injiziert): lade() → (pl, accs, letzt, echo_bal, dup_bal). → None (alles live, bestätigen)
+    oder (status, msg): 400 mit den Konten, deren Balance seit dem letzten Trade nicht gelesen ist; 503, wenn das Lesen scheitert —
+    seit 08.10.2026 blockiert ein Fehler (Finn: „nur bestätigen, wenn es perfekt ist"; vorher wurde nach print bestätigt)."""
+    try:
+        pl, accs, letzt, echo_bal, dup_bal = lade()
+        tot = []
+        for z in pl or ():
+            k = str(z.get("master_account_id") or "")
+            a = accs.get(k)
+            if not ap_balance_live(acc_balance_wahl(a, echo_bal, dup_bal)[3] if a else None, letzt.get(k)):
+                tot.append(z.get("master_name") or k[:8])
+    except Exception as e:
+        print(f"[auto-plan] ⚠️ bestaetigen/balance_live: {type(e).__name__}: {e}", flush=True)
+        return 503, AP_GRUND_BAL_FEHLER
+    return (400, f"{AP_GRUND_BAL_LIVE}: {', '.join(tot)}") if tot else None
+
+
+def _ap_bal_guard_laden(id_filter):
+    """Daten für ap_bal_guard: Pläne (PostgREST-Filter id), ihre Konten, letztes Trade-Ende je Konto, Echo-/Duplikum-Karten.
+    Fehler fliegen durch (→ 503 im Guard)."""
+    pl = sb_select("trade_plans", {"select": "id,master_account_id,master_name", "id": id_filter})
+    kids = sorted({str(z.get("master_account_id")) for z in pl if z.get("master_account_id")})
+    if not kids:
+        return pl, {}, {}, {}, {}
+    accs = {str(a.get("id")): a for a in _ap_konten_laden({"id": "in.(" + ",".join(kids) + ")"})}
+    letzt = ap_letzt_je_konto(_sb_all("trade_plans", {"select": "master_account_id,status,ended_at,completed_at",
+                                                       "status": "in.(review,completed)", "master_account_id": "in.(" + ",".join(kids) + ")"}))
+    echo_bal, dup_bal = _ap_balance_karten()
+    return pl, accs, letzt, echo_bal, dup_bal
 
 
 def ap_ext_fehlt(a, regel):
@@ -15732,7 +15795,8 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
                             menge=w["menge"], stufe=w["stufe"], rest=w["rest"], balance=round(k["bal"]),
                             delta_eur_pkt=(round(abs(dd), 3) * (1 if richtung[key] == "buy" else -1)) if dd is not None else None,
                             einsatz_eur=round(float((d.get("g") or {}).get("verlust_eur") or 0)) * (1 if richtung[key] == "buy" else -1),
-                            tp_punkte=d.get("tp_punkte"), sl_punkte=d.get("sl_punkte"), bestaetigt=bool(param["auto_start"])))
+                            tp_punkte=d.get("tp_punkte"), sl_punkte=d.get("sl_punkte"), bestaetigt=bool(param["auto_start"]),
+                            **ap_boden_konto(k["regel"], a.get("account_type"), k["bal"])))   # Boden für den Balance-Balken (08.10.2026)
     geplant.sort(key=lambda g: (g["start"], g["konto_id"]))
     fp = hashlib.sha1(json.dumps([[g["konto_id"], g["start"], g["richtung"], g["tp"], g["sl"], g["menge"]] for g in geplant],
                                  sort_keys=True).encode()).hexdigest()[:12]
@@ -16732,7 +16796,11 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
                  # Auto-Starts, den der PC-Tab in mt5_baseline.start_fehler schreibt — der Planer zeigt ihn auch für fremde IDs
                  start_fehler=p.get("sf") if isinstance(p.get("sf"), dict) else None, geclaimt=bool(p.get("start_um_gestartet_at")),
                  balance_live=ap_balance_live(acc_balance_wahl(a, echo_bal, dup_bal)[3] if a else None,
-                                              letzt_je.get(str(p.get("master_account_id") or ""))))   # 08.10.2026
+                                              letzt_je.get(str(p.get("master_account_id") or ""))),   # 08.10.2026
+                 # BODEN (08.10.2026, Balance-Balken Slave 4): Liquidations-Level aus den Firmen-Kernwerten wie im Planer
+                 **(ap_boden_konto(ap_regel_konto(ap_regel_finden(firmen, a.get("firm")), a, acc_balance_wahl(a, echo_bal, dup_bal)[0]),
+                                   a.get("account_type"), acc_balance_wahl(a, echo_bal, dup_bal)[0])
+                    if a else ap_boden_konto(None, None, None)))
         z["einsatz_eur"] = z["einsatz_abs"] * (1 if r == "buy" else -1) if r in ("buy", "sell") else None
         geplant_rows.append(z)
         if b["hinweis"]:
@@ -16863,7 +16931,11 @@ def ap_delta_antwort(stand, sicht_uid=None):
     geplant = [{k: z.get(k) for k in ("plan_id", "user_id", "user", "firma", "richtung", "start", "delta_eur_pkt", "einsatz_eur", "fest_durch", "bestaetigt",
                                       "start_txt", "start_min", "aenderbar", "auto_plan", "richtung_fest_durch", "tp_punkte", "sl_punkte",
                                       "konto", "ende4", "typ", "route", "menge", "usd_pro_pkt", "punktwert_quelle", "wert_eur", "gehedgt",
-                                      "hinweis", "richtung_konflikt")} for z in sorted(stand["geplant"], key=lambda z: (z.get("start_min") or 0, z["plan_id"]))]
+                                      "hinweis", "richtung_konflikt",
+                                      # 08.10.2026: Balance live (Braucht dich/Firmen-Block) und Boden (Balance-Balken) — standen in _ap_stand_laden
+                                      # schon an der Zeile, kamen aber ohne diese Liste nie im Frontend an (.1224)
+                                      "balance_live", "boden", "boden_min", "boden_art")}
+               for z in sorted(stand["geplant"], key=lambda z: (z.get("start_min") or 0, z["plan_id"]))]
     hinweise = list(stand["hinweise"]) + ([{"grund": h_umpl}] if h_umpl else [])
     # Master 06.10.2026 (Frontend .1084 schon live): band als ZAHL in €/Pkt (± um null, jetzt), Details in band_info; je
     # Verlaufspunkt zusätzlich band (= band_delta); fenster[] aus auto_plan_regeln.zeiten für die Grenzlinien im Chart
@@ -17197,7 +17269,7 @@ def admin_auto_plan_ids():
         except Exception:
             return jsonify({"ok": False, "msg": "Anmeldung nicht prüfbar"}), 502
         mail = f"uid {str(uid)[:8]}"
-    reg = (sb_select("auto_plan_regeln", {"select": "aktiv,user_ids", "id": "eq.1"}) or [None])[0]
+    reg = (sb_select("auto_plan_regeln", {"select": "aktiv,user_ids,firmen:regeln->firmen", "id": "eq.1"}) or [None])[0]   # firmen für boden (08.10.2026)
     if not reg:
         return jsonify({"ok": False, "msg": "auto_plan_regeln fehlt"}), 503
     drin = [str(u) for u in (reg.get("user_ids") or [])]
@@ -17260,7 +17332,12 @@ def admin_auto_plan_ids():
                           "notes": p.get("notes"), "stufe": (re.search(r"Auto-Planer · ([^·]+)", str(p.get("notes") or "")) or [None, None])[1],
                           "konto_id": str(p.get("master_account_id") or "") or None,
                           "balance_live": ap_balance_live(acc_balance_wahl(a, echo_bal, dup_bal)[3] if a else None,
-                                                          letzt_je.get(str(p.get("master_account_id") or "")))})
+                                                          letzt_je.get(str(p.get("master_account_id") or ""))),
+                          # BODEN (08.10.2026, Balance-Balken Slave 4) — wie delta.geplant[]
+                          **(ap_boden_konto(ap_regel_konto(ap_regel_finden(reg.get("firmen") or [], a.get("firm")), a,
+                                                           acc_balance_wahl(a, echo_bal, dup_bal)[0]),
+                                            a.get("account_type"), acc_balance_wahl(a, echo_bal, dup_bal)[0])
+                             if a else ap_boden_konto(None, None, None))})
     except Exception as e:
         print(f"[auto-plan] ⚠️ ids/offen: {type(e).__name__}: {e}", flush=True)
     return jsonify({"ok": True, "ids": ids, "aktiv": bool(reg.get("aktiv")), "tag": tag, "offen": offen})
@@ -17810,26 +17887,11 @@ def _ap_eingriff(aktion):
                 return jsonify({"ok": False, "msg": "nur eigene Pläne"}), 403
         if aktion == "bestaetigen":
             # BALANCE NICHT LIVE (08.10.2026, Finn: „nur bestätigen, wenn es perfekt ist"): Konto-Balance muss jünger sein als das Ende des
-            # letzten Trades dieses Kontos (ap_balance_live) — sonst 400 mit Konto-Namen, nichts geändert
-            try:
-                pl = sb_select("trade_plans", {"select": "id,master_account_id,master_name", "id": params["id"]})
-                kids = sorted({str(z.get("master_account_id")) for z in pl if z.get("master_account_id")})
-                if kids:
-                    accs = {str(a.get("id")): a for a in _ap_konten_laden({"id": "in.(" + ",".join(kids) + ")"})}
-                    letzt = ap_letzt_je_konto(_sb_all("trade_plans", {"select": "master_account_id,status,ended_at,completed_at",
-                                                                       "status": "in.(review,completed)", "master_account_id": "in.(" + ",".join(kids) + ")"}))
-                    try:
-                        echo_bal, dup_bal = _ap_balance_karten()
-                    except Exception:
-                        echo_bal, dup_bal = {}, {}
-                    tot = [z.get("master_name") or str(z.get("master_account_id"))[:8] for z in pl
-                           if not ap_balance_live(acc_balance_wahl(accs.get(str(z.get("master_account_id"))), echo_bal, dup_bal)[3]
-                                                  if accs.get(str(z.get("master_account_id"))) else None,
-                                                  letzt.get(str(z.get("master_account_id") or "")))]
-                    if tot:
-                        return jsonify({"ok": False, "msg": f"{AP_GRUND_BAL_LIVE}: {', '.join(tot)}"}), 400
-            except Exception as e:
-                print(f"[auto-plan] ⚠️ bestaetigen/balance_live: {type(e).__name__}: {e}", flush=True)
+            # letzten Trades dieses Kontos (ap_balance_live) — sonst 400 mit Konto-Namen, nichts geändert. Lesefehler → 503, nicht
+            # bestätigen (Slave 2, 08.10.2026: vorher ließ der Guard bei einem DB-Fehler durch)
+            sperre = ap_bal_guard(lambda: _ap_bal_guard_laden(params["id"]))
+            if sperre:
+                return jsonify({"ok": False, "msg": sperre[1]}), sperre[0]
         zeilen = sb_delete("trade_plans", params) if art == "delete" else sb_update("trade_plans", params, upd)
         print(f"[auto-plan] {aktion}: {len(zeilen)} Zeile(n) durch {'Admin' if not sicht else 'ID ' + str(sicht)[:8]}", flush=True)
         return jsonify({"ok": True, "aktion": aktion, "n": len(zeilen), "zeilen": zeilen, "alle": sicht is None})
