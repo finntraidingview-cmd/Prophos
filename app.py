@@ -10213,7 +10213,10 @@ def _wd_heute_zeile(p, acc, disp, vorher=None):
         "master_pl_plan": _wd_num(p.get("master_pl")), "slave_pl": _wd_num(p.get("slave_pl")), "pl_quelle": p.get("pl_quelle"),
         "final_quelle": final.get("quelle"), "master_pl_schaetzung": _wd_num(final.get("master_pl_schaetzung")),
         "completed_at": p.get("completed_at"),
-        "good_day": _wd_good_day(acc, p.get("master_pl")),   # 01.10.2026: Tradeify-WD über 250 $ → „Good Day" in Erledigt
+        "good_day": _wd_good_day(acc, p.get("master_pl")),
+        # BESTANDEN-FLAG (07.10.2026, Finn: „sobald bei Wartet/Überprüfen der Trade geflagt ist, dass er sehr wahrscheinlich gepasst
+        # ist … neue Accounts hinzufügen braucht meine Handarbeit"): Kontotyp + Ziel-Balance der Ziel-Wache (zw_tick, 5-min-Takt)
+        "konto_typ": (acc or {}).get("account_type"), "ziel_usd": _zw["ziele"].get(str(p.get("master_account_id") or "")),   # 01.10.2026: Tradeify-WD über 250 $ → „Good Day" in Erledigt
         # P&L aus Fills + Abgleich (Koordination 25.09.2026): Einstieg/Start aus der tv-Baseline, Ende aus final — nur die Felder,
         # die die Rechnung braucht (Fill-Preise, Today's P&L, Quelle, Ende-Art), keine Zugangsdaten
         # TSV2-PNL (01.10.2026): dazu Balance vorher/nachher + Basis (TopstepX-Express 0-basiert) und der RP&L-Start
@@ -16859,6 +16862,105 @@ def ap_nacht_tick(jetzt, zustand):
     return erg
 
 
+# ══ ZIEL-WACHE (07.10.2026, Finn: „dass ich eine Benachrichtigung kriege, wenn irgendwo ein Account sein Ziel erreicht hat, dass der
+# irgendwie dann getaggt wird"). Anlass: FundedNext Phase 2 …4830 stand bei 105.068 → Ziel 105.000 und bekam trotzdem einen Trade.
+# Alle 5 min (im ap_loop, nur Railway): jedes Challenge/Phase-1/Phase-2-Konto aller IDs mit Firmen-Regel — Ziel wie der Planer
+# (Größe aus der Balance × (1 + ziel_pct der Phase), ap_konto_rechnen), Balance wie der Planer (acc_balance_wahl). Erreicht →
+# accounts.ziel_erreicht_at/_bal/ziel_usd setzen (Tag in Prophos, Start-Sperre im Frontend) + Push an Inhaber und Admins, je Konto
+# einmal. Wieder darunter (Phase umgestellt, neues höheres Ziel) → Tag weg. Ohne Balance oder Regel: nichts ändern. ══
+ZW_TAKT_S = 300
+_zw = {"at": 0.0, "fehler": "", "erreicht": 0, "spalte_fehlt": False, "ziele": {}}   # ziele: konto_id → Ziel-Balance (Radar-Zeilen)
+
+
+def zw_ziel(regel, phase, balance):
+    """REIN RECHNEND (testbar): Ziel-Balance eines Kontos wie ap_konto_rechnen → (ziel, groesse) oder None (Regel/Größe unbekannt)."""
+    if not regel or not balance:
+        return None
+    zp = (regel.get("ziel_pct") or {}).get(phase) if isinstance(regel.get("ziel_pct"), dict) else None
+    if zp is None:
+        zp = ((regel.get("phasen") or {}).get(phase) or {}).get("ziel_pct")
+    if not zp:
+        return None
+    # beide Größenlisten: FundedNext/FundingPips führen 50k nur in wert_groessen (Planer plant dort nur 100k)
+    gr = sorted({float(g) for g in (regel.get("groessen") or []) + (regel.get("wert_groessen") or []) if g})
+    groesse = ap_groesse(gr, float(balance))
+    if groesse is None:
+        return None
+    return round(groesse * (1 + float(zp) / 100.0), 2), groesse
+
+
+def zw_erreicht(ziel, balance, phase):
+    """REIN RECHNEND: wie der Planer — Rest ≤ 0, Challenge schon ab Rest < AP_REST_MIN („Ziel erreicht — Phase umstellen")."""
+    rest = float(ziel) - float(balance)
+    return rest <= 0 or (phase == "challenge" and rest < AP_REST_MIN)
+
+
+def _zw_admin_uids():
+    out = set()
+    try:
+        for u in (_auth_liste_anfrage().json() or {}).get("users", []):
+            if str(u.get("email") or "").strip().lower() in ADMIN_EMAILS:
+                out.add(str(u.get("id")))
+    except Exception as e:
+        print(f"[ziel-wache] ⚠️ Admins: {type(e).__name__}: {e}", flush=True)
+    return out
+
+
+def zw_tick(force=False):
+    if not force and time.time() - _zw["at"] < ZW_TAKT_S:
+        return
+    _zw["at"] = time.time()
+    reg = (sb_select("auto_plan_regeln", {"select": "regeln", "id": "eq.1"}) or [{}])[0]
+    firmen = ((reg or {}).get("regeln") or {}).get("firmen") or []
+    if not firmen:
+        return
+    try:
+        flags = {str(r["id"]): r for r in _sb_all("accounts", {"select": "id,ziel_erreicht_at", "order": "id.asc",
+                                                                "account_type": "in.(" + ",".join(AP_TYPEN) + ")"})}
+        _zw["spalte_fehlt"] = False
+    except requests.exceptions.HTTPError as e:
+        if "ziel_erreicht_at" in str(getattr(e.response, "text", "") or e):
+            _zw["spalte_fehlt"] = True      # SQL 2026-10-07_accounts_ziel_erreicht.sql noch nicht eingespielt
+            return
+        raise
+    konten = _ap_konten_laden({"order": "id.asc", "account_type": "in.(" + ",".join(AP_TYPEN) + ")"})
+    archiv = _ap_archiviert()
+    echo_bal, dup_bal = _ap_balance_karten()
+    namen, admins, n = None, None, 0
+    for a in konten:
+        aid = str(a["id"])
+        if aid in archiv or _ap_norm(a.get("firm")) in AP_STILL_FIRMEN:
+            continue
+        regel = ap_regel_finden(firmen, a.get("firm"))
+        bal = acc_balance_wahl(a, echo_bal, dup_bal)[0]
+        zg = zw_ziel(regel, a.get("account_type"), bal) if (regel and bal) else None
+        if not zg:
+            continue
+        ziel, _gr = zg
+        _zw["ziele"][aid] = ziel
+        erreicht, war = zw_erreicht(ziel, bal, a.get("account_type")), bool((flags.get(aid) or {}).get("ziel_erreicht_at"))
+        if erreicht:
+            n += 1
+        if erreicht and not war:
+            neu = sb_update("accounts", {"id": f"eq.{aid}", "ziel_erreicht_at": "is.null"},
+                            {"ziel_erreicht_at": datetime.now(timezone.utc).isoformat(), "ziel_erreicht_bal": round(float(bal), 2),
+                             "ziel_usd": ziel})
+            if not neu:
+                continue                     # anderer Lauf war schneller — der hat gemeldet
+            if namen is None:
+                namen, _aus = _ap_namen()
+                admins = _zw_admin_uids()
+            wer = namen.get(str(a.get("user_id")), "")
+            text = (f"{a.get('name') or 'Konto'} ({a.get('firm') or '–'}{' · ' + wer if wer else ''}): Balance "
+                    f"{float(bal):,.0f} ≥ Ziel {ziel:,.0f} — Phase umstellen / auszahlen.").replace(",", ".")
+            for uid in {str(a.get("user_id"))} | (admins or set()):
+                push_an_user(uid, "🎯 Ziel erreicht", text, "https://prophos.pages.dev/prophos#accounts", "ziel-" + aid[:8])
+            print(f"[ziel-wache] 🎯 {text}", flush=True)
+        elif war and not erreicht:
+            sb_update("accounts", {"id": f"eq.{aid}"}, {"ziel_erreicht_at": None, "ziel_erreicht_bal": None, "ziel_usd": None})
+    _zw["erreicht"] = n
+
+
 def ap_loop():
     """Nachtlauf nach zeiten.nachtlauf (Standard 01:00 Dubai, 07.10.2026; vorher 00:00 dt) mit Nachholen, nur wenn
     auto_plan_regeln.aktiv; Sa/So gibt es keinen Zieltag. Dazu jede Minute der Takt-Check des Ausgleichs-Bots
@@ -16877,6 +16979,12 @@ def ap_loop():
         except Exception as e:
             _ap_bot["fehler"] = f"{type(e).__name__}: {e}"
             print(f"[auto-plan] ⚠️ Ausgleich-Takt: {e}", flush=True)
+        try:
+            zw_tick()                         # Ziel-Wache alle 5 min (07.10.2026)
+            _zw["fehler"] = ""
+        except Exception as e:
+            _zw["fehler"] = f"{type(e).__name__}: {e}"
+            print(f"[ziel-wache] ⚠️ {e}", flush=True)
         _schleife_schlafen(60)
 
 

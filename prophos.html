@@ -27368,6 +27368,22 @@
     const bs = n(t.balance_start), liq = t.liq_regel_soft ? n(t.liq_boden_balance) : (n(t.liq_regel_balance) ?? n(t.liq_balance))
     return (bs != null && liq != null && liq < bs) ? Math.round((liq - bs) * 100) / 100 : null
   }
+  /* BESTANDEN-FLAG (07.10.2026, Finn: „sobald bei Wartet oder Überprüfen der Trade geflagt ist, dass er sehr wahrscheinlich gepasst
+   * ist … wenn ein Account gepasst wird, muss ich die neuen Accounts hinzufügen, da braucht man meine Handarbeit"). Ziel-Balance
+   * und Kontotyp liefert der Server je Zeile (app.py ziel_usd/konto_typ aus der Ziel-Wache). Balance nach dem Trade wie die
+   * Konto-Spalte (wdlBlowStand), in Wartet sonst Start + P&L. Challenge zählt wie im Planer schon ab < 100 $ Rest. Nur Markierung. */
+  const WDL_UEBERGANG = { challenge: 'Challenge → Funded', phase1: 'Phase 1 → Phase 2', phase2: 'Phase 2 → Funded' }
+  function wdlBestandenChip(t){
+    const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
+    if(!t || t.status === 'open' || t.status === 'planned') return ''
+    const ziel = n(t.ziel_usd), typ = String(t.konto_typ || '')
+    if(ziel == null || !WDL_UEBERGANG[typ]) return ''
+    let bal = (wdlBlowStand(t) || {}).bal
+    if(bal == null){ const bs = n(t.balance_start), pl = n(t.pl_balance) ?? n(t.master_pl && t.master_pl.wert); if(bs != null && pl != null) bal = bs + pl }
+    if(bal == null || bal < ziel - (typ === 'challenge' ? 100 : 0)) return ''
+    const de = v => Math.round(v).toLocaleString('de-DE')
+    return ` <span class="type-badge acc-ziel-chip wdl-bestanden" title="Balance ${de(bal)} ≥ Ziel ${de(ziel)} — sehr wahrscheinlich bestanden. Phase umstellen und neues Konto anlegen.">🎯 bestanden · ${WDL_UEBERGANG[typ]}</span>`
+  }
   function wdlKontoZ(t){
     const b = wdlBlowStand(t)
     if(!b && wdlKontoWeg(t)) return '<span class="wdl-z-konto" title="Konto bei Tradovate nicht mehr vorhanden — keine Balance mehr lesbar">vermutl. geblowt</span>'
@@ -27562,7 +27578,7 @@
         zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
       }
       return `<div class="wdl-z wdl-z-${art}${echo ? ' wdl-z-echo' : ''}${an ? ' is-aktiv' : ''}${extra ? ' ' + extra : ''}" style="--wdl-id:${wdlIdFarbe(t)}" data-wdl-trade="${escapeHtml(wdlTid(t))}" title="${escapeHtml(tip)}">`
-        + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><i class="wdl-pf">${escapeHtml(wdlWeg(t))}</i><small>${escapeHtml(konto)}</small></span>`
+        + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><i class="wdl-pf">${escapeHtml(wdlWeg(t))}</i>${wdlBestandenChip(t)}<small>${escapeHtml(konto)}</small></span>`
         + ri + miZ + kontoZ + plZ + zeitZ + '</div>'
     }
     // Gruppe = ein Kasten, oben einmal die Spaltenköpfe im selben Raster wie die Zeilen
@@ -40048,7 +40064,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1139'
+  const OS_TAB_BUILD = '2026-09-22.1140'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
