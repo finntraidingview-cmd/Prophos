@@ -40905,7 +40905,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1230'
+  const OS_TAB_BUILD = '2026-09-22.1231'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -47058,7 +47058,8 @@
     const tick = () => {
       const st = _accBalLauf.get(id)
       if(st !== zuletzt){ zuletzt = st; tplSpaeter() }
-      if(st === vorher || !st){
+      // läuft schon eine Lesung (z. B. aus der Accounts-Liste), wurde nichts neu angefordert — dann nur weiter beobachten (Prüfer 08.10.2026)
+      if(!st || (st === vorher && !(vorher && vorher.laeuft))){
         if(Date.now() - t0 > 15000){ _accBalLauf.set(id, { laeuft: false, fehler: true, text: 'Lesung nicht gestartet — Seite neu laden und noch einmal' }); tplSpaeter(); return }
         setTimeout(tick, 1000); return
       }
@@ -47302,6 +47303,10 @@
     if(bl){ const id = String(bl.dataset.tplBal), wer = tplBdWer(bl)
       // nie stumm (08.10.2026): accBalanceLesen kehrt ohne geladenes Konto wortlos zurück → hier sagen, warum nichts passiert
       if(!(accounts || []).some(a => String(a.id) === id)){ _accBalLauf.set(id, { laeuft: false, fehler: true, text: 'Konto nicht in deiner Kontenliste — Seite neu laden' }); tplSpaeter(); return }
+      // läuft für das Konto schon eine Lesung (z. B. aus der Accounts-Liste): accBalanceLesen kehrt dann wortlos zurück — nicht neu
+      // anfordern, nur beobachten; sonst meldete tplBalBeobachten nach 15 s fälschlich „Lesung nicht gestartet" (Prüfer-Befund zu .1227)
+      const lauf = _accBalLauf.get(id)
+      if(lauf && lauf.laeuft){ _accBalLauf.set(id, { ...lauf, text: 'wird schon gelesen …' }); tplSpaeter(); tplBalBeobachten(id, currentUserId); return }
       bl.disabled = true; bl.textContent = 'fordert an …'
       try{ accBalanceLesen(id, wer) }catch(err){ console.warn('[tpl] Balance lesen', err); _accBalLauf.set(id, { laeuft: false, fehler: true, text: 'nicht gesendet: ' + String((err && err.message) || err).slice(0, 80) }) }
       tplBalBeobachten(id, currentUserId); return }
