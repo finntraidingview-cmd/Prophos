@@ -269,6 +269,28 @@ def ist_einklick_akzeptieren_knopf(text):
     return zustimmung and bedingungen
 
 
+def ist_mt5_login_dialog(titel, beschriftungen, knoepfe, konto_werte, expected):
+    """REIN RECHNEND (testbar): ist das MT5s 'Einloggen'-Dialog fuer GENAU
+    dieses Konto? (Finn 07.10.2026, Screenshot HS2-200K: „ab und zu beim
+    Account-Einloggen dieses Pop-up, wo man einfach nur einmal auf OK druecken
+    muesste" — Konto, Passwort (gespeichert) und Server stehen schon drin.)
+    Positiv-Signatur aus allen Haelften: Titel Einloggen/Login, Beschriftungen
+    Passwort UND Server, ein OK-Knopf — und die Kontonummer im Feld ist exakt
+    das erwartete Konto. Ein Login-Dialog fuer ein anderes Konto bleibt
+    unberuehrt."""
+    t = (titel or "").strip().lower()
+    if t not in ("einloggen", "login", "anmelden", "anmeldung"):
+        return False
+    b = " ".join(str(x or "") for x in beschriftungen).lower()
+    if not (("passwort" in b or "password" in b) and "server" in b):
+        return False
+    if not any((str(k or "").strip().lower() == "ok") for k in knoepfe):
+        return False
+    if not expected:
+        return False
+    return any(re.sub(r"\D", "", str(v or "")) == str(int(expected)) for v in konto_werte)
+
+
 # Fensterklassen der Browser (28.08.2026): alle Chromium-Ableger (Chrome, Edge,
 # Brave — auch die als App installierte PWA-Huelle) teilen sich eine Klasse,
 # dazu Firefox.
@@ -9973,6 +9995,137 @@ def _einklick_haftung_annehmen(hauptfenster, trail, melden=False):
     return "gescheitert"
 
 
+def _uia_wert(el):
+    """Feld-Inhalt eines UIA-Elements (ComboBox/Edit) — Value-Muster zuerst,
+    dann Legacy-Wert, zuletzt der Name."""
+    for f in (lambda: el.iface_value.CurrentValue,
+              lambda: el.legacy_properties().get("Value"),
+              lambda: el.window_text()):
+        try:
+            v = f()
+            if v:
+                return str(v)
+        except Exception:
+            continue
+    return ""
+
+
+def _mt5_login_bestaetigen(expected, trail=None):
+    """Den 'Einloggen'-Dialog von MT5 mit OK bestaetigen (Finn 07.10.2026:
+    „Kannst du einstellen, dass … der Bot automatisch hier auf OK drueckt?").
+    MT5 schiebt ihn ab und zu beim Konto-Login dazwischen; Konto, gespeichertes
+    Passwort und Server stehen schon drin. Bis heute lief Puls dagegen: ohne
+    Login fehlt die Kontonummer im Fenstertitel (_finde_terminal greift nicht),
+    und _fremde_dialoge_schliessen haette ihn per Abbrechen weggeraeumt.
+
+    Zweite Stelle neben dem Ein-Klick-Haftungsausschluss, an der der Bot einen
+    MT5-Dialog BESTAETIGT: OK loggt nur das schon eingetragene Konto ein, es
+    wird nichts getippt und nichts gehandelt. Getroffen nur ueber die volle
+    Signatur (ist_mt5_login_dialog) inkl. Kontonummer == expected.
+
+    Gesucht in Top-Level-Fenstern der MT5-Prozesse UND Kind-Fenstern der
+    MT5-Hauptfenster (gleiche zwei Quellen wie beim Haftungsausschluss).
+    Beweis: angenommen erst, wenn der OK-Knopf weg ist.
+    Rueckgabe: 'bestaetigt' | 'gescheitert' | 'keiner'."""
+    try:
+        from pywinauto import Desktop
+        alle = Desktop(backend="uia").windows()
+    except Exception:
+        return "keiner"
+    haupt, pids = [], set()
+    for w in alle:
+        try:
+            if w.element_info.class_name == MT5_KLASSE:
+                haupt.append(w)
+                pids.add(w.element_info.process_id)
+        except Exception:
+            continue
+    if not haupt:
+        return "keiner"
+    kandidaten = []
+    for w in alle:
+        try:
+            if w.element_info.process_id in pids and w.is_visible() \
+                    and w.element_info.class_name != MT5_KLASSE:
+                kandidaten.append(w)
+        except Exception:
+            continue
+    for h in haupt:
+        kandidaten.extend(_kind_fenster(h))
+
+    for d in kandidaten:
+        try:
+            titel = (d.window_text() or "").strip()
+            if titel.lower() not in ("einloggen", "login", "anmelden", "anmeldung"):
+                continue
+            knoepfe = d.descendants(control_type="Button")
+            texte = [t.window_text() for t in d.descendants(control_type="Text")]
+            werte = []
+            for typ in ("ComboBox", "Edit"):
+                try:
+                    werte += [_uia_wert(e) for e in d.descendants(control_type=typ)]
+                except Exception:
+                    pass
+            if not ist_mt5_login_dialog(titel, texte, [b.window_text() for b in knoepfe],
+                                        werte, expected):
+                if trail is not None:
+                    trail.append(f"Login-Dialog '{titel}' uebergangen (Konto passt nicht)")
+                continue
+            ok = next(b for b in knoepfe if (b.window_text() or "").strip().lower() == "ok")
+        except Exception:
+            continue
+
+        def _weg():
+            try:
+                return not ok.is_visible() or not d.is_visible()
+            except Exception:
+                return True   # Element nicht mehr ansprechbar = weg
+
+        for weg in ("invoke", "klick", "enter"):
+            try:
+                if weg == "invoke":
+                    ok.invoke()
+                elif weg == "klick":
+                    ok.click_input()
+                else:
+                    d.set_focus()
+                    d.type_keys("{ENTER}", set_foreground=False)
+            except Exception:
+                pass
+            ende = time.time() + 2.0
+            while time.time() < ende:
+                if _weg():
+                    if trail is not None:
+                        trail.append(f"MT5-Login-Dialog fuer {expected} mit OK bestaetigt ({weg})")
+                    return "bestaetigt"
+                _warte(0.2, 0.1)
+        if trail is not None:
+            trail.append(f"MT5-Login-Dialog fuer {expected}: OK ohne Wirkung")
+        return "gescheitert"
+    return "keiner"
+
+
+def _login_dann_lesen(path, expected, **kw):
+    """_api_lesen mit vorgeschaltetem Login-OK (07.10.2026): steht der
+    Einloggen-Dialog da, erst OK, dann bis ~15 s warten, bis das Konto
+    verbunden ist. Ohne Dialog exakt das alte _api_lesen."""
+    st = _mt5_login_bestaetigen(expected)
+    lese = _api_lesen(path, expected, **kw)
+    if "fehler" not in lese:
+        return lese
+    if st != "bestaetigt":
+        st = _mt5_login_bestaetigen(expected)
+        if st != "bestaetigt":
+            return lese
+    ende = time.time() + 15.0
+    while time.time() < ende:
+        _warte(1.0, 0.5)
+        lese = _api_lesen(path, expected, **kw)
+        if "fehler" not in lese:
+            return lese
+    return lese
+
+
 def _fremde_dialoge_schliessen(hauptfenster):
     """Versehentlich geoeffnete Fenster (z.B. EA-Eigenschaften) wieder zu —
     IMMER ueber Abbrechen/ESC, NIE ueber OK (18.08.2026: der .54-Doppelklick
@@ -10654,7 +10807,7 @@ def run(cfg_path, cmd):
     vol = float(cmd["volumen"])
 
     # 1) LESEND: Kurs + Positionsstand VORHER (+ Login-Kontrolle)
-    lese = _api_lesen(path, expected, symbol=symbol)
+    lese = _login_dann_lesen(path, expected, symbol=symbol)
     if "fehler" in lese:
         msg = lese["fehler"]
         if _ist_verbindungsfehler(msg):
@@ -11402,7 +11555,7 @@ def run_close(cfg_path, cmd):
     symbol = str(cmd.get("symbol") or "").strip()
 
     # 1) LESEND: gibt es die Position ueberhaupt (noch)? Login-Guard inklusive.
-    lese = _api_lesen(path, expected)
+    lese = _login_dann_lesen(path, expected)
     if "fehler" in lese:
         msg = lese["fehler"]
         if _ist_verbindungsfehler(msg):

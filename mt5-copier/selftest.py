@@ -1398,6 +1398,19 @@ def main():
         and order_bot.ist_einklick_akzeptieren_knopf("Ich akzeptiere die allgemeinen Geschaeftsbedingungen")
         and order_bot.ist_einklick_akzeptieren_knopf("I accept the terms and conditions")
         and order_bot.ist_einklick_akzeptieren_knopf("I agree to the Terms and Conditions"))
+    _lb = ["Loggen Sie sich ein, um vollen Zugriff auf Ihr Handelskonto zu erhalten.",
+           "Kontonummer:", "Passwort:", "Server:"]
+    chk("LOGIN: MT5-Einloggen-Dialog fuers eigene Konto wird erkannt (07.10.2026)",
+        order_bot.ist_mt5_login_dialog("Einloggen", _lb, ["OK", "Abbrechen"], ["26692392"], 26692392)
+        and order_bot.ist_mt5_login_dialog("Login", ["Login:", "Password:", "Server:"],
+                                           ["OK", "Cancel"], ["Kontonummer:", "26692392"], 26692392))
+    chk("LOGIN: fremdes Konto, anderer Titel, ohne OK oder ohne Konto bleibt unberuehrt",
+        not order_bot.ist_mt5_login_dialog("Einloggen", _lb, ["OK"], ["26692393"], 26692392)
+        and not order_bot.ist_mt5_login_dialog("Eigenschaften", _lb, ["OK"], ["26692392"], 26692392)
+        and not order_bot.ist_mt5_login_dialog("Einloggen", _lb, ["Abbrechen"], ["26692392"], 26692392)
+        and not order_bot.ist_mt5_login_dialog("Einloggen", ["Kontonummer:"], ["OK"], ["26692392"], 26692392)
+        and not order_bot.ist_mt5_login_dialog("Einloggen", _lb, ["OK"], ["126692392"], 26692392)
+        and not order_bot.ist_mt5_login_dialog("Einloggen", _lb, ["OK"], ["26692392"], 0))
     chk("CLOSE: Abbrechen/Ablehnen und halbe Treffer sind NIE Zustimmung",
         not order_bot.ist_einklick_akzeptieren_knopf("Abbrechen")
         and not order_bot.ist_einklick_akzeptieren_knopf("Cancel")
