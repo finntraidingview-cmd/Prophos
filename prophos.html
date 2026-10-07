@@ -36759,8 +36759,25 @@
     const rest = zahl(m[2]), bal = zahl(m[3])
     if(!(rest > 0) || !(bal > 0)) return null
     const stufe = m[1].trim()
-    return { stufe, art: /^letzter Trade/i.test(stufe) ? 'letzter Trade' : /^Etappe/i.test(stufe) ? 'Etappe' : stufe,
+    return { stufe, art: planSchritt(stufe), rest,
              gekappt: /SL auf Boden gekappt/i.test(stufe), ziel: Math.round((bal + rest) / 5) * 5 }   // beide Zahlen sind gerundet → auf 5 $ glätten
+  }
+  /* SCHRITT STATT ART (08.10.2026, Finn an der Spalte „Art" mit „Etappe / Etappe / letzter Trade": „Bei Art gibt es mal coolere Namen.
+   * Das checkt ja keiner."). EINE Zuordnung für Trades-Reiter, Trade-Planer-Seite und Admin. ap_konto_rechnen (app.py) schreibt nur
+   * „Etappe" oder „letzter Trade (Rest bis Ziel | auf Tageshöchstwert gedeckelt)" — ohne Nummer/Anzahl, daher „Aufbau" ohne 1/3. */
+  function planSchritt(stufe){
+    const s = String(stufe || '').trim()
+    return /^letzter Trade/i.test(s) ? 'Finale' : /^Etappe/i.test(s) ? 'Aufbau' : s.replace(/\s*\(.*$/, '').replace(/,\s*SL auf Boden gekappt.*$/i, '')
+  }
+  /* Tooltip der Schritt-Zelle in Klartext. n = notiz (art, stufe, rest, gekappt), tp = TP des Plans in $. */
+  function planSchrittTip(n, tp){
+    if(!n) return ''
+    const de = v => Math.round(Number(v)).toLocaleString('de-DE')
+    const st = String(n.stufe || '')
+    const sl = n.gekappt ? ' · SL gekappt: der Abstand zum Boden ist kleiner als der normale SL' : ''
+    if(n.art === 'Finale') return 'Finale: dieser Trade bringt das Konto ans Ziel' + (/gedeckelt/i.test(st) ? ' (TP auf den Tageshöchstwert gedeckelt)' : '') + sl
+    if(n.art === 'Aufbau') return 'Aufbau: ' + (tp > 0 && n.rest > 0 ? `holt ${de(tp)} $ von noch ${de(n.rest)} $ bis zum Ziel` : 'ein Teilschritt — das Ziel holt ein späterer Trade') + sl
+    return st
   }
   /* ZIEL ERREICHT = KEIN START (07.10.2026, Finn: „der Account war schon durch, und es wurde trotzdem noch ein Trade gestartet … es wird
    * überhaupt gar kein Trade mehr gestartet, wenn das Ziel schon erreicht wird"). Vorfall FundedNext Phase 2 …4830 (Moritz): Balance
@@ -36885,7 +36902,7 @@
         <span class="pz-konto" title="${escapeHtml(kontoTitel)}" data-ak-konto="${escapeHtml(String(p.id || ''))}">${kontoKurz}${typChip}</span>
         <span class="pz-ri ${p.richtung === 'buy' ? 'is-buy' : p.richtung === 'sell' ? 'is-sell' : ''}">${p.richtung === 'buy' ? '▲ Long' : p.richtung === 'sell' ? '▼ Short' : '–'}</span>
         <span class="pz-bal">${balHtml}</span>
-        <span class="pz-art" title="${notiz ? escapeHtml(notiz.stufe) : ''}">${notiz ? escapeHtml(notiz.art) + (notiz.gekappt ? ' · SL gekappt' : '') : ''}</span>
+        <span class="pz-art" title="${notiz ? escapeHtml(planSchrittTip(notiz, Number(p.masterTp))) : ''}">${notiz ? escapeHtml(notiz.art) + (notiz.gekappt ? ' · SL gekappt' : '') : ''}</span>
         <span class="pz-gr">${gr}</span>
         <span class="pz-tp${p.masterTp > 0 ? '' : ' is-leer'}">${p.masterTp > 0 ? de(p.masterTp) + ' $' : '–'}</span>
         <span class="pz-sl${p.masterSl > 0 ? '' : ' is-leer'}">${p.masterSl > 0 ? de(p.masterSl) + ' $' : '–'}</span>
@@ -36939,7 +36956,7 @@
           ${zeilen.length && !opt.ohneHinweis ? `<span class="tc2-chip tc2-dir-hint" data-dir-firm="${escapeHtml(g.firma === '–' ? '' : g.firma)}" style="display:none;background:rgba(245,158,11,.14);color:#b45309"></span>` : ''}
         </div>`
         + (zeilen.length ? `<div class="pz-tab${opt.mitId ? ' pz-mit-id' : ''}">
-          <div class="pz-z pz-z-kopf">${opt.mitId ? '<span>ID</span>' : ''}<span>Start</span><span>Konto</span><span class="pz-ri">Richtung</span><span>Balance → Ziel</span><span class="pz-art">Art</span><span class="pz-gr">Größe</span><span class="pz-tp">TP</span><span class="pz-sl">SL</span><span></span></div>`
+          <div class="pz-z pz-z-kopf">${opt.mitId ? '<span>ID</span>' : ''}<span>Start</span><span>Konto</span><span class="pz-ri">Richtung</span><span>Balance → Ziel</span><span class="pz-art">Schritt</span><span class="pz-gr">Größe</span><span class="pz-tp">TP</span><span class="pz-sl">SL</span><span></span></div>`
           + zeilen.map(p => opt.zeile ? opt.zeile(p) : renderTradePlanCard(p)).join('') + `</div>` : '')
         + karten.map(p => renderTradePlanCard(p)).join('')
     }).join('')
@@ -40830,7 +40847,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1222'
+  const OS_TAB_BUILD = '2026-09-22.1223'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -46591,7 +46608,7 @@
       const bal = !kontoBal && t.balance != null ? { val: Number(t.balance), at: 0, tip: 'Balance laut Planer (Stand des Laufs)' } : undefined
       // Art + Ziel aus der Lauf-Zeile (Stufe, Rest bis Ziel, Planer-Balance) — gleiche Rundung wie planAutoNotiz
       const st = String(t.stufe || '').trim(), rest = Number(t.rest), b0 = Number(t.balance)
-      const notiz = st && rest > 0 && b0 > 0 ? { stufe: st, art: /^letzter Trade/i.test(st) ? 'letzter Trade' : /^Etappe/i.test(st) ? 'Etappe' : st,
+      const notiz = st && rest > 0 && b0 > 0 ? { stufe: st, art: planSchritt(st), rest,
         gekappt: /SL auf Boden gekappt/i.test(st), ziel: Math.round((b0 + rest) / 5) * 5 } : undefined
       const verpasst = t.status === 'offen' && D.tag === D.heute && D.jetzt != null && D.jetzt - t.start > 10
       const zeit = `<span class="pz-zeit-t" title="Start ${tplUhr(t.start, D.v)} Dubai${p.autoPlan && t.status === 'offen' ? ' — startet erst nach Bestätigung' : ' — der PC-Tab startet zu dieser Zeit von selbst'}">${tplUhr(t.start, D.v)}${verpasst ? '<small class="is-verpasst">verpasst</small>' : ''}</span>`
@@ -59932,7 +59949,7 @@
       const bal = !kontoBal && t.balance != null ? { val: Number(t.balance), at: 0, tip: 'Balance laut Planer (Stand des Laufs)' } : undefined
       const st = String(z.stufe || t.stufe || '').trim(), rest = Number(t.rest), b0 = Number(t.balance)
       // Ziel = Balance + Rest; fehlt die Balance, reicht der Rest allein nicht — dann bleibt ziel 0 und die Zelle sagt es (planZeileHtml)
-      const notiz = (st || rest > 0) ? { stufe: String(z.notes || st), art: /^letzter Trade/i.test(st) ? 'letzter Trade' : /^Etappe/i.test(st) ? 'Etappe' : st.replace(/\s*\(.*$/, ''),
+      const notiz = (st || rest > 0) ? { stufe: String(z.notes || st), art: planSchritt(st),
         gekappt: /SL auf Boden gekappt/i.test(st), ziel: (rest > 0 && b0 > 0) ? Math.round((b0 + rest) / 5) * 5 : 0, rest: rest > 0 ? rest : null } : undefined
       const zeit = `<span class="pz-zeit-t" title="Start ${escapeHtml(wann(z.start_um))} Dubai — startet erst nach Bestätigung">${escapeHtml(wann(z.start_um))}</span>`
       // Balance nicht live (Terminal 4 liefert balance_live auf offen[]; eigen über planBalanceLive): Haken aus, Hinweis im Tooltip
