@@ -614,6 +614,7 @@
   #dashboard-view .tpk-kopf{display:flex;align-items:center;gap:6px;font-weight:600;color:var(--ink);margin-bottom:4px}
   #dashboard-view .tpk-kopf.is-aktiv{color:#047857}
   #dashboard-view .tpk-kopf.is-danach{margin-top:8px}
+  #dashboard-view .tpk-kopf.is-offen{margin-top:8px;color:var(--sub)} #dashboard-view .tpk-kopf.is-offen b{font-weight:600;margin-left:2px} #dashboard-view .tpk-zeile.is-offen{opacity:.72}   /* 08.10.2026: unbestätigt/von Hand — kein Countdown */
   #dashboard-view .tpk-dot{width:6px;height:6px;border-radius:50%;background:var(--sub-2);flex:none}
   #dashboard-view .tpk-kopf.is-aktiv .tpk-dot{background:#10b981;animation:tc2Pulse 1.6s ease-in-out infinite}
   #dashboard-view .tpk-zeile{display:flex;gap:10px;padding:6px 0;border-top:1px solid var(--border-soft)}
@@ -40770,7 +40771,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1210'
+  const OS_TAB_BUILD = '2026-09-22.1211'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -44120,10 +44121,13 @@
     const out = []
     for(const p of pulsPlaene(jetzt)){
       if(!p) continue
-      if(p.status === 'planned' && p.startUm && !p.startUmGestartetAt && (routeIstOrbit(p.route) || routeIstEcho(p.route)) && (scharf || !tpIstFarmerPlan(p))
-         && p.route !== 'tsv2'){   // Topstep V2 startet bis K4 nicht von selbst (30.09.2026) — kein angekündigter Start in der Pille
-        const t = Date.parse(p.startUm) || 0
-        if(t && jetzt - t <= pulsStartFenster(p)) out.push({ t, art: 'Start', plan: p })
+      if(p.status === 'planned' && p.startUm && !p.startUmGestartetAt && (routeIstOrbit(p.route) || routeIstEcho(p.route)) && (scharf || !tpIstFarmerPlan(p))){
+        // Angekündigt wird nur, was suKandidaten auch startet (08.10.2026, suStartetNichtWeil); unbestätigte Vorschläge, Topstep V2 und
+        // aufgegebene Richtungskonflikte stehen als „Offen" in der Hover-Karte — ohne Countdown, ohne Overlay, ohne „Puls in n"
+        const t = Date.parse(p.startUm) || 0, grund = suStartetNichtWeil(p, scharf)
+        if(!t) continue
+        if(!grund){ if(jetzt - t <= pulsStartFenster(p)) out.push({ t, art: 'Start', plan: p }) }
+        else if(jetzt - t <= 6 * 3600000) out.push({ t, art: 'Offen', plan: p, grund })
         continue
       }
       // erledigt = fertig (29.09.2026): nur „Überprüfen" — einen erledigten Plan liest Puls nicht mehr nach (tvV2EndlesungGrund)
@@ -44271,10 +44275,14 @@
     const karteEl = document.getElementById('tb-puls-karte')
     let uid = null; try{ uid = currentUserId }catch(_){}
     if(!uid){ el.hidden = true; pulsCountdownZeigen(null); return }
-    const jetzt = Date.now(), liste = pulsTermine(jetzt), n = liste[0], aktiv = pulsAktivJetzt(jetzt)
+    const jetzt = Date.now(), alle = pulsTermine(jetzt), liste = alle.filter(x => x.art !== 'Offen'), offen = alle.filter(x => x.art === 'Offen'), n = liste[0], aktiv = pulsAktivJetzt(jetzt)
     const zeile = (oben, unten, was, info) => `<div class="tpk-zeile"><div class="tpk-zeit"><b>${escapeHtml(oben)}</b><span>${escapeHtml(unten)}</span></div>`
       + `<div class="tpk-was"><div class="tpk-titel">${escapeHtml(was)}</div><div class="tpk-info">${escapeHtml(info.filter(Boolean).join(' · '))}</div></div></div>`
     const zeileTermin = x => { const tx = pulsTerminText(x); return zeile(pulsUhr(Math.max(x.t, jetzt)), x.t <= jetzt ? 'fällig' : pulsInText(x.t - jetzt), tx.was, tx.info) }
+    // Offene Bestätigung (08.10.2026): grau, ohne Countdown — Uhrzeit · Konto · warum Puls nicht von selbst startet
+    const zeileOffen = x => { const p = x.plan || {}; return `<div class="tpk-zeile is-offen"><div class="tpk-zeit"><b>${escapeHtml(pulsUhr(x.t))}</b><span>${x.t <= jetzt ? 'war geplant' : 'geplant'}</span></div>`
+      + `<div class="tpk-was"><div class="tpk-titel">${escapeHtml(p.masterName || 'Konto')}</div><div class="tpk-info">${escapeHtml(x.grund || 'startet erst nach Bestätigung')}</div></div></div>` }
+    const offenHtml = offen.length ? `<div class="tpk-kopf is-offen"><span class="tpk-dot"></span>Offene Bestätigung <b>${offen.length}</b></div>` + offen.slice(0, 4).map(zeileOffen).join('') : ''
     const s = aktiv ? Math.max(0, Math.round((jetzt - aktiv.seit) / 1000)) : 0
     const dauer = s < 120 ? s + ' s' : Math.round(s / 60) + ' min'
     const rest = n ? n.t - jetzt : Infinity
@@ -44286,7 +44294,7 @@
     } else if(aktiv){
       html = `<span class="tb-puls-dot"></span><span class="tb-puls-lbl">Puls ${aktiv.wartet ? 'wartet' : 'läuft'} · </span><b>${aktiv.art} · ${dauer}</b>`
     } else if(!n){
-      html = '<span class="tb-puls-dot"></span><span class="tb-puls-lbl">Puls · </span>nichts geplant'
+      html = offen.length ? `<span class="tb-puls-dot"></span><span class="tb-puls-lbl">Puls · </span>${offen.length} unbestätigt` : '<span class="tb-puls-dot"></span><span class="tb-puls-lbl">Puls · </span>nichts geplant'
     } else {
       html = `<span class="tb-puls-dot"></span><span class="tb-puls-lbl">Puls</span><span class="tb-puls-uhr"> · ${pulsUhr(Math.max(n.t, jetzt))}</span><span class="tb-puls-lbl"> · </span><b>${pulsInText(rest)}</b>`
     }
@@ -44295,12 +44303,13 @@
     if(aktiv){
       karte = `<div class="tpk-kopf is-aktiv"><span class="tpk-dot"></span>Puls ${aktiv.wartet ? 'wartet' : 'arbeitet gerade'}</div>`
         + zeile(dauer, 'seit ' + pulsUhr(aktiv.seit), aktiv.art, [aktiv.name, aktiv.wo, aktiv.wartet ? '' : 'Maus und Tastatur am PC frei lassen'])
-        + (liste.length ? '<div class="tpk-kopf is-danach"><span class="tpk-dot"></span>Danach</div>' + liste.slice(0, 5).map(zeileTermin).join('') : '')
+        + (liste.length ? '<div class="tpk-kopf is-danach"><span class="tpk-dot"></span>Danach</div>' + liste.slice(0, 5).map(zeileTermin).join('') : '') + offenHtml
     } else if(!n){
-      karte = '<div class="tpk-kopf"><span class="tpk-dot"></span>Puls</div><div class="tpk-leer">Kein geplanter Start und keine offene Bestätigung auf dieser ID.</div>'
+      karte = offen.length ? '<div class="tpk-kopf"><span class="tpk-dot"></span>Puls</div><div class="tpk-leer">Kein Start von selbst geplant.</div>' + offenHtml
+        : '<div class="tpk-kopf"><span class="tpk-dot"></span>Puls</div><div class="tpk-leer">Kein geplanter Start und keine offene Bestätigung auf dieser ID.</div>'
     } else {
       karte = '<div class="tpk-kopf"><span class="tpk-dot"></span>Nächste Puls-Einsätze</div>' + liste.slice(0, 6).map(zeileTermin).join('')
-        + `<div class="tpk-fuss">${liste.length > 6 ? `+ ${liste.length - 6} weitere · ` : ''}Zu diesen Zeiten Maus und ${n.plan && n.plan.route === 'tsv2' ? 'TopstepX' : 'TradingView'} am PC frei lassen · Klick öffnet Trades</div>`
+        + `<div class="tpk-fuss">${liste.length > 6 ? `+ ${liste.length - 6} weitere · ` : ''}Zu diesen Zeiten Maus und ${n.plan && n.plan.route === 'tsv2' ? 'TopstepX' : 'TradingView'} am PC frei lassen · Klick öffnet Trades</div>` + offenHtml
     }
     // Sekundentakt: nur anfassen, was sich geändert hat
     if(el.innerHTML !== html) el.innerHTML = html
@@ -44331,7 +44340,7 @@
     // 15 s, solange etwas läuft/wartet oder ein Termin in ≤ 10 min ansteht, sonst 30 s (01.10.2026, Supabase-Diät) — die Pille rechnet
     // Countdown und „in X min" jede Sekunde aus dem Speicher, neue Termine weiter weg dürfen 30 s später erscheinen
     let pulsRuhig = false
-    try{ const j = Date.now(), n0 = pulsTermine(j)[0]; pulsRuhig = !pulsAktivJetzt(j) && !(_pulsFern.signale || []).length && !(n0 && n0.t - j <= 10 * 60000) }catch(_){}
+    try{ const j = Date.now(), n0 = pulsTermine(j).find(x => x.art !== 'Offen'); pulsRuhig = !pulsAktivJetzt(j) && !(_pulsFern.signale || []).length && !(n0 && n0.t - j <= 10 * 60000) }catch(_){}
     if(seitVersuch >= (pulsRuhig ? 30000 : 15000) || (!_pulsFern.at && seitVersuch >= 3000)) pulsFernLaden().catch(() => {})
     try{ pulsNaechsterZeichnen() }catch(_){}
   }, 1000)
@@ -44804,6 +44813,21 @@
   // Unbestätigter Auto-Vorschlag (Punkt 7) — dasselbe Kennzeichen wie app.py _vorschlag / ap_bestaetigen und die Trade-Planer-Seite:
   // auto_plan true ohne auto_bestaetigt_at (rowToPlan: autoPlan / autoBestaetigtAt). Bestätigen tut nur Finn (apBestaetigen).
   const suUnbestaetigt = p => !!p && p.autoPlan === true && !p.autoBestaetigtAt
+  /* STARTET VON SELBST? (08.10.2026, Slave-Terminal 3 — Vorfall Finn 02:48 Dubai, Mac-Tab .1208: Overlay „Puls startet in 5 · Echo-Order
+   * platzieren · SELL 38 NAS100" für einen UNBESTÄTIGTEN Auto-Vorschlag. DB-Beweis: nichts geclaimt, nichts platziert — suKandidaten
+   * und der DB-Guard hielten; nur pulsTermine nahm jeden planned-Plan mit Startzeit und ließ Pille + Overlay herunterzählen.)
+   * EIN Prädikat für Start-Kandidaten (suKandidaten) und Ankündigung (pulsTermine): Orbit/Echo, Farmer nur scharf, nie Topstep V2
+   * (startet nur von Hand), nie unbestätigt, nie nach aufgegebenem Richtungskonflikt. -> '' = startet von selbst, sonst der Grund. */
+  function suStartetNichtWeil(p, scharf){
+    if(!p || !(routeIstOrbit(p.route) || routeIstEcho(p.route))) return 'kein Puls-Weg'
+    if(!scharf && tpIstFarmerPlan(p)) return 'Farmer nicht scharf'
+    if(p.route === 'tsv2') return 'Topstep V2 — startet nur von Hand'
+    if(suUnbestaetigt(p)) return 'startet erst nach Bestätigung'
+    if(rkAufgegeben(p)) return 'Richtungskonflikt — startet nur von Hand oder mit neuer Uhrzeit'
+    return ''
+  }
+  const suStartetVonSelbst = (p, scharf) => !suStartetNichtWeil(p, scharf)
+  window._suStartetNichtWeil = suStartetNichtWeil   // Test-Haken
   // DB-Guard für jedes Claim-Update dieser Sektion (Punkt 7): PostgREST-or über die Spalten selbst — ein Vorschlag ohne Bestätigung
   // trifft keine Zeile, der Claim bleibt aus, auch wenn der Tab den Plan für einen Hand-Plan hält
   const SU_CLAIM_GUARD = 'auto_plan.is.null,auto_plan.eq.false,auto_bestaetigt_at.not.is.null'
@@ -44821,15 +44845,12 @@
   function suKandidaten(plaene, o){
     const now = o.now, scharf = !!o.scharf
     return (plaene || []).filter(p => p && suNichtGestartet(p) && p.startUm
-      && (routeIstOrbit(p.route) || routeIstEcho(p.route)) && (scharf || !tpIstFarmerPlan(p))
-      // Topstep V2 startet NICHT von selbst, bis Etappe K4 (scharf über CDP) grün ist (30.09.2026, Topstep-Paket, Plan v2) —
-      // der Plan bleibt mit seiner Startzeit stehen, Starten nur von Hand
-      && p.route !== 'tsv2'
-      // Auto-Planer (05.10.2026, Finn: „ich muss die Trades trotzdem noch manuell confirmen"): Vorschlag ohne Bestätigung nie
-      && !suUnbestaetigt(p)
+      // Orbit/Echo · Farmer nur scharf · nie Topstep V2 (30.09.2026, startet nur von Hand) · nie unbestätigt (05.10.2026, Finn: „ich muss
+      // die Trades trotzdem noch manuell confirmen") · nie nach aufgegebenem Richtungskonflikt (07.10.2026) — seit 08.10.2026 EIN Prädikat
+      // mit der Ankündigung in pulsTermine (suStartetVonSelbst), damit Pille/Overlay nie etwas ankündigen, was hier nicht startet
+      && suStartetVonSelbst(p, scharf)
       && !((_vorcheckNaechst.get(String(p.id)) || 0) > now)   // Slave-Vorprüfung: wartender Plan erst nach seinem Jitter wieder
       && !((_suClaimPause.get(String(p.id)) || 0) > now)      // Claim ging ins Leere: kurz zurückstellen, die Schlange läuft weiter
-      && !rkAufgegeben(p)   // Richtungskonflikt bis Fensterende nicht lösbar (07.10.2026) — Start nur noch von Hand bzw. mit neuer Uhrzeit
       && (tpIstFarmerPlan(p) ? suKetteFrei(p, plaene, now) : new Date(p.startUm).getTime() <= now))
       .sort((a, b) => (new Date(a.startUm) - new Date(b.startUm)) || String(a.id).localeCompare(String(b.id)))
   }
