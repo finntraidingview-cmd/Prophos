@@ -39920,7 +39920,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1113'
+  const OS_TAB_BUILD = '2026-09-22.1114'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -44984,24 +44984,12 @@
         ${nach.length > 1 ? `<path d="${treppe(nach)}" fill="none" stroke="var(--violet)" stroke-width="2" stroke-dasharray="6 4" stroke-opacity=".85" vector-effect="non-scaling-stroke"/>` : ''}
         ${stufen}</svg>`
     const nJetzt = jetztIn ? wertBei(D.jetzt).netto : null, vz = n => (n > 0 ? '+' : n < 0 ? '−' : '') + tplEur(n)
-    // HYPO-P&L als zweite Linie (HYPO-PNL-LIVE, Finn-Korrektur: im bestehenden Chart, eigene Farbe, eigene Skala rechts in €)
-    const h = tplHypo(D), hv = h.verlauf
-    let hypoSvg = '', hypoSkala = '', hypoLeg = '', hypoTip = ''
-    if(hv.length){
-      const hmax = Math.max(50, ...hv.map(p => Math.abs(p.eur))) * 1.15, YH = e => (M - e / hmax * (M - 6))
-      const pfad = hv.map((p, i) => `${i ? 'L' : 'M'}${XS(p.min).toFixed(1)},${YH(p.eur).toFixed(1)}`).join(''), l = hv[hv.length - 1]
-      hypoSvg = `<path d="${pfad}" fill="none" stroke="#0F766E" stroke-width="2.5" vector-effect="non-scaling-stroke"/><circle cx="${XS(l.min).toFixed(1)}" cy="${YH(l.eur).toFixed(1)}" r="4" fill="#0F766E"/>`
-      hypoSkala = `<span class="skala rechts oben">+${tplEur(hmax)}</span><span class="skala rechts unten">−${tplEur(hmax)}</span>`
-      hypoLeg = `<span><i class="tpl-nk-l hypo"></i> P&amp;L hypothetisch <b class="${l.eur > 0 ? 'tpl-gut' : l.eur < 0 ? 'tpl-rot' : ''}">${vz(l.eur)}</b>${h.cfd ? ' · CFD ≈ NQ' : ''}</span>`
-      // Tooltip je Minute (Netto der Stufe + Hypo-P&L) statt je Stufe
-      hypoTip = hv.map(p => `<rect x="${XS(p.min - 0.5).toFixed(1)}" y="0" width="${(W / SPAN).toFixed(2)}" height="${H}" fill="transparent"><title>${escapeHtml(`${tplUhr(p.min, v)} · Netto ${vz(wertBei(p.min).netto)} · P&L hypothetisch ${vz(p.eur)}`)}</title></rect>`).join('')
-    }
-    const svg2 = svg.replace('</svg>', hypoSvg + (hypoTip ? hypoTip : '') + '</svg>').replace(stufen, hypoTip ? '' : stufen)
+    // Hypo-P&L steht seit Finns Korrektur 4 (07.10.2026: „Mach beides in separate Graphen") in einer eigenen Karte darunter (tplHypoHtml)
     const schritt = SPAN <= 12 * 60 ? 60 : 120, achse = []
     for(let hh = Math.ceil(VON / schritt) * schritt; hh <= BIS; hh += schritt){ const x = (hh - VON) / SPAN * 100; achse.push(`<span class="${x < 3 ? 'links' : x > 97 ? 'rechts' : ''}" style="left:${x.toFixed(2)}%">${tplUhr(hh - v, v)}</span>`) }
     return `<div class="tpl-karte tpl-nk"><div class="tpl-h">Netto-Einsatz über den Tag <b>${nJetzt != null ? 'jetzt ' + vz(nJetzt) : 'max ' + tplEur(Math.max(...reihe.map(p => Math.abs(p.netto))))}</b>
-        <span class="leg"><span><i class="tpl-nk-l"></i> gelaufen</span><span><i class="tpl-nk-l gestrichelt"></i> geplant</span><span><i class="tpl-nk-b"></i> Band ±${pct != null ? pct + ' %' : '—'}</span>${hypoLeg}<span>0 = ausgeglichen</span></span></div>
-        <div class="tpl-nk-chart"><span class="skala oben">+${tplEur(max)}</span><span class="skala unten">−${tplEur(max)}</span>${hypoSkala}${svg2}</div><div class="tpl-achse tpl-nk-achse">${achse.join('')}</div></div>`
+        <span class="leg"><span><i class="tpl-nk-l"></i> gelaufen</span><span><i class="tpl-nk-l gestrichelt"></i> geplant</span><span><i class="tpl-nk-b"></i> Band ±${pct != null ? pct + ' %' : '—'}</span><span>0 = ausgeglichen</span></span></div>
+        <div class="tpl-nk-chart"><span class="skala oben">+${tplEur(max)}</span><span class="skala unten">−${tplEur(max)}</span>${svg}</div><div class="tpl-achse tpl-nk-achse">${achse.join('')}</div></div>`
   }
 
   function tplDetailHtml(D){
@@ -45306,6 +45294,37 @@
     return `<div class="kpi"><div class="kpi-label">P&amp;L hypothetisch</div><div class="kpi-value ${h.jetzt > 0 ? 'tpl-gut' : h.jetzt < 0 ? 'tpl-rot' : ''}" title="Σ Kontowert-Satz (€ je $) × Live-P&amp;L $ je laufendem ungehedgtem Trade${h.cfd ? ' · ' + h.cfd + ' CFD aus MT5' : ''}">jetzt ${vz(h.jetzt)}</div>
         <span class="kpi-delta">${h.n} Trade${h.n === 1 ? '' : 's'}${h.ohne ? ` · ${h.ohne} ohne Wert` : ''}${!h.n && !h.ohne ? ' · nichts läuft' : ''}</span></div>`
   }
+  /* HYPO-P&L-CHART (Finns Korrektur 4, 07.10.2026: „Mach beides in separate Graphen, nicht im gleichen Chart"): eigene Karte direkt unter
+   * dem Netto-Chart, gleiche Breite und Höhe, eigene €-Achse, 0-Linie kräftig, Fläche grün über / rot unter 0, Tooltip je Minute,
+   * Kopf „P&L hypothetisch heute · jetzt ±€". Zeitachse = die des Zeitstrahls (_tpl.achse). */
+  function tplHypoHtml(D){
+    const a = _tpl.achse || {}; if(a.VON == null) return ''
+    const h = tplHypo(D), hv = h.verlauf
+    if(!hv.length && !h.n) return ''
+    const v = D.v, VON = a.VON, BIS = a.BIS, SPAN = BIS - VON, W = 1000, H = 150, M = H / 2
+    const vz = x => (x > 0 ? '+' : x < 0 ? '−' : '') + tplEur(x)
+    const max = Math.max(50, ...hv.map(p => Math.abs(p.eur))) * 1.15
+    const XS = m => ((m + v - VON) / SPAN * W), Y = e => (M - e / max * (M - 6))
+    let svg = ''
+    if(hv.length){
+      const pfad = hv.map((p, i) => `${i ? 'L' : 'M'}${XS(p.min).toFixed(1)},${Y(p.eur).toFixed(1)}`).join(''), l = hv[hv.length - 1], e0 = hv[0]
+      const flaeche = `${pfad}L${XS(l.min).toFixed(1)},${M}L${XS(e0.min).toFixed(1)},${M}Z`
+      const tip = hv.map(p => `<rect x="${XS(p.min - 0.5).toFixed(1)}" y="0" width="${(W / SPAN).toFixed(2)}" height="${H}" fill="transparent"><title>${escapeHtml(`${tplUhr(p.min, v)} · ${vz(p.eur)} hypothetisch`)}</title></rect>`).join('')
+      svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+        <defs><clipPath id="tplHypoOben"><rect x="0" y="0" width="${W}" height="${M}"/></clipPath><clipPath id="tplHypoUnten"><rect x="0" y="${M}" width="${W}" height="${M}"/></clipPath></defs>
+        <path d="${flaeche}" fill="var(--good)" fill-opacity=".16" stroke="none" clip-path="url(#tplHypoOben)"/>
+        <path d="${flaeche}" fill="var(--danger)" fill-opacity=".16" stroke="none" clip-path="url(#tplHypoUnten)"/>
+        <line x1="0" y1="${M}" x2="${W}" y2="${M}" stroke="var(--ink)" stroke-opacity=".55" stroke-width="1.5" vector-effect="non-scaling-stroke"/>
+        <path d="${pfad}" fill="none" stroke="var(--good)" stroke-width="2.5" vector-effect="non-scaling-stroke" clip-path="url(#tplHypoOben)"/>
+        <path d="${pfad}" fill="none" stroke="var(--danger)" stroke-width="2.5" vector-effect="non-scaling-stroke" clip-path="url(#tplHypoUnten)"/>
+        <circle cx="${XS(l.min).toFixed(1)}" cy="${Y(l.eur).toFixed(1)}" r="4" fill="${l.eur >= 0 ? 'var(--good)' : 'var(--danger)'}"/>${tip}</svg>`
+    }
+    const schritt = SPAN <= 12 * 60 ? 60 : 120, achse = []
+    for(let hh = Math.ceil(VON / schritt) * schritt; hh <= BIS; hh += schritt){ const x = (hh - VON) / SPAN * 100; achse.push(`<span class="${x < 3 ? 'links' : x > 97 ? 'rechts' : ''}" style="left:${x.toFixed(2)}%">${tplUhr(hh - v, v)}</span>`) }
+    return `<div class="tpl-karte tpl-nk tpl-hk"><div class="tpl-h">P&amp;L hypothetisch heute <b class="${h.jetzt > 0 ? 'tpl-gut' : h.jetzt < 0 ? 'tpl-rot' : ''}">jetzt ${vz(h.jetzt)}</b>
+        <span class="leg"><span>${h.n} Trade${h.n === 1 ? '' : 's'}${h.ohne ? ` · ${h.ohne} ohne Wert` : ''}</span><span>Kontowert-Satz × Live-P&amp;L${h.cfd ? ' · CFD ≈ NQ' : ''}</span><span>0 = Einstand</span></span></div>
+        ${hv.length ? `<div class="tpl-nk-chart"><span class="skala oben">+${tplEur(max)}</span><span class="skala unten">−${tplEur(max)}</span>${svg}</div><div class="tpl-achse tpl-nk-achse">${achse.join('')}</div>` : '<div class="tpl-leer">noch kein Verlauf — Kerzen oder Startzeiten fehlen</div>'}</div>`
+  }
   /* Sicht auf EINE ID (ID-Chip): Trades und Summen nur dieser ID — Band/Netto „jetzt" aus dem Delta bleiben über alle (so rechnet der Planer) */
   function tplSichtFilter(D, ids){
     const trades = D.trades.filter(t => ids.has(t.user_id))
@@ -45364,7 +45383,7 @@
     const chips = (alleIds.length > 1 || alleBest) ? `<div class="adm-vl-legend tpl-ids">${chipsIds}${alleBest}</div>` : ''
     root.innerHTML =(_tpl.fehler ? `<div class="tpl-fehler">⚠ ${escapeHtml(_tpl.fehler)}</div>` : '')
       + (ohne ? `<div class="tpl-karte"><div class="tpl-leer">— nicht im Auto-Planer</div></div>`
-        : chips + tplKachelnHtml(F) + tplBrauchtHtml(tplBraucht(D, sichtIds)) + tplZeitstrahlHtml(F, zeilen) + tplNettoHtml(F) + tplDetailHtml(D) + tplListeHtml(F) + tplAbdeckungHtml(F, abF))
+        : chips + tplKachelnHtml(F) + tplBrauchtHtml(tplBraucht(D, sichtIds)) + tplZeitstrahlHtml(F, zeilen) + tplNettoHtml(F) + tplHypoHtml(F) + tplDetailHtml(D) + tplListeHtml(F) + tplAbdeckungHtml(F, abF))
     const sc = root.querySelector('.tpl-scroll')
     if(sc && sc.scrollWidth > sc.clientWidth + 4){
       if(scrollX != null && _tpl.tagScroll === _tpl.tag) sc.scrollLeft = scrollX
