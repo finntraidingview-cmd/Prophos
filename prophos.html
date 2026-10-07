@@ -31787,7 +31787,7 @@
     let da = false; try{ da = !!(_ap.letzter && _ap.geladenFuer === currentUserId) }catch(_){ return }
     _apChipVersucht = currentUserId
     if(da) return
-    ;(async () => { try{ const d = await apApi('GET'); _ap.letzter = d.letzter || null; _ap.imPlaner = !!d.im_planer; _ap.admin = d.admin != null ? !!d.admin : null; _ap.geladenFuer = currentUserId; renderAccounts() }catch(_){} })()
+    ;(async () => { try{ await apLetztenHolen(); renderAccounts() }catch(_){} })()   // geteilter Abruf (08.10.2026): Accounts + Planer-Seite holten GET /admin/auto-plan beide
   }
   function accPlanerZelleHtml(a, archiviert){
     if(!a || !AP_CHIP_TYPEN.includes(a.type)) return '<span style="color:var(--sub-2)">—</span>'
@@ -40674,7 +40674,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1201'
+  const OS_TAB_BUILD = '2026-09-22.1202'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -44920,9 +44920,17 @@
     if(!r.ok || d.ok === false){ const f = new Error(d.msg || d.error || ('HTTP ' + r.status)); f.daten = d; throw f }   // daten: z. B. abweichung (Probelauf)
     return d
   }
+  // EIN Abruf je Öffnen (TRADE-PLANER LÄDT EWIG, Finn 08.10.2026 — Messung Railway-Logs 22:16 UTC: GET /admin/auto-plan lief beim Öffnen
+  // ZWEIMAL, einmal aus apLeisteZeichnen → apLetztenLaden, einmal aus tplLaden): ein laufender Abruf wird geteilt, höchstens alle 5 s neu
+  function apLetztenHolen(){
+    if(_ap.lauf && Date.now() - _ap.laufAt < 5000) return _ap.lauf
+    _ap.laufAt = Date.now()
+    _ap.lauf = apApi('GET').then(d => { _ap.letzter = d.letzter || null; _ap.imPlaner = !!d.im_planer; _ap.admin = d.admin != null ? !!d.admin : null; _ap.geladenFuer = currentUserId; return d })
+    return _ap.lauf
+  }
   async function apLetztenLaden(){
     _ap.geladenFuer = currentUserId
-    try{ const d = await apApi('GET'); _ap.letzter = d.letzter || null; _ap.imPlaner = !!d.im_planer; _ap.admin = d.admin != null ? !!d.admin : null }
+    try{ await apLetztenHolen() }
     catch(_){ _ap.letzter = null; _ap.imPlaner = false; _ap.admin = null }
     apLeisteZeichnen()
     try{ _apd.d = null; _apd.vorschau = null; _apd.edit = null; apdLaden(true) }catch(_){}   // Delta-Monitor (06.10.2026): je Login frisch, nie Daten der vorigen ID
@@ -46561,9 +46569,14 @@
       + alleIds.filter(x => planer.has(x.uid)).map(x => chip(x.uid, x.name || x.uid.slice(0, 8), D.trades.filter(t => t.user_id === x.uid), sicht === x.uid)).join('')
       + (weitere.length ? chip('weitere', 'Weitere', D.trades.filter(t => weitere.some(x => x.uid === t.user_id)), sicht === 'weitere') : '') : ''
     const chips = (alleIds.length > 1 || alleBest) ? `<div class="adm-vl-legend tpl-ids">${chipsIds}${alleBest}</div>` : ''
-    root.innerHTML =(_tpl.fehler ? `<div class="tpl-fehler">⚠ ${escapeHtml(_tpl.fehler)}</div>` : '')
+    const html = (_tpl.fehler ? `<div class="tpl-fehler">⚠ ${escapeHtml(_tpl.fehler)}</div>` : '')
       + (ohne ? `<div class="tpl-karte"><div class="tpl-leer">— nicht im Auto-Planer</div></div>`
         : chips + tplKachelnHtml(F) + tplBrauchtHtml(tplBraucht(D, sichtIds)) + tplZeitstrahlHtml(F, zeilen) + tplDetailHtml(D) + tplNettoHtml(F) + tplHypoHtml(F) + tplListeHtml(F) + tplBilanzKarteHtml(F))   // Konten-Abdeckung ausgeblendet (Finn 08.10.2026: „mies unnötig, kann visuell weg“) — tplAbdeckungHtml bleibt   // Detail direkt unter dem Zeitstrahl (Finn 07.10.2026)
+    // FINGERABDRUCK (08.10.2026): gleiches Markup → nichts anfassen (60-s-Takt, Delta-Takt, Balance-Stände zeichnen sonst alles neu
+    // und werfen Scroll/Fokus weg); die Kopfzeile oben wird trotzdem jedes Mal aktualisiert
+    if(html === _tpl.htmlAlt && root.firstChild) return
+    _tpl.htmlAlt = html
+    root.innerHTML = html
     const sc = root.querySelector('.tpl-scroll')
     if(sc && sc.scrollWidth > sc.clientWidth + 4){
       if(scrollX != null && _tpl.tagScroll === _tpl.tag) sc.scrollLeft = scrollX
@@ -46664,24 +46677,58 @@
       _tpl.kerzenAt = voll ? jetzt : _tpl.kerzenAt
     }catch(e){ console.warn('[tpl] tv_kurs_1m', (e && e.message) || e) }
   }
+  /* BOOT-CACHE DER PLANER-SEITE (TRADE-PLANER LÄDT EWIG, Finn 08.10.2026: „Baut mal, dass der Trade-Planer nicht immer so ewig lädt, damit
+   * ich die Trades sehe"). Messung (Railway http-Logs 22:16–22:17 UTC, Finns Mac): beim Öffnen liefen auto-plan (2×, 0,1–0,3 s),
+   * live-trades (1,1–2,5 s), kontowerte (0,4–0,7 s), hypo-bilanz (0,3 s), delta (0,7–1,0 s) NACHEINANDER, je Anfrage dazu Preflight +
+   * Laufzeit Dubai→Railway ≈ 0,35 s → erste Trades nach ~5 s, alles nach ~8 s, davor nur „lädt …". Jetzt: (a) der letzte Stand liegt je
+   * Login in localStorage (prophos_tpl_cache: Lauf, Delta mit Stempel um, Live-Zeilen, Bilanz — gekürzt, nie mehr als ~200 Zeilen je
+   * Liste) und wird beim Öffnen SOFORT gezeichnet (Kopf zeigt „Stand HH:MM" des Caches + „lädt …"), (b) alle Abrufe laufen parallel
+   * (Promise.allSettled), (c) tplZeichnen setzt innerHTML nur bei verändertem Markup (Fingerabdruck). Keine neuen Takte, keine
+   * Realtime-Kanäle, keine Logik an Planung/Riegeln. Voller Cache (QuotaExceeded, s. prophos-localstorage-voll) → Schlüssel weg. */
+  const TPL_CACHE_KEY = 'prophos_tpl_cache'
+  function tplCacheLesen(){
+    try{
+      const raw = localStorage.getItem(TPL_CACHE_KEY); if(!raw) return null
+      const c = JSON.parse(raw)
+      if(!c || String(c.uid || '') !== String(currentUserId || '') || !c.at || Date.now() - c.at > 86400000) return null   // anderer Login / älter als 1 Tag: nicht zeichnen
+      return c
+    }catch(_){ return null }
+  }
+  function tplCacheSchreiben(){
+    try{
+      const k = (a, n) => Array.isArray(a) ? a.slice(0, n) : []
+      const l = _ap.letzter && !_ap.letzter.trocken ? { ...(_ap.letzter), geplant: k(_ap.letzter.geplant, 200), ausgelassen: k(_ap.letzter.ausgelassen, 200), verlauf: undefined } : null
+      const d = _apd.d ? { ...(_apd.d), offen: k(_apd.d.offen, 200), geplant: k(_apd.d.geplant, 200), bot: undefined, verlauf: undefined } : null
+      const c = { uid: String(currentUserId || ''), at: Date.now(), letzter: l, imPlaner: !!_ap.imPlaner, admin: _ap.admin, delta: d,
+        lt: k([..._tpl.lt.values()], 200), bilanz: k(_tpl.bilanz, 300) }
+      localStorage.setItem(TPL_CACHE_KEY, JSON.stringify(c))
+    }catch(_){ try{ localStorage.removeItem(TPL_CACHE_KEY) }catch(__){} }
+  }
+  function tplAusCache(){
+    if(_tpl.cacheGelesen || _tpl.stub) return
+    _tpl.cacheGelesen = true
+    const c = tplCacheLesen(); if(!c) return
+    if(!_ap.letzter && c.letzter){ _ap.letzter = c.letzter; _ap.imPlaner = !!c.imPlaner; _ap.admin = c.admin != null ? !!c.admin : _ap.admin; _ap.geladenFuer = currentUserId; _ap.ausCache = true }
+    if(!_apd.d && c.delta) _apd.d = c.delta           // trägt um → Kopf „Stand HH:MM" des Caches
+    if(!_tpl.lt.size && Array.isArray(c.lt)) _tpl.lt = new Map(c.lt.filter(t => t && t.plan_id).map(t => [String(t.plan_id), t]))
+    if(!(_tpl.bilanz && _tpl.bilanz.length) && Array.isArray(c.bilanz)) _tpl.bilanz = c.bilanz
+  }
   async function tplLaden(){
     if(!currentUserId || _tpl.laeuft || _tpl.stub) return
-    _tpl.laeuft = true; tplZeichnen()
+    _tpl.laeuft = true; tplAusCache(); tplZeichnen()
     try{
-      await tplLiveLaden()
       // Kontowerte (Satz € je $ je Konto) für beendete eigene Trades im Hypo-P&L — kwLaden aus der Accounts-Ansicht, höchstens alle 10 min
-      if(typeof kwLaden === 'function' && Date.now() - _tpl.kwAt > 600000){ _tpl.kwAt = Date.now(); try{ await kwLaden() }catch(_){} }
-      try{ await tplKerzenLaden(tplDaten()) }catch(_){}
-      await tplBilanzLaden()
-      const d = await apApi('GET')
-      _ap.letzter = d.letzter || null; _ap.imPlaner = !!d.im_planer; _ap.admin = d.admin != null ? !!d.admin : null; _ap.geladenFuer = currentUserId
-      _tpl.fehler = ''
+      const jobs = [tplLiveLaden(), tplBilanzLaden(), tplKerzenLaden(tplDaten()).catch(() => {}),
+        apLetztenHolen().then(() => { _tpl.fehler = '' }, e => { _tpl.fehler = (e && e.message) || String(e) })]
+      if(typeof kwLaden === 'function' && Date.now() - _tpl.kwAt > 600000){ _tpl.kwAt = Date.now(); jobs.push(kwLaden().catch(() => {})) }
+      // Delta nur, wenn der Delta-Takt nicht gerade selbst geladen hat; offene Eingabe/Vorschau im Delta-Monitor nicht zerschießen
+      if(!_apd.edit && !_apd.vorschau && Date.now() - _apd.geladen > 20000) jobs.push(apdLaden(true))
+      await Promise.allSettled(jobs)
     }catch(e){ _tpl.fehler = (e && e.message) || String(e) }
-    finally{ _tpl.laeuft = false; _tpl.geladen = Date.now() }
-    // Delta nur, wenn der Delta-Takt nicht gerade selbst geladen hat; offene Eingabe/Vorschau im Delta-Monitor nicht zerschießen
-    if(!_apd.edit && !_apd.vorschau && Date.now() - _apd.geladen > 20000) await apdLaden(true)
+    finally{ _tpl.laeuft = false; _tpl.geladen = Date.now(); _ap.ausCache = false }
     try{ apLeisteZeichnen() }catch(_){}
     tplZeichnen()
+    tplCacheSchreiben()
   }
   /* Admin-Eingriff an Vorschlägen fremder IDs (07.10.2026): POST /admin/auto-plan/bestaetigen {plan_ids} | zurueck {plan_id} |
    * loeschen {plan_id} — Service-Key hinter dem Admin-Gate (RLS lässt den Browser nur an eigene Zeilen). Antwort n = wirklich
@@ -46869,7 +46916,7 @@
   document.getElementById('tplNeu')?.addEventListener('click', () => { _tpl.geladen = 0; _apd.geladen = 0; tplLaden() })
   // Offen: sofort zeichnen, laden, wenn der Stand älter als 15 s ist; danach alle 60 s, nur im sichtbaren Tab
   window._tplTabOeffnen = () => {
-    tplZeichnen()
+    tplAusCache(); tplZeichnen()   // Boot-Cache sofort (08.10.2026), dann frisch
     if(Date.now() - _tpl.geladen > 15000) tplLaden()
     clearInterval(_tpl.timer)
     _tpl.timer = setInterval(() => { if(document.visibilityState === 'visible' && !_tpl.edit) tplLaden() }, 60000)
