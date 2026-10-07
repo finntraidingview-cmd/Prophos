@@ -16976,9 +16976,12 @@ def win_hover_js(x, y):
 def win_ziel_js(x, y):
     """Am Viewport-Punkt: liegt das Element unter dem Mauszeiger (:hover) — und gehört es zu einer TradingView-Meldung (Toast)?
     Live 29.09.2026 16:13 UTC: der aufgeklappte Meldungsstapel lag über dem Konto-Umschalter, der Klick traf die Meldung. Liest nur."""
-    return ("(function(){var e=document.elementFromPoint(" + f"{float(x):.1f},{float(y):.1f}" + ");if(!e)return {hover:false,toast:false};"
+    return ("(function(){var e=document.elementFromPoint(" + f"{float(x):.1f},{float(y):.1f}" + ");if(!e)return {hover:false,toast:false,was:''};"
             "var t=e.closest('[data-name^=\"toast-group-\"],[class*=\"toastGroup-\"],[class*=\"toastListInner-\"],[class*=\"toastItem\"]');"
-            "return {hover:e.matches(':hover'),toast:!!t};})()")
+            # was (07.10.2026, Routine „Puls-Fehler"): Element am Punkt in der Spur, damit „Ziel NICHT unter dem Zeiger" ohne pruef
+            # sagt, WAS dort lag (Senden-Knopf 4× auf 4 PCs ohne diesen Hinweis) — nur lesen, ändert kein Urteil
+            "var w=(e.tagName.toLowerCase()+' '+String(e.getAttribute('aria-label')||e.getAttribute('data-name')||e.textContent||'').replace(/\\s+/g,' ').trim()).slice(0,40);"
+            "return {hover:e.matches(':hover'),toast:!!t,was:w};})()")
 
 
 def win_ziel_pruef_js(x, y, pruef):
@@ -17598,29 +17601,34 @@ class _AugenSitzung:
                 if isinstance(v, dict) and v.get("hover"):
                     hover = True
                     break
-                if not gestupst and time.time() >= ende - 0.15:
-                    # Live 30.09.2026 11:18 UTC (erster Topstep-PC, Bracket-Zahnrad): Zeiger stand rechnerisch richtig, die Seite meldete
-                    # 0,9 s lang kein :hover. EINMAL 2 px anstupsen (frische Mausbewegung, kein Druck) und noch 0,7 s schauen.
-                    gestupst = True
-                    try:
-                        _cursor_set(int(punkt[0]) + 2, int(punkt[1]) + 1)
-                        _warte(0.04, 0.03)
-                        _cursor_set(int(punkt[0]), int(punkt[1]))
-                    except Exception:
-                        pass
-                    ende = time.time() + 0.7
-                continue
-            v = self.lese_js(win_ziel_js(p[0], p[1]))
-            if isinstance(v, dict) and v.get("toast") and not toast_ok:
-                # das Ziel liegt unter einer TradingView-Meldung — ein Druck träfe die Meldung (Live 16:13 UTC, Konto-Umschalter)
-                self._verdeckt = True
-                self.trail.append(f"{name}: von einer TradingView-Meldung verdeckt @{punkt[0]},{punkt[1]} — kein Druck")
-                return False
-            if (v.get("hover") if isinstance(v, dict) else v):
-                hover = True
-                break
+            else:
+                v = self.lese_js(win_ziel_js(p[0], p[1]))
+                if isinstance(v, dict) and v.get("toast") and not toast_ok:
+                    # das Ziel liegt unter einer TradingView-Meldung — ein Druck träfe die Meldung (Live 16:13 UTC, Konto-Umschalter)
+                    self._verdeckt = True
+                    self.trail.append(f"{name}: von einer TradingView-Meldung verdeckt @{punkt[0]},{punkt[1]} — kein Druck")
+                    return False
+                if (v.get("hover") if isinstance(v, dict) else v):
+                    hover = True
+                    break
+            if not gestupst and time.time() >= ende - 0.15:
+                # Live 30.09.2026 11:18 UTC (erster Topstep-PC, Bracket-Zahnrad): Zeiger stand rechnerisch richtig, die Seite meldete
+                # 0,9 s lang kein :hover. EINMAL 2 px anstupsen (frische Mausbewegung, kein Druck) und noch 0,7 s schauen.
+                # AUCH OHNE ZIEL-PRÜFUNG (07.10.2026, Routine „Puls-Fehler", Muster „knopf: senden-knopf nicht gedrückt (maus nicht
+                # bewiesen über dem knopf)": 4× in 7 Tagen auf 4 PCs, dieselbe Spur bei „Show more" und den Reitern — der nächste Klick
+                # mit frischer Mausbewegung traf dann): der Stups lief bisher nur im pruef-Zweig, Senden-Knopf, Show more und Reiter
+                # klicken ohne pruef und bekamen nach 0,9 s ohne :hover nie eine frische Bewegung. Riegel unverändert: ohne :hover kein Druck.
+                gestupst = True
+                try:
+                    _cursor_set(int(punkt[0]) + 2, int(punkt[1]) + 1)
+                    _warte(0.04, 0.03)
+                    _cursor_set(int(punkt[0]), int(punkt[1]))
+                except Exception:
+                    pass
+                ende = time.time() + 0.7
         if not hover:
-            zus = (f" — am Punkt '{v.get('was')}', Zeiger laut Seite über '{v.get('unter')}'" if pruef and isinstance(v, dict) else "")
+            zus = (f" — am Punkt '{v.get('was')}', Zeiger laut Seite über '{v.get('unter')}'" if pruef and isinstance(v, dict)
+                   else (f" — am Punkt '{v.get('was')}'" if isinstance(v, dict) and v.get("was") else ""))
             self.trail.append(f"{name}: Maus steht @{punkt[0]},{punkt[1]}, Ziel NICHT unter dem Zeiger (Hover){zus} — kein Druck")
             return False
         self.maus = p
@@ -19073,7 +19081,8 @@ def modus_tvkette_cdp(cmd):
             return raus("knopf", "Senden-Knopf NICHT gedrückt (Maus nicht bewiesen über dem Knopf) — nichts gesendet.", "knopf")
         trail.append("Senden geklickt — ab hier zählt nur der Beweis")
         _puls_ergebnis_senden("order", "geklickt", cmd, res, trail)   # sofort: überlebt Absturz und einen neu geladenen Prophos-Tab
-        b, neu, erst_ok, mehr = {}, [], None, {"gedrueckt": False, "versuche": 0, "hin": False}
+        b, neu, erst_ok, mehr = {}, [], None, {"gedrueckt": False, "versuche": 0, "hin": False, "gehalten": 0}
+        b_ok = None                                   # einmal bestätigter Beweis (BEWEIS BLEIBT, 07.10.2026, s. u.)
         ende = time.time() + 15.0
         while time.time() < ende:
             _warte(0.5, 0.25)
@@ -19108,6 +19117,24 @@ def modus_tvkette_cdp(cmd):
                 continue
             neu = k3_neue_meldungen(vorher_m, (st.get("toasts") or {}).get("meldungen"))
             b = cdp_order_beweis(neu, k3_zeilen(st.get("positionen"), root), plan, menge0)
+            # BEWEIS BLEIBT (07.10.2026, Routine „Puls-Fehler", Muster „unklar: ergebnis unklar — … in 15 s weder Fill-Meldung noch
+            # neue Position": 1×, UNKLAR — Spur „Fill-Beweis früh gemeldet: Einstieg … (tabelle_avg_fill)" und 9 s später trotzdem
+            # „unklar", Erholungsversuch startete Puls-Chrome neu, die Position lag da). Ursache: der Beweis wurde je Blick NEU gerechnet;
+            # ein späterer Blick ohne sichtbare Zeile (die Tabelle baut sich nach „Show more" um) warf den schon gesehenen Fill weg, und
+            # am Ende zählte nur der letzte Blick. Jetzt: ein einmal bestätigter Beweis bleibt; spätere bestätigte Blicke ergänzen nur
+            # (Einstieg, TP, SL, Symbol), ein leerer Blick setzt nie auf „nichts" zurück. Kein Riegel wird lockerer — bestätigt wird
+            # weiterhin nur, was cdp_order_beweis in einem echten Blick gesehen hat.
+            if b["bestaetigt"]:
+                if b_ok:
+                    for k_ in ("einstieg", "einstieg_quelle", "tp", "sl", "symbol", "beweis"):
+                        if (b.get(k_) is None or b.get(k_) == "") and b_ok.get(k_) not in (None, ""):
+                            b[k_] = b_ok[k_]
+                b_ok = b
+            elif b_ok:
+                b = b_ok
+                mehr["gehalten"] += 1
+                if mehr["gehalten"] == 1:
+                    trail.append("Blick ohne Fill-Meldung/Zeile — der bestätigte Beweis bleibt (BEWEIS BLEIBT)")
             if b["bestaetigt"] and not erst_ok and b.get("einstieg") is not None:
                 # FRÜHER FILL-BEWEIS (01.10.2026, Finn nach einem WD-Trade 30.09.2026 22:13 UTC: Fill in TradingView 22:13:26,5, Fusion erst
                 # 22:13:41,6 — 15 s, weil der Tab auf das Ende dieses Laufs wartete: Show more, Orders, Positions, Endprüfung). Sobald
