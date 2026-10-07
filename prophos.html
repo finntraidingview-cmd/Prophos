@@ -3323,6 +3323,11 @@
   #dashboard-view .pz-bahn2 > .pz-bahn-tp{background:rgba(21,128,61,.5);z-index:3;border-radius:0 3px 3px 0;animation:rsqCardPulse 1.8s ease-in-out infinite}
   #dashboard-view .pz-bahn2 > .pz-bahn-sl{top:2px;bottom:2px;height:auto;background:rgba(185,28,28,.6);z-index:3;border-radius:2px 0 0 2px}
   #dashboard-view .pz-bahn2 > .pz-bahn-verlust{background:#b91c1c;z-index:2}
+  /* Farbverlauf nach Skalenposition (08.10.2026): Grün gedeckt am Start → hell/kräftig (--good) am Ziel, Rot gedämpft am Start → tief am
+     Liq-Level. --a/--b setzt planZeileHtml je Segment-Ende; ohne color-mix bleibt die Vollfarbe oben stehen */
+  #dashboard-view .pz-bahn2{--pz-g0:color-mix(in srgb,#15803d 72%,var(--sub));--pz-g1:var(--good);--pz-r0:color-mix(in srgb,var(--danger) 55%,var(--border));--pz-r1:color-mix(in srgb,#b91c1c 78%,#000)}
+  #dashboard-view .pz-bahn2 > .pz-bahn-ist.is-verlauf{background-image:linear-gradient(90deg,color-mix(in srgb,var(--pz-g1) var(--a),var(--pz-g0)),color-mix(in srgb,var(--pz-g1) var(--b),var(--pz-g0)))}
+  #dashboard-view .pz-bahn2 > .pz-bahn-verlust.is-verlauf{background-image:linear-gradient(90deg,color-mix(in srgb,var(--pz-r1) var(--a),var(--pz-r0)),color-mix(in srgb,var(--pz-r1) var(--b),var(--pz-r0)))}
   #dashboard-view .pz-bahn2 > .pz-bahn-start{top:-2px;bottom:-2px;height:auto;width:2px;margin-left:-1px;border-radius:1px;background:var(--ink-2);z-index:3}
   #dashboard-view .pz-bahn2 > .pz-bahn-pkt{position:absolute;top:50%;width:10px;height:10px;border-radius:50%;transform:translate(-50%,-50%);box-shadow:0 0 0 2px var(--surface);z-index:4}
   @media (prefers-reduced-motion:reduce){#dashboard-view .pz-bahn2 > .pz-bahn-tp{animation:none}}
@@ -36912,11 +36917,17 @@
       const bahnTitel = `${boden != null ? 'Liq ' + de(boden) + ' · ' : ''}Start ${de(groesse)} · jetzt ${de(istV)}${prozent != null ? ' (' + prozent + ' %)' : ''}${plL != null ? ' = Balance ' + de(bal.val) + ' ' + (plL >= 0 ? '+' : '−') + ' P&L ' + de(Math.abs(plL)) : ''}${tpUsd ? ' · nach TP ' + de(istV + tpUsd) : ''}${slUsd ? ' · nach SL ' + de(istV - slUsd) : ''} · Ziel ${de(ziel)}`
       const idFarb = o.uid ? idFarbe(String(o.uid)) : 'var(--ink)'
       const w = (l, r) => `left:${l.toFixed(1)}%;width:${Math.max(0, r - l).toFixed(1)}%`
+      // FARBVERLAUF (Finn 08.10.2026, Screenshot .1226: „je näher wir zum Passen kommen, umso helleres Grün, … je näher zum Blow, umso
+      // anderes Rot"): die Farbe hängt an der Skala, nicht an der Segmentlänge — --a/--b = Mischanteil des kräftigen Ankers an den beiden
+      // Segment-Enden (Grün: 0 am Start … 100 am Ziel; Rot: 0 am Start … 100 am Liq-Level), gemischt in CSS (color-mix, .pz-bahn2)
+      const mix = (a, b) => `;--a:${Math.round(Math.max(0, Math.min(1, a)) * 100)}%;--b:${Math.round(Math.max(0, Math.min(1, b)) * 100)}%`
+      const gruen = pIst > pStart && pStart < 100 ? mix(0, (pIst - pStart) / (100 - pStart)) : ''
+      const rot = boden != null && verlB > 0 && pStart > 0 ? mix((pStart - pIst) / pStart, 0) : ''
       balHtml = `<span class="pz-bal-t">${typChipHandy}${liveZ}${plL != null ? `<i class="pz-live-pl ${plL >= 0 ? 'plus' : 'minus'}" title="läuft · Live-P&L ${plL >= 0 ? '+' : '−'}${de(Math.abs(plL))} $">●</i>` : ''}${de(istV)}${ziel ? `<em>→</em>${de(ziel)}<span class="pz-rest"> · Rest ${de(Math.max(0, ziel - istV))}</span>` : ' $'}</span>`
         + (mitBahn ? `<i class="pz-bahn pz-bahn2${boden != null ? ' mit-liq' : ''}" title="${escapeHtml(bahnTitel)}">`
           + `<i class="pz-bahn-offen" style="${w(Math.max(pIst, pStart), 100)}"></i>`
-          + (verlB > 0 ? `<i class="pz-bahn-verlust" style="${w(verlL, verlL + verlB)}"></i>` : '')
-          + (pIst > pStart ? `<i class="pz-bahn-ist" style="${w(pStart, pIst)}"></i>` : '')
+          + (verlB > 0 ? `<i class="pz-bahn-verlust${rot ? ' is-verlauf' : ''}" style="${w(verlL, verlL + verlB)}${rot}"></i>` : '')
+          + (pIst > pStart ? `<i class="pz-bahn-ist is-verlauf" style="${w(pStart, pIst)}${gruen}"></i>` : '')
           + (pSl < pIst ? `<i class="pz-bahn-sl" style="${w(pSl, pIst)}"></i>` : '')
           + (pTp > pIst ? `<i class="pz-bahn-tp" style="${w(pIst, pTp)}"></i>` : '')
           + (boden != null ? `<i class="pz-bahn-start" style="left:${pStart.toFixed(1)}%"></i>` : '')
@@ -40894,7 +40905,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1228'
+  const OS_TAB_BUILD = '2026-09-22.1229'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
