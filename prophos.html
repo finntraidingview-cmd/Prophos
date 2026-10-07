@@ -1832,7 +1832,7 @@
   @keyframes tplPuls{0%,100%{opacity:1}50%{opacity:.2}}
   :is(#tpl-view,#adm-pane-planer) .tpl-m .l{display:inline-flex;align-items:baseline;gap:5px;font-variant-numeric:tabular-nums}
   :is(#tpl-view,#adm-pane-planer) .tpl-m .l b{font-weight:600;color:var(--ink)}
-  :is(#tpl-view,#adm-pane-planer) .tpl-m .l em{font-style:normal;font-size:10.5px;color:var(--sub-2)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-m .l b{white-space:nowrap;overflow:visible}
   :is(#tpl-view,#adm-pane-planer) .tpl-m:hover,:is(#tpl-view,#adm-pane-planer) .tpl-m.wahl{z-index:3;box-shadow:0 0 0 2px var(--violet-tint),0 2px 6px rgba(16,24,40,.12)}
   :is(#tpl-view,#adm-pane-planer) .tpl-m.wahl{border-color:var(--violet)}
   :is(#tpl-view,#adm-pane-planer) .tpl-m.beendet,:is(#tpl-view,#adm-pane-planer) .tpl-m.vorbei{opacity:.5} :is(#tpl-view,#adm-pane-planer) .tpl-m.beendet:hover,:is(#tpl-view,#adm-pane-planer) .tpl-m.vorbei:hover,:is(#tpl-view,#adm-pane-planer) .tpl-m.beendet.wahl,:is(#tpl-view,#adm-pane-planer) .tpl-m.vorbei.wahl{opacity:1}
@@ -40735,7 +40735,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1205'
+  const OS_TAB_BUILD = '2026-09-22.1206'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -45903,7 +45903,9 @@
    * dünner Balken von der echten Startzeit bis jetzt. Feste Zeilenhöhe: Marker, die sich überschneiden (< 30 min bzw. näher als die
    * Textbreite), stapeln höchstens zwei Ebenen, danach ein Sammel-Marker „+n" mit Tooltip-Liste. Achse = heutiger Bereich (frühester
    * Start … spätester Start/jetzt, mindestens jetzt ± 1 h, volle Stunden), Stunden als zarte Spalten, Jetzt-Linie. */
-  const TPL_EBENE_Y = [10, 50]   // zwei Marker-Ebenen je Spur — seit 08.10.2026 Spur 96 px, Marker als Pille 24 px (Finn: „Zeitstrahl größer, dicker")
+  // Drei Unterspuren je ID (Nacharbeit 08.10.2026, S3-QA am Stub: Pillen lagen halb übereinander, Labels abgeschnitten): Spur 96 px mit
+  // Pillen à 24 px auf y 6/36/66 (Handy 84 px, Pillen 22 px auf 4/30/56). Wer in keine freie Unterspur passt, landet in „+n".
+  const TPL_EBENE_Y = [6, 36, 66], TPL_EBENE_Y_SCHMAL = [4, 30, 56]
   /* PILLEN STATT KÜRZEL (08.10.2026, Finn: „Diese Kürzel AP, TF, TS, FP sind richtig kacke, ich erkenne das nicht. Mach da was anderes mit mehr
    * Info"): Firmen-Kurzname + Größe („Tradeify 150k", „FNF 150k"); bei Enge Kürzel + Größe („TF 150k"), noch enger nur Kürzel, Rest „+n". */
   function tplFirmaKurz(f){
@@ -45942,9 +45944,14 @@
     const bahnPx = Math.max(720, (rootEl && rootEl.clientWidth) || 0) - nw - 26, pxJeMin = bahnPx / SPAN
     // Enge → Stufe des Pillen-Textes (08.10.2026): voll „Tradeify 150k 09:42" (≈ 128 px) · mittel „TF 150k" (≈ 72 px) · kompakt „TF" (≈ 46 px);
     // Handy höchstens mittel. Cluster (zwei Ebenen, dann „+n") rechnen mit derselben Breite.
-    const px30 = pxJeMin * 30, stufe = (!schmal && px30 >= 64) ? 'voll' : px30 >= 46 ? 'mittel' : 'kompakt'
-    const kompakt = stufe === 'kompakt', markerPx = stufe === 'voll' ? 128 : stufe === 'mittel' ? 72 : 46
-    const breiteMin = Math.max(30, markerPx / pxJeMin)   // Mindestabstand in Minuten, nie unter 30 min
+    // Label-Stufe (Nacharbeit 08.10.2026): voll „Tradeify 150k" · mittel „TF 150k" · kompakt „TF" — Uhrzeit steht nur im Tooltip (die Achse
+    // zeigt sie), nie abschneiden: die Stufe fällt mit der Enge, Handy höchstens mittel. Pillenbreite je Label (≈ 6,6 px je Zeichen + 34 px
+    // für Pfeil und Innenabstand) bestimmt die Unterspur-Belegung in Minuten (+ 4 min Luft).
+    const stufe = (!schmal && pxJeMin >= 1.5) ? 'voll' : pxJeMin >= 0.9 ? 'mittel' : 'kompakt'
+    const EB = schmal ? TPL_EBENE_Y_SCHMAL : TPL_EBENE_Y, barOff = schmal ? 8 : 9
+    const labelVon = t => { const gr = tplGroesseKurz(t); return stufe === 'voll' ? `${tplFirmaKurz(t.firma)}${gr ? ' ' + gr : ''}` : stufe === 'mittel' ? `${apPrKurz(t.firma)}${gr ? ' ' + gr : ''}` : apPrKurz(t.firma) }
+    const pillPx = text => 34 + text.length * (schmal ? 6.2 : 6.6), pillMin = text => pillPx(text) / pxJeMin + 4
+    const kompakt = stufe === 'kompakt', breiteMin = Math.max(20, pillPx('TF 150k') / pxJeMin)   // Cluster-Nähe für „+n" (Tooltip-Liste)
     const raster = []
     for(let h = Math.ceil(VON / 60) * 60; h <= BIS; h += 60) raster.push(`<i style="left:${((h - VON) / SPAN * 100).toFixed(2)}%"></i>`)
     const jetztIn = heute && D.jetzt + v >= VON && D.jetzt + v <= BIS
@@ -45958,24 +45965,33 @@
       t.wert != null ? `Kontowert ${tplEur(t.wert)}` : '', `Einsatz ${t.gehedgt ? 'gehedgt' : t.einsatz != null ? tplEur(t.einsatz) : '—'}`, t.menge != null ? `Größe ${t.menge}` : '',
       [t.tp != null ? 'TP ' + tplUsd(t.tp) : '', t.sl != null ? 'SL ' + tplUsd(t.sl) : ''].filter(Boolean).join(' · '),
       t.stufe || '', t.status === 'beendet' && t.pnl != null ? `Ergebnis ${t.pnl > 0 ? '+' : ''}${tplUsd(t.pnl)}` : ''].filter(Boolean).join('\n')
-    const marker = (t, ebene, mitName) => {
+    // Pille am rechten Rand (Nacharbeit 08.10.2026, Handy: „Fundi", „Tr" abgeschnitten): hängt nach links, sobald sie mit ihrer Pixelbreite
+    // über die Bahn hinausragen würde — nicht erst ab 90 %
+    const rechts = (t, text) => X(t.start) + pillPx(text) / bahnPx * 100 > 99
+    const marker = (t, ebene) => {
       const erg = t.status === 'beendet' && t.pnl != null ? (t.pnl > 0 ? ' erg-gut' : t.pnl < 0 ? ' erg-rot' : ' erg-null') : ''
-      const balken = t.status === 'laeuft' && heute && D.jetzt > t.start ? `<i class="tpl-bar ${t.long ? 'long' : 'short'}" style="left:${X(t.start).toFixed(2)}%;width:${(X(D.jetzt) - X(t.start)).toFixed(2)}%;top:${TPL_EBENE_Y[ebene] + 9}px"></i>` : ''   // Balken mittig hinter der 24-px-Pille (Pille top … top+24, Balken 6 px ab top+9)
-      const gr = tplGroesseKurz(t), text = stufe === 'voll' ? `${tplFirmaKurz(t.firma)}${gr ? ' ' + gr : ''}` : stufe === 'mittel' ? `${apPrKurz(t.firma)}${gr ? ' ' + gr : ''}` : apPrKurz(t.firma)
-      return balken + `<button type="button" class="tpl-m ${t.long ? 'long' : 'short'} ${t.status}${erg}${t.wd ? ' wd' : ''}${_tpl.wahl === t.key ? ' wahl' : ''}${X(t.start) > 90 ? ' rechts' : ''}" style="left:${X(t.start).toFixed(2)}%;top:${TPL_EBENE_Y[ebene]}px" data-tpl-t="${escapeHtml(t.key)}" title="${escapeHtml(titelVon(t))}">
-          <span class="g">${t.status === 'laeuft' ? '<i class="p"></i>' : ''}${t.long ? '▲' : '▼'}</span><span class="l"><b>${escapeHtml(text)}</b>${stufe === 'voll' ? `<em>${tplUhr(t.start, v)}</em>` : ''}</span></button>`
+      const balken = t.status === 'laeuft' && heute && D.jetzt > t.start ? `<i class="tpl-bar ${t.long ? 'long' : 'short'}" style="left:${X(t.start).toFixed(2)}%;width:${(X(D.jetzt) - X(t.start)).toFixed(2)}%;top:${EB[ebene] + barOff}px"></i>` : ''   // Balken mittig hinter der Pille
+      const text = labelVon(t)
+      return balken + `<button type="button" class="tpl-m ${t.long ? 'long' : 'short'} ${t.status}${erg}${t.wd ? ' wd' : ''}${_tpl.wahl === t.key ? ' wahl' : ''}${rechts(t, text) ? ' rechts' : ''}" style="left:${X(t.start).toFixed(2)}%;top:${EB[ebene]}px" data-tpl-t="${escapeHtml(t.key)}" title="${escapeHtml(titelVon(t))}">
+          <span class="g">${t.status === 'laeuft' ? '<i class="p"></i>' : ''}${t.long ? '▲' : '▼'}</span><span class="l"><b>${escapeHtml(text)}</b></span></button>`
     }
     const spurHtml = (z, liste, label) => {
-      // Cluster: Marker, die näher als breiteMin am vorigen liegen, bilden eine Gruppe — 1. Ebene 0, 2. Ebene 1, Rest = „+n"
-      const gruppen = []; let g = null
-      for(const t of liste){ if(g && t.start - g.letzte < breiteMin){ g.items.push(t); g.letzte = t.start } else { g = { items: [t], letzte: t.start }; gruppen.push(g) } }
+      // Unterspuren (Nacharbeit 08.10.2026): jede Pille belegt ihre Breite in Minuten; die erste freie von drei Unterspuren nimmt sie,
+      // sonst wandert sie in ein „+n" (Gruppe benachbarter Reste, Tooltip-Liste). Vorher: zwei Ebenen nach Nähe zum Vorgänger — Pillen
+      // weiter hinten überlappten trotzdem, weil nur der Abstand zum letzten Start zählte, nicht die Pillenbreite.
+      const frei = EB.map(() => -Infinity), rest = []
       let html = ''
+      for(const t of liste){
+        const text = labelVon(t), w = pillMin(text), links = rechts(t, text)   // geklappte Rand-Pille belegt [start − Breite, start]
+        const lane = frei.findIndex(ende => (links ? t.start - w : t.start) >= ende)
+        if(lane < 0){ rest.push(t); continue }
+        frei[lane] = links ? t.start + 2 : t.start + w; html += marker(t, lane)
+      }
+      const gruppen = []; let g = null
+      for(const t of rest){ if(g && t.start - g.letzte < breiteMin){ g.items.push(t); g.letzte = t.start } else { g = { items: [t], letzte: t.start }; gruppen.push(g) } }
       for(const gr of gruppen){
-        gr.items.forEach((t, i) => { if(i < 2) html += marker(t, i, true) })
-        if(gr.items.length > 2){
-          const rest = gr.items.slice(2)
-          html += `<button type="button" class="tpl-m mehr" style="left:${X(rest[0].start).toFixed(2)}%;top:${TPL_EBENE_Y[0]}px" data-tpl-t="${escapeHtml(rest[0].key)}" title="${escapeHtml(rest.map(t => `${t.user} · ${apPrKurz(t.firma)} ${t.long ? '▲' : '▼'} ${tplUhr(t.start, v)} · ${TPL_WORT[t.status] || t.status}`).join('\n'))}"><span class="l">+${rest.length}</span></button>`
-        }
+        const x = X(gr.items[0].start), lane = frei.findIndex(ende => gr.items[0].start >= ende - breiteMin / 2)   // „+n" bevorzugt eine Unterspur mit Luft, sonst die letzte
+        html += `<button type="button" class="tpl-m mehr${x + 40 / bahnPx * 100 > 99 ? ' rechts' : ''}" style="left:${x.toFixed(2)}%;top:${EB[lane < 0 ? EB.length - 1 : lane]}px" data-tpl-t="${escapeHtml(gr.items[0].key)}" title="${escapeHtml(gr.items.map(t => `${t.user} · ${apPrKurz(t.firma)} ${tplGroesseKurz(t)} ${t.long ? '▲' : '▼'} ${tplUhr(t.start, v)} · ${TPL_WORT[t.status] || t.status}`).join('\n'))}"><span class="l">+${gr.items.length}</span></button>`
       }
       return `<div class="tpl-spur${z.sammel ? ' sammel' : ''}" style="--id:${z.uid ? idFarbe(z.uid) : 'var(--sub-2)'}">${label}<div class="tpl-bahn">${html || '<span class="leer">—</span>'}</div></div>`
     }
@@ -46652,13 +46668,19 @@
     if(html === _tpl.htmlAlt && root.firstChild) return
     _tpl.htmlAlt = html
     root.innerHTML = html
-    const sc = root.querySelector('.tpl-scroll')
-    if(sc && sc.scrollWidth > sc.clientWidth + 4){
-      if(scrollX != null && _tpl.tagScroll === _tpl.tag) sc.scrollLeft = scrollX
-      else{ const j = sc.querySelector('.tpl-raster .jetzt'); sc.scrollLeft = j ? Math.max(0, j.getBoundingClientRect().left - sc.getBoundingClientRect().left - sc.clientWidth * .45) : 0 }
-      _tpl.tagScroll = _tpl.tag
-    }
+    // Handy-Scroll (Nacharbeit 08.10.2026, S3-QA: Kasten stand auf 00:00 statt „jetzt − 45 %"): die Position wird nur gemerkt, wenn der Kasten
+    // sichtbar gemessen wurde — ein verdecktes Rendern (Breite 0) hatte vorher scrollLeft 0 festgeschrieben, danach galt „Nutzer-Position"
+    tplScrollJetzt(root, scrollX)
     if(_tpl.edit) setTimeout(() => root.querySelector('[data-tpl-zeit]')?.focus(), 0)
+  }
+  function tplScrollJetzt(root, scrollX){
+    const sc = root && root.querySelector('.tpl-scroll'); if(!sc || sc.clientWidth <= 0 || sc.scrollWidth <= sc.clientWidth + 4) return
+    const rootId = root.id || ''
+    if(scrollX != null && scrollX > 0 && _tpl.tagScroll === _tpl.tag + '|' + rootId){ sc.scrollLeft = scrollX; return }
+    const j = sc.querySelector('.tpl-raster .jetzt'), r = sc.getBoundingClientRect()
+    if(!j || r.width <= 0) return
+    sc.scrollLeft = Math.max(0, j.getBoundingClientRect().left - r.left + sc.scrollLeft - sc.clientWidth * .45)
+    _tpl.tagScroll = _tpl.tag + '|' + rootId
   }
   /* Neu zeichnen nach Daten-Änderung aus Leiste/Delta-Monitor — nur bei offener Seite, nie während eine Startzeit eingegeben wird */
   /* ↻ BALANCE LESEN FÜR FREMDE KONTEN (08.10.2026, Finn am Trade-Planer „Braucht dich", Zeile „Mike · Topstep … keine Balance → Am PC von
@@ -59766,6 +59788,8 @@
     root.innerHTML = apIdsKopfHtml() + apIdsOffenHtml() + `<div class="ap-adm-karte ap-ids-karte">${kopf}<div class="ap-adm-scroll"><table class="wd-tab ap-ids-tab"><thead><tr><th>ID</th><th class="zahl" title="Konten vom Typ Challenge / Phase 1 / Phase 2, nicht archiviert">Konten planbar</th><th class="zahl">geplant (letzter Lauf)</th><th class="zahl">ausgelassen</th><th class="ok" title="im Trade-Planer"></th></tr></thead><tbody>${zeilen || '<tr><td colspan="5" style="color:var(--sub)">keine ID mit planbaren Konten</td></tr>'}</tbody></table></div>
       <div class="ap-adm-fuss">Welche Konten einer ID geplant werden, entscheiden weiter Typ, Firma (Kernwerte), Balance und der Haken je Konto unter Accounts.</div></div>`
     root.querySelector('#ap-ids-neu')?.addEventListener('click', apIdsLaden)
+    try{ if(typeof tplScrollJetzt === 'function'){ const alt = _tpl.tag; _tpl.tag = apIdsTag(); try{ tplScrollJetzt(root, _apIds.scrollX) } finally{ _tpl.tag = alt } } }catch(_){}   // Handy: Kasten auf „jetzt − 45 %" (08.10.2026)
+    root.querySelector('.tpl-scroll')?.addEventListener('scroll', ev => { _apIds.scrollX = ev.currentTarget.scrollLeft })
     root.querySelector('[data-tpl-weitere]')?.addEventListener('click', () => { _apIds.weitereAuf = !_apIds.weitereAuf; apIdsRender() })
     root.querySelectorAll('[data-ap-tag]').forEach(b => b.addEventListener('click', () => { _apIds.tagWahl = b.dataset.apTag; apIdsRender() }))
     root.querySelectorAll('[data-ap-konto],[data-ak-konto]').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); apKontoOeffnen(b.dataset.apKonto || b.dataset.akKonto) }))   // Konto-Spalte der Zeile (planZeileHtml) öffnet das Popup
