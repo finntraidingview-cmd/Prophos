@@ -1865,6 +1865,17 @@
   #dashboard-view .tpl-kasten .tk-liste button:first-child{border-top:0} #dashboard-view .tpl-kasten .tk-liste button:hover{background:var(--surface-tint)}
   #dashboard-view .tpl-kasten .tk-liste span{color:var(--sub);font-size:11.5px;font-variant-numeric:tabular-nums}
   #dashboard-view .tpl-kasten .tk-zurueck{border:0;background:none;color:var(--sub);font:inherit;font-size:12px;cursor:pointer;padding:0 4px 0 0}
+  /* Mini-Popup TP · SL · Größe an der Plan-Zeile (08.10.2026): Zellen dezent klickbar, Kasten = .tpl-kasten mit drei Feldern */
+  #dashboard-view .pz-z > .pz-w{cursor:pointer;border-radius:5px;margin:-2px -5px;padding:2px 5px;transition:background .12s}
+  #dashboard-view .pz-z > .pz-w:hover,#dashboard-view .pz-z > .pz-w.pz-w-an{background:var(--surface-tint);box-shadow:inset 0 0 0 1px var(--border)}
+  #dashboard-view .tpl-kasten.pzw{width:250px}
+  #dashboard-view .pzw-f{display:grid;grid-template-columns:minmax(0,1fr);gap:2px;margin-top:6px}
+  #dashboard-view .pzw-f label{display:grid;grid-template-columns:48px minmax(0,1fr) 34px;align-items:center;gap:8px;margin-top:4px}
+  #dashboard-view .pzw-f label span{color:var(--sub);font-size:12px} #dashboard-view .pzw-f label em{font-style:normal;color:var(--sub);font-size:12px}
+  #dashboard-view .pzw-f input{height:30px;border:1px solid var(--border);border-radius:7px;padding:0 8px;font:inherit;font-size:14px;text-align:right;font-variant-numeric:tabular-nums;background:var(--surface);color:var(--ink);min-width:0}
+  #dashboard-view .pzw-f input:focus{outline:none;border-color:var(--violet);box-shadow:0 0 0 3px var(--violet-tint)}
+  #dashboard-view .pzw-f small{padding-left:56px;font-size:11px;color:var(--sub-2);min-height:13px;font-variant-numeric:tabular-nums}
+  #dashboard-view .pzw-f .tk-akt{align-items:center} #dashboard-view .pzw-f .pzw-tipp{margin-left:auto;font-size:11px;color:var(--sub-2)}
   :is(#tpl-view,#adm-pane-planer) .tpl-netto{position:relative;display:flex;height:50px;border-top:1px solid var(--border-soft)}
   :is(#tpl-view,#adm-pane-planer) .tpl-netto .tpl-name span{padding-left:0}
   :is(#tpl-view,#adm-pane-planer) .tpl-netto .tpl-bahn::before{display:none}
@@ -37082,6 +37093,10 @@
     const gr = !menge ? '–' : p.route === 'mt5v2'
       ? menge.toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 2 }) + ' Lot'
       : menge.toLocaleString('de-DE') + ' ' + escapeHtml(String(p.masterSymbol || '').replace(/[FGHJKMNQUVXZ]\d{1,2}$/, '') || 'Kt')
+    // TP · SL · GRÖSSE ÄNDERN (Finn 08.10.2026: „Wenn ich auf Take Profit, Stop Loss oder Größe draufklicke, soll immer so ein Mini-Popup kommen,
+    // wo ich das anpassen kann"): nur mit o.werte (Aufrufer: noch nicht gestartet + Recht) — Kasten pzwOeffnen, Klick über tplKlick
+    const pzw = o.werte ? ` data-pzw-plan="${escapeHtml(String(p.id))}" data-pzw-tp="${Number(p.masterTp) > 0 ? Number(p.masterTp) : ''}" data-pzw-sl="${Number(p.masterSl) > 0 ? Number(p.masterSl) : ''}" data-pzw-gr="${menge || ''}" data-pzw-lot="${p.route === 'mt5v2' ? '1' : ''}" data-pzw-sym="${escapeHtml(String(p.masterSymbol || '').replace(/[FGHJKMNQUVXZ]\d{1,2}$/, ''))}" data-pzw-ppp="${o.werte.ppp > 0 ? o.werte.ppp : ''}"` : ''
+    const pzwZ = art => pzw ? ` pz-w"${pzw} data-pzw="${art}" title="Klicken zum Ändern"` : '"'
     return `
       <div class="pz-z${p.autoPlan ? '' : ' pz-z-hand'}" data-plan-id="${p.id}">${o.wer ? `
         <span class="pz-wer">${o.wer}</span>` : ''}
@@ -37090,9 +37105,9 @@
         <span class="pz-ri ${p.richtung === 'buy' ? 'is-buy' : p.richtung === 'sell' ? 'is-sell' : ''}">${p.richtung === 'buy' ? '▲ Long' : p.richtung === 'sell' ? '▼ Short' : '–'}</span>
         <span class="pz-bal">${balHtml}</span>
         <span class="pz-art" title="${notiz ? escapeHtml(planSchrittTip(notiz, Number(p.masterTp))) : ''}">${notiz ? escapeHtml(notiz.art) + (notiz.gekappt ? ' · SL gekappt' : '') : ''}</span>
-        <span class="pz-gr">${gr}</span>
-        <span class="pz-tp${p.masterTp > 0 ? '' : ' is-leer'}">${p.masterTp > 0 ? de(p.masterTp) + ' $' : '–'}</span>
-        <span class="pz-sl${p.masterSl > 0 ? '' : ' is-leer'}">${p.masterSl > 0 ? de(p.masterSl) + ' $' : '–'}</span>
+        <span class="pz-gr${pzwZ('gr')}>${gr}</span>
+        <span class="pz-tp${p.masterTp > 0 ? '' : ' is-leer'}${pzwZ('tp')}>${p.masterTp > 0 ? de(p.masterTp) + ' $' : '–'}</span>
+        <span class="pz-sl${p.masterSl > 0 ? '' : ' is-leer'}${pzwZ('sl')}>${p.masterSl > 0 ? de(p.masterSl) + ' $' : '–'}</span>
         <span class="pz-akt">${o.chips || ''}${o.akt || ''}</span>
       </div>`
   }
@@ -41034,7 +41049,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1251'
+  const OS_TAB_BUILD = '2026-09-22.1252'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -47039,7 +47054,10 @@
       const akt = `<button type="button" class="btn btn-ghost icon-btn tc2-ab" data-tpl-zedit="${k}"${t.ohnePlan ? ' disabled' : ''} title="${t.eigen ? 'Bearbeiten' : 'Richtung / Start ändern (Detail)'}">${PLAN_SVG_EDIT}</button>`
         + `<button type="button" class="btn btn-ghost icon-btn tc2-ab" data-tpl-zdel="${k}"${zu || dis} title="${t.eigen ? 'Löschen (5 s Rückgängig)' : 'Vorschlag löschen'}">${PLAN_SVG_DEL}</button>`
         + `<span class="pz-zustand"${darf ? '' : ` title="${escapeHtml(sperre)}"`}>${zustand}</span>`
-      return planZeileHtml(p, konto, { name: p.masterName, ext: konto && konto.externalId ? konto.externalId : (t.ende4 || ''), extTitle: '', chips: '', akt, zeit, bal, notiz, uid: t.user_id, boden: t.boden })
+      // TP/SL/Größe per Mini-Popup nur vor dem Start (offen/bestätigt, nicht geclaimt) und mit Recht; $/Pkt je Einheit aus dem Delta (usd_pro_pkt ÷ Menge)
+      const werte = darf && (t.status === 'offen' || t.status === 'bestaetigt') && !p.startUmGestartetAt && !t.geclaimt
+        ? { ppp: Number(t.usd) > 0 && Number(t.menge) > 0 ? Number(t.usd) / Number(t.menge) : null } : null
+      return planZeileHtml(p, konto, { name: p.masterName, ext: konto && konto.externalId ? konto.externalId : (t.ende4 || ''), extTitle: '', chips: '', akt, zeit, bal, notiz, uid: t.user_id, boden: t.boden, werte })
     }
     // GEPLANT = FIRMEN-BLÖCKE JE ID (Korrektur 08.10.2026, Finn: „ich will NICHT das Design der Admin-Tabelle, sondern das wie bei Trade-Planer →
     // Geplant" — die Firmen-Block-Ansicht vor .1194, „sehr clean"): je ID eine Gruppe (Farbpunkt · Name · n geplant · n offen · „✓ alle n"),
@@ -47403,6 +47421,109 @@
     }
     setTimeout(tick, 300)
   }
+  /* MINI-POPUP TP · SL · GRÖSSE (Finn 08.10.2026, Zeile „13:35 · 150k …9055 · ▼ Short · … · 2 NQ · 3.099 $ · –": „Wenn ich auf Take Profit,
+   * Stop Loss oder Größe draufklicke, soll immer so ein Mini-Popup kommen, wo ich das anpassen kann"). Plan-Zeilen (planZeileHtml mit o.werte)
+   * in Trade-Planer „Geplant" und Admin „Zu bestätigen", nur vor dem Start. EIN Kasten in #dashboard-view in der Optik des Zeitstrahl-Kastens
+   * (.tpl-kasten), eigene Verdrahtung: Enter speichert, Esc/✕/Klick daneben bricht ab; bleibt beim Scrollen an der Zelle (Handy-Tastatur
+   * scrollt/ändert die Größe — Schließen wäre dort ein Wegklicken). Speichern über die Planer-Route POST /admin/auto-plan/plan
+   * {aktion:'werte'} (Backend Slave 1); Antwort {ok, plan:{tp_usd, sl_usd, groesse, einheit}} oder 400 {msg} → Meldung im Kasten. */
+  const _pzw = { el: null, anker: null, busy: false }
+  const pzwZahl = (s, lot) => {   // „3.500" / „3500" / „3.500,5" / „0,25" → Zahl; leer → null; Lot nie mit Tausenderpunkt lesen
+    let v = String(s == null ? '' : s).replace(/[\s$€]/g, ''); if(!v) return null
+    if(v.includes(',')) v = v.replace(/\./g, '').replace(',', '.')
+    else if(!lot && /^\d{1,3}(\.\d{3})+$/.test(v)) v = v.replace(/\./g, '')
+    const n = Number(v); return Number.isFinite(n) ? n : NaN
+  }
+  const pzwDe = (v, d) => Number(v).toLocaleString('de-DE', { minimumFractionDigits: d || 0, maximumFractionDigits: d == null ? 0 : d })
+  function pzwDaten(a){
+    const d = a.dataset, lot = d.pzwLot === '1', sym = String(d.pzwSym || '').toUpperCase()
+    const ppp = Number(d.pzwPpp) > 0 ? Number(d.pzwPpp) : lot ? null : sym === 'MNQ' ? 2 : sym === 'NQ' ? 20 : null   // $ je Punkt und Einheit
+    return { plan: d.pzwPlan, tp: d.pzwTp ? Number(d.pzwTp) : null, sl: d.pzwSl ? Number(d.pzwSl) : null, gr: d.pzwGr ? Number(d.pzwGr) : null,
+      lot, einheit: lot ? 'Lot' : (sym || 'Kt'), ppp }
+  }
+  function pzwZu(){ if(_pzw.el) _pzw.el.hidden = true; if(_pzw.anker) _pzw.anker.classList.remove('pz-w-an'); _pzw.anker = null; _pzw.busy = false }
+  function pzwSetzen(){
+    const el = _pzw.el, a = _pzw.anker; if(!el || !a) return
+    if(!a.isConnected){ pzwZu(); return }   // Zeile neu gezeichnet → Kasten zu
+    const r = a.getBoundingClientRect(); if(!r.width && !r.height){ pzwZu(); return }
+    const w = el.offsetWidth, h = el.offsetHeight, rand = 12
+    const left = Math.max(rand, Math.min(window.innerWidth - rand - w, r.right - w))
+    let top = r.bottom + 6
+    if(top + h > window.innerHeight - rand && r.top - 6 - h >= rand) top = r.top - 6 - h
+    el.style.left = left + 'px'; el.style.top = Math.max(rand, top) + 'px'
+  }
+  function pzwPunkte(){
+    const el = _pzw.el, a = _pzw.anker; if(!el || !a) return
+    const D = pzwDaten(a), f = el.querySelector('form'), gr = pzwZahl(f.gr.value, D.lot)
+    for(const k of ['tp', 'sl']){
+      const v = pzwZahl(f[k].value, false), o = el.querySelector(`[data-pzw-pkt="${k}"]`)
+      o.textContent = D.ppp && gr > 0 && v > 0 ? `≈ ${pzwDe(v / (D.ppp * gr), 1)} Pkt` : ''
+    }
+  }
+  function pzwOeffnen(a){
+    if(_pzw.anker === a && _pzw.el && !_pzw.el.hidden){ pzwZu(); return }
+    if(!_pzw.el){
+      _pzw.el = document.createElement('div'); _pzw.el.className = 'tpl-kasten pzw'; _pzw.el.hidden = true
+      ;(document.getElementById('dashboard-view') || document.body).appendChild(_pzw.el)
+      _pzw.el.addEventListener('click', e => { if(e.target.closest('[data-pzw-x]')) pzwZu() })
+      _pzw.el.addEventListener('input', pzwPunkte)
+      _pzw.el.addEventListener('submit', e => { e.preventDefault(); pzwSpeichern() })
+      _pzw.el.addEventListener('keydown', e => { if(e.key === 'Escape'){ e.stopPropagation(); pzwZu() } })
+      document.addEventListener('keydown', e => { if(e.key === 'Escape' && _pzw.el && !_pzw.el.hidden) pzwZu() })
+      document.addEventListener('pointerdown', e => { if(!_pzw.el || _pzw.el.hidden || _pzw.el.contains(e.target) || (e.target.closest && e.target.closest('[data-pzw]'))) return; pzwZu() }, true)
+      window.addEventListener('scroll', () => { if(_pzw.el && !_pzw.el.hidden) pzwSetzen() }, { passive: true, capture: true })
+      window.addEventListener('resize', () => { if(_pzw.el && !_pzw.el.hidden) pzwSetzen() })
+    }
+    if(_pzw.anker) _pzw.anker.classList.remove('pz-w-an')
+    _pzw.anker = a; _pzw.busy = false; a.classList.add('pz-w-an')
+    const D = pzwDaten(a), feld = a.dataset.pzw
+    const wert = (v, lot) => v == null ? '' : lot ? String(v).replace('.', ',') : String(v)
+    _pzw.el.innerHTML = `<div class="tk-kopf">TP · SL · Größe<button type="button" class="tk-x" data-pzw-x title="Abbrechen (Esc)">✕</button></div>
+      <form class="pzw-f" autocomplete="off">
+        <label><span>TP</span><input name="tp" inputmode="decimal" value="${escapeHtml(wert(D.tp))}"><em>$</em></label><small data-pzw-pkt="tp"></small>
+        <label><span>SL</span><input name="sl" inputmode="decimal" value="${escapeHtml(wert(D.sl))}" placeholder="ohne SL"><em>$</em></label><small data-pzw-pkt="sl"></small>
+        <label><span>Größe</span><input name="gr" inputmode="${D.lot ? 'decimal' : 'numeric'}" value="${escapeHtml(wert(D.gr, D.lot))}"><em>${escapeHtml(D.einheit)}</em></label><small>${D.lot ? '2 Nachkommastellen' : 'ganze Kontrakte'}</small>
+        <div class="tk-hin" data-pzw-msg></div>
+        <div class="tk-akt"><button type="submit" class="btn btn-primary">Speichern</button><button type="button" class="btn btn-ghost" data-pzw-x>Abbrechen</button><span class="pzw-tipp">Enter · Esc</span></div>
+      </form>`
+    _pzw.el.hidden = false; pzwPunkte(); pzwSetzen()
+    const f = _pzw.el.querySelector(`input[name="${feld}"]`); if(f){ f.focus({ preventScroll: true }); f.select() }
+  }
+  async function pzwSpeichern(){
+    const el = _pzw.el, a = _pzw.anker; if(!el || !a || _pzw.busy) return
+    const D = pzwDaten(a), f = el.querySelector('form'), msg = el.querySelector('[data-pzw-msg]')
+    const fehler = t => { msg.textContent = t; msg.classList.add('rot') }
+    const tp = pzwZahl(f.tp.value, false), sl = pzwZahl(f.sl.value, false), gr0 = pzwZahl(f.gr.value, D.lot)
+    if(!(tp > 0)) return fehler('TP muss größer als 0 sein')
+    if(sl !== null && !(sl > 0)) return fehler('SL leer lassen (ohne SL) oder größer als 0')
+    const gr = D.lot ? Math.round(gr0 * 100) / 100 : gr0
+    if(!(gr > 0) || (!D.lot && !Number.isInteger(gr))) return fehler(D.lot ? 'Größe in Lot, z. B. 0,50' : 'Größe in ganzen Kontrakten')
+    _pzw.busy = true; msg.textContent = 'speichert …'; msg.classList.remove('rot'); el.querySelectorAll('button,input').forEach(x => x.disabled = true)
+    try{
+      const d = await apdApi('POST', '/plan', { plan_id: D.plan, aktion: 'werte', tp_usd: tp, sl_usd: sl, groesse: gr })
+      const n = (d && d.plan) || {}, nTp = n.tp_usd != null ? Number(n.tp_usd) : tp, nSl = n.sl_usd !== undefined ? (n.sl_usd == null ? null : Number(n.sl_usd)) : sl
+      const nGr = n.groesse != null ? Number(n.groesse) : gr, einh = n.einheit || D.einheit
+      // Zeile sofort (alle Wurzeln mit diesem Plan), eigenen Plan im Speicher mit; danach lädt die Seite ohnehin neu
+      const grTxt = v => D.lot ? pzwDe(v, 2) + ' Lot' : pzwDe(v) + ' ' + einh
+      document.querySelectorAll(`[data-pzw-plan="${CSS.escape(String(D.plan))}"]`).forEach(z => {
+        z.dataset.pzwTp = nTp; z.dataset.pzwSl = nSl == null ? '' : nSl; z.dataset.pzwGr = nGr
+        if(z.dataset.pzw === 'tp'){ z.textContent = pzwDe(nTp) + ' $'; z.classList.remove('is-leer') }
+        if(z.dataset.pzw === 'sl'){ z.textContent = nSl ? pzwDe(nSl) + ' $' : '–'; z.classList.toggle('is-leer', !nSl) }
+        if(z.dataset.pzw === 'gr') z.textContent = grTxt(nGr)
+      })
+      const pl = (tradePlans || []).find(x => String(x.id) === String(D.plan)); if(pl){ pl.masterTp = nTp; pl.masterSl = nSl; pl.masterContracts = nGr }
+      const teil = []
+      if(nTp !== D.tp) teil.push(`TP ${D.tp ? pzwDe(D.tp) : '–'} → ${pzwDe(nTp)} $`)
+      if(nSl !== D.sl) teil.push(`SL ${D.sl ? pzwDe(D.sl) : 'ohne'} → ${nSl ? pzwDe(nSl) + ' $' : 'ohne'}`)
+      if(nGr !== D.gr) teil.push(`Größe ${D.gr ? grTxt(D.gr) : '–'} → ${grTxt(nGr)}`)
+      if(typeof atToast === 'function') atToast(teil.length ? teil.join(' · ') : 'unverändert', 'start')
+      pzwZu()
+      try{ if(document.querySelector('#tpl-view.active')){ if(typeof apdNachEingriff === 'function') apdNachEingriff() } else if(typeof window._apIdsLaden === 'function') window._apIdsLaden() }catch(_){}
+    }catch(e){
+      _pzw.busy = false; el.querySelectorAll('button,input').forEach(x => x.disabled = false)
+      fehler((e && e.message) || String(e))
+    }
+  }
   /* Startzeiten laufender Trades ALLER IDs aus /admin/live-trades?tage=1&echo=1 (bestehende Radar-Route, Login reicht; 07.10.2026):
    * nur plan_id → {started_at, start_um}, höchstens alle 50 s, Fehler still (dann bleibt „jetzt" mit Hinweis) */
   async function tplLiveLaden(){
@@ -47612,6 +47733,8 @@
   tplRoot?.addEventListener('toggle', e => { const d = e.target.closest('details.tpl-bil-det'); if(d) _tpl.bilanzAuf = d.open }, true)   // Beendet-Tabelle auf/zu merken
   // Ein Klick-Handler für beide Wurzeln (08.10.2026): Trade-Planer-Seite (#tpl-root) und Admin-Reiter (#ap-ids-root, bindet ihn in apIdsRender)
   const tplKlick = e => {
+    const pw = e.target.closest('[data-pzw]')   // Plan-Zeile: TP/SL/Größe → Mini-Popup (08.10.2026)
+    if(pw){ e.stopPropagation(); pzwOeffnen(pw); return }
     const hk = e.target.closest('[data-tpl-haken]')   // Braucht dich: ✓ Planer-Haken setzen (08.10.2026) — wie der Haken in der Accounts-Liste
     if(hk){ hk.disabled = true; hk.textContent = 'setzt …'; accAutoPlanerUmstellen(hk.dataset.tplHaken, true, null).then(() => { _ap.laufAt = 0; return apLetztenHolen() }).catch(() => {}).finally(() => { setTimeout(tplSpaeter, 300) }); return }
     const c = e.target.closest('[data-tpl-id]')   // ID-Chip: Klick auf die gewählte ID oder „Alle" = alle (07.10.2026)
@@ -60560,7 +60683,7 @@
       } else if(art === 'warten'){
         akt = `<span class="pz-zustand"><button type="button" class="btn btn-ghost tc2-btn pz-ok is-ok" data-ap-zur="${escapeHtml(id)}"${unterwegs ? ' disabled' : ''} title="Bestätigt — startet zur Startzeit. Klick schickt den Plan zurück nach „Zu bestätigen“">${unterwegs ? '…' : '↩ zurück'}</button>${fehlHtml}</span>`
       } else akt = '<span class="pz-zustand"><span class="ap-gr-live">● läuft</span></span>'
-      return planZeileHtml(p, konto, { name: p.masterName, ext: (konto && konto.externalId) || z.ende4 || '', extTitle: '', chips: '', akt, zeit, bal, notiz, uid: z.user_id, boden: z.boden ?? t.boden, pl: art === 'laeuft' ? pl : undefined })
+      return planZeileHtml(p, konto, { name: p.masterName, ext: (konto && konto.externalId) || z.ende4 || '', extTitle: '', chips: '', akt, zeit, bal, notiz, uid: z.user_id, boden: z.boden ?? t.boden, pl: art === 'laeuft' ? pl : undefined, werte: art !== 'laeuft' ? { ppp: null } : null })
     }
     for(const p of plaene){ const { z } = jeZ.get(String(p.id)), k = String(z.user_id || '')
       if(!je.has(k)) je.set(k, { uid: k, name: z.user || k.slice(0, 8), plaene: [], live: 0 }); je.get(k).plaene.push(p); if(z.balance_live !== false) je.get(k).live++ }
