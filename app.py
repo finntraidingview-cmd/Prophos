@@ -16822,7 +16822,30 @@ def admin_auto_plan_ids():
     alle = sorted(set(ap_ids_laden(aus)) | set(drin), key=lambda u: namen.get(u, u).lower())
     ids = [{"user_id": u, "name": namen.get(u, u[:8]), "drin": u in drin, "konten": konten.get(u, 0),
             "geplant": gepl.get(u, 0), "ausgelassen": ausg.get(u, 0)} for u in alle]
-    return jsonify({"ok": True, "ids": ids, "aktiv": bool(reg.get("aktiv")), "tag": tag})
+    # ZU BESTÄTIGEN (Finn 08.10.2026): alle unbestätigten Auto-Vorschläge aller IDs, egal welcher Tag (heute/morgen) — das Delta kennt
+    # nur den heutigen Tag, die Nacht plant aber schon den nächsten. Bestätigt wird über /admin/auto-plan/bestaetigen (alle IDs).
+    offen = []
+    try:
+        seit = (datetime.now(timezone.utc) - timedelta(hours=12)).isoformat()
+        pl = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_firm,master_name,richtung,route,start_um,master_contracts,master_tp,master_sl",
+                                     "status": "eq.planned", "auto_plan": "eq.true", "auto_bestaetigt_at": "is.null", "start_um": "gte." + seit,
+                                     "order": "start_um.asc"})
+        pl = [p for p in pl if str(p.get("user_id")) not in aus]
+        acc_ids = sorted({str(p.get("master_account_id")) for p in pl if p.get("master_account_id")})
+        accs = {}
+        for j in range(0, len(acc_ids), 150):
+            for a in _sb_all("accounts", {"select": "id,name,firm,external_id,account_type", "id": "in.(" + ",".join(acc_ids[j:j + 150]) + ")"}):
+                accs[str(a.get("id"))] = a
+        for p in pl:
+            a = accs.get(str(p.get("master_account_id")))
+            offen.append({"plan_id": str(p.get("id")), "user_id": str(p.get("user_id")), "user": namen.get(str(p.get("user_id")), str(p.get("user_id"))[:8]),
+                          "firma": (a or {}).get("firm") or p.get("master_firm"), "konto": (a or {}).get("name") or p.get("master_name"),
+                          "ende4": _ap_ende4(a), "typ": (a or {}).get("account_type"), "richtung": p.get("richtung"), "route": p.get("route"),
+                          "start_um": p.get("start_um"), "menge": _wd_num(p.get("master_contracts")),
+                          "tp": _wd_num(p.get("master_tp")), "sl": _wd_num(p.get("master_sl"))})
+    except Exception as e:
+        print(f"[auto-plan] ⚠️ ids/offen: {type(e).__name__}: {e}", flush=True)
+    return jsonify({"ok": True, "ids": ids, "aktiv": bool(reg.get("aktiv")), "tag": tag, "offen": offen})
 
 
 @app.route("/admin/auto-plan/plan", methods=["POST", "OPTIONS"])
