@@ -3379,21 +3379,18 @@
   /* Balken-Skala Start → Ziel (08.10.2026): Spur grau, Ist satt grün, Potenzial hell, SL dünn rot, Verlust rot links, Marker in ID-Farbe */
   #dashboard-view .pz-bahn.pz-bahn2{position:relative;display:block;height:6px;overflow:visible;background:var(--border)}
   #dashboard-view .pz-bahn2 > i{position:absolute;top:0;bottom:0;left:0;border-radius:3px}
-  /* Skala Liq → Ziel (08.10.2026): links vom Start bleibt die Spur grau (Drawdown-Puffer), Balance → Ziel hell „offen", Start feiner
-     Strich, Potenzial des Trades pulsiert nur in der Deckkraft (rsqCardPulse), SL dünn rot über dem Grün */
-  #dashboard-view .pz-bahn.pz-bahn2 > i.pz-bahn-offen:first-child{background:rgba(21,128,61,.22);z-index:1;border-radius:0 3px 3px 0}   /* vor der :first-child-Regel der alten Bahn */
-  #dashboard-view .pz-bahn2 > .pz-bahn-ist{background:#15803d;z-index:2}
-  #dashboard-view .pz-bahn2 > .pz-bahn-tp{background:rgba(21,128,61,.5);z-index:3;border-radius:0 3px 3px 0;animation:rsqCardPulse 1.8s ease-in-out infinite}
-  #dashboard-view .pz-bahn2 > .pz-bahn-sl{top:2px;bottom:2px;height:auto;background:rgba(185,28,28,.6);z-index:3;border-radius:2px 0 0 2px}
+  /* Ein Verlauf Liq → Ziel (08.10.2026, Finn zu .1229: „immer komplett ausgefüllt, je mehr ins Minus, umso roter"): tiefrot am Liq,
+     hell neutral am Start (--s), leuchtend grün (--good) am Ziel — Rot und Grün mischen nie (kein Braun); direkt neben dem Start-Strich
+     schon ein helles, klares Rot bzw. Grün (--pz-r0/--pz-g0), sonst sieht „satt knapp unter Start" aus wie blass. .pz-v = dieselbe Fläche in drei
+     Lagen: blass, satt (Start ↔ Balance), Potenzial pulsiert (rsqCardPulse, nur Deckkraft); Beschnitt per clip-path aus planZeileHtml */
+  #dashboard-view .pz-bahn.pz-bahn2.pz-bahn3{--pz-r:color-mix(in srgb,#b91c1c 80%,#000);--pz-r0:color-mix(in srgb,var(--danger) 45%,#fff);--pz-n:var(--border-soft);--pz-g0:color-mix(in srgb,var(--good) 40%,#fff);--pz-g:var(--good);background:transparent}
+  #dashboard-view .pz-bahn.pz-bahn2.pz-bahn3 > i.pz-v{left:0;right:0;width:auto;border-radius:3px;background:#15803d;background:linear-gradient(90deg,var(--pz-r) 0%,var(--pz-r0) calc(var(--s) - 1.5%),var(--pz-n) var(--s),var(--pz-g0) calc(var(--s) + 1.5%),var(--pz-g) 100%);opacity:.3;z-index:1}
+  #dashboard-view .pz-bahn.pz-bahn2.pz-bahn3 > i.pz-v.is-satt{opacity:1;z-index:2}
+  #dashboard-view .pz-bahn.pz-bahn2.pz-bahn3 > i.pz-v.is-tp{opacity:1;z-index:2;animation:rsqCardPulse 1.8s ease-in-out infinite}
   #dashboard-view .pz-bahn2 > .pz-bahn-verlust{background:#b91c1c;z-index:2}
-  /* Farbverlauf nach Skalenposition (08.10.2026): Grün gedeckt am Start → hell/kräftig (--good) am Ziel, Rot gedämpft am Start → tief am
-     Liq-Level. --a/--b setzt planZeileHtml je Segment-Ende; ohne color-mix bleibt die Vollfarbe oben stehen */
-  #dashboard-view .pz-bahn2{--pz-g0:color-mix(in srgb,#15803d 72%,var(--sub));--pz-g1:var(--good);--pz-r0:color-mix(in srgb,var(--danger) 55%,var(--border));--pz-r1:color-mix(in srgb,#b91c1c 78%,#000)}
-  #dashboard-view .pz-bahn2 > .pz-bahn-ist.is-verlauf{background-image:linear-gradient(90deg,color-mix(in srgb,var(--pz-g1) var(--a),var(--pz-g0)),color-mix(in srgb,var(--pz-g1) var(--b),var(--pz-g0)))}
-  #dashboard-view .pz-bahn2 > .pz-bahn-verlust.is-verlauf{background-image:linear-gradient(90deg,color-mix(in srgb,var(--pz-r1) var(--a),var(--pz-r0)),color-mix(in srgb,var(--pz-r1) var(--b),var(--pz-r0)))}
   #dashboard-view .pz-bahn2 > .pz-bahn-start{top:-2px;bottom:-2px;height:auto;width:2px;margin-left:-1px;border-radius:1px;background:var(--ink-2);z-index:3}
   #dashboard-view .pz-bahn2 > .pz-bahn-pkt{position:absolute;top:50%;width:10px;height:10px;border-radius:50%;transform:translate(-50%,-50%);box-shadow:0 0 0 2px var(--surface);z-index:4}
-  @media (prefers-reduced-motion:reduce){#dashboard-view .pz-bahn2 > .pz-bahn-tp{animation:none}}
+  @media (prefers-reduced-motion:reduce){#dashboard-view .pz-bahn.pz-bahn2.pz-bahn3 > i.pz-v.is-tp{animation:none}}
   /* ID-Hierarchie (08.10.2026): Karte je ID mit Rand in ID-Farbe, großer sticky Kopf, Firmen-Kopf darunter 13 px grau */
   #dashboard-view .ap-id-karte{border-left:3px solid var(--id,var(--border));padding:0 0 4px 14px;margin:0 0 18px}
   #dashboard-view .ap-id-karte > .ap-adm-grp{position:sticky;top:0;z-index:4;background:var(--surface);padding:10px 0 8px;margin-top:0;border-top:0}
@@ -36972,27 +36969,25 @@
       const tpUsd = Number(p.masterTp) > 0 ? Number(p.masterTp) : 0, slUsd = Number(p.masterSl) > 0 ? Number(p.masterSl) : 0
       const pIst = mitBahn ? pct(istV) : 0, pTp = mitBahn && tpUsd ? pct(Math.min(ziel, istV + tpUsd)) : pIst
       const pStart = mitBahn ? pct(groesse) : 0
-      // im Minus: mit Boden Balance → Start rot; ohne Boden (Start = linker Rand) wie bisher ein roter Mini-Anteil, höchstens 12 %
-      const verlL = boden != null ? pIst : 0
-      const verlB = !mitBahn || istV >= groesse ? 0 : boden != null ? pStart - pIst : Math.min(12, (groesse - istV) / sp * 100)
-      const pSl = mitBahn && slUsd ? pct(istV - slUsd) : pIst
+      // EIN VERLAUF ÜBER DIE GANZE SPUR (Finn 08.10.2026 zu .1229: „dieser rote Strich ins Minus ist ganz komisch … mach den Balken einfach
+      // immer komplett ausgefüllt, aber je mehr es ins Minus geht, umso roter, mit diesem Farbverlauf"; im Screenshot war das Minus braun,
+      // weil Rot mit Grün/Grau gemischt wurde): Liq tiefrot → Start hell neutral (--s) → Ziel leuchtend grün, Rot und Grün treffen sich
+      // nie direkt. Drei Lagen mit demselben Verlauf über die volle Breite: blass (ganze Spur), satt zwischen Start und Balance, Potenzial
+      // des Trades (Balance → + TP, am Ziel gedeckelt) pulsiert — per clip-path beschnitten, damit die Farbe an der Skala hängt.
+      // SL nur noch im Tooltip. Ohne Boden (Start = linker Rand) bleibt im Minus der rote Mini-Anteil, höchstens 12 %.
+      const verlB = mitBahn && boden == null && istV < groesse ? Math.min(12, (groesse - istV) / sp * 100) : 0
       const prozent = mitBahn ? Math.round((istV - groesse) / (ziel - groesse) * 100) : null
       const bahnTitel = `${boden != null ? 'Liq ' + de(boden) + ' · ' : ''}Start ${de(groesse)} · jetzt ${de(istV)}${prozent != null ? ' (' + prozent + ' %)' : ''}${plL != null ? ' = Balance ' + de(bal.val) + ' ' + (plL >= 0 ? '+' : '−') + ' P&L ' + de(Math.abs(plL)) : ''}${tpUsd ? ' · nach TP ' + de(istV + tpUsd) : ''}${slUsd ? ' · nach SL ' + de(istV - slUsd) : ''} · Ziel ${de(ziel)}`
       const idFarb = o.uid ? idFarbe(String(o.uid)) : 'var(--ink)'
-      const w = (l, r) => `left:${l.toFixed(1)}%;width:${Math.max(0, r - l).toFixed(1)}%`
-      // FARBVERLAUF (Finn 08.10.2026, Screenshot .1226: „je näher wir zum Passen kommen, umso helleres Grün, … je näher zum Blow, umso
-      // anderes Rot"): die Farbe hängt an der Skala, nicht an der Segmentlänge — --a/--b = Mischanteil des kräftigen Ankers an den beiden
-      // Segment-Enden (Grün: 0 am Start … 100 am Ziel; Rot: 0 am Start … 100 am Liq-Level), gemischt in CSS (color-mix, .pz-bahn2)
-      const mix = (a, b) => `;--a:${Math.round(Math.max(0, Math.min(1, a)) * 100)}%;--b:${Math.round(Math.max(0, Math.min(1, b)) * 100)}%`
-      const gruen = pIst > pStart && pStart < 100 ? mix(0, (pIst - pStart) / (100 - pStart)) : ''
-      const rot = boden != null && verlB > 0 && pStart > 0 ? mix((pStart - pIst) / pStart, 0) : ''
+      const clip = (l, r) => `clip-path:inset(0 ${(100 - Math.min(100, r)).toFixed(1)}% 0 ${Math.max(0, l).toFixed(1)}%)`
+      // im Minus deckt das Potenzial den Anfang der satten Fläche ab → satt erst ab dem TP, so pulsiert der Abschnitt sichtbar
+      const sattL = pIst < pStart ? Math.min(pTp, pStart) : pStart, sattR = Math.max(pIst, pStart)
       balHtml = `<span class="pz-bal-t">${typChipHandy}${liveZ}${plL != null ? `<i class="pz-live-pl ${plL >= 0 ? 'plus' : 'minus'}" title="läuft · Live-P&L ${plL >= 0 ? '+' : '−'}${de(Math.abs(plL))} $">●</i>` : ''}${de(istV)}${ziel ? `<em>→</em>${de(ziel)}<span class="pz-rest"> · Rest ${de(Math.max(0, ziel - istV))}</span>` : ' $'}</span>`
-        + (mitBahn ? `<i class="pz-bahn pz-bahn2${boden != null ? ' mit-liq' : ''}" title="${escapeHtml(bahnTitel)}">`
-          + `<i class="pz-bahn-offen" style="${w(Math.max(pIst, pStart), 100)}"></i>`
-          + (verlB > 0 ? `<i class="pz-bahn-verlust${rot ? ' is-verlauf' : ''}" style="${w(verlL, verlL + verlB)}${rot}"></i>` : '')
-          + (pIst > pStart ? `<i class="pz-bahn-ist is-verlauf" style="${w(pStart, pIst)}${gruen}"></i>` : '')
-          + (pSl < pIst ? `<i class="pz-bahn-sl" style="${w(pSl, pIst)}"></i>` : '')
-          + (pTp > pIst ? `<i class="pz-bahn-tp" style="${w(pIst, pTp)}"></i>` : '')
+        + (mitBahn ? `<i class="pz-bahn pz-bahn2 pz-bahn3${boden != null ? ' mit-liq' : ''}" style="--s:${pStart.toFixed(1)}%" title="${escapeHtml(bahnTitel)}">`
+          + `<i class="pz-v"></i>`
+          + (sattR > sattL ? `<i class="pz-v is-satt" style="${clip(sattL, sattR)}"></i>` : '')
+          + (pTp > pIst ? `<i class="pz-v is-tp" style="${clip(pIst, pTp)}"></i>` : '')
+          + (verlB > 0 ? `<i class="pz-bahn-verlust" style="width:${verlB.toFixed(1)}%"></i>` : '')
           + (boden != null ? `<i class="pz-bahn-start" style="left:${pStart.toFixed(1)}%"></i>` : '')
           + `<b class="pz-bahn-pkt" style="left:${pIst.toFixed(1)}%;background:${idFarb}"></b></i>` : '')
     } else if(notiz && (notiz.ziel || notiz.rest)){
@@ -40968,7 +40963,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1236'
+  const OS_TAB_BUILD = '2026-09-22.1237'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
