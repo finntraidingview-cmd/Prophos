@@ -4419,7 +4419,21 @@ def test_cdp_konto_weg():
         and q_km.count("_cdp_tradovate_verbinden(") == 1 and q_ks.index("_cdp_ziel_im_text(s, ext) if n == 0") < q_ks.index('"Konto-Liste schließen"'),
         "konto_weg nur nach zwei gleichen Befunden; Probe vor dem Esc")
     for m in (ob.modus_tvlesen_cdp, ob.modus_tvkette_cdp, ob.modus_tvclose_cdp):
-        chk('**{k: v for k, v in extra.items() if k != "konto_aktiv"}' in _i.getsource(m), f"{m.__name__}: Code, retry_ok und Zähler reisen ins Ergebnis")
+        chk("**cdp_konto_ergebnis_extra(extra, st)" in _i.getsource(m) and 'k != "konto_aktiv"' not in _i.getsource(m), f"{m.__name__}: Code, retry_ok, Zähler und Konto-Befund reisen ins Ergebnis")
+    # KONTO-BEFUND INS ERGEBNIS (08.10.2026): gekürzt, konto_stand/konto_aktiv raus, login_aktiv/liste_voll_grund/gescrollt dabei
+    KE = ob.cdp_konto_ergebnis_extra
+    viele = [("K%02d" % i) + "X" * 70 for i in range(45)]
+    ko_ = {"aktiv": "PAAPEX0000000000001USD", "liste_voll_grund": "Container scrollt (900 > 300)", "liste_offen": True, "liste_voll": False, "liste_kurz": False,
+           "eintraege": [{"text": t} for t in viele]}
+    k1_ = KE({"konto_treffer": None, "konto_aktiv": "x", "konto_stand": ko_, "ziel_im_text": False, "gleicher_login": {"user": "000000", "konten": 45, "gescrollt": 5}}, {})
+    chk(len(k1_["konto_eintraege"]) == 40 and all(len(x) == 40 for x in k1_["konto_eintraege"]) and k1_["konto_eintraege"][0].startswith("K00")
+        and "konto_stand" not in k1_ and "konto_aktiv" not in k1_ and k1_["login_aktiv"] == "PAAPEX0000000000001USD" and k1_["liste_voll_grund"] == "Container scrollt (900 > 300)"
+        and k1_["gescrollt"] == 5 and k1_["liste_offen"] is True and k1_["liste_voll"] is False and k1_["konto_treffer"] is None and k1_["ziel_im_text"] is False,
+        f"Konto-Befund: 45×71 → 40×40, Stand raus, Login/Grund/gescrollt dabei, Rest unverändert ({ {k: (v if k != 'konto_eintraege' else len(v)) for k, v in k1_.items()} })")
+    k2_ = KE({"konto_eintraege": ["A1USD", "", None, "B2USD"], "liste_aktiv": "TDFYSL150300000000USD", "retry_ok": False}, {"konto": {"aktiv": "ignoriert", "liste_voll_grund": "x"}})
+    chk(k2_["konto_eintraege"] == ["A1USD", "B2USD"] and k2_["login_aktiv"] == "TDFYSL150300000000USD" and k2_["liste_voll_grund"] == "x" and k2_["gescrollt"] == 0 and k2_["retry_ok"] is False
+        and KE(None, None) == {"konto_eintraege": [], "liste_voll_grund": "", "login_aktiv": "", "gescrollt": 0} and KE({"konto_eintraege": []}, {"konto": {"eintraege": [{"text": "Z9USD"}]}})["konto_eintraege"] == ["Z9USD"],
+        f"Konto-Befund: eigene Einträge vor dem Stand, liste_aktiv vor aktiv, leer/None sicher ({k2_})")
     if ok:
         print("✓ Konto weg: eigener Code nur nach eigenem Formular-Login + zwei gleichen Befunden + Ziel nirgends im Text; sonst alles wie bisher")
     return ok

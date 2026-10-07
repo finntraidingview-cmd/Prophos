@@ -23527,6 +23527,31 @@
     return !pc || (typeof mt5FleetPcId === 'function' && pc === mt5FleetPcId())
   }
   // JSON-Objekt für die DB kappen (Befund ≤ 2 kB kommt schon so vom Bot — hier nur die Sicherung)
+  /* KONTO-BEFUND PERSISTIEREN (08.10.2026, Auftrag Master an Slave-Terminal 3): bei konto_nicht_erreicht/konto_weg liefert der Bot seit
+   * .1188 die gelesenen Listen-Einträge (≤ 40 × 40), liste_voll_grund, login_aktiv, gescrollt — Fall „0× auch nach dem Tradovate-Login"
+   * war ohne sie nicht beweisbar. REIN RECHNEND: aus dem Bot-Ergebnis r die Felder ziehen → Objekt für order_signale.ergebnis.extra
+   * (null, wenn nichts davon da ist) bzw. kurzer Text (≤ 300) für Meldungen ohne JSON-Feld (sfMelden → puls_fehlstarts.msg). */
+  function tvPulsKontoBefund(r){
+    if(!r || typeof r !== 'object') return null
+    const hat = ['konto_eintraege', 'liste_voll_grund', 'login_aktiv', 'gescrollt', 'konto_treffer', 'ziel_im_text', 'gleicher_login', 'konten_im_login', 'ziel_nach_scrollen', 'liste_offen', 'liste_voll', 'liste_kurz']
+      .filter(k => r[k] !== undefined && r[k] !== null)
+    if(!hat.length) return null
+    const o = {}
+    for(const k of hat) o[k] = k === 'konto_eintraege' ? (Array.isArray(r[k]) ? r[k].slice(0, 40).map(x => String(x).slice(0, 40)) : []) : r[k]
+    if(typeof o.login_aktiv === 'string') o.login_aktiv = o.login_aktiv.slice(0, 80)
+    if(typeof o.liste_voll_grund === 'string') o.liste_voll_grund = o.liste_voll_grund.slice(0, 80)
+    return o
+  }
+  function tvPulsKontoBefundText(b){
+    if(!b) return ''
+    const e = Array.isArray(b.konto_eintraege) ? b.konto_eintraege : []
+    const teile = [`Liste ${e.length}: ${e.slice(0, 8).map(x => String(x).slice(-10)).join(',')}${e.length > 8 ? ',…' : ''}`]
+    if(b.login_aktiv) teile.push('aktiv ' + String(b.login_aktiv).slice(-12))
+    if(b.liste_voll_grund) teile.push('unvollständig: ' + String(b.liste_voll_grund).slice(0, 60))
+    if(b.gescrollt) teile.push('gescrollt ' + b.gescrollt + '×')
+    if(b.ziel_nach_scrollen) teile.push('Ziel nach Scrollen ' + b.ziel_nach_scrollen + '×')
+    return (' [' + teile.join(' · ') + ']').slice(0, 300)
+  }
   function tvJsonKurz(o, max){
     if(o == null) return null
     try{ const t = JSON.stringify(o); return t.length <= max ? o : { gekuerzt: true, text: t.slice(0, Math.max(0, max - 40)) } }catch(_){ return null }
@@ -23726,7 +23751,9 @@
         // Login-Bremse: beim zweiten Login-/Verbindungsfehler einmal deutlich sagen, dass Puls jetzt nicht mehr von selbst liest
         if(patch.puls_login_fehler === TV_ENDLESUNG_LOGIN_MAX && typeof atToast === 'function') atToast(`⚠ ${name}: Puls kam ${TV_ENDLESUNG_LOGIN_MAX}× nicht durch den Login/die Verbindung (${patch.puls_login_code}) — Login am PC prüfen, dann „Jetzt lesen"`, 'end')
         try{ renderTradePlans() }catch(_){}
-        return { ok: false, msg: `Versuch ${versuch}: ${erg.fehler}${exitTxt}` }
+        // ergebnis unverkürzt genug (08.10.2026): trail + Konto-Befund mit ins Signal — nicht schritt/code, die View puls_fehler_ereignisse
+        // nimmt schritt sonst statt „endlesung" (Muster-Namen blieben sonst nicht vergleichbar)
+        return { ok: false, msg: `Versuch ${versuch}: ${erg.fehler}${exitTxt}`, trail: String((r && r.trail) || '').slice(0, 2000) || null, extra: tvPulsKontoBefund(r) }
       }
       const { m, res } = await tvV2MasterPlAusBalance(pid, p1, fin0, neu)
       let msg = erg.balance != null ? `Balance ${erg.balance}${exitTxt}` : `Today's P&L ${erg.today}${exitTxt}`
@@ -40588,7 +40615,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1189'
+  const OS_TAB_BUILD = '2026-09-22.1190'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -40883,7 +40910,9 @@
       if(!fern && pv2 && opts && opts.vonStartUm){
         const unk = !!(r && r.retry_ok === false) || /UNKLAR/.test(String(text))
         const schritt = unk ? 'unklar' : String((r && (r.schritt || r.code)) || (/nicht erreichbar|Backend/i.test(String(text)) ? 'pc' : 'puls'))
-        try{ await sfMelden(plan, { schritt, msg: String(text).replace(/\s+/g, ' '), unklar: unk }) }catch(e){ console.warn('[start-fehler] orbit', (e && e.message) || e) }
+        // Konto-Befund (08.10.2026): puls_fehlstarts hat kein JSON-Feld → kurz an msg (sfMelden kappt bei 400)
+        const kb = (typeof tvPulsKontoBefund === 'function') ? tvPulsKontoBefundText(tvPulsKontoBefund(r)) : ''
+        try{ await sfMelden(plan, { schritt, msg: (String(text).replace(/\s+/g, ' ') + kb).slice(0, 400), unklar: unk }) }catch(e){ console.warn('[start-fehler] orbit', (e && e.message) || e) }
       }
       // Diagnose mitschicken (23.09.2026, Moritz-PC: der Dump lag nur auf dem PC, vom Mac
       // aus war 'steht dort eine Fehlermeldung?' nicht zu beantworten) — per SQL lesbar.
@@ -41130,7 +41159,8 @@
             params: { aktion: 'orbit', lokal: true, orbit: { symbol, richtung: dir, volumen: lots, tp_usd: tp > 0 ? tp : null, sl_usd: (tp > 0 && sl > 0) ? sl : null } },
             ergebnis: { ok: !!(r && r.ok), gesendet: !!(r && r.gesendet), schritt: r && r.schritt, msg: r && (r.msg || r.error), trail: r && r.trail,
               code: (r && r.code) || null, unklar: !!(r && r.unklar), warnung: (r && r.warnung) || null,
-              einstieg: (r && r.einstieg) || null, einstieg_quelle: (r && r.einstieg_quelle) || null, tp_limit: (r && r.tp_limit) || null, tp_limit_quelle: (r && r.tp_limit_quelle) || null, sl_limit: (r && r.sl_limit) || null, sl_limit_quelle: (r && r.sl_limit_quelle) || null, order_klick_ms: (r && r.order_klick_ms) || null, meldung_roh: (r && Array.isArray(r.meldung_roh)) ? r.meldung_roh.slice(0, 14) : null } })   // Fill-Nachweis (28.09.2026); SL-Limit seit 29.09.2026 — der neue Puls liest nach „Show more“ Fill, TP UND SL exakt (Radar spiegelt 1:1)
+              einstieg: (r && r.einstieg) || null, einstieg_quelle: (r && r.einstieg_quelle) || null, tp_limit: (r && r.tp_limit) || null, tp_limit_quelle: (r && r.tp_limit_quelle) || null, sl_limit: (r && r.sl_limit) || null, sl_limit_quelle: (r && r.sl_limit_quelle) || null, order_klick_ms: (r && r.order_klick_ms) || null, meldung_roh: (r && Array.isArray(r.meldung_roh)) ? r.meldung_roh.slice(0, 14) : null,
+              extra: (typeof tvPulsKontoBefund === 'function') ? tvPulsKontoBefund(r) : null } })   // Konto-Befund (08.10.2026) · Fill-Nachweis (28.09.2026); SL-Limit seit 29.09.2026 — der neue Puls liest nach „Show more“ Fill, TP UND SL exakt (Radar spiegelt 1:1)
         }catch(_){}
       }
       // ORBIT V2 (24.09.2026 nachts): direkt nach dem bewiesenen Klick liest Puls einmal Today's P&L als

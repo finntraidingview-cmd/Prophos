@@ -18338,7 +18338,7 @@ def modus_tvlesen_cdp(cmd):
         s = sitz[0]                                          # der Auto-Login tauscht den Tab → neue Sitzung
         res.update({k: v for k, v in extra.items() if k == "konto_aktiv"})
         if not ok:
-            return raus(code, msg, "konto", **{k: v for k, v in extra.items() if k != "konto_aktiv"})
+            return raus(code, msg, "konto", **cdp_konto_ergebnis_extra(extra, st))   # Konto-Befund gekürzt ins Ergebnis (08.10.2026)
         _warte(0.6, 0.3)
         st = s.stand(opts)
         summary = cdp_summary(st.get("konto_summary"))
@@ -19154,7 +19154,7 @@ def modus_tvkette_cdp(cmd):
         s = sitz[0]                                          # der Auto-Login tauscht den Tab → neue Sitzung
         res.update({k: v for k, v in extra.items() if k == "konto_aktiv"})
         if not ok:
-            return raus(code, msg, "konto", **{k: v for k, v in extra.items() if k != "konto_aktiv"})
+            return raus(code, msg, "konto", **cdp_konto_ergebnis_extra(extra, st))   # Konto-Befund gekürzt ins Ergebnis (08.10.2026)
         if not symbol:
             res["ok"] = True
             return raus("", f"Richtiges Konto ist aktiv ({res['konto_aktiv'][:60]}).", "konto")
@@ -19502,7 +19502,7 @@ def modus_tvclose_cdp(cmd):
         s = sitz[0]
         res.update({k: v for k, v in extra.items() if k == "konto_aktiv"})
         if not ok:
-            return raus(code, msg + " — nichts geklickt.", "konto", **{k: v for k, v in extra.items() if k != "konto_aktiv"})
+            return raus(code, msg + " — nichts geklickt.", "konto", **cdp_konto_ergebnis_extra(extra, st))   # Konto-Befund (08.10.2026)
         _cdp_reiter(s, "positions", trail)
         # Vorher: flach nur mit zwei Lesungen bei sichtbarer Tabelle; eine Zeile der Wurzel (ggf. nur diese Seite) zählt sofort
         vorher, n_flach, sichtbar = [], 0, False
@@ -20725,6 +20725,41 @@ def _cdp_liste_scrollen(s, ext, trail, max_schritte=CDP_SCROLL_SCHRITTE_MAX):
     trail.append(f"Konto-Liste gescrollt: {aus['schritte']} Abschnitt(e), {len(aus['zeilen'])} Konten ({aus['dupl']} doppelt aus der Überlappung), "
                  + ("Ende erreicht" if aus["ende"] else f"KEIN Ende ({aus['grund']})") + f", scrollTop {p0[0]}→{p1[0]} von {p1[2]}, Ziel {aus['ziel_n']}×")
     return aus
+
+
+# KONTO-BEFUND INS ERGEBNIS (08.10.2026, Auftrag Master an Slave-Terminal 3 „Endlesung persistiert konto_eintraege + liste_voll_grund"):
+# Fall „Konto … steht im Dropdown 0× — auch nach dem Tradovate-Login" (05./06.10., zwei PCs) war nicht beweisbar, weil der Listeninhalt
+# des Konto-Schritts nirgends lag — Endlesungs-Signale trugen nur msg, der Orbit-Start nur eine Feld-Auswahl. Jetzt reist der Befund
+# bei jedem konto_nicht_erreicht/konto_weg (Lesung, Order, Schließen) gekürzt als Felder im Bot-Ergebnis mit; der PC-Tab schreibt sie in
+# order_signale.ergebnis.extra. Keine Logikänderung am Konto-Schritt selbst.
+KONTO_BEFUND_N, KONTO_BEFUND_LEN = 40, 40
+
+
+def cdp_konto_ergebnis_extra(extra, st=None):
+    """REIN RECHNEND (testbar): extra des Konto-Schritts → Felder fürs Ergebnis. Entfernt konto_aktiv (steht schon im Ergebnis) und den
+    rohen konto_stand; liefert konto_eintraege (≤ 40 × 40 Zeichen, aus extra bzw. dem Stand), liste_voll_grund, login_aktiv (≤ 80),
+    gescrollt (aus extra bzw. gleicher_login), liste_offen/liste_voll/liste_kurz. Alles Übrige (konto_treffer, ziel_im_text,
+    gleicher_login, konten_im_login, retry_ok, popups, …) bleibt wie bisher."""
+    e = dict(extra) if isinstance(extra, dict) else {}
+    ko = e.pop("konto_stand", None)
+    e.pop("konto_aktiv", None)
+    if not isinstance(ko, dict):
+        ko = (st.get("konto") if isinstance(st, dict) and isinstance(st.get("konto"), dict) else {}) or {}
+    roh = e.get("konto_eintraege")
+    if not isinstance(roh, list) or not roh:
+        roh = [x.get("text") if isinstance(x, dict) else x for x in (ko.get("eintraege") or [])]
+    e["konto_eintraege"] = [str(x)[:KONTO_BEFUND_LEN] for x in roh if str(x or "").strip()][:KONTO_BEFUND_N]
+    e["liste_voll_grund"] = str(e.get("liste_voll_grund") or ko.get("liste_voll_grund") or "")[:80]
+    e["login_aktiv"] = str(e.get("liste_aktiv") or ko.get("aktiv") or "")[:80]
+    gl = e.get("gleicher_login") if isinstance(e.get("gleicher_login"), dict) else {}
+    try:
+        e["gescrollt"] = int(e.get("gescrollt") or gl.get("gescrollt") or 0)
+    except (TypeError, ValueError):
+        e["gescrollt"] = 0
+    for k in ("liste_offen", "liste_voll", "liste_kurz"):
+        if k not in e and k in ko:
+            e[k] = bool(ko.get(k))
+    return e
 
 
 def cdp_konto_weg_gleicher_login(extra, ext):
