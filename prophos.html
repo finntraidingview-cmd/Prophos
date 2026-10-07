@@ -7812,7 +7812,7 @@
                  max. 5 Zeilen, schmal (Finn: „nur die Orders von dem Account, zu groß"). Gefüllt von tpLetzteOrdersRender. -->
             <div class="field" id="tp-letzte-orders" style="grid-column:span 2;display:none">
               <div style="padding:5px 10px;border-radius:8px;border:1px solid var(--border-soft)">
-                <span style="font-size:10.5px;color:var(--sub);text-transform:uppercase;letter-spacing:.06em">Letzte Orders</span>
+                <span style="font-size:10.5px;color:var(--sub);text-transform:uppercase;letter-spacing:.06em">Letzte Orders</span><span id="tp-letzte-orders-zahl" style="font-size:10.5px;font-weight:600;font-family:var(--mono)"></span>
                 <div id="tp-letzte-orders-liste" style="margin-top:1px;font-size:11.5px;line-height:1.3"></div>
               </div>
             </div>
@@ -39071,9 +39071,10 @@
     // Kompass-Feld + Richtungs-Vorwahl (23.09.2026): lädt asynchron, würfelt nur bei neuem Plan ohne Richtung.
     v2zeig('tp-kompass-box', v2, true)
     if(typeof tpV2KompassVorwahl === 'function') tpV2KompassVorwahl()
-    // Letzte Orders (29.09.2026): direkt unter dem Kompass, gleiche Sichtbarkeit
-    v2zeig('tp-letzte-orders', v2, true)
-    if(v2) try{ tpLetzteOrdersRender() }catch(_){}
+    // Letzte Orders (29.09.2026): direkt unter dem Kompass. Seit 07.10.2026 auf JEDEM Weg (Finn: „bei Echo, Orbit, Winning Days,
+    // Topstep, Duplikum sehe ich immer noch nichts") — bis dahin hing die Box an v2 und fehlte auf Echo/Topstep/Duplikum (Puls).
+    v2zeig('tp-letzte-orders', true, true)
+    try{ tpLetzteOrdersRender() }catch(_){}
     // Winning Days Farm (24.09.2026 spät): Faktor-Feld mit TP/SL-Vorschau nur auf diesem Weg
     v2zeig('tp-wd-hedge-row', false, true)   // „Kein Stop Loss / Notfall-SL Fusion“ aus (01.10.2026, Finn: „die Information weiß man, kann man weglassen“)
     if(wdAn){ tpWdSlaveRiskVorbelegen(); tpWdVorschau() }
@@ -39174,27 +39175,41 @@
    * ist zu groß"): nur master_account_id == Auswahl in #tp-master, höchstens 5 Zeilen, ohne Konto-Spalte, Status nur wenn
    * nicht erledigt. Neu gerendert beim Öffnen, beim Wegwechsel und beim Master-Wechsel (eigener change-Listener unten).
    * Reine Anzeige — keine Bewertung, keine Sperre (die macht allein tpV2RichtungSchutz). */
+  /* Seit 07.10.2026 (Finn: „cleanes Feld — von jedem letzten Order immer Buy oder Sell sehen, wenn ich einen Trade plane, pro
+   * Account; früher waren immer Leerdaten dabei"): nur Pläne MIT Richtung (buy/sell) — Duplikum (manuell) hat nie eine erfasst
+   * (304 von 304 Plänen der letzten 30 Tage leer), die „—"-Zeilen fallen weg statt Plätze zu belegen. Konto samt Vorgänger-Kette
+   * (tpOrderKettenIds, wie im Order-Popup): Phase 2 zeigt die Phase-1-Orders mit, bis eigene nachrücken. Kopf zählt L/S der
+   * gezeigten Zeilen — reine Anzeige. */
   function tpLetzteOrdersRender(){
     const el = document.getElementById('tp-letzte-orders-liste')
     if(!el) return
+    const kopf = document.getElementById('tp-letzte-orders-zahl')
     const master = String(document.getElementById('tp-master')?.value || '')
+    const kette = (master && !/^tsx:/.test(master)) ? tpOrderKettenIds(master) : new Set()
     const zeit = p => { const t = new Date(p.startedAt || p.createdAt || 0).getTime(); return isFinite(t) ? t : 0 }
-    const liste = master ? (tradePlans || [])
-      .filter(p => p && String(p.masterAccountId || '') === master && (p.status === 'open' || p.status === 'review' || p.status === 'completed'))
+    const liste = kette.size ? (tradePlans || [])
+      .filter(p => p && kette.has(String(p.masterAccountId || '')) && (p.richtung === 'buy' || p.richtung === 'sell')
+        && (p.status === 'open' || p.status === 'review' || p.status === 'completed'))
       .sort((a, b) => zeit(b) - zeit(a)).slice(0, 5) : []
-    if(!liste.length){ el.innerHTML = '<div style="color:var(--sub);padding:2px 0">Noch keine Orders auf diesem Konto.</div>'; return }
-    const wegKurz = p => routeIstV2(p.route) ? (tpIstWdPlan(p) ? 'WD' : wegLabel(p)) : ((SYS_STICKER[p.route || 'dup'] || [p.route || '—'])[0])
+    if(kopf){
+      const nL = liste.filter(p => p.richtung === 'buy').length, nS = liste.length - nL
+      kopf.innerHTML = liste.length ? ` · <span style="color:#0E9757">${nL} L</span> / <span style="color:var(--danger)">${nS} S</span>` : ''
+    }
+    if(!liste.length){ el.innerHTML = `<div style="color:var(--sub);padding:2px 0">${master ? 'Noch keine Orders auf diesem Konto.' : 'Erst ein Master-Konto wählen.'}</div>`; return }
+    // Namen wie auf den Weg-Knöpfen (tvplus heißt in SYS_STICKER noch „Orbit" aus der Zeit vor dem 01.10.2026)
+    const wegKurz = p => routeIstV2(p.route) ? (tpIstWdPlan(p) ? 'WD' : wegLabel(p))
+      : p.route === 'tvplus' ? 'Duplikum (Puls)' : p.route === 'topstep' ? 'Topstep' : ((SYS_STICKER[p.route || 'dup'] || [p.route || '—'])[0])
     const statusTxt = s => ({ open: 'läuft', review: 'prüfen' })[s] || ''
     el.innerHTML = liste.map(p => {
       const d = new Date(p.startedAt || p.createdAt || 0)
       const wann = isFinite(d) ? d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) + ' ' + d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '—'
-      const dir = p.richtung === 'buy' ? '<span class="tp-lo-dir" style="color:#0E9757">▲ LONG</span>'
-        : p.richtung === 'sell' ? '<span class="tp-lo-dir" style="color:var(--danger)">▼ SHORT</span>'
-        : '<span class="tp-lo-dir" style="color:var(--sub)">—</span>'
+      const dir = p.richtung === 'buy' ? '<span class="tp-lo-dir" style="color:#0E9757">▲ BUY</span>'
+        : '<span class="tp-lo-dir" style="color:var(--danger)">▼ SELL</span>'
+      const vorg = String(p.masterAccountId || '') !== master ? `<span style="color:var(--sub-2)" title="${escapeHtml(p.masterName || '')}">Vorgänger</span>` : ''
       const st = statusTxt(p.status)
       const pl = p.masterPl != null && isFinite(p.masterPl)
         ? `<span class="tnum" style="color:${p.masterPl >= 0 ? '#0E9757' : 'var(--danger)'}">${p.masterPl >= 0 ? '+' : '−'}$${Math.abs(p.masterPl).toLocaleString('de-DE', { maximumFractionDigits: 2 })}</span>` : ''
-      return `<div class="tp-lo-zeile"><span class="tp-lo-wann tnum">${escapeHtml(wann)}</span><span class="tp-lo-weg">${escapeHtml(wegKurz(p))}</span>${dir}`
+      return `<div class="tp-lo-zeile"><span class="tp-lo-wann tnum">${escapeHtml(wann)}</span>${dir}<span class="tp-lo-weg">${escapeHtml(wegKurz(p))}</span>${vorg}`
         + `<span class="tp-lo-rechts">${st ? `<span style="color:var(--sub)">${escapeHtml(st)}</span>` : ''}${pl}</span></div>`
     }).join('')
   }
@@ -39975,7 +39990,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1131'
+  const OS_TAB_BUILD = '2026-09-22.1132'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
