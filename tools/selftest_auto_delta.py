@@ -85,11 +85,17 @@ def fixture(jetzt):
         {"id": "k-5", "user_id": U2, "name": "5ers B", "firm": "The5%ers", "account_type": "phase1", "external_id": "000005"},
         {"id": "k-6", "user_id": U3, "name": "TDFY WD", "firm": "Tradeify", "account_type": "winning_days", "external_id": "TDFY-000006"},
         {"id": "k-7", "user_id": U3, "name": "Lucid", "firm": "Lucid Trading", "account_type": "challenge", "external_id": "LUC-000007"},
+        {"id": "k-11", "user_id": U3, "name": "TDFY C", "firm": "Tradeify", "account_type": "challenge", "external_id": "TDFY-000011"},
     ]
-    bal = {"k-1": 150000, "k-2": 100000, "k-3": 153600, "k-4": 150000, "k-5": 100000, "k-6": 150000, "k-7": 50000}
+    bal = {"k-1": 150000, "k-2": 100000, "k-3": 153600, "k-4": 150000, "k-5": 100000, "k-6": 150000, "k-7": 50000, "k-11": 159000}
     offen = [
         # U3 (nicht im Planer): Tradeify-WD läuft SHORT ohne Hedge → Firma × Tag: Tradeify heute nur short
         {"id": "p-o1", "user_id": U3, "master_account_id": "k-6", "master_firm": "Tradeify", "status": "open", "richtung": "sell",
+         "master_tp": 1000, "master_sl": None, "master_contracts": 2, "master_symbol": "NQZ6", "route": "tvv2",
+         "mt5_baseline": {"hedge": {"status": "fehler", "einstieg_nq": 20000}}, "start_um": None, "started_at": jetzt.isoformat()},
+        # U3 Tradeify-Challenge (159k = Ziel erreicht → Kontowert 975 € wie der WD) läuft SHORT ohne Hedge — der WD oben zählt in
+        # offen[] seit 07.10.2026 nicht mehr (Finn: „Winning Days raus"), die Basis für Bot/Band bleibt damit gleich
+        {"id": "p-o3", "user_id": U3, "master_account_id": "k-11", "master_firm": "Tradeify", "status": "open", "richtung": "sell",
          "master_tp": 1000, "master_sl": None, "master_contracts": 2, "master_symbol": "NQZ6", "route": "tvv2",
          "mt5_baseline": {"hedge": {"status": "fehler", "einstieg_nq": 20000}}, "start_um": None, "started_at": jetzt.isoformat()},
         # U3 Lucid ohne Kernwerte → Delta null + Hinweis
@@ -370,7 +376,10 @@ def main():
           "GET /admin/auto-plan/delta: alle Vertragsfelder")
     check(isinstance(dl["band"], float) and dl["fenster"][0]["von"] == "00:00" and "band" in dl["verlauf"][0],
           "band als Zahl €/Pkt, fenster[], verlauf[].band")
-    o1 = next(x for x in dl["offen"] if x["plan_id"] == "p-o1")
+    check(not any(x["plan_id"] == "p-o1" for x in dl["offen"]) and all(x["typ"] in ("challenge", "phase1", "phase2") for x in dl["offen"]),
+          "offen[]: Winning-Days-Trade fehlt, nur challenge/phase1/phase2 (Finn 07.10.2026)")
+    check(stand["id_fest"].get(f"{U3}|tradeify", {}).get("richtung") == "sell", "Richtungsschutz sieht den laufenden WD weiter (Tradeify bei U3 short)")
+    o1 = next(x for x in dl["offen"] if x["plan_id"] == "p-o3")
     check(o1["tp_punkte_rest"] is not None and o1["delta_eur_pkt"] < 0 and o1["user_id"] == U3, f"offen: Delta short, TP-Rest {o1['tp_punkte_rest']} Pkt")
     gp = {x["plan_id"]: x for x in dl["geplant"]}
     check(gp["p-g1"]["aenderbar"] and not gp["p-g2"]["aenderbar"] and gp["p-g2"]["fest_durch"].startswith("Handplan"),

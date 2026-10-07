@@ -14813,7 +14813,70 @@ def _ap_sicht_aus_anfrage(admin, uid):
     return ap_sicht_uid(admin, uid, nur, s)
 
 
+# ── PROBELAUF ÜBER ALLE IDS (07.10.2026, Finn 04:08 dt: „Kannst du mal zum Test alle IDs einfach als geplant reinpacken, sodass ich
+# grob sehe, wie dann geplant wird und das Long-Short-Verhältnis ausgeglichen wird? Der Netto-Chart soll ja immer um 0 laufen").
+# POST /admin/auto-plan {trocken:true, ids:"alle"} rechnet den Probelauf über ALLE IDs mit Konten in AP_TYPEN (nicht nur
+# auto_plan_regeln.user_ids), dieselbe Rechenstrecke wie sonst (ap_planen), laufende Trades aller IDs als Basis. Nur Admin
+# (ADMIN_EMAILS), nur trocken — mit trocken:false wird ids ignoriert, damit nie echte Pläne für fremde IDs entstehen; kein
+# Protokoll in auto_plan_lauf (der Probelauf schreibt ohnehin nichts).
+AP_IDS_ALLE = "alle"
+
+
+def ap_ids_modus(body, admin):
+    """REIN RECHNEND: ids-Parameter der POST-Anfrage → (ids | None, fehler | None), fehler = (Text, HTTP-Status).
+    Ohne ids wie bisher. ids ≠ "alle" → 400. Nicht-Admin mit ids → 403 (auch mit trocken:false — fremde IDs sind nie seine Sache).
+    Admin mit trocken:false → ids ignoriert (None): angelegt wird nur für auto_plan_regeln.user_ids."""
+    roh = str((body or {}).get("ids") or "").strip().lower()
+    if not roh:
+        return None, None
+    if roh != AP_IDS_ALLE:
+        return None, ("ids = alle", 400)
+    if not admin:
+        return None, ("Probelauf über alle IDs nur für Admins", 403)
+    if not (body or {}).get("trocken"):
+        return None, None
+    return AP_IDS_ALLE, None
+
+
+def ap_ids_alle(ids, trocken):
+    """REIN RECHNEND: gilt der Alle-IDs-Modus in ap_planen? Nur ids="alle" UND trocken."""
+    return str(ids or "").strip().lower() == AP_IDS_ALLE and bool(trocken)
+
+
+def ap_ids_laden(ausgeblendet=None):
+    """Alle IDs mit mindestens einem Konto in AP_TYPEN (challenge/phase1/phase2), ohne ausgeblendete Personen (ADMIN_EXCLUDE_EMAILS,
+    wie der Live-Stand in _ap_stand_laden); archiviert/Regel/Balance prüft ap_planen je Konto wie sonst. Sortiert, nur Lesen."""
+    if ausgeblendet is None:
+        _n, ausgeblendet = _ap_namen()
+    rows = _sb_all("accounts", {"select": "user_id", "account_type": "in.(" + ",".join(AP_TYPEN) + ")"})
+    return sorted({str(r.get("user_id")) for r in rows if r.get("user_id") and str(r.get("user_id")) not in (ausgeblendet or ())})
+
+
+def ap_ids_benutzt(geplant, ausgelassen, namen=None):
+    """REIN RECHNEND: IDs, die im Lauf mit mindestens einem Konto vorkommen (geplant[] oder ausgelassen[]) → [{user_id, user}],
+    nach Anzeigename sortiert. IDs, deren Konten alle archiviert/still sind, fehlen — sie standen auch nicht im Lauf."""
+    ids = {}
+    for z in list(geplant or ()) + list(ausgelassen or ()):
+        u = str((z or {}).get("user_id") or "")
+        if u:
+            ids.setdefault(u, str((z or {}).get("user") or (namen or {}).get(u) or u[:8]))
+    return [{"user_id": u, "user": n} for u, n in sorted(ids.items(), key=lambda x: (x[1].lower(), x[0]))]
+
+
 AP_EINGRIFF_MAX = 200                # Pläne je Aufruf an /admin/auto-plan/bestaetigen
+
+
+def ap_eingriff_sicht(admin, uid, im_planer, nur_eigene):
+    """REIN RECHNEND (BESTÄTIGEN FÜR ALLE, Finn 07.10.2026 05:16 Dubai als Jacob eingeloggt: „jeden einzelnen Trade bestätigen können.
+    Fertig. Das geht ja immer noch nicht, oder?" — bis .1118 durfte nur ein Admin-Login fremde Vorschläge bestätigen; Master: Weg b):
+    welche ID die Eingriffs-Routen bestaetigen/zurueck/loeschen einschränken. None = alle IDs: Admin (ADMIN_EMAILS) oder jeder
+    Login, der im Planer ist (auto_plan_regeln.user_ids) — außer admin_zugang „nur eigene", der bleibt bei seiner ID. Ein Login,
+    der weder Admin noch im Planer ist, bleibt ebenfalls bei der eigenen ID (die Route antwortet bei fremden Plänen 403)."""
+    if nur_eigene:
+        return str(uid)
+    if admin or im_planer:
+        return None
+    return str(uid)
 
 
 def ap_eingriff_filter(aktion, plan_ids, sicht_uid=None):
@@ -14890,7 +14953,7 @@ def ap_richtung_fest_plan(p, tag, tz):
     return True
 
 
-def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, sicht_uid=None, fingerabdruck=None):
+def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, sicht_uid=None, fingerabdruck=None, ids=None):
     """Plant den Tag `tag` (Dubai-Datum, Standard heute) für alle IDs aus auto_plan_regeln. trocken = nur rechnen.
     quelle 'nacht' claimt den Tag (ein Lauf je Tag). Hand-Lauf am selben Tag: unbestätigte Auto-Pläne werden ersetzt,
     Startzeiten frühestens jetzt + 10 min. → Ergebnis-Dict (auch in auto_plan_lauf).
@@ -14900,15 +14963,19 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     (aus dem Probelauf) beim Anlegen: weicht der neue Stand ab, wird nichts gelöscht und nichts angelegt. trocken liefert
     zusätzlich tranchen[] + ausgleich{} (Kontowert in €, Delta €/Pkt je Konto/Tranche, Netto-Verlauf, Band).
     06.10.2026 (Delta-Vertrag + Korrektur Finn): Richtung je Tranche nach delta_eur_pkt (ap_richtungen_delta), je PC nie zwei Starts zugleich.
-    sicht_uid: Antwort nur mit den Zeilen dieser ID (Nicht-Admin); geplant wird trotzdem über alle IDs."""
+    sicht_uid: Antwort nur mit den Zeilen dieser ID (Nicht-Admin); geplant wird trotzdem über alle IDs.
+    ids="alle" (PROBELAUF-ALLE-IDS, 07.10.2026): nur mit trocken — rechnet über alle IDs mit Konten in AP_TYPEN statt
+    auto_plan_regeln.user_ids (ap_ids_laden), legt nie an, schreibt kein Protokoll; Antwort zusätzlich ids_benutzt[]."""
     reg = (sb_select("auto_plan_regeln", {"select": "*", "id": "eq.1"}) or [None])[0]
     if not reg:
         return {"ok": False, "msg": "auto_plan_regeln fehlt (SQL 2026-10-05_auto_planer.sql einspielen)"}
-    uids = [str(u) for u in (reg.get("user_ids") or [])]
+    alle_ids = bool(ids) and ap_ids_alle(ids, trocken)      # PROBELAUF-ALLE-IDS (07.10.2026): nur im Probelauf, nie beim Anlegen
+    uids = ap_ids_laden() if alle_ids else [str(u) for u in (reg.get("user_ids") or [])]
     if nur_uid and nur_uid not in uids:
         return {"ok": False, "msg": "Diese ID ist nicht im Auto-Planer"}
     if not uids:
-        return {"ok": False, "msg": "Keine IDs im Auto-Planer (auto_plan_regeln.user_ids leer)"}
+        return {"ok": False, "msg": "Keine ID mit Konten in challenge/phase1/phase2" if alle_ids
+                else "Keine IDs im Auto-Planer (auto_plan_regeln.user_ids leer)"}
     zeiten = reg.get("zeiten") or {}
     firmen = (reg.get("regeln") or {}).get("firmen") or []
     jetzt = datetime.now(timezone.utc)
@@ -15145,6 +15212,8 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     erg = {"ok": True, "tag": tag, "quelle": quelle, "trocken": bool(trocken), "at": jetzt.isoformat(), "seed": seed,
            "fingerabdruck": fp, "geplant": geplant, "ausgelassen": ausgelassen, "netto_max_abs": netto_max,
            "band_pct": param["zielband_pct"], "auto_start": param["auto_start"], "einsatz": einsatz_info}
+    if alle_ids:
+        erg["ids_benutzt"] = ap_ids_benutzt(geplant, ausgelassen, namen)     # welche IDs der Lauf über alle IDs wirklich enthält
     if trocken:
         try:
             erg.update(_ap_probelauf(tr_info, plan_roh, minuten, zinfo, richtung, zeiten, namen, stand, dinfo))
@@ -15855,7 +15924,8 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
     """Live-Stand für Delta, Bot und manuelle Eingriffe — ALLE IDs (wie Radar, ohne ADMIN_EXCLUDE_EMAILS): laufende Trades mit
     Delta + Restabständen (Orbit: Einstieg/Level aus mt5_baseline + Reader-Kurs; Echo: mt5_live-Position), heutige geplante
     Pläne (deutscher Tag) mit Delta + Änderbarkeit, heutige Starts (weicher Malus), Richtungsschutz anderer Tage. ersetzt(p) = Plan zählt nicht
-    (der Planer ersetzt seine unbestätigten Vorschläge). Nur Lesen."""
+    (der Planer ersetzt seine unbestätigten Vorschläge). Nur Lesen. offen[] und die Einsatz-Basis nur Konten der AP_TYPEN
+    (Winning Days/Funded raus, Finn 07.10.2026); Richtungsschutz und Starts sehen alle laufenden Trades."""
     jetzt = jetzt or datetime.now(timezone.utc)
     zeiten = reg.get("zeiten") or {}
     regeln = reg.get("regeln") or {}
@@ -16009,6 +16079,16 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
     for z in geplant_rows:
         ff = id_fest.get(f"{z['user_id']}|{z['firma_key']}")
         z["richtung_fest_durch"] = ff["durch"] if ff else None
+    # WINNING DAYS / FUNDED RAUS (Finn 07.10.2026 04:17 Dubai: „Hier sind nur die Trades, die nicht gegengehedgt werden. Winning Days
+    # ist mit Gegenhedgen, das ist ein anderes Kapitel — das bitte weglassen, auch wenn läuft"; Master: winning_days und funded/
+    # funded_cfd raus, nicht nur „gehedgt = 0 €" — ein WD mit Hedge „fehler" zählte sonst mit): offen[] von /admin/auto-plan/delta
+    # und die Einsatz-/Delta-Basis für Planer, Bot und Chart kennen nur noch Konten der AP_TYPEN (challenge/phase1/phase2).
+    # Richtungsschutz (id_fest, oben) und heutige Starts (Malus) sehen weiter ALLE laufenden Trades: ein Challenge-Plan darf nie
+    # gegen einen laufenden WD derselben ID+Firma gedreht werden — das ist die Firmen-Sicht, kein Planer-Thema.
+    behalten = {z["plan_id"] for z in offen_rows if str(z.get("typ") or "") in AP_TYPEN}
+    geplant_ids = {z["plan_id"] for z in geplant_rows}
+    offen_rows = [z for z in offen_rows if z["plan_id"] in behalten]
+    hinweise = [h for h in hinweise if not h.get("plan_id") or h["plan_id"] in behalten or h["plan_id"] in geplant_ids]
     ds = [z["delta_eur_pkt"] for z in offen_rows if z["delta_eur_pkt"] is not None]
     # Klumpen-Regel (07.10.2026): Netto-Einsatz der laufenden, ungehedgten Trades (+ long / − short, € Kontowert im Risiko)
     # Finn 07.10.2026 („TP/SL-Abstand der laufenden Trades mitdenken"): ein laufender Trade mit SL hat noch so viel Einsatz im
@@ -16382,7 +16462,13 @@ def admin_auto_plan_delta():
         # 07.10.2026 TRADE-PLANER-ALLE-IDS: ?sicht=alle → alle IDs (außer „nur eigene"), sonst wie bisher Admin alle / eigene ID
         antwort = ap_delta_antwort(_ap_stand_laden(reg), _ap_sicht_aus_anfrage(admin, uid))
         antwort.setdefault("sicht", "alle")
-        return jsonify(dict(antwort, admin=admin))
+        # BESTÄTIGEN FÜR ALLE (07.10.2026): alle = darf dieser Login fremde Vorschläge bestätigen/zurücknehmen/löschen (ap_eingriff_sicht;
+        # Nicht-Admin ist hier immer im Planer, _ap_zugang). admin_zugang nicht lesbar → vorsichtshalber false
+        try:
+            nur = admin_zugang_nur_eigene(str(uid))
+        except Exception:
+            nur = True
+        return jsonify(dict(antwort, admin=admin, alle=ap_eingriff_sicht(admin, uid, True, nur) is None))
     except Exception as e:
         return jsonify({"ok": False, "admin": admin, "msg": f"{type(e).__name__}: {e}"}), 502
 
@@ -16679,25 +16765,29 @@ def start_auto_planer():
 
 def _ap_eingriff(aktion):
     """POST /admin/auto-plan/{bestaetigen {plan_ids} | zurueck {plan_id} | loeschen {plan_id}} (07.10.2026, Trade-Planer alle IDs).
-    Gate wie /admin/kontowerte: Admin (ADMIN_EMAILS) alle IDs, admin_zugang „nur eigene" und jeder andere Login nur die eigenen
-    (403 bei fremden Plänen). Guard-Bedingungen (ap_eingriff_filter) in derselben Anfrage; Antwort = die wirklich geänderten bzw.
-    gelöschten Zeilen. Eigene Pläne schreibt das Frontend weiter selbst per supabase-js (RLS) — diese Routen braucht nur der Admin."""
+    Gate (ap_eingriff_sicht, seit .1119 BESTÄTIGEN FÜR ALLE): Admin (ADMIN_EMAILS) und jeder Login im Planer (auto_plan_regeln.user_ids)
+    alle IDs; admin_zugang „nur eigene" und jeder andere Login nur die eigenen (403 bei fremden Plänen). Guard-Bedingungen
+    (ap_eingriff_filter) in derselben Anfrage; Antwort = die wirklich geänderten bzw. gelöschten Zeilen + alle:true/false (darf dieser
+    Login fremde Pläne anfassen — das Frontend zeigt danach den ✓-Knopf bei allen Zeilen). Eigene Pläne schreibt das Frontend weiter
+    selbst per supabase-js (RLS)."""
     if request.method == "OPTIONS":
         return "", 200
     _mail, err = _admin_auth()
-    if err is None:
-        uid = str(request.environ.get("prophos.admin_uid") or "")
-        try:
-            sicht = uid if admin_zugang_nur_eigene(uid) else None
-        except Exception:
-            return jsonify({"ok": False, "msg": "Anmeldung nicht prüfbar"}), 502
-    else:
+    admin = err is None
+    uid = str(request.environ.get("prophos.admin_uid") or "") if admin else None
+    if not admin:
         if err[1] != 403:
             return err
         uid, err2 = _wd_login()
         if err2:
             return err2
-        sicht = str(uid)
+    try:
+        nur = admin_zugang_nur_eigene(str(uid))
+        im_planer = False if admin else str(uid) in [str(u) for u in ((sb_select("auto_plan_regeln", {"select": "user_ids", "id": "eq.1"})
+                                                                       or [{}])[0].get("user_ids") or [])]
+    except Exception:
+        return jsonify({"ok": False, "msg": "Anmeldung nicht prüfbar"}), 502
+    sicht = ap_eingriff_sicht(admin, uid, im_planer, nur)
     body = request.get_json(silent=True) or {}
     ids = body.get("plan_ids") if isinstance(body.get("plan_ids"), list) else [body.get("plan_id")]
     params, upd, art = ap_eingriff_filter(aktion, ids, sicht)
@@ -16733,7 +16823,8 @@ def admin_auto_plan_loeschen():
 @app.route("/admin/auto-plan", methods=["GET", "POST", "OPTIONS"])
 def admin_auto_plan():
     """GET: letzter Lauf (Admin: alle IDs, sonst nur die eigene). POST {trocken, tag}: jetzt planen — Admin oder eine ID,
-    die selbst im Auto-Planer ist (Finn bestätigt in den Test-IDs, deren Login ist kein Admin)."""
+    die selbst im Auto-Planer ist (Finn bestätigt in den Test-IDs, deren Login ist kein Admin).
+    POST {trocken:true, ids:"alle"}: Probelauf über alle IDs mit planbaren Konten — nur Admin (ap_ids_modus, 07.10.2026)."""
     if request.method == "OPTIONS":
         return "", 200
     mail, err = _admin_auth()
@@ -16764,9 +16855,12 @@ def admin_auto_plan():
     seed = body.get("seed")
     if seed not in (None, "") and not re.match(r"^\d{1,10}$", str(seed)):
         return jsonify({"ok": False, "msg": "seed = Ganzzahl"}), 400
+    ids, fehler = ap_ids_modus(body, admin)         # PROBELAUF-ALLE-IDS (07.10.2026): ids="alle" nur Admin, nur trocken
+    if fehler:
+        return jsonify({"ok": False, "admin": admin, "msg": fehler[0]}), fehler[1]
     try:
         erg = ap_planen(tag, trocken=bool(body.get("trocken")), quelle="hand", seed=seed, sicht_uid=sicht,
-                        fingerabdruck=str(body.get("fingerabdruck") or "").strip() or None)
+                        fingerabdruck=str(body.get("fingerabdruck") or "").strip() or None, ids=ids)
         return jsonify(dict(erg, admin=admin))
     except Exception as e:
         return jsonify({"ok": False, "admin": admin, "msg": f"{type(e).__name__}: {e}"}), 502
