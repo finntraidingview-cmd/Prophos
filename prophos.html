@@ -1945,13 +1945,13 @@
   :is(#tpl-view,#adm-pane-planer) .tpl-hz .p,:is(#tpl-view,#adm-pane-planer) .tpl-hz .s{text-align:right;color:var(--ink-2)} :is(#tpl-view,#adm-pane-planer) .tpl-hz .h{text-align:right;font-weight:700;font-size:13.5px} :is(#tpl-view,#adm-pane-planer) .tpl-hz .z{text-align:right;color:var(--sub);white-space:nowrap}
   /* Geplant-Liste = Tabelle des Reiters Trades → Geplant (.pz-*, GEPLANT-WIE-TRADES-REITER 07.10.2026), hier mit ID-Spalte vorn */
   :is(#tpl-view,#adm-pane-planer) .tpl-lk{padding-bottom:6px} :is(#tpl-view,#adm-pane-planer) .tpl-lk .tpl-h{margin:4px 0 0}
-  #dashboard-view .pz-tab.pz-mit-id{grid-template-columns:156px 72px minmax(150px,1fr) 220px 92px 64px 150px 76px 76px 160px}
+  #dashboard-view .pz-tab.pz-mit-id{grid-template-columns:156px 72px minmax(150px,1.2fr) 84px minmax(220px,1fr) 92px 64px 76px 76px 160px}
   #dashboard-view .pz-z > .pz-wer{display:flex;align-items:center;gap:7px} #dashboard-view .pz-wer i{flex:none;width:8px;height:8px;border-radius:50%}
   #dashboard-view .pz-wer b{font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis}
   #dashboard-view .pz-wer .tc2-chip{flex:none;margin-left:auto;font-size:10.5px}   /* Richtung je ID rechts in der ID-Spalte */
   #dashboard-view .pz-hand{font-size:11.5px;color:var(--sub)} #dashboard-view .pz-live.is-leer{width:0}
   #dashboard-view .pz-akt .btn:disabled{opacity:.45;cursor:default}
-  @media (max-width:1359px){ #dashboard-view .pz-tab.pz-mit-id{grid-template-columns:156px 72px minmax(150px,1fr) 200px 64px 130px 76px 76px 160px} }
+  @media (max-width:1359px){ #dashboard-view .pz-tab.pz-mit-id{grid-template-columns:156px 72px minmax(150px,1fr) 80px 200px 64px 76px 76px 160px} }
   @media (max-width:820px){ #dashboard-view .pz-z > .pz-wer{order:0;flex:0 0 100%} }
   /* Braucht dich (07.10.2026): ruhiger Block je ID — Zeile = Symbol · Firma · Klartext · kleine Aktion */
   :is(#tpl-view,#adm-pane-planer) .tpl-bd{border-color:color-mix(in srgb,#B45309 35%,var(--border))}
@@ -3227,7 +3227,7 @@
   #dashboard-view .pz-kopf i{font-style:normal;color:var(--sub-2)}
   /* FESTE SPALTEN (08.10.2026, Finn: „das Mapping ist hässlich"): nur die Konto-Spalte ist flexibel, alle anderen fest — damit stehen die
      Spalten in jedem Firmen-Block gleich; Block max. 1100 px (tpl-lk / Admin). Neu: Risiko-Spalte (Balken) vor TP/SL. */
-  #dashboard-view .pz-tab{display:grid;grid-template-columns:84px minmax(150px,1fr) 220px 92px 64px 150px 76px 76px 160px;column-gap:10px;border:1px solid var(--border-soft);border-radius:10px;background:var(--surface);overflow:hidden}
+  #dashboard-view .pz-tab{display:grid;grid-template-columns:84px minmax(150px,1.2fr) 84px minmax(220px,1fr) 92px 64px 76px 76px 160px;column-gap:10px;border:1px solid var(--border-soft);border-radius:10px;background:var(--surface);overflow:hidden}
   #dashboard-view .pz-z{display:grid;grid-template-columns:subgrid;grid-column:1/-1;align-items:center;min-height:42px;padding:6px 14px;font-size:13px;color:var(--ink-2);font-variant-numeric:tabular-nums;transition:background .12s}
   #dashboard-view .pz-z + .pz-z{border-top:1px solid var(--border-soft)}
   #dashboard-view .pz-z:not(.pz-z-kopf):hover{background:var(--bg)}
@@ -3278,10 +3278,14 @@
   #dashboard-view .pz-ok.is-ok{border-color:transparent;color:#15803d}
   /* Schmales Fenster (Tabelle unter ~1060 px): Art-Spalte und „· Rest" weichen, damit nichts über den Rand läuft */
   @media (max-width:1359px){
-    #dashboard-view .pz-tab{grid-template-columns:84px minmax(150px,1fr) 200px 64px 130px 76px 76px 160px}
+    #dashboard-view .pz-tab{grid-template-columns:84px minmax(150px,1fr) 80px 200px 64px 76px 76px 160px}
     #dashboard-view .pz-z > .pz-art,#dashboard-view .pz-bal-t .pz-rest{display:none}
   }
-  #tpl-view .tpl-lk .pz-tab,#tpl-view .tpl-lk .pz-kopf,#adm-pane-planer .ap-geplant .pz-tab,#adm-pane-planer .ap-geplant .pz-kopf{max-width:1180px}   /* feste Spuren 926 px + Konto ≥ 150 + 8 Lücken = 1156 px */
+  /* Volle Kartenbreite (Nachtrag 08.10.2026, Finn-Screenshot 2000 px: Blöcke endeten bei 1180 px, „✓ alle n" saß 600 px weiter rechts):
+     kein Deckel — Konto und Balance → Ziel wachsen mit, Zahlen-Spalten fest; rechte Kante von „Bestätigen", „✓ alle n", „Alle n bestätigen" = Kartenrand.
+     Richtung je Zeile (Finn: „je Zeile sehen, ob Long oder Short") als eigene Spalte neben Konto. */
+  #dashboard-view .pz-bahn{max-width:none}
+  #dashboard-view .pz-z > .pz-ri{font-weight:600;white-space:nowrap} #dashboard-view .pz-z:not(.pz-z-kopf) > .pz-ri.is-buy{color:#047857} #dashboard-view .pz-z:not(.pz-z-kopf) > .pz-ri.is-sell{color:#b91c1c}
   /* Risiko-Balken in der Zeile (08.10.2026, wie die WD-Karte): SL rot links, TP grün rechts, Punkt = Einstieg bzw. Live-P&L */
   #dashboard-view .pz-z > .pz-risk{display:flex;align-items:center;overflow:visible}
   #dashboard-view .pz-risk-b{display:flex;align-items:center;gap:5px;width:100%;min-width:0;font-variant-numeric:tabular-nums}
@@ -3308,7 +3312,7 @@
     #dashboard-view .pz-z > .pz-gr{order:3;flex:none}
     #dashboard-view .pz-z > .pz-tp{order:4;flex:none;width:56px}
     #dashboard-view .pz-z > .pz-sl{order:5;flex:none;width:48px}
-    #dashboard-view .pz-z > .pz-risk{order:6;flex:1 1 100%;min-width:0}   /* Handy: Risiko-Balken schmaler in eigener Zeile */
+    #dashboard-view .pz-z > .pz-ri{order:2;flex:none;font-size:11.5px}   /* Handy: Richtung direkt hinter dem Konto */
     #dashboard-view .pz-z > .pz-bal{order:7;flex:0 0 auto;overflow:visible}
     #dashboard-view .pz-z > .pz-akt{order:8;flex:1 1 auto;min-width:0}
     #dashboard-view .pz-bal-t{overflow:visible}
@@ -36793,7 +36797,8 @@
       balHtml = `<span class="pz-bal-t">${typChipHandy}${liveZ}${plL != null ? `<i class="pz-live-pl ${plL >= 0 ? 'plus' : 'minus'}" title="läuft · Live-P&L ${plL >= 0 ? '+' : '−'}${de(Math.abs(plL))} $">●</i>` : ''}${de(istV)}${ziel ? `<em>→</em>${de(ziel)}<span class="pz-rest"> · Rest ${de(Math.max(0, ziel - istV))}</span>` : ' $'}</span>`
         + (mitBahn ? `<i class="pz-bahn" title="${bahnTitel}"><i style="width:${(anteil * 100).toFixed(1)}%"></i>${stueckTp > 0 ? `<i class="pz-bahn-tp" style="width:${(stueckTp * 100).toFixed(1)}%"></i>` : ''}</i>` : '')
     }
-    // RISIKO-BALKEN (08.10.2026, Finn-Foto WD-Karte „Liq −5.806 $ |▬▬●| TP +270 $"): SL rot links, TP grün rechts, Punkt = Einstieg;
+    // RISIKO-BALKEN — seit 08.10.2026 ~03:30 Dubai NICHT mehr in der Zeile (Finn: „voll hässlich, sieht spielerisch aus, lieber so wie es
+    // bei Trades → Geplant war"); der Helfer bleibt für den Fall, dass er an anderer Stelle gebraucht wird. Ursprung: WD-Karte, SL rot links, TP grün rechts, Punkt = Einstieg;
     // laufend (o.pl) = Live-P&L zwischen −SL und +TP. Nur die $-Beträge am Plan, keine neue Rechnung. Ohne SL: „ohne" grau, Balken grün.
     const riskHtml = (() => {
       const tp = Number(p.masterTp) > 0 ? Number(p.masterTp) : null, sl = Number(p.masterSl) > 0 ? Number(p.masterSl) : null
@@ -36814,10 +36819,10 @@
         <span class="pz-wer">${o.wer}</span>` : ''}
         <span class="pz-zeit">${zeit}</span>
         <span class="pz-konto" title="${escapeHtml(kontoTitel)}" data-ak-konto="${escapeHtml(String(p.id || ''))}">${kontoKurz}${typChip}</span>
+        <span class="pz-ri ${p.richtung === 'buy' ? 'is-buy' : p.richtung === 'sell' ? 'is-sell' : ''}">${p.richtung === 'buy' ? '▲ Long' : p.richtung === 'sell' ? '▼ Short' : '–'}</span>
         <span class="pz-bal">${balHtml}</span>
         <span class="pz-art" title="${notiz ? escapeHtml(notiz.stufe) : ''}">${notiz ? escapeHtml(notiz.art) + (notiz.gekappt ? ' · SL gekappt' : '') : ''}</span>
         <span class="pz-gr">${gr}</span>
-        <span class="pz-risk">${riskHtml}</span>
         <span class="pz-tp${p.masterTp > 0 ? '' : ' is-leer'}">${p.masterTp > 0 ? de(p.masterTp) + ' $' : '–'}</span>
         <span class="pz-sl${p.masterSl > 0 ? '' : ' is-leer'}">${p.masterSl > 0 ? de(p.masterSl) + ' $' : '–'}</span>
         <span class="pz-akt">${o.chips || ''}${o.akt || ''}</span>
@@ -36849,7 +36854,14 @@
       const richtung = (buy ? chip(sell ? `BUY ${buy}` : 'BUY', true) : '') + (sell ? chip(buy ? `SELL ${sell}` : 'SELL', false) : '')
       const zeiten = ps.map(p => Date.parse(p.startUm || '')).filter(Boolean).sort((a, b) => a - b)
       const fenster = !zeiten.length ? 'ohne Startzeit' : zeiten.length === 1 || hhmm(zeiten[0]) === hhmm(zeiten[zeiten.length - 1]) ? hhmm(zeiten[0]) : `${hhmm(zeiten[0])}–${hhmm(zeiten[zeiten.length - 1])}`
-      const tp = ps.reduce((s, p) => s + (Number(p.masterTp) || 0), 0), sl = ps.reduce((s, p) => s + (Number(p.masterSl) || 0), 0)
+      // TP/SL im Kopf (08.10.2026, Finn: „TP 27.300 $" als Summe über 3 Konten verwirrt): gleich bei allen → „TP 9.100 $ je Konto",
+      // sonst „3 × 7.000–9.100 $"; die Summe steht nur noch im Tooltip
+      const tps = ps.map(p => Number(p.masterTp) || 0), sls = ps.map(p => Number(p.masterSl) || 0)
+      const tp = tps.reduce((s, v) => s + v, 0), sl = sls.reduce((s, v) => s + v, 0)
+      const jeKonto = (werte, summe) => { const w = werte.filter(v => v > 0); if(!w.length) return null
+        const mn = Math.min(...w), mx = Math.max(...w)
+        return { txt: w.length === 1 ? geld(mn) : mn === mx ? `${geld(mn)} je Konto` : `${w.length} × ${geld(mn).replace(' $', '')}–${geld(mx)}`, tip: w.length > 1 ? `Summe ${geld(summe)} über ${w.length} Konten` : '' } }
+      const tpK = jeKonto(tps, tp), slK = jeKonto(sls, sl)
       let nichtLive = 0
       for(const p of ps){
         const b = routeIstV2(p.route) ? planKontoBalance(accounts.find(a => String(a.id) === String(p.masterAccountId))) : null
@@ -36862,12 +36874,12 @@
           <span>${ps.length} Trade${ps.length === 1 ? '' : 's'}</span> ${sep} <span>${escapeHtml(wege)}</span>
           ${richtung} ${sep}
           <span>${fenster}</span> ${sep}
-          <span>TP <span class="pz-tp">${geld(tp)}</span>${sl > 0 ? ` · SL <span class="pz-sl">${geld(sl)}</span>` : ''}</span>
+          <span>TP <span class="pz-tp"${tpK && tpK.tip ? ` title="${escapeHtml(tpK.tip)}"` : ''}>${tpK ? escapeHtml(tpK.txt) : '–'}</span>${slK ? ` · SL <span class="pz-sl"${slK.tip ? ` title="${escapeHtml(slK.tip)}"` : ''}>${escapeHtml(slK.txt)}</span>` : ''}</span>
           ${nichtLive ? `${sep} <span class="pz-warn">⚠ ${nichtLive} Balance${nichtLive === 1 ? '' : 's'} nicht live</span>` : ''}
           ${zeilen.length && !opt.ohneHinweis ? `<span class="tc2-chip tc2-dir-hint" data-dir-firm="${escapeHtml(g.firma === '–' ? '' : g.firma)}" style="display:none;background:rgba(245,158,11,.14);color:#b45309"></span>` : ''}
         </div>`
         + (zeilen.length ? `<div class="pz-tab${opt.mitId ? ' pz-mit-id' : ''}">
-          <div class="pz-z pz-z-kopf">${opt.mitId ? '<span>ID</span>' : ''}<span>Start</span><span>Konto</span><span>Balance → Ziel</span><span class="pz-art">Art</span><span class="pz-gr">Größe</span><span class="pz-risk">Risiko</span><span class="pz-tp">TP</span><span class="pz-sl">SL</span><span></span></div>`
+          <div class="pz-z pz-z-kopf">${opt.mitId ? '<span>ID</span>' : ''}<span>Start</span><span>Konto</span><span class="pz-ri">Richtung</span><span>Balance → Ziel</span><span class="pz-art">Art</span><span class="pz-gr">Größe</span><span class="pz-tp">TP</span><span class="pz-sl">SL</span><span></span></div>`
           + zeilen.map(p => opt.zeile ? opt.zeile(p) : renderTradePlanCard(p)).join('') + `</div>` : '')
         + karten.map(p => renderTradePlanCard(p)).join('')
     }).join('')
@@ -40758,7 +40770,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1209'
+  const OS_TAB_BUILD = '2026-09-22.1210'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -59706,6 +59718,10 @@
       return D.trades.find(t => String(t.plan_id) === String(z.plan_id))
         || D.trades.find(t => String(t.user_id) === String(z.user_id) && (kk(t.konto) === kk(z.konto) || (z.ende4 && t.ende4 && String(t.ende4) === String(z.ende4)))) || null
     }catch(_){ return null } }
+  // Lauf-Zeile (letzter Planer-Lauf, alle IDs, egal welcher Tag) zu einem offenen Vorschlag — Rückfall für Balance/Rest/Stufe, wenn die
+  // Trade-Zeile fehlt (BALANCE → ZIEL „–" in jeder Admin-Zeile, Finn 08.10.2026 .1208)
+  const apIdsLaufZeile = z => { const kk = s => String(s || '').trim().toLowerCase()
+    return ((_ap.letzter && _ap.letzter.geplant) || []).find(g => String(g.user_id) === String(z.user_id) && (kk(g.konto) === kk(z.konto) || (z.ende4 && g.ende4 && String(g.ende4) === String(z.ende4)))) || null }
   // Kontowert: Delta (wert_eur, heute) → Trade-Zeile → letzter Lauf (ergebnis.geplant je ID + Konto: wert) → null
   const apIdsWert = (z, t) => { if(t && t.wert != null) return t.wert
     const kk = s => String(s || '').trim().toLowerCase()
@@ -59727,7 +59743,9 @@
         ${o.length ? `<button type="button" class="ap-adm-ok" id="ap-ids-alle-ok" style="margin-left:auto">✓ Alle ${o.length} bestätigen</button>` : ''}</div>`
     if(!o.length) return `<div class="ap-adm-karte ap-geplant">${kopf}<div style="color:var(--sub);font-size:12.5px;padding:2px 0 6px">Nichts offen.</div></div>`
     const jeZ = new Map(), je = new Map()
-    const plaene = o.map(z => { const t = apIdsTrade(z) || {}
+    const plaene = o.map(z => { const tz = apIdsTrade(z) || {}, g = apIdsLaufZeile(z) || {}
+      // Balance/Rest/Stufe: Trade-Zeile (Delta + Lauf des Admin-Tags), sonst Lauf-Zeile, sonst eigenes Konto — nie stumm „–" (08.10.2026)
+      const t = Object.assign({}, g, tz, { balance: tz.balance ?? g.balance ?? null, rest: tz.rest ?? g.rest ?? null, stufe: tz.stufe || g.stufe || null, konto_id: tz.konto_id || g.konto_id || null, wert: tz.wert ?? g.wert ?? g.wert_eur ?? null })
       const p = { id: String(z.plan_id), status: 'planned', route: z.route || t.route || null, masterFirm: z.firma || '–', masterName: z.konto || '',
         masterAccountId: t.konto_id || null, richtung: z.richtung, startUm: z.start_um || null, startUmGestartetAt: null,
         masterTp: Number(z.tp) || 0, masterSl: Number(z.sl) || 0, masterContracts: z.menge, masterSymbol: (z.route || t.route) === 'mt5v2' ? '' : 'NQ',
@@ -59737,7 +59755,7 @@
     const zeile = p => {
       const { z, t } = jeZ.get(String(p.id))
       const eigen = String(z.user_id || '') === String(currentUserId || '')
-      const konto = eigen && t.konto_id ? (accounts || []).find(a => String(a.id) === String(t.konto_id)) || null : null
+      const konto = eigen ? ((t.konto_id ? (accounts || []).find(a => String(a.id) === String(t.konto_id)) : null) || (accounts || []).find(a => String(a.name || '') === String(z.konto || '')) || null) : null
       const kontoBal = konto ? planKontoBalance(konto) : null
       const bal = !kontoBal && t.balance != null ? { val: Number(t.balance), at: 0, tip: 'Balance laut Planer (Stand des Laufs)' } : undefined
       const st = String(z.stufe || t.stufe || '').trim(), rest = Number(t.rest), b0 = Number(t.balance)
