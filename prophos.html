@@ -40192,7 +40192,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1163'
+  const OS_TAB_BUILD = '2026-09-22.1164'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -58650,13 +58650,37 @@
    * mal einen Überblick über alle IDs sehe, die ich gleichzeitig beim Trade-Planer managen kann"). Eine Zeile je ID mit planbaren
    * Konten (challenge/phase1/phase2): Haken = in auto_plan_regeln.user_ids (sofort gespeichert über /admin/auto-plan/ids), Konten,
    * im letzten Lauf geplant/ausgelassen. Nur Anzeige + Haken, keine Bewertung. Nur Admin. ══ */
-  const _apIds = { rows: [], aktiv: null, tag: null, laeuft: false, fehler: '' }
+  const _apIds = { rows: [], aktiv: null, tag: null, laeuft: false, fehler: '', offen: [], offenTag: null, offenFehler: '' }
   async function apIdsLaden(){
     if(_apIds.laeuft) return
-    _apIds.laeuft = true; _apIds.fehler = ''
+    _apIds.laeuft = true; _apIds.fehler = ''; _apIds.offenFehler = ''
     try{ const d = await apdApi('GET', '/ids'); _apIds.rows = Array.isArray(d.ids) ? d.ids : []; _apIds.aktiv = !!d.aktiv; _apIds.tag = d.tag || null }
     catch(e){ _apIds.fehler = (e && e.message) || String(e) }
-    finally{ _apIds.laeuft = false; apIdsRender() }
+    // ZU BESTÄTIGEN (Finn 08.10.2026: „unter Admin eine richtig cleane Übersicht über alle Trades, die ich bestätigen muss"): offene
+    // Vorschläge aller IDs aus dem Delta (heute), Bestätigen über dieselbe Admin-Route wie auf der Trade-Planer-Seite (tplEingriff)
+    try{ const d = await apdApi('GET', '/delta?sicht=alle'); _apIds.offen = (Array.isArray(d.geplant) ? d.geplant : []).filter(z => z.auto_plan !== false && !z.bestaetigt); _apIds.offenTag = d.tag || null }
+    catch(e){ _apIds.offen = []; _apIds.offenFehler = (e && e.message) || String(e) }
+    _apIds.laeuft = false; apIdsRender()
+  }
+  function apIdsOffenHtml(){
+    const o = _apIds.offen, v = typeof tplVersatz === 'function' ? tplVersatz(_apIds.offenTag || '') : 120
+    const uhr = z => z.start_min != null ? tplUhr(Number(z.start_min), v) : (typeof apPrHm === 'function' && apPrHm(z.start) != null ? tplUhr(apPrHm(z.start), v) : '–')
+    const usd = (pkt, upp) => (pkt != null && upp > 0) ? Math.round(Number(pkt) * Number(upp)).toLocaleString('de-DE') + ' $' : '–'
+    const kopf = `<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:0 0 8px;color:var(--ink)">
+        <b style="font-size:15px">Zu bestätigen · ${o.length}</b><span style="color:var(--sub);font-size:12.5px">${_apIds.offenTag ? escapeHtml(String(_apIds.offenTag)) : ''}${_apIds.offenFehler ? ' · ⚠ ' + escapeHtml(_apIds.offenFehler) : ''}</span>
+        ${o.length ? `<button type="button" class="btn btn-primary" id="ap-ids-alle-ok" style="margin-left:auto;padding:4px 12px;font-size:12px">✓ Alle ${o.length} bestätigen</button>` : ''}</div>`
+    if(!o.length) return kopf + `<div style="color:var(--sub);font-size:12.5px;margin-bottom:16px">Keine offenen Vorschläge.</div>`
+    const zeilen = o.slice().sort((a, b) => (Number(a.start_min) || 0) - (Number(b.start_min) || 0)).map(z => `<tr>
+        <td><button type="button" class="knopf" data-ap-ok="${escapeHtml(String(z.plan_id))}" title="Diesen Vorschlag bestätigen — startet zur Startzeit">✓</button></td>
+        <td><span style="display:inline-flex;align-items:center;gap:7px"><i style="width:9px;height:9px;border-radius:50%;background:${idFarbe(apdUid(z))};flex:none"></i>${escapeHtml(String(z.user || ''))}</span></td>
+        <td><b>${escapeHtml(String(z.firma || ''))}</b> <span style="color:var(--sub)">${escapeHtml(String(z.konto || ''))}</span></td>
+        <td class="zahl" style="font-weight:600;color:${z.richtung === 'buy' ? '#047857' : '#b91c1c'}">${z.richtung === 'buy' ? '▲ Long' : z.richtung === 'sell' ? '▼ Short' : '–'}</td>
+        <td class="zahl mono">${escapeHtml(uhr(z))}</td>
+        <td class="zahl mono">${z.menge != null ? escapeHtml(String(z.menge)) : '–'}</td>
+        <td class="zahl mono">${usd(z.tp_punkte, z.usd_pro_pkt)}</td>
+        <td class="zahl mono">${z.sl_punkte != null ? usd(z.sl_punkte, z.usd_pro_pkt) : '<span style="color:var(--sub-2)">ohne</span>'}</td>
+        <td class="zahl mono">${z.einsatz_abs != null ? Math.round(Number(z.einsatz_abs)).toLocaleString('de-DE') + ' €' : '–'}</td></tr>`).join('')
+    return kopf + `<table class="wd-tab" style="margin-bottom:18px"><thead><tr><th></th><th>ID</th><th>Konto</th><th class="zahl">Richtung</th><th class="zahl">Start (Dubai)</th><th class="zahl">Menge</th><th class="zahl">TP</th><th class="zahl">SL</th><th class="zahl">Einsatz</th></tr></thead><tbody>${zeilen}</tbody></table>`
   }
   function apIdsRender(){
     const root = document.getElementById('ap-ids-root'); if(!root) return
@@ -58673,9 +58697,13 @@
         <td class="zahl">${r.drin ? r.geplant : '<span style="color:var(--sub-2)">–</span>'}</td>
         <td class="zahl">${r.drin ? r.ausgelassen : '<span style="color:var(--sub-2)">–</span>'}</td></tr>`).join('')
     root.style.padding = '6px 2px'; root.style.color = ''
-    root.innerHTML = kopf + `<table class="wd-tab"><thead><tr><th>Planer</th><th>ID</th><th class="zahl" title="Konten vom Typ Challenge / Phase 1 / Phase 2, nicht archiviert">Konten planbar</th><th class="zahl">geplant (letzter Lauf)</th><th class="zahl">ausgelassen</th></tr></thead><tbody>${zeilen || '<tr><td colspan="5" style="color:var(--sub)">keine ID mit planbaren Konten</td></tr>'}</tbody></table>
+    root.innerHTML = apIdsOffenHtml() + kopf + `<table class="wd-tab"><thead><tr><th>Planer</th><th>ID</th><th class="zahl" title="Konten vom Typ Challenge / Phase 1 / Phase 2, nicht archiviert">Konten planbar</th><th class="zahl">geplant (letzter Lauf)</th><th class="zahl">ausgelassen</th></tr></thead><tbody>${zeilen || '<tr><td colspan="5" style="color:var(--sub)">keine ID mit planbaren Konten</td></tr>'}</tbody></table>
       <div style="font-size:11.5px;color:var(--sub);margin-top:8px">Welche Konten einer ID geplant werden, entscheiden weiter Typ, Firma (Kernwerte), Balance und der Haken je Konto unter Accounts.</div>`
     root.querySelector('#ap-ids-neu')?.addEventListener('click', apIdsLaden)
+    // Bestätigen: eine Zeile / alle — Admin-Route wie auf der Trade-Planer-Seite, danach neu laden
+    const ok = async (ids, btn) => { if(btn) btn.disabled = true; try{ await tplEingriff('bestaetigen', ids) }catch(e){ if(typeof atToast === 'function') atToast('Nicht bestätigt: ' + ((e && e.message) || e), 'end') } finally{ apIdsLaden() } }
+    root.querySelectorAll('[data-ap-ok]').forEach(b => b.addEventListener('click', () => ok([b.dataset.apOk], b)))
+    root.querySelector('#ap-ids-alle-ok')?.addEventListener('click', e => ok(_apIds.offen.map(z => String(z.plan_id)), e.currentTarget))
     root.querySelectorAll('[data-ap-id]').forEach(cb => cb.addEventListener('change', async () => {
       cb.disabled = true
       try{ await apdApi('POST', '/ids', { user_id: cb.dataset.apId, drin: cb.checked })
