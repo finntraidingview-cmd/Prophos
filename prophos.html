@@ -39990,7 +39990,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1132'
+  const OS_TAB_BUILD = '2026-09-22.1133'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -45338,7 +45338,7 @@
       case 'v2term': return `Am PC${pc} MT5 öffnen und mit Login${login} einloggen.`
       case 'v2order': return sf.unklar ? 'Erst im MT5-Terminal nachsehen, ob die Order liegt — dann von Hand starten, nie blind.' : 'Puls hat nichts platziert — nichts tun.'
       case 'zu_spaet': return `Prophos-Tab am PC${pc} offen lassen.`
-      default: return 'Check am PC war rot — ↻ Neu starten prüft erneut.'
+      default: return 'Check am PC war rot — beheben, dann ✓ Behoben.'
     }
   }
   function tplSfAuto(sf, D){
@@ -45385,7 +45385,9 @@
       const probleme = []
       // START-FEHLER (07.10.2026): eigener Plan frisch aus dem Tab, fremder aus dem Delta (app.py start_fehler)
       const sf = (p && p.mt5Baseline && p.mt5Baseline.start_fehler) || t.sf || null, geclaimt = p ? !!p.startUmGestartetAt : !!t.geclaimt
-      const neuKnopf = t.eigen && t.status === 'bestaetigt' ? t.plan_id : null
+      // ✓ Behoben (Finn 07.10.2026 16:24: „Fehler behoben — da muss ich auf Abhaken drücken, sodass der Trade frisch reingeplant wird"):
+      // eigene Pläne direkt (sfNeuEinplanen), fremde über die Admin-Route /admin/auto-plan/plan {aktion: 'neu_starten'}
+      const neuKnopf = t.status === 'bestaetigt' && (t.eigen || apdAdmin()) ? t.key : null
       const ueberfaellig = D.jetzt != null && t.start + TPL_VERPASST_MIN < D.jetzt
       if(t.status === 'bestaetigt' && sf && sf.status === 'neu' && D.tag === D.heute && !ueberfaellig){
         add(t.user_id, t.user, { art: 'neu', firma: t.firma, konto: t.konto, ende4: t.ende4, key: t.key,
@@ -45398,8 +45400,8 @@
       } else if(t.status === 'bestaetigt' && D.tag === D.heute && D.jetzt != null && t.start + TPL_VERPASST_MIN < D.jetzt){
         add(t.user_id, t.user, { art: 'plan', firma: t.firma, konto: t.konto, ende4: t.ende4, key: t.key, neu: neuKnopf,
           text: `verpasst — Start ${tplUhr(t.start, D.v)} ist vorbei, nie gestartet`,
-          tun: geclaimt ? 'Der Check am PC war rot, der Grund wurde damals noch nicht gespeichert — ↻ Neu starten prüft erneut und zeigt ihn.'
-            : `Der Prophos-Tab am PC${t.eigen ? '' : ' von ' + (t.user || 'der ID')} lief nicht — Tab öffnen, dann ↻ Neu starten.` })
+          tun: geclaimt ? 'Der Check am PC war rot, der Grund wurde damals noch nicht gespeichert — beheben, dann ✓ Behoben: der Trade startet neu und zeigt ihn, falls es wieder hakt.'
+            : `Der Prophos-Tab am PC${t.eigen ? '' : ' von ' + (t.user || 'der ID')} lief nicht — Tab öffnen, dann ✓ Behoben.` })
       }
       if(b.puls_unklar) probleme.push(`Puls: Ergebnis unklar${b.puls_unklar.msg ? ' — ' + b.puls_unklar.msg : ''}`)
       if(b.tv && b.tv.fehler) probleme.push(`Start-Fehler: ${b.tv.msg || b.tv.fehler}${b.tv.code ? ' (' + b.tv.code + ')' : ''}`)
@@ -45430,7 +45432,7 @@
         <span class="a">${z.bal ? (z.lauf && z.lauf.laeuft ? `<span class="s">${escapeHtml(z.lauf.text || 'liest …')}</span>`
           : `<button type="button" class="knopf" data-tpl-bal="${escapeHtml(z.bal)}">↻ Balance lesen</button>${z.lauf && z.lauf.text ? `<span class="s${z.lauf.fehler ? ' rot' : ''}">${escapeHtml(z.lauf.text)}</span>` : ''}`)
           : z.hinweis ? `<span class="s">${escapeHtml(z.hinweis)}</span>`
-          : `${z.neu ? `<button type="button" class="knopf" data-tpl-neu="${escapeHtml(z.neu)}">↻ Neu starten</button>` : ''}${z.key ? `<button type="button" class="knopf" data-tpl-t="${escapeHtml(z.key)}">→ Plan</button>` : ''}`}</span></div>`).join('')}</div>`).join('')
+          : `${z.neu ? `<button type="button" class="knopf" data-tpl-neu="${escapeHtml(z.neu)}" title="Startzeit in 1–3 min, Prüfungen wie immer am PC der ID">✓ Behoben – neu einplanen</button>` : ''}${z.key ? `<button type="button" class="knopf" data-tpl-t="${escapeHtml(z.key)}">→ Plan</button>` : ''}`}</span></div>`).join('')}</div>`).join('')
     return `<div class="tpl-karte tpl-bd"><div class="tpl-h">Braucht dich <b>${n}</b><span class="leg">↻ Balance · ⏸ heute ausgelassen · ⚠ Plan hängt</span></div>${bloecke}</div>`
   }
   /* LISTE „GEPLANT" (TPL-UEBERSICHT-2, Finn: „so Infos finde ich clean"): Zeilen im Stil der Radar-Zeile (Markup/Klassen wdl-z*,
@@ -45914,9 +45916,18 @@
     const bl = e.target.closest('[data-tpl-bal]')   // Braucht dich: ↻ Balance lesen (bestehende Aktion aus Accounts, F19)
     if(bl){ try{ accBalanceLesen(bl.dataset.tplBal) }catch(err){ console.warn('[tpl] Balance lesen', err) } setTimeout(tplSpaeter, 500); setTimeout(tplSpaeter, 5000); return }
     const nk = e.target.closest('[data-tpl-neu]')   // Braucht dich: ↻ Neu starten (START-FEHLER, 07.10.2026) — Start in 1 min, alle Prüfungen am PC
-    if(nk){ const p = (tradePlans || []).find(x => String(x.id) === nk.dataset.tplNeu); if(!p) return
-      nk.disabled = true; sfNeuEinplanen(p, 'von Hand', true).then(r => { if(!r && typeof atToast === 'function') atToast('Plan ließ sich nicht neu einplanen — schon gestartet oder geändert.', 'end') })
-        .catch(err => console.warn('[tpl] neu starten', err)).finally(() => { setTimeout(tplSpaeter, 500) }); return }
+    if(nk){ const t = tplDaten().trades.find(x => x.key === nk.dataset.tplNeu); if(!t) return
+      nk.disabled = true; nk.textContent = 'plant neu …'
+      const p = t.eigen ? (tradePlans || []).find(x => String(x.id) === t.plan_id) : null
+      ;(async () => {
+        try{
+          if(p){ const r = await sfNeuEinplanen(p, 'von Hand', true); if(!r) throw new Error('schon gestartet oder geändert') }
+          else{ await apdApi('POST', '/plan', { plan_id: t.plan_id, aktion: 'neu_starten' })
+            if(typeof atToast === 'function') atToast(`✓ ${t.user || 'ID'} · ${t.firma || ''}: neu eingeplant — startet in 1–3 min am PC der ID.`, 'start') }
+          await apdLaden(true)
+        }catch(err){ if(typeof atToast === 'function') atToast('Nicht neu eingeplant: ' + ((err && err.message) || err), 'end') }
+        finally{ setTimeout(tplSpaeter, 300) }
+      })(); return }
     const k = e.target.closest('[data-tpl-ab]')   // Konten-Abdeckung: Block auf/zu
     if(k){ const z = k.closest('.tpl-ab-z'); _tpl.abAuf.set(k.dataset.tplAb, !(z && z.classList.contains('auf'))); tplZeichnen(); return }
     const m = e.target.closest('[data-tpl-t]')
