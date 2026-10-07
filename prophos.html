@@ -1896,6 +1896,12 @@
   #tpl-view .tpl-hl-k{padding:7px 4px 3px;font-size:10.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--sub-2)} #tpl-view .tpl-hl-k b{color:var(--sub)}
   #tpl-view .tpl-hz{display:grid;grid-template-columns:minmax(150px,1.4fr) 120px 90px 80px 100px minmax(110px,1fr);gap:4px 10px;align-items:center;padding:5px 4px;border-top:1px solid var(--border-soft);font-size:12.5px;font-variant-numeric:tabular-nums;cursor:pointer}
   #tpl-view .tpl-hz:hover{background:var(--surface-tint)} #tpl-view .tpl-hz.summe{cursor:default;font-weight:600;background:none;border-top:2px solid var(--border)}
+  #tpl-view .kpis.tpl-bk{margin:6px 0 8px} #tpl-view .tpl-bk .kpi-value{font-size:17px}
+  #tpl-view .tpl-tb{display:flex;gap:6px;align-items:stretch;overflow-x:auto;padding:2px 4px 8px}
+  #tpl-view .tpl-tb .tb{flex:0 0 64px;display:flex;flex-direction:column;align-items:center;font-variant-numeric:tabular-nums}
+  #tpl-view .tpl-tb .ob,#tpl-view .tpl-tb .ub{width:22px;height:34px;display:flex;justify-content:center} #tpl-view .tpl-tb .ob{align-items:flex-end;border-bottom:1.5px solid var(--border)} #tpl-view .tpl-tb .ub{align-items:flex-start}
+  #tpl-view .tpl-tb i{display:block;width:100%;border-radius:3px} #tpl-view .tpl-tb i.gut{background:var(--good)} #tpl-view .tpl-tb i.rot{background:var(--danger)}
+  #tpl-view .tpl-tb small{font-size:10.5px;color:var(--sub);margin-top:3px} #tpl-view .tpl-tb b{font-size:11.5px;font-weight:600}
   #tpl-view .tpl-hz.ohne{opacity:.6} #tpl-view .tpl-hz.zu .w b{color:var(--sub)}
   #tpl-view .tpl-hz .w{display:flex;align-items:center;gap:6px;min-width:0} #tpl-view .tpl-hz .w i{width:8px;height:8px;border-radius:50%;flex:none} #tpl-view .tpl-hz .w b{font-weight:600;white-space:nowrap} #tpl-view .tpl-hz .w small{color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #tpl-view .tpl-hz .r{color:var(--sub);white-space:nowrap} #tpl-view .tpl-hz .r em{display:inline-block;min-width:34px;margin-right:6px;padding:1px 0;border-radius:4px;background:var(--surface-tint);color:var(--ink-2);font-style:normal;font-size:10.5px;font-weight:700;text-align:center;letter-spacing:.04em}
@@ -39966,7 +39972,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1129'
+  const OS_TAB_BUILD = '2026-09-22.1130'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -44753,7 +44759,7 @@
    * Tages (Sommer 2 h, Winter 3 h). Netto-Linie: jeder Trade zählt ab Start laufzeit_min lang (aus dem Lauf, sonst 180 min) mit seinem
    * Einsatz, beendete bis zu ihrem Ende, laufende mindestens bis jetzt; gehedgte zählen 0 — wie ap_verlauf im Backend. */
   const _tpl = { tag: 'heute', wahl: null, edit: null, busy: false, meldung: '', timer: null, geladen: 0, laeuft: false, fehler: '', weg: new Set(), stub: false,
-    sicht: 'alle', abAuf: new Map(), lt: new Map(), ltAt: 0, weitereAuf: false, kerzen: [], kerzenAt: 0, kerzenBis: '', kwAt: 0, hypoJe: new Map(), okLokal: new Set() }   // okLokal: eben einzeln bestätigte Vorschläge (Chip sofort „bestätigt")   // kerzen: tv_kurs_1m NQ heute; hypoJe: Satz/Typ/Einstieg je Plan über Ladevorgänge hinweg (Hypo-P&L)   // sicht: ID-Chip („alle" | user_id), abAuf: Konten-Abdeckung je ID auf/zu, lt: Startzeiten laufender Trades aller IDs (07.10.2026)
+    sicht: 'alle', abAuf: new Map(), lt: new Map(), ltAt: 0, weitereAuf: false, kerzen: [], kerzenAt: 0, kerzenBis: '', kwAt: 0, hypoJe: new Map(), okLokal: new Set(), bilanz: null, bilanzAt: 0 }   // okLokal: eben einzeln bestätigte Vorschläge (Chip sofort „bestätigt")   // kerzen: tv_kurs_1m NQ heute; hypoJe: Satz/Typ/Einstieg je Plan über Ladevorgänge hinweg (Hypo-P&L)   // sicht: ID-Chip („alle" | user_id), abAuf: Konten-Abdeckung je ID auf/zu, lt: Startzeiten laufender Trades aller IDs (07.10.2026)
   try{ const s = localStorage.getItem('prophos_tpl_sicht'); if(s) _tpl.sicht = s }catch(_){}
   // ALLE IDS (07.10.2026, Finn 03:25 dt: „Es ist nur die ID, von der ich gerade eingeloggt bin. So hässlich, man erkennt gar nichts"):
   // solange diese Seite offen ist, fragen apApi (Lauf) und apdLaden (Delta) mit ?sicht=alle — das Backend liefert dann alle IDs
@@ -45412,8 +45418,8 @@
    * Kopf „P&L hypothetisch heute · jetzt ±€". Zeitachse = die des Zeitstrahls (_tpl.achse). */
   function tplHypoHtml(D){
     const a = _tpl.achse || {}; if(a.VON == null) return ''
-    const h = tplHypo(D), hv = h.verlauf
-    if(!hv.length && !h.n && !h.ohne) return ''
+    const h = tplHypo(D), hv = h.verlauf, bilanz = tplBilanzHtml(D)
+    if(!hv.length && !h.n && !h.ohne) return bilanz ? `<div class="tpl-karte tpl-nk tpl-hk"><div class="tpl-h">P&amp;L hypothetisch <b>nichts läuft</b></div>${bilanz}</div>` : ''
     const v = D.v, VON = a.VON, BIS = a.BIS, SPAN = BIS - VON, W = 1000, H = 150, M = H / 2
     const vz = x => (x > 0 ? '+' : x < 0 ? '−' : '') + tplEur(x)
     const max = Math.max(50, ...hv.map(p => Math.abs(p.eur))) * 1.15
@@ -45447,7 +45453,42 @@
         <div class="tpl-hz summe"><span class="w"><b>Summe</b></span><span class="r"></span><span class="p"></span><span class="s"></span><b class="h ${h.jetzt > 0 ? 'tpl-gut' : h.jetzt < 0 ? 'tpl-rot' : ''}">${vz(h.jetzt)}</b><span class="z">${h.ohne ? h.ohne + ' ohne Wert' : ''}</span></div></div>` : ''
     return `<div class="tpl-karte tpl-nk tpl-hk"><div class="tpl-h">P&amp;L hypothetisch heute <b class="${h.jetzt > 0 ? 'tpl-gut' : h.jetzt < 0 ? 'tpl-rot' : ''}">jetzt ${vz(h.jetzt)}</b>
         <span class="leg"><span>${h.n} Trade${h.n === 1 ? '' : 's'}${h.ohne ? ` · ${h.ohne} ohne Wert` : ''}</span><span>Kontowert-Satz × Live-P&amp;L${h.cfd ? ' · CFD ≈ NQ' : ''}</span><span>0 = Einstand</span></span></div>
-        ${hv.length ? `<div class="tpl-nk-chart"><span class="skala oben">+${tplEur(max)}</span><span class="skala unten">−${tplEur(max)}</span>${svg}</div><div class="tpl-achse tpl-nk-achse">${achse.join('')}</div>` : '<div class="tpl-leer">noch kein Verlauf — Kerzen oder Startzeiten fehlen</div>'}${liste}</div>`
+        ${hv.length ? `<div class="tpl-nk-chart"><span class="skala oben">+${tplEur(max)}</span><span class="skala unten">−${tplEur(max)}</span>${svg}</div><div class="tpl-achse tpl-nk-achse">${achse.join('')}</div>` : '<div class="tpl-leer">noch kein Verlauf — Kerzen oder Startzeiten fehlen</div>'}${liste}${bilanz}</div>`
+  }
+  /* BEENDET · BILANZ DES RECHNERS (07.10.2026, Finn: „kleine Statistiken … wie gut der Rechner Long/Short ausgleicht"): Kacheln Gesamt ·
+   * Long · Short · im Plus, Balken je Tag (grün über / rot unter 0), darunter die beendeten Trades (neueste oben). Nur Auto-Planer-Trades,
+   * ID-Chip filtert mit. Hypothetisch = echter P&L $ × Kontowert-Satz (Lauf des Tages → Balance vorher → heute, Quelle im Tooltip). */
+  function tplBilanzHtml(D){
+    let b = (_tpl.bilanz || []).filter(z => z && z.hypo_eur != null)
+    if(_tpl.sicht && _tpl.sicht !== 'alle') b = b.filter(z => String(z.user_id) === String(_tpl.sicht))
+    if(!b.length) return ''
+    const vz = x => (x > 0 ? '+' : x < 0 ? '−' : '') + tplEur(x)
+    const kl = x => x > 0 ? 'tpl-gut' : x < 0 ? 'tpl-rot' : ''
+    const summe = a => a.reduce((s, z) => s + Number(z.hypo_eur), 0)
+    const lo = b.filter(z => z.richtung === 'buy'), sh = b.filter(z => z.richtung === 'sell'), plus = b.filter(z => z.hypo_eur > 0)
+    const ges = summe(b), heute = summe(b.filter(z => z.tag === D.heute))
+    const kachel = (lab, wert, unter, titel) => `<div class="kpi" title="${escapeHtml(titel || '')}"><div class="kpi-label">${lab}</div><div class="kpi-value ${kl(wert)}">${vz(wert)}</div><span class="kpi-delta">${unter}</span></div>`
+    const kacheln = `<div class="kpis tpl-bk">
+        ${kachel('Gesamt', ges, `${b.length} Trade${b.length === 1 ? '' : 's'} · heute ${vz(heute)}`, 'Summe aller beendeten Auto-Planer-Trades, hypothetisch in €')}
+        ${kachel('▲ Long', summe(lo), `${lo.length} Trade${lo.length === 1 ? '' : 's'}`, 'beendete Long-Trades')}
+        ${kachel('▼ Short', summe(sh), `${sh.length} Trade${sh.length === 1 ? '' : 's'}`, 'beendete Short-Trades')}
+        <div class="kpi"><div class="kpi-label">Im Plus</div><div class="kpi-value">${plus.length} / ${b.length}</div><span class="kpi-delta">${Math.round(plus.length / b.length * 100)} % · Ø ${vz(ges / b.length)}</span></div></div>`
+    // Balken je Tag
+    const jeTag = new Map(); for(const z of b){ const t = z.tag || String(z.start || '').slice(0, 10); jeTag.set(t, (jeTag.get(t) || 0) + Number(z.hypo_eur)) }
+    const tage = [...jeTag.keys()].sort(), max = Math.max(1, ...[...jeTag.values()].map(Math.abs))
+    const tagTxt = t => { const [y, m, d] = String(t).split('-'); return d && m ? `${d}.${m}.` : t }
+    const balken = `<div class="tpl-tb">${tage.map(t => { const e = jeTag.get(t), hP = Math.max(2, Math.abs(e) / max * 100)
+        return `<div class="tb" title="${escapeHtml(`${tagTxt(t)} · ${vz(e)} hypothetisch`)}"><div class="ob">${e > 0 ? `<i class="gut" style="height:${hP.toFixed(0)}%"></i>` : ''}</div><div class="ub">${e < 0 ? `<i class="rot" style="height:${hP.toFixed(0)}%"></i>` : ''}</div><small>${tagTxt(t)}</small><b class="${kl(e)}">${vz(e)}</b></div>` }).join('')}</div>`
+    const f2 = x => Number(x).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    const usd = x => x == null ? '—' : (x < 0 ? '−' : '+') + Math.abs(Math.round(x)).toLocaleString('de-DE') + ' $'
+    const QW = { lauf: 'Satz aus dem Planer-Lauf des Tages', balance_vorher: 'Satz aus dem Kontowert bei der Balance vor dem Trade', heute: 'Satz aus dem Kontowert von heute' }
+    const zeit = iso => { const d = new Date(iso || ''); return isNaN(d) ? '—' : d.toLocaleString('de-DE', { timeZone: 'Asia/Dubai', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) }
+    const zeilen = [...b].sort((x, y) => String(y.start || '').localeCompare(String(x.start || ''))).slice(0, 30).map(z => `<div class="tpl-hz zu" title="${escapeHtml(`${z.konto || ''} · ${QW[z.satz_quelle] || ''}`)}">
+        <span class="w"><i style="background:${idFarbe(z.user_id)}"></i><b>${escapeHtml(z.user || '?')}</b><small>${escapeHtml(z.firma || '?')}${z.ende4 ? ' …' + escapeHtml(z.ende4) : ''}</small></span>
+        <span class="r"><em class="${z.richtung === 'buy' ? 'is-buy' : 'is-sell'}">${z.richtung === 'buy' ? 'BUY' : 'SELL'}</em>${escapeHtml(z.typ === 'phase2' ? 'Phase 2' : z.typ === 'phase1' ? 'Phase 1' : z.typ || '')}</span>
+        <span class="p">${usd(z.pl_usd)}</span><span class="s">${z.satz != null ? f2(z.satz) + ' €/$' : '—'}</span>
+        <b class="h ${kl(z.hypo_eur)}">${vz(z.hypo_eur)}</b><span class="z">${zeit(z.start)}</span></div>`).join('')
+    return `<div class="tpl-hl"><div class="tpl-hl-k">Beendet · letzte 30 Tage <b>${b.length}</b> <span style="text-transform:none;letter-spacing:0;font-weight:500">nur Trades vom Auto-Planer · echter P&amp;L × Kontowert-Satz</span></div>${kacheln}${balken}${zeilen}</div>`
   }
   /* Sicht auf EINE ID (ID-Chip): Trades und Summen nur dieser ID — Band/Netto „jetzt" aus dem Delta bleiben über alle (so rechnet der Planer) */
   function tplSichtFilter(D, ids){
@@ -45541,6 +45582,21 @@
       _tpl.lt = m
     }catch(e){ console.warn('[tpl] live-trades', (e && e.message) || e) }
   }
+  /* HYPO-BILANZ (07.10.2026, Finn: „wie viel die vergangenen Trades hypothetisch gemacht oder verloren haben … kleine Statistiken … nur
+   * die Trades vom Rechner"): GET /admin/hypo-bilanz?tage=30 (beendete Auto-Planer-Trades aller IDs, P&L $ × Satz) — höchstens alle 5 min */
+  async function tplBilanzLaden(){
+    if(Date.now() - _tpl.bilanzAt < 300000) return
+    _tpl.bilanzAt = Date.now()
+    try{
+      const { data: { session } } = await supabase.auth.getSession()
+      const tok = session?.access_token; if(!tok) return
+      const ctrl = new AbortController(); const tm = setTimeout(() => ctrl.abort(), 15000)
+      const r = await fetch(`${WATCHER_HOME}/admin/hypo-bilanz?tage=30`, { headers: { 'sb-token': tok }, cache: 'no-store', signal: ctrl.signal })
+      clearTimeout(tm)
+      const d = await r.json().catch(() => ({}))
+      if(r.ok && d && d.ok) _tpl.bilanz = d.trades || []
+    }catch(e){ console.warn('[tpl] hypo-bilanz', (e && e.message) || e) }
+  }
   /* KERZEN FÜR DEN HYPO-P&L-VERLAUF (HYPO-PNL-LIVE, 07.10.2026): tv_kurs_1m, Wurzel NQ, heute (deutsche Zeit) — einmal je Seitenöffnung
    * ganz, danach im 60-s-Takt nur die Minuten nach der letzten geladenen (kein Realtime-Abo, Supabase-Last). Je Minute der Schlusskurs. */
   async function tplKerzenLaden(D){
@@ -45563,6 +45619,7 @@
       // Kontowerte (Satz € je $ je Konto) für beendete eigene Trades im Hypo-P&L — kwLaden aus der Accounts-Ansicht, höchstens alle 10 min
       if(typeof kwLaden === 'function' && Date.now() - _tpl.kwAt > 600000){ _tpl.kwAt = Date.now(); try{ await kwLaden() }catch(_){} }
       try{ await tplKerzenLaden(tplDaten()) }catch(_){}
+      await tplBilanzLaden()
       const d = await apApi('GET')
       _ap.letzter = d.letzter || null; _ap.imPlaner = !!d.im_planer; _ap.admin = d.admin != null ? !!d.admin : null; _ap.geladenFuer = currentUserId
       _tpl.fehler = ''

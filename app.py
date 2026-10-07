@@ -14614,6 +14614,108 @@ def admin_kontowerte():
         return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 500
 
 
+
+# HYPO-BILANZ (07.10.2026, Finn am Trade-Planer „P&L hypothetisch heute": „wie viel die vergangenen Trades hypothetisch gemacht oder
+# verloren haben … kleine Statistiken … nur die Trades vom Rechner, damit ich sehe, wie gut der Rechner Long/Short ausgleicht").
+# Beendete Auto-Planer-Trades (auto_plan, completed/review) aller IDs: echter P&L $ × Kontowert-Satz (€ je $) = hypothetischer €.
+# Satz in fester Reihenfolge: der Planer-Lauf DIESES Tages für das Konto (satz_eur_je_usd, so hat der Rechner gewichtet) → Kontowert
+# bei der Balance VOR dem Trade (ap_kontowert, dieselbe Formel wie live) → Kontowert heute. Nur Lesen, keine Entscheidung.
+def hypo_bilanz_zeile(p, acc, firmen, lauf_satz, kw_heute, disp):
+    """REIN RECHNEND (testbar): ein beendeter Auto-Plan → Zeile {plan_id, user_id, user, firma, konto, ende4, typ, richtung,
+    start, ende, pl_usd, satz, satz_quelle, hypo_eur} oder None (kein P&L)."""
+    acc = acc or {}
+    base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+    tv = base.get("tv") if isinstance(base.get("tv"), dict) else {}
+    fin = base.get("final") if isinstance(base.get("final"), dict) else {}
+    pl = _wd_num(p.get("master_pl"))
+    if pl is None:
+        pl = lt_pl_balance(p.get("route"), tv, fin)
+    if pl is None:
+        return None
+    typ = p.get("konto_typ") or acc.get("account_type") or ""
+    satz, quelle = lauf_satz, ("lauf" if lauf_satz is not None else None)
+    if satz is None:
+        bs = _wd_num(tv.get("balance_start"))
+        be = _wd_num(fin.get("balance_end"))
+        if bs is None and be is not None:
+            bs = be - pl
+        kp = ap_kw_param(ap_regel_finden(firmen, acc.get("firm") or p.get("master_firm")))
+        kv = ap_kontowert(typ, bs, kp) if (kp and bs is not None) else None
+        if kv and kv.get("satz") is not None:
+            satz, quelle = float(kv["satz"]), "balance_vorher"
+    if satz is None and kw_heute is not None:
+        satz, quelle = float(kw_heute), "heute"
+    return {"plan_id": str(p.get("id")), "user_id": str(p.get("user_id") or ""), "user": disp.get(str(p.get("user_id") or ""), ""),
+            "firma": p.get("master_firm") or acc.get("firm") or "", "konto": p.get("master_name") or acc.get("name") or "",
+            "ende4": _ap_ende4(acc), "typ": typ, "richtung": p.get("richtung"), "route": p.get("route"),
+            "start": p.get("started_at"), "ende": p.get("ended_at") or p.get("completed_at") or fin.get("at"),
+            "pl_usd": round(pl, 2), "satz": round(satz, 5) if satz is not None else None, "satz_quelle": quelle,
+            "hypo_eur": round(satz * pl, 2) if satz is not None else None}
+
+
+@app.route("/admin/hypo-bilanz", methods=["GET", "OPTIONS"])
+def admin_hypo_bilanz():
+    """GET ?tage=30 → {ok, tage, trades:[hypo_bilanz_zeile …]} — Sicht wie /admin/kontowerte (Admin alle, sonst nur eigene)."""
+    if request.method == "OPTIONS":
+        return "", 200
+    _mail, err = _admin_auth()
+    if err is None:
+        uid = str(request.environ.get("prophos.admin_uid") or "")
+        try:
+            sicht = uid if admin_zugang_nur_eigene(uid) else None
+        except Exception:
+            return jsonify({"ok": False, "error": "Anmeldung nicht prüfbar"}), 502
+    else:
+        uid, err2 = _wd_login()
+        if err2:
+            return err2
+        sicht = uid
+    try:
+        tage = max(1, min(90, int(request.args.get("tage") or 30)))
+        seit = datetime.fromtimestamp(datetime.now(timezone.utc).timestamp() - tage * 86400, timezone.utc).isoformat()
+        q = {"select": "id,user_id,master_account_id,master_name,master_firm,route,richtung,status,master_pl,konto_typ,"
+                       "started_at,ended_at,completed_at,mt5_baseline",
+             "auto_plan": "eq.true", "status": "in.(completed,review)", "started_at": f"gte.{seit}", "order": "started_at.asc"}
+        if sicht:
+            q["user_id"] = f"eq.{sicht}"
+        plaene = _sb_all("trade_plans", q)
+        disp, excluded = _wd_personen()
+        plaene = [p for p in plaene if str(p.get("user_id")) not in excluded]
+        ids = sorted({str(p.get("master_account_id")) for p in plaene if p.get("master_account_id")})
+        accs = {}
+        for i in range(0, len(ids), 80):
+            for a in sb_select("accounts", {"select": "id,name,firm,account_type,external_id", "id": f"in.({','.join(ids[i:i + 80])})"}):
+                accs[str(a["id"])] = a
+        reg = (sb_select("auto_plan_regeln", {"select": "regeln", "id": "eq.1"}) or [{}])[0]
+        firmen = (reg.get("regeln") or {}).get("firmen") or []
+        # Satz je (Tag, Konto) aus den echten Läufen (kein Probelauf); spätester Lauf des Tages gewinnt
+        lauf = {}
+        for l in _sb_all("auto_plan_lauf", {"select": "tag,at,ergebnis", "tag": f"gte.{seit[:10]}", "order": "at.asc"}):
+            e = l.get("ergebnis") if isinstance(l.get("ergebnis"), dict) else {}
+            if e.get("trocken"):
+                continue
+            for g in e.get("geplant") or []:
+                if isinstance(g, dict) and g.get("konto_id") and g.get("satz_eur_je_usd") is not None:
+                    lauf[(str(l.get("tag")), str(g["konto_id"]))] = float(g["satz_eur_je_usd"])
+        kw = ap_kontowerte_gemerkt(sicht)
+        from zoneinfo import ZoneInfo
+        aus = []
+        for p in plaene:
+            aid = str(p.get("master_account_id") or "")
+            st = str(p.get("started_at") or "")
+            try:
+                tag = datetime.fromisoformat(st.replace("Z", "+00:00")).astimezone(ZoneInfo("Europe/Berlin")).date().isoformat()
+            except Exception:
+                tag = st[:10]
+            z = hypo_bilanz_zeile(p, accs.get(aid), firmen, lauf.get((tag, aid)), (kw.get(aid) or {}).get("satz_eur_pro_usd"), disp)
+            if z:
+                z["tag"] = tag
+                aus.append(z)
+        return jsonify({"ok": True, "tage": tage, "trades": aus})
+    except Exception as e:
+        print(f"[hypo-bilanz] ⚠️ GET: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 500
+
 def _ap_hhmm_txt(m):
     return f"{int(m) // 60:02d}:{int(m) % 60:02d}"
 
