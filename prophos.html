@@ -40067,7 +40067,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1147'
+  const OS_TAB_BUILD = '2026-09-22.1148'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -56500,7 +56500,10 @@
   async function mtcApi(path, opts){
     // tsx-lesen / tsx-inventar seit 30.09.2026 (Topstep-Paket S): das Panel wartet 150 s, der Proxy seit heute 310 s — 20 s Standard
     // hätte eine laufende Lesung als „offline" gemeldet
-    const lang = /^(tv-lesen|tv-close|tv-konto|tv-order|master-close|order|tv-fokus|tsx-konto|tsx-close|tsx-lesen|tsx-inventar)/.test(String(path))   // tsx-* (F23/F25): Order/Schließen in TopstepX lang   // lokal: kein TDZ bei frühen Ticks
+    // master-order (07.10.2026, Fehler-Muster „Zeitlimit 20 s": 16× auf 9 PCs, alle UNKLAR): der Order-Bot darf laut Panel bis 300 s
+    // brauchen (F9-Dialog, SL/TP-Zeilen-Scan), der Aufruf stand aber nicht in dieser Liste → nach 20 s abgebrochen, während der Bot
+    // weiterklickte; Folge „unklar" und beim zweiten Versuch „läuft gerade schon eine Order". Jetzt 320 s wie master-close.
+    const lang = /^(tv-lesen|tv-close|tv-konto|tv-order|master-close|master-order|order|tv-fokus|tsx-konto|tsx-close|tsx-lesen|tsx-inventar)/.test(String(path))   // tsx-* (F23/F25): Order/Schließen in TopstepX lang   // lokal: kein TDZ bei frühen Ticks
     const ctrl = new AbortController()
     const ms = (opts && opts.timeoutMs) || (lang ? 320000 : 20000)
     const tm = setTimeout(() => { try{ ctrl.abort() }catch(_){} }, ms)
