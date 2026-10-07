@@ -40066,7 +40066,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1142'
+  const OS_TAB_BUILD = '2026-09-22.1143'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -43923,6 +43923,11 @@
         versuche: (alt && Number(alt.versuche)) || 0 }
       await baselinePatch(plan.id, { start_fehler: flag }, 'planned')
       try{ renderTradePlans() }catch(_){}
+      // FEHLER-MUSTER (07.10.2026, Finn: „wenn es öfter die gleichen sind, genau diese Fehler eliminieren"): start_fehler wird je Plan
+      // überschrieben — deshalb jede rote Meldung zusätzlich als Zeile in puls_fehlstarts (Auswertung: View puls_fehler_muster)
+      supabase.from('puls_fehlstarts').insert({ plan_id: String(plan.id), route: plan.route || null, firma: plan.masterFirm || null,
+        konto: plan.masterName || null, pc: flag.pc, login: flag.login, schritt: flag.schritt, msg: flag.msg, unklar: flag.unklar })
+        .then(({ error }) => { if(error) console.warn('[start-fehler] Protokoll', error.message) }, () => {})
       // Handy-Meldung (07.10.2026, Finn: Fehlstarts sofort sehen und selbst beheben) — Ziel erreicht meldet tpStartUmTick selbst
       if(flag.schritt !== 'ziel_erreicht'){
         try{ if(typeof pushAnsHandy === 'function') pushAnsHandy('⚠ Trade nicht gestartet', `„${plan.masterName || 'Plan'}": ${flag.msg || 'Check rot'} — Trade-Planer → Braucht dich.`,
