@@ -8685,9 +8685,33 @@ def start_vorrat2():
     threading.Thread(target=vorrat2_loop, daemon=True).start()
 
 
+VORRAT2_NEU_BREMSE_S = 300
+
+
+def vorrat2_neu_seit_lauf(zellen, lauf_at):
+    """REIN RECHNEND (testbar): gibt es Konten, die NACH dem letzten Lauf angelegt wurden? zellen tragen _angelegt (created_at je Konto
+    der Zelle, aus admin_build_vorrat). Anlass 08.10.2026 (Finn: „Moritz — vor 20 Minuten 3 weitere Tradeify-Konten gekauft, die werden
+    im Vorrat nicht angezeigt"): Konten-Liste, Wert im Vorrat und Kaufzahl kommen aus dem gespeicherten Lauf (Takt alle 6 h) —
+    zwischen zwei Takten fehlten neue Konten bis zu 6 h. → True = ein frischer Lauf ist fällig."""
+    if not lauf_at:
+        return False
+
+    def norm(x):   # PostgREST liefert „2026-10-07T22:12:24+00:00", SQL-Spalten auch „2026-10-07 17:00:25+00" — gleiche Form, dann String-Vergleich
+        t = str(x).strip().replace(" ", "T").replace("Z", "+00:00")
+        return t + ":00" if len(t) >= 3 and t[-3] == "+" and t[-6] != "+" else t
+    s = norm(lauf_at)
+    for z in zellen or []:
+        for c in z.get("_angelegt") or []:
+            if c and norm(c) > s:
+                return True
+    return False
+
+
 def vorrat2_anhaengen(erg1):
     """Stufe-1-Antwort (admin_build_vorrat) + Stufe-2-Felder aus dem letzten Lauf. Gibt es noch keinen Lauf, läuft einmal einer.
-    Bestellungen und seit dem Lauf angelegte Konten wirken sofort (vorrat_anzeige_n)."""
+    Bestellungen und seit dem Lauf angelegte Konten wirken sofort (vorrat_anzeige_n). Seit 08.10.2026: liegen Konten jünger als der
+    letzte Lauf vor, läuft sofort ein neuer (Quelle 'hand' wie der Knopf, höchstens alle VORRAT2_NEU_BREMSE_S s) — neue Konten zählen damit sofort
+    als im Vorrat, mit ihrer Lesung oder ohne (vorrat2_zelle nimmt Konten ohne Balance als Bestand ohne Chance-Wert)."""
     try:
         rows = sb_select("vorrat_lauf", {"select": "id,at,quelle,ergebnis", "ergebnis": "not.is.null", "order": "at.desc,id.desc",
                                          "limit": "1"})
@@ -8696,6 +8720,14 @@ def vorrat2_anhaengen(erg1):
             return dict(erg1, stufe2_bereit=False, stufe2_hinweis=f"SQL noch nicht eingespielt ({VORRAT2_SQL})")
         raise
     lauf = rows[0] if rows else vorrat2_lauf("hand")
+    if lauf and lauf.get("ergebnis") and vorrat2_neu_seit_lauf(erg1.get("zellen") or [], lauf.get("at")) \
+            and time.time() - float(_vr2_info.get("neu_at") or 0) > VORRAT2_NEU_BREMSE_S:
+        _vr2_info["neu_at"] = time.time()
+        try:
+            lauf = vorrat2_lauf("hand") or lauf    # neue Konten seit dem letzten Lauf → sofort nachrechnen (08.10.2026); quelle 'hand', weil
+                                                   # vorrat_lauf.quelle per CHECK nur 'takt'/'hand' zulässt (Hinweis Slave 1)
+        except Exception as e:
+            print(f"[vorrat2] ⚠️ Lauf wegen neuer Konten: {type(e).__name__}: {e}", flush=True)
     if lauf and (lauf.get("ergebnis") or {}).get("stand") != VORRAT2_RECHEN_STAND:
         # Lauf stammt aus älterem Code (06.10.2026: nach dem Push von .1055 fehlten untergrenze/chance_neu bis zum nächsten Takt —
         # die Sätze der Tagesliste lauteten „Ziel 0") → einmal neu rechnen; scheitert das, bleibt der alte Lauf
