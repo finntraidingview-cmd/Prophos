@@ -1922,13 +1922,13 @@
   :is(#tpl-view,#adm-pane-planer) .tpl-hz .p,:is(#tpl-view,#adm-pane-planer) .tpl-hz .s{text-align:right;color:var(--ink-2)} :is(#tpl-view,#adm-pane-planer) .tpl-hz .h{text-align:right;font-weight:700;font-size:13.5px} :is(#tpl-view,#adm-pane-planer) .tpl-hz .z{text-align:right;color:var(--sub);white-space:nowrap}
   /* Geplant-Liste = Tabelle des Reiters Trades → Geplant (.pz-*, GEPLANT-WIE-TRADES-REITER 07.10.2026), hier mit ID-Spalte vorn */
   :is(#tpl-view,#adm-pane-planer) .tpl-lk{padding-bottom:6px} :is(#tpl-view,#adm-pane-planer) .tpl-lk .tpl-h{margin:4px 0 0}
-  #dashboard-view .pz-tab.pz-mit-id{grid-template-columns:156px 72px minmax(162px,.7fr) minmax(210px,1.4fr) minmax(96px,.6fr) 60px 76px 76px 168px}
+  #dashboard-view .pz-tab.pz-mit-id{grid-template-columns:156px 72px minmax(150px,1fr) 220px 92px 64px 150px 76px 76px 160px}
   #dashboard-view .pz-z > .pz-wer{display:flex;align-items:center;gap:7px} #dashboard-view .pz-wer i{flex:none;width:8px;height:8px;border-radius:50%}
   #dashboard-view .pz-wer b{font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis}
   #dashboard-view .pz-wer .tc2-chip{flex:none;margin-left:auto;font-size:10.5px}   /* Richtung je ID rechts in der ID-Spalte */
   #dashboard-view .pz-hand{font-size:11.5px;color:var(--sub)} #dashboard-view .pz-live.is-leer{width:0}
   #dashboard-view .pz-akt .btn:disabled{opacity:.45;cursor:default}
-  @media (max-width:1359px){ #dashboard-view .pz-tab.pz-mit-id{grid-template-columns:156px 72px minmax(162px,.7fr) minmax(130px,1.4fr) 60px 76px 76px 168px} }
+  @media (max-width:1359px){ #dashboard-view .pz-tab.pz-mit-id{grid-template-columns:156px 72px minmax(150px,1fr) 200px 64px 130px 76px 76px 160px} }
   @media (max-width:820px){ #dashboard-view .pz-z > .pz-wer{order:0;flex:0 0 100%} }
   /* Braucht dich (07.10.2026): ruhiger Block je ID — Zeile = Symbol · Firma · Klartext · kleine Aktion */
   :is(#tpl-view,#adm-pane-planer) .tpl-bd{border-color:color-mix(in srgb,#B45309 35%,var(--border))}
@@ -3190,7 +3190,9 @@
   #dashboard-view .pz-kopf .pz-sl{color:#b91c1c;font-weight:600}
   #dashboard-view .pz-kopf .pz-warn{color:#B45309;font-weight:600}
   #dashboard-view .pz-kopf i{font-style:normal;color:var(--sub-2)}
-  #dashboard-view .pz-tab{display:grid;grid-template-columns:88px minmax(162px,.7fr) minmax(210px,1.4fr) minmax(118px,.6fr) 60px 76px 76px 168px;column-gap:10px;border:1px solid var(--border-soft);border-radius:10px;background:var(--surface);overflow:hidden}
+  /* FESTE SPALTEN (08.10.2026, Finn: „das Mapping ist hässlich"): nur die Konto-Spalte ist flexibel, alle anderen fest — damit stehen die
+     Spalten in jedem Firmen-Block gleich; Block max. 1100 px (tpl-lk / Admin). Neu: Risiko-Spalte (Balken) vor TP/SL. */
+  #dashboard-view .pz-tab{display:grid;grid-template-columns:84px minmax(150px,1fr) 220px 92px 64px 150px 76px 76px 160px;column-gap:10px;border:1px solid var(--border-soft);border-radius:10px;background:var(--surface);overflow:hidden}
   #dashboard-view .pz-z{display:grid;grid-template-columns:subgrid;grid-column:1/-1;align-items:center;min-height:42px;padding:6px 14px;font-size:13px;color:var(--ink-2);font-variant-numeric:tabular-nums;transition:background .12s}
   #dashboard-view .pz-z + .pz-z{border-top:1px solid var(--border-soft)}
   #dashboard-view .pz-z:not(.pz-z-kopf):hover{background:var(--bg)}
@@ -3219,8 +3221,9 @@
   #dashboard-view .pz-bal-t .pz-rest{color:var(--sub)}
   #dashboard-view .pz-live{display:inline-block;width:14px;font-style:normal;font-size:9px;vertical-align:1px;color:var(--good)}
   #dashboard-view .pz-live.is-alt{font-size:12px;vertical-align:0;color:var(--warn)}
-  #dashboard-view .pz-bahn{display:flex;height:3px;max-width:230px;border-radius:2px;background:var(--border-soft);overflow:hidden}
-  #dashboard-view .pz-bahn > i{display:block;flex:none;height:100%;border-radius:2px;background:var(--sub-2)}
+  /* Kräftiger (08.10.2026, Finn: „das grau-grüne erkennt man nicht gut"): Spur deutlich grau, Ist sattes Grün, Potenzial nach TP heller */
+  #dashboard-view .pz-bahn{display:flex;height:6px;max-width:230px;border-radius:3px;background:var(--border);overflow:hidden}
+  #dashboard-view .pz-bahn > i{display:block;flex:none;height:100%;border-radius:3px;background:#15803d}
   /* Stück „nach TP" (05.10.2026): schließt direkt an den Stand an — das TP-Grün der Tabelle (#15803d), deutlich heller */
   #dashboard-view .pz-bahn > i:first-child:not(:last-child){border-radius:2px 0 0 2px}
   #dashboard-view .pz-bahn > .pz-bahn-tp{border-radius:0 2px 2px 0;background:rgba(21,128,61,.42)}
@@ -3240,9 +3243,19 @@
   #dashboard-view .pz-ok.is-ok{border-color:transparent;color:#15803d}
   /* Schmales Fenster (Tabelle unter ~1060 px): Art-Spalte und „· Rest" weichen, damit nichts über den Rand läuft */
   @media (max-width:1359px){
-    #dashboard-view .pz-tab{grid-template-columns:88px minmax(162px,.7fr) minmax(130px,1.4fr) 60px 76px 76px 168px}
+    #dashboard-view .pz-tab{grid-template-columns:84px minmax(150px,1fr) 200px 64px 130px 76px 76px 160px}
     #dashboard-view .pz-z > .pz-art,#dashboard-view .pz-bal-t .pz-rest{display:none}
   }
+  #tpl-view .tpl-lk .pz-tab,#tpl-view .tpl-lk .pz-kopf,#adm-pane-planer .ap-geplant .pz-tab,#adm-pane-planer .ap-geplant .pz-kopf{max-width:1180px}   /* feste Spuren 926 px + Konto ≥ 150 + 8 Lücken = 1156 px */
+  /* Risiko-Balken in der Zeile (08.10.2026, wie die WD-Karte): SL rot links, TP grün rechts, Punkt = Einstieg bzw. Live-P&L */
+  #dashboard-view .pz-z > .pz-risk{display:flex;align-items:center;overflow:visible}
+  #dashboard-view .pz-risk-b{display:flex;align-items:center;gap:5px;width:100%;min-width:0;font-variant-numeric:tabular-nums}
+  #dashboard-view .pz-risk-b small{flex:none;font-size:11px;font-weight:600;white-space:nowrap}
+  #dashboard-view .pz-risk-b small.l{color:rgba(185,28,28,.8)} #dashboard-view .pz-risk-b small.r{color:rgba(21,128,61,.85)} #dashboard-view .pz-risk-b small.ohne{color:var(--sub-2);font-weight:500}
+  #dashboard-view .pz-risk-b .bahn{position:relative;flex:1;min-width:30px;height:5px;border-radius:3px;background:var(--border-soft)}
+  #dashboard-view .pz-risk-b .ein{position:absolute;top:-3px;width:1px;height:11px;background:var(--sub-2);transform:translateX(-50%)}
+  #dashboard-view .pz-risk-b .pkt{position:absolute;top:50%;width:9px;height:9px;border-radius:50%;transform:translate(-50%,-50%);box-shadow:0 0 0 2px var(--surface)}
+  #dashboard-view .pz-live-pl{font-style:normal;font-size:9px;margin-right:4px} #dashboard-view .pz-live-pl.plus{color:#15803d} #dashboard-view .pz-live-pl.minus{color:#b91c1c}
   /* Handy: zwei Zeilen — oben Start · Konto · Größe · TP · SL, darunter Phase + Balance → Ziel und die Knöpfe. Art steht im Tooltip.
      AP-FIX 05.10.2026: vorher ein Raster mit festen Bereichen — die zweite Zeile hing an den Spalten der ersten, bei 375 px
      wurden die letzten vier Stellen des Kontos und das Ziel abgeschnitten („150k …08…", „150.000 → 15…"). Jetzt Flex mit
@@ -3260,8 +3273,9 @@
     #dashboard-view .pz-z > .pz-gr{order:3;flex:none}
     #dashboard-view .pz-z > .pz-tp{order:4;flex:none;width:56px}
     #dashboard-view .pz-z > .pz-sl{order:5;flex:none;width:48px}
-    #dashboard-view .pz-z > .pz-bal{order:6;flex:0 0 auto;overflow:visible}
-    #dashboard-view .pz-z > .pz-akt{order:7;flex:1 1 auto;min-width:0}
+    #dashboard-view .pz-z > .pz-risk{order:6;flex:1 1 100%;min-width:0}   /* Handy: Risiko-Balken schmaler in eigener Zeile */
+    #dashboard-view .pz-z > .pz-bal{order:7;flex:0 0 auto;overflow:visible}
+    #dashboard-view .pz-z > .pz-akt{order:8;flex:1 1 auto;min-width:0}
     #dashboard-view .pz-bal-t{overflow:visible}
     #dashboard-view .pz-zeit-k{margin-left:-4px;padding:2px 3px}
     #dashboard-view .pz-konto .pz-typ{display:none}
@@ -36720,24 +36734,39 @@
     }
     // Balance → Ziel · Rest, darunter der Weg vom Start zum Ziel als dünner Balken (nur wenn Start und Ziel bekannt sind)
     let balHtml = `<span class="pz-bal-t is-leer">${typChipHandy}–</span>`
+    // Laufender Trade (08.10.2026, Finn: „die Balance soll da stehen, wo wir potenziell hingehen"): o.pl = Live-P&L → Ist = Balance + P&L
+    const plL = (o.pl != null && isFinite(Number(o.pl))) ? Number(o.pl) : null
+    const istV = bal ? bal.val + (plL || 0) : 0
     if(bal){
       const liveZ = !live ? `<i class="pz-live is-leer" title="${escapeHtml(bal.tip || '')}"></i>` : live.live
         ? `<i class="pz-live" title="Balance nach dem letzten Trade gelesen · ${escapeHtml(bal.tip)}">●</i>`
         : `<i class="pz-live is-alt" title="Nicht live: seit dem letzten Trade (Ende ${new Date(live.ende).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}) nicht neu gelesen — TP/SL im Plan können falsch sein · ${escapeHtml(bal.tip)}">⚠</i>`
       const ziel = notiz ? notiz.ziel : 0
       const mitBahn = ziel > 0 && groesse > 0 && ziel > groesse && ziel <= groesse * 1.2
-      const anteil = mitBahn ? Math.max(0, Math.min(1, (bal.val - groesse) / (ziel - groesse))) : 0
+      const anteil = mitBahn ? Math.max(0, Math.min(1, (istV - groesse) / (ziel - groesse))) : 0
       // „Nach TP" (05.10.2026, Finn am Balken: „… und dann so eine leichte andere Farbe, wo wir wären, wenn wir den Trade
       // gewinnen"): helles Stück direkt hinter dem Stand — von der Balance bis Balance + TP, am Ziel gedeckelt (reicht es bis
       // ans Ziel, endet es am rechten Rand). Balance unter der Startgröße: das Stück zeigt nur den Teil über dem Start, liegt
       // auch Balance + TP darunter, gibt es keins. Ohne TP bleibt der Balken wie bisher. Nur der Gewinnfall, keine Bewertung.
       const tpUsd = Number(p.masterTp) > 0 ? Number(p.masterTp) : 0
-      const anteilTp = (mitBahn && tpUsd) ? Math.max(0, Math.min(1, (bal.val + tpUsd - groesse) / (ziel - groesse))) : 0
+      const anteilTp = (mitBahn && tpUsd) ? Math.max(0, Math.min(1, (istV + tpUsd - groesse) / (ziel - groesse))) : 0
       const stueckTp = Math.max(0, anteilTp - anteil)
-      const bahnTitel = tpUsd ? `jetzt ${de(bal.val)} $ · nach TP ${de(bal.val + tpUsd)} $ · Ziel ${de(ziel)} $` : `Start ${de(groesse)} → Ziel ${de(ziel)}`
-      balHtml = `<span class="pz-bal-t">${typChipHandy}${liveZ}${de(bal.val)}${ziel ? `<em>→</em>${de(ziel)}<span class="pz-rest"> · Rest ${de(Math.max(0, ziel - bal.val))}</span>` : ' $'}</span>`
+      const bahnTitel = `${plL != null ? 'Balance ' + de(bal.val) + ' $ ' + (plL >= 0 ? '+' : '−') + ' P&L ' + de(Math.abs(plL)) + ' $ = ' : ''}${tpUsd ? `jetzt ${de(istV)} $ · nach TP ${de(istV + tpUsd)} $ · Ziel ${de(ziel)} $` : `Start ${de(groesse)} → Ziel ${de(ziel)}`}`
+      balHtml = `<span class="pz-bal-t">${typChipHandy}${liveZ}${plL != null ? `<i class="pz-live-pl ${plL >= 0 ? 'plus' : 'minus'}" title="läuft · Live-P&L ${plL >= 0 ? '+' : '−'}${de(Math.abs(plL))} $">●</i>` : ''}${de(istV)}${ziel ? `<em>→</em>${de(ziel)}<span class="pz-rest"> · Rest ${de(Math.max(0, ziel - istV))}</span>` : ' $'}</span>`
         + (mitBahn ? `<i class="pz-bahn" title="${bahnTitel}"><i style="width:${(anteil * 100).toFixed(1)}%"></i>${stueckTp > 0 ? `<i class="pz-bahn-tp" style="width:${(stueckTp * 100).toFixed(1)}%"></i>` : ''}</i>` : '')
     }
+    // RISIKO-BALKEN (08.10.2026, Finn-Foto WD-Karte „Liq −5.806 $ |▬▬●| TP +270 $"): SL rot links, TP grün rechts, Punkt = Einstieg;
+    // laufend (o.pl) = Live-P&L zwischen −SL und +TP. Nur die $-Beträge am Plan, keine neue Rechnung. Ohne SL: „ohne" grau, Balken grün.
+    const riskHtml = (() => {
+      const tp = Number(p.masterTp) > 0 ? Number(p.masterTp) : null, sl = Number(p.masterSl) > 0 ? Number(p.masterSl) : null
+      if(tp == null && sl == null) return ''
+      const L = sl || 0, R = tp || 0, spann = L + R
+      const ein = spann > 0 ? L / spann * 100 : 0, pos = spann > 0 ? Math.max(0, Math.min(100, ((plL || 0) + L) / spann * 100)) : 0
+      const farbe = plL == null ? 'var(--sub-2)' : plL > 0 ? '#15803d' : plL < 0 ? '#b91c1c' : 'var(--sub-2)'
+      const bahn = L > 0 ? `background:linear-gradient(90deg,rgba(240,68,56,.22) 0 ${ein.toFixed(1)}%,rgba(18,183,106,.28) ${ein.toFixed(1)}% 100%)` : 'background:rgba(18,183,106,.28)'
+      const tip = `${sl != null ? 'SL −' + de(L) + ' $' : 'ohne SL'} · ${tp != null ? 'TP +' + de(R) + ' $' : 'ohne TP'}${plL != null ? ' · jetzt ' + (plL >= 0 ? '+' : '−') + de(Math.abs(plL)) + ' $' : ' · Punkt = Einstieg'}`
+      return `<span class="pz-risk-b" title="${escapeHtml(tip)}"><small class="l${sl == null ? ' ohne' : ''}">${sl != null ? '−' + de(L) : 'ohne'}</small><span class="bahn" style="${bahn}">${L > 0 ? `<i class="ein" style="left:${ein.toFixed(1)}%"></i>` : ''}<b class="pkt" style="left:${pos.toFixed(1)}%;background:${farbe}"></b></span><small class="r${tp == null ? ' ohne' : ''}">${tp != null ? '+' + de(R) : 'ohne'}</small></span>`
+    })()
     const menge = Number(p.masterContracts) || 0
     const gr = !menge ? '–' : p.route === 'mt5v2'
       ? menge.toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 2 }) + ' Lot'
@@ -36750,6 +36779,7 @@
         <span class="pz-bal">${balHtml}</span>
         <span class="pz-art" title="${notiz ? escapeHtml(notiz.stufe) : ''}">${notiz ? escapeHtml(notiz.art) + (notiz.gekappt ? ' · SL gekappt' : '') : ''}</span>
         <span class="pz-gr">${gr}</span>
+        <span class="pz-risk">${riskHtml}</span>
         <span class="pz-tp${p.masterTp > 0 ? '' : ' is-leer'}">${p.masterTp > 0 ? de(p.masterTp) + ' $' : '–'}</span>
         <span class="pz-sl${p.masterSl > 0 ? '' : ' is-leer'}">${p.masterSl > 0 ? de(p.masterSl) + ' $' : '–'}</span>
         <span class="pz-akt">${o.chips || ''}${o.akt || ''}</span>
@@ -36799,7 +36829,7 @@
           ${zeilen.length && !opt.ohneHinweis ? `<span class="tc2-chip tc2-dir-hint" data-dir-firm="${escapeHtml(g.firma === '–' ? '' : g.firma)}" style="display:none;background:rgba(245,158,11,.14);color:#b45309"></span>` : ''}
         </div>`
         + (zeilen.length ? `<div class="pz-tab${opt.mitId ? ' pz-mit-id' : ''}">
-          <div class="pz-z pz-z-kopf">${opt.mitId ? '<span>ID</span>' : ''}<span>Start</span><span>Konto</span><span>Balance → Ziel</span><span class="pz-art">Art</span><span class="pz-gr">Größe</span><span class="pz-tp">TP</span><span class="pz-sl">SL</span><span></span></div>`
+          <div class="pz-z pz-z-kopf">${opt.mitId ? '<span>ID</span>' : ''}<span>Start</span><span>Konto</span><span>Balance → Ziel</span><span class="pz-art">Art</span><span class="pz-gr">Größe</span><span class="pz-risk">Risiko</span><span class="pz-tp">TP</span><span class="pz-sl">SL</span><span></span></div>`
           + zeilen.map(p => opt.zeile ? opt.zeile(p) : renderTradePlanCard(p)).join('') + `</div>` : '')
         + karten.map(p => renderTradePlanCard(p)).join('')
     }).join('')
@@ -40690,7 +40720,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1203'
+  const OS_TAB_BUILD = '2026-09-22.1204'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -46334,40 +46364,44 @@
       jeKey.set(String(p.id), t)
       return p
     }).sort((a, b) => String(a.masterFirm).toLowerCase().localeCompare(String(b.masterFirm).toLowerCase()) || Date.parse(a.startUm) - Date.parse(b.startUm))
-    // GEPLANT IN DER ADMIN-FORM (08.10.2026, Finn mag den Block „Zu bestätigen" aus .1178/.1186): je ID gruppiert (Farbpunkt · Name ·
-    // n · „✓ alle n"), Zeilen Konto · Richtung · Start · Menge · TP · SL · Kontowert · Stufe · Aktionen rechts (✓ bzw. ↶ + ✎ + 🗑) — derselbe
-    // Baustein wie im Admin (apOffenTabelleHtml über window._apOffenTabelleHtml, die Admin-Sektion ist ein eigener Block). Aktionen bleiben
-    // die bestehenden data-tpl-*-Handler am tplRoot; Konto-Klick → Popup (data-ak-konto). Die Plan-Objekte (plaene) bleiben für Detail/Chart.
-    const bau = window._apOffenTabelleHtml
-    if(typeof bau !== 'function') return `<div class="tpl-karte tpl-lk"><div class="tpl-h">Geplant <b>${plan.length}</b></div><div style="color:var(--sub);font-size:12.5px">Tabelle noch nicht geladen.</div></div>`
-    const je = new Map()
-    for(const p of plaene){
+    // Zeile = die Planer-Zeile des Trades-Reiters (planZeileHtml) mit den Aktionen der Planer-Seite (data-tpl-*, Handler am tplRoot)
+    const zeile = p => {
       const t = jeKey.get(String(p.id)), k = escapeHtml(t.key)
+      const konto = p.masterAccountId ? (accounts || []).find(a => String(a.id) === String(p.masterAccountId)) || null : null
+      const kontoBal = konto ? planKontoBalance(konto) : null
+      // Balance: eigenes Konto live wie im Reiter; fremde IDs (oder ohne Lesung) der Stand, mit dem der Planer gerechnet hat
+      const bal = !kontoBal && t.balance != null ? { val: Number(t.balance), at: 0, tip: 'Balance laut Planer (Stand des Laufs)' } : undefined
+      // Art + Ziel aus der Lauf-Zeile (Stufe, Rest bis Ziel, Planer-Balance) — gleiche Rundung wie planAutoNotiz
+      const st = String(t.stufe || '').trim(), rest = Number(t.rest), b0 = Number(t.balance)
+      const notiz = st && rest > 0 && b0 > 0 ? { stufe: st, art: /^letzter Trade/i.test(st) ? 'letzter Trade' : /^Etappe/i.test(st) ? 'Etappe' : st,
+        gekappt: /SL auf Boden gekappt/i.test(st), ziel: Math.round((b0 + rest) / 5) * 5 } : undefined
       const verpasst = t.status === 'offen' && D.tag === D.heute && D.jetzt != null && D.jetzt - t.start > 10
-      const start = `<span class="pz-zeit-t" title="Start ${tplUhr(t.start, D.v)} Dubai${p.autoPlan && t.status === 'offen' ? ' — startet erst nach Bestätigung' : ' — der PC-Tab startet zu dieser Zeit von selbst'}">${tplUhr(t.start, D.v)}${verpasst ? '<small class="is-verpasst">verpasst</small>' : ''}</span>`
+      const zeit = `<span class="pz-zeit-t" title="Start ${tplUhr(t.start, D.v)} Dubai${p.autoPlan && t.status === 'offen' ? ' — startet erst nach Bestätigung' : ' — der PC-Tab startet zu dieser Zeit von selbst'}">${tplUhr(t.start, D.v)}${verpasst ? '<small class="is-verpasst">verpasst</small>' : ''}</span>`
       const darf = !t.ohnePlan && /^[0-9a-f-]{36}$/i.test(t.plan_id) && (t.eigen || darfFremd)
       const zu = darf ? '' : ` disabled title="${escapeHtml(t.ohnePlan ? 'kein Plan angelegt (nur im Lauf)' : sperre)}"`
       const dis = _tpl.busy ? ' disabled' : ''
-      const ok = !p.autoPlan ? '<span class="pz-hand">von Hand</span>'
+      const zustand = !p.autoPlan ? '<span class="pz-hand">von Hand</span>'
         : t.status === 'offen'
-          ? `<button type="button" class="ap-adm-ok" data-tpl-ok1="${k}"${zu || dis} title="Freigeben — der PC-Tab startet den Trade dann zur Startzeit">✓</button>`
-          : `<button type="button" class="ap-adm-ok is-ok" data-tpl-zur1="${k}"${zu || dis} title="Bestätigt — startet zur Startzeit. Klick nimmt die Freigabe zurück">↶</button>`
-      const aktionen = `<span class="ap-akt">${ok}`
-        + `<button type="button" class="btn btn-ghost icon-btn tc2-ab" data-tpl-zedit="${k}"${t.ohnePlan ? ' disabled' : ''} title="${t.eigen ? 'Bearbeiten (Start, Richtung, TP/SL)' : 'Richtung / Start ändern (Detail)'}">${PLAN_SVG_EDIT}</button>`
-        + `<button type="button" class="btn btn-ghost icon-btn tc2-ab" data-tpl-zdel="${k}"${zu || dis} title="${t.eigen ? 'Löschen (5 s Rückgängig)' : 'Vorschlag löschen'}">${PLAN_SVG_DEL}</button></span>`
-      const uid = String(t.user_id || '')
-      if(!je.has(uid)) je.set(uid, { uid, name: t.user || uid.slice(0, 8), liste: [], offen: 0, offenKeys: [] })
-      const g = je.get(uid)
-      if(p.autoPlan && t.status === 'offen' && darf){ g.offen++; g.offenKeys.push(t.key) }
-      g.liste.push({ z: { plan_id: t.plan_id, konto: t.konto, firma: t.firma, ende4: t.ende4, richtung: t.richtung }, start, menge: t.menge,
-        tp: p.masterTp > 0 ? p.masterTp : null, sl: p.masterSl > 0 ? p.masterSl : null, wert: t.wert, stufe: t.stufe || '', notes: t.hinweis || '', aktionen })
+          ? `<button type="button" class="btn btn-ghost tc2-btn pz-ok" data-tpl-ok1="${k}"${zu || dis} title="Freigeben — der PC-Tab startet den Trade dann zur Startzeit">Bestätigen</button>`
+          : `<button type="button" class="btn btn-ghost tc2-btn pz-ok is-ok" data-tpl-zur1="${k}"${zu || dis} title="Bestätigt — startet zur Startzeit. Klick nimmt die Freigabe zurück">✓ bestätigt</button>`
+      const akt = `<button type="button" class="btn btn-ghost icon-btn tc2-ab" data-tpl-zedit="${k}"${t.ohnePlan ? ' disabled' : ''} title="${t.eigen ? 'Bearbeiten' : 'Richtung / Start ändern (Detail)'}">${PLAN_SVG_EDIT}</button>`
+        + `<button type="button" class="btn btn-ghost icon-btn tc2-ab" data-tpl-zdel="${k}"${zu || dis} title="${t.eigen ? 'Löschen (5 s Rückgängig)' : 'Vorschlag löschen'}">${PLAN_SVG_DEL}</button>`
+        + `<span class="pz-zustand"${darf ? '' : ` title="${escapeHtml(sperre)}"`}>${zustand}</span>`
+      return planZeileHtml(p, konto, { name: p.masterName, ext: konto && konto.externalId ? konto.externalId : (t.ende4 || ''), extTitle: '', chips: '', akt, zeit, bal, notiz })
     }
+    // GEPLANT = FIRMEN-BLÖCKE JE ID (Korrektur 08.10.2026, Finn: „ich will NICHT das Design der Admin-Tabelle, sondern das wie bei Trade-Planer →
+    // Geplant" — die Firmen-Block-Ansicht vor .1194, „sehr clean"): je ID eine Gruppe (Farbpunkt · Name · n geplant · n offen · „✓ alle n"),
+    // darin die Firmen-Blöcke (planFirmenBloecke: Kopf Firma · n Trades · Weg · BUY/SELL · Zeitfenster · TP/SL, Zeilen planZeileHtml). Eigene ID genauso.
+    const je = new Map()
+    for(const p of plaene){ const t = jeKey.get(String(p.id)), uid = String(t.user_id || '')
+      if(!je.has(uid)) je.set(uid, { uid, name: t.user || uid.slice(0, 8), plaene: [], offen: 0 })
+      const g = je.get(uid); g.plaene.push(p)
+      if(p.autoPlan && t.status === 'offen' && !t.ohnePlan && (t.eigen || darfFremd)) g.offen++ }
     const gruppen = [...je.values()].sort((a, b) => String(a.name).localeCompare(String(b.name), 'de'))
-    for(const g of gruppen){ g.liste.sort((a, b) => String(a.start).localeCompare(String(b.start))); g.n = `${g.liste.length} geplant${g.offen ? ' · ' + g.offen + ' offen' : ''}` }
-    const offenGesamt = plan.filter(t => t.status === 'offen' && t.auto).length
-    const kopf = `<div class="ap-adm-kopf"><b>Geplant · ${plan.length}</b><span>${D.tag === D.heute ? 'heute' : escapeHtml(D.tag)} · ${offenGesamt ? offenGesamt + ' offen' : 'alle bestätigt'} · Zeiten Dubai</span></div>`
-    return `<div class="tpl-karte tpl-lk">${bau(gruppen, { kopf, leer: 'Nichts geplant.', kontoAttr: 'data-ak-konto',
-      gruppeKnopf: g => g.offen ? `<button type="button" class="btn btn-ghost btn-xs" data-tpl-ok-id="${escapeHtml(g.uid)}"${_tpl.busy ? ' disabled' : ''} title="alle offenen Vorschläge dieser ID bestätigen">✓ alle ${g.offen}</button>` : '' })}</div>`
+    const html = gruppen.map(g => `<div class="ap-adm-grp"><span class="ap-adm-id"><i style="background:${idFarbe(g.uid)}"></i>${escapeHtml(g.name)}</span><span class="n">${g.plaene.length} geplant${g.offen ? ' · ' + g.offen + ' offen' : ''}</span>`
+        + (g.offen ? `<button type="button" class="btn btn-ghost btn-xs" data-tpl-ok-id="${escapeHtml(g.uid)}"${_tpl.busy ? ' disabled' : ''} title="alle offenen Vorschläge dieser ID bestätigen">✓ alle ${g.offen}</button>` : '') + `</div>`
+        + planFirmenBloecke(g.plaene, { zeile, ohneHinweis: true })).join('')
+    return `<div class="tpl-karte tpl-lk"><div class="tpl-h">Geplant <b>${plan.length}</b></div>${html}</div>`
   }
   /* HYPO-P&L (HYPO-PNL-LIVE, 07.10.2026, Finn: „Jeder Trade wird mit den Gesamtkosten in hypothetischen Euro umgesetzt … ob wir gerade eher
    * ins Plus oder ins Minus gehen"): hypothetischer P&L € eines Trades = Kontowert-Satz des Kontos (€ je $, Delta offen[].satz_eur_je_usd;
@@ -59590,42 +59624,11 @@
     const d = (_apd.d && (_apd.d.geplant || [])).find?.(x => String(x.plan_id) === String(z.plan_id)); if(d && d.wert_eur != null && isFinite(Number(d.wert_eur))) return Number(d.wert_eur)
     const g = ((_ap.letzter && _ap.letzter.geplant) || []).find(x => String(x.user_id) === String(z.user_id) && kk(x.konto) === kk(z.konto))
     const w = g && (g.wert ?? g.wert_eur); return w != null && isFinite(Number(w)) ? Number(w) : null }
-  /* GEMEINSAMER TABELLEN-BAUSTEIN „ZU BESTÄTIGEN" (08.10.2026, Slave-Terminal 1, mit Terminal 4 abgestimmt): Admin-Reiter UND die
-   * Geplant-Liste der Trade-Planer-Seite zeichnen dieselbe Form — je ID eine Gruppe (Farbpunkt · Name · n · Knopf rechts), darunter
-   * Zeilen Konto · Richtung · Start · Menge · TP · SL · Kontowert · Stufe · Aktionen ganz rechts (Zahlen tabular). REIN RECHNEND.
-   * gruppen = [{uid, name, n (Text neben dem Namen), liste: [{z: {plan_id, konto, firma, ende4, richtung}, start (HTML), menge, tp, sl,
-   * wert, stufe, notes, aktionen (HTML der rechten Zelle)}]}]; opt = {kopf (HTML), leer (Text), kontoAttr (Datenattribut des
-   * Konto-Knopfs, Standard data-ap-konto), gruppeKnopf(g) → HTML}. Außerhalb des Admin-Blocks über window._apOffenTabelleHtml. */
-  function apOffenTabelleHtml(gruppen, opt){
-    opt = opt || {}
-    const usd = v => v != null && isFinite(Number(v)) ? Math.round(Number(v)).toLocaleString('de-DE') + ' $' : '<span style="color:var(--sub-2)">ohne</span>'
-    const eur = v => v != null && isFinite(Number(v)) ? Math.round(Number(v)).toLocaleString('de-DE') + ' €' : '<span style="color:var(--sub-2)">–</span>'
-    const attr = opt.kontoAttr || 'data-ap-konto'
-    if(!(gruppen || []).length) return `<div class="ap-adm-karte">${opt.kopf || ''}<div style="color:var(--sub);font-size:12.5px;padding:2px 0 6px">${escapeHtml(opt.leer || 'Nichts offen.')}</div></div>`
-    const th = `<thead><tr><th class="k">Konto</th><th class="r">Richtung</th><th class="zahl s">Start</th><th class="zahl m">Menge</th><th class="zahl g">TP</th><th class="zahl g">SL</th><th class="zahl w" title="Kontowert in € (Delta, sonst letzter Lauf)">Kontowert</th><th class="st">Stufe</th><th class="ok"></th></tr></thead>`
-    const html = gruppen.map(g => {
-      const zeilen = g.liste.map(r => { const z = r.z || {}, st0 = String(r.stufe || '').trim()
-        // Stufe lesbar (Finn 08.10.2026, Screenshot .1192: „Etappe" stand allein): der Planer kennt nur „Etappe" und „letzter Trade (…)" —
-        // Klammer-Zusatz in den Tooltip, der Rest bis Ziel aus den Notes („Rest 1.850 $ bis Ziel") als Nebenzeile; ohne Stufe bleibt die Zelle leer
-        const st = st0.replace(/\s*\(.*$/, ''), rest = /Rest ([\d.]+) \$/.exec(String(r.notes || '')), restTxt = rest ? `Rest ${rest[1]} $` : ''
-        const stufe = st ? `<span class="ap-stufe${/letzter/i.test(st) ? ' letzter' : ''}" title="${escapeHtml(String(r.notes || st0))}">${escapeHtml(st)}</span>${restTxt ? `<small class="ap-stufe-sub">${escapeHtml(restTxt)}</small>` : ''}` : ''
-        return `<tr>
-        <td class="k"><button type="button" class="ap-konto" ${attr}="${escapeHtml(String(z.plan_id))}" title="Konto ansehen">${apKontoKurz(z)}</button></td>
-        <td class="r" style="font-weight:600;color:${z.richtung === 'buy' ? '#047857' : '#b91c1c'}">${z.richtung === 'buy' ? '▲ Long' : z.richtung === 'sell' ? '▼ Short' : '–'}</td>
-        <td class="zahl s">${r.start || '–'}</td>
-        <td class="zahl m">${r.menge != null ? escapeHtml(String(r.menge)) : '–'}</td>
-        <td class="zahl g">${usd(r.tp)}</td>
-        <td class="zahl g">${usd(r.sl)}</td>
-        <td class="zahl w">${eur(r.wert)}</td>
-        <td class="st">${stufe}</td>
-        <td class="ok">${r.aktionen || ''}</td></tr>` }).join('')
-      return `<div class="ap-adm-grp"><span class="ap-adm-id"><i style="background:${idFarbe(g.uid)}"></i>${escapeHtml(g.name)}</span><span class="n">${escapeHtml(String(g.n != null ? g.n : g.liste.length + ' offen'))}</span>
-          ${opt.gruppeKnopf ? (opt.gruppeKnopf(g) || '') : ''}</div>
-        <div class="ap-adm-scroll"><table class="wd-tab">${th}<tbody>${zeilen}</tbody></table></div>`
-    }).join('')
-    return `<div class="ap-adm-karte">${opt.kopf || ''}${html}</div>`
-  }
-  window._apOffenTabelleHtml = apOffenTabelleHtml
+  /* ZU BESTÄTIGEN IM FIRMEN-BLOCK-DESIGN (Korrektur 08.10.2026, Finn: „das allgemeine Design von Geplant finde ich sehr clean, das gerne auch
+   * für Admin"): dieselben Bausteine wie die Planer-Seite — je ID eine Gruppe (Farbpunkt · Name · n offen · „✓ alle n"), darin die Firmen-
+   * Blöcke (planFirmenBloecke) mit planZeileHtml-Zeilen: Start · Konto + Phase · Balance → Ziel (Balken) · Art · Größe · Risiko · TP · SL ·
+   * „Bestätigen". Daten wie bisher aus _apIds.offen + der Trade-Zeile des Zeitstrahls (apIdsTrade: Balance, Rest, Stufe, Kontowert);
+   * nichts nachgeladen. Der frühere Tabellen-Baustein (apOffenTabelleHtml, .1194) ist damit weg. */
   function apIdsOffenHtml(){
     const o = _apIds.offen.slice().sort((a, b) => String(a.user || '').localeCompare(String(b.user || '')) || String(a.start_um || '').localeCompare(String(b.start_um || '')))
     const heute = new Date().toLocaleDateString('de-DE', { timeZone: 'Asia/Dubai', day: '2-digit', month: '2-digit' })
@@ -59634,14 +59637,34 @@
       return t === heute ? u : `${t} ${u}` }
     const kopf = `<div class="ap-adm-kopf"><b>Zu bestätigen · ${o.length}</b><span>Vorschläge des Auto-Planers, heute und morgen, alle IDs · Zeiten Dubai</span>
         ${o.length ? `<button type="button" class="ap-adm-ok" id="ap-ids-alle-ok" style="margin-left:auto">✓ Alle ${o.length} bestätigen</button>` : ''}</div>`
-    // je ID eine Gruppe: Kopfzeile (Farbpunkt · Name · n offen · „alle n bestätigen"), darunter die Zeilen, Haken ganz rechts — Baustein apOffenTabelleHtml
-    const je = new Map()
-    for(const z of o){ const k = String(z.user_id || ''); if(!je.has(k)) je.set(k, { uid: k, name: z.user || k.slice(0, 8), liste: [] })
-      const t = apIdsTrade(z) || {}
-      je.get(k).liste.push({ z, start: escapeHtml(wann(z.start_um)), menge: z.menge, tp: z.tp, sl: z.sl, wert: apIdsWert(z, t), stufe: z.stufe || t.stufe || '', notes: z.notes,
-        aktionen: `<button type="button" class="ap-adm-ok" data-ap-ok="${escapeHtml(String(z.plan_id))}" title="Bestätigen — startet zur Startzeit">✓</button>` }) }
-    return apOffenTabelleHtml([...je.values()], { kopf, leer: 'Nichts offen.', kontoAttr: 'data-ap-konto',
-      gruppeKnopf: g => `<button type="button" class="btn btn-ghost btn-xs" data-ap-ok-id="${escapeHtml(g.uid)}" title="alle offenen Vorschläge dieser ID bestätigen">✓ alle ${g.liste.length}</button>` })
+    if(!o.length) return `<div class="ap-adm-karte ap-geplant">${kopf}<div style="color:var(--sub);font-size:12.5px;padding:2px 0 6px">Nichts offen.</div></div>`
+    const jeZ = new Map(), je = new Map()
+    const plaene = o.map(z => { const t = apIdsTrade(z) || {}
+      const p = { id: String(z.plan_id), status: 'planned', route: z.route || t.route || null, masterFirm: z.firma || '–', masterName: z.konto || '',
+        masterAccountId: t.konto_id || null, richtung: z.richtung, startUm: z.start_um || null, startUmGestartetAt: null,
+        masterTp: Number(z.tp) || 0, masterSl: Number(z.sl) || 0, masterContracts: z.menge, masterSymbol: (z.route || t.route) === 'mt5v2' ? '' : 'NQ',
+        autoPlan: true, autoBestaetigtAt: null, kontoTyp: z.typ || null }
+      jeZ.set(p.id, { z, t }); return p })
+      .sort((a, b) => String(a.masterFirm).toLowerCase().localeCompare(String(b.masterFirm).toLowerCase()) || String(a.startUm || '').localeCompare(String(b.startUm || '')))
+    const zeile = p => {
+      const { z, t } = jeZ.get(String(p.id))
+      const eigen = String(z.user_id || '') === String(currentUserId || '')
+      const konto = eigen && t.konto_id ? (accounts || []).find(a => String(a.id) === String(t.konto_id)) || null : null
+      const kontoBal = konto ? planKontoBalance(konto) : null
+      const bal = !kontoBal && t.balance != null ? { val: Number(t.balance), at: 0, tip: 'Balance laut Planer (Stand des Laufs)' } : undefined
+      const st = String(z.stufe || t.stufe || '').trim(), rest = Number(t.rest), b0 = Number(t.balance)
+      const notiz = st ? { stufe: String(z.notes || st), art: /^letzter Trade/i.test(st) ? 'letzter Trade' : /^Etappe/i.test(st) ? 'Etappe' : st.replace(/\s*\(.*$/, ''),
+        gekappt: /SL auf Boden gekappt/i.test(st), ziel: (rest > 0 && b0 > 0) ? Math.round((b0 + rest) / 5) * 5 : 0 } : undefined
+      const zeit = `<span class="pz-zeit-t" title="Start ${escapeHtml(wann(z.start_um))} Dubai — startet erst nach Bestätigung">${escapeHtml(wann(z.start_um))}</span>`
+      const akt = `<span class="pz-zustand"><button type="button" class="btn btn-ghost tc2-btn pz-ok" data-ap-ok="${escapeHtml(String(z.plan_id))}" title="Bestätigen — startet zur Startzeit">Bestätigen</button></span>`
+      return planZeileHtml(p, konto, { name: p.masterName, ext: (konto && konto.externalId) || z.ende4 || '', extTitle: '', chips: '', akt, zeit, bal, notiz })
+    }
+    for(const p of plaene){ const { z } = jeZ.get(String(p.id)), k = String(z.user_id || '')
+      if(!je.has(k)) je.set(k, { uid: k, name: z.user || k.slice(0, 8), plaene: [] }); je.get(k).plaene.push(p) }
+    const gruppen = [...je.values()].map(g => `<div class="ap-adm-grp"><span class="ap-adm-id"><i style="background:${idFarbe(g.uid)}"></i>${escapeHtml(g.name)}</span><span class="n">${g.plaene.length} offen</span>
+          <button type="button" class="btn btn-ghost btn-xs" data-ap-ok-id="${escapeHtml(g.uid)}" title="alle offenen Vorschläge dieser ID bestätigen">✓ alle ${g.plaene.length}</button></div>`
+        + planFirmenBloecke(g.plaene, { zeile, ohneHinweis: true })).join('')
+    return `<div class="ap-adm-karte ap-geplant">${kopf}${gruppen}</div>`
   }
   /* Konto-Popup (08.10.2026): Name, Firma, Typ/Phase, Balance (letzte Lesung + Quelle + Alter), Ziel/Rest, Kontowert, letzte Trades — eigene
    * Konten aus accounts/tradePlans (tplKontoBalance wie auf der Planer-Seite), fremde aus Lauf (balance/rest), Delta (wert_eur), live-trades
@@ -59719,7 +59742,7 @@
     root.querySelector('#ap-ids-neu')?.addEventListener('click', apIdsLaden)
     root.querySelector('[data-tpl-weitere]')?.addEventListener('click', () => { _apIds.weitereAuf = !_apIds.weitereAuf; apIdsRender() })
     root.querySelectorAll('[data-ap-tag]').forEach(b => b.addEventListener('click', () => { _apIds.tagWahl = b.dataset.apTag; apIdsRender() }))
-    root.querySelectorAll('[data-ap-konto]').forEach(b => b.addEventListener('click', () => apKontoOeffnen(b.dataset.apKonto)))
+    root.querySelectorAll('[data-ap-konto],[data-ak-konto]').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); apKontoOeffnen(b.dataset.apKonto || b.dataset.akKonto) }))   // Konto-Spalte der Zeile (planZeileHtml) öffnet das Popup
     // Bestätigen: eine Zeile / eine ID / alle — Admin-Route wie auf der Trade-Planer-Seite, danach neu laden
     const ok = async (ids, btn) => { if(btn) btn.disabled = true; try{ await tplEingriff('bestaetigen', ids) }catch(e){ if(typeof atToast === 'function') atToast('Nicht bestätigt: ' + ((e && e.message) || e), 'end') } finally{ apIdsLaden() } }
     root.querySelectorAll('[data-ap-ok]').forEach(b => b.addEventListener('click', () => ok([b.dataset.apOk], b)))
