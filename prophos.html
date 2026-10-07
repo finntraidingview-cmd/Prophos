@@ -39944,7 +39944,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1121'
+  const OS_TAB_BUILD = '2026-09-22.1122'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -45331,7 +45331,9 @@
       const echo = !!(r && r.plattform === 'echo') || /^(mt5|mt5v2)$/.test(String(t.route || ''))
       const kt = tplNum(r && r.kt) ?? t.menge, wurzel = (r && r.symbol_root) || (Number(t.usd) === 20 ? 'NQ' : 'MNQ')
       const usdPkt = t.usd != null ? t.usd : (!echo && kt != null ? kt * (wurzel === 'NQ' ? 20 : 2) : null)
-      const satz = t.satz != null ? t.satz : (cache.get(String(t.plan_id)) || {}).satz ?? satzLauf(t.user_id, t.konto, t.konto_id) ?? satzKw(t.konto_id)
+      // SATZ AN LIVE-TRADES (07.10.2026, Vertrag Nachtrag 05:55): /admin/live-trades liefert satz_eur_je_usd je Zeile für ALLE IDs — vor
+      // satzKw, das nur eigene Konten kennt (fremde Hand-/Orbit-Trades standen sonst „ohne Wert"). Altes Backend ohne Feld: Kette wie bisher.
+      const satz = t.satz != null ? t.satz : (cache.get(String(t.plan_id)) || {}).satz ?? satzLauf(t.user_id, t.konto, t.konto_id) ?? tplNum(r && r.satz_eur_je_usd) ?? satzKw(t.konto_id)
       const e = echo ? { ein: null, q: 'cfd' } : einstiegVon(p, r, t.start)
       let pl = null
       if(echo) pl = tplNum(r && r.pl_live)
@@ -45658,7 +45660,7 @@
     if(k){ const z = k.closest('.tpl-ab-z'); _tpl.abAuf.set(k.dataset.tplAb, !(z && z.classList.contains('auf'))); tplZeichnen(); return }
     const m = e.target.closest('[data-tpl-t]')
     if(m){ _tpl.wahl = _tpl.wahl === m.dataset.tplT ? null : m.dataset.tplT; _tpl.edit = null; _tpl.meldung = ''; tplZeichnen()
-      if(_tpl.wahl && (m.classList.contains('tpl-chip') || m.closest('.tpl-bd') || m.closest('.tpl-liste'))) tplRoot.querySelector('.tpl-detail')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      if(_tpl.wahl && (m.classList.contains('tpl-chip') || m.closest('.tpl-bd'))) tplRoot.querySelector('.tpl-detail')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
       return }
     const b = e.target.closest('[data-tpl-akt]'); if(!b || b.disabled) return
     const a = b.dataset.tplAkt
