@@ -14336,6 +14336,13 @@ def ap_regel_konto(regel, konto, balance):
     """Firmen-Regel mit der Consistency des Kontos (07.10.2026): phasen.challenge.tp_max = consistency_pct × Ziel-$, die TP-Spanne
     rückt um dieselbe Differenz mit (Tradeify 3.600 [3.450, 3.550] → 50 %: 4.500 [4.350, 4.450]). Ohne consistency_pct oder ohne
     Challenge-Phase: die Regel unverändert. Planer, Kontowert (ap_kw_param liest tp_max) und Probelauf nutzen dieselbe Regel."""
+    # 07.10.2026 (Finn, FundingPips-Konto …9722 auf dem ALTEN Plan 10 %/5 %, Regel seit Kernwerten 8 %/5 %): accounts.ziel_pct_konto
+    # {"phase1": 10, …} überschreibt je Phase den ziel_pct der Regel — nur für dieses Konto, neue Konten bleiben bei der Regel.
+    # Ziel-Wache (zw_tick) und Planer gehen beide hier durch, damit Tag und Plan dasselbe Ziel sehen.
+    zk = (konto or {}).get("ziel_pct_konto")
+    if isinstance(zk, dict) and any(_wd_num(v) is not None for v in zk.values()):
+        zp_alt = regel.get("ziel_pct") if isinstance((regel or {}).get("ziel_pct"), dict) else {}
+        regel = dict(regel or {}, ziel_pct=dict(zp_alt, **{k: float(v) for k, v in zk.items() if _wd_num(v) is not None}))
     ch = ((regel or {}).get("phasen") or {}).get("challenge")
     if not ch or not _wd_num((konto or {}).get("consistency_pct")):
         return regel
@@ -14535,7 +14542,7 @@ def _ap_archiviert():
 
 
 AP_KONTO_FELDER = ("id,user_id,name,firm,account_type,external_id,max_drawdown,topstep_balance,topstep_last_check,"
-                   "meta_api_balance,meta_api_last_check,tv_balance,tv_balance_at,consistency_pct")
+                   "meta_api_balance,meta_api_last_check,tv_balance,tv_balance_at,consistency_pct,ziel_pct_konto")
 AP_KONTO_FELDER_OHNE_CONS = AP_KONTO_FELDER.replace(",consistency_pct", "")
 
 
@@ -17061,6 +17068,8 @@ def zw_tick(force=False):
             continue
         regel = ap_regel_finden(firmen, a.get("firm"))
         bal = acc_balance_wahl(a, echo_bal, dup_bal)[0]
+        if regel and bal:
+            regel = ap_regel_konto(regel, a, float(bal))   # Ziel-% je Konto (ziel_pct_konto, 07.10.2026)
         zg = zw_ziel(regel, a.get("account_type"), bal) if (regel and bal) else None
         if not zg:
             continue
