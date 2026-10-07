@@ -39920,7 +39920,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1112'
+  const OS_TAB_BUILD = '2026-09-22.1113'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -44768,7 +44768,8 @@
         tp: tplNum(g && g.tp) ?? (p ? p.masterTp : null), sl: tplNum(g && g.sl) ?? (p ? p.masterSl : null),
         tp_punkte: tplNum(x.tp_punkte) ?? tplNum(g && g.tp_punkte), sl_punkte: tplNum(x.sl_punkte) ?? tplNum(g && g.sl_punkte),
         stufe: (g && g.stufe) || stufeAus(p), wert: tplNum(x.wert_eur), gehedgt: !!x.gehedgt, einsatz: ein != null ? Math.abs(ein) : null, hinweis: x.hinweis || (g && g.hinweis) || null,
-        typ: x.typ || (g && g.typ) || null, route: x.route || (g && g.route) || (p ? p.route : null), usd: tplNum(x.usd_pro_pkt) ?? tplNum(g && g.usd_pro_pkt),
+        typ: x.typ || (g && g.typ) || (p && p.kontoTyp) || (p && ((accounts || []).find(a => String(a.id) === String(p.masterAccountId)) || {}).type) || null,
+        route: x.route || (g && g.route) || (p ? p.route : null), usd: tplNum(x.usd_pro_pkt) ?? tplNum(g && g.usd_pro_pkt),
         satz: tplNum(x.satz_eur_je_usd),   // Kontowert-Satz € je $ (Delta offen[]) — Hypo-P&L (07.10.2026)
         wd: (x.typ || (g && g.typ)) === 'winning_days' || !!(p && (p.notes === 'Winning-Day-Farmer' || (p.route === 'tvv2' && p.hedgeEur > 0 && !p.orbitV3))),   // Winning Day: nur dezent (Finn 07.10.2026)
         eigen: !!p, auto: x.auto_plan != null ? !!x.auto_plan : p ? !!p.autoPlan : true, ...mehr }
@@ -44817,6 +44818,12 @@
       if(delta && s > jetzt) continue          // heute weder geplant noch gelaufen: gelöscht oder ersetzt
       neu({ auto_plan: true }, g, null, { plan_id: 'lauf:' + (g.konto_id || g.konto), status: delta || s <= jetzt ? 'vorbei' : g.bestaetigt ? 'bestaetigt' : 'offen', start: s, ohnePlan: true })
     }
+    // NUR CHALLENGE / PHASE 1 / PHASE 2 (WD-RAUS-AUS-PLANER, Finn 07.10.2026 an Terminal 1: „Mach doch Winning Days hier raus … Hier sind
+    // nur die Trades, die nicht gegengehedgt werden … Das bitte weglassen — auch wenn es läuft"): Winning Days, Funded und Funded CFD
+    // erscheinen auf der Seite nirgends — nicht im Zeitstrahl (auch nicht in „Weitere"), nicht in Kacheln, Netto-Chart, Hypo-P&L,
+    // Braucht-dich, Geplant-Liste, Abdeckung. Das Frontend filtert selbst (Typ aus Delta/Lauf/Plan/Konto), unabhängig vom Backend.
+    const raus = trades.filter(t => !TPL_TYPEN.includes(String(t.typ || '')) || t.wd)
+    for(const t of raus){ const i = trades.indexOf(t); if(i >= 0) trades.splice(i, 1) }
     let L = 0, S = 0
     for(const t of trades){
       t.bis = t.status === 'beendet' ? (t.ende != null && t.ende > t.start ? t.ende : t.start + laufzeit)
@@ -45062,11 +45069,13 @@
     const findeT = r => !tagGleich ? null : D.trades.find(t => (t.konto_id && r.konto_id && String(t.konto_id) === String(r.konto_id)) || tplKk(t.user_id, t.konto) === tplKk(r.user_id, r.konto))
     const zustand = t => t.status === 'laeuft' ? ['läuft', 'lauf'] : t.status === 'beendet' || t.status === 'vorbei' ? ['fertig', 'grau'] : ['geplant ' + tplUhr(t.start, vL), 'gut']
     for(const g of (roh && roh.geplant) || []){
+      if(g.typ && !TPL_TYPEN.includes(String(g.typ))) continue   // WD-RAUS-AUS-PLANER: nur Challenge/Phase-Konten
       const t = findeT(g), s = apPrHm(g.start)
       const [w, kl] = t ? zustand(t) : ['geplant ' + (s != null ? tplUhr(s, vL) : '—'), 'gut']
       id(g.user_id, g.user).chips.push({ r: g, t, wort: w, kl, titel: [g.firma, g.konto, g.stufe].filter(Boolean).join(' · '), plan: true })
     }
     for(const a of (roh && roh.ausgelassen) || []){
+      if(a.typ && !TPL_TYPEN.includes(String(a.typ))) continue   // WD-RAUS-AUS-PLANER
       const t = findeT(a)
       let w = tplGrund(a.grund), kl = 'grau', plan = false
       if(/geplanten\/laufenden Plan/.test(a.grund || '')){ if(t){ [w, kl] = zustand(t); plan = true } else w = 'alter Vorschlag offen' }
@@ -45163,6 +45172,7 @@
     if(tagGleich) for(const x of roh.ausgelassen || []){
       const g = String(x.grund || '')
       if(/geplanten\/laufenden Plan/.test(g)) continue
+      if(x.typ && !TPL_TYPEN.includes(String(x.typ))) continue   // WD-RAUS-AUS-PLANER
       const k = tplKk(x.user_id, x.konto); if(konten.has(k)) continue; konten.add(k)
       const bal = /keine Balance|nicht live/.test(g), fremd = String(x.user_id) !== String(currentUserId)
       add(x.user_id, x.user, { art: bal ? 'balance' : 'ausgelassen', firma: x.firma, konto: x.konto, typ: x.typ, balance: '', ende4: tplEnde4(x), text: g, hinweis: bal && fremd ? 'am PC der ID lesen' : '' })
