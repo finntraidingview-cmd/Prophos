@@ -3846,9 +3846,11 @@ def test_cdp_konto_regression_865():
     js = open(_os.path.join(_os.path.dirname(_os.path.abspath(ob.__file__)), "augen.js"), encoding="utf-8").read()
     chk("function kontoSchalter()" in js and "r.top >= lr.top - 4" in js and "var s = kontoSchalter();" in js
         and "(eintraege.length === 1 && !!s.el && !eintraege[0].aktiv)" in js and "panel_lage: lage" in js
-        and "VERSION = '0.7.9'" in js, "augen.js 0.7.4+: Umschalter unter der Broker-Leiste (beide Lagen), panel_lage, Liste nur mit Umschalter")
+        and "VERSION = '0.8.0'" in js, "augen.js 0.7.4+: Umschalter unter der Broker-Leiste (beide Lagen), panel_lage, Liste nur mit Umschalter")
     # MAUS-MITSCHRIFT (0.7.9, 08.10.2026, Slave-Terminal 3): augen.js meldet, wo die Seite den Zeiger zuletzt sah; der Bot stupst sofort,
     # wenn die Bewegung nie ankam, und schreibt den Befund in die Spur — der Hover-Riegel bleibt (ohne :hover kein Druck)
+    chk("function kontoScroll(aktion)" in js and "konto_scroll: kontoScroll" in js and "c.scrollTop = 0" in js and ".click(" not in js.split("function kontoScroll")[1].split("function mausMitschrift")[0]
+        and "els: zeilenEl" in js, "augen.js 0.8.0: konto_scroll liest/scrollt nur den Listen-Container, klickt nie; kontoZeilen liefert die Elemente")
     chk("function maus()" in js and "maus: maus," in js and "window.__prophosMaus" in js and "addEventListener('mousemove'" in js
         and "}, true);" in js and "mausMitschrift();   // beim Laden" in js, "augen.js 0.7.9: maus() + Capture-Listener einmal je Seite, beim Laden installiert")
     # ECHO EIN TICK SCHNELLER (08.10.2026, Slave-Terminal 3, Finn 07.10.): Spuren von 14 Läufen — F9-Dialog-Suche erst die billige
@@ -4159,7 +4161,7 @@ def test_cdp_konto_weg_gleicher_login():
         for n_, f_ in alt.items():
             setattr(ob, n_, f_)
     chk(r1[1] == "konto_nicht_erreicht" and r1[4].get("konto_treffer") is None and r1[4].get("konto_treffer_roh") == 0
-        and r1[4].get("gleicher_login") == {"user": "123456", "konten": 2} and r1[4].get("ziel_im_text") is False
+        and r1[4].get("gleicher_login") == {"user": "123456", "konten": 2, "gescrollt": 0} and r1[4].get("ziel_im_text") is False
         and "richtiger Login, Ziel fehlt: " in r1[2] and "selben Apex-Login" in r1[2] and "gleicher Apex-User 123456, Liste vollständig (2 Konten), Ziel 0×" in r1[2] and "kein Login-Beleg" not in r1[2]
         and not ob.cdp_login_noetig(r1[1], r1[4]), f"Konto-Schritt: Beleg in extra, kein Login nötig, ehrliche Meldung ({r1[2]}, {r1[4]})")
     chk(r2[4].get("gleicher_login") is None and "Liste nicht vollständig im Bild" in r2[2] and "selben Apex-Login" in r2[2],
@@ -4175,9 +4177,67 @@ def test_cdp_konto_weg_gleicher_login():
     chk(d[1] == "konto_weg" and n_d == {"k": 3, "v": 1} and d[4].get("konten_im_login") == 2,
         f"fremder Login zuerst → Login-Wechsel, dann richtiger Login zweimal ohne Ziel → konto_weg ({d[1]}, {n_d}, {d[2]})")
     chk(e[1] == "konto_nicht_erreicht" and n_e == {"k": 1, "v": 0}, f"Ziel im sichtbaren Text → nie, kein zweiter Blick ({e[1]}, {n_e})")
+    # LISTE SCROLLEN (08.10.2026, Auftrag Master): Abschnitte zusammenführen (Überlappung), Scroll-Urteil, Konto-Schritt mit scrollender Liste
+    Z, U = ob.cdp_liste_abschnitte_zusammen, ob.cdp_scroll_urteil
+    def zl(nr, top, text=None):
+        return {"text": (text if text is not None else nr + "USD"), "kontonr": nr, "rect": [78, top, 228, 32], "aktiv": None}
+    A3, A4, A5 = "APEX1234560000003", "APEX1234560000004", "APEX1234560000005"
+    ab = [[zl(A1, 90), zl(A2, 122), zl(A3, 154)], [zl(A3, 100), zl(A4, 132), zl(A5, 164)], [zl(A5, 110), zl(A5, 110, text="Apex · " + A5 + "USD")]]
+    zz, dd = Z(ab)
+    chk([z["kontonr"] for z in zz] == [A1, A2, A3, A4, A5] and dd == 3 and Z([]) == ([], 0) and Z([[{"text": "", "kontonr": ""}], None]) == ([], 0)
+        and Z([[zl("", 50, "Gruppe X"), zl("", 20, "Gruppe X")]])[0][0]["text"] == "Gruppe X" and Z([[zl("", 50, "Gruppe X"), zl("", 20, "Gruppe X")]])[1] == 1
+        and [z["kontonr"] for z in Z([[zl(A2, 200), zl(A1, 100)]])[0]] == [A1, A2],
+        f"Abschnitte zusammenführen: Duplikate aus der Überlappung, Reihenfolge Abschnitt/oben→unten, Text-Schlüssel ohne Nummer ({[z['kontonr'] for z in zz]}, {dd})")
+    sc = lambda **k: {"ok": True, "zeilen": [], "scroll": dict({"vorher": 0, "top": 160, "hoehe": 1000, "sicht": 200, "ende": False, "bewegt": True}, **k)}
+    chk(U(sc(), None) == ("weiter", "") and U(sc(ende=True), None)[0] == "ende" and U(sc(bewegt=False), None)[0] == "steht" and U(sc(top=160), 160)[0] == "steht"
+        and U(sc(top=320), 160)[0] == "weiter" and U({"ok": False, "grund": "keine Liste"}, None) == ("fehler", "keine Liste") and U(None, None)[0] == "fehler"
+        and U(sc(top="x"), None) == ("fehler", "Scrollposition unlesbar"), "Scroll-Urteil: Ende/weiter/steht/fehler")
+
+    class _SS(_S):
+        """Liste mit 7 Konten, 3 je Sicht (scrollbar): konto_scroll liefert Abschnitte, der Umschalter-Stand sagt liste_voll False."""
+        def __init__(self, konten, ziel_drin=False, scroll_ok=True, **kw):
+            _S.__init__(self, konten[:3], voll=False, **kw); self.alle, self.scroll_ok, self.top, self.rufe = konten, scroll_ok, 0, []
+        def lese_js(self, a, timeout=8):
+            if "konto_scroll" in a:
+                akt = a.split("(")[1].strip('")\n ')
+                self.rufe.append(akt)
+                if not self.scroll_ok:
+                    return {"ok": False, "zeilen": [], "scroll": None, "grund": "kein Scroll-Container"}
+                if akt == "anfang":
+                    self.top = 0; return {"ok": True, "zeilen": [], "scroll": {"vorher": 0, "top": 0, "hoehe": 32 * len(self.alle), "sicht": 96, "ende": False, "bewegt": False}, "grund": ""}
+                i0 = self.top // 32
+                zeilen = [{"text": z + "USD", "kontonr": z, "rect": [78, 90 + 32 * k, 228, 32], "aktiv": None} for k, z in enumerate(self.alle[i0:i0 + 3])]
+                vorher, hoehe = self.top, 32 * len(self.alle)
+                ende = vorher + 96 >= hoehe - 2
+                self.top = min(vorher + 76, hoehe - 96)
+                return {"ok": True, "zeilen": zeilen, "scroll": {"vorher": vorher, "top": self.top, "hoehe": hoehe, "sicht": 96, "ende": ende, "bewegt": self.top != vorher}, "grund": ""}
+            return _S.lese_js(self, a, timeout)
+    ob._warte = lambda a_, b_: None
+    try:
+        sieben = [A1, A2, A3, A4, A5, "APEX1234560000007", "APEX1234560000008"]
+        s5 = _SS(sieben); tr5 = []
+        r5 = ob._cdp_konto_sichern(s5, A6, {}, tr5)
+        s6 = _SS(sieben[:6] + [A6]); tr6 = []
+        r6 = ob._cdp_konto_sichern(s6, A6, {}, tr6)
+        s7 = _SS(sieben, scroll_ok=False); tr7 = []
+        r7 = ob._cdp_konto_sichern(s7, A6, {}, tr7)
+    finally:
+        for n_, f_ in alt.items():
+            setattr(ob, n_, f_)
+    chk(r5[1] == "konto_nicht_erreicht" and r5[4].get("gleicher_login") == {"user": "123456", "konten": 7, "gescrollt": 3} and r5[4].get("gescrollt") == 3
+        and r5[4].get("konto_treffer") is None and len(r5[4].get("konto_eintraege") or []) == 7 and "gescrollt 3× vollständig gelesen (7 Konten), Ziel 0×" in r5[2]
+        and s5.rufe[0] == "anfang" and s5.rufe.count("schritt") == 3 and s5.spur[-1] == "Taste Escape" and any("Konto-Liste gescrollt: 3 Abschnitt(e), 7 Konten (2 doppelt" in x and "Ende erreicht" in x for x in tr5)
+        and ob.cdp_konto_weg_gleicher_login(r5[4], A6) == (True, 7),
+        f"scrollbare Liste ohne Ziel: Abschnitte gelesen, Ende bewiesen, Beleg mit 7 Konten, danach Esc ({r5[2]}, {s5.rufe}, {tr5})")
+    chk(r6[1] == "konto_nicht_erreicht" and r6[4].get("gleicher_login") is None and r6[4].get("ziel_nach_scrollen") == 1 and "erst nach Scrollen" in r6[2] and "nicht geklickt" in r6[2]
+        and not any(x.startswith("Konto ") for x in s6.spur), f"Ziel steht erst nach Scrollen in der Liste → kein Beleg, nichts geklickt ({r6[2]}, {s6.spur})")
+    chk(r7[1] == "konto_nicht_erreicht" and r7[4].get("gleicher_login") is None and "Liste nicht vollständig im Bild" in r7[2] and any("nicht möglich (kein Scroll-Container)" in x for x in tr7),
+        f"kein Scroll-Container → weiter konto_nicht_erreicht mit Grund ({r7[2]}, {tr7})")
     q_km, q_ks = _i.getsource(ob._cdp_konto_mit_login), _i.getsource(ob._cdp_konto_sichern)
+    chk(q_ks.index("scroll = _cdp_liste_scrollen(s, ext, trail)") < q_ks.index('_cdp_esc(s, st, trail, "Konto-Liste schließen")') and "Scroll-Weg liest nur" in q_ks
+        and "_warte(0.3, 0.25)" in _i.getsource(ob._cdp_liste_scrollen), "Scrollen vor dem Esc, nur lesen, Takt über _warte")
     chk(q_km.count("_cdp_konto_weg_gleicher_login(sitz, ext, opts, trail, res") == 2 and q_km.index("if ok or not cdp_login_noetig(code, extra):") < q_km.index("_cdp_konto_weg_gleicher_login(")
-        and "cdp_gleicher_login_beleg(ko, aktiv, ext)" in q_ks and q_ks.index('ex["konto_treffer"] = None') < q_ks.index("cdp_gleicher_login_beleg("),
+        and "cdp_gleicher_login_beleg(ko, aktiv, ext)" in q_ks and q_ks.index('ex["konto_treffer"] = None') < q_ks.index("gl, gg, gn = cdp_gleicher_login_beleg("),
         "Verdrahtung: vor dem frühen Rücksprung und nach der Login-Schleife; konto_treffer bleibt None (kein Abmelden)")
     if ok:
         print("✓ Konto weg bei richtigem Login: gleicher Apex-User + Liste 2× vollständig + Ziel 0× → konto_weg; fremder Login erst wechseln; sonst nie")

@@ -18121,6 +18121,12 @@ def _cdp_konto_sichern(s, ext, opts, trail):
         if ko.get("liste_offen"):
             e, n = cdp_konto_eintrag(ko.get("eintraege"), ext)
             if not e:
+                # LISTE SCROLLEN (08.10.2026): Ziel 0×, gleicher Apex-User, Liste nicht ganz im Bild → VOR dem Esc abschnittsweise lesen
+                scroll = None
+                if n == 0 and not cdp_liste_beleg(ko, aktiv, ext)[0]:
+                    _gl0, _gg0, _ = cdp_gleicher_login_beleg(ko, aktiv, ext)
+                    if not _gl0 and _gg0.startswith("Liste nicht vollständig"):
+                        scroll = _cdp_liste_scrollen(s, ext, trail)
                 im_text = _cdp_ziel_im_text(s, ext) if n == 0 else None   # VOR dem Esc, solange die Liste offen ist (cdp_konto_weg)
                 _cdp_esc(s, st, trail, "Konto-Liste schließen")
                 ex = {"konto_eintraege": _eintr(ko), "konto_treffer": n}
@@ -18138,8 +18144,22 @@ def _cdp_konto_sichern(s, ext, opts, trail):
                         # RICHTIGER LOGIN, Ziel fehlt (08.10.2026, cdp_gleicher_login_beleg): kein Login-Wechsel (konto_treffer None
                         # bleibt), aber Befund für _cdp_konto_mit_login — zwei davon = 'konto_weg'
                         gl, gg, gn = cdp_gleicher_login_beleg(ko, aktiv, ext)
+                        if not gl and scroll:
+                            if scroll["ziel_n"]:
+                                # das Ziel steht in der Liste, nur außer Sicht — der Scroll-Weg liest nur, kein Klick (Auftrag 08.10.2026)
+                                gg = f"Ziel steht in der Liste erst nach Scrollen ({scroll['ziel_n']}×, {len(scroll['zeilen'])} Konten) — nicht geklickt, Scroll-Weg liest nur"
+                                ex["ziel_nach_scrollen"] = scroll["ziel_n"]
+                            elif scroll["ende"] and scroll["zeilen"]:
+                                ko_voll = {"liste_voll": True, "liste_kurz": False, "liste_voll_grund": "", "eintraege": scroll["zeilen"]}
+                                gl, gg, gn = cdp_gleicher_login_beleg(ko_voll, aktiv, ext)
+                                if gl:
+                                    gg = gg.replace("Liste vollständig", f"Liste gescrollt {scroll['schritte']}× vollständig gelesen")
+                                    ex["konto_eintraege"] = [str(z.get("text"))[:40] for z in scroll["zeilen"]][:40]
+                                    ex["gescrollt"] = scroll["schritte"]
+                            else:
+                                gg = f"{gg}; gescrollt {scroll['schritte']}×, {scroll['grund'] or 'kein Ende'}"
                         if gl:
-                            ex["gleicher_login"] = {"user": cdp_konto_familie(cdp_kontonr(aktiv))[5:], "konten": gn}
+                            ex["gleicher_login"] = {"user": cdp_konto_familie(cdp_kontonr(aktiv))[5:], "konten": gn, "gescrollt": (scroll or {}).get("schritte", 0) if gl and scroll else 0}
                             ex["ziel_im_text"] = im_text
                             # alter Satz („selben Apex-Login …") bleibt vorn stehen (Prüfer-Tests .865), der Beleg hängt sich an
                             grund = grund + "; " + gg + ", Ziel 0×" + ("" if im_text is False else " (Ziel im sichtbaren Text" + (" — nicht prüfbar" if im_text is None else "") + ")")
@@ -20619,6 +20639,95 @@ def cdp_gleicher_login_beleg(ko, aktiv, ext=""):
     if not any(cdp_konto_passt(str(x.get("text") or ""), nr) for x in zeilen):
         return False, f"aktives Konto {nr} steht nicht in der Liste", 0
     return True, f"gleicher Apex-User {fa[5:]}, Liste vollständig ({len(zeilen)} Konten)", len(zeilen)
+
+
+# LISTE SCROLLEN (08.10.2026, Auftrag Master für Slave-Terminal 3): Apex-Logins mit vielen Konten — die Liste ist scrollbar, liste_voll
+# sagt nein, der Beleg oben war nicht möglich. augen.js 0.8.0 konto_scroll liest die offene Liste abschnittsweise (Container scrollen,
+# Mitschrift der Scrollposition, nie klicken); hier werden die Abschnitte zusammengeführt (Duplikate aus der Überlappung), das Ende
+# entschieden und das Ziel in der GANZEN Liste gesucht. Danach schließt der Konto-Schritt die Liste wie heute mit Esc.
+CDP_SCROLL_SCHRITTE_MAX = 12
+
+
+def cdp_liste_abschnitte_zusammen(abschnitte):
+    """REIN RECHNEND (testbar): Abschnitte [[{text, kontonr, rect, aktiv}, …], …] → (zeilen, duplikate). Schlüssel = Kontonummer,
+    sonst der Text ohne Trennzeichen (groß); Duplikate aus der Überlappung zweier Abschnitte zählen, erste Fundstelle gewinnt;
+    Reihenfolge: Abschnitt, darin oben nach unten. Zeilen ohne Text fallen weg."""
+    gesehen, zeilen, dupl = set(), [], 0
+    for ab in abschnitte or []:
+        for z in sorted([x for x in (ab or []) if isinstance(x, dict) and str(x.get("text") or "").strip()],
+                        key=lambda x: (cdp_rect(x.get("rect")) or [0, 0])[1]):
+            k = _nur_alnum(str(z.get("kontonr") or "")).upper() or _nur_alnum(str(z.get("text") or "")).upper()
+            if not k:
+                continue
+            if k in gesehen:
+                dupl += 1
+                continue
+            gesehen.add(k)
+            zeilen.append({"text": str(z.get("text") or "")[:60], "kontonr": str(z.get("kontonr") or ""), "rect": z.get("rect"), "aktiv": z.get("aktiv")})
+    return zeilen, dupl
+
+
+def cdp_scroll_urteil(v, letzte_top):
+    """REIN RECHNEND (testbar): Antwort eines konto_scroll('schritt') beurteilen. -> ('ende' | 'weiter' | 'steht' | 'fehler', grund)
+    ende = beim Lesen stand der Container am unteren Rand; steht = Scrollen bewegt nichts mehr (virtualisierte Liste am Ende, ohne
+    ende-Flag) bzw. dieselbe Position wie beim letzten Schritt; fehler = keine Liste/kein Container/Ausnahme."""
+    if not isinstance(v, dict) or not v.get("ok") or not isinstance(v.get("scroll"), dict):
+        return "fehler", str((v or {}).get("grund") if isinstance(v, dict) else "keine Antwort")[:80] or "keine Antwort"
+    sc = v["scroll"]
+    if sc.get("ende") is True:
+        return "ende", ""
+    try:
+        top, vorher = float(sc.get("top")), float(sc.get("vorher"))
+    except (TypeError, ValueError):
+        return "fehler", "Scrollposition unlesbar"
+    if not sc.get("bewegt") or (letzte_top is not None and abs(top - float(letzte_top)) < 1.0):
+        return "steht", f"Scrollen bewegt nichts mehr (top {int(top)} von {sc.get('hoehe')})"
+    return "weiter", ""
+
+
+def _cdp_liste_scrollen(s, ext, trail, max_schritte=CDP_SCROLL_SCHRITTE_MAX):
+    """Die OFFENE Konto-Liste abschnittsweise lesen (augen.js konto_scroll): erst nach oben, dann je Schritt lesen + weiterscrollen,
+    Pausen über _warte (Streuung), bis Ende, Stillstand oder max_schritte. -> {"zeilen", "schritte", "ende", "grund", "ziel_n", "dupl",
+    "pos": [(vorher, top, hoehe)]}; ende True nur, wenn der Container beim letzten Lesen am unteren Rand stand (Beweis aus der
+    Mitschrift). Wirft nie. Liest und scrollt nur — nie ein Klick; die Liste schließt der Aufrufer wie heute mit Esc."""
+    aus = {"zeilen": [], "schritte": 0, "ende": False, "grund": "", "ziel_n": 0, "dupl": 0, "pos": []}
+    def _ruf(aktion):
+        try:
+            return s.lese_js("globalThis.prophosAugen.konto_scroll(" + json.dumps(aktion) + ")")
+        except Exception as e_:
+            return {"ok": False, "grund": f"{type(e_).__name__}"}
+    v0 = _ruf("anfang")
+    if not (isinstance(v0, dict) and v0.get("ok")):
+        aus["grund"] = str((v0 or {}).get("grund") if isinstance(v0, dict) else "augen.js ohne konto_scroll (< 0.8.0)")[:80] or "augen.js ohne konto_scroll (< 0.8.0)"
+        trail.append(f"Konto-Liste scrollen: nicht möglich ({aus['grund']})")
+        return aus
+    abschnitte, letzte_top = [], None
+    for _i in range(max(1, int(max_schritte))):
+        _warte(0.3, 0.25)                                  # die Liste nach dem Scrollen neu zeichnen lassen (virtualisiert)
+        v = _ruf("schritt")
+        urteil, grund = cdp_scroll_urteil(v, letzte_top)
+        if urteil == "fehler":
+            aus["grund"] = grund
+            break
+        sc = v["scroll"]
+        abschnitte.append(v.get("zeilen") or [])
+        aus["pos"].append((sc.get("vorher"), sc.get("top"), sc.get("hoehe")))
+        if urteil == "ende":
+            aus["ende"] = True
+            break
+        if urteil == "steht":
+            aus["grund"] = grund
+            break
+        letzte_top = sc.get("top")
+    else:
+        aus["grund"] = f"nach {max_schritte} Schritten kein Ende"
+    aus["schritte"] = len(abschnitte)
+    aus["zeilen"], aus["dupl"] = cdp_liste_abschnitte_zusammen(abschnitte)
+    aus["ziel_n"] = cdp_konto_eintrag(aus["zeilen"], ext)[1]
+    p0, p1 = (aus["pos"][0] if aus["pos"] else (None, None, None)), (aus["pos"][-1] if aus["pos"] else (None, None, None))
+    trail.append(f"Konto-Liste gescrollt: {aus['schritte']} Abschnitt(e), {len(aus['zeilen'])} Konten ({aus['dupl']} doppelt aus der Überlappung), "
+                 + ("Ende erreicht" if aus["ende"] else f"KEIN Ende ({aus['grund']})") + f", scrollTop {p0[0]}→{p1[0]} von {p1[2]}, Ziel {aus['ziel_n']}×")
+    return aus
 
 
 def cdp_konto_weg_gleicher_login(extra, ext):

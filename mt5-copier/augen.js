@@ -23,7 +23,7 @@
  */
 var PROPHOS_AUGEN = (function () {
   'use strict';
-  var VERSION = '0.7.9';   // 0.7.9 (08.10.2026, Slave-Terminal 3, Muster „knopf: senden-knopf nicht gedrückt (maus nicht bewiesen über dem knopf)" 4× auf 4 PCs): maus() — wo die Seite den Zeiger zuletzt sah (mousemove-Mitschrift, einmal je Seite installiert), damit der Bot vor dem Hover-Riegel unterscheiden kann „Bewegung kam nie an" (sofort frisch bewegen) und „Ziel bewegt sich unter dem Zeiger"   // 0.7.8 (05.10.2026, Finn: „auch diese kleinen Ads unten links automatisch wegklicken"): toasts.werbung — kleine Werbe-Kachel #charting-ad mit ihrem Knopf „Close ad" (nur Diagnose, geschlossen wird sie im Bot)
+  var VERSION = '0.8.0';   // 0.8.0 (08.10.2026, Slave-Terminal 3, Auftrag Master: Apex-Logins mit vielen Konten, Liste scrollbar): konto_scroll(aktion) — die offene Konto-Liste abschnittsweise lesen: 'anfang' scrollt den Container nach oben, 'schritt' liest die sichtbaren Zeilen und scrollt dann einen Schritt weiter, mit Mitschrift der Scrollposition (vorher/nachher/hoehe/sicht/ende). Scrollt nur den Listen-Container, klickt nie; der Bot führt Abschnitte zusammen und schließt die Liste wie heute mit Esc   // 0.7.9 (08.10.2026, Slave-Terminal 3, Muster „knopf: senden-knopf nicht gedrückt (maus nicht bewiesen über dem knopf)" 4× auf 4 PCs): maus() — wo die Seite den Zeiger zuletzt sah (mousemove-Mitschrift, einmal je Seite installiert), damit der Bot vor dem Hover-Riegel unterscheiden kann „Bewegung kam nie an" (sofort frisch bewegen) und „Ziel bewegt sich unter dem Zeiger"   // 0.7.8 (05.10.2026, Finn: „auch diese kleinen Ads unten links automatisch wegklicken"): toasts.werbung — kleine Werbe-Kachel #charting-ad mit ihrem Knopf „Close ad" (nur Diagnose, geschlossen wird sie im Bot)
     // 0.7.7 (05.10.2026): Kontonummern mit nur 4 Endziffern (mindestens 10 Buchstaben davor) zählen als Konto-Zeile und Umschalter (kontoNrAus, RX_KONTO) — vorher „0x im Dropdown“. 0.7.6 (05.10.2026, Finn: „erkennt das falsche Tradovate-Konto und bricht einfach ab"): konto.liste_kurz — eine kurze Liste (≤ 8 Zeilen) mit Platz darüber und darunter ist ganz zu sehen, auch wenn listeVoll am Container scheitert; konto.liste_voll_grund nennt, woran
     // 0.7.5 (02.10.2026, Finn + Pascal): Kontonummern mit 5 End-Ziffern (FundedNext Futures) — Umschalter nach dem Login sonst „kein Konto“
     // 0.7.4 (30.09.2026, Regression .865): Konto-Umschalter relativ zur Broker-Leiste (auch maximiert oben), konto.panel_lage, keine Ein-Zeilen-Liste ohne Umschalter, konto.liste_voll (ganze Liste im Bild)   // 0.7.3 (29.09.2026, K3): kurz() gibt geheime Felder (Passwort, Login-Formular) nie mit Wert zurück   // 0.7.2 (29.09.2026): Aufnahme stoppt nach 10 min von selbst   // 0.7.1 (29.09.2026, K2 für T3): kauf_knopf.disabled, tp/sl.einheit/wert/neben, summary_reiter   // 0.7.0 (29.09.2026, Aufnahme 00:52): Kontoliste ohne Rollen, Meldungs-Status, Watchlist, Dialog-Knöpfe   // 0.6.1 (29.09.2026): aufnahme_letzte() als Rettungskopie, T3-Banner 'prophos-aufnahme' ausgeblendet   // 0.6.0 (29.09.2026, Aufnahme 00:36 leer): window-capture, roh-Zähler, tab_id, Sichtbarkeit   // 0.5.3 (29.09.2026, Lesung 00:22:50): Konto-Anker Kontonummer zuerst, Summary Total P/L = today   // 0.5.2 (29.09.2026, Lesung 00:22): Panel 'Collapse panel'/Manager-Knopf, Konto entdoppelt + kontonr   // 0.5.1 (29.09.2026, Lesung 00:17 pc-cccccc): Schalter-Rechteck, ticket.seite/bereit, Legende, veraltete Zeilen   // 0.5.0 (29.09.2026): Aufnahme-Modus (Finn klickt den Ablauf einmal selbst, jede Aktion wird mitgeschrieben)   // 0.4.0 (29.09.2026, K1–K4 für T3): positionen, orders, konto_summary, symbolsuche, toasts.meldungen   // 0.3.0 (29.09.2026, erste echte Lesung pc-cccccc): TP/SL-Zustand, Konto-Leiste, Toast-Rückfall   // 0.2.0 (29.09.2026): Vertrag mit T3 — globalThis.prophosAugen, Schlüssel-Whitelist, popups, kauf_knopf
@@ -461,7 +461,7 @@ var PROPHOS_AUGEN = (function () {
       });
     }
     var vollZ = zeilen.length <= 40 && listeVoll(zeilenEl, schalterEl);
-    return { zeilen: zeilen.slice(0, 40), gruppen: gruppen, voll: vollZ, grund: vollZ ? '' : (zeilen.length > 40 ? 'mehr als 40 Zeilen' : lvGrund), kurz: listeKurz(zeilenEl, schalterEl) };
+    return { zeilen: zeilen.slice(0, 40), gruppen: gruppen, voll: vollZ, grund: vollZ ? '' : (zeilen.length > 40 ? 'mehr als 40 Zeilen' : lvGrund), kurz: listeKurz(zeilenEl, schalterEl), els: zeilenEl };   // els (0.8.0): nur für konto_scroll, nie im stand()
   }
   /* KONTO-UMSCHALTER RELATIV ZUR BROKER-LEISTE (30.09.2026, Regression .865 bei pc-cccccc, Inventar 03:13 UTC): maximiert steht
    * #footer-chart-panel OBEN ([56,0,1194,38], Knopf „Restore panel") und der Umschalter direkt darunter ([72,59,199,28] 'PAAPEX…0008USD');
@@ -982,6 +982,46 @@ var PROPHOS_AUGEN = (function () {
     return o;
   }
 
+  /* KONTO-LISTE SCROLLEN (0.8.0, 08.10.2026, Auftrag Master für Slave-Terminal 3: Apex-Logins mit vielen Konten — die Liste ist
+   * scrollbar, liste_voll sagt nein, der Konto-weg-Beleg (gleicher Apex-User, Ziel 0×) war dort nicht möglich). aktion:
+   *   'anfang'  → Scroll-Container der offenen Liste nach oben (scrollTop 0), keine Zeilen
+   *   'schritt' → sichtbare Zeilen lesen, DANN einen Schritt weiter scrollen (80 % der Sichthöhe, mindestens 40 px)
+   *   'lesen'   → nur lesen, nicht scrollen
+   * -> { ok, zeilen:[{text, kontonr, rect, aktiv}], scroll:{vorher, top, hoehe, sicht, ende, bewegt}, grund }
+   * ende = beim Lesen stand der Container schon am unteren Rand (vorher + sicht ≥ hoehe − 2). Scrollt NUR den Listen-Container
+   * (Vorfahr der ersten Zeile mit overflow auto/scroll und scrollHeight > clientHeight, ≤ 10 Ebenen), klickt nie, tippt nie.
+   * Zeilen wie in konto(): role=option/menuitem, sonst kontoZeilen(). Der Bot (order_bot.py _cdp_liste_scrollen) ruft das im
+   * Takt mit Pausen, führt die Abschnitte zusammen (Duplikate aus der Überlappung) und schließt die Liste wie heute mit Esc. */
+  function kontoScroll(aktion) {
+    try {
+      var s = kontoSchalter();
+      var optEl = alle('[role="listbox"] [role="option"],[role="menu"] [role="menuitem"],[data-name="menu-inner"] [role="option"],[data-name="popup-menu-container"] [role="menuitem"]').filter(sichtbar);
+      var els = optEl.length ? optEl : (kontoZeilen(s.el).els || []);
+      if (!els.length) return { ok: false, zeilen: [], scroll: null, grund: 'keine Liste' };
+      var c = els[0].parentElement, n = 0;
+      while (c && c !== document.body && n < 10) {
+        var st = window.getComputedStyle(c);
+        if (/(auto|scroll)/.test(st.overflowY + ' ' + st.overflow) && c.scrollHeight > c.clientHeight + 2) break;
+        c = c.parentElement; n++;
+      }
+      function lies() {
+        return els.slice(0, 60).map(function (e) {
+          var t = entdoppeln(txt(e)), m = kontoNrAus(t);
+          return { text: t.slice(0, 60), kontonr: m ? m[0] : '', rect: rect(e),
+                   aktiv: attr(e, 'aria-selected') === 'true' || attr(e, 'aria-checked') === 'true' || null };
+        });
+      }
+      if (!c || c === document.body || c === document.documentElement) return { ok: false, zeilen: lies(), scroll: null, grund: 'kein Scroll-Container' };
+      var vorher = c.scrollTop, zeilen = aktion === 'anfang' ? [] : lies();
+      if (aktion === 'anfang') c.scrollTop = 0;
+      else if (aktion === 'schritt') c.scrollTop = Math.min(vorher + Math.max(40, Math.round(c.clientHeight * 0.8)), Math.max(0, c.scrollHeight - c.clientHeight));
+      var nach = c.scrollTop;
+      return { ok: true, zeilen: zeilen, grund: '',
+               scroll: { vorher: Math.round(vorher), top: Math.round(nach), hoehe: c.scrollHeight, sicht: c.clientHeight,
+                         ende: vorher + c.clientHeight >= c.scrollHeight - 2, bewegt: Math.round(nach) !== Math.round(vorher) } };
+    } catch (e) { return { ok: false, zeilen: [], scroll: null, grund: 'konto_scroll: ' + String(e) }; }
+  }
+
   /* MAUS-MITSCHRIFT (0.7.9, 08.10.2026): wo hat die SEITE den Zeiger zuletzt gesehen? Der Bot fährt die echte Windows-Maus hin und
    * beweist :hover — in 4 Senden-Fällen (4 PCs, 04.–06.10.) und 61 Hover-Fehlschlägen seit 01.10. stand der Zeiger laut Windows am
    * Ziel, die Seite wusste es nicht (Werbe-Kachel: „am Punkt 'close ad', Zeiger laut Seite über 'svg'"). Ein Capture-Listener auf
@@ -1006,7 +1046,7 @@ var PROPHOS_AUGEN = (function () {
   }
   mausMitschrift();   // beim Laden installieren, damit die erste Fahrt des Laufs schon mitgeschrieben wird
 
-  return { v: VERSION, version: VERSION, stand: stand, inventar: inventar, maus: maus,
+  return { v: VERSION, version: VERSION, stand: stand, inventar: inventar, maus: maus, konto_scroll: kontoScroll,
            aufnahme_start: aufnahme_start, aufnahme_stopp: aufnahme_stopp, aufnahme_stand: aufnahme_stand, aufnahme_letzte: aufnahme_letzte };
 })();
 // Vertrag T3: globalThis.prophosAugen = { v, stand(), inventar() } — mehrfaches Ausführen setzt es einfach neu (idempotent).
