@@ -1930,7 +1930,8 @@
   #tpl-view .tpl-bd-z .k .f{flex:none;font-size:11.5px} #tpl-view .tpl-bd-z .k b{font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
   #tpl-view .tpl-bd-z .k .type-badge{flex:none;font-size:10px;padding:1px 6px}
   #tpl-view .tpl-bd-z .b{font-variant-numeric:tabular-nums;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis} #tpl-view .tpl-bd-z .b.leer{color:var(--sub-2)}
-  #tpl-view .tpl-bd-z .t{min-width:0;color:var(--ink-2)}
+  #tpl-view .tpl-bd-z .t{min-width:0;color:var(--ink-2)} #tpl-view .tpl-bd-z .t .tun{display:block;margin-top:1px;font-size:11.5px;color:var(--sub)}
+  #tpl-view .tpl-bd-z .t .tun b{font-weight:600;color:var(--ink-2)} #tpl-view .tpl-bd-z.neu em{color:var(--violet)}
   #tpl-view .tpl-bd-z .a{display:flex;align-items:center;gap:6px;justify-content:flex-end;white-space:nowrap}
   #tpl-view .tpl-bd-z .s{font-size:11.5px;color:var(--sub-2)} #tpl-view .tpl-bd-z .s.rot{color:var(--danger)}
   #tpl-view .tpl-bd-z .knopf{border:1px solid var(--border);background:var(--surface);border-radius:7px;height:26px;padding:0 9px;font:inherit;font-size:12px;color:var(--ink-2);cursor:pointer;white-space:nowrap}
@@ -37960,6 +37961,7 @@
         abschluss(false, w === 'verschoben' ? '⇅ Richtungskonflikt — nichts platziert, neuer Versuch in 10–20 min.' : w === 'aufgegeben' ? '⇅ Richtungskonflikt bis Fensterende — nicht gestartet, von Hand starten.' : '✗ Nichts platziert — Zeilen oben prüfen.', !w)
         return
       }
+      if(vonTick) await sfMelden(plan, { schritt: failKeys[0] || '', msg: _pfErrLog.join(' · ') })   // START-FEHLER (07.10.2026)
       abschluss(false, '✗ Nichts platziert — Zeilen oben prüfen.', true)
       return
     }
@@ -38005,6 +38007,7 @@
       const msg = String((r && (r.msg || r.error)) || 'keine Antwort vom Bot')
       _pfSet('v2order', 'err', escapeHtml(msg))
       _pfRemoteMelde(plan.id, { ok:false, retry_ok: retryOk, unklar: !retryOk, offen, msg })
+      if(vonTick && !offen) await sfMelden(plan, { schritt: 'v2order', msg, unklar: !retryOk })   // START-FEHLER (07.10.2026)
       abschluss(false, offen ? '🚨 POSITION IST OFFEN, SL/TP fehlt — SOFORT im Master-Terminal nachtragen!'
         : retryOk ? '✗ Nichts platziert — Meldung oben. „Erneut versuchen" nimmt die Order vom Plan.'
         : '⚠ Ergebnis UNKLAR — erst im Master-Terminal prüfen, ob die Order liegt. NICHT blind erneut starten.', retryOk && !offen)
@@ -39972,7 +39975,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1130'
+  const OS_TAB_BUILD = '2026-09-22.1131'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -43794,6 +43797,106 @@
   }
   window._rk = { vorStart: rkVorStart, verschieben: rkVerschieben, fensterEnde: rkFensterEnde, aufgegeben: rkAufgegeben }   // Test-Haken (Stub)
 
+  /* ══ START-FEHLER & NEU EINPLANEN (07.10.2026, Finn 15:07 zu „Braucht dich": „woher soll ich wissen, was ich bei The5ers machen
+   * muss? … sobald es gefixt ist, checkt der Bot das automatisch und plant dann wieder für den gleichen Tag ein, wenn noch Zeit ist").
+   * Anlass: zwei Auto-Pläne (The5ers Phase 2 08:52, FundedNext Phase 2 14:07 Dubai) wurden pünktlich geclaimt, der Echo-V2-Check am
+   * PC war rot, kein Signal — der Grund stand nur im Check-Popup am PC, im Planer nur „nie gestartet". Jetzt:
+   *   (1) sfMelden: ein roter Start zur Startzeit (Echo-V2-Check, Puls ohne Order, Start-Fenster verpasst) schreibt
+   *       mt5_baseline.start_fehler { schritt, msg, status 'rot', at, pc, login, versuche } — app.py reicht ihn an den Planer (alle IDs),
+   *       „Braucht dich" macht daraus Klartext + was zu tun ist (tplSfTun).
+   *   (2) sfTick (nur PC-Tab, 60 s): ist die Ursache weg (Echo-Instanz mit Terminal für den Login da / Tab läuft wieder / nach 15 min
+   *       bei Terminal, Hedge, Richtung, Puls), plant er den Plan neu ein: Startzeit jetzt + 2–6 min (Zufall), Claim zurück — nur am
+   *       selben Tag, solange das letzte Start-Fenster offen ist (höchstens start_bis), höchstens SF_MAX Mal. Den Start macht wie immer
+   *       tpStartUmTick mit allen Prüfungen (Richtung am Start, Echo-V2-Check).
+   *   Nie automatisch: Puls-Ergebnis UNKLAR (Doppel-Order-Gefahr) — dort bleibt es bei „erst im Terminal nachsehen".
+   *   Der PC-Tab lädt Pläne sonst nur beim Login — alle 2 min gleicht er deshalb die heutigen geplanten Pläne der ID ab (eine kleine
+   *   Abfrage), damit ein „↻ Neu starten" vom Mac/Handy am PC ankommt. ══ */
+  const SF_MAX = 3, SF_WARTE_MS = 15 * 60000, SF_TAKT_MS = 60000, SF_ABGLEICH_MS = 2 * 60000
+  const sfFlag = p => (p && p.mt5Baseline && p.mt5Baseline.start_fehler) || null
+  const sfTagDt = iso => new Date(iso).toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' })
+  async function sfMelden(plan, f){
+    try{
+      const alt = sfFlag(plan)
+      const login = (typeof mt5LoginForAccount === 'function') ? mt5LoginForAccount(plan.masterAccountId) : null
+      const flag = { schritt: f.schritt || '', msg: String(f.msg || '').slice(0, 400), unklar: !!f.unklar, status: 'rot', at: new Date().toISOString(),
+        pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : null, login: login ? String(login) : null, start: plan.startUm || null,
+        versuche: (alt && Number(alt.versuche)) || 0 }
+      await baselinePatch(plan.id, { start_fehler: flag }, 'planned')
+      try{ renderTradePlans() }catch(_){}
+    }catch(e){ console.warn('[start-fehler] schreiben', (e && e.message) || e) }
+  }
+  // Letzte Startminute des Tages (deutsche Zeit): Ende des letzten Start-Fensters (Delta-Monitor), höchstens start_bis (16:30 dt)
+  function sfTagesEnde(){
+    const d = (typeof _apd !== 'undefined' && _apd && _apd.d) || null
+    const fen = (d && Array.isArray(d.fenster) && d.fenster.length) ? d.fenster : AP_DELTA_FENSTER
+    let bis = 0
+    for(const f of fen){ const b0 = apPrHm(f.bis), b = b0 === 0 ? 1440 : b0; if(b != null && b > bis) bis = b }
+    const sb = apPrHm((d && d.start_bis) || '16:30')
+    return Math.min(bis || 1440, sb != null ? sb : 1440)
+  }
+  // Ist die Ursache weg? → Klartext (warum neu eingeplant) oder null
+  async function sfBehoben(plan, f){
+    if(f.unklar) return null
+    if(f.schritt === 'zu_spaet') return 'Prophos-Tab am PC läuft wieder'
+    if(plan.route === 'mt5v2' && (f.schritt === 'v2link' || !f.schritt)){
+      const dd = (typeof window.mtcApi === 'function') ? await window.mtcApi('instances') : null
+      if(!dd || dd.copier_offline || dd._httpFail) return null
+      const r = mt5V2Resolve(plan, dd.instances || [])
+      return r && r.inst && r.inst.has_terminal ? `Echo-Instanz mit Terminal für Login ${r.masterLogin} da` : null
+    }
+    return Date.now() - (Date.parse(f.at) || 0) >= SF_WARTE_MS ? `${Math.round(SF_WARTE_MS / 60000)} min später neuer Versuch` : null
+  }
+  /* Neu einplanen: Startzeit jetzt + 2–6 min (von Hand: + 1 min), Claim zurück. Guard: noch geplant, nichts gesendet.
+   * → 'neu' | 'tagesende' | false */
+  async function sfNeuEinplanen(plan, grund, hand){
+    const f = sfFlag(plan) || {}
+    const neuMs = Date.now() + (hand ? 60000 : (2 + Math.random() * 4) * 60000)
+    if(!hand && apPrHm(new Date(neuMs).toISOString()) >= sfTagesEnde()) return 'tagesende'
+    const q = supabase.from('trade_plans').update({ start_um: new Date(neuMs).toISOString(), start_um_gestartet_at: null })
+      .eq('id', plan.id).eq('status', 'planned').is('started_at', null).is('orbit_gesendet_at', null)
+    const { data, error } = await q.select('*')
+    if(error || !data || !data.length){ console.warn('[start-fehler] nicht neu einplanbar', plan.id, error); return false }
+    const neu = rkPlanErsetzen(data[0])
+    const flag = Object.assign({}, f, { status: 'neu', versuche: (Number(f.versuche) || 0) + 1, behoben: grund || '', neu_at: new Date().toISOString(), neu_start: neu.startUm, hand: !!hand })
+    try{ await baselinePatch(plan.id, { start_fehler: flag }, 'planned') }catch(e){ console.warn('[start-fehler] Flag', (e && e.message) || e) }
+    if(typeof atToast === 'function') atToast(`↻ „${plan.masterName || 'Plan'}" neu eingeplant — Start ${tpStartUmText(neu.startUm)}${grund ? ' (' + grund + ')' : ''}.`, 'start')
+    try{ renderTradePlans() }catch(_){}
+    return 'neu'
+  }
+  let _sfLaeuft = false, _sfAbgleichAt = 0
+  async function sfTick(){
+    if(!MT5_LOCAL || _sfLaeuft) return
+    let uid; try{ uid = currentUserId }catch(_){ uid = null }
+    if(!uid) return
+    _sfLaeuft = true
+    try{
+      const heute = sfTagDt(new Date().toISOString())
+      // Abgleich (2 min): heutige geplante Pläne dieser ID — Startzeit/Claim/Start-Fehler, die woanders geändert wurden
+      if(Date.now() - _sfAbgleichAt >= SF_ABGLEICH_MS){
+        _sfAbgleichAt = Date.now()
+        const { data } = await supabase.from('trade_plans').select('id,start_um,start_um_gestartet_at,mt5_baseline')
+          .eq('user_id', uid).eq('status', 'planned').gte('start_um', new Date(Date.now() - 24 * 3600000).toISOString())
+        const anders = (data || []).some(r => { const p = (tradePlans || []).find(x => String(x.id) === String(r.id))
+          return !p || Date.parse(p.startUm || 0) !== Date.parse(r.start_um || 0) || !!p.startUmGestartetAt !== !!r.start_um_gestartet_at
+            || JSON.stringify(sfFlag(p)) !== JSON.stringify((r.mt5_baseline && r.mt5_baseline.start_fehler) || null) })
+        if(anders && typeof loadTradePlansFromSupabase === 'function') await loadTradePlansFromSupabase()
+      }
+      const kand = (tradePlans || []).filter(p => { const f = sfFlag(p)
+        return p && f && f.status === 'rot' && p.status === 'planned' && p.startUmGestartetAt && !p.startedAt && !p.orbitGesendetAt
+          && (Number(f.versuche) || 0) < SF_MAX && p.startUm && sfTagDt(p.startUm) === heute })
+      for(const p of kand){
+        const f = sfFlag(p), grund = await sfBehoben(p, f)
+        if(!grund) continue
+        const r = await sfNeuEinplanen(p, grund, false)
+        if(r === 'tagesende'){ try{ await baselinePatch(p.id, { start_fehler: Object.assign({}, f, { status: 'tagesende' }) }, 'planned') }catch(_){} }
+      }
+    }catch(e){ console.warn('[start-fehler] tick', (e && e.message) || e) }
+    finally{ _sfLaeuft = false }
+  }
+  setInterval(sfTick, SF_TAKT_MS)
+  window._sf = { melden: sfMelden, neu: sfNeuEinplanen, behoben: sfBehoben, tagesEnde: sfTagesEnde, tick: sfTick }   // Test-Haken
+  /* ══ ENDE START-FEHLER ══ */
+
   /* STARTZEIT-WARTESCHLANGE (07.10.2026, Finn: „seit zwei Tagen gehen der zweite und dritte nie los, weil der erste zu lang dauert —
    * die gehen in die Warteschlange"). Live-Befund Jacob 07.10.2026 (Dubai): Plan A 02:05:00 geclaimt, Puls fertig 02:06:22; B (02:06)
    * und C (02:07) blieben „Geplant" ohne Claim, ohne Signal. Edge-Logs: ab 02:06:23 versuchte dieser Tick JEDE SEKUNDE (445× bis
@@ -43978,6 +44081,7 @@
         const t = `„${plan.masterName || '—'}" NICHT gestartet — Startzeit ${tpStartUmText(plan.startUm)} um ${Math.round(verspaetet / 60000)} min verpasst (Start-Fenster ${Math.round(fenster / 60000)} min). Plan bleibt Geplant, von Hand starten.`
         if(typeof atToast === 'function') atToast('⏰ ' + t, 'end')
         try{ if(typeof pushAnsHandy === 'function') pushAnsHandy('Startzeit verpasst', t, 'https://prophos.pages.dev/prophos#trades', 'startum-' + String(plan.id).slice(0, 8)) }catch(_){}
+        if(rkGilt(plan)) await sfMelden(plan, { schritt: 'zu_spaet', msg: `Startzeit um ${Math.round(verspaetet / 60000)} min verpasst — der Prophos-Tab am PC lief nicht` })   // START-FEHLER (07.10.2026): sfTick plant neu ein
         return
       }
       // Pünktlich statt Zufall (23.09.2026 04:1x, Finn: „wenn ich den Trade auf 4:30 plane, soll er auch um 4:30 starten, wenn gerade
@@ -44856,7 +44960,7 @@
       if(s == null) continue
       if(x.bestaetigt) _tpl.okLokal.delete(String(x.plan_id))
       neu(x, g, p, { plan_id: String(x.plan_id), status: (x.bestaetigt || _tpl.okLokal.has(String(x.plan_id))) ? 'bestaetigt' : 'offen', start: s, aenderbar: x.aenderbar !== false,
-        fest: x.fest_durch || null, richtungFest: x.richtung_fest_durch || null })
+        fest: x.fest_durch || null, richtungFest: x.richtung_fest_durch || null, sf: x.start_fehler || null, geclaimt: !!x.geclaimt })
     }
     // eigene Auto-Pläne: beendete immer (nur hier steht das Ergebnis), geplante/laufende nur ohne Delta (z. B. morgen)
     for(const p of tradePlans || []){
@@ -45206,6 +45310,35 @@
   }
   const tplAlter = ms => ms < 3600000 ? `${Math.max(1, Math.round(ms / 60000))} min` : ms < 48 * 3600000 ? `${Math.round(ms / 3600000)} h` : `${Math.round(ms / 86400000)} T`
   const tplBalText = (b, jetzt) => !b ? 'keine Balance' : `${Number(b.bal).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${b.ccy === 'EUR' ? '€' : '$'}${b.at ? ' · ' + tplAlter(jetzt - b.at) : ''}${b.src ? ' · ' + b.src : ''}`
+  /* WAS TUN (Finn 07.10.2026 15:07: „ich weiß ja nicht, was ich machen soll — das muss da stehen"): je Zeile ein Satz, was zu tun ist,
+   * aus dem Start-Fehler (mt5_baseline.start_fehler, START-FEHLER-Sektion) bzw. der Balance-Quelle. Keine Prüfung, nur Anleitung. */
+  function tplSfTun(sf, wer){
+    const pc = sf.pc ? ` ${sf.pc}` : wer ? ` von ${wer}` : '', login = sf.login ? ` ${sf.login}` : '', m = String(sf.msg || '')
+    switch(sf.schritt){
+      case 'v2link': return /nicht erreichbar/i.test(m) ? `Am PC${pc} start-alles.bat ausführen (Copier-Backend).`
+        : /Terminal-Pfad/i.test(m) && !/Kein Master-Terminal/i.test(m) ? `Am PC${pc}: Echo → Instanz → Terminal-Pfad eintragen.`
+        : `Am PC${pc}: Echo → „Neue Instanz" für Login${login} mit Terminal-Pfad anlegen (nach dem Phasenwechsel neuer Login).`
+      case 'v2hedge': return /Duplikum/i.test(m) ? 'Master in Duplikum entkoppeln — Echo V2 läuft ohne Kopie.' : 'Offenes Echo-Fenster dieser Instanz beenden.'
+      case 'v2dir': return 'Nichts tun — wartet, bis der Gegen-Trade derselben Firma zu ist.'
+      case 'v2term': return `Am PC${pc} MT5 öffnen und mit Login${login} einloggen.`
+      case 'v2order': return sf.unklar ? 'Erst im MT5-Terminal nachsehen, ob die Order liegt — dann von Hand starten, nie blind.' : 'Puls hat nichts platziert — nichts tun.'
+      case 'zu_spaet': return `Prophos-Tab am PC${pc} offen lassen.`
+      default: return 'Check am PC war rot — ↻ Neu starten prüft erneut.'
+    }
+  }
+  function tplSfAuto(sf, D){
+    const bis = tplUhr(sfTagesEnde(), D.v), n = Number(sf.versuche) || 0
+    if(sf.status === 'tagesende') return 'Start-Fenster heute zu — der Nachtlauf plant neu.'
+    if(sf.unklar) return ''
+    if(n >= SF_MAX) return `${n} Neuversuche gescheitert — von Hand starten.`
+    return `Danach startet der Bot ihn von selbst neu (bis ${bis}${n ? `, Versuch ${n + 1}/${SF_MAX}` : ''}).`
+  }
+  function tplBalTun(a, b, fremd, wer){
+    if(fremd) return `Am PC von ${wer || 'der ID'}: Prophos → Accounts → ↻ Balance.`
+    if(b && b.src === 'MT5-Konto') return 'Am PC das MT5-Terminal dieses Kontos öffnen und einloggen, dann ↻ Balance lesen.'
+    if(b && b.src === 'TradingView') return 'Im Puls-Chrome dieses Konto in TradingView verbinden, dann ↻ Balance lesen.'
+    return '↻ Balance lesen — einmal lesen genügt.'
+  }
   function tplBraucht(D, ids){   // ids = Set der sichtbaren IDs, null = alle
     const je = new Map(), jetzt = Date.now(), ich = (_ap.ich && _ap.ich.name) || ''
     const add = (uid, name, z) => { const k = String(uid || ''); if(!k || (ids && !ids.has(k))) return
@@ -45220,7 +45353,7 @@
         const lauf = (typeof _accBalLauf !== 'undefined' && _accBalLauf.get(String(a.id))) || null
         konten.add(tplKk(currentUserId, a.name))
         add(currentUserId, ich, { art: 'balance', firma: a.firm, konto: a.name, typ: a.type, balance: tplBalText(b, jetzt), ende4: String(a.externalId || '').replace(/\D/g, '').slice(-4),
-          text: !b ? 'keine Live-Balance' : !at ? 'Balance ohne Zeitstempel' : `Balance ${tplAlter(jetzt - at)} alt`, bal: String(a.id), lauf })
+          text: !b ? 'keine Live-Balance' : !at ? 'Balance ohne Zeitstempel' : `Balance ${tplAlter(jetzt - at)} alt`, bal: String(a.id), lauf, tun: tplBalTun(a, b, false) })
       }
     }
     if(tagGleich) for(const x of roh.ausgelassen || []){
@@ -45229,12 +45362,30 @@
       if(x.typ && !TPL_TYPEN.includes(String(x.typ))) continue   // WD-RAUS-AUS-PLANER
       const k = tplKk(x.user_id, x.konto); if(konten.has(k)) continue; konten.add(k)
       const bal = /keine Balance|nicht live/.test(g), fremd = String(x.user_id) !== String(currentUserId)
-      add(x.user_id, x.user, { art: bal ? 'balance' : 'ausgelassen', firma: x.firma, konto: x.konto, typ: x.typ, balance: '', ende4: tplEnde4(x), text: g, hinweis: bal && fremd ? 'am PC der ID lesen' : '' })
+      add(x.user_id, x.user, { art: bal ? 'balance' : 'ausgelassen', firma: x.firma, konto: x.konto, typ: x.typ, balance: '', ende4: tplEnde4(x), text: g, hinweis: bal && fremd ? 'am PC der ID lesen' : '',
+        tun: bal ? tplBalTun(null, null, fremd, x.user) : 'Beheben — der Bot plant das Konto dann von selbst nach (alle 10 min).' })
     }
     for(const t of D.trades){
       const p = t.eigen ? (tradePlans || []).find(x => String(x.id) === t.plan_id) : null, b = (p && p.mt5Baseline) || {}
       const probleme = []
-      if(t.status === 'bestaetigt' && D.tag === D.heute && D.jetzt != null && t.start + TPL_VERPASST_MIN < D.jetzt) probleme.push(`verpasst — Start ${tplUhr(t.start, D.v)} ist vorbei, nie gestartet`)
+      // START-FEHLER (07.10.2026): eigener Plan frisch aus dem Tab, fremder aus dem Delta (app.py start_fehler)
+      const sf = (p && p.mt5Baseline && p.mt5Baseline.start_fehler) || t.sf || null, geclaimt = p ? !!p.startUmGestartetAt : !!t.geclaimt
+      const neuKnopf = t.eigen && t.status === 'bestaetigt' ? t.plan_id : null
+      const ueberfaellig = D.jetzt != null && t.start + TPL_VERPASST_MIN < D.jetzt
+      if(t.status === 'bestaetigt' && sf && sf.status === 'neu' && D.tag === D.heute && !ueberfaellig){
+        add(t.user_id, t.user, { art: 'neu', firma: t.firma, konto: t.konto, ende4: t.ende4, key: t.key,
+          text: `neu eingeplant — Start ${tplUhr(t.start, D.v)}${sf.behoben ? ' · ' + sf.behoben : ''}`, tun: `Nichts tun. Vorher: ${String(sf.msg || '').slice(0, 120)}` })
+      } else if(t.status === 'bestaetigt' && sf && sf.status !== 'neu' && D.tag === D.heute){
+        const wer = sf.pc ? '' : t.user
+        add(t.user_id, t.user, { art: 'plan', firma: t.firma, konto: t.konto, ende4: t.ende4, key: t.key, neu: neuKnopf,
+          text: `nicht gestartet (${tplUhr(t.start, D.v)}) — ${String(sf.msg || 'Check rot').replace(/\s+/g, ' ').slice(0, 160)}`,
+          tun: tplSfTun(sf, wer) + ' ' + tplSfAuto(sf, D) })
+      } else if(t.status === 'bestaetigt' && D.tag === D.heute && D.jetzt != null && t.start + TPL_VERPASST_MIN < D.jetzt){
+        add(t.user_id, t.user, { art: 'plan', firma: t.firma, konto: t.konto, ende4: t.ende4, key: t.key, neu: neuKnopf,
+          text: `verpasst — Start ${tplUhr(t.start, D.v)} ist vorbei, nie gestartet`,
+          tun: geclaimt ? 'Der Check am PC war rot, der Grund wurde damals noch nicht gespeichert — ↻ Neu starten prüft erneut und zeigt ihn.'
+            : `Der Prophos-Tab am PC${t.eigen ? '' : ' von ' + (t.user || 'der ID')} lief nicht — Tab öffnen, dann ↻ Neu starten.` })
+      }
       if(b.puls_unklar) probleme.push(`Puls: Ergebnis unklar${b.puls_unklar.msg ? ' — ' + b.puls_unklar.msg : ''}`)
       if(b.tv && b.tv.fehler) probleme.push(`Start-Fehler: ${b.tv.msg || b.tv.fehler}${b.tv.code ? ' (' + b.tv.code + ')' : ''}`)
       if(b.tv && b.tv.warnung) probleme.push(`Puls: ${b.tv.warnung}`)
@@ -45255,15 +45406,16 @@
   }
   function tplBrauchtHtml(liste){
     if(!liste.length) return ''
-    const n = liste.reduce((a, o) => a + o.zeilen.length, 0), ICON = { balance: '↻', ausgelassen: '⏸', plan: '⚠' }
+    const n = liste.reduce((a, o) => a + o.zeilen.length, 0), ICON = { balance: '↻', ausgelassen: '⏸', plan: '⚠', neu: '↻' }
     const bloecke = liste.map(o => `<div class="tpl-bd-id"><b><i style="background:${idFarbe(o.uid)}"></i>${escapeHtml(o.name || '—')}<span>${o.zeilen.length}</span></b>
       ${o.zeilen.map(z => `<div class="tpl-bd-z ${z.art}"><em>${ICON[z.art] || '•'}</em>
         <span class="k"><i style="background:${apdFirmaTon(z.firma)}"></i><span class="f">${escapeHtml(z.firma || '?')}</span><b title="${escapeHtml(z.konto || '')}">${escapeHtml(z.konto || '—')}</b>${z.typ ? `<span class="type-badge type-${escapeHtml(z.typ)}">${escapeHtml(TPL_TYP_WORT[z.typ] || z.typ)}</span>` : ''}</span>
         <span class="b${z.balance ? '' : ' leer'}">${escapeHtml(z.balance || (z.art === 'balance' ? 'keine Balance' : '—'))}</span>
-        <span class="t">${escapeHtml(z.text)}</span>
+        <span class="t">${escapeHtml(z.text)}${z.tun ? `<span class="tun"><b>→</b> ${escapeHtml(z.tun)}</span>` : ''}</span>
         <span class="a">${z.bal ? (z.lauf && z.lauf.laeuft ? `<span class="s">${escapeHtml(z.lauf.text || 'liest …')}</span>`
           : `<button type="button" class="knopf" data-tpl-bal="${escapeHtml(z.bal)}">↻ Balance lesen</button>${z.lauf && z.lauf.text ? `<span class="s${z.lauf.fehler ? ' rot' : ''}">${escapeHtml(z.lauf.text)}</span>` : ''}`)
-          : z.hinweis ? `<span class="s">${escapeHtml(z.hinweis)}</span>` : z.key ? `<button type="button" class="knopf" data-tpl-t="${escapeHtml(z.key)}">→ Plan</button>` : ''}</span></div>`).join('')}</div>`).join('')
+          : z.hinweis ? `<span class="s">${escapeHtml(z.hinweis)}</span>`
+          : `${z.neu ? `<button type="button" class="knopf" data-tpl-neu="${escapeHtml(z.neu)}">↻ Neu starten</button>` : ''}${z.key ? `<button type="button" class="knopf" data-tpl-t="${escapeHtml(z.key)}">→ Plan</button>` : ''}`}</span></div>`).join('')}</div>`).join('')
     return `<div class="tpl-karte tpl-bd"><div class="tpl-h">Braucht dich <b>${n}</b><span class="leg">↻ Balance · ⏸ heute ausgelassen · ⚠ Plan hängt</span></div>${bloecke}</div>`
   }
   /* LISTE „GEPLANT" (TPL-UEBERSICHT-2, Finn: „so Infos finde ich clean"): Zeilen im Stil der Radar-Zeile (Markup/Klassen wdl-z*,
@@ -45746,6 +45898,10 @@
     if(w){ _tpl.weitereAuf = !_tpl.weitereAuf; tplZeichnen(); return }
     const bl = e.target.closest('[data-tpl-bal]')   // Braucht dich: ↻ Balance lesen (bestehende Aktion aus Accounts, F19)
     if(bl){ try{ accBalanceLesen(bl.dataset.tplBal) }catch(err){ console.warn('[tpl] Balance lesen', err) } setTimeout(tplSpaeter, 500); setTimeout(tplSpaeter, 5000); return }
+    const nk = e.target.closest('[data-tpl-neu]')   // Braucht dich: ↻ Neu starten (START-FEHLER, 07.10.2026) — Start in 1 min, alle Prüfungen am PC
+    if(nk){ const p = (tradePlans || []).find(x => String(x.id) === nk.dataset.tplNeu); if(!p) return
+      nk.disabled = true; sfNeuEinplanen(p, 'von Hand', true).then(r => { if(!r && typeof atToast === 'function') atToast('Plan ließ sich nicht neu einplanen — schon gestartet oder geändert.', 'end') })
+        .catch(err => console.warn('[tpl] neu starten', err)).finally(() => { setTimeout(tplSpaeter, 500) }); return }
     const k = e.target.closest('[data-tpl-ab]')   // Konten-Abdeckung: Block auf/zu
     if(k){ const z = k.closest('.tpl-ab-z'); _tpl.abAuf.set(k.dataset.tplAb, !(z && z.classList.contains('auf'))); tplZeichnen(); return }
     const m = e.target.closest('[data-tpl-t]')
