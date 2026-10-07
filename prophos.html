@@ -3358,11 +3358,17 @@
   #dashboard-view .wdl-tab-manuell .wdl-man-hinweis{grid-column:mi-start / zeit-end;text-align:right;font-weight:400;letter-spacing:0;text-transform:none;color:var(--sub)}
   #dashboard-view .wdl-z[draggable="true"]{cursor:grab}
   #dashboard-view .wdl-z.is-drag{opacity:.45}
-  #dashboard-view .wdl-tab-manuell .wdl-z{grid-template-columns:minmax(0,1fr) 150px 360px 110px 150px 136px}   /* Notiz-Spalte breiter (360 statt 256): Notiz · seit · Abhaken · zurück */
-  #dashboard-view .wdl-z-man .wdl-z-mi{color:var(--ink-2)}
-  #dashboard-view .wdl-man-text{flex:1 1 auto;min-width:40px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;font:inherit;font-size:12px;line-height:1.5;color:var(--ink-2);background:none;border:none;padding:0;cursor:text}
+  /* Nachbesserung 08.10.2026 (Finn als Moritz): Richtung/Menge in der Gruppe weg — die Notiz bekommt Richtungs- UND Mitte-Spalte,
+     13 px, umbrechend statt „…"; davor der nächste Schritt („→ Funded") fett bzw. als kleine Auswahl im Bearbeiten-Modus */
+  #dashboard-view .wdl-tab-konto .wdl-z-man{grid-template-areas:"wer mi mi konto pl zeit"}   /* Spezifität wie .wdl-tab-konto .wdl-z (6 Spalten) */
+  #dashboard-view .wdl-z-man .wdl-z-ri{display:none}
+  #dashboard-view .wdl-z-man .wdl-z-mi{color:var(--ink-2);justify-content:flex-start}
+  #dashboard-view .wdl-z-man .wdl-z-mi .el-knopf{margin-left:0}
+  #dashboard-view .wdl-man-text{flex:1 1 auto;min-width:40px;overflow:visible;white-space:normal;line-height:1.35;text-align:left;font:inherit;font-size:13px;color:var(--ink-2);background:none;border:none;padding:0;cursor:text}
+  #dashboard-view .wdl-man-text b{font-weight:600;color:var(--ink)}
   #dashboard-view .wdl-man-text i{color:var(--sub);font-style:normal}
-  #dashboard-view .wdl-man-notiz{flex:1 1 auto;min-width:60px;font:inherit;font-size:12px;padding:2px 6px;border:1px solid var(--violet);border-radius:6px;background:var(--surface);color:var(--ink);outline:none}
+  #dashboard-view .wdl-man-notiz{flex:1 1 auto;min-width:60px;font:inherit;font-size:13px;padding:2px 6px;border:1px solid var(--violet);border-radius:6px;background:var(--surface);color:var(--ink);outline:none}
+  #dashboard-view .wdl-man-schritt{flex:none;font:inherit;font-size:12px;font-weight:600;padding:2px 4px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--ink)}
   #dashboard-view .wdl-man-seit{flex:none;font-size:11px;color:var(--sub)}
   #dashboard-view .wdl-sp-bahn{position:relative;flex:1;min-width:40px;height:4px;border-radius:2px;background:var(--border-soft)}
   #dashboard-view .wdl-sp-bahn::before,#dashboard-view .wdl-sp-bahn::after{content:'';position:absolute;top:-3px;width:2px;height:10px;border-radius:1px}
@@ -27222,7 +27228,8 @@
     const sig = JSON.stringify([((wdl.daten && wdl.daten.trades) || []).map(ohneEchoLive), wdl.fehler])
     if(!voll && sig === wdl.sig && Date.now() - (wdl.renderAt || 0) < 60000){ wdlEchoLive(); wdlFusionLive(); return }
     // Offenes Notiz-Feld (Manuelle Arbeit, 08.10.2026): der Takt baut die Liste nicht neu, sonst ginge das Getippte verloren
-    if(!voll && _wdlManNotiz){ wdlEchoLive(); wdlFusionLive(); return }
+    if(!voll && _wdlManNotiz && document.querySelector('#wdl-liste [data-wdl-man-notiz]')){ wdlEchoLive(); wdlFusionLive(); return }
+    if(_wdlManNotiz && !document.querySelector('#wdl-liste [data-wdl-man-notiz]')) _wdlManNotiz = null   // Feld weg (Fehler/Neuaufbau) → Sperre sicher aufheben
     wdl.sig = sig
     wdlRender()
   }
@@ -27522,6 +27529,15 @@
    * Master 08.10.2026), bis das steht für eigene Pläne aus tradePlans.mt5Baseline. Schreiben: eigener Plan → mt5_baseline_patch
    * (oberste Ebene, RLS, Status-Guard review; weg = manuell:null), fremder Plan → PATCH /admin/wd-plaene {aktion:'manuell'|
    * 'manuell_weg'} — EIN Weg für alle IDs wie 'ende'; antwortet das Backend noch nicht, sagt es der Toast ehrlich. */
+  // Nächster Schritt (Nachbesserung 08.10.2026): kleine Auswahl vor der Notiz, gespeichert als manuell.schritt (String)
+  const WDL_MAN_SCHRITTE = [['funded', '→ Funded'], ['phase2', '→ Phase 2'], ['payout', '→ Payout'], ['winning_days', '→ Winning Days'], ['sonst', 'sonst']]
+  const wdlManSchrittText = k => { const x = WDL_MAN_SCHRITTE.find(([v]) => v === String(k || '')); return x ? x[1] : '' }
+  // Vorbelegung je Kontotyp: Phase 1 → Phase 2, Challenge/Phase 2 → Funded, Funded → Payout, Winning Days → Winning Days, sonst „sonst"
+  function wdlManSchrittStd(kontoTyp){
+    const typ = String(kontoTyp || '').toLowerCase()
+    return typ === 'phase1' ? 'phase2' : (typ === 'phase2' || typ === 'challenge') ? 'funded' : (typ === 'funded' || typ === 'funded_cfd') ? 'payout' : typ === 'winning_days' ? 'winning_days' : 'sonst'
+  }
+  window._wdlManSchrittStd = wdlManSchrittStd   // Test-Haken
   const _wdlManBusy = new Set()   // plan_id, solange geschrieben wird
   let _wdlManNotiz = null         // {pid, neu} — Zeile mit offenem Notiz-Feld: neu = frisch abgelegt (Esc = nichts schreiben, zurück nach Überprüfen)
   function wdlManuell(t){
@@ -27533,8 +27549,8 @@
     const e = mklWdEigenerPlan(pid), m = e && e.mt5Baseline && e.mt5Baseline.manuell
     return (m && typeof m === 'object' && m.at) ? m : null
   }
-  // -> true, wenn geschrieben. notiz null = Kennzeichen entfernen (zurück nach Überprüfen)
-  async function wdlManuellSchreiben(pid, notiz){
+  // -> true, wenn geschrieben. notiz null = Kennzeichen entfernen (zurück nach Überprüfen); schritt = Schlüssel aus WDL_MAN_SCHRITTE
+  async function wdlManuellSchreiben(pid, notiz, schritt){
     pid = String(pid); if(_wdlManBusy.has(pid)) return false
     const t = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === pid)
     const weg = notiz == null, alt = (t && t.manuell) || null
@@ -27544,16 +27560,16 @@
       let neu = null
       if(eigen && typeof baselinePatch === 'function'){
         let von = null; try{ const { data: { session } } = await supabase.auth.getSession(); von = (session && session.user && session.user.id) || null }catch(_){}
-        neu = weg ? null : { at: (alt && alt.at) || new Date().toISOString(), notiz: String(notiz || '').slice(0, 140), von }
+        neu = weg ? null : { at: (alt && alt.at) || new Date().toISOString(), notiz: String(notiz || '').slice(0, 140), schritt: String(schritt || (alt && alt.schritt) || 'sonst'), von }
         const base = await baselinePatch(pid, { manuell: neu }, 'review')
         if(!base) throw new Error('Plan nicht mehr in „Überprüfen" — nichts geschrieben')
       } else {
         const tok = await _pushTok(); if(!tok) throw new Error('nicht angemeldet')
         const r = await fetch(`${WATCHER_HOME}/admin/wd-plaene`, { method: 'PATCH', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
-          body: JSON.stringify(weg ? { aktion: 'manuell_weg', plan_id: pid } : { aktion: 'manuell', plan_id: pid, notiz: String(notiz || '').slice(0, 140) }) })
+          body: JSON.stringify(weg ? { aktion: 'manuell_weg', plan_id: pid } : { aktion: 'manuell', plan_id: pid, notiz: String(notiz || '').slice(0, 140), schritt: String(schritt || (alt && alt.schritt) || 'sonst') }) })
         const d = await r.json().catch(() => ({}))
         if(!r.ok || !d.ok) throw new Error((r.status === 400 || r.status === 404) && !/review|Überprüfen/i.test(String(d.error || '')) ? `Backend kennt „manuell" noch nicht (${d.error || 'HTTP ' + r.status}) — kommt mit dem nächsten Railway-Stand` : (d.error || ('HTTP ' + r.status)))
-        neu = weg ? null : (d.manuell || { at: new Date().toISOString(), notiz: String(notiz || ''), von: null })
+        neu = weg ? null : Object.assign({ at: new Date().toISOString(), notiz: String(notiz || ''), von: null }, d.manuell || {}, { schritt: String(schritt || (alt && alt.schritt) || 'sonst') })   // schritt lokal halten, bis das Backend es zurückgibt
       }
       if(t) t.manuell = neu   // sofort sichtbar, der nächste Abruf holt den Backend-Stand
       if(typeof atToast === 'function') atToast(weg ? 'Zurück nach „Überprüfen"' : (alt ? 'Notiz gespeichert' : 'In „Manuelle Arbeit" — nichts verbucht'), weg ? 'end' : 'ok')
@@ -27713,9 +27729,12 @@
         const pb = num(t.pl_balance) != null ? num(t.pl_balance) : num(t.master_pl && t.master_pl.wert)
         kontoZ = wdlKontoZ(t)
         const seitD = m.at ? new Date(m.at) : null, seit = seitD && !isNaN(seitD) ? `seit ${tag(seitD)}` : ''
+        // Schritt + Notiz (Nachbesserung 08.10.2026): Auswahl vor der Notiz, vorbelegt je Kontotyp; Anzeige „→ Funded · Warten bis …"
+        const schritt = m.schritt || wdlManSchrittStd(t.konto_typ), schrittTxt = wdlManSchrittText(schritt)
         const notizHtml = edit
-          ? `<input type="text" class="wdl-man-notiz" data-wdl-man-notiz="${escapeHtml(pid)}" value="${escapeHtml(String(m.notiz || ''))}" maxlength="140" placeholder="Notiz · Enter speichert, Esc bricht ab" autocomplete="off">`
-          : `<button type="button" class="wdl-man-text" data-wdl-man-edit="${escapeHtml(pid)}" title="${escapeHtml(m.notiz ? m.notiz + ' — klicken: Notiz bearbeiten' : 'Notiz schreiben')}">${m.notiz ? escapeHtml(String(m.notiz)) : '<i>Notiz …</i>'}</button>`
+          ? `<select class="wdl-man-schritt" data-wdl-man-schritt="${escapeHtml(pid)}" title="Nächster Schritt">${WDL_MAN_SCHRITTE.map(([v, l]) => `<option value="${v}"${v === schritt ? ' selected' : ''}>${l}</option>`).join('')}</select>`
+            + `<input type="text" class="wdl-man-notiz" data-wdl-man-notiz="${escapeHtml(pid)}" value="${escapeHtml(String(m.notiz || ''))}" maxlength="140" placeholder="Notiz · Enter oder Klick daneben speichert, Esc verwirft" autocomplete="off">`
+          : `<button type="button" class="wdl-man-text" data-wdl-man-edit="${escapeHtml(pid)}" title="${escapeHtml((m.notiz ? m.notiz + ' — ' : '') + 'klicken: Schritt/Notiz bearbeiten')}">${schrittTxt ? `<b>${escapeHtml(schrittTxt)}</b>` : ''}${schrittTxt && m.notiz ? ' · ' : ''}${m.notiz ? escapeHtml(String(m.notiz)) : (schrittTxt ? '' : '<i>Notiz …</i>')}</button>`
         miZ = zelle('mi wdl-z-akt', `${notizHtml}${seit ? `<small class="wdl-man-seit" title="${escapeHtml('in Manuelle Arbeit seit ' + zeit(m.at))}">${seit}</small>` : ''}`
           + (edit ? '' : `<button type="button" class="btn btn-ghost el-knopf" data-wdl-abhaken="${escapeHtml(pid)}"${(sperre || busy) ? ' disabled' : ''} title="${escapeHtml(sperre || 'Abhaken — P&L prüfen, verbuchen und Nachfolger anlegen')}">Abhaken</button>`
           + `<button type="button" class="btn btn-ghost el-knopf" data-wdl-man-zurueck="${escapeHtml(pid)}"${busy ? ' disabled' : ''} title="Kennzeichen entfernen — zurück nach „Überprüfen"">zurück</button>`))
@@ -27756,7 +27775,7 @@
       // Überprüfen-Zeilen sind ziehbar (08.10.2026, HTML5-Drag nach „Manuelle Arbeit"; Handler unten am Listen-Container)
       return `<div class="wdl-z wdl-z-${art}${echo ? ' wdl-z-echo' : ''}${an ? ' is-aktiv' : ''}${extra ? ' ' + extra : ''}" style="--wdl-id:${wdlIdFarbe(t)}" data-wdl-trade="${escapeHtml(wdlTid(t))}"${art === 'pruef' ? ` draggable="true" data-wdl-drag="${escapeHtml(wdlTid(t))}"` : ''} title="${escapeHtml(tip)}">`
         + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><i class="wdl-pf">${escapeHtml(wdlWeg(t))}</i><small>${escapeHtml(konto)}</small></span>`
-        + ri + miZ + kontoZ + plZ + zeitZ + '</div>'
+        + (art === 'man' ? '' : ri) + miZ + kontoZ + plZ + zeitZ + '</div>'   // Manuelle Arbeit ohne Richtung/Menge (08.10.2026) — die Notiz bekommt den Platz
     }
     // Gruppe = ein Kasten, oben einmal die Spaltenköpfe im selben Raster wie die Zeilen
     // mehr = Schlüssel für „Beendet" (30.09.2026, Finn sah die Echo-Sektion nicht — sie stand unter Orbits „Beendet · 42"): nur die
@@ -27879,11 +27898,27 @@
   })
   // Notiz-Feld (Manuelle Arbeit, 08.10.2026): Enter = speichern (leer erlaubt), Esc = abbrechen — frisch abgelegt heißt Esc: nichts
   // geschrieben, die Zeile steht wieder in „Überprüfen"; bei einer bestehenden Notiz bleibt die alte.
+  // Speichern aus dem Bearbeiten-Modus: Notiz + gewählter Schritt derselben Zelle; _wdlManNotiz VOR dem Schreiben löschen, damit
+  // Blur/Enter nicht doppelt speichern und die Takt-Sperre sicher fällt (Nachbesserung 08.10.2026, Finn: „komme gar nicht mehr raus")
+  function wdlManSpeichernAus(i){
+    const pid = i.getAttribute('data-wdl-man-notiz'); if(!_wdlManNotiz || _wdlManNotiz.pid !== pid) return
+    const zelle = i.closest('.wdl-z-akt'), sel = zelle && zelle.querySelector('[data-wdl-man-schritt]')
+    const txt = i.value, schritt = sel ? sel.value : null
+    _wdlManNotiz = null
+    wdlManuellSchreiben(pid, txt, schritt)
+  }
   document.getElementById('wdl-liste')?.addEventListener('keydown', ev => {
-    const i = ev.target.closest && ev.target.closest('[data-wdl-man-notiz]'); if(!i) return
-    const pid = i.getAttribute('data-wdl-man-notiz')
-    if(ev.key === 'Enter'){ ev.preventDefault(); const txt = i.value; _wdlManNotiz = null; wdlManuellSchreiben(pid, txt) }
+    const i = ev.target.closest && (ev.target.closest('[data-wdl-man-notiz]') || ev.target.closest('[data-wdl-man-schritt]')); if(!i) return
+    const zelle = i.closest('.wdl-z-akt'), inp = zelle && zelle.querySelector('[data-wdl-man-notiz]'); if(!inp) return
+    if(ev.key === 'Enter'){ ev.preventDefault(); wdlManSpeichernAus(inp) }
     else if(ev.key === 'Escape'){ ev.preventDefault(); _wdlManNotiz = null; wdlRender() }
+  })
+  // Blur = speichern (Klick außerhalb, Tab weg); Fokuswechsel innerhalb derselben Zelle (Auswahl ↔ Feld) zählt nicht
+  document.getElementById('wdl-liste')?.addEventListener('focusout', ev => {
+    const i = ev.target.closest && (ev.target.closest('[data-wdl-man-notiz]') || ev.target.closest('[data-wdl-man-schritt]')); if(!i) return
+    const zelle = i.closest('.wdl-z-akt'); if(zelle && ev.relatedTarget && zelle.contains(ev.relatedTarget)) return
+    const inp = zelle && zelle.querySelector('[data-wdl-man-notiz]'); if(!inp) return
+    setTimeout(() => { if(document.contains(inp) && _wdlManNotiz) wdlManSpeichernAus(inp) }, 0)
   })
   // Drag & Drop (Manuelle Arbeit, 08.10.2026): Überprüfen-Zeile (draggable, data-wdl-drag) auf den Kasten „Manuelle Arbeit"
   // (.wdl-tab-manuell) ziehen — eigene Verdrahtung am Listen-Container, kein Sammel-Handler. Hover-Zustand is-ziel am Kasten.
@@ -40362,7 +40397,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1172'
+  const OS_TAB_BUILD = '2026-09-22.1173'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
