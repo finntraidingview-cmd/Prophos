@@ -15754,10 +15754,10 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     # NACHPLANEN (nur_konten): nichts wird ersetzt — jeder bestehende Vorschlag zählt als Plan und bleibt stehen.
     def _vorschlag(p):
         return (not nachplanen) and p.get("auto_plan") is True and p.get("status") == "planned" and not p.get("auto_bestaetigt_at") \
-            and not p.get("start_um_gestartet_at")
+            and not p.get("start_um_gestartet_at") and not p.get("hand_werte_at")   # Werte von Hand → bleibt stehen (08.10.2026)
     konten = _ap_konten_laden({"user_id": in_uids, "order": "id.asc",
                                   "account_type": "in.(" + ",".join(AP_TYPEN) + ")"})
-    plaene = [p for p in _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_firm,status,richtung,master_tp,"
+    plaene = [p for p in _ap_plaene_mit_hand({"select": "id,user_id,master_account_id,master_firm,status,richtung,master_tp,"
                                                            "ended_at,completed_at,auto_plan,auto_bestaetigt_at,start_um_gestartet_at,"
                                                            "start_um,planned_for,mt5_baseline->final", "order": "id.asc",
                                                  "user_id": in_uids, "created_at": "gte." + (jetzt - timedelta(days=30)).isoformat()})
@@ -15979,9 +15979,15 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
         return {"ok": False, "tag": tag, "seed": seed, "fingerabdruck": fp, "abweichung": True,
                 "msg": "Stand hat sich seit dem Probelauf geändert — bitte Probelauf neu ansehen, nichts angelegt"}
     if not trocken and not nachplanen:             # NACHPLANEN löscht nie (bestehende Vorschläge/Pläne bleiben)
-        _sb_anfrage("DELETE", f"{SUPABASE_URL}/rest/v1/trade_plans", headers=_sb_headers(),
-                    params={"user_id": in_uids, "auto_plan": "eq.true", "status": "eq.planned",
-                            "auto_bestaetigt_at": "is.null", "start_um_gestartet_at": "is.null"}).raise_for_status()
+        weg = {"user_id": in_uids, "auto_plan": "eq.true", "status": "eq.planned",
+               "auto_bestaetigt_at": "is.null", "start_um_gestartet_at": "is.null"}
+        try:                                       # von Hand geänderte Vorschläge bleiben (hand_werte_at, 08.10.2026)
+            _sb_anfrage("DELETE", f"{SUPABASE_URL}/rest/v1/trade_plans", headers=_sb_headers(),
+                        params=dict(weg, hand_werte_at="is.null")).raise_for_status()
+        except Exception as e:
+            if not _ap_hand_spalte_fehlt(e):
+                raise
+            _sb_anfrage("DELETE", f"{SUPABASE_URL}/rest/v1/trade_plans", headers=_sb_headers(), params=weg).raise_for_status()
     if zeilen and not trocken:
         r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/trade_plans", json=zeilen,
                         headers=_sb_headers("return=minimal"), timeout=(5, 30))
@@ -16647,7 +16653,9 @@ def ap_eingriff_pruefen(plan_id, aktion, plaene, jetzt_min, zeiten, id_fest=None
     Fenster, nicht vor jetzt + 5 min). Abgelehnt wird nur bei Richtungsschutz (ID+Firma) oder PC-Überlappung — nie wegen
     Firma/Pause über IDs. → (aenderungen [wie ap_umplanen], None) oder (None, Klartext für 400)."""
     id_fest = id_fest or {}
-    p = next((x for x in plaene or () if str(x.get("plan_id")) == str(plan_id)), None)
+    # Werte von Hand (AP_FEST_HAND) sperren nur den Bot — Finns eigene Eingriffe (Richtung/Start) bleiben möglich (08.10.2026)
+    plaene = [dict(x, aenderbar=True, fest_durch=None) if x.get("fest_durch") == AP_FEST_HAND else x for x in plaene or ()]
+    p = next((x for x in plaene if str(x.get("plan_id")) == str(plan_id)), None)
     if not p:
         return None, "Plan ist kein geplanter Plan von heute"
     if p.get("start_min") is None:
@@ -16823,6 +16831,26 @@ def _ap_bewerten(ctx, a, bal, menge, route, symbol, richtung, tp, sl, gehedgt=Fa
             "tp_punkte": ap_punkte(tp, upp), "sl_punkte": ap_punkte(sl, upp), "hinweis": hinweis}
 
 
+# WERTE VON HAND (08.10.2026, Master/Finn): trade_plans.hand_werte_at (sql/2026-10-08_trade_plans_hand_werte_at.sql) — setzt
+# aktion „werte"; so ein Plan ist für den Bot fest (nie drehen/verschieben), der Nachtlauf ersetzt ihn nicht. Hand-Eingriffe, Bestätigen
+# und Start bleiben unberührt. Fehlt die Spalte noch, läuft alles wie vorher (_ap_hand_spalte_fehlt).
+AP_FEST_HAND = "Werte von Hand geändert"
+
+
+def _ap_hand_spalte_fehlt(e):
+    return isinstance(e, requests.exceptions.HTTPError) and "hand_werte_at" in str(getattr(e.response, "text", "") or e)
+
+
+def _ap_plaene_mit_hand(params):
+    """trade_plans lesen mit hand_werte_at im select — ohne die Spalte (SQL noch nicht eingespielt) wie bisher."""
+    try:
+        return _sb_all("trade_plans", dict(params, select=params["select"] + ",hand_werte_at"))
+    except Exception as e:
+        if not _ap_hand_spalte_fehlt(e):
+            raise
+        return _sb_all("trade_plans", params)
+
+
 AP_STAND_FELDER = ("id,user_id,master_account_id,master_firm,master_name,status,richtung,master_tp,master_sl,master_contracts,"
                    "master_symbol,master_symbol_root,route,slave_account_id,hedge_eur,start_um,started_at,start_um_gestartet_at,"
                    "orbit_gesendet_at,auto_plan,auto_bestaetigt_at,created_at")
@@ -16897,7 +16925,7 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
     ersetzt = ersetzt or (lambda p: False)
     offen = [p for p in _sb_all("trade_plans", {"select": AP_STAND_FELDER + ",mt5_baseline", "status": "eq.open", "order": "id.asc"})
              if str(p.get("user_id")) not in ausgeblendet]
-    geplant_alle = [p for p in _sb_all("trade_plans", {"select": AP_STAND_FELDER + ",hedge:mt5_baseline->hedge->>status,"
+    geplant_alle = [p for p in _ap_plaene_mit_hand({"select": AP_STAND_FELDER + ",hedge:mt5_baseline->hedge->>status,"
                                                                  "rk:mt5_baseline->richtung_konflikt,sf:mt5_baseline->start_fehler",
                                                        "status": "eq.planned", "order": "id.asc",
                                                        "created_at": "gte." + (jetzt - timedelta(days=30)).isoformat()})
@@ -17021,6 +17049,8 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
             fest = "Handplan (nur Auto-Pläne werden umgeplant)"
         elif p.get("start_um_gestartet_at") or p.get("started_at") or p.get("orbit_gesendet_at"):
             fest = "schon gestartet"
+        elif p.get("hand_werte_at"):
+            fest = AP_FEST_HAND                    # TP/SL/Größe von Hand — der Bot fasst ihn nicht mehr an (08.10.2026)
         elif bestaetigt and m is not None and m <= jetzt_min + AP_FAELLIG_MIN:
             fest = "bestätigt und fällig"
         elif r not in ("buy", "sell"):
@@ -17668,8 +17698,13 @@ def _ap_werte_setzen(pid, body, admin, uid):
     upd, antwort, fehler = ap_werte_pruefen(plan, body)
     if fehler:
         return jsonify({"ok": False, "msg": fehler}), 404 if fehler == "Plan nicht gefunden" else 400
-    neu = sb_update("trade_plans", {"id": f"eq.{pid}", "status": "eq.planned", "start_um_gestartet_at": "is.null",
-                                    "started_at": "is.null", "orbit_gesendet_at": "is.null"}, upd)
+    guard = {"id": f"eq.{pid}", "status": "eq.planned", "start_um_gestartet_at": "is.null", "started_at": "is.null", "orbit_gesendet_at": "is.null"}
+    try:                                           # hand_werte_at: Bot fasst den Plan danach nicht mehr an (AP_FEST_HAND)
+        neu = sb_update("trade_plans", guard, dict(upd, hand_werte_at=datetime.now(timezone.utc).isoformat()))
+    except Exception as e:
+        if not _ap_hand_spalte_fehlt(e):
+            raise
+        neu = sb_update("trade_plans", guard, upd)
     if not neu:
         return jsonify({"ok": False, "msg": "Plan läuft schon — Werte nicht mehr änderbar"}), 409
     print(f"[auto-plan] werte {pid[:8]} durch {'Admin' if admin else 'ID ' + str(uid)[:8]}: {upd['notes'].splitlines()[-1]}", flush=True)
