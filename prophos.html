@@ -23458,7 +23458,8 @@
     const name = p0.masterName || 'Plan'
     if(erg.offen){
       if(typeof atToast === 'function') atToast(`${name}: Order läuft laut ${pulsPlattform(p0)} noch — nichts geändert`, 'start')
-      return { ok: false, offen: true, msg: `Order läuft laut ${pulsPlattform(p0)} noch — Plan bleibt „Läuft"` }
+      // Trail mitgeben (08.10.2026): bisher stand im Signal nur die Meldung — ob Puls das richtige Konto/die richtige Tabelle gelesen hat, war nicht nachprüfbar
+      return { ok: false, offen: true, msg: `Order läuft laut ${pulsPlattform(p0)} noch — Plan bleibt „Läuft"`, trail: String((r && r.trail) || '').slice(0, 1500) }
     }
     // TopstepX (T1-B 05.10.2026): bei offener Position antwortet tsx-lesen mit 'tabelle_unklar' — das ist kein Lesefehler, es fehlt nur
     // der Flach-Beweis. Klar sagen, nichts ableiten (kein offen:true, kein Schluss aus dem offenen G&V); der Plan bleibt „Läuft".
@@ -40155,7 +40156,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1156'
+  const OS_TAB_BUILD = '2026-09-22.1157'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -42465,8 +42466,12 @@
           if(!clE || !clE.length){ _osStand = 'claim-verloren'; continue }
           osClaimMerken(sig)
           _osStand = 'claim-endlesung: ' + String(sig.id).slice(0, 8)
+          // „Order läuft noch" ist KEIN Fehler (Muster „endlesung: order läuft laut tradingview noch — plan bleibt läuft", 10× in 7 Tagen
+          // auf 3 PCs, 08.10.2026): der Knopf „Beendet" prüft erst — ist die Position offen, antwortet tvV2BeendetPruefen ehrlich mit
+          // {ok:false, offen:true}. In allen 6 nachprüfbaren Fällen kam das echte Ende (demo_tp/demo_liq/Reader) 2 min bis 3 h NACH der
+          // Lesung — Puls hatte recht. Nur die Buchung als status 'fehler' war falsch und füllte puls_fehler_muster. Deshalb: offen = fertig.
           tvV2EndlesungVersuch(plan.id, { force: true })
-            .then(er => supabase.from('order_signale').update({ status: er && er.ok ? 'fertig' : 'fehler', updated_at: new Date().toISOString(),
+            .then(er => supabase.from('order_signale').update({ status: er && (er.ok || er.offen) ? 'fertig' : 'fehler', updated_at: new Date().toISOString(),
                                                                  ergebnis: er || { ok: false, msg: 'keine Antwort' } }).eq('id', sig.id))
             .catch(e => supabase.from('order_signale').update({ status: 'fehler', updated_at: new Date().toISOString(),
                                                                  ergebnis: { ok: false, msg: 'Endlesung abgebrochen: ' + String((e && e.message) || e) } }).eq('id', sig.id))
