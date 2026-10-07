@@ -1786,7 +1786,7 @@
   :is(#tpl-view,#adm-pane-planer) .tpl-scroll{overflow:visible}
   :is(#tpl-view,#adm-pane-planer) .tpl-innen{position:relative;min-width:0;--nw:108px}
   :is(#tpl-view,#adm-pane-planer) .tpl-raster{position:absolute;top:0;bottom:0;left:var(--nw);right:0;pointer-events:none;z-index:0}
-  :is(#tpl-view,#adm-pane-planer) .tpl-raster i{position:absolute;top:0;bottom:18px;width:1px;background:var(--border-soft)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-raster i{position:absolute;top:0;bottom:18px;width:1px;background:var(--border)}   /* Stundenlinien kräftiger (08.10.2026) */
   :is(#tpl-view,#adm-pane-planer) .tpl-raster i.fen{background:none;border-left:1px dashed var(--border)}
   :is(#tpl-view,#adm-pane-planer) .tpl-raster i.jetzt{width:2px;margin-left:-1px;bottom:0;background:var(--ink);opacity:.45}
   :is(#tpl-view,#adm-pane-planer) .tpl-raster .jetzt-t{position:absolute;top:-1px;transform:translateX(-50%);font-size:10px;font-weight:600;color:var(--ink);background:var(--surface);padding:0 4px;border-radius:4px;white-space:nowrap;font-variant-numeric:tabular-nums}
@@ -1800,7 +1800,7 @@
   #tplBestModal .tpl-chip{display:inline-flex;align-items:center;gap:5px;border:1px solid color-mix(in srgb,var(--good) 45%,var(--border));border-radius:999px;padding:2px 9px;font-size:11.5px;background:color-mix(in srgb,var(--good) 8%,var(--surface))}
   #tplBestModal .tpl-chip i{width:8px;height:8px;border-radius:50%} #tplBestModal .tpl-chip em{font-style:normal;font-weight:600;color:var(--good)}
   /* Spur je ID (TPL-UEBERSICHT-2, 07.10.2026): feste Höhe, zwei Marker-Ebenen, Balken für laufende Trades */
-  :is(#tpl-view,#adm-pane-planer) .tpl-spur{position:relative;display:flex;height:60px;border-top:1px solid var(--border-soft)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-spur{position:relative;display:flex;height:96px;border-top:1px solid var(--border-soft)}   /* 96 px je Spur, zwei Ebenen à 24-px-Pille (Finn 08.10.2026: „größer, dicker") */
   :is(#tpl-view,#adm-pane-planer) .tpl-spur:first-child{border-top:0}
   :is(#tpl-view,#adm-pane-planer) .tpl-spur.sammel{background:color-mix(in srgb,var(--surface-tint) 55%,var(--surface))}
   :is(#tpl-view,#adm-pane-planer) .tpl-name{position:sticky;left:0;z-index:4;flex:0 0 var(--nw);display:flex;flex-direction:column;justify-content:center;gap:2px;padding-right:8px;background:var(--surface);font-size:12.5px;min-width:0}
@@ -1814,25 +1814,33 @@
   :is(#tpl-view,#adm-pane-planer) .tpl-bahn{position:relative;flex:1 1 auto;min-width:0;z-index:1}
   :is(#tpl-view,#adm-pane-planer) .tpl-bahn::before{content:'';position:absolute;left:0;right:0;top:50%;height:2px;margin-top:-1px;border-radius:1px;background:var(--id,var(--sub-2));opacity:.25}
   :is(#tpl-view,#adm-pane-planer) .tpl-bahn .leer{position:absolute;left:8px;top:50%;transform:translateY(-130%);font-size:11px;color:var(--sub-2)}
-  :is(#tpl-view,#adm-pane-planer) .tpl-bar{position:absolute;height:3px;border-radius:2px;opacity:.55;z-index:0}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bar{position:absolute;height:6px;border-radius:3px;opacity:.5;z-index:0}
   :is(#tpl-view,#adm-pane-planer) .tpl-bar.long{background:var(--good)} :is(#tpl-view,#adm-pane-planer) .tpl-bar.short{background:var(--danger)}
-  :is(#tpl-view,#adm-pane-planer) .tpl-m{position:absolute;display:inline-flex;align-items:center;gap:4px;height:18px;margin-left:-8px;padding:0 4px 0 0;border:0;background:none;cursor:pointer;font:inherit;font-size:11px;line-height:1;color:var(--sub);white-space:nowrap;z-index:1}
-  :is(#tpl-view,#adm-pane-planer) .tpl-m .g{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;font-size:10px;background:var(--surface);box-shadow:0 0 0 1px var(--border);position:relative;flex:none}
+  /* MARKER ALS PILLE (08.10.2026, Finn: „Diese Kürzel … ich erkenne das nicht … den Zeitstrahl größer, dicker, alles"): 24 px hoch, Richtungsfarbe
+     als Rand + zarter Füllung (grün Long / rot Short), gestrichelt = unbestätigt, violetter Ring + Puls = läuft, blass = beendet/vorbei; Text
+     „Firma Größe" + Uhrzeit (voll) / „TF 150k" (mittel) / „TF" (kompakt), „+n" als graue Pille. Tooltip unverändert (Konto, Start, TP/SL, Stufe). */
+  :is(#tpl-view,#adm-pane-planer) .tpl-m{position:absolute;display:inline-flex;align-items:center;gap:5px;height:24px;margin-left:-12px;padding:0 9px 0 7px;border:1px solid var(--border);border-radius:999px;background:var(--surface);box-shadow:0 1px 2px rgba(16,24,40,.06);cursor:pointer;font:inherit;font-size:11.5px;line-height:1;white-space:nowrap;color:var(--ink);z-index:2}
+  :is(#tpl-view,#adm-pane-planer) .tpl-m.long{border-color:color-mix(in srgb,var(--good) 55%,var(--border));background:color-mix(in srgb,var(--good) 10%,var(--surface))}
+  :is(#tpl-view,#adm-pane-planer) .tpl-m.short{border-color:color-mix(in srgb,var(--danger) 55%,var(--border));background:color-mix(in srgb,var(--danger) 9%,var(--surface))}
+  :is(#tpl-view,#adm-pane-planer) .tpl-m .g{position:relative;display:inline-flex;align-items:center;font-size:11px;font-weight:700}
   :is(#tpl-view,#adm-pane-planer) .tpl-m.long .g{color:var(--good)} :is(#tpl-view,#adm-pane-planer) .tpl-m.short .g{color:var(--danger)}
-  :is(#tpl-view,#adm-pane-planer) .tpl-m.offen .g{box-shadow:0 0 0 1px transparent;outline:1px dashed var(--sub-2);outline-offset:-1px}
-  :is(#tpl-view,#adm-pane-planer) .tpl-m.bestaetigt .g{box-shadow:0 0 0 1.5px color-mix(in srgb,var(--good) 55%,var(--border))}
-  :is(#tpl-view,#adm-pane-planer) .tpl-m.laeuft .g{box-shadow:0 0 0 1.5px var(--violet);background:var(--violet-tint)}
-  :is(#tpl-view,#adm-pane-planer) .tpl-m .g .p{position:absolute;top:-3px;right:-3px;width:7px;height:7px;border-radius:50%;background:var(--violet);animation:tplPuls 1.6s ease-in-out infinite}
+  :is(#tpl-view,#adm-pane-planer) .tpl-m.offen{border-style:dashed}
+  :is(#tpl-view,#adm-pane-planer) .tpl-m.rechts{transform:translateX(calc(-100% + 24px))}   /* am rechten Rand (> 90 %) hängt die Pille links vom Startpunkt, statt über die Bahn hinaus */
+  :is(#tpl-view,#adm-pane-planer) .tpl-m.bestaetigt{border-width:1.5px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-m.laeuft{border-color:var(--violet);box-shadow:0 0 0 2px var(--violet-tint),0 1px 2px rgba(16,24,40,.06)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-m .g .p{position:absolute;top:-6px;right:-6px;width:7px;height:7px;border-radius:50%;background:var(--violet);animation:tplPuls 1.6s ease-in-out infinite}
   @keyframes tplPuls{0%,100%{opacity:1}50%{opacity:.2}}
-  :is(#tpl-view,#adm-pane-planer) .tpl-m .l{font-variant-numeric:tabular-nums;padding:0 3px;border-radius:4px;background:color-mix(in srgb,var(--surface) 85%,transparent)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-m .l{display:inline-flex;align-items:baseline;gap:5px;font-variant-numeric:tabular-nums}
   :is(#tpl-view,#adm-pane-planer) .tpl-m .l b{font-weight:600;color:var(--ink)}
-  :is(#tpl-view,#adm-pane-planer) .tpl-m:hover,:is(#tpl-view,#adm-pane-planer) .tpl-m.wahl{z-index:3} :is(#tpl-view,#adm-pane-planer) .tpl-m:hover .l,:is(#tpl-view,#adm-pane-planer) .tpl-m.wahl .l{background:var(--violet-tint);color:var(--ink)}
-  :is(#tpl-view,#adm-pane-planer) .tpl-m.wahl .g{box-shadow:0 0 0 2px var(--violet)}
-  :is(#tpl-view,#adm-pane-planer) .tpl-m.beendet,:is(#tpl-view,#adm-pane-planer) .tpl-m.vorbei{opacity:.55} :is(#tpl-view,#adm-pane-planer) .tpl-m.beendet:hover,:is(#tpl-view,#adm-pane-planer) .tpl-m.vorbei:hover,:is(#tpl-view,#adm-pane-planer) .tpl-m.beendet.wahl,:is(#tpl-view,#adm-pane-planer) .tpl-m.vorbei.wahl{opacity:1}
+  :is(#tpl-view,#adm-pane-planer) .tpl-m .l em{font-style:normal;font-size:10.5px;color:var(--sub-2)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-m:hover,:is(#tpl-view,#adm-pane-planer) .tpl-m.wahl{z-index:3;box-shadow:0 0 0 2px var(--violet-tint),0 2px 6px rgba(16,24,40,.12)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-m.wahl{border-color:var(--violet)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-m.beendet,:is(#tpl-view,#adm-pane-planer) .tpl-m.vorbei{opacity:.5} :is(#tpl-view,#adm-pane-planer) .tpl-m.beendet:hover,:is(#tpl-view,#adm-pane-planer) .tpl-m.vorbei:hover,:is(#tpl-view,#adm-pane-planer) .tpl-m.beendet.wahl,:is(#tpl-view,#adm-pane-planer) .tpl-m.vorbei.wahl{opacity:1}
   :is(#tpl-view,#adm-pane-planer) .tpl-m.beendet .g,:is(#tpl-view,#adm-pane-planer) .tpl-m.vorbei .g{color:var(--sub-2)}
   :is(#tpl-view,#adm-pane-planer) .tpl-m.erg-gut .l b{color:var(--good)} :is(#tpl-view,#adm-pane-planer) .tpl-m.erg-rot .l b{color:var(--danger)}
-  :is(#tpl-view,#adm-pane-planer) .tpl-m.mehr .l{background:var(--surface-tint);border:1px solid var(--border);font-weight:600;color:var(--ink);padding:1px 6px;border-radius:999px}
-  :is(#tpl-view,#adm-pane-planer) .tpl-m.wd{opacity:.5} :is(#tpl-view,#adm-pane-planer) .tpl-m.wd:hover,:is(#tpl-view,#adm-pane-planer) .tpl-m.wd.wahl{opacity:1} :is(#tpl-view,#adm-pane-planer) .tpl-m.wd .l b::after{content:' WD';font-weight:500;color:var(--sub-2)}   /* Winning Days nur dezent: die Seite plant Challenges/Phasen */
+  :is(#tpl-view,#adm-pane-planer) .tpl-m.mehr{background:var(--surface-tint);border-color:var(--border);padding:0 8px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-m.mehr .l b{color:var(--ink)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-m.wd{opacity:.5} :is(#tpl-view,#adm-pane-planer) .tpl-m.wd:hover,:is(#tpl-view,#adm-pane-planer) .tpl-m.wd.wahl{opacity:1} :is(#tpl-view,#adm-pane-planer) .tpl-m.wd .l b::after{content:' WD';font-weight:500;color:var(--sub-2)}
   :is(#tpl-view,#adm-pane-planer) .tpl-achse{position:relative;height:18px;margin-left:var(--nw);font-size:10.5px;color:var(--sub-2);font-variant-numeric:tabular-nums;border-top:1px solid var(--border-soft)}
   :is(#tpl-view,#adm-pane-planer) .tpl-achse span{position:absolute;top:3px;transform:translateX(-50%);white-space:nowrap}
   :is(#tpl-view,#adm-pane-planer) .tpl-achse span.links{transform:none} :is(#tpl-view,#adm-pane-planer) .tpl-achse span.rechts{transform:translateX(-100%)}
@@ -1953,7 +1961,8 @@
     :is(#tpl-view,#adm-pane-planer) .tpl-ab-kopf{grid-template-columns:minmax(0,1fr) minmax(50px,100px) 16px;gap:3px 8px}
     :is(#tpl-view,#adm-pane-planer) .tpl-ab-kopf>span.t{grid-column:1/-1;white-space:normal}
     :is(#tpl-view,#adm-pane-planer) .tpl-ab-kopf>em{grid-row:1;grid-column:3}
-    :is(#tpl-view,#adm-pane-planer) .tpl-m{font-size:10.5px}
+    :is(#tpl-view,#adm-pane-planer) .tpl-m{font-size:11px;height:22px;padding:0 8px 0 6px}
+    :is(#tpl-view,#adm-pane-planer) .tpl-spur{height:84px}
     :is(#tpl-view,#adm-pane-planer) .tpl-bd-z{grid-template-columns:16px minmax(0,1fr) auto;gap:2px 8px}
     :is(#tpl-view,#adm-pane-planer) .tpl-hz{grid-template-columns:minmax(0,1fr) auto;gap:2px 8px} :is(#tpl-view,#adm-pane-planer) .tpl-hz .p,:is(#tpl-view,#adm-pane-planer) .tpl-hz .s{display:none} :is(#tpl-view,#adm-pane-planer) .tpl-hz .z{grid-column:1/-1;text-align:left;font-size:11px}
     :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .b,:is(#tpl-view,#adm-pane-planer) .tpl-bd-z .t{grid-column:2/-1}
@@ -40623,7 +40632,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1192'
+  const OS_TAB_BUILD = '2026-09-22.1193'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -45016,6 +45025,7 @@
     const t = String(f || '').toLowerCase().replace(/[^a-z0-9%]/g, '')
     return t.includes('tradeify') ? 'TF' : t.includes('apex') ? 'AP' : t.includes('fundednext') ? 'FN' : t.includes('fundingpips') ? 'FP'
       : t.includes('5ers') || t.includes('5%ers') ? '5%' : t.includes('ftmo') ? 'FT' : t.includes('blueguardian') ? 'BG' : t.includes('topstep') ? 'TS'
+      : t.includes('myfunded') || t.includes('myfounded') ? 'MF' : t.includes('lucid') ? 'LU'   // MFFU/Lucid lesbar (08.10.2026, Zeitstrahl-Pillen)
       : (String(f || '?').replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() || '?')
   }
   async function apProbeOeffnen(){
@@ -45775,7 +45785,25 @@
    * dünner Balken von der echten Startzeit bis jetzt. Feste Zeilenhöhe: Marker, die sich überschneiden (< 30 min bzw. näher als die
    * Textbreite), stapeln höchstens zwei Ebenen, danach ein Sammel-Marker „+n" mit Tooltip-Liste. Achse = heutiger Bereich (frühester
    * Start … spätester Start/jetzt, mindestens jetzt ± 1 h, volle Stunden), Stunden als zarte Spalten, Jetzt-Linie. */
-  const TPL_EBENE_Y = [9, 33]   // zwei Marker-Ebenen je Spur (Finn 07.10.2026: „Spuren zu gedrängt" — 60 px statt 48)
+  const TPL_EBENE_Y = [10, 50]   // zwei Marker-Ebenen je Spur — seit 08.10.2026 Spur 96 px, Marker als Pille 24 px (Finn: „Zeitstrahl größer, dicker")
+  /* PILLEN STATT KÜRZEL (08.10.2026, Finn: „Diese Kürzel AP, TF, TS, FP sind richtig kacke, ich erkenne das nicht. Mach da was anderes mit mehr
+   * Info"): Firmen-Kurzname + Größe („Tradeify 150k", „FNF 150k"); bei Enge Kürzel + Größe („TF 150k"), noch enger nur Kürzel, Rest „+n". */
+  function tplFirmaKurz(f){
+    const t = String(f || '').toLowerCase().replace(/[^a-z0-9%]/g, '')
+    if(t.includes('tradeify')) return 'Tradeify'
+    if(t.includes('apex')) return 'Apex'
+    if(t.includes('fundednext')) return t.includes('futures') ? 'FNF' : 'FundedNext'
+    if(t.includes('fundingpips')) return 'FundingPips'
+    if(t.includes('5ers') || t.includes('5%ers')) return 'The5ers'
+    if(t.includes('ftmo')) return 'FTMO'
+    if(t.includes('blueguardian')) return 'Blue Guardian'
+    if(t.includes('topstep')) return 'Topstep'
+    if(t.includes('myfundedfutures') || t.includes('myfoundedfutures')) return 'MFFU'
+    if(t.includes('lucid')) return 'Lucid'
+    if(t.includes('alpha')) return 'Alpha'
+    return String(f || '?').trim().split(/\s+/)[0] || '?'
+  }
+  const tplGroesseKurz = t => { let g = 0; try{ g = Number(kontoGroesseAnzeige(t.konto, null, t.balance)) || 0 }catch(_){} return g >= 1000 ? Math.round(g / 1000) + 'k' : g > 0 ? String(g) : '' }
   function tplZeitstrahlHtml(D, zeilen){
     const v = D.v, heute = D.tag === D.heute && D.jetzt != null
     const alle = zeilen.flatMap(z => D.trades.filter(t => z.ids.includes(t.user_id)))
@@ -45790,10 +45818,14 @@
     VON = Math.max(0, Math.floor(VON / 60) * 60); BIS = Math.min(1440, Math.ceil(BIS / 60) * 60)
     if(BIS - VON < 180){ BIS = Math.min(1440, VON + 180); VON = Math.max(0, BIS - 180) }
     const SPAN = BIS - VON, X = mDt => Math.max(0, Math.min(100, (mDt + v - VON) / SPAN * 100))
-    const schmal = (window.innerWidth || 1280) <= 760, nw = schmal ? 86 : 108, rootEl = document.getElementById('tpl-root')
+    // Breite am sichtbaren Wurzel-Knoten messen (Planer-Seite #tpl-root oder Admin-Reiter #ap-ids-root, 08.10.2026) — ein verdeckter Knoten misst 0
+    const schmal = (window.innerWidth || 1280) <= 760, nw = schmal ? 86 : 108
+    const rootEl = [document.getElementById('tpl-root'), document.getElementById('ap-ids-root')].find(e => e && e.offsetParent !== null) || document.getElementById('tpl-root')
     const bahnPx = Math.max(720, (rootEl && rootEl.clientWidth) || 0) - nw - 26, pxJeMin = bahnPx / SPAN
-    // Enge (Master 07.10.2026: Marker-Text kürzen statt Achse verbreitern): unter ~1,6 px/min nur noch Kürzel ohne Uhrzeit (≈ 42 px)
-    const kompakt = pxJeMin * 30 < 36, markerPx = kompakt ? 42 : 74
+    // Enge → Stufe des Pillen-Textes (08.10.2026): voll „Tradeify 150k 09:42" (≈ 128 px) · mittel „TF 150k" (≈ 72 px) · kompakt „TF" (≈ 46 px);
+    // Handy höchstens mittel. Cluster (zwei Ebenen, dann „+n") rechnen mit derselben Breite.
+    const px30 = pxJeMin * 30, stufe = (!schmal && px30 >= 64) ? 'voll' : px30 >= 46 ? 'mittel' : 'kompakt'
+    const kompakt = stufe === 'kompakt', markerPx = stufe === 'voll' ? 128 : stufe === 'mittel' ? 72 : 46
     const breiteMin = Math.max(30, markerPx / pxJeMin)   // Mindestabstand in Minuten, nie unter 30 min
     const raster = []
     for(let h = Math.ceil(VON / 60) * 60; h <= BIS; h += 60) raster.push(`<i style="left:${((h - VON) / SPAN * 100).toFixed(2)}%"></i>`)
@@ -45810,9 +45842,10 @@
       t.stufe || '', t.status === 'beendet' && t.pnl != null ? `Ergebnis ${t.pnl > 0 ? '+' : ''}${tplUsd(t.pnl)}` : ''].filter(Boolean).join('\n')
     const marker = (t, ebene, mitName) => {
       const erg = t.status === 'beendet' && t.pnl != null ? (t.pnl > 0 ? ' erg-gut' : t.pnl < 0 ? ' erg-rot' : ' erg-null') : ''
-      const balken = t.status === 'laeuft' && heute && D.jetzt > t.start ? `<i class="tpl-bar ${t.long ? 'long' : 'short'}" style="left:${X(t.start).toFixed(2)}%;width:${(X(D.jetzt) - X(t.start)).toFixed(2)}%;top:${TPL_EBENE_Y[ebene] + 9}px"></i>` : ''
-      return balken + `<button type="button" class="tpl-m ${t.long ? 'long' : 'short'} ${t.status}${erg}${t.wd ? ' wd' : ''}${_tpl.wahl === t.key ? ' wahl' : ''}" style="left:${X(t.start).toFixed(2)}%;top:${TPL_EBENE_Y[ebene]}px" data-tpl-t="${escapeHtml(t.key)}" title="${escapeHtml(titelVon(t))}">
-          <span class="g">${t.status === 'laeuft' ? '<i class="p"></i>' : ''}${t.long ? '▲' : '▼'}</span><span class="l"><b>${escapeHtml(apPrKurz(t.firma))}</b>${kompakt ? '' : ' ' + tplUhr(t.start, v)}</span></button>`
+      const balken = t.status === 'laeuft' && heute && D.jetzt > t.start ? `<i class="tpl-bar ${t.long ? 'long' : 'short'}" style="left:${X(t.start).toFixed(2)}%;width:${(X(D.jetzt) - X(t.start)).toFixed(2)}%;top:${TPL_EBENE_Y[ebene] + 9}px"></i>` : ''   // Balken mittig hinter der 24-px-Pille (Pille top … top+24, Balken 6 px ab top+9)
+      const gr = tplGroesseKurz(t), text = stufe === 'voll' ? `${tplFirmaKurz(t.firma)}${gr ? ' ' + gr : ''}` : stufe === 'mittel' ? `${apPrKurz(t.firma)}${gr ? ' ' + gr : ''}` : apPrKurz(t.firma)
+      return balken + `<button type="button" class="tpl-m ${t.long ? 'long' : 'short'} ${t.status}${erg}${t.wd ? ' wd' : ''}${_tpl.wahl === t.key ? ' wahl' : ''}${X(t.start) > 90 ? ' rechts' : ''}" style="left:${X(t.start).toFixed(2)}%;top:${TPL_EBENE_Y[ebene]}px" data-tpl-t="${escapeHtml(t.key)}" title="${escapeHtml(titelVon(t))}">
+          <span class="g">${t.status === 'laeuft' ? '<i class="p"></i>' : ''}${t.long ? '▲' : '▼'}</span><span class="l"><b>${escapeHtml(text)}</b>${stufe === 'voll' ? `<em>${tplUhr(t.start, v)}</em>` : ''}</span></button>`
     }
     const spurHtml = (z, liste, label) => {
       // Cluster: Marker, die näher als breiteMin am vorigen liegen, bilden eine Gruppe — 1. Ebene 0, 2. Ebene 1, Rest = „+n"
