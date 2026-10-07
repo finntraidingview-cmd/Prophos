@@ -1903,12 +1903,13 @@
   #tpl-view .tpl-hz .p,#tpl-view .tpl-hz .s{text-align:right;color:var(--ink-2)} #tpl-view .tpl-hz .h{text-align:right;font-weight:700;font-size:13.5px} #tpl-view .tpl-hz .z{text-align:right;color:var(--sub);white-space:nowrap}
   /* Geplant-Liste = Tabelle des Reiters Trades → Geplant (.pz-*, GEPLANT-WIE-TRADES-REITER 07.10.2026), hier mit ID-Spalte vorn */
   #tpl-view .tpl-lk{padding-bottom:6px} #tpl-view .tpl-lk .tpl-h{margin:4px 0 0}
-  #dashboard-view .pz-tab.pz-mit-id{grid-template-columns:118px 72px minmax(162px,.7fr) minmax(210px,1.4fr) minmax(118px,.6fr) 60px 76px 76px 168px}
+  #dashboard-view .pz-tab.pz-mit-id{grid-template-columns:156px 72px minmax(162px,.7fr) minmax(210px,1.4fr) minmax(96px,.6fr) 60px 76px 76px 168px}
   #dashboard-view .pz-z > .pz-wer{display:flex;align-items:center;gap:7px} #dashboard-view .pz-wer i{flex:none;width:8px;height:8px;border-radius:50%}
   #dashboard-view .pz-wer b{font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis}
+  #dashboard-view .pz-wer .tc2-chip{flex:none;margin-left:auto;font-size:10.5px}   /* Richtung je ID rechts in der ID-Spalte */
   #dashboard-view .pz-hand{font-size:11.5px;color:var(--sub)} #dashboard-view .pz-live.is-leer{width:0}
   #dashboard-view .pz-akt .btn:disabled{opacity:.45;cursor:default}
-  @media (max-width:1359px){ #dashboard-view .pz-tab.pz-mit-id{grid-template-columns:110px 72px minmax(162px,.7fr) minmax(130px,1.4fr) 60px 76px 76px 168px} }
+  @media (max-width:1359px){ #dashboard-view .pz-tab.pz-mit-id{grid-template-columns:156px 72px minmax(162px,.7fr) minmax(130px,1.4fr) 60px 76px 76px 168px} }
   @media (max-width:820px){ #dashboard-view .pz-z > .pz-wer{order:0;flex:0 0 100%} }
   /* Braucht dich (07.10.2026): ruhiger Block je ID — Zeile = Symbol · Firma · Klartext · kleine Aktion */
   #tpl-view .tpl-bd{border-color:color-mix(in srgb,#B45309 35%,var(--border))}
@@ -36036,6 +36037,8 @@
    * AP-DESIGN 05.10.2026: „N offen" in Rot ist weg (kein Fehler), „● alle live" ebenso (der Normalfall braucht kein Etikett).
    * opt (Trade-Planer, 07.10.2026): { zeile(p) → Zeilen-HTML für jeden Plan (keine Karten), mitId: Spalte „ID" vorn, ohneHinweis: kein
    * Richtungs-Platzhalter (der gilt nur für die eingeloggte ID) }. Ohne opt unverändert wie im Reiter Trades → Geplant. */
+  /* BUY/SELL-Chip des Firmenkopfs — auch je Zeile im Trade-Planer (GEPLANT-RICHTUNG-JE-ID, 07.10.2026) */
+  const planRichtungChip = (txt, gut) => `<span class="tc2-chip" style="font-family:var(--mono);font-weight:700;${gut ? 'background:rgba(18,183,106,.12);color:#0E9757' : 'background:rgba(240,68,56,.10);color:#D92D20'}">${txt}</span>`
   function planFirmenBloecke(list, opt){
     opt = opt || {}
     const gruppen = []
@@ -36050,7 +36053,7 @@
       const ps = g.plaene
       const wege = [...new Set(ps.map(p => p.route === 'tvv2' ? 'Orbit V2' : p.route === 'mt5v2' ? 'Echo V2' : (p.route || 'Duplikum')))].join(' + ')
       const buy = ps.filter(p => p.richtung === 'buy').length, sell = ps.filter(p => p.richtung === 'sell').length
-      const chip = (txt, gut) => `<span class="tc2-chip" style="font-family:var(--mono);font-weight:700;${gut ? 'background:rgba(18,183,106,.12);color:#0E9757' : 'background:rgba(240,68,56,.10);color:#D92D20'}">${txt}</span>`
+      const chip = planRichtungChip
       const richtung = (buy ? chip(sell ? `BUY ${buy}` : 'BUY', true) : '') + (sell ? chip(buy ? `SELL ${sell}` : 'SELL', false) : '')
       const zeiten = ps.map(p => Date.parse(p.startUm || '')).filter(Boolean).sort((a, b) => a - b)
       const fenster = !zeiten.length ? 'ohne Startzeit' : zeiten.length === 1 || hhmm(zeiten[0]) === hhmm(zeiten[zeiten.length - 1]) ? hhmm(zeiten[0]) : `${hhmm(zeiten[0])}–${hhmm(zeiten[zeiten.length - 1])}`
@@ -39944,7 +39947,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1125'
+  const OS_TAB_BUILD = '2026-09-22.1126'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -45294,7 +45297,10 @@
       const akt = `<button type="button" class="btn btn-ghost icon-btn tc2-ab" data-tpl-zedit="${k}"${t.ohnePlan ? ' disabled' : ''} title="${t.eigen ? 'Bearbeiten' : 'Richtung / Start ändern (Detail)'}">${PLAN_SVG_EDIT}</button>`
         + `<button type="button" class="btn btn-ghost icon-btn tc2-ab" data-tpl-zdel="${k}"${zu || dis} title="${t.eigen ? 'Löschen (5 s Rückgängig)' : 'Vorschlag löschen'}">${PLAN_SVG_DEL}</button>`
         + `<span class="pz-zustand"${darf ? '' : ` title="${escapeHtml(sperre)}"`}>${zustand}</span>`
-      const wer = `<i style="background:${idFarbe(t.user_id)}"></i><b>${escapeHtml(t.user || '?')}</b>`
+      // RICHTUNG JE ID (GEPLANT-RICHTUNG-JE-ID, Finn 07.10.2026 05:58 Dubai am Planer-Screenshot): ▲ Long / ▼ Short direkt bei der ID, gleicher
+      // Chip wie BUY/SELL im Firmenkopf — man sieht je ID, in welche Richtung sie geplant ist
+      const ri = t.richtung === 'buy' ? planRichtungChip('▲ Long', true) : t.richtung === 'sell' ? planRichtungChip('▼ Short', false) : ''
+      const wer = `<i style="background:${idFarbe(t.user_id)}"></i><b title="${escapeHtml(t.user || '')}">${escapeHtml(t.user || '?')}</b>${ri}`
       return planZeileHtml(p, konto, { name: p.masterName, ext: konto && konto.externalId ? konto.externalId : (t.ende4 || ''), extTitle: '', chips: '', akt, wer, zeit, bal, notiz })
     }
     return `<div class="tpl-karte tpl-lk"><div class="tpl-h">Geplant <b>${plan.length}</b></div>${planFirmenBloecke(plaene, { zeile, mitId: true, ohneHinweis: true })}</div>`
