@@ -36855,14 +36855,8 @@
       const richtung = (buy ? chip(sell ? `BUY ${buy}` : 'BUY', true) : '') + (sell ? chip(buy ? `SELL ${sell}` : 'SELL', false) : '')
       const zeiten = ps.map(p => Date.parse(p.startUm || '')).filter(Boolean).sort((a, b) => a - b)
       const fenster = !zeiten.length ? 'ohne Startzeit' : zeiten.length === 1 || hhmm(zeiten[0]) === hhmm(zeiten[zeiten.length - 1]) ? hhmm(zeiten[0]) : `${hhmm(zeiten[0])}–${hhmm(zeiten[zeiten.length - 1])}`
-      // TP/SL im Kopf (08.10.2026, Finn: „TP 27.300 $" als Summe über 3 Konten verwirrt): gleich bei allen → „TP 9.100 $ je Konto",
-      // sonst „3 × 7.000–9.100 $"; die Summe steht nur noch im Tooltip
-      const tps = ps.map(p => Number(p.masterTp) || 0), sls = ps.map(p => Number(p.masterSl) || 0)
-      const tp = tps.reduce((s, v) => s + v, 0), sl = sls.reduce((s, v) => s + v, 0)
-      const jeKonto = (werte, summe) => { const w = werte.filter(v => v > 0); if(!w.length) return null
-        const mn = Math.min(...w), mx = Math.max(...w)
-        return { txt: w.length === 1 ? geld(mn) : mn === mx ? `${geld(mn)} je Konto` : `${w.length} × ${geld(mn).replace(' $', '')}–${geld(mx)}`, tip: w.length > 1 ? `Summe ${geld(summe)} über ${w.length} Konten` : '' } }
-      const tpK = jeKonto(tps, tp), slK = jeKonto(sls, sl)
+      // TP/SL stehen NICHT mehr im Kopf (Finn 08.10.2026 ~04:00 Dubai: „unnötig, werde ich nie angucken, einfach weglassen — ich sehe es
+      // rechts einmal"), ebenso die Zeitspanne (Nachtrag): Kopf = Firma · n Trades · Weg · BUY/SELL; Start/TP/SL je Zeile
       let nichtLive = 0
       for(const p of ps){
         const b = routeIstV2(p.route) ? planKontoBalance(accounts.find(a => String(a.id) === String(p.masterAccountId))) : null
@@ -36873,9 +36867,7 @@
       return `<div class="pz-kopf plan-firma-kopf">
           <span class="pz-firma">${escapeHtml(g.firma)}</span>
           <span>${ps.length} Trade${ps.length === 1 ? '' : 's'}</span> ${sep} <span>${escapeHtml(wege)}</span>
-          ${richtung} ${sep}
-          <span>${fenster}</span> ${sep}
-          <span>TP <span class="pz-tp"${tpK && tpK.tip ? ` title="${escapeHtml(tpK.tip)}"` : ''}>${tpK ? escapeHtml(tpK.txt) : '–'}</span>${slK ? ` · SL <span class="pz-sl"${slK.tip ? ` title="${escapeHtml(slK.tip)}"` : ''}>${escapeHtml(slK.txt)}</span>` : ''}</span>
+          ${richtung}
           ${nichtLive ? `${sep} <span class="pz-warn">⚠ ${nichtLive} Balance${nichtLive === 1 ? '' : 's'} nicht live</span>` : ''}
           ${zeilen.length && !opt.ohneHinweis ? `<span class="tc2-chip tc2-dir-hint" data-dir-firm="${escapeHtml(g.firma === '–' ? '' : g.firma)}" style="display:none;background:rgba(245,158,11,.14);color:#b45309"></span>` : ''}
         </div>`
@@ -40771,7 +40763,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1211'
+  const OS_TAB_BUILD = '2026-09-22.1212'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
