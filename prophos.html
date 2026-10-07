@@ -1744,176 +1744,176 @@
     #apDelta .apd-liste.breit .apd-z,#apDelta .apd-vorschau .apd-z{flex-wrap:wrap;row-gap:0}
     #apDelta .apd-liste.breit .grund,#apDelta .apd-vorschau .grund{flex:1 1 100%;padding-left:46px}
   }
-  /* TRADE-PLANER (07.10.2026, Finn: Tagesplan des Auto-Planers clean und visuell): eigene Seite #tpl-view — Kacheln Long/Short/Netto in
+  /* TRADE-PLANER (07.10.2026; seit 08.10.2026 gelten die Styles über :is() auch im Admin-Reiter „Trade-Planer" #adm-pane-planer — gleiche Bausteine, keine zweite Kopie; Finn: Tagesplan des Auto-Planers clean und visuell): eigene Seite #tpl-view — Kacheln Long/Short/Netto in
      € Einsatz + Bot-Kachel, Zeitstrahl je ID (Dubai), Netto-Einsatz über den Tag, Konten-Abdeckung; darunter Auto-Planer-Leiste und
-     Delta-Monitor (umgezogen aus Trades → Geplant). Nur #tpl-view, eigene tpl-*-Klassen; Firmentöne wie die Vorrat-Seite. */
-  #tpl-view{--vr-f0:var(--violet);--vr-f1:color-mix(in oklch,var(--violet) 70%,var(--blue));--vr-f2:color-mix(in oklch,var(--violet) 45%,var(--blue));
+     Delta-Monitor (umgezogen aus Trades → Geplant). Nur :is(#tpl-view,#adm-pane-planer), eigene tpl-*-Klassen; Firmentöne wie die Vorrat-Seite. */
+  :is(#tpl-view,#adm-pane-planer){--vr-f0:var(--violet);--vr-f1:color-mix(in oklch,var(--violet) 70%,var(--blue));--vr-f2:color-mix(in oklch,var(--violet) 45%,var(--blue));
     --vr-f3:color-mix(in oklch,var(--violet) 75%,var(--violet-soft));--vr-f4:color-mix(in oklch,var(--violet) 75%,var(--danger));
     --vr-f5:color-mix(in oklch,var(--violet) 50%,var(--sub));--vr-f6:color-mix(in oklch,var(--violet) 60%,var(--sub-2))}
   @supports (color: oklch(from red l c h)){
-    #tpl-view{--vr-f1:oklch(from var(--violet) l c calc(h - 14));--vr-f2:oklch(from var(--violet) l c calc(h - 28));
+    :is(#tpl-view,#adm-pane-planer){--vr-f1:oklch(from var(--violet) l c calc(h - 14));--vr-f2:oklch(from var(--violet) l c calc(h - 28));
       --vr-f3:oklch(from var(--violet) l calc(c * .8) calc(h + 14));--vr-f4:oklch(from var(--violet) l c calc(h + 32));
       --vr-f5:oklch(from var(--violet) l calc(c * .55) calc(h - 40));--vr-f6:oklch(from var(--violet) l calc(c * .4) h)}
   }
-  #tpl-view{min-width:0}
-  #tpl-view .view-head .btn-mini{padding:4px 11px;font-size:12px;height:auto}
-  #tpl-view .tpl-kr{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
-  #tpl-view .tpl-fehler{color:var(--danger);font-size:12.5px;margin:0 0 10px}
-  #tpl-view .kpis{grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:12px}
-  #tpl-view .kpis.tpl-kpis5{grid-template-columns:repeat(5,minmax(0,1fr))}
-  #tpl-view .kpi{padding:10px 12px;box-shadow:none;min-width:0;border-radius:var(--r-md)}
-  #tpl-view .kpi:hover{box-shadow:none}
-  #tpl-view .kpi-label{font-size:12px;margin-bottom:2px}
-  #tpl-view .kpi-value{font-size:20px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  #tpl-view .kpi-value small{font-size:11.5px;font-weight:500;color:var(--sub);margin-left:4px}
-  #tpl-view .kpi-delta{display:block;font-size:11.5px;color:var(--sub);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  #tpl-view .kpi-delta.umbruch{white-space:normal;line-height:1.3}   /* Netto-Unterzeile darf zweizeilig werden (Finn 07.10.2026: voller Wortlaut) */
-  #tpl-view .tpl-gut,#tpl-view .apd-gut{color:var(--good)} #tpl-view .tpl-rot,#tpl-view .apd-rot{color:var(--danger)} #tpl-view .tpl-grau,#tpl-view .apd-grau{color:var(--sub-2)}
-  #tpl-view .tpl-ls{display:flex;height:6px;border-radius:3px;overflow:hidden;margin:6px 0 4px;background:var(--surface-tint)}
-  #tpl-view .tpl-ls i{display:block;height:100%}
-  #tpl-view .apd-schalter{display:flex;gap:10px;flex-wrap:wrap;margin-top:5px;font-size:11px;color:var(--sub)}
-  #tpl-view .apd-schalter label{display:inline-flex;align-items:center;gap:5px;cursor:pointer;user-select:none}
-  #tpl-view .apd-schalter .switch{width:28px;height:16px}
-  #tpl-view .apd-schalter .switch-slider::before{width:12px;height:12px}
-  #tpl-view .apd-schalter .switch input:checked + .switch-slider::before{transform:translateX(12px)}
-  #tpl-view .apd-schalter .switch input:disabled + .switch-slider{opacity:.55;cursor:default}
-  #tpl-view .tpl-karte{border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface);padding:10px 12px 6px;margin:0 0 12px;min-width:0}
-  #tpl-view .tpl-h{display:flex;align-items:center;gap:4px 12px;flex-wrap:wrap;font-size:11.5px;font-weight:600;color:var(--sub);text-transform:uppercase;letter-spacing:.04em;margin:0 0 6px}
-  #tpl-view .tpl-h b{color:var(--ink);font-weight:600}
-  #tpl-view .tpl-h .leg{display:inline-flex;gap:4px 10px;flex-wrap:wrap;text-transform:none;letter-spacing:0;font-weight:500;color:var(--sub-2)}
-  #tpl-view .tpl-h .leg .g{font-size:12px}
+  :is(#tpl-view,#adm-pane-planer){min-width:0}
+  :is(#tpl-view,#adm-pane-planer) .view-head .btn-mini{padding:4px 11px;font-size:12px;height:auto}
+  :is(#tpl-view,#adm-pane-planer) .tpl-kr{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+  :is(#tpl-view,#adm-pane-planer) .tpl-fehler{color:var(--danger);font-size:12.5px;margin:0 0 10px}
+  :is(#tpl-view,#adm-pane-planer) .kpis{grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:12px}
+  :is(#tpl-view,#adm-pane-planer) .kpis.tpl-kpis5{grid-template-columns:repeat(5,minmax(0,1fr))}
+  :is(#tpl-view,#adm-pane-planer) .kpi{padding:10px 12px;box-shadow:none;min-width:0;border-radius:var(--r-md)}
+  :is(#tpl-view,#adm-pane-planer) .kpi:hover{box-shadow:none}
+  :is(#tpl-view,#adm-pane-planer) .kpi-label{font-size:12px;margin-bottom:2px}
+  :is(#tpl-view,#adm-pane-planer) .kpi-value{font-size:20px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  :is(#tpl-view,#adm-pane-planer) .kpi-value small{font-size:11.5px;font-weight:500;color:var(--sub);margin-left:4px}
+  :is(#tpl-view,#adm-pane-planer) .kpi-delta{display:block;font-size:11.5px;color:var(--sub);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  :is(#tpl-view,#adm-pane-planer) .kpi-delta.umbruch{white-space:normal;line-height:1.3}   /* Netto-Unterzeile darf zweizeilig werden (Finn 07.10.2026: voller Wortlaut) */
+  :is(#tpl-view,#adm-pane-planer) .tpl-gut,:is(#tpl-view,#adm-pane-planer) .apd-gut{color:var(--good)} :is(#tpl-view,#adm-pane-planer) .tpl-rot,:is(#tpl-view,#adm-pane-planer) .apd-rot{color:var(--danger)} :is(#tpl-view,#adm-pane-planer) .tpl-grau,:is(#tpl-view,#adm-pane-planer) .apd-grau{color:var(--sub-2)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-ls{display:flex;height:6px;border-radius:3px;overflow:hidden;margin:6px 0 4px;background:var(--surface-tint)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-ls i{display:block;height:100%}
+  :is(#tpl-view,#adm-pane-planer) .apd-schalter{display:flex;gap:10px;flex-wrap:wrap;margin-top:5px;font-size:11px;color:var(--sub)}
+  :is(#tpl-view,#adm-pane-planer) .apd-schalter label{display:inline-flex;align-items:center;gap:5px;cursor:pointer;user-select:none}
+  :is(#tpl-view,#adm-pane-planer) .apd-schalter .switch{width:28px;height:16px}
+  :is(#tpl-view,#adm-pane-planer) .apd-schalter .switch-slider::before{width:12px;height:12px}
+  :is(#tpl-view,#adm-pane-planer) .apd-schalter .switch input:checked + .switch-slider::before{transform:translateX(12px)}
+  :is(#tpl-view,#adm-pane-planer) .apd-schalter .switch input:disabled + .switch-slider{opacity:.55;cursor:default}
+  :is(#tpl-view,#adm-pane-planer) .tpl-karte{border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface);padding:10px 12px 6px;margin:0 0 12px;min-width:0}
+  :is(#tpl-view,#adm-pane-planer) .tpl-h{display:flex;align-items:center;gap:4px 12px;flex-wrap:wrap;font-size:11.5px;font-weight:600;color:var(--sub);text-transform:uppercase;letter-spacing:.04em;margin:0 0 6px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-h b{color:var(--ink);font-weight:600}
+  :is(#tpl-view,#adm-pane-planer) .tpl-h .leg{display:inline-flex;gap:4px 10px;flex-wrap:wrap;text-transform:none;letter-spacing:0;font-weight:500;color:var(--sub-2)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-h .leg .g{font-size:12px}
   /* Desktop (Master 07.10.2026): Zeitstrahl fix auf Kartenbreite, kein Querscroll, kein Scrollbalken — nur am Handy wischbar */
-  #tpl-view .tpl-scroll{overflow:visible}
-  #tpl-view .tpl-innen{position:relative;min-width:0;--nw:108px}
-  #tpl-view .tpl-raster{position:absolute;top:0;bottom:0;left:var(--nw);right:0;pointer-events:none;z-index:0}
-  #tpl-view .tpl-raster i{position:absolute;top:0;bottom:18px;width:1px;background:var(--border-soft)}
-  #tpl-view .tpl-raster i.fen{background:none;border-left:1px dashed var(--border)}
-  #tpl-view .tpl-raster i.jetzt{width:2px;margin-left:-1px;bottom:0;background:var(--ink);opacity:.45}
-  #tpl-view .tpl-raster .jetzt-t{position:absolute;top:-1px;transform:translateX(-50%);font-size:10px;font-weight:600;color:var(--ink);background:var(--surface);padding:0 4px;border-radius:4px;white-space:nowrap;font-variant-numeric:tabular-nums}
-  #tpl-view .tpl-ids{margin:0 0 10px;gap:6px 8px}
-  #tpl-view .tpl-ids .adm-vl-chip{padding:3px 10px;border:1px solid var(--border);border-radius:999px;background:var(--surface);font-size:12px;line-height:1.4;color:var(--sub)}
-  #tpl-view .tpl-ids .adm-vl-chip.is-on{border-color:var(--violet);color:var(--ink)}
-  #tpl-view .tpl-ids .adm-vl-chip b{margin-left:6px;font-variant-numeric:tabular-nums;font-weight:600}
-  #tpl-view .tpl-ids .adm-dot{width:8px;height:8px;border-radius:50%}
-  #tpl-view .tpl-ids .tpl-alle-best{margin-left:auto;padding:3px 10px;font-size:12px;height:auto} #tpl-view .tpl-ids .tpl-alle-best b{margin-left:4px;font-variant-numeric:tabular-nums}
+  :is(#tpl-view,#adm-pane-planer) .tpl-scroll{overflow:visible}
+  :is(#tpl-view,#adm-pane-planer) .tpl-innen{position:relative;min-width:0;--nw:108px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-raster{position:absolute;top:0;bottom:0;left:var(--nw);right:0;pointer-events:none;z-index:0}
+  :is(#tpl-view,#adm-pane-planer) .tpl-raster i{position:absolute;top:0;bottom:18px;width:1px;background:var(--border-soft)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-raster i.fen{background:none;border-left:1px dashed var(--border)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-raster i.jetzt{width:2px;margin-left:-1px;bottom:0;background:var(--ink);opacity:.45}
+  :is(#tpl-view,#adm-pane-planer) .tpl-raster .jetzt-t{position:absolute;top:-1px;transform:translateX(-50%);font-size:10px;font-weight:600;color:var(--ink);background:var(--surface);padding:0 4px;border-radius:4px;white-space:nowrap;font-variant-numeric:tabular-nums}
+  :is(#tpl-view,#adm-pane-planer) .tpl-ids{margin:0 0 10px;gap:6px 8px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-ids .adm-vl-chip{padding:3px 10px;border:1px solid var(--border);border-radius:999px;background:var(--surface);font-size:12px;line-height:1.4;color:var(--sub)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-ids .adm-vl-chip.is-on{border-color:var(--violet);color:var(--ink)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-ids .adm-vl-chip b{margin-left:6px;font-variant-numeric:tabular-nums;font-weight:600}
+  :is(#tpl-view,#adm-pane-planer) .tpl-ids .adm-dot{width:8px;height:8px;border-radius:50%}
+  :is(#tpl-view,#adm-pane-planer) .tpl-ids .tpl-alle-best{margin-left:auto;padding:3px 10px;font-size:12px;height:auto} :is(#tpl-view,#adm-pane-planer) .tpl-ids .tpl-alle-best b{margin-left:4px;font-variant-numeric:tabular-nums}
   #tplBestModal .tpl-chips{display:flex;flex-wrap:wrap;gap:5px}
   #tplBestModal .tpl-chip{display:inline-flex;align-items:center;gap:5px;border:1px solid color-mix(in srgb,var(--good) 45%,var(--border));border-radius:999px;padding:2px 9px;font-size:11.5px;background:color-mix(in srgb,var(--good) 8%,var(--surface))}
   #tplBestModal .tpl-chip i{width:8px;height:8px;border-radius:50%} #tplBestModal .tpl-chip em{font-style:normal;font-weight:600;color:var(--good)}
   /* Spur je ID (TPL-UEBERSICHT-2, 07.10.2026): feste Höhe, zwei Marker-Ebenen, Balken für laufende Trades */
-  #tpl-view .tpl-spur{position:relative;display:flex;height:60px;border-top:1px solid var(--border-soft)}
-  #tpl-view .tpl-spur:first-child{border-top:0}
-  #tpl-view .tpl-spur.sammel{background:color-mix(in srgb,var(--surface-tint) 55%,var(--surface))}
-  #tpl-view .tpl-name{position:sticky;left:0;z-index:4;flex:0 0 var(--nw);display:flex;flex-direction:column;justify-content:center;gap:2px;padding-right:8px;background:var(--surface);font-size:12.5px;min-width:0}
-  #tpl-view .tpl-spur.sammel .tpl-name{background:color-mix(in srgb,var(--surface-tint) 55%,var(--surface))}
-  #tpl-view .tpl-name b{display:flex;align-items:center;gap:6px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  #tpl-view .tpl-name b i{width:9px;height:9px;border-radius:50%;flex:none}
-  #tpl-view .tpl-name b em{font-style:normal;color:var(--sub-2);font-size:11px}
-  #tpl-view .tpl-name span{font-size:11px;color:var(--sub-2);font-variant-numeric:tabular-nums;padding-left:15px;white-space:nowrap}
-  #tpl-view button.tpl-name{border:0;font:inherit;text-align:left;cursor:pointer;color:var(--ink);align-items:flex-start}
-  #tpl-view button.tpl-name:hover b{color:var(--violet)}
-  #tpl-view .tpl-bahn{position:relative;flex:1 1 auto;min-width:0;z-index:1}
-  #tpl-view .tpl-bahn::before{content:'';position:absolute;left:0;right:0;top:50%;height:2px;margin-top:-1px;border-radius:1px;background:var(--id,var(--sub-2));opacity:.25}
-  #tpl-view .tpl-bahn .leer{position:absolute;left:8px;top:50%;transform:translateY(-130%);font-size:11px;color:var(--sub-2)}
-  #tpl-view .tpl-bar{position:absolute;height:3px;border-radius:2px;opacity:.55;z-index:0}
-  #tpl-view .tpl-bar.long{background:var(--good)} #tpl-view .tpl-bar.short{background:var(--danger)}
-  #tpl-view .tpl-m{position:absolute;display:inline-flex;align-items:center;gap:4px;height:18px;margin-left:-8px;padding:0 4px 0 0;border:0;background:none;cursor:pointer;font:inherit;font-size:11px;line-height:1;color:var(--sub);white-space:nowrap;z-index:1}
-  #tpl-view .tpl-m .g{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;font-size:10px;background:var(--surface);box-shadow:0 0 0 1px var(--border);position:relative;flex:none}
-  #tpl-view .tpl-m.long .g{color:var(--good)} #tpl-view .tpl-m.short .g{color:var(--danger)}
-  #tpl-view .tpl-m.offen .g{box-shadow:0 0 0 1px transparent;outline:1px dashed var(--sub-2);outline-offset:-1px}
-  #tpl-view .tpl-m.bestaetigt .g{box-shadow:0 0 0 1.5px color-mix(in srgb,var(--good) 55%,var(--border))}
-  #tpl-view .tpl-m.laeuft .g{box-shadow:0 0 0 1.5px var(--violet);background:var(--violet-tint)}
-  #tpl-view .tpl-m .g .p{position:absolute;top:-3px;right:-3px;width:7px;height:7px;border-radius:50%;background:var(--violet);animation:tplPuls 1.6s ease-in-out infinite}
+  :is(#tpl-view,#adm-pane-planer) .tpl-spur{position:relative;display:flex;height:60px;border-top:1px solid var(--border-soft)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-spur:first-child{border-top:0}
+  :is(#tpl-view,#adm-pane-planer) .tpl-spur.sammel{background:color-mix(in srgb,var(--surface-tint) 55%,var(--surface))}
+  :is(#tpl-view,#adm-pane-planer) .tpl-name{position:sticky;left:0;z-index:4;flex:0 0 var(--nw);display:flex;flex-direction:column;justify-content:center;gap:2px;padding-right:8px;background:var(--surface);font-size:12.5px;min-width:0}
+  :is(#tpl-view,#adm-pane-planer) .tpl-spur.sammel .tpl-name{background:color-mix(in srgb,var(--surface-tint) 55%,var(--surface))}
+  :is(#tpl-view,#adm-pane-planer) .tpl-name b{display:flex;align-items:center;gap:6px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  :is(#tpl-view,#adm-pane-planer) .tpl-name b i{width:9px;height:9px;border-radius:50%;flex:none}
+  :is(#tpl-view,#adm-pane-planer) .tpl-name b em{font-style:normal;color:var(--sub-2);font-size:11px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-name span{font-size:11px;color:var(--sub-2);font-variant-numeric:tabular-nums;padding-left:15px;white-space:nowrap}
+  :is(#tpl-view,#adm-pane-planer) button.tpl-name{border:0;font:inherit;text-align:left;cursor:pointer;color:var(--ink);align-items:flex-start}
+  :is(#tpl-view,#adm-pane-planer) button.tpl-name:hover b{color:var(--violet)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bahn{position:relative;flex:1 1 auto;min-width:0;z-index:1}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bahn::before{content:'';position:absolute;left:0;right:0;top:50%;height:2px;margin-top:-1px;border-radius:1px;background:var(--id,var(--sub-2));opacity:.25}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bahn .leer{position:absolute;left:8px;top:50%;transform:translateY(-130%);font-size:11px;color:var(--sub-2)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bar{position:absolute;height:3px;border-radius:2px;opacity:.55;z-index:0}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bar.long{background:var(--good)} :is(#tpl-view,#adm-pane-planer) .tpl-bar.short{background:var(--danger)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-m{position:absolute;display:inline-flex;align-items:center;gap:4px;height:18px;margin-left:-8px;padding:0 4px 0 0;border:0;background:none;cursor:pointer;font:inherit;font-size:11px;line-height:1;color:var(--sub);white-space:nowrap;z-index:1}
+  :is(#tpl-view,#adm-pane-planer) .tpl-m .g{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;font-size:10px;background:var(--surface);box-shadow:0 0 0 1px var(--border);position:relative;flex:none}
+  :is(#tpl-view,#adm-pane-planer) .tpl-m.long .g{color:var(--good)} :is(#tpl-view,#adm-pane-planer) .tpl-m.short .g{color:var(--danger)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-m.offen .g{box-shadow:0 0 0 1px transparent;outline:1px dashed var(--sub-2);outline-offset:-1px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-m.bestaetigt .g{box-shadow:0 0 0 1.5px color-mix(in srgb,var(--good) 55%,var(--border))}
+  :is(#tpl-view,#adm-pane-planer) .tpl-m.laeuft .g{box-shadow:0 0 0 1.5px var(--violet);background:var(--violet-tint)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-m .g .p{position:absolute;top:-3px;right:-3px;width:7px;height:7px;border-radius:50%;background:var(--violet);animation:tplPuls 1.6s ease-in-out infinite}
   @keyframes tplPuls{0%,100%{opacity:1}50%{opacity:.2}}
-  #tpl-view .tpl-m .l{font-variant-numeric:tabular-nums;padding:0 3px;border-radius:4px;background:color-mix(in srgb,var(--surface) 85%,transparent)}
-  #tpl-view .tpl-m .l b{font-weight:600;color:var(--ink)}
-  #tpl-view .tpl-m:hover,#tpl-view .tpl-m.wahl{z-index:3} #tpl-view .tpl-m:hover .l,#tpl-view .tpl-m.wahl .l{background:var(--violet-tint);color:var(--ink)}
-  #tpl-view .tpl-m.wahl .g{box-shadow:0 0 0 2px var(--violet)}
-  #tpl-view .tpl-m.beendet,#tpl-view .tpl-m.vorbei{opacity:.55} #tpl-view .tpl-m.beendet:hover,#tpl-view .tpl-m.vorbei:hover,#tpl-view .tpl-m.beendet.wahl,#tpl-view .tpl-m.vorbei.wahl{opacity:1}
-  #tpl-view .tpl-m.beendet .g,#tpl-view .tpl-m.vorbei .g{color:var(--sub-2)}
-  #tpl-view .tpl-m.erg-gut .l b{color:var(--good)} #tpl-view .tpl-m.erg-rot .l b{color:var(--danger)}
-  #tpl-view .tpl-m.mehr .l{background:var(--surface-tint);border:1px solid var(--border);font-weight:600;color:var(--ink);padding:1px 6px;border-radius:999px}
-  #tpl-view .tpl-m.wd{opacity:.5} #tpl-view .tpl-m.wd:hover,#tpl-view .tpl-m.wd.wahl{opacity:1} #tpl-view .tpl-m.wd .l b::after{content:' WD';font-weight:500;color:var(--sub-2)}   /* Winning Days nur dezent: die Seite plant Challenges/Phasen */
-  #tpl-view .tpl-achse{position:relative;height:18px;margin-left:var(--nw);font-size:10.5px;color:var(--sub-2);font-variant-numeric:tabular-nums;border-top:1px solid var(--border-soft)}
-  #tpl-view .tpl-achse span{position:absolute;top:3px;transform:translateX(-50%);white-space:nowrap}
-  #tpl-view .tpl-achse span.links{transform:none} #tpl-view .tpl-achse span.rechts{transform:translateX(-100%)}
-  #tpl-view .tpl-netto{position:relative;display:flex;height:50px;border-top:1px solid var(--border-soft)}
-  #tpl-view .tpl-netto .tpl-name span{padding-left:0}
-  #tpl-view .tpl-netto .tpl-bahn::before{display:none}
-  #tpl-view .tpl-netto svg{position:absolute;inset:4px 0;display:block;width:100%;height:calc(100% - 8px)}
-  #tpl-view .tpl-netto .skala{position:absolute;left:3px;top:2px;font-size:10px;color:var(--sub-2);font-variant-numeric:tabular-nums;pointer-events:none}
-  #tpl-view .tpl-detail{border:1px solid color-mix(in srgb,var(--violet) 35%,var(--border));border-radius:var(--r-md);background:var(--surface);padding:10px 12px;margin:0 0 12px;min-width:0}
-  #tpl-view .tpl-detail .k{display:flex;align-items:center;gap:4px 10px;flex-wrap:wrap;font-size:13px}
-  #tpl-view .tpl-detail .k i.id{width:9px;height:9px;border-radius:50%;flex:none}
-  #tpl-view .tpl-detail .k .mono{font-family:'JetBrains Mono',monospace;font-size:12.5px;font-weight:600}
-  #tpl-view .tpl-pill{font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--surface-tint);color:var(--sub);white-space:nowrap}
-  #tpl-view .tpl-pill.laeuft{background:var(--violet-tint);color:var(--violet)}
-  #tpl-view .tpl-pill.bestaetigt{background:color-mix(in srgb,var(--good) 12%,var(--surface));color:var(--good)}
-  #tpl-view .tpl-werte{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:6px;margin:8px 0}
-  #tpl-view .tpl-werte-1{margin-bottom:0} #tpl-view .tpl-werte-1 + .tpl-werte{margin-top:6px}
-  #tpl-view .tpl-wert{background:var(--surface-tint);border-radius:8px;padding:6px 9px;min-width:0}
-  #tpl-view .tpl-wert span{display:block;font-size:11px;color:var(--sub)}
-  #tpl-view .tpl-wert b{display:block;font-size:13.5px;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  #tpl-view .tpl-akt{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
-  #tpl-view .tpl-akt .knopf{border:1px solid var(--border);background:var(--surface);border-radius:7px;height:30px;padding:0 10px;font:inherit;font-size:12.5px;color:var(--ink-2);cursor:pointer;white-space:nowrap}
-  #tpl-view .tpl-akt .knopf:hover:not(:disabled){border-color:var(--sub-2);background:var(--surface-tint)}
-  #tpl-view .tpl-akt .knopf:disabled{opacity:.4;cursor:default}
-  #tpl-view .tpl-akt input[type=time]{height:30px;padding:0 6px;font-size:12.5px;width:104px}
-  #tpl-view .tpl-meldung{margin-top:6px;color:var(--danger);font-size:12px;font-weight:500}
-  #tpl-view .tpl-ab-z{padding:3px 0;border-top:1px solid var(--border-soft)}
-  #tpl-view .tpl-ab-z.erste{border-top:0}
-  #tpl-view .tpl-ab-kopf{display:grid;grid-template-columns:170px minmax(60px,1fr) auto 16px;gap:4px 12px;align-items:center;width:100%;padding:6px 4px;border:0;border-radius:6px;background:none;font:inherit;text-align:left;cursor:pointer;color:var(--ink)}
-  #tpl-view .tpl-ab-kopf:hover{background:var(--surface-tint)}
-  #tpl-view .tpl-ab-kopf>b{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
-  #tpl-view .tpl-ab-kopf>b i{width:9px;height:9px;border-radius:50%;flex:none}
-  #tpl-view .tpl-ab-balken{display:flex;height:8px;border-radius:4px;overflow:hidden;background:var(--surface-tint)}
-  #tpl-view .tpl-ab-balken i{display:block;height:100%;min-width:3px}
-  #tpl-view .tpl-ab-balken i.lauf{background:var(--violet)} #tpl-view .tpl-ab-balken i.plan{background:var(--good)}
-  #tpl-view .tpl-ab-balken i.fertig{background:color-mix(in srgb,var(--sub) 35%,#fff)} #tpl-view .tpl-ab-balken i.offen{background:var(--sub-2);opacity:.45}
-  #tpl-view .tpl-ab-kopf>span.t{font-size:11.5px;color:var(--sub);font-variant-numeric:tabular-nums;white-space:nowrap}
-  #tpl-view .tpl-ab-kopf>span.t b{font-weight:600} #tpl-view .tpl-lila{color:var(--violet)}
-  #tpl-view .tpl-ab-kopf>em{font-style:normal;color:var(--sub-2);text-align:center}
-  #tpl-view .tpl-ab-z .tpl-chips{padding:2px 4px 8px}
-  #tpl-view .tpl-chips{display:flex;flex-wrap:wrap;gap:5px;min-width:0}
-  #tpl-view .tpl-chip{display:inline-flex;align-items:center;gap:5px;max-width:100%;border:1px solid var(--border);border-radius:999px;padding:2px 9px;font:inherit;font-size:11.5px;color:var(--sub);background:var(--surface);white-space:nowrap;font-variant-numeric:tabular-nums;cursor:default}
-  #tpl-view .tpl-chip[data-tpl-t]{cursor:pointer}
-  #tpl-view .tpl-chip i{width:7px;height:7px;border-radius:2px;flex:none}
-  #tpl-view .tpl-chip em{font-style:normal;font-weight:600;overflow:hidden;text-overflow:ellipsis}
-  #tpl-view .tpl-chip.gut{border-color:color-mix(in srgb,var(--good) 45%,var(--border));background:color-mix(in srgb,var(--good) 8%,var(--surface));color:var(--ink)}
-  #tpl-view .tpl-chip.gut em{color:var(--good)}
-  #tpl-view .tpl-chip.lauf{border-color:color-mix(in srgb,var(--violet) 45%,var(--border));background:var(--violet-tint);color:var(--ink)}
-  #tpl-view .tpl-chip.lauf em{color:var(--violet)}
-  #tpl-view .tpl-chip.grau{background:var(--surface-tint);border-color:var(--border-soft)}
-  #tpl-view .tpl-chip.grau em{font-weight:500}
-  #tpl-view .tpl-leer{padding:14px 4px;color:var(--sub-2);font-size:12.5px;text-align:center}
+  :is(#tpl-view,#adm-pane-planer) .tpl-m .l{font-variant-numeric:tabular-nums;padding:0 3px;border-radius:4px;background:color-mix(in srgb,var(--surface) 85%,transparent)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-m .l b{font-weight:600;color:var(--ink)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-m:hover,:is(#tpl-view,#adm-pane-planer) .tpl-m.wahl{z-index:3} :is(#tpl-view,#adm-pane-planer) .tpl-m:hover .l,:is(#tpl-view,#adm-pane-planer) .tpl-m.wahl .l{background:var(--violet-tint);color:var(--ink)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-m.wahl .g{box-shadow:0 0 0 2px var(--violet)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-m.beendet,:is(#tpl-view,#adm-pane-planer) .tpl-m.vorbei{opacity:.55} :is(#tpl-view,#adm-pane-planer) .tpl-m.beendet:hover,:is(#tpl-view,#adm-pane-planer) .tpl-m.vorbei:hover,:is(#tpl-view,#adm-pane-planer) .tpl-m.beendet.wahl,:is(#tpl-view,#adm-pane-planer) .tpl-m.vorbei.wahl{opacity:1}
+  :is(#tpl-view,#adm-pane-planer) .tpl-m.beendet .g,:is(#tpl-view,#adm-pane-planer) .tpl-m.vorbei .g{color:var(--sub-2)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-m.erg-gut .l b{color:var(--good)} :is(#tpl-view,#adm-pane-planer) .tpl-m.erg-rot .l b{color:var(--danger)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-m.mehr .l{background:var(--surface-tint);border:1px solid var(--border);font-weight:600;color:var(--ink);padding:1px 6px;border-radius:999px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-m.wd{opacity:.5} :is(#tpl-view,#adm-pane-planer) .tpl-m.wd:hover,:is(#tpl-view,#adm-pane-planer) .tpl-m.wd.wahl{opacity:1} :is(#tpl-view,#adm-pane-planer) .tpl-m.wd .l b::after{content:' WD';font-weight:500;color:var(--sub-2)}   /* Winning Days nur dezent: die Seite plant Challenges/Phasen */
+  :is(#tpl-view,#adm-pane-planer) .tpl-achse{position:relative;height:18px;margin-left:var(--nw);font-size:10.5px;color:var(--sub-2);font-variant-numeric:tabular-nums;border-top:1px solid var(--border-soft)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-achse span{position:absolute;top:3px;transform:translateX(-50%);white-space:nowrap}
+  :is(#tpl-view,#adm-pane-planer) .tpl-achse span.links{transform:none} :is(#tpl-view,#adm-pane-planer) .tpl-achse span.rechts{transform:translateX(-100%)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-netto{position:relative;display:flex;height:50px;border-top:1px solid var(--border-soft)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-netto .tpl-name span{padding-left:0}
+  :is(#tpl-view,#adm-pane-planer) .tpl-netto .tpl-bahn::before{display:none}
+  :is(#tpl-view,#adm-pane-planer) .tpl-netto svg{position:absolute;inset:4px 0;display:block;width:100%;height:calc(100% - 8px)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-netto .skala{position:absolute;left:3px;top:2px;font-size:10px;color:var(--sub-2);font-variant-numeric:tabular-nums;pointer-events:none}
+  :is(#tpl-view,#adm-pane-planer) .tpl-detail{border:1px solid color-mix(in srgb,var(--violet) 35%,var(--border));border-radius:var(--r-md);background:var(--surface);padding:10px 12px;margin:0 0 12px;min-width:0}
+  :is(#tpl-view,#adm-pane-planer) .tpl-detail .k{display:flex;align-items:center;gap:4px 10px;flex-wrap:wrap;font-size:13px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-detail .k i.id{width:9px;height:9px;border-radius:50%;flex:none}
+  :is(#tpl-view,#adm-pane-planer) .tpl-detail .k .mono{font-family:'JetBrains Mono',monospace;font-size:12.5px;font-weight:600}
+  :is(#tpl-view,#adm-pane-planer) .tpl-pill{font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--surface-tint);color:var(--sub);white-space:nowrap}
+  :is(#tpl-view,#adm-pane-planer) .tpl-pill.laeuft{background:var(--violet-tint);color:var(--violet)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-pill.bestaetigt{background:color-mix(in srgb,var(--good) 12%,var(--surface));color:var(--good)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-werte{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:6px;margin:8px 0}
+  :is(#tpl-view,#adm-pane-planer) .tpl-werte-1{margin-bottom:0} :is(#tpl-view,#adm-pane-planer) .tpl-werte-1 + .tpl-werte{margin-top:6px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-wert{background:var(--surface-tint);border-radius:8px;padding:6px 9px;min-width:0}
+  :is(#tpl-view,#adm-pane-planer) .tpl-wert span{display:block;font-size:11px;color:var(--sub)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-wert b{display:block;font-size:13.5px;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  :is(#tpl-view,#adm-pane-planer) .tpl-akt{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  :is(#tpl-view,#adm-pane-planer) .tpl-akt .knopf{border:1px solid var(--border);background:var(--surface);border-radius:7px;height:30px;padding:0 10px;font:inherit;font-size:12.5px;color:var(--ink-2);cursor:pointer;white-space:nowrap}
+  :is(#tpl-view,#adm-pane-planer) .tpl-akt .knopf:hover:not(:disabled){border-color:var(--sub-2);background:var(--surface-tint)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-akt .knopf:disabled{opacity:.4;cursor:default}
+  :is(#tpl-view,#adm-pane-planer) .tpl-akt input[type=time]{height:30px;padding:0 6px;font-size:12.5px;width:104px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-meldung{margin-top:6px;color:var(--danger);font-size:12px;font-weight:500}
+  :is(#tpl-view,#adm-pane-planer) .tpl-ab-z{padding:3px 0;border-top:1px solid var(--border-soft)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-ab-z.erste{border-top:0}
+  :is(#tpl-view,#adm-pane-planer) .tpl-ab-kopf{display:grid;grid-template-columns:170px minmax(60px,1fr) auto 16px;gap:4px 12px;align-items:center;width:100%;padding:6px 4px;border:0;border-radius:6px;background:none;font:inherit;text-align:left;cursor:pointer;color:var(--ink)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-ab-kopf:hover{background:var(--surface-tint)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-ab-kopf>b{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  :is(#tpl-view,#adm-pane-planer) .tpl-ab-kopf>b i{width:9px;height:9px;border-radius:50%;flex:none}
+  :is(#tpl-view,#adm-pane-planer) .tpl-ab-balken{display:flex;height:8px;border-radius:4px;overflow:hidden;background:var(--surface-tint)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-ab-balken i{display:block;height:100%;min-width:3px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-ab-balken i.lauf{background:var(--violet)} :is(#tpl-view,#adm-pane-planer) .tpl-ab-balken i.plan{background:var(--good)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-ab-balken i.fertig{background:color-mix(in srgb,var(--sub) 35%,#fff)} :is(#tpl-view,#adm-pane-planer) .tpl-ab-balken i.offen{background:var(--sub-2);opacity:.45}
+  :is(#tpl-view,#adm-pane-planer) .tpl-ab-kopf>span.t{font-size:11.5px;color:var(--sub);font-variant-numeric:tabular-nums;white-space:nowrap}
+  :is(#tpl-view,#adm-pane-planer) .tpl-ab-kopf>span.t b{font-weight:600} :is(#tpl-view,#adm-pane-planer) .tpl-lila{color:var(--violet)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-ab-kopf>em{font-style:normal;color:var(--sub-2);text-align:center}
+  :is(#tpl-view,#adm-pane-planer) .tpl-ab-z .tpl-chips{padding:2px 4px 8px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-chips{display:flex;flex-wrap:wrap;gap:5px;min-width:0}
+  :is(#tpl-view,#adm-pane-planer) .tpl-chip{display:inline-flex;align-items:center;gap:5px;max-width:100%;border:1px solid var(--border);border-radius:999px;padding:2px 9px;font:inherit;font-size:11.5px;color:var(--sub);background:var(--surface);white-space:nowrap;font-variant-numeric:tabular-nums;cursor:default}
+  :is(#tpl-view,#adm-pane-planer) .tpl-chip[data-tpl-t]{cursor:pointer}
+  :is(#tpl-view,#adm-pane-planer) .tpl-chip i{width:7px;height:7px;border-radius:2px;flex:none}
+  :is(#tpl-view,#adm-pane-planer) .tpl-chip em{font-style:normal;font-weight:600;overflow:hidden;text-overflow:ellipsis}
+  :is(#tpl-view,#adm-pane-planer) .tpl-chip.gut{border-color:color-mix(in srgb,var(--good) 45%,var(--border));background:color-mix(in srgb,var(--good) 8%,var(--surface));color:var(--ink)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-chip.gut em{color:var(--good)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-chip.lauf{border-color:color-mix(in srgb,var(--violet) 45%,var(--border));background:var(--violet-tint);color:var(--ink)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-chip.lauf em{color:var(--violet)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-chip.grau{background:var(--surface-tint);border-color:var(--border-soft)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-chip.grau em{font-weight:500}
+  :is(#tpl-view,#adm-pane-planer) .tpl-leer{padding:14px 4px;color:var(--sub-2);font-size:12.5px;text-align:center}
   /* Netto-Chart (eigene Karte, volle Breite) */
-  #tpl-view .tpl-nk-chart{position:relative;height:150px;margin:2px 0 0}
-  #tpl-view .tpl-nk-chart svg{display:block;width:100%;height:100%}
-  #tpl-view .tpl-nk-chart .skala{position:absolute;left:4px;font-size:10.5px;color:var(--sub-2);font-variant-numeric:tabular-nums;pointer-events:none;background:color-mix(in srgb,var(--surface) 80%,transparent);padding:0 3px;border-radius:3px}
-  #tpl-view .tpl-nk-chart .skala.oben{top:2px} #tpl-view .tpl-nk-chart .skala.unten{bottom:2px}
-  #tpl-view .tpl-nk-chart .skala.rechts{left:auto;right:4px;color:#0F766E}
-  #tpl-view .tpl-nk-achse{margin-left:0;margin-top:2px}
-  #tpl-view .tpl-h .leg .tpl-nk-l{display:inline-block;width:16px;height:0;border-top:2.5px solid var(--violet);vertical-align:middle;margin-right:3px}
-  #tpl-view .tpl-h .leg .tpl-nk-l.gestrichelt{border-top-style:dashed}
-  #tpl-view .tpl-h .leg .tpl-nk-l.hypo{border-top-color:#0F766E}
-  #tpl-view .tpl-h .leg .tpl-nk-b{display:inline-block;width:12px;height:10px;background:color-mix(in srgb,var(--good) 20%,var(--surface));border:1px solid color-mix(in srgb,var(--good) 45%,var(--surface));vertical-align:middle;margin-right:3px;border-radius:2px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-nk-chart{position:relative;height:150px;margin:2px 0 0}
+  :is(#tpl-view,#adm-pane-planer) .tpl-nk-chart svg{display:block;width:100%;height:100%}
+  :is(#tpl-view,#adm-pane-planer) .tpl-nk-chart .skala{position:absolute;left:4px;font-size:10.5px;color:var(--sub-2);font-variant-numeric:tabular-nums;pointer-events:none;background:color-mix(in srgb,var(--surface) 80%,transparent);padding:0 3px;border-radius:3px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-nk-chart .skala.oben{top:2px} :is(#tpl-view,#adm-pane-planer) .tpl-nk-chart .skala.unten{bottom:2px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-nk-chart .skala.rechts{left:auto;right:4px;color:#0F766E}
+  :is(#tpl-view,#adm-pane-planer) .tpl-nk-achse{margin-left:0;margin-top:2px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-h .leg .tpl-nk-l{display:inline-block;width:16px;height:0;border-top:2.5px solid var(--violet);vertical-align:middle;margin-right:3px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-h .leg .tpl-nk-l.gestrichelt{border-top-style:dashed}
+  :is(#tpl-view,#adm-pane-planer) .tpl-h .leg .tpl-nk-l.hypo{border-top-color:#0F766E}
+  :is(#tpl-view,#adm-pane-planer) .tpl-h .leg .tpl-nk-b{display:inline-block;width:12px;height:10px;background:color-mix(in srgb,var(--good) 20%,var(--surface));border:1px solid color-mix(in srgb,var(--good) 45%,var(--surface));vertical-align:middle;margin-right:3px;border-radius:2px}
   /* Hypo-P&L: Liste je Trade unter dem Chart */
-  #tpl-view .tpl-hl{margin-top:8px;border-top:1px solid var(--border-soft)}
-  #tpl-view .tpl-hl-k{padding:7px 4px 3px;font-size:10.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--sub-2)} #tpl-view .tpl-hl-k b{color:var(--sub)}
-  #tpl-view .tpl-hz{display:grid;grid-template-columns:minmax(150px,1.4fr) 120px 90px 80px 100px minmax(110px,1fr);gap:4px 10px;align-items:center;padding:5px 4px;border-top:1px solid var(--border-soft);font-size:12.5px;font-variant-numeric:tabular-nums;cursor:pointer}
-  #tpl-view .tpl-hz:hover{background:var(--surface-tint)} #tpl-view .tpl-hz.summe{cursor:default;font-weight:600;background:none;border-top:2px solid var(--border)}
-  #tpl-view .kpis.tpl-bk{margin:6px 0 8px} #tpl-view .tpl-bk .kpi-value{font-size:17px}
-  #tpl-view .tpl-tb{display:flex;gap:6px;align-items:stretch;overflow-x:auto;padding:2px 4px 8px}
-  #tpl-view .tpl-tb .tb{flex:0 0 64px;display:flex;flex-direction:column;align-items:center;font-variant-numeric:tabular-nums}
-  #tpl-view .tpl-tb .ob,#tpl-view .tpl-tb .ub{width:22px;height:34px;display:flex;justify-content:center} #tpl-view .tpl-tb .ob{align-items:flex-end;border-bottom:1.5px solid var(--border)} #tpl-view .tpl-tb .ub{align-items:flex-start}
-  #tpl-view .tpl-tb i{display:block;width:100%;border-radius:3px} #tpl-view .tpl-tb i.gut{background:var(--good)} #tpl-view .tpl-tb i.rot{background:var(--danger)}
-  #tpl-view .tpl-tb small{font-size:10.5px;color:var(--sub);margin-top:3px} #tpl-view .tpl-tb b{font-size:11.5px;font-weight:600}
-  #tpl-view .tpl-hz.ohne{opacity:.6} #tpl-view .tpl-hz.zu .w b{color:var(--sub)}
-  #tpl-view .tpl-hz .w{display:flex;align-items:center;gap:6px;min-width:0} #tpl-view .tpl-hz .w i{width:8px;height:8px;border-radius:50%;flex:none} #tpl-view .tpl-hz .w b{font-weight:600;white-space:nowrap} #tpl-view .tpl-hz .w small{color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  #tpl-view .tpl-hz .r{color:var(--sub);white-space:nowrap} #tpl-view .tpl-hz .r em{display:inline-block;min-width:34px;margin-right:6px;padding:1px 0;border-radius:4px;background:var(--surface-tint);color:var(--ink-2);font-style:normal;font-size:10.5px;font-weight:700;text-align:center;letter-spacing:.04em}
-  #tpl-view .tpl-hz .r em.is-buy{background:rgba(18,183,106,.12);color:#047857} #tpl-view .tpl-hz .r em.is-sell{background:rgba(240,68,56,.10);color:#b91c1c}
-  #tpl-view .tpl-hz .p,#tpl-view .tpl-hz .s{text-align:right;color:var(--ink-2)} #tpl-view .tpl-hz .h{text-align:right;font-weight:700;font-size:13.5px} #tpl-view .tpl-hz .z{text-align:right;color:var(--sub);white-space:nowrap}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hl{margin-top:8px;border-top:1px solid var(--border-soft)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hl-k{padding:7px 4px 3px;font-size:10.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--sub-2)} :is(#tpl-view,#adm-pane-planer) .tpl-hl-k b{color:var(--sub)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hz{display:grid;grid-template-columns:minmax(150px,1.4fr) 120px 90px 80px 100px minmax(110px,1fr);gap:4px 10px;align-items:center;padding:5px 4px;border-top:1px solid var(--border-soft);font-size:12.5px;font-variant-numeric:tabular-nums;cursor:pointer}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hz:hover{background:var(--surface-tint)} :is(#tpl-view,#adm-pane-planer) .tpl-hz.summe{cursor:default;font-weight:600;background:none;border-top:2px solid var(--border)}
+  :is(#tpl-view,#adm-pane-planer) .kpis.tpl-bk{margin:6px 0 8px} :is(#tpl-view,#adm-pane-planer) .tpl-bk .kpi-value{font-size:17px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-tb{display:flex;gap:6px;align-items:stretch;overflow-x:auto;padding:2px 4px 8px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-tb .tb{flex:0 0 64px;display:flex;flex-direction:column;align-items:center;font-variant-numeric:tabular-nums}
+  :is(#tpl-view,#adm-pane-planer) .tpl-tb .ob,:is(#tpl-view,#adm-pane-planer) .tpl-tb .ub{width:22px;height:34px;display:flex;justify-content:center} :is(#tpl-view,#adm-pane-planer) .tpl-tb .ob{align-items:flex-end;border-bottom:1.5px solid var(--border)} :is(#tpl-view,#adm-pane-planer) .tpl-tb .ub{align-items:flex-start}
+  :is(#tpl-view,#adm-pane-planer) .tpl-tb i{display:block;width:100%;border-radius:3px} :is(#tpl-view,#adm-pane-planer) .tpl-tb i.gut{background:var(--good)} :is(#tpl-view,#adm-pane-planer) .tpl-tb i.rot{background:var(--danger)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-tb small{font-size:10.5px;color:var(--sub);margin-top:3px} :is(#tpl-view,#adm-pane-planer) .tpl-tb b{font-size:11.5px;font-weight:600}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hz.ohne{opacity:.6} :is(#tpl-view,#adm-pane-planer) .tpl-hz.zu .w b{color:var(--sub)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hz .w{display:flex;align-items:center;gap:6px;min-width:0} :is(#tpl-view,#adm-pane-planer) .tpl-hz .w i{width:8px;height:8px;border-radius:50%;flex:none} :is(#tpl-view,#adm-pane-planer) .tpl-hz .w b{font-weight:600;white-space:nowrap} :is(#tpl-view,#adm-pane-planer) .tpl-hz .w small{color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hz .r{color:var(--sub);white-space:nowrap} :is(#tpl-view,#adm-pane-planer) .tpl-hz .r em{display:inline-block;min-width:34px;margin-right:6px;padding:1px 0;border-radius:4px;background:var(--surface-tint);color:var(--ink-2);font-style:normal;font-size:10.5px;font-weight:700;text-align:center;letter-spacing:.04em}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hz .r em.is-buy{background:rgba(18,183,106,.12);color:#047857} :is(#tpl-view,#adm-pane-planer) .tpl-hz .r em.is-sell{background:rgba(240,68,56,.10);color:#b91c1c}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hz .p,:is(#tpl-view,#adm-pane-planer) .tpl-hz .s{text-align:right;color:var(--ink-2)} :is(#tpl-view,#adm-pane-planer) .tpl-hz .h{text-align:right;font-weight:700;font-size:13.5px} :is(#tpl-view,#adm-pane-planer) .tpl-hz .z{text-align:right;color:var(--sub);white-space:nowrap}
   /* Geplant-Liste = Tabelle des Reiters Trades → Geplant (.pz-*, GEPLANT-WIE-TRADES-REITER 07.10.2026), hier mit ID-Spalte vorn */
-  #tpl-view .tpl-lk{padding-bottom:6px} #tpl-view .tpl-lk .tpl-h{margin:4px 0 0}
+  :is(#tpl-view,#adm-pane-planer) .tpl-lk{padding-bottom:6px} :is(#tpl-view,#adm-pane-planer) .tpl-lk .tpl-h{margin:4px 0 0}
   #dashboard-view .pz-tab.pz-mit-id{grid-template-columns:156px 72px minmax(162px,.7fr) minmax(210px,1.4fr) minmax(96px,.6fr) 60px 76px 76px 168px}
   #dashboard-view .pz-z > .pz-wer{display:flex;align-items:center;gap:7px} #dashboard-view .pz-wer i{flex:none;width:8px;height:8px;border-radius:50%}
   #dashboard-view .pz-wer b{font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis}
@@ -1923,42 +1923,42 @@
   @media (max-width:1359px){ #dashboard-view .pz-tab.pz-mit-id{grid-template-columns:156px 72px minmax(162px,.7fr) minmax(130px,1.4fr) 60px 76px 76px 168px} }
   @media (max-width:820px){ #dashboard-view .pz-z > .pz-wer{order:0;flex:0 0 100%} }
   /* Braucht dich (07.10.2026): ruhiger Block je ID — Zeile = Symbol · Firma · Klartext · kleine Aktion */
-  #tpl-view .tpl-bd{border-color:color-mix(in srgb,#B45309 35%,var(--border))}
-  #tpl-view .tpl-bd-id{padding:3px 0 2px;border-top:1px solid var(--border-soft)} #tpl-view .tpl-bd-id:first-of-type{border-top:0}
-  #tpl-view .tpl-bd-id>b{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;margin:2px 0 3px}
-  #tpl-view .tpl-bd-id>b i{width:9px;height:9px;border-radius:50%;flex:none} #tpl-view .tpl-bd-id>b span{font-weight:500;color:var(--sub-2);font-variant-numeric:tabular-nums}
-  #tpl-view .tpl-bd-z{display:grid;grid-template-columns:16px minmax(180px,1.3fr) minmax(150px,1fr) minmax(170px,1.5fr) auto;gap:4px 10px;align-items:center;padding:4px 0 4px 15px;font-size:12.5px;min-width:0;border-top:1px dashed var(--border-soft)}
-  #tpl-view .tpl-bd-z:first-of-type{border-top:0}
-  #tpl-view .tpl-bd-z em{font-style:normal;text-align:center;color:var(--sub)}
-  #tpl-view .tpl-bd-z.plan em{color:var(--danger)} #tpl-view .tpl-bd-z.balance em{color:var(--violet)}
-  #tpl-view .tpl-bd-z .k{display:flex;align-items:center;gap:6px;min-width:0;color:var(--sub)} #tpl-view .tpl-bd-z .k i{width:7px;height:7px;border-radius:2px;flex:none}
-  #tpl-view .tpl-bd-z .k .f{flex:none;font-size:11.5px} #tpl-view .tpl-bd-z .k b{font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
-  #tpl-view .tpl-bd-z .k .type-badge{flex:none;font-size:10px;padding:1px 6px}
-  #tpl-view .tpl-bd-z .b{font-variant-numeric:tabular-nums;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis} #tpl-view .tpl-bd-z .b.leer{color:var(--sub-2)}
-  #tpl-view .tpl-bd-z .t{min-width:0;color:var(--ink-2)} #tpl-view .tpl-bd-z .t .tun{display:block;margin-top:1px;font-size:11.5px;color:var(--sub)}
-  #tpl-view .tpl-bd-z .t .tun b{font-weight:600;color:var(--ink-2)} #tpl-view .tpl-bd-z.neu em{color:var(--violet)}
-  #tpl-view .tpl-bd-z .a{display:flex;align-items:center;gap:6px;justify-content:flex-end;white-space:nowrap}
-  #tpl-view .tpl-bd-z .s{font-size:11.5px;color:var(--sub-2)} #tpl-view .tpl-bd-z .s.rot{color:var(--danger)}
-  #tpl-view .tpl-bd-z .knopf{border:1px solid var(--border);background:var(--surface);border-radius:7px;height:26px;padding:0 9px;font:inherit;font-size:12px;color:var(--ink-2);cursor:pointer;white-space:nowrap}
-  #tpl-view .tpl-bd-z .knopf:hover:not(:disabled){border-color:var(--sub-2);background:var(--surface-tint)}
-  #tpl-view #apLeiste,#tpl-view #apDelta{margin:0 0 12px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bd{border-color:color-mix(in srgb,#B45309 35%,var(--border))}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bd-id{padding:3px 0 2px;border-top:1px solid var(--border-soft)} :is(#tpl-view,#adm-pane-planer) .tpl-bd-id:first-of-type{border-top:0}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bd-id>b{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;margin:2px 0 3px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bd-id>b i{width:9px;height:9px;border-radius:50%;flex:none} :is(#tpl-view,#adm-pane-planer) .tpl-bd-id>b span{font-weight:500;color:var(--sub-2);font-variant-numeric:tabular-nums}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bd-z{display:grid;grid-template-columns:16px minmax(180px,1.3fr) minmax(150px,1fr) minmax(170px,1.5fr) auto;gap:4px 10px;align-items:center;padding:4px 0 4px 15px;font-size:12.5px;min-width:0;border-top:1px dashed var(--border-soft)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bd-z:first-of-type{border-top:0}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bd-z em{font-style:normal;text-align:center;color:var(--sub)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bd-z.plan em{color:var(--danger)} :is(#tpl-view,#adm-pane-planer) .tpl-bd-z.balance em{color:var(--violet)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .k{display:flex;align-items:center;gap:6px;min-width:0;color:var(--sub)} :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .k i{width:7px;height:7px;border-radius:2px;flex:none}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .k .f{flex:none;font-size:11.5px} :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .k b{font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .k .type-badge{flex:none;font-size:10px;padding:1px 6px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .b{font-variant-numeric:tabular-nums;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis} :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .b.leer{color:var(--sub-2)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .t{min-width:0;color:var(--ink-2)} :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .t .tun{display:block;margin-top:1px;font-size:11.5px;color:var(--sub)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .t .tun b{font-weight:600;color:var(--ink-2)} :is(#tpl-view,#adm-pane-planer) .tpl-bd-z.neu em{color:var(--violet)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .a{display:flex;align-items:center;gap:6px;justify-content:flex-end;white-space:nowrap}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .s{font-size:11.5px;color:var(--sub-2)} :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .s.rot{color:var(--danger)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .knopf{border:1px solid var(--border);background:var(--surface);border-radius:7px;height:26px;padding:0 9px;font:inherit;font-size:12px;color:var(--ink-2);cursor:pointer;white-space:nowrap}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .knopf:hover:not(:disabled){border-color:var(--sub-2);background:var(--surface-tint)}
+  :is(#tpl-view,#adm-pane-planer) #apLeiste,:is(#tpl-view,#adm-pane-planer) #apDelta{margin:0 0 12px}
   #apLeiste .ap-alle{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--sub);cursor:pointer;user-select:none;margin-right:2px} #apLeiste .ap-alle:has(input:disabled){opacity:.55;cursor:default}
   @media (max-width:760px){
-    #tpl-view .kpis,#tpl-view .kpis.tpl-kpis5{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
-    #tpl-view .kpi-value{font-size:18px}
-    #tpl-view .kpi-delta{white-space:normal}
-    #tpl-view .tpl-scroll{overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain}
-    #tpl-view .tpl-innen{min-width:720px;--nw:86px}
-    #tpl-view .tpl-name{font-size:12px}
-    #tpl-view .tpl-ab-kopf{grid-template-columns:minmax(0,1fr) minmax(50px,100px) 16px;gap:3px 8px}
-    #tpl-view .tpl-ab-kopf>span.t{grid-column:1/-1;white-space:normal}
-    #tpl-view .tpl-ab-kopf>em{grid-row:1;grid-column:3}
-    #tpl-view .tpl-m{font-size:10.5px}
-    #tpl-view .tpl-bd-z{grid-template-columns:16px minmax(0,1fr) auto;gap:2px 8px}
-    #tpl-view .tpl-hz{grid-template-columns:minmax(0,1fr) auto;gap:2px 8px} #tpl-view .tpl-hz .p,#tpl-view .tpl-hz .s{display:none} #tpl-view .tpl-hz .z{grid-column:1/-1;text-align:left;font-size:11px}
-    #tpl-view .tpl-bd-z .b,#tpl-view .tpl-bd-z .t{grid-column:2/-1}
-    #tpl-view .tpl-bd-z .a{grid-column:1/-1;justify-content:flex-start;padding-left:24px}
-    #tpl-view .tpl-ids .adm-vl-chip{font-size:11.5px;padding:3px 8px}
+    :is(#tpl-view,#adm-pane-planer) .kpis,:is(#tpl-view,#adm-pane-planer) .kpis.tpl-kpis5{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+    :is(#tpl-view,#adm-pane-planer) .kpi-value{font-size:18px}
+    :is(#tpl-view,#adm-pane-planer) .kpi-delta{white-space:normal}
+    :is(#tpl-view,#adm-pane-planer) .tpl-scroll{overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain}
+    :is(#tpl-view,#adm-pane-planer) .tpl-innen{min-width:720px;--nw:86px}
+    :is(#tpl-view,#adm-pane-planer) .tpl-name{font-size:12px}
+    :is(#tpl-view,#adm-pane-planer) .tpl-ab-kopf{grid-template-columns:minmax(0,1fr) minmax(50px,100px) 16px;gap:3px 8px}
+    :is(#tpl-view,#adm-pane-planer) .tpl-ab-kopf>span.t{grid-column:1/-1;white-space:normal}
+    :is(#tpl-view,#adm-pane-planer) .tpl-ab-kopf>em{grid-row:1;grid-column:3}
+    :is(#tpl-view,#adm-pane-planer) .tpl-m{font-size:10.5px}
+    :is(#tpl-view,#adm-pane-planer) .tpl-bd-z{grid-template-columns:16px minmax(0,1fr) auto;gap:2px 8px}
+    :is(#tpl-view,#adm-pane-planer) .tpl-hz{grid-template-columns:minmax(0,1fr) auto;gap:2px 8px} :is(#tpl-view,#adm-pane-planer) .tpl-hz .p,:is(#tpl-view,#adm-pane-planer) .tpl-hz .s{display:none} :is(#tpl-view,#adm-pane-planer) .tpl-hz .z{grid-column:1/-1;text-align:left;font-size:11px}
+    :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .b,:is(#tpl-view,#adm-pane-planer) .tpl-bd-z .t{grid-column:2/-1}
+    :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .a{grid-column:1/-1;justify-content:flex-start;padding-left:24px}
+    :is(#tpl-view,#adm-pane-planer) .tpl-ids .adm-vl-chip{font-size:11.5px;padding:3px 8px}
   }
   /* Winning-Day-Farmer im Admin (23.09.2026, Finn: „mach alles in Admin und mehr Überblick"; dann „mies
      hässlich und man checkt nix — erklär mal visuell"; 01:xx: „der Erklärblock und der Zeitstrahl sind
@@ -2738,6 +2738,26 @@
   #adm-pane-planer .ap-adm-id{display:inline-flex;align-items:center;gap:7px;font-weight:600} #adm-pane-planer .ap-adm-id i{width:9px;height:9px;border-radius:50%;flex:none}
   #adm-pane-planer .ap-adm-ok{padding:3px 9px;border-radius:7px;border:1px solid #A7F3D0;background:#ECFDF5;color:#047857;font-weight:600;font-size:12px;cursor:pointer}
   #adm-pane-planer .ap-adm-ok:hover{background:#D1FAE5} #adm-pane-planer .ap-adm-ok:disabled{opacity:.5;cursor:default}
+  /* ZU BESTÄTIGEN je ID (08.10.2026, Finn: „mehr Struktur — eine ID nach der anderen bestätigen … den Haken ganz rechts, Spalte Weg weg"):
+     Kopfzeile je ID, Tabelle scrollt auf dem Handy quer, Konto ist ein Link zum Konto-Popup */
+  #adm-pane-planer .ap-adm-grp{display:flex;align-items:center;gap:10px;padding:10px 0 6px;margin-top:4px;border-top:1px solid var(--line)}
+  #adm-pane-planer .ap-adm-grp:first-of-type{border-top:0;margin-top:0}
+  #adm-pane-planer .ap-adm-grp .ap-adm-id{font-size:13.5px} #adm-pane-planer .ap-adm-grp>span.n{font-size:12px;color:var(--sub)}
+  #adm-pane-planer .ap-adm-grp .ap-adm-ok{margin-left:auto;white-space:nowrap}
+  #adm-pane-planer .ap-adm-scroll{overflow-x:auto} #adm-pane-planer .ap-adm-scroll .wd-tab{min-width:640px}
+  #adm-pane-planer .wd-tab td{font-size:13px;vertical-align:middle;padding:7px 10px 7px 0} #adm-pane-planer .wd-tab th{font-size:11.5px;padding:4px 10px 6px 0}
+  #adm-pane-planer .wd-tab td.ok,#adm-pane-planer .wd-tab th.ok{text-align:right;padding-right:2px;width:40px}
+  #adm-pane-planer .ap-konto{background:none;border:0;padding:0;font:inherit;color:var(--ink);cursor:pointer;text-align:left;white-space:nowrap}
+  #adm-pane-planer .ap-konto:hover{color:var(--violet);text-decoration:underline;text-underline-offset:3px}
+  #adm-pane-planer .ap-konto .mono{color:var(--sub)}
+  #adm-pane-planer .ap-stufe{font-size:11.5px;color:var(--sub);white-space:nowrap} #adm-pane-planer .ap-stufe.letzter{color:var(--violet);font-weight:600}
+  #adm-pane-planer .ap-adm-fuss{font-size:11.5px;color:var(--sub);margin-top:8px}
+  #apKontoModal .ak-z{display:grid;grid-template-columns:118px 1fr;gap:4px 10px;font-size:13px;margin-bottom:10px}
+  #apKontoModal .ak-z dt{color:var(--sub);font-size:12px} #apKontoModal .ak-z dd{margin:0}
+  #apKontoModal .ak-h{font-size:11.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--sub-2);margin:12px 0 6px}
+  #apKontoModal .wd-tab{font-size:12.5px} #apKontoModal .wd-tab td,#apKontoModal .wd-tab th{padding:5px 8px 5px 0}
+  #apKontoModal .wd-tab td.zahl,#apKontoModal .wd-tab th.zahl{text-align:right;font-variant-numeric:tabular-nums}
+  @media (max-width:820px){ #adm-pane-planer .ap-adm-karte{padding:12px 12px 8px} #apKontoModal .ak-z{grid-template-columns:96px 1fr} }
   #adm-pane-wd .wd-ablauf-tab tr.id{cursor:pointer}
   #adm-pane-wd .wd-ablauf-tab tr.id td{transition:background .12s var(--ease)}
   #adm-pane-wd .wd-ablauf-tab tr.id:hover td{background:var(--surface-tint)}
@@ -7467,6 +7487,18 @@
         </div>
       </div>
     </div>
+    <!-- KONTO-POPUP im Admin-Reiter „Trade-Planer" (08.10.2026, Finn: Klick auf das Konto in „Zu bestätigen" zeigt Name, Firma, Phase, Balance,
+         Ziel/Rest, Kontowert und die letzten Trades). Eigene Verdrahtung (apKonto*), kein Sammel-Handler. Daten nur aus dem, was schon
+         geladen ist (Lauf, Delta, live-trades, hypo-bilanz, eigene accounts/tradePlans) — nichts per RLS nachladen. -->
+    <div class="modal-bg" id="apKontoModal">
+      <div class="modal" style="max-width:520px">
+        <div class="modal-head">
+          <h3 id="apKontoTitel">Konto</h3>
+          <button class="modal-x" id="apKontoX" aria-label="Schließen">✕</button>
+        </div>
+        <div class="modal-body" id="apKontoBody" style="font-size:13px"></div>
+      </div>
+    </div>
     <div class="modal-bg" id="apProbeModal">
       <div class="modal">
         <div class="modal-head">
@@ -9840,7 +9872,8 @@
         </div>
         <div class="subtabs">
           <button class="subtab active adm-tab" data-admtab="overview">Übersicht</button>
-          <button class="subtab adm-tab" data-admtab="auftrag">Auftrag</button>
+          <!-- Auftrag ausgeblendet (Finn 08.10.2026: „Admin → Auftrag komplett weg, brauche ich nicht") — Pane, JS (aufLaden/aufRender) und Backend bleiben, nur der Reiter ist weg; der 120-s-Takt startet erst mit _aufTabOeffnen, also nie -->
+          <button class="subtab adm-tab" data-admtab="auftrag" style="display:none">Auftrag</button>
           <button class="subtab adm-tab" data-admtab="planer">Trade-Planer</button>
           <button class="subtab adm-tab" data-admtab="wd">Winning Days</button>
           <!-- Kapitel/Statistik ohne Emojis (Finn 30.09.2026: „die Emojis weg, die nerven") -->
@@ -40419,7 +40452,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1177'
+  const OS_TAB_BUILD = '2026-09-22.1178'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -45395,7 +45428,8 @@
   // ALLE IDS (07.10.2026, Finn 03:25 dt: „Es ist nur die ID, von der ich gerade eingeloggt bin. So hässlich, man erkennt gar nichts"):
   // solange diese Seite offen ist, fragen apApi (Lauf) und apdLaden (Delta) mit ?sicht=alle — das Backend liefert dann alle IDs
   // (außer „nur eigene"-Logins, die bleiben bei der eigenen). Gefiltert wird nur noch hier über die ID-Chips.
-  window._tplSicht = () => document.querySelector('#tpl-view.active') ? '?sicht=alle' : ''
+  // Seit 08.10.2026 auch der Admin-Reiter „Trade-Planer" (#adm-pane-planer sichtbar): er zeigt dieselben Kacheln + Zeitstrahl aller IDs
+  window._tplSicht = () => { const p = document.getElementById('adm-pane-planer'); return (document.querySelector('#tpl-view.active') || (p && !p.hidden && p.offsetParent !== null)) ? '?sicht=alle' : '' }
   const TPL_LAUFZEIT = 180                               // ap_ausgleich_param.laufzeit_min (Standard), wenn der Lauf keinen Wert mitschickt
   const TPL_TYPEN = ['challenge', 'phase1', 'phase2']   // AP_TYPEN im Planer
   const tplDatum = d => d.toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' })
@@ -58914,38 +58948,126 @@
    * mal einen Überblick über alle IDs sehe, die ich gleichzeitig beim Trade-Planer managen kann"). Eine Zeile je ID mit planbaren
    * Konten (challenge/phase1/phase2): Haken = in auto_plan_regeln.user_ids (sofort gespeichert über /admin/auto-plan/ids), Konten,
    * im letzten Lauf geplant/ausgelassen. Nur Anzeige + Haken, keine Bewertung. Nur Admin. ══ */
-  const _apIds = { rows: [], aktiv: null, tag: null, laeuft: false, fehler: '', offen: [], offenTag: null, offenFehler: '' }
+  const _apIds = { rows: [], aktiv: null, tag: null, laeuft: false, fehler: '', offen: [], offenTag: null, offenFehler: '', weitereAuf: false }
   async function apIdsLaden(){
     if(_apIds.laeuft) return
     _apIds.laeuft = true; _apIds.fehler = ''; _apIds.offenFehler = ''
     // ZU BESTÄTIGEN (Finn 08.10.2026: „unter Admin eine richtig cleane Übersicht über alle Trades, die ich bestätigen muss"): offene
     // Vorschläge aller IDs kommen mit aus /ids (heute UND morgen — das Delta kennt nur heute), Bestätigen über tplEingriff (Admin-Route)
-    try{ const d = await apdApi('GET', '/ids'); _apIds.rows = Array.isArray(d.ids) ? d.ids : []; _apIds.aktiv = !!d.aktiv; _apIds.tag = d.tag || null; _apIds.offen = Array.isArray(d.offen) ? d.offen : [] }
-    catch(e){ _apIds.fehler = (e && e.message) || String(e) }
+    // KOPF WIE DIE TRADE-PLANER-SEITE (Finn 08.10.2026: „oben ein richtig cleaner Zeitstrahl mit allen IDs, die Kacheln mit dem
+    // hypothetischen Betrag und dem kleinen Graph"): dieselben Lader (tplLaden → Lauf/live-trades/Kerzen/Bilanz, apdLaden → Delta) mit
+    // Sicht „alle" (window._tplSicht sieht den offenen Reiter), dieselben Bausteine tplKachelnHtml/tplZeitstrahlHtml — keine Kopie.
+    const ids = apdApi('GET', '/ids').then(d => { _apIds.rows = Array.isArray(d.ids) ? d.ids : []; _apIds.aktiv = !!d.aktiv; _apIds.tag = d.tag || null; _apIds.offen = Array.isArray(d.offen) ? d.offen : [] })
+      .catch(e => { _apIds.fehler = (e && e.message) || String(e) })
+    const kopf = (async () => { try{ if(typeof tplLaden === 'function') await tplLaden(); if(typeof apdLaden === 'function') await apdLaden(true) }catch(e){ console.warn('[ap-ids] Kopf', e) } })()
+    await Promise.all([ids, kopf])
     _apIds.laeuft = false; apIdsRender()
   }
+  /* Kacheln + Zeitstrahl aller IDs: Spuren = Planer-IDs (Haken im Reiter oder Auto-Trades heute), die übrigen IDs mit laufenden Hand-/Orbit-V3-
+   * Trades in der Sammelzeile „Weitere" (aufklappbar wie auf der Planer-Seite, Zustand nur hier) */
+  function apIdsKopfHtml(){
+    if(typeof tplDaten !== 'function' || typeof tplKachelnHtml !== 'function' || typeof tplZeitstrahlHtml !== 'function') return ''
+    try{
+      const D = tplDaten(), sp = new Map()
+      for(const t of D.trades) if(!sp.has(t.user_id)) sp.set(t.user_id, { uid: t.user_id, name: t.user })
+      for(const r of _apIds.rows) if(r.drin && !sp.has(String(r.user_id))) sp.set(String(r.user_id), { uid: String(r.user_id), name: r.name })
+      const planer = new Set([..._apIds.rows.filter(r => r.drin).map(r => String(r.user_id)), ...D.trades.filter(t => t.auto).map(t => t.user_id)])
+      const spuren = [...sp.values()].sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))
+      const zeile = x => ({ key: x.uid, name: x.name, uid: x.uid, ids: [x.uid], sammel: false })
+      const zeilen = spuren.filter(x => planer.has(x.uid)).map(zeile), w = spuren.filter(x => !planer.has(x.uid))
+      if(w.length){
+        if(_apIds.weitereAuf){ zeilen.push({ key: 'weitere', name: 'Weitere', uid: null, ids: [], alle: w.map(x => x.uid), sammel: true, auf: true }); zeilen.push(...w.map(zeile)) }
+        else zeilen.push({ key: 'weitere', name: 'Weitere', uid: null, ids: w.map(x => x.uid), sammel: true, auf: false })
+      }
+      return tplKachelnHtml(D) + tplZeitstrahlHtml(D, zeilen)
+    }catch(e){ console.warn('[ap-ids] Kopf zeichnen', e); return '' }
+  }
+  const apKontoKurz = z => { let g = 0; try{ g = Number(kontoGroesseAnzeige(z.konto, null, null)) || 0 }catch(_){}
+    const gk = g >= 1000 ? Math.round(g / 1000) + 'k' : g > 0 ? String(g) : ''
+    return `${gk ? gk + ' ' : ''}${escapeHtml(String(z.firma || ''))}${z.ende4 ? ` <span class="mono">…${escapeHtml(String(z.ende4))}</span>` : ''}` }
+  // Trade-Zeile des Zeitstrahls (tplDaten) zur plan_id — liefert Kontowert (wert_eur aus dem Delta), Stufe (Lauf / Planer-Notes), Balance, Rest
+  const apIdsTrade = pid => { try{ return (typeof tplDaten === 'function' ? tplDaten().trades : []).find(t => String(t.plan_id) === String(pid)) || null }catch(_){ return null } }
   function apIdsOffenHtml(){
-    const o = _apIds.offen.slice().sort((a, b) => String(a.start_um || '').localeCompare(String(b.start_um || '')))
+    const o = _apIds.offen.slice().sort((a, b) => String(a.user || '').localeCompare(String(b.user || '')) || String(a.start_um || '').localeCompare(String(b.start_um || '')))
     const heute = new Date().toLocaleDateString('de-DE', { timeZone: 'Asia/Dubai', day: '2-digit', month: '2-digit' })
     const wann = iso => { const d = new Date(iso || ''); if(isNaN(d)) return '–'
       const t = d.toLocaleDateString('de-DE', { timeZone: 'Asia/Dubai', day: '2-digit', month: '2-digit' }), u = d.toLocaleTimeString('de-DE', { timeZone: 'Asia/Dubai', hour: '2-digit', minute: '2-digit' })
       return t === heute ? u : `${t} ${u}` }
     const usd = v => v != null && isFinite(Number(v)) ? Math.round(Number(v)).toLocaleString('de-DE') + ' $' : '<span style="color:var(--sub-2)">ohne</span>'
+    const eur = v => v != null && isFinite(Number(v)) ? Math.round(Number(v)).toLocaleString('de-DE') + ' €' : '<span style="color:var(--sub-2)">–</span>'
     const kopf = `<div class="ap-adm-kopf"><b>Zu bestätigen · ${o.length}</b><span>Vorschläge des Auto-Planers, heute und morgen, alle IDs · Zeiten Dubai</span>
         ${o.length ? `<button type="button" class="ap-adm-ok" id="ap-ids-alle-ok" style="margin-left:auto">✓ Alle ${o.length} bestätigen</button>` : ''}</div>`
     if(!o.length) return `<div class="ap-adm-karte">${kopf}<div style="color:var(--sub);font-size:12.5px;padding:2px 0 6px">Nichts offen.</div></div>`
-    const zeilen = o.map(z => `<tr>
-        <td style="width:34px"><button type="button" class="ap-adm-ok" data-ap-ok="${escapeHtml(String(z.plan_id))}" title="Bestätigen — startet zur Startzeit">✓</button></td>
-        <td><span class="ap-adm-id"><i style="background:${idFarbe(String(z.user_id || ''))}"></i>${escapeHtml(String(z.user || ''))}</span></td>
-        <td>${escapeHtml(String(z.firma || ''))}${z.ende4 ? ` <span class="mono" style="color:var(--sub)">…${escapeHtml(String(z.ende4))}</span>` : ''}${z.typ && TPL_TYP_WORT[z.typ] ? ` <span class="type-badge type-${escapeHtml(String(z.typ))}" style="font-size:10px;padding:1px 6px;margin-left:4px">${escapeHtml(TPL_TYP_WORT[z.typ])}</span>` : ''}</td>
+    // je ID eine Gruppe: Kopfzeile (Farbpunkt · Name · n offen · „alle n bestätigen"), darunter die Zeilen, Haken ganz rechts
+    const je = new Map()
+    for(const z of o){ const k = String(z.user_id || ''); if(!je.has(k)) je.set(k, { uid: k, name: z.user || k.slice(0, 8), liste: [] }); je.get(k).liste.push(z) }
+    const th = `<thead><tr><th>Konto</th><th>Richtung</th><th class="zahl">Start</th><th class="zahl">Menge</th><th class="zahl">TP</th><th class="zahl">SL</th><th class="zahl" title="Kontowert in € (aus dem Delta)">Kontowert</th><th>Stufe</th><th class="ok"></th></tr></thead>`
+    const gruppen = [...je.values()].map(g => {
+      const zeilen = g.liste.map(z => { const t = apIdsTrade(z.plan_id) || {}
+        const stufe = t.stufe ? `<span class="ap-stufe${/letzter/i.test(t.stufe) ? ' letzter' : ''}">${escapeHtml(t.stufe)}</span>` : '<span style="color:var(--sub-2)">–</span>'
+        return `<tr>
+        <td><button type="button" class="ap-konto" data-ap-konto="${escapeHtml(String(z.plan_id))}" title="Konto ansehen">${apKontoKurz(z)}</button></td>
         <td style="font-weight:600;color:${z.richtung === 'buy' ? '#047857' : '#b91c1c'};white-space:nowrap">${z.richtung === 'buy' ? '▲ Long' : z.richtung === 'sell' ? '▼ Short' : '–'}</td>
         <td class="zahl mono">${escapeHtml(wann(z.start_um))}</td>
         <td class="zahl mono">${z.menge != null ? escapeHtml(String(z.menge)) : '–'}</td>
         <td class="zahl mono">${usd(z.tp)}</td>
         <td class="zahl mono">${usd(z.sl)}</td>
-        <td style="color:var(--sub);font-size:11.5px">${z.route === 'tvv2' ? 'Orbit V2' : z.route === 'mt5v2' ? 'Echo V2' : escapeHtml(String(z.route || ''))}</td></tr>`).join('')
-    return `<div class="ap-adm-karte">${kopf}<table class="wd-tab"><thead><tr><th></th><th>ID</th><th>Konto</th><th>Richtung</th><th class="zahl">Start</th><th class="zahl">Menge</th><th class="zahl">TP</th><th class="zahl">SL</th><th>Weg</th></tr></thead><tbody>${zeilen}</tbody></table></div>`
+        <td class="zahl mono">${eur(t.wert)}</td>
+        <td>${stufe}</td>
+        <td class="ok"><button type="button" class="ap-adm-ok" data-ap-ok="${escapeHtml(String(z.plan_id))}" title="Bestätigen — startet zur Startzeit">✓</button></td></tr>` }).join('')
+      return `<div class="ap-adm-grp"><span class="ap-adm-id"><i style="background:${idFarbe(g.uid)}"></i>${escapeHtml(g.name)}</span><span class="n">${g.liste.length} offen</span>
+          <button type="button" class="ap-adm-ok" data-ap-ok-id="${escapeHtml(g.uid)}" title="alle offenen Vorschläge dieser ID bestätigen">✓ alle ${g.liste.length} bestätigen</button></div>
+        <div class="ap-adm-scroll"><table class="wd-tab">${th}<tbody>${zeilen}</tbody></table></div>`
+    }).join('')
+    return `<div class="ap-adm-karte">${kopf}${gruppen}</div>`
   }
+  /* Konto-Popup (08.10.2026): Name, Firma, Typ/Phase, Balance (letzte Lesung + Quelle + Alter), Ziel/Rest, Kontowert, letzte Trades — eigene
+   * Konten aus accounts/tradePlans (tplKontoBalance wie auf der Planer-Seite), fremde aus Lauf (balance/rest), Delta (wert_eur), live-trades
+   * (_tpl.lt) und hypo-bilanz (_tpl.bilanz). Nichts wird nachgeladen. */
+  function apKontoOeffnen(pid){
+    const m = document.getElementById('apKontoModal'), body = document.getElementById('apKontoBody'), titel = document.getElementById('apKontoTitel'); if(!m || !body) return
+    const z = _apIds.offen.find(x => String(x.plan_id) === String(pid)); if(!z) return
+    const t = apIdsTrade(pid) || {}, uid = String(z.user_id || '')
+    const eigen = String(uid) === String(currentUserId || '')
+    const acc = eigen ? (accounts || []).find(a => String(a.id) === String(t.konto_id || '')) || (accounts || []).find(a => String(a.name || '') === String(z.konto || '')) : null
+    const jetzt = Date.now(), de = (v, d) => v != null && isFinite(Number(v)) ? Number(v).toLocaleString('de-DE', { maximumFractionDigits: d == null ? 0 : d }) : null
+    // Balance: eigenes Konto wie in der Accounts-Liste, fremdes aus dem Planer-Lauf (Balance der Nacht) oder der live-trades-Zeile
+    let bal = null
+    if(acc && typeof tplKontoBalance === 'function'){ const b = tplKontoBalance(acc); if(b) bal = `${de(b.bal, 2)} ${b.ccy === 'EUR' ? '€' : '$'} · ${b.src || 'gespeichert'}${b.at ? ' · vor ' + tplAlter(jetzt - b.at) : ''}` }
+    if(!bal){ const lt = (_tpl && _tpl.lt && _tpl.lt.get(String(pid))) || null
+      if(lt && lt.balance_start != null) bal = `${de(lt.balance_start, 2)} $ · live-trades`
+      else if(t.balance != null) bal = `${de(t.balance, 2)} $ · Planer-Lauf${_apIds.tag ? ' ' + _apIds.tag : ''}` }
+    const typ = (z.typ && TPL_TYP_WORT[z.typ]) || (acc && TPL_TYP_WORT[acc.type]) || z.typ || '–'
+    const ziel = t.rest != null ? `noch ${de(t.rest)} $ bis Ziel` : (acc && acc.profitTarget != null ? `Ziel ${de(acc.profitTarget)} $` : null)
+    // letzte Trades: hypo-bilanz (alle IDs, 30 Tage) + eigene Pläne, je Konto (ID + Name bzw. letzte vier Ziffern), jüngste zuerst, höchstens 8
+    const passt = x => String(x.user_id || '') === uid && ((z.ende4 && String(x.ende4 || '') === String(z.ende4)) || String(x.konto || '').trim().toLowerCase() === String(z.konto || '').trim().toLowerCase())
+    const liste = []
+    for(const x of (_tpl && _tpl.bilanz) || []) if(passt(x) && String(x.plan_id) !== String(pid)) liste.push({ at: x.ende || x.start, richtung: x.richtung, menge: null, pl: x.pl_usd, hypo: x.hypo_eur, plan_id: x.plan_id })
+    if(acc) for(const p of tradePlans || []){ if(String(p.masterAccountId) !== String(acc.id) || !(p.status === 'review' || p.status === 'completed') || liste.some(q => String(q.plan_id) === String(p.id))) continue
+      const fin = p.mt5Baseline && p.mt5Baseline.final; liste.push({ at: p.endedAt || p.completedAt || p.startedAt, richtung: p.richtung, menge: p.masterContracts, pl: p.masterPl ?? p.masterRealized ?? (fin && (fin.pnl ?? fin.pl)), hypo: null, plan_id: p.id }) }
+    liste.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')))
+    const datum = iso => { const d = new Date(iso || ''); return isNaN(d) ? '–' : d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) + ' ' + d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) }
+    const plTxt = v => v == null || !isFinite(Number(v)) ? '–' : `<span style="color:${Number(v) > 0 ? '#047857' : Number(v) < 0 ? '#b91c1c' : 'inherit'}">${Number(v) > 0 ? '+' : ''}${de(v)} $</span>`
+    const trades = liste.slice(0, 8).map(x => `<tr><td class="mono">${datum(x.at)}</td><td style="color:${x.richtung === 'buy' ? '#047857' : '#b91c1c'}">${x.richtung === 'buy' ? '▲ Long' : x.richtung === 'sell' ? '▼ Short' : '–'}</td><td class="zahl mono">${x.menge != null ? escapeHtml(String(x.menge)) : '–'}</td><td class="zahl mono">${plTxt(x.pl)}</td><td class="zahl mono">${x.pl == null ? '–' : Number(x.pl) > 0 ? 'Gewinn' : Number(x.pl) < 0 ? 'Verlust' : '±0'}${x.hypo != null ? ` <span style="color:var(--sub)">· ${de(x.hypo)} €</span>` : ''}</td></tr>`).join('')
+    if(titel) titel.textContent = `${apKontoKurz(z).replace(/<[^>]+>/g, '')}`
+    body.innerHTML = `<dl class="ak-z">
+        <dt>Name</dt><dd>${escapeHtml(String(z.konto || '–'))}</dd>
+        <dt>ID</dt><dd><span class="ap-adm-id"><i style="background:${idFarbe(uid)}"></i>${escapeHtml(String(z.user || ''))}</span></dd>
+        <dt>Firma</dt><dd>${escapeHtml(String(z.firma || '–'))}${z.ende4 ? ` <span class="mono" style="color:var(--sub)">…${escapeHtml(String(z.ende4))}</span>` : ''}</dd>
+        <dt>Typ / Phase</dt><dd>${escapeHtml(String(typ))}${t.stufe ? ` <span style="color:var(--sub)">· ${escapeHtml(t.stufe)}</span>` : ''}</dd>
+        <dt>Balance</dt><dd>${bal ? escapeHtml(bal) : '<span style="color:var(--sub-2)">keine Lesung geladen</span>'}</dd>
+        <dt>Ziel / Rest</dt><dd>${ziel ? escapeHtml(ziel) : '<span style="color:var(--sub-2)">–</span>'}</dd>
+        <dt>Kontowert</dt><dd>${t.wert != null ? de(t.wert) + ' €' : '<span style="color:var(--sub-2)">–</span>'}${t.satz != null ? ` <span style="color:var(--sub)">· ${Number(t.satz).toLocaleString('de-DE', { maximumFractionDigits: 3 })} € je $</span>` : ''}</dd>
+        <dt>Vorschlag</dt><dd>${z.richtung === 'buy' ? '▲ Long' : z.richtung === 'sell' ? '▼ Short' : '–'}${z.menge != null ? ' · ' + escapeHtml(String(z.menge)) : ''}${z.tp != null ? ' · TP ' + de(z.tp) + ' $' : ''}${z.sl != null ? ' · SL ' + de(z.sl) + ' $' : ''}</dd>
+      </dl>
+      <div class="ak-h">Letzte Trades</div>
+      ${trades ? `<table class="wd-tab"><thead><tr><th>Datum</th><th>Richtung</th><th class="zahl">Menge</th><th class="zahl">P&amp;L</th><th class="zahl">Ergebnis</th></tr></thead><tbody>${trades}</tbody></table>`
+        : '<div style="color:var(--sub);font-size:12.5px">Keine beendeten Trades dieses Kontos in den geladenen Daten (30 Tage).</div>'}`
+    m.classList.add('open')
+  }
+  const apKontoZu = () => document.getElementById('apKontoModal')?.classList.remove('open')
+  document.getElementById('apKontoX')?.addEventListener('click', apKontoZu)
+  document.getElementById('apKontoModal')?.addEventListener('click', ev => { if(ev.target === ev.currentTarget) apKontoZu() })
   function apIdsRender(){
     const root = document.getElementById('ap-ids-root'); if(!root) return
     if(_apIds.fehler){ root.innerHTML = `<div style="color:var(--danger)">⚠ ${escapeHtml(_apIds.fehler)}</div>`; return }
@@ -58954,18 +59076,21 @@
         <span>Nachtlauf ${_apIds.aktiv ? 'an' : 'aus'}${_apIds.tag ? ' · letzter Lauf ' + escapeHtml(String(_apIds.tag)) : ''}</span>
         <button type="button" class="btn btn-ghost" id="ap-ids-neu" style="margin-left:auto;padding:3px 9px;font-size:12px" title="Neu laden">↻</button></div>`
     const zeilen = rows.map(r => `<tr>
-        <td style="width:34px"><input type="checkbox" class="acc-ap" style="width:15px;height:15px;accent-color:#047857;cursor:pointer;margin:0" data-ap-id="${escapeHtml(String(r.user_id))}"${r.drin ? ' checked' : ''} title="${r.drin ? 'Im Trade-Planer — Haken weg = ab dem nächsten Lauf nicht mehr geplant' : 'Nicht im Trade-Planer — Haken setzen = ab dem nächsten Lauf (10-min-Takt / Nacht) dabei'}"></td>
         <td><span class="ap-adm-id"${r.drin ? '' : ' style="color:var(--sub);font-weight:500"'}><i style="background:${idFarbe(r.user_id)}"></i>${escapeHtml(String(r.name || ''))}</span></td>
         <td class="zahl">${r.konten}</td>
         <td class="zahl">${r.drin ? r.geplant : '<span style="color:var(--sub-2)">–</span>'}</td>
-        <td class="zahl">${r.drin ? r.ausgelassen : '<span style="color:var(--sub-2)">–</span>'}</td></tr>`).join('')
+        <td class="zahl">${r.drin ? r.ausgelassen : '<span style="color:var(--sub-2)">–</span>'}</td>
+        <td class="ok"><input type="checkbox" class="acc-ap" style="width:15px;height:15px;accent-color:#047857;cursor:pointer;margin:0" data-ap-id="${escapeHtml(String(r.user_id))}"${r.drin ? ' checked' : ''} title="${r.drin ? 'Im Trade-Planer — Haken weg = ab dem nächsten Lauf nicht mehr geplant' : 'Nicht im Trade-Planer — Haken setzen = ab dem nächsten Lauf (10-min-Takt / Nacht) dabei'}"></td></tr>`).join('')
     root.style.padding = '6px 0'; root.style.color = ''
-    root.innerHTML = apIdsOffenHtml() + `<div class="ap-adm-karte">${kopf}<table class="wd-tab"><thead><tr><th></th><th>ID</th><th class="zahl" title="Konten vom Typ Challenge / Phase 1 / Phase 2, nicht archiviert">Konten planbar</th><th class="zahl">geplant (letzter Lauf)</th><th class="zahl">ausgelassen</th></tr></thead><tbody>${zeilen || '<tr><td colspan="5" style="color:var(--sub)">keine ID mit planbaren Konten</td></tr>'}</tbody></table>
-      <div style="font-size:11.5px;color:var(--sub);margin-top:8px">Welche Konten einer ID geplant werden, entscheiden weiter Typ, Firma (Kernwerte), Balance und der Haken je Konto unter Accounts.</div></div>`
+    root.innerHTML = apIdsKopfHtml() + apIdsOffenHtml() + `<div class="ap-adm-karte">${kopf}<div class="ap-adm-scroll"><table class="wd-tab"><thead><tr><th>ID</th><th class="zahl" title="Konten vom Typ Challenge / Phase 1 / Phase 2, nicht archiviert">Konten planbar</th><th class="zahl">geplant (letzter Lauf)</th><th class="zahl">ausgelassen</th><th class="ok" title="im Trade-Planer"></th></tr></thead><tbody>${zeilen || '<tr><td colspan="5" style="color:var(--sub)">keine ID mit planbaren Konten</td></tr>'}</tbody></table></div>
+      <div class="ap-adm-fuss">Welche Konten einer ID geplant werden, entscheiden weiter Typ, Firma (Kernwerte), Balance und der Haken je Konto unter Accounts.</div></div>`
     root.querySelector('#ap-ids-neu')?.addEventListener('click', apIdsLaden)
-    // Bestätigen: eine Zeile / alle — Admin-Route wie auf der Trade-Planer-Seite, danach neu laden
+    root.querySelector('[data-tpl-weitere]')?.addEventListener('click', () => { _apIds.weitereAuf = !_apIds.weitereAuf; apIdsRender() })
+    root.querySelectorAll('[data-ap-konto]').forEach(b => b.addEventListener('click', () => apKontoOeffnen(b.dataset.apKonto)))
+    // Bestätigen: eine Zeile / eine ID / alle — Admin-Route wie auf der Trade-Planer-Seite, danach neu laden
     const ok = async (ids, btn) => { if(btn) btn.disabled = true; try{ await tplEingriff('bestaetigen', ids) }catch(e){ if(typeof atToast === 'function') atToast('Nicht bestätigt: ' + ((e && e.message) || e), 'end') } finally{ apIdsLaden() } }
     root.querySelectorAll('[data-ap-ok]').forEach(b => b.addEventListener('click', () => ok([b.dataset.apOk], b)))
+    root.querySelectorAll('[data-ap-ok-id]').forEach(b => b.addEventListener('click', () => ok(_apIds.offen.filter(z => String(z.user_id) === b.dataset.apOkId).map(z => String(z.plan_id)), b)))
     root.querySelector('#ap-ids-alle-ok')?.addEventListener('click', e => ok(_apIds.offen.map(z => String(z.plan_id)), e.currentTarget))
     root.querySelectorAll('[data-ap-id]').forEach(cb => cb.addEventListener('change', async () => {
       cb.disabled = true
