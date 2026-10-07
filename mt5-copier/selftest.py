@@ -6387,8 +6387,18 @@ def test_puls_win_maus():
         s_.trail, s_.ws, s_.js, s_.maus, s_.target_id = [], _Ws(), "/* augen.js */", (0.0, 0.0), "T"
         chk(s_.klick([952, 701, 282, 56], "SENDEN-Knopf") is True and len(zustand["klicks"]) == 1, "Hover bewiesen → genau EIN Druck")
         x_, y_ = zustand["klicks"][0]
-        chk(952 + 282 / 3 <= x_ <= 952 + 2 * 282 / 3 + 1 and 87 + 701 + 56 / 3 <= y_ <= 87 + 701 + 2 * 56 / 3 + 1,
-            f"Bildschirmpunkt im inneren Drittel inkl. Leiste oben ({x_},{y_})")
+        # Seit klick_punkt (.1080, 06.10.2026) streut der Klickpunkt bewusst (Saum 12 % je Kante, Deckel 60/28 px um die Mitte, Hand des
+        # Laufs) — der alte Test prüfte das innere Drittel und kippte zufällig (Master 08.10.2026, Slave-Terminal 3). Jetzt: der echte
+        # Druck liegt im Rechteck ohne Saum inkl. Leiste oben, und 200 Proben mit festem Zufall halten Saum und Deckel.
+        import random as _rk
+        sx_, sy_, sw_, sh_ = 952, 701, 282, 56
+        chk(sx_ + 0.12 * sw_ - 1 <= x_ <= sx_ + 0.88 * sw_ + 1 and 87 + sy_ + 0.12 * sh_ - 1 <= y_ <= 87 + sy_ + 0.88 * sh_ + 1,
+            f"Bildschirmpunkt im Rechteck ohne Saum inkl. Leiste oben ({x_},{y_})")
+        hand_k = ob.maus_hand(_rk.Random(7))
+        prob_ = [ob.cdp_klickpunkt([sx_, sy_, sw_, sh_], rnd=_rk.Random(i_), hand=hand_k) for i_ in range(200)]
+        chk(all(sx_ + 0.12 * sw_ - 1 <= px_ <= sx_ + 0.88 * sw_ + 1 and sy_ + 0.12 * sh_ - 1 <= py_ <= sy_ + 0.88 * sh_ + 1
+                and abs(px_ - (sx_ + sw_ / 2.0)) <= 60 + 1 and abs(py_ - (sy_ + sh_ / 2.0)) <= 28 + 1 for px_, py_ in prob_)
+            and len(set(prob_)) >= 40, f"Klickpunkt-Streuung (200 Proben, fester Zufall): im Rechteck ohne Saum, im Deckel 60/28 um die Mitte, nie dieselbe Stelle ({len(set(prob_))} verschieden)")
         chk(zustand["gezeigt"][:1] == [9] and "Windows-Maus, Hover bewiesen" in s_.trail[-1], "minimiertes Fenster wiederhergestellt (SW_RESTORE), Spur sagt Windows-Maus")
         zustand["hover"] = False
         chk(s_.klick([952, 701, 282, 56], "SENDEN-Knopf") is False and len(zustand["klicks"]) == 1 and "kein Druck" in s_.trail[-1],
