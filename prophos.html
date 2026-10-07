@@ -6684,9 +6684,9 @@
                   <th style="padding-left:20px">Account</th>
                   <th>Firm</th>
                   <th>Typ</th>
-                  <th title="Auto-Planer (08.10.2026): Haken = darf eingeplant werden; darunter Startzeit des letzten Laufs (Dubai) oder der Grund, warum nicht">Planer</th>
                   <th>Balance</th>
-                  <th title="Kontowert mit Gegenhedge (Kaufpreis + Hedge-Kosten der gewonnenen Etappen) — Rechnung im Backend wie Probelauf/Vorrat">Wert</th>
+                  <!-- „Wert" (Kontowert) raus, „Planer" an die Stelle (Finn 08.10.2026: „den Wert nutze ich eh nie, ersetze ihn mit Planer") -->
+                  <th title="Auto-Planer (08.10.2026): Haken = darf eingeplant werden; daneben Startzeit des letzten Laufs (Dubai) oder der Grund, warum nicht">Planer</th>
                   <th>Verknüpfungen</th>
                   <th style="padding-right:20px"></th>
                 </tr>
@@ -31899,9 +31899,8 @@
             </td>
             <td>${escapeHtml(a.firm || '–')}</td>
             <td>${accTypChipHtml(a)}${accZielChipHtml(a)}${accConsChipHtml(a)}${accRisikoChipHtml(a)}${accWdToggleHtml(a)}</td>
+            <td>${balCell}</td>
             <td data-stop-row-click="1">${accPlanerZelleHtml(a, isArchived)}</td>
-            <td>${balCell}<div class="acc-kw-mob" data-kw-zelle="${a.id}">${kwZelleHtml(a.id)}</div></td>
-            <td class="acc-kw-td" data-kw-zelle="${a.id}">${kwZelleHtml(a.id)}</td>
             <td>${(_mtcLogin && !isArchived && typeof mt5KontoIst === 'function' && mt5KontoIst(a)) ? `<div>${accTermBtnHtml(a.id)}</div>` : ''}${linksHtml}${accTermStatusHtml(a.id)}</td>
             <td style="padding-right:20px;text-align:right;white-space:nowrap" data-stop-row-click="1">
               <button class="btn btn-ghost icon-btn" data-acc-cred="${a.id}" title="Zugangsdaten${a.creds ? '' : ' (leer)'}" style="padding:5px 8px${a.creds ? ';color:var(--violet)' : ''}">
@@ -40180,7 +40179,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1161'
+  const OS_TAB_BUILD = '2026-09-22.1162'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
