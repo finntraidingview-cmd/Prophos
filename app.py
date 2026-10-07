@@ -11058,6 +11058,19 @@ def lt_fusion_lots_echo(live, jetzt_ts):
     return round(sum(werte), 2) if werte else None
 
 
+def lt_satz_setzen(trades, konto_je_plan, werte):
+    """REIN RECHNEND (SATZ-AN-LIVE-TRADES, 07.10.2026, Hinweis Terminal 2: fremde Hand-Trades, die vor dem Öffnen des Trade-Planers
+    gestartet sind und nicht im Delta stehen, hatten im Frontend keinen Kontowert-Satz → „ohne Wert" im Hypo-P&L; /admin/kontowerte
+    liefert Nicht-Admins nur die eigenen Konten): je Zeile satz_eur_je_usd (€ je $, wie Delta offen[]) des Master-Kontos aus den
+    Kontowerten (ap_kontowert_konto, dieselbe Rechnung wie Probelauf/Accounts). Nur der Satz, kein wert_eur — mehr braucht der
+    Hypo-P&L nicht. Ohne Wert None — kein Raten."""
+    for z in trades:
+        aid = konto_je_plan.get(str(z.get("plan_id") or z.get("id") or ""))
+        w = (werte or {}).get(str(aid)) if aid else None
+        z["satz_eur_je_usd"] = (w or {}).get("satz_eur_pro_usd")
+    return trades
+
+
 def lt_fusion_pl_solo(hedge, solo_je_pc, jetzt_ts):
     """REIN RECHNEND (testbar): schwebender Fusion-P&L eines Orbit-/Winning-Day-Hedges aus mt5_live.status.hedge_solo des
     Hedge-PCs (solo_je_pc = {pc: {updated_at, solo: [{ticket, profit|pl_live}]}}). Nur offener Hedge mit Ticket, frisch, sonst None."""
@@ -11303,6 +11316,13 @@ def admin_live_trades():
         for z in trades:
             q = je_id.get(str(z.get("id"))) or {}
             z["orbit_v3"], z["konto_typ"] = bool(q.get("orbit_v3")), q.get("konto_typ")
+        if mit_echo:
+            # SATZ-AN-LIVE-TRADES (07.10.2026): Kontowert-Satz je Zeile für den Hypo-P&L im Trade-Planer — nur mit ?echo=1 (Radar/Planer),
+            # der PC-Tab-Takt (?nur_eigene=1&status=open) bleibt ohne. Kontowerte aus dem 60-s-Merker; scheitern sie, fehlt nur der Satz.
+            try:
+                lt_satz_setzen(trades, {k: q.get("master_account_id") for k, q in je_id.items()}, ap_kontowerte_gemerkt(None))
+            except Exception as e:
+                print(f"[live-trades] ⚠️ Kontowerte (Satz): {type(e).__name__}: {e}", flush=True)
         kj = _kurs_jetzt()                       # B35/F28: aktueller Kurs je Wurzel (Radar-Weg Topstep)
         for z in trades:
             if z.get("plattform") != "echo":     # Echo trägt seinen eigenen (CFD-)Kurs aus lt_echo_felder
@@ -14555,6 +14575,19 @@ def admin_build_kontowerte(sicht=None):
     return werte
 
 
+def ap_kontowerte_gemerkt(sicht=None):
+    """admin_build_kontowerte mit dem 60-s-Merker je Sicht (None = alle). Geteilt von /admin/kontowerte und /admin/live-trades?echo=1
+    (SATZ-AN-LIVE-TRADES, 07.10.2026) — beide Wege treffen denselben Merker, gerechnet wird höchstens einmal je Minute."""
+    schluessel = sicht or "*"
+    with _ap_kw_cache_lock:            # Single-Flight: zwei Tabs gleichzeitig rechnen nicht doppelt
+        treffer = _ap_kw_cache.get(schluessel)
+        if treffer and treffer[0] > time.time():
+            return treffer[1]
+        werte = admin_build_kontowerte(sicht)
+        _ap_kw_cache[schluessel] = (time.time() + AP_KW_CACHE_S, werte)
+        return werte
+
+
 @app.route("/admin/kontowerte", methods=["GET", "OPTIONS"])
 def admin_kontowerte():
     """GET → {ok, werte: {account_id: {wert_eur, stufe, satz_eur_pro_usd, quelle, hinweis, …}}}. Admin (ADMIN_EMAILS): alle
@@ -14573,15 +14606,8 @@ def admin_kontowerte():
         if err2:
             return err2
         sicht = uid
-    schluessel = sicht or "*"
     try:
-        with _ap_kw_cache_lock:            # Single-Flight: zwei Tabs gleichzeitig rechnen nicht doppelt
-            treffer = _ap_kw_cache.get(schluessel)
-            if treffer and treffer[0] > time.time():
-                werte = treffer[1]
-            else:
-                werte = admin_build_kontowerte(sicht)
-                _ap_kw_cache[schluessel] = (time.time() + AP_KW_CACHE_S, werte)
+        werte = ap_kontowerte_gemerkt(sicht)
         return jsonify({"ok": True, "werte": werte, "alle": sicht is None})
     except Exception as e:
         print(f"[kontowerte] ⚠️ GET: {type(e).__name__}: {e}", flush=True)
