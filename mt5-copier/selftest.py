@@ -3365,6 +3365,42 @@ def test_puls_cdp_login():
         and ob.cdp_login_noetig(r2_[1], r2_[4]), f"Symbol fehlt → kein Klick, kein_broker → Login-Weg ({r2_[2]})")
     chk(not r3_[0] and r3_[1] == "konto_nicht_erreicht" and k3_.klicks == ["Konto-Umschalter", "Taste Escape"] and "Order-Panel ok (320 px)" in r3_[2],
         f"Panel groß, Liste trotzdem nicht erkannt → ehrliche Meldung mit Panel-Lage, Umschalter nur einmal ({r3_[2]})")
+    # BIS ZU DREI LESUNGEN nach dem Umschalter-Klick (08.10.2026, Slave-Terminal 3, Muster „konto: konto-umschalter geklickt, dropdown
+    # nicht erkannt" 4× / 3 PCs: pc-xxxxxx 16:16:09 keine Liste, 16:16:25 sofort da) — Liste erst beim 2. Blick → Konto gewechselt,
+    # Umschalter trotzdem nur EINMAL; nie da → nach drei Blicken wie bisher Esc + Meldung, jeder Blick in der Spur
+    class _SL(_SK):
+        def __init__(self, ab_lesung=2, **kw):
+            _SK.__init__(self, gross=True, **kw); self.ab_lesung, self.blicke = ab_lesung, 0
+        def klick(self, r, n, toast_ok=False):
+            if n == "Konto-Umschalter":
+                self.klicks.append(n); self.blicke = 0; self.geklickt = True; return True
+            if n.startswith("Konto "):
+                self.geklickt = False          # Eintrag gewählt → Liste zu, kein weiteres Aufgehen
+            return _SK.klick(self, r, n, toast_ok)
+        def stand(self, opts=None):
+            if getattr(self, "geklickt", False):
+                self.blicke += 1
+                if self.ab_lesung and self.blicke >= self.ab_lesung:
+                    self.offen = True
+            return _SK.stand(self, opts)
+    ob._warte = lambda a_, b_: None
+    try:
+        kl1_, tl1_ = _SL(ab_lesung=2), []
+        rl1_ = ob._cdp_konto_sichern(kl1_, "PAAPEX0000000000008", {}, tl1_)
+        kl2_, tl2_ = _SL(ab_lesung=3), []
+        rl2_ = ob._cdp_konto_sichern(kl2_, "PAAPEX0000000000008", {}, tl2_)
+        kl3_, tl3_ = _SL(ab_lesung=0), []
+        rl3_ = ob._cdp_konto_sichern(kl3_, "PAAPEX0000000000008", {}, tl3_)
+    finally:
+        ob._warte = alt_w
+    chk(rl1_[0] and kl1_.klicks == ["Konto-Umschalter", "Konto PAAPEX0000000000008"] and "Konto-Liste erst bei Lesung 2/3 da (2 Zeilen)" in tl1_
+        and sum(1 for x in tl1_ if "Lesung 1/3: keine Liste" in x) == 1,
+        f"Umschalter: Liste erst beim 2. Blick → Konto gewechselt, Umschalter einmal, Blick in der Spur ({kl1_.klicks}, {tl1_})")
+    chk(rl2_[0] and kl2_.klicks == ["Konto-Umschalter", "Konto PAAPEX0000000000008"] and "Konto-Liste erst bei Lesung 3/3 da (2 Zeilen)" in tl2_,
+        f"Umschalter: Liste erst beim 3. Blick → trotzdem gewechselt ({tl2_})")
+    chk(not rl3_[0] and rl3_[1] == "konto_nicht_erreicht" and kl3_.klicks == ["Konto-Umschalter", "Taste Escape"] and "Dropdown nicht erkannt" in rl3_[2]
+        and sum(1 for x in tl3_ if "keine Liste (0 Zeilen)" in x) == 3,
+        f"Umschalter: nie eine Liste → drei Blicke in der Spur, dann Esc + Meldung wie bisher ({kl3_.klicks}, {tl3_})")
     chk(r4_[0] and k4_.klicks == [] and not k4_.gross,
         f"Konto steht, Panel eingeklappt → NIE maximieren (Finn 01.10.2026: Chart sichtbar), nie deshalb scheitern ({k4_.klicks})")
     chk("_cdp_panel_aufklappen(s, trail, ohne_max=True)" in _i.getsource(ob._cdp_konto_sichern)
@@ -3809,7 +3845,24 @@ def test_cdp_konto_regression_865():
     js = open(_os.path.join(_os.path.dirname(_os.path.abspath(ob.__file__)), "augen.js"), encoding="utf-8").read()
     chk("function kontoSchalter()" in js and "r.top >= lr.top - 4" in js and "var s = kontoSchalter();" in js
         and "(eintraege.length === 1 && !!s.el && !eintraege[0].aktiv)" in js and "panel_lage: lage" in js
-        and "VERSION = '0.7.8'" in js, "augen.js 0.7.4+: Umschalter unter der Broker-Leiste (beide Lagen), panel_lage, Liste nur mit Umschalter")
+        and "VERSION = '0.7.9'" in js, "augen.js 0.7.4+: Umschalter unter der Broker-Leiste (beide Lagen), panel_lage, Liste nur mit Umschalter")
+    # MAUS-MITSCHRIFT (0.7.9, 08.10.2026, Slave-Terminal 3): augen.js meldet, wo die Seite den Zeiger zuletzt sah; der Bot stupst sofort,
+    # wenn die Bewegung nie ankam, und schreibt den Befund in die Spur — der Hover-Riegel bleibt (ohne :hover kein Druck)
+    chk("function maus()" in js and "maus: maus," in js and "window.__prophosMaus" in js and "addEventListener('mousemove'" in js
+        and "}, true);" in js and "mausMitschrift();   // beim Laden" in js, "augen.js 0.7.9: maus() + Capture-Listener einmal je Seite, beim Laden installiert")
+    chk("maus:m" in ob.win_ziel_js(1, 2) and "prophosAugen.maus()" in ob.win_ziel_js(1, 2) and "toast:!!t" in ob.win_ziel_js(1, 2)
+        and "maus:m" in ob.win_ziel_pruef_js(1, 2, {"rect": [0, 0, 10, 10]}), "Ziel-Proben (mit/ohne Kandidat) tragen die Maus-Mitschrift der Seite")
+    B_ = ob.maus_stups_befund
+    chk(B_({"hover": False}, (10, 20)) == (False, "") and B_(None, (10, 20)) == (False, "") and B_({"maus": {"x": 10, "y": 20, "n": 0}}, (10, 20))[0]
+        and B_({"maus": {"x": 11, "y": 19, "vor_ms": 40, "n": 5}}, (10, 20)) == (False, "")
+        and B_({"maus": {"x": 497, "y": 680, "vor_ms": 900, "n": 5}}, (566, 871)) == (True, "Seite sah den Zeiger zuletzt @497,680 vor 900 ms, Ziel @566,871")
+        and B_({"maus": {"x": None, "y": None, "n": 3}}, (1, 1)) == (True, "Seite sah noch keine Mausbewegung") and B_({"maus": {"x": 1, "y": 1, "n": 1}}, None) == (False, ""),
+        "Stups-Befund: ohne Mitschrift alter Weg, am Ziel kein Stups, abseits/nie gesehen → sofort frisch bewegen mit Befund")
+    import inspect as _iw
+    q_wk = _iw.getsource(ob._AugenSitzung._win_klick)
+    chk("maus_stups_befund(v, p)" in q_wk and "stupser < 2" in q_wk and q_wk.index("jetzt_stups, bef = maus_stups_befund(v, p)") < q_wk.index("if not gestupst and time.time() >= ende - 0.15:")
+        and "if not hover:" in q_wk and q_wk.index("if not hover:") < q_wk.index("self._druck_versucht = True") and "frisch bewegt" in q_wk,
+        "Hover-Schleife: Befund vor dem alten Stups, höchstens zwei Stupser, Riegel „ohne :hover kein Druck“ vor dem Druck unverändert")
     chk("warnung" in ob.PULS_ERGEBNIS_FELDER and "unklar" in ob.PULS_ERGEBNIS_FELDER, "Ergebnis-Paket trägt warnung + unklar")
     # Login-Abriss (30.09.2026 03:23 UTC): Verbindung weg nach „Anmelden" → Spur mit Chrome-Zustand, EINMAL neu anhängen
     import inspect as _ia

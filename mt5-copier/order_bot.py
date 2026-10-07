@@ -16981,7 +16981,42 @@ def win_ziel_js(x, y):
             # was (07.10.2026, Routine „Puls-Fehler"): Element am Punkt in der Spur, damit „Ziel NICHT unter dem Zeiger" ohne pruef
             # sagt, WAS dort lag (Senden-Knopf 4× auf 4 PCs ohne diesen Hinweis) — nur lesen, ändert kein Urteil
             "var w=(e.tagName.toLowerCase()+' '+String(e.getAttribute('aria-label')||e.getAttribute('data-name')||e.textContent||'').replace(/\\s+/g,' ').trim()).slice(0,40);"
-            "return {hover:e.matches(':hover'),toast:!!t,was:w};})()")
+            # maus (08.10.2026, Slave-Terminal 3, Muster „knopf: senden-knopf nicht gedrückt (maus nicht bewiesen über dem knopf)", 4× auf
+            # 4 PCs 04.–06.10.): wo die SEITE den Zeiger zuletzt sah (augen.js maus(), mousemove-Mitschrift) — Windows sagt „Maus steht
+            # am Ziel", die Seite hatte die Bewegung aber nie bekommen bzw. :hover blieb beim alten Element (Werbe-Kachel 06./07.10.:
+            # „am Punkt 'close ad', Zeiger laut Seite über 'svg'"). Nur lesen; ohne augen.js null.
+            "var m=(globalThis.prophosAugen&&globalThis.prophosAugen.maus)?globalThis.prophosAugen.maus():null;"
+            "return {hover:e.matches(':hover'),toast:!!t,was:w,maus:m};})()")
+
+
+def maus_stups_befund(v, p, toleranz=3.0):
+    """REIN RECHNEND (testbar): Hat die SEITE den Zeiger am Zielpunkt p (CSS-px) schon gesehen? v = Antwort von win_ziel_js /
+    win_ziel_pruef_js (Schlüssel maus = {x, y, vor_ms, n} aus augen.js maus()). -> (stups_jetzt, befund)
+    stups_jetzt = True, wenn die Seite die letzte Bewegung nicht bekommen hat (nie eine gesehen, oder zuletzt > toleranz px vom Ziel
+    entfernt) — dann hilft nur eine FRISCHE Mausbewegung, Warten bringt nichts. befund = kurzer Text für die Spur ('' = Seite sah den
+    Zeiger am Ziel; dann liegt es am Ziel selbst, z. B. bewegt es sich noch unter dem Zeiger).
+    Anlass (08.10.2026, Slave-Terminal 3): Muster „knopf: senden-knopf nicht gedrückt (maus nicht bewiesen über dem knopf)" 4× auf
+    4 PCs (04.–06.10.) und 61 Hover-Fehlschläge seit 01.10. an allen Zielen — Windows meldete den Zeiger immer am richtigen Punkt im
+    richtigen Fenster, nur die Seite wusste es nicht. Ohne augen.js-Mitschrift (maus fehlt) bleibt es beim alten Weg (False, '')."""
+    m = v.get("maus") if isinstance(v, dict) else None
+    if not isinstance(m, dict):
+        return False, ""
+    try:
+        px, py = float(p[0]), float(p[1])
+    except (TypeError, ValueError, IndexError):
+        return False, ""
+    n = m.get("n") or 0
+    if not n or m.get("x") is None or m.get("y") is None:
+        return True, "Seite sah noch keine Mausbewegung"
+    try:
+        dx, dy = float(m["x"]) - px, float(m["y"]) - py
+    except (TypeError, ValueError):
+        return False, ""
+    vor = m.get("vor_ms")
+    vor_t = f" vor {int(vor)} ms" if isinstance(vor, (int, float)) and not isinstance(vor, bool) else ""
+    if abs(dx) > toleranz or abs(dy) > toleranz:
+        return True, f"Seite sah den Zeiger zuletzt @{int(round(float(m['x'])))},{int(round(float(m['y'])))}{vor_t}, Ziel @{int(px)},{int(py)}"
+    return False, ""
 
 
 def win_ziel_pruef_js(x, y, pruef):
@@ -17001,7 +17036,8 @@ def win_ziel_pruef_js(x, y, pruef):
             "var hs=document.querySelectorAll(':hover'),d=hs.length?hs[hs.length-1]:null,dr=d?d.getBoundingClientRect():null;"
             "var unter=d?(d.tagName.toLowerCase()+' '+String(d.getAttribute('data-testid')||d.getAttribute('aria-label')||T(d)).slice(0,30)"
             "+' @'+Math.round(dr.left)+','+Math.round(dr.top)):'nichts';"
-            "return {hover:e.matches(':hover'),passt:!!(drin&&klein&&text_ok&&!tabu&&wort_ok),was:(kt||ka||k.tagName.toLowerCase()).slice(0,40),tabu:tabu,wort:wort_ok,unter:unter};})("
+            "var m=(globalThis.prophosAugen&&globalThis.prophosAugen.maus)?globalThis.prophosAugen.maus():null;"   # s. win_ziel_js (08.10.2026)
+            "return {hover:e.matches(':hover'),passt:!!(drin&&klein&&text_ok&&!tabu&&wort_ok),was:(kt||ka||k.tagName.toLowerCase()).slice(0,40),tabu:tabu,wort:wort_ok,unter:unter,maus:m};})("
             + json.dumps(pruef, ensure_ascii=False) + ")")
 
 
@@ -17590,6 +17626,24 @@ class _AugenSitzung:
         hover, v = False, None
         ende = time.time() + 0.9
         gestupst = False
+        # URSACHE VOR DEM RIEGEL (08.10.2026, Slave-Terminal 3, Muster „knopf: senden-knopf nicht gedrückt (maus nicht bewiesen über
+        # dem knopf)", 4× auf 4 PCs 04.–06.10., dazu 61 Hover-Fehlschläge seit 01.10. an Reitern, Show less, Meldungen-X, Konto-Zeilen):
+        # in allen Spuren stand der Zeiger laut Windows am richtigen Punkt im richtigen Fenster, die SEITE hatte die Bewegung aber nicht
+        # verarbeitet (Werbe-Kachel 06./07.10.: „am Punkt 'close ad', Zeiger laut Seite über 'svg'" — :hover hing am alten Element).
+        # Chrome reicht Mausbewegungen bildsynchron an die Seite; unter Last (4K-Chart, Ticket/Positions-Tabelle baut gerade um,
+        # Meldungen schieben sich ein) kommt die letzte Bewegung erst nach dem 0,9-s-Fenster oder gar nicht an. augen.js schreibt seit
+        # 0.7.9 jede mousemove mit (maus()); meldet die Seite den Zeiger NICHT am Ziel, wird SOFORT frisch bewegt (nicht erst nach
+        # 0,75 s) und der Befund steht in der Spur. Höchstens zwei Stupser, Fenster je +0,7 s obendrauf. Riegel unverändert: ohne :hover
+        # kein Druck. Ohne Mitschrift (altes augen.js) läuft die Schleife wie bisher (ein Stups bei 0,75 s).
+        stupser, befund_m = 0, ""
+
+        def _stups():
+            try:
+                _cursor_set(int(punkt[0]) + random.choice((-2, 2)), int(punkt[1]) + random.choice((-1, 1)))
+                _warte(0.04, 0.03)
+                _cursor_set(int(punkt[0]), int(punkt[1]))
+            except Exception:
+                pass
         while time.time() < ende:
             _warte(0.08, 0.05)
             if pruef:
@@ -17611,6 +17665,16 @@ class _AugenSitzung:
                 if (v.get("hover") if isinstance(v, dict) else v):
                     hover = True
                     break
+            jetzt_stups, bef = maus_stups_befund(v, p)
+            if bef:
+                befund_m = bef
+            if jetzt_stups and stupser < 2 and time.time() >= ende - 0.65:   # frühestens ~0,25 s nach der Ankunft, dann sofort
+                stupser += 1
+                gestupst = True
+                self.trail.append(f"{name}: {bef} — frische Bewegung ({stupser}/2)")
+                _stups()
+                ende = time.time() + 0.7
+                continue
             if not gestupst and time.time() >= ende - 0.15:
                 # Live 30.09.2026 11:18 UTC (erster Topstep-PC, Bracket-Zahnrad): Zeiger stand rechnerisch richtig, die Seite meldete
                 # 0,9 s lang kein :hover. EINMAL 2 px anstupsen (frische Mausbewegung, kein Druck) und noch 0,7 s schauen.
@@ -17619,16 +17683,20 @@ class _AugenSitzung:
                 # mit frischer Mausbewegung traf dann): der Stups lief bisher nur im pruef-Zweig, Senden-Knopf, Show more und Reiter
                 # klicken ohne pruef und bekamen nach 0,9 s ohne :hover nie eine frische Bewegung. Riegel unverändert: ohne :hover kein Druck.
                 gestupst = True
-                try:
-                    _cursor_set(int(punkt[0]) + 2, int(punkt[1]) + 1)
-                    _warte(0.04, 0.03)
-                    _cursor_set(int(punkt[0]), int(punkt[1]))
-                except Exception:
-                    pass
+                stupser += 1
+                _stups()
                 ende = time.time() + 0.7
         if not hover:
             zus = (f" — am Punkt '{v.get('was')}', Zeiger laut Seite über '{v.get('unter')}'" if pruef and isinstance(v, dict)
                    else (f" — am Punkt '{v.get('was')}'" if isinstance(v, dict) and v.get("was") else ""))
+            # Befund der Seite zur Zeigerposition (08.10.2026): stand sie am Ziel, hat sich das ZIEL unter dem Zeiger bewegt
+            _s, bef = maus_stups_befund(v, p)
+            if bef:
+                zus += f" — {bef}"
+            elif isinstance(v, dict) and isinstance(v.get("maus"), dict):
+                zus += " — Seite sah den Zeiger am Ziel, :hover trotzdem woanders (Ziel bewegt sich?)"
+            if stupser:
+                zus += f" — {stupser}× frisch bewegt"
             self.trail.append(f"{name}: Maus steht @{punkt[0]},{punkt[1]}, Ziel NICHT unter dem Zeiger (Hover){zus} — kein Druck")
             return False
         self.maus = p
@@ -18106,8 +18174,23 @@ def _cdp_konto_sichern(s, ext, opts, trail):
                 {"konto_stand": ko, "popups": st.get("popups"), "panel_lage": pd}
         geklickt_umschalter = True
         s.klick(cdp_rect(ko.get("schalter")), "Konto-Umschalter")
-        _warte(0.9, 0.4)
-        st = s.stand(opts)
+        # BIS ZU DREI LESUNGEN (08.10.2026, Slave-Terminal 3, Muster „konto: konto-umschalter geklickt, dropdown nicht erkannt" 4× in
+        # 7 Tagen auf 3 PCs / 3 IDs): bisher entschied EINE Lesung ~1 s nach dem bewiesenen Klick. Beleg pc-xxxxxx 06.10. 16:16:09:
+        # Login mit 6 Konten, Liste nicht da → Fehlstart; 16 s später derselbe PC, derselbe Umschalter: Liste sofort da, Konto gewechselt.
+        # Die Tradovate-Liste baut sich beim ersten Aufklappen nach dem Laden erst auf (Konten kommen vom Broker nach). Darum jetzt bis
+        # zu drei Blicke (je 0,9–1,3 s, gestreut), jeder Blick steht in der Spur (Zeilen, Popups) — der Umschalter wird weiter nur EINMAL
+        # geklickt, Esc und die Meldung danach bleiben wie bisher.
+        for lesung in (1, 2, 3):
+            _warte(0.9, 0.4)
+            st = s.stand(opts)
+            ko_n = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+            if ko_n.get("liste_offen"):
+                if lesung > 1:
+                    trail.append(f"Konto-Liste erst bei Lesung {lesung}/3 da ({len(ko_n.get('eintraege') or [])} Zeilen)")
+                break
+            pop = [str(p_.get("titel") or p_.get("text") or "")[:30] for p_ in (st.get("popups") or []) if isinstance(p_, dict)][:2]
+            trail.append(f"Umschalter geklickt, Lesung {lesung}/3: keine Liste ({len(ko_n.get('eintraege') or [])} Zeilen"
+                         + (f", Dialog {pop}" if pop else "") + (f", {str(ko_n.get('liste_voll_grund'))[:40]}" if ko_n.get("liste_voll_grund") else "") + ")")
         if not (st.get("konto") or {}).get("liste_offen"):
             _warte(1.0, 0.4)
             st = s.stand(opts)
