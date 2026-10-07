@@ -3863,6 +3863,32 @@ def test_cdp_konto_regression_865():
     chk(q_rn.count("_map_felder(dlg)") == 1 and 'sl_el, tp_el = fmap.get("sl"), fmap.get("tp")' in q_rn
         and q_rn.index("fmap = _map_felder(dlg)") < q_rn.index('vol_el = fmap.get("volumen", edits[0])')
         and "_warte(0.3, 0.25)" in q_rn and "_warte(0.2, 0.25)" in q_rn, "run(): Feld-Karte einmal für Volumen + SL/TP, Setz-Pausen unverändert")
+    # KONTEXTMENÜ ERST BEIM 2./3. BLICK (08.10.2026, Slave-Terminal 3): „Kontextmenü: []" 3× auf 3 PCs → bis zu drei Lesungen, Knopf einmal
+    class _OrtM:
+        def __init__(self, ab):
+            self.ab, self.blicke = ab, 0
+        def blick(self):
+            self.blicke += 1
+            return {"menue": [{"text": "Log out", "rect": [100, 100, 120, 24]}, {"text": "Trading settings…", "rect": [100, 70, 120, 24]}]} if self.ab and self.blicke >= self.ab else {"menue": []}
+    ob._warte = lambda a_, b_: None
+    try:
+        tm1, o1 = [], _OrtM(3)
+        b1 = ob._cdp_menue_abwarten(o1, tm1, "[Login]")
+        tm2, o2 = [], _OrtM(0)
+        b2 = ob._cdp_menue_abwarten(o2, tm2, "[8]")
+        tm3, o3 = [], _OrtM(1)
+        b3 = ob._cdp_menue_abwarten(o3, tm3, "[Login]")
+    finally:
+        ob._warte = alt_w
+    chk(len(b1.get("menue") or []) == 2 and o1.blicke == 3 and tm1 == ["[Login] Kontextmenü leer (Lesung 1/3)", "[Login] Kontextmenü leer (Lesung 2/3)", "[Login] Kontextmenü erst bei Lesung 3/3 da", "[Login] Kontextmenü: ['Log out', 'Trading settings…']"]
+        and ob.k3_eindeutig(b1.get("menue"), ob.K3_RX_ABMELDEN)[1] == 1, f"Kontextmenü erst beim 3. Blick → 'Log out' eindeutig, Spur je Blick ({tm1})")
+    chk(not b2.get("menue") and o2.blicke == 3 and tm2[-1] == "[8] Kontextmenü: []" and o3.blicke == 1 and tm3 == ["[Login] Kontextmenü: ['Log out', 'Trading settings…']"],
+        f"Menü bleibt leer → drei Blicke, dann wie bisher; sofort da → ein Blick ({tm2}, {tm3})")
+    import inspect as _im
+    q_ab2, q_k8 = _im.getsource(ob._cdp_abmelden), _im.getsource(ob._k3_login_wechsel)
+    chk(q_ab2.count("_cdp_menue_abwarten(ort, trail") == 1 and q_k8.count("_cdp_menue_abwarten(ort_tv, trail") == 1 and q_ab2.count('"Kontextmenü neben Tradovate"') == 1
+        and q_ab2.index("_cdp_menue_abwarten(") < q_ab2.index("k3_eindeutig(b.get(\"menue\"), K3_RX_ABMELDEN)") and 's.taste("Escape")' in q_ab2,
+        "beide Abmelde-Wege lesen das Menü über _cdp_menue_abwarten; Knopf einmal, Esc bei leerem Menü bleibt")
     chk("maus:m" in ob.win_ziel_js(1, 2) and "prophosAugen.maus()" in ob.win_ziel_js(1, 2) and "toast:!!t" in ob.win_ziel_js(1, 2)
         and "maus:m" in ob.win_ziel_pruef_js(1, 2, {"rect": [0, 0, 10, 10]}), "Ziel-Proben (mit/ohne Kandidat) tragen die Maus-Mitschrift der Seite")
     B_ = ob.maus_stups_befund

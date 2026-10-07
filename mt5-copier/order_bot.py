@@ -20029,10 +20029,7 @@ def _k3_login_wechsel(s, anfang, opts, trail, res):
     if not cdp_rect(b.get("ctx")):
         return "abmelden", f"Kontextmenü-Knopf neben 'Tradovate' nicht eindeutig ({b.get('ctx')}) — nichts geklickt, Tradovate bleibt verbunden.", "8-abmelden"
     s.klick(cdp_rect(b.get("ctx")), "Kontextmenü neben Tradovate")
-    _warte(0.8, 0.3)
-    b = ort_tv.blick()
-    texte = [k3_label(m) for m in b.get("menue") or []]
-    trail.append(f"[8] Kontextmenü: {texte}")
+    b = _cdp_menue_abwarten(ort_tv, trail, "[8]")
     e, n = k3_eindeutig(b.get("menue"), K3_RX_ABMELDEN)
     if not e:
         s.taste("Escape")
@@ -21099,6 +21096,27 @@ def _cdp_sitzung_holen(cmd, trail):
     return _AugenSitzung(trail)
 
 
+def _cdp_menue_abwarten(ort, trail, praefix, lesungen=3):
+    """Nach dem bewiesenen Klick auf den Kontextmenü-Knopf neben „Tradovate" bis zu drei Blicke (je 0,8–1,1 s über _warte), bis das Menü
+    Einträge zeigt. -> letzter Blick (dict). Muster „konto_nicht_erreicht: Tradovate-Login … nicht geschafft (abmelden): Im Kontextmenü
+    kein eindeutiges 'Log out' (0 Treffer)" (3× in 7 Tagen, 3 PCs, 06.–07.10.2026; Slave-Terminal 3, 08.10.2026): in allen drei Spuren
+    stand „[Login] Kontextmenü: []" — EINE Lesung ~1 s nach dem Klick traf das noch leere Menü, der nächste Lauf eine Minute später
+    kam durch. Dieselbe Klasse wie „Dropdown nicht erkannt" (.1161): erst prüfen, dann warten; der Knopf wird weiter nur einmal
+    geklickt, Esc und Meldung bei leerem Menü bleiben."""
+    b = {}
+    for lesung in range(1, max(1, int(lesungen)) + 1):
+        _warte(0.8, 0.3)
+        b = ort.blick() or {}
+        menue = b.get("menue") or []
+        if menue:
+            if lesung > 1:
+                trail.append(f"{praefix} Kontextmenü erst bei Lesung {lesung}/{lesungen} da")
+            break
+        trail.append(f"{praefix} Kontextmenü leer (Lesung {lesung}/{lesungen})")
+    trail.append(f"{praefix} Kontextmenü: {[k3_label(m) for m in b.get('menue') or []][:8]}")
+    return b
+
+
 def _cdp_abmelden(s, opts, trail):
     """[2] Log out über das Kontextmenü neben „Tradovate" (K3-Weg, live 29.09.2026 12:27 UTC: „Log out ok"). -> (ok, text)"""
     ort = _K3Ort("TradingView-Seite", s.ws, s, "")
@@ -21107,9 +21125,7 @@ def _cdp_abmelden(s, opts, trail):
         return False, f"Kontextmenü-Knopf neben 'Tradovate' nicht eindeutig ({b.get('ctx')}) — nicht abgemeldet."
     if not s.klick(cdp_rect(b.get("ctx")), "Kontextmenü neben Tradovate"):
         return False, "Kontextmenü neben 'Tradovate' ließ sich nicht klicken — nicht abgemeldet."
-    _warte(0.8, 0.3)
-    b = ort.blick()
-    trail.append(f"[Login] Kontextmenü: {[k3_label(m) for m in b.get('menue') or []][:8]}")
+    b = _cdp_menue_abwarten(ort, trail, "[Login]")
     e, n = k3_eindeutig(b.get("menue"), K3_RX_ABMELDEN)
     if not e:
         s.taste("Escape")
