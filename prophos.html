@@ -40905,7 +40905,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1231'
+  const OS_TAB_BUILD = '2026-09-22.1232'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -46799,6 +46799,10 @@
         }
         verlauf.push({ min: mi, eur: sum })
       }
+      // KOPF = MARKE (08.10.2026, Master-Prüfung am Chart-Upgrade: Kopf „jetzt +30.061 €", Marke „jetzt +687 €"): die Kurve rechnet je
+      // Minute mit dem Kerzen-Schluss × usd_pro_pkt, CFD nur als NQ-Näherung — der Kopf (= Kachel, = Summe der Liste) mit Live-Kurs,
+      // wdMasterLive bzw. MT5-pl_live. Der letzte Punkt ist deshalb derselbe Live-Wert wie der Kopf; die Kurve endet am echten Stand.
+      if(verlauf.length) verlauf.push({ min: Math.max(verlauf[verlauf.length - 1].min, D.jetzt), eur: jetzt })
     }
     zeilen.sort((a, b) => (b.lauf - a.lauf) || (a.start - b.start))
     return { jetzt: Math.round(jetzt), n, ohne, cfd, verlauf, kurs, zeilen }
