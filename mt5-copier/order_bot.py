@@ -7115,7 +7115,7 @@ def modus_tvkette(cmd):
     import io
     cmd = tv_bruecke_auspacken(cmd)
     if augen_modus_lauf() == "cdp":          # nur CDP-Test-PC (29.09.2026, K2): Probelauf über das Puls-Chrome, nie senden
-        return modus_tvkette_cdp(cmd)
+        return modus_tvkette_cdp_mit_neustart(cmd)   # 07.10.2026: EIN Erholungsversuch mit frischem Puls-Chrome (Block PULS-CHROME-NEUSTART)
     puffer, echt = io.StringIO(), sys.stdout
     sys.stdout = puffer
     _PULS_HEIM["aus"] = True          # B35: kein Heimweg zwischen Konto-Schritt und Asset/Order — erst am Ende der Kette
@@ -13590,7 +13590,7 @@ def modus_tsxorder(cmd):
             return
         # K3a (01.10.2026): dieselbe Kette wie K1/K2 (Chrome, Login, Konto, Lesen), danach das Ticket füllen — Probe, nie ein Order-Knopf.
         # K4 (05.10.2026): mit scharf:true drückt _tsx_k4_senden danach den Order-Knopf und trägt Risk / To Make ein.
-        return modus_tsxlesen_cdp({"konto": befehl["ext"], "firma": (cmd or {}).get("firma")}, order=befehl, order_cmd=cmd)
+        return _tsx_order_cdp_mit_neustart(befehl, cmd)   # 07.10.2026: EIN Erholungsversuch mit frischem Puls-Chrome (Block PULS-CHROME-NEUSTART)
     befehl, f = tsx_order_befehl(cmd)                    # UIA-Weg: TP Pflicht (Bracket-Dialog)
     if f:
         print(json.dumps({"ok": False, "code": "befehl", "retry_ok": True, "gesendet": False, "msg": f}, ensure_ascii=False))
@@ -15895,6 +15895,16 @@ def _tsx_k3_ticket(s, st, befehl, trail):
 # mit einem Tick Spiel. Scheitert Risk/To Make NACH dem Fill, bleibt die Order stehen: ok + warnung („Brackets in TopstepX prüfen").
 # Nie geklickt: das Kreuz der Spalte Close, Close/Reverse/Flatten/Cancel der Order-Karte. Reine Regeln zuerst (testbar).
 
+def _tsx_frist(trail):
+    """Frist (Wachhund) DIESES Laufs in Sekunden — die Spur trägt sie seit dem Neustart-Umbau (07.10.2026: der zweite Versuch nach
+    einem Chrome-Neustart läuft nur mit der Restzeit des Panels); ohne eigene Frist die Standard-Frist TSX_K3_WACHHUND_S."""
+    try:
+        f = float(getattr(trail, "frist_s", None) or 0.0)
+    except (TypeError, ValueError):
+        f = 0.0
+    return f if f > 0 else TSX_K3_WACHHUND_S
+
+
 def tsx_k4_betraege(cmd):
     """REIN RECHNEND (testbar): (tp_usd, sl_usd) aus dem Befehl — je float > 0 oder None (Winning Days: SL fehlt)."""
     def z(v):
@@ -16088,7 +16098,7 @@ def _tsx_k4_feld(s, st, befehl, feld, usd, name, trail):
     text = tsx_k4_betrag_text(usd)
     letzter = ""
     for versuch in range(2):
-        if versuch == 1 and TSX_K3_WACHHUND_S - trail.sekunden() < 27.0:
+        if versuch == 1 and _tsx_frist(trail) - trail.sekunden() < 27.0:
             # Prüfer 06.10.2026: ein zweiter Versuch braucht bis ~19 s — der Wachhund (os._exit) träfe sonst mitten ins Tippen
             letzter += " — kein zweiter Versuch (Zeitlimit des Laufs)"
             break
@@ -16219,7 +16229,7 @@ def _tsx_k4_senden(s, st, befehl, ziel, kn, res, trail, raus, order_cmd):
     res["schritt"] = "senden"
     res.update(etappe="K4", scharf=True)
     ktext = " ".join(str(kn.get("text") or "").split())
-    rest = TSX_K3_WACHHUND_S - trail.sekunden()
+    rest = _tsx_frist(trail) - trail.sekunden()
     if rest < TSX_K4_REST_S:
         return raus("zeit", (f"Ticket bereit ({ktext}), aber nur noch {int(rest)} s bis zum Zeitlimit — nichts gesendet. "
                              "Bitte erneut starten (TopstepX ist jetzt offen und angemeldet)."), "senden")
@@ -16317,7 +16327,7 @@ def _tsx_k4_senden(s, st, befehl, ziel, kn, res, trail, raus, order_cmd):
                 if isinstance(st, dict) and st.get("popups"):
                     warn.append(f"{name} {tsx_k4_betrag_text(usd)} $ nicht gesetzt (Dialog offen)")
                     continue
-                if TSX_K3_WACHHUND_S - trail.sekunden() < 30.0:      # eine Zelle mit zwei Versuchen + Zeilen-Warten braucht bis ~29 s (Nachprüfer 06.10.2026)
+                if _tsx_frist(trail) - trail.sekunden() < 30.0:      # eine Zelle mit zwei Versuchen + Zeilen-Warten braucht bis ~29 s (Nachprüfer 06.10.2026)
                     warn.append(f"{name} {tsx_k4_betrag_text(usd)} $ nicht gesetzt (Zeitlimit des Laufs)")
                     continue
                 try:
@@ -16389,7 +16399,7 @@ def _tsx_k3_probe(s, st, befehl, res, trail, raus, order_cmd=None):
                      + (" — Markt zu, Knopf nicht prüfbar" if nur_markt else "")), "probe", ok=True)
 
 
-def modus_tsxlesen_cdp(cmd, order=None, order_cmd=None):
+def modus_tsxlesen_cdp(cmd, order=None, order_cmd=None, frist_s=None):
     """order (K3a, 01.10.2026): geprüfter tsx_order_befehl ohne scharf — nach der Lesung füllt _tsx_k3_probe das Ticket (Contract, Menge)
     und endet vor dem Order-Knopf; Antwort wie tsx-konto (gesendet false, retry_ok), Wachhund TSX_K3_WACHHUND_S.
     K1: TopstepX im Puls-Chrome lesen — die ganze Kette in EINEM Lauf (Entscheidung 01.10.2026): Puls-Chrome starten, TopstepX-Tab öffnen,
@@ -16403,8 +16413,13 @@ def modus_tsxlesen_cdp(cmd, order=None, order_cmd=None):
         res.update(etappe="K3", gesendet=False, retry_ok=True, scharf=False, plattform="tsx")
     k4 = bool(order and order.get("scharf") is True and TSX_K4_AKTIV)     # K4 (05.10.2026): scharfer Lauf — die Kette davor ist dieselbe
     wachhund_s = TSX_K3_WACHHUND_S if order else TSX_K1_WACHHUND_S
+    if frist_s:
+        # Neustart (07.10.2026): der zweite Versuch nach einem Chrome-Neustart bekommt nur die Restzeit des Panels (tsx-konto 170 s) —
+        # nie länger als die Standard-Frist; K4 rechnet seine Restzeit über _tsx_frist(trail) gegen genau diese Frist
+        wachhund_s = max(10.0, min(wachhund_s, float(frist_s)))
     diag_art = "tsx_order_cdp" if k4 else "tsx_probe_cdp" if order else "tsx_lesen_cdp"
     trail = _StempelSpur()
+    trail.frist_s = wachhund_s
     trail.append(puls_bot_stand())
     trail.append(maus_hand_text())                 # 06.10.2026: welche Hand lief
     trail.append("Weg: Puls-Chrome (CDP) — " + (f"{'K4 SCHARF' if k4 else 'K3a Probe'} TopstepX ({order.get('richtung')} {order.get('menge')} {order.get('wurzel')})"
@@ -16443,6 +16458,10 @@ def modus_tsxlesen_cdp(cmd, order=None, order_cmd=None):
 
     def _wachhund():
         trail.append(f"Wachhund: nach {int(wachhund_s)} s abgebrochen (Schritt {res.get('schritt')})")
+        if _PULS_AUSGABE_ECHT.get("stdout") is not None:
+            # Neustart-Wrapper (07.10.2026) fängt die Ausgabe des Laufs ab — der Wachhund endet mit os._exit, seine Antwort muss
+            # deshalb direkt auf den echten stdout (sonst „bot_stumm" im Panel). Zeitlimit = bisheriger Fehler-Ausgang, kein Neustart.
+            sys.stdout = _PULS_AUSGABE_ECHT["stdout"]
         try:
             raus("haenger", f"TopstepX-{'Order' if k4 else 'Probe' if order else 'Lesen'} hing nach {int(wachhund_s)} s — abgebrochen.", "haenger",
                  zuerst=_schliessen)
@@ -21209,6 +21228,378 @@ def _cdp_konto_mit_login(sitz, ext, opts, cmd, trail, res):
         msg += " — Tradovate zeigt ein Konto, aber ohne Beleg für einen fremden Login: nichts abgemeldet."
     _cdp_login_sichern(res, trail)
     return ok, code, msg, st, extra
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PULS-CHROME-NEUSTART (07.10.2026, Auftrag Master PULS-CHROME-NEUSTART; Finn wörtlich: „Beim Puls-Bot: wenn beim Platzieren der
+# Order ein Fehler kommt, schließt er einfach das komplette Chrome-Ding, schließt den Tab und öffnet ihn neu. Damit lassen sich
+# meistens 50-prozentige Probleme einfach beheben.")
+# Gilt NUR für die Order-Wege über das Puls-Chrome (CDP, Port 9333): Orbit V2/V3 (modus_tvkette → modus_tvkette_cdp) und Topstep K4
+# (modus_tsxorder → modus_tsxlesen_cdp). Der alte UIA-Weg im Alltags-Chrome bekommt keinen Neustart — Fenster-Treue (26.09.2026):
+# nie das Chrome des Nutzers oder den Reader anfassen. Beendet wird ausschließlich die Instanz am Puls-CDP-Port (Browser.close, wie
+# die 'uia'-Rückschaltung in modus_augen) bzw. Browser-Prozesse mit dem Puls-Profilordner in der Kommandozeile (PowerShell-Filter wie
+# der Handgriff vom 02.10.2026, ohne wmic) — nie „taskkill chrome.exe" nach Namen.
+# Ablauf: erster Versuch → Fehler? → neustart_entscheid → Puls-Chrome beenden (Port frei + Prozesse weg, Zeitlimit, sonst Fehler-
+# Ausgang) → frisch starten wie puls-chrome-starten.bat (_puls_chrome_sicher mit der Ziel-URL des Wegs) → zweiter Versuch GENAU
+# EINMAL über denselben Weg (Tab + Auto-Login wie bisher). Scheitert auch der: sein Fehler-Ausgang unverändert. Nie in Schleife.
+# DOPPEL-ORDER-SCHUTZ (Pflicht): der zweite Versuch läuft nur, wenn der erste nachweislich nichts gesendet hat (gesendet false =
+# Fehler VOR dem Klick: Login, Konto, Ticket, Rücklesung, Knopf nicht gedrückt) ODER — Orbit — wenn die Lesung nach dem Neustart für
+# dieses Konto keine Position der Wurzel, keine offene Order (Reiter Orders) und Total P/L + Balance unverändert gegen die Start-Werte
+# des ersten Versuchs zeigt (ein Fill, der schon wieder zu ist, wäre sonst unsichtbar). Topstep: augen_tsx.js liest keine Orders →
+# nach einem Klick ohne Beweis nie ein zweiter Versuch, der UNKLAR-Ausgang bleibt und das Chrome bleibt stehen (Finn sieht dort nach).
+# Nach bewiesenem Fill (ok / bestaetigt / einstieg) nie ein Neustart. Die Entscheidung steht als Text in der Spur (trail) und in
+# puls_diagnose (schritt chrome_neustart). Ergebnis-Semantik unverändert (PULS_ERGEBNIS_FELDER, UNKLAR-Marke, beweis/warnung).
+# Zeitbudget: das Panel beendet den Bot (tv-konto 260 s, tsx-konto 170 s) — ohne genug Rest für den zweiten Versuch kein Neustart;
+# Topstep bekommt die Restzeit als Wachhund-Frist (frist_s). Alle Wartezeiten über _warte (Jitter-Regel 28.08.2026).
+# ═══════════════════════════════════════════════════════════════════════════
+_PULS_PROZESS_T0 = time.time()
+_PULS_AUSGABE_ECHT = {"stdout": None}        # echter stdout, solange der Neustart-Wrapper einen Lauf abfängt (Wachhund antwortet daran vorbei)
+PULS_NEUSTART_BUDGET_S = {"tvv2": 250.0, "tsv2": 160.0}    # Panel-Zeitlimit (panel.py /api/tv-konto 260 s, /api/tsx-konto 170 s) minus 10 s Luft
+PULS_NEUSTART_MIN_REST_S = {"tvv2": 110.0, "tsv2": 100.0}  # so viel muss für den zweiten Versuch übrig sein (Topstep: Kette + TSX_K4_REST_S 75 s)
+PULS_NEUSTART_DAUER_S = 20.0                 # geschätzte Dauer Chrome-Ende + Start für die Vorab-Entscheidung
+PULS_NEUSTART_ENDE_S = 25.0                  # so lange auf das Ende des alten Puls-Chrome warten (Port frei + Prozesse weg)
+PULS_NEUSTART_HART_AB_S = 10.0               # antwortet Chrome auf Browser.close so lange nicht → nur die eigenen PIDs hart beenden
+# Codes, bei denen ein Neustart nichts hilft oder nicht erlaubt ist: Befehl/Sperre/Etappe fehlt/Markt zu/Zeit/Wachhund/abgelehnt
+PULS_NEUSTART_NIE = frozenset(("befehl", "handlauf", "sperre", "cdp_folgt", "markt_zu", "zeit", "haenger", "abgelehnt",
+                               "puls_beschaeftigt", "bot_fehlt"))
+
+
+def neustart_entscheid(res, weg, verstrichen_s, schon=False, lesung_moeglich=True, budget_s=None, min_rest_s=None,
+                       dauer_s=PULS_NEUSTART_DAUER_S):
+    """REIN RECHNEND (testbar): Darf nach dem ersten Versuch das Puls-Chrome neu starten? -> (art, grund, rest_s)
+    art 'nein' | 'direkt' (Fehler vor dem Klick — nichts gesendet) | 'lesung' (nach dem Klick ohne Beweis — zweiter Versuch nur mit
+    Beleg aus der Lesung nach dem Neustart). rest_s = Zeit, die nach dem Neustart voraussichtlich bleibt."""
+    r = res if isinstance(res, dict) else {}
+    budget = PULS_NEUSTART_BUDGET_S.get(weg, 0.0) if budget_s is None else float(budget_s)
+    min_rest = PULS_NEUSTART_MIN_REST_S.get(weg, 0.0) if min_rest_s is None else float(min_rest_s)
+    rest = budget - float(verstrichen_s or 0.0) - float(dauer_s)
+    if schon:
+        return "nein", "schon ein Neustart in diesem Lauf (nie zwei)", rest
+    if not r:
+        return "nein", "keine lesbare Antwort des ersten Versuchs", rest
+    if r.get("ok"):
+        return "nein", "erster Versuch ok", rest
+    code = str(r.get("code") or "")
+    if code in PULS_NEUSTART_NIE:
+        return "nein", f"Code '{code}' ist kein Chrome-Problem", rest
+    if r.get("bestaetigt") or r.get("einstieg") not in (None, ""):
+        return "nein", "Fill bewiesen — bestehender Weg", rest
+    if r.get("offen") or r.get("positionen"):
+        return "nein", "Konto hat eine offene Position — kein Chrome-Problem", rest
+    nach_klick = bool(r.get("gesendet") or r.get("geklickt") or r.get("retry_ok") is False)
+    if nach_klick and not lesung_moeglich:
+        return "nein", "Fehler nach dem Klick, für diesen Weg keine Positions-/Order-Lesung belegbar — UNKLAR bleibt", rest
+    if rest < min_rest:
+        return "nein", f"zu wenig Zeit ({rest:.0f} s übrig, nötig {min_rest:.0f} s)", rest
+    if nach_klick:
+        return "lesung", f"Fehler nach dem Klick (code '{code or '-'}') — zweiter Versuch nur mit leerer Lesung", rest
+    return "direkt", f"Fehler vor dem Klick (code '{code or '-'}', Schritt '{r.get('schritt') or '-'}'), nichts gesendet", rest
+
+
+def neustart_beleg_leer(lesung, erst):
+    """REIN RECHNEND (testbar): Darf nach einem Klick ohne Beweis ein zweiter Versuch laufen? Nur wenn die Lesung nach dem Neustart
+    ALLES belegt: Positions-Tabelle sichtbar, keine Position der Wurzel (auch unsichtbare Zeilen zählen), Reiter Orders gelesen und keine
+    offene Order der Wurzel, Total P/L vorher UND nachher lesbar und gleich (ein schon wieder geschlossener Fill wäre sonst unsichtbar),
+    Balance gleich, wenn beide lesbar. Fehlt ein Glied → False (UNKLAR bleibt). -> (leer, text)"""
+    l = lesung if isinstance(lesung, dict) else {}
+    e = erst if isinstance(erst, dict) else {}
+    if not l.get("ok"):
+        return False, "Lesung nach dem Neustart fehlgeschlagen: " + (str(l.get("msg") or "-")[:120])
+    if l.get("positionen_sichtbar") is not True:
+        return False, "Positions-Tabelle nicht sichtbar"
+    if l.get("pos_root"):
+        return False, f"{l['pos_root']} Position(en) der Wurzel da — die Order ging wohl durch"
+    if not l.get("orders_gelesen"):
+        return False, "Reiter Orders nicht lesbar"
+    if l.get("orders_root"):
+        return False, f"{l['orders_root']} offene Order(s) der Wurzel"
+    ts, tn = e.get("today_pnl_start"), l.get("today_pnl")
+    if not isinstance(ts, (int, float)) or not isinstance(tn, (int, float)):
+        return False, "Total P/L vorher/nachher nicht lesbar — ein schon geschlossener Fill wäre unsichtbar"
+    if abs(float(ts) - float(tn)) > 0.005:
+        return False, f"Total P/L verändert ({ts:g} → {tn:g}) — es wurde gehandelt"
+    bs, bn = e.get("balance_start"), l.get("balance")
+    if isinstance(bs, (int, float)) and isinstance(bn, (int, float)) and abs(float(bs) - float(bn)) > 0.005:
+        return False, f"Balance verändert ({bs:g} → {bn:g})"
+    return True, "keine Position, keine offene Order, Total P/L und Balance unverändert"
+
+
+def neustart_spur_text(r):
+    """REIN RECHNEND (testbar): Kurzform des ersten Versuchs für die Spur."""
+    r = r if isinstance(r, dict) else {}
+    return (f"1. Versuch: code '{r.get('code') or '-'}', Schritt '{r.get('schritt') or '-'}', gesendet {bool(r.get('gesendet'))} — "
+            + str(r.get("msg") or "")[:140])
+
+
+def _puls_antwort_drucken(res):
+    """Die EINE Antwort des Laufs: JSON (dict) oder der schon fertige Text des Laufs (str) — wie die raus()-Helfer der Modi."""
+    if isinstance(res, dict):
+        try:
+            print(json.dumps(res, ensure_ascii=False))
+        except UnicodeEncodeError:
+            print(json.dumps(res, ensure_ascii=True))
+    elif res:
+        print(res)
+    try:
+        sys.stdout.flush()
+    except Exception:
+        pass
+
+
+def _puls_chrome_prozesse():
+    """PIDs der Browser-Prozesse (chrome/msedge/brave) mit dem Puls-Profilordner in der Kommandozeile — nur Windows, PowerShell
+    Get-CimInstance (kein wmic, manche PCs haben keins). Nur diese gehören dem Puls-Chrome: Reader- und Alltags-Chrome laufen ohne diesen
+    Ordner (puls_chrome_argumente lässt keinen anderen zu). Die eigene PowerShell (ihr Befehl trägt den Pfad) ist ausgenommen. -> [pid]"""
+    if not _WIN_EINGABE:
+        return []
+    import subprocess
+    profil = puls_chrome_profil_pfad().replace("'", "''")
+    ps = (f"$p = [regex]::Escape('{profil}'); Get-CimInstance Win32_Process | Where-Object {{ $_.ProcessId -ne $PID -and "
+          "$_.Name -match '^(chrome|msedge|brave)\\.exe$' -and $_.CommandLine -match $p } | ForEach-Object { $_.ProcessId }")
+    try:
+        r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps], capture_output=True, text=True,
+                           errors="replace", timeout=20, creationflags=0x08000000)
+        return [int(x) for x in (r.stdout or "").split() if x.strip().isdigit()]
+    except Exception:
+        return []
+
+
+def _puls_prozesse_beenden(pids):
+    """Nur GENAU diese PIDs (eigene Puls-Chrome-Prozesse) hart beenden: taskkill /T /F je PID — nie nach Prozessnamen, nie ein fremdes Chrome."""
+    if not _WIN_EINGABE:
+        return
+    import subprocess
+    for pid in pids:
+        try:
+            subprocess.run(["taskkill", "/PID", str(int(pid)), "/T", "/F"], capture_output=True, timeout=10, creationflags=0x08000000)
+        except Exception:
+            pass
+
+
+def _puls_chrome_beenden(trail, warten_s=PULS_NEUSTART_ENDE_S, hart_ab_s=PULS_NEUSTART_HART_AB_S):
+    """Das Puls-Chrome komplett beenden: erst Browser.close über den CDP-Port (trifft nur die Instanz mit Port 9333 — das Reader-Chrome
+    hat keinen), dann warten, bis der Port nicht mehr antwortet und kein Browser-Prozess mit dem Puls-Profilordner mehr läuft. Antwortet
+    es nach hart_ab_s noch, werden nur die eigenen PIDs (CDP-Browser-PID + Profil-Filter) hart beendet. -> (True/False, text)"""
+    t0 = time.time()
+    pid_cdp = None
+    v = _cdp_http("/json/version", timeout=1.5)
+    if v and v.get("webSocketDebuggerUrl"):
+        try:
+            ws = _CdpVerbindung(v["webSocketDebuggerUrl"], timeout=3.0)
+            try:
+                try:
+                    info = ws.rufe("SystemInfo.getProcessInfo", timeout=3.0)
+                    for pr in (info or {}).get("processInfo") or []:
+                        if pr.get("type") == "browser":
+                            pid_cdp = int(pr.get("id"))
+                            break
+                except Exception:
+                    pass
+                try:
+                    ws.rufe("Browser.close", timeout=3.0)
+                except Exception:
+                    pass                         # Chrome schließt die Verbindung beim Beenden — kein Fehler
+            finally:
+                ws.zu()
+            trail.append(f"Neustart: Browser.close an das Puls-Chrome (Port {PULS_CDP_PORT}" + (f", PID {pid_cdp}" if pid_cdp else "") + ")")
+        except Exception as e:
+            trail.append(f"Neustart: Browser.close nicht möglich ({type(e).__name__})")
+    else:
+        trail.append(f"Neustart: Port {PULS_CDP_PORT} antwortet nicht — kein Browser.close, prüfe Prozesse")
+    hart, port_frei, pids = False, False, []
+    ende = t0 + float(warten_s)
+    while time.time() < ende:
+        _warte(0.8, 0.5)
+        port_frei = _cdp_http("/json/version", timeout=1.0) is None
+        pids = _puls_chrome_prozesse() if port_frei or hart or time.time() - t0 >= hart_ab_s else [None]
+        if port_frei and not pids:
+            _PULS_CHROME_PID.update(geholt=False, pid=None)      # die gemerkte Browser-PID gilt im neuen Chrome nicht mehr
+            return True, f"Puls-Chrome beendet nach {time.time() - t0:.1f} s" + (" (hart)" if hart else "")
+        if not hart and time.time() - t0 >= hart_ab_s:
+            hart = True
+            ziel = sorted({int(p) for p in pids if p} | ({pid_cdp} if pid_cdp else set()))
+            if ziel:
+                _puls_prozesse_beenden(ziel)
+                trail.append(f"Neustart: Puls-Chrome hängt — taskkill auf {len(ziel)} eigene PID(s)")
+    n = len([p for p in pids if p])
+    return False, f"Puls-Chrome nach {warten_s:.0f} s nicht beendet (Port {'frei' if port_frei else 'belegt'}, {n} Prozess(e) mit Profilordner)"
+
+
+def _puls_chrome_neustart(trail, url):
+    """Puls-Chrome beenden und frisch starten (wie puls-chrome-starten.bat: _puls_chrome_sicher, minimiert, eigenes Profil, Port 9333),
+    mit der Ziel-URL des Wegs (TradingView-Chart bzw. TopstepX). Den Tab und den Auto-Login macht danach der zweite Versuch über den
+    bestehenden Weg. -> True/False"""
+    ok, text = _puls_chrome_beenden(trail)
+    trail.append(text)
+    if not ok:
+        return False
+    try:
+        os.remove(os.path.join(_AUGEN_HIER, "tsx_tabs.json"))   # vom Bot gemerkte Tab-IDs gelten im neuen Chrome nicht mehr
+    except OSError:
+        pass
+    _warte(1.0, 1.0)
+    if not _puls_chrome_sicher(trail, url=url):
+        trail.append("Neustart: Puls-Chrome kam nicht hoch")
+        return False
+    _warte(2.0, 1.5)                                      # Seite baut auf, bevor der zweite Versuch Tab/Login anfasst
+    trail.append(f"Neustart: Puls-Chrome frisch gestartet ({str(url)[:40]})")
+    return True
+
+
+def _puls_lauf_abfangen(fn, *args, **kw):
+    """Einen modus_* laufen lassen und seine Ausgabe abfangen (letzte Zeile = JSON-Antwort) — Muster wie modus_tvkette und
+    tvlesen_cdp_mit_wiederholung. Der echte stdout steht währenddessen in _PULS_AUSGABE_ECHT (Wachhund). -> (roh, res|{})"""
+    import io
+    puffer, echt = io.StringIO(), sys.stdout
+    _PULS_AUSGABE_ECHT["stdout"] = echt
+    sys.stdout = puffer
+    try:
+        fn(*args, **kw)
+    finally:
+        sys.stdout = echt
+        _PULS_AUSGABE_ECHT["stdout"] = None
+    roh = puffer.getvalue().strip()
+    try:
+        return roh, (json.loads(roh.splitlines()[-1]) if roh else {})
+    except (ValueError, IndexError):
+        return roh, {}
+
+
+def _puls_mit_neustart(weg, erster, zweiter, lesung, url, neustart=None, jetzt=None, t0=None, ausgeben=None, diagnose=None):
+    """Kern des Neustart-Wrappers (testbar mit Attrappen). erster() und zweiter(frist_s) → (roh, res); lesung(spur) → dict für
+    neustart_beleg_leer oder None (Weg ohne Order-Lesung, Topstep). Gibt GENAU EINE Antwort aus — die des letzten Versuchs; ein
+    unveränderter erster Versuch geht so raus, wie er war. Genau ein Neustart, nie zwei. -> res des ausgegebenen Versuchs"""
+    neustart = neustart or _puls_chrome_neustart
+    jetzt = jetzt or time.time
+    t0 = _PULS_PROZESS_T0 if t0 is None else t0
+    ausgeben = ausgeben or _puls_antwort_drucken
+    diagnose = diagnose or _puls_diagnose_senden
+    budget = PULS_NEUSTART_BUDGET_S.get(weg, 0.0)
+    roh1, r1 = erster()
+    art, grund, rest = neustart_entscheid(r1, weg, jetzt() - t0, lesung_moeglich=lesung is not None)
+    if art == "nein":
+        if isinstance(r1, dict) and r1 and not r1.get("ok"):
+            r1["trail"] = str(r1.get("trail") or "") + f" | chrome_neustart: nein — {grund}"
+            ausgeben(r1)
+        else:
+            ausgeben(roh1)                                 # Erfolg oder unlesbar: unverändert
+        return r1
+    spur = _StempelSpur()
+    spur.append(neustart_spur_text(r1))
+    spur.append(f"chrome_neustart: Grund — {grund}; voraussichtlich {rest:.0f} s Rest")
+    info = {"grund": grund, "neu_gestartet": False, "zweiter_versuch": False}
+
+    def erster_raus(warum):
+        spur.append(f"zweiter Versuch nein, weil {warum}")
+        info["weil"] = warum
+        r1["trail"] = str(r1.get("trail") or "") + " | " + " > ".join(spur)
+        r1["chrome_neustart"] = info
+        ausgeben(r1)
+        diagnose(spur=list(spur), schritt="chrome_neustart")
+        return r1
+
+    if not neustart(spur, url):
+        return erster_raus("das Puls-Chrome ließ sich nicht sauber beenden oder neu starten")
+    info["neu_gestartet"] = True
+    if art == "lesung":
+        leer, text = neustart_beleg_leer(lesung(spur), r1)
+        if not leer:
+            return erster_raus(f"Beleg fehlt — {text} (UNKLAR bleibt, nichts erneut gesendet)")
+        spur.append(f"Beleg: {text}")
+    frist = budget - (jetzt() - t0)
+    if frist < PULS_NEUSTART_MIN_REST_S.get(weg, 0.0):
+        return erster_raus(f"nach dem Neustart zu wenig Zeit ({frist:.0f} s übrig)")
+    spur.append("zweiter Versuch ja, weil " + ("der erste nachweislich nichts gesendet hat (Fehler vor dem Klick)" if art == "direkt"
+                                                else "die Lesung nach dem Neustart leer ist") + f" — Frist {frist:.0f} s")
+    info.update(zweiter_versuch=True, frist_s=int(frist))
+    roh2, r2 = zweiter(frist)
+    if not isinstance(r2, dict) or not r2:
+        spur.append("2. Versuch ohne lesbare Antwort")
+        diagnose(spur=list(spur), schritt="chrome_neustart")
+        ausgeben(roh2 or roh1)
+        return r2
+    r2["trail"] = " > ".join(spur) + " || 2. Versuch: " + str(r2.get("trail") or "")
+    r2["chrome_neustart"] = info
+    ausgeben(r2)
+    spur.append(f"2. Versuch: {'ok' if r2.get('ok') else 'code ' + str(r2.get('code') or '-')} — {str(r2.get('msg') or '')[:120]}")
+    diagnose(spur=list(spur), schritt="chrome_neustart")
+    return r2
+
+
+def _neustart_lesung_tvv2(cmd, ext, opts, root, trail):
+    """Lesung nach dem Neustart (Orbit): Konto mit Auto-Login wie der Order-Lauf, dann Positions (ALLE Zeilen der Wurzel zählen, auch
+    unsichtbare), Reiter Orders (augen.js + eigener Tabellen-Blick CDP_TABELLEN_JS wie die Endprüfung), Total P/L + Balance aus
+    „Account summary" (cdp_summary_start — dieselben Schlüssel wie die Start-Werte des ersten Versuchs). Nur Lesen und Reiter-Klicks,
+    nie das Ticket. -> dict für neustart_beleg_leer"""
+    out = {"ok": False, "msg": "", "positionen_sichtbar": None, "pos_root": None, "orders_gelesen": False, "orders_root": None,
+           "today_pnl": None, "balance": None}
+    sitz = [None]
+    try:
+        trail.append(f"Lesung nach dem Neustart: Konto {ext}, Wurzel {root}")
+        sitz[0] = _cdp_sitzung_holen(cmd, trail)
+        ok, code, msg, st, extra = _cdp_konto_mit_login(sitz, ext, opts, cmd, trail, {})
+        s = sitz[0]
+        if not ok:
+            out["msg"] = f"Konto nicht erreicht ({code}: {str(msg)[:100]})"
+            return out
+        _warte(0.8, 0.4)
+        st = s.stand(opts)
+        ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+        out["positionen_sichtbar"] = ko.get("positionen_sichtbar")
+        out["pos_root"] = len([p for p in (st.get("positionen") or []) if isinstance(p, dict)
+                               and tv_symbol_root(str(p.get("symbol") or "")) == root])
+        if _cdp_reiter(s, "orders", trail):
+            _warte(0.7, 0.4)
+            st2 = s.stand(opts)
+            roh = s.lese_js(CDP_TABELLEN_JS) or {}
+            orders = list(st2.get("orders") or []) + cdp_orders_aus_roh(roh)
+            out["orders_gelesen"] = bool(st2.get("orders")) or bool(isinstance(roh, dict) and roh.get("tabellen"))
+            out["orders_root"] = len(k3_offene_orders(orders, root))
+            trail.append(f"Reiter Orders: {len(orders)} Zeile(n), {out['orders_root']} offen für {root}"
+                         + ("" if out["orders_gelesen"] else " — keine Tabelle sichtbar"))
+            _cdp_reiter(s, "positions", trail)
+        else:
+            trail.append("Reiter Orders nicht aktiv zu bekommen")
+        sm, _t, _l, _x = _cdp_today_aus_reiter(s, opts, trail)
+        nach = cdp_summary_start(sm)
+        out.update(today_pnl=nach.get("today_pnl_start"), balance=nach.get("balance_start"), ok=True, msg="gelesen")
+        trail.append(f"Lesung: Tabelle sichtbar {out['positionen_sichtbar']}, {out['pos_root']} Pos {root}, Orders gelesen "
+                     f"{out['orders_gelesen']} ({out['orders_root']} offen), Total P/L {k3_fmt(out['today_pnl'])}, Balance {k3_fmt(out['balance'])}")
+    except Exception as e:
+        out["msg"] = f"{type(e).__name__}: {str(e)[:120]}"
+        trail.append("Lesung nach dem Neustart abgebrochen: " + out["msg"])
+    finally:
+        if sitz[0]:
+            try:
+                _cdp_panel_zurueck(sitz[0], trail)
+            except Exception:
+                pass
+            sitz[0].zu()
+    return out
+
+
+def modus_tvkette_cdp_mit_neustart(cmd):
+    """Orbit-Order über das Puls-Chrome mit EINEM Erholungsversuch (Block-Kopf). Ohne Symbol + Richtung (reiner Konto-Schritt) wie bisher."""
+    c = cmd if isinstance(cmd, dict) else {}
+    symbol = str(c.get("symbol") or "").strip()
+    if not symbol or not str(c.get("richtung") or "").strip():
+        return modus_tvkette_cdp(cmd)
+    ext = str(c.get("ext_id") or c.get("konto") or "").strip()
+    geschwister = [str(x).strip() for x in (c.get("geschwister") or []) if len(_nur_alnum(x)) >= 3][:60]
+    opts = {"kontoTexte": [ext] + geschwister}
+    root = tv_symbol_root(symbol)
+    return _puls_mit_neustart("tvv2", lambda: _puls_lauf_abfangen(modus_tvkette_cdp, cmd),
+                              lambda frist: _puls_lauf_abfangen(modus_tvkette_cdp, cmd),
+                              lambda spur: _neustart_lesung_tvv2(cmd, ext, opts, root, spur), AUGEN_TV_URL)
+
+
+def _tsx_order_cdp_mit_neustart(befehl, cmd):
+    """Topstep-Order/-Probe über das Puls-Chrome mit EINEM Erholungsversuch (Block-Kopf); der zweite Versuch läuft mit der Restzeit des
+    Panels als Frist. Keine Order-Lesung in TopstepX → nach einem Klick ohne Beweis nie ein zweiter Versuch."""
+    lese_cmd = {"konto": befehl["ext"], "firma": (cmd or {}).get("firma")}
+    return _puls_mit_neustart("tsv2", lambda: _puls_lauf_abfangen(modus_tsxlesen_cdp, lese_cmd, order=befehl, order_cmd=cmd),
+                              lambda frist: _puls_lauf_abfangen(modus_tsxlesen_cdp, lese_cmd, order=befehl, order_cmd=cmd, frist_s=frist),
+                              None, TSX_URL)
 
 
 def main():
