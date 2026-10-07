@@ -40674,7 +40674,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1198'
+  const OS_TAB_BUILD = '2026-09-22.1199'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -46146,8 +46146,17 @@
       case 'pc': return `Am PC${pc} start-alles.bat ausführen (Copier-Backend/Panel) — Puls war nicht erreichbar.`
       case 'chrome': case 'chrome_neustart': case 'tab': case 'cdp': return `Am PC${pc} den Puls-Chrome prüfen (läuft er, ist der TradingView-Tab offen?).`
       case 'login': return `Am PC${pc} den Puls-Chrome ansehen: Tradovate-/TradingView-Login prüfen und einloggen.`
-      case 'konto': case 'konto_weg': return `Am PC${pc} in TradingView das Konto verbinden (Trading-Panel → Konto wählen); fehlt es, Account prüfen.`
-      case 'ticket': case 'asset': return `Am PC${pc} das TradingView-Order-Panel ansehen: Asset/Kontrakt (NQ/MNQ, Front-Monat) und Felder prüfen.`
+      // Konto-Fälle (08.10.2026, aus order_signale der letzten 3 Wochen: „Kein Konto-Umschalter zu sehen", „Dropdown nicht erkannt", „steht darin nicht
+      // eindeutig"): fehlt das Konto im Dropdown, ist es vermutlich geblasen/weg → unter Accounts prüfen und abhaken, Plan löschen
+      case 'konto': case 'konto_weg': case 'konto_nicht_erreicht': case 'wechsel':
+        return /nicht (eindeutig|im Dropdown|in der Liste|gefunden)|steht darin nicht|konto_weg|fehlt/i.test(m)
+          ? `Konto fehlt im Tradovate-Dropdown — vermutlich geblasen oder weg: unter Accounts prüfen (External ID, Status), ggf. abhaken und den Plan löschen.`
+          : `Am PC${pc} im Puls-Chrome Tradovate/TradingView verbinden und das richtige Unterkonto wählen (Trading-Panel → Konto); dann ✓ Behoben.`
+      case 'ticket': case 'asset': case 'contract': return `Am PC${pc} das TradingView-Order-Panel ansehen: Order-Ticket offen („Trade" oben rechts), Asset/Kontrakt (NQ/MNQ, Front-Monat) und Felder prüfen.`
+      case 'order': case 'ordertyp': case 'bracket': case 'feld': return `Am PC${pc} das Order-Panel ansehen: Richtung BUY/SELL, Order-Typ Market, Menge und Risk/To-Make-Felder (Brackets) — nichts gesendet; dann ✓ Behoben.`
+      case 'tradingview': case 'fenster': case 'seite': return `Am PC${pc} das Handels-Chrome mit TradingView einmal in den Vordergrund holen (Reader-/Popup-Fenster zählen nicht) und den TradingView-Tab offen lassen.`
+      case 'abgelehnt': return `Von ${/Topstep/i.test(m) ? 'TopstepX' : 'der Plattform'} abgelehnt — dort den Grund lesen (Margin, Markt zu, Kontrakt-Limit), beheben, dann ✓ Behoben oder von Hand starten.`
+      case 'absturz': case 'haenger': case 'bot_stumm': case 'bot_fehlt': case 'timeout': return `Puls am PC${pc} ist abgestürzt oder stumm — Copier-Panel/Puls-Chrome ansehen, notfalls start-alles.bat; der Bot wiederholt sonst von selbst.`
       case 'ruecklesung': return `Am PC${pc} das Order-Panel ansehen — Werte stimmten vor dem Senden nicht; nichts gesendet.`
       case 'popup': return `Am PC${pc} das offene Popup/den Dialog in TradingView schließen; nichts gesendet.`
       case 'knopf': return 'Nichts tun — der Kauf-Knopf war nicht bereit/nicht gedrückt, der Bot wiederholt von selbst.'
@@ -46156,7 +46165,10 @@
       case 'unklar': return `Erst in ${/Topstep/i.test(m) ? 'TopstepX' : 'TradingView'} nachsehen, ob die Order liegt — dann auf der Karte „⚠ UNKLAR" lösen; nie blind erneut starten.`
       case 'zu_spaet': return `Prophos-Tab am PC${pc} offen lassen.`
       case 'ziel_erreicht': return 'Ziel ist erreicht — kein Trade nötig. Konto ansehen (Phasenwechsel/Auszahlung), Plan löschen.'
-      default: return sf.unklar ? 'Erst in der Plattform nachsehen, ob die Order liegt — nie blind erneut starten.'
+      // 'puls' = Orbit-Fehler ohne Bot-Schritt (08.10.2026): die häufigsten Texte aus order_signale — External ID fehlt (49×), Tab lud neu (33×)
+      case 'puls': default: return sf.unklar ? 'Erst in der Plattform nachsehen, ob die Order liegt — nie blind erneut starten.'
+        : /External ID/i.test(m) ? 'Dem Konto unter Accounts die External ID (Tradovate-Unterkonto) eintragen, dann ✓ Behoben.'
+        : /Tab lud|neu geladen|UNBEKANNT/i.test(m) ? `Der Prophos-Tab am PC${pc} lud während der Order neu — erst in TradingView nachsehen, ob die Order liegt; dann ✓ Behoben oder von Hand, nie blind.`
         : /Puls|TradingView|Tradovate/i.test(m) ? `Am PC${pc} Puls-Chrome/TradingView prüfen — Meldung lesen, dann ✓ Behoben oder von Hand starten.`
         : 'Check am PC war rot — beheben, dann ✓ Behoben.'
     }
