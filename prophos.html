@@ -32015,8 +32015,10 @@
       }
     }catch(_){}
   }
-  async function accBalanceLesen(id){
+  async function accBalanceLesen(id, wer){
     id = String(id)
+    // wer (08.10.2026, Box „Braucht dich"): Name der ID für „Lesung angefordert · wartet auf PC von …" — ohne wer wie bisher (Accounts)
+    const pcVon = wer ? `PC von ${wer}` : 'den PC dieser ID'
     // Lesung fertig und ok → MT5-Cloud-Cache dieses Logins verwerfen und neu laden (08.10.2026, s. mt5BalCacheErneuern)
     const setz = (o) => { _accBalLauf.set(id, o); try{ renderAccounts() }catch(_){}; if(o && o.laeuft === false && !o.fehler && typeof mt5BalCacheErneuern === 'function') mt5BalCacheErneuern(id).catch(() => {}) }
     if(_accBalLauf.get(id)?.laeuft) return
@@ -32046,7 +32048,7 @@
       const { data, error } = await supabase.from('order_signale').insert({ plan_id: 'konto:' + id, params }).select('*').single()
       if(error) throw error; sig = data
     }catch(e){ setz({ laeuft: false, fehler: true, text: 'Signal nicht gesendet: ' + String((e && e.message) || e).slice(0, 80) }); return }
-    setz({ laeuft: true, text: 'wartet auf den PC dieser ID …' })
+    setz({ laeuft: true, text: wer ? `Lesung angefordert · wartet auf ${pcVon} …` : 'wartet auf den PC dieser ID …' })
     const t0 = Date.now()
     const tick = async () => {
       let row = null; try{ const { data } = await supabase.from('order_signale').select('*').eq('id', sig.id).maybeSingle(); row = data }catch(_){}
@@ -32054,7 +32056,7 @@
       if(row && row.status === 'fertig'){
         const e = row.ergebnis || {}
         if(typeof e.balance === 'number'){ acc.tvBalance = e.balance; acc.tvBalanceAt = e.balance_at || new Date().toISOString(); acc.tvBalanceQuelle = mt5 ? 'mt5' : 'puls'; if(mt5 && e.ccy) acc.mt5BalCcy = e.ccy }
-        setz({ laeuft: false, text: 'gerade gelesen' + (row.pc ? ` (PC ${row.pc})` : '') }); apNachplanBald(id); return
+        setz({ laeuft: false, text: (wer && typeof e.balance === 'number' ? `gelesen ${e.balance.toLocaleString('de-DE', { maximumFractionDigits: 2 })} $` : 'gerade gelesen') + (row.pc ? ` (PC ${row.pc})` : '') }); apNachplanBald(id); return
       }
       if(row && ['fehler', 'verfallen', 'verworfen'].includes(row.status)){ setz({ laeuft: false, fehler: true, text: String((row.ergebnis || {}).msg || row.status) }); return }
       // 'laeuft' > 4 min seit der letzten Bewegung = PC-Tab weg (Fenster zu, neu geladen) → fehler, Konto frei für einen neuen Versuch
@@ -32064,7 +32066,7 @@
       }
       if(sek > 180 && (!row || row.status === 'wartet')){
         try{ await supabase.from('order_signale').update({ status: 'verfallen', updated_at: new Date().toISOString(), ergebnis: { ok: false, msg: 'keine Antwort vom PC' } }).eq('id', sig.id).in('status', ['wartet']) }catch(_){}
-        setz({ laeuft: false, fehler: true, text: mt5 ? `kein PC dieser ID hat ein MT5-Terminal für Login ${mt5Login} gemeldet (Prophos-Tab + start-alles.bat offen?)` : 'keine Antwort vom PC (Prophos-Tab + Copier auf dem PC der ID offen?)' }); return
+        setz({ laeuft: false, fehler: true, text: mt5 ? `kein PC dieser ID hat ein MT5-Terminal für Login ${mt5Login} gemeldet (Prophos-Tab + start-alles.bat offen?)` : wer ? `${pcVon} antwortet nicht — offline? (Prophos-Tab + Copier dort offen?)` : 'keine Antwort vom PC (Prophos-Tab + Copier auf dem PC der ID offen?)' }); return
       }
       if(row && row.status === 'laeuft'){ const pl = Number(((row.ergebnis || {}).warteschlange)) || 0; const t = mt5 ? `MT5 wird geöffnet · liest … (PC ${row.pc || '?'})` : pl > 1 ? `in der Warteschlange · Platz ${pl} (PC ${row.pc || '?'})` : `wird gelesen … (PC ${row.pc || '?'})`; if(_accBalLauf.get(id)?.text !== t) setz({ laeuft: true, text: t }) }
       setTimeout(tick, 2000)
@@ -40881,7 +40883,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1226'
+  const OS_TAB_BUILD = '2026-09-22.1227'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -46578,7 +46580,7 @@
         <span class="b${z.balance ? '' : ' leer'}">${escapeHtml(z.balance || (z.art === 'balance' ? 'keine Balance' : '—'))}</span>
         <span class="t">${escapeHtml(z.text)}${z.tun ? `<span class="tun"><b>→</b> ${escapeHtml(z.tun)}</span>` : ''}</span>
         <span class="a">${z.bal ? (z.lauf && z.lauf.laeuft ? `<span class="s">${escapeHtml(z.lauf.text || 'liest …')}</span>`
-          : `<button type="button" class="knopf" data-tpl-bal="${escapeHtml(z.bal)}">↻ Balance lesen</button>${z.lauf && z.lauf.text ? `<span class="s${z.lauf.fehler ? ' rot' : ''}">${escapeHtml(z.lauf.text)}</span>` : ''}`)
+          : `<button type="button" class="knopf" data-tpl-bal="${escapeHtml(z.bal)}">↻ Balance lesen</button>${z.lauf && (z.lauf.html || z.lauf.text) ? `<span class="s${z.lauf.fehler ? ' rot' : ''}">${z.lauf.html || escapeHtml(z.lauf.text)}</span>` : ''}`)
           : z.balf ? (z.lauf && z.lauf.laeuft ? `<span class="s">${escapeHtml(z.lauf.text || 'liest …')}</span>`
             : `<button type="button" class="knopf" data-tpl-balf="${escapeHtml(z.balf)}" data-tpl-uid="${escapeHtml(z.uid || '')}" title="Signal an den PC dieser ID — die Lesung läuft dort">↻ Balance lesen</button>${z.lauf && (z.lauf.html || z.lauf.text) ? `<span class="s${z.lauf.fehler ? ' rot' : ''}">${z.lauf.html || escapeHtml(z.lauf.text)}</span>` : ''}`)
           : z.haken ? `<button type="button" class="knopf" data-tpl-haken="${escapeHtml(z.haken)}" title="accounts.auto_planer an — der nächste Lauf nimmt das Konto mit">✓ Planer-Haken setzen</button>`
@@ -46959,7 +46961,7 @@
       const { r, d } = await ruf({ aktion: 'balance', account_id: accId })
       if(!r.ok || !d.signal_id) throw new Error(d.error || ('HTTP ' + r.status))
       const mt5 = d.art === 'mt5_balance'
-      setz({ laeuft: true, text: `wartet auf PC von ${wer} …` })
+      setz({ laeuft: true, text: `Lesung angefordert · wartet auf PC von ${wer} …` })
       const t0 = Date.now()
       while(Date.now() - t0 < 240000){
         await new Promise(res => setTimeout(res, 5000))
@@ -46967,20 +46969,55 @@
         const s = st && st.status, e = (st && st.ergebnis) || {}
         if(s === 'fertig'){
           const txt = typeof e.balance === 'number' ? `gelesen ${tplBalFmt(e.balance)}` : String(e.msg || 'gelesen')
-          setz({ laeuft: false, text: txt + (st.pc ? ` (PC ${st.pc})` : '') }); try{ tplLaden && tplLaden(true) }catch(_){}; return
+          setz({ laeuft: false, text: txt + (st.pc ? ` (PC ${st.pc})` : '') }); tplNachLesung(); return
         }
         if(['fehler', 'verfallen', 'verworfen'].includes(s)){ setz({ laeuft: false, fehler: true, text: String(e.msg || s) + (st.pc ? ` (PC ${st.pc})` : '') }); return }
         if(s === 'laeuft'){ const pl = Number(e.warteschlange) || 0
           setz({ laeuft: true, text: mt5 ? `MT5 wird geöffnet · liest … (PC ${st.pc || '?'})` : pl > 1 ? `in der Warteschlange · Platz ${pl} (PC ${st.pc || '?'})` : `liest … (PC ${st.pc || '?'})` }) }
       }
-      setz({ laeuft: false, fehler: true, text: 'kein PC hat übernommen (Tab offen?)', html: 'kein PC hat übernommen (Prophos-Tab bei ' + escapeHtml(wer) + ' offen?) ' + pcs() })
+      setz({ laeuft: false, fehler: true, text: `PC von ${wer} offline? kein PC hat übernommen`, html: `PC von ${escapeHtml(wer)} offline? Kein PC hat übernommen (Prophos-Tab dort offen?) ` + pcs() })
     }catch(err){ setz({ laeuft: false, fehler: true, text: 'nicht gesendet: ' + String((err && err.message) || err).slice(0, 80) }) }
   }
+  // AUCH DER ADMIN-REITER (08.10.2026, Finn als Ina unter Admin → Trade-Planer: „Ich drücke auf Balance lesen, es passiert einfach gar
+  // nichts"): die Box „Braucht dich" steht dort ebenfalls (#ap-ids-root, window._apIdsRender), tplSpaeter zeichnete aber nur die Planer-Seite —
+  // Lesung lief am PC durch (Signal fertig, Balance in accounts), im Admin blieb Knopf + „nicht live" stehen. Jetzt die sichtbare Wurzel.
   function tplSpaeter(){
     try{
-      if(window._tplRaf || !document.querySelector('#tpl-view.active')) return
-      window._tplRaf = requestAnimationFrame(() => { window._tplRaf = 0; try{ if(!_tpl.edit) tplZeichnen() }catch(e){ console.warn('[tpl]', e) } })
+      if(window._tplRaf) return
+      const tplAn = !!document.querySelector('#tpl-view.active'), admAn = !tplAn && !!document.getElementById('ap-ids-root')?.offsetParent
+      if(!tplAn && !admAn) return
+      window._tplRaf = requestAnimationFrame(() => { window._tplRaf = 0
+        try{ if(tplAn){ if(!_tpl.edit) tplZeichnen() } else if(typeof window._apIdsRender === 'function') window._apIdsRender() }catch(e){ console.warn('[tpl]', e) } })
     }catch(_){}
+  }
+  // Nach einer fertigen Lesung die sichtbare Seite neu laden (Planer: tplLaden, Admin: apIdsLaden — dessen balance_live kommt vom Backend),
+  // damit die Zeile „Balance nicht live" von selbst verschwindet und der Plan nach „Zu bestätigen" rutscht
+  function tplNachLesung(){
+    try{
+      if(document.querySelector('#tpl-view.active')) tplLaden()
+      else if(document.getElementById('ap-ids-root')?.offsetParent && typeof window._apIdsLaden === 'function') window._apIdsLaden()
+    }catch(_){}
+  }
+  // Name der ID aus dem Block der Box („<b><i></i>Name<span>n</span></b>")
+  const tplBdWer = el => String(el.closest('.tpl-bd-id')?.querySelector('b')?.firstChild?.nextSibling?.textContent || '').trim()
+  // EIGENES KONTO: accBalanceLesen meldet seinen Stand nur in _accBalLauf (+ renderAccounts) — hier beobachten und die Box bei jeder
+  // Änderung neu zeichnen; nie stumm: kein neuer Stand nach 15 s → Fehler, Fehler mit PC-Punkt der ID (pcStandPunktHtml, .1180)
+  function tplBalBeobachten(id, uid){
+    id = String(id); const vorher = _accBalLauf.get(id), t0 = Date.now()
+    let zuletzt = vorher
+    const tick = () => {
+      const st = _accBalLauf.get(id)
+      if(st !== zuletzt){ zuletzt = st; tplSpaeter() }
+      if(st === vorher || !st){
+        if(Date.now() - t0 > 15000){ _accBalLauf.set(id, { laeuft: false, fehler: true, text: 'Lesung nicht gestartet — Seite neu laden und noch einmal' }); tplSpaeter(); return }
+        setTimeout(tick, 1000); return
+      }
+      if(st.laeuft){ if(Date.now() - t0 < 300000) setTimeout(tick, 1500); return }
+      if(st.fehler){ let p = ''; try{ p = (typeof window.pcStandPunktHtml === 'function' && uid) ? (window.pcStandPunktHtml(String(uid)) || '') : '' }catch(_){}
+        st.html = escapeHtml(st.text || 'Fehler') + (p ? ' ' + p : ''); tplSpaeter(); return }
+      tplNachLesung()
+    }
+    setTimeout(tick, 300)
   }
   /* Startzeiten laufender Trades ALLER IDs aus /admin/live-trades?tage=1&echo=1 (bestehende Radar-Route, Login reicht; 07.10.2026):
    * nur plan_id → {started_at, start_um}, höchstens alle 50 s, Fehler still (dann bleibt „jetzt" mit Hinweis) */
@@ -47212,9 +47249,14 @@
     const pb = e.target.closest('[data-tpl-probe]'); if(pb){ apProbeOeffnen(); return }          // Kopfzeile (QA 08.10.2026 Punkt 1)
     const jp = e.target.closest('[data-tpl-jetzt]'); if(jp){ apJetztPlanen(false); return }
     const bl = e.target.closest('[data-tpl-bal]')   // Braucht dich: ↻ Balance lesen (bestehende Aktion aus Accounts, F19)
-    if(bl){ try{ accBalanceLesen(bl.dataset.tplBal) }catch(err){ console.warn('[tpl] Balance lesen', err) } setTimeout(tplSpaeter, 500); setTimeout(tplSpaeter, 5000); return }
+    if(bl){ const id = String(bl.dataset.tplBal), wer = tplBdWer(bl)
+      // nie stumm (08.10.2026): accBalanceLesen kehrt ohne geladenes Konto wortlos zurück → hier sagen, warum nichts passiert
+      if(!(accounts || []).some(a => String(a.id) === id)){ _accBalLauf.set(id, { laeuft: false, fehler: true, text: 'Konto nicht in deiner Kontenliste — Seite neu laden' }); tplSpaeter(); return }
+      bl.disabled = true; bl.textContent = 'fordert an …'
+      try{ accBalanceLesen(id, wer) }catch(err){ console.warn('[tpl] Balance lesen', err); _accBalLauf.set(id, { laeuft: false, fehler: true, text: 'nicht gesendet: ' + String((err && err.message) || err).slice(0, 80) }) }
+      tplBalBeobachten(id, currentUserId); return }
     const blf = e.target.closest('[data-tpl-balf]')   // Braucht dich: ↻ Balance lesen eines FREMDEN Kontos (08.10.2026) — Signal an den PC der ID
-    if(blf){ tplBalanceFremd(blf.dataset.tplBalf, blf.dataset.tplUid, blf.closest('.tpl-bd-id')?.querySelector('b')?.firstChild?.nextSibling?.textContent || '').catch(err => console.warn('[tpl] Balance fremd', err)); setTimeout(tplSpaeter, 300); return }
+    if(blf){ tplBalanceFremd(blf.dataset.tplBalf, blf.dataset.tplUid, tplBdWer(blf)).catch(err => console.warn('[tpl] Balance fremd', err)); setTimeout(tplSpaeter, 300); return }
     const ex = e.target.closest('[data-tpl-ext]')   // Braucht dich: ✎ External ID eintragen (08.10.2026) — eigenes Konto-Formular, wie „Bearbeiten" in Accounts
     if(ex){ const acc = (accounts || []).find(q => String(q.id) === ex.dataset.tplExt); if(acc && typeof openAccountModal === 'function') openAccountModal(null, acc); return }
     const nk = e.target.closest('[data-tpl-neu]')   // Braucht dich: ↻ Neu starten (START-FEHLER, 07.10.2026) — Start in 1 min, alle Prüfungen am PC
@@ -60111,6 +60153,8 @@
       finally{ cb.disabled = false; apIdsLaden() }
     }))
   }
+  // Box „Braucht dich" im Admin-Reiter (tplSpaeter/tplNachLesung, 08.10.2026): die Planer-Seite erreicht diese Funktionen sonst nicht
+  window._apIdsRender = () => { if(!_apIds.laeuft) apIdsRender() }; window._apIdsLaden = () => apIdsLaden()
   window._apIdsTabOeffnen = () => { apIdsLaden(); if(typeof window.pcStandLaden === 'function') Promise.resolve(window.pcStandLaden()).then(() => { if(!_apIds.laeuft) apIdsRender() }).catch(() => {}) }   // PC-Punkt (höchstens alle 60 s) nachziehen
   /* ══ ENDE ADMIN „TRADE-PLANER" ══ */
 
