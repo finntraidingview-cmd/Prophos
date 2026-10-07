@@ -2977,6 +2977,7 @@
   .ap-idd-bz b{text-align:right;font-variant-numeric:tabular-nums}
   .ap-idd-bar{height:10px;border-radius:999px;background:var(--surface-tint);overflow:hidden} .ap-idd-bar i{display:block;height:100%;border-radius:999px;min-width:2px}
   .ap-idd-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .ap-idd-7t{margin:0 0 10px} .ap-idd-7t .ap-idd-chip{font-size:12px;padding:3px 10px} .ap-idd-7t .ap-idd-chip b{font-size:13px}
   .ap-idd-chip{font-size:11.5px;padding:2px 8px;border-radius:999px;background:var(--surface-tint);color:var(--sub)} .ap-idd-chip.gut{color:var(--good)} .ap-idd-chip.rot{color:var(--danger)}
   .ap-idd-tage{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}
   .ap-idd-tage .tg{display:flex;flex-direction:column;align-items:center;font-variant-numeric:tabular-nums;min-width:0}
@@ -41035,7 +41036,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1239'
+  const OS_TAB_BUILD = '2026-09-22.1240'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -60576,8 +60577,17 @@
     const tmax = Math.max(1, ...jeTag.map(x => Math.max(x.plus, -x.minus)))
     const s7 = b7.reduce((s, z) => s + (Number(z.hypo_eur) || 0), 0), p7 = b7.filter(z => Number(z.pl_usd) > 0).length
     const tagTxt = t => { const [, m, d] = t.split('-'); return `${d}.${m}.` }
+    // BESTANDEN / GEBLASEN / BEENDET 7 TAGE (08.10.2026, Slave 1 .1241): /admin/auto-plan/ids liefert je ID bestanden_7t, geblasen_7t,
+    // beendet_7t (Zahl oder null) — null → „–". Fehlen die Felder ganz (altes Backend), bleibt die Zeile weg.
+    const idRow = _apIds.rows.find(r => String(r.user_id) === uid) || {}
+    const z7 = k => idRow[k] != null && isFinite(Number(idRow[k])) ? Number(idRow[k]).toLocaleString('de-DE') : '–'
+    const ab7 = (() => { const d = new Date(idRow.sieben_tage_ab || ''); return isNaN(d) ? '' : ' seit ' + d.toLocaleDateString('de-DE', { timeZone: 'Asia/Dubai', day: '2-digit', month: '2-digit' }) })()
+    const bgb = ['bestanden_7t', 'geblasen_7t', 'beendet_7t'].some(k => k in idRow) ? `<div class="ap-idd-chips ap-idd-7t">
+        <span class="ap-idd-chip gut" title="${escapeHtml('Phasenwechsel ohne Archiv-Eintrag zählt nicht mit' + ab7)}">bestanden <b>${z7('bestanden_7t')}</b></span>
+        <span class="ap-idd-chip rot" title="${escapeHtml('geblasen' + ab7)}">geblasen <b>${z7('geblasen_7t')}</b></span>
+        <span class="ap-idd-chip" title="${escapeHtml('beendet' + ab7)}">beendet <b>${z7('beendet_7t')}</b></span></div>` : ''
     const tageKarte = `<div class="ap-idd-karte"><div class="ap-idd-h">Letzte 7 Tage <b class="${kl(s7)}">${b7.length ? vzE(s7) : '–'}</b><span>${b7.length ? `${n(b7.length, 'Trade')} · ${p7} im Plus` : 'keine beendeten Auto-Trades'}</span></div>
-        <div class="ap-idd-tage">${jeTag.map(x => `<div class="tg" title="${escapeHtml(`${tagTxt(x.t)} · ${n(x.n, 'Trade')} · ${vzE(x.plus + x.minus)} hypothetisch`)}">
+        ${bgb}<div class="ap-idd-tage">${jeTag.map(x => `<div class="tg" title="${escapeHtml(`${tagTxt(x.t)} · ${n(x.n, 'Trade')} · ${vzE(x.plus + x.minus)} hypothetisch`)}">
           <div class="ob"><i style="height:${(x.plus / tmax * 100).toFixed(0)}%;background:${farbe}"></i></div><div class="ub"><i style="height:${(-x.minus / tmax * 100).toFixed(0)}%"></i></div>
           <small>${tagTxt(x.t)}</small><b class="${kl(x.plus + x.minus)}">${x.n ? vzE(x.plus + x.minus) : '·'}</b></div>`).join('')}</div></div>`
     // ── LAUFENDE TRADES JETZT: Konto · Richtung · Start · Weg · Live-P&L (Balken, Mitte = 0) · $ + € — Klick öffnet das Konto-Popup
