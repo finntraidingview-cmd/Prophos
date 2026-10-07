@@ -2868,24 +2868,38 @@
      eine Kachel in ID-Farbe (--id aus idFarbe), Klick = nur diese ID. Haken oben rechts = Planer-Haken. Handy: eine Reihe zum Wischen. */
   #adm-pane-planer .ap-ids-kopf{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 8px}
   #adm-pane-planer .ap-ids-kopf b{font-size:14px;color:var(--ink)} #adm-pane-planer .ap-ids-kopf span{font-size:12px;color:var(--sub);font-variant-numeric:tabular-nums}
-  #adm-pane-planer .ap-ids{display:grid;grid-template-columns:repeat(auto-fill,minmax(176px,1fr));gap:10px;margin-bottom:14px}
-  #adm-pane-planer .ap-idk{--id:var(--ink);position:relative;min-width:0;padding:10px 12px 10px;border-radius:var(--r-md);cursor:pointer;
-    border:1px solid color-mix(in srgb,var(--id) 22%,var(--border));background:color-mix(in srgb,var(--id) 6%,var(--surface));transition:border-color .15s,box-shadow .15s,opacity .15s}
-  #adm-pane-planer .ap-idk:hover{border-color:color-mix(in srgb,var(--id) 55%,var(--border))}
-  #adm-pane-planer .ap-idk:focus-visible{outline:2px solid var(--id);outline-offset:2px}
-  #adm-pane-planer .ap-idk.an{border-color:var(--id);box-shadow:0 0 0 2px color-mix(in srgb,var(--id) 28%,transparent);background:color-mix(in srgb,var(--id) 12%,var(--surface))}
-  #adm-pane-planer .ap-ids.gewaehlt .ap-idk:not(.an){opacity:.62} #adm-pane-planer .ap-ids.gewaehlt .ap-idk:not(.an):hover{opacity:1}
-  #adm-pane-planer .ap-idk.aus{opacity:.45;background:var(--surface);border-color:var(--border)} #adm-pane-planer .ap-idk.aus.an{opacity:1}
-  #adm-pane-planer .ap-idk-k{display:flex;align-items:center;gap:6px;min-width:0;padding-right:20px}
-  #adm-pane-planer .ap-idk-k .ap-adm-id{font-size:13.5px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap} #adm-pane-planer .ap-idk-k .ap-adm-id i{background:var(--id)}
-  #adm-pane-planer .ap-idk input{position:absolute;top:10px;right:10px;width:15px;height:15px;margin:0;accent-color:var(--id);cursor:pointer}
-  #adm-pane-planer .ap-idk-w{display:flex;align-items:baseline;gap:5px;margin:6px 0 1px;font-variant-numeric:tabular-nums}
-  #adm-pane-planer .ap-idk-w b{font-size:22px;font-weight:600;letter-spacing:-.02em;color:var(--ink);line-height:1.1} #adm-pane-planer .ap-idk-w span{font-size:12.5px;color:var(--sub)}
-  #adm-pane-planer .ap-idk-b{display:flex;height:5px;border-radius:999px;overflow:hidden;background:color-mix(in srgb,var(--id) 10%,var(--surface-tint));margin:7px 0 6px}
-  #adm-pane-planer .ap-idk-b i{display:block;height:100%;background:var(--id)} #adm-pane-planer .ap-idk-b i.a{background:color-mix(in srgb,var(--sub-2) 45%,transparent)}
-  #adm-pane-planer .ap-idk-u{font-size:11.5px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
-  @media (max-width:760px){ #adm-pane-planer .ap-ids{grid-auto-flow:column;grid-template-columns:none;grid-auto-columns:150px;overflow-x:auto;scroll-snap-type:x proximity;padding:2px 2px 6px;margin-left:-2px;margin-right:-2px}
-    #adm-pane-planer .ap-idk{scroll-snap-align:start} #adm-pane-planer .ap-idk-w b{font-size:19px} }
+  /* REITER STATT KACHELN (08.10.2026, Slave-Terminal 3 — Finn, Screenshot .1238 auf 2000 px: „Oben jetzt mal ein bisschen schöner. Das mit
+     den IDs im Planer sieht nicht so geil aus. Auch vom Mapping gefällt es mir nicht" — zwei Reihen getönter Kacheln, die gedimmten „nicht im
+     Planer" so groß wie die anderen): eine Zeile wie die Admin-Reiter darüber (.subtab: Text, 2-px-Unterstrich, Linie unten), je ID Punkt +
+     Name + „7/11" grau + dünner Balken in ID-Farbe, aktiv = Unterstrich in ID-Farbe. Haken nur noch im Menü rechts (Fehlklick-Verdacht). */
+  #adm-pane-planer .ap-idr-wrap{position:relative;display:flex;align-items:stretch;gap:4px;border-bottom:1px solid var(--border);margin-bottom:14px}
+  #adm-pane-planer .ap-idr{display:flex;gap:2px;flex:1 1 auto;min-width:0;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+  #adm-pane-planer .ap-idr::-webkit-scrollbar{display:none}
+  #adm-pane-planer .ap-idr-t{--id:var(--violet);flex:none;display:flex;flex-direction:column;justify-content:center;gap:6px;padding:9px 14px 7px;margin-bottom:-1px;
+    background:none;border:0;border-bottom:2px solid transparent;font:inherit;font-size:13.5px;font-weight:500;color:var(--sub);cursor:pointer;white-space:nowrap;text-align:left;
+    transition:color .15s var(--ease),border-color .15s var(--ease)}
+  #adm-pane-planer .ap-idr-t:hover{color:var(--ink)} #adm-pane-planer .ap-idr-t:focus-visible{outline:2px solid var(--id);outline-offset:-2px;border-radius:6px}
+  #adm-pane-planer .ap-idr-t.an{color:var(--ink);border-bottom-color:var(--id)}
+  #adm-pane-planer .ap-idr-t .k{display:flex;align-items:center;gap:6px}
+  #adm-pane-planer .ap-idr-t .k i.p{width:8px;height:8px;border-radius:50%;background:var(--id);flex:none}
+  #adm-pane-planer .ap-idr-t .k em{font-style:normal;font-size:12px;color:var(--sub-2);font-variant-numeric:tabular-nums}
+  #adm-pane-planer .ap-idr-t .k small{font-size:11.5px;color:var(--sub-2);font-weight:400}
+  #adm-pane-planer .ap-idr-t .b{display:flex;height:3px;border-radius:2px;overflow:hidden;background:color-mix(in srgb,var(--id) 14%,var(--surface-tint))}
+  #adm-pane-planer .ap-idr-t .b i{display:block;height:100%;background:var(--id)}
+  #adm-pane-planer .ap-idr-r{flex:none;display:flex;align-items:center;gap:2px;padding-left:6px}
+  #adm-pane-planer .ap-idr-m{background:none;border:0;border-radius:6px;padding:6px 9px;font:inherit;font-size:12.5px;color:var(--sub);cursor:pointer;white-space:nowrap}
+  #adm-pane-planer .ap-idr-m:hover,#adm-pane-planer .ap-idr-m.auf{color:var(--ink);background:var(--surface-tint)}
+  #adm-pane-planer .ap-idr-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:30;width:300px;max-width:calc(100vw - 32px);max-height:60vh;overflow-y:auto;
+    background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow-pop);padding:6px 4px}
+  #adm-pane-planer .ap-idr-menu .h{padding:6px 10px 4px;font-size:11.5px;color:var(--sub)}
+  #adm-pane-planer .ap-idr-menu .z{display:grid;grid-template-columns:18px minmax(0,1fr) auto;align-items:center;gap:10px;padding:6px 10px;border-radius:8px}
+  #adm-pane-planer .ap-idr-menu .z:hover{background:var(--surface-tint)}
+  #adm-pane-planer .ap-idr-menu .z input{width:15px;height:15px;margin:0;accent-color:#047857;cursor:pointer}
+  #adm-pane-planer .ap-idr-menu .z button{background:none;border:0;padding:0;font:inherit;font-size:13px;color:var(--ink);text-align:left;cursor:pointer;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #adm-pane-planer .ap-idr-menu .z button i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px;vertical-align:1px}
+  #adm-pane-planer .ap-idr-menu .z span{font-size:11.5px;color:var(--sub-2);font-variant-numeric:tabular-nums}
+  #adm-pane-planer .ap-idr-menu .z.aus button{color:var(--sub)}
+  @media (max-width:760px){ #adm-pane-planer .ap-idr-t{padding:8px 11px 6px;font-size:13px} #adm-pane-planer .ap-idr-m .lang{display:none} }   /* Handy: Leiste wischbar, Menüs als Symbol */
   /* Bestätigen ohne Warten (08.10.2026, Slave-Terminal 7): Zeile gedimmt solange der POST läuft, kurzes Ausblenden nach Erfolg, Grund bei Ablehnung */
   #adm-pane-planer .pz-z.ap-ok-laeuft{opacity:.5} #adm-pane-planer .pz-z.ap-ok-weg{opacity:0;transform:translateX(8px);transition:opacity .16s,transform .16s}
   #adm-pane-planer .ap-ok-bal{margin-top:4px;padding:2px 8px;font-size:11.5px;height:auto;white-space:nowrap}
@@ -40978,7 +40992,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1255'
+  const OS_TAB_BUILD = '2026-09-22.1256'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -60889,45 +60903,53 @@
     }
     const Z = rows.map(zahlen).sort((a, b) => b.drin - a.drin)   // ohne Haken ans Ende, sonst Reihenfolge des Backends
     const pct = (n, k) => k > 0 ? Math.min(100, n / k * 100).toFixed(1) : '0'
-    const unter = (laeuft, aus) => [laeuft ? `● ${laeuft} läuft` : '', aus ? `${aus} ausgelassen` : ''].filter(Boolean).join(' · ')
-    const kachel = z => {
+    /* REITER (08.10.2026, Slave-Terminal 3 — Finn .1238: „Oben jetzt mal ein bisschen schöner … Auch vom Mapping gefällt es mir nicht"):
+     * eine Zeile wie die Admin-Reiter. „Alle 32/42", dann je ID MIT Haken ein Reiter (Punkt, Name, PC-Punkt, „7/11", „· 1 ausgelassen" nur
+     * bei > 0, 3-px-Balken in ID-Farbe). IDs ohne Haken nur als „+n nicht im Planer ▾". Der Planer-Haken steht NICHT mehr im Reiter —
+     * Verdacht: EzPoker/Mike wurden beim Wählen aus Versehen herausgenommen —, sondern nur in den Menüs rechts („⚙ IDs verwalten ▾" = alle). */
+    const reiter = z => {
       const an = u === z.uid
-      const tip = (!z.drin ? 'nicht im Trade-Planer' : `${z.geplant} von ${z.konten} planbaren Konten heute geplant${z.aus ? ' · ausgelassen: ' + z.ausTip : ''}`) + (an ? ' — nochmal klicken = alle IDs' : ' — klicken = nur diese ID')
-      const wert = !z.drin ? '<b>–</b><span>nicht im Planer</span>' : !z.konten ? '<b>0</b><span>keine planbaren Konten</span>' : `<b>${z.geplant}</b><span>von ${z.konten} geplant</span>`
-      return `<div class="ap-idk${z.drin ? '' : ' aus'}${an ? ' an' : ''}" style="--id:${idFarbe(z.uid)}" role="button" tabindex="0" data-ap-sicht="${escapeHtml(z.uid)}" title="${escapeHtml(tip)}">
-        <div class="ap-idk-k"><span class="ap-adm-id"><i></i>${escapeHtml(z.name)}</span>${pcs(z.uid)}</div>
-        <input type="checkbox" data-ap-id="${escapeHtml(z.uid)}"${z.drin ? ' checked' : ''} title="${z.drin ? 'Im Trade-Planer — Haken weg = ab dem nächsten Lauf nicht mehr geplant' : 'Nicht im Trade-Planer — Haken setzen = ab dem nächsten Lauf (10-min-Takt / Nacht) dabei'}">
-        <div class="ap-idk-w">${wert}</div>
-        <div class="ap-idk-b"><i style="width:${pct(z.geplant, z.konten)}%"></i><i class="a" style="width:${pct(z.aus, z.konten)}%"></i></div>
-        <div class="ap-idk-u">${unter(z.laeuft, z.aus) || '&nbsp;'}</div></div>`
+      const tip = `${z.geplant} von ${z.konten} planbaren Konten heute geplant${z.laeuft ? ' · ' + z.laeuft + ' läuft' : ''}${z.aus ? ' · ausgelassen: ' + z.ausTip : ''}` + (an ? ' — nochmal klicken = alle IDs' : ' — klicken = nur diese ID')
+      return `<button type="button" role="tab" aria-selected="${an}" class="ap-idr-t${an ? ' an' : ''}" style="--id:${idFarbe(z.uid)}" data-ap-sicht="${escapeHtml(z.uid)}" title="${escapeHtml(tip)}">
+        <span class="k"><i class="p"></i>${escapeHtml(z.name)}${pcs(z.uid)}<em>${z.geplant}/${z.konten}</em>${z.aus ? `<small>· ${z.aus} ausgelassen</small>` : ''}</span>
+        <span class="b"><i style="width:${pct(z.geplant, z.konten)}%"></i></span></button>`
     }
-    // „Alle" (neutral grau, --id:var(--sub)): Summe über die IDs mit Haken, Balken aus den ID-Farben (je ID ihr Anteil geplant), grau = ausgelassen
-    const im = Z.filter(z => z.drin), sum = k => im.reduce((a, z) => a + z[k], 0), gK = sum('konten'), gG = sum('geplant'), gA = sum('aus')
-    const alleBalken = gK ? im.filter(z => z.geplant).map(z => `<i style="width:${pct(z.geplant, gK)}%;background:${idFarbe(z.uid)}"></i>`).join('') + `<i class="a" style="width:${pct(gA, gK)}%"></i>` : ''
-    const alle = `<div class="ap-idk${u ? '' : ' an'}" style="--id:var(--sub)" role="button" tabindex="0" data-ap-sicht="" title="alle IDs zusammen">
-        <div class="ap-idk-k"><span class="ap-adm-id">Alle IDs</span></div>
-        <div class="ap-idk-w"><b>${gG}</b><span>von ${gK} geplant</span></div>
-        <div class="ap-idk-b">${alleBalken}</div>
-        <div class="ap-idk-u">${unter(sum('laeuft'), gA) || '&nbsp;'}</div></div>`   // „8 von 10 IDs" steht schon im Kopf
+    // „Alle" (Violett wie die aktiven Admin-Reiter): Summe über die IDs mit Haken, Balken aus den ID-Farben je Anteil
+    const im = Z.filter(z => z.drin), raus = Z.filter(z => !z.drin), sum = k => im.reduce((a, z) => a + z[k], 0), gK = sum('konten'), gG = sum('geplant'), gA = sum('aus')
+    const alleBalken = gK ? im.filter(z => z.geplant).map(z => `<i style="width:${pct(z.geplant, gK)}%;background:${idFarbe(z.uid)}"></i>`).join('') : ''
+    const alle = `<button type="button" role="tab" aria-selected="${!u}" class="ap-idr-t${u ? '' : ' an'}" data-ap-sicht="" title="alle IDs zusammen">
+        <span class="k">Alle<em>${gG}/${gK}</em>${gA ? `<small>· ${gA} ausgelassen</small>` : ''}</span><span class="b">${alleBalken}</span></button>`
+    // Menü-Zeile: Haken = Planer an/aus (POST /ids wie bisher, Handler [data-ap-id] unten), Name = Sicht auf diese ID
+    const mz = z => `<div class="z${z.drin ? '' : ' aus'}"><input type="checkbox" data-ap-id="${escapeHtml(z.uid)}"${z.drin ? ' checked' : ''} title="${z.drin ? 'Im Trade-Planer — Haken weg = ab dem nächsten Lauf nicht mehr geplant' : 'Nicht im Trade-Planer — Haken setzen = ab dem nächsten Lauf (10-min-Takt / Nacht) dabei'}">
+        <button type="button" data-ap-sicht="${escapeHtml(z.uid)}" title="nur diese ID ansehen"><i style="background:${idFarbe(z.uid)}"></i>${escapeHtml(z.name)}</button><span>${z.konten} Konten</span></div>`
+    const menu = _apIds.menu === 'raus' && raus.length ? `<div class="ap-idr-menu" data-ap-menu-box><div class="h">Nicht im Trade-Planer — Haken setzen = ab dem nächsten Lauf dabei</div>${raus.map(mz).join('')}</div>`
+      : _apIds.menu === 'verw' ? `<div class="ap-idr-menu" data-ap-menu-box><div class="h">Haken = im Trade-Planer (gilt ab dem nächsten Lauf)</div>${Z.map(mz).join('')}</div>` : ''
+    const rechts = `<div class="ap-idr-r">${raus.length ? `<button type="button" class="ap-idr-m${_apIds.menu === 'raus' ? ' auf' : ''}" data-ap-menu="raus" title="IDs ohne Planer-Haken">+${raus.length}<span class="lang"> nicht im Planer</span> ▾</button>` : ''}
+        <button type="button" class="ap-idr-m${_apIds.menu === 'verw' ? ' auf' : ''}" data-ap-menu="verw" title="Planer-Haken aller IDs">⚙<span class="lang"> IDs verwalten</span> ▾</button></div>`
     const kopf = `<div class="ap-ids-kopf"><b>IDs im Trade-Planer · ${drin.length} von ${rows.length}</b>
         <span title="Welche Konten einer ID geplant werden, entscheiden weiter Typ, Firma (Kernwerte), Balance und der Haken je Konto unter Accounts.">Nachtlauf ${_apIds.aktiv ? 'an' : 'aus'}${lzAt ? ' · letzter Lauf ' + escapeHtml(lzAt) : _apIds.tag ? ' · letzter Lauf ' + escapeHtml(String(_apIds.tag)) : ''}</span>
         <button type="button" class="btn btn-ghost" id="ap-ids-neu" style="margin-left:auto;padding:3px 9px;font-size:12px" title="Neu laden">↻</button></div>`
-    const leiste = kopf + (rows.length ? `<div class="ap-ids${u ? ' gewaehlt' : ''}">${alle}${Z.map(kachel).join('')}</div>` : '<div style="color:var(--sub);font-size:12.5px;margin-bottom:14px">keine ID mit planbaren Konten</div>')
+    const leiste = kopf + (rows.length ? `<div class="ap-idr-wrap"><div class="ap-idr" role="tablist">${alle}${im.map(reiter).join('')}${raus.filter(z => z.uid === u).map(reiter).join('')}</div>${rechts}${menu}</div>` : '<div style="color:var(--sub);font-size:12.5px;margin-bottom:14px">keine ID mit planbaren Konten</div>')
       + '<div id="ap-id-detail"></div>'   // ID-Details (Slave 8, apIdDetailRender) — leer, solange „Alle" gewählt ist
     root.style.padding = '6px 0'; root.style.color = ''
     try{ _apIds.D = apIdsDaten() }catch(_){ _apIds.D = null }   // Trades des gewählten Tags (und der gewählten ID) einmal je Zeichnen (Kopf + Vorschlags-Zeilen)
     window._apOffenNichtLive = _apIds.offen.filter(z => z.balance_live === false)   // Box „Braucht dich" (tplBraucht) zeigt sie mit ↻ Balance lesen — auch für morgen, wo das Delta nichts kennt
-    const leisteX = root.querySelector('.ap-ids')?.scrollLeft || 0   // Handy: Wisch-Position der Leiste über das Neuzeichnen (Klick, Takt) halten
+    const leisteX = root.querySelector('.ap-idr')?.scrollLeft || 0   // Handy: Wisch-Position der Leiste über das Neuzeichnen (Klick, Takt) halten
     root.innerHTML = leiste + apIdsKopfHtml() + apIdsOffenHtml()
-    if(leisteX) root.querySelector('.ap-ids').scrollLeft = leisteX
+    if(leisteX && root.querySelector('.ap-idr')) root.querySelector('.ap-idr').scrollLeft = leisteX
     const det = root.querySelector('#ap-id-detail'), detFn = typeof window.apIdDetailRender === 'function' ? window.apIdDetailRender : typeof apIdDetailRender === 'function' ? apIdDetailRender : null
     if(u && det && detFn){ try{ detFn(u, det) }catch(e){ console.warn('[ap-ids] ID-Details', e) } }
-    // Kachel-Klick: Sicht auf diese ID, nochmal = alle; Haken (input) in der Kachel wählt nicht mit
-    root.querySelectorAll('[data-ap-sicht]').forEach(k => {
-      const wahl = ev => { if(ev.target.closest('input,a,button')) return; const id = k.dataset.apSicht || null; apSichtSetzen(id && id !== u ? id : null) }
-      k.addEventListener('click', wahl)
-      k.addEventListener('keydown', ev => { if(ev.key === 'Enter' || ev.key === ' '){ ev.preventDefault(); wahl(ev) } })
-    })
+    // Reiter-Klick (auch Name im Menü): Sicht auf diese ID, nochmal = alle; Reiter sind <button>, Enter/Leertaste kommen als click
+    root.querySelectorAll('[data-ap-sicht]').forEach(k => k.addEventListener('click', () => { const id = k.dataset.apSicht || null; _apIds.menu = null; apSichtSetzen(id && id !== u ? id : null) }))
+    // Menüs „+n nicht im Planer" / „IDs verwalten": Zustand in _apIds.menu, damit das Neuzeichnen (Takt, Haken) es offen lässt; zu per
+    // Klick daneben oder Esc — eigene Listener nur für dieses Menü, einmal gebunden
+    root.querySelectorAll('[data-ap-menu]').forEach(b => b.addEventListener('click', () => { _apIds.menu = _apIds.menu === b.dataset.apMenu ? null : b.dataset.apMenu; apIdsRender() }))
+    if(!_apIds.menuZuGebunden){
+      _apIds.menuZuGebunden = true
+      const menuZu = () => { if(_apIds.menu){ _apIds.menu = null; apIdsRender() } }
+      document.addEventListener('pointerdown', e => { if(_apIds.menu && !(e.target.closest && e.target.closest('[data-ap-menu-box],[data-ap-menu]'))) menuZu() }, true)
+      document.addEventListener('keydown', e => { if(e.key === 'Escape') menuZu() })
+    }
     root.querySelector('#ap-ids-neu')?.addEventListener('click', apIdsLaden)
     if(!root.dataset.tplKlick && typeof window._tplKlick === 'function'){ root.addEventListener('click', window._tplKlick); root.dataset.tplKlick = '1' }   // Braucht-dich-Knöpfe (Balance, External ID, Haken, Neu starten) wie auf der Planer-Seite
     try{ if(typeof tplScrollJetzt === 'function'){ const alt = _tpl.tag; _tpl.tag = apIdsTag(); try{ tplScrollJetzt(root, _apIds.scrollX) } finally{ _tpl.tag = alt } } }catch(_){}   // Handy: Kasten auf „jetzt − 45 %" (08.10.2026)
