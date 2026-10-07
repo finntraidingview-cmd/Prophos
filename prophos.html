@@ -1929,6 +1929,15 @@
   :is(#tpl-view,#adm-pane-planer) .tpl-tb .ob,:is(#tpl-view,#adm-pane-planer) .tpl-tb .ub{width:22px;height:34px;display:flex;justify-content:center} :is(#tpl-view,#adm-pane-planer) .tpl-tb .ob{align-items:flex-end;border-bottom:1.5px solid var(--border)} :is(#tpl-view,#adm-pane-planer) .tpl-tb .ub{align-items:flex-start}
   :is(#tpl-view,#adm-pane-planer) .tpl-tb i{display:block;width:100%;border-radius:3px} :is(#tpl-view,#adm-pane-planer) .tpl-tb i.gut{background:var(--good)} :is(#tpl-view,#adm-pane-planer) .tpl-tb i.rot{background:var(--danger)}
   :is(#tpl-view,#adm-pane-planer) .tpl-tb small{font-size:10.5px;color:var(--sub);margin-top:3px} :is(#tpl-view,#adm-pane-planer) .tpl-tb b{font-size:11.5px;font-weight:600}
+  /* QA 08.10.2026 (Slave 3): Beendet-Balken je Handelstag, Segmente in ID-Farbe gestapelt, höher; Tabelle aufklappbar; Kopfzeile rechts; Leerzustand klein */
+  :is(#tpl-view,#adm-pane-planer) .tpl-tb .ob,:is(#tpl-view,#adm-pane-planer) .tpl-tb .ub{width:26px;height:56px;display:flex;flex-direction:column;gap:1px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-tb .ob{flex-direction:column-reverse;justify-content:flex-start;border-bottom:1.5px solid var(--border)} :is(#tpl-view,#adm-pane-planer) .tpl-tb .ub{justify-content:flex-start}
+  :is(#tpl-view,#adm-pane-planer) .tpl-tb .ob i{border-radius:3px 3px 0 0} :is(#tpl-view,#adm-pane-planer) .tpl-tb .ub i{border-radius:0 0 3px 3px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bil-det summary{cursor:pointer;padding:6px 4px;font-size:12px;color:var(--sub);list-style:none} :is(#tpl-view,#adm-pane-planer) .tpl-bil-det summary::before{content:'▸ ';color:var(--sub-2)} :is(#tpl-view,#adm-pane-planer) .tpl-bil-det[open] summary::before{content:'▾ '}
+  :is(#tpl-view,#adm-pane-planer) .tpl-ids .tpl-kopf-r{margin-left:auto;display:inline-flex;align-items:center;gap:6px 8px;flex-wrap:wrap} :is(#tpl-view,#adm-pane-planer) .tpl-ids .tpl-kopf-r .tc2-btn{height:26px;padding:0 10px;font-size:12px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-ids .tpl-lauf{font-size:12px;color:var(--sub);font-variant-numeric:tabular-nums;white-space:nowrap} :is(#tpl-view,#adm-pane-planer) .tpl-ids .ap-alle{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--sub);cursor:pointer;user-select:none}
+  :is(#tpl-view,#adm-pane-planer) .tpl-ids .tpl-alle-best{margin-left:0}
+  :is(#tpl-view,#adm-pane-planer) .tpl-leer.klein{padding:6px 4px}
   :is(#tpl-view,#adm-pane-planer) .tpl-hz.ohne{opacity:.6} :is(#tpl-view,#adm-pane-planer) .tpl-hz.zu .w b{color:var(--sub)}
   :is(#tpl-view,#adm-pane-planer) .tpl-hz .w{display:flex;align-items:center;gap:6px;min-width:0} :is(#tpl-view,#adm-pane-planer) .tpl-hz .w i{width:8px;height:8px;border-radius:50%;flex:none} :is(#tpl-view,#adm-pane-planer) .tpl-hz .w b{font-weight:600;white-space:nowrap} :is(#tpl-view,#adm-pane-planer) .tpl-hz .w small{color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   :is(#tpl-view,#adm-pane-planer) .tpl-hz .r{color:var(--sub);white-space:nowrap} :is(#tpl-view,#adm-pane-planer) .tpl-hz .r em{display:inline-block;min-width:34px;margin-right:6px;padding:1px 0;border-radius:4px;background:var(--surface-tint);color:var(--ink-2);font-style:normal;font-size:10.5px;font-weight:700;text-align:center;letter-spacing:.04em}
@@ -1978,8 +1987,12 @@
     :is(#tpl-view,#adm-pane-planer) .tpl-m{font-size:11px;height:22px;padding:0 8px 0 6px}
     :is(#tpl-view,#adm-pane-planer) .tpl-spur{height:84px}
     :is(#tpl-view,#adm-pane-planer) .tpl-bd-z{grid-template-columns:16px minmax(0,1fr) auto;gap:2px 8px}
-    :is(#tpl-view,#adm-pane-planer) .tpl-hb{grid-template-columns:minmax(0,1.3fr) minmax(70px,1fr) 84px;gap:4px 8px} :is(#tpl-view,#adm-pane-planer) .tpl-hb .bar{height:10px}
-    :is(#tpl-view,#adm-pane-planer) .tpl-hz{grid-template-columns:minmax(0,1fr) auto;gap:2px 8px} :is(#tpl-view,#adm-pane-planer) .tpl-hz .p,:is(#tpl-view,#adm-pane-planer) .tpl-hz .s{display:none} :is(#tpl-view,#adm-pane-planer) .tpl-hz .z{grid-column:1/-1;text-align:left;font-size:11px}
+    /* Läuft-Liste einzeilig (QA 08.10.2026 Punkt 8): Konto links, Richtung + Wert rechts, Zeit klein dahinter — vorher drei Zeilen je Trade */
+    :is(#tpl-view,#adm-pane-planer) .tpl-hz{grid-template-columns:minmax(0,1fr) auto auto auto;gap:2px 6px;padding:4px 2px} :is(#tpl-view,#adm-pane-planer) .tpl-hz .p,:is(#tpl-view,#adm-pane-planer) .tpl-hz .s{display:none}
+    :is(#tpl-view,#adm-pane-planer) .tpl-hz .z{grid-column:auto;text-align:right;font-size:10.5px} :is(#tpl-view,#adm-pane-planer) .tpl-hz .h{font-size:12.5px} :is(#tpl-view,#adm-pane-planer) .tpl-hz .r{font-size:11px} :is(#tpl-view,#adm-pane-planer) .tpl-hz .r em{min-width:30px;margin-right:4px}
+    :is(#tpl-view,#adm-pane-planer) .tpl-hz .w small{max-width:110px} :is(#tpl-view,#adm-pane-planer) .tpl-hz .w b{max-width:84px;overflow:hidden;text-overflow:ellipsis}
+    :is(#tpl-view,#adm-pane-planer) .kpis.tpl-kpis5 .kpi-value{white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere}   /* Netto-Zahl darf umbrechen (QA Punkt 3) */
+    :is(#tpl-view,#adm-pane-planer) .tpl-ids .tpl-kopf-r{margin-left:0;width:100%} :is(#tpl-view,#adm-pane-planer) .tpl-ids .tpl-lauf{white-space:normal}
     :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .b,:is(#tpl-view,#adm-pane-planer) .tpl-bd-z .t{grid-column:2/-1}
     :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .a{grid-column:1/-1;justify-content:flex-start;padding-left:24px}
     :is(#tpl-view,#adm-pane-planer) .tpl-ids .adm-vl-chip{font-size:11.5px;padding:3px 8px}
@@ -40735,7 +40748,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1206'
+  const OS_TAB_BUILD = '2026-09-22.1207'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -45062,6 +45075,8 @@
     const vorschlaege = (tradePlans || []).filter(p => p && p.status === 'planned' && p.autoPlan && !p.autoBestaetigtAt)
     const bestaetigt = (tradePlans || []).filter(p => p && p.status === 'planned' && p.autoPlan && p.autoBestaetigtAt).length
     if(!_ap.imPlaner && !vorschlaege.length && !bestaetigt){ el.style.display = 'none'; return }
+    // Trade-Planer-Seite zeichnet Lauf + Knöpfe in ihrer Kopfzeile (QA 08.10.2026 Punkt 1) — die Karte hier nur, wo es die Kopfzeile nicht gibt
+    if(_tpl.kopfInChips && el.closest('#tpl-view')){ el.style.display = 'none'; return }
     const l = _ap.letzter || {}, e = apEigenes(l)
     const gruende = new Map()
     for(const x of e.ausgelassen){ const k = apGrundKurz(x.grund); gruende.set(k, (gruende.get(k) || 0) + 1) }
@@ -45889,7 +45904,7 @@
     const k2 = `<div class="kpi"><div class="kpi-label">Short im Spiel</div><div class="kpi-value tpl-rot">▼ ${tplEur(Sl)}</div><span class="kpi-delta" title="laufende Short-Trades (Einsatz €) · darunter die geplanten">${unter(false)}</span></div>`
     const sumL = Ll + Sl, anteil = sumL > 0 ? Ll / sumL * 100 : 50, N = Ll - Sl, NT = (Ll + Lp) - (Sl + Sp)
     const d = D.delta, band = d && d.band_eur != null ? ` · Band ±${tplEur(d.band_eur)}` : ''
-    const k3 = `<div class="kpi"><div class="kpi-label">Netto</div><div class="kpi-value ${N > 0 ? 'tpl-gut' : N < 0 ? 'tpl-rot' : ''}">jetzt ${vz(N)}<small>${N > 0 ? 'long' : N < 0 ? 'short' : ''}</small></div>
+    const k3 = `<div class="kpi"><div class="kpi-label">Netto</div><div class="kpi-value ${N > 0 ? 'tpl-gut' : N < 0 ? 'tpl-rot' : ''}" title="Netto jetzt (laufende Trades)">${vz(N)}<small>${N > 0 ? 'long' : N < 0 ? 'short' : ''}</small></div>
         <div class="tpl-ls"><i style="width:${anteil.toFixed(1)}%;background:var(--good)"></i><i style="flex:1;background:var(--danger)"></i></div>
         <span class="kpi-delta umbruch" title="Netto der laufenden Trades · darunter mit den geplanten bis Tagesende${band}">${plan.length ? `bis Tagesende mit geplanten ${vz(NT)}` : 'keine geplanten'}</span></div>`
     const hy = tplHypo(D)
@@ -46003,7 +46018,7 @@
         const label = `<button type="button" class="tpl-name tpl-weitere" data-tpl-weitere="1" title="${z.auf ? 'zusammenklappen' : 'aufklappen: eine Zeile je ID'}"><b><i style="background:var(--sub-2)"></i>Weitere <em>${z.auf ? '▾' : '▸'}</em></b><span>${(z.alle || z.ids).length} IDs · ${nl ? nl + ' laufend' : n + ' Trades'}</span></button>`
         return spurHtml(z, liste, label)
       }
-      const label = `<div class="tpl-name"><b title="${escapeHtml(z.name)}"><i style="background:${idFarbe(z.uid)}"></i>${escapeHtml(z.name || '—')}</b><span>${n} Trade${n === 1 ? '' : 's'}${nl ? ` · ${nl} ●` : ''}</span></div>`
+      const label = `<div class="tpl-name"><b title="${escapeHtml(z.name)}"><i style="background:${idFarbe(z.uid)}"></i>${escapeHtml(z.name || '—')}</b><span>${n} Trade${n === 1 ? '' : 's'}${nl ? ` · ${nl} läuft` : ''}</span></div>`   // „1 läuft" als Wort (QA 08.10.2026, Punkt 6: der Punkt allein war nicht zu erkennen)
       return spurHtml(z, liste, label)
     }).join('')
     _tpl.achse = { VON, BIS, jetztIn }   // der Netto-Chart (eigene Karte darunter) teilt sich die Zeitachse
@@ -46512,7 +46527,7 @@
   function tplHypoKachelHtml(h){
     const vz = x => (x > 0 ? '+' : x < 0 ? '−' : '') + tplEur(x)
     return `<div class="kpi"><div class="kpi-label">P&amp;L hypothetisch</div><div class="kpi-value ${h.jetzt > 0 ? 'tpl-gut' : h.jetzt < 0 ? 'tpl-rot' : ''}" title="Σ Kontowert-Satz (€ je $) × Live-P&amp;L $ je laufendem ungehedgtem Trade${h.cfd ? ' · ' + h.cfd + ' CFD aus MT5' : ''}">jetzt ${vz(h.jetzt)}</div>
-        <span class="kpi-delta">${h.n} Trade${h.n === 1 ? '' : 's'}${h.ohne ? ` · ${h.ohne} ohne Wert` : ''}${!h.n && !h.ohne ? ' · nichts läuft' : ''}</span></div>`
+        <span class="kpi-delta">${(h.n - h.ohne) > 0 ? `${h.n - h.ohne} Trade${h.n - h.ohne === 1 ? '' : 's'} mit Live-Wert` : (h.n || h.ohne) ? 'noch kein Live-Wert' : 'nichts läuft'}</span></div>`   // QA 08.10.2026 Punkt 2: „18 ohne Wert" war Rauschen
   }
   /* HYPO-P&L-CHART (Finns Korrektur 4, 07.10.2026: „Mach beides in separate Graphen, nicht im gleichen Chart"): eigene Karte direkt unter
    * dem Netto-Chart, gleiche Breite und Höhe, eigene €-Achse, 0-Linie kräftig, Fläche grün über / rot unter 0, Tooltip je Minute,
@@ -46564,7 +46579,7 @@
         ${mitWert.length ? `<div class="tpl-hb summe"><span class="w"><b>Summe</b></span><span class="bar"></span><b class="h ${h.jetzt > 0 ? 'tpl-gut' : h.jetzt < 0 ? 'tpl-rot' : ''}">${vz(h.jetzt)}</b></div>` : ''}</div>` : ''
     return `<div class="tpl-karte tpl-nk tpl-hk"><div class="tpl-h">P&amp;L hypothetisch heute <b class="${h.jetzt > 0 ? 'tpl-gut' : h.jetzt < 0 ? 'tpl-rot' : ''}">jetzt ${vz(h.jetzt)}</b>
         <span class="leg"><span>${h.n} Trade${h.n === 1 ? '' : 's'}${h.ohne ? ` · ${h.ohne} ohne Wert` : ''}</span><span>Kontowert-Satz × Live-P&amp;L${h.cfd ? ' · CFD ≈ NQ' : ''}</span><span>0 = Einstand</span></span></div>
-        ${hv.length ? `<div class="tpl-nk-chart"><span class="skala oben">+${tplEur(max)}</span><span class="skala unten">−${tplEur(max)}</span>${svg}</div><div class="tpl-achse tpl-nk-achse">${achse.join('')}</div>` : '<div class="tpl-leer">noch kein Verlauf — Kerzen oder Startzeiten fehlen</div>'}${liste}</div>`
+        ${hv.length ? `<div class="tpl-nk-chart"><span class="skala oben">+${tplEur(max)}</span><span class="skala unten">−${tplEur(max)}</span>${svg}</div><div class="tpl-achse tpl-nk-achse">${achse.join('')}</div>` : '<div class="tpl-leer klein">Verlauf kommt mit der ersten Kerze des Tages</div>'}${liste}</div>`   // QA 08.10.2026 Punkt 9
   }
   /* BEENDET · BILANZ DES RECHNERS (07.10.2026, Finn: „kleine Statistiken … wie gut der Rechner Long/Short ausgleicht"): Kacheln Gesamt ·
    * Long · Short · im Plus, Balken je Tag (grün über / rot unter 0), darunter die beendeten Trades (neueste oben). Nur Auto-Planer-Trades,
@@ -46587,11 +46602,17 @@
         ${kachel('▼ Short', summe(sh), `${sh.length} Trade${sh.length === 1 ? '' : 's'}`, 'beendete Short-Trades')}
         <div class="kpi"><div class="kpi-label">Im Plus</div><div class="kpi-value">${plus.length} / ${b.length}</div><span class="kpi-delta">${Math.round(plus.length / b.length * 100)} % · Ø ${vz(ges / b.length)}</span></div></div>`
     // Balken je Tag
-    const jeTag = new Map(); for(const z of b){ const t = z.tag || String(z.start || '').slice(0, 10); jeTag.set(t, (jeTag.get(t) || 0) + Number(z.hypo_eur)) }
-    const tage = [...jeTag.keys()].sort(), max = Math.max(1, ...[...jeTag.values()].map(Math.abs))
+    // Balken je Handelstag, Segmente in ID-Farbe (QA 08.10.2026 Punkt 10: die Balken waren winzig und ohne Bezug zur ID): je Tag
+    // Gewinne über und Verluste unter der Null-Linie gestapelt, Anteil je ID; Datum + Tagessumme darunter, ID + € im Tooltip
+    const jeTag = new Map()
+    for(const z of b){ const t = z.tag || String(z.start || '').slice(0, 10); if(!jeTag.has(t)) jeTag.set(t, new Map()); const m = jeTag.get(t), k = String(z.user_id || '?'); m.set(k, { user: z.user || '?', plus: (m.get(k)?.plus || 0) + Math.max(0, Number(z.hypo_eur)), minus: (m.get(k)?.minus || 0) + Math.min(0, Number(z.hypo_eur)) }) }
+    const tage = [...jeTag.keys()].sort()
+    const tagSum = t => [...jeTag.get(t).values()].reduce((a, x) => a + x.plus + x.minus, 0)
+    const max = Math.max(1, ...tage.flatMap(t => { const m = jeTag.get(t); return [[...m.values()].reduce((a, x) => a + x.plus, 0), -[...m.values()].reduce((a, x) => a + x.minus, 0)] }))
     const tagTxt = t => { const [y, m, d] = String(t).split('-'); return d && m ? `${d}.${m}.` : t }
-    const balken = `<div class="tpl-tb">${tage.map(t => { const e = jeTag.get(t), hP = Math.max(2, Math.abs(e) / max * 100)
-        return `<div class="tb" title="${escapeHtml(`${tagTxt(t)} · ${vz(e)} hypothetisch`)}"><div class="ob">${e > 0 ? `<i class="gut" style="height:${hP.toFixed(0)}%"></i>` : ''}</div><div class="ub">${e < 0 ? `<i class="rot" style="height:${hP.toFixed(0)}%"></i>` : ''}</div><small>${tagTxt(t)}</small><b class="${kl(e)}">${vz(e)}</b></div>` }).join('')}</div>`
+    const seg = (uid, x, w) => w ? `<i style="height:${Math.max(2, Math.abs(w) / max * 100).toFixed(0)}%;background:${idFarbe(uid)}" title="${escapeHtml(`${x.user} ${vz(w)}`)}"></i>` : ''
+    const balken = `<div class="tpl-tb">${tage.map(t => { const m = jeTag.get(t), e = tagSum(t)
+        return `<div class="tb" title="${escapeHtml(`${tagTxt(t)} · ${vz(e)} hypothetisch`)}"><div class="ob">${[...m.entries()].map(([uid, x]) => seg(uid, x, x.plus)).join('')}</div><div class="ub">${[...m.entries()].map(([uid, x]) => seg(uid, x, x.minus)).join('')}</div><small>${tagTxt(t)}</small><b class="${kl(e)}">${vz(e)}</b></div>` }).join('')}</div>`
     const f2 = x => Number(x).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     const usd = x => x == null ? '—' : (x < 0 ? '−' : '+') + Math.abs(Math.round(x)).toLocaleString('de-DE') + ' $'
     const QW = { lauf: 'Satz aus dem Planer-Lauf des Tages', balance_vorher: 'Satz aus dem Kontowert bei der Balance vor dem Trade', heute: 'Satz aus dem Kontowert von heute' }
@@ -46601,7 +46622,7 @@
         <span class="r"><em class="${z.richtung === 'buy' ? 'is-buy' : 'is-sell'}">${z.richtung === 'buy' ? 'BUY' : 'SELL'}</em>${escapeHtml(z.typ === 'phase2' ? 'Phase 2' : z.typ === 'phase1' ? 'Phase 1' : z.typ || '')}</span>
         <span class="p">${usd(z.pl_usd)}</span><span class="s">${z.satz != null ? f2(z.satz) + ' €/$' : '—'}</span>
         <b class="h ${kl(z.hypo_eur)}">${vz(z.hypo_eur)}</b><span class="z">${zeit(z.start)}</span></div>`).join('')
-    return `<div class="tpl-hl"><div class="tpl-hl-k">Beendet · letzte 30 Tage <b>${b.length}</b> <span style="text-transform:none;letter-spacing:0;font-weight:500">nur Trades vom Auto-Planer · echter P&amp;L × Kontowert-Satz</span></div>${kacheln}${balken}${zeilen}</div>`
+    return `<div class="tpl-hl"><div class="tpl-hl-k">Beendet · letzte 30 Tage <b>${b.length}</b> <span style="text-transform:none;letter-spacing:0;font-weight:500">nur Trades vom Auto-Planer · echter P&amp;L × Kontowert-Satz</span></div>${kacheln}${balken}<details class="tpl-bil-det"${_tpl.bilanzAuf ? ' open' : ''}><summary>${Math.min(30, b.length)} Trade${b.length === 1 ? '' : 's'} einzeln</summary>${zeilen}</details></div>`   // Tabelle aufklappbar (QA 08.10.2026 Punkt 10)
   }
   /* Sicht auf EINE ID (ID-Chip): Trades und Summen nur dieser ID — Band/Netto „jetzt" aus dem Delta bleiben über alle (so rechnet der Planer) */
   function tplSichtFilter(D, ids){
@@ -46648,7 +46669,7 @@
       if(wSp.length) zeilen.push(_tpl.weitereAuf ? { key: 'weitere', name: 'Weitere', uid: null, ids: wSp.map(x => x.uid), sammel: true, auf: true, einzeln: wSp } : { key: 'weitere', name: 'Weitere', uid: null, ids: wSp.map(x => x.uid), sammel: true, auf: false })
       if(_tpl.weitereAuf && wSp.length){ const k = zeilen[zeilen.length - 1]; k.alle = k.ids; k.ids = []; zeilen.push(...wSp.map(zeile)) }   // aufgeklappt: Kopfzeile ohne Marker (Zähler aus alle), darunter je ID
     } else zeilen = spuren.filter(x => sichtIds.has(x.uid)).map(zeile)
-    const chip = (uid, name, l, on) => `<button type="button" class="adm-vl-chip${on ? ' is-on' : ''}" data-tpl-id="${escapeHtml(uid)}" title="${uid === 'alle' ? 'alle IDs zusammen' : 'nur diese ID — nochmal klicken = alle'}">${uid === 'alle' ? '' : `<span class="adm-dot" style="background:${idFarbe(uid)}"></span>`}<span class="nm">${escapeHtml(name)}</span>${l.length ? `<b>${l.length}${l.some(t => t.status === 'laeuft') ? ' · ' + l.filter(t => t.status === 'laeuft').length + ' ●' : ''}</b>` : ''}</button>`
+    const chip = (uid, name, l, on) => `<button type="button" class="adm-vl-chip${on ? ' is-on' : ''}" data-tpl-id="${escapeHtml(uid)}" title="${uid === 'alle' ? 'alle IDs zusammen' : 'nur diese ID — nochmal klicken = alle'}">${uid === 'alle' ? '' : `<span class="adm-dot" style="background:${idFarbe(uid)}"></span>`}<span class="nm">${escapeHtml(name)}</span>${l.length ? `<b>${l.length}${l.some(t => t.status === 'laeuft') ? ' · ' + l.filter(t => t.status === 'laeuft').length + ' läuft' : ''}</b>` : ''}</button>`
     // „Alle offenen bestätigen" (07.10.2026): offene Auto-Vorschläge der angezeigten IDs — eigene immer, fremde nur für den Admin
     const darfFremd = tplDarfFremd(), echtId = t => !t.ohnePlan && /^[0-9a-f-]{36}$/i.test(t.plan_id)
     const offen = F.trades.filter(t => t.status === 'offen' && t.auto && echtId(t) && (t.eigen || darfFremd))
@@ -46659,7 +46680,12 @@
     const chipsIds = (alleIds.length > 1 && chipsErlaubt) ? chip('alle', 'Alle IDs', D.trades, sicht === 'alle')
       + alleIds.filter(x => planer.has(x.uid)).map(x => chip(x.uid, x.name || x.uid.slice(0, 8), D.trades.filter(t => t.user_id === x.uid), sicht === x.uid)).join('')
       + (weitere.length ? chip('weitere', 'Weitere', D.trades.filter(t => weitere.some(x => x.uid === t.user_id)), sicht === 'weitere') : '') : ''
-    const chips = (alleIds.length > 1 || alleBest) ? `<div class="adm-vl-legend tpl-ids">${chipsIds}${alleBest}</div>` : ''
+    // EINE KOPFZEILE (QA 08.10.2026 Punkt 1): Chips links, rechts „Letzter Lauf HH:MM · n geplant · n ausgelassen" + Probelauf/Jetzt planen
+    // (Knöpfe wie in #apLeiste, hier über data-tpl-probe/-jetzt); die Karte #apLeiste bleibt auf der Seite dann aus (apLeisteZeichnen)
+    const lz = _ap.letzter || {}, lzTxt = lz.tag && lz.at && !lz.trocken ? `${lz.quelle === 'nachplanen' ? 'Nachplanen' : 'Letzter Lauf'} ${tplUhrIso(lz.at)} · ${(lz.geplant || []).length} geplant · ${(lz.ausgelassen || []).length} ausgelassen` : ''
+    const kopfRechts = _ap.imPlaner ? `<span class="tpl-kopf-r">${lzTxt ? `<span class="tpl-lauf" title="${escapeHtml(lzTxt)}">${escapeHtml(lzTxt)}</span>` : ''}${_ap.admin === true ? `<label class="ap-alle" title="Probelauf über alle IDs"><input type="checkbox" data-tpl-probe-alle${_apPr.alle ? ' checked' : ''}> alle IDs</label>` : ''}<button type="button" class="btn btn-ghost tc2-btn" data-tpl-probe${_ap.laeuft ? ' disabled' : ''} title="Nur rechnen, nichts anlegen">Probelauf</button><button type="button" class="btn btn-ghost tc2-btn" data-tpl-jetzt${_ap.laeuft ? ' disabled' : ''} title="Jetzt planen (ersetzt unbestätigte Vorschläge)">${_ap.laeuft ? 'plant…' : 'Jetzt planen'}</button></span>` : ''
+    _tpl.kopfInChips = !!kopfRechts
+    const chips = (alleIds.length > 1 || alleBest || kopfRechts) ? `<div class="adm-vl-legend tpl-ids">${chipsIds}${alleBest}${kopfRechts}</div>` : ''
     const html = (_tpl.fehler ? `<div class="tpl-fehler">⚠ ${escapeHtml(_tpl.fehler)}</div>` : '')
       + (ohne ? `<div class="tpl-karte"><div class="tpl-leer">— nicht im Auto-Planer</div></div>`
         : chips + tplKachelnHtml(F) + tplBrauchtHtml(tplBraucht(D, sichtIds)) + tplZeitstrahlHtml(F, zeilen) + tplDetailHtml(D) + tplNettoHtml(F) + tplHypoHtml(F) + tplListeHtml(F) + tplBilanzKarteHtml(F))   // Konten-Abdeckung ausgeblendet (Finn 08.10.2026: „mies unnötig, kann visuell weg“) — tplAbdeckungHtml bleibt   // Detail direkt unter dem Zeitstrahl (Finn 07.10.2026)
@@ -46921,6 +46947,8 @@
   }
   // Verdrahtung nur dieser Seite (eigene Elemente, kein Sammel-Handler)
   const tplRoot = document.getElementById('tpl-root')
+  tplRoot?.addEventListener('change', e => { const a = e.target.closest('[data-tpl-probe-alle]'); if(a) _apPr.alle = !!a.checked })   // Kopfzeile: Probelauf alle IDs
+  tplRoot?.addEventListener('toggle', e => { const d = e.target.closest('details.tpl-bil-det'); if(d) _tpl.bilanzAuf = d.open }, true)   // Beendet-Tabelle auf/zu merken
   tplRoot?.addEventListener('click', e => {
     const c = e.target.closest('[data-tpl-id]')   // ID-Chip: Klick auf die gewählte ID oder „Alle" = alle (07.10.2026)
     if(c){ _tpl.sicht = (c.dataset.tplId === 'alle' || _tpl.sicht === c.dataset.tplId) ? 'alle' : c.dataset.tplId
@@ -46949,6 +46977,8 @@
       tplAktion(t, 'weg'); return }
     const w = e.target.closest('[data-tpl-weitere]')   // Sammelzeile „Weitere" auf/zu
     if(w){ _tpl.weitereAuf = !_tpl.weitereAuf; tplZeichnen(); return }
+    const pb = e.target.closest('[data-tpl-probe]'); if(pb){ apProbeOeffnen(); return }          // Kopfzeile (QA 08.10.2026 Punkt 1)
+    const jp = e.target.closest('[data-tpl-jetzt]'); if(jp){ apJetztPlanen(false); return }
     const bl = e.target.closest('[data-tpl-bal]')   // Braucht dich: ↻ Balance lesen (bestehende Aktion aus Accounts, F19)
     if(bl){ try{ accBalanceLesen(bl.dataset.tplBal) }catch(err){ console.warn('[tpl] Balance lesen', err) } setTimeout(tplSpaeter, 500); setTimeout(tplSpaeter, 5000); return }
     const blf = e.target.closest('[data-tpl-balf]')   // Braucht dich: ↻ Balance lesen eines FREMDEN Kontos (08.10.2026) — Signal an den PC der ID
