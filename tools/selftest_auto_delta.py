@@ -67,7 +67,7 @@ def lade():
     konstanten = ("AP_REST_MIN", "AP_GROESSE_TOLERANZ", "AP_KW_FUNDED", "AP_KW_PHASEN", "AP_TYPEN", "AP_TZ_LAUF", "AP_STILL_FIRMEN",
                   "AP_AUSGLEICH_STANDARD", "AP_TZ_TAG", "AP_BOT_ENDE_MIN", "AP_BOT_EXTRA_MIN", "AP_FAELLIG_MIN", "AP_BOT_SCHRITTE",
                   "AP_RICHTUNG_TXT", "AP_GEGEN_DICHT_MIN", "AP_GEGEN_WUERFE", "AP_EUR_STUFE", "AP_START_BIS_STANDARD", "AP_CFD_AB_STANDARD", "AP_CFD_ROUTEN", "AP_TRANCHE_LUECKE_MIN", "_ap_bot", "_ap_info", "WD_HEUTE_PPL", "LT_ECHO_ROUTEN", "LT_ECHO_MAX_ALTER_S",
-                  "AP_RS_HORIZONT_MIN", "AP_RS_NACHLAUF_MIN", "AP_RS_ROUTEN", "AP_EINGRIFF_MAX", "AP_SICHT_ADMIN", "AP_ID_FEST_HORIZONT_MIN")
+                  "AP_RS_HORIZONT_MIN", "AP_RS_NACHLAUF_MIN", "AP_RS_ROUTEN", "AP_EINGRIFF_MAX", "AP_SICHT_ADMIN", "AP_ID_FEST_HORIZONT_MIN", "AP_RUHE_JE_PLAN_MIN", "AP_HYSTERESE_EUR")
     exec("\n".join([konst(k) for k in konstanten] + [block(f) for f in REIN + IO]), ns)
     return ns
 
@@ -294,6 +294,22 @@ def main():
     check(ruhig["aenderungen"] == [] and ruhig["ausloeser"] is None, "im Band → keine Änderung")
     nichts = a["ap_umplanen"]([dict(p, aenderbar=False) for p in plaene], 0.0, 10.0, jm, ZEITEN, 15, random.Random(3))
     check(nichts["aenderungen"] == [], "nichts änderbar → nichts geändert (auch wenn über dem Band)")
+    # DÄMPFUNG (Vorschlag 1, 08.10.2026): Ruhezeit je Plan + Hysterese am Band — beide dürfen die alte Rechnung sonst nicht ändern
+    ruhe = a["ap_umplanen"](plaene, 0.0, 10.0, jm, ZEITEN, 15, random.Random(3), zuletzt={"x1": jm - 10, "x2": jm - 10, "v1": jm - 10})
+    check(not {x["plan_id"] for x in ruhe["aenderungen"]} & {"x1", "x2", "v1"} and set(ruhe["daempfung"]["ruhig"]) >= {"x1", "x2", "v1"},
+          f"Ruhezeit: eben erst (10 min) angefasste Pläne ruhen ({ruhe['daempfung']['ruhig']})")
+    fest_v = {"E|v": {"richtung": "buy", "durch": "geplant morgen"}}
+    alt_genug = a["ap_umplanen"](plaene, 0.0, 10.0, jm, ZEITEN, 15, random.Random(3), id_fest=fest_v, zuletzt={"x1": jm - a["AP_RUHE_JE_PLAN_MIN"] - 1})
+    check({x["plan_id"] for x in alt_genug["aenderungen"]} == ids and alt_genug["daempfung"]["ruhig"] == [],
+          f"Ruhezeit: nach {a['AP_RUHE_JE_PLAN_MIN']} min ist der Plan wieder frei — Ergebnis wie ohne Ruhezeit")
+    check(a["ap_umplanen"](plaene, 0.0, 10.0, jm, ZEITEN, 15, random.Random(3))["daempfung"]["hysterese"] == 0.0,
+          "Hysterese: in der €/Pkt-Rechnung (ohne einsatz) 0 — Verhalten wie bisher")
+    hyst = a["ap_umplanen"](plaene, 0.0, 10.0, jm, ZEITEN, 15, random.Random(3), hysterese=erg["vorher"]["ueber_band"] + 1)
+    check(hyst["aenderungen"] == [] and hyst["ausloeser"] is None and hyst["daempfung"]["hysterese"] > 0,
+          "Hysterese: Überschreitung unter der Schwelle → kein Eingriff, kein Auslöser")
+    hyst0 = a["ap_umplanen"](plaene, 0.0, 10.0, jm, ZEITEN, 15, random.Random(3), id_fest=fest_v, hysterese=0)
+    check([x["plan_id"] for x in hyst0["aenderungen"]] == [x["plan_id"] for x in erg["aenderungen"]], "Hysterese 0 → identisch zur alten Rechnung")
+    check(a["AP_RUHE_JE_PLAN_MIN"] == 30 and a["AP_HYSTERESE_EUR"] == 200.0, "Dämpfungs-Konstanten: 30 min Ruhe je Plan, 200 € Hysterese (Vorschlag 1)")
     einzel = a["ap_umplanen"]([plaene[0], dict(plaene[1], richtung="buy")], 5.0, 5.0, jm, ZEITEN, 15, random.Random(3), schritte=1)
     check([x["plan_id"] for x in einzel["aenderungen"]] in (["x1"], ["x2"]) and einzel["aenderungen"][0]["art"] == "richtung",
           "Bot tauscht eine Tranche — dieselbe Firma bei der anderen ID darf gegenläufig bleiben")

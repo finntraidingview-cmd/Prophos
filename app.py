@@ -15698,6 +15698,14 @@ AP_BOT_ENDE_MIN = 19 * 60 + 30       # Bot-Takt 00:00–19:30 dt
 AP_BOT_EXTRA_MIN = 14 * 60           # Extra-Lauf 14:00 dt mit frischen TP-Abständen
 AP_FAELLIG_MIN = 5                   # bestätigter Plan, der in ≤ 5 min startet = fällig — Bot und Hand fassen ihn nicht mehr an
 AP_BOT_SCHRITTE = 3                  # höchstens so viele Umplanungen (Tranche tauschen / schieben) je Bot-Lauf
+# DÄMPFUNG (Vorschlag 1, Analyse Slave-Terminal 1 am 08.10.2026: 47 Umplanungen am 07.10., 10 Pingpongs, 10 Eingriffe < 30 min
+# Abstand am selben Plan, 10 Auslöser unter 200 € Überschreitung — das wandernde 60-min-Fenster schob dieselben Tranchen hin und
+# her). Zwei Riegel, beide nur im Bot (ap_umplanen), keine neue Logik: ein Plan wird höchstens alle AP_RUHE_JE_PLAN_MIN Minuten
+# angefasst (Maß: letzte Zeile zu ihm in auto_plan_umplanung heute), und der Bot greift erst ein, wenn die Band-Überschreitung der
+# nächsten 60 min AP_HYSTERESE_EUR übersteigt (Hysterese am ±Band, nur in € Einsatz — die alte €/Pkt-Rechnung kennt keine). Werte =
+# Vorschlag an Finn (Entscheidung offen), 0 = aus.
+AP_RUHE_JE_PLAN_MIN = 30
+AP_HYSTERESE_EUR = 200.0
 # Weicher Malus (Finn 06.10.2026 abends: „nicht so fixe Minuten-Regeln, einfach Zufallsprinzip — wenn mal zwei derselben
 # Firma in der gleichen Minute long gehen, ist das halt so"): zwei gegenläufige Starts derselben Firma bei verschiedenen IDs
 # dichter als das zählen im Optimierer als Malus (lieber anders würfeln) — nie Verbot, nie Ablehnung, kein DB-Parameter
@@ -16060,7 +16068,7 @@ def _ap_tranche_frei(t, start, tranchen, zeiten):
 
 
 def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, rnd, gestartet=None, id_fest=None,
-                schritte=AP_BOT_SCHRITTE, einsatz=None):
+                schritte=AP_BOT_SCHRITTE, einsatz=None, zuletzt=None, hysterese=None):
     """REIN RECHNEND (Vertrag §3, Korrektur Finn 06.10.2026): ein Lauf des Ausgleichs-Bots. plaene = heutige geplante Pläne
     [{plan_id, user_id, user, firma, richtung, start_min, delta_abs, aenderbar}] — nicht änderbare zählen mit und sperren ihre
     Tranche. gestartet = heute schon gestartete Trades [{user_id, firma, start, richtung}] (nur für den weichen Malus),
@@ -16078,6 +16086,14 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
     je = {p["plan_id"]: p for p in plaene or () if p.get("start_min") is not None and p.get("richtung") in ("buy", "sell")}
     zustand = {i: {"richtung": p["richtung"], "start": float(p["start_min"])} for i, p in je.items()}
     jetzt_min = float(jetzt_min)
+    # DÄMPFUNG (Vorschlag 1, 08.10.2026): zuletzt = {plan_id: Minute des Tages der letzten Umplanung} → Tranche mit einem Plan, der vor
+    # weniger als AP_RUHE_JE_PLAN_MIN min angefasst wurde, ruht; hysterese = Schwelle in € (None = AP_HYSTERESE_EUR im Einsatz-Modus,
+    # 0 in der alten €/Pkt-Rechnung) — unterhalb gilt das Band als gehalten, der Bot lässt die Finger davon
+    zuletzt = zuletzt or {}
+    schwelle = float(hysterese) if hysterese is not None else (float(AP_HYSTERESE_EUR) if einsatz else 0.0)
+
+    def ruht(ids):
+        return any(zuletzt.get(i) is not None and 0 <= jetzt_min - float(zuletzt[i]) < AP_RUHE_JE_PLAN_MIN for i in ids)
 
     def strafe(z):
         ev = [(z[i]["start"], float(je[i].get("delta_abs") or 0) * (1 if z[i]["richtung"] == "buy" else -1)) for i in z]
@@ -16100,11 +16116,12 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
         return {"ueber_band": k[1], "netto_max_abs": k[3], "gross_folge": k[2], "malus": k[0]}
 
     def offen_(k):
-        return k[1] > 0
+        return k[1] > schwelle
 
     aktuell = vorher = strafe(zustand)
     if not offen_(vorher):
-        return {"aenderungen": [], "vorher": als_dict(vorher), "nachher": als_dict(vorher), "ausloeser": None}
+        return {"aenderungen": [], "vorher": als_dict(vorher), "nachher": als_dict(vorher), "ausloeser": None,
+                "daempfung": {"hysterese": schwelle, "ruhe_min": AP_RUHE_JE_PLAN_MIN, "ruhig": []}}
     ausloeser = (f"Netto-Einsatz in den nächsten 60 min bis {vorher[1]:.0f} € über dem Band ±{float(band_pct):g} %" if einsatz else
                  f"Netto-Delta in den nächsten 60 min bis {vorher[1]:.2f} €/Pkt über dem Band ±{float(band_pct):g} %")
     aenderungen = []
@@ -16113,11 +16130,15 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
             break
         kandidaten = []
         tr = _ap_tranchen([dict(je[i], start_min=zustand[i]["start"]) for i in zustand])
+        ruhig = []
         for k in sorted(tr):
             t = tr[k]
             if not t["aenderbar"]:
                 continue
             ids = sorted(t["plan_ids"])
+            if ruht(ids):                        # DÄMPFUNG: eben erst angefasst — in dieser Runde nicht noch einmal
+                ruhig.extend(ids)
+                continue
             # geteilte ID+Firma (Teil-Tranchen) dreht der Bot nicht — eine Richtung je ID+Firma (Richtungsschutz)
             if f"{t['user_id']}|{t['firma']}" not in id_fest and len({zustand[i]["richtung"] for i in ids}) == 1 and t.get("teile", 1) == 1:
                 z = {i: dict(v) for i, v in zustand.items()}
@@ -16167,7 +16188,9 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                                 "von_richtung": von["richtung"], "nach_richtung": nach["richtung"],
                                 "von_start_min": von["start"], "nach_start_min": nach["start"], "grund": grund})
         zustand, aktuell = z, k_neu
-    return {"aenderungen": aenderungen, "vorher": als_dict(vorher), "nachher": als_dict(aktuell), "ausloeser": ausloeser}
+    return {"aenderungen": aenderungen, "vorher": als_dict(vorher), "nachher": als_dict(aktuell), "ausloeser": ausloeser,
+            "daempfung": {"hysterese": schwelle, "ruhe_min": AP_RUHE_JE_PLAN_MIN,
+                          "ruhig": sorted({i for i in je if ruht([i])})}}
 
 
 def ap_eingriff_pruefen(plan_id, aktion, plaene, jetzt_min, zeiten, id_fest=None, neu_start_min=None):
@@ -16856,9 +16879,21 @@ def ap_ausgleichen(trocken=False, quelle="bot", jetzt=None, seed=None):
         rs = {"gedreht": [], "markiert": [], "frei": [], "fehler": f"{type(e).__name__}: {e}"}
         print(f"[auto-plan] ⚠️ Richtungsschutz: {rs['fehler']}", flush=True)
     seed = int(seed) if seed not in (None, "") else random.SystemRandom().randrange(1, 2 ** 31)
+    # DÄMPFUNG (08.10.2026): letzte Umplanung je Plan heute (auto_plan_umplanung, bot UND hand) als Minute des Tages → Ruhezeit
+    zuletzt = {}
+    try:
+        for r in (_ap_umplanungen_heute(stand)[0] or []):
+            um = r.get("um")
+            if not um or not r.get("plan_id"):
+                continue
+            m = (datetime.fromisoformat(str(um).replace("Z", "+00:00")) - stand["mitternacht"]).total_seconds() / 60.0
+            pid = str(r["plan_id"])
+            zuletzt[pid] = max(zuletzt.get(pid, -1e9), m)
+    except Exception as e:
+        print(f"[auto-plan] ⚠️ Dämpfung: Protokoll nicht lesbar ({type(e).__name__}) — ohne Ruhezeit", flush=True)
     erg = ap_umplanen(_ap_stand_plaene(stand), stand["basis_netto"], stand["basis_brutto"], max(0.0, stand["jetzt_min"]),
                       stand["zeiten"], param["zielband_pct"], random.Random(seed), gestartet=stand["starts_heute"],
-                      id_fest=stand["id_fest"], einsatz=ap_einsatz_kontext(stand, param))
+                      id_fest=stand["id_fest"], einsatz=ap_einsatz_kontext(stand, param), zuletzt=zuletzt)
     je = {z["plan_id"]: z for z in stand["geplant"]}
     if trocken:
         umpl = [{"um": None, "plan_id": a["plan_id"], "user_id": a["user_id"], "user": (je.get(a["plan_id"]) or {}).get("user"),
@@ -16875,6 +16910,7 @@ def ap_ausgleichen(trocken=False, quelle="bot", jetzt=None, seed=None):
            "ueber_band_vorher": erg["vorher"]["ueber_band"], "ueber_band_nachher": erg["nachher"]["ueber_band"],
            "gross_folge_vorher": erg["vorher"].get("gross_folge"), "gross_folge_nachher": erg["nachher"].get("gross_folge"),
            "netto_jetzt": round(stand["basis_netto"], 2), "band_pct": param["zielband_pct"], "ausloeser": erg["ausloeser"],
+           "daempfung": erg.get("daempfung"),   # DÄMPFUNG (08.10.2026): Hysterese €, Ruhe min, Pläne in Ruhe
            "hinweise": stand["hinweise"],
            "richtungsschutz": {"gedreht": rs["gedreht"], "markiert": rs["markiert"], "frei": rs["frei"], "fehler": rs["fehler"]}}
     if fehler:
