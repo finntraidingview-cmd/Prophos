@@ -36002,6 +36002,19 @@
     return { stufe, art: /^letzter Trade/i.test(stufe) ? 'letzter Trade' : /^Etappe/i.test(stufe) ? 'Etappe' : stufe,
              gekappt: /SL auf Boden gekappt/i.test(stufe), ziel: Math.round((bal + rest) / 5) * 5 }   // beide Zahlen sind gerundet → auf 5 $ glätten
   }
+  /* ZIEL ERREICHT = KEIN START (07.10.2026, Finn: „der Account war schon durch, und es wurde trotzdem noch ein Trade gestartet … es wird
+   * überhaupt gar kein Trade mehr gestartet, wenn das Ziel schon erreicht wird"). Vorfall FundedNext Phase 2 …4830 (Moritz): Balance
+   * 105.068 → Ziel 105.000 · Rest 0, Auto-Plan startete um 16:41 Dubai trotzdem. Ziel und Balance genau wie in der Zeile
+   * (planAutoNotiz + planKontoBalance) — ohne lesbares Ziel oder ohne Balance → null, dann gilt der alte Weg. → { bal, ziel } | null */
+  function planZielErreicht(plan){
+    try{
+      const n = plan ? planAutoNotiz(plan.notes) : null
+      if(!n || !(n.ziel > 0)) return null
+      const b = planKontoBalance(accounts.find(a => String(a.id) === String(plan.masterAccountId)))
+      return (b && isFinite(b.val) && b.val >= n.ziel) ? { bal: b.val, ziel: n.ziel } : null
+    }catch(_){ return null }
+  }
+  const planZielText = (plan, z) => `„${plan.masterName || 'Konto'}" hat das Ziel schon erreicht (Balance ${Math.round(z.bal).toLocaleString('de-DE')} ≥ Ziel ${Math.round(z.ziel).toLocaleString('de-DE')}) — kein Trade gestartet.`
   /* Eine Zeile der Geplant-Tabelle. o = { name, ext, extTitle, chips, akt } aus renderTradePlanCard (dieselben Knöpfe und
    * data-plan-*-Attribute wie die Karte → bindTradePlanCardActions läuft unverändert).
    * Trade-Planer (GEPLANT-WIE-TRADES-REITER, Finn 07.10.2026: „exakt die Darstellung vom Reiter Geplant") nutzt dieselbe Zeile für alle
@@ -40020,7 +40033,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1137'
+  const OS_TAB_BUILD = '2026-09-22.1138'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -40270,6 +40283,8 @@
       if(data){ const frisch = rowToPlan(data); const i = tradePlans.findIndex(x => String(x.id) === String(plan.id)); if(i >= 0) tradePlans[i] = frisch; plan = frisch }
     }catch(_){ /* offline: mit dem Cache weiter */ }
     if(plan.status !== 'planned'){ if(fern) fern.melde({ ok:false, msg: 'Plan ist nicht (mehr) „Geplant" — nichts gestartet.' }); return }
+    const zielOk = planZielErreicht(plan)   // ZIEL ERREICHT (07.10.2026): auch von Hand / vom Mac kein Start
+    if(zielOk){ const t = planZielText(plan, zielOk); toast('🎯 ' + t, 'end'); if(fern) fern.melde({ ok:false, msg: t }); return }
     // UNKLAR-Marke (B37, 30.09.2026; Topstep V2 und Orbit V2): der letzte Start endete UNKLAR, die Order liegt vielleicht — kein zweiter
     // Klick, egal ob Karte, Startzeit oder Signal vom Mac. Gelöst wird die Marke nur bewusst über den Chip auf der Karte.
     if((plan.route === 'tsv2' || plan.route === 'tvv2') && plan.mt5Baseline && plan.mt5Baseline.puls_unklar){
@@ -40884,6 +40899,8 @@
   async function tpJetztStarten(planId){
     const plan = tradePlans.find(x => String(x.id) === String(planId))
     if(!plan || plan.status !== 'planned') return
+    const zielOk = planZielErreicht(plan)   // ZIEL ERREICHT (07.10.2026): auch von Hand kein Start
+    if(zielOk){ if(typeof atToast === 'function') atToast('🎯 ' + planZielText(plan, zielOk), 'end'); return }
     const { order, fehlt } = _tpOrderAusPlan(plan)
     if(fehlt.length){
       if(typeof atToast === 'function') atToast('Für „Starten" fehlt: ' + fehlt.join(', ') + ' — über „Weiter →" im Plan speichern.', 'end')
@@ -43886,7 +43903,7 @@
   }
   // Ist die Ursache weg? → Klartext (warum neu eingeplant) oder null
   async function sfBehoben(plan, f){
-    if(f.unklar) return null
+    if(f.unklar || f.schritt === 'ziel_erreicht') return null   // Ziel erreicht: nie von selbst neu einplanen (07.10.2026)
     if(f.schritt === 'zu_spaet') return 'Prophos-Tab am PC läuft wieder'
     if(plan.route === 'mt5v2' && (f.schritt === 'v2link' || !f.schritt)){
       const dd = (typeof window.mtcApi === 'function') ? await window.mtcApi('instances') : null
@@ -44088,6 +44105,20 @@
     try{
       const verspaetet = now - new Date(plan.startUm).getTime()
       const fenster = pulsStartFenster(plan)
+      // ZIEL ERREICHT (07.10.2026): Claim setzen (feuert nie wieder), Start-Fehler für „Braucht dich", Toast + Handy — nichts starten
+      const zielOk = planZielErreicht(plan)
+      if(zielOk){
+        const { data: dz } = await supabase.from('trade_plans').update({ start_um_gestartet_at: new Date().toISOString() })
+          .eq('id', plan.id).eq('status', 'planned').is('start_um_gestartet_at', null).select('*')
+        if(dz && dz.length){
+          const iz = tradePlans.findIndex(x => String(x.id) === String(plan.id)); if(iz >= 0) tradePlans[iz] = rowToPlan(dz[0])
+          const t = planZielText(plan, zielOk)
+          if(typeof atToast === 'function') atToast('🎯 ' + t, 'end')
+          try{ if(typeof pushAnsHandy === 'function') pushAnsHandy('Ziel erreicht — kein Start', t, 'https://prophos.pages.dev/prophos#trades', 'ziel-' + String(plan.id).slice(0, 8)) }catch(_){}
+          await sfMelden(tradePlans[iz] || plan, { schritt: 'ziel_erreicht', msg: t })
+        }
+        return
+      }
       // RICHTUNG AM START (07.10.2026): frisch prüfen, VOR Slave-Vorprüfung und Claim — Auto-Plan dreht, sonst verschieben
       if(verspaetet <= fenster){
         const rk = await rkVorStart(plan)
@@ -45373,13 +45404,14 @@
       case 'v2term': return `Am PC${pc} MT5 öffnen und mit Login${login} einloggen.`
       case 'v2order': return sf.unklar ? 'Erst im MT5-Terminal nachsehen, ob die Order liegt — dann von Hand starten, nie blind.' : 'Puls hat nichts platziert — nichts tun.'
       case 'zu_spaet': return `Prophos-Tab am PC${pc} offen lassen.`
+      case 'ziel_erreicht': return 'Ziel ist erreicht — kein Trade nötig. Konto ansehen (Phasenwechsel/Auszahlung), Plan löschen.'
       default: return 'Check am PC war rot — beheben, dann ✓ Behoben.'
     }
   }
   function tplSfAuto(sf, D){
     const bis = tplUhr(sfTagesEnde(), D.v), n = Number(sf.versuche) || 0
     if(sf.status === 'tagesende') return 'Start-Fenster heute zu — der Nachtlauf plant neu.'
-    if(sf.unklar) return ''
+    if(sf.unklar || sf.schritt === 'ziel_erreicht') return ''
     if(n >= SF_MAX) return `${n} Neuversuche gescheitert — von Hand starten.`
     return `Danach startet der Bot ihn von selbst neu (bis ${bis}${n ? `, Versuch ${n + 1}/${SF_MAX}` : ''}).`
   }
