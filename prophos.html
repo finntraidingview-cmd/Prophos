@@ -3339,6 +3339,9 @@
   #dashboard-view .wdl-z-wer{grid-area:wer}
   #dashboard-view .wdl-z-wer b{font-weight:600;color:var(--ink)}
   #dashboard-view .wdl-z-wer small{margin-left:8px;font-size:12.5px;color:var(--sub)}
+  #dashboard-view .wdl-z-wer small[data-wdl-konto]{cursor:pointer;text-decoration:underline dotted transparent;text-underline-offset:3px}   /* Konto-Popup (08.10.2026) */
+  #dashboard-view .wdl-z-wer small[data-wdl-konto]:hover{color:var(--ink-2);text-decoration-color:var(--sub)}
+  #tpl-view .pz-konto[data-ak-konto]{cursor:pointer} #tpl-view .pz-konto[data-ak-konto]:hover b{text-decoration:underline dotted;text-underline-offset:3px}
   #dashboard-view .wdl-z-punkt{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:9px;vertical-align:1px;background:var(--wdl-id,#98A2B3)}
   /* PC-Tab-Lebenszeichen je ID (08.10.2026): kleiner Punkt am ID-Chip — grün Tab lebt, grau kein Tab, rot Bot/Copier veraltet */
   .pcs-dot{display:inline-block;width:6px;height:6px;border-radius:50%;margin-left:5px;vertical-align:1px;background:#98A2B3}
@@ -27925,7 +27928,7 @@
       }
       // Überprüfen-Zeilen sind ziehbar (08.10.2026, HTML5-Drag nach „Manuelle Arbeit"; Handler unten am Listen-Container)
       return `<div class="wdl-z wdl-z-${art}${echo ? ' wdl-z-echo' : ''}${an ? ' is-aktiv' : ''}${extra ? ' ' + extra : ''}" style="--wdl-id:${wdlIdFarbe(t)}" data-wdl-trade="${escapeHtml(wdlTid(t))}"${art === 'pruef' ? ` draggable="true" data-wdl-drag="${escapeHtml(wdlTid(t))}"` : ''} title="${escapeHtml(tip)}">`
-        + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><i class="wdl-pf">${escapeHtml(wdlWeg(t))}</i><small>${escapeHtml(konto)}</small></span>`
+        + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><i class="wdl-pf">${escapeHtml(wdlWeg(t))}</i><small data-wdl-konto="${escapeHtml(wdlTid(t))}" title="Konto ansehen">${escapeHtml(konto)}</small></span>`
         + (art === 'man' ? '' : ri) + miZ + kontoZ + plZ + zeitZ + '</div>'   // Manuelle Arbeit ohne Richtung/Menge (08.10.2026) — die Notiz bekommt den Platz
     }
     // Gruppe = ein Kasten, oben einmal die Spaltenköpfe im selben Raster wie die Zeilen
@@ -28021,6 +28024,21 @@
       if(ab.disabled) return
       const pid = ab.getAttribute('data-wdl-abhaken'), t = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === pid)
       if(t) mklWdErledigtOeffnen(pid, t)
+      return
+    }
+    // Konto-Popup (08.10.2026, Master-Auftrag): Klick auf den Konto-Namen (nicht auf Knöpfe/Notiz) öffnet das Popup des Admin-Trade-Planers
+    // mit den Feldern dieser live-trades-Zeile (apKontoOeffnen mit quelle; nichts nachgeladen, Fehlendes zeigt das Popup als „–")
+    const kk = ev.target.closest('[data-wdl-konto]')
+    if(kk){
+      const pid = kk.getAttribute('data-wdl-konto'), t = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === pid)
+      if(t && typeof window._apKontoOeffnen === 'function'){
+        const k = t.konto || {}, echo = wdlIstEcho(t), n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
+        const bs = n(t.balance_start), be = n(t.balance_end)
+        const bal = be != null ? `${be.toLocaleString('de-DE', { minimumFractionDigits: 2 })} $ · nach dem Trade (Radar)` : bs != null ? `${bs.toLocaleString('de-DE', { minimumFractionDigits: 2 })} $ · vor dem Trade (Radar)` : ''
+        window._apKontoOeffnen(pid, { z: { plan_id: pid, user_id: wdlUid(t), user: t.person, konto: k.name || '', firma: k.firma || '', ende4: k.kontonr_ende || '', typ: t.konto_typ || '', richtung: t.richtung,
+                                   menge: echo ? n(t.lots) : n(t.kt), tp: n(t.master_tp), sl: n(t.master_sl) },
+                              t: { balance: bs, rest: (n(t.ziel_usd) != null && (be ?? bs) != null) ? Math.max(0, n(t.ziel_usd) - (be ?? bs)) : null }, bal })
+      }
       return
     }
     // Manuelle Arbeit (08.10.2026): „→ manuell" öffnet das Notiz-Feld, Notiz-Klick bearbeitet, „zurück" nimmt das Kennzeichen weg;
@@ -36617,7 +36635,7 @@
       <div class="pz-z${p.autoPlan ? '' : ' pz-z-hand'}" data-plan-id="${p.id}">${o.wer ? `
         <span class="pz-wer">${o.wer}</span>` : ''}
         <span class="pz-zeit">${zeit}</span>
-        <span class="pz-konto" title="${escapeHtml(kontoTitel)}">${kontoKurz}${typChip}</span>
+        <span class="pz-konto" title="${escapeHtml(kontoTitel)}" data-ak-konto="${escapeHtml(String(p.id || ''))}">${kontoKurz}${typChip}</span>
         <span class="pz-bal">${balHtml}</span>
         <span class="pz-art" title="${notiz ? escapeHtml(notiz.stufe) : ''}">${notiz ? escapeHtml(notiz.art) + (notiz.gekappt ? ' · SL gekappt' : '') : ''}</span>
         <span class="pz-gr">${gr}</span>
@@ -40561,7 +40579,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1187'
+  const OS_TAB_BUILD = '2026-09-22.1188'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -46605,6 +46623,14 @@
       })(); return }
     const k = e.target.closest('[data-tpl-ab]')   // Konten-Abdeckung: Block auf/zu
     if(k){ const z = k.closest('.tpl-ab-z'); _tpl.abAuf.set(k.dataset.tplAb, !(z && z.classList.contains('auf'))); tplZeichnen(); return }
+    // Konto-Popup (08.10.2026, Master-Auftrag): Klick auf den Konto-Namen in „Geplant" öffnet das Popup des Admin-Reiters (apKontoOeffnen
+    // mit quelle = diese Zeile aus tplDaten, nichts nachgeladen); fremde IDs aus denselben Daten, Fehlendes zeigt das Popup als „–"
+    const ak = e.target.closest('[data-ak-konto]')
+    if(ak && typeof window._apKontoOeffnen === 'function'){
+      e.stopPropagation()
+      const pid = ak.dataset.akKonto, t = tplDaten().trades.find(x => String(x.plan_id) === String(pid)); if(!t) return
+      window._apKontoOeffnen(pid, { z: { plan_id: pid, user_id: t.user_id, user: t.user, konto: t.konto, firma: t.firma, ende4: t.ende4, typ: t.typ, richtung: t.richtung, menge: t.menge, tp: t.tp, sl: t.sl }, t })
+      return }
     const m = e.target.closest('[data-tpl-t]')
     if(m){ _tpl.wahl = _tpl.wahl === m.dataset.tplT ? null : m.dataset.tplT; _tpl.edit = null; _tpl.meldung = ''; tplZeichnen()
       if(_tpl.wahl && (m.classList.contains('tpl-chip') || m.closest('.tpl-bd'))) tplRoot.querySelector('.tpl-detail')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
@@ -59224,16 +59250,20 @@
   /* Konto-Popup (08.10.2026): Name, Firma, Typ/Phase, Balance (letzte Lesung + Quelle + Alter), Ziel/Rest, Kontowert, letzte Trades — eigene
    * Konten aus accounts/tradePlans (tplKontoBalance wie auf der Planer-Seite), fremde aus Lauf (balance/rest), Delta (wert_eur), live-trades
    * (_tpl.lt) und hypo-bilanz (_tpl.bilanz). Nichts wird nachgeladen. */
-  function apKontoOeffnen(pid){
+  // quelle (08.10.2026, Slave-Terminal 1, abgestimmt): { z, t, bal? } — Planer-Seite „Geplant" und Radar reichen ihre Zeile selbst
+  // herein (z wie _apIds.offen: plan_id/user_id/user/konto/firma/ende4/typ/richtung/menge/tp/sl; t wie apIdsTrade: balance/rest/
+  // stufe/wert/satz/konto_id; bal = fertiger Balance-Text). Ohne quelle wie bisher aus dem Admin-Reiter. Das Modal selbst unverändert.
+  function apKontoOeffnen(pid, quelle){
     const m = document.getElementById('apKontoModal'), body = document.getElementById('apKontoBody'), titel = document.getElementById('apKontoTitel'); if(!m || !body) return
-    const z = _apIds.offen.find(x => String(x.plan_id) === String(pid)); if(!z) return
-    const t = apIdsTrade(pid) || {}, uid = String(z.user_id || '')
+    const z = (quelle && quelle.z) || _apIds.offen.find(x => String(x.plan_id) === String(pid)); if(!z) return
+    const t = (quelle && quelle.t) || apIdsTrade(pid) || {}, uid = String(z.user_id || '')
     const eigen = String(uid) === String(currentUserId || '')
     const acc = eigen ? (accounts || []).find(a => String(a.id) === String(t.konto_id || '')) || (accounts || []).find(a => String(a.name || '') === String(z.konto || '')) : null
     const jetzt = Date.now(), de = (v, d) => v != null && isFinite(Number(v)) ? Number(v).toLocaleString('de-DE', { maximumFractionDigits: d == null ? 0 : d }) : null
     // Balance: eigenes Konto wie in der Accounts-Liste, fremdes aus dem Planer-Lauf (Balance der Nacht) oder der live-trades-Zeile
     let bal = null
     if(acc && typeof tplKontoBalance === 'function'){ const b = tplKontoBalance(acc); if(b) bal = `${de(b.bal, 2)} ${b.ccy === 'EUR' ? '€' : '$'} · ${b.src || 'gespeichert'}${b.at ? ' · vor ' + tplAlter(jetzt - b.at) : ''}` }
+    if(!bal && quelle && quelle.bal) bal = String(quelle.bal)
     if(!bal){ const lt = (_tpl && _tpl.lt && _tpl.lt.get(String(pid))) || null
       if(lt && lt.balance_start != null) bal = `${de(lt.balance_start, 2)} $ · live-trades`
       else if(t.balance != null) bal = `${de(t.balance, 2)} $ · Planer-Lauf${_apIds.tag ? ' ' + _apIds.tag : ''}` }
@@ -59265,6 +59295,9 @@
         : '<div style="color:var(--sub);font-size:12.5px">Keine beendeten Trades dieses Kontos in den geladenen Daten (30 Tage).</div>'}`
     m.classList.add('open')
   }
+  // Haken für Planer-Seite und Radar (08.10.2026, Slave-Terminal 1): die Admin-Sektion ist ein eigener Block, apKontoOeffnen dort
+  // block-scoped — außerhalb nur über window erreichbar (wie die anderen Test-/Brücken-Haken)
+  window._apKontoOeffnen = apKontoOeffnen
   const apKontoZu = () => document.getElementById('apKontoModal')?.classList.remove('open')
   document.getElementById('apKontoX')?.addEventListener('click', apKontoZu)
   document.getElementById('apKontoModal')?.addEventListener('click', ev => { if(ev.target === ev.currentTarget) apKontoZu() })
