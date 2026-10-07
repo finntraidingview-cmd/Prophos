@@ -2735,51 +2735,59 @@
   #adm-pane-wd .wd-leer{padding:14px 4px;color:var(--sub);font-size:13px;line-height:1.55}
   #adm-pane-wd .kf{color:var(--sub);font-size:11.5px;font-weight:400}
   #adm-pane-wd .kn{font-weight:600}
-  #adm-pane-wd .wd-tab,#adm-pane-planer .wd-tab{width:100%;border-collapse:collapse;font-size:12.5px}
-  #adm-pane-wd .wd-tab th,#adm-pane-planer .wd-tab th{text-align:left;font-weight:500;color:var(--sub);padding:4px 8px 6px 0;border-bottom:1px solid var(--line)}
-  #adm-pane-wd .wd-tab td,#adm-pane-planer .wd-tab td{padding:6px 8px 6px 0;border-bottom:1px solid var(--line);vertical-align:top}
+  #adm-pane-wd .wd-tab,:is(#adm-pane-planer,#tpl-view) .wd-tab{width:100%;border-collapse:collapse;font-size:12.5px}
+  #adm-pane-wd .wd-tab th,:is(#adm-pane-planer,#tpl-view) .wd-tab th{text-align:left;font-weight:500;color:var(--sub);padding:4px 8px 6px 0;border-bottom:1px solid var(--line)}
+  #adm-pane-wd .wd-tab td,:is(#adm-pane-planer,#tpl-view) .wd-tab td{padding:6px 8px 6px 0;border-bottom:1px solid var(--line);vertical-align:top}
   /* Admin „Trade-Planer" (08.10.2026, Finn: „wie hässlich" zur rohen Tabelle): zwei Karten wie die anderen Admin-Blöcke, Tabellen im wd-tab-Stil */
-  #adm-pane-planer .ap-adm-karte{border:1px solid var(--border);border-radius:12px;background:var(--surface,#fff);padding:14px 16px 10px;margin-bottom:14px}
-  #adm-pane-planer .ap-adm-kopf{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}
-  #adm-pane-planer .ap-adm-kopf b{font-size:14px;color:var(--ink)} #adm-pane-planer .ap-adm-kopf span{font-size:12px;color:var(--sub)}
-  #adm-pane-planer .wd-tab td.zahl,#adm-pane-planer .wd-tab th.zahl{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
-  #adm-pane-planer .wd-tab td{vertical-align:middle}
-  #adm-pane-planer .ap-adm-id{display:inline-flex;align-items:center;gap:7px;font-weight:600} #adm-pane-planer .ap-adm-id i{width:9px;height:9px;border-radius:50%;flex:none}
-  #adm-pane-planer .ap-adm-ok{padding:3px 9px;border-radius:7px;border:1px solid #A7F3D0;background:#ECFDF5;color:#047857;font-weight:600;font-size:12px;cursor:pointer}
-  #adm-pane-planer .ap-adm-ok:hover{background:#D1FAE5} #adm-pane-planer .ap-adm-ok:disabled{opacity:.5;cursor:default}
+  :is(#adm-pane-planer,#tpl-view) .ap-adm-karte{border:1px solid var(--border);border-radius:12px;background:var(--surface,#fff);padding:14px 16px 10px;margin-bottom:14px}
+  :is(#adm-pane-planer,#tpl-view) .ap-adm-kopf{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+  :is(#adm-pane-planer,#tpl-view) .ap-adm-kopf b{font-size:14px;color:var(--ink)} :is(#adm-pane-planer,#tpl-view) .ap-adm-kopf span{font-size:12px;color:var(--sub)}
+  :is(#adm-pane-planer,#tpl-view) .wd-tab td.zahl,:is(#adm-pane-planer,#tpl-view) .wd-tab th.zahl{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  :is(#adm-pane-planer,#tpl-view) .wd-tab td{vertical-align:middle}
+  :is(#adm-pane-planer,#tpl-view) .ap-adm-id{display:inline-flex;align-items:center;gap:7px;font-weight:600} :is(#adm-pane-planer,#tpl-view) .ap-adm-id i{width:9px;height:9px;border-radius:50%;flex:none}
+  :is(#adm-pane-planer,#tpl-view) .ap-adm-ok{padding:3px 9px;border-radius:7px;border:1px solid #A7F3D0;background:#ECFDF5;color:#047857;font-weight:600;font-size:12px;cursor:pointer}
+  :is(#adm-pane-planer,#tpl-view) .ap-adm-ok:hover{background:#D1FAE5} :is(#adm-pane-planer,#tpl-view) .ap-adm-ok:disabled{opacity:.5;cursor:default}
   /* ZU BESTÄTIGEN je ID (08.10.2026, Finn: „mehr Struktur — eine ID nach der anderen bestätigen … den Haken ganz rechts, Spalte Weg weg"):
      Kopfzeile je ID, Tabelle scrollt auf dem Handy quer, Konto ist ein Link zum Konto-Popup */
-  #adm-pane-planer .ap-adm-grp{display:flex;align-items:center;gap:10px;padding:10px 0 6px;margin-top:4px;border-top:1px solid var(--line)}
-  #adm-pane-planer .ap-adm-grp:first-of-type{border-top:0;margin-top:0}
-  #adm-pane-planer .ap-adm-grp .ap-adm-id{font-size:13.5px} #adm-pane-planer .ap-adm-grp>span.n{font-size:12px;color:var(--sub)}
-  #adm-pane-planer .ap-adm-grp .ap-adm-ok{margin-left:auto;white-space:nowrap}
-  #adm-pane-planer .ap-adm-scroll{overflow-x:auto} #adm-pane-planer .ap-adm-scroll .wd-tab{min-width:640px}
-  #adm-pane-planer .wd-tab td{font-size:13px;vertical-align:middle;padding:7px 10px 7px 0} #adm-pane-planer .wd-tab th{font-size:11.5px;padding:4px 10px 6px 0}
-  #adm-pane-planer .wd-tab td.ok,#adm-pane-planer .wd-tab th.ok{text-align:right;padding-right:2px;width:40px}
+  :is(#adm-pane-planer,#tpl-view) .ap-adm-grp{display:flex;align-items:center;gap:10px;padding:10px 0 6px;margin-top:4px;border-top:1px solid var(--line)}
+  :is(#adm-pane-planer,#tpl-view) .ap-adm-grp:first-of-type{border-top:0;margin-top:0}
+  :is(#adm-pane-planer,#tpl-view) .ap-adm-grp .ap-adm-id{font-size:13.5px} :is(#adm-pane-planer,#tpl-view) .ap-adm-grp>span.n{font-size:12px;color:var(--sub)}
+  :is(#adm-pane-planer,#tpl-view) .ap-adm-grp .ap-adm-ok{margin-left:auto;white-space:nowrap}
+  :is(#adm-pane-planer,#tpl-view) .ap-adm-scroll{overflow-x:auto} :is(#adm-pane-planer,#tpl-view) .ap-adm-scroll .wd-tab{min-width:640px}
+  :is(#adm-pane-planer,#tpl-view) .wd-tab td{font-size:13px;vertical-align:middle;padding:7px 10px 7px 0} :is(#adm-pane-planer,#tpl-view) .wd-tab th{font-size:11.5px;padding:4px 10px 6px 0}
+  :is(#adm-pane-planer,#tpl-view) .wd-tab td.ok,:is(#adm-pane-planer,#tpl-view) .wd-tab th.ok{text-align:right;padding-right:2px;width:40px}
   /* Nachbesserung 08.10.2026 (Finn: „es packt noch ein bisschen"): Zahlen in normaler Schrift, rechtsbündig mit tabular-nums, feste Mindestbreiten je Spalte */
-  #adm-pane-planer .wd-tab td.zahl,#adm-pane-planer .wd-tab th.zahl{text-align:right;font-family:inherit;font-variant-numeric:tabular-nums;padding-right:18px;white-space:nowrap}
-  #adm-pane-planer .wd-tab td.r,#adm-pane-planer .wd-tab th.r{white-space:nowrap;min-width:84px;padding-right:18px}
-  #adm-pane-planer .wd-tab th.s,#adm-pane-planer .wd-tab td.s{min-width:64px} #adm-pane-planer .wd-tab th.m,#adm-pane-planer .wd-tab td.m{min-width:56px}
-  #adm-pane-planer .wd-tab th.g,#adm-pane-planer .wd-tab td.g{min-width:76px} #adm-pane-planer .wd-tab th.w,#adm-pane-planer .wd-tab td.w{min-width:88px}
-  #adm-pane-planer .wd-tab td.k{padding-right:18px} #adm-pane-planer .wd-tab td.st{min-width:120px;padding-right:12px}
-  #adm-pane-planer .ap-adm-scroll .wd-tab{min-width:760px}
-  #adm-pane-planer .ap-adm-grp{padding:12px 0 6px} #adm-pane-planer .ap-adm-grp .ap-adm-id{font-size:13px;font-weight:600}
-  #adm-pane-planer .ap-adm-grp .btn-xs{margin-left:auto;padding:2px 9px;font-size:11.5px;height:auto;line-height:1.6;white-space:nowrap}
-  #adm-pane-planer .seg button{padding:3px 10px;font-size:12px}
+  :is(#adm-pane-planer,#tpl-view) .wd-tab td.zahl,:is(#adm-pane-planer,#tpl-view) .wd-tab th.zahl{text-align:right;font-family:inherit;font-variant-numeric:tabular-nums;padding-right:18px;white-space:nowrap}
+  :is(#adm-pane-planer,#tpl-view) .wd-tab td.r,:is(#adm-pane-planer,#tpl-view) .wd-tab th.r{white-space:nowrap;min-width:84px;padding-right:18px}
+  :is(#adm-pane-planer,#tpl-view) .wd-tab th.s,:is(#adm-pane-planer,#tpl-view) .wd-tab td.s{min-width:64px} :is(#adm-pane-planer,#tpl-view) .wd-tab th.m,:is(#adm-pane-planer,#tpl-view) .wd-tab td.m{min-width:56px}
+  :is(#adm-pane-planer,#tpl-view) .wd-tab th.g,:is(#adm-pane-planer,#tpl-view) .wd-tab td.g{min-width:76px} :is(#adm-pane-planer,#tpl-view) .wd-tab th.w,:is(#adm-pane-planer,#tpl-view) .wd-tab td.w{min-width:88px}
+  :is(#adm-pane-planer,#tpl-view) .wd-tab td.k{padding-right:18px} :is(#adm-pane-planer,#tpl-view) .wd-tab td.st{min-width:120px;padding-right:12px}
+  :is(#adm-pane-planer,#tpl-view) .ap-adm-scroll .wd-tab{min-width:760px}
+  :is(#adm-pane-planer,#tpl-view) .ap-adm-grp{padding:12px 0 6px} :is(#adm-pane-planer,#tpl-view) .ap-adm-grp .ap-adm-id{font-size:13px;font-weight:600}
+  :is(#adm-pane-planer,#tpl-view) .ap-adm-grp .btn-xs{margin-left:auto;padding:2px 9px;font-size:11.5px;height:auto;line-height:1.6;white-space:nowrap}
+  :is(#adm-pane-planer,#tpl-view) .seg button{padding:3px 10px;font-size:12px}
   /* Nächste Payouts (08.10.2026, Finn: Schriften cleaner, Zahlen nicht in Mono): kompaktere Zeilen, Zahlen rechtsbündig + tabular */
   #adm-f-cal-panel .t td{padding-top:7px;padding-bottom:7px;vertical-align:middle}
   #adm-f-cal-panel .t td.adm-num{font-variant-numeric:tabular-nums}
-  #adm-pane-planer .ap-konto{background:none;border:0;padding:0;font:inherit;color:var(--ink);cursor:pointer;text-align:left;white-space:nowrap}
-  #adm-pane-planer .ap-konto:hover{color:var(--violet);text-decoration:underline;text-underline-offset:3px}
-  #adm-pane-planer .ap-konto .mono{color:var(--sub)}
-  #adm-pane-planer .ap-stufe{font-size:11.5px;color:var(--sub);white-space:nowrap} #adm-pane-planer .ap-stufe.letzter{color:var(--violet);font-weight:600}
-  #adm-pane-planer .ap-adm-fuss{font-size:11.5px;color:var(--sub);margin-top:8px}
+  :is(#adm-pane-planer,#tpl-view) .ap-konto{background:none;border:0;padding:0;font:inherit;color:var(--ink);cursor:pointer;text-align:left;white-space:nowrap}
+  :is(#adm-pane-planer,#tpl-view) .ap-konto:hover{color:var(--violet);text-decoration:underline;text-underline-offset:3px}
+  :is(#adm-pane-planer,#tpl-view) .ap-konto .mono{color:var(--sub)}
+  :is(#adm-pane-planer,#tpl-view) .ap-stufe{font-size:11.5px;color:var(--sub);white-space:nowrap} :is(#adm-pane-planer,#tpl-view) .ap-stufe.letzter{color:var(--violet);font-weight:600}
+  /* Planer-Seite „Geplant" in der Admin-Form (08.10.2026, Finn mag den Block „Zu bestätigen"): Aktionen rechts = ✓/↶ + kleine Icon-Knöpfe */
+  #tpl-view .tpl-lk .ap-adm-karte{margin-bottom:0;border:0;padding:0;background:transparent}
+  #tpl-view .wd-tab td.ok,#tpl-view .wd-tab th.ok{width:auto;white-space:nowrap}
+  #tpl-view .ap-akt{display:inline-flex;align-items:center;justify-content:flex-end;gap:4px}
+  #tpl-view .ap-akt .icon-btn{width:26px;height:26px;min-height:0;padding:0}
+  :is(#adm-pane-planer,#tpl-view) .ap-adm-ok.is-ok{background:var(--surface-tint);border-color:var(--border);color:var(--sub)}
+  :is(#adm-pane-planer,#tpl-view) .ap-adm-ok.is-ok:hover{background:var(--bg)}
+  #tpl-view .wd-tab .is-verpasst{display:block;font-size:10.5px;color:var(--danger)}
+  :is(#adm-pane-planer,#tpl-view) .ap-adm-fuss{font-size:11.5px;color:var(--sub);margin-top:8px}
   #apKontoModal .ak-z{display:grid;grid-template-columns:118px 1fr;gap:4px 10px;font-size:13px;margin-bottom:10px}
   #apKontoModal .ak-z dt{color:var(--sub);font-size:12px} #apKontoModal .ak-z dd{margin:0}
   #apKontoModal .ak-h{font-size:11.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--sub-2);margin:12px 0 6px}
   #apKontoModal .wd-tab{font-size:12.5px} #apKontoModal .wd-tab td,#apKontoModal .wd-tab th{padding:5px 8px 5px 0}
   #apKontoModal .wd-tab td.zahl,#apKontoModal .wd-tab th.zahl{text-align:right;font-variant-numeric:tabular-nums}
-  @media (max-width:820px){ #adm-pane-planer .ap-adm-karte{padding:12px 12px 8px} #apKontoModal .ak-z{grid-template-columns:96px 1fr} }
+  @media (max-width:820px){ :is(#adm-pane-planer,#tpl-view) .ap-adm-karte{padding:12px 12px 8px} #apKontoModal .ak-z{grid-template-columns:96px 1fr} }
   #adm-pane-wd .wd-ablauf-tab tr.id{cursor:pointer}
   #adm-pane-wd .wd-ablauf-tab tr.id td{transition:background .12s var(--ease)}
   #adm-pane-wd .wd-ablauf-tab tr.id:hover td{background:var(--surface-tint)}
@@ -40632,7 +40640,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1193'
+  const OS_TAB_BUILD = '2026-09-22.1194'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -46249,35 +46257,40 @@
       jeKey.set(String(p.id), t)
       return p
     }).sort((a, b) => String(a.masterFirm).toLowerCase().localeCompare(String(b.masterFirm).toLowerCase()) || Date.parse(a.startUm) - Date.parse(b.startUm))
-    const zeile = p => {
+    // GEPLANT IN DER ADMIN-FORM (08.10.2026, Finn mag den Block „Zu bestätigen" aus .1178/.1186): je ID gruppiert (Farbpunkt · Name ·
+    // n · „✓ alle n"), Zeilen Konto · Richtung · Start · Menge · TP · SL · Kontowert · Stufe · Aktionen rechts (✓ bzw. ↶ + ✎ + 🗑) — derselbe
+    // Baustein wie im Admin (apOffenTabelleHtml über window._apOffenTabelleHtml, die Admin-Sektion ist ein eigener Block). Aktionen bleiben
+    // die bestehenden data-tpl-*-Handler am tplRoot; Konto-Klick → Popup (data-ak-konto). Die Plan-Objekte (plaene) bleiben für Detail/Chart.
+    const bau = window._apOffenTabelleHtml
+    if(typeof bau !== 'function') return `<div class="tpl-karte tpl-lk"><div class="tpl-h">Geplant <b>${plan.length}</b></div><div style="color:var(--sub);font-size:12.5px">Tabelle noch nicht geladen.</div></div>`
+    const je = new Map()
+    for(const p of plaene){
       const t = jeKey.get(String(p.id)), k = escapeHtml(t.key)
-      const konto = p.masterAccountId ? (accounts || []).find(a => String(a.id) === String(p.masterAccountId)) || null : null
-      const kontoBal = konto ? planKontoBalance(konto) : null
-      // Balance: eigenes Konto live wie im Reiter; fremde IDs (oder ohne Lesung) der Stand, mit dem der Planer gerechnet hat
-      const bal = !kontoBal && t.balance != null ? { val: Number(t.balance), at: 0, tip: 'Balance laut Planer (Stand des Laufs)' } : undefined
-      // Art + Ziel aus der Lauf-Zeile (Stufe, Rest bis Ziel, Planer-Balance) — gleiche Rundung wie planAutoNotiz
-      const st = String(t.stufe || '').trim(), rest = Number(t.rest), b0 = Number(t.balance)
-      const notiz = st && rest > 0 && b0 > 0 ? { stufe: st, art: /^letzter Trade/i.test(st) ? 'letzter Trade' : /^Etappe/i.test(st) ? 'Etappe' : st,
-        gekappt: /SL auf Boden gekappt/i.test(st), ziel: Math.round((b0 + rest) / 5) * 5 } : undefined
       const verpasst = t.status === 'offen' && D.tag === D.heute && D.jetzt != null && D.jetzt - t.start > 10
-      const zeit = `<span class="pz-zeit-t" title="Start ${tplUhr(t.start, D.v)} Dubai${p.autoPlan && t.status === 'offen' ? ' — startet erst nach Bestätigung' : ' — der PC-Tab startet zu dieser Zeit von selbst'}">${tplUhr(t.start, D.v)}${verpasst ? '<small class="is-verpasst">verpasst</small>' : ''}</span>`
+      const start = `<span class="pz-zeit-t" title="Start ${tplUhr(t.start, D.v)} Dubai${p.autoPlan && t.status === 'offen' ? ' — startet erst nach Bestätigung' : ' — der PC-Tab startet zu dieser Zeit von selbst'}">${tplUhr(t.start, D.v)}${verpasst ? '<small class="is-verpasst">verpasst</small>' : ''}</span>`
       const darf = !t.ohnePlan && /^[0-9a-f-]{36}$/i.test(t.plan_id) && (t.eigen || darfFremd)
       const zu = darf ? '' : ` disabled title="${escapeHtml(t.ohnePlan ? 'kein Plan angelegt (nur im Lauf)' : sperre)}"`
       const dis = _tpl.busy ? ' disabled' : ''
-      const zustand = !p.autoPlan ? '<span class="pz-hand">von Hand</span>'
+      const ok = !p.autoPlan ? '<span class="pz-hand">von Hand</span>'
         : t.status === 'offen'
-          ? `<button type="button" class="btn btn-ghost tc2-btn pz-ok" data-tpl-ok1="${k}"${zu || dis} title="Freigeben — der PC-Tab startet den Trade dann zur Startzeit">Bestätigen</button>`
-          : `<button type="button" class="btn btn-ghost tc2-btn pz-ok is-ok" data-tpl-zur1="${k}"${zu || dis} title="Bestätigt — startet zur Startzeit. Klick nimmt die Freigabe zurück">✓ bestätigt</button>`
-      const akt = `<button type="button" class="btn btn-ghost icon-btn tc2-ab" data-tpl-zedit="${k}"${t.ohnePlan ? ' disabled' : ''} title="${t.eigen ? 'Bearbeiten' : 'Richtung / Start ändern (Detail)'}">${PLAN_SVG_EDIT}</button>`
-        + `<button type="button" class="btn btn-ghost icon-btn tc2-ab" data-tpl-zdel="${k}"${zu || dis} title="${t.eigen ? 'Löschen (5 s Rückgängig)' : 'Vorschlag löschen'}">${PLAN_SVG_DEL}</button>`
-        + `<span class="pz-zustand"${darf ? '' : ` title="${escapeHtml(sperre)}"`}>${zustand}</span>`
-      // RICHTUNG JE ID (GEPLANT-RICHTUNG-JE-ID, Finn 07.10.2026 05:58 Dubai am Planer-Screenshot): ▲ Long / ▼ Short direkt bei der ID, gleicher
-      // Chip wie BUY/SELL im Firmenkopf — man sieht je ID, in welche Richtung sie geplant ist
-      const ri = t.richtung === 'buy' ? planRichtungChip('▲ Long', true) : t.richtung === 'sell' ? planRichtungChip('▼ Short', false) : ''
-      const wer = `<i style="background:${idFarbe(t.user_id)}"></i><b title="${escapeHtml(t.user || '')}">${escapeHtml(t.user || '?')}</b>${ri}`
-      return planZeileHtml(p, konto, { name: p.masterName, ext: konto && konto.externalId ? konto.externalId : (t.ende4 || ''), extTitle: '', chips: '', akt, wer, zeit, bal, notiz })
+          ? `<button type="button" class="ap-adm-ok" data-tpl-ok1="${k}"${zu || dis} title="Freigeben — der PC-Tab startet den Trade dann zur Startzeit">✓</button>`
+          : `<button type="button" class="ap-adm-ok is-ok" data-tpl-zur1="${k}"${zu || dis} title="Bestätigt — startet zur Startzeit. Klick nimmt die Freigabe zurück">↶</button>`
+      const aktionen = `<span class="ap-akt">${ok}`
+        + `<button type="button" class="btn btn-ghost icon-btn tc2-ab" data-tpl-zedit="${k}"${t.ohnePlan ? ' disabled' : ''} title="${t.eigen ? 'Bearbeiten (Start, Richtung, TP/SL)' : 'Richtung / Start ändern (Detail)'}">${PLAN_SVG_EDIT}</button>`
+        + `<button type="button" class="btn btn-ghost icon-btn tc2-ab" data-tpl-zdel="${k}"${zu || dis} title="${t.eigen ? 'Löschen (5 s Rückgängig)' : 'Vorschlag löschen'}">${PLAN_SVG_DEL}</button></span>`
+      const uid = String(t.user_id || '')
+      if(!je.has(uid)) je.set(uid, { uid, name: t.user || uid.slice(0, 8), liste: [], offen: 0, offenKeys: [] })
+      const g = je.get(uid)
+      if(p.autoPlan && t.status === 'offen' && darf){ g.offen++; g.offenKeys.push(t.key) }
+      g.liste.push({ z: { plan_id: t.plan_id, konto: t.konto, firma: t.firma, ende4: t.ende4, richtung: t.richtung }, start, menge: t.menge,
+        tp: p.masterTp > 0 ? p.masterTp : null, sl: p.masterSl > 0 ? p.masterSl : null, wert: t.wert, stufe: t.stufe || '', notes: t.hinweis || '', aktionen })
     }
-    return `<div class="tpl-karte tpl-lk"><div class="tpl-h">Geplant <b>${plan.length}</b></div>${planFirmenBloecke(plaene, { zeile, mitId: true, ohneHinweis: true })}</div>`
+    const gruppen = [...je.values()].sort((a, b) => String(a.name).localeCompare(String(b.name), 'de'))
+    for(const g of gruppen){ g.liste.sort((a, b) => String(a.start).localeCompare(String(b.start))); g.n = `${g.liste.length} geplant${g.offen ? ' · ' + g.offen + ' offen' : ''}` }
+    const offenGesamt = plan.filter(t => t.status === 'offen' && t.auto).length
+    const kopf = `<div class="ap-adm-kopf"><b>Geplant · ${plan.length}</b><span>${D.tag === D.heute ? 'heute' : escapeHtml(D.tag)} · ${offenGesamt ? offenGesamt + ' offen' : 'alle bestätigt'} · Zeiten Dubai</span></div>`
+    return `<div class="tpl-karte tpl-lk">${bau(gruppen, { kopf, leer: 'Nichts geplant.', kontoAttr: 'data-ak-konto',
+      gruppeKnopf: g => g.offen ? `<button type="button" class="btn btn-ghost btn-xs" data-tpl-ok-id="${escapeHtml(g.uid)}"${_tpl.busy ? ' disabled' : ''} title="alle offenen Vorschläge dieser ID bestätigen">✓ alle ${g.offen}</button>` : '' })}</div>`
   }
   /* HYPO-P&L (HYPO-PNL-LIVE, 07.10.2026, Finn: „Jeder Trade wird mit den Gesamtkosten in hypothetischen Euro umgesetzt … ob wir gerade eher
    * ins Plus oder ins Minus gehen"): hypothetischer P&L € eines Trades = Kontowert-Satz des Kontos (€ je $, Delta offen[].satz_eur_je_usd;
@@ -46715,6 +46728,12 @@
       _tpl.wahl = null; _tpl.edit = null; _tpl.meldung = ''; tplZeichnen(); return }
     const ok1 = e.target.closest('[data-tpl-ok1]')   // Geplant-Liste: einen Vorschlag bestätigen (Finn 07.10.2026) — ohne Rückfrage
     if(ok1){ e.stopPropagation(); tplEinzelBestaetigen(ok1.dataset.tplOk1); return }
+    const okId = e.target.closest('[data-tpl-ok-id]')   // Geplant-Liste (Admin-Form, 08.10.2026): „✓ alle n" einer ID — nacheinander wie der Einzel-Haken
+    if(okId){ e.stopPropagation(); if(okId.disabled) return
+      const uid = okId.dataset.tplOkId, keys = tplDaten().trades.filter(t => String(t.user_id) === uid && t.status === 'offen' && t.auto && !t.ohnePlan && (t.eigen || tplDarfFremd())).map(t => t.key)
+      okId.disabled = true
+      ;(async () => { for(const k of keys) await tplEinzelBestaetigen(k) })().finally(() => { try{ tplZeichnen() }catch(_){} })
+      return }
     // Geplant-Liste im Reiter-Stil (GEPLANT-WIE-TRADES-REITER, 07.10.2026): ↶ bestätigt, ✎, 🗑 je Zeile — eigene/fremde trennt tplAktion
     const zz = e.target.closest('[data-tpl-zur1],[data-tpl-zedit],[data-tpl-zdel]')
     if(zz){ e.stopPropagation(); if(zz.disabled) return
@@ -59415,39 +59434,55 @@
     const d = (_apd.d && (_apd.d.geplant || [])).find?.(x => String(x.plan_id) === String(z.plan_id)); if(d && d.wert_eur != null && isFinite(Number(d.wert_eur))) return Number(d.wert_eur)
     const g = ((_ap.letzter && _ap.letzter.geplant) || []).find(x => String(x.user_id) === String(z.user_id) && kk(x.konto) === kk(z.konto))
     const w = g && (g.wert ?? g.wert_eur); return w != null && isFinite(Number(w)) ? Number(w) : null }
+  /* GEMEINSAMER TABELLEN-BAUSTEIN „ZU BESTÄTIGEN" (08.10.2026, Slave-Terminal 1, mit Terminal 4 abgestimmt): Admin-Reiter UND die
+   * Geplant-Liste der Trade-Planer-Seite zeichnen dieselbe Form — je ID eine Gruppe (Farbpunkt · Name · n · Knopf rechts), darunter
+   * Zeilen Konto · Richtung · Start · Menge · TP · SL · Kontowert · Stufe · Aktionen ganz rechts (Zahlen tabular). REIN RECHNEND.
+   * gruppen = [{uid, name, n (Text neben dem Namen), liste: [{z: {plan_id, konto, firma, ende4, richtung}, start (HTML), menge, tp, sl,
+   * wert, stufe, notes, aktionen (HTML der rechten Zelle)}]}]; opt = {kopf (HTML), leer (Text), kontoAttr (Datenattribut des
+   * Konto-Knopfs, Standard data-ap-konto), gruppeKnopf(g) → HTML}. Außerhalb des Admin-Blocks über window._apOffenTabelleHtml. */
+  function apOffenTabelleHtml(gruppen, opt){
+    opt = opt || {}
+    const usd = v => v != null && isFinite(Number(v)) ? Math.round(Number(v)).toLocaleString('de-DE') + ' $' : '<span style="color:var(--sub-2)">ohne</span>'
+    const eur = v => v != null && isFinite(Number(v)) ? Math.round(Number(v)).toLocaleString('de-DE') + ' €' : '<span style="color:var(--sub-2)">–</span>'
+    const attr = opt.kontoAttr || 'data-ap-konto'
+    if(!(gruppen || []).length) return `<div class="ap-adm-karte">${opt.kopf || ''}<div style="color:var(--sub);font-size:12.5px;padding:2px 0 6px">${escapeHtml(opt.leer || 'Nichts offen.')}</div></div>`
+    const th = `<thead><tr><th class="k">Konto</th><th class="r">Richtung</th><th class="zahl s">Start</th><th class="zahl m">Menge</th><th class="zahl g">TP</th><th class="zahl g">SL</th><th class="zahl w" title="Kontowert in € (Delta, sonst letzter Lauf)">Kontowert</th><th class="st">Stufe</th><th class="ok"></th></tr></thead>`
+    const html = gruppen.map(g => {
+      const zeilen = g.liste.map(r => { const z = r.z || {}, st = String(r.stufe || '')
+        const stufe = st ? `<span class="ap-stufe${/letzter/i.test(st) ? ' letzter' : ''}" title="${escapeHtml(String(r.notes || ''))}">${escapeHtml(st)}</span>` : '<span style="color:var(--sub-2)">–</span>'
+        return `<tr>
+        <td class="k"><button type="button" class="ap-konto" ${attr}="${escapeHtml(String(z.plan_id))}" title="Konto ansehen">${apKontoKurz(z)}</button></td>
+        <td class="r" style="font-weight:600;color:${z.richtung === 'buy' ? '#047857' : '#b91c1c'}">${z.richtung === 'buy' ? '▲ Long' : z.richtung === 'sell' ? '▼ Short' : '–'}</td>
+        <td class="zahl s">${r.start || '–'}</td>
+        <td class="zahl m">${r.menge != null ? escapeHtml(String(r.menge)) : '–'}</td>
+        <td class="zahl g">${usd(r.tp)}</td>
+        <td class="zahl g">${usd(r.sl)}</td>
+        <td class="zahl w">${eur(r.wert)}</td>
+        <td class="st">${stufe}</td>
+        <td class="ok">${r.aktionen || ''}</td></tr>` }).join('')
+      return `<div class="ap-adm-grp"><span class="ap-adm-id"><i style="background:${idFarbe(g.uid)}"></i>${escapeHtml(g.name)}</span><span class="n">${escapeHtml(String(g.n != null ? g.n : g.liste.length + ' offen'))}</span>
+          ${opt.gruppeKnopf ? (opt.gruppeKnopf(g) || '') : ''}</div>
+        <div class="ap-adm-scroll"><table class="wd-tab">${th}<tbody>${zeilen}</tbody></table></div>`
+    }).join('')
+    return `<div class="ap-adm-karte">${opt.kopf || ''}${html}</div>`
+  }
+  window._apOffenTabelleHtml = apOffenTabelleHtml
   function apIdsOffenHtml(){
     const o = _apIds.offen.slice().sort((a, b) => String(a.user || '').localeCompare(String(b.user || '')) || String(a.start_um || '').localeCompare(String(b.start_um || '')))
     const heute = new Date().toLocaleDateString('de-DE', { timeZone: 'Asia/Dubai', day: '2-digit', month: '2-digit' })
     const wann = iso => { const d = new Date(iso || ''); if(isNaN(d)) return '–'
       const t = d.toLocaleDateString('de-DE', { timeZone: 'Asia/Dubai', day: '2-digit', month: '2-digit' }), u = d.toLocaleTimeString('de-DE', { timeZone: 'Asia/Dubai', hour: '2-digit', minute: '2-digit' })
       return t === heute ? u : `${t} ${u}` }
-    const usd = v => v != null && isFinite(Number(v)) ? Math.round(Number(v)).toLocaleString('de-DE') + ' $' : '<span style="color:var(--sub-2)">ohne</span>'
-    const eur = v => v != null && isFinite(Number(v)) ? Math.round(Number(v)).toLocaleString('de-DE') + ' €' : '<span style="color:var(--sub-2)">–</span>'
     const kopf = `<div class="ap-adm-kopf"><b>Zu bestätigen · ${o.length}</b><span>Vorschläge des Auto-Planers, heute und morgen, alle IDs · Zeiten Dubai</span>
         ${o.length ? `<button type="button" class="ap-adm-ok" id="ap-ids-alle-ok" style="margin-left:auto">✓ Alle ${o.length} bestätigen</button>` : ''}</div>`
-    if(!o.length) return `<div class="ap-adm-karte">${kopf}<div style="color:var(--sub);font-size:12.5px;padding:2px 0 6px">Nichts offen.</div></div>`
-    // je ID eine Gruppe: Kopfzeile (Farbpunkt · Name · n offen · „alle n bestätigen"), darunter die Zeilen, Haken ganz rechts
+    // je ID eine Gruppe: Kopfzeile (Farbpunkt · Name · n offen · „alle n bestätigen"), darunter die Zeilen, Haken ganz rechts — Baustein apOffenTabelleHtml
     const je = new Map()
-    for(const z of o){ const k = String(z.user_id || ''); if(!je.has(k)) je.set(k, { uid: k, name: z.user || k.slice(0, 8), liste: [] }); je.get(k).liste.push(z) }
-    const th = `<thead><tr><th class="k">Konto</th><th class="r">Richtung</th><th class="zahl s">Start</th><th class="zahl m">Menge</th><th class="zahl g">TP</th><th class="zahl g">SL</th><th class="zahl w" title="Kontowert in € (Delta, sonst letzter Lauf)">Kontowert</th><th class="st">Stufe</th><th class="ok"></th></tr></thead>`
-    const gruppen = [...je.values()].map(g => {
-      const zeilen = g.liste.map(z => { const t = apIdsTrade(z) || {}, st = z.stufe || t.stufe || ''
-        const stufe = st ? `<span class="ap-stufe${/letzter/i.test(st) ? ' letzter' : ''}" title="${escapeHtml(String(z.notes || ''))}">${escapeHtml(st)}</span>` : '<span style="color:var(--sub-2)">–</span>'
-        return `<tr>
-        <td class="k"><button type="button" class="ap-konto" data-ap-konto="${escapeHtml(String(z.plan_id))}" title="Konto ansehen">${apKontoKurz(z)}</button></td>
-        <td class="r" style="font-weight:600;color:${z.richtung === 'buy' ? '#047857' : '#b91c1c'}">${z.richtung === 'buy' ? '▲ Long' : z.richtung === 'sell' ? '▼ Short' : '–'}</td>
-        <td class="zahl s">${escapeHtml(wann(z.start_um))}</td>
-        <td class="zahl m">${z.menge != null ? escapeHtml(String(z.menge)) : '–'}</td>
-        <td class="zahl g">${usd(z.tp)}</td>
-        <td class="zahl g">${usd(z.sl)}</td>
-        <td class="zahl w">${eur(apIdsWert(z, t))}</td>
-        <td class="st">${stufe}</td>
-        <td class="ok"><button type="button" class="ap-adm-ok" data-ap-ok="${escapeHtml(String(z.plan_id))}" title="Bestätigen — startet zur Startzeit">✓</button></td></tr>` }).join('')
-      return `<div class="ap-adm-grp"><span class="ap-adm-id"><i style="background:${idFarbe(g.uid)}"></i>${escapeHtml(g.name)}</span><span class="n">${g.liste.length} offen</span>
-          <button type="button" class="btn btn-ghost btn-xs" data-ap-ok-id="${escapeHtml(g.uid)}" title="alle offenen Vorschläge dieser ID bestätigen">✓ alle ${g.liste.length}</button></div>
-        <div class="ap-adm-scroll"><table class="wd-tab">${th}<tbody>${zeilen}</tbody></table></div>`
-    }).join('')
-    return `<div class="ap-adm-karte">${kopf}${gruppen}</div>`
+    for(const z of o){ const k = String(z.user_id || ''); if(!je.has(k)) je.set(k, { uid: k, name: z.user || k.slice(0, 8), liste: [] })
+      const t = apIdsTrade(z) || {}
+      je.get(k).liste.push({ z, start: escapeHtml(wann(z.start_um)), menge: z.menge, tp: z.tp, sl: z.sl, wert: apIdsWert(z, t), stufe: z.stufe || t.stufe || '', notes: z.notes,
+        aktionen: `<button type="button" class="ap-adm-ok" data-ap-ok="${escapeHtml(String(z.plan_id))}" title="Bestätigen — startet zur Startzeit">✓</button>` }) }
+    return apOffenTabelleHtml([...je.values()], { kopf, leer: 'Nichts offen.', kontoAttr: 'data-ap-konto',
+      gruppeKnopf: g => `<button type="button" class="btn btn-ghost btn-xs" data-ap-ok-id="${escapeHtml(g.uid)}" title="alle offenen Vorschläge dieser ID bestätigen">✓ alle ${g.liste.length}</button>` })
   }
   /* Konto-Popup (08.10.2026): Name, Firma, Typ/Phase, Balance (letzte Lesung + Quelle + Alter), Ziel/Rest, Kontowert, letzte Trades — eigene
    * Konten aus accounts/tradePlans (tplKontoBalance wie auf der Planer-Seite), fremde aus Lauf (balance/rest), Delta (wert_eur), live-trades
