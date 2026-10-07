@@ -108,7 +108,27 @@ def main():
           "mt5_baseline": {"tv": {"balance_start": 150000}}}])
     check(gb and "geblasen" in gb, f"echte Balance 150.000 → 146.000 = voller DD → geblasen? ({gb})")
     gb = a["ap_letzter_trade_geblasen"]({"groessen": [100000], "dd_pct": 10}, 90400, [{"ended_at": "x", "final": {"master_pl_schaetzung": -9600}}])
-    check(gb and "geblasen" in gb, "CFD 100k: −9.600 $ ≥ 95 % von 10 % → geblasen?")
+    check(gb and "nie gelesen" in gb and "Balance lesen" in gb and "geblasen" not in gb, f"CFD 100k: −9.600 $ nur geschätzt → Balance lesen statt geblasen? ({gb})")
+    # 08.10.2026 (Slave-Terminal 3, Finn: FNF 150k …5241 „geblasen? → Beheben" ohne Handgriff): Demo-Ende vom 05.10. ohne balance_end, ohne
+    # echten master_pl, nur Schätzung −4.000 → Balance-lesen-Hinweis mit Datum; echter today_pnl −4.000 → geblasen?; frische Balance
+    # (tv_balance_at NACH dem Ende) über dem Boden 146.000 → gar kein Hinweis; frische Balance unter dem Boden → weiter der Lese-Hinweis
+    R4 = {"groessen": [150000], "dd_usd": 4000}
+    nur_s = [{"ended_at": "2026-10-05T17:44:10+00:00", "pl_quelle": None, "master_pl": None, "mt5_baseline": {"tv": {"balance_start": 150000}},
+              "final": {"grund": "demo_liq", "today_pnl": None, "balance_end": None, "master_pl_schaetzung": -4000}}]
+    gb = a["ap_letzter_trade_geblasen"](R4, 150000, nur_s)
+    check(gb == "Ergebnis vom 05.10. nie gelesen (Demo-Schätzung -4.000 $) → ↻ Balance lesen", f"nur Demo-Schätzung → Balance lesen mit Datum ({gb})")
+    gb = a["ap_letzter_trade_geblasen"](R4, 150000, nur_s, bal_stand="2026-10-05T12:00:00+00:00")
+    check(gb and "nie gelesen" in gb, f"Balance von VOR dem Ende zählt nicht ({gb})")
+    gb = a["ap_letzter_trade_geblasen"](R4, 150000, nur_s, bal_stand="2026-10-06T09:00:00+00:00")
+    check(gb is None, f"frische Balance 150.000 nach dem Ende über dem Boden 146.000 → kein Hinweis ({gb})")
+    gb = a["ap_letzter_trade_geblasen"](R4, 145500, nur_s, bal_stand="2026-10-06T09:00:00+00:00")
+    check(gb and "nie gelesen" in gb, f"frische Balance unter dem Boden → weiter Balance-lesen-Hinweis, Boden sagt ap_konto_rechnen ({gb})")
+    gb = a["ap_letzter_trade_geblasen"](R4, 146000, [{"ended_at": "2026-10-05T17:44:10+00:00", "final": {"grund": "demo_liq", "today_pnl": -4000, "master_pl_schaetzung": -4000}}])
+    check(gb and "geblasen" in gb and "nie gelesen" not in gb, f"echter today_pnl −4.000 → geblasen? ({gb})")
+    gb = a["ap_letzter_trade_geblasen"](R4, 146000, [{"ended_at": "2026-10-05T17:44:10+00:00", "pl_quelle": "tv", "master_pl": -4000, "final": {"grund": "demo_liq", "master_pl_schaetzung": -4000}}])
+    check(gb and "geblasen" in gb, f"echter master_pl (tv) −4.000 → geblasen? ({gb})")
+    gb = a["ap_letzter_trade_geblasen"](R4, 146000, [{"ended_at": "2026-10-05T17:44:10+00:00", "final": {"grund": "demo_liq", "today_pnl": -4000}}], bal_stand="2026-10-06T09:00:00+00:00")
+    check(gb and "geblasen" in gb, f"echter Verlust, frische Balance am Boden (146.000 = nicht über) → geblasen? ({gb})")
 
     # ── 2d Consistency je Konto (accounts.consistency_pct, Finn 07.10.2026)
     tdfy = next(r for r in sd.FIRMEN if "tradeify" in r["namen"])

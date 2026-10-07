@@ -15363,18 +15363,37 @@ def ap_eingriff_filter(aktion, plan_ids, sicht_uid=None):
     return params, body, bed[1]
 
 
-def ap_letzter_trade_geblasen(regel, balance, plaene_konto):
+def ap_letzter_trade_geblasen(regel, balance, plaene_konto, bal_stand=None):
     """REIN RECHNEND (Master 07.10.2026, Anlass Tradeify-Challenge 149.046 nach −4.521 $ = Liquidation, Boden aber nicht
     bekannt): hat der LETZTE beendete Trade des Kontos mindestens 95 % des Drawdowns verloren (final.today_pnl, sonst
     master_pl_schaetzung), ist das Konto „geblasen?" — danach kam per Definition kein Gewinn. Ein Ende per „liq" allein zählt
     nicht (Apex: Liq-Level = weicher Tagesstopp −2.000 $, Konto lebt).
-    DD = dd_usd (skaliert) bzw. Größe × dd_pct. → Grund oder None."""
+    DD = dd_usd (skaliert) bzw. Größe × dd_pct. → Grund oder None.
+    Seit 08.10.2026 (Slave-Terminal 3; Finn: „Braucht dich" zeigte beim FNF 150k „geblasen? → Beheben", ohne dass er etwas tun konnte —
+    zwei Pläne vom 05.10. mit grund demo_liq, ohne balance_end und ohne echten master_pl, Puls-Login damals gescheitert):
+    (1) kommt der Verlust NUR aus der Demo-Schätzung, heißt es nicht „geblasen?", sondern „Ergebnis vom <Datum> nie gelesen
+        (Demo-Schätzung …) → ↻ Balance lesen" — das Frontend hängt daran den Knopf „↻ Balance lesen" (art balance, auch fremde IDs);
+        nach der Lesung entscheidet die Balance (≤ Boden → Boden-Hinweis aus ap_konto_rechnen, sonst frei);
+    (2) liegt bal_stand (accounts.tv_balance_at) NACH dem Ende des letzten Trades und die Balance ÜBER dem Boden (Größe − DD),
+        gibt es gar keinen Hinweis — eine echte Balance beweist, dass das Konto lebt, egal was die Schätzung sagt."""
     fertig = [p for p in plaene_konto or () if (p.get("ended_at") or p.get("completed_at")) and isinstance(p.get("final"), dict)]
     if not fertig or not regel:
         return None
     p = max(fertig, key=lambda x: str(x.get("ended_at") or x.get("completed_at") or ""))
     fin = p["final"]
-    pnl = _wd_num(fin.get("today_pnl"))
+    ende = str(p.get("ended_at") or p.get("completed_at") or "")
+    groesse = ap_groesse(regel.get("groessen"), balance) or (regel.get("groessen") or [None])[0]
+    f = (groesse or 100000) / 100000.0 if regel.get("skaliert") else 1.0
+    dd = float(regel["dd_usd"]) * f if regel.get("dd_usd") else (float(groesse) * float(regel["dd_pct"]) / 100.0
+                                                                  if regel.get("dd_pct") and groesse else None)
+    # (2) echte Balance NACH dem Trade-Ende über dem Boden → Konto lebt, kein Hinweis
+    if bal_stand and ende and str(bal_stand) > ende and dd and groesse and balance is not None:
+        try:
+            if float(balance) > float(groesse) - dd:
+                return None
+        except (TypeError, ValueError):
+            pass
+    pnl, geschaetzt = _wd_num(fin.get("today_pnl")), False
     if pnl is None:
         # 08.10.2026 (Finn: FundedNext 150k …9055 stand als „geblasen?" da, obwohl +3.358 $ und Balance 153.358 $ live):
         # Orbit V2 beendet oft über den Demo-Spiegel (grund demo_liq) OHNE today_pnl, die master_pl_schaetzung ist dann der
@@ -15388,12 +15407,12 @@ def ap_letzter_trade_geblasen(regel, balance, plaene_konto):
         elif _wd_num(p.get("master_pl")) is not None and str(p.get("pl_quelle") or "") in ("tv", "reader", "puls", "hand"):
             pnl = _wd_num(p.get("master_pl"))
         else:
-            pnl = _wd_num(fin.get("master_pl_schaetzung"))
-    groesse = ap_groesse(regel.get("groessen"), balance) or (regel.get("groessen") or [None])[0]
-    f = (groesse or 100000) / 100000.0 if regel.get("skaliert") else 1.0
-    dd = float(regel["dd_usd"]) * f if regel.get("dd_usd") else (float(groesse) * float(regel["dd_pct"]) / 100.0
-                                                                  if regel.get("dd_pct") and groesse else None)
+            pnl, geschaetzt = _wd_num(fin.get("master_pl_schaetzung")), True
     if dd and pnl is not None and pnl <= -0.95 * dd:
+        if geschaetzt:
+            # (1) nur die Demo-Schätzung kennt den Verlust — niemand hat das echte Ergebnis gelesen → Balance lesen statt „geblasen?"
+            datum = f"{ende[8:10]}.{ende[5:7]}." if len(ende) >= 10 and ende[4] == "-" else "?"
+            return f"Ergebnis vom {datum} nie gelesen (Demo-Schätzung {pnl:,.0f} $) → ↻ Balance lesen".replace(",", ".")
         return f"letzter Trade {pnl:,.0f} $ (≥ 95 % des Drawdowns {dd:,.0f} $) — geblasen?".replace(",", ".")
     return None
 
@@ -15537,7 +15556,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
         if not bal:
             ausgelassen.append(dict(zeile, grund="keine Balance bekannt"))
             continue
-        gb = ap_letzter_trade_geblasen(regel, float(bal), eig)
+        gb = ap_letzter_trade_geblasen(regel, float(bal), eig, bal_stand=stand)   # stand = Zeit der Balance (08.10.2026: frische Balance über dem Boden schlägt die Schätzung)
         if gb:
             ausgelassen.append(dict(zeile, grund=gb))
             continue

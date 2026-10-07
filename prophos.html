@@ -40811,7 +40811,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1217'
+  const OS_TAB_BUILD = '2026-09-22.1218'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -45147,7 +45147,7 @@
   function apGrundKurz(g){
     const t = String(g || '')
     return /geplanten\/laufenden Plan/.test(t) ? 'laufen schon' : /keine Regel/.test(t) ? 'ohne Regel' : /nicht live/.test(t) ? 'Balance nicht live'
-      : /noch nicht erledigt/.test(t) ? 'in Überprüfen' : /keine Balance/.test(t) ? 'ohne Balance' : /Ziel erreicht/.test(t) ? 'Ziel erreicht'
+      : /noch nicht erledigt/.test(t) ? 'in Überprüfen' : /keine Balance/.test(t) ? 'ohne Balance' : /nie gelesen/.test(t) ? 'Ergebnis nie gelesen' : /Ziel erreicht/.test(t) ? 'Ziel erreicht'
       : /bis zum Ziel/.test(t) ? 'kurz vor Ziel' : /Kontogröße/.test(t) ? 'Größe unklar' : /Zeitfenster/.test(t) ? 'kein Zeitfenster'
       : /Boden/.test(t) ? 'am Boden' : (t.split(/[—(]/)[0].trim() || 'sonstige')
   }
@@ -46213,7 +46213,7 @@
   /* Gründe des Planers (ap_planen/ap_konto_rechnen) als kurzes Wort für die Chips; ganzer Satz im Tooltip */
   function tplGrund(g){
     const t = String(g || '')
-    return /keine Regel/.test(t) ? 'keine Regel' : /nicht live/.test(t) ? 'Balance nicht live' : /keine Balance/.test(t) ? 'keine Balance'
+    return /keine Regel/.test(t) ? 'keine Regel' : /nicht live/.test(t) ? 'Balance nicht live' : /keine Balance/.test(t) ? 'keine Balance' : /nie gelesen/.test(t) ? 'Ergebnis nie gelesen'
       : /Ziel erreicht/.test(t) ? 'Ziel erreicht' : /Boden/.test(t) ? 'unter Boden' : /geblasen/.test(t) ? 'geblasen?'
       : /noch nicht erledigt/.test(t) ? 'in Überprüfen' : /Zeitfenster/.test(t) ? 'kein Zeitfenster' : /bis zum Ziel/.test(t) ? 'kurz vor Ziel'
       : /Kontogröße/.test(t) ? 'Größe unklar' : apGrundKurz(t)
@@ -46411,23 +46411,8 @@
       const g = String(x.grund || '')
       if(/geplanten\/laufenden Plan/.test(g)) continue
       if(x.typ && !TPL_TYPEN.includes(String(x.typ))) continue   // WD-RAUS-AUS-PLANER
-      const k = tplKk(x.user_id, x.konto)
-      if(konten.has(k)){
-        // schon als Balance-Zeile drin (eigenes Konto ohne Live-Balance): ein konkreter Planer-Grund (Haken aus) ist die bessere Zeile → ersetzen (08.10.2026)
-        if(!/ausgenommen/i.test(g)) continue
-        const o = je.get(String(x.user_id)); if(o) o.zeilen = o.zeilen.filter(z => !(z.art === 'balance' && z.konto === x.konto))
-      }
-      konten.add(k)
-      const bal = /keine Balance|nicht live/.test(g), fremd = String(x.user_id) !== String(currentUserId)
-      // EXTERNAL ID FEHLT (08.10.2026, Fehler-Muster: 49 Orbit-Fehlstarts „Konto hat keine External ID"): der Planer lässt das Konto jetzt
-      // vorab aus (app.py ap_ext_fehlt) — hier als Zeile mit Anleitung; eigene Konten öffnen per Knopf das Konto-Formular, fremde „am PC von X"
-      if(/External ID fehlt/i.test(g)){
-        const acc = fremd ? null : (accounts || []).find(q => String(q.id) === String(x.konto_id || '') || String(q.name || '') === String(x.konto || ''))
-        add(x.user_id, x.user, { art: 'ausgelassen', firma: x.firma, konto: x.konto, typ: x.typ, balance: '', ende4: '', text: 'ohne External ID — der Bot kann das Unterkonto nicht wählen',
-          ext: acc ? String(acc.id) : '', hinweis: fremd ? `am PC von ${x.user || 'der ID'} eintragen` : (acc ? '' : 'Konto nicht in der Liste'),
-          tun: 'External ID (Tradovate-/TopstepX-Unterkonto) unter Accounts eintragen — der Bot plant das Konto dann von selbst nach (alle 10 min).' })
-        continue
-      }
+      const k = tplKk(x.user_id, x.konto); if(konten.has(k)) continue; konten.add(k)
+      const bal = /keine Balance|nicht live|nie gelesen/.test(g), fremd = String(x.user_id) !== String(currentUserId)   // „nie gelesen" (08.10.2026): Demo-Schätzung statt Ergebnis → ↻ Balance lesen
       // ↻ Balance lesen auch für FREMDE Konten (08.10.2026, Finn: „direkt hier auf Balance-Refresh drücken") — Signal im Namen des
       // Besitzers über PATCH /admin/wd-plaene {aktion:'balance'} (tplBalanceFremd); ohne konto_id (alter Backend-Stand) bleibt der Hinweis
       const balf = bal && fremd && x.konto_id ? String(x.konto_id) : ''
