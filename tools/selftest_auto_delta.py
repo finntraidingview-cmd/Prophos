@@ -47,7 +47,7 @@ REIN = ("ap_id_fest", "ap_id_misch", "ap_ext_fehlt", "_ap_norm", "ap_regel_finde
         "ap_rest_punkte", "ap_verlauf", "_ap_gegen_dicht", "ap_dicht_paare", "ap_richtungen_delta", "ap_fenster_von",
         "_ap_tranchen", "_ap_tranche_frei", "ap_umplanen", "ap_eingriff_pruefen", "ap_start_bis", "ap_einsatz_lage", "ap_gross_ab", "ap_consistency_etappe", "ap_regel_konto", "ist_topstep_express", "ap_cfd_ab",
         "ap_richtung_konflikte", "lt_echo_live_wahl", "lt_echo_felder",
-        "ap_balance_live", "ap_letzt_je_konto", "_ap_boden", "ap_boden_konto", "ap_boden_sicher", "liq_peak", "_ap_peaks", "_liq_verlauf_laden")   # 08.10.2026: Balance live (Guard/Delta/ids), Boden für den Balance-Balken
+        "ap_balance_live", "ap_letzt_je_konto", "_ap_boden", "ap_boden_konto", "ap_boden_sicher", "ap_boden_zeile", "liq_peak", "_ap_peaks", "_liq_verlauf_laden")   # 08.10.2026: Balance live (Guard/Delta/ids), Boden für den Balance-Balken
 IO = ("_ap_gehedgt_plan", "_ap_bewerten", "_ap_iso_min", "_ap_stand_laden", "_ap_stand_plaene", "_ap_min_iso",
       "_ap_umplanungen_heute", "_ap_bot_stand", "ap_delta_antwort", "_ap_aenderungen_anwenden", "ap_ausgleichen",
       "_ap_probelauf", "ap_planen", "_ap_tz", "_ap_eur_bei", "_ap_konten_laden", "ap_einsatz_kontext", "ap_richtung_fest_plan", "ap_letzter_trade_geblasen", "_ap_rk_flag",

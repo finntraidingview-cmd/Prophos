@@ -7298,7 +7298,7 @@ def vorrat_chance_stufe(regel, balance, groesse, start=None, max_dd=None):
         if bal >= ziel:
             return dict(out, chance=1.0, erreicht=True, hinweis="Ziel erreicht, noch nicht umgestellt")
         if bal <= boden:
-            return dict(out, chance=0.0, hinweis="auf/unter dem Boden — geblasen?")
+            return dict(out, chance=0.0, hinweis="auf/unter dem Boden — geblowt?")
         out["chance"] = (bal - boden) / (ziel - boden)
         return out
     if modell == "trades":
@@ -7324,7 +7324,7 @@ def vorrat_chance_stufe(regel, balance, groesse, start=None, max_dd=None):
         if plus >= sum(tps):
             return dict(out, chance=1.0, erreicht=True, hinweis="Ziel erreicht, noch nicht umgestellt")
         if polster <= 0:
-            return dict(out, chance=0.0, hinweis="Polster aufgebraucht — geblasen?")
+            return dict(out, chance=0.0, hinweis="Polster aufgebraucht — geblowt?")
         p, cum, erst, bod = 1.0, 0.0, True, bal - polster
         for tp in tps:
             lo, cum = cum, cum + tp
@@ -7355,7 +7355,7 @@ def vorrat_chance_stufe(regel, balance, groesse, start=None, max_dd=None):
         if bal >= ziel:
             return dict(out, chance=1.0, erreicht=True, hinweis="Ziel erreicht, noch nicht umgestellt")
         if bal <= boden:
-            return dict(out, chance=0.0, hinweis="auf/unter dem Boden — geblasen?")
+            return dict(out, chance=0.0, hinweis="auf/unter dem Boden — geblowt?")
         b, fail = bal, 1.0
         while b > boden + 0.005 and len(out["trades"]) < 60:
             pol = min(tag, b - boden)          # letzter Tag: nur noch der Rest bis zum Gesamt-Boden
@@ -14362,7 +14362,7 @@ def ap_konto_rechnen(regel, phase, balance, u):
             return None, f"Ziel erreicht — Phase umstellen (nur noch {rest:.0f} $)"
         return None, f"nur noch {rest:.0f} $ bis zum Ziel — von Hand prüfen"
     if boden_blow is not None and balance <= boden_blow:
-        return None, "Balance auf/unter dem Boden — geblasen?"
+        return None, "Balance auf/unter dem Boden — geblowt?"
     menge = _ap_runden(_ap_spanne(ph.get("menge"), u["menge"], f), ph.get("menge_schritt") or 1)
     pjm = ph.get("puffer_je_menge")
     psp = (pjm or {}).get(str(int(menge))) if pjm else ph.get("puffer")
@@ -14452,6 +14452,21 @@ def ap_boden_sicher(firmen, a, balance, peaks=None, regel=None):
     except Exception as e:
         print(f"[auto-plan] ⚠️ boden Konto {a.get('id')}: {type(e).__name__}: {e}", flush=True)
         return {"boden": None, "boden_min": None, "boden_art": None}
+
+
+def ap_boden_zeile(regel, a, balance, bal_stand):
+    """Anzeige-Felder für eine ausgelassen[]-Zeile mit geblowt-Grund (Vertrag Slave 6, 08.10.2026): boden (sicheres Level, sonst
+    boden_min), boden_min, boden_art, balance (die vom Planer benutzte), bal_stand (Zeit dieser Balance, ISO). Nur Anzeige — eigenes try,
+    Fehler → Felder null; die Rechnung des Planers bleibt unberührt."""
+    b = _wd_num(balance)
+    out = {"boden": None, "boden_min": None, "boden_art": None, "balance": round(b, 2) if b is not None else None,
+           "bal_stand": str(bal_stand) if bal_stand else None}
+    try:
+        bk = ap_boden_sicher(None, a, b, None, regel=ap_regel_konto(regel, a, b) if regel else None)
+        out.update(bk, boden=bk.get("boden") if bk.get("boden") is not None else bk.get("boden_min"))
+    except Exception as e:
+        print(f"[auto-plan] ⚠️ boden-zeile Konto {(a or {}).get('id')}: {type(e).__name__}: {e}", flush=True)
+    return out
 
 
 def _ap_peaks(konten):
@@ -15658,7 +15673,7 @@ def ap_letzter_trade_geblasen(regel, balance, plaene_konto, bal_stand=None):
             # (1) nur die Demo-Schätzung kennt den Verlust — niemand hat das echte Ergebnis gelesen → Balance lesen statt „geblasen?"
             datum = f"{ende[8:10]}.{ende[5:7]}." if len(ende) >= 10 and ende[4] == "-" else "?"
             return f"Ergebnis vom {datum} nie gelesen (Demo-Schätzung {pnl:,.0f} $) → ↻ Balance lesen".replace(",", ".")
-        return f"letzter Trade {pnl:,.0f} $ (≥ 95 % des Drawdowns {dd:,.0f} $) — geblasen?".replace(",", ".")
+        return f"letzter Trade {pnl:,.0f} $ (≥ 95 % des Drawdowns {dd:,.0f} $) — geblowt?".replace(",", ".")
     return None
 
 
@@ -15803,9 +15818,11 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
             continue
         gb = ap_letzter_trade_geblasen(regel, float(bal), eig, bal_stand=stand)   # stand = Zeit der Balance (08.10.2026: frische Balance über dem Boden schlägt die Schätzung)
         if gb:
-            ausgelassen.append(dict(zeile, grund=gb))
+            # geblowt? — Boden/Balance/Stand für die Anzeige (Slave 6, 08.10.2026)
+            ausgelassen.append(dict(zeile, grund=gb, **ap_boden_zeile(regel, a, float(bal), stand if quelle_b != "Nachlesung" else letzt)))
             continue
         kandidaten.append({"a": a, "regel": ap_regel_konto(regel, a, float(bal)), "bal": float(bal), "bal_quelle": quelle_b, "zeile": zeile,
+                           "bal_stand": stand if quelle_b != "Nachlesung" else letzt,
                            "tkey": str(a["user_id"]) + "|" + _ap_norm(a.get("firm"))})
 
     # DELTA (06.10.2026, Vertrag §2): Live-Stand ALLER IDs — laufende Trades, heute schon geplante Pläne (ohne die Vorschläge,
@@ -15826,7 +15843,11 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
         rechnung = []
         for k in liste:
             w, grund = ap_konto_rechnen(k["regel"], k["a"]["account_type"], k["bal"], u)
-            if grund:
+            if grund and "Boden" in grund:
+                # „Balance auf/unter dem Boden — geblowt?" — Boden/Balance/Stand für die Anzeige (Slave 6, 08.10.2026); k["regel"] ist schon
+                # die Konto-Regel, ap_regel_konto darauf ändert nichts mehr
+                ausgelassen.append(dict(k["zeile"], grund=grund, **ap_boden_zeile(k["regel"], k["a"], k["bal"], k.get("bal_stand"))))
+            elif grund:
                 ausgelassen.append(dict(k["zeile"], grund=grund))
             else:
                 rechnung.append((k, w))
@@ -17565,12 +17586,122 @@ def admin_auto_plan_ids():
     return jsonify({"ok": True, "ids": ids, "aktiv": bool(reg.get("aktiv")), "tag": tag, "offen": offen, "sieben_tage_ab": sieben_ab})
 
 
+def _ap_zahl(x):
+    """Zahl aus dem Body (int/float/Zahl-String mit Komma) oder None; bool zählt nicht."""
+    if isinstance(x, bool) or x is None:
+        return None
+    try:
+        f = float(str(x).replace(",", ".")) if isinstance(x, str) else float(x)
+    except (TypeError, ValueError):
+        return None
+    return f if f == f and f not in (float("inf"), float("-inf")) else None
+
+
+def ap_werte_pruefen(plan, body, jetzt=None):
+    """REIN RECHNEND (testbar): TP/SL/Größe eines geplanten Trades von Hand (Finn 08.10.2026, Mini-Popup; Vertrag Master/Slave 5).
+    plan = trade_plans-Zeile {status, start_um_gestartet_at, started_at, orbit_gesendet_at, route, master_symbol(_root), master_tp,
+    master_sl, master_contracts, notes}; body = {tp_usd?, sl_usd?, groesse?}. Futures (Route nicht in AP_CFD_ROUTEN) = ganze Kontrakte ≥ 1,
+    CFD (mt5v2/mt5) = Lots auf 2 Stellen > 0. sl_usd null oder 0 = ohne SL (master_sl null). Nur die drei Werte, keine Neuberechnung,
+    Bestätigung bleibt. → (upd, antwort, None) oder (None, None, Klartext)."""
+    if not plan:
+        return None, None, "Plan nicht gefunden"
+    if plan.get("start_um_gestartet_at") or plan.get("started_at") or plan.get("orbit_gesendet_at") or plan.get("status") == "open":
+        return None, None, "Plan läuft schon — Werte nicht mehr änderbar"
+    if plan.get("status") != "planned":
+        return None, None, "Plan ist nicht mehr geplant — Werte nicht änderbar"
+    cfd = str(plan.get("route") or "") in AP_CFD_ROUTEN
+    sym = str(plan.get("master_symbol_root") or plan.get("master_symbol") or "").upper()
+    einheit = "Lot" if cfd else ("MNQ" if sym.startswith("MNQ") else "NQ")
+    upd, txt = {}, []
+
+    def de(x):                                   # deutsch: 3.600 / 1,23
+        if x is None:
+            return "ohne"
+        if float(x) == int(x):
+            return f"{int(x):,}".replace(",", ".")
+        return f"{float(x):,.2f}".rstrip("0").translate(str.maketrans(",.", ".,"))
+    if "tp_usd" in body:
+        tp = _ap_zahl(body.get("tp_usd"))
+        if tp is None or tp <= 0:
+            return None, None, "TP muss eine Zahl > 0 sein ($)"
+        upd["master_tp"] = round(tp, 2)
+        txt.append(f"TP {de(_wd_num(plan.get('master_tp')))} → {de(upd['master_tp'])}")
+    if "sl_usd" in body:
+        roh = body.get("sl_usd")
+        sl = None if roh in (None, "") else _ap_zahl(roh)
+        if roh not in (None, "") and (sl is None or sl < 0):
+            return None, None, "SL muss eine Zahl ≥ 0 sein ($) oder leer (= ohne SL)"
+        upd["master_sl"] = round(sl, 2) if sl else None          # 0 = ohne SL
+        txt.append(f"SL {de(_wd_num(plan.get('master_sl')))} → {de(upd['master_sl'])}")
+    if "groesse" in body:
+        g = _ap_zahl(body.get("groesse"))
+        if cfd:
+            g = round(g, 2) if g is not None else None
+            if g is None or g <= 0:
+                return None, None, "Größe muss > 0 Lot sein (2 Nachkommastellen)"
+        else:
+            if g is None or g < 1 or g != int(g):
+                return None, None, "Größe muss ganze Kontrakte sein (≥ 1)"
+            g = int(g)
+        upd["master_contracts"] = g
+        txt.append(f"Größe {de(_wd_num(plan.get('master_contracts')))} → {de(float(g))} {einheit}")
+    if not upd:
+        return None, None, "nichts zu ändern — tp_usd, sl_usd oder groesse angeben"
+    z = (jetzt or datetime.now(timezone.utc)).astimezone(_ap_tz(AP_7T_TZ))
+    zeile = f"✎ Hand {z.strftime('%d.%m %H:%M')}: " + " · ".join(txt)
+    upd["notes"] = (str(plan.get("notes") or "").rstrip() + "\n" + zeile).strip()
+    neu = {"master_tp": _wd_num(plan.get("master_tp")), "master_sl": _wd_num(plan.get("master_sl")),
+           "master_contracts": _wd_num(plan.get("master_contracts"))}
+    neu.update({k: v for k, v in upd.items() if k != "notes"})
+    return upd, {"plan_id": str(plan.get("id") or ""), "tp_usd": neu["master_tp"], "sl_usd": neu["master_sl"],
+                 "groesse": neu["master_contracts"], "einheit": einheit}, None
+
+
+def _ap_werte_setzen(pid, body, admin, uid):
+    """aktion „werte" (08.10.2026): Admin alle Pläne, sonst nur eigene. Schreiben mit Guard in derselben Anfrage (planned, nichts
+    gestartet/gesendet) — sonst 409. Bestätigung (auto_bestaetigt_at) bleibt unberührt."""
+    rows = sb_select("trade_plans", {"select": "id,user_id,status,route,master_symbol,master_symbol_root,master_tp,master_sl,"
+                                               "master_contracts,notes,start_um_gestartet_at,started_at,orbit_gesendet_at", "id": f"eq.{pid}"})
+    plan = rows[0] if rows else None
+    if plan and not admin and str(plan.get("user_id")) != str(uid):
+        return jsonify({"ok": False, "msg": "nur eigene Pläne"}), 403
+    upd, antwort, fehler = ap_werte_pruefen(plan, body)
+    if fehler:
+        return jsonify({"ok": False, "msg": fehler}), 404 if fehler == "Plan nicht gefunden" else 400
+    neu = sb_update("trade_plans", {"id": f"eq.{pid}", "status": "eq.planned", "start_um_gestartet_at": "is.null",
+                                    "started_at": "is.null", "orbit_gesendet_at": "is.null"}, upd)
+    if not neu:
+        return jsonify({"ok": False, "msg": "Plan läuft schon — Werte nicht mehr änderbar"}), 409
+    print(f"[auto-plan] werte {pid[:8]} durch {'Admin' if admin else 'ID ' + str(uid)[:8]}: {upd['notes'].splitlines()[-1]}", flush=True)
+    return jsonify({"ok": True, "plan": antwort})
+
+
 @app.route("/admin/auto-plan/plan", methods=["POST", "OPTIONS"])
 def admin_auto_plan_eingriff():
     """POST {plan_id, aktion: 'richtung_tauschen'|'start', start?, start_min?} → manueller Eingriff mit denselben harten Regeln wie der Bot
-    (Verstoß = 400 Klartext). start = 'HH:MM' deutscher Zeit (heute) oder ISO. Gilt für die ganze Tranche (ID × Firma). Nur Admin."""
+    (Verstoß = 400 Klartext). start = 'HH:MM' deutscher Zeit (heute) oder ISO. Gilt für die ganze Tranche (ID × Firma). Nur Admin.
+    Seit 08.10.2026 auch aktion 'werte' {tp_usd?, sl_usd?, groesse?} (Mini-Popup): Admin alle Pläne, jede andere ID nur eigene."""
     if request.method == "OPTIONS":
         return "", 200
+    body = request.get_json(silent=True) or {}
+    if str(body.get("aktion") or "").strip() == "werte":
+        # eigenes Gate: auch IDs außerhalb des Auto-Planers dürfen ihre eigenen geplanten Trades ändern
+        _mail, err = _admin_auth()
+        admin = err is None
+        uid = request.environ.get("prophos.admin_uid") if admin else None
+        if not admin:
+            if err[1] != 403:
+                return err
+            uid, err2 = _wd_login()
+            if err2:
+                return err2
+        pid = str(body.get("plan_id") or "").strip()
+        if not re.match(r"^[0-9a-f-]{36}$", pid):
+            return jsonify({"ok": False, "msg": "plan_id fehlt"}), 400
+        try:
+            return _ap_werte_setzen(pid, body, admin, uid)
+        except Exception as e:
+            return jsonify({"ok": False, "msg": f"{type(e).__name__}: {e}"}), 502
     admin, uid, reg, err = _ap_zugang()
     if err:
         return err
@@ -17581,7 +17712,7 @@ def admin_auto_plan_eingriff():
     if not re.match(r"^[0-9a-f-]{36}$", pid):
         return jsonify({"ok": False, "msg": "plan_id fehlt"}), 400
     if aktion not in ("richtung_tauschen", "start", "neu_starten"):
-        return jsonify({"ok": False, "msg": "aktion = richtung_tauschen | start | neu_starten"}), 400
+        return jsonify({"ok": False, "msg": "aktion = richtung_tauschen | start | neu_starten | werte"}), 400
     if aktion == "neu_starten":
         return _ap_neu_starten(pid)
     try:

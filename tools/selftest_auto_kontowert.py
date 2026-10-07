@@ -159,11 +159,11 @@ def main():
     check(grund and "Ziel erreicht" in grund, "FN Futures 10 $ vor Ziel → Ziel erreicht (Futures-Challenge, Rest < 100, 07.10.2026)")
     # 07.10.2026 (Finn: nur Konten auf Live-Stand, geblasene/fertige raus): Boden aus dd_usd, Futures-Challenge Rest < 100 = Ziel
     w, grund = a["ap_konto_rechnen"](regel("Apex Trader"), "challenge", 146000, u)
-    check(grund and "Boden" in grund, "Apex 146.000 = Boden (statisch 150k − 4.000) → geblasen?")
+    check(grund and "Boden" in grund, "Apex 146.000 = Boden (statisch 150k − 4.000) → geblowt?")
     w, grund = a["ap_konto_rechnen"](regel("Apex Trader"), "challenge", 146500, u)
     check(w and not grund, "Apex 146.500 über dem Boden → wird geplant")
     w, grund = a["ap_konto_rechnen"](regel("Tradeify"), "challenge", 145400, u)
-    check(grund and "Boden" in grund, "Tradeify 145.400 ≤ Start − 4.500 → geblasen?")
+    check(grund and "Boden" in grund, "Tradeify 145.400 ≤ Start − 4.500 → geblowt?")
     w, grund = a["ap_konto_rechnen"](regel("Tradeify"), "challenge", 146000, u)
     check(w and not grund and w["sl"] is None, "Tradeify 146.000 → geplant, SL bleibt ungekappt (keiner)")
     w, grund = a["ap_konto_rechnen"](regel("Tradeify"), "challenge", 158950, u)
@@ -171,7 +171,7 @@ def main():
     w, grund = a["ap_konto_rechnen"](regel("FundedNext"), "phase1", 107950, u)
     check(grund and "Hand" in grund, "CFD Phase 1 50 $ vor Ziel → weiter „von Hand prüfen“")
     w, grund = a["ap_konto_rechnen"](regel("FundedNext"), "phase1", 89000, u)
-    check(grund and "Boden" in grund, "CFD unter Start × (1 − dd_pct) → geblasen?")
+    check(grund and "Boden" in grund, "CFD unter Start × (1 − dd_pct) → geblowt?")
     w, grund = a["ap_konto_rechnen"](regel("FundedNext Futures"), "challenge", 158000, u)
     check(grund and "Ziel erreicht" in grund, "FN Futures 158.000 = Ziel erreicht")
 
