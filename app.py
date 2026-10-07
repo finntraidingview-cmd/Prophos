@@ -15290,7 +15290,19 @@ def ap_letzter_trade_geblasen(regel, balance, plaene_konto):
     fin = p["final"]
     pnl = _wd_num(fin.get("today_pnl"))
     if pnl is None:
-        pnl = _wd_num(fin.get("master_pl_schaetzung"))
+        # 08.10.2026 (Finn: FundedNext 150k …9055 stand als „geblasen?" da, obwohl +3.358 $ und Balance 153.358 $ live):
+        # Orbit V2 beendet oft über den Demo-Spiegel (grund demo_liq) OHNE today_pnl, die master_pl_schaetzung ist dann der
+        # volle Demo-Verlust (−4.000). Erst die ECHTE Differenz gelesene Endbalance − Startbalance, dann der echte master_pl
+        # (pl_quelle tv/reader/puls), die Demo-Schätzung nur, wenn gar nichts Echtes da ist.
+        be = _wd_num(fin.get("balance_end"))
+        bl = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+        bs = _wd_num(((bl.get("tv") or {}) if isinstance(bl.get("tv"), dict) else {}).get("balance_start")) or _wd_num(bl.get("balance_start"))
+        if be is not None and bs:
+            pnl = be - bs
+        elif _wd_num(p.get("master_pl")) is not None and str(p.get("pl_quelle") or "") in ("tv", "reader", "puls", "hand"):
+            pnl = _wd_num(p.get("master_pl"))
+        else:
+            pnl = _wd_num(fin.get("master_pl_schaetzung"))
     groesse = ap_groesse(regel.get("groessen"), balance) or (regel.get("groessen") or [None])[0]
     f = (groesse or 100000) / 100000.0 if regel.get("skaliert") else 1.0
     dd = float(regel["dd_usd"]) * f if regel.get("dd_usd") else (float(groesse) * float(regel["dd_pct"]) / 100.0

@@ -97,6 +97,16 @@ def main():
     check(gb is None, "danach ein Gewinn → nicht geblasen")
     gb = a["ap_letzter_trade_geblasen"]({"groessen": [150000], "dd_usd": 4000}, 148097, [fin(-1884.3, "2026-10-06T17:00")])
     check(gb is None, "Apex Tagesstopp −1.884 $ (Ende „liq“) → nicht geblasen")
+    # 08.10.2026 FundedNext …9055: Demo-Ende ohne today_pnl, Schätzung −4.000, aber gelesene Endbalance 153.358 → Gewinn
+    gb = a["ap_letzter_trade_geblasen"]({"groessen": [150000], "dd_usd": 4000}, 153357.72,
+        [{"ended_at": "2026-10-07T13:39", "master_pl": 3357.72, "pl_quelle": "tv",
+          "mt5_baseline": {"tv": {"balance_start": 150000}},
+          "final": {"grund": "demo_liq", "today_pnl": None, "balance_end": 153357.72, "master_pl_schaetzung": -4000}}])
+    check(gb is None, f"Demo-Schätzung −4.000, echte Balance 150.000 → 153.358 → nicht geblasen ({gb})")
+    gb = a["ap_letzter_trade_geblasen"]({"groessen": [150000], "dd_usd": 4000}, 146000,
+        [{"ended_at": "2026-10-07T13:39", "final": {"grund": "demo_liq", "balance_end": 146000, "master_pl_schaetzung": -4000},
+          "mt5_baseline": {"tv": {"balance_start": 150000}}}])
+    check(gb and "geblasen" in gb, f"echte Balance 150.000 → 146.000 = voller DD → geblasen? ({gb})")
     gb = a["ap_letzter_trade_geblasen"]({"groessen": [100000], "dd_pct": 10}, 90400, [{"ended_at": "x", "final": {"master_pl_schaetzung": -9600}}])
     check(gb and "geblasen" in gb, "CFD 100k: −9.600 $ ≥ 95 % von 10 % → geblasen?")
 
