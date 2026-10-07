@@ -2946,6 +2946,11 @@
   #adm-pane-planer .ap-idk-u{font-size:11.5px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
   @media (max-width:760px){ #adm-pane-planer .ap-ids{grid-auto-flow:column;grid-template-columns:none;grid-auto-columns:150px;overflow-x:auto;scroll-snap-type:x proximity;padding:2px 2px 6px;margin-left:-2px;margin-right:-2px}
     #adm-pane-planer .ap-idk{scroll-snap-align:start} #adm-pane-planer .ap-idk-w b{font-size:19px} }
+  /* Bestätigen ohne Warten (08.10.2026, Slave-Terminal 7): Zeile gedimmt solange der POST läuft, kurzes Ausblenden nach Erfolg, Grund bei Ablehnung */
+  #adm-pane-planer .pz-z.ap-ok-laeuft{opacity:.5} #adm-pane-planer .pz-z.ap-ok-weg{opacity:0;transform:translateX(8px);transition:opacity .16s,transform .16s}
+  #adm-pane-planer .ap-ok-bal{margin-top:4px;padding:2px 8px;font-size:11.5px;height:auto;white-space:nowrap}
+  #adm-pane-planer .ap-gr-live{font-size:12px;font-weight:600;color:var(--good);white-space:nowrap}
+  #adm-pane-planer .ap-ok-fehler{display:block;margin-top:3px;max-width:200px;font-size:11px;line-height:1.3;color:var(--danger);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   :is(#adm-pane-planer,#tpl-view) .ap-adm-grp{padding:12px 0 6px} :is(#adm-pane-planer,#tpl-view) .ap-adm-grp .ap-adm-id{font-size:13px;font-weight:600}
   :is(#adm-pane-planer,#tpl-view) .ap-adm-grp .btn-xs{margin-left:auto;padding:2px 9px;font-size:11.5px;height:auto;line-height:1.6;white-space:nowrap}
   :is(#adm-pane-planer,#tpl-view) .seg button{padding:3px 10px;font-size:12px}
@@ -41029,7 +41034,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1244'
+  const OS_TAB_BUILD = '2026-09-22.1245'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -45323,7 +45328,8 @@
       if(typeof atToast === 'function') atToast((data || []).length
         ? `✓ ${(data || []).length} Auto-Plan${(data || []).length === 1 ? '' : 'e'} bestätigt — startet zur Startzeit`
         : '⚠ Nichts bestätigt — schon bestätigt, gestartet oder nicht mehr geplant', (data || []).length ? 'start' : 'end')
-    }catch(e){ if(typeof atToast === 'function') atToast('Bestätigen fehlgeschlagen: ' + ((e && e.message) || e), 'end') }
+      return (data || []).map(r => String(r.id))   // bestätigte IDs (08.10.2026: Trade-Planer markiert sie sofort, okLokal)
+    }catch(e){ if(typeof atToast === 'function') atToast('Bestätigen fehlgeschlagen: ' + ((e && e.message) || e), 'end'); return [] }
   }
   async function apZuruecknehmen(id){
     try{
@@ -46582,13 +46588,10 @@
       document.getElementById('tpl-root')?.querySelector('.tpl-detail')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
       return }
     if(a === 'ok'){
-      const root = _tk.root; _tk.busy = true; tkZeichnen()
-      ;(async () => {
-        try{ await tplAktion(t, 'ok') }finally{ _tk.busy = false }
-        if(_tpl.meldung){ _tk.meldung = _tpl.meldung; _tpl.meldung = ''; tkZeichnen(); return }
-        tkZu()
-        if(root && root.id === 'ap-ids-root' && typeof window._apIdsLaden === 'function') window._apIdsLaden()   // Admin-Reiter neu laden
-      })()
+      // Kasten sofort zu, bestätigt wird im Hintergrund (08.10.2026, Slave-Terminal 7 — Finn klickt viele Pläne nacheinander): der Plan steht
+      // sofort als bestätigt (okLokal), Ablehnung kommt als Toast und setzt ihn zurück; vorher hielt _tk.busy den nächsten Kasten bis zur Antwort gesperrt
+      const root = _tk.root; tkZu()
+      tplAktion(t, 'ok').finally(() => { if(root && root.id === 'ap-ids-root' && typeof window._apIdsLaden === 'function') window._apIdsLaden() })   // Admin-Reiter neu laden
     }
   }
 
@@ -47499,11 +47502,12 @@
   /* Admin-Eingriff an Vorschlägen fremder IDs (07.10.2026): POST /admin/auto-plan/bestaetigen {plan_ids} | zurueck {plan_id} |
    * loeschen {plan_id} — Service-Key hinter dem Admin-Gate (RLS lässt den Browser nur an eigene Zeilen). Antwort n = wirklich
    * geänderte Zeilen (Guard: planned, Auto-Plan, unbestätigt bzw. ungestartet). Eigene Pläne gehen weiter per supabase-js. */
-  async function tplEingriff(aktion, ids){
+  async function tplEingriff(aktion, ids, aus){
     // sicht:"admin" nur aus dem Admin-Reiter (08.10.2026): auf der Planer-Seite darf ein Nicht-Admin nur eigene Pläne anfassen
     const sichtP = (typeof window._tplSichtParam === 'function' && window._tplSichtParam()) ? { sicht: 'admin' } : {}
     const d = await apdApi('POST', '/' + aktion, Object.assign(aktion === 'bestaetigen' ? { plan_ids: ids } : { plan_id: ids[0] }, sichtP))
     const n = Number(d && d.n) || 0
+    if(aus) aus.zeilen = Array.isArray(d && d.zeilen) ? d.zeilen : []   // wirklich geänderte Zeilen (Admin „Zu bestätigen" blendet sie sofort aus, 08.10.2026)
     if(typeof atToast === 'function') atToast(n ? (aktion === 'bestaetigen' ? `✓ ${n} Auto-Plan${n === 1 ? '' : 'e'} bestätigt — startet zur Startzeit` : aktion === 'zurueck' ? '↶ Bestätigung zurückgenommen' : '🗑 Vorschlag gelöscht')
       : '⚠ Nichts geändert — schon bestätigt, gestartet oder nicht mehr geplant', n ? 'start' : 'end')
     return n
@@ -47525,13 +47529,19 @@
   document.getElementById('tplBestNein')?.addEventListener('click', tplBestZu)
   document.getElementById('tplBestJa')?.addEventListener('click', async () => {
     const o = _tpl.offen; if(!o || _tpl.busy) return
+    // sofort als bestätigt zeichnen (okLokal, 08.10.2026), was das Backend nicht bestätigt, fällt danach wieder zurück
+    const alle = [...o.eigen, ...o.fremd].map(String); alle.forEach(id => _tpl.okLokal.add(id))
     tplBestZu(); _tpl.busy = true; _tpl.meldung = ''; tplZeichnen()
+    const gut = new Set()
     try{
-      if(o.eigen.length) await apBestaetigen(o.eigen)
-      if(o.fremd.length) await tplEingriff('bestaetigen', o.fremd)
-      await apdLaden(true)
+      if(o.eigen.length) (await apBestaetigen(o.eigen) || []).forEach(id => gut.add(String(id)))
+      if(o.fremd.length){ await tplEingriff('bestaetigen', o.fremd); o.fremd.forEach(id => gut.add(String(id))) }
     }catch(e){ _tpl.meldung = (e && e.message) || String(e) }
-    finally{ _tpl.busy = false; tplZeichnen() }
+    alle.forEach(id => { if(!gut.has(id)) _tpl.okLokal.delete(id) })
+    if(gut.size && typeof window._apIdsBestaetigt === 'function') window._apIdsBestaetigt([...gut])
+    _tpl.busy = false; tplZeichnen()
+    try{ await apdLaden(true) }catch(_){}
+    tplZeichnen()
   })
   /* EINZELN BESTÄTIGEN aus der Geplant-Liste (Finn 07.10.2026: „jeden unbestätigten Vorschlag einzeln bestätigen"): eigene per supabase-js
    * (wie apBestaetigen, RLS), fremde (Admin) per POST /admin/auto-plan/bestaetigen mit einer plan_id; Chip sofort „bestätigt" (okLokal),
@@ -47552,14 +47562,21 @@
         const n = await tplEingriff('bestaetigen', [t.plan_id])
         if(!n) throw new Error('nicht bestätigt')
       }
+      if(typeof window._apIdsBestaetigt === 'function') window._apIdsBestaetigt([t.plan_id])   // Admin „Zu bestätigen": sofort raus, Nachladen holt ihn nicht zurück
       apdLaden(true)
+      return true
     }catch(e){
       _tpl.okLokal.delete(String(t.plan_id))
       if(typeof atToast === 'function') atToast('⚠ Bestätigen fehlgeschlagen: ' + String((e && e.message) || e).slice(0, 120), 'end')
       tplZeichnen()
+      return false
     }
   }
   async function tplAktion(t, aktion, wert){
+    /* BESTÄTIGEN NIE STUMM (08.10.2026, Slave-Terminal 7 — Finn: „Wenn ich die Pläne bestätige, soll der Plan verschwinden. Das macht er immer
+     * nur so bei ein, zwei."): „ok" wartete bisher auf POST + ganzes Delta und sperrte so lange _tpl.busy — jeder weitere Klick lief ins
+     * „if busy return" und tat nichts. Jetzt wie der Haken der Geplant-Liste: sofort „bestätigt" (okLokal), Fehler als Toast, ohne Sperre. */
+    if(aktion === 'ok'){ await tplEinzelBestaetigen(t.key); return }   // Grund einer Ablehnung kommt als Toast aus tplEinzelBestaetigen
     if(_tpl.busy) return
     _tpl.busy = true; _tpl.meldung = ''; tplZeichnen()
     try{
@@ -47570,9 +47587,6 @@
         _tpl.edit = null
         if(typeof atToast === 'function') atToast(aktion === 'start' ? `🕑 Start ${tplUhr(apPrHm(wert), tplVersatz(tplTag()))} (Dubai) gesetzt` : '⇅ Richtung getauscht', 'start')
         await apdNachEingriff()
-      }else if(aktion === 'ok'){
-        if(t.eigen) await apBestaetigen([t.plan_id]); else await tplEingriff('bestaetigen', [t.plan_id])
-        await apdLaden(true)
       }else if(aktion === 'zurueck'){
         if(t.eigen) await apZuruecknehmen(t.plan_id); else await tplEingriff('zurueck', [t.plan_id])
         await apdLaden(true)
@@ -60296,20 +60310,82 @@
    * mal einen Überblick über alle IDs sehe, die ich gleichzeitig beim Trade-Planer managen kann"). Eine Zeile je ID mit planbaren
    * Konten (challenge/phase1/phase2): Haken = in auto_plan_regeln.user_ids (sofort gespeichert über /admin/auto-plan/ids), Konten,
    * im letzten Lauf geplant/ausgelassen. Nur Anzeige + Haken, keine Bewertung. Nur Admin. ══ */
-  const _apIds = { rows: [], aktiv: null, tag: null, laeuft: false, fehler: '', offen: [], offenTag: null, offenFehler: '', weitereAuf: false, tagWahl: null, D: null }   // tagWahl: 'heute' | 'morgen' (Hand), sonst Standard = Tag mit offenen Vorschlägen
+  const _apIds = { rows: [], aktiv: null, tag: null, laeuft: false, fehler: '', offen: [], offenTag: null, offenFehler: '', weitereAuf: false, tagWahl: null, D: null,
+    okWeg: new Map(), okLaeuft: new Set(), okFehler: new Map(), nochmal: false,
+    warteLokal: new Map(), zurLokal: new Map(), bestaetigt: null, bestaetigtT0: 0 }   // Wartet auf Start / ↩ zurück (08.10.2026): siehe apIdsWartenLaeuft, apIdsZurueck   // Bestätigen ohne Warten (08.10.2026, Slave-Terminal 7): siehe apIdsOk   // tagWahl: 'heute' | 'morgen' (Hand), sonst Standard = Tag mit offenen Vorschlägen
   async function apIdsLaden(){
-    if(_apIds.laeuft) return
-    _apIds.laeuft = true; _apIds.fehler = ''; _apIds.offenFehler = ''
+    if(_apIds.laeuft){ _apIds.nochmal = true; return }   // läuft schon: danach genau einmal nachladen, statt den Wunsch zu verschlucken (Bestätigen-Serie, 08.10.2026)
+    _apIds.laeuft = true; _apIds.nochmal = false; _apIds.fehler = ''; _apIds.offenFehler = ''
+    const t0 = Date.now()
     // ZU BESTÄTIGEN (Finn 08.10.2026: „unter Admin eine richtig cleane Übersicht über alle Trades, die ich bestätigen muss"): offene
     // Vorschläge aller IDs kommen mit aus /ids (heute UND morgen — das Delta kennt nur heute), Bestätigen über tplEingriff (Admin-Route)
     // KOPF WIE DIE TRADE-PLANER-SEITE (Finn 08.10.2026: „oben ein richtig cleaner Zeitstrahl mit allen IDs, die Kacheln mit dem
     // hypothetischen Betrag und dem kleinen Graph"): dieselben Lader (tplLaden → Lauf/live-trades/Kerzen/Bilanz, apdLaden → Delta) mit
     // Sicht „alle" (window._tplSicht sieht den offenen Reiter), dieselben Bausteine tplKachelnHtml/tplZeitstrahlHtml — keine Kopie.
-    const ids = apdApi('GET', '/ids').then(d => { _apIds.rows = Array.isArray(d.ids) ? d.ids : []; _apIds.aktiv = !!d.aktiv; _apIds.tag = d.tag || null; _apIds.offen = Array.isArray(d.offen) ? d.offen : [] })
+    const ids = apdApi('GET', '/ids').then(d => { _apIds.rows = Array.isArray(d.ids) ? d.ids : []; _apIds.aktiv = !!d.aktiv; _apIds.tag = d.tag || null; _apIds.offen = apIdsOhneBestaetigte(Array.isArray(d.offen) ? d.offen : [], t0)
+      // bestätigte, noch nicht gestartete Pläne aller IDs (heute + morgen), sobald das Backend sie mitliefert — sonst null (Delta heute + warteLokal)
+      if(Array.isArray(d.bestaetigt)){ _apIds.bestaetigt = d.bestaetigt.filter(z => !_apIds.zurLokal.has(String(z.plan_id))); _apIds.bestaetigtT0 = t0 } })
       .catch(e => { _apIds.fehler = (e && e.message) || String(e) })
     const kopf = (async () => { try{ if(typeof tplLaden === 'function') await tplLaden(); if(typeof apdLaden === 'function') await apdLaden(true) }catch(e){ console.warn('[ap-ids] Kopf', e) } })()
     await Promise.all([ids, kopf])
     _apIds.laeuft = false; apIdsRender()
+    if(_apIds.nochmal) apIdsLaden()
+  }
+  /* BESTÄTIGEN OHNE WARTEN (08.10.2026, Slave-Terminal 7 — Finn beim Durchklicken: „Wenn ich die Pläne bestätige, soll der Plan hier verschwinden.
+   * Das macht er immer nur so bei ein, zwei."). Ursache: die Zeile verschwand erst mit dem nächsten vollen Laden (/ids + Lauf + Delta); lief
+   * schon ein Laden, wurde das nächste verschluckt (if laeuft return), und eine Antwort, die VOR dem Bestätigen losging, brachte den Plan
+   * zurück. Jetzt: Klick → Zeile gedimmt (okLaeuft); POST ok → sofort raus aus _apIds.offen, gemerkt in okWeg (plan_id → Zeitpunkt), im
+   * Zeitstrahl bestätigt (_tpl.okLokal); jede /ids-Antwort wird gegen okWeg gefiltert. Ein Eintrag fällt weg, sobald eine Antwort, die NACH
+   * dem Bestätigen losging, den Plan nicht mehr in offen[] hat — spätestens nach 3 min (dann gilt wieder der Server). Ablehnung (400 Balance
+   * nicht live, 503, 502): Zeile bleibt mit Grund unter dem Knopf (okFehler) + Toast. */
+  // Haken für die Planer-Seite / den Klick-Kasten (anderer Block): dort bestätigte Pläne verschwinden hier genauso sofort
+  window._apIdsBestaetigt = ids => { const jetzt = Date.now(); for(const id of (ids || []).map(String)){ _apIds.okWeg.set(id, jetzt)
+      const z = _apIds.offen.find(x => String(x.plan_id) === id); if(z) _apIds.warteLokal.set(id, { z, at: jetzt }) }
+    _apIds.offen = _apIds.offen.filter(z => !_apIds.okWeg.has(String(z.plan_id))); if(document.getElementById('ap-ids-root')?.offsetParent && !_apIds.laeuft) apIdsRender() }
+  function apIdsOhneBestaetigte(offen, t0){
+    const da = new Set(offen.map(z => String(z.plan_id))), jetzt = Date.now()
+    for(const [id, at] of _apIds.okWeg) if((t0 > at && !da.has(id)) || jetzt - at > 180000) _apIds.okWeg.delete(id)
+    // eben zurückgeschickt (apIdsZurueck): bleibt in „Zu bestätigen", bis eine Antwort NACH dem Zurück ihn selbst bringt (höchstens 3 min)
+    const zur = []
+    for(const [id, e] of _apIds.zurLokal){ if((t0 > e.at && da.has(id)) || jetzt - e.at > 180000) _apIds.zurLokal.delete(id); else if(!da.has(id)) zur.push(e.z) }
+    return offen.filter(z => !_apIds.okWeg.has(String(z.plan_id))).concat(zur)
+  }
+  // ↩ ZURÜCK (Wartet auf Start → Zu bestätigen): POST /admin/auto-plan/zurueck (planned + auto + ungestartet, setzt auto_bestaetigt_at null)
+  async function apIdsZurueck(id){
+    id = String(id); if(_apIds.okLaeuft.has(id)) return
+    let z = null; try{ z = (apIdsWartenLaeuft().warten.find(e => String(e.z.plan_id) === id) || {}).z || null }catch(_){}
+    _apIds.okLaeuft.add(id); _apIds.okFehler.delete(id); apIdsRender()
+    try{
+      const n = await tplEingriff('zurueck', [id])
+      if(!n) throw new Error('nicht zurück — schon gestartet oder nicht mehr geplant')
+      const jetzt = Date.now()
+      _apIds.okWeg.delete(id); _apIds.warteLokal.delete(id); try{ _tpl.okLokal.delete(id) }catch(_){}
+      if(z){ const zz = Object.assign({}, z, { balance_live: z.balance_live ?? true }); _apIds.zurLokal.set(id, { z: zz, at: jetzt }); if(!_apIds.offen.some(x => String(x.plan_id) === id)) _apIds.offen.push(zz) }
+      if(Array.isArray(_apIds.bestaetigt)) _apIds.bestaetigt = _apIds.bestaetigt.filter(x => String(x.plan_id) !== id)
+    }catch(e){ _apIds.okFehler.set(id, String((e && e.message) || e)) }
+    finally{ _apIds.okLaeuft.delete(id); apIdsRender(); apIdsLaden() }
+  }
+  async function apIdsOk(ids){
+    ids = [...new Set((ids || []).map(String))].filter(id => !_apIds.okLaeuft.has(id)); if(!ids.length) return
+    for(const id of ids){ _apIds.okLaeuft.add(id); _apIds.okFehler.delete(id) }
+    apIdsRender()
+    const aus = {}
+    try{
+      await tplEingriff('bestaetigen', ids, aus)
+      // Antwort ok: alle angefragten raus — nicht geänderte sind schon bestätigt/gestartet/weg (Guard planned + unbestätigt), also auch nicht offen
+      const jetzt = Date.now()
+      for(const id of ids){ _apIds.okWeg.set(id, jetzt); _apIds.zurLokal.delete(id); try{ _tpl.okLokal.add(id) }catch(_){}
+        const z = _apIds.offen.find(x => String(x.plan_id) === id); if(z) _apIds.warteLokal.set(id, { z, at: jetzt }) }   // sofort in „Wartet auf Start" (auch morgen)
+      const raus = () => { _apIds.offen = _apIds.offen.filter(z => !_apIds.okWeg.has(String(z.plan_id))); for(const id of ids) _apIds.okLaeuft.delete(id); apIdsRender() }
+      // kurzes Ausblenden der Zeile(n), dann neu zeichnen (Zähler „Zu bestätigen · n", „n offen", „✓ alle n" zählen mit)
+      const zeilen = ids.map(id => document.querySelector(`#ap-ids-root .pz-z[data-plan-id="${CSS.escape(id)}"]`)).filter(Boolean)
+      if(zeilen.length){ zeilen.forEach(z => z.classList.add('ap-ok-weg')); setTimeout(raus, 170) } else raus()
+    }catch(e){
+      const msg = String((e && e.message) || e)
+      for(const id of ids){ _apIds.okLaeuft.delete(id); _apIds.okFehler.set(id, msg) }
+      if(typeof atToast === 'function') atToast('Nicht bestätigt: ' + msg.slice(0, 140), 'end')
+      apIdsRender()
+    } finally { apIdsLaden() }
   }
   /* Kacheln + Zeitstrahl aller IDs: Spuren = Planer-IDs (Haken im Reiter oder Auto-Trades heute), die übrigen IDs mit laufenden Hand-/Orbit-V3-
    * Trades in der Sammelzeile „Weitere" (aufklappbar wie auf der Planer-Seite, Zustand nur hier) */
@@ -60395,34 +60471,65 @@
    * Blöcke (planFirmenBloecke) mit planZeileHtml-Zeilen: Start · Konto + Phase · Balance → Ziel (Balken) · Art · Größe · Risiko · TP · SL ·
    * „Bestätigen". Daten wie bisher aus _apIds.offen + der Trade-Zeile des Zeitstrahls (apIdsTrade: Balance, Rest, Stufe, Kontowert);
    * nichts nachgeladen. Der frühere Tabellen-Baustein (apOffenTabelleHtml, .1194) ist damit weg. */
-  function apIdsOffenHtml(){
-    // nicht-live Balance (08.10.2026): raus aus „Zu bestätigen" (steht in der Box „Braucht dich"), Zähler/„alle n"/„Alle n" ohne sie
-    const nichtLive = z => z.balance_live === false || (() => { const t = apIdsTrade(z); return !!t && !tplPlanLive(t) })()
-    const o = apIdsOffenSicht().filter(z => !nichtLive(z)).slice().sort((a, b) => String(a.user || '').localeCompare(String(b.user || '')) || String(a.start_um || '').localeCompare(String(b.start_um || '')))
+  /* DREI GRUPPEN (08.10.2026, Slave-Terminal 7 — Finn: „Es buggt, wenn ich Trades bestätige … eine große Gruppe, wo alle bestätigten Trades
+   * sind; wartende Trades, die von ‚bestätigen' zu ‚warten' kommen, die ich gegebenenfalls noch einmal bearbeiten und wieder zurückschicken
+   * kann; und laufende Trades, die nach dem Start live sind"). Untereinander im Firmen-Block-Design: Zu bestätigen · Wartet auf Start (↩ zurück
+   * über /admin/auto-plan/zurueck) · Läuft (Live-P&L aus tplHypo, kein Knopf). Beendete stehen in den ID-Details. Quellen: offen = /ids offen[]
+   * (gegen okWeg/zurLokal gefiltert); wartet = Delta heute (bestätigt, inkl. okLokal) + /ids bestaetigt[] (falls das Backend es liefert) +
+   * warteLokal (hier bestätigt, z. B. für morgen); läuft = Delta heute (auto). ID-Sicht (_apSicht) gilt überall. */
+  const apIdsWann = iso => { const d = new Date(iso || ''); if(isNaN(d)) return '–'
     const heute = new Date().toLocaleDateString('de-DE', { timeZone: 'Asia/Dubai', day: '2-digit', month: '2-digit' })
-    const wann = iso => { const d = new Date(iso || ''); if(isNaN(d)) return '–'
-      const t = d.toLocaleDateString('de-DE', { timeZone: 'Asia/Dubai', day: '2-digit', month: '2-digit' }), u = d.toLocaleTimeString('de-DE', { timeZone: 'Asia/Dubai', hour: '2-digit', minute: '2-digit' })
-      return t === heute ? u : `${t} ${u}` }
-    const kopf = `<div class="ap-adm-kopf"><b>Zu bestätigen · ${o.length}</b><span>Vorschläge des Auto-Planers, heute und morgen, ${apSichtUid() ? escapeHtml(String((_apIds.rows.find(r => String(r.user_id) === apSichtUid()) || {}).name || '')) : 'alle IDs'} · Zeiten Dubai</span>
-        ${o.length ? `<button type="button" class="ap-adm-ok" id="ap-ids-alle-ok" style="margin-left:auto">✓ Alle ${o.length} bestätigen</button>` : ''}</div>`
-    if(!o.length) return `<div class="ap-adm-karte ap-geplant">${kopf}<div style="color:var(--sub);font-size:12.5px;padding:2px 0 6px">Nichts offen.</div></div>`
+    const t = d.toLocaleDateString('de-DE', { timeZone: 'Asia/Dubai', day: '2-digit', month: '2-digit' }), u = d.toLocaleTimeString('de-DE', { timeZone: 'Asia/Dubai', hour: '2-digit', minute: '2-digit' })
+    return t === heute ? u : `${t} ${u}` }
+  // notes-Text des Plans („Auto-Planer · Etappe · Rest 9.000 $ bis Ziel · Balance 150.000 (TV)", app.py Nachtlauf/Nachplanen) → {rest, balance}
+  const apIdsAusNotes = txt => { const t = String(txt || ''), r = /Rest ([\d.]+) \$/.exec(t), b = /Balance ([\d.]+)/.exec(t)
+    const z = v => v ? Number(v.replace(/\./g, '')) : null; return { rest: z(r && r[1]), balance: z(b && b[1]) } }
+  // Trades des Tags HEUTE mit ID-Sicht (für Wartet/Läuft — „Zu bestätigen" kennt über /ids auch morgen)
+  function apIdsHeute(){
+    const alt = _tpl.tag; _tpl.tag = 'heute'
+    let D; try{ D = tplDaten() } finally{ _tpl.tag = alt }
+    const u = apSichtUid(); return u && typeof tplSichtFilter === 'function' ? tplSichtFilter(D, new Set([u])) : D
+  }
+  // Trade-Zeile (tplDaten) → Zeile im Format von /ids offen[] (start_um aus den Minuten deutscher Zeit, wie tplListeHtml)
+  const apIdsAusTrade = (t, D) => { const off = (tplMinDt(D.tag + 'T12:00:00Z', D.tag) ?? 840) - 720
+    return { plan_id: String(t.plan_id), user_id: t.user_id, user: t.user, firma: t.firma, konto: t.konto, ende4: t.ende4, typ: t.typ, richtung: t.richtung,
+      route: t.route, start_um: new Date(Date.parse(D.tag + 'T00:00:00Z') + (t.start - off) * 60000).toISOString(), menge: t.menge, tp: t.tp, sl: t.sl,
+      stufe: t.stufe, notes: t.stufe ? 'Auto-Planer · ' + t.stufe : '', konto_id: t.konto_id, boden: t.boden } }
+  const apIdsEcht = t => !t.ohnePlan && /^[0-9a-f-]{36}$/i.test(String(t.plan_id || ''))
+  function apIdsWartenLaeuft(){
+    const D = apIdsHeute(), u = apSichtUid(), jetzt = Date.now()
+    const laeuft = D.trades.filter(t => t.status === 'laeuft' && t.auto && apIdsEcht(t))
+    const lIds = new Set(laeuft.map(t => String(t.plan_id))), w = new Map()
+    for(const t of D.trades) if(t.status === 'bestaetigt' && t.auto && apIdsEcht(t)) w.set(String(t.plan_id), { z: apIdsAusTrade(t, D), t })
+    for(const z of _apIds.bestaetigt || []) if(!w.has(String(z.plan_id))) w.set(String(z.plan_id), { z })
+    for(const [id, e] of _apIds.warteLokal){
+      // lokaler Merker: weg, sobald der Plan läuft, der Start 20 min vorbei ist oder (mit /ids bestaetigt[]) der Server ihn kennt bzw. nicht mehr kennt
+      if(lIds.has(id) || Date.parse(e.z.start_um || '') < jetzt - 1200000 || (Array.isArray(_apIds.bestaetigt) && _apIds.bestaetigtT0 > e.at)){ _apIds.warteLokal.delete(id); continue }
+      if(!w.has(id)) w.set(id, { z: e.z })
+    }
+    const sicht = e => !u || String(e.z.user_id) === u
+    const warten = [...w.values()].filter(e => sicht(e) && !lIds.has(String(e.z.plan_id)) && !_apIds.zurLokal.has(String(e.z.plan_id)))
+    let plJe = new Map(); try{ plJe = new Map((tplHypo(D).zeilen || []).map(z => [String(z.plan_id), z.pl])) }catch(_){}
+    return { warten, laeuft: laeuft.map(t => ({ z: apIdsAusTrade(t, D), t, pl: plJe.get(String(t.plan_id)) ?? null })) }
+  }
+  /* Ein Block (art offen | warten | laeuft): je ID eine Gruppe (Farbpunkt · Name · Zähler · „✓ alle n" nur bei offen), darin die Firmen-Blöcke
+   * (planFirmenBloecke) mit planZeileHtml-Zeilen. Balance/Rest/Stufe: Trade-Zeile → Lauf-Zeile → notes-Text → eigenes Konto. */
+  function apIdsBlockHtml(art, liste, kopf){
+    const leer = { offen: 'Nichts offen.', warten: 'Nichts bestätigt.', laeuft: 'Nichts läuft.' }[art]
+    if(!liste.length) return `<div class="ap-adm-karte ap-geplant ap-gr-${art}">${kopf}<div style="color:var(--sub);font-size:12.5px;padding:2px 0 6px">${leer}</div></div>`
     const jeZ = new Map(), je = new Map()
-    // notes-Text des Plans („Auto-Planer · Etappe · Rest 9.000 $ bis Ziel · Balance 150.000 (TV)", app.py Nachtlauf/Nachplanen) → {rest, balance}
-    const ausNotes = txt => { const t = String(txt || ''), r = /Rest ([\d.]+) \$/.exec(t), b = /Balance ([\d.]+)/.exec(t)
-      const z = v => v ? Number(v.replace(/\./g, '')) : null; return { rest: z(r && r[1]), balance: z(b && b[1]) } }
-    const plaene = o.map(z => { const tz = apIdsTrade(z) || {}, g = apIdsLaufZeile(z) || {}, nz = ausNotes(z.notes)
-      // Balance/Rest/Stufe: Trade-Zeile (Delta + Lauf des Admin-Tags) → Lauf-Zeile (letzter Lauf) → notes-Text des Plans (auch Nachplanen/
-      // frühere Läufe) → eigenes Konto. Finn-Screenshot .1210: fast alle Admin-Zeilen „–", nur Konten des letzten Laufs hatten Werte.
+    const plaene = liste.map(e => { const z = e.z, tz = e.t || apIdsTrade(z) || {}, g = apIdsLaufZeile(z) || {}, nz = apIdsAusNotes(z.notes)
+      // Finn-Screenshot .1210: fast alle Admin-Zeilen „–", nur Konten des letzten Laufs hatten Werte → Kette bis zum notes-Text
       const t = Object.assign({}, g, tz, { balance: tz.balance ?? g.balance ?? nz.balance ?? null, rest: tz.rest ?? g.rest ?? nz.rest ?? null,
-        stufe: tz.stufe || g.stufe || null, konto_id: tz.konto_id || g.konto_id || null, wert: tz.wert ?? g.wert ?? g.wert_eur ?? null })
-      const p = { id: String(z.plan_id), status: 'planned', route: z.route || t.route || null, masterFirm: z.firma || '–', masterName: z.konto || '',
-        masterAccountId: t.konto_id || null, richtung: z.richtung, startUm: z.start_um || null, startUmGestartetAt: null,
+        stufe: tz.stufe || g.stufe || null, konto_id: tz.konto_id || g.konto_id || z.konto_id || null, wert: tz.wert ?? g.wert ?? g.wert_eur ?? null })
+      const p = { id: String(z.plan_id), status: art === 'laeuft' ? 'open' : 'planned', route: z.route || t.route || null, masterFirm: z.firma || '–', masterName: z.konto || '',
+        masterAccountId: t.konto_id || null, richtung: z.richtung, startUm: z.start_um || null, startUmGestartetAt: art === 'laeuft' ? (z.start_um || 'ja') : null,
         masterTp: Number(z.tp) || 0, masterSl: Number(z.sl) || 0, masterContracts: z.menge, masterSymbol: (z.route || t.route) === 'mt5v2' ? '' : 'NQ',
-        autoPlan: true, autoBestaetigtAt: null, kontoTyp: z.typ || null }
-      jeZ.set(p.id, { z, t }); return p })
+        autoPlan: true, autoBestaetigtAt: art === 'offen' ? null : 'ja', kontoTyp: z.typ || null }
+      jeZ.set(p.id, { z, t, pl: e.pl }); return p })
       .sort((a, b) => String(a.masterFirm).toLowerCase().localeCompare(String(b.masterFirm).toLowerCase()) || String(a.startUm || '').localeCompare(String(b.startUm || '')))
     const zeile = p => {
-      const { z, t } = jeZ.get(String(p.id))
+      const { z, t, pl } = jeZ.get(String(p.id)), id = String(z.plan_id)
       const eigen = String(z.user_id || '') === String(currentUserId || '')
       const konto = eigen ? ((t.konto_id ? (accounts || []).find(a => String(a.id) === String(t.konto_id)) : null) || (accounts || []).find(a => String(a.name || '') === String(z.konto || '')) || null) : null
       const kontoBal = konto ? planKontoBalance(konto) : null
@@ -60431,18 +60538,45 @@
       // Ziel = Balance + Rest; fehlt die Balance, reicht der Rest allein nicht — dann bleibt ziel 0 und die Zelle sagt es (planZeileHtml)
       const notiz = (st || rest > 0) ? { stufe: String(z.notes || st), art: planSchritt(st),
         gekappt: /SL auf Boden gekappt/i.test(st), ziel: (rest > 0 && b0 > 0) ? Math.round((b0 + rest) / 5) * 5 : 0, rest: rest > 0 ? rest : null } : undefined
-      const zeit = `<span class="pz-zeit-t" title="Start ${escapeHtml(wann(z.start_um))} Dubai — startet erst nach Bestätigung">${escapeHtml(wann(z.start_um))}</span>`
-      // Balance nicht live (Terminal 4 liefert balance_live auf offen[]; eigen über planBalanceLive): Haken aus, Hinweis im Tooltip
-      const nichtLive = z.balance_live === false || (konto && kontoBal && typeof planBalanceLive === 'function' && planBalanceLive(konto.id, kontoBal.at)?.live === false)
-      const akt = `<span class="pz-zustand"><button type="button" class="btn btn-ghost tc2-btn pz-ok" data-ap-ok="${escapeHtml(String(z.plan_id))}"${nichtLive ? ' disabled' : ''} title="${nichtLive ? 'Balance nicht live — erst „↻ Balance lesen" (Braucht dich), dann bestätigen' : 'Bestätigen — startet zur Startzeit'}">Bestätigen</button></span>`
-      return planZeileHtml(p, konto, { name: p.masterName, ext: (konto && konto.externalId) || z.ende4 || '', extTitle: '', chips: '', akt, zeit, bal, notiz, uid: z.user_id, boden: z.boden ?? t.boden })
+      const wTip = { offen: 'startet erst nach Bestätigung', warten: 'bestätigt — der PC-Tab startet zu dieser Zeit von selbst', laeuft: 'gestartet' }[art]
+      const zeit = `<span class="pz-zeit-t" title="Start ${escapeHtml(apIdsWann(z.start_um))} Dubai — ${wTip}">${escapeHtml(apIdsWann(z.start_um))}</span>`
+      // läuft = POST unterwegs (Knopf „…", Zeile gedimmt), fehl = Ablehnung des Backends (Grund unter dem Knopf, ganz im Tooltip) — apIdsOk/apIdsZurueck
+      const unterwegs = _apIds.okLaeuft.has(id), fehl = _apIds.okFehler.get(id)
+      // Ablehnung „Balance nicht live" (Backend-Guard 400): gleich daneben „↻ Balance lesen" — derselbe Knopf wie in „Braucht dich"
+      // (data-tpl-bal eigenes Konto / data-tpl-balf fremdes, Handler window._tplKlick am Wurzelknoten), danach erneut bestätigen
+      const balKnopf = fehl && /balance/i.test(fehl) && art === 'offen' && (t.konto_id || konto) ? (konto
+          ? `<button type="button" class="btn btn-ghost btn-xs ap-ok-bal" data-tpl-bal="${escapeHtml(String(konto.id))}" title="Balance dieses Kontos lesen">↻ Balance lesen</button>`
+          : `<button type="button" class="btn btn-ghost btn-xs ap-ok-bal" data-tpl-balf="${escapeHtml(String(t.konto_id))}" data-tpl-uid="${escapeHtml(String(z.user_id || ''))}" title="Signal an den PC dieser ID — die Lesung läuft dort">↻ Balance lesen</button>`) : ''
+      const fehlHtml = fehl ? `<small class="ap-ok-fehler" title="${escapeHtml(fehl)}" data-wer="${escapeHtml(String(z.user || ''))}">⚠ ${escapeHtml(fehl)}</small>${balKnopf ? `<span data-wer="${escapeHtml(String(z.user || ''))}">${balKnopf}</span>` : ''}` : ''
+      let akt
+      if(art === 'offen'){
+        // Balance nicht live (Terminal 4 liefert balance_live auf offen[]; eigen über planBalanceLive): Haken aus, Hinweis im Tooltip
+        const nichtLive = z.balance_live === false || (konto && kontoBal && typeof planBalanceLive === 'function' && planBalanceLive(konto.id, kontoBal.at)?.live === false)
+        akt = `<span class="pz-zustand"><button type="button" class="btn btn-ghost tc2-btn pz-ok" data-ap-ok="${escapeHtml(id)}"${nichtLive || unterwegs ? ' disabled' : ''} title="${nichtLive ? 'Balance nicht live — erst „↻ Balance lesen" (Braucht dich), dann bestätigen' : 'Bestätigen — startet zur Startzeit'}">${unterwegs ? '…' : 'Bestätigen'}</button>${fehlHtml}</span>`
+      } else if(art === 'warten'){
+        akt = `<span class="pz-zustand"><button type="button" class="btn btn-ghost tc2-btn pz-ok is-ok" data-ap-zur="${escapeHtml(id)}"${unterwegs ? ' disabled' : ''} title="Bestätigt — startet zur Startzeit. Klick schickt den Plan zurück nach „Zu bestätigen“">${unterwegs ? '…' : '↩ zurück'}</button>${fehlHtml}</span>`
+      } else akt = '<span class="pz-zustand"><span class="ap-gr-live">● läuft</span></span>'
+      return planZeileHtml(p, konto, { name: p.masterName, ext: (konto && konto.externalId) || z.ende4 || '', extTitle: '', chips: '', akt, zeit, bal, notiz, uid: z.user_id, boden: z.boden ?? t.boden, pl: art === 'laeuft' ? pl : undefined })
     }
     for(const p of plaene){ const { z } = jeZ.get(String(p.id)), k = String(z.user_id || '')
       if(!je.has(k)) je.set(k, { uid: k, name: z.user || k.slice(0, 8), plaene: [], live: 0 }); je.get(k).plaene.push(p); if(z.balance_live !== false) je.get(k).live++ }
-    const gruppen = [...je.values()].map(g => `<div class="ap-id-karte" style="--id:${idFarbe(g.uid)}"><div class="ap-adm-grp"><span class="ap-adm-id"><i style="background:${idFarbe(g.uid)}"></i>${escapeHtml(g.name)}</span><span class="n">${g.plaene.length} offen${g.live < g.plaene.length ? ` · ${g.plaene.length - g.live} Balance nicht live` : ''}</span>
-          ${g.live ? `<button type="button" class="btn btn-ghost btn-xs" data-ap-ok-id="${escapeHtml(g.uid)}" title="alle offenen Vorschläge dieser ID mit liver Balance bestätigen">✓ alle ${g.live}</button>` : ''}</div>`
+    const wort = { offen: 'offen', warten: 'wartet', laeuft: 'läuft' }[art]
+    const gruppen = [...je.values()].sort((a, b) => String(a.name).localeCompare(String(b.name), 'de')).map(g => `<div class="ap-id-karte" style="--id:${idFarbe(g.uid)}"><div class="ap-adm-grp"><span class="ap-adm-id"><i style="background:${idFarbe(g.uid)}"></i>${escapeHtml(g.name)}</span><span class="n">${g.plaene.length} ${wort}${art === 'offen' && g.live < g.plaene.length ? ` · ${g.plaene.length - g.live} Balance nicht live` : ''}</span>
+          ${art === 'offen' && g.live ? `<button type="button" class="btn btn-ghost btn-xs" data-ap-ok-id="${escapeHtml(g.uid)}" title="alle offenen Vorschläge dieser ID mit liver Balance bestätigen">✓ alle ${g.live}</button>` : ''}</div>`
         + planFirmenBloecke(g.plaene, { zeile, ohneHinweis: true }) + '</div>').join('')
-    return `<div class="ap-adm-karte ap-geplant">${kopf}${gruppen}</div>`
+    return `<div class="ap-adm-karte ap-geplant ap-gr-${art}">${kopf}${gruppen}</div>`
+  }
+  function apIdsOffenHtml(){
+    // nicht-live Balance (08.10.2026): raus aus „Zu bestätigen" (steht in der Box „Braucht dich"), Zähler/„alle n"/„Alle n" ohne sie
+    const nichtLive = z => z.balance_live === false || (() => { const t = apIdsTrade(z); return !!t && !tplPlanLive(t) })()
+    const o = apIdsOffenSicht().filter(z => !nichtLive(z)).slice().sort((a, b) => String(a.user || '').localeCompare(String(b.user || '')) || String(a.start_um || '').localeCompare(String(b.start_um || '')))
+    const wer = apSichtUid() ? escapeHtml(String((_apIds.rows.find(r => String(r.user_id) === apSichtUid()) || {}).name || '')) : 'alle IDs'
+    const kopfO = `<div class="ap-adm-kopf"><b>Zu bestätigen · ${o.length}</b><span>heute und morgen · ${wer} · Zeiten Dubai</span>
+        ${o.length ? `<button type="button" class="ap-adm-ok" id="ap-ids-alle-ok" style="margin-left:auto">✓ Alle ${o.length} bestätigen</button>` : ''}</div>`
+    let wl = { warten: [], laeuft: [] }; try{ wl = apIdsWartenLaeuft() }catch(e){ console.warn('[ap-ids] Wartet/Läuft', e) }
+    const kopfW = `<div class="ap-adm-kopf"><b>Wartet auf Start · ${wl.warten.length}</b><span>bestätigt · ${wer}</span></div>`
+    const kopfL = `<div class="ap-adm-kopf"><b>Läuft · ${wl.laeuft.length}</b><span>live · ${wer}</span></div>`
+    return apIdsBlockHtml('offen', o.map(z => ({ z })), kopfO) + apIdsBlockHtml('warten', wl.warten, kopfW) + apIdsBlockHtml('laeuft', wl.laeuft, kopfL)
   }
   /* Konto-Popup (08.10.2026): Name, Firma, Typ/Phase, Balance (letzte Lesung + Quelle + Alter), Ziel/Rest, Kontowert, letzte Trades — eigene
    * Konten aus accounts/tradePlans (tplKontoBalance wie auf der Planer-Seite), fremde aus Lauf (balance/rest), Delta (wert_eur), live-trades
@@ -60683,10 +60817,13 @@
     root.querySelectorAll('[data-ap-tag]').forEach(b => b.addEventListener('click', () => { _apIds.tagWahl = b.dataset.apTag; apIdsRender() }))
     root.querySelectorAll('[data-ap-konto],[data-ak-konto]').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); apKontoOeffnen(b.dataset.apKonto || b.dataset.akKonto) }))   // Konto-Spalte der Zeile (planZeileHtml) öffnet das Popup
     // Bestätigen: eine Zeile / eine ID / alle — Admin-Route wie auf der Trade-Planer-Seite, danach neu laden
-    const ok = async (ids, btn) => { if(btn) btn.disabled = true; try{ await tplEingriff('bestaetigen', ids) }catch(e){ if(typeof atToast === 'function') atToast('Nicht bestätigt: ' + ((e && e.message) || e), 'end') } finally{ apIdsLaden() } }
+    // Bestätigen ohne Warten (apIdsOk): Zeile sofort weg, Zähler zählen mit, ein Nachladen kann sie nicht zurückholen
+    const ok = (ids, btn) => { if(btn) btn.disabled = true; apIdsOk(ids) }
+    for(const id of _apIds.okLaeuft) root.querySelector(`.pz-z[data-plan-id="${CSS.escape(id)}"]`)?.classList.add('ap-ok-laeuft')
     root.querySelectorAll('[data-ap-ok]').forEach(b => b.addEventListener('click', () => ok([b.dataset.apOk], b)))
-    root.querySelectorAll('[data-ap-ok-id]').forEach(b => b.addEventListener('click', () => ok(_apIds.offen.filter(z => String(z.user_id) === b.dataset.apOkId && z.balance_live !== false && (() => { const t = apIdsTrade(z); return !t || tplPlanLive(t) })()).map(z => String(z.plan_id)), b)))
-    root.querySelector('#ap-ids-alle-ok')?.addEventListener('click', e => ok(apIdsOffenSicht().filter(z => z.balance_live !== false && (() => { const t = apIdsTrade(z); return !t || tplPlanLive(t) })()).map(z => String(z.plan_id)), e.currentTarget))
+    root.querySelectorAll('[data-ap-zur]').forEach(b => b.addEventListener('click', () => { b.disabled = true; apIdsZurueck(b.dataset.apZur) }))   // Wartet auf Start → ↩ zurück
+    root.querySelectorAll('[data-ap-ok-id]').forEach(b => b.addEventListener('click', () => ok(_apIds.offen.filter(z => String(z.user_id) === b.dataset.apOkId && !_apIds.okLaeuft.has(String(z.plan_id)) && z.balance_live !== false && (() => { const t = apIdsTrade(z); return !t || tplPlanLive(t) })()).map(z => String(z.plan_id)), b)))
+    root.querySelector('#ap-ids-alle-ok')?.addEventListener('click', e => ok(apIdsOffenSicht().filter(z => !_apIds.okLaeuft.has(String(z.plan_id)) && z.balance_live !== false && (() => { const t = apIdsTrade(z); return !t || tplPlanLive(t) })()).map(z => String(z.plan_id)), e.currentTarget))
     root.querySelectorAll('[data-ap-id]').forEach(cb => cb.addEventListener('change', async () => {
       cb.disabled = true
       try{ await apdApi('POST', '/ids', { user_id: cb.dataset.apId, drin: cb.checked })
