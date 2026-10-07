@@ -65,6 +65,11 @@ def main():
           "Kandidaten: nur Konten ohne Plan heute (k-2 morgen frei, k-8 erledigt + veränderlicher Grund), funded/Haken aus/fester Grund/open/heute raus")
     k2 = K(konten, plaene, tag, tz, {"tag": "2026-10-07", "ausgelassen": [{"konto_id": "k-2", "grund": "keine Regel für diese Firma"}]}, {"k-8"})
     check(k2 == ["k-2", "k-6"], f"Lauf eines anderen Tags zählt nicht (k-6 wieder dabei), Archiv k-8 raus ({k2})")
+    # 08.10.2026: Haken wieder gesetzt → Konto ist wieder Kandidat, auch wenn der letzte Lauf „vom Auto-Planer ausgenommen" sagte
+    k3 = K([{"id": "k-9", "account_type": "phase1", "auto_planer": True}, {"id": "k-10", "account_type": "phase1", "auto_planer": False}], [], tag, tz,
+           {"tag": tag, "ausgelassen": [{"konto_id": "k-9", "grund": "vom Auto-Planer ausgenommen (Haken im Konto aus)"},
+                                        {"konto_id": "k-10", "grund": "vom Auto-Planer ausgenommen (Haken im Konto aus)"}]}, set())
+    check(k3 == ["k-9"], f"Haken wieder an → k-9 wird nachgeplant, k-10 (Haken aus) bleibt draußen ({k3})")
 
     # ap_planen mit nur_konten gegen die nachgebaute DB
     jetzt = datetime(2026, 10, 8, 7, 0, tzinfo=timezone.utc)

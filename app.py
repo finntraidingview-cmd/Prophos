@@ -14731,6 +14731,36 @@ AP_KONTO_FELDER_OHNE_CONS = AP_KONTO_FELDER.replace(",consistency_pct", "")
 
 
 AP_GRUND_EXT = "External ID fehlt (Tradovate-Unterkonto) — unter Accounts eintragen"
+AP_GRUND_BAL_LIVE = "Balance nicht live — erst lesen"
+
+
+def ap_balance_live(stand, letzt):
+    """REIN RECHNEND (testbar): ist die Balance eines Kontos „live"? = Zeitstempel der Balance-Lesung (stand) jünger als das Ende des
+    letzten beendeten Trades (letzt, ISO); ohne beendeten Trade immer live; ohne Stand bei vorhandenem Trade nicht live. Dieselbe Regel
+    wie der Planer beim Auslassen („Balance nicht live (seit dem letzten Trade nicht nachgelesen)"). Finn 08.10.2026: „Wenn die Balance
+    nicht live ist, warum kann ich dann überhaupt einen Trade starten? Ich will nur starten/bestätigen können, wenn es perfekt ist."
+    Zeitformate (PostgREST „T…+00:00", SQL „ …+00", Z) werden angeglichen, dann String-Vergleich."""
+    if not letzt:
+        return True
+    if not stand:
+        return False
+
+    def norm(x):
+        t = str(x).strip().replace(" ", "T").replace("Z", "+00:00")
+        return t + ":00" if len(t) >= 3 and t[-3] == "+" and t[-6] != "+" else t
+    return norm(stand) >= norm(letzt)
+
+
+def ap_letzt_je_konto(plaene):
+    """konto_id → ISO des jüngsten Trade-Endes (ended_at/completed_at) aus beendeten Plänen (review/completed)."""
+    out = {}
+    for p in plaene or ():
+        if p.get("status") not in ("review", "completed"):
+            continue
+        k, e = str(p.get("master_account_id") or ""), str(p.get("ended_at") or p.get("completed_at") or "")
+        if k and e and e > out.get(k, ""):
+            out[k] = e
+    return out
 
 
 def ap_ext_fehlt(a, regel):
@@ -15543,7 +15573,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
             continue
         bal, _ccy, quelle_b, stand = acc_balance_wahl(a, echo_bal, dup_bal)
         letzt = max((str(p.get("ended_at") or p.get("completed_at") or "") for p in eig), default="")
-        if letzt and (bal is None or str(stand or "") < letzt):
+        if letzt and (bal is None or not ap_balance_live(stand, letzt)):   # seit 08.10.2026 über ap_balance_live (auch Delta/ids/Guard)
             # Balance seit dem letzten Trade nicht nachgelesen → Endstand der Nachlesung, sonst auslassen (Finn: Notfall)
             fin = next((p.get("final") for p in sorted(eig, key=lambda p: str(p.get("ended_at") or p.get("completed_at") or ""),
                                                         reverse=True) if isinstance(p.get("final"), dict)), None)
@@ -16665,6 +16695,16 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
                                  "start": round(m, 2), "richtung": p.get("richtung")})
 
     geplant_rows = []
+    # BALANCE LIVE je Plan (08.10.2026): Ende des letzten beendeten Trades je Konto der heutigen Pläne — eine kleine Abfrage
+    letzt_je = {}
+    try:
+        kids = sorted({str(p.get("master_account_id")) for p in heute if p.get("master_account_id")})
+        for j in range(0, len(kids), 150):
+            letzt_je.update(ap_letzt_je_konto(_sb_all("trade_plans", {"select": "master_account_id,status,ended_at,completed_at",
+                                                                       "status": "in.(review,completed)",
+                                                                       "master_account_id": "in.(" + ",".join(kids[j:j + 150]) + ")"})))
+    except Exception as e:
+        print(f"[auto-plan] ⚠️ balance_live: {type(e).__name__}: {e}", flush=True)
     for p in heute:
         a, r = konto(p), p.get("richtung")
         gh, art = _ap_gehedgt_plan(p)
@@ -16690,7 +16730,9 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
                  richtung_konflikt=p.get("rk") if isinstance(p.get("rk"), dict) else None,   # RICHTUNG AM START (07.10.2026)
                  # START-FEHLER (Finn 07.10.2026 15:07: „woher soll ich wissen, was ich bei The5ers machen muss?"): Grund eines roten
                  # Auto-Starts, den der PC-Tab in mt5_baseline.start_fehler schreibt — der Planer zeigt ihn auch für fremde IDs
-                 start_fehler=p.get("sf") if isinstance(p.get("sf"), dict) else None, geclaimt=bool(p.get("start_um_gestartet_at")))
+                 start_fehler=p.get("sf") if isinstance(p.get("sf"), dict) else None, geclaimt=bool(p.get("start_um_gestartet_at")),
+                 balance_live=ap_balance_live(acc_balance_wahl(a, echo_bal, dup_bal)[3] if a else None,
+                                              letzt_je.get(str(p.get("master_account_id") or ""))))   # 08.10.2026
         z["einsatz_eur"] = z["einsatz_abs"] * (1 if r == "buy" else -1) if r in ("buy", "sell") else None
         geplant_rows.append(z)
         if b["hinweis"]:
@@ -17195,10 +17237,18 @@ def admin_auto_plan_ids():
                                      "order": "start_um.asc"})
         pl = [p for p in pl if str(p.get("user_id")) not in aus]
         acc_ids = sorted({str(p.get("master_account_id")) for p in pl if p.get("master_account_id")})
-        accs = {}
+        accs, letzt_je = {}, {}
         for j in range(0, len(acc_ids), 150):
-            for a in _sb_all("accounts", {"select": "id,name,firm,external_id,account_type", "id": "in.(" + ",".join(acc_ids[j:j + 150]) + ")"}):
+            for a in _ap_konten_laden({"id": "in.(" + ",".join(acc_ids[j:j + 150]) + ")"}):   # Felder für acc_balance_wahl, Rückfall ohne neue Spalten
                 accs[str(a.get("id"))] = a
+            # BALANCE LIVE (08.10.2026): Ende des letzten beendeten Trades je Konto — „Zu bestätigen" zeigt nicht-live Pläne nicht
+            letzt_je.update(ap_letzt_je_konto(_sb_all("trade_plans", {"select": "master_account_id,status,ended_at,completed_at",
+                                                                       "status": "in.(review,completed)",
+                                                                       "master_account_id": "in.(" + ",".join(acc_ids[j:j + 150]) + ")"})))
+        try:
+            echo_bal, dup_bal = _ap_balance_karten()
+        except Exception:
+            echo_bal, dup_bal = {}, {}
         for p in pl:
             a = accs.get(str(p.get("master_account_id")))
             offen.append({"plan_id": str(p.get("id")), "user_id": str(p.get("user_id")), "user": namen.get(str(p.get("user_id")), str(p.get("user_id"))[:8]),
@@ -17207,7 +17257,10 @@ def admin_auto_plan_ids():
                           "start_um": p.get("start_um"), "menge": _wd_num(p.get("master_contracts")),
                           "tp": _wd_num(p.get("master_tp")), "sl": _wd_num(p.get("master_sl")),
                           # Stufe aus den Planer-Notes („Auto-Planer · Etappe · Rest …") — Admin-Reiter Spalte „Stufe" (08.10.2026)
-                          "notes": p.get("notes"), "stufe": (re.search(r"Auto-Planer · ([^·]+)", str(p.get("notes") or "")) or [None, None])[1]})
+                          "notes": p.get("notes"), "stufe": (re.search(r"Auto-Planer · ([^·]+)", str(p.get("notes") or "")) or [None, None])[1],
+                          "konto_id": str(p.get("master_account_id") or "") or None,
+                          "balance_live": ap_balance_live(acc_balance_wahl(a, echo_bal, dup_bal)[3] if a else None,
+                                                          letzt_je.get(str(p.get("master_account_id") or "")))})
     except Exception as e:
         print(f"[auto-plan] ⚠️ ids/offen: {type(e).__name__}: {e}", flush=True)
     return jsonify({"ok": True, "ids": ids, "aktiv": bool(reg.get("aktiv")), "tag": tag, "offen": offen})
@@ -17484,7 +17537,9 @@ def ap_nacht_tick(jetzt, zustand):
 # Richtungsschutz), bestehende Pläne bleiben, Protokoll nur bei Treffer. Rein rechnende Teile (Fenster, Kandidaten) sind testbar.
 AP_NACHPLAN_TAKT_S = 600
 # Gründe des letzten Laufs, die sich innerhalb des Tages nicht von selbst ändern — solche Konten werden nicht alle 10 min neu gerechnet
-AP_NACHPLAN_FEST_GRUENDE = ("keine Regel für diese Firma", "vom Auto-Planer ausgenommen", "kein freies Zeitfenster mehr",
+# „vom Auto-Planer ausgenommen" ist seit 08.10.2026 KEIN fester Grund mehr: der Haken wird je Konto live geprüft (auto_planer is False) —
+# vorher blieb ein Konto, dessen Haken Finn wieder gesetzt hatte, bis zum nächsten Tag draußen (Grund aus dem letzten Lauf)
+AP_NACHPLAN_FEST_GRUENDE = ("keine Regel für diese Firma", "kein freies Zeitfenster mehr",
                             "letzter Trade ", "Kontogröße", "Ziel erreicht", "bis zum Ziel")
 
 
@@ -17753,6 +17808,28 @@ def _ap_eingriff(aktion):
             fremd = [z for z in sb_select("trade_plans", {"select": "id,user_id", "id": params["id"]}) if str(z.get("user_id")) != sicht]
             if fremd:
                 return jsonify({"ok": False, "msg": "nur eigene Pläne"}), 403
+        if aktion == "bestaetigen":
+            # BALANCE NICHT LIVE (08.10.2026, Finn: „nur bestätigen, wenn es perfekt ist"): Konto-Balance muss jünger sein als das Ende des
+            # letzten Trades dieses Kontos (ap_balance_live) — sonst 400 mit Konto-Namen, nichts geändert
+            try:
+                pl = sb_select("trade_plans", {"select": "id,master_account_id,master_name", "id": params["id"]})
+                kids = sorted({str(z.get("master_account_id")) for z in pl if z.get("master_account_id")})
+                if kids:
+                    accs = {str(a.get("id")): a for a in _ap_konten_laden({"id": "in.(" + ",".join(kids) + ")"})}
+                    letzt = ap_letzt_je_konto(_sb_all("trade_plans", {"select": "master_account_id,status,ended_at,completed_at",
+                                                                       "status": "in.(review,completed)", "master_account_id": "in.(" + ",".join(kids) + ")"}))
+                    try:
+                        echo_bal, dup_bal = _ap_balance_karten()
+                    except Exception:
+                        echo_bal, dup_bal = {}, {}
+                    tot = [z.get("master_name") or str(z.get("master_account_id"))[:8] for z in pl
+                           if not ap_balance_live(acc_balance_wahl(accs.get(str(z.get("master_account_id"))), echo_bal, dup_bal)[3]
+                                                  if accs.get(str(z.get("master_account_id"))) else None,
+                                                  letzt.get(str(z.get("master_account_id") or "")))]
+                    if tot:
+                        return jsonify({"ok": False, "msg": f"{AP_GRUND_BAL_LIVE}: {', '.join(tot)}"}), 400
+            except Exception as e:
+                print(f"[auto-plan] ⚠️ bestaetigen/balance_live: {type(e).__name__}: {e}", flush=True)
         zeilen = sb_delete("trade_plans", params) if art == "delete" else sb_update("trade_plans", params, upd)
         print(f"[auto-plan] {aktion}: {len(zeilen)} Zeile(n) durch {'Admin' if not sicht else 'ID ' + str(sicht)[:8]}", flush=True)
         return jsonify({"ok": True, "aktion": aktion, "n": len(zeilen), "zeilen": zeilen, "alle": sicht is None})

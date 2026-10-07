@@ -46,7 +46,8 @@ REIN = ("ap_id_fest", "ap_id_misch", "ap_ext_fehlt", "_ap_norm", "ap_regel_finde
         "ap_ausgleich_param", "ap_firma_key", "ap_ppl_karte", "ap_punktwert", "ap_usd_pro_pkt", "ap_delta", "ap_punkte",
         "ap_rest_punkte", "ap_verlauf", "_ap_gegen_dicht", "ap_dicht_paare", "ap_richtungen_delta", "ap_fenster_von",
         "_ap_tranchen", "_ap_tranche_frei", "ap_umplanen", "ap_eingriff_pruefen", "ap_start_bis", "ap_einsatz_lage", "ap_gross_ab", "ap_consistency_etappe", "ap_regel_konto", "ist_topstep_express", "ap_cfd_ab",
-        "ap_richtung_konflikte", "lt_echo_live_wahl", "lt_echo_felder")
+        "ap_richtung_konflikte", "lt_echo_live_wahl", "lt_echo_felder",
+        "ap_balance_live", "ap_letzt_je_konto")   # 08.10.2026: Balance live (Guard/Delta/ids)
 IO = ("_ap_gehedgt_plan", "_ap_bewerten", "_ap_iso_min", "_ap_stand_laden", "_ap_stand_plaene", "_ap_min_iso",
       "_ap_umplanungen_heute", "_ap_bot_stand", "ap_delta_antwort", "_ap_aenderungen_anwenden", "ap_ausgleichen",
       "_ap_probelauf", "ap_planen", "_ap_tz", "_ap_eur_bei", "_ap_konten_laden", "ap_einsatz_kontext", "ap_richtung_fest_plan", "ap_letzter_trade_geblasen", "_ap_rk_flag",
@@ -67,7 +68,8 @@ def lade():
     konstanten = ("AP_REST_MIN", "AP_GROESSE_TOLERANZ", "AP_KW_FUNDED", "AP_KW_PHASEN", "AP_TYPEN", "AP_TZ_LAUF", "AP_STILL_FIRMEN",
                   "AP_AUSGLEICH_STANDARD", "AP_TZ_TAG", "AP_BOT_ENDE_MIN", "AP_BOT_EXTRA_MIN", "AP_FAELLIG_MIN", "AP_BOT_SCHRITTE",
                   "AP_RICHTUNG_TXT", "AP_GEGEN_DICHT_MIN", "AP_GEGEN_WUERFE", "AP_EUR_STUFE", "AP_START_BIS_STANDARD", "AP_CFD_AB_STANDARD", "AP_CFD_ROUTEN", "AP_TRANCHE_LUECKE_MIN", "_ap_bot", "_ap_info", "WD_HEUTE_PPL", "LT_ECHO_ROUTEN", "LT_ECHO_MAX_ALTER_S",
-                  "AP_RS_HORIZONT_MIN", "AP_RS_NACHLAUF_MIN", "AP_RS_ROUTEN", "AP_EINGRIFF_MAX", "AP_SICHT_ADMIN", "AP_ID_FEST_HORIZONT_MIN", "AP_RUHE_JE_PLAN_MIN", "AP_HYSTERESE_EUR", "AP_ID_MISCH_AB", "AP_ID_MISCH_MAX")
+                  "AP_RS_HORIZONT_MIN", "AP_RS_NACHLAUF_MIN", "AP_RS_ROUTEN", "AP_EINGRIFF_MAX", "AP_SICHT_ADMIN", "AP_ID_FEST_HORIZONT_MIN", "AP_RUHE_JE_PLAN_MIN", "AP_HYSTERESE_EUR", "AP_ID_MISCH_AB", "AP_ID_MISCH_MAX",
+                  "AP_GRUND_EXT", "AP_GRUND_BAL_LIVE")
     exec("\n".join([konst(k) for k in konstanten] + [block(f) for f in REIN + IO]), ns)
     return ns
 
