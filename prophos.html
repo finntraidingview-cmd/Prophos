@@ -1905,10 +1905,14 @@
   /* Liste „Läuft / Geplant" (Radar-Zeilen wdl-z in der Planer-Karte) */
   #tpl-view .tpl-lk{padding-bottom:4px} #tpl-view .tpl-lk .tpl-h{margin:4px 0 2px} #tpl-view .tpl-lk .tpl-h + .tpl-liste{margin-bottom:8px}
   #tpl-view .tpl-liste{border:1px solid var(--border-soft);border-radius:var(--r-md);overflow:hidden}
-  #tpl-view .tpl-liste .wdl-z{padding:9px 12px;cursor:pointer} #tpl-view .tpl-liste .wdl-z.is-aktiv{background:var(--violet-tint)}
+  #tpl-view .tpl-liste .wdl-z{padding:9px 12px;cursor:pointer;grid-template-columns:minmax(0,1fr) 140px 230px 150px 200px} #tpl-view .tpl-liste .wdl-z.is-aktiv{background:var(--violet-tint)}   /* Spalten: Zeit breit genug für „06:24 unbestätigt ✓" */
+  #tpl-view .tpl-liste .tpl-g-zeit{white-space:nowrap}
   #tpl-view .tpl-liste .wdl-z-pl{font-size:13.5px} #tpl-view .tpl-liste .wdl-z-lauf .wdl-z-pl{font-size:13.5px;font-weight:600}
   #tpl-view .tpl-liste .tpl-l-bal{display:block;margin:1px 0 0 17px;font-size:11.5px;color:var(--sub-2);font-variant-numeric:tabular-nums}
   #tpl-view .tpl-liste .tpl-pill{margin-left:4px}
+  #tpl-view .tpl-liste .tpl-g-mi{display:flex;flex-direction:column;align-items:flex-end;gap:1px;line-height:1.3} #tpl-view .tpl-liste .tpl-g-mi b{font-weight:600} #tpl-view .tpl-liste .tpl-g-mi small{color:var(--sub);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+  #tpl-view .tpl-liste .tpl-g-pl{display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-weight:600;line-height:1.2} #tpl-view .tpl-liste .tpl-g-pl .wdl-z-slave{display:inline;margin-left:4px;font-weight:500}
+  #tpl-view .tpl-liste .tpl-g-start{font-size:15px;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums;margin-right:4px}
   /* Braucht dich (07.10.2026): ruhiger Block je ID — Zeile = Symbol · Firma · Klartext · kleine Aktion */
   #tpl-view .tpl-bd{border-color:color-mix(in srgb,#B45309 35%,var(--border))}
   #tpl-view .tpl-bd-id{padding:3px 0 2px;border-top:1px solid var(--border-soft)} #tpl-view .tpl-bd-id:first-of-type{border-top:0}
@@ -39933,7 +39937,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1117'
+  const OS_TAB_BUILD = '2026-09-22.1118'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -44784,6 +44788,7 @@
         typ: x.typ || (g && g.typ) || (p && p.kontoTyp) || (p && ((accounts || []).find(a => String(a.id) === String(p.masterAccountId)) || {}).type) || null,
         route: x.route || (g && g.route) || (p ? p.route : null), usd: tplNum(x.usd_pro_pkt) ?? tplNum(g && g.usd_pro_pkt),
         satz: tplNum(x.satz_eur_je_usd),   // Kontowert-Satz € je $ (Delta offen[]) — Hypo-P&L (07.10.2026)
+        balance: tplNum(x.balance) ?? tplNum(g && g.balance), rest: tplNum(x.rest) ?? tplNum(g && g.rest),   // Planer-Balance + Rest bis Ziel (Lauf-Zeile, alle IDs)
         wd: (x.typ || (g && g.typ)) === 'winning_days' || !!(p && (p.notes === 'Winning-Day-Farmer' || (p.route === 'tvv2' && p.hedgeEur > 0 && !p.orbitV3))),   // Winning Day: nur dezent (Finn 07.10.2026)
         eigen: !!p, auto: x.auto_plan != null ? !!x.auto_plan : p ? !!p.autoPlan : true, ...mehr }
       t.long = t.richtung === 'buy'
@@ -45231,20 +45236,23 @@
     const f0 = x => Number(x).toLocaleString('de-DE', { maximumFractionDigits: 0 })
     const menge = t => t.menge == null ? '?' : Number(t.menge).toLocaleString('de-DE', { maximumFractionDigits: 2 })
     const sym = t => /^(mt5|mt5v2)$/.test(String(t.route || '')) ? `${menge(t)} Lot` : `${menge(t)} × ${Number(t.usd) === 20 ? 'NQ' : Number(t.usd) === 2 ? 'MNQ' : 'NQ'}`
-    const spanne = t => {
-      const l = t.status === 'laeuft' ? t.sl_rest : t.sl_punkte, r = t.status === 'laeuft' ? t.tp_rest : t.tp_punkte
-      if(r == null && l == null) return `<span class="wdl-z-mi">–</span>`
-      const links = l != null ? 'SL' : 'Liq', pos = (l != null && r != null && l + r > 0) ? (t.status === 'laeuft' ? l / (l + r) * 100 : 0) : (t.status === 'laeuft' ? 50 : 0)
-      return `<span class="wdl-z-mi wdl-sp" title="${escapeHtml(`${links} ${l != null ? f0(l) + ' Pkt' : '—'} · TP ${r != null ? f0(r) + ' Pkt' : '—'}${t.status === 'laeuft' ? ' (Rest ab Kurs)' : ' (ab Einstieg)'}`)}"><small class="wdl-sp-l"><i>${links}</i>${l != null ? `<b>−${f0(l)}</b>` : ''}</small><span class="wdl-sp-bahn"><b class="wdl-sp-punkt" style="left:${pos.toFixed(1)}%;background:${t.long ? 'var(--good)' : 'var(--danger)'}"></b></span><small class="wdl-sp-r"><i>TP</i>${r != null ? `<b>+${f0(r)}</b>` : ''}</small></span>`
+    // GEPLANT-ZEILE (Finn 07.10.2026: „zwei, drei relevante Sachen, Hauptding durchbestätigen"): TP $ / SL $ als Zahlen (kein Balken),
+    // Stufe + Rest bis Ziel, Kontowert € + Einsatz €, Balance mit Quelle für alle IDs (eigenes Konto live, sonst Planer-Stand), Start groß
+    const mitte = t => {
+      const tp = t.tp != null ? t.tp : (t.tp_punkte != null && t.usd != null ? t.tp_punkte * t.usd : null)
+      const sl = t.sl != null ? t.sl : (t.sl_punkte != null && t.usd != null ? t.sl_punkte * t.usd : null)
+      return `<span class="wdl-z-mi tpl-g-mi"><span><b class="tpl-gut">TP ${tp != null ? '+' + f0(tp) + ' $' : '—'}</b> · <b class="tpl-rot">SL ${sl != null ? '−' + f0(sl) + ' $' : '—'}</b></span><small>${escapeHtml(t.stufe || '—')}${t.rest != null ? ' · Rest ' + f0(t.rest) + ' $' : ''}</small></span>`
     }
-    const bal = t => { if(!t.eigen || !t.konto_id) return ''; const a = (accounts || []).find(x => String(x.id) === String(t.konto_id)); const b = a ? tplKontoBalance(a) : null; return b ? `<small class="tpl-l-bal">${escapeHtml(tplBalText(b, jetzt))}</small>` : '' }
+    const bal = t => { const a = t.konto_id ? (accounts || []).find(x => String(x.id) === String(t.konto_id)) : null; const b = a ? tplKontoBalance(a) : null
+      const txt = b ? tplBalText(b, jetzt) : t.balance != null ? `${f0(t.balance)} $ · Planer-Stand` : ''
+      return txt ? `<small class="tpl-l-bal">${escapeHtml(txt)}</small>` : '' }
     const zeile = t => `<div class="wdl-z wdl-z-${t.status === 'laeuft' ? 'lauf' : 'plan'}${_tpl.wahl === t.key ? ' is-aktiv' : ''}" style="--wdl-id:${idFarbe(t.user_id)}" data-tpl-t="${escapeHtml(t.key)}" title="${escapeHtml(t.konto || '')}">
         <span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(t.user || '?')}</b>${t.typ ? `<i class="wdl-pf">${escapeHtml(TPL_TYP_WORT[t.typ] || t.typ)}</i>` : ''}<small>${escapeHtml(t.firma || '?')}${t.ende4 ? ' …' + escapeHtml(t.ende4) : ''}</small>${bal(t)}</span>
         <span class="wdl-z-ri"><em class="${t.long ? 'is-buy' : 'is-sell'}">${t.long ? 'BUY' : 'SELL'}</em>${sym(t)}</span>
-        ${spanne(t)}
-        <span class="wdl-z-pl">${t.gehedgt ? '<span style="color:var(--sub);font-weight:500">gehedgt</span>' : t.einsatz != null ? tplEur(t.einsatz) : '–'}<small class="wdl-z-slave" style="color:var(--sub-2)">Einsatz</small></span>
-        <span class="wdl-z-zeit">${t.status === 'laeuft' ? `<span class="wdl-z-ab">seit ${tplUhr(t.start, v)} · </span><span class="wdl-z-dauer">${heute ? tplAlter(Math.max(60000, (D.jetzt - t.start) * 60000)) : '—'}</span>`
-          : `${tplUhr(t.start, v)} ${t.status === 'offen' && t.auto && !t.ohnePlan && /^[0-9a-f-]{36}$/i.test(t.plan_id) && (t.eigen || apdAdmin())
+        ${mitte(t)}
+        <span class="wdl-z-pl tpl-g-pl"><span>${t.wert != null ? tplEur(t.wert) : '–'}<small class="wdl-z-slave" style="color:var(--sub-2)">Kontowert</small></span><span>${t.gehedgt ? '<span style="color:var(--sub);font-weight:500">gehedgt</span>' : t.einsatz != null ? tplEur(t.einsatz) : '–'}<small class="wdl-z-slave" style="color:var(--sub-2)">Einsatz</small></span></span>
+        <span class="wdl-z-zeit tpl-g-zeit">${t.status === 'laeuft' ? `<span class="wdl-z-ab">seit ${tplUhr(t.start, v)} · </span><span class="wdl-z-dauer">${heute ? tplAlter(Math.max(60000, (D.jetzt - t.start) * 60000)) : '—'}</span>`
+          : `<b class="tpl-g-start">${tplUhr(t.start, v)}</b> ${t.status === 'offen' && t.auto && !t.ohnePlan && /^[0-9a-f-]{36}$/i.test(t.plan_id) && (t.eigen || apdAdmin())
             ? `<button type="button" class="tpl-pill offen tpl-ok1" data-tpl-ok1="${escapeHtml(t.key)}" title="diesen Vorschlag bestätigen">unbestätigt <b>✓</b></button>`
             : `<span class="tpl-pill ${t.status}">${TPL_WORT[t.status]}</span>`}`}</span></div>`
     const block = (titel, liste) => liste.length ? `<div class="tpl-h">${titel} <b>${liste.length}</b></div><div class="tpl-liste">${liste.map(zeile).join('')}</div>` : ''
