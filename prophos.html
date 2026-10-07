@@ -9810,6 +9810,7 @@
         <div class="subtabs">
           <button class="subtab active adm-tab" data-admtab="overview">Übersicht</button>
           <button class="subtab adm-tab" data-admtab="auftrag">Auftrag</button>
+          <button class="subtab adm-tab" data-admtab="planer">Trade-Planer</button>
           <button class="subtab adm-tab" data-admtab="wd">Winning Days</button>
           <!-- Kapitel/Statistik ohne Emojis (Finn 30.09.2026: „die Emojis weg, die nerven") -->
           <button class="subtab adm-tab" data-admtab="kapitel">Kapitel</button>
@@ -10142,6 +10143,10 @@
              an Pascal je Firma und ID. Inhalt baut die Sektion AUFTRAG im Modul, Daten /admin/auftrag. -->
         <div id="adm-pane-auftrag" hidden>
           <div id="auf-root" style="color:var(--sub);font-size:13px;padding:22px 2px">Lade Auftrag…</div>
+        </div>
+        <!-- Trade-Planer (08.10.2026, Finn: „alle IDs zum Trade-Planen zufügen und einen Überblick über alle IDs"): auto_plan_regeln.user_ids -->
+        <div id="adm-pane-planer" hidden>
+          <div id="ap-ids-root" style="color:var(--sub);font-size:13px;padding:22px 2px">Lade IDs…</div>
         </div>
         <div id="adm-pane-kompass" hidden>
           <!-- Kopf (23.09.2026, Finn: „oben den ganzen Quatsch weglassen, kleiner, einfach sagen was der Bot gerade
@@ -17350,6 +17355,8 @@
         $('adm-pane-kapitel').hidden  = name !== 'kapitel'
         $('adm-pane-stat').hidden     = name !== 'stat'
         $('adm-pane-auftrag').hidden  = name !== 'auftrag'
+        $('adm-pane-planer').hidden   = name !== 'planer'
+        if(name === 'planer') window._apIdsTabOeffnen?.()   // Trade-Planer-IDs (08.10.2026)
         if(name === 'auftrag') window._aufTabOeffnen?.(); else window._aufTabSchliessen?.()   // Wochenauftrag (05.10.2026)
         if(name === 'kapitel' || name === 'stat') admKapitelOeffnen()   // lädt /admin/kapitel beim ersten Öffnen (24.09.2026), danach Cache
         if(name === 'kompass' && typeof window._kpTabOeffnen === 'function') window._kpTabOeffnen()
@@ -31281,6 +31288,9 @@
     const tag = l && l.tag ? String(l.tag) : ''
     let txt = '', cls = '', tip = ''
     if(!an){ txt = 'aus'; tip = 'Vom Auto-Planer ausgenommen — wird nie automatisch eingeplant. Haken setzen = wieder drin.' }
+    // Ziel erreicht (Finn 08.10.2026: „dann kann da auf keinen Fall mehr ein Trade gemacht werden, bis ich die nächste Phase einstelle"):
+    // Ziel-Wache hat das Konto markiert → Planer lässt es aus, Start-Takt/Echo/Orbit starten nicht — nicht den alten Lauf zeigen
+    else if(a.zielErreichtAt){ txt = 'Ziel ✓'; tip = 'Ziel erreicht — wird nicht mehr geplant und nicht gestartet, bis du die nächste Phase einstellst (dann rechnet die Ziel-Wache neu)' }
     else {
       const g = l && Array.isArray(l.geplant) ? l.geplant.find(x => String(x.konto_id) === id) : null
       const x = !g && l && Array.isArray(l.ausgelassen) ? l.ausgelassen.find(y => String(y.konto_id) === id) : null
@@ -40145,7 +40155,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1155'
+  const OS_TAB_BUILD = '2026-09-22.1156'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -58592,6 +58602,47 @@
   const aufKlasse = (n, soll) => n >= soll[0] ? 'auf-gut' : n > 0 ? 'auf-halb' : 'auf-null'
   const aufFarbe = (n, soll) => n >= soll[0] ? 'var(--good)' : n > 0 ? 'var(--warn)' : 'var(--danger)'
   const aufIstFunded = t => ['funded', 'funded_cfd', 'winning_days'].includes(String(t || '').toLowerCase())
+
+  /* ══ ADMIN „TRADE-PLANER" (08.10.2026, Finn: „unter Admin einen Tab, wo ich alle IDs zum Trade-Planen zufügen kann und noch
+   * mal einen Überblick über alle IDs sehe, die ich gleichzeitig beim Trade-Planer managen kann"). Eine Zeile je ID mit planbaren
+   * Konten (challenge/phase1/phase2): Haken = in auto_plan_regeln.user_ids (sofort gespeichert über /admin/auto-plan/ids), Konten,
+   * im letzten Lauf geplant/ausgelassen. Nur Anzeige + Haken, keine Bewertung. Nur Admin. ══ */
+  const _apIds = { rows: [], aktiv: null, tag: null, laeuft: false, fehler: '' }
+  async function apIdsLaden(){
+    if(_apIds.laeuft) return
+    _apIds.laeuft = true; _apIds.fehler = ''
+    try{ const d = await apdApi('GET', '/ids'); _apIds.rows = Array.isArray(d.ids) ? d.ids : []; _apIds.aktiv = !!d.aktiv; _apIds.tag = d.tag || null }
+    catch(e){ _apIds.fehler = (e && e.message) || String(e) }
+    finally{ _apIds.laeuft = false; apIdsRender() }
+  }
+  function apIdsRender(){
+    const root = document.getElementById('ap-ids-root'); if(!root) return
+    if(_apIds.fehler){ root.innerHTML = `<div style="color:var(--danger)">⚠ ${escapeHtml(_apIds.fehler)}</div>`; return }
+    const rows = _apIds.rows, drin = rows.filter(r => r.drin)
+    const kopf = `<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:10px;color:var(--ink)">
+        <b style="font-size:15px">${drin.length} von ${rows.length} IDs im Trade-Planer</b>
+        <span style="color:var(--sub);font-size:12.5px">Nachtlauf ${_apIds.aktiv ? 'an' : 'aus'}${_apIds.tag ? ' · letzter Lauf ' + escapeHtml(String(_apIds.tag)) : ''}</span>
+        <button type="button" class="btn btn-ghost" id="ap-ids-neu" style="margin-left:auto;padding:4px 10px;font-size:12px">↻</button></div>`
+    const zeilen = rows.map(r => `<tr>
+        <td><label class="acc-ap" title="${r.drin ? 'Im Trade-Planer — Haken weg = ab dem nächsten Lauf nicht mehr geplant' : 'Nicht im Trade-Planer — Haken setzen = ab dem nächsten Lauf (10-min-Takt / Nacht) dabei'}"><input type="checkbox" data-ap-id="${escapeHtml(String(r.user_id))}"${r.drin ? ' checked' : ''}><span class="acc-ap-s ${r.drin ? 'drin' : ''}">${r.drin ? 'drin' : '–'}</span></label></td>
+        <td><span style="display:inline-flex;align-items:center;gap:7px"><i style="width:9px;height:9px;border-radius:50%;background:${idFarbe(r.user_id)};flex:none"></i><b>${escapeHtml(String(r.name || ''))}</b></span></td>
+        <td class="zahl">${r.konten}</td>
+        <td class="zahl">${r.drin ? r.geplant : '<span style="color:var(--sub-2)">–</span>'}</td>
+        <td class="zahl">${r.drin ? r.ausgelassen : '<span style="color:var(--sub-2)">–</span>'}</td></tr>`).join('')
+    root.style.padding = '6px 2px'; root.style.color = ''
+    root.innerHTML = kopf + `<table class="wd-tab"><thead><tr><th>Planer</th><th>ID</th><th class="zahl" title="Konten vom Typ Challenge / Phase 1 / Phase 2, nicht archiviert">Konten planbar</th><th class="zahl">geplant (letzter Lauf)</th><th class="zahl">ausgelassen</th></tr></thead><tbody>${zeilen || '<tr><td colspan="5" style="color:var(--sub)">keine ID mit planbaren Konten</td></tr>'}</tbody></table>
+      <div style="font-size:11.5px;color:var(--sub);margin-top:8px">Welche Konten einer ID geplant werden, entscheiden weiter Typ, Firma (Kernwerte), Balance und der Haken je Konto unter Accounts.</div>`
+    root.querySelector('#ap-ids-neu')?.addEventListener('click', apIdsLaden)
+    root.querySelectorAll('[data-ap-id]').forEach(cb => cb.addEventListener('change', async () => {
+      cb.disabled = true
+      try{ await apdApi('POST', '/ids', { user_id: cb.dataset.apId, drin: cb.checked })
+        if(typeof atToast === 'function') atToast(cb.checked ? '🤖 ID im Trade-Planer — der nächste Lauf plant sie mit.' : '🤖 ID aus dem Trade-Planer genommen.', cb.checked ? 'start' : 'end') }
+      catch(e){ cb.checked = !cb.checked; if(typeof atToast === 'function') atToast('Nicht gespeichert: ' + ((e && e.message) || e), 'end') }
+      finally{ cb.disabled = false; apIdsLaden() }
+    }))
+  }
+  window._apIdsTabOeffnen = () => apIdsLaden()
+  /* ══ ENDE ADMIN „TRADE-PLANER" ══ */
 
   async function aufLaden(){
     if(_auf.laedt) return

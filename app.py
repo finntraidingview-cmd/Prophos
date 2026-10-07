@@ -16740,6 +16740,51 @@ def admin_auto_plan_ausgleichen():
         return jsonify({"ok": False, "admin": True, "msg": f"{type(e).__name__}: {e}"}), 502
 
 
+@app.route("/admin/auto-plan/ids", methods=["GET", "POST", "OPTIONS"])
+def admin_auto_plan_ids():
+    """ADMIN-REITER „TRADE-PLANER" (Finn 08.10.2026: „unter Admin einen Tab, wo ich alle IDs zum Trade-Planen zufügen kann und
+    einen Überblick über alle IDs sehe, die ich gleichzeitig managen kann"). Nur Admin (ADMIN_EMAILS).
+    GET → ids[]: jede ID mit planbaren Konten (ap_ids_laden) ∪ auto_plan_regeln.user_ids — {user_id, name, drin, konten,
+    geplant, ausgelassen} (Konten = challenge/phase1/phase2 nicht archiviert; geplant/ausgelassen aus dem letzten Lauf), aktiv, tag.
+    POST {user_id, drin} → ID in auto_plan_regeln.user_ids rein/raus (nur dieses Feld, Regeln/Zeiten unberührt)."""
+    if request.method == "OPTIONS":
+        return "", 200
+    mail, err = _admin_auth()
+    if err:
+        return err
+    reg = (sb_select("auto_plan_regeln", {"select": "aktiv,user_ids", "id": "eq.1"}) or [None])[0]
+    if not reg:
+        return jsonify({"ok": False, "msg": "auto_plan_regeln fehlt"}), 503
+    drin = [str(u) for u in (reg.get("user_ids") or [])]
+    if request.method == "POST":
+        body = request.get_json(silent=True) or {}
+        uid = str(body.get("user_id") or "").strip()
+        if not re.fullmatch(r"[0-9a-f-]{36}", uid):
+            return jsonify({"ok": False, "msg": "user_id fehlt"}), 400
+        soll = bool(body.get("drin"))
+        neu = [u for u in drin if u != uid] + ([uid] if soll else [])
+        sb_update("auto_plan_regeln", {"id": "eq.1"}, {"user_ids": neu})
+        drin = neu
+        print(f"[auto-plan] ID {uid[:8]} {'rein' if soll else 'raus'} (Admin {mail}) — {len(neu)} IDs im Planer", flush=True)
+    namen, aus = _ap_namen()
+    archiv = _ap_archiviert()
+    konten = {}
+    for r in _sb_all("accounts", {"select": "id,user_id", "account_type": "in.(" + ",".join(AP_TYPEN) + ")"}):
+        if str(r.get("id")) not in archiv:
+            konten[str(r.get("user_id"))] = konten.get(str(r.get("user_id")), 0) + 1
+    rows = sb_select("auto_plan_lauf", {"select": "tag,ergebnis", "order": "at.desc", "limit": "1"})
+    erg, tag = ((rows[0].get("ergebnis") or {}), rows[0].get("tag")) if rows else ({}, None)
+    gepl, ausg = {}, {}
+    for z in erg.get("geplant") or []:
+        gepl[str(z.get("user_id"))] = gepl.get(str(z.get("user_id")), 0) + 1
+    for z in erg.get("ausgelassen") or []:
+        ausg[str(z.get("user_id"))] = ausg.get(str(z.get("user_id")), 0) + 1
+    alle = sorted(set(ap_ids_laden(aus)) | set(drin), key=lambda u: namen.get(u, u).lower())
+    ids = [{"user_id": u, "name": namen.get(u, u[:8]), "drin": u in drin, "konten": konten.get(u, 0),
+            "geplant": gepl.get(u, 0), "ausgelassen": ausg.get(u, 0)} for u in alle]
+    return jsonify({"ok": True, "ids": ids, "aktiv": bool(reg.get("aktiv")), "tag": tag})
+
+
 @app.route("/admin/auto-plan/plan", methods=["POST", "OPTIONS"])
 def admin_auto_plan_eingriff():
     """POST {plan_id, aktion: 'richtung_tauschen'|'start', start?, start_min?} → manueller Eingriff mit denselben harten Regeln wie der Bot
