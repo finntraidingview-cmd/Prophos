@@ -3305,11 +3305,16 @@
   /* Balken-Skala Start → Ziel (08.10.2026): Spur grau, Ist satt grün, Potenzial hell, SL dünn rot, Verlust rot links, Marker in ID-Farbe */
   #dashboard-view .pz-bahn.pz-bahn2{position:relative;display:block;height:6px;overflow:visible;background:var(--border)}
   #dashboard-view .pz-bahn2 > i{position:absolute;top:0;bottom:0;left:0;border-radius:3px}
+  /* Skala Liq → Ziel (08.10.2026): links vom Start bleibt die Spur grau (Drawdown-Puffer), Balance → Ziel hell „offen", Start feiner
+     Strich, Potenzial des Trades pulsiert nur in der Deckkraft (rsqCardPulse), SL dünn rot über dem Grün */
+  #dashboard-view .pz-bahn.pz-bahn2 > i.pz-bahn-offen:first-child{background:rgba(21,128,61,.22);z-index:1;border-radius:0 3px 3px 0}   /* vor der :first-child-Regel der alten Bahn */
   #dashboard-view .pz-bahn2 > .pz-bahn-ist{background:#15803d;z-index:2}
-  #dashboard-view .pz-bahn2 > .pz-bahn-tp{background:rgba(21,128,61,.38);z-index:1;border-radius:0 3px 3px 0}
-  #dashboard-view .pz-bahn2 > .pz-bahn-sl{background:rgba(185,28,28,.35);z-index:1;border-radius:3px 0 0 3px}
+  #dashboard-view .pz-bahn2 > .pz-bahn-tp{background:rgba(21,128,61,.5);z-index:3;border-radius:0 3px 3px 0;animation:rsqCardPulse 1.8s ease-in-out infinite}
+  #dashboard-view .pz-bahn2 > .pz-bahn-sl{top:2px;bottom:2px;height:auto;background:rgba(185,28,28,.6);z-index:3;border-radius:2px 0 0 2px}
   #dashboard-view .pz-bahn2 > .pz-bahn-verlust{background:#b91c1c;z-index:2}
-  #dashboard-view .pz-bahn2 > .pz-bahn-pkt{position:absolute;top:50%;width:10px;height:10px;border-radius:50%;transform:translate(-50%,-50%);box-shadow:0 0 0 2px var(--surface);z-index:3}
+  #dashboard-view .pz-bahn2 > .pz-bahn-start{top:-2px;bottom:-2px;height:auto;width:2px;margin-left:-1px;border-radius:1px;background:var(--ink-2);z-index:3}
+  #dashboard-view .pz-bahn2 > .pz-bahn-pkt{position:absolute;top:50%;width:10px;height:10px;border-radius:50%;transform:translate(-50%,-50%);box-shadow:0 0 0 2px var(--surface);z-index:4}
+  @media (prefers-reduced-motion:reduce){#dashboard-view .pz-bahn2 > .pz-bahn-tp{animation:none}}
   /* ID-Hierarchie (08.10.2026): Karte je ID mit Rand in ID-Farbe, großer sticky Kopf, Firmen-Kopf darunter 13 px grau */
   #dashboard-view .ap-id-karte{border-left:3px solid var(--id,var(--border));padding:0 0 4px 14px;margin:0 0 18px}
   #dashboard-view .ap-id-karte > .ap-adm-grp{position:sticky;top:0;z-index:4;background:var(--surface);padding:10px 0 8px;margin-top:0;border-top:0}
@@ -36800,6 +36805,22 @@
    * Trade-Planer (GEPLANT-WIE-TRADES-REITER, Finn 07.10.2026: „exakt die Darstellung vom Reiter Geplant") nutzt dieselbe Zeile für alle
    * IDs und gibt dafür optional mit: o.wer (ID-Zelle vorn), o.zeit (Start-Zelle ohne data-plan-*-Knöpfe), o.bal { val, tip } (Balance
    * fremder IDs aus geplant[] — ohne Live-Marke, das Alter kennt nur der eigene Browser), o.notiz (Art/Ziel aus der Lauf-Zeile). */
+  /* Liquidations-Level (Balance in $) für die Skala des Balance-Balkens (08.10.2026). Quelle ist der Boden aus ap_konto_rechnen (Kernwerte
+   * der Firma, nachziehend schon aufs aktuelle Level gezogen), den das Backend als „boden" an delta.geplant[] und /admin/auto-plan/ids
+   * offen[] hängt: o.boden (Aufrufer: Trade-Planer aus der Delta-Zeile, Admin „Zu bestätigen" aus offen[] — _apIds ist hier nicht
+   * sichtbar) → delta.geplant → letzter Lauf (je plan_id). Rückfall eigenes Konto: Größe − max_drawdown, nur
+   * wenn der Wert 1–15 % der Größe ist (app.py ap_kw_param: am Konto stehen Einzelfehler wie Apex 400, FTMO 100000). Sonst null →
+   * die Zeile bleibt bei Start → Ziel. Die Daten-Halter stehen weiter unten im Modul (const) — deshalb jeder Zugriff im try. */
+  function planZeileBoden(p, konto, o, groesse){
+    const ok = v => (v != null && v !== '' && isFinite(Number(v)) && Number(v) > 0) ? Number(v) : null
+    if(ok(o && o.boden) != null) return ok(o.boden)
+    const pid = String(p && p.id || '')
+    const ausListe = f => { try{ const z = (f() || []).find(x => x && String(x.plan_id) === pid); return z ? ok(z.boden) : null }catch(_){ return null } }
+    const b = ausListe(() => _apd.d && _apd.d.geplant) ?? ausListe(() => _ap.letzter && _ap.letzter.geplant)
+    if(b != null) return b
+    const dd = ok(konto && konto.maxDrawdown)
+    return dd != null && groesse > 0 && dd >= groesse * 0.01 && dd <= groesse * 0.15 ? groesse - dd : null
+  }
   function planZeileHtml(p, konto, o){
     const de = v => Math.round(Number(v)).toLocaleString('de-DE')
     const bal = o.bal || planKontoBalance(konto)
@@ -36858,21 +36879,34 @@
       // Ist-Anteil = (Balance − Start) ÷ (Ziel − Start) satt grün; Potenzial = heller Abschnitt von Balance bis Balance + TP-$ dieses Trades
       // (laufend ab Balance + Live-P&L), am Ziel gedeckelt; Marker (Punkt in ID-Farbe) an der Ist-Position; Balance unter Start = Ist 0 %
       // mit rotem Mini-Anteil nach links; SL dünn rot von Balance − SL bis Balance. Tooltip „Start · jetzt (x %) · nach TP · Ziel".
+      // SKALA LIQ → ZIEL (Finn 08.10.2026, Screenshot frischer Konten „150.000 → 159.000", Punkt am linken Rand, Balken ganz hellgrün:
+      // „100k-Account, frischer Kauf … der Punkt ist bei 100k, nach links bis 90k runter, das ist maximal Drawdown, nach rechts bis
+      // 108.000"): linker Rand = Liquidations-Level (planZeileBoden), Start als feiner Strich, Start → Balance satt grün (darunter rot),
+      // Balance → Ziel hell „offen", Potenzial dieses Trades pulsiert (nur Deckkraft). Ohne Boden bleibt die Skala Start → Ziel von oben.
       const mitBahn = ziel > 0 && groesse > 0 && ziel > groesse && ziel <= groesse * 1.3
-      const sp = mitBahn ? (ziel - groesse) : 1, pct = v => Math.max(0, Math.min(100, (v - groesse) / sp * 100))
+      const bodenR = mitBahn ? planZeileBoden(p, konto, o, groesse) : null
+      const boden = bodenR != null && bodenR <= groesse ? bodenR : null      // Boden über dem Start ergibt keine Skala → alte Skala
+      const lo = boden != null ? boden : groesse
+      const sp = mitBahn ? (ziel - lo) : 1, pct = v => Math.max(0, Math.min(100, (v - lo) / sp * 100))
       const tpUsd = Number(p.masterTp) > 0 ? Number(p.masterTp) : 0, slUsd = Number(p.masterSl) > 0 ? Number(p.masterSl) : 0
-      const pIst = mitBahn ? pct(istV) : 0, pTp = mitBahn && tpUsd ? pct(istV + tpUsd) : pIst
-      const verlust = mitBahn && istV < groesse ? Math.min(12, (groesse - istV) / sp * 100) : 0     // rot links, höchstens 12 % Breite
+      const pIst = mitBahn ? pct(istV) : 0, pTp = mitBahn && tpUsd ? pct(Math.min(ziel, istV + tpUsd)) : pIst
+      const pStart = mitBahn ? pct(groesse) : 0
+      // im Minus: mit Boden Balance → Start rot; ohne Boden (Start = linker Rand) wie bisher ein roter Mini-Anteil, höchstens 12 %
+      const verlL = boden != null ? pIst : 0
+      const verlB = !mitBahn || istV >= groesse ? 0 : boden != null ? pStart - pIst : Math.min(12, (groesse - istV) / sp * 100)
       const pSl = mitBahn && slUsd ? pct(istV - slUsd) : pIst
-      const prozent = mitBahn ? Math.round((istV - groesse) / sp * 100) : null
-      const bahnTitel = `Start ${de(groesse)} · jetzt ${de(istV)}${prozent != null ? ' (' + prozent + ' %)' : ''}${plL != null ? ' = Balance ' + de(bal.val) + ' ' + (plL >= 0 ? '+' : '−') + ' P&L ' + de(Math.abs(plL)) : ''}${tpUsd ? ' · nach TP ' + de(istV + tpUsd) : ''}${slUsd ? ' · nach SL ' + de(istV - slUsd) : ''} · Ziel ${de(ziel)}`
+      const prozent = mitBahn ? Math.round((istV - groesse) / (ziel - groesse) * 100) : null
+      const bahnTitel = `${boden != null ? 'Liq ' + de(boden) + ' · ' : ''}Start ${de(groesse)} · jetzt ${de(istV)}${prozent != null ? ' (' + prozent + ' %)' : ''}${plL != null ? ' = Balance ' + de(bal.val) + ' ' + (plL >= 0 ? '+' : '−') + ' P&L ' + de(Math.abs(plL)) : ''}${tpUsd ? ' · nach TP ' + de(istV + tpUsd) : ''}${slUsd ? ' · nach SL ' + de(istV - slUsd) : ''} · Ziel ${de(ziel)}`
       const idFarb = o.uid ? idFarbe(String(o.uid)) : 'var(--ink)'
+      const w = (l, r) => `left:${l.toFixed(1)}%;width:${Math.max(0, r - l).toFixed(1)}%`
       balHtml = `<span class="pz-bal-t">${typChipHandy}${liveZ}${plL != null ? `<i class="pz-live-pl ${plL >= 0 ? 'plus' : 'minus'}" title="läuft · Live-P&L ${plL >= 0 ? '+' : '−'}${de(Math.abs(plL))} $">●</i>` : ''}${de(istV)}${ziel ? `<em>→</em>${de(ziel)}<span class="pz-rest"> · Rest ${de(Math.max(0, ziel - istV))}</span>` : ' $'}</span>`
-        + (mitBahn ? `<i class="pz-bahn pz-bahn2" title="${escapeHtml(bahnTitel)}">`
-          + (verlust > 0 ? `<i class="pz-bahn-verlust" style="width:${verlust.toFixed(1)}%"></i>` : '')
-          + (pSl < pIst ? `<i class="pz-bahn-sl" style="left:${pSl.toFixed(1)}%;width:${(pIst - pSl).toFixed(1)}%"></i>` : '')
-          + `<i class="pz-bahn-ist" style="width:${pIst.toFixed(1)}%"></i>`
-          + (pTp > pIst ? `<i class="pz-bahn-tp" style="left:${pIst.toFixed(1)}%;width:${(pTp - pIst).toFixed(1)}%"></i>` : '')
+        + (mitBahn ? `<i class="pz-bahn pz-bahn2${boden != null ? ' mit-liq' : ''}" title="${escapeHtml(bahnTitel)}">`
+          + `<i class="pz-bahn-offen" style="${w(Math.max(pIst, pStart), 100)}"></i>`
+          + (verlB > 0 ? `<i class="pz-bahn-verlust" style="${w(verlL, verlL + verlB)}"></i>` : '')
+          + (pIst > pStart ? `<i class="pz-bahn-ist" style="${w(pStart, pIst)}"></i>` : '')
+          + (pSl < pIst ? `<i class="pz-bahn-sl" style="${w(pSl, pIst)}"></i>` : '')
+          + (pTp > pIst ? `<i class="pz-bahn-tp" style="${w(pIst, pTp)}"></i>` : '')
+          + (boden != null ? `<i class="pz-bahn-start" style="left:${pStart.toFixed(1)}%"></i>` : '')
           + `<b class="pz-bahn-pkt" style="left:${pIst.toFixed(1)}%;background:${idFarb}"></b></i>` : '')
     } else if(notiz && (notiz.ziel || notiz.rest)){
       // Quelle für die Balance fehlt (Nachtrag 08.10.2026): nicht stumm „–", sondern zeigen, was da ist
@@ -40847,7 +40881,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1224'
+  const OS_TAB_BUILD = '2026-09-22.1225'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -46626,7 +46660,7 @@
       const akt = `<button type="button" class="btn btn-ghost icon-btn tc2-ab" data-tpl-zedit="${k}"${t.ohnePlan ? ' disabled' : ''} title="${t.eigen ? 'Bearbeiten' : 'Richtung / Start ändern (Detail)'}">${PLAN_SVG_EDIT}</button>`
         + `<button type="button" class="btn btn-ghost icon-btn tc2-ab" data-tpl-zdel="${k}"${zu || dis} title="${t.eigen ? 'Löschen (5 s Rückgängig)' : 'Vorschlag löschen'}">${PLAN_SVG_DEL}</button>`
         + `<span class="pz-zustand"${darf ? '' : ` title="${escapeHtml(sperre)}"`}>${zustand}</span>`
-      return planZeileHtml(p, konto, { name: p.masterName, ext: konto && konto.externalId ? konto.externalId : (t.ende4 || ''), extTitle: '', chips: '', akt, zeit, bal, notiz, uid: t.user_id })
+      return planZeileHtml(p, konto, { name: p.masterName, ext: konto && konto.externalId ? konto.externalId : (t.ende4 || ''), extTitle: '', chips: '', akt, zeit, bal, notiz, uid: t.user_id, boden: t.boden })
     }
     // GEPLANT = FIRMEN-BLÖCKE JE ID (Korrektur 08.10.2026, Finn: „ich will NICHT das Design der Admin-Tabelle, sondern das wie bei Trade-Planer →
     // Geplant" — die Firmen-Block-Ansicht vor .1194, „sehr clean"): je ID eine Gruppe (Farbpunkt · Name · n geplant · n offen · „✓ alle n"),
@@ -59955,7 +59989,7 @@
       // Balance nicht live (Terminal 4 liefert balance_live auf offen[]; eigen über planBalanceLive): Haken aus, Hinweis im Tooltip
       const nichtLive = z.balance_live === false || (konto && kontoBal && typeof planBalanceLive === 'function' && planBalanceLive(konto.id, kontoBal.at)?.live === false)
       const akt = `<span class="pz-zustand"><button type="button" class="btn btn-ghost tc2-btn pz-ok" data-ap-ok="${escapeHtml(String(z.plan_id))}"${nichtLive ? ' disabled' : ''} title="${nichtLive ? 'Balance nicht live — erst „↻ Balance lesen" (Braucht dich), dann bestätigen' : 'Bestätigen — startet zur Startzeit'}">Bestätigen</button></span>`
-      return planZeileHtml(p, konto, { name: p.masterName, ext: (konto && konto.externalId) || z.ende4 || '', extTitle: '', chips: '', akt, zeit, bal, notiz, uid: z.user_id })
+      return planZeileHtml(p, konto, { name: p.masterName, ext: (konto && konto.externalId) || z.ende4 || '', extTitle: '', chips: '', akt, zeit, bal, notiz, uid: z.user_id, boden: z.boden ?? t.boden })
     }
     for(const p of plaene){ const { z } = jeZ.get(String(p.id)), k = String(z.user_id || '')
       if(!je.has(k)) je.set(k, { uid: k, name: z.user || k.slice(0, 8), plaene: [], live: 0 }); je.get(k).plaene.push(p); if(z.balance_live !== false) je.get(k).live++ }
