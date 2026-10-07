@@ -40397,7 +40397,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1173'
+  const OS_TAB_BUILD = '2026-09-22.1174'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -44717,7 +44717,7 @@
     const gruende = new Map()
     for(const x of e.ausgelassen){ const k = apGrundKurz(x.grund); gruende.set(k, (gruende.get(k) || 0) + 1) }
     const lauf = !l.tag || (!e.geplant.length && !e.ausgelassen.length) ? ''
-      : `${l.trocken ? 'Probelauf' : 'Letzter Lauf'}${l.at ? ' ' + new Date(l.at).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}: ${e.geplant.length} geplant · ${e.ausgelassen.length} ausgelassen`
+      : `${l.trocken ? 'Probelauf' : l.quelle === 'nachplanen' ? 'Nachplanen' : 'Letzter Lauf'}${l.at ? ' ' + new Date(l.at).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}: ${e.geplant.length} geplant · ${e.ausgelassen.length} ausgelassen`
         + (gruende.size ? ` (${[...gruende].sort((a, b) => b[1] - a[1]).map(([k, n]) => `${n} ${escapeHtml(k)}`).join(' · ')})` : '')
     el.style.display = ''
     el.innerHTML = `<div style="display:flex;align-items:center;gap:6px 10px;flex-wrap:wrap">

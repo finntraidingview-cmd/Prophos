@@ -14131,6 +14131,7 @@ import random
 from datetime import timedelta
 
 AP_TYPEN = ("challenge", "phase1", "phase2")
+AP_NACHPLAN_VORLAUF_MIN = 15          # NACHPLANEN (08.10.2026): Startzeiten frühestens jetzt + 15 min
 AP_TZ_LAUF = "Asia/Dubai"            # Hand-Lauf ohne tag: Dubai-Datum. Nachtlauf seit 07.10.2026 nach zeiten.nachtlauf (AP_NACHT_STANDARD)
 AP_REST_MIN = 100                    # weniger Rest bis Ziel → kein Auto-Trade, Finn prüft selbst
 AP_GROESSE_TOLERANZ = 0.15           # Balance weiter als 15 % von jeder Regel-Größe weg → „stimmt was nicht"
@@ -15222,7 +15223,8 @@ def ap_richtung_fest_plan(p, tag, tz):
     return True
 
 
-def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, sicht_uid=None, fingerabdruck=None, ids=None):
+def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, sicht_uid=None, fingerabdruck=None, ids=None,
+              nur_konten=None):
     """Plant den Tag `tag` (Dubai-Datum, Standard heute) für alle IDs aus auto_plan_regeln. trocken = nur rechnen.
     quelle 'nacht' claimt den Tag (ein Lauf je Tag). Hand-Lauf am selben Tag: unbestätigte Auto-Pläne werden ersetzt,
     Startzeiten frühestens jetzt + 10 min. → Ergebnis-Dict (auch in auto_plan_lauf).
@@ -15234,7 +15236,11 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     06.10.2026 (Delta-Vertrag + Korrektur Finn): Richtung je Tranche nach delta_eur_pkt (ap_richtungen_delta), je PC nie zwei Starts zugleich.
     sicht_uid: Antwort nur mit den Zeilen dieser ID (Nicht-Admin); geplant wird trotzdem über alle IDs.
     ids="alle" (PROBELAUF-ALLE-IDS, 07.10.2026): nur mit trocken — rechnet über alle IDs mit Konten in AP_TYPEN statt
-    auto_plan_regeln.user_ids (ap_ids_laden), legt nie an, schreibt kein Protokoll; Antwort zusätzlich ids_benutzt[]."""
+    auto_plan_regeln.user_ids (ap_ids_laden), legt nie an, schreibt kein Protokoll; Antwort zusätzlich ids_benutzt[].
+    nur_konten (NACHPLANEN, 08.10.2026, Finn setzte um 01:20 fünf IDs in den Planer — sie bekamen bis zum nächsten Nachtlauf
+    nichts): nur GENAU diese Konto-IDs werden gerechnet und angelegt; bestehende Vorschläge/bestätigte Pläne zählen als
+    vorhanden und werden NIE gelöscht oder ersetzt (anders als Hand-/Nachtlauf), Startzeiten frühestens jetzt + 15 min,
+    Protokoll in auto_plan_lauf nur, wenn etwas geplant wurde (kein Log-Spam alle 10 min). Delta/Richtung: dieselbe Strecke."""
     reg = (sb_select("auto_plan_regeln", {"select": "*", "id": "eq.1"}) or [None])[0]
     if not reg:
         return {"ok": False, "msg": "auto_plan_regeln fehlt (SQL 2026-10-05_auto_planer.sql einspielen)"}
@@ -15261,13 +15267,16 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
             raise
     tz = _ap_tz(zeiten.get("tz") or "Europe/Berlin")
     mitternacht = datetime(tag_d.year, tag_d.month, tag_d.day, tzinfo=tz)
-    frueh = max(0, int(((jetzt + timedelta(minutes=10)) - mitternacht).total_seconds() // 60) + 1)
+    nachplanen = bool(nur_konten)
+    nur_set = {str(x) for x in (nur_konten or ())}
+    frueh = max(0, int(((jetzt + timedelta(minutes=AP_NACHPLAN_VORLAUF_MIN if nachplanen else 10)) - mitternacht).total_seconds() // 60) + 1)
     in_uids = "in.(" + ",".join(uids) + ")"
 
     # Unbestätigte, nie gestartete Auto-Vorschläge (Finn: „unbestätigte verfallen") ersetzt dieser Lauf — sie zählen schon beim
-    # Rechnen nicht (sonst stünden ihre Konten im Probelauf als „hat schon einen Plan"); gelöscht wird erst vor dem Anlegen
+    # Rechnen nicht (sonst stünden ihre Konten im Probelauf als „hat schon einen Plan"); gelöscht wird erst vor dem Anlegen.
+    # NACHPLANEN (nur_konten): nichts wird ersetzt — jeder bestehende Vorschlag zählt als Plan und bleibt stehen.
     def _vorschlag(p):
-        return p.get("auto_plan") is True and p.get("status") == "planned" and not p.get("auto_bestaetigt_at") \
+        return (not nachplanen) and p.get("auto_plan") is True and p.get("status") == "planned" and not p.get("auto_bestaetigt_at") \
             and not p.get("start_um_gestartet_at")
     konten = _ap_konten_laden({"user_id": in_uids, "order": "id.asc",
                                   "account_type": "in.(" + ",".join(AP_TYPEN) + ")"})
@@ -15290,6 +15299,8 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
         aid, wer = str(a["id"]), namen.get(str(a["user_id"]), str(a["user_id"])[:8])
         zeile = {"user": wer, "user_id": str(a["user_id"]), "konto_id": aid, "konto": a.get("name"), "firma": a.get("firm"),
                  "typ": a.get("account_type")}
+        if nachplanen and aid not in nur_set:
+            continue                                   # NACHPLANEN: nur die neuen Konten, alle anderen bleiben unberührt (keine Meldung)
         if aid in archiv:
             continue                                   # archiviert = weg, keine Meldung
         if _ap_norm(a.get("firm")) in AP_STILL_FIRMEN:
@@ -15473,7 +15484,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
         # Stand hat sich seit dem Probelauf geändert (Balance, Plan beendet, Uhrzeit) — nichts löschen, nichts anlegen
         return {"ok": False, "tag": tag, "seed": seed, "fingerabdruck": fp, "abweichung": True,
                 "msg": "Stand hat sich seit dem Probelauf geändert — bitte Probelauf neu ansehen, nichts angelegt"}
-    if not trocken:
+    if not trocken and not nachplanen:             # NACHPLANEN löscht nie (bestehende Vorschläge/Pläne bleiben)
         _sb_anfrage("DELETE", f"{SUPABASE_URL}/rest/v1/trade_plans", headers=_sb_headers(),
                     params={"user_id": in_uids, "auto_plan": "eq.true", "status": "eq.planned",
                             "auto_bestaetigt_at": "is.null", "start_um_gestartet_at": "is.null"}).raise_for_status()
@@ -15486,13 +15497,15 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
            "band_pct": param["zielband_pct"], "auto_start": param["auto_start"], "einsatz": einsatz_info}
     if alle_ids:
         erg["ids_benutzt"] = ap_ids_benutzt(geplant, ausgelassen, namen)     # welche IDs der Lauf über alle IDs wirklich enthält
+    if nachplanen:
+        erg["nur_konten"] = sorted(nur_set)
     if trocken:
         try:
             erg.update(_ap_probelauf(tr_info, plan_roh, minuten, zinfo, richtung, zeiten, namen, stand, dinfo))
         except Exception as e:      # die Ansicht baut notfalls aus geplant[] — der Probelauf selbst scheitert nicht daran
             print(f"[auto-plan] ⚠️ Probelauf-Zusatz: {type(e).__name__}: {e}", flush=True)
             erg["probelauf_fehler"] = f"{type(e).__name__}: {e}"
-    if not trocken:
+    if not trocken and not (nachplanen and not geplant):      # NACHPLANEN ohne Treffer: kein Lauf-Eintrag, kein Log
         try:
             if quelle == "nacht":
                 sb_update("auto_plan_lauf", {"tag": f"eq.{tag}", "quelle": "eq.nacht"}, {"ergebnis": erg})
@@ -15500,7 +15513,8 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
                 sb_insert("auto_plan_lauf", {"tag": tag, "quelle": quelle, "ergebnis": erg})
         except Exception as e:
             print(f"[auto-plan] ⚠️ Protokoll: {type(e).__name__}: {e}", flush=True)
-    print(f"[auto-plan] {tag} {quelle}: {len(geplant)} geplant, {len(ausgelassen)} ausgelassen", flush=True)
+    if not (nachplanen and not geplant):
+        print(f"[auto-plan] {tag} {quelle}: {len(geplant)} geplant, {len(ausgelassen)} ausgelassen", flush=True)
     return ap_sicht(erg, sicht_uid) if sicht_uid else erg        # Protokoll oben vollständig, Antwort nur die eigene ID
 
 
@@ -17112,6 +17126,104 @@ def ap_nacht_tick(jetzt, zustand):
     return erg
 
 
+# ══ NACHPLANEN (08.10.2026, Master/Finn; Zielbild Trade-Planer 07.10.2026: „Nachplanen neuer Konten alle 10 min bis start_bis").
+# Anlass: Finn setzte am 08.10.2026 um 01:20 Dubai fünf IDs in auto_plan_regeln.user_ids — der Nachtlauf (01:00 Dubai) war durch,
+# bis zum nächsten hätte niemand Vorschläge bekommen; einziger Weg war „Jetzt planen" von Hand (ersetzt dabei alle Vorschläge).
+# Jetzt: alle 10 min (ap_loop) zwischen 00:00 dt und start_bis − 15 min prüft Railway, welche Konten der Planer-IDs HEUTE noch
+# keinen Plan haben, und stößt für GENAU diese ap_planen(nur_konten=…) an — dieselbe Rechenstrecke (Tranchen, Fenster, Delta,
+# Richtungsschutz), bestehende Pläne bleiben, Protokoll nur bei Treffer. Rein rechnende Teile (Fenster, Kandidaten) sind testbar.
+AP_NACHPLAN_TAKT_S = 600
+# Gründe des letzten Laufs, die sich innerhalb des Tages nicht von selbst ändern — solche Konten werden nicht alle 10 min neu gerechnet
+AP_NACHPLAN_FEST_GRUENDE = ("keine Regel für diese Firma", "vom Auto-Planer ausgenommen", "kein freies Zeitfenster mehr",
+                            "letzter Trade ", "Kontogröße", "Ziel erreicht", "bis zum Ziel")
+
+
+def ap_nachplan_fenster(d, zeiten):
+    """REIN RECHNEND: darf jetzt nachgeplant werden? d = jetzt in deutscher Zeit. Mo–Fr, 00:00 ≤ jetzt < start_bis − Vorlauf."""
+    if d.weekday() >= 5:
+        return False
+    m = d.hour * 60 + d.minute
+    return 0 <= m < ap_start_bis(zeiten) - AP_NACHPLAN_VORLAUF_MIN
+
+
+def _ap_plan_am_tag(p, tag, tz):
+    """REIN RECHNEND: belegt dieser Plan das Konto für den Tag? Laufend/Überprüfen immer; geplant, wenn planned_for oder start_um
+    (in tz) auf den Tag fällt — ein Plan ohne beides blockt vorsichtshalber auch."""
+    st = str(p.get("status") or "")
+    if st in ("open", "review"):
+        return True
+    if st != "planned":
+        return False
+    if p.get("planned_for"):
+        return str(p.get("planned_for")) == tag
+    su = p.get("start_um")
+    if not su:
+        return True
+    try:
+        return datetime.fromisoformat(str(su).replace("Z", "+00:00")).astimezone(tz).strftime("%Y-%m-%d") == tag
+    except (TypeError, ValueError):
+        return True
+
+
+def ap_nachplan_kandidaten(konten, plaene, tag, tz, letzter_erg=None, archiv=None):
+    """REIN RECHNEND (testbar): Konto-IDs, die heute nachgeplant werden sollen — Typ in AP_TYPEN, nicht archiviert, Haken nicht aus,
+    ohne Plan am Tag (planned/open/review, _ap_plan_am_tag) und im letzten Lauf des Tages nicht aus einem festen Grund ausgelassen
+    (AP_NACHPLAN_FEST_GRUENDE). Reihenfolge = Eingabe."""
+    archiv = archiv or set()
+    belegt = {str(p.get("master_account_id")) for p in (plaene or []) if _ap_plan_am_tag(p, tag, tz)}
+    fest = set()
+    if isinstance(letzter_erg, dict) and str(letzter_erg.get("tag") or "") == tag:
+        for z in letzter_erg.get("ausgelassen") or []:
+            g = str((z or {}).get("grund") or "")
+            if any(g.startswith(f) or f in g for f in AP_NACHPLAN_FEST_GRUENDE):
+                fest.add(str(z.get("konto_id")))
+    out = []
+    for a in konten or []:
+        aid = str(a.get("id"))
+        if a.get("account_type") not in AP_TYPEN or aid in archiv or a.get("auto_planer") is False:
+            continue
+        if aid in belegt or aid in fest:
+            continue
+        out.append(aid)
+    return out
+
+
+def ap_nachplan_tick(jetzt, zustand):
+    """Ein Takt (aus ap_loop, jede Minute): alle AP_NACHPLAN_TAKT_S, nur wenn auto_plan_regeln.aktiv und im Fenster. Kandidaten ohne
+    Plan heute → ap_planen(nur_konten) für heute; Ergebnis im Speicher (zustand['nachplanen']) und nur bei Treffer im Protokoll/Log."""
+    if time.time() - (zustand.get("nachplan_at") or 0) < AP_NACHPLAN_TAKT_S:
+        return None
+    zustand["nachplan_at"] = time.time()
+    reg = (sb_select("auto_plan_regeln", {"select": "aktiv,user_ids,zeiten", "id": "eq.1"}) or [{}])[0]
+    uids = [str(u) for u in (reg.get("user_ids") or [])]
+    tz = _ap_tz(AP_TZ_TAG)
+    d = jetzt.astimezone(tz)
+    tag = d.strftime("%Y-%m-%d")
+    info = {"at": jetzt.isoformat(), "tag": tag, "aktiv": bool(reg.get("aktiv")), "fenster": ap_nachplan_fenster(d, reg.get("zeiten")),
+            "kandidaten": 0, "geplant": 0}
+    zustand["nachplanen"] = info
+    if not reg.get("aktiv") or not uids or not info["fenster"]:
+        return None
+    in_uids = "in.(" + ",".join(uids) + ")"
+    konten = _ap_konten_laden({"user_id": in_uids, "order": "id.asc", "account_type": "in.(" + ",".join(AP_TYPEN) + ")"})
+    plaene = _sb_all("trade_plans", {"select": "id,master_account_id,status,start_um,planned_for", "user_id": in_uids,
+                                     "status": "in.(planned,open,review)",
+                                     "created_at": "gte." + (jetzt - timedelta(days=30)).isoformat()})
+    rows = sb_select("auto_plan_lauf", {"select": "tag,quelle,ergebnis", "tag": f"eq.{tag}", "order": "at.desc", "limit": "1"})
+    letzter = (rows[0].get("ergebnis") if rows else None) or {}
+    kand = ap_nachplan_kandidaten(konten, plaene, tag, tz, letzter, _ap_archiviert())
+    info["kandidaten"] = len(kand)
+    if not kand:
+        return None
+    erg = ap_planen(tag, quelle="nachplanen", nur_konten=kand)
+    info["geplant"] = len(erg.get("geplant") or [])
+    info["ausgelassen"] = len(erg.get("ausgelassen") or [])
+    if info["geplant"]:
+        print(f"[auto-plan] Nachplanen {tag} {d.strftime('%H:%M')} dt: {info['geplant']} geplant für {len(kand)} Konten ohne Plan "
+              f"({info['ausgelassen']} ausgelassen)", flush=True)
+    return erg
+
+
 # ══ ZIEL-WACHE (07.10.2026, Finn: „dass ich eine Benachrichtigung kriege, wenn irgendwo ein Account sein Ziel erreicht hat, dass der
 # irgendwie dann getaggt wird"). Anlass: FundedNext Phase 2 …4830 stand bei 105.068 → Ziel 105.000 und bekam trotzdem einen Trade.
 # Alle 5 min (im ap_loop, nur Railway): jedes Challenge/Phase-1/Phase-2-Konto aller IDs mit Firmen-Regel — Ziel wie der Planer
@@ -17226,6 +17338,11 @@ def ap_loop():
         except Exception as e:
             _ap_info["last_error"] = f"{type(e).__name__}: {e}"
             print(f"[auto-plan] ⚠️ {e}", flush=True)
+        try:
+            ap_nachplan_tick(datetime.now(timezone.utc), _ap_info)      # NACHPLANEN neuer Konten alle 10 min (08.10.2026)
+        except Exception as e:
+            _ap_info["nachplan_fehler"] = f"{type(e).__name__}: {e}"
+            print(f"[auto-plan] ⚠️ Nachplanen: {e}", flush=True)
         try:
             _ap_bot_tick(datetime.now(_ap_tz(AP_TZ_TAG)))
         except Exception as e:
