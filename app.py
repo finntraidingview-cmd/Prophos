@@ -11544,6 +11544,57 @@ def _wd_hedge_buchung(plan_id, uid, konto, person, slave_pl, datum):
             "auto_generated": True}
 
 
+# ══ PC-TAB-LEBENSZEICHEN JE ID (08.10.2026, Master/Finn; Anlass: ein Trade stand 20 h auf „wird gelesen", weil der Prophos-Tab am PC
+# der ID gar nicht lief — niemand sah es). mt5_live wird vom PC-TAB geschrieben (prophos.html Flotten-Push, alle 12 s Lebenszeichen,
+# status.tab_build/bot_version/copier_version/user_id) — updated_at ist also der Herzschlag des Tabs, nicht des Copiers. Nur lesen.
+PC_STAND_LEBT_S = 180
+
+
+def pc_stand_zusammenfassen(rows, jetzt):
+    """REIN RECHNEND (testbar): mt5_live-Zeilen → je user_id der jüngste Stand {pc_name, tab_build, bot_version, copier_version,
+    zuletzt, alt_s, lebt, pcs[]}. Mehrere Instanzen/PCs je ID: der jüngste Herzschlag zählt, alle PC-Namen stehen in pcs."""
+    out = {}
+    for r in rows or []:
+        uid = str(r.get("user_id") or "").strip()
+        if not uid:
+            continue
+        try:
+            at = datetime.fromisoformat(str(r.get("updated_at") or "").replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            continue
+        if at.tzinfo is None:
+            at = at.replace(tzinfo=timezone.utc)
+        alt = max(0, int((jetzt - at).total_seconds()))
+        pc = str(r.get("pc_name") or "")
+        z = out.get(uid)
+        if z is None or alt < z["alt_s"]:
+            out[uid] = {"pc_name": pc, "tab_build": r.get("tab_build"), "bot_version": r.get("bot_version"),
+                        "copier_version": r.get("copier_version"), "zuletzt": at.isoformat(), "alt_s": alt,
+                        "lebt": alt < PC_STAND_LEBT_S, "pcs": sorted(set((z or {}).get("pcs", []) + ([pc] if pc else [])))}
+        elif pc and pc not in z["pcs"]:
+            z["pcs"] = sorted(z["pcs"] + [pc])
+    return out
+
+
+@app.route("/admin/pc-stand", methods=["GET", "OPTIONS"])
+def admin_pc_stand():
+    """GET → {ok, at, stand: {user_id: {...}}}. Gate wie /admin/wd-plaene (eingeloggt); „nur eigene" (admin_zugang) sieht nur die eigene ID."""
+    if request.method == "OPTIONS":
+        return "", 200
+    me, err = _wd_login()
+    if err:
+        return err
+    rows = sb_select("mt5_live", {"select": "id,pc_name,updated_at,user_id:status->>user_id,tab_build:status->>tab_build,"
+                                             "bot_version:status->>bot_version,copier_version:status->>copier_version",
+                                  "order": "updated_at.desc", "limit": "400"}) or []
+    jetzt = datetime.now(timezone.utc)
+    stand = pc_stand_zusammenfassen(rows, jetzt)
+    nur = _admin_nur_uid()
+    if nur:
+        stand = {k: v for k, v in stand.items() if k == str(nur)}
+    return jsonify({"ok": True, "at": jetzt.isoformat(), "lebt_s": PC_STAND_LEBT_S, "stand": stand})
+
+
 @app.route("/admin/wd-plaene", methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"])
 def admin_wd_plaene():
     if request.method == "OPTIONS":

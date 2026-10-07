@@ -3316,6 +3316,11 @@
   #dashboard-view .wdl-z-wer b{font-weight:600;color:var(--ink)}
   #dashboard-view .wdl-z-wer small{margin-left:8px;font-size:12.5px;color:var(--sub)}
   #dashboard-view .wdl-z-punkt{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:9px;vertical-align:1px;background:var(--wdl-id,#98A2B3)}
+  /* PC-Tab-Lebenszeichen je ID (08.10.2026): kleiner Punkt am ID-Chip — grün Tab lebt, grau kein Tab, rot Bot/Copier veraltet */
+  .pcs-dot{display:inline-block;width:6px;height:6px;border-radius:50%;margin-left:5px;vertical-align:1px;background:#98A2B3}
+  .pcs-dot.pcs-gruen{background:#12B76A}
+  .pcs-dot.pcs-grau{background:#98A2B3;opacity:.7}
+  .pcs-dot.pcs-rot{background:#F04438}
   #dashboard-view .wdl-z-ri{grid-area:ri;color:var(--sub)}
   #dashboard-view .wdl-z-ri em{display:inline-block;min-width:34px;margin-right:6px;padding:1px 0;border-radius:4px;background:var(--surface-tint);color:var(--ink-2);font-style:normal;font-size:10.5px;font-weight:600;letter-spacing:.03em;text-align:center}
   /* BUY/SELL leicht grün/rot (30.09.2026, Finn: „in diesem Rot und Grün" von Prophos): Tint wie die BUY/SELL-Chips der Trade-Karten
@@ -27194,6 +27199,51 @@
       el.style.color = v == null ? 'var(--sub)' : v >= 0 ? '#15803d' : '#b91c1c'
     }
   }
+  /* PC-TAB-LEBENSZEICHEN JE ID (08.10.2026, Master/Finn; Anlass: Mikes Trade stand 20 h auf „wird gelesen", weil der Prophos-Tab an
+   * seinem PC nicht lief — niemand sah es). GET /admin/pc-stand (app.py, aus mt5_live: der PC-Tab schreibt dort alle 12 s sein
+   * Lebenszeichen mit tab_build/bot_version/copier_version) → je ID ein Punkt am Chip: grün = Tab lebt (Build x), grau = seit N h kein
+   * Tab, rot = Bot/Copier ≥ 3 Builds hinter diesem Frontend (OS_TAB_BUILD kommt von pages.dev = origin). Eine Anfrage für alle IDs,
+   * höchstens alle 60 s und nur bei sichtbarem Radar. Keine Logik an Starts/Nachlesung — nur Anzeige.
+   * pcStandPunktHtml(uid) ist global (window) — der Admin-Reiter „Trade-Planer" (Terminal 4) hängt denselben Punkt an seine ID-Liste. */
+  const _pcStand = { daten: null, at: 0, laedt: false }
+  const PCS_LADE_MS = 60000, PCS_ROT_AB = 3
+  const pcsBuildNr = b => { const m = /\.(\d+)$/.exec(String(b || '')); return m ? Number(m[1]) : null }
+  async function pcStandLaden(){
+    if(_pcStand.laedt || Date.now() - _pcStand.at < PCS_LADE_MS) return
+    _pcStand.laedt = true
+    try{
+      const { data: { session } } = await supabase.auth.getSession(); const tok = session?.access_token; if(!tok) return
+      const ctrl = new AbortController(), tm = setTimeout(() => ctrl.abort(), 15000)
+      const r = await fetch(`${WATCHER_HOME}/admin/pc-stand`, { headers: { 'sb-token': tok }, cache: 'no-store', signal: ctrl.signal }).finally(() => clearTimeout(tm))
+      const d = r.ok ? await r.json().catch(() => null) : null
+      _pcStand.at = Date.now()
+      if(d && d.ok && d.stand){ _pcStand.daten = d.stand; if(wdlAktiv()) wdlRender() }
+    }catch(e){ _pcStand.at = Date.now(); console.warn('[pc-stand]', (e && e.message) || e) }
+    finally{ _pcStand.laedt = false }
+  }
+  // REIN RECHNEND (window._pcStandUrteil): Stand einer ID + eigener Build → {farbe 'gruen'|'grau'|'rot', text}
+  function pcStandUrteil(z, eigenBuild){
+    if(!z) return null
+    const alt = Number(z.alt_s) || 0, lebt = !!z.lebt
+    const eigen = pcsBuildNr(eigenBuild), bot = pcsBuildNr(z.bot_version), cop = pcsBuildNr(z.copier_version)
+    const hinter = Math.max(eigen != null && bot != null ? eigen - bot : 0, eigen != null && cop != null ? eigen - cop : 0)
+    const pc = z.pc_name ? ` (${z.pc_name})` : ''
+    if(!lebt){
+      const dauer = alt < 3600 ? `${Math.max(1, Math.round(alt / 60))} min` : alt < 48 * 3600 ? `${Math.round(alt / 3600)} h` : `${Math.round(alt / 86400)} T`
+      return { farbe: 'grau', text: `Seit ${dauer} kein Prophos-Tab am PC${pc} — Prophos am PC dieser ID öffnen: Nachlesung und Starts laufen nur dort.` }
+    }
+    if(hinter >= PCS_ROT_AB) return { farbe: 'rot', text: `Tab lebt (Build ${z.tab_build || '?'}${pc}), aber Bot/Copier ${z.bot_version || '?'} / ${z.copier_version || '?'} ist ${hinter} Builds hinter ${eigenBuild} — Backend am PC neu starten (start-alles.bat).` }
+    return { farbe: 'gruen', text: `Prophos-Tab lebt${pc} · Tab-Build ${z.tab_build || '?'} · Bot ${z.bot_version || '?'} · Copier ${z.copier_version || '?'} · vor ${alt} s` }
+  }
+  function pcStandPunktHtml(uid){
+    const z = _pcStand.daten ? _pcStand.daten[String(uid)] : null
+    const u = pcStandUrteil(z, (typeof OS_TAB_BUILD !== 'undefined') ? OS_TAB_BUILD : '')
+    if(!u) return ''
+    return `<span class="pcs-dot pcs-${u.farbe}" title="${escapeHtml(u.text)}"></span>`
+  }
+  window.pcStandPunktHtml = pcStandPunktHtml
+  window.pcStandLaden = pcStandLaden
+  window._pcStandUrteil = pcStandUrteil   // Test-Haken
   function wdlIdsRender(trades){
     const bar = document.getElementById('wdl-ids'); if(!bar) return
     const je = new Map()
@@ -27204,7 +27254,7 @@
       const x = je.get(u), b = document.createElement('button'); b.type = 'button'
       b.className = 'adm-vl-chip' + (wdl.person ? (wdl.person === u ? ' is-on' : ' is-off') : '')
       // Chip = Farbe + Name + Zahl der laufenden Trades (nur wenn > 0); „+n zu" entfällt (30.09.2026, Finn: „so viele kleine Texte")
-      b.innerHTML = `<span class="adm-dot" style="background:${idFarbe(u)}"></span><span class="nm"></span><b></b>`
+      b.innerHTML = `<span class="adm-dot" style="background:${idFarbe(u)}"></span><span class="nm"></span><b></b>${pcStandPunktHtml(u)}`   // PC-Tab-Punkt (08.10.2026)
       // voller Name (30.09.2026): das erste Wort machte aus „Finn + Pascal" einen zweiten Chip „Finn" — zwei IDs, gleicher Name
       b.querySelector('.nm').textContent = String(x.name)
       b.querySelector('b').textContent = x.lauf ? String(x.lauf) : ''
@@ -27236,7 +27286,7 @@
     return reihe.map(u => {
       const x = je.get(u), an = wdl.person === u
       return `<button type="button" class="adm-vl-chip${wdl.person ? (an ? ' is-on' : ' is-off') : ''}" data-wdl-person="${escapeHtml(u)}" title="${an ? 'Filter aufheben — wieder alle IDs zeigen' : escapeHtml(`${x.n} in „${titel}" — klicken zeigt im Radar nur diese ID`)}">`
-        + `<span class="adm-dot" style="background:${idFarbe(u)}"></span><span class="nm">${escapeHtml(String(x.name))}</span><b>${x.n}</b></button>`
+        + `<span class="adm-dot" style="background:${idFarbe(u)}"></span><span class="nm">${escapeHtml(String(x.name))}</span><b>${x.n}</b>${pcStandPunktHtml(u)}</button>`   // PC-Tab-Punkt (08.10.2026)
     }).join('')
   }
   const wdlAktiv = () => { const v = document.querySelector('#dashboard-view .view[data-view="wdlive"]'); return !!(v && v.classList.contains('active')) }
@@ -28014,6 +28064,7 @@
     clearTimeout(wdl.timer)
     if(!wdlAktiv()) return
     wdlLaden()
+    pcStandLaden()   // PC-Tab-Lebenszeichen je ID, höchstens alle 60 s (08.10.2026)
     wdl.timer = setTimeout(wdlTakt, 15000)
   }
   window.wdlOnEnter = () => { wdlChartHolen(); wdlRender(); wdlTakt(); try{ setTimeout(() => mklTick(true), 80) }catch(_){} }
@@ -40452,7 +40503,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1179'
+  const OS_TAB_BUILD = '2026-09-22.1180'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
