@@ -15648,15 +15648,21 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
                                         bestehend=bestehend_pc)
         tr_w = {key: {"fest": tr_info[key]["fest"], "user": tr_info[key]["user"], "firma": tr_info[key]["fkey"],
                       "start": minuten_w[key], "delta_abs": tr_info[key]["delta_abs"], "gruppe": tr_info[key]["gruppe"],
-                      "einsatz_abs": tr_info[key]["einsatz_abs"]} for key in minuten_w}
+                      "einsatz_abs": tr_info[key]["einsatz_abs"],
+                      "n_plaene": sum(1 for (kk_, _k, _w2, _v) in plan_roh if kk_ == key)} for key in minuten_w}   # ID-Mischung (08.10.2026)
         richtung_w, netto_w, wert_w = ap_richtungen_delta(tr_w, stand["basis_netto"], stand["basis_brutto"], rnd,
                                                           param["zielband_pct"], fest_ev, bestehende=stand["starts_heute"],
                                                           einsatz=ek, mit_wert=True)
         if bester is None or (-len(minuten_w), wert_w) < (-len(bester[1]), bester[0]):
             bester = (wert_w, minuten_w, zinfo_w, richtung_w, netto_w)
-        if wert_w[0] == 0 and wert_w[1] == 0 and wert_w[2] == 0:
-            break                      # kein Malus, |Netto| unter einer Stufe, keine Große-Folge — besser geht es nicht
+        if wert_w[0] == 0 and wert_w[1] == 0 and wert_w[2] == 0 and wert_w[3] == 0:
+            break                      # kein Malus, |Netto| unter einer Stufe, ID-Mischung ok, keine Große-Folge — besser geht es nicht
     _w, minuten, zinfo, richtung, netto_max = bester
+    # ID-MISCHUNG für den Delta-Monitor (08.10.2026): je ID long/short-Zählung der Zuteilung dieses Laufs (nur neue Tranchen)
+    tr_best = {key: {"user": tr_info[key]["user"], "firma": tr_info[key]["fkey"], "n_plaene": sum(1 for (kk_, _k, _w2, _v) in plan_roh if kk_ == key)}
+               for key in minuten}
+    id_misch = [dict(v, user_id=u, user=namen.get(u, u[:8])) for u, v in ap_id_misch(richtung, tr_best)[1].items()]
+    id_misch.sort(key=lambda x: (-x["n"], x["user"]))
     for key in [k for k in tr_info if k not in minuten]:
         for (kk, k, _w2, _v) in plan_roh:
             if kk == key:
@@ -15714,7 +15720,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
         _sb_pruefen(r)
     erg = {"ok": True, "tag": tag, "quelle": quelle, "trocken": bool(trocken), "at": jetzt.isoformat(), "seed": seed,
            "fingerabdruck": fp, "geplant": geplant, "ausgelassen": ausgelassen, "netto_max_abs": netto_max,
-           "band_pct": param["zielband_pct"], "auto_start": param["auto_start"], "einsatz": einsatz_info}
+           "band_pct": param["zielband_pct"], "auto_start": param["auto_start"], "einsatz": einsatz_info, "id_misch": id_misch}
     if alle_ids:
         erg["ids_benutzt"] = ap_ids_benutzt(geplant, ausgelassen, namen)     # welche IDs der Lauf über alle IDs wirklich enthält
     if nachplanen:
@@ -15757,6 +15763,14 @@ AP_AUSGLEICH_STANDARD = {"aktiv": False, "takt_min": 10, "zielband_pct": 15.0, "
 # |Netto-Einsatz| über den Tag (kein hartes Limit, kein Pflicht-Gegenstück). Große Trades (≥ gross_ab_eur bzw. oberes Viertel
 # der Einsätze des Laufs) starten weich nie direkt hintereinander gleich gerichtet — nur über das Optimierer-Ziel, nie Ablehnung.
 AP_EUR_STUFE = 50                    # max |Netto-Einsatz| zählt im Optimierer in 50-€-Stufen — darin entscheidet der Malus mit
+# ID-MISCHUNG (Finn 08.10.2026 ~02:50 Dubai, Admin „Zu bestätigen": Chris 7 Pläne ALLE long, Aurel 2× short — „Über alle IDs gleicht es
+# sich aus, aber dass eine ID komplett long und eine andere komplett short ist, ist ein Mischmasch — FundedNext und FundingPips bei
+# derselben ID kann man perfekt gegeneinander setzen. Bei 2–4 Trades okay, bei 7 ist das zu viel. Nicht so hart."): hat eine ID
+# mindestens AP_ID_MISCH_AB Pläne über mindestens zwei Firmen, soll keine Seite mehr als AP_ID_MISCH_MAX ihrer Pläne halten —
+# zweites Kriterium nach dem Gesamt-Netto, weich (Strafe = Überschuss über die Grenze), nie über das globale Band. Innerhalb
+# ID+Firma bleibt eine Richtung (Richtungsschutz). Bei 1–3 Plänen oder nur einer Firma keine Vorgabe.
+AP_ID_MISCH_AB = 4
+AP_ID_MISCH_MAX = 0.67
 AP_START_BIS_STANDARD = "16:30"      # Finn 07.10.2026: alle Trades bis spätestens 16:30 dt gestartet (zeiten.start_bis)
 AP_TZ_TAG = "Europe/Berlin"          # Nachtlauf 00:00 und Bot-Takt in deutscher Zeit (Vertrag §2/§3)
 AP_BOT_ENDE_MIN = 19 * 60 + 30       # Bot-Takt 00:00–19:30 dt
@@ -15998,6 +16012,33 @@ def ap_dicht_paare(tranchen, bestehende=()):
     return paare
 
 
+def ap_id_misch(z, tranchen):
+    """REIN RECHNEND (testbar): ID-Mischung einer Zuteilung z = {tranche: 'buy'|'sell'} über tranchen = {key: {user|user_id, firma,
+    n_plaene?}} (n_plaene = Pläne der Tranche, Standard 1). → (strafe, je_id); je_id = {uid: {long, short, n, firmen, anteil}} mit
+    long/short = Pläne je Seite. strafe = Σ über IDs mit n ≥ AP_ID_MISCH_AB und ≥ 2 Firmen von max(0, max(long, short)/n − AP_ID_MISCH_MAX),
+    in Hundertsteln (ganzzahlig, damit sie im Vergleichs-Tupel sauber ordnet). 0 = jede große ID ist gemischt genug."""
+    je = {}
+    for k, r in (z or {}).items():
+        t = (tranchen or {}).get(k) or {}
+        uid = str(t.get("user") or t.get("user_id") or "")
+        if not uid or r not in ("buy", "sell"):
+            continue
+        n = int(t.get("n_plaene") or 1)
+        e = je.setdefault(uid, {"long": 0, "short": 0, "n": 0, "firmen": set()})
+        e["long" if r == "buy" else "short"] += n
+        e["n"] += n
+        e["firmen"].add(str(t.get("firma") or ""))
+    strafe = 0.0
+    out = {}
+    for uid, e in je.items():
+        anteil = max(e["long"], e["short"]) / e["n"] if e["n"] else 0.0
+        gilt = e["n"] >= AP_ID_MISCH_AB and len(e["firmen"]) >= 2
+        if gilt:
+            strafe += max(0.0, anteil - AP_ID_MISCH_MAX)
+        out[uid] = {"long": e["long"], "short": e["short"], "n": e["n"], "firmen": sorted(e["firmen"]), "anteil": round(anteil, 2), "regel": gilt}
+    return int(round(strafe * 100)), out
+
+
 def ap_richtungen_delta(tranchen, basis_netto, basis_brutto, rnd, band_pct, fest_ereignisse=(), bestehende=(), versuche=4096,
                         einsatz=None, mit_wert=False):
     """REIN RECHNEND (Vertrag §2, Korrektur Finn 06.10.2026 „nicht so fixe Minuten-Regeln, einfach Zufallsprinzip"): Richtung
@@ -16032,10 +16073,11 @@ def ap_richtungen_delta(tranchen, basis_netto, basis_brutto, rnd, band_pct, fest
             el = ap_einsatz_lage(einsatz.get("basis"), list(einsatz.get("fest_ev") or ()) + [
                 (tranchen[k]["start"], float(tranchen[k].get("einsatz_abs") or 0) * (1 if z[k] == "buy" else -1)) for k in namen],
                 einsatz.get("gross_ab"), laufzeit_min=einsatz.get("laufzeit"))
-            # Malus zuerst (Finn: gleiche Firma gegenläufig kurz hintereinander nur, wenn es gar nicht anders geht)
-            return (_ap_gegen_dicht(z, paare), int(el["netto_eur_max_abs"] // AP_EUR_STUFE), el["gross_folge"],
+            # Malus zuerst (Finn: gleiche Firma gegenläufig kurz hintereinander nur, wenn es gar nicht anders geht); dann das
+            # Gesamt-Netto in Stufen, dann die ID-Mischung (08.10.2026, Finn: keine ID komplett long/short bei ≥ 4 Plänen über ≥ 2 Firmen)
+            return (_ap_gegen_dicht(z, paare), int(el["netto_eur_max_abs"] // AP_EUR_STUFE), ap_id_misch(z, tranchen)[0], el["gross_folge"],
                     el["netto_eur_max_abs"], abs(el["netto_eur_ende"])), v["netto_max_abs"]
-        return (band_ueber, _ap_gegen_dicht(z, paare), round(v["netto_max_abs"], 1),
+        return (band_ueber, _ap_gegen_dicht(z, paare), ap_id_misch(z, tranchen)[0], round(v["netto_max_abs"], 1),
                 round(abs(v["verlauf"][-1]["netto_delta"]), 3)), v["netto_max_abs"]
 
     def zuteilung(bits):
@@ -16177,13 +16219,16 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
             return malus, round(ueber_e), el["gross_folge"], el["netto_eur_max_abs"]
         return malus, round(ueber, 3), 0, round(tag["netto_max_abs"], 3)
 
+    def misch(z):
+        return ap_id_misch({i: z[i]["richtung"] for i in z}, {i: {"user": je[i]["user_id"], "firma": je[i]["firma"], "n_plaene": 1} for i in z})[0]
+
     def als_dict(k):
-        return {"ueber_band": k[1], "netto_max_abs": k[3], "gross_folge": k[2], "malus": k[0]}
+        return {"ueber_band": k[1], "netto_max_abs": k[3], "gross_folge": k[2], "malus": k[0], "id_misch": k[4] if len(k) > 4 else None}
 
     def offen_(k):
         return k[1] > schwelle
 
-    aktuell = vorher = strafe(zustand)
+    aktuell = vorher = strafe(zustand) + (misch(zustand),)
     if not offen_(vorher):
         return {"aenderungen": [], "vorher": als_dict(vorher), "nachher": als_dict(vorher), "ausloeser": None,
                 "daempfung": {"hysterese": schwelle, "ruhe_min": AP_RUHE_JE_PLAN_MIN, "ruhig": []}}
@@ -16209,7 +16254,12 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                 z = {i: dict(v) for i, v in zustand.items()}
                 for i in ids:
                     z[i]["richtung"] = "sell" if z[i]["richtung"] == "buy" else "buy"
-                kandidaten.append((strafe(z), "richtung", t["firma"], ids, z))
+                # ID-MISCHUNG (08.10.2026, Finn): eine Drehung darf die Long/Short-Verteilung innerhalb der ID nie verschlechtern;
+                # bessere Drehungen werden bevorzugt (letztes Glied im Vergleichs-Tupel, nach Band/Große-Folge/|Netto|)
+                m_vor, m_nach = misch(zustand), misch(z)
+                if m_nach > m_vor:
+                    continue
+                kandidaten.append((strafe(z) + (m_nach,), "richtung", t["firma"], ids, z))
             fen = ap_fenster_von(zeiten, t["start"])
             if not fen:
                 continue
@@ -16225,7 +16275,7 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                 z = {i: dict(v) for i, v in zustand.items()}
                 for i in ids:
                     z[i]["start"] += neu - t["start"]
-                kandidaten.append((strafe(z), "start", t["firma"], ids, z))
+                kandidaten.append((strafe(z) + (misch(z),), "start", t["firma"], ids, z))
         if not kandidaten:
             break
         # 07.10.2026 (Finn): Malus (dicht gegenläufig gleiche Firma — baut der Bot nie selbst ein), Band (€ Einsatz), große gleich
