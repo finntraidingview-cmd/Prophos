@@ -2898,6 +2898,8 @@
   /* Consistency-Chip neben dem Typ (07.10.2026): nur bei gesetztem accounts.consistency_pct, neutral im Outline-Stil der Typ-Chips */
   #dashboard-view .type-badge.acc-cons-chip{margin-left:6px;background:#fff;border-color:var(--border);color:var(--ink-2);vertical-align:middle}
   /* Max-Risiko-Chip (07.10.2026): nur bei gesetztem accounts.max_risiko_trade, Amber wie der Trade-Limits-Block im Bulk-Add */
+  /* Ziel-Chip (07.10.2026): accounts.ziel_erreicht_at, gesetzt von der Ziel-Wache (app.py zw_tick) — Grün wie ein erreichtes Ziel */
+  .type-badge.acc-ziel-chip{margin-left:6px;background:#ECFDF5;border-color:#A7F3D0;color:#047857;vertical-align:middle}
   #dashboard-view .type-badge.acc-risk-chip{margin-left:6px;background:#fff;border-color:#f3c98b;color:#b45309;vertical-align:middle}
   #dashboard-view #ac-cons-row[hidden],#dashboard-view #ac-cons-frei[hidden],#dashboard-view #bulk-cons-row[hidden],#dashboard-view #bulk-cons-frei[hidden]{display:none}
   #dashboard-view .type-live{background:#F0FAEE;border-color:#B4DFAE;color:#1B6A14}
@@ -30608,6 +30610,9 @@
       waitingPayoutSince: row.waiting_payout_since || null,
       // Consistency je Konto (07.10.2026): null = Standard der Firma (40 %), sonst z. B. 50 bei Addon-Konten
       consistencyPct: row.consistency_pct != null ? Number(row.consistency_pct) : null,
+      zielErreichtAt: row.ziel_erreicht_at || null,   // Ziel-Wache (07.10.2026, app.py zw_tick)
+      zielErreichtBal: row.ziel_erreicht_bal != null ? Number(row.ziel_erreicht_bal) : null,
+      zielUsd: row.ziel_usd != null ? Number(row.ziel_usd) : null,
       creds: (row.cred_login || row.cred_password || row.cred_server || row.cred_platform || row.cred_notes) ? {
         login:    row.cred_login    || '',
         password: row.cred_password || '',
@@ -31200,6 +31205,13 @@
     if(!a || a.consistencyPct == null || !isFinite(a.consistencyPct)) return ''
     return ` <span class="type-badge acc-cons-chip" title="Consistency ${accConsZahl(a.consistencyPct)} — größter Tag ≤ ${accConsZahl(a.consistencyPct)} des Ziels (Standard 40 %)">${accConsZahl(a.consistencyPct)}</span>`
   }
+  // Ziel-Chip (07.10.2026, Finn: „wenn irgendwo ein Account sein Ziel erreicht hat, dass der getaggt wird") — Markierung der Ziel-Wache
+  function accZielChipHtml(a){
+    if(!a || !a.zielErreichtAt) return ''
+    const de = v => Math.round(Number(v)).toLocaleString('de-DE')
+    const seit = new Date(a.zielErreichtAt).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+    return ` <span class="type-badge acc-ziel-chip" title="Ziel erreicht seit ${seit}${a.zielErreichtBal ? ' · Balance ' + de(a.zielErreichtBal) : ''}${a.zielUsd ? ' ≥ Ziel ' + de(a.zielUsd) : ''} — Phase umstellen / auszahlen. Kein Trade mehr.">🎯 Ziel erreicht</span>`
+  }
   // Max-Risiko-Chip (07.10.2026): Konto mit eigener Vorgabe je Trade (z. B. 1-%-Regel) — reine Markierung, keine Prüfung
   function accRisikoChipHtml(a){
     if(!a || !(a.maxRisikoTrade > 0)) return ''
@@ -31766,7 +31778,7 @@
               ${meta}
             </td>
             <td>${escapeHtml(a.firm || '–')}</td>
-            <td>${accTypChipHtml(a)}${accConsChipHtml(a)}${accRisikoChipHtml(a)}${accWdToggleHtml(a)}</td>
+            <td>${accTypChipHtml(a)}${accZielChipHtml(a)}${accConsChipHtml(a)}${accRisikoChipHtml(a)}${accWdToggleHtml(a)}</td>
             <td>${balCell}<div class="acc-kw-mob" data-kw-zelle="${a.id}">${kwZelleHtml(a.id)}</div></td>
             <td class="acc-kw-td" data-kw-zelle="${a.id}">${kwZelleHtml(a.id)}</td>
             <td>${(_mtcLogin && !isArchived && typeof mt5KontoIst === 'function' && mt5KontoIst(a)) ? `<div>${accTermBtnHtml(a.id)}</div>` : ''}${linksHtml}${accTermStatusHtml(a.id)}</td>
@@ -36008,13 +36020,16 @@
    * (planAutoNotiz + planKontoBalance) — ohne lesbares Ziel oder ohne Balance → null, dann gilt der alte Weg. → { bal, ziel } | null */
   function planZielErreicht(plan){
     try{
+      const konto = plan ? accounts.find(a => String(a.id) === String(plan.masterAccountId)) : null
+      // Markierung der Ziel-Wache (app.py zw_tick, 07.10.2026) — gilt auch für Pläne ohne Auto-Planer-Ziel
+      if(konto && konto.zielErreichtAt) return { bal: konto.zielErreichtBal || 0, ziel: konto.zielUsd || 0 }
       const n = plan ? planAutoNotiz(plan.notes) : null
       if(!n || !(n.ziel > 0)) return null
-      const b = planKontoBalance(accounts.find(a => String(a.id) === String(plan.masterAccountId)))
+      const b = planKontoBalance(konto)
       return (b && isFinite(b.val) && b.val >= n.ziel) ? { bal: b.val, ziel: n.ziel } : null
     }catch(_){ return null }
   }
-  const planZielText = (plan, z) => `„${plan.masterName || 'Konto'}" hat das Ziel schon erreicht (Balance ${Math.round(z.bal).toLocaleString('de-DE')} ≥ Ziel ${Math.round(z.ziel).toLocaleString('de-DE')}) — kein Trade gestartet.`
+  const planZielText = (plan, z) => `„${plan.masterName || 'Konto'}" hat das Ziel schon erreicht${z.ziel > 0 ? ` (Balance ${Math.round(z.bal).toLocaleString('de-DE')} ≥ Ziel ${Math.round(z.ziel).toLocaleString('de-DE')})` : ''} — kein Trade gestartet.`
   /* Eine Zeile der Geplant-Tabelle. o = { name, ext, extTitle, chips, akt } aus renderTradePlanCard (dieselben Knöpfe und
    * data-plan-*-Attribute wie die Karte → bindTradePlanCardActions läuft unverändert).
    * Trade-Planer (GEPLANT-WIE-TRADES-REITER, Finn 07.10.2026: „exakt die Darstellung vom Reiter Geplant") nutzt dieselbe Zeile für alle
@@ -36039,7 +36054,7 @@
     const typ = String((konto && konto.type) || p.kontoTyp || '').toLowerCase()
     const typName = typ ? ((typeof typeLabel === 'function' && typeLabel(typ)) || typ) : ''
     const typKurz = { challenge: 'CH', phase1: 'P1', phase2: 'P2', funded: 'F', funded_cfd: 'CFD', winning_days: 'WD', live: 'Live' }[typ] || typName
-    const typChip = typ ? `<span class="type-badge type-${escapeHtml(typ)} pz-typ">${escapeHtml(typName)}</span>` : ''
+    const typChip = (typ ? `<span class="type-badge type-${escapeHtml(typ)} pz-typ">${escapeHtml(typName)}</span>` : '') + accZielChipHtml(konto)
     const typChipHandy = typ ? `<span class="type-badge type-${escapeHtml(typ)} pz-typ pz-typ-m" title="${escapeHtml(typName)}">${escapeHtml(typKurz)}</span>` : ''
     // Start: Uhrzeit klickbar (ändern), ✕ nimmt sie raus — dieselben Handler wie auf der Karte
     // AP-FIX 05.10.2026: tpStartUmText liefert an einem anderen Tag „06.10. 02:01" bzw. „verpasst (16:40)" — das lief in die
@@ -40033,7 +40048,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1138'
+  const OS_TAB_BUILD = '2026-09-22.1139'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
