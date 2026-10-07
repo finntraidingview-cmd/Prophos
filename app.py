@@ -16893,7 +16893,7 @@ def admin_auto_plan_ids():
     offen = []
     try:
         seit = (datetime.now(timezone.utc) - timedelta(hours=12)).isoformat()
-        pl = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_firm,master_name,richtung,route,start_um,master_contracts,master_tp,master_sl",
+        pl = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_firm,master_name,richtung,route,start_um,master_contracts,master_tp,master_sl,notes",
                                      "status": "eq.planned", "auto_plan": "eq.true", "auto_bestaetigt_at": "is.null", "start_um": "gte." + seit,
                                      "order": "start_um.asc"})
         pl = [p for p in pl if str(p.get("user_id")) not in aus]
@@ -16908,7 +16908,9 @@ def admin_auto_plan_ids():
                           "firma": (a or {}).get("firm") or p.get("master_firm"), "konto": (a or {}).get("name") or p.get("master_name"),
                           "ende4": _ap_ende4(a), "typ": (a or {}).get("account_type"), "richtung": p.get("richtung"), "route": p.get("route"),
                           "start_um": p.get("start_um"), "menge": _wd_num(p.get("master_contracts")),
-                          "tp": _wd_num(p.get("master_tp")), "sl": _wd_num(p.get("master_sl"))})
+                          "tp": _wd_num(p.get("master_tp")), "sl": _wd_num(p.get("master_sl")),
+                          # Stufe aus den Planer-Notes („Auto-Planer · Etappe · Rest …") — Admin-Reiter Spalte „Stufe" (08.10.2026)
+                          "notes": p.get("notes"), "stufe": (re.search(r"Auto-Planer · ([^·]+)", str(p.get("notes") or "")) or [None, None])[1]})
     except Exception as e:
         print(f"[auto-plan] ⚠️ ids/offen: {type(e).__name__}: {e}", flush=True)
     return jsonify({"ok": True, "ids": ids, "aktiv": bool(reg.get("aktiv")), "tag": tag, "offen": offen})
