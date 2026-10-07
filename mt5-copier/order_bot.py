@@ -18129,14 +18129,25 @@ def _cdp_konto_sichern(s, ext, opts, trail):
                     # Beleg für „anderer Tradovate-Login" nur mit lesbarem aktivem Konto, vollständiger Liste und dem aktiven Konto
                     # darin — der Login-Weg vergleicht liste_aktiv vor dem Abmelden noch einmal (cdp_abmelden_erlaubt)
                     ja, grund = cdp_liste_beleg(ko, aktiv, ext)
+                    ex["konto_treffer_roh"] = 0
                     if ja:
                         ex["liste_aktiv"] = aktiv[:80]
                         ex["ziel_im_text"] = im_text
                     else:
                         ex["konto_treffer"] = None
+                        # RICHTIGER LOGIN, Ziel fehlt (08.10.2026, cdp_gleicher_login_beleg): kein Login-Wechsel (konto_treffer None
+                        # bleibt), aber Befund für _cdp_konto_mit_login — zwei davon = 'konto_weg'
+                        gl, gg, gn = cdp_gleicher_login_beleg(ko, aktiv, ext)
+                        if gl:
+                            ex["gleicher_login"] = {"user": cdp_konto_familie(cdp_kontonr(aktiv))[5:], "konten": gn}
+                            ex["ziel_im_text"] = im_text
+                            # alter Satz („selben Apex-Login …") bleibt vorn stehen (Prüfer-Tests .865), der Beleg hängt sich an
+                            grund = grund + "; " + gg + ", Ziel 0×" + ("" if im_text is False else " (Ziel im sichtbaren Text" + (" — nicht prüfbar" if im_text is None else "") + ")")
+                        elif gg:
+                            grund = grund + "; " + gg
                 return False, "konto_nicht_erreicht", (f"Konto {ext} steht im Dropdown {n}x (nicht genau einmal) — nichts geklickt"
                                                         + ((" (anderer Tradovate-Login?)" if ex.get("liste_aktiv") else
-                                                            f" — kein Login-Beleg: {grund}") if n == 0 else "") + "."), st, ex
+                                                            (f" — richtiger Login, Ziel fehlt: {grund}" if ex.get("gleicher_login") else f" — kein Login-Beleg: {grund}")) if n == 0 else "") + "."), st, ex
             if not s.klick(cdp_rect(e), f"Konto {ext}"):
                 # Prüfer 30.09.2026: ein nicht gedrückter Eintrag verbrauchte alle Runden und ließ die Liste offen
                 _cdp_esc(s, st, trail, "Konto-Eintrag nicht gedrückt")
@@ -20580,6 +20591,56 @@ def cdp_konto_weg(extra, formular, ext):
     return (True, n, False) if n >= 1 else nein
 
 
+# KONTO WEG BEI RICHTIGEM LOGIN (08.10.2026, Slave-Terminal 3; Finn am Radar, Apex-Konto …0006, Nachlesung Versuch 5: „konto_nicht_erreicht
+# … kein Login-Beleg: Ziel und aktives Konto gehören zum selben Apex-Login — das Ziel steht nur nicht sichtbar in der Liste"). Finns
+# Regel: „Wenn ich im RICHTIGEN Prop-Login bin (derselbe Apex-User) und das Konto steht nicht im Dropdown, dann ist das Konto geblasen —
+# das soll er auch so abhaken. Bin ich gerade z. B. in Tradeify eingeloggt, darf er das nicht als geblasen werten: erst in Apex
+# einloggen, dann prüfen, dann erst geblasen." Der Login-Beleg ist hier NICHT das Formular (cdp_konto_weg), sondern die Kontonummer
+# selbst: nur bei Apex steckt die User-ID in der Nummer (cdp_konto_familie 'apex:<id>'), dort beweist das aktive Konto den Login.
+# Dazu muss die Liste GANZ zu sehen sein (liste_voll/liste_kurz, Regression .865: abgeschnittene Apex-Liste mit 32 Konten zeigte das
+# Ziel 0×), das aktive Konto selbst darin stehen, das Ziel nirgends im sichtbaren Text — und das Ganze zweimal (zweiter Konto-Schritt
+# nach Pause, gleiche Kontenzahl). Anderer Login (andere Firma/anderer Apex-User) → wie bisher erst der Login-Wechsel, dann diese Regel.
+def cdp_gleicher_login_beleg(ko, aktiv, ext=""):
+    """REIN RECHNEND (testbar): Belegt eine selbst geöffnete, VOLLSTÄNDIGE Liste ohne Ziel, dass das Ziel im RICHTIGEN Login fehlt?
+    -> (ja, grund, konten). ja nur: aktives Konto lesbar, derselbe Apex-User wie das Ziel, Liste ganz im Bild (liste_voll oder
+    liste_kurz), aktives Konto steht als Zeile darin. konten = Zeilen der Liste. Tradeify/Lucid/FundedNext/MFF: nie (die Nummer
+    verrät den User nicht — dort bleibt der Formular-Weg cdp_konto_weg)."""
+    nr = cdp_kontonr(aktiv)
+    if not nr:
+        return False, f"aktives Konto nicht lesbar ('{str(aktiv or '')[:40] or '-'}')", 0
+    fa, fz = cdp_konto_familie(nr), cdp_konto_familie(ext)
+    if not (fa and fa == fz and fa.startswith("apex:")):
+        return False, "", 0
+    k = ko if isinstance(ko, dict) else {}
+    if k.get("liste_voll") is not True and k.get("liste_kurz") is not True:
+        g = str(k.get("liste_voll_grund") or "")[:80]
+        return False, ("Liste nicht vollständig im Bild (abgeschnitten/scrollbar)" + (f"; augen.js: {g}" if g else "")), 0
+    zeilen = [x for x in (k.get("eintraege") or []) if isinstance(x, dict) and str(x.get("text") or "").strip()]
+    if not any(cdp_konto_passt(str(x.get("text") or ""), nr) for x in zeilen):
+        return False, f"aktives Konto {nr} steht nicht in der Liste", 0
+    return True, f"gleicher Apex-User {fa[5:]}, Liste vollständig ({len(zeilen)} Konten)", len(zeilen)
+
+
+def cdp_konto_weg_gleicher_login(extra, ext):
+    """REIN RECHNEND (testbar): Zählt der Konto-Schritt (extra) als EIN Befund „Ziel fehlt im richtigen Login"? -> (ja, konten)
+    Nur mit extra.gleicher_login {user, konten ≥ 1} vom selben Apex-User wie das Ziel, Ziel 0× (konto_treffer_roh 0) und Ziel nirgends
+    im sichtbaren Text (ziel_im_text genau False). Zwei gleiche Befunde (gleiche Kontenzahl) ergeben 'konto_weg' (_cdp_konto_mit_login)."""
+    nein = (False, None)
+    if not isinstance(extra, dict):
+        return nein
+    gl = extra.get("gleicher_login")
+    if not isinstance(gl, dict) or extra.get("ziel_im_text") is not False or extra.get("konto_treffer_roh") != 0:
+        return nein
+    fz = cdp_konto_familie(ext)
+    if not (fz.startswith("apex:") and str(gl.get("user") or "") == fz[5:]):
+        return nein
+    try:
+        n = int(gl.get("konten") or 0)
+    except (TypeError, ValueError):
+        return nein
+    return (True, n) if n >= 1 else nein
+
+
 def cdp_abmelden_erlaubt(aktiv, beleg):
     """REIN RECHNEND (testbar): Darf der Login-Weg die laufende Tradovate-Sitzung abmelden? -> (ja, grund)
     Regression .865 (30.09.2026, pc-cccccc, Plan …): der Login-Weg las den aktuellen Login als '-' und klickte „Log out" —
@@ -21506,6 +21567,38 @@ def _cdp_sitzung_zurueck(s, opts, trail):
     return False
 
 
+def _cdp_konto_weg_gleicher_login(sitz, ext, opts, trail, res, erg):
+    """Zweiter Konto-Schritt nach Pause, wenn der erste „Ziel fehlt im richtigen Login" belegt hat (cdp_konto_weg_gleicher_login).
+    -> (ok, code, msg, stand, extra): bei zwei gleichen Befunden code 'konto_weg' (retry_ok False); findet der zweite Blick das Konto,
+    läuft der Lauf normal weiter; sonst der zweite Befund als 'konto_nicht_erreicht'. erg = Ergebnis des ersten Konto-Schritts."""
+    ok, code, msg, st, extra = erg
+    erst = cdp_konto_weg_gleicher_login(extra, ext)
+    if ok or not erst[0]:
+        return erg
+    gl = extra.get("gleicher_login") or {}
+    trail.append(f"[Login] Ziel {ext} fehlt im richtigen Login (Apex-User {gl.get('user')}, Liste vollständig, {erst[1]} Konten) — zweiter Blick")
+    _warte(2.5, 1.0)
+    ok2, code2, msg2, st2, extra2 = _cdp_konto_sichern(sitz[0], ext, opts, trail)
+    if ok2:
+        return ok2, code2, msg2, st2, extra2
+    zweit = cdp_konto_weg_gleicher_login(extra2, ext)
+    if not (zweit[0] and zweit[1] == erst[1]):
+        trail.append("[Login] zweiter Blick anders als der erste — kein Beleg für ein fehlendes Konto")
+        return ok2, code2, msg2, st2, extra2
+    n = zweit[1]
+    # Kontonummer nur mit den letzten vier Stellen: msg landet in puls_fehler und im Radar-Tooltip (Master 06.10.2026)
+    msg = (f"Konto …{str(ext)[-4:]} bei Tradovate nicht mehr vorhanden (richtiger Apex-Login {gl.get('user')}: "
+           + ("steht 1 Konto" if n == 1 else f"stehen {n} Konten") + ", dieses nicht, Liste zweimal vollständig gelesen) — vermutlich geblowt.")
+    extra2 = dict(extra2, retry_ok=False, konten_im_login=n, einzelkonto=(n == 1), login_beleg="gleicher_apex_user")
+    login = res.get("login") if isinstance(res.get("login"), dict) else {}
+    login.update(ok=False, code="konto_weg", beleg="gleicher_apex_user")
+    res["login"] = login
+    trail.append(f"[Login] Konto weg: Login-Beleg gleicher Apex-User {gl.get('user')}, Liste 2× vollständig gelesen ({n} Konten), Ziel 0× — "
+                 "kein Login-Wechsel, kein weiterer Versuch")
+    _cdp_login_sichern(res, trail)
+    return False, "konto_weg", msg, st2, extra2
+
+
 def _cdp_konto_mit_login(sitz, ext, opts, cmd, trail, res):
     """Konto sicherstellen wie _cdp_konto_sichern — steht es nicht im Puls-Chrome (kein Broker / anderer Tradovate-Login), verbindet
     Puls selbst (Block-Kopf). sitz = [Sitzung] (der Login tauscht den Tab). -> (ok, code, msg, stand, extra) wie _cdp_konto_sichern.
@@ -21519,7 +21612,8 @@ def _cdp_konto_mit_login(sitz, ext, opts, cmd, trail, res):
         _warte(1.5, 1.0)
         ok, code, msg, st, extra = _cdp_konto_sichern(sitz[0], ext, opts, trail)
     if ok or not cdp_login_noetig(code, extra):
-        return ok, code, msg, st, extra
+        # RICHTIGER LOGIN, Ziel fehlt (08.10.2026): kein Login-Wechsel — zweiter Blick, zwei gleiche Befunde = konto_weg
+        return _cdp_konto_weg_gleicher_login(sitz, ext, opts, trail, res, (ok, code, msg, st, extra))
     benutzer = str(cmd.get("tv_username") or "").strip()
     if not benutzer:
         return False, "konto_nicht_erreicht", (msg + " Puls kann nicht selbst verbinden: für die Firma ist kein Tradovate-Username hinterlegt "
@@ -21564,6 +21658,12 @@ def _cdp_konto_mit_login(sitz, ext, opts, cmd, trail, res):
             zweit = (False, None, False) if ok else cdp_konto_weg(extra, True, ext)
             if zweit[0] and zweit[1:] == erst[1:]:
                 weg = zweit
+    # NACH DEM LOGIN-WECHSEL (08.10.2026, Finns Regel: „erst in Apex einloggen, dann prüfen, dann erst geblasen"): steht das Ziel im
+    # jetzt richtigen Apex-Login nicht, greift dieselbe Regel wie ohne Wechsel — zweiter Blick, zwei gleiche Befunde = konto_weg
+    if not ok and not weg[0]:
+        ok, code, msg, st, extra = _cdp_konto_weg_gleicher_login(sitz, ext, opts, trail, res, (ok, code, msg, st, extra))
+        if code == "konto_weg":
+            return ok, code, msg, st, extra
     res["login"].update(ok=bool(ok), code="" if ok else code)
     noetig = not ok and cdp_login_noetig(code, extra)
     if not ok and code == "kein_broker":

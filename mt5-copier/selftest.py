@@ -1914,6 +1914,7 @@ def main():
     results.append(test_puls_cdp_login())
     results.append(test_cdp_konto_regression_865())
     results.append(test_cdp_konto_weg())
+    results.append(test_cdp_konto_weg_gleicher_login())
     results.append(test_cdp_connect_zweiter_versuch())
     results.append(test_tsx_k0())
     results.append(test_tsx_k1_vorbau())
@@ -4058,6 +4059,128 @@ def test_cdp_konto_regression_865():
         "Shift+T: Chart-Klick nur nach gedrücktem Restore, danach NICHT wieder maximiert (höchstens Open panel); Symbol bis ~6 s warten")
     if ok:
         print("✓ Regression .865: fremde Liste kein Beleg, Abmelden nur mit Beleg, unlesbar = ehrlich raus, Umschalter auch maximiert")
+    return ok
+
+
+def test_cdp_konto_weg_gleicher_login():
+    """KONTO WEG BEI RICHTIGEM LOGIN (08.10.2026, Finn am Radar, Apex-Konto, Nachlesung Versuch 5): derselbe Apex-User ist der Login-
+    Beleg; mit zweimal vollständig gelesener Liste ohne Ziel → 'konto_weg'. Anderer Login (andere Firma/anderer Apex-User) → erst der
+    bestehende Login-Wechsel, dann dieselbe Regel. Unvollständige Liste, Ziel im Text, Tradeify-Nummern → nie. Alle Kennungen erfunden."""
+    import order_bot as ob, inspect as _i
+    ok = True
+
+    def chk(bed, text):
+        nonlocal ok
+        if not bed:
+            print("  ✗ Konto weg (richtiger Login): " + text)
+            ok = False
+    A1, A2, A6 = "APEX1234560000001", "APEX1234560000002", "APEX1234560000006"   # ein Apex-User
+    B1 = "APEX6543210000001"                                                      # anderer Apex-User
+    T1 = "TDFYSL150300000000"
+    G, K = ob.cdp_gleicher_login_beleg, ob.cdp_konto_weg_gleicher_login
+    def ko(zeilen, voll=True, kurz=False, grund=""):
+        return {"liste_offen": True, "liste_voll": voll, "liste_kurz": kurz, "liste_voll_grund": grund,
+                "eintraege": [{"text": z + "USD", "rect": [78, 90 + 32 * i, 228, 32]} for i, z in enumerate(zeilen)]}
+    chk(G(ko([A1, A2]), A1 + "USD", A6) == (True, "gleicher Apex-User 123456, Liste vollständig (2 Konten)", 2)
+        and G(ko([A1, A2], voll=False, kurz=True), A1 + "USD", A6)[0] is True, "gleicher Apex-User + vollständige/kurze Liste mit aktivem Konto → Beleg")
+    chk(G(ko([A1, A2], voll=False, grund="Container scrollt"), A1 + "USD", A6) == (False, "Liste nicht vollständig im Bild (abgeschnitten/scrollbar); augen.js: Container scrollt", 0),
+        "abgeschnittene Liste → kein Beleg, Grund genannt")
+    chk(G(ko([A2]), A1 + "USD", A6)[1] == f"aktives Konto {A1} steht nicht in der Liste" and not G(ko([A1]), B1 + "USD", A6)[0]
+        and not G(ko([T1]), T1 + "USD", "TDFYSL150300000001")[0] and G(ko([A1]), "Konto wählen", A6)[1].startswith("aktives Konto nicht lesbar"),
+        "aktives Konto fehlt / anderer Apex-User / Tradeify / unlesbar → nie")
+    gl = {"konto_treffer": None, "konto_treffer_roh": 0, "gleicher_login": {"user": "123456", "konten": 2}, "ziel_im_text": False}
+    chk(K(gl, A6) == (True, 2) and K(dict(gl, ziel_im_text=True), A6) == (False, None) and K(dict(gl, ziel_im_text=None), A6) == (False, None)
+        and K(dict(gl, konto_treffer_roh=None), A6) == (False, None) and K(gl, B1) == (False, None) and K({k: v for k, v in gl.items() if k != "gleicher_login"}, A6) == (False, None)
+        and K(dict(gl, gleicher_login={"user": "123456", "konten": 0}), A6) == (False, None) and K(None, A6) == (False, None), "Befund nur mit Beleg, Ziel 0×, Ziel nicht im Text, gleicher User")
+
+    # Konto-Schritt mit Attrappe (Liste vollständig, Ziel fehlt, gleicher Apex-User) → extra.gleicher_login, kein Login-Beleg
+    MAX = {"leiste": [56, 0, 1194, 38], "unter_leiste": 735, "max_knopf": {"rect": [1212, 0, 38, 38], "aria": "Restore panel"}}
+
+    class _S:
+        ws = None
+
+        def __init__(self, zeilen, im_text=False, voll=True):
+            self.zeilen, self.im_text, self.voll, self.offen, self.spur = zeilen, im_text, voll, False, []
+
+        def stand(self, opts=None):
+            e = [{"text": z + "USD", "rect": [78, 90 + 32 * i, 228, 32], "aktiv": i == 0} for i, z in enumerate(self.zeilen)]
+            return {"konto": {"panel": "offen", "panel_lage": "maximiert", "schalter": {"rect": [72, 59, 199, 28]}, "aktiv": self.zeilen[0] + "USD",
+                              "liste_offen": self.offen, "liste_voll": self.offen and self.voll, "eintraege": e if self.offen else []}}
+
+        def lese_js(self, a, timeout=8):
+            if "innerText" in a:
+                return self.im_text
+            return {"frei": True, "was": ""} if "elementFromPoint" in a else dict(MAX)
+
+        def werbung_weg(self, zwang=False):
+            return 0
+
+        def taste(self, k, modifiers=0):
+            self.spur.append("Taste " + k); self.offen = False
+
+        def klick(self, r, n, toast_ok=False):
+            self.spur.append(n)
+            if n == "Konto-Umschalter":
+                self.offen = True
+            return True
+    alt = {n: getattr(ob, n) for n in ("_warte", "_cdp_konto_sichern", "_cdp_tradovate_verbinden", "_cdp_login_sichern", "_cdp_sitzung_zurueck")}
+    ob._warte = lambda a_, b_: None
+    try:
+        s1 = _S([A1, A2])
+        r1 = ob._cdp_konto_sichern(s1, A6, {}, [])
+        s2 = _S([A1, A2], voll=False)
+        r2 = ob._cdp_konto_sichern(s2, A6, {}, [])
+
+        def kn(extra, msg="Ziel fehlt"):
+            return (False, "konto_nicht_erreicht", msg, {}, dict(extra))
+
+        def lauf(folge, wie="login"):
+            n = {"k": 0, "v": 0}
+
+            def _ks(s, ext, opts, trail):
+                n["k"] += 1
+                return folge[min(n["k"], len(folge)) - 1]
+
+            def _tv(sitz, cmd, opts, trail, beleg=None, merk=None):
+                n["v"] += 1
+                return "", "", wie
+            ob._cdp_konto_sichern, ob._cdp_tradovate_verbinden = _ks, _tv
+            ob._cdp_login_sichern, ob._cdp_sitzung_zurueck = (lambda res, trail: None), (lambda s, o, t: False)
+            res, tr = {}, []
+            aus = ob._cdp_konto_mit_login([object()], A6, {}, {"tv_username": "APEX_123456"}, tr, res)
+            return aus, res, tr, n
+        fremd = {"konto_treffer": 0, "konto_treffer_roh": 0, "liste_aktiv": T1 + "USD", "ziel_im_text": False, "konto_eintraege": [T1 + "USD"]}
+        a, res_a, tr_a, n_a = lauf([kn(gl), kn(gl)])                                   # richtiger Login, zweimal gleich → konto_weg, KEIN Login
+        b, res_b, tr_b, n_b = lauf([kn(gl), (True, "", "", {"x": 1}, {"konto_aktiv": A6 + "USD"})])   # zweiter Blick findet es
+        c, res_c, tr_c, n_c = lauf([kn(gl), kn(dict(gl, gleicher_login={"user": "123456", "konten": 3}))])   # anders → alte Meldung
+        d, res_d, tr_d, n_d = lauf([kn(fremd), kn(gl), kn(gl)])                        # Tradeify aktiv → Login-Wechsel → dann konto_weg
+        e, res_e, tr_e, n_e = lauf([kn(dict(gl, ziel_im_text=True)), kn(gl)])          # Ziel im Text → nie, kein zweiter Blick
+    finally:
+        for n_, f_ in alt.items():
+            setattr(ob, n_, f_)
+    chk(r1[1] == "konto_nicht_erreicht" and r1[4].get("konto_treffer") is None and r1[4].get("konto_treffer_roh") == 0
+        and r1[4].get("gleicher_login") == {"user": "123456", "konten": 2} and r1[4].get("ziel_im_text") is False
+        and "richtiger Login, Ziel fehlt: " in r1[2] and "selben Apex-Login" in r1[2] and "gleicher Apex-User 123456, Liste vollständig (2 Konten), Ziel 0×" in r1[2] and "kein Login-Beleg" not in r1[2]
+        and not ob.cdp_login_noetig(r1[1], r1[4]), f"Konto-Schritt: Beleg in extra, kein Login nötig, ehrliche Meldung ({r1[2]}, {r1[4]})")
+    chk(r2[4].get("gleicher_login") is None and "Liste nicht vollständig im Bild" in r2[2] and "selben Apex-Login" in r2[2],
+        f"abgeschnittene Liste: kein Beleg, Grund in der Meldung ({r2[2]})")
+    chk(a[1] == "konto_weg" and a[4].get("retry_ok") is False and a[4].get("konten_im_login") == 2 and a[4].get("login_beleg") == "gleicher_apex_user"
+        and "stehen 2 Konten" in a[2] and "vermutlich geblowt" in a[2] and "Konto …0006 bei" in a[2] and A6 not in a[2]
+        and n_a == {"k": 2, "v": 0} and res_a["login"].get("code") == "konto_weg"
+        and any("Login-Beleg gleicher Apex-User 123456, Liste 2× vollständig gelesen (2 Konten), Ziel 0×" in x for x in tr_a),
+        f"richtiger Login, zweimal gleich → konto_weg ohne Login-Wechsel, Beweis in der Spur ({a[1]}, {a[2]}, {n_a})")
+    chk(b[0] is True and n_b == {"k": 2, "v": 0}, f"zweiter Blick findet das Konto → normal weiter ({b[:3]}, {n_b})")
+    chk(c[1] == "konto_nicht_erreicht" and "retry_ok" not in c[4] and n_c == {"k": 2, "v": 0} and any("anders als der erste" in x for x in tr_c),
+        f"zweiter Blick anders → kein konto_weg ({c[1]}, {n_c})")
+    chk(d[1] == "konto_weg" and n_d == {"k": 3, "v": 1} and d[4].get("konten_im_login") == 2,
+        f"fremder Login zuerst → Login-Wechsel, dann richtiger Login zweimal ohne Ziel → konto_weg ({d[1]}, {n_d}, {d[2]})")
+    chk(e[1] == "konto_nicht_erreicht" and n_e == {"k": 1, "v": 0}, f"Ziel im sichtbaren Text → nie, kein zweiter Blick ({e[1]}, {n_e})")
+    q_km, q_ks = _i.getsource(ob._cdp_konto_mit_login), _i.getsource(ob._cdp_konto_sichern)
+    chk(q_km.count("_cdp_konto_weg_gleicher_login(sitz, ext, opts, trail, res") == 2 and q_km.index("if ok or not cdp_login_noetig(code, extra):") < q_km.index("_cdp_konto_weg_gleicher_login(")
+        and "cdp_gleicher_login_beleg(ko, aktiv, ext)" in q_ks and q_ks.index('ex["konto_treffer"] = None') < q_ks.index("cdp_gleicher_login_beleg("),
+        "Verdrahtung: vor dem frühen Rücksprung und nach der Login-Schleife; konto_treffer bleibt None (kein Abmelden)")
+    if ok:
+        print("✓ Konto weg bei richtigem Login: gleicher Apex-User + Liste 2× vollständig + Ziel 0× → konto_weg; fremder Login erst wechseln; sonst nie")
     return ok
 
 
