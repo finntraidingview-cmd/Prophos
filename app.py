@@ -14411,12 +14411,15 @@ def _ap_boden(regel, ph, groesse, balance):
     return boden, boden_blow
 
 
-def ap_boden_konto(regel, phase, balance):
+def ap_boden_konto(regel, phase, balance, peak=None):
     """REIN RECHNEND (testbar): Boden für die Anzeige (Master/Slave 4, 08.10.2026: Balance-Balken Skala Liquidations-Level → Ziel)
     → {boden, boden_min, boden_art}. boden = Balance-Level in $, unter dem das Konto weg ist, sonst None (unbekannt);
-    boden_min = Start − DD als Untergrenze, auch wenn der nachgezogene Stand fehlt (Tradeify ohne Lock: boden None, boden_min gesetzt).
-    Quelle sind nur die Firmen-Kernwerte (ap_kw_param) — nicht accounts.max_drawdown; ohne Kernwerte, Balance oder passende
-    Größe alles None. Keine zweite Rechnung: _ap_boden wie im Planer."""
+    boden_min = Start − DD als Untergrenze. Quelle sind nur die Firmen-Kernwerte (ap_kw_param) — nicht accounts.max_drawdown;
+    ohne Kernwerte, Balance oder passende Größe alles None. Statisch und mit Lock: _ap_boden wie im Planer.
+    Nachziehend ohne Lock (Tradeify, Master 08.10.2026: Finns Screenshots fast alle Tradeify 150k, Balken blieb auf der alten Skala):
+    GESCHÄTZT aus der höchsten bekannten Balance — max(Start, peak, Balance) − DD, nie unter boden_min, boden_art
+    „nachziehend_geschaetzt". peak = liq_peak (belegte Start-/End-Balances der Pläne in derselben Phase, tv_balance). Nur Anzeige:
+    der Planer (SL-Deckel, Geblasen-Prüfung) rechnet weiter ohne diese Schätzung."""
     leer = {"boden": None, "boden_min": None, "boden_art": None}
     b = _wd_num(balance)
     if not regel or not ap_kw_param(regel) or not b or b <= 0:
@@ -14428,8 +14431,39 @@ def ap_boden_konto(regel, phase, balance):
     boden, blow = _ap_boden(regel, ph, groesse, b)
     art = ("statisch" if regel.get("boden") != "nachziehend" else
            "nachziehend_lock" if regel.get("lock_bei_start") is True else "nachziehend")
+    if boden is None and art == "nachziehend" and blow is not None and regel.get("dd_usd"):
+        f = groesse / 100000.0 if regel.get("skaliert") else 1.0
+        hoch = max(groesse, b, _wd_num(peak) or 0)
+        boden, art = max(blow, hoch - float(regel["dd_usd"]) * f), "nachziehend_geschaetzt"
     rund = lambda x: round(float(x), 2) if x is not None else None
     return {"boden": rund(boden), "boden_min": rund(blow), "boden_art": art}
+
+
+def ap_boden_sicher(firmen, a, balance, peaks=None, regel=None):
+    """ap_boden_konto für EIN Konto mit eigenem try (Prüfer-Befund 08.10.2026): eine kaputte Firmen-Regel darf nicht das ganze Delta
+    oder /ids kippen — Fehler → boden/boden_min/boden_art null + print mit Konto-id. regel = schon fertige Regel (Lauf-Zeilen),
+    sonst aus firmen wie im Planer (ap_regel_finden + ap_regel_konto)."""
+    if not a:
+        return {"boden": None, "boden_min": None, "boden_art": None}
+    try:
+        if regel is None:
+            regel = ap_regel_konto(ap_regel_finden(firmen or [], a.get("firm")), a, balance)
+        return ap_boden_konto(regel, a.get("account_type"), balance, (peaks or {}).get(str(a.get("id"))))
+    except Exception as e:
+        print(f"[auto-plan] ⚠️ boden Konto {a.get('id')}: {type(e).__name__}: {e}", flush=True)
+        return {"boden": None, "boden_min": None, "boden_art": None}
+
+
+def _ap_peaks(konten):
+    """konto_id → höchste belegte Balance (liq_peak, gleiche Phase) für ap_boden_konto — Daten aus _liq_verlauf_laden (60 s Cache,
+    wie der Radar). Nur Anzeige: jeder Fehler → {} (dann schätzt der Boden ab Start bzw. aktueller Balance)."""
+    try:
+        konten = [a for a in konten or () if a and a.get("id")]
+        verlauf = _liq_verlauf_laden([a["id"] for a in konten])
+        return {str(a["id"]): liq_peak({}, a, None, verlauf) for a in konten}
+    except Exception as e:
+        print(f"[auto-plan] ⚠️ boden/peak: {type(e).__name__}: {e}", flush=True)
+        return {}
 
 
 def _ap_hhmm(s):
@@ -15772,6 +15806,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
 
     frontcode = _wd_futures_frontcode(mitternacht.astimezone(timezone.utc))
     zeilen, geplant = [], []
+    peaks = _ap_peaks([k["a"] for _key, k, _w, _v in plan_roh])   # Höchststand für den geschätzten Boden (08.10.2026)
     for key, k, w, vers in plan_roh:
         if key not in minuten:
             continue
@@ -15796,7 +15831,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
                             delta_eur_pkt=(round(abs(dd), 3) * (1 if richtung[key] == "buy" else -1)) if dd is not None else None,
                             einsatz_eur=round(float((d.get("g") or {}).get("verlust_eur") or 0)) * (1 if richtung[key] == "buy" else -1),
                             tp_punkte=d.get("tp_punkte"), sl_punkte=d.get("sl_punkte"), bestaetigt=bool(param["auto_start"]),
-                            **ap_boden_konto(k["regel"], a.get("account_type"), k["bal"])))   # Boden für den Balance-Balken (08.10.2026)
+                            **ap_boden_sicher(None, a, k["bal"], peaks, regel=k["regel"])))   # Boden für den Balance-Balken (08.10.2026)
     geplant.sort(key=lambda g: (g["start"], g["konto_id"]))
     fp = hashlib.sha1(json.dumps([[g["konto_id"], g["start"], g["richtung"], g["tp"], g["sl"], g["menge"]] for g in geplant],
                                  sort_keys=True).encode()).hexdigest()[:12]
@@ -16769,6 +16804,7 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
                                                                        "master_account_id": "in.(" + ",".join(kids[j:j + 150]) + ")"})))
     except Exception as e:
         print(f"[auto-plan] ⚠️ balance_live: {type(e).__name__}: {e}", flush=True)
+    peaks = _ap_peaks([konto(p) for p in heute])   # Höchststand für den geschätzten Boden (08.10.2026)
     for p in heute:
         a, r = konto(p), p.get("richtung")
         gh, art = _ap_gehedgt_plan(p)
@@ -16798,9 +16834,8 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
                  balance_live=ap_balance_live(acc_balance_wahl(a, echo_bal, dup_bal)[3] if a else None,
                                               letzt_je.get(str(p.get("master_account_id") or ""))),   # 08.10.2026
                  # BODEN (08.10.2026, Balance-Balken Slave 4): Liquidations-Level aus den Firmen-Kernwerten wie im Planer
-                 **(ap_boden_konto(ap_regel_konto(ap_regel_finden(firmen, a.get("firm")), a, acc_balance_wahl(a, echo_bal, dup_bal)[0]),
-                                   a.get("account_type"), acc_balance_wahl(a, echo_bal, dup_bal)[0])
-                    if a else ap_boden_konto(None, None, None)))
+                 **ap_boden_sicher(firmen, a, acc_balance_wahl(a, echo_bal, dup_bal)[0], peaks),
+                 konto_id=str(p.get("master_account_id") or "") or None)   # Frontend tplDaten ordnet Konto/Balance darüber zu (08.10.2026)
         z["einsatz_eur"] = z["einsatz_abs"] * (1 if r == "buy" else -1) if r in ("buy", "sell") else None
         geplant_rows.append(z)
         if b["hinweis"]:
@@ -16934,7 +16969,9 @@ def ap_delta_antwort(stand, sicht_uid=None):
                                       "hinweis", "richtung_konflikt",
                                       # 08.10.2026: Balance live (Braucht dich/Firmen-Block) und Boden (Balance-Balken) — standen in _ap_stand_laden
                                       # schon an der Zeile, kamen aber ohne diese Liste nie im Frontend an (.1224)
-                                      "balance_live", "boden", "boden_min", "boden_art")}
+                                      "balance_live", "boden", "boden_min", "boden_art",
+                                      # 08.10.2026: liest tplDaten (Braucht dich: Start-Fehler/geclaimt fremder Pläne, Konto-Zuordnung)
+                                      "konto_id", "start_fehler", "geclaimt")}
                for z in sorted(stand["geplant"], key=lambda z: (z.get("start_min") or 0, z["plan_id"]))]
     hinweise = list(stand["hinweise"]) + ([{"grund": h_umpl}] if h_umpl else [])
     # Master 06.10.2026 (Frontend .1084 schon live): band als ZAHL in €/Pkt (± um null, jetzt), Details in band_info; je
@@ -17321,6 +17358,7 @@ def admin_auto_plan_ids():
             echo_bal, dup_bal = _ap_balance_karten()
         except Exception:
             echo_bal, dup_bal = {}, {}
+        peaks = _ap_peaks(list(accs.values()))   # Höchststand für den geschätzten Boden (08.10.2026)
         for p in pl:
             a = accs.get(str(p.get("master_account_id")))
             offen.append({"plan_id": str(p.get("id")), "user_id": str(p.get("user_id")), "user": namen.get(str(p.get("user_id")), str(p.get("user_id"))[:8]),
@@ -17334,10 +17372,7 @@ def admin_auto_plan_ids():
                           "balance_live": ap_balance_live(acc_balance_wahl(a, echo_bal, dup_bal)[3] if a else None,
                                                           letzt_je.get(str(p.get("master_account_id") or ""))),
                           # BODEN (08.10.2026, Balance-Balken Slave 4) — wie delta.geplant[]
-                          **(ap_boden_konto(ap_regel_konto(ap_regel_finden(reg.get("firmen") or [], a.get("firm")), a,
-                                                           acc_balance_wahl(a, echo_bal, dup_bal)[0]),
-                                            a.get("account_type"), acc_balance_wahl(a, echo_bal, dup_bal)[0])
-                             if a else ap_boden_konto(None, None, None))})
+                          **ap_boden_sicher(reg.get("firmen"), a, acc_balance_wahl(a, echo_bal, dup_bal)[0], peaks)})
     except Exception as e:
         print(f"[auto-plan] ⚠️ ids/offen: {type(e).__name__}: {e}", flush=True)
     return jsonify({"ok": True, "ids": ids, "aktiv": bool(reg.get("aktiv")), "tag": tag, "offen": offen})
