@@ -40066,7 +40066,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1141'
+  const OS_TAB_BUILD = '2026-09-22.1142'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -43923,6 +43923,11 @@
         versuche: (alt && Number(alt.versuche)) || 0 }
       await baselinePatch(plan.id, { start_fehler: flag }, 'planned')
       try{ renderTradePlans() }catch(_){}
+      // Handy-Meldung (07.10.2026, Finn: Fehlstarts sofort sehen und selbst beheben) — Ziel erreicht meldet tpStartUmTick selbst
+      if(flag.schritt !== 'ziel_erreicht'){
+        try{ if(typeof pushAnsHandy === 'function') pushAnsHandy('⚠ Trade nicht gestartet', `„${plan.masterName || 'Plan'}": ${flag.msg || 'Check rot'} — Trade-Planer → Braucht dich.`,
+          'https://prophos.pages.dev/prophos#trades', 'sf-' + String(plan.id).slice(0, 8)) }catch(_){}
+      }
     }catch(e){ console.warn('[start-fehler] schreiben', (e && e.message) || e) }
   }
   // Letzte Startminute des Tages (deutsche Zeit): Ende des letzten Start-Fensters (Delta-Monitor), höchstens start_bis (16:30 dt)
@@ -45435,7 +45440,10 @@
       case 'v2hedge': return /Duplikum/i.test(m) ? 'Master in Duplikum entkoppeln — Echo V2 läuft ohne Kopie.' : 'Offenes Echo-Fenster dieser Instanz beenden.'
       case 'v2dir': return 'Nichts tun — wartet, bis der Gegen-Trade derselben Firma zu ist.'
       case 'v2term': return `Am PC${pc} MT5 öffnen und mit Login${login} einloggen.`
-      case 'v2order': return sf.unklar ? 'Erst im MT5-Terminal nachsehen, ob die Order liegt — dann von Hand starten, nie blind.' : 'Puls hat nichts platziert — nichts tun.'
+      // 07.10.2026 (Finn, Blue Guardian 16:49/16:50 „Prüfung fehlgeschlagen, nicht gestartet"): statt „nichts tun" sagen, was zu tun ist
+      case 'v2order': return sf.unklar ? 'Erst im MT5-Terminal nachsehen, ob die Order liegt — dann von Hand starten, nie blind.'
+        : /Popup geschlossen|Terminal|Verbindung|initialize|IPC|Konto/i.test(m) ? `Am PC${pc} MT5 für Login${login} öffnen und eingeloggt lassen, dann ✓ Behoben oder von Hand starten. Nichts platziert.`
+        : 'Nichts platziert — Meldung prüfen, dann ✓ Behoben oder von Hand starten.'
       case 'zu_spaet': return `Prophos-Tab am PC${pc} offen lassen.`
       case 'ziel_erreicht': return 'Ziel ist erreicht — kein Trade nötig. Konto ansehen (Phasenwechsel/Auszahlung), Plan löschen.'
       default: return 'Check am PC war rot — beheben, dann ✓ Behoben.'
