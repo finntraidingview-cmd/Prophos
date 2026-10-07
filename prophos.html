@@ -3341,6 +3341,20 @@
   #dashboard-view .wdl-sp-r b{color:rgba(21,128,61,.78)}
   #dashboard-view .wdl-mehr{display:block;width:100%;padding:8px 16px;border:none;border-top:1px solid var(--border-soft);background:transparent;color:var(--sub);font:inherit;font-size:12px;text-align:center;cursor:pointer}
   #dashboard-view .wdl-mehr:hover{background:var(--bg);color:var(--ink-2)}
+  /* MANUELLE ARBEIT (08.10.2026, Finn am Radar „Überprüfen"): Gruppe zwischen Überprüfen und Erledigt — Zeile aus Überprüfen
+     hineinziehen (Drop-Ziel = der ganze Kasten, Hover violett) oder „→ manuell"; in der Gruppe Notiz (Klick = bearbeiten),
+     „seit TT.MM.", Abhaken und zurück. Alles im Raster der Zeile, Knöpfe el-knopf wie Wartet/Überprüfen. */
+  #dashboard-view .wdl-tab-manuell.is-ziel{border-color:var(--violet);box-shadow:0 0 0 1px var(--violet) inset;background:var(--surface-tint)}
+  #dashboard-view .wdl-tab-manuell.wdl-tab-leer .wdl-z-kopf{border-style:dashed}
+  #dashboard-view .wdl-tab-manuell .wdl-man-hinweis{grid-column:mi-start / zeit-end;text-align:right;font-weight:400;letter-spacing:0;text-transform:none;color:var(--sub)}
+  #dashboard-view .wdl-z[draggable="true"]{cursor:grab}
+  #dashboard-view .wdl-z.is-drag{opacity:.45}
+  #dashboard-view .wdl-tab-manuell .wdl-z{grid-template-columns:minmax(0,1fr) 150px 360px 110px 150px 136px}   /* Notiz-Spalte breiter (360 statt 256): Notiz · seit · Abhaken · zurück */
+  #dashboard-view .wdl-z-man .wdl-z-mi{color:var(--ink-2)}
+  #dashboard-view .wdl-man-text{flex:1 1 auto;min-width:40px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;font:inherit;font-size:12px;line-height:1.5;color:var(--ink-2);background:none;border:none;padding:0;cursor:text}
+  #dashboard-view .wdl-man-text i{color:var(--sub);font-style:normal}
+  #dashboard-view .wdl-man-notiz{flex:1 1 auto;min-width:60px;font:inherit;font-size:12px;padding:2px 6px;border:1px solid var(--violet);border-radius:6px;background:var(--surface);color:var(--ink);outline:none}
+  #dashboard-view .wdl-man-seit{flex:none;font-size:11px;color:var(--sub)}
   #dashboard-view .wdl-sp-bahn{position:relative;flex:1;min-width:40px;height:4px;border-radius:2px;background:var(--border-soft)}
   #dashboard-view .wdl-sp-bahn::before,#dashboard-view .wdl-sp-bahn::after{content:'';position:absolute;top:-3px;width:2px;height:10px;border-radius:1px}
   #dashboard-view .wdl-sp-bahn::before{left:-1px;background:rgba(217,45,32,.5)}
@@ -3360,6 +3374,8 @@
     #dashboard-view .wdl-sp small{font-size:9.5px}
     #dashboard-view .wdl-sp-bahn{min-width:24px}
     #dashboard-view .wdl-z-wart .wdl-z-mi{white-space:normal;line-height:1.3}   /* „wird gelesen · seit 1 h 52 min" passt nicht in eine Zeile */
+    #dashboard-view .wdl-z-man .wdl-z-mi{flex-wrap:wrap;justify-content:flex-start;row-gap:4px}   /* Manuelle Arbeit am Handy: Notiz oben, Knöpfe darunter (kein Drag — der Knopf „→ manuell" macht es) */
+    #dashboard-view .wdl-z[draggable="true"]{cursor:pointer}
     #dashboard-view .wdl-z-kopf{padding-top:8px;padding-bottom:7px}
     /* Personen-Chips am Handy: eigene dritte Zeile unter den Spaltenköpfen, waagrecht wischbar statt Umbruch */
     #dashboard-view .wdl-kp{grid-row:3;flex-wrap:nowrap;margin:0 -4px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
@@ -27196,6 +27212,8 @@
     const ohneEchoLive = t => Object.assign({}, t, wdlIstEcho(t) ? { kurs_jetzt: null, pl_live: null, mt5_alter_s: null, konto_balance: null, konto_balance_at: null } : {}, { slave_pl_live: null })
     const sig = JSON.stringify([((wdl.daten && wdl.daten.trades) || []).map(ohneEchoLive), wdl.fehler])
     if(!voll && sig === wdl.sig && Date.now() - (wdl.renderAt || 0) < 60000){ wdlEchoLive(); wdlFusionLive(); return }
+    // Offenes Notiz-Feld (Manuelle Arbeit, 08.10.2026): der Takt baut die Liste nicht neu, sonst ginge das Getippte verloren
+    if(!voll && _wdlManNotiz){ wdlEchoLive(); wdlFusionLive(); return }
     wdl.sig = sig
     wdlRender()
   }
@@ -27487,6 +27505,66 @@
       ende(`👁 ${wer}: kein PC hat geantwortet — läuft Prophos am PC dieser ID?`, 'end')
     }catch(e){ ende('Ansehen nicht gesendet: ' + String((e && e.message) || e), 'end') }
   }
+  /* MANUELLE ARBEIT (08.10.2026, Finn am Radar „Überprüfen": „ein Feld … manuelle Arbeit. Wo z. B. noch eine Winning-Day-Fahrt mit
+   * 0,01 fehlt oder ein, zwei Dollar — das mache ich dann manuell oder warte ein paar Tage. Per Drag & Drop in die Gruppe
+   * runterziehen, kurze Notiz dazu, in zwei Tagen abhaken und den Nachfolger anlegen. Erst dann wird verbucht."): Kennzeichen
+   * mt5_baseline.manuell = {at, notiz, von}. NUR Anzeige + Reihenfolge — kein Riegel: Nachlesung, Endlesung, Auto-Erkennung und
+   * Ziel-Wache laufen unverändert, der Plan bleibt in „review". Lesen: t.manuell aus /admin/live-trades (Backend-Vertrag an den
+   * Master 08.10.2026), bis das steht für eigene Pläne aus tradePlans.mt5Baseline. Schreiben: eigener Plan → mt5_baseline_patch
+   * (oberste Ebene, RLS, Status-Guard review; weg = manuell:null), fremder Plan → PATCH /admin/wd-plaene {aktion:'manuell'|
+   * 'manuell_weg'} — EIN Weg für alle IDs wie 'ende'; antwortet das Backend noch nicht, sagt es der Toast ehrlich. */
+  const _wdlManBusy = new Set()   // plan_id, solange geschrieben wird
+  let _wdlManNotiz = null         // {pid, neu} — Zeile mit offenem Notiz-Feld: neu = frisch abgelegt (Esc = nichts schreiben, zurück nach Überprüfen)
+  function wdlManuell(t){
+    if(!t || t.status !== 'review') return null
+    const pid = wdlTid(t)
+    if(_wdlManNotiz && _wdlManNotiz.neu && _wdlManNotiz.pid === pid) return { at: null, notiz: '', neu: true }   // Ablage läuft, Notiz offen
+    // manuell_weg lässt den Schlüssel mit Wert null stehen (Backend .1160) — nur ein Kennzeichen MIT at zählt
+    if(t.manuell && typeof t.manuell === 'object' && t.manuell.at) return t.manuell
+    const e = mklWdEigenerPlan(pid), m = e && e.mt5Baseline && e.mt5Baseline.manuell
+    return (m && typeof m === 'object' && m.at) ? m : null
+  }
+  // -> true, wenn geschrieben. notiz null = Kennzeichen entfernen (zurück nach Überprüfen)
+  async function wdlManuellSchreiben(pid, notiz){
+    pid = String(pid); if(_wdlManBusy.has(pid)) return false
+    const t = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === pid)
+    const weg = notiz == null, alt = (t && t.manuell) || null
+    _wdlManBusy.add(pid); wdlRender()
+    try{
+      const eigen = mklWdEigenerPlan(pid)
+      let neu = null
+      if(eigen && typeof baselinePatch === 'function'){
+        let von = null; try{ const { data: { session } } = await supabase.auth.getSession(); von = (session && session.user && session.user.id) || null }catch(_){}
+        neu = weg ? null : { at: (alt && alt.at) || new Date().toISOString(), notiz: String(notiz || '').slice(0, 140), von }
+        const base = await baselinePatch(pid, { manuell: neu }, 'review')
+        if(!base) throw new Error('Plan nicht mehr in „Überprüfen" — nichts geschrieben')
+      } else {
+        const tok = await _pushTok(); if(!tok) throw new Error('nicht angemeldet')
+        const r = await fetch(`${WATCHER_HOME}/admin/wd-plaene`, { method: 'PATCH', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
+          body: JSON.stringify(weg ? { aktion: 'manuell_weg', plan_id: pid } : { aktion: 'manuell', plan_id: pid, notiz: String(notiz || '').slice(0, 140) }) })
+        const d = await r.json().catch(() => ({}))
+        if(!r.ok || !d.ok) throw new Error((r.status === 400 || r.status === 404) && !/review|Überprüfen/i.test(String(d.error || '')) ? `Backend kennt „manuell" noch nicht (${d.error || 'HTTP ' + r.status}) — kommt mit dem nächsten Railway-Stand` : (d.error || ('HTTP ' + r.status)))
+        neu = weg ? null : (d.manuell || { at: new Date().toISOString(), notiz: String(notiz || ''), von: null })
+      }
+      if(t) t.manuell = neu   // sofort sichtbar, der nächste Abruf holt den Backend-Stand
+      if(typeof atToast === 'function') atToast(weg ? 'Zurück nach „Überprüfen"' : (alt ? 'Notiz gespeichert' : 'In „Manuelle Arbeit" — nichts verbucht'), weg ? 'end' : 'ok')
+      return true
+    }catch(e){
+      if(typeof atToast === 'function') atToast('Nicht gespeichert: ' + String((e && e.message) || e), 'end')
+      return false
+    }finally{
+      _wdlManBusy.delete(pid)
+      wdlRender()
+      setTimeout(() => wdlLaden(true), 1200)
+    }
+  }
+  // Ablegen / „→ manuell": Notiz-Feld in der Zeile öffnen (noch nichts geschrieben — Enter speichert, Esc bricht ab)
+  function wdlManuellStart(pid){
+    pid = String(pid || ''); if(!pid || _wdlManBusy.has(pid)) return
+    const t = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === pid)
+    if(!t || t.status !== 'review' || wdlManuell(t)) return
+    _wdlManNotiz = { pid, neu: true }; wdlRender()
+  }
   function wdlAbhakenSperre(t){
     // seit 30.09.2026 (Finn wollte einen Echo-Trade von Mike abhaken, Knopf war gesperrt): Orbit/Echo/Topstep V2 aller IDs
     // seit 02.10.2026 auch Echo mit Fusion-Hedge (mt5) und Duplikum (tvplus) — Finn: „natürlich will ich auch Echo-Trades hier abhaken"
@@ -27617,6 +27695,22 @@
               : wt.versuche ? `${wt.versuche}. Leseversuch` : 'Puls liest die Balance 1–120 min nach dem Ende' })
         plZ = zelle('pl', '–' + slaveZ(t) + zuWegZ(t), { tip: num(d.pl_usd) != null ? `Demo ${sig(d.pl_usd, '$', 0)} · exakt nach der Nachlesung` : 'exakt nach der Nachlesung' })
         zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
+      } else if(t.status === 'review' && wdlManuell(t)){
+        // MANUELLE ARBEIT (08.10.2026): wie Überprüfen (Konto, P&L, Zu), in der Mitte Notiz (Klick = bearbeiten) · „seit TT.MM." ·
+        // Abhaken (derselbe Weg wie Überprüfen: mklWdErledigtOeffnen) · zurück (Kennzeichen weg). Frisch abgelegt = Notiz-Feld offen.
+        art = 'man'
+        const pid = wdlTid(t), m = wdlManuell(t), sperre = wdlAbhakenSperre(t), busy = _wdlManBusy.has(pid), edit = !!(_wdlManNotiz && _wdlManNotiz.pid === pid)
+        const pb = num(t.pl_balance) != null ? num(t.pl_balance) : num(t.master_pl && t.master_pl.wert)
+        kontoZ = wdlKontoZ(t)
+        const seitD = m.at ? new Date(m.at) : null, seit = seitD && !isNaN(seitD) ? `seit ${tag(seitD)}` : ''
+        const notizHtml = edit
+          ? `<input type="text" class="wdl-man-notiz" data-wdl-man-notiz="${escapeHtml(pid)}" value="${escapeHtml(String(m.notiz || ''))}" maxlength="140" placeholder="Notiz · Enter speichert, Esc bricht ab" autocomplete="off">`
+          : `<button type="button" class="wdl-man-text" data-wdl-man-edit="${escapeHtml(pid)}" title="${escapeHtml(m.notiz ? m.notiz + ' — klicken: Notiz bearbeiten' : 'Notiz schreiben')}">${m.notiz ? escapeHtml(String(m.notiz)) : '<i>Notiz …</i>'}</button>`
+        miZ = zelle('mi wdl-z-akt', `${notizHtml}${seit ? `<small class="wdl-man-seit" title="${escapeHtml('in Manuelle Arbeit seit ' + zeit(m.at))}">${seit}</small>` : ''}`
+          + (edit ? '' : `<button type="button" class="btn btn-ghost el-knopf" data-wdl-abhaken="${escapeHtml(pid)}"${(sperre || busy) ? ' disabled' : ''} title="${escapeHtml(sperre || 'Abhaken — P&L prüfen, verbuchen und Nachfolger anlegen')}">Abhaken</button>`
+          + `<button type="button" class="btn btn-ghost el-knopf" data-wdl-man-zurueck="${escapeHtml(pid)}"${busy ? ' disabled' : ''} title="Kennzeichen entfernen — zurück nach „Überprüfen"">zurück</button>`))
+        plZ = zelle('pl', sig(pb, '$', 2) + slaveZ(t) + zuWegZ(t), { f: col(pb), tip: num(t.pl_balance) != null ? (echo ? 'MT5-Balance' : 'Balance') + ' nachher − vorher' : pb != null ? 'P&L am Plan' : 'noch kein P&L — beim Abhaken eintragen' })
+        zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
       } else if(t.status === 'review'){
         // ÜBERPRÜFEN (30.09.2026, Finn: „Läuft → Wartet → Überprüfen (P&L ist eingetragen, ich muss nur noch abhaken) → Erledigt"):
         // P&L steht (Balance nachher − vorher, sonst der P&L am Plan), „Abhaken" ruft die vorhandene Erledigt-Aktion der Winning-
@@ -27626,7 +27720,9 @@
         const pb = num(t.pl_balance) != null ? num(t.pl_balance) : num(t.master_pl && t.master_pl.wert)
         const erg = wdlBestandenChip(t) || wdlBlowErg(t) || (wdlKontoWeg(t) ? WDL_KONTO_WEG_ERG : echo ? '' : d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : wdlLiqIstTag(t) ? WDL_TAGESLIMIT_ERG : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : '')
         kontoZ = wdlKontoZ(t)
-        miZ = zelle('mi wdl-z-akt', `${erg ? `<span>${erg}</span>` : ''}<button type="button" class="btn btn-ghost el-knopf" data-wdl-abhaken="${escapeHtml(pid)}"${sperre ? ' disabled' : ''} title="${escapeHtml(sperre || 'Abhaken — P&L prüfen und Trade erledigen')}">Abhaken</button>`,
+        // „→ manuell" (08.10.2026): Handy/Touch hat kein Drag — derselbe Weg wie das Ablegen in „Manuelle Arbeit"
+        miZ = zelle('mi wdl-z-akt', `${erg ? `<span>${erg}</span>` : ''}<button type="button" class="btn btn-ghost el-knopf" data-wdl-abhaken="${escapeHtml(pid)}"${sperre ? ' disabled' : ''} title="${escapeHtml(sperre || 'Abhaken — P&L prüfen und Trade erledigen')}">Abhaken</button>`
+          + `<button type="button" class="btn btn-ghost el-knopf" data-wdl-manuell="${escapeHtml(pid)}"${_wdlManBusy.has(pid) ? ' disabled' : ''} title="Nach „Manuelle Arbeit" — Notiz dazu, nichts wird verbucht (oder die Zeile dorthin ziehen)">→ manuell</button>`,
           { tip: echo ? '' : demoTip(d) })
         plZ = zelle('pl', sig(pb, '$', 2) + slaveZ(t) + zuWegZ(t), { f: col(pb), tip: num(t.pl_balance) != null ? (echo ? 'MT5-Balance' : 'Balance') + ' nachher − vorher' : pb != null ? 'P&L am Plan' : 'noch kein P&L — beim Abhaken eintragen' })
         zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
@@ -27647,7 +27743,8 @@
         }
         zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
       }
-      return `<div class="wdl-z wdl-z-${art}${echo ? ' wdl-z-echo' : ''}${an ? ' is-aktiv' : ''}${extra ? ' ' + extra : ''}" style="--wdl-id:${wdlIdFarbe(t)}" data-wdl-trade="${escapeHtml(wdlTid(t))}" title="${escapeHtml(tip)}">`
+      // Überprüfen-Zeilen sind ziehbar (08.10.2026, HTML5-Drag nach „Manuelle Arbeit"; Handler unten am Listen-Container)
+      return `<div class="wdl-z wdl-z-${art}${echo ? ' wdl-z-echo' : ''}${an ? ' is-aktiv' : ''}${extra ? ' ' + extra : ''}" style="--wdl-id:${wdlIdFarbe(t)}" data-wdl-trade="${escapeHtml(wdlTid(t))}"${art === 'pruef' ? ` draggable="true" data-wdl-drag="${escapeHtml(wdlTid(t))}"` : ''} title="${escapeHtml(tip)}">`
         + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><i class="wdl-pf">${escapeHtml(wdlWeg(t))}</i><small>${escapeHtml(konto)}</small></span>`
         + ri + miZ + kontoZ + plZ + zeitZ + '</div>'
     }
@@ -27690,8 +27787,18 @@
     // Echo hat kein Wartet: review geht direkt nach Überprüfen.
     const teile = arr => {
       const la = arr.filter(t => t.status === 'open'), rv = arr.filter(t => t.status === 'review'), er = arr.filter(t => t.status === 'completed')
-      const wa = rv.filter(t => !wdlIstEcho(t) && wdlWartet(t)), pr = rv.filter(t => !wa.includes(t))
-      return { la, wa, pr, er }
+      // Manuelle Arbeit (08.10.2026) geht vor Wartet/Überprüfen — das Kennzeichen zieht die Zeile aus beiden heraus (Zähler mit)
+      const ma = rv.filter(t => !!wdlManuell(t)), rest = rv.filter(t => !ma.includes(t))
+      const wa = rest.filter(t => !wdlIstEcho(t) && wdlWartet(t)), pr = rest.filter(t => !wa.includes(t))
+      return { la, wa, pr, ma, er }
+    }
+    // MANUELLE ARBEIT (08.10.2026): zwischen Überprüfen und Erledigt, neueste Ablage oben. Leer, aber Überprüfen hat Zeilen → ein
+    // schmaler, gestrichelter Kopf als Drop-Ziel (sonst gäbe es nichts, wohin man ziehen könnte); ohne beides nichts.
+    const nachAblage = arr => arr.sort((a, b) => String((wdlManuell(b) || {}).at || '').localeCompare(String((wdlManuell(a) || {}).at || '')))
+    const manuell = (g, a) => {
+      if(g.ma.length) return gruppe('Manuelle Arbeit', nachAblage(g.ma), ['Notiz', 'Konto', 'P&amp;L', 'Zu'], 'wdl-tab-konto wdl-tab-manuell', null, a.ma)
+      if(!g.pr.length) return ''
+      return `<div class="wdl-tab wdl-tab-konto wdl-tab-manuell wdl-tab-leer"><div class="wdl-z wdl-z-kopf"><span class="wdl-z-wer">Manuelle Arbeit · 0</span><span class="wdl-z-ri"></span><span class="wdl-man-hinweis">Zeile aus „Überprüfen" hierher ziehen oder „→ manuell"</span></div></div>`
     }
     // arr = was gezeigt wird (Modell + Person), alleArr = dieselbe Liste ohne Personen-Filter — nur für die Chips im Kopf
     const gruppen = (arr, alleArr) => {
@@ -27699,6 +27806,7 @@
       return gruppe('Läuft', nachStart(g.la), ['Spanne', 'P&amp;L', 'Seit'], 'wdl-tab-lauf', null, a.la)
         + gruppe('Wartet', nachEnde(g.wa), ['Nachlesung', 'P&amp;L', 'Zu'], '', null, a.wa)
         + gruppe('Überprüfen', nachEnde(g.pr), ['Ergebnis', 'Konto', 'P&amp;L', 'Zu'], 'wdl-tab-konto', null, a.pr)
+        + manuell(g, a)
         + gruppe('Erledigt', nachEnde(g.er), ['Ergebnis', 'Konto', 'P&amp;L', 'Zu'], 'wdl-tab-konto', 'erledigt', a.er)
     }
     // Wischstand der Chip-Reihen (Handy) über den Neuaufbau retten — die Liste wird im Lade-Takt komplett neu gezeichnet
@@ -27706,6 +27814,8 @@
     liste.innerHTML = trades.length ? gruppen(trades, modellTrades)
       : `<div class="mwd-leer">${wdl.daten ? (wdl.modell ? `Keine ${escapeHtml(wdl.modell)}-Trades im Zeitraum.` : 'Keine Trades im Zeitraum.') : (wdl.fehler ? 'Nicht ladbar: ' + escapeHtml(wdl.fehler) : 'Lade Radar…')}</div>`
     for(const e of liste.querySelectorAll('[data-wdl-kp]')){ const x = kpScroll.get(e.getAttribute('data-wdl-kp')); if(x) e.scrollLeft = x }
+    // Offenes Notiz-Feld (Manuelle Arbeit) nach dem Neuaufbau wieder fokussieren — Cursor ans Ende
+    if(_wdlManNotiz){ const i = liste.querySelector('[data-wdl-man-notiz]'); if(i){ i.focus(); try{ i.setSelectionRange(i.value.length, i.value.length) }catch(_){} } else _wdlManNotiz = null }
     try{ if(wdlAktiv() && typeof mklChartZeichnen === 'function') mklChartZeichnen() }catch(_){}
   }
   // Klick auf eine Karte (oder ihren Punkt) schaltet die Linien dieses Trades — eigener Handler am Listen-Container
@@ -27733,6 +27843,15 @@
       if(t) mklWdErledigtOeffnen(pid, t)
       return
     }
+    // Manuelle Arbeit (08.10.2026): „→ manuell" öffnet das Notiz-Feld, Notiz-Klick bearbeitet, „zurück" nimmt das Kennzeichen weg;
+    // Klicks ins Notiz-Feld selbst wählen die Zeile nicht aus
+    if(ev.target.closest('[data-wdl-man-notiz]')) return
+    const mn = ev.target.closest('[data-wdl-manuell]')
+    if(mn){ if(!mn.disabled) wdlManuellStart(mn.getAttribute('data-wdl-manuell')); return }
+    const me = ev.target.closest('[data-wdl-man-edit]')
+    if(me){ const pid = me.getAttribute('data-wdl-man-edit'); if(!_wdlManBusy.has(pid)){ _wdlManNotiz = { pid, neu: false }; wdlRender() } return }
+    const mz = ev.target.closest('[data-wdl-man-zurueck]')
+    if(mz){ if(!mz.disabled){ if(_wdlManNotiz && _wdlManNotiz.pid === mz.getAttribute('data-wdl-man-zurueck')) _wdlManNotiz = null; wdlManuellSchreiben(mz.getAttribute('data-wdl-man-zurueck'), null) } return }
     const c = ev.target.closest('[data-wdl-trade]'); if(!c) return
     const id = c.getAttribute('data-wdl-trade'), t = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === id); if(!t) return
     if(wdlIstEcho(t)) return   // Echo (CFD) hat keine Linien im NQ-Chart — keine Auswahl, kein Hochscrollen
@@ -27747,6 +27866,45 @@
         if(slot) window.scrollTo({ top: Math.max(0, slot.getBoundingClientRect().top + window.scrollY - (bar ? bar.getBoundingClientRect().height : 50) - 8), behavior: 'smooth' })
       }, 80)
     }
+  })
+  // Notiz-Feld (Manuelle Arbeit, 08.10.2026): Enter = speichern (leer erlaubt), Esc = abbrechen — frisch abgelegt heißt Esc: nichts
+  // geschrieben, die Zeile steht wieder in „Überprüfen"; bei einer bestehenden Notiz bleibt die alte.
+  document.getElementById('wdl-liste')?.addEventListener('keydown', ev => {
+    const i = ev.target.closest && ev.target.closest('[data-wdl-man-notiz]'); if(!i) return
+    const pid = i.getAttribute('data-wdl-man-notiz')
+    if(ev.key === 'Enter'){ ev.preventDefault(); const txt = i.value; _wdlManNotiz = null; wdlManuellSchreiben(pid, txt) }
+    else if(ev.key === 'Escape'){ ev.preventDefault(); _wdlManNotiz = null; wdlRender() }
+  })
+  // Drag & Drop (Manuelle Arbeit, 08.10.2026): Überprüfen-Zeile (draggable, data-wdl-drag) auf den Kasten „Manuelle Arbeit"
+  // (.wdl-tab-manuell) ziehen — eigene Verdrahtung am Listen-Container, kein Sammel-Handler. Hover-Zustand is-ziel am Kasten.
+  let _wdlDrag = null
+  document.getElementById('wdl-liste')?.addEventListener('dragstart', ev => {
+    const z = ev.target.closest && ev.target.closest('[data-wdl-drag]'); if(!z){ ev.preventDefault(); return }
+    _wdlDrag = z.getAttribute('data-wdl-drag'); z.classList.add('is-drag')
+    try{ ev.dataTransfer.setData('text/plain', _wdlDrag); ev.dataTransfer.effectAllowed = 'move' }catch(_){}
+  })
+  document.getElementById('wdl-liste')?.addEventListener('dragend', ev => {
+    _wdlDrag = null
+    const l = document.getElementById('wdl-liste'); if(!l) return
+    l.querySelectorAll('.is-drag').forEach(e => e.classList.remove('is-drag'))
+    l.querySelectorAll('.wdl-tab-manuell.is-ziel').forEach(e => e.classList.remove('is-ziel'))
+  })
+  document.getElementById('wdl-liste')?.addEventListener('dragover', ev => {
+    const k = ev.target.closest && ev.target.closest('.wdl-tab-manuell'); if(!k || !_wdlDrag) return
+    ev.preventDefault(); try{ ev.dataTransfer.dropEffect = 'move' }catch(_){}
+    k.classList.add('is-ziel')
+  })
+  document.getElementById('wdl-liste')?.addEventListener('dragleave', ev => {
+    const k = ev.target.closest && ev.target.closest('.wdl-tab-manuell'); if(!k) return
+    if(ev.relatedTarget && k.contains(ev.relatedTarget)) return
+    k.classList.remove('is-ziel')
+  })
+  document.getElementById('wdl-liste')?.addEventListener('drop', ev => {
+    const k = ev.target.closest && ev.target.closest('.wdl-tab-manuell'); if(!k) return
+    ev.preventDefault(); k.classList.remove('is-ziel')
+    let pid = _wdlDrag; try{ pid = pid || ev.dataTransfer.getData('text/plain') }catch(_){}
+    _wdlDrag = null
+    if(pid) wdlManuellStart(pid)
   })
   // Chart umhängen: #mkl-wrap wohnt in „Markt live"; Live Trades leiht ihn aus (kein zweiter Chart). Heimat = Platz vor #mkl-wd.
   const _mklHeimat = (() => { const w = document.getElementById('mkl-wrap'); return w ? { parent: w.parentNode, next: w.nextElementSibling } : null })()
@@ -40192,7 +40350,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1165'
+  const OS_TAB_BUILD = '2026-09-22.1166'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
