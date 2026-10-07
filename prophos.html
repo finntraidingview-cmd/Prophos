@@ -2337,32 +2337,38 @@
      Steht HINTER den #dashboard-view-/#af-view-Regeln (gleiche Spezifität, die spätere gewinnt). Kacheln wie .af-kpis, zwei Panels (.af-grid-Maße), Zeilen = .adm-row wie dort. Rechte Zahl „N kaufen" rot (jetzt) bzw. gelb (bald),
      „gedeckt" grau. Personen-Balken: je Firma ein gleich breites Stück (2 px Lücke), voll = gesichert, hell = Funnel erwartet. */
   #vr-view .vr-kpis{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+  #vr-view .vr-kpis .kpi-value{font-size:18px;font-weight:600} #vr-view .vr-kpis .kpi-label{font-size:11.5px} #vr-view .vr-kpis .kpi-delta{font-size:11.5px}
   #vr-view .vr-grid{grid-template-columns:minmax(0,2.1fr) minmax(0,1fr);align-items:start}
   @media (max-width:960px){#vr-view .vr-grid{grid-template-columns:minmax(0,1fr)}}
   /* ENTSCHLACKT (Finn 08.10.2026): luftigere Zeilen, Schrift ≥ 13 px, Dringlichkeits-Punkt statt Score-Spalte */
   #vr-view .adm-row{grid-template-columns:minmax(0,1.3fr) minmax(48px,1.4fr) 82px 14px}
   #vr-view .adm-row.vr-row-id{grid-template-columns:minmax(0,1.2fr) minmax(60px,1.6fr) 22px 96px 14px;padding:11px 12px;column-gap:12px;align-items:center}
   #vr-view .adm-row.vr-row-f{grid-template-columns:minmax(0,1.2fr) minmax(60px,1.6fr) 80px;padding:11px 12px;column-gap:12px;align-items:center}
-  #vr-view .adm-row .adm-row-name .nm{font-size:14px}
-  #vr-view .adm-row .adm-row-name small{font-size:13px;color:var(--sub)}
-  #vr-view .adm-row .adm-val{font-size:14px;font-variant-numeric:normal;white-space:nowrap;text-align:right}
+  /* RUNDE 2 (Finn 08.10.2026: „Schrift allgemein zu groß, soll normale Größe sein"): Grundgröße 13 px, Namen 14 px, nichts fett außer der Kaufzahl */
+  #vr-view .adm-row .adm-row-name .nm{font-size:14px;font-weight:500}
+  #vr-view .adm-row .adm-row-name small{font-size:12px;color:var(--sub)}
+  #vr-view .adm-row .adm-val{font-size:13px;font-weight:400;font-variant-numeric:tabular-nums;white-space:nowrap;text-align:right}
+  #vr-view .adm-row .adm-val b{font-weight:700}
   #vr-view .vr-dr{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--surface-tint);border:1px solid var(--border)}
   #vr-view .vr-dr-hoch{background:var(--vr-rot,#D92D20);border-color:transparent} #vr-view .vr-dr-mittel{background:var(--vr-amber,#F79009);border-color:transparent}
   #vr-view .vr-dr-niedrig{background:var(--sub-2);border-color:transparent} #vr-view .vr-dr-leer{opacity:.5}
   #vr-view .vr-sc{display:flex;align-items:center;justify-content:center}
   #vr-view .vr-info{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;border:1px solid var(--border);color:var(--sub);font-size:12px;font-weight:500;margin-left:6px;vertical-align:2px;cursor:help}
-  #vr-view .vr-fz-auftrag{grid-area:auftrag;font-size:13.5px;color:var(--ink);font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #vr-view .vr-fz-auftrag{grid-area:auftrag;display:flex;align-items:baseline;gap:6px;font-size:13px;color:var(--ink);font-weight:400;min-width:0;overflow:hidden;white-space:nowrap}
+  #vr-view .vr-fz-auftrag b{font-weight:700} #vr-view .vr-fz-auftrag small{font-size:12px;color:var(--sub);overflow:hidden;text-overflow:ellipsis}
+  #vr-view .vr-fz-bestand{color:var(--sub);white-space:nowrap} #vr-view .vr-fz-trenn{color:var(--sub-2)}
+  #vr-view .vr-neu{font-style:normal;font-size:11px;font-weight:600;color:#B54708;background:rgba(247,144,9,.13);border-radius:6px;padding:1px 6px;margin-left:6px}
   #vr-view .vr-fz-grau{color:var(--sub-2);font-weight:500}
-  #vr-view .vr-bknopf.vr-jetzt{font-size:13px;font-weight:600;color:var(--ink);padding:5px 11px}
-  #vr-view .vr-fz-gedeckt{display:block;width:100%;text-align:left;border:0;background:none;padding:9px 0 4px;font:inherit;font-size:13px;color:var(--sub-2);cursor:pointer}
+  #vr-view .vr-bknopf.vr-jetzt{font-size:12.5px;font-weight:500;color:var(--ink);padding:4px 10px}
+  #vr-view .vr-fz-gedeckt{display:block;width:100%;text-align:left;border:0;background:none;padding:9px 0 4px;font:inherit;font-size:12.5px;color:var(--sub-2);cursor:pointer}
   #vr-view .vr-fz-gedeckt:hover{color:var(--sub)}
   #vr-view #vr-firmen .adm-row{grid-template-columns:minmax(0,1.6fr) minmax(36px,1fr) 74px}
   #vr-view .adm-row-name small{white-space:normal}
   #vr-view .adm-row-btn.is-on{background:var(--surface-tint)}
   #vr-view .adm-row-btn.is-on .adm-row-name{color:var(--ink)}
-  #vr-view .adm-val.is-jetzt{color:#B42318;font-weight:700}
-  #vr-view .adm-val.is-bald{color:#B54708;font-weight:700}
-  #vr-view .adm-val.is-null{color:var(--sub-2);font-weight:500}
+  #vr-view .adm-val.is-jetzt{color:#B42318;font-weight:400}
+  #vr-view .adm-val.is-bald{color:#B54708;font-weight:400}
+  #vr-view .adm-val.is-null{color:var(--sub-2);font-weight:400}
   #vr-view #vr-ids .adm-pct{color:var(--sub);font-size:13px;text-align:center}
   #vr-view .adm-track.af-drei{display:flex;background:var(--surface-tint)}
   #vr-view .af-drei .adm-fill{border-radius:0;flex:none;box-sizing:border-box}
@@ -2370,7 +2376,7 @@
   #vr-view .af-legende{display:inline-flex;align-items:center;gap:4px 10px;font-size:11px;color:var(--sub-2);white-space:nowrap}
   #vr-view .af-legende i{display:inline-block;width:7px;height:7px;border-radius:2px;margin-right:4px;vertical-align:0}
   #vr-view .adm-track.vr-seg{display:flex;gap:2px;background:none}
-  #vr-view .vr-seg > span{flex:1 1 0;position:relative;height:12px;border-radius:999px;background:var(--surface-tint);overflow:hidden;min-width:8px}   /* größer (08.10.2026) */
+  #vr-view .vr-seg > span{flex:1 1 0;position:relative;height:8px;border-radius:999px;background:var(--border);overflow:hidden;min-width:8px}   /* Runde 2: EIN Balken „Vorrat gegen Ziel", Spur deutlich grau */
   #vr-view .vr-seg i{position:absolute;left:0;top:0;bottom:0}
   #vr-view .vr-seg i.erw{opacity:.32}
   /* aufgeklappte Person: je Firma eine kompakte Zeile im festen Raster [Firma | Kette | Ziel | Menge | Pille + Knöpfe] */
@@ -2379,7 +2385,7 @@
     grid-template-areas:"firma kette bar menge rechts";column-gap:12px;align-items:center;padding:7px 0;border-top:1px solid var(--border-soft);font-size:13px;cursor:pointer}
   #vr-view .vr-fz-box > :first-child{border-top:none}
   #vr-view .vr-fz:hover .vr-fz-firma span{text-decoration:underline;text-decoration-color:var(--sub-2);text-underline-offset:2px}
-  #vr-view .vr-fz-firma{grid-area:firma;display:flex;align-items:center;gap:7px;min-width:0;font-weight:500}
+  #vr-view .vr-fz-firma{grid-area:firma;display:flex;align-items:center;gap:7px;min-width:0;font-weight:400;font-size:13px}
   #vr-view .vr-fz-firma i{width:8px;height:8px;border-radius:3px;flex:none}
   #vr-view .vr-fz-firma span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   #vr-view .vr-fz-kette{grid-area:kette;display:flex;flex-wrap:wrap;align-items:center;gap:3px;min-width:0}
@@ -2395,6 +2401,7 @@
   @media (max-width:760px){
     /* Handy: Personen-Zeile wie #af-view am Handy (Zahl fest, Balken bündig), Firmenzeile zweizeilig */
     #vr-view .adm-dist .adm-row{grid-template-columns:minmax(0,1.25fr) minmax(40px,1fr) 70px 12px;gap:10px}
+    #vr-view .adm-row.vr-row-id{grid-template-columns:minmax(0,1.1fr) minmax(36px,.8fr) 14px 98px 10px;gap:8px;padding:10px 10px}   /* Handy: „nachkaufen 12" bleibt ganz sichtbar */
     #vr-view #vr-firmen .adm-row{grid-template-columns:minmax(0,1.4fr) minmax(36px,1fr) 70px;gap:10px}
     #vr-view .vr-fz{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"firma rechts" "auftrag auftrag" "bar bar";row-gap:6px;column-gap:10px}
     #vr-view .vr-fz-bar{max-width:none}
@@ -33144,6 +33151,9 @@
       renderOverviewKpis()
       updateSidebarBadges()
       if(typeof renderPairs === 'function') renderPairs()
+      // Vorrat-Seite nachziehen (08.10.2026, Finn: drei frisch gekaufte Konten fehlten im Vorrat): ist die Seite schon geladen, sofort
+      // neu rechnen lassen (POST rechnen = frischer Lauf) — sonst holt sie beim Öffnen ohnehin frisch
+      try{ if(typeof vrLaden === 'function' && typeof _vr !== 'undefined' && _vr.daten) vrLaden(true) }catch(_){}
 
       // Kam der Edit aus dem Trade-Start-Preflight ("Account bearbeiten"-Fix-Button)?
       // → Check nach dem Speichern automatisch neu anlaufen lassen.
@@ -40748,7 +40758,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1208'
+  const OS_TAB_BUILD = '2026-09-22.1209'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -60300,15 +60310,16 @@
       const sub = hatEur ? `Vorrat${nb}${vrEur(g.vorrat).replace(' ', nb)}` : ''
       const tipp = [ps?.text || '', g.jetzt.length ? `${g.jetzt.length} ${g.jetzt.length === 1 ? 'Firma' : 'Firmen'} jetzt` : '', g.bald.length ? `${g.bald.length} bald` : '',
         !g.jetzt.length && !g.bald.length ? ohneZahl : ''].filter(Boolean).join(' · ')
-      // Balken: je freie Firma mit Ziel ein gleich breites Stück, Füllung = Anteil an der Untergrenze (gesichert voll, Funnel hell)
-      const seg = g.fr.filter(x => x.f?.ziel).sort((a, b) => a.z.firma.localeCompare(b.z.firma, 'de')).map(x => {
-        const q = vrZielZahlen(x.z, x.f), voll = n => Math.max(0, Math.min(100, q.von ? n / q.von * 100 : 100))
-        const fa = vrFirmaFarbe(x.z.firma)
-        return `<span title="${vrEsc(x.z.firma + ': ' + vrZielTitel(x.z, x.f))}"><i class="erw" style="width:${voll(q.erw)}%;background:${vrFirmaHell(x.z.firma)}"></i><i style="width:${voll(q.ges)}%;background:${fa}"></i></span>`
-      }).join('')
+      // EIN Balken „Vorrat gegen Ziel" (Runde 2, Finn 08.10.2026: „man erkennt nicht, was es einem sagen will" — die kleinen Mehrfach-Balken
+      // je Firma sind weg): Summe der Vorrat-Anteile ÷ Zahl der Firmen mit Ziel (gesichert voll, mit Funnel erwartet hell); Tooltip je Firma
+      const mitZiel = g.fr.filter(x => x.f?.ziel && vrZielZahlen(x.z, x.f)?.von)
+      const anteile = mitZiel.map(x => { const q = vrZielZahlen(x.z, x.f); return { ges: Math.min(1, q.ges / q.von), erw: Math.min(1, q.erw / q.von), t: x.z.firma + ': ' + vrZielTitel(x.z, x.f) } })
+      const mittel = k => anteile.length ? anteile.reduce((s, a) => s + a[k], 0) / anteile.length * 100 : 0
+      const seg = anteile.length ? `<span title="${vrEsc('Vorrat gegen Ziel über ' + anteile.length + ' Firmen\n' + anteile.map(a => a.t).join('\n'))}"><i class="erw" style="width:${mittel('erw').toFixed(1)}%;background:${vrFirmaHell('')}"></i><i style="width:${mittel('ges').toFixed(1)}%;background:var(--vr-akzent)"></i></span>` : ''
       const VR_PZ = { daten_fehlen: 'kein Vorschlag', pausiert: 'pausiert', gesperrt: 'gesperrt', pausiert_gesperrt: 'pausiert', gedeckt: 'gedeckt' }
-      // „7 kaufen" fett statt „heute 7 / gesamt 30" (Finn 08.10.2026: „Dieses ‚heute' immer weg. Einfach, was man kaufen sollte.")
-      const val = g.n ? `${g.n}${nb}kaufen` : (ps ? VR_PZ[ps.zustand] || 'gedeckt' : { 'alles pausiert/gesperrt': 'pausiert', 'kein Vorschlag — Daten fehlen': 'kein Vorschlag' }[ohneZahl] || 'gedeckt')
+      // EINE klare Aussage (Runde 2, Finn 08.10.2026: „wie viel ich heute kaufen soll, soll einfach dastehen: nachkaufen, fertig"): „nachkaufen 8"
+      // (nur die Zahl fett) oder „gedeckt" / „pausiert" / „kein Vorschlag"
+      const val = g.n ? `nachkaufen${nb}<b>${g.n}</b>` : (ps ? VR_PZ[ps.zustand] || 'gedeckt' : { 'alles pausiert/gesperrt': 'pausiert', 'kein Vorschlag — Daten fehlen': 'kein Vorschlag' }[ohneZahl] || 'gedeckt')
       const valKl = g.jetzt.length ? 'is-jetzt' : g.n ? 'is-bald' : 'is-null'
       return `<button type="button" class="adm-row adm-row-btn vr-row-id${auf ? ' is-on' : ''}" data-vr-auf="${vrEsc(uid)}" title="${vrEsc(g.p.name)}${tipp ? ' · ' + vrEsc(tipp) : ''} — ${auf ? 'zuklappen' : 'Firmen aufklappen'}">
         <div class="adm-row-name"><span class="adm-dot" style="background:${farbe}"></span><span class="nm">${vrEsc(g.p.name)}</span>${sub ? `<small>${sub}</small>` : ''}</div>
@@ -60342,7 +60353,7 @@
       + `<div class="kpis vr-kpis">${kpis}</div>`
       // KI-Absatz nicht mehr als Fließtext über der Seite — nur ⓘ mit Tooltip am Panel-Titel (Finn 08.10.2026)
       + `<div class="grid-2 vr-grid">
-          <div class="panel"><div class="panel-head"><div><div class="panel-title">${vrEsc(titel)}${d.ki_text ? ` <span class="vr-info" tabindex="0" title="${vrEsc(d.ki_text)}${vrUhr(d.ki_text_um) ? ' · Text von ' + vrUhr(d.ki_text_um) : ''}">ⓘ</span>` : ''}</div><div class="panel-sub">Balken je Firma: voll gesichert, hell mit Funnel. Klick klappt auf.</div></div></div>
+          <div class="panel"><div class="panel-head"><div><div class="panel-title">${vrEsc(titel)}${d.ki_text ? ` <span class="vr-info" tabindex="0" title="${vrEsc(d.ki_text)}${vrUhr(d.ki_text_um) ? ' · Text von ' + vrUhr(d.ki_text_um) : ''}">ⓘ</span>` : ''}</div><div class="panel-sub">Vorrat gegen Ziel (voll gesichert, hell mit Funnel) · Klick klappt die Firmen auf</div></div></div>
             <div class="adm-dist" id="vr-ids">${ids.map(idZeile).join('') || '<div class="adm-empty">Keine ID für diese Auswahl.</div>'}</div></div>
           <div class="panel"><div class="panel-head"><div><div class="panel-title">Je Firma</div><div class="panel-sub">Klick filtert links und die Kaufliste</div></div>${legende}</div>
             <div class="adm-dist" id="vr-firmen">${fListe.map(fZeile).join('') || '<div class="adm-empty">Keine Firma.</div>'}</div></div>
@@ -60406,15 +60417,21 @@
       const z = x.z, f = x.f, key = z.user_id + '|' + z.firma, offen = _vr.offen.has(key), fa = vrFirmaFarbe(z.firma)
       const gef = vrGef(z)
       const erkl = [z.satz ? (z.quelle === 'ki' ? '🤖 ' : '') + z.satz : '', z.ki_text || ''].filter(Boolean).join(' · ')
+      // BESTAND LIVE (Bug Finn 08.10.2026, Moritz: drei frisch gekaufte Tradeify-Konten fehlten 20 min lang): konten_n/bestand_n kommen aus
+      // Stufe 1 (jede Anfrage liest accounts frisch), die Kontenliste (z.konten) aus dem Lauf (alle 6 h) — mehr Konten als in der Liste =
+      // „neu, ohne Lauf" ehrlich dazusagen statt sie zu verschweigen; der Server stößt dann von selbst einen Lauf an (app.py)
+      const nLive = vrN(z), nListe = vrListe(z).length, neu = Math.max(0, nLive - nListe)
+      const nVorrat = z.bestand_n != null ? Number(z.bestand_n) : vrListe(z).filter(k => k.im_bestand).length
+      const bestandTxt = `<span class="vr-fz-bestand" title="${vrEsc(`${nLive} ${nLive === 1 ? 'Konto' : 'Konten'} bei ${z.firma}: ${nVorrat} im Vorrat (Zieltyp), ${Math.max(0, nLive - nVorrat)} unterwegs (Challenge/Phase)${neu ? ` · ${neu} neu seit dem letzten Lauf — zählt nach dem nächsten Lauf (läuft von selbst)` : ''}`)}">${nVorrat}${VR_NB}im${VR_NB}Vorrat${neu ? `<em class="vr-neu">${neu}${VR_NB}neu</em>` : ''}</span>`
       let auftrag
-      if(vrKauf(z)) auftrag = vrEsc(vrMenge(z, f))
+      if(vrKauf(z)) auftrag = `nachkaufen${VR_NB}<b>${vrEsc(String(z.nachkauf?.n || 0))}</b><small title="${vrEsc(vrMenge(z, f))}">${vrEsc(vrMenge(z, f, true))}</small>`
       else if(x.zst === 'bestellt') auftrag = `✓ ${vrEsc(z.bestellt.anzahl || '')} × ${vrEsc(z.bestellt.einheit || z.nachkauf?.einheit || 'Konto')} bestellt`
       else if(x.zst === 'daten') auftrag = `<span class="vr-fz-grau" title="${vrEsc([z.sperre === 'unsicher' ? 'Lesung älter als 2 Handelstage — kein Vorschlag' : 'Konten ohne Lesung — kein Vorschlag', erkl].filter(Boolean).join(' · '))}">Daten fehlen</span>`
       else if(x.zst === 'pausiert') auftrag = '<span class="vr-fz-grau">pausiert</span>'
       else auftrag = '<span class="vr-fz-grau">gedeckt</span>'
       return `<div class="vr-fz${x.zst === 'pausiert' ? ' pausiert' : ''}" style="--vr-ft:${fa}" data-vr-o="${vrEsc(key)}" title="Klick: ${offen ? 'zuklappen' : 'Rechnung und Konten'}">
         <div class="vr-fz-firma"><i style="background:${fa}"></i><span${erkl ? ` title="${vrEsc(erkl)}"` : ''}>${vrEsc(z.firma)}</span>${gef ? `<em class="vr-gef" title="${gef} Vorrats-Konto nah am Boden">⚠${VR_NB}${gef}</em>` : ''}</div>
-        <div class="vr-fz-auftrag">${auftrag}</div>
+        <div class="vr-fz-auftrag">${bestandTxt}<span class="vr-fz-trenn">·</span>${auftrag}</div>
         <div class="vr-fz-bar">${vrFzBar(z, f, fa)}</div>
         <div class="vr-fz-rechts">${vrKauf(z) ? best(z) : x.zst === 'bestellt' ? best(z, true) : ''}${x.zst === 'pausiert' ? knopf(z, 'frei', VR_PLAY, 'wieder freischalten') : knopf(z, 'pausiert', VR_PAUSE, 'pausieren (gerade nichts kaufen)')}${knopf(z, 'gesperrt', VR_SCHLOSS, 'sperren')}</div>
         ${offen ? vrZellDetail(z, f, fa) : ''}
@@ -60913,8 +60930,10 @@
     const teile = (Array.isArray(z.score_teile) ? z.score_teile : []).filter(x => nicht0(x) && !doppelt(x))
     const mehr = vrTeileHtml({ score_teile: teile }) + vrEurHtml({ ...z, bestand_eur: z.bestand_eur || null, funnel_eur: z.funnel_eur || null }) + vrHinweisHtml(z)
       + (z.ki_text ? `<div class="vr-kz-txt">${vrEsc(z.ki_text)}</div>` : '')
-    return `<div class="vr-zd">${vrZellKopf(z, f, farbe)}${vrZellBar(z, f, farbe)}<div class="vr-zd-konten">${vrKontenTabelle(z, f)}</div>`
-      + (mehr ? `<details class="vr-zd-mehr"><summary>Details</summary>${mehr}</details>` : '') + '</div>'
+    // Runde 2 (Finn 08.10.2026): beim Aufklappen zuerst nur die Konten — Simulations-Kacheln (Ziel/Vorrat/Unterwegs/Chance/Kaufplan) und
+    // Rechnung hinter „Details ▸"
+    return `<div class="vr-zd"><div class="vr-zd-konten">${vrKontenTabelle(z, f)}</div>`
+      + `<details class="vr-zd-mehr"><summary>Details</summary>${vrZellKopf(z, f, farbe)}${vrZellBar(z, f, farbe)}${mehr}</details></div>`
   }
 
 
