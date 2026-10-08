@@ -3440,6 +3440,28 @@
     #dashboard-view .pz-akt .tc2-btn{padding:5px 8px;border-radius:8px}
     #dashboard-view .pz-akt .tc2-ab{padding:5px 6px}
   }
+  /* RADAR-OPTIK der Plan-Zeilen (o.stil/opt.stil 'radar', Admin → Trade-Planer „Zu bestätigen"/„Wartet auf Start", 08.10.2026): Maße wie die
+     Radar-Zeile .wdl-z (11/16 px, 13 px, Spaltenabstand 16 px), Konto zweizeilig, BUY/SELL-Chip wie .wdl-z-ri em, keine Größe-Spalte. */
+  #dashboard-view .pz-tab.pz-radar{grid-template-columns:92px minmax(170px,.9fr) 124px minmax(220px,1.4fr) 76px 76px 76px 150px;column-gap:16px}   /* Start 92 px: „09.10. 14:00" (Zeile für morgen) */
+  #dashboard-view .pz-radar .pz-z{min-height:50px;padding:11px 16px}
+  #dashboard-view .pz-radar .pz-z-kopf{min-height:0;padding-top:9px;padding-bottom:8px}
+  #dashboard-view .pz-radar .pz-konto2{display:flex;flex-direction:column;gap:2px;line-height:1.25}
+  #dashboard-view .pz-radar .pz-k1{display:flex;align-items:center;gap:6px;min-width:0;overflow:hidden;white-space:nowrap}
+  #dashboard-view .pz-radar .pz-k1 b{font-weight:600;color:var(--ink)} #dashboard-view .pz-radar .pz-k1 .pz-typ{margin:0}
+  #dashboard-view .pz-radar .pz-konto2 small.pz-k2{margin:0;font-size:12.5px;color:var(--sub)}
+  #dashboard-view .pz-radar .pz-z:not(.pz-z-kopf) > .pz-ri{display:flex;align-items:center;font-weight:400;color:var(--sub);overflow:visible}
+  #dashboard-view .pz-radar .pz-ri em{display:inline-block;min-width:34px;margin-right:6px;padding:1px 0;border-radius:4px;background:var(--surface-tint);color:var(--ink-2);font-style:normal;font-size:10.5px;font-weight:600;letter-spacing:.03em;text-align:center}
+  #dashboard-view .pz-radar .pz-ri em.is-buy{background:rgba(18,183,106,.12);color:#047857} #dashboard-view .pz-radar .pz-ri em.is-sell{background:rgba(240,68,56,.10);color:#b91c1c}
+  #dashboard-view .pz-radar .pz-ri .pz-gr{text-align:left;color:var(--sub)}
+  #dashboard-view .pz-radar .pz-ri .pz-w{cursor:pointer;border-radius:5px;margin:-2px -5px;padding:2px 5px;transition:background .12s}
+  #dashboard-view .pz-radar .pz-ri .pz-w:hover,#dashboard-view .pz-radar .pz-ri .pz-w.pz-w-an{background:var(--surface-tint);box-shadow:inset 0 0 0 1px var(--border)}
+  @media (max-width:1359px){ #dashboard-view .pz-tab.pz-radar{grid-template-columns:92px minmax(150px,1fr) 116px 200px 76px 76px 150px;column-gap:12px} }
+  @media (max-width:820px){
+    #dashboard-view .pz-tab.pz-radar{display:block}
+    #dashboard-view .pz-radar .pz-z{padding:10px 12px}
+    #dashboard-view .pz-radar .pz-z > .pz-konto2{flex:1 1 0;min-width:0}
+    #dashboard-view .pz-radar .pz-ri em{min-width:28px;margin-right:4px;letter-spacing:0}
+  }
 
   /* ── Kompakte Trade-Zeilen (tc2) — dichter, mehr Infos, mit Live-Animation ── */
   #dashboard-view .tc2{display:flex;align-items:center;gap:11px;padding:8px 13px;background:var(--surface);border:1px solid var(--border);border-radius:10px;transition:border-color .12s,background .12s;position:relative;overflow:hidden}
@@ -37057,6 +37079,27 @@
     // wo ich das anpassen kann"): nur mit o.werte (Aufrufer: noch nicht gestartet + Recht) — Kasten pzwOeffnen, Klick über tplKlick
     const pzw = o.werte ? ` data-pzw-plan="${escapeHtml(String(p.id))}" data-pzw-tp="${Number(p.masterTp) > 0 ? Number(p.masterTp) : ''}" data-pzw-sl="${Number(p.masterSl) > 0 ? Number(p.masterSl) : ''}" data-pzw-gr="${menge || ''}" data-pzw-lot="${p.route === 'mt5v2' ? '1' : ''}" data-pzw-sym="${escapeHtml(String(p.masterSymbol || '').replace(/[FGHJKMNQUVXZ]\d{1,2}$/, ''))}" data-pzw-ppp="${o.werte.ppp > 0 ? o.werte.ppp : ''}"` : ''
     const pzwZ = art => pzw ? ` pz-w"${pzw} data-pzw="${art}" title="Klicken zum Ändern"` : '"'
+    // RADAR-OPTIK (o.stil 'radar', 08.10.2026, Finn: „im Admin die geplanten Trades etwas anpassen" — wie die Läuft-Zeilen im Radar): Konto
+    // zweizeilig (Firma + Typ-Chip oben, „150k …0530" darunter), Richtung als BUY/SELL-Chip mit „3 × NQ" / „1,5 × Lot" (Mini-Popup der Größe
+    // bleibt an der Menge), keine eigene Größe-Spalte. Kopf + Raster liefert planFirmenBloecke mit opt.stil 'radar'. Ohne o.stil unverändert.
+    if(o.stil === 'radar'){
+      const firmaR = escapeHtml(typeof tplFirmaKurz === 'function' ? tplFirmaKurz(p.masterFirm) : String(p.masterFirm || '–'))
+      const k2 = nummer ? `${groesse ? (groesse / 1000) + 'k ' : ''}…${escapeHtml(nummer.slice(-4))}` : escapeHtml(String(o.name || '–'))
+      const em = `<em class="${p.richtung === 'buy' ? 'is-buy' : p.richtung === 'sell' ? 'is-sell' : ''}">${p.richtung === 'buy' ? 'BUY' : p.richtung === 'sell' ? 'SELL' : '?'}</em>`
+      const grR = !menge ? '–' : p.route === 'mt5v2' ? menge.toLocaleString('de-DE', { maximumFractionDigits: 2 }) + ' × Lot'
+        : menge.toLocaleString('de-DE') + ' × ' + escapeHtml(String(p.masterSymbol || '').replace(/[FGHJKMNQUVXZ]\d{1,2}$/, '') || 'NQ')
+      return `
+      <div class="pz-z pz-radar-z${p.autoPlan ? '' : ' pz-z-hand'}" data-plan-id="${p.id}">
+        <span class="pz-zeit">${zeit}</span>
+        <span class="pz-konto pz-konto2" title="${escapeHtml(kontoTitel)}" data-ak-konto="${escapeHtml(String(p.id || ''))}"><span class="pz-k1"><b>${firmaR}</b>${typChip}</span><small class="pz-k2">${k2}</small></span>
+        <span class="pz-ri">${em}<span class="pz-gr${pzwZ('gr')}>${grR}</span></span>
+        <span class="pz-bal">${balHtml}</span>
+        <span class="pz-art" title="${notiz ? escapeHtml(planSchrittTip(notiz, Number(p.masterTp))) : ''}">${notiz ? escapeHtml(notiz.art) + (notiz.gekappt ? ' · SL gekappt' : '') : ''}</span>
+        <span class="pz-tp${p.masterTp > 0 ? '' : ' is-leer'}${pzwZ('tp')}>${p.masterTp > 0 ? de(p.masterTp) + ' $' : '–'}</span>
+        <span class="pz-sl${p.masterSl > 0 ? '' : ' is-leer'}${pzwZ('sl')}>${p.masterSl > 0 ? de(p.masterSl) + ' $' : '–'}</span>
+        <span class="pz-akt">${o.chips || ''}${o.akt || ''}</span>
+      </div>`
+    }
     return `
       <div class="pz-z${p.autoPlan ? '' : ' pz-z-hand'}" data-plan-id="${p.id}">${o.wer ? `
         <span class="pz-wer">${o.wer}</span>` : ''}
@@ -37117,7 +37160,10 @@
           ${nichtLive ? `${sep} <span class="pz-warn">⚠ ${nichtLive} Balance${nichtLive === 1 ? '' : 's'} nicht live</span>` : ''}
           ${zeilen.length && !opt.ohneHinweis ? `<span class="tc2-chip tc2-dir-hint" data-dir-firm="${escapeHtml(g.firma === '–' ? '' : g.firma)}" style="display:none;background:rgba(245,158,11,.14);color:#b45309"></span>` : ''}
         </div>`
-        + (zeilen.length ? `<div class="pz-tab${opt.mitId ? ' pz-mit-id' : ''}">
+        + (zeilen.length && opt.stil === 'radar' ? `<div class="pz-tab pz-radar">
+          <div class="pz-z pz-z-kopf"><span>Start</span><span>Konto</span><span class="pz-ri">Richtung</span><span>Balance → Ziel</span><span class="pz-art">Schritt</span><span class="pz-tp">TP</span><span class="pz-sl">SL</span><span></span></div>`
+          + zeilen.map(p => opt.zeile(p)).join('') + `</div>`
+        : zeilen.length ? `<div class="pz-tab${opt.mitId ? ' pz-mit-id' : ''}">
           <div class="pz-z pz-z-kopf">${opt.mitId ? '<span>ID</span>' : ''}<span>Start</span><span>Konto</span><span class="pz-ri">Richtung</span><span>Balance → Ziel</span><span class="pz-art">Schritt</span><span class="pz-gr">Größe</span><span class="pz-tp">TP</span><span class="pz-sl">SL</span><span></span></div>`
           + zeilen.map(p => opt.zeile ? opt.zeile(p) : renderTradePlanCard(p)).join('') + `</div>` : '')
         + karten.map(p => renderTradePlanCard(p)).join('')
@@ -41009,7 +41055,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1260'
+  const OS_TAB_BUILD = '2026-09-22.1261'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -60702,6 +60748,22 @@
   function apIdsBlockHtml(art, liste, kopf){
     const leer = { offen: 'Nichts offen.', warten: 'Nichts bestätigt.', laeuft: 'Nichts läuft.' }[art]
     if(!liste.length) return `<div class="ap-adm-karte ap-geplant ap-gr-${art}">${kopf}<div style="color:var(--sub);font-size:12.5px;padding:2px 0 6px">${leer}</div></div>`
+    // LÄUFT = RADAR-ZEILEN (08.10.2026, Finn: „Für den Trade-Planer unter Admin das Ganze auch anpassen"): statt Firmen-Blöcken dieselben Zeilen
+    // wie unter „P&L hypothetisch heute" (laufZeilenHtml) — ID-Punkt · Person · Weg · Konto kurz · BUY/SELL × Größe · Spanne Liq → TP · P&L $ + € ·
+    // seit. P&L/€ aus tplHypo (Tag heute, ID-Sicht), Spanne/Start aus der live-trades-Zeile. Klick = Konto-Popup (apKontoOeffnen mit quelle).
+    if(art === 'laeuft' && typeof laufZeilenHtml === 'function' && typeof tplLaufEintraege === 'function'){
+      const D = apIdsHeute(); let hz = []; try{ hz = tplHypo(D).zeilen || [] }catch(_){}
+      const hJe = new Map(hz.map(z => [String(z.plan_id), z]))
+      const zl = liste.map(e => { const t = e.t || {}, id = String(e.z.plan_id)
+        return hJe.get(id) || { plan_id: id, key: id, user: e.z.user || t.user, user_id: e.z.user_id, firma: e.z.firma, konto: e.z.konto, ende4: e.z.ende4, richtung: e.z.richtung,
+          kt: e.z.menge, wurzel: 'NQ', echo: e.z.route === 'mt5v2', pl: e.pl, hypo: null, start: t.start } })
+        .sort((a, b) => (Number(a.start) || 0) - (Number(b.start) || 0))
+      _apIds.laufQ = new Map(liste.map(e => [String(e.z.plan_id), { z: e.z, t: e.t || {} }]))
+      const eintr = tplLaufEintraege(zl, D), mitWert = zl.some(z => z.hypo != null)
+      const usd = zl.reduce((a, z) => a + (z.pl != null && isFinite(z.pl) ? z.pl : 0), 0), eur = zl.reduce((a, z) => a + (z.hypo != null && isFinite(z.hypo) ? z.hypo : 0), 0)
+      return `<div class="ap-adm-karte ap-geplant ap-gr-${art}">${kopf}${laufZeilenHtml(eintr, { titel: 'ID · Konto', kurs: tplKursJetzt(), summe: mitWert ? { usd, eur } : null,
+        attr: e => `data-ap-lauf="${escapeHtml(String(e.z.plan_id))}"` })}</div>`
+    }
     const jeZ = new Map(), je = new Map()
     const plaene = liste.map(e => { const z = e.z, tz = e.t || apIdsTrade(z) || {}, g = apIdsLaufZeile(z) || {}, nz = apIdsAusNotes(z.notes)
       // Finn-Screenshot .1210: fast alle Admin-Zeilen „–", nur Konten des letzten Laufs hatten Werte → Kette bis zum notes-Text
@@ -60741,14 +60803,14 @@
       } else if(art === 'warten'){
         akt = `<span class="pz-zustand"><button type="button" class="btn btn-ghost tc2-btn pz-ok is-ok" data-ap-zur="${escapeHtml(id)}"${unterwegs ? ' disabled' : ''} title="Bestätigt — startet zur Startzeit. Klick schickt den Plan zurück nach „Zu bestätigen“">${unterwegs ? '…' : '↩ zurück'}</button>${fehlHtml}</span>`
       } else akt = '<span class="pz-zustand"><span class="ap-gr-live">● läuft</span></span>'
-      return planZeileHtml(p, konto, { name: p.masterName, ext: (konto && konto.externalId) || z.ende4 || '', extTitle: '', chips: '', akt, zeit, bal, notiz, uid: z.user_id, boden: z.boden ?? t.boden, pl: art === 'laeuft' ? pl : undefined, werte: art !== 'laeuft' ? { ppp: null } : null })
+      return planZeileHtml(p, konto, { name: p.masterName, ext: (konto && konto.externalId) || z.ende4 || '', extTitle: '', chips: '', akt, zeit, bal, notiz, uid: z.user_id, boden: z.boden ?? t.boden, pl: art === 'laeuft' ? pl : undefined, werte: art !== 'laeuft' ? { ppp: null } : null, stil: 'radar' })
     }
     for(const p of plaene){ const { z } = jeZ.get(String(p.id)), k = String(z.user_id || '')
       if(!je.has(k)) je.set(k, { uid: k, name: z.user || k.slice(0, 8), plaene: [], live: 0 }); je.get(k).plaene.push(p); if(z.balance_live !== false) je.get(k).live++ }
     const wort = { offen: 'offen', warten: 'wartet', laeuft: 'läuft' }[art]
     const gruppen = [...je.values()].sort((a, b) => String(a.name).localeCompare(String(b.name), 'de')).map(g => `<div class="ap-id-karte" style="--id:${idFarbe(g.uid)}"><div class="ap-adm-grp"><span class="ap-adm-id"><i style="background:${idFarbe(g.uid)}"></i>${escapeHtml(g.name)}</span><span class="n">${g.plaene.length} ${wort}${art === 'offen' && g.live < g.plaene.length ? ` · ${g.plaene.length - g.live} Balance nicht live` : ''}</span>
           ${art === 'offen' && g.live ? `<button type="button" class="btn btn-ghost btn-xs" data-ap-ok-id="${escapeHtml(g.uid)}" title="alle offenen Vorschläge dieser ID mit liver Balance bestätigen">✓ alle ${g.live}</button>` : ''}</div>`
-        + planFirmenBloecke(g.plaene, { zeile, ohneHinweis: true }) + '</div>').join('')
+        + planFirmenBloecke(g.plaene, { zeile, ohneHinweis: true, stil: 'radar' }) + '</div>').join('')   // Radar-Optik der Zeilen (08.10.2026)
     return `<div class="ap-adm-karte ap-geplant ap-gr-${art}">${kopf}${gruppen}</div>`
   }
   function apIdsOffenHtml(){
@@ -60999,6 +61061,12 @@
     root.querySelector('[data-tpl-weitere]')?.addEventListener('click', () => { _apIds.weitereAuf = !_apIds.weitereAuf; apIdsRender() })
     root.querySelectorAll('[data-ap-tag]').forEach(b => b.addEventListener('click', () => { _apIds.tagWahl = b.dataset.apTag; apIdsRender() }))
     root.querySelectorAll('[data-ap-konto],[data-ak-konto]').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); apKontoOeffnen(b.dataset.apKonto || b.dataset.akKonto) }))   // Konto-Spalte der Zeile (planZeileHtml) öffnet das Popup
+    // Läuft (Radar-Zeilen, 08.10.2026): Klick auf die Zeile öffnet dasselbe Konto-Popup — der Plan steht nicht in offen[], darum mit quelle
+    root.querySelectorAll('[data-ap-lauf]').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation()
+      const q = (_apIds.laufQ || new Map()).get(b.dataset.apLauf); if(!q) return
+      const z = q.z, t = q.t || {}
+      apKontoOeffnen(z.plan_id, { z: { plan_id: z.plan_id, user_id: z.user_id, user: z.user, konto: z.konto, firma: z.firma, ende4: z.ende4, typ: z.typ, richtung: z.richtung, menge: z.menge, tp: z.tp, sl: z.sl },
+        t: { balance: t.balance ?? z.balance, rest: t.rest, stufe: t.stufe || z.stufe, wert: t.wert, satz: t.satz, konto_id: t.konto_id || z.konto_id } }) }))
     // Bestätigen: eine Zeile / eine ID / alle — Admin-Route wie auf der Trade-Planer-Seite, danach neu laden
     // Bestätigen ohne Warten (apIdsOk): Zeile sofort weg, Zähler zählen mit, ein Nachladen kann sie nicht zurückholen
     const ok = (ids, btn) => { if(btn) btn.disabled = true; apIdsOk(ids) }
