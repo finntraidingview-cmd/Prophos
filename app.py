@@ -16710,6 +16710,41 @@ def _ap_id_konflikt(i, je, zustand, gestartet=(), gap=None):
                for x in gestartet or ())
 
 
+WD_KONTO_ABSTAND_S = 80   # Winning-Days-Farmer: 1:20 min je Konto einer ID — wie das Frontend (WD_KONTO_ABSTAND_MS in wdKontoZeiten)
+
+
+def ap_wd_block_starts(rows, mitternacht, firmen, bekannt=()):
+    """REIN RECHNEND (08.10.2026, Master/Finn: „Halten Starts aus dem Winning-Days-Farmer den 5-min-Abstand je Firma ein?"):
+    Konto-Startzeiten der gewürfelten Farmer-Blöcke aus wd_tagesplan als feste Starts für den Stand → [{key, user_id, user, firma,
+    start, richtung, wd}]. Lücke vorher: der Farmer würfelt um 00:10 Dubai, die Pläne entstehen erst später (Mac oder PC-Tab,
+    08.10.2026: 01:49 Dubai) — der Nachtlauf um 01:30 und der Bot sahen die Blöcke nicht und konnten einen Auto-Plan einer anderen
+    ID bei derselben Firma (meist Tradeify) daneben legen. Zeit je Konto wie wdKontoZeiten: Blockstart + 80 s × Nummer des aktiven
+    Kontos (aktiv ≠ False). Konten, deren Plan schon im Stand steht (bekannt = plan_ids), entfallen — der Plan zählt selbst.
+    Nur Blöcke mit Zeit (status geplant/laeuft), nur Minuten des Tags (0 … 24 h ab mitternacht)."""
+    bekannt = {str(x) for x in bekannt or ()}
+    out = []
+    for r in rows or ():
+        if str(r.get("status") or "") not in ("geplant", "laeuft") or not r.get("start_um"):
+            continue
+        try:
+            t0 = datetime.fromisoformat(str(r["start_um"]).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            continue
+        i = 0
+        for k in r.get("konten") or ():
+            if not isinstance(k, dict) or k.get("aktiv") is False:
+                continue
+            t = t0 + timedelta(seconds=WD_KONTO_ABSTAND_S * i)
+            i += 1
+            if k.get("plan_id") and str(k["plan_id"]) in bekannt:
+                continue
+            m = (t - mitternacht).total_seconds() / 60.0
+            if 0 <= m < 24 * 60:
+                out.append({"key": f"wd:{r.get('user_id')}:{k.get('id')}", "user_id": str(r.get("user_id")), "user": r.get("name") or "",
+                            "firma": ap_firma_key(firmen, k.get("firm")), "start": round(m, 2), "richtung": r.get("richtung"), "wd": True})
+    return out
+
+
 def ap_verteil_gruppen(je, zustand, abstand=None, gestartet=()):
     """REIN RECHNEND: ID × Firma-Gruppen mit einem Klumpen — zwei Pläne näher als `abstand` (Standard AP_ABSTAND_ID_FIRMA_MIN),
     der spätere davon änderbar — oder (08.10.2026) einem änderbaren Plan, der wegen des Firmen-Abstands zu einer anderen ID weichen
@@ -17714,6 +17749,16 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
         if m is not None and 0 <= m < 24 * 60:
             starts_heute.append({"key": str(p.get("id")), "user_id": str(p.get("user_id")), "user": wer(p), "firma": fkey(p),
                                  "start": round(m, 2), "richtung": p.get("richtung")})
+    # WINNING-DAYS-FARMER (08.10.2026): gewürfelte Blöcke, deren Pläne noch nicht angelegt sind, zählen wie feste Starts — Firmen-
+    # Abstand (5 min zu anderen IDs), PC-Abstand derselben ID und Richtung für Nachtlauf, Bot und Hand-Start (ap_wd_block_starts).
+    # Alle IDs, auch ausgeblendete: echte Trades. Fehler → ohne (Stand wie bisher).
+    try:
+        tage = ",".join(sorted({(mitternacht + timedelta(days=d)).date().isoformat() for d in (-1, 0, 1)}))
+        wd_rows = sb_select("wd_tagesplan", {"select": "tag,user_id,name,status,start_um,richtung,konten", "tag": f"in.({tage})"})
+        bekannt = {str(p.get("id")) for p in offen + geplant_alle + gestartet}
+        starts_heute += ap_wd_block_starts(wd_rows, mitternacht, firmen, bekannt)
+    except Exception as e:
+        print(f"[auto-plan] ⚠️ Winning-Days-Blöcke nicht lesbar ({type(e).__name__}: {e}) — Stand ohne", flush=True)
 
     geplant_rows = []
     # BALANCE LIVE je Plan (08.10.2026): Ende des letzten beendeten Trades je Konto der heutigen Pläne — eine kleine Abfrage
