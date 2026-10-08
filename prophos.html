@@ -23767,6 +23767,22 @@
   // später EINE Puls-Lesung (Today's P&L): liefert sie einen Wert, ersetzt er die Schätzung (final.quelle 'puls'), sonst bleibt
   // die Schätzung stehen. Nur am PC des Hedges (Wächter-Liste 'meine'); der Mac zeigt nur.
   const HEDGE_REVIEW_GRUENDE = { tp_feed: 'tp', level_tp: 'tp', sl_feed: 'sl', level_sl: 'sl' }
+  /* NACHZÜGLER NACH READER-ENDE (08.10.2026, Prüfer-Fund Ina 4f290f4c, Apex PA, Orbit V3): Fusion schloss 13:54:20 UTC über
+   * master_ende_reader (+318,23 €), der Plan blieb aber „open" ohne final/ended_at — hedgeMasterWegAusfuehren beendet den Plan in EINEM
+   * Versuch (tvV2EndeSetzen → baselinePatch mit Guard 'open'; scheitert der Write oder bricht der Tab dazwischen ab, gibt es keinen zweiten),
+   * und weder die Kerzen-Demo (nimmt Hedge-Pläne aus) noch dieser Wächter (nur tp/sl-Gründe) sahen den Plan danach noch an. Jetzt nimmt der
+   * Wächter auch Reader-Enden mit: Hedge zu wegen master_ende_reader, ≥ 60 s her (der normale Weg hatte seine Chance — kein
+   * Doppel-Ende), Plan noch open → derselbe Weg wie tp/sl (hedgePlanAufReview: Sperre, frisch aus der DB, Reader-Balance oder Puls-Endlesung).
+   * master_nie_da bewusst NICHT (Slave-2-Prüfung): kein Trade zustande = Start-Fehler, und bei einem Falsch-Positiv (Fill spät, Reader blind)
+   * stünde eine echte Master-Position ohne Plan und Hedge da — offen bleibend fasst sie wenigstens Auto-Close abends an. Entscheidet Finn. */
+  const HEDGE_REVIEW_SPAET = { master_ende_reader: 'reader' }
+  const HEDGE_REVIEW_SPAET_MS = 60000
+  function hedgeReviewSpaetFaellig(h, jetzt){
+    if(!h || h.status !== 'geschlossen' || !HEDGE_REVIEW_SPAET[h.grund]) return false
+    const zu = Date.parse(h.closed_at || '') || 0
+    return zu > 0 && (Number(jetzt) || Date.now()) - zu >= HEDGE_REVIEW_SPAET_MS
+  }
+  window._hedgeReviewSpaetFaellig = hedgeReviewSpaetFaellig   // Test-Haken (rein rechnend)
   const _hedgeReviewVersucht = new Map()   // planId → ms des letzten Versuchs (höchstens alle 60 s, falls ein Write scheitert)
   function hedgeLevelSchaetzung(p, art){
     // Liquidation (F22): Master-P&L ≈ Liquidations-Balance − Start-Balance (negativ), exakt später per Balance-Nachlesung
@@ -23792,8 +23808,14 @@
     let p = plan
     try{ const { data } = await supabase.from('trade_plans').select('*').eq('id', pid).maybeSingle(); if(data) p = rowToPlan(data) }catch(_){}
     const h = p.mt5Baseline && p.mt5Baseline.hedge
-    const art = h ? HEDGE_REVIEW_GRUENDE[h.grund] : null
+    const spaet = !!(h && !HEDGE_REVIEW_GRUENDE[h.grund] && HEDGE_REVIEW_SPAET[h.grund])   // Nachzügler nach Reader-Ende (08.10.2026)
+    const art = h ? (HEDGE_REVIEW_GRUENDE[h.grund] || HEDGE_REVIEW_SPAET[h.grund]) : null
     if(!art || h.status !== 'geschlossen' || p.route !== 'tvv2' || p.status !== 'open' || (h.pc && h.pc !== hedgePcId())) return false
+    if(spaet && !hedgeReviewSpaetFaellig(h, Date.now())) return false
+    if(spaet && p.mt5Baseline.final){   // Ende stand schon, nur „Überprüfen" fehlte
+      try{ const pf = tradePlans.find(x => String(x.id) === pid) || p; if(typeof atMoveToReview === 'function') await atMoveToReview(pf) }catch(e){ console.warn('[hedgeReview] Überprüfen (nachgeholt)', e); return false }
+      return true
+    }
     const schaetzung = hedgeLevelSchaetzung(p, art)
     const extra = { grund: h.grund, art, master_pl_schaetzung: schaetzung, hedge_pl: (h.pl != null && isFinite(Number(h.pl))) ? Number(h.pl) : null }
     // END-BALANCE AUCH HIER AUS DEM USERSCRIPT (01.10.2026, Live Moritz 14:08 UTC, Orbit V3 mit TP 15 $: das Notfall-Level im Fusion-Terminal
@@ -23803,7 +23825,8 @@
     try{
       // Orbit V3 (Finn 01.10.2026: „bei Orbit V3 muss Puls gar nicht mehr nachlesen — das Tampermonkey-Script hat den P&L"): das Level im
       // Fusion-Terminal schließt oft ~1 s BEVOR TradingView die Master-Position als weg zeigt (Live 14:12 UTC) — bis 6 s auf den Reader warten
-      if(planPlUserscript(p) && typeof hedgeReaderMasterDa === 'function'){ for(let i = 0; i < 12 && hedgeReaderMasterDa(p) !== false; i++) await new Promise(ok => setTimeout(ok, 500)) }
+      // Nachzügler (08.10.2026): der Master ist längst weg — nicht 6 s auf den Reader warten (blockierte sonst den Wächter-Takt)
+      if(!spaet && planPlUserscript(p) && typeof hedgeReaderMasterDa === 'function'){ for(let i = 0; i < 12 && hedgeReaderMasterDa(p) !== false; i++) await new Promise(ok => setTimeout(ok, 500)) }
       if(typeof hedgeReaderMasterDa === 'function' && hedgeReaderMasterDa(p) === false){
         const accL = (accounts || []).find(a => String(a.id) === String(p.masterAccountId))
         const ktoL = accL ? String(accL.externalId || '').trim() : ''
@@ -23819,6 +23842,13 @@
     if(!beendet) return false
     // atShowEndPrompt schiebt schon auf Überprüfen — explizit nachziehen, falls das Popup für diesen Plan schon gemeldet war
     try{ const pf = tradePlans.find(x => String(x.id) === pid); if(pf && pf.status === 'open' && typeof atMoveToReview === 'function') await atMoveToReview(pf) }catch(e){ console.warn('[hedgeReview] Überprüfen', e) }
+    // Nachzügler: Trade-Ende = Hedge-Schluss (wie die Demo mit dm.at), nicht „jetzt" — Live Trades rechnet die Nachlese-Zeit ab ended_at
+    if(spaet && h.closed_at){ try{ await supabase.from('trade_plans').update({ ended_at: h.closed_at }).eq('id', pid).eq('status', 'review'); const pf = tradePlans.find(x => String(x.id) === pid); if(pf) pf.endedAt = h.closed_at }catch(_){} }
+    if(spaet){
+      if(typeof atToast === 'function') atToast(`✓ ${p.masterName || 'Plan'}: Master zu laut Reader (Fusion schon zu) → Überprüfen nachgeholt`
+        + (_balL ? ' · Master-P&L aus der Balance (Userscript)' : ' · Puls liest die Balance nach'), 'end')
+      return true
+    }
     if(typeof atToast === 'function') atToast(`✓ ${p.masterName || 'Plan'}: ${art === 'tp' ? 'Master-TP' : (h.sl_art === 'liquidation' ? 'Liquidations-Level' : 'Master-SL')} erreicht → Überprüfen`
       + (_balL ? ' · Master-P&L aus der Balance (Userscript)' : schaetzung != null ? ` · Master ${schaetzung >= 0 ? '+' : '−'}${Math.abs(schaetzung).toLocaleString('de-DE', { minimumFractionDigits: 2 })} $ geschätzt, Puls liest nach` : ' · Master-P&L: Puls liest nach'), 'end')
     if(!_balL && !planPlUserscript(p)) setTimeout(() => { hedgeReviewPulsLesen(pid).catch(e => console.warn('[hedgeReview] Puls', e)) }, 10000 + Math.random() * 10000)   // V3: Nachtrag aus dem Userscript (hedgeV3BalanceNachtrag)
@@ -25376,7 +25406,7 @@
         }
         if(!amPc) continue
         // Hedge wegen Master-TP/-SL zu, Plan läuft noch → Plan auf Überprüfen (25.09.2026, auch nachträglich, z. B. Plan 24b7c138)
-        if(h.status === 'geschlossen' && p.status === 'open' && HEDGE_REVIEW_GRUENDE[h.grund]){ if(await hedgePlanAufReview(p)) continue }
+        if(h.status === 'geschlossen' && p.status === 'open' && (HEDGE_REVIEW_GRUENDE[h.grund] || hedgeReviewSpaetFaellig(h, Date.now()))){ if(await hedgePlanAufReview(p)) continue }   // + Nachzügler nach Reader-Ende (08.10.2026)
         // Ring meldete zu ohne P&L (Historie hinkte) → per Close-Aufruf mit Ticket nachfragen (schon_zu + pl)
         if(h.status === 'geschlossen' && h.pl == null && h.pl_offen && h.ticket && !_hedgeBusy.has(String(p.id))){ await hedgePlNachholen(p); continue }
         if(h.status === 'unklar' && h.cmd_id && !_hedgeBusy.has(String(p.id))){
@@ -41930,7 +41960,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1368'
+  const OS_TAB_BUILD = '2026-09-22.1369'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
