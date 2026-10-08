@@ -1938,6 +1938,8 @@
   :is(#tpl-view,#adm-pane-planer) .tpl-nk-chart .skala.oben{top:2px} :is(#tpl-view,#adm-pane-planer) .tpl-nk-chart .skala.unten{bottom:2px}
   :is(#tpl-view,#adm-pane-planer) .tpl-nk-chart .skala.rechts{left:auto;right:4px;color:#0F766E}
   :is(#tpl-view,#adm-pane-planer) .tpl-nk-achse{margin-left:0;margin-top:2px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-h .leg .tpl-sz-l{display:inline-block;width:14px;height:0;border-top:2px solid var(--good);vertical-align:middle;margin-right:2px} :is(#tpl-view,#adm-pane-planer) .tpl-h .leg .tpl-sz-l.gestr{border-top:2px dashed color-mix(in srgb,var(--ink) 55%,var(--surface))}
+  :is(#tpl-view,#adm-pane-planer) .kpi-delta.tpl-sz-k{display:block;margin-top:1px}
   /* Chart-Upgrade (08.10.2026): Skala an der Gitterlinie zentriert, Jetzt-Punkt + Wert als HTML (im gestreckten SVG würde ein Kreis zur
      Ellipse), Stufe/Minute unter der Maus leicht abgedunkelt; Legende als Flächen: Long grün, Short rot, geplant hell, Band grau gestrichelt */
   :is(#tpl-view,#adm-pane-planer) .tpl-nk-chart .skala{transform:translateY(-50%)}
@@ -41246,7 +41248,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1285'
+  const OS_TAB_BUILD = '2026-09-22.1286'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -46499,7 +46501,7 @@
     const d = D.delta, band = d && d.band_eur != null ? ` · Band ±${tplEur(d.band_eur)}` : ''
     const k3 = `<div class="kpi"><div class="kpi-label">Netto</div><div class="kpi-value ${N > 0 ? 'tpl-gut' : N < 0 ? 'tpl-rot' : ''}" title="Netto jetzt (laufende Trades)">${vz(N)}<small>${N > 0 ? 'long' : N < 0 ? 'short' : ''}</small></div>
         <div class="tpl-ls"><i style="width:${anteil.toFixed(1)}%;background:var(--good)"></i><i style="flex:1;background:var(--danger)"></i></div>
-        <span class="kpi-delta umbruch" title="Netto der laufenden Trades · darunter mit den geplanten bis Tagesende${band}">${plan.length ? `bis Tagesende mit geplanten ${vz(NT)}` : 'keine geplanten'}</span></div>`
+        <span class="kpi-delta umbruch" title="Netto der laufenden Trades · darunter mit den geplanten bis Tagesende${band}">${plan.length ? `bis Tagesende mit geplanten ${vz(NT)}` : 'keine geplanten'}</span>${tplSzKachelHtml(D)}</div>`
     const hy = tplHypo(D)
     return `<div class="kpis tpl-kpis5">${k1}${k2}${k3}${tplHypoKachelHtml(hy)}${apdBotKachelHtml(apdDaten(), apdAdmin(), tplUhrIso)}</div>`
   }
@@ -46716,8 +46718,70 @@
     for(let hh = Math.ceil(VON / schritt) * schritt; hh <= BIS; hh += schritt){ const x = (hh - VON) / SPAN * 100; achse.push(`<span class="${x < 3 ? 'links' : x > 97 ? 'rechts' : ''}" style="left:${x.toFixed(2)}%">${tplUhr(hh - v, v)}</span>`) }
     return `<div class="tpl-achse tpl-nk-achse">${achse.join('')}</div>`
   }
-  // Beide Charts untereinander — Planer-Seite (tplRender) und Admin-Reiter (apIdsKopfHtml) hängen denselben Baustein ein
-  function tplChartsHtml(D, pre){ return tplNettoHtml(D, pre) + tplHypoHtml(D, pre) }
+  /* RISIKO NACH PUNKTEN (Finn 08.10.2026: Long/Short nach echtem Risiko messen, nicht nach „Netto-Einsatz"; Backend Slave 3 in /delta):
+   * delta_eur_pkt (€ je NQ-Punkt, + = long) und szenario = P&L hypothetisch € bei NQ ±x Punkte — jetzt (laufende) und in 60 min mit den
+   * geplanten, Klippen (TP/SL getroffen) stecken in den Stützpunkten. Alles optional: ohne Felder bleiben Kachel und Charts wie bisher.
+   * Annahme der Form (Vertrag an Slave 3): szenario = [{pkt, eur}] (= jetzt) oder {jetzt:[…], plus60:[…], schlimmst:{links:{pkt,eur}, rechts:{pkt,eur}}};
+   * auch szenario_60 neben szenario wird gelesen. Nur Anzeige, keine Bewertung. */
+  function tplSzDaten(d){
+    if(!d) return null
+    const reihe = a => Array.isArray(a) ? a.map(p => ({ pkt: tplNum(p && p.pkt), eur: tplNum(p && p.eur) })).filter(p => p.pkt != null && p.eur != null).sort((x, y) => x.pkt - y.pkt) : []
+    const s = d.szenario, o = s && !Array.isArray(s) && typeof s === 'object' ? s : null
+    const jetzt = reihe(Array.isArray(s) ? s : o && o.jetzt), p60 = reihe((o && (o.plus60 || o.plus_60 || o.in60 || o['+60'])) || d.szenario_60 || d.szenario_plus60)
+    const dpkt = tplNum(d.delta_eur_pkt)
+    if(!jetzt.length && dpkt == null) return null
+    return { jetzt, p60, dpkt, schlimm: (o && o.schlimmst) || d.schlimmst || null }
+  }
+  // € bei x Punkten: Stützpunkte linear (Klippen bleiben, weil das Backend sie als eigene Punkte liefert), sonst Delta × x
+  function tplSzBei(sz, x, r){ const a = r || sz.jetzt
+    if(!a || !a.length) return sz.dpkt != null ? sz.dpkt * x : null
+    if(x <= a[0].pkt) return a[0].eur; if(x >= a[a.length - 1].pkt) return a[a.length - 1].eur
+    for(let i = 1; i < a.length; i++) if(a[i].pkt >= x){ const p = a[i - 1], q = a[i]; return q.pkt === p.pkt ? q.eur : p.eur + (q.eur - p.eur) * (x - p.pkt) / (q.pkt - p.pkt) }
+    return null }
+  // schlimmster Fall je Seite: Backend-Wert, sonst Minimum der Stützpunkte links bzw. rechts von 0 (bis ±100 Pkt)
+  function tplSzSchlimm(sz, seite){
+    const b = sz.schlimm && sz.schlimm[seite]; if(b && tplNum(b.eur) != null) return { pkt: tplNum(b.pkt), eur: tplNum(b.eur) }
+    const a = (sz.jetzt || []).filter(p => seite === 'links' ? p.pkt < 0 && p.pkt >= -100 : p.pkt > 0 && p.pkt <= 100)
+    if(!a.length) return sz.dpkt != null ? { pkt: seite === 'links' ? -100 : 100, eur: sz.dpkt * (seite === 'links' ? -100 : 100) } : null
+    return a.reduce((m, p) => p.eur < m.eur ? p : m, a[0]) }
+  const tplPktVz = n => (n > 0 ? '+' : n < 0 ? '−' : '±') + Math.abs(Math.round(n)).toLocaleString('de-DE')
+  function tplSzKachelHtml(D){
+    const sz = tplSzDaten(D.delta); if(!sz) return ''
+    const vz = n => (n > 0 ? '+' : n < 0 ? '−' : '') + tplEur(n)
+    const w = [tplSzBei(sz, -30), tplSzBei(sz, 30)].filter(v => v != null), s30 = w.length ? Math.min(...w) : null
+    return (sz.dpkt != null ? `<span class="kpi-delta tpl-sz-k" title="€ je NQ-Punkt über alle laufenden Trades (+ = profitiert von steigendem NQ)">Delta ${tplPktVz(sz.dpkt)} €/Pkt</span>` : '')
+      + (s30 != null ? `<span class="kpi-delta tpl-sz-k ${s30 < 0 ? 'tpl-rot' : ''}" title="P&L hypothetisch, wenn NQ jetzt 30 Punkte fällt bzw. steigt — der schlechtere der beiden">schlimmster Fall bei ±30 Pkt: ${vz(s30)}</span>` : '')
+  }
+  function tplSzenarioHtml(D, pre){
+    const sz = tplSzDaten(D.delta); if(!sz) return ''
+    const W = 1000, H = 150, M = H / 2, id = (pre || 'p') + 'sz', XMAX = 100
+    const xs = []; for(let x = -XMAX; x <= XMAX; x += 2) xs.push(x)
+    const punkte = r => { const set = new Set(xs); for(const p of (r || [])) if(p.pkt >= -XMAX && p.pkt <= XMAX) set.add(p.pkt); return [...set].sort((a, b) => a - b) }
+    const J = punkte(sz.jetzt).map(x => ({ x, e: tplSzBei(sz, x) })), P = sz.p60.length ? punkte(sz.p60).map(x => ({ x, e: tplSzBei(sz, x, sz.p60) })) : []
+    const sk = tplSkala(Math.max(...J.map(p => Math.abs(p.e || 0)), ...P.map(p => Math.abs(p.e || 0))))
+    const X = x => (x + XMAX) / (2 * XMAX) * W, Y = n => (M - n / sk.max * (M - 8))
+    const linie = arr => arr.filter(p => p.e != null).map((p, i) => `${i ? 'L' : 'M'}${X(p.x).toFixed(1)},${Y(p.e).toFixed(1)}`).join('')
+    const pj = linie(J), flaeche = `${pj}V${M}H${X(J[0].x).toFixed(1)}Z`
+    const defs = `<defs><clipPath id="${id}O"><rect x="0" y="0" width="${W}" height="${M}"/></clipPath><clipPath id="${id}U"><rect x="0" y="${M}" width="${W}" height="${M}"/></clipPath></defs>`
+    const vz = n => (n > 0 ? '+' : n < 0 ? '−' : '') + tplEur(n)
+    const hv = xs.filter(x => x % 10 === 0).map(x => { const e = tplSzBei(sz, x), e6 = sz.p60.length ? tplSzBei(sz, x, sz.p60) : null
+      return `<rect x="${(X(x) - W / 40).toFixed(1)}" y="0" width="${(W / 20).toFixed(1)}" height="${H}" fill="transparent"><title>${escapeHtml(`NQ ${tplPktVz(x)} Pkt · jetzt ${vz(e)}${e6 != null ? ' · in 60 min ' + vz(e6) : ''}`)}</title></rect>` }).join('')
+    const svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">${defs}${tplGitter(sk, W, Y)}
+        <path d="${flaeche}" fill="var(--good)" fill-opacity=".18" clip-path="url(#${id}O)"/><path d="${flaeche}" fill="var(--danger)" fill-opacity=".18" clip-path="url(#${id}U)"/>
+        ${P.length ? `<path d="${linie(P)}" fill="none" stroke="var(--ink)" stroke-opacity=".55" stroke-width="1.5" stroke-dasharray="5 4" vector-effect="non-scaling-stroke"/>` : ''}
+        <path d="${pj}" fill="none" stroke="var(--good)" stroke-width="2" vector-effect="non-scaling-stroke" clip-path="url(#${id}O)"/><path d="${pj}" fill="none" stroke="var(--danger)" stroke-width="2" vector-effect="non-scaling-stroke" clip-path="url(#${id}U)"/>
+        <line x1="0" y1="${M}" x2="${W}" y2="${M}" stroke="var(--ink)" stroke-opacity=".55" stroke-width="1.25" vector-effect="non-scaling-stroke"/>
+        <line x1="${X(0)}" y1="0" x2="${X(0)}" y2="${H}" stroke="var(--ink)" stroke-opacity=".45" stroke-width="1.25" stroke-dasharray="3 3" vector-effect="non-scaling-stroke"/>${hv}</svg>`
+    const achse = [-100, -50, 0, 50, 100].map(x => `<span class="${x === -100 ? 'links' : x === 100 ? 'rechts' : ''}" style="left:${(X(x) / W * 100).toFixed(2)}%">${x === 0 ? 'NQ jetzt' : tplPktVz(x) + ' Pkt'}</span>`).join('')
+    const li = tplSzSchlimm(sz, 'links'), re = tplSzSchlimm(sz, 'rechts')
+    const seiteTxt = (pfeil, s) => !s ? '' : s.eur >= 0 ? `${pfeil} kein Verlust bis ${tplPktVz(pfeil === '↓' ? -XMAX : XMAX)}` : `${pfeil} ${vz(s.eur)} bei ${tplPktVz(s.pkt)}`
+    const schlimm = [seiteTxt('↓', li), seiteTxt('↑', re)].filter(Boolean).join(' · ')
+    return `<div class="tpl-karte tpl-nk tpl-sz"><div class="tpl-h">P&amp;L hypothetisch bei NQ ±${XMAX} Pkt${sz.dpkt != null ? ` <b class="${sz.dpkt > 0 ? 'tpl-gut' : sz.dpkt < 0 ? 'tpl-rot' : ''}">Delta ${tplPktVz(sz.dpkt)} €/Pkt</b>` : ''}
+        <span class="leg"><span><i class="tpl-sz-l"></i> jetzt</span>${P.length ? '<span><i class="tpl-sz-l gestr"></i> in 60 min mit geplanten</span>' : ''}${schlimm ? `<span title="schlimmster Fall links (NQ fällt) und rechts (NQ steigt)">${escapeHtml(schlimm)}</span>` : ''}</span></div>
+        <div class="tpl-nk-chart">${svg}${tplSkalaHtml(sk, Y, H)}</div><div class="tpl-achse tpl-nk-achse">${achse}</div></div>`
+  }
+  // Beide Charts untereinander — Planer-Seite (tplRender) und Admin-Reiter (apIdsKopfHtml) hängen denselben Baustein ein; Szenario nur mit Backend-Feldern
+  function tplChartsHtml(D, pre){ return tplNettoHtml(D, pre) + tplHypoHtml(D, pre) + tplSzenarioHtml(D, pre) }
 
   function tplDetailHtml(D){
     const t = _tpl.wahl ? D.trades.find(x => x.key === _tpl.wahl) : null
