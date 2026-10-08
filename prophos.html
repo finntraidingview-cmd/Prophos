@@ -41316,7 +41316,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1316'
+  const OS_TAB_BUILD = '2026-09-22.1317'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -47292,6 +47292,11 @@
     const k = tplKk(uid, konto)
     return kid ? (man.kids.has(String(kid)) || man.namenOhneId.has(k)) : man.namen.has(k)
   }
+  /* ZIEL ERREICHT RAUS (Finn 08.10.2026, Screenshot Admin „Braucht dich · 5" mit lauter „Ziel erreicht — Phase unter Accounts umstellen":
+   * „Wenn ein Account sein Ziel erreicht hat, soll mir das da nicht angezeigt werden. Hier geht es um Sachen, die nicht starten können …
+   * die werden oft zu Funded umgestellt.") — Braucht dich zeigt nur echte Probleme. Die Info bleibt: Accounts/Radar zeigen „bestanden"
+   * (Ziel-Wache, 🎯-Chip). Gilt für Planer-Grund, Start-Fehler ziel_erreicht und eigene Konten mit zielErreichtAt. */
+  const TPL_ZIEL_RE = /Ziel erreicht|bestanden/i
   function tplBraucht(D, ids){   // ids = Set der sichtbaren IDs, null = alle
     const je = new Map(), jetzt = Date.now(), ich = (_ap.ich && _ap.ich.name) || ''
     // Konten in „Manuelle Arbeit" (Radar) → keine Zeile, egal welcher Fall (08.10.2026, s. tplManuellKonten) — geprüft je Quelle unten
@@ -47304,6 +47309,7 @@
       for(const a of accounts || []){
         if(!a || !TPL_TYPEN.includes(a.type) || /fusion/i.test(String(a.firm || '')) || (arch[a.id] && arch[a.id].archived)) continue
         if(tplManRaus(man, currentUserId, a.id, a.name)) continue   // Konto in Manueller Arbeit (08.10.2026)
+        if(a.zielErreichtAt){ konten.add(tplKk(currentUserId, a.name)); continue }   // Ziel erreicht → nie hier (Finn 08.10.2026, s. TPL_ZIEL_RE)
         // EXTERNAL ID FEHLT bei eigenen Futures-Konten (08.10.2026, Fehler-Muster 49 Orbit-Fehlstarts): vorab als Zeile mit Knopf, noch bevor
         // der Planer läuft — der Planer lässt das Konto ohnehin aus (app.py ap_ext_fehlt); die Balance-Zeile entfällt dafür
         if(typeof tpFirmIstFutures === 'function' && tpFirmIstFutures(a.firm) && !String(a.externalId || '').trim()){
@@ -47326,6 +47332,8 @@
       if(x.typ && !TPL_TYPEN.includes(String(x.typ))) continue   // WD-RAUS-AUS-PLANER
       if(tplManRaus(man, x.user_id, x.konto_id, x.konto)) continue   // Konto in Manueller Arbeit (08.10.2026)
       const k = tplKk(x.user_id, x.konto), istBlow = /geblasen|geblowt|Polster aufgebraucht/i.test(g)
+      if(TPL_ZIEL_RE.test(g)){   // Ziel erreicht: keine Zeile, auch eine schon gesetzte Balance-Zeile desselben Kontos fällt weg (Finn 08.10.2026)
+        const o = je.get(String(x.user_id)); if(o) o.zeilen = o.zeilen.filter(z => z.konto !== x.konto); konten.add(k); continue }
       if(konten.has(k)){
         // schon als Balance-Zeile drin (eigenes Konto ohne Live-Balance): ein konkreter Planer-Grund (Haken aus, geblowt?) ist die bessere Zeile → ersetzen (08.10.2026)
         if(!/ausgenommen/i.test(g) && !istBlow) continue
@@ -47395,7 +47403,9 @@
       // dann auch nicht neu) oder erreichtem Ziel
       const neuKnopf = t.status === 'bestaetigt' && !(sf && (sf.unklar || sf.schritt === 'ziel_erreicht')) && (t.eigen || tplDarfFremd()) ? t.key : null
       const ueberfaellig = D.jetzt != null && t.start + TPL_VERPASST_MIN < D.jetzt
-      if(t.status === 'bestaetigt' && sf && sf.status === 'neu' && D.tag === D.heute && !ueberfaellig){
+      const zielSf = !!sf && (sf.schritt === 'ziel_erreicht' || TPL_ZIEL_RE.test(String(sf.msg || '')))   // Ziel erreicht: kein Start-Fehler/verpasst hier
+      if(zielSf){ /* nichts — Accounts/Radar zeigen „bestanden" (Finn 08.10.2026) */ }
+      else if(t.status === 'bestaetigt' && sf && sf.status === 'neu' && D.tag === D.heute && !ueberfaellig){
         add(t.user_id, t.user, { art: 'neu', firma: t.firma, konto: t.konto, ende4: t.ende4, key: t.key,
           text: `neu eingeplant — Start ${tplUhr(t.start, D.v)}${sf.behoben ? ' · ' + sf.behoben : ''}`, tun: `Nichts tun. Vorher: ${String(sf.msg || '').slice(0, 120)}` })
       } else if(t.status === 'bestaetigt' && sf && sf.status !== 'neu' && D.tag === D.heute){
@@ -47413,7 +47423,7 @@
       if(b.tv && b.tv.fehler) probleme.push(`Start-Fehler: ${b.tv.msg || b.tv.fehler}${b.tv.code ? ' (' + b.tv.code + ')' : ''}`)
       if(b.tv && b.tv.warnung) probleme.push(`Puls: ${b.tv.warnung}`)
       if(b.hedge && b.hedge.status === 'fehler') probleme.push(`Fusion-Hedge: ${b.hedge.msg || 'Fehler'}`)
-      if(t.hinweis) probleme.push(String(t.hinweis))
+      if(t.hinweis && !TPL_ZIEL_RE.test(String(t.hinweis))) probleme.push(String(t.hinweis))
       for(const txt of probleme) add(t.user_id, t.user, { art: 'plan', firma: t.firma, konto: t.konto, ende4: t.ende4, text: txt, key: t.key })
     }
     // Offene Vorschläge mit nicht-live Balance aus /admin/auto-plan/ids (Admin-Reiter, auch morgen; 08.10.2026) — dieselbe Zeile wie oben
