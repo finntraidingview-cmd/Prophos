@@ -2014,6 +2014,7 @@
   :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .s{flex-basis:100%;font-size:11px;line-height:1.3;color:var(--sub-2)} :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .s.rot{color:var(--danger)}
   :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .knopf{border:1px solid var(--border);background:var(--surface);border-radius:7px;height:26px;padding:0 9px;font:inherit;font-size:12px;color:var(--ink-2);cursor:pointer;white-space:nowrap}
   :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .knopf:hover:not(:disabled){border-color:var(--sub-2);background:var(--surface-tint)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .knopf.rot{color:#b91c1c;border-color:color-mix(in srgb,#b91c1c 35%,var(--border))}   /* Als geblowt archivieren (08.10.2026) */
   :is(#tpl-view,#adm-pane-planer) #apLeiste,:is(#tpl-view,#adm-pane-planer) #apDelta{margin:0 0 12px}
   #apLeiste .ap-alle{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--sub);cursor:pointer;user-select:none;margin-right:2px} #apLeiste .ap-alle:has(input:disabled){opacity:.55;cursor:default}
   @media (max-width:760px){
@@ -32086,7 +32087,7 @@
       else if(x){
         const bald = _apNachplanBald.get(id), g2 = String(x.grund || '')
         if(bald && Date.now() - bald < 12 * 60000 && /Balance/i.test(g2)){ txt = 'nächster Lauf ≤ 10 min'; cls = 'bald'; tip = `Balance gerade gelesen — der Nachplan-Takt plant das Konto beim nächsten Lauf (alle 10 min). Vorher: ${g2} (Lauf ${tag})` }
-        else { txt = 'ausgelassen · ' + apGrundKurz(g2); cls = 'raus'; tip = `Ausgelassen: ${g2} (Lauf ${tag})` }
+        else { txt = 'ausgelassen · ' + apGrundKurz(g2); cls = 'raus'; tip = `Ausgelassen: ${apBlowText(g2)} (Lauf ${tag})` }
       }
       else { txt = '–'; tip = l ? `Im letzten Lauf (${tag}) nicht dabei` : 'Noch kein Planer-Lauf geladen' }
     }
@@ -41049,7 +41050,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1252'
+  const OS_TAB_BUILD = '2026-09-22.1253'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -45392,8 +45393,11 @@
     return /geplanten\/laufenden Plan/.test(t) ? 'laufen schon' : /keine Regel/.test(t) ? 'ohne Regel' : /nicht live/.test(t) ? 'Balance nicht live'
       : /noch nicht erledigt/.test(t) ? 'in Überprüfen' : /keine Balance/.test(t) ? 'ohne Balance' : /nie gelesen/.test(t) ? 'Ergebnis nie gelesen' : /Ziel erreicht/.test(t) ? 'Ziel erreicht'
       : /bis zum Ziel/.test(t) ? 'kurz vor Ziel' : /Kontogröße/.test(t) ? 'Größe unklar' : /Zeitfenster/.test(t) ? 'kein Zeitfenster'
-      : /Boden/.test(t) ? 'am Boden' : (t.split(/[—(]/)[0].trim() || 'sonstige')
+      : /geblasen|geblowt/.test(t) ? 'geblowt?' : /Boden/.test(t) ? 'am Boden' : (t.split(/[—(]/)[0].trim() || 'sonstige')
   }
+  // „geblasen" heißt seit 08.10.2026 „geblowt" (Finn: „Ändere das zu geblowt, das hört sich voll geil an") — Backend-Texte
+  // (ap_letzter_trade_geblasen, ap_konto_rechnen) hier für die Anzeige umschreiben, bis app.py sie selbst so nennt
+  function apBlowText(t){ return String(t == null ? '' : t).replace(/geblasen/g, 'geblowt').replace(/Geblasen/g, 'Geblowt') }
   function apLeisteZeichnen(){
     tplSpaeter()   // Trade-Planer-Seite: Lauf/Pläne geändert → neu zeichnen
     const el = document.getElementById('apLeiste'); if(!el) return
@@ -46618,7 +46622,7 @@
   function tplGrund(g){
     const t = String(g || '')
     return /keine Regel/.test(t) ? 'keine Regel' : /nicht live/.test(t) ? 'Balance nicht live' : /keine Balance/.test(t) ? 'keine Balance' : /nie gelesen/.test(t) ? 'Ergebnis nie gelesen'
-      : /Ziel erreicht/.test(t) ? 'Ziel erreicht' : /Boden/.test(t) ? 'unter Boden' : /geblasen/.test(t) ? 'geblasen?'
+      : /Ziel erreicht/.test(t) ? 'Ziel erreicht' : /geblasen|geblowt/.test(t) ? 'geblowt?' : /Boden/.test(t) ? 'unter Boden'
       : /noch nicht erledigt/.test(t) ? 'in Überprüfen' : /Zeitfenster/.test(t) ? 'kein Zeitfenster' : /bis zum Ziel/.test(t) ? 'kurz vor Ziel'
       : /Kontogröße/.test(t) ? 'Größe unklar' : apGrundKurz(t)
   }
@@ -46747,10 +46751,10 @@
       case 'chrome': case 'chrome_neustart': case 'tab': case 'cdp': return `Am PC${pc} den Puls-Chrome prüfen (läuft er, ist der TradingView-Tab offen?).`
       case 'login': return `Am PC${pc} den Puls-Chrome ansehen: Tradovate-/TradingView-Login prüfen und einloggen.`
       // Konto-Fälle (08.10.2026, aus order_signale der letzten 3 Wochen: „Kein Konto-Umschalter zu sehen", „Dropdown nicht erkannt", „steht darin nicht
-      // eindeutig"): fehlt das Konto im Dropdown, ist es vermutlich geblasen/weg → unter Accounts prüfen und abhaken, Plan löschen
+      // eindeutig"): fehlt das Konto im Dropdown, ist es vermutlich geblowt/weg → unter Accounts prüfen und abhaken, Plan löschen
       case 'konto': case 'konto_weg': case 'konto_nicht_erreicht': case 'wechsel':
         return /nicht (eindeutig|im Dropdown|in der Liste|gefunden)|steht darin nicht|konto_weg|fehlt/i.test(m)
-          ? `Konto fehlt im Tradovate-Dropdown — vermutlich geblasen oder weg: unter Accounts prüfen (External ID, Status), ggf. abhaken und den Plan löschen.`
+          ? `Konto fehlt im Tradovate-Dropdown — vermutlich geblowt oder weg: unter Accounts prüfen (External ID, Status), ggf. abhaken und den Plan löschen.`
           : `Am PC${pc} im Puls-Chrome Tradovate/TradingView verbinden und das richtige Unterkonto wählen (Trading-Panel → Konto); dann ✓ Behoben.`
       case 'ticket': case 'asset': case 'contract': return `Am PC${pc} das TradingView-Order-Panel ansehen: Order-Ticket offen („Trade" oben rechts), Asset/Kontrakt (NQ/MNQ, Front-Monat) und Felder prüfen.`
       case 'order': case 'ordertyp': case 'bracket': case 'feld': return `Am PC${pc} das Order-Panel ansehen: Richtung BUY/SELL, Order-Typ Market, Menge und Risk/To-Make-Felder (Brackets) — nichts gesendet; dann ✓ Behoben.`
@@ -46786,6 +46790,24 @@
     if(b && b.src === 'TradingView') return 'Im Puls-Chrome dieses Konto in TradingView verbinden, dann ↻ Balance lesen.'
     return '↻ Balance lesen — einmal lesen genügt.'
   }
+  // Boden für das Geblowt-Urteil nach der Lesung (08.10.2026): Server boden → boden_min (ausgelassen-Zeile, Vertrag Slave 1), sonst
+  // Kontogröße − Drawdown aus dem Grundtext („… des Drawdowns 4.500 $") — wie app.py ap_letzter_trade_geblasen (2). null = unbekannt
+  function tplBlowBoden(x, acc){
+    const n = v => v != null && v !== '' && isFinite(Number(v)) && Number(v) > 0 ? Number(v) : null
+    const b = n(x.boden) ?? n(x.boden_min); if(b != null) return b
+    const m = /Drawdowns\s+([\d.]+)\s*\$/.exec(String(x.grund || '')); if(!m) return null
+    const dd = Number(m[1].replace(/\./g, '')); let g = 0
+    try{ g = Number(kontoGroesseAnzeige(x.konto, acc && acc.startingBalance, null)) || 0 }catch(_){}
+    return g > dd && dd > 0 ? g - dd : null
+  }
+  // Lesung NACH dem Planer-Lauf (bzw. nach der Balance, mit der er gerechnet hat): eigen aus accounts, fremd aus der Lesung hier
+  function tplBlowLesung(x, roh, fremd, acc){
+    const seit = Math.max(Date.parse((roh && roh.at) || '') || 0, Date.parse(x.bal_stand || '') || 0)
+    if(fremd){ const f = _tplBalFremd.get(String(x.konto_id))
+      return f && !f.laeuft && !f.fehler && typeof f.balance === 'number' && f.at > seit ? { val: f.balance, at: f.at } : null }
+    const b = acc ? tplKontoBalance(acc) : null
+    return b && b.at > seit && isFinite(Number(b.bal)) ? { val: Number(b.bal), at: b.at } : null
+  }
   function tplBraucht(D, ids){   // ids = Set der sichtbaren IDs, null = alle
     const je = new Map(), jetzt = Date.now(), ich = (_ap.ich && _ap.ich.name) || ''
     const add = (uid, name, z) => { const k = String(uid || ''); if(!k || (ids && !ids.has(k))) return
@@ -46815,14 +46837,34 @@
       const g = String(x.grund || '')
       if(/geplanten\/laufenden Plan/.test(g)) continue
       if(x.typ && !TPL_TYPEN.includes(String(x.typ))) continue   // WD-RAUS-AUS-PLANER
-      const k = tplKk(x.user_id, x.konto)
+      const k = tplKk(x.user_id, x.konto), istBlow = /geblasen|geblowt|Polster aufgebraucht/i.test(g)
       if(konten.has(k)){
-        // schon als Balance-Zeile drin (eigenes Konto ohne Live-Balance): ein konkreter Planer-Grund (Haken aus) ist die bessere Zeile → ersetzen (08.10.2026)
-        if(!/ausgenommen/i.test(g)) continue
+        // schon als Balance-Zeile drin (eigenes Konto ohne Live-Balance): ein konkreter Planer-Grund (Haken aus, geblowt?) ist die bessere Zeile → ersetzen (08.10.2026)
+        if(!/ausgenommen/i.test(g) && !istBlow) continue
         const o = je.get(String(x.user_id)); if(o) o.zeilen = o.zeilen.filter(z => !(z.art === 'balance' && z.konto === x.konto))
       }
       konten.add(k)
-      const bal = /keine Balance|nicht live|nie gelesen/.test(g), fremd = String(x.user_id) !== String(currentUserId)   // „nie gelesen" (08.10.2026): Demo-Schätzung statt Ergebnis → ↻ Balance lesen
+      const bal = /keine Balance|nicht live|nie gelesen/.test(g), fremd = String(x.user_id) !== String(currentUserId)
+      // GEBLOWT? KLÄREN (08.10.2026, Finn: „wenn er bei geblowt nochmal die Balance liest und sieht, dass der Account wirklich geblowt
+      // wurde, dann eben wegmachen"): ↻ Balance lesen (eigen accBalanceLesen, fremd Signal an den PC der ID wie bei „nicht live"); danach
+      // Urteil gegen den Boden (tplBlowBoden): darüber = Konto lebt → Zeile weg (der nächste Lauf plant es wieder); auf/unter = „geblowt" +
+      // „Als geblowt archivieren" (archiveAccount 'blown', nur per Klick); Boden unbekannt = Balance zeigen + derselbe Knopf, Finn entscheidet.
+      // Archivieren fremder Konten nur mit Admin-Recht. Schon archivierte Konten erscheinen nicht mehr (der Lauf kennt das Archiv erst später).
+      if(istBlow){
+        const kid = x.konto_id ? String(x.konto_id) : ''
+        if(kid && typeof getArchive === 'function' && (getArchive() || {})[kid]?.archived) continue
+        const acc = !fremd && kid ? (accounts || []).find(q => String(q.id) === kid) || null : null
+        const les = kid ? tplBlowLesung(x, roh, fremd, acc) : null, boden = tplBlowBoden(x, acc)
+        if(les && boden != null && les.val > boden) continue
+        const blow = les ? (boden != null ? 'ja' : 'unklar') : null, darf = !fremd || apdAdmin()
+        add(x.user_id, x.user, { art: 'blow', firma: x.firma, konto: x.konto, typ: x.typ, balance: '', ende4: tplEnde4(x), text: apBlowText(g),
+          bal: !blow && !fremd && kid ? kid : '', balf: !blow && fremd && kid ? kid : '', uid: String(x.user_id || ''),
+          lauf: kid && !blow ? ((fremd ? _tplBalFremd.get(kid) : (typeof _accBalLauf !== 'undefined' && _accBalLauf.get(kid))) || null) : null,
+          blow, blowBal: les ? les.val : null, blowBoden: boden, arch: blow && kid && darf ? kid : '',
+          hinweis: !kid ? 'am PC der ID lesen' : blow && !darf ? 'archivieren nur mit Admin-Login' : '',
+          tun: blow ? 'Als geblowt archivieren — der Planer lässt das Konto danach weg.' : `↻ Balance lesen — liegt sie über dem Boden, verschwindet die Zeile${fremd ? ` (läuft am PC von ${x.user || 'der ID'})` : ''}.` })
+        continue
+      }   // „nie gelesen" (08.10.2026): Demo-Schätzung statt Ergebnis → ↻ Balance lesen
       // EXTERNAL ID FEHLT (08.10.2026, Fehler-Muster: 49 Orbit-Fehlstarts „Konto hat keine External ID"): der Planer lässt das Konto jetzt
       // vorab aus (app.py ap_ext_fehlt) — hier als Zeile mit Anleitung; eigene Konten öffnen per Knopf das Konto-Formular, fremde „am PC von X"
       if(/External ID fehlt/i.test(g)){
@@ -46923,7 +46965,8 @@
     }
     if(/External ID/i.test(t)) return { w: 'External ID', ton: 'gelb', r: 2 }
     if(/Ziel erreicht|bestanden/i.test(t)) return { w: 'Ziel erreicht', ton: 'gruen', r: 4 }
-    if(/geblasen|Boden|Polster aufgebraucht/i.test(t)) return { w: 'geblasen?', ton: 'rot', r: 5 }
+    if(z.art === 'blow') return z.blow === 'ja' ? { w: 'geblowt', ton: 'rot', r: 5 } : { w: 'geblowt?', ton: 'rot', r: 5 }
+    if(/geblasen|geblowt|Boden|Polster aufgebraucht/i.test(t)) return { w: 'geblowt?', ton: 'rot', r: 5 }
     if(/ausgenommen/i.test(t)) return { w: 'Haken aus', ton: 'grau', r: 3 }
     return { w: 'ausgelassen', ton: 'grau', r: 3 }
   }
@@ -46941,6 +46984,8 @@
   }
   function tplBdAktion(z){
     const st = z.lauf && (z.lauf.html || z.lauf.text) ? `<span class="s${z.lauf.fehler ? ' rot' : ''}">${z.lauf.html || escapeHtml(z.lauf.text)}</span>` : ''
+    // geblowt (Lesung ≤ Boden oder Boden unbekannt): Archiv nur per Klick — der Boden ist bei Tradeify nur geschätzt (Finn kann das später lockern)
+    if(z.arch) return `<button type="button" class="knopf rot" data-tpl-blowarch="${escapeHtml(z.arch)}" title="Konto als geblowt archivieren (wie unter Accounts, Grund blown) — der Planer lässt es danach weg">Als geblowt archivieren</button>`
     if(z.bal || z.balf){
       if(z.lauf && z.lauf.laeuft) return st || '<span class="s">liest …</span>'
       return (z.bal ? `<button type="button" class="knopf" data-tpl-bal="${escapeHtml(z.bal)}">↻ Balance lesen</button>`
@@ -46952,7 +46997,7 @@
     return `${z.neu ? `<button type="button" class="knopf" data-tpl-neu="${escapeHtml(z.neu)}" title="Startzeit in 1–3 min, Prüfungen wie immer am PC der ID">✓ Behoben – neu einplanen</button>` : ''}${z.key ? `<button type="button" class="knopf" data-tpl-t="${escapeHtml(z.key)}">→ Plan</button>` : ''}`
   }
   // Eine Zeile Klartext, was zu tun ist; der volle Problemtext steht im Tooltip. Balance-Fälle: eigene Anleitung (MT5/TV) bleibt, sonst ein
-  // fester Satz je Label, fremd mit „am PC von …"; Ziel erreicht / geblasen? / ausgelassen: der Grund selbst ist die Information
+  // fester Satz je Label, fremd mit „am PC von …"; Ziel erreicht / geblowt? / ausgelassen: der Grund selbst ist die Information
   function tplBdGrau(z, l, wer){
     const t = String(z.text || ''), tun = String(z.tun || ''), fremd = !!(z.balf || (z.hinweis && /PC/.test(z.hinweis)))
     if(z.art === 'balance'){
@@ -46963,7 +47008,11 @@
       return stand + satz + (fremd ? ` · am PC von ${wer || 'der ID'}` : '')
     }
     if(l.w === 'Ziel erreicht') return 'Phase unter Accounts umstellen — danach plant der Bot weiter'
-    if(l.w === 'geblasen?') return t.replace(/\s*[—–-]\s*geblasen\?\s*$/, '') || t
+    if(z.art === 'blow' && z.blowBal != null){
+      const f = v => Math.round(Number(v)).toLocaleString('de-DE') + ' $'
+      return z.blowBoden != null ? `gelesen ${f(z.blowBal)} · Boden ${f(z.blowBoden)}` : `gelesen ${f(z.blowBal)} · Boden unbekannt — selbst entscheiden`
+    }
+    if(l.w === 'geblowt?') return apBlowText(t).replace(/\s*[—–-]\s*geblowt\?\s*$/, '') || apBlowText(t)
     if(l.w === 'ausgelassen') return t
     return tun || t
   }
@@ -46975,8 +47024,8 @@
       return `<div class="ap-id-karte tpl-bd-id" style="--id:${idFarbe(o.uid)}" data-wer="${escapeHtml(o.name || '')}"><div class="ap-adm-grp"><span class="ap-adm-id"><i style="background:${idFarbe(o.uid)}"></i>${escapeHtml(o.name || '—')}</span><span class="n">${o.zeilen.length} ${o.zeilen.length === 1 ? 'Fall' : 'Fälle'}</span></div>`
         + zeilen.map(({ z, l }) => {
           const grau = tplBdGrau(z, l, o.name)
-          return `<div class="tpl-bd-z ${z.art}">${tplBdKonto(z)}<span class="l ${l.ton}" title="${escapeHtml(z.text || '')}">${escapeHtml(l.w)}</span>`
-            + `<span class="t" title="${escapeHtml([z.text, z.tun].filter(Boolean).join(' — '))}">${escapeHtml(grau)}</span><span class="a">${tplBdAktion(z)}</span></div>`
+          return `<div class="tpl-bd-z ${z.art}">${tplBdKonto(z)}<span class="l ${l.ton}" title="${escapeHtml(apBlowText(z.text || ''))}">${escapeHtml(l.w)}</span>`
+            + `<span class="t" title="${escapeHtml(apBlowText([z.text, z.tun].filter(Boolean).join(' — ')))}">${escapeHtml(grau)}</span><span class="a">${tplBdAktion(z)}</span></div>`
         }).join('') + `</div>`
     }).join('')
     return `<div class="tpl-karte tpl-bd"><div class="tpl-h">Braucht dich <b>${n}</b></div>${bloecke}</div>`
@@ -47370,7 +47419,7 @@
         const s = st && st.status, e = (st && st.ergebnis) || {}
         if(s === 'fertig'){
           const txt = typeof e.balance === 'number' ? `gelesen ${tplBalFmt(e.balance)}` : String(e.msg || 'gelesen')
-          setz({ laeuft: false, text: txt + (st.pc ? ` (PC ${st.pc})` : '') }); tplNachLesung(); return
+          setz({ laeuft: false, text: txt + (st.pc ? ` (PC ${st.pc})` : ''), balance: typeof e.balance === 'number' ? e.balance : null, at: Date.now() }); tplNachLesung(); return
         }
         if(['fehler', 'verfallen', 'verworfen'].includes(s)){ setz({ laeuft: false, fehler: true, text: String(e.msg || s) + (st.pc ? ` (PC ${st.pc})` : '') }); return }
         if(s === 'laeuft'){ const pl = Number(e.warteschlange) || 0
@@ -47735,6 +47784,12 @@
   const tplKlick = e => {
     const pw = e.target.closest('[data-pzw]')   // Plan-Zeile: TP/SL/Größe → Mini-Popup (08.10.2026)
     if(pw){ e.stopPropagation(); pzwOeffnen(pw); return }
+    // Braucht dich, geblowt (08.10.2026): vorhandener Archiv-Weg wie unter Accounts (archiveAccount 'blown' → Duplikum/Echo aufräumen,
+    // user_settings.archive per Sync; der Planer liest das Archiv aller Profile). Nur per Klick, danach ist die Zeile weg.
+    const ba = e.target.closest('[data-tpl-blowarch]')
+    if(ba){ e.stopPropagation(); ba.disabled = true; ba.textContent = 'archiviert …'
+      try{ archiveAccount(ba.dataset.tplBlowarch, 'blown'); if(typeof renderAccounts === 'function') renderAccounts() }catch(err){ console.warn('[tpl] archivieren', err); ba.disabled = false; ba.textContent = 'Als geblowt archivieren' }
+      setTimeout(tplSpaeter, 200); return }
     const hk = e.target.closest('[data-tpl-haken]')   // Braucht dich: ✓ Planer-Haken setzen (08.10.2026) — wie der Haken in der Accounts-Liste
     if(hk){ hk.disabled = true; hk.textContent = 'setzt …'; accAutoPlanerUmstellen(hk.dataset.tplHaken, true, null).then(() => { _ap.laufAt = 0; return apLetztenHolen() }).catch(() => {}).finally(() => { setTimeout(tplSpaeter, 300) }); return }
     const c = e.target.closest('[data-tpl-id]')   // ID-Chip: Klick auf die gewählte ID oder „Alle" = alle (07.10.2026)
@@ -60820,10 +60875,10 @@
     for(const t of T) if(!t.ohnePlan){ const k = String(t.konto_id || t.konto); if(!konten.has(k)) konten.set(k, { typ: t.typ, grund: null }) }
     const jeTyp = TPL_TYPEN.map(ty => ({ ty, k: [...konten.values()].filter(x => String(x.typ) === ty).length }))
     const kmax = Math.max(1, ...jeTyp.map(x => x.k))
-    const zust = new Map(); for(const x of konten.values()) if(x.grund && /Ziel erreicht|geblasen|unter Boden|kurz vor Ziel/.test(x.grund)) zust.set(x.grund, (zust.get(x.grund) || 0) + 1)
+    const zust = new Map(); for(const x of konten.values()) if(x.grund && /Ziel erreicht|geblasen|geblowt|unter Boden|kurz vor Ziel/.test(x.grund)) zust.set(apBlowText(x.grund), (zust.get(x.grund) || 0) + 1)
     const kontenKarte = `<div class="ap-idd-karte"><div class="ap-idd-h">Konten <b>${konten.size}</b><span>${lauf ? 'Stand Lauf heute' + (lauf.at ? ' ' + escapeHtml(tplUhrIso(lauf.at)) : '') : 'noch kein Lauf heute'}</span></div>
         ${jeTyp.map(x => `<div class="ap-idd-bz"><span>${TPL_TYP_WORT[x.ty]}</span><span class="ap-idd-bar"><i style="width:${(x.k / kmax * 100).toFixed(1)}%;background:${farbe}"></i></span><b>${x.k}</b></div>`).join('')}
-        ${zust.size ? `<div class="ap-idd-chips">${[...zust].map(([g, k]) => `<span class="ap-idd-chip${/Ziel/.test(g) ? ' gut' : /geblasen|Boden/.test(g) ? ' rot' : ''}">${escapeHtml(g)} <b>${k}</b></span>`).join('')}</div>` : ''}</div>`
+        ${zust.size ? `<div class="ap-idd-chips">${[...zust].map(([g, k]) => `<span class="ap-idd-chip${/Ziel/.test(g) ? ' gut' : /geblowt|Boden/.test(g) ? ' rot' : ''}">${escapeHtml(g)} <b>${k}</b></span>`).join('')}</div>` : ''}</div>`
     // ── LETZTE 7 TAGE: beendete Auto-Trades dieser ID je Tag (hypothetisch €, Gewinne über / Verluste unter der Null-Linie)
     const tage = []; { const d0 = new Date(heute + 'T12:00:00Z'); for(let i = 6; i >= 0; i--){ const d = new Date(d0); d.setUTCDate(d.getUTCDate() - i); tage.push(d.toISOString().slice(0, 10)) } }
     const b7 = bil.filter(z => tage.includes(String(z.tag || '')))
@@ -60838,7 +60893,7 @@
     const ab7 = (() => { const d = new Date(idRow.sieben_tage_ab || ''); return isNaN(d) ? '' : ' seit ' + d.toLocaleDateString('de-DE', { timeZone: 'Asia/Dubai', day: '2-digit', month: '2-digit' }) })()
     const bgb = ['bestanden_7t', 'geblasen_7t', 'beendet_7t'].some(k => k in idRow) ? `<div class="ap-idd-chips ap-idd-7t">
         <span class="ap-idd-chip gut" title="${escapeHtml('Phasenwechsel ohne Archiv-Eintrag zählt nicht mit' + ab7)}">bestanden <b>${z7('bestanden_7t')}</b></span>
-        <span class="ap-idd-chip rot" title="${escapeHtml('geblasen' + ab7)}">geblasen <b>${z7('geblasen_7t')}</b></span>
+        <span class="ap-idd-chip rot" title="${escapeHtml('geblowt' + ab7)}">geblowt <b>${z7('geblasen_7t')}</b></span>
         <span class="ap-idd-chip" title="${escapeHtml('beendet' + ab7)}">beendet <b>${z7('beendet_7t')}</b></span></div>` : ''
     const tageKarte = `<div class="ap-idd-karte"><div class="ap-idd-h">Letzte 7 Tage <b class="${kl(s7)}">${b7.length ? vzE(s7) : '–'}</b><span>${b7.length ? `${n(b7.length, 'Trade')} · ${p7} im Plus` : 'keine beendeten Auto-Trades'}</span></div>
         ${bgb}<div class="ap-idd-tage">${jeTag.map(x => `<div class="tg" title="${escapeHtml(`${tagTxt(x.t)} · ${n(x.n, 'Trade')} · ${vzE(x.plus + x.minus)} hypothetisch`)}">
