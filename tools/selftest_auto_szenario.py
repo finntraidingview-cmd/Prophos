@@ -98,6 +98,17 @@ def main():
     nach3 = L(laufend + [a["ap_szenario_trade_aus_zeile"](p, False) for p in z3 if p["start_min"] <= jetzt + 60])["min_eur"]
     check(nach3 >= vor3 - 1e-6, f"Verteilung verschlechtert den schlimmsten Fall nicht ({vor3} → {nach3} €, Züge {neu3})")
 
+    # ── 4 keine Schwelle (Finn 08.10.2026): schon −30 € löst aus; ein Zug unter AP_SZENARIO_MIN_GEWINN_EUR Gewinn unterbleibt ────────
+    klein = [{"richtung": "sell", "satz": 0.05, "usd_pro_pkt": 20.0, "wert": 9999.0, "polster_usd": 1e6, "tp_punkte": None}]   # −1 €/Pkt
+    e4 = U([plan("tf_long", "chris", "tradeify", "buy", 420, satz_eur_je_usd=0.05, usd_pro_pkt=20.0)], 0.0, 0.0, jetzt, Z, 25,
+           random.Random(1), einsatz=dict(EK, szenario_laufend=klein), dubai_min=120)
+    check(L(klein)["min_eur"] < 0 and len(e4["aenderungen"]) == 1,
+          f"keine Schwelle: min ±30 = {L(klein)['min_eur']} € (über −100) löst trotzdem aus ({[x['plan_id'] for x in e4['aenderungen']]})")
+    winzig = [{"richtung": "sell", "satz": 0.05, "usd_pro_pkt": 2.0, "wert": 9999.0, "polster_usd": 1e6, "tp_punkte": None}]   # −0,1 €/Pkt
+    e5 = U([plan("tf_long", "chris", "tradeify", "buy", 420, satz_eur_je_usd=0.05, usd_pro_pkt=0.2)], 0.0, 0.0, jetzt, Z, 25,
+           random.Random(1), einsatz=dict(EK, szenario_laufend=winzig), dubai_min=120)
+    check(not e5["aenderungen"], f"Gewinn am Minimum < {a['AP_SZENARIO_MIN_GEWINN_EUR']:g} € → kein Zug (Dämpfung, min {L(winzig)['min_eur']} €)")
+
     print()
     if FEHLER:
         print(f"✗ {len(FEHLER)} Fehler")

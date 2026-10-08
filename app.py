@@ -16564,7 +16564,9 @@ AP_VORZIEHEN_HYSTERESE_EUR = 100.0     # Vorziehen löst schon ab 100 € über 
 AP_SZENARIO_R = 30                       # Punkte links/rechts, über die das Minimum zählt
 AP_SZENARIO_SCHRITT = 5
 AP_SZENARIO_WEIT = 100                   # Kurve für die Anzeige −100 … +100
-AP_SZENARIO_AB_EUR = 100.0               # Vorziehen löst auch aus, wenn min P über ±R unter −100 € liegt
+AP_SZENARIO_AB_EUR = 0.0                 # Vorziehen löst aus, sobald min P über ±R unter 0 € liegt — Finn 08.10.2026: „es gibt keine
+                                         # Schwelle … einfach so, wie es sein soll" (vorher 100 €)
+AP_SZENARIO_MIN_GEWINN_EUR = 10.0        # Dämpfung: ein Zug muss das Minimum um mindestens so viel heben, sonst kein Zug (kein Flattern)
 
 
 def ap_szenario_trade(t, d):
@@ -17043,8 +17045,8 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
             if sz_offen:
                 # SZENARIO: der Zug muss das Minimum über ±AP_SZENARIO_R heben (die Klippe zählt voll); kein neuer Malus
                 s_neu = sz_lage(z)["min_eur"]
-                if k_neu[0] > aktuell[0] or s_neu <= sz_vor["min_eur"] + 1e-9:
-                    continue
+                if k_neu[0] > aktuell[0] or s_neu < sz_vor["min_eur"] + AP_SZENARIO_MIN_GEWINN_EUR:
+                    continue                                 # kein echter Gewinn am Minimum (< AP_SZENARIO_MIN_GEWINN_EUR) → kein Zug
                 gewinn = s_neu - sz_vor["min_eur"]
             else:
                 u_vor, u_neu = flaeche_ab(zustand, ziel), flaeche_ab(z, ziel)   # Über-Band-Fläche ab dem neuen Start: vorher gegen nachher
