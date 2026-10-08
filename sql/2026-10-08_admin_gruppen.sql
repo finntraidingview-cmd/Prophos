@@ -22,6 +22,10 @@
 --   Hermann Technologies + IDs ohne Zeile: wie bisher alles; Finn bekommt im Admin-Kopf Chips je Gruppe (Name aus id_gruppen.name).
 --   Fehlen die Tabellen (Datei nicht eingespielt), gibt es keine Gruppen — Backend und Frontend laufen wie vor den Gruppen.
 -- Live-DB: spielt der Master ein. Keine echten IDs, Namen oder E-Mails in dieser Datei (Repo) — Platzhalter unten.
+-- EINE TRANSAKTION (Prüfer S2, 08.10.2026): begin … commit um die ganze Datei; die Prüfung am Ende (Abschnitt 6b) wirft, wenn die Gruppe
+-- „Emin" fehlt oder weniger als 2 Mitglieder hat — dann rollt alles zurück, nichts bleibt halb eingespielt.
+
+begin;
 
 -- ── 1. Tabellen ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 create table if not exists public.id_gruppen (
@@ -184,8 +188,8 @@ create policy nur_eigene_wallet_tx on public.wallet_tx as restrictive
 -- ── 6. SEED — Platzhalter, der Master setzt beim Einspielen die zwei user_ids ein (nie ins Repo) ────────────────────────────────
 --   :'emin' = user_id des Verwalters (hat die admin_zugang-Zeile mit nur_eigene = true)
 --   :'amir' = user_id des neuen Mitglieds (Login seit 08.10.2026)
--- psql: \set emin '<uuid>' und \set amir '<uuid>' vor dem Lauf; im SQL-Editor / execute_sql jedes :'emin' bzw. :'amir' durch
--- '<uuid>' ersetzen. Nachschlagen z. B.: select id, raw_user_meta_data->>'name' from auth.users order by created_at desc limit 10;
+-- psql: \set emin '<uuid>' und \set amir '<uuid>' vor dem Lauf (die Platzhalter stehen bewusst außerhalb des do-Blocks, psql setzt sie
+-- dort ein); im SQL-Editor / execute_sql jedes :'emin' bzw. :'amir' durch '<uuid>' ersetzen. Nachschlagen z. B.: select id, raw_user_meta_data->>'name' from auth.users order by created_at desc limit 10;
 insert into public.id_gruppen (name, verwalter_user_id, notiz)
 values ('Hermann Technologies', null, 'Finns Admins — jede ID ohne andere Gruppe')
 on conflict (name) do nothing;
@@ -212,6 +216,31 @@ select x.user_id, g.id
   cross join public.id_gruppen g
  where g.name = 'Emin'
 on conflict (user_id) do update set gruppe_id = excluded.gruppe_id, seit = now();
+
+-- ── 6b. Prüfung — wirft bei halbem Seed, die Transaktion rollt dann komplett zurück ───────────────────────────────────────────────
+do $$
+declare
+  v_gruppe uuid;
+  v_verwalter uuid;
+  v_n int;
+begin
+  if not exists (select 1 from public.id_gruppen where verwalter_user_id is null and name = 'Hermann Technologies') then
+    raise exception 'Admin-Gruppen: Gruppe „Hermann Technologies" fehlt — nichts eingespielt';
+  end if;
+  select id, verwalter_user_id into v_gruppe, v_verwalter from public.id_gruppen where name = 'Emin';
+  if v_gruppe is null or v_verwalter is null then
+    raise exception 'Admin-Gruppen: Gruppe „Emin" fehlt oder hat keinen Verwalter (admin_zugang nur_eigene?) — nichts eingespielt';
+  end if;
+  select count(*) into v_n from public.id_gruppe_mitglied where gruppe_id = v_gruppe;
+  if v_n < 2 then
+    raise exception 'Admin-Gruppen: Gruppe „Emin" hat nur % Mitglied(er), erwartet 2 — Platzhalter richtig ersetzt? Nichts eingespielt', v_n;
+  end if;
+  if not exists (select 1 from public.id_gruppe_mitglied where user_id = v_verwalter and gruppe_id = v_gruppe) then
+    raise exception 'Admin-Gruppen: der Verwalter ist nicht Mitglied seiner Gruppe — nichts eingespielt';
+  end if;
+end $$;
+
+commit;
 
 -- ── 7. Kontrolle nach dem Einspielen ─────────────────────────────────────────────────────────────────────────────────────────────
 -- select * from public.id_gruppen_uebersicht;                       -- jede ID genau einmal, Emin-Gruppe = 2 Zeilen

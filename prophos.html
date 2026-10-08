@@ -13195,6 +13195,9 @@
     }
     // eingeschränkt (Verwalter/eigener Code): Listen aus nutzerübergreifenden Tabellen nur über _admGruppeOk (Winning Days, 08.10.2026)
     window._admNurGruppe = () => admEingeschraenkt() || !!eigenerCode
+    // dasselbe, aber ohne vorher den Admin betreten zu haben: admin_zugang (eigene Zeile, RLS) einmal je Login nachladen (Prüfer M1,
+    // 08.10.2026) — die Schreib-Wächter im Farmer/Markt (wdDarf) fragen das, bevor sie Tagesplan-Zeilen anderer IDs anfassen
+    window._admNurGruppeLaden = async () => { try{ await eigenerCodeLaden() }catch(_){} return admEingeschraenkt() || !!eigenerCode }
     function admGruppeChips(){
       const el = $('adm-gruppe-seg'); if(!el) return
       const liste = (!admEingeschraenkt() && admData && Array.isArray(admData.gruppen)) ? admData.gruppen : []
@@ -13931,6 +13934,8 @@
       const st = $('adm-kap-edit-stand')
       const name = lies('name').trim(), von = lies('von'), bis = lies('bis')
       if(!name || !von){ if(st) st.textContent = 'Name und Beginn dürfen nicht leer sein'; return }
+      // kapitel ist HT-weit und per RLS offen — ein eingeschränkter Login (Verwalter) schreibt hier nie (Prüfer M1, 08.10.2026)
+      if(admEingeschraenkt() || eigenerCode){ if(st) st.textContent = 'Kapitel gelten für alle IDs — nur Hermann Technologies'; return }
       const patch = { name, von, bis: bis || null, beschreibung: lies('beschreibung').trim(), updated_at: new Date().toISOString() }
       try{
         const { error } = await supabase.from('kapitel').update(patch).eq('id', id)
@@ -20592,6 +20597,8 @@
     sel.addEventListener('change', async () => {
       const v = sel.value; zeig('speichert …')
       try{
+        // wd_farmer_regeln gilt für alle IDs — ein eingeschränkter Login (Verwalter) schreibt hier nie (Prüfer M1, 08.10.2026)
+        if(typeof window._admNurGruppeLaden === 'function' && await window._admNurGruppeLaden()){ sel.value = tsPulsModus(); return zeig('nur Hermann Technologies') }
         const { error } = await supabase.from('wd_farmer_regeln').update({ puls_topstep: v, updated_at: new Date().toISOString() }).eq('id', 1)
         if(error) throw error
         wdRegelnVergessen()
@@ -27070,6 +27077,7 @@
     const t = mklWdPlanTrades(P).find(x => String(x.konto.plan_id) === e.id)
     const fehler = m => { e.busy = false; e.fehler = true; e.msg = m; mklWdRender() }
     if(!t) return fehler('Plan nicht mehr in der Liste')
+    if(!(await wdDarf(t.uid, true))) return fehler('Nur eigene Pläne')   // Markt: eingeschränkter Login nur eigene Zeile (Prüfer M1, 08.10.2026)
     if(t.status !== 'planned' || t.gestartet) return fehler('Plan ist schon gestartet — nicht mehr bearbeitbar')
     const tp = Math.round(Number(e.tp)), kt = Number(e.kt)
     if(!(tp > 0)) return fehler('TP $ muss größer als 0 sein')
@@ -27115,6 +27123,7 @@
   async function mklWdPlanNeuAnlegen(pid){
     const P = mkl.wd.plan; if(!P || P.neuBusy) return
     const t = mklWdPlanTrades(P).find(x => String(x.konto.plan_id) === String(pid)); if(!t || t.status !== 'fehlt') return
+    if(!(await wdDarf(t.row && t.row.user_id, true))) return   // Markt: eingeschränkter Login nur eigene Zeile (Prüfer M1, 08.10.2026)
     P.neuBusy = pid; P.neuMsg = null; mklWdRender()
     let text = ''
     try{
@@ -27223,6 +27232,7 @@
     const A = (P.rows || []).find(x => String(x.user_id) === String(uidA)), B = (P.rows || []).find(x => String(x.user_id) === String(uidB))
     const toast = (t, k) => { if(typeof atToast === 'function') atToast(t, k) }
     if(!A || !B || !A.start_um || !B.start_um || A.status !== 'geplant' || B.status !== 'geplant') return toast('Tauschen geht nur zwischen geplanten Blöcken', 'end')
+    if(!(await wdDarf(uidA, true)) || !(await wdDarf(uidB, true))) return toast('Tauschen nur mit eigenen Blöcken', 'end')   // Prüfer M1 (08.10.2026)
     P.tauschBusy = true; mklWdRender()
     const schreibe = async (row, start, rf, basis) => {
       const konten = (basis || []).map(k => (k && k.aktiv !== false) ? { ...k, start_um: start } : k)
@@ -52339,6 +52349,7 @@
     return 'ohne Take Profit kein Multiplikator — Hedge nur über den Staffel-Betrag'
   }
   async function wdVorplanRegelnSpeichern(v){
+    if(await wdNurGruppe()) return   // wd_farmer_regeln ist HT-weit (Prüfer M1, 08.10.2026)
     const { data: { user } } = await supabase.auth.getUser()
     await supabase.from('wd_farmer_regeln').update({ vorplan: v, updated_at: new Date().toISOString(), updated_by: user ? user.id : null }).eq('id', 1)
     if(_wd.regeln) _wd.regeln.vorplan = v
@@ -52387,6 +52398,9 @@
       rail = d; _wd.railFehler = ''
     }catch(e){ _wd.railFehler = String(e.message || e); console.warn('[wd] Railway', e) } }
     await Promise.all([ladeRpc(), ladeRail()])
+    // Prüfer M1 (08.10.2026): die RPC liefert die Konten ALLER IDs, Railway einem Verwalter nur seine Gruppe — fremde Konten fielen sonst
+    // unten als „archiviert" auf und wdPlaeneAnlegen schriebe das in HT-Tagespläne. Für Eingeschränkte: nur Konten der eigenen Sicht.
+    if(konten && await wdNurGruppe()) konten = await wdNurErlaubte(konten)
     const rpcOk = !!konten   // rpc wd_konten_alle liefert NUR Typ winning_days — dann ist „nicht in der Liste" = kein Winning-Days-Konto
     if(konten && rail && Array.isArray(rail.konten)){
       // Railway kennt Archiv + ausgeblendete Personen: solche Konten bleiben in der Liste, aber als
@@ -52423,6 +52437,18 @@
   // Live-Stand eines Plans aus der Railway-Antwort (Mac) — der PC-Tab hat die Pläne selbst in tradePlans
   const wdPlanLive = k => (k && k.plan_id && _wd.daten && Array.isArray(_wd.daten.plaene)) ? (_wd.daten.plaene.find(p => String(p.id) === String(k.plan_id)) || null) : null
   const wdKontoDaten = id => ((_wd.daten && _wd.daten.konten) || []).find(q => String(q.id) === String(id)) || null
+  /* SCHREIB-WÄCHTER FÜR OFFENE TABELLEN (Prüfer M1, 08.10.2026): wd_tagesplan, wd_farmer_regeln und die RPC wd_konto_setzen sind per RLS für
+   * jeden Login offen. Ein eingeschränkter Login (Gruppen-Verwalter mit eigenem Admin-Code) schreibt die eigene Zeile, aus einer Admin-Aktion
+   * auch Zeilen/Konten seiner Gruppe (window._admGruppeOk, Admin-Ansicht), mit streng (Automatik am PC) nur die eigene; wd_farmer_regeln nie.
+   * HT-Logins wie bisher alles. Nicht prüfbar → wie eingeschränkt (nur eigene). */
+  async function wdNurGruppe(){ try{ return typeof window._admNurGruppeLaden === 'function' ? !!(await window._admNurGruppeLaden()) : false }catch(_){ return true } }
+  async function wdDarf(uid, streng){
+    if(String(uid || '') === String((typeof currentUserId !== 'undefined' && currentUserId) || '#')) return true
+    if(!(await wdNurGruppe())) return true
+    return !streng && typeof window._admGruppeOk === 'function' && !!window._admGruppeOk(uid)
+  }
+  async function wdNurErlaubte(liste, streng){ const ok = await Promise.all((liste || []).map(x => wdDarf(x && x.user_id, streng))); return (liste || []).filter((_, i) => ok[i]) }
+  window._wdDarf = wdDarf   // Test-Haken
   // IDs, die NIE gefahren werden (Finn 23.09.2026: „Emin und Finn — die ID immer weglassen, immer") — wd_farmer_regeln.ids_aus
   const wdIdsAus = () => new Set((((_wd.regeln || {}).ids_aus) || []).map(String))
   // Nur Konten vom Typ Winning Days fahren im Farmer (26.09.2026, Finn: „von jeder ID alle Konten, die als Typ Winning Days sind") —
@@ -52463,7 +52489,7 @@
     const rows = await wdRowsLaden(tag), byUid = new Map(rows.map(x => [String(x.user_id), x]))
     let neu = 0, aktualisiert = 0, fehler = null
     const jobs = []   // alle Schreibzugriffe parallel (23.09.2026, Finn: „warum dauert das Würfeln so lange?")
-    for(const e of erw){
+    for(const e of await wdNurErlaubte(erw)){   // eingeschränkt: nur IDs der eigenen Sicht (Prüfer M1, 08.10.2026)
       const jetzt = new Date().toISOString(), x = byUid.get(e.user_id)
       if(!x){
         jobs.push(supabase.from('wd_tagesplan').insert({ tag, user_id: e.user_id, name: e.name, konten: e.konten,
@@ -52539,7 +52565,9 @@
     const rf = (typeof window._admNurGruppe === 'function' && window._admNurGruppe()) ? {} : (((_wd.daten || {}).richtung_fest) || {})
     const erg = wdWuerfeln(rows, r, tag, seed, alleNeu, Date.now(), rf)
     let n = 0
-    await Promise.all(offen.map(x => {   // parallel statt nacheinander (23.09.2026)
+    // Prüfer M1 (08.10.2026): gerechnet wird über alle Zeilen (deterministisch wie jeder Tab), geschrieben vom eingeschränkten Login nur die eigene
+    const schreibbar = await wdNurErlaubte(offen, true)
+    await Promise.all(schreibbar.map(x => {   // parallel statt nacheinander (23.09.2026)
       const e = erg.get(String(x.user_id)); if(!e) return null
       let q = supabase.from('wd_tagesplan').update({ reihenfolge: e.reihenfolge, start_um: e.start_um, richtung: e.richtung, status: e.status, updated_at: new Date().toISOString() }).eq('tag', tag).eq('user_id', x.user_id)
       if(!alleNeu) q = q.is('start_um', null)   // wer zuerst schreibt, gewinnt — das Ergebnis ist ohnehin dasselbe
@@ -52566,6 +52594,7 @@
     return out
   }
   async function wdZeileSchreiben(row, konten){
+    if(!(await wdDarf(row && row.user_id))) return   // Riegel: nie eine fremde Zeile aus einem eingeschränkten Login (Prüfer M1, 08.10.2026)
     const status = !konten.some(wdAktiv) ? 'leer' : row.status === 'leer' ? 'geplant' : row.status
     await supabase.from('wd_tagesplan').update({ konten, status, updated_at: new Date().toISOString() }).eq('tag', row.tag).eq('user_id', row.user_id).neq('status', 'laeuft')
   }
@@ -52579,7 +52608,7 @@
   async function wdPlaeneAnlegen(tag){
     const d = _wd.daten
     if(!d || !d.rail) return { angelegt: 0, fehler: ['Railway nicht erreichbar — Pläne legen dann die PC-Tabs an (müssen offen sein)'] }
-    const rows = await wdRowsLaden(tag), r = _wd.regeln || {}, vp = wdVorplanRegeln()
+    const rows = await wdNurErlaubte(await wdRowsLaden(tag)), r = _wd.regeln || {}, vp = wdVorplanRegeln()   // eingeschränkt: nur Gruppe (M1)
     _tpNqMode = vp.instr; try{ localStorage.setItem(TP_NQ_MODE_LS, vp.instr) }catch(_){}
     const symbol = (vp.instr === 'nq' ? 'NQ' : 'MNQ') + (typeof tpFuturesFrontcode === 'function' ? tpFuturesFrontcode() : '')
     let angelegt = 0; const fehler = []
@@ -52642,7 +52671,7 @@
   // TP/SL-Vorgabe) bzw. löschen (Konto abgewählt). Braucht die frische Railway-Antwort (_wd.daten.plaene).
   async function wdPlaeneNachziehen(tag){
     const d = _wd.daten; if(!d || !d.rail) return { geaendert: 0, geloescht: 0 }
-    const rows = await wdRowsLaden(tag), r = _wd.regeln || {}
+    const rows = await wdNurErlaubte(await wdRowsLaden(tag)), r = _wd.regeln || {}   // eingeschränkt: nur Gruppe (Prüfer M1, 08.10.2026)
     let geaendert = 0, geloescht = 0
     for(const row of rows){
       if(row.status === 'laeuft' || row.status === 'fertig' || row.status === 'verpasst') continue
@@ -53292,6 +53321,7 @@
   window._wdSlotWaehlen = wdSlotWaehlen   // Test-Haken
   // Zeile einplanen + Pläne anlegen (bei SCHARF, gleicher Weg wie Würfeln). Nur diese Zeile wird geschrieben. → Text für den Toast
   async function wdSlotEinplanen(x){
+    if(!(await wdDarf(x && x.user_id))) return `${(x && x.name) || 'ID'}: nicht in deiner Gruppe`   // Prüfer M1 (08.10.2026)
     const r = _wd.regeln || {}
     const s = wdSlotWaehlen(_wd.rows || [], x, r, x.tag, Date.now())
     if(s.start_ms == null) return `${x.name || 'ID'} nicht eingeplant: ${s.grund}`   // Zeitfenster (08.10.2026)
@@ -53314,6 +53344,7 @@
    * Zeile (aktiv/hinweis/status) in die DB, bei Haken raus den noch nicht gestarteten Plan löschen, bei Haken rein
    * und SCHARF den Plan anlegen. Kein „Änderungen speichern" mehr nötig für den Haken. */
   async function wdKontoHaken(uid, kontoId, an){
+    if(!(await wdDarf(uid))) return wdSay('Nur Konten deiner Gruppe.', 'err')   // Prüfer M1 (08.10.2026)
     const x = (_wd.rows || []).find(r => String(r.user_id) === String(uid)); if(!x || x.status === 'laeuft' || x.status === 'fertig') return
     const k = (x.konten || []).find(q => String(q.id) === String(kontoId)); if(!k) return
     k.farm = !!an; k.aktiv = !!(an && k.ext && !k.archiviert); k.hinweis = an ? (k.ext ? '' : WD_HINWEIS_EXT) : WD_HINWEIS_FARM
@@ -53342,6 +53373,7 @@
   /* Haken für eine ID ohne Tageszeile (26.09.2026): nur dauerhaft am Konto (rpc wd_konto_setzen) — die Zeile entsteht beim Würfeln bzw.
    * um 00:00 über den PC-Tab und übernimmt den Haken dann von selbst (wdErwartet/wdKandidaten lesen wd_farm). */
   async function wdKontoHakenOhneZeile(kontoId, an){
+    if(!(await wdDarf((wdKontoDaten(kontoId) || {}).user_id))) return wdSay('Nur Konten deiner Gruppe.', 'err')   // Prüfer M1 (08.10.2026)
     const kd = wdKontoDaten(kontoId); if(kd) kd.wd_farm = !!an
     try{
       const { error } = await supabase.rpc('wd_konto_setzen', { p_account: kontoId, p_wd_farm: !!an }); if(error) throw error
@@ -53353,6 +53385,7 @@
    * (dauerhaft) bleibt, nur wd_tagesplan.konten[].aktiv des Tages ändert sich. Raus → nie gestarteten Plan löschen; rein → bei SCHARF und
    * gewürfelter Zeile den Plan anlegen. Der nächste Tag baut seine Zeile neu aus dem Haken — dort fährt das Konto wieder mit. */
   async function wdKontoHeute(uid, kontoId, rein){
+    if(!(await wdDarf(uid))) return wdSay('Nur Konten deiner Gruppe.', 'err')   // Prüfer M1 (08.10.2026)
     const x = (_wd.rows || []).find(r => String(r.user_id) === String(uid)); if(!x || x.status === 'laeuft' || x.status === 'fertig') return
     const k = (x.konten || []).find(q => String(q.id) === String(kontoId)); if(!k || !k.farm) return
     k.aktiv = !!(rein && k.ext && !k.archiviert); k.hinweis = ''
@@ -53387,6 +53420,7 @@
     return `<button type="button" class="chip ${kl} wd-dir-flip" data-wd-flip="${escapeHtml(String(x.user_id))}" title="anklicken: Richtung für alle Konten von ${escapeHtml(x.name || 'dieser ID')} umdrehen">${txt}</button>`
   }
   async function wdRichtungUmschalten(uid){
+    if(!(await wdDarf(uid))) return wdSay('Nur Blöcke deiner Gruppe.', 'err')   // Prüfer M1 (08.10.2026)
     const x = (_wd.rows || []).find(q => String(q.user_id) === String(uid)); if(!x || x._dirBusy) return
     if(x.status === 'laeuft' || x.status === 'fertig' || x.status === 'verpasst') return wdSay('Block läuft schon — Richtung nicht mehr änderbar.', 'err')
     const alt = x.richtung || null, neu = alt === 'buy' ? 'sell' : 'buy'
@@ -53540,6 +53574,7 @@
       <select class="input mono vp-in" id="wd-aus-wahl" style="width:130px;text-align:left"><option value="">ID wählen …</option>${[...bekannt.entries()].sort((a, b) => a[1].localeCompare(b[1])).map(([uid, n]) => `<option value="${escapeHtml(uid)}">${escapeHtml(n)}</option>`).join('')}</select>
       <button type="button" class="btn btn-ghost btn-xs" id="wd-aus-add">+ weglassen</button>`
     const speichern = async liste => {
+      if(await wdNurGruppe()) return wdSay('Gilt für alle IDs — nur Hermann Technologies.', 'err')   // wd_farmer_regeln (Prüfer M1, 08.10.2026)
       const { error } = await supabase.from('wd_farmer_regeln').update({ ids_aus: liste, updated_at: new Date().toISOString() }).eq('id', 1)
       if(error) return wdSay('Liste nicht gespeichert: ' + error.message, 'err')
       _wd.regeln = Object.assign(_wd.regeln || {}, { ids_aus: liste }); wdIdsAusRender(); wdNeuLaden()
@@ -54024,6 +54059,7 @@
     let n = 0, haken = 0, vorgaben = 0
     const num = el => { const v = parseFloat(el?.value); return (isFinite(v) && v > 0) ? Math.round(v) : null }
     for(const el of document.querySelectorAll('#wd-ablauf .wd-karte[data-wd-user]')){
+      if(!(await wdDarf(el.dataset.wdUser))) continue   // eingeschränkt: nur Blöcke der Gruppe (Prüfer M1, 08.10.2026)
       const uid = el.dataset.wdUser, x = (_wd.rows || []).find(r => String(r.user_id) === uid); if(!x) continue
       if(x.status === 'laeuft' || x.status === 'fertig' || x.status === 'verpasst') continue
       const konten = []
@@ -54076,6 +54112,7 @@
     wdSay((n || verschoben) ? teile.join(' · ') + (a.fehler.length ? ' — ⚠ ' + a.fehler.join(' · ') : '') : 'Nichts zu speichern.', (n || verschoben) && !a.fehler.length ? 'ok' : 'err')
   }
   async function wdRegelnSpeichern(auto){
+    if(await wdNurGruppe()) return wdSay('Einstellungen gelten für alle IDs — nur Hermann Technologies.', 'err')   // Prüfer M1 (08.10.2026)
     const g = id => document.getElementById(id), n = (id, std) => { const v = parseFloat(g(id)?.value); return isFinite(v) ? Math.max(0, Math.round(v)) : std }
     const { data: { user } } = await supabase.auth.getUser()
     const r = { aktiv: !!g('wd-aktiv')?.checked, start_hhmm: g('wd-start')?.value || WD_VON_STD, tz: WD_TZ_STD,
@@ -54126,6 +54163,7 @@
     el.textContent = alle.length && ohne ? `${ohne} von ${alle.length} ohne Risiko Master` : ''
   }
   document.getElementById('wdRiskAlle')?.addEventListener('click', async () => {
+    if(await wdNurGruppe()) return wdSay('Risiko für alle WD-Konten gilt für alle IDs — nur Hermann Technologies.', 'err')   // Prüfer M1 (08.10.2026)
     const inp = document.getElementById('wd-risk-alle'), b = document.getElementById('wdRiskAlle')
     const wert = Math.round(parseFloat(inp && inp.value))
     if(!(wert > 0)) return wdSay('Risiko Master: erst einen Dollar-Betrag eintragen (z. B. 1500).', 'err')
@@ -54197,6 +54235,7 @@
     el.innerHTML = `<button type="button" class="ws-knopf" id="ws-knopf">—</button><div class="ws-text" id="ws-text"></div>`
     pane.insertBefore(el, pane.firstChild)
     el.querySelector('#ws-knopf').addEventListener('click', async () => {
+      if(await wdNurGruppe()) return wdSay('Farmer SCHARF/AUS gilt für alle IDs — nur Hermann Technologies.', 'err')   // Prüfer M1 (08.10.2026)
       const an = !(_wd.regeln && _wd.regeln.scharf), b = el.querySelector('#ws-knopf'); b.disabled = true
       try{
         const { data: { user } } = await supabase.auth.getUser()
@@ -54233,7 +54272,7 @@
     for(const p of alle){ if(p && p.status === 'planned' && !p.start_um_gestartet_at) weg.set(String(p.id), p) }
     if(!weg.size) return 0
     await Promise.all([...weg.keys()].map(id => wdApi('DELETE', { id }).catch(e => console.warn('[wd] löschen', id, e))))
-    const rows = await wdRowsLaden(tag), jobs = []
+    const rows = await wdNurErlaubte(await wdRowsLaden(tag)), jobs = []   // eingeschränkt: nur Gruppe (Prüfer M1, 08.10.2026)
     for(const x of rows){
       if(!x || x.status === 'laeuft' || x.status === 'fertig') continue
       let ge = false

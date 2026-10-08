@@ -44,8 +44,8 @@ def check(bed, name):
 
 
 class Antwort:
-    def __init__(self, status, daten):
-        self.status_code, self._d = status, daten
+    def __init__(self, status, daten, text=""):
+        self.status_code, self._d, self.text = status, daten, text
 
     def json(self):
         return self._d
@@ -67,14 +67,14 @@ def lade():
 
     namen = ["admin_zugang_nur_eigene", "admin_gruppen_daten", "admin_sicht_menge", "admin_sicht_lesen", "admin_in_sicht",
              "admin_sicht_filter", "_admin_verwalter_gruppen_ids", "admin_gruppen_liste", "admin_gruppe_filter_menge",
-             "admin_gruppe_ist_ht", "_admin_ansicht", "_admin_filter_ist_ht", "_admin_filter_aus_anfrage", "_admin_nur_uid", "_admin_sicht", "_admin_eingeschraenkt",
+             "admin_gruppe_ist_ht", "admin_gruppen_tabelle_fehlt", "_admin_ansicht", "_admin_filter_ist_ht", "_admin_filter_aus_anfrage", "_admin_nur_uid", "_admin_sicht", "_admin_eingeschraenkt",
              "_admin_darf_uid", "_admin_verwalter", "_wd_login", "_wd_personen", "_admin_basis",
              "ap_sicht", "ap_sicht_uid", "ap_eingriff_sicht", "ap_eingriff_admin_reiter", "ap_admin_reiter_ok", "ap_eingriff_filter",
              "_ap_gruppe_lesen", "_ap_sicht_param", "konto_balance_darf", "ap_stand_sicht", "ap_lauf_ohne_summen",
              "admin_pc_stand", "admin_prop_baum", "admin_wd_plaene", "admin_auto_plan_ids"]
     teile = [konst(k) for k in ("AP_SICHT_ADMIN", "AP_EINGRIFF_MAX", "AUTH_LISTE_CACHE_S", "ADMIN_GRUPPE_HT", "AP_NUR_PLANER_TXT",
                                 "ADMIN_ANSICHT", "AP_LAUF_SUMMEN")]
-    teile += ["_admin_zugang_cache = {}", '_admin_gruppe_cache = {"bis": 0.0, "daten": None}']
+    teile += ["_admin_zugang_cache = {}", '_admin_gruppe_cache = {"bis": 0.0, "daten": None, "letzte": None}']
     teile += [block(n) for n in namen]
     ns = {"re": re, "time": time, "threading": threading, "requests": requests, "request": request, "jsonify": jsonify, "g": g,
           "datetime": datetime, "timedelta": timedelta, "timezone": timezone, "_kurz_cache_lock": threading.Lock(),
@@ -92,7 +92,9 @@ def fake_db(ns, tabellen_fehlen=False):
     def sb_select(table, params):
         log["select"].append((table, dict(params)))
         if table in ("id_gruppen", "id_gruppe_mitglied") and tabellen_fehlen:
-            raise requests.exceptions.HTTPError(response=Antwort(404, {}))
+            if tabellen_fehlen == "kaputt":     # K1: anderer Fehler (DB-Schluckauf)
+                raise requests.exceptions.HTTPError(response=Antwort(503, {}, '{"code":"PGRST003","message":"timeout"}'))
+            raise requests.exceptions.HTTPError(response=Antwort(404, {}, '{"code":"PGRST205","message":"Could not find the table"}'))
         if table == "id_gruppen":
             return [dict(x) for x in GRUPPEN]
         if table == "id_gruppe_mitglied":
@@ -140,7 +142,7 @@ def fake_db(ns, tabellen_fehlen=False):
                "_ap_im_planer": lambda uid: False, "_firm_norm": lambda x: x,
                "WD_PLAN_FELDER": ("master_account_id", "user_id"), "_wd_ohne_master_sl": lambda b: (b, False)})
     ns["_admin_zugang_cache"].clear()
-    ns["_admin_gruppe_cache"].update(bis=0.0, daten=None)
+    ns["_admin_gruppe_cache"].update(bis=0.0, daten=None)   # letzte bleibt (K1: Rückfall auf den zuletzt bekannten Stand)
     return log
 
 
@@ -363,6 +365,57 @@ def main():
     check(set(d["stand"]) == set(ALLE), "Tabellen fehlen: Mitglied ist (noch) unbeschränkt wie vor den Gruppen")
     d = c.get("/admin/pc-stand", headers=h(SOLO)).get_json()
     check(set(d["stand"]) == {SOLO}, "Tabellen fehlen: admin_zugang nur_eigene bleibt bei sich")
+
+    # K1: andere Lesefehler → zuletzt bekannter Stand; nie bekannt → Fehler (502), nie still unbeschränkt
+    ns["_admin_gruppe_cache"].update(letzte=None)
+    fake_db(ns)
+    ns["admin_gruppen_daten"]()                                   # Stand bekannt
+    fake_db(ns, tabellen_fehlen="kaputt")
+    d = c.get("/admin/pc-stand", headers=h(MITGL)).get_json()
+    check(set(d["stand"]) == {MITGL}, "K1: DB-Fehler beim Lesen der Gruppen → letzter Stand, Mitglied bleibt beschränkt")
+    ns["_admin_gruppe_cache"].update(letzte=None)
+    fake_db(ns, tabellen_fehlen="kaputt")
+    r = c.get("/admin/pc-stand", headers=h(MITGL))
+    check(r.status_code == 502, "K1: nie ein Stand + Lesefehler → Anfrage scheitert (502), nicht unbeschränkt")
+    tf = ns["admin_gruppen_tabelle_fehlt"]
+    err = lambda st, txt: requests.exceptions.HTTPError(response=Antwort(st, {}, txt))
+    check(tf(err(404, '{"code":"PGRST205"}')) and tf(err(404, 'relation "x" does not exist 42P01')) and not tf(err(404, '{"code":"PGRST116"}'))
+          and not tf(err(503, "PGRST205 maybe")), "K1: nur PGRST205/42P01 zählt als „Tabelle fehlt“")
+
+    # S1: verfallen im Lauf nur für die Sicht
+    erg = {"geplant": [], "verfallen": [{"user_id": HT1, "plan_id": "a"}, {"user_id": MITGL, "plan_id": "b"}]}
+    check([x["plan_id"] for x in ns["ap_sicht"](erg, gr)["verfallen"]] == ["b"], "S1: Lauf-Antwort — verfallen nur der eigenen Sicht")
+
+    # S6 / M1: Quelltext-Proben
+    src = open(APP, encoding="utf-8").read()
+    i = src.index("\ndef admin_build_auftrag(")
+    blk = src[i:src.find("\n\n\n", i)]
+    check("if not _admin_nur_uid():" in blk and blk.index("if not _admin_nur_uid():") < blk.index('"auftrag_plan"'),
+          "S6: auftrag_plan (Soll/Ziel/ID-Namen) nur ohne Einschränkung")
+    html = open(os.path.join(os.path.dirname(HIER), "prophos.html"), encoding="utf-8").read()
+    def fn(name, n=4000):
+        j = html.index(name); return html[j:j + n]
+    check("konten = await wdNurErlaubte(konten)" in fn("async function wdDatenLaden(", 3600), "M1: wdDatenLaden nimmt für Eingeschränkte nur Konten der Sicht (keine „archiviert“-Markierung fremder)")
+    check("await wdNurErlaubte(await wdRowsLaden(tag))" in fn("async function wdPlaeneAnlegen(", 700) and
+          "await wdNurErlaubte(await wdRowsLaden(tag))" in fn("async function wdPlaeneNachziehen(", 400), "M1: Pläne anlegen/nachziehen nur Zeilen der Gruppe")
+    check("if(!(await wdDarf(row && row.user_id))) return" in fn("async function wdZeileSchreiben(", 300), "M1: wdZeileSchreiben — Riegel gegen fremde Zeilen")
+    for name in ("async function wdSlotEinplanen(", "async function wdKontoHaken(", "async function wdKontoHakenOhneZeile(", "async function wdKontoHeute(",
+                 "async function wdRichtungUmschalten(", "async function mklWdPlanSpeichern(", "async function mklWdPlanTauschen(", "async function mklWdPlanNeuAnlegen("):
+        check("await wdDarf(" in fn(name, 900), f"M1: {name[15:-1]} prüft wdDarf vor dem Schreiben")
+    check("await wdNurErlaubte(offen, true)" in fn("async function wdWuerfelnSchreiben(", 1600), "M1: Würfel-Automatik schreibt eingeschränkt nur die eigene Zeile")
+    # jede Schreibstelle in wd_farmer_regeln bzw. jeder Aufruf von wd_konto_setzen hat in SEINER Funktion/seinem Handler vorher einen Riegel
+    import re as _re
+
+    def umgebung(k):   # vom letzten Funktions- bzw. Handler-Anfang bis zur Stelle
+        return html[max(html.rfind("function ", 0, k), html.rfind("addEventListener(", 0, k)):k]
+    stellen = [m.start() for m in _re.finditer(r"supabase\.from\('wd_farmer_regeln'\)\.update", html)]
+    check(len(stellen) == 5 and all(("wdNurGruppe()" in umgebung(k) or "_admNurGruppeLaden()" in umgebung(k)) for k in stellen),
+          f"M1: alle {len(stellen)} Schreibstellen in wd_farmer_regeln für Eingeschränkte gesperrt")
+    rpc = [m.start() for m in _re.finditer(r"supabase\.rpc\('wd_konto_setzen'", html)]
+    check(len(rpc) == 4 and all(("wdDarf(" in umgebung(k) or "wdNurGruppe()" in umgebung(k)) for k in rpc),
+          f"M1: alle {len(rpc)} Aufrufe von wd_konto_setzen hinter wdDarf/wdNurGruppe")
+    i = html.index("async function admKapSpeichern(")
+    check("if(admEingeschraenkt() || eigenerCode)" in html[i:i + 900], "M1: kapitel (HT-weit) schreibt ein eingeschränkter Login nie")
 
     print("\nALLES GRÜN" if not FEHLER else f"\n{len(FEHLER)} FEHLER")
     sys.exit(1 if FEHLER else 0)

@@ -3201,7 +3201,7 @@ def admin_zugang_nur_eigene(uid):
 # Verwalter-Gruppe bzw. Login mit admin_zugang.nur_eigene ohne eigene Gruppe: sieht im Admin nur sich selbst (wie Emin bis .1380) —
 # nie die HT-Daten, auch nicht über eine Planer-Mitgliedschaft (Option A). Alle anderen Logins (Finn, HT) wie bisher alles, dazu
 # ?gruppe=<gruppe_id>|ht als reiner Lese-Filter. Neue ID zu einer Gruppe = ein update in id_gruppe_mitglied, keine Code-Änderung.
-_admin_gruppe_cache = {"bis": 0.0, "daten": None}
+_admin_gruppe_cache = {"bis": 0.0, "daten": None, "letzte": None}   # letzte: zuletzt gelesener Stand (Rückfall K1)
 ADMIN_GRUPPE_HT = "ht"                 # ?gruppe=ht = die Gruppe ohne Verwalter (Hermann Technologies)
 
 
@@ -3216,18 +3216,39 @@ def admin_gruppen_daten():
     try:
         gr = sb_select("id_gruppen", {"select": "id,name,verwalter_user_id"})
         mg = sb_select("id_gruppe_mitglied", {"select": "user_id,gruppe_id"})
-    except requests.exceptions.HTTPError as e:
-        if getattr(getattr(e, "response", None), "status_code", 0) != 404:
+    except Exception as e:
+        # Prüfer K1 (08.10.2026): NUR „Tabelle gibt es nicht" (PGRST205/42P01, SQL nicht eingespielt) heißt „keine Gruppen". Jeder andere
+        # Fehler — auch ein 404 ohne diesen Code — nimmt den zuletzt bekannten Stand; gab es nie einen, scheitert die Anfrage wie bisher
+        # (502). Sonst wäre ein Mitglied bei einem DB-Schluckauf still wieder unbeschränkt.
+        if isinstance(e, requests.exceptions.HTTPError) and admin_gruppen_tabelle_fehlt(e):
+            gr, mg = [], []
+        else:
+            alt = _admin_gruppe_cache.get("letzte")
+            print(f"[admin-gruppen] ⚠️ nicht lesbar ({type(e).__name__}: {e}) — "
+                  f"{'letzter bekannter Stand' if alt is not None else 'kein bekannter Stand, Anfrage scheitert'}", flush=True)
+            if alt is not None:
+                return alt
             raise
-        gr, mg = [], []
     daten = {"gruppen": [{"id": str(x.get("id")), "name": str(x.get("name") or ""),
                           "verwalter_id": str(x["verwalter_user_id"]) if x.get("verwalter_user_id") else None}
                          for x in (gr if isinstance(gr, list) else []) if x.get("id")],
              "mitglieder": [{"user_id": str(x.get("user_id")), "gruppe_id": str(x.get("gruppe_id"))}
                             for x in (mg if isinstance(mg, list) else []) if x.get("user_id") and x.get("gruppe_id")]}
     with _kurz_cache_lock:
-        _admin_gruppe_cache.update(bis=jetzt + AUTH_LISTE_CACHE_S, daten=daten)
+        _admin_gruppe_cache.update(bis=jetzt + AUTH_LISTE_CACHE_S, daten=daten, letzte=daten)
     return daten
+
+
+def admin_gruppen_tabelle_fehlt(e):
+    """REIN RECHNEND (testbar, Prüfer K1): ist der PostgREST-Fehler „Tabelle existiert nicht" (PGRST205 bzw. Postgres 42P01)?"""
+    r = getattr(e, "response", None)
+    if getattr(r, "status_code", 0) not in (400, 404):
+        return False
+    try:
+        txt = str(getattr(r, "text", "") or "")
+    except Exception:
+        txt = ""
+    return "PGRST205" in txt or "42P01" in txt or "Could not find the table" in txt
 
 
 def admin_sicht_menge(uid, nur_eigene, daten):
@@ -7142,9 +7163,12 @@ def admin_build_auftrag():
     # Soll je Firma + ID-Liste aus der DB (sql/2026-10-05_auftrag_plan.sql) — die Namen gehören nicht ins öffentliche Repo
     plan = {"firmen": []}
     try:
-        zeile = _sb_all("auftrag_plan", {"select": "plan", "id": "eq.1"})
-        if zeile and isinstance(zeile[0].get("plan"), dict):
-            plan = zeile[0]["plan"]
+        # Prüfer S6 (08.10.2026): der Wochenauftrag (Soll, Ziel, ID-Namen) ist HT-intern — eingeschränkte Logins (Verwalter, Gruppen-
+        # Mitglied, „nur eigene") bekommen ihn nicht, nur die Zählung ihrer Sicht
+        if not _admin_nur_uid():
+            zeile = _sb_all("auftrag_plan", {"select": "plan", "id": "eq.1"})
+            if zeile and isinstance(zeile[0].get("plan"), dict):
+                plan = zeile[0]["plan"]
     except Exception as e:
         print(f"[auftrag] ⚠️ auftrag_plan: {type(e).__name__}: {e}", flush=True)
 
@@ -16595,7 +16619,8 @@ def ap_sicht(erg, uid):
     sicht = str(uid) if isinstance(uid, (str, int)) else frozenset(str(u) for u in uid)
     drin = lambda x: (str((x or {}).get("user_id")) == sicht) if isinstance(sicht, str) else (str((x or {}).get("user_id")) in sicht)
     out = dict(erg or {})
-    for f in ("geplant", "ausgelassen", "tranchen"):
+    # verfallen seit Prüfer S1 (08.10.2026): trägt plan_id/user_id/konto_id/Firma/Startzeit je ID — wie die übrigen Listen nur die Sicht
+    for f in ("geplant", "ausgelassen", "tranchen", "verfallen"):
         if isinstance(out.get(f), list):
             out[f] = [x for x in out[f] if drin(x)]
     if isinstance(out.get("ausgleich"), dict):
@@ -19949,7 +19974,7 @@ def ap_stand_sicht(stand, sicht):
     return out
 
 
-AP_LAUF_SUMMEN = ("netto_max_abs", "id_misch", "firma_misch", "misch_fenster", "ids_benutzt")
+AP_LAUF_SUMMEN = ("netto_max_abs", "id_misch", "firma_misch", "misch_fenster", "ids_benutzt", "nur_konten")   # nur_konten: Konto-IDs aller IDs
 
 
 def ap_lauf_ohne_summen(erg):
