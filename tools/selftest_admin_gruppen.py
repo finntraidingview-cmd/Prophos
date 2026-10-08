@@ -68,7 +68,7 @@ def lade():
     namen = ["admin_zugang_nur_eigene", "admin_gruppen_daten", "admin_sicht_menge", "admin_sicht_lesen", "admin_in_sicht",
              "admin_sicht_filter", "_admin_verwalter_gruppen_ids", "admin_gruppen_liste", "admin_gruppe_filter_menge",
              "admin_gruppe_ist_ht", "admin_gruppen_tabelle_fehlt", "_admin_ansicht", "_admin_filter_ist_ht", "_admin_filter_aus_anfrage", "_admin_nur_uid", "_admin_sicht", "_admin_eingeschraenkt",
-             "_admin_darf_uid", "_admin_verwalter", "_wd_login", "_wd_personen", "_admin_basis",
+             "_admin_darf_uid", "_admin_verwalter", "_admin_standard_aus", "_wd_login", "_wd_personen", "_admin_basis", "_ap_namen",
              "ap_sicht", "ap_sicht_uid", "ap_eingriff_sicht", "ap_eingriff_admin_reiter", "ap_admin_reiter_ok", "ap_eingriff_filter",
              "_ap_gruppe_lesen", "_ap_sicht_param", "konto_balance_darf", "ap_stand_sicht", "ap_lauf_ohne_summen",
              "admin_pc_stand", "admin_prop_baum", "admin_wd_plaene", "admin_auto_plan_ids"]
@@ -221,7 +221,7 @@ def main():
     AA = "ansicht=admin"
 
     d = c.get("/admin/pc-stand", headers=h(HT1)).get_json()
-    check(set(d["stand"]) == set(ALLE), "pc-stand: Finn (HT) sieht alle IDs")
+    check(set(d["stand"]) == set(ALLE) - {VERW, MITGL}, "pc-stand: Finn ohne Chip = Standard HT (Gruppe V raus, 09.10.2026)")
     d = c.get(f"/admin/pc-stand?{AA}", headers=h(VERW)).get_json()
     check(set(d["stand"]) == {VERW, MITGL}, "pc-stand: Verwalter in der Admin-Ansicht = seine Gruppe")
     d = c.get("/admin/pc-stand", headers=h(VERW)).get_json()
@@ -241,8 +241,11 @@ def main():
             ns["_wd_login"]()
             return ns["_admin_basis"](), ns["_wd_personen"]()[1]
     b, ex = basis("/admin/overview", HT1)
-    check(b["excluded_ids"] == {HT2, VERW} and sorted(b["excluded_names"]) == ["aus@beispiel.invalid", "verw-aus@beispiel.invalid"],
-          "Übersicht Finn „Alle“: Server-Ausblendung wie heute")
+    check(b["excluded_ids"] == {HT2, VERW, MITGL} and ex == {HT2, VERW, MITGL},
+          "STANDARD HT (09.10.2026): Finn ohne Chip sieht weder Verwalter noch Mitglied (Übersicht + Winning Days/Radar)")
+    check(sorted(b["excluded_names"]) == ["aus@beispiel.invalid", "verw-aus@beispiel.invalid"],
+          "STANDARD HT: „Nicht enthalten“ nennt das Mitglied NICHT (Finn will es auch visuell nicht sehen)")
+    check({HT1, NEU, SOLO}.isdisjoint(b["excluded_ids"]), "STANDARD HT: HT-IDs (auch neue ohne Zeile) unverändert sichtbar")
     b, ex = basis(f"/admin/overview?gruppe={G_V}", HT1)
     check(b["excluded_ids"] == {HT1, HT2, NEU, SOLO} and b["excluded_names"] == ["aus@beispiel.invalid"] and ex == {HT1, HT2, NEU, SOLO},
           "C: Finns Chip „Gruppe V“ zeigt Verwalter UND Mitglied, obwohl der Verwalter ausgeblendet ist")
@@ -257,6 +260,26 @@ def main():
     check(b["excluded_ids"] == set(ALLE) - {VERW} and ex == set(ALLE) - {VERW}, "A: ohne Admin-Ansicht (PC-Tab) nur die eigene ID")
     b, ex = basis(f"/admin/overview?{AA}", MITGL)
     check(b["excluded_ids"] == set(ALLE) - {MITGL}, "Übersicht Mitglied: nur er selbst")
+
+    # STANDARD HT auch ohne _admin_basis (09.10.2026): Planer/Delta/Heute beendet (_ap_namen) und der Helfer selbst
+    def ap_aus(pfad, uid):
+        with app.test_request_context(pfad, headers=h(uid)):
+            ns["_wd_login"]()
+            return ns["_ap_namen"]()[1], ns["_admin_standard_aus"]()
+    aus, std = ap_aus("/admin/auto-plan", HT1)
+    check({VERW, MITGL} <= aus and std == {VERW, MITGL}, "STANDARD HT: Planer/Delta (_ap_namen) ohne Chip ohne Verwalter + Mitglied")
+    aus, std = ap_aus(f"/admin/auto-plan?gruppe={G_V}", HT1)
+    check(MITGL not in aus and std == set(), "Chip „Gruppe V“: _admin_standard_aus leer (die Gruppe ist gewählt)")
+    aus, std = ap_aus(f"/admin/auto-plan?{AA}", VERW)
+    check(std == set() and MITGL not in aus, "Verwalter: seine Gruppe bleibt (keine Standard-Ausblendung)")
+    with app.app_context():
+        check(ns["_admin_standard_aus"]() == {VERW, MITGL}, "ohne Request (Nachtlauf/Bot-Thread): Standard HT")
+    # Frontend: kein Chip „Alle“, Standard HT über die ausser-Liste
+    q_html = open(os.path.join(os.path.dirname(HIER), "prophos.html"), encoding="utf-8").read()
+    check("name: 'Alle' }, ...liste" not in q_html and "id: x.ht ? '' : x.id" in q_html,
+          "Frontend: Chips nur „Hermann Technologies · <Verwalter-Gruppen>“, HT = Standard ohne ?gruppe=")
+    check("if(!gp){ const ht = (admData?.gruppen || []).find(y => y.ht); return !ht || !(ht.ausser || [])" in q_html,
+          "Frontend: _admGruppeOk ohne Chip blendet die ausser-Liste der HT-Gruppe aus")
 
     # Schreib-Schutz wd-plaene — mit Admin-Ansicht (Reiter „Winning Days")
     W = f"/admin/wd-plaene?{AA}"

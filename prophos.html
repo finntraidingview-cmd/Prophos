@@ -10252,7 +10252,7 @@
 
       <div id="kasse-content" hidden>
         <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin:-6px 0 -2px">
-          <!-- Gruppenfilter (08.10.2026, Finn: „Hermann Technologies sieht weiterhin alles, dazu ein Gruppenfilter"): Chips „Alle · <Gruppe> …",
+          <!-- Gruppenfilter (08.10.2026, Finn: „Hermann Technologies sieht weiterhin alles, dazu ein Gruppenfilter"): Chips „Hermann Technologies · <Gruppe> …" (seit 09.10.2026 ohne „Alle", Standard HT),
                Namen aus id_gruppen.name (über /admin/overview → gruppen), nur für Logins ohne Einschränkung. Eigene Verdrahtung admGruppe* im Modul. -->
           <div class="seg adm-gruppe-seg" id="adm-gruppe-seg" role="tablist" aria-label="Gruppe" hidden></div>
           <button id="kasse-sperren" title="Admin wieder mit Code sperren"
@@ -13219,17 +13219,22 @@
     /* GRUPPENFILTER (08.10.2026, Finn: „Finn (Hermann Technologies) sieht weiterhin ALLES, dazu ein Gruppenfilter"): Chips im Admin-Kopf
      * „Alle · <Name aus id_gruppen> …", nur ohne Einschränkung und nur, wenn es mehr als eine Gruppe gibt. Gewählt = ?gruppe=<id> an
      * Übersicht/Kapitel/Trade-Planer (der Server filtert, wie beim Kapitel-Regler), dazu window._admGruppeOk für Listen, die direkt aus
-     * Supabase kommen (Winning-Days-Blöcke, PC-Tabs). Wahl je Gerät gemerkt (prophos_adm_gruppe), nur Komfort. */
+     * Supabase kommen (Winning-Days-Blöcke, PC-Tabs). Wahl je Gerät gemerkt (prophos_adm_gruppe), nur Komfort.
+     * STANDARD = HERMANN TECHNOLOGIES (09.10.2026, Finn: ein Mitglied der Gruppe „Emin" stand in „Verlauf nach Person" — „Der soll weg …
+     * auch visuell nicht mehr sehen"): kein Chip „Alle" mehr, nur „Hermann Technologies · <Verwalter-Gruppen>". Ohne gewählte Gruppe
+     * blendet der Server alle IDs der Gruppen MIT Verwalter aus (_admin_standard_aus) und _admGruppeOk hier ebenso (ausser-Liste der
+     * HT-Gruppe); der Chip „Emin" zeigt die Gruppe weiter. HT hat keinen ?gruppe=-Parameter (= Standard), eine gemerkte HT-ID zählt wie leer. */
     const ADM_GRUPPE_LS = 'prophos_adm_gruppe'
     let admGruppe = ''
     try{ admGruppe = localStorage.getItem(ADM_GRUPPE_LS) || '' }catch(_){}
-    const admGruppeAktiv = () => (!admEingeschraenkt() && admGruppe && (admData?.gruppen || []).some(x => String(x.id) === admGruppe)) ? admGruppe : ''
+    const admGruppeAktiv = () => (!admEingeschraenkt() && admGruppe && (admData?.gruppen || []).some(x => String(x.id) === admGruppe && !x.ht)) ? admGruppe : ''
     // ?gruppe= für die Admin-Lader; vor der ersten Übersicht gilt die gemerkte Wahl (der Server prüft sie ohnehin)
     window._admGruppeQ = vor => { const gp = admData ? admGruppeAktiv() : (admEingeschraenkt() ? '' : admGruppe); return gp ? `${vor}gruppe=${encodeURIComponent(gp)}` : '' }
     window._admGruppeOk = uid => {
       if(admEingeschraenkt()) return admData.sicht_ids.map(String).includes(String(uid))
       if(eigenerCode && !admData) return false          // eigener Code, Übersicht noch nicht da: nichts Fremdes zeigen
-      const gp = admGruppeAktiv(); if(!gp) return true
+      const gp = admGruppeAktiv()
+      if(!gp){ const ht = (admData?.gruppen || []).find(y => y.ht); return !ht || !(ht.ausser || []).map(String).includes(String(uid)) }   // Standard HT (09.10.2026)
       const x = (admData.gruppen || []).find(y => String(y.id) === gp); if(!x) return true
       return x.ht ? !(x.ausser || []).map(String).includes(String(uid)) : (x.ids || []).map(String).includes(String(uid))
     }
@@ -13244,7 +13249,7 @@
       const liste = (!admEingeschraenkt() && admData && Array.isArray(admData.gruppen)) ? admData.gruppen : []
       if(liste.length < 2){ el.hidden = true; el.innerHTML = ''; return }
       const akt = admGruppeAktiv()
-      el.innerHTML = [{ id: '', name: 'Alle' }, ...liste].map(x => `<button type="button" role="tab" data-adm-gruppe="${escapeHtml(String(x.id))}" class="${String(x.id) === akt ? 'active' : ''}" aria-selected="${String(x.id) === akt}">${escapeHtml(x.name)}</button>`).join('')
+      el.innerHTML = liste.map(x => ({ id: x.ht ? '' : x.id, name: x.name })).map(x => `<button type="button" role="tab" data-adm-gruppe="${escapeHtml(String(x.id))}" class="${String(x.id) === akt ? 'active' : ''}" aria-selected="${String(x.id) === akt}">${escapeHtml(x.name)}</button>`).join('')
       el.hidden = false
     }
     document.getElementById('adm-gruppe-seg')?.addEventListener('click', ev => {   // hier noch ohne $ (const weiter unten)
@@ -42402,7 +42407,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1397'
+  const OS_TAB_BUILD = '2026-09-22.1398'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

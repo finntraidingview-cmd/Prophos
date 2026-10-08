@@ -5012,6 +5012,24 @@ def _admin_verwalter():
     return bool(getattr(g, "admin_verwalter", False))
 
 
+# STANDARD-SICHT = HERMANN TECHNOLOGIES (09.10.2026, Finn ~03:35 Dubai im Admin, „Verlauf nach Person" zeigte ein Mitglied der Gruppe
+# „Emin": „Warum ist der überhaupt bei uns in den Statistiken drin? Der soll weg … auch visuell nicht mehr sehen"). Bis .1393 blendete
+# Finns Standard-Sicht nur die ADMIN_EXCLUDE-E-Mails aus (der Verwalter), die Mitglieder seiner Gruppe standen in allen Auswertungen.
+# Jetzt fallen ALLE IDs der Gruppen MIT Verwalter heraus — solange der Betrachter unbeschränkt ist und keinen Gruppen-Chip gewählt hat;
+# der Chip der Gruppe zeigt sie weiter (Finn will bewusst nachsehen können). Eine neue ID, die „zu Emin" kommt (id_gruppe_mitglied),
+# ist damit ohne Code-Änderung aus allen HT-Auswertungen raus. Gilt auch ohne Request (Nachtlauf/Bot über _ap_namen, Vorrat-Thread).
+def _admin_standard_aus():
+    """IDs, die Finns Standard-Sicht zusätzlich zu ADMIN_EXCLUDE ausblendet (set): die der Gruppen MIT Verwalter — leer, wenn der Login
+    eingeschränkt ist (g.admin_sicht) oder Finn einen Gruppen-Chip gewählt hat (g.admin_filter). Gruppen nicht lesbar → Fehler fliegt
+    (Aufrufer 502, wie admin_gruppen_daten), nie still alles zeigen."""
+    try:
+        if getattr(g, "admin_sicht", None) is not None or getattr(g, "admin_filter", None) is not None:
+            return set()
+    except RuntimeError:
+        pass                                  # ohne App-Kontext (Thread) = Standard-Sicht
+    return _admin_verwalter_gruppen_ids(admin_gruppen_daten())
+
+
 def _firm_norm(name):
     """Schreibweisen zusammenführen — sonst wird das Klumpenrisiko zu klein
     angezeigt (real vorhanden: 'MyFoundedFutures'; 'Apex' vs 'Apex Trader' seit
@@ -5194,6 +5212,9 @@ def _admin_basis():
             # Server den Verwalter für HT ausblendet; „Nicht enthalten" nennt nur noch Ausgeblendete außerhalb der Gruppe
             excluded_names = [m for u, m in names.items() if u in excluded_ids and u not in sicht]
             excluded_ids = alle_ids - set(sicht)
+    else:
+        # Standard-Sicht HT (09.10.2026): Gruppen MIT Verwalter raus — ohne Namen in excluded_names („Nicht enthalten: …" nennt sie nicht)
+        excluded_ids = set(excluded_ids) | _admin_standard_aus()
 
     return {"accounts": accounts, "archived": archived, "preds_of": preds_of, "arch_info": arch_info, "fx": fx,
             "by_id": by_id, "live_ids": live_ids, "names": names, "disp": disp,
@@ -10059,8 +10080,9 @@ def _acc_plan_personen(accs):
         if getattr(e, "sb_netz", False):
             raise
     out = []
+    std_aus = _admin_standard_aus()          # Standard-Sicht HT (09.10.2026): Gruppen MIT Verwalter auch im Kaufplan raus
     for uid in ids:
-        if str(mails.get(uid, "")).strip().lower() in ADMIN_EXCLUDE_EMAILS:
+        if str(mails.get(uid, "")).strip().lower() in ADMIN_EXCLUDE_EMAILS or uid in std_aus:
             continue
         out.append({"user_id": uid, "name": namen.get(uid, uid[:8]), "mail": mails.get(uid, "")})
     return sorted(out, key=lambda p: p["name"].lower())
@@ -10374,6 +10396,8 @@ def _wd_personen():
         excluded = set(disp) - set(sicht or {nur})
     elif sicht is not None:   # Finns ?gruppe=-Filter (08.10.2026): HT zusätzlich zur Ausblendung, Verwalter-Gruppe genau die Gruppe (C)
         excluded = (set(excluded) | (set(disp) - set(sicht))) if _admin_filter_ist_ht() else (set(disp) - set(sicht))
+    else:   # Standard-Sicht HT (09.10.2026): Gruppen MIT Verwalter raus wie in _admin_basis
+        excluded = set(excluded) | _admin_standard_aus()
     return disp, excluded
 
 
@@ -12194,6 +12218,9 @@ def admin_pc_stand():
     sicht = _admin_sicht()   # Admin-Gruppen (08.10.2026): Verwalter = seine Gruppe, Mitglied = nur er, Finn mit ?gruppe= = diese Gruppe
     if sicht is not None:
         stand = {k: v for k, v in stand.items() if str(k) in sicht}
+    else:   # Standard-Sicht HT (09.10.2026): Gruppen MIT Verwalter raus
+        std_aus = _admin_standard_aus()
+        stand = {k: v for k, v in stand.items() if str(k) not in std_aus}
     return jsonify({"ok": True, "at": jetzt.isoformat(), "lebt_s": PC_STAND_LEBT_S, "stand": stand})
 
 
@@ -12309,13 +12336,18 @@ def admin_handarbeit():
             mail = ""
         if mail not in ADMIN_EMAILS:
             sicht = frozenset({str(me)})
-    schluessel = "*" if sicht is None else ",".join(sorted(sicht))
+    # Standard-Sicht HT (09.10.2026): Finn ohne Gruppen-Chip sieht keine IDs der Gruppen MIT Verwalter
+    try:
+        std_aus = _admin_standard_aus() if sicht is None else set()
+    except Exception as e:
+        return jsonify({"error": f"Gruppen nicht lesbar ({type(e).__name__})"}), 502
+    schluessel = ("*-" + ",".join(sorted(std_aus))) if sicht is None else ",".join(sorted(sicht))
     with _hand_lock:
         c = _hand_cache.get(schluessel)
         if c and c[0] > time.time():
             return jsonify(c[1])
     try:
-        f = admin_sicht_filter(sicht)
+        f = admin_sicht_filter(sicht) or (("not.in.(" + ",".join(sorted(std_aus)) + ")") if std_aus else None)
         uq = {"user_id": f} if f else {}
         konten_ziel = _sb_all("accounts", dict(uq, select="id,user_id,name,firm,account_type,external_id,starting_balance,"
                                                            "ziel_erreicht_at,ziel_erreicht_bal,ziel_usd", ziel_erreicht_at="not.is.null"))
@@ -12333,7 +12365,8 @@ def admin_handarbeit():
                                               "ergebnis->>quelle": "eq.nacht", "order": "at.desc", "limit": "3"}) or []:
             if str(l.get("trocken") or "").lower() != "true":
                 lauf = {"at": l.get("at"), "ausgelassen": [x for x in (l.get("aus") or []) if isinstance(x, dict)
-                                                            and admin_in_sicht(x.get("user_id"), sicht)]}
+                                                            and admin_in_sicht(x.get("user_id"), sicht)
+                                                            and str(x.get("user_id") or "") not in std_aus]}
                 try:
                     lauf = ap_lauf_gelesen_markieren(lauf)   # seit dem Lauf gelesene „Balance fehlt"-Konten (09.10.2026)
                 except Exception as e:
@@ -20070,6 +20103,12 @@ def _ap_namen():
                 aus.add(str(u.get("id")))
     except Exception as e:
         print(f"[auto-plan] ⚠️ Namen: {type(e).__name__}: {e}", flush=True)
+    # Standard-Sicht HT (09.10.2026): Gruppen MIT Verwalter wie der Verwalter selbst (ADMIN_EXCLUDE) — Planer, Delta/Bot, Heute beendet.
+    # Ein eingeschränkter Login bzw. Finns Gruppen-Chip bekommt leer (_admin_standard_aus); nicht lesbar → Meldung, Rest wie bisher.
+    try:
+        aus |= _admin_standard_aus()
+    except Exception as e:
+        print(f"[auto-plan] ⚠️ Gruppen für die Ausblendung: {type(e).__name__}: {e}", flush=True)
     return namen, aus
 
 
