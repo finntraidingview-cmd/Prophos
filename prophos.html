@@ -40992,7 +40992,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1258'
+  const OS_TAB_BUILD = '2026-09-22.1259'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -60748,7 +60748,8 @@
     let wl = { warten: [], laeuft: [] }; try{ wl = apIdsWartenLaeuft() }catch(e){ console.warn('[ap-ids] Wartet/Läuft', e) }
     const kopfW = `<div class="ap-adm-kopf"><b>Wartet auf Start · ${wl.warten.length}</b><span>bestätigt · ${wer}</span></div>`
     const kopfL = `<div class="ap-adm-kopf"><b>Läuft · ${wl.laeuft.length}</b><span>live · ${wer}</span></div>`
-    return apIdsBlockHtml('offen', o.map(z => ({ z })), kopfO) + apIdsBlockHtml('warten', wl.warten, kopfW) + apIdsBlockHtml('laeuft', wl.laeuft, kopfL)
+    // Reihenfolge (Finn 08.10.2026: „Mach die laufenden Trades nach oben über den Block mit Wartet auf Start"): Läuft · Zu bestätigen · Wartet auf Start
+    return apIdsBlockHtml('laeuft', wl.laeuft, kopfL) + apIdsBlockHtml('offen', o.map(z => ({ z })), kopfO) + apIdsBlockHtml('warten', wl.warten, kopfW)
   }
   /* Konto-Popup (08.10.2026): Name, Firma, Typ/Phase, Balance (letzte Lesung + Quelle + Alter), Ziel/Rest, Kontowert, letzte Trades — eigene
    * Konten aus accounts/tradePlans (tplKontoBalance wie auf der Planer-Seite), fremde aus Lauf (balance/rest), Delta (wert_eur), live-trades
