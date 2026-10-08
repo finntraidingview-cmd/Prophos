@@ -40992,7 +40992,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1257'
+  const OS_TAB_BUILD = '2026-09-22.1258'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -45276,7 +45276,10 @@
   function apLetztenHolen(){
     if(_ap.lauf && Date.now() - _ap.laufAt < 5000) return _ap.lauf
     _ap.laufAt = Date.now()
-    _ap.lauf = apApi('GET').then(d => { _ap.letzter = d.letzter || null; _ap.imPlaner = !!d.im_planer; _ap.admin = d.admin != null ? !!d.admin : null; _ap.geladenFuer = currentUserId; return d })
+    // nur der JÜNGSTE Abruf schreibt (08.10.2026): ein älterer mit anderer Sicht (Accounts/Planer-Seite „eigene") darf den Admin-Stand nicht überschreiben
+    const pr = apApi('GET').then(d => { if(_ap.lauf !== pr) return d
+      _ap.letzter = d.letzter || null; _ap.imPlaner = !!d.im_planer; _ap.admin = d.admin != null ? !!d.admin : null; _ap.geladenFuer = currentUserId; _ap.sicht = d.sicht || null; return d })
+    _ap.lauf = pr
     return _ap.lauf
   }
   async function apLetztenLaden(){
@@ -60463,6 +60466,19 @@
     for(const z of offen || []) if(z && z.plan_id && (z.notes || z.stufe || z.boden != null)) _apIds.notizJe.set(String(z.plan_id), { notes: z.notes || null, stufe: z.stufe || null, boden: z.boden ?? null, at: jetzt })
     try{ localStorage.setItem('prophos_ap_notiz', JSON.stringify([..._apIds.notizJe].sort((a, b) => (b[1].at || 0) - (a[1].at || 0)).slice(0, 400))) }catch(_){}
   }
+  /* ADMIN-SICHT ERZWINGEN (08.10.2026, Slave-Terminal 7 — Finn als „Finn + Pascal" sah im Admin-Reiter nur die eigene ID; Backend liefert
+   * mit sicht=admin alle IDs, Befund Slave 1). Lauf und Delta konnten noch von Accounts/Planer-Seite stammen (geteilter Abruf apLetztenHolen
+   * 5 s, Delta aus dem Takt < 20 s alt, apdLaden springt bei laufendem Abruf zurück) — dann mit sicht „eigene". Hier: Lauf frisch (laufAt 0,
+   * nur der jüngste Abruf schreibt), danach prüfen und bei sicht „eigene" genau einmal mit sicht=admin nachladen (laufendes Delta abwarten).
+   * Logins mit admin_zugang „nur eigene" bekommen auch dann die eigene Sicht — keine Schleife, nur ein zusätzlicher Abruf. */
+  async function apIdsSichtAdmin(){
+    if(!(typeof window._tplSichtParam === 'function' && window._tplSichtParam() === 'admin')) return   // nur bei sichtbarem Admin-Reiter
+    if(_apd.d && _apd.d.sicht === 'eigene' && typeof apdLaden === 'function'){
+      for(let i = 0; i < 40 && _apd.laeuft; i++) await new Promise(r => setTimeout(r, 250))
+      if(_apd.d && _apd.d.sicht === 'eigene') await apdLaden(true)
+    }
+    if(_ap.sicht === 'eigene' && typeof apLetztenHolen === 'function'){ _ap.laufAt = 0; try{ await apLetztenHolen() }catch(_){} }
+  }
   async function apIdsLaden(){
     if(_apIds.laeuft){ _apIds.nochmal = true; return }   // läuft schon: danach genau einmal nachladen, statt den Wunsch zu verschlucken (Bestätigen-Serie, 08.10.2026)
     _apIds.laeuft = true; _apIds.nochmal = false; _apIds.fehler = ''; _apIds.offenFehler = ''
@@ -60476,7 +60492,7 @@
       // bestätigte, noch nicht gestartete Pläne aller IDs (heute + morgen), sobald das Backend sie mitliefert — sonst null (Delta heute + warteLokal)
       if(Array.isArray(d.bestaetigt)){ _apIds.bestaetigt = d.bestaetigt.filter(z => !_apIds.zurLokal.has(String(z.plan_id))); _apIds.bestaetigtT0 = t0 } })
       .catch(e => { _apIds.fehler = (e && e.message) || String(e) })
-    const kopf = (async () => { try{ if(typeof tplLaden === 'function') await tplLaden(); if(typeof apdLaden === 'function') await apdLaden(true) }catch(e){ console.warn('[ap-ids] Kopf', e) } })()
+    const kopf = (async () => { try{ _ap.laufAt = 0; if(typeof tplLaden === 'function') await tplLaden(); if(typeof apdLaden === 'function') await apdLaden(true); await apIdsSichtAdmin() }catch(e){ console.warn('[ap-ids] Kopf', e) } })()
     await Promise.all([ids, kopf])
     _apIds.laeuft = false; apIdsRender()
     if(_apIds.nochmal) apIdsLaden()
