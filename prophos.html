@@ -39897,8 +39897,6 @@
   // auch für Orbit V3; alles Winning-Day-Eigene (Staffel, Kontoart-Filter, TP-Spanne, kein SL) hängt an _tpWd allein.
   const tpWdAktiv = () => _tpRoute === 'tvv2' && (_tpWd || _tpO3)
   const tpO3Aktiv = () => _tpRoute === 'tvv2' && _tpO3
-  // Winning Day ohne Orbit V3: Hedge = Staffel-€ gegen die TP-Summe (Lot-Basis = Take Profit, nicht Risiko Master) — 05.10.2026
-  const tpWdNurTp = () => _tpRoute === 'tvv2' && _tpWd && !_tpO3
   // Alles Rechenbare aus den Feldern von Popup 1
   /* Multiplikator von Hand (25.09.2026, Koordination: Finn testet mit ×0,01 — Jacobs Plan wurde mit 250 $ / 60 € gespeichert, ×0,56,
    * 0,56 Lot, der Broker lehnte ab): Klick auf den Multiplikator-Kasten → Zahl eintippen; der Wert gilt, bis Risiko Master oder
@@ -39917,14 +39915,17 @@
     // Handwert endet, sobald Risiko Master oder Risiko Slave anders dastehen als beim Setzen/Zurückschreiben — unabhängig davon,
     // welcher input-Listener zuerst läuft (erste Fassung schrieb Risiko Slave mit dem neuen Risiko Master noch einmal um)
     if(_tpWdHand.mult > 0 && (r.risk !== _tpWdHand.risk || (_tpWdHand.slaveGeschrieben != null && r.slaveRisk !== _tpWdHand.slaveGeschrieben))) _tpWdHand.mult = null
-    // Winning Day (05.10.2026, Vorfall Jacob 02:07 Dubai: 0,09/0,11 Lot statt ~2): Staffel-€ gegen die TP-SUMME — Basis der Lot-Rechnung
-    // ist der Take Profit, nie Risiko Master. Das Popup las beim Bearbeiten Risiko Master = 4.500 $ (Max DD) aus dem Plan → Multiplikator
-    // 0,031. Orbit V3 rechnet weiter über Risiko Master (= echter Stop Loss).
-    const nurTp = tpWdNurTp(), basisPkt = nurTp ? r.tpPkt : r.slPkt
+    /* MULTIPLIKATOR NUR AUS RISIKO MASTER + RISIKO SLAVE (08.10.2026, Slave-Terminal 7 — Finn: „Gerade bestimmt der Take-Profit auch den
+     * Multiplikator. Das macht keinen Sinn. Der Multiplikator soll nur über Risiko Master und Risiko Slave bewegt werden … Der TP hat keinen
+     * Einfluss auf den Multiplikator."; Screenshot Tradeify 150k WD, 6 MNQ, 250 $/50 €: TP 22.222 $ → 0,03 Lot, TP 22 $ → 32,09 Lot, die
+     * Formel-Zeile zeigte beide Male die Risiko-Rechnung). Seit 05.10. nahm Winning Day ohne Orbit V3 hier die TP-Summe als Basis (Vorfall
+     * Jacob 02:07: Risiko Master = Max DD aus dem Plan). Jetzt für jeden Weg im Formular: Lots = Risiko Slave € ÷ (0,85 €/Pkt × Risiko-
+     * Master-Punkte), Punkte = Risiko Master $ ÷ ($/Pkt × Kontrakte), Multiplikator = Lots ÷ Kontrakte. Der TP wirkt nur noch auf „bei
+     * Take Profit" (tpPkt). Der WD-Farmer (wdFarmHedge) rechnet getrennt und bleibt, wie er ist; gespeicherte Pläne werden nicht angefasst. */
     if(_tpWdHand.mult > 0){
       r.mult = _tpWdHand.mult; r.hand = true
-      if(basisPkt > 0 && r.kt > 0) r.slaveRisk = Math.round(r.mult * r.kt * basisPkt * r.slavePpl * 100) / 100
-    } else r.mult = tpCalcMultiplier(master.firm, TP_WD_SLAVE_FIRM, nurTp ? r.tp : r.risk, r.kt, r.slaveRisk)
+      if(r.slPkt > 0 && r.kt > 0) r.slaveRisk = Math.round(r.mult * r.kt * r.slPkt * r.slavePpl * 100) / 100
+    } else r.mult = tpCalcMultiplier(master.firm, TP_WD_SLAVE_FIRM, r.risk, r.kt, r.slaveRisk)
     r.lots = (r.mult > 0 && r.kt > 0) ? Math.round(r.kt * r.mult * 100) / 100 : 0
     return r
   }
@@ -40005,7 +40006,7 @@
     document.getElementById('tp-wd-multi-row')?.classList.remove('tp-wd-leer')
     if(me) me.innerHTML = r.hand
       ? `<b>von Hand</b> · Risiko Slave = ×${n(r.mult, 3)} × ${n(r.kt, 0)} Kt × ${n(r.slPkt, 1)} Pkt × ${n(r.slavePpl, 2)} €/Pkt = ${n(r.slaveRisk, 2)} €<br><span style="color:var(--sub-2)">ändert sich Risiko Master oder Slave, rechnet er wieder selbst</span>`
-      : `${n(r.risk, 0)} $ ÷ (${n(r.masterPpl, r.masterPpl % 1 ? 2 : 0)} $/Pkt × ${n(r.kt, 0)} Kt) = ${n(r.slPkt, 1)} Pkt<br>${n(r.slaveRisk, 0)} € ÷ (${n(r.slavePpl, 2)} €/Pkt × ${n(r.slPkt, 1)} Pkt) = ${n(r.lots, 2)} Lot → ×${n(r.mult, 3)}`
+      : `${n(r.risk, 0)} $ ÷ (${n(r.masterPpl, r.masterPpl % 1 ? 2 : 0)} $/Pkt × ${n(r.kt, 0)} Kt) = ${n(r.slPkt, 2)} Pkt<br>${n(r.slaveRisk, 0)} € ÷ (${n(r.slavePpl, 2)} €/Pkt × ${n(r.slPkt, 2)} Pkt) = ${n(r.lots, 2)} Lot → ×${n(r.mult, 3)}`   // Punkte 2 Stellen: mit 20,8 statt 20,83 ergab die Zeile 2,83 bei Ergebnis 2,82 (08.10.2026)
     // Margen-Hinweis (nur Anzeige): Lots × Kurs × €/Pkt ÷ Hebel — NAS100 ≈ NQ-Kurs aus dem Reader-Feed, Hebel 1:100 als Annahme
     { const mg = document.getElementById('tp-wd-marge'); if(mg){ let kurs = null
         try{ const je = (typeof mkl !== 'undefined' && mkl.kursJe) || {}; const k = je.NQ || je.MNQ; if(k && hedgeKursAlterJetzt(k) <= 600000 && k.preis > 0) kurs = k.preis }catch(_){}   // echtes Alter (25.09.2026)
@@ -41056,7 +41057,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1263'
+  const OS_TAB_BUILD = '2026-09-22.1264'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
