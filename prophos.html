@@ -3164,6 +3164,15 @@
   /* Consistency-Chip neben dem Typ (07.10.2026): nur bei gesetztem accounts.consistency_pct, neutral im Outline-Stil der Typ-Chips */
   #dashboard-view .type-badge.acc-cons-chip{margin-left:6px;background:#fff;border-color:var(--border);color:var(--ink-2);vertical-align:middle}
   /* Max-Risiko-Chip (07.10.2026): nur bei gesetztem accounts.max_risiko_trade, Amber wie der Trade-Limits-Block im Bulk-Add */
+  /* Zu tun (08.10.2026): eine Zeile je Konto — Konto kurz · Firma · Phase → nächste · was · Knopf rechts */
+  #zuTunList .zt-id{display:flex;align-items:center;gap:7px;margin:8px 0 2px;font-size:12.5px;font-weight:650;color:var(--ink)} #zuTunList .zt-id i{width:9px;height:9px;border-radius:50%;flex:none}
+  #zuTunList .zt-z{display:flex;align-items:center;gap:6px 12px;flex-wrap:wrap;padding:7px 0;border-top:1px solid var(--border-soft);font-size:13px}
+  #zuTunList .zt-id + .zt-z{border-top:0}
+  #zuTunList .zt-k b{font-weight:650} #zuTunList .zt-k small{color:var(--sub);margin-left:3px;font-variant-numeric:tabular-nums}
+  #zuTunList .zt-f{color:var(--sub)} #zuTunList .zt-ph{white-space:nowrap} #zuTunList .zt-ph b{font-weight:600}
+  #zuTunList .zt-was{font-size:12px;color:var(--sub);flex:1;min-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #zuTunList .zt-was.ziel{color:#047857;font-weight:600} #zuTunList .zt-was.manuell{color:#b45309;font-weight:600}
+  #zuTunList .zt-z .btn{padding:3px 10px;font-size:12px;height:auto;white-space:nowrap;margin-left:auto}
   /* Ziel-Chip (07.10.2026): accounts.ziel_erreicht_at, gesetzt von der Ziel-Wache (app.py zw_tick) — Grün wie ein erreichtes Ziel */
   .type-badge.acc-ziel-chip{margin-left:6px;background:#ECFDF5;border-color:#A7F3D0;color:#047857;vertical-align:middle}
   #dashboard-view .type-badge.acc-risk-chip{margin-left:6px;background:#fff;border-color:#f3c98b;color:#b45309;vertical-align:middle}
@@ -6961,6 +6970,19 @@
             Account hinzufügen
           </button>
         </div>
+      </div>
+
+      <!-- ZU TUN (08.10.2026, Slave-Terminal 7 — Finn: „Es wird zu unübersichtlich, ich kriege zu viele Sachen in den Radar. Ich will unter
+           Accounts oben angezeigt kriegen: ‚Ziel erreicht' — da muss ich was machen … soll das dort einmal stehen, wo ich hingehe und in die
+           nächste Phase überleite"): Konten mit erreichtem Ziel (Ziel-Wache, accounts.ziel_erreicht_at) und Konten in Manueller Arbeit
+           (Plan in „Überprüfen" mit mt5_baseline.manuell), je ID gruppiert, je Zeile der vorhandene Weg (Nachfolger-Assistent bzw. Radar).
+           Gefüllt von zuTunRender, verschwindet, wenn nichts ansteht. Eigene Verdrahtung nur an #zuTunList. -->
+      <div class="card" id="zuTunCard" hidden style="margin-bottom:14px;padding:10px 16px 12px">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px">
+          <h3 style="margin:0;font-size:11.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--sub-2);font-weight:650">Zu tun</h3>
+          <span id="zuTunCount" style="font-size:11.5px;color:var(--sub-2)"></span>
+        </div>
+        <div id="zuTunList"></div>
       </div>
 
       <!-- TODO fuer diese ID (31.08.2026, Finns Wunsch: "mach das es bei der
@@ -32682,7 +32704,63 @@
     kwKachelMalen()
   }
 
+  /* ZU TUN oben in Accounts (08.10.2026, Slave-Terminal 7 — Finn: „Ziel erreicht — da muss ich was machen … soll dort einmal stehen, wo
+   * ich hingehe und in die nächste Phase überleite"): eigene Konten (nicht archiviert) mit accounts.ziel_erreicht_at (Ziel-Wache) → Knopf
+   * „Nächste Phase →" öffnet den vorhandenen Nachfolger-Assistenten (openSuccessorWizard: Nachfolger anlegen bzw. Funded → Winning Days
+   * umstellen); eigene Pläne in „Überprüfen" mit mt5_baseline.manuell (Manuelle Arbeit, Kennzeichen wie tplManuellKonten) → „Im Radar →".
+   * Je ID gruppiert (Farbpunkt idFarbe). Nur Anzeige + vorhandene Wege; die Startsperre für beide Fälle steht in planKontoSperre. */
+  const ZT_NAECHSTE = { challenge: 'Funded', phase1: 'Phase 2', phase2: 'Funded' }
+  function zuTunDaten(){
+    const arch = (typeof getArchive === 'function' && getArchive()) || {}, out = []
+    for(const a of accounts || []){
+      if(!a || (arch[a.id] && arch[a.id].archived) || !a.zielErreichtAt) continue
+      out.push({ art: 'ziel', konto: a, at: a.zielErreichtAt })
+    }
+    const gesehen = new Set()
+    for(const p of tradePlans || []){
+      const m = p && p.status === 'review' && p.mt5Baseline && p.mt5Baseline.manuell
+      if(!(m && typeof m === 'object' && m.at)) continue
+      const k = String(p.masterAccountId || p.masterName || p.id); if(gesehen.has(k)) continue; gesehen.add(k)
+      const a = (accounts || []).find(x => String(x.id) === String(p.masterAccountId)) || null
+      if(a && arch[a.id] && arch[a.id].archived) continue
+      out.push({ art: 'manuell', konto: a, plan: p, at: m.at, notiz: String(m.notiz || '') })
+    }
+    return out
+  }
+  function zuTunRender(){
+    const card = document.getElementById('zuTunCard'), list = document.getElementById('zuTunList'), cnt = document.getElementById('zuTunCount')
+    if(!card || !list) return
+    let z = []; try{ z = zuTunDaten() }catch(e){ console.warn('[zu-tun]', e) }
+    card.hidden = !z.length
+    if(!z.length){ list.innerHTML = ''; return }
+    if(cnt) cnt.textContent = String(z.length)
+    const tag = iso => { const d = new Date(iso || ''); return isNaN(d) ? '' : d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) }
+    const zeile = e => {
+      const a = e.konto, name = (a && a.name) || (e.plan && e.plan.masterName) || 'Konto'
+      let g = 0; try{ g = Number((typeof kontoGroesseKurz === 'function' ? kontoGroesseKurz : kontoGroesseAnzeige)(name, a && a.startingBalance, null)) || 0 }catch(_){}
+      const e4 = String((a && a.externalId) || '').replace(/[^A-Za-z0-9]/g, '').slice(-4)
+      const kurz = g >= 1000 ? `<b>${Math.round(g / 1000)}k</b>${e4 ? `<small>…${escapeHtml(e4)}</small>` : ''}` : `<b>${escapeHtml(name.slice(0, 18))}</b>`
+      const typ = String((a && a.type) || (e.plan && e.plan.kontoTyp) || '')
+      const ph = typ ? `<span class="zt-ph"><span class="type-badge type-${escapeHtml(typ)}">${escapeHtml((typeof typeLabel === 'function' && typeLabel(typ)) || typ)}</span>${e.art === 'ziel' && ZT_NAECHSTE[typ] ? ` → <b>${ZT_NAECHSTE[typ]}</b>` : ''}</span>` : ''
+      const was = e.art === 'ziel'
+        ? `<span class="zt-was ziel" title="Ziel erreicht seit ${escapeHtml(tag(e.at))}${a && a.zielErreichtBal ? ' · Balance ' + Math.round(a.zielErreichtBal).toLocaleString('de-DE') : ''} — kein Trade mehr, bis die nächste Phase steht">🎯 Ziel erreicht · ${escapeHtml(tag(e.at))}</span>`
+        : `<span class="zt-was manuell" title="${escapeHtml(e.notiz || 'Manuelle Arbeit')} — kein Trade, bis die Arbeit erledigt ist">✍ Manuelle Arbeit${e.notiz ? ' · ' + escapeHtml(e.notiz) : ''}</span>`
+      const knopf = e.art === 'ziel' && a
+        ? `<button type="button" class="btn btn-primary" data-zt-nachfolger="${escapeHtml(String(a.id))}" title="Nachfolger-Assistent: nächste Phase anlegen bzw. umstellen">Nächste Phase →</button>`
+        : `<button type="button" class="btn btn-ghost" data-zt-radar="1" title="Radar → Manuelle Arbeit">Im Radar →</button>`
+      return `<div class="zt-z"><span class="zt-k" title="${escapeHtml(name)}">${kurz}</span><span class="zt-f">${escapeHtml((a && a.firm) || (e.plan && e.plan.masterFirm) || '')}</span>${ph}${was}${knopf}</div>`
+    }
+    const uid = String(currentUserId || ''), wer = (typeof _ap !== 'undefined' && _ap && _ap.ich && _ap.ich.name) || ''
+    list.innerHTML = (wer ? `<div class="zt-id"><i style="background:${typeof idFarbe === 'function' ? idFarbe(uid) : 'var(--sub)'}"></i>${escapeHtml(wer)}</div>` : '')
+      + z.sort((x, y) => (x.art === y.art ? 0 : x.art === 'ziel' ? -1 : 1) || String(x.at).localeCompare(String(y.at))).map(zeile).join('')
+  }
+  document.getElementById('zuTunList')?.addEventListener('click', e => {
+    const n = e.target.closest('[data-zt-nachfolger]')
+    if(n){ if(typeof openSuccessorWizard === 'function') openSuccessorWizard(n.dataset.ztNachfolger); return }
+    if(e.target.closest('[data-zt-radar]')) document.querySelector('#dashboard-view .sb-link[data-view="markt"]')?.click()
+  })
   function renderAccounts(){
+    try{ zuTunRender() }catch(e){ console.warn('[zu-tun]', e) }   // Zu tun oben in Accounts (08.10.2026) — verschwindet, sobald erledigt
     if(!accEls.table) return
     if(typeof tsAutoLinkSoon === 'function') tsAutoLinkSoon()  // Auto-Verlinkung per External ID (17.09.2026)
     todoLaden()
@@ -37256,6 +37334,37 @@
     }catch(_){ return null }
   }
   const planZielText = (plan, z) => `„${plan.masterName || 'Konto'}" hat das Ziel schon erreicht${z.ziel > 0 ? ` (Balance ${Math.round(z.bal).toLocaleString('de-DE')} ≥ Ziel ${Math.round(z.ziel).toLocaleString('de-DE')})` : ''} — kein Trade gestartet.`
+  /* KONTO-SPERRE VOR JEDEM START (08.10.2026, Slave-Terminal 7 — Finn: „Sobald ein Account bei ‚Ziel erreicht' oder in manueller Arbeit
+   * ist, darf auf ihm auf keinen Fall ein Trade gemacht werden"). Bisher sperrte nur planZielErreicht, und das aus dem Konten-Cache des Tabs
+   * (eine Ziel-Wache-Markierung nach dem Laden kam dort nicht an); Manuelle Arbeit (mt5_baseline.manuell an einem Plan in „Überprüfen")
+   * war laut tplManuellKonten „nur Anzeige — kein Riegel". Jetzt frisch aus der DB: accounts.ziel_erreicht_at des Kontos und Pläne in
+   * „review" mit manuell.at auf demselben Konto (RLS: eigene ID = die des PC-Tabs). DB nicht lesbar → Rückfall auf Cache (accounts/
+   * tradePlans), nie stumm durchwinken, wenn der Cache etwas weiß. Genutzt von tpStartUmTick, tpOrbitStartenKern, tpJetztStarten,
+   * tpPreflightAndStart. → { art: 'ziel' | 'manuell', text, z? } | null */
+  async function planKontoSperre(plan){
+    const kid = plan && plan.masterAccountId ? String(plan.masterAccountId) : ''
+    const name = (plan && plan.masterName) || 'Konto'
+    const manuellText = n => `„${name}" steht in Manueller Arbeit${n ? ' (' + n + ')' : ''} — kein Start, bis die Arbeit erledigt ist (Radar → Manuelle Arbeit, Accounts → Zu tun).`
+    if(kid){
+      try{
+        const [ra, rp] = await Promise.all([
+          supabase.from('accounts').select('ziel_erreicht_at,ziel_erreicht_bal,ziel_usd').eq('id', kid).maybeSingle(),
+          supabase.from('trade_plans').select('id,manuell:mt5_baseline->manuell').eq('master_account_id', kid).eq('status', 'review').limit(30)])
+        if(!ra.error && ra.data && ra.data.ziel_erreicht_at){
+          const konto = (accounts || []).find(a => String(a.id) === kid)
+          if(konto){ konto.zielErreichtAt = ra.data.ziel_erreicht_at; konto.zielErreichtBal = ra.data.ziel_erreicht_bal != null ? Number(ra.data.ziel_erreicht_bal) : konto.zielErreichtBal }
+          const z = { bal: Number(ra.data.ziel_erreicht_bal) || 0, ziel: Number(ra.data.ziel_usd) || 0 }
+          return { art: 'ziel', z, text: planZielText(plan, z) }
+        }
+        const m = !rp.error && (rp.data || []).find(r => String(r.id) !== String(plan.id) && r.manuell && typeof r.manuell === 'object' && r.manuell.at)
+        if(m) return { art: 'manuell', text: manuellText(String(m.manuell.notiz || '').slice(0, 60)) }
+      }catch(e){ console.warn('[konto-sperre] DB', (e && e.message) || e) }
+    }
+    const z = planZielErreicht(plan); if(z) return { art: 'ziel', z, text: planZielText(plan, z) }
+    const mc = kid && (tradePlans || []).find(p => String(p.masterAccountId) === kid && String(p.id) !== String(plan.id) && p.status === 'review'
+      && p.mt5Baseline && p.mt5Baseline.manuell && typeof p.mt5Baseline.manuell === 'object' && p.mt5Baseline.manuell.at)
+    return mc ? { art: 'manuell', text: manuellText(String(mc.mt5Baseline.manuell.notiz || '').slice(0, 60)) } : null
+  }
   /* Eine Zeile der Geplant-Tabelle. o = { name, ext, extTitle, chips, akt } aus renderTradePlanCard (dieselben Knöpfe und
    * data-plan-*-Attribute wie die Karte → bindTradePlanCardActions läuft unverändert).
    * Trade-Planer (GEPLANT-WIE-TRADES-REITER, Finn 07.10.2026: „exakt die Darstellung vom Reiter Geplant") nutzt dieselbe Zeile für alle
@@ -37591,6 +37700,7 @@
   }
 
   function renderTradePlans(){
+    try{ if(typeof zuTunRender === 'function') zuTunRender() }catch(_){}   // Manuelle Arbeit kommt/geht mit den Plänen (08.10.2026)
     try{ if(typeof atToggleSichtbarkeit === 'function') atToggleSichtbarkeit() }catch(_){}
     try{ apLeisteZeichnen() }catch(_){}   // Auto-Planer-Leiste (05.10.2026)
     try{ mt5BalCacheAnstossen() }catch(_){}   // Live-Balance der geplanten Karten (planKontoBalance), höchstens 1×/min
@@ -38845,6 +38955,8 @@
   async function tpPreflightAndStart(planId, opts){
     const plan = tradePlans.find(x => String(x.id) === String(planId))
     if(!plan) return
+    { const sp = await planKontoSperre(plan)   // Ziel erreicht / Manuelle Arbeit: auch der Duplikum-Start nicht (08.10.2026)
+      if(sp){ if(typeof atToast === 'function') atToast((sp.art === 'ziel' ? '🎯 ' : '✍ ') + sp.text, 'end'); if(opts && typeof opts.fehl === 'function') opts.fehl(sp.text); return } }
     // ORBIT + DUPLIKIUM (22.09.2026, Finns Ablauf: Popup 2 „Speichern" → „dann kommt
     // der Duplikum-Trade-Cross-Check, genau das Gleiche wie beim Duplikum-Trade → Popup
     // verschwindet, Trade ist ready to start"). Auf Orbit platziert Puls die Order in
@@ -41385,7 +41497,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1321'
+  const OS_TAB_BUILD = '2026-09-22.1322'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -41671,8 +41783,8 @@
       if(data){ const frisch = rowToPlan(data); const i = tradePlans.findIndex(x => String(x.id) === String(plan.id)); if(i >= 0) tradePlans[i] = frisch; plan = frisch }
     }catch(_){ /* offline: mit dem Cache weiter */ }
     if(plan.status !== 'planned'){ if(fern) fern.melde({ ok:false, msg: 'Plan ist nicht (mehr) „Geplant" — nichts gestartet.' }); return }
-    const zielOk = planZielErreicht(plan)   // ZIEL ERREICHT (07.10.2026): auch von Hand / vom Mac kein Start
-    if(zielOk){ const t = planZielText(plan, zielOk); toast('🎯 ' + t, 'end'); if(fern) fern.melde({ ok:false, msg: t }); return }
+    const sperre = await planKontoSperre(plan)   // ZIEL ERREICHT (07.10.2026) / MANUELLE ARBEIT (08.10.2026): auch von Hand / vom Mac kein Start
+    if(sperre){ toast((sperre.art === 'ziel' ? '🎯 ' : '✍ ') + sperre.text, 'end'); if(fern) fern.melde({ ok:false, msg: sperre.text }); return }
     const fa = await faVorStart(plan)       // FIRMEN-ABSTAND (08.10.2026): andere ID bei derselben Firma eben gestartet → später
     if(fa){ if(fern) fern.melde({ ok:false, msg: fa }); return }
     // UNKLAR-Marke (B37, 30.09.2026; Topstep V2 und Orbit V2): der letzte Start endete UNKLAR, die Order liegt vielleicht — kein zweiter
@@ -42302,8 +42414,8 @@
   async function tpJetztStarten(planId){
     const plan = tradePlans.find(x => String(x.id) === String(planId))
     if(!plan || plan.status !== 'planned') return
-    const zielOk = planZielErreicht(plan)   // ZIEL ERREICHT (07.10.2026): auch von Hand kein Start
-    if(zielOk){ if(typeof atToast === 'function') atToast('🎯 ' + planZielText(plan, zielOk), 'end'); return }
+    const sperre = await planKontoSperre(plan)   // ZIEL ERREICHT (07.10.2026) / MANUELLE ARBEIT (08.10.2026): auch von Hand kein Start
+    if(sperre){ if(typeof atToast === 'function') atToast((sperre.art === 'ziel' ? '🎯 ' : '✍ ') + sperre.text, 'end'); return }
     if(await faVorStart(plan)) return       // FIRMEN-ABSTAND (08.10.2026): andere ID bei derselben Firma eben gestartet → später
     const { order, fehlt } = _tpOrderAusPlan(plan)
     if(fehlt.length){
@@ -45384,7 +45496,7 @@
   }
   // Ist die Ursache weg? → Klartext (warum neu eingeplant) oder null
   async function sfBehoben(plan, f){
-    if(f.unklar || f.schritt === 'ziel_erreicht') return null   // Ziel erreicht: nie von selbst neu einplanen (07.10.2026)
+    if(f.unklar || f.schritt === 'ziel_erreicht' || f.schritt === 'manuelle_arbeit') return null   // Ziel erreicht / Manuelle Arbeit: nie von selbst neu einplanen
     if(f.schritt === 'zu_spaet') return 'Prophos-Tab am PC läuft wieder'
     if(plan.route === 'mt5v2' && (f.schritt === 'v2link' || !f.schritt)){
       const dd = (typeof window.mtcApi === 'function') ? await window.mtcApi('instances') : null
@@ -45639,8 +45751,20 @@
     try{
       const verspaetet = now - new Date(plan.startUm).getTime()
       const fenster = pulsStartFenster(plan)
-      // ZIEL ERREICHT (07.10.2026): Claim setzen (feuert nie wieder), Start-Fehler für „Braucht dich", Toast + Handy — nichts starten
-      const zielOk = planZielErreicht(plan)
+      // ZIEL ERREICHT (07.10.2026) / MANUELLE ARBEIT (08.10.2026, planKontoSperre — frisch aus der DB): Claim setzen (feuert nie wieder),
+      // Start-Fehler für „Braucht dich", Toast + Handy — nichts starten
+      const sperre = await planKontoSperre(plan)
+      const zielOk = sperre && sperre.art === 'ziel' ? sperre.z : null
+      if(sperre && sperre.art === 'manuell'){
+        const { data: dm } = await supabase.from('trade_plans').update({ start_um_gestartet_at: new Date().toISOString() })
+          .eq('id', plan.id).eq('status', 'planned').is('start_um_gestartet_at', null).select('*')
+        if(dm && dm.length){
+          const im = tradePlans.findIndex(x => String(x.id) === String(plan.id)); if(im >= 0) tradePlans[im] = rowToPlan(dm[0])
+          if(typeof atToast === 'function') atToast('✍ ' + sperre.text, 'end')
+          await sfMelden(tradePlans[im] || plan, { schritt: 'manuelle_arbeit', msg: sperre.text })
+        }
+        return
+      }
       if(zielOk){
         const { data: dz } = await supabase.from('trade_plans').update({ start_um_gestartet_at: new Date().toISOString() })
           .eq('id', plan.id).eq('status', 'planned').is('start_um_gestartet_at', null).select('*')
@@ -47287,6 +47411,7 @@
       case 'unklar': return `Erst in ${/Topstep/i.test(m) ? 'TopstepX' : 'TradingView'} nachsehen, ob die Order liegt — dann auf der Karte „⚠ UNKLAR" lösen; nie blind erneut starten.`
       case 'zu_spaet': return `Prophos-Tab am PC${pc} offen lassen.`
       case 'ziel_erreicht': return 'Ziel ist erreicht — kein Trade nötig. Konto ansehen (Phasenwechsel/Auszahlung), Plan löschen.'
+      case 'manuelle_arbeit': return 'Konto steht in Manueller Arbeit — erst im Radar erledigen, dann neu planen.'
       // 'puls' = Orbit-Fehler ohne Bot-Schritt (08.10.2026): die häufigsten Texte aus order_signale — External ID fehlt (49×), Tab lud neu (33×)
       case 'puls': default: return sf.unklar ? 'Erst in der Plattform nachsehen, ob die Order liegt — nie blind erneut starten.'
         : /External ID/i.test(m) ? 'Dem Konto unter Accounts die External ID (Tradovate-Unterkonto) eintragen, dann ↻ Erneut versuchen.'
