@@ -15664,6 +15664,17 @@ def ap_hb_zeile(p, acc, firmen, lauf_satz, kw_heute, namen, archiv=None, letzter
     tv = base.get("tv") if isinstance(base.get("tv"), dict) else {}
     fin = base.get("final") if isinstance(base.get("final"), dict) else {}
     gelesen = ap_hb_gelesen(p)
+    # BALANCE VORHER AUS DER KONTO-LESUNG (08.10.2026, Finn: „Die Zahl stimmt doch nie" — Kachel „Heute" +14 € netto): Orbit-V1-Trades mit
+    # Duplikum-Hedge (tvplus) tragen weder Start- noch Endbalance → kein Kontowert-Satz → sie fielen STILL aus der Summe (heute 4 Trades,
+    # +3.570/+3.600/+3.630/−4.500 $). Liegt am Konto eine Balance-Lesung VOR dem Start (accounts.tv_balance/_at), ist das die Balance vor
+    # dem Trade — wie tv.balance_start. Ohne solche Lesung bleibt es „ohne €" (nicht raten).
+    if _wd_num(tv.get("balance_start")) is None and _wd_num(base.get("balance_start")) is None \
+            and _wd_num(fin.get("balance_end")) is None and _wd_num(fin.get("master_balance")) is None:
+        kb, kb_at, st0 = _wd_num(acc.get("tv_balance")), _ap_ts(acc.get("tv_balance_at")), _ap_ts(p.get("started_at"))
+        if kb and kb > 0 and kb_at is not None and st0 is not None and kb_at <= st0:
+            tv = dict(tv, balance_start=kb)
+            base = dict(base, tv=tv)
+            p = dict(p, mt5_baseline=base)
     # Echo meldet die Endbalance als final.master_balance — für die Satz-Kette der Hypo-Bilanz (Balance vorher = Ende − P&L) wie balance_end
     p_satz = p
     if _wd_num(fin.get("balance_end")) is None and _wd_num(fin.get("master_balance")) is not None:
@@ -15758,7 +15769,7 @@ def _ap_hb_laden(firmen, jetzt=None):
     for j in range(0, len(kids), 150):
         q = {"id": "in.(" + ",".join(kids[j:j + 150]) + ")"}
         try:
-            rows = _sb_all("accounts", dict(q, select="id,name,firm,account_type,external_id,ziel_pct_konto,ziel_erreicht_at,tv_balance_at"))
+            rows = _sb_all("accounts", dict(q, select="id,name,firm,account_type,external_id,ziel_pct_konto,ziel_erreicht_at,tv_balance,tv_balance_at"))
         except requests.exceptions.HTTPError:
             rows = _sb_all("accounts", dict(q, select="id,name,firm,account_type,external_id"))   # Spalten fehlen → ohne
         accs.update({str(a["id"]): a for a in rows if a.get("id")})

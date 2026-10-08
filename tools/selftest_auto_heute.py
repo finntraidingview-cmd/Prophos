@@ -271,6 +271,18 @@ def main():
     check(dlf["heute_beendet"] is None and dlf["heute_beendet_fehler"] == "HTTPError: 503" and isinstance(dlf["offen"], list),
           "Ladefehler → heute_beendet null + Fehlertext, übriges Delta unberührt")
 
+    # BALANCE VORHER AUS DER KONTO-LESUNG (Finn 08.10.2026 „Die Zahl stimmt doch nie"): Orbit V1/Duplikum ohne Start-/Endbalance fiel still
+    # aus der Summe. Lesung am Konto VOR dem Start → Satz wie tv.balance_start (Tradeify 215 € / 4.500 $ = 0,0478); Lesung NACH dem Start → ohne €
+    trd = {"id": "k-t9", "name": "150k Tradeify …0909", "firm": "Tradeify", "account_type": "challenge", "external_id": "TDFY-000909",
+           "tv_balance": 150000, "tv_balance_at": "2026-10-08T07:00:53+00:00"}
+    pd = plan("p-d1", UA, "k-t9", "Tradeify", richtung="buy", status="completed", auto=False, pl=3570.0, quelle="duplikum", route="tvplus",
+              start="2026-10-08T07:14:26+00:00", ende="2026-10-08T08:19:45+00:00", fin=None)
+    zd = Z(pd, trd, FIRMEN, None, None, namen)
+    check(zd["eur"] is not None and zd["satz_quelle"] == "balance_vorher" and abs(zd["satz"] - 0.0478) < 0.0001 and zd["art"] == "normal",
+          f"Duplikum ohne Balance + Konto-Lesung vor dem Start → Satz {zd['satz']} ({zd['satz_quelle']}), {zd['eur']} €")
+    zd2 = Z(pd, dict(trd, tv_balance_at="2026-10-08T09:00:00+00:00"), FIRMEN, None, None, namen)
+    check(zd2["eur"] is None and "ohne Kontowert-Satz" in str(zd2["grund"]), "Konto-Lesung NACH dem Start zählt nicht → ohne € (nicht raten)")
+
     print(f"{len(f) - sum(f)}/{len(f)} ok")
     sys.exit(1 if sum(f) else 0)
 

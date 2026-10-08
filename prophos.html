@@ -48325,15 +48325,36 @@
   const tplKlE = x => x > 0 ? 'tpl-gut' : x < 0 ? 'tpl-rot' : ''
   // „Heute: +x € gewonnen · −y € verloren · netto z €" (+ „· n offen") — Finns Wortlaut, für ID-Detail und Karte
   const tplHeuteSatzHtml = s => `Heute: <b class="tpl-gut">${tplVzE(s.plus)}</b> gewonnen · <b class="tpl-rot">${tplVzE(s.minus)}</b> verloren · netto <b class="${tplKlE(s.netto)}">${tplVzE(s.netto)}</b>`
-    + (s.offen ? ` · <span title="Ergebnis noch nicht gelesen — zählt nicht">${s.offen} offen</span>` : '') + (s.ohne ? ` · <span title="ohne Kontowert-Satz — zählt nicht">${s.ohne} ohne €</span>` : '')
+    + (s.offen ? ` · <span title="Ergebnis noch nicht gelesen — zählt nicht">${s.offen} nicht gelesen</span>` : '')   // „offen" heißt seit 08.10.2026 „läuft" (Kachel Heute) + (s.ohne ? ` · <span title="ohne Kontowert-Satz — zählt nicht">${s.ohne} ohne €</span>` : '')
+  /* KACHEL „HEUTE" NACHGERECHNET (Finn 08.10.2026: „Die Zahl stimmt doch nie" — Kachel „+14 € netto · +2.269 € gewonnen · −2.255 € verloren
+   * · 1 offen"): mit den echten Backend-Funktionen gegen die DB des Tages exakt nachgestellt. Zwei Abweichungen von dem, was Finn liest:
+   * (1) „1 offen" war „Ergebnis nicht gelesen", nicht „läuft" — jetzt heißt „n offen" alle LAUFENDEN Trades der Sicht (wie die Läuft-Liste),
+   * „nicht gelesen" und „ohne €" stehen eigens daneben; (2) Trades ohne Kontowert-Satz fielen still aus der Summe (Orbit V1/Duplikum ohne
+   * Balance — Fix im Backend ap_hb_zeile: Balance vorher aus der Konto-Lesung vor dem Start). Der Tooltip zeigt die Herleitung je Trade. */
+  function tplHeuteHerleitung(zeilen, ids){
+    const usd = x => x == null ? '–' : (x > 0 ? '+' : x < 0 ? '−' : '') + Math.round(Math.abs(x)).toLocaleString('de-DE') + ' $'
+    const satz = z => z.satz != null ? ` × ${Number(z.satz).toLocaleString('de-DE', { maximumFractionDigits: 4 })} €/$` : ''
+    return zeilen.map(z => {
+      const e = tplNum(z.eur), wer = ids && ids.size === 1 ? '' : (z.user || '?') + ' · '
+      const konto = `${tplGroesseKurz(z) ? tplGroesseKurz(z) + ' ' : ''}${tplFirmaKurz(z.firma)}${z.ende4 ? ' …' + z.ende4 : ''}`
+      const was = z.art === 'offen' ? 'nicht gelesen — zählt nicht' : e == null ? 'ohne € — zählt nicht'
+        : z.art === 'geblowt' ? `geblowt → ${tplVzE(e)} (−Kontowert)` : `${usd(tplNum(z.ergebnis_usd))}${satz(z)} = ${tplVzE(e)}${z.art === 'bestanden' ? ' (bestanden)' : ''}`
+      return `${wer}${konto} ${tplUhrIso(z.ende)}: ${was}`
+    }).join('\n')
+  }
   function tplHeuteKachelHtml(D){
     const ids = D && D.sicht instanceof Set ? D.sicht : null
     const zeilen = tplHeuteZeilen(ids); if(!zeilen) return ''
     const s = tplHeuteSumme(zeilen), mit = s.n - s.offen - s.ohne
-    const tip = `Heute (Dubai) beendete Trades ${ids ? 'der gewählten ID' : 'aller IDs'} — ${s.n} Trade${s.n === 1 ? '' : 's'}: echter P&L $ × Kontowert-Satz wie „P&L hypothetisch", geblowtes Konto = −Kontowert${s.offen ? ` · ${s.offen} offen (Ergebnis nicht gelesen, zählt nicht)` : ''}${s.ohne ? ` · ${s.ohne} ohne Satz` : ''}`
+    const laufen = ((D && D.trades) || []).filter(t => t.status === 'laeuft').length
+    const neben = [laufen ? `${laufen} offen` : '', s.offen ? `${s.offen} nicht gelesen` : '', s.ohne ? `${s.ohne} ohne €` : ''].filter(Boolean).join(' · ')
+    const tip = `Heute (Dubai) beendete Trades ${ids ? 'der gewählten ID' : 'aller IDs'} — ${s.n} Trade${s.n === 1 ? '' : 's'}, davon ${mit} mit €: `
+      + `echter P&L $ × Kontowert-Satz wie „P&L hypothetisch", geblowtes Konto = −Kontowert. Netto = gewonnen + verloren.`
+      + `${laufen ? ` „${laufen} offen" = gerade laufende Trades.` : ''}${s.offen ? ` ${s.offen} nicht gelesen und` : ''}${s.ohne ? ` ${s.ohne} ohne Kontowert-Satz` : ''}${s.offen || s.ohne ? ' zählen nicht.' : ''}`
+      + (zeilen.length ? '\n\n' + tplHeuteHerleitung(zeilen, ids) : '')
     return `<div class="kpi tpl-heute"><div class="kpi-label" title="${escapeHtml(tip)}">Heute</div>
         <div class="kpi-value ${tplKlE(s.netto)}" title="${escapeHtml(tip)}">${mit ? tplVzE(s.netto) : '–'}<small>netto</small></div>
-        <span class="kpi-delta umbruch" title="${escapeHtml(tip)}"><b class="tpl-gut">${tplVzE(s.plus)}</b> gewonnen · <b class="tpl-rot">${tplVzE(s.minus)}</b> verloren${s.offen ? ` · ${s.offen} offen` : ''}</span>
+        <span class="kpi-delta umbruch" title="${escapeHtml(tip)}"><b class="tpl-gut">${tplVzE(s.plus)}</b> gewonnen · <b class="tpl-rot">${tplVzE(s.minus)}</b> verloren${neben ? ` · ${neben}` : ''}</span>
         ${apdBotKleinHtml(apdDaten(), apdAdmin(), tplUhrIso)}</div>`
   }
   const TPL_HB_ART = { bestanden: ['bestanden', 'gut'], geblowt: ['geblowt', 'rot'], offen: ['nicht gelesen', 'offen'] }
@@ -62360,7 +62381,7 @@
     let h = { zeilen: [], jetzt: 0 }
     try{ if(D) h = tplHypo(tplSichtFilter(D, new Set([uid]))) }catch(e){ console.warn('[ap-idd] tplHypo', e) }
     const usdLauf = h.zeilen.reduce((s, z) => s + (z.pl != null && isFinite(z.pl) ? z.pl : 0), 0)
-    const ergTip = hs ? `Heute (Dubai) beendete Trades: echter P&L $ · hypothetisch € = P&L × Kontowert-Satz, geblowtes Konto = −Kontowert${ohneEur ? ` (${hs.offen ? hs.offen + ' offen — Ergebnis nicht gelesen' : ''}${hs.offen && hs.ohne ? ', ' : ''}${hs.ohne ? hs.ohne + ' ohne Satz' : ''}; zählen nicht)` : ''}. Darunter: laufende jetzt.`
+    const ergTip = hs ? `Heute (Dubai) beendete Trades: echter P&L $ · hypothetisch € = P&L × Kontowert-Satz, geblowtes Konto = −Kontowert${ohneEur ? ` (${hs.offen ? hs.offen + ' Ergebnis nicht gelesen' : ''}${hs.offen && hs.ohne ? ', ' : ''}${hs.ohne ? hs.ohne + ' ohne Satz' : ''}; zählen nicht)` : ''}. Darunter: laufende jetzt.`
       : `Beendete Trades heute: echter P&L $ · hypothetisch € = P&L × Kontowert-Satz${ohneEur ? ` (${ohneEur} ohne Satz)` : ''}. Darunter: laufende jetzt.`
     const ergKachel = `<div class="kpi" title="${escapeHtml(ergTip)}">
         <div class="kpi-label">Ergebnis heute</div><div class="kpi-value ${kl(usdFertig)}">${mitErg ? vzU(usdFertig) : '–'}</div>
@@ -62368,7 +62389,7 @@
     const kacheln = `<div class="kpis tpl-kpis5">
         ${zahlKachel('Geplant', geplant.length, unbest ? `${unbest} unbestätigt` : geplant.length ? 'alle bestätigt' : '–', 'var(--good)', 'heute geplant, noch nicht gestartet')}
         ${zahlKachel('Läuft', laeuft.length, laeuft.length ? `Live ${vzU(usdLauf)}` : '–', 'color-mix(in srgb,var(--good) 45%,transparent)', 'läuft gerade')}
-        ${zahlKachel('Beendet', fertigN, fertigN ? (hs ? `${hs.nPlus} im Plus${hs.offen ? ` · ${hs.offen} offen` : ''}` : `${bilHeute.filter(z => Number(z.pl_usd) > 0).length} im Plus`) : '–', farbe, 'heute beendet')}
+        ${zahlKachel('Beendet', fertigN, fertigN ? (hs ? `${hs.nPlus} im Plus${hs.offen ? ` · ${hs.offen} nicht gelesen` : ''}` : `${bilHeute.filter(z => Number(z.pl_usd) > 0).length} im Plus`) : '–', farbe, 'heute beendet')}
         ${zahlKachel('Ausgelassen', aus.length, lauf ? (gruendeTxt[0] || '–') : 'noch kein Lauf heute', 'var(--sub-2)', lauf ? (gruendeTxt.join(' · ') || 'nichts ausgelassen') : 'Der Planer ist für heute noch nicht gelaufen')}
         ${ergKachel}</div>`
     // ── KONTEN NACH STATUS: Konten der ID aus dem letzten Lauf (geplant[] + ausgelassen[], je Konto einmal) — Typ + Zustand (Grund)
