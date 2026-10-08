@@ -57,7 +57,7 @@ def lade():
     def konst(name):
         m = re.search(rf"^{name} = .*$", src, re.M)
         return m.group(0)
-    exec("\n".join([konst(k) for k in ("AP_REST_MIN", "AP_GROESSE_TOLERANZ", "AP_KW_FUNDED", "AP_KW_PHASEN", "AP_START_BIS_STANDARD", "AP_CFD_AB_STANDARD", "AP_ABSTAND_ID_FIRMA_MIN", "AP_ABSTAND_ID_MIN", "AP_ABSTAND_STUFEN", "AP_GROSS_NAH_MIN")] + [block(f) for f in (
+    exec("\n".join([konst(k) for k in ("AP_REST_MIN", "AP_GROESSE_TOLERANZ", "AP_KW_FUNDED", "AP_KW_PHASEN", "AP_START_BIS_STANDARD", "AP_CFD_AB_STANDARD", "AP_ABSTAND_ID_FIRMA_MIN", "AP_ABSTAND_ID_MIN", "AP_ABSTAND_STUFEN", "AP_GROSS_NAH_MIN", "AP_FIRMA_ABSTAND_MIN")] + [block(f) for f in (
         "_ap_norm", "ap_regel_finden", "ap_groesse", "_ap_spanne", "_ap_runden", "_ap_boden", "ap_konto_rechnen", "ap_start_bis", "ap_cfd_ab", "ap_zeiten_verteilen",
         "ap_kw_param", "_ap_kw_kauf", "_ap_kw_wachsen", "_ap_kw_lock", "ap_kontowert", "ap_trade_gewicht", "ap_sicht", "_ap_hhmm")]), ns)
     return ns

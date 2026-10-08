@@ -14514,6 +14514,11 @@ AP_ABSTAND_ID_FIRMA_MIN = 60          # Pläne derselben ID × Firma (gruppe) �
 AP_ABSTAND_ID_MIN = 20                # Pläne derselben ID überhaupt (PC) — zeiten.abstand_id_gesamt_min
 AP_ABSTAND_STUFEN = (1.0, 0.5, 0.25, 0.0)   # passt es nicht ins Fenster: Abstände stufenweise lockern, zuletzt nur die alte PC-Regel
 AP_GROSS_NAH_MIN = 60                 # Große-Folge (ap_einsatz_lage): zwei große gleich gerichtete näher als das zählen immer als Klumpen
+# FIRMEN-ABSTAND (08.10.2026, Finn zu The5%ers Finn + Pascal 04:24, Jacob 04:23: „dass bei zwei verschiedenen IDs zur selben Uhrzeit bei
+# derselben Prop-Firm zwei Trades aufgehen. Das ist mies auffällig. Immer mindestens 5 Minuten Abstand … Korrelation"): zwischen zwei
+# Starts VERSCHIEDENER IDs bei derselben Firma (ap_firma_key / _firm_norm) — hart, auch in der letzten Lockerungsstufe. Am Start selbst
+# hält der DB-Riegel sql/2026-10-08_firmen_abstand_riegel.sql dieselbe Regel (Neustarts, verpasste Starts, „Neu einplanen").
+AP_FIRMA_ABSTAND_MIN = 5
 
 
 def ap_zeiten_verteilen(tranchen, zeiten, rnd, frueheste_min=0, info=None, bestehend=None):
@@ -14548,11 +14553,14 @@ def ap_zeiten_verteilen(tranchen, zeiten, rnd, frueheste_min=0, info=None, beste
     abst_id = float(zeiten.get("abstand_id_min") or 3)
     gap_f = float(zeiten.get("abstand_id_firma_min") or AP_ABSTAND_ID_FIRMA_MIN)
     gap_i = float(zeiten.get("abstand_id_gesamt_min") or AP_ABSTAND_ID_MIN)
-    je_id, out = {}, {}               # PC je ID: [(tranche, start)] — nur die eigene ID wird geprüft
+    gap_firma = float(zeiten.get("abstand_firma_min") or AP_FIRMA_ABSTAND_MIN)
+    je_id, je_firma, out = {}, {}, {}   # PC je ID: [(tranche, start)]; je Firma (fkey): [(ID, start)] aller IDs
     for b in bestehend or ():
         if b.get("start") is not None:
             je_id.setdefault(str(b["user"]), []).append(({"user": str(b["user"]), "dauer_min": float(b.get("dauer_min") or 2),
                                                           "gruppe": b.get("gruppe")}, float(b["start"])))
+            if b.get("fkey"):
+                je_firma.setdefault(str(b["fkey"]), []).append((str(b["user"]), float(b["start"])))
 
     def frei(t, start, f=1.0):
         for o, s in je_id.get(str(t["user"]), ()):
@@ -14561,6 +14569,9 @@ def ap_zeiten_verteilen(tranchen, zeiten, rnd, frueheste_min=0, info=None, beste
             if f > 0 and abs(start - s) < gap_i * f:
                 return False
             if f > 0 and t.get("gruppe") and o.get("gruppe") == t.get("gruppe") and abs(start - s) < gap_f * f:
+                return False
+        for u, s in je_firma.get(str(t.get("fkey") or ""), ()):   # Firmen-Abstand zu ANDEREN IDs — hart, jede Stufe
+            if u != str(t["user"]) and abs(start - s) < gap_firma:
                 return False
         return True
 
@@ -14582,6 +14593,8 @@ def ap_zeiten_verteilen(tranchen, zeiten, rnd, frueheste_min=0, info=None, beste
                         break
                 if treffer is not None:
                     je_id.setdefault(str(t["user"]), []).append((t, treffer))
+                    if t.get("fkey"):
+                        je_firma.setdefault(str(t["fkey"]), []).append((str(t["user"]), treffer))
                     out[t["key"]] = treffer
                     if info is not None:
                         info[t["key"]] = {"fenster": fenster[j], "soll": fenster[fi]}
@@ -15938,8 +15951,11 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     fest_ev = [(z["start_min"], z["delta_eur_pkt"]) for z in stand["geplant"]
                if z.get("start_min") is not None and z.get("delta_eur_pkt") is not None]
     bestehend_pc = [{"user": z["user_id"], "start": z["start_min"], "dauer_min": 2,
-                     "gruppe": str(z["user_id"]) + "|" + _ap_norm(z.get("firma"))}       # Abstand je ID × Firma auch zu schon geplanten
+                     "gruppe": str(z["user_id"]) + "|" + _ap_norm(z.get("firma")),       # Abstand je ID × Firma auch zu schon geplanten
+                     "fkey": z.get("firma_key")}                                          # Firmen-Abstand zu anderen IDs (08.10.2026)
                     for z in stand["geplant"] if z.get("start_min") is not None]
+    bestehend_pc += [{"user": x["user_id"], "start": x["start"], "dauer_min": 2, "gruppe": None, "fkey": x.get("firma")}
+                     for x in stand.get("starts_heute") or () if x.get("start") is not None]   # heute gestartete: PC + Firmen-Abstand
     ek = ap_einsatz_kontext(stand, param)
     ek["gross_ab"] = gross_ab
     ek["fest_ev"] = [(z["start_min"], z["einsatz_eur"]) for z in stand["geplant"]
@@ -16498,11 +16514,29 @@ def _ap_tranche_frei(t, start, tranchen, zeiten):
 AP_VERTEIL_VORLAUF_MIN = 10            # Verteilung: nie auf einen Start vor jetzt + 10 min schieben (Master 08.10.2026)
 AP_VERTEIL_JITTER_MIN = 8              # Streuung hinter dem frühesten freien Start (kein festes Raster)
 AP_VERTEIL_GEGEN_MIN = 120             # ohne laufzeit_min: so weit muss eine Gegenrichtung derselben ID × Firma weg bleiben
+AP_VERTEIL_VERSATZ = (0, 0, 10, 20, 30, 45, 60)   # Neuwürfe: frühester Platz so viele Minuten weiter hinten
 
 
-def ap_verteil_gruppen(je, zustand, abstand=None):
+def _ap_firma_konflikt(i, je, zustand, gestartet=(), gap=None):
+    """Muss Plan i wegen des FIRMEN-ABSTANDS weichen? Ja, wenn eine ANDERE ID bei derselben Firma weniger als AP_FIRMA_ABSTAND_MIN
+    entfernt startet und Plan i der „spätere" ist: der andere startet früher, gleichzeitig mit kleinerer plan_id, ist nicht änderbar
+    oder schon gestartet (gestartet = [{user_id, firma, start}])."""
+    g = float(AP_FIRMA_ABSTAND_MIN if gap is None else gap)
+    s0, u, f = zustand[i]["start"], str(je[i]["user_id"]), je[i]["firma"]
+    for k in zustand:
+        if k == i or str(je[k]["user_id"]) == u or je[k]["firma"] != f:
+            continue
+        s = zustand[k]["start"]
+        if abs(s - s0) < g and (s < s0 or (s == s0 and str(k) < str(i)) or not je[k].get("aenderbar")):
+            return True
+    return any(str(x.get("user_id")) != u and x.get("firma") == f and x.get("start") is not None and abs(float(x["start"]) - s0) < g
+               for x in gestartet or ())
+
+
+def ap_verteil_gruppen(je, zustand, abstand=None, gestartet=()):
     """REIN RECHNEND: ID × Firma-Gruppen mit einem Klumpen — zwei Pläne näher als `abstand` (Standard AP_ABSTAND_ID_FIRMA_MIN),
-    der spätere davon änderbar. je = {plan_id: plan}, zustand = {plan_id: {start, richtung}}. → [(erste Klumpen-Minute, "uid|firma")]
+    der spätere davon änderbar — oder (08.10.2026) einem änderbaren Plan, der wegen des Firmen-Abstands zu einer anderen ID weichen
+    muss (_ap_firma_konflikt). je = {plan_id: plan}, zustand = {plan_id: {start, richtung}}. → [(erste Klumpen-Minute, "uid|firma")]
     nach Dringlichkeit (frühester Klumpen zuerst)."""
     gf = float(AP_ABSTAND_ID_FIRMA_MIN if abstand is None else abstand)
     gr = {}
@@ -16511,23 +16545,29 @@ def ap_verteil_gruppen(je, zustand, abstand=None):
     out = []
     for g, ids in gr.items():
         ids = sorted(ids, key=lambda i: (zustand[i]["start"], str(i)))
-        for x, y in zip(ids, ids[1:]):
-            if zustand[y]["start"] - zustand[x]["start"] < gf and je[y].get("aenderbar"):
-                out.append((zustand[x]["start"], g))
-                break
+        treffer = [zustand[x]["start"] for x, y in zip(ids, ids[1:]) if zustand[y]["start"] - zustand[x]["start"] < gf and je[y].get("aenderbar")]
+        treffer += [zustand[i]["start"] for i in ids if je[i].get("aenderbar") and _ap_firma_konflikt(i, je, zustand, gestartet)]
+        if treffer:
+            out.append((min(treffer), g))
     return sorted(out)
 
 
-def ap_verteilung(gruppe, je, zustand, jetzt_min, zeiten, rnd, gestartet=None, laufzeit_min=None):
+def ap_verteilung(gruppe, je, zustand, jetzt_min, zeiten, rnd, gestartet=None, laufzeit_min=None, versatz=0.0):
     """REIN RECHNEND (VERTEILUNG, 08.10.2026, Master/Finn: „Jetzt starten drei Apex-Dinger. Wenn es nur ganz kurz nicht weitergeht,
     werden alle liquidiert. Deswegen lieber einzeln starten"): neue Startminuten für EINE Gruppe "uid|firma". Der Reihe nach: ein
-    änderbarer Plan, der näher als AP_ABSTAND_ID_FIRMA_MIN an seinem Vorgänger startet, rückt NUR nach hinten — frühestens
-    jetzt + AP_VERTEIL_VORLAUF_MIN, spätestens im eigenen Fenster (≤ start_bis), je ID ≥ AP_ABSTAND_ID_MIN + PC-Regel zu allen
-    anderen Plänen/Starts der ID, nie in die Laufzeit einer GEGENRICHTUNG derselben ID × Firma (sonst Long und Short zugleich).
-    Abstände gelockert nach AP_ABSTAND_STUFEN (ohne 0); passt nichts, bleibt der Plan stehen. Richtung nie. → {plan_id: neue Minute}
-    nur für verschobene Pläne."""
+    änderbarer Plan, der näher als AP_ABSTAND_ID_FIRMA_MIN an seinem Vorgänger startet oder wegen des Firmen-Abstands zu einer
+    anderen ID weichen muss (AP_FIRMA_ABSTAND_MIN, _ap_firma_konflikt), rückt NUR nach hinten — frühestens jetzt +
+    AP_VERTEIL_VORLAUF_MIN, spätestens im eigenen Fenster (≤ start_bis), je ID ≥ AP_ABSTAND_ID_MIN + PC-Regel zu allen anderen
+    Plänen/Starts der ID, ≥ AP_FIRMA_ABSTAND_MIN zu allen Plänen/Starts anderer IDs derselben Firma (hart), nie in die Laufzeit einer
+    GEGENRICHTUNG derselben ID × Firma (sonst Long und Short zugleich). Abstände je ID gelockert nach AP_ABSTAND_STUFEN (ohne 0);
+    passt nichts, bleibt der Plan stehen. Richtung nie. → {plan_id: neue Minute} nur für verschobene Pläne.
+    Live-Befund 08.10.2026 00:30 UTC (Ina FundedNext 16:58/16:59/17:01 hing): der früheste freie Platz 18:06 lag genau auf dem
+    FundedNext-Buy einer anderen ID → Malus „dicht gegenläufig", ap_umplanen verwarf den Zug, und jeder Neuwurf landete wieder in
+    denselben 8 min. Seitdem meidet die Auswahl solche Plätze selbst (AP_GEGEN_DICHT_MIN zu Gegenrichtung anderer IDs derselben
+    Firma), und versatz (min) schiebt den frühesten Platz für einen Neuwurf weiter nach hinten."""
     gf_v = float((zeiten or {}).get("abstand_id_firma_min") or AP_ABSTAND_ID_FIRMA_MIN)
     gi_v = float((zeiten or {}).get("abstand_id_gesamt_min") or AP_ABSTAND_ID_MIN)
+    gfirma = float((zeiten or {}).get("abstand_firma_min") or AP_FIRMA_ABSTAND_MIN)
     abst_pc = float((zeiten or {}).get("abstand_id_min") or 3) + 2
     gegen = float(laufzeit_min or AP_VERTEIL_GEGEN_MIN)
     uid, firma = gruppe.split("|", 1)
@@ -16535,7 +16575,9 @@ def ap_verteilung(gruppe, je, zustand, jetzt_min, zeiten, rnd, gestartet=None, l
     neu, vorher = {}, None
     for i in eigene:
         s0 = zustand[i]["start"]
-        if vorher is None or not je[i].get("aenderbar") or s0 - vorher >= gf_v:
+        z_jetzt = {k: dict(v, start=neu.get(k, v["start"])) for k, v in zustand.items()}
+        klumpen = vorher is not None and s0 - vorher < gf_v
+        if not je[i].get("aenderbar") or not (klumpen or _ap_firma_konflikt(i, je, z_jetzt, gestartet, gfirma)):
             vorher = s0
             continue
         fen = ap_fenster_von(zeiten, s0)
@@ -16545,8 +16587,17 @@ def ap_verteilung(gruppe, je, zustand, jetzt_min, zeiten, rnd, gestartet=None, l
                   for k in zustand if k != i and str(je[k]["user_id"]) == uid]
         andere += [(float(x["start"]), x.get("richtung"), f"{x['user_id']}|{x['firma']}") for x in gestartet or ()
                    if str(x.get("user_id")) == uid and x.get("start") is not None]
+        fremd = [(neu.get(k, zustand[k]["start"]), zustand[k]["richtung"]) for k in zustand
+                 if str(je[k]["user_id"]) != uid and je[k]["firma"] == firma]
+        fremd += [(float(x["start"]), x.get("richtung")) for x in gestartet or ()
+                  if str(x.get("user_id")) != uid and x.get("firma") == firma and x.get("start") is not None]
 
         def ok(t, f):
+            for s, r in fremd:
+                if abs(t - s) < gfirma:
+                    return False                                   # Firmen-Abstand zu anderen IDs — hart
+                if r in ("buy", "sell") and r != richtung and abs(t - s) < AP_GEGEN_DICHT_MIN:
+                    return False                                   # kein neuer Malus „dicht gegenläufig gleiche Firma"
             for s, r, g in andere:
                 if abs(t - s) < max(abst_pc, gi_v * f):
                     return False                                   # PC + Abstand je ID
@@ -16555,7 +16606,7 @@ def ap_verteilung(gruppe, je, zustand, jetzt_min, zeiten, rnd, gestartet=None, l
             return True
         ziel = None
         for f in [x for x in AP_ABSTAND_STUFEN if x > 0]:
-            lo = max(s0, float(jetzt_min) + AP_VERTEIL_VORLAUF_MIN, vorher + gf_v * f)
+            lo = max(s0, float(jetzt_min) + AP_VERTEIL_VORLAUF_MIN, (vorher + gf_v * f) if klumpen else s0) + float(versatz or 0)
             if hi is None or lo > hi:
                 continue
             frei_ = [t for t in range(int(-(-lo // 1)), hi + 1) if ok(t, f)]
@@ -16625,7 +16676,7 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
         return k[1] > schwelle
 
     aktuell = vorher = strafe(zustand) + (misch(zustand),)
-    klumpen = ap_verteil_gruppen(je, zustand)     # VERTEILUNG (08.10.2026): weckt den Bot auch bei gehaltenem Band
+    klumpen = ap_verteil_gruppen(je, zustand, gestartet=gestartet)     # VERTEILUNG (08.10.2026): weckt den Bot auch bei gehaltenem Band
     # ID-MISCHUNG OHNE BAND-ANLASS (08.10.2026, Finn: „warum ist bei Chris immer noch alles long?" — 7 Pläne von 02:02 Dubai, also vor
     # .1220 angelegt; Nachplanen lässt bestehende stehen, der Bot drehte nur bei Band-Überschreitung): auch eine ID-Mischung > 0 weckt
     # den Bot — die Band-Schritte unten laufen trotzdem nur, wenn das Band offen ist, danach die eigene Mischungs-Phase
@@ -16774,16 +16825,16 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
     def zeiten_txt(ms):
         return "/".join(_ap_hhmm_txt((float(m) + float(dubai_min or 0)) % 1440) for m in ms)
     tag_vor_v = None
-    for _m0, g in ap_verteil_gruppen(je, zustand):
+    for _m0, g in ap_verteil_gruppen(je, zustand, gestartet=gestartet):
         ids_g = sorted((i for i in zustand if f"{je[i]['user_id']}|{je[i]['firma']}" == g), key=lambda i: zustand[i]["start"])
         if ruht([i for i in ids_g if je[i].get("aenderbar")]):
             continue
         if tag_vor_v is None:
             tag_vor_v = ueber_tag(zustand)
         gewaehlt = None
-        for _v in range(6):                      # Streuung neu würfeln, falls ein Zug das Band verschlechtert
+        for vs in AP_VERTEIL_VERSATZ:            # verschlechtert ein Zug Band/Malus: weiter hinten neu würfeln (nicht 6× dieselben 8 min)
             neu = ap_verteilung(g, je, zustand, jetzt_min, zeiten, rnd, gestartet=gestartet,
-                                laufzeit_min=(einsatz or {}).get("laufzeit"))
+                                laufzeit_min=(einsatz or {}).get("laufzeit"), versatz=vs)
             if not neu:
                 break
             z = {i: dict(v) for i, v in zustand.items()}

@@ -213,6 +213,31 @@ def main():
     g = next((x["grund"] for x in alle_aend if x["plan_id"].startswith("inafn")), "")
     check(g.startswith("Verteilung: Ina Fundednext 16:58/16:59/17:01 → 16:58/") and "Dubai" in g, f"Protokoll-Grund in Dubai-Zeit ({g[:90]})")
 
+    # Live-Befund 00:30 UTC: Ina FundedNext hing — frühester Platz 18:06 lag auf dem FundedNext-Buy einer anderen ID (Malus)
+    Z2 = {"fenster": [["00:00", "14:30", 50], ["14:30", "16:30", 50]], "start_bis": "16:30", "abstand_id_min": 3}
+    live = [plan("ifn1", "u-ina", "Ina", "fundednext", dt("16:58"), "sell"), plan("ifn2", "u-ina", "Ina", "fundednext", dt("16:59"), "sell"),
+            plan("ifn3", "u-ina", "Ina", "fundednext", dt("17:01"), "sell"), plan("ifp", "u-ina", "Ina", "fundingpips", dt("17:46")),
+            plan("x1", "u-x", "X", "fundednext", dt("16:14")), plan("x2", "u-x", "X", "fundednext", dt("18:06")),
+            plan("y1", "u-y", "Y", "fundednext", dt("17:00"), "sell")]
+    pl, jm, zul = [dict(p) for p in live], dt("04:45"), {}
+    for _l in range(6):
+        e = U(pl, 0.0, 0.0, jm, Z2, 100, random.Random(_l), zuletzt=zul, dubai_min=DUBAI)
+        nv = {x["plan_id"]: x["nach_start_min"] for x in e["aenderungen"] if x["art"] == "start"}
+        pl = [dict(p, start_min=nv.get(p["plan_id"], p["start_min"])) for p in pl]
+        for k in nv:
+            zul[k] = jm
+        jm += 10
+    s2 = {p["plan_id"]: p["start_min"] for p in pl}
+    ifn = sorted(s2[k] for k in ("ifn1", "ifn2", "ifn3"))
+    txt = ["%02d:%02d" % divmod(int(x + DUBAI), 60) for x in ifn]
+    check(min(b - a_ for a_, b in zip(ifn, ifn[1:])) >= GF * 0.25, f"Live-Fall Ina FundedNext: verteilt ({txt} Dubai, vorher 16:58/16:59/17:01)")
+    check(all(abs(s2[k] - s2["x2"]) >= a["AP_GEGEN_DICHT_MIN"] for k in ("ifn2", "ifn3") if s2[k] != dt("16:59") and s2[k] != dt("17:01")),
+          "Live-Fall: kein Platz im Malus-Abstand zum FundedNext-Buy der anderen ID (18:06)")
+    check(all(abs(s2[k] - s2["ifp"]) >= GI * 0.5 for k in ("ifn1", "ifn2", "ifn3")), "Live-Fall: ≥ 10 min zu Inas FundingPips 17:46 (ID-Abstand)")
+    check(all(abs(s2[k] - s2["y1"]) >= a["AP_FIRMA_ABSTAND_MIN"] for k in ("ifn2", "ifn3") if s2[k] not in (dt("16:59"), dt("17:01"))),
+          "Live-Fall: ≥ 5 min zum FundedNext-Plan der dritten ID (Firmen-Abstand)")
+    check(all(s2[k] <= 16 * 60 + 30 for k in s2), "Live-Fall: alles bis 18:30 Dubai")
+
     # Ruhezeit: ein eben verschobener Plan ruht 30 min
     e_r = U([plan("m1", "u-m", "M", "apex", 600), plan("m2", "u-m", "M", "apex", 601)], 0.0, 0.0, 400, Z16, 100, random.Random(1),
             zuletzt={"m2": 395})
