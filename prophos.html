@@ -22937,6 +22937,31 @@
     const ra = a && a.balance_relativ, rb = b && b.balance_relativ
     return !(typeof ra === 'boolean' && typeof rb === 'boolean' && ra !== rb)
   }
+  /* BALANCE-SPRUNG (08.10.2026, Master nach der Gegenprüfung, Fall ea91e359: Tradeify-WD, Balance −5.089,20, Tages-P&L −589,20 — eine
+   * Auszahlung von 4.500 $ lag dazwischen; die Balance-Differenz wäre automatisch als Master-P&L übernommen worden). Gleiche Regel wie
+   * app.py lt_balance_sprung: Today's P&L beim Klick und nach dem Ende vom SELBEN CME-Handelstag (tv.datum_start == final.datum) →
+   * Trade-P&L = Ende − Start (nie der Tageswert allein: Topstep-Kette zwei Trades am Tag); liegt die Balance-Differenz mehr als
+   * TV_BALANCE_SPRUNG_USD DARUNTER, gilt sie nicht als P&L. Nur nach unten (Auszahlung) und nur, wenn sich Today's P&L bewegt hat (hängendes
+   * Total P/L, Fall 8da04bfe → keine Aussage, wie bisher). REIN RECHNEND → {balance, tages, differenz} | null. */
+  const TV_BALANCE_SPRUNG_USD = 100
+  function tvBalanceSprung(route, tv, fin){
+    const n = v => (typeof v === 'number' && isFinite(v)) ? v : null
+    tv = tv || {}; fin = fin || {}
+    const bs = n(tv.balance_start), be = n(fin.balance_end)
+    if(bs == null || be == null || (route === 'tsv2' && !tvBalanceBasisGleich(tv, fin))) return null
+    const start = n(tv.today_pnl_start) != null ? n(tv.today_pnl_start) : (route === 'tsv2' ? n(tv.rpl_start) : null), ende = n(fin.today_pnl)
+    if(start == null || ende == null || !fin.datum || fin.datum !== tv.datum_start) return null
+    if(Math.abs(ende - start) < 0.005) return null   // Total P/L hängt (unverändert) → keine Aussage
+    const bal = Math.round((be - bs) * 100) / 100, tages = Math.round((ende - start) * 100) / 100
+    if(bal >= tages - TV_BALANCE_SPRUNG_USD) return null   // nur nach unten und mehr als die Schwelle
+    return { balance: bal, tages, differenz: Math.round((bal - tages) * 100) / 100 }
+  }
+  window._tvBalanceSprung = tvBalanceSprung   // Test-Haken
+  function balanceSprungText(sp){
+    const de = v => `${v < 0 ? '−' : '+'}${Math.abs(Math.round(v)).toLocaleString('de-DE')}`
+    return sp ? `Balance ${de(sp.balance)} · Tages-P&L ${de(sp.tages)} · Differenz ${de(sp.differenz)} (Auszahlung?)` : ''
+  }
+  window._balanceSprungText = balanceSprungText
   function _autoPnlTvV2Gelesen(plan){
     const base = (plan && plan.mt5Baseline) || null
     const tv = (base && base.tv) || null, fin = (base && base.final) || null
@@ -22945,6 +22970,11 @@
     // P&L"): beide von Puls gelesen, tagesunabhängig. Schlägt Today's P&L, weil das Tradovate-Panel dieses Feld gar nicht zeigt.
     const bs = tv && typeof tv.balance_start === 'number' && isFinite(tv.balance_start) ? tv.balance_start : null
     const be = fin && typeof fin.balance_end === 'number' && isFinite(fin.balance_end) ? fin.balance_end : null
+    // Balance-Sprung (08.10.2026): Differenz ≠ Tages-P&L → kein Automatik-Wert, nur der Vorschlag (Tages-P&L) fürs Abhak-Popup
+    const sprung = (bs != null && be != null) ? tvBalanceSprung(plan && plan.route, tv, fin) : null
+    if(sprung)
+      return { slavePnl: (plan && plan.hedgeEur > 0) ? null : 0, slaveCcy: '', masterPnl: null, masterCcy: '$', quelle: 'balance_sprung', sprung, vorschlag: sprung.tages,
+               hinweis: `Balance-Sprung: ${balanceSprungText(sprung)} — nicht automatisch übernommen, Tages-P&L vorgeschlagen` }
     if(bs != null && be != null && tvBalanceBasisGleich(tv, fin))
       return { slavePnl: (plan && plan.hedgeEur > 0) ? null : 0, slaveCcy: '', masterPnl: Number((be - bs).toFixed(2)), masterCcy: '$', quelle: 'balance',
                hinweis: `aus der Balance (${tsx ? 'TopstepX' : 'TradingView'}${fin && fin.balance_relativ ? ', Express ab 0' : ''}): ${be.toLocaleString('de-DE', { minimumFractionDigits: 2 })} − ${bs.toLocaleString('de-DE', { minimumFractionDigits: 2 })}` }
@@ -23114,6 +23144,7 @@
   async function _autoPnlFetchTvV2(plan){
     try{ _autoPnlAmbiguous.delete(String(plan.id)) }catch(_){}
     const resA = _autoPnlTvV2Gelesen(plan)
+    if(resA && resA.quelle === 'balance_sprung') return resA   // Balance-Sprung (08.10.2026): weder Fills noch Schätzung automatisch
     const base = (plan && plan.mt5Baseline) || {}, fin = base.final || null
     const geb = orbitGebuehrFuer(plan.masterFirm)
     const fills = tradePlAusFills({ richtung: plan.richtung, kt: plan.masterContracts, wurzel: orbitWurzelVon(plan), master_tp: plan.masterTp,
@@ -27883,6 +27914,7 @@
    * plan_id, master_pl, slave_pl} (Backend .541, geht aus open und review; auf completed = Korrektur). Fusion vorbelegt mit hedge.pl
    * aus der Deal-Historie. */
   let _mwdErlId = null, _mwdErlKonto = '', _mwdErlOhneHedge = false, _mwdErlFusionAmPlan = false
+  let _mwdErlVor = null   // vorbelegter Master-Wert — weicht der gespeicherte ab, war es Hand (pl_quelle 'hand', 08.10.2026)
   function mklWdErledigtOeffnen(pid, extra){
     const pw = Object.assign({}, (mkl.wd.plaene || []).find(x => String(x.id) === String(pid)) || {}, extra || {})
     // Echo/Duplikum (02.10.2026): kein Solo-Hedge am Plan — Fusion-P&L aus dem Live-Wert (slave_pl_live) bzw. dem slave_pl am Plan
@@ -27913,14 +27945,19 @@
     // Account getradet wurde"): tvv2 zählt nur mit Fusion-Hedge (hedge_eur > 0 oder Hedge am Plan = Winning Days) als gehedgt
     const mitHedge = Number(pw.hedge_eur) > 0 || !!pw.hedge
     _mwdErlOhneHedge = !_mwdErlFusionAmPlan && (pw.route === 'mt5v2' || pw.route === 'tsv2' || pw.plattform === 'echo' || (pw.route === 'tvv2' && !mitHedge))
-    const plVor = (pw.pl_balance != null && isFinite(Number(pw.pl_balance))) ? Number(pw.pl_balance)
+    // Balance-Sprung (08.10.2026, Fall ea91e359): Balance-Differenz ≠ Tages-P&L (Auszahlung o. Ä.) → Tages-P&L vorbelegen, nie die Differenz
+    const _sp = pw.balance_sprung || ((pw.tv && pw.final && typeof tvBalanceSprung === 'function') ? tvBalanceSprung(pw.route, pw.tv, pw.final) : null)
+    const plVor = _sp ? _sp.tages
+      : (pw.pl_balance != null && isFinite(Number(pw.pl_balance))) ? Number(pw.pl_balance)
       : (pw.master_pl && pw.master_pl.wert != null && isFinite(Number(pw.master_pl.wert))) ? Number(pw.master_pl.wert) : null
     // Konto weg (05.10.2026): P&L nicht mehr lesbar — steht keiner am Plan, Vorschlag ≈ Start-Balance bis Liquidation (überschreibbar)
     const _kw = (typeof wdlKontoWeg === 'function') && wdlKontoWeg(pw)
     const _kwSch = (_kw && plVor == null) ? wdlKontoWegSchaetzung(pw) : null
     const m = document.getElementById('mwd-erl-master'); if(m) m.value = plFeldText(plVor != null ? plVor : _kwSch)
+    _mwdErlVor = plVor != null ? plVor : _kwSch
     const mHilfe = m && m.closest('.field') && m.closest('.field').querySelector('.mwd-erl-hilfe')
-    if(mHilfe) mHilfe.textContent = _kwSch != null ? '≈ geschätzt: Start-Balance bis Liquidation (Konto weg) — bitte prüfen'
+    if(mHilfe) mHilfe.textContent = _sp ? `Tages-P&L — Balance-Sprung: ${balanceSprungText(_sp)}`
+      : _kwSch != null ? '≈ geschätzt: Start-Balance bis Liquidation (Konto weg) — bitte prüfen'
       : (_kw && plVor == null) ? 'Konto weg — nichts mehr lesbar, bitte eintragen'
       : pw.route === 'mt5v2' ? (pw.pl_balance != null ? 'MT5-Balance nachher − vorher' : 'aus MetaTrader eintragen')
       : pw.route === 'tsv2' ? (pw.pl_balance != null ? 'Balance nachher − vorher' : 'aus TopstepX eintragen')
@@ -27966,6 +28003,7 @@
     if(mpl == null || !isFinite(mpl)) return say('Master-P&L eintragen ($).', 'err')
     if(spl != null && !isFinite(spl)) return say('Fusion-P&L ist keine Zahl.', 'err')
     const kontoStatus = document.querySelector('input[name="mwd-erl-status"]:checked')?.value || 'none'
+    const plHand = _mwdErlVor == null || !isFinite(Number(_mwdErlVor)) || Math.abs(mpl - Number(_mwdErlVor)) >= 0.005
     if(btn) btn.disabled = true; say('')
     // SOFORT ZU (01.10.2026 abends, Finn: „Abhaken dauert 5–6 s"): Popup zu und Zeile nach „Erledigt", das Backend speichert dahinter;
     // scheitert es, Hinweis + Liste neu laden (die Zeile springt zurück) — das Popup lässt sich dann erneut öffnen
@@ -27978,7 +28016,9 @@
     try{
       const tok = await _pushTok(); if(!tok) throw new Error('nicht angemeldet')
       const r = await fetch(`${WATCHER_HOME}/admin/wd-plaene`, { method: 'PATCH', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ aktion: 'erledigt', plan_id: pid, master_pl: mpl, slave_pl: spl, konto_status: kontoStatus }) })
+        body: JSON.stringify({ aktion: 'erledigt', plan_id: pid, master_pl: mpl, slave_pl: spl, konto_status: kontoStatus,
+                               // Hand-Betrag (08.10.2026): ohne Vorbelegung oder davon abweichend → pl_quelle 'hand' am Plan
+                               ...((plHand) ? { pl_quelle: 'hand' } : {}) }) })
       const d = await r.json().catch(() => ({}))
       if(!r.ok || d.ok === false) throw new Error(d.error || ('HTTP ' + r.status))
       const fmtE = v => `${v < 0 ? '−' : '+'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
@@ -28740,6 +28780,12 @@
    * lebt weiter. Geblowt ist es erst beim Gesamt-Drawdown 4.000 $, also Balance ≤ 146.000"). Liegt das Liq-Level des Radars am weichen
    * Tagesstopp (liq_regeln art tagesstart/stufen, das Backend sagt liq_regel_soft) und nicht am Konto-Boden, heißt es „Tageslimit". */
   const wdlLiqIstTag = t => !!(t && t.liq_regel_soft && t.liq_gilt === 'regel')
+  // BALANCE-SPRUNG (08.10.2026): Backend lt_balance_sprung → t.balance_sprung; Wort kurz, die Zahlen im Tooltip. P&L-Zelle zeigt den
+  // Tages-P&L statt der Balance-Differenz (die enthält z. B. eine Auszahlung)
+  const wdlSprungErg = t => (t && t.balance_sprung) ? `<span style="color:#b45309" title="${escapeHtml(balanceSprungText(t.balance_sprung))}">Balance-Sprung</span>` : ''
+  const wdlPlTrade = t => (t && t.balance_sprung) ? t.balance_sprung.tages : (t && t.pl_balance != null && isFinite(Number(t.pl_balance))) ? Number(t.pl_balance) : null
+  const wdlPlTip = (t, echo, pb) => (t && t.balance_sprung) ? 'Tages-P&L — ' + balanceSprungText(t.balance_sprung)
+    : (t && t.pl_balance != null && isFinite(Number(t.pl_balance))) ? (echo ? 'MT5-Balance' : 'Balance') + ' nachher − vorher' : pb != null ? 'P&L am Plan' : 'noch kein P&L — beim Abhaken eintragen'
   const WDL_TAGESLIMIT_ERG = '<span style="color:#b45309;opacity:.8" title="Tageslimit erreicht — Soft-Breach: der Tag stoppt, das Konto lebt weiter">⏸ Tageslimit</span>'
   // Eigene Spalten (02.10.2026, Finn: „eine eigene Spalte für den Kontostand und eine für geblowt/Take Profit"): Ergebnis-Wort
   // („💀 geblowt" / „⏸ Tageslimit" schlägt SL/Liq der Demo) und Konto-Zelle
@@ -29029,7 +29075,7 @@
         // Abhaken (derselbe Weg wie Überprüfen: mklWdErledigtOeffnen) · zurück (Kennzeichen weg). Frisch abgelegt = Notiz-Feld offen.
         art = 'man'
         const pid = wdlTid(t), m = wdlManuell(t), sperre = wdlAbhakenSperre(t), busy = _wdlManBusy.has(pid), edit = !!(_wdlManNotiz && _wdlManNotiz.pid === pid)
-        const pb = num(t.pl_balance) != null ? num(t.pl_balance) : num(t.master_pl && t.master_pl.wert)
+        const pb = wdlPlTrade(t) != null ? wdlPlTrade(t) : num(t.master_pl && t.master_pl.wert)   // Balance-Sprung → Tages-P&L (08.10.2026)
         kontoZ = wdlKontoZ(t)
         const seitD = m.at ? new Date(m.at) : null, seit = seitD && !isNaN(seitD) ? `seit ${tag(seitD)}` : ''
         // Schritt + Notiz (Nachbesserung 08.10.2026): Auswahl vor der Notiz, vorbelegt je Kontotyp; Anzeige „→ Funded · Warten bis …"
@@ -29041,7 +29087,7 @@
         miZ = zelle('mi wdl-z-akt', `${notizHtml}${seit ? `<small class="wdl-man-seit" title="${escapeHtml('in Manuelle Arbeit seit ' + zeit(m.at))}">${seit}</small>` : ''}`
           + (edit ? '' : `<button type="button" class="btn btn-ghost el-knopf" data-wdl-abhaken="${escapeHtml(pid)}"${(sperre || busy) ? ' disabled' : ''} title="${escapeHtml(sperre || 'Abhaken — P&L prüfen, verbuchen und Nachfolger anlegen')}">Abhaken</button>`
           + `<button type="button" class="btn btn-ghost el-knopf" data-wdl-man-zurueck="${escapeHtml(pid)}"${busy ? ' disabled' : ''} title="Kennzeichen entfernen — zurück nach „Überprüfen"">zurück</button>`))
-        plZ = zelle('pl', sig(pb, '$', 2) + slaveZ(t) + zuWegZ(t), { f: col(pb), tip: num(t.pl_balance) != null ? (echo ? 'MT5-Balance' : 'Balance') + ' nachher − vorher' : pb != null ? 'P&L am Plan' : 'noch kein P&L — beim Abhaken eintragen' })
+        plZ = zelle('pl', sig(pb, '$', 2) + slaveZ(t) + zuWegZ(t), { f: col(pb), tip: wdlPlTip(t, echo, pb) })
         zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
         zielSp = wdlZielSpanneHtml(t, col(pb))   // Ziel-Spanne unter der Zeile (08.10.2026)
       } else if(t.status === 'review'){
@@ -29050,14 +29096,14 @@
         // Days-Karte (mklWdErledigtOeffnen: eigener Plan → Erledigt-Popup der Trade-Karte, fremder Orbit-Plan → kompaktes Popup)
         art = 'pruef'
         const pid = wdlTid(t), sperre = wdlAbhakenSperre(t)
-        const pb = num(t.pl_balance) != null ? num(t.pl_balance) : num(t.master_pl && t.master_pl.wert)
-        const erg = wdlBestandenChip(t) || wdlBlowErg(t) || (wdlKontoWeg(t) ? WDL_KONTO_WEG_ERG : echo ? '' : d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : wdlLiqIstTag(t) ? WDL_TAGESLIMIT_ERG : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : '')
+        const pb = wdlPlTrade(t) != null ? wdlPlTrade(t) : num(t.master_pl && t.master_pl.wert)   // Balance-Sprung → Tages-P&L (08.10.2026)
+        const erg = wdlSprungErg(t) || wdlBestandenChip(t) || wdlBlowErg(t) || (wdlKontoWeg(t) ? WDL_KONTO_WEG_ERG : echo ? '' : d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : wdlLiqIstTag(t) ? WDL_TAGESLIMIT_ERG : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : '')
         kontoZ = wdlKontoZ(t)
         // „→ manuell" (08.10.2026): Handy/Touch hat kein Drag — derselbe Weg wie das Ablegen in „Manuelle Arbeit"
         miZ = zelle('mi wdl-z-akt', `${erg ? `<span>${erg}</span>` : ''}<button type="button" class="btn btn-ghost el-knopf" data-wdl-abhaken="${escapeHtml(pid)}"${sperre ? ' disabled' : ''} title="${escapeHtml(sperre || 'Abhaken — P&L prüfen und Trade erledigen')}">Abhaken</button>`
           + `<button type="button" class="btn btn-ghost el-knopf" data-wdl-manuell="${escapeHtml(pid)}"${_wdlManBusy.has(pid) ? ' disabled' : ''} title="Nach „Manuelle Arbeit" — Notiz dazu, nichts wird verbucht (oder die Zeile dorthin ziehen)">→ manuell</button>`,
           { tip: echo ? '' : demoTip(d) })
-        plZ = zelle('pl', sig(pb, '$', 2) + slaveZ(t) + zuWegZ(t), { f: col(pb), tip: num(t.pl_balance) != null ? (echo ? 'MT5-Balance' : 'Balance') + ' nachher − vorher' : pb != null ? 'P&L am Plan' : 'noch kein P&L — beim Abhaken eintragen' })
+        plZ = zelle('pl', sig(pb, '$', 2) + slaveZ(t) + zuWegZ(t), { f: col(pb), tip: wdlPlTip(t, echo, pb) })
         zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
         zielSp = wdlZielSpanneHtml(t, col(pb))   // Ziel-Spanne unter der Zeile (08.10.2026)
       } else {
@@ -29070,10 +29116,12 @@
           kontoZ = wdlKontoZ(t)
           plZ = zelle('pl', sig(pb, '$', 2) + slaveZ(t), { f: col(pb), tip: num(t.pl_balance) != null ? 'MT5-Balance nachher − vorher' : pb != null ? 'P&L am Plan' : 'noch keine End-Balance' })
         } else {
-        const erg = wdlBestandenChip(t) || wdlBlowErg(t) || (wdlKontoWeg(t) ? WDL_KONTO_WEG_ERG : d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : wdlLiqIstTag(t) ? WDL_TAGESLIMIT_ERG : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : '–')
+        const erg = wdlSprungErg(t) || wdlBestandenChip(t) || wdlBlowErg(t) || (wdlKontoWeg(t) ? WDL_KONTO_WEG_ERG : d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : wdlLiqIstTag(t) ? WDL_TAGESLIMIT_ERG : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : '–')
         miZ = zelle('mi', erg, { tip: demoTip(d) })
         kontoZ = wdlKontoZ(t)
-        plZ = zelle('pl', sig(t.pl_balance, '$', 2) + slaveZ(t) + zuWegZ(t), { f: col(t.pl_balance), tip: num(t.pl_balance) != null ? 'Balance nachher − vorher' : 'keine End-Balance' })
+        // Balance-Sprung (08.10.2026): erledigt zählt der P&L am Plan (von Hand entschieden), sonst der Tages-P&L — nie die Differenz
+        const pbZu = t.balance_sprung ? (num(t.master_pl && t.master_pl.wert) ?? t.balance_sprung.tages) : t.pl_balance
+        plZ = zelle('pl', sig(pbZu, '$', 2) + slaveZ(t) + zuWegZ(t), { f: col(pbZu), tip: t.balance_sprung ? 'P&L am Plan — ' + balanceSprungText(t.balance_sprung) : num(t.pl_balance) != null ? 'Balance nachher − vorher' : 'keine End-Balance' })
         }
         zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
       }
@@ -42050,7 +42098,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1377'
+  const OS_TAB_BUILD = '2026-09-22.1378'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -55058,6 +55106,10 @@
           if(res.masterPnl != null && mEl && mEl.value === ''){
             mEl.value = res.masterPnl.toFixed(2); filled.push('Master ' + res.masterPnl.toFixed(2) + (res.masterCcy||''))
             _tcAuto = { wert: Number(res.masterPnl.toFixed(2)), quelle: plQuellePlan(plan) }   // pl_quelle (24.09.2026)
+          } else if(res.masterPnl == null && res.vorschlag != null && mEl && mEl.value === ''){
+            // Balance-Sprung (08.10.2026): Tages-P&L vorbelegt — übernommen zählt als Auto-Quelle, geändert als 'hand'
+            mEl.value = Number(res.vorschlag).toFixed(2); filled.push('Master ' + Number(res.vorschlag).toFixed(2) + ' $ (Tages-P&L)')
+            _tcAuto = { wert: Number(Number(res.vorschlag).toFixed(2)), quelle: plQuellePlan(plan) }
           }
           if(filled.length){
             if(typeof tcRecompute === 'function') { try { tcRecompute() } catch(_){} }

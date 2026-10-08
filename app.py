@@ -11136,6 +11136,39 @@ def lt_pl_balance(route, tv, fin):
     return round(be - bs, 2)
 
 
+# BALANCE-SPRUNG (08.10.2026, Master nach der Gegenprüfung, Fall ea91e359: Tradeify-WD, Balance 165.039,22 → 159.950,02 = −5.089,20,
+# Tages-P&L −589,20 — dazwischen eine Auszahlung von 4.500 $ von der Balance; Hand-Eintrag −600, Hedge +182,64 passte nur zu ~−590).
+# Balance nachher − vorher ist der Trade-P&L nur, solange nichts anderes die Balance bewegt (Auszahlung, Gebührenbuchung, Hand-Trade).
+# Liegen Today's P&L beim Klick (tv.today_pnl_start, Topstep V2 älter rpl_start) und nach dem Ende (final.today_pnl) vom SELBEN
+# CME-Handelstag vor (tv.datum_start == final.datum, Grenze 22:00 UTC), ist Ende − Start der Trade-P&L — nie today_pnl allein (Topstep-
+# Kette: zwei Trades am Tag). Liegt die Balance-Differenz mehr als LT_BALANCE_SPRUNG_USD UNTER diesem Wert, gilt sie nicht als P&L: kein
+# Automatik-Wert, Ergebnis-Wort „Balance-Sprung", Abhak-Popup mit dem Tages-P&L vorbelegt. Nur nach unten (Auszahlungen senken die Balance,
+# Einzahlungen gibt es auf Prop-Konten nicht) und nur, wenn sich Today's P&L bewegt hat — hängt Total P/L (Ende = Start, Fall 8da04bfe:
+# 12,6 vor und nach dem Trade, Balance −50,40), sagt er nichts, dann wie bisher die Balance-Differenz (Prüfung Slave 2 / Master 08.10.2026).
+# Fehlt ein Wert / anderer Tag: wie bisher.
+LT_BALANCE_SPRUNG_USD = 100.0
+
+
+def lt_balance_sprung(route, tv, fin):
+    """REIN RECHNEND (testbar): Balance-Sprung eines beendeten Puls-Plans → {balance, tages, differenz} | None (s. o.)."""
+    tv, fin = tv or {}, fin or {}
+    bal = lt_pl_balance(route, tv, fin)
+    if bal is None:
+        return None
+    start = _wd_num(tv.get("today_pnl_start"))
+    if start is None and route == "tsv2":
+        start = _wd_num(tv.get("rpl_start"))
+    ende = _wd_num(fin.get("today_pnl"))
+    if start is None or ende is None or not fin.get("datum") or fin.get("datum") != tv.get("datum_start"):
+        return None
+    if abs(ende - start) < 0.005:
+        return None                       # Total P/L hängt (unverändert) → keine Aussage
+    tages = round(ende - start, 2)
+    if bal >= tages - LT_BALANCE_SPRUNG_USD:
+        return None                       # nur nach unten und mehr als die Schwelle
+    return {"balance": bal, "tages": tages, "differenz": round(bal - tages, 2)}
+
+
 def _lt_zeile(p, acc, disp, kerzen_je_wurzel, vorher=None, regeln=None, fruehere=None, verlauf=None, kw_firmen=None):
     z = _wd_heute_zeile(p, acc, disp, vorher)
     base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
@@ -11188,6 +11221,7 @@ def _lt_zeile(p, acc, disp, kerzen_je_wurzel, vorher=None, regeln=None, fruehere
         demo["pl_usd"] = demo_liq_pl
     z.update({"balance_start": bs, "equity_start": _wd_num(tv.get("equity_start")), "balance_end": be,
               "pl_balance": lt_pl_balance(p.get("route"), tv, fin),
+              "balance_sprung": lt_balance_sprung(p.get("route"), tv, fin),   # Auszahlung o. Ä. zwischen Start und Ende (08.10.2026)
               "liq_balance": liq_bal, "liq_regel": liq_regel, "liq_level_nq": liq_level, "demo": demo,
               "liq_quelle": liq_quelle if liq_level is not None else None,
               "konto_balance": _wd_num((acc or {}).get("tv_balance")), "konto_balance_at": (acc or {}).get("tv_balance_at")})
@@ -12168,6 +12202,8 @@ def admin_wd_plaene():
                             return jsonify({"error": fehler[1], "plan_id": pid}), fehler[0]
                         if blown:
                             upd["blown"] = True
+                        if daten.get("pl_quelle") == "hand":
+                            upd["pl_quelle"] = "hand"   # Hand-Betrag im Erledigt-Popup (08.10.2026, Fall ea91e359: −600 ohne Herkunft)
                         if uid is None:
                             # Welle 2: was den Plan braucht — Good-Day-Konto, Konten der ID, Hedge-Login
                             if plan.get("master_account_id"):
@@ -15591,7 +15627,8 @@ def hypo_bilanz_zeile(p, acc, firmen, lauf_satz, kw_heute, disp):
     fin = base.get("final") if isinstance(base.get("final"), dict) else {}
     pl = _wd_num(p.get("master_pl"))
     if pl is None:
-        pl = lt_pl_balance(p.get("route"), tv, fin)
+        sp = lt_balance_sprung(p.get("route"), tv, fin)   # Balance-Sprung (08.10.2026): Tages-P&L statt Balance-Differenz
+        pl = sp["tages"] if sp else lt_pl_balance(p.get("route"), tv, fin)
     if pl is None:
         return None
     typ = p.get("konto_typ") or acc.get("account_type") or ""
@@ -19891,6 +19928,13 @@ def ap_kette_abhaken(jetzt=None):
                    float(k.get("tagesziel") or AP_KETTE_STANDARD["tagesziel_usd"])) + 1500
         unten = -(float(k.get("verlust_grenze") or (AP_KETTE_DD_STANDARD + AP_KETTE_STANDARD["blow_puffer_usd"])) + 1500)
         vg = float(k.get("verlust_grenze") or 4700)          # eigener P&L von Trade 2 reicht bis SL2 = Verlustgrenze + E1 bzw. TP2
+        _kb = p.get("mt5_baseline") or {}
+        _sp = lt_balance_sprung(p.get("route"), _kb.get("tv") or {}, _kb.get("final") or {})
+        if _sp:
+            # Balance-Sprung (08.10.2026): Balance-Differenz mehr als 100 $ UNTER dem Tages-P&L (Auszahlung o. Ä.) → nicht automatisch abhaken
+            _ap_kette_grund(p, f"Balance-Sprung: Balance {_sp['balance']:+,.0f} $ · Tages-P&L {_sp['tages']:+,.0f} $ · Differenz "
+                            f"{_sp['differenz']:+,.0f} $ (Auszahlung?) — von Hand abhaken".replace(",", "."))
+            continue
         if not (unten <= e_tag <= oben) or not (unten - vg <= mpl <= oben + vg):
             _ap_kette_grund(p, f"Ergebnis unplausibel ({mpl:+,.0f} $, Tag {e_tag:+,.0f} $, Balance-Basis prüfen) — von Hand abhaken"
                             .replace(",", "."))

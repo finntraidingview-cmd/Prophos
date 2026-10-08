@@ -164,7 +164,11 @@ def main():
             "mt5_baseline": {"kette": {"nr": 2, "vor": "r-x", "verlust_grenze": 4700, "tagesziel": 4500, "balance_start_tag": 150000},
                              "tv": {"balance_start": 152650}, "final": {"balance_end": 145480, "quelle": "puls", "plattform": "tsx"}}},
            dict(t1, id="r-relativ", route="tsv2", status="review", updated_at="x",
-                mt5_baseline=dict(t1["mt5_baseline"], final={"quelle": "puls", "plattform": "tsx", "balance_end": 2000}))]
+                mt5_baseline=dict(t1["mt5_baseline"], final={"quelle": "puls", "plattform": "tsx", "balance_end": 2000})),
+           # Balance-Sprung (08.10.2026): Balance −2.500, RP&L des Tages ab dem Klick nur −500 (z. B. Auszahlung dazwischen)
+           dict(t1, id="r-sprung", route="tsv2", status="review", updated_at="z",
+                mt5_baseline=dict(t1["mt5_baseline"], tv={"balance_start": 150000, "today_pnl_start": 0, "datum_start": "2026-10-09"},
+                                  final={"quelle": "puls", "plattform": "tsx", "balance_end": 147500, "today_pnl": -500, "datum": "2026-10-09"}))]
     upds, gruende_ab = [], []
     a["_ap_kette_grund"] = lambda t_, g: gruende_ab.append((t_["id"], g))
     a["sb_select"] = lambda t, prm: [dict(x) for x in rev] if prm.get("status") == "eq.review" else []
@@ -184,6 +188,8 @@ def main():
     check("eq.r-warte" not in [f["id"] for f, _u in upds], "ohne genaue Puls-Lesung bleibt der Trade in Überprüfen")
     check("eq.r-relativ" not in [f["id"] for f, _u in upds] and any(i == "r-relativ" and "unplausibel" in g for i, g in gruende_ab),
           "Start absolut 150.000, Ende relativ 2.000 → nicht abgehakt, Grund „unplausibel — von Hand abhaken“ (Prüfer Slave 2)")
+    check("eq.r-sprung" not in [f["id"] for f, _u in upds] and any(i == "r-sprung" and "Balance-Sprung" in g and "Differenz -2.000" in g for i, g in gruende_ab),
+          f"Balance −2.500 · Tages-P&L −500 → nicht abgehakt, Grund „Balance-Sprung … (Auszahlung?)“ ({[g for i, g in gruende_ab if i == 'r-sprung']})")
 
     # ── 4 Trade 1 nur bis 11:00 dt im Planer ──────────────────────────────────────────────────────────────────────────────
     Z = {"fenster": [["00:00", "14:30", 50], ["14:30", "16:30", 50]], "start_bis": "16:30"}
