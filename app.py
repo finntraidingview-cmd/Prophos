@@ -18555,6 +18555,101 @@ def ap_start_hand_pruefen(plan_id, neu_min, plaene, starts, id_fest, jetzt_min, 
     return g, None
 
 
+AP_NACHHOL_VORLAUF_MIN = (2.0, 4.0)   # verpasster Start: frühestens jetzt + 2–4 min (Zufall), dann die erste regelkonforme Minute
+
+
+def ap_nachhol_minute(p, plaene, starts, id_fest, jetzt_min, zeiten=None, laufzeit_min=None, laufend=None, rnd=None):
+    """REIN RECHNEND (08.10.2026, Master: Mikes PC offline — „kommt der PC wieder, sollen seine verpassten Pläne automatisch sauber neu
+    eingeplant werden, mit allen Regeln: Firmen-Abstand, Gegenhedge, Klumpen — nicht still verfallen und nicht alle auf einmal starten").
+    Bisher setzte sfNeuEinplanen jeden verpassten Plan auf jetzt + 2–6 min Zufall — kam ein Tab nach Stunden wieder, starteten alle
+    verpassten Pläne binnen Minuten, ohne jede Regel. Jetzt: ab jetzt + AP_NACHHOL_VORLAUF_MIN (Zufall) die erste Minute, die
+    (1) ap_start_hand_pruefen besteht (Richtungsschutz ID × Firma, Firmen-Abstand zu anderen IDs), (2) den Abstand je ID hält —
+    gleiche Firma AP_ABSTAND_ID_FIRMA_MIN, andere Firma AP_ABSTAND_ID_MIN (zeiten überschreibt) — zu kommenden Plänen und heutigen
+    Starts derselben ID (verpasste Pläne mit Start in der Vergangenheit zählen nicht, sie holt ihr eigener Lauf nach), (3) keinen
+    Gegenhedge über IDs bildet (_ap_gegen_firma), (4) vor start_bis liegt. p = Zeile aus _ap_stand_plaene {plan_id, user_id, firma,
+    richtung}; plaene = _ap_stand_plaene, starts = stand.starts_heute, laufend = [{user_id, firma, richtung, start}].
+    → (minute ab 00:00 dt, None) | (None, Klartext)."""
+    zeiten = zeiten or {}
+    rnd = rnd or random
+    u, f, r, pid = str(p["user_id"]), p.get("firma"), p.get("richtung"), str(p.get("plan_id"))
+    gap_i = float(zeiten.get("abstand_id_gesamt_min") or AP_ABSTAND_ID_MIN)
+    gap_f = float(zeiten.get("abstand_id_firma_min") or AP_ABSTAND_ID_FIRMA_MIN)
+    bis, jm = float(ap_start_bis(zeiten)), float(jetzt_min)
+    kommend = [x for x in plaene or () if str(x.get("plan_id")) != pid and x.get("start_min") is not None and float(x["start_min"]) >= jm]
+    eigen = [(float(x["start_min"]), x.get("firma")) for x in kommend if str(x.get("user_id")) == u]
+    eigen += [(float(x["start"]), x.get("firma")) for x in starts or () if str(x.get("user_id")) == u and x.get("start") is not None]
+    gegen_pl = [(float(x["start_min"]), x.get("richtung"), str(x.get("user_id")), x.get("firma")) for x in kommend]
+    gegen_pl += [(float(x["start"]), x.get("richtung"), str(x.get("user_id")), x.get("firma")) for x in starts or () if x.get("start") is not None]
+    m = jm + AP_NACHHOL_VORLAUF_MIN[0] + rnd.random() * (AP_NACHHOL_VORLAUF_MIN[1] - AP_NACHHOL_VORLAUF_MIN[0])
+    letzter = None
+    for _ in range(4000):
+        if m >= bis:
+            return None, f"kein regelkonformer Start mehr bis {_ap_hhmm_txt(bis)} dt" + (f" ({letzter})" if letzter else "")
+        g, vors = ap_start_hand_pruefen(p, m, plaene, starts, id_fest, jm, laufzeit_min, zeiten.get("abstand_firma_min"))
+        if g:
+            if vors is None:
+                return None, g
+            letzter, m = g, (float(vors) if float(vors) > m else int(m) + 1.0) + rnd.random()   # nächste freie Minute + Streuung (Jitter-Regel)
+            continue
+        sperre = [s + (gap_f if fm == f else gap_i) for s, fm in eigen if abs(s - m) < (gap_f if fm == f else gap_i)]
+        if sperre:
+            letzter, m = "Abstand je ID", max(sperre) + rnd.random()
+            continue
+        if _ap_gegen_firma(m, u, f, r, gegen_pl, laufend, jm, laufzeit_min):
+            letzter, m = "Gegenhedge über IDs", int(m) + 1.0 + rnd.random()
+            continue
+        return round(m, 2), None
+    return None, "kein regelkonformer Start gefunden"
+
+
+def _ap_nachholen(pid, alle, uid, jetzt=None):
+    """aktion „nachholen" (08.10.2026): verpassten Plan regelkonform neu einplanen (ap_nachhol_minute) — der PC-Tab der ID ruft das aus
+    sfTick, wenn er nach einem Ausfall wieder läuft. Admin alle Pläne, sonst nur eigene (Gate wie werte). Nur solange nichts gesendet ist
+    (Guard planned, started_at/orbit_gesendet_at leer); Claim zurück, Bestätigung bleibt; start_fehler → status „neu" (Anzeige im Planer).
+    → {ok, start, start_dubai} | 409 {ok:false, msg, tagesende}."""
+    rows = sb_select("trade_plans", {"select": "id,user_id,status,start_um,started_at,orbit_gesendet_at,master_firm,richtung,mt5_baseline",
+                                     "id": f"eq.{pid}"})
+    plan = rows[0] if rows else None
+    if not plan:
+        return jsonify({"ok": False, "msg": "Plan nicht gefunden"}), 404
+    if not alle and str(plan.get("user_id")) != str(uid):
+        return jsonify({"ok": False, "msg": "nur eigene Pläne"}), 403
+    if plan.get("status") != "planned" or plan.get("started_at") or plan.get("orbit_gesendet_at"):
+        return jsonify({"ok": False, "msg": "Plan ist nicht mehr geplant oder schon gesendet — nichts geändert"}), 409
+    jetzt = jetzt or datetime.now(timezone.utc)
+    reg = (sb_select("auto_plan_regeln", {"select": "*", "id": "eq.1"}) or [None])[0]
+    if not reg:
+        return jsonify({"ok": False, "msg": "auto_plan_regeln fehlt"}), 503
+    stand = _ap_stand_laden(reg, jetzt)
+    plaene_tag = _ap_stand_plaene(stand)
+    ziel = next((x for x in plaene_tag if str(x.get("plan_id")) == pid), None) or {
+        "plan_id": pid, "user_id": str(plan.get("user_id")), "richtung": plan.get("richtung"),
+        "firma": ap_firma_key(stand.get("firmen") or [], plan.get("master_firm"))}
+    laufend = [{"user_id": z["user_id"], "firma": z.get("firma_key"), "richtung": z.get("richtung"), "start": None} for z in stand["offen"]]
+    m, fehler = ap_nachhol_minute(ziel, plaene_tag, stand["starts_heute"], stand["id_fest"], stand["jetzt_min"], stand.get("zeiten"),
+                                  (stand.get("param") or {}).get("laufzeit_min"), laufend)
+    if m is None:
+        return jsonify({"ok": False, "msg": fehler, "tagesende": True}), 409
+    neu = stand["mitternacht"] + timedelta(minutes=m)
+    rows = sb_update("trade_plans", {"id": f"eq.{pid}", "status": "eq.planned", "started_at": "is.null", "orbit_gesendet_at": "is.null"},
+                     {"start_um": neu.astimezone(timezone.utc).isoformat(), "start_um_gestartet_at": None})
+    if not rows:
+        return jsonify({"ok": False, "msg": "Plan ist nicht mehr geplant oder schon gesendet — nichts geändert"}), 409
+    dubai = neu.astimezone(_ap_tz(AP_7T_TZ)).strftime("%H:%M")
+    alt = ((plan.get("mt5_baseline") or {}).get("start_fehler") or {}) if isinstance(plan.get("mt5_baseline"), dict) else {}
+    flag = dict(alt if isinstance(alt, dict) else {}, status="neu", behoben=f"nachgeholt um {dubai} (Dubai) — Regeln geprüft",
+                neu_at=jetzt.isoformat(), neu_start=neu.astimezone(timezone.utc).isoformat(), hand=False,
+                versuche=int((alt or {}).get("versuche") or 0) + 1)
+    try:
+        r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/rpc/mt5_baseline_patch", headers=_sb_headers(), timeout=(5, 15),
+                        json={"p_plan": str(pid), "p_patch": {"start_fehler": flag}, "p_status": "planned"})
+        _sb_pruefen(r)
+    except Exception as e:
+        print(f"[auto-plan] ⚠️ nachholen Flag {pid}: {type(e).__name__}: {e}", flush=True)
+    print(f"[auto-plan] nachholen {pid[:8]} → {dubai} Dubai durch {'Admin' if alle else 'ID ' + str(uid)[:8]}", flush=True)
+    return jsonify({"ok": True, "start": neu.astimezone(timezone.utc).isoformat(), "start_dubai": dubai})
+
+
 def ap_werte_pruefen(plan, body, jetzt=None, start=None):
     """REIN RECHNEND (testbar): TP/SL/Größe eines geplanten Trades von Hand (Finn 08.10.2026, Mini-Popup; Vertrag Master/Slave 5).
     plan = trade_plans-Zeile {status, start_um_gestartet_at, started_at, orbit_gesendet_at, route, master_symbol(_root), master_tp,
@@ -18680,7 +18775,7 @@ def admin_auto_plan_eingriff():
     if request.method == "OPTIONS":
         return "", 200
     body = request.get_json(silent=True) or {}
-    if str(body.get("aktion") or "").strip() == "werte":
+    if str(body.get("aktion") or "").strip() in ("werte", "nachholen"):   # nachholen (08.10.2026): verpasste Pläne, gleiches Gate
         # eigenes Gate: auch IDs außerhalb des Auto-Planers dürfen ihre eigenen geplanten Trades ändern
         _mail, err = _admin_auth()
         admin = err is None
@@ -18702,6 +18797,8 @@ def admin_auto_plan_eingriff():
                     alle = ap_eingriff_sicht(False, uid, False, admin_zugang_nur_eigene(str(uid)), AP_SICHT_ADMIN) is None
                 except Exception:
                     alle = False
+            if str(body.get("aktion") or "").strip() == "nachholen":
+                return _ap_nachholen(pid, alle, uid)
             return _ap_werte_setzen(pid, body, alle, uid)
         except Exception as e:
             return jsonify({"ok": False, "msg": f"{type(e).__name__}: {e}"}), 502

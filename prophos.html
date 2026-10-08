@@ -41253,7 +41253,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1292'
+  const OS_TAB_BUILD = '2026-09-22.1293'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -45262,6 +45262,27 @@
    * → 'neu' | 'tagesende' | false */
   async function sfNeuEinplanen(plan, grund, hand){
     const f = sfFlag(plan) || {}
+    // NACHHOLEN MIT REGELN (08.10.2026, Master: Mikes PC offline — „kommt der PC wieder, sollen seine verpassten Pläne automatisch sauber
+    // neu eingeplant werden … nicht still verfallen und nicht alle auf einmal starten"): von selbst (sfTick) nicht mehr jetzt + 2–6 min
+    // Zufall, sondern das Backend sucht die erste Minute ab jetzt + 2–4 min mit Richtungsschutz, Firmen-Abstand, Abstand je ID
+    // (Firma 60 / gesamt 20 min) und ohne Gegenhedge über IDs (POST /plan {aktion:'nachholen'}, app.py ap_nachhol_minute). sfTick ruft
+    // die Pläne nacheinander auf — jeder sieht die neue Zeit des vorigen. Alter Backend-Stand (Aktion unbekannt) oder offline: wie bisher.
+    if(!hand){
+      try{
+        const d = await apdApi('POST', '/plan', { plan_id: plan.id, aktion: 'nachholen' })
+        const { data } = await supabase.from('trade_plans').select('*').eq('id', plan.id).maybeSingle()
+        const neu = data ? rkPlanErsetzen(data) : null
+        if(typeof atToast === 'function') atToast(`↻ „${plan.masterName || 'Plan'}" nachgeholt — Start ${d.start_dubai || (neu ? tpStartUmText(neu.startUm) : '?')} (Dubai), Regeln geprüft${grund ? ' (' + grund + ')' : ''}.`, 'start')
+        try{ renderTradePlans() }catch(_){}
+        return 'neu'
+      }catch(e){
+        const st = e && e.status
+        if(st === 409 && e.daten && e.daten.tagesende) return 'tagesende'
+        if(st === 409 || st >= 500){ console.warn('[start-fehler] nachholen', (e && e.message) || e); return false }   // sfTick versucht es in 60 s wieder
+        // 400/403/404/405 = alter Backend-Stand kennt „nachholen" nicht (dort Admin-Gate 403), ohne Status = offline → wie bisher
+        console.warn('[start-fehler] nachholen nicht verfügbar — wie bisher', (e && e.message) || e)
+      }
+    }
     const neuMs = Date.now() + (hand ? 60000 : (2 + Math.random() * 4) * 60000)
     if(!hand && apPrHm(new Date(neuMs).toISOString()) >= sfTagesEnde()) return 'tagesende'
     const q = supabase.from('trade_plans').update({ start_um: new Date(neuMs).toISOString(), start_um_gestartet_at: null })
@@ -45532,7 +45553,8 @@
         const t = `„${plan.masterName || '—'}" NICHT gestartet — Startzeit ${tpStartUmText(plan.startUm)} um ${Math.round(verspaetet / 60000)} min verpasst (Start-Fenster ${Math.round(fenster / 60000)} min). Plan bleibt Geplant, von Hand starten.`
         if(typeof atToast === 'function') atToast('⏰ ' + t, 'end')
         try{ if(typeof pushAnsHandy === 'function') pushAnsHandy('Startzeit verpasst', t, 'https://prophos.pages.dev/prophos#trades', 'startum-' + String(plan.id).slice(0, 8)) }catch(_){}
-        if(rkGilt(plan)) await sfMelden(plan, { schritt: 'zu_spaet', msg: `Startzeit um ${Math.round(verspaetet / 60000)} min verpasst — der Prophos-Tab am PC lief nicht` })   // START-FEHLER (07.10.2026): sfTick plant neu ein
+        // auch Topstep V2 (08.10.2026): sonst verfiel ein verpasster tsv2-Plan still — sfTick holt ihn mit Regeln nach (nachholen)
+        if(rkGilt(plan) || (plan.route === 'tsv2' && !tpIstWdPlan(plan) && (plan.richtung === 'buy' || plan.richtung === 'sell'))) await sfMelden(plan, { schritt: 'zu_spaet', msg: `Startzeit um ${Math.round(verspaetet / 60000)} min verpasst — der Prophos-Tab am PC lief nicht` })   // START-FEHLER (07.10.2026): sfTick plant neu ein
         return
       }
       // Pünktlich statt Zufall (23.09.2026 04:1x, Finn: „wenn ich den Trade auf 4:30 plane, soll er auch um 4:30 starten, wenn gerade
