@@ -14269,6 +14269,22 @@ def _puls_chrome_sicher(trail, warten_s=15.0, sichtbar=False, url=AUGEN_TV_URL):
     v = _cdp_http("/json/version")
     if v:
         return True
+    # KEIN DOPPELSTART (09.10.2026, Muster WinError 10053, Spur 08.10. 17:35 Dubai auf einem Orbit-PC): der Neustart hatte das Puls-Chrome
+    # gestartet, 2 s später fand der 2. Versuch Port 9333 noch stumm (frische TradingView-Seite, BELOW_NORMAL) und startete ein ZWEITES
+    # chrome.exe auf dasselbe Profil — Chrome reicht das an den laufenden Browser weiter (neues Fenster), die Verbindung zum Tab riss ab.
+    # Läuft schon ein Browser mit dem Puls-Profil, nur auf den Port warten; nie ein zweiter Start.
+    laeuft = _puls_chrome_prozesse()
+    if laeuft:
+        trail.append(f"Puls-Chrome läuft schon ({len(laeuft)} Prozess(e) mit dem Puls-Profil), Port {PULS_CDP_PORT} antwortet noch "
+                     "nicht — warten statt zweitem Start")
+        ende = time.time() + warten_s
+        while time.time() < ende:
+            _warte(0.8, 0.4)
+            if _cdp_http("/json/version"):
+                return True
+        trail.append(f"Puls-Chrome läuft, antwortet aber nicht auf Port {PULS_CDP_PORT} — kein zweiter Start (Fenster des Puls-Chrome "
+                     "von Hand schließen, dann startet Puls es neu)")
+        return False
     exe = _chrome_pfad(_puls_cfg_datei().get("tv_browser_path") or "")
     if not exe:
         trail.append("Puls-Chrome: chrome.exe nicht gefunden")
@@ -22655,6 +22671,38 @@ def _puls_mit_neustart(weg, erster, zweiter, lesung, url, neustart=None, jetzt=N
         diagnose(spur=list(spur), schritt="chrome_neustart")
         ausgeben(roh2 or roh1)
         return r2
+    # ABRISS IM 2. VERSUCH (09.10.2026, Muster „cdp: Puls-Chrome/CDP: ConnectionAbortedError [WinError 10053]", 08.10. 17:26 + 17:35 Dubai
+    # auf zwei PCs): beide Male riss die Verbindung erst im 2. Versuch nach dem harten Neustart — beim Verbinden mit Tradovate auf der
+    # frisch geladenen TradingView-Seite, das Puls-Chrome lief weiter; der Rückfall „neu anhängen" (5ece7a5) galt nur für den 1. Versuch.
+    # Jetzt: war der 2. Versuch ebenfalls nur ein Abriss VOR dem Klick (cdp_abriss_erkannt: nichts gesendet), einmal neu anhängen und
+    # GENAU EIN weiterer Versuch in der Rest-Frist — kein zweiter Chrome-Neustart, nach dem Klick nie.
+    if neustart_sanft is not None and cdp_abriss_erkannt(r2):
+        frist3 = budget - (jetzt() - t0)
+        spur.append(f"2. Versuch: Abriss der CDP-Verbindung vor dem Klick — {str(r2.get('msg') or '')[:100]}")
+        weiter = False
+        if frist3 >= PULS_NEUSTART_MIN_REST_S.get(weg, 0.0):
+            try:
+                weiter = bool(neustart_sanft(spur))
+            except Exception as e_:
+                spur.append(f"neu anhängen fehlgeschlagen ({type(e_).__name__})")
+        else:
+            spur.append(f"kein 3. Versuch: zu wenig Zeit ({frist3:.0f} s übrig)")
+        if weiter:
+            frist3 = budget - (jetzt() - t0)
+            spur.append(f"3. Versuch ja, weil der 2. nur an einem Abriss scheiterte (nichts gesendet) — Frist {frist3:.0f} s")
+            info["dritter_versuch"] = True
+            roh3, r3 = zweiter(frist3)
+            if isinstance(r3, dict) and r3:
+                r3["trail"] = " > ".join(spur) + " || 2. Versuch: " + str(r2.get("trail") or "") + " || 3. Versuch: " + str(r3.get("trail") or "")
+                r3["chrome_neustart"] = info
+                ausgeben(r3)
+                spur.append(f"3. Versuch: {'ok' if r3.get('ok') else 'code ' + str(r3.get('code') or '-')} — {str(r3.get('msg') or '')[:120]}")
+                diagnose(spur=list(spur), schritt="chrome_neustart")
+                return r3
+            spur.append("3. Versuch ohne lesbare Antwort")           # wie beim 2. Versuch: Rohausgabe weiter, nie still „nichts gesendet"
+            diagnose(spur=list(spur), schritt="chrome_neustart")
+            ausgeben(roh3 or roh2)
+            return r3
     r2["trail"] = " > ".join(spur) + " || 2. Versuch: " + str(r2.get("trail") or "")
     r2["chrome_neustart"] = info
     ausgeben(r2)

@@ -293,6 +293,75 @@ def main():
     a4.lesung_res = {"ok": False, "msg": "x"}
     a4.lauf()
     check(a4.sanfte == 0 and len(a4.zweite) == 0, "Abriss NACH dem Klick → kein sanfter Weg, kein zweiter Versuch (UNKLAR bleibt)")
+
+    # ── Abriss im 2. Versuch (09.10.2026, 08.10. 17:26/17:35 Dubai): einmal neu anhängen, genau EIN 3. Versuch, nie nach dem Klick ────
+    class Folge(Sanft):
+        """zweiter() liefert der Reihe nach die Antworten aus folge (2., 3., … Versuch)."""
+        def __init__(self, r1, folge, sanft_folge=None, **k):
+            super().__init__(r1, folge[0], **k)
+            self.folge, self.sanft_folge = list(folge), list(sanft_folge or [])
+
+        def zweiter(self, frist):
+            self.zweite.append(frist)
+            r = self.folge.pop(0) if self.folge else None
+            return (json.dumps(r, ensure_ascii=False), dict(r)) if r else ("", {})
+
+        def sanft(self, spur):
+            self.sanfte += 1
+            spur.append("Attrappe: neu anhängen")
+            return self.sanft_folge.pop(0) if self.sanft_folge else self.sanft_ok
+    abr = erg(code="cdp_fehler", schritt="cdp", msg=m10053)
+    gut = erg(ok=True, gesendet=True, bestaetigt=True)
+    # 1. Versuch mit hartem Neustart (seit effd767 löst ein Konto-Fehler keinen Chrome-Neustart mehr aus — hier eine CDP-Zeitüberschreitung)
+    erst_hart = erg(code="cdp_fehler", schritt="cdp", msg="Puls-Chrome/CDP: TimeoutError: timed out — nichts gesendet.")
+    f1 = Folge(erst_hart, [abr, gut], verstrichen=30.0)
+    r = f1.lauf()
+    check(f1.neustarts == 1 and f1.sanfte == 1 and len(f1.zweite) == 2 and r.get("ok") and r.get("chrome_neustart", {}).get("dritter_versuch") is True
+          and "3. Versuch ja" in r.get("trail", "") and len(f1.ausgaben) == 1,
+          "08.10.-Fall: Fehler vor dem Klick → harter Neustart → Abriss im 2. Versuch → neu angehängt → 3. Versuch ok, genau eine Ausgabe")
+    f2 = Folge(abr, [abr, gut], verstrichen=30.0)
+    r = f2.lauf()
+    check(f2.neustarts == 0 and f2.sanfte == 2 and len(f2.zweite) == 2 and r.get("ok"), "Abriss im 1. und 2. Versuch → zweimal neu angehängt, kein Chrome-Neustart")
+    f3 = Folge(abr, [abr, abr, gut], verstrichen=30.0)
+    r = f3.lauf()
+    check(len(f3.zweite) == 2 and not r.get("ok") and r.get("code") == "cdp_fehler" and len(f3.ausgaben) == 1,
+          "nie mehr als 3 Versuche: Abriss auch im 3. → Fehler-Ausgang, kein 4.")
+    f4 = Folge(erst_hart, [abr, gut], sanft_folge=[False], verstrichen=30.0)
+    r = f4.lauf()
+    check(len(f4.zweite) == 1 and r.get("code") == "cdp_fehler" and f4.neustarts == 1, "Abriss im 2. Versuch, Chrome/Tab weg → kein 3. Versuch, kein 2. Neustart")
+    f5 = Folge(erst_hart, [erg(code="unklar", schritt="unklar", msg=m10053, gesendet=True, retry_ok=False), gut],
+               verstrichen=30.0)
+    r = f5.lauf()
+    check(len(f5.zweite) == 1 and f5.sanfte == 0 and r.get("code") == "unklar", "Abriss NACH dem Klick im 2. Versuch → kein 3. Versuch (UNKLAR bleibt)")
+    f6 = Folge(erst_hart, [abr, gut], verstrichen=ob.PULS_NEUSTART_BUDGET_S.get("tvv2", 0.0) - 1.0)
+    r = f6.lauf()
+    check(len(f6.zweite) <= 1, "zu wenig Rest-Frist → kein 3. Versuch")
+    f7 = Folge(erst_hart, [abr, None], verstrichen=30.0)
+    r = f7.lauf()
+    check(len(f7.zweite) == 2 and r == {} and f7.ausgaben and "nichts gesendet" in str(f7.ausgaben[-1]),
+          "3. Versuch ohne lesbare Antwort → Rohausgabe weiter wie beim 2. Versuch")
+
+    # ── _puls_chrome_sicher: kein zweiter Start, wenn ein Browser mit dem Puls-Profil schon läuft (09.10.2026) ──────────────────────
+    alt = {n: getattr(ob, n) for n in ("_cdp_http", "_puls_chrome_prozesse", "_chrome_pfad", "_warte", "_puls_cfg_datei")}
+    try:
+        gestartet = []
+        antworten = [None, None, {"Browser": "x"}]
+        ob._cdp_http = lambda pfad, methode="GET", timeout=2.0: antworten.pop(0) if antworten else {"Browser": "x"}
+        ob._puls_chrome_prozesse = lambda: [4711]
+        ob._chrome_pfad = lambda p: gestartet.append(p) or None
+        ob._warte = lambda a, b=0: None
+        ob._puls_cfg_datei = lambda: {}
+        sp = []
+        check(ob._puls_chrome_sicher(sp) is True and gestartet == [] and any("warten statt zweitem Start" in x for x in sp),
+              "_puls_chrome_sicher: Prozess mit Puls-Profil läuft, Port noch stumm → warten, KEIN zweiter Start")
+        ob._puls_chrome_prozesse = lambda: []
+        antworten[:] = [None]
+        sp = []
+        ob._puls_chrome_sicher(sp)
+        check(gestartet != [], "_puls_chrome_sicher: kein Prozess → Start wie bisher (chrome.exe gesucht)")
+    finally:
+        for n, f in alt.items():
+            setattr(ob, n, f)
     print("\nALLES OK" if OK else "\nFEHLER")
     return 0 if OK else 1
 
