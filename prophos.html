@@ -1950,20 +1950,10 @@
   /* Hypo-P&L: Liste je Trade unter dem Chart */
   :is(#tpl-view,#adm-pane-planer) .tpl-hl{margin-top:8px;border-top:1px solid var(--border-soft)}
   :is(#tpl-view,#adm-pane-planer) .tpl-hl-k{padding:7px 4px 3px;font-size:10.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--sub-2)} :is(#tpl-view,#adm-pane-planer) .tpl-hl-k b{color:var(--sub)}
-  /* P&L hypothetisch — Balkenliste (08.10.2026): Mitte = 0, grün rechts, rot links, ID-Farbe am Punkt; Zahlentabelle (.tpl-hz) bleibt für „Beendet" */
-  :is(#tpl-view,#adm-pane-planer) .tpl-hb{display:grid;grid-template-columns:minmax(150px,1.2fr) minmax(120px,2fr) 96px;gap:4px 12px;align-items:center;padding:7px 4px;border-top:1px solid var(--border-soft);font-size:13px;cursor:pointer}
-  :is(#tpl-view,#adm-pane-planer) .tpl-hb:hover{background:var(--surface-tint)}
-  :is(#tpl-view,#adm-pane-planer) .tpl-hb .w{display:flex;align-items:center;gap:7px;min-width:0} :is(#tpl-view,#adm-pane-planer) .tpl-hb .w i{width:9px;height:9px;border-radius:50%;flex:none;background:var(--c,var(--sub-2))}
-  :is(#tpl-view,#adm-pane-planer) .tpl-hb .w span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink)}
-  :is(#tpl-view,#adm-pane-planer) .tpl-hb .bar{position:relative;height:12px;border-radius:999px;background:var(--surface-tint);overflow:hidden}
-  :is(#tpl-view,#adm-pane-planer) .tpl-hb .bar .null{position:absolute;left:50%;top:0;bottom:0;width:1.5px;background:var(--ink);opacity:.45}
-  :is(#tpl-view,#adm-pane-planer) .tpl-hb .bar .fill{position:absolute;top:0;bottom:0;border-radius:999px;min-width:2px}
-  :is(#tpl-view,#adm-pane-planer) .tpl-hb .bar .fill.plus{background:color-mix(in srgb,var(--c,var(--good)) 70%,var(--good))} :is(#tpl-view,#adm-pane-planer) .tpl-hb .bar .fill.minus{background:color-mix(in srgb,var(--c,var(--danger)) 55%,var(--danger))}
-  :is(#tpl-view,#adm-pane-planer) .tpl-hb .h{text-align:right;font-weight:700;font-size:14px;white-space:nowrap}
-  :is(#tpl-view,#adm-pane-planer) .tpl-hb.ohne{opacity:.6;cursor:default} :is(#tpl-view,#adm-pane-planer) .tpl-hb.ohne .h{font-weight:500;color:var(--sub-2);font-size:13px}
-  :is(#tpl-view,#adm-pane-planer) .tpl-hb.summe{cursor:default;border-top:2px solid var(--border);font-weight:600} :is(#tpl-view,#adm-pane-planer) .tpl-hb.summe .bar{background:none}
-  :is(#tpl-view,#adm-pane-planer) .tpl-hb-ohne{display:block;width:100%;text-align:left;border:0;border-top:1px solid var(--border-soft);background:none;padding:8px 4px;font:inherit;font-size:13px;color:var(--sub-2);cursor:pointer}
-  :is(#tpl-view,#adm-pane-planer) .tpl-hb-ohne:hover{color:var(--sub)}
+  /* Läuft-Liste unter „P&L hypothetisch heute“ = Radar-Zeilen (laufZeilenHtml, 08.10.2026) — ersetzt .tpl-hb; nur Abstand + Summenzeile */
+  #dashboard-view .tpl-lz{margin-top:12px} #dashboard-view .lz-tab .wdl-z.lz-summe{border-top:2px solid var(--border);cursor:default} #dashboard-view .lz-tab .wdl-z.lz-summe:hover{background:none}
+  #dashboard-view .lz-tab .wdl-z-lauf[data-tpl-t],#dashboard-view .lz-tab .wdl-z-lauf[data-idd-plan]{cursor:pointer}
+  #dashboard-view .lz-tab .wdl-z-lauf .wdl-z-wer small{display:block;margin:2px 0 0 17px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}   /* Konto als 2. Zeile — die Namensspalte ist im Planer schmaler als im Radar */
   :is(#tpl-view,#adm-pane-planer) .tpl-hz{display:grid;grid-template-columns:minmax(150px,1.4fr) 120px 90px 80px 100px minmax(110px,1fr);gap:4px 10px;align-items:center;padding:5px 4px;border-top:1px solid var(--border-soft);font-size:12.5px;font-variant-numeric:tabular-nums;cursor:pointer}
   :is(#tpl-view,#adm-pane-planer) .tpl-hz:hover{background:var(--surface-tint)} :is(#tpl-view,#adm-pane-planer) .tpl-hz.summe{cursor:default;font-weight:600;background:none;border-top:2px solid var(--border)}
   :is(#tpl-view,#adm-pane-planer) .kpis.tpl-bk{margin:6px 0 8px} :is(#tpl-view,#adm-pane-planer) .tpl-bk .kpi-value{font-size:17px}
@@ -2943,25 +2933,10 @@
   .ap-idd-tage .ob,.ap-idd-tage .ub{width:24px;height:32px;display:flex;justify-content:center} .ap-idd-tage .ob{align-items:flex-end;border-bottom:1.5px solid var(--border)} .ap-idd-tage .ub{align-items:flex-start}   /* gleiche Höhe = gleiche Skala für Gewinn und Verlust */
   .ap-idd-tage i{display:block;width:100%;border-radius:3px} .ap-idd-tage .ub i{background:var(--danger)}
   .ap-idd-tage small{font-size:10.5px;color:var(--sub);margin-top:3px} .ap-idd-tage b{font-size:11.5px;font-weight:600;white-space:nowrap}
-  .ap-idd-lk,.ap-idd-lt{display:grid;grid-template-columns:minmax(130px,1.3fr) 76px 52px 80px minmax(100px,2fr) 96px;gap:4px 12px;align-items:center}
-  .ap-idd-lk{font-size:11px;color:var(--sub-2);text-transform:uppercase;letter-spacing:.04em;padding:0 4px 4px}
-  .ap-idd-lt{width:100%;background:none;border:0;border-top:1px solid var(--border-soft,var(--border));padding:7px 4px;font:inherit;font-size:13px;color:var(--ink);text-align:left;cursor:pointer}
-  .ap-idd-lt:hover{background:var(--surface-tint)}
-  .ap-idd-lt .k{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600} .ap-idd-lt .k em{font-style:normal;font-weight:400;color:var(--sub)}
-  .ap-idd-lt .r{font-weight:600;white-space:nowrap} .ap-idd-lt .z,.ap-idd-lt .w{color:var(--sub);white-space:nowrap;font-variant-numeric:tabular-nums}
-  .ap-idd-pl{position:relative;height:12px;border-radius:999px;background:var(--surface-tint);overflow:hidden}
-  .ap-idd-pl .null{position:absolute;left:50%;top:0;bottom:0;width:1.5px;background:var(--ink);opacity:.45}
-  .ap-idd-pl .fill{position:absolute;top:0;bottom:0;border-radius:999px;min-width:2px} .ap-idd-pl .fill.plus{background:color-mix(in srgb,var(--id,var(--good)) 60%,var(--good))} .ap-idd-pl .fill.minus{background:color-mix(in srgb,var(--id,var(--danger)) 45%,var(--danger))}
-  .ap-idd-lt>b{text-align:right;font-weight:700;white-space:nowrap;font-variant-numeric:tabular-nums} .ap-idd-lt>b small{display:block;font-size:11px;font-weight:500;color:var(--sub)}
-  .ap-idd-lt .ohne{font-weight:500;font-size:12px;color:var(--sub-2)}
   .ap-idd-leer{font-size:12.5px;color:var(--sub);padding:2px 0 4px}
   @media (max-width:760px){
     .ap-idd{padding:12px 12px 10px}
     .ap-idd-zwei{grid-template-columns:minmax(0,1fr)}
-    .ap-idd-lk{display:none}
-    .ap-idd-lt{grid-template-columns:minmax(0,1fr) auto;gap:3px 10px}
-    .ap-idd-lt .z,.ap-idd-lt .w{display:none} .ap-idd-lt .ap-idd-pl{grid-column:1 / -1;grid-row:3} .ap-idd-lt>b{grid-column:2;grid-row:1}
-    .ap-idd-lt .r{grid-column:1;grid-row:2;font-size:12px}
     .ap-idd-tage{gap:2px} .ap-idd-tage b{font-size:9.5px;letter-spacing:-.02em} .ap-idd-tage small{font-size:9.5px}
   }
   #tpl-view .wd-tab .is-verpasst{display:block;font-size:10.5px;color:var(--danger)}
@@ -27809,6 +27784,48 @@
       + (pE != null ? `<i class="wdl-sp-ein" style="left:${pE.toFixed(2)}%"></i>` : '')
       + `<b class="wdl-sp-punkt" style="left:${(pK != null ? pK : 0).toFixed(2)}%;background:${farbe || 'var(--sub)'}${pK == null ? ';display:none' : ''}"></b></span><small class="wdl-sp-r"><i>TP</i>${betrag(sp.plRechts)}</small></span>`
   }
+  /* LÄUFT-ZEILEN WIE IM RADAR — gemeinsamer Helfer (08.10.2026, Finn zur Liste unter „P&L hypothetisch heute": „nimm grob die Ansicht, wie es
+   * unter Radar bei den laufenden Trades aussieht, weil es voll hässlich ist … so eine Multi-Row-Gruppe wie unter Radar, für jeden Account so
+   * eine Zeile"). Derselbe Aufbau wie die Läuft-Gruppe in wdlRender (wdl-tab/wdl-z, gleiche Spalten, gleiche Spanne über wdlSpanne/
+   * wdlSpanneHtml, gleiche Laufzeit wdlDauer), aber ohne Radar-Knöpfe (Ansehen, Chart-Linien) — die Verdrahtung macht der Aufrufer über o.attr.
+   * liste = [{ t, pl, eur, key }]: t = Zeile aus /admin/live-trades (oder ein Ersatz mit person/user_id/konto{firma,name,kontonr_ende}/richtung/
+   * kt/symbol_root/route/plattform), pl = Live-P&L $, eur = € (hypothetisch) — gerechnet wird beim Aufrufer, hier nur gezeichnet.
+   * o = { titel, kurs, summe: { usd, eur } | null, attr: e => 'data-…' }. Volle Kontonummer nur im Tooltip. */
+  function laufZeilenHtml(liste, o = {}){
+    if(!liste || !liste.length) return ''
+    const num = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
+    const f2 = v => Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    const usd = v => num(v) == null ? '–' : `${v < 0 ? '−' : '+'}${f2(Math.abs(v))} $`
+    const eur = v => num(v) == null ? '' : `${v < 0 ? '−' : '+'}${Math.round(Math.abs(v)).toLocaleString('de-DE')} €`
+    const col = v => num(v) == null ? 'var(--sub)' : v >= 0 ? '#15803d' : '#b91c1c'
+    const heute = new Date().toDateString(), kp = num(o.kurs)
+    const zeit = s => { const d = new Date(s || ''); if(isNaN(d)) return ''; return d.toDateString() === heute ? d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) }
+    const zeile = e => {
+      const t = e.t || {}, k = t.konto || {}, buy = t.richtung === 'buy', sell = t.richtung === 'sell', echo = wdlIstEcho(t)
+      const grK = (typeof kontoGroesseAnzeige === 'function') ? kontoGroesseAnzeige(k.name, num(k.groesse), t.balance_start) : 0
+      const grTxt = grK > 0 ? ' ' + (grK % 1000 === 0 ? grK / 1000 : (grK / 1000).toLocaleString('de-DE', { maximumFractionDigits: 1 })) + 'k' : ''
+      const konto = `${(typeof tplFirmaKurz === 'function' ? tplFirmaKurz(k.firma) : k.firma) || '?'}${grTxt}${k.kontonr_ende ? ' …' + k.kontonr_ende : ''}`
+      const lots = v => num(v) == null ? '?' : Number(v).toLocaleString('de-DE', { maximumFractionDigits: 2 })
+      const em = `<em${buy ? ' class="is-buy"' : sell ? ' class="is-sell"' : ''}>${buy ? 'BUY' : sell ? 'SELL' : '?'}</em>`
+      const ri = echo ? `<span class="wdl-z-ri">${em}${lots(t.lots ?? t.kt)} Lot${t.symbol ? `<span class="wdl-z-sym"> ${escapeHtml(t.symbol)}</span>` : ''}</span>`
+        : `<span class="wdl-z-ri">${em}${t.kt != null ? lots(t.kt) : '?'} × ${escapeHtml(t.symbol_root || 'NQ')}</span>`
+      const farbe = col(e.pl), sp = wdlSpanne(t)
+      let mi = '<span class="wdl-z-mi" title="kein TP oder keine Liquidation/SL gespeichert">–</span>'
+      if(sp && echo){ const pkt = wdlEchoPunkt(t, sp); mi = wdlSpanneHtml(sp, pkt ? pkt.v : null, farbe, wdlEchoSpTip(t, sp, pkt)) }
+      else if(sp){ const lg = v => v != null ? ' · ' + wdlSpBetrag(v, true) : ''
+        mi = wdlSpanneHtml(sp, kp, farbe, `${sp.art === 'SL' ? 'SL' : sp.art === 'Tag' ? 'Tageslimit' : 'Liquidation'} ${f2(sp.links)}${lg(sp.plLinks)}${sp.ein != null ? ' · Einstieg ' + f2(sp.ein) : ''} · TP ${f2(sp.rechts)}${lg(sp.plRechts)}${kp != null ? ' · Kurs ' + f2(kp) : ''}`) }
+      const pl = `<span class="wdl-z-pl"><span style="color:${farbe}">${usd(e.pl)}</span>${num(e.eur) != null ? `<small class="wdl-z-slave" style="color:${col(e.eur)}" title="hypothetisch: Kontowert-Satz × Live-P&amp;L">${eur(e.eur)}</small>` : ''}</span>`
+      const ab = zeit(t.started_at || t.start_um)
+      const z = `<span class="wdl-z-zeit" title="${escapeHtml(ab ? 'läuft seit ' + ab : 'Startzeit unbekannt')}">${ab ? `<span class="wdl-z-ab">${ab} · </span>` : ''}<span class="wdl-z-dauer">${t.started_at ? wdlDauer(t.started_at) : '–'}</span></span>`
+      const tip = [t.person, k.name || konto, k.kontonr || '', echo ? 'Echo (MT5)' : ''].filter(Boolean).join(' · ')
+      return `<div class="wdl-z wdl-z-lauf${echo ? ' wdl-z-echo' : ''}" style="--wdl-id:${idFarbe(String(t.user_id || ''))}" ${o.attr ? o.attr(e) : ''} title="${escapeHtml(tip)}">`
+        + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><i class="wdl-pf">${escapeHtml(wdlWeg(t))}</i><small>${escapeHtml(konto)}</small></span>${ri}${mi}${pl}${z}</div>`
+    }
+    const s = o.summe, summe = s ? `<div class="wdl-z wdl-z-lauf lz-summe"><span class="wdl-z-wer"><b>Summe</b></span><span class="wdl-z-ri"></span><span class="wdl-z-mi"></span>`
+      + `<span class="wdl-z-pl"><span style="color:${col(s.usd)}">${usd(s.usd)}</span>${num(s.eur) != null ? `<small class="wdl-z-slave" style="color:${col(s.eur)}">${eur(s.eur)}</small>` : ''}</span><span class="wdl-z-zeit"></span></div>` : ''
+    return `<div class="wdl-tab wdl-tab-lauf lz-tab"><div class="wdl-z wdl-z-kopf"><span class="wdl-z-wer">${escapeHtml(o.titel || 'Läuft')} · ${liste.length}</span><span class="wdl-z-ri"></span>`
+      + `<span class="wdl-z-mi">Spanne</span><span class="wdl-z-pl">P&amp;L</span><span class="wdl-z-zeit">Seit</span></div>${liste.map(zeile).join('')}${summe}</div>`
+  }
   /* WARTET (30.09.2026, Finn: „wenn noch nachgelesen wird, soll der Trade erst warten und dann zu Beendet gehen, bis das gemacht ist"):
    * zu, aber die Balance-Nachlesung steht noch aus. Dieselben Zweige wie tvV2EndlesungGrund / planWartetAufPuls (Reiter „Warte auf
    * Puls"), hier aus den Feldern von /admin/live-trades (endlesung = Auszug aus mt5_baseline.final): nur „Überprüfen" (erledigt =
@@ -40992,7 +41009,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1259'
+  const OS_TAB_BUILD = '2026-09-22.1260'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -47166,6 +47183,17 @@
    * Kopf „P&L hypothetisch heute · jetzt ±€". Zeitachse = die des Zeitstrahls (_tpl.achse).
    * 08.10.2026 im Stil des Netto-Charts (Finn: „ein bisschen ein Upgrade"): runde €-Skala mit Gitter, Jetzt-Linie + Punkt mit Wert,
    * clipPath-IDs je Wurzel (pre) — Planer-Seite und Admin-Reiter stehen gleichzeitig im DOM, gleiche IDs griffen sonst ins verdeckte SVG. */
+  /* tplHypo-Zeilen → Einträge für laufZeilenHtml (Radar-Zeile): t = die ganze /admin/live-trades-Zeile (_tpl.lt, wie im Radar: Konto, Spanne,
+   * started_at), sonst ein Ersatz aus der Hypo-Zeile; pl/eur aus tplHypo (08.10.2026). Auch fürs ID-Detail (apIdDetailRender). */
+  function tplLaufEintraege(zeilen, D){
+    return (zeilen || []).map(z => {
+      const r = _tpl.lt.get(String(z.plan_id)) || null, tr = ((D && D.trades) || []).find(x => String(x.plan_id) === String(z.plan_id)) || {}
+      const t = r ? Object.assign({}, r, { person: r.person || z.user, user_id: r.user_id || z.user_id, kt: r.kt ?? z.kt, symbol_root: r.symbol_root || z.wurzel })
+        : { person: z.user, user_id: z.user_id, konto: { firma: z.firma, name: z.konto, kontonr_ende: z.ende4 }, richtung: z.richtung, kt: z.kt, lots: z.kt,
+            symbol_root: z.wurzel, plattform: z.echo ? 'echo' : '', route: tr.route || null, status: 'open' }
+      return { t, pl: z.pl != null && isFinite(z.pl) ? z.pl : null, eur: z.hypo, key: String(z.key || z.plan_id), z }
+    })
+  }
   function tplHypoHtml(D, pre){
     const a = _tpl.achse || {}; if(a.VON == null) return ''
     const h = tplHypo(D), hv = h.verlauf
@@ -47190,27 +47218,13 @@
         ${jX != null ? `<line x1="${jX.toFixed(1)}" y1="0" x2="${jX.toFixed(1)}" y2="${H}" stroke="var(--ink)" stroke-opacity=".45" stroke-width="1.25" stroke-dasharray="3 3" vector-effect="non-scaling-stroke"/>` : ''}${tip}</svg>`
       marke = tplJetztHtml(XS(l.min) / W * 100, Y(l.eur) / H * 100, l.eur, vz)
     }
-    // LISTE JE TRADE — BALKEN STATT ZAHLENTABELLE (Finn-Statistik-Design; QA S3 08.10.2026: 18 Zeilen „0,42 €/$ · ohne Wert · seit HH:MM" waren
-    // eine reine Zahlentabelle). Je laufendem Trade mit Live-Wert: ID-Punkt + Konto „100k FundingPips …9722" · horizontaler P&L-Balken in
-    // ID-Farbe (Mitte = 0, rechts grün Gewinn, links rot Verlust, Skala über alle Trades gemeinsam wie der Finanzen-Überblick) · €-Wert fett;
-    // Kontowert-Satz, P&L $, Richtung/Menge und „seit" nur im Tooltip. Zeilen ohne Live-Wert in EINER grauen Sammelzeile „n Trades ohne
-    // Live-Wert ▸" (aufklappbar, _tpl.hbOhneAuf). Summenzeile nur mit Wert. Rechnung (tplHypo) unverändert.
-    const f2 = x => Number(x).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    const usd = x => x == null ? '—' : (x < 0 ? '−' : '+') + Math.abs(Math.round(x)).toLocaleString('de-DE') + ' $'
-    const mitWert = h.zeilen.filter(z => z.hypo != null), ohneWert = h.zeilen.filter(z => z.hypo == null)
-    const hmax = Math.max(1, ...mitWert.map(z => Math.abs(z.hypo)))
-    const kontoTxt = z => `${escapeHtml(z.konto || z.firma || '?')}${z.ende4 ? ' …' + escapeHtml(z.ende4) : ''}`
-    const tipp = z => `${z.user || '?'} · ${z.firma || '?'}${z.konto ? ' · ' + z.konto : ''}${z.ende4 ? ' …' + z.ende4 : ''} · ${z.richtung === 'buy' ? 'BUY' : 'SELL'} ${z.kt != null ? Number(z.kt).toLocaleString('de-DE', { maximumFractionDigits: 2 }) : '?'} ${z.echo ? 'Lot' : '× ' + (z.wurzel || 'NQ')}`
-      + ` · P&L ${usd(z.pl)} · Satz ${z.satz != null ? f2(z.satz) + ' €/$' : '—'} · ${z.lauf ? 'seit ' + tplUhr(z.start, v) : tplUhr(z.start, v) + ' – ' + tplUhr(z.ende, v)}${z.einQ ? ' · Einstieg aus ' + z.einQ : ''}${z.plQ ? ' · P&L ' + z.plQ : ''}`
-    const hb = z => { const w = Math.min(50, Math.abs(z.hypo) / hmax * 50), plus = z.hypo >= 0
-      return `<div class="tpl-hb${z.lauf ? '' : ' zu'}" style="--c:${idFarbe(z.user_id)}" ${/^[0-9a-f-]{36}$/i.test(z.key) ? `data-tpl-t="${escapeHtml(z.key)}"` : ''} title="${escapeHtml(tipp(z))}">
-        <span class="w"><i></i><span>${kontoTxt(z)}</span></span>
-        <span class="bar"><i class="null"></i><i class="fill ${plus ? 'plus' : 'minus'}" style="${plus ? 'left:50%' : 'right:50%'};width:${w.toFixed(1)}%"></i></span>
-        <b class="h ${z.hypo > 0 ? 'tpl-gut' : z.hypo < 0 ? 'tpl-rot' : ''}">${vz(z.hypo)}</b></div>` }
-    const ohneZ = z => `<div class="tpl-hb ohne" ${/^[0-9a-f-]{36}$/i.test(z.key) ? `data-tpl-t="${escapeHtml(z.key)}"` : ''} title="${escapeHtml(tipp(z))}"><span class="w"><i style="background:${idFarbe(z.user_id)}"></i><span>${kontoTxt(z)}</span></span><span class="bar"></span><b class="h">ohne Wert</b></div>`
-    const ohneHtml = ohneWert.length ? `<button type="button" class="tpl-hb-ohne" data-tpl-hbohne title="${escapeHtml(ohneWert.map(z => `${z.user || '?'} · ${z.konto || z.firma || '?'}`).join('\n'))}">${ohneWert.length} Trade${ohneWert.length === 1 ? '' : 's'} ohne Live-Wert ${_tpl.hbOhneAuf ? '▾' : '▸'}</button>${_tpl.hbOhneAuf ? ohneWert.map(ohneZ).join('') : ''}` : ''
-    const liste = h.zeilen.length ? `<div class="tpl-hl"><div class="tpl-hl-k">Läuft <b>${h.zeilen.length}</b></div>${mitWert.map(hb).join('')}${ohneHtml}
-        ${mitWert.length ? `<div class="tpl-hb summe"><span class="w"><b>Summe</b></span><span class="bar"></span><b class="h ${h.jetzt > 0 ? 'tpl-gut' : h.jetzt < 0 ? 'tpl-rot' : ''}">${vz(h.jetzt)}</b></div>` : ''}</div>` : ''
+    // LISTE „LÄUFT" WIE IM RADAR (08.10.2026, Finn-Screenshot .1247: „150k Apex APEX6780960000005 …0005", langer rötlicher Balken, „−1 €" —
+    // „voll hässlich … so eine Multi-Row-Gruppe wie unter Radar, für jeden Account so eine Zeile"): gemeinsamer Helfer laufZeilenHtml (Radar-
+    // Abschnitt) — je Konto Person · Weg · Konto kurz · Richtung × Menge · Spanne Liq/SL → TP mit Kurs · P&L $ + € · seit/Dauer, Summe unten.
+    // Ersetzt die Balkenzeilen (.tpl-hb, QA S3) und die Sammelzeile „ohne Live-Wert". Rechnung (tplHypo) unverändert, Klick wie bisher (data-tpl-t).
+    const plSumme = h.zeilen.reduce((a, z) => a + (z.pl != null && isFinite(z.pl) ? z.pl : 0), 0), mitWert = h.zeilen.some(z => z.hypo != null)
+    const liste = h.zeilen.length && typeof laufZeilenHtml === 'function' ? `<div class="tpl-lz">${laufZeilenHtml(tplLaufEintraege(h.zeilen, D), { titel: 'Läuft', kurs: tplKursJetzt(),
+        summe: mitWert ? { usd: plSumme, eur: h.jetzt } : null, attr: e => /^[0-9a-f-]{36}$/i.test(e.key) ? `data-tpl-t="${escapeHtml(e.key)}"` : '' })}</div>` : ''
     return `<div class="tpl-karte tpl-nk tpl-hk"><div class="tpl-h">P&amp;L hypothetisch heute <b class="${h.jetzt > 0 ? 'tpl-gut' : h.jetzt < 0 ? 'tpl-rot' : ''}">jetzt ${vz(h.jetzt)}</b>
         <span class="leg"><span>${h.n} Trade${h.n === 1 ? '' : 's'}${h.ohne ? ` · ${h.ohne} ohne Wert` : ''}</span><span>Kontowert-Satz × Live-P&amp;L${h.cfd ? ' · CFD ≈ NQ' : ''}</span><span>0 = Einstand</span></span></div>
         ${hv.length ? `<div class="tpl-nk-chart">${svg}${tplSkalaHtml(sk, Y, H)}${marke}</div>${tplAchseHtml(VON, BIS, v)}` : '<div class="tpl-leer klein">Verlauf kommt mit der ersten Kerze des Tages</div>'}${liste}</div>`   // QA 08.10.2026 Punkt 9
@@ -47818,7 +47832,6 @@
     if(m){ _tpl.wahl = _tpl.wahl === m.dataset.tplT ? null : m.dataset.tplT; _tpl.edit = null; _tpl.meldung = ''; tplZeichnen()
       if(_tpl.wahl && (m.classList.contains('tpl-chip') || m.closest('.tpl-bd'))) tplRoot.querySelector('.tpl-detail')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
       return }
-    const oh = e.target.closest('[data-tpl-hbohne]'); if(oh){ _tpl.hbOhneAuf = !_tpl.hbOhneAuf; tplZeichnen(); return }   // „n Trades ohne Live-Wert" auf/zu (08.10.2026)
     const b = e.target.closest('[data-tpl-akt]'); if(!b || b.disabled) return
     const a = b.dataset.tplAkt
     if(a === 'zu'){ _tpl.wahl = null; _tpl.edit = null; _tpl.meldung = ''; tplZeichnen(); return }
@@ -60812,7 +60825,6 @@
    * geladen hat: tplDaten (Delta/Lauf/eigene Pläne, Tag heute), tplHypo (Live-P&L $ × Kontowert-Satz aus /admin/live-trades + Kerzen),
    * _tpl.bilanz (/admin/hypo-bilanz, beendete Auto-Trades 30 Tage), _ap.letzter (Lauf: Konten mit Typ + Ausgelassen-Grund). Keine neue
    * Abfrage, nur Anzeige und Zählung — keine Bewertung. Nur Challenge/Phase 1/Phase 2 wie die ganze Planer-Sicht (WD/Funded raus). ══ */
-  const AP_IDD_WEG = { mt5v2: 'Echo V2', tvv2: 'Orbit V2', tsv2: 'Topstep V2', mt5: 'Echo', tvplus: 'Orbit', dup: 'Duplikum' }
   function apIdDetailRender(uid, el){
     if(!el) return
     uid = String(uid || '')
@@ -60890,21 +60902,11 @@
         ${bgb}<div class="ap-idd-tage">${jeTag.map(x => `<div class="tg" title="${escapeHtml(`${tagTxt(x.t)} · ${n(x.n, 'Trade')} · ${vzE(x.plus + x.minus)} hypothetisch`)}">
           <div class="ob"><i style="height:${(x.plus / tmax * 100).toFixed(0)}%;background:${farbe}"></i></div><div class="ub"><i style="height:${(-x.minus / tmax * 100).toFixed(0)}%"></i></div>
           <small>${tagTxt(x.t)}</small><b class="${kl(x.plus + x.minus)}">${x.n ? vzE(x.plus + x.minus) : '·'}</b></div>`).join('')}</div></div>`
-    // ── LAUFENDE TRADES JETZT: Konto · Richtung · Start · Weg · Live-P&L (Balken, Mitte = 0) · $ + € — Klick öffnet das Konto-Popup
-    const hmax = Math.max(1, ...h.zeilen.map(z => Math.abs(z.pl || 0)))
-    const lt = h.zeilen.map(z => {
-      const t = T.find(x => String(x.plan_id) === String(z.plan_id)) || {}
-      const gk = tplGroesseKurz(t), weg = AP_IDD_WEG[String(t.route || '')] || (z.echo ? 'Echo' : t.route ? String(t.route) : '–')
-      const pl = z.pl != null && isFinite(z.pl) ? z.pl : null, w = pl == null ? 0 : Math.min(50, Math.abs(pl) / hmax * 50)
-      const menge = z.kt != null ? `${Number(z.kt).toLocaleString('de-DE', { maximumFractionDigits: 2 })} ${z.echo ? 'Lot' : z.wurzel || 'NQ'}` : ''
-      return `<button type="button" class="ap-idd-lt" data-idd-plan="${escapeHtml(String(z.plan_id))}" title="${escapeHtml(`${z.firma || ''} · ${z.konto || ''}${z.ende4 ? ' …' + z.ende4 : ''} · ${menge}${z.satz != null ? ' · Satz ' + Number(z.satz).toLocaleString('de-DE', { maximumFractionDigits: 3 }) + ' €/$' : ''}${t.startUnklar ? ' · Startzeit unbekannt' : ''}`)}">
-          <span class="k">${gk ? gk + ' ' : ''}${escapeHtml(tplFirmaKurz(z.firma))}${z.ende4 ? ` <em>…${escapeHtml(z.ende4)}</em>` : ''}</span>
-          <span class="r ${z.richtung === 'buy' ? 'tpl-gut' : 'tpl-rot'}">${z.richtung === 'buy' ? '▲ Long' : '▼ Short'}</span>
-          <span class="z">${t.startUnklar ? '–' : tplUhr(z.start, v)}</span><span class="w">${escapeHtml(weg)}</span>
-          <span class="ap-idd-pl"><i class="null"></i>${pl == null ? '' : `<i class="fill ${pl >= 0 ? 'plus' : 'minus'}" style="${pl >= 0 ? 'left:50%' : 'right:50%'};width:${w.toFixed(1)}%"></i>`}</span>
-          <b class="${kl(pl)}">${pl == null ? '<span class="ohne">kein Live-Wert</span>' : vzU(pl)}${z.hypo != null ? `<small>${vzE(z.hypo)}</small>` : ''}</b></button>` }).join('')
-    const ltKarte = `<div class="ap-idd-karte"><div class="ap-idd-h">Läuft jetzt <b>${h.zeilen.length}</b>${h.zeilen.length ? `<span>Live ${vzU(usdLauf)} · hypothetisch ${vzE(h.jetzt)}</span>` : ''}</div>
-        ${lt ? `<div class="ap-idd-lk"><span>Konto</span><span>Richtung</span><span>Start</span><span>Weg</span><span>Live-P&amp;L</span><span></span></div>${lt}` : '<div class="ap-idd-leer">Nichts läuft.</div>'}</div>`
+    // ── LAUFENDE TRADES JETZT: Radar-Zeilen über den gemeinsamen Helfer laufZeilenHtml (wie die Läuft-Liste unter dem Hypo-Chart, 08.10.2026) —
+    // Person · Weg · Konto kurz · Richtung × Menge · Spanne Liq/SL → TP · P&L $ + € · seit/Dauer; Klick öffnet das Konto-Popup
+    const lt = h.zeilen.length && typeof laufZeilenHtml === 'function' ? laufZeilenHtml(tplLaufEintraege(h.zeilen, D), { titel: 'Läuft jetzt', kurs: tplKursJetzt(),
+      summe: h.zeilen.some(z => z.hypo != null) ? { usd: usdLauf, eur: h.jetzt } : null, attr: e => `data-idd-plan="${escapeHtml(String(e.z.plan_id))}"` }) : ''
+    const ltKarte = lt ? `<div class="tpl-lz">${lt}</div>` : `<div class="ap-idd-karte"><div class="ap-idd-h">Läuft jetzt <b>0</b></div><div class="ap-idd-leer">Nichts läuft.</div></div>`
     el.innerHTML = `<div class="ap-idd" style="--id:${farbe}"><div class="ap-idd-kopf"><span class="ap-adm-id"><i style="background:${farbe}"></i>${escapeHtml(name)}</span>
         <span>heute · Dubai${_apd.d && _apd.d.um ? ' · Stand ' + tplUhrIso(_apd.d.um) : ''}</span></div>
       ${kacheln}<div class="ap-idd-zwei">${kontenKarte}${tageKarte}</div>${ltKarte}</div>`
