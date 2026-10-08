@@ -41322,7 +41322,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1305'
+  const OS_TAB_BUILD = '2026-09-22.1306'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -61798,6 +61798,18 @@
   // Box „Braucht dich" im Admin-Reiter (tplSpaeter/tplNachLesung, 08.10.2026): die Planer-Seite erreicht diese Funktionen sonst nicht
   window._apIdsRender = () => { if(!_apIds.laeuft) apIdsRender() }; window._apIdsLaden = () => apIdsLaden()
   window._apIdsTabOeffnen = () => { apIdsLaden(); if(typeof window.pcStandLaden === 'function') Promise.resolve(window.pcStandLaden()).then(() => { if(!_apIds.laeuft) apIdsRender() }).catch(() => {}) }   // PC-Punkt (höchstens alle 60 s) nachziehen
+  /* BOT-SCHALTER IM ADMIN-REITER (Master 08.10.2026, gefunden beim Bau von .1305): die Schalter Bot / Auto-Start (apdBotSchalterHtml — in der
+   * Bot-Kachel bzw. seit .1305 klein unter der Kachel „Heute") kommen über tplKachelnHtml auch hierher, verdrahtet waren sie aber nur auf der
+   * Planer-Seite (tplRoot change) — im Admin-Reiter bewirkte ein Klick nichts. Eigener change-Listener an #ap-ids-root (statisches Markup,
+   * apIdsRender ersetzt nur den Inhalt → einmal gebunden reicht), dieselbe Funktion apdEinstellung wie dort: POST /admin/auto-plan/ausgleich-
+   * einstellung { aktiv | auto_start }, danach Delta neu (sicht=admin) und neu zeichnen. Rechte bleiben im Backend (nur ADMIN_EMAILS): ein 403
+   * „Nur für Admins" steht wie auf der Planer-Seite als ⚠ in der Bot-Zeile, das Neuzeichnen aus _apd.d.bot setzt den Schalter auf den alten Stand. */
+  document.getElementById('ap-ids-root')?.addEventListener('change', async e => {
+    const s = e.target.closest('[data-apd-schalter]'); if(!s) return
+    if(!apdAdmin()){ s.checked = !s.checked; return }
+    await apdEinstellung(s.dataset.apdSchalter, s.checked)
+    if(!_apIds.laeuft && document.getElementById('ap-ids-root')?.offsetParent) apIdsRender()   // Kachel sofort neu — auch wenn apdLaden wegen eines laufenden Abrufs nicht selbst zeichnet
+  })
   /* LIVE-P&L IM ADMIN-REITER (Finn 08.10.2026, Screenshot Admin → Trade-Planer „Läuft · 8": „Der PNL hier wird nicht immer aktualisiert. Wenn ich
    * einmal die Seite neu lade, aktualisiert der PNL, sonst bleibt es immer stehen"). Ursache: der Reiter lud nur beim Öffnen (apIdsLaden), nur die
    * Planer-Seite hat einen Takt (_tpl.timer, 60 s). Jetzt alle 20 s, nur bei sichtbarem Reiter und Tab: Live-Trades (P&L $, /admin/live-trades) +
