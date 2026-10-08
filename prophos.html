@@ -40978,7 +40978,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1254'
+  const OS_TAB_BUILD = '2026-09-22.1255'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -41881,12 +41881,20 @@
    * Takt wartet auf das Ende (await). Plan + Order werden erst beim Drankommen frisch gelesen. Hänger-Schutz: nach 4 min gibt die Kette
    * frei (der Check selbst wartet höchstens ~90 s aufs Terminal). */
   let _pfV2Kette = Promise.resolve()
+  // LAUFENDER ECHO-V2-CHECK (08.10.2026, Befund Slave-Terminal 4, Freigabe Finn im Master-Chat: „Terminal wurde hochgefahren, aber Echo
+  // hat nichts gemacht"): The5%ers 04:05/04:24 und FundingPips 04:16 Dubai endeten mit „Popup geschlossen — nichts platziert". Ursache:
+  // war das Terminal beim ersten master-order noch nicht bereit, wartet tpPreflightMt5V2 6 s mit sichtbarem pf-final („Puls arbeitet…");
+  // orderSignalTick (alle 5 s) hielt das für ein FERTIGES Popup und rief _pfClose(). Solange hier ein Check läuft, lässt orderSignalTick
+  // das Popup jetzt in Ruhe und claimt nichts (wie bei jedem laufenden Check). Claim, Start und Guard bleiben unverändert.
+  let _pfV2Laeuft = null
   function tpV2Nacheinander(planId, order){
     const lauf = _pfV2Kette.then(async () => {
       const plan = tradePlans.find(x => String(x.id) === String(planId))
       if(!plan || plan.status !== 'planned') return
       _tpPendingOrder = order || _tpOrderAusPlan(plan).order || null   // Remote-Signal: Werte des Absenders gewinnen
-      await tpPreflightMt5V2(plan)
+      _pfV2Laeuft = String(plan.id)
+      try{ await tpPreflightMt5V2(plan) }
+      finally{ if(_pfV2Laeuft === String(plan.id)) _pfV2Laeuft = null }
     }).catch(e => console.warn('[echo-v2] Check', (e && e.message) || e))
     _pfV2Kette = Promise.race([lauf, new Promise(r => setTimeout(r, 4 * 60000))])
     return lauf
@@ -43111,7 +43119,8 @@
       const fin = document.getElementById('pf-final')
       const sichtbar = el => !!el && el.style.display !== 'none' && el.style.display !== ''
       const entscheidung = sichtbar(document.getElementById('pf-force')) || sichtbar(document.getElementById('pf-retry'))
-      if(!sichtbar(fin) || entscheidung){ _osStand = 'popup-offen'; return }
+      // _pfV2Laeuft: Echo-V2-Check wartet gerade aufs Terminal (pf-final sichtbar, aber nicht fertig) — nicht schließen (08.10.2026)
+      if(!sichtbar(fin) || entscheidung || _pfV2Laeuft){ _osStand = 'popup-offen'; return }
       try{ _pfClose() }catch(_){}
     }
     if(document.getElementById('tpOrderModal')?.classList.contains('open')){ _osStand = 'popup-offen'; return }
