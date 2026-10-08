@@ -154,6 +154,29 @@ def main():
           and not sperre(200, "chris", "fundednext", "buy", [(235, "sell", "jacob", "fundednext")], [], 100, 60),
           "geplante Gegenrichtung einer anderen ID: ≤ 30 min gesperrt, 35 min frei")
 
+    # ── 2b' BAND-SCHRITT (Prüfer Slave 2 zu 3d43e4e): weder Drehen noch Verschieben neben eine Gegenrichtung einer anderen ID je Firma ──
+    Zb = {"fenster": [["00:00", "14:30", 50], ["14:30", "16:30", 50]], "start_bis": "16:30", "abstand_id_min": 3}
+    pb = [dict(plan("a_ap", "u-a", "apex", d(9, 0), "buy"), delta_abs=5.0, einsatz_abs=0.0, bestaetigt=False)]
+    frei_b = U(pb, 6.0, 6.0, d(8, 30), Zb, 15, random.Random(1))
+    dreh_frei = [x for x in frei_b["aenderungen"] if x["art"] == "richtung"]
+    lauf_b = [{"user_id": "u-b", "firma": "apex", "richtung": "buy", "start": None}]
+    mit_b = U(pb, 6.0, 6.0, d(8, 30), Zb, 15, random.Random(1), laufend=lauf_b)
+    dreh_mit = [x for x in mit_b["aenderungen"] if x["art"] == "richtung"]
+    check(dreh_frei and not dreh_mit,
+          f"Band-Schritt dreht A Apex buy → sell nur ohne laufenden Apex-Buy einer anderen ID ({len(dreh_frei)} → {len(dreh_mit)})")
+    verstoss_b = 0
+    plan_b = [dict(plan("a_ap", "u-a", "apex", d(10, 0), "buy"), delta_abs=5.0, einsatz_abs=0.0, bestaetigt=False),
+              dict(plan("b_ap", "u-b", "apex", d(9, 0), "sell"), delta_abs=1.0, einsatz_abs=0.0, aenderbar=False, fest_durch="Handplan")]
+    lauf_s = [{"user_id": "u-c", "firma": "apex", "richtung": "sell", "start": None}]
+    for seed in range(40):
+        eb = U(plan_b, 6.0, 6.0, d(8, 30), Zb, 15, random.Random(seed), laufend=lauf_s, id_fest={"u-a|apex": {"richtung": "buy"}})
+        for x in eb["aenderungen"]:
+            if x["art"] == "start" and x["plan_id"] == "a_ap":
+                t_ = x["nach_start_min"]
+                if a["_ap_gegen_firma"](t_, "u-a", "apex", "buy", [(d(9, 0), "sell", "u-b", "apex")], lauf_s, d(8, 30), None):
+                    verstoss_b += 1
+    check(verstoss_b == 0, f"Band-Schritt verschiebt (40 Seeds) nie neben laufende/≤ 30 min nahe Gegenrichtung einer anderen ID (Verstöße {verstoss_b})")
+
     # ── 2c ABSTAND JE ID ÜBER FIRMEN (Slave 4: Chris FundedNext 18:06 + Topstep 18:13 = 7 min) ───────────────────────────────────────
     pk = [plan("c_fn", "chris", "fundednext", d(18, 6), "buy"), plan("c_ts", "chris", "topstep", d(18, 13), "sell")]
     ek0 = {"basis": 0.0, "brutto": 0.0, "gross_ab": 100000.0, "laufzeit": 60}

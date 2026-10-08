@@ -17136,6 +17136,14 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
             if sz_an:
                 sz_vor = sz_lage(zustand)
 
+    def gegen_frei(z, ids):
+        # GEGENHEDGE ÜBER IDs auch im Band-Schritt (Prüfer Slave 2 zu 3d43e4e, 08.10.2026: Drehen und Verschieben einer Tranche prüften
+        # nur _ap_tranche_frei/Fenster, gebremst hat allein der 10-min-Malus über geplante Pläne): jeder Plan der Tranche im neuen Zustand
+        # z gegen Pläne ANDERER IDs (aus z) und laufende Trades derselben Firma in Gegenrichtung — sonst Kandidat verwerfen
+        andere = [(z[o]["start"], z[o]["richtung"], str(je[o]["user_id"]), je[o]["firma"]) for o in z if o not in ids]
+        return not any(_ap_gegen_firma(z[i]["start"], je[i]["user_id"], je[i]["firma"], z[i]["richtung"], andere, laufend, jetzt_min,
+                                       (einsatz or {}).get("laufzeit")) for i in ids)
+
     for _ in range(0 if vorgezogen else max(0, int(schritte))):
         if not offen_(aktuell):
             break
@@ -17163,7 +17171,8 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                 m_vor, m_nach = misch(zustand), misch(z)
                 if m_nach > m_vor:
                     continue
-                kandidaten.append((strafe(z) + (m_nach,), "richtung", t["firma"], ids, z))
+                if gegen_frei(z, ids):                   # gedreht nie gegen eine andere ID derselben Firma (laufend / ± 30 min)
+                    kandidaten.append((strafe(z) + (m_nach,), "richtung", t["firma"], ids, z))
             fen = ap_fenster_von(zeiten, t["start"])
             if not fen:
                 continue
@@ -17183,6 +17192,8 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                 z = {i: dict(v) for i, v in zustand.items()}
                 for i in ids:
                     z[i]["start"] += neu - t["start"]
+                if not gegen_frei(z, ids):
+                    continue                     # verschoben nie neben eine laufende / ≤ 30 min nahe Gegenrichtung einer anderen ID
                 kandidaten.append((strafe(z) + (misch(z),), "start", t["firma"], ids, z))
         if not kandidaten:
             break
