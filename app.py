@@ -12361,12 +12361,13 @@ def admin_handarbeit():
                                             **{"or": f"(ended_at.gte.{ab_b},and(ended_at.is.null,completed_at.gte.{ab_b}))"}))
         archiv = _ap_archiviert()
         lauf = None                                     # letzter echter Nachtlauf (5. Gruppe „Planer braucht dich")
-        for l in sb_select("auto_plan_lauf", {"select": "at,aus:ergebnis->ausgelassen,trocken:ergebnis->>trocken",
+        for l in sb_select("auto_plan_lauf", {"select": "tag,at,aus:ergebnis->ausgelassen,trocken:ergebnis->>trocken",
                                               "ergebnis->>quelle": "eq.nacht", "order": "at.desc", "limit": "3"}) or []:
             if str(l.get("trocken") or "").lower() != "true":
-                lauf = {"at": l.get("at"), "ausgelassen": [x for x in (l.get("aus") or []) if isinstance(x, dict)
-                                                            and admin_in_sicht(x.get("user_id"), sicht)
-                                                            and str(x.get("user_id") or "") not in std_aus]}
+                lauf = {"at": l.get("at"), "tag": l.get("tag"), "ausgelassen": [x for x in (l.get("aus") or []) if isinstance(x, dict)
+                                                                                 and admin_in_sicht(x.get("user_id"), sicht)
+                                                                                 and str(x.get("user_id") or "") not in std_aus]}
+                lauf = ap_aus_ohne_plan_laden(lauf)   # inzwischen geplant (z. B. Klein-Trade per Nachplanen) → kein Hand-Fall mehr (09.10.2026)
                 try:
                     lauf = ap_lauf_gelesen_markieren(lauf)   # seit dem Lauf gelesene „Balance fehlt"-Konten (09.10.2026)
                 except Exception as e:
@@ -17066,6 +17067,45 @@ def _ap_probelauf(tr_info, plan_roh, minuten, zinfo, richtung, zeiten, namen, st
                           "netto_delta": v["verlauf"][-1]["netto_delta"], "netto_max_abs": v["netto_max_abs"],
                           "band": {"pct": pct, "gehalten": v["gehalten"], "ueber": v["ueber"][:20]},
                           "hinweise": hinweise}}
+
+
+# Gründe, die den Plan des Kontos selbst beschreiben — die bleiben, auch wenn das Konto einen Plan hat (Frontend zeigt daraus „geplant/läuft")
+AP_AUS_PLAN_INFO = re.compile(r"geplanten/laufenden Plan|heute schon gehandelt|noch nicht erledigt")
+
+
+def ap_aus_ohne_plan(erg, plaene, tz):
+    """REIN RECHNEND (testbar): Lauf-Ergebnis ohne ausgelassen[]-Zeilen von Konten, die für den Tag des Laufs inzwischen einen Plan haben
+    (planned/open/review/completed am Tag, _ap_plan_am_tag). Anlass (Finn 09.10.2026, Screenshot „Braucht dich"): Chris/Moritz/Ina standen
+    nach dem Nachtlauf mit „nur noch 36/56/62 $ bis zum Ziel — von Hand prüfen" drin, obwohl das Nachplanen um 23:37 UTC ihre Klein-Trades
+    angelegt und Finn sie bestätigt hatte. Zeilen, die den Plan selbst beschreiben (AP_AUS_PLAN_INFO), bleiben. erg ohne tag → unverändert."""
+    if not isinstance(erg, dict) or not isinstance(erg.get("ausgelassen"), list) or not erg.get("tag"):
+        return erg
+    tag = str(erg.get("tag"))
+    belegt = {str(p.get("master_account_id")) for p in plaene or () if p.get("master_account_id") and _ap_plan_am_tag(p, tag, tz)}
+    if not belegt:
+        return erg
+    out = dict(erg)
+    out["ausgelassen"] = [x for x in erg["ausgelassen"] if not (isinstance(x, dict) and str(x.get("konto_id") or "") in belegt
+                                                               and not AP_AUS_PLAN_INFO.search(str(x.get("grund") or "")))]
+    return out
+
+
+def ap_aus_ohne_plan_laden(erg):
+    """ap_aus_ohne_plan mit den Plänen der ausgelassen-Konten aus der DB (eine Abfrage je 150 Konten). Fehler → Ergebnis unverändert + Log."""
+    try:
+        kids = sorted({str(x.get("konto_id")) for x in (erg or {}).get("ausgelassen") or [] if isinstance(x, dict) and x.get("konto_id")})
+        if not kids or not (erg or {}).get("tag"):
+            return erg
+        ab = (datetime.fromisoformat(str(erg["tag"])[:10]) - timedelta(days=3)).strftime("%Y-%m-%d")
+        plaene = []
+        for j in range(0, len(kids), 150):
+            plaene += _sb_all("trade_plans", {"select": "master_account_id,status,start_um,planned_for,started_at,ended_at,completed_at",
+                                              "master_account_id": "in.(" + ",".join(kids[j:j + 150]) + ")",
+                                              "status": "in.(planned,open,review,completed)", "created_at": f"gte.{ab}"})
+        return ap_aus_ohne_plan(erg, plaene, _ap_tz(AP_TZ_TAG))
+    except Exception as e:
+        print(f"[auto-plan] ⚠️ ausgelassen ohne Plan: {type(e).__name__}: {e}", flush=True)
+        return erg
 
 
 def ap_ohne_archiv(erg, archiv):
@@ -23132,6 +23172,9 @@ def admin_auto_plan():
             erg = ap_ohne_archiv(erg, _ap_archiviert())   # seit dem Lauf archiviert → nicht mehr in Braucht dich (08.10.2026)
         except Exception as e:
             print(f"[auto-plan] ⚠️ Archiv-Filter: {type(e).__name__}: {e}", flush=True)
+        if isinstance(erg, dict) and not erg.get("tag") and rows:
+            erg = dict(erg, tag=rows[0].get("tag"))
+        erg = ap_aus_ohne_plan_laden(erg)   # Konto hat inzwischen einen Plan für den Tag → nicht mehr in Braucht dich (09.10.2026)
         letzter = ap_sicht(erg, sicht) if sicht is not None else erg
         if not admin and _ap_gruppe_lesen(uid)[0]:
             letzter = ap_lauf_ohne_summen(letzter)   # Nachbesserung B (08.10.2026): Eingeschränkte bekommen keine HT-Summen
