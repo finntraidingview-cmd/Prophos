@@ -20358,12 +20358,42 @@ def zw_tick(force=False):
     _zw["erreicht"] = n
 
 
+# ANLAUFSPERRE (Slave 1, 08.10.2026, Railway-Logs): bei schnell aufeinanderfolgenden Pushes laufen kurz zwei Container — 05:12:18 und
+# 05:12:20 UTC „Starting Container", beide ließen den Ausgleichs-Bot 4 s nach dem Start laufen (05:12:22 und 05:12:23, je „Ausgleich
+# bot: …"), erst 05:12:24 kam SIGTERM. Zwei Bots im selben Takt können denselben Plan doppelt verschieben. Darum laufen alle
+# SCHREIBENDEN Planer-Takte in ap_loop (Nachtlauf, Nachplanen, Topstep-Kette, Ausgleichs-Bot) erst AP_ANLAUF_S nach dem
+# Prozessstart — ein überholter Container ist dann beendet (im Beleg nach < 10 s). 30 s statt 90 s (Slave-2-Prüfung): Pushes kamen
+# heute teils im Minutentakt, jede Sperre beginnt von vorn — mit 90 s wären die Takte in solchen Phasen fast durchgehend aus. Die
+# Ziel-Wache (zw_tick) läuft auch in der Sperre: sie ist eine Schutzfunktion (ziel_erreicht_at → kein Start) und idempotent
+# (Update nur bei ziel_erreicht_at is.null, Push nur vom Lauf, der die Zeile wirklich gesetzt hat). Lesen, Watcher und Routen
+# sind nicht betroffen; vorrat2 claimt seine Slots selbst (Unique-Index).
+AP_ANLAUF_S = 30
+
+
+def ap_anlauf_rest(start_ts, jetzt_ts, sperre=AP_ANLAUF_S):
+    """REIN RECHNEND: Sekunden, die die Anlaufsperre ab start_ts (Prozessstart, epoch) zu jetzt_ts noch dauert — 0 = frei."""
+    return max(0.0, float(start_ts) + float(sperre) - float(jetzt_ts))
+
+
 def ap_loop():
     """Nachtlauf nach zeiten.nachtlauf (Standard 01:00 Dubai, 07.10.2026; vorher 00:00 dt) mit Nachholen, nur wenn
     auto_plan_regeln.aktiv; Sa/So gibt es keinen Zieltag. Dazu jede Minute der Takt-Check des Ausgleichs-Bots
-    (_ap_bot_tick, nur wenn regeln.ausgleich.aktiv)."""
+    (_ap_bot_tick, nur wenn regeln.ausgleich.aktiv). Erst nach der Anlaufsperre (AP_ANLAUF_S, s. o.)."""
     print("[auto-plan] 🤖 Nachtlauf bereit (zeiten.nachtlauf, Standard 01:00 Asia/Dubai, mit Nachholen) · "
           "Ausgleichs-Bot nach regeln.ausgleich", flush=True)
+    start = time.time()
+    rest = ap_anlauf_rest(start, time.time())
+    _ap_info["anlauf_bis"] = datetime.fromtimestamp(start + AP_ANLAUF_S, timezone.utc).isoformat()
+    if rest > 0:
+        print(f"[auto-plan] ⏳ Anlaufsperre {rest:.0f} s — Nachtlauf, Nachplanen, Kette und Bot erst danach (ein überholter "
+              f"Container ist dann weg); die Ziel-Wache läuft schon", flush=True)
+        try:
+            zw_tick()                         # Schutzfunktion, idempotent — auch in der Sperre
+            _zw["fehler"] = ""
+        except Exception as e:
+            _zw["fehler"] = f"{type(e).__name__}: {e}"
+            print(f"[ziel-wache] ⚠️ {e}", flush=True)
+        _schleife_schlafen(rest)
     while True:
         try:
             ap_nacht_tick(datetime.now(timezone.utc), _ap_info)
