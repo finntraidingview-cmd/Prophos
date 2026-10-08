@@ -23093,8 +23093,11 @@
    * (liq_quelle 'konto_balance'); sonst kein Level beim Open, der Wächter rechnet nach, sobald tv.balance_start da ist ('balance_start').
    * master_sl bleibt null. */
   function hedgeIstWd(plan){
-    if(plan && plan.orbitV3) return false   // Orbit V3 (01.10.2026): normaler Master-SL am Hedge, kein Liquidations-Level
     const acc = (accounts || []).find(a => String(a.id) === String(plan && plan.masterAccountId))
+    // Orbit V3 (01.10.2026): normaler Master-SL am Hedge, kein Liquidations-Level — AUSSER auf einem Winning-Days-Konto ohne Master-SL
+    // (08.10.2026, Plan d18f860e, 4 MNQ: orbit_v3 + WD-Konto + master_sl null → weder SL- noch Liq-Level, kein Nachtrag, der Fusion-Hedge
+    // hatte auf der Liq-Seite gar nichts). Ohne Stop ist die Liquidation das einzige ferne Level — wie bei jedem Winning Day.
+    if(plan && plan.orbitV3) return !!(acc && acc.type === 'winning_days') && !(Number(plan.masterSl) > 0)
     return !!((acc && acc.type === 'winning_days') || (plan && (plan.kontoTyp === 'winning_days' || plan.konto_typ === 'winning_days')) || Number(plan && plan.hedgeEur) > 0)
   }  /* HEDGE-LOTS IMMER FRISCH AUS RISIKO (08.10.2026, Slave-Terminal 7 — Vorfall 05:04 Dubai, Jacob WD-Farmer, Plan 8da04bfe, 6 MNQ, TP 2.100 $:
    * am Plan master_risk 250 / slave_risk 65, aber multiplier 0,0728 → 0,44 Lot, weil Mac- und PC-Tab auf .1265 noch die alte TP-Rechnung
@@ -24582,9 +24585,11 @@
   function hedgeSlNqEcht(richtungMaster, h, tv){
     const plus = richtungMaster === 'buy' ? 1 : richtungMaster === 'sell' ? -1 : 0
     const slp = Number(h && h.sl_punkte), tpp = Number(h && h.punkte), tp = Number(h && h.tp_level_nq)
-    if(!plus || !(slp > 0)) return null
     const einEcht = /^fill$|avg_fill|^hand/.test(String((h && h.einstieg_quelle) || ''))
-    if(h.sl_art === 'liquidation') return (einEcht && Number(h.sl_level_nq) > 1000) ? { sl: Number(h.sl_level_nq), quelle: 'liquidation' } : null
+    // Liquidation VOR der sl_punkte-Prüfung (08.10.2026, Plan 2a8c53e9, 3 MNQ: beim Open fehlte die Start-Balance → sl_punkte 0, der
+    // Wächter trug das Liq-Level nach, aber hier stand „sl_punkte > 0" davor → kein Level, Fusion-TP am Liq-Level blieb 0)
+    if(plus && h && h.sl_art === 'liquidation') return (einEcht && Number(h.sl_level_nq) > 1000) ? { sl: Number(h.sl_level_nq), quelle: 'liquidation' } : null
+    if(!plus || !(slp > 0)) return null
     const ein = Number(h.einstieg_nq)
     // plausibel: auf der richtigen Seite, Abstand zum Einstieg ≈ SL-Distanz (wie hedgeTpPreisPasst)
     const passt = x => { const d = plus * (ein - x); return !(ein > 1000) || (d > 0 && Math.abs(d - slp) <= Math.max(8, slp * 0.4)) }
@@ -25058,7 +25063,7 @@
               const wz2 = (typeof tvSymbolWurzel === 'function' && tvSymbolWurzel(h.symbol_nq || '')) || 'NQ'
               const lq = hedgeLiqLevel(p, Number(h.einstieg_nq), wz2 === 'MNQ' ? 2 : 20, Number(p.masterContracts) || 0)
               if(lq && lq.sl_level_nq > 0){
-                await hedgeAmPlanSchreiben(p.id, { sl_level_nq: lq.sl_level_nq, sl_art: 'liquidation', liq_balance: lq.liq_balance, sl_usd_hedge: lq.sl_usd_hedge, liq_quelle: 'balance_start', liq_balance_start: lq.liq_balance_start, sl_hinweis: null, sl_nachgetragen_at: new Date().toISOString() })
+                await hedgeAmPlanSchreiben(p.id, { sl_level_nq: lq.sl_level_nq, sl_punkte: lq.sl_punkte, sl_art: 'liquidation', liq_balance: lq.liq_balance, sl_usd_hedge: lq.sl_usd_hedge, liq_quelle: 'balance_start', liq_balance_start: lq.liq_balance_start, sl_hinweis: null, sl_nachgetragen_at: new Date().toISOString() })
                 slL = lq.sl_level_nq
               }
             }
@@ -41241,7 +41246,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1282'
+  const OS_TAB_BUILD = '2026-09-22.1283'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
