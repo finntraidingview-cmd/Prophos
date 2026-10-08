@@ -123,6 +123,9 @@ def main():
     x = es["aenderungen"][0] if es["aenderungen"] else {}
     check(x.get("plan_id") == "s1" and x.get("nach_start_min", 0) > JETZT + 60 and "hinausgeschoben" in x.get("grund", ""),
           f"Short aus den 60 min hinausgeschoben ({x.get('nach_start_min')}, {x.get('grund', '')[:60]})")
+    ek_ = U(sh, 0.0, 0.0, JETZT, Z, 25, random.Random(1), einsatz=EK, dubai_min=120, id_fest={"jacob|the5ers": {"richtung": "sell"}},
+            hinaus_heute={"s1"})
+    check(not ek_["aenderungen"], "kein Kriechen: heute schon hinausgeschoben → nicht noch einmal hinausschieben (Ina Apex 08:43 → 08:47)")
     ep = U(sh, 0.0, 0.0, JETZT, Z, 25, random.Random(1), einsatz=EK, dubai_min=120, id_fest={"jacob|the5ers": {"richtung": "sell"}},
            vorgezogen_heute={"s1"})
     check(not ep["aenderungen"], "Pingpong: heute vorgezogen → nicht hinausschieben")

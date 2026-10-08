@@ -17503,7 +17503,11 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                 t = platz(i, lo, min(s0, bis60 + 1), bel) if lo <= bis60 else None
                 if t is not None and t < s0:
                     out.append((i, t, "vor"))
-            elif ab_ + 1 < s0 <= bis60 and s0 > float(jetzt_min) + AP_FAELLIG_MIN and i not in vorgezogen_heute:
+            elif (ab_ + 1 < s0 <= bis60 and s0 > float(jetzt_min) + AP_FAELLIG_MIN and i not in vorgezogen_heute
+                  and i not in hinaus_heute):
+                # KEIN KRIECHEN (Beobachtung Slave 3, 08.10.2026: Lauf 03:44 UTC schob Ina Apex 08:43 → 08:47 Dubai — der früheste
+                # freie Platz liegt knapp hinter jetzt + 60; nach der Ruhezeit stünde er wieder in den 60 min und würde erneut ein paar
+                # Minuten geschoben, Lauf für Lauf): je Plan und Tag höchstens EIN Hinausschieben
                 # Ende (Start + Laufzeit) im Fenster (Master 08.10.2026): nichts Richtung Auto-Close 23:45 Dubai hinausschieben
                 t = platz(i, bis60 + 1, float(fen[1]) - laufz + 1, bel)
                 if t is not None and t > s0 and t + laufz <= float(fen[1]):
