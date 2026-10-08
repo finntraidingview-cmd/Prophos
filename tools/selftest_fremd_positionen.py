@@ -92,6 +92,14 @@ def main():
               [{"master_account_id": "k1", "slave_account_id": "k2", "status": "completed", "ticket": "10", "ended_at": iso(3600)}], jetzt)
     check(len(fr) == 1, "Gegenkonto eines längst beendeten Plans → wieder bewertet")
 
+    # 5c) Echo-V1-Restfall: Plan von Hand erledigt, Master-Position noch offen, Copier führt einen Hedge dazu → nie fremd
+    z = {"master_login": "222", "updated_at": iso(5), "note": None, "pos": [pos(613921415, 0), pos(77, 1)],
+         "hd": {"613921415": [{"ticket": 233263483, "volume": 1.76}], "77": []}}
+    fr, bew = E([z], konten, [{"master_account_id": "k2", "status": "completed", "ticket": None, "ended_at": iso(3600)}], jetzt)
+    check([x["ident"] for x in fr] == ["77"] and bew == {"222"}, f"Echo V1: Position mit Copier-Hedge nie fremd, ohne Hedge (leere Liste) schon ({fr})")
+    fr, _ = E([dict(z, hd=None)], konten, [], jetzt)
+    check(len(fr) == 2, "ohne hedges-Feld wie bisher")
+
     # 6) fp_plan_aktiv
     check(AKT({"status": "open"}, jetzt) and not AKT({"status": "planned"}, jetzt) and AKT({"status": "planned", "orbit_gesendet_at": iso(300)}, jetzt)
           and not AKT({"status": "review", "ended_at": iso(900)}, jetzt) and AKT({"status": "review", "ended_at": iso(100)}, jetzt),

@@ -20581,7 +20581,7 @@ def fp_plan_aktiv(p, jetzt):
 
 
 def fp_erkennen(live_rows, konten, plaene, jetzt):
-    """REIN RECHNEND (testbar): → (fremde, bewertet). live_rows: mt5_live-Auszug {master_login, hedge_login, updated_at, note, pos};
+    """REIN RECHNEND (testbar): → (fremde, bewertet). live_rows: mt5_live-Auszug {master_login, hedge_login, updated_at, note, pos, hd};
     konten: {login: accounts-Zeile}; plaene: {master_account_id, slave_account_id, status, ticket, start_um_gestartet_at,
     orbit_gesendet_at, ended_at}.
     fremde = [{master_login, ident, konto_id, user_id, firma, konto_name, account_type, richtung, symbol, menge}]; bewertet = Logins mit
@@ -20604,6 +20604,10 @@ def fp_erkennen(live_rows, konten, plaene, jetzt):
             ohne.add(str(p["slave_account_id"]))          # Gegenkonto (Duplikum/Echo-Slave): dessen Position hat kein Plan-Ticket
     fremde, bewertet = [], set()
     for login, z in lt_echo_live_wahl(frisch).items():
+        # ECHO-V1-RESTFALL (Master 08.10.2026): klassisches Echo führt kein Ticket am Plan — wird der Plan von Hand erledigt, während
+        # die Master-Position noch offen ist, wäre sie nach 10 min „fremd". Der Copier führt aber je Master-Position seinen Hedge in
+        # status.hedges {Master-Ticket: [Hedges]} → eine Position mit Copier-Hedge ist nachweislich eine Echo-Position, nie Hand
+        gehedgt = {str(k) for k, v in (z.get("hd") or {}).items() if v} if isinstance(z.get("hd"), dict) else set()
         a = konten.get(login)
         if (login in hedge or not a or str(a.get("id")) in ohne or a.get("duplikum_linked")
                 or "fusion" in str(a.get("firm") or "").lower()):
@@ -20613,7 +20617,7 @@ def fp_erkennen(live_rows, konten, plaene, jetzt):
             if not isinstance(x, dict):
                 continue
             ident, typ = str(x.get("ident") or "").strip(), x.get("type")
-            if not ident or ident in tickets or typ not in (0, 1):        # MT5: 0 = Buy, 1 = Sell
+            if not ident or ident in tickets or ident in gehedgt or typ not in (0, 1):        # MT5: 0 = Buy, 1 = Sell
                 continue
             fremde.append({"master_login": login, "ident": ident, "konto_id": str(a["id"]), "user_id": a.get("user_id"),
                            "firma": a.get("firm"), "konto_name": a.get("name"), "account_type": a.get("account_type"),
@@ -20719,7 +20723,7 @@ def fp_tick(force=False):
     jetzt = datetime.now(timezone.utc)
     jetzt_iso = jetzt.isoformat()
     ab = datetime.fromtimestamp(time.time() - FP_FRISCH_S, timezone.utc).isoformat()
-    live = sb_select("mt5_live", {"select": "master_login,hedge_login,updated_at,note:status->>note,pos:status->master_positions",
+    live = sb_select("mt5_live", {"select": "master_login,hedge_login,updated_at,note:status->>note,pos:status->master_positions,hd:status->hedges",
                                   "updated_at": f"gte.{ab}", "master_login": "not.is.null"}) or []
     tv = sb_select("echoplus_live", {"select": "konto,positionen,positionen_ok,updated_at", "updated_at": f"gte.{ab}",
                                      "positionen_ok": "is.true", "konto": "not.is.null"}) or []
