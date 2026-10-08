@@ -20167,7 +20167,7 @@
   async function v2PlanAufOpen(planId, ticket, tvBaseline){
     try{
       const plan = tradePlans.find(x => String(x.id) === String(planId))
-      if(!plan || plan.status !== 'planned') return
+      if(!plan || plan.status !== 'planned') return false
       // started_at = Klickzeit, wenn die Baseline sie kennt (F28: Topstep V2) — die Demo im Radar zählt ab dieser Minute
       const upd = { status: 'open', started_at: (tvBaseline && tvBaseline.klick_at) || new Date().toISOString(), ended_at: null }
       // MERGE statt Überschreiben (25.09.2026, Live-Befund Plan 2089a033): seit .527 öffnet der Fusion-Hedge VOR diesem
@@ -20199,14 +20199,61 @@
       const { data, error } = await supabase.from('trade_plans')
         .update(upd)
         .eq('id', plan.id).eq('status', 'planned').select('*')
-      if(error || !data || !data.length) return
+      if(error || !data || !data.length) return false   // Guard planned griff (anderer Tab/Weg war schneller)
       const idx = tradePlans.findIndex(x => String(x.id) === String(plan.id))
       if(idx >= 0) tradePlans[idx] = rowToPlan(data[0])
       if(patchBase){ try{ await baselinePatch(plan.id, patchBase, 'open') }catch(e){ console.warn('[v2PlanAufOpen] Baseline', (e && e.message) || e) } }
       if(typeof renderTradePlans === 'function') renderTradePlans()
-    }catch(e){ console.warn('[v2PlanAufOpen]', e) }
+      return true
+    }catch(e){ console.warn('[v2PlanAufOpen]', e); return false }
   }
 
+  /* UNTERBROCHENEN ECHO-V2-START ÜBERNEHMEN (08.10.2026, Master — Anlass ff8c2412: Order 05:11:25 UTC im Terminal, Chris' Tab lud mitten im
+   * Check neu, der Plan blieb „Geplant" ohne Ticket und musste von Hand angehängt werden; F5, Absturz oder PC-Neustart können das genauso).
+   * Beweis statt Vermutung: der Check schreibt VOR dem Puls-Klick die Positionen, die schon auf dem Master lagen (mt5_baseline.v2_vorher,
+   * aus der Snapshot-Datei, auch bei geschlossenem Terminal). Übernommen wird nur, wenn nach dem Claim (≤ 30 min) GENAU EINE neue Position
+   * dazugekommen ist und sie in Symbol, Richtung und Volumen der Order des Plans entspricht. Sonst nichts außer einer Konsolen-Zeile.
+   * Nie etwas platzieren. -> {ident} | {grund} */
+  function v2NachholTreffer(plan, order, positions, vorher){
+    if(!plan || plan.route !== 'mt5v2' || plan.status !== 'planned') return { grund: 'kein geplanter Echo-V2-Plan' }
+    if(!order) return { grund: 'Order am Plan unvollständig' }
+    if(!vorher || !vorher.snap || !Array.isArray(vorher.idents)) return { grund: 'kein Beleg „vorher" (v2_vorher fehlt oder ohne Snapshot dieses Logins)' }
+    const vor = new Set(vorher.idents.map(String)), typ = order.richtung === 'buy' ? 0 : 1
+    const neu = (positions || []).filter(x => x && x.ident != null && !vor.has(String(x.ident)))
+    const passt = neu.filter(x => Number(x.type) === typ && Math.abs(Number(x.volume) - Number(order.volumen)) <= 0.005   // Toleranz wie order_bot.finde_neue_position
+      && String(x.symbol || '').toLowerCase() === String(order.symbol || '').toLowerCase())
+    if(passt.length !== 1) return { grund: `${passt.length} passende neue Position(en) (neu insgesamt ${neu.length})` }
+    if(neu.length !== 1) return { grund: `neben der passenden ${neu.length - 1} weitere neue Position(en) — nicht eindeutig` }
+    return { ident: passt[0].ident }
+  }
+  const V2_NACHHOL_MS = 30 * 60000
+  const _v2NachholGemeldet = new Map()   // planId → letzter Grund (Konsole nur bei Wechsel)
+  const _v2NachholVersucht = new Set()   // je Plan nur EIN Übernahme-Versuch je Tab (Prüfer Slave 2: zweiter Tab verliert am Guard)
+  async function v2Nachholen(plan, s){
+    const claim = Date.parse(plan.startUmGestartetAt || '') || 0
+    if(!claim || Date.now() - claim > V2_NACHHOL_MS || plan.startedAt) return
+    try{ if(String(_pfV2Laeuft) === String(plan.id)) return }catch(_){}   // der Check läuft in DIESEM Tab noch — der setzt „Läuft" selbst
+    const order = _tpOrderAusPlan(plan).order, vorher = (plan.mt5Baseline || {}).v2_vorher
+    const t = v2NachholTreffer(plan, order, s.master_positions || [], vorher)
+    if(!t.ident){
+      if((s.master_positions || []).length && _v2NachholGemeldet.get(String(plan.id)) !== t.grund){
+        _v2NachholGemeldet.set(String(plan.id), t.grund); console.log(`[v2-nachholen] ${plan.masterName || plan.id}: nicht übernommen — ${t.grund}`) }
+      return
+    }
+    if(_v2NachholVersucht.has(String(plan.id))) return
+    _v2NachholVersucht.add(String(plan.id))
+    console.log(`[v2-nachholen] ${plan.masterName || plan.id}: Position ${t.ident} nach dem Claim gefunden — Plan wird „Läuft"`)
+    const ok = await v2PlanAufOpen(plan.id, t.ident)
+    if(!ok){   // anderer Tab/Weg war schneller (Guard planned) → Plan frisch aus der DB, kein Toast
+      try{ const { data } = await supabase.from('trade_plans').select('*').eq('id', plan.id).maybeSingle()
+        if(data){ const i = tradePlans.findIndex(x => String(x.id) === String(plan.id)); if(i >= 0) tradePlans[i] = rowToPlan(data); try{ renderTradePlans() }catch(_){} } }catch(_){}
+      return
+    }
+    const f = (typeof sfFlag === 'function') ? sfFlag(plan) : null
+    if(f){ try{ await baselinePatch(plan.id, { start_fehler: Object.assign({}, f, { status: 'behoben', behoben: `Position ${t.ident} nach Neuladen übernommen` }) }, 'open') }catch(_){} }
+    if(typeof atToast === 'function') atToast(`▶ „${plan.masterName || 'Plan'}" läuft — offene Position ${t.ident} übernommen (Start war unterbrochen).`, 'start')
+  }
+  window._v2Nachhol = { treffer: v2NachholTreffer }   // Test-Haken
   async function mt5PlanPollTick(){
     if(!MT5_LOCAL || mt5PlanPoll.busy) return
     // defensiver tradePlans-Zugriff wie atCheck (Boot-Reihenfolge)
@@ -20257,7 +20304,9 @@
         const posCount = (s.master_positions || []).length
 
         if(plan.status === 'planned'){
-          if(istV2) continue   // Echo V2 startet NIE von selbst — „Läuft" kommt vom bewiesenen Puls-Klick
+          // Echo V2 startet NIE von selbst — „Läuft" kommt vom bewiesenen Puls-Klick; einzige Ausnahme: ein unterbrochener Start, dessen
+          // Position nachweislich nach dem Claim kam (v2Nachholen, 08.10.2026)
+          if(istV2){ await v2Nachholen(plan, s); continue }
           if(posCount <= 0) continue
           if((plannedByMaster[route.masterLogin] || []).length > 1){
             if(!mt5PlanPoll.multiWarned.has(route.masterLogin)){
@@ -39564,6 +39613,15 @@
     else if(!route) fail('v2link', `Kein Master-Terminal für „${escapeHtml(plan.masterName || '—')}" auf diesem PC — der Account braucht eine MT5-Verlinkung und eine Echo-Instanz mit Terminal-Pfad (Echo-Ansicht → Neue Instanz).`)
     else if(!route.inst.has_terminal) fail('v2link', `Instanz <span class="mono">${escapeHtml(String(route.inst.name || route.inst.file))}</span> hat keinen Terminal-Pfad (master_terminal_path).`)
     else _pfSet('v2link', 'ok', `Master <span class="mono">${escapeHtml(route.masterLogin)}</span> · Instanz <span class="mono">${escapeHtml(String(route.inst.name || route.inst.file))}</span>`)
+    // BELEG „VORHER" (08.10.2026, s. v2Nachholen): Positionen, die VOR dem Klick schon auf dem Master lagen — läuft parallel zu den nächsten
+    // Schritten, wird vor dem Puls-Klick abgewartet. Snapshot auch bei geschlossenem Terminal (letzter Stand der Datei).
+    let vorherP = null
+    if(route){
+      const s0 = route.inst.status || {}
+      const vorher = { at: new Date().toISOString(), login: String(route.masterLogin), snap: String(s0.master_login || '') === String(route.masterLogin),
+                       frisch: !!(route.inst.alive || route.inst.lesen) && !s0.note, idents: (s0.master_positions || []).map(x => String(x && x.ident)) }
+      vorherP = baselinePatch(plan.id, { v2_vorher: vorher }, 'planned').catch(e => console.warn('[echo-v2] v2_vorher', (e && e.message) || e))
+    }
 
     // ── 2. Kein Hedge: Echo-Fenster dieser Instanz zu + Master nicht in Duplikum ──
     if(!route){
@@ -39640,6 +39698,9 @@
     }
 
     // ── 5. Puls platziert ── (one-shot: die gemerkte Order gilt nur für diesen Abschuss)
+    // Beleg „vorher" steht, bevor geklickt wird — höchstens 5 s (Prüfer Slave 2: hängt Supabase, darf der Klick nicht hängen; ohne Beleg gibt
+    // es später eben keine Übernahme, sicher)
+    if(vorherP){ try{ await Promise.race([vorherP, new Promise(r => setTimeout(r, 5000))]) }catch(_){} }
     if(!offenUndMeiner()) return
     _tpPendingOrder = null
     if(_pfRemoteHook && String(_pfRemoteHook.planId) === String(plan.id)){
@@ -41681,7 +41742,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1331'
+  const OS_TAB_BUILD = '2026-09-22.1332'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
