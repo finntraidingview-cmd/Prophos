@@ -16554,6 +16554,96 @@ AP_VORZIEHEN_HYSTERESE_EUR = 100.0     # Vorziehen löst schon ab 100 € über 
                                        # 08.10.2026: bei reinen Shorts liegt das Über-Band ≈ 0,75 × |Netto|, 200 € erst ab ≈ 267 € Netto
 
 
+# ── SZENARIO-KURVE (08.10.2026, Finn 05:26 Dubai, Admin „Long 202 € · Short 376 € · Netto −174 € short", kurz davor +333: „Der Bot muss
+# neu berechnen. Ich will, dass Long und Short im Ausgleich gleich sind und dass der P&L hypothetisch quasi immer über Null ist. Drei
+# Apex-Konten mit 5 NQ sind weg, wenn es 2.000 $ hochgeht … Der Bot guckt nur auf den Netto-Einsatz, der muss aber in Relation zu den
+# Lots stehen"). Statt Einsatz = Kontowert × Risiko ÷ Polster: was das Buch in € macht, wenn NQ um Δ Punkte läuft — linear Satz (€ je $,
+# derselbe wie „P&L hypothetisch") × $/Pkt × Δ × Richtung, oben am TP gedeckelt, unten am SL normal verloren, bei Erreichen von Boden/Liq
+# bzw. Tageslimit (Apex 2.000 $) die Klippe: −Kontowert. Gehedgt (Fusion offen) zählt netto 0. Laufende ab jetzt (Rest-Punkte), geplante ab
+# ihrem Start. Ziel des Bots: das Minimum über ±AP_SZENARIO_R möglichst hoch (≥ 0), die Steigung bei 0 nahe 0.
+AP_SZENARIO_R = 30                       # Punkte links/rechts, über die das Minimum zählt
+AP_SZENARIO_SCHRITT = 5
+AP_SZENARIO_WEIT = 100                   # Kurve für die Anzeige −100 … +100
+AP_SZENARIO_AB_EUR = 100.0               # Vorziehen löst auch aus, wenn min P über ±R unter −100 € liegt
+
+
+def ap_szenario_trade(t, d):
+    """REIN RECHNEND: P&L in € eines Trades bei NQ-Bewegung d Punkte. t = {richtung, satz (€ je $), usd_pro_pkt, wert (€), polster_usd,
+    daily_usd, tp_punkte, sl_punkte, gehedgt}. Ohne Satz/$ je Pkt → 0 (Hinweis beim Aufrufer); ohne Polster/Tageslimit → ohne Klippe."""
+    if t.get("gehedgt") or t.get("richtung") not in ("buy", "sell"):
+        return 0.0
+    satz, upp = _wd_num(t.get("satz")), _wd_num(t.get("usd_pro_pkt"))
+    if not satz or not upp:
+        return 0.0
+    m = float(d) * (1 if t["richtung"] == "buy" else -1)          # Bewegung zu Gunsten des Trades
+    tp = _wd_num(t.get("tp_punkte"))
+    if tp is not None and tp > 0 and m >= tp:
+        return satz * upp * tp
+    grenzen = [x for x in (_wd_num(t.get("polster_usd")), _wd_num(t.get("daily_usd"))) if x is not None and x > 0]
+    blow = (min(grenzen) / upp) if grenzen else None
+    sl = _wd_num(t.get("sl_punkte"))
+    if sl is not None and sl > 0 and (blow is None or sl < blow) and m <= -sl:
+        return -satz * upp * sl
+    if blow is not None and m <= -blow:
+        w = _wd_num(t.get("wert"))
+        return -(w if w is not None else satz * upp * blow)
+    return satz * upp * m
+
+
+def ap_szenario_knicke(t):
+    """REIN RECHNEND: Punkte (relativ zu jetzt), an denen der Trade knickt oder springt — TP, SL, Klippe (Boden/Tageslimit)."""
+    upp = _wd_num(t.get("usd_pro_pkt"))
+    if t.get("gehedgt") or t.get("richtung") not in ("buy", "sell") or not _wd_num(t.get("satz")) or not upp:
+        return []
+    s = 1 if t["richtung"] == "buy" else -1
+    grenzen = [x for x in (_wd_num(t.get("polster_usd")), _wd_num(t.get("daily_usd"))) if x is not None and x > 0]
+    out = []
+    for m in (_wd_num(t.get("tp_punkte")), -(_wd_num(t.get("sl_punkte")) or 0) or None, -(min(grenzen) / upp) if grenzen else None):
+        if m:
+            out.append(round(s * float(m), 1))
+    return out
+
+
+def ap_szenario_kurve(trades, weit=None, schritt=None):
+    """REIN RECHNEND: Summe aller Trades → [{pkt, eur}] von −weit bis +weit im Raster `schritt`, dazu an jeder Klippe/jedem Knick zwei
+    Punkte mit gleichem pkt (Wert links davon, Wert rechts davon) — Vertrag mit Slave 5 (Anzeige, 08.10.2026): der Sprung ist senkrecht."""
+    weit, schritt = int(weit or AP_SZENARIO_WEIT), int(schritt or AP_SZENARIO_SCHRITT)
+    trades = list(trades or ())
+    summe = lambda d: round(sum(ap_szenario_trade(t, d) for t in trades), 1)    # noqa: E731
+    pkte = [(float(d), 0, summe(d)) for d in range(-weit, weit + 1, schritt)]
+    for b in sorted({k for t in trades for k in ap_szenario_knicke(t) if -weit < k < weit}):
+        pkte += [(b, -1, summe(b - 1e-6)), (b, 1, summe(b + 1e-6))]
+    pkte.sort(key=lambda x: (x[0], x[1]))
+    out = []
+    for d, _o, e in pkte:
+        if out and out[-1]["pkt"] == d and _o == 0:
+            continue                                                          # Rasterpunkt fällt auf einen Knick: das Paar reicht
+        out.append({"pkt": int(d) if float(d).is_integer() else d, "eur": e})
+    return out
+
+
+def ap_szenario_lage(trades, r=None):
+    """REIN RECHNEND: Kennzahlen der Kurve → {min_eur (über ±r), delta_eur_pkt (Steigung bei 0), links {pkt, eur}, rechts {pkt, eur},
+    kurve}. links = schlimmster Fall bei fallendem NQ (Δ < 0), rechts bei steigendem."""
+    r = int(r or AP_SZENARIO_R)
+    k = ap_szenario_kurve(trades)
+    innen = [x for x in k if abs(x["pkt"]) <= r]
+    links = min((x for x in innen if x["pkt"] < 0), key=lambda x: x["eur"], default={"pkt": 0, "eur": 0.0})
+    rechts = min((x for x in innen if x["pkt"] > 0), key=lambda x: x["eur"], default={"pkt": 0, "eur": 0.0})
+    s = AP_SZENARIO_SCHRITT
+    delta = (sum(ap_szenario_trade(t, s) for t in trades or ()) - sum(ap_szenario_trade(t, -s) for t in trades or ())) / (2 * s)
+    return {"min_eur": round(min([x["eur"] for x in innen] + [0.0]), 1), "delta_eur_pkt": round(delta, 2),
+            "links": links, "rechts": rechts, "kurve": k}
+
+
+def ap_szenario_trade_aus_zeile(z, laufend):
+    """Stand-Zeile (_ap_stand_laden offen[]/geplant[]) → Trade für ap_szenario_trade; laufend: Rest-Punkte ab jetzt."""
+    return {"richtung": z.get("richtung"), "satz": z.get("satz_eur_je_usd"), "usd_pro_pkt": z.get("usd_pro_pkt"), "wert": z.get("wert_eur"),
+            "polster_usd": z.get("polster_usd"), "daily_usd": z.get("daily_usd"), "gehedgt": z.get("gehedgt"),
+            "tp_punkte": z.get("tp_punkte_rest") if laufend else z.get("tp_punkte"),
+            "sl_punkte": z.get("sl_punkte_rest") if laufend else z.get("sl_punkte")}
+
+
 def _ap_firma_konflikt(i, je, zustand, gestartet=(), gap=None):
     """Muss Plan i wegen des FIRMEN-ABSTANDS weichen? Ja, wenn eine ANDERE ID bei derselben Firma weniger als AP_FIRMA_ABSTAND_MIN
     entfernt startet und Plan i der „spätere" ist: der andere startet früher, gleichzeitig mit kleinerer plan_id, ist nicht änderbar
@@ -16726,7 +16816,18 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
     # .1220 angelegt; Nachplanen lässt bestehende stehen, der Bot drehte nur bei Band-Überschreitung): auch eine ID-Mischung > 0 weckt
     # den Bot — die Band-Schritte unten laufen trotzdem nur, wenn das Band offen ist, danach die eigene Mischungs-Phase
     schwelle_v = min(schwelle, AP_VORZIEHEN_HYSTERESE_EUR) if einsatz else schwelle   # Vorziehen: eigene, niedrigere Schwelle
-    if not offen_(vorher) and not vorher[4] and not klumpen and not vorher[1] > schwelle_v and not verpufft:
+    # SZENARIO (08.10.2026, Finn: „Der Bot guckt nur auf den Netto-Einsatz, der muss aber in Relation zu den Lots stehen"): laufende Trades
+    # (einsatz.szenario_laufend) + Pläne, die in den nächsten 60 min starten → Kurve P(Δ); min über ±AP_SZENARIO_R ist das Maß
+    sz_an = bool(einsatz) and "szenario_laufend" in (einsatz or {})
+
+    def sz_lage(z):
+        tr = list((einsatz or {}).get("szenario_laufend") or [])
+        tr += [ap_szenario_trade_aus_zeile(dict(je[i], richtung=z[i]["richtung"]), False) for i in z
+               if float(jetzt_min) <= z[i]["start"] <= float(jetzt_min) + 60]
+        return ap_szenario_lage(tr)
+    sz_vor = sz_lage(zustand) if sz_an else None
+    sz_offen = bool(sz_an and sz_vor["min_eur"] < -AP_SZENARIO_AB_EUR)
+    if not offen_(vorher) and not vorher[4] and not klumpen and not vorher[1] > schwelle_v and not verpufft and not sz_offen:
         return {"aenderungen": [], "vorher": als_dict(vorher), "nachher": als_dict(vorher), "ausloeser": None,
                 "daempfung": {"hysterese": schwelle, "ruhe_min": AP_RUHE_JE_PLAN_MIN, "ruhig": []}}
     ausloeser = None if not offen_(vorher) else (
@@ -16828,9 +16929,14 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
         vorgezogen_heute.add(i)                            # nicht gleich wieder vorziehen
     if aenderungen:
         aktuell = strafe(zustand) + (misch(zustand),)
-    if aktuell[1] > schwelle_v:
+    if sz_an and aenderungen:
+        sz_vor = sz_lage(zustand)
+        sz_offen = sz_vor["min_eur"] < -AP_SZENARIO_AB_EUR
+    if aktuell[1] > schwelle_v or sz_offen:
         n_vor = netto60(zustand)
         noetig = "buy" if n_vor < 0 else "sell"
+        if sz_offen:      # Seite der Klippe: tut steigender NQ mehr weh, braucht das Buch Longs (und umgekehrt)
+            noetig = "buy" if sz_vor["rechts"]["eur"] < sz_vor["links"]["eur"] else "sell"
         laufz = float((einsatz or {}).get("laufzeit") or AP_VERTEIL_GEGEN_MIN)
         gf_v = float((zeiten or {}).get("abstand_id_firma_min") or AP_ABSTAND_ID_FIRMA_MIN)
         gi_v = float((zeiten or {}).get("abstand_id_gesamt_min") or AP_ABSTAND_ID_MIN)
@@ -16883,10 +16989,17 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
             z = {k: dict(v) for k, v in zustand.items()}
             z[i]["start"] = ziel
             k_neu = strafe(z) + (misch(z),)
-            u_vor, u_neu = flaeche_ab(zustand, ziel), flaeche_ab(z, ziel)   # Über-Band-Fläche ab dem neuen Start: vorher gegen nachher
-            if k_neu[0] > aktuell[0] or k_neu[1] > aktuell[1] + 1e-9 or u_neu >= u_vor - 1e-9:
-                continue                                     # muss das Band ab dem neuen Start verbessern, 60-min-Spitze nicht schlechter, kein Malus
-            gewinn = u_vor - u_neu
+            if sz_offen:
+                # SZENARIO: der Zug muss das Minimum über ±AP_SZENARIO_R heben (die Klippe zählt voll); kein neuer Malus
+                s_neu = sz_lage(z)["min_eur"]
+                if k_neu[0] > aktuell[0] or s_neu <= sz_vor["min_eur"] + 1e-9:
+                    continue
+                gewinn = s_neu - sz_vor["min_eur"]
+            else:
+                u_vor, u_neu = flaeche_ab(zustand, ziel), flaeche_ab(z, ziel)   # Über-Band-Fläche ab dem neuen Start: vorher gegen nachher
+                if k_neu[0] > aktuell[0] or k_neu[1] > aktuell[1] + 1e-9 or u_neu >= u_vor - 1e-9:
+                    continue                                 # muss das Band ab dem neuen Start verbessern, 60-min-Spitze nicht schlechter, kein Malus
+                gewinn = u_vor - u_neu
             if beste is None or (-gewinn, ziel) < (-beste[4], beste[3]):
                 beste = (k_neu, i, z, ziel, gewinn)          # die größte Verbesserung, bei Gleichstand der frühere Start
         if beste:
@@ -16896,12 +17009,15 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
             hm = lambda m: _ap_hhmm_txt((float(m) + float(dubai_min or 0)) % 1440)    # noqa: E731
             grund = (f"Ausgleich: {'Long' if noetig == 'buy' else 'Short'} vorgezogen, {wer} {name} {hm(zustand[i]['start'])} → {hm(ziel)}"
                      f"{' Dubai' if dubai_min else ''} (Netto {netto_bei(zustand, ziel):+.0f} → {netto_bei(z, ziel):+.0f} "
-                     f"{'€' if einsatz else '€/Pkt'})")
+                     f"{'€' if einsatz else '€/Pkt'}"
+                     + (f"; schlimmster Fall ±{AP_SZENARIO_R} Pkt {sz_vor['min_eur']:+.0f} → {sz_lage(z)['min_eur']:+.0f} €" if sz_offen else "") + ")")
             aenderungen.append({"plan_id": i, "user_id": je[i]["user_id"], "firma": je[i]["firma"], "art": "start",
                                 "von_richtung": noetig, "nach_richtung": noetig, "von_start_min": zustand[i]["start"],
                                 "nach_start_min": ziel, "grund": grund})
             ausloeser = grund
             zustand, aktuell, vorgezogen = z, k_neu, True
+            if sz_an:
+                sz_vor = sz_lage(zustand)
 
     for _ in range(0 if vorgezogen else max(0, int(schritte))):
         if not offen_(aktuell):
@@ -17025,6 +17141,8 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
             k_neu = strafe(z) + (misch(z),)
             if k_neu[4] >= aktuell[4] or k_neu[0] > aktuell[0] or k_neu[1] > max(schwelle, aktuell[1]) + 1e-9:
                 continue
+            if sz_an and sz_lage(z)["min_eur"] < sz_lage(zustand)["min_eur"] - 1e-9:
+                continue                                     # SZENARIO: die Drehung darf den schlimmsten Fall ±R nicht verschlechtern
             tag_neu = ueber_tag(z)
             if tag_neu > max(schwelle, tag_vor) + 1e-9:
                 continue
@@ -17074,6 +17192,8 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                 z[i]["start"] = m
             k_neu = strafe(z) + (misch(z),)
             tol = AP_VERTEILUNG_BAND_TOLERANZ_EUR if einsatz else 0.0      # Tagesband: Verteilen darf bis +200 € (Finn), 60 min strikt
+            if sz_an and sz_lage(z)["min_eur"] < sz_lage(zustand)["min_eur"] - 1e-9:
+                continue                                     # SZENARIO: Verteilen darf den schlimmsten Fall ±R nicht verschlechtern
             if k_neu[0] > aktuell[0] or k_neu[1] > max(schwelle, aktuell[1]) + 1e-9 or ueber_tag(z) > max(schwelle, tag_vor_v) + tol + 1e-9:
                 continue
             gewaehlt = (neu, z, k_neu)
@@ -17280,7 +17400,8 @@ def _ap_bewerten(ctx, a, bal, menge, route, symbol, richtung, tp, sl, gehedgt=Fa
         hinweis = ("kein Kontowert (Firma ohne Kernwerte, Größe passt nicht oder keine Balance)" if not kw
                    else pq if not ppe else "keine Menge am Plan" if not upp else "keine Richtung")
     return {"kw": kw, "g": g, "delta_eur_pkt": d, "usd_pro_pkt": upp, "punktwert": ppe, "punktwert_quelle": pq if ppe else None,
-            "tp_punkte": ap_punkte(tp, upp), "sl_punkte": ap_punkte(sl, upp), "hinweis": hinweis}
+            "tp_punkte": ap_punkte(tp, upp), "sl_punkte": ap_punkte(sl, upp), "hinweis": hinweis,
+            "polster_usd": (kw or {}).get("polster"), "daily_usd": (p or {}).get("daily_usd")}   # Szenario-Klippe (08.10.2026)
 
 
 # WERTE VON HAND (08.10.2026, Master/Finn): trade_plans.hand_werte_at (sql/2026-10-08_trade_plans_hand_werte_at.sql) — setzt
@@ -17446,7 +17567,8 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
                 "punktwert_quelle": b["punktwert_quelle"], "tp_punkte": b["tp_punkte"], "sl_punkte": b["sl_punkte"],
                 "wert_eur": (b["kw"] or {}).get("wert"), "satz_eur_je_usd": (b["kw"] or {}).get("satz"),
                 "gewinn_eur": (b["g"] or {}).get("gewinn_eur"), "verlust_eur": (b["g"] or {}).get("verlust_eur"),
-                "gewicht_eur": (b["g"] or {}).get("gewicht_eur"), "hinweis": b["hinweis"]}
+                "gewicht_eur": (b["g"] or {}).get("gewicht_eur"), "hinweis": b["hinweis"],
+                "polster_usd": b.get("polster_usd"), "daily_usd": b.get("daily_usd")}
 
     offen_rows = []
     for p in offen:
@@ -17581,7 +17703,8 @@ def ap_einsatz_kontext(stand, param):
     """Klumpen-Regel-Kontext aus dem Stand: Basis (laufend), Grenzen, Gegenstück-Kandidaten (heute gestartete Trades)."""
     return {"basis": stand.get("basis_einsatz") or 0.0, "brutto": stand.get("brutto_einsatz") or 0.0,
             "gross_ab": ap_gross_ab([z.get("einsatz_abs") for z in stand.get("geplant") or ()], param.get("gross_ab_eur")),
-            "laufzeit": param.get("laufzeit_min")}
+            "laufzeit": param.get("laufzeit_min"),
+            "szenario_laufend": [ap_szenario_trade_aus_zeile(z, True) for z in stand.get("offen") or ()]}   # Szenario (08.10.2026)
 
 
 def _ap_stand_plaene(stand):
@@ -17590,6 +17713,10 @@ def _ap_stand_plaene(stand):
              "richtung": z["richtung"],
              "start_min": z["start_min"], "delta_abs": z["delta_abs"], "aenderbar": z["aenderbar"], "fest_durch": z["fest_durch"],
              "einsatz_abs": z.get("einsatz_abs") or 0.0,
+             # SZENARIO (08.10.2026): was ap_szenario_trade braucht
+             "satz_eur_je_usd": z.get("satz_eur_je_usd"), "usd_pro_pkt": z.get("usd_pro_pkt"), "wert_eur": z.get("wert_eur"),
+             "polster_usd": z.get("polster_usd"), "daily_usd": z.get("daily_usd"), "tp_punkte": z.get("tp_punkte"),
+             "sl_punkte": z.get("sl_punkte"),
              # RICHTUNG AM START (07.10.2026): für ap_richtung_konflikte
              "route": z.get("route"), "gehedgt": z.get("gehedgt"), "auto_plan": z.get("auto_plan"), "bestaetigt": z.get("bestaetigt"),
              "richtung_konflikt": z.get("richtung_konflikt")}
@@ -17691,6 +17818,23 @@ def ap_delta_antwort(stand, sicht_uid=None):
            "fenster": [{"von": f[0], "bis": f[1], "anteil": round(float(f[2]) / w_summe * 100, 1)}
                        for f in stand["zeiten"].get("fenster") or []],
            "bot": _ap_bot_stand(stand["param"], stand["jetzt"]), "hinweise": hinweise}
+    # SZENARIO (08.10.2026, für Slave 5s Anzeige): Kurve jetzt (laufende) und +60 min (mit den in 60 min startenden), Steigung, schlimmster
+    # Fall links/rechts über ±AP_SZENARIO_R; Trades ohne Satz/$ je Pkt zählen 0 und stehen in szenario.ohne
+    try:
+        lauf_t = [ap_szenario_trade_aus_zeile(z, True) for z in stand["offen"]]
+        jm_ = float(stand.get("jetzt_min") or 0)
+        plan_t = [ap_szenario_trade_aus_zeile(z, False) for z in stand["geplant"]
+                  if z.get("start_min") is not None and jm_ <= float(z["start_min"]) <= jm_ + 60]
+        l0, l60 = ap_szenario_lage(lauf_t), ap_szenario_lage(lauf_t + plan_t)
+        out["delta_eur_pkt"] = l0["delta_eur_pkt"]
+        out["szenario"] = {"r_pkt": AP_SZENARIO_R, "jetzt": l0["kurve"], "plus60": l60["kurve"],
+                           "schlimmst": {"links": l0["links"], "rechts": l0["rechts"]},   # Vertrag Slave 5 (844d9ef): jetzt
+                           "schlimmst_jetzt": {"links": l0["links"], "rechts": l0["rechts"], "min_eur": l0["min_eur"]},
+                           "schlimmst_plus60": {"links": l60["links"], "rechts": l60["rechts"], "min_eur": l60["min_eur"]},
+                           "ohne": [z["plan_id"] for z in stand["offen"] + stand["geplant"]
+                                    if not z.get("satz_eur_je_usd") or not z.get("usd_pro_pkt")]}
+    except Exception as e:
+        out["szenario"] = {"fehler": f"{type(e).__name__}: {e}"}
     if sicht_uid:
         uid = str(sicht_uid)
         for f in ("offen", "geplant", "umplanungen", "hinweise"):
