@@ -20594,6 +20594,9 @@
           alive: !!inst.alive,
           status: {
             user_id: pushUid || null,
+            // Config-Login der Instanz (08.10.2026, Chris' ↻ wartete 3 min auf einen PC, den es für 14270909 nicht gab): master_login
+            // kommt nur aus dem Snapshot und ist leer, solange das Terminal nie gelesen hat — mt5LoginOrt braucht beide
+            master_expected: inst.master_expected != null ? String(inst.master_expected) : '',
             note: s.note || null,
             standby: !!s.standby,
             multiplier: s.multiplier ?? null,
@@ -22176,7 +22179,9 @@
       let fremd = ''
       const t1 = Date.now()
       while(Date.now() - t1 < 90000){
-        await warte(4000)
+        // 4 s → 1,2–1,8 s (08.10.2026, Echo-Tempo: das EA schreibt alle 200 ms, das Panel fragt lokal ab — der feste 4-s-Schritt kostete
+        // im Mittel 2 s je kalter Lesung, gemessen p50 15 s)
+        await warte(1200 + Math.random() * 600)
         insts = await holen(); if(!insts) continue
         f = mt5InstBalanceFrisch(insts.find(x => x && x.file === file))
         if(f && f.login === login) return await fertig(f)
@@ -32408,6 +32413,41 @@
     const st = _accBalLauf.get(String(id)); if(!st || !st.text) return ''
     return `<div style="font-size:11px;margin-top:2px;color:${st.fehler ? 'var(--danger)' : 'var(--sub)'}">${escapeHtml(st.text)}</div>`
   }
+  /* LOGIN-ORT VOR DEM SIGNAL (08.10.2026, Finn: „Ich lade gerade ein Terminal bei Chris neu, es lädt seit 5 Minuten nichts" — Chris' ↻
+   * für 14270909 wartete 3 min und verfiel: die Instanz „100kfundednext1427090" schreibt seit 05.10. nicht mehr, kein PC hatte den Login.
+   * 14 Tage: 21 mt5_balance/mt5_terminal-Signale verfielen so nach 180 s ohne Hinweis, 28 % aller MT5-Lesungen). Vorher in mt5_live
+   * nachsehen, ob ein lebender PC dieser ID eine Instanz mit dem Login meldet (master_login aus dem Snapshot oder master_expected aus
+   * der Config). -> {da:true} | {da:false, zuletzt:{pc, instanz, at}|null} | null = unklar → wie bisher senden. Unklar: DB-Fehler,
+   * kein frischer PC der ID (der Signal-Weg meldet dann ehrlich „offline"), oder ein frischer PC schreibt noch ohne master_expected
+   * (Build vor .1318) und hat eine Instanz ohne Snapshot-Login. Frisch = 2 min (Leerlauf-Push alle 30 s). */
+  const MT5_ORT_FRISCH_MS = 2 * 60000
+  async function mt5LoginOrt(login, uid){
+    login = String(login || '').trim(); uid = String(uid || '')
+    if(!login || !uid) return null
+    let rows = null
+    try{
+      const r = await Promise.race([
+        supabase.from('mt5_live').select('pc_name,instance,master_login,updated_at,master_expected:status->>master_expected,user_id:status->>user_id').eq('status->>user_id', uid),
+        new Promise(res => setTimeout(() => res({ error: 'timeout' }), 6000))])
+      if(r.error || !Array.isArray(r.data)) return null
+      rows = r.data
+    }catch(_){ return null }
+    const jetzt = Date.now(), frisch = x => jetzt - (Date.parse(x.updated_at || '') || 0) < MT5_ORT_FRISCH_MS
+    const passt = x => String(x.master_login || '') === login || String(x.master_expected || '') === login
+    if(rows.some(x => frisch(x) && passt(x))) return { da: true }
+    const lebend = rows.filter(frisch)
+    if(!lebend.length) return null
+    if(lebend.some(x => !x.master_login && !x.master_expected)) return null   // Instanz ohne bekannten Login (alter Build / Config ohne Login)
+    const alt = rows.filter(passt).sort((a, b) => (Date.parse(b.updated_at || '') || 0) - (Date.parse(a.updated_at || '') || 0))[0]
+    return { da: false, zuletzt: alt ? { pc: alt.pc_name, instanz: alt.instance, at: alt.updated_at } : null }
+  }
+  function mt5LoginOrtText(login, ort){
+    const z = ort && ort.zuletzt
+    const wann = z ? new Date(z.at).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''
+    return `Login ${login} ist auf keinem laufenden PC dieser ID als Echo-Instanz eingerichtet`
+      + (z ? ` — zuletzt „${z.instanz}" auf ${z.pc} (${wann}). Dort im Echo-Panel die Instanz wieder anlegen bzw. „Direkt in Echo einrichten".`
+           : ' — am PC dieser ID „Direkt in Echo einrichten" (bzw. Instanz im Echo-Panel anlegen).')
+  }
   async function accBalSignaleAufraeumen(id){
     try{
       const jetzt = Date.now(), iso = new Date().toISOString()
@@ -32441,6 +32481,11 @@
       setz({ laeuft: false, fehler: !r.ok, text: r.ok ? 'gerade gelesen' : r.msg })
       if(r.ok) apNachplanBald(id)   // Planer-Chip: „nächster Lauf ≤ 10 min" (08.10.2026)
       return
+    }
+    // Kein lebender PC dieser ID hat den Login → sofort sagen, statt 3 min auf einen PC zu warten, den es nicht gibt (08.10.2026)
+    if(mt5){
+      const ort = await mt5LoginOrt(mt5Login, currentUserId)
+      if(ort && ort.da === false){ setz({ laeuft: false, fehler: true, text: mt5LoginOrtText(mt5Login, ort) }); return }
     }
     // Hängende Signale freigeben (F24, 27.09.2026, Live-Test Mike: Puls öffnete TopstepX, danach schloss sich das ganze Chrome samt
     // Prophos-Tab — die Signale blieben ewig 'laeuft'): 'laeuft' > 4 min bzw. 'wartet' > 10 min für dieses Konto → fehler
@@ -32536,6 +32581,9 @@
       if(!['keine_instanz', 'copier_offline'].includes(r.code)){ setz({ laeuft: false, fehler: true, text: r.msg }); return }
       // Instanz liegt nicht auf diesem PC → weiter mit dem Signal
     }
+    // Kein lebender PC dieser ID hat den Login → sofort sagen statt 3 min warten (08.10.2026, 8 von 12 mt5_terminal-Signalen verfielen)
+    const ort = await mt5LoginOrt(login, currentUserId)
+    if(ort && ort.da === false){ setz({ laeuft: false, fehler: true, text: mt5LoginOrtText(login, ort) }); return }
     await accBalSignaleAufraeumen(id)   // hängende konto:-Signale dieses Kontos freigeben (dieselbe plan_id wie ↻)
     let sig = null
     try{
@@ -41327,7 +41375,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1318'
+  const OS_TAB_BUILD = '2026-09-22.1319'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
