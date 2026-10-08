@@ -18643,7 +18643,21 @@ def ap_nachhol_minute(p, plaene, starts, id_fest, jetzt_min, zeiten=None, laufze
     return None, "kein regelkonformer Start gefunden"
 
 
+# NACHHOLEN NACHEINANDER (08.10.2026, Slave-Terminal 4 — Befund Slave 2 zu 96a89a6: zwei Tabs derselben ID (gleiche pc_id, Fall pc-40mali)
+# rufen „nachholen" parallel für verschiedene verpasste Pläne auf; beide laden denselben Stand, ap_nachhol_minute findet für beide dieselbe
+# freie Minute → zwei Starts zu eng, Abstand je ID/Firmen-Abstand gebrochen). Ein Lock für ALLE IDs um Laden + Rechnen + Schreiben: auch
+# zwei verschiedene IDs dürfen bei derselben Firma nicht dieselbe Minute bekommen. Railway läuft mit einem Prozess (gunicorn --workers 1
+# --threads 48), ein threading.Lock reicht; nachholen ist selten, die Wartezeit ist die Dauer eines Laufs (≈ 1–2 s).
+_AP_NACHHOL_LOCK = threading.Lock()
+
+
 def _ap_nachholen(pid, alle, uid, jetzt=None):
+    """Serialisiert _ap_nachholen_kern (s. _AP_NACHHOL_LOCK). jetzt erst im Lock — der zweite Aufruf rechnet mit dem Stand nach dem ersten."""
+    with _AP_NACHHOL_LOCK:
+        return _ap_nachholen_kern(pid, alle, uid, jetzt)
+
+
+def _ap_nachholen_kern(pid, alle, uid, jetzt=None):
     """aktion „nachholen" (08.10.2026): verpassten Plan regelkonform neu einplanen (ap_nachhol_minute) — der PC-Tab der ID ruft das aus
     sfTick, wenn er nach einem Ausfall wieder läuft. Admin alle Pläne, sonst nur eigene (Gate wie werte). Nur solange nichts gesendet ist
     (Guard planned, started_at/orbit_gesendet_at leer); Claim zurück, Bestätigung bleibt; start_fehler → status „neu" (Anzeige im Planer).
