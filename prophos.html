@@ -3164,15 +3164,6 @@
   /* Consistency-Chip neben dem Typ (07.10.2026): nur bei gesetztem accounts.consistency_pct, neutral im Outline-Stil der Typ-Chips */
   #dashboard-view .type-badge.acc-cons-chip{margin-left:6px;background:#fff;border-color:var(--border);color:var(--ink-2);vertical-align:middle}
   /* Max-Risiko-Chip (07.10.2026): nur bei gesetztem accounts.max_risiko_trade, Amber wie der Trade-Limits-Block im Bulk-Add */
-  /* Zu tun (08.10.2026): eine Zeile je Konto — Konto kurz · Firma · Phase → nächste · was · Knopf rechts */
-  #zuTunList .zt-id{display:flex;align-items:center;gap:7px;margin:8px 0 2px;font-size:12.5px;font-weight:650;color:var(--ink)} #zuTunList .zt-id i{width:9px;height:9px;border-radius:50%;flex:none}
-  #zuTunList .zt-z{display:flex;align-items:center;gap:6px 12px;flex-wrap:wrap;padding:7px 0;border-top:1px solid var(--border-soft);font-size:13px}
-  #zuTunList .zt-id + .zt-z{border-top:0}
-  #zuTunList .zt-k b{font-weight:650} #zuTunList .zt-k small{color:var(--sub);margin-left:3px;font-variant-numeric:tabular-nums}
-  #zuTunList .zt-f{color:var(--sub)} #zuTunList .zt-ph{white-space:nowrap} #zuTunList .zt-ph b{font-weight:600}
-  #zuTunList .zt-was{font-size:12px;color:var(--sub);flex:1;min-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  #zuTunList .zt-was.ziel{color:#047857;font-weight:600} #zuTunList .zt-was.manuell{color:#b45309;font-weight:600}
-  #zuTunList .zt-z .btn{padding:3px 10px;font-size:12px;height:auto;white-space:nowrap;margin-left:auto}
   /* Ziel-Chip (07.10.2026): accounts.ziel_erreicht_at, gesetzt von der Ziel-Wache (app.py zw_tick) — Grün wie ein erreichtes Ziel */
   .type-badge.acc-ziel-chip{margin-left:6px;background:#ECFDF5;border-color:#A7F3D0;color:#047857;vertical-align:middle}
   #dashboard-view .type-badge.acc-risk-chip{margin-left:6px;background:#fff;border-color:#f3c98b;color:#b45309;vertical-align:middle}
@@ -3713,6 +3704,12 @@
   #dashboard-view .wdl-man-notiz{flex:1 1 auto;min-width:60px;font:inherit;font-size:13px;padding:2px 6px;border:1px solid var(--violet);border-radius:6px;background:var(--surface);color:var(--ink);outline:none}
   #dashboard-view .wdl-man-schritt{flex:none;font:inherit;font-size:12px;font-weight:600;padding:2px 4px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--ink)}
   #dashboard-view .wdl-man-seit{flex:none;font-size:11px;color:var(--sub)}
+  /* Ziel erreicht (08.10.2026): zweizeilig — oben „🎯 Ziel erreicht · Datum", darunter Konto · Phase → Ziel; die Namensspalte ist in
+     „Manuelle Arbeit" bei 1280 px nur ~100 px breit, das Konto stünde dort abgeschnitten */
+  #dashboard-view .wdl-z-akt > .wdl-ziel-txt{flex:1;display:flex;flex-direction:column;text-align:left;line-height:1.3}
+  #dashboard-view .wdl-ziel-txt > *{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #dashboard-view .wdl-ziel-txt b{font-weight:600;color:#15803d}
+  #dashboard-view .wdl-ziel-ph{font-size:12px;color:var(--sub)} #dashboard-view .wdl-ziel-ph b{font-weight:600;color:var(--ink-2)}
   #dashboard-view .wdl-sp-bahn{position:relative;flex:1;min-width:40px;height:4px;border-radius:2px;background:var(--border-soft)}
   #dashboard-view .wdl-sp-bahn::before,#dashboard-view .wdl-sp-bahn::after{content:'';position:absolute;top:-3px;width:2px;height:10px;border-radius:1px}
   #dashboard-view .wdl-sp-bahn::before{left:-1px;background:rgba(217,45,32,.5)}
@@ -3745,6 +3742,7 @@
     #dashboard-view .wdl-z-ab{display:none}
     #dashboard-view .wdl-z-sym{display:none}   /* Handy: nur „0,5 Lot", das Symbol steht im Tooltip */
     #dashboard-view .wdl-z > .wdl-z-akt{flex-wrap:wrap;row-gap:4px}   /* Handy: passt „in 58 min" + Knopf nicht in eine Zeile, rutscht der Knopf darunter */
+    #dashboard-view .wdl-z-akt > .wdl-ziel-txt{flex-basis:100%}   /* Ziel erreicht (08.10.2026): Text volle Breite, „Nächste Phase →" darunter */
   }
   #dashboard-view .mwd-box{padding:7px 10px;border-radius:8px;border:1px solid var(--border-soft);background:var(--bg)}
   #dashboard-view .mwd-box-sum{background:var(--surface-tint)}
@@ -6972,18 +6970,6 @@
         </div>
       </div>
 
-      <!-- ZU TUN (08.10.2026, Slave-Terminal 7 — Finn: „Es wird zu unübersichtlich, ich kriege zu viele Sachen in den Radar. Ich will unter
-           Accounts oben angezeigt kriegen: ‚Ziel erreicht' — da muss ich was machen … soll das dort einmal stehen, wo ich hingehe und in die
-           nächste Phase überleite"): Konten mit erreichtem Ziel (Ziel-Wache, accounts.ziel_erreicht_at) und Konten in Manueller Arbeit
-           (Plan in „Überprüfen" mit mt5_baseline.manuell), je ID gruppiert, je Zeile der vorhandene Weg (Nachfolger-Assistent bzw. Radar).
-           Gefüllt von zuTunRender, verschwindet, wenn nichts ansteht. Eigene Verdrahtung nur an #zuTunList. -->
-      <div class="card" id="zuTunCard" hidden style="margin-bottom:14px;padding:10px 16px 12px">
-        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px">
-          <h3 style="margin:0;font-size:11.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--sub-2);font-weight:650">Zu tun</h3>
-          <span id="zuTunCount" style="font-size:11.5px;color:var(--sub-2)"></span>
-        </div>
-        <div id="zuTunList"></div>
-      </div>
 
       <!-- TODO fuer diese ID (31.08.2026, Finns Wunsch: "mach das es bei der
            jeweiligen person dann auch angezeigt wird im dashboard seine trade
@@ -28839,8 +28825,45 @@
     // MANUELLE ARBEIT (08.10.2026): zwischen Überprüfen und Erledigt, neueste Ablage oben. Leer, aber Überprüfen hat Zeilen → ein
     // schmaler, gestrichelter Kopf als Drop-Ziel (sonst gäbe es nichts, wohin man ziehen könnte); ohne beides nichts.
     const nachAblage = arr => arr.sort((a, b) => String((wdlManuell(b) || {}).at || '').localeCompare(String((wdlManuell(a) || {}).at || '')))
+    // ZIEL ERREICHT → NÄCHSTE PHASE (08.10.2026, Finn zum Kasten „Zu tun" unter Accounts: „Kann das Zu tun irgendwo anders hin? Das macht
+    // das voll kaputt … vielleicht einfach zu Radar ‚Manuelle Arbeit', finde ich gut"): eigene Konten mit accounts.ziel_erreicht_at
+    // (Ziel-Wache) als Zeilen in „Manuelle Arbeit", Zeilen-Stil wie dort (wdl-z-man) — Konto · „🎯 Ziel erreicht · TT.MM." · Phase → Ziel ·
+    // „Nächste Phase →" (openSuccessorWizard, Klick unten am #wdl-liste-Handler). Nur eigene Konten (accounts per RLS, der Assistent legt
+    // nur eigene an); ein Konto, das schon als Manuelle-Arbeit-Zeile dasteht, nicht doppelt. Nur Anzeige — die Startsperre bleibt planKontoSperre.
+    // Phase 1/2 gibt es nur bei CFD-Firmen → nach Phase 2 kommt Funded CFD; Futures laufen als challenge → Funded
+    const WDL_ZIEL_TYP = { challenge: 'funded', phase1: 'phase2', phase2: 'funded_cfd' }
+    const zielZeilen = ma => {
+      const ich = String(currentUserId || ''); if(!ich || (wdl.person && wdl.person !== ich)) return []
+      const arch = (typeof getArchive === 'function' && getArchive()) || {}, schon = new Set(ma.map(t => String(t.konto_id || '')))
+      const name = (typeof _ap !== 'undefined' && _ap && _ap.ich && _ap.ich.name) || 'Ich'
+      const typW = x => (typeof typeLabel === 'function' && typeLabel(x)) || x
+      return (accounts || []).filter(a => a && a.zielErreichtAt && !(arch[a.id] && arch[a.id].archived) && !schon.has(String(a.id)))
+        .sort((x, y) => String(y.zielErreichtAt).localeCompare(String(x.zielErreichtAt)))
+        .map(a => {
+          let gr = 0; try{ gr = Number(kontoGroesseAnzeige(a.name, a.startingBalance, null)) || 0 }catch(_){}
+          const e4 = String(a.externalId || '').replace(/[^A-Za-z0-9]/g, '').slice(-4)
+          const konto = `${a.firm || '?'}${gr >= 1000 ? ' ' + Math.round(gr / 1000) + 'k' : ''}${e4 ? ' …' + e4 : ''}`
+          const typ = String(a.type || ''), nach = WDL_ZIEL_TYP[typ], d = new Date(a.zielErreichtAt), datum = isNaN(d) ? '' : tag(d)
+          const phase = typ ? ` · ${escapeHtml(typW(typ))}${nach ? ' → <b>' + escapeHtml(typW(nach)) + '</b>' : ''}` : ''
+          const bal = num(a.zielErreichtBal)
+          // Konto steht in der Notiz-Spalte (2. Zeile), nicht in der schmalen Namensspalte — dort nur Name + Pille „Ziel"
+          return `<div class="wdl-z wdl-z-man wdl-z-ziel" style="--wdl-id:${idFarbe(ich)}">`
+            + `<span class="wdl-z-wer" title="${escapeHtml(a.name || konto)}"><span class="wdl-z-punkt"></span><b>${escapeHtml(name)}</b><i class="wdl-pf">Ziel</i></span>`
+            + zelle('mi wdl-z-akt', `<span class="wdl-ziel-txt" title="${escapeHtml(a.name || konto)}"><b>🎯 Ziel erreicht${datum ? ' · ' + datum : ''}</b><span class="wdl-ziel-ph">${escapeHtml(konto)}${phase}</span></span>`
+              + `<button type="button" class="btn btn-ghost el-knopf" data-wdl-nachfolger="${escapeHtml(String(a.id))}" title="Nachfolger-Assistent: nächste Phase anlegen bzw. umstellen — bis dahin startet kein Trade">Nächste Phase →</button>`)
+            + zelle('konto', bal != null ? f0(bal) + ' $' : '–', { tip: 'Balance beim Erreichen des Ziels (Ziel-Wache)' })
+            + zelle('pl', '–') + zelle('zeit', datum || '–') + '</div>'
+        })
+    }
     const manuell = (g, a) => {
-      if(g.ma.length) return gruppe('Manuelle Arbeit', nachAblage(g.ma), ['Notiz', 'Konto', 'P&amp;L', 'Zu'], 'wdl-tab-konto wdl-tab-manuell', null, a.ma)
+      const zz = zielZeilen(g.ma), ziel = zz.length && !wdl.modell ? [`<div class="wdl-z-modell">Ziel erreicht · ${zz.length}</div>`, ...zz] : zz
+      const nZiel = zz.length
+      if(g.ma.length){
+        const h = gruppe('Manuelle Arbeit', nachAblage(g.ma), ['Notiz', 'Konto', 'P&amp;L', 'Zu'], 'wdl-tab-konto wdl-tab-manuell', null, a.ma)
+        return ziel.length ? h.replace(`Manuelle Arbeit · ${g.ma.length}<`, `Manuelle Arbeit · ${g.ma.length + nZiel}<`).replace(/<\/div>$/, ziel.join('') + '</div>') : h
+      }
+      if(ziel.length) return `<div class="wdl-tab wdl-tab-konto wdl-tab-manuell"><div class="wdl-z wdl-z-kopf"><span class="wdl-z-wer">Manuelle Arbeit · ${nZiel}</span><span class="wdl-z-ri"></span>`
+        + ['Notiz', 'Konto', 'P&amp;L', 'Zu'].map((x, i) => `<span class="wdl-z-${['mi', 'konto', 'pl', 'zeit'][i]}">${x}</span>`).join('') + `</div>${ziel.join('')}</div>`
       if(!g.pr.length) return ''
       return `<div class="wdl-tab wdl-tab-konto wdl-tab-manuell wdl-tab-leer"><div class="wdl-z wdl-z-kopf"><span class="wdl-z-wer">Manuelle Arbeit · 0</span><span class="wdl-z-ri"></span><span class="wdl-man-hinweis">Zeile aus „Überprüfen" hierher ziehen oder „→ manuell"</span></div></div>`
     }
@@ -28855,7 +28878,8 @@
     }
     // Wischstand der Chip-Reihen (Handy) über den Neuaufbau retten — die Liste wird im Lade-Takt komplett neu gezeichnet
     const kpScroll = new Map([...liste.querySelectorAll('[data-wdl-kp]')].map(e => [e.getAttribute('data-wdl-kp'), e.scrollLeft]))
-    liste.innerHTML = trades.length ? gruppen(trades, modellTrades)
+    // Ziel-erreicht-Zeilen (08.10.2026) auch ohne Trades im Zeitraum zeigen — sonst stünde nur „Keine Trades"
+    liste.innerHTML = (trades.length || zielZeilen([]).length) ? gruppen(trades, modellTrades)
       : `<div class="mwd-leer">${wdl.daten ? (wdl.modell ? `Keine ${escapeHtml(wdl.modell)}-Trades im Zeitraum.` : 'Keine Trades im Zeitraum.') : (wdl.fehler ? 'Nicht ladbar: ' + escapeHtml(wdl.fehler) : 'Lade Radar…')}</div>`
     for(const e of liste.querySelectorAll('[data-wdl-kp]')){ const x = kpScroll.get(e.getAttribute('data-wdl-kp')); if(x) e.scrollLeft = x }
     // Offenes Notiz-Feld (Manuelle Arbeit) nach dem Neuaufbau wieder fokussieren — Cursor ans Ende
@@ -28864,6 +28888,9 @@
   }
   // Klick auf eine Karte (oder ihren Punkt) schaltet die Linien dieses Trades — eigener Handler am Listen-Container
   document.getElementById('wdl-liste')?.addEventListener('click', ev => {
+    // Ziel erreicht → „Nächste Phase →" (08.10.2026, aus dem früheren Kasten „Zu tun"): vorhandener Nachfolger-Assistent
+    const zn = ev.target.closest('[data-wdl-nachfolger]')
+    if(zn){ if(typeof openSuccessorWizard === 'function') openSuccessorWizard(zn.getAttribute('data-wdl-nachfolger')); return }
     // Personen-Chip im Gruppen-Kopf (05.10.2026): derselbe Filter wie die ID-Leiste oben
     const kp = ev.target.closest('[data-wdl-person]')
     if(kp){ wdlPersonUmschalten(kp.getAttribute('data-wdl-person')); return }
@@ -32933,63 +32960,7 @@
     kwKachelMalen()
   }
 
-  /* ZU TUN oben in Accounts (08.10.2026, Slave-Terminal 7 — Finn: „Ziel erreicht — da muss ich was machen … soll dort einmal stehen, wo
-   * ich hingehe und in die nächste Phase überleite"): eigene Konten (nicht archiviert) mit accounts.ziel_erreicht_at (Ziel-Wache) → Knopf
-   * „Nächste Phase →" öffnet den vorhandenen Nachfolger-Assistenten (openSuccessorWizard: Nachfolger anlegen bzw. Funded → Winning Days
-   * umstellen); eigene Pläne in „Überprüfen" mit mt5_baseline.manuell (Manuelle Arbeit, Kennzeichen wie tplManuellKonten) → „Im Radar →".
-   * Je ID gruppiert (Farbpunkt idFarbe). Nur Anzeige + vorhandene Wege; die Startsperre für beide Fälle steht in planKontoSperre. */
-  const ZT_NAECHSTE = { challenge: 'Funded', phase1: 'Phase 2', phase2: 'Funded' }
-  function zuTunDaten(){
-    const arch = (typeof getArchive === 'function' && getArchive()) || {}, out = []
-    for(const a of accounts || []){
-      if(!a || (arch[a.id] && arch[a.id].archived) || !a.zielErreichtAt) continue
-      out.push({ art: 'ziel', konto: a, at: a.zielErreichtAt })
-    }
-    const gesehen = new Set()
-    for(const p of tradePlans || []){
-      const m = p && p.status === 'review' && p.mt5Baseline && p.mt5Baseline.manuell
-      if(!(m && typeof m === 'object' && m.at)) continue
-      const k = String(p.masterAccountId || p.masterName || p.id); if(gesehen.has(k)) continue; gesehen.add(k)
-      const a = (accounts || []).find(x => String(x.id) === String(p.masterAccountId)) || null
-      if(a && arch[a.id] && arch[a.id].archived) continue
-      out.push({ art: 'manuell', konto: a, plan: p, at: m.at, notiz: String(m.notiz || '') })
-    }
-    return out
-  }
-  function zuTunRender(){
-    const card = document.getElementById('zuTunCard'), list = document.getElementById('zuTunList'), cnt = document.getElementById('zuTunCount')
-    if(!card || !list) return
-    let z = []; try{ z = zuTunDaten() }catch(e){ console.warn('[zu-tun]', e) }
-    card.hidden = !z.length
-    if(!z.length){ list.innerHTML = ''; return }
-    if(cnt) cnt.textContent = String(z.length)
-    const tag = iso => { const d = new Date(iso || ''); return isNaN(d) ? '' : d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) }
-    const zeile = e => {
-      const a = e.konto, name = (a && a.name) || (e.plan && e.plan.masterName) || 'Konto'
-      let g = 0; try{ g = Number((typeof kontoGroesseKurz === 'function' ? kontoGroesseKurz : kontoGroesseAnzeige)(name, a && a.startingBalance, null)) || 0 }catch(_){}
-      const e4 = String((a && a.externalId) || '').replace(/[^A-Za-z0-9]/g, '').slice(-4)
-      const kurz = g >= 1000 ? `<b>${Math.round(g / 1000)}k</b>${e4 ? `<small>…${escapeHtml(e4)}</small>` : ''}` : `<b>${escapeHtml(name.slice(0, 18))}</b>`
-      const typ = String((a && a.type) || (e.plan && e.plan.kontoTyp) || '')
-      const ph = typ ? `<span class="zt-ph"><span class="type-badge type-${escapeHtml(typ)}">${escapeHtml((typeof typeLabel === 'function' && typeLabel(typ)) || typ)}</span>${e.art === 'ziel' && ZT_NAECHSTE[typ] ? ` → <b>${ZT_NAECHSTE[typ]}</b>` : ''}</span>` : ''
-      const was = e.art === 'ziel'
-        ? `<span class="zt-was ziel" title="Ziel erreicht seit ${escapeHtml(tag(e.at))}${a && a.zielErreichtBal ? ' · Balance ' + Math.round(a.zielErreichtBal).toLocaleString('de-DE') : ''} — kein Trade mehr, bis die nächste Phase steht">🎯 Ziel erreicht · ${escapeHtml(tag(e.at))}</span>`
-        : `<span class="zt-was manuell" title="${escapeHtml(e.notiz || 'Manuelle Arbeit')} — kein Trade, bis die Arbeit erledigt ist">✍ Manuelle Arbeit${e.notiz ? ' · ' + escapeHtml(e.notiz) : ''}</span>`
-      const knopf = e.art === 'ziel' && a
-        ? `<button type="button" class="btn btn-primary" data-zt-nachfolger="${escapeHtml(String(a.id))}" title="Nachfolger-Assistent: nächste Phase anlegen bzw. umstellen">Nächste Phase →</button>`
-        : `<button type="button" class="btn btn-ghost" data-zt-radar="1" title="Radar → Manuelle Arbeit">Im Radar →</button>`
-      return `<div class="zt-z"><span class="zt-k" title="${escapeHtml(name)}">${kurz}</span><span class="zt-f">${escapeHtml((a && a.firm) || (e.plan && e.plan.masterFirm) || '')}</span>${ph}${was}${knopf}</div>`
-    }
-    const uid = String(currentUserId || ''), wer = (typeof _ap !== 'undefined' && _ap && _ap.ich && _ap.ich.name) || ''
-    list.innerHTML = (wer ? `<div class="zt-id"><i style="background:${typeof idFarbe === 'function' ? idFarbe(uid) : 'var(--sub)'}"></i>${escapeHtml(wer)}</div>` : '')
-      + z.sort((x, y) => (x.art === y.art ? 0 : x.art === 'ziel' ? -1 : 1) || String(x.at).localeCompare(String(y.at))).map(zeile).join('')
-  }
-  document.getElementById('zuTunList')?.addEventListener('click', e => {
-    const n = e.target.closest('[data-zt-nachfolger]')
-    if(n){ if(typeof openSuccessorWizard === 'function') openSuccessorWizard(n.dataset.ztNachfolger); return }
-    if(e.target.closest('[data-zt-radar]')) document.querySelector('#dashboard-view .sb-link[data-view="markt"]')?.click()
-  })
   function renderAccounts(){
-    try{ zuTunRender() }catch(e){ console.warn('[zu-tun]', e) }   // Zu tun oben in Accounts (08.10.2026) — verschwindet, sobald erledigt
     if(!accEls.table) return
     if(typeof tsAutoLinkSoon === 'function') tsAutoLinkSoon()  // Auto-Verlinkung per External ID (17.09.2026)
     todoLaden()
@@ -37934,7 +37905,6 @@
   }
 
   function renderTradePlans(){
-    try{ if(typeof zuTunRender === 'function') zuTunRender() }catch(_){}   // Manuelle Arbeit kommt/geht mit den Plänen (08.10.2026)
     try{ if(typeof atToggleSichtbarkeit === 'function') atToggleSichtbarkeit() }catch(_){}
     try{ apLeisteZeichnen() }catch(_){}   // Auto-Planer-Leiste (05.10.2026)
     try{ mt5BalCacheAnstossen() }catch(_){}   // Live-Balance der geplanten Karten (planKontoBalance), höchstens 1×/min
@@ -41751,7 +41721,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1335'
+  const OS_TAB_BUILD = '2026-09-22.1336'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
