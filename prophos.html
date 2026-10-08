@@ -10442,6 +10442,12 @@
                 <input type="search" class="input vp-in" id="wd-such" placeholder="ID / Konto / Firma suchen" style="width:190px;text-align:left">
                 <label class="at-toggle" style="margin-left:6px"><input type="checkbox" id="wd-nur-farm"><span>nur IDs mit Konten drin</span></label>
                 <span class="mono" id="wd-k-zeile" style="font-size:12px;color:var(--sub);margin-left:10px"></span>
+                <!-- Risiko Master für alle WD-Konten (08.10.2026): ein Wert → wd_sl jedes Winning-Days-Kontos (nur Lot-Rechnung des Fusion-Hedges,
+                     nie ein SL am Plan). Keine Vorbelegung — Finn trägt den Wert selbst ein. -->
+                <span style="margin-left:auto;font-size:12px;color:var(--sub)">Risiko Master $</span>
+                <input type="number" min="1" step="1" class="input mono vp-in" id="wd-risk-alle" style="width:84px" placeholder="z. B. 1500">
+                <button class="btn btn-ghost btn-mini" id="wdRiskAlle" title="Diesen Wert als Risiko Master (wd_sl) an ALLE Winning-Days-Konten aller IDs schreiben — bestehende Werte werden überschrieben, TP bleibt">für alle WD-Konten übernehmen</button>
+                <span id="wd-risk-fehlt" style="font-size:12px;color:var(--danger)"></span>
               </div>
             </div>
             <div id="wd-ablauf"></div>
@@ -41223,7 +41229,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1279'
+  const OS_TAB_BUILD = '2026-09-22.1280'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -51788,6 +51794,10 @@
       const start = k.plan_id && k.start_um ? wdHhmm(k.start_um) : (wdAktiv(k) && zeiten.get(String(k.id))) ? wdHhmm(zeiten.get(String(k.id))) : '—'
       const tpWert = k.plan_id && k.tp ? k.tp : (kd.tp_vorgabe || '')
       const slWert = kd.sl_vorgabe || ''   // Vorgabe für Risiko Master (Lot-Rechnung) — kein Stop am Plan (25.09.2026)
+      // RISIKO MASTER FEHLT (08.10.2026, Master: alle 11 WD-Konten ohne wd_sl/max_risiko_trade → hedgeMultAusRisiko fällt auf den TP zurück =
+      // Mini-Hedge): rot direkt am Feld. max_risiko_trade liefert die RPC wd_konten_alle nicht — zählt nur, wenn sie es einmal tut
+      const riskFehlt = !(Number(slWert) > 0) && !(Number(kd.max_risiko_trade) > 0)
+      const riskHinweis = riskFehlt ? '<div class="kf" style="color:var(--danger);white-space:nowrap">Risiko Master fehlt, Hedge nach TP</div>' : ''
       const tpFeld = sperren ? `<span class="mono">${tpWert ? '$' + de(tpWert) : '—'}</span>` : `<input type="number" class="input mono vp-in wd-in" data-wd-tp="${escapeHtml(String(k.id))}" value="${tpWert ? escapeHtml(String(tpWert)) : ''}" placeholder="${k.tpVon != null ? escapeHtml(de(k.tpVon) + '–' + de(k.tpBis)) : ''}" title="TP in $ — leer = zufällig aus der Firmen-Spanne">`
       const slFeld = sperren ? `<span class="mono">${slWert ? '$' + de(slWert) : '—'}</span>` : `<input type="number" class="input mono vp-in wd-in" data-wd-sl="${escapeHtml(String(k.id))}" value="${slWert ? escapeHtml(String(slWert)) : ''}" placeholder="—" title="SL in $ — leer = kein SL">`
       const live = kd.live_balance != null ? kd.live_balance : (k.live != null ? k.live : null)
@@ -51801,7 +51811,7 @@
       return `<tr class="${aus ? 'aus' : ''}">
         <td><input type="checkbox" data-wd-konto="${escapeHtml(String(k.id))}" ${hakenAn ? 'checked' : ''} ${hakenSperre ? 'disabled' : ''} title="${hakenAn || !k.farm ? 'Haken = dauerhaft im Farm: jeden Handelstag neu gewürfelt und gefahren, bis du ihn rausnimmst' : 'dauerhaft im Farm, heute abgewählt — Haken setzen = heute wieder rein'}"></td>
         <td><div class="kn">${escapeHtml(k.name || '')}</div><div class="kf">${escapeHtml(k.firm || '')}${k.ext ? ' · ' + escapeHtml(k.ext) : ' · <span style="color:var(--danger)">ohne External ID</span>'}</div></td>
-        <td class="mono">${wd}</td><td class="mono">${bal}</td><td class="mono">${start}</td><td>${tpFeld}</td><td>${slFeld}</td><td class="mono">${dd}</td><td class="mono">${slave}</td><td>${wdStand(k)}${tagKnopf ? `<div style="margin-top:3px">${tagKnopf}</div>` : ''}</td></tr>`
+        <td class="mono">${wd}</td><td class="mono">${bal}</td><td class="mono">${start}</td><td>${tpFeld}</td><td>${slFeld}${riskHinweis}</td><td class="mono">${dd}</td><td class="mono">${slave}</td><td>${wdStand(k)}${tagKnopf ? `<div style="margin-top:3px">${tagKnopf}</div>` : ''}</td></tr>`
     }).join('')
     const ohneZeile = ''   // keine Einblenden-Zeile mehr — archivierte Konten sind für den Farmer weg (Finn 23.09.2026)
     const hinweis = !erw && x.ergebnis && x.ergebnis.hinweis ? `<div style="font-size:12px;color:var(--sub);padding-top:6px">${escapeHtml(x.ergebnis.hinweis)}</div>` : ''
@@ -51815,7 +51825,7 @@
         <span class="kf">${nAkt} von ${(x.konten || []).length} Konten drin${x.gestartet_at ? ` · gestartet ${wdHhmm(x.gestartet_at)}` : ''}${erw ? ' · noch nicht eingetragen — „🎲 Würfeln" nimmt die ID mit' : ''}</span>
         <span class="kf" style="margin-left:auto">Haken wirkt sofort und dauerhaft · TP/SL, Zeit, Richtung: „Änderungen speichern"</span>
       </div>
-      <table class="wd-konten"><thead><tr><th></th><th>Konto</th><th title="Winning Days (gezählt / Ziel)">WD</th><th>Balance</th><th>Start</th><th>TP $</th><th title="Risiko Master für die Lot-Rechnung — kein Stop Loss in TradingView (Winning Days laufen ohne SL)">Risiko $</th><th>Risiko (DD)</th><th>Slave</th><th>Stand</th></tr></thead><tbody>${zeilen}${ohneZeile}</tbody></table>${hinweis}</div>`
+      <table class="wd-konten"><thead><tr><th></th><th>Konto</th><th title="Winning Days (gezählt / Ziel)">WD</th><th>Balance</th><th>Start</th><th>TP $</th><th title="Risiko Master für die Lot-Rechnung des Fusion-Hedges (hedgeMultAusRisiko) — kein Stop Loss in TradingView (Winning Days laufen ohne SL)">Risiko Master $</th><th>Risiko (DD)</th><th>Slave</th><th>Stand</th></tr></thead><tbody>${zeilen}${ohneZeile}</tbody></table>${hinweis}</div>`
   }
   /* ID OHNE NEU-WÜRFELN EINPLANEN (F35, 28.09.2026, Finn: „dass ich die ID einfach hinzufüge, sodass ich nicht neu würfeln muss — per
    * Zufallsprinzip in irgendeinen Block rein … nicht jedes Mal neu würfeln"). REIN RECHNEND (window._wdSlotWaehlen): Startzeit NUR für
@@ -51971,6 +51981,7 @@
   // Ebene 1: eine Zeile je ID (Block-Reihenfolge, ungewürfelte alphabetisch), Klick klappt die Konten der ID auf
   function wdAblauf(rows, fehlend){
     const box = document.getElementById('wd-ablauf'); if(!box) return
+    try{ wdRiskZaehlen() }catch(_){}   // „n von m ohne Risiko Master" im Kopf (08.10.2026)
     const r = _wd.regeln || {}, de = wdDe
     const such = String(document.getElementById('wd-such')?.value || '').trim().toLowerCase()
     const nurFarm = !!document.getElementById('wd-nur-farm')?.checked
@@ -52647,6 +52658,33 @@
   document.getElementById('wd-tag')?.addEventListener('change', () => { _wd.tagHand = true; wdNeuLaden() })   // von Hand gewählt → wdOpen setzt nicht zurück
   document.getElementById('wd-such')?.addEventListener('input', () => wdAblauf(_wd.rows || [], wdFehlend()))
   document.getElementById('wd-nur-farm')?.addEventListener('change', () => wdAblauf(_wd.rows || [], wdFehlend()))
+  /* RISIKO MASTER FÜR ALLE WD-KONTEN (08.10.2026, Master: alle 11 Winning-Days-Konten ohne wd_sl/max_risiko_trade — der Fusion-Hedge
+   * rechnete deshalb mit dem TP als Risiko Master = Mini-Hedge, hedgeMultAusRisiko seit f12d451). Ein Wert → wd_sl an jedem WD-Konto aller
+   * IDs über die RPC wd_konto_setzen (p_sl; p_tp bleibt NULL = TP unangetastet). wd_sl ist nur Rechenfeld der Lot-Rechnung, nie ein SL am
+   * Plan (Finns Regel: Winning Days ohne SL, master_sl bleibt null). Keine Vorbelegung — Finn trägt den Wert selbst ein. */
+  const wdWdKonten = () => ((_wd.daten && _wd.daten.konten) || []).filter(k => wdIstWdKonto(k))
+  function wdRiskZaehlen(){
+    const el = document.getElementById('wd-risk-fehlt'); if(!el) return
+    const alle = wdWdKonten(), ohne = alle.filter(k => !(Number(k.sl_vorgabe) > 0) && !(Number(k.max_risiko_trade) > 0)).length
+    el.textContent = alle.length && ohne ? `${ohne} von ${alle.length} ohne Risiko Master` : ''
+  }
+  document.getElementById('wdRiskAlle')?.addEventListener('click', async () => {
+    const inp = document.getElementById('wd-risk-alle'), b = document.getElementById('wdRiskAlle')
+    const wert = Math.round(parseFloat(inp && inp.value))
+    if(!(wert > 0)) return wdSay('Risiko Master: erst einen Dollar-Betrag eintragen (z. B. 1500).', 'err')
+    const konten = wdWdKonten()
+    if(!konten.length) return wdSay('Keine Winning-Days-Konten geladen — „Neu laden".', 'err')
+    if(!confirm(`Risiko Master ${wert.toLocaleString('de-DE')} $ an alle ${konten.length} Winning-Days-Konten schreiben?\n\nBestehende Werte werden überschrieben, TP bleibt. Kein Stop Loss — nur die Lot-Rechnung des Fusion-Hedges.`)) return
+    if(b){ b.disabled = true; b.textContent = 'speichert …' }
+    let ok = 0; const fehler = []
+    for(const k of konten){
+      const { error } = await supabase.rpc('wd_konto_setzen', { p_account: k.id, p_sl: wert })
+      if(error) fehler.push(`${k.name || k.id}: ${error.message}`); else { k.sl_vorgabe = wert; ok++ }
+    }
+    if(b){ b.disabled = false; b.textContent = 'für alle WD-Konten übernehmen' }
+    wdSay(fehler.length ? `Risiko Master an ${ok} von ${konten.length} Konten gesetzt — Fehler: ${fehler.slice(0, 3).join(' · ')}` : `Risiko Master ${wert.toLocaleString('de-DE')} $ an alle ${ok} WD-Konten gesetzt.`, fehler.length ? 'err' : 'ok')
+    try{ wdAblauf(_wd.rows || [], wdFehlend()) }catch(_){ try{ wdRender() }catch(_){} }
+  })
   document.getElementById('wdSave')?.addEventListener('click', async () => {
     const b = document.getElementById('wdSave'); if(b){ b.disabled = true; b.textContent = 'speichert …' }
     _wd.busy = true
