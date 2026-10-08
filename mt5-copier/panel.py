@@ -1731,6 +1731,26 @@ def _ok_dialog_watcher(install_dir, dauer_s=75):
             pass
 
 
+def _login_ok_wache(fname, expected, sekunden=90):
+    """Nach einem Kaltstart (08.10.2026, Master — Moritz 8a05ebaa: das MT5-Einloggen-Fenster blockierte Snapshot und API ~4 min, der
+    _ok_dialog_watcher erkennt es nicht, nur der Bot — und der erst mitten im Order-Lauf): der Bot sucht bis `sekunden` lang NUR das
+    Einloggen-Fenster für GENAU dieses Konto (ist_mt5_login_dialog) und bestätigt es nur per invoke() — keine Maus, kein Tippen,
+    nie ein fremder Dialog. Läuft als eigener Prozess wie /api/mouse-test; Fehler bleiben still (der Order-Weg prüft selbst nach)."""
+    try:
+        bot = os.path.join(HERE, "order_bot.py")
+        if not os.path.exists(bot):
+            ensure_bot_source()
+        p = subprocess.run([sys.executable, bot, "loginok", str(int(expected)), str(int(sekunden))],
+                           capture_output=True, text=True, errors="replace", timeout=sekunden + 30,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        zeilen = (p.stdout or "").strip().splitlines()
+        res = json.loads(zeilen[-1]) if zeilen else {}
+        if "bestätigt" in str(res.get("msg") or ""):
+            print(f"[panel] {fname}: {res.get('msg')}", flush=True)
+    except Exception as e:
+        print(f"[panel] {fname}: Login-OK-Wache {type(e).__name__}: {e}", flush=True)
+
+
 def start_terminal(fname, creds=None, ohne_update=False):
     """Startet das Master-Terminal der Instanz — oder holt das LAUFENDE Fenster
     nach vorn. Ein zweiter Start derselben Installation wuerde ein frisches
@@ -1893,6 +1913,9 @@ def start_terminal(fname, creds=None, ohne_update=False):
         # Start-Dialoge (Login/OK) automatisch bestaetigen — s. _ok_dialog_watcher
         threading.Thread(target=_ok_dialog_watcher, args=(install_dir,),
                          daemon=True).start()
+        # MT5-Einloggen-Fenster dieses Kontos (08.10.2026, s. _login_ok_wache) — nur mit bekanntem Konto
+        if expected:
+            threading.Thread(target=_login_ok_wache, args=(fname, expected), daemon=True).start()
         # Fenster nach vorn, sobald es da ist (sonst startet MT5 hinter dem Browser)
         _front_when_up(install_dir)
         return True, msg

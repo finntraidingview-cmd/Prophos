@@ -1239,12 +1239,14 @@ _MT5_PFAD = None            # Terminal, an dem dieser Prozess gerade haengt
 _API_STAT = {"n": 0, "ms": 0.0}   # Bilanz fuer die Spur — Beweis statt Gefuehl
 
 
-def _api_verbinden(mt5, path):
+def _api_verbinden(mt5, path, timeout_ms=None):
     global _MT5_PFAD
     if _MT5_PFAD == path:
         return True
     _api_trennen(mt5)
-    if not mt5.initialize(path=path):
+    # timeout_ms (08.10.2026, Login-Dialog-Fall 8a05ebaa): ohne Angabe wie bisher (MetaTrader5-Standard 60 s)
+    ok = mt5.initialize(path=path, timeout=int(timeout_ms)) if timeout_ms else mt5.initialize(path=path)
+    if not ok:
         return False
     _MT5_PFAD = path
     return True
@@ -1312,7 +1314,7 @@ class _StempelSpur(list):
         return time.time() - self._t0
 
 
-def _api_lesen(path, expected, symbol=None):
+def _api_lesen(path, expected, symbol=None, timeout_ms=None):
     """Lesen ueber die (offen gehaltene) Terminal-Verbindung. Rueckgabe:
     {"login", "positionen": [...], "ref_ask", "ref_bid", "contract_size",
      "digits"} oder {"fehler": ...}."""
@@ -1323,7 +1325,7 @@ def _api_lesen(path, expected, symbol=None):
     _t0 = time.time()
     try:
         for versuch in (1, 2):
-            if not _api_verbinden(mt5, path):
+            if not _api_verbinden(mt5, path, timeout_ms):
                 _api_trennen(mt5)
                 if versuch == 2:
                     return {"fehler": f"Terminal-Verbindung fehlgeschlagen: {mt5.last_error()}"}
@@ -10116,7 +10118,7 @@ def _uia_wert(el):
     return ""
 
 
-def _mt5_login_bestaetigen(expected, trail=None):
+def _mt5_login_bestaetigen(expected, trail=None, wege=("invoke", "klick", "enter")):
     """Den 'Einloggen'-Dialog von MT5 mit OK bestaetigen (Finn 07.10.2026:
     „Kannst du einstellen, dass … der Bot automatisch hier auf OK drueckt?").
     MT5 schiebt ihn ab und zu beim Konto-Login dazwischen; Konto, gespeichertes
@@ -10187,7 +10189,7 @@ def _mt5_login_bestaetigen(expected, trail=None):
             except Exception:
                 return True   # Element nicht mehr ansprechbar = weg
 
-        for weg in ("invoke", "klick", "enter"):
+        for weg in wege:
             try:
                 if weg == "invoke":
                     ok.invoke()
@@ -10211,27 +10213,33 @@ def _mt5_login_bestaetigen(expected, trail=None):
     return "keiner"
 
 
+LOGIN_RUNDE_MS = 10000    # initialize-Timeout je Runde in _login_dann_lesen (08.10.2026)
+LOGIN_GEDULD_S = 120.0    # Gesamtgeduld wie bisher (2 × 60 s initialize + 15 s)
+
+
 def _login_dann_lesen(path, expected, **kw):
     """_api_lesen mit vorgeschaltetem Login-OK (07.10.2026): steht der
     Einloggen-Dialog da, erst OK, dann bis ~15 s warten, bis das Konto
     verbunden ist. Ohne Dialog exakt das alte _api_lesen.
     trail (optional) bekommt die Login-Stempel."""
     trail = kw.pop("trail", None)
+    # IN RUNDEN (08.10.2026, Master — Moritz 8a05ebaa: Claim 05:59 → offen 06:04; „API-Lesen 5x 137.4s", erst bei 140 s fand der Bot das
+    # MT5-Einloggen-Fenster und drückte OK, danach Order in 20 s). Steht der Dialog, hängt mt5.initialize ohne Timeout bis ~60 s je
+    # Versuch — der Dialog wurde erst DANACH gesucht. Jetzt: Dialog prüfen/bestätigen, dann initialize mit 10 s, das im Wechsel bis zur
+    # bisherigen Gesamtgeduld (~120 s); ohne Dialog und mit schneller Verbindung genau wie vorher (eine Runde).
+    kw.setdefault("timeout_ms", LOGIN_RUNDE_MS)
+    ende = time.time() + LOGIN_GEDULD_S
     st = _mt5_login_bestaetigen(expected, trail)
-    lese = _api_lesen(path, expected, **kw)
-    if "fehler" not in lese:
-        return lese
-    if st != "bestaetigt":
-        st = _mt5_login_bestaetigen(expected, trail)
-        if st != "bestaetigt":
-            return lese
-    ende = time.time() + 15.0
-    while time.time() < ende:
-        _warte(1.0, 0.5)
+    while True:
         lese = _api_lesen(path, expected, **kw)
         if "fehler" not in lese:
             return lese
-    return lese
+        if time.time() >= ende:
+            return lese
+        st2 = _mt5_login_bestaetigen(expected, trail)
+        if st2 == "bestaetigt":
+            st = st2
+        _warte(1.0, 0.5)
 
 
 def _fremde_dialoge_schliessen(hauptfenster):
@@ -22359,6 +22367,24 @@ def _tsx_order_cdp_mit_neustart(befehl, cmd):
                               None, TSX_URL)
 
 
+def modus_loginok(expected, sekunden="90"):
+    """Panel nach einem Kaltstart (08.10.2026, Master — Fall 8a05ebaa): bis `sekunden` lang alle ~2 s nach dem MT5-Einloggen-Fenster
+    für GENAU dieses Konto suchen (volle Signatur ist_mt5_login_dialog) und es NUR per invoke() bestätigen — keine Maus, kein Fokus,
+    kein Tippen (ein gleichzeitig klickender Puls wird nicht gestört), nie ein fremder Dialog, nie Login-Daten. → {ok, msg, trail}"""
+    try:
+        exp = int(str(expected).strip())
+        dauer = max(5.0, min(180.0, float(sekunden)))
+    except (TypeError, ValueError):
+        return {"ok": False, "msg": "loginok: Konto/Sekunden ungültig"}
+    trail, ende = [], time.time() + dauer
+    while time.time() < ende:
+        st = _mt5_login_bestaetigen(exp, trail, wege=("invoke",))
+        if st == "bestaetigt":
+            return {"ok": True, "msg": f"MT5-Login-Dialog für {exp} bestätigt", "trail": trail[-5:]}
+        _warte(2.0, 0.5)
+    return {"ok": True, "msg": "kein Login-Dialog", "trail": trail[-5:]}
+
+
 def main():
     # Konsole robust (24.09.2026 abends, Finns PC: tvlesen 'absturz @ raus' = UnicodeEncodeError, cp1252 kann
     # '\u25bc' aus dem TradingView-Tab-Titel nicht kodieren — die Spur traegt den Titel, die JSON-Antwort
@@ -22370,6 +22396,9 @@ def main():
             pass
     if len(sys.argv) >= 2 and sys.argv[1] == "mousetest":
         modus_mousetest()
+        return 0
+    if len(sys.argv) >= 3 and sys.argv[1] == "loginok":
+        print(json.dumps(modus_loginok(sys.argv[2], sys.argv[3] if len(sys.argv) >= 4 else "90"), ensure_ascii=False))
         return 0
     if len(sys.argv) >= 2 and sys.argv[1] == "tvfokus":
         # Orbit Schritt 1 (28.08.2026): nur den TradingView-Tab nach vorn —
