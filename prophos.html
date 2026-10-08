@@ -23798,6 +23798,116 @@
     return zu > 0 && (Number(jetzt) || Date.now()) - zu >= HEDGE_REVIEW_SPAET_MS
   }
   window._hedgeReviewSpaetFaellig = hedgeReviewSpaetFaellig   // Test-Haken (rein rechnend)
+  /* MASTER NIE GEFÜLLT → START-FEHLER + NEU EINPLANEN (08.10.2026, Finn über Master: Orbit V3 mit Hedge-Schluss master_nie_da „als
+   * START-FEHLER behandeln und NEU EINPLANEN wie andere Startfehler" — mit Slave-2-Einwand: ein Falsch-Positiv (Fill spät, Reader blind)
+   * ließe sonst eine echte Master-Position ohne Plan und Hedge). Ablauf am Hedge-PC (Wächter, je Takt):
+   *   1) Beweis sammeln: Puls-Chrome-Reader (Tab 'puls-…', flach nur mit Beweis), Stand ≤ 3 s, Plan-Konto (Token), keine blinde Zeile,
+   *      KEINE Position der Plan-Wurzel in IRGENDEINER Richtung. ≥ 6 solche Lesungen über ≥ 60 s, ohne Lücke > 15 s.
+   *   2) Bewiesen + Puls meldete keinen Fill → prophos_orbit_nie_da_zurueck (SQL, atomar, Guard): Plan zurück auf „geplant", alter
+   *      Versuch unter versuche_alt, start_fehler {schritt 'master_nie'} → sfTick plant 15 min später neu ein (sfBehoben verlangt dafür
+   *      noch einmal eine frische Flach-Lesung — kam der Master doch noch, kein zweiter Trade). Alte puls_ergebnisse-Zeile gilt als abgeholt.
+   *   3) Unklar (Puls meldete einen Fill, oder 10 min ohne Beweis) → Überprüfen mit Hinweis, Balance-Lesung zeigt die Wahrheit.
+   *   4) Reader zeigt doch eine Position → Alarm, KEIN Neueinplanen, Plan bleibt offen (Auto-Close fasst ihn abends an). */
+  const NIE_DA_LESUNGEN = 6, NIE_DA_BEWEIS_MS = 60000, NIE_DA_LUECKE_MS = 15000, NIE_DA_FRIST_MS = 10 * 60000
+  // REIN: eine Reader-Lesung für den Beweis → 'flach' | 'position' | null (keine Aussage)
+  function nieDaLesung(st, kontoPlan, wurzel){
+    if(!st || st.an === false || st.positionen_ok === false || !Array.isArray(st.positionen)) return null
+    if(!/^puls-/.test(String(st.positionen_tab || ''))) return null
+    if(!(typeof st.positionen_alter_s === 'number' && st.positionen_alter_s <= 3)) return null
+    const id = String(kontoPlan || '').trim(), kt = String(st.konto || '').trim()
+    if(!id || !kt || !(kt === id || kt.split(/[^A-Za-z0-9]+/).includes(id))) return null
+    if(st.positionen.some(x => x && x.pnl_unklar)) return null
+    const w = wurzel === 'MNQ' ? 'MNQ' : 'NQ'
+    const da = st.positionen.some(x => { if(!x) return false
+      const xw = x.wurzel || ((typeof tvSymbolWurzel === 'function') ? tvSymbolWurzel(x.symbol || '') : String(x.symbol || ''))
+      if(xw !== w) return false
+      const m = (typeof x.menge_zahl === 'number') ? Math.abs(x.menge_zahl) : Math.abs(Number(x.menge) || 0)
+      return m > 0 || (x.menge_zahl == null && x.menge == null) })   // Zeile ohne lesbare Menge zählt als Position (vorsichtig)
+    return da ? 'position' : 'flach'
+  }
+  // REIN: Beweis-Stand fortschreiben → { erste, letzte, n, position }
+  function nieDaSchritt(stand, lesung, jetzt){
+    const s0 = stand || null
+    if(s0 && s0.position) return s0
+    if(lesung === 'position') return { erste: s0 ? s0.erste : jetzt, letzte: jetzt, n: s0 ? s0.n : 0, position: true }
+    if(lesung !== 'flach') return s0
+    if(!s0 || jetzt - s0.letzte > NIE_DA_LUECKE_MS) return { erste: jetzt, letzte: jetzt, n: 1, position: false }
+    return { erste: s0.erste, letzte: jetzt, n: s0.n + 1, position: false }
+  }
+  const nieDaBewiesen = st => !!(st && !st.position && st.n >= NIE_DA_LESUNGEN && st.letzte - st.erste >= NIE_DA_BEWEIS_MS)
+  // REIN: hat Puls für diesen Start einen Fill gemeldet? (dann war der Master da — nie neu einplanen)
+  const nieDaFillGemeldet = tv => !!(tv && (tv.einstieg_quelle === 'fill' || /fill/i.test(String(tv.einstieg_beleg || ''))))
+  window._nieDa = { lesung: nieDaLesung, schritt: nieDaSchritt, bewiesen: nieDaBewiesen, fill: nieDaFillGemeldet }   // Test-Haken (rein rechnend)
+  const _nieDaStand = new Map(), _nieDaFertig = new Set()
+  async function hedgeNieDaPruefen(p){
+    const pid = String(p.id), h = p.mt5Baseline.hedge
+    if(_nieDaFertig.has(pid)) return
+    const acc = (accounts || []).find(a => String(a.id) === String(p.masterAccountId))
+    const kontoPlan = acc ? String(acc.externalId || '').trim() : ''
+    const wz = ((typeof tvSymbolWurzel === 'function') && tvSymbolWurzel(h.symbol_nq || '')) === 'MNQ' ? 'MNQ' : 'NQ'
+    try{ if(typeof window._epLokalHolen === 'function') await window._epLokalHolen() }catch(_){}
+    const ep = window._epLokal, st = (ep && ep.stand) ? ep.stand : null
+    const jetzt = Date.now(), stand = nieDaSchritt(_nieDaStand.get(pid), nieDaLesung(st, kontoPlan, wz), jetzt)
+    if(stand) _nieDaStand.set(pid, stand)
+    const tv = (p.mt5Baseline && p.mt5Baseline.tv) || null
+    const zuSeit = jetzt - (Date.parse(h.closed_at || '') || jetzt)
+    // (4) Position doch da → Alarm, nichts neu einplanen, Plan bleibt offen
+    if(stand && stand.position){
+      _nieDaFertig.add(pid)
+      try{ await baselinePatch(pid, { nie_da_pruefung: { status: 'master_da', at: new Date().toISOString() } }, 'open') }catch(_){}
+      if(typeof atToast === 'function') atToast(`⚠ ${p.masterName || 'Plan'}: Master-Position ist DOCH in TradingView — Fusion-Hedge ist zu! Von Hand prüfen (Prophos plant nichts neu ein).`, 'end')
+      try{ if(typeof pushAnsHandy === 'function') pushAnsHandy('⚠ Master ohne Hedge', `„${p.masterName || 'Plan'}": Master-Position doch da, Fusion-Hedge geschlossen (master_nie_da) — von Hand prüfen.`, 'https://prophos.pages.dev/prophos#trades', 'nieda-' + pid.slice(0, 8)) }catch(_){}
+      return
+    }
+    // (3) unklar → Überprüfen mit Hinweis (Balance-Lesung zeigt die Wahrheit). Puls UNKLAR („nie blind erneut starten", Slave-2-Prüfung:
+    // eine Order kann in einer Pause hängen und später noch füllen — der Reader sieht nur Positionen, keine wartenden Orders) zählt mit
+    const fill = nieDaFillGemeldet(tv) || !!(p.mt5Baseline && p.mt5Baseline.puls_unklar)
+    if(fill || zuSeit >= NIE_DA_FRIST_MS){
+      if(!(await hedgeSperre(pid, 'waechter', 20))) return
+      _nieDaFertig.add(pid)
+      let frisch = p
+      try{ const { data } = await supabase.from('trade_plans').select('*').eq('id', pid).maybeSingle(); if(data) frisch = rowToPlan(data) }catch(_){}
+      if(frisch.status !== 'open' || frisch.mt5Baseline.final) return
+      const hinweis = fill ? 'Fusion schloss als „Master nie gefüllt", Puls hatte aber einen Fill bzw. UNKLAR gemeldet — in TradingView prüfen, Balance-Lesung abwarten'
+        : 'Master-Position nie gesehen, aber nicht 60 s bewiesen flach (Reader auf anderem Konto/aus) — Balance-Lesung abwarten, nicht neu eingeplant'
+      let ok = false
+      try{ ok = await tvV2EndeSetzen(frisch, null, 'nie_da_unklar', { grund: 'master_nie_da', art: 'nie_da', hinweis }) }catch(e){ console.warn('[nieDa] Ende', e) }
+      if(ok){ try{ const pf = tradePlans.find(x => String(x.id) === pid); if(pf && pf.status === 'open' && typeof atMoveToReview === 'function') await atMoveToReview(pf) }catch(_){}
+        if(typeof atToast === 'function') atToast(`⚠ ${p.masterName || 'Plan'}: ${hinweis} → Überprüfen`, 'end') }
+      else _nieDaFertig.delete(pid)
+      return
+    }
+    if(!nieDaBewiesen(stand)) return
+    // Fusion-P&L zuerst festhalten (Slave-2-Prüfung): fehlt er noch (pl_offen), holt hedgePlNachholen ihn — erst dann wandert der Hedge
+    // nach versuche_alt (der Spread-Verlust ist echte Reibung)
+    if(h.pl == null && h.pl_offen) return
+    // PULS-LAUF NACHWEISLICH FERTIG (Slave-2-Prüfung, Muss): ein spätes Puls-Ergebnis (Puls hing, 409-Schleife, Bridge-Timeout bis 150 s)
+    // käme sonst NACH dem Zurücksetzen mit abgeholt_at null an und pulsErgebnisseUebernehmen nähme es bei „geplant" als neuen Start — Plan
+    // open ohne Hedge. Darum nur, wenn kein order_signale dieses Plans mehr läuft UND die puls_ergebnisse-Zeile (order) schon da ist
+    try{
+      const [{ count: laeuft }, { data: pe }] = await Promise.all([
+        supabase.from('order_signale').select('id', { count: 'exact', head: true }).eq('plan_id', pid).eq('status', 'laeuft'),
+        supabase.from('puls_ergebnisse').select('at, stufe').eq('plan_id', pid).eq('art', 'order').maybeSingle()])
+      if((Number(laeuft) || 0) > 0 || !pe) return            // warten — nach NIE_DA_FRIST_MS greift sonst der Weg „unklar"
+    }catch(_){ return }
+    // (2) bewiesen flach → zurück auf „geplant" + Start-Fehler, sfTick plant neu
+    if(!(await hedgeSperre(pid, 'waechter', 20))) return
+    _nieDaFertig.add(pid)
+    const login = (typeof mt5LoginForAccount === 'function') ? mt5LoginForAccount(p.masterAccountId) : null
+    const flag = { schritt: 'master_nie', msg: `Master nie gefüllt — Hedge geschlossen, nichts offen (Reader ${Math.round((stand.letzte - stand.erste) / 1000)} s flach, ${stand.n} Lesungen)`,
+      unklar: false, status: 'rot', at: new Date().toISOString(), pc: hedgePcId() || null, login: login ? String(login) : null, start: p.startUm || null,
+      versuche: ((p.mt5Baseline.start_fehler && Number(p.mt5Baseline.start_fehler.versuche)) || 0) }
+    let row = null
+    try{ const { data, error } = await supabase.rpc('prophos_orbit_nie_da_zurueck', { p_plan: pid, p_flag: flag }); if(error) throw error; row = Array.isArray(data) ? data[0] : data }
+    catch(e){ console.warn('[nieDa] zurücksetzen', (e && e.message) || e); setTimeout(() => _nieDaFertig.delete(pid), 60000); return }   // SQL noch nicht eingespielt → höchstens 1×/min neu
+    if(!row){ setTimeout(() => _nieDaFertig.delete(pid), 60000); return }   // Guard griff (Plan inzwischen anders) → in 1 min neu ansehen
+    try{ await supabase.from('puls_ergebnisse').update({ abgeholt_at: new Date().toISOString() }).eq('plan_id', pid).eq('art', 'order') }catch(_){}   // alter Klick nie übernehmen
+    const neu = rkPlanErsetzen(row)
+    try{ if(typeof sfMelden === 'function') await sfMelden(neu, flag) }catch(_){}   // Fehler-Muster + Handy, start_fehler (Guard planned)
+    _nieDaStand.delete(pid)
+    if(typeof atToast === 'function') atToast(`↻ ${p.masterName || 'Plan'}: Master nie gefüllt (60 s flach bewiesen) — Start-Fehler, Prophos plant von selbst neu ein`, 'start')
+    try{ renderTradePlans() }catch(_){}
+  }
   const _hedgeReviewVersucht = new Map()   // planId → ms des letzten Versuchs (höchstens alle 60 s, falls ein Write scheitert)
   function hedgeLevelSchaetzung(p, art){
     // Liquidation (F22): Master-P&L ≈ Liquidations-Balance − Start-Balance (negativ), exakt später per Balance-Nachlesung
@@ -25424,6 +25534,8 @@
         if(h.status === 'geschlossen' && p.status === 'open' && (HEDGE_REVIEW_GRUENDE[h.grund] || hedgeReviewSpaetFaellig(h, Date.now()))){ if(await hedgePlanAufReview(p)) continue }   // + Nachzügler nach Reader-Ende (08.10.2026)
         // Ring meldete zu ohne P&L (Historie hinkte) → per Close-Aufruf mit Ticket nachfragen (schon_zu + pl)
         if(h.status === 'geschlossen' && h.pl == null && h.pl_offen && h.ticket && !_hedgeBusy.has(String(p.id))){ await hedgePlNachholen(p); continue }
+        // Master nie gefüllt → Beweis sammeln, dann Start-Fehler + neu einplanen bzw. Überprüfen (08.10.2026, Finn) — nach dem P&L-Nachholen
+        if(h.status === 'geschlossen' && p.status === 'open' && h.grund === 'master_nie_da'){ try{ await hedgeNieDaPruefen(p) }catch(e){ console.warn('[nieDa]', e) } continue }
         if(h.status === 'unklar' && h.cmd_id && !_hedgeBusy.has(String(p.id))){
           try{
             const e = await window.mtcApi('hedge-solo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ aktion: 'ergebnis', cmd_id: h.cmd_id }), timeoutMs: 8000 })
@@ -42017,7 +42129,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1370'
+  const OS_TAB_BUILD = '2026-09-22.1371'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -43817,6 +43929,12 @@
         const name = plan.masterName || 'Plan'
         if(z.art === 'order'){
           if(plan.status !== 'planned' || !(e.gesendet || e.ok)){ await pulsErgebnisAbgeholt(z.plan_id, 'order'); continue }
+          // MASTER NIE GEFÜLLT (08.10.2026, Slave-2-Prüfung): Ergebnis eines Starts, der schon zurückgesetzt wurde (versuche_alt) → nie als
+          // neuer Start übernehmen; der Klick muss NACH dem letzten Zurücksetzen liegen
+          { const va = (plan.mt5Baseline && Array.isArray(plan.mt5Baseline.versuche_alt)) ? plan.mt5Baseline.versuche_alt : []
+            const zur = va.length ? (Date.parse(va[va.length - 1].zurueck_at || '') || 0) : 0
+            const kms0 = Number(e.order_klick_ms), klick0 = kms0 > 1e12 ? kms0 : (Date.parse(e.klick_at || z.at || '') || 0)
+            if(zur && klick0 && klick0 <= zur){ await pulsErgebnisAbgeholt(z.plan_id, 'order'); console.info('[puls-ergebnis] Ergebnis vor dem Zurücksetzen verworfen', z.plan_id); continue } }
           // Topstep V2 (K4, 30.09.2026): nur ein BEWIESEN gesendeter Klick zählt — eine Probe (scharf:false, schritt 'probe') meldet ok:true
           // ohne gesendet und darf NIE „Läuft" setzen (der Bot sendet sie ohnehin nicht, das hier ist der Riegel im Tab)
           // Seit B37 (30.09.2026) auch: abgelehnt / beweis (gesendet:true, ok:false) und unklar setzen NIE „Läuft" — nur ok UND gesendet
@@ -46028,6 +46146,17 @@
   async function sfBehoben(plan, f){
     if(f.unklar || f.schritt === 'ziel_erreicht' || f.schritt === 'manuelle_arbeit') return null   // Ziel erreicht / Manuelle Arbeit: nie von selbst neu einplanen
     if(f.schritt === 'zu_spaet') return 'Prophos-Tab am PC läuft wieder'
+    // Master nie gefüllt (08.10.2026): nach 15 min nur, wenn der Puls-Chrome-Reader das Konto JETZT flach zeigt — kam der Master doch
+    // noch (oder ist das Konto nicht im Blick), kein zweiter Trade
+    if(f.schritt === 'master_nie'){
+      if(Date.now() - (Date.parse(f.at) || 0) < SF_WARTE_MS) return null
+      try{ if(typeof window._epLokalHolen === 'function') await window._epLokalHolen() }catch(_){}
+      const acc = (accounts || []).find(a => String(a.id) === String(plan.masterAccountId))
+      const sym = String(((typeof tpOrbitWerte === 'function') ? tpOrbitWerte(plan).symbol : '') || plan.masterSymbolRoot || plan.masterSymbol || '')
+      const wz = /^MNQ/i.test(sym) ? 'MNQ' : 'NQ'
+      const l = (typeof window._nieDa === 'object') ? window._nieDa.lesung((window._epLokal || {}).stand, acc ? acc.externalId : '', wz) : null
+      return l === 'flach' ? 'Konto weiter flach (Reader) — Master war nie gefüllt' : null
+    }
     if(plan.route === 'mt5v2' && (f.schritt === 'v2link' || !f.schritt)){
       const dd = (typeof window.mtcApi === 'function') ? await window.mtcApi('instances') : null
       if(!dd || dd.copier_offline || dd._httpFail) return null
@@ -47942,6 +48071,7 @@
       case 'zeitlimit': case 'puls_beschaeftigt': return `Puls am PC${pc} war belegt oder zu langsam — nichts tun, der Bot wiederholt von selbst.`
       case 'unklar': return `Erst in ${/Topstep/i.test(m) ? 'TopstepX' : 'TradingView'} nachsehen, ob die Order liegt — dann auf der Karte „⚠ UNKLAR" lösen; nie blind erneut starten.`
       case 'zu_spaet': return `Prophos-Tab am PC${pc} offen lassen.`
+      case 'master_nie': return 'Nichts tun — die Order kam in TradingView nie an (Fusion wieder zu, Konto 60 s flach bewiesen); Prophos plant 15 min später neu ein, wenn das Konto dann noch flach ist.'
       case 'ziel_erreicht': return 'Ziel ist erreicht — kein Trade nötig. Konto ansehen (Phasenwechsel/Auszahlung), Plan löschen.'
       case 'manuelle_arbeit': return 'Konto steht in Manueller Arbeit — erst im Radar erledigen, dann neu planen.'
       // 'puls' = Orbit-Fehler ohne Bot-Schritt (08.10.2026): die häufigsten Texte aus order_signale — External ID fehlt (49×), Tab lud neu (33×)
