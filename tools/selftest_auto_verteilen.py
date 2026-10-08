@@ -260,6 +260,31 @@ def main():
     check(not zug(e500), "Verschlechterung über Hysterese + Toleranz (500 € > 400): bleibt stehen")
     check(e300["nachher"]["ueber_band"] <= e300["vorher"]["ueber_band"], "60-min-Band bleibt strikt (nicht schlechter)")
 
+    # KEIN KRIECHEN (Prüfer 08.10.2026: Ina FundedNext 82412ebf 17:24 → 17:25 → 17:26, je Lauf 1 min): 60 min passen nicht (Inas
+    # FundingPips 17:46 ± 20, fremder FundedNext-Buy 18:06 = Malus/Firmen-Abstand), die ½-Stufe ist mit 51 min längst erfüllt → stehen lassen
+    kr = [plan("k1", "u-ina", "Ina", "fundednext", dt("16:33"), "sell"), plan("k2", "u-ina", "Ina", "fundednext", dt("17:24"), "sell"),
+          plan("k3", "u-ina", "Ina", "fundednext", dt("18:26"), "sell"), plan("kfp", "u-ina", "Ina", "fundingpips", dt("17:46")),
+          plan("kx", "u-x", "X", "fundednext", dt("18:06"))]
+    plk, jmk, zk, zuege = [dict(p) for p in kr], dt("04:44"), {}, []
+    for _l in range(6):
+        e = U(plk, 0.0, 0.0, jmk, Z2, 100, random.Random(_l), zuletzt=zk, dubai_min=DUBAI)
+        nv = {x["plan_id"]: x["nach_start_min"] for x in e["aenderungen"] if x["art"] == "start"}
+        zuege += [(x["plan_id"], x["nach_start_min"] - x["von_start_min"]) for x in e["aenderungen"] if x["art"] == "start"]
+        plk = [dict(p, start_min=nv.get(p["plan_id"], p["start_min"])) for p in plk]
+        for k in nv:
+            zk[k] = jmk
+        jmk += 41
+    check(all(d >= a["AP_VERTEIL_MIN_SCHRITT_MIN"] for _p, d in zuege), f"6 Läufe: kein Zug unter {a['AP_VERTEIL_MIN_SCHRITT_MIN']:g} min ({zuege})")
+    check(not any(p_ == "k2" for p_, _d in zuege), "Ina 17:24 (51 min Abstand, ½-Stufe erfüllt, 60 passen nicht) bleibt stehen — kein Kriechen")
+    # Band-Schritt nach Rückfall: Grund trägt einen Auslöser, nie „None:"
+    EKn = {"basis": 0.0, "brutto": 0.0, "gross_ab": 10000.0, "laufzeit": 60}
+    rb = [plan("r1", "u-r", "R", "apex", dt("05:10"), "sell", einsatz_abs=900.0, aenderbar=False, fest_durch="bestätigt und fällig"),
+          plan("r2", "u-q", "Q", "topstep", dt("09:00"), "sell", einsatz_abs=100.0)]
+    e_n = U(rb, 0.0, 0.0, dt("05:25"), Z2, 25, random.Random(1), einsatz=EKn, dubai_min=DUBAI,
+            verpufft=[{"plan_id": "r1", "alt_min": float(dt("05:40"))}], vorgezogen_heute={"r1"})
+    gr = [x["grund"] for x in e_n["aenderungen"]]
+    check(gr and not any(g_.startswith("None") for g_ in gr), f"nach dem Rückfall: kein Grund beginnt mit „None\" ({[g_[:40] for g_ in gr]})")
+
     # Ruhezeit: ein eben verschobener Plan ruht 30 min
     e_r = U([plan("m1", "u-m", "M", "apex", 600), plan("m2", "u-m", "M", "apex", 601)], 0.0, 0.0, 400, Z16, 100, random.Random(1),
             zuletzt={"m2": 395})

@@ -16538,6 +16538,7 @@ def _ap_tranche_frei(t, start, tranchen, zeiten):
 AP_VERTEIL_VORLAUF_MIN = 10            # Verteilung: nie auf einen Start vor jetzt + 10 min schieben (Master 08.10.2026)
 AP_VERTEIL_JITTER_MIN = 8              # Streuung hinter dem frühesten freien Start (kein festes Raster)
 AP_VERTEIL_GEGEN_MIN = 120             # ohne laufzeit_min: so weit muss eine Gegenrichtung derselben ID × Firma weg bleiben
+AP_VERTEIL_MIN_SCHRITT_MIN = 5         # Verteilung: kein Zug unter 5 min (Prüfer 08.10.2026: Ina FundedNext kroch 17:24 → 17:25 → 17:26)
 AP_VERTEIL_VERSATZ = (0, 0, 10, 20, 30, 45, 60)   # Neuwürfe: frühester Platz so viele Minuten weiter hinten
 # Tagesband-Toleranz NUR für Verteilungs-Züge (Finn 08.10.2026 im Master-Chat: „Darf der Bot beim Verteilen das Tagesband um bis zu
 # 200 € verschlechtern? — ja klar, so gut wie es geht eben"; Anlass The5%ers 17:57/17:58 blieb liegen): das Band bis Tagesende darf
@@ -16641,8 +16642,15 @@ def ap_verteilung(gruppe, je, zustand, jetzt_min, zeiten, rnd, gestartet=None, l
                     return False                                   # nie Gegenrichtung derselben ID × Firma zugleich offen
             return True
         ziel = None
+        fk = _ap_firma_konflikt(i, je, z_jetzt, gestartet, gfirma)
         for f in [x for x in AP_ABSTAND_STUFEN if x > 0]:
-            lo = max(s0, float(jetzt_min) + AP_VERTEIL_VORLAUF_MIN, (vorher + gf_v * f) if klumpen else s0) + float(versatz or 0)
+            # KEIN KRIECHEN (Prüfer 08.10.2026, Ina FundedNext 16:33/17:24/18:26 rückte je Lauf 1 min, weil 60 min nicht passten und die
+            # ½-Stufe die 51 min längst erfüllte): ist der Abstand zum Vorgänger auf dieser Stufe schon da (und kein Firmen-Konflikt),
+            # bleibt der Plan stehen; sonst mindestens AP_VERTEIL_MIN_SCHRITT_MIN nach hinten
+            if not fk and (not klumpen or s0 - vorher >= gf_v * f - 1e-9):
+                break
+            lo = max(s0 + AP_VERTEIL_MIN_SCHRITT_MIN, float(jetzt_min) + AP_VERTEIL_VORLAUF_MIN,
+                     (vorher + gf_v * f) if klumpen else s0) + float(versatz or 0)
             if hi is None or lo > hi:
                 continue
             frei_ = [t for t in range(int(-(-lo // 1)), hi + 1) if ok(t, f)]
@@ -16898,6 +16906,9 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
     for _ in range(0 if vorgezogen else max(0, int(schritte))):
         if not offen_(aktuell):
             break
+        if ausloeser is None:   # Band erst nach dem Rückfall offen (Prüfer 08.10.2026: Grund begann mit „None: Tranche …")
+            ausloeser = (f"Netto-Einsatz in den nächsten 60 min bis {aktuell[1]:.0f} € über dem Band ±{float(band_pct):g} %" if einsatz else
+                         f"Netto-Delta in den nächsten 60 min bis {aktuell[1]:.2f} €/Pkt über dem Band ±{float(band_pct):g} %")
         kandidaten = []
         tr = _ap_tranchen([dict(je[i], start_min=zustand[i]["start"]) for i in zustand])
         ruhig = []
