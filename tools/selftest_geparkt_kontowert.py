@@ -33,9 +33,9 @@ def lade():
 
     def konst(name):
         return re.search(rf"^{name} = .*$", src, re.M).group(0)
-    exec("\n".join([konst(k) for k in ("AP_GROESSE_TOLERANZ", "AP_KW_FUNDED", "AP_KW_PHASEN")]
+    exec("\n".join([konst(k) for k in ("AP_GROESSE_TOLERANZ", "_KETTE_DLL_CACHE", "AP_KW_FUNDED", "AP_KW_PHASEN")]
                    + [block(f) for f in ("_wd_num", "_ap_norm", "ap_regel_finden", "ap_groesse", "ap_kw_param", "_ap_kw_kauf",
-                                         "_ap_kw_wachsen", "_ap_kw_lock", "ap_kontowert", "gp_zuwachs_konto",
+                                         "_ap_kw_wachsen", "_ap_kw_lock", "kette_dll_chance", "ap_kontowert", "gp_zuwachs_konto",
                                          "gp_konto_geparkt")]), ns)
     return ns
 

@@ -7507,7 +7507,80 @@ def _vr2_num(v):
         return None
 
 
-def vorrat_chance_stufe(regel, balance, groesse, start=None, max_dd=None):
+# TOPSTEP-KETTE MIT DLL ALS TAGESMODELL (09.10.2026, Master — Punkt 6 aus dem DLL-Umbau; Referenz: Rechnung Slave 1, Artifact „Topstep
+# angefressen"): Vorrat und Kontowert rechneten Topstep als „ein Trade bis zur Liquidation" (modell trades, risiko = dd_usd 4.500). Mit
+# kette.daily_usd endet ein Tag aber mit +Tagesziel (bzw. Rest) oder −DLL (soft), angefressene Konten fahren Weg B (.1380). Exakte
+# Markov-Kette über (Balance, höchster Tagesschluss), fairer Markt (p = Verlust ÷ (Gewinn + Verlust)), Wertiteration bis 1e-13:
+#   MLL = min(Start, Höchststand − DD) (EOD-trailing, Lock beim Start) · Ziel = Start + ziel_usd · Balance ≤ MLL = geblowt
+#   gesund (Abstand ≥ DLL):  +min(Tagesziel, Rest) / −DLL
+#   angefressen, unter Start, Start − MLL ≥ DLL (Weg B): Reparatur-Tag +(Start − Balance) / −Abstand (Blow)
+#   angefressen sonst:       +min(Tagesziel, Rest) / −Abstand (Blow)
+# Slave 1: frisch 24,9 % (exakt 25,0 %), angefressen 147.000 (B) 8,33 %, nach Gewinn 151.500 (MLL 150.000) 16,7 %. Puffer, Gebühren und
+# die 50-%-Consistency bleiben draußen (Finn: Consistency 55 %, mit +4.500/Tag drin). Ein Cache je Parameter-Satz und Zustand.
+_KETTE_DLL_CACHE = {}
+
+
+def kette_dll_chance(balance, peak, start, dd, daily, ziel_usd, tagesziel, reparatur=True):
+    """REIN RECHNEND (testbar): Pass-Chance eines Topstep-Kettenkontos mit DLL (s. o.) → {chance, mll, abstand, win, loss, p_tag,
+    angefressen, reparatur, zustaende} oder None (Werte fehlen). peak = höchster belegter Tagesschluss (None = Balance/Start)."""
+    try:
+        b0, st, dd, daily, zu, tz = float(balance), float(start), float(dd), float(daily), float(ziel_usd), float(tagesziel)
+    except (TypeError, ValueError):
+        return None
+    if dd <= 0 or daily <= 0 or zu <= 0 or tz <= 0:
+        return None
+    ziel = st + zu
+
+    def kanon(b, pk):
+        b = round(b, 2)
+        pk = round(max(float(pk or 0), b, st), 2)
+        return (b, round(st + dd, 2) if pk - dd >= st else pk)    # ab dem Lock zählt der Höchststand nicht mehr
+
+    def zug(z):
+        b, pk = z
+        if b >= ziel - 0.005:
+            return None
+        mll = min(st, pk - dd)
+        ab = b - mll
+        if ab <= 0.005:
+            return None
+        angef = ab < daily - 0.005
+        rep_ = bool(reparatur and angef and b < st - 0.005 and st - mll >= daily - 0.005)
+        win, loss = ((st - b, ab) if rep_ else (min(tz, ziel - b), ab if angef else daily))
+        return loss / (win + loss), kanon(b + win, max(pk, b + win)), kanon(b - loss, pk), win, loss, mll, angef, rep_
+
+    s0 = kanon(b0, peak)
+    key = (s0, st, dd, daily, zu, tz, bool(reparatur))
+    if key not in _KETTE_DLL_CACHE:
+        zust, offen, tr = {s0}, [s0], {}
+        while offen and len(zust) < 5000:
+            z = offen.pop()
+            tr[z] = zug(z)
+            for n in (tr[z][1:3] if tr[z] else ()):
+                if n not in zust:
+                    zust.add(n)
+                    offen.append(n)
+        V = {z: (1.0 if z[0] >= ziel - 0.005 else 0.0) for z in zust}
+        for _ in range(100000):
+            d = 0.0
+            for z, t in tr.items():
+                if t:
+                    v = t[0] * V[t[1]] + (1 - t[0]) * V[t[2]]
+                    d, V[z] = max(d, abs(v - V[z])), v
+            if d < 1e-13:
+                break
+        t0 = tr.get(s0)
+        if len(_KETTE_DLL_CACHE) > 5000:
+            _KETTE_DLL_CACHE.clear()
+        _KETTE_DLL_CACHE[key] = {"chance": V[s0], "zustaende": len(zust),
+                                 "mll": round(min(st, s0[1] - dd), 2), "abstand": round(s0[0] - min(st, s0[1] - dd), 2),
+                                 "win": round(t0[3], 2) if t0 else None, "loss": round(t0[4], 2) if t0 else None,
+                                 "p_tag": t0[0] if t0 else None, "angefressen": bool(t0 and t0[6]), "reparatur": bool(t0 and t0[7]),
+                                 "w_hoch": V[t0[1]] if t0 else None, "w_tief": V[t0[2]] if t0 else None}
+    return dict(_KETTE_DLL_CACHE[key])
+
+
+def vorrat_chance_stufe(regel, balance, groesse, start=None, max_dd=None, peak=None):
     """REIN RECHNEND (testbar): Chance, die aktuelle Stufe EINES Kontos zu bestehen.
     regel = eine Stufe aus vorrat_stufen_aus_kernwerten, balance = Balance jetzt, groesse = Kontogröße, start = Startbalance (Standard Größe,
     Topstep Express 0), max_dd = Drawdown des Kontos (nur, wenn die Regel keinen Boden kennt: Boden = Größe − max_dd).
@@ -7522,6 +7595,8 @@ def vorrat_chance_stufe(regel, balance, groesse, start=None, max_dd=None):
     modell tage: Apex-Evaluation (Finn 06.10.2026): je Tag ein Trade ohne SL auf Rest + puffer_usd,
         Tagesverlust tages_usd ist Soft Breach (Tag stoppt, Konto lebt), Gesamt-Drawdown gesamt_usd statisch. Chance =
         1 − Π(1 − p_Tag) — frisch 2.000 ÷ 11.100, nach einem Verlusttag 2.000 ÷ 13.100 → ≈ 30 %.
+    modell kette_dll: Topstep-Kette mit DLL (09.10.2026) — Tagesmodell +Tagesziel/−DLL mit MLL und Weg B (kette_dll_chance; peak =
+        höchster belegter Tagesschluss, sonst die Balance).
     modell siege: Apex Funded → Winning Days (Finn 06.10.2026): je Tag
         tages_usd Risiko gegen tp_tag_usd, Ziel ziel_usd über Start; ein Verlusttag tötet nicht, verlusttage_max Verlusttage
         schon — Chance, W Siege vor L Verlusttagen zu holen: Σ_{j<L} C(W−1+j, j) · p^W · (1−p)^j (+15.000 in 2 Tagen à 2.500
@@ -7637,6 +7712,28 @@ def vorrat_chance_stufe(regel, balance, groesse, start=None, max_dd=None):
         out["trades"] = [{"polster": round(tag, 2), "tp": round(tp_tag, 2), "p": q}] * w
         out["chance"] = sum(comb(w - 1 + j, j) * q ** w * (1 - q) ** j for j in range(lmax))
         return out
+    if modell == "kette_dll":
+        # Topstep-Kette mit DLL (09.10.2026, s. kette_dll_chance): Tagesmodell statt „ein Trade bis zur Liquidation"
+        zp = _vr2_num(r.get("ziel_pct"))
+        tz = (_vr2_num(r.get("tagesziel_usd")) or 4500.0) * f
+        daily_f = (_vr2_num(r.get("daily_usd")) or 0.0) * f
+        k = kette_dll_chance(bal, peak, st, (_vr2_num(r.get("dd_usd")) or 0.0) * f, daily_f, gr * zp / 100.0, tz) if zp else None
+        if not k:
+            return dict(out, daten_fehlen=True, hinweis="DD/DLL/Ziel der Kette fehlen")
+        ziel = st + gr * zp / 100.0
+        out.update(boden=k["mll"], ziel=round(ziel, 2), polster=k["abstand"], abstand=round(ziel - bal, 2))
+        if bal >= ziel:
+            return dict(out, chance=1.0, erreicht=True, hinweis="Ziel erreicht, noch nicht umgestellt")
+        if k["abstand"] <= 0:
+            return dict(out, chance=0.0, hinweis="am MLL — geblowt?")
+        # „trades" = noch nötige Gewinntage (erster mit dem echten Tagesausgang) — vorrat2_zelle erkennt daran „eins vor"
+        n_tage = 1 + max(0, int(-(-(ziel - bal - k["win"]) // tz))) if k["win"] else 1
+        out["trades"] = ([{"polster": k["loss"], "tp": k["win"], "p": k["p_tag"]}]
+                         + [{"polster": daily_f, "tp": tz, "p": daily_f / (daily_f + tz)}] * (n_tage - 1))
+        out["chance"] = k["chance"]
+        out["hinweis"] = ("angefressen — Reparatur-Tag auf den Start (Weg B)" if k["reparatur"] else
+                          "angefressen — Verlust bis zum MLL" if k["angefressen"] else "")
+        return out
     if modell == "bestand":
         return dict(out, hinweis="Bestand")
     return dict(out, daten_fehlen=True, hinweis=f"unbekanntes Modell {modell!r}")
@@ -7670,6 +7767,10 @@ def vorrat_stufen_aus_kernwerten(regel, param=None):
         folge = phasen[i + 1] if i + 1 < len(phasen) else ("funded_cfd" if cfd else "funded")
         if cfd:
             r = {"modell": "statisch", "ziel_pct": zp[ph], "boden_pct": kw["dd_pct"]}
+        elif nachz and ph == "challenge" and kw.get("kette_daily"):
+            # Topstep-Kette mit DLL (09.10.2026): Tagesmodell statt ein Trade bis zur Liquidation (kette_dll_chance)
+            r = {"modell": "kette_dll", "ziel_pct": zp[ph], "dd_usd": kw["dd_usd"], "daily_usd": kw["kette_daily"],
+                 "tagesziel_usd": kw.get("kette_tagesziel")}
         elif nachz:
             r = {"modell": "trades", "ziel_pct": zp[ph], "risiko_usd": kw["dd_usd"], "etappe_usd": kw.get("etappe_usd")}
             if kw.get("lock_bei_start"):
@@ -7705,7 +7806,7 @@ def vorrat_stufen_aus_kernwerten(regel, param=None):
     return stufen
 
 
-def vorrat_chance_kette(stufen, stufe, balance, groesse, start=None, faktoren=None, param=None, max_dd=None):
+def vorrat_chance_kette(stufen, stufe, balance, groesse, start=None, faktoren=None, param=None, max_dd=None, peak=None):
     """REIN RECHNEND (testbar): Chance, dass ein Konto von seiner Stufe bis in den Vorrat kommt (Kette über regel.folge bis zur
     Stufe mit modell 'bestand'). stufen = {stufe: regel} EINER Firma. Die aktuelle Stufe rechnet mit der echten Balance, jede
     folgende frisch (Balance = Start). faktoren = {stufe: Faktor aus den gemessenen Quoten} (vorrat_quoten), sonst 1.
@@ -7725,7 +7826,7 @@ def vorrat_chance_kette(stufen, stufe, balance, groesse, start=None, faktoren=No
         if s in gesehen:
             return dict(out, daten_fehlen=True, hinweis="Stufen-Kette im Kreis")
         gesehen.add(s)
-        e = vorrat_chance_stufe(r, bal, groesse, st, md)
+        e = vorrat_chance_stufe(r, bal, groesse, st, md, peak)
         if e["daten_fehlen"]:
             return dict(out, daten_fehlen=True, hinweis=f"{s}: {e['hinweis']}")
         if r.get("vorlaeufig"):
@@ -7747,7 +7848,7 @@ def vorrat_chance_kette(stufen, stufe, balance, groesse, start=None, faktoren=No
         s = r.get("folge")
         if not s:
             break
-        bal, st, md = groesse, groesse, None          # folgende Stufe frisch
+        bal, st, md, peak = groesse, groesse, None, None          # folgende Stufe frisch
     out.update(chance=ges, chance_stufe=(out["kette"][0]["chance"] if out["kette"] else 1.0), ziel_stufe=s)
     return out
 
@@ -7991,7 +8092,7 @@ def vorrat2_zelle(ziel, stufen, konten, status, param=None, faktoren=None, seed=
             if kw:
                 kw_k = dict(kw, etappe_usd=cp_et)
         if kw_k and bal is not None:
-            kv = ap_kontowert(typ, bal, kw_k)
+            kv = ap_kontowert(typ, bal, kw_k, peak=k.get("peak"))
             z["wert_eur"] = kv["wert"] if kv else None
         i = fach_von(gr)
         if im_bestand:
@@ -8021,7 +8122,7 @@ def vorrat2_zelle(ziel, stufen, konten, status, param=None, faktoren=None, seed=
         else:
             funnel_n += 1
             rb = start if uns else bal
-            e = vorrat_chance_kette(stufen_k, typ, rb, gr, start, faktoren, p, k.get("max_dd"))
+            e = vorrat_chance_kette(stufen_k, typ, rb, gr, start, faktoren, p, k.get("max_dd"), peak=None if uns else k.get("peak"))
             if e["daten_fehlen"]:
                 df = True
                 z["daten_fehlen"] = True
@@ -8055,7 +8156,7 @@ def vorrat2_zelle(ziel, stufen, konten, status, param=None, faktoren=None, seed=
                 # nahe am Ziel, Ziel schon erreicht) · kurz vor Blow · Abstand zu Boden und Ziel in $
                 k0 = (e.get("kette") or [{}])[0]
                 eins_vor = typ in ("challenge", "phase1", "phase2") and bool(
-                    k0.get("erreicht") or (k0.get("modell") == "trades" and k0.get("rest_trades") == 1)
+                    k0.get("erreicht") or (k0.get("modell") in ("trades", "kette_dll") and k0.get("rest_trades") == 1)
                     or (k0.get("modell") == "statisch" and float(k0.get("roh") or 0) >= float(p.get("eins_vor_chance") or 1)))
                 z.update(eins_vor=eins_vor, kurz_vor_blow=float(k0.get("roh") if k0.get("roh") is not None else 1)
                          < float(p.get("kurz_vor_blow_chance") or 0), abstand_boden=k0.get("polster"), abstand_ziel=k0.get("abstand"))
@@ -8825,7 +8926,14 @@ def vorrat2_rechnen_lauf(quelle):
                                       firma in cfd_firmen or typ in VORRAT_CFD_TYPEN),
             "balance": bal, "balance_at": at or None, "alter_tage": vorrat_alter_handelstage(at, jetzt) if at else None,
             "express": express, "waiting": bool(a.get("waiting_payout_since")), "created_at": a.get("created_at"),
-            "consistency_pct": a.get("consistency_pct")})
+            "consistency_pct": a.get("consistency_pct"), "_a": a})
+    # Höchststand je Kettenkonto (Topstep mit DLL, 09.10.2026) für MLL in Chance und Kontowert — eine Abfrage, Fehler → ohne Höchststand
+    kette_konten = [k["_a"] for (u_, f_), l_ in je.items() if (kws.get(f_) or {}).get("kette_daily") for k in l_]
+    peaks = _ap_peaks(kette_konten) if kette_konten else {}
+    for l_ in je.values():
+        for k in l_:
+            k["peak"] = peaks.get(str(k["_a"].get("id")))
+            k.pop("_a", None)
     uids = sorted((set(b["names"]) | {u for u, _ in je}) - excluded_ids)
     # Totband-Vorlauf: letzte fertige Zeile
     try:
@@ -15593,7 +15701,10 @@ def ap_kw_param(regel):
     return {"kauf_eur": regel["kauf_eur"], "dd_usd": regel.get("dd_usd"), "dd_pct": regel.get("dd_pct"),
             "boden": regel.get("boden") or "statisch", "ziel_pct": regel["ziel_pct"],
             "groessen": sorted(float(g) for g in (regel.get("wert_groessen") or regel["groessen"])), "etappe_usd": ch.get("tp_max") or regel.get("tp_max") or regel.get("etappe_usd"),
-            "daily_usd": regel.get("daily_usd"), "lock_bei_start": regel.get("lock_bei_start") is True}
+            "daily_usd": regel.get("daily_usd"), "lock_bei_start": regel.get("lock_bei_start") is True,
+            # Topstep-Kette mit DLL (09.10.2026): Tagesmodell für Vorrat/Kontowert (kette_dll_chance); Tagesziel-Rückfall = AP_KETTE_STANDARD
+            "kette_daily": ((regel.get("kette") or {}).get("daily_usd") if isinstance(regel.get("kette"), dict) else None),
+            "kette_tagesziel": ((regel.get("kette") or {}).get("tagesziel_usd") or 4500) if isinstance(regel.get("kette"), dict) else None}
 
 
 def _ap_kw_kauf(p, groesse):
@@ -15634,11 +15745,14 @@ def _ap_kw_lock(wert, gewinn, dd, etappe):
     return (wert, gewinn, True) if gewinn >= dd - 1e-9 else (wert, dd, False)
 
 
-def ap_kontowert(typ, balance, p, kauf_eur=None):
+def ap_kontowert(typ, balance, p, kauf_eur=None, peak=None):
     """REIN RECHNEND (testbar): Wert eines Kontos in € nach Finns Wiederbeschaffungs-Logik (KONTOWERT oben).
     typ = account_type, balance = Live-Balance ($), p = ap_kw_param(regel), kauf_eur = echter Kauf der Kette (Vorrang).
     Je Phase: Startwert × Polster/DD (statisch) bzw. × Π(1+Etappe/DD) (nachziehend); bestandene Phase = Wert am Ziel →
     Startwert der nächsten. Funded/WD: Wert beim Bestehen, Satz = dieser Wert/DD, wächst/schrumpft mit dem Polster.
+    Topstep-Kette mit DLL (kette_daily, 09.10.2026): Challenge-Wert = Kauf × Chance(Zustand) ÷ Chance(frisch) aus kette_dll_chance
+    (fairer Markt → Wert ∝ Pass-Chance), Polster = Abstand zum MLL, Satz = Wertänderung je $ über den nächsten Tagesausgang;
+    bestanden = Kauf ÷ Chance(frisch). peak = höchster belegter Tagesschluss (None = Balance).
     → {wert, satz (€ je $), polster ($), groesse, kauf, wie} oder None."""
     if not p or balance is None:
         return None
@@ -15663,8 +15777,19 @@ def ap_kontowert(typ, balance, p, kauf_eur=None):
         typ = phasen[0] if typ != "phase2" or len(phasen) < 2 else phasen[1]
     start = 0.0 if relativ else groesse
     wert = kauf
+    kd_tag = float(p.get("kette_tagesziel") or 4500)
+    kette = nachz and not relativ and bool(p.get("kette_daily")) and "challenge" in zp
+    k0 = kette_dll_chance(start, None, start, dd, float(p["kette_daily"]), groesse * float(zp["challenge"]) / 100.0, kd_tag) if kette else None
+    kette = bool(k0 and k0["chance"] > 0)
     for ph in phasen:                                         # Startwert der Phase des Kontos (bestandene Phasen vorher)
         ziel = groesse * float(zp[ph]) / 100.0
+        if ph == typ and kette and ph == "challenge":
+            kd = kette_dll_chance(b, peak, start, dd, float(p["kette_daily"]), ziel, kd_tag)
+            v = wert * kd["chance"] / k0["chance"]
+            satz = (wert * (kd["w_hoch"] - kd["w_tief"]) / k0["chance"] / (kd["win"] + kd["loss"])) if kd["win"] else v / dd
+            return {"wert": round(v), "satz": round(satz, 4), "polster": round(max(kd["abstand"], 0.0)), "groesse": groesse,
+                    "kauf": round(kauf), "wie": (f"Kauf {wert:.0f} × Chance {kd['chance'] * 100:.1f} % ÷ frisch {k0['chance'] * 100:.1f} % "
+                                                 .replace(".", ",") + "(Topstep-Kette DLL, MLL " + f"{kd['mll']:,.0f}".replace(",", ".") + ")")}
         if ph == typ:
             g = b - start
             if nachz and lock and g >= 0:
@@ -15681,6 +15806,9 @@ def ap_kontowert(typ, balance, p, kauf_eur=None):
             polster = max(0.0, dd + g)
             return {"wert": round(wert * polster / dd), "satz": round(wert / dd, 4), "polster": round(polster), "groesse": groesse,
                     "kauf": round(kauf), "wie": f"{'Kauf' if ph == phasen[0] else 'Phasenstart'} {wert:.0f} × Polster/{dd:,.0f}".replace(",", ".")}
+        if kette and ph == "challenge":
+            wert = wert / k0["chance"]                # bestanden: Kauf ÷ Pass-Chance (fairer Markt, frisch 25 % → 4 × Kauf)
+            continue
         wert = (_ap_kw_lock(wert, ziel, dd, etappe)[0] if lock else _ap_kw_wachsen(wert, ziel, dd, etappe)) if nachz \
             else wert * (dd + ziel) / dd
     if typ in AP_KW_FUNDED:
@@ -16047,7 +16175,7 @@ def ap_kw_stufe(typ, balance, p, kv):
     return f"{name} · {'+' if g > 0 else '−'}{_ap_kw_usd(g)}"
 
 
-def ap_kontowert_konto(a, bal, firmen, kauf_eur=None, archiviert=False):
+def ap_kontowert_konto(a, bal, firmen, kauf_eur=None, archiviert=False, peak=None):
     """REIN RECHNEND: Zeile der Kontowert-Spalte → {wert_eur, stufe, satz_eur_pro_usd, quelle, hinweis, wie, kauf_eur,
     balance_usd}. Wert = ap_kontowert wie im Probelauf (echter Kauf der Kette nur, wenn plausibel — entscheidet ap_kontowert).
     quelle: 'kauf_echt' (echter Kauf trägt den Wert) oder 'kernwerte' (Kaufpreis der Firma). Ohne Wert: wert_eur None + hinweis."""
@@ -16064,7 +16192,7 @@ def ap_kontowert_konto(a, bal, firmen, kauf_eur=None, archiviert=False):
         return dict(leer, hinweis=f"keine Kernwerte für {a.get('firm') or 'diese Firma'} (auto_plan_regeln)")
     if bal is None:
         return dict(leer, hinweis="keine Live-Balance")
-    kv = ap_kontowert(typ, bal, p, kauf_eur)
+    kv = ap_kontowert(typ, bal, p, kauf_eur, peak=peak)
     if not kv:
         return dict(leer, hinweis=("Kontotyp ohne Kontowert" if typ not in AP_KW_FUNDED + AP_KW_PHASEN
                                    else f"Balance {_ap_kw_usd(float(bal))} passt zu keiner Größe der Kernwerte"))
@@ -16089,11 +16217,14 @@ def admin_build_kontowerte(sicht=None):
     echo_bal, dup_bal = _ap_balance_karten()
     aktiv = [str(a["id"]) for a in konten if str(a["id"]) not in archiv and (a.get("account_type") or "") != "live"]
     kauf = _ap_kauf_echt(aktiv) if aktiv else {}
+    # Höchststand für die Topstep-Kette mit DLL (09.10.2026, MLL im Kontowert) — nur Kettenkonten, eine Abfrage, Fehler → ohne
+    kette_ids = [a for a in konten if str(a["id"]) in aktiv and (ap_kw_param(ap_regel_finden(firmen, a.get("firm"))) or {}).get("kette_daily")]
+    peaks = _ap_peaks(kette_ids) if kette_ids else {}
     werte = {}
     for a in konten:
         aid = str(a["id"])
         bal = acc_balance_wahl(a, echo_bal, dup_bal)[0]
-        werte[aid] = ap_kontowert_konto(a, bal, firmen, kauf.get(aid), archiviert=aid in archiv)
+        werte[aid] = ap_kontowert_konto(a, bal, firmen, kauf.get(aid), archiviert=aid in archiv, peak=peaks.get(aid))
     return werte
 
 

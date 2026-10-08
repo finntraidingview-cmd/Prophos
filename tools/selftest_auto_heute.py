@@ -39,10 +39,10 @@ def lade():
 
     def konst(name):
         return re.search(rf"^{name} = .*$", src, re.M).group(0)
-    teile = [konst(k) for k in ("AP_KW_FUNDED", "LT_BALANCE_SPRUNG_USD", "AP_KW_PHASEN", "AP_TYPEN", "AP_GROESSE_TOLERANZ", "LT_ECHO_ROUTEN", "AP_HB_TZ",
+    teile = [konst(k) for k in ("_KETTE_DLL_CACHE", "AP_KW_FUNDED", "LT_BALANCE_SPRUNG_USD", "AP_KW_PHASEN", "AP_TYPEN", "AP_GROESSE_TOLERANZ", "LT_ECHO_ROUTEN", "AP_HB_TZ",
                                 "AP_HB_CACHE_S", "AP_HB_BLOW_ANTEIL", "AP_HB_ECHT_QUELLEN", "_ap_hb_cache", "_ap_hb_lock")]
     teile += [block(f) for f in ("_wd_num", "lt_pl_balance", "lt_balance_sprung", "_ap_norm", "ap_regel_finden", "ap_groesse", "ap_kw_param", "_ap_kw_kauf",
-                                 "_ap_kw_wachsen", "_ap_kw_lock", "ap_kontowert", "_ap_ende4", "_ap_tz", "_ap_ts", "ap_bal_vorher_konto", "ap_konto_plaene_grenze", "hypo_bilanz_zeile",
+                                 "_ap_kw_wachsen", "_ap_kw_lock", "kette_dll_chance", "ap_kontowert", "_ap_ende4", "_ap_tz", "_ap_ts", "ap_bal_vorher_konto", "ap_konto_plaene_grenze", "hypo_bilanz_zeile",
                                  "ap_hb_ende", "ap_hb_gelesen", "ap_hb_zeile", "_ap_konto_plaene", "_ap_hb_laden", "ap_heute_beendet_gemerkt")]
     exec("\n".join(teile), ns)
     return ns
