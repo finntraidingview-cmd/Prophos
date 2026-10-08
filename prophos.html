@@ -41316,11 +41316,25 @@
     if(!box) return
     const eigener = (tradePlans || []).find(p => p && String(p.id) === String(ohnePlanId))
     const kette = tpOrderKettenIds(eigener ? eigener.masterAccountId : null)
-    const letzte = (tradePlans || [])
+    let letzte = (tradePlans || [])
       .filter(p => p && p.startedAt && String(p.id) !== String(ohnePlanId))
       .filter(p => !kette.size || kette.has(String(p.masterAccountId)))
       .sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt))
       .slice(0, 10)
+    // NEUES KONTO (08.10.2026, Emins Tradeify 150k: „Könntest du bitte noch die letzte Richtungen-Anzeige bei Futures einbauen" — die
+    // Box blieb leer, weil das frisch gekaufte Konto samt Kette noch keine gestartete Order hatte, egal welcher Weg): dann die letzten
+    // Orders DERSELBEN FIRMA (gleiche Normalisierung wie firmGeplanteRichtungen), nur mit erfasster Richtung. Reine Anzeige.
+    let umfangFirma = false
+    if(!letzte.length && eigener && eigener.masterFirm){
+      const norm = f => String(f || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+      const ziel = norm(eigener.masterFirm)
+      letzte = (tradePlans || [])
+        .filter(p => p && p.startedAt && String(p.id) !== String(ohnePlanId) && norm(p.masterFirm) === ziel
+          && (p.richtung === 'buy' || p.richtung === 'sell'))
+        .sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt))
+        .slice(0, 10)
+      umfangFirma = letzte.length > 0
+    }
     if(!letzte.length){ box.style.display = 'none'; box.innerHTML = ''; return }
     const chip = p => {
       const dir = (p.richtung === 'buy' || p.richtung === 'sell') ? p.richtung : null
@@ -41333,10 +41347,11 @@
       return `<span class="tc2-chip" style="font-family:var(--mono);font-weight:700;${st}" title="${escapeHtml(tip)}">${dir === 'buy' ? 'BUY' : dir === 'sell' ? 'SELL' : '?'}</span>`
     }
     box.style.display = ''
-    const umfang = kette.size > 1 ? 'Account + Vorgänger' : kette.size === 1 ? 'dieser Account' : 'alle Accounts'
+    const umfang = umfangFirma ? `${eigener.masterFirm} · alle Accounts` : kette.size > 1 ? 'Account + Vorgänger' : kette.size === 1 ? 'dieser Account' : 'alle Accounts'
     box.innerHTML = `Letzte ${letzte.length} Orders <span style="color:var(--sub-2)">(${umfang} · neueste zuerst)</span> &nbsp;${letzte.map(chip).join(' ')}`
   }
 
+  window._tpOrderLetzteRender = tpOrderLetzteRender   // Test-Haken (Stub)
   async function openTpOrderModal(planId){
     const plan = tradePlans.find(x => String(x.id) === String(planId))
     if(!plan) return
@@ -41736,7 +41751,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1344'
+  const OS_TAB_BUILD = '2026-09-22.1345'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
