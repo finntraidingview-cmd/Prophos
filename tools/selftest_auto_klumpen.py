@@ -64,16 +64,17 @@ def main():
     for s in range(4):
         r, _m, w = a["ap_richtungen_delta"](tr, 0, 0, random.Random(s), 25, einsatz=EK, mit_wert=True)
         check(r["A|tradeify#1"] == r["A|tradeify#2"] and r["B|apex"] != r["A|tradeify#1"] and r["C|fundednext"] != r["A|tradeify#1"]
-              and w[2] == 0, f"aufgeteilte Tranche (seed {s}): beide Tradeify gleich gerichtet, Gegengewicht dazwischen")
+              and w[3] == 0, f"aufgeteilte Tranche (seed {s}): beide Tradeify gleich gerichtet, Gegengewicht dazwischen")   # w[3] = ID-Mischung (seit 08.10.2026 Firmen-Mischung an Stelle 2)
     tr = {"A|tradeify#1": T("sell", "A", "tradeify", 600, 3.0, 720, "A|tradeify"),
           "A|tradeify#2": T(None, "A", "tradeify", 660, 3.0, 720, "A|tradeify")}
     r, _m = a["ap_richtungen_delta"](tr, 0, 0, random.Random(2), 25, einsatz=EK)
     check(r == {"A|tradeify#1": "sell", "A|tradeify#2": "sell"}, "Richtungsschutz: fester Teil legt die ganze Gruppe fest (nie Ablehnung)")
-    tr = {"A|tradeify": T(None, "A", "tradeify", 600, 3.0, 300), "B|tradeify": T(None, "B", "tradeify", 603, 3.0, 300),
-          "C|apex": T(None, "C", "apex", 700, 3.0, 300), "D|apex": T(None, "D", "apex", 703, 3.0, 300)}
+    # seit 08.10.2026 ~17:00 Dubai < 3 min statt < 10 min (AP_GEGEN_DICHT_MIN): 2 min auseinander
+    tr = {"A|tradeify": T(None, "A", "tradeify", 600, 3.0, 300), "B|tradeify": T(None, "B", "tradeify", 602, 3.0, 300),
+          "C|apex": T(None, "C", "apex", 700, 3.0, 300), "D|apex": T(None, "D", "apex", 702, 3.0, 300)}
     r, _m, w = a["ap_richtungen_delta"](tr, 0, 0, random.Random(3), 25, einsatz=dict(EK, gross_ab=1000), mit_wert=True)
     check(r["A|tradeify"] == r["B|tradeify"] and r["C|apex"] == r["D|apex"] and w[0] == 0,
-          "Malus stark: gleiche Firma nicht gegenläufig < 10 min, auch wenn das Netto dann größer ist")
+          "Malus stark: gleiche Firma nicht gegenläufig < 3 min, auch wenn das Netto dann größer ist")
 
     # ── 2b Laufzeit (Master 07.10.2026: „frühe Starts gemischt long/short, kein Block aus 4 Shorts")
     el = lage(419, [(102, -49), (103, -30), (317, -163), (431, -657), (694, 271), (706, 164)], 300)

@@ -179,8 +179,10 @@ def main():
         return dict({"plan_id": pid, "user_id": uid, "user": user, "firma": firma, "firma_name": firma.capitalize(), "richtung": richtung,
                      "start_min": float(start), "delta_abs": 1.0, "einsatz_abs": 100.0, "aenderbar": True, "fest_durch": None,
                      "auto_plan": True, "bestaetigt": True, "route": "tvv2"}, **kw)
-    # seit 08.10.2026 (1 min je Firma, 60/20 weg): Konflikt = gleiche Minute derselben Firma; 1 min nacheinander bleibt stehen
-    heute = [plan("mike1", "u-mike", "Mike", "fundednext", dt("09:59")), plan("mike2", "u-mike", "Mike", "fundednext", dt("09:59")),
+    # seit 08.10.2026 (1 min je Firma, 60/20 weg): Konflikt = gleiche Minute derselben Firma; 1 min nacheinander bleibt stehen.
+    # Mike FundedNext short (seit 08.10.2026 ~17:00 Dubai FIRMEN-MISCHUNG: 5× FundedNext über 2 IDs nur long weckte sonst die
+    # Mischungs-Drehung — hier geht es nur um die Verteilung, der Test übernimmt keine Drehungen)
+    heute = [plan("mike1", "u-mike", "Mike", "fundednext", dt("09:59"), "sell"), plan("mike2", "u-mike", "Mike", "fundednext", dt("09:59"), "sell"),
              plan("inafn1", "u-ina", "Ina", "fundednext", dt("16:58")), plan("inafn2", "u-ina", "Ina", "fundednext", dt("16:58")),
              plan("inafn3", "u-ina", "Ina", "fundednext", dt("16:58")),
              plan("chrfp1", "u-chris", "Chris", "fundingpips", dt("17:02"), "sell"), plan("chrfp2", "u-chris", "Chris", "fundingpips", dt("17:02"), "sell"),

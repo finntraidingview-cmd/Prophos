@@ -6,7 +6,7 @@ Aufruf:  python3 tools/selftest_auto_suche.py
 Ohne Netz, Platzhalter-IDs. Lage wie Finns: 3× Apex short (Tageslimit-Klippe bei +20 Pkt) laufen, viele geplante Longs später am Tag.
 Geprüft: mehrere Züge je Lauf (≤ AP_SUCHE_ZUEGE), jeder hebt das Minimum ±30 um ≥ AP_SZENARIO_MIN_GEWINN_EUR (nachgerechnet), Ergebnis
 mindestens so gut wie ein Zug allein und wie Greedy (Breite 1); in der Kombination alle Abstände (Firma zwischen IDs, je ID, je ID ×
-Firma ≥ ½-Stufe) und kein Gegenhedge über IDs; Hinausschieben eines Shorts aus den 60 min; Hand-Plan, toter PC, ruhender Plan nie;
+Firma ≥ ½-Stufe) und kein gegenläufiger Start einer anderen ID derselben Firma ±3 min (seit 08.10.2026 ~17:00 Dubai, vorher Laufzeit); Hinausschieben eines Shorts aus den 60 min; Hand-Plan, toter PC, ruhender Plan nie;
 Pingpong (heute hinausgeschoben → nicht vorziehen, heute vorgezogen → nicht hinausschieben); ein Zug je Plan; Laufzeit < 3 s bei 40
 Plänen; ausgeglichenes Buch → nichts."""
 import collections
@@ -186,10 +186,15 @@ def main():
           f"Schalter an: beide Nachmittags-Shorts über die Fenstergrenze in die nächsten 60 min ({zus})")
     check(nach_f["min_eur"] > vor_f["min_eur"] + 90 and abs(nach_f["delta_eur_pkt"]) < 1.0,
           f"schlimmster Fall {vor_f['min_eur']:.0f} → {nach_f['min_eur']:.0f} €, Delta {vor_f['delta_eur_pkt']:+.1f} → {nach_f['delta_eur_pkt']:+.1f} €/Pkt")
-    gh_f = U(vm + nm + [plan("x_fn", "u-x", "fundednext", "buy", 380, aenderbar=False, fest_durch="Handplan", satz_eur_je_usd=0.0001)],
-             0.0, 0.0, jf, Z, 25, random.Random(1), einsatz=dict(EKf, fenster_uebergreifend=True), dubai_min=120, id_fest=fest_f)
-    check(not any(x["plan_id"] == "a_fn" for x in gh_f["aenderungen"]),
-          "Schalter an: Gegenhedge über die Laufzeit gilt weiter (FN-Buy einer anderen ID 06:20 dt → FN-Short nicht daneben)")
+    # seit 08.10.2026 ~17:00 Dubai (Finn: „kann natürlich eine ANDERE ID … short gehen"): über IDs nur ±AP_GEGEN_FIRMA_MIN am Start —
+    # der FN-Short darf in die Laufzeit des FN-Buys einer anderen ID (06:20 dt), aber nie ±3 min neben dessen Start
+    nah_f = 0
+    for seed in range(10):
+        gh_f = U(vm + nm + fueller + [plan("x_fn", "u-x", "fundednext", "buy", 380, aenderbar=False, fest_durch="Handplan",
+                                           satz_eur_je_usd=0.0001)],
+                 0.0, 0.0, jf, Z, 25, random.Random(seed), einsatz=dict(EKf, fenster_uebergreifend=True), dubai_min=120, id_fest=fest_f)
+        nah_f += sum(1 for x in gh_f["aenderungen"] if x["plan_id"] == "a_fn" and abs(x["nach_start_min"] - 380) <= a["AP_GEGEN_FIRMA_MIN"])
+    check(nah_f == 0, f"Schalter an: FN-Short nie ±3 min neben dem FN-Buy einer anderen ID um 06:20 dt (10 Seeds, {nah_f})")
     pv_f = U(nm, 0.0, 0.0, jf, Z, 25, random.Random(1), einsatz=dict(EKf, fenster_uebergreifend=True), dubai_min=120, id_fest=fest_f,
              pc_lebt={"u-c"})
     check(not any(x["plan_id"] == "a_fn" for x in pv_f["aenderungen"]), "Schalter an: toter PC → nicht vorgezogen")

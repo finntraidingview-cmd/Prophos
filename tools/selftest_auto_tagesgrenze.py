@@ -75,7 +75,7 @@ def main():
           and not any(g["plan_id"] == "p-nacht" for g in dl["geplant"]),
           "Delta: Szenario +60 rechnet den Plan nach 00:00 dt mit, jetzt-Kurve und geplant[] unverändert")
 
-    # ── 2 Bot: Gegenhedge gegen den Folgetag-Plan, nie bewegt ───────────────────────────────────────────────────────────────────
+    # ── 2 Bot: Richtungsschutz gegen den Folgetag-Plan, nie bewegt ───────────────────────────────────────────────────────────────────
     U = a["ap_umplanen"]
     Z = {"fenster": [["00:00", "23:59", 1]], "start_bis": "23:59", "abstand_id_min": 3}
     EK = {"basis": 0.0, "brutto": 0.0, "gross_ab": 100000.0, "laufzeit": 180, "szenario_laufend": LAUFEND}
@@ -85,7 +85,13 @@ def main():
     ohne = U([a_long], 0.0, 0.0, jm, Z, 25, random.Random(1), einsatz=EK)
     mit = U([a_long, b_morgen], 0.0, 0.0, jm, Z, 25, random.Random(1), einsatz=EK)
     check([x["plan_id"] for x in ohne["aenderungen"]] == ["a_long"], f"ohne Folgetag-Plan: Long wird vorgezogen ({[x['plan_id'] for x in ohne['aenderungen']]})")
-    check(not mit["aenderungen"], f"mit Folgetag-SELL einer anderen ID 00:05 dt: kein Vorziehen daneben ({[x['plan_id'] for x in mit['aenderungen']]})")
+    # seit 08.10.2026 ~17:00 Dubai (Finn: „kann natürlich eine ANDERE ID … short gehen") sperrt eine andere ID nur ±3 min um ihren Start —
+    # der Folgetag-SELL 00:05 dt liegt weit hinter dem Vorzieh-Platz; die eigene ID sperrt ihre Gegenrichtung weiter über die Laufzeit
+    check([x["plan_id"] for x in mit["aenderungen"]] == ["a_long"],
+          f"mit Folgetag-SELL einer anderen ID 00:05 dt: Vorziehen erlaubt (Gegenrichtung über IDs) ({[x['plan_id'] for x in mit['aenderungen']]})")
+    selbe = U([a_long, dict(b_morgen, user_id="u-a", user="U-a", plan_id="a_morgen")], 0.0, 0.0, jm, Z, 25, random.Random(1), einsatz=EK)
+    check(not selbe["aenderungen"],
+          f"mit Folgetag-SELL DERSELBEN ID 00:05 dt: kein Vorziehen in dessen Laufzeit ({[x['plan_id'] for x in selbe['aenderungen']]})")
     m2 = U([dict(a_long, user_id="u-b", user="U-b", richtung="sell", plan_id="b_heute", start_min=1350), b_morgen], 0.0, 0.0, jm, Z, 25,
            random.Random(1), einsatz=EK)
     check(not any(x["plan_id"] == "b_morgen" for x in m2["aenderungen"]), "Folgetag-Plan wird nie bewegt")

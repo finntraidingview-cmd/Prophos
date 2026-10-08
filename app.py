@@ -16555,6 +16555,11 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     ek["gross_ab"] = gross_ab
     ek["fest_ev"] = [(z["start_min"], z["einsatz_eur"]) for z in stand["geplant"]
                      if z.get("start_min") is not None and z.get("einsatz_eur") is not None]
+    # FIRMEN-MISCHUNG (08.10.2026, Finn: „nicht, dass an einem Tag eine Prop-Firm nur in einer Richtung getradet wird"): Trades des Tages
+    # mit fester Richtung — schon geplante Pläne (alle IDs, Hand/WD eingeschlossen; die ersetzten Vorschläge fehlen im Stand) und heute
+    # gestartete bzw. gewürfelte Winning-Days-Blöcke (starts_heute) — zählen in der Tages-Mischung je Firma mit
+    firma_fest = [{"user_id": z["user_id"], "firma": z.get("firma_key"), "richtung": z.get("richtung")} for z in stand["geplant"]]
+    firma_fest += [{"user_id": x.get("user_id"), "firma": x.get("firma"), "richtung": x.get("richtung")} for x in stand.get("starts_heute") or ()]
     bester = None
     for _wurf in range(AP_GEGEN_WUERFE):
         zinfo_w = {}
@@ -16566,17 +16571,20 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
                       "n_plaene": sum(1 for (kk_, _k, _w2, _v) in plan_roh if kk_ == key)} for key in minuten_w}   # ID-Mischung (08.10.2026)
         richtung_w, netto_w, wert_w = ap_richtungen_delta(tr_w, stand["basis_netto"], stand["basis_brutto"], rnd,
                                                           param["zielband_pct"], fest_ev, bestehende=stand["starts_heute"],
-                                                          einsatz=ek, mit_wert=True)
+                                                          einsatz=ek, mit_wert=True, firma_fest=firma_fest)
         if bester is None or (-len(minuten_w), wert_w) < (-len(bester[1]), bester[0]):
             bester = (wert_w, minuten_w, zinfo_w, richtung_w, netto_w)
-        if wert_w[0] == 0 and wert_w[1] == 0 and wert_w[2] == 0 and wert_w[3] == 0:
-            break                      # kein Malus, |Netto| unter einer Stufe, ID-Mischung ok, keine Große-Folge — besser geht es nicht
+        if all(x == 0 for x in wert_w[:5]):
+            break                      # kein Malus, Firmen gemischt, |Netto| unter einer Stufe, ID-Mischung ok, keine Große-Folge
     _w, minuten, zinfo, richtung, netto_max = bester
     # ID-MISCHUNG für den Delta-Monitor (08.10.2026): je ID long/short-Zählung der Zuteilung dieses Laufs (nur neue Tranchen)
     tr_best = {key: {"user": tr_info[key]["user"], "firma": tr_info[key]["fkey"], "n_plaene": sum(1 for (kk_, _k, _w2, _v) in plan_roh if kk_ == key)}
                for key in minuten}
     id_misch = [dict(v, user_id=u, user=namen.get(u, u[:8])) for u, v in ap_id_misch(richtung, tr_best)[1].items()]
     id_misch.sort(key=lambda x: (-x["n"], x["user"]))
+    # FIRMEN-MISCHUNG für Probelauf/Protokoll (08.10.2026): je Firma long/short über den ganzen Tag (neu + fest), seltenere Richtung
+    firma_misch = [dict(v, firma=f) for f, v in ap_firma_misch(richtung, tr_best, firma_fest)[1].items()]
+    firma_misch.sort(key=lambda x: (-x["n"], x["firma"]))
     for key in [k for k in tr_info if k not in minuten]:
         for (kk, k, _w2, _v) in plan_roh:
             if kk == key:
@@ -16643,7 +16651,8 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
         _sb_pruefen(r)
     erg = {"ok": True, "tag": tag, "quelle": quelle, "trocken": bool(trocken), "at": jetzt.isoformat(), "seed": seed,
            "fingerabdruck": fp, "geplant": geplant, "ausgelassen": ausgelassen, "netto_max_abs": netto_max,
-           "band_pct": param["zielband_pct"], "auto_start": param["auto_start"], "einsatz": einsatz_info, "id_misch": id_misch}
+           "band_pct": param["zielband_pct"], "auto_start": param["auto_start"], "einsatz": einsatz_info, "id_misch": id_misch,
+           "firma_misch": firma_misch}
     if alle_ids:
         erg["ids_benutzt"] = ap_ids_benutzt(geplant, ausgelassen, namen)     # welche IDs der Lauf über alle IDs wirklich enthält
     if nachplanen:
@@ -16694,6 +16703,17 @@ AP_EUR_STUFE = 50                    # max |Netto-Einsatz| zählt im Optimierer 
 # ID+Firma bleibt eine Richtung (Richtungsschutz). Bei 1–3 Plänen oder nur einer Firma keine Vorgabe.
 AP_ID_MISCH_AB = 4
 AP_ID_MISCH_MAX = 0.67
+# FIRMEN-MISCHUNG JE TAG (Finn 08.10.2026 ~16:50 Dubai: „Heute war kein einziger Tradeify-Short bei 10–15 Trades — Fehler. Wenn eine
+# ID Tradeify long geht, kann natürlich eine ANDERE ID Tradeify short gehen zum Ausgleichen. Es darf sich nur nicht die GLEICHE ID
+# gegenhedgen. Ich will auch nicht, dass an einem Tag eine Prop-Firm nur in einer Richtung getradet wird, weil das genauso auffällig
+# ist" — Befund Master: Tradeify 17× buy über 6 IDs, 1× sell von Hand): hat eine Firma an einem Tag mindestens AP_FIRMA_MISCH_AB
+# Trades über mindestens zwei IDs (geplant + heute gestartet, auch Winning Days/Hand — Sicht der Firma), soll die seltenere Richtung
+# grob AP_FIRMA_MISCH_MIN der Trades halten (gerundet, mindestens einer: 3 → 1, 4 → 1, 6 → 2, 10 → 3). Weich (Strafe = Fehlbetrag),
+# im Planer direkt nach dem Malus, im Bot zusammen mit der ID-Mischung (darf nie schlechter werden, weckt die Mischungs-Drehung).
+# Darüber entscheidet weiter der Zufall/das Netto — kein festes 50/50, kein Muster. Bei 1–2 Trades oder nur einer ID keine Vorgabe
+# (eine ID = eine Richtung je Firma, Richtungsschutz).
+AP_FIRMA_MISCH_AB = 3
+AP_FIRMA_MISCH_MIN = 0.30
 AP_START_BIS_STANDARD = "16:30"      # Finn 07.10.2026: alle Trades bis spätestens 16:30 dt gestartet (zeiten.start_bis)
 AP_TZ_TAG = "Europe/Berlin"          # Nachtlauf 00:00 und Bot-Takt in deutscher Zeit (Vertrag §2/§3)
 # Bot-Takt rund um die Uhr (08.10.2026, Finn über Master: „Der Bot soll quasi die ganze Zeit schauen — 24/7"): früher nur Mo–Fr
@@ -16713,8 +16733,12 @@ AP_RUHE_JE_PLAN_MIN = 30
 AP_HYSTERESE_EUR = 200.0
 # Weicher Malus (Finn 06.10.2026 abends: „nicht so fixe Minuten-Regeln, einfach Zufallsprinzip — wenn mal zwei derselben
 # Firma in der gleichen Minute long gehen, ist das halt so"): zwei gegenläufige Starts derselben Firma bei verschiedenen IDs
-# dichter als das zählen im Optimierer als Malus (lieber anders würfeln) — nie Verbot, nie Ablehnung, kein DB-Parameter
-AP_GEGEN_DICHT_MIN = 10
+# dichter als das zählen im Optimierer als Malus (lieber anders würfeln) — nie Verbot, nie Ablehnung, kein DB-Parameter.
+# Seit 08.10.2026 ~17:00 Dubai 3 statt 10 min (= AP_GEGEN_FIRMA_MIN, DB-Riegel 90 s + Puffer): mit 10 min stand der Malus im
+# Planer VOR dem Netto — im vollen Opening-Fenster (6 Tradeify-Starts in 60 min) zog er Kette um Kette alle Starts einer Firma
+# in dieselbe Richtung (Finn: „Im Planer wird zum Opening schon wieder alles leicht long"). Gegenläufig über IDs ist erwünscht,
+# nur nicht in derselben Minute (der DB-Riegel würde den Späteren um 90 s schieben).
+AP_GEGEN_DICHT_MIN = 3
 AP_GEGEN_WUERFE = 16                 # 07.10.2026: so oft würfelt der Planer die Zeiten neu, der beste Lauf (Malus, |Netto-€|, Große-Folge) gilt
 AP_RICHTUNG_TXT = {"buy": "long", "sell": "short"}
 _ap_bot = {"letzter_lauf": None, "letztes": None, "extra_tag": None, "fehler": "", "param": None, "gelesen": 0.0}
@@ -16971,8 +16995,44 @@ def ap_id_misch(z, tranchen):
     return int(round(strafe * 100)), out
 
 
+def ap_firma_misch(z, tranchen, fest=()):
+    """REIN RECHNEND (testbar, FIRMEN-MISCHUNG 08.10.2026, Finn: „nicht, dass an einem Tag eine Prop-Firm nur in einer Richtung
+    getradet wird"): Tages-Mischung je Firma einer Zuteilung z = {tranche: 'buy'|'sell'} über tranchen = {key: {user|user_id, firma,
+    n_plaene?, folgetag?}} plus fest = [{user_id, firma, richtung}] — Trades des Tages, deren Richtung dieser Lauf nicht ändert (heute
+    gestartet/gewürfelte WD-Blöcke, schon geplante Pläne). → (strafe, je_firma); je_firma = {firma: {long, short, n, ids, anteil, regel}}
+    mit anteil = Anteil der selteneren Richtung, soll = Mindestzahl der selteneren Richtung. Für Firmen mit n ≥ AP_FIRMA_MISCH_AB
+    Trades über ≥ 2 IDs ist soll = max(1, round(AP_FIRMA_MISCH_MIN × n)) — „grob" 30 %: 3 → 1, 4 → 1, 6 → 2, 10 → 3 (nie unter 25 %,
+    nie 100 % eine Richtung); strafe = Σ (soll − seltenere) ÷ n in Hundertsteln (ganzzahlig wie ap_id_misch). 0 = jede Firma gemischt."""
+    je = {}
+
+    def zaehle(uid, firma, r, n=1):
+        if not uid or not firma or r not in ("buy", "sell"):
+            return
+        e = je.setdefault(str(firma), {"long": 0, "short": 0, "n": 0, "ids": set()})
+        e["long" if r == "buy" else "short"] += n
+        e["n"] += n
+        e["ids"].add(str(uid))
+    for k, r in (z or {}).items():
+        t = (tranchen or {}).get(k) or {}
+        if t.get("folgetag"):
+            continue                                       # Pläne des Folgetags gehören nicht zu diesem Tag
+        zaehle(str(t.get("user") or t.get("user_id") or ""), t.get("firma"), r, int(t.get("n_plaene") or 1))
+    for x in fest or ():
+        zaehle(str(x.get("user_id") or ""), x.get("firma"), x.get("richtung"))
+    strafe, out = 0.0, {}
+    for f, e in je.items():
+        selten = min(e["long"], e["short"])
+        gilt = e["n"] >= AP_FIRMA_MISCH_AB and len(e["ids"]) >= 2
+        soll = max(1, int(round(AP_FIRMA_MISCH_MIN * e["n"]))) if gilt else 0
+        if selten < soll:
+            strafe += (soll - selten) / e["n"]
+        out[f] = {"long": e["long"], "short": e["short"], "n": e["n"], "ids": len(e["ids"]),
+                  "anteil": round(selten / e["n"], 2) if e["n"] else 0.0, "soll": soll, "regel": gilt}
+    return int(round(strafe * 100)), out
+
+
 def ap_richtungen_delta(tranchen, basis_netto, basis_brutto, rnd, band_pct, fest_ereignisse=(), bestehende=(), versuche=4096,
-                        einsatz=None, mit_wert=False):
+                        einsatz=None, mit_wert=False, firma_fest=()):
     """REIN RECHNEND (Vertrag §2, Korrektur Finn 06.10.2026 „nicht so fixe Minuten-Regeln, einfach Zufallsprinzip"): Richtung
     je TRANCHE (ID × Firma). Dieselbe Firma darf bei verschiedenen IDs gegenläufig sein — kein Verbot, keine Pause; nur ein
     weicher Malus, wenn zwei gegenläufige derselben Firma dichter als AP_GEGEN_DICHT_MIN starten (dann lieber anders würfeln).
@@ -16983,7 +17043,10 @@ def ap_richtungen_delta(tranchen, basis_netto, basis_brutto, rnd, band_pct, fest
     gross_ab} oder None. Mit einsatz (Finn 07.10.2026, EINE Kennzahl = Einsatz €, einfach): Malus dicht gegenläufig gleiche
     Firma (stark, nie Verbot), größtes |Netto-Einsatz| (in AP_EUR_STUFE-Stufen), große gleich gerichtet direkt hintereinander,
     genaues größtes |Netto-Einsatz|, Netto am Tagesende — €/Pkt zählt dann nicht, keine harte Grenze. Ohne einsatz wie bisher nach Delta: Band-Überschreitung, Malus, größtes |Netto-Delta|, Tagesende. Bis 12 freie Gruppen alle Verteilungen, darüber `versuche` Würfe + Einzeltausch;
-    Gleichstand entscheidet der Zufall. → ({key: 'buy'|'sell'}, netto_max_abs) bzw. mit_wert: (…, …, wert-Tupel)"""
+    Gleichstand entscheidet der Zufall. → ({key: 'buy'|'sell'}, netto_max_abs) bzw. mit_wert: (…, …, wert-Tupel)
+    FIRMEN-MISCHUNG (08.10.2026, Finn: „kein einziger Tradeify-Short bei 10–15 Trades — Fehler"): firma_fest = [{user_id, firma,
+    richtung}] Trades des Tages mit fester Richtung (heute gestartet, schon geplant); ap_firma_misch zählt direkt nach dem Malus —
+    jede Firma mit ≥ AP_FIRMA_MISCH_AB Trades über ≥ 2 IDs bekommt beide Richtungen (seltenere ≥ AP_FIRMA_MISCH_MIN), sonst Netto/Zufall."""
     namen = sorted(tranchen or {})
     gruppe = {k: str(tranchen[k].get("gruppe") or k) for k in namen}
     basis = {k: tranchen[k]["fest"] for k in namen if tranchen[k].get("fest") in ("buy", "sell")}
@@ -17007,10 +17070,11 @@ def ap_richtungen_delta(tranchen, basis_netto, basis_brutto, rnd, band_pct, fest
                 einsatz.get("gross_ab"), laufzeit_min=einsatz.get("laufzeit"))
             # Malus zuerst (Finn: gleiche Firma gegenläufig kurz hintereinander nur, wenn es gar nicht anders geht); dann das
             # Gesamt-Netto in Stufen, dann die ID-Mischung (08.10.2026, Finn: keine ID komplett long/short bei ≥ 4 Plänen über ≥ 2 Firmen)
-            return (_ap_gegen_dicht(z, paare), int(el["netto_eur_max_abs"] // AP_EUR_STUFE), ap_id_misch(z, tranchen)[0], el["gross_folge"],
-                    el["netto_eur_max_abs"], abs(el["netto_eur_ende"])), v["netto_max_abs"]
-        return (band_ueber, _ap_gegen_dicht(z, paare), ap_id_misch(z, tranchen)[0], round(v["netto_max_abs"], 1),
-                round(abs(v["verlauf"][-1]["netto_delta"]), 3)), v["netto_max_abs"]
+            # FIRMEN-MISCHUNG (08.10.2026) direkt nach dem Malus: eine Firma nie den ganzen Tag nur in eine Richtung
+            return (_ap_gegen_dicht(z, paare), ap_firma_misch(z, tranchen, firma_fest)[0], int(el["netto_eur_max_abs"] // AP_EUR_STUFE),
+                    ap_id_misch(z, tranchen)[0], el["gross_folge"], el["netto_eur_max_abs"], abs(el["netto_eur_ende"])), v["netto_max_abs"]
+        return (band_ueber, _ap_gegen_dicht(z, paare), ap_firma_misch(z, tranchen, firma_fest)[0], ap_id_misch(z, tranchen)[0],
+                round(v["netto_max_abs"], 1), round(abs(v["verlauf"][-1]["netto_delta"]), 3)), v["netto_max_abs"]
 
     def zuteilung(bits):
         z = dict(basis)
@@ -17231,39 +17295,40 @@ def ap_szenario_trade_aus_zeile(z, laufend):
             "sl_punkte": z.get("sl_punkte_rest") if laufend else z.get("sl_punkte")}
 
 
-AP_GEGEN_FIRMA_MIN = 30                  # andere ID, gleiche Firma, Gegenrichtung: so nah darf kein Start heranrücken (± min)
+# GEGENHEDGE ÜBER IDs — nur noch das kurze Fenster am Start (08.10.2026 ~17:00 Dubai, Finn: „Ich glaube, im Bot ist eine falsche Regel
+# drin. Heute war kein einziger Tradeify-Short bei 10–15 Trades — Fehler. Wenn eine ID Tradeify long geht, kann natürlich eine ANDERE
+# ID Tradeify short gehen zum Ausgleichen. Es darf sich nur nicht die GLEICHE ID gegenhedgen"). Bis dahin (.1287/.1292/.1302) sperrte
+# eine laufende oder geplante Gegenrichtung einer anderen ID die Firma über die ganze Laufzeit (|t − s| ≤ max(180, 30) min) — Futures
+# laufen stundenlang, also legte die erste Richtung des Tages die Firma für alle IDs fest (08.10.: Tradeify 17× long über 6 IDs).
+# Jetzt: über IDs ist die Gegenrichtung bei derselben Firma erlaubt und erwünscht; Planer/Bot legen nur keine zwei gegenläufigen
+# Starts derselben Firma binnen ±AP_GEGEN_FIRMA_MIN (DB-Riegel prophos_gegenhedge_fenster 90 s + Puffer, der Riegel würde den
+# Späteren sonst um 90 s schieben). Gleiche ID × Firma: weiter EINE Richtung, solange dort ein Trade läuft/geplant ist
+# (Richtungsschutz id_fest, Laufzeit-Prüfung je ID × Firma in Verteilung/Bot/Nachholen, ap_richtung_fest_plan im Planer).
+AP_GEGEN_FIRMA_MIN = 3                   # andere ID, gleiche Firma, Gegenrichtung: kein Start näher als ± so viele min
 
 
 def _ap_gegen_firma(t, uid, firma, richtung, plaene, laufend, jetzt_min, laufzeit_min=None):
-    """True = Startzeit t gesperrt (Gegenhedge über IDs je Firma), Regel siehe _ap_gegen_partner."""
+    """True = Startzeit t gesperrt (gegenläufiger Start einer anderen ID derselben Firma zu nah), Regel siehe _ap_gegen_partner."""
     return bool(_ap_gegen_partner(t, uid, firma, richtung, plaene, laufend, jetzt_min, laufzeit_min))
 
 
 def _ap_gegen_partner(t, uid, firma, richtung, plaene, laufend, jetzt_min, laufzeit_min=None):
-    """REIN RECHNEND: GEGENHEDGE ÜBER IDs (08.10.2026, Master/Finn: „aufpassen, dass man nicht aus Versehen gegenhedged" — Trockenlauf
-    hätte Chris FundedNext BUY auf 05:57 vorgezogen, während Jacob FundedNext SELL lief). Partner, die t sperren: eine ANDERE ID bei
-    derselben Firma (Schlüssel wie je[..]["firma"]) läuft in Gegenrichtung (laufend = [{user_id, firma, richtung, start?}], zählt bis
-    max(start + laufzeit, jetzt + AP_GEGEN_FIRMA_MIN)) oder ist in Gegenrichtung geplant und die Laufzeiten berühren sich
-    (|t − s| ≤ max(laufzeit, AP_GEGEN_FIRMA_MIN), seit 08.10.2026 — vorher nur ±AP_GEGEN_FIRMA_MIN um den Start)
-    (plaene = [(start, richtung, user_id, firma)])."""
-    lz = float(laufzeit_min or AP_VERTEIL_GEGEN_MIN)
-    # LAUFZEIT AUCH BEI GEPLANTEN (Master 08.10.2026, Befund Slave 2 zum Lauf 02:39:42 UTC: Band-Drehung Jacob The5%ers 72c2a073 → BUY
-    # 13:17 UTC, Moritz The5%ers SELL d83e1d2f 12:46 — 31 min davor, knapp außerhalb ±AP_GEGEN_FIRMA_MIN und damit erlaubt, obwohl
-    # Moritz' Sell dann noch ~2 h läuft): gesperrt, wenn t in [s − 30, s + max(Laufzeit, 30)] (ich starte in seinen Lauf) ODER s in
-    # [t − 30, t + max(Laufzeit, 30)] (er startet in meinen) — zusammen |t − s| ≤ max(Laufzeit, AP_GEGEN_FIRMA_MIN)
-    # → Menge der Partner (("plan", s, u) / ("lauf", Index)), die t sperren; _ap_gegen_firma = „nicht leer"
-    fenster = max(lz, float(AP_GEGEN_FIRMA_MIN))
+    """REIN RECHNEND: Partner, die Startzeit t sperren — eine ANDERE ID bei derselben Firma (Schlüssel wie je[..]["firma"]) startet in
+    Gegenrichtung höchstens AP_GEGEN_FIRMA_MIN entfernt: geplant/gestartet (plaene = [(start, richtung, user_id, firma)]) oder laufend
+    mit bekanntem Start (laufend = [{user_id, firma, richtung, start?}] — ohne start sperrt ein laufender Trade nicht mehr).
+    Seit 08.10.2026 ~17:00 Dubai (Finn, s. o.) KEINE Laufzeit-Sperre über IDs mehr; jetzt_min/laufzeit_min bleiben nur für die Aufrufer.
+    → Menge der Partner (("plan", s, u) / ("lauf", Index)); _ap_gegen_firma = „nicht leer"."""
     out = set()
     if richtung not in ("buy", "sell"):
         return out
+    fenster = float(AP_GEGEN_FIRMA_MIN)
     for s, r, u, f in plaene or ():
         if str(u) != str(uid) and f == firma and r in ("buy", "sell") and r != richtung and abs(float(t) - float(s)) <= fenster:
             out.add(("plan", float(s), str(u)))
     for n, x in enumerate(laufend or ()):
         if str(x.get("user_id")) == str(uid) or x.get("firma") != firma or x.get("richtung") not in ("buy", "sell") or x.get("richtung") == richtung:
             continue
-        ende = max((float(x["start"]) + lz) if x.get("start") is not None else float(jetzt_min) + lz, float(jetzt_min) + AP_GEGEN_FIRMA_MIN)
-        if float(t) < ende:
+        if x.get("start") is not None and abs(float(t) - float(x["start"])) <= fenster:
             out.add(("lauf", n))
     return out
 
@@ -17401,17 +17466,14 @@ def ap_verteilung(gruppe, je, zustand, jetzt_min, zeiten, rnd, gestartet=None, l
         firma_alle += [float(x["start"]) for x in gestartet or () if x.get("firma") == firma and x.get("start") is not None]
 
         gegen_pl = [(neu.get(k, zustand[k]["start"]), zustand[k]["richtung"], str(je[k]["user_id"]), je[k]["firma"]) for k in zustand if k != i]
-        # BESTAND (08.10.2026, mit der Laufzeit-Sperre bei geplanten): steht der Plan schon in einer Gegenrichtung einer anderen ID, darf
-        # das Auseinanderziehen ihn innerhalb DIESER Überschneidung verschieben (keine neuen Partner) — sonst bliebe der Klumpen stehen
-        # (Live-Fall Ina FundedNext 3 Sells in 3 min neben X' Buys). Gebaut wird dabei nichts Neues.
-        bestand = _ap_gegen_partner(s0, uid, firma, richtung, gegen_pl, laufend, jetzt_min, laufzeit_min)
+        gegen_pl += [(float(x["start"]), x.get("richtung"), str(x.get("user_id")), x.get("firma")) for x in gestartet or ()
+                     if x.get("start") is not None]
+        # Seit 08.10.2026 ~17:00 Dubai (Finn: „kann natürlich eine ANDERE ID Tradeify short gehen") nur noch ±AP_GEGEN_FIRMA_MIN um
+        # gegenläufige Starts anderer IDs — die Laufzeit-Sperre und damit der „Bestand" (Schieben innerhalb einer Überschneidung) sind weg
 
         def ok(t, f):
-            p_ = _ap_gegen_partner(t, uid, firma, richtung, gegen_pl, laufend, jetzt_min, laufzeit_min)
-            if p_ and not p_ <= bestand:
-                return False                                       # Gegenhedge über IDs: andere ID läuft/startet gegenläufig (neu)
-            if any(x[0] == "lauf" or abs(float(t) - x[1]) <= AP_GEGEN_FIRMA_MIN for x in p_):
-                return False                                       # hart wie vor .1302: nie in einen laufenden, nie ±30 min um einen Start
+            if _ap_gegen_partner(t, uid, firma, richtung, gegen_pl, laufend, jetzt_min, laufzeit_min):
+                return False                                       # gegenläufiger Start einer anderen ID derselben Firma ±3 min
             if any(abs(t - s) < gfirma for s in firma_alle):
                 return False                                       # Firmen-Abstand zu jedem Start derselben Firma — hart
             for s, r in fremd:
@@ -17501,8 +17563,25 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
             return malus, round(ueber_e), el["gross_folge"], el["netto_eur_max_abs"]
         return malus, round(ueber, 3), 0, round(tag["netto_max_abs"], 3)
 
+    # FIRMEN-MISCHUNG (08.10.2026, Finn: „nicht, dass an einem Tag eine Prop-Firm nur in einer Richtung getradet wird"): misch = ID-Mischung
+    # + Tages-Mischung je Firma (ap_firma_misch) über die Pläne des Tags im Zustand und die heutigen Starts (gestartet, inkl. Winning-Days-
+    # Blöcke) — jede Drehung (Band-Schritt, Suche, Mischung) darf sie nicht verschlechtern, eine Schieflage weckt die Mischungs-Drehung
+    gest_fest = [{"user_id": x.get("user_id"), "firma": x.get("firma"), "richtung": x.get("richtung")} for x in gestartet or ()
+                 if x.get("start") is None or float(x["start"]) < 24 * 60]
+    # gegenläufige Starts anderer IDs ±AP_GEGEN_FIRMA_MIN (08.10.2026 ~17:00 Dubai): heute gestartete zählen mit (DB-Riegel 90 s)
+    gest_pl = [(float(x["start"]), x.get("richtung"), str(x.get("user_id")), x.get("firma")) for x in gestartet or ()
+               if x.get("start") is not None]
+
+    def misch_tr(z):
+        return ({i: z[i]["richtung"] for i in z},
+                {i: {"user": je[i]["user_id"], "firma": je[i]["firma"], "n_plaene": 1, "folgetag": je[i].get("folgetag")} for i in z})
+
+    def firma_strafe(z):
+        return ap_firma_misch(*misch_tr(z), gest_fest)[0]
+
     def misch(z):
-        return ap_id_misch({i: z[i]["richtung"] for i in z}, {i: {"user": je[i]["user_id"], "firma": je[i]["firma"], "n_plaene": 1} for i in z})[0]
+        r_, tr_ = misch_tr(z)
+        return ap_id_misch(r_, tr_)[0] + ap_firma_misch(r_, tr_, gest_fest)[0]
 
     def als_dict(k):
         return {"ueber_band": k[1], "netto_max_abs": k[3], "gross_folge": k[2], "malus": k[0], "id_misch": k[4] if len(k) > 4 else None}
@@ -17678,13 +17757,13 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
     # über zwei Zugarten — einen Plan von nach den nächsten 60 min in sie hinein VORZIEHEN oder einen Plan aus ihnen HINAUSSCHIEBEN
     # (nur diese beiden ändern die Szenario-Kurve +60). Ziel: schlimmster Fall ±AP_SZENARIO_R möglichst hoch, bei Gleichstand |Delta| an
     # null, dann weniger Züge. Jeder einzelne Zug muss das Minimum um ≥ AP_SZENARIO_MIN_GEWINN_EUR heben. Am neuen Platz alle harten
-    # Regeln wie beim Vorziehen (frei_fuer): Gegenhedge über IDs, eigene ID × Firma nie gegenläufig in der Laufzeit, Richtungsschutz,
+    # Regeln wie beim Vorziehen (frei_fuer): Gegenhedge über IDs (seit 08.10.2026 nur ±3 min am Start), eigene ID × Firma nie gegenläufig in der Laufzeit, Richtungsschutz,
     # Firmen-Abstand zu anderen IDs, kein Malus „dicht gegenläufig", Abstand je ID und je ID × Firma (Stufen 1/½/¼, ¼ nicht für heute
     # verteilte) — damit nie zwei Starts derselben Firma enger als die Regeln, auch nicht innerhalb der Kombination. Nur Auto-Pläne,
     # änderbar (keine Hand-Werte, nicht fällig), PC-Tab lebt, nicht ruhend, je Plan höchstens ein Zug. Pingpong: heute vorgezogene werden
     # nicht hinausgeschoben, heute hinausgeschobene nicht wieder vorgezogen. Dritte Zugart DREHEN: die ganze ID × Firma (eine Richtung je
     # ID × Firma) mit den Grenzen der Mischung — kein Richtungsschutz, alle änderbar/Auto/PC lebt, Bestätigte erst ab
-    # AP_MISCH_BESTAETIGT_AB_MIN vor dem frühesten Start, kein Gegenhedge über IDs, ID-Mischung nicht schlechter, Tagesband nicht über
+    # AP_MISCH_BESTAETIGT_AB_MIN vor dem frühesten Start, kein Gegenhedge über IDs (±3 min), ID- und Firmen-Mischung nicht schlechter, Tagesband nicht über
     # max(Hysterese, vorher).
     laufz = float((einsatz or {}).get("laufzeit") or AP_VERTEIL_GEGEN_MIN)
     gf_v = float((zeiten or {}).get("abstand_id_firma_min") or AP_ABSTAND_ID_FIRMA_MIN)
@@ -17714,9 +17793,9 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
             return False                                 # Richtungsschutz ID × Firma
         je_u, je_f = bel
         firma_ = [x for x in je_f.get(fa, ()) if x[0] != i]
-        if _ap_gegen_firma(t, uid, fa, r, [(s_, r_, u_, f_) for k_, s_, r_, u_, f_ in firma_ if k_ is not None], laufend, jetzt_min,
+        if _ap_gegen_firma(t, uid, fa, r, [(s_, r_, u_, f_) for k_, s_, r_, u_, f_ in firma_], laufend, jetzt_min,
                            (einsatz or {}).get("laufzeit")):
-            return False                                 # Gegenhedge über IDs (andere ID läuft/startet gegenläufig, ± 30 min)
+            return False                                 # gegenläufiger Start einer anderen ID derselben Firma ±3 min (geplant/gestartet)
         for k_, s_, r_, u_, f_ in firma_:
             if u_ == uid and r_ in ("buy", "sell") and r_ != r and (s_ <= t < s_ + laufz or t <= s_ < t + laufz):
                 return False                             # nie gegen einen Trade derselben ID × Firma
@@ -17747,9 +17826,9 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
         # nur die Richtungs-Regeln am bestehenden Platz (Abstände ändern sich beim Drehen nicht)
         uid, fa, t = str(je[i]["user_id"]), je[i]["firma"], zustand_start(i)
         firma_ = [x for x in bel[1].get(fa, ()) if x[0] != i]
-        if _ap_gegen_firma(t, uid, fa, r, [(s_, r_, u_, f_) for k_, s_, r_, u_, f_ in firma_ if k_ is not None and u_ != uid], laufend,
+        if _ap_gegen_firma(t, uid, fa, r, [(s_, r_, u_, f_) for k_, s_, r_, u_, f_ in firma_ if u_ != uid], laufend,
                            jetzt_min, (einsatz or {}).get("laufzeit")):
-            return False
+            return False                                 # andere ID startet ±3 min gegenläufig (über IDs sonst erlaubt, 08.10.2026)
         for k_, s_, r_, u_, f_ in firma_:
             if u_ == uid and k_ is None and r_ in ("buy", "sell") and r_ != r and (s_ <= t < s_ + laufz or t <= s_ < t + laufz):
                 return False                             # heute gestarteter Trade derselben ID × Firma in Gegenrichtung
@@ -17937,9 +18016,9 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                 lo = max(lo, float(ap_cfd_ab(zeiten)))
 
             def ok(t, f, i=i, uid=uid, fa=fa, g=g):
-                if _ap_gegen_firma(t, uid, fa, noetig, [(s, r, u, ff) for k, s, r, u, ff in alle if k is not None and k != i], laufend,
+                if _ap_gegen_firma(t, uid, fa, noetig, [(s, r, u, ff) for k, s, r, u, ff in alle if k != i], laufend,
                                    jetzt_min, (einsatz or {}).get("laufzeit")):
-                    return False                             # Gegenhedge über IDs (andere ID läuft/startet gegenläufig, ± 30 min)
+                    return False                             # andere ID startet ±3 min gegenläufig bei derselben Firma (08.10.2026)
                 for k, s, r, u, ff in alle:
                     if k == i:
                         continue
@@ -17998,10 +18077,10 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                 sz_vor = sz_lage(zustand)
 
     def gegen_frei(z, ids):
-        # GEGENHEDGE ÜBER IDs auch im Band-Schritt (Prüfer Slave 2 zu 3d43e4e, 08.10.2026: Drehen und Verschieben einer Tranche prüften
-        # nur _ap_tranche_frei/Fenster, gebremst hat allein der 10-min-Malus über geplante Pläne): jeder Plan der Tranche im neuen Zustand
-        # z gegen Pläne ANDERER IDs (aus z) und laufende Trades derselben Firma in Gegenrichtung — sonst Kandidat verwerfen
-        andere = [(z[o]["start"], z[o]["richtung"], str(je[o]["user_id"]), je[o]["firma"]) for o in z if o not in ids]
+        # GEGENHEDGE ÜBER IDs auch im Band-Schritt (Prüfer Slave 2 zu 3d43e4e, 08.10.2026): jeder Plan der Tranche im neuen Zustand z gegen
+        # Pläne ANDERER IDs (aus z) und heutige Starts derselben Firma in Gegenrichtung — seit 08.10.2026 ~17:00 Dubai nur noch ±3 min um
+        # deren Start (Finn: „kann natürlich eine ANDERE ID Tradeify short gehen zum Ausgleichen"), keine Laufzeit-Sperre mehr
+        andere = [(z[o]["start"], z[o]["richtung"], str(je[o]["user_id"]), je[o]["firma"]) for o in z if o not in ids] + gest_pl
         return not any(_ap_gegen_firma(z[i]["start"], je[i]["user_id"], je[i]["firma"], z[i]["richtung"], andere, laufend, jetzt_min,
                                        (einsatz or {}).get("laufzeit")) for i in ids)
 
@@ -18037,7 +18116,7 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                 m_vor, m_nach = misch(zustand), misch(z)
                 if m_nach > m_vor:
                     continue
-                if gegen_frei(z, ids):                   # gedreht nie gegen eine andere ID derselben Firma (laufend / ± 30 min)
+                if gegen_frei(z, ids):                   # gedreht nie ±3 min neben einen gegenläufigen Start einer anderen ID
                     kandidaten.append((strafe(z) + (m_nach,), "richtung", t["firma"], ids, z))
             fen = ap_fenster_von(zeiten, t["start"])
             if not fen:
@@ -18059,7 +18138,7 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                 for i in ids:
                     z[i]["start"] += neu - t["start"]
                 if not gegen_frei(z, ids):
-                    continue                     # verschoben nie neben eine laufende / ≤ 30 min nahe Gegenrichtung einer anderen ID
+                    continue                     # verschoben nie ±3 min neben einen gegenläufigen Start einer anderen ID
                 kandidaten.append((strafe(z) + (misch(z),), "start", t["firma"], ids, z))
         if not kandidaten:
             break
@@ -18096,6 +18175,10 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
     # wie Finn sie freigegeben hat), kein Richtungsschutz, Ruhezeit je Plan, keine geteilte ID+Firma. Das Band darf dabei nicht
     # schlechter werden als die Hysterese — in den nächsten 60 min UND über den Tag (Chris' Pläne liegen oft später als 60 min),
     # kein neuer Malus. Bevorzugt: beste Mischung, dann die kleinere Tranche (Chris 6/1: FundingPips 2× → sell = 4/3).
+    # Seit 08.10.2026 ~17:00 Dubai zählt in „Mischung" auch die FIRMEN-MISCHUNG des Tages (ap_firma_misch, Finn: „kein einziger
+    # Tradeify-Short bei 10–15 Trades — Fehler"): ist eine Firma heute einseitig, dreht diese Phase die ganze ID × Firma einer ANDEREN ID
+    # in die Gegenrichtung (über IDs erlaubt) — mit denselben Grenzen: Deckel je ID/Tag, Bestätigte ≥ 30 min, kein Richtungsschutz,
+    # Band/Tagesband/Szenario nicht schlechter, ±3 min neben keinem gegenläufigen Start einer anderen ID.
     def ueber_tag(z):
         if einsatz:
             ev_e = [(z[i]["start"], float(je[i].get("einsatz_abs") or 0) * (1 if z[i]["richtung"] == "buy" else -1)) for i in z]
@@ -18136,9 +18219,9 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
             t = {"user_id": je[ids[0]]["user_id"], "firma": je[ids[0]]["firma"], "bestaetigt": best_}
             neu_r = "sell" if zustand[ids[0]]["richtung"] == "buy" else "buy"
             andere_pl = [(zustand[o]["start"], zustand[o]["richtung"], str(je[o]["user_id"]), je[o]["firma"]) for o in zustand if o not in ids]
-            if any(_ap_gegen_firma(zustand[i]["start"], t["user_id"], t["firma"], neu_r, andere_pl, laufend, jetzt_min,
+            if any(_ap_gegen_firma(zustand[i]["start"], t["user_id"], t["firma"], neu_r, andere_pl + gest_pl, laufend, jetzt_min,
                                    (einsatz or {}).get("laufzeit")) for i in ids):
-                continue                                     # Gegenhedge über IDs: nach der Drehung gegen eine andere ID derselben Firma
+                continue                                     # nach der Drehung ±3 min neben einem gegenläufigen Start einer anderen ID
             ok_gr[k] = (ids, t, neu_r)
 
         def drehen(*idlisten):
@@ -18175,8 +18258,8 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                 for k2, (ids2, t2, r2) in ok_gr.items():
                     if str(t1["user_id"]) == str(t2["user_id"]) or zustand[ids2[0]]["richtung"] != r1 or k1 >= k2 and False:
                         continue
-                    if t1["firma"] == t2["firma"]:
-                        continue                             # dieselbe Firma gegeneinander drehen hieße Gegenhedge über IDs
+                    # dieselbe Firma bei zwei IDs gegeneinander drehen ist seit 08.10.2026 ~17:00 Dubai erlaubt (Gegenrichtung über IDs
+                    # erwünscht, Finn) — nur ±3 min am Start prüft ok_gr/gegen
                     z = drehen(ids1, ids2)
                     r_ = zulaessig(z)
                     if r_:
@@ -18190,8 +18273,16 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
         uid = str(teile[0][0]["user_id"])
         m_vor, m_nach = misch_je(zustand).get(uid) or {}, misch_je(z).get(uid) or {}
         wer = je[teile[0][1][0]].get("user") or uid[:8]
+        # FIRMEN-MISCHUNG (08.10.2026): hat die Drehung die Tages-Mischung einer Firma verbessert, sagt das Protokoll das (Firma long/short
+        # über alle IDs heute) — sonst wie bisher die ID-Mischung
+        fa_ = teile[0][0]["firma"]
+        f_vor, f_nach = (ap_firma_misch(*misch_tr(zustand), gest_fest)[1].get(fa_) or {},
+                         ap_firma_misch(*misch_tr(z), gest_fest)[1].get(fa_) or {})
+        firma_txt = firma_strafe(z) < firma_strafe(zustand)
+        fname_ = je[teile[0][1][0]].get("firma_name") or fa_
         if ausloeser is None:
-            ausloeser = f"ID-Mischung: {wer} {m_vor.get('long')} long / {m_vor.get('short')} short"
+            ausloeser = (f"Firmen-Mischung: {fname_} heute {f_vor.get('long')} long / {f_vor.get('short')} short" if firma_txt else
+                         f"ID-Mischung: {wer} {m_vor.get('long')} long / {m_vor.get('short')} short")
         txt_t = ""
         if tausch:
             t2, ids2 = teile[1]
@@ -18204,11 +18295,14 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                 aenderungen.append({"plan_id": i, "user_id": je[i]["user_id"], "firma": t["firma"], "art": "richtung",
                                     "von_richtung": von["richtung"], "nach_richtung": nach["richtung"],
                                     "von_start_min": von["start"], "nach_start_min": nach["start"],
-                                    "grund": (f"ID-Mischung{' (Tausch)' if tausch else ''}{' (bestätigt)' if t.get('bestaetigt') else ''}: "
+                                    "grund": (f"{'Firmen-Mischung' if firma_txt else 'ID-Mischung'}{' (Tausch)' if tausch else ''}"
+                                              f"{' (bestätigt)' if t.get('bestaetigt') else ''}: "
                                               f"{je[i].get('firma_name') or t['firma']} bei {wer_i} "
                                               f"{AP_RICHTUNG_TXT[von['richtung']]} → {AP_RICHTUNG_TXT[nach['richtung']]} "
-                                              f"({wer} {m_vor.get('long')}/{m_vor.get('short')} → {m_nach.get('long')}/{m_nach.get('short')} long/short"
-                                              f"{txt_t if t is teile[0][0] else ''})")})
+                                              + (f"({fname_} heute {f_vor.get('long')}/{f_vor.get('short')} → {f_nach.get('long')}/{f_nach.get('short')} "
+                                                 f"long/short über alle IDs" if firma_txt else
+                                                 f"({wer} {m_vor.get('long')}/{m_vor.get('short')} → {m_nach.get('long')}/{m_nach.get('short')} long/short")
+                                              + f"{txt_t if t is teile[0][0] else ''})")})
         zustand, aktuell = z, k_neu
         angefasst.update(i for _t, ids in teile for i in ids)
         for _t, ids_ in teile:
@@ -19762,8 +19856,9 @@ def ap_nachhol_minute(p, plaene, starts, id_fest, jetzt_min, zeiten=None, laufze
     verpassten Pläne binnen Minuten, ohne jede Regel. Jetzt: ab jetzt + AP_NACHHOL_VORLAUF_MIN (Zufall) die erste Minute, die
     (1) ap_start_hand_pruefen besteht (Richtungsschutz ID × Firma, Firmen-Abstand zu anderen IDs), (2) den Abstand je ID hält —
     gleiche Firma AP_ABSTAND_ID_FIRMA_MIN, andere Firma AP_ABSTAND_ID_MIN (zeiten überschreibt) — zu kommenden Plänen und heutigen
-    Starts derselben ID (verpasste Pläne mit Start in der Vergangenheit zählen nicht, sie holt ihr eigener Lauf nach), (3) keinen
-    Gegenhedge über IDs bildet (_ap_gegen_firma), (4) vor start_bis liegt. p = Zeile aus _ap_stand_plaene {plan_id, user_id, firma,
+    Starts derselben ID (verpasste Pläne mit Start in der Vergangenheit zählen nicht, sie holt ihr eigener Lauf nach), (3) nicht
+    ±AP_GEGEN_FIRMA_MIN neben einem gegenläufigen Start einer anderen ID derselben Firma liegt (_ap_gegen_firma — seit 08.10.2026
+    ~17:00 Dubai keine Laufzeit-Sperre über IDs mehr, Finn: „kann natürlich eine ANDERE ID Tradeify short gehen"), (4) vor start_bis liegt. p = Zeile aus _ap_stand_plaene {plan_id, user_id, firma,
     richtung}; plaene = _ap_stand_plaene, starts = stand.starts_heute, laufend = [{user_id, firma, richtung, start}].
     → (minute ab 00:00 dt, None) | (None, Klartext)."""
     zeiten = zeiten or {}
@@ -19798,7 +19893,7 @@ def ap_nachhol_minute(p, plaene, starts, id_fest, jetzt_min, zeiten=None, laufze
             letzter, m = "Abstand je ID", max(sperre) + rnd.random()
             continue
         if _ap_gegen_firma(m, u, f, r, gegen_pl, laufend, jm, laufzeit_min):
-            letzter, m = "Gegenhedge über IDs", int(m) + 1.0 + rnd.random()
+            letzter, m = "gegenläufiger Start einer anderen ID (±3 min)", int(m) + 1.0 + rnd.random()
             continue
         return round(m, 2), None
     return None, "kein regelkonformer Start gefunden"

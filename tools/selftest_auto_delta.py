@@ -40,7 +40,7 @@ FIRMEN = [
 ZEITEN = {"tz": "Europe/Berlin", "fenster": [["00:00", "14:30", 40], ["14:30", "17:30", 40], ["17:30", "19:30", 20]],
           "abstand_id_min": 3, "abstand_konto_s": [60, 120], "pause_firma_min": [25, 45]}
 
-REIN = ("_ap_plan_am_tag", "ap_id_fest", "ap_id_misch", "ap_ext_fehlt", "_ap_norm", "ap_regel_finden", "ap_groesse", "_ap_spanne", "_ap_runden", "ap_konto_rechnen", "_ap_hhmm", "_ap_hhmm_txt",
+REIN = ("_ap_plan_am_tag", "ap_id_fest", "ap_id_misch", "ap_firma_misch", "ap_ext_fehlt", "_ap_norm", "ap_regel_finden", "ap_groesse", "_ap_spanne", "_ap_runden", "ap_konto_rechnen", "_ap_hhmm", "_ap_hhmm_txt",
         "ap_zeiten_verteilen", "_ap_zeiten_verteilen_einmal", "ap_kw_param", "_ap_kw_kauf", "_ap_kw_wachsen", "ap_kontowert", "ap_trade_gewicht", "ap_sicht", "ap_sicht_uid", "ap_eingriff_filter",
         "_wd_num", "_symbol_wurzel", "_wd_level", "_wd_futures_frontcode", "_ap_gehedgt", "_ap_ende4",
         "ap_ausgleich_param", "ap_firma_key", "ap_ppl_karte", "ap_punktwert", "ap_usd_pro_pkt", "ap_delta", "ap_punkte",
@@ -68,7 +68,7 @@ def lade():
     konstanten = ("AP_REST_MIN", "AP_GROESSE_TOLERANZ", "AP_FENSTER_WUERFE", "AP_KW_FUNDED", "AP_KW_PHASEN", "AP_TYPEN", "AP_TZ_LAUF", "AP_STILL_FIRMEN",
                   "AP_AUSGLEICH_STANDARD", "AP_TZ_TAG", "AP_BOT_ARBEIT_VORLAUF_MIN", "AP_BOT_EXTRA_MIN", "AP_FAELLIG_MIN", "AP_BOT_SCHRITTE",
                   "AP_RICHTUNG_TXT", "AP_GEGEN_DICHT_MIN", "AP_GEGEN_WUERFE", "AP_EUR_STUFE", "AP_START_BIS_STANDARD", "AP_CFD_AB_STANDARD", "AP_CFD_ROUTEN", "AP_TRANCHE_LUECKE_MIN", "AP_ABSTAND_ID_FIRMA_MIN", "AP_ABSTAND_ID_MIN", "AP_ABSTAND_STUFEN", "AP_GROSS_NAH_MIN", "AP_FIRMA_ABSTAND_MIN", "AP_VERTEIL_VORLAUF_MIN", "AP_VERTEIL_JITTER_MIN", "AP_VERTEIL_GEGEN_MIN", "AP_VERTEIL_VERSATZ", "AP_VERTEIL_MIN_SCHRITT_MIN", "AP_SZENARIO_R", "AP_SZENARIO_SCHRITT", "AP_SZENARIO_WEIT", "AP_SZENARIO_AB_EUR", "AP_SZENARIO_MIN_GEWINN_EUR", "AP_SUCHE_ZUEGE", "AP_SUCHE_BREITE", "AP_BOT_ZUEGE_JE_ID_TAG", "AP_GEGEN_FIRMA_MIN", "AP_VERTEILUNG_BAND_TOLERANZ_EUR", "AP_VORZIEHEN_AB_MIN", "AP_VORZIEHEN_JITTER_MIN", "AP_VORZIEHEN_HYSTERESE_EUR", "AP_VORZIEHEN_RUECKFALL_MIN", "AP_MISCH_BESTAETIGT_AB_MIN", "PC_STAND_LEBT_S", "_ap_bot", "_ap_info", "WD_HEUTE_PPL", "LT_ECHO_ROUTEN", "LT_ECHO_MAX_ALTER_S",
-                  "AP_RS_HORIZONT_MIN", "AP_RS_NACHLAUF_MIN", "AP_RS_ROUTEN", "AP_EINGRIFF_MAX", "AP_SICHT_ADMIN", "AP_ID_FEST_HORIZONT_MIN", "AP_RUHE_JE_PLAN_MIN", "AP_HYSTERESE_EUR", "AP_ID_MISCH_AB", "AP_ID_MISCH_MAX",
+                  "AP_RS_HORIZONT_MIN", "AP_RS_NACHLAUF_MIN", "AP_RS_ROUTEN", "AP_EINGRIFF_MAX", "AP_SICHT_ADMIN", "AP_ID_FEST_HORIZONT_MIN", "AP_RUHE_JE_PLAN_MIN", "AP_HYSTERESE_EUR", "AP_ID_MISCH_AB", "AP_ID_MISCH_MAX", "AP_FIRMA_MISCH_AB", "AP_FIRMA_MISCH_MIN",
                   "AP_GRUND_EXT", "AP_GRUND_HEUTE_GEHANDELT", "WD_KONTO_ABSTAND_S", "AP_GRUND_BAL_LIVE", "AP_FEST_HAND", "AP_FEST_FOLGETAG", "AP_FEST_KETTE", "AP_FEST_TSV2", "AP_KETTE_STANDARD", "AP_KETTE_TXT", "AP_KETTE_DD_STANDARD", "WD_ERLEDIGT_ROUTEN", "WD_FUSION_AM_PLAN", "AP_NACHHOL_VORLAUF_MIN", "AP_START_HAND_VORLAUF_MIN", "AP_KETTE_TAKT_S", "_ap_kette", "AP_NOTES_MAX", "LIQ_VERLAUF_CACHE_S", "_liq_verlauf_cache")
     exec("\n".join([konst(k) for k in konstanten] + [block(f) for f in REIN + IO]), ns)
     return ns
@@ -213,16 +213,19 @@ def main():
     tr = {"A|tradeify": T("buy", "A", "tradeify", 60, 3.0), "B|apex": T(None, "B", "apex", 100, 3.0)}
     r, _m = a["ap_richtungen_delta"](tr, 0, 0, random.Random(7), 15)
     check(r["A|tradeify"] == "buy" and r["B|apex"] == "sell", "Richtungsschutz ID+Firma bleibt fest, die andere gleicht aus")
-    # weicher Malus: zwei gleich gute Lösungen — die mit dicht gegenläufiger Firma verliert
-    tr = {"A|tradeify": T(None, "A", "tradeify", 100, 2.0), "B|tradeify": T(None, "B", "tradeify", 103, 2.0),
-          "C|apex": T(None, "C", "apex", 100, 2.0), "D|apex": T(None, "D", "apex", 103, 2.0)}
+    # weicher Malus: zwei gleich gute Lösungen — die mit dicht gegenläufiger Firma verliert (seit 08.10.2026 ~17:00 Dubai < 3 min statt
+    # < 10 min, AP_GEGEN_DICHT_MIN = AP_GEGEN_FIRMA_MIN — Finn: Gegenrichtung über IDs erwünscht, nur nicht in derselben Minute)
+    tr = {"A|tradeify": T(None, "A", "tradeify", 100, 2.0), "B|tradeify": T(None, "B", "tradeify", 102, 2.0),
+          "C|apex": T(None, "C", "apex", 100, 2.0), "D|apex": T(None, "D", "apex", 102, 2.0)}
     for s in range(5):
         r, _m = a["ap_richtungen_delta"](tr, 0, 0, random.Random(s), 15)
         check(r["A|tradeify"] == r["B|tradeify"] and r["C|apex"] == r["D|apex"] and r["A|tradeify"] != r["C|apex"],
               f"Malus (seed {s}): dicht gegenläufig derselben Firma gemieden, ausgeglichen über die andere Firma")
-    paare = a["ap_dicht_paare"]({"A|x": T(None, "A", "x", 100, 1)}, [{"user_id": "B", "firma": "x", "start": 105, "richtung": "sell"}])
+    paare = a["ap_dicht_paare"]({"A|x": T(None, "A", "x", 100, 1)}, [{"user_id": "B", "firma": "x", "start": 102, "richtung": "sell"}])
     check(a["_ap_gegen_dicht"]({"A|x": "buy"}, paare) == 1 and a["_ap_gegen_dicht"]({"A|x": "sell"}, paare) == 0,
           "Malus auch gegen schon gestartete Trades derselben Firma")
+    paare = a["ap_dicht_paare"]({"A|x": T(None, "A", "x", 100, 1)}, [{"user_id": "B", "firma": "x", "start": 105, "richtung": "sell"}])
+    check(a["AP_GEGEN_DICHT_MIN"] == 3 and not paare, "Malus nur noch < 3 min (5 min daneben gegenläufig = kein Malus, 08.10.2026)")
     # 07.10.2026 (Finn: „Tradeify long bei Jacob, eine Minute später Tradeify short bei Moritz" praktisch nie): innerhalb des
     # Delta-Bands geht der Malus vor dem kleinsten Netto — lieber schlechter ausgeglichen als dicht gegenläufig
     tr = {"A|tradeify": T(None, "A", "tradeify", 100, 3.0), "B|tradeify": T(None, "B", "tradeify", 101, 3.0)}
@@ -317,14 +320,17 @@ def main():
     hyst0 = a["ap_umplanen"](plaene, 0.0, 10.0, jm, ZEITEN, 15, random.Random(3), id_fest=fest_v, hysterese=0)
     check([x["plan_id"] for x in hyst0["aenderungen"]] == [x["plan_id"] for x in erg["aenderungen"]], "Hysterese 0 → identisch zur alten Rechnung")
     check(a["AP_RUHE_JE_PLAN_MIN"] == 30 and a["AP_HYSTERESE_EUR"] == 200.0, "Dämpfungs-Konstanten: 30 min Ruhe je Plan, 200 € Hysterese (Vorschlag 1)")
-    # seit .1302 sperrt ein geplanter Plan einer anderen ID derselben Firma die Gegenrichtung über seine Laufzeit (120 min) — x2 liegt
-    # deshalb 200 min hinter x1, damit die Drehung erlaubt bleibt
+    # seit 08.10.2026 ~17:00 Dubai (Finn: „Wenn eine ID Tradeify long geht, kann natürlich eine ANDERE ID Tradeify short gehen") keine
+    # Laufzeit-Sperre über IDs mehr: x2 60 min hinter x1 → Drehung erlaubt; nur ±AP_GEGEN_FIRMA_MIN (3) um den Start sperrt
     einzel = a["ap_umplanen"]([plaene[0], dict(plaene[1], richtung="buy", start_min=820)], 5.0, 5.0, jm, ZEITEN, 15, random.Random(3), schritte=1)
     check([x["plan_id"] for x in einzel["aenderungen"]] in (["x1"], ["x2"]) and einzel["aenderungen"][0]["art"] == "richtung",
-          "Bot tauscht eine Tranche — dieselbe Firma bei der anderen ID darf außerhalb der Laufzeit gegenläufig bleiben")
+          "Bot tauscht eine Tranche — dieselbe Firma bei der anderen ID darf gegenläufig bleiben")
     eng = a["ap_umplanen"]([plaene[0], dict(plaene[1], richtung="buy")], 5.0, 5.0, jm, ZEITEN, 15, random.Random(3), schritte=1)
-    check(not [x for x in eng["aenderungen"] if x["art"] == "richtung"],
-          "x2 nur 60 min später (in der Laufzeit) → keine Drehung von x1 (Gegenhedge über IDs)")
+    check([x for x in eng["aenderungen"] if x["art"] == "richtung"],
+          "x2 60 min später (in seiner Laufzeit) → Drehung von x1 erlaubt (Gegenrichtung über IDs, 08.10.2026)")
+    dicht = a["ap_umplanen"]([plaene[0], dict(plaene[1], richtung="buy", start_min=622)], 5.0, 5.0, jm, ZEITEN, 15, random.Random(3), schritte=1)
+    check(not [x for x in dicht["aenderungen"] if x["art"] == "richtung"],
+          "x2 2 min neben x1 → keine Drehung (gegenläufiger Start derselben Firma ±3 min, DB-Riegel 90 s)")
 
     # ── A5 Manueller Eingriff: nur Richtungsschutz oder PC-Überlappung lehnen ab ─────────────────────────────────────────
     ep = a["ap_eingriff_pruefen"]

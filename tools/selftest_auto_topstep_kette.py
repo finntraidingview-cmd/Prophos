@@ -139,7 +139,8 @@ def main():
     e2 = a["ap_kette_tick"](jetzt, random.Random(3))
     check(not zustand["ins"] and "Nachlesung" in " ".join((e2.get("gruende") or {}).values())
           and any("Nachlesung" in g for _i, g in gruende_db), f"ohne genaue Nachlesung kein Trade 2, Grund am Trade 1 ({e2.get('gruende')})")
-    # Gegenhedge über IDs: andere ID bei Topstep um 11:10 dt SHORT geplant → Trade 2 nie SHORT/LONG daneben gegenläufig
+    # über IDs (seit 08.10.2026 ~17:00 Dubai, Finn: „kann natürlich eine ANDERE ID … short gehen"): andere ID bei Topstep um 11:10 dt
+    # SHORT geplant → Trade 2 darf LONG sein, startet aber nie ±AP_GEGEN_FIRMA_MIN (3 min) neben diesem Short
     zustand.update(t1=[t1], ins=[])
     andere[:] = [{"plan_id": "p-x", "user_id": U2, "user": "X", "firma_key": "topstep", "firma": "Topstep", "richtung": "sell", "start_min": 670.0,
                   "delta_abs": 1.0, "aenderbar": False, "fest_durch": "Handplan", "einsatz_abs": 0.0}]
@@ -149,9 +150,9 @@ def main():
         a["ap_kette_tick"](jetzt, random.Random(seed))
         for zz in zustand["ins"]:
             m = (datetime.fromisoformat(zz["start_um"]) - mitt).total_seconds() / 60.0
-            if zz["richtung"] == "buy" and abs(m - 670.0) <= 180:
+            if zz["richtung"] == "buy" and abs(m - 670.0) <= a["AP_GEGEN_FIRMA_MIN"]:
                 gegen_ok = False
-    check(gegen_ok, "Trade 2 nie gegenläufig in der Laufzeit eines geplanten Plans einer anderen ID derselben Firma")
+    check(gegen_ok, "Trade 2 nie ±3 min neben einem gegenläufigen Plan einer anderen ID derselben Firma (Laufzeit über IDs frei)")
 
     # ── 3b automatisch abhaken (Finn 08.10.2026: nach der Prüfung direkt erledigt, nicht mehr im Radar abhaken) ───────────────
     rev = [dict(t1, id="r-t1", route="tsv2", status="review", updated_at="2026-10-09T08:00:00Z", master_pl=None, konto_typ=None),

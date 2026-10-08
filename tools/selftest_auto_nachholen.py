@@ -4,8 +4,9 @@ seine verpassten Pläne automatisch sauber neu eingeplant werden (Firmen-Abstand
 alle auf einmal starten"). Vorher setzte sfNeuEinplanen jeden verpassten Plan auf jetzt + 2–6 min — alle auf einmal, ohne Regeln.
 Ohne Netz, Platzhalter-IDs. Aufruf: python3 tools/selftest_auto_nachholen.py
 Geprüft: frühestens jetzt + 2–4 min; Firmen-Abstand (seit 08.10.2026 1 min, jede ID); nacheinander nachgeholte Pläne einer ID nur noch
-PC-Abstand auseinander (abstand_id_min 3 + 2 = 5 min — 20/60 min je ID seit 08.10.2026 weg, Finn: „Nur eben nicht gleichzeitig"); Richtungsschutz derselben ID × Firma; kein Gegenhedge über IDs (andere ID läuft in
-Gegenrichtung); verpasste Pläne mit Start in der Vergangenheit blockieren nicht; nach start_bis → Klartext statt Minute."""
+PC-Abstand auseinander (abstand_id_min 3 + 2 = 5 min — 20/60 min je ID seit 08.10.2026 weg, Finn: „Nur eben nicht gleichzeitig"); Richtungsschutz derselben ID × Firma; über IDs nur kein
+gegenläufiger Start derselben Firma ±AP_GEGEN_FIRMA_MIN (seit 08.10.2026 ~17:00 Dubai keine Laufzeit-Sperre mehr, Finn: „kann natürlich eine
+ANDERE ID Tradeify short gehen"); verpasste Pläne mit Start in der Vergangenheit blockieren nicht; nach start_bis → Klartext statt Minute."""
 import os
 import random
 import re
@@ -78,11 +79,16 @@ def main():
            {"plan_id": "y", "user_id": MIKE, "firma": "apex", "richtung": "sell", "start_min": 330.0}]
     m4, _ = N(pl3[0], pl3, [], {}, jetzt, Z, 120, [], random.Random(4))
     check(m4 is not None and abs(m4 - 330.0) >= 120, f"Richtungsschutz ID × Firma: Gegenrichtung ≥ Laufzeit 120 min weg ({m4})")
-    # Gegenhedge über IDs: Jacob läuft FundedNext SELL → Mikes FundedNext BUY erst nach jetzt + 30 (Laufzeit-Rest)
+    # über IDs (seit 08.10.2026 ~17:00 Dubai): Jacob läuft FundedNext SELL seit 04:50 → Mikes FundedNext BUY sofort erlaubt (keine
+    # Laufzeit-Sperre mehr); startet Jacobs geplanter SELL gleich (05:03), hält Mikes BUY ±3 min Abstand zu dessen Start
     pl4 = [{"plan_id": "g", "user_id": MIKE, "firma": "fundednext", "richtung": "buy", "start_min": 250.0}]
     laufend = [{"user_id": JA, "firma": "fundednext", "richtung": "sell", "start": 290.0}]
     m5, _ = N(pl4[0], pl4, [], {}, jetzt, Z, 60, laufend, random.Random(5))
-    check(m5 is not None and m5 >= 290 + 60, f"kein Gegenhedge über IDs: erst nach Ende der Gegen-Laufzeit ({m5})")
+    check(m5 is not None and m5 < jetzt + 5, f"Gegenrichtung einer anderen ID läuft → kein Warten auf deren Laufzeit-Ende ({m5})")
+    pl4b = pl4 + [{"plan_id": "j", "user_id": JA, "firma": "fundednext", "richtung": "sell", "start_min": 303.0}]
+    m5c = [N(pl4[0], pl4b, [], {}, jetzt, Z, 60, [], random.Random(s))[0] for s in range(20)]
+    check(all(m is not None and abs(m - 303.0) > a["AP_GEGEN_FIRMA_MIN"] for m in m5c) and a["AP_GEGEN_FIRMA_MIN"] == 3,
+          f"gegenläufiger Start einer anderen ID 05:03 → nie ±3 min daneben (20 Seeds, {sorted(round(m, 1) for m in m5c)[:3]} …)")
     m5b, _ = N(dict(pl4[0], richtung="sell"), pl4, [], {}, jetzt, Z, 60, laufend, random.Random(5))
     check(m5b is not None and m5b < 310, f"gleiche Richtung wie Jacob → keine Sperre ({m5b})")
     # verpasste (vergangene) Pläne blockieren nicht

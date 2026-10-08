@@ -10,7 +10,9 @@ Ohne Netz, Platzhalter-IDs. Geprüft: (1) ap_zeiten_verteilen — Starts verschi
 auch gegen schon geplante/gestartete (bestehend[fkey]), gleiche ID oder andere Firma frei, Abstände gestreut statt starr 5:00,
 enges Fenster ohne Fehler; (2) Bot-Verteilung — The5%ers 04:23/04:24/04:24 über mehrere Läufe repariert, nur nach hinten, eine
 Gruppe je Lauf, Richtung nie, gegen gestartete und Hand-Pläne; (3) SQL-Riegel — prophos_firma_key liefert für alle Schreibweisen
-dasselbe wie app.py _firm_norm (Bedingungen direkt aus dem SQL-Text ausgewertet), Trigger sitzt auf dem Claim und gibt NULL zurück."""
+dasselbe wie app.py _firm_norm (Bedingungen direkt aus dem SQL-Text ausgewertet), Trigger sitzt auf dem Claim und gibt NULL zurück.
+Seit 08.10.2026 ~17:00 Dubai (Finn: „kann natürlich eine ANDERE ID Tradeify short gehen") prüft 2b die Gegenrichtung über IDs nur noch
+±AP_GEGEN_FIRMA_MIN am Start (keine Laufzeit-Sperre mehr)."""
 import os
 import random
 import re
@@ -121,13 +123,12 @@ def main():
     check(all(st[i] >= start0[i] for i in st) and all(x["nach_richtung"] == x["von_richtung"] for x in alle),
           "nur nach hinten, Richtung nie geändert")
     check(all(len(g) <= 1 for g in je_lauf), "höchstens eine Gruppe je Bot-Lauf")
-    # Finn (Buy) hält AP_GEGEN_FIRMA_MIN (30) zu den Shorts von Jacob/Pascal. Seit .1302 sperrt zwar die ganze Laufzeit, aber Finns Buy
-    # stand schon in deren Laufzeit (Bestand) — die Verteilung zieht ihn darin auseinander, baut keinen neuen Partner und hält ±30 hart
+    # Finn (Buy) gegen die Shorts von Jacob/Pascal: seit 08.10.2026 ~17:00 Dubai zählt über IDs nur ±AP_GEGEN_FIRMA_MIN (3) am Start
     check(all(st[i] - start0[i] <= 45 for i in st), f"nur so weit wie nötig + Streuung (≤ 45 min: {[round(st[i] - start0[i]) for i in st]})")
     # seit 1 min (08.10.2026): Finn 04:24 liegt schon 1 min hinter Jacob 04:23 → bleibt stehen (Gegenhedge am Start hält die DB, 90 s);
-    # wer verschoben wurde, landet nie NEU neben einer Gegenrichtung einer anderen ID (±30 min) — außer im Bestand (Pascal ↔ Finn)
+    # wer verschoben wurde, landet nie neben einem gegenläufigen Start einer anderen ID (±3 min)
     check(st["finn"] == start0["finn"] or all(abs(st["finn"] - st[k]) > a["AP_GEGEN_FIRMA_MIN"] for k in ("jacob", "pascal")),
-          "Finn (Buy): unverschoben oder > 30 min zu den Shorts der anderen IDs derselben Firma — kein neuer Gegenhedge über IDs")
+          "Finn (Buy): unverschoben oder > 3 min zu den Shorts der anderen IDs derselben Firma — kein gegenläufiger Start daneben")
     g_ = next((x["grund"] for x in alle), "")
     check(g_.startswith("Verteilung: "), f"Protokoll-Grund ({g_[:80]})")
     # gegen einen schon GESTARTETEN Plan einer anderen ID
@@ -151,52 +152,63 @@ def main():
     e = U([plan("finn", "finn", "the5ers", d(4, 24)), plan("pascal", "pascal", "apex", d(4, 24))], 0.0, 0.0, d(4, 5), Z, 100, random.Random(1))
     check(not e["aenderungen"], "andere Firma zur selben Minute: kein Eingriff")
 
-    # ── 2b GEGENHEDGE ÜBER IDs (08.10.2026: Trockenlauf zog Chris FundedNext BUY auf 05:57, während Jacob FundedNext SELL lief) ──────
+    # ── 2b GEGENRICHTUNG ÜBER IDs (seit 08.10.2026 ~17:00 Dubai, Finn: „Wenn eine ID Tradeify long geht, kann natürlich eine ANDERE ID
+    #    Tradeify short gehen zum Ausgleichen. Es darf sich nur nicht die GLEICHE ID gegenhedgen") — vorher (.1287/.1292/.1302) sperrte
+    #    eine laufende/geplante Gegenrichtung einer anderen ID die Firma über die ganze Laufzeit; jetzt nur ±AP_GEGEN_FIRMA_MIN am Start ──
+    G = a["AP_GEGEN_FIRMA_MIN"]
+    check(G == 3 and a["AP_GEGEN_DICHT_MIN"] == 3, f"Fenster gegenläufiger Starts anderer IDs: ±{G} min (DB-Riegel 90 s + Puffer), Malus < 3 min")
     EKg = {"basis": -800.0, "brutto": 800.0, "gross_ab": 100000.0, "laufzeit": 60}
     pg = [plan("chris_fn", "chris", "fundednext", d(10, 38), "buy"), plan("emin_tf", "emin", "tradeify", d(11, 0), "buy")]
     lauf_g = [{"user_id": "jacob", "firma": "fundednext", "richtung": "sell", "start": None}]
     eg = U(pg, 0.0, 0.0, d(5, 50), Z, 25, random.Random(1), einsatz=EKg, laufend=lauf_g, dubai_min=120)
-    vg = [x["plan_id"] for x in eg["aenderungen"] if x["art"] == "start"]
-    check("chris_fn" not in vg and vg == ["emin_tf"],
-          f"Vorziehen: Chris FundedNext BUY nicht neben Jacobs laufenden FundedNext SELL — stattdessen ein anderer Long ({vg})")
+    eg0 = U(pg, 0.0, 0.0, d(5, 50), Z, 25, random.Random(1), einsatz=EKg, dubai_min=120)
+    vg = [(x["plan_id"], x["nach_start_min"]) for x in eg["aenderungen"] if x["art"] == "start"]
+    check(vg and vg == [(x["plan_id"], x["nach_start_min"]) for x in eg0["aenderungen"] if x["art"] == "start"],
+          f"Vorziehen: Jacobs laufender FundedNext SELL sperrt Chris' FundedNext BUY nicht mehr — wie ohne ihn ({vg})")
     sperre = a["_ap_gegen_firma"]
-    check(sperre(200, "chris", "fundednext", "buy", [], lauf_g, 190, 60) and not sperre(200, "chris", "tradeify", "buy", [], lauf_g, 190, 60)
-          and not sperre(200, "jacob", "fundednext", "buy", [], lauf_g, 190, 60) and not sperre(200, "chris", "fundednext", "sell", [], lauf_g, 190, 60),
-          "_ap_gegen_firma: nur andere ID + gleiche Firma + Gegenrichtung sperrt")
-    check(sperre(200, "chris", "fundednext", "buy", [(225, "sell", "jacob", "fundednext")], [], 100, 60)
-          and sperre(200, "chris", "fundednext", "buy", [(235, "sell", "jacob", "fundednext")], [], 100, 60)
-          and sperre(200, "chris", "fundednext", "buy", [(140, "sell", "jacob", "fundednext")], [], 100, 60)
-          and not sperre(200, "chris", "fundednext", "buy", [(261, "sell", "jacob", "fundednext")], [], 100, 60)
-          and not sperre(200, "chris", "fundednext", "buy", [(139, "sell", "jacob", "fundednext")], [], 100, 60)
-          and sperre(200, "chris", "fundednext", "buy", [(225, "sell", "jacob", "fundednext")], [], 100, 10),
-          "geplante Gegenrichtung einer anderen ID: über die Laufzeit (60) in beide Richtungen gesperrt, 61 min frei; Laufzeit < 30 → 30")
-    # ── 2b'' Befund Slave 2 Lauf 02:39:42 UTC: Band-Drehung Jacob The5%ers 72c2a073 sell → BUY 13:17 UTC, Moritz SELL 12:46 UTC (31 min davor)
+    lauf_s0 = [dict(lauf_g[0], start=198.0)]
+    check(not sperre(200, "chris", "fundednext", "buy", [], lauf_g, 190, 60)
+          and sperre(200, "chris", "fundednext", "buy", [], lauf_s0, 190, 60)
+          and not sperre(200, "chris", "fundednext", "buy", [], [dict(lauf_g[0], start=190.0)], 190, 60)
+          and not sperre(200, "chris", "tradeify", "buy", [], lauf_s0, 190, 60)
+          and not sperre(200, "jacob", "fundednext", "buy", [], lauf_s0, 190, 60)
+          and not sperre(200, "chris", "fundednext", "sell", [], lauf_s0, 190, 60),
+          "_ap_gegen_firma laufend: nur andere ID + gleiche Firma + Gegenrichtung + Start ±3 min sperrt; laufend ohne Start nie")
+
+    def pl_(s_):
+        return [(s_, "sell", "jacob", "fundednext")]
+    check(sperre(200, "chris", "fundednext", "buy", pl_(203), [], 100, 180) and sperre(200, "chris", "fundednext", "buy", pl_(197), [], 100, 180)
+          and not sperre(200, "chris", "fundednext", "buy", pl_(204), [], 100, 180)
+          and not sperre(200, "chris", "fundednext", "buy", pl_(196), [], 100, 180)
+          and not sperre(200, "chris", "fundednext", "buy", pl_(225), [], 100, 600)
+          and not sperre(200, "jacob", "fundednext", "buy", pl_(200), [], 100, 180),
+          "geplante Gegenrichtung einer anderen ID: nur ±3 min gesperrt, 4 min / 25 min / lange Laufzeit frei; gleiche ID hier nie "
+          "(die regelt der Richtungsschutz)")
+    # ── 2b'' Fall Slave 2 Lauf 02:39:42 UTC: Band-Drehung Jacob The5%ers sell → BUY 13:17 UTC neben Moritz' SELL 12:46 UTC (31 min davor)
+    #    — damals gesperrt (Laufzeit 180), seit 08.10.2026 ~17:00 Dubai erlaubt (Gegenrichtung über IDs); nur 2 min daneben bleibt gesperrt
     U_ = a["ap_umplanen"]
-    m0 = lambda h, m: h * 60 + m + 120     # noqa: E731 — UTC → dt (Sommerzeit)
+
+    def m0(h, m):
+        return h * 60 + m + 120     # UTC → dt (Sommerzeit)
     jm5 = m0(2, 39)
-    p5 = [dict(plan("jac_t5", "jacob", "the5ers", m0(13, 17), "sell"), delta_abs=5.0, einsatz_abs=500.0, bestaetigt=False),
-          dict(plan("mor_t5", "moritz", "the5ers", m0(12, 46), "sell"), delta_abs=1.0, einsatz_abs=400.0, aenderbar=False, fest_durch="Handplan")]
     Z5 = {"fenster": [["00:00", "14:30", 50], ["14:30", "16:30", 50]], "start_bis": "16:30", "abstand_id_min": 3}
 
-    def drehungen():
+    def drehungen(mor_start):
+        p5 = [dict(plan("jac_t5", "jacob", "the5ers", m0(13, 17), "sell"), delta_abs=5.0, einsatz_abs=500.0, bestaetigt=False),
+              dict(plan("mor_t5", "moritz", "the5ers", mor_start, "sell"), delta_abs=1.0, einsatz_abs=400.0, aenderbar=False,
+                   fest_durch="Handplan")]
         n = 0
         for seed in range(20):
             e5 = U_(p5, -12.0, 12.0, jm5, Z5, 15, random.Random(seed), einsatz={"basis": -400.0, "brutto": 400.0, "gross_ab": 100000.0,
                                                                              "laufzeit": 180})
-            n += sum(1 for x in e5["aenderungen"] if x["plan_id"] == "jac_t5" and x["nach_richtung"] == "buy"
-                     and abs(x["nach_start_min"] - m0(12, 46)) <= 180)
+            n += sum(1 for x in e5["aenderungen"] if x["plan_id"] == "jac_t5" and x["art"] == "richtung" and x["nach_richtung"] == "buy")
         return n
-    gedreht = drehungen()
-    partner_neu = a["_ap_gegen_partner"]                       # Gegenprobe: Regel vor .1302 (geplante nur ±30 min um den Start)
-    a["_ap_gegen_partner"] = lambda t, u, f, r, pl, la, jm, lz=None: {x for x in partner_neu(t, u, f, r, pl, la, jm, lz)
-                                                                      if x[0] == "lauf" or abs(float(t) - x[1]) <= a["AP_GEGEN_FIRMA_MIN"]}
-    gedreht_alt = drehungen()
-    a["_ap_gegen_partner"] = partner_neu
-    check(gedreht == 0 and gedreht_alt > 0 and sperre(m0(13, 17), "jacob", "the5ers", "buy", [(m0(12, 46), "sell", "moritz", "the5ers")], [], jm5, 180),
-          f"Jacob The5%ers 13:17 UTC wird nicht auf BUY gedreht, solange Moritz' SELL 12:46 UTC (31 min davor, Laufzeit 180) steht "
-          f"({gedreht}; Gegenprobe alte ±30-Regel dreht {gedreht_alt}/20)")
+    weit, nah = drehungen(m0(12, 46)), drehungen(m0(13, 15))
+    check(weit > 0 and nah == 0,
+          f"Jacob The5%ers 13:17 UTC darf auf BUY drehen, obwohl Moritz' SELL 12:46 UTC läuft ({weit}/20) — nicht, wenn Moritz 13:15 "
+          f"startet ({nah}/20)")
 
-    # ── 2b' BAND-SCHRITT (Prüfer Slave 2 zu 3d43e4e): weder Drehen noch Verschieben neben eine Gegenrichtung einer anderen ID je Firma ──
+    # ── 2b' BAND-SCHRITT: Drehen über IDs erlaubt, nur nie ±3 min neben einen gegenläufigen Start einer anderen ID derselben Firma ──
     Zb = {"fenster": [["00:00", "14:30", 50], ["14:30", "16:30", 50]], "start_bis": "16:30", "abstand_id_min": 3}
     pb = [dict(plan("a_ap", "u-a", "apex", d(9, 0), "buy"), delta_abs=5.0, einsatz_abs=0.0, bestaetigt=False)]
     frei_b = U(pb, 6.0, 6.0, d(8, 30), Zb, 15, random.Random(1))
@@ -204,8 +216,12 @@ def main():
     lauf_b = [{"user_id": "u-b", "firma": "apex", "richtung": "buy", "start": None}]
     mit_b = U(pb, 6.0, 6.0, d(8, 30), Zb, 15, random.Random(1), laufend=lauf_b)
     dreh_mit = [x for x in mit_b["aenderungen"] if x["art"] == "richtung"]
-    check(dreh_frei and not dreh_mit,
-          f"Band-Schritt dreht A Apex buy → sell nur ohne laufenden Apex-Buy einer anderen ID ({len(dreh_frei)} → {len(dreh_mit)})")
+    nah_b = U(pb, 6.0, 6.0, d(8, 30), Zb, 15, random.Random(1),
+              gestartet=[{"user_id": "u-b", "firma": "apex", "start": float(d(8, 58)), "richtung": "buy"}])
+    dreh_nah = [x for x in nah_b["aenderungen"] if x["art"] == "richtung"]
+    check(dreh_frei and dreh_mit and not dreh_nah,
+          f"Band-Schritt dreht A Apex buy → sell auch neben einem laufenden Apex-Buy einer anderen ID ({len(dreh_frei)}/{len(dreh_mit)}), "
+          f"nicht 2 min nach deren Start ({len(dreh_nah)})")
     verstoss_b = 0
     plan_b = [dict(plan("a_ap", "u-a", "apex", d(10, 0), "buy"), delta_abs=5.0, einsatz_abs=0.0, bestaetigt=False),
               dict(plan("b_ap", "u-b", "apex", d(9, 0), "sell"), delta_abs=1.0, einsatz_abs=0.0, aenderbar=False, fest_durch="Handplan")]
@@ -217,7 +233,7 @@ def main():
                 t_ = x["nach_start_min"]
                 if a["_ap_gegen_firma"](t_, "u-a", "apex", "buy", [(d(9, 0), "sell", "u-b", "apex")], lauf_s, d(8, 30), None):
                     verstoss_b += 1
-    check(verstoss_b == 0, f"Band-Schritt verschiebt (40 Seeds) nie neben laufende/≤ 30 min nahe Gegenrichtung einer anderen ID (Verstöße {verstoss_b})")
+    check(verstoss_b == 0, f"Band-Schritt verschiebt (40 Seeds) nie ±3 min neben den gegenläufigen Start einer anderen ID (Verstöße {verstoss_b})")
 
     # ── 2c ABSTAND JE ID ÜBER FIRMEN — seit 08.10.2026 WEG (Finn: „wenn Jacob Topstep long geht, kann er direkt danach Tradeify short
     #    gehen, das ist ganz egal"): Chris FundedNext 18:06 + Topstep 18:13 = 7 min bleibt stehen (PC-Regel 5 min ist erfüllt) ─────────

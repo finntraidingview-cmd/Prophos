@@ -48,12 +48,14 @@ def main():
     check(st_c == 0 and max(je_c[C]["long"], je_c[C]["short"]) == 4 and min(je_c[C]["long"], je_c[C]["short"]) == 3,
           f"Chris 7 Pläne/3 Firmen → 4/3 statt 7/0 (long {je_c[C]['long']}, short {je_c[C]['short']})")
     check(z["a|apex"] == "sell", "feste Tranche (Richtungsschutz) bleibt sell")
-    check(len(w) == 5 and w[2] == 0, f"Wert-Tupel ohne Einsatz: (Band, Malus, ID-Mischung, |Netto|, Ende) — Mischung 0 ({w})")
-    # mit Einsatz-Kontext: Tupel (Malus, Netto-Stufe, Mischung, Große-Folge, |Netto|, Ende)
+    # seit 08.10.2026 ~17:00 Dubai steht die FIRMEN-MISCHUNG (ap_firma_misch) direkt hinter dem Malus
+    check(len(w) == 6 and w[3] == 0, f"Wert-Tupel ohne Einsatz: (Band, Malus, Firmen-Mischung, ID-Mischung, |Netto|, Ende) — Mischung 0 ({w})")
+    # mit Einsatz-Kontext: Tupel (Malus, Firmen-Mischung, Netto-Stufe, ID-Mischung, Große-Folge, |Netto|, Ende)
     ek = {"basis": 0.0, "fest_ev": [], "gross_ab": 10000.0, "laufzeit": 180}
     z2, _m2, w2 = R(T, 0.0, 0.0, random.Random(7), 50.0, einsatz=ek, mit_wert=True)
     st_c2, je_c2 = M(z2, T)
-    check(len(w2) == 6 and st_c2 == 0 and max(je_c2[C]["long"], je_c2[C]["short"]) == 4, f"mit Einsatz: Mischung an Stelle 3, Chris 4/3 ({w2}, {je_c2[C]})")
+    check(len(w2) == 7 and w2[3] == st_c2 == 0 and max(je_c2[C]["long"], je_c2[C]["short"]) == 4,
+          f"mit Einsatz: ID-Mischung an Stelle 4, Chris 4/3 ({w2}, {je_c2[C]})")
     # globales Band geht vor der Mischung: enges Band (5 %) — die gewählte Zuteilung hat die kleinste Band-Überschreitung aller 8 Zuteilungen
     V = a["ap_verlauf"]
     frei = ["c|fn", "c|fp", "c|ts"]
