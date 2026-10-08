@@ -45,7 +45,7 @@ REIN = ("ap_id_fest", "ap_id_misch", "ap_ext_fehlt", "_ap_norm", "ap_regel_finde
         "_wd_num", "_symbol_wurzel", "_wd_level", "_wd_futures_frontcode", "_ap_gehedgt", "_ap_ende4",
         "ap_ausgleich_param", "ap_firma_key", "ap_ppl_karte", "ap_punktwert", "ap_usd_pro_pkt", "ap_delta", "ap_punkte",
         "ap_rest_punkte", "ap_verlauf", "_ap_gegen_dicht", "ap_dicht_paare", "ap_richtungen_delta", "ap_fenster_von",
-        "_ap_tranchen", "_ap_tranche_frei", "ap_szenario_trade", "ap_szenario_knicke", "ap_szenario_kurve", "ap_szenario_lage", "ap_szenario_trade_aus_zeile", "_ap_firma_konflikt", "ap_verteil_gruppen", "ap_verteilung", "ap_umplanen", "ap_eingriff_pruefen", "ap_start_bis", "ap_einsatz_lage", "ap_gross_ab", "ap_consistency_etappe", "ap_regel_konto", "ist_topstep_express", "ap_cfd_ab",
+        "_ap_tranchen", "_ap_tranche_frei", "ap_szenario_trade", "ap_szenario_knicke", "ap_szenario_kurve", "ap_szenario_lage", "ap_szenario_trade_aus_zeile", "_ap_gegen_firma", "_ap_id_konflikt", "_ap_firma_konflikt", "ap_verteil_gruppen", "ap_verteilung", "ap_umplanen", "ap_eingriff_pruefen", "ap_start_bis", "ap_einsatz_lage", "ap_gross_ab", "ap_consistency_etappe", "ap_regel_konto", "ist_topstep_express", "ap_cfd_ab",
         "ap_richtung_konflikte", "lt_echo_live_wahl", "lt_echo_felder",
         "ap_balance_live", "ap_letzt_je_konto", "_ap_boden", "ap_boden_konto", "ap_boden_sicher", "ap_boden_zeile", "_ap_notes_kurz", "_ap_hand_spalte_fehlt", "_ap_plaene_mit_hand", "liq_peak", "_ap_peaks", "_liq_verlauf_laden")   # 08.10.2026: Balance live (Guard/Delta/ids), Boden für den Balance-Balken
 IO = ("_ap_gehedgt_plan", "_ap_bewerten", "_ap_iso_min", "_ap_stand_laden", "_ap_stand_plaene", "_ap_min_iso",
@@ -67,7 +67,7 @@ def lade():
         return re.search(rf"^{name} = .*$", src, re.M).group(0)
     konstanten = ("AP_REST_MIN", "AP_GROESSE_TOLERANZ", "AP_KW_FUNDED", "AP_KW_PHASEN", "AP_TYPEN", "AP_TZ_LAUF", "AP_STILL_FIRMEN",
                   "AP_AUSGLEICH_STANDARD", "AP_TZ_TAG", "AP_BOT_ENDE_MIN", "AP_BOT_EXTRA_MIN", "AP_FAELLIG_MIN", "AP_BOT_SCHRITTE",
-                  "AP_RICHTUNG_TXT", "AP_GEGEN_DICHT_MIN", "AP_GEGEN_WUERFE", "AP_EUR_STUFE", "AP_START_BIS_STANDARD", "AP_CFD_AB_STANDARD", "AP_CFD_ROUTEN", "AP_TRANCHE_LUECKE_MIN", "AP_ABSTAND_ID_FIRMA_MIN", "AP_ABSTAND_ID_MIN", "AP_ABSTAND_STUFEN", "AP_GROSS_NAH_MIN", "AP_FIRMA_ABSTAND_MIN", "AP_VERTEIL_VORLAUF_MIN", "AP_VERTEIL_JITTER_MIN", "AP_VERTEIL_GEGEN_MIN", "AP_VERTEIL_VERSATZ", "AP_VERTEIL_MIN_SCHRITT_MIN", "AP_SZENARIO_R", "AP_SZENARIO_SCHRITT", "AP_SZENARIO_WEIT", "AP_SZENARIO_AB_EUR", "AP_VERTEILUNG_BAND_TOLERANZ_EUR", "AP_VORZIEHEN_AB_MIN", "AP_VORZIEHEN_JITTER_MIN", "AP_VORZIEHEN_HYSTERESE_EUR", "AP_VORZIEHEN_RUECKFALL_MIN", "AP_MISCH_BESTAETIGT_AB_MIN", "PC_STAND_LEBT_S", "_ap_bot", "_ap_info", "WD_HEUTE_PPL", "LT_ECHO_ROUTEN", "LT_ECHO_MAX_ALTER_S",
+                  "AP_RICHTUNG_TXT", "AP_GEGEN_DICHT_MIN", "AP_GEGEN_WUERFE", "AP_EUR_STUFE", "AP_START_BIS_STANDARD", "AP_CFD_AB_STANDARD", "AP_CFD_ROUTEN", "AP_TRANCHE_LUECKE_MIN", "AP_ABSTAND_ID_FIRMA_MIN", "AP_ABSTAND_ID_MIN", "AP_ABSTAND_STUFEN", "AP_GROSS_NAH_MIN", "AP_FIRMA_ABSTAND_MIN", "AP_VERTEIL_VORLAUF_MIN", "AP_VERTEIL_JITTER_MIN", "AP_VERTEIL_GEGEN_MIN", "AP_VERTEIL_VERSATZ", "AP_VERTEIL_MIN_SCHRITT_MIN", "AP_SZENARIO_R", "AP_SZENARIO_SCHRITT", "AP_SZENARIO_WEIT", "AP_SZENARIO_AB_EUR", "AP_GEGEN_FIRMA_MIN", "AP_VERTEILUNG_BAND_TOLERANZ_EUR", "AP_VORZIEHEN_AB_MIN", "AP_VORZIEHEN_JITTER_MIN", "AP_VORZIEHEN_HYSTERESE_EUR", "AP_VORZIEHEN_RUECKFALL_MIN", "AP_MISCH_BESTAETIGT_AB_MIN", "PC_STAND_LEBT_S", "_ap_bot", "_ap_info", "WD_HEUTE_PPL", "LT_ECHO_ROUTEN", "LT_ECHO_MAX_ALTER_S",
                   "AP_RS_HORIZONT_MIN", "AP_RS_NACHLAUF_MIN", "AP_RS_ROUTEN", "AP_EINGRIFF_MAX", "AP_SICHT_ADMIN", "AP_ID_FEST_HORIZONT_MIN", "AP_RUHE_JE_PLAN_MIN", "AP_HYSTERESE_EUR", "AP_ID_MISCH_AB", "AP_ID_MISCH_MAX",
                   "AP_GRUND_EXT", "AP_GRUND_BAL_LIVE", "AP_FEST_HAND", "AP_NOTES_MAX", "LIQ_VERLAUF_CACHE_S", "_liq_verlauf_cache")
     exec("\n".join([konst(k) for k in konstanten] + [block(f) for f in REIN + IO]), ns)
@@ -307,8 +307,10 @@ def main():
     check(a["ap_umplanen"](plaene, 0.0, 10.0, jm, ZEITEN, 15, random.Random(3))["daempfung"]["hysterese"] == 0.0,
           "Hysterese: in der €/Pkt-Rechnung (ohne einsatz) 0 — Verhalten wie bisher")
     hyst = a["ap_umplanen"](plaene, 0.0, 10.0, jm, ZEITEN, 15, random.Random(3), hysterese=erg["vorher"]["ueber_band"] + 1)
-    check(hyst["aenderungen"] == [] and hyst["ausloeser"] is None and hyst["daempfung"]["hysterese"] > 0,
-          "Hysterese: Überschreitung unter der Schwelle → kein Eingriff, kein Auslöser")
+    # Verteilung (Abstand je ID über Firmen, seit 08.10.2026: x1 A/x 620 neben Handplan y1 A/y 625) ist kein Band-Eingriff
+    band_h = [x for x in hyst["aenderungen"] if not x["grund"].startswith("Verteilung")]
+    check(band_h == [] and (hyst["ausloeser"] is None or hyst["ausloeser"].startswith("Verteilung")) and hyst["daempfung"]["hysterese"] > 0,
+          "Hysterese: Überschreitung unter der Schwelle → kein Band-Eingriff, kein Band-Auslöser")
     hyst0 = a["ap_umplanen"](plaene, 0.0, 10.0, jm, ZEITEN, 15, random.Random(3), id_fest=fest_v, hysterese=0)
     check([x["plan_id"] for x in hyst0["aenderungen"]] == [x["plan_id"] for x in erg["aenderungen"]], "Hysterese 0 → identisch zur alten Rechnung")
     check(a["AP_RUHE_JE_PLAN_MIN"] == 30 and a["AP_HYSTERESE_EUR"] == 200.0, "Dämpfungs-Konstanten: 30 min Ruhe je Plan, 200 € Hysterese (Vorschlag 1)")

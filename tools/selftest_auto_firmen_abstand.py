@@ -118,10 +118,10 @@ def main():
     check(all(st[i] >= start0[i] for i in st) and all(x["nach_richtung"] == x["von_richtung"] for x in alle),
           "nur nach hinten, Richtung nie geändert")
     check(all(len(g) <= 1 for g in je_lauf), "höchstens eine Gruppe je Bot-Lauf")
-    # Finn (Buy) hält zusätzlich AP_GEGEN_DICHT_MIN zu den Shorts von Jacob/Pascal — kein neuer Malus „dicht gegenläufig"
-    check(all(st[i] - start0[i] <= 25 for i in st), f"nur so weit wie nötig + Streuung (≤ 25 min: {[round(st[i] - start0[i]) for i in st]})")
-    check(all(abs(st["finn"] - st[k]) >= a["AP_GEGEN_DICHT_MIN"] for k in ("jacob", "pascal")),
-          "Finn (Buy) ≥ 10 min zu den Shorts der anderen IDs — die Verteilung baut keinen Malus")
+    # Finn (Buy) hält seit 08.10.2026 AP_GEGEN_FIRMA_MIN (30) zu den Shorts von Jacob/Pascal — Gegenhedge über IDs gesperrt
+    check(all(st[i] - start0[i] <= 45 for i in st), f"nur so weit wie nötig + Streuung (≤ 45 min: {[round(st[i] - start0[i]) for i in st]})")
+    check(all(abs(st["finn"] - st[k]) > a["AP_GEGEN_FIRMA_MIN"] for k in ("jacob", "pascal")),
+          "Finn (Buy) > 30 min zu den Shorts der anderen IDs derselben Firma — kein Gegenhedge über IDs")
     g_ = next((x["grund"] for x in alle), "")
     check(g_.startswith("Verteilung: "), f"Protokoll-Grund ({g_[:80]})")
     # gegen einen schon GESTARTETEN Plan einer anderen ID
@@ -137,6 +137,32 @@ def main():
     # andere Firma oder gleiche ID: nichts zu tun
     e = U([plan("finn", "finn", "the5ers", d(4, 24)), plan("pascal", "pascal", "apex", d(4, 24))], 0.0, 0.0, d(4, 5), Z, 100, random.Random(1))
     check(not e["aenderungen"], "andere Firma zur selben Minute: kein Eingriff")
+
+    # ── 2b GEGENHEDGE ÜBER IDs (08.10.2026: Trockenlauf zog Chris FundedNext BUY auf 05:57, während Jacob FundedNext SELL lief) ──────
+    EKg = {"basis": -800.0, "brutto": 800.0, "gross_ab": 100000.0, "laufzeit": 60}
+    pg = [plan("chris_fn", "chris", "fundednext", d(10, 38), "buy"), plan("emin_tf", "emin", "tradeify", d(11, 0), "buy")]
+    lauf_g = [{"user_id": "jacob", "firma": "fundednext", "richtung": "sell", "start": None}]
+    eg = U(pg, 0.0, 0.0, d(5, 50), Z, 25, random.Random(1), einsatz=EKg, laufend=lauf_g, dubai_min=120)
+    vg = [x["plan_id"] for x in eg["aenderungen"] if x["art"] == "start"]
+    check("chris_fn" not in vg and vg == ["emin_tf"],
+          f"Vorziehen: Chris FundedNext BUY nicht neben Jacobs laufenden FundedNext SELL — stattdessen ein anderer Long ({vg})")
+    sperre = a["_ap_gegen_firma"]
+    check(sperre(200, "chris", "fundednext", "buy", [], lauf_g, 190, 60) and not sperre(200, "chris", "tradeify", "buy", [], lauf_g, 190, 60)
+          and not sperre(200, "jacob", "fundednext", "buy", [], lauf_g, 190, 60) and not sperre(200, "chris", "fundednext", "sell", [], lauf_g, 190, 60),
+          "_ap_gegen_firma: nur andere ID + gleiche Firma + Gegenrichtung sperrt")
+    check(sperre(200, "chris", "fundednext", "buy", [(225, "sell", "jacob", "fundednext")], [], 100, 60)
+          and not sperre(200, "chris", "fundednext", "buy", [(235, "sell", "jacob", "fundednext")], [], 100, 60),
+          "geplante Gegenrichtung einer anderen ID: ≤ 30 min gesperrt, 35 min frei")
+
+    # ── 2c ABSTAND JE ID ÜBER FIRMEN (Slave 4: Chris FundedNext 18:06 + Topstep 18:13 = 7 min) ───────────────────────────────────────
+    pk = [plan("c_fn", "chris", "fundednext", d(18, 6), "buy"), plan("c_ts", "chris", "topstep", d(18, 13), "sell")]
+    ek0 = {"basis": 0.0, "brutto": 0.0, "gross_ab": 100000.0, "laufzeit": 60}
+    Zl = {"fenster": [["00:00", "14:30", 50], ["14:30", "18:00", 50]], "start_bis": "18:00", "abstand_id_min": 3}
+    ek = U(pk, 0.0, 0.0, d(9, 0), Zl, 100, random.Random(1), einsatz=ek0, dubai_min=120)
+    nk = {x["plan_id"]: x["nach_start_min"] for x in ek["aenderungen"] if x["art"] == "start"}
+    sk = {p["plan_id"]: nk.get(p["plan_id"], p["start_min"]) for p in pk}
+    check("c_ts" in nk and sk["c_ts"] - sk["c_fn"] >= a["AP_ABSTAND_ID_MIN"] * 0.5 and nk["c_ts"] - d(18, 13) >= 5,
+          f"Chris FundedNext 18:06 + Topstep 18:13: Topstep rückt nach hinten, ≥ 5 min, Abstand {sk['c_ts'] - sk['c_fn']:g} min")
 
     # ── 3 SQL-Riegel ──────────────────────────────────────────────────────────────────────────────────────────────────────
     sql = open(SQL, encoding="utf-8").read()

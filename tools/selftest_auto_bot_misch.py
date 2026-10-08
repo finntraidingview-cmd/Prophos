@@ -106,9 +106,26 @@ def main():
     check(gedreht(lauf(pl4)) == [], "Chris mit 3 Plänen → keine Drehung")
 
     # 5) Band würde schlechter: Band 60 % — vorher 80 € über dem Band (unter der Hysterese 200 €), nach der Drehung 240 € → keine Drehung
+    #    Seit 08.10.2026 (TAUSCH): keine EINZEL-Drehung; erlaubt ist nur ein Tausch mit einer anderen ID (Netto bleibt), Band nicht schlechter
     e5 = lauf(chris(), band=60.0)
-    check(e5["vorher"]["ueber_band"] <= e5["daempfung"]["hysterese"] and gedreht(e5) == [],
-          f"enges Band: Drehung würde das Band über die Hysterese schieben → keine Drehung ({gedreht(e5)}, vorher {e5['vorher']['ueber_band']} €)")
+    einzel = [x for x in e5["aenderungen"] if "(Tausch)" not in x["grund"]]
+    check(e5["vorher"]["ueber_band"] <= e5["daempfung"]["hysterese"] and einzel == []
+          and e5["nachher"]["ueber_band"] <= max(e5["daempfung"]["hysterese"], e5["vorher"]["ueber_band"]),
+          f"enges Band: keine Einzeldrehung, höchstens ein Tausch mit gleichem Band ({gedreht(e5)}, Band {e5['vorher']['ueber_band']} → {e5['nachher']['ueber_band']} €)")
+    # Chris' Live-Fall (08.10.2026, Chris 6/1 trotz .1279): das Buch ist short-lastig (andere ID 5× short), jede Einzeldrehung long → short
+    # macht den Tag schlechter → Tausch: Chris FundingPips 2× → short gegen 2 Shorts einer anderen ID bei einer anderen Firma → long
+    pl6 = chris(bestaetigt=True)
+    pl6 = [p for p in pl6 if p["user_id"] == C] + [plan(f"y{i}", "u-dritte", "the5ers", "sell", 720 + i * 4, bestaetigt=True) for i in range(2)]
+    pl6 += [plan(f"z{i}", A, "apex", "sell", 605 + i * 4) for i in range(5)]
+    e6 = lauf(pl6, band=25.0)
+    g6 = gedreht(e6)
+    check(any(f == "fundingpips" and r == "sell" for f, _p, r in g6) and any(f == "the5ers" and r == "buy" for f, _p, r in g6)
+          and all("(Tausch)" in x["grund"] for x in e6["aenderungen"] if x["art"] == "richtung"),
+          f"Chris 6/1 im short-lastigen Buch: Tausch FundingPips 2× → short gegen The5%ers 2× → long ({g6})")
+    tausch = [x for x in e5["aenderungen"] if "(Tausch)" in x["grund"]]
+    check(not tausch or (any(x["user_id"] == C for x in tausch) and any(x["user_id"] != C for x in tausch)
+                         and len({x["firma"] for x in tausch}) == 2),
+          f"Tausch dreht je eine ID × Firma zweier IDs bei verschiedenen Firmen ({gedreht(e5)})")
 
     print("\nBOT-MISCHUNG:", "alles grün" if ok else "FEHLER")
     return 0 if ok else 1
