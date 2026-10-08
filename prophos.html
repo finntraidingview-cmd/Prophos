@@ -41900,7 +41900,12 @@
    * Trade frei (app.py AP_RICHTUNG_WECHSEL_MIN = 0). In den Richtungs-Prüfungen (Start-Wächter, Echo-V2-Check, Puls-Sperre, Order-Popup)
    * zählen deshalb nur LAUFENDE Trades derselben ID+Firma und geplante, deren Start schon läuft (geclaimt bzw. Order gesendet — zwei
    * Pläne in derselben Minute: der erste ist geclaimt, wenn der zweite prüft); ein bloß geplanter Plan sperrt nichts mehr. */
-  const rkZaehlt = (status, geclaimt) => status === 'open' || (status === 'planned' && !!geclaimt)
+  // Geclaimt zählt nur FRISCH (≤ 15 min) und ohne offenen Start-Fehler (Prüfer Slave 2, 09.10.2026: geclaimte Start-Fehler-Leichen —
+  // live drei, die älteste vom 07.10. — hätten die Gegenrichtung ihrer ID × Firma sonst dauerhaft gesperrt; wie app.py ap_claim_laeuft)
+  const RK_CLAIM_FRISCH_MS = 15 * 60000
+  const rkZaehlt = (status, geclaimt, sf) => status === 'open' || (status === 'planned' && !!geclaimt
+    && Date.now() - Date.parse(geclaimt) <= RK_CLAIM_FRISCH_MS && !(sf && sf.status !== 'behoben'))
+  const rkClaimAt = (a, b) => [a, b].filter(x => x && Date.parse(x) > 0).sort((x, y) => Date.parse(y) - Date.parse(x))[0] || null
   function firmGeplanteRichtungen(firmName, ohnePlanId){
     const norm = f => String(f || '').toLowerCase().replace(/[^a-z0-9]/g, '')
     const ziel = norm(firmName)
@@ -41911,7 +41916,7 @@
       if(p.status !== 'planned' && p.status !== 'open') continue
       if(p.richtung !== 'buy' && p.richtung !== 'sell') continue
       if(norm(p.masterFirm) !== ziel) continue
-      if(!rkZaehlt(p.status, p.startUmGestartetAt || p.orbitGesendetAt)) continue
+      if(!rkZaehlt(p.status, rkClaimAt(p.startUmGestartetAt, p.orbitGesendetAt), p.mt5Baseline && p.mt5Baseline.start_fehler)) continue
       out[p.richtung === 'buy' ? 'long' : 'short'].push({
         wer: p.masterName || '?', quelle: 'Plan', symbol: p.masterSymbol || ''
       })
@@ -41932,11 +41937,13 @@
     const ziel = norm(o && o.firm), ohne = o && o.ohneId != null ? String(o.ohneId) : null
     let liste = null
     if(o && o.frisch){
-      try{ const { data, error } = await supabase.from('trade_plans').select('id,status,richtung,master_firm,master_name,start_um_gestartet_at,orbit_gesendet_at').in('status', ['open', 'planned'])
-           if(!error && Array.isArray(data)) liste = data.map(r => ({ id: r.id, status: r.status, richtung: r.richtung, firm: r.master_firm, name: r.master_name, geclaimt: r.start_um_gestartet_at || r.orbit_gesendet_at })) }catch(_){}
+      try{ const { data, error } = await supabase.from('trade_plans').select('id,status,richtung,master_firm,master_name,start_um_gestartet_at,orbit_gesendet_at,start_fehler:mt5_baseline->start_fehler').in('status', ['open', 'planned'])
+           if(!error && Array.isArray(data)) liste = data.map(r => ({ id: r.id, status: r.status, richtung: r.richtung, firm: r.master_firm, name: r.master_name,
+             geclaimt: rkClaimAt(r.start_um_gestartet_at, r.orbit_gesendet_at), sf: r.start_fehler || null })) }catch(_){}
     }
     if(!liste) liste = (tradePlans || []).filter(p => p.status === 'open' || p.status === 'planned')
-      .map(p => ({ id: p.id, status: p.status, richtung: p.richtung, firm: p.masterFirm, name: p.masterName, geclaimt: p.startUmGestartetAt || p.orbitGesendetAt }))
+      .map(p => ({ id: p.id, status: p.status, richtung: p.richtung, firm: p.masterFirm, name: p.masterName,
+        geclaimt: rkClaimAt(p.startUmGestartetAt, p.orbitGesendetAt), sf: (p.mt5Baseline && p.mt5Baseline.start_fehler) || null }))
     const lauf = { long: [], short: [] }, gep = { long: [], short: [] }
     for(const p of liste){
       if(ohne && String(p.id) === ohne) continue
@@ -41946,7 +41953,7 @@
       // long ist — es gilt nur, wenn bei der gleichen ID unter der gleichen Firma schon eine Richtung läuft"). Die Koordinations-Regel
       // „laufender Plan sperrt für JEDE Firma" war falsch und ist raus; ohne gewählte Firma sperrt nichts.
       if(!ziel || norm(p.firm) !== ziel) continue
-      if(!rkZaehlt(p.status, p.geclaimt)) continue        // bloß geplant sperrt nichts (09.10.2026)
+      if(!rkZaehlt(p.status, p.geclaimt, p.sf)) continue   // bloß geplant / alter Claim / Start-Fehler sperrt nichts (09.10.2026)
       if(p.status === 'open') lauf[seite].push({ name: p.name, firm: p.firm, verb: 'läuft gerade' })
       else if(p.geclaimt) lauf[seite].push({ name: p.name, firm: p.firm, verb: 'startet gerade' })   // Start läuft = wie laufend
       else gep[seite].push({ name: p.name, firm: p.firm, verb: 'ist geplant' })
@@ -42440,7 +42447,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1400'
+  const OS_TAB_BUILD = '2026-09-22.1401'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

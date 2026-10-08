@@ -17654,7 +17654,7 @@ def _ap_fest_ref(p, mitternacht, jetzt):
     def minute(roh):
         t = _ap_ts(roh)                # Postgres-Formen („ +00", 1–6 Nachkommastellen) sicher
         return (t - mitternacht).total_seconds() / 60.0 if t else None
-    if p.get("status") == "open" or p.get("start_um_gestartet_at") or p.get("orbit_gesendet_at"):   # geclaimt/gesendet = Start läuft
+    if p.get("status") == "open" or ap_claim_laeuft(p, jetzt):   # frisch geclaimt/gesendet ohne Start-Fehler = Start läuft
         m = minute(p.get("started_at")) if p.get("status") == "open" else minute(p.get("start_um"))
         return (m if m is not None else (jetzt - mitternacht).total_seconds() / 60.0, p.get("richtung"), True)
     return (minute(p.get("start_um")), p.get("richtung"), False)
@@ -17753,7 +17753,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
         return ap_plan_verfallen(p, _grenze, jetzt)
     roh_plaene = _ap_plaene_mit_hand({"select": "id,user_id,master_account_id,master_firm,status,richtung,master_tp,"
                                                 "ended_at,completed_at,auto_plan,auto_bestaetigt_at,start_um_gestartet_at,"
-                                                "start_um,planned_for,started_at,orbit_gesendet_at,mt5_baseline->final", "order": "id.asc",
+                                                "start_um,planned_for,started_at,orbit_gesendet_at,mt5_baseline->final,mt5_baseline->start_fehler", "order": "id.asc",
                                       "user_id": in_uids, "created_at": "gte." + (jetzt - timedelta(days=30)).isoformat()})
     verfallen = [{"plan_id": p.get("id"), "user_id": p.get("user_id"), "konto_id": p.get("master_account_id"), "firma": p.get("master_firm"),
                   "start_um": p.get("start_um")} for p in roh_plaene if _liegengeblieben(p)]
@@ -18614,6 +18614,19 @@ def ap_misch_text(vor, nach, namen=None):
 # (AP_RICHTUNG_LAUF_FEST_MIN) und der Start-Wächter im PC-Tab (rkVorStart: erst verschieben, dann drehen). Über IDs unverändert.
 AP_RICHTUNG_WECHSEL_MIN = 0
 AP_RICHTUNG_LAUF_FEST_MIN = 90   # ein laufender/geclaimter Trade legt Teile fest, die weniger als 90 min nach seinem Start starten
+AP_CLAIM_FRISCH_MIN = 15         # ein Claim/Senden zählt nur so lange als „Start läuft" (ein Puls-Lauf dauert ≤ ~3 min)
+
+
+def ap_claim_laeuft(p, jetzt):
+    """REIN RECHNEND (09.10.2026, Prüfer Slave 2): zählt ein GEPLANTER Plan als „Start läuft" (= wie laufend)? Nur mit frischem Claim bzw.
+    Senden (start_um_gestartet_at/orbit_gesendet_at ≤ AP_CLAIM_FRISCH_MIN alt) und ohne offenen Start-Fehler (start_fehler, Status
+    nicht „behoben") — sonst sperrten geclaimte Start-Fehler-Leichen (live 3 Stück, älteste vom 07.10.) die Gegenrichtung ihrer
+    ID × Firma dauerhaft."""
+    sf = p.get("start_fehler")
+    if isinstance(sf, dict) and sf.get("status") != "behoben":
+        return False
+    t = max((x for x in (_ap_ts(p.get("start_um_gestartet_at")), _ap_ts(p.get("orbit_gesendet_at"))) if x), default=None)
+    return bool(t) and (jetzt - t).total_seconds() <= AP_CLAIM_FRISCH_MIN * 60
 
 
 def _ap_gegen_eigen(t, s, gestartet):
@@ -20131,7 +20144,9 @@ def ap_richtung_konflikte(plaene, offen, jetzt_min, horizont_min=AP_RS_HORIZONT_
             lauf.append((f"{o['user_id']}|{o['firma']}", o["richtung"], o.get("start_min")))
     # geplant, aber vom PC-Tab schon geclaimt (Start läuft) = läuft
     for p in plaene or ():
-        if p.get("fest_durch") == "schon gestartet" and p.get("richtung") in ("buy", "sell"):
+        sf = p.get("start_fehler")
+        if p.get("fest_durch") == "schon gestartet" and p.get("richtung") in ("buy", "sell") \
+                and not (isinstance(sf, dict) and sf.get("status") != "behoben"):      # Start-Fehler-Leiche zählt nicht (09.10.2026)
             lauf.append((f"{p['user_id']}|{p['firma']}", p["richtung"], p.get("start_min")))
     eff = {p["plan_id"]: p.get("richtung") for p in plaene or ()}
     reihe = sorted([p for p in plaene or () if p.get("start_min") is not None], key=lambda p: (float(p["start_min"]), str(p["plan_id"])))
@@ -20575,7 +20590,8 @@ def _ap_stand_plaene(stand):
              "sl_punkte": z.get("sl_punkte"),
              # RICHTUNG AM START (07.10.2026): für ap_richtung_konflikte
              "route": z.get("route"), "gehedgt": z.get("gehedgt"), "auto_plan": z.get("auto_plan"), "bestaetigt": z.get("bestaetigt"),
-             "richtung_konflikt": z.get("richtung_konflikt"), "folgetag": bool(z.get("folgetag"))}
+             "richtung_konflikt": z.get("richtung_konflikt"), "folgetag": bool(z.get("folgetag")),
+             "start_fehler": z.get("start_fehler")}
             for z in list(stand["geplant"]) + list(stand.get("folgetag") or ()) if z.get("start_min") is not None]   # Folgetag: fest
 
 

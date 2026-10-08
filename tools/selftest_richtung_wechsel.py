@@ -64,9 +64,17 @@ def main():
     ref = a["_ap_fest_ref"]
     from datetime import datetime, timezone
     mn = datetime(2026, 10, 9, 0, 0, tzinfo=timezone.utc)
-    jetzt = datetime(2026, 10, 9, 9, 0, tzinfo=timezone.utc)
-    check(ref({"status": "planned", "richtung": "sell", "start_um": "2026-10-09T10:00:00+00:00", "start_um_gestartet_at": "2026-10-09T10:00:05+00"}, mn, jetzt)
-          == (600.0, "sell", True), "geclaimter Plan = läuft (Bezug: sein Start)")
+    jetzt = datetime(2026, 10, 9, 10, 5, tzinfo=timezone.utc)
+    gc = {"status": "planned", "richtung": "sell", "start_um": "2026-10-09T10:00:00+00:00", "start_um_gestartet_at": "2026-10-09T10:00:05+00"}
+    check(ref(gc, mn, jetzt) == (600.0, "sell", True), "frisch geclaimter Plan (5 min) = läuft (Bezug: sein Start)")
+    # LEICHEN (Prüfer Slave 2, 09.10.2026: live 3 geclaimte Start-Fehler-Pläne, ältester vom 07.10.) — sperren nichts
+    alt = dict(gc, start_um="2026-10-07T08:00:00+00:00", start_um_gestartet_at="2026-10-07T08:00:04+00")
+    check(ref(alt, mn, jetzt)[2] is False and not a["ap_claim_laeuft"](alt, jetzt), "alte geclaimte Leiche (07.10.) = legt nichts fest")
+    check(not a["ap_claim_laeuft"](dict(gc, start_um_gestartet_at="2026-10-09T09:45:00+00"), jetzt), "Claim 20 min alt → zählt nicht mehr (> 15 min)")
+    check(not a["ap_claim_laeuft"](dict(gc, start_fehler={"status": "rot"}), jetzt)
+          and not a["ap_claim_laeuft"](dict(gc, start_fehler={"status": "tagesende"}), jetzt)
+          and a["ap_claim_laeuft"](dict(gc, start_fehler={"status": "behoben"}), jetzt), "frischer Claim mit offenem Start-Fehler zählt nicht, behoben schon")
+    check(a["ap_claim_laeuft"]({"orbit_gesendet_at": "2026-10-09T10:01:00+00:00"}, jetzt), "gesendet (orbit_gesendet_at) frisch = läuft")
     check(ref({"status": "planned", "richtung": "sell", "start_um": "2026-10-09T10:00:00+00:00"}, mn, jetzt)[2] is False, "bloß geplant = legt nichts fest")
     tf = dict(chris)
     tf["c|fn#1"] = dict(tf["c|fn#1"], fest="sell")
@@ -88,6 +96,8 @@ def main():
     check(not e4["drehen"] and not e4["markieren"], "geplanter BUY 10:00, Auto-Plan SELL 10:05 → beide bleiben (nur nie gleichzeitig)")
     e5 = K([plan("q", 600, "buy", bestaetigt=True, fest_durch="schon gestartet"), plan("p5", 605)], [], 601)
     check([x["plan_id"] for x in e5["drehen"]] == ["p5"], "geclaimter BUY 10:00 (Start läuft), Auto-Plan SELL 10:05 → gedreht")
+    e6 = K([plan("q", 600, "buy", bestaetigt=True, fest_durch="schon gestartet", start_fehler={"status": "rot"}), plan("p6", 605)], [], 601)
+    check(not e6["drehen"] and not e6["markieren"], "geclaimte Start-Fehler-Leiche BUY → Auto-Plan SELL bleibt")
 
     # 5 Quelltext
     src = open(sd.APP, encoding="utf-8").read()
@@ -99,11 +109,13 @@ def main():
 
     # 6 Frontend: nur laufende/geclaimte zählen, Start-Wächter verschiebt Auto-Pläne zuerst
     html = open(os.path.join(os.path.dirname(sd.APP), "prophos.html"), encoding="utf-8").read()
-    check("const rkZaehlt = (status, geclaimt) => status === 'open' || (status === 'planned' && !!geclaimt)" in html
-          and "if(!rkZaehlt(p.status, p.geclaimt)) continue" in html and "if(!rkZaehlt(p.status, p.startUmGestartetAt || p.orbitGesendetAt)) continue" in html
+    check("const RK_CLAIM_FRISCH_MS = 15 * 60000" in html
+          and "Date.now() - Date.parse(geclaimt) <= RK_CLAIM_FRISCH_MS && !(sf && sf.status !== 'behoben'))" in html
+          and "if(!rkZaehlt(p.status, p.geclaimt, p.sf)) continue" in html
+          and "if(!rkZaehlt(p.status, rkClaimAt(p.startUmGestartetAt, p.orbitGesendetAt), p.mt5Baseline && p.mt5Baseline.start_fehler)) continue" in html
           and "else if(p.geclaimt) lauf[seite].push({ name: p.name, firm: p.firm, verb: 'startet gerade' })" in html
-          and "select('id,status,richtung,master_firm,master_name,start_um_gestartet_at,orbit_gesendet_at')" in html,
-          "Richtungs-Prüfungen: nur laufende und geclaimte (= laufend) zählen, bloß geplante nie")
+          and "select('id,status,richtung,master_firm,master_name,start_um_gestartet_at,orbit_gesendet_at,start_fehler:mt5_baseline->start_fehler')" in html,
+          "Richtungs-Prüfungen: nur laufende und FRISCH geclaimte ohne Start-Fehler zählen, bloß geplante und Leichen nie")
     check("RK_WECHSEL_MIN" not in html and "rkPlanNah" not in html, "kein 90-min-Fenster mehr im Frontend")
     vs = html[html.index("  async function rkVorStart(plan){"):html.index("  window._rk = {")]
     check("if(plan.autoPlan && k.quelle === 'lauf'){" in vs
