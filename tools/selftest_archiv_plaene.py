@@ -42,10 +42,45 @@ def main():
     check(neu["offen"] == antwort["offen"] and len(antwort["geplant"]) == 4, "offen[] unberührt, Eingabe nicht verändert")
     check(weg(antwort, set()) is antwort and weg(None, {"k"}) is None, "leeres Archiv / keine Antwort: unverändert")
 
+    exec(block(app, "\ndef ap_ist_waise(").lstrip("\n"), ns)
+    w = ns["ap_ist_waise"]
+    check(w({"status": "planned", "master_account_id": None}), "Waise: geplant, Konto null, nie gestartet")
+    check(not w({"status": "planned", "master_account_id": None, "start_um_gestartet_at": "2026-10-09T08:00:00Z"})
+          and not w({"status": "planned", "master_account_id": None, "started_at": "2026-10-09T08:00:00Z"}),
+          "geclaimt/gestartet ohne Konto ist keine Waise (dort läuft vielleicht etwas)")
+    check(not w({"status": "completed", "master_account_id": None}) and not w({"status": "planned", "master_account_id": "k-1"}) and not w(None),
+          "beendet ohne Konto / geplant mit Konto / nichts: keine Waise")
+    check("and not ap_ist_waise(p)]" in block(app, "\ndef ap_planen(") and "not ersetzt(p) and not ap_ist_waise(p)]" in block(app, "\ndef _ap_stand_laden("),
+          "Planer (plaene) und Stand (Delta/Bot) zählen Waisen nicht")
+
+    exec(block(app, "\ndef ap_archiv_sweep_ziele(").lstrip("\n"), ns)
+    sz = ns["ap_archiv_sweep_ziele"]
+    pl = [{"id": "s1", "status": "planned", "master_account_id": "k-arch"},
+          {"id": "s2", "status": "planned", "master_account_id": None},
+          {"id": "s3", "status": "planned", "master_account_id": "k-aktiv"},
+          {"id": "s4", "status": "planned", "master_account_id": "k-arch", "start_um_gestartet_at": "x"},
+          {"id": "s5", "status": "planned", "master_account_id": "k-arch", "orbit_gesendet_at": "x"},
+          {"id": "s6", "status": "open", "master_account_id": "k-arch"}]
+    check([p["id"] for p in sz(pl, {"k-arch"})] == ["s1", "s2"],
+          "Sweep: archiviert + Waise raus; aktives Konto, geclaimt, gesendet, laufend bleiben")
+    ns_a = {"json": __import__("json"), "_sb_all": lambda t, q: [{"value": {"k1": {"archived": True}, "k2": {"archived": False}, "k3": {"x": 1}}},
+                                                                  {"value": '{"k4": {"archived": true}}'}]}
+    exec(block(app, "\ndef _ap_archiviert(").lstrip("\n"), ns_a)
+    check(ns_a["_ap_archiviert"](streng=True) == {"k1", "k4"} and ns_a["_ap_archiviert"]() == {"k1", "k2", "k3", "k4"},
+          "Archiv streng (Sweep löscht): nur archived === true; Anzeige-Lesart unverändert")
+    sw = block(app, "\ndef ap_archiv_sweep(")
+    check(all(x in sw for x in ('_ap_archiviert(streng=True)', '"status": "eq.planned", "start_um_gestartet_at": "is.null", "started_at": "is.null",',
+                                '"orbit_gesendet_at": "is.null", "master_account_id": f"eq.{kid}" if kid else "is.null"', "sb_delete(")),
+          "Sweep-DELETE trägt den Wächter in der Anfrage selbst")
+    check("ap_archiv_sweep()" in block(app, "\ndef ap_loop("), "Sweep läuft in der Auto-Planer-Schleife")
+    check('rest/v1/auto_plan_umplanung' in sw and '"quelle": "bot"' in sw and "Plan entfernt — " in sw,
+          "Sweep protokolliert je Plan in auto_plan_umplanung (quelle bot)")
+
     d = block(app, '@app.route("/admin/auto-plan/delta"')
     check("ap_delta_ohne_archiv(antwort, _ap_archiviert_gemerkt())" in d, "GET /admin/auto-plan/delta filtert mit gemerktem Archiv")
     ids = block(app, '@app.route("/admin/auto-plan/ids"')
-    check('str(p.get("master_account_id") or "") not in archiv' in ids, "Zu bestätigen (ids offen[]): archivierte Konten raus")
+    check('and p.get("master_account_id") and str(p.get("master_account_id")) not in archiv]' in ids,
+          "Zu bestätigen (ids offen[]): archivierte Konten und Waisen raus")
     hg = block(app, "\ndef hand_gruppen(")
     check(hg.count("in archiv") >= 4, "Handarbeit: alle Gruppen prüfen das Archiv")
 
@@ -57,7 +92,15 @@ def main():
           "archivPlaeneEntfernen löscht nur planned ohne Claim und ohne started_at")
     check("tpWdTagesplanAustragen(r.id, 'Konto archiviert')" in ape and "'geplante Trades'} dieses Kontos entfernt" in ape,
           "Farmer-Plan wird aus dem Tagesplan ausgetragen, Toast „n geplante Trades dieses Kontos entfernt“")
+    dl = block(html, "accEls.table.querySelectorAll('[data-acc-del]')", "\n      })\n      })\n")
+    i_p, i_a = dl.find("await archivPlaeneEntfernen(id)"), dl.find("from('accounts').delete()")
+    check(0 < i_p < i_a, "Konto löschen: erst die nie gestarteten Pläne, dann das Konto (FK setzt sonst null)")
+    wpe = block(html, "  async function waisePlanEntfernen(", "\n  }\n")
+    check(all(x in wpe for x in (".eq('id', plan.id)", ".eq('status', 'planned')", ".is('master_account_id', null)",
+                                 ".is('start_um_gestartet_at', null)", ".is('started_at', null)")),
+          "waisePlanEntfernen: nur dieser Plan, nur Waise, nie gestartet")
     pks = block(html, "  async function planKontoSperre(", "\n  }\n")
+    check("if(!kid && plan && plan.status === 'planned') return { art: 'waise'" in pks, "planKontoSperre: Waise → kein Start")
     check(".from('user_settings').select('value').eq('user_id', currentUserId).eq('key', 'archive')" in pks
           and "art: 'archiv'" in pks and "isAccountArchived(kid)" in pks,
           "planKontoSperre: Archiv frisch aus user_settings, Rückfall lokaler Stand")
@@ -65,8 +108,8 @@ def main():
     check(0 < i_arch < i_ziel, "Archiv-Sperre vor Ziel-Sperre")
     tick = block(html, "  async function tpStartUmTick(", "\n  }\n")
     i_a, i_claim = tick.find("sperre.art === 'archiv'"), tick.find("// Claim: nur der Tab")
-    check(0 < i_a < i_claim and "archivPlaeneEntfernen(plan.masterAccountId, 'start')" in tick,
-          "tpStartUmTick: archivierter Plan wird vor dem Claim entfernt, nie gestartet")
+    check(0 < i_a < i_claim and "archivPlaeneEntfernen(plan.masterAccountId, 'start')" in tick and "await waisePlanEntfernen(plan)" in tick,
+          "tpStartUmTick: archivierter Plan / Waise wird vor dem Claim entfernt, nie gestartet")
     td = block(html, "  function tplDaten(", "\n  }\n")
     check("arch[String(t.konto_id)].archived" in td and "!t.geclaimt" in td, "tplDaten: geplante Zeilen archivierter Konten ausgeblendet")
 

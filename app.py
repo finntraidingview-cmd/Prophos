@@ -15896,9 +15896,9 @@ def _ap_balance_karten():
     return echo_bal, dup_bal
 
 
-def _ap_archiviert():
+def _ap_archiviert(streng=False):
     """Archivierte Konto-IDs — gleiche Lesart wie _admin_basis: alle archive-Zeilen (zwischen Profilen vermischt,
-    Account-IDs sind global eindeutig), jeder wahre Eintrag zählt."""
+    Account-IDs sind global eindeutig), jeder wahre Eintrag zählt. streng=True (Archiv-Sweep, der LÖSCHT): nur archived === true."""
     out = set()
     for row in _sb_all("user_settings", {"select": "value", "key": "eq.archive"}):
         v = row.get("value")
@@ -15909,7 +15909,7 @@ def _ap_archiviert():
                 v = None
         if isinstance(v, dict):
             for acc_id, info in v.items():
-                if info:                       # wie _admin_basis: archived-Flag ODER jeder wahre Eintrag
+                if (isinstance(info, dict) and info.get("archived") is True) if streng else info:   # sonst wie _admin_basis
                     out.add(str(acc_id))
     return out
 
@@ -16973,6 +16973,17 @@ def ap_ohne_archiv(erg, archiv):
     return out
 
 
+def ap_ist_waise(p):
+    """REIN RECHNEND (testbar): geplanter, nie gestarteter Plan OHNE Konto (Master 09.10.2026, Ina: „100k ftmo …" nach dem Nachplanen
+    gelöscht und neu angelegt — der FK trade_plans_master_account_id_fkey setzt beim Löschen master_account_id auf null, der alte Plan
+    blieb als Waise und hätte dasselbe FTMO-Konto ein zweites Mal gehandelt). Ein geplanter Plan braucht immer ein Master-Konto (Editor
+    „Master muss gewählt sein"), null heißt also: Konto gelöscht. Waisen zählen nirgends (Planer, Delta/Bot, Zu bestätigen); der PC-Tab
+    startet sie nie und entfernt sie (tpStartUmTick). Geclaimte/gestartete Pläne sind keine Waisen — dort läuft vielleicht schon etwas."""
+    p = p or {}
+    return (p.get("status") == "planned" and not p.get("master_account_id")
+            and not p.get("start_um_gestartet_at") and not p.get("started_at"))
+
+
 def ap_delta_ohne_archiv(antwort, archiv):
     """REIN RECHNEND (testbar): Delta-Antwort ohne geplante, nie geclaimte Zeilen archivierter Konten (Finn 09.10.2026 ~03:00 Dubai,
     FN Futures …0045: „Den Account habe ich schon längst archiviert, den gibt's gar nicht mehr" — der Nachtlauf hatte den Plan vor dem
@@ -16982,6 +16993,84 @@ def ap_delta_ohne_archiv(antwort, archiv):
         return antwort
     return dict(antwort, geplant=[z for z in antwort["geplant"]
                                   if (z or {}).get("geclaimt") or str((z or {}).get("konto_id") or "") not in archiv])
+
+
+# ARCHIV-SWEEP (Prüfer Slave 2, 09.10.2026): archiveAccount im Browser löscht nur EIGENE Pläne (RLS) — archiviert Finn als Admin ein
+# Konto einer anderen ID (Handarbeit „Als geblowt archivieren"), läuft das DELETE leer und der PC-Tab des Inhabers kennt das Archiv nicht
+# (liest nur sein eigenes). Der Server räumt deshalb alle 5 min über den Service-Key ab: geplante, nie geclaimte/gestartete/gesendete Pläne
+# eines archivierten Kontos (Archiv ALLER Profile) und Waisen (Konto gelöscht). Derselbe Wächter in der DELETE-Anfrage selbst.
+AP_ARCHIV_SWEEP_S = 300
+_ap_sweep = {"at": 0.0, "letzt": None}
+
+
+def ap_archiv_sweep_ziele(plaene, archiv):
+    """REIN RECHNEND (testbar): Pläne, die der Sweep entfernt — geplant, nie geclaimt/gestartet/gesendet, Konto archiviert oder Waise."""
+    out = []
+    for p in plaene or ():
+        p = p or {}
+        if p.get("status") != "planned" or p.get("start_um_gestartet_at") or p.get("started_at") or p.get("orbit_gesendet_at"):
+            continue
+        kid = p.get("master_account_id")
+        if not kid or str(kid) in (archiv or ()):
+            out.append(p)
+    return out
+
+
+def _ap_wd_tagesplan_austragen(plan_id, uid, hinweis):
+    """Farmer-Plan aus wd_tagesplan austragen (wie tpWdTagesplanAustragen im Browser), laufende Tagespläne nie."""
+    ab = (datetime.now(timezone.utc) - timedelta(days=2)).strftime("%Y-%m-%d")
+    for x in sb_select("wd_tagesplan", {"select": "tag,user_id,konten,status", "user_id": f"eq.{uid}", "tag": f"gte.{ab}"}) or []:
+        konten = x.get("konten") or []
+        if not any(isinstance(k, dict) and str(k.get("plan_id")) == str(plan_id) for k in konten):
+            continue
+        konten = [dict(k, plan_id=None, status=None, start_um=None, aktiv=False, hinweis=hinweis)
+                  if isinstance(k, dict) and str(k.get("plan_id")) == str(plan_id) else k for k in konten]
+        status = x.get("status") if any(isinstance(k, dict) and k.get("aktiv") is not False for k in konten) else "leer"
+        sb_update("wd_tagesplan", {"tag": f"eq.{x.get('tag')}", "user_id": f"eq.{uid}", "status": "neq.laeuft"},
+                  {"konten": konten, "status": status, "updated_at": datetime.now(timezone.utc).isoformat()})
+
+
+def ap_archiv_sweep(force=False):
+    """Alle AP_ARCHIV_SWEEP_S: Pläne archivierter Konten / Waisen löschen (siehe oben). → Liste gelöschter Plan-IDs oder None (nicht dran)."""
+    if not force and time.time() - _ap_sweep["at"] < AP_ARCHIV_SWEEP_S:
+        return None
+    _ap_sweep["at"] = time.time()
+    archiv = _ap_archiviert(streng=True)
+    plaene = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_name,master_firm,richtung,status,start_um,"
+                                               "start_um_gestartet_at,started_at,orbit_gesendet_at,notes",
+                                     "status": "eq.planned", "start_um_gestartet_at": "is.null", "started_at": "is.null"})
+    weg, protokoll = [], []
+    for p in ap_archiv_sweep_ziele(plaene, archiv):
+        kid = p.get("master_account_id")
+        guard = {"id": f"eq.{p['id']}", "status": "eq.planned", "start_um_gestartet_at": "is.null", "started_at": "is.null",
+                 "orbit_gesendet_at": "is.null", "master_account_id": f"eq.{kid}" if kid else "is.null"}
+        try:
+            if not sb_delete("trade_plans", guard):
+                continue
+        except Exception as e:
+            print(f"[archiv-sweep] ⚠️ {str(p['id'])[:8]}: {type(e).__name__}: {e}", flush=True)
+            continue
+        weg.append(str(p["id"]))
+        grund = "archiviert" if kid else "Konto gelöscht"
+        protokoll.append({"plan_id": p["id"], "user_id": p.get("user_id"), "firma": p.get("master_firm"), "von_richtung": p.get("richtung"),
+                          "von_start": p.get("start_um"), "grund": f"Plan entfernt — {'Konto archiviert' if kid else 'Konto gelöscht'}",
+                          "quelle": "bot"})
+        print(f"[archiv-sweep] 🗄 Plan {str(p['id'])[:8]} entfernt ({grund}, {p.get('master_name') or '—'}, Start {p.get('start_um') or '—'})",
+              flush=True)
+        if p.get("notes") == "Winning-Day-Farmer":
+            try:
+                _ap_wd_tagesplan_austragen(p["id"], p.get("user_id"), f"Plan entfernt — {grund}")
+            except Exception as e:
+                print(f"[archiv-sweep] ⚠️ Tagesplan {str(p['id'])[:8]}: {type(e).__name__}: {e}", flush=True)
+    if protokoll:   # nachvollziehbar in „Änderungen heute" (auto_plan_umplanung; quelle nur bot/hand/start erlaubt)
+        try:
+            r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/auto_plan_umplanung", json=protokoll,
+                            headers=_sb_headers("return=minimal"), timeout=(5, 20))
+            r.raise_for_status()
+        except Exception as e:
+            print(f"[archiv-sweep] ⚠️ Protokoll nicht geschrieben ({type(e).__name__}) — Pläne sind trotzdem entfernt", flush=True)
+    _ap_sweep["letzt"] = {"at": datetime.now(timezone.utc).isoformat(), "weg": len(weg)}
+    return weg
 
 
 _ap_archiv_merk = {"bis": 0.0, "wert": None}
@@ -17492,7 +17581,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
                                       "user_id": in_uids, "created_at": "gte." + (jetzt - timedelta(days=30)).isoformat()})
     verfallen = [{"plan_id": p.get("id"), "user_id": p.get("user_id"), "konto_id": p.get("master_account_id"), "firma": p.get("master_firm"),
                   "start_um": p.get("start_um")} for p in roh_plaene if _liegengeblieben(p)]
-    plaene = [p for p in roh_plaene if not _vorschlag(p) and not _liegengeblieben(p)]
+    plaene = [p for p in roh_plaene if not _vorschlag(p) and not _liegengeblieben(p) and not ap_ist_waise(p)]   # Waise: Konto gelöscht (09.10.2026)
     # Nachtlauf: Leichen mit Fusion-Spread aus Leer-Versuchen nach „Überprüfen" (_ap_leichen_abschliessen) — Probelauf/Hand/Nachplanen nicht
     leichen_zu = _ap_leichen_abschliessen([v["plan_id"] for v in verfallen], jetzt) if (not trocken and quelle == "nacht") else []
     for v in verfallen:
@@ -20060,7 +20149,7 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
                                                                  "kt:mt5_baseline->kette",
                                                        "status": "eq.planned", "order": "id.asc",
                                                        "created_at": "gte." + (jetzt - timedelta(days=30)).isoformat()})
-                    if str(p.get("user_id")) not in ausgeblendet and not ersetzt(p)]
+                    if str(p.get("user_id")) not in ausgeblendet and not ersetzt(p) and not ap_ist_waise(p)]   # Waise (09.10.2026)
     gestartet = [p for p in _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_firm,richtung,status,started_at",
                                                     "status": "in.(review,completed)", "started_at": "gte." + mitternacht.isoformat(),
                                                     "order": "id.asc"})
@@ -21234,7 +21323,7 @@ def admin_auto_plan_ids():
                                      "order": "start_um.asc"})
         pl = [p for p in pl if (str(p.get("user_id")) in gruppe if gruppe
                                 else (ohne_aus or str(p.get("user_id")) not in aus) and admin_in_sicht(p.get("user_id"), lese_sicht))
-              and str(p.get("master_account_id") or "") not in archiv]   # archiviertes Konto: kein Vorschlag mehr (09.10.2026)
+              and p.get("master_account_id") and str(p.get("master_account_id")) not in archiv]   # archiviert / Konto gelöscht (Waise): kein Vorschlag mehr (09.10.2026)
         acc_ids = sorted({str(p.get("master_account_id")) for p in pl if p.get("master_account_id")})
         accs, letzt_je = {}, {}
         for j in range(0, len(acc_ids), 150):
@@ -22667,6 +22756,10 @@ def ap_loop():
         except Exception as e:
             _ap_info["nachplan_fehler"] = f"{type(e).__name__}: {e}"
             print(f"[auto-plan] ⚠️ Nachplanen: {e}", flush=True)
+        try:
+            ap_archiv_sweep()                 # Pläne archivierter Konten / Waisen alle 5 min (09.10.2026)
+        except Exception as e:
+            print(f"[archiv-sweep] ⚠️ {type(e).__name__}: {e}", flush=True)
         _ap_kette_takt()                      # Topstep-Kette: Trade 2 nach genauer Nachlesung von Trade 1 (08.10.2026)
         try:
             _ap_bot_tick(datetime.now(_ap_tz(AP_TZ_TAG)))

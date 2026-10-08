@@ -31976,6 +31976,20 @@
    * das Konto als „nicht live" in „Braucht dich"). Entfernt NUR nie gestartete Pläne des Kontos (planned, ohne Claim, ohne started_at),
    * Auto- wie Hand-Pläne; gestartete/laufende nie. RLS: nur eigene Pläne — das Archiv liegt im Profil des Konto-Inhabers.
    * quelle 'start' = Sicherheitsnetz im PC-Tab (tpStartUmTick, eigener Toast). Gibt die Zahl entfernter Pläne zurück. */
+  // Waise (Konto gelöscht, master_account_id null) per Plan-ID entfernen — gleiche Wächter wie oben, dazu master_account_id is null
+  async function waisePlanEntfernen(plan){
+    try{
+      const { data, error } = await supabase.from('trade_plans').delete().eq('id', plan.id).eq('status', 'planned')
+        .is('master_account_id', null).is('start_um_gestartet_at', null).is('started_at', null).select('id,notes')
+      if(error) throw error
+      if(!data || !data.length) return 0
+      tradePlans = (tradePlans || []).filter(p => String(p.id) !== String(plan.id))
+      if(data[0].notes === 'Winning-Day-Farmer') await tpWdTagesplanAustragen(plan.id, 'Konto gelöscht')
+      try{ if(typeof mirrorReleasePlan === 'function') mirrorReleasePlan(plan.id) }catch(_){}
+      try{ renderTradePlans() }catch(_){}
+      return 1
+    }catch(e){ console.warn('[waise] Plan entfernen', (e && e.message) || e); return 0 }
+  }
   async function archivPlaeneEntfernen(accountId, quelle){
     const kid = String(accountId || ''); if(!kid) return 0
     try{
@@ -33912,6 +33926,9 @@
           const id = btn.dataset.accDel
           if(!confirm('Account wirklich entfernen?')) return
           try{
+            // ERST die nie gestarteten Pläne (Master 09.10.2026, Ina „100k ftmo …"): nach dem Konto-Löschen setzt der FK master_account_id
+            // auf null — der Plan bliebe als Waise stehen und hätte dasselbe Prop-Konto nach dem Neu-Anlegen ein zweites Mal gehandelt
+            await archivPlaeneEntfernen(id)
             const { error } = await supabase.from('accounts').delete().eq('id', id)
             if(error) throw error
             accounts = accounts.filter(x => String(x.id) !== String(id))
@@ -38134,6 +38151,8 @@
     // denn der PC-Tab kennt ein am Mac archiviertes Konto sonst erst nach dem nächsten Sync; Rückfall der lokale Stand
     const archivText = `„${name}" ist archiviert — kein Start.`
     const imArchiv = v => { try{ if(typeof v === 'string') v = JSON.parse(v) }catch(_){ v = null }; return !!(v && v[kid] && v[kid].archived) }
+    // WAISE (09.10.2026): geplanter Plan ohne Konto = Konto gelöscht (FK setzt null; der Editor verlangt immer ein Master-Konto) → nie starten
+    if(!kid && plan && plan.status === 'planned') return { art: 'waise', text: `„${name}" — Konto gelöscht, kein Start.` }
     if(kid){
       // TIMEOUT 5 s (08.10.2026, Befund Slave 2 zu .1322): die zwei Abfragen laufen vor JEDEM Start — hängt Supabase (Last-Vorfälle
       // 29./30.09.), hing jeder Start hier. Nach 5 s gilt die DB als nicht lesbar → derselbe Rückfall auf den Cache wie beim DB-Fehler.
@@ -42381,7 +42400,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1395'
+  const OS_TAB_BUILD = '2026-09-22.1396'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -46688,8 +46707,8 @@
       const zielOk = sperre && sperre.art === 'ziel' ? sperre.z : null
       // ARCHIVIERT (09.10.2026): nie starten, sondern entfernen wie beim Archivieren. Klappt das Löschen nicht, Claim setzen — sonst
       // stünde der Plan als faellig[0] vorne und hielte jeden weiteren Start dieses Tabs auf
-      if(sperre && sperre.art === 'archiv'){
-        const n = await archivPlaeneEntfernen(plan.masterAccountId, 'start')
+      if(sperre && (sperre.art === 'archiv' || sperre.art === 'waise')){
+        const n = sperre.art === 'archiv' ? await archivPlaeneEntfernen(plan.masterAccountId, 'start') : await waisePlanEntfernen(plan)
         if(!n){
           const { data: da } = await supabase.from('trade_plans').update({ start_um_gestartet_at: new Date().toISOString() })
             .eq('id', plan.id).eq('status', 'planned').is('start_um_gestartet_at', null).select('*')
@@ -47663,7 +47682,8 @@
       t.long = t.richtung === 'buy'
       t.key = String(t.plan_id)
       if(_tpl.weg.has(t.key)) return null
-      if((t.status === 'offen' || t.status === 'bestaetigt') && !t.geclaimt && !(p && (p.startUmGestartetAt || p.startedAt)) && t.konto_id && arch[String(t.konto_id)] && arch[String(t.konto_id)].archived) return null
+      if((t.status === 'offen' || t.status === 'bestaetigt') && !t.geclaimt && !(p && (p.startUmGestartetAt || p.startedAt))
+         && ((t.konto_id && arch[String(t.konto_id)] && arch[String(t.konto_id)].archived) || (p && p.status === 'planned' && !p.masterAccountId))) return null   // archiviert / Waise (Konto gelöscht)
       trades.push(t); gesehen.add(t.key)
       return t
     }
