@@ -15590,9 +15590,21 @@ def ap_eingriff_sicht(admin, uid, im_planer, nur_eigene, sicht=None):
         return str(uid)
     if admin:
         return None
-    if im_planer and str(sicht or "").strip().lower() == AP_SICHT_ADMIN:
+    # ADMIN-REITER FÜR JEDEN ADMIN-LOGIN (Finn 08.10.2026, als „Finn + Pascal": „Im Admin soll jeder die Trades von allen sehen. Im normalen
+    # Trade-Planer sieht jeder nur die eigenen, aber im Admin jeder von jedem."): sicht="admin" reicht — im_planer ist nicht mehr nötig
+    # (vorbereitete Lockerung _ap_planer_voll, Finns Go); admin_zugang „nur eigene" (Emin) bleibt oben bei der eigenen ID
+    if str(sicht or "").strip().lower() == AP_SICHT_ADMIN:
         return None
     return str(uid)
+
+
+def ap_admin_reiter_ok(admin, im_planer, nur_eigene, sicht):
+    """REIN RECHNEND (08.10.2026): darf dieser Login die LESE-Routen des Trade-Planers (/admin/auto-plan GET, /delta) nutzen?
+    Admin, jede ID im Planer (wie bisher) — und seit 08.10.2026 jeder Login mit sicht="admin" (Admin-Reiter, Admin-Code entsperrt),
+    der nicht admin_zugang „nur eigene" ist. Planer-Lauf (POST) und Bot-Einstellungen bleiben davon unberührt."""
+    if admin or im_planer:
+        return True
+    return str(sicht or "").strip().lower() == AP_SICHT_ADMIN and not nur_eigene
 
 
 def ap_eingriff_filter(aktion, plan_ids, sicht_uid=None):
@@ -17452,8 +17464,9 @@ def _ap_bot_tick(d):
         print(f"[auto-plan] ⚠️ Ausgleich: {e}", flush=True)
 
 
-def _ap_zugang():
+def _ap_zugang(admin_reiter=False):
     """Gate wie /admin/auto-plan: Admin oder eine ID, die selbst im Auto-Planer ist (nur lesen, nur eigene Zeilen).
+    admin_reiter=True (nur Lese-Routen, 08.10.2026): auch jeder andere Login mit sicht=admin, der nicht „nur eigene" ist (ap_admin_reiter_ok).
     → (admin, uid, reg, None) oder (…, Fehler-Antwort)."""
     mail, err = _admin_auth()
     uid = request.environ.get("prophos.admin_uid")
@@ -17468,7 +17481,14 @@ def _ap_zugang():
     if not reg:
         return admin, uid, None, (jsonify({"ok": False, "msg": "auto_plan_regeln fehlt"}), 503)
     if not admin and str(uid) not in [str(u) for u in (reg.get("user_ids") or [])]:
-        return admin, uid, reg, (jsonify({"ok": False, "msg": "Diese ID ist nicht im Auto-Planer"}), 403)
+        ok = False
+        if admin_reiter and _ap_sicht_param() == AP_SICHT_ADMIN:
+            try:
+                ok = ap_admin_reiter_ok(False, False, admin_zugang_nur_eigene(str(uid)), AP_SICHT_ADMIN)
+            except Exception:
+                ok = False                    # admin_zugang nicht lesbar → nie versehentlich alle IDs
+        if not ok:
+            return admin, uid, reg, (jsonify({"ok": False, "msg": "Diese ID ist nicht im Auto-Planer"}), 403)
     return admin, uid, reg, None
 
 
@@ -17477,7 +17497,7 @@ def admin_auto_plan_delta():
     """GET → Delta-Stand jetzt (Vertrag §4): netto/brutto, offen[], geplant[], verlauf[], umplanungen[] (heute), bot{}."""
     if request.method == "OPTIONS":
         return "", 200
-    admin, uid, reg, err = _ap_zugang()
+    admin, uid, reg, err = _ap_zugang(admin_reiter=True)
     if err:
         return err
     try:
@@ -17734,7 +17754,14 @@ def admin_auto_plan_eingriff():
         if not re.match(r"^[0-9a-f-]{36}$", pid):
             return jsonify({"ok": False, "msg": "plan_id fehlt"}), 400
         try:
-            return _ap_werte_setzen(pid, body, admin, uid)
+            # Admin-Reiter (08.10.2026): sicht="admin" und nicht „nur eigene" → alle Pläne wie ein Admin (ap_eingriff_sicht)
+            alle = admin
+            if not admin and _ap_sicht_param() == AP_SICHT_ADMIN:
+                try:
+                    alle = ap_eingriff_sicht(False, uid, False, admin_zugang_nur_eigene(str(uid)), AP_SICHT_ADMIN) is None
+                except Exception:
+                    alle = False
+            return _ap_werte_setzen(pid, body, alle, uid)
         except Exception as e:
             return jsonify({"ok": False, "msg": f"{type(e).__name__}: {e}"}), 502
     admin, uid, reg, err = _ap_zugang()
@@ -18321,7 +18348,13 @@ def admin_auto_plan():
     reg = (sb_select("auto_plan_regeln", {"select": "aktiv,user_ids", "id": "eq.1"}) or [{}])[0]
     im_planer = str(uid) in [str(u) for u in (reg.get("user_ids") or [])]
     if not admin and not im_planer:
-        return jsonify({"ok": False, "msg": "Diese ID ist nicht im Auto-Planer"}), 403
+        # Admin-Reiter (08.10.2026): GET mit sicht=admin auch ohne Planer-Mitgliedschaft (ap_admin_reiter_ok); POST bleibt Planer-only
+        try:
+            darf = request.method == "GET" and ap_admin_reiter_ok(False, False, admin_zugang_nur_eigene(str(uid)), _ap_sicht_param())
+        except Exception:
+            darf = False
+        if not darf:
+            return jsonify({"ok": False, "msg": "Diese ID ist nicht im Auto-Planer"}), 403
     sicht = None if admin else str(uid)        # 06.10.2026: Nicht-Admin (Test-ID) sieht nur die eigenen Zeilen
     if request.method == "GET":
         sicht = _ap_sicht_aus_anfrage(admin, uid)   # seit 08.10.2026: Nicht-Admin alle IDs nur mit ?sicht=admin (Admin-Reiter), sonst eigene
