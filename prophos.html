@@ -37515,10 +37515,14 @@
     const name = (plan && plan.masterName) || 'Konto'
     const manuellText = n => `„${name}" steht in Manueller Arbeit${n ? ' (' + n + ')' : ''} — kein Start, bis die Arbeit erledigt ist (Radar → Manuelle Arbeit, Accounts → Zu tun).`
     if(kid){
+      // TIMEOUT 5 s (08.10.2026, Befund Slave 2 zu .1322): die zwei Abfragen laufen vor JEDEM Start — hängt Supabase (Last-Vorfälle
+      // 29./30.09.), hing jeder Start hier. Nach 5 s gilt die DB als nicht lesbar → derselbe Rückfall auf den Cache wie beim DB-Fehler.
+      let uhr = null
       try{
-        const [ra, rp] = await Promise.all([
+        const [ra, rp] = await Promise.race([Promise.all([
           supabase.from('accounts').select('ziel_erreicht_at,ziel_erreicht_bal,ziel_usd').eq('id', kid).maybeSingle(),
-          supabase.from('trade_plans').select('id,manuell:mt5_baseline->manuell').eq('master_account_id', kid).eq('status', 'review').limit(30)])
+          supabase.from('trade_plans').select('id,manuell:mt5_baseline->manuell').eq('master_account_id', kid).eq('status', 'review').limit(30)]),
+          new Promise((_, nein) => { uhr = setTimeout(() => nein(new Error('Timeout 5 s — Rückfall auf Cache')), 5000) })])
         if(!ra.error && ra.data && ra.data.ziel_erreicht_at){
           const konto = (accounts || []).find(a => String(a.id) === kid)
           if(konto){ konto.zielErreichtAt = ra.data.ziel_erreicht_at; konto.zielErreichtBal = ra.data.ziel_erreicht_bal != null ? Number(ra.data.ziel_erreicht_bal) : konto.zielErreichtBal }
@@ -37528,6 +37532,7 @@
         const m = !rp.error && (rp.data || []).find(r => String(r.id) !== String(plan.id) && r.manuell && typeof r.manuell === 'object' && r.manuell.at)
         if(m) return { art: 'manuell', text: manuellText(String(m.manuell.notiz || '').slice(0, 60)) }
       }catch(e){ console.warn('[konto-sperre] DB', (e && e.message) || e) }
+      finally{ clearTimeout(uhr) }
     }
     const z = planZielErreicht(plan); if(z) return { art: 'ziel', z, text: planZielText(plan, z) }
     const mc = kid && (tradePlans || []).find(p => String(p.masterAccountId) === kid && String(p.id) !== String(plan.id) && p.status === 'review'
@@ -41674,7 +41679,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1328'
+  const OS_TAB_BUILD = '2026-09-22.1329'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
