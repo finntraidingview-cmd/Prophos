@@ -12074,6 +12074,134 @@ def admin_pc_stand():
     return jsonify({"ok": True, "at": jetzt.isoformat(), "lebt_s": PC_STAND_LEBT_S, "stand": stand})
 
 
+# HANDARBEIT (Finn 09.10.2026 ~01:30 Dubai: „eine Liste mit allen Accounts, die gepasst wurden oder irgendwas manuell Hilfe brauchen … in einem
+# Popup: welche Accounts brauchen genau die Hilfe? Wo muss ich die Phase hinzufügen?"). Vier Gruppen, nur aktive Konten (Archiv wie _admin_basis):
+#   bestanden    accounts.ziel_erreicht_at (Ziel-Wache), Kontoart Challenge/Phase → Phase alt → neu (wie WDL_ZIEL_TYP im Radar), neues Konto nötig
+#   geblowt      letzter gestarteter Plan des Kontos mit blown = true, Konto nicht archiviert
+#   ueberpruefen trade_plans review OHNE Manuell-Kennzeichen, Ende älter als 6 h
+#   manuell      trade_plans review MIT mt5_baseline.manuell (Schritt + Notiz)
+# Sicht wie die Admin-Reiter (_admin_sicht: Verwalter = Gruppe mit ?ansicht=admin, Finns ?gruppe=); ein Login ohne Einschränkung, der NICHT in
+# ADMIN_EMAILS steht, sieht nur sich (Master: „normale ID: nur eigene"). Nur Lesen, 30 s gemerkt je Sicht — das Frontend fragt alle 60 s.
+HAND_CACHE_S = 30
+HAND_UEBERPRUEFEN_H = 6
+HAND_NACH = {"challenge": "funded", "phase1": "phase2", "phase2": "funded_cfd"}
+_hand_cache = {}
+_hand_lock = threading.Lock()
+
+
+def hand_gruppen(konten_ziel, reviews, blown, letzte, accs, archiv, namen, ausgeblendet, jetzt):
+    """REIN RECHNEND (testbar): die vier Handarbeit-Gruppen. konten_ziel = accounts mit ziel_erreicht_at; reviews = trade_plans review
+    (mit manuell); blown = trade_plans blown=true; letzte = {konto_id: (plan_id, started_at)} jüngster gestarteter Plan je Konto;
+    accs = {konto_id: account} (Name/Firma/External ID/Typ der Plan-Konten); archiv = archivierte Konto-IDs; namen = user_id → Name.
+    → {bestanden, geblowt, ueberpruefen, manuell} — Listen von Zeilen, neueste zuerst."""
+    def ende4(a):
+        return str((a or {}).get("external_id") or "").strip()[-4:]
+
+    def basis(uid, kid, a, firma=None, name=None):
+        a = a or {}
+        return {"user_id": str(uid or ""), "user": namen.get(str(uid or ""), ""), "konto_id": str(kid or "") or None,
+                "firma": firma or a.get("firm") or "", "konto": name or a.get("name") or "", "ende4": ende4(a),
+                "typ": a.get("account_type"), "start_balance": _wd_num(a.get("starting_balance"))}
+    out = {"bestanden": [], "geblowt": [], "ueberpruefen": [], "manuell": []}
+    # Konto mit Manuelle-Arbeit-Zeile nicht zusätzlich als „bestanden" (wie die Ziel-Zeilen im Radar: nicht doppelt)
+    man_konten = {str(p.get("master_account_id")) for p in reviews or ()
+                  if isinstance(p.get("manuell"), dict) and p["manuell"].get("at") and p.get("master_account_id")}
+    for a in konten_ziel or ():
+        kid, uid = str(a.get("id") or ""), str(a.get("user_id") or "")
+        if not kid or kid in archiv or kid in man_konten or uid in ausgeblendet or a.get("account_type") not in HAND_NACH:
+            continue
+        z = basis(uid, kid, a)
+        z.update(art="bestanden", seit=a.get("ziel_erreicht_at"), nach=HAND_NACH[a["account_type"]],
+                 bal=_wd_num(a.get("ziel_erreicht_bal")), ziel=_wd_num(a.get("ziel_usd")))
+        out["bestanden"].append(z)
+    gesehen = set()
+    for p in blown or ():
+        kid, uid = str(p.get("master_account_id") or ""), str(p.get("user_id") or "")
+        if not kid or kid in gesehen or kid in archiv or uid in ausgeblendet:
+            continue
+        if (letzte.get(kid) or (None,))[0] != str(p.get("id")):
+            continue                                   # nach dem Blow lief schon ein neuer Plan auf dem Konto → kein Fall
+        gesehen.add(kid)
+        z = basis(uid, kid, accs.get(kid), p.get("master_firm"), p.get("master_name"))
+        z.update(art="geblowt", plan_id=str(p.get("id")), seit=p.get("ended_at") or p.get("completed_at"), pl=_wd_num(p.get("master_pl")))
+        out["geblowt"].append(z)
+    for p in reviews or ():
+        kid, uid = str(p.get("master_account_id") or ""), str(p.get("user_id") or "")
+        if uid in ausgeblendet or (kid and kid in archiv):
+            continue
+        m = p.get("manuell") if isinstance(p.get("manuell"), dict) else None
+        z = basis(uid, kid, accs.get(kid), p.get("master_firm"), p.get("master_name"))
+        z["plan_id"] = str(p.get("id"))
+        if m and m.get("at"):
+            z.update(art="manuell", seit=m.get("at"), schritt=m.get("schritt"), notiz=m.get("notiz"))
+            out["manuell"].append(z)
+            continue
+        ende = _ap_ts(p.get("ended_at") or p.get("completed_at"))
+        if ende is None or (jetzt - ende).total_seconds() < HAND_UEBERPRUEFEN_H * 3600:
+            continue
+        z.update(art="ueberpruefen", seit=ende.isoformat(), pl=_wd_num(p.get("master_pl")))
+        out["ueberpruefen"].append(z)
+    for k in out:
+        out[k].sort(key=lambda z: str(z.get("seit") or ""), reverse=True)
+    return out
+
+
+@app.route("/admin/handarbeit", methods=["GET", "OPTIONS"])
+def admin_handarbeit():
+    """GET → {ok, at, n, gruppen: hand_gruppen(…)} für die Sicht des Logins (siehe oben)."""
+    if request.method == "OPTIONS":
+        return "", 200
+    me, err = _wd_login()
+    if err:
+        return err
+    sicht = _admin_sicht()
+    if sicht is None:
+        try:
+            mail = str((_auth_user_anfrage((request.headers.get("sb-token") or "").strip()).json() or {}).get("email") or "").strip().lower()
+        except Exception:
+            mail = ""
+        if mail not in ADMIN_EMAILS:
+            sicht = frozenset({str(me)})
+    schluessel = "*" if sicht is None else ",".join(sorted(sicht))
+    with _hand_lock:
+        c = _hand_cache.get(schluessel)
+        if c and c[0] > time.time():
+            return jsonify(c[1])
+    try:
+        f = admin_sicht_filter(sicht)
+        uq = {"user_id": f} if f else {}
+        konten_ziel = _sb_all("accounts", dict(uq, select="id,user_id,name,firm,account_type,external_id,starting_balance,"
+                                                           "ziel_erreicht_at,ziel_erreicht_bal,ziel_usd", ziel_erreicht_at="not.is.null"))
+        reviews = _sb_all("trade_plans", dict(uq, select="id,user_id,master_account_id,master_name,master_firm,master_pl,ended_at,"
+                                                         "completed_at,manuell:mt5_baseline->manuell", status="eq.review"))
+        blown = _sb_all("trade_plans", dict(uq, select="id,user_id,master_account_id,master_name,master_firm,master_pl,started_at,"
+                                                       "ended_at,completed_at", blown="is.true", order="started_at.desc"))
+        archiv = _ap_archiviert()
+        aktiv = lambda liste: sorted({str(p.get("master_account_id")) for p in liste or []
+                                      if p.get("master_account_id") and str(p.get("master_account_id")) not in archiv})
+        kids_blown, kids = aktiv(blown), aktiv((blown or []) + (reviews or []))
+        letzte, accs = {}, {}
+        for j in range(0, len(kids_blown), 150):          # jüngster gestarteter Plan nur für die Blow-Konten (Last: nichts sonst)
+            for r in _sb_all("trade_plans", {"select": "id,master_account_id,started_at", "started_at": "not.is.null",
+                                             "master_account_id": "in.(" + ",".join(kids_blown[j:j + 150]) + ")", "order": "started_at.desc"}):
+                k = str(r.get("master_account_id"))
+                if k not in letzte:
+                    letzte[k] = (str(r.get("id")), r.get("started_at"))
+        for j in range(0, len(kids), 150):
+            for a in _sb_all("accounts", {"select": "id,name,firm,account_type,external_id,starting_balance",
+                                          "id": "in.(" + ",".join(kids[j:j + 150]) + ")"}):
+                accs[str(a["id"])] = a
+        namen, ausgeblendet = _wd_personen()
+        gr = hand_gruppen(konten_ziel, reviews, blown, letzte, accs, archiv, namen, ausgeblendet, datetime.now(timezone.utc))
+        antwort = {"ok": True, "at": datetime.now(timezone.utc).isoformat(), "n": sum(len(v) for v in gr.values()), "gruppen": gr}
+    except Exception as e:
+        print(f"[handarbeit] ⚠️ {type(e).__name__}: {e}", flush=True)
+        return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 502
+    with _hand_lock:
+        _hand_cache[schluessel] = (time.time() + HAND_CACHE_S, antwort)
+    return jsonify(antwort)
+
+
 @app.route("/admin/wd-plaene", methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"])
 def admin_wd_plaene():
     if request.method == "OPTIONS":

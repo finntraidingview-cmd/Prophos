@@ -645,6 +645,19 @@
   #dashboard-view .mwd-feed{margin:2px 0 8px;font-size:12px;color:var(--sub)}
   #dashboard-view .mwd-feed.is-alarm{color:#b91c1c;font-weight:600}
   #dashboard-view .tb-btn svg{width:15px;height:15px}
+  /* Handarbeit (09.10.2026): Zahl violett statt rot — Aufgabe, kein Fehler */
+  #dashboard-view .tb-hand[hidden]{display:none}
+  #dashboard-view .tb-hand{margin-right:8px}
+  #dashboard-view .tb-btn.tb-hand .badge{background:var(--violet);width:auto;min-width:14px;padding:0 3px}
+  #handModal .hand-gr{margin:0 0 14px}
+  #handModal .hand-gr h4{margin:0 0 6px;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--sub)}
+  #handModal .hand-z{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--border-soft)}
+  #handModal .hand-z > div{flex:1;min-width:0}
+  #handModal .hand-z b{font-weight:600;color:var(--ink)}
+  #handModal .hand-z i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:1px}
+  #handModal .hand-z small{display:block;color:var(--sub);font-size:12px;margin-top:2px;overflow-wrap:anywhere}
+  #handModal .hand-z .btn{flex:none;padding:3px 10px;font-size:11.5px;min-height:0;height:auto}
+  #handModal .hand-leer{color:var(--sub);padding:6px 0}
   #dashboard-view .tb-btn .badge{
     position:absolute;top:-3px;right:-3px;
     width:14px;height:14px;border-radius:999px;
@@ -6800,6 +6813,12 @@
       <div class="tb-puls-karte" id="tb-puls-karte" role="tooltip"></div>
     </div>
 
+    <!-- HANDARBEIT (09.10.2026, Finn): Konten, die eine Hand brauchen — Zahl im Kopf, Klick öffnet #handModal (handLaden/handRender) -->
+    <button type="button" class="tb-btn tb-hand" id="tb-hand" hidden aria-label="Handarbeit" title="Handarbeit — Konten, die eine Hand brauchen">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+      <span class="badge" id="tb-hand-n"></span>
+    </button>
+
     <button class="tb-btn" aria-label="Notifications">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
       <span class="badge">3</span>
@@ -7839,6 +7858,17 @@
           <button class="modal-x" id="apKontoX" aria-label="Schließen">✕</button>
         </div>
         <div class="modal-body" id="apKontoBody" style="font-size:13px"></div>
+      </div>
+    </div>
+    <!-- HANDARBEIT (09.10.2026, Finn: „Welche Accounts brauchen genau die Hilfe? Wo muss ich die Phase hinzufügen?"): eigene Verdrahtung
+         (hand*), kein Sammel-Handler. Daten GET /admin/handarbeit (Sicht wie die Admin-Reiter, normale ID nur eigene). -->
+    <div class="modal-bg" id="handModal">
+      <div class="modal" style="max-width:560px">
+        <div class="modal-head">
+          <h3>Handarbeit <span id="handN" style="color:var(--sub);font-weight:500"></span></h3>
+          <button class="modal-x" id="handX" aria-label="Schließen">✕</button>
+        </div>
+        <div class="modal-body" id="handBody" style="font-size:13px"></div>
       </div>
     </div>
     <div class="modal-bg" id="apProbeModal">
@@ -28684,6 +28714,88 @@
       + (vor != null ? ` · vor dem Trade ${de(vor)} $` : '')
     return wdlSpanneHtml(sp, bal, farbe, tip, { klasse: 'wdl-sp wdl-sp-ziel', l: 'Blow', r: ok ? 'Ziel ✓' : 'Ziel' })
   }
+  /* HANDARBEIT (09.10.2026, Finn: „eine Liste mit allen Accounts, die gepasst wurden oder irgendwas manuell Hilfe brauchen … in einem Popup:
+   * Welche Accounts brauchen genau die Hilfe? Wo muss ich die Phase hinzufügen?"). Knopf „🛠 n" in der Kopfzeile (#tb-hand, nur mit Fällen),
+   * Popup #handModal mit vier Gruppen aus GET /admin/handarbeit (Sicht wie die Admin-Reiter + Gruppenfilter; normale ID nur eigene):
+   * Bestanden → nächste Phase (Nachfolger-Assistent, nur eigene Konten — die anderen „im Login von …"), Geblowt → archivieren (archiveAccount
+   * 'blown', fremd nur mit Admin-Recht wie „Braucht dich"), Überprüfen offen (> 6 h) und Manuelle Arbeit → Radar. Laden beim Öffnen und alle
+   * 60 s für die Zahl (nur sichtbarer Tab). Eigene Verdrahtung, kein Sammel-Handler. Nur Anzeige + vorhandene Wege. */
+  const _hand = { d: null, at: 0, laedt: false, fehler: '' }
+  const HAND_GRUPPEN = [['bestanden', 'Bestanden → Phase umstellen'], ['geblowt', 'Geblowt → archivieren'], ['ueberpruefen', 'Überprüfen offen'], ['manuell', 'Manuelle Arbeit']]
+  async function handLaden(){
+    if(_hand.laedt || !currentUserId) return
+    _hand.laedt = true
+    try{
+      const { data: { session } } = await supabase.auth.getSession(); const tok = session?.access_token; if(!tok) return
+      const gq = typeof window._admGruppeQ === 'function' ? window._admGruppeQ('&') : ''
+      const r = await fetch(`${WATCHER_HOME}/admin/handarbeit?ansicht=admin${gq}`, { headers: { 'sb-token': tok }, cache: 'no-store' })
+      const d = await r.json().catch(() => null)
+      if(r.ok && d && d.ok){ _hand.d = d; _hand.at = Date.now(); _hand.fehler = '' } else _hand.fehler = (d && d.error) || ('HTTP ' + r.status)
+    }catch(e){ _hand.fehler = (e && e.message) || String(e) }
+    finally{ _hand.laedt = false; handKnopf(); if(document.getElementById('handModal')?.classList.contains('open')) handRender() }
+  }
+  function handKnopf(){
+    const b = document.getElementById('tb-hand'), z = document.getElementById('tb-hand-n'); if(!b || !z) return
+    const n = (_hand.d && Number(_hand.d.n)) || 0
+    b.hidden = !n; z.textContent = n > 99 ? '99+' : String(n)
+  }
+  function handRender(){
+    const body = document.getElementById('handBody'), kopf = document.getElementById('handN'); if(!body) return
+    const d = _hand.d, ich = String(currentUserId || ''), adm = typeof apdAdmin === 'function' && apdAdmin()
+    if(!d){ body.innerHTML = `<div class="hand-leer">${_hand.fehler ? 'Nicht ladbar: ' + escapeHtml(_hand.fehler) : 'Lade …'}</div>`; return }
+    if(kopf) kopf.textContent = d.n ? `· ${d.n}` : ''
+    const typW = x => (typeof typeLabel === 'function' && typeLabel(x)) || String(x || '')
+    const de = v => Math.round(Number(v)).toLocaleString('de-DE')
+    const tagTxt = iso => { const t = new Date(iso); return isNaN(t) ? '' : t.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) }
+    const konto = z => { let gr = 0; try{ gr = Number(kontoGroesseAnzeige(z.konto, z.start_balance, null)) || 0 }catch(_){}
+      return `${z.firma || '?'}${gr >= 1000 ? ' ' + Math.round(gr / 1000) + 'k' : ''}${z.ende4 ? ' …' + z.ende4 : ''}` }
+    const zeile = (z, was, knopf) => `<div class="hand-z"><div><i style="background:${idFarbe(z.user_id)}"></i><b>${escapeHtml(z.user || '?')}</b> · ${escapeHtml(konto(z))}`
+      + `<small>${was}${z.seit ? ` · seit ${tagTxt(z.seit)}` : ''}</small></div>${knopf || ''}</div>`
+    const fremdTxt = z => `<span style="color:var(--sub);font-size:11.5px;white-space:nowrap">im Login von ${escapeHtml(z.user || 'der ID')}</span>`
+    const teile = HAND_GRUPPEN.map(([k, titel]) => {
+      const liste = (d.gruppen && d.gruppen[k]) || []
+      if(!liste.length) return ''
+      const zeilen = liste.map(z => {
+        const eigen = String(z.user_id) === ich
+        if(k === 'bestanden'){
+          const was = `${escapeHtml(typW(z.typ))} → <b>${escapeHtml(typW(z.nach))}</b>${z.bal != null && z.ziel != null ? ` · ${de(z.bal)} ≥ Ziel ${de(z.ziel)} $` : ''} · neues Konto anlegen`
+          return zeile(z, was, eigen ? `<button type="button" class="btn btn-ghost" data-hand-phase="${escapeHtml(z.konto_id || '')}" title="Nachfolger-Assistent: nächste Phase anlegen bzw. umstellen">Nächste Phase →</button>` : fremdTxt(z))
+        }
+        if(k === 'geblowt'){
+          const was = `letzter Trade geblowt${z.pl != null ? ` (${z.pl < 0 ? '−' : '+'}${de(Math.abs(z.pl))} $)` : ''} · Konto noch aktiv`
+          return zeile(z, was, (eigen || adm) ? `<button type="button" class="btn btn-ghost" data-hand-arch="${escapeHtml(z.konto_id || '')}" title="Wie unter Accounts: archivieren mit Grund geblowt (Duplikum/Echo räumen auf)">Als geblowt archivieren</button>` : fremdTxt(z))
+        }
+        if(k === 'manuell'){
+          const st = typeof wdlManSchrittText === 'function' ? wdlManSchrittText(z.schritt) : (z.schritt || '')
+          const was = `${st ? '<b>' + escapeHtml(st) + '</b>' : ''}${st && z.notiz ? ' · ' : ''}${z.notiz ? escapeHtml(String(z.notiz)) : (st ? '' : 'ohne Notiz')}`
+          return zeile(z, was, `<button type="button" class="btn btn-ghost" data-hand-radar="1" title="Radar → Manuelle Arbeit">Im Radar →</button>`)
+        }
+        return zeile(z, 'Trade wartet aufs Abhaken', `<button type="button" class="btn btn-ghost" data-hand-radar="1" title="Radar → Überprüfen (dort abhaken)">Im Radar →</button>`)
+      }).join('')
+      return `<div class="hand-gr"><h4>${titel} · ${liste.length}</h4>${zeilen}</div>`
+    }).join('')
+    body.innerHTML = teile || '<div class="hand-leer">Nichts zu tun.</div>'
+  }
+  function handZu(){ document.getElementById('handModal')?.classList.remove('open') }
+  document.getElementById('tb-hand')?.addEventListener('click', () => {
+    document.getElementById('handModal')?.classList.add('open'); handRender(); handLaden()
+  })
+  document.getElementById('handX')?.addEventListener('click', handZu)
+  document.getElementById('handModal')?.addEventListener('click', ev => {
+    if(ev.target && ev.target.id === 'handModal'){ handZu(); return }   // Klick auf den Hintergrund
+    const ph = ev.target.closest('[data-hand-phase]')
+    if(ph){ handZu(); if(typeof openSuccessorWizard === 'function') openSuccessorWizard(ph.getAttribute('data-hand-phase')); return }
+    const ar = ev.target.closest('[data-hand-arch]')
+    if(ar){ ar.disabled = true; ar.textContent = 'archiviert …'
+      try{ archiveAccount(ar.getAttribute('data-hand-arch'), 'blown'); if(typeof renderAccounts === 'function') renderAccounts() }
+      catch(err){ console.warn('[handarbeit] archivieren', err); ar.disabled = false; ar.textContent = 'Als geblowt archivieren' }
+      setTimeout(() => { _hand.d = null; handLaden() }, 1500); return }
+    if(ev.target.closest('[data-hand-radar]')){ handZu(); document.querySelector('#dashboard-view .sb-link[data-view="wdlive"]')?.click() }
+  })
+  // Zahl im Kopf: erster Abruf kurz nach dem Login, dann alle 60 s (nur sichtbarer Tab)
+  setTimeout(handLaden, 6000)
+  setInterval(() => { if(document.visibilityState === 'visible') handLaden() }, 60000)
+  window._handLaden = handLaden   // Test-Haken (Stub)
   /* LÄUFT-ZEILEN WIE IM RADAR — gemeinsamer Helfer (08.10.2026, Finn zur Liste unter „P&L hypothetisch heute": „nimm grob die Ansicht, wie es
    * unter Radar bei den laufenden Trades aussieht, weil es voll hässlich ist … so eine Multi-Row-Gruppe wie unter Radar, für jeden Account so
    * eine Zeile"). Derselbe Aufbau wie die Läuft-Gruppe in wdlRender (wdl-tab/wdl-z, gleiche Spalten, gleiche Spanne über wdlSpanne/
@@ -42189,7 +42301,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1383'
+  const OS_TAB_BUILD = '2026-09-22.1384'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
