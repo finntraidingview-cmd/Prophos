@@ -1960,7 +1960,8 @@
   :is(#tpl-view,#adm-pane-planer) .tpl-hl{margin-top:8px;border-top:1px solid var(--border-soft)}
   :is(#tpl-view,#adm-pane-planer) .tpl-hl-k{padding:7px 4px 3px;font-size:10.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--sub-2)} :is(#tpl-view,#adm-pane-planer) .tpl-hl-k b{color:var(--sub)}
   /* Läuft-Liste unter „P&L hypothetisch heute“ = Radar-Zeilen (laufZeilenHtml, 08.10.2026) — ersetzt .tpl-hb; nur Abstand + Summenzeile */
-  #dashboard-view .tpl-lz{margin-top:12px} #dashboard-view .lz-tab .wdl-z.lz-summe{border-top:2px solid var(--border);cursor:default} #dashboard-view .lz-tab .wdl-z.lz-summe:hover{background:none}
+  #dashboard-view .tpl-lz{margin-top:12px}
+  #dashboard-view .lz-tab .lz-stand{margin-left:6px;font-size:10px;font-weight:500;letter-spacing:0;text-transform:none;color:var(--sub-2)}   /* „· Stand Kurs vor 8 s · MT5 vor 14 s" (08.10.2026) */ #dashboard-view .lz-tab .wdl-z.lz-summe{border-top:2px solid var(--border);cursor:default} #dashboard-view .lz-tab .wdl-z.lz-summe:hover{background:none}
   #dashboard-view .lz-tab .wdl-z-lauf[data-tpl-t],#dashboard-view .lz-tab .wdl-z-lauf[data-idd-plan]{cursor:pointer}
   #dashboard-view .lz-tab .wdl-z-lauf .wdl-z-wer small{display:block;margin:2px 0 0 17px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}   /* Konto als 2. Zeile — die Namensspalte ist im Planer schmaler als im Radar */
   :is(#tpl-view,#adm-pane-planer) .tpl-hz{display:grid;grid-template-columns:minmax(150px,1.4fr) 120px 90px 80px 100px minmax(110px,1fr);gap:4px 10px;align-items:center;padding:5px 4px;border-top:1px solid var(--border-soft);font-size:12.5px;font-variant-numeric:tabular-nums;cursor:pointer}
@@ -28352,18 +28353,71 @@
       if(sp && echo){ const pkt = wdlEchoPunkt(t, sp); mi = wdlSpanneHtml(sp, pkt ? pkt.v : null, farbe, wdlEchoSpTip(t, sp, pkt)) }
       else if(sp){ const lg = v => v != null ? ' · ' + wdlSpBetrag(v, true) : ''
         mi = wdlSpanneHtml(sp, kp, farbe, `${sp.art === 'SL' ? 'SL' : sp.art === 'Tag' ? 'Tageslimit' : 'Liquidation'} ${f2(sp.links)}${lg(sp.plLinks)}${sp.ein != null ? ' · Einstieg ' + f2(sp.ein) : ''} · TP ${f2(sp.rechts)}${lg(sp.plRechts)}${kp != null ? ' · Kurs ' + f2(kp) : ''}`) }
-      const pl = `<span class="wdl-z-pl"><span style="color:${farbe}">${usd(e.pl)}</span>${num(e.eur) != null ? `<small class="wdl-z-slave" style="color:${col(e.eur)}" title="hypothetisch: Kontowert-Satz × Live-P&amp;L">${eur(e.eur)}</small>` : ''}</span>`
+      const pl = `<span class="wdl-z-pl"><span data-lz-usd style="color:${farbe}">${usd(e.pl)}</span><small class="wdl-z-slave" data-lz-eur style="color:${col(e.eur)}" title="hypothetisch: Kontowert-Satz × Live-P&amp;L">${eur(e.eur)}</small></span>`
       const ab = zeit(t.started_at || t.start_um)
-      const z = `<span class="wdl-z-zeit" title="${escapeHtml(ab ? 'läuft seit ' + ab : 'Startzeit unbekannt')}">${ab ? `<span class="wdl-z-ab">${ab} · </span>` : ''}<span class="wdl-z-dauer">${t.started_at ? wdlDauer(t.started_at) : '–'}</span></span>`
+      const z = `<span class="wdl-z-zeit" title="${escapeHtml(ab ? 'läuft seit ' + ab : 'Startzeit unbekannt')}">${ab ? `<span class="wdl-z-ab">${ab} · </span>` : ''}<span class="wdl-z-dauer" data-lz-dauer>${t.started_at ? wdlDauer(t.started_at) : '–'}</span></span>`
       const tip = [t.person, k.name || konto, k.kontonr || '', echo ? 'Echo (MT5)' : ''].filter(Boolean).join(' · ')
-      return `<div class="wdl-z wdl-z-lauf${echo ? ' wdl-z-echo' : ''}" style="--wdl-id:${idFarbe(String(t.user_id || ''))}" ${o.attr ? o.attr(e) : ''} title="${escapeHtml(tip)}">`
+      const pid = String((e.z && e.z.plan_id) || t.plan_id || t.id || '')   // Live-Nachschreiben (lzLiveTick) je Zeile
+      return `<div class="wdl-z wdl-z-lauf${echo ? ' wdl-z-echo' : ''}" style="--wdl-id:${idFarbe(String(t.user_id || ''))}" ${pid ? `data-lz-plan="${escapeHtml(pid)}" ` : ''}${o.attr ? o.attr(e) : ''} title="${escapeHtml(tip)}">`
         + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><i class="wdl-pf">${escapeHtml(wdlWeg(t))}</i><small>${escapeHtml(konto)}</small></span>${ri}${mi}${pl}${z}</div>`
     }
     const s = o.summe, summe = s ? `<div class="wdl-z wdl-z-lauf lz-summe"><span class="wdl-z-wer"><b>Summe</b></span><span class="wdl-z-ri"></span><span class="wdl-z-mi"></span>`
-      + `<span class="wdl-z-pl"><span style="color:${col(s.usd)}">${usd(s.usd)}</span>${num(s.eur) != null ? `<small class="wdl-z-slave" style="color:${col(s.eur)}">${eur(s.eur)}</small>` : ''}</span><span class="wdl-z-zeit"></span></div>` : ''
-    return `<div class="wdl-tab wdl-tab-lauf lz-tab"><div class="wdl-z wdl-z-kopf"><span class="wdl-z-wer">${escapeHtml(o.titel || 'Läuft')} · ${liste.length}</span><span class="wdl-z-ri"></span>`
+      + `<span class="wdl-z-pl"><span data-lz-usd style="color:${col(s.usd)}">${usd(s.usd)}</span><small class="wdl-z-slave" data-lz-eur style="color:${col(s.eur)}">${eur(s.eur)}</small></span><span class="wdl-z-zeit"></span></div>` : ''
+    const stand = typeof lzStandText === 'function' ? lzStandText() : ''
+    return `<div class="wdl-tab wdl-tab-lauf lz-tab"><div class="wdl-z wdl-z-kopf"><span class="wdl-z-wer">${escapeHtml(o.titel || 'Läuft')} · ${liste.length}<small class="lz-stand" data-lz-stand>${escapeHtml(stand)}</small></span><span class="wdl-z-ri"></span>`
       + `<span class="wdl-z-mi">Spanne</span><span class="wdl-z-pl">P&amp;L</span><span class="wdl-z-zeit">Seit</span></div>${liste.map(zeile).join('')}${summe}</div>`
   }
+  /* LÄUFT LIVE (08.10.2026, Finn: „Der P&L hier soll auch immer aktualisiert werden, auch unter Admin im Trade-Planer"): wie wdlLiveTick im
+   * Radar alle 2 s in die schon gezeichneten Läuft-Zeilen (Planer-Seite, Admin-Gruppe „Läuft", ID-Detail) nachschreiben — kein Neuaufbau, kein
+   * Netz, kein Realtime-Abo. Orbit: P&L aus dem Kurs (tplKursStand: Reader/Kurs-Feed, sonst die zuletzt geholte NQ-Minute) und dem gemerkten
+   * Einstieg je Plan (_tpl.hypoJe, gefüllt von tplHypo — dieselbe Rechnung wdMasterLive); Echo: pl_live der zuletzt geholten /admin/live-trades-
+   * Zeile. € = Kontowert-Satz × P&L, Spannen-Punkt, Laufzeit und Summe ziehen mit; Kopf „Stand · Kurs vor x s · MT5 vor y s". Neue Daten holen
+   * die vorhandenen Takte (Admin 20 s apIdsLiveTick, Planer-Seite 20 s tplLiveTakt solange etwas läuft). */
+  const lzZahl = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
+  const lzUsd = v => lzZahl(v) == null ? '–' : `${v < 0 ? '−' : '+'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $`
+  const lzEur = v => lzZahl(v) == null ? '' : `${v < 0 ? '−' : '+'}${Math.round(Math.abs(v)).toLocaleString('de-DE')} €`
+  const lzFarbe = v => lzZahl(v) == null ? 'var(--sub)' : v >= 0 ? '#15803d' : '#b91c1c'
+  const lzAlter = ms => ms == null || !isFinite(ms) ? null : ms < 60000 ? Math.max(0, Math.round(ms / 1000)) + ' s' : Math.round(ms / 60000) + ' min'
+  function lzStandText(){
+    try{
+      const k = typeof tplKursStand === 'function' ? tplKursStand() : null, lt = (typeof _tpl !== 'undefined' && _tpl.ltHolAt) ? Date.now() - _tpl.ltHolAt : null
+      const teile = [k && lzAlter(k.alter_ms) ? 'Kurs vor ' + lzAlter(k.alter_ms) : '', lt != null ? 'MT5 vor ' + lzAlter(lt) : ''].filter(Boolean)
+      return teile.length ? ' · Stand ' + teile.join(' · ') : ''
+    }catch(_){ return '' }
+  }
+  function lzLiveTick(immer){
+    try{
+      if((!immer && document.visibilityState !== 'visible') || typeof _tpl === 'undefined') return   // immer: Test-Haken (ausgeblendete Vorschau)
+      const tabs = [...document.querySelectorAll('#dashboard-view .lz-tab')].filter(x => x.offsetParent !== null)
+      if(!tabs.length) return
+      const k = tplKursStand(), kp = k ? k.preis : null, stand = lzStandText()
+      const setz = (el, txt, farbe) => { if(!el) return; if(el.textContent !== txt) el.textContent = txt; if(farbe && el.style.color !== farbe) el.style.color = farbe }
+      for(const tab of tabs){
+        let su = 0, se = 0, nu = 0, ne = 0
+        for(const z of tab.querySelectorAll('[data-lz-plan]')){
+          const id = z.getAttribute('data-lz-plan'), c = _tpl.hypoJe.get(id), r = _tpl.lt.get(id) || null
+          const du = z.querySelector('[data-lz-dauer]'); if(du && r && r.started_at) setz(du, wdlDauer(r.started_at))
+          if(!c) continue
+          let pl = null
+          if(c.echo) pl = r ? lzZahl(r.pl_live) : null
+          else if(c.einstieg != null && kp && c.kt && typeof wdMasterLive === 'function'){ const mm = wdMasterLive(c.richtung, c.einstieg, c.kt, c.wurzel, kp); pl = mm ? lzZahl(mm.pl) : null }
+          if(pl == null) continue                          // ohne neuen Wert bleibt die gezeichnete Zahl stehen
+          const eur = c.satz != null ? c.satz * pl : null
+          setz(z.querySelector('[data-lz-usd]'), lzUsd(pl), lzFarbe(pl))
+          setz(z.querySelector('[data-lz-eur]'), lzEur(eur), lzFarbe(eur))
+          su += pl; nu++; if(eur != null){ se += eur; ne++ }
+          // Punkt der Spanne: Orbit am Kurs, Echo am Kurs ≈ bzw. aus dem Live-P&L (wie wdlEchoPunkt) — Farbe wie der P&L
+          const pk = z.querySelector('.wdl-sp-punkt'), sp = pk && r ? wdlSpanne(r) : null
+          const v = !sp ? null : c.echo ? (wdlEchoPunkt(r, sp) || {}).v : kp, pos = sp && v != null ? wdlSpPos(sp, v) : null
+          if(pk && pos != null){ pk.style.display = ''; pk.style.left = pos.toFixed(2) + '%'; pk.style.background = lzFarbe(pl) }
+        }
+        const sz = tab.querySelector('.lz-summe')
+        if(sz && nu){ setz(sz.querySelector('[data-lz-usd]'), lzUsd(su), lzFarbe(su)); if(ne) setz(sz.querySelector('[data-lz-eur]'), lzEur(se), lzFarbe(se)) }
+        setz(tab.querySelector('[data-lz-stand]'), stand)
+      }
+    }catch(e){ console.warn('[läuft live]', (e && e.message) || e) }
+  }
+  setInterval(lzLiveTick, 2000)
   /* WARTET (30.09.2026, Finn: „wenn noch nachgelesen wird, soll der Trade erst warten und dann zu Beendet gehen, bis das gemacht ist"):
    * zu, aber die Balance-Nachlesung steht noch aus. Dieselben Zweige wie tvV2EndlesungGrund / planWartetAufPuls (Reiter „Warte auf
    * Puls"), hier aus den Feldern von /admin/live-trades (endlesung = Auszug aus mt5_baseline.final): nur „Überprüfen" (erledigt =
@@ -41754,7 +41808,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1354'
+  const OS_TAB_BUILD = '2026-09-22.1355'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -48159,6 +48213,12 @@
    * der Radar-Zeile) und NQ-Kurs (wdMasterLive), Echo aus pl_live (MT5). Verlauf heute je Minute aus tv_kurs_1m (NQ): (Schluss − Einstieg)
    * × Richtung × $/Pkt (Delta usd_pro_pkt) × Satz ab Startminute; CFD-Trades grob über NQ (Einstieg = Schluss der Startminute, Hinweis);
    * beendete eigene Trades heute bis zum Ende über die Kerzen, danach fest Ergebnis × Satz. Ohne Satz oder ohne P&L: „ohne Wert". */
+  // Kurs + Alter für die Läuft-Liste (lzLiveTick, 08.10.2026): dieselbe Reihenfolge wie tplKursJetzt; Alter der Minute = seit dem letzten Abruf
+  function tplKursStand(){
+    try{ const k = (typeof wdKursJetzt === 'function') ? wdKursJetzt('NQ', 120000) : null; if(k && k.preis > 0) return { preis: Number(k.preis), alter_ms: Number(k.alter_ms) || 0, quelle: k.quelle } }catch(_){}
+    const z = _tpl.kerzen; if(!z.length) return null
+    return { preis: z[z.length - 1].c, alter_ms: _tpl.kerzenHolAt ? Date.now() - _tpl.kerzenHolAt : null, quelle: 'Minute' }
+  }
   function tplKursJetzt(){
     try{ const k = (typeof wdKursJetzt === 'function') ? wdKursJetzt('NQ', 120000) : null; if(k && k.preis > 0) return Number(k.preis) }catch(_){}
     try{ const je = (typeof mkl !== 'undefined' && mkl.kursJe) || {}; const k = je.NQ || je.MNQ; if(k && k.preis > 0 && hedgeKursAlterJetzt(k) <= 120000) return Number(k.preis) }catch(_){}
@@ -48802,7 +48862,7 @@
       if(!r.ok) return
       const m = new Map()
       for(const t of (d && d.trades) || []) if(t && t.plan_id) m.set(String(t.plan_id), t)   // ganze Zeile: Startzeit, Einstieg, Live-P&L (Hypo-P&L)
-      _tpl.lt = m
+      _tpl.lt = m; _tpl.ltHolAt = Date.now()                 // „MT5 vor x s" in der Läuft-Liste (08.10.2026)
     }catch(e){ console.warn('[tpl] live-trades', (e && e.message) || e) }
   }
   /* HYPO-BILANZ (07.10.2026, Finn: „wie viel die vergangenen Trades hypothetisch gemacht oder verloren haben … kleine Statistiken … nur
@@ -48826,11 +48886,14 @@
     try{
       const jetzt = Date.now(), voll = !_tpl.kerzenBis || jetzt - _tpl.kerzenAt > 6 * 3600000
       const seit = voll ? new Date(jetzt - Math.max(0, D.jetzt || 0) * 60000 - 120000).toISOString() : _tpl.kerzenBis
-      const { data, error } = await supabase.from('tv_kurs_1m').select('minute,c').eq('wurzel', 'NQ').gt('minute', seit).order('minute', { ascending: true }).range(0, 1499)
+      // LETZTE MINUTE MIT (08.10.2026, Läuft live): inkrementell ab der zuletzt geholten Minute (gte statt gt) — deren Schluss ändert sich noch,
+      // sonst stünde der Orbit-P&L zwischen zwei Minuten still; die doppelte Minute ersetzt unten die alte
+      const { data, error } = await supabase.from('tv_kurs_1m').select('minute,c').eq('wurzel', 'NQ')[voll ? 'gt' : 'gte']('minute', seit).order('minute', { ascending: true }).range(0, 1499)
       if(error) throw error
       const neu = (data || []).map(r => ({ at: r.minute, min: tplMinDt(typeof r.minute === 'number' ? new Date(r.minute * (r.minute > 1e12 ? 1 : 1000)).toISOString() : r.minute, D.tag), c: Number(r.c) })).filter(r => r.min != null && r.c > 0)
-      if(voll) _tpl.kerzen = neu; else if(neu.length) _tpl.kerzen = [..._tpl.kerzen, ...neu]
+      if(voll) _tpl.kerzen = neu; else if(neu.length){ const da = new Set(neu.map(r => String(r.at))); _tpl.kerzen = [..._tpl.kerzen.filter(r => !da.has(String(r.at))), ...neu] }
       if(neu.length) _tpl.kerzenBis = neu[neu.length - 1].at
+      _tpl.kerzenHolAt = Date.now()
       _tpl.kerzenAt = voll ? jetzt : _tpl.kerzenAt
     }catch(e){ console.warn('[tpl] tv_kurs_1m', (e && e.message) || e) }
   }
@@ -49133,7 +49196,23 @@
     _tpl.timer = setInterval(() => { if(document.visibilityState === 'visible' && !_tpl.edit) tplLaden() }, 60000)
   }
   window._tplTabSchliessen = () => { clearInterval(_tpl.timer); _tpl.timer = null }
+  // LÄUFT LIVE AUF DER PLANER-SEITE (08.10.2026, wie apIdsLiveTick im Admin): alle 20 s nur Live-Trades + neue NQ-Minuten, solange die Seite
+  // sichtbar ist und die Läuft-Liste Zeilen hat — kein Neuaufbau (lzLiveTick schreibt nach), der volle 60-s-Takt (tplLaden) bleibt
+  setInterval(async () => {
+    try{
+      if(document.visibilityState !== 'visible' || !document.querySelector('#tpl-view.active') || _tpl.laeuft || _tpl.stub
+        || !document.querySelector('#tpl-root .lz-tab [data-lz-plan]') || Date.now() - _tpl.geladen < 15000) return
+      _tpl.ltAt = 0
+      await Promise.allSettled([tplLiveLaden(), tplKerzenLaden(tplDaten())])
+      lzLiveTick()
+    }catch(e){ console.warn('[tpl] läuft live', (e && e.message) || e) }
+  }, 20000)
   // Stub ohne Login (Design-Prüfung): Lauf + Delta direkt setzen, nichts laden
+  // Test-Haken Läuft live (08.10.2026): nur im Stub — Live-Trades/Kerzen tauschen OHNE Neuzeichnen, dann prüft man lzLiveTick
+  window._tplStubLive = (lt, kerzen) => { if(!_tpl.stub) return false
+    if(Array.isArray(lt)){ _tpl.lt = new Map(lt.map(t => [String(t.plan_id), t])); _tpl.ltHolAt = Date.now() }
+    if(Array.isArray(kerzen)){ _tpl.kerzen = kerzen; _tpl.kerzenHolAt = Date.now() }
+    lzLiveTick(true); return tplKursStand() }
   window._tplStub = (lauf, delta, admin, lt) => {
     _tpl.stub = true; _tpl.fehler = ''; _ap.letzter = lauf || null; _ap.imPlaner = true; _ap.admin = admin !== false; _ap.geladenFuer = currentUserId
     if(Array.isArray(lt)) _tpl.lt = new Map(lt.map(t => [String(t.plan_id), t]))
