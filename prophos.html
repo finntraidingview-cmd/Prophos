@@ -23078,7 +23078,29 @@
     if(plan && plan.orbitV3) return false   // Orbit V3 (01.10.2026): normaler Master-SL am Hedge, kein Liquidations-Level
     const acc = (accounts || []).find(a => String(a.id) === String(plan && plan.masterAccountId))
     return !!((acc && acc.type === 'winning_days') || (plan && (plan.kontoTyp === 'winning_days' || plan.konto_typ === 'winning_days')) || Number(plan && plan.hedgeEur) > 0)
+  }  /* HEDGE-LOTS IMMER FRISCH AUS RISIKO (08.10.2026, Slave-Terminal 7 — Vorfall 05:04 Dubai, Jacob WD-Farmer, Plan 8da04bfe, 6 MNQ, TP 2.100 $:
+   * am Plan master_risk 250 / slave_risk 65, aber multiplier 0,0728 → 0,44 Lot, weil Mac- und PC-Tab auf .1265 noch die alte TP-Rechnung
+   * schrieben; Finn zu Recht sauer). Der gespeicherte multiplier ist nur noch Rückfall. Risiko Master: Wert am Plan → wd_sl → max_risiko_trade
+   * → sonst TP-$ (Startwert); bei Winning Days nie Max DD/Max Tages-DD/Max Loss (der Farmer belegt masterRisk mit dem Max DD vor).
+   * Lots = Risiko Slave € ÷ (0,85 €/Pkt × Risiko Master $ ÷ ($/Pkt × Kontrakte)), Multiplikator = Lots ÷ Kontrakte. */
+  function hedgeRisikoMaster(plan){
+    const acc = (accounts || []).find(a => String(a.id) === String(plan && plan.masterAccountId)) || null
+    const wd = !(plan && plan.orbitV3) && ((acc && acc.type === 'winning_days') || (plan && (plan.kontoTyp === 'winning_days' || plan.konto_typ === 'winning_days')))
+    const dd = wd && acc ? [acc.maxDrawdown, acc.maxDailyDrawdown, acc.maxLossPerTrade].map(Number).filter(x => x > 0) : []
+    const p = Number(plan && plan.masterRisk)
+    if(p > 0 && !dd.some(x => Math.abs(x - p) < 0.5)) return { risk: p, quelle: 'plan' }
+    if(acc && Number(acc.wdSl) > 0) return { risk: Number(acc.wdSl), quelle: 'wd_sl' }
+    if(acc && Number(acc.maxRisikoTrade) > 0) return { risk: Number(acc.maxRisikoTrade), quelle: 'max_risiko' }
+    const tp = Number(plan && plan.masterTp); return tp > 0 ? { risk: tp, quelle: 'tp' } : null
   }
+  function hedgeMultAusRisiko(plan, kt, ppl){
+    const sr = Number(plan && plan.slaveRisk); if(!(sr > 0 && kt > 0 && ppl > 0)) return null
+    const q = hedgeRisikoMaster(plan); if(!q) return null
+    const pkt = q.risk / (ppl * kt), lots = sr / (0.85 * pkt), mult = lots / kt
+    return (isFinite(mult) && mult > 0) ? { mult, lots: Math.round(kt * mult * 100) / 100, quelle: q.quelle, risk: q.risk } : null
+  }
+  window._hedgeMultAusRisiko = hedgeMultAusRisiko   // Prüf-Haken
+
   function hedgeLiqStart(plan){
     const tv = plan && plan.mt5Baseline && plan.mt5Baseline.tv
     if(tv && typeof tv.balance_start === 'number' && isFinite(tv.balance_start)) return { balance: tv.balance_start, quelle: 'balance_start', at: tv.at || null }
@@ -23141,6 +23163,15 @@
     // Zweites Level (24.09.2026 spät, Finns Zielbild „beide Schließ-Level liegen in MetaTrader"): die Master-SL-Distanz
     // in Punkten wird zum Fusion-TP. Ohne Master-SL kein zweites Level (0) — der Hedge endet dann mit dem Master.
     let slPunkte = (ppl > 0 && kt > 0 && sl > 0) ? Math.round(sl / (ppl * kt) * 100) / 100 : 0
+    // Lots frisch aus master_risk/slave_risk (08.10.2026, hedgeMultAusRisiko) — ein von einem alten Tab falsch gespeicherter multiplier wird
+    // hier korrigiert (Plan + Auftrag); nur ohne Risiko-Werte gilt der gespeicherte multiplier
+    const frisch = hedgeMultAusRisiko(plan, kt, ppl)
+    if(frisch && Math.abs(frisch.mult - (Number(plan.multiplier) || 0)) > 0.0005){
+      console.warn('[hedgeSolo] multiplier am Plan', plan.multiplier, '→ aus Risiko', frisch.mult.toFixed(4), '(' + frisch.quelle + ')')
+      supabase.from('trade_plans').update({ multiplier: Math.round(frisch.mult * 10000) / 10000, hedge_faktor: Math.round(frisch.mult * 1000) / 1000 }).eq('id', plan.id)
+        .then(({ error }) => { if(error) console.warn('[hedgeSolo] multiplier-Korrektur', error.message) }, () => {})
+      plan.multiplier = Math.round(frisch.mult * 10000) / 10000; plan.hedgeFaktor = Math.round(frisch.mult * 1000) / 1000
+    }
     const gegen = plan.richtung === 'buy' ? 'sell' : plan.richtung === 'sell' ? 'buy' : ''
     const at = new Date().toISOString()
     if(!gegen || !(punkte > 0)){
@@ -23202,7 +23233,7 @@
     // überstimmt eur/tp_punkte, der Copier rundet aufs Broker-Raster. eur/tp_punkte/sl_punkte reisen weiter mit (Anzeige, Alt-Weg).
     // Vertrag .470: tp_punkte (Pflicht) + sl_punkte (0 = kein zweites Level); 'punkte' bleibt als alter Name.
     // notfall_faktor (Backend .512): SL am Hedge = fill ± tp_punkte × 1,10; geschlossen wird über den Feed-Wächter bei TP + 8 Ticks.
-    const lotsSoll = (Number(plan.multiplier) > 0 && kt > 0) ? Math.round(kt * Number(plan.multiplier) * 100) / 100 : undefined
+    const lotsSoll = frisch ? frisch.lots : (Number(plan.multiplier) > 0 && kt > 0) ? Math.round(kt * Number(plan.multiplier) * 100) / 100 : undefined   // Risiko vor multiplier (08.10.2026)
     // VORLÄUFIGE LEVEL (01.10.2026, Finn: „Fusion insta öffnen, am Anfang Notfall auf 120 % oder so, und sobald Show more da ist, werden
     // TP und SL auf Fusion korrekt angepasst"): Ist der TP beim Open noch nicht echt (früher Hedge beim Klick, kein TP-Limit/Fill), setzt
     // der Copier beide Level bewusst weiter weg — Notfall-SL mindestens 120 % (+10 % über dem normalen), Level am Master-SL 20 % der
@@ -41192,7 +41223,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1275'
+  const OS_TAB_BUILD = '2026-09-22.1276'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -50841,7 +50872,7 @@
    * Logik ausgeführt, die wir da entwickelt haben"): Gegenstück ist fest Fusion (wie Popup „Winning Days Farm", TP_WD_SLAVE_FIRM) — ein
    * reines Rechen-Gegenstück ohne Konto-ID; der Server dreht die Zeile auf Orbit V2 und nullt die Slave-Felder. Vorher hing jeder
    * Farmer-Plan an einem Duplikum-Slave je ID; IDs ohne Duplikum-Plan wurden übersprungen. */
-  window._wdFarmHedge = (pr, r, e, an) => { const x = { ...pr }; const h = wdFarmHedge(x, r, e, an); return { ...x, hinweis: h } }   // REIN RECHNEND, Prüf-Haken (Muster _mklWdAbhakenVorbelegung)
+  window._wdFarmHedge = (pr, r, e, an, dd) => { const x = { ...pr }; const h = wdFarmHedge(x, r, e, an, dd); return { ...x, hinweis: h } }   // REIN RECHNEND, Prüf-Haken (Muster _mklWdAbhakenVorbelegung)
   function wdFusionGegenstueck(){ return { slave: { id: null, name: TP_WD_SLAVE_FIRM, firm: TP_WD_SLAVE_FIRM } } }
   /* Hedge-Felder eines Farmer-Plans — exakt die Rechnung des Popups (tpWdRechnung/tpWdHedgeEurAus): Risiko Master ($) = SL-Vorgabe des
    * Kontos (wd_sl, nur Rechenfeld, nie master_sl), Kontrakte, Risiko Slave (€) = Staffel → Multiplikator (tpCalcMultiplier gegen Fusion);
@@ -50854,17 +50885,21 @@
    * Risiko Master kommt vom Aufrufer: wd_sl des Kontos → max_risiko_trade (eigene Vorgabe je Konto), NIE Max DD/max_loss_per_trade (beim
    * Jacob-Konto beide 4.500 $). Fehlt beides (Stand 08.10.: alle 11 WD-Konten ohne Wert), gilt wie im Formular der TP-$ als Startwert —
    * nicht still: Hinweis am Konto („Risiko Master fehlt …"). Laufende Pläne fasst das nicht an, nur neue/neu gerechnete. */
-  function wdFarmHedge(pr, riskMaster, slaveEur, an){
+  // ddListe = Max DD/Max Tages-DD/Max Loss des Kontos (08.10.2026): ein master_risk am Plan, das einem davon gleicht, ist die Vorbelegung
+  // der Farmer-Zeile (tpVorplanZeile masterRisk = Max DD), kein Handwert — sonst gilt der Wert am Plan zuerst (Finn tippt 250 $ ein)
+  function wdFarmHedge(pr, riskMaster, slaveEur, an, ddListe){
     const aus = () => { pr.hedge_eur = null; pr.hedge_faktor = null; pr.multiplier = null; pr.slave_risk = null; return '' }
     if(!an || !(slaveEur > 0)) return aus()
     const kt = Number(pr.master_contracts) || 0, tp = Number(pr.master_tp) || 0, ppl = tpMasterPpl(pr.master_firm) || 0
-    const risk = Number(riskMaster) > 0 ? Number(riskMaster) : tp
+    const dd = (ddListe || []).map(Number).filter(x => x > 0), pv = Number(pr.master_risk)
+    const planWert = (pv > 0 && !dd.some(x => Math.abs(x - pv) < 0.5)) ? pv : 0
+    const risk = planWert > 0 ? planWert : Number(riskMaster) > 0 ? Number(riskMaster) : tp
     const mult = (risk > 0 && kt > 0) ? tpCalcMultiplier(pr.master_firm, TP_WD_SLAVE_FIRM, risk, kt, slaveEur) : null
     if(mult > 0 && ppl > 0 && tp > 0){
       const lots = Math.round(kt * mult * 100) / 100, tpPkt = tp / (ppl * kt)
       pr.multiplier = mult; pr.hedge_faktor = Math.round(mult * 1000) / 1000; pr.slave_risk = slaveEur; pr.master_risk = risk
       pr.hedge_eur = Math.round(lots * tpWdSlavePpl() * tpPkt * 100) / 100
-      return Number(riskMaster) > 0 ? '' : `Risiko Master fehlt am Konto (wd_sl / Max Risiko) — Startwert = TP ${Math.round(tp)} $`
+      return (planWert > 0 || Number(riskMaster) > 0) ? '' : `Risiko Master fehlt am Konto (wd_sl / Max Risiko) — Startwert = TP ${Math.round(tp)} $`
     }
     pr.hedge_eur = Math.round(slaveEur * 100) / 100; pr.hedge_faktor = null; pr.multiplier = null; pr.slave_risk = slaveEur
     return 'ohne Take Profit kein Multiplikator — Hedge nur über den Staffel-Betrag'
@@ -51134,7 +51169,7 @@
         pr.master_sl = null   // Winning Days: nie ein SL (Finn 25.09.2026) — sl_vorgabe (wd_sl) ist nur noch Risiko Master im Popup
         // Fusion-Gegenhedge: Rechnung wie Popup „Winning Days Farm" (26.09.2026) — der Server dreht die Zeile auf V2, behält bei
         // hedge_eur > 0 Multiplikator + Risiko Slave. Schalter AUS → alles null = kein Hedge.
-        { const h = wdFarmHedge(pr, Number(kd.sl_vorgabe) || Number(kd.max_risiko_trade) || 0, z.slaveEur, vp.hedge_an); if(h) k.hinweis = h }
+        { const h = wdFarmHedge(pr, Number(kd.sl_vorgabe) || Number(kd.max_risiko_trade) || 0, z.slaveEur, vp.hedge_an, [kd.max_drawdown, kd.max_daily_drawdown, kd.max_loss_per_trade, z.masterRisk]); if(h) k.hinweis = h }
         wdPlanAufV2(pr)   // der Server dreht ohnehin — so verlässt nie eine tvplus-Zeile den Browser (28.09.2026)
         allePlaene.push(pr); zVon.set(String(k.id), z)
       }
@@ -51227,7 +51262,7 @@
     const row = tpVorplanPlanRow(acc, slave, z, wdKontrakteFuer(acc.firm, vp), symbol, richtung, tag || new Date().toLocaleDateString('en-CA'))
     row.start_um = startIso; row.notes = 'Winning-Day-Farmer'
     row.master_sl = null   // Winning Days: nie ein SL (Finn 25.09.2026)
-    wdFarmHedge(row, Number(acc.wdSl) || Number(acc.maxRisikoTrade) || 0, z.slaveEur, vp.hedge_an)   // wie der Mac: Popup-Rechnung (26.09.2026)
+    wdFarmHedge(row, Number(acc.wdSl) || Number(acc.maxRisikoTrade) || 0, z.slaveEur, vp.hedge_an, [acc.maxDrawdown, acc.maxDailyDrawdown, acc.maxLossPerTrade, z.masterRisk])   // wie der Mac: Popup-Rechnung (26.09.2026)
     // BUG 28.09.2026 (Jacobs Pläne 2368ebe6/f644c1f8 mit route 'tvplus'): dieser Rückfall schreibt DIREKT in trade_plans — die
     // V2-Umschreibung des Servers (/admin/wd-plaene POST, _wd_plan_v2) griff hier nie. Jetzt dieselbe Umschreibung im Browser.
     wdPlanAufV2(row)
@@ -51236,7 +51271,7 @@
       if(extra.id) row.id = String(extra.id)
       if(Number(extra.master_tp) > 0) row.master_tp = Number(extra.master_tp)
       if(Number.isInteger(Number(extra.master_contracts)) && Number(extra.master_contracts) >= 1) row.master_contracts = Number(extra.master_contracts)
-      if(Number(row.hedge_eur) > 0) wdFarmHedge(row, Number(acc.wdSl) || Number(acc.maxRisikoTrade) || 0, z.slaveEur, vp.hedge_an)   // Hedge zu TP/Kontrakten neu rechnen
+      if(Number(row.hedge_eur) > 0) wdFarmHedge(row, Number(acc.wdSl) || Number(acc.maxRisikoTrade) || 0, z.slaveEur, vp.hedge_an, [acc.maxDrawdown, acc.maxDailyDrawdown, acc.maxLossPerTrade, z.masterRisk])   // Hedge zu TP/Kontrakten neu rechnen
     }
     /* RIEGEL gegen Doppel-Pläne (25.09.2026, Koordination: zwei Chrome-Profile am selben PC = zwei Tabs desselben Nutzers — beide
      * hätten beim Rückfall für ein Konto je einen Plan angelegt). (a) frisch prüfen, ob für Konto + Tag schon ein Farmer-Plan steht
@@ -51350,8 +51385,8 @@
             // seit 26.09.2026 mit der Popup-Rechnung: Multiplikator/hedge_faktor/hedge_eur gemeinsam nachziehen
             if(vp.hedge_an && plan.hedgeEur > 0 && z && z.live != null && z.slaveEur > 0 && Math.abs((plan.slaveRisk || 0) - z.slaveEur) > 0.5){
               const acc = (accounts || []).find(a => String(a.id) === String(k.id))
-              const h = { master_firm: plan.masterFirm, master_contracts: plan.masterContracts, master_tp: plan.masterTp }
-              wdFarmHedge(h, acc ? Number(acc.wdSl) || Number(acc.maxRisikoTrade) || 0 : 0, z.slaveEur, true)
+              const h = { master_firm: plan.masterFirm, master_contracts: plan.masterContracts, master_tp: plan.masterTp, master_risk: plan.masterRisk }
+              wdFarmHedge(h, acc ? Number(acc.wdSl) || Number(acc.maxRisikoTrade) || 0 : 0, z.slaveEur, true, acc ? [acc.maxDrawdown, acc.maxDailyDrawdown, acc.maxLossPerTrade, z.masterRisk] : [z.masterRisk])
               for(const f of ['hedge_eur', 'hedge_faktor', 'multiplier', 'slave_risk']) if(h[f] != null) upd[f] = h[f]
             }
           } else if(z && z.live != null && typeof z.slaveRisk === 'number' && Math.abs((plan.slaveRisk || 0) - z.slaveRisk) > 0.5){
