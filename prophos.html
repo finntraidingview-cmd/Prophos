@@ -23544,6 +23544,7 @@
    * sonst schlösse ein laufender Hedge plötzlich an anderer Stelle. Schreiben atomar über mt5_baseline_patch_in('hedge'). */
   async function hedgeEinstiegNachtragen(plan, r){
     try{
+      await hedgeRegelnSicher()   // puffer_punkte/schliesst_bei_nq nie aus dem Standard-Puffer (08.10.2026, s. hedgeRegelnSicher)
       const h = plan && plan.mt5Baseline && plan.mt5Baseline.hedge
       const je = r && r.avg_fill_je_wurzel
       // 'feed_klick' (Feed zum Klickzeitpunkt, seit 28.09.2026) beginnt auch mit 'feed' — kein echter Fill, wird ersetzt
@@ -23623,6 +23624,7 @@
    * nur plausibel (hedgeTpPreisPasst gegen den Einstieg). Schreiben atomar über baselinePatchIn('hedge'). */
   async function hedgeTpNachtragenAusOrder(plan, r){
     try{
+      await hedgeRegelnSicher()   // puffer_punkte/schliesst_bei_nq nie aus dem Standard-Puffer (08.10.2026, s. hedgeRegelnSicher)
       const tp = (r && r.tp_limit != null) ? Number(r.tp_limit) : NaN
       if(!(tp > 1000)) return
       const { data: z } = await supabase.from('trade_plans').select('mt5_baseline').eq('id', plan.id).maybeSingle()
@@ -24609,14 +24611,30 @@
     return (einEcht && Number(h.sl_level_nq) > 1000) ? { sl: Number(h.sl_level_nq), quelle: 'einstieg' } : null
   }
   window._hedgeSlNqEcht = hedgeSlNqEcht
-  const _hedgeLevelAbgleich = new Map()   // plan_id → { key, versuche, busy, basisFehlt }
+  /* HEDGE-REGELN VOR DEM RECHNEN (08.10.2026, Slave-Terminal 4 — Befund Slave 2 nach den Pushes 02:01/02:18/02:24 UTC auf pc-auzre5:
+   * 27005d71 bekam am Fusion-Broker SL 31.412 / TP 30.903,95 statt 31.404,19 / 30.900,97, 2a8c53e9 TP 29.653,66 statt 29.650,68 und
+   * puffer_punkte 2 statt 5). Ursache: hedgePuffer()/hedgeNotfallFaktor() lesen wd_farmer_regeln.vorplan aus _wd.regeln — die lädt der
+   * PC-Tab erst im wdTick; direkt nach dem Neuladen rechnete der Level-Abgleich (und der Fill-Nachtrag) mit den Standardwerten
+   * (Puffer 2, Notfall 1,10) und schickte sie an Fusion. Nicht der Copier: der setzt Solo-Level nur auf Auftrag. Jetzt: Regeln erst
+   * laden (höchstens 8 s, eine Ladung für alle Aufrufer); scheitert das, rechnet der Abgleich nicht. → true = Regeln geladen */
+  let _hedgeRegelnLaedt = null
+  async function hedgeRegelnSicher(){
+    try{ if(_wd && _wd.geladen) return true }catch(_){ return false }
+    if(!_hedgeRegelnLaedt) _hedgeRegelnLaedt = Promise.race([wdLaden(), new Promise(r => setTimeout(() => r(false), 8000))]).finally(() => { _hedgeRegelnLaedt = null })
+    return !!(await _hedgeRegelnLaedt)
+  }
+  window._hedgeRegelnSicher = hedgeRegelnSicher   // Test-Haken
+  const HEDGE_LEVEL_PAUSE_MS = 2 * 60000          // keine Antwort/Verbindung weg: nach 2 min erneut, ohne Fehlversuch zu zählen
+  const _hedgeLevelAbgleich = new Map()   // plan_id → { key, versuche, busy, basisFehlt, pauseBis }
   async function hedgeTerminalLevelAbgleich(p, h){
-    const pid = String(p.id), st = _hedgeLevelAbgleich.get(pid) || { key: null, versuche: 0, busy: false, basisFehlt: false }
+    const pid = String(p.id), st = _hedgeLevelAbgleich.get(pid) || { key: null, versuche: 0, busy: false, basisFehlt: false, pauseBis: 0 }
     _hedgeLevelAbgleich.set(pid, st)
     if(st.busy || st.versuche >= 3 || !h || h.status !== 'offen' || !h.ticket || !(Number(h.fill) > 0)) return
+    if(st.pauseBis && Date.now() < st.pauseBis) return   // Backend war nicht erreichbar — nach der Pause erneut
     if(!/tv_limit|tv_toast|tv_orders|fill_|hand/.test(String(h.tp_quelle || ''))) return   // TP nur geschätzt → warten
     st.busy = true
     try{
+      if(!(await hedgeRegelnSicher())) return            // nie mit Standard-Puffer/-Notfall rechnen (08.10.2026)
       let vh = (h.nas_nq_verhaeltnis != null) ? Number(h.nas_nq_verhaeltnis) : NaN
       if(!(vh > 0)){
         if(st.basisFehlt) return
@@ -24665,9 +24683,16 @@
           notfall_faktor: hedgeNotfallFaktorFuer(Number(h.punkte)), level_vorlaeufig: !(slE || !(Number(h.sl_punkte) > 0)),
           level_abgleich: Object.assign(info, { ok: true, sl: res.sl, tp: res.tp, sl_alt: res.sl_alt, tp_alt: res.tp_alt }) })
       } else {
-        st.versuche++
+        // KEINE ANTWORT ≠ ABGELEHNT (08.10.2026, Slave 2: nach jedem Push scheiterte der Abgleich 3× mit „keine Antwort", weil das
+        // lokale Backend neu startete, und gab bis zum nächsten Neuladen auf): Verbindungsfehler zählen nicht, nach 2 min erneut.
+        // Echte Broker-Antworten (abgelehnt, weg, fremd, befehl) zählen wie bisher.
+        const verbindung = !res || res._httpFail || res.copier_offline || res.code === 'verbindung' || !res.code
+          && /keine Antwort|fetch|abort|timeout|Timeout|Connection|nicht erreichbar|offline/i.test(String(res.msg || ''))
+        if(verbindung) st.pauseBis = Date.now() + HEDGE_LEVEL_PAUSE_MS
+        else st.versuche++
         if(res && ['weg', 'fremd', 'befehl'].includes(res.code)) st.versuche = 3
-        await hedgeAmPlanSchreiben(p.id, { level_abgleich: Object.assign(info, { ok: false, versuch: st.versuche, msg: String((res && res.msg) || 'keine Antwort').slice(0, 200) }) })
+        await hedgeAmPlanSchreiben(p.id, { level_abgleich: Object.assign(info, { ok: false, versuch: st.versuche, msg: String((res && res.msg) || 'keine Antwort').slice(0, 200),
+          pause_bis: verbindung ? new Date(st.pauseBis).toISOString() : null }) })
       }
     }catch(e){ console.warn('[hedge] Terminal-Level abgleichen', e) }
     finally{ st.busy = false }
@@ -41253,7 +41278,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1297'
+  const OS_TAB_BUILD = '2026-09-22.1298'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
