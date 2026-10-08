@@ -15515,11 +15515,12 @@
       admCalRender()
 
       function admCalRender(){
-        // NUR FUTURES MIT TYP WINNING DAYS / FUNDED (Finn 08.10.2026: „Hier unten sollen die Accounts nur angezeigt werden, wenn sie bei Futures
-        // als Typ Winning Day sind — nicht jede einzelne als Funded. Nur Winning Day und Funded als Typ."): Challenges/Phasen und CFD-Konten
-        // bleiben weg — reiner Anzeige-Filter auf admData.payout_ready (Raster, Summen und Tabelle gleich), keine Datenänderung.
-        const istFut = f => { try{ return typeof tpFirmIstFutures === 'function' ? !!tpFirmIstFutures(f) : true }catch(_){ return true } }
-        const cal = ((admData && admData.payout_ready) || []).filter(r => istFut(r.account_firm) && (r.type === 'winning_days' || r.type === 'funded'))
+        // NUR WINNING DAYS + WAITING FOR PAYOUT (Finn 08.10.2026: „nur Accounts, die auch als Typ ‚Winning Day' sind, nicht alle ‚Funded' …
+        // nur Typ ‚Winning Day' oder ‚Waiting for Payout'" + „es fehlen gerade die kompletten CFD-Accounts"). Gefiltert an der Quelle
+        // (app.py payout_ready, waiting_since = accounts.waiting_payout_since); der Filter hier hält nur einen älteren Backend-Stand sauber.
+        // Zwei Gruppen: Winning Days (Futures, Typ winning_days) · CFD (Waiting for Payout); Summen oben je Gruppe und gesamt.
+        const cal = ((admData && admData.payout_ready) || []).filter(r => r.type === 'winning_days' || r.waiting_since)
+        const istWd = r => r.type === 'winning_days'
         const calPanel = $('adm-f-cal-panel')
         if(!calPanel) return
         calPanel.hidden = !cal.length
@@ -15549,7 +15550,9 @@
           if(r.calc.tag && r.calc.tage > 0 && r.calc.tage <= 7) addTo(s7, r)
           if(r.calc.tag && r.calc.tage < 0) ueberfaellig++
         }
-        for(const [lbl, m, farbe] of [['Anfragbar jetzt', sJetzt, 'var(--good)'], ['Nächste 7 Tage', s7, 'var(--ink)'], ['Gesamt offen', sAll, 'var(--ink)']]){
+        const sWd = new Map(), sCfd = new Map()
+        for(const r of cal) addTo(istWd(r) ? sWd : sCfd, r)
+        for(const [lbl, m, farbe] of [['Anfragbar jetzt', sJetzt, 'var(--good)'], ['Nächste 7 Tage', s7, 'var(--ink)'], ['Winning Days', sWd, 'var(--ink)'], ['CFD', sCfd, 'var(--ink)'], ['Gesamt offen', sAll, 'var(--ink)']]){
           const d = document.createElement('div')
           d.innerHTML = '<div class="tnum" style="font-size:17px;font-weight:800"></div><div style="font-size:11px;color:var(--sub)"></div>'
           d.children[0].style.color = farbe
@@ -15602,11 +15605,15 @@
         }
         grid.appendChild(g)
 
-        // Tabelle: Tages-Gruppen aufsteigend (überfällige damit oben), dann Winning Days
-        const gruppen = [...byDay.entries()].sort((a, b) => a[0].localeCompare(b[0]))
-        const wd = cal.filter(r => !r.calc.tag && r.wd_target > 0)
-          .sort((a, b) => (b.wd_ready - a.wd_ready) || ((b.wd_count / b.wd_target) - (a.wd_count / a.wd_target)) || String(a.person || '').localeCompare(String(b.person || '')))
+        // Tabelle (08.10.2026): zwei Gruppen statt Tages-Gruppen — Winning Days (Futures) · CFD (Waiting for Payout, Termin aufsteigend,
+        // ohne Termin zuletzt). Der Klick im Raster springt zur ersten CFD-Zeile dieses Tags (data-cal-tag an der Zeile).
+        const gruppen = []
+        const wd = cal.filter(istWd)
+          .sort((a, b) => (b.wd_ready - a.wd_ready) || (((b.wd_count || 0) / (b.wd_target || 1)) - ((a.wd_count || 0) / (a.wd_target || 1))) || String(a.person || '').localeCompare(String(b.person || '')))
+        const cfd = cal.filter(r => !istWd(r))
+          .sort((a, b) => String(a.calc.tag || '9999').localeCompare(String(b.calc.tag || '9999')) || String(a.person || '').localeCompare(String(b.person || '')))
         if(wd.length) gruppen.push(['wd', wd])
+        if(cfd.length) gruppen.push(['cfd', cfd])
 
         const kopfZeile = (titel, sub, list, farbe, key) => {
           const tr = document.createElement('tr')
@@ -15647,9 +15654,15 @@
           tr.querySelector('.c-acc').textContent = r.account_name || '—'
           const ext = tr.querySelector('.c-ext'); if(r.ext) ext.textContent = '#' + r.ext; else ext.remove()
           tr.querySelector('.c-firm').textContent = r.account_firm || '–'
-          // Stand: CFD = relativer Termin, Futures = Winning Days
+          // Stand: Winning Days = 🏆-Zähler, CFD = relativer Termin bzw. „wartet seit …" ohne Termin
           const st = tr.querySelector('.c-stand')
-          if(c.tag){
+          if(c.tag) tr.dataset.calTag = c.tag
+          if(!(istWd(r) && r.wd_target > 0) && !c.tag){
+            const chip = document.createElement('span'); chip.className = 'chip chip-neutral'
+            const tw = r.waiting_since ? Math.max(0, -tageBis(r.waiting_since)) : null
+            chip.textContent = 'Waiting for Payout' + (tw != null ? (tw === 0 ? ' · seit heute' : ` · seit ${tw} Tag${tw === 1 ? '' : 'en'}`) : '')
+            st.appendChild(chip)
+          }else if(c.tag && !(istWd(r) && r.wd_target > 0)){
             const chip = document.createElement('span')
             chip.className = 'chip ' + (c.tage < 0 ? 'chip-warn' : c.tage === 0 ? 'chip-good' : 'chip-neutral')
             chip.textContent = c.tage === 0 ? 'heute anfragbar' : c.tage === 1 ? 'morgen' : c.tage > 1 ? `in ${c.tage} Tagen` : c.tage === -1 ? 'seit gestern anfragbar' : `seit ${-c.tage} Tagen anfragbar`
@@ -15668,15 +15681,8 @@
           return tr
         }
         for(const [key, list] of gruppen){
-          if(key === 'wd'){
-            tb.appendChild(kopfZeile('Winning Days', 'Futures · manuell gezählt · bei erreichtem Ziel anfragbar', list, 'var(--ink)', 'wd'))
-          }else{
-            const tage = tageBis(key)
-            const d = new Date(key + 'T12:00:00Z')
-            const datum = d.toLocaleDateString('de-DE', { weekday:'short', day:'2-digit', month:'short', timeZone:'UTC' })
-            const rel = tage === 0 ? 'heute' : tage === 1 ? 'morgen' : tage > 1 ? `in ${tage} Tagen` : tage === -1 ? 'seit gestern anfragbar' : `seit ${-tage} Tagen anfragbar`
-            tb.appendChild(kopfZeile(datum, rel, list, tage < 0 ? '#b6690a' : tage === 0 ? '#058a50' : 'var(--ink)', key))
-          }
+          if(key === 'wd') tb.appendChild(kopfZeile('Winning Days', 'Futures · manuell gezählt · bei erreichtem Ziel anfragbar', list, 'var(--ink)', 'wd'))
+          else tb.appendChild(kopfZeile('CFD', 'Waiting for Payout · Termin = ab wann anfragbar', list, 'var(--ink)', 'cfd'))
           for(const r of list) tb.appendChild(zeile(r))
         }
       }
@@ -55830,7 +55836,9 @@
     const panel = document.getElementById('fin-status-panel')
     if(!panel) return
     const arch = (typeof getArchive === 'function') ? getArchive() : {}
-    const list = (accounts || []).filter(a => (a.type === 'funded' || a.type === 'funded_cfd' || a.type === 'winning_days') && !arch[a.id]?.archived)   // Winning Days (25.09.2026) zahlen aus wie Funded
+    // Nur Winning Days + Waiting for Payout (Finn 08.10.2026, wie Admin → Payouts / app.py payout_ready): normale Funded (Futures + CFD,
+    // noch im Handel) bleiben draußen; Waiting for Payout = waitingPayoutSince (accounts.waiting_payout_since, wie der Chip in Accounts)
+    const list = (accounts || []).filter(a => (a.type === 'winning_days' || a.waitingPayoutSince) && !arch[a.id]?.archived)
     if(!list.length){ panel.hidden = true; return }
     const rows = list.map(a => {
       const pi = (typeof payoutReadyInfo === 'function') ? payoutReadyInfo(a) : null

@@ -5968,19 +5968,8 @@ def admin_build_overview(kapitel_id=None):
     # ready_at leer, dafür count/target) — bei count >= target ist der Payout
     # anfragbar. Die automatische Zählung (Tages-P&L) bleibt dem Frontend
     # vorbehalten, sie bräuchte hier alle trade_plans.
-    # Futures-Firmen = Firm-Specs mit Einheit 'Kontrakte' (dieselbe Erkennung
-    # wie tpFirmIstFutures im Frontend, hier über alle Personen aus firm_specs).
-    # Jeder Futures-FUNDED-Account zählt Winning Days manuell — auch ohne
-    # gespeichertes Ziel (implizit, 15.09.2026 abends): Stand goal_done_offset
-    # (leer = 0), Ziel goal_target (leer = 5). Schlägt der Spec-Read fehl,
-    # bleiben nur die explizit gespeicherten (goal_manual) übrig — hörbar.
-    futures_firms = set()
-    try:
-        for f in _sb_all("firm_specs", {"select": "name,unit"}):
-            if (f.get("unit") or "").strip().lower() == "kontrakte":
-                futures_firms.add(_firm_norm(f.get("name")))
-    except Exception as e:
-        print(f"[admin] ⚠️ firm_specs: {type(e).__name__}: {e}", flush=True)
+    # Futures-Funded zählten seit 15.09.2026 implizit als Winning-Day-Konten (firm_specs-Lesung hier) — seit 08.10.2026 nur noch
+    # Typ winning_days oder Waiting for Payout (s. payout_ready unten), die Lesung entfiel.
     # Balance je Account (15.09.2026 abends, Finn: „schreib die aktuelle
     # Balance daneben, damit man weiss, wie viel der Account hat"). Gleiche
     # Rangfolge wie die Account-Karte: Topstep-Sync → MetaApi → Duplikum-
@@ -6156,11 +6145,16 @@ def admin_build_overview(kapitel_id=None):
         typ = a.get("account_type") or ""
         if typ == "live" or aid in archived or uid in excluded_ids:
             continue
-        d = (a.get("payout_ready_at") or "").strip()
-        implizit = typ == "funded" and _firm_norm(a.get("firm")) in futures_firms
-        manual = implizit or (bool(a.get("goal_manual")) and (a.get("goal_kind") or "") == "winning_days")
-        if not d and not manual:
+        # NUR WINNING DAYS + WAITING FOR PAYOUT (Finn 08.10.2026, Admin → Payouts: „nur Accounts, die auch als Typ ‚Winning Day'
+        # sind, nicht alle ‚Funded' … nur Typ ‚Winning Day' oder ‚Waiting for Payout'" + „es fehlen gerade die kompletten CFD-Accounts
+        # … jeder CFD-Account, der nicht mehr gehandelt wird, soll hier rein"). Bisher kamen alle Funded Futures implizit mit (75 Konten
+        # in „Winning Days"), CFD mit Waiting for Payout ohne Termin gar nicht. Waiting for Payout = waiting_payout_since gesetzt
+        # (wie accTypGruppe/Chip in Accounts). Einziger Leser ist der Payout-Kalender (admCalRender).
+        warten = str(a.get("waiting_payout_since") or "").strip()
+        if typ != "winning_days" and not warten:
             continue
+        d = (a.get("payout_ready_at") or "").strip()
+        manual = typ == "winning_days" or (bool(a.get("goal_manual")) and (a.get("goal_kind") or "") == "winning_days")
         try:
             target = int(a.get("goal_target") or 0)
         except (TypeError, ValueError):
@@ -6183,6 +6177,7 @@ def admin_build_overview(kapitel_id=None):
             "wd_count": count if manual else None,
             "wd_target": target if manual else None,
             "wd_ready": bool(manual and target > 0 and count >= target),
+            "waiting_since": warten[:10],
         })
         bal, ccy, src, at = _acc_balance(a)
         payout_ready[-1].update({
