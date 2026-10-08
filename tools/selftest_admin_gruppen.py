@@ -4,7 +4,10 @@ Nachtrag 23:00: Tabellen id_gruppen + id_gruppe_mitglied, sql/2026-10-08_admin_g
 gegen eine Fake-DB (sb_select/_sb_anfrage/_auth_* gestubbt), die Routen über einen Flask-Testclient.
 Geprüft: Mengen-Logik (HT alle · Verwalter = Gruppe · Mitglied ohne Zugang = kein Admin), Finns ?gruppe=-Filter, Gruppen-Liste für die
 Chips, _admin_basis-Ausblendung, Trade-Planer-Sicht (ap_*), pc-stand-Filter, Schreib-Schutz fremder Objekte (wd-plaene PATCH/DELETE/POST,
-prop-baum, /ids POST, konto_balance_darf). Platzhalter-IDs, keine echten Namen. Aufruf: python3 tools/selftest_admin_gruppen.py"""
+prop-baum, /ids POST, konto_balance_darf). Nachbesserungen Master 08.10.2026: (A) Gruppe nur mit ?ansicht=admin — der PC-Tab des
+Verwalters (ohne Marker) sieht/ändert nur die eigene ID, dazu Quelltext-Proben der PC-Wege in prophos.html; (B) Trade-Planer-Summen
+nur über die Sicht (ap_stand_sicht, ap_lauf_ohne_summen); (C) Finns Chip einer Verwalter-Gruppe zeigt auch den ausgeblendeten Verwalter.
+Platzhalter-IDs, keine echten Namen. Aufruf: python3 tools/selftest_admin_gruppen.py"""
 import os
 import re
 import sys
@@ -64,18 +67,19 @@ def lade():
 
     namen = ["admin_zugang_nur_eigene", "admin_gruppen_daten", "admin_sicht_menge", "admin_sicht_lesen", "admin_in_sicht",
              "admin_sicht_filter", "_admin_verwalter_gruppen_ids", "admin_gruppen_liste", "admin_gruppe_filter_menge",
-             "admin_gruppe_ist_ht", "_admin_filter_aus_anfrage", "_admin_nur_uid", "_admin_sicht", "_admin_eingeschraenkt",
+             "admin_gruppe_ist_ht", "_admin_ansicht", "_admin_filter_ist_ht", "_admin_filter_aus_anfrage", "_admin_nur_uid", "_admin_sicht", "_admin_eingeschraenkt",
              "_admin_darf_uid", "_admin_verwalter", "_wd_login", "_wd_personen", "_admin_basis",
              "ap_sicht", "ap_sicht_uid", "ap_eingriff_sicht", "ap_eingriff_admin_reiter", "ap_admin_reiter_ok", "ap_eingriff_filter",
-             "_ap_gruppe_lesen", "_ap_sicht_param", "konto_balance_darf",
+             "_ap_gruppe_lesen", "_ap_sicht_param", "konto_balance_darf", "ap_stand_sicht", "ap_lauf_ohne_summen",
              "admin_pc_stand", "admin_prop_baum", "admin_wd_plaene", "admin_auto_plan_ids"]
-    teile = [konst(k) for k in ("AP_SICHT_ADMIN", "AP_EINGRIFF_MAX", "AUTH_LISTE_CACHE_S", "ADMIN_GRUPPE_HT", "AP_NUR_PLANER_TXT")]
+    teile = [konst(k) for k in ("AP_SICHT_ADMIN", "AP_EINGRIFF_MAX", "AUTH_LISTE_CACHE_S", "ADMIN_GRUPPE_HT", "AP_NUR_PLANER_TXT",
+                                "ADMIN_ANSICHT", "AP_LAUF_SUMMEN")]
     teile += ["_admin_zugang_cache = {}", '_admin_gruppe_cache = {"bis": 0.0, "daten": None}']
     teile += [block(n) for n in namen]
     ns = {"re": re, "time": time, "threading": threading, "requests": requests, "request": request, "jsonify": jsonify, "g": g,
           "datetime": datetime, "timedelta": timedelta, "timezone": timezone, "_kurz_cache_lock": threading.Lock(),
           "SUPABASE_SERVICE_KEY": "svc", "SUPABASE_URL": "https://beispiel.invalid", "ADMIN_EMAILS": {"admin@beispiel.invalid"},
-          "ADMIN_EXCLUDE_EMAILS": {"aus@beispiel.invalid"}, "AP_TYPEN": ("challenge", "phase1", "phase2")}
+          "ADMIN_EXCLUDE_EMAILS": {"aus@beispiel.invalid", "verw-aus@beispiel.invalid"}, "AP_TYPEN": ("challenge", "phase1", "phase2")}
     exec("\n".join(teile), ns)
     return ns
 
@@ -115,7 +119,7 @@ def fake_db(ns, tabellen_fehlen=False):
         return Antwort(200, {"id": token}) if token else Antwort(401, {})
 
     def _auth_liste_anfrage():
-        mails = {HT2: "aus@beispiel.invalid"}
+        mails = {HT2: "aus@beispiel.invalid", VERW: "verw-aus@beispiel.invalid"}   # der Verwalter ist für HT ausgeblendet (wie heute)
         return Antwort(200, {"users": [{"id": u, "email": mails.get(u, f"{u}@beispiel.invalid"), "user_metadata": {"name": u}}
                                        for u in ALLE]})
 
@@ -201,7 +205,8 @@ def main():
           and not kbd(MITGL, "m@x", {"user_id": VERW}, set(), None) and kbd(HT1, "admin@beispiel.invalid", {"user_id": MITGL}, {"admin@beispiel.invalid"}),
           "Balance lesen: Verwalter für seine Gruppe, nicht für HT; Mitglied nicht für den Verwalter; Admin immer")
 
-    # 5) Routen über Flask (Fake-DB)
+    # 5) Routen über Flask (Fake-DB). Admin-Ansicht = ?ansicht=admin (nur die Admin-Reiter schicken es); ohne Marker ist ein Verwalter
+    # wie bis .1380 auf die eigene ID beschränkt — das ist der Weg seines PC-Tabs (Nachbesserung A, Master 08.10.2026)
     log = fake_db(ns)
     app = Flask("selftest_admin_gruppen")
     app.add_url_rule("/admin/pc-stand", "pc", ns["admin_pc_stand"], methods=["GET", "OPTIONS"])
@@ -211,66 +216,87 @@ def main():
     ns["_admin_auth"] = lambda: (None, (jsonify({"error": "Nur für Admins"}), 403))
     c = app.test_client()
     h = lambda uid: {"sb-token": uid}
+    AA = "ansicht=admin"
 
     d = c.get("/admin/pc-stand", headers=h(HT1)).get_json()
     check(set(d["stand"]) == set(ALLE), "pc-stand: Finn (HT) sieht alle IDs")
+    d = c.get(f"/admin/pc-stand?{AA}", headers=h(VERW)).get_json()
+    check(set(d["stand"]) == {VERW, MITGL}, "pc-stand: Verwalter in der Admin-Ansicht = seine Gruppe")
     d = c.get("/admin/pc-stand", headers=h(VERW)).get_json()
-    check(set(d["stand"]) == {VERW, MITGL}, "pc-stand: Verwalter nur seine Gruppe")
-    d = c.get("/admin/pc-stand", headers=h(MITGL)).get_json()
-    check(set(d["stand"]) == {MITGL}, "pc-stand: Mitglied nur sich")
+    check(set(d["stand"]) == {VERW}, "A: pc-stand ohne Admin-Ansicht (PC-Tab des Verwalters) = nur eigene ID")
+    d = c.get(f"/admin/pc-stand?{AA}", headers=h(MITGL)).get_json()
+    check(set(d["stand"]) == {MITGL}, "pc-stand: Mitglied auch mit Marker nur sich")
     d = c.get(f"/admin/pc-stand?gruppe={G_V}", headers=h(HT1)).get_json()
     check(set(d["stand"]) == {VERW, MITGL}, "pc-stand: Finn mit ?gruppe=<Gruppe V>")
     d = c.get("/admin/pc-stand?gruppe=ht", headers=h(HT1)).get_json()
     check(set(d["stand"]) == {HT1, HT2, NEU, SOLO}, "pc-stand: Finn mit ?gruppe=ht (neue ID ohne Zeile inklusive)")
-    d = c.get(f"/admin/pc-stand?gruppe={G_HT}", headers=h(VERW)).get_json()
+    d = c.get(f"/admin/pc-stand?{AA}&gruppe={G_HT}", headers=h(VERW)).get_json()
     check(set(d["stand"]) == {VERW, MITGL}, "pc-stand: Verwalter kann ?gruppe= nicht ausweiten")
 
-    # _admin_basis: Ausblendung
-    with app.test_request_context("/admin/overview", headers=h(HT1)):
-        ns["_wd_login"]()
-        b = ns["_admin_basis"]()
-        check(b["excluded_ids"] == {HT2} and b["excluded_names"] == ["aus@beispiel.invalid"], "Übersicht Finn: nur die Server-Ausblendung")
-    with app.test_request_context(f"/admin/overview?gruppe={G_V}", headers=h(HT1)):
-        ns["_wd_login"]()
-        b = ns["_admin_basis"]()
-        check(b["excluded_ids"] == {HT1, HT2, NEU, SOLO}, "Übersicht Finn mit Gruppe V: alle außer Gruppe V ausgeblendet")
-    with app.test_request_context("/admin/overview?gruppe=ht", headers=h(HT1)):
-        ns["_wd_login"]()
-        b = ns["_admin_basis"]()
-        check(b["excluded_ids"] == {HT2, VERW, MITGL}, "Übersicht Finn mit HT: Gruppe V raus, Server-Ausblendung bleibt")
-    with app.test_request_context("/admin/overview", headers=h(VERW)):
-        ns["_wd_login"]()
-        b = ns["_admin_basis"]()
-        check(b["excluded_ids"] == {HT1, HT2, NEU, SOLO} and b["excluded_names"] == [], "Übersicht Verwalter: nur seine Gruppe, keine fremden E-Mails")
-        disp, excl = ns["_wd_personen"]()
-        check(excl == {HT1, HT2, NEU, SOLO}, "WD/Live-Trades Verwalter: alle außer seiner Gruppe ausgeblendet")
-    with app.test_request_context("/admin/overview", headers=h(MITGL)):
-        ns["_wd_login"]()
-        b = ns["_admin_basis"]()
-        check(b["excluded_ids"] == set(ALLE) - {MITGL}, "Übersicht Mitglied: nur er selbst")
+    # _admin_basis / _wd_personen: Ausblendung. Der Verwalter steht in der Server-Ausblendung (ADMIN_EXCLUDE) wie heute.
+    def basis(pfad, uid):
+        with app.test_request_context(pfad, headers=h(uid)):
+            ns["_wd_login"]()
+            return ns["_admin_basis"](), ns["_wd_personen"]()[1]
+    b, ex = basis("/admin/overview", HT1)
+    check(b["excluded_ids"] == {HT2, VERW} and sorted(b["excluded_names"]) == ["aus@beispiel.invalid", "verw-aus@beispiel.invalid"],
+          "Übersicht Finn „Alle“: Server-Ausblendung wie heute")
+    b, ex = basis(f"/admin/overview?gruppe={G_V}", HT1)
+    check(b["excluded_ids"] == {HT1, HT2, NEU, SOLO} and b["excluded_names"] == ["aus@beispiel.invalid"] and ex == {HT1, HT2, NEU, SOLO},
+          "C: Finns Chip „Gruppe V“ zeigt Verwalter UND Mitglied, obwohl der Verwalter ausgeblendet ist")
+    b, ex = basis("/admin/overview?gruppe=ht", HT1)
+    check(b["excluded_ids"] == {HT2, VERW, MITGL} and ex == {HT2, VERW, MITGL}, "C: Chip HT — Gruppe V raus, Server-Ausblendung bleibt")
+    b, ex = basis(f"/admin/overview?gruppe={G_HT}", HT1)
+    check(b["excluded_ids"] == {HT2, VERW, MITGL}, "C: Chip HT über die Gruppen-ID wie 'ht'")
+    b, ex = basis(f"/admin/overview?{AA}", VERW)
+    check(b["excluded_ids"] == {HT1, HT2, NEU, SOLO} and b["excluded_names"] == [] and ex == {HT1, HT2, NEU, SOLO},
+          "Übersicht/WD Verwalter (Admin-Ansicht): nur seine Gruppe, keine fremden E-Mails")
+    b, ex = basis("/admin/live-trades", VERW)
+    check(b["excluded_ids"] == set(ALLE) - {VERW} and ex == set(ALLE) - {VERW}, "A: ohne Admin-Ansicht (PC-Tab) nur die eigene ID")
+    b, ex = basis(f"/admin/overview?{AA}", MITGL)
+    check(b["excluded_ids"] == set(ALLE) - {MITGL}, "Übersicht Mitglied: nur er selbst")
 
-    # Schreib-Schutz wd-plaene
-    r = c.patch("/admin/wd-plaene", headers=h(VERW), json={"aktion": "ende", "plan_id": "plan-ht-0001"})
+    # Schreib-Schutz wd-plaene — mit Admin-Ansicht (Reiter „Winning Days")
+    W = f"/admin/wd-plaene?{AA}"
+    r = c.patch(W, headers=h(VERW), json={"aktion": "ende", "plan_id": "plan-ht-0001"})
     check(r.status_code == 403, "wd-plaene PATCH: Verwalter auf HT-Plan → 403")
-    r = c.patch("/admin/wd-plaene", headers=h(VERW), json={"aktion": "ende", "plan_id": "plan-mitglied-1"})
-    check(r.status_code == 404, "wd-plaene PATCH: Verwalter auf Plan seines Mitglieds → durch das Gate (hier 404 aus der Fake-DB)")
-    r = c.patch("/admin/wd-plaene", headers=h(MITGL), json={"aktion": "ende", "plan_id": "plan-verwalter-1"})
+    r = c.patch(W, headers=h(VERW), json={"aktion": "ende", "plan_id": "plan-mitglied-1"})
+    check(r.status_code == 404, "wd-plaene PATCH: Verwalter (Admin-Ansicht) auf Plan seines Mitglieds → durch das Gate (404 aus der Fake-DB)")
+    r = c.patch(W, headers=h(MITGL), json={"aktion": "ende", "plan_id": "plan-verwalter-1"})
     check(r.status_code == 403, "wd-plaene PATCH: Mitglied auf Plan des Verwalters → 403")
-    r = c.patch("/admin/wd-plaene", headers=h(VERW), json={"aktion": "tab_neu_laden", "user_id": MITGL, "pc": "pc-abc123"})
-    check(r.status_code == 200 and log["insert"][-1][1]["user_id"] == MITGL, "tab_neu_laden: Verwalter für ID seiner Gruppe")
-    r = c.patch("/admin/wd-plaene", headers=h(VERW), json={"aktion": "tab_neu_laden", "user_id": HT1, "pc": "pc-abc123"})
+    r = c.patch(W, headers=h(VERW), json={"aktion": "tab_neu_laden", "user_id": MITGL, "pc": "pc-abc123"})
+    check(r.status_code == 200 and log["insert"][-1][1]["user_id"] == MITGL, "tab_neu_laden: Verwalter (Admin-Ansicht) für ID seiner Gruppe")
+    r = c.patch(W, headers=h(VERW), json={"aktion": "tab_neu_laden", "user_id": HT1, "pc": "pc-abc123"})
     check(r.status_code == 403, "tab_neu_laden: Verwalter für HT-ID → 403")
-    r = c.delete("/admin/wd-plaene", headers=h(VERW), json={"id": "plan-ht-0001"})
+    r = c.delete(W, headers=h(VERW), json={"id": "plan-ht-0001"})
     check(r.status_code == 403, "wd-plaene DELETE: Verwalter auf HT-Plan → 403")
-    r = c.delete("/admin/wd-plaene", headers=h(VERW), json={"id": "plan-mitglied-1"})
+    r = c.delete(W, headers=h(VERW), json={"id": "plan-mitglied-1"})
     letzte = log["anfrage"][-1]
     check(r.status_code == 200 and letzte[0] == "DELETE" and letzte[2]["user_id"] == "in.(" + ",".join(sorted(gr)) + ")",
           "wd-plaene DELETE: Plan der Gruppe, Guard user_id in (Gruppe) in derselben Anfrage")
-    r = c.get("/admin/wd-plaene", headers=h(MITGL))
+    r = c.get(W, headers=h(MITGL))
     check(r.status_code == 403, "wd-plaene GET: Mitglied ohne Admin → 403")
-    r = c.post("/admin/wd-plaene", headers=h(VERW), json={"plaene": [{"master_account_id": "a-ht-0000000", "user_id": HT1}]})
+    r = c.post(W, headers=h(VERW), json={"plaene": [{"master_account_id": "a-ht-0000000", "user_id": HT1}]})
     d = r.get_json()
     check(d["angelegt"] == [] and d["uebersprungen"][0]["grund"] == "ID nicht in deiner Gruppe", "wd-plaene POST: Verwalter für HT-ID → übersprungen")
+
+    # A: dieselben Wege OHNE Admin-Ansicht = PC-Tab des Verwalters → nie ein Objekt des Mitglieds
+    anz = len(log["anfrage"])
+    r = c.get("/admin/wd-plaene?tag=2026-10-09", headers=h(VERW))
+    check(r.status_code == 403, "A: wd-plaene GET des PC-Tabs (ohne Marker) → 403 wie bis .1380 — keine Pläne des Mitglieds in der Antwort")
+    r = c.patch("/admin/wd-plaene", headers=h(VERW), json={"aktion": "ende", "plan_id": "plan-mitglied-1"})
+    check(r.status_code == 403, "A: PC-Tab beendet keinen Plan des Mitglieds (PATCH ende → 403)")
+    for akt in ("endlesung", "ansehen", "erledigt", "manuell"):
+        r = c.patch("/admin/wd-plaene", headers=h(VERW), json={"aktion": akt, "plan_id": "plan-mitglied-1", "master_pl": 1})
+        check(r.status_code == 403, f"A: PC-Tab — PATCH {akt} auf Plan des Mitglieds → 403")
+    r = c.patch("/admin/wd-plaene", headers=h(VERW), json={"aktion": "ende", "plan_id": "plan-verwalter-1"})
+    check(r.status_code == 404, "A: PC-Tab — eigener Plan geht wie bisher durchs Gate (404 aus der Fake-DB)")
+    r = c.patch("/admin/wd-plaene", headers=h(VERW), json={"aktion": "tab_neu_laden", "user_id": MITGL, "pc": "pc-abc123"})
+    check(r.status_code == 403, "A: PC-Tab — tab_neu_laden für das Mitglied → 403")
+    r = c.delete("/admin/wd-plaene", headers=h(VERW), json={"id": "plan-mitglied-1"})
+    check(r.status_code == 403 and len(log["anfrage"]) == anz, "A: PC-Tab löscht keinen Plan des Mitglieds (kein DELETE abgeschickt)")
+    r = c.post("/admin/wd-plaene", headers=h(VERW), json={"plaene": [{"master_account_id": "a-mitg-000000", "user_id": MITGL}]})
+    check(r.status_code == 403, "A: PC-Tab legt keine Pläne fürs Mitglied an (POST → 403)")
 
     # prop-baum POST
     aid_ht, aid_m = "00000000-0000-0000-0000-0000000000a1", "00000000-0000-0000-0000-0000000000a2"
@@ -281,20 +307,56 @@ def main():
             return [{"id": params["id"][3:], "user_id": HT1 if params["id"].endswith("a1") else MITGL}]
         return orig(table, params)
     ns["sb_select"] = sb_select2
-    r = c.post("/admin/prop-baum", headers=h(VERW), json={"account_id": aid_ht, "art": "done"})
+    r = c.post(f"/admin/prop-baum?{AA}", headers=h(VERW), json={"account_id": aid_ht, "art": "done"})
     check(r.status_code == 403, "prop-baum: Verwalter hakt HT-Account ab → 403")
+    r = c.post(f"/admin/prop-baum?{AA}", headers=h(VERW), json={"account_id": aid_m, "art": "done"})
+    check(r.status_code == 200, "prop-baum: Verwalter (Admin-Ansicht) hakt Account seiner Gruppe ab → ok")
     r = c.post("/admin/prop-baum", headers=h(VERW), json={"account_id": aid_m, "art": "done"})
-    check(r.status_code == 200, "prop-baum: Verwalter hakt Account seiner Gruppe ab → ok")
+    check(r.status_code == 403, "A: prop-baum ohne Admin-Ansicht → nur eigene Accounts")
     r = c.post("/admin/prop-baum", headers=h(HT1), json={"account_id": aid_m, "art": "done"})
     check(r.status_code == 200, "prop-baum: Finn wie bisher überall")
     ns["sb_select"] = orig
 
-    # /admin/auto-plan/ids: Planer-Haken sind HT-weit
-    r = c.post("/admin/auto-plan/ids", headers=h(VERW), json={"user_id": MITGL, "drin": True})
+    # /admin/auto-plan/ids: Planer-Haken sind HT-weit; Lesen nur aus der Admin-Ansicht
+    r = c.post(f"/admin/auto-plan/ids?{AA}", headers=h(VERW), json={"user_id": MITGL, "drin": True})
     check(r.status_code == 403 and "HT-weit" in r.get_json()["msg"], "/ids POST: Verwalter darf auto_plan_regeln.user_ids nicht ändern")
-    r = c.get("/admin/auto-plan/ids", headers=h(MITGL))
+    r = c.get("/admin/auto-plan/ids", headers=h(VERW))
+    check(r.status_code == 403, "A: /ids GET ohne Admin-Ansicht → 403 (wie bis .1380)")
+    r = c.get(f"/admin/auto-plan/ids?{AA}", headers=h(MITGL))
     check(r.status_code == 403, "/ids GET: Mitglied ohne Admin → 403")
 
+    # B: Summen im Trade-Planer nur über die Sicht
+    stand = {"offen": [{"user_id": HT1, "delta_eur_pkt": 10.0, "einsatz_eur": 500.0}, {"user_id": MITGL, "delta_eur_pkt": -4.0, "einsatz_eur": -200.0},
+                       {"user_id": VERW, "delta_eur_pkt": 1.0, "einsatz_eur": 50.0}],
+             "geplant": [{"user_id": HT2}, {"user_id": VERW}], "folgetag": [{"user_id": HT1}], "hinweise": [{"grund": "global"}, {"user_id": MITGL}],
+             "heute_beendet": [{"user_id": HT1}, {"user_id": MITGL}], "fremd": [{"user_id": HT2}],
+             "basis_netto": 7.0, "basis_brutto": 15.0, "basis_einsatz": 350.0, "brutto_einsatz": 750.0, "zeiten": {}}
+    sg = ns["ap_stand_sicht"](stand, gr)
+    check(sg["basis_netto"] == -3.0 and sg["basis_brutto"] == 5.0 and sg["basis_einsatz"] == -150.0 and sg["brutto_einsatz"] == 250.0,
+          "B: Basis Netto/Brutto (€/Pkt und € Einsatz) nur aus der Gruppe neu gerechnet")
+    check([z["user_id"] for z in sg["geplant"]] == [VERW] and sg["folgetag"] == [] and sg["hinweise"] == [{"user_id": MITGL}]
+          and len(sg["heute_beendet"]) == 1 and sg["fremd"] == [] and stand["basis_netto"] == 7.0,
+          "B: Listen (geplant/folgetag/hinweise/heute beendet/fremd) nur Gruppe, Original unverändert")
+    check(ns["ap_stand_sicht"](stand, MITGL)["basis_einsatz"] == -200.0, "B: eine ID (Mitglied) → nur ihre Summe")
+    lo = ns["ap_lauf_ohne_summen"]({"geplant": [1], "ausgelassen": [], "netto_max_abs": 99, "id_misch": {"x": 1}, "firma_misch": {}, "misch_fenster": [],
+                                     "einsatz": {"laufzeit_min": 180, "basis": 5000}, "ausgleich": {"offen": [], "hinweise": [], "long_eur": 1}})
+    check("netto_max_abs" not in lo and "id_misch" not in lo and lo["einsatz"] == {"laufzeit_min": 180} and "long_eur" not in lo["ausgleich"]
+          and lo["geplant"] == [1], "B: Lauf-Antwort für Eingeschränkte ohne HT-Summen, Listen + laufzeit_min bleiben")
+
+    # A: Quelltext der PC-Wege (prophos.html) — Ausführung nur aus eigenen Daten
+    html = open(os.path.join(os.path.dirname(HIER), "prophos.html"), encoding="utf-8").read()
+    i = html.index("async function loadTradePlansFromSupabase(")
+    check(".eq('user_id', currentUserId)" in html[i:i + 600], "A: tradePlans (Start/Hedge/Endlesung/sfTick) nur eigene ID (RLS + eq user_id)")
+    i = html.index("async function tpStartUmTick(")
+    check("_tp = tradePlans" in html[i:i + 1200] and "/admin/" not in html[i:i + 1200], "A: tpStartUmTick startet nur aus tradePlans, nie aus Admin-Antworten")
+    check("/admin/live-trades?tage=1&nur_eigene=1&status=open" in html, "A: Endlesung des PC-Tabs fragt live-trades nur_eigene=1 (Server eq.me)")
+    check(html.count("ansicht=admin") >= 8 and "wdSichtbar() ? '&ansicht=admin'" in html and "(wdSichtbar() ? ((query ? '&' : '?') + 'ansicht=admin')" in html,
+          "A: Admin-Ansicht nur aus Admin-Reitern (Farmer nur bei sichtbarem Reiter)")
+    i = html.index("async function wdWuerfelnSchreiben(")
+    check("window._admNurGruppe()) ? {}" in html[i:i + 900], "A: Würfel-Automatik nimmt keine Richtungen aus der Verwalter-Ansicht")
+    i = html.index("async function wdNeuLaden(")
+    check("!nurGruppe && d && d.rail" in html[i:i + 2200] and "String(x.user_id) === ich" in html[i:i + 2600],
+          "A: Farmer-Reiter eines Verwalters räumt/heilt nur die eigene Zeile")
     # 6) Tabellen fehlen (SQL nicht eingespielt) → keine Gruppen, nichts kippt
     fake_db(ns, tabellen_fehlen=True)
     d = c.get("/admin/pc-stand", headers=h(MITGL)).get_json()

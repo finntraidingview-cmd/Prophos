@@ -13330,7 +13330,9 @@
         // „Alle" = ungefiltert wie bisher. Gewählt wird oben in der Topbar (window._kapitel).
         const kap = window._kapitel ? window._kapitel.aktiv : 'alle'
         // Gruppenfilter (08.10.2026): ?gruppe= wie ?kapitel= — der Server blendet die übrigen IDs aus (Summen stimmen mit der Liste)
-        const q = [kap !== 'alle' ? `kapitel=${encodeURIComponent(kap)}` : '', window._admGruppeQ('')].filter(Boolean).join('&')
+        // ansicht=admin (Nachbesserung A, 08.10.2026): nur Admin-Reiter schicken es — ein Verwalter bekommt seine Gruppe NUR hier, sein
+        // PC-Tab (Start, Endlesung, Hedge …) ohne den Marker wie bisher nur die eigene ID
+        const q = ['ansicht=admin', kap !== 'alle' ? `kapitel=${encodeURIComponent(kap)}` : '', window._admGruppeQ('')].filter(Boolean).join('&')
         const r = await fetch(`${WATCHER_HOME}/admin/overview` + (q ? '?' + q : ''),
                               { headers: { 'sb-token': tok }, cache:'no-store' })
         const d = await r.json()
@@ -13692,7 +13694,7 @@
         const { data: { session } } = await supabase.auth.getSession()
         const tok = session?.access_token
         if(!tok) throw new Error('nicht angemeldet')
-        const r = await fetch(`${WATCHER_HOME}/admin/kapitel` + window._admGruppeQ('?'), { headers: { 'sb-token': tok }, cache:'no-store' })   // Gruppenfilter (08.10.2026)
+        const r = await fetch(`${WATCHER_HOME}/admin/kapitel?ansicht=admin` + window._admGruppeQ('&'), { headers: { 'sb-token': tok }, cache:'no-store' })   // Admin-Ansicht + Gruppenfilter (08.10.2026)
         const d = await r.json()
         if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
         admKapGeladenAt = Date.now()   // Stempel nur nach echtem Fetch (Review 24.09.2026, F1)
@@ -15815,7 +15817,7 @@
             const { data: { session } } = await supabase.auth.getSession()
             const tok = session?.access_token
             if(!tok) throw new Error('nicht angemeldet')
-            const res = await fetch(`${WATCHER_HOME}/admin/payout-calc`, {
+            const res = await fetch(`${WATCHER_HOME}/admin/payout-calc?ansicht=admin`, {   // Admin-Ansicht: Verwalter für Konten seiner Gruppe (08.10.2026)
               method:'PATCH', headers: { 'sb-token': tok, 'Content-Type':'application/json' },
               body: JSON.stringify({ account_id: r.account_id, payout_pct: pct === admPayoutPctDefault(r.account_firm || r.firm_raw || r.firm || '') ? null : pct, payout_override: betrag })   // Firmen-Standard = leer (08.10.2026, vorher fest 80)
             })
@@ -28326,7 +28328,7 @@
     _admPcs.laedt = true
     try{
       const { data: { session } } = await supabase.auth.getSession(); const tok = session?.access_token; if(!tok) return
-      const r = await fetch(`${WATCHER_HOME}/admin/pc-stand`, { headers: { 'sb-token': tok }, cache: 'no-store' })
+      const r = await fetch(`${WATCHER_HOME}/admin/pc-stand?ansicht=admin`, { headers: { 'sb-token': tok }, cache: 'no-store' })   // Admin-Ansicht (08.10.2026)
       const d = r.ok ? await r.json().catch(() => null) : null
       if(d && d.ok && d.stand){ _admPcs.daten = d.stand; _admPcs.at = Date.now() }
     }catch(e){ console.warn('[adm-pcs]', (e && e.message) || e) }
@@ -28398,7 +28400,7 @@
     if(btn){ btn.disabled = true; btn.textContent = 'sende …' }
     try{
       const { data: { session } } = await supabase.auth.getSession(); const tok = session?.access_token; if(!tok) throw new Error('nicht angemeldet')
-      const r = await fetch(`${WATCHER_HOME}/admin/wd-plaene`, { method: 'PATCH', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
+      const r = await fetch(`${WATCHER_HOME}/admin/wd-plaene?ansicht=admin`, { method: 'PATCH', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
         body: JSON.stringify({ aktion: 'tab_neu_laden', user_id: uid, pc }) })
       const d = await r.json().catch(() => ({}))
       if(!r.ok || !d.ok) throw new Error(d.error || ('HTTP ' + r.status))
@@ -33313,7 +33315,8 @@
     try{
       const { data: { session } } = await supabase.auth.getSession()
       if(!session?.access_token) throw new Error('nicht angemeldet')
-      const r = await fetch(`${WATCHER_HOME}/admin/kontowerte`, { headers: { 'sb-token': session.access_token }, cache: 'no-store' })
+      // im Admin-Reiter Trade-Planer mit Admin-Ansicht (Verwalter: Konten seiner Gruppe, 08.10.2026); Accounts-Ansicht wie bisher eigene
+      const r = await fetch(`${WATCHER_HOME}/admin/kontowerte${(typeof window._tplSichtParam === 'function' && window._tplSichtParam() === 'admin') ? '?ansicht=admin' : ''}`, { headers: { 'sb-token': session.access_token }, cache: 'no-store' })
       const d = await r.json().catch(() => ({}))
       if(!r.ok || !d.ok) throw new Error(d.error || ('HTTP ' + r.status))
       kwSt().werte = d.werte || {}; kwSt().uid = uid; kwSt().fehler = ''
@@ -49003,7 +49006,8 @@
     setz({ laeuft: true, text: 'Signal wird gesendet …' })
     try{
       const tok = await _pushTok(); if(!tok) throw new Error('nicht angemeldet')
-      const ruf = body => fetch(`${WATCHER_HOME}/admin/wd-plaene`, { method: 'PATCH', headers: { 'sb-token': tok, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      const adm = (typeof window._tplSichtParam === 'function' && window._tplSichtParam() === 'admin')   // Admin-Reiter: Admin-Ansicht (Verwalter: Konten seiner Gruppe, 08.10.2026)
+      const ruf = body => fetch(`${WATCHER_HOME}/admin/wd-plaene${adm ? '?ansicht=admin' : ''}`, { method: 'PATCH', headers: { 'sb-token': tok, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
         .then(r => r.json().then(d => ({ r, d })).catch(() => ({ r, d: {} })))
       const { r, d } = await ruf({ aktion: 'balance', account_id: accId })
       // kein lebender PC der ID hat den MT5-Login (08.10.2026, app.py mt5_login_ort) → ganze Meldung, nicht auf 80 Zeichen gekürzt
@@ -49286,7 +49290,8 @@
       const { data: { session } } = await supabase.auth.getSession()
       const tok = session?.access_token; if(!tok) return
       const ctrl = new AbortController(); const tm = setTimeout(() => ctrl.abort(), 12000)
-      const r = await fetch(`${WATCHER_HOME}/admin/live-trades?tage=1&echo=1`, { headers: { 'sb-token': tok }, cache: 'no-store', signal: ctrl.signal })
+      // Admin-Reiter: Admin-Ansicht (Verwalter = Gruppe, 08.10.2026) — nur Anzeige (Startzeiten, Live-P&L), kein Start daraus
+      const r = await fetch(`${WATCHER_HOME}/admin/live-trades?tage=1&echo=1${(typeof window._tplSichtParam === 'function' && window._tplSichtParam() === 'admin') ? '&ansicht=admin' : ''}`, { headers: { 'sb-token': tok }, cache: 'no-store', signal: ctrl.signal })
       clearTimeout(tm)
       const d = await r.json().catch(() => ({}))
       if(!r.ok) return
@@ -49304,7 +49309,7 @@
       const { data: { session } } = await supabase.auth.getSession()
       const tok = session?.access_token; if(!tok) return
       const ctrl = new AbortController(); const tm = setTimeout(() => ctrl.abort(), 15000)
-      const r = await fetch(`${WATCHER_HOME}/admin/hypo-bilanz?tage=30`, { headers: { 'sb-token': tok }, cache: 'no-store', signal: ctrl.signal })
+      const r = await fetch(`${WATCHER_HOME}/admin/hypo-bilanz?tage=30${(typeof window._tplSichtParam === 'function' && window._tplSichtParam() === 'admin') ? '&ansicht=admin' : ''}`, { headers: { 'sb-token': tok }, cache: 'no-store', signal: ctrl.signal })
       clearTimeout(tm)
       const d = await r.json().catch(() => ({}))
       if(r.ok && d && d.ok) _tpl.bilanz = d.trades || []
@@ -52374,7 +52379,8 @@
       const { data: { session } } = await supabase.auth.getSession()
       const tok = session?.access_token; if(!tok) throw new Error('nicht angemeldet')
       const ctrl = new AbortController(); const tm = setTimeout(() => ctrl.abort(), 12000)
-      const r = await fetch(`${WATCHER_HOME}/admin/wd-plaene?tag=${encodeURIComponent(tag || '')}`, { headers: { 'sb-token': tok }, cache: 'no-store', signal: ctrl.signal })
+      // ansicht=admin nur bei sichtbarem Admin-Reiter „Winning Days" (08.10.2026, Nachbesserung A) — der Markt-Block und die Automatik bleiben ohne
+      const r = await fetch(`${WATCHER_HOME}/admin/wd-plaene?tag=${encodeURIComponent(tag || '')}${wdSichtbar() ? '&ansicht=admin' : ''}`, { headers: { 'sb-token': tok }, cache: 'no-store', signal: ctrl.signal })
       clearTimeout(tm)
       const d = await r.json()
       if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
@@ -52407,7 +52413,9 @@
   async function wdApi(method, body, query){
     const { data: { session } } = await supabase.auth.getSession()
     const tok = session?.access_token; if(!tok) throw new Error('nicht angemeldet')
-    const r = await fetch(`${WATCHER_HOME}/admin/wd-plaene${query || ''}`, { method, headers: { 'sb-token': tok, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+    // Admin-Ansicht nur aus dem sichtbaren Admin-Reiter „Winning Days" (08.10.2026, Nachbesserung A): Radar/Markt schicken den Marker nie
+    const q = (query || '') + (wdSichtbar() ? ((query ? '&' : '?') + 'ansicht=admin') : '')
+    const r = await fetch(`${WATCHER_HOME}/admin/wd-plaene${q}`, { method, headers: { 'sb-token': tok, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
     const d = await r.json().catch(() => ({}))
     if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
     return d
@@ -52526,7 +52534,10 @@
     const offen = rows.filter(x => alleNeu ? (x.status !== 'laeuft' && x.status !== 'fertig' && x.status !== 'verpasst') : (x.status === 'geplant' && !x.start_um))
     if(!offen.length) return 0
     const seed = alleNeu ? null : tag + '|' + offen.map(x => x.user_id).sort().join(',')
-    const erg = wdWuerfeln(rows, r, tag, seed, alleNeu, Date.now(), ((_wd.daten || {}).richtung_fest) || {})   // Richtung übernehmen (08.10.2026)
+    // Richtung übernehmen (08.10.2026) — aber nie aus der Admin-Ansicht eines eingeschränkten Logins (Verwalter: _wd.daten kennt nur seine
+    // Gruppe, Nachbesserung A): dann ohne, wie sein PC-Tab bis .1380 würfelte
+    const rf = (typeof window._admNurGruppe === 'function' && window._admNurGruppe()) ? {} : (((_wd.daten || {}).richtung_fest) || {})
+    const erg = wdWuerfeln(rows, r, tag, seed, alleNeu, Date.now(), rf)
     let n = 0
     await Promise.all(offen.map(x => {   // parallel statt nacheinander (23.09.2026)
       const e = erg.get(String(x.user_id)); if(!e) return null
@@ -53942,7 +53953,9 @@
       // gar nichts ladbar → Rückfall auf die Admin-Übersicht (nur Konten, keine fremden Pläne)
       if(!d && !window._admData && typeof window._admLaden === 'function'){ try{ await Promise.race([window._admLaden(), new Promise(res => setTimeout(res, 10000))]) }catch(_){} }
       // Farmer AUS, aber noch nie gestartete Pläne da (alter Stand vor .411) → weg damit, einmal je Ladung
-      if(d && d.rail && !(_wd.regeln && _wd.regeln.scharf) && !_wd.busy && typeof wsFarmerPlaeneLoeschen === 'function'){
+      const nurGruppe = typeof window._admNurGruppe === 'function' && window._admNurGruppe()
+      // Aufräumen „Farmer AUS" nur ohne Einschränkung — ein Verwalter-Tab löscht nie Pläne anderer IDs von selbst (Nachbesserung A, 08.10.2026)
+      if(!nurGruppe && d && d.rail && !(_wd.regeln && _wd.regeln.scharf) && !_wd.busy && typeof wsFarmerPlaeneLoeschen === 'function'){
         try{ const n = await wsFarmerPlaeneLoeschen(tag); if(n){ await wdDatenLaden(tag); _wd.rowsFrisch = await wdRowsLaden(tag); wdSay(`Farmer AUS — ${n} nie gestartete Pläne gelöscht.`, 'ok') } }catch(e){ console.warn('[wd] aufräumen', e) }
       }
       let rows = (_wd.tag === tag && _wd.rows !== rowsRoh && (_wd.rows || []).length && _wd.rows[0] && _wd.rows[0].tag === tag && _wd.rows.some(x => x && x.konten)) && _wd.rowsFrisch ? _wd.rows : rowsRoh
@@ -53950,8 +53963,12 @@
       // Admin-Gruppen (08.10.2026): ein eingeschränkter Login (Verwalter) heilt und zeigt nur Zeilen seiner Gruppe — _wd.daten (Konten) kommt
       // vom Server schon nur für die Gruppe; ohne diesen Filter hielte wdZeilenHeilen fremde Konten für „kein Winning Days" und schriebe
       // deren Tagesplan-Zeilen um. Die Nacht-Automatik am PC (wdTick) liest wdRowsLaden selbst und bleibt unberührt.
-      if(typeof window._admNurGruppe === 'function' && window._admNurGruppe()) rows = rows.filter(x => window._admGruppeOk(x.user_id))
-      try{ rows = await wdZeilenHeilen(tag, rows) }catch(e){ console.warn('[wd] heilen', e) }
+      if(nurGruppe) rows = rows.filter(x => window._admGruppeOk(x.user_id))
+      // Selbstheilung schreibt Tagesplan-Zeilen — für einen Verwalter nur die EIGENE Zeile (Anzeige Gruppe, Ausführung eigene ID, Nachbesserung A)
+      try{
+        if(nurGruppe){ const ich = String(currentUserId || ''); const geheilt = await wdZeilenHeilen(tag, rows.filter(x => String(x.user_id) === ich)); rows = [...rows.filter(x => String(x.user_id) !== ich), ...geheilt] }
+        else rows = await wdZeilenHeilen(tag, rows)
+      }catch(e){ console.warn('[wd] heilen', e) }
       _wd.rows = wdUmsortiertAuflegen(rows.map(wdMitLive)); wdRender(); wdCacheSchreiben(tag)
     }catch(e){ wdSay('Laden fehlgeschlagen: ' + (e.message || e), 'err') }
   }
@@ -62416,7 +62433,7 @@
     // hypothetischen Betrag und dem kleinen Graph"): dieselben Lader (tplLaden → Lauf/live-trades/Kerzen/Bilanz, apdLaden → Delta) mit
     // Sicht „alle" (window._tplSicht sieht den offenen Reiter), dieselben Bausteine tplKachelnHtml/tplZeitstrahlHtml — keine Kopie.
     // Gruppenfilter (08.10.2026): Finns Gruppen-Chip hängt ?gruppe= an (Verwalter bekommt ohnehin nur seine Gruppe)
-    const ids = apdApi('GET', '/ids' + (typeof window._admGruppeQ === 'function' ? window._admGruppeQ('?') : '')).then(d => { _apIds.rows = Array.isArray(d.ids) ? d.ids : []; _apIds.aktiv = !!d.aktiv; _apIds.tag = d.tag || null; _apIds.offen = apIdsOhneBestaetigte(Array.isArray(d.offen) ? d.offen : [], t0); apIdsNotizMerken(d.offen)
+    const ids = apdApi('GET', '/ids?ansicht=admin' + (typeof window._admGruppeQ === 'function' ? window._admGruppeQ('&') : '')).then(d => { _apIds.rows = Array.isArray(d.ids) ? d.ids : []; _apIds.aktiv = !!d.aktiv; _apIds.tag = d.tag || null; _apIds.offen = apIdsOhneBestaetigte(Array.isArray(d.offen) ? d.offen : [], t0); apIdsNotizMerken(d.offen)
       // bestätigte, noch nicht gestartete Pläne aller IDs (heute + morgen), sobald das Backend sie mitliefert — sonst null (Delta heute + warteLokal)
       if(Array.isArray(d.bestaetigt)){ _apIds.bestaetigt = d.bestaetigt.filter(z => !_apIds.zurLokal.has(String(z.plan_id))); _apIds.bestaetigtT0 = t0 } })
       .catch(e => { _apIds.fehler = (e && e.message) || String(e) })

@@ -3331,6 +3331,31 @@ def admin_gruppe_ist_ht(gruppe, daten):
     return any(str(x.get("id")).lower() == gp and not x.get("verwalter_id") for x in (daten or {}).get("gruppen") or ())
 
 
+ADMIN_ANSICHT = "admin"                # ?ansicht=admin: Anfrage kommt aus einem Admin-Reiter (Master 08.10.2026, Nachbesserung A)
+
+
+def _admin_ansicht():
+    """Kommt die Anfrage aus der Admin-Ansicht? ?ansicht=admin (Übersicht, Kapitel, PC-Tabs, Farmer, Payouts …) oder sicht=admin
+    (Trade-Planer-Reiter, Query oder Body). Nur dann gilt die Gruppe eines Verwalters — sonst nur die eigene ID."""
+    if str(request.args.get("ansicht") or "").strip().lower() == ADMIN_ANSICHT:
+        return True
+    s = request.args.get("sicht")
+    if s is None and request.method in ("POST", "PATCH", "DELETE"):
+        b = request.get_json(silent=True)
+        s = b.get("sicht") if isinstance(b, dict) else None
+    return str(s or "").strip().lower() == ADMIN_ANSICHT
+
+
+def _admin_filter_ist_ht():
+    """Gilt Finns ?gruppe= der Gruppe ohne Verwalter (Hermann Technologies)? Dann bleibt die Server-Ausblendung (ADMIN_EXCLUDE) wie
+    bei „Alle"; bei einer Verwalter-Gruppe zeigt der Filter genau die Gruppe, auch einen ausgeblendeten Verwalter (Master 08.10.2026 C).
+    Nicht lesbar → wie HT (Ausblendung bleibt)."""
+    try:
+        return admin_gruppe_ist_ht(request.args.get("gruppe"), admin_gruppen_daten())
+    except Exception:
+        return True
+
+
 def _admin_filter_aus_anfrage():
     """Finns Lese-Filter aus ?gruppe= (nur GET) → frozenset oder None. Nur für Logins OHNE Einschränkung — ein Verwalter bleibt bei
     seiner Gruppe. HT braucht alle IDs (Auth-Liste, 60 s gemerkt); nicht lesbar → Fehler (Aufrufer 502), nie still ungefiltert."""
@@ -5125,7 +5150,14 @@ def _admin_basis():
     elif sicht is not None:
         if not names_ok:
             raise RuntimeError("Auth-API nicht erreichbar — Gruppenfilter nicht sicher trennbar.")
-        excluded_ids = set(excluded_ids) | ((set(names) | {str(a.get("user_id")) for a in accounts}) - set(sicht))
+        alle_ids = set(names) | {str(a.get("user_id")) for a in accounts}
+        if _admin_filter_ist_ht():
+            excluded_ids = set(excluded_ids) | (alle_ids - set(sicht))
+        else:
+            # Verwalter-Gruppe (Master 08.10.2026 C: Chip „Emin" zeigt Emin UND seine Mitglieder): genau die Gruppe, auch wenn der
+            # Server den Verwalter für HT ausblendet; „Nicht enthalten" nennt nur noch Ausgeblendete außerhalb der Gruppe
+            excluded_names = [m for u, m in names.items() if u in excluded_ids and u not in sicht]
+            excluded_ids = alle_ids - set(sicht)
 
     return {"accounts": accounts, "archived": archived, "preds_of": preds_of, "arch_info": arch_info, "fx": fx,
             "by_id": by_id, "live_ids": live_ids, "names": names, "disp": disp,
@@ -10159,6 +10191,11 @@ def _wd_login():
         # Admin-Gruppen (08.10.2026): Einschränkung als MENGE (Verwalter = seine Gruppe, Mitglied = nur er); ohne Einschränkung
         # Finns ?gruppe=-Lesefilter (nur GET). admin_gruppe 60 s gemerkt; fehlt die Tabelle noch, gibt es keine Gruppen.
         sicht, verwalter = admin_sicht_lesen(str(u["id"]))
+        # ANZEIGE ≠ AUSFÜHRUNG (Master 08.10.2026, Nachbesserung A): die Gruppe gilt nur in der Admin-Ansicht (?ansicht=admin bzw.
+        # sicht=admin, das schicken allein die Admin-Reiter). Jede andere Anfrage desselben Logins — der PC-Tab des Verwalters (Start,
+        # Endlesung, Hedge, Abhaken, Radar, Farmer-Automatik …) — sieht und ändert wie bis .1380 nur die eigene ID.
+        if verwalter and not _admin_ansicht():
+            sicht, verwalter = frozenset({str(u["id"])}), False
         if sicht is not None:
             g.admin_nur_uid = str(u["id"])
             g.admin_sicht = sicht
@@ -10188,8 +10225,8 @@ def _wd_personen():
     sicht = _admin_sicht()
     if nur:   # nur eigene Daten (27.09.2026) — seit 08.10.2026 die eigene Gruppe (Verwalter): alle anderen raus
         excluded = set(disp) - set(sicht or {nur})
-    elif sicht is not None:   # Finns ?gruppe=-Filter (08.10.2026) zusätzlich zur Ausblendung
-        excluded = set(excluded) | (set(disp) - set(sicht))
+    elif sicht is not None:   # Finns ?gruppe=-Filter (08.10.2026): HT zusätzlich zur Ausblendung, Verwalter-Gruppe genau die Gruppe (C)
+        excluded = (set(excluded) | (set(disp) - set(sicht))) if _admin_filter_ist_ht() else (set(disp) - set(sicht))
     return disp, excluded
 
 
@@ -12161,6 +12198,8 @@ def admin_wd_plaene():
                     alt_tag = str(o.get("planned_for") or "")
                     if (farmer and o.get("status") == "planned" and not o.get("start_um_gestartet_at") and alt_tag and alt_tag < tag
                             and wd_plan_wegraeumbar(o.get("start_um"))):          # Vorfall 28.09.2026: nie vor/kurz nach dem Start
+                        if nur and str(o.get("user_id")) != str(nur):
+                            continue    # Verwalter-Ansicht (08.10.2026, Nachbesserung A): Aufräumen fremder IDs nie aus seinem Laden
                         try:
                             _sb_anfrage("DELETE", f"{SUPABASE_URL}/rest/v1/trade_plans",
                                             params={"id": f"eq.{o['id']}", "status": "eq.planned", "start_um_gestartet_at": "is.null"},
@@ -14354,7 +14393,7 @@ def konto_balance_darf(uid, mail, konto, admins, gruppe=None):
 def _konto_balance_gruppe(uid, mail):
     """Gruppe des Aufrufers für konto_balance_darf (nur Verwalter, Admin-Gruppen 08.10.2026). Admin braucht sie nicht; nicht lesbar →
     None (dann bleibt es bei Admin oder Besitzer)."""
-    if (mail or "#") in ADMIN_EMAILS:
+    if (mail or "#") in ADMIN_EMAILS or not _admin_ansicht():   # Gruppe nur aus der Admin-Ansicht (Nachbesserung A)
         return None
     try:
         sicht, verwalter = admin_sicht_lesen(str(uid))
@@ -19890,6 +19929,41 @@ def ap_delta_antwort(stand, sicht_uid=None, pc_lebt=None):
     return out
 
 
+def ap_stand_sicht(stand, sicht):
+    """REIN RECHNEND (Admin-Gruppen, Master 08.10.2026 Nachbesserung B: „HT-Gesamtsummen sind HT-Daten"): Stand nur mit den Zeilen der
+    Sicht (eine ID oder eine Menge) — offen/geplant/folgetag/hinweise/heute_beendet/fremd gefiltert und die Basis der laufenden Trades
+    (Delta €/Pkt und € Einsatz) mit denselben Summen wie _ap_stand_laden aus den gefilterten neu gerechnet. Netto, Band, Long/Short,
+    Verlauf und Szenario der Delta-Antwort entstehen danach nur aus dieser Sicht. Für eingeschränkte Logins und Finns Gruppenfilter;
+    der Bot und HT ohne Filter rechnen weiter über alle IDs."""
+    sicht = str(sicht) if isinstance(sicht, (str, int)) else frozenset(str(u) for u in sicht)
+    drin = (lambda z: str((z or {}).get("user_id")) == sicht) if isinstance(sicht, str) else (lambda z: str((z or {}).get("user_id")) in sicht)
+    out = dict(stand or {})
+    for f in ("offen", "geplant", "folgetag", "hinweise", "heute_beendet", "fremd"):
+        if isinstance(out.get(f), list):
+            out[f] = [z for z in out[f] if drin(z)]
+    offen = out.get("offen") or []
+    ds = [z["delta_eur_pkt"] for z in offen if z.get("delta_eur_pkt") is not None]
+    ein = [z["einsatz_eur"] for z in offen if z.get("einsatz_eur") is not None]
+    out.update(basis_netto=round(sum(ds), 3), basis_brutto=round(sum(abs(d) for d in ds), 3),
+               basis_einsatz=round(sum(ein), 1), brutto_einsatz=round(sum(abs(e) for e in ein), 1))
+    return out
+
+
+AP_LAUF_SUMMEN = ("netto_max_abs", "id_misch", "firma_misch", "misch_fenster", "ids_benutzt")
+
+
+def ap_lauf_ohne_summen(erg):
+    """REIN RECHNEND (Nachbesserung B, 08.10.2026): Lauf-Antwort für eingeschränkte Logins — die Listen (schon auf die Sicht gefiltert)
+    bleiben, Summen und Mischungen über alle IDs fallen weg; aus einsatz bleibt nur laufzeit_min (das Einzige, was die Oberfläche
+    liest), aus ausgleich nur die gefilterten Listen."""
+    out = {k: v for k, v in (erg or {}).items() if k not in AP_LAUF_SUMMEN}
+    if isinstance(out.get("einsatz"), dict):
+        out["einsatz"] = {k: v for k, v in out["einsatz"].items() if k == "laufzeit_min"}
+    if isinstance(out.get("ausgleich"), dict):
+        out["ausgleich"] = {k: v for k, v in out["ausgleich"].items() if k in ("offen", "hinweise", "fenster", "auto_start")}
+    return out
+
+
 def _ap_aenderungen_anwenden(stand, aenderungen, quelle, nur_unbestaetigt=False):
     """Schreibt Umplanungen: nur Plan-Zeilen, die noch geplant, ungestartet, Auto-Plan, in der alten Richtung und nicht
     bestätigt-und-fällig sind (Guard in derselben PATCH-Anfrage), danach je Plan eine Zeile in auto_plan_umplanung.
@@ -20518,12 +20592,20 @@ def admin_auto_plan_delta():
             stand["heute_beendet_fehler"] = f"{type(e).__name__}: {e}"
             print(f"[auto-plan] ⚠️ heute beendet: {stand['heute_beendet_fehler']}", flush=True)
         stand["fremd"] = fp_delta_zeilen()        # FREMD-POSITIONEN (08.10.2026): Hand-Positionen ohne Plan, „Braucht dich"
-        antwort = ap_delta_antwort(stand, _ap_sicht_aus_anfrage(admin, uid), pc_lebt=_ap_pc_lebt_gecacht())
+        sicht_d = _ap_sicht_aus_anfrage(admin, uid)
+        nur, gruppe = _ap_gruppe_lesen(uid)
+        # SUMMEN NUR ÜBER DIE SICHT (Master 08.10.2026, Nachbesserung B: „HT-Gesamtsummen sind HT-Daten"): ein eingeschränkter Login
+        # (Verwalter, Mitglied) und Finns Gruppenfilter bekommen Netto/Band/Long/Short/Verlauf/Szenario nur aus ihren Zeilen; eine
+        # normale HT-ID auf der Planer-Seite sieht die Summen wie bisher über alle IDs (Neutralität übergreifend)
+        if sicht_d is not None and ((not admin and nur) or not isinstance(sicht_d, str)):
+            stand = ap_stand_sicht(stand, sicht_d)
+        antwort = ap_delta_antwort(stand, sicht_d, pc_lebt=_ap_pc_lebt_gecacht())
         antwort.setdefault("sicht", "alle")
+        if not admin and nur:   # Bot-Zustand ist HT-weit (letzter Lauf, Zähler) — nur Schalter-Stand
+            antwort["bot"] = {k: (antwort.get("bot") or {}).get(k) for k in ("aktiv", "auto_start", "takt_min", "zielband_pct")}
         # BESTÄTIGEN FÜR ALLE (07.10.2026): alle = darf dieser Login fremde Vorschläge bestätigen/zurücknehmen/löschen (ap_eingriff_sicht;
         # Nicht-Admin ist hier immer im Planer, _ap_zugang). admin_zugang nicht lesbar → vorsichtshalber false.
         # Admin-Gruppen (08.10.2026): ein Verwalter bekommt seine Gruppe — er darf alle Zeilen, die er sieht (alle true, Backend prüft je Plan)
-        nur, gruppe = _ap_gruppe_lesen(uid)
         e_sicht = ap_eingriff_sicht(admin, uid, True, nur, _ap_sicht_param(), gruppe)
         return jsonify(dict(antwort, admin=admin, alle=e_sicht is None or not isinstance(e_sicht, str)))
     except Exception as e:
@@ -20573,6 +20655,8 @@ def admin_auto_plan_ids():
         if err2:
             return err2
         nur, gruppe = _ap_gruppe_lesen(uid)
+        if gruppe and not _admin_ansicht():
+            gruppe = None                     # Gruppe nur aus der Admin-Ansicht (?ansicht=admin, Nachbesserung A)
         if nur and not gruppe:
             return jsonify({"ok": False, "msg": "Diese ID sieht im Admin nur sich selbst"}), 403
         if gruppe and request.method == "POST":
@@ -20616,8 +20700,10 @@ def admin_auto_plan_ids():
         gepl[str(z.get("user_id"))] = gepl.get(str(z.get("user_id")), 0) + 1
     for z in erg.get("ausgelassen") or []:
         ausg[str(z.get("user_id"))] = ausg.get(str(z.get("user_id")), 0) + 1
-    # Verwalter: seine Gruppe, auch wenn der Server sie für HT ausblendet (ADMIN_EXCLUDE); Finn mit ?gruppe=: nur diese Gruppe
-    basis = set(ap_ids_laden(() if gruppe else aus)) | set(drin)
+    # Verwalter: seine Gruppe, auch wenn der Server sie für HT ausblendet (ADMIN_EXCLUDE); Finn mit ?gruppe=: nur diese Gruppe — bei einer
+    # Verwalter-Gruppe ebenfalls ohne die Ausblendung (Master 08.10.2026 C), bei HT mit
+    ohne_aus = bool(gruppe) or (lese_sicht is not None and not _admin_filter_ist_ht())
+    basis = set(ap_ids_laden(() if ohne_aus else aus)) | set(drin)
     if lese_sicht is not None:
         basis &= set(lese_sicht)
     alle = sorted(basis, key=lambda u: namen.get(u, u).lower())
@@ -20636,7 +20722,7 @@ def admin_auto_plan_ids():
                                      "status": "eq.planned", "auto_plan": "eq.true", "auto_bestaetigt_at": "is.null", "start_um": "gte." + seit,
                                      "order": "start_um.asc"})
         pl = [p for p in pl if (str(p.get("user_id")) in gruppe if gruppe
-                                else str(p.get("user_id")) not in aus and admin_in_sicht(p.get("user_id"), lese_sicht))]
+                                else (ohne_aus or str(p.get("user_id")) not in aus) and admin_in_sicht(p.get("user_id"), lese_sicht))]
         acc_ids = sorted({str(p.get("master_account_id")) for p in pl if p.get("master_account_id")})
         accs, letzt_je = {}, {}
         for j in range(0, len(acc_ids), 150):
@@ -22087,8 +22173,11 @@ def admin_auto_plan():
             erg = ap_ohne_archiv(erg, _ap_archiviert())   # seit dem Lauf archiviert → nicht mehr in Braucht dich (08.10.2026)
         except Exception as e:
             print(f"[auto-plan] ⚠️ Archiv-Filter: {type(e).__name__}: {e}", flush=True)
+        letzter = ap_sicht(erg, sicht) if sicht is not None else erg
+        if not admin and _ap_gruppe_lesen(uid)[0]:
+            letzter = ap_lauf_ohne_summen(letzter)   # Nachbesserung B (08.10.2026): Eingeschränkte bekommen keine HT-Summen
         return jsonify({"ok": True, "admin": admin, "aktiv": bool(reg.get("aktiv")), "ids": len(reg.get("user_ids") or []),
-                        "im_planer": im_planer or admin, "letzter": ap_sicht(erg, sicht) if sicht is not None else erg,
+                        "im_planer": im_planer or admin, "letzter": letzter,
                         "sicht": "alle" if sicht is None else "eigene" if isinstance(sicht, str) else "gruppe", "info": _ap_info})
     body = request.get_json(silent=True) or {}
     tag = str(body.get("tag") or "").strip() or None
@@ -22103,6 +22192,8 @@ def admin_auto_plan():
     try:
         erg = ap_planen(tag, trocken=bool(body.get("trocken")), quelle="hand", seed=seed, sicht_uid=sicht,
                         fingerabdruck=str(body.get("fingerabdruck") or "").strip() or None, ids=ids)
+        if not admin and _ap_gruppe_lesen(uid)[0]:
+            erg = ap_lauf_ohne_summen(erg)           # Nachbesserung B (08.10.2026)
         return jsonify(dict(erg, admin=admin))
     except Exception as e:
         return jsonify({"ok": False, "admin": admin, "msg": f"{type(e).__name__}: {e}"}), 502
