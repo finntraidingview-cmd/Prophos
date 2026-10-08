@@ -153,6 +153,37 @@ def main():
                 gegen_ok = False
     check(gegen_ok, "Trade 2 nie gegenläufig in der Laufzeit eines geplanten Plans einer anderen ID derselben Firma")
 
+    # ── 3b automatisch abhaken (Finn 08.10.2026: nach der Prüfung direkt erledigt, nicht mehr im Radar abhaken) ───────────────
+    rev = [dict(t1, id="r-t1", route="tsv2", status="review", updated_at="2026-10-09T08:00:00Z", master_pl=None, konto_typ=None),
+           {"id": "r-t2", "route": "tsv2", "status": "review", "user_id": U1, "updated_at": "2026-10-09T13:00:00Z", "ended_at": None,
+            "mt5_baseline": {"kette": {"nr": 2, "vor": "r-t1", "verlust_grenze": 4700, "balance_start_tag": 150000},
+                             "tv": {"balance_start": 147500}, "final": {"balance_end": 145480, "quelle": "puls", "plattform": "tsx"}}},
+           dict(t1, id="r-warte", status="review", mt5_baseline=dict(t1["mt5_baseline"], final={"quelle": "hand", "balance_end": 1})),
+           {"id": "r-t2b", "route": "tsv2", "status": "review", "user_id": U1, "updated_at": "y", "ended_at": None,
+            "mt5_baseline": {"kette": {"nr": 2, "vor": "r-x", "verlust_grenze": 4700, "tagesziel": 4500, "balance_start_tag": 150000},
+                             "tv": {"balance_start": 152650}, "final": {"balance_end": 145480, "quelle": "puls", "plattform": "tsx"}}},
+           dict(t1, id="r-relativ", route="tsv2", status="review", updated_at="x",
+                mt5_baseline=dict(t1["mt5_baseline"], final={"quelle": "puls", "plattform": "tsx", "balance_end": 2000}))]
+    upds, gruende_ab = [], []
+    a["_ap_kette_grund"] = lambda t_, g: gruende_ab.append((t_["id"], g))
+    a["sb_select"] = lambda t, prm: [dict(x) for x in rev] if prm.get("status") == "eq.review" else []
+    a["sb_update"] = lambda t, f, u: upds.append((f, u)) or [u]
+    weg = a["ap_kette_abhaken"](jetzt)
+    u1 = next((u for f, u in upds if f["id"] == "eq.r-t1"), {})
+    u2 = next((u for f, u in upds if f["id"] == "eq.r-t2"), {})
+    check(sorted(weg) == ["r-t1", "r-t2", "r-t2b"] and u1.get("status") == "completed" and u1.get("master_pl") == -2500.0
+          and u1.get("pl_quelle") == "tv" and u1.get("konto_typ") == "challenge" and not u1.get("blown")
+          and all(f.get("status") == "eq.review" and f.get("updated_at") for f, _u in upds),
+          f"Trade 1 nach genauer Lesung automatisch erledigt (P&L −2.500, pl_quelle tv, Sperre review/updated_at) — {weg}")
+    check(u2.get("master_pl") == -2020.0 and u2.get("blown") is True,
+          "Trade 2: −2.020 nach −2.500 = Tag −4.520 → blown (Tag zählt, nicht nur der eigene P&L)")
+    u2b = next((u for f, u in upds if f["id"] == "eq.r-t2b"), {})
+    check(u2b.get("master_pl") == -7170.0 and u2b.get("blown") is True,
+          f"Trade 2 nach +2.650 blowt mit −7.170 eigenem P&L → trotzdem plausibel, abgehakt + blown ({u2b.get('master_pl')})")
+    check("eq.r-warte" not in [f["id"] for f, _u in upds], "ohne genaue Puls-Lesung bleibt der Trade in Überprüfen")
+    check("eq.r-relativ" not in [f["id"] for f, _u in upds] and any(i == "r-relativ" and "unplausibel" in g for i, g in gruende_ab),
+          "Start absolut 150.000, Ende relativ 2.000 → nicht abgehakt, Grund „unplausibel — von Hand abhaken“ (Prüfer Slave 2)")
+
     # ── 4 Trade 1 nur bis 11:00 dt im Planer ──────────────────────────────────────────────────────────────────────────────
     Z = {"fenster": [["00:00", "14:30", 50], ["14:30", "16:30", 50]], "start_bis": "16:30"}
     tr = [{"key": f"u{i}|topstep", "user": f"u{i}", "gruppe": f"u{i}|topstep", "fkey": "topstep", "dauer_min": 2, "bis_min": 660} for i in range(6)]

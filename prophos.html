@@ -24002,7 +24002,7 @@
     // gewürfelt, damit alle Tabs dieselbe Zeit sehen und nicht zweimal einloggen. Nur vor dem ersten Versuch.
     const vers0 = Number(fin.puls_versuche) || (fin.puls_at ? 1 : 0)
     const endeMs = Date.parse(fin.at || p.endedAt || '') || 0
-    if(!vers0 && endeMs && jetzt < endeMs + tvV2NachleseMs(p.id)) return `Nachlesung ab ${new Date(endeMs + tvV2NachleseMs(p.id)).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} (${tpKetteNr(p) === 1 ? 'Topstep-Kette: gleich nach dem Ende, Trade 2 wartet darauf' : '1–120 min Zufall'})`
+    if(!vers0 && endeMs && jetzt < endeMs + tvV2NachleseMs(p.id)) return `Nachlesung ab ${new Date(endeMs + tvV2NachleseMs(p.id)).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} (${tpKetteNr(p) ? 'Topstep-Kette: 1–35 min Zufall, danach automatisch abgehakt' : '1–120 min Zufall'})`
     if(fin.puls_aufgegeben) return 'aufgegeben: ' + String(fin.puls_fehler || '')
     // Login-Bremse (30.09.2026): nach einem Login-/Verbindungsfehler 30 min Ruhe, nach zweien nur noch „Jetzt lesen" von Hand
     const lb = tvV2LoginBremse(fin, jetzt)
@@ -24049,8 +24049,10 @@
     let h = 2166136261; for(const ch of String(id || '')) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0
     // TOPSTEP-KETTE (08.10.2026, Finn: „nachdem Trade 1 abgeschlossen ist, muss die Balance ganz genau gelesen werden, und dann von der
     // Balance der nächste geplant werden"): Trade 2 wartet auf genau diese Lesung — Ketten-Trade 1 liest nach 30–120 s statt 1–120 min
-    let k1 = false; try{ const pk = tradePlans.find(x => String(x.id) === String(id)); k1 = tpKetteNr(pk) === 1 }catch(_){ k1 = false }
-    return k1 ? (30 + (h % 91)) * 1000 : (60 + (h % 7141)) * 1000
+    // Finn 08.10.2026 später: „wird dann innerhalb von 1 bis 35 Minuten per Zufallsprinzip überprüft" — Kettentrades (1 und 2) 1–35 min,
+    // danach hakt das Backend sie selbst ab (ap_kette_abhaken) und plant Trade 2
+    let k = null; try{ const pk = tradePlans.find(x => String(x.id) === String(id)); k = tpKetteNr(pk) }catch(_){ k = null }
+    return k ? (60 + (h % 2041)) * 1000 : (60 + (h % 7141)) * 1000
   }
   // Topstep-Kette: 1 = Trade 1, 2 = Trade 2 (vom Backend aus Trade 1 gerechnet), sonst null — Marke mt5_baseline.kette (app.py ap_planen/ap_kette_tick)
   function tpKetteNr(p){
@@ -41679,7 +41681,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1329'
+  const OS_TAB_BUILD = '2026-09-22.1330'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

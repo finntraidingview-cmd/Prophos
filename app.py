@@ -14468,6 +14468,7 @@ def _ap_runden(x, schritt):
 # Aktiv, sobald die Firmen-Regel einen Block "kette" hat (sql/2026-10-08_topstep_kette.sql); Werte darin überschreiben den Standard.
 AP_KETTE_STANDARD = {"t1_bis": "11:00", "t1_sl": [1950, 2650], "t1_tp": [1950, 2650], "t2_ab": "11:00", "t2_bis": "19:30", "tagesziel_usd": 4500, "blow_puffer_usd": 200, "menge": [2, 3], "t2_menge": [3, 4], "puffer": [25, 40], "t2_abstand_min": [5, 20], "t2_streuung_min": [0, 45]}
 AP_KETTE_TXT = "Topstep-Kette"
+AP_KETTE_DD_STANDARD = 4500.0           # Rückfall für den Blow-Vergleich beim Abhaken, wenn der Plan keine verlust_grenze trägt
 
 
 def ap_kette_regel(regel):
@@ -19082,12 +19083,13 @@ def ap_kette_tick(jetzt=None, rnd=None):
     tz = _ap_tz(AP_TZ_TAG)
     d = jetzt.astimezone(tz)
     mitternacht = datetime(d.year, d.month, d.day, tzinfo=tz)
+    abgehakt = ap_kette_abhaken(jetzt)
     t1s = [p for p in (sb_select("trade_plans", {
         "select": "id,user_id,master_account_id,master_firm,master_name,master_symbol,richtung,auto_plan,auto_bestaetigt_at,ended_at,"
                   "planned_for,status,mt5_baseline", "route": "eq.tsv2", "status": "in.(review,completed)",
         "ended_at": "gte." + mitternacht.isoformat(), "mt5_baseline->kette->>nr": "eq.1"}) or [])]
     if not t1s:
-        return {"neu": []}
+        return {"neu": [], "abgehakt": abgehakt}
     t2s = sb_select("trade_plans", {"select": "id,vor:mt5_baseline->kette->>vor",
                                     "mt5_baseline->kette->>vor": "in.(" + ",".join(str(p["id"]) for p in t1s) + ")"}) or []
     schon = {str(x.get("vor")) for x in t2s}
@@ -19167,7 +19169,64 @@ def ap_kette_tick(jetzt=None, rnd=None):
         print(f"[auto-plan] Topstep-Kette: Trade 2 zu {pid[:8]} — E1 {werte['e1']:+.0f} $ → TP {werte['tp']} / SL {werte['sl']} $, "
               f"{r} {werte['menge']} NQ, Start {start.astimezone(tz).strftime('%H:%M')} dt", flush=True)
     _ap_kette["erledigt"] = gruende
-    return {"neu": neu, "gruende": gruende}
+    return {"neu": neu, "gruende": gruende, "abgehakt": abgehakt}
+
+
+def ap_kette_abhaken(jetzt=None):
+    """AUTOMATISCH ABHAKEN (Finn 08.10.2026: „die Trades bei Topstep werden automatisch abgehakt — läuft durch, wird in 1–35 min per
+    Zufall überprüft, und sobald überprüft, direkt für den zweiten Trade freigeschaltet, sodass ich sie im Radar nicht mehr abhaken
+    muss"): Ketten-Trades (tsv2, mt5_baseline.kette nr 1/2) in Überprüfen, deren Balance Puls GENAU nachgelesen hat (ap_kette_t1_fertig),
+    gehen auf Erledigt — wie „Erledigt" im Radar (_wd_erledigt_upd): master_pl = Balance danach − davor ($), pl_quelle 'tv',
+    completed_at, ended_at falls leer; Blow (Tagesverlust ab Tagesstart ≥ DD − 50 $) setzt blown am Plan (das Konto archiviert Finn wie bisher im
+    Radar). Optimistische Sperre über updated_at. → [plan_id …]"""
+    jetzt = jetzt or datetime.now(timezone.utc)
+    rows = sb_select("trade_plans", {"select": "id,route,status,user_id,master_account_id,master_firm,master_pl,mt5_baseline,updated_at,"
+                                               "ended_at,completed_at,konto_typ", "route": "eq.tsv2", "status": "eq.review",
+                                     "mt5_baseline->kette->>nr": "in.(1,2)"}) or []
+    fertig = []
+    for p in rows:
+        bal, grund = ap_kette_t1_fertig(p)
+        if grund:
+            continue
+        jetzt_iso = jetzt.isoformat().replace("+00:00", "Z")
+        mpl = round(float(bal[1]) - float(bal[0]), 2)
+        k = (p.get("mt5_baseline") or {}).get("kette") or {}
+        # Prüfer Slave 2 zu ed079ca: dieselbe Plausibilitätsgrenze wie ap_kette_trade2 — passen Start- und End-Balance nicht zusammen
+        # (relativ gegen absolut, z. B. Express 0-basiert), wäre P&L −148.000 $ und „geblowt" ohne dass jemand hinschaut. Gemessen am
+        # TAG (Trade 2: ab balance_start_tag): oberhalb max(SL/TP Trade 1, Tagesziel) + 1.500 bzw. unterhalb −(Verlustgrenze + 1.500)
+        # bleibt der Trade in Überprüfen, Grund an Trade 1 bzw. am Plan selbst
+        tag0_p = _wd_num(k.get("balance_start_tag")) or float(bal[0])
+        e_tag = float(bal[1]) - tag0_p
+        oben = max(float(AP_KETTE_STANDARD["t1_sl"][1]), float(AP_KETTE_STANDARD["t1_tp"][1]),
+                   float(k.get("tagesziel") or AP_KETTE_STANDARD["tagesziel_usd"])) + 1500
+        unten = -(float(k.get("verlust_grenze") or (AP_KETTE_DD_STANDARD + AP_KETTE_STANDARD["blow_puffer_usd"])) + 1500)
+        vg = float(k.get("verlust_grenze") or 4700)          # eigener P&L von Trade 2 reicht bis SL2 = Verlustgrenze + E1 bzw. TP2
+        if not (unten <= e_tag <= oben) or not (unten - vg <= mpl <= oben + vg):
+            _ap_kette_grund(p, f"Ergebnis unplausibel ({mpl:+,.0f} $, Tag {e_tag:+,.0f} $, Balance-Basis prüfen) — von Hand abhaken"
+                            .replace(",", "."))
+            continue
+        upd, fehler = _wd_erledigt_upd(p, mpl, None, jetzt_iso, _cme_handelstag())
+        if fehler:
+            continue
+        upd["pl_quelle"] = "tv"
+        dd = AP_KETTE_DD_STANDARD
+        if k.get("verlust_grenze"):
+            dd = float(k["verlust_grenze"]) - float(AP_KETTE_STANDARD["blow_puffer_usd"])
+        if e_tag <= -(dd - 50):                   # Trade 2: der TAG zählt (Tagesstart), nicht sein eigener P&L
+            upd["blown"] = True
+        if not p.get("konto_typ"):
+            upd["konto_typ"] = "challenge"            # Kette gibt es nur in der Challenge (Topstep Combine)
+        filt = {"id": f"eq.{p['id']}", "status": "eq.review"}
+        if p.get("updated_at"):
+            filt["updated_at"] = f"eq.{p['updated_at']}"
+        try:
+            if sb_update("trade_plans", filt, upd):
+                fertig.append(str(p["id"]))
+                print(f"[auto-plan] Topstep-Kette: {str(p['id'])[:8]} automatisch abgehakt — P&L {mpl:+.2f} $"
+                      f"{' (geblowt)' if upd.get('blown') else ''}", flush=True)
+        except Exception as e:
+            print(f"[auto-plan] ⚠️ Topstep-Kette abhaken {str(p['id'])[:8]}: {type(e).__name__}: {e}", flush=True)
+    return fertig
 
 
 def _ap_kette_grund(t1, grund):
