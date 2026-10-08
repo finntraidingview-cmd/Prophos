@@ -14528,6 +14528,8 @@ def ap_konto_rechnen(regel, phase, balance, u):
     # regel.je_groesse = {"50000": {"phasen": {phase1: {...}, phase2: {...}}}} ersetzt für genau diese Größe die Phasen-Werte,
     # ohne Skalierung. Fehlt dort die Phase, gibt es KEINEN Rückfall auf die 100k-Werte (sonst SL 2.500 auf einem 50k-Konto).
     jg = (regel.get("je_groesse") or {}).get(str(int(groesse))) if groesse else None
+    if jg and jg.get("keine_werte"):
+        return None, jg.get("grund") or f"{int(groesse) // 1000}k: Werte fehlen"   # Flex/Standard ohne Finns Werte (08.10.2026)
     if jg:
         # Kernwerte der Größe (ziel_pct, dd_pct, boden …) gehen der Firma vor — FundingPips 50k Flex: Ziel P1 10 %, Max-Verlust 12 %
         regel = dict(regel, **{k: v for k, v in jg.items() if k != "phasen"})
@@ -14625,7 +14627,7 @@ def ap_boden_konto(regel, phase, balance, peak=None):
     if groesse is None:
         return leer
     jg = (regel.get("je_groesse") or {}).get(str(int(groesse)))
-    if jg:
+    if jg and not jg.get("keine_werte"):
         # 08.10.2026: Kernwerte je Größe (FundingPips 50k Flex, Max-Verlust 12 %) — derselbe Boden wie im Planer
         regel = dict(regel, **{k: v for k, v in jg.items() if k != "phasen"})
         ph = (jg.get("phasen") or {}).get(phase) or {}
@@ -14836,6 +14838,49 @@ def ap_consistency_etappe(ziel_pct, konto, groesse):
     return round(float(groesse) * float(ziel_pct) / 100.0 * float(pct) / 100.0)
 
 
+def ap_konto_flex(regel, konto, balance):
+    """REIN RECHNEND (Finn 08.10.2026: „bei allen Accounts, wo das Maximum Drawdown 12 % vom Initial Balance ist — das ist alles Flex,
+    die anderen sind in Zukunft alles Neues immer Standard"): None ohne regel.flex, sonst True/False. Anfangsgröße = starting_balance,
+    sonst account_size, sonst die Größe, die der Planer aus der Balance erkennt (ap_groesse); Flex ab max_drawdown ≥ ab_dd_pct %
+    (Standard 12) davon (1 $ Toleranz). Ohne max_drawdown oder Größe: Standard."""
+    fx = (regel or {}).get("flex")
+    if not isinstance(fx, dict):
+        return None
+    k = konto or {}
+    dd = _wd_num(k.get("max_drawdown"))
+    start = _wd_num(k.get("starting_balance")) or _wd_num(k.get("account_size")) or \
+        (ap_groesse(regel.get("groessen"), balance) if balance else None)
+    if not dd or not start:
+        return False
+    return dd >= float(fx.get("ab_dd_pct") or 12) / 100.0 * float(start) - 1
+
+
+def ap_regel_flex(regel, konto, balance):
+    """REIN RECHNEND: Firmen-Regel für DIESES Konto nach Flex/Standard (s. ap_konto_flex). Flex: je_groesse = flex.je_groesse, dd_pct
+    = flex.dd_pct (Boden 12 %); Standard: je_groesse der Firma, Phasen-Werte nur für standard_groessen. Fehlen für die erkannte Größe
+    die Werte (Flex ohne Block, Standard außerhalb standard_groessen), wird je_groesse[g] = {keine_werte, grund}: ap_konto_rechnen lässt
+    das Konto mit Grund aus (Kernwerte nur von Finn — nicht raten), ap_boden_konto rechnet mit den Kernwerten. Ohne flex: unverändert."""
+    flex = ap_konto_flex(regel, konto, balance)
+    if flex is None:
+        return regel
+    fx = regel["flex"]
+    g = ap_groesse(regel.get("groessen"), balance) if balance else None
+    name = str((konto or {}).get("firm") or ((regel.get("namen") or ["Firma"])[0])).strip()
+    if flex:
+        je = dict(fx.get("je_groesse") or {})
+        neu = dict(regel, je_groesse=je, flex_konto=True)
+        if fx.get("dd_pct"):
+            neu["dd_pct"] = fx["dd_pct"]
+        if g and str(int(g)) not in je:
+            je[str(int(g))] = {"keine_werte": True, "grund": f"{name} {int(g) // 1000}k Flex: Werte fehlen"}
+        return neu
+    je = dict(regel.get("je_groesse") or {})
+    std = [int(x) for x in (regel.get("standard_groessen") or [])]
+    if g and std and int(g) not in std and str(int(g)) not in je:
+        je[str(int(g))] = {"keine_werte": True, "grund": f"{name} {int(g) // 1000}k Standard: Werte fehlen"}
+    return dict(regel, je_groesse=je, flex_konto=False)
+
+
 def ap_regel_konto(regel, konto, balance):
     """Firmen-Regel mit der Consistency des Kontos (07.10.2026): phasen.challenge.tp_max = consistency_pct × Ziel-$, die TP-Spanne
     rückt um dieselbe Differenz mit (Tradeify 3.600 [3.450, 3.550] → 50 %: 4.500 [4.350, 4.450]). Ohne consistency_pct oder ohne
@@ -14843,6 +14888,8 @@ def ap_regel_konto(regel, konto, balance):
     # 07.10.2026 (Finn, FundingPips-Konto …9722 auf dem ALTEN Plan 10 %/5 %, Regel seit Kernwerten 8 %/5 %): accounts.ziel_pct_konto
     # {"phase1": 10, …} überschreibt je Phase den ziel_pct der Regel — nur für dieses Konto, neue Konten bleiben bei der Regel.
     # Ziel-Wache (zw_tick) und Planer gehen beide hier durch, damit Tag und Plan dasselbe Ziel sehen.
+    if isinstance((regel or {}).get("flex"), dict):
+        regel = ap_regel_flex(regel, konto, balance)   # FundingPips Flex (max_drawdown ≥ 12 %) / Standard je Konto (Finn 08.10.2026)
     zk = (konto or {}).get("ziel_pct_konto")
     if isinstance(zk, dict) and any(_wd_num(v) is not None for v in zk.values()):
         zp_alt = regel.get("ziel_pct") if isinstance((regel or {}).get("ziel_pct"), dict) else {}
@@ -15045,7 +15092,7 @@ def _ap_archiviert():
     return out
 
 
-AP_KONTO_FELDER = ("id,user_id,name,firm,account_type,external_id,max_drawdown,topstep_balance,topstep_last_check,"
+AP_KONTO_FELDER = ("id,user_id,name,firm,account_type,external_id,max_drawdown,starting_balance,account_size,topstep_balance,topstep_last_check,"
                    "meta_api_balance,meta_api_last_check,tv_balance,tv_balance_at,consistency_pct,ziel_pct_konto,auto_planer")
 AP_KONTO_FELDER_OHNE_CONS = AP_KONTO_FELDER.replace(",consistency_pct", "")
 
