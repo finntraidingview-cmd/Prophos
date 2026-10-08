@@ -6,8 +6,8 @@ nicht sein … über den Tag verteilen. Damit weniger Klumpenrisiko. Aber auch h
 Aufruf:  python3 tools/selftest_auto_verteilen.py
 Ohne Netz, Platzhalter-IDs. Geprüft: ap_zeiten_verteilen hält je ID × Firma ≥ AP_ABSTAND_ID_FIRMA_MIN und je ID ≥ AP_ABSTAND_ID_MIN
 (Start zu Start, über viele Seeds), auch gegen schon geplante Pläne (bestehend[gruppe]); fremde IDs dürfen dicht daneben (Takt bleibt
-gemischt); enges Fenster → alles gesetzt, gelockert, PC-Regel hält, kein Fehler. ap_richtungen_delta: eine Richtung je gruppe
-(auch mit Richtungsschutz auf einem Teil), Apex gegen FundedNext ausgeglichen (Band hält). Große-Folge zählt Zeit-Nähe auch mit
+gemischt); enges Fenster → alles gesetzt, gelockert, PC-Regel hält, kein Fehler. ap_richtungen_delta: eine Richtung je BLOCK (Teile
+einer gruppe mit < 90 min Startabstand, seit 09.10.2026; auch mit Richtungsschutz auf einem Teil), Band hält. Große-Folge zählt Zeit-Nähe auch mit
 Gegenrichtung dazwischen. _ap_tranche_frei: der Bot schiebt nicht näher zusammen. ap_planen-Rauchlauf: drei FundedNext-Konten einer
 ID ≥ 60 min auseinander, eine Richtung.
 Seit 08.10.2026 ~12:00 Dubai (Slave-Terminal 4, Finn: „Die zwei Regeln mit 60/20 min sind komplett dumm … Nur eben nicht gleichzeitig"):
@@ -102,14 +102,16 @@ def main():
     T = {t["key"]: {"fest": None, "user": "ina", "firma": t["gruppe"].split("|")[1], "start": m[t["key"]], "delta_abs": 1.0,
                     "gruppe": t["gruppe"]} for t in ina}
     r, netto = a["ap_richtungen_delta"](T, 0.0, 0.0, random.Random(3), 50)
-    ra = {r[k] for k in T if "apex" in k}
-    rf = {r[k] for k in T if "fundednext" in k}
-    check(len(ra) == 1 and len(rf) == 1, f"eine Richtung je ID × Firma trotz verteilter Starts (Apex {ra}, FundedNext {rf})")
-    check(ra != rf, f"Apex gegen FundedNext ausgeglichen (Band hält, |Netto| max {netto:g} statt 6)")
+    # seit 09.10.2026: gegenläufig nur mit ≥ 90 min Startabstand derselben ID × Firma (ap_richtung_bloecke)
+    nah_gegen = [(k1, k2) for k1 in T for k2 in T if k1 < k2 and T[k1]["gruppe"] == T[k2]["gruppe"]
+                 and abs(T[k1]["start"] - T[k2]["start"]) < 90 and r[k1] != r[k2]]
+    check(not nah_gegen, f"eine Richtung je Block (< 90 min) trotz verteilter Starts ({nah_gegen})")
+    check(netto <= 2, f"Band hält (|Netto| max {netto:g} statt 6)")
     T2 = dict(T)
     T2["ina|apex#2"] = dict(T["ina|apex#2"], fest="sell")
     r2, _ = a["ap_richtungen_delta"](T2, 0.0, 0.0, random.Random(3), 50)
-    check({r2[k] for k in T2 if "apex" in k} == {"sell"}, "Richtungsschutz auf EINEM Teil legt die ganze ID × Firma fest (kein Gegenhedge)")
+    bl = a["ap_richtung_bloecke"](T2)
+    check({r2[k] for k in T2 if bl[k] == bl["ina|apex#2"]} == {"sell"}, "Richtungsschutz auf EINEM Teil legt seinen ganzen Block fest (kein Gegenhedge)")
 
     # ── 5 Große-Folge mit Zeit-Nähe ───────────────────────────────────────────────────────────────────────────────────────
     lage = a["ap_einsatz_lage"]
@@ -161,7 +163,9 @@ def main():
     mins = [int(g["start"][:2]) * 60 + int(g["start"][3:]) for g in fn]
     check(erg.get("ok") and len(fn) == 3, f"ap_planen: drei FundedNext-Konten der ID geplant ({len(fn)}; {erg.get('msg') or 'ok'})")
     check(all(b - a_ >= PC for a_, b in zip(mins, mins[1:])), f"ap_planen: Starts ≥ {PC} min auseinander (PC) ({[g['start'] for g in fn]})")
-    check(len({g["richtung"] for g in fn}) == 1, f"ap_planen: eine Richtung je ID × Firma ({[g['richtung'] for g in fn]})")
+    check(all(g1["richtung"] == g2["richtung"] for i_, g1 in enumerate(fn) for g2 in fn[i_ + 1:]
+              if abs(int(g1["start"][:2]) * 60 + int(g1["start"][3:]) - int(g2["start"][:2]) * 60 - int(g2["start"][3:])) < 89),
+          f"ap_planen: gegenläufig nur mit ≥ 90 min Abstand je ID × Firma ({[(g['start'], g['richtung']) for g in fn]})")
     eigen = sorted(int(g["start"][:2]) * 60 + int(g["start"][3:]) for g in erg.get("geplant", []) if g["user_id"] == sd.U1)
     check(all(b - a_ >= PC for a_, b in zip(eigen, eigen[1:])), f"ap_planen: alle Pläne der ID ≥ {PC} min auseinander (PC)")
     check(not geschrieben["post"] and not inserts, "Probelauf schreibt nichts")

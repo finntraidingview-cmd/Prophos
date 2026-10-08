@@ -64,7 +64,7 @@ def main():
     for s in range(4):
         r, _m, w = a["ap_richtungen_delta"](tr, 0, 0, random.Random(s), 25, einsatz=EK, mit_wert=True)
         check(r["A|tradeify#1"] == r["A|tradeify#2"] and r["B|apex"] != r["A|tradeify#1"] and r["C|fundednext"] != r["A|tradeify#1"]
-              and w[3] == 0, f"aufgeteilte Tranche (seed {s}): beide Tradeify gleich gerichtet, Gegengewicht dazwischen")   # w[3] = ID-Mischung (seit 08.10.2026 Firmen-Mischung an Stelle 2)
+              and w[4] == 0, f"aufgeteilte Tranche (seed {s}): beide Tradeify gleich gerichtet (60 min < 90 = ein Block), Gegengewicht dazwischen")   # w[4] = ID-Mischung (seit 09.10.2026 „ID × Firma einseitig" an Stelle 2)
     tr = {"A|tradeify#1": T("sell", "A", "tradeify", 600, 3.0, 720, "A|tradeify"),
           "A|tradeify#2": T(None, "A", "tradeify", 660, 3.0, 720, "A|tradeify")}
     r, _m = a["ap_richtungen_delta"](tr, 0, 0, random.Random(2), 25, einsatz=EK)
