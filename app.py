@@ -10379,6 +10379,70 @@ def balance_lese_weg(firm, mt5_login="", external_id=""):
     return "mt5_balance", login
 
 
+MT5_ORT_FRISCH_S = 120   # mt5_live-Zeile gilt als lebend (Leerlauf-Push der PC-Tabs alle 30 s)
+
+
+def mt5_login_ort(login, rows, jetzt):
+    """REIN RECHNEND (testbar): hat ein lebender PC der ID eine Echo-Instanz mit diesem MT5-Login? (08.10.2026, Finn: „Ich lade gerade
+    ein Terminal bei Chris neu, es lädt seit 5 Minuten nichts" — Chris' mt5_balance für 14270909 verfiel nach 180 s, die Instanz
+    schrieb seit 05.10. nicht mehr; 14 Tage: 21 von 67 MT5-Lese-/Terminal-Signalen verfielen so ohne Hinweis). Gleiche Regel wie
+    mt5LoginOrt im Frontend. rows = mt5_live-Zeilen DER ID {pc_name, instance, master_login, master_expected, updated_at};
+    jetzt = datetime (UTC). → ('da', None) | ('weg', zuletzt {pc, instanz, at} oder None) | (None, None) = unklar → Signal wie bisher.
+    Unklar: kein lebender PC der ID (dann meldet der Signal-Weg „offline") oder eine lebende Instanz ohne bekannten Login (Build vor
+    .1318 schreibt kein master_expected, Instanz ohne Snapshot)."""
+    login = str(login or "").strip()
+    if not login or rows is None:
+        return None, None
+
+    def _at(x):
+        try:
+            return datetime.fromisoformat(str(x.get("updated_at") or "").replace("Z", "+00:00"))
+        except ValueError:
+            return None
+
+    def frisch(x):
+        a = _at(x)
+        return a is not None and (jetzt - a).total_seconds() < MT5_ORT_FRISCH_S
+
+    def passt(x):
+        return str(x.get("master_login") or "") == login or str(x.get("master_expected") or "") == login
+
+    if any(frisch(x) and passt(x) for x in rows):
+        return "da", None
+    lebend = [x for x in rows if frisch(x)]
+    if not lebend or any(not x.get("master_login") and not x.get("master_expected") for x in lebend):
+        return None, None
+    alt = sorted((x for x in rows if passt(x) and _at(x)), key=_at, reverse=True)
+    z = alt[0] if alt else None
+    return "weg", ({"pc": z.get("pc_name"), "instanz": z.get("instance"), "at": z.get("updated_at")} if z else None)
+
+
+def mt5_login_ort_text(login, zuletzt):
+    """Klartext zu mt5_login_ort 'weg' — gleicher Wortlaut wie mt5LoginOrtText im Frontend (Zeit in Dubai)."""
+    t = f"Login {login} ist auf keinem laufenden PC dieser ID als Echo-Instanz eingerichtet"
+    if zuletzt:
+        wann = ""
+        try:
+            wann = datetime.fromisoformat(str(zuletzt.get("at") or "").replace("Z", "+00:00")).astimezone(_ap_tz("Asia/Dubai")).strftime("%d.%m., %H:%M")
+        except (ValueError, TypeError):
+            pass
+        return (t + f" — zuletzt „{zuletzt.get('instanz')}“ auf {zuletzt.get('pc')} ({wann}). Dort im Echo-Panel die Instanz wieder "
+                "anlegen bzw. „Direkt in Echo einrichten“.")
+    return t + " — am PC dieser ID „Direkt in Echo einrichten“ (bzw. Instanz im Echo-Panel anlegen)."
+
+
+def _mt5_ort_fehler(uid, login):
+    """mt5_live der ID lesen und mt5_login_ort anwenden → Klartext, wenn sicher KEIN lebender PC den Login hat, sonst None
+    (auch bei DB-Fehler: dann wie bisher das Signal senden)."""
+    try:
+        rows = sb_select("mt5_live", {"select": "pc_name,instance,master_login,updated_at,master_expected:status->>master_expected",
+                                      "status->>user_id": f"eq.{uid}", "limit": "200"})
+    except Exception:
+        return None
+    art, zuletzt = mt5_login_ort(login, rows, datetime.now(timezone.utc))
+    return mt5_login_ort_text(login, zuletzt) if art == "weg" else None
+
+
 def _wd_balance_signal(acc, mt5_login=""):
     """REIN RECHNEND (testbar): Signal-Zeile fuer „↻ Balance lesen" eines Kontos → (zeile, None) oder (None, (http, text)).
     acc = accounts-Zeile {id, user_id, name, firm, external_id}; mt5_login = mt5_links.mt5_login (leer = keins). Weg über
@@ -11999,6 +12063,11 @@ def admin_wd_plaene():
                 zeile, fehler = _wd_balance_signal(acc[0] if acc else None, (ml[0] if ml else {}).get("mt5_login") or "")
                 if fehler:
                     return jsonify({"error": fehler[1], "account_id": aid}), fehler[0]
+                # Kein lebender PC der ID hat den MT5-Login → sofort sagen statt 4 min „wartet auf PC" (08.10.2026, s. mt5_login_ort)
+                if zeile["params"]["aktion"] == "mt5_balance":
+                    ort = _mt5_ort_fehler(zeile["user_id"], zeile["params"]["login"])
+                    if ort:
+                        return jsonify({"error": ort, "code": "kein_pc_login", "account_id": aid}), 409
                 sig = sb_insert("order_signale", zeile)
                 return jsonify({"ok": True, "account_id": aid, "signal_id": str((sig or {}).get("id") or ""), "art": zeile["params"]["aktion"]})
             except Exception as e:
@@ -14048,6 +14117,10 @@ def admin_konto_balance_lesen():
             weg, x = balance_lese_weg(konto.get("firm"), (ml[0] if ml else {}).get("mt5_login") or "", konto.get("external_id"))
             if not weg:
                 return jsonify({"ok": False, "error": x}), 409
+            if weg == "mt5_balance":   # kein lebender PC der ID mit diesem Login → sofort sagen (08.10.2026, s. mt5_login_ort)
+                ort = _mt5_ort_fehler(str(konto.get("user_id")), x)
+                if ort:
+                    return jsonify({"ok": False, "error": ort, "code": "kein_pc_login"}), 409
             sig = sb_insert("order_signale", konto_balance_signal(konto, "admin" if str(konto.get("user_id")) != uid else "besitzer",
                                                                   weg, x if weg == "mt5_balance" else ""))
             return jsonify({"ok": True, "signal_id": str((sig or {}).get("id") or ""), "status": "wartet", "neu": True, "art": weg})

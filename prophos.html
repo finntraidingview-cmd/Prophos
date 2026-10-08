@@ -41375,7 +41375,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1319'
+  const OS_TAB_BUILD = '2026-09-22.1320'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -48056,6 +48056,8 @@
       const ruf = body => fetch(`${WATCHER_HOME}/admin/wd-plaene`, { method: 'PATCH', headers: { 'sb-token': tok, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
         .then(r => r.json().then(d => ({ r, d })).catch(() => ({ r, d: {} })))
       const { r, d } = await ruf({ aktion: 'balance', account_id: accId })
+      // kein lebender PC der ID hat den MT5-Login (08.10.2026, app.py mt5_login_ort) → ganze Meldung, nicht auf 80 Zeichen gekürzt
+      if(d && d.code === 'kein_pc_login'){ setz({ laeuft: false, fehler: true, text: String(d.error || '') }); return }
       if(!r.ok || !d.signal_id) throw new Error(d.error || ('HTTP ' + r.status))
       const mt5 = d.art === 'mt5_balance'
       setz({ laeuft: true, text: `Lesung angefordert · wartet auf PC von ${wer} …` })
