@@ -31,7 +31,11 @@ def main():
         tag += timedelta(days=1)
     tag_s = tag.strftime("%Y-%m-%d")
     mitt = datetime(tag.year, tag.month, tag.day, tzinfo=ZoneInfo("Europe/Berlin"))
-    gestern = (mitt - timedelta(hours=30)).astimezone(timezone.utc)     # 18:00 dt am Tag VOR heute — sicher vor heute 00:00
+    # „Vortag" aus dem ECHTEN Heute (jetzt), nicht aus dem Plan-Tag: über ein Wochenende (Lauf Freitag nach 00:00 dt → Plan-Tag Montag)
+    # lag mitt − 30 h am Samstag 18:00, also in der Zukunft → nicht verfallen, Test rot (Prüfer Slave 2, 09.10.2026 00:01 dt)
+    h = jetzt.astimezone(ZoneInfo("Europe/Berlin"))
+    heute0 = datetime(h.year, h.month, h.day, tzinfo=ZoneInfo("Europe/Berlin"))
+    gestern = (heute0 - timedelta(hours=6)).astimezone(timezone.utc)     # 18:00 dt am Tag VOR heute — sicher vor heute 00:00 und vor jetzt
 
     def plan(pid, konto, start, **kw):
         return dict({"id": pid, "user_id": sd.U1, "master_account_id": konto, "master_firm": "FundedNext", "status": "planned",
