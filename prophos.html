@@ -22175,10 +22175,12 @@
       }catch(e){ ts = { ok: false, msg: String((e && e.message) || e) } }
       if(!ts || !ts.ok) return { ok: false, msg: 'Terminal-Start fehlgeschlagen: ' + String((ts && (ts.msg || ts.error)) || 'Fehler') }
       if(/FALSCHEN Konto/i.test(String(ts.msg || ''))) return { ok: false, msg: String(ts.msg) }
-      // Snapshot frisch? Das Panel liefert lesen/alive nur bei ≤ 15 s alter Datei — bis ~90 s nach dem Start
+      // Snapshot frisch? Das Panel liefert lesen/alive nur bei ≤ 15 s alter Datei — bis 160 s nach dem Start (08.10.2026, vorher 90 s:
+      // fehlt das Lese-EA, heilt das Panel bei Login-Zwang erst nach wait_s 45 + 90 s Boot-Puffer und startet dann neu — der Tab hatte
+      // da schon „Nach 90 s kein frischer Stand" gemeldet, 4× in 14 Tagen; ein Fall kam nach 125 s doch noch durch)
       let fremd = ''
       const t1 = Date.now()
-      while(Date.now() - t1 < 90000){
+      while(Date.now() - t1 < 160000){
         // 4 s → 1,2–1,8 s (08.10.2026, Echo-Tempo: das EA schreibt alle 200 ms, das Panel fragt lokal ab — der feste 4-s-Schritt kostete
         // im Mittel 2 s je kalter Lesung, gemessen p50 15 s)
         await warte(1200 + Math.random() * 600)
@@ -22187,7 +22189,7 @@
         if(f && f.login === login) return await fertig(f)
         if(f) fremd = f.login
       }
-      return { ok: false, code: 'kein_snapshot', msg: fremd ? `Terminal steht im Konto ${fremd}, nicht ${login}` : 'Nach 90 s kein frischer Stand vom Lese-EA — Terminal/EA am PC prüfen' }
+      return { ok: false, code: 'kein_snapshot', msg: fremd ? `Terminal steht im Konto ${fremd}, nicht ${login}` : 'Nach 160 s kein frischer Stand vom Lese-EA — Terminal/EA am PC prüfen' }
     }finally{ _mt5BalLesenLaeuft.delete(id) }
   }
   /* BALANCE JETZT LESEN (27.09.2026, F19, Finn am Screenshot der Accounts-Liste: „neben den Balances bei den Futures ein Refresh-
@@ -39241,6 +39243,10 @@
     const po = (_tpPendingOrder && String(_tpPendingOrder.planId) === String(plan.id)) ? _tpPendingOrder : (_tpOrderAusPlan(plan).order || null)
     let hardFail = false, rkSperre = null
     const failKeys = [], vonTick = _rkTickStart.delete(String(plan.id))   // Start zur Startzeit (tpStartUmTick, 07.10.2026)
+    // ZEITMARKEN (08.10.2026, Finn: „Der Echo-Bot ist so langsam" — Claim → offen 24–35 s, Puls selbst 13–14 s, der Rest war nirgends
+    // aufgeschlüsselt): ms seit Check-Beginn je Schritt + Abstand zum Claim, reist mit der Puls-Spur an den Plan (puls_spur.zeiten)
+    const _zt0 = Date.now(), zeiten = {}, zMark = k => { zeiten[k] = Date.now() - _zt0 }
+    try{ const c = Date.parse(plan.startUmGestartetAt || ''); if(c && _zt0 - c < 10 * 60000) zeiten.claim_bis_check = _zt0 - c }catch(_){}
     const fail = (key, html) => { _pfSet(key, 'err', html); hardFail = true; failKeys.push(key) }
     const abschluss = (ok, text, retry) => {
       if(finalEl){ finalEl.style.display = 'block'; finalEl.className = 'pf-final ' + (ok ? 'ok' : 'err'); finalEl.textContent = text }
@@ -39261,6 +39267,7 @@
 
     // ── 1. Verlinkung: Master-Login → Instanz mit Terminal-Pfad (der Hedge der Instanz ist hier egal) ──
     const dd = (typeof window.mtcApi === 'function') ? await window.mtcApi('instances') : { ok:false, copier_offline:true }
+    zMark('instanzen')
     const offline = !dd || dd.copier_offline || dd._httpFail
     const route = offline ? null : mt5V2Resolve(plan, dd.instances || [])
     if(offline) fail('v2link', 'Copier-Backend am PC nicht erreichbar — start-alles.bat ausführen (der Copier selbst muss NICHT laufen).')
@@ -39277,7 +39284,7 @@
         && (x.status === 'laufend' || (x.status === 'geplant' && isFinite(new Date(x.armed_at || 0).getTime()) && jetzt - new Date(x.armed_at).getTime() <= 6 * 3600 * 1000)))
       const _dupLinks = (typeof dupGetLinks === 'function') ? dupGetLinks() : {}
       const _dupConnected = (typeof dupState !== 'undefined') && !!dupState.token
-      if(_dupConnected && !(dupState.accounts || []).length && typeof dupLoadAccounts === 'function'){ try{ await dupLoadAccounts() }catch(_){} }
+      if(_dupConnected && !(dupState.accounts || []).length && typeof dupLoadAccounts === 'function'){ try{ await dupLoadAccounts() }catch(_){}; zMark('duplikum') }
       const _dupAccIds = new Set(((typeof dupState !== 'undefined' && dupState.accounts) || []).map(a => String(a.account_id)))
       const _dupLinkedIds = new Set(Object.entries(_dupLinks).filter(([dupId]) => !_dupAccIds.size || _dupAccIds.has(String(dupId))).map(([, manualId]) => String(manualId)))
       if(fenster) fail('v2hedge', `Echo-Fenster dieser Instanz ist OFFEN (Panel-Plan „${escapeHtml(String(fenster.name || fenster.status))}") — ein laufender Copier würde die Order hedgen. Erst den Echo-Trade beenden.`)
@@ -39304,6 +39311,7 @@
         else _pfSet('v2dir', 'ok', gepDir ? `Kein laufender Trade bei ${fName} — gespeicherter Plan ebenfalls ${gepDir} ✓` : `Kein laufender Trade bei ${fName} — Richtung frei.`)
       }
     }catch(_){ _pfSet('v2dir', 'warn', 'Richtungs-Schutz nicht prüfbar (keine Flotten-Daten) — Richtung selbst im Blick behalten.') }
+    zMark('richtung')
 
     // ── 4. Terminal starten / nach vorn (Login-Zwang wie bei Echo, wenn die Zugangsdaten zum Login passen) ──
     let file = null
@@ -39322,6 +39330,7 @@
           headers:{'Content-Type':'application/json'},
           body: JSON.stringify(sendCreds ? { login: String(mc.login), password: String(mc.password), server: String(mc.server || '') } : {}) })
       }catch(e){ ts = { ok:false, msg: String(e && e.message || e) } }
+      zMark('terminal')
       if(!ts || !ts.ok){ fail('v2term', 'Terminal-Start fehlgeschlagen: ' + escapeHtml(String((ts && (ts.msg || ts.error)) || 'Fehler'))); _pfSet('v2order', 'warn', 'Übersprungen.') }
       else if(/FALSCHEN Konto/i.test(String(ts.msg || ''))){ fail('v2term', escapeHtml(String(ts.msg))); _pfSet('v2order', 'warn', 'Übersprungen.') }
       else _pfSet('v2term', 'ok', escapeHtml(String(ts.msg || 'Terminal läuft')) + ' — den Login prüft Puls vor dem Klick lesend selbst.')
@@ -39366,7 +39375,8 @@
       _pfSet('v2order', 'warn', `⏳ Terminal noch nicht bereit — neuer Versuch in 6 s (${Math.round((Date.now() - t0) / 1000)}s): ${escapeHtml(String(r.msg || ''))}`)
       await new Promise(res => setTimeout(res, 6000))
     }
-    pulsSpurSchreiben(plan.id, r)   // Spur am Plan (07.10.2026)
+    zMark('order')
+    pulsSpurSchreiben(plan.id, r, zeiten)   // Spur am Plan (07.10.2026) + Zeitmarken (08.10.2026)
     const offen = !!(r && r.price && r.ticket)
     if(r && (r.ok || offen)) await v2PlanAufOpen(plan.id, r.ticket ?? null)   // Position lesend bestätigt → „Läuft" (+ Baseline, 24.09.2026), auch wenn nur SL/TP scheiterte
     if(r && r.ok){
@@ -41375,7 +41385,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1320'
+  const OS_TAB_BUILD = '2026-09-22.1321'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -45461,11 +45471,12 @@
    * Order-Bots (Station · Sekunden) kam bisher nur ins Panel-Log am PC. Jetzt steht sie am Plan in mt5_baseline.puls_spur
    * {at, pc, ok, s, trail, msg}, ohne Status-Guard (der Plan ist je nach Weg schon „open"). Bei Fehlern steckt die Spur im
    * Meldungstext in eckigen Klammern — die wird herausgelöst. Die Routine „Puls-Fehler" liest daraus, welche Station Zeit frisst. */
-  function pulsSpurSchreiben(planId, r){
+  function pulsSpurSchreiben(planId, r, zeiten){
     try{
       const msg = String((r && (r.msg || r.error)) || ''), sek = /·\s*(\d+)s\b/.exec(msg), klammer = /\[([^\]]{20,})\]\s*$/.exec(msg)
       const spur = { at: new Date().toISOString(), pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : null, ok: !!(r && r.ok),
         s: sek ? Number(sek[1]) : null, trail: String((r && r.trail) || (klammer && klammer[1]) || '').slice(0, 1500), msg: msg.slice(0, 600) }
+      if(zeiten && typeof zeiten === 'object') spur.zeiten = zeiten   // ms je Schritt des Echo-V2-Checks (08.10.2026)
       if(!spur.trail && !spur.msg) return
       baselinePatch(planId, { puls_spur: spur }, null).catch(e => console.warn('[puls-spur]', (e && e.message) || e))
     }catch(e){ console.warn('[puls-spur]', (e && e.message) || e) }
