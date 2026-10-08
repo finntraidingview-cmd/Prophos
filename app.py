@@ -16519,6 +16519,10 @@ AP_VERTEIL_VERSATZ = (0, 0, 10, 20, 30, 45, 60)   # Neuwürfe: frühester Platz 
 # 200 € verschlechtern? — ja klar, so gut wie es geht eben"; Anlass The5%ers 17:57/17:58 blieb liegen): das Band bis Tagesende darf
 # um so viele € über max(Hysterese, jetzt) steigen — das 60-min-Band und der Malus bleiben strikt. Nur im Einsatz-Modus (€).
 AP_VERTEILUNG_BAND_TOLERANZ_EUR = 200.0
+# GEGENRICHTUNG VORZIEHEN (08.10.2026, Finn 04:46 Dubai: „Du bist dafür da, dass du Longs/Shorts ausgleichst, wenn du was merkst. Gerade
+# sind nur Shorts drin, viel zu viel Short. Der Bot muss das checken und in genau solchen Phasen schnell Longs vorziehen"):
+AP_VORZIEHEN_AB_MIN = 3                # frühestens jetzt + 3 min
+AP_VORZIEHEN_JITTER_MIN = 3            # Streuung hinter dem frühesten freien Platz
 
 
 def _ap_firma_konflikt(i, je, zustand, gestartet=(), gap=None):
@@ -16691,7 +16695,126 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
         f"Netto-Einsatz in den nächsten 60 min bis {vorher[1]:.0f} € über dem Band ±{float(band_pct):g} %" if einsatz else
         f"Netto-Delta in den nächsten 60 min bis {vorher[1]:.2f} €/Pkt über dem Band ±{float(band_pct):g} %")
     aenderungen = []
-    for _ in range(max(0, int(schritte))):
+
+    # ── GEGENRICHTUNG VORZIEHEN (08.10.2026, Finn 04:46 Dubai: „Gerade sind nur Shorts drin, viel zu viel Short. Der Bot muss das
+    # checken und in genau solchen Phasen schnell Longs vorziehen"; Lage: 5 Shorts liefen, alle Pläne bestätigt — der Bot verschob
+    # nichts). Ist das 60-min-Band einseitig über der Hysterese, rückt EIN geplanter Plan der Gegenrichtung nach vorn (frühestens
+    # jetzt + AP_VORZIEHEN_AB_MIN, Streuung, eigenes Fenster) — bestätigte eingeschlossen, die Bestätigung bleibt (nur start_um).
+    # Richtung nie. Harte Regeln am neuen Platz: keine Gegenrichtung derselben ID × Firma in deren Laufzeit (laufend oder geplant) und
+    # kein fester Richtungsschutz (id_fest) dagegen, Firmen-Abstand zu anderen IDs, kein neuer Malus „dicht gegenläufig", je ID
+    # AP_ABSTAND_ID_MIN und je ID × Firma AP_ABSTAND_ID_FIRMA_MIN (gelockert 1/½/¼). Bevorzugt der Zug, der das 60-min-Band am meisten
+    # verbessert; er muss es verbessern. Ruhe je Plan. Danach wartet der Bot auf den nächsten Lauf (keine weiteren Schritte).
+    def netto60(z):
+        if einsatz:
+            ev_ = [(z[i]["start"], float(je[i].get("einsatz_abs") or 0) * (1 if z[i]["richtung"] == "buy" else -1)) for i in z]
+            v_ = ap_verlauf(einsatz.get("basis"), einsatz.get("brutto"), ev_, band_pct, ab_min=jetzt_min, bis_min=jetzt_min + 60,
+                            laufzeit_min=einsatz.get("laufzeit"))
+        else:
+            ev_ = [(z[i]["start"], float(je[i].get("delta_abs") or 0) * (1 if z[i]["richtung"] == "buy" else -1)) for i in z]
+            v_ = ap_verlauf(basis_netto, basis_brutto, ev_, band_pct, ab_min=jetzt_min, bis_min=jetzt_min + 60)
+        x = max(v_["verlauf"] or [{"netto_delta": 0.0, "band_delta": 0.0}], key=lambda y: abs(y["netto_delta"]) - y["band_delta"])
+        return float(x["netto_delta"])
+    def ueber_ab(z, ab_m):
+        # Über-Band von ab_m bis jetzt + 60 — der Spitzenwert JETZT (laufende Trades) ist durch einen Zug ab jetzt + 3 nicht
+        # erreichbar; mit ab = jetzt hätte kein Vorziehen je „verbessert" (Selftest-Befund 08.10.2026, genau Finns Lage)
+        if einsatz:
+            ev_ = [(z[i]["start"], float(je[i].get("einsatz_abs") or 0) * (1 if z[i]["richtung"] == "buy" else -1)) for i in z]
+            v_ = ap_verlauf(einsatz.get("basis"), einsatz.get("brutto"), ev_, band_pct, ab_min=jetzt_min, bis_min=jetzt_min + 60,
+                            laufzeit_min=einsatz.get("laufzeit"))
+        else:
+            ev_ = [(z[i]["start"], float(je[i].get("delta_abs") or 0) * (1 if z[i]["richtung"] == "buy" else -1)) for i in z]
+            v_ = ap_verlauf(basis_netto, basis_brutto, ev_, band_pct, ab_min=jetzt_min, bis_min=jetzt_min + 60)
+        vl = sorted(v_["verlauf"], key=lambda x: float(x.get("min", 0)))
+        vor_ab = [] if any(abs(float(x.get("min", 0)) - ab_m) < 1e-9 for x in vl) else \
+            [x for x in vl if float(x.get("min", 0)) < ab_m - 1e-9][-1:]                # gilt noch über ab_m hinaus (ohne eigenen Schritt dort)
+        return max([abs(x["netto_delta"]) - x["band_delta"] for x in vor_ab + [x for x in vl if float(x.get("min", 0)) >= ab_m - 1e-9]] + [0.0])
+    def netto_bei(z, m):
+        # Netto-Einsatz (bzw. -Delta) zur Minute m — für den Protokoll-Text „Netto vorher → nachher" am neuen Start
+        if einsatz:
+            ev_ = [(z[i]["start"], float(je[i].get("einsatz_abs") or 0) * (1 if z[i]["richtung"] == "buy" else -1)) for i in z]
+            v_ = ap_verlauf(einsatz.get("basis"), einsatz.get("brutto"), ev_, band_pct, ab_min=jetzt_min, bis_min=jetzt_min + 60,
+                            laufzeit_min=einsatz.get("laufzeit"))
+        else:
+            ev_ = [(z[i]["start"], float(je[i].get("delta_abs") or 0) * (1 if z[i]["richtung"] == "buy" else -1)) for i in z]
+            v_ = ap_verlauf(basis_netto, basis_brutto, ev_, band_pct, ab_min=jetzt_min, bis_min=jetzt_min + 60)
+        vor = [x for x in sorted(v_["verlauf"], key=lambda x: float(x.get("min", 0))) if float(x.get("min", 0)) <= float(m) + 1e-9]
+        return float(vor[-1]["netto_delta"]) if vor else 0.0
+    vorgezogen = False
+    if offen_(aktuell):
+        n_vor = netto60(zustand)
+        noetig = "buy" if n_vor < 0 else "sell"
+        laufz = float((einsatz or {}).get("laufzeit") or AP_VERTEIL_GEGEN_MIN)
+        gf_v = float((zeiten or {}).get("abstand_id_firma_min") or AP_ABSTAND_ID_FIRMA_MIN)
+        gi_v = float((zeiten or {}).get("abstand_id_gesamt_min") or AP_ABSTAND_ID_MIN)
+        gfirma = float((zeiten or {}).get("abstand_firma_min") or AP_FIRMA_ABSTAND_MIN)
+        abst_pc = float((zeiten or {}).get("abstand_id_min") or 3) + 2
+        ab = float(jetzt_min) + AP_VORZIEHEN_AB_MIN
+        alle = [(k, zustand[k]["start"], zustand[k]["richtung"], str(je[k]["user_id"]), je[k]["firma"]) for k in zustand]
+        alle += [(None, float(x["start"]), x.get("richtung"), str(x.get("user_id")), x.get("firma")) for x in gestartet or ()
+                 if x.get("start") is not None]
+        beste = None
+        for i in sorted(zustand, key=lambda i: zustand[i]["start"]):
+            p, s0 = je[i], zustand[i]["start"]
+            if (zustand[i]["richtung"] != noetig or not p.get("aenderbar") or not p.get("auto_plan") or s0 <= ab + 1 or ruht([i])):
+                continue
+            uid, fa, g = str(p["user_id"]), p["firma"], f"{p['user_id']}|{p['firma']}"
+            fest = id_fest.get(g)
+            if fest and fest.get("richtung") in ("buy", "sell") and fest.get("richtung") != noetig:
+                continue                                     # Richtungsschutz ID × Firma: Gegenrichtung läuft/steht an
+            fen = ap_fenster_von(zeiten, s0)
+            if not fen:
+                continue
+            lo = max(ab, float(fen[0]))
+            if p.get("route") in AP_CFD_ROUTEN:
+                lo = max(lo, float(ap_cfd_ab(zeiten)))
+
+            def ok(t, f, i=i, uid=uid, fa=fa, g=g):
+                for k, s, r, u, ff in alle:
+                    if k == i:
+                        continue
+                    if u == uid and ff == fa and r in ("buy", "sell") and r != noetig and (s <= t < s + laufz or t <= s < t + laufz):
+                        return False                         # nie gegen einen laufenden/geplanten Trade derselben ID × Firma
+                    if u != uid and ff == fa and abs(t - s) < gfirma:
+                        return False                         # Firmen-Abstand zu anderen IDs
+                    if u != uid and ff == fa and r in ("buy", "sell") and r != noetig and abs(t - s) < AP_GEGEN_DICHT_MIN:
+                        return False                         # kein neuer Malus
+                    if u == uid and abs(t - s) < max(abst_pc, gi_v * f):
+                        return False                         # PC + Abstand je ID
+                    if u == uid and ff == fa and abs(t - s) < gf_v * f:
+                        return False                         # Abstand je ID × Firma
+                return True
+            ziel = None
+            for f in [x for x in AP_ABSTAND_STUFEN if x > 0]:
+                frei_ = [t for t in range(int(-(-lo // 1)), int(min(s0, fen[1])) ) if ok(t, f)]
+                if frei_:
+                    ziel = float(rnd.choice([t for t in frei_ if t <= frei_[0] + AP_VORZIEHEN_JITTER_MIN]))
+                    break
+            if ziel is None or ziel >= s0:
+                continue
+            z = {k: dict(v) for k, v in zustand.items()}
+            z[i]["start"] = ziel
+            k_neu = strafe(z) + (misch(z),)
+            u_vor, u_neu = ueber_ab(zustand, ziel), ueber_ab(z, ziel)   # ab dem neuen Start: vorher gegen nachher
+            if k_neu[0] > aktuell[0] or k_neu[1] > aktuell[1] + 1e-9 or u_neu >= u_vor - 1e-9:
+                continue                                     # muss das Band ab dem neuen Start verbessern, 60 min nicht schlechter, kein Malus
+            gewinn = u_vor - u_neu
+            if beste is None or (-gewinn, ziel) < (-beste[4], beste[3]):
+                beste = (k_neu, i, z, ziel, gewinn)          # die größte Verbesserung, bei Gleichstand der frühere Start
+        if beste:
+            k_neu, i, z, ziel, _u = beste
+            wer = je[i].get("user") or str(je[i]["user_id"])[:8]
+            name = je[i].get("firma_name") or je[i]["firma"]
+            hm = lambda m: _ap_hhmm_txt((float(m) + float(dubai_min or 0)) % 1440)    # noqa: E731
+            grund = (f"Ausgleich: {'Long' if noetig == 'buy' else 'Short'} vorgezogen, {wer} {name} {hm(zustand[i]['start'])} → {hm(ziel)}"
+                     f"{' Dubai' if dubai_min else ''} (Netto {netto_bei(zustand, ziel):+.0f} → {netto_bei(z, ziel):+.0f} "
+                     f"{'€' if einsatz else '€/Pkt'})")
+            aenderungen.append({"plan_id": i, "user_id": je[i]["user_id"], "firma": je[i]["firma"], "art": "start",
+                                "von_richtung": noetig, "nach_richtung": noetig, "von_start_min": zustand[i]["start"],
+                                "nach_start_min": ziel, "grund": grund})
+            ausloeser = grund
+            zustand, aktuell, vorgezogen = z, k_neu, True
+
+    for _ in range(0 if vorgezogen else max(0, int(schritte))):
         if not offen_(aktuell):
             break
         kandidaten = []
@@ -16779,7 +16902,7 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
 
     # höchstens EINE Mischungs-Drehung je Bot-Lauf, über alle IDs (Master 08.10.2026, Finn „nicht so hart", passt zur Dämpfung) —
     # ein Zwei-Schritt-Weg (FundedNext 4× → short, dann Topstep → long) verteilt sich so auf zwei Läufe
-    for _ in range(min(1, max(0, int(schritte)))):
+    for _ in range(0 if vorgezogen else min(1, max(0, int(schritte)))):
         if not aktuell[4]:
             break
         tag_vor = ueber_tag(zustand)
@@ -16829,7 +16952,7 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
     def zeiten_txt(ms):
         return "/".join(_ap_hhmm_txt((float(m) + float(dubai_min or 0)) % 1440) for m in ms)
     tag_vor_v = None
-    for _m0, g in ap_verteil_gruppen(je, zustand, gestartet=gestartet):
+    for _m0, g in ([] if vorgezogen else ap_verteil_gruppen(je, zustand, gestartet=gestartet)):
         ids_g = sorted((i for i in zustand if f"{je[i]['user_id']}|{je[i]['firma']}" == g), key=lambda i: zustand[i]["start"])
         if ruht([i for i in ids_g if je[i].get("aenderbar")]):
             continue
