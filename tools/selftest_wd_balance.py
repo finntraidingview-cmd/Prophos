@@ -3,7 +3,7 @@
 
 Aufruf:  python3 tools/selftest_wd_balance.py
 Laedt _wd_balance_signal per Quelltext aus app.py. Prueft: MT5-Konto mit Login → 'mt5_balance' im Namen des Besitzers, Futures-Firma
-bzw. ohne Login → 'konto_balance'; ohne Konto/Besitzer/ID → Fehler mit Code; die Route und das Gate kennen 'balance'/'balance_stand'."""
+→ 'konto_balance'; CFD ohne Login → 409 (nie Tradovate, 08.10.2026); ohne Konto/Besitzer/ID → Fehler mit Code; die Route und das Gate kennen 'balance'/'balance_stand'."""
 import os
 import re
 
@@ -18,6 +18,9 @@ def lade():
     exec(src[i:src.find("\n", i)], ns)
     i = src.index("WD_BALANCE_FUTURES = ")
     exec(src[i:src.find("\n", i)], ns)
+    ns["re"] = re
+    i = src.index("def balance_lese_weg(")
+    exec(src[i:src.find("\n\n\n", i)], ns)
     i = src.index("def _wd_balance_signal(")
     exec(src[i:src.find("\n\n\n", i)], ns)
     return ns["_wd_balance_signal"], src
@@ -38,8 +41,11 @@ def main():
     check(f is None and z == {"user_id": uid, "plan_id": "konto:" + acc["id"], "status": "wartet",
                               "params": {"account_id": acc["id"], "external_id": "MUSTER-000001", "firm": "FundingPips", "name": "Muster 100k", "von": "admin",
                                          "aktion": "mt5_balance", "login": "12345678"}}, "CFD-Konto mit MT5-Login → mt5_balance im Namen des Besitzers")
+    # 08.10.2026 (Finn: „Bei The5%ers ist CFD. Da gibt es keinen Tradovate-Nutzernamen.“): CFD nie über Tradovate
     z, f = sig(acc, "")
-    check(f is None and z["params"]["aktion"] == "konto_balance" and "login" not in z["params"], "CFD-Konto ohne MT5-Login → konto_balance (Puls)")
+    check(z is None and f[0] == 409 and "CFD" in f[1] and "Tradovate" in f[1], "CFD-Konto ohne MT5-Login und ohne MT5-Nummer → 409, nie konto_balance")
+    z, f = sig(dict(acc, firm="The5%ers", external_id="10000001"), "")
+    check(f is None and z["params"]["aktion"] == "mt5_balance" and z["params"]["login"] == "10000001", "The5%ers ohne mt5_links, External ID = MT5-Nummer → mt5_balance mit dieser Nummer")
     z, f = sig(dict(acc, firm="Topstep"), "12345678")
     check(f is None and z["params"]["aktion"] == "konto_balance", "Futures-Firma trotz Login → konto_balance")
     for firma in ("Tradeify", "Apex Trader", "Lucid Trading", "FundedNext Futures", "MyFundedFutures", "Alpha Futures"):
@@ -48,7 +54,7 @@ def main():
     check(sig(None, "1")[1][0] == 404, "kein Konto → 404")
     check(sig(dict(acc, user_id=None), "1")[1][0] == 409, "ohne Besitzer → 409")
     check(sig(dict(acc, id="x"), "1")[1][0] == 400, "ohne id → 400")
-    check(sig(dict(acc, firm=None), None)[0]["params"]["aktion"] == "konto_balance", "Firma/Login None sicher")
+    check(sig(dict(acc, firm=None), None)[1][0] == 409, "Firma/Login None sicher (unbekannte Firma = kein Tradovate)")
     # Route + Gate (Quelltext)
     check('daten.get("aktion") == "balance"' in src and "_wd_balance_signal(acc[0] if acc else None" in src and '"mt5_login"' in src,
           "Route: aktion 'balance' liest accounts + mt5_links und legt das Signal an")

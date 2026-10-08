@@ -22205,6 +22205,11 @@
     const acc = (accounts || []).find(a => String(a.id) === String(accountId))
     if(!MT5_LOCAL) return { ok: false, msg: 'Nur am PC mit TradingView möglich' }
     if(!acc || !acc.externalId) return { ok: false, msg: 'Konto ohne External ID' }
+    // CFD NIE ÜBER TRADOVATE (08.10.2026, Finn: „Bei The5%ers ist CFD. Da gibt es keinen Tradovate-Nutzernamen.“ — pc-40mali las ein
+    // The5%ers-Konto ohne mt5_links-Zeile über Tradovate: „nicht im aktiven Tradovate-Login … kein Tradovate-Username hinterlegt“).
+    // Futures wie im Backend (WD_BALANCE_FUTURES, Teilwörter) oder tpFirmIstFutures — alles andere ist CFD und kommt über MT5/Echo.
+    const istFutures = /tradeify|apex|topstep|futur|mffu|lucid|alpha ?future/i.test(String(acc.firm || '')) || (typeof tpFirmIstFutures === 'function' && tpFirmIstFutures(acc.firm))
+    if(!istFutures) return { ok: false, cfd: true, msg: `CFD-Konto (${acc.firm || 'Firma unbekannt'}) — die Balance kommt über das MT5-Terminal (Echo), nie über Tradovate. MT5-Verlinkung anlegen bzw. die MT5-Nummer als External ID eintragen.` }
     const konto = String(acc.externalId).trim(), id = String(acc.id)
     if(_tvBalLesenLaeuft.has(id)) return { ok: false, msg: 'Lesung für dieses Konto läuft schon' }
     _tvBalLesenLaeuft.add(id)
@@ -41248,7 +41253,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1290'
+  const OS_TAB_BUILD = '2026-09-22.1291'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

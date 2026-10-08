@@ -10360,10 +10360,26 @@ def _wd_endlesung_signal(plan):
 WD_BALANCE_FUTURES = WD_FUTURES_FIRMEN + ("alpha future", "alphafutures")   # wie tpFirmIstFutures im Frontend (Alpha Futures seit 07.10.)
 
 
+def balance_lese_weg(firm, mt5_login="", external_id=""):
+    """REIN RECHNEND (testbar): welcher PC-Weg liest die Balance eines Kontos (08.10.2026, Finn: „Bei The5%ers ist CFD. Da gibt es keinen
+    Tradovate-Nutzernamen." — Puls-Routine fand auf pc-40mali eine Tradovate-Lesung für ein The5%ers-Konto ohne mt5_links-Zeile).
+    Futures-Firma (WD_BALANCE_FUTURES) → ('konto_balance', '') = Puls in TradingView/TopstepX. CFD → ('mt5_balance', login) über das
+    MT5-Terminal; Login aus mt5_links, sonst die External ID, wenn sie eine MT5-Nummer ist (wie mt5KontoLogin im Frontend und
+    „Ansehen" in /admin/wd-plaene). CFD ohne Login → (None, Grund) — nie Tradovate."""
+    f = str(firm or "").lower()
+    if any(k in f for k in WD_BALANCE_FUTURES):
+        return "konto_balance", ""
+    login = str(mt5_login or "").strip() or str(external_id or "").strip()
+    if not re.fullmatch(r"\d{4,}", login):
+        return None, (f"CFD-Konto ({firm or 'Firma unbekannt'}) ohne MT5-Login — die Balance kommt nur über das MT5-Terminal (Echo), "
+                      "nie über Tradovate. MT5-Verlinkung anlegen bzw. die MT5-Nummer als External ID eintragen.")
+    return "mt5_balance", login
+
+
 def _wd_balance_signal(acc, mt5_login=""):
     """REIN RECHNEND (testbar): Signal-Zeile fuer „↻ Balance lesen" eines Kontos → (zeile, None) oder (None, (http, text)).
-    acc = accounts-Zeile {id, user_id, name, firm, external_id}; mt5_login = mt5_links.mt5_login (leer = keins). Futures-Firma
-    (WD_BALANCE_FUTURES) oder ohne MT5-Login → 'konto_balance' (Puls in TradingView/TopstepX), sonst 'mt5_balance' (Echo-Terminal)."""
+    acc = accounts-Zeile {id, user_id, name, firm, external_id}; mt5_login = mt5_links.mt5_login (leer = keins). Weg über
+    balance_lese_weg: Futures → 'konto_balance' (Puls in TradingView/TopstepX), CFD → 'mt5_balance' (Echo-Terminal), CFD ohne Login → 409."""
     if not acc:
         return None, (404, "Konto nicht gefunden")
     aid, uid = str(acc.get("id") or ""), str(acc.get("user_id") or "")
@@ -10372,13 +10388,11 @@ def _wd_balance_signal(acc, mt5_login=""):
     if len(uid) < 10:
         return None, (409, "Konto ohne Besitzer")
     firm = str(acc.get("firm") or "")
-    futures = any(k in firm.lower() for k in WD_BALANCE_FUTURES)
-    login = str(mt5_login or "").strip()
     basis = {"account_id": aid, "external_id": acc.get("external_id"), "firm": firm, "name": acc.get("name"), "von": "admin"}
-    if not futures and login:
-        params = dict(basis, aktion="mt5_balance", login=login)
-    else:
-        params = dict(basis, aktion="konto_balance")
+    weg, x = balance_lese_weg(firm, mt5_login, acc.get("external_id"))   # CFD nie über Tradovate (08.10.2026)
+    if not weg:
+        return None, (409, x)
+    params = dict(basis, aktion="mt5_balance", login=x) if weg == "mt5_balance" else dict(basis, aktion="konto_balance")
     return {"user_id": uid, "plan_id": f"konto:{aid}", "status": "wartet", "params": params}, None
 
 
@@ -13962,12 +13976,14 @@ def konto_balance_darf(uid, mail, konto, admins):
     return bool(konto) and (str(konto.get("user_id") or "") == str(uid or "#") or (mail or "#") in (admins or ()))
 
 
-def konto_balance_signal(konto, von):
-    """REIN RECHNEND (testbar): order_signale-Zeile fuer den Auftrag."""
-    return {"user_id": str(konto["user_id"]), "plan_id": f"konto:{konto['id']}", "status": "wartet",
-            "params": {"aktion": "konto_balance", "account_id": str(konto["id"]),
-                       "external_id": str(konto.get("external_id") or "").strip(), "firm": konto.get("firm") or "",
-                       "name": konto.get("name") or "", "von": von}}
+def konto_balance_signal(konto, von, aktion="konto_balance", login=""):
+    """REIN RECHNEND (testbar): order_signale-Zeile fuer den Auftrag. aktion/login aus balance_lese_weg (CFD → 'mt5_balance' mit Login)."""
+    params = {"aktion": aktion, "account_id": str(konto["id"]),
+              "external_id": str(konto.get("external_id") or "").strip(), "firm": konto.get("firm") or "",
+              "name": konto.get("name") or "", "von": von}
+    if login:
+        params["login"] = str(login)
+    return {"user_id": str(konto["user_id"]), "plan_id": f"konto:{konto['id']}", "status": "wartet", "params": params}
 
 
 def konto_balance_stand(sig, jetzt_s, verfall_s=KONTO_BALANCE_VERFALL_S):
@@ -14024,15 +14040,21 @@ def admin_konto_balance_lesen():
                                "ergebnis": {"ok": False, "verfallen": True, "msg": konto_balance_stand(sg, jetzt)["grund"]}})
                 else:
                     return jsonify({"ok": True, "signal_id": str(sg["id"]), "status": sg.get("status"), "neu": False})
-            sig = sb_insert("order_signale", konto_balance_signal(konto, "admin" if str(konto.get("user_id")) != uid else "besitzer"))
-            return jsonify({"ok": True, "signal_id": str((sig or {}).get("id") or ""), "status": "wartet", "neu": True})
+            # CFD nie über Tradovate (08.10.2026): Weg wie „↻ Balance lesen" in /admin/wd-plaene — MT5-Login aus mt5_links, sonst External ID
+            ml = sb_select("mt5_links", {"select": "mt5_login", "account_id": f"eq.{aid}", "limit": "1"}) or []
+            weg, x = balance_lese_weg(konto.get("firm"), (ml[0] if ml else {}).get("mt5_login") or "", konto.get("external_id"))
+            if not weg:
+                return jsonify({"ok": False, "error": x}), 409
+            sig = sb_insert("order_signale", konto_balance_signal(konto, "admin" if str(konto.get("user_id")) != uid else "besitzer",
+                                                                  weg, x if weg == "mt5_balance" else ""))
+            return jsonify({"ok": True, "signal_id": str((sig or {}).get("id") or ""), "status": "wartet", "neu": True, "art": weg})
         if b.get("aktion") == "stand":
             sid = str(b.get("signal_id") or "").strip()
             if not re.fullmatch(r"[0-9a-fA-F-]{36}", sid):
                 return jsonify({"ok": False, "error": "signal_id fehlt/ungültig"}), 400
             rows = sb_select("order_signale", {"select": "id,user_id,status,created_at,updated_at,pc,ergebnis,params", "id": f"eq.{sid}", "limit": "1"})
             sg = rows[0] if rows else None
-            if not sg or (sg.get("params") or {}).get("aktion") != "konto_balance":
+            if not sg or (sg.get("params") or {}).get("aktion") not in ("konto_balance", "mt5_balance"):   # CFD liest über MT5 (08.10.2026)
                 return jsonify({"ok": False, "error": "Auftrag nicht gefunden"}), 404
             if str(sg.get("user_id")) != uid and mail not in ADMIN_EMAILS:
                 return jsonify({"ok": False, "error": "Nur Admin oder Besitzer des Kontos"}), 403

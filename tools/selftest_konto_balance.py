@@ -44,6 +44,12 @@ def main():
           and z["params"] == {"aktion": "konto_balance", "account_id": konto["id"], "external_id": "TDFYSL150813173931",
                               "firm": "Tradeify", "name": "Tradeify 150k", "von": "admin"},
           "Signal im Namen des Besitzers, plan_id konto:<id>, params mit getrimmter External ID")
+    # CFD über MT5 (08.10.2026): aktion/login aus balance_lese_weg
+    z = a["konto_balance_signal"](dict(konto, firm="The5%ers", external_id="10000001"), "admin", "mt5_balance", "10000001")
+    check(z["params"]["aktion"] == "mt5_balance" and z["params"]["login"] == "10000001", "CFD-Signal: aktion mt5_balance mit Login")
+    src = open(APP, encoding="utf-8").read()
+    check('balance_lese_weg(konto.get("firm")' in src and 'not in ("konto_balance", "mt5_balance")' in src,
+          "Route konto-balance-lesen: Weg über balance_lese_weg, stand kennt mt5_balance")
     st = a["konto_balance_stand"]
     t0 = datetime(2026, 9, 27, 10, 0, tzinfo=timezone.utc)
     sig = {"status": "fertig", "created_at": t0.isoformat(), "updated_at": t0.isoformat(), "pc": "pc-usq1i6",
