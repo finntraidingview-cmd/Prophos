@@ -4,8 +4,10 @@ Tag am Ende nur „+4.500 $" oder geblowt, aber in ZWEI Trades; Konzept als Baum
 
 Aufruf:  python3 tools/selftest_auto_topstep_kette.py
 Ohne Netz, Platzhalter-IDs. Seit DLL 3.000 (Finn 08.10.2026 ~21:55 Dubai): Trade 1 SL 1.250–1.750 / TP 1.950–2.650 $, Verlustgrenze
-min(3.000, Tagesstart − MLL) + 200 = 3.200; MLL EOD-trailing 4.500, Lock 150.000 (ap_kette_mll); angefressen (Abstand MLL < 3.000) → kein
-Plan + Grund; Finns Beispiel −1.250 → TP2 5.750 / SL2 1.950; Abhaken: −3.000 = Tageslimit (nicht blown), MLL = blown; Kette ohne
+min(3.000, Tagesstart − MLL) + 200 = 3.200; MLL EOD-trailing 4.500, Lock 150.000 (ap_kette_mll); angefressen (Abstand MLL < 3.000) seit
+Weg B (Finn 08.10.2026 ~22:15 Dubai): unter 150.000 Reparatur-Tag (Tagesziel 150.000 − Balance + Puffer, Verlustgrenze Abstand + 200,
+T1-SL/TP gedeckelt, T2 aus dem Block, T1 am MLL = blown), ab 150.000 normal mit Verlustgrenze Abstand + 200, Balance ≤ MLL = geblowt;
+Abhaken: Reparatur-Tag am MLL = blown, Plausibilität bei kleinem Abstand; Finns Beispiel −1.250 → TP2 5.750 / SL2 1.950; Abhaken: −3.000 = Tageslimit (nicht blown), MLL = blown; Kette ohne
 daily_usd rechnet wie bisher (DD + 200). Vorher: Trade 1 (00:00–11:00 dt, SL/TP 1.950–2.650 $, 3–4 NQ, Tagesziel 4.500, Verlustgrenze 4.700);
 Trade 1 2–3 NQ, Trade 2 3–4 NQ; Finns Beispiele für Trade 2 (−2.500 → TP 7.000 / SL 2.200; +2.500 → TP 2.000 / SL 7.200); zweiter Tag (154.500, Rest 4.500 + Puffer);
 Blow / Tagesziel schon erreicht → kein Trade 2; nur genaue Puls-Nachlesung in TopstepX zählt; ap_kette_tick legt Trade 2 an (Start ≥ Ende
@@ -59,11 +61,33 @@ def main():
     wv, _ = R(KETTE, "challenge", 148750.0, {"tp": 0.5, "sl": 0.5, "menge": 0.0, "puffer": 0.5}, peak=150000.0)
     check(wv and wv["kette"]["verlust_grenze"] == 3200 and wv["kette"]["mll"] == 145500.0,
           f"nach Verlusttag 148.750 (Abstand MLL 3.250 ≥ 3.000): Plan mit Verlustgrenze 3.200 ({wv and wv['kette']})")
+    # Weg B (Finn 08.10.2026 ~22:15 Dubai): angefressen unter der Startgröße → Reparatur-Tag zurück auf 150.000 + Puffer, Tag endet am MLL
     wa, ga = R(KETTE, "challenge", 147000.0, {"tp": 0.5, "sl": 0.5, "menge": 0.0, "puffer": 0.5}, peak=150000.0)
-    check(wa is None and ga == "angefressen (Balance 147.000, Abstand MLL 1.500) — Weg entscheidet Finn",
-          f"angefressen 147.000 nach −3.000-Tag → kein Plan, Grund „{ga}“")
+    ka = (wa or {}).get("kette") or {}
+    check(wa and ka.get("tagesziel") == 3000 + wa["puffer"] and 25 <= wa["puffer"] <= 40 and ka.get("verlust_grenze") == 1700
+          and ka.get("mll") == 145500.0 and ka.get("reparatur") is True and ka.get("angefressen") is True and ka.get("abstand_mll") == 1500.0
+          and wa["sl"] <= 1700 and wa["tp"] <= ka["tagesziel"] and wa["risiko"] == wa["sl"],
+          f"Reparatur 147.000 / MLL 145.500: Tagesziel 3.000 + Puffer, Verlustgrenze 1.700 (Abstand + 200), T1-SL ≤ 1.700, T1-TP ≤ Tagesziel ({ga or ka})")
+    check(wa and wa["stufe"] == f"Topstep-Kette 1/2 (Reparatur auf 150.000: +{ka['tagesziel']:,} $)".replace(",", "."),
+          f"Stufe erkennbar im Planer: „{wa and wa['stufe']}“")
+    ws, _ = R(KETTE, "challenge", 147000.0, {"tp": 0.5, "sl": 0.999, "menge": 0.0, "puffer": 0.5}, peak=150000.0)
+    check(ws and ws["sl"] == 1700 and ws["risiko"] == 1700, f"T1-SL 1.750 > Verlustgrenze 1.700 → SL = 1.700 ({ws and ws['sl']})")
+    wk, _ = R(KETTE, "challenge", 149000.0, {"tp": 0.5, "sl": 0.5, "menge": 0.0, "puffer": 0.0}, peak=151500.0)
+    check(wk and wk["kette"]["tagesziel"] == 1025 and wk["tp"] == 1025 and wk["kette"]["verlust_grenze"] == 2200
+          and "Reparatur auf 150.000: +1.025 $" in wk["stufe"],
+          f"Reparatur 149.000 / MLL 147.000: Tagesziel 1.025 < T1-TP 2.300 → T1-TP = Tagesziel ({wk and (wk['tp'], wk['kette'], wk['stufe'])})")
+    # ab der Startgröße (MLL gelockt bei 150.000): normal weiter, Verlustgrenze = Abstand + 200
+    wn, gn = R(KETTE, "challenge", 151500.0, {"tp": 0.5, "sl": 0.999, "menge": 0.0, "puffer": 0.5}, peak=154500.0)
+    kn = (wn or {}).get("kette") or {}
+    check(wn and kn.get("tagesziel") == 4500 and kn.get("verlust_grenze") == 1700 and kn.get("mll") == 150000.0 and wn["sl"] == 1700
+          and kn.get("angefressen") is True and "reparatur" not in kn and wn["stufe"] == "Topstep-Kette 1/2 (Tagesziel +4.500 $)",
+          f"151.500 / MLL 150.000 (gelockt): normal 4.500, Verlustgrenze 1.700, T1-SL gedeckelt ({gn or (wn['sl'], kn, wn['stufe'])})")
     wb, gb = R(KETTE, "challenge", 150000.0, {"tp": 0.5, "sl": 0.5, "menge": 0.0, "puffer": 0.5}, peak=152000.0)
-    check(wb is None and "Abstand MLL 2.500" in (gb or ""), f"Höchststand 152.000, jetzt 150.000 → MLL 147.500, angefressen ({gb})")
+    check(wb and wb["kette"]["tagesziel"] == 4500 and wb["kette"]["verlust_grenze"] == 2700 and wb["kette"]["mll"] == 147500.0
+          and not wb["kette"].get("reparatur"),
+          f"Höchststand 152.000, jetzt 150.000 (= Startgröße) → MLL 147.500, normal mit Verlustgrenze 2.700 ({gb or wb['kette']})")
+    wg, gg = R(KETTE, "challenge", 147400.0, {"tp": 0.5, "sl": 0.5, "menge": 0.0, "puffer": 0.5}, peak=152000.0)
+    check(wg is None and gg == "Balance 147.400 auf/unter dem MLL 147.500 — geblowt?", f"Balance unter dem nachgezogenen MLL → geblowt, kein Plan ({gg})")
     check(a["ap_kette_mll"](150000, 4500, None, 150000) == 145500.0 and a["ap_kette_mll"](150000, 4500, 156000, 151000) == 150000.0
           and a["ap_kette_mll"](150000, 4500, 152000, 150000) == 147500.0, "MLL: frisch 145.500, gelockt 150.000, nachgezogen 147.500")
     ALT = dict(TOPSTEP, kette={"daily_usd": 0, "t1_sl": [1950, 2650]})
@@ -99,6 +123,24 @@ def main():
     check(g[0] is None and "MLL geblowt" in g[1], f"T1 bis unter den MLL → geblowt, kein Trade 2 ({g[1]})")
     g = T2(kd, 150000, 147000)
     check(g[0] is None and "Tageslimit" in g[1], f"T1 −3.000 (DLL) → Tageslimit, kein Trade 2 ({g[1]})")
+    # Weg B: Trade 2 eines Reparatur-Tags (Tagesziel 3.030, Verlustgrenze 1.700) aus dem Kette-Block von Trade 1
+    kr = {"nr": 1, "tagesziel": 3030, "verlust_grenze": 1700, "daily_usd": 3000, "mll": 145500.0, "tagesstart_plan": 147000.0,
+          "angefressen": True, "abstand_mll": 1500.0, "reparatur": True}
+    v, g = T2(kr, 147000, 146000)
+    check(v and (v["tp"], v["sl"]) == (4030, 700) and v.get("angefressen") is True and v.get("reparatur") is True and v.get("mll") == 145500.0,
+          f"Reparatur: T1 −1.000 → TP2 = Tagesziel + 1.000 = 4.030, SL2 700, Einstufung geerbt ({g or v})")
+    v, g = T2(kr, 147000, 148500)
+    check(v and (v["tp"], v["sl"]) == (1530, 3200), f"Reparatur: T1 +1.500 → TP2 1.530 / SL2 3.200 ({g or (v['tp'], v['sl'])})")
+    g = T2(kr, 147000, 145500)
+    check(g[0] is None and "MLL geblowt" in g[1], f"Reparatur: T1 am MLL (145.500) → blown, kein Trade 2 ({g[1]})")
+    g = T2(kr, 147000, 145300)
+    check(g[0] is None and "MLL geblowt" in g[1], f"Reparatur: T1 am SL 1.700 (hinter dem MLL) → blown, kein Trade 2 ({g[1]})")
+    g = T2(kr, 147000, 145520)
+    check(g[0] is None and "MLL schon mit Trade 1 fast erreicht" in g[1], f"Reparatur: T1 −1.480 (20 $ über MLL) → kein Trade 2 ({g[1]})")
+    ang = a["ap_kette_angefressen"]
+    check(ang(kr) and ang({"verlust_grenze": 1700, "daily_usd": 3000, "mll": 145500}) and not ang(kd)
+          and not ang({"verlust_grenze": 4700}) and not ang(None) and not ang(dict(kr, angefressen=False)),
+          "ap_kette_angefressen: Flag, sonst aus Verlustgrenze < DLL + 200 abgeleitet; gesund/ohne DLL → nein")
     fertig = a["ap_kette_t1_fertig"]
     gut = {"mt5_baseline": {"tv": {"balance_start": 150000}, "final": {"balance_end": 147500, "quelle": "puls", "plattform": "tsx"}}}
     check(fertig(gut) == ((150000.0, 147500.0), None), "genaue Puls-Nachlesung in TopstepX → fertig")
@@ -183,6 +225,18 @@ def main():
             if zz["richtung"] == "buy" and abs(m - 670.0) <= a["AP_GEGEN_FIRMA_MIN"]:
                 gegen_ok = False
     check(gegen_ok, "Trade 2 nie ±3 min neben einem gegenläufigen Plan einer anderen ID derselben Firma (Laufzeit über IDs frei)")
+    # Weg B: Trade 2 zu einem Reparatur-Tag trägt angefressen/reparatur + MLL (Abhaken) und nennt den MLL als Tagesende
+    andere[:] = []
+    t1r = dict(t1, id="00000000-0000-0000-0000-00000000k003",
+               mt5_baseline={"kette": kr, "tv": {"balance_start": 147000}, "final": {"balance_end": 146000, "quelle": "puls", "plattform": "tsx"}})
+    zustand.update(t1=[t1r], ins=[])
+    a["ap_kette_tick"](jetzt, random.Random(7))
+    zr = zustand["ins"][0] if zustand["ins"] else {}
+    k2r = (zr.get("mt5_baseline") or {}).get("kette") or {}
+    check((zr.get("master_tp"), zr.get("master_sl")) == (4030, 700) and k2r.get("angefressen") is True and k2r.get("reparatur") is True
+          and k2r.get("mll") == 145500.0 and k2r.get("verlust_grenze") == 1700 and "oder MLL 145.500 (Blow)" in zr.get("notes", ""),
+          f"Reparatur-Trade 2 angelegt: TP 4.030 / SL 700, Kette-Block mit angefressen/reparatur/MLL, Notiz „oder MLL … (Blow)“ ({k2r}, {zr.get('notes')})")
+    zustand.update(t1=[t1], ins=[])
 
     # ── 3b automatisch abhaken (Finn 08.10.2026: nach der Prüfung direkt erledigt, nicht mehr im Radar abhaken) ───────────────
     rev = [dict(t1, id="r-t1", route="tsv2", status="review", updated_at="2026-10-09T08:00:00Z", master_pl=None, konto_typ=None),
@@ -206,6 +260,24 @@ def main():
            {"id": "r-dllmll", "route": "tsv2", "status": "review", "user_id": U1, "updated_at": "dm", "ended_at": None,
             "mt5_baseline": {"kette": {"nr": 2, "vor": "r-x3", "verlust_grenze": 3200, "daily_usd": 3000, "mll": 147500, "balance_start_tag": 150500},
                              "tv": {"balance_start": 149250}, "final": {"balance_end": 147500, "quelle": "puls", "plattform": "tsx"}}},
+           # Weg B: Reparatur-Tag (147.000, MLL 145.500) — T1 endet am MLL (Tag −1.500 < DLL + 50) → blown
+           {"id": "r-rep1", "route": "tsv2", "status": "review", "user_id": U1, "updated_at": "r1", "ended_at": None,
+            "mt5_baseline": {"kette": dict(kr), "tv": {"balance_start": 147000}, "final": {"balance_end": 145500, "quelle": "puls", "plattform": "tsx"}}},
+           # Reparatur-Tag, T1 +2.300, T2 läuft in den MLL (eigener P&L −3.800) → plausibel, blown
+           {"id": "r-rep2", "route": "tsv2", "status": "review", "user_id": U1, "updated_at": "r2", "ended_at": None,
+            "mt5_baseline": {"kette": {"nr": 2, "vor": "r-x4", "tagesziel": 3030, "verlust_grenze": 1700, "daily_usd": 3000, "mll": 145500,
+                                       "angefressen": True, "reparatur": True, "balance_start_tag": 147000},
+                             "tv": {"balance_start": 149300}, "final": {"balance_end": 145500, "quelle": "puls", "plattform": "tsx"}}},
+           # Reparatur-Tag erreicht das Tagesziel (150.030) → erledigt, nicht blown
+           {"id": "r-rep3", "route": "tsv2", "status": "review", "user_id": U1, "updated_at": "r3", "ended_at": None,
+            "mt5_baseline": {"kette": {"nr": 2, "vor": "r-x5", "tagesziel": 3030, "verlust_grenze": 1700, "daily_usd": 3000, "mll": 145500,
+                                       "angefressen": True, "reparatur": True, "balance_start_tag": 147000},
+                             "tv": {"balance_start": 146000}, "final": {"balance_end": 150030, "quelle": "puls", "plattform": "tsx"}}},
+           # sehr kleiner Abstand (50 → Verlustgrenze 250): T1 +2.300, T2 am MLL mit −2.350 eigenem P&L — früher „unplausibel" (Grenze −2.000)
+           {"id": "r-rep4", "route": "tsv2", "status": "review", "user_id": U1, "updated_at": "r4", "ended_at": None,
+            "mt5_baseline": {"kette": {"nr": 2, "vor": "r-x6", "tagesziel": 4480, "verlust_grenze": 250, "daily_usd": 3000, "mll": 145500,
+                                       "balance_start_tag": 145550},
+                             "tv": {"balance_start": 147850}, "final": {"balance_end": 145500, "quelle": "puls", "plattform": "tsx"}}},
            # Balance-Sprung (08.10.2026): Balance −2.500, RP&L des Tages ab dem Klick nur −500 (z. B. Auszahlung dazwischen)
            dict(t1, id="r-sprung", route="tsv2", status="review", updated_at="z",
                 mt5_baseline=dict(t1["mt5_baseline"], tv={"balance_start": 150000, "today_pnl_start": 0, "datum_start": "2026-10-09"},
@@ -217,7 +289,8 @@ def main():
     weg = a["ap_kette_abhaken"](jetzt)
     u1 = next((u for f, u in upds if f["id"] == "eq.r-t1"), {})
     u2 = next((u for f, u in upds if f["id"] == "eq.r-t2"), {})
-    check(sorted(weg) == ["r-dll", "r-dllmll", "r-mll", "r-t1", "r-t2", "r-t2b"] and u1.get("status") == "completed" and u1.get("master_pl") == -2500.0
+    check(sorted(weg) == ["r-dll", "r-dllmll", "r-mll", "r-rep1", "r-rep2", "r-rep3", "r-rep4", "r-t1", "r-t2", "r-t2b"]
+          and u1.get("status") == "completed" and u1.get("master_pl") == -2500.0
           and u1.get("pl_quelle") == "tv" and u1.get("konto_typ") == "challenge" and not u1.get("blown")
           and all(f.get("status") == "eq.review" and f.get("updated_at") for f, _u in upds),
           f"Trade 1 nach genauer Lesung automatisch erledigt (P&L −2.500, pl_quelle tv, Sperre review/updated_at) — {weg}")
@@ -234,6 +307,16 @@ def main():
     check(um.get("status") == "completed" and um.get("blown") is True, f"MLL: Tag −3.600 endet bei 147.400 ≤ MLL 147.500 → blown ({um})")
     udm = next((u for f, u in upds if f["id"] == "eq.r-dllmll"), {})
     check(udm.get("status") == "completed" and not udm.get("blown"), f"reiner DLL-Tag (−3.000) genau am MLL → Tageslimit, nicht blown ({udm})")
+    ur = {i: next((u for f, u in upds if f["id"] == f"eq.{i}"), {}) for i in ("r-rep1", "r-rep2", "r-rep3", "r-rep4")}
+    check(ur["r-rep1"].get("status") == "completed" and ur["r-rep1"].get("master_pl") == -1500.0 and ur["r-rep1"].get("blown") is True,
+          f"Reparatur-Tag: T1 endet am MLL (Tag −1.500, unter DLL + 50) → blown ({ur['r-rep1']})")
+    check(ur["r-rep2"].get("master_pl") == -3800.0 and ur["r-rep2"].get("blown") is True,
+          f"Reparatur-Tag: T2 nach T1 +2.300 am MLL (eigener P&L −3.800) → plausibel, blown ({ur['r-rep2']})")
+    check(ur["r-rep3"].get("status") == "completed" and ur["r-rep3"].get("master_pl") == 4030.0 and not ur["r-rep3"].get("blown"),
+          f"Reparatur-Tag am Tagesziel (150.030) → erledigt, nicht blown ({ur['r-rep3']})")
+    check(ur["r-rep4"].get("master_pl") == -2350.0 and ur["r-rep4"].get("blown") is True
+          and not any(i == "r-rep4" and "unplausibel" in g for i, g in gruende_ab),
+          f"Abstand 50 (Verlustgrenze 250, ohne Flag abgeleitet): T2 −2.350 am MLL → nicht unplausibel, blown ({ur['r-rep4']})")
     check("eq.r-relativ" not in [f["id"] for f, _u in upds] and any(i == "r-relativ" and "unplausibel" in g for i, g in gruende_ab),
           "Start absolut 150.000, Ende relativ 2.000 → nicht abgehakt, Grund „unplausibel — von Hand abhaken“ (Prüfer Slave 2)")
     check("eq.r-sprung" not in [f["id"] for f, _u in upds] and any(i == "r-sprung" and "Balance-Sprung" in g and "Differenz -2.000" in g for i, g in gruende_ab),
