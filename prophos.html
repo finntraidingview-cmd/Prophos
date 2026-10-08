@@ -41510,7 +41510,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1323'
+  const OS_TAB_BUILD = '2026-09-22.1324'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -47514,13 +47514,13 @@
     let man = null; try{ man = tplManuellKonten() }catch(e){ console.warn('[tpl] Manuelle Arbeit', e) }
     const add = (uid, name, z) => { const k = String(uid || ''); if(!k || (ids && !ids.has(k))) return
       if(!je.has(k)) je.set(k, { uid: k, name: name || '', zeilen: [] }); const o = je.get(k); if(!o.name && name) o.name = name; o.zeilen.push(z) }
-    const roh = D.roh, tagGleich = roh && String(roh.tag || '') === D.tag, konten = new Set()
+    const roh = D.roh, tagGleich = roh && String(roh.tag || '') === D.tag, konten = new Set(), zielIds = new Set()   // zielIds: Konto-IDs mit erreichtem Ziel
     if(currentUserId){
       const arch = typeof getArchive === 'function' ? (getArchive() || {}) : {}
       for(const a of accounts || []){
         if(!a || !TPL_TYPEN.includes(a.type) || /fusion/i.test(String(a.firm || '')) || (arch[a.id] && arch[a.id].archived)) continue
         if(tplManRaus(man, currentUserId, a.id, a.name)) continue   // Konto in Manueller Arbeit (08.10.2026)
-        if(a.zielErreichtAt){ konten.add(tplKk(currentUserId, a.name)); continue }   // Ziel erreicht → nie hier (Finn 08.10.2026, s. TPL_ZIEL_RE)
+        if(a.zielErreichtAt){ zielIds.add(String(a.id)); continue }   // Ziel erreicht → nie hier (Finn 08.10.2026, s. TPL_ZIEL_RE) — über die Konto-ID, nie den Namen
         // EXTERNAL ID FEHLT bei eigenen Futures-Konten (08.10.2026, Fehler-Muster 49 Orbit-Fehlstarts): vorab als Zeile mit Knopf, noch bevor
         // der Planer läuft — der Planer lässt das Konto ohnehin aus (app.py ap_ext_fehlt); die Balance-Zeile entfällt dafür
         if(typeof tpFirmIstFutures === 'function' && tpFirmIstFutures(a.firm) && !String(a.externalId || '').trim()){
@@ -47543,8 +47543,13 @@
       if(x.typ && !TPL_TYPEN.includes(String(x.typ))) continue   // WD-RAUS-AUS-PLANER
       if(tplManRaus(man, x.user_id, x.konto_id, x.konto)) continue   // Konto in Manueller Arbeit (08.10.2026)
       const k = tplKk(x.user_id, x.konto), istBlow = /geblasen|geblowt|Polster aufgebraucht/i.test(g)
-      if(TPL_ZIEL_RE.test(g)){   // Ziel erreicht: keine Zeile, auch eine schon gesetzte Balance-Zeile desselben Kontos fällt weg (Finn 08.10.2026)
-        const o = je.get(String(x.user_id)); if(o) o.zeilen = o.zeilen.filter(z => z.konto !== x.konto); konten.add(k); continue }
+      // Ziel erreicht: keine Zeile; eine schon gesetzte Zeile DESSELBEN Kontos (bal/ext = Konto-ID) fällt weg. Nur über die Konto-ID —
+      // gleichnamige Konten derselben ID sind häufig (Prüfer zu .1317, wie .1311); ohne konto_id wird nur diese Zeile ausgelassen
+      const kidZ = x.konto_id ? String(x.konto_id) : ''
+      if(kidZ && zielIds.has(kidZ)) continue
+      if(TPL_ZIEL_RE.test(g)){
+        if(kidZ){ zielIds.add(kidZ); const o = je.get(String(x.user_id)); if(o) o.zeilen = o.zeilen.filter(z => String(z.bal || z.ext || '') !== kidZ) }
+        continue }
       if(konten.has(k)){
         // schon als Balance-Zeile drin (eigenes Konto ohne Live-Balance): ein konkreter Planer-Grund (Haken aus, geblowt?) ist die bessere Zeile → ersetzen (08.10.2026)
         if(!/ausgenommen/i.test(g) && !istBlow) continue
@@ -47599,7 +47604,7 @@
       // steht hier statt unter „Zu bestätigen", mit ↻ Balance lesen (eigen direkt, fremd per Signal an den PC der ID)
       if((t.status === 'offen' || t.status === 'bestaetigt') && !tplPlanLive(t)){
         const kid = t.konto_id ? String(t.konto_id) : '', fremd = !t.eigen
-        const k = tplKk(t.user_id, t.konto); if(!konten.has(k)){ konten.add(k)
+        const k = tplKk(t.user_id, t.konto); if(!konten.has(k) && !(kid && zielIds.has(kid))){ konten.add(k)
           add(t.user_id, t.user, { art: 'balance', firma: t.firma, konto: t.konto, typ: t.typ, balance: '', ende4: t.ende4, key: t.key,
             text: 'Balance nicht live — seit dem letzten Trade nicht gelesen; der Plan wird erst bestätigbar, wenn sie frisch ist',
             bal: (!fremd && kid) ? kid : '', balf: (fremd && kid) ? kid : '', uid: String(t.user_id || ''), lauf: kid ? ((fremd ? _tplBalFremd.get(kid) : (typeof _accBalLauf !== 'undefined' && _accBalLauf.get(kid))) || null) : null,
@@ -47640,7 +47645,7 @@
     // Offene Vorschläge mit nicht-live Balance aus /admin/auto-plan/ids (Admin-Reiter, auch morgen; 08.10.2026) — dieselbe Zeile wie oben
     for(const z of (window._apOffenNichtLive || [])){
       if(tplManRaus(man, z.user_id, z.konto_id, z.konto)) continue   // Konto in Manueller Arbeit (08.10.2026)
-      const k = tplKk(z.user_id, z.konto); if(konten.has(k) || (ids && !ids.has(String(z.user_id)))) continue; konten.add(k)
+      const k = tplKk(z.user_id, z.konto); if(konten.has(k) || (ids && !ids.has(String(z.user_id))) || (z.konto_id && zielIds.has(String(z.konto_id)))) continue; konten.add(k)
       const kid = z.konto_id ? String(z.konto_id) : '', fremd = String(z.user_id) !== String(currentUserId)
       add(z.user_id, z.user, { art: 'balance', firma: z.firma, konto: z.konto, typ: z.typ, balance: '', ende4: z.ende4 || '',
         text: 'Balance nicht live — seit dem letzten Trade nicht gelesen; der Plan wird erst bestätigbar, wenn sie frisch ist',
