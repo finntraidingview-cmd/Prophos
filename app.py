@@ -12085,15 +12085,19 @@ def admin_pc_stand():
 HAND_CACHE_S = 30
 HAND_UEBERPRUEFEN_H = 6
 HAND_NACH = {"challenge": "funded", "phase1": "phase2", "phase2": "funded_cfd"}
+# 5. Gruppe „Planer braucht dich" (Master 09.10.2026): Gründe des letzten Nachtlaufs, die eine Hand brauchen — ohne die, die schon eine andere
+# Gruppe zeigt (Ziel erreicht = bestanden, noch nicht erledigt = Überprüfen) und ohne „hat schon einen geplanten/laufenden Plan" (kein Fall)
+HAND_PLANER_OHNE = re.compile(r"Ziel erreicht|bestanden|noch nicht erledigt|Überprüfen|geplanten/laufenden Plan|Manuelle Arbeit", re.I)
 _hand_cache = {}
 _hand_lock = threading.Lock()
 
 
-def hand_gruppen(konten_ziel, reviews, blown, letzte, accs, archiv, namen, ausgeblendet, jetzt):
+def hand_gruppen(konten_ziel, reviews, blown, letzte, accs, archiv, namen, ausgeblendet, jetzt, lauf=None):
     """REIN RECHNEND (testbar): die vier Handarbeit-Gruppen. konten_ziel = accounts mit ziel_erreicht_at; reviews = trade_plans review
     (mit manuell); blown = trade_plans blown=true; letzte = {konto_id: (plan_id, started_at)} jüngster gestarteter Plan je Konto;
     accs = {konto_id: account} (Name/Firma/External ID/Typ der Plan-Konten); archiv = archivierte Konto-IDs; namen = user_id → Name.
-    → {bestanden, geblowt, ueberpruefen, manuell} — Listen von Zeilen, neueste zuerst."""
+    lauf = {at, ausgelassen[]} des letzten echten Nachtlaufs (schon auf die Sicht gefiltert) oder None → Gruppe planer.
+    → {bestanden, geblowt, ueberpruefen, manuell, planer} — Listen von Zeilen, neueste zuerst (planer in Lauf-Reihenfolge)."""
     def ende4(a):
         return str((a or {}).get("external_id") or "").strip()[-4:]
 
@@ -12102,7 +12106,7 @@ def hand_gruppen(konten_ziel, reviews, blown, letzte, accs, archiv, namen, ausge
         return {"user_id": str(uid or ""), "user": namen.get(str(uid or ""), ""), "konto_id": str(kid or "") or None,
                 "firma": firma or a.get("firm") or "", "konto": name or a.get("name") or "", "ende4": ende4(a),
                 "typ": a.get("account_type"), "start_balance": _wd_num(a.get("starting_balance"))}
-    out = {"bestanden": [], "geblowt": [], "ueberpruefen": [], "manuell": []}
+    out = {"bestanden": [], "geblowt": [], "ueberpruefen": [], "manuell": [], "planer": []}
     # Konto mit Manuelle-Arbeit-Zeile nicht zusätzlich als „bestanden" (wie die Ziel-Zeilen im Radar: nicht doppelt)
     man_konten = {str(p.get("master_account_id")) for p in reviews or ()
                   if isinstance(p.get("manuell"), dict) and p["manuell"].get("at") and p.get("master_account_id")}
@@ -12143,6 +12147,21 @@ def hand_gruppen(konten_ziel, reviews, blown, letzte, accs, archiv, namen, ausge
         out["ueberpruefen"].append(z)
     for k in out:
         out[k].sort(key=lambda z: str(z.get("seit") or ""), reverse=True)
+    schon = {z.get("konto_id") for k in ("bestanden", "geblowt", "ueberpruefen", "manuell") for z in out[k] if z.get("konto_id")}
+    for x in (lauf or {}).get("ausgelassen") or ():
+        if not isinstance(x, dict):
+            continue
+        kid, uid, grund = str(x.get("konto_id") or ""), str(x.get("user_id") or ""), str(x.get("grund") or "").strip()
+        if not grund or HAND_PLANER_OHNE.search(grund) or uid in ausgeblendet or (kid and (kid in archiv or kid in schon)):
+            continue
+        a = accs.get(kid) or {}
+        z = basis(uid, kid, a, x.get("firma"), x.get("konto"))
+        z["typ"] = z.get("typ") or x.get("typ")
+        z.update(art="planer", grund=grund, seit=(lauf or {}).get("at"),
+                 knopf="balance" if re.search(r"keine Balance|nicht live|nie gelesen", grund, re.I) else "")
+        out["planer"].append(z)
+        if kid:
+            schon.add(kid)
     return out
 
 
@@ -12177,9 +12196,17 @@ def admin_handarbeit():
         blown = _sb_all("trade_plans", dict(uq, select="id,user_id,master_account_id,master_name,master_firm,master_pl,started_at,"
                                                        "ended_at,completed_at", blown="is.true", order="started_at.desc"))
         archiv = _ap_archiviert()
+        lauf = None                                     # letzter echter Nachtlauf (5. Gruppe „Planer braucht dich")
+        for l in sb_select("auto_plan_lauf", {"select": "at,aus:ergebnis->ausgelassen,trocken:ergebnis->>trocken",
+                                              "ergebnis->>quelle": "eq.nacht", "order": "at.desc", "limit": "3"}) or []:
+            if str(l.get("trocken") or "").lower() != "true":
+                lauf = {"at": l.get("at"), "ausgelassen": [x for x in (l.get("aus") or []) if isinstance(x, dict)
+                                                            and admin_in_sicht(x.get("user_id"), sicht)]}
+                break
         aktiv = lambda liste: sorted({str(p.get("master_account_id")) for p in liste or []
                                       if p.get("master_account_id") and str(p.get("master_account_id")) not in archiv})
-        kids_blown, kids = aktiv(blown), aktiv((blown or []) + (reviews or []))
+        kids_blown = aktiv(blown)
+        kids = aktiv((blown or []) + (reviews or []) + [{"master_account_id": x.get("konto_id")} for x in ((lauf or {}).get("ausgelassen") or [])])
         letzte, accs = {}, {}
         for j in range(0, len(kids_blown), 150):          # jüngster gestarteter Plan nur für die Blow-Konten (Last: nichts sonst)
             for r in _sb_all("trade_plans", {"select": "id,master_account_id,started_at", "started_at": "not.is.null",
@@ -12192,7 +12219,7 @@ def admin_handarbeit():
                                           "id": "in.(" + ",".join(kids[j:j + 150]) + ")"}):
                 accs[str(a["id"])] = a
         namen, ausgeblendet = _wd_personen()
-        gr = hand_gruppen(konten_ziel, reviews, blown, letzte, accs, archiv, namen, ausgeblendet, datetime.now(timezone.utc))
+        gr = hand_gruppen(konten_ziel, reviews, blown, letzte, accs, archiv, namen, ausgeblendet, datetime.now(timezone.utc), lauf)
         antwort = {"ok": True, "at": datetime.now(timezone.utc).isoformat(), "n": sum(len(v) for v in gr.values()), "gruppen": gr}
     except Exception as e:
         print(f"[handarbeit] ⚠️ {type(e).__name__}: {e}", flush=True)

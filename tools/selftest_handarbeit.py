@@ -19,7 +19,7 @@ def lade():
     def block(name):
         i = src.index(f"\ndef {name}(") + 1
         return src[i:src.find("\n\n\n", i)]
-    for k in ("HAND_UEBERPRUEFEN_H", "HAND_NACH"):
+    for k in ("HAND_UEBERPRUEFEN_H", "HAND_NACH", "HAND_PLANER_OHNE"):
         exec(re.search(rf"^{k} = .*$", src, re.M).group(0), ns)
     for f in ("_wd_num", "_ap_ts", "hand_gruppen"):
         exec(block(f), ns)
@@ -59,7 +59,15 @@ def main():
     ]
     letzte = {"k9": ("b1", iso(12)), "k10": ("neu1", iso(1))}
     accs = {"k9": {"id": "k9", "external_id": "FNF-0045", "account_type": "challenge"}, "k7": {"id": "k7", "external_id": "TDFY-3962"}}
-    g = ns["hand_gruppen"](konten_ziel, reviews, blown, letzte, accs, {"k3"}, {UA: "Ina", UB: "Ben"}, {UX}, jetzt)
+    lauf = {"at": iso(4), "ausgelassen": [
+        {"user_id": UA, "konto_id": "k20", "firma": "Tradeify", "konto": "150k Tradeify", "typ": "challenge", "grund": "keine Balance bekannt"},
+        {"user_id": UB, "konto_id": "k21", "firma": "FundedNext", "konto": "100k FundedNext", "typ": "phase1", "grund": "nur noch 36 $ bis zum Ziel — von Hand prüfen"},
+        {"user_id": UB, "konto_id": "k22", "firma": "FundedNext", "grund": "Ziel erreicht — Phase umstellen"},
+        {"user_id": UA, "konto_id": "k23", "firma": "The5%ers", "grund": "letzter Trade noch nicht erledigt (Überprüfen)"},
+        {"user_id": UA, "konto_id": "k24", "firma": "FundingPips", "grund": "hat schon einen geplanten/laufenden Plan"},
+        {"user_id": UB, "konto_id": "k2", "firma": "FundedNext", "grund": "keine Balance bekannt"},
+        {"user_id": UX, "konto_id": "k25", "firma": "Tradeify", "grund": "keine Balance bekannt"}]}
+    g = ns["hand_gruppen"](konten_ziel, reviews, blown, letzte, accs, {"k3"}, {UA: "Ina", UB: "Ben"}, {UX}, jetzt, lauf)
     be = g["bestanden"]
     check([z["konto_id"] for z in be] == ["k2", "k1"], f"bestanden: k2, k1 (neueste zuerst; archiviert, Funded, ausgeblendet, Manuell-Konto raus) → {[z['konto_id'] for z in be]}")
     check(be[1]["typ"] == "phase2" and be[1]["nach"] == "funded_cfd" and be[0]["nach"] == "phase2" and be[0]["user"] == "Ben" and be[1]["ende4"] == "0001",
@@ -69,6 +77,11 @@ def main():
     check([z["plan_id"] for z in g["ueberpruefen"]] == ["r1"] and g["ueberpruefen"][0]["ende4"] == "3962", "Überprüfen erst nach 6 h (r2 nach 2 h noch nicht)")
     check([z["plan_id"] for z in g["manuell"]] == ["r3"] and g["manuell"][0]["notiz"] == "Warten auf Freigabe" and g["manuell"][0]["schritt"] == "warten",
           "Manuelle Arbeit mit Schritt und Notiz")
+    pl = g["planer"]
+    check([z["konto_id"] for z in pl] == ["k20", "k21"], f"Planer braucht dich: nur Hand-Gründe, ohne Ziel/Überprüfen/geplant, ohne Konto aus anderer Gruppe, ohne ausgeblendete → {[z['konto_id'] for z in pl]}")
+    check(pl[0]["knopf"] == "balance" and pl[1]["knopf"] == "" and pl[1]["grund"].startswith("nur noch 36 $") and pl[0]["seit"] == lauf["at"],
+          "Knopf „Balance lesen“ nur bei keine Balance; Grund im Klartext; seit = Lauf")
+    check(ns["hand_gruppen"](konten_ziel, reviews, blown, letzte, accs, {"k3"}, {}, {UX}, jetzt)["planer"] == [], "ohne Lauf → Gruppe leer")
     print(f"{len(f) - sum(f)}/{len(f)} ok")
     sys.exit(1 if sum(f) else 0)
 

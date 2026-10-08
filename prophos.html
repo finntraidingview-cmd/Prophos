@@ -28721,7 +28721,7 @@
    * 'blown', fremd nur mit Admin-Recht wie „Braucht dich"), Überprüfen offen (> 6 h) und Manuelle Arbeit → Radar. Laden beim Öffnen und alle
    * 60 s für die Zahl (nur sichtbarer Tab). Eigene Verdrahtung, kein Sammel-Handler. Nur Anzeige + vorhandene Wege. */
   const _hand = { d: null, at: 0, laedt: false, fehler: '' }
-  const HAND_GRUPPEN = [['bestanden', 'Bestanden → Phase umstellen'], ['geblowt', 'Geblowt → archivieren'], ['ueberpruefen', 'Überprüfen offen'], ['manuell', 'Manuelle Arbeit']]
+  const HAND_GRUPPEN = [['bestanden', 'Bestanden → Phase umstellen'], ['geblowt', 'Geblowt → archivieren'], ['ueberpruefen', 'Überprüfen offen'], ['manuell', 'Manuelle Arbeit'], ['planer', 'Planer braucht dich']]   // planer (09.10.2026): Hand-Gründe des letzten Nachtlaufs
   async function handLaden(){
     if(_hand.laedt || !currentUserId) return
     _hand.laedt = true
@@ -28770,6 +28770,18 @@
           const was = `${st ? '<b>' + escapeHtml(st) + '</b>' : ''}${st && z.notiz ? ' · ' : ''}${z.notiz ? escapeHtml(String(z.notiz)) : (st ? '' : 'ohne Notiz')}`
           return zeile(z, was, `<button type="button" class="btn btn-ghost" data-hand-radar="1" title="Radar → Manuelle Arbeit">Im Radar →</button>`)
         }
+        if(k === 'planer'){
+          // PLANER BRAUCHT DICH (Master 09.10.2026): Grund des Nachtlaufs im Klartext; „keine Balance" → vorhandener Lese-Weg (eigen accBalanceLesen,
+          // fremd Signal an den PC der ID wie „Braucht dich", nur mit Admin-Recht); „nur noch X $ bis zum Ziel" → Hinweis, kein Knopf
+          const rest = /bis zum Ziel/i.test(z.grund || '')
+          const was = `${escapeHtml(String(z.grund || ''))}${rest ? ' · kleiner Rest-Trade oder Phase prüfen' : ''}`
+          const eigenDa = eigen && (accounts || []).some(a => String(a.id) === String(z.konto_id))
+          const knopf = z.knopf !== 'balance' ? '' : eigenDa
+            ? `<button type="button" class="btn btn-ghost" data-hand-bal="${escapeHtml(z.konto_id || '')}" title="Balance dieses Kontos lesen (wie unter Accounts)">↻ Balance lesen</button>`
+            : (!eigen && adm) ? `<button type="button" class="btn btn-ghost" data-hand-balf="${escapeHtml(z.konto_id || '')}" data-hand-uid="${escapeHtml(z.user_id || '')}" data-hand-wer="${escapeHtml(z.user || '')}" title="Signal an den PC von ${escapeHtml(z.user || 'der ID')}: Balance lesen">↻ Balance lesen</button>`
+            : (!eigen ? fremdTxt(z) : '')
+          return zeile(z, was, knopf)
+        }
         return zeile(z, 'Trade wartet aufs Abhaken', `<button type="button" class="btn btn-ghost" data-hand-radar="1" title="Radar → Überprüfen (dort abhaken)">Im Radar →</button>`)
       }).join('')
       return `<div class="hand-gr"><h4>${titel} · ${liste.length}</h4>${zeilen}</div>`
@@ -28790,6 +28802,12 @@
       try{ archiveAccount(ar.getAttribute('data-hand-arch'), 'blown'); if(typeof renderAccounts === 'function') renderAccounts() }
       catch(err){ console.warn('[handarbeit] archivieren', err); ar.disabled = false; ar.textContent = 'Als geblowt archivieren' }
       setTimeout(() => { _hand.d = null; handLaden() }, 1500); return }
+    const hb = ev.target.closest('[data-hand-bal],[data-hand-balf]')   // Planer braucht dich: ↻ Balance lesen (vorhandene Wege)
+    if(hb){ hb.disabled = true; hb.textContent = 'angefordert …'
+      try{ if(hb.dataset.handBal) accBalanceLesen(hb.dataset.handBal, '')
+        else tplBalanceFremd(hb.dataset.handBalf, hb.dataset.handUid, hb.dataset.handWer).catch(err => console.warn('[handarbeit] Balance fremd', err)) }
+      catch(err){ console.warn('[handarbeit] Balance lesen', err); hb.disabled = false; hb.textContent = '↻ Balance lesen' }
+      return }
     if(ev.target.closest('[data-hand-radar]')){ handZu(); document.querySelector('#dashboard-view .sb-link[data-view="wdlive"]')?.click() }
   })
   // Zahl im Kopf: erster Abruf kurz nach dem Login, dann alle 60 s (nur sichtbarer Tab)
@@ -42301,7 +42319,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1384'
+  const OS_TAB_BUILD = '2026-09-22.1385'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
