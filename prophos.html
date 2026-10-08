@@ -42328,7 +42328,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1391'
+  const OS_TAB_BUILD = '2026-09-22.1392'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -46749,7 +46749,7 @@
     // nur der JÜNGSTE Abruf schreibt (08.10.2026): ein älterer mit anderer Sicht (Accounts/Planer-Seite „eigene") darf den Admin-Stand nicht überschreiben
     const pr = apApi('GET').then(d => { if(_ap.lauf !== pr) return d
       _ap.letzter = d.letzter || null; _ap.imPlaner = !!d.im_planer; _ap.admin = d.admin != null ? !!d.admin : null; _ap.geladenFuer = currentUserId; _ap.sicht = d.sicht || null
-      _ap.info = d.info || null; return d })   // info: Nachplan-Countdown (nachplan_naechster/_art, 09.10.2026)
+      _ap.info = d.info || null; _ap.aktiv = d.aktiv != null ? !!d.aktiv : null; return d })   // info: Nachplan-Countdown (nachplan_naechster/_art, 09.10.2026); aktiv: Not-Aus
     _ap.lauf = pr
     return _ap.lauf
   }
@@ -48592,6 +48592,7 @@
    * nachplan_naechster/_art: im Fenster alle 10 min, sonst der erste Takt im nächsten Fenster ab 00:00 dt); Text jede Sekunde neu
    * (tplCdTick, nur sichtbarer Tab). Knopf nur Admin (ADMIN_EMAILS → _ap.admin), POST {nachplanen:true} = dieselbe Strecke wie der Takt. */
   function tplCdText(info){
+    if(_ap.aktiv === false) return 'Auto-Planer aus'   // Not-Aus (Master 09.10.2026): kein Takt, der Knopf antwortet 409 — keine Zeit vortäuschen
     const iso = info && info.nachplan_naechster; if(!iso) return ''
     const t = Date.parse(iso); if(!isFinite(t)) return ''
     if(info.nachplan_laeuft) return 'rechnet gerade …'
@@ -48699,8 +48700,8 @@
         }).join('') + `</div>`
     }).join('')
     const cd = tplCdText(_ap.info)
-    const knopf = _ap.admin === true ? `<button type="button" class="btn btn-ghost tpl-bd-np" data-tpl-nachplan="1"${_tpl.nachplanLaeuft ? ' disabled' : ''} title="Nachplanen jetzt anstoßen — dieselbe Rechnung wie der 10-min-Takt, für den Tag des letzten Nachtlaufs; bestehende Pläne bleiben">${_tpl.nachplanLaeuft ? 'läuft …' : 'Jetzt neu berechnen'}</button>` : ''
-    const kopfR = (cd || knopf) ? `<span class="tpl-bd-cd">${cd ? `Nachplanen <span data-tpl-cd>${escapeHtml(cd)}</span>` : ''}${knopf}</span>` : ''
+    const knopf = _ap.admin === true ? `<button type="button" class="btn btn-ghost tpl-bd-np" data-tpl-nachplan="1"${_tpl.nachplanLaeuft ? ' disabled' : ''} title="Nachplanen jetzt anstoßen — dieselbe Rechnung wie der 10-min-Takt, für den Tag des letzten Nachtlaufs; bestehende Pläne bleiben">${_tpl.nachplanLaeuft ? 'läuft …' : escapeHtml(_tpl.nachplanFehler || 'Jetzt neu berechnen')}</button>` : ''
+    const kopfR = (cd || knopf) ? `<span class="tpl-bd-cd">${cd ? `${_ap.aktiv === false ? '' : 'Nachplanen '}<span data-tpl-cd>${escapeHtml(cd)}</span>` : ''}${knopf}</span>` : ''
     const gelZ = gel ? `<div class="tpl-bd-gel">✓ ${gel} ${gel === 1 ? 'Konto' : 'Konten'} gelesen · ${gel === 1 ? 'wird' : 'werden'} beim nächsten Nachplanen eingeplant${cd ? ` (<span data-tpl-cd>${escapeHtml(cd)}</span>)` : ''}</div>` : ''
     return `<div class="tpl-karte tpl-bd"><div class="tpl-h">Braucht dich <b>${n}</b>${kopfR}</div>${gelZ}${bloecke}</div>`
   }
@@ -49701,8 +49702,9 @@
     // Braucht dich, geblowt (08.10.2026): vorhandener Archiv-Weg wie unter Accounts (archiveAccount 'blown' → Duplikum/Echo aufräumen,
     // user_settings.archive per Sync; der Planer liest das Archiv aller Profile). Nur per Klick, danach ist die Zeile weg.
     const np = e.target.closest('[data-tpl-nachplan]')   // „Jetzt neu berechnen" (09.10.2026): POST {nachplanen:true}, gegen Doppelklick gesperrt
-    if(np){ if(_tpl.nachplanLaeuft) return; _tpl.nachplanLaeuft = true; np.disabled = true; np.textContent = 'läuft …'
+    if(np){ if(_tpl.nachplanLaeuft) return; _tpl.nachplanLaeuft = true; _tpl.nachplanFehler = ''; np.disabled = true; np.textContent = 'läuft …'
       apApi('POST', { nachplanen: true })
+        .catch(err => { _tpl.nachplanFehler = String((err && err.message) || err).slice(0, 60); throw err })   // 409 „Auto-Planer ist aus" / „läuft schon" steht im Knopf bis zum nächsten Klick (Master 09.10.2026)
         .then(d => { if(typeof atToast === 'function') atToast(`🤖 Nachplanen ${d.tag || ''}: ${d.geplant || 0} geplant für ${d.kandidaten || 0} ${d.kandidaten === 1 ? 'Konto' : 'Konten'} ohne Plan`, 'start') })
         .catch(err => { if(typeof atToast === 'function') atToast('Nachplanen: ' + ((err && err.message) || err), 'end') })
         .finally(() => { _tpl.nachplanLaeuft = false; _ap.laufAt = 0; _ap.lauf = null; tplSpaeter(); Promise.resolve(apLetztenHolen()).catch(() => {}).finally(() => { try{ apdLaden(true) }catch(_){}; tplSpaeter() }) })
