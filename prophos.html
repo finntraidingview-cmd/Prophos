@@ -10495,8 +10495,10 @@
                 <label class="wd-abl-schalter"><span><b>Automatik</b><small>würfelt und plant nachts um 00:10 — gestartet wird nur mit „Farmer SCHARF"</small></span><input type="checkbox" id="wd-aktiv"></label>
                 <div class="wd-abl-abschnitt">Zeiten</div>
                 <div class="wd-felder">
-                  <div class="wd-feld"><label>Start ab · Dubai</label><input type="time" class="input mono" id="wd-start" value="02:00"></div>
-                  <div class="wd-feld"><label>Takt je ID</label><div class="wd-abl-wert mono" title="die nächste ID startet 20–55 min nach der vorigen; die Konten einer ID laufen über die Warteschlange ihres PCs nacheinander">20–55 min <small>Zufall</small></div></div>
+                  <!-- Zeitfenster (08.10.2026, Finn: „von Dubai-Zeit 5 Uhr morgens bis 18 Uhr … die Zeitspanne von–bis selbst eingeben"):
+                       Blöcke zufällig und gleichmäßig im Fenster, nur Firmen-Abstand (wdFensterMs/wdZeitenVerteilen); bis_hhmm per sql/2026-10-08_wd_zeitfenster.sql -->
+                  <div class="wd-feld"><label>Start ab · Dubai</label><input type="time" class="input mono" id="wd-start" value="05:00" title="frühester Start eines Blocks (Dubai-Zeit)"></div>
+                  <div class="wd-feld"><label>Spätestens · Dubai</label><input type="time" class="input mono" id="wd-bis" value="18:00" title="spätester Start eines Blocks (Dubai-Zeit) — dazwischen zufällig und gleichmäßig verteilt; die Konten einer ID laufen über die Warteschlange ihres PCs nacheinander"></div>
                 </div>
                 <div class="wd-abl-abschnitt">Order</div>
                 <div class="wd-felder">
@@ -41752,7 +41754,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1351'
+  const OS_TAB_BUILD = '2026-09-22.1352'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -51568,9 +51570,10 @@
   // Nächster Lauf-Tag: heute, wenn die Startzeit noch nicht vorbei ist, sonst morgen — Sa/So übersprungen
   // Tag, dessen Nacht gerade läuft bzw. als Nächstes läuft: bis 10:00 Dubai an einem Handelstag der heutige (die Blöcke laufen bis in den
   // Morgen), danach wdNaechsterTag. Nur für die Anzeige im Admin-Farmer — Eintragen/Würfeln der PC-Tabs bleibt bei wdNaechsterTag.
-  function wdLaufTag(r, j){ return (j && wdHandelstag(j.wochentag) && j.minuten < 10 * 60) ? j.tag : wdNaechsterTag(r, j) }
+  // Seit dem Zeitfenster (08.10.2026) reichen die Blöcke bis Spätestens → heutiger Tag bis Spätestens + 2 h (mind. 10:00)
+  function wdLaufTag(r, j){ return (j && wdHandelstag(j.wochentag) && j.minuten < Math.min(24 * 60, Math.max(10 * 60, wdHhmmMin(wdBisHhmm(r), WD_BIS_STD) + 120))) ? j.tag : wdNaechsterTag(r, j) }
   function wdNaechsterTag(r, j){
-    const m = /^(\d{1,2}):(\d{2})$/.exec((r && r.start_hhmm) || '02:00'), startMin = m ? (+m[1]) * 60 + (+m[2]) : 120
+    const m = /^(\d{1,2}):(\d{2})$/.exec((r && r.start_hhmm) || WD_VON_STD), startMin = m ? (+m[1]) * 60 + (+m[2]) : 300
     let tag = j.minuten < startMin ? j.tag : wdTagPlus(j.tag, 1)
     for(let i = 0; i < 3; i++){ const [y, mo, d] = tag.split('-').map(Number); const wt = new Date(Date.UTC(y, mo - 1, d)).getUTCDay(); if(wdHandelstag(wt)) break; tag = wdTagPlus(tag, 1) }
     return tag
@@ -51589,6 +51592,54 @@
   // Ein Takt-Schritt: Start des nächsten Blocks = Start des vorigen + 20 min + 0–35 min Zufall (dieselbe Rechnung wie beim Würfeln;
   // seit 08.10.2026 auch von der Umsortierung per Drag & Drop benutzt, damit beide gleich ticken)
   const wdNaechsterStart = (t, rnd) => t + wdDauerMs() + (rnd || Math.random)() * WD_TAKT_ZUFALL_MIN * 60000
+  /* ZEITFENSTER STATT TAKT (08.10.2026, Finn: „Bisher öffnen sie zum Opening und pumpen dann den ganzen Tag in eine Richtung … nur die
+   * Uhrzeiten anpassen: von Dubai-Zeit 5 Uhr morgens bis zum US-Opening bzw. 18 Uhr … zufällige Zeiten in diesem Zeitraum"). Die Blöcke
+   * (eine ID = ein Block, Konten wie bisher über die Warteschlange ihres PCs, Richtung je ID gewürfelt) liegen zufällig im Fenster
+   * [start_hhmm, bis_hhmm] Dubai statt ab start_hhmm im 20–55-min-Takt. Gleichmäßig: das Fenster wird in n gleiche Abschnitte geteilt,
+   * jeder Block liegt zufällig in seinem Abschnitt (keine Klumpen). Kein eigener Abstand (Finn 08.10.2026: 60-min- und 20-min-Regel
+   * abgeschafft, es gilt nur 1 min je Firma zwischen zwei beliebigen Starts + Gegenhedge 90 s): zwischen zwei Blöcken liegt
+   * WD_FIRMA_ABSTAND_MIN hinter dem letzten Konto-Start des früheren, mindestens das Gegenhedge-Fenster (wdBlockAbstandMs, Konten 80 s
+   * versetzt wie wdKontoZeiten). Planer-Pläne (ap_wd_block_starts) und den Riegel selbst prüfen Planer und DB. Fenster voll → direkt dahinter.
+   * bis_hhmm: sql/2026-10-08_wd_zeitfenster.sql. */
+  const WD_VON_STD = '05:00', WD_BIS_STD = '18:00'
+  const WD_FIRMA_ABSTAND_MIN = 1   // = Firmen-Abstand von Planer/Bot/DB (app.py AP_FIRMA_ABSTAND_MIN, Finn 08.10.2026: 1 min je Firma)
+  const WD_GEGENHEDGE_S = 90 + 40   // = DB prophos_gegenhedge_fenster() 90 s + Jitter bis 40 s, um den der Riegel einen Gegen-Start schiebt
+  // Abstand zwischen zwei Block-Starts: Firmen-Minute hinter dem letzten Konto des Blocks (nKonten = meiste aktive Konten eines Blocks),
+  // mindestens aber das Gegenhedge-Fenster — zwei IDs mit gewürfelter Gegenrichtung bei derselben Firma würde der DB-Riegel sonst
+  // verschieben (Prüfung Slave 2, 08.10.2026)
+  const wdBlockAbstandMs = nKonten => Math.max(WD_GEGENHEDGE_S * 1000,
+    WD_FIRMA_ABSTAND_MIN * 60000 + Math.max(0, (nKonten || 1) - 1) * (typeof WD_KONTO_ABSTAND_MS !== 'undefined' ? WD_KONTO_ABSTAND_MS : 80000))
+  const wdBisHhmm = r => (r && r.bis_hhmm) || WD_BIS_STD
+  const wdHhmmMin = (hhmm, std) => { const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm || std); return m ? (+m[1]) * 60 + (+m[2]) : 0 }
+  // Fenster eines Tags in ms: lo = Start ab (nie vor jetzt + 5 min), hi = Spätestens. hi < lo = Fenster schon vorbei.
+  function wdFensterMs(r, tag, jetztMs){
+    r = r || {}
+    const tz = r.tz || WD_TZ_STD
+    const lo = Math.max(wdZeitpunkt(tag, r.start_hhmm || WD_VON_STD, tz).getTime(), (jetztMs || Date.now()) + 5 * 60000)
+    return { lo, hi: wdZeitpunkt(tag, wdBisHhmm(r), tz).getTime() }
+  }
+  window._wdFensterMs = wdFensterMs   // Test-Haken
+  /* REIN RECHNEND: n Startzeiten (ms, auf die Minute) in [lo, hi], gleichmäßig verteilt (je Abschnitt eine), ≥ gap zu allen festen
+   * Blöcken und untereinander. Passt eine nicht mehr, kommt sie direkt hinter den letzten Block. → aufsteigend. */
+  function wdZeitenVerteilen(n, lo, hi, fest, rnd, gap){
+    const M = 60000, out = [], f = (fest || []).filter(t => t > 0)
+    gap = Math.max(M, gap || wdBlockAbstandMs(1))
+    const frei = t => f.every(x => Math.abs(x - t) >= gap) && out.every(x => Math.abs(x - t) >= gap)
+    const w = n > 0 && hi > lo ? (hi - lo) / n : 0
+    for(let i = 0; i < n; i++){
+      let t = null
+      if(w > 0){
+        // Abschnitt i, hinten um den Abstand gekürzt → der nächste Abschnitt bleibt immer frei
+        const a = lo + i * w, b = Math.max(a, lo + (i + 1) * w - gap)
+        for(let k = 0; k < 40 && t == null; k++){ const c = Math.round((a + rnd() * (b - a)) / M) * M; if(c >= lo && c <= hi && frei(c)) t = c }
+        for(let k = 0; k < 200 && t == null; k++){ const c = Math.round((lo + rnd() * (hi - lo)) / M) * M; if(c >= lo && c <= hi && frei(c)) t = c }
+      }
+      if(t == null) t = Math.ceil((f.concat(out).length ? Math.max(lo, ...f.concat(out).map(x => x + gap)) : lo) / M) * M   // Fenster voll: direkt dahinter
+      out.push(t)
+    }
+    return out.sort((x, y) => x - y)
+  }
+  window._wdZeitenVerteilen = wdZeitenVerteilen   // Test-Haken
 
   /* Würfeln (rein rechnend, testbar). rows = Zeilen des Tages; Zeilen mit start_um bleiben fest
    * (außer alleNeu) und Neue werden dahinter angehängt. seed → deterministisch, null → Math.random.
@@ -51629,27 +51680,19 @@
   function wdWuerfeln(rows, regeln, tag, seed, alleNeu, jetztMs, richtungFest){
     const r = regeln || {}, rnd = seed != null ? wdMulberry(seed) : Math.random
     const nAkt = x => (x.konten || []).filter(wdAktiv).length
-    const aMax = Math.max(1, +r.abstand_max || 4)
-    const jit = (r.jitter_min == null) ? 10 : Math.max(0, +r.jitter_min || 0)
-    const dauer = () => wdDauerMs()   // 20 min fest + luft() 0–35 min = 20–55 min (27.09.2026)
-    const luft = () => rnd() * WD_TAKT_ZUFALL_MIN * 60000    // Zufall 0–35 min, Seed-Zufall (zwei Tabs würfeln gleich)
     const out = new Map()
     const fest = alleNeu ? [] : (rows || []).filter(x => x.start_um && nAkt(x) > 0 && x.status !== 'leer')
     const teil = (rows || []).filter(x => nAkt(x) > 0 && (alleNeu || !x.start_um) && x.status !== 'laeuft' && x.status !== 'fertig' && x.status !== 'verpasst')
       .sort((a, b) => String(a.registriert_at || '').localeCompare(String(b.registriert_at || '')) || String(a.user_id).localeCompare(String(b.user_id)))
     for(let i = teil.length - 1; i > 0; i--){ const j = Math.floor(rnd() * (i + 1)); [teil[i], teil[j]] = [teil[j], teil[i]] }
-    let t, nr
-    if(fest.length){
-      t = Math.max(...fest.map(x => new Date(x.start_um).getTime() + dauer(x))) + luft()
-      nr = Math.max(...fest.map(x => +x.reihenfolge || 0))
-    }else{
-      t = wdZeitpunkt(tag, r.start_hhmm || '02:00', r.tz || WD_TZ_STD).getTime() + rnd() * jit * 60000
-      // Startzeit schon vorbei (Tab kam spät, „Würfeln" am Nachmittag): frühestens in 5 min
-      t = Math.max(t, (jetztMs || Date.now()) + 5 * 60000)
-      nr = 0
-    }
+    // ZEITFENSTER (08.10.2026): Zeiten zufällig über [Start ab, Spätestens] statt Takt ab Start — feste Blöcke bleiben, Neue mit Abstand
+    // dazwischen; Startzeit schon vorbei (Tab kam spät, „Würfeln" am Nachmittag): frühestens in 5 min (wdFensterMs)
+    const nr0 = fest.length ? Math.max(...fest.map(x => +x.reihenfolge || 0)) : 0
+    const { lo, hi } = wdFensterMs(r, tag, jetztMs)
+    const zeiten = wdZeitenVerteilen(teil.length, lo, hi, fest.map(x => new Date(x.start_um).getTime()), rnd, wdBlockAbstandMs(Math.max(1, ...(rows || []).map(nAkt))))
+    let nr = nr0
     teil.forEach((x, i) => {
-      if(i > 0) t = wdNaechsterStart(t, rnd)   // = t + dauer + luft (gleiche Rechnung, seit 08.10.2026 über wdNaechsterStart)
+      const t = zeiten[i]   // teil ist schon gemischt → Reihenfolge der IDs zufällig, Zeiten aufsteigend
       const gew = rnd() < 0.5 ? 'buy' : 'sell'                          // rnd() immer ziehen — Seed-Folge bleibt für alle Tabs gleich
       const v = wdRichtungVorgabe(richtungFest, String(x.user_id), x.konten)   // RICHTUNG ÜBERNEHMEN (08.10.2026) statt würfeln
       out.set(String(x.user_id), { reihenfolge: ++nr, start_um: new Date(Math.round(t / 60000) * 60000).toISOString(), richtung: v ? v.richtung : gew, status: 'geplant', richtung_grund: v ? v.grund : null })
@@ -51664,7 +51707,7 @@
   /* BLÖCKE PER DRAG & DROP (08.10.2026, Finn: „IDs bzw. Blöcke per Drag & Drop auf andere Plätze verschieben — z. B. wenn Chris erst
    * später starten soll, ziehe ich seinen Block nach hinten"). Rein rechnend: liste = Zeilen mit Block in Reihenfolge (nach start_um),
    * fest = läuft/fertig/verpasst (unverschiebbar, bleiben vorn, blockieren alles davor), die übrigen werden umgestellt. Zeiten: der erste
-   * verschiebbare Block behält seinen Start (den Platz), jeder folgende = voriger + Takt (wdNaechsterStart, wie beim Würfeln);
+   * Seit dem Zeitfenster (08.10.2026) bleiben die gewürfelten Plätze (Zeiten), nur die IDs wandern in die neue Reihenfolge;
    * reihenfolge wird fortlaufend neu vergeben. → Map user_id → {reihenfolge, start_um}, nur für geänderte Zeilen. */
   const wdFest = x => x.status === 'laeuft' || x.status === 'fertig' || x.status === 'verpasst'
   function wdUmsortieren(rows, vonUid, nachUid, rnd){
@@ -51677,11 +51720,11 @@
     frei.splice(ziel, 0, z)
     const out = new Map()
     let nr = fest.length ? Math.max(...fest.map(x => +x.reihenfolge || 0)) : 0
-    let t = frei.length ? Math.min(...liste.filter(x => !wdFest(x)).map(x => new Date(x.start_um).getTime())) : 0   // erster freier Platz behält seine Zeit
-    if(fest.length){ const fe = Math.max(...fest.map(x => new Date(x.start_um).getTime())); if(t <= fe) t = wdNaechsterStart(fe, rnd) }
+    // ZEITFENSTER (08.10.2026): die gewürfelten Plätze (Zeiten) bleiben, nur die IDs wandern — vorher neu getaktet (20–55 min ab dem
+    // ersten Platz), das hätte die über den Tag verteilten Blöcke wieder an den Anfang zusammengeschoben
+    const plaetze = liste.filter(x => !wdFest(x)).map(x => new Date(x.start_um).getTime()).sort((a, b) => a - b)
     frei.forEach((x, i) => {
-      if(i > 0) t = wdNaechsterStart(t, rnd)
-      const startIso = new Date(Math.round(t / 60000) * 60000).toISOString(), reihenfolge = ++nr
+      const startIso = new Date(Math.round(plaetze[i] / 60000) * 60000).toISOString(), reihenfolge = ++nr
       if(startIso !== x.start_um || reihenfolge !== +x.reihenfolge) out.set(String(x.user_id), { reihenfolge, start_um: startIso })
     })
     return out
@@ -51703,8 +51746,8 @@
   }
   // Rein rechnend: was ist in diesem Tick zu tun? Registrieren ab 00:00 bis zur Startzeit, würfeln ab 00:10.
   function wdTickEntscheidung(j, r, registriertTag){
-    const m = /^(\d{1,2}):(\d{2})$/.exec((r && r.start_hhmm) || '02:00')
-    const startMin = m ? (+m[1]) * 60 + (+m[2]) : 120
+    const m = /^(\d{1,2}):(\d{2})$/.exec((r && r.start_hhmm) || WD_VON_STD)
+    const startMin = m ? (+m[1]) * 60 + (+m[2]) : 300
     return { registrieren: registriertTag !== j.tag && j.minuten < startMin, wuerfeln: j.minuten >= 10 }
   }
 
@@ -52504,7 +52547,8 @@
   function wdRegelnInsFormular(){
     const r = _wd.regeln || {}, g = id => document.getElementById(id)
     if(g('wd-aktiv')) g('wd-aktiv').checked = !!r.aktiv
-    if(g('wd-start')) g('wd-start').value = r.start_hhmm || '02:00'
+    if(g('wd-start')) g('wd-start').value = r.start_hhmm || WD_VON_STD
+    if(g('wd-bis')){ g('wd-bis').value = wdBisHhmm(r); g('wd-bis').disabled = !('bis_hhmm' in r); if(!('bis_hhmm' in r)) g('wd-bis').title = 'Spalte bis_hhmm fehlt noch (sql/2026-10-08_wd_zeitfenster.sql) — bis dahin gilt 18:00' }
     if(g('wd-abst-min')) g('wd-abst-min').value = r.abstand_min != null ? r.abstand_min : 2
     if(g('wd-abst-max')) g('wd-abst-max').value = r.abstand_max != null ? r.abstand_max : 4
     // Hedge-Tabelle (23.09.2026, Finn: „die Tabelle, wie viel gegengehedgt wird, steht nirgendwo und ich
@@ -52550,8 +52594,8 @@
   function wdStatus(){
     const r = _wd.regeln || {}, chip = document.getElementById('wd-auto-chip'), txt = document.getElementById('wd-status-text')
     if(!chip || !txt) return
-    const start = r.start_hhmm || '02:00', rows = _wd.rows || []
-    chip.textContent = r.aktiv ? `Automatik AN · würfelt 00:10 · Start ab ${start} Dubai` : `Automatik AUS · Start ab ${start} Dubai`
+    const start = r.start_hhmm || WD_VON_STD, rows = _wd.rows || []
+    chip.textContent = r.aktiv ? `Automatik AN · würfelt 00:10 · Start ${start}–${wdBisHhmm(r)} Dubai` : `Automatik AUS · Start ${start}–${wdBisHhmm(r)} Dubai`
     chip.className = 'wd-status-chip ' + (r.aktiv ? 'an' : 'aus')
     const j = wdJetzt(WD_TZ_STD), laeuft = rows.find(x => x.status === 'laeuft')
     const geplant = rows.filter(x => x.status === 'geplant' && x.start_um).sort((a, b) => new Date(a.start_um) - new Date(b.start_um))
@@ -52693,8 +52737,8 @@
   }
   /* ID OHNE NEU-WÜRFELN EINPLANEN (F35, 28.09.2026, Finn: „dass ich die ID einfach hinzufüge, sodass ich nicht neu würfeln muss — per
    * Zufallsprinzip in irgendeinen Block rein … nicht jedes Mal neu würfeln"). REIN RECHNEND (window._wdSlotWaehlen): Startzeit NUR für
-   * diese Zeile, feste Blöcke bleiben unberührt. Zufällig eine Lücke, in der ≥ 20 min Abstand zu beiden Nachbarn bleibt (Takt 20–55 min
-   * nach dem vorigen Block), sonst hinter den letzten Block (+20–55 min). Ohne Blöcke: Startzeit der Regeln + Jitter. Nie vor jetzt + 5 min.
+   * diese Zeile, feste Blöcke bleiben unberührt. Seit 08.10.2026 zufällig im Zeitfenster [Start ab, Spätestens] mit Firmen-Abstand
+   * (wdBlockAbstandMs) zu jedem festen Block; kein Platz → { start_ms: null, grund } (nichts eingeplant). Nie vor jetzt + 5 min.
    * → { start_ms, vor: Zeile|null, nach: Zeile|null } */
   function wdSlotWaehlen(rows, ich, regeln, tag, jetztMs, rnd){
     const r = regeln || {}, M = 60000, zufall = rnd || Math.random, jetzt = jetztMs || Date.now(), frueh = jetzt + 5 * M
@@ -52702,28 +52746,29 @@
       && (x.status === 'laeuft' || x.status === 'fertig' || x.status === 'verpasst' || (x.konten || []).some(wdAktiv)))
       .map(x => ({ x, t: new Date(x.start_um).getTime() })).filter(e => e.t > 0).sort((a, b) => a.t - b.t)
     const runde = t => Math.round(t / M) * M
-    if(!fest.length){
-      const t = wdZeitpunkt(tag, r.start_hhmm || '02:00', r.tz || WD_TZ_STD).getTime() + zufall() * ((r.jitter_min == null ? 10 : +r.jitter_min || 0) * M)
-      return { start_ms: runde(Math.max(t, frueh)), vor: null, nach: null }
+    // ZEITFENSTER (08.10.2026): irgendwo im Fenster [Start ab, Spätestens] mit Firmen-Abstand (wdBlockAbstandMs) zu jedem festen Block,
+    // gleich wahrscheinlich über alle freien Strecken (vorher: eine Lücke im 20–55-min-Takt). Kein Platz → direkt hinter den letzten.
+    const { lo, hi } = wdFensterMs(r, tag, jetzt), gap = wdBlockAbstandMs(Math.max(1, ...(rows || []).concat([ich]).map(x => ((x && x.konten) || []).filter(wdAktiv).length)))
+    let stuecke = hi >= lo ? [[lo, hi]] : []
+    for(const e of fest) stuecke = stuecke.flatMap(([a, b]) => [[a, Math.min(b, e.t - gap)], [Math.max(a, e.t + gap), b]]).filter(([a, b]) => b >= a)
+    const nachbarn = t => ({ vor: (fest.filter(e => e.t <= t).pop() || {}).x || null, nach: (fest.find(e => e.t > t) || {}).x || null })
+    if(stuecke.length){
+      const summe = stuecke.reduce((n, [a, b]) => n + (b - a), 0)
+      let rest = zufall() * summe, t = stuecke[0][0]
+      for(const [a, b] of stuecke){ if(rest <= b - a){ t = a + rest; break } rest -= b - a }
+      const st = runde(t)
+      return { start_ms: st, ...nachbarn(st) }
     }
-    const MIN = WD_TAKT_MIN * M, MAX = (WD_TAKT_MIN + WD_TAKT_ZUFALL_MIN) * M
-    const luecken = []
-    for(let i = 0; i < fest.length - 1; i++){
-      const lo = Math.max(fest[i].t + MIN, frueh), hi = Math.min(fest[i + 1].t - MIN, fest[i].t + MAX)
-      if(hi >= lo) luecken.push({ lo, hi, vor: fest[i].x, nach: fest[i + 1].x })
-    }
-    if(luecken.length){
-      const l = luecken[Math.floor(zufall() * luecken.length)]
-      return { start_ms: runde(l.lo + zufall() * (l.hi - l.lo)), vor: l.vor, nach: l.nach }
-    }
-    const letzte = fest[fest.length - 1]
-    return { start_ms: runde(Math.max(letzte.t + MIN + zufall() * (MAX - MIN), frueh)), vor: letzte.x, nach: null }
+    // Kein Platz mehr im Fenster (z. B. nach Spätestens nachgetragen): nichts einplanen statt heute Abend außerhalb des Fensters
+    // (Prüfung Slave 2, 08.10.2026) — die ID ist beim nächsten Würfeln dabei
+    return { start_ms: null, vor: null, nach: null, grund: hi < lo ? `Fenster ${r.start_hhmm || WD_VON_STD}–${wdBisHhmm(r)} Dubai für diesen Tag vorbei — die ID ist beim nächsten Würfeln dabei` : `kein freier Platz mehr im Fenster ${r.start_hhmm || WD_VON_STD}–${wdBisHhmm(r)} Dubai` }
   }
   window._wdSlotWaehlen = wdSlotWaehlen   // Test-Haken
   // Zeile einplanen + Pläne anlegen (bei SCHARF, gleicher Weg wie Würfeln). Nur diese Zeile wird geschrieben. → Text für den Toast
   async function wdSlotEinplanen(x){
     const r = _wd.regeln || {}
     const s = wdSlotWaehlen(_wd.rows || [], x, r, x.tag, Date.now())
+    if(s.start_ms == null) return `${x.name || 'ID'} nicht eingeplant: ${s.grund}`   // Zeitfenster (08.10.2026)
     const vorgabe = wdRichtungVorgabe(((_wd.daten || {}).richtung_fest) || {}, String(x.user_id), x.konten)   // Richtung übernehmen (08.10.2026)
     const start = new Date(s.start_ms).toISOString(), richtung = vorgabe ? vorgabe.richtung : (Math.random() < 0.5 ? 'buy' : 'sell')
     const rf = Math.max(0, ...(_wd.rows || []).map(q => +q.reihenfolge || 0)) + 1
@@ -53494,9 +53539,15 @@
   async function wdRegelnSpeichern(auto){
     const g = id => document.getElementById(id), n = (id, std) => { const v = parseFloat(g(id)?.value); return isFinite(v) ? Math.max(0, Math.round(v)) : std }
     const { data: { user } } = await supabase.auth.getUser()
-    const r = { aktiv: !!g('wd-aktiv')?.checked, start_hhmm: g('wd-start')?.value || '02:00', tz: WD_TZ_STD,
+    const r = { aktiv: !!g('wd-aktiv')?.checked, start_hhmm: g('wd-start')?.value || WD_VON_STD, tz: WD_TZ_STD,
                 abstand_min: 0, abstand_max: 0,   // Abstand entfällt (27.09.2026), Warteschlange je PC
                 updated_at: new Date().toISOString(), updated_by: user ? user.id : null }
+    // Zeitfenster (08.10.2026): Spätestens nur schreiben, wenn die Spalte schon da ist (sonst lehnt PostgREST das ganze Update ab)
+    if('bis_hhmm' in (_wd.regeln || {})){
+      const bis = g('wd-bis')?.value || WD_BIS_STD
+      if(wdHhmmMin(bis, WD_BIS_STD) <= wdHhmmMin(r.start_hhmm, WD_VON_STD)) return wdSay(`Spätestens (${bis}) muss nach Start ab (${r.start_hhmm}) liegen — nicht gespeichert.`, 'err')
+      r.bis_hhmm = bis
+    }
     if(r.abstand_max < r.abstand_min) r.abstand_max = r.abstand_min
     const { error } = await supabase.from('wd_farmer_regeln').update(r).eq('id', 1)
     if(error) return wdSay('Einstellungen nicht gespeichert: ' + error.message, 'err')
@@ -53515,6 +53566,9 @@
     }, 60)
   })
   document.getElementById('wd-regeln')?.addEventListener('change', wdAutoRegeln)   // Auto-Speichern (23.09.2026)
+  // Zeitfenster (08.10.2026): #wd-regeln gibt es nicht mehr — Start ab / Spätestens speichern je eigenem Handler 0,7 s nach der Änderung
+  document.getElementById('wd-start')?.addEventListener('change', wdAutoRegeln)
+  document.getElementById('wd-bis')?.addEventListener('change', wdAutoRegeln)
   document.getElementById('wdRegelnSave')?.addEventListener('click', () => wdRegelnSpeichern().then(() => wdHedgeSpeichern()).catch(e => wdSay('Fehler: ' + (e.message || e), 'err')))
   document.getElementById('wdHedgeSave2')?.addEventListener('click', () => wdHedgeSpeichern().catch(e => wdSay('Fehler: ' + (e.message || e), 'err')))
   document.getElementById('wdHedgeSave')?.addEventListener('click', () => wdHedgeSpeichern().catch(e => wdSay('Fehler: ' + (e.message || e), 'err')))
@@ -53581,7 +53635,7 @@
       if(a.angelegt) teile.push(`${a.angelegt} Pläne angelegt`); if(nz.geaendert) teile.push(`${nz.geaendert} Pläne umgestellt`); if(nz.geloescht) teile.push(`${nz.geloescht} Pläne gelöscht`)
       const probleme = [...(e.fehler ? [e.fehler] : []), ...a.fehler]
       const imFarm = (_wd.rows || []).flatMap(x => (x.konten || []).filter(wdAktiv)).length
-      wdSay(n ? `${teile.join(' · ')} — ab ${escapeHtml((_wd.regeln || {}).start_hhmm || '02:00')} Dubai starten die PC-Tabs Block für Block.${probleme.length ? ' ⚠ ' + probleme.join(' · ') : ''}`
+      wdSay(n ? `${teile.join(' · ')} — zwischen ${escapeHtml((_wd.regeln || {}).start_hhmm || WD_VON_STD)} und ${escapeHtml(wdBisHhmm(_wd.regeln))} Dubai starten die PC-Tabs Block für Block.${probleme.length ? ' ⚠ ' + probleme.join(' · ') : ''}`
               : `Nichts zu würfeln — ${imFarm ? 'kein Block, der noch nicht läuft' : 'kein Konto im Farm (Haken in den Blöcken setzen, dann speichern)'}.${probleme.length ? ' ⚠ ' + probleme.join(' · ') : ''}`, n && !probleme.length ? 'ok' : 'err')
     }catch(err){ wdSay('Fehler: ' + (err.message || err), 'err') }
     finally{ _wd.busy = false; if(b){ b.disabled = false; b.textContent = '🎲 Würfeln' } }
@@ -53655,7 +53709,7 @@
     el.classList.toggle('an', an)
     el.querySelector('#ws-knopf').textContent = an ? 'Farmer SCHARF' : 'Farmer AUS'
     el.querySelector('#ws-text').innerHTML = an
-      ? `<b>Scharf:</b> die Pläne liegen an und starten zur Startzeit (ab ${escapeHtml(r.start_hhmm || '02:00')} Dubai) von allein. Zum Ausstellen auf den Knopf drücken — dann werden nie gestartete Pläne wieder gelöscht.`
+      ? `<b>Scharf:</b> die Pläne liegen an und starten zur Startzeit (${escapeHtml(r.start_hhmm || WD_VON_STD)}–${escapeHtml(wdBisHhmm(r))} Dubai) von allein. Zum Ausstellen auf den Knopf drücken — dann werden nie gestartete Pläne wieder gelöscht.`
       : `<b>Aus:</b> würfeln geht (Blöcke, Zeiten, Richtung), aber es werden <b>keine Pläne</b> angelegt und nichts gestartet. Zum Scharfstellen auf den Knopf drücken — dann werden die Pläne für den gewählten Tag angelegt.${r.aktiv ? '' : ' Nachts von allein würfeln ist ebenfalls aus (Einstellungen).'}`
   }
   function wzPanel(){
@@ -53674,7 +53728,7 @@
     const p = wzPanel(); if(!p) return
     const body = p.querySelector('#wz-body'), r = _wd.regeln || {}
     const rows = (_wd.rows || []).filter(x => x && x.start_um && (x.status !== 'leer' || x.reihenfolge))
-    if(!rows.length){ body.innerHTML = `<div style="padding:6px 0;color:var(--sub);font-size:13px">Noch keine Startzeiten — „🎲 Würfeln" verteilt die Blöcke ab ${escapeHtml(r.start_hhmm || '02:00')} Dubai.</div>`; return }
+    if(!rows.length){ body.innerHTML = `<div style="padding:6px 0;color:var(--sub);font-size:13px">Noch keine Startzeiten — „🎲 Würfeln" verteilt die Blöcke zwischen ${escapeHtml(r.start_hhmm || WD_VON_STD)} und ${escapeHtml(wdBisHhmm(r))} Dubai.</div>`; return }
     const dauer = x => (typeof wdDauerMs === 'function') ? wdDauerMs(x, r) : 10 * 60000
     const H = 3600000
     const t0 = Math.floor((Math.min(...rows.map(x => +new Date(x.start_um))) - 10 * 60000) / H) * H
@@ -53701,7 +53755,7 @@
   setInterval(() => {
     const pane = document.getElementById('adm-pane-wd'); if(!pane || pane.hidden || pane.offsetParent === null) return
     const r = _wd.regeln || {}
-    const sig = JSON.stringify([(_wd.rows || []).map(x => [x.user_id, x.start_um, x.status, x.reihenfolge, x.richtung, x.name, (x.konten || []).filter(k => k && k.aktiv !== false).length]), r.scharf, r.aktiv, r.abstand_max, r.start_hhmm, Math.floor(Date.now() / 60000)])
+    const sig = JSON.stringify([(_wd.rows || []).map(x => [x.user_id, x.start_um, x.status, x.reihenfolge, x.richtung, x.name, (x.konten || []).filter(k => k && k.aktiv !== false).length]), r.scharf, r.aktiv, r.abstand_max, r.start_hhmm, r.bis_hhmm, Math.floor(Date.now() / 60000)])
     if(sig === _wzSig) return
     _wzSig = sig; wsRender(); wzRender()
   }, 1000)
