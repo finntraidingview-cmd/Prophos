@@ -30031,14 +30031,19 @@
   }
 
   // ── MetaApi: offene Positionen für jeden manuellen Account mit MA-Verknüpfung ──
+  // 08.10.2026 (Prüfer: GET /ma/positions seit 15:25 UTC 5× 500/504 nach 5–15 s vom Mac — belegt den einen Railway-Worker): die
+  // MetaApi-Verknüpfungen sind Altbestand der Mirror-Zeit (5 Fusion-Live-Konten, letzte Prüfung Juli–22.09.; Fusion läuft heute über
+  // Echo/mt5_live). Abruf nur noch, wenn die alte Live-Trades-Ansicht sichtbar ist (ltRefresh), und jede Anfrage bricht nach 4 s still ab.
+  const LT_MA_TIMEOUT_MS = 4000
   async function ltFetchMtPositions(){
     const maAccounts = (accounts || []).filter(a => a.ma && a.ma.token && a.ma.accountId)
     if(!maAccounts.length) return []
     const out = []
     for(const acc of maAccounts){
+      const ab = new AbortController(), tm = setTimeout(() => ab.abort(), LT_MA_TIMEOUT_MS)
       try {
         const r = await fetch(`${TS_BACKEND}/ma/positions`, {
-          method:'GET',
+          method:'GET', signal: ab.signal,
           headers:{'ma-token': acc.ma.token, 'ma-account': acc.ma.accountId}
         })
         if(!r.ok) continue
@@ -30057,7 +30062,8 @@
             ccy: 'USD'
           })
         }
-      } catch(_){}
+      } catch(_){}   // Timeout/Netz: still, die Ansicht zeigt dann eben keine MT-Zeilen
+      finally { clearTimeout(tm) }
     }
     return out
   }
@@ -30154,7 +30160,7 @@
       const ltSicht = !!document.querySelector('.view[data-view="livetrades"].active')
       const [tsx, mt, dup] = await Promise.all([
         ltFetchTsxPositions(),
-        ltFetchMtPositions(),
+        ltSicht ? ltFetchMtPositions() : Promise.resolve(ltState.positions.mt || []),   // MetaApi nur bei sichtbarer Ansicht (08.10.2026)
         ltSicht ? ltFetchDupPositions() : Promise.resolve(ltState.positions.dup || [])
       ])
       ltState.positions = { tsx, mt, dup }
@@ -41949,7 +41955,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1364'
+  const OS_TAB_BUILD = '2026-09-22.1365'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
