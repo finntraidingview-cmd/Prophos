@@ -15684,7 +15684,7 @@ def _ap_hb_laden(firmen, jetzt=None):
         accs.update({str(a["id"]): a for a in rows if a.get("id")})
     plaene = [p for p in plaene if (p.get("konto_typ") or (accs.get(str(p.get("master_account_id"))) or {}).get("account_type")) in AP_TYPEN]
     # Archiv-Grund je Konto (frühester Eintrag mit Grund, wie ap_sieben_tage) — nicht lesbar → ohne
-    arch = {}
+    arch, arch_alle = {}, set()   # arch_alle: jeder wahre Eintrag wie _ap_archiviert (bal_nach-Hinweis nicht für archivierte Konten)
     try:
         for row in _sb_all("user_settings", {"select": "value", "key": "eq.archive"}):
             v = row.get("value")
@@ -15694,6 +15694,8 @@ def _ap_hb_laden(firmen, jetzt=None):
                 except ValueError:
                     v = None
             for kid, info in (v.items() if isinstance(v, dict) else ()):
+                if info:
+                    arch_alle.add(str(kid))
                 if str(kid) in accs and isinstance(info, dict) and info.get("reason") and info.get("at"):
                     d = _ap_ts(info["at"])
                     if d and (str(kid) not in arch or d < arch[str(kid)][0]):
@@ -15746,8 +15748,8 @@ def _ap_hb_laden(firmen, jetzt=None):
         k = str(p.get("master_account_id") or "")
         bn = (p.get("mt5_baseline") or {}).get("bal_nach")
         zeilen[i]["konto_id"] = k or None
-        if not (isinstance(bn, dict) and bn.get("ok") is False) or str(ap_hb_ende(p) or "") < letzt.get(k, ""):
-            continue
+        if not (isinstance(bn, dict) and bn.get("ok") is False) or str(ap_hb_ende(p) or "") < letzt.get(k, "") or k in arch_alle:
+            continue                                   # archiviert → kein „Balance nicht gelesen" mehr (Zeile zählt weiter in die Bilanz)
         ende, bal_at = _ap_ts(ap_hb_ende(p)), _ap_ts((accs.get(k) or {}).get("tv_balance_at"))
         if ende is not None and (bal_at is None or bal_at < ende):
             zeilen[i]["bal_nach"] = {f: bn.get(f) for f in ("msg", "code", "tun", "versuche", "at") if bn.get(f) is not None}
@@ -15950,6 +15952,19 @@ def _ap_probelauf(tr_info, plan_roh, minuten, zinfo, richtung, zeiten, namen, st
                           "netto_delta": v["verlauf"][-1]["netto_delta"], "netto_max_abs": v["netto_max_abs"],
                           "band": {"pct": pct, "gehalten": v["gehalten"], "ueber": v["ueber"][:20]},
                           "hinweise": hinweise}}
+
+
+def ap_ohne_archiv(erg, archiv):
+    """REIN RECHNEND (testbar): gespeichertes Lauf-Ergebnis ohne Zeilen archivierter Konten in ausgelassen[] (08.10.2026, Finn am
+    Screenshot „Braucht dich" — EzPoker „100k …7021 The5%ers Phase 1 · Balance fehlt": „Den Account habe ich schon längst archiviert,
+    deswegen soll er selber weggemacht werden"). Der Planer lässt archivierte Konten seit jeher aus (ap_planen: archiviert = weg), aber
+    GET /admin/auto-plan lieferte das Ergebnis des LETZTEN Laufs unverändert — lief der vor dem Archivieren (hier 04:30 UTC), stand das
+    Konto bis zum nächsten Lauf weiter als „keine Balance bekannt" in Braucht dich. geplant[] bleibt (echte Pläne), Summen bleiben."""
+    if not archiv or not isinstance(erg, dict) or not isinstance(erg.get("ausgelassen"), list):
+        return erg
+    out = dict(erg)
+    out["ausgelassen"] = [x for x in erg["ausgelassen"] if str((x or {}).get("konto_id") or "") not in archiv]
+    return out
 
 
 def ap_sicht(erg, uid):
@@ -20527,6 +20542,10 @@ def admin_auto_plan():
         sicht = _ap_sicht_aus_anfrage(admin, uid)   # seit 08.10.2026: Nicht-Admin alle IDs nur mit ?sicht=admin (Admin-Reiter), sonst eigene
         rows = sb_select("auto_plan_lauf", {"select": "tag,quelle,at,ergebnis", "order": "at.desc", "limit": "1"})
         erg = (rows[0].get("ergebnis") if rows else None) or {}
+        try:
+            erg = ap_ohne_archiv(erg, _ap_archiviert())   # seit dem Lauf archiviert → nicht mehr in Braucht dich (08.10.2026)
+        except Exception as e:
+            print(f"[auto-plan] ⚠️ Archiv-Filter: {type(e).__name__}: {e}", flush=True)
         return jsonify({"ok": True, "admin": admin, "aktiv": bool(reg.get("aktiv")), "ids": len(reg.get("user_ids") or []),
                         "im_planer": im_planer or admin, "letzter": ap_sicht(erg, sicht) if sicht else erg,
                         "sicht": "eigene" if sicht else "alle", "info": _ap_info})

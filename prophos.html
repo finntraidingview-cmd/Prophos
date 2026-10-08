@@ -41745,7 +41745,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1334'
+  const OS_TAB_BUILD = '2026-09-22.1335'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -47804,9 +47804,13 @@
           tun: String(bn.tun || `Am PC von ${z.user || 'der ID'} ↻ Balance lesen.`) + ` Der PC-Tab von ${z.user || 'der ID'} liest weiter von selbst nach.` })
       }
     }catch(e){ console.warn('[tpl] Balance nach Trade', e) }
+    const archEigen = (typeof getArchive === 'function') ? (getArchive() || {}) : {}
     if(tagGleich) for(const x of roh.ausgelassen || []){
       const g = String(x.grund || '')
       if(/geplanten\/laufenden Plan/.test(g)) continue
+      // seit dem Lauf archiviert (08.10.2026, Finn: „Den Account habe ich schon längst archiviert … soll selber weggemacht werden"): das Backend
+      // filtert beim Ausliefern (app.py ap_ohne_archiv); hier zusätzlich für eigene Konten, falls noch ein alter Lauf im Zwischenspeicher steht
+      if(x.konto_id && archEigen[x.konto_id] && archEigen[x.konto_id].archived) continue
       if(x.typ && !TPL_TYPEN.includes(String(x.typ))) continue   // WD-RAUS-AUS-PLANER
       if(tplManRaus(man, x.user_id, x.konto_id, x.konto)) continue   // Konto in Manueller Arbeit (08.10.2026)
       const k = tplKk(x.user_id, x.konto), istBlow = /geblasen|geblowt|Polster aufgebraucht/i.test(g)

@@ -223,6 +223,30 @@ def main():
     q_tp = next(q for t, q in aufrufe["anfragen"] if t == "trade_plans")
     check("+" not in q_tp["or"] and "2026-10-07T20:00:00Z" in q_tp["or"] and "mt5_baseline->final" in q_tp["select"],
           f"Abfrage: Dubai-Mitternacht ohne „+“, nur tv/final aus mt5_baseline ({q_tp['or']})")
+    # ARCHIVIERT (08.10.2026): Konto des d-7 archiviert → kein bal_nach mehr, die Zeile selbst bleibt (Bilanz)
+    alt_sb = ns["_sb_all"]
+    def sb_arch(tabelle, q):
+        if tabelle == "user_settings":
+            return [{"value": json.dumps({"k-l1": {"archived": True, "reason": "manual", "at": "2026-10-08T05:00:00Z"},
+                                          "k-f1": {"archived": True, "reason": "manual", "at": "2026-10-08T04:30:51Z"}})}]
+        return alt_sb(tabelle, q)
+    ns["_sb_all"] = sb_arch
+    z2 = {z["plan_id"]: z for z in ns["_ap_hb_laden"](FIRMEN, jetzt)[0]}
+    ns["_sb_all"] = alt_sb
+    check("d-7" in z2 and "bal_nach" not in z2["d-7"], "bal_nach: archiviertes Konto → kein Hinweis, Zeile bleibt in heute_beendet")
+    # GET /admin/auto-plan: ap_ohne_archiv nimmt archivierte Konten aus ausgelassen[], geplant[] bleibt
+    import re as _re
+    src_app = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "app.py"), encoding="utf-8").read()
+    i_ = src_app.index("\ndef ap_ohne_archiv(") + 1
+    ns2 = {}
+    exec(src_app[i_:src_app.find("\n\n\n", i_)], ns2)
+    erg = {"ausgelassen": [{"konto_id": "k-x", "grund": "keine Balance bekannt"}, {"konto_id": "k-y", "grund": "keine Regel"}],
+           "geplant": [{"konto_id": "k-x"}], "summe": 3}
+    o = ns2["ap_ohne_archiv"](erg, {"k-x"})
+    check([x["konto_id"] for x in o["ausgelassen"]] == ["k-y"] and o["geplant"] == [{"konto_id": "k-x"}] and o["summe"] == 3
+          and len(erg["ausgelassen"]) == 2, "ap_ohne_archiv: archiviertes Konto aus ausgelassen raus, geplant/Summen bleiben, Eingabe unverändert")
+    check(ns2["ap_ohne_archiv"](erg, set()) is erg and ns2["ap_ohne_archiv"](None, {"k-x"}) is None, "ap_ohne_archiv: ohne Archiv/ohne Ergebnis unverändert")
+    check(_re.search(r"erg = ap_ohne_archiv\(erg, _ap_archiviert\(\)\)", src_app) is not None, "GET /admin/auto-plan filtert den gespeicherten Lauf gegen das aktuelle Archiv")
     # Merker: zweiter Aufruf im selben Dubai-Tag ohne neue Abfrage
     vorher = len(aufrufe["anfragen"])
     ns["ap_heute_beendet_gemerkt"](FIRMEN, jetzt)
