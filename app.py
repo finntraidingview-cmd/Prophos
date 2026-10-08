@@ -14386,6 +14386,65 @@ def _ap_runden(x, schritt):
     return int(n) if s >= 1 else n
 
 
+# TOPSTEP-KETTE (08.10.2026, Finn mit Slave-Terminal 3 — Konzept als Baum bestätigt): je Konto und Tag am Ende nur „+4.500 $" oder
+# geblowt, aber in ZWEI Trades statt einem ohne SL bis zur Liquidation („damit es normaler aussieht"). Trade 1: Start zufällig
+# 00:00–t1_bis dt, SL und TP je zufällig in t1_sl/t1_tp ($). Trade 2 entsteht erst, wenn Trade 1 zu Ende ist und Puls die Balance
+# GENAU nachgelesen hat (ap_kette_tick), Start t2_ab–t2_bis dt: TP2 = Tagesziel − E1, SL2 = Verlustgrenze (DD + blow_puffer) + E1
+# (E1 = Balance nach Trade 1 − Tagesstart; Beispiel −2.500 → TP2 7.000 / SL2 2.200, +2.500 → TP2 2.000 / SL2 7.200). Gilt jeden Tag gleich ab dem Tagesstand (150.000 oder 154.500). Richtung frei, nie Gegenhedge über IDs. Beide 3–4 NQ.
+# Aktiv, sobald die Firmen-Regel einen Block "kette" hat (sql/2026-10-08_topstep_kette.sql); Werte darin überschreiben den Standard.
+AP_KETTE_STANDARD = {"t1_bis": "11:00", "t1_sl": [1950, 2650], "t1_tp": [1950, 2650], "t2_ab": "11:00", "t2_bis": "19:30", "tagesziel_usd": 4500, "blow_puffer_usd": 200, "menge": [3, 4], "puffer": [25, 40], "t2_abstand_min": [5, 20], "t2_streuung_min": [0, 45]}
+AP_KETTE_TXT = "Topstep-Kette"
+
+
+def ap_kette_regel(regel):
+    """Kettenwerte der Firmen-Regel (Standard + regel.kette) oder None, wenn die Firma keine Kette hat."""
+    k = (regel or {}).get("kette")
+    if not isinstance(k, dict):
+        return None
+    return dict(AP_KETTE_STANDARD, **k)
+
+
+def ap_kette_trade1(regel, kette, groesse, ziel, balance, u):
+    """REIN RECHNEND: Trade 1 der Kette → werte wie ap_konto_rechnen + kette{nr, tagesziel, verlust_grenze}. Tagesziel = Rest bis zum
+    Phasenziel + Puffer, wenn der Rest höchstens tagesziel_usd ist (letzter Tag), sonst tagesziel_usd; Verlustgrenze = DD + blow_puffer."""
+    rest = ziel - balance
+    menge = _ap_runden(_ap_spanne(kette.get("menge"), u["menge"]), 1)
+    puffer = round(_ap_spanne(kette.get("puffer"), u["puffer"]) or 0)
+    # letzter Tag (Rest ≤ Tagesziel): Rest + Puffer, damit das Konto sicher über das Phasenziel kommt (159.000 statt 158.990)
+    tagesziel = round(rest + puffer) if rest <= float(kette["tagesziel_usd"]) else round(float(kette["tagesziel_usd"]))
+    verlust = round(float(regel.get("dd_usd") or 0) + float(kette["blow_puffer_usd"]))
+    tp = round(_ap_spanne(kette["t1_tp"], u["tp"]))
+    sl = round(_ap_spanne(kette["t1_sl"], u["sl"]))
+    stufe = f"{AP_KETTE_TXT} 1/2 (Tagesziel +{tagesziel:,} $)".replace(",", ".")
+    if tp >= tagesziel:                       # letzter Tag mit kleinem Rest: Trade 1 kann das Ziel schon allein holen
+        tp, stufe = tagesziel, f"{AP_KETTE_TXT} 1/2 (Rest bis Ziel +{tagesziel:,} $)".replace(",", ".")
+    return {"groesse": groesse, "ziel": ziel, "rest": round(rest), "menge": menge, "puffer": puffer, "tp": tp, "sl": sl, "risiko": sl,
+            "stufe": stufe, "kette": {"nr": 1, "tagesziel": tagesziel, "verlust_grenze": verlust}}
+
+
+def ap_kette_trade2(t1_kette, balance_start, balance_end, regel, kette, u_menge):
+    """REIN RECHNEND: Werte von Trade 2 aus dem GENAU gelesenen Ergebnis von Trade 1 → (werte, None) | (None, grund).
+    E1 = balance_end − balance_start; TP2 = Tagesziel − E1; SL2 = Verlustgrenze + E1."""
+    tagesziel = float((t1_kette or {}).get("tagesziel") or kette["tagesziel_usd"])
+    verlust = float((t1_kette or {}).get("verlust_grenze") or (float(regel.get("dd_usd") or 0) + float(kette["blow_puffer_usd"])))
+    e1 = round(float(balance_end) - float(balance_start), 2)
+    # Prüfer Slave 2 (08.10.2026): passen Start- und End-Balance nicht zusammen (relativ gegen absolut, z. B. Express 0-basiert), wäre
+    # E1 riesig — SL/TP von Trade 1 liegen höchstens bei max(t1_sl, t1_tp, Tagesziel) $; mehr als 1.500 $ darüber (bzw. unter −DD − 1.500) ist kein
+    # echter Trade-1-Ausgang
+    grenze = max(float((kette.get("t1_sl") or [0, 0])[-1]), float((kette.get("t1_tp") or [0, 0])[-1]), tagesziel) + 1500   # letzter Tag: TP1 = Tagesziel
+    if e1 > grenze or e1 < -(float(regel.get("dd_usd") or grenze) + 1500):
+        return None, f"Ergebnis von Trade 1 unplausibel ({e1:+,.0f} $, Balance-Basis prüfen) — von Hand".replace(",", ".")
+    if regel.get("dd_usd") and e1 <= -float(regel["dd_usd"]):
+        return None, f"Trade 1 hat das Konto geblowt ({e1:+.0f} $) — kein Trade 2"
+    if e1 >= tagesziel - 50:
+        return None, f"Tagesziel schon mit Trade 1 erreicht ({e1:+.0f} $) — kein Trade 2"
+    tp2, sl2 = round(tagesziel - e1), round(verlust + e1)
+    if sl2 < 100:
+        return None, f"SL für Trade 2 wäre nur {sl2} $ — von Hand prüfen"
+    menge = _ap_runden(_ap_spanne(kette.get("menge"), u_menge), 1)
+    return {"e1": e1, "tp": tp2, "sl": sl2, "menge": menge, "tagesziel": round(tagesziel), "verlust_grenze": round(verlust)}, None
+
+
 def ap_konto_rechnen(regel, phase, balance, u):
     """REIN RECHNEND (testbar): Plan-Werte EINES Kontos. u = Zufallsanteile der Tranche {tp, sl, menge, puffer} (0..1).
     → (werte, None) oder (None, grund). werte: groesse, ziel, rest, menge, puffer, tp, sl, risiko, stufe."""
@@ -14423,6 +14482,9 @@ def ap_konto_rechnen(regel, phase, balance, u):
         return None, f"nur noch {rest:.0f} $ bis zum Ziel — von Hand prüfen"
     if boden_blow is not None and balance <= boden_blow:
         return None, "Balance auf/unter dem Boden — geblowt?"
+    kette = ap_kette_regel(regel) if phase == "challenge" else None
+    if kette:                                 # TOPSTEP-KETTE: Trade 1 statt eines Trades ohne SL (Finn 08.10.2026)
+        return ap_kette_trade1(regel, kette, groesse, ziel, balance, u), None
     menge = _ap_runden(_ap_spanne(ph.get("menge"), u["menge"], f), ph.get("menge_schritt") or 1)
     pjm = ph.get("puffer_je_menge")
     psp = (pjm or {}).get(str(int(menge))) if pjm else ph.get("puffer")
@@ -14648,6 +14710,8 @@ def ap_zeiten_verteilen(tranchen, zeiten, rnd, frueheste_min=0, info=None, beste
         for f in AP_ABSTAND_STUFEN:          # erst mit vollen Abständen in allen Fenstern, dann gelockert
             for j in reihenfolge:
                 a, b, _ = fenster[j]
+                if t.get("bis_min") is not None:
+                    b = min(b, int(t["bis_min"]))                                  # Topstep-Kette Trade 1 nur bis t1_bis (08.10.2026)
                 ober = b - 1 - int(max(0.0, float(t.get("dauer_min") or 2) - 2))   # letztes Konto der Tranche startet noch im Fenster
                 a = max(a, int(t.get("ab_min") or 0))                              # CFD erst ab zeiten.cfd_ab (07.10.2026)
                 if ober < a:
@@ -16234,7 +16298,9 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
         u = {x: rnd.random() for x in ("tp", "sl", "menge", "puffer")}
         rechnung = []
         for k in liste:
-            w, grund = ap_konto_rechnen(k["regel"], k["a"]["account_type"], k["bal"], u)
+            # Topstep-Kette: eigener Zufall je Konto (sonst hätten alle Topstep-Konten einer ID dieselben SL/TP/Kontrakte)
+            u_k = {x: rnd.random() for x in ("tp", "sl", "menge", "puffer")} if ap_kette_regel(k["regel"]) else u
+            w, grund = ap_konto_rechnen(k["regel"], k["a"]["account_type"], k["bal"], u_k)
             if grund and "Boden" in grund:
                 # „Balance auf/unter dem Boden — geblowt?" — Boden/Balance/Stand für die Anzeige (Slave 6, 08.10.2026); k["regel"] ist schon
                 # die Konto-Regel, ap_regel_konto darauf ändert nichts mehr
@@ -16280,6 +16346,8 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
                 dinfo[(ukey, str(k["a"]["id"]))] = bew[str(k["a"]["id"])]
             tr_info[ukey] = {"key": ukey, "user": key.split("|")[0], "firma": firm_n, "fest": fest, "gruppe": key,
                              "ab_min": ap_cfd_ab(zeiten) if (r_teil[0][0]["regel"].get("route") or "mt5v2") in AP_CFD_ROUTEN else 0,
+                             "bis_min": (_ap_hhmm(ap_kette_regel(r_teil[0][0]["regel"])["t1_bis"])
+                                         if r_teil[0][1].get("kette") else None),          # Topstep-Kette: Trade 1 bis t1_bis dt
                              "fest_durch": (("laufender Plan" if fest_p.get("status") == "open" else "geplanter Plan") if fest_p else None),
                              "dauer_min": versatz[-1] / 60.0 + 2, "gewicht": sum(w["tp"] for _, w in r_teil),
                              "fkey": ap_firma_key(firmen, r_teil[0][0]["a"].get("firm")),
@@ -16357,6 +16425,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
             "master_symbol": (str(regel.get("symbol") or "NQ") + frontcode) if route in ("tvv2", "tsv2") else None,   # tsv2 = Topstep V2 (07.10.2026)
             "start_um": start.astimezone(timezone.utc).isoformat(), "status": "planned", "priority": "medium",
             "planned_for": tag, "auto_plan": True,
+            "mt5_baseline": {"kette": dict(w["kette"], tag=tag)} if w.get("kette") else None,   # Topstep-Kette Trade 1 (08.10.2026)
             "notes": f"Auto-Planer · {w['stufe']} · Rest {rest_txt} $ bis Ziel · Balance {k['bal']:,.0f} ({k['bal_quelle']})".replace(",", ".")})
         if param["auto_start"]:      # regeln.ausgleich.auto_start (Standard aus): Plan gilt sofort als bestätigt
             zeilen[-1]["auto_bestaetigt_at"] = jetzt.isoformat()
@@ -17441,9 +17510,11 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
         return True
 
     def platz(i, von, bis, bel):
-        # früheste freie Minute in [von, bis) über die Abstands-Stufen, Streuung bis AP_VORZIEHEN_JITTER_MIN (Jitter-Regel)
+        # früheste freie Minute in [von, bis) mit VOLLEN Abständen, Streuung bis AP_VORZIEHEN_JITTER_MIN (Jitter-Regel). Keine gelockerten
+        # Stufen (Master 08.10.2026, Befund Slave 1: Suche zog Ina FundedNext 18 min nach ihrem anderen FundedNext-Plan vor — Regel ≥ 60 min
+        # je ID × Firma, ≥ 20 min je ID; die ½/¼-Stufen bleiben dem Verteilen bestehender Klumpen vorbehalten)
         r = zustand_r[i]
-        for f in [x for x in AP_ABSTAND_STUFEN if x > 0 and (x >= 0.5 or i not in verteilt_heute)]:
+        for f in (1.0,):
             erst = next((t for t in range(int(-(-von // 1)), int(bis)) if frei_fuer(i, float(t), f, r, bel)), None)
             if erst is not None:
                 frei_ = [t for t in range(erst, min(int(bis), erst + AP_VORZIEHEN_JITTER_MIN + 1)) if frei_fuer(i, float(t), f, r, bel)]
@@ -17959,7 +18030,7 @@ def ap_eingriff_pruefen(plan_id, aktion, plaene, jetzt_min, zeiten, id_fest=None
     Firma/Pause über IDs. → (aenderungen [wie ap_umplanen], None) oder (None, Klartext für 400)."""
     id_fest = id_fest or {}
     # Werte von Hand (AP_FEST_HAND) sperren nur den Bot — Finns eigene Eingriffe (Richtung/Start) bleiben möglich (08.10.2026)
-    plaene = [dict(x, aenderbar=True, fest_durch=None) if x.get("fest_durch") == AP_FEST_HAND else x for x in plaene or ()]
+    plaene = [dict(x, aenderbar=True, fest_durch=None) if x.get("fest_durch") in (AP_FEST_HAND, AP_FEST_KETTE, AP_FEST_TSV2) else x for x in plaene or ()]
     p = next((x for x in plaene if str(x.get("plan_id")) == str(plan_id)), None)
     if not p:
         return None, "Plan ist kein geplanter Plan von heute"
@@ -18141,6 +18212,8 @@ def _ap_bewerten(ctx, a, bal, menge, route, symbol, richtung, tp, sl, gehedgt=Fa
 # aktion „werte"; so ein Plan ist für den Bot fest (nie drehen/verschieben), der Nachtlauf ersetzt ihn nicht. Hand-Eingriffe, Bestätigen
 # und Start bleiben unberührt. Fehlt die Spalte noch, läuft alles wie vorher (_ap_hand_spalte_fehlt).
 AP_FEST_HAND = "Werte von Hand geändert"
+AP_FEST_KETTE = "Topstep-Kette (fest)"
+AP_FEST_TSV2 = "Topstep V2 startet nur von Hand"
 AP_FEST_FOLGETAG = "Folgetag (zählt nur für Abstände, Gegenhedge und Szenario)"
 
 
@@ -18241,7 +18314,8 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
     offen = [p for p in _sb_all("trade_plans", {"select": AP_STAND_FELDER + ",mt5_baseline", "status": "eq.open", "order": "id.asc"})
              if str(p.get("user_id")) not in ausgeblendet]
     geplant_alle = [p for p in _ap_plaene_mit_hand({"select": AP_STAND_FELDER + ",hedge:mt5_baseline->hedge->>status,"
-                                                                 "rk:mt5_baseline->richtung_konflikt,sf:mt5_baseline->start_fehler",
+                                                                 "rk:mt5_baseline->richtung_konflikt,sf:mt5_baseline->start_fehler,"
+                                                                 "kt:mt5_baseline->kette",
                                                        "status": "eq.planned", "order": "id.asc",
                                                        "created_at": "gte." + (jetzt - timedelta(days=30)).isoformat()})
                     if str(p.get("user_id")) not in ausgeblendet and not ersetzt(p)]
@@ -18386,6 +18460,12 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
             fest = "schon gestartet"
         elif p.get("hand_werte_at"):
             fest = AP_FEST_HAND                    # TP/SL/Größe von Hand — der Bot fasst ihn nicht mehr an (08.10.2026)
+        elif isinstance(p.get("kt"), dict):
+            fest = AP_FEST_KETTE                   # Topstep-Kette: Zeiten/Werte aus der Kettenregel, der Bot fasst sie nicht an (08.10.2026)
+        elif p.get("route") == "tsv2":
+            # Topstep V2 ohne Kette startet nur von Hand (Befund Slave 4, 08.10.2026: Strahlsuche zog Chris Topstep 18:29 → 08:37 Dubai
+            # „über Fenster" vor — der Zug gleicht nur auf dem Papier aus, kein Tab startet ihn zur neuen Zeit)
+            fest = AP_FEST_TSV2
         elif bestaetigt and m is not None and m <= jetzt_min + AP_FAELLIG_MIN:
             fest = "bestätigt und fällig"
         elif r not in ("buy", "sell"):
@@ -18886,6 +18966,152 @@ def _ap_bot_hat_arbeit(jetzt=None):
         return True
 
 
+_ap_kette = {"letzter": 0.0, "letztes": None, "fehler": "", "erledigt": {}}   # Topstep-Kette: Takt + Gründe je Trade 1 (Anzeige/Log)
+AP_KETTE_TAKT_S = 60
+
+
+def ap_kette_t1_fertig(t1):
+    """REIN: Ist Trade 1 der Kette GENAU nachgelesen? → (balance_start, balance_end) oder (None, Grund). Finn 08.10.2026: „nachdem Trade 1
+    abgeschlossen ist, muss einmal die Balance ganz genau gelesen werden, und dann von der Balance der nächste geplant werden" — nur die
+    Puls-Nachlesung in TopstepX zählt (final.quelle puls, plattform tsx), kein Folgetrade-Wert, keine Schätzung."""
+    mb = t1.get("mt5_baseline") if isinstance(t1.get("mt5_baseline"), dict) else {}
+    tv, fin = mb.get("tv") or {}, mb.get("final") or {}
+    b0, b1 = _wd_num(tv.get("balance_start")), _wd_num(fin.get("balance_end"))
+    if b0 is None:
+        return None, "ohne Start-Balance von Trade 1"
+    if b1 is None or fin.get("quelle") != "puls" or fin.get("plattform") != "tsx" or fin.get("balance_quelle") == "folgetrade":
+        return None, "wartet auf die genaue Balance-Nachlesung"
+    return (b0, b1), None
+
+
+def ap_kette_tick(jetzt=None, rnd=None):
+    """TOPSTEP-KETTE Trade 2 (08.10.2026, s. AP_KETTE_STANDARD): jede Minute aus ap_loop. Sucht heute beendete Ketten-Trade-1 (tsv2,
+    review/completed, mt5_baseline.kette.nr 1) ohne Trade 2, rechnet aus der genau nachgelesenen Balance TP2/SL2 und legt Trade 2 an:
+    Start frühestens Ende + t2_abstand_min (Zufall) und t2_ab, spätestens t2_bis dt, erste regelkonforme Minute (ap_nachhol_minute:
+    Richtungsschutz, Firmen-Abstand, Abstand je ID, Gegenhedge über IDs über die Laufzeit), Richtung frei (die mit dem früheren freien
+    Platz, Gleichstand Zufall). Bestätigt, wenn Trade 1 bestätigt war (Finn). Eine kleine Abfrage je Takt, Stand nur bei einem Treffer."""
+    jetzt = jetzt or datetime.now(timezone.utc)
+    rnd = rnd or random.SystemRandom()
+    tz = _ap_tz(AP_TZ_TAG)
+    d = jetzt.astimezone(tz)
+    mitternacht = datetime(d.year, d.month, d.day, tzinfo=tz)
+    t1s = [p for p in (sb_select("trade_plans", {
+        "select": "id,user_id,master_account_id,master_firm,master_name,master_symbol,richtung,auto_plan,auto_bestaetigt_at,ended_at,"
+                  "planned_for,status,mt5_baseline", "route": "eq.tsv2", "status": "in.(review,completed)",
+        "ended_at": "gte." + mitternacht.isoformat(), "mt5_baseline->kette->>nr": "eq.1"}) or [])]
+    if not t1s:
+        return {"neu": []}
+    t2s = sb_select("trade_plans", {"select": "id,vor:mt5_baseline->kette->>vor",
+                                    "mt5_baseline->kette->>vor": "in.(" + ",".join(str(p["id"]) for p in t1s) + ")"}) or []
+    schon = {str(x.get("vor")) for x in t2s}
+    offen_t1 = [p for p in t1s if str(p["id"]) not in schon]
+    if not offen_t1:
+        return {"neu": []}
+    reg = (sb_select("auto_plan_regeln", {"select": "*", "id": "eq.1"}) or [None])[0]
+    if not reg:
+        return {"neu": [], "fehler": "auto_plan_regeln fehlt"}
+    firmen = (reg.get("regeln") or {}).get("firmen") or []
+    param = ap_ausgleich_param(reg.get("regeln"))
+    stand = None
+    neu, gruende = [], {}
+    for t1 in offen_t1:
+        pid = str(t1["id"])
+        regel = ap_regel_finden(firmen, t1.get("master_firm"))
+        kette = ap_kette_regel(regel)
+        if not kette:
+            gruende[pid] = "Firma ohne Kettenregel"
+            continue
+        bal, grund = ap_kette_t1_fertig(t1)
+        if not grund:
+            werte, grund = ap_kette_trade2((t1.get("mt5_baseline") or {}).get("kette"), bal[0], bal[1], regel, kette, rnd.random())
+        if grund:
+            gruende[pid] = grund
+            _ap_kette_grund(t1, grund)
+            continue
+        if stand is None:
+            stand = _ap_stand_laden(reg, jetzt)
+        ende_min = (datetime.fromisoformat(str(t1["ended_at"]).replace("Z", "+00:00")) - stand["mitternacht"]).total_seconds() / 60.0
+        abst, streu = kette.get("t2_abstand_min") or [5, 20], kette.get("t2_streuung_min") or [0, 45]
+        # frühestens Ende + Abstand, frühestens Fensterbeginn + Streuung (sonst stünden alle Trade 2 genau um 11:00 — Muster)
+        ab = max(ende_min + float(abst[0]) + rnd.random() * (float(abst[1]) - float(abst[0])),
+                 float(_ap_hhmm(kette["t2_ab"])) + float(streu[0]) + rnd.random() * (float(streu[1]) - float(streu[0])))
+        zeiten2 = dict(stand.get("zeiten") or {}, start_bis=kette["t2_bis"])
+        laufend = [{"user_id": z["user_id"], "firma": z.get("firma_key"), "richtung": z.get("richtung"), "start": None} for z in stand["offen"]]
+        fkey = ap_firma_key(stand.get("firmen") or firmen, t1.get("master_firm"))
+        plaene = _ap_stand_plaene(stand)
+        beste = None
+        richtungen = ["buy", "sell"]
+        rnd.shuffle(richtungen)
+        for r in richtungen:
+            m, f_ = ap_nachhol_minute({"plan_id": "kette-" + pid, "user_id": str(t1["user_id"]), "firma": fkey, "richtung": r}, plaene,
+                                      stand["starts_heute"], stand["id_fest"], stand["jetzt_min"], zeiten2, param.get("laufzeit_min"),
+                                      laufend, rnd=rnd, ab_min=ab)
+            if m is not None and (beste is None or m < beste[0]):
+                beste = (m, r)
+        if beste is None:
+            gruende[pid] = f"kein regelkonformer Start für Trade 2 bis {kette['t2_bis']} dt"
+            continue
+        m, r = beste
+        start = stand["mitternacht"] + timedelta(minutes=m)
+        k2 = {"nr": 2, "vor": pid, "e1": werte["e1"], "tagesziel": werte["tagesziel"], "verlust_grenze": werte["verlust_grenze"],
+              "balance_start_tag": bal[0], "balance_nach_t1": bal[1]}
+        zeile = {"user_id": t1["user_id"], "master_account_id": t1["master_account_id"], "master_name": t1.get("master_name"),
+                 "master_firm": t1.get("master_firm"), "master_contracts": werte["menge"], "master_risk": werte["sl"],
+                 "master_tp": werte["tp"], "master_sl": werte["sl"], "richtung": r, "route": "tsv2", "master_symbol": t1.get("master_symbol"),
+                 "start_um": start.astimezone(timezone.utc).isoformat(), "status": "planned", "priority": "medium",
+                 "planned_for": t1.get("planned_for"), "auto_plan": True,
+                 "auto_bestaetigt_at": jetzt.isoformat() if t1.get("auto_bestaetigt_at") else None,
+                 "mt5_baseline": {"kette": k2},
+                 "notes": (f"Auto-Planer · {AP_KETTE_TXT} 2/2 · Trade 1 {werte['e1']:+,.0f} $ → TP {werte['tp']:,} / SL {werte['sl']:,} $ "
+                           f"(Tag +{werte['tagesziel']:,} $ oder geblowt) · Balance {bal[1]:,.0f} (Nachlesung)").replace(",", ".")}
+        if (sb_select("trade_plans", {"select": "id", "mt5_baseline->kette->>vor": f"eq.{pid}"}) or []):
+            continue                              # inzwischen angelegt (zweiter Takt) — nie doppelt
+        try:
+            sb_insert("trade_plans", zeile)
+        except requests.exceptions.HTTPError as e:
+            # Unique-Index trade_plans_kette_vor_uniq (Prüfer Slave 2: beim Railway-Deploy laufen alter und neuer Container kurz
+            # parallel, jeder mit eigenem ap_loop) — der andere war schneller, Trade 2 steht schon
+            if getattr(e.response, "status_code", 0) == 409:
+                continue
+            raise
+        _ap_kette_grund(t1, f"Trade 2 angelegt: {r} {werte['menge']} NQ, TP {werte['tp']} / SL {werte['sl']} $, Start "
+                            f"{start.astimezone(tz).strftime('%H:%M')} dt")
+        neu.append({"vor": pid, "start": start.isoformat(), "richtung": r, "tp": werte["tp"], "sl": werte["sl"], "menge": werte["menge"]})
+        print(f"[auto-plan] Topstep-Kette: Trade 2 zu {pid[:8]} — E1 {werte['e1']:+.0f} $ → TP {werte['tp']} / SL {werte['sl']} $, "
+              f"{r} {werte['menge']} NQ, Start {start.astimezone(tz).strftime('%H:%M')} dt", flush=True)
+    _ap_kette["erledigt"] = gruende
+    return {"neu": neu, "gruende": gruende}
+
+
+def _ap_kette_grund(t1, grund):
+    """Wartegrund bzw. Ergebnis der Kette an Trade 1 sichtbar machen (Prüfer Slave 2: „fehlt tv.balance_start, wartet T2 still für
+    immer — bitte zeigen"): mt5_baseline.kette.t2_grund, nur wenn er sich ändert (sonst jede Minute ein Schreiben). Atomar über das RPC
+    mt5_baseline_patch_in (merged eine Ebene tief). Fehler nur loggen."""
+    k = ((t1.get("mt5_baseline") or {}).get("kette") or {})
+    if k.get("t2_grund") == grund:
+        return
+    try:
+        r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/rpc/mt5_baseline_patch_in", headers=_sb_headers(), timeout=(5, 15),
+                        json={"p_plan": str(t1["id"]), "p_key": "kette",
+                              "p_patch": {"t2_grund": grund, "t2_grund_at": datetime.now(timezone.utc).isoformat()}, "p_status": None})
+        _sb_pruefen(r)
+    except Exception as e:
+        print(f"[auto-plan] ⚠️ Topstep-Kette Grund: {type(e).__name__}: {e}", flush=True)
+
+
+def _ap_kette_takt():
+    """aus ap_loop: höchstens alle AP_KETTE_TAKT_S ap_kette_tick (Fehler nur loggen)."""
+    if time.time() - _ap_kette["letzter"] < AP_KETTE_TAKT_S:
+        return
+    _ap_kette["letzter"] = time.time()
+    try:
+        _ap_kette["letztes"] = ap_kette_tick()
+        _ap_kette["fehler"] = ""
+    except Exception as e:
+        _ap_kette["fehler"] = f"{type(e).__name__}: {e}"
+        print(f"[auto-plan] ⚠️ Topstep-Kette: {e}", flush=True)
+
+
 def _ap_bot_tick(d):
     """Ein Takt-Check des Ausgleichs-Bots (aus ap_loop, jede Minute). d = jetzt in deutscher Zeit. Schalter alle 2 min frisch.
     Rund um die Uhr (08.10.2026); ein fälliger Takt ohne geplante/laufende Trades zählt als Lauf, lädt aber keinen Stand."""
@@ -19196,7 +19422,7 @@ def ap_start_hand_pruefen(plan_id, neu_min, plaene, starts, id_fest, jetzt_min, 
 AP_NACHHOL_VORLAUF_MIN = (2.0, 4.0)   # verpasster Start: frühestens jetzt + 2–4 min (Zufall), dann die erste regelkonforme Minute
 
 
-def ap_nachhol_minute(p, plaene, starts, id_fest, jetzt_min, zeiten=None, laufzeit_min=None, laufend=None, rnd=None):
+def ap_nachhol_minute(p, plaene, starts, id_fest, jetzt_min, zeiten=None, laufzeit_min=None, laufend=None, rnd=None, ab_min=None):
     """REIN RECHNEND (08.10.2026, Master: Mikes PC offline — „kommt der PC wieder, sollen seine verpassten Pläne automatisch sauber neu
     eingeplant werden, mit allen Regeln: Firmen-Abstand, Gegenhedge, Klumpen — nicht still verfallen und nicht alle auf einmal starten").
     Bisher setzte sfNeuEinplanen jeden verpassten Plan auf jetzt + 2–6 min Zufall — kam ein Tab nach Stunden wieder, starteten alle
@@ -19219,6 +19445,8 @@ def ap_nachhol_minute(p, plaene, starts, id_fest, jetzt_min, zeiten=None, laufze
     gegen_pl = [(float(x["start_min"]), x.get("richtung"), str(x.get("user_id")), x.get("firma")) for x in kommend]
     gegen_pl += [(float(x["start"]), x.get("richtung"), str(x.get("user_id")), x.get("firma")) for x in starts or () if x.get("start") is not None]
     m = jm + AP_NACHHOL_VORLAUF_MIN[0] + rnd.random() * (AP_NACHHOL_VORLAUF_MIN[1] - AP_NACHHOL_VORLAUF_MIN[0])
+    if ab_min is not None:
+        m = max(m, float(ab_min) + rnd.random())       # frühester Start von außen (Topstep-Kette Trade 2, 08.10.2026)
     letzter = None
     for _ in range(4000):
         if m >= bis:
@@ -19978,6 +20206,7 @@ def ap_loop():
         except Exception as e:
             _ap_info["nachplan_fehler"] = f"{type(e).__name__}: {e}"
             print(f"[auto-plan] ⚠️ Nachplanen: {e}", flush=True)
+        _ap_kette_takt()                      # Topstep-Kette: Trade 2 nach genauer Nachlesung von Trade 1 (08.10.2026)
         try:
             _ap_bot_tick(datetime.now(_ap_tz(AP_TZ_TAG)))
         except Exception as e:

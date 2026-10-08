@@ -8,9 +8,9 @@ import sys
 
 HIER = os.path.dirname(os.path.abspath(__file__))
 APP = os.path.join(os.path.dirname(HIER), "app.py")
-FUNKTIONEN = ("_wd_num", "ap_groesse", "_ap_spanne", "_ap_runden", "ap_kw_param", "_ap_boden", "ap_boden_konto", "ap_konto_rechnen",
+FUNKTIONEN = ("_wd_num", "ap_groesse", "_ap_spanne", "_ap_runden", "ap_kw_param", "_ap_boden", "ap_boden_konto", "ap_kette_regel", "ap_kette_trade1", "ap_konto_rechnen",
               "liq_peak", "_ap_peaks", "ap_boden_sicher")
-KONSTANTEN = ("AP_REST_MIN", "AP_GROESSE_TOLERANZ")
+KONSTANTEN = ("AP_REST_MIN", "AP_GROESSE_TOLERANZ", "AP_KETTE_STANDARD", "AP_KETTE_TXT")
 
 
 def lade():

@@ -23815,7 +23815,7 @@
     // gewürfelt, damit alle Tabs dieselbe Zeit sehen und nicht zweimal einloggen. Nur vor dem ersten Versuch.
     const vers0 = Number(fin.puls_versuche) || (fin.puls_at ? 1 : 0)
     const endeMs = Date.parse(fin.at || p.endedAt || '') || 0
-    if(!vers0 && endeMs && jetzt < endeMs + tvV2NachleseMs(p.id)) return `Nachlesung ab ${new Date(endeMs + tvV2NachleseMs(p.id)).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} (1–120 min Zufall)`
+    if(!vers0 && endeMs && jetzt < endeMs + tvV2NachleseMs(p.id)) return `Nachlesung ab ${new Date(endeMs + tvV2NachleseMs(p.id)).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} (${tpKetteNr(p) === 1 ? 'Topstep-Kette: gleich nach dem Ende, Trade 2 wartet darauf' : '1–120 min Zufall'})`
     if(fin.puls_aufgegeben) return 'aufgegeben: ' + String(fin.puls_fehler || '')
     // Login-Bremse (30.09.2026): nach einem Login-/Verbindungsfehler 30 min Ruhe, nach zweien nur noch „Jetzt lesen" von Hand
     const lb = tvV2LoginBremse(fin, jetzt)
@@ -23860,8 +23860,18 @@
   // Puls sich ein und überprüft den Profit"; vorher 1–200, 1–150, 1–30 min), fest aus der Plan-ID (FNV-Hash) — gleich auf allen Tabs
   function tvV2NachleseMs(id){
     let h = 2166136261; for(const ch of String(id || '')) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0
-    return (60 + (h % 7141)) * 1000
+    // TOPSTEP-KETTE (08.10.2026, Finn: „nachdem Trade 1 abgeschlossen ist, muss die Balance ganz genau gelesen werden, und dann von der
+    // Balance der nächste geplant werden"): Trade 2 wartet auf genau diese Lesung — Ketten-Trade 1 liest nach 30–120 s statt 1–120 min
+    let k1 = false; try{ const pk = tradePlans.find(x => String(x.id) === String(id)); k1 = tpKetteNr(pk) === 1 }catch(_){ k1 = false }
+    return k1 ? (30 + (h % 91)) * 1000 : (60 + (h % 7141)) * 1000
   }
+  // Topstep-Kette: 1 = Trade 1, 2 = Trade 2 (vom Backend aus Trade 1 gerechnet), sonst null — Marke mt5_baseline.kette (app.py ap_planen/ap_kette_tick)
+  function tpKetteNr(p){
+    const k = p && p.mt5Baseline && p.mt5Baseline.kette
+    const n = k && Number(k.nr)
+    return n === 1 || n === 2 ? n : null
+  }
+  window._tpKetteNr = tpKetteNr   // Test-Haken
   // Nachlesung ab (ms) — EINE Rechnung für Live Trades, Accounts-Balance und das Konto-Popup (26.09.2026, F3)
   const tvV2NachleseAb = (id, endeIso) => { const e = Date.parse(endeIso || '') || 0; return e ? e + tvV2NachleseMs(id) : 0 }
   /* FOLGETRADE (F5, Master 26.09.2026 nach Befund F4: „Hat ein späterer Plan desselben Kontos schon tv.balance_start, gilt der als
@@ -37987,8 +37997,9 @@
         : _rk.status === 'konflikt' ? `<span class="rsq-card-run" style="color:var(--danger)" title="${escapeHtml(String(_rk.text || ''))}">⇅ Richtungskonflikt: ${escapeHtml(String(_rk.gegen === 'sell' ? 'SHORT' : _rk.gegen === 'buy' ? 'LONG' : '?'))} ${_rk.durch === 'geplant' ? 'vorher geplant' : 'läuft'}</span>`
         : ''
       const startUmBtn = (p.startUm && !p.startUmGestartetAt)
-        ? vorcheckChip + rkChip + (p.route === 'tsv2'
-          // Topstep V2: bis Etappe K4 kein automatischer Start (30.09.2026) — die Zeit ist nur Erinnerung, „Starten" von Hand bleibt
+        ? vorcheckChip + rkChip + (p.route === 'tsv2' && !tpKetteNr(p)
+          // Topstep V2: bis Etappe K4 kein automatischer Start (30.09.2026) — die Zeit ist nur Erinnerung, „Starten" von Hand bleibt.
+          // Ausnahme Topstep-Kette (08.10.2026): startet zur Zeit über Puls in TopstepX wie Orbit
           ? `<button class="btn btn-ghost tc2-btn rsq-card-wait" data-plan-start-um-x="${p.id}" title="Topstep V2 startet bis Etappe K4 NICHT von selbst — die Zeit ist nur eine Erinnerung. Klick nimmt sie raus.">⏰ ${tpStartUmText(p.startUm)} · von Hand ✕</button> ${orbitBtn}`
           // Uhrzeit per Klick ändern, ✕ nimmt sie raus (05.10.2026, Finn: „wenn ich auf die Uhrzeit klicke, die Uhrzeit ändern")
           : `<span style="display:inline-flex;gap:2px"><button class="btn btn-ghost tc2-btn rsq-card-wait" data-plan-start-um-edit="${p.id}" title="${p.autoPlan && !p.autoBestaetigtAt ? 'Startet erst nach Bestätigung. ' : 'Der PC-Tab startet zu dieser Zeit von selbst (Duplikum-Check → Puls). '}Klick: Uhrzeit ändern">⏰ ${tpStartUmText(p.startUm)}</button><button class="btn btn-ghost tc2-btn rsq-card-wait" data-plan-start-um-x="${p.id}" title="Startzeit entfernen" style="padding-left:6px;padding-right:6px">✕</button></span>`)
@@ -41316,7 +41327,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1317'
+  const OS_TAB_BUILD = '2026-09-22.1318'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -45461,7 +45472,10 @@
   function suStartetNichtWeil(p, scharf){
     if(!p || !(routeIstOrbit(p.route) || routeIstEcho(p.route))) return 'kein Puls-Weg'
     if(!scharf && tpIstFarmerPlan(p)) return 'Farmer nicht scharf'
-    if(p.route === 'tsv2') return 'Topstep V2 — startet nur von Hand'
+    // Topstep-Kette (08.10.2026, Finn: „die starten per Topstep-Puls"): Trade 1 und 2 starten zur Zeit über Puls in TopstepX, sobald der
+    // Schalter scharf steht; sonstige Topstep-V2-Pläne bleiben Handarbeit
+    if(p.route === 'tsv2' && !tpKetteNr(p)) return 'Topstep V2 — startet nur von Hand'
+    if(p.route === 'tsv2' && tsPulsModus() !== 'scharf') return 'Topstep-Kette — Puls für Topstep nicht scharf'
     if(suUnbestaetigt(p)) return 'startet erst nach Bestätigung'
     if(rkAufgegeben(p)) return 'Richtungskonflikt — startet nur von Hand oder mit neuer Uhrzeit'
     return ''
@@ -45523,7 +45537,7 @@
     const heute = new Date(now).toISOString().slice(0, 10), m = suVorschlagGemeldetLaden()
     let neu = false
     for(const p of (plaene || [])){
-      if(!suUnbestaetigt(p) || !suNichtGestartet(p) || !p.startUm || p.route === 'tsv2' || !(routeIstOrbit(p.route) || routeIstEcho(p.route))) continue
+      if(!suUnbestaetigt(p) || !suNichtGestartet(p) || !p.startUm || (p.route === 'tsv2' && !tpKetteNr(p)) || !(routeIstOrbit(p.route) || routeIstEcho(p.route))) continue
       if(new Date(p.startUm).getTime() > now || m.get(String(p.id)) === heute) continue
       m.set(String(p.id), heute); neu = true
       if(typeof atToast === 'function') atToast(`🤖 Vorschlag „${p.masterName || '—'}" (${tpStartUmText(p.startUm)}) ist unbestätigt — nicht gestartet, nicht geclaimt. Im Trade-Planer bestätigen oder löschen.`, 'end')

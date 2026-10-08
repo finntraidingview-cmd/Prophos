@@ -103,11 +103,11 @@ def main():
             pi, pk, d = by[i], by[k], abs(starts[i] - starts[k])
             if pi["user_id"] != pk["user_id"] and pi["firma"] == pk["firma"] and d < a["AP_FIRMA_ABSTAND_MIN"]:
                 verstoss.append(("Firma", i, k, d))
-            if pi["user_id"] == pk["user_id"] and d < a["AP_ABSTAND_ID_MIN"] * 0.5:
+            if pi["user_id"] == pk["user_id"] and d < a["AP_ABSTAND_ID_MIN"]:
                 verstoss.append(("ID", i, k, d))
-            if pi["user_id"] == pk["user_id"] and pi["firma"] == pk["firma"] and d < a["AP_ABSTAND_ID_FIRMA_MIN"] * 0.5:
+            if pi["user_id"] == pk["user_id"] and pi["firma"] == pk["firma"] and d < a["AP_ABSTAND_ID_FIRMA_MIN"]:
                 verstoss.append(("ID×Firma", i, k, d))
-    check(not verstoss, f"Kombination hält Firmen-Abstand, Abstand je ID und je ID × Firma (Verstöße {verstoss})")
+    check(not verstoss, f"Kombination hält Firmen-Abstand, VOLLE Abstände je ID (20) und je ID × Firma (60) (Verstöße {verstoss})")
     check(all(JETZT + a["AP_VORZIEHEN_AB_MIN"] <= neu[i] <= JETZT + 61 for i in neu), f"vorgezogen in die nächsten 60 min ({sorted(neu.values())})")
     # Gegenhedge: ein Short einer anderen ID bei Tradeify steht in 20 min → kein Tradeify-Long daneben
     mit_s = longs + [plan("s_tf", "emin", "tradeify", "sell", JETZT + 20, aenderbar=False, fest_durch="Handplan", einsatz_abs=10.0,
@@ -184,6 +184,17 @@ def main():
     pv_f = U(nm, 0.0, 0.0, jf, Z, 25, random.Random(1), einsatz=dict(EKf, fenster_uebergreifend=True), dubai_min=120, id_fest=fest_f,
              pc_lebt={"u-c"})
     check(not any(x["plan_id"] == "a_fn" for x in pv_f["aenderungen"]), "Schalter an: toter PC → nicht vorgezogen")
+    # Ina-Fall (Master 08.10.2026): zwei Shorts derselben ID × Firma im Nachmittag — vorgezogen nie enger als 60 min (keine ¼-Stufe)
+    ina = [plan("i1", "u-n", "fundednext", "sell", 890, usd_pro_pkt=25.0, satz_eur_je_usd=0.08, route="mt5v2"),
+           plan("i2", "u-n", "fundednext", "sell", 960, usd_pro_pkt=25.0, satz_eur_je_usd=0.08, route="mt5v2")]
+    eng_n = 0
+    for seed in range(15):
+        ei = U(ina, 0.0, 0.0, jf, Z, 25, random.Random(seed), einsatz=dict(EKf, fenster_uebergreifend=True), dubai_min=120,
+               id_fest={"u-n|fundednext": {"richtung": "sell"}})
+        zi = {p["plan_id"]: p["start_min"] for p in ina}
+        zi.update({x["plan_id"]: x["nach_start_min"] for x in ei["aenderungen"]})
+        eng_n += abs(zi["i1"] - zi["i2"]) < a["AP_ABSTAND_ID_FIRMA_MIN"]
+    check(eng_n == 0, f"Ina-Fall: zwei Shorts derselben ID × Firma nach dem Vorziehen nie enger als 60 min (15 Seeds, {eng_n} zu eng)")
     pa = a["ap_ausgleich_param"]
     check(pa({})["fenster_uebergreifend"] is False and pa({"ausgleich": {"fenster_uebergreifend": "ja"}})["fenster_uebergreifend"] is False
           and pa({"ausgleich": {"fenster_uebergreifend": True}})["fenster_uebergreifend"] is True,
