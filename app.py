@@ -15658,6 +15658,13 @@ def ap_eingriff_sicht(admin, uid, im_planer, nur_eigene, sicht=None):
     return str(uid)
 
 
+def ap_eingriff_admin_reiter(admin, uid, nur_eigene, sicht):
+    """REIN RECHNEND (08.10.2026, Finn: „Ja, sollen alle dies machen können."): darf dieser Login richtung_tauschen/start/neu_starten an
+    BELIEBIGEN Plänen? Admin (ADMIN_EMAILS) immer; sonst nur im Admin-Reiter (sicht="admin") und nicht admin_zugang „nur eigene" —
+    dieselbe Regel wie Bestätigen/werte (ap_eingriff_sicht → alle IDs). Die normale Planer-Seite (ohne sicht=admin) bleibt gesperrt."""
+    return bool(admin) or ap_eingriff_sicht(False, uid, False, nur_eigene, sicht) is None
+
+
 def ap_admin_reiter_ok(admin, im_planer, nur_eigene, sicht):
     """REIN RECHNEND (08.10.2026): darf dieser Login die LESE-Routen des Trade-Planers (/admin/auto-plan GET, /delta) nutzen?
     Admin, jede ID im Planer (wie bisher) — und seit 08.10.2026 jeder Login mit sicht="admin" (Admin-Reiter, Admin-Code entsperrt),
@@ -18589,7 +18596,8 @@ def _ap_werte_setzen(pid, body, admin, uid):
 @app.route("/admin/auto-plan/plan", methods=["POST", "OPTIONS"])
 def admin_auto_plan_eingriff():
     """POST {plan_id, aktion: 'richtung_tauschen'|'start', start?, start_min?} → manueller Eingriff mit denselben harten Regeln wie der Bot
-    (Verstoß = 400 Klartext). start = 'HH:MM' deutscher Zeit (heute) oder ISO. Gilt für die ganze Tranche (ID × Firma). Nur Admin.
+    (Verstoß = 400 Klartext). start = 'HH:MM' deutscher Zeit (heute) oder ISO. Gilt für die ganze Tranche (ID × Firma). Admin — seit
+    08.10.2026 auch jeder Login im Admin-Reiter (sicht=admin, nicht „nur eigene", ap_eingriff_admin_reiter).
     Seit 08.10.2026 auch aktion 'werte' {tp_usd?, sl_usd?, groesse?} (Mini-Popup): Admin alle Pläne, jede andere ID nur eigene."""
     if request.method == "OPTIONS":
         return "", 200
@@ -18619,11 +18627,20 @@ def admin_auto_plan_eingriff():
             return _ap_werte_setzen(pid, body, alle, uid)
         except Exception as e:
             return jsonify({"ok": False, "msg": f"{type(e).__name__}: {e}"}), 502
-    admin, uid, reg, err = _ap_zugang()
+    # ADMIN-REITER DARF EINGREIFEN (Finn 08.10.2026 auf die Frage des Masters, ob auch „Finn + Pascal" und Ina bei fremden IDs neu starten,
+    # Richtung tauschen und Tranchen verschieben dürfen: „Ja, sollen alle dies machen können."): richtung_tauschen/start/neu_starten
+    # für Admin (ADMIN_EMAILS) UND jeden Login mit sicht="admin", der nicht admin_zugang „nur eigene" ist (ap_eingriff_admin_reiter);
+    # Nicht-Planer-Logins kommen über _ap_zugang(admin_reiter=True) durch. Ausgleichen/Bot-Einstellung bleiben bei ADMIN_EMAILS.
+    admin, uid, reg, err = _ap_zugang(admin_reiter=True)
     if err:
         return err
     if not admin:
-        return jsonify({"ok": False, "msg": "Nur für Admins — Eingriffe macht nur Finn"}), 403
+        try:
+            darf = ap_eingriff_admin_reiter(False, uid, admin_zugang_nur_eigene(str(uid)), _ap_sicht_param())
+        except Exception:
+            darf = False                       # admin_zugang nicht lesbar → nie fremde Pläne
+        if not darf:
+            return jsonify({"ok": False, "msg": "Nur im Admin-Reiter (Admin-Code) — dort darf jeder Admin-Login eingreifen"}), 403
     body = request.get_json(silent=True) or {}
     pid, aktion = str(body.get("plan_id") or "").strip(), str(body.get("aktion") or "").strip()
     if not re.match(r"^[0-9a-f-]{36}$", pid):

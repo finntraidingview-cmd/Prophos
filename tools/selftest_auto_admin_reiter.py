@@ -15,7 +15,7 @@ def lade():
     src = open(APP, encoding="utf-8").read()
     ns = {"re": re, "datetime": datetime, "timedelta": timedelta, "timezone": timezone}
     teile = [re.search(r"^AP_SICHT_ADMIN = .*$", src, re.M).group(0)]
-    for name in ("ap_sicht_uid", "ap_eingriff_sicht", "ap_admin_reiter_ok", "ap_eingriff_filter"):
+    for name in ("ap_sicht_uid", "ap_eingriff_sicht", "ap_admin_reiter_ok", "ap_eingriff_admin_reiter", "ap_eingriff_filter"):
         i = src.index(f"\ndef {name}(") + 1
         teile.append(src[i:src.find("\n\n\n", i)])
     k = re.search(r"^AP_EINGRIFF_MAX = .*$", src, re.M).group(0)
@@ -55,6 +55,12 @@ def main():
     p1, b1, a1 = ns["ap_eingriff_filter"]("bestaetigen", [pid], es(False, FINN, False, False, "admin"))
     p2, _b, _a = ns["ap_eingriff_filter"]("bestaetigen", [pid], es(False, EMIN, False, True, "admin"))
     check(p1 is not None and "user_id" not in p1 and p2.get("user_id") == f"eq.{EMIN}", "Filter: Admin-Reiter ohne user_id-Grenze, Emin mit eigener ID")
+    # richtung_tauschen/start/neu_starten (Finn 08.10.2026: „Ja, sollen alle dies machen können.")
+    ea = ns["ap_eingriff_admin_reiter"]
+    check(ea(False, FP, False, "admin") and ea(False, FINN, False, "admin"), "Eingriffe im Admin-Reiter: Finn + Pascal und Nicht-Planer-Login dürfen")
+    check(not ea(False, EMIN, True, "admin"), "Eingriffe: Emin (nur eigene) bleibt gesperrt")
+    check(not ea(False, FP, False, "") and not ea(False, FP, False, "alle"), "Eingriffe auf der normalen Planer-Seite (ohne sicht=admin): gesperrt")
+    check(ea(True, "adm", False, "") and ea(True, "adm", True, ""), "Eingriffe: Admin (ADMIN_EMAILS) immer")
     print(f"{len(f) - sum(f)}/{len(f)} ok")
     sys.exit(1 if sum(f) else 0)
 
