@@ -16547,6 +16547,7 @@ AP_VERTEILUNG_BAND_TOLERANZ_EUR = 200.0
 # sind nur Shorts drin, viel zu viel Short. Der Bot muss das checken und in genau solchen Phasen schnell Longs vorziehen"):
 AP_VORZIEHEN_AB_MIN = 3                # frühestens jetzt + 3 min
 AP_VORZIEHEN_JITTER_MIN = 3            # Streuung hinter dem frühesten freien Platz
+AP_MISCH_BESTAETIGT_AB_MIN = 30         # ID-Mischung darf BESTÄTIGTE drehen, wenn der früheste Plan der ID × Firma ≥ 30 min entfernt ist
 AP_VORZIEHEN_RUECKFALL_MIN = 3        # vorgezogen, aber so viele min nach der neuen Startzeit noch ungeclaimt → zurück (PC-Tab tot)
 AP_VORZIEHEN_HYSTERESE_EUR = 100.0     # Vorziehen löst schon ab 100 € über dem 60-min-Band aus (sonst Hysterese 200 €) — Master/Finn
                                        # 08.10.2026: bei reinen Shorts liegt das Über-Band ≈ 0,75 × |Netto|, 200 € erst ab ≈ 267 € Netto
@@ -16988,15 +16989,25 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
         if not aktuell[4]:
             break
         tag_vor = ueber_tag(zustand)
-        tr = _ap_tranchen([dict(je[i], start_min=zustand[i]["start"]) for i in zustand])
+        # GANZE ID × FIRMA, AUCH BESTÄTIGT (08.10.2026, Finn ~03:30 Dubai: „Ich will nicht, dass eine ID komplett long oder komplett
+        # short ist. FundedNext gegen FundingPips kann man perfekt gegeneinander setzen. Dass bei Chris 7 Trades long gehen, finde ich
+        # nicht geil" — Chris stand 6/1, alle bestätigt, die Mischung drehte nur unbestätigte; und seit dem Verteilen ist jede ID × Firma
+        # in Teil-Tranchen geteilt, die sie gar nicht anfasste): gedreht wird jetzt immer die GANZE ID × Firma (alle ihre Pläne, eine
+        # Richtung bleibt), bestätigte eingeschlossen, wenn ihr frühester Start ≥ jetzt + AP_MISCH_BESTAETIGT_AB_MIN liegt. Alle Pläne
+        # änderbar (nicht gestartet, keine Werte von Hand, nicht fällig) und Auto-Plan, kein Richtungsschutz (id_fest: laufender/
+        # anstehender Trade dieser ID × Firma), Ruhezeit, eine Drehung je Lauf, kein neuer Malus. Die Bestätigung bleibt.
+        gruppen = {}
+        for i in zustand:
+            gruppen.setdefault(f"{je[i]['user_id']}|{je[i]['firma']}", []).append(i)
         kandidaten = []
-        for k in sorted(tr):
-            t = tr[k]
-            ids = sorted(t["plan_ids"])
-            if (not t["aenderbar"] or t.get("teile", 1) != 1 or f"{t['user_id']}|{t['firma']}" in id_fest or ruht(ids)
-                    or len({zustand[i]["richtung"] for i in ids}) != 1
-                    or not all(je[i].get("auto_plan") and not je[i].get("bestaetigt") for i in ids)):
+        for k in sorted(gruppen):
+            ids = sorted(gruppen[k])
+            best_ = any(je[i].get("bestaetigt") for i in ids)
+            if (k in id_fest or ruht(ids) or len({zustand[i]["richtung"] for i in ids}) != 1
+                    or not all(je[i].get("aenderbar") and je[i].get("auto_plan") for i in ids)
+                    or (best_ and min(zustand[i]["start"] for i in ids) < float(jetzt_min) + AP_MISCH_BESTAETIGT_AB_MIN)):
                 continue
+            t = {"user_id": je[ids[0]]["user_id"], "firma": je[ids[0]]["firma"], "bestaetigt": best_}
             z = {i: dict(v) for i, v in zustand.items()}
             for i in ids:
                 z[i]["richtung"] = "sell" if z[i]["richtung"] == "buy" else "buy"
@@ -17021,7 +17032,7 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
             aenderungen.append({"plan_id": i, "user_id": je[i]["user_id"], "firma": t["firma"], "art": "richtung",
                                 "von_richtung": von["richtung"], "nach_richtung": nach["richtung"],
                                 "von_start_min": von["start"], "nach_start_min": nach["start"],
-                                "grund": (f"ID-Mischung: {je[i].get('firma_name') or t['firma']} bei {wer} "
+                                "grund": (f"ID-Mischung{' (bestätigt)' if t.get('bestaetigt') else ''}: {je[i].get('firma_name') or t['firma']} bei {wer} "
                                           f"{AP_RICHTUNG_TXT[von['richtung']]} → {AP_RICHTUNG_TXT[nach['richtung']]} "
                                           f"({m_vor.get('long')}/{m_vor.get('short')} → {m_nach.get('long')}/{m_nach.get('short')} long/short)")})
         zustand, aktuell = z, k_neu

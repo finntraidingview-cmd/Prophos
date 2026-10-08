@@ -67,14 +67,32 @@ def main():
     pl2 = [dict(p, richtung=nach.get(p["plan_id"], p["richtung"])) for p in chris()]
     check(erg["aenderungen"] and gedreht(lauf(pl2)) == [], "zweiter Lauf auf 4/3 → keine Drehung")
 
-    # 3) bestätigte oder feste Tranche wird nie gedreht
+    # 3) BESTÄTIGT (seit 08.10.2026, Finn: „Dass bei Chris 7 Trades long gehen, finde ich nicht geil" — alle bestätigt): gedreht, wenn der
+    #    früheste Plan der ID × Firma ≥ AP_MISCH_BESTAETIGT_AB_MIN entfernt ist; die ganze ID × Firma, Grund „ID-Mischung (bestätigt)"
     e3 = lauf(chris(bestaetigt=True))
-    check(not any(x["firma"] == "fundingpips" for x in e3["aenderungen"]), f"FundingPips bestätigt → nie gedreht ({gedreht(e3)})")
-    check(len({x["firma"] for x in e3["aenderungen"]}) == 1, f"kleine Tranche gesperrt → höchstens EINE Mischungs-Drehung je Lauf ({gedreht(e3)})")
+    check(gedreht(e3) == [("fundingpips", "fp0", "sell"), ("fundingpips", "fp1", "sell")],
+          f"FundingPips 2× bestätigt, Start in ≥ 30 min → beide short, 6/1 → 4/3 ({gedreht(e3)})")
+    check(e3["aenderungen"] and all(x["grund"].startswith("ID-Mischung (bestätigt): ") for x in e3["aenderungen"]),
+          f"Protokoll-Grund „ID-Mischung (bestätigt): …“ ({e3['aenderungen'][0]['grund'] if e3['aenderungen'] else '—'})")
+    nah = [dict(p, start_min=310 + i * 4) if p["firma"] == "fundingpips" else p for i, p in enumerate(chris(bestaetigt=True))]
+    e3n = lauf(nah)
+    check(not any(x["firma"] == "fundingpips" for x in e3n["aenderungen"]), f"bestätigt, aber Start in < 30 min → nicht gedreht ({gedreht(e3n)})")
+    check(len({x["firma"] for x in e3n["aenderungen"]}) <= 1, f"höchstens EINE Mischungs-Drehung je Lauf ({gedreht(e3n)})")
     e3b = lauf(chris(aenderbar=False, fest_durch="schon gestartet"))
     check(not any(x["firma"] == "fundingpips" for x in e3b["aenderungen"]), f"FundingPips fest (gestartet) → nie gedreht ({gedreht(e3b)})")
     pl3 = [dict(p, bestaetigt=True) if p["firma"] in ("fundednext", "fundingpips") else p for p in chris()]
-    check(gedreht(lauf(pl3)) == [], "alle Long-Tranchen bestätigt → keine Drehung")
+    check(len({x["firma"] for x in lauf(pl3)["aenderungen"]}) == 1, "alle Long-Tranchen bestätigt → genau EINE ID × Firma gedreht (die kleinste)")
+    teil = [dict(p, bestaetigt=True, hand_werte=True, aenderbar=(p["plan_id"] != "fp1"), fest_durch=(None if p["plan_id"] != "fp1" else "Werte von Hand geändert"))
+            if p["firma"] == "fundingpips" else p for p in chris()]
+    check(not any(x["firma"] == "fundingpips" for x in lauf(teil)["aenderungen"]),
+          "ein Plan der ID × Firma mit Werten von Hand → die ganze ID × Firma bleibt (nie halb gedreht)")
+    # verteilt (seit dem Verteilen 08.10.2026 liegen die Pläne einer ID × Firma ≥ 60 min auseinander = Teil-Tranchen, die die alte
+    # Mischung nie drehte — darum hing Chris live): die ganze ID × Firma dreht trotzdem gemeinsam
+    vt = [dict(p, start_min=700 + i * 75, bestaetigt=True) if p["firma"] == "fundingpips" else p for i, p in enumerate(chris())]
+    vt = [dict(p, start_min=700 + (0 if p["plan_id"] == "fp0" else 80)) if p["firma"] == "fundingpips" else p for p in vt]
+    ev = lauf(vt)
+    check(gedreht(ev) == [("fundingpips", "fp0", "sell"), ("fundingpips", "fp1", "sell")],
+          f"verteilte ID × Firma (80 min auseinander, bestätigt) → beide gemeinsam short ({gedreht(ev)})")
     pl3h = [dict(p, auto_plan=False) if p["firma"] == "fundingpips" else p for p in chris()]
     check(not any(x["firma"] == "fundingpips" for x in lauf(pl3h)["aenderungen"]), "Handplan-Tranche → nie gedreht")
     e3r = lauf(chris(), id_fest={f"{C}|fundingpips": {"richtung": "buy"}})
