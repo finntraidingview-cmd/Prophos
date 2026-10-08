@@ -29,11 +29,11 @@ def lade():
     def block(name):
         i = src.index(f"\ndef {name}(") + 1
         return src[i:src.find("\n\n\n", i)]
-    exec("\n".join([re.search(rf"^{k} = .*$", src, re.M).group(0) for k in ("AP_NACHPLAN_VORLAUF_MIN", "AP_NACHPLAN_TAKT_S", "AP_TZ_TAG")]
+    exec("\n".join([re.search(rf"^{k} = .*$", src, re.M).group(0) for k in ("AP_NACHPLAN_VORLAUF_MIN", "AP_NACHPLAN_TAKT_S", "AP_TZ_TAG", "AP_NACHPLAN_REST_RE", "AP_REST_MIN_CFD")]
                    + [re.search(rf"^{k} = \([^)]*\)", src, re.M | re.S).group(0)
                       for k in ("AP_NACHPLAN_FEST_GRUENDE", "AP_NACHPLAN_REGEL_GRUENDE")]
                    + [block(f) for f in ("_ap_ts", "ap_nachplan_fenster", "_ap_plan_am_tag", "ap_nachplan_letzter",
-                                         "ap_nachplan_kandidaten", "ap_nachplan_regeln_at", "ap_nachplan_regeln_merken",
+                                         "ap_nachplan_ziel_frei", "ap_nachplan_kandidaten", "ap_nachplan_regeln_at", "ap_nachplan_regeln_merken",
                                          # 09.10.2026 Countdown/Knopf: gemeinsame Strecke + Sperre, reine Helfer
                                          "ap_nachplan_naechster", "ap_nachplan_planungstag", "ap_bal_gelesen", "_ap_nachplan_rechnen",
                                          "ap_nachplan_tick")]), a)

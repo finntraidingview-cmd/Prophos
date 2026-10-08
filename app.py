@@ -22172,11 +22172,33 @@ def ap_nachplan_letzter(rows):
     return erg
 
 
-def ap_nachplan_kandidaten(konten, plaene, tag, tz, letzter_erg=None, archiv=None, regeln_at=None):
+AP_NACHPLAN_REST_RE = re.compile(r"nur noch (-?\d+) \$ bis zum Ziel")
+
+
+def ap_nachplan_ziel_frei(letzter_erg, tag, schon=None):
+    """REIN RECHNEND (testbar): Konto-IDs, deren „nur noch X $ bis zum Ziel"-Grund des letzten Laufs HEUTE einmal neu gerechnet wird — nur
+    CFD-Phasen (typ phase1/phase2 in der Lauf-Zeile; ohne typ bleibt der Grund fest) mit Rest ≥ AP_REST_MIN_CFD. Anlass (Master 09.10.2026, Folge zu .1397): seit dem Klein-Trade wird aus so
+    einem Rest ein Plan, der Grund stammte aber aus dem Lauf VOR dem Update und galt als fest → Chris/Moritz/Ina (Rest 36/56/62 $) wären
+    erst morgen geplant worden. Unter 10 $ bleibt er fest (Handarbeit), Futures unverändert. schon = heute bereits freigegebene IDs: jedes
+    Konto nur EINMAL je Tag (kommt derselbe Grund wieder, z. B. „kein Punktwert", gilt er danach wieder als fest — kein 10-min-Kreisel)."""
+    if not isinstance(letzter_erg, dict) or str(letzter_erg.get("tag") or "") != tag:
+        return set()
+    out = set()
+    for z in letzter_erg.get("ausgelassen") or []:
+        if not isinstance(z, dict) or str(z.get("typ") or "") not in ("phase1", "phase2") or not z.get("konto_id"):
+            continue
+        m = AP_NACHPLAN_REST_RE.search(str(z.get("grund") or ""))
+        if m and int(m.group(1)) >= AP_REST_MIN_CFD and str(z.get("konto_id")) not in (schon or ()):
+            out.add(str(z.get("konto_id")))
+    return out
+
+
+def ap_nachplan_kandidaten(konten, plaene, tag, tz, letzter_erg=None, archiv=None, regeln_at=None, ziel_frei=None):
     """REIN RECHNEND (testbar): Konto-IDs, die heute nachgeplant werden sollen — Typ in AP_TYPEN, nicht archiviert, Haken nicht aus,
     ohne Plan am Tag (planned/open/review, _ap_plan_am_tag) und im letzten Lauf des Tages nicht aus einem festen Grund ausgelassen
     (AP_NACHPLAN_FEST_GRUENDE). regeln_at = auto_plan_regeln.updated_at (08.10.2026): liegt es nach letzter_erg['at'], zählen die
-    Regel-Gründe (AP_NACHPLAN_REGEL_GRUENDE) nicht mehr als fest — ohne regeln_at oder ohne Laufzeit wie bisher. Reihenfolge = Eingabe."""
+    Regel-Gründe (AP_NACHPLAN_REGEL_GRUENDE) nicht mehr als fest — ohne regeln_at oder ohne Laufzeit wie bisher. ziel_frei = Konto-IDs aus
+    ap_nachplan_ziel_frei: ihr „bis zum Ziel"-Grund ist diesmal nicht fest (09.10.2026). Reihenfolge = Eingabe."""
     archiv = archiv or set()
     belegt = {str(p.get("master_account_id")) for p in (plaene or []) if _ap_plan_am_tag(p, tag, tz)}
     fest = set()
@@ -22190,6 +22212,8 @@ def ap_nachplan_kandidaten(konten, plaene, tag, tz, letzter_erg=None, archiv=Non
             if any(g.startswith(f) or f in g for f in AP_NACHPLAN_FEST_GRUENDE):
                 if regeln_neu and any(f in g for f in AP_NACHPLAN_REGEL_GRUENDE):
                     continue        # Regeln seit dem Lauf geändert → mit den neuen Regeln nachrechnen
+                if str(z.get("konto_id")) in (ziel_frei or ()) and "bis zum Ziel" in g:
+                    continue        # CFD-Rest ≥ 10 $ → jetzt ein Klein-Trade (einmal je Tag, ap_nachplan_ziel_frei)
                 fest.add(str(z.get("konto_id")))
     out = []
     for a in konten or []:
@@ -22332,12 +22356,18 @@ def _ap_nachplan_rechnen(tag, jetzt, zustand, reg, tz):
     # ändern oder ein Lauf mit Treffer eine neue auto_plan_lauf-Zeile schreibt (Prozess-Speicher, nach Neustart höchstens einmal mehr)
     merker = zustand.setdefault("nachplan_regeln", {})
     regeln_at = ap_nachplan_regeln_at(merker, tag, reg.get("updated_at"))
-    kand = ap_nachplan_kandidaten(konten, plaene, tag, tz, letzter, _ap_archiviert(), regeln_at=regeln_at)
+    # CFD „nur noch X $ bis zum Ziel" (X ≥ 10): je Konto und Tag einmal neu rechnen — wird jetzt ein Klein-Trade (09.10.2026)
+    ziel_m = zustand.setdefault("nachplan_ziel", {})
+    for t in [t for t in ziel_m if t != tag]:
+        ziel_m.pop(t, None)
+    ziel_frei = ap_nachplan_ziel_frei(letzter, tag, ziel_m.get(tag))
+    kand = ap_nachplan_kandidaten(konten, plaene, tag, tz, letzter, _ap_archiviert(), regeln_at=regeln_at, ziel_frei=ziel_frei)
     if not kand:
         ap_nachplan_regeln_merken(merker, tag, regeln_at)
         return None, kand
     erg = ap_planen(tag, quelle="nachplanen", nur_konten=kand)
     ap_nachplan_regeln_merken(merker, tag, regeln_at)      # erst nach fertigem Lauf — wirft ap_planen, rechnet der nächste Takt neu
+    ziel_m.setdefault(tag, set()).update(ziel_frei & set(kand))
     return erg, kand
 
 
