@@ -41754,7 +41754,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1352'
+  const OS_TAB_BUILD = '2026-09-22.1353'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -41982,6 +41982,8 @@
    * security definer — RLS zeigt fremde Pläne nicht): hat eine ANDERE ID bei derselben Firma in den letzten 5 min wirklich gestartet
    * (bzw. vor ≤ 2 min geclaimt), legt die Funktion den Start auf deren Start + 5 min + Jitter, löst Claim/orbit_gesendet_at und
    * protokolliert (orbit_gesendet_at nie — ist schon gesendet, greift nichts ein); hier: nicht starten, Hinweis „wartet 5-min-Abstand zu <ID>, startet HH:MM". Der Tick startet den Plan zur neuen Zeit.
+   * Seit sql/2026-10-08_firmen_abstand_1min.sql (Finn 08.10.2026: „Nur eben nicht gleichzeitig") 1 min statt 5 und für JEDEN Start derselben Firma,
+   * auch ein anderes Konto derselben ID (wer = „deinem anderen Konto"); Ziel = deren Start + 60 s + 10–30 s.
    * Ohne die Funktion (noch nicht eingespielt) oder offline: Start wie bisher — der Claim-Riegel bleibt. → Hinweistext oder null. */
   // „frei" je Plan 30 s merken (08.10.2026): seit faVorStart auch zentral in tpPreflightAndStart läuft, fragen Orbit-Wege mit Duplikum-Check
   // (tpOrbitStartenKern → tpPreflightAndStart → weiter → tpOrbitStarten) sonst bis zu dreimal hintereinander dieselben zwei RPCs
@@ -42009,7 +42011,7 @@
     const um = d.ziel ? new Date(d.ziel).toLocaleTimeString('de-DE', { timeZone: 'Asia/Dubai', hour: '2-digit', minute: '2-digit' }) + ' Dubai' : '?'
     const t = gh
       ? `„${plan.masterName || '—'}" wartet 90-s-Abstand: ${d.wer || 'eine andere ID'} ${d.grund || 'startet gegenläufig'} (${plan.masterFirm || d.firma || 'gleiche Firma'}) — startet ${um}`
-      : `„${plan.masterName || '—'}" wartet 5-min-Abstand zu ${d.wer || 'einer anderen ID'} (${plan.masterFirm || d.firma || 'gleiche Firma'}) — startet ${um}`
+      : `„${plan.masterName || '—'}" wartet 1-min-Abstand zu ${d.wer || 'einer anderen ID'} (${plan.masterFirm || d.firma || 'gleiche Firma'}) — startet ${um}`
     const i = tradePlans.findIndex(x => String(x.id) === String(plan.id))
     if(i >= 0) tradePlans[i] = Object.assign({}, tradePlans[i], { startUm: d.ziel || tradePlans[i].startUm, startUmGestartetAt: null })   // orbit_gesendet_at nie
     try{ renderTradePlans() }catch(_){}

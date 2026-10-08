@@ -57,10 +57,14 @@ def main():
     check(P("p1", 330, plaene, starts, {}, 300) == (None, None), "freie Zeit 05:30 dt → ok")
     g, v = P("p1", 301, plaene, starts, {}, 300)
     check(g.startswith("Startzeit zu früh") and v == 302, f"jetzt + 1 min → zu früh, Vorschlag jetzt + 2 ({g}, {v})")
-    g, v = P("p1", 398, plaene, starts, {}, 300)
-    check(g.startswith("Firmen-Abstand") and v == 405, f"andere ID derselben Firma um 400 → Abstand 5 min, Vorschlag 405 ({g}, {v})")
-    check(P("p1", 395, plaene, starts, {}, 300)[0] is None, "genau 5 min davor → ok")
-    check(P("r1", 452, plaene, starts, {}, 300)[0].startswith("Firmen-Abstand"), "Start einer anderen ID (gestartet heute) zählt beim Abstand")
+    # seit 08.10.2026 1 min statt 5, und für jeden Start derselben Firma (auch derselben ID) — Finn: „Nur eben nicht gleichzeitig"
+    g, v = P("p1", 400, plaene, starts, {}, 300)
+    check(g.startswith("Firmen-Abstand: andere ID") and v == 401, f"andere ID derselben Firma um 400 → Abstand 1 min, Vorschlag 401 ({g}, {v})")
+    check(P("p1", 399, plaene, starts, {}, 300)[0] is None and P("p1", 398, plaene, starts, {}, 300)[0] is None, "genau 1 min davor → ok (5 min gelten nicht mehr)")
+    check(P("r1", 450, plaene, starts, {}, 300)[0].startswith("Firmen-Abstand"), "Start einer anderen ID (gestartet heute) zählt beim Abstand")
+    g, v = P("p1", 620, plaene, starts, {}, 300)
+    check(g.startswith("Firmen-Abstand: diese ID") and v == 621, f"eigener Plan derselben Firma zur selben Minute → 1 min ({g}, {v})")
+    check(P("p1", 610, plaene, starts, {}, 300)[0] is None, "eigener Plan derselben Firma 10 min weiter → ok (60 min je ID × Firma weg)")
     g, v = P("p1", 800, plaene, starts, {}, 300)
     check(g.startswith("Richtungsschutz") and "short" in g and v == 1020, f"Gegenrichtung derselben ID × Firma um 900 (Laufzeit 120) → Vorschlag 1020 ({g}, {v})")
     check(P("p1", 800, plaene, starts, {}, 300, laufzeit_min=60)[0] is None, "mit Laufzeit 60 min ist 800 frei")
@@ -73,10 +77,10 @@ def main():
     check(P("p1", 1440, plaene, starts, {}, 300)[0].startswith("Startzeit liegt nach dem Planer-Tag"), "nach 24:00 dt → nur heute")
     check(P("zz", 330, plaene, starts, {}, 300)[0].startswith("Startzeit ändern geht nur"), "Plan unbekannt → Klartext")
     fremd = plan("m1", U, "the5ers", "buy", None)                       # Plan liegt bisher an einem anderen Tag
-    check(P(fremd, 330, plaene, starts, {}, 300) == (None, None) and P(fremd, 398, plaene, starts, {}, 300)[0].startswith("Firmen-Abstand"),
+    check(P(fremd, 330, plaene, starts, {}, 300) == (None, None) and P(fremd, 400, plaene, starts, {}, 300)[0].startswith("Firmen-Abstand"),
           "Plan aus einem anderen Tag (als Objekt) wird gegen den Ziel-Tag geprüft")
     check(P("p1", 300 + 130, plaene, starts, fest, 300)[0] is None, "läuft gerade short, Start nach der Laufzeit (120 min ab jetzt) → ok")
-    check(P("p1", 398, plaene, starts, {}, 300, zeit=lambda m: "DUBAI")[0].endswith("um DUBAI — mindestens 5 min Abstand"),
+    check(P("p1", 400, plaene, starts, {}, 300, zeit=lambda m: "DUBAI")[0].endswith("um DUBAI — mindestens 1 min Abstand"),
           "Meldung mit Zeit-Formatierer (Route: Dubai)")
 
     # ── ap_werte_pruefen mit start: Notes „Start 15:08 → 05:02“, Bestätigung bleibt ──
@@ -112,10 +116,10 @@ def main():
           f"05:02 Dubai frei → start_um gesetzt, hand_werte_at, Guard, Bestätigung unberührt ({u_.get('start_um')})")
     check(tage and tage[-1] == "2026-10-08", f"Stand des Ziel-Tages (deutsche Zeit) geladen ({tage})")
     check(u_.get("notes", "").endswith("Start 15:08 → 05:02"), f"Notes in Dubai-Zeit ({u_.get('notes', '').splitlines()[-1] if u_ else ''})")
-    r = ns["_ap_werte_setzen"](PID, {"start_um": "04:33"}, True, "adm")
-    check(isinstance(r, tuple) and r[1] == 400 and r[0]["msg"].startswith("Firmen-Abstand") and r[0]["vorschlag_dubai"] == "04:40"
-          and "um 04:35" in r[0]["msg"] and r[0]["vorschlag"].startswith("2026-10-08T00:40:00"),
-          f"04:33 Dubai neben anderer ID um 04:35 → 400 mit Vorschlag ({r[0] if isinstance(r, tuple) else r})")
+    r = ns["_ap_werte_setzen"](PID, {"start_um": "04:35"}, True, "adm")
+    check(isinstance(r, tuple) and r[1] == 400 and r[0]["msg"].startswith("Firmen-Abstand") and r[0]["vorschlag_dubai"] == "04:36"
+          and "um 04:35" in r[0]["msg"] and r[0]["vorschlag"].startswith("2026-10-08T00:36:00"),
+          f"04:35 Dubai auf derselben Minute wie andere ID um 04:35 → 400 mit Vorschlag 04:36 ({r[0] if isinstance(r, tuple) else r})")
     r = ns["_ap_werte_setzen"](PID, {"start_um": "2026-10-08T01:20:30.000Z"}, True, "adm")
     check(isinstance(r, dict) and r["ok"] and r["plan"]["start_um"].startswith("2026-10-08T01:20:30"), "ISO-UTC mit Sekunden (Vertrag Slave 5) → ok")
     r = ns["_ap_werte_setzen"](PID, {"start_um": "04:00"}, True, "adm")

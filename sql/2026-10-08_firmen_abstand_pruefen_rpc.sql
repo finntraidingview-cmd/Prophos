@@ -1,3 +1,5 @@
+-- ÜBERHOLT (08.10.2026): prophos_firmen_abstand_halten ersetzt durch sql/2026-10-08_firmen_abstand_1min.sql (1 min, jede ID).
+-- Nicht erneut einspielen, sonst gilt wieder 5 min nur zwischen IDs.
 -- FIRMEN-ABSTAND VOR JEDEM START (08.10.2026, Slave-Terminal 3 — Finn 05:00 Dubai: „5-Minuten-Regel gleiche Prop-Firm — gefixt? Falls
 -- nicht, kümmer dich um alles!"). Der Claim-Riegel (sql/2026-10-08_firmen_abstand_riegel.sql) greift nur, wenn start_um_gestartet_at
 -- von NULL auf gesetzt geht. „Neu starten" (Claim bleibt gesetzt) und Hand-Starts ohne Claim liefen daran vorbei. Darum fragt der

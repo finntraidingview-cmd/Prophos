@@ -242,8 +242,9 @@ def main():
     trz = [{"key": f"A|f{i}", "user": "A", "firma": f"f{i}", "dauer_min": 4} for i in range(3)] + \
           [{"key": "B|f0", "user": "B", "firma": "f0", "dauer_min": 4}]
     mz = a["ap_zeiten_verteilen"](trz, zt, random.Random(5), 0, bestehend=[{"user": "A", "start": 615, "dauer_min": 2}])
-    ss = sorted([mz[k] for k in mz if k.startswith("A|")] + [615])
-    check(all(b - a_ >= 4 + 3 for a_, b in zip(ss, ss[1:])), f"PC der ID nie doppelt belegt (Starts {ss})")
+    # Dauer je Start (bestehender Plan 615 läuft 2 min, neue 4) — seit 08.10.2026 ohne 20-min-Regel je ID zählt nur noch Dauer + abstand_id_min
+    ss = sorted([(mz[k], 4) for k in mz if k.startswith("A|")] + [(615, 2)])
+    check(all(b[0] - a_[0] >= a_[1] + 3 for a_, b in zip(ss, ss[1:])), f"PC der ID nie doppelt belegt (Starts {ss})")
 
     # ── A3 Optimierer hält das Band ────────────────────────────────────────────────────────────────────────────────────
     gruppen = {"a": T(None, "A", "a", 60, 3.0), "b": T(None, "B", "b", 120, 3.0), "c": T(None, "C", "c", 180, 2.0),

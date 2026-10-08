@@ -51,7 +51,9 @@ def main():
     for d, soll, txt in ((2, True, "2 min neben Farmer-Konto einer anderen ID → weicht"), (8, False, "8 min daneben (6,7 min zum zweiten Konto) → frei")):
         z = {"p1": {"start": 125.0 + d}}
         check(K("p1", je, z, out) is soll, txt)
-    check(K("p1", {"p1": {"user_id": U3, "firma": fk, "aenderbar": True}}, {"p1": {"start": 126.0}}, out) is False, "gleiche ID wie der Farmer-Block → kein Firmen-Abstand")
+    # seit 08.10.2026 zählt der Firmen-Abstand (1 min) auch innerhalb derselben ID (Finn: „Nur eben nicht gleichzeitig")
+    check(K("p1", {"p1": {"user_id": U3, "firma": fk, "aenderbar": True}}, {"p1": {"start": 126.0}}, out) is True, "gleiche ID wie der Farmer-Block, < 1 min daneben → weicht auch")
+    check(K("p1", {"p1": {"user_id": U3, "firma": fk, "aenderbar": True}}, {"p1": {"start": 128.0}}, out) is False, "gleiche ID, ≥ 1 min daneben → frei")
     check(K("p1", {"p1": {"user_id": sd.U2, "firma": "apextrader", "aenderbar": True}}, {"p1": {"start": 126.0}}, out) is False, "andere Firma → frei")
 
     # ── 3 Probelauf mit dichten Farmer-Blöcken (U3, Tradeify) ──

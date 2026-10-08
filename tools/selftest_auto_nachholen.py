@@ -3,8 +3,8 @@
 seine verpassten Pläne automatisch sauber neu eingeplant werden (Firmen-Abstand, Gegenhedge, Klumpen), nicht still verfallen und nicht
 alle auf einmal starten"). Vorher setzte sfNeuEinplanen jeden verpassten Plan auf jetzt + 2–6 min — alle auf einmal, ohne Regeln.
 Ohne Netz, Platzhalter-IDs. Aufruf: python3 tools/selftest_auto_nachholen.py
-Geprüft: frühestens jetzt + 2–4 min; Firmen-Abstand zu einer anderen ID; nacheinander nachgeholte Pläne einer ID ≥ 20 min auseinander
-(andere Firma) bzw. ≥ 60 min (gleiche Firma); Richtungsschutz derselben ID × Firma; kein Gegenhedge über IDs (andere ID läuft in
+Geprüft: frühestens jetzt + 2–4 min; Firmen-Abstand (seit 08.10.2026 1 min, jede ID); nacheinander nachgeholte Pläne einer ID nur noch
+PC-Abstand auseinander (abstand_id_min 3 + 2 = 5 min — 20/60 min je ID seit 08.10.2026 weg, Finn: „Nur eben nicht gleichzeitig"); Richtungsschutz derselben ID × Firma; kein Gegenhedge über IDs (andere ID läuft in
 Gegenrichtung); verpasste Pläne mit Start in der Vergangenheit blockieren nicht; nach start_bis → Klartext statt Minute."""
 import os
 import random
@@ -53,25 +53,26 @@ def main():
           {"plan_id": "m-fn2", "user_id": MIKE, "firma": "fundednext", "richtung": "sell", "start_min": 543.0},
           {"plan_id": "m-tdfy2", "user_id": MIKE, "firma": "tradeify", "richtung": "buy", "start_min": 887.0},
           {"plan_id": "mo-tdfy", "user_id": MO, "firma": "tradeify", "richtung": "buy", "start_min": 306.0}]   # andere ID, Tradeify 05:06
+    GFA, PC = a["AP_FIRMA_ABSTAND_MIN"], 3 + 2      # Firmen-Abstand / PC-Regel (abstand_id_min Standard 3 + Laufdauer 2)
     rnd = random.Random(1)
     p = next(x for x in pl if x["plan_id"] == "m-tdfy")
     m1, f1 = N(p, pl, [], {}, jetzt, Z, None, [], rnd)
     check(m1 is not None and m1 >= jetzt + 2, f"Tradeify nachgeholt frühestens jetzt + 2 min ({m1}, {f1})")
-    check(m1 is not None and abs(m1 - 306.0) >= 5, f"Firmen-Abstand zu Moritz' Tradeify 05:06 ≥ 5 min ({m1})")
+    check(m1 is not None and abs(m1 - 306.0) >= GFA, f"Firmen-Abstand zu Moritz' Tradeify 05:06 ≥ {GFA:g} min ({m1})")
     # nacheinander: der zweite sieht die neue Zeit des ersten
     for x in pl:
         if x["plan_id"] == "m-tdfy":
             x["start_min"] = m1
     q = next(x for x in pl if x["plan_id"] == "m-ts")
     m2, f2 = N(q, pl, [], {}, jetzt, Z, None, [], random.Random(2))
-    check(m2 is not None and abs(m2 - m1) >= 20, f"Topstep danach ≥ 20 min nach Mikes Tradeify (Abstand je ID über Firmen) ({m1} → {m2})")
-    check(m2 is not None and all(abs(m2 - x["start_min"]) >= 20 for x in pl if x["user_id"] == MIKE and x["plan_id"] != "m-ts" and x["start_min"] >= jetzt),
-          "Topstep hält 20 min zu allen kommenden Plänen der ID")
+    check(m2 is not None and PC <= abs(m2 - m1) < 20, f"Topstep danach ≥ {PC} min (PC), nicht mehr 20 min nach Mikes Tradeify ({m1} → {m2})")
+    check(m2 is not None and all(abs(m2 - x["start_min"]) >= PC for x in pl if x["user_id"] == MIKE and x["plan_id"] != "m-ts" and x["start_min"] >= jetzt),
+          f"Topstep hält {PC} min (PC) zu allen kommenden Plänen der ID")
     # gleiche Firma: zweiter verpasster FundedNext-Plan ≥ 60 min neben dem ersten
     pl2 = [{"plan_id": "a", "user_id": MIKE, "firma": "fundednext", "richtung": "sell", "start_min": 310.0},
            {"plan_id": "b", "user_id": MIKE, "firma": "fundednext", "richtung": "sell", "start_min": 200.0}]
     m3, _ = N(pl2[1], pl2, [], {}, jetzt, Z, None, [], random.Random(3))
-    check(m3 is not None and abs(m3 - 310.0) >= 60, f"gleiche ID × Firma ≥ 60 min (Klumpen) ({m3})")
+    check(m3 is not None and PC <= abs(m3 - 310.0) < 60, f"gleiche ID × Firma: PC-Abstand reicht, keine 60 min mehr ({m3})")
     # Richtungsschutz: kommender SELL derselben ID × Firma 20 min später → BUY muss ≥ 120 min weg
     pl3 = [{"plan_id": "x", "user_id": MIKE, "firma": "apex", "richtung": "buy", "start_min": 100.0},
            {"plan_id": "y", "user_id": MIKE, "firma": "apex", "richtung": "sell", "start_min": 330.0}]
@@ -91,14 +92,14 @@ def main():
     check(m6 is not None and m6 < jetzt + 5, f"vergangene, noch nicht nachgeholte Pläne derselben ID blockieren nicht ({m6})")
     # heutige Starts derselben ID zählen (PC)
     m7, _ = N(pl5[0], pl5, [{"user_id": MIKE, "firma": "apex", "start": 298.0, "richtung": "buy"}], {}, jetzt, Z, None, [], random.Random(7))
-    check(m7 is not None and m7 >= 298 + 20, f"heutiger Start derselben ID (Apex 04:58) → ≥ 20 min danach ({m7})")
+    check(m7 is not None and m7 >= 298 + PC, f"heutiger Start derselben ID (Apex 04:58) → ≥ {PC} min danach (PC) ({m7})")
     # Tagesende
     m8, f8 = N(pl5[0], pl5, [], {}, 16 * 60 + 29, Z, None, [], random.Random(8))
     check(m8 is None and f8 and "16:30" in f8, f"nach start_bis → Klartext statt Minute ({f8})")
     # Streuung: nicht starr jetzt + 2
     ws = {N(pl5[0], pl5, [], {}, jetzt, Z, None, [], random.Random(s))[0] for s in range(20)}
     check(len(ws) > 5 and min(ws) >= jetzt + 2 and max(ws) <= jetzt + 4, f"Vorlauf gestreut 2–4 min ({sorted(ws)[:4]} …)")
-    # Altweg-Vergleich: früher jetzt + 2–6 min für alle → Tradeify und Topstep binnen Minuten; jetzt ≥ 20 min auseinander
+    # Altweg-Vergleich: früher jetzt + 2–6 min für alle → Tradeify und Topstep binnen Minuten; jetzt ≥ PC-Abstand auseinander
     print("\nALLES GRÜN" if not FEHLER else f"\n{len(FEHLER)} FEHLER")
     return 0 if not FEHLER else 1
 

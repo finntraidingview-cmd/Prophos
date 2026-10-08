@@ -1,3 +1,5 @@
+-- TEILWEISE ÜBERHOLT (08.10.2026): trade_plans_firmen_abstand ersetzt durch sql/2026-10-08_firmen_abstand_1min.sql (1 min, jede ID).
+-- prophos_firma_key und der Trigger selbst kommen weiter aus dieser Datei. Nicht erneut einspielen, sonst gilt wieder 5 min.
 -- FIRMEN-ABSTAND AM START (08.10.2026, Slave-Terminal 3 — Finn zu The5%ers Finn + Pascal 04:24, Jacob 04:23 Dubai: „Was ich auch
 -- nicht will: dass bei zwei verschiedenen IDs zur selben Uhrzeit bei derselben Prop-Firm zwei Trades aufgehen. Das ist mies
 -- auffällig. Immer mindestens 5 Minuten Abstand, wenn eine ID bei einer Prop-Firm einen Trade öffnet … Korrelation").

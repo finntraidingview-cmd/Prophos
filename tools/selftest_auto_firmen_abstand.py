@@ -2,6 +2,8 @@
 """Selbsttest FIRMEN-ABSTAND (app.py + sql/2026-10-08_firmen_abstand_riegel.sql, 08.10.2026, Slave-Terminal 3 — Finn zu The5%ers
 Finn + Pascal 04:24, Jacob 04:23 Dubai: „dass bei zwei verschiedenen IDs zur selben Uhrzeit bei derselben Prop-Firm zwei Trades
 aufgehen. Das ist mies auffällig. Immer mindestens 5 Minuten Abstand … Korrelation").
+Seit 08.10.2026 ~12:00 Dubai (Slave-Terminal 4, Finn: „Nur eben nicht gleichzeitig") 1 min und für JEDEN Start derselben Firma, auch derselben
+ID; 60/20 min je ID weg. SQL jetzt sql/2026-10-08_firmen_abstand_1min.sql (prophos_firmen_abstand_fenster = 60 s).
 
 Aufruf:  python3 tools/selftest_auto_firmen_abstand.py
 Ohne Netz, Platzhalter-IDs. Geprüft: (1) ap_zeiten_verteilen — Starts verschiedener IDs bei derselben Firma ≥ AP_FIRMA_ABSTAND_MIN,
@@ -18,7 +20,8 @@ HIER = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HIER)
 import selftest_auto_delta as sd  # noqa: E402
 
-SQL = os.path.join(HIER, "..", "sql", "2026-10-08_firmen_abstand_riegel.sql")
+SQL = os.path.join(HIER, "..", "sql", "2026-10-08_firmen_abstand_riegel.sql")       # prophos_firma_key (unverändert)
+SQL_1MIN = os.path.join(HIER, "..", "sql", "2026-10-08_firmen_abstand_1min.sql")  # Riegel + RPC seit 08.10.2026
 FEHLER = []
 
 
@@ -68,13 +71,13 @@ def main():
         fehlt += sum(1 for t in tr if t["key"] not in m)
         for x in tr:
             for y in tr:
-                if x["key"] < y["key"] and x["key"] in m and y["key"] in m and x["fkey"] == y["fkey"] and x["user"] != y["user"]:
+                if x["key"] < y["key"] and x["key"] in m and y["key"] in m and x["fkey"] == y["fkey"]:   # jede ID, auch die eigene
                     d = abs(m[x["key"]] - m[y["key"]])
                     verstoss += d < GFA
                     abstaende.append(d)
     check(fehlt == 0, f"enges Fenster (40 min, 5 IDs bei The5%ers + 2 bei Apex): alle gesetzt (fehlend {fehlt})")
-    check(verstoss == 0, f"verschiedene IDs bei derselben Firma ≥ {GFA:g} min (200 Seeds, Verstöße {verstoss})")
-    nah = sorted(d for d in abstaende if d < 2 * GFA)
+    check(verstoss == 0, f"Starts derselben Firma ≥ {GFA:g} min (200 Seeds, Verstöße {verstoss})")
+    nah = sorted(d for d in abstaende if d < GFA + 5)   # ganze Minuten: bei 1 min Abstand die Streuung über die nächsten 5 min
     check(len(set(nah)) > 2, f"Abstände gestreut, nicht starr {GFA:g}:00 ({sorted(set(nah))[:6]} …)")
     best = [{"user": "jacob", "start": 143, "dauer_min": 2, "gruppe": "jacob|the5ers", "fkey": "the5ers"}]
     v = 0
@@ -86,7 +89,7 @@ def main():
     gleich = verteilen([{"key": "a", "user": "u1", "gruppe": "u1|x", "fkey": "x", "dauer_min": 2}],
                        {"fenster": [["02:00", "02:12", 1]], "start_bis": "16:30"}, random.Random(1),
                        bestehend=[{"user": "u1", "start": 121, "dauer_min": 2, "gruppe": "u1|y", "fkey": "x"}])
-    check("a" in gleich, "gleiche ID: der Firmen-Abstand gilt nur zwischen VERSCHIEDENEN IDs (PC-Regel bleibt)")
+    check("a" in gleich and abs(gleich["a"] - 121) >= GFA, "gleiche ID: Firmen-Abstand gilt seit 08.10.2026 auch hier (PC-Regel bleibt), Platz findet sich")
 
     # ── 2 Bot-Verteilung: The5%ers Finn + Pascal 04:24, Jacob 04:23 Dubai (dt = Dubai − 120) ──────────────────────────────────
     U = a["ap_umplanen"]
@@ -121,15 +124,24 @@ def main():
     # Finn (Buy) hält AP_GEGEN_FIRMA_MIN (30) zu den Shorts von Jacob/Pascal. Seit .1302 sperrt zwar die ganze Laufzeit, aber Finns Buy
     # stand schon in deren Laufzeit (Bestand) — die Verteilung zieht ihn darin auseinander, baut keinen neuen Partner und hält ±30 hart
     check(all(st[i] - start0[i] <= 45 for i in st), f"nur so weit wie nötig + Streuung (≤ 45 min: {[round(st[i] - start0[i]) for i in st]})")
-    check(all(abs(st["finn"] - st[k]) > a["AP_GEGEN_FIRMA_MIN"] for k in ("jacob", "pascal")),
-          "Finn (Buy) > 30 min zu den Shorts der anderen IDs derselben Firma — kein Gegenhedge über IDs")
+    # seit 1 min (08.10.2026): Finn 04:24 liegt schon 1 min hinter Jacob 04:23 → bleibt stehen (Gegenhedge am Start hält die DB, 90 s);
+    # wer verschoben wurde, landet nie NEU neben einer Gegenrichtung einer anderen ID (±30 min) — außer im Bestand (Pascal ↔ Finn)
+    check(st["finn"] == start0["finn"] or all(abs(st["finn"] - st[k]) > a["AP_GEGEN_FIRMA_MIN"] for k in ("jacob", "pascal")),
+          "Finn (Buy): unverschoben oder > 30 min zu den Shorts der anderen IDs derselben Firma — kein neuer Gegenhedge über IDs")
     g_ = next((x["grund"] for x in alle), "")
     check(g_.startswith("Verteilung: "), f"Protokoll-Grund ({g_[:80]})")
     # gegen einen schon GESTARTETEN Plan einer anderen ID
     e = U([plan("finn", "finn", "the5ers", d(4, 24))], 0.0, 0.0, d(4, 5), Z, 100, random.Random(1),
-          gestartet=[{"user_id": "jacob", "firma": "the5ers", "start": float(d(4, 23)), "richtung": "sell"}])
+          gestartet=[{"user_id": "jacob", "firma": "the5ers", "start": float(d(4, 24)), "richtung": "buy"}])
     n_ = next((x["nach_start_min"] for x in e["aenderungen"] if x["plan_id"] == "finn"), None)
-    check(n_ is not None and n_ - d(4, 23) >= GFA, "gegen einen schon gestarteten Trade einer anderen ID: Plan rückt nach hinten")
+    check(n_ is not None and n_ - d(4, 24) >= GFA, "gegen einen schon gestarteten Trade einer anderen ID (gleiche Minute): Plan rückt nach hinten")
+    e = U([plan("finn", "finn", "the5ers", d(4, 24))], 0.0, 0.0, d(4, 5), Z, 100, random.Random(1),
+          gestartet=[{"user_id": "finn", "firma": "the5ers", "start": float(d(4, 24)), "richtung": "buy"}])
+    n_ = next((x["nach_start_min"] for x in e["aenderungen"] if x["plan_id"] == "finn"), None)
+    check(n_ is not None and n_ - d(4, 24) >= GFA, "auch gegen einen gestarteten Trade DERSELBEN ID bei derselben Firma (gleiche Minute)")
+    e = U([plan("finn", "finn", "the5ers", d(4, 24))], 0.0, 0.0, d(4, 5), Z, 100, random.Random(1),
+          gestartet=[{"user_id": "finn", "firma": "the5ers", "start": float(d(4, 19)), "richtung": "buy"}])
+    check(not e["aenderungen"], "gleiche ID, gleiche Firma, 5 min davor: kein Eingriff mehr (60-min-Regel weg)")
     # Handplan der anderen ID steht fest → der änderbare weicht
     e = U([plan("finn", "finn", "the5ers", d(4, 24), auto_plan=False, aenderbar=False, fest_durch="Handplan"),
            plan("pascal", "pascal", "the5ers", d(4, 24))], 0.0, 0.0, d(4, 5), Z, 100, random.Random(1))
@@ -207,15 +219,16 @@ def main():
                     verstoss_b += 1
     check(verstoss_b == 0, f"Band-Schritt verschiebt (40 Seeds) nie neben laufende/≤ 30 min nahe Gegenrichtung einer anderen ID (Verstöße {verstoss_b})")
 
-    # ── 2c ABSTAND JE ID ÜBER FIRMEN (Slave 4: Chris FundedNext 18:06 + Topstep 18:13 = 7 min) ───────────────────────────────────────
+    # ── 2c ABSTAND JE ID ÜBER FIRMEN — seit 08.10.2026 WEG (Finn: „wenn Jacob Topstep long geht, kann er direkt danach Tradeify short
+    #    gehen, das ist ganz egal"): Chris FundedNext 18:06 + Topstep 18:13 = 7 min bleibt stehen (PC-Regel 5 min ist erfüllt) ─────────
     pk = [plan("c_fn", "chris", "fundednext", d(18, 6), "buy"), plan("c_ts", "chris", "topstep", d(18, 13), "sell")]
     ek0 = {"basis": 0.0, "brutto": 0.0, "gross_ab": 100000.0, "laufzeit": 60}
     Zl = {"fenster": [["00:00", "14:30", 50], ["14:30", "18:00", 50]], "start_bis": "18:00", "abstand_id_min": 3}
     ek = U(pk, 0.0, 0.0, d(9, 0), Zl, 100, random.Random(1), einsatz=ek0, dubai_min=120)
     nk = {x["plan_id"]: x["nach_start_min"] for x in ek["aenderungen"] if x["art"] == "start"}
     sk = {p["plan_id"]: nk.get(p["plan_id"], p["start_min"]) for p in pk}
-    check("c_ts" in nk and sk["c_ts"] - sk["c_fn"] >= a["AP_ABSTAND_ID_MIN"] * 0.5 and nk["c_ts"] - d(18, 13) >= 5,
-          f"Chris FundedNext 18:06 + Topstep 18:13: Topstep rückt nach hinten, ≥ 5 min, Abstand {sk['c_ts'] - sk['c_fn']:g} min")
+    check("c_ts" not in nk and "c_fn" not in nk and a["AP_ABSTAND_ID_MIN"] == 0 and a["AP_ABSTAND_ID_FIRMA_MIN"] == 0,
+          f"Chris FundedNext 18:06 + Topstep 18:13: kein Eingriff mehr (20/60 min je ID weg, Abstand {sk['c_ts'] - sk['c_fn']:g} min)")
 
     # ── 3 SQL-Riegel ──────────────────────────────────────────────────────────────────────────────────────────────────────
     sql = open(SQL, encoding="utf-8").read()
@@ -231,11 +244,18 @@ def main():
     check(re.search(r"before update of start_um_gestartet_at on public\.trade_plans", sql) is not None
           and "when (old.start_um_gestartet_at is null and new.start_um_gestartet_at is not null)" in sql,
           "Trigger sitzt genau auf dem Claim (start_um_gestartet_at NULL → gesetzt)")
-    rumpf = sql[sql.index("function public.trade_plans_firmen_abstand"):]
-    check("return null;" in rumpf and "pg_advisory_xact_lock" in rumpf and "interval '5 minutes'" in rumpf
-          and "p.user_id is distinct from new.user_id" in rumpf,
-          "Riegel: andere ID, 5 min, Lock je Firma, Claim nicht schreiben (NULL → Tab startet nicht)")
-    check("'start'" in rumpf and "auto_plan_umplanung" in rumpf, "Protokoll in auto_plan_umplanung (quelle 'start', erlaubt seit 2026-10-07)")
+    sql1 = open(SQL_1MIN, encoding="utf-8").read()
+    rumpf = sql1[sql1.index("function public.trade_plans_firmen_abstand"):sql1.index("function public.prophos_firmen_abstand_halten")]
+    rpc = sql1[sql1.index("function public.prophos_firmen_abstand_halten"):]
+    fenster = re.search(r"prophos_firmen_abstand_fenster\(\) returns interval\s+language sql immutable as \$\$ select interval '(\d+) seconds'", sql1)
+    check(fenster is not None and int(fenster.group(1)) == round(GFA * 60),
+          f"DB-Fenster = app.py AP_FIRMA_ABSTAND_MIN ({fenster and fenster.group(1)} s ↔ {GFA:g} min)")
+    check("return null;" in rumpf and "pg_advisory_xact_lock" in rumpf and "prophos_firmen_abstand_fenster()" in rumpf
+          and "user_id is distinct from" not in rumpf and "minutes'" not in rumpf.replace("'60 minutes'", ""),
+          "Riegel: jede ID, Fenster zentral, Lock je Firma, Claim nicht schreiben (NULL → Tab startet nicht)")
+    check("prophos_firmen_abstand_fenster()" in rpc and "p.user_id is distinct from pl.user_id" not in rpc and "auth.uid()" in rpc
+          and "orbit_gesendet_at = " not in rpc, "RPC: jede ID, Fenster zentral, nur eigener Plan, orbit_gesendet_at nie gesetzt")
+    check("'start'" in rumpf and "auto_plan_umplanung" in rumpf and "'start'" in rpc, "Protokoll in auto_plan_umplanung (quelle 'start', erlaubt seit 2026-10-07)")
 
     print()
     if FEHLER:

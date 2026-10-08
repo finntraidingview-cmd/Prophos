@@ -4,9 +4,9 @@ zwei Tabs derselben ID (gleiche pc_id, Fall pc-40mali) rufen „nachholen" gleic
 denselben Stand und bekamen dieselbe freie Minute → zwei Starts zu eng).
 Ohne Netz: die echten _ap_nachholen / _ap_nachholen_kern / ap_nachhol_minute (samt Regeln) laufen gegen eine Fake-DB; das Laden des
 Stands wartet künstlich 0,3 s, damit sich zwei Threads sicher überlappen. Geprüft:
-  1 zwei verpasste Pläne derselben ID (andere Firmen) parallel → ≥ 20 min auseinander (Abstand je ID)
-  2 zwei IDs, gleiche Firma, parallel → ≥ 5 min auseinander (Firmen-Abstand)
-  3 Gegenprobe OHNE Lock: dieselben zwei Aufrufe landen < 20 min auseinander — der Test misst also wirklich die Serialisierung
+  1 zwei verpasste Pläne derselben ID (andere Firmen) parallel → ≥ 5 min auseinander (PC-Regel; 20 min je ID seit 08.10.2026 weg)
+  2 zwei IDs, gleiche Firma, parallel → ≥ 1 min auseinander (Firmen-Abstand, seit 08.10.2026 1 statt 5 min)
+  3 Gegenprobe OHNE Lock: dieselben zwei Aufrufe landen < 5 min auseinander — der Test misst also wirklich die Serialisierung
   4 der Lock steht im Quelltext genau um _ap_nachholen_kern
 Aufruf: python3 tools/selftest_auto_nachholen_parallel.py"""
 import contextlib
@@ -103,24 +103,25 @@ def lauf(plaene, aufrufe, mit_lock=True):
 
 def main():
     U, V = "u-test-1", "u-test-2"
+    GFA, PC = lade()[0]["AP_FIRMA_ABSTAND_MIN"], 3 + 2   # Firmen-Abstand / PC-Regel (abstand_id_min 3 + Laufdauer 2)
     # 1: zwei verpasste Pläne derselben ID, andere Firmen
     p1 = {"p-a": {"user_id": U, "firma": "tradeify", "richtung": "buy", "start_min": 125.0},
           "p-b": {"user_id": U, "firma": "topstep", "richtung": "sell", "start_min": 283.0}}
     db, erg = lauf(p1, [("p-a", U), ("p-b", U)])
     ma, mb = db["p-a"]["start_min"], db["p-b"]["start_min"]
     check(all(isinstance(x, dict) and x.get("ok") for x in erg.values()), f"beide Aufrufe ok ({erg})")
-    check(abs(ma - mb) >= 20, f"1 gleiche ID parallel → ≥ 20 min auseinander ({ma} / {mb})")
+    check(abs(ma - mb) >= PC, f"1 gleiche ID parallel → ≥ {PC} min auseinander (PC-Regel) ({ma} / {mb})")
     check(min(ma, mb) >= JETZT_MIN + 2, "frühestens jetzt + 2 min")
     # 2: zwei IDs, gleiche Firma
     p2 = {"q-a": {"user_id": U, "firma": "fundednext", "richtung": "sell", "start_min": 200.0},
           "q-b": {"user_id": V, "firma": "fundednext", "richtung": "sell", "start_min": 210.0}}
     db, _ = lauf(p2, [("q-a", U), ("q-b", V)])
     qa, qb = db["q-a"]["start_min"], db["q-b"]["start_min"]
-    check(abs(qa - qb) >= 5, f"2 zwei IDs gleiche Firma parallel → ≥ 5 min (Firmen-Abstand) ({qa} / {qb})")
+    check(abs(qa - qb) >= GFA, f"2 zwei IDs gleiche Firma parallel → ≥ {GFA:g} min (Firmen-Abstand) ({qa} / {qb})")
     # 3: Gegenprobe ohne Lock
     db, _ = lauf(p1, [("p-a", U), ("p-b", U)], mit_lock=False)
     oa, ob = db["p-a"]["start_min"], db["p-b"]["start_min"]
-    check(abs(oa - ob) < 20, f"3 Gegenprobe ohne Lock: Kollision nachgewiesen ({oa} / {ob}) — der Test misst die Serialisierung")
+    check(abs(oa - ob) < PC, f"3 Gegenprobe ohne Lock: Kollision nachgewiesen ({oa} / {ob}) — der Test misst die Serialisierung")
     # 4: Quelltext
     _, teil, src = lade()
     check(re.search(r"def _ap_nachholen\(pid, alle, uid, jetzt=None\):\n(?:    .*\n)*?    with _AP_NACHHOL_LOCK:\n        return _ap_nachholen_kern\(", src) is not None,

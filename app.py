@@ -14715,15 +14715,22 @@ def ap_cfd_ab(zeiten):
 # VERTEILEN STATT DURCHRATTERN (08.10.2026, Slave-Terminal 3 — Finn zu Ina: 3× Apex 150k um 03:56/03:57/03:58, 3× FundedNext 100k um
 # 16:58–17:01: „Wenn bei einer ID Trades dran sind, werden alle direkt hintereinander durchgerattert. Das muss nicht sein … über den Tag
 # verteilen. Damit weniger Klumpenrisiko. Aber auch hier aufpassen, dass man nicht aus Versehen gegenhedged"). Abstand Start zu Start:
-AP_ABSTAND_ID_FIRMA_MIN = 60          # Pläne derselben ID × Firma (gruppe) — überschreibbar per zeiten.abstand_id_firma_min
-AP_ABSTAND_ID_MIN = 20                # Pläne derselben ID überhaupt (PC) — zeiten.abstand_id_gesamt_min
+# WEG seit 08.10.2026 ~12:00 Dubai (Finn: „Die zwei Regeln mit 60/20 min sind komplett dumm, die kannst du weglassen. Nur eben nicht
+# gleichzeitig") — 0 = aus; bleibt nur der Firmen-Abstand (AP_FIRMA_ABSTAND_MIN, jetzt auch innerhalb derselben ID) und die PC-Regel
+# (abstand_id_min: nie zwei Puls-Starts gleichzeitig auf einem PC). zeiten.abstand_id_firma_min / abstand_id_gesamt_min überschreiben weiter.
+AP_ABSTAND_ID_FIRMA_MIN = 0           # Pläne derselben ID × Firma (gruppe) — vorher 60
+AP_ABSTAND_ID_MIN = 0                 # Pläne derselben ID überhaupt — vorher 20
 AP_ABSTAND_STUFEN = (1.0, 0.5, 0.25, 0.0)   # passt es nicht ins Fenster: Abstände stufenweise lockern, zuletzt nur die alte PC-Regel
 AP_GROSS_NAH_MIN = 60                 # Große-Folge (ap_einsatz_lage): zwei große gleich gerichtete näher als das zählen immer als Klumpen
 # FIRMEN-ABSTAND (08.10.2026, Finn zu The5%ers Finn + Pascal 04:24, Jacob 04:23: „dass bei zwei verschiedenen IDs zur selben Uhrzeit bei
 # derselben Prop-Firm zwei Trades aufgehen. Das ist mies auffällig. Immer mindestens 5 Minuten Abstand … Korrelation"): zwischen zwei
 # Starts VERSCHIEDENER IDs bei derselben Firma (ap_firma_key / _firm_norm) — hart, auch in der letzten Lockerungsstufe. Am Start selbst
 # hält der DB-Riegel sql/2026-10-08_firmen_abstand_riegel.sql dieselbe Regel (Neustarts, verpasste Starts, „Neu einplanen").
-AP_FIRMA_ABSTAND_MIN = 5
+# Seit 08.10.2026 ~12:00 Dubai 1 statt 5 min und für JEDEN anderen Start derselben Firma, auch derselben ID, jede Richtung (Finn: „Wenn es
+# eine andere ID ist, würde ich einfach eine Minute machen … dass die beiden Orders nicht gleichzeitig starten … nicht in der gleichen
+# Sekunde"; dazu: „wenn Jacob Tradeify long geht, kann er auch 5 min später wieder Tradeify long gehen"). DB: sql/2026-10-08_firmen_abstand_1min.sql
+# (prophos_firmen_abstand_fenster = 60 s) — gleiche Zahl.
+AP_FIRMA_ABSTAND_MIN = 1
 
 
 AP_FENSTER_WUERFE = 20     # Verteilung je Lauf so oft würfeln, die fenster-treueste gewinnt (Opening-Anteil, 08.10.2026)
@@ -14801,8 +14808,8 @@ def _ap_zeiten_verteilen_einmal(tranchen, zeiten, rnd, frueheste_min=0, info=Non
                 return False
             if f > 0 and t.get("gruppe") and o.get("gruppe") == t.get("gruppe") and abs(start - s) < gap_f * f:
                 return False
-        for u, s in je_firma.get(str(t.get("fkey") or ""), ()):   # Firmen-Abstand zu ANDEREN IDs — hart, jede Stufe
-            if u != str(t["user"]) and abs(start - s) < gap_firma:
+        for u, s in je_firma.get(str(t.get("fkey") or ""), ()):   # Firmen-Abstand zu JEDEM Start derselben Firma (seit 08.10.2026 auch eigene ID) — hart, jede Stufe
+            if abs(start - s) < gap_firma:
                 return False
         return True
 
@@ -17262,19 +17269,18 @@ def _ap_gegen_partner(t, uid, firma, richtung, plaene, laufend, jetzt_min, laufz
 
 
 def _ap_firma_konflikt(i, je, zustand, gestartet=(), gap=None):
-    """Muss Plan i wegen des FIRMEN-ABSTANDS weichen? Ja, wenn eine ANDERE ID bei derselben Firma weniger als AP_FIRMA_ABSTAND_MIN
-    entfernt startet und Plan i der „spätere" ist: der andere startet früher, gleichzeitig mit kleinerer plan_id, ist nicht änderbar
-    oder schon gestartet (gestartet = [{user_id, firma, start}])."""
+    """Muss Plan i wegen des FIRMEN-ABSTANDS weichen? Ja, wenn ein anderer Plan/Start bei derselben Firma (seit 08.10.2026 jede ID,
+    auch die eigene) weniger als AP_FIRMA_ABSTAND_MIN entfernt startet und Plan i der „spätere" ist: der andere startet früher,
+    gleichzeitig mit kleinerer plan_id, ist nicht änderbar oder schon gestartet (gestartet = [{user_id, firma, start}])."""
     g = float(AP_FIRMA_ABSTAND_MIN if gap is None else gap)
-    s0, u, f = zustand[i]["start"], str(je[i]["user_id"]), je[i]["firma"]
+    s0, f = zustand[i]["start"], je[i]["firma"]
     for k in zustand:
-        if k == i or str(je[k]["user_id"]) == u or je[k]["firma"] != f:
+        if k == i or je[k]["firma"] != f:
             continue
         s = zustand[k]["start"]
         if abs(s - s0) < g and (s < s0 or (s == s0 and str(k) < str(i)) or not je[k].get("aenderbar")):
             return True
-    return any(str(x.get("user_id")) != u and x.get("firma") == f and x.get("start") is not None and abs(float(x["start"]) - s0) < g
-               for x in gestartet or ())
+    return any(x.get("firma") == f and x.get("start") is not None and abs(float(x["start"]) - s0) < g for x in gestartet or ())
 
 
 def _ap_id_konflikt(i, je, zustand, gestartet=(), gap=None):
@@ -17333,7 +17339,8 @@ def ap_verteil_gruppen(je, zustand, abstand=None, gestartet=()):
     """REIN RECHNEND: ID × Firma-Gruppen mit einem Klumpen — zwei Pläne näher als `abstand` (Standard AP_ABSTAND_ID_FIRMA_MIN),
     der spätere davon änderbar — oder (08.10.2026) einem änderbaren Plan, der wegen des Firmen-Abstands zu einer anderen ID weichen
     muss (_ap_firma_konflikt). je = {plan_id: plan}, zustand = {plan_id: {start, richtung}}. → [(erste Klumpen-Minute, "uid|firma")]
-    nach Dringlichkeit (frühester Klumpen zuerst)."""
+    nach Dringlichkeit (frühester Klumpen zuerst). Seit 08.10.2026 (60/20 min je ID weg) weckt nur noch der Firmen-Abstand (1 min, jede ID,
+    _ap_firma_konflikt) — Konten einer Tranche 1–2 min nacheinander (zeiten.abstand_konto_s) sind gewollt (Finn: „Nur eben nicht gleichzeitig")."""
     gf = float(AP_ABSTAND_ID_FIRMA_MIN if abstand is None else abstand)
     gr = {}
     for i in zustand:
@@ -17389,6 +17396,9 @@ def ap_verteilung(gruppe, je, zustand, jetzt_min, zeiten, rnd, gestartet=None, l
                  if str(je[k]["user_id"]) != uid and je[k]["firma"] == firma]
         fremd += [(float(x["start"]), x.get("richtung")) for x in gestartet or ()
                   if str(x.get("user_id")) != uid and x.get("firma") == firma and x.get("start") is not None]
+        # Firmen-Abstand seit 08.10.2026 zu JEDEM Start derselben Firma, auch der eigenen ID (Finn: „nur eben nicht gleichzeitig")
+        firma_alle = [neu.get(k, zustand[k]["start"]) for k in zustand if k != i and je[k]["firma"] == firma]
+        firma_alle += [float(x["start"]) for x in gestartet or () if x.get("firma") == firma and x.get("start") is not None]
 
         gegen_pl = [(neu.get(k, zustand[k]["start"]), zustand[k]["richtung"], str(je[k]["user_id"]), je[k]["firma"]) for k in zustand if k != i]
         # BESTAND (08.10.2026, mit der Laufzeit-Sperre bei geplanten): steht der Plan schon in einer Gegenrichtung einer anderen ID, darf
@@ -17402,9 +17412,9 @@ def ap_verteilung(gruppe, je, zustand, jetzt_min, zeiten, rnd, gestartet=None, l
                 return False                                       # Gegenhedge über IDs: andere ID läuft/startet gegenläufig (neu)
             if any(x[0] == "lauf" or abs(float(t) - x[1]) <= AP_GEGEN_FIRMA_MIN for x in p_):
                 return False                                       # hart wie vor .1302: nie in einen laufenden, nie ±30 min um einen Start
+            if any(abs(t - s) < gfirma for s in firma_alle):
+                return False                                       # Firmen-Abstand zu jedem Start derselben Firma — hart
             for s, r in fremd:
-                if abs(t - s) < gfirma:
-                    return False                                   # Firmen-Abstand zu anderen IDs — hart
                 if r in ("buy", "sell") and r != richtung and abs(t - s) < AP_GEGEN_DICHT_MIN:
                     return False                                   # kein neuer Malus „dicht gegenläufig gleiche Firma"
             for s, r, g in andere:
@@ -17710,8 +17720,8 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
         for k_, s_, r_, u_, f_ in firma_:
             if u_ == uid and r_ in ("buy", "sell") and r_ != r and (s_ <= t < s_ + laufz or t <= s_ < t + laufz):
                 return False                             # nie gegen einen Trade derselben ID × Firma
-            if u_ != uid and abs(t - s_) < gfirma:
-                return False                             # Firmen-Abstand zu anderen IDs
+            if abs(t - s_) < gfirma:
+                return False                             # Firmen-Abstand zu jedem Start derselben Firma (seit 08.10.2026 auch eigene ID)
             if u_ != uid and r_ in ("buy", "sell") and r_ != r and abs(t - s_) < AP_GEGEN_DICHT_MIN:
                 return False                             # kein neuer Malus
             if u_ == uid and abs(t - s_) < gf_v * f:
@@ -17935,8 +17945,8 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                         continue
                     if u == uid and ff == fa and r in ("buy", "sell") and r != noetig and (s <= t < s + laufz or t <= s < t + laufz):
                         return False                         # nie gegen einen laufenden/geplanten Trade derselben ID × Firma
-                    if u != uid and ff == fa and abs(t - s) < gfirma:
-                        return False                         # Firmen-Abstand zu anderen IDs
+                    if ff == fa and abs(t - s) < gfirma:
+                        return False                         # Firmen-Abstand zu jedem Start derselben Firma (seit 08.10.2026 auch eigene ID)
                     if u != uid and ff == fa and r in ("buy", "sell") and r != noetig and abs(t - s) < AP_GEGEN_DICHT_MIN:
                         return False                         # kein neuer Malus
                     if u == uid and abs(t - s) < max(abst_pc, gi_v * f):
@@ -18037,7 +18047,7 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                 lo = max(lo, ap_cfd_ab(zeiten))           # CFD nie vor zeiten.cfd_ab (07.10.2026)
             if hi <= lo:
                 continue
-            eng = len(ids) > 1 and any(b_ - a_ < AP_ABSTAND_ID_FIRMA_MIN for a_, b_ in zip(sorted(zustand[i]["start"] for i in ids),
+            eng = len(ids) > 1 and any(b_ - a_ < max(AP_ABSTAND_ID_FIRMA_MIN, AP_FIRMA_ABSTAND_MIN) for a_, b_ in zip(sorted(zustand[i]["start"] for i in ids),
                                                                                         sorted(zustand[i]["start"] for i in ids)[1:]))
             for _v in range(0 if eng else 12):       # STRECKEN (08.10.2026): enge Alt-Tranchen (1-min-Abstände) nie als Block — die Verteilung zieht sie auseinander
                 neu = float(rnd.randint(lo, hi))
@@ -19697,8 +19707,8 @@ def ap_start_hand_pruefen(plan_id, neu_min, plaene, starts, id_fest, jetzt_min, 
     Minute neu_min (ab 00:00 deutscher Zeit, wie der Stand) starten? plaene = _ap_stand_plaene (heute geplant, alle IDs), starts =
     stand.starts_heute [{user_id, firma, start, richtung}], id_fest = ap_id_fest. Regeln: frühestens jetzt + AP_START_HAND_VORLAUF_MIN,
     nur innerhalb des Planer-Tages; RICHTUNGSSCHUTZ — keine Gegenrichtung derselben ID × Firma, die läuft (id_fest „läuft gerade") oder
-    als Plan/Start näher als laufzeit_min (Standard AP_VERTEIL_GEGEN_MIN) liegt; FIRMEN-ABSTAND — kein Plan/Start einer ANDEREN ID
-    derselben Firma näher als abstand_firma (zeiten.abstand_firma_min, sonst AP_FIRMA_ABSTAND_MIN, wie da88e68).
+    als Plan/Start näher als laufzeit_min (Standard AP_VERTEIL_GEGEN_MIN) liegt; FIRMEN-ABSTAND — kein anderer Plan/Start derselben Firma
+    (seit 08.10.2026 jede ID, auch die eigene) näher als abstand_firma (zeiten.abstand_firma_min, sonst AP_FIRMA_ABSTAND_MIN, wie da88e68).
     zeit = Minute → Text für die Meldung (Route: Dubai-Uhrzeit), sonst deutsche Zeit.
     → (None, None) oder (Klartext, vorschlag_min | None) mit der nächsten freien Minute ab dem Wunsch."""
     zt = zeit or (lambda m: _ap_hhmm_txt(m) + " dt")
@@ -19728,8 +19738,8 @@ def ap_start_hand_pruefen(plan_id, neu_min, plaene, starts, id_fest, jetzt_min, 
             if str(x.get("user_id")) == u and x.get("firma") == f and gegen and x.get("richtung") == gegen and abs(s - m) < lz:
                 return f"Richtungsschutz: {AP_RICHTUNG_TXT[gegen]} derselben ID und Firma um {zt(s)} — näher als {lz:.0f} min"
         for s, x in anders + st:
-            if str(x.get("user_id")) != u and x.get("firma") == f and abs(s - m) < gap:
-                return f"Firmen-Abstand: andere ID bei derselben Firma um {zt(s)} — mindestens {gap:.0f} min Abstand"
+            if x.get("firma") == f and abs(s - m) < gap:
+                return f"Firmen-Abstand: {'andere ID' if str(x.get('user_id')) != u else 'diese ID'} bei derselben Firma um {zt(s)} — mindestens {gap:g} min Abstand"
         return None
     g = grund(float(neu_min))
     if not g:
@@ -19761,6 +19771,9 @@ def ap_nachhol_minute(p, plaene, starts, id_fest, jetzt_min, zeiten=None, laufze
     u, f, r, pid = str(p["user_id"]), p.get("firma"), p.get("richtung"), str(p.get("plan_id"))
     gap_i = float(zeiten.get("abstand_id_gesamt_min") or AP_ABSTAND_ID_MIN)
     gap_f = float(zeiten.get("abstand_id_firma_min") or AP_ABSTAND_ID_FIRMA_MIN)
+    # PC-Regel bleibt (60/20 min sind seit 08.10.2026 weg): nie zwei Puls-Starts derselben ID gleichzeitig — wie ap_verteilung (abstand_id_min + 2)
+    gap_pc = float(zeiten.get("abstand_id_min") or 3) + 2
+    gap_i, gap_f = max(gap_i, gap_pc), max(gap_f, gap_pc)
     bis, jm = float(ap_start_bis(zeiten)), float(jetzt_min)
     kommend = [x for x in plaene or () if str(x.get("plan_id")) != pid and x.get("start_min") is not None and float(x["start_min"]) >= jm]
     eigen = [(float(x["start_min"]), x.get("firma")) for x in kommend if str(x.get("user_id")) == u]
