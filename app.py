@@ -18004,7 +18004,82 @@ def _ap_zahl(x):
     return f if f == f and f not in (float("inf"), float("-inf")) else None
 
 
-def ap_werte_pruefen(plan, body, jetzt=None):
+AP_START_HAND_VORLAUF_MIN = 2       # Startzeit von Hand frühestens jetzt + 2 min (Finn 08.10.2026: Pläne selbst vorziehen)
+
+
+def ap_start_zeit(roh, jetzt, tz=None):
+    """REIN RECHNEND: start_um aus dem Body → (datetime UTC, None) oder (None, Klartext). „HH:MM" = Dubai, HEUTE (kein Sprung auf
+    morgen — liegt die Zeit vorbei, ist das ein Fehler); sonst ISO."""
+    t = str(roh or "").strip()
+    if not t:
+        return None, "start_um fehlt — HH:MM (Dubai) oder ISO"
+    m = re.fullmatch(r"(\d{1,2}):(\d{2})", t)
+    if m:
+        h, mi = int(m.group(1)), int(m.group(2))
+        if h > 23 or mi > 59:
+            return None, "start_um = HH:MM (00:00–23:59, Dubai)"
+        z = jetzt.astimezone(_ap_tz(tz or AP_7T_TZ))
+        d = datetime(z.year, z.month, z.day, h, mi, tzinfo=z.tzinfo)
+        if d <= jetzt:
+            return None, f"Startzeit {t} (Dubai) liegt schon vorbei"
+        return d.astimezone(timezone.utc), None
+    d = _ap_ts(t)
+    if d is None:
+        return None, "start_um = HH:MM (Dubai) oder ISO"
+    return d.astimezone(timezone.utc), None
+
+
+def ap_start_hand_pruefen(plan_id, neu_min, plaene, starts, id_fest, jetzt_min, laufzeit_min=None, abstand_firma=None, zeit=None):
+    """REIN RECHNEND (Startzeit per Klick, Finn 08.10.2026: Pläne selbst vorziehen; Vertrag Master/Slave 5): darf Plan plan_id auf
+    Minute neu_min (ab 00:00 deutscher Zeit, wie der Stand) starten? plaene = _ap_stand_plaene (heute geplant, alle IDs), starts =
+    stand.starts_heute [{user_id, firma, start, richtung}], id_fest = ap_id_fest. Regeln: frühestens jetzt + AP_START_HAND_VORLAUF_MIN,
+    nur innerhalb des Planer-Tages; RICHTUNGSSCHUTZ — keine Gegenrichtung derselben ID × Firma, die läuft (id_fest „läuft gerade") oder
+    als Plan/Start näher als laufzeit_min (Standard AP_VERTEIL_GEGEN_MIN) liegt; FIRMEN-ABSTAND — kein Plan/Start einer ANDEREN ID
+    derselben Firma näher als abstand_firma (zeiten.abstand_firma_min, sonst AP_FIRMA_ABSTAND_MIN, wie da88e68).
+    zeit = Minute → Text für die Meldung (Route: Dubai-Uhrzeit), sonst deutsche Zeit.
+    → (None, None) oder (Klartext, vorschlag_min | None) mit der nächsten freien Minute ab dem Wunsch."""
+    zt = zeit or (lambda m: _ap_hhmm_txt(m) + " dt")
+    p = plan_id if isinstance(plan_id, dict) else next((x for x in plaene or () if str(x.get("plan_id")) == str(plan_id)), None)
+    if not p:
+        return "Startzeit ändern geht nur für geplante Pläne", None
+    plan_id = p.get("plan_id")
+    u, f, r = str(p["user_id"]), p["firma"], p.get("richtung")
+    lz = float(laufzeit_min or AP_VERTEIL_GEGEN_MIN)
+    gap = float(abstand_firma or AP_FIRMA_ABSTAND_MIN)
+    ab = float(jetzt_min) + AP_START_HAND_VORLAUF_MIN
+    gegen = {"buy": "sell", "sell": "buy"}.get(r)
+    fest = (id_fest or {}).get(f"{u}|{f}") or {}
+    anders = [(float(x["start_min"]), x) for x in plaene or () if str(x.get("plan_id")) != str(plan_id) and x.get("start_min") is not None]
+    st = [(float(x["start"]), x) for x in starts or () if x.get("start") is not None]
+
+    def grund(m):
+        if m < ab:
+            return f"Startzeit zu früh — frühestens {AP_START_HAND_VORLAUF_MIN} min ab jetzt"
+        if m >= 24 * 60:
+            return "Startzeit liegt nach dem Planer-Tag (00:00 deutsche Zeit)"
+        # ein laufender Gegen-Trade blockiert nur innerhalb seiner Laufzeit ab jetzt (Start morgen früh: nicht mehr)
+        if gegen and fest.get("richtung") == gegen and fest.get("durch") == "läuft gerade" and str(fest.get("plan_id")) != str(plan_id) \
+                and m - float(jetzt_min) < lz:
+            return f"Richtungsschutz: bei dieser ID und Firma läuft gerade {AP_RICHTUNG_TXT[gegen]}"
+        for s, x in anders + st:
+            if str(x.get("user_id")) == u and x.get("firma") == f and gegen and x.get("richtung") == gegen and abs(s - m) < lz:
+                return f"Richtungsschutz: {AP_RICHTUNG_TXT[gegen]} derselben ID und Firma um {zt(s)} — näher als {lz:.0f} min"
+        for s, x in anders + st:
+            if str(x.get("user_id")) != u and x.get("firma") == f and abs(s - m) < gap:
+                return f"Firmen-Abstand: andere ID bei derselben Firma um {zt(s)} — mindestens {gap:.0f} min Abstand"
+        return None
+    g = grund(float(neu_min))
+    if not g:
+        return None, None
+    m = int(max(float(neu_min), ab) + 0.999)
+    while m < 24 * 60:
+        if not grund(float(m)):
+            return g, m
+        m += 1
+    return g, None
+
+
+def ap_werte_pruefen(plan, body, jetzt=None, start=None):
     """REIN RECHNEND (testbar): TP/SL/Größe eines geplanten Trades von Hand (Finn 08.10.2026, Mini-Popup; Vertrag Master/Slave 5).
     plan = trade_plans-Zeile {status, start_um_gestartet_at, started_at, orbit_gesendet_at, route, master_symbol(_root), master_tp,
     master_sl, master_contracts, notes}; body = {tp_usd?, sl_usd?, groesse?}. Futures (Route nicht in AP_CFD_ROUTEN) = ganze Kontrakte ≥ 1,
@@ -18052,27 +18127,59 @@ def ap_werte_pruefen(plan, body, jetzt=None):
             g = int(g)
         upd["master_contracts"] = g
         txt.append(f"Größe {de(_wd_num(plan.get('master_contracts')))} → {de(float(g))} {einheit}")
+    if start:
+        # start = {iso, alt_txt, neu_txt} — schon geprüft (ap_start_zeit + ap_start_hand_pruefen), hier nur setzen + Notes
+        upd["start_um"] = start["iso"]
+        txt.append(f"Start {start.get('alt_txt') or '–'} → {start.get('neu_txt')}")
     if not upd:
-        return None, None, "nichts zu ändern — tp_usd, sl_usd oder groesse angeben"
+        return None, None, "nichts zu ändern — tp_usd, sl_usd, groesse oder start_um angeben"
     z = (jetzt or datetime.now(timezone.utc)).astimezone(_ap_tz(AP_7T_TZ))
     zeile = f"✎ Hand {z.strftime('%d.%m %H:%M')}: " + " · ".join(txt)
     upd["notes"] = (str(plan.get("notes") or "").rstrip() + "\n" + zeile).strip()
     neu = {"master_tp": _wd_num(plan.get("master_tp")), "master_sl": _wd_num(plan.get("master_sl")),
            "master_contracts": _wd_num(plan.get("master_contracts"))}
-    neu.update({k: v for k, v in upd.items() if k != "notes"})
+    neu.update({k: v for k, v in upd.items() if k not in ("notes", "start_um")})
     return upd, {"plan_id": str(plan.get("id") or ""), "tp_usd": neu["master_tp"], "sl_usd": neu["master_sl"],
-                 "groesse": neu["master_contracts"], "einheit": einheit}, None
+                 "groesse": neu["master_contracts"], "einheit": einheit, "start_um": upd.get("start_um") or plan.get("start_um")}, None
 
 
 def _ap_werte_setzen(pid, body, admin, uid):
     """aktion „werte" (08.10.2026): Admin alle Pläne, sonst nur eigene. Schreiben mit Guard in derselben Anfrage (planned, nichts
     gestartet/gesendet) — sonst 409. Bestätigung (auto_bestaetigt_at) bleibt unberührt."""
     rows = sb_select("trade_plans", {"select": "id,user_id,status,route,master_symbol,master_symbol_root,master_tp,master_sl,"
-                                               "master_contracts,notes,start_um_gestartet_at,started_at,orbit_gesendet_at", "id": f"eq.{pid}"})
+                                               "master_contracts,notes,start_um,start_um_gestartet_at,started_at,orbit_gesendet_at,"
+                                               "master_firm,richtung", "id": f"eq.{pid}"})
     plan = rows[0] if rows else None
     if plan and not admin and str(plan.get("user_id")) != str(uid):
         return jsonify({"ok": False, "msg": "nur eigene Pläne"}), 403
-    upd, antwort, fehler = ap_werte_pruefen(plan, body)
+    start = None
+    if plan and "start_um" in body:
+        # STARTZEIT PER KLICK (08.10.2026, Vertrag Slave 5): ≥ jetzt + 2 min, Richtungsschutz, Firmen-Abstand — gegen den Live-Stand
+        jetzt = datetime.now(timezone.utc)
+        dt, fehler = ap_start_zeit(body.get("start_um"), jetzt)
+        if fehler:
+            return jsonify({"ok": False, "msg": fehler}), 400
+        reg = (sb_select("auto_plan_regeln", {"select": "*", "id": "eq.1"}) or [None])[0]
+        if not reg:
+            return jsonify({"ok": False, "msg": "auto_plan_regeln fehlt"}), 503
+        # Stand des TAGES, an dem der neue Start liegt (Planer-Tag = deutsche Zeit) — auch Pläne von morgen (Nachtlauf)
+        stand = _ap_stand_laden(reg, jetzt, tag=dt.astimezone(_ap_tz(AP_TZ_TAG)).strftime("%Y-%m-%d"))
+        neu_min = (dt - stand["mitternacht"]).total_seconds() / 60.0
+        dubai = lambda d: d.astimezone(_ap_tz(AP_7T_TZ)).strftime("%H:%M") if d else None
+        plaene_tag = _ap_stand_plaene(stand)
+        ziel = next((x for x in plaene_tag if str(x.get("plan_id")) == pid), None) or {
+            "plan_id": pid, "user_id": str(plan.get("user_id")), "richtung": plan.get("richtung"),
+            "firma": ap_firma_key(stand.get("firmen") or [], plan.get("master_firm"))}   # Plan liegt bisher an einem anderen Tag
+        fehler, vorschlag = ap_start_hand_pruefen(ziel, neu_min, plaene_tag, stand["starts_heute"], stand["id_fest"],
+                                                 stand["jetzt_min"], (stand.get("param") or {}).get("laufzeit_min"),
+                                                 (stand.get("zeiten") or {}).get("abstand_firma_min"),
+                                                 zeit=lambda m: dubai(stand["mitternacht"] + timedelta(minutes=float(m))))
+        if fehler:
+            v = stand["mitternacht"] + timedelta(minutes=vorschlag) if vorschlag is not None else None
+            return jsonify({"ok": False, "msg": fehler + (f" — nächste freie Zeit {dubai(v)} (Dubai)" if v else ""),
+                            "vorschlag": v.astimezone(timezone.utc).isoformat() if v else None, "vorschlag_dubai": dubai(v)}), 400
+        start = {"iso": dt.isoformat(), "alt_txt": dubai(_ap_ts(plan.get("start_um"))), "neu_txt": dubai(dt)}
+    upd, antwort, fehler = ap_werte_pruefen(plan, body, start=start)
     if fehler:
         return jsonify({"ok": False, "msg": fehler}), 404 if fehler == "Plan nicht gefunden" else 400
     guard = {"id": f"eq.{pid}", "status": "eq.planned", "start_um_gestartet_at": "is.null", "started_at": "is.null", "orbit_gesendet_at": "is.null"}

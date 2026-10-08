@@ -39,7 +39,8 @@ def main():
     upd, a, err = P(fut, {"tp_usd": 4000, "sl_usd": None, "groesse": 3}, jetzt)
     check(err is None and upd["master_tp"] == 4000 and upd["master_sl"] is None and upd["master_contracts"] == 3,
           f"Futures: TP 4.000, ohne SL, 3 Kontrakte ({upd}, {err})")
-    check(a == {"plan_id": PID, "tp_usd": 4000, "sl_usd": None, "groesse": 3, "einheit": "NQ"}, f"Antwort-Vertrag ({a})")
+    check(a == {"plan_id": PID, "tp_usd": 4000, "sl_usd": None, "groesse": 3, "einheit": "NQ", "start_um": None},
+          f"Antwort-Vertrag, seit 08.10.2026 mit start_um ({a})")
     check(upd["notes"].startswith("Auto-Planer · Etappe") and upd["notes"].endswith("✎ Hand 08.10 03:55: TP 3.600 → 4.000 · SL 2.000 → ohne · Größe 2 → 3 NQ"),
           f"Notes-Zeile angehängt, Dubai-Zeit ({upd['notes'].splitlines()[-1]})")
     check(set(upd) == {"master_tp", "master_sl", "master_contracts", "notes"} and "auto_bestaetigt_at" not in upd,
