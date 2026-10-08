@@ -42142,7 +42142,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1372'
+  const OS_TAB_BUILD = '2026-09-22.1373'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -46187,6 +46187,12 @@
    * → 'neu' | 'tagesende' | false */
   async function sfNeuEinplanen(plan, grund, hand){
     const f = sfFlag(plan) || {}
+    // VERFALLEN (08.10.2026, Prüfer Slave 2): Auto-Plan eines früheren Tages, nie gesendet — der Nachtlauf plant das Konto neu (app.py
+    // ap_plan_verfallen); „↻ Erneut versuchen" würde ihn NEBEN den Ersatzplan legen (zwei Trades auf einem Konto) → nicht neu einplanen
+    if(plan && plan.autoPlan && plan.startUm && !plan.startedAt && !plan.orbitGesendetAt && sfTagDt(plan.startUm) < sfTagDt(new Date().toISOString())){
+      if(typeof atToast === 'function') atToast(`„${plan.masterName || 'Plan'}" ist verfallen (Plan vom ${sfTagDt(plan.startUm)}, nie gesendet) — der Nachtlauf plant das Konto neu. Nicht neu gestartet.`, 'end')
+      return false
+    }
     // NACHHOLEN MIT REGELN (08.10.2026, Master: Mikes PC offline — „kommt der PC wieder, sollen seine verpassten Pläne automatisch sauber
     // neu eingeplant werden … nicht still verfallen und nicht alle auf einmal starten"): von selbst (sfTick) nicht mehr jetzt + 2–6 min
     // Zufall, sondern das Backend sucht die erste Minute ab jetzt + 2–4 min mit Richtungsschutz, Firmen-Abstand, Abstand je ID

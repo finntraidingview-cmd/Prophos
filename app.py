@@ -16399,6 +16399,27 @@ def ap_letzter_trade_geblasen(regel, balance, plaene_konto, bal_stand=None):
     return None
 
 
+def ap_plan_verfallen(p, grenze, jetzt=None):
+    """REIN RECHNEND (08.10.2026, Master: liegengebliebene Auto-Pläne — Jacob 72c2a073/1429b717, Chris 840c8097): ist p ein Auto-Plan,
+    der nie gesendet wurde und dessen Start VOR `grenze` (und vor `jetzt`) liegt? (planned, auto_plan, ohne started_at/orbit_gesendet_at.)
+    Solche Pläne blockieren das Konto im Planer nicht mehr (ap_planen) und lassen sich nicht mehr „neu starten" (_ap_neu_starten,
+    sfNeuEinplanen) — sonst liefen der Ersatzplan des Nachtlaufs und die Leiche nebeneinander auf einem Konto. Handpläne nie."""
+    if p.get("status") != "planned" or p.get("auto_plan") is not True or p.get("started_at") or p.get("orbit_gesendet_at"):
+        return False
+    t = _ap_ts(p.get("start_um"))
+    return bool(t) and t < grenze and (jetzt is None or t < jetzt)
+
+
+def ap_verfallen_grenze(jetzt, mitternacht, tz, start_bis_min):
+    """REIN RECHNEND: Grenze für ap_plan_verfallen im Planer-Lauf für den Tag ab `mitternacht`. Pläne früherer Tage sind tot; ein HEUTIGER
+    Plan erst, wenn das heutige Start-Fenster (start_bis) zu ist — vorher holt sfTick ihn noch nach (Prüfer Slave 2: ein Hand-Lauf für
+    morgen am Nachmittag darf heutige, noch startbare Pläne nicht übergehen). Der Nachtlauf (01:30 Dubai = 23:30 dt, also noch „heute")
+    sieht die heutigen Leichen dadurch als tot."""
+    h = jetzt.astimezone(tz)
+    heute0 = datetime(h.year, h.month, h.day, tzinfo=tz)
+    return mitternacht if jetzt >= heute0 + timedelta(minutes=float(start_bis_min)) else min(mitternacht, heute0)
+
+
 def ap_richtung_fest_plan(p, tag, tz):
     """REIN RECHNEND (07.10.2026, Richtungsschutz nur gleichzeitig): legt Plan p die Richtung seiner ID+Firma für den Tag `tag`
     (deutsches Datum) fest? Ja, wenn er läuft (open) oder am selben Tag geplant ist (planned_for bzw. Start in dt) — ohne
@@ -16479,11 +16500,24 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
             and not p.get("start_um_gestartet_at") and not p.get("hand_werte_at")   # Werte von Hand → bleibt stehen (08.10.2026)
     konten = _ap_konten_laden({"user_id": in_uids, "order": "id.asc",
                                   "account_type": "in.(" + ",".join(AP_TYPEN) + ")"})
-    plaene = [p for p in _ap_plaene_mit_hand({"select": "id,user_id,master_account_id,master_firm,status,richtung,master_tp,"
-                                                           "ended_at,completed_at,auto_plan,auto_bestaetigt_at,start_um_gestartet_at,"
-                                                           "start_um,planned_for,mt5_baseline->final", "order": "id.asc",
-                                                 "user_id": in_uids, "created_at": "gte." + (jetzt - timedelta(days=30)).isoformat()})
-              if not _vorschlag(p)]
+    # LIEGENGEBLIEBENE AUTO-PLÄNE (08.10.2026, Master: Jacob 72c2a073 The5%ers + 1429b717 FundingPips seit 07.10., Chris 840c8097):
+    # ein Auto-Plan, der an seinem Tag nie gesendet wurde (Start-Fehler bis Tagesende, PC aus …), blieb auf planned liegen — und
+    # „hat schon einen geplanten/laufenden Plan" ließ das Konto in jedem folgenden Lauf aus, obwohl die Karte „der Nachtlauf plant neu"
+    # verspricht. Jetzt zählt so ein Plan (auto_plan, planned, ohne started_at/orbit_gesendet_at, Start VOR dem geplanten Tag) hier
+    # nicht mehr; er bleibt unverändert stehen (kein Datenverlust, keine P&L-Zeile) und startet nie mehr von selbst — Claim gesetzt,
+    # sfTick nimmt nur Pläne des eigenen Tages. Handpläne bleiben, wie sie sind (Finns Entscheidung). Heutige Pläne erst nach start_bis
+    # (ap_verfallen_grenze) — vorher holt sfTick sie noch nach.
+    _grenze = ap_verfallen_grenze(jetzt, mitternacht, tz, ap_start_bis(zeiten))
+
+    def _liegengeblieben(p):
+        return ap_plan_verfallen(p, _grenze, jetzt)
+    roh_plaene = _ap_plaene_mit_hand({"select": "id,user_id,master_account_id,master_firm,status,richtung,master_tp,"
+                                                "ended_at,completed_at,auto_plan,auto_bestaetigt_at,start_um_gestartet_at,"
+                                                "start_um,planned_for,started_at,orbit_gesendet_at,mt5_baseline->final", "order": "id.asc",
+                                      "user_id": in_uids, "created_at": "gte." + (jetzt - timedelta(days=30)).isoformat()})
+    verfallen = [{"plan_id": p.get("id"), "user_id": p.get("user_id"), "konto_id": p.get("master_account_id"), "firma": p.get("master_firm"),
+                  "start_um": p.get("start_um")} for p in roh_plaene if _liegengeblieben(p)]
+    plaene = [p for p in roh_plaene if not _vorschlag(p) and not _liegengeblieben(p)]
     archiv = _ap_archiviert()
     echo_bal, dup_bal = _ap_balance_karten()
     namen, ausgeblendet = _ap_namen()   # direkt aus der Nutzerliste — _wd_personen braucht einen Request (Nachtlauf hat keinen)
@@ -16745,6 +16779,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
                         headers=_sb_headers("return=minimal"), timeout=(5, 30))
         _sb_pruefen(r)
     erg = {"ok": True, "tag": tag, "quelle": quelle, "trocken": bool(trocken), "at": jetzt.isoformat(), "seed": seed,
+           "verfallen": verfallen,   # liegengebliebene Auto-Pläne früherer Tage, die das Konto nicht mehr blockieren (08.10.2026)
            "fingerabdruck": fp, "geplant": geplant, "ausgelassen": ausgelassen, "netto_max_abs": netto_max,
            "band_pct": param["zielband_pct"], "auto_start": param["auto_start"], "einsatz": einsatz_info, "id_misch": id_misch,
            "firma_misch": firma_misch, "misch_fenster": misch_fenster}
@@ -20465,6 +20500,14 @@ def _ap_neu_starten(pid):
     Admin per RLS nicht selbst ändern darf (eigene macht der Tab direkt, sfNeuEinplanen): Startzeit jetzt + 1–3 min (Zufall), Claim
     zurück — nur solange nichts gesendet ist (Guard: planned, started_at/orbit_gesendet_at leer). Den Start macht der PC-Tab der ID
     mit allen Prüfungen; er gleicht seine Pläne alle 2 min ab. mt5_baseline.start_fehler → status 'neu' (Anzeige im Planer)."""
+    # VERFALLEN (08.10.2026, Prüfer Slave 2): ein Auto-Plan eines früheren Tages, der nie gesendet wurde, zählt im Planer nicht mehr —
+    # der Nachtlauf plant das Konto neu. „Neu starten" würde ihn NEBEN den Ersatzplan legen (zwei Trades auf einem Konto) → ablehnen.
+    alt_p = (sb_select("trade_plans", {"select": "id,status,auto_plan,start_um,started_at,orbit_gesendet_at", "id": f"eq.{pid}"}) or [None])[0]
+    _tz = _ap_tz(AP_TZ_TAG)
+    _h = datetime.now(timezone.utc).astimezone(_tz)
+    if alt_p and ap_plan_verfallen(alt_p, datetime(_h.year, _h.month, _h.day, tzinfo=_tz)):
+        return jsonify({"ok": False, "verfallen": True,
+                        "msg": "verfallen — der Plan war für einen früheren Tag und wurde nie gesendet; der Nachtlauf plant das Konto neu"}), 409
     neu = datetime.now(timezone.utc) + timedelta(seconds=60 + random.random() * 120)
     rows = sb_update("trade_plans", {"id": f"eq.{pid}", "status": "eq.planned", "started_at": "is.null", "orbit_gesendet_at": "is.null"},
                      {"start_um": neu.isoformat(), "start_um_gestartet_at": None})
