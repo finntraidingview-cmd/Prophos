@@ -15514,7 +15514,10 @@ def ap_bal_vorher_konto(p, acc):
     +14 € netto): trägt der Plan weder Start- noch Endbalance (tv.balance_start, balance_start, final.balance_end/master_balance —
     z. B. Orbit V1 mit Duplikum-Hedge), gilt die Konto-Lesung accounts.tv_balance als Balance vor dem Trade, NUR wenn tv_balance_at vor
     dem Start liegt. → Plan mit tv.balance_start (Kopie) oder der Plan unverändert; ohne passende Lesung bleibt er „ohne €" (nicht raten).
-    Gilt für heute_beendet (ap_hb_zeile) und die Hypo-Bilanz gleich — beide über hypo_bilanz_zeile."""
+    Gilt für heute_beendet (ap_hb_zeile) und die Hypo-Bilanz gleich — beide über hypo_bilanz_zeile.
+    NACHSCHÄRFUNG (Prüfer 08.10.2026): die Lesung muss auch NACH dem Ende des vorigen Trades desselben Kontos liegen — sonst ist es nicht die
+    Balance direkt vor DIESEM Trade. Dafür trägt acc["_plaene"] [(plan_id, start, ende)] aller Pläne des Kontos (_ap_konto_plaene); fehlt
+    die Liste (nicht lesbar) oder hat ein voriger Trade kein Ende → kein Rückfall."""
     acc = acc or {}
     base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
     tv = base.get("tv") if isinstance(base.get("tv"), dict) else {}
@@ -15525,7 +15528,30 @@ def ap_bal_vorher_konto(p, acc):
     kb, kb_at, st0 = _wd_num(acc.get("tv_balance")), _ap_ts(acc.get("tv_balance_at")), _ap_ts(p.get("started_at"))
     if not (kb and kb > 0 and kb_at is not None and st0 is not None and kb_at <= st0):
         return p
+    plaene = acc.get("_plaene")
+    if not isinstance(plaene, list):
+        return p                                   # vorige Trades des Kontos unbekannt → nicht raten
+    for pid, vs, ve in plaene:
+        vs_ts = _ap_ts(vs)
+        if str(pid) == str(p.get("id")) or vs_ts is None or vs_ts >= st0:
+            continue                               # nur Trades, die VOR diesem gestartet sind
+        ve_ts = _ap_ts(ve)
+        if ve_ts is None or ve_ts > kb_at:
+            return p                               # voriger Trade ohne Ende oder endete nach der Lesung → Lesung ist älter
     return dict(p, mt5_baseline=dict(base, tv=dict(tv, balance_start=kb)))
+
+
+def _ap_konto_plaene(kids):
+    """{konto_id: [(plan_id, start, ende)]} aller gestarteten Pläne der Konten (alle Wege, auch Hand) — für ap_bal_vorher_konto.
+    Fehler fliegen durch; der Aufrufer lässt _plaene dann weg (→ kein Rückfall)."""
+    out = {}
+    kids = sorted({str(k) for k in kids if k})
+    for j in range(0, len(kids), 150):
+        for r in _sb_all("trade_plans", {"select": "id,master_account_id,started_at,ended_at,completed_at,mt5_baseline->final->>at",
+                                         "master_account_id": "in.(" + ",".join(kids[j:j + 150]) + ")", "started_at": "not.is.null"}):
+            ende = r.get("ended_at") or r.get("completed_at") or r.get("at")
+            out.setdefault(str(r.get("master_account_id")), []).append((str(r.get("id")), r.get("started_at"), ende))
+    return out
 
 
 def hypo_bilanz_zeile(p, acc, firmen, lauf_satz, kw_heute, disp):
@@ -15595,6 +15621,12 @@ def admin_hypo_bilanz():
         for i in range(0, len(ids), 80):
             for a in sb_select("accounts", {"select": "id,name,firm,account_type,external_id,tv_balance,tv_balance_at", "id": f"in.({','.join(ids[i:i + 80])})"}):
                 accs[str(a["id"])] = a
+        try:                                       # Pläne je Konto für ap_bal_vorher_konto (Lesung nach dem vorigen Trade)
+            for k, liste in _ap_konto_plaene(accs.keys()).items():
+                if k in accs:
+                    accs[k]["_plaene"] = liste
+        except Exception as e:
+            print(f"[hypo-bilanz] ⚠️ Konto-Pläne: {type(e).__name__}: {e}", flush=True)
         reg = (sb_select("auto_plan_regeln", {"select": "regeln", "id": "eq.1"}) or [{}])[0]
         firmen = (reg.get("regeln") or {}).get("firmen") or []
         # Satz je (Tag, Konto) aus den echten Läufen (kein Probelauf); spätester Lauf des Tages gewinnt
@@ -15786,6 +15818,12 @@ def _ap_hb_laden(firmen, jetzt=None):
         except requests.exceptions.HTTPError:
             rows = _sb_all("accounts", dict(q, select="id,name,firm,account_type,external_id"))   # Spalten fehlen → ohne
         accs.update({str(a["id"]): a for a in rows if a.get("id")})
+    try:                                           # Pläne je Konto für „Balance vorher aus der Konto-Lesung" (ap_bal_vorher_konto)
+        for k, liste in _ap_konto_plaene(accs.keys()).items():
+            if k in accs:
+                accs[k]["_plaene"] = liste
+    except Exception as e:
+        print(f"[auto-plan] ⚠️ heute beendet/Konto-Pläne: {type(e).__name__}: {e}", flush=True)
     plaene = [p for p in plaene if (p.get("konto_typ") or (accs.get(str(p.get("master_account_id"))) or {}).get("account_type")) in AP_TYPEN]
     # Archiv-Grund je Konto (frühester Eintrag mit Grund, wie ap_sieben_tage) — nicht lesbar → ohne
     arch, arch_alle = {}, set()   # arch_alle: jeder wahre Eintrag wie _ap_archiviert (bal_nach-Hinweis nicht für archivierte Konten)

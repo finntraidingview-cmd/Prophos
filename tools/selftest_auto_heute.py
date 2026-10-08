@@ -43,7 +43,7 @@ def lade():
                                 "AP_HB_CACHE_S", "AP_HB_BLOW_ANTEIL", "AP_HB_ECHT_QUELLEN", "_ap_hb_cache", "_ap_hb_lock")]
     teile += [block(f) for f in ("_wd_num", "lt_pl_balance", "_ap_norm", "ap_regel_finden", "ap_groesse", "ap_kw_param", "_ap_kw_kauf",
                                  "_ap_kw_wachsen", "_ap_kw_lock", "ap_kontowert", "_ap_ende4", "_ap_tz", "_ap_ts", "ap_bal_vorher_konto", "hypo_bilanz_zeile",
-                                 "ap_hb_ende", "ap_hb_gelesen", "ap_hb_zeile", "_ap_hb_laden", "ap_heute_beendet_gemerkt")]
+                                 "ap_hb_ende", "ap_hb_gelesen", "ap_hb_zeile", "_ap_konto_plaene", "_ap_hb_laden", "ap_heute_beendet_gemerkt")]
     exec("\n".join(teile), ns)
     return ns
 
@@ -251,7 +251,8 @@ def main():
     vorher = len(aufrufe["anfragen"])
     ns["ap_heute_beendet_gemerkt"](FIRMEN, jetzt)
     ns["ap_heute_beendet_gemerkt"](FIRMEN, jetzt)
-    check(len(aufrufe["anfragen"]) - vorher == 4, f"30-s-Merker: zweiter Abruf ohne DB ({len(aufrufe['anfragen']) - vorher} Anfragen)")
+    # 5 Anfragen je Laden (seit 08.10.2026 + Pläne je Konto für ap_bal_vorher_konto), der zweite Abruf kommt aus dem Merker
+    check(len(aufrufe["anfragen"]) - vorher == 5, f"30-s-Merker: zweiter Abruf ohne DB ({len(aufrufe['anfragen']) - vorher} Anfragen)")
 
     # ── Sicht wie offen[]/geplant[]: ap_delta_antwort filtert heute_beendet je ID (nachgebaute DB aus selftest_auto_delta)
     import selftest_auto_delta as sd
@@ -274,7 +275,7 @@ def main():
     # BALANCE VORHER AUS DER KONTO-LESUNG (Finn 08.10.2026 „Die Zahl stimmt doch nie"): Orbit V1/Duplikum ohne Start-/Endbalance fiel still
     # aus der Summe. Lesung am Konto VOR dem Start → Satz wie tv.balance_start (Tradeify 215 € / 4.500 $ = 0,0478); Lesung NACH dem Start → ohne €
     trd = {"id": "k-t9", "name": "150k Tradeify …0909", "firm": "Tradeify", "account_type": "challenge", "external_id": "TDFY-000909",
-           "tv_balance": 150000, "tv_balance_at": "2026-10-08T07:00:53+00:00"}
+           "tv_balance": 150000, "tv_balance_at": "2026-10-08T07:00:53+00:00", "_plaene": [("p-d1", "2026-10-08T07:14:26+00:00", None)]}
     pd = plan("p-d1", UA, "k-t9", "Tradeify", richtung="buy", status="completed", auto=False, pl=3570.0, quelle="duplikum", route="tvplus",
               start="2026-10-08T07:14:26+00:00", ende="2026-10-08T08:19:45+00:00", fin=None)
     zd = Z(pd, trd, FIRMEN, None, None, namen)
@@ -287,6 +288,16 @@ def main():
           f"Hypo-Bilanz rechnet dieselbe Regel: {hd['hypo_eur']} € = Kachel {zd['eur']} €")
     hd2 = H(pd, dict(trd, tv_balance_at="2026-10-08T09:00:00+00:00"), FIRMEN, None, 0.05, namen)
     check(hd2["satz_quelle"] == "heute", "Hypo-Bilanz: Lesung nach dem Start → wie bisher Rückfall „Satz heute\"")
+    # NACHSCHÄRFUNG (Prüfer 08.10.2026): Lesung muss NACH dem Ende des vorigen Trades desselben Kontos liegen
+    vor_nach = dict(trd, _plaene=trd["_plaene"] + [("p-v1", "2026-10-08T06:00:00+00:00", "2026-10-08T07:05:00+00:00")])
+    check(Z(pd, vor_nach, FIRMEN, None, None, namen)["eur"] is None and H(pd, vor_nach, FIRMEN, None, None, namen)["hypo_eur"] is None,
+          "voriger Trade endete NACH der Lesung (07:05 > 07:00) → ohne € (Kachel und Hypo-Bilanz)")
+    vor_vor = dict(trd, _plaene=trd["_plaene"] + [("p-v2", "2026-10-08T05:00:00+00:00", "2026-10-08T06:30:00+00:00")])
+    check(Z(pd, vor_vor, FIRMEN, None, None, namen)["eur"] == zd["eur"], "voriger Trade endete VOR der Lesung (06:30 < 07:00) → Satz wie ohne Vorgänger")
+    vor_offen = dict(trd, _plaene=trd["_plaene"] + [("p-v3", "2026-10-08T05:00:00+00:00", None)])
+    check(Z(pd, vor_offen, FIRMEN, None, None, namen)["eur"] is None, "voriger Trade ohne Ende → ohne € (nicht raten)")
+    ohne_liste = {k: v for k, v in trd.items() if k != "_plaene"}
+    check(Z(pd, ohne_liste, FIRMEN, None, None, namen)["eur"] is None, "Pläne des Kontos nicht gelesen → ohne € (nicht raten)")
 
     print(f"{len(f) - sum(f)}/{len(f)} ok")
     sys.exit(1 if sum(f) else 0)
