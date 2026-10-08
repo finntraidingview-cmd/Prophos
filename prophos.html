@@ -3655,8 +3655,6 @@
   /* Balance → Ziel im Radar (08.10.2026): Balken unter dem Endstand (Konto-Spalte) bzw. unter dem Live-P&L (Läuft), darunter „x % · Rest" */
   /* BALANCE → ZIEL BREIT (08.10.2026, Finn: „größer und cleaner", Logik wie die WD-Spanne): eigene Zeile unter der Radar-Zeile von
    * Richtung bis P&L — Blow links, Ziel rechts, Trade-Stück leuchtend mit P&L darüber, Balance unter dem Punkt */
-  #dashboard-view .wdl-z-bzm{display:block;grid-column:2 / -2;grid-row:2;min-width:0}
-  #dashboard-view .wdl-z.mit-bz{row-gap:2px}
   #dashboard-view .bzb{display:grid;grid-template-columns:auto minmax(80px,1fr) auto auto;align-items:center;column-gap:10px;min-width:0;font-variant-numeric:tabular-nums}
   #dashboard-view .bzb small{font-size:10.5px;font-weight:600;color:var(--sub-2);white-space:nowrap;line-height:1.2}
   #dashboard-view .bzb small i{font-style:normal;font-weight:500;margin-right:4px}
@@ -3753,9 +3751,6 @@
     #dashboard-view .wdl-tab{border:none;border-radius:var(--m-r-card,16px);box-shadow:var(--shadow-mob-card,0 1px 2px rgba(16,24,40,.05))}
     #dashboard-view .wdl-z, #dashboard-view .wdl-tab-konto .wdl-z{grid-template-columns:84px minmax(0,1fr) minmax(0,1fr) 88px;grid-template-areas:"wer wer wer pl" "ri mi mi zeit";column-gap:4px;row-gap:5px;padding:10px 12px;font-size:12px}
     #dashboard-view .wdl-z-konto{display:none}   /* Handy: kein Platz — Ergebnis-Wort zeigt den Blow */
-    #dashboard-view .wdl-z.mit-bz,#dashboard-view .wdl-tab-konto .wdl-z.mit-bz{grid-template-areas:"wer wer wer pl" "ri mi mi zeit" "bz bz bz bz"}   /* Balance → Ziel als eigene Zeile (08.10.2026) */
-    #dashboard-view .wdl-tab-konto .wdl-z-man.mit-bz{grid-template-areas:"wer wer wer pl" "mi mi mi zeit" "bz bz bz bz"}
-    #dashboard-view .wdl-z-bzm{grid-area:bz} #dashboard-view .wdl-z.mit-bz{row-gap:5px}   /* Handy: Balken über die volle Breite (Areas oben) */
     #dashboard-view .bzb{grid-template-columns:auto minmax(0,1fr) auto;column-gap:6px} #dashboard-view .bzb small{font-size:10px} #dashboard-view .bzb-txt{grid-column:1 / -1;justify-self:end;margin-top:-6px}
     #dashboard-view .wdl-z-lauf .wdl-z-pl{font-size:14px}
     #dashboard-view .wdl-z > .wdl-sp{gap:6px;padding:0 4px}
@@ -28547,7 +28542,6 @@
       const pl = c.querySelector('.wdl-z-pl .wdl-pl-m') || c.querySelector('.wdl-z-pl'); if(pl){ pl.textContent = P.txt; pl.style.color = P.farbe; pl.title = P.tip }
       const pk = c.querySelector('.wdl-sp-punkt'); if(pk){ pk.style.display = pos == null ? 'none' : ''; if(pos != null) pk.style.left = pos.toFixed(2) + '%'; pk.style.background = P.farbe }
       const spEl = c.querySelector('.wdl-sp'); if(spEl && sp) spEl.title = wdlEchoSpTip(t, sp, pkt)
-      wdlBalZielNach(c, t, null)
     }
   }
   // Leiste als HTML — bekommt alle Werte als Parameter (sp = {links, rechts, ein, art}, kurs, Punktfarbe, Tooltip) und hängt an keinem
@@ -28698,14 +28692,7 @@
       // Punkt der Spanne mitziehen (30.09.2026): Lage des Kurses zwischen Liq/SL und TP, Farbe wie der P&L
       const pk = c.querySelector('.wdl-sp-punkt'), pos = pk ? wdlSpPos(wdlSpanne(t), kp) : null
       if(pk){ pk.style.display = pos == null ? 'none' : ''; if(pos != null) pk.style.left = pos.toFixed(2) + '%'; pk.style.background = T.plFarbe }
-      wdlBalZielNach(c, t, kp)
     }
-  }
-  // Breiten Balance-Balken der Läuft-Zeile mit dem Live-Stand neu zeichnen (08.10.2026) — nur wenn sich das HTML ändert
-  function wdlBalZielNach(c, t, kp){
-    const z = c.querySelector('.wdl-z-bzm'); if(!z) return
-    const h = wdlBalZiel(t, wdlBalZielIst(t, kp), (v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v))(t.balance_start))
-    if(h && z._bz !== h){ z.innerHTML = h; z._bz = h }
   }
   setInterval(wdlLiveTick, 2000)
   setInterval(() => { if(wdlAktiv()) wdlFusionLive() }, 2000)   // Fusion-P&L aus dem Copier-Status alle 2 s (01.10.2026)
@@ -28793,33 +28780,6 @@
     // seit .1141 Ergebnis-Wort in der Ergebnis-Spalte (Finn 07.10.2026: „links von Ereignis, da wo geblowt/Tageslimit steht …
     // nicht in den Namen reinpacken") — Stil wie wdlBlowErg, der Übergang steht im Tooltip
     return `<b class="wdl-bestanden" style="color:#15803d;white-space:nowrap" title="${WDL_UEBERGANG[typ]} · Balance ${de(bal)} ≥ Ziel ${de(ziel)} — sehr wahrscheinlich bestanden. Phase umstellen und neues Konto anlegen.">🎯 bestanden → ${WDL_ZIEL[typ]}</b>`
-  }
-  /* BALANCE → ZIEL IM RADAR (08.10.2026, Slave-Terminal 7 — Finn: „Mach allgemein bei Überprüfen, bei Manuelle Arbeit und bei Erledigt immer
-   * den Endstand dazu, also wo wir jetzt sind: am Ziel des Accounts oder am Blow. Nimm einfach den kleinen Zeitstrahl aus Admin →
-   * Trade-Planer. Bei Läuft auch: was der Trade gerade an Profit oder Verlust macht und wie nah wir am Ziel sind"). Derselbe Balken wie im
-   * Trade-Planer (window._pzBahnHtml). Nur Werte der Zeile (/admin/live-trades, alle IDs, keine neue Abfrage): Ist = übergeben (Endstand
-   * aus wdlBlowStand bzw. bei Läuft Balance vor dem Trade + Live-P&L), Ziel = ziel_usd (Ziel-Wache: Kernwerte/ziel_pct_konto), Boden =
-   * dasselbe Liq-Level wie wdlBlowStand (bei Soft-Breach der Konto-Boden), Start = Kontogröße wie die Zeile. Ohne Ziel (Funded, Winning
-   * Days) kein Balken. → HTML | '' */
-  // seit 08.10.2026 (breiter Balken) eine eigene Zeile unter Läuft/Überprüfen/Manuelle Arbeit/Erledigt (wdl-z-bzm) statt in Konto/P&L
-  function wdlBalZiel(t, ist, vor){
-    const b = wdlBlowStand(t), geblowt = !!(b && b.geblowt) || (t.status !== 'open' && wdlKontoWeg(t))
-    return (typeof window._balZielZeile === 'function' && t) ? window._balZielZeile(t, { ist, vor, uid: wdlUid(t), geblowt }) : ''
-  }
-  // Stand jetzt für den Balken: Läuft = Balance vor dem Trade + Live-P&L (Echo: MT5-pl_live), sonst der Endstand
-  function wdlBalZielIst(t, kp){
-    const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
-    if(t.status !== 'open') return wdlEndstand(t)
-    if(wdlIstEcho(t)) return n(t.balance_start) != null && n(t.pl_live) != null ? n(t.balance_start) + n(t.pl_live) : n(t.balance_start)
-    return wdlLive(t, kp).bal ?? n(t.balance_start)
-  }
-
-  // Endstand nach dem Trade für den Balken (wie die Konto-Spalte), sonst Start + P&L
-  function wdlEndstand(t){
-    const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
-    const b = wdlBlowStand(t); if(b && b.bal != null) return b.bal
-    const bs = n(t.balance_start), pl = n(t.pl_balance) ?? n(t.master_pl && t.master_pl.wert)
-    return bs != null && pl != null ? bs + pl : null
   }
   function wdlKontoZ(t){
     const b = wdlBlowStand(t)
@@ -29116,12 +29076,10 @@
         }
         zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
       }
-      // Balance → Ziel als eigene breite Zeile unter der Zeile (08.10.2026, Finn: „größer und cleaner") — Desktop und Handy gleich
-      const bzM = (art === 'lauf' || art === 'man' || art === 'pruef' || art === 'zu') ? wdlBalZiel(t, wdlBalZielIst(t, kp), num(t.balance_start)) : ''
       // Überprüfen-Zeilen sind ziehbar (08.10.2026, HTML5-Drag nach „Manuelle Arbeit"; Handler unten am Listen-Container)
-      return `<div class="wdl-z wdl-z-${art}${echo ? ' wdl-z-echo' : ''}${an ? ' is-aktiv' : ''}${bzM ? ' mit-bz' : ''}${extra ? ' ' + extra : ''}" style="--wdl-id:${wdlIdFarbe(t)}" data-wdl-trade="${escapeHtml(wdlTid(t))}"${art === 'pruef' ? ` draggable="true" data-wdl-drag="${escapeHtml(wdlTid(t))}"` : ''} title="${escapeHtml(tip)}">`
+      return `<div class="wdl-z wdl-z-${art}${echo ? ' wdl-z-echo' : ''}${an ? ' is-aktiv' : ''}${extra ? ' ' + extra : ''}" style="--wdl-id:${wdlIdFarbe(t)}" data-wdl-trade="${escapeHtml(wdlTid(t))}"${art === 'pruef' ? ` draggable="true" data-wdl-drag="${escapeHtml(wdlTid(t))}"` : ''} title="${escapeHtml(tip)}">`
         + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><i class="wdl-pf">${escapeHtml(wdlWeg(t))}</i><small data-wdl-konto="${escapeHtml(wdlTid(t))}" title="Konto ansehen">${escapeHtml(konto)}</small></span>`
-        + (art === 'man' ? '' : ri) + miZ + kontoZ + plZ + zeitZ + (bzM ? `<span class="wdl-z-bzm">${bzM}</span>` : '') + '</div>'   // Manuelle Arbeit ohne Richtung/Menge (08.10.2026) — die Notiz bekommt den Platz
+        + (art === 'man' ? '' : ri) + miZ + kontoZ + plZ + zeitZ + '</div>'   // Manuelle Arbeit ohne Richtung/Menge (08.10.2026) — die Notiz bekommt den Platz
     }
     // Gruppe = ein Kasten, oben einmal die Spaltenköpfe im selben Raster wie die Zeilen
     // mehr = Schlüssel für „Beendet" (30.09.2026, Finn sah die Echo-Sektion nicht — sie stand unter Orbits „Beendet · 42"): nur die
@@ -37902,7 +37860,7 @@
   /* BALANCE → ZIEL-BALKEN ALS BAUSTEIN (08.10.2026, Slave-Terminal 7 — Finn: „Mach allgemein bei Überprüfen, bei Manuelle Arbeit und bei
    * Erledigt immer den Endstand dazu, also wo wir jetzt sind: am Ziel des Accounts oder am Blow. Nimm einfach den kleinen Zeitstrahl aus
    * Admin → Trade-Planer. Bei Läuft auch"): die Rechnung stand bisher nur in planZeileHtml, jetzt hier — genutzt von planZeileHtml und
-   * den Radar-Zeilen (wdlBalZiel). a = { groesse, ziel, boden?, ist, tpUsd?, slUsd?, uid?, plL?, balVal? }. Ohne sinnvolles Ziel (über dem
+   * „Heute beendet“ (balZielZeile). a = { groesse, ziel, boden?, ist, tpUsd?, slUsd?, uid?, plL?, balVal? }. Ohne sinnvolles Ziel (über dem
    * Start, höchstens +30 %) → null. Kommentare zur Skala/Farbe siehe unten in der Funktion (unverändert übernommen). → { html, prozent, titel } */
   function pzBahnHtml(a){
     const de = v => Math.round(Number(v)).toLocaleString('de-DE')
@@ -37954,9 +37912,9 @@
       + `<b class="pz-bahn-pkt" style="left:${pIst.toFixed(1)}%;background:${idFarb}"></b></i>`
     return { html, prozent, titel }
   }
-  window._pzBahnHtml = pzBahnHtml   // Radar (wdlBalZiel) liegt in einem anderen Block
-  /* EINE ZEILE BALANCE → ZIEL aus einer /admin/live-trades-Zeile (08.10.2026, Slave-Terminal 7): gemeinsam für den Radar (wdlBalZiel) und
-   * „Heute beendet" (tplHeuteListeHtml über _tpl.lt) — keine zweite Implementierung. Ziel = ziel_usd (Ziel-Wache), Blow = Liq-Level wie
+  window._pzBahnHtml = pzBahnHtml
+  /* EINE ZEILE BALANCE → ZIEL aus einer /admin/live-trades-Zeile (08.10.2026, Slave-Terminal 7): für „Heute beendet"
+   * (tplHeuteListeHtml über _tpl.lt). Im Radar seit 08.10.2026 abends wieder raus (Finn: „voll hässlich … zwei Schritte zurück"). Ziel = ziel_usd (Ziel-Wache), Blow = Liq-Level wie
    * wdlBlowStand (bei Soft-Breach der Konto-Boden), Start = Kontogröße der Zeile; o = { ist, vor?, uid?, geblowt? }.
    * BREIT WIE DIE WD-SPANNE (08.10.2026, Finn: „Das Design ist so sehr schmal unter Konto … Wo ist der Account jetzt? Was hat der Trade
    * gemacht? Größer und cleaner. Spannend ist die Logik, wie es bei den laufenden Trades unter Winning Days ist"): Aufbau wie
@@ -42142,7 +42100,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1373'
+  const OS_TAB_BUILD = '2026-09-22.1374'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
