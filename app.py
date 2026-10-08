@@ -15662,12 +15662,13 @@ def _ap_hb_laden(firmen, jetzt=None):
     namen, aus = _ap_namen()
     roh = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_name,master_firm,route,richtung,status,auto_plan,master_pl,"
                                             "pl_quelle,konto_typ,started_at,ended_at,completed_at,"
-                                            "tv:mt5_baseline->tv,final:mt5_baseline->final,bstart:mt5_baseline->balance_start",
+                                            "tv:mt5_baseline->tv,final:mt5_baseline->final,bstart:mt5_baseline->balance_start,bn:mt5_baseline->bal_nach",
                                   "status": "in.(completed,review)", "or": f"(ended_at.gte.{ab_q},completed_at.gte.{ab_q})",
                                   "order": "started_at.asc"})
     plaene = []
     for p in roh:
-        p = dict(p, mt5_baseline={"tv": p.pop("tv", None), "final": p.pop("final", None), "balance_start": p.pop("bstart", None)})
+        p = dict(p, mt5_baseline={"tv": p.pop("tv", None), "final": p.pop("final", None), "balance_start": p.pop("bstart", None),
+                                  "bal_nach": p.pop("bn", None)})
         e = _ap_ts(ap_hb_ende(p))
         if e is not None and e >= ab and str(p.get("user_id")) not in aus:
             plaene.append(p)
@@ -15676,7 +15677,7 @@ def _ap_hb_laden(firmen, jetzt=None):
     for j in range(0, len(kids), 150):
         q = {"id": "in.(" + ",".join(kids[j:j + 150]) + ")"}
         try:
-            rows = _sb_all("accounts", dict(q, select="id,name,firm,account_type,external_id,ziel_pct_konto,ziel_erreicht_at"))
+            rows = _sb_all("accounts", dict(q, select="id,name,firm,account_type,external_id,ziel_pct_konto,ziel_erreicht_at,tv_balance_at"))
         except requests.exceptions.HTTPError:
             rows = _sb_all("accounts", dict(q, select="id,name,firm,account_type,external_id"))   # Spalten fehlen → ohne
         accs.update({str(a["id"]): a for a in rows if a.get("id")})
@@ -15737,6 +15738,18 @@ def _ap_hb_laden(firmen, jetzt=None):
                     zeilen[i] = zeile(plaene[i], s)
         except Exception as e:
             print(f"[auto-plan] ⚠️ heute beendet/Kontowerte: {type(e).__name__}: {e}", flush=True)
+    # BALANCE NACH ECHO-TRADE FEHLT (08.10.2026, Master: „Braucht dich" im Admin auch für fremde IDs): der PC-Tab der ID schreibt nach 15 min
+    # ohne Lesung mt5_baseline.bal_nach {ok:false, msg, tun, versuche} (prophos.html ebnTick) — hier nur für den jüngsten Trade des Kontos und
+    # nur, solange die Konto-Balance noch älter ist als das Ende (sonst ist sie inzwischen live und die Zeile erledigt)
+    for i, p in enumerate(plaene):
+        k = str(p.get("master_account_id") or "")
+        bn = (p.get("mt5_baseline") or {}).get("bal_nach")
+        zeilen[i]["konto_id"] = k or None
+        if not (isinstance(bn, dict) and bn.get("ok") is False) or str(ap_hb_ende(p) or "") < letzt.get(k, ""):
+            continue
+        ende, bal_at = _ap_ts(ap_hb_ende(p)), _ap_ts((accs.get(k) or {}).get("tv_balance_at"))
+        if ende is not None and (bal_at is None or bal_at < ende):
+            zeilen[i]["bal_nach"] = {f: bn.get(f) for f in ("msg", "code", "tun", "versuche", "at") if bn.get(f) is not None}
     zeilen.sort(key=lambda r: str(r.get("ende") or ""), reverse=True)
     return zeilen, ab.isoformat()
 

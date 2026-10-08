@@ -22217,9 +22217,12 @@
         // 4 s → 1,2–1,8 s (08.10.2026, Echo-Tempo: das EA schreibt alle 200 ms, das Panel fragt lokal ab — der feste 4-s-Schritt kostete
         // im Mittel 2 s je kalter Lesung, gemessen p50 15 s)
         await warte(1200 + Math.random() * 600)
+        // Öffnungs-Sperre mitziehen, solange der Snapshot nicht frisch ist (Prüfer Slave 2, 08.10.2026: die Panel-Heilung startet das Terminal
+        // nach 45 + 90 s neu — das Fenster kann dann nach den ersten 60 s nochmals aufpoppen). Nur verlängern, nie fremde Marken überschreiben.
+        if((window._mt5BalOeffnetBis || 0) >= oeffnetBis - 1 && Date.now() + 20000 > (window._mt5BalOeffnetBis || 0)) window._mt5BalOeffnetBis = Date.now() + 20000
         insts = await holen(); if(!insts) continue
         f = mt5InstBalanceFrisch(insts.find(x => x && x.file === file))
-        if(f && f.login === login) return await fertig(f)
+        if(f && f.login === login){ if((window._mt5BalOeffnetBis || 0) >= oeffnetBis - 1) window._mt5BalOeffnetBis = 0; return await fertig(f) }   // Terminal ist da → Starts nicht weiter aufhalten
         if(f) fremd = f.login
       }
       return { ok: false, code: 'kein_snapshot', msg: fremd ? `Terminal steht im Konto ${fremd}, nicht ${login}` : 'Nach 160 s kein frischer Stand vom Lese-EA — Terminal/EA am PC prüfen' }
@@ -41630,7 +41633,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1325'
+  const OS_TAB_BUILD = '2026-09-22.1326'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -47671,6 +47674,22 @@
           text: !b ? 'keine Live-Balance' : !at ? 'Balance ohne Zeitstempel' : `Balance ${tplAlter(jetzt - at)} alt`, bal: String(a.id), lauf, tun: tplBalTun(a, b, false) })
       }
     }
+    // BALANCE NACH ECHO-TRADE FEHLT — FREMDE IDs (08.10.2026, Master): delta.heute_beendet[].bal_nach (app.py _ap_hb_laden) meldet, wenn der
+    // PC-Tab der ID 15 min nach dem Ende keine Balance lesen konnte; eigene Konten kommen oben aus tradePlans (ebnLetzte)
+    try{
+      const hb = (typeof _apd !== 'undefined' && _apd.d && Array.isArray(_apd.d.heute_beendet)) ? _apd.d.heute_beendet : []
+      for(const z of hb){
+        const bn = z && z.bal_nach
+        if(!bn || String(z.user_id) === String(currentUserId)) continue
+        const k = tplKk(z.user_id, z.konto); if(konten.has(k) || tplManRaus(man, z.user_id, z.konto_id, z.konto)) continue
+        konten.add(k)
+        const kid = z.konto_id ? String(z.konto_id) : '', uhr = z.ende ? new Date(z.ende).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '?'
+        add(z.user_id, z.user, { art: 'balance', firma: z.firma, konto: z.konto, typ: z.typ, balance: '', ende4: z.ende4 || '',
+          text: `Balance nach dem Echo-Trade (Ende ${uhr}) nicht gelesen — ${String(bn.msg || bn.code || 'ohne Grund').slice(0, 140)}${bn.versuche ? ` · ${bn.versuche} Versuche` : ''}`,
+          balf: kid, uid: String(z.user_id || ''), lauf: kid ? (_tplBalFremd.get(kid) || null) : null, hinweis: kid ? '' : 'am PC der ID lesen',
+          tun: String(bn.tun || `Am PC von ${z.user || 'der ID'} ↻ Balance lesen.`) + ` Der PC-Tab von ${z.user || 'der ID'} liest weiter von selbst nach.` })
+      }
+    }catch(e){ console.warn('[tpl] Balance nach Trade', e) }
     if(tagGleich) for(const x of roh.ausgelassen || []){
       const g = String(x.grund || '')
       if(/geplanten\/laufenden Plan/.test(g)) continue

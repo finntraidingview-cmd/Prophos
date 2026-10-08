@@ -157,7 +157,7 @@ def main():
     def roh(p):
         q = {k: v for k, v in p.items() if k != "mt5_baseline"}
         b = p.get("mt5_baseline") or {}
-        q.update(tv=b.get("tv"), final=b.get("final"), bstart=b.get("balance_start"))
+        q.update(tv=b.get("tv"), final=b.get("final"), bstart=b.get("balance_start"), bn=b.get("bal_nach"))
         return q
     db_plaene = [
         roh(plan("d-1", UA, "k-a1", "Apex Trader", pl=-2065.5, tv={"balance_start": 150000},
@@ -176,6 +176,13 @@ def main():
     ]
     konten = {"k-a1": apex, "k-w1": {"id": "k-w1", "name": "TDFY WD", "firm": "Tradeify", "account_type": "winning_days"},
               "k-a9": dict(apex, id="k-a9"), "k-l1": luc, "k-f1": fn}
+    # BALANCE NACH ECHO-TRADE (08.10.2026): bal_nach ok:false nur beim jüngsten Trade des Kontos und nur, solange die Konto-Balance älter ist
+    bn_fehlt = {"ok": False, "code": "", "msg": "Terminal-Start fehlgeschlagen: x", "tun": "Am PC ↻", "versuche": 3, "at": "2026-10-08T00:45:00Z"}
+    db_plaene[6]["bn"] = dict(bn_fehlt)                     # d-7 FundedNext, Ende 00:29:45, Balance 00:10 → bleibt
+    db_plaene[0]["bn"] = dict(bn_fehlt)                     # d-1 Apex, aber d-2 ist jünger → nicht
+    db_plaene[5]["bn"] = dict(bn_fehlt)                     # d-6 Lucid, Balance nach dem Ende gelesen → nicht
+    konten["k-f1"] = dict(fn, tv_balance_at="2026-10-08T00:10:00+00:00")
+    konten["k-l1"] = dict(luc, tv_balance_at="2026-10-08T01:00:00+00:00")
     aufrufe = {"kw": 0, "anfragen": []}
 
     def sb_all(tabelle, q):
@@ -206,6 +213,10 @@ def main():
     check(set(ids) == {"d-1", "d-2", "d-6", "d-7"}, f"heute beendet: Dubai-Tag, WD raus, ausgeblendete ID raus, completed_at zählt ({ids})")
     check(ids == ["d-2", "d-1", "d-7", "d-6"], f"neueste zuerst ({ids})")
     je = {z["plan_id"]: z for z in zeilen}
+    check((je["d-7"].get("bal_nach") or {}).get("msg") == "Terminal-Start fehlgeschlagen: x" and je["d-7"].get("konto_id") == "k-f1"
+          and (je["d-7"].get("bal_nach") or {}).get("versuche") == 3, f"bal_nach: jüngster Trade, Balance älter als Ende → mit Grund ({je['d-7'].get('bal_nach')})")
+    check("bal_nach" not in je["d-1"] and "bal_nach" not in je["d-6"] and "bal_nach" not in je["d-2"],
+          "bal_nach: älterer Trade desselben Kontos / Balance inzwischen live / ohne Meldung → kein Feld")
     check(je["d-2"]["art"] == "offen" and je["d-1"]["art"] == "normal" and je["d-7"]["typ"] == "phase1",
           f"Arten + Typ aus der Kontoart ({je['d-2']['art']}, {je['d-1']['art']}, {je['d-7']['typ']})")
     check(je["d-6"]["eur"] == -20.0 and aufrufe["kw"] == 1, f"Kontowert heute genau einmal nachgeladen ({je['d-6']['eur']}, {aufrufe['kw']}×)")
