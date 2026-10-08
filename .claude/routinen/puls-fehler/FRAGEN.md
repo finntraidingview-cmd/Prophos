@@ -11,3 +11,8 @@ Status: offen
 Was passiert: Am pc-2zc2we meldet sich Puls mit dem für die Firma hinterlegten Tradovate-Username an, das Zielkonto taucht in der Kontoliste aber 0× auf (05./06.10., Pläne 621cb106…, 1e4cabd3…, 14868bdb…, 4e6b6068…, 9e53f702…; am 02.10. einmal pc-l5o8bv, Plan e1c4d6d4…). Puls klickt dann richtigerweise nichts.
 Was ich brauche: Eine Prüfung/Entscheidung: Gehört der in Einstellungen > Prop Firms hinterlegte Tradovate-Username wirklich zu dem Login, in dem diese Konten liegen? Falls eine Firma mehrere Tradovate-Logins hat, müsste der Username am Konto statt an der Firma hängen — das wäre eine Entscheidung von dir, kein Fix, den ich allein machen darf.
 Status: offen
+
+## 2026-10-08 05:40 — konto_balance: kein Tradovate-Username für die Firma (The5%ers)
+Was passiert: Am pc-40mali wollte Puls heute 00:22 UTC die Balance eines The5%ers-Kontos (accounts-ID d4143916…) in TradingView lesen. Das Konto liegt nicht im gerade verbundenen Tradovate-Login, und für The5%ers ist kein Tradovate-Username hinterlegt — Puls kann den Login-Wechsel nicht selbst machen und bricht korrekt ab (nichts geklickt). Einzelfall, aber er kommt bei jeder Lesung/Order dieses Kontos wieder. Am selben PC lief um 00:04 UTC der Prophos-Tab nicht („Startzeit um 45 min verpasst“); der Plan startete 00:08 UTC dann doch — nur zur Kenntnis.
+Was ich brauche: In Einstellungen > Prop Firms > The5%ers bearbeiten den „Tradovate-Username für TradingView“ eintragen (der Login, in dem dieses Konto liegt). Falls The5%ers-Futures-Konten bei dir nicht über Tradovate laufen, sag mir das — dann gehört das Konto nicht in die Tradovate-Lesung.
+Status: offen
