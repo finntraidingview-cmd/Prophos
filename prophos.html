@@ -10361,7 +10361,7 @@
               <div class="panel-head">
                 <div>
                   <div class="panel-title">Wert in Funded-Accounts</div>
-                  <div class="panel-sub">Balance − Größe = Gewinn · × Profit-Share (FundedNext 80 %, Tradeify 90 %) + FundedNext-Refund 150 % beim ersten Payout = potenziell · anpassen im Payout-Kalender unter Finanzen</div>
+                  <div class="panel-sub">Balance − Größe = Gewinn · × Profit-Share (FundedNext 76,5 %, Tradeify 90 %, Blue Guardian 85 %, sonst 80 %) + FundedNext-Refund 150 % beim ersten Payout = potenziell · anpassen im Payout-Kalender unter Finanzen</div>
                 </div>
                 <div id="adm-wert-sums" style="display:flex;gap:22px;text-align:right;flex-wrap:wrap"></div>
               </div>
@@ -14448,7 +14448,8 @@
      * (payout_override) gewinnt über alles. Balance-Quelle und Stand-Zeit
      * kommen vom Backend (Echo-Snapshot → TSX → Duplikum → manuell). */
     // Blue Guardian 85/15 (2-Step Standard ohne 90-%-Add-on, Finn 04.10.2026) — sonst fiele die Firma auf 80
-    const admPayoutPctDefault = firm => /tradeify/i.test(String(firm || '')) ? 90 : /blue\s*guardian/i.test(String(firm || '')) ? 85 : 80
+    // FundedNext 76,5 (Finn 08.10.2026: „FundedNext ist 76,5" — FTMO, FundingPips, The5ers bleiben bei 80); Überschreibung je Konto (payout_pct) gewinnt
+    const admPayoutPctDefault = firm => /tradeify/i.test(String(firm || '')) ? 90 : /blue\s*guardian/i.test(String(firm || '')) ? 85 : admIstFundedNext(firm) ? 76.5 : 80
     const admIstFundedNext = firm => /f(ou|u)nded\s*next/i.test(String(firm || ''))
     function admAccGroesse(name, balance){
       const m = String(name || '').match(/(\d{2,3})\s*k\b/i)
@@ -14491,8 +14492,9 @@
         ? (c.ccy === 'EUR' ? ` + Refund ${admGeld(c.refund, 'EUR')}` : ` + Refund ${admGeld(c.refundEur, 'EUR')} ≈ ${admGeld(c.refund, c.ccy)}`)
         : ''
       if(c.manuell) return 'manuell' + (c.berechnet != null ? ' · ber. ' + admGeld(c.berechnet, c.ccy) : '')
-      if(c.profit == null) return (c.size == null ? 'Größe unklar' : 'keine Balance') + ' · ' + c.pct + ' %' + refund
-      return (c.profit >= 0 ? '+' : '−') + admGeld(Math.abs(c.profit), c.ccy) + ' × ' + c.pct + ' %' + refund
+      const pctTxt = String(c.pct).replace('.', ',')   // 76,5 (FundedNext, 08.10.2026)
+      if(c.profit == null) return (c.size == null ? 'Größe unklar' : 'keine Balance') + ' · ' + pctTxt + ' %' + refund
+      return (c.profit >= 0 ? '+' : '−') + admGeld(Math.abs(c.profit), c.ccy) + ' × ' + pctTxt + ' %' + refund
     }
     // Balance-Zelle: Quelle im Tooltip, „manuell" = Startbalance gedämpft,
     // Stand-Zeit sichtbar, sobald der Snapshot älter als eine Stunde ist
@@ -15488,7 +15490,7 @@
       // CFD-Termine als Tages-Gruppen (überfällige zuerst), Futures-Winning-
       // Days als letzte Gruppe. Die Chip-Blöcke von vorher waren bei zehn
       // Accounts unlesbar (Lehre 15.09. abends).
-      // Betrag = (Balance − Größe) × Profit-Share (Tradeify 90, sonst 80) +
+      // Betrag = (Balance − Größe) × Profit-Share (Tradeify 90, Blue Guardian 85, FundedNext 76,5, sonst 80 — admPayoutPctDefault) +
       // FundedNext-Refund beim ersten Payout — zentral in admPayoutCalc. Die Größe
       // steht im Account-Namen („100k funded …", „funded next 200k") —
       // account_size/starting_balance sind in der DB bei ALLEN Accounts leer
@@ -15699,9 +15701,9 @@
         td.innerHTML = ''
         const box = document.createElement('div')
         box.style.cssText = 'display:inline-flex;gap:4px;align-items:center;flex-wrap:wrap;justify-content:flex-end'
-        const inPct = document.createElement('input'); inPct.type = 'number'; inPct.min = 0; inPct.max = 100; inPct.step = 1
+        const inPct = document.createElement('input'); inPct.type = 'number'; inPct.min = 0; inPct.max = 100; inPct.step = 0.5   // 0,5er-Schritte für FundedNext 76,5 (08.10.2026)
         inPct.className = 'input'; inPct.style.cssText = 'width:58px;padding:4px 6px;font-size:12px;height:auto'
-        inPct.value = c.pct; inPct.title = 'Prozent vom Gewinn (Standard 80)'
+        inPct.value = c.pct; inPct.title = `Prozent vom Gewinn (Standard der Firma ${String(admPayoutPctDefault(r.account_firm || r.firm_raw || r.firm || '')).replace('.', ',')} %)`
         const pctLbl = document.createElement('span'); pctLbl.textContent = '%'; pctLbl.style.cssText = 'font-size:12px;color:var(--sub)'
         const inBetrag = document.createElement('input'); inBetrag.type = 'number'; inBetrag.min = 0; inBetrag.step = 1
         inBetrag.className = 'input'; inBetrag.style.cssText = 'width:92px;padding:4px 6px;font-size:12px;height:auto'
@@ -15727,7 +15729,7 @@
             if(!tok) throw new Error('nicht angemeldet')
             const res = await fetch(`${WATCHER_HOME}/admin/payout-calc`, {
               method:'PATCH', headers: { 'sb-token': tok, 'Content-Type':'application/json' },
-              body: JSON.stringify({ account_id: r.account_id, payout_pct: pct === 80 ? null : pct, payout_override: betrag })
+              body: JSON.stringify({ account_id: r.account_id, payout_pct: pct === admPayoutPctDefault(r.account_firm || r.firm_raw || r.firm || '') ? null : pct, payout_override: betrag })   // Firmen-Standard = leer (08.10.2026, vorher fest 80)
             })
             const d = await res.json().catch(() => ({}))
             if(!res.ok) throw new Error(d.error || ('HTTP ' + res.status))
@@ -41724,7 +41726,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1340'
+  const OS_TAB_BUILD = '2026-09-22.1341'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
