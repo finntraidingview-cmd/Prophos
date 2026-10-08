@@ -17252,8 +17252,9 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                 if t is not None and t < s0:
                     out.append((i, t, "vor"))
             elif ab_ + 1 < s0 <= bis60 and s0 > float(jetzt_min) + AP_FAELLIG_MIN and i not in vorgezogen_heute:
-                t = platz(i, bis60 + 1, float(fen[1]), bel)
-                if t is not None and t > s0:
+                # Ende (Start + Laufzeit) im Fenster (Master 08.10.2026): nichts Richtung Auto-Close 23:45 Dubai hinausschieben
+                t = platz(i, bis60 + 1, float(fen[1]) - laufz + 1, bel)
+                if t is not None and t > s0 and t + laufz <= float(fen[1]):
                     out.append((i, t, "raus"))
         return out + [(ids, r_neu, "dreh") for ids, r_neu in dreh_kandidaten(z, bewegt, bel)]
 
@@ -17872,6 +17873,7 @@ def _ap_bewerten(ctx, a, bal, menge, route, symbol, richtung, tp, sl, gehedgt=Fa
 # aktion „werte"; so ein Plan ist für den Bot fest (nie drehen/verschieben), der Nachtlauf ersetzt ihn nicht. Hand-Eingriffe, Bestätigen
 # und Start bleiben unberührt. Fehlt die Spalte noch, läuft alles wie vorher (_ap_hand_spalte_fehlt).
 AP_FEST_HAND = "Werte von Hand geändert"
+AP_FEST_FOLGETAG = "Folgetag (zählt nur für Abstände, Gegenhedge und Szenario)"
 
 
 def _ap_hand_spalte_fehlt(e):
@@ -17983,6 +17985,14 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
     for p in geplant_alle:
         m = _ap_iso_min(p.get("start_um"), mitternacht) if p.get("start_um") else None
         (heute if m is not None and 0 <= m < 24 * 60 else andere_tage).append(p)
+    # ÜBER DIE TAGESGRENZE (Master 08.10.2026, mit dem 24/7-Takt jede Nacht relevant): zwischen ~23:00 und 24:00 dt kannte der Zustand
+    # die Pläne ab 00:00 dt nicht (Nachtlauf 23:30 dt legt sie an) — Vorziehen/Hinausschieben prüfte weder Abstände noch Gegenhedge gegen
+    # sie, das Szenario +60 ließ sie weg. Pläne des Folgetags bis jetzt + 60 + Laufzeit kommen als FESTE Zeilen (start_min ≥ 1440) in
+    # stand["folgetag"]: der Bot sieht sie (_ap_stand_plaene), bewegt sie nie; Planer-Listen (geplant[]) bleiben beim Tag.
+    folge_bis = jetzt_min + 60 + float(param.get("laufzeit_min") or AP_VERTEIL_GEGEN_MIN)
+    folge = [p for p in andere_tage if p.get("start_um")
+             and 24 * 60 <= (_ap_iso_min(p.get("start_um"), mitternacht) or -1) <= folge_bis]
+    folge_ids = {str(p.get("id")) for p in folge}
     ids = sorted({str(p["master_account_id"]) for p in offen + heute + gestartet + andere_tage if p.get("master_account_id")}
                  | {str(x) for x in extra_konten or ()})
     konten = {}
@@ -18093,7 +18103,8 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
     except Exception as e:
         print(f"[auto-plan] ⚠️ balance_live: {type(e).__name__}: {e}", flush=True)
     peaks = _ap_peaks([konto(p) for p in heute])   # Höchststand für den geschätzten Boden (08.10.2026)
-    for p in heute:
+    folge_rows = []
+    for p in heute + folge:
         a, r = konto(p), p.get("richtung")
         gh, art = _ap_gehedgt_plan(p)
         b = _ap_bewerten(ctx, a, bal(a), p.get("master_contracts"), p.get("route"),
@@ -18129,6 +18140,10 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
                  # Slave 7 (08.10.2026, „Wartet auf Start" fremder IDs): notes + die Balance, mit der der Planer rechnet — nur Anzeige
                  notes=_ap_notes_kurz(p.get("notes")), balance=round(float(bal(a)), 2) if bal(a) is not None else None)   # Frontend tplDaten ordnet Konto/Balance darüber zu (08.10.2026)
         z["einsatz_eur"] = z["einsatz_abs"] * (1 if r == "buy" else -1) if r in ("buy", "sell") else None
+        if str(p.get("id")) in folge_ids:
+            z.update(aenderbar=False, fest_durch=AP_FEST_FOLGETAG, folgetag=True)
+            folge_rows.append(z)
+            continue
         geplant_rows.append(z)
         if b["hinweis"]:
             hinweise.append({"plan_id": z["plan_id"], "user_id": z["user_id"], "user": z["user"], "firma": z["firma"],
@@ -18167,7 +18182,7 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
     basis_einsatz = sum(z["einsatz_eur"] for z in offen_rows if z.get("einsatz_eur") is not None)
     brutto_einsatz = sum(abs(z["einsatz_eur"]) for z in offen_rows if z.get("einsatz_eur") is not None)
     return {"tag": tag, "mitternacht": mitternacht, "jetzt": jetzt, "jetzt_min": jetzt_min, "zeiten": zeiten, "firmen": firmen,
-            "param": param, "ctx": ctx, "namen": namen, "offen": offen_rows, "geplant": geplant_rows,
+            "param": param, "ctx": ctx, "namen": namen, "offen": offen_rows, "geplant": geplant_rows, "folgetag": folge_rows,
             "starts_heute": starts_heute, "id_fest": id_fest, "hinweise": hinweise,
             "basis_netto": round(sum(ds), 3), "basis_brutto": round(sum(abs(d) for d in ds), 3),
             "basis_einsatz": round(basis_einsatz, 1), "brutto_einsatz": round(brutto_einsatz, 1)}
@@ -18193,8 +18208,8 @@ def _ap_stand_plaene(stand):
              "sl_punkte": z.get("sl_punkte"),
              # RICHTUNG AM START (07.10.2026): für ap_richtung_konflikte
              "route": z.get("route"), "gehedgt": z.get("gehedgt"), "auto_plan": z.get("auto_plan"), "bestaetigt": z.get("bestaetigt"),
-             "richtung_konflikt": z.get("richtung_konflikt")}
-            for z in stand["geplant"] if z.get("start_min") is not None]
+             "richtung_konflikt": z.get("richtung_konflikt"), "folgetag": bool(z.get("folgetag"))}
+            for z in list(stand["geplant"]) + list(stand.get("folgetag") or ()) if z.get("start_min") is not None]   # Folgetag: fest
 
 
 def _ap_min_iso(stand, m):
@@ -18295,7 +18310,8 @@ def ap_delta_antwort(stand, sicht_uid=None, pc_lebt=None):
     try:
         lauf_t = [ap_szenario_trade_aus_zeile(z, True) for z in stand["offen"]]
         jm_ = float(stand.get("jetzt_min") or 0)
-        plan_t = [ap_szenario_trade_aus_zeile(z, False) for z in zaehlt
+        folge_z = [z for z in stand.get("folgetag") or () if pc_lebt is None or str(z.get("user_id")) in pc_lebt]   # über 00:00 dt
+        plan_t = [ap_szenario_trade_aus_zeile(z, False) for z in zaehlt + folge_z
                   if z.get("start_min") is not None and jm_ <= float(z["start_min"]) <= jm_ + 60]
         l0, l60 = ap_szenario_lage(lauf_t), ap_szenario_lage(lauf_t + plan_t)
         out["delta_eur_pkt"] = l0["delta_eur_pkt"]
@@ -18392,7 +18408,7 @@ def ap_richtungsschutz(stand, trocken=False, quelle="bot"):
     fasst der Bot nicht an. Danach steht die neue Richtung auch im Stand (für den Ausgleich im selben Lauf).
     → {gedreht [Umplanungen], markiert [plan_id …], frei [plan_id …], fehler}"""
     offen = [{"user_id": z["user_id"], "firma": z["firma_key"], "richtung": z.get("richtung")} for z in stand["offen"]]
-    erg = ap_richtung_konflikte(_ap_stand_plaene(stand), offen, max(0.0, stand["jetzt_min"]))
+    erg = ap_richtung_konflikte([x for x in _ap_stand_plaene(stand) if not x["folgetag"]], offen, max(0.0, stand["jetzt_min"]))
     je = {z["plan_id"]: z for z in stand["geplant"]}
     out = {"gedreht": [], "markiert": [], "frei": [], "fehler": None, "konflikte": erg}
     if trocken:
