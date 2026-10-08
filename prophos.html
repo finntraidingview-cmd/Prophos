@@ -1994,6 +1994,17 @@
   :is(#tpl-view,#adm-pane-planer) .tpl-hz .r{color:var(--sub);white-space:nowrap} :is(#tpl-view,#adm-pane-planer) .tpl-hz .r em{display:inline-block;min-width:34px;margin-right:6px;padding:1px 0;border-radius:4px;background:var(--surface-tint);color:var(--ink-2);font-style:normal;font-size:10.5px;font-weight:700;text-align:center;letter-spacing:.04em}
   :is(#tpl-view,#adm-pane-planer) .tpl-hz .r em.is-buy{background:rgba(18,183,106,.12);color:#047857} :is(#tpl-view,#adm-pane-planer) .tpl-hz .r em.is-sell{background:rgba(240,68,56,.10);color:#b91c1c}
   :is(#tpl-view,#adm-pane-planer) .tpl-hz .p,:is(#tpl-view,#adm-pane-planer) .tpl-hz .s{text-align:right;color:var(--ink-2)} :is(#tpl-view,#adm-pane-planer) .tpl-hz .h{text-align:right;font-weight:700;font-size:13.5px} :is(#tpl-view,#adm-pane-planer) .tpl-hz .z{text-align:right;color:var(--sub);white-space:nowrap}
+  /* HEUTE BEENDET (Finn 08.10.2026): Zeilen wie die Bilanz-Liste (.tpl-hz), drei Spalten — Person/Konto + Start–Ende | Richtung + Kennzeichen |
+     € hypothetisch über P&L $; dazu die kleine Bot-Zeile unter der Kachel „Heute" (Bot-Infos bleiben, nur kleiner) */
+  :is(#tpl-view,#adm-pane-planer) .tpl-hz.tpl-hb{grid-template-columns:minmax(0,1fr) minmax(150px,auto) 96px;cursor:default}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hb .w{flex-wrap:wrap;row-gap:1px} :is(#tpl-view,#adm-pane-planer) .tpl-hb .w small{flex-basis:100%;padding-left:14px} :is(#tpl-view,#adm-pane-planer) .tpl-hb .w.ohne-name small{padding-left:0}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hb .r{display:flex;align-items:center;flex-wrap:wrap;gap:3px 5px} :is(#tpl-view,#adm-pane-planer) .tpl-hb .r em{margin-right:0} :is(#tpl-view,#adm-pane-planer) .tpl-hb .r small{font-size:11px;color:var(--sub-2)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hb .r .ap-idd-chip{font-size:10.5px;padding:1px 7px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hb .h{display:flex;flex-direction:column;align-items:flex-end;line-height:1.25;font-size:13.5px} :is(#tpl-view,#adm-pane-planer) .tpl-hb .h small{font-size:11px;font-weight:500;color:var(--sub)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hb-satz{font-size:12.5px;color:var(--sub);margin:0 0 6px;line-height:1.45} :is(#tpl-view,#adm-pane-planer) .tpl-hb-satz b{font-weight:700;font-variant-numeric:tabular-nums}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hb-mehr summary{cursor:pointer;padding:6px 4px;font-size:12px;color:var(--sub);list-style:none} :is(#tpl-view,#adm-pane-planer) .tpl-hb-mehr summary::before{content:'▸ ';color:var(--sub-2)} :is(#tpl-view,#adm-pane-planer) .tpl-hb-mehr[open] summary::before{content:'▾ '}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bot-klein{margin-top:7px;padding-top:6px;border-top:1px dashed var(--border-soft,var(--border));font-size:11px;color:var(--sub);line-height:1.35}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bot-klein .apd-schalter{margin-top:4px}
   /* Geplant-Liste = Tabelle des Reiters Trades → Geplant (.pz-*, GEPLANT-WIE-TRADES-REITER 07.10.2026), hier mit ID-Spalte vorn */
   :is(#tpl-view,#adm-pane-planer) .tpl-lk{padding-bottom:6px} :is(#tpl-view,#adm-pane-planer) .tpl-lk .tpl-h{margin:4px 0 0}
   #dashboard-view .pz-tab.pz-mit-id{grid-template-columns:156px 72px minmax(150px,1.2fr) 84px minmax(220px,1fr) 92px 64px 76px 76px 160px}
@@ -2047,6 +2058,8 @@
     :is(#tpl-view,#adm-pane-planer) .tpl-hz{grid-template-columns:minmax(0,1fr) auto auto auto;gap:2px 6px;padding:4px 2px} :is(#tpl-view,#adm-pane-planer) .tpl-hz .p,:is(#tpl-view,#adm-pane-planer) .tpl-hz .s{display:none}
     :is(#tpl-view,#adm-pane-planer) .tpl-hz .z{grid-column:auto;text-align:right;font-size:10.5px} :is(#tpl-view,#adm-pane-planer) .tpl-hz .h{font-size:12.5px} :is(#tpl-view,#adm-pane-planer) .tpl-hz .r{font-size:11px} :is(#tpl-view,#adm-pane-planer) .tpl-hz .r em{min-width:30px;margin-right:4px}
     :is(#tpl-view,#adm-pane-planer) .tpl-hz .w small{max-width:110px} :is(#tpl-view,#adm-pane-planer) .tpl-hz .w b{max-width:84px;overflow:hidden;text-overflow:ellipsis}
+    :is(#tpl-view,#adm-pane-planer) .tpl-hz.tpl-hb{grid-template-columns:minmax(0,1fr) auto auto;gap:2px 8px}   /* Heute beendet: Handy drei Spalten, nichts versteckt */
+    :is(#tpl-view,#adm-pane-planer) .tpl-hb .w b,:is(#tpl-view,#adm-pane-planer) .tpl-hb .w small{max-width:none} :is(#tpl-view,#adm-pane-planer) .tpl-hb .r{max-width:92px} :is(#tpl-view,#adm-pane-planer) .tpl-hb .h{font-size:12.5px}
     :is(#tpl-view,#adm-pane-planer) .kpis.tpl-kpis5 .kpi-value{white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere}   /* Netto-Zahl darf umbrechen (QA Punkt 3) */
     :is(#tpl-view,#adm-pane-planer) .tpl-ids .tpl-kopf-r{margin-left:0;width:100%} :is(#tpl-view,#adm-pane-planer) .tpl-ids .tpl-lauf{white-space:normal}
     :is(#tpl-view,#adm-pane-planer) .tpl-ids .adm-vl-chip{font-size:11.5px;padding:3px 8px}
@@ -2955,6 +2968,7 @@
   .ap-idd-tage i{display:block;width:100%;border-radius:3px} .ap-idd-tage .ub i{background:var(--danger)}
   .ap-idd-tage small{font-size:10.5px;color:var(--sub);margin-top:3px} .ap-idd-tage b{font-size:11.5px;font-weight:600;white-space:nowrap}
   .ap-idd-leer{font-size:12.5px;color:var(--sub);padding:2px 0 4px}
+  .ap-idd-hb{margin-top:12px}   /* Heute beendet unter „Läuft jetzt“ (Finn 08.10.2026) */
   @media (max-width:760px){
     .ap-idd{padding:12px 12px 10px}
     .ap-idd-zwei{grid-template-columns:minmax(0,1fr)}
@@ -41308,7 +41322,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1304'
+  const OS_TAB_BUILD = '2026-09-22.1305'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -46205,18 +46219,31 @@
   /* Bot-Kachel (Schalter Bot + Auto-Start, letzter/nächster Lauf) — steht seit 07.10.2026 in der Kachelreihe der Trade-Planer-Seite;
    * Netto/Long·Short/Brutto in €/Pkt und der €/Pkt-Verlauf sind dort durch Long/Short/Netto in € Einsatz und die Netto-Linie ersetzt.
    * uhr: Zeitformat der Seite (Trade-Planer = Dubai). Schalter-Klicks verdrahtet die Seite selbst (apdEinstellung). */
-  function apdBotKachelHtml(v, admin, uhr){
-    uhr = uhr || apdUhr
-    const b = v.bot || {}, an = !!b.aktiv
-    const zeiten = [b.letzter_lauf ? `↺ ${uhr(b.letzter_lauf)}` : '', b.naechster_lauf && an ? `→ ${uhr(b.naechster_lauf)}` : '', b.takt_min ? `${b.takt_min} min` : ''].filter(Boolean).join(' · ')
-    const sperre = admin ? '' : ' disabled'
-    return `<div class="kpi"><div class="kpi-label">Bot</div><div class="kpi-value ${an ? 'apd-gut' : 'apd-grau'}">${an ? 'an' : 'aus'}</div>
-        <span class="kpi-delta" title="letzter Lauf · nächster Lauf · Takt">${zeiten || '—'}</span>
-        <div class="apd-schalter">
+  // Bausteine der Bot-Kachel (08.10.2026, Finn: die KPI-Kachel mit dem Bot wird zur Kachel „Heute" — die Bot-Infos bleiben, klein darunter):
+  // Zeiten, Schalter (data-apd-schalter, verdrahtet von der Seite) und Meldung einmal, genutzt von der Kachel und der kleinen Zeile
+  const apdBotZeiten = (v, uhr) => { const b = v.bot || {}, an = !!b.aktiv
+    return [b.letzter_lauf ? `↺ ${uhr(b.letzter_lauf)}` : '', b.naechster_lauf && an ? `→ ${uhr(b.naechster_lauf)}` : '', b.takt_min ? `${b.takt_min} min` : ''].filter(Boolean).join(' · ') }
+  function apdBotSchalterHtml(v, admin){
+    const an = !!(v.bot || {}).aktiv, sperre = admin ? '' : ' disabled'
+    return `<div class="apd-schalter">
           <label title="${admin ? 'Ausgleichs-Bot an/aus' : 'nur Admin'}"><span class="switch"><input type="checkbox" data-apd-schalter="aktiv"${an ? ' checked' : ''}${sperre || (_apd.busy.has('aktiv') ? ' disabled' : '')}><span class="switch-slider"></span></span>Bot</label>
           <label title="${admin ? 'Auto-Start: Pläne starten ohne Bestätigung' : 'nur Admin'}${v.autoStart == null ? ' · Stand unbekannt' : ''}"><span class="switch"><input type="checkbox" data-apd-schalter="auto_start"${v.autoStart ? ' checked' : ''}${sperre || (_apd.busy.has('auto_start') ? ' disabled' : '')}><span class="switch-slider"></span></span>Auto-Start</label>
-        </div>
-        ${_apd.meldung && _apd.meldung.ort === 'bot' ? `<span class="kpi-delta apd-rot" style="white-space:normal" title="${escapeHtml(_apd.meldung.text)}">⚠ ${escapeHtml(_apd.meldung.text)}</span>` : ''}</div>`
+        </div>`
+  }
+  const apdBotMeldungHtml = () => _apd.meldung && _apd.meldung.ort === 'bot' ? `<span class="kpi-delta apd-rot" style="white-space:normal" title="${escapeHtml(_apd.meldung.text)}">⚠ ${escapeHtml(_apd.meldung.text)}</span>` : ''
+  function apdBotKachelHtml(v, admin, uhr){
+    uhr = uhr || apdUhr
+    const an = !!(v.bot || {}).aktiv, zeiten = apdBotZeiten(v, uhr)
+    return `<div class="kpi"><div class="kpi-label">Bot</div><div class="kpi-value ${an ? 'apd-gut' : 'apd-grau'}">${an ? 'an' : 'aus'}</div>
+        <span class="kpi-delta" title="letzter Lauf · nächster Lauf · Takt">${zeiten || '—'}</span>
+        ${apdBotSchalterHtml(v, admin)}
+        ${apdBotMeldungHtml()}</div>`
+  }
+  // Kleine Bot-Zeile unter der Kachel „Heute" (Trade-Planer + Admin-Reiter): „Bot an · ↺ 07:10 · → 07:20 · 10 min" + dieselben Schalter
+  function apdBotKleinHtml(v, admin, uhr){
+    uhr = uhr || apdUhr
+    const an = !!(v.bot || {}).aktiv, zeiten = apdBotZeiten(v, uhr)
+    return `<div class="tpl-bot-klein"><span title="Ausgleichs-Bot · letzter Lauf · nächster Lauf · Takt">Bot <b class="${an ? 'apd-gut' : 'apd-grau'}">${an ? 'an' : 'aus'}</b>${zeiten ? ' · ' + zeiten : ''}</span>${apdBotSchalterHtml(v, admin)}${apdBotMeldungHtml()}</div>`
   }
   /* Waage: links Long, rechts Short, je Firma gestapelt im Firmenton; offen voll, geplant hell */
   function apdWaageHtml(v){
@@ -46592,7 +46619,8 @@
         <div class="tpl-ls"><i style="width:${anteil.toFixed(1)}%;background:var(--good)"></i><i style="flex:1;background:var(--danger)"></i></div>
         <span class="kpi-delta umbruch" title="Netto der laufenden Trades · darunter mit den geplanten bis Tagesende${band}">${plan.length ? `bis Tagesende mit geplanten ${vz(NT)}` : 'keine geplanten'}</span>${tplSzKachelHtml(D)}</div>`
     const hy = tplHypo(D)
-    return `<div class="kpis tpl-kpis5">${k1}${k2}${k3}${tplHypoKachelHtml(hy)}${apdBotKachelHtml(apdDaten(), apdAdmin(), tplUhrIso)}</div>`
+    // Kachel „Heute" statt der Bot-Kachel (Finn 08.10.2026); altes Backend ohne delta.heute_beendet → Bot-Kachel wie bisher
+    return `<div class="kpis tpl-kpis5">${k1}${k2}${k3}${tplHypoKachelHtml(hy)}${tplHeuteKachelHtml(D) || apdBotKachelHtml(apdDaten(), apdAdmin(), tplUhrIso)}</div>`
   }
 
   /* ZEITSTRAHL V2 (07.10.2026, TPL-UEBERSICHT-2, Finn: „da erkennt man nix, zu viel auf einmal, und da kommt ja nur mehr dazu"):
@@ -47645,6 +47673,77 @@
     return `<div class="kpi"><div class="kpi-label">P&amp;L hypothetisch</div><div class="kpi-value ${h.jetzt > 0 ? 'tpl-gut' : h.jetzt < 0 ? 'tpl-rot' : ''}" title="Σ Kontowert-Satz (€ je $) × Live-P&amp;L $ je laufendem ungehedgtem Trade${h.cfd ? ' · ' + h.cfd + ' CFD aus MT5' : ''}">jetzt ${vz(h.jetzt)}</div>
         <span class="kpi-delta">${(h.n - h.ohne) > 0 ? `${h.n - h.ohne} Trade${h.n - h.ohne === 1 ? '' : 's'} mit Live-Wert` : (h.n || h.ohne) ? 'noch kein Live-Wert' : 'nichts läuft'}</span></div>`   // QA 08.10.2026 Punkt 2: „18 ohne Wert" war Rauschen
   }
+  /* ══ HEUTE BEENDET (08.10.2026, Finn: „Wenn ich oben auf die Kachel einer ID drücke, sehe ich ihre Trades von heute. Ich will dort einmal die
+   * laufenden und einmal die vergangenen, heute schon gelaufenen Trades sehen. Plus wie viel hypothetische Euro diese ID heute gemacht oder
+   * verloren hat … Dasselbe für alle zusammen, vielleicht statt der KPI-Kachel, wo der Bot steht"). Daten NUR aus delta.heute_beendet[]
+   * (Backend ap_hb_zeile: heute = Dubai-Tag, Challenge/Phase 1/Phase 2, Auto- und Hand-Trades; € GENAU wie „P&L hypothetisch" / Hypo-Bilanz =
+   * echter P&L $ × Kontowert-Satz, geblowt = −Kontowert vor dem Trade, art „offen" = Ergebnis noch nicht gelesen → zählt in keiner Summe).
+   * Hier wird nur gefiltert, summiert und gezeichnet — keine eigene Rechnung, keine Bewertung. Fehlt das Feld (altes Backend), bleibt alles
+   * wie vorher: Bot-Kachel, Ergebnis aus der Hypo-Bilanz, keine Karte. Genutzt von Kachelreihe (tplKachelnHtml), Planer-Seite, Admin-Kopf
+   * und ID-Detail (apIdDetailRender). ══ */
+  function tplHeuteZeilen(ids){
+    const roh = _apd.d && Array.isArray(_apd.d.heute_beendet) ? _apd.d.heute_beendet : null
+    if(!roh) return null
+    return roh.filter(z => z && (!ids || ids.has(String(z.user_id))))
+  }
+  function tplHeuteSumme(zeilen){
+    const s = { n: (zeilen || []).length, plus: 0, minus: 0, netto: 0, usd: 0, nPlus: 0, nMinus: 0, offen: 0, ohne: 0 }
+    for(const z of zeilen || []){
+      if(z.art === 'offen'){ s.offen++; continue }
+      const u = tplNum(z.ergebnis_usd); if(u != null) s.usd += u
+      const e = tplNum(z.eur); if(e == null){ s.ohne++; continue }
+      if(e > 0){ s.plus += e; s.nPlus++ } else if(e < 0){ s.minus += e; s.nMinus++ }
+    }
+    s.netto = s.plus + s.minus
+    return s
+  }
+  const tplVzE = x => (x > 0 ? '+' : x < 0 ? '−' : '') + tplEur(x)
+  const tplKlE = x => x > 0 ? 'tpl-gut' : x < 0 ? 'tpl-rot' : ''
+  // „Heute: +x € gewonnen · −y € verloren · netto z €" (+ „· n offen") — Finns Wortlaut, für ID-Detail und Karte
+  const tplHeuteSatzHtml = s => `Heute: <b class="tpl-gut">${tplVzE(s.plus)}</b> gewonnen · <b class="tpl-rot">${tplVzE(s.minus)}</b> verloren · netto <b class="${tplKlE(s.netto)}">${tplVzE(s.netto)}</b>`
+    + (s.offen ? ` · <span title="Ergebnis noch nicht gelesen — zählt nicht">${s.offen} offen</span>` : '') + (s.ohne ? ` · <span title="ohne Kontowert-Satz — zählt nicht">${s.ohne} ohne €</span>` : '')
+  function tplHeuteKachelHtml(D){
+    const ids = D && D.sicht instanceof Set ? D.sicht : null
+    const zeilen = tplHeuteZeilen(ids); if(!zeilen) return ''
+    const s = tplHeuteSumme(zeilen), mit = s.n - s.offen - s.ohne
+    const tip = `Heute (Dubai) beendete Trades ${ids ? 'der gewählten ID' : 'aller IDs'} — ${s.n} Trade${s.n === 1 ? '' : 's'}: echter P&L $ × Kontowert-Satz wie „P&L hypothetisch", geblowtes Konto = −Kontowert${s.offen ? ` · ${s.offen} offen (Ergebnis nicht gelesen, zählt nicht)` : ''}${s.ohne ? ` · ${s.ohne} ohne Satz` : ''}`
+    return `<div class="kpi tpl-heute"><div class="kpi-label" title="${escapeHtml(tip)}">Heute</div>
+        <div class="kpi-value ${tplKlE(s.netto)}" title="${escapeHtml(tip)}">${mit ? tplVzE(s.netto) : '–'}<small>netto</small></div>
+        <span class="kpi-delta umbruch" title="${escapeHtml(tip)}"><b class="tpl-gut">${tplVzE(s.plus)}</b> gewonnen · <b class="tpl-rot">${tplVzE(s.minus)}</b> verloren${s.offen ? ` · ${s.offen} offen` : ''}</span>
+        ${apdBotKleinHtml(apdDaten(), apdAdmin(), tplUhrIso)}</div>`
+  }
+  const TPL_HB_ART = { bestanden: ['bestanden', 'gut'], geblowt: ['geblowt', 'rot'], offen: ['nicht gelesen', 'offen'] }
+  const TPL_SATZ_QW = { lauf: 'Satz aus dem Planer-Lauf des Tages', balance_vorher: 'Satz aus dem Kontowert bei der Balance vor dem Trade', heute: 'Satz aus dem Kontowert von heute' }
+  // Zeilen wie die Bilanz-Liste (.tpl-hz): Konto + Start–Ende (Dubai) | Richtung + Kennzeichen | € hypothetisch über P&L $. o.name = false: ohne Person (ID-Detail)
+  function tplHeuteListeHtml(zeilen, o = {}){
+    const usd = x => x == null ? '' : (x > 0 ? '+' : x < 0 ? '−' : '') + Math.round(Math.abs(x)).toLocaleString('de-DE') + ' $'
+    const typTxt = t => t === 'phase2' ? 'Phase 2' : t === 'phase1' ? 'Phase 1' : t === 'challenge' ? 'Challenge' : String(t || '')
+    return zeilen.map(z => {
+      const k = TPL_HB_ART[z.art], g = tplGroesseKurz(z), eur = tplNum(z.eur)
+      const konto = `${g ? g + ' ' : ''}${tplFirmaKurz(z.firma)}${z.ende4 ? ' …' + z.ende4 : ''}`, zeit = `${tplUhrIso(z.start)}–${tplUhrIso(z.ende)}`
+      const tip = [z.user, z.konto, typTxt(z.typ), z.auto ? 'Auto-Planer' : 'Hand-Trade', z.grund,
+        z.satz != null ? `${Number(z.satz).toLocaleString('de-DE', { maximumFractionDigits: 4 })} €/$ · ${TPL_SATZ_QW[z.satz_quelle] || z.satz_quelle || ''}` : '',
+        z.kontowert_eur != null ? `Kontowert vor dem Trade ${tplEur(z.kontowert_eur)}` : ''].filter(Boolean).join(' · ')
+      const wer = o.name === false ? `<b>${escapeHtml(konto)}</b><small>${zeit}</small>`
+        : `<i style="background:${idFarbe(z.user_id)}"></i><b>${escapeHtml(z.user || '?')}</b><small>${escapeHtml(konto)} · ${zeit}</small>`
+      return `<div class="tpl-hz tpl-hb${z.art === 'offen' ? ' ohne' : ''}" title="${escapeHtml(tip)}">
+        <span class="w${o.name === false ? ' ohne-name' : ''}">${wer}</span>
+        <span class="r"><em class="${z.richtung === 'buy' ? 'is-buy' : 'is-sell'}">${z.richtung === 'buy' ? 'BUY' : 'SELL'}</em>${k ? `<span class="ap-idd-chip ${k[1]}">${k[0]}</span>` : `<small>${escapeHtml(typTxt(z.typ))}</small>`}${z.auto ? '' : '<small>Hand</small>'}</span>
+        <span class="h">${z.art === 'offen' ? '<b class="tpl-grau">offen</b>' : `<b class="${tplKlE(eur)}">${eur == null ? '–' : tplVzE(eur)}</b>`}<small>${usd(tplNum(z.ergebnis_usd))}</small></span></div>`
+    }).join('')
+  }
+  // Karte „Heute beendet" für Planer-Seite und Admin-Kopf (Sicht = D.sicht): die 8 jüngsten offen, der Rest aufklappbar (Zustand _tpl.hbAuf)
+  function tplHeuteKarteHtml(D){
+    if(!D || D.tag !== D.heute) return ''   // nur am Tag „heute" — „morgen" hat nichts Beendetes
+    const ids = D.sicht instanceof Set ? D.sicht : null
+    const zeilen = tplHeuteZeilen(ids); if(!zeilen) return ''
+    const s = tplHeuteSumme(zeilen), name = !(ids && ids.size === 1), vorn = zeilen.slice(0, 8), rest = zeilen.slice(8)
+    return `<div class="tpl-karte tpl-hb-karte"><div class="tpl-h">Heute beendet <b>${s.n}</b><span class="leg"><span>Dubai-Tag · echter P&amp;L × Kontowert-Satz · geblowt = −Kontowert</span></span></div>
+        <div class="tpl-hb-satz">${tplHeuteSatzHtml(s)}</div>
+        ${zeilen.length ? tplHeuteListeHtml(vorn, { name }) + (rest.length ? `<details class="tpl-hb-mehr"${_tpl.hbAuf ? ' open' : ''}><summary>${rest.length} weitere</summary>${tplHeuteListeHtml(rest, { name })}</details>` : '')
+          : '<div class="tpl-leer klein">heute noch nichts beendet</div>'}</div>`
+  }
+  document.addEventListener('toggle', e => { if(e.target && e.target.matches && e.target.matches('details.tpl-hb-mehr')) _tpl.hbAuf = e.target.open }, true)
   /* HYPO-P&L-CHART (Finns Korrektur 4, 07.10.2026: „Mach beides in separate Graphen, nicht im gleichen Chart"): eigene Karte direkt unter
    * dem Netto-Chart, gleiche Breite und Höhe, eigene €-Achse, 0-Linie kräftig, Fläche grün über / rot unter 0, Tooltip je Minute,
    * Kopf „P&L hypothetisch heute · jetzt ±€". Zeitachse = die des Zeitstrahls (_tpl.achse).
@@ -47744,7 +47843,7 @@
     const trades = D.trades.filter(t => ids.has(t.user_id))
     let L = 0, S = 0
     for(const t of trades) if(tplAktiv(t) && !t.gehedgt){ if(t.long) L += t.einsatz || 0; else S += t.einsatz || 0 }
-    return { ...D, trades, L, S }
+    return { ...D, trades, L, S, sicht: ids }   // sicht: Kachel/Karte „Heute" filtern delta.heute_beendet nach denselben IDs (08.10.2026)
   }
 
   function tplZeichnen(){
@@ -47803,7 +47902,7 @@
     const chips = (alleIds.length > 1 || alleBest || kopfRechts) ? `<div class="adm-vl-legend tpl-ids">${chipsIds}${alleBest}${kopfRechts}</div>` : ''
     const html = (_tpl.fehler ? `<div class="tpl-fehler">⚠ ${escapeHtml(_tpl.fehler)}</div>` : '')
       + (ohne ? `<div class="tpl-karte"><div class="tpl-leer">— nicht im Auto-Planer</div></div>`
-        : chips + tplKachelnHtml(F) + tplZeitstrahlHtml(F, zeilen) + tplBrauchtHtml(tplBraucht(D, sichtIds)) + tplDetailHtml(D) + tplChartsHtml(F, 'p') + tplListeHtml(F) + tplBilanzKarteHtml(F))   // Konten-Abdeckung ausgeblendet (Finn 08.10.2026: „mies unnötig, kann visuell weg“) — tplAbdeckungHtml bleibt   // Detail direkt unter dem Zeitstrahl (Finn 07.10.2026)
+        : chips + tplKachelnHtml(F) + tplZeitstrahlHtml(F, zeilen) + tplBrauchtHtml(tplBraucht(D, sichtIds)) + tplDetailHtml(D) + tplChartsHtml(F, 'p') + tplHeuteKarteHtml(F) + tplListeHtml(F) + tplBilanzKarteHtml(F))   // Heute beendet unter dem Hypo-Chart mit „Läuft" (Finn 08.10.2026)   // Konten-Abdeckung ausgeblendet (Finn 08.10.2026: „mies unnötig, kann visuell weg“) — tplAbdeckungHtml bleibt   // Detail direkt unter dem Zeitstrahl (Finn 07.10.2026)
     // FINGERABDRUCK (08.10.2026): gleiches Markup → nichts anfassen (60-s-Takt, Delta-Takt, Balance-Stände zeichnen sonst alles neu
     // und werfen Scroll/Fokus weg); die Kopfzeile oben wird trotzdem jedes Mal aktualisiert
     if(html === _tpl.htmlAlt && root.firstChild) return
@@ -61269,7 +61368,8 @@
       const alt = _tpl.tag; _tpl.tag = tag
       let braucht = ''
       try{ if(typeof tplBraucht === 'function' && typeof tplBrauchtHtml === 'function') braucht = tplBrauchtHtml(tplBraucht(D, u ? new Set([u]) : null)) }catch(e){ console.warn('[ap-ids] Braucht dich', e) }   // Ausgelassene je ID mit Grund + Knöpfen (08.10.2026)
-      try{ return seg + tplKachelnHtml(D) + tplZeitstrahlHtml(D, zeilen) + braucht + tplChartsHtml(D, 'a') } finally{ _tpl.tag = alt }   // beide Charts wie auf der Planer-Seite (Finn 08.10.2026)
+      // Heute beendet (Finn 08.10.2026) unter den Charts — nur bei „Alle"; mit gewählter ID steht dieselbe Liste im ID-Detail oben
+      try{ return seg + tplKachelnHtml(D) + tplZeitstrahlHtml(D, zeilen) + braucht + tplChartsHtml(D, 'a') + (u ? '' : tplHeuteKarteHtml(D)) } finally{ _tpl.tag = alt }   // beide Charts wie auf der Planer-Seite (Finn 08.10.2026)
     }catch(e){ console.warn('[ap-ids] Kopf zeichnen', e); return '' }
   }
   const apKontoKurz = z => { let g = 0; try{ g = Number(kontoGroesseAnzeige(z.konto, null, null)) || 0 }catch(_){}
@@ -61511,7 +61611,11 @@
     const typOk = x => !x.typ || TPL_TYPEN.includes(String(x.typ))
     const aus = ((lauf && lauf.ausgelassen) || []).filter(x => String(x.user_id) === uid && typOk(x) && !/geplanten\/laufenden Plan/.test(String(x.grund || '')))
     const unbest = geplant.filter(t => t.status === 'offen').length
-    const gesamt = geplant.length + laeuft.length + fertigIds.size + aus.length
+    // HEUTE BEENDET (Finn 08.10.2026): delta.heute_beendet[] dieser ID (Dubai-Tag, Auto + Hand, € wie „P&L hypothetisch") zählt „Beendet" und
+    // „Ergebnis heute" und füllt die Karte unter „Läuft jetzt". null = altes Backend → wie bisher aus der Hypo-Bilanz
+    const hb = tplHeuteZeilen(new Set([uid])), hs = hb ? tplHeuteSumme(hb) : null
+    const fertigN = hb ? hb.length : fertigIds.size
+    const gesamt = geplant.length + laeuft.length + fertigN + aus.length
     const anteil = k => gesamt ? (k / gesamt * 100).toFixed(1) : 0
     const zahlKachel = (lab, k, unter, farbeBar, tip) => `<div class="kpi" title="${escapeHtml(tip)}"><div class="kpi-label">${lab}</div><div class="kpi-value">${k}</div>
         <span class="kpi-delta">${unter}</span><div class="kpi-bar"><div class="kpi-bar-fill" style="width:${anteil(k)}%;background:${farbeBar}"></div></div></div>`
@@ -61521,16 +61625,20 @@
     let usdFertig = 0, eurFertig = 0, ohneEur = 0
     for(const z of bilHeute){ usdFertig += Number(z.pl_usd) || 0; if(z.hypo_eur != null) eurFertig += Number(z.hypo_eur); else ohneEur++ }
     for(const t of T) if(t.status === 'beendet' && t.pnl != null && !bilHeute.some(z => String(z.plan_id) === String(t.plan_id))){ usdFertig += Number(t.pnl) || 0; ohneEur++ }
+    if(hs){ usdFertig = hs.usd; eurFertig = hs.netto; ohneEur = hs.offen + hs.ohne }
+    const mitErg = hs ? hs.n - hs.offen : fertigIds.size   // beendet MIT gelesenem Ergebnis
     let h = { zeilen: [], jetzt: 0 }
     try{ if(D) h = tplHypo(tplSichtFilter(D, new Set([uid]))) }catch(e){ console.warn('[ap-idd] tplHypo', e) }
     const usdLauf = h.zeilen.reduce((s, z) => s + (z.pl != null && isFinite(z.pl) ? z.pl : 0), 0)
-    const ergKachel = `<div class="kpi" title="${escapeHtml(`Beendete Trades heute: echter P&L $ · hypothetisch € = P&L × Kontowert-Satz${ohneEur ? ` (${ohneEur} ohne Satz)` : ''}. Darunter: laufende jetzt.`)}">
-        <div class="kpi-label">Ergebnis heute</div><div class="kpi-value ${kl(usdFertig)}">${fertigIds.size ? vzU(usdFertig) : '–'}</div>
-        <span class="kpi-delta umbruch">${fertigIds.size ? `<b class="${kl(eurFertig)}">${vzE(eurFertig)}</b>` : 'noch nichts beendet'}${h.zeilen.length ? ` · läuft <b class="${kl(h.jetzt)}">${vzE(h.jetzt)}</b>` : ''}</span></div>`
+    const ergTip = hs ? `Heute (Dubai) beendete Trades: echter P&L $ · hypothetisch € = P&L × Kontowert-Satz, geblowtes Konto = −Kontowert${ohneEur ? ` (${hs.offen ? hs.offen + ' offen — Ergebnis nicht gelesen' : ''}${hs.offen && hs.ohne ? ', ' : ''}${hs.ohne ? hs.ohne + ' ohne Satz' : ''}; zählen nicht)` : ''}. Darunter: laufende jetzt.`
+      : `Beendete Trades heute: echter P&L $ · hypothetisch € = P&L × Kontowert-Satz${ohneEur ? ` (${ohneEur} ohne Satz)` : ''}. Darunter: laufende jetzt.`
+    const ergKachel = `<div class="kpi" title="${escapeHtml(ergTip)}">
+        <div class="kpi-label">Ergebnis heute</div><div class="kpi-value ${kl(usdFertig)}">${mitErg ? vzU(usdFertig) : '–'}</div>
+        <span class="kpi-delta umbruch">${mitErg ? `<b class="${kl(eurFertig)}">${vzE(eurFertig)}</b>` : fertigN ? 'Ergebnis offen' : 'noch nichts beendet'}${h.zeilen.length ? ` · läuft <b class="${kl(h.jetzt)}">${vzE(h.jetzt)}</b>` : ''}</span></div>`
     const kacheln = `<div class="kpis tpl-kpis5">
         ${zahlKachel('Geplant', geplant.length, unbest ? `${unbest} unbestätigt` : geplant.length ? 'alle bestätigt' : '–', 'var(--good)', 'heute geplant, noch nicht gestartet')}
         ${zahlKachel('Läuft', laeuft.length, laeuft.length ? `Live ${vzU(usdLauf)}` : '–', 'color-mix(in srgb,var(--good) 45%,transparent)', 'läuft gerade')}
-        ${zahlKachel('Beendet', fertigIds.size, fertigIds.size ? `${bilHeute.filter(z => Number(z.pl_usd) > 0).length} im Plus` : '–', farbe, 'heute beendet')}
+        ${zahlKachel('Beendet', fertigN, fertigN ? (hs ? `${hs.nPlus} im Plus${hs.offen ? ` · ${hs.offen} offen` : ''}` : `${bilHeute.filter(z => Number(z.pl_usd) > 0).length} im Plus`) : '–', farbe, 'heute beendet')}
         ${zahlKachel('Ausgelassen', aus.length, lauf ? (gruendeTxt[0] || '–') : 'noch kein Lauf heute', 'var(--sub-2)', lauf ? (gruendeTxt.join(' · ') || 'nichts ausgelassen') : 'Der Planer ist für heute noch nicht gelaufen')}
         ${ergKachel}</div>`
     // ── KONTEN NACH STATUS: Konten der ID aus dem letzten Lauf (geplant[] + ausgelassen[], je Konto einmal) — Typ + Zustand (Grund)
@@ -61569,9 +61677,13 @@
     const lt = h.zeilen.length && typeof laufZeilenHtml === 'function' ? laufZeilenHtml(tplLaufEintraege(h.zeilen, D), { titel: 'Läuft jetzt', kurs: tplKursJetzt(),
       summe: h.zeilen.some(z => z.hypo != null) ? { usd: usdLauf, eur: h.jetzt } : null, attr: e => `data-idd-plan="${escapeHtml(String(e.z.plan_id))}"` }) : ''
     const ltKarte = lt ? `<div class="tpl-lz">${lt}</div>` : `<div class="ap-idd-karte"><div class="ap-idd-h">Läuft jetzt <b>0</b></div><div class="ap-idd-leer">Nichts läuft.</div></div>`
+    // ── HEUTE BEENDET (Finn 08.10.2026): unter „Läuft jetzt" jeder heute beendete Trade dieser ID — Konto, Start–Ende (Dubai), Richtung,
+    // Kennzeichen bestanden/geblowt/nicht gelesen, € hypothetisch über P&L $; Kopfzeile „Heute: +x € gewonnen · −y € verloren · netto z €"
+    const hbKarte = hb ? `<div class="ap-idd-karte ap-idd-hb"><div class="ap-idd-h">Heute beendet <b>${hb.length}</b><span>Dubai-Tag · echter P&amp;L × Kontowert-Satz · geblowt = −Kontowert</span></div>
+        <div class="tpl-hb-satz">${tplHeuteSatzHtml(hs)}</div>${hb.length ? tplHeuteListeHtml(hb, { name: false }) : '<div class="ap-idd-leer">Heute noch nichts beendet.</div>'}</div>` : ''
     el.innerHTML = `<div class="ap-idd" style="--id:${farbe}"><div class="ap-idd-kopf"><span class="ap-adm-id"><i style="background:${farbe}"></i>${escapeHtml(name)}</span>
         <span>heute · Dubai${_apd.d && _apd.d.um ? ' · Stand ' + tplUhrIso(_apd.d.um) : ''}</span></div>
-      ${kacheln}<div class="ap-idd-zwei">${kontenKarte}${tageKarte}</div>${ltKarte}</div>`
+      ${kacheln}<div class="ap-idd-zwei">${kontenKarte}${tageKarte}</div>${ltKarte}${hbKarte}</div>`
     el.querySelectorAll('[data-idd-plan]').forEach(b => b.addEventListener('click', ev => {
       ev.stopPropagation()
       const z = h.zeilen.find(x => String(x.plan_id) === b.dataset.iddPlan); if(!z) return

@@ -15366,6 +15366,237 @@ def admin_hypo_bilanz():
         print(f"[hypo-bilanz] ⚠️ GET: {type(e).__name__}: {e}", flush=True)
         return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 500
 
+
+# HEUTE BEENDET (Finn 08.10.2026: „Wenn ich oben auf die Kachel einer ID drücke, sehe ich ihre Trades von heute. Ich will dort einmal die
+# laufenden und einmal die vergangenen, heute schon gelaufenen Trades sehen. Plus wie viel hypothetische Euro diese ID heute gemacht oder
+# verloren hat … Dasselbe für alle zusammen"). GET /admin/auto-plan/delta trägt dafür heute_beendet[]: jeder HEUTE (Dubai-Tag, ab 00:00
+# Dubai) beendete Trade (review/completed) auf einem Challenge/Phase-Konto (AP_TYPEN wie die ganze Planer-Sicht — WD/Funded raus), Auto-
+# UND Hand-Trades (die Läuft-Liste zeigt auch beide). € GENAU wie die Hypo-Bilanz: hypo_bilanz_zeile (echter P&L $ × Kontowert-Satz, Satz
+# aus dem Lauf des Tages → Kontowert bei der Balance vor dem Trade → Kontowert heute) — keine zweite Rechnung. Dazu je Zeile art:
+#   offen     Ergebnis noch nicht gelesen (kein P&L, oder nur die Demo-Schätzung kennt den Verlust — dieselbe Unterscheidung wie
+#             ap_letzter_trade_geblasen) → ergebnis_usd/eur None, zählt in keiner Summe (nicht raten);
+#   geblowt   echter Verlust ≥ 95 % des Polsters vor dem Trade (Polster aus ap_kontowert, 95-%-Schwelle wie „geblowt?") oder das Konto ist
+#             danach mit Grund blown archiviert → eur = −Kontowert vor dem Trade (Finn: „ein geblowtes Konto zählt mit −Kontowert");
+#   bestanden Balance nachher ≥ Ziel der Phase (Kernwerte ziel_pct, accounts.ziel_pct_konto geht vor) oder danach passed/Ziel-Wache;
+#   normal    sonst.
+# Nur Lesen. 30 s im Prozess gemerkt (alle IDs je Dubai-Tag) — jeder Admin-Tab fragt das Delta; die Sicht (sicht_uid) filtert
+# ap_delta_antwort genau wie offen[]/geplant[].
+AP_HB_TZ = "Asia/Dubai"
+AP_HB_CACHE_S = 30
+AP_HB_BLOW_ANTEIL = 0.95                               # wie ap_letzter_trade_geblasen: ≥ 95 % verloren = geblowt
+AP_HB_ECHT_QUELLEN = ("tv", "reader", "puls", "hand")  # pl_quelle eines echten Ergebnisses (ap_letzter_trade_geblasen)
+_ap_hb_cache = {"bis": 0.0, "tag": None, "zeilen": None, "ab": None}
+_ap_hb_lock = threading.Lock()
+
+
+def ap_hb_ende(p):
+    """Ende eines beendeten Plans: ended_at → completed_at → final.at (ISO) oder None."""
+    base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+    fin = base.get("final") if isinstance(base.get("final"), dict) else {}
+    return p.get("ended_at") or p.get("completed_at") or fin.get("at") or None
+
+
+def ap_hb_gelesen(p):
+    """REIN RECHNEND (testbar): ist das Ergebnis des beendeten Plans gelesen? Ja mit Today's P&L oder Endbalance (Puls/Reader), mit
+    pl_quelle tv/reader/puls/hand, bei Echo (mt5/mt5v2 — der Copier liest MT5 direkt) mit master_pl oder Endbalance. Nein ohne P&L,
+    und wenn nur die Demo-Schätzung den Verlust kennt (final.master_pl_schaetzung bzw. final.quelle demo, weder Today noch Endbalance) —
+    dieselbe Unterscheidung wie ap_letzter_trade_geblasen (1). Anlass: Inas Apex-Trades am 08.10.2026, master_pl −2.000 = Schätzung."""
+    base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+    fin = base.get("final") if isinstance(base.get("final"), dict) else {}
+    if _wd_num(fin.get("today_pnl")) is not None or _wd_num(fin.get("balance_end")) is not None:
+        return True
+    pl = _wd_num(p.get("master_pl"))
+    if str(p.get("route") or "") in LT_ECHO_ROUTEN and (pl is not None or _wd_num(fin.get("master_balance")) is not None):
+        return True
+    if pl is None:
+        return False
+    if str(p.get("pl_quelle") or "") in AP_HB_ECHT_QUELLEN:
+        return True
+    return _wd_num(fin.get("master_pl_schaetzung")) is None and str(fin.get("quelle") or "") != "demo"
+
+
+def ap_hb_zeile(p, acc, firmen, lauf_satz, kw_heute, namen, archiv=None, letzter=True):
+    """REIN RECHNEND (testbar): ein heute beendeter Plan → Zeile für delta.heute_beendet[] {plan_id, user_id, user, firma, konto, ende4,
+    typ, richtung, route, auto, status, start, ende, ergebnis_usd, eur, satz, satz_quelle, kontowert_eur, art, grund}.
+    lauf_satz/kw_heute wie hypo_bilanz_zeile. archiv = (at, grund) des frühesten Archiv-Eintrags mit Grund für das Konto oder None;
+    letzter = jüngster heute beendeter Trade dieses Kontos — nur dann zählen Archiv-Grund und Ziel-Wache als Ergebnis DIESES Trades."""
+    acc, namen = acc or {}, namen or {}
+    base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+    tv = base.get("tv") if isinstance(base.get("tv"), dict) else {}
+    fin = base.get("final") if isinstance(base.get("final"), dict) else {}
+    gelesen = ap_hb_gelesen(p)
+    # Echo meldet die Endbalance als final.master_balance — für die Satz-Kette der Hypo-Bilanz (Balance vorher = Ende − P&L) wie balance_end
+    p_satz = p
+    if _wd_num(fin.get("balance_end")) is None and _wd_num(fin.get("master_balance")) is not None:
+        p_satz = dict(p, mt5_baseline=dict(base, final=dict(fin, balance_end=fin.get("master_balance"))))
+    z = hypo_bilanz_zeile(p_satz, acc, firmen, lauf_satz, kw_heute, namen)
+    typ = p.get("konto_typ") or acc.get("account_type") or ""
+    start = p.get("started_at")
+    out = {"plan_id": str(p.get("id")), "user_id": str(p.get("user_id") or ""), "user": namen.get(str(p.get("user_id") or ""), ""),
+           "firma": p.get("master_firm") or acc.get("firm") or "", "konto": p.get("master_name") or acc.get("name") or "",
+           "ende4": _ap_ende4(acc), "typ": typ, "richtung": p.get("richtung"), "route": p.get("route"), "auto": bool(p.get("auto_plan")),
+           "status": p.get("status"), "start": start, "ende": ap_hb_ende(p), "ergebnis_usd": None, "eur": None, "satz": None,
+           "satz_quelle": None, "kontowert_eur": None, "art": "offen", "grund": None}
+    # Kontowert + Polster VOR dem Trade (ap_kontowert, dieselbe Formel wie live): Balance vorher = Start-Lesung, sonst Ende − P&L
+    pl = z["pl_usd"] if z else None
+    kp = ap_kw_param(ap_regel_finden(firmen, acc.get("firm") or p.get("master_firm")))
+    bs = _wd_num(tv.get("balance_start"))
+    if bs is None:
+        bs = _wd_num(base.get("balance_start"))
+    be = _wd_num(fin.get("balance_end"))
+    if be is None:
+        be = _wd_num(fin.get("master_balance"))
+    if bs is None and be is not None and pl is not None:
+        bs = be - pl
+    if be is None and bs is not None and pl is not None:
+        be = bs + pl
+    kv = ap_kontowert(typ, bs, kp) if (kp and bs is not None) else None
+    if kv:
+        out["kontowert_eur"] = kv["wert"]
+    st = _ap_ts(start)
+    a_at, a_grund = archiv if archiv else (None, None)
+    nach = bool(letzter and a_at is not None and (st is None or a_at >= st))
+    arch_blown, arch_passed = nach and a_grund == "blown", nach and a_grund in ("passed", "passed_pending")
+    wert_txt = lambda w: ("−" if float(w) < 0 else "") + f"{abs(float(w)):,.0f}".replace(",", ".")
+    if z is None or not gelesen:
+        if arch_blown and kv:      # Finn hat das Konto als geblowt archiviert — das ist ein Ergebnis, auch ohne Lesung
+            out.update(art="geblowt", eur=-float(kv["wert"]),
+                       grund=f"als geblowt archiviert, Ergebnis nicht gelesen — zählt mit −Kontowert {wert_txt(kv['wert'])} €")
+            return out
+        s = _wd_num(fin.get("master_pl_schaetzung"))
+        out["grund"] = "Ergebnis noch nicht gelesen" + (f" (Demo-Schätzung {wert_txt(s)} $ — zählt nicht)" if s is not None else "")
+        return out
+    out.update(ergebnis_usd=pl, eur=z["hypo_eur"], satz=z["satz"], satz_quelle=z["satz_quelle"], art="normal")
+    polster = float(kv["polster"]) if kv and kv.get("polster") else None
+    if arch_blown or (polster and pl <= -AP_HB_BLOW_ANTEIL * polster):
+        out["art"] = "geblowt"
+        if kv:
+            out["eur"] = -float(kv["wert"])
+            out["grund"] = f"Konto aufgebraucht — zählt mit −Kontowert {wert_txt(kv['wert'])} € (vor dem Trade)"
+        else:
+            out["grund"] = "geblowt — Kontowert vor dem Trade unbekannt, € = P&L × Satz"
+        return out
+    # Ziel der Phase wie ap_regel_konto (ziel_pct_konto vor der Regel) und Phasen-Zuordnung wie ap_kontowert
+    zp = dict((kp or {}).get("ziel_pct") or {})
+    zk = acc.get("ziel_pct_konto")
+    if isinstance(zk, dict):
+        zp.update({k: float(v) for k, v in zk.items() if _wd_num(v) is not None})
+    phasen = [x for x in AP_KW_PHASEN if x in zp]
+    ph = typ if typ in zp else ((phasen[0] if typ != "phase2" or len(phasen) < 2 else phasen[1]) if phasen else None)
+    ziel = float(kv["groesse"]) * (1 + float(zp[ph]) / 100.0) if (kv and ph) else None
+    ze = _ap_ts(acc.get("ziel_erreicht_at"))
+    if (ziel and be is not None and be >= ziel - 0.5) or arch_passed or (letzter and ze is not None and (st is None or ze >= st)):
+        out["art"] = "bestanden"
+        out["grund"] = f"Ziel {wert_txt(ziel)} $ erreicht" if (ziel and be is not None and be >= ziel - 0.5) else "bestanden (Archiv/Ziel-Wache)"
+    if out["eur"] is None:
+        out["grund"] = (out["grund"] + " · " if out["grund"] else "") + "ohne Kontowert-Satz — zählt nicht in die €-Summe"
+    return out
+
+
+def _ap_hb_laden(firmen, jetzt=None):
+    """heute_beendet[] aller IDs (ohne ADMIN_EXCLUDE_EMAILS), neueste zuerst — nur Lesen: beendete Pläne mit Ende seit 00:00 Dubai, ihre
+    Konten, Archiv-Gründe, Läufe der Start-Tage (Satz wie die Hypo-Bilanz); Kontowerte heute nur, wenn eine Zeile sonst ohne Satz bliebe
+    (ap_kontowerte_gemerkt, höchstens einmal je Minute). → (zeilen, ab_iso)"""
+    jetzt = jetzt or datetime.now(timezone.utc)
+    z = jetzt.astimezone(_ap_tz(AP_HB_TZ))
+    ab = datetime(z.year, z.month, z.day, tzinfo=z.tzinfo)
+    ab_q = ab.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")      # ohne „+" (würde im or-Filter zum Leerzeichen)
+    namen, aus = _ap_namen()
+    roh = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_name,master_firm,route,richtung,status,auto_plan,master_pl,"
+                                            "pl_quelle,konto_typ,started_at,ended_at,completed_at,"
+                                            "tv:mt5_baseline->tv,final:mt5_baseline->final,bstart:mt5_baseline->balance_start",
+                                  "status": "in.(completed,review)", "or": f"(ended_at.gte.{ab_q},completed_at.gte.{ab_q})",
+                                  "order": "started_at.asc"})
+    plaene = []
+    for p in roh:
+        p = dict(p, mt5_baseline={"tv": p.pop("tv", None), "final": p.pop("final", None), "balance_start": p.pop("bstart", None)})
+        e = _ap_ts(ap_hb_ende(p))
+        if e is not None and e >= ab and str(p.get("user_id")) not in aus:
+            plaene.append(p)
+    kids = sorted({str(p.get("master_account_id")) for p in plaene if p.get("master_account_id")})
+    accs = {}
+    for j in range(0, len(kids), 150):
+        q = {"id": "in.(" + ",".join(kids[j:j + 150]) + ")"}
+        try:
+            rows = _sb_all("accounts", dict(q, select="id,name,firm,account_type,external_id,ziel_pct_konto,ziel_erreicht_at"))
+        except requests.exceptions.HTTPError:
+            rows = _sb_all("accounts", dict(q, select="id,name,firm,account_type,external_id"))   # Spalten fehlen → ohne
+        accs.update({str(a["id"]): a for a in rows if a.get("id")})
+    plaene = [p for p in plaene if (p.get("konto_typ") or (accs.get(str(p.get("master_account_id"))) or {}).get("account_type")) in AP_TYPEN]
+    # Archiv-Grund je Konto (frühester Eintrag mit Grund, wie ap_sieben_tage) — nicht lesbar → ohne
+    arch = {}
+    try:
+        for row in _sb_all("user_settings", {"select": "value", "key": "eq.archive"}):
+            v = row.get("value")
+            if isinstance(v, str):
+                try:
+                    v = json.loads(v)
+                except ValueError:
+                    v = None
+            for kid, info in (v.items() if isinstance(v, dict) else ()):
+                if str(kid) in accs and isinstance(info, dict) and info.get("reason") and info.get("at"):
+                    d = _ap_ts(info["at"])
+                    if d and (str(kid) not in arch or d < arch[str(kid)][0]):
+                        arch[str(kid)] = (d, str(info["reason"]).strip().lower())
+    except Exception as e:
+        print(f"[auto-plan] ⚠️ heute beendet/Archiv: {type(e).__name__}: {e}", flush=True)
+    # Satz aus den echten Läufen der Start-Tage (deutsches Datum wie die Hypo-Bilanz), spätester Lauf gewinnt
+    tag_je = {}
+    for p in plaene:
+        st = _ap_ts(p.get("started_at"))
+        tag_je[str(p.get("id"))] = st.astimezone(_ap_tz("Europe/Berlin")).date().isoformat() if st else str(p.get("started_at") or "")[:10]
+    lauf = {}
+    tage = sorted({t for t in tag_je.values() if re.fullmatch(r"\d{4}-\d{2}-\d{2}", t)})
+    if tage:
+        try:
+            for l in _sb_all("auto_plan_lauf", {"select": "tag,at,trocken:ergebnis->trocken,geplant:ergebnis->geplant",
+                                                "tag": "in.(" + ",".join(tage) + ")", "order": "at.asc"}):
+                if l.get("trocken") is True:
+                    continue
+                for g in l.get("geplant") or []:
+                    if isinstance(g, dict) and g.get("konto_id") and g.get("satz_eur_je_usd") is not None:
+                        lauf[(str(l.get("tag")), str(g["konto_id"]))] = float(g["satz_eur_je_usd"])
+        except Exception as e:
+            print(f"[auto-plan] ⚠️ heute beendet/Lauf: {type(e).__name__}: {e}", flush=True)
+    letzt = {}
+    for p in plaene:
+        k = str(p.get("master_account_id") or "")
+        if k and str(ap_hb_ende(p) or "") > letzt.get(k, ""):
+            letzt[k] = str(ap_hb_ende(p) or "")
+
+    def zeile(p, kw_heute):
+        k = str(p.get("master_account_id") or "")
+        return ap_hb_zeile(p, accs.get(k), firmen, lauf.get((tag_je.get(str(p.get("id"))), k)), kw_heute, namen,
+                           arch.get(k), letzter=bool(k) and str(ap_hb_ende(p) or "") >= letzt.get(k, ""))
+    zeilen = [zeile(p, None) for p in plaene]
+    fehlt = [i for i, r in enumerate(zeilen) if r["art"] != "offen" and r["eur"] is None]
+    if fehlt:
+        try:
+            kw = ap_kontowerte_gemerkt(None)
+            for i in fehlt:
+                s = (kw.get(str(plaene[i].get("master_account_id") or "")) or {}).get("satz_eur_pro_usd")
+                if s is not None:
+                    zeilen[i] = zeile(plaene[i], s)
+        except Exception as e:
+            print(f"[auto-plan] ⚠️ heute beendet/Kontowerte: {type(e).__name__}: {e}", flush=True)
+    zeilen.sort(key=lambda r: str(r.get("ende") or ""), reverse=True)
+    return zeilen, ab.isoformat()
+
+
+def ap_heute_beendet_gemerkt(firmen, jetzt=None):
+    """_ap_hb_laden mit dem 30-s-Merker (alle IDs, je Dubai-Tag); Single-Flight — zwei Tabs gleichzeitig laden nicht doppelt.
+    Fehler fliegen durch (nicht gemerkt)."""
+    jetzt = jetzt or datetime.now(timezone.utc)
+    tag = jetzt.astimezone(_ap_tz(AP_HB_TZ)).strftime("%Y-%m-%d")
+    with _ap_hb_lock:
+        c = _ap_hb_cache
+        if c["zeilen"] is not None and c["tag"] == tag and c["bis"] > time.time():
+            return c["zeilen"], c["ab"]
+        zeilen, ab = _ap_hb_laden(firmen, jetzt)
+        _ap_hb_cache.update(bis=time.time() + AP_HB_CACHE_S, tag=tag, zeilen=zeilen, ab=ab)
+        return zeilen, ab
+
+
 def _ap_hhmm_txt(m):
     return f"{int(m) // 60:02d}:{int(m) % 60:02d}"
 
@@ -18323,10 +18554,17 @@ def ap_delta_antwort(stand, sicht_uid=None, pc_lebt=None):
                                     if not z.get("satz_eur_je_usd") or not z.get("usd_pro_pkt")]}
     except Exception as e:
         out["szenario"] = {"fehler": f"{type(e).__name__}: {e}"}
+    # HEUTE BEENDET (Finn 08.10.2026): heute (Dubai) beendete Trades mit € wie die Hypo-Bilanz — vom Delta-Route-Aufruf in den Stand gelegt
+    # (ap_heute_beendet_gemerkt); fehlt der Schlüssel (Bot, Selbsttests), bleibt das Feld weg. Die Sicht filtert unten wie offen[]/geplant[].
+    if isinstance(stand.get("heute_beendet"), list):
+        out["heute_beendet"], out["heute_ab"] = list(stand["heute_beendet"]), stand.get("heute_ab")
+    elif stand.get("heute_beendet_fehler"):
+        out["heute_beendet"], out["heute_beendet_fehler"] = None, stand["heute_beendet_fehler"]
     if sicht_uid:
         uid = str(sicht_uid)
-        for f in ("offen", "geplant", "umplanungen", "hinweise"):
-            out[f] = [x for x in out[f] if str(x.get("user_id")) == uid]
+        for f in ("offen", "geplant", "umplanungen", "hinweise", "heute_beendet"):
+            if isinstance(out.get(f), list):
+                out[f] = [x for x in out[f] if str(x.get("user_id")) == uid]
         out["sicht"] = "eigene"
     return out
 
@@ -18684,7 +18922,14 @@ def admin_auto_plan_delta():
         return err
     try:
         # 07.10.2026 TRADE-PLANER-ALLE-IDS: ?sicht=alle → alle IDs (außer „nur eigene"), sonst wie bisher Admin alle / eigene ID
-        antwort = ap_delta_antwort(_ap_stand_laden(reg), _ap_sicht_aus_anfrage(admin, uid), pc_lebt=_ap_pc_lebt_gecacht())
+        stand = _ap_stand_laden(reg)
+        # HEUTE BEENDET (Finn 08.10.2026, ID-Detail + Kachel „Heute"): eigener try — fällt es aus, bleibt das übrige Delta unberührt
+        try:
+            stand["heute_beendet"], stand["heute_ab"] = ap_heute_beendet_gemerkt((reg.get("regeln") or {}).get("firmen") or [])
+        except Exception as e:
+            stand["heute_beendet_fehler"] = f"{type(e).__name__}: {e}"
+            print(f"[auto-plan] ⚠️ heute beendet: {stand['heute_beendet_fehler']}", flush=True)
+        antwort = ap_delta_antwort(stand, _ap_sicht_aus_anfrage(admin, uid), pc_lebt=_ap_pc_lebt_gecacht())
         antwort.setdefault("sicht", "alle")
         # BESTÄTIGEN FÜR ALLE (07.10.2026): alle = darf dieser Login fremde Vorschläge bestätigen/zurücknehmen/löschen (ap_eingriff_sicht;
         # Nicht-Admin ist hier immer im Planer, _ap_zugang). admin_zugang nicht lesbar → vorsichtshalber false
