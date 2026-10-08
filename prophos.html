@@ -1992,6 +1992,10 @@
   :is(#tpl-view,#adm-pane-planer) .tpl-hb .w{flex-wrap:wrap;row-gap:1px} :is(#tpl-view,#adm-pane-planer) .tpl-hb .w small{flex-basis:100%;padding-left:14px} :is(#tpl-view,#adm-pane-planer) .tpl-hb .w.ohne-name small{padding-left:0}
   :is(#tpl-view,#adm-pane-planer) .tpl-hb .r{display:flex;align-items:center;flex-wrap:wrap;gap:3px 5px} :is(#tpl-view,#adm-pane-planer) .tpl-hb .r em{margin-right:0} :is(#tpl-view,#adm-pane-planer) .tpl-hb .r small{font-size:11px;color:var(--sub-2)}
   :is(#tpl-view,#adm-pane-planer) .tpl-hb .r .ap-idd-chip{font-size:10.5px;padding:1px 7px}
+  /* Heute beendet (08.10.2026): Filter-Chips über der Summe, Balance → Ziel als eigene Spalte vor dem €-Wert, am Handy darunter */
+  :is(#tpl-view,#adm-pane-planer) .tpl-hb-filter{margin:0 0 6px;gap:5px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hz.tpl-hb.mit-bz{grid-template-columns:minmax(0,1fr) minmax(150px,auto) 170px 96px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hb .bz{min-width:0} :is(#tpl-view,#adm-pane-planer) .tpl-hb .bz .wdl-bz{margin-top:0} :is(#tpl-view,#adm-pane-planer) .tpl-hb .bz .pz-bahn{max-width:none}
   :is(#tpl-view,#adm-pane-planer) .tpl-hb .h{display:flex;flex-direction:column;align-items:flex-end;line-height:1.25;font-size:13.5px} :is(#tpl-view,#adm-pane-planer) .tpl-hb .h small{font-size:11px;font-weight:500;color:var(--sub)}
   :is(#tpl-view,#adm-pane-planer) .tpl-hb-satz{font-size:12.5px;color:var(--sub);margin:0 0 6px;line-height:1.45} :is(#tpl-view,#adm-pane-planer) .tpl-hb-satz b{font-weight:700;font-variant-numeric:tabular-nums}
   :is(#tpl-view,#adm-pane-planer) .tpl-hb-mehr summary{cursor:pointer;padding:6px 4px;font-size:12px;color:var(--sub);list-style:none} :is(#tpl-view,#adm-pane-planer) .tpl-hb-mehr summary::before{content:'▸ ';color:var(--sub-2)} :is(#tpl-view,#adm-pane-planer) .tpl-hb-mehr[open] summary::before{content:'▾ '}
@@ -2049,7 +2053,8 @@
     :is(#tpl-view,#adm-pane-planer) .tpl-hz{grid-template-columns:minmax(0,1fr) auto auto auto;gap:2px 6px;padding:4px 2px} :is(#tpl-view,#adm-pane-planer) .tpl-hz .p,:is(#tpl-view,#adm-pane-planer) .tpl-hz .s{display:none}
     :is(#tpl-view,#adm-pane-planer) .tpl-hz .z{grid-column:auto;text-align:right;font-size:10.5px} :is(#tpl-view,#adm-pane-planer) .tpl-hz .h{font-size:12.5px} :is(#tpl-view,#adm-pane-planer) .tpl-hz .r{font-size:11px} :is(#tpl-view,#adm-pane-planer) .tpl-hz .r em{min-width:30px;margin-right:4px}
     :is(#tpl-view,#adm-pane-planer) .tpl-hz .w small{max-width:110px} :is(#tpl-view,#adm-pane-planer) .tpl-hz .w b{max-width:84px;overflow:hidden;text-overflow:ellipsis}
-    :is(#tpl-view,#adm-pane-planer) .tpl-hz.tpl-hb{grid-template-columns:minmax(0,1fr) auto auto;gap:2px 8px}   /* Heute beendet: Handy drei Spalten, nichts versteckt */
+    :is(#tpl-view,#adm-pane-planer) .tpl-hz.tpl-hb,:is(#tpl-view,#adm-pane-planer) .tpl-hz.tpl-hb.mit-bz{grid-template-columns:minmax(0,1fr) auto auto;gap:2px 8px}
+    :is(#tpl-view,#adm-pane-planer) .tpl-hb .bz{grid-column:1 / -1;order:9} :is(#tpl-view,#adm-pane-planer) .tpl-hb .bz .wdl-bz{flex-direction:row;align-items:center;gap:8px} :is(#tpl-view,#adm-pane-planer) .tpl-hb .bz .pz-bahn{flex:1}   /* Heute beendet: Handy drei Spalten, nichts versteckt */
     :is(#tpl-view,#adm-pane-planer) .tpl-hb .w b,:is(#tpl-view,#adm-pane-planer) .tpl-hb .w small{max-width:none} :is(#tpl-view,#adm-pane-planer) .tpl-hb .r{max-width:92px} :is(#tpl-view,#adm-pane-planer) .tpl-hb .h{font-size:12.5px}
     :is(#tpl-view,#adm-pane-planer) .kpis.tpl-kpis5 .kpi-value{white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere}   /* Netto-Zahl darf umbrechen (QA Punkt 3) */
     :is(#tpl-view,#adm-pane-planer) .tpl-ids .tpl-kopf-r{margin-left:0;width:100%} :is(#tpl-view,#adm-pane-planer) .tpl-ids .tpl-lauf{white-space:normal}
@@ -3418,6 +3423,10 @@
   #dashboard-view .pz-bahn2 > .pz-bahn-fuell{z-index:2}
   #dashboard-view .pz-bahn2 > .pz-bahn-fuell.is-tp{opacity:.4;border-radius:0 3px 3px 0;animation:rsqCardPulse 1.8s ease-in-out infinite}
   #dashboard-view .pz-bahn2 > .pz-bahn-start{top:-2px;bottom:-2px;height:auto;width:2px;margin-left:-1px;border-radius:1px;background:var(--ink-2);z-index:3}
+  #dashboard-view .pz-bahn2 > .pz-bahn-fuell.is-sockel{opacity:.45}
+  #dashboard-view .pz-bahn2 > .pz-bahn-fuell.is-plus{background:#12B76A;box-shadow:0 0 6px rgba(18,183,106,.55);border-radius:0 3px 3px 0}
+  #dashboard-view .pz-bahn2 > .pz-bahn-fuell.is-minus{background:#F04438;box-shadow:0 0 6px rgba(240,68,56,.55);border-radius:0 3px 3px 0}
+  #dashboard-view .pz-bahn2 > .pz-bahn-vor{top:-2px;bottom:-2px;height:auto;width:2px;margin-left:-1px;border-radius:1px;background:var(--sub);z-index:3}
   #dashboard-view .pz-bahn2 > .pz-bahn-pkt{position:absolute;top:50%;width:10px;height:10px;border-radius:50%;transform:translate(-50%,-50%);box-shadow:0 0 0 2px var(--surface);z-index:4}
   @media (prefers-reduced-motion:reduce){#dashboard-view .pz-bahn2 > .pz-bahn-fuell.is-tp{animation:none}}
   /* ID-Hierarchie (08.10.2026): Karte je ID mit Rand in ID-Farbe, großer sticky Kopf, Firmen-Kopf darunter 13 px grau */
@@ -28614,23 +28623,10 @@
    * aus wdlBlowStand bzw. bei Läuft Balance vor dem Trade + Live-P&L), Ziel = ziel_usd (Ziel-Wache: Kernwerte/ziel_pct_konto), Boden =
    * dasselbe Liq-Level wie wdlBlowStand (bei Soft-Breach der Konto-Boden), Start = Kontogröße wie die Zeile. Ohne Ziel (Funded, Winning
    * Days) kein Balken. → HTML | '' */
-  function wdlBalZiel(t, ist, kurz){   // kurz: schmale Konto-Spalte (110 px) — nur „70 %" / „Blow 200" / „🎯 Ziel", Rest im Tooltip
-    const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
-    const f = window._pzBahnHtml, ziel = n(t && t.ziel_usd)
-    if(typeof f !== 'function' || ziel == null || ist == null || !isFinite(Number(ist))) return ''
-    const k = t.konto || {}
-    const gr = (typeof kontoGroesseAnzeige === 'function') ? kontoGroesseAnzeige(k.name, n(k.groesse), t.balance_start) : n(k.groesse)
-    const liq = t.liq_regel_soft ? n(t.liq_boden_balance) : (n(t.liq_regel_balance) ?? n(t.liq_balance))
-    const bz = f({ groesse: gr, ziel, boden: liq, ist: Number(ist), uid: wdlUid(t) }); if(!bz) return ''
-    const de = v => Math.round(v).toLocaleString('de-DE'), rest = Math.max(0, ziel - Number(ist))
-    const tip = `${bz.titel}${liq != null ? ' · Blow ' + de(liq) + (Number(ist) > liq ? ' (noch ' + de(Number(ist) - liq) + ' $ Abstand)' : '') : ''} · Rest bis Ziel ${de(rest)} $`
-    // unter dem Start zählt der Abstand zum Blow (Finn: „am Ziel des Accounts oder am Blow"), darüber % + Rest bis Ziel
-    const ist_ = Number(ist), unterStart = gr > 0 && ist_ < gr
-    const txt = rest <= 0 ? (kurz ? '🎯 Ziel' : '🎯 am Ziel') : liq != null && ist_ <= liq + 25 ? (kurz ? '💀 Blow' : '💀 am Blow')
-      : unterStart && liq != null ? (kurz ? `Blow ${de(ist_ - liq)}` : `Blow in ${de(ist_ - liq)} · Rest ${de(rest)}`)
-      : (kurz ? `${bz.prozent} %` : `${bz.prozent} % · Rest ${de(rest)}`)
-    return `<span class="wdl-bz" title="${escapeHtml(tip)}">${bz.html}<small${txt.startsWith('Blow') || txt.startsWith('💀') ? ' class="is-blow"' : ''}>${txt}</small></span>`
+  function wdlBalZiel(t, ist, kurz, vor){   // kurz: schmale Konto-Spalte (110 px) — nur „70 %" / „Blow 200" / „🎯 Ziel", Rest im Tooltip
+    return (typeof window._balZielZeile === 'function' && t) ? window._balZielZeile(t, { ist, kurz, vor, uid: wdlUid(t) }) : ''
   }
+
   // Endstand nach dem Trade für den Balken (wie die Konto-Spalte), sonst Start + P&L
   function wdlEndstand(t){
     const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
@@ -28644,7 +28640,7 @@
     if(!b) return '<span class="wdl-z-konto" title="noch keine Balance nach dem Trade gelesen">–</span>'
     const f0 = v => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 0 })
     const tip = `${b.quelle}: ${f0(b.bal)} $${b.liq != null ? ` · Blow (Max Drawdown) bei ${f0(b.liq)} $` : ''}${b.tagLiq != null ? ` · Tageslimit bei ${f0(b.tagLiq)} $ (Soft-Breach, Konto lebt)` : ''}`
-    return `<span class="wdl-z-konto" title="${escapeHtml(tip)}"${b.geblowt ? ' style="color:#b91c1c"' : ''}>${f0(b.bal)} $${wdlBalZiel(t, b.bal, true)}</span>`
+    return `<span class="wdl-z-konto" title="${escapeHtml(tip)}"${b.geblowt ? ' style="color:#b91c1c"' : ''}>${f0(b.bal)} $${wdlBalZiel(t, b.bal, true, t.balance_start)}</span>`
   }
   /* ANSEHEN (02.10.2026, Finn: „Ansehen bei allen laufenden Trades — Puls navigiert am jeweiligen PC zu dem Trade, damit ich ihn
    * visuell sehe; ist er schon zu, wird er direkt abgehakt"). Railway legt das Signal im Namen des Plan-Besitzers an (aktion
@@ -28837,7 +28833,7 @@
           miZ = sp ? wdlSpanneHtml(sp, pkt ? pkt.v : null, P.farbe, wdlEchoSpTip(t, sp, pkt))
             : zelle('mi', '–', { tip: t.position_offen ? 'SL oder TP fehlt an der MT5-Position' : 'keine frische MT5-Position' })
           const echoIst = (num(t.balance_start) != null && num(t.pl_live) != null) ? num(t.balance_start) + num(t.pl_live) : num(t.balance_start)   // ohne MT5-Stand: Balance vor dem Trade
-          plZ = zelle('pl', `<span class="wdl-pl-m" style="color:${P.farbe}">${P.txt}</span>${fusionLiveZ(t)}${wdlBalZiel(t, echoIst)}`, { tip: P.tip })
+          plZ = zelle('pl', `<span class="wdl-pl-m" style="color:${P.farbe}">${P.txt}</span>${fusionLiveZ(t)}${wdlBalZiel(t, echoIst, false, t.balance_start)}`, { tip: P.tip })
         } else {
         const LT = wdlLiveTexte(wdlLive(t, kp), kp)   // Live-P&L (F28); der 2-s-Takt schreibt denselben Text nach
         const sp = wdlSpanne(t)
@@ -28847,7 +28843,7 @@
           const spTip = `${sp.art === 'SL' ? 'SL' : sp.art === 'Tag' ? 'Tageslimit (Soft-Breach, Konto lebt)' : 'Liquidation'} ${f2(sp.links)}${lg(sp.plLinks)}${sp.regel ? (sp.regelPur ? ' · ' : ' · Regel: ') + sp.regel : ''}${sp.ein != null ? ' · Einstieg ' + f2(sp.ein) + naeh : ''} · TP ${f2(sp.rechts)}${lg(sp.plRechts)}${kp != null ? ' · Kurs ' + f2(kp) : ''}${demoTip(d) ? ' · ' + demoTip(d) : ''}`
           miZ = wdlSpanneHtml(sp, kp, LT.plFarbe, spTip)
         } else miZ = zelle('mi', '–', { tip: num(t.tp_level_nq) == null ? 'kein TP gespeichert' : 'keine Liquidation/SL gespeichert' })
-        plZ = zelle('pl', `<span data-wdl-lv="pl" style="color:${LT.plFarbe}">${LT.pl}</span>${fusionLiveZ(t)}${wdlBalZiel(t, wdlLive(t, kp).bal ?? num(t.balance_start))}`)
+        plZ = zelle('pl', `<span data-wdl-lv="pl" style="color:${LT.plFarbe}">${LT.pl}</span>${fusionLiveZ(t)}${wdlBalZiel(t, wdlLive(t, kp).bal ?? num(t.balance_start), false, t.balance_start)}`)
         }
         // „läuft seit 03:24 · 40 min" (Finn 30.09.2026) — an einem anderen Tag „29.09. · 1 T 3 h"; am Handy nur die Laufzeit
         const ab = new Date(t.started_at || ''), abTxt = isNaN(ab) ? '' : ab.toDateString() === heute ? zeit(t.started_at) : tag(ab)
@@ -28935,8 +28931,8 @@
         zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
       }
       // Handy (08.10.2026, Balance → Ziel): die Konto-Spalte ist dort aus — der Balken steht als eigene Zeile darunter (wdl-z-bzm, nur Handy)
-      const bzM = art === 'lauf' ? wdlBalZiel(t, echo ? ((num(t.balance_start) != null && num(t.pl_live) != null) ? num(t.balance_start) + num(t.pl_live) : num(t.balance_start)) : (wdlLive(t, kp).bal ?? num(t.balance_start)))
-        : (art === 'man' || art === 'pruef' || art === 'zu') ? wdlBalZiel(t, wdlEndstand(t)) : ''
+      const bzM = art === 'lauf' ? wdlBalZiel(t, echo ? ((num(t.balance_start) != null && num(t.pl_live) != null) ? num(t.balance_start) + num(t.pl_live) : num(t.balance_start)) : (wdlLive(t, kp).bal ?? num(t.balance_start)), false, t.balance_start)
+        : (art === 'man' || art === 'pruef' || art === 'zu') ? wdlBalZiel(t, wdlEndstand(t), false, t.balance_start) : ''
       // Überprüfen-Zeilen sind ziehbar (08.10.2026, HTML5-Drag nach „Manuelle Arbeit"; Handler unten am Listen-Container)
       return `<div class="wdl-z wdl-z-${art}${echo ? ' wdl-z-echo' : ''}${an ? ' is-aktiv' : ''}${bzM ? ' mit-bz' : ''}${extra ? ' ' + extra : ''}" style="--wdl-id:${wdlIdFarbe(t)}" data-wdl-trade="${escapeHtml(wdlTid(t))}"${art === 'pruef' ? ` draggable="true" data-wdl-drag="${escapeHtml(wdlTid(t))}"` : ''} title="${escapeHtml(tip)}">`
         + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><i class="wdl-pf">${escapeHtml(wdlWeg(t))}</i><small data-wdl-konto="${escapeHtml(wdlTid(t))}" title="Konto ansehen">${escapeHtml(konto)}</small></span>`
@@ -37774,6 +37770,20 @@
     const balV = a.balVal != null && isFinite(Number(a.balVal)) ? Number(a.balVal) : istV
     const titel = `${boden != null ? 'Liq ' + de(boden) + ' · ' : ''}Start ${de(groesse)} · jetzt ${de(istV)} (${prozent} %)${plL != null ? ' = Balance ' + de(balV) + ' ' + (plL >= 0 ? '+' : '−') + ' P&L ' + de(Math.abs(plL)) : ''}${tpUsd ? ' · nach TP ' + de(istV + tpUsd) : ''}${slUsd ? ' · nach SL ' + de(istV - slUsd) : ''} · Ziel ${de(ziel)}`
     const idFarb = a.uid ? idFarbe(String(a.uid)) : 'var(--ink)'
+    // VORHER → NACHHER (08.10.2026, Finn zu „Heute beendet": „wo steht der Account gerade, wo ist das Ziel, wo ist der Blow, was hat dieser
+    // Trade ausgemacht … kleine leuchtende Farben"): mit a.vor füllt der Sockel bis zum kleineren Stand (gedeckt), der Beitrag des Trades
+    // ist ein leuchtendes Segment zwischen vorher und nachher — grün Gewinn, rot Verlust (geblowt: bis zur Liq-Grenze); Strich = vorher
+    const vorV = a.vor != null && isFinite(Number(a.vor)) ? Number(a.vor) : null
+    if(vorV != null){
+      const pVor = pct(vorV), lo_ = Math.min(pVor, pIst), hi_ = Math.max(pVor, pIst), plus = istV >= vorV
+      const html = `<i class="pz-bahn pz-bahn2 mit-vor${boden != null ? ' mit-liq' : ''}" title="${escapeHtml(titel + ' · vorher ' + de(vorV) + ' · Trade ' + (plus ? '+' : '−') + de(Math.abs(istV - vorV)))}">`
+        + (lo_ > 0 ? `<i class="pz-bahn-fuell is-sockel" style="width:${lo_.toFixed(1)}%;background:${farbe}"></i>` : '')
+        + (hi_ - lo_ > 0.2 ? `<i class="pz-bahn-fuell ${plus ? 'is-plus' : 'is-minus'}" style="left:${lo_.toFixed(1)}%;width:${(hi_ - lo_).toFixed(1)}%"></i>` : '')
+        + (boden != null ? `<i class="pz-bahn-start" style="left:${pStart.toFixed(1)}%"></i>` : '')
+        + `<i class="pz-bahn-vor" style="left:${pVor.toFixed(1)}%"></i>`
+        + `<b class="pz-bahn-pkt" style="left:${pIst.toFixed(1)}%;background:${idFarb}"></b></i>`
+      return { html, prozent, titel }
+    }
     const html = `<i class="pz-bahn pz-bahn2${boden != null ? ' mit-liq' : ''}" title="${escapeHtml(titel)}">`
       + (Math.max(pIst, verlB) > 0 ? `<i class="pz-bahn-fuell" style="width:${Math.max(pIst, verlB).toFixed(1)}%;background:${farbe}"></i>` : '')
       + (pTp > pIst ? `<i class="pz-bahn-fuell is-tp" style="left:${pIst.toFixed(1)}%;width:${(pTp - pIst).toFixed(1)}%;background:${farbe}"></i>` : '')
@@ -37782,6 +37792,27 @@
     return { html, prozent, titel }
   }
   window._pzBahnHtml = pzBahnHtml   // Radar (wdlBalZiel) liegt in einem anderen Block
+  /* EINE ZEILE BALANCE → ZIEL aus einer /admin/live-trades-Zeile (08.10.2026, Slave-Terminal 7): gemeinsam für den Radar (wdlBalZiel) und
+   * „Heute beendet" (tplHeuteListeHtml über _tpl.lt) — keine zweite Implementierung. Ziel = ziel_usd (Ziel-Wache), Boden = Liq-Level wie
+   * wdlBlowStand (bei Soft-Breach der Konto-Boden), Start = Kontogröße der Zeile; o = { ist, vor?, kurz?, uid? }. Ohne Ziel → ''. */
+  function balZielZeile(t, o = {}){
+    const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
+    const ziel = n(t && t.ziel_usd), ist = n(o.ist)
+    if(ziel == null || ist == null) return ''
+    const k = t.konto || {}
+    const gr = (typeof kontoGroesseAnzeige === 'function') ? kontoGroesseAnzeige(k.name, n(k.groesse), t.balance_start) : n(k.groesse)
+    const liq = t.liq_regel_soft ? n(t.liq_boden_balance) : (n(t.liq_regel_balance) ?? n(t.liq_balance))
+    const vor = n(o.vor)
+    const bz = pzBahnHtml({ groesse: gr, ziel, boden: liq, ist, vor, uid: o.uid || t.user_id }); if(!bz) return ''
+    const de = v => Math.round(v).toLocaleString('de-DE'), rest = Math.max(0, ziel - ist), unterStart = gr > 0 && ist < gr
+    const tip = `${bz.titel}${vor != null ? ' · vorher ' + de(vor) + ' → nachher ' + de(ist) : ''}${liq != null ? ' · Blow ' + de(liq) + (ist > liq ? ' (noch ' + de(ist - liq) + ' $ Abstand)' : '') : ''} · Rest bis Ziel ${de(rest)} $`
+    // unter dem Start zählt der Abstand zum Blow (Finn: „am Ziel des Accounts oder am Blow"), darüber % + Rest bis Ziel
+    const txt = rest <= 0 ? (o.kurz ? '🎯 Ziel' : '🎯 am Ziel') : liq != null && ist <= liq + 25 ? (o.kurz ? '💀 Blow' : '💀 am Blow')
+      : unterStart && liq != null ? (o.kurz ? `Blow ${de(ist - liq)}` : `Blow in ${de(ist - liq)} · Rest ${de(rest)}`)
+      : (o.kurz ? `${bz.prozent} %` : `${bz.prozent} % · Rest ${de(rest)}`)
+    return `<span class="wdl-bz" title="${escapeHtml(tip)}">${bz.html}<small${txt.startsWith('Blow') || txt.startsWith('💀') ? ' class="is-blow"' : ''}>${txt}</small></span>`
+  }
+  window._balZielZeile = balZielZeile
   function planZeileBoden(p, konto, o, groesse){
     const ok = v => (v != null && v !== '' && isFinite(Number(v)) && Number(v) > 0) ? Number(v) : null
     if(ok(o && o.boden) != null) return ok(o.boden)
@@ -41918,7 +41949,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1362'
+  const OS_TAB_BUILD = '2026-09-22.1363'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -48481,22 +48512,42 @@
         z.kontowert_eur != null ? `Kontowert vor dem Trade ${tplEur(z.kontowert_eur)}` : ''].filter(Boolean).join(' · ')
       const wer = o.name === false ? `<b>${escapeHtml(konto)}</b><small>${zeit}</small>`
         : `<i style="background:${idFarbe(z.user_id)}"></i><b>${escapeHtml(z.user || '?')}</b><small>${escapeHtml(konto)} · ${zeit}</small>`
-      return `<div class="tpl-hz tpl-hb${z.art === 'offen' ? ' ohne' : ''}" title="${escapeHtml(tip)}">
+      // BALANCE → ZIEL je Zeile (08.10.2026, Finn: „wo steht der Account gerade, wo ist das Ziel, wo ist der Blow, was hat dieser Trade
+      // ausgemacht"): Radar-Zeile desselben Plans aus _tpl.lt (/admin/live-trades, schon geladen) → derselbe Helfer wie im Radar
+      // (window._balZielZeile): vorher = balance_start, nachher = balance_end, sonst vorher + Ergebnis $. Ohne Zeile/Ziel kein Balken.
+      const lt = (_tpl.lt && _tpl.lt.get(String(z.plan_id))) || null
+      const vorB = lt ? tplNum(lt.balance_start) : null
+      const nachB = lt ? (tplNum(lt.balance_end) ?? (vorB != null && tplNum(z.ergebnis_usd) != null ? vorB + tplNum(z.ergebnis_usd) : null)) : null
+      const bzHtml = lt && nachB != null && typeof window._balZielZeile === 'function' ? window._balZielZeile(lt, { ist: nachB, vor: vorB, uid: z.user_id }) : ''
+      return `<div class="tpl-hz tpl-hb${z.art === 'offen' ? ' ohne' : ''}${bzHtml ? ' mit-bz' : ''}" title="${escapeHtml(tip)}">
         <span class="w${o.name === false ? ' ohne-name' : ''}">${wer}</span>
         <span class="r"><em class="${z.richtung === 'buy' ? 'is-buy' : 'is-sell'}">${z.richtung === 'buy' ? 'BUY' : 'SELL'}</em>${k ? `<span class="ap-idd-chip ${k[1]}">${k[0]}</span>` : `<small>${escapeHtml(typTxt(z.typ))}</small>`}${z.auto ? '' : '<small>Hand</small>'}</span>
-        <span class="h">${z.art === 'offen' ? '<b class="tpl-grau">offen</b>' : `<b class="${tplKlE(eur)}">${eur == null ? '–' : tplVzE(eur)}</b>`}<small>${usd(tplNum(z.ergebnis_usd))}</small></span></div>`
+        ${bzHtml ? `<span class="bz">${bzHtml}</span>` : ''}<span class="h">${z.art === 'offen' ? '<b class="tpl-grau">offen</b>' : `<b class="${tplKlE(eur)}">${eur == null ? '–' : tplVzE(eur)}</b>`}<small>${usd(tplNum(z.ergebnis_usd))}</small></span></div>`
     }).join('')
   }
   // Karte „Heute beendet" für Planer-Seite und Admin-Kopf (Sicht = D.sicht): die 8 jüngsten offen, der Rest aufklappbar (Zustand _tpl.hbAuf)
   function tplHeuteKarteHtml(D){
     if(!D || D.tag !== D.heute) return ''   // nur am Tag „heute" — „morgen" hat nichts Beendetes
     const ids = D.sicht instanceof Set ? D.sicht : null
-    const zeilen = tplHeuteZeilen(ids); if(!zeilen) return ''
+    const alle = tplHeuteZeilen(ids); if(!alle) return ''
+    /* FILTER FIRMA + ID (08.10.2026, Finn: „Mach da auch, dass ich nach Prop-Firmen filtern kann und nach Namen filtern kann"): je eine
+     * Chip-Reihe (Stil der ID-Chips .adm-vl-chip), eine Wahl je Reihe, nochmal klicken = alle; Summe und Liste folgen dem Filter.
+     * Zustand _tpl.hbFirma / _tpl.hbId (nur dieser Tab), Verdrahtung im Klick-Handler der Seite (data-hb-firma / data-hb-id). */
+    const fk = z => tplFirmaKurz(z.firma)
+    const firmen = [...new Set(alle.map(fk))].sort((a, b) => a.localeCompare(b, 'de'))
+    const leute = [...new Map(alle.map(z => [String(z.user_id), z.user || '?'])).entries()].sort((a, b) => String(a[1]).localeCompare(String(b[1]), 'de'))
+    if(_tpl.hbFirma && !firmen.includes(_tpl.hbFirma)) _tpl.hbFirma = null
+    if(_tpl.hbId && !leute.some(([u]) => u === _tpl.hbId)) _tpl.hbId = null
+    const zeilen = alle.filter(z => (!_tpl.hbFirma || fk(z) === _tpl.hbFirma) && (!_tpl.hbId || String(z.user_id) === _tpl.hbId))
     const s = tplHeuteSumme(zeilen), name = !(ids && ids.size === 1), vorn = zeilen.slice(0, 8), rest = zeilen.slice(8)
+    const chip = (attr, wert, txt, an, farbe) => `<button type="button" class="adm-vl-chip${an ? ' is-on' : ''}" ${attr}="${escapeHtml(wert)}">${farbe ? `<span class="adm-dot" style="background:${farbe}"></span>` : ''}<span class="nm">${escapeHtml(txt)}</span><b>${alle.filter(z => attr === 'data-hb-firma' ? (wert === '' || fk(z) === wert) : (wert === '' || String(z.user_id) === wert)).length}</b></button>`
+    const filter = (firmen.length > 1 || (name && leute.length > 1)) ? `<div class="adm-vl-legend tpl-ids tpl-hb-filter">`
+        + (firmen.length > 1 ? chip('data-hb-firma', '', 'Alle Firmen', !_tpl.hbFirma) + firmen.map(f => chip('data-hb-firma', f, f, _tpl.hbFirma === f)).join('') : '')
+        + `</div>` + (name && leute.length > 1 ? `<div class="adm-vl-legend tpl-ids tpl-hb-filter">${chip('data-hb-id', '', 'Alle IDs', !_tpl.hbId)}${leute.map(([u, nm]) => chip('data-hb-id', u, nm, _tpl.hbId === u, idFarbe(u))).join('')}</div>` : '') : ''
     return `<div class="tpl-karte tpl-hb-karte"><div class="tpl-h">Heute beendet <b>${s.n}</b><span class="leg"><span>Dubai-Tag · echter P&amp;L × Kontowert-Satz · geblowt = −Kontowert</span></span></div>
-        <div class="tpl-hb-satz">${tplHeuteSatzHtml(s)}</div>
+        ${filter}<div class="tpl-hb-satz">${tplHeuteSatzHtml(s)}</div>
         ${zeilen.length ? tplHeuteListeHtml(vorn, { name }) + (rest.length ? `<details class="tpl-hb-mehr"${_tpl.hbAuf ? ' open' : ''}><summary>${rest.length} weitere</summary>${tplHeuteListeHtml(rest, { name })}</details>` : '')
-          : '<div class="tpl-leer klein">heute noch nichts beendet</div>'}</div>`
+          : `<div class="tpl-leer klein">${alle.length ? 'nichts für diesen Filter' : 'heute noch nichts beendet'}</div>`}</div>`
   }
   document.addEventListener('toggle', e => { if(e.target && e.target.matches && e.target.matches('details.tpl-hb-mehr')) _tpl.hbAuf = e.target.open }, true)
   /* HYPO-P&L-CHART (Finns Korrektur 4, 07.10.2026: „Mach beides in separate Graphen, nicht im gleichen Chart"): eigene Karte direkt unter
@@ -49194,6 +49245,10 @@
   tplRoot?.addEventListener('toggle', e => { const d = e.target.closest('details.tpl-bil-det'); if(d) _tpl.bilanzAuf = d.open }, true)   // Beendet-Tabelle auf/zu merken
   // Ein Klick-Handler für beide Wurzeln (08.10.2026): Trade-Planer-Seite (#tpl-root) und Admin-Reiter (#ap-ids-root, bindet ihn in apIdsRender)
   const tplKlick = e => {
+    const hb = e.target.closest('[data-hb-firma],[data-hb-id]')   // Heute beendet: Filter Firma / ID (08.10.2026), nochmal = alle
+    if(hb){ if(hb.dataset.hbFirma != null){ const v = hb.dataset.hbFirma || null; _tpl.hbFirma = (v && _tpl.hbFirma !== v) ? v : null }
+      else { const v = hb.dataset.hbId || null; _tpl.hbId = (v && _tpl.hbId !== v) ? v : null }
+      try{ tplZeichnen() }catch(_){}; if(typeof window._apIdsRender === 'function') window._apIdsRender(); return }
     const cw = e.target.closest('[data-tpl-chart]')   // Chart-Umschalter (08.10.2026): Wahl merken, sichtbare Seite neu zeichnen
     if(cw){ _tpl.chartWahl = cw.dataset.tplChart; try{ localStorage.setItem('prophos_tpl_chart', _tpl.chartWahl) }catch(_){}; tplSpaeter(); return }
     const pw = e.target.closest('[data-pzw]')   // Plan-Zeile: TP/SL/Größe → Mini-Popup (08.10.2026)
