@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Selbsttest: eigene Planer-Werte je Kontogröße (app.py ap_konto_rechnen, regel.je_groesse, 08.10.2026 — Finn: FundingPips 50k mit
-eigenem SL/Lots/Puffer). Rein rechnend, ohne Netz. Werte wie Finns Angabe, Konten frei erfunden.
+eigenem SL/Lots/Puffer; korrigiert: 50k sind FLEX-Konten — Ziel P1 10 %, Max-Verlust 12 %, SL 1.250–1.500, Lots 0,5–0,7,
+TP 2.500–3.000, Puffer 75–100). Rein rechnend, ohne Netz. Werte wie Finns Angabe, Konten frei erfunden.
 Aufruf: python3 tools/selftest_auto_je_groesse.py"""
 import os
 import re
@@ -8,7 +9,7 @@ import sys
 
 HIER = os.path.dirname(os.path.abspath(__file__))
 APP = os.path.join(os.path.dirname(HIER), "app.py")
-FUNKTIONEN = ("_wd_num", "ap_groesse", "_ap_spanne", "_ap_runden", "_ap_boden", "ap_konto_rechnen")
+FUNKTIONEN = ("_wd_num", "ap_groesse", "_ap_spanne", "_ap_runden", "_ap_boden", "ap_konto_rechnen", "ap_kw_param", "ap_boden_konto")
 KONSTANTEN = ("AP_REST_MIN", "AP_GROESSE_TOLERANZ")
 
 
@@ -29,9 +30,11 @@ FP = {"namen": ["fundingpips"], "boden": "statisch", "route": "mt5v2", "dd_pct":
                             "ziel_pct": 8, "boden_pct": 10, "menge_schritt": 0.1},
                  "phase2": {"sl": [2500, 3500], "tp": [2000, 2500], "menge": [1, 1.5], "puffer": [50, 75], "tp_max": 2500,
                             "ziel_pct": 5, "boden_pct": 10, "menge_schritt": 0.1}},
-      "je_groesse": {"50000": {"phasen": {
-          "phase1": {"sl": [1250, 1750], "menge": [1.25, 1.75], "menge_schritt": 0.01, "puffer": [75, 75], "boden_pct": 10},
-          "phase2": {"sl": [1250, 1750], "menge": [1.25, 1.75], "menge_schritt": 0.01, "puffer": [50, 50], "boden_pct": 10}}}}}
+      "je_groesse": {"50000": {"ziel_pct": {"phase1": 10, "phase2": 5}, "dd_pct": 12, "phasen": {
+          "phase1": {"sl": [1250, 1500], "tp": [2500, 3000], "menge": [0.5, 0.7], "menge_schritt": 0.01, "puffer": [75, 100],
+                     "boden_pct": 12},
+          "phase2": {"sl": [1250, 1500], "tp": [2500, 3000], "menge": [0.5, 0.7], "menge_schritt": 0.01, "puffer": [75, 100],
+                     "boden_pct": 12}}}}}
 
 
 def main():
@@ -41,26 +44,33 @@ def main():
     ok = lambda b, t: f.append(t) if not b else None
     mitte = {"tp": 0.5, "sl": 0.5, "menge": 0.5, "puffer": 0.5}
 
-    # 50k Phase 1, Balance 48.916 (Chris-artig): eigene Werte, kein Skalieren, ein Trade bis zum Ziel (kein TP-Bereich)
+    # 50k Flex Phase 1, Balance 48.916: Ziel 55.000 (10 %), Boden 44.000 (12 %), eigene Werte, Etappe mit TP 2.500–3.000
     w, g = rechnen(FP, "phase1", 48916.0, mitte)
     ok(g is None, f"50k P1 ohne Grund erwartet, kam {g}")
     ok(w and w["groesse"] == 50000, f"Größe 50k erwartet: {w}")
-    ok(w and abs(w["ziel"] - 54000) < 0.01, f"Ziel 54.000 erwartet: {w}")
-    ok(w and w["sl"] == 1500, f"SL Mitte 1.500 erwartet: {w}")
-    ok(w and abs(w["menge"] - 1.5) < 1e-9, f"Lots Mitte 1,5 erwartet: {w}")
-    ok(w and w["puffer"] == 75, f"Puffer 75 erwartet: {w}")
-    ok(w and w["tp"] == round(54000 - 48916 + 75), f"TP = Rest + Puffer erwartet: {w}")
-    # Grenzen: u=0 / u=1
+    ok(w and abs(w["ziel"] - 55000) < 0.01, f"Ziel 55.000 (10 %) erwartet: {w}")
+    ok(w and w["sl"] == 1375, f"SL Mitte 1.375 erwartet: {w}")
+    ok(w and abs(w["menge"] - 0.6) < 1e-9, f"Lots Mitte 0,6 erwartet: {w}")
+    ok(w and w["puffer"] == 88, f"Puffer Mitte 87,5 → 88 erwartet: {w}")
+    ok(w and w["tp"] == 2750 and w["stufe"] == "Etappe", f"TP Mitte 2.750 als Etappe erwartet: {w}")
     w0, _ = rechnen(FP, "phase1", 48916.0, {"tp": 0, "sl": 0, "menge": 0, "puffer": 0})
     w1, _ = rechnen(FP, "phase1", 48916.0, {"tp": 1, "sl": 1, "menge": 1, "puffer": 1})
-    ok(w0 and w0["sl"] == 1250 and abs(w0["menge"] - 1.25) < 1e-9, f"Untergrenze: {w0}")
-    ok(w1 and w1["sl"] == 1750 and abs(w1["menge"] - 1.75) < 1e-9, f"Obergrenze: {w1}")
-    # SL-Deckel am Boden 45.000: Balance 46.000 → SL höchstens 1.000
-    wb, _ = rechnen(FP, "phase1", 46000.0, mitte)
-    ok(wb and wb["sl"] == 1000, f"SL auf Boden gekappt erwartet (1.000): {wb}")
-    # 50k Phase 2: Puffer 50, Ziel 52.500
+    ok(w0 and w0["sl"] == 1250 and abs(w0["menge"] - 0.5) < 1e-9 and w0["tp"] == 2500, f"Untergrenze: {w0}")
+    ok(w1 and w1["sl"] == 1500 and abs(w1["menge"] - 0.7) < 1e-9 and w1["tp"] == 3000, f"Obergrenze: {w1}")
+    # SL-Deckel am Flex-Boden 44.000: Balance 45.000 → SL höchstens 1.000 (mit 10 % wäre der Boden 45.000 → geblowt)
+    wb, gb = rechnen(FP, "phase1", 45000.0, mitte)
+    ok(gb is None and wb and wb["sl"] == 1000, f"SL auf Flex-Boden gekappt erwartet (1.000): {wb} {gb}")
+    # letzter Trade: Rest < TP-Obergrenze → TP = Rest + Puffer
+    wl, _ = rechnen(FP, "phase1", 53000.0, mitte)
+    ok(wl and wl["tp"] == 2000 + 88, f"letzter Trade Rest + Puffer erwartet: {wl}")
+    # 50k Phase 2: Ziel 52.500 (5 %)
     w2, g2 = rechnen(FP, "phase2", 50200.0, mitte)
-    ok(g2 is None and w2 and abs(w2["ziel"] - 52500) < 0.01 and w2["puffer"] == 50, f"50k P2: {w2} {g2}")
+    ok(g2 is None and w2 and abs(w2["ziel"] - 52500) < 0.01, f"50k P2: {w2} {g2}")
+    # Balance-Balken zeigt denselben Flex-Boden
+    bk = ns["ap_boden_konto"](FP, "phase1", 48916.0)
+    ok(bk and abs((bk.get("boden") or 0) - 44000) < 0.01, f"Balken-Boden 44.000 erwartet: {bk}")
+    bk100 = ns["ap_boden_konto"](FP, "phase1", 101000.0)
+    ok(bk100 and abs((bk100.get("boden") or 0) - 90000) < 0.01, f"100k-Boden 90.000 erwartet: {bk100}")
     # 100k bleibt bei den 100k-Werten
     wh, gh = rechnen(FP, "phase1", 101000.0, mitte)
     ok(gh is None and wh and wh["groesse"] == 100000 and wh["sl"] == 3000 and abs(wh["menge"] - 1.2) < 1e-9,

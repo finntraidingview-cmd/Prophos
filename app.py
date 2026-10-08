@@ -14392,6 +14392,8 @@ def ap_konto_rechnen(regel, phase, balance, u):
     # ohne Skalierung. Fehlt dort die Phase, gibt es KEINEN Rückfall auf die 100k-Werte (sonst SL 2.500 auf einem 50k-Konto).
     jg = (regel.get("je_groesse") or {}).get(str(int(groesse))) if groesse else None
     if jg:
+        # Kernwerte der Größe (ziel_pct, dd_pct, boden …) gehen der Firma vor — FundingPips 50k Flex: Ziel P1 10 %, Max-Verlust 12 %
+        regel = dict(regel, **{k: v for k, v in jg.items() if k != "phasen"})
         ph = (jg.get("phasen") or {}).get(phase)
         if not ph:
             return None, f"keine Regel für {phase} ({int(groesse) // 1000}k)"
@@ -14482,7 +14484,13 @@ def ap_boden_konto(regel, phase, balance, peak=None):
     groesse = ap_groesse(regel.get("groessen"), b)
     if groesse is None:
         return leer
-    ph = (regel.get("phasen") or {}).get(phase) or {}
+    jg = (regel.get("je_groesse") or {}).get(str(int(groesse)))
+    if jg:
+        # 08.10.2026: Kernwerte je Größe (FundingPips 50k Flex, Max-Verlust 12 %) — derselbe Boden wie im Planer
+        regel = dict(regel, **{k: v for k, v in jg.items() if k != "phasen"})
+        ph = (jg.get("phasen") or {}).get(phase) or {}
+    else:
+        ph = (regel.get("phasen") or {}).get(phase) or {}
     boden, blow = _ap_boden(regel, ph, groesse, b)
     art = ("statisch" if regel.get("boden") != "nachziehend" else
            "nachziehend_lock" if regel.get("lock_bei_start") is True else "nachziehend")
