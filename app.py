@@ -15583,19 +15583,40 @@ def ap_sicht_uid(admin, uid, nur_eigene, sicht, im_planer=False):
     return str(uid)
 
 
-AP_SICHT_ADMIN = "admin"
+AP_SICHT_ADMIN = "admin"           # ?sicht=admin bzw. Body {sicht:"admin"}: Alle-IDs-Sicht des Admin-Reiters (08.10.2026)
 AP_NUR_PLANER_TXT = "Nur für IDs im Trade-Planer (oder Admin) — dieser Login darf fremde Pläne nicht sehen oder ändern"
+
+
+_ap_planer_cache = {"bis": 0.0, "ids": None}   # auto_plan_regeln.user_ids, 60 s (AUTH_LISTE_CACHE_S) — POST /ids leert ihn
+
+
+def _ap_planer_ids():
+    """auto_plan_regeln.user_ids als Set, 60 s gemerkt wie admin_zugang_nur_eigene (Slave 2, 08.10.2026: /delta fragt je Admin-Tab alle
+    paar Sekunden — ohne Cache eine Supabase-Abfrage je Anfrage). Fehler fliegen durch (nicht gemerkt)."""
+    jetzt = time.time()
+    with _kurz_cache_lock:
+        if _ap_planer_cache["ids"] is not None and _ap_planer_cache["bis"] > jetzt:
+            return _ap_planer_cache["ids"]
+    reg = (sb_select("auto_plan_regeln", {"select": "user_ids", "id": "eq.1"}) or [{}])[0]
+    ids = frozenset(str(u) for u in (reg.get("user_ids") or []))
+    with _kurz_cache_lock:
+        _ap_planer_cache.update(bis=jetzt + AUTH_LISTE_CACHE_S, ids=ids)
+    return ids
+
+
+def _ap_planer_cache_leeren():
+    with _kurz_cache_lock:
+        _ap_planer_cache.update(bis=0.0, ids=None)
 
 
 def _ap_im_planer(uid):
     """Steht dieser Login in auto_plan_regeln.user_ids (= Admin-Login im Sinne des Admin-Reiters, Finn 08.10.2026 Option A)?
-    Nicht lesbar → False (gesperrt, nie versehentlich alle IDs)."""
+    Nicht lesbar → False (gesperrt, nie versehentlich alle IDs). 60-s-Cache über _ap_planer_ids."""
     try:
-        reg = (sb_select("auto_plan_regeln", {"select": "user_ids", "id": "eq.1"}) or [{}])[0]
-        return str(uid) in [str(u) for u in (reg.get("user_ids") or [])]
+        return str(uid) in _ap_planer_ids()
     except Exception as e:
         print(f"[auto-plan] ⚠️ user_ids nicht lesbar ({type(e).__name__}) — Admin-Reiter gesperrt", flush=True)
-        return False           # ?sicht=admin bzw. Body {sicht:"admin"}: Alle-IDs-Sicht des Admin-Reiters (08.10.2026)
+        return False
 
 
 def _ap_sicht_param():
@@ -18422,6 +18443,7 @@ def admin_auto_plan_ids():
         soll = bool(body.get("drin"))
         neu = [u for u in drin if u != uid] + ([uid] if soll else [])
         sb_update("auto_plan_regeln", {"id": "eq.1"}, {"user_ids": neu})
+        _ap_planer_cache_leeren()          # neue Planer-ID gilt sofort im Admin-Reiter (Cache _ap_im_planer)
         drin = neu
         print(f"[auto-plan] ID {uid[:8]} {'rein' if soll else 'raus'} (Admin {mail}) — {len(neu)} IDs im Planer", flush=True)
     namen, aus = _ap_namen()
