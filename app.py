@@ -16425,7 +16425,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
 # geplante, nicht gestartete Auto-Pläne (Richtung einer Tranche / Startzeit im eigenen Fenster) — nie laufende Trades, nie
 # Orders. Standard aus (regeln.ausgleich.aktiv = false, auto_start = false).
 # ════════════════════════════════════════════════════════════════════════════
-AP_AUSGLEICH_STANDARD = {"aktiv": False, "takt_min": 10, "zielband_pct": 15.0, "auto_start": False, "gross_ab_eur": 300.0, "laufzeit_min": 180}
+AP_AUSGLEICH_STANDARD = {"aktiv": False, "takt_min": 10, "zielband_pct": 15.0, "auto_start": False, "gross_ab_eur": 300.0, "laufzeit_min": 180, "fenster_uebergreifend": False}
 # EINSATZ (Finn 07.10.2026, „einfach, keine 1.000 Regeln"): EINE Kennzahl je Trade = Einsatz € = Kontowert × riskierte $ ÷
 # Polster (ap_trade_gewicht verlust_eur; ohne SL = ganzer Wert, gehedgt = 0), + long / − short. Ziel: kleinstes größtes
 # |Netto-Einsatz| über den Tag (kein hartes Limit, kein Pflicht-Gegenstück). Große Trades (≥ gross_ab_eur bzw. oberes Viertel
@@ -16473,6 +16473,9 @@ def ap_ausgleich_param(regeln):
     out = dict(AP_AUSGLEICH_STANDARD)
     out["aktiv"] = a.get("aktiv") is True
     out["auto_start"] = a.get("auto_start") is True
+    # FENSTER-ÜBERGREIFEND VORZIEHEN (08.10.2026, Master/Finn — nur auf Finns Go per SQL): die Strahlsuche darf Pläne aus späteren
+    # Startfenstern in die nächsten 60 min vorziehen; Hinausschieben bleibt im eigenen Fenster. Standard aus = Verhalten wie bisher.
+    out["fenster_uebergreifend"] = a.get("fenster_uebergreifend") is True
     try:
         out["takt_min"] = max(2, min(120, int(float(a.get("takt_min")))))
     except (TypeError, ValueError):
@@ -17497,11 +17500,15 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
             if not fen:
                 continue
             if s0 > bis60 and i not in vorgezogen_heute and i not in hinaus_heute:
-                lo = max(ab_, float(fen[0]))
+                # eigenes Fenster (Standard) — mit ausgleich.fenster_uebergreifend auch aus einem späteren Fenster in die nächsten
+                # 60 min, solange das Ziel in IRGENDEINEM Startfenster vor start_bis liegt (Master/Finn 08.10.2026)
+                ueber = bool((einsatz or {}).get("fenster_uebergreifend"))
+                lo = ab_ if ueber else max(ab_, float(fen[0]))
                 if p.get("route") in AP_CFD_ROUTEN:
                     lo = max(lo, float(ap_cfd_ab(zeiten)))
-                t = platz(i, lo, min(s0, bis60 + 1), bel) if lo <= bis60 else None
-                if t is not None and t < s0:
+                bis_v = min(s0, bis60 + 1, float(ap_start_bis(zeiten)))
+                t = platz(i, lo, bis_v, bel) if lo <= bis60 else None
+                if t is not None and t < s0 and ap_fenster_von(zeiten, t):
                     out.append((i, t, "vor"))
             elif (ab_ + 1 < s0 <= bis60 and s0 > float(jetzt_min) + AP_FAELLIG_MIN and i not in vorgezogen_heute
                   and i not in hinaus_heute):
@@ -17571,7 +17578,9 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                     angefasst.add(k)
             else:
                 seite = "Long" if zustand_r[i] == "buy" else "Short"
-                grund = (f"Ausgleich: {seite} {'vorgezogen' if art == 'vor' else 'hinausgeschoben'}, {wer} {name} "
+                f_alt = ap_fenster_von(zeiten, alt)
+                ueber_txt = " (über Fenster)" if art == "vor" and f_alt and t < f_alt[0] else ""
+                grund = (f"Ausgleich: {seite} {'vorgezogen' if art == 'vor' else 'hinausgeschoben'}{ueber_txt}, {wer} {name} "
                          f"{hm(alt)} → {hm(t)}{' Dubai' if dubai_min else ''} ({werte})")
                 aenderungen.append({"plan_id": i, "user_id": je[i]["user_id"], "firma": je[i]["firma"], "art": "start",
                                     "von_richtung": zustand_r[i], "nach_richtung": zustand_r[i], "von_start_min": alt,
@@ -18448,7 +18457,7 @@ def ap_einsatz_kontext(stand, param):
     """Klumpen-Regel-Kontext aus dem Stand: Basis (laufend), Grenzen, Gegenstück-Kandidaten (heute gestartete Trades)."""
     return {"basis": stand.get("basis_einsatz") or 0.0, "brutto": stand.get("brutto_einsatz") or 0.0,
             "gross_ab": ap_gross_ab([z.get("einsatz_abs") for z in stand.get("geplant") or ()], param.get("gross_ab_eur")),
-            "laufzeit": param.get("laufzeit_min"),
+            "laufzeit": param.get("laufzeit_min"), "fenster_uebergreifend": bool(param.get("fenster_uebergreifend")),
             "szenario_laufend": [ap_szenario_trade_aus_zeile(z, True) for z in stand.get("offen") or ()]}   # Szenario (08.10.2026)
 
 

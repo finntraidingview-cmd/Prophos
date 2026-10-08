@@ -155,6 +155,40 @@ def main():
     e5 = U(longs, 0.0, 0.0, JETZT, Z, 25, random.Random(1), einsatz=dict(EK, szenario_laufend=ruhig), id_fest=fest)
     check(not e5["aenderungen"], "ausgeglichenes Buch → kein Zug")
 
+    # ── 6 Fenster-übergreifend (Schalter ausgleich.fenster_uebergreifend, Master/Finn 08.10.2026) — Lage wie im Trockenlauf 04:06 UTC:
+    # Buch leicht long (+3,8 €/Pkt, −112 € bei NQ −30), vormittags nur Longs geplant, die Shorts liegen im Nachmittagsfenster ab 14:30 dt
+    lauf_l = [{"richtung": "buy", "satz": 0.0378, "usd_pro_pkt": 100.0, "wert": 9999.0, "polster_usd": 1e6, "tp_punkte": None}]
+    EKf = {"basis": 0.0, "brutto": 0.0, "gross_ab": 100000.0, "laufzeit": 180, "szenario_laufend": lauf_l}
+    jf = 366.0                                                    # 06:06 dt
+    vm = [plan("i_tf", "u-i", "tradeify", "buy", 468, usd_pro_pkt=40.0, satz_eur_je_usd=0.05),
+          plan("c_fn", "u-c", "fundednext", "buy", 615, usd_pro_pkt=28.0, satz_eur_je_usd=0.05)]
+    nm = [plan("a_fn", "u-a", "fundednext", "sell", 900, usd_pro_pkt=25.0, satz_eur_je_usd=0.08, route="mt5v2"),
+          plan("c_ts", "u-c", "topstep", "sell", 989, usd_pro_pkt=40.0, satz_eur_je_usd=0.05)]
+    fest_f = {f"{p['user_id']}|{p['firma']}": {"richtung": p["richtung"]} for p in vm + nm}
+    Lf = lambda zus: L(lauf_l + [T(dict(p, start_min=zus.get(p["plan_id"], p["start_min"])), False) for p in vm + nm  # noqa: E731
+                                 if jf <= zus.get(p["plan_id"], p["start_min"]) <= jf + 60])
+    aus = U(vm + nm, 0.0, 0.0, jf, Z, 25, random.Random(1), einsatz=EKf, dubai_min=120, id_fest=fest_f)
+    an = U(vm + nm, 0.0, 0.0, jf, Z, 25, random.Random(1), einsatz=dict(EKf, fenster_uebergreifend=True), dubai_min=120, id_fest=fest_f)
+    zus = {x["plan_id"]: x["nach_start_min"] for x in an["aenderungen"]}
+    vor_f, nach_f = Lf({}), Lf(zus)
+    check(not aus["aenderungen"] and vor_f["min_eur"] < -100, f"Schalter aus: Fenstergrenze hält, kein Zug (min ±30 {vor_f['min_eur']:.0f} €)")
+    check(sorted(zus) == ["a_fn", "c_ts"] and all(jf + 3 <= m <= jf + 60 for m in zus.values())
+          and all("über Fenster" in x["grund"] for x in an["aenderungen"]),
+          f"Schalter an: beide Nachmittags-Shorts über die Fenstergrenze in die nächsten 60 min ({zus})")
+    check(nach_f["min_eur"] > vor_f["min_eur"] + 90 and abs(nach_f["delta_eur_pkt"]) < 1.0,
+          f"schlimmster Fall {vor_f['min_eur']:.0f} → {nach_f['min_eur']:.0f} €, Delta {vor_f['delta_eur_pkt']:+.1f} → {nach_f['delta_eur_pkt']:+.1f} €/Pkt")
+    gh_f = U(vm + nm + [plan("x_fn", "u-x", "fundednext", "buy", 380, aenderbar=False, fest_durch="Handplan", satz_eur_je_usd=0.0001)],
+             0.0, 0.0, jf, Z, 25, random.Random(1), einsatz=dict(EKf, fenster_uebergreifend=True), dubai_min=120, id_fest=fest_f)
+    check(not any(x["plan_id"] == "a_fn" for x in gh_f["aenderungen"]),
+          "Schalter an: Gegenhedge über die Laufzeit gilt weiter (FN-Buy einer anderen ID 06:20 dt → FN-Short nicht daneben)")
+    pv_f = U(nm, 0.0, 0.0, jf, Z, 25, random.Random(1), einsatz=dict(EKf, fenster_uebergreifend=True), dubai_min=120, id_fest=fest_f,
+             pc_lebt={"u-c"})
+    check(not any(x["plan_id"] == "a_fn" for x in pv_f["aenderungen"]), "Schalter an: toter PC → nicht vorgezogen")
+    pa = a["ap_ausgleich_param"]
+    check(pa({})["fenster_uebergreifend"] is False and pa({"ausgleich": {"fenster_uebergreifend": "ja"}})["fenster_uebergreifend"] is False
+          and pa({"ausgleich": {"fenster_uebergreifend": True}})["fenster_uebergreifend"] is True,
+          "Regel: nur echtes true schaltet ein, Standard aus")
+
     print()
     if FEHLER:
         print(f"✗ {len(FEHLER)} Fehler")

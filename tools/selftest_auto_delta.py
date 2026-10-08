@@ -196,10 +196,12 @@ def main():
                                          {"user_id": "z", "name": "FTMO", "ppl": "1.0"}])
     check(je_firma["ftmo"][0] == 0.85 and je_id[("z", "ftmo")][0] == 1.0, "firm_specs: eigene ID vor häufigstem Firmenwert")
     pa = a["ap_ausgleich_param"]({})
-    check(pa == {"aktiv": False, "takt_min": 10, "zielband_pct": 15.0, "auto_start": False, "gross_ab_eur": 300.0, "laufzeit_min": 180},
-          "Standard: Bot aus, 10 min, Band 15 %, ohne Auto-Start, groß ab 300 €")
+    check(pa == {"aktiv": False, "takt_min": 10, "zielband_pct": 15.0, "auto_start": False, "gross_ab_eur": 300.0, "laufzeit_min": 180,
+                 "fenster_uebergreifend": False},
+          "Standard: Bot aus, 10 min, Band 15 %, ohne Auto-Start, groß ab 300 €, Vorziehen nur im eigenen Fenster")
     check(a["ap_ausgleich_param"]({"ausgleich": {"aktiv": "true", "takt_min": 1, "zielband_pct": 500}})
-          == {"aktiv": False, "takt_min": 2, "zielband_pct": 100.0, "auto_start": False, "gross_ab_eur": 300.0, "laufzeit_min": 180},
+          == {"aktiv": False, "takt_min": 2, "zielband_pct": 100.0, "auto_start": False, "gross_ab_eur": 300.0, "laufzeit_min": 180,
+              "fenster_uebergreifend": False},
           "nur echtes true schaltet ein, Werte geklemmt")
 
     # ── A2 Keine Firma × Tag-Regel mehr, nur Richtungsschutz + weicher Malus (Finn 06.10.2026 abends) ─────────────────────
