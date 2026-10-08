@@ -42323,7 +42323,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1389'
+  const OS_TAB_BUILD = '2026-09-22.1390'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -53381,7 +53381,8 @@
     const r = _wd.regeln || {}, de = wdDe
     const fest = !erw && (x.status === 'laeuft' || x.status === 'fertig' || x.status === 'verpasst')
     // Verwalter (Master 09.10.2026, Entscheidung a): Zeit, Richtung, TP/SL nur Anzeige — speichern kann sie nur Hermann Technologies,
-    // ein Bearbeiten ohne Speichern-Knopf verwirrt nur. Haken bleiben (wirken sofort).
+    // ein Bearbeiten ohne Speichern-Knopf verwirrt nur. Nachzug .1390: auch Haken und „nur heute" — der Reiter ist für Verwalter KOMPLETT
+    // lesend (Master: halb bedienbar ist unklarer als klar lesend)
     const nurLesen = wdVerwalter()
     const uid = escapeHtml(String(x.user_id))
     const zeiten = (!erw && x.start_um) ? wdKontoZeiten((x.konten || []).map(k => ({ ...k })), x.start_um, r) : new Map()
@@ -53400,12 +53401,12 @@
       const sperren = erw || fest || nurLesen || planFest || (!k.ext && !k.plan_id) || (k.archiviert && !k.plan_id)
       // Haken = DAUERHAFT (26.09.2026, Finn: „einmal live stellen, dann jeden Tag automatisch, bis ich Stopp drücke") — geht auch bei
       // IDs, die für den Tag noch nicht eingetragen sind (vorher gesperrt, bis gewürfelt war). „nur heute" ist ein eigener Knopf.
-      const hakenSperre = fest || planFest || (k.archiviert && !k.plan_id)
+      const hakenSperre = fest || nurLesen || planFest || (k.archiviert && !k.plan_id)
       // Haken zeigt „heute drin" (29.09.2026, Finn bei Chris: Konto dauerhaft im Farm, heute abgewählt → das Kästchen stand ANGEHAKT;
       // „Haken setzen" nahm es in Wahrheit dauerhaft raus, nach dem Würfeln blieb es draußen). Heute abgewählt (mit External ID, nicht
       // archiviert) = leeres Kästchen; ein Tipp → wdKontoHaken(an) setzt es dauerhaft UND für heute rein. „nur heute raus" bleibt Tag-only.
       const hakenAn = k.farm && (k.aktiv !== false || !k.ext || k.archiviert)
-      const tagKnopf = (!erw && !fest && !planFest && k.farm && k.ext && !k.archiviert)
+      const tagKnopf = (!erw && !fest && !nurLesen && !planFest && k.farm && k.ext && !k.archiviert)
         ? `<button type="button" class="btn btn-ghost btn-xs" data-wd-heute="${escapeHtml(String(k.id))}" data-wd-heute-rein="${k.aktiv === false ? '1' : ''}" title="${k.aktiv === false ? 'für diesen Tag wieder mitfahren lassen' : 'nur an diesem Tag auslassen — morgen fährt das Konto wieder mit'}">${k.aktiv === false ? 'heute wieder rein' : 'nur heute raus'}</button>` : ''
       const start = k.plan_id && k.start_um ? wdHhmm(k.start_um) : (wdAktiv(k) && zeiten.get(String(k.id))) ? wdHhmm(zeiten.get(String(k.id))) : '—'
       const tpWert = k.plan_id && k.tp ? k.tp : (kd.tp_vorgabe || '')
@@ -53434,12 +53435,12 @@
     const nAkt = (x.konten || []).filter(wdAktiv).length
     return `<div class="wd-karte ${erw ? 'erwartet' : escapeHtml(x.status)}" ${erw ? `data-wd-erw="${uid}"` : `data-wd-user="${uid}"`}>
       <div class="wd-karte-kopf">
-        <label class="wd-id-haken" title="ganze ID rein/raus (alle Konten)"><input type="checkbox" data-wd-id-alle ${alleAn ? 'checked' : ''} ${erw || fest ? 'disabled' : ''}> <span class="kf">alle</span></label>
+        <label class="wd-id-haken" title="ganze ID rein/raus (alle Konten)"><input type="checkbox" data-wd-id-alle ${alleAn ? 'checked' : ''} ${erw || fest || nurLesen ? 'disabled' : ''}> <span class="kf">alle</span></label>
         <span class="kf">Start</span>
         ${erw || fest || nurLesen ? `<span class="zeit">${x.start_um ? escapeHtml(wdHhmm(x.start_um)) : '—:—'}</span>` : `<input type="time" class="input mono vp-in" data-wd-zeit style="width:92px;text-align:left;font-size:15px;font-weight:600" value="${x.start_um ? escapeHtml(wdHhmm(x.start_um)) : ''}" title="Startzeit des Blocks in Dubai-Zeit">`}
         <div class="seg"><button type="button" data-wd-dir="buy" class="${x.richtung === 'buy' ? 'active' : ''}" ${erw || fest || nurLesen ? 'disabled' : ''}>BUY</button><button type="button" data-wd-dir="sell" class="${x.richtung === 'sell' ? 'active' : ''}" ${erw || fest || nurLesen ? 'disabled' : ''}>SELL</button></div>
         <span class="kf">${nAkt} von ${(x.konten || []).length} Konten drin${x.gestartet_at ? ` · gestartet ${wdHhmm(x.gestartet_at)}` : ''}${erw ? (wdVerwalter() ? ' · noch nicht eingetragen' : ' · noch nicht eingetragen — „🎲 Würfeln" nimmt die ID mit') : ''}</span>
-        <span class="kf" style="margin-left:auto">Haken wirkt sofort und dauerhaft${wdVerwalter() ? '' : ' · TP/SL, Zeit, Richtung: „Änderungen speichern"'}</span>
+        <span class="kf" style="margin-left:auto">${nurLesen ? 'nur Anzeige — ändern kann Hermann Technologies' : 'Haken wirkt sofort und dauerhaft · TP/SL, Zeit, Richtung: „Änderungen speichern"'}</span>
       </div>
       <table class="wd-konten"><thead><tr><th></th><th>Konto</th><th title="Winning Days (gezählt / Ziel)">WD</th><th>Balance</th><th>Start</th><th>TP $</th><th title="Risiko Master für die Lot-Rechnung des Fusion-Hedges (hedgeMultAusRisiko) — kein Stop Loss in TradingView (Winning Days laufen ohne SL)">Risiko Master $</th><th>Risiko (DD)</th><th>Slave</th><th>Stand</th></tr></thead><tbody>${zeilen}${ohneZeile}</tbody></table>${hinweis}</div>`
   }
@@ -53569,7 +53570,7 @@
     const fest = erw || x.status === 'laeuft' || x.status === 'fertig' || x.status === 'verpasst'
     const txt = x.richtung === 'buy' ? '▲ BUY' : x.richtung === 'sell' ? '▼ SELL' : '—'
     const kl = x.richtung === 'buy' ? 'chip-good' : x.richtung === 'sell' ? 'chip-bad' : ''
-    if(fest) return x.richtung ? `<span class="chip ${kl}">${txt}</span>` : '<span class="kf">—</span>'
+    if(fest || wdVerwalter()) return x.richtung ? `<span class="chip ${kl}">${txt}</span>` : '<span class="kf">—</span>'   // Verwalter: nur Anzeige (Master 09.10.2026)
     return `<button type="button" class="chip ${kl} wd-dir-flip" data-wd-flip="${escapeHtml(String(x.user_id))}" title="anklicken: Richtung für alle Konten von ${escapeHtml(x.name || 'dieser ID')} umdrehen">${txt}</button>`
   }
   async function wdRichtungUmschalten(uid){
@@ -53649,16 +53650,19 @@
     }))
     // DRAG & DROP der Blöcke (08.10.2026): Griff am Block-Chip, Ablegen auf einer ID-Zeile = dort einreihen (ID ohne Block = ans Ende);
     // HTML5-DnD, dazu ▲▼ für Touch/Handy. _wd.drag sperrt den 30-s-Takt, wird bei dragend immer aufgehoben.
+    // Verwalter: jeder Handler fragt beim Klick selbst wdVerwalter() — ein vor dem Umschalten gezeichnetes DOM löst nichts aus
+    // (Prüfer Slave 2, 09.10.2026); Checkboxen springen zurück
     box.querySelectorAll('[data-wd-drag]').forEach(g => {
-      g.addEventListener('dragstart', ev => { _wd.drag = g.dataset.wdDrag; try{ ev.dataTransfer.setData('text/plain', _wd.drag); ev.dataTransfer.effectAllowed = 'move' }catch(_){} g.closest('tr')?.classList.add('wd-zieht') })
+      g.addEventListener('dragstart', ev => { if(wdVerwalter()) return ev.preventDefault(); _wd.drag = g.dataset.wdDrag; try{ ev.dataTransfer.setData('text/plain', _wd.drag); ev.dataTransfer.effectAllowed = 'move' }catch(_){} g.closest('tr')?.classList.add('wd-zieht') })
       g.addEventListener('dragend', () => { _wd.drag = null; box.querySelectorAll('.wd-zieht,.wd-drop').forEach(x => x.classList.remove('wd-zieht', 'wd-drop')) })
     })
     box.querySelectorAll('tr[data-wd-open]').forEach(tr => {
       tr.addEventListener('dragover', ev => { if(!_wd.drag || tr.dataset.wdOpen === _wd.drag) return; ev.preventDefault(); try{ ev.dataTransfer.dropEffect = 'move' }catch(_){} tr.classList.add('wd-drop') })
       tr.addEventListener('dragleave', () => tr.classList.remove('wd-drop'))
-      tr.addEventListener('drop', ev => { if(!_wd.drag) return; ev.preventDefault(); const von = _wd.drag, nach = tr.dataset.wdOpen; _wd.drag = null; if(von !== nach) wdVerschieben(von, nach) })
+      tr.addEventListener('drop', ev => { if(!_wd.drag || wdVerwalter()) return; ev.preventDefault(); const von = _wd.drag, nach = tr.dataset.wdOpen; _wd.drag = null; if(von !== nach) wdVerschieben(von, nach) })
     })
     const nachbar = (uid, richtung) => {   // ▲▼: Platz mit dem freien Nachbarn tauschen
+      if(wdVerwalter()) return
       const frei = (_wd.rows || []).filter(x => x.start_um && x.reihenfolge && !wdFest(x)).sort((a, b) => new Date(a.start_um) - new Date(b.start_um))
       const i = frei.findIndex(x => String(x.user_id) === String(uid)); if(i < 0) return
       const j = i + richtung; if(j < 0 || j >= frei.length) return
@@ -53669,17 +53673,17 @@
     // Richtungs-Chip in der ID-Zeile: Klick dreht BUY↔SELL (05.10.2026) — eigene Verdrahtung, Zeilen-Klick ignoriert Knöpfe
     box.querySelectorAll('[data-wd-flip]').forEach(b => b.addEventListener('click', ev => {
       ev.stopPropagation()
-      if(!b.disabled) wdRichtungUmschalten(b.dataset.wdFlip)
+      if(!b.disabled && !wdVerwalter()) wdRichtungUmschalten(b.dataset.wdFlip)
     }))
     box.querySelectorAll('[data-wd-dir]').forEach(b => b.addEventListener('click', () => {
-      if(b.disabled) return
+      if(b.disabled || wdVerwalter()) return
       b.parentElement.querySelectorAll('[data-wd-dir]').forEach(x => x.classList.toggle('active', x === b))
     }))
     box.querySelectorAll('.wd-konten tr').forEach(tr => {
       const cb = tr.querySelector('[data-wd-konto]'); if(!cb) return
       tr.classList.toggle('klick', !cb.disabled)
       tr.addEventListener('click', ev => {
-        if(cb.disabled || ev.target.closest('input,button,select,a,label')) return
+        if(cb.disabled || wdVerwalter() || ev.target.closest('input,button,select,a,label')) return
         cb.checked = !cb.checked; cb.dispatchEvent(new Event('change', { bubbles: true }))
         tr.classList.toggle('aus', !cb.checked)
       })
@@ -53693,16 +53697,19 @@
     box.querySelectorAll('[data-wd-konto]').forEach(cb => cb.addEventListener('change', () => {
       const karte = cb.closest('.wd-karte'), uid = karte && karte.dataset.wdUser
       if(cb.disabled) return
+      if(wdVerwalter()){ cb.checked = !cb.checked; return }
       if(uid) wdKontoHaken(uid, cb.dataset.wdKonto, cb.checked)
       else if(karte && karte.dataset.wdErw) wdKontoHakenOhneZeile(cb.dataset.wdKonto, cb.checked)   // ID noch nicht eingetragen (26.09.2026)
     }))
     // „nur heute raus" / „heute wieder rein" (26.09.2026) — eigene Verdrahtung je Knopf
     box.querySelectorAll('[data-wd-heute]').forEach(b => b.addEventListener('click', ev => {
       ev.stopPropagation()
+      if(wdVerwalter()) return
       const karte = b.closest('.wd-karte'), uid = karte && karte.dataset.wdUser
       if(uid) wdKontoHeute(uid, b.dataset.wdHeute, b.dataset.wdHeuteRein === '1')
     }))
     box.querySelectorAll('[data-wd-id-alle]').forEach(cb => cb.addEventListener('change', async () => {
+      if(wdVerwalter()){ cb.checked = !cb.checked; return }
       const karte = cb.closest('.wd-karte'), uid = karte && karte.dataset.wdUser, an = cb.checked
       const ids = [...(karte ? karte.querySelectorAll('[data-wd-konto]') : [])].filter(x => !x.disabled && x.checked !== an).map(x => x.dataset.wdKonto)
       for(const id of ids) await wdKontoHaken(uid, id, an)   // nacheinander — eine Zeile, keine Schreib-Rennen

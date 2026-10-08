@@ -443,10 +443,20 @@ def main():
     karte = html0[html0.index("  function wdKarte(x, erw){"):html0.index("  function wdSlotWaehlen(")]
     ablauf = html0[html0.index("  function wdAblauf(rows, fehlend){"):html0.index("    box.querySelectorAll('tr[data-wd-open]')")]
     check("const nurLesen = wdVerwalter()" in karte and "const sperren = erw || fest || nurLesen ||" in karte
-          and "${erw || fest || nurLesen ? `<span class=\"zeit\">" in karte and karte.count("${erw || fest || nurLesen ? 'disabled' : ''}") == 2,
+          and "${erw || fest || nurLesen ? `<span class=\"zeit\">" in karte and karte.count("${erw || fest || nurLesen ? 'disabled' : ''}") == 3,
           "Verwalter: Zeit als Text, BUY/SELL disabled, TP/SL (sperren) als Text")
     check("const nurLesen = wdVerwalter()" in ablauf and "(erw || wdFest(x) || nurLesen ? `<span class=\"wd-blk\">" in ablauf,
           "Verwalter: Block-Chip ohne draggable/▲▼")
+    # Nachzug .1390 (Master 09.10.2026): komplett lesend — Haken, „alle", „nur heute", Richtungs-Chip in der ID-Zeile
+    chip = html0[html0.index("  function wdRichtungChip(x, erw){"):html0.index("  async function wdRichtungUmschalten(")]
+    check("const hakenSperre = fest || nurLesen ||" in karte and "const tagKnopf = (!erw && !fest && !nurLesen &&" in karte
+          and "data-wd-id-alle ${alleAn ? 'checked' : ''} ${erw || fest || nurLesen ? 'disabled' : ''}" in karte
+          and "if(fest || wdVerwalter()) return x.richtung ? `<span class=\"chip ${kl}\">" in chip,
+          "Verwalter: Haken/alle disabled, kein nur-heute-Knopf, Richtungs-Chip als Span ohne data-wd-flip")
+    hand = html0[html0.index("    box.querySelectorAll('[data-wd-drag]').forEach(g => {"):html0.index("  function wdGruende(konten){")]
+    check(hand.count("wdVerwalter()") >= 9 and "if(wdVerwalter()) return ev.preventDefault();" in hand
+          and "if(!b.disabled && !wdVerwalter()) wdRichtungUmschalten(" in hand and hand.count("if(wdVerwalter()){ cb.checked = !cb.checked; return }") == 2,
+          f"Verwalter: alle WD-Handler fragen beim Klick wdVerwalter() (altes DOM löst nichts aus, {hand.count('wdVerwalter()')} Stellen)")
 
     # S1: verfallen im Lauf nur für die Sicht
     erg = {"geplant": [], "verfallen": [{"user_id": HT1, "plan_id": "a"}, {"user_id": MITGL, "plan_id": "b"}]}
