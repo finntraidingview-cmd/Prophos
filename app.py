@@ -16973,6 +16973,27 @@ def ap_ohne_archiv(erg, archiv):
     return out
 
 
+def ap_delta_ohne_archiv(antwort, archiv):
+    """REIN RECHNEND (testbar): Delta-Antwort ohne geplante, nie geclaimte Zeilen archivierter Konten (Finn 09.10.2026 ~03:00 Dubai,
+    FN Futures …0045: „Den Account habe ich schon längst archiviert, den gibt's gar nicht mehr" — der Nachtlauf hatte den Plan vor dem
+    Archivieren angelegt, Trade-Planer und „Braucht dich" zeigten ihn weiter). Geclaimte Pläne bleiben (Start läuft), offen[] bleibt.
+    Gelöscht wird hier nichts — das macht der Browser des Konto-Inhabers beim Archivieren (archivPlaeneEntfernen)."""
+    if not archiv or not isinstance(antwort, dict) or not isinstance(antwort.get("geplant"), list):
+        return antwort
+    return dict(antwort, geplant=[z for z in antwort["geplant"]
+                                  if (z or {}).get("geclaimt") or str((z or {}).get("konto_id") or "") not in archiv])
+
+
+_ap_archiv_merk = {"bis": 0.0, "wert": None}
+
+
+def _ap_archiviert_gemerkt(ttl=30):
+    """_ap_archiviert für das Delta, 30 s gemerkt — jeder Admin-Tab fragt das Delta alle paar Sekunden (Supabase-Last, vgl. .1296)."""
+    if _ap_archiv_merk["wert"] is None or time.time() > _ap_archiv_merk["bis"]:
+        _ap_archiv_merk.update(wert=_ap_archiviert(), bis=time.time() + ttl)
+    return _ap_archiv_merk["wert"]
+
+
 def ap_sicht(erg, uid):
     """Antwort nur mit den Zeilen EINER ID (Nicht-Admin, Master 06.10.2026: „heute bekommt auch eine Test-ID alle IDs") bzw. einer
     GRUPPE (uid = Menge: Verwalter oder Finns ?gruppe=, Admin-Gruppen 08.10.2026 → sicht "gruppe").
@@ -20995,6 +21016,10 @@ def admin_auto_plan_delta():
         if sicht_d is not None and ((not admin and nur) or not isinstance(sicht_d, str)):
             stand = ap_stand_sicht(stand, sicht_d)
         antwort = ap_delta_antwort(stand, sicht_d, pc_lebt=_ap_pc_lebt_gecacht())
+        try:
+            antwort = ap_delta_ohne_archiv(antwort, _ap_archiviert_gemerkt())   # archivierte Konten (09.10.2026), eigener try
+        except Exception as e:
+            print(f"[auto-plan] ⚠️ Delta-Archiv: {type(e).__name__}: {e}", flush=True)
         antwort.setdefault("sicht", "alle")
         if not admin and nur:   # Bot-Zustand ist HT-weit (letzter Lauf, Zähler) — nur Schalter-Stand
             antwort["bot"] = {k: (antwort.get("bot") or {}).get(k) for k in ("aktiv", "auto_start", "takt_min", "zielband_pct")}
@@ -21117,7 +21142,8 @@ def admin_auto_plan_ids():
                                      "status": "eq.planned", "auto_plan": "eq.true", "auto_bestaetigt_at": "is.null", "start_um": "gte." + seit,
                                      "order": "start_um.asc"})
         pl = [p for p in pl if (str(p.get("user_id")) in gruppe if gruppe
-                                else (ohne_aus or str(p.get("user_id")) not in aus) and admin_in_sicht(p.get("user_id"), lese_sicht))]
+                                else (ohne_aus or str(p.get("user_id")) not in aus) and admin_in_sicht(p.get("user_id"), lese_sicht))
+              and str(p.get("master_account_id") or "") not in archiv]   # archiviertes Konto: kein Vorschlag mehr (09.10.2026)
         acc_ids = sorted({str(p.get("master_account_id")) for p in pl if p.get("master_account_id")})
         accs, letzt_je = {}, {}
         for j in range(0, len(acc_ids), 150):

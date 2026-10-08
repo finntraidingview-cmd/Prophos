@@ -31968,6 +31968,32 @@
        && typeof echoLoeschAuftrag === 'function'){
       echoLoeschAuftrag(accountId, reason)
     }
+    archivPlaeneEntfernen(accountId)   // jeder Grund, auch erneutes Archivieren (09.10.2026) — läuft im Hintergrund
+  }
+
+  /* ARCHIVIERT = KEINE GEPLANTEN TRADES MEHR (Finn 09.10.2026 ~03:00 Dubai: „Den Account habe ich schon längst archiviert, den gibt's gar
+   * nicht mehr" — FN Futures …0045: der Nachtlauf 21:30 UTC legte den Auto-Plan an, archiviert wurde um 21:57 UTC, der Plan blieb und hielt
+   * das Konto als „nicht live" in „Braucht dich"). Entfernt NUR nie gestartete Pläne des Kontos (planned, ohne Claim, ohne started_at),
+   * Auto- wie Hand-Pläne; gestartete/laufende nie. RLS: nur eigene Pläne — das Archiv liegt im Profil des Konto-Inhabers.
+   * quelle 'start' = Sicherheitsnetz im PC-Tab (tpStartUmTick, eigener Toast). Gibt die Zahl entfernter Pläne zurück. */
+  async function archivPlaeneEntfernen(accountId, quelle){
+    const kid = String(accountId || ''); if(!kid) return 0
+    try{
+      const { data, error } = await supabase.from('trade_plans').delete()
+        .eq('master_account_id', kid).eq('status', 'planned').is('start_um_gestartet_at', null).is('started_at', null).select('id,notes')
+      if(error) throw error
+      const weg = new Set((data || []).map(r => String(r.id)))
+      if(!weg.size) return 0
+      tradePlans = (tradePlans || []).filter(p => !weg.has(String(p.id)))
+      for(const r of data){
+        if(r.notes === 'Winning-Day-Farmer') await tpWdTagesplanAustragen(r.id, 'Konto archiviert')
+        try{ if(typeof mirrorReleasePlan === 'function') mirrorReleasePlan(r.id) }catch(_){}
+      }
+      try{ renderTradePlans() }catch(_){}
+      if(quelle !== 'start' && typeof atToast === 'function')
+        atToast(`🗄 ${weg.size} ${weg.size === 1 ? 'geplanter Trade' : 'geplante Trades'} dieses Kontos entfernt`, 'end')
+      return weg.size
+    }catch(e){ console.warn('[archiv] Pläne entfernen', (e && e.message) || e); return 0 }
   }
 
   /* ── Account bei Blow aus Duplikum löschen (deleteAccount.php) ──
@@ -38104,15 +38130,21 @@
     const kid = plan && plan.masterAccountId ? String(plan.masterAccountId) : ''
     const name = (plan && plan.masterName) || 'Konto'
     const manuellText = n => `„${name}" steht in Manueller Arbeit${n ? ' (' + n + ')' : ''} — kein Start, bis die Arbeit erledigt ist (Radar → Manuelle Arbeit, Accounts → Zu tun).`
+    // ARCHIVIERT (09.10.2026, Vorfall FN Futures …0045): Konto im Archiv → nie starten. Frisch aus user_settings (archive des eigenen Profils),
+    // denn der PC-Tab kennt ein am Mac archiviertes Konto sonst erst nach dem nächsten Sync; Rückfall der lokale Stand
+    const archivText = `„${name}" ist archiviert — kein Start.`
+    const imArchiv = v => { try{ if(typeof v === 'string') v = JSON.parse(v) }catch(_){ v = null }; return !!(v && v[kid] && v[kid].archived) }
     if(kid){
       // TIMEOUT 5 s (08.10.2026, Befund Slave 2 zu .1322): die zwei Abfragen laufen vor JEDEM Start — hängt Supabase (Last-Vorfälle
       // 29./30.09.), hing jeder Start hier. Nach 5 s gilt die DB als nicht lesbar → derselbe Rückfall auf den Cache wie beim DB-Fehler.
       let uhr = null
       try{
-        const [ra, rp] = await Promise.race([Promise.all([
+        const [ra, rp, rs] = await Promise.race([Promise.all([
           supabase.from('accounts').select('ziel_erreicht_at,ziel_erreicht_bal,ziel_usd').eq('id', kid).maybeSingle(),
-          supabase.from('trade_plans').select('id,manuell:mt5_baseline->manuell').eq('master_account_id', kid).eq('status', 'review').limit(30)]),
+          supabase.from('trade_plans').select('id,manuell:mt5_baseline->manuell').eq('master_account_id', kid).eq('status', 'review').limit(30),
+          supabase.from('user_settings').select('value').eq('user_id', currentUserId).eq('key', 'archive').maybeSingle()]),
           new Promise((_, nein) => { uhr = setTimeout(() => nein(new Error('Timeout 5 s — Rückfall auf Cache')), 5000) })])
+        if(rs && !rs.error && rs.data && imArchiv(rs.data.value)) return { art: 'archiv', text: archivText }
         if(!ra.error && ra.data && ra.data.ziel_erreicht_at){
           const konto = (accounts || []).find(a => String(a.id) === kid)
           if(konto){ konto.zielErreichtAt = ra.data.ziel_erreicht_at; konto.zielErreichtBal = ra.data.ziel_erreicht_bal != null ? Number(ra.data.ziel_erreicht_bal) : konto.zielErreichtBal }
@@ -38124,6 +38156,7 @@
       }catch(e){ console.warn('[konto-sperre] DB', (e && e.message) || e) }
       finally{ clearTimeout(uhr) }
     }
+    if(kid && isAccountArchived(kid)) return { art: 'archiv', text: archivText }
     const z = planZielErreicht(plan); if(z) return { art: 'ziel', z, text: planZielText(plan, z) }
     const mc = kid && (tradePlans || []).find(p => String(p.masterAccountId) === kid && String(p.id) !== String(plan.id) && p.status === 'review'
       && p.mt5Baseline && p.mt5Baseline.manuell && typeof p.mt5Baseline.manuell === 'object' && p.mt5Baseline.manuell.at)
@@ -41082,6 +41115,17 @@
   window.addEventListener('pagehide', tpLoeschenAlleJetzt)
   document.addEventListener('visibilitychange', () => { if(document.hidden) tpLoeschenAlleJetzt() })
 
+  // Farmer-Plan aus dem WD-Tagesplan austragen (aus tpLoeschenAusfuehren herausgezogen, 09.10.2026 — auch archivPlaeneEntfernen braucht es)
+  async function tpWdTagesplanAustragen(planId, hinweis){
+    try{
+      const { data: rows } = await supabase.from('wd_tagesplan').select('tag,user_id,konten,status').eq('user_id', currentUserId).gte('tag', new Date(Date.now() - 2 * 86400000).toISOString().slice(0, 10))
+      for(const x of (rows || [])){
+        if(!(x.konten || []).some(k => k && String(k.plan_id) === String(planId))) continue
+        const konten = x.konten.map(k => (k && String(k.plan_id) === String(planId)) ? { ...k, plan_id: null, status: null, start_um: null, aktiv: false, hinweis } : k)
+        await supabase.from('wd_tagesplan').update({ konten, status: konten.some(k => k && k.aktiv !== false) ? x.status : 'leer', updated_at: new Date().toISOString() }).eq('tag', x.tag).eq('user_id', x.user_id).neq('status', 'laeuft')
+      }
+    }catch(e){ console.warn('[wd] Tagesplan nach Löschen', e) }
+  }
   // Das echte Löschen (unverändert aus deleteTradePlan, nur 5 s später)
   // Der Eintrag bleibt bis zum Ende des Requests in der Map (laeuft) — so bringt ein Poll mittendrin den Plan nicht zurück.
   async function tpLoeschenAusfuehren(key){
@@ -41095,16 +41139,7 @@
       if(error) throw error
       _tpLoeschOffen.delete(key)
       tradePlans = tradePlans.filter(p => String(p.id) !== String(planId))
-      if(farmer){
-        try{
-          const { data: rows } = await supabase.from('wd_tagesplan').select('tag,user_id,konten,status').eq('user_id', currentUserId).gte('tag', new Date(Date.now() - 2 * 86400000).toISOString().slice(0, 10))
-          for(const x of (rows || [])){
-            if(!(x.konten || []).some(k => k && String(k.plan_id) === String(planId))) continue
-            const konten = x.konten.map(k => (k && String(k.plan_id) === String(planId)) ? { ...k, plan_id: null, status: null, start_um: null, aktiv: false, hinweis: 'Plan von Hand gelöscht' } : k)
-            await supabase.from('wd_tagesplan').update({ konten, status: konten.some(k => k && k.aktiv !== false) ? x.status : 'leer', updated_at: new Date().toISOString() }).eq('tag', x.tag).eq('user_id', x.user_id).neq('status', 'laeuft')
-          }
-        }catch(e){ console.warn('[wd] Tagesplan nach Löschen', e) }
-      }
+      if(farmer) await tpWdTagesplanAustragen(planId, 'Plan von Hand gelöscht')
       // Mirror-Route: scharfgeschaltetes Pair freigeben (stoppt die Engine, falls
       // kein anderer Plan sie hält) — sonst würde ein gelöschter Plan weiterspiegeln
       if(typeof mirrorReleasePlan === 'function') mirrorReleasePlan(planId)
@@ -42334,7 +42369,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1393'
+  const OS_TAB_BUILD = '2026-09-22.1394'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -46627,6 +46662,18 @@
       // Start-Fehler für „Braucht dich", Toast + Handy — nichts starten
       const sperre = await planKontoSperre(plan)
       const zielOk = sperre && sperre.art === 'ziel' ? sperre.z : null
+      // ARCHIVIERT (09.10.2026): nie starten, sondern entfernen wie beim Archivieren. Klappt das Löschen nicht, Claim setzen — sonst
+      // stünde der Plan als faellig[0] vorne und hielte jeden weiteren Start dieses Tabs auf
+      if(sperre && sperre.art === 'archiv'){
+        const n = await archivPlaeneEntfernen(plan.masterAccountId, 'start')
+        if(!n){
+          const { data: da } = await supabase.from('trade_plans').update({ start_um_gestartet_at: new Date().toISOString() })
+            .eq('id', plan.id).eq('status', 'planned').is('start_um_gestartet_at', null).select('*')
+          const ia = tradePlans.findIndex(x => String(x.id) === String(plan.id)); if(ia >= 0 && da && da.length) tradePlans[ia] = rowToPlan(da[0])
+        }
+        if(typeof atToast === 'function') atToast('🗄 ' + sperre.text + (n ? ' Plan entfernt.' : ''), 'end')
+        return
+      }
       if(sperre && sperre.art === 'manuell'){
         const { data: dm } = await supabase.from('trade_plans').update({ start_um_gestartet_at: new Date().toISOString() })
           .eq('id', plan.id).eq('status', 'planned').is('start_um_gestartet_at', null).select('*')
@@ -47564,6 +47611,9 @@
     const laufJe = new Map(), benutzt = new Set()
     for(const g of (lauf && lauf.geplant) || []) laufJe.set(tplKk(g.user_id, g.konto), g)
     const eigen = new Map((tradePlans || []).map(p => [String(p.id), p]))
+    // ARCHIVIERT (09.10.2026, Vorfall FN Futures …0045): geplante, nie gestartete Zeilen archivierter Konten nicht zeigen — auch nicht in
+    // „Braucht dich" (baut auf diesen Zeilen auf). Eigenes Archiv hier; fremde IDs filtert schon das Backend (Delta geplant[])
+    let arch = {}; try{ arch = getArchive() || {} }catch(_){}
     const trades = [], gesehen = new Set()
     const stufeAus = p => { const m = /Auto-Planer · ([^·]+)/.exec(String((p && p.notes) || '')); return m ? m[1].trim() : null }
     const neu = (x, g, p, mehr) => {
@@ -47589,6 +47639,7 @@
       t.long = t.richtung === 'buy'
       t.key = String(t.plan_id)
       if(_tpl.weg.has(t.key)) return null
+      if((t.status === 'offen' || t.status === 'bestaetigt') && !t.geclaimt && !(p && (p.startUmGestartetAt || p.startedAt)) && t.konto_id && arch[String(t.konto_id)] && arch[String(t.konto_id)].archived) return null
       trades.push(t); gesehen.add(t.key)
       return t
     }
