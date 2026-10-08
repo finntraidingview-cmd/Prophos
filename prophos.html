@@ -2005,7 +2005,8 @@
   :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .k .type-badge{flex:none;font-size:10px;padding:1px 6px}
   :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .l{grid-area:l;justify-self:start;font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;white-space:nowrap;background:color-mix(in srgb,currentColor 11%,transparent)}
   :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .l.vio{color:var(--violet)} :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .l.rot{color:#b91c1c} :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .l.gelb{color:#b45309} :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .l.gruen{color:#15803d} :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .l.grau{color:var(--sub)}
-  :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .t{grid-area:t;min-width:0;font-size:11.5px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* Klartext höchstens zwei Zeilen (08.10.2026, offener Punkt aus Finns „man erkennt nix" — einzeilig mit „…" war zu knapp), Rest im Tooltip */
+  :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .t{grid-area:t;min-width:0;font-size:11.5px;line-height:1.35;color:var(--sub);white-space:normal;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2}
   :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .a{grid-area:a;display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:3px 6px;min-width:0;text-align:right}
   :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .s{flex-basis:100%;font-size:11px;line-height:1.3;color:var(--sub-2)} :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .s.rot{color:var(--danger)}
   :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .knopf{border:1px solid var(--border);background:var(--surface);border-radius:7px;height:26px;padding:0 9px;font:inherit;font-size:12px;color:var(--ink-2);cursor:pointer;white-space:nowrap}
@@ -2028,7 +2029,7 @@
     :is(#tpl-view,#adm-pane-planer) .tpl-spur{height:84px}
     /* Braucht dich am Handy: Konto oben, Label + Aktion darunter, Klartext darunter (umbrechend) */
     :is(#tpl-view,#adm-pane-planer) .tpl-bd-z{grid-template-columns:auto minmax(0,1fr);grid-template-areas:"k k" "l a" "t t";gap:4px 8px}
-    :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .t{white-space:normal}
+    :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .t{display:block;-webkit-line-clamp:unset;line-clamp:none;overflow:visible}   /* Handy: ganz umbrechen */
     /* Läuft-Liste einzeilig (QA 08.10.2026 Punkt 8): Konto links, Richtung + Wert rechts, Zeit klein dahinter — vorher drei Zeilen je Trade */
     :is(#tpl-view,#adm-pane-planer) .tpl-hz{grid-template-columns:minmax(0,1fr) auto auto auto;gap:2px 6px;padding:4px 2px} :is(#tpl-view,#adm-pane-planer) .tpl-hz .p,:is(#tpl-view,#adm-pane-planer) .tpl-hz .s{display:none}
     :is(#tpl-view,#adm-pane-planer) .tpl-hz .z{grid-column:auto;text-align:right;font-size:10.5px} :is(#tpl-view,#adm-pane-planer) .tpl-hz .h{font-size:12.5px} :is(#tpl-view,#adm-pane-planer) .tpl-hz .r{font-size:11px} :is(#tpl-view,#adm-pane-planer) .tpl-hz .r em{min-width:30px;margin-right:4px}
@@ -41229,7 +41230,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1280'
+  const OS_TAB_BUILD = '2026-09-22.1281'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
