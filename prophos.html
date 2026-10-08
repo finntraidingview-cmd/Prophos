@@ -38046,6 +38046,7 @@
   /* Was der Auto-Planer in die notes schreibt (app.py ap_planen): „Auto-Planer · <stufe> · Rest 9.039 $ bis Ziel · Balance 149.961 (…)".
    * Daraus die Art (Etappe / letzter Trade) und das Ziel (= Balance + Rest von damals). Nicht lesbar → null: die Zeile lässt Art
    * und Ziel dann weg, statt zu raten. Keine Backend-Abfrage. */
+  const PLAN_STARTWERT_TIP = 'Startwert — Kontogröße eines frischen Kontos ohne Trade, noch nicht gelesen; die erste echte Lesung ersetzt ihn'
   function planAutoNotiz(notes){
     const m = /Auto-Planer · (.+?) · Rest ([\d.]+) \$ bis Ziel · Balance ([\d.]+)/.exec(String(notes || ''))
     if(!m) return null
@@ -38053,7 +38054,10 @@
     const rest = zahl(m[2]), bal = zahl(m[3])
     if(!(rest > 0) || !(bal > 0)) return null
     const stufe = m[1].trim()
-    return { stufe, art: planSchritt(stufe), rest,
+    // STARTWERT (09.10.2026, Finn: frisches Konto ohne Lesung → Kontogröße als Balance, app.py ap_startwert_frisch): Notiz „Balance 150.000
+    // (Startwert (frisches Konto))" → die Zeile zeigt die Zahl mit „Startwert" statt „Balance ?"
+    const startwert = /\(Startwert\b/.test(String(notes || '')) ? bal : null
+    return { stufe, art: planSchritt(stufe), rest, startwert,
              gekappt: /SL auf Boden gekappt/i.test(stufe), ziel: Math.round((bal + rest) / 5) * 5 }   // beide Zahlen sind gerundet → auf 5 $ glätten
   }
   /* SCHRITT STATT ART (08.10.2026, Finn an der Spalte „Art" mit „Etappe / Etappe / letzter Trade": „Bei Art gibt es mal coolere Namen.
@@ -38204,9 +38208,11 @@
   }
   function planZeileHtml(p, konto, o){
     const de = v => Math.round(Number(v)).toLocaleString('de-DE')
-    const bal = o.bal || planKontoBalance(konto)
-    const live = o.bal ? null : bal ? planBalanceLive(p.masterAccountId, bal.at) : null
     const notiz = o.notiz !== undefined ? o.notiz : p.autoPlan ? planAutoNotiz(p.notes) : null
+    const balKonto = o.bal || planKontoBalance(konto)
+    // ohne Lesung: Startwert aus der Plan-Notiz (frisches Konto, 09.10.2026) — sichtbar markiert, nie als „live"
+    const bal = balKonto || (notiz && notiz.startwert > 0 ? { val: notiz.startwert, at: 0, tip: PLAN_STARTWERT_TIP, startwert: true } : null)
+    const live = (o.bal || !balKonto) ? null : planBalanceLive(p.masterAccountId, bal.at)
     // Kontogröße wie der Planer sie rechnet (08.10.2026, „100k …1733" stand als „150k"): Name „100k" vor starting_balance (kontoGroesseAnzeige)
     const groesse = kontoGroesseKurz(o.name || (konto && konto.name), konto && konto.startingBalance, bal ? bal.val : 0)   // „150KTC-SKU-…" → 150k (08.10.2026)
     // Konto kurz: Größe + letzte 4 Zeichen der Nummer, voller Name im Tooltip. Ohne Nummer bleibt der Name stehen.
@@ -38267,7 +38273,7 @@
       const tpUsd = Number(p.masterTp) > 0 ? Number(p.masterTp) : 0, slUsd = Number(p.masterSl) > 0 ? Number(p.masterSl) : 0
       const mitBahn = ziel > 0 && groesse > 0 && ziel > groesse && ziel <= groesse * 1.3
       const bz = mitBahn ? pzBahnHtml({ groesse, ziel, boden: planZeileBoden(p, konto, o, groesse), ist: istV, tpUsd, slUsd, uid: o.uid, plL, balVal: bal.val }) : null
-      balHtml = `<span class="pz-bal-t">${typChipHandy}${liveZ}${plL != null ? `<i class="pz-live-pl ${plL >= 0 ? 'plus' : 'minus'}" title="läuft · Live-P&L ${plL >= 0 ? '+' : '−'}${de(Math.abs(plL))} $">●</i>` : ''}${de(istV)}${ziel ? `<em>→</em>${de(ziel)}<span class="pz-rest"> · Rest ${de(Math.max(0, ziel - istV))}</span>` : ' $'}</span>`
+      balHtml = `<span class="pz-bal-t">${typChipHandy}${liveZ}${plL != null ? `<i class="pz-live-pl ${plL >= 0 ? 'plus' : 'minus'}" title="läuft · Live-P&L ${plL >= 0 ? '+' : '−'}${de(Math.abs(plL))} $">●</i>` : ''}${de(istV)}${bal.startwert ? `<span class="pz-rest" title="${escapeHtml(PLAN_STARTWERT_TIP)}"> Startwert</span>` : ''}${ziel ? `<em>→</em>${de(ziel)}<span class="pz-rest"> · Rest ${de(Math.max(0, ziel - istV))}</span>` : ' $'}</span>`
         + (bz ? bz.html : '')
     } else if(notiz && (notiz.ziel || notiz.rest)){
       // Quelle für die Balance fehlt (Nachtrag 08.10.2026): nicht stumm „–", sondern zeigen, was da ist
@@ -42328,7 +42334,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1392'
+  const OS_TAB_BUILD = '2026-09-22.1393'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -47576,7 +47582,8 @@
         typ: x.typ || (g && g.typ) || (p && p.kontoTyp) || (p && ((accounts || []).find(a => String(a.id) === String(p.masterAccountId)) || {}).type) || null,
         route: x.route || (g && g.route) || (p ? p.route : null), usd: tplNum(x.usd_pro_pkt) ?? tplNum(g && g.usd_pro_pkt),
         satz: tplNum(x.satz_eur_je_usd),   // Kontowert-Satz € je $ (Delta offen[]) — Hypo-P&L (07.10.2026)
-        balance: tplNum(x.balance) ?? tplNum(g && g.balance), rest: tplNum(x.rest) ?? tplNum(g && g.rest),   // Planer-Balance + Rest bis Ziel (Lauf-Zeile, alle IDs)
+        balance: tplNum(x.balance) ?? tplNum(g && g.balance), rest: tplNum(x.rest) ?? tplNum(g && g.rest),
+        bal_startwert: tplNum(x.balance) == null && /^Startwert/.test(String((g && g.bal_quelle) || '')),   // frisches Konto (09.10.2026)   // Planer-Balance + Rest bis Ziel (Lauf-Zeile, alle IDs)
         wd: (x.typ || (g && g.typ)) === 'winning_days' || !!(p && (p.notes === 'Winning-Day-Farmer' || (p.route === 'tvv2' && p.hedgeEur > 0 && !p.orbitV3))),   // Winning Day: nur dezent (Finn 07.10.2026)
         eigen: !!p, auto: x.auto_plan != null ? !!x.auto_plan : p ? !!p.autoPlan : true, ...mehr }
       t.long = t.richtung === 'buy'
@@ -48757,7 +48764,8 @@
       const konto = p.masterAccountId ? (accounts || []).find(a => String(a.id) === String(p.masterAccountId)) || null : null
       const kontoBal = konto ? planKontoBalance(konto) : null
       // Balance: eigenes Konto live wie im Reiter; fremde IDs (oder ohne Lesung) der Stand, mit dem der Planer gerechnet hat
-      const bal = !kontoBal && t.balance != null ? { val: Number(t.balance), at: 0, tip: 'Balance laut Planer (Stand des Laufs)' } : undefined
+      const bal = !kontoBal && t.balance != null ? (t.bal_startwert ? { val: Number(t.balance), at: 0, tip: PLAN_STARTWERT_TIP, startwert: true }
+        : { val: Number(t.balance), at: 0, tip: 'Balance laut Planer (Stand des Laufs)' }) : undefined
       // Art + Ziel aus der Lauf-Zeile (Stufe, Rest bis Ziel, Planer-Balance) — gleiche Rundung wie planAutoNotiz
       const st = String(t.stufe || '').trim(), rest = Number(t.rest), b0 = Number(t.balance)
       const notiz = st && rest > 0 && b0 > 0 ? { stufe: st, art: planSchritt(st), rest,
@@ -62925,7 +62933,9 @@
       const eigen = String(z.user_id || '') === String(currentUserId || '')
       const konto = eigen ? ((t.konto_id ? (accounts || []).find(a => String(a.id) === String(t.konto_id)) : null) || (accounts || []).find(a => String(a.name || '') === String(z.konto || '')) || null) : null
       const kontoBal = konto ? planKontoBalance(konto) : null
-      const bal = !kontoBal && t.balance != null ? { val: Number(t.balance), at: 0, tip: 'Balance laut Planer (Stand des Laufs)' } : undefined
+      // Startwert eines frischen Kontos (09.10.2026): Lauf-Zeile bal_quelle oder Plan-Notiz, solange das Delta keine Lesung hat
+      const sw = tplNum(z.balance) == null && (!!t.bal_startwert || /^Startwert/.test(String(t.bal_quelle || '')) || /\(Startwert\b/.test(String(z.notes || '')))
+      const bal = !kontoBal && t.balance != null ? { val: Number(t.balance), at: 0, tip: sw ? PLAN_STARTWERT_TIP : 'Balance laut Planer (Stand des Laufs)', startwert: sw } : undefined
       const st = String(z.stufe || t.stufe || '').trim(), rest = Number(t.rest), b0 = Number(t.balance)
       // Ziel = Balance + Rest; fehlt die Balance, reicht der Rest allein nicht — dann bleibt ziel 0 und die Zelle sagt es (planZeileHtml)
       const notiz = (st || rest > 0) ? { stufe: String(z.notes || st), art: planSchritt(st),

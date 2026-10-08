@@ -15914,6 +15914,51 @@ def _ap_archiviert():
     return out
 
 
+AP_STARTWERT_QUELLE = "Startwert (frisches Konto)"
+
+
+AP_LESE_FELDER = ("tv_balance_at", "topstep_last_check", "meta_api_last_check")
+
+
+def ap_startwert_frisch(a, hatte_trade, gelesen=False):
+    """REIN RECHNEND (testbar): Startwert eines FRISCHEN Kontos als Planer-Balance oder None (Finn 09.10.2026 ~02:30 Dubai: „Wenn ich
+    Accounts frisch hinzufüge, soll die Balance direkt drin sein — ein frisches 150k ohne Trade muss niemand erst lesen"; Vorfall: frische
+    Tradeify-150k standen unter „Braucht dich" mit „keine Balance bekannt", die Hand-Lesung ergab genau 150.000).
+    Frisch = in Prophos nie gehandelt (hatte_trade False — weder Master noch Slave eines gestarteten/gesendeten/beendeten Plans; None =
+    nicht prüfbar → kein Startwert). Größe wie beim Konto-Boden (liq_konto_groesse: „150k" im Namen, starting_balance, Tradeify-/
+    Topstep-Kürzel), sonst account_size. Phase-2-Nachfolger sind eigene Konten → Größe der neuen Phase. Topstep Express (0-basiert) nie.
+    Nur Rückfall: eine echte Lesung (acc_balance_wahl) hat immer Vorrang; nichts wird als „gelesen" in die DB geschrieben.
+    Frisch auch nur, wenn es NIE eine Lesung gab (Prüfer Slave 2): acc_balance_wahl wirft 0 als „unbekannt" weg — ein von Hand
+    geblowtes Konto (tv_balance 0 gelesen, nie ein Prophos-Plan) bekäme sonst den Startwert. gelesen = Echo/Duplikum kennt den Login."""
+    if hatte_trade is not False or gelesen or ist_topstep_express(a or {}) or any((a or {}).get(f) for f in AP_LESE_FELDER):
+        return None
+    g = liq_konto_groesse(a or {}) or _wd_num((a or {}).get("account_size"))
+    return float(g) if g and g > 0 else None
+
+
+def _ap_konten_mit_trade(konto_ids):
+    """Konto-IDs (Teilmenge von konto_ids), die je gehandelt wurden — in einem Plan als Master oder Slave, ohne Zeitgrenze
+    (ap_planen liest nur 30 Tage; gestartet, Order gesendet, beendet oder Status open/review/completed), oder von Hand ohne Plan
+    (fremd_positionen.konto_id, Prüfer Slave 2). Lesefehler → None (dann bekommt kein Konto einen Startwert, es bleibt bei
+    „keine Balance bekannt")."""
+    ids = sorted({str(i) for i in konto_ids or () if i})
+    if not ids:
+        return set()
+    out = set()
+    try:
+        for i in range(0, len(ids), 100):
+            liste = "(" + ",".join(ids[i:i + 100]) + ")"
+            for feld in ("master_account_id", "slave_account_id"):
+                for p in _sb_all("trade_plans", {"select": f"{feld},status,started_at,ended_at,orbit_gesendet_at", feld: "in." + liste}):
+                    if p.get("started_at") or p.get("ended_at") or p.get("orbit_gesendet_at") or p.get("status") in ("open", "review", "completed"):
+                        out.add(str(p.get(feld)))
+            out.update(str(f.get("konto_id")) for f in _sb_all("fremd_positionen", {"select": "konto_id", "konto_id": "in." + liste}))
+    except Exception as e:
+        print(f"[auto-plan] ⚠️ Startwert: Trade-Verlauf nicht lesbar ({type(e).__name__}: {e}) — kein Startwert", flush=True)
+        return None
+    return out
+
+
 AP_KONTO_FELDER = ("id,user_id,name,firm,account_type,external_id,max_drawdown,starting_balance,account_size,topstep_balance,topstep_last_check,"
                    "meta_api_balance,meta_api_last_check,tv_balance,tv_balance_at,consistency_pct,ziel_pct_konto,auto_planer")
 AP_KONTO_FELDER_OHNE_CONS = AP_KONTO_FELDER.replace(",consistency_pct", "")
@@ -17428,6 +17473,10 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     je_konto = {}
     for p in plaene:
         je_konto.setdefault(str(p.get("master_account_id")), []).append(p)
+    # FRISCHE KONTEN (Finn 09.10.2026): ohne jede Lesung → einmal den ganzen Trade-Verlauf dieser Konten prüfen (ap_startwert_frisch)
+    _ohne_bal = [a["id"] for a in konten if str(a["id"]) not in archiv and (not nachplanen or str(a["id"]) in nur_set)
+                 and acc_balance_wahl(a, echo_bal, dup_bal)[0] is None]
+    _gehandelt = _ap_konten_mit_trade(_ohne_bal) if _ohne_bal else set()
     ausgelassen, kandidaten = [], []
     for a in konten:
         aid, wer = str(a["id"]), namen.get(str(a["user_id"]), str(a["user_id"])[:8])
@@ -17476,6 +17525,11 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
             else:
                 ausgelassen.append(dict(zeile, grund="Balance nicht live (seit dem letzten Trade nicht nachgelesen)"))
                 continue
+        if not bal and not letzt:
+            _lg = str(a.get("external_id") or "").strip()
+            sw = ap_startwert_frisch(a, None if _gehandelt is None else aid in _gehandelt, gelesen=bool(_lg) and (_lg in echo_bal or _lg in dup_bal))
+            if sw:
+                bal, quelle_b, stand = sw, AP_STARTWERT_QUELLE, ""
         if not bal:
             ausgelassen.append(dict(zeile, grund="keine Balance bekannt"))
             continue
@@ -17662,7 +17716,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
         d = dinfo.get((key, str(a["id"]))) or {}
         dd = d.get("delta_eur_pkt")
         geplant.append(dict(k["zeile"], start=start.strftime("%H:%M"), richtung=richtung[key], tp=w["tp"], sl=w["sl"],
-                            menge=w["menge"], stufe=w["stufe"], rest=w["rest"], balance=round(k["bal"]),
+                            menge=w["menge"], stufe=w["stufe"], rest=w["rest"], balance=round(k["bal"]), bal_quelle=k["bal_quelle"],
                             delta_eur_pkt=(round(abs(dd), 3) * (1 if richtung[key] == "buy" else -1)) if dd is not None else None,
                             einsatz_eur=round(float((d.get("g") or {}).get("verlust_eur") or 0)) * (1 if richtung[key] == "buy" else -1),
                             tp_punkte=d.get("tp_punkte"), sl_punkte=d.get("sl_punkte"), bestaetigt=bool(param["auto_start"]),
