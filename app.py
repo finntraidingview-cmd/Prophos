@@ -17109,6 +17109,11 @@ AP_SZENARIO_AB_EUR = 0.0                 # Vorziehen löst aus, sobald min P üb
 AP_SZENARIO_MIN_GEWINN_EUR = 10.0        # Dämpfung: ein Zug muss das Minimum um mindestens so viel heben, sonst kein Zug (kein Flattern)
 AP_SUCHE_ZUEGE = 4                       # Strahlsuche (08.10.2026, Finn „beste Kombination"): höchstens so viele Züge je Lauf …
 AP_SUCHE_BREITE = 6                      # … über so viele beste Zwischenstände je Tiefe (Greedy wäre Breite 1)
+# BOT MASSVOLL (08.10.2026, Finn: „Die ganzen Orders werden jetzt nach vorne verschoben … es sollten aber immer noch [der Anteil] im
+# Opening sein, wie die Zeitfenster das sagen. Man kann ab und zu mal ein, zwei Orders verschieben" — Befund Slave 3: 49 Bot-Züge an 29
+# Plänen bis 10 Uhr Dubai, Opening 15 → 8 von 36): höchstens so viele Ausgleichs-Züge je ID und Tag (Vorziehen, Hinausschieben, Drehen,
+# Band-Schritt, Mischung; nicht Verteilung gegen Klumpen und nicht Rückfall) — „ein, zwei" → 2
+AP_BOT_ZUEGE_JE_ID_TAG = 2
 
 
 def ap_szenario_trade(t, d):
@@ -17404,7 +17409,7 @@ def ap_verteilung(gruppe, je, zustand, jetzt_min, zeiten, rnd, gestartet=None, l
 
 def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, rnd, gestartet=None, id_fest=None,
                 schritte=AP_BOT_SCHRITTE, einsatz=None, zuletzt=None, hysterese=None, dubai_min=0, vorgezogen_heute=None,
-                verteilt_heute=None, pc_lebt=None, verpufft=None, laufend=None, hinaus_heute=None):
+                verteilt_heute=None, pc_lebt=None, verpufft=None, laufend=None, hinaus_heute=None, zuege_heute=None, zuege_gesperrt=False):
     """REIN RECHNEND (Vertrag §3, Korrektur Finn 06.10.2026): ein Lauf des Ausgleichs-Bots. plaene = heutige geplante Pläne
     [{plan_id, user_id, user, firma, richtung, start_min, delta_abs, aenderbar}] — nicht änderbare zählen mit und sperren ihre
     Tranche. gestartet = heute schon gestartete Trades [{user_id, firma, start, richtung}] (nur für den weichen Malus),
@@ -17566,6 +17571,37 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
     # im selben Lauf zweimal, 02:43 → 02:51 → 02:59 UTC): jeder Plan, den dieser Lauf schon bewegt oder gedreht hat (Rückfall,
     # Vorziehen, Band-Schritt, Mischung), ist für die folgenden Schritte und Phasen gesperrt
     angefasst = set()
+    # Deckel je ID und Tag (AP_BOT_ZUEGE_JE_ID_TAG): zuege_heute = {user_id: Züge heute} aus dem Protokoll, lauf = Züge dieses Laufs
+    zuege_heute, lauf_zuege = {str(k): int(v) for k, v in (zuege_heute or {}).items()}, {}
+
+    def id_voll(uid, extra=0):
+        if zuege_gesperrt:
+            return True                      # Protokoll nicht lesbar → keine gedeckelten Züge (Prüfer Slave 2: nie still „alles erlaubt")
+        return zuege_heute.get(str(uid), 0) + lauf_zuege.get(str(uid), 0) + extra >= AP_BOT_ZUEGE_JE_ID_TAG
+
+    def id_zug(uid):
+        lauf_zuege[str(uid)] = lauf_zuege.get(str(uid), 0) + 1
+
+    # FENSTER-ANTEIL (Finn 08.10.2026: „es sollten immer noch [so viele] Orders im Opening sein, wie die Zeitfenster das sagen"): ein Plan
+    # darf sein Startfenster nur verlassen, wenn dort danach noch mindestens Gewicht ÷ Summe × (heutige Pläne + heutige Starts) liegen
+    fen_reg = [(float(_ap_hhmm(f_[0])), float(min(_ap_hhmm(f_[1]), ap_start_bis(zeiten))), float(f_[2] if len(f_) > 2 else 1))
+               for f_ in ((zeiten or {}).get("fenster") or [])]
+    fen_reg = [x for x in fen_reg if x[1] > x[0]]
+
+    def fen_idx(m):
+        return next((j for j, (a_, b_, _w) in enumerate(fen_reg) if a_ <= float(m) < b_), None)
+    _gest_idx = [fen_idx(x["start"]) for x in gestartet or () if x.get("start") is not None]
+    _n_tag = sum(1 for i in zustand if fen_idx(zustand[i]["start"]) is not None) + sum(1 for j in _gest_idx if j is not None)
+    _w_sum = sum(w for _a, _b, w in fen_reg) or 1.0
+    fen_soll = {j: int(w / _w_sum * _n_tag) for j, (_a, _b, w) in enumerate(fen_reg)}
+
+    def fen_zahl(z, j):
+        return sum(1 for i in z if fen_idx(z[i]["start"]) == j) + sum(1 for g in _gest_idx if g == j)
+
+    def fenster_frei(z, i, t):
+        # darf Plan i (im Zustand z) von seinem Fenster nach t? Gleiches Fenster immer; anderes nur, solange das alte sein Soll behält
+        j_alt, j_neu = fen_idx(z[i]["start"]), fen_idx(t)
+        return j_alt is None or j_alt == j_neu or fen_zahl(z, j_alt) - 1 >= fen_soll.get(j_alt, 0)
     # RÜCKFALL: ein heute vorgezogener Plan, der AP_VORZIEHEN_RUECKFALL_MIN nach seiner neuen Startzeit noch ungeclaimt ist (verpufft =
     # [{plan_id, alt_min}] aus ap_ausgleichen), geht zurück auf seine alte Zeit, wenn die noch ≥ jetzt + AP_VERTEIL_VORLAUF_MIN liegt —
     # sonst bleibt er stehen. Zählt nicht als „die eine Tranche": danach darf ein anderer vorgezogen werden.
@@ -17707,13 +17743,15 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                 out.append((tuple(ids), r_neu))
         return out
 
-    def suche_kandidaten(z, bewegt):
+    def suche_kandidaten(z, bewegt, seq_ids=None):
         bel, out = belegung(z), []
         ab_ = float(jetzt_min) + AP_VORZIEHEN_AB_MIN
         bis60 = float(jetzt_min) + 60
+        seq_ids = seq_ids or {}
         for i in sorted(z, key=lambda k: z[k]["start"]):
             p, s0 = je[i], z[i]["start"]
-            if (i in bewegt or i in angefasst or not p.get("aenderbar") or not p.get("auto_plan") or ruht([i]) or not lebt(p["user_id"])):
+            if (i in bewegt or i in angefasst or not p.get("aenderbar") or not p.get("auto_plan") or ruht([i]) or not lebt(p["user_id"])
+                    or id_voll(p["user_id"], seq_ids.get(str(p["user_id"]), 0))):
                 continue
             fen = ap_fenster_von(zeiten, s0)
             if not fen:
@@ -17727,7 +17765,7 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                     lo = max(lo, float(ap_cfd_ab(zeiten)))
                 bis_v = min(s0, bis60 + 1, float(ap_start_bis(zeiten)))
                 t = platz(i, lo, bis_v, bel) if lo <= bis60 else None
-                if t is not None and t < s0 and ap_fenster_von(zeiten, t):
+                if t is not None and t < s0 and ap_fenster_von(zeiten, t) and fenster_frei(z, i, t):
                     out.append((i, t, "vor"))
             elif (ab_ + 1 < s0 <= bis60 and s0 > float(jetzt_min) + AP_FAELLIG_MIN and i not in vorgezogen_heute
                   and i not in hinaus_heute):
@@ -17738,14 +17776,27 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                 t = platz(i, bis60 + 1, float(fen[1]) - laufz + 1, bel)
                 if t is not None and t > s0 and t + laufz <= float(fen[1]):
                     out.append((i, t, "raus"))
-        return out + [(ids, r_neu, "dreh") for ids, r_neu in dreh_kandidaten(z, bewegt, bel)]
+        return out + [(ids, r_neu, "dreh") for ids, r_neu in dreh_kandidaten(z, bewegt, bel)
+                      if not id_voll(je[ids[0]]["user_id"], seq_ids.get(str(je[ids[0]]["user_id"]), 0))]
 
     such_zuege = []
     if sz_offen:
         zustand_r = {i: zustand[i]["richtung"] for i in zustand}
 
-        def wert(lage, n):
-            return (round(lage["min_eur"], 6), -round(abs(lage["delta_eur_pkt"]), 6), -n)
+        def wert(lage, n, ueber=0):
+            # (c) Finn 08.10.2026 „nur wenn wirklich nötig": bei praktisch gleichem schlimmsten Fall (gleiche Stufe AP_SZENARIO_MIN_GEWINN_EUR)
+            # gewinnt die Kombination mit weniger Fenster-Wechseln — Drehen/Schieben im eigenen Fenster vor Vorziehen über die Fenstergrenze
+            return (int(lage["min_eur"] // AP_SZENARIO_MIN_GEWINN_EUR), -ueber, round(lage["min_eur"], 6), -round(abs(lage["delta_eur_pkt"]), 6), -n)
+
+        def ueber_n(zuege):
+            return sum(1 for x in zuege if x[2] == "vor" and fen_idx(x[3]) != fen_idx(x[1]))
+
+        def seq_ids_von(zuege):
+            out_ = {}
+            for x in zuege:
+                u_ = str(je[x[0][0] if x[2] == "dreh" else x[0]]["user_id"])
+                out_[u_] = out_.get(u_, 0) + 1
+            return out_
         zustand_start = lambda i: zustand[i]["start"]    # noqa: E731 — Drehen ändert keine Startzeit
         start_l = sz_lage(zustand)
         misch0, tag0 = misch(zustand), tag_ueber(zustand)
@@ -17758,7 +17809,7 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
         for _tiefe in range(AP_SUCHE_ZUEGE):
             neu_b = []
             for z0, zuege, l0 in beam:
-                for i, t, art in suche_kandidaten(z0, bewegte(zuege)):
+                for i, t, art in suche_kandidaten(z0, bewegte(zuege), seq_ids_von(zuege)):
                     schluessel = frozenset([(x[0], x[1]) for x in zuege] + [(i, t)])
                     if schluessel in gesehen:
                         continue
@@ -17775,9 +17826,9 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                     neu_b.append((z1, zuege + ((i, t, art, None if art == "dreh" else z0[i]["start"], l0, l1),), l1))
             if not neu_b:
                 break
-            neu_b.sort(key=lambda x: wert(x[2], len(x[1])), reverse=True)
+            neu_b.sort(key=lambda x: wert(x[2], len(x[1]), ueber_n(x[1])), reverse=True)
             beam = neu_b[:AP_SUCHE_BREITE]
-            if wert(beam[0][2], len(beam[0][1])) > wert(beste[2], len(beste[1])):
+            if wert(beam[0][2], len(beam[0][1]), ueber_n(beam[0][1])) > wert(beste[2], len(beste[1]), ueber_n(beste[1])):
                 beste = beam[0]
         such_zuege = list(beste[1])
         hm = lambda m: _ap_hhmm_txt((float(m) + float(dubai_min or 0)) % 1440)    # noqa: E731
@@ -17795,6 +17846,7 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                                         "von_richtung": zustand_r[k], "nach_richtung": t, "von_start_min": zustand[k]["start"],
                                         "nach_start_min": zustand[k]["start"], "grund": grund})
                     angefasst.add(k)
+                id_zug(je[erst]["user_id"])
             else:
                 seite = "Long" if zustand_r[i] == "buy" else "Short"
                 f_alt = ap_fenster_von(zeiten, alt)
@@ -17805,6 +17857,7 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                                     "von_richtung": zustand_r[i], "nach_richtung": zustand_r[i], "von_start_min": alt,
                                     "nach_start_min": t, "grund": grund})
                 angefasst.add(i)
+                id_zug(je[i]["user_id"])
             if ausloeser is None or n == 1:
                 ausloeser = grund
         if such_zuege:
@@ -17829,8 +17882,8 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
         for i in sorted(zustand, key=lambda i: zustand[i]["start"]):
             p, s0 = je[i], zustand[i]["start"]
             if (zustand[i]["richtung"] != noetig or not p.get("aenderbar") or not p.get("auto_plan") or s0 <= ab + 1 or ruht([i])
-                    or not lebt(p["user_id"]) or i in vorgezogen_heute):
-                continue                                     # PC-Tab der ID tot / heute schon vorgezogen → anderen nehmen
+                    or not lebt(p["user_id"]) or i in vorgezogen_heute or id_voll(p["user_id"])):
+                continue                                     # PC-Tab der ID tot / heute schon vorgezogen / Deckel je ID → anderen nehmen
             uid, fa, g = str(p["user_id"]), p["firma"], f"{p['user_id']}|{p['firma']}"
             fest = id_fest.get(g)
             if fest and fest.get("richtung") in ("buy", "sell") and fest.get("richtung") != noetig:
@@ -17899,6 +17952,7 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
             ausloeser = grund
             zustand, aktuell, vorgezogen = z, k_neu, True
             angefasst.add(i)
+            id_zug(je[i]["user_id"])
             if sz_an:
                 sz_vor = sz_lage(zustand)
 
@@ -17927,8 +17981,8 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
             if ruht(ids):                        # DÄMPFUNG: eben erst angefasst — in dieser Runde nicht noch einmal
                 ruhig.extend(ids)
                 continue
-            if any(i in angefasst for i in ids):
-                continue                         # ein Zug je Plan und Lauf (s. o.)
+            if any(i in angefasst for i in ids) or id_voll(t["user_id"]):
+                continue                         # ein Zug je Plan und Lauf (s. o.), Deckel je ID und Tag
             if not lebt(t["user_id"]):
                 continue                         # PC-TAB TOT (Master 08.10.2026, Mikes PC): wie beim Vorziehen — Drehen/Schieben
                                                  # einer ID, die nichts startet, gleicht nur auf dem Papier aus
@@ -17994,6 +18048,7 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                                 "von_start_min": von["start"], "nach_start_min": nach["start"], "grund": grund})
         zustand, aktuell = z, k_neu
         angefasst.update(ids)
+        id_zug(je[ids[0]]["user_id"])
 
     # ── ID-MISCHUNG (08.10.2026, Master/Finn): Tranche ID × Firma drehen, wenn eine ID ≥ AP_ID_MISCH_AB Pläne über ≥ 2 Firmen fast nur
     # in eine Richtung hat (ap_id_misch). Nur Tranchen aus lauter UNBESTÄTIGTEN Auto-Vorschlägen (bestätigte und gestartete bleiben,
@@ -18032,7 +18087,8 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
         for k in sorted(gruppen):
             ids = sorted(gruppen[k])
             best_ = any(je[i].get("bestaetigt") for i in ids)
-            if (k in id_fest or ruht(ids) or any(i in angefasst for i in ids) or len({zustand[i]["richtung"] for i in ids}) != 1
+            if (k in id_fest or ruht(ids) or any(i in angefasst for i in ids) or id_voll(je[ids[0]]["user_id"])
+                    or len({zustand[i]["richtung"] for i in ids}) != 1
                     or not all(je[i].get("aenderbar") and je[i].get("auto_plan") for i in ids)
                     or (best_ and min(zustand[i]["start"] for i in ids) < float(jetzt_min) + AP_MISCH_BESTAETIGT_AB_MIN)):
                 continue
@@ -18114,6 +18170,8 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                                               f"{txt_t if t is teile[0][0] else ''})")})
         zustand, aktuell = z, k_neu
         angefasst.update(i for _t, ids in teile for i in ids)
+        for _t, ids_ in teile:
+            id_zug(_t["user_id"])
 
     # ── VERTEILUNG (08.10.2026, Master/Finn: „Jetzt starten drei Apex-Dinger. Wenn es nur ganz kurz nicht weitergeht, werden alle
     # liquidiert. Deswegen lieber einzeln starten" — auch für HEUTE schon angelegte Pläne): eine ID × Firma je Lauf, deren Pläne näher
@@ -18989,6 +19047,22 @@ def _ap_pc_lebt_gecacht():
     return ids
 
 
+def ap_zuege_je_id(rows):
+    """REIN: Ausgleichs-Züge je ID aus dem heutigen Protokoll (auto_plan_umplanung) für den Deckel AP_BOT_ZUEGE_JE_ID_TAG — nur quelle
+    'bot', ohne Verteilung (Klumpen) und Rückfall („verpufft"); ein Lauf (Minute) × Firma = ein Zug (eine gedrehte Tranche mit 3
+    Plänen zählt einmal). → {user_id: n}"""
+    out, keys = {}, set()
+    for r in rows or ():
+        g = str(r.get("grund") or "")
+        if r.get("quelle") != "bot" or not r.get("user_id") or g.startswith("Verteilung:") or "verpufft" in g:
+            continue
+        k = (str(r["user_id"]), str(r.get("um") or "")[:16], str(r.get("firma") or ""))
+        if k not in keys:
+            keys.add(k)
+            out[k[0]] = out.get(k[0], 0) + 1
+    return out
+
+
 def _ap_zug_nach_vorn(grund, von_min, nach_min):
     """Protokollzeile eines Bot-Zugs nach VORN? „Gegenrichtung vorziehen" („Ausgleich: … vorgezogen …") und seit 08.10.2026 auch der
     Band-Schritt („…: Tranche X HH:MM → HH:MM im eigenen Fenster …"), wenn er früher gelegt hat (Master, Befund Slave 2: Mikes PC
@@ -19044,6 +19118,7 @@ def ap_ausgleichen(trocken=False, quelle="bot", jetzt=None, seed=None):
     seed = int(seed) if seed not in (None, "") else random.SystemRandom().randrange(1, 2 ** 31)
     # DÄMPFUNG (08.10.2026): letzte Umplanung je Plan heute (auto_plan_umplanung, bot UND hand) als Minute des Tages → Ruhezeit
     zuletzt, vorgez_h, verteilt_h, alt_start, hinaus_h = {}, set(), set(), {}, set()
+
     try:
         for r in (_ap_umplanungen_heute(stand)[0] or []):
             um = r.get("um")
@@ -19065,11 +19140,21 @@ def ap_ausgleichen(trocken=False, quelle="bot", jetzt=None, seed=None):
             zuletzt[pid] = max(zuletzt.get(pid, -1e9), m)
     except Exception as e:
         print(f"[auto-plan] ⚠️ Dämpfung: Protokoll nicht lesbar ({type(e).__name__}) — ohne Ruhezeit", flush=True)
+    zuege_gesperrt = False
+    try:
+        _rows, _hinw = _ap_umplanungen_heute(stand)    # schluckt Lesefehler selbst und meldet sie als Hinweis
+        if _hinw:
+            raise RuntimeError(_hinw)
+        zuege_h = ap_zuege_je_id(_rows or [])          # Deckel AP_BOT_ZUEGE_JE_ID_TAG (08.10.2026)
+    except Exception as e:
+        # Fail-safe (Prüfer Slave 2): ohne Protokoll keine gedeckelten Ausgleichs-Züge in diesem Lauf (Verteilung/Rückfall bleiben)
+        zuege_h, zuege_gesperrt = {}, True
+        print(f"[auto-plan] ⚠️ Deckel je ID: Protokoll nicht lesbar ({type(e).__name__}) — dieser Lauf ohne Ausgleichs-Züge", flush=True)
     erg = ap_umplanen(_ap_stand_plaene(stand), stand["basis_netto"], stand["basis_brutto"], max(0.0, stand["jetzt_min"]),
                       stand["zeiten"], param["zielband_pct"], random.Random(seed), gestartet=stand["starts_heute"],
                       id_fest=stand["id_fest"], einsatz=ap_einsatz_kontext(stand, param), zuletzt=zuletzt,
                       dubai_min=_ap_dubai_versatz(stand["mitternacht"]), vorgezogen_heute=vorgez_h, verteilt_heute=verteilt_h,
-                      pc_lebt=_ap_pc_lebt(), verpufft=_ap_verpufft(stand, alt_start), hinaus_heute=hinaus_h,
+                      pc_lebt=_ap_pc_lebt(), verpufft=_ap_verpufft(stand, alt_start), hinaus_heute=hinaus_h, zuege_heute=zuege_h, zuege_gesperrt=zuege_gesperrt,
                       laufend=[{"user_id": z["user_id"], "firma": z.get("firma_key"), "richtung": z.get("richtung"), "start": None}
                                for z in stand["offen"]])   # Gegenhedge über IDs (08.10.2026)
     je = {z["plan_id"]: z for z in stand["geplant"]}

@@ -167,8 +167,17 @@ def main():
     fest_f = {f"{p['user_id']}|{p['firma']}": {"richtung": p["richtung"]} for p in vm + nm}
     Lf = lambda zus: L(lauf_l + [T(dict(p, start_min=zus.get(p["plan_id"], p["start_min"])), False) for p in vm + nm  # noqa: E731
                                  if jf <= zus.get(p["plan_id"], p["start_min"]) <= jf + 60])
-    aus = U(vm + nm, 0.0, 0.0, jf, Z, 25, random.Random(1), einsatz=EKf, dubai_min=120, id_fest=fest_f)
-    an = U(vm + nm, 0.0, 0.0, jf, Z, 25, random.Random(1), einsatz=dict(EKf, fenster_uebergreifend=True), dubai_min=120, id_fest=fest_f)
+    # seit 08.10.2026 (Finn: Opening-Anteil laut Zeitfenster halten): im Nachmittagsfenster 4 weitere feste Pläne → Überschuss 2 über dem Soll
+    fueller = [plan(f"f{k}", f"u-f{k}", "apex", "buy", 900 + 12 * k, aenderbar=False, fest_durch="Handplan", satz_eur_je_usd=0.00001)
+               for k in range(4)]
+    aus = U(vm + nm + fueller, 0.0, 0.0, jf, Z, 25, random.Random(1), einsatz=EKf, dubai_min=120, id_fest=fest_f)
+    an = U(vm + nm + fueller, 0.0, 0.0, jf, Z, 25, random.Random(1), einsatz=dict(EKf, fenster_uebergreifend=True), dubai_min=120,
+           id_fest=fest_f)
+    knapp = U(vm + nm, 0.0, 0.0, jf, Z, 25, random.Random(1), einsatz=dict(EKf, fenster_uebergreifend=True), dubai_min=120, id_fest=fest_f)
+    check(not knapp["aenderungen"], "Fenster-Anteil: 2 vormittags / 2 im Opening bei 50/50 → nichts aus dem Opening ziehen (Finn 08.10.2026)")
+    eins = U(vm + nm + fueller[:2], 0.0, 0.0, jf, Z, 25, random.Random(1), einsatz=dict(EKf, fenster_uebergreifend=True), dubai_min=120,
+             id_fest=fest_f)
+    check(len(eins["aenderungen"]) == 1, f"Überschuss 1 im Opening → genau ein Zug über die Fenstergrenze ({[x['plan_id'] for x in eins['aenderungen']]})")
     zus = {x["plan_id"]: x["nach_start_min"] for x in an["aenderungen"]}
     vor_f, nach_f = Lf({}), Lf(zus)
     check(not aus["aenderungen"] and vor_f["min_eur"] < -100, f"Schalter aus: Fenstergrenze hält, kein Zug (min ±30 {vor_f['min_eur']:.0f} €)")
@@ -195,6 +204,24 @@ def main():
         zi.update({x["plan_id"]: x["nach_start_min"] for x in ei["aenderungen"]})
         eng_n += abs(zi["i1"] - zi["i2"]) < a["AP_ABSTAND_ID_FIRMA_MIN"]
     check(eng_n == 0, f"Ina-Fall: zwei Shorts derselben ID × Firma nach dem Vorziehen nie enger als 60 min (15 Seeds, {eng_n} zu eng)")
+    # Deckel je ID und Tag (Finn: „ab und zu mal ein, zwei Orders verschieben")
+    voll = U(vm + nm + fueller, 0.0, 0.0, jf, Z, 25, random.Random(1), einsatz=dict(EKf, fenster_uebergreifend=True), dubai_min=120,
+             id_fest=fest_f, zuege_heute={"u-a": a["AP_BOT_ZUEGE_JE_ID_TAG"], "u-c": a["AP_BOT_ZUEGE_JE_ID_TAG"]})
+    check(not voll["aenderungen"], f"Deckel: beide IDs haben heute schon {a['AP_BOT_ZUEGE_JE_ID_TAG']} Züge → kein Zug")
+    halb = U(vm + nm + fueller, 0.0, 0.0, jf, Z, 25, random.Random(1), einsatz=dict(EKf, fenster_uebergreifend=True), dubai_min=120,
+             id_fest=fest_f, zuege_heute={"u-c": a["AP_BOT_ZUEGE_JE_ID_TAG"]})
+    check([x["plan_id"] for x in halb["aenderungen"]] == ["a_fn"], f"Deckel nur bei Chris → nur Aurels Short ({[x['plan_id'] for x in halb['aenderungen']]})")
+    gesp = U(vm + nm + fueller, 0.0, 0.0, jf, Z, 25, random.Random(1), einsatz=dict(EKf, fenster_uebergreifend=True), dubai_min=120,
+             id_fest=fest_f, zuege_gesperrt=True)
+    check(not gesp["aenderungen"], "Fail-safe: Protokoll nicht lesbar (zuege_gesperrt) → keine Ausgleichs-Züge")
+    zj = a["ap_zuege_je_id"]([
+        {"quelle": "bot", "user_id": "u1", "um": "2026-10-08T04:30:54", "firma": "FundedNext", "grund": "Ausgleich: Short vorgezogen …"},
+        {"quelle": "bot", "user_id": "u1", "um": "2026-10-08T04:30:54", "firma": "FundedNext", "grund": "Ausgleich: gedreht …"},
+        {"quelle": "bot", "user_id": "u1", "um": "2026-10-08T04:40:00", "firma": "Tradeify", "grund": "Netto-Einsatz …: Tranche …"},
+        {"quelle": "bot", "user_id": "u1", "um": "2026-10-08T04:50:00", "firma": "Tradeify", "grund": "Verteilung: …"},
+        {"quelle": "bot", "user_id": "u1", "um": "2026-10-08T05:00:00", "firma": "Tradeify", "grund": "Ausgleich: Vorziehen verpufft …"},
+        {"quelle": "hand", "user_id": "u1", "um": "2026-10-08T05:10:00", "firma": "Tradeify", "grund": "Master: …"}])
+    check(zj == {"u1": 2}, f"Zählung je ID: Lauf × Firma = ein Zug, ohne Verteilung/Rückfall/Hand ({zj})")
     pa = a["ap_ausgleich_param"]
     check(pa({})["fenster_uebergreifend"] is False and pa({"ausgleich": {"fenster_uebergreifend": "ja"}})["fenster_uebergreifend"] is False
           and pa({"ausgleich": {"fenster_uebergreifend": True}})["fenster_uebergreifend"] is True,
