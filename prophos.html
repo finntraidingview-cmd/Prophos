@@ -13156,7 +13156,9 @@
      * Rechnungen, Kasse, Auftrag); innerhalb der Reiter blendet die Klasse adm-verwalter die HT-weiten Schalter aus (CSS data-ht-global).
      * Ein eingeschränkter Login OHNE Gruppe (admin_zugang nur_eigene) bleibt bei den drei Reitern von 27.09. Solange die Übersicht noch
      * nicht geantwortet hat, gilt für eigene Codes die enge Auswahl — danach zeichnet admLoad die Reiter neu. */
-    const KASSE_REITER_HT = new Set(['rg', 'kasse', 'auftrag'])
+    // Trade-Planer für Verwalter aus (Finn 09.10.2026: „mach bei Emin nix mit Trade-Planer, der macht noch manuell mit Gegenhedgen“)
+    // — seine IDs stehen nicht im Auto-Planer; der Reiter zeigte ihm nur leere bzw. HT-fremde Planer-Ansichten
+    const KASSE_REITER_HT = new Set(['rg', 'kasse', 'auftrag', 'planer'])
     const admEingeschraenkt = () => !!(admData && Array.isArray(admData.sicht_ids))
     const admIstVerwalter = () => !!(admData && admData.verwalter)
     function kasseReiterErlaubt(name, ec){
@@ -42187,7 +42189,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1381'
+  const OS_TAB_BUILD = '2026-09-22.1382'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
