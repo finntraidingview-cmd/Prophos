@@ -41192,7 +41192,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1271'
+  const OS_TAB_BUILD = '2026-09-22.1272'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -47690,6 +47690,9 @@
    * scrollt/ändert die Größe — Schließen wäre dort ein Wegklicken). Speichern über die Planer-Route POST /admin/auto-plan/plan
    * {aktion:'werte'} (Backend Slave 1); Antwort {ok, plan:{tp_usd, sl_usd, groesse, einheit}} oder 400 {msg} → Meldung im Kasten. */
   const _pzw = { el: null, anker: null, busy: false }
+  // ADMIN-REITER = ALLE PLÄNE (Finn 08.10.2026, als Jacob im Admin: „nur eigene Pläne" — „mach, dass ich aus dem Admin alle Trades starten
+  // und ändern kann"): POSTs an /plan tragen dort sicht:'admin' wie tplEingriff beim Bestätigen; auf der Planer-Seite ohne → nur eigene
+  const pzwSicht = () => (typeof window._tplSichtParam === 'function' && window._tplSichtParam()) ? { sicht: 'admin' } : {}
   const pzwZahl = (s, lot) => {   // „3.500" / „3500" / „3.500,5" / „0,25" → Zahl; leer → null; Lot nie mit Tausenderpunkt lesen
     let v = String(s == null ? '' : s).replace(/[\s$€]/g, ''); if(!v) return null
     if(v.includes(',')) v = v.replace(/\./g, '').replace(',', '.')
@@ -47769,7 +47772,7 @@
     if(!(gr > 0) || (!D.lot && !Number.isInteger(gr))) return fehler(D.lot ? 'Größe in Lot, z. B. 0,50' : 'Größe in ganzen Kontrakten')
     _pzw.busy = true; msg.textContent = 'speichert …'; msg.classList.remove('rot'); el.querySelectorAll('button,input').forEach(x => x.disabled = true)
     try{
-      const d = await apdApi('POST', '/plan', { plan_id: D.plan, aktion: 'werte', tp_usd: tp, sl_usd: sl, groesse: gr })
+      const d = await apdApi('POST', '/plan', Object.assign({ plan_id: D.plan, aktion: 'werte', tp_usd: tp, sl_usd: sl, groesse: gr }, pzwSicht()))
       const n = (d && d.plan) || {}, nTp = n.tp_usd != null ? Number(n.tp_usd) : tp, nSl = n.sl_usd !== undefined ? (n.sl_usd == null ? null : Number(n.sl_usd)) : sl
       const nGr = n.groesse != null ? Number(n.groesse) : gr, einh = n.einheit || D.einheit
       // Zeile sofort (alle Wurzeln mit diesem Plan), eigenen Plan im Speicher mit; danach lädt die Seite ohnehin neu
@@ -47807,14 +47810,16 @@
     _pzw.tag = isFinite(alt) && pzwDubaiTag(alt) > pzwDubaiTag(Date.now()) ? 'morgen' : 'heute'
     _pzw.el.innerHTML = `<div class="tk-kopf">Startzeit<button type="button" class="tk-x" data-pzw-x title="Abbrechen (Esc)">✕</button></div>
       <form class="pzw-f" data-modus="start" autocomplete="off">
-        <label><span>Start</span><input name="hm" inputmode="numeric" placeholder="HH:MM" value="${escapeHtml(hm)}"><em>Dubai</em></label>
+        <label><span>Start</span><input name="hm" type="time" step="60" required value="${escapeHtml(hm)}"><em>Dubai</em></label>
         <div class="pzw-tag"><button type="button" data-pzw-tag="heute">heute</button><button type="button" data-pzw-tag="morgen">morgen</button></div>
         <small>bisher ${escapeHtml(pzwWann(D.start))} · frühestens jetzt + 2 min</small>
         <div class="tk-hin" data-pzw-msg></div>
         <div class="tk-akt"><button type="submit" class="btn btn-primary">Speichern</button><button type="button" class="btn btn-ghost" data-pzw-in3 title="Start in 3 Minuten (Dubai ${escapeHtml(pzwWann(new Date(Date.now() + 3 * 60000).toISOString()))})">in 3 min</button><span class="pzw-tipp">Enter · Esc</span></div>
       </form>`
     pzwTagZeigen(); _pzw.el.hidden = false; pzwSetzen()
-    const f = _pzw.el.querySelector('input[name="hm"]'); if(f){ f.focus({ preventScroll: true }); f.select() }
+    // nativer Wähler (Finn 08.10.2026: „mit einem ganz normalen Time-Picker die Uhrzeit auswählen"): am Handy der System-Wähler beim Antippen,
+    // am Rechner öffnet showPicker ihn gleich mit dem Klick auf die Zelle (Nutzer-Geste liegt noch an)
+    const f = _pzw.el.querySelector('input[name="hm"]'); if(f){ f.focus({ preventScroll: true }); try{ if(typeof f.showPicker === 'function') f.showPicker() }catch(_){} }
   }
   function pzwTagZeigen(){ _pzw.el && _pzw.el.querySelectorAll('[data-pzw-tag]').forEach(b => b.classList.toggle('an', b.dataset.pzwTag === _pzw.tag)) }
   // „5:02" / „0502" / „05.02" / „05:02" + Tag → ISO mit Dubai-Versatz (+04:00, keine Sommerzeit); ungültig → null
@@ -47829,12 +47834,12 @@
     const D = pzwDaten(a), f = el.querySelector('form'), msg = el.querySelector('[data-pzw-msg]')
     const fehler = (t, vorschlag) => { msg.innerHTML = escapeHtml(t) + (vorschlag ? ` <button type="button" class="btn btn-ghost btn-xs" data-pzw-vorschlag="${escapeHtml(vorschlag)}">→ ${escapeHtml(pzwWann(vorschlag))} übernehmen</button>` : ''); msg.classList.add('rot') }
     const iso = isoDirekt || pzwStartIso(f.hm.value, _pzw.tag)
-    if(!iso) return fehler('Uhrzeit als HH:MM, z. B. 05:02')
+    if(!iso) return fehler('Uhrzeit wählen')
     const ms = Date.parse(iso)
     if(ms < Date.now() + 2 * 60000 - 5000) return fehler(ms < Date.now() ? `${pzwWann(iso)} liegt in der Vergangenheit${_pzw.tag === 'heute' ? ' — morgen gemeint?' : ''}` : 'frühestens jetzt + 2 min', null)
     _pzw.busy = true; msg.textContent = 'speichert …'; msg.classList.remove('rot'); el.querySelectorAll('button,input').forEach(x => x.disabled = true)
     try{
-      const d = await apdApi('POST', '/plan', { plan_id: D.plan, aktion: 'werte', start_um: iso })
+      const d = await apdApi('POST', '/plan', Object.assign({ plan_id: D.plan, aktion: 'werte', start_um: iso }, pzwSicht()))
       const neu = (d && d.plan && d.plan.start_um) || iso
       document.querySelectorAll(`[data-pzw-plan="${CSS.escape(String(D.plan))}"]`).forEach(z => {
         z.dataset.pzwStart = neu
@@ -48033,7 +48038,7 @@
       if(aktion === 'tausch' || aktion === 'start'){
         const body = { plan_id: t.plan_id, aktion: aktion === 'tausch' ? 'richtung_tauschen' : 'start' }
         if(aktion === 'start'){ body.start = wert; body.start_min = apPrHm(wert) }   // „HH:MM" deutsche Zeit wie im Delta-Monitor
-        await apdApi('POST', '/plan', body)
+        await apdApi('POST', '/plan', Object.assign(body, pzwSicht()))   // Admin-Reiter: alle Pläne (sicht:'admin')
         _tpl.edit = null
         if(typeof atToast === 'function') atToast(aktion === 'start' ? `🕑 Start ${tplUhr(apPrHm(wert), tplVersatz(tplTag()))} (Dubai) gesetzt` : '⇅ Richtung getauscht', 'start')
         await apdNachEingriff()
@@ -48122,7 +48127,7 @@
           let start = null
           if(p){ const r = await sfNeuEinplanen(p, 'von Hand', true); if(r !== 'neu') throw new Error('schon gestartet oder geändert')
             start = ((tradePlans || []).find(x => String(x.id) === t.plan_id) || {}).startUm || null }
-          else{ const d = await apdApi('POST', '/plan', { plan_id: t.plan_id, aktion: 'neu_starten' }); start = d && d.start
+          else{ const d = await apdApi('POST', '/plan', Object.assign({ plan_id: t.plan_id, aktion: 'neu_starten' }, pzwSicht())); start = d && d.start
             if(typeof atToast === 'function') atToast(`↻ ${t.user || 'ID'} · ${t.firma || ''}: neu eingeplant für ${tplUhrIso(start)} — der PC-Tab der ID startet.`, 'start') }
           _tplNeu.set(t.key, { laeuft: true, text: `neu eingeplant für ${tplUhrIso(start)} · wartet auf den PC-Tab${wer ? ' von ' + wer : ''}` })
           await apdLaden(true)
