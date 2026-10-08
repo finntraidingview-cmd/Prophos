@@ -36933,7 +36933,7 @@
     const live = o.bal ? null : bal ? planBalanceLive(p.masterAccountId, bal.at) : null
     const notiz = o.notiz !== undefined ? o.notiz : p.autoPlan ? planAutoNotiz(p.notes) : null
     // Kontogröße wie der Planer sie rechnet (08.10.2026, „100k …1733" stand als „150k"): Name „100k" vor starting_balance (kontoGroesseAnzeige)
-    const groesse = kontoGroesseAnzeige(o.name || (konto && konto.name), konto && konto.startingBalance, bal ? bal.val : 0)
+    const groesse = kontoGroesseKurz(o.name || (konto && konto.name), konto && konto.startingBalance, bal ? bal.val : 0)   // „150KTC-SKU-…" → 150k (08.10.2026)
     // Konto kurz: Größe + letzte 4 Zeichen der Nummer, voller Name im Tooltip. Ohne Nummer bleibt der Name stehen.
     const nummer = String(o.ext || '').replace(/[^A-Za-z0-9]/g, '') || ((/\d{6,}/.exec(String(o.name || '')) || [''])[0])
     const kontoKurz = nummer
@@ -40992,7 +40992,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1256'
+  const OS_TAB_BUILD = '2026-09-22.1257'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -46924,8 +46924,7 @@
   // Konto kurz wie in Geplant/Zu bestätigen: Größe + letzte 4 der Nummer, Firma + Typ daneben; voller Name im Tooltip
   function tplBdKonto(z){
     const name = String(z.konto || '')
-    let g = 0; try{ g = Number(kontoGroesseAnzeige(name, null, null)) || 0 }catch(_){}
-    if(!g){ const m = /(\d{2,3})\s*k/i.exec(name); if(m) g = (+m[1]) * 1000 }   // „150KTC-SKU-…" (Topstep) hat kein Wortende hinter dem k
+    let g = 0; try{ g = Number(kontoGroesseKurz(name, null, null)) || 0 }catch(_){}   // „150KTC-SKU-…" (Topstep) hat kein Wortende hinter dem k
     // Nummer nur aus echten 4+-stelligen Ziffernfolgen — „100k Apex" ergab sonst „…100", „50k The5ers" „…505"
     const ziffern = (name.match(/\d{4,}/g) || []).pop() || '', e = String(z.ende4 || '').replace(/\D/g, '')
     const e4 = e.length >= 4 ? e.slice(-4) : ziffern.slice(-4)
@@ -49882,6 +49881,14 @@
     return tpKontoGroesseAusName(name, live)
   }
   window._kontoGroesseAnzeige = kontoGroesseAnzeige   // Test-Haken
+  /* Kontogröße für die Kurzform „150k …8484" (08.10.2026, Slave-Terminal 7 — Finn-Screenshot .1247: „150KTC-SKU-V2- …8484" in „Wartet auf
+   * Start"): wie kontoGroesseAnzeige, erkennt aber auch Topstep-Namen ohne Wortende hinter dem k — dieselbe Regel wie tplBdKonto (d03fe11).
+   * Nur für die Anzeige; kontoGroesseAnzeige selbst bleibt unverändert. */
+  function kontoGroesseKurz(name, startingBalance, live){
+    const n = String(name || '')
+    if(!/(\d{2,3})\s*k\b/i.test(n)){ const m = /(\d{2,3})\s*k/i.exec(n); if(m) return (+m[1]) * 1000 }
+    return kontoGroesseAnzeige(name, startingBalance, live)
+  }
   function tpVorplanSlaveWaehrung(eur, slaveCurrency, fxUsdEur){
     return Math.round((slaveCurrency !== '€' ? eur / (fxUsdEur || 0.85) : eur) * 100) / 100
   }
@@ -60445,7 +60452,17 @@
    * im letzten Lauf geplant/ausgelassen. Nur Anzeige + Haken, keine Bewertung. Nur Admin. ══ */
   const _apIds = { rows: [], aktiv: null, tag: null, laeuft: false, fehler: '', offen: [], offenTag: null, offenFehler: '', weitereAuf: false, tagWahl: null, D: null,
     okWeg: new Map(), okLaeuft: new Set(), okFehler: new Map(), nochmal: false,
-    warteLokal: new Map(), zurLokal: new Map(), bestaetigt: null, bestaetigtT0: 0 }   // Wartet auf Start / ↩ zurück (08.10.2026): siehe apIdsWartenLaeuft, apIdsZurueck   // Bestätigen ohne Warten (08.10.2026, Slave-Terminal 7): siehe apIdsOk   // tagWahl: 'heute' | 'morgen' (Hand), sonst Standard = Tag mit offenen Vorschlägen
+    warteLokal: new Map(), zurLokal: new Map(), bestaetigt: null, bestaetigtT0: 0, notizJe: new Map() }   // Wartet auf Start / ↩ zurück (08.10.2026): siehe apIdsWartenLaeuft, apIdsZurueck   // Bestätigen ohne Warten (08.10.2026, Slave-Terminal 7): siehe apIdsOk   // tagWahl: 'heute' | 'morgen' (Hand), sonst Standard = Tag mit offenen Vorschlägen
+  /* NOTES-GEDÄCHTNIS (08.10.2026, Slave-Terminal 7 — Finn-Screenshot .1247 „Wartet auf Start · 34": Balance → Ziel „–", Schritt leer): bestätigte
+   * Pläne fremder IDs kommen nur über das Delta, und das hat weder notes noch Balance/Rest. Jeder Plan stand aber vorher in /ids offen[] — dort
+   * werden notes/stufe/boden je plan_id gemerkt (localStorage prophos_ap_notiz, höchstens 400, 3 Tage), damit „Wartet"/„Läuft" dieselbe
+   * Kette wie „Zu bestätigen" haben. Liefert das Backend notes/balance im Delta, gehen die vor. */
+  try{ const roh = JSON.parse(localStorage.getItem('prophos_ap_notiz') || '[]'); for(const [id, v] of roh) if(v && Date.now() - (v.at || 0) < 3 * 86400000) _apIds.notizJe.set(id, v) }catch(_){}
+  function apIdsNotizMerken(offen){
+    const jetzt = Date.now()
+    for(const z of offen || []) if(z && z.plan_id && (z.notes || z.stufe || z.boden != null)) _apIds.notizJe.set(String(z.plan_id), { notes: z.notes || null, stufe: z.stufe || null, boden: z.boden ?? null, at: jetzt })
+    try{ localStorage.setItem('prophos_ap_notiz', JSON.stringify([..._apIds.notizJe].sort((a, b) => (b[1].at || 0) - (a[1].at || 0)).slice(0, 400))) }catch(_){}
+  }
   async function apIdsLaden(){
     if(_apIds.laeuft){ _apIds.nochmal = true; return }   // läuft schon: danach genau einmal nachladen, statt den Wunsch zu verschlucken (Bestätigen-Serie, 08.10.2026)
     _apIds.laeuft = true; _apIds.nochmal = false; _apIds.fehler = ''; _apIds.offenFehler = ''
@@ -60455,7 +60472,7 @@
     // KOPF WIE DIE TRADE-PLANER-SEITE (Finn 08.10.2026: „oben ein richtig cleaner Zeitstrahl mit allen IDs, die Kacheln mit dem
     // hypothetischen Betrag und dem kleinen Graph"): dieselben Lader (tplLaden → Lauf/live-trades/Kerzen/Bilanz, apdLaden → Delta) mit
     // Sicht „alle" (window._tplSicht sieht den offenen Reiter), dieselben Bausteine tplKachelnHtml/tplZeitstrahlHtml — keine Kopie.
-    const ids = apdApi('GET', '/ids').then(d => { _apIds.rows = Array.isArray(d.ids) ? d.ids : []; _apIds.aktiv = !!d.aktiv; _apIds.tag = d.tag || null; _apIds.offen = apIdsOhneBestaetigte(Array.isArray(d.offen) ? d.offen : [], t0)
+    const ids = apdApi('GET', '/ids').then(d => { _apIds.rows = Array.isArray(d.ids) ? d.ids : []; _apIds.aktiv = !!d.aktiv; _apIds.tag = d.tag || null; _apIds.offen = apIdsOhneBestaetigte(Array.isArray(d.offen) ? d.offen : [], t0); apIdsNotizMerken(d.offen)
       // bestätigte, noch nicht gestartete Pläne aller IDs (heute + morgen), sobald das Backend sie mitliefert — sonst null (Delta heute + warteLokal)
       if(Array.isArray(d.bestaetigt)){ _apIds.bestaetigt = d.bestaetigt.filter(z => !_apIds.zurLokal.has(String(z.plan_id))); _apIds.bestaetigtT0 = t0 } })
       .catch(e => { _apIds.fehler = (e && e.message) || String(e) })
@@ -60624,10 +60641,16 @@
     const u = apSichtUid(); return u && typeof tplSichtFilter === 'function' ? tplSichtFilter(D, new Set([u])) : D
   }
   // Trade-Zeile (tplDaten) → Zeile im Format von /ids offen[] (start_um aus den Minuten deutscher Zeit, wie tplListeHtml)
-  const apIdsAusTrade = (t, D) => { const off = (tplMinDt(D.tag + 'T12:00:00Z', D.tag) ?? 840) - 720
-    return { plan_id: String(t.plan_id), user_id: t.user_id, user: t.user, firma: t.firma, konto: t.konto, ende4: t.ende4, typ: t.typ, richtung: t.richtung,
+  // notes/stufe/boden/balance: Delta-Zeile (boden; notes/balance, sobald das Backend sie mitgibt) → eigener Plan (notes) → notes-Gedächtnis aus
+  // /ids offen[] → Stufe der Trade-Zeile. apIdsBlockHtml rechnet daraus wie bei „Zu bestätigen" Balance → Ziel, Balken und Schritt.
+  const apIdsAusTrade = (t, D) => { const off = (tplMinDt(D.tag + 'T12:00:00Z', D.tag) ?? 840) - 720, id = String(t.plan_id)
+    const rd = ((D.delta && D.delta.geplant) || []).concat((D.delta && D.delta.offen) || []).find(x => String(x.plan_id) === id) || {}
+    const ep = t.eigen ? (tradePlans || []).find(x => String(x.id) === id) : null, c = _apIds.notizJe.get(id) || {}
+    const stufe = t.stufe || c.stufe || null
+    return { plan_id: id, user_id: t.user_id, user: t.user, firma: t.firma, konto: t.konto, ende4: t.ende4, typ: t.typ, richtung: t.richtung,
       route: t.route, start_um: new Date(Date.parse(D.tag + 'T00:00:00Z') + (t.start - off) * 60000).toISOString(), menge: t.menge, tp: t.tp, sl: t.sl,
-      stufe: t.stufe, notes: t.stufe ? 'Auto-Planer · ' + t.stufe : '', konto_id: t.konto_id, boden: t.boden } }
+      stufe, notes: rd.notes || (ep && ep.notes) || c.notes || (stufe ? 'Auto-Planer · ' + stufe : ''), konto_id: t.konto_id,
+      boden: rd.boden ?? c.boden ?? t.boden ?? null, balance: tplNum(rd.balance) } }
   const apIdsEcht = t => !t.ohnePlan && /^[0-9a-f-]{36}$/i.test(String(t.plan_id || ''))
   function apIdsWartenLaeuft(){
     const D = apIdsHeute(), u = apSichtUid(), jetzt = Date.now()
@@ -60653,8 +60676,8 @@
     const jeZ = new Map(), je = new Map()
     const plaene = liste.map(e => { const z = e.z, tz = e.t || apIdsTrade(z) || {}, g = apIdsLaufZeile(z) || {}, nz = apIdsAusNotes(z.notes)
       // Finn-Screenshot .1210: fast alle Admin-Zeilen „–", nur Konten des letzten Laufs hatten Werte → Kette bis zum notes-Text
-      const t = Object.assign({}, g, tz, { balance: tz.balance ?? g.balance ?? nz.balance ?? null, rest: tz.rest ?? g.rest ?? nz.rest ?? null,
-        stufe: tz.stufe || g.stufe || null, konto_id: tz.konto_id || g.konto_id || z.konto_id || null, wert: tz.wert ?? g.wert ?? g.wert_eur ?? null })
+      const t = Object.assign({}, g, tz, { balance: tz.balance ?? tplNum(z.balance) ?? g.balance ?? nz.balance ?? null, rest: tz.rest ?? g.rest ?? nz.rest ?? null,
+        stufe: tz.stufe || z.stufe || g.stufe || null, konto_id: tz.konto_id || g.konto_id || z.konto_id || null, wert: tz.wert ?? g.wert ?? g.wert_eur ?? null })
       const p = { id: String(z.plan_id), status: art === 'laeuft' ? 'open' : 'planned', route: z.route || t.route || null, masterFirm: z.firma || '–', masterName: z.konto || '',
         masterAccountId: t.konto_id || null, richtung: z.richtung, startUm: z.start_um || null, startUmGestartetAt: art === 'laeuft' ? (z.start_um || 'ja') : null,
         masterTp: Number(z.tp) || 0, masterSl: Number(z.sl) || 0, masterContracts: z.menge, masterSymbol: (z.route || t.route) === 'mt5v2' ? '' : 'NQ',
