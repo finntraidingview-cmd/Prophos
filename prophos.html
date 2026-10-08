@@ -23164,6 +23164,9 @@
   }
   window._hedgeLiqLevel = hedgeLiqLevel   // Test-Haken
   async function hedgeSoloOeffnenKern(plan, r){
+    // Regeln höchstens 2 s abwarten (08.10.2026): direkt nach dem Neuladen rechnete das Open schliesst_bei_nq/Puffer/Notfall mit Standard-
+    // werten. Das Open selbst nie blockieren — lieber Standard als kein Hedge; der Level-Abgleich zieht Level und Schließ-Abstand danach nach
+    try{ await Promise.race([hedgeRegelnSicher(), new Promise(res => setTimeout(res, 2000))]) }catch(_){}
     // Doppel-Open-Riegel (Gegenprüfung 25.09.2026): frisch lesen — steht schon ein Hedge in Arbeit oder offen, NICHT noch einmal
     // öffnen. 'wartet' eines anderen Laufs zählt nur, solange er jünger als 2 min ist (sonst Rest eines neu geladenen Tabs).
     let handAlt = null   // Hand-Werte am Hedge (✎ Entry aus TV: einstieg_quelle 'hand (TV)', tp_quelle 'entry_hand'/'hand') — nie überschreiben (Master 28.09.2026)
@@ -23544,7 +23547,9 @@
    * sonst schlösse ein laufender Hedge plötzlich an anderer Stelle. Schreiben atomar über mt5_baseline_patch_in('hedge'). */
   async function hedgeEinstiegNachtragen(plan, r){
     try{
-      await hedgeRegelnSicher()   // puffer_punkte/schliesst_bei_nq nie aus dem Standard-Puffer (08.10.2026, s. hedgeRegelnSicher)
+      // Einstieg/TP immer; puffer_punkte/schliesst_bei_nq nur mit geladenen Regeln — sonst bleibt das Alte stehen und der Level-Abgleich
+      // zieht es nach, sobald die Regeln da sind (08.10.2026, Prüfer-Fund zu 9cce7e0: Ergebnis von hedgeRegelnSicher wurde ignoriert)
+      const regelnOk = await hedgeRegelnSicher()
       const h = plan && plan.mt5Baseline && plan.mt5Baseline.hedge
       const je = r && r.avg_fill_je_wurzel
       // 'feed_klick' (Feed zum Klickzeitpunkt, seit 28.09.2026) beginnt auch mit 'feed' — kein echter Fill, wird ersetzt
@@ -23566,7 +23571,8 @@
         const tpFest = /^(tv_limit|tv_toast|tv_orders)$/.test(String(h.tp_quelle || '')) && Number(h.tp_level_nq) > 0   // TP-Limit aus TV (Meldung/Orders) bleibt
         const tpNeu = tpFest ? Number(h.tp_level_nq) : Math.round((fill + plus * pkt) * 100) / 100
         Object.assign(upd, { tp_level_feed_vorher: h.tp_level_nq ?? null, schliesst_bei_feed_vorher: h.schliesst_bei_nq ?? null, tp_level_nq: tpNeu,
-          schliesst_bei_nq: hedgeSchliesstBei(plan.richtung, tpNeu, hedgePuffer()), puffer_punkte: hedgePuffer(), puffer_ohne_fill: null, tp_quelle: tpFest ? h.tp_quelle : 'fill_nachtrag' })
+          tp_quelle: tpFest ? h.tp_quelle : 'fill_nachtrag' },
+          regelnOk ? { schliesst_bei_nq: hedgeSchliesstBei(plan.richtung, tpNeu, hedgePuffer()), puffer_punkte: hedgePuffer(), puffer_ohne_fill: null } : {})
         if(slp > 0) Object.assign(upd, { sl_level_feed_vorher: h.sl_level_nq ?? null, sl_level_nq: Math.round((fill - plus * slp) * 100) / 100 })
       }
       await baselinePatchIn(plan.id, 'hedge', upd)
@@ -23624,7 +23630,7 @@
    * nur plausibel (hedgeTpPreisPasst gegen den Einstieg). Schreiben atomar über baselinePatchIn('hedge'). */
   async function hedgeTpNachtragenAusOrder(plan, r){
     try{
-      await hedgeRegelnSicher()   // puffer_punkte/schliesst_bei_nq nie aus dem Standard-Puffer (08.10.2026, s. hedgeRegelnSicher)
+      const regelnOk = await hedgeRegelnSicher()   // ohne Regeln: TP ja, Puffer/Schließ-Level zieht der Level-Abgleich nach (08.10.2026)
       const tp = (r && r.tp_limit != null) ? Number(r.tp_limit) : NaN
       if(!(tp > 1000)) return
       const { data: z } = await supabase.from('trade_plans').select('mt5_baseline').eq('id', plan.id).maybeSingle()
@@ -23634,10 +23640,10 @@
       if(/hand/.test(q) || /^(tv_limit|tv_toast|tv_orders)$/.test(q)) return
       if(!hedgeTpPreisPasst(tp, Number(h.einstieg_nq), plan.richtung, Number(h.punkte))) return
       const tpNeu = Math.round(tp * 100) / 100
-      await baselinePatchIn(plan.id, 'hedge', { tp_level_vorher: h.tp_level_nq ?? null, schliesst_bei_vorher: h.schliesst_bei_nq ?? null,
-        tp_level_nq: tpNeu, schliesst_bei_nq: hedgeSchliesstBei(plan.richtung, tpNeu, hedgePuffer()), puffer_punkte: hedgePuffer(), puffer_ohne_fill: null,
+      await baselinePatchIn(plan.id, 'hedge', Object.assign({ tp_level_vorher: h.tp_level_nq ?? null, schliesst_bei_vorher: h.schliesst_bei_nq ?? null,
+        tp_level_nq: tpNeu }, regelnOk ? { schliesst_bei_nq: hedgeSchliesstBei(plan.richtung, tpNeu, hedgePuffer()), puffer_punkte: hedgePuffer(), puffer_ohne_fill: null } : {}, {
         tp_limit_tv: tpNeu, tp_quelle: /^(tv_toast|tv_orders)$/.test(String(r.tp_limit_quelle || '')) ? r.tp_limit_quelle : 'tv_limit',
-        tv_meldung_roh: Array.isArray(r.meldung_roh) ? r.meldung_roh.slice(0, 14) : (h.tv_meldung_roh || null), tp_nachgetragen_at: new Date().toISOString() })
+        tv_meldung_roh: Array.isArray(r.meldung_roh) ? r.meldung_roh.slice(0, 14) : (h.tv_meldung_roh || null), tp_nachgetragen_at: new Date().toISOString() }))
     }catch(e){ console.warn('[hedge] TP nachtragen', e) }
   }
   /* PULS-ENDLESUNG (25.09.2026, Finn über die Koordination: „Das Einzige, was ich brauche: einmal den Profit, jedes Mal wenn der
@@ -24624,8 +24630,10 @@
     return !!(await _hedgeRegelnLaedt)
   }
   window._hedgeRegelnSicher = hedgeRegelnSicher   // Test-Haken
+  // Vorladen (08.10.2026): PC-Tab lädt die Regeln gleich nach dem Start, nicht erst im wdTick — bis es klappt (Login), alle 30 s erneut
+  setTimeout(function hedgeRegelnVorladen(){ try{ if(typeof MT5_LOCAL !== 'undefined' && MT5_LOCAL) hedgeRegelnSicher().then(ok => { if(!ok) setTimeout(hedgeRegelnVorladen, 30000) }) }catch(_){ setTimeout(hedgeRegelnVorladen, 30000) } }, 3000)
   const HEDGE_LEVEL_PAUSE_MS = 2 * 60000          // keine Antwort/Verbindung weg: nach 2 min erneut, ohne Fehlversuch zu zählen
-  const _hedgeLevelAbgleich = new Map()   // plan_id → { key, versuche, busy, basisFehlt, pauseBis }
+  const _hedgeLevelAbgleich = new Map()   // plan_id → { key, versuche, busy, basisFehlt, pauseBis, pufferKey }
   async function hedgeTerminalLevelAbgleich(p, h){
     const pid = String(p.id), st = _hedgeLevelAbgleich.get(pid) || { key: null, versuche: 0, busy: false, basisFehlt: false, pauseBis: 0 }
     _hedgeLevelAbgleich.set(pid, st)
@@ -24635,6 +24643,17 @@
     st.busy = true
     try{
       if(!(await hedgeRegelnSicher())) return            // nie mit Standard-Puffer/-Notfall rechnen (08.10.2026)
+      // PUFFER/SCHLIESS-LEVEL NACHZIEHEN (08.10.2026, Fall 2a8c53e9: puffer_punkte 2, schliesst_bei_nq 31.483,58 statt 31.486,58): Open
+      // oder Nachtrag kurz nach dem Neuladen schrieben den Standard-Puffer. Hier läuft der Abgleich nur mit echtem TP (wie echterTp beim
+      // Open) → Puffer = Regel, ohne Zuschlag. Hand-TP (schliesst_bei_nq von Hand) bleibt. Einmal je Sollwert (st.pufferKey).
+      if(!/hand/.test(String(h.tp_quelle || '')) && Number(h.tp_level_nq) > 0){
+        const pf = hedgePuffer(), sb = hedgeSchliesstBei(p.richtung, Number(h.tp_level_nq), pf), pk = pf + '|' + sb
+        const weicht = sb != null && (Math.abs(Number(h.puffer_punkte) - pf) > 0.001 || !(Math.abs(Number(h.schliesst_bei_nq) - sb) < 0.01) || h.puffer_ohne_fill != null)
+        if(weicht && st.pufferKey !== pk){
+          await hedgeAmPlanSchreiben(p.id, { puffer_punkte: pf, schliesst_bei_nq: sb, puffer_ohne_fill: null, schliesst_bei_vor_abgleich: (h.schliesst_bei_nq != null) ? h.schliesst_bei_nq : null })
+          st.pufferKey = pk
+        }
+      }
       let vh = (h.nas_nq_verhaeltnis != null) ? Number(h.nas_nq_verhaeltnis) : NaN
       if(!(vh > 0)){
         if(st.basisFehlt) return
@@ -41278,7 +41297,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1299'
+  const OS_TAB_BUILD = '2026-09-22.1300'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
