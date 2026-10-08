@@ -14386,13 +14386,22 @@ def _ap_runden(x, schritt):
 def ap_konto_rechnen(regel, phase, balance, u):
     """REIN RECHNEND (testbar): Plan-Werte EINES Kontos. u = Zufallsanteile der Tranche {tp, sl, menge, puffer} (0..1).
     → (werte, None) oder (None, grund). werte: groesse, ziel, rest, menge, puffer, tp, sl, risiko, stufe."""
-    ph = (regel.get("phasen") or {}).get(phase)
-    if not ph:
-        return None, f"keine Regel für {phase}"
     groesse = ap_groesse(regel.get("groessen"), balance)
+    # 08.10.2026 EIGENE WERTE JE KONTOGRÖSSE (Finn: FundingPips 50k mit eigenem SL/Lots/Puffer, nicht einfach halbe 100k-Werte):
+    # regel.je_groesse = {"50000": {"phasen": {phase1: {...}, phase2: {...}}}} ersetzt für genau diese Größe die Phasen-Werte,
+    # ohne Skalierung. Fehlt dort die Phase, gibt es KEINEN Rückfall auf die 100k-Werte (sonst SL 2.500 auf einem 50k-Konto).
+    jg = (regel.get("je_groesse") or {}).get(str(int(groesse))) if groesse else None
+    if jg:
+        ph = (jg.get("phasen") or {}).get(phase)
+        if not ph:
+            return None, f"keine Regel für {phase} ({int(groesse) // 1000}k)"
+    else:
+        ph = (regel.get("phasen") or {}).get(phase)
+        if not ph:
+            return None, f"keine Regel für {phase}"
     if groesse is None:
         return None, f"Balance {balance:,.0f} passt zu keiner Kontogröße der Regel — stimmt was nicht?".replace(",", ".")
-    f = groesse / 100000.0 if regel.get("skaliert") else 1.0
+    f = 1.0 if jg else (groesse / 100000.0 if regel.get("skaliert") else 1.0)
     # 06.10.2026: Ziel und statischer Boden aus den Kernwerten der Firma (ziel_pct je Phase, dd_pct) — EINE Quelle mit
     # Kontowert und Vorrat; die alten Felder in phasen{} gelten nur noch, wenn die Firma die Kernwerte nicht hat
     zp = (regel.get("ziel_pct") or {}).get(phase) if isinstance(regel.get("ziel_pct"), dict) else None
