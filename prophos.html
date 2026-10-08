@@ -2003,7 +2003,8 @@
   :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .a{grid-area:a;display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:3px 6px;min-width:0;text-align:right}
   :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .s{flex-basis:100%;font-size:11px;line-height:1.3;color:var(--sub-2)} :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .s.rot{color:var(--danger)}
   :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .knopf{border:1px solid var(--border);background:var(--surface);border-radius:7px;height:26px;padding:0 9px;font:inherit;font-size:12px;color:var(--ink-2);cursor:pointer;white-space:nowrap}
-  :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .knopf:hover:not(:disabled){border-color:var(--sub-2);background:var(--surface-tint)}
+:is(#tpl-view,#adm-pane-planer) .tpl-bd-z .knopf:hover:not(:disabled){border-color:var(--sub-2);background:var(--surface-tint)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .lnk{border:0;background:none;padding:0 2px;font:inherit;font-size:11.5px;color:var(--sub);cursor:pointer;white-space:nowrap} :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .lnk:hover{color:var(--ink-2);text-decoration:underline}
   :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .knopf.rot{color:#b91c1c;border-color:color-mix(in srgb,#b91c1c 35%,var(--border))}   /* Als geblowt archivieren (08.10.2026) */
   :is(#tpl-view,#adm-pane-planer) #apLeiste,:is(#tpl-view,#adm-pane-planer) #apDelta{margin:0 0 12px}
   #apLeiste .ap-alle{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--sub);cursor:pointer;user-select:none;margin-right:2px} #apLeiste .ap-alle:has(input:disabled){opacity:.55;cursor:default}
@@ -41055,7 +41056,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1261'
+  const OS_TAB_BUILD = '2026-09-22.1262'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -46761,8 +46762,8 @@
       case 'v2term': return `Am PC${pc} MT5 öffnen und mit Login${login} einloggen.`
       // 07.10.2026 (Finn, Blue Guardian 16:49/16:50 „Prüfung fehlgeschlagen, nicht gestartet"): statt „nichts tun" sagen, was zu tun ist
       case 'v2order': return sf.unklar ? 'Erst im MT5-Terminal nachsehen, ob die Order liegt — dann von Hand starten, nie blind.'
-        : /Popup geschlossen|Terminal|Verbindung|initialize|IPC|Konto/i.test(m) ? `Am PC${pc} MT5 für Login${login} öffnen und eingeloggt lassen, dann ✓ Behoben oder von Hand starten. Nichts platziert.`
-        : 'Nichts platziert — Meldung prüfen, dann ✓ Behoben oder von Hand starten.'
+        : /Popup geschlossen|Terminal|Verbindung|initialize|IPC|Konto/i.test(m) ? `Am PC${pc} MT5 für Login${login} öffnen und eingeloggt lassen, dann ↻ Erneut versuchen oder von Hand starten. Nichts platziert.`
+        : 'Nichts platziert — Meldung prüfen, dann ↻ Erneut versuchen oder von Hand starten.'
       // ORBIT V2 / TOPSTEP V2 (08.10.2026): Puls-Schritte aus dem CDP-Lauf (order_bot modus_tvkette_cdp / _cdp_ticket_fuellen)
       case 'pc': return `Am PC${pc} start-alles.bat ausführen (Copier-Backend/Panel) — Puls war nicht erreichbar.`
       case 'chrome': case 'chrome_neustart': case 'tab': case 'cdp': return `Am PC${pc} den Puls-Chrome prüfen (läuft er, ist der TradingView-Tab offen?).`
@@ -46772,11 +46773,11 @@
       case 'konto': case 'konto_weg': case 'konto_nicht_erreicht': case 'wechsel':
         return /nicht (eindeutig|im Dropdown|in der Liste|gefunden)|steht darin nicht|konto_weg|fehlt/i.test(m)
           ? `Konto fehlt im Tradovate-Dropdown — vermutlich geblowt oder weg: unter Accounts prüfen (External ID, Status), ggf. abhaken und den Plan löschen.`
-          : `Am PC${pc} im Puls-Chrome Tradovate/TradingView verbinden und das richtige Unterkonto wählen (Trading-Panel → Konto); dann ✓ Behoben.`
+          : `Am PC${pc} im Puls-Chrome Tradovate/TradingView verbinden und das richtige Unterkonto wählen (Trading-Panel → Konto); dann ↻ Erneut versuchen.`
       case 'ticket': case 'asset': case 'contract': return `Am PC${pc} das TradingView-Order-Panel ansehen: Order-Ticket offen („Trade" oben rechts), Asset/Kontrakt (NQ/MNQ, Front-Monat) und Felder prüfen.`
-      case 'order': case 'ordertyp': case 'bracket': case 'feld': return `Am PC${pc} das Order-Panel ansehen: Richtung BUY/SELL, Order-Typ Market, Menge und Risk/To-Make-Felder (Brackets) — nichts gesendet; dann ✓ Behoben.`
+      case 'order': case 'ordertyp': case 'bracket': case 'feld': return `Am PC${pc} das Order-Panel ansehen: Richtung BUY/SELL, Order-Typ Market, Menge und Risk/To-Make-Felder (Brackets) — nichts gesendet; dann ↻ Erneut versuchen.`
       case 'tradingview': case 'fenster': case 'seite': return `Am PC${pc} das Handels-Chrome mit TradingView einmal in den Vordergrund holen (Reader-/Popup-Fenster zählen nicht) und den TradingView-Tab offen lassen.`
-      case 'abgelehnt': return `Von ${/Topstep/i.test(m) ? 'TopstepX' : 'der Plattform'} abgelehnt — dort den Grund lesen (Margin, Markt zu, Kontrakt-Limit), beheben, dann ✓ Behoben oder von Hand starten.`
+      case 'abgelehnt': return `Von ${/Topstep/i.test(m) ? 'TopstepX' : 'der Plattform'} abgelehnt — dort den Grund lesen (Margin, Markt zu, Kontrakt-Limit), beheben, dann ↻ Erneut versuchen oder von Hand starten.`
       case 'absturz': case 'haenger': case 'bot_stumm': case 'bot_fehlt': case 'timeout': return `Puls am PC${pc} ist abgestürzt oder stumm — Copier-Panel/Puls-Chrome ansehen, notfalls start-alles.bat; der Bot wiederholt sonst von selbst.`
       case 'ruecklesung': return `Am PC${pc} das Order-Panel ansehen — Werte stimmten vor dem Senden nicht; nichts gesendet.`
       case 'popup': return `Am PC${pc} das offene Popup/den Dialog in TradingView schließen; nichts gesendet.`
@@ -46788,10 +46789,10 @@
       case 'ziel_erreicht': return 'Ziel ist erreicht — kein Trade nötig. Konto ansehen (Phasenwechsel/Auszahlung), Plan löschen.'
       // 'puls' = Orbit-Fehler ohne Bot-Schritt (08.10.2026): die häufigsten Texte aus order_signale — External ID fehlt (49×), Tab lud neu (33×)
       case 'puls': default: return sf.unklar ? 'Erst in der Plattform nachsehen, ob die Order liegt — nie blind erneut starten.'
-        : /External ID/i.test(m) ? 'Dem Konto unter Accounts die External ID (Tradovate-Unterkonto) eintragen, dann ✓ Behoben.'
-        : /Tab lud|neu geladen|UNBEKANNT/i.test(m) ? `Der Prophos-Tab am PC${pc} lud während der Order neu — erst in TradingView nachsehen, ob die Order liegt; dann ✓ Behoben oder von Hand, nie blind.`
-        : /Puls|TradingView|Tradovate/i.test(m) ? `Am PC${pc} Puls-Chrome/TradingView prüfen — Meldung lesen, dann ✓ Behoben oder von Hand starten.`
-        : 'Check am PC war rot — beheben, dann ✓ Behoben.'
+        : /External ID/i.test(m) ? 'Dem Konto unter Accounts die External ID (Tradovate-Unterkonto) eintragen, dann ↻ Erneut versuchen.'
+        : /Tab lud|neu geladen|UNBEKANNT/i.test(m) ? `Der Prophos-Tab am PC${pc} lud während der Order neu — erst in TradingView nachsehen, ob die Order liegt; dann ↻ Erneut versuchen oder von Hand, nie blind.`
+        : /Puls|TradingView|Tradovate/i.test(m) ? `Am PC${pc} Puls-Chrome/TradingView prüfen — Meldung lesen, dann ↻ Erneut versuchen oder von Hand starten.`
+        : 'Check am PC war rot — beheben, dann ↻ Erneut versuchen.'
     }
   }
   function tplSfAuto(sf, D){
@@ -46918,7 +46919,10 @@
       const sf = (p && p.mt5Baseline && p.mt5Baseline.start_fehler) || t.sf || null, geclaimt = p ? !!p.startUmGestartetAt : !!t.geclaimt
       // ✓ Behoben (Finn 07.10.2026 16:24: „Fehler behoben — da muss ich auf Abhaken drücken, sodass der Trade frisch reingeplant wird"):
       // eigene Pläne direkt (sfNeuEinplanen), fremde über die Admin-Route /admin/auto-plan/plan {aktion: 'neu_starten'}
-      const neuKnopf = t.status === 'bestaetigt' && (t.eigen || apdAdmin()) ? t.key : null
+      // ↻ ERNEUT VERSUCHEN (Finn 08.10.2026: „Statt ‚Plan' einfach auf ‚Erneut versuchen' drücken … sonst kommt der Trade ja nie wieder ins
+      // System"): Recht wie beim Bestätigen (eigen oder tplDarfFremd); nie bei unklarem Ergebnis (Order liegt evtl. schon — sfTick startet
+      // dann auch nicht neu) oder erreichtem Ziel
+      const neuKnopf = t.status === 'bestaetigt' && !(sf && (sf.unklar || sf.schritt === 'ziel_erreicht')) && (t.eigen || tplDarfFremd()) ? t.key : null
       const ueberfaellig = D.jetzt != null && t.start + TPL_VERPASST_MIN < D.jetzt
       if(t.status === 'bestaetigt' && sf && sf.status === 'neu' && D.tag === D.heute && !ueberfaellig){
         add(t.user_id, t.user, { art: 'neu', firma: t.firma, konto: t.konto, ende4: t.ende4, key: t.key,
@@ -46931,8 +46935,8 @@
       } else if(t.status === 'bestaetigt' && D.tag === D.heute && D.jetzt != null && t.start + TPL_VERPASST_MIN < D.jetzt){
         add(t.user_id, t.user, { art: 'plan', firma: t.firma, konto: t.konto, ende4: t.ende4, key: t.key, neu: neuKnopf,
           text: `verpasst — Start ${tplUhr(t.start, D.v)} ist vorbei, nie gestartet`,
-          tun: geclaimt ? 'Der Check am PC war rot, der Grund wurde damals noch nicht gespeichert — beheben, dann ✓ Behoben: der Trade startet neu und zeigt ihn, falls es wieder hakt.'
-            : `Der Prophos-Tab am PC${t.eigen ? '' : ' von ' + (t.user || 'der ID')} lief nicht — Tab öffnen, dann ✓ Behoben.` })
+          tun: geclaimt ? 'Der Check am PC war rot, der Grund wurde damals noch nicht gespeichert — beheben, dann ↻ Erneut versuchen: der Trade startet neu und zeigt ihn, falls es wieder hakt.'
+            : `Der Prophos-Tab am PC${t.eigen ? '' : ' von ' + (t.user || 'der ID')} lief nicht — Tab öffnen, dann ↻ Erneut versuchen.` })
       }
       if(b.puls_unklar) probleme.push(`Puls: Ergebnis unklar${b.puls_unklar.msg ? ' — ' + b.puls_unklar.msg : ''}`)
       if(b.tv && b.tv.fehler) probleme.push(`Start-Fehler: ${b.tv.msg || b.tv.fehler}${b.tv.code ? ' (' + b.tv.code + ')' : ''}`)
@@ -47010,7 +47014,11 @@
     if(z.haken) return `<button type="button" class="knopf" data-tpl-haken="${escapeHtml(z.haken)}" title="accounts.auto_planer an — der nächste Lauf nimmt das Konto mit">✓ Planer-Haken setzen</button>`
     if(z.ext) return `<button type="button" class="knopf" data-tpl-ext="${escapeHtml(z.ext)}" title="Konto bearbeiten — External ID eintragen">✎ External ID eintragen</button>`
     if(z.hinweis) return `<span class="s">${escapeHtml(z.hinweis)}</span>`
-    return `${z.neu ? `<button type="button" class="knopf" data-tpl-neu="${escapeHtml(z.neu)}" title="Startzeit in 1–3 min, Prüfungen wie immer am PC der ID">✓ Behoben – neu einplanen</button>` : ''}${z.key ? `<button type="button" class="knopf" data-tpl-t="${escapeHtml(z.key)}">→ Plan</button>` : ''}`
+    // Start-Fehler: „↻ Erneut versuchen" + Stand aus tplNeuBeobachten (neu eingeplant → läuft → gestartet / wieder Start-Fehler), „→ Plan" als Link
+    const nl = z.key ? _tplNeu.get(z.key) : null
+    const nst = nl && nl.text ? `<span class="s${nl.fehler ? ' rot' : ''}">${escapeHtml(nl.text)}</span>` : ''
+    const neuK = z.neu && !(nl && nl.laeuft) ? `<button type="button" class="knopf" data-tpl-neu="${escapeHtml(z.neu)}" title="Neue Startzeit in 1–3 min — der PC-Tab der ID startet mit allen Prüfungen (Claim, Guard)">↻ Erneut versuchen</button>` : ''
+    return `${neuK}${z.key ? `<button type="button" class="lnk" data-tpl-t="${escapeHtml(z.key)}">→ Plan</button>` : ''}${nst}`
   }
   // Eine Zeile Klartext, was zu tun ist; der volle Problemtext steht im Tooltip. Balance-Fälle: eigene Anleitung (MT5/TV) bleibt, sonst ein
   // fester Satz je Label, fremd mit „am PC von …"; Ziel erreicht / geblowt? / ausgelassen: der Grund selbst ist die Information
@@ -47483,6 +47491,43 @@
     }
     setTimeout(tick, 300)
   }
+  /* ↻ ERNEUT VERSUCHEN — RÜCKMELDUNG (Finn 08.10.2026, „Braucht dich" Start-Fehler: „damit neu versucht wird und man sieht, ob der Fehler
+   * behoben ist"). Neu eingeplant wird über den bestehenden Weg (eigen sfNeuEinplanen, fremd POST /plan {aktion:'neu_starten'}); den Start
+   * macht wie immer der PC-Tab der ID mit Claim + Guard — der Mac löst nie eine Order aus. Hier nur beobachten, nie stumm:
+   * „neu eingeplant für HH:MM" → Claim „läuft …" → „gestartet ✓" bzw. „wieder Start-Fehler: …" bzw. „kein Start bis HH:MM". Eigene Pläne
+   * direkt aus trade_plans (RLS), fremde aus dem Delta (apdLaden: status/geclaimt/start_fehler). */
+  const _tplNeu = new Map()   // t.key → {laeuft, text, fehler}
+  function tplNeuBeobachten(key, planId, eigen, wer, startIso){
+    const t0 = Date.now(), ende = (Date.parse(startIso || '') || t0) + 6 * 60000, pcVon = wer ? `PC-Tab von ${wer}` : 'PC-Tab'
+    const setz = o => { _tplNeu.set(key, o); tplSpaeter() }
+    const tick = async () => {
+      let claim = false, gestartet = false, sf = null
+      try{
+        if(eigen){
+          const { data } = await supabase.from('trade_plans').select('*').eq('id', planId).maybeSingle()
+          if(data){ claim = !!data.start_um_gestartet_at; gestartet = data.status !== 'planned' || !!data.started_at || !!data.orbit_gesendet_at
+            sf = (data.mt5_baseline && data.mt5_baseline.start_fehler) || null; try{ rkPlanErsetzen(data) }catch(_){} }
+        } else {
+          await apdLaden(true)
+          const x = tplDaten().trades.find(q => q.key === key)
+          if(x){ claim = !!x.geclaimt; gestartet = ['laeuft', 'beendet', 'vorbei'].includes(x.status); sf = x.sf || null }
+        }
+      }catch(_){}
+      // neuer Fehler = Flag nicht mehr „neu" (wir haben es eben auf „neu" gesetzt) und nicht älter als der Klick
+      const fehler = sf && sf.status && sf.status !== 'neu' && !(sf.at && Date.parse(sf.at) < t0 - 5000)
+      if(gestartet){ setz({ laeuft: false, text: 'gestartet ✓' }); if(typeof atToast === 'function') atToast(`✓ ${wer ? wer + ' · ' : ''}neu versucht — gestartet`, 'start'); return }
+      if(fehler){
+        const m = sf.status === 'tagesende' ? 'Start-Fenster heute zu' : String(sf.msg || 'Check rot').replace(/\s+/g, ' ').slice(0, 120)
+        setz({ laeuft: false, fehler: true, text: 'wieder Start-Fehler: ' + m })
+        if(typeof atToast === 'function') atToast(`Start-Fehler${wer ? ' · ' + wer : ''}: ${m}`, 'end'); return
+      }
+      if(Date.now() > ende){ setz({ laeuft: false, fehler: true, text: `kein Start bis ${tplUhrIso(new Date(ende).toISOString())} — ${pcVon} offen?` }); return }
+      const txt = claim ? `läuft … (${pcVon} prüft und startet)` : `neu eingeplant für ${tplUhrIso(startIso)} · wartet auf den ${pcVon}`
+      if(_tplNeu.get(key)?.text !== txt) setz({ laeuft: true, text: txt })
+      setTimeout(tick, 15000)
+    }
+    setTimeout(tick, 8000)
+  }
   /* MINI-POPUP TP · SL · GRÖSSE (Finn 08.10.2026, Zeile „13:35 · 150k …9055 · ▼ Short · … · 2 NQ · 3.099 $ · –": „Wenn ich auf Take Profit,
    * Stop Loss oder Größe draufklicke, soll immer so ein Mini-Popup kommen, wo ich das anpassen kann"). Plan-Zeilen (planZeileHtml mit o.werte)
    * in Trade-Planer „Geplant" und Admin „Zu bestätigen", nur vor dem Start. EIN Kasten in #dashboard-view in der Optik des Zeitstrahl-Kastens
@@ -47850,18 +47895,27 @@
     const ex = e.target.closest('[data-tpl-ext]')   // Braucht dich: ✎ External ID eintragen (08.10.2026) — eigenes Konto-Formular, wie „Bearbeiten" in Accounts
     if(ex){ const acc = (accounts || []).find(q => String(q.id) === ex.dataset.tplExt); if(acc && typeof openAccountModal === 'function') openAccountModal(null, acc); return }
     const nk = e.target.closest('[data-tpl-neu]')   // Braucht dich: ↻ Neu starten (START-FEHLER, 07.10.2026) — Start in 1 min, alle Prüfungen am PC
-    if(nk){ const t = tplDaten().trades.find(x => x.key === nk.dataset.tplNeu); if(!t) return
+    if(nk){ const t = tplDaten().trades.find(x => x.key === nk.dataset.tplNeu); if(!t || _tplNeu.get(t.key)?.laeuft) return
       nk.disabled = true; nk.textContent = 'plant neu …'
-      const p = t.eigen ? (tradePlans || []).find(x => String(x.id) === t.plan_id) : null
+      const p = t.eigen ? (tradePlans || []).find(x => String(x.id) === t.plan_id) : null, wer = t.eigen ? '' : (t.user || 'der ID')
+      _tplNeu.set(t.key, { laeuft: true, text: 'plant neu …' })
       ;(async () => {
         try{
-          if(p){ const r = await sfNeuEinplanen(p, 'von Hand', true); if(!r) throw new Error('schon gestartet oder geändert') }
-          else{ await apdApi('POST', '/plan', { plan_id: t.plan_id, aktion: 'neu_starten' })
-            if(typeof atToast === 'function') atToast(`✓ ${t.user || 'ID'} · ${t.firma || ''}: neu eingeplant — startet in 1–3 min am PC der ID.`, 'start') }
+          let start = null
+          if(p){ const r = await sfNeuEinplanen(p, 'von Hand', true); if(r !== 'neu') throw new Error('schon gestartet oder geändert')
+            start = ((tradePlans || []).find(x => String(x.id) === t.plan_id) || {}).startUm || null }
+          else{ const d = await apdApi('POST', '/plan', { plan_id: t.plan_id, aktion: 'neu_starten' }); start = d && d.start
+            if(typeof atToast === 'function') atToast(`↻ ${t.user || 'ID'} · ${t.firma || ''}: neu eingeplant für ${tplUhrIso(start)} — der PC-Tab der ID startet.`, 'start') }
+          _tplNeu.set(t.key, { laeuft: true, text: `neu eingeplant für ${tplUhrIso(start)} · wartet auf den PC-Tab${wer ? ' von ' + wer : ''}` })
           await apdLaden(true)
-        }catch(err){ if(typeof atToast === 'function') atToast('Nicht neu eingeplant: ' + ((err && err.message) || err), 'end') }
+          tplNeuBeobachten(t.key, t.plan_id, !!p, wer, start)
+        }catch(err){
+          const m = (err && err.status === 403) ? 'das Backend erlaubt das nur Admins' : ((err && err.message) || String(err))
+          _tplNeu.set(t.key, { laeuft: false, fehler: true, text: 'nicht neu eingeplant: ' + m })
+          if(typeof atToast === 'function') atToast('Nicht neu eingeplant: ' + m, 'end')
+        }
         finally{ setTimeout(tplSpaeter, 300) }
-      })(); return }
+      })(); tplSpaeter(); return }
     const k = e.target.closest('[data-tpl-ab]')   // Konten-Abdeckung: Block auf/zu
     if(k){ const z = k.closest('.tpl-ab-z'); _tpl.abAuf.set(k.dataset.tplAb, !(z && z.classList.contains('auf'))); tplZeichnen(); return }
     // Konto-Popup (08.10.2026, Master-Auftrag): Klick auf den Konto-Namen in „Geplant" öffnet das Popup des Admin-Reiters (apKontoOeffnen
