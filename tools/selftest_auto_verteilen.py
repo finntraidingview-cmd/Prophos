@@ -238,6 +238,28 @@ def main():
           "Live-Fall: ≥ 5 min zum FundedNext-Plan der dritten ID (Firmen-Abstand)")
     check(all(s2[k] <= 16 * 60 + 30 for k in s2), "Live-Fall: alles bis 18:30 Dubai")
 
+    # Tagesband-Toleranz (Finn 08.10.2026: „ja klar, so gut wie es geht eben"): Verteilungs-Zug darf das Band bis Tagesende um bis zu
+    # AP_VERTEILUNG_BAND_TOLERANZ_EUR verschlechtern; 60-min-Band strikt. 2× Apex-Short S € und ein Topstep-Long 2S € (andere ID) starten
+    # zur selben Minute → Netto 0; t2 nach hinten verteilt → bis Tagesende +S €. Grenze = max(Hysterese 200, vorher 0) + Toleranz.
+    EK = {"basis": 0.0, "brutto": 0.0, "gross_ab": 10000.0, "laufzeit": 60}
+
+    def tol_fall(s):
+        pl_t = [plan("t1", "u-t", "T", "apex", 700, "sell", einsatz_abs=s), plan("t2", "u-t", "T", "apex", 700, "sell", einsatz_abs=s),
+                plan("l1", "u-l", "L", "topstep", 700, "buy", einsatz_abs=2 * s)]
+        return U(pl_t, 0.0, 0.0, 300, Z16, 0, random.Random(1), einsatz=EK)
+    alt_tol = a["AP_VERTEILUNG_BAND_TOLERANZ_EUR"]
+    e300 = tol_fall(300.0)
+    a["AP_VERTEILUNG_BAND_TOLERANZ_EUR"] = 0.0
+    e300_ohne = tol_fall(300.0)
+    a["AP_VERTEILUNG_BAND_TOLERANZ_EUR"] = alt_tol
+    e500 = tol_fall(500.0)
+    zug = lambda e: [x for x in e["aenderungen"] if x["plan_id"] == "t2" and x["art"] == "start"]   # noqa: E731
+    check(not zug(e300_ohne), "ohne Toleranz: Verteilen, das das Tagesband auf 300 € (> 200 Hysterese) hebt, wird verworfen (alter Stand)")
+    check(len(zug(e300)) == 1 and zug(e300)[0]["nach_start_min"] >= 760,
+          f"mit Toleranz {alt_tol:g} €: derselbe Zug wird genommen (t2 → {zug(e300)[0]['nach_start_min'] if zug(e300) else '—'})")
+    check(not zug(e500), "Verschlechterung über Hysterese + Toleranz (500 € > 400): bleibt stehen")
+    check(e300["nachher"]["ueber_band"] <= e300["vorher"]["ueber_band"], "60-min-Band bleibt strikt (nicht schlechter)")
+
     # Ruhezeit: ein eben verschobener Plan ruht 30 min
     e_r = U([plan("m1", "u-m", "M", "apex", 600), plan("m2", "u-m", "M", "apex", 601)], 0.0, 0.0, 400, Z16, 100, random.Random(1),
             zuletzt={"m2": 395})

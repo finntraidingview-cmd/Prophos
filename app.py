@@ -16515,6 +16515,10 @@ AP_VERTEIL_VORLAUF_MIN = 10            # Verteilung: nie auf einen Start vor jet
 AP_VERTEIL_JITTER_MIN = 8              # Streuung hinter dem frühesten freien Start (kein festes Raster)
 AP_VERTEIL_GEGEN_MIN = 120             # ohne laufzeit_min: so weit muss eine Gegenrichtung derselben ID × Firma weg bleiben
 AP_VERTEIL_VERSATZ = (0, 0, 10, 20, 30, 45, 60)   # Neuwürfe: frühester Platz so viele Minuten weiter hinten
+# Tagesband-Toleranz NUR für Verteilungs-Züge (Finn 08.10.2026 im Master-Chat: „Darf der Bot beim Verteilen das Tagesband um bis zu
+# 200 € verschlechtern? — ja klar, so gut wie es geht eben"; Anlass The5%ers 17:57/17:58 blieb liegen): das Band bis Tagesende darf
+# um so viele € über max(Hysterese, jetzt) steigen — das 60-min-Band und der Malus bleiben strikt. Nur im Einsatz-Modus (€).
+AP_VERTEILUNG_BAND_TOLERANZ_EUR = 200.0
 
 
 def _ap_firma_konflikt(i, je, zustand, gestartet=(), gap=None):
@@ -16841,7 +16845,8 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
             for i, m in neu.items():
                 z[i]["start"] = m
             k_neu = strafe(z) + (misch(z),)
-            if k_neu[0] > aktuell[0] or k_neu[1] > max(schwelle, aktuell[1]) + 1e-9 or ueber_tag(z) > max(schwelle, tag_vor_v) + 1e-9:
+            tol = AP_VERTEILUNG_BAND_TOLERANZ_EUR if einsatz else 0.0      # Tagesband: Verteilen darf bis +200 € (Finn), 60 min strikt
+            if k_neu[0] > aktuell[0] or k_neu[1] > max(schwelle, aktuell[1]) + 1e-9 or ueber_tag(z) > max(schwelle, tag_vor_v) + tol + 1e-9:
                 continue
             gewaehlt = (neu, z, k_neu)
             break
