@@ -41223,7 +41223,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1276'
+  const OS_TAB_BUILD = '2026-09-22.1277'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -41450,10 +41450,11 @@
    * (tpOrbitStartenKern, tpJetztStarten) vorher die DB-Funktion prophos_firmen_abstand_halten (sql/2026-10-08_firmen_abstand_pruefen_rpc.sql,
    * security definer — RLS zeigt fremde Pläne nicht): hat eine ANDERE ID bei derselben Firma in den letzten 5 min wirklich gestartet
    * (bzw. vor ≤ 2 min geclaimt), legt die Funktion den Start auf deren Start + 5 min + Jitter, löst Claim/orbit_gesendet_at und
-   * protokolliert; hier: nicht starten, Hinweis „wartet 5-min-Abstand zu <ID>, startet HH:MM". Der Tick startet den Plan zur neuen Zeit.
+   * protokolliert (orbit_gesendet_at nie — ist schon gesendet, greift nichts ein); hier: nicht starten, Hinweis „wartet 5-min-Abstand zu <ID>, startet HH:MM". Der Tick startet den Plan zur neuen Zeit.
    * Ohne die Funktion (noch nicht eingespielt) oder offline: Start wie bisher — der Claim-Riegel bleibt. → Hinweistext oder null. */
   async function faVorStart(plan){
     if(!plan || !plan.id) return null
+    if(plan.orbitGesendetAt || plan.startedAt) return null   // Order schon draußen — nie eingreifen (Prüfer 08.10.2026: kein Doppel-Kauf)
     try{
       const { data, error } = await supabase.rpc('prophos_firmen_abstand_halten', { p_plan: plan.id })
       if(error) throw error
@@ -41461,7 +41462,7 @@
       const um = data.ziel ? new Date(data.ziel).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '?'
       const t = `„${plan.masterName || '—'}" wartet 5-min-Abstand zu ${data.wer || 'einer anderen ID'} (${plan.masterFirm || data.firma || 'gleiche Firma'}) — startet ${um}`
       const i = tradePlans.findIndex(x => String(x.id) === String(plan.id))
-      if(i >= 0) tradePlans[i] = Object.assign({}, tradePlans[i], { startUm: data.ziel || tradePlans[i].startUm, startUmGestartetAt: null, orbitGesendetAt: null })
+      if(i >= 0) tradePlans[i] = Object.assign({}, tradePlans[i], { startUm: data.ziel || tradePlans[i].startUm, startUmGestartetAt: null })   // orbit_gesendet_at nie
       try{ renderTradePlans() }catch(_){}
       if(typeof atToast === 'function') atToast('⏳ ' + t, 'end')
       console.warn('[firmen-abstand]', t)
