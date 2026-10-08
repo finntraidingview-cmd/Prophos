@@ -41760,7 +41760,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1349'
+  const OS_TAB_BUILD = '2026-09-22.1350'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -48480,7 +48480,7 @@
     const chips = (alleIds.length > 1 || alleBest || kopfRechts) ? `<div class="adm-vl-legend tpl-ids">${chipsIds}${alleBest}${kopfRechts}</div>` : ''
     const html = (_tpl.fehler ? `<div class="tpl-fehler">⚠ ${escapeHtml(_tpl.fehler)}</div>` : '')
       + (ohne ? `<div class="tpl-karte"><div class="tpl-leer">— nicht im Auto-Planer</div></div>`
-        : chips + tplKachelnHtml(F) + tplZeitstrahlHtml(F, zeilen) + tplChartsUmschalterHtml(F, 'p') + tplBrauchtHtml(tplBraucht(D, sichtIds)) + tplDetailHtml(D) + tplListeHtml(F) + tplLaeuftKarteHtml(F) + tplHeuteKarteHtml(F) + tplBilanzKarteHtml(F))   // Reihenfolge wie Admin (Finn 08.10.2026): Charts-Umschalter · Braucht dich · Geplant · Läuft · Heute beendet   // Heute beendet unter dem Hypo-Chart mit „Läuft" (Finn 08.10.2026)   // Konten-Abdeckung ausgeblendet (Finn 08.10.2026: „mies unnötig, kann visuell weg“) — tplAbdeckungHtml bleibt   // Detail direkt unter dem Zeitstrahl (Finn 07.10.2026)
+        : chips + tplKachelnHtml(F) + tplZeitstrahlHtml(F, zeilen) + tplChartsUmschalterHtml(F, 'p') + tplLaeuftKarteHtml(F) + tplBrauchtHtml(tplBraucht(D, sichtIds)) + tplDetailHtml(D) + tplListeHtml(F) + tplHeuteKarteHtml(F) + tplBilanzKarteHtml(F))   // Reihenfolge wie Admin (Finn 08.10.2026, Läuft seit ~11:45 Dubai direkt unter den Charts): Charts-Umschalter · Läuft · Braucht dich · Geplant · Heute beendet   // Heute beendet unter dem Hypo-Chart mit „Läuft" (Finn 08.10.2026)   // Konten-Abdeckung ausgeblendet (Finn 08.10.2026: „mies unnötig, kann visuell weg“) — tplAbdeckungHtml bleibt   // Detail direkt unter dem Zeitstrahl (Finn 07.10.2026)
     // FINGERABDRUCK (08.10.2026): gleiches Markup → nichts anfassen (60-s-Takt, Delta-Takt, Balance-Stände zeichnen sonst alles neu
     // und werfen Scroll/Fokus weg); die Kopfzeile oben wird trotzdem jedes Mal aktualisiert
     if(html === _tpl.htmlAlt && root.firstChild) return
@@ -61946,8 +61946,10 @@
     const u = apSichtUid()
     return u && typeof tplSichtFilter === 'function' ? tplSichtFilter(D, new Set([u])) : D
   }
-  function apIdsKopfHtml(){
-    if(typeof tplDaten !== 'function' || typeof tplKachelnHtml !== 'function' || typeof tplZeitstrahlHtml !== 'function') return ''
+  // laeuft = fertiger „Läuft"-Block (apIdsOffenHtml) — steht seit 08.10.2026 direkt unter den Charts (Finn: „den Läuft-Block packen und
+  // unter PNL hypothetisch heute da drunter packen"); ohne Kopf (Fehler/fehlende Bausteine) kommt er trotzdem
+  function apIdsKopfHtml(laeuft = ''){
+    if(typeof tplDaten !== 'function' || typeof tplKachelnHtml !== 'function' || typeof tplZeitstrahlHtml !== 'function') return laeuft
     try{
       const D = _apIds.D || apIdsDaten(), sp = new Map()
       for(const t of D.trades) if(!sp.has(t.user_id)) sp.set(t.user_id, { uid: t.user_id, name: t.user })
@@ -61968,8 +61970,8 @@
       let braucht = ''
       try{ if(typeof tplBraucht === 'function' && typeof tplBrauchtHtml === 'function') braucht = tplBrauchtHtml(tplBraucht(D, u ? new Set([u]) : null)) }catch(e){ console.warn('[ap-ids] Braucht dich', e) }   // Ausgelassene je ID mit Grund + Knöpfen (08.10.2026)
       // Heute beendet (Finn 08.10.2026) unter den Charts — nur bei „Alle"; mit gewählter ID steht dieselbe Liste im ID-Detail oben
-      try{ return seg + tplKachelnHtml(D) + tplZeitstrahlHtml(D, zeilen) + tplChartsUmschalterHtml(D, 'a') + braucht } finally{ _tpl.tag = alt }   // Reihenfolge Finn 08.10.2026; Heute beendet steht unter „Läuft" (apIdsRender)   // beide Charts wie auf der Planer-Seite (Finn 08.10.2026)
-    }catch(e){ console.warn('[ap-ids] Kopf zeichnen', e); return '' }
+      try{ return seg + tplKachelnHtml(D) + tplZeitstrahlHtml(D, zeilen) + tplChartsUmschalterHtml(D, 'a') + laeuft + braucht } finally{ _tpl.tag = alt }   // Reihenfolge Finn 08.10.2026; Heute beendet steht unter „Läuft" (apIdsRender)   // beide Charts wie auf der Planer-Seite (Finn 08.10.2026)
+    }catch(e){ console.warn('[ap-ids] Kopf zeichnen', e); return laeuft }
   }
   const apKontoKurz = z => { let g = 0; try{ g = Number(kontoGroesseAnzeige(z.konto, null, null)) || 0 }catch(_){}
     const gk = g >= 1000 ? Math.round(g / 1000) + 'k' : g > 0 ? String(g) : ''
@@ -62124,7 +62126,8 @@
     const kopfL = `<div class="ap-adm-kopf"><b>Läuft · ${wl.laeuft.length}</b><span>live · ${wer}</span></div>`
     // Reihenfolge (Finn 08.10.2026: „Mach die laufenden Trades nach oben über den Block mit Wartet auf Start"): Läuft · Zu bestätigen · Wartet auf Start
     // Reihenfolge seit 08.10.2026 (Finn über den Master): Braucht dich (Kopf) · Zu bestätigen · Wartet auf Start · Läuft · Heute beendet
-    return apIdsBlockHtml('offen', o.map(z => ({ z })), kopfO) + apIdsBlockHtml('warten', wl.warten, kopfW) + apIdsBlockHtml('laeuft', wl.laeuft, kopfL)
+    // seit 08.10.2026 ~11:45 Dubai (Finn): Läuft direkt unter „P&L hypothetisch heute" (apIdsKopfHtml), dann Braucht dich · Zu bestätigen · Wartet · Heute beendet
+    return { laeuft: apIdsBlockHtml('laeuft', wl.laeuft, kopfL), rest: apIdsBlockHtml('offen', o.map(z => ({ z })), kopfO) + apIdsBlockHtml('warten', wl.warten, kopfW) }
   }
   /* Konto-Popup (08.10.2026): Name, Firma, Typ/Phase, Balance (letzte Lesung + Quelle + Alter), Ziel/Rest, Kontowert, letzte Trades — eigene
    * Konten aus accounts/tradePlans (tplKontoBalance wie auf der Planer-Seite), fremde aus Lauf (balance/rest), Delta (wert_eur), live-trades
@@ -62352,7 +62355,8 @@
     window._apOffenNichtLive = _apIds.offen.filter(z => z.balance_live === false)   // Box „Braucht dich" (tplBraucht) zeigt sie mit ↻ Balance lesen — auch für morgen, wo das Delta nichts kennt
     const leisteX = root.querySelector('.ap-idr')?.scrollLeft || 0   // Handy: Wisch-Position der Leiste über das Neuzeichnen (Klick, Takt) halten
     let heuteHb = ''; try{ heuteHb = tplHeuteKarteHtml(apIdsHeute()) }catch(e){ console.warn('[ap-ids] Heute beendet', e) }   // gefiltert nach der gewählten ID
-    root.innerHTML = leiste + apIdsKopfHtml() + apIdsOffenHtml() + heuteHb
+    let ow = { laeuft: '', rest: '' }; try{ ow = apIdsOffenHtml() }catch(e){ console.warn('[ap-ids] Vorschläge/Läuft', e) }
+    root.innerHTML = leiste + apIdsKopfHtml(ow.laeuft) + ow.rest + heuteHb
     if(leisteX && root.querySelector('.ap-idr')) root.querySelector('.ap-idr').scrollLeft = leisteX
     const det = root.querySelector('#ap-id-detail'), detFn = typeof window.apIdDetailRender === 'function' ? window.apIdDetailRender : typeof apIdDetailRender === 'function' ? apIdDetailRender : null
     if(u && det && detFn){ try{ detFn(u, det) }catch(e){ console.warn('[ap-ids] ID-Details', e) } }
