@@ -39168,6 +39168,16 @@
     if(!plan) return
     { const sp = await planKontoSperre(plan)   // Ziel erreicht / Manuelle Arbeit: auch der Duplikum-Start nicht (08.10.2026)
       if(sp){ if(typeof atToast === 'function') atToast((sp.art === 'ziel' ? '🎯 ' : '✍ ') + sp.text, 'end'); if(opts && typeof opts.fehl === 'function') opts.fehl(sp.text); return } }
+    // FIRMEN-ABSTAND + GEGENHEDGE AUF JEDEM STARTWEG (08.10.2026, Master: Finn fragt, ob der Schutz bei JEDEM Start greift — tpPreflightAndStart
+    // lief bisher ohne faVorStart und ohne Claim: „Trade planen → Speichern → sofort starten", „Echo fortsetzen", Duplikum-Resume nach
+    // Konto-Edit, Orbit-Warteschlange vom Mac/Handy). Jetzt zentral hier, solange nichts gesendet ist. Ausgenommen die Wege, die nur das
+    // Order-Popup öffnen (Orbit V2, Topstep V2 mit Puls, Orbit ohne Duplikum-Check) — deren Order geht später durch tpOrbitStarten, das
+    // selbst prüft. Doppelte Abfragen fängt die 30-s-Merkung in faVorStart ab.
+    { const nurPopup = plan.route === 'tvv2' || (plan.route === 'tsv2' && tsPulsModus() !== 'aus') || (plan.route === 'tvplus' && !(opts && opts.nurDup))
+      if(!nurPopup && plan.status === 'planned' && !plan.startedAt && !plan.orbitGesendetAt){
+        const w = await faVorStart(plan)
+        if(w){ if(opts && typeof opts.fehl === 'function') opts.fehl(w); return }
+      } }
     // ORBIT + DUPLIKIUM (22.09.2026, Finns Ablauf: Popup 2 „Speichern" → „dann kommt
     // der Duplikum-Trade-Cross-Check, genau das Gleiche wie beim Duplikum-Trade → Popup
     // verschwindet, Trade ist ready to start"). Auf Orbit platziert Puls die Order in
@@ -41726,7 +41736,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1341'
+  const OS_TAB_BUILD = '2026-09-22.1342'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -41955,9 +41965,13 @@
    * (bzw. vor ≤ 2 min geclaimt), legt die Funktion den Start auf deren Start + 5 min + Jitter, löst Claim/orbit_gesendet_at und
    * protokolliert (orbit_gesendet_at nie — ist schon gesendet, greift nichts ein); hier: nicht starten, Hinweis „wartet 5-min-Abstand zu <ID>, startet HH:MM". Der Tick startet den Plan zur neuen Zeit.
    * Ohne die Funktion (noch nicht eingespielt) oder offline: Start wie bisher — der Claim-Riegel bleibt. → Hinweistext oder null. */
+  // „frei" je Plan 30 s merken (08.10.2026): seit faVorStart auch zentral in tpPreflightAndStart läuft, fragen Orbit-Wege mit Duplikum-Check
+  // (tpOrbitStartenKern → tpPreflightAndStart → weiter → tpOrbitStarten) sonst bis zu dreimal hintereinander dieselben zwei RPCs
+  const _faFrei = new Map()   // planId → Zeitpunkt der letzten „frei"-Antwort
   async function faVorStart(plan){
     if(!plan || !plan.id) return null
     if(plan.orbitGesendetAt || plan.startedAt) return null   // Order schon draußen — nie eingreifen (Prüfer 08.10.2026: kein Doppel-Kauf)
+    if(Date.now() - (_faFrei.get(String(plan.id)) || 0) < 30000) return null
     // Beide DB-Prüfungen unabhängig: fehlt eine Funktion (nicht eingespielt) oder ist offline, gilt sie als frei, die andere zählt weiter
     const frage = async (fn, wofuer) => {
       try{ const { data, error } = await supabase.rpc(fn, { p_plan: plan.id }); if(error) throw error; return (data && data.frei === false) ? data : null }
@@ -41970,7 +41984,8 @@
     // später (+30 min bzw. deren Start + 30 min) und protokolliert.
     const gh = fa ? null : await frage('prophos_gegenhedge_halten', 'gegenhedge')
     const d = fa || gh
-    if(!d) return null
+    if(!d){ _faFrei.set(String(plan.id), Date.now()); return null }
+    _faFrei.delete(String(plan.id))
     const um = d.ziel ? new Date(d.ziel).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '?'
     const t = gh
       ? `„${plan.masterName || '—'}" wartet: ${d.wer || 'eine andere ID'} ${d.grund || 'läuft gegenläufig'} (${plan.masterFirm || d.firma || 'gleiche Firma'}) — startet ${um}`
