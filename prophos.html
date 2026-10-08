@@ -1940,6 +1940,7 @@
   :is(#tpl-view,#adm-pane-planer) .tpl-nk-achse{margin-left:0;margin-top:2px}
   :is(#tpl-view,#adm-pane-planer) .tpl-h .leg .tpl-sz-l{display:inline-block;width:14px;height:0;border-top:2px solid var(--good);vertical-align:middle;margin-right:2px} :is(#tpl-view,#adm-pane-planer) .tpl-h .leg .tpl-sz-l.gestr{border-top:2px dashed color-mix(in srgb,var(--ink) 55%,var(--surface))}
   :is(#tpl-view,#adm-pane-planer) .kpi-delta.tpl-sz-k{display:block;margin-top:1px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-charts-u{margin:0 0 14px} :is(#tpl-view,#adm-pane-planer) .tpl-chart-seg{display:inline-flex;flex-wrap:wrap;gap:2px;margin:0 0 6px} :is(#tpl-view,#adm-pane-planer) .tpl-charts-u > .tpl-karte{margin-top:0}
   /* Chart-Upgrade (08.10.2026): Skala an der Gitterlinie zentriert, Jetzt-Punkt + Wert als HTML (im gestreckten SVG würde ein Kreis zur
      Ellipse), Stufe/Minute unter der Maus leicht abgedunkelt; Legende als Flächen: Long grün, Short rot, geplant hell, Band grau gestrichelt */
   :is(#tpl-view,#adm-pane-planer) .tpl-nk-chart .skala{transform:translateY(-50%)}
@@ -41315,7 +41316,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1314'
+  const OS_TAB_BUILD = '2026-09-22.1315'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -46890,6 +46891,21 @@
         <span class="leg"><span><i class="tpl-sz-l"></i> jetzt</span>${P.length ? '<span><i class="tpl-sz-l gestr"></i> in 60 min mit geplanten</span>' : ''}${schlimm ? `<span title="schlimmster Fall links (NQ fällt) und rechts (NQ steigt)">${escapeHtml(schlimm)}</span>` : ''}</span></div>
         <div class="tpl-nk-chart">${svg}${tplSkalaHtml(sk, Y, H)}</div><div class="tpl-achse tpl-nk-achse">${achse}</div></div>`
   }
+  /* CHART-UMSCHALTER (Finn 08.10.2026 über den Master, Admin → Trade-Planer von oben nach unten: ID-Leiste · Kacheln · Zeitstrahl · „darunter ein
+   * kleiner Umschalter mit ‚P&L hypothetisch heute' und ‚Netto-Einsatz über den Tag' — immer nur einer sichtbar", das Szenario ±100 Pkt als dritte
+   * Option · Braucht dich · Zu bestätigen · Wartet auf Start · Läuft · Heute beendet). Gilt für Admin und Planer-Seite. Wahl je Browser in
+   * localStorage prophos_tpl_chart; Klick über tplKlick (data-tpl-chart, beide Wurzeln). Szenario nur, wenn das Backend die Felder liefert. */
+  const TPL_CHARTS = [['hypo', 'P&L hypothetisch heute'], ['netto', 'Netto-Einsatz über den Tag'], ['sz', 'P&L bei NQ ±100 Pkt']]
+  try{ const s = localStorage.getItem('prophos_tpl_chart'); if(s) _tpl.chartWahl = s }catch(_){}
+  function tplChartsUmschalterHtml(D, pre){
+    let sz = null; try{ sz = tplSzDaten(D.delta) }catch(_){}
+    const opts = TPL_CHARTS.filter(([k]) => k !== 'sz' || sz)
+    const w = opts.some(([k]) => k === _tpl.chartWahl) ? _tpl.chartWahl : 'hypo'
+    const knoepfe = `<div class="seg tpl-chart-seg" role="tablist">${opts.map(([k, t]) => `<button type="button" role="tab" data-tpl-chart="${k}" class="${k === w ? 'active' : ''}" aria-selected="${k === w}">${escapeHtml(t)}</button>`).join('')}</div>`
+    let chart = ''
+    try{ chart = w === 'netto' ? tplNettoHtml(D, pre) : w === 'sz' ? tplSzenarioHtml(D, pre) : tplHypoHtml(D, pre, { ohneListe: true }) }catch(e){ console.warn('[tpl] Chart', e) }
+    return `<div class="tpl-charts-u">${knoepfe}${chart || '<div class="tpl-karte"><div class="tpl-leer klein">Noch keine Daten für diesen Chart</div></div>'}</div>`
+  }
   // Beide Charts untereinander — Planer-Seite (tplRender) und Admin-Reiter (apIdsKopfHtml) hängen denselben Baustein ein; Szenario nur mit Backend-Feldern
   function tplChartsHtml(D, pre){ return tplNettoHtml(D, pre) + tplHypoHtml(D, pre) + tplSzenarioHtml(D, pre) }
 
@@ -47783,7 +47799,19 @@
       return { t, pl: z.pl != null && isFinite(z.pl) ? z.pl : null, eur: z.hypo, key: String(z.key || z.plan_id), z }
     })
   }
-  function tplHypoHtml(D, pre){
+  // Liste „Läuft" (Radar-Zeilen) aus tplHypo — unter dem Hypo-Chart (alt) bzw. seit 08.10.2026 als eigene Karte (tplLaeuftKarteHtml)
+  function tplLaeuftListeHtml(D, h){
+    h = h || tplHypo(D)
+    const plSumme = h.zeilen.reduce((a, z) => a + (z.pl != null && isFinite(z.pl) ? z.pl : 0), 0), mitWert = h.zeilen.some(z => z.hypo != null)
+    return h.zeilen.length && typeof laufZeilenHtml === 'function' ? `<div class="tpl-lz">${laufZeilenHtml(tplLaufEintraege(h.zeilen, D), { titel: 'Läuft', kurs: tplKursJetzt(),
+        summe: mitWert ? { usd: plSumme, eur: h.jetzt } : null, attr: e => /^[0-9a-f-]{36}$/i.test(e.key) ? `data-tpl-t="${escapeHtml(e.key)}"` : '' })}</div>` : ''
+  }
+  function tplLaeuftKarteHtml(D){
+    let h; try{ h = tplHypo(D) }catch(_){ return '' }
+    const l = tplLaeuftListeHtml(D, h); if(!l) return ''
+    return `<div class="tpl-karte tpl-nk tpl-hk"><div class="tpl-h">Läuft <b>${h.zeilen.length}</b><span class="leg"><span>live · Kontowert-Satz × Live-P&amp;L</span></span></div>${l}</div>`
+  }
+  function tplHypoHtml(D, pre, opt){
     const a = _tpl.achse || {}; if(a.VON == null) return ''
     const h = tplHypo(D), hv = h.verlauf
     if(!hv.length && !h.n && !h.ohne) return ''
@@ -47811,9 +47839,7 @@
     // „voll hässlich … so eine Multi-Row-Gruppe wie unter Radar, für jeden Account so eine Zeile"): gemeinsamer Helfer laufZeilenHtml (Radar-
     // Abschnitt) — je Konto Person · Weg · Konto kurz · Richtung × Menge · Spanne Liq/SL → TP mit Kurs · P&L $ + € · seit/Dauer, Summe unten.
     // Ersetzt die Balkenzeilen (.tpl-hb, QA S3) und die Sammelzeile „ohne Live-Wert". Rechnung (tplHypo) unverändert, Klick wie bisher (data-tpl-t).
-    const plSumme = h.zeilen.reduce((a, z) => a + (z.pl != null && isFinite(z.pl) ? z.pl : 0), 0), mitWert = h.zeilen.some(z => z.hypo != null)
-    const liste = h.zeilen.length && typeof laufZeilenHtml === 'function' ? `<div class="tpl-lz">${laufZeilenHtml(tplLaufEintraege(h.zeilen, D), { titel: 'Läuft', kurs: tplKursJetzt(),
-        summe: mitWert ? { usd: plSumme, eur: h.jetzt } : null, attr: e => /^[0-9a-f-]{36}$/i.test(e.key) ? `data-tpl-t="${escapeHtml(e.key)}"` : '' })}</div>` : ''
+    const liste = opt && opt.ohneListe ? '' : tplLaeuftListeHtml(D, h)   // Umschalter (08.10.2026): Läuft steht als eigene Karte weiter unten
     return `<div class="tpl-karte tpl-nk tpl-hk"><div class="tpl-h">P&amp;L hypothetisch heute <b class="${h.jetzt > 0 ? 'tpl-gut' : h.jetzt < 0 ? 'tpl-rot' : ''}">jetzt ${vz(h.jetzt)}</b>
         <span class="leg"><span>${h.n} Trade${h.n === 1 ? '' : 's'}${h.ohne ? ` · ${h.ohne} ohne Wert` : ''}</span><span>Kontowert-Satz × Live-P&amp;L${h.cfd ? ' · CFD ≈ NQ' : ''}</span><span>0 = Einstand</span></span></div>
         ${hv.length ? `<div class="tpl-nk-chart">${svg}${tplSkalaHtml(sk, Y, H)}${marke}</div>${tplAchseHtml(VON, BIS, v)}` : '<div class="tpl-leer klein">Verlauf kommt mit der ersten Kerze des Tages</div>'}${liste}</div>`   // QA 08.10.2026 Punkt 9
@@ -47925,7 +47951,7 @@
     const chips = (alleIds.length > 1 || alleBest || kopfRechts) ? `<div class="adm-vl-legend tpl-ids">${chipsIds}${alleBest}${kopfRechts}</div>` : ''
     const html = (_tpl.fehler ? `<div class="tpl-fehler">⚠ ${escapeHtml(_tpl.fehler)}</div>` : '')
       + (ohne ? `<div class="tpl-karte"><div class="tpl-leer">— nicht im Auto-Planer</div></div>`
-        : chips + tplKachelnHtml(F) + tplZeitstrahlHtml(F, zeilen) + tplBrauchtHtml(tplBraucht(D, sichtIds)) + tplDetailHtml(D) + tplChartsHtml(F, 'p') + tplHeuteKarteHtml(F) + tplListeHtml(F) + tplBilanzKarteHtml(F))   // Heute beendet unter dem Hypo-Chart mit „Läuft" (Finn 08.10.2026)   // Konten-Abdeckung ausgeblendet (Finn 08.10.2026: „mies unnötig, kann visuell weg“) — tplAbdeckungHtml bleibt   // Detail direkt unter dem Zeitstrahl (Finn 07.10.2026)
+        : chips + tplKachelnHtml(F) + tplZeitstrahlHtml(F, zeilen) + tplChartsUmschalterHtml(F, 'p') + tplBrauchtHtml(tplBraucht(D, sichtIds)) + tplDetailHtml(D) + tplListeHtml(F) + tplLaeuftKarteHtml(F) + tplHeuteKarteHtml(F) + tplBilanzKarteHtml(F))   // Reihenfolge wie Admin (Finn 08.10.2026): Charts-Umschalter · Braucht dich · Geplant · Läuft · Heute beendet   // Heute beendet unter dem Hypo-Chart mit „Läuft" (Finn 08.10.2026)   // Konten-Abdeckung ausgeblendet (Finn 08.10.2026: „mies unnötig, kann visuell weg“) — tplAbdeckungHtml bleibt   // Detail direkt unter dem Zeitstrahl (Finn 07.10.2026)
     // FINGERABDRUCK (08.10.2026): gleiches Markup → nichts anfassen (60-s-Takt, Delta-Takt, Balance-Stände zeichnen sonst alles neu
     // und werfen Scroll/Fokus weg); die Kopfzeile oben wird trotzdem jedes Mal aktualisiert
     if(html === _tpl.htmlAlt && root.firstChild) return
@@ -48443,6 +48469,8 @@
   tplRoot?.addEventListener('toggle', e => { const d = e.target.closest('details.tpl-bil-det'); if(d) _tpl.bilanzAuf = d.open }, true)   // Beendet-Tabelle auf/zu merken
   // Ein Klick-Handler für beide Wurzeln (08.10.2026): Trade-Planer-Seite (#tpl-root) und Admin-Reiter (#ap-ids-root, bindet ihn in apIdsRender)
   const tplKlick = e => {
+    const cw = e.target.closest('[data-tpl-chart]')   // Chart-Umschalter (08.10.2026): Wahl merken, sichtbare Seite neu zeichnen
+    if(cw){ _tpl.chartWahl = cw.dataset.tplChart; try{ localStorage.setItem('prophos_tpl_chart', _tpl.chartWahl) }catch(_){}; tplSpaeter(); return }
     const pw = e.target.closest('[data-pzw]')   // Plan-Zeile: TP/SL/Größe → Mini-Popup (08.10.2026)
     if(pw){ e.stopPropagation(); pzwOeffnen(pw); return }
     // Braucht dich, geblowt (08.10.2026): vorhandener Archiv-Weg wie unter Accounts (archiveAccount 'blown' → Duplikum/Echo aufräumen,
@@ -61397,7 +61425,7 @@
       let braucht = ''
       try{ if(typeof tplBraucht === 'function' && typeof tplBrauchtHtml === 'function') braucht = tplBrauchtHtml(tplBraucht(D, u ? new Set([u]) : null)) }catch(e){ console.warn('[ap-ids] Braucht dich', e) }   // Ausgelassene je ID mit Grund + Knöpfen (08.10.2026)
       // Heute beendet (Finn 08.10.2026) unter den Charts — nur bei „Alle"; mit gewählter ID steht dieselbe Liste im ID-Detail oben
-      try{ return seg + tplKachelnHtml(D) + tplZeitstrahlHtml(D, zeilen) + braucht + tplChartsHtml(D, 'a') + (u ? '' : tplHeuteKarteHtml(D)) } finally{ _tpl.tag = alt }   // beide Charts wie auf der Planer-Seite (Finn 08.10.2026)
+      try{ return seg + tplKachelnHtml(D) + tplZeitstrahlHtml(D, zeilen) + tplChartsUmschalterHtml(D, 'a') + braucht } finally{ _tpl.tag = alt }   // Reihenfolge Finn 08.10.2026; Heute beendet steht unter „Läuft" (apIdsRender)   // beide Charts wie auf der Planer-Seite (Finn 08.10.2026)
     }catch(e){ console.warn('[ap-ids] Kopf zeichnen', e); return '' }
   }
   const apKontoKurz = z => { let g = 0; try{ g = Number(kontoGroesseAnzeige(z.konto, null, null)) || 0 }catch(_){}
@@ -61552,7 +61580,8 @@
     const kopfW = `<div class="ap-adm-kopf"><b>Wartet auf Start · ${wl.warten.length}</b><span>bestätigt · ${wer}</span></div>`
     const kopfL = `<div class="ap-adm-kopf"><b>Läuft · ${wl.laeuft.length}</b><span>live · ${wer}</span></div>`
     // Reihenfolge (Finn 08.10.2026: „Mach die laufenden Trades nach oben über den Block mit Wartet auf Start"): Läuft · Zu bestätigen · Wartet auf Start
-    return apIdsBlockHtml('laeuft', wl.laeuft, kopfL) + apIdsBlockHtml('offen', o.map(z => ({ z })), kopfO) + apIdsBlockHtml('warten', wl.warten, kopfW)
+    // Reihenfolge seit 08.10.2026 (Finn über den Master): Braucht dich (Kopf) · Zu bestätigen · Wartet auf Start · Läuft · Heute beendet
+    return apIdsBlockHtml('offen', o.map(z => ({ z })), kopfO) + apIdsBlockHtml('warten', wl.warten, kopfW) + apIdsBlockHtml('laeuft', wl.laeuft, kopfL)
   }
   /* Konto-Popup (08.10.2026): Name, Firma, Typ/Phase, Balance (letzte Lesung + Quelle + Alter), Ziel/Rest, Kontowert, letzte Trades — eigene
    * Konten aus accounts/tradePlans (tplKontoBalance wie auf der Planer-Seite), fremde aus Lauf (balance/rest), Delta (wert_eur), live-trades
@@ -61774,12 +61803,13 @@
         <span title="Welche Konten einer ID geplant werden, entscheiden weiter Typ, Firma (Kernwerte), Balance und der Haken je Konto unter Accounts.">Nachtlauf ${_apIds.aktiv ? 'an' : 'aus'}${lzAt ? ' · letzter Lauf ' + escapeHtml(lzAt) : _apIds.tag ? ' · letzter Lauf ' + escapeHtml(String(_apIds.tag)) : ''}</span>
         <button type="button" class="btn btn-ghost" id="ap-ids-neu" style="margin-left:auto;padding:3px 9px;font-size:12px" title="Neu laden">↻</button></div>`
     const leiste = kopf + (rows.length ? `<div class="ap-idr-wrap"><div class="ap-idr" role="tablist">${alle}${im.map(reiter).join('')}${raus.filter(z => z.uid === u).map(reiter).join('')}</div>${rechts}${menu}</div>` : '<div style="color:var(--sub);font-size:12.5px;margin-bottom:14px">keine ID mit planbaren Konten</div>')
-      + '<div id="ap-id-detail"></div>'   // ID-Details (Slave 8, apIdDetailRender) — leer, solange „Alle" gewählt ist
+      // ID-Details (apIdDetailRender) seit 08.10.2026 nicht mehr unter der Leiste: die ganze Seite filtert nach der ID (Finns Reihenfolge)
     root.style.padding = '6px 0'; root.style.color = ''
     try{ _apIds.D = apIdsDaten() }catch(_){ _apIds.D = null }   // Trades des gewählten Tags (und der gewählten ID) einmal je Zeichnen (Kopf + Vorschlags-Zeilen)
     window._apOffenNichtLive = _apIds.offen.filter(z => z.balance_live === false)   // Box „Braucht dich" (tplBraucht) zeigt sie mit ↻ Balance lesen — auch für morgen, wo das Delta nichts kennt
     const leisteX = root.querySelector('.ap-idr')?.scrollLeft || 0   // Handy: Wisch-Position der Leiste über das Neuzeichnen (Klick, Takt) halten
-    root.innerHTML = leiste + apIdsKopfHtml() + apIdsOffenHtml()
+    let heuteHb = ''; try{ heuteHb = tplHeuteKarteHtml(apIdsHeute()) }catch(e){ console.warn('[ap-ids] Heute beendet', e) }   // gefiltert nach der gewählten ID
+    root.innerHTML = leiste + apIdsKopfHtml() + apIdsOffenHtml() + heuteHb
     if(leisteX && root.querySelector('.ap-idr')) root.querySelector('.ap-idr').scrollLeft = leisteX
     const det = root.querySelector('#ap-id-detail'), detFn = typeof window.apIdDetailRender === 'function' ? window.apIdDetailRender : typeof apIdDetailRender === 'function' ? apIdDetailRender : null
     if(u && det && detFn){ try{ detFn(u, det) }catch(e){ console.warn('[ap-ids] ID-Details', e) } }
