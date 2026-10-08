@@ -1879,6 +1879,8 @@
   #dashboard-view .pzw-f input{height:30px;border:1px solid var(--border);border-radius:7px;padding:0 8px;font:inherit;font-size:14px;text-align:right;font-variant-numeric:tabular-nums;background:var(--surface);color:var(--ink);min-width:0}
   #dashboard-view .pzw-f input:focus{outline:none;border-color:var(--violet);box-shadow:0 0 0 3px var(--violet-tint)}
   #dashboard-view .pzw-f small{padding-left:56px;font-size:11px;color:var(--sub-2);min-height:13px;font-variant-numeric:tabular-nums}
+  #dashboard-view .pzw-tag{display:flex;gap:4px;padding-left:56px;margin-top:6px} #dashboard-view .pzw-tag button{border:1px solid var(--border);background:var(--surface);border-radius:999px;padding:2px 10px;font:inherit;font-size:11.5px;color:var(--sub);cursor:pointer}
+  #dashboard-view .pzw-tag button.an{border-color:var(--violet);color:var(--violet);background:var(--violet-tint)} #dashboard-view .pzw-f .tk-hin .btn{margin-left:4px}
   #dashboard-view .pzw-f .tk-akt{align-items:center} #dashboard-view .pzw-f .pzw-tipp{margin-left:auto;font-size:11px;color:var(--sub-2)}
   :is(#tpl-view,#adm-pane-planer) .tpl-netto{position:relative;display:flex;height:50px;border-top:1px solid var(--border-soft)}
   :is(#tpl-view,#adm-pane-planer) .tpl-netto .tpl-name span{padding-left:0}
@@ -37087,7 +37089,7 @@
       : menge.toLocaleString('de-DE') + ' ' + escapeHtml(String(p.masterSymbol || '').replace(/[FGHJKMNQUVXZ]\d{1,2}$/, '') || 'Kt')
     // TP · SL · GRÖSSE ÄNDERN (Finn 08.10.2026: „Wenn ich auf Take Profit, Stop Loss oder Größe draufklicke, soll immer so ein Mini-Popup kommen,
     // wo ich das anpassen kann"): nur mit o.werte (Aufrufer: noch nicht gestartet + Recht) — Kasten pzwOeffnen, Klick über tplKlick
-    const pzw = o.werte ? ` data-pzw-plan="${escapeHtml(String(p.id))}" data-pzw-tp="${Number(p.masterTp) > 0 ? Number(p.masterTp) : ''}" data-pzw-sl="${Number(p.masterSl) > 0 ? Number(p.masterSl) : ''}" data-pzw-gr="${menge || ''}" data-pzw-lot="${p.route === 'mt5v2' ? '1' : ''}" data-pzw-sym="${escapeHtml(String(p.masterSymbol || '').replace(/[FGHJKMNQUVXZ]\d{1,2}$/, ''))}" data-pzw-ppp="${o.werte.ppp > 0 ? o.werte.ppp : ''}"` : ''
+    const pzw = o.werte ? ` data-pzw-plan="${escapeHtml(String(p.id))}" data-pzw-tp="${Number(p.masterTp) > 0 ? Number(p.masterTp) : ''}" data-pzw-sl="${Number(p.masterSl) > 0 ? Number(p.masterSl) : ''}" data-pzw-gr="${menge || ''}" data-pzw-lot="${p.route === 'mt5v2' ? '1' : ''}" data-pzw-sym="${escapeHtml(String(p.masterSymbol || '').replace(/[FGHJKMNQUVXZ]\d{1,2}$/, ''))}" data-pzw-ppp="${o.werte.ppp > 0 ? o.werte.ppp : ''}" data-pzw-start="${escapeHtml(String(p.startUm || ''))}"` : ''
     const pzwZ = art => pzw ? ` pz-w"${pzw} data-pzw="${art}" title="Klicken zum Ändern"` : '"'
     // RADAR-OPTIK (o.stil 'radar', 08.10.2026, Finn: „im Admin die geplanten Trades etwas anpassen" — wie die Läuft-Zeilen im Radar): Konto
     // zweizeilig (Firma + Typ-Chip oben, „150k …0530" darunter), Richtung als BUY/SELL-Chip mit „3 × NQ" / „1,5 × Lot" (Mini-Popup der Größe
@@ -37100,7 +37102,7 @@
         : menge.toLocaleString('de-DE') + ' × ' + escapeHtml(String(p.masterSymbol || '').replace(/[FGHJKMNQUVXZ]\d{1,2}$/, '') || 'NQ')
       return `
       <div class="pz-z pz-radar-z${p.autoPlan ? '' : ' pz-z-hand'}" data-plan-id="${p.id}">
-        <span class="pz-zeit">${zeit}</span>
+        <span class="pz-zeit${pzwZ('start')}>${zeit}</span>
         <span class="pz-konto pz-konto2" title="${escapeHtml(kontoTitel)}" data-ak-konto="${escapeHtml(String(p.id || ''))}"><span class="pz-k1"><b>${firmaR}</b>${typChip}</span><small class="pz-k2">${k2}</small></span>
         <span class="pz-ri">${em}<span class="pz-gr${pzwZ('gr')}>${grR}</span></span>
         <span class="pz-bal">${balHtml}</span>
@@ -37113,7 +37115,7 @@
     return `
       <div class="pz-z${p.autoPlan ? '' : ' pz-z-hand'}" data-plan-id="${p.id}">${o.wer ? `
         <span class="pz-wer">${o.wer}</span>` : ''}
-        <span class="pz-zeit">${zeit}</span>
+        <span class="pz-zeit${pzwZ('start')}>${zeit}</span>
         <span class="pz-konto" title="${escapeHtml(kontoTitel)}" data-ak-konto="${escapeHtml(String(p.id || ''))}">${kontoKurz}${typChip}</span>
         <span class="pz-ri ${p.richtung === 'buy' ? 'is-buy' : p.richtung === 'sell' ? 'is-sell' : ''}">${p.richtung === 'buy' ? '▲ Long' : p.richtung === 'sell' ? '▼ Short' : '–'}</span>
         <span class="pz-bal">${balHtml}</span>
@@ -41075,7 +41077,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1269'
+  const OS_TAB_BUILD = '2026-09-22.1270'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -47565,7 +47567,7 @@
     const d = a.dataset, lot = d.pzwLot === '1', sym = String(d.pzwSym || '').toUpperCase()
     const ppp = Number(d.pzwPpp) > 0 ? Number(d.pzwPpp) : lot ? null : sym === 'MNQ' ? 2 : sym === 'NQ' ? 20 : null   // $ je Punkt und Einheit
     return { plan: d.pzwPlan, tp: d.pzwTp ? Number(d.pzwTp) : null, sl: d.pzwSl ? Number(d.pzwSl) : null, gr: d.pzwGr ? Number(d.pzwGr) : null,
-      lot, einheit: lot ? 'Lot' : (sym || 'Kt'), ppp }
+      lot, einheit: lot ? 'Lot' : (sym || 'Kt'), ppp, start: d.pzwStart || '' }
   }
   function pzwZu(){ if(_pzw.el) _pzw.el.hidden = true; if(_pzw.anker) _pzw.anker.classList.remove('pz-w-an'); _pzw.anker = null; _pzw.busy = false }
   function pzwSetzen(){
@@ -47580,7 +47582,8 @@
   }
   function pzwPunkte(){
     const el = _pzw.el, a = _pzw.anker; if(!el || !a) return
-    const D = pzwDaten(a), f = el.querySelector('form'), gr = pzwZahl(f.gr.value, D.lot)
+    const D = pzwDaten(a), f = el.querySelector('form'); if(!f || !f.gr) return
+    const gr = pzwZahl(f.gr.value, D.lot)
     for(const k of ['tp', 'sl']){
       const v = pzwZahl(f[k].value, false), o = el.querySelector(`[data-pzw-pkt="${k}"]`)
       o.textContent = D.ppp && gr > 0 && v > 0 ? `≈ ${pzwDe(v / (D.ppp * gr), 1)} Pkt` : ''
@@ -47591,9 +47594,14 @@
     if(!_pzw.el){
       _pzw.el = document.createElement('div'); _pzw.el.className = 'tpl-kasten pzw'; _pzw.el.hidden = true
       ;(document.getElementById('dashboard-view') || document.body).appendChild(_pzw.el)
-      _pzw.el.addEventListener('click', e => { if(e.target.closest('[data-pzw-x]')) pzwZu() })
+      _pzw.el.addEventListener('click', e => {
+        if(e.target.closest('[data-pzw-x]')){ pzwZu(); return }
+        const tg = e.target.closest('[data-pzw-tag]'); if(tg){ _pzw.tag = tg.dataset.pzwTag; pzwTagZeigen(); return }
+        if(e.target.closest('[data-pzw-in3]')){ pzwStartSpeichern(new Date(Date.now() + 3 * 60000).toISOString()); return }
+        const vs = e.target.closest('[data-pzw-vorschlag]'); if(vs){ pzwStartSpeichern(vs.dataset.pzwVorschlag); return }
+      })
       _pzw.el.addEventListener('input', pzwPunkte)
-      _pzw.el.addEventListener('submit', e => { e.preventDefault(); pzwSpeichern() })
+      _pzw.el.addEventListener('submit', e => { e.preventDefault(); if(e.target.dataset.modus === 'start') pzwStartSpeichern(); else pzwSpeichern() })
       _pzw.el.addEventListener('keydown', e => { if(e.key === 'Escape'){ e.stopPropagation(); pzwZu() } })
       document.addEventListener('keydown', e => { if(e.key === 'Escape' && _pzw.el && !_pzw.el.hidden) pzwZu() })
       document.addEventListener('pointerdown', e => { if(!_pzw.el || _pzw.el.hidden || _pzw.el.contains(e.target) || (e.target.closest && e.target.closest('[data-pzw]'))) return; pzwZu() }, true)
@@ -47603,6 +47611,7 @@
     if(_pzw.anker) _pzw.anker.classList.remove('pz-w-an')
     _pzw.anker = a; _pzw.busy = false; a.classList.add('pz-w-an')
     const D = pzwDaten(a), feld = a.dataset.pzw
+    if(feld === 'start'){ pzwStartForm(D); return }
     const wert = (v, lot) => v == null ? '' : lot ? String(v).replace('.', ',') : String(v)
     _pzw.el.innerHTML = `<div class="tk-kopf">TP · SL · Größe<button type="button" class="tk-x" data-pzw-x title="Abbrechen (Esc)">✕</button></div>
       <form class="pzw-f" autocomplete="off">
@@ -47648,6 +47657,62 @@
     }catch(e){
       _pzw.busy = false; el.querySelectorAll('button,input').forEach(x => x.disabled = false)
       fehler((e && e.message) || String(e))
+    }
+  }
+  /* STARTZEIT ÄNDERN (Finn 08.10.2026, Admin als Jacob, „Zu bestätigen" Blue Guardian 15:08/16:30: „Wenn ich hier auf die Uhrzeit drücke,
+   * will ich sie ändern können, dann starte ich sie"). Derselbe Kasten wie TP/SL/Größe: HH:MM Dubai, Umschalter heute/morgen (vorbelegt mit dem
+   * Tag des Plans), „in 3 min". POST /plan {aktion:'werte', start_um: ISO +04:00} — Prüfung (frühestens jetzt + 2 min, Richtungsschutz,
+   * Firmen-Abstand) macht das Backend, bei 400 steht der Klartext im Kasten, ein Vorschlag {vorschlag: ISO} als Knopf. Bestätigung bleibt;
+   * gestartet wird wie immer vom PC-Tab der ID (Claim + Guard), der Mac löst nie eine Order aus. */
+  const pzwDubaiTag = ms => new Date(ms).toLocaleDateString('en-CA', { timeZone: 'Asia/Dubai' })
+  const pzwWann = iso => { const d = new Date(iso || ''); if(isNaN(d)) return '–'
+    const u = d.toLocaleTimeString('de-DE', { timeZone: 'Asia/Dubai', hour: '2-digit', minute: '2-digit' })
+    return pzwDubaiTag(d.getTime()) === pzwDubaiTag(Date.now()) ? u : `${d.toLocaleDateString('de-DE', { timeZone: 'Asia/Dubai', day: '2-digit', month: '2-digit' })} ${u}` }
+  function pzwStartForm(D){
+    const alt = Date.parse(D.start || ''), hm = isFinite(alt) ? new Date(alt).toLocaleTimeString('de-DE', { timeZone: 'Asia/Dubai', hour: '2-digit', minute: '2-digit' }) : ''
+    _pzw.tag = isFinite(alt) && pzwDubaiTag(alt) > pzwDubaiTag(Date.now()) ? 'morgen' : 'heute'
+    _pzw.el.innerHTML = `<div class="tk-kopf">Startzeit<button type="button" class="tk-x" data-pzw-x title="Abbrechen (Esc)">✕</button></div>
+      <form class="pzw-f" data-modus="start" autocomplete="off">
+        <label><span>Start</span><input name="hm" inputmode="numeric" placeholder="HH:MM" value="${escapeHtml(hm)}"><em>Dubai</em></label>
+        <div class="pzw-tag"><button type="button" data-pzw-tag="heute">heute</button><button type="button" data-pzw-tag="morgen">morgen</button></div>
+        <small>bisher ${escapeHtml(pzwWann(D.start))} · frühestens jetzt + 2 min</small>
+        <div class="tk-hin" data-pzw-msg></div>
+        <div class="tk-akt"><button type="submit" class="btn btn-primary">Speichern</button><button type="button" class="btn btn-ghost" data-pzw-in3 title="Start in 3 Minuten (Dubai ${escapeHtml(pzwWann(new Date(Date.now() + 3 * 60000).toISOString()))})">in 3 min</button><span class="pzw-tipp">Enter · Esc</span></div>
+      </form>`
+    pzwTagZeigen(); _pzw.el.hidden = false; pzwSetzen()
+    const f = _pzw.el.querySelector('input[name="hm"]'); if(f){ f.focus({ preventScroll: true }); f.select() }
+  }
+  function pzwTagZeigen(){ _pzw.el && _pzw.el.querySelectorAll('[data-pzw-tag]').forEach(b => b.classList.toggle('an', b.dataset.pzwTag === _pzw.tag)) }
+  // „5:02" / „0502" / „05.02" / „05:02" + Tag → ISO mit Dubai-Versatz (+04:00, keine Sommerzeit); ungültig → null
+  function pzwStartIso(hm, tag){
+    const m = /^\s*(\d{1,2})\s*[:.h]?\s*(\d{2})\s*$/.exec(String(hm || '')); if(!m) return null
+    const H = +m[1], M = +m[2]; if(H > 23 || M > 59) return null
+    const datum = pzwDubaiTag(Date.now() + (tag === 'morgen' ? 86400000 : 0))
+    return new Date(`${datum}T${String(H).padStart(2, '0')}:${String(M).padStart(2, '0')}:00+04:00`).toISOString()
+  }
+  async function pzwStartSpeichern(isoDirekt){
+    const el = _pzw.el, a = _pzw.anker; if(!el || !a || _pzw.busy) return
+    const D = pzwDaten(a), f = el.querySelector('form'), msg = el.querySelector('[data-pzw-msg]')
+    const fehler = (t, vorschlag) => { msg.innerHTML = escapeHtml(t) + (vorschlag ? ` <button type="button" class="btn btn-ghost btn-xs" data-pzw-vorschlag="${escapeHtml(vorschlag)}">→ ${escapeHtml(pzwWann(vorschlag))} übernehmen</button>` : ''); msg.classList.add('rot') }
+    const iso = isoDirekt || pzwStartIso(f.hm.value, _pzw.tag)
+    if(!iso) return fehler('Uhrzeit als HH:MM, z. B. 05:02')
+    const ms = Date.parse(iso)
+    if(ms < Date.now() + 2 * 60000 - 5000) return fehler(ms < Date.now() ? `${pzwWann(iso)} liegt in der Vergangenheit${_pzw.tag === 'heute' ? ' — morgen gemeint?' : ''}` : 'frühestens jetzt + 2 min', null)
+    _pzw.busy = true; msg.textContent = 'speichert …'; msg.classList.remove('rot'); el.querySelectorAll('button,input').forEach(x => x.disabled = true)
+    try{
+      const d = await apdApi('POST', '/plan', { plan_id: D.plan, aktion: 'werte', start_um: iso })
+      const neu = (d && d.plan && d.plan.start_um) || iso
+      document.querySelectorAll(`[data-pzw-plan="${CSS.escape(String(D.plan))}"]`).forEach(z => {
+        z.dataset.pzwStart = neu
+        if(z.dataset.pzw === 'start') z.innerHTML = `<span class="pz-zeit-t" title="Start ${escapeHtml(pzwWann(neu))} Dubai — von Hand gesetzt">${escapeHtml(pzwWann(neu))}</span>`
+      })
+      const pl = (tradePlans || []).find(x => String(x.id) === String(D.plan)); if(pl) pl.startUm = neu
+      if(typeof atToast === 'function') atToast(`Start ${pzwWann(D.start)} → ${pzwWann(neu)}`, 'start')
+      pzwZu()
+      try{ if(document.querySelector('#tpl-view.active')){ if(typeof apdNachEingriff === 'function') apdNachEingriff() } else if(typeof window._apIdsLaden === 'function') window._apIdsLaden() }catch(_){}
+    }catch(e){
+      _pzw.busy = false; el.querySelectorAll('button,input').forEach(x => x.disabled = false)
+      fehler((e && e.message) || String(e), e && e.daten && e.daten.vorschlag)
     }
   }
   /* Startzeiten laufender Trades ALLER IDs aus /admin/live-trades?tage=1&echo=1 (bestehende Radar-Route, Login reicht; 07.10.2026):
