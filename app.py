@@ -17174,6 +17174,81 @@ def ap_archiv_sweep(force=False):
     return weg
 
 
+# ENTARCHIVIEREN ÜBERALL (Master 09.10.2026, Hinweis Prüfer Slave 2): das Archiv liegt je Profil (user_settings key archive), der
+# Archiv-Sweep liest ALLE Profile. Archiviert Finn als Admin ein fremdes Konto und der Besitzer holt es in SEINEM Profil zurück, bliebe
+# Finns Eintrag stehen — der Sweep löschte dann alle 5 min jeden neuen Plan des wieder aktiven Kontos. POST /account/entarchivieren
+# {account_id} entfernt den Eintrag in allen Profilen (Service-Key). Recht: Besitzer des Kontos, Admin (ADMIN_EMAILS) oder Verwalter
+# der Gruppe des Besitzers.
+def archiv_ohne_konto(value, kid):
+    """REIN RECHNEND (testbar): archive-Wert ohne den Eintrag kid → (neuer Wert, entfernt?). Wert als dict oder JSON-Text."""
+    v = value
+    if isinstance(v, str):
+        try:
+            v = json.loads(v)
+        except ValueError:
+            return value, False
+    if not isinstance(v, dict) or str(kid) not in v:
+        return value, False
+    return {k: x for k, x in v.items() if k != str(kid)}, True
+
+
+def entarchivieren_darf(uid, admin, besitzer, gruppe):
+    """REIN RECHNEND (testbar): Admin, Besitzer oder Verwalter einer Gruppe, in der der Besitzer steht."""
+    if admin:
+        return True
+    if not uid or not besitzer:
+        return False
+    return str(uid) == str(besitzer) or (bool(gruppe) and str(besitzer) in {str(x) for x in gruppe})
+
+
+@app.route("/account/entarchivieren", methods=["POST", "OPTIONS"])
+def account_entarchivieren():
+    if request.method == "OPTIONS":
+        return "", 200
+    kid = str((request.get_json(silent=True) or {}).get("account_id") or "").strip()
+    if not re.match(r"^[0-9a-f-]{36}$", kid):
+        return jsonify({"ok": False, "msg": "account_id fehlt"}), 400
+    _mail, err = _admin_auth()
+    admin, uid = err is None, request.environ.get("prophos.admin_uid")
+    if not admin:
+        if err[1] != 403:
+            return err
+        uid, err2 = _wd_login()
+        if err2:
+            return err2
+    try:
+        acc = sb_select("accounts", {"select": "id,user_id", "id": f"eq.{kid}"}) or []
+        besitzer = acc[0].get("user_id") if acc else None
+        if not besitzer:
+            return jsonify({"ok": False, "msg": "Konto nicht gefunden"}), 404
+        gruppe = None
+        if not admin and str(besitzer) != str(uid):
+            _nur, gruppe = _ap_gruppe_lesen(uid)
+        if not entarchivieren_darf(uid, admin, besitzer, gruppe):
+            return jsonify({"ok": False, "msg": "Nur Besitzer, Admin oder Verwalter der Gruppe"}), 403
+        profile = 0
+        for row in _sb_all("user_settings", {"select": "user_id,value,updated_at", "key": "eq.archive"}):
+            for _versuch in range(2):     # Wächter updated_at: hat der Browser des Profils dazwischen geschrieben → neu lesen, nochmal
+                neu, weg = archiv_ohne_konto(row.get("value"), kid)
+                if not weg:
+                    break
+                guard = {"user_id": f"eq.{row['user_id']}", "key": "eq.archive"}
+                if row.get("updated_at"):
+                    guard["updated_at"] = f"eq.{row['updated_at']}"
+                if sb_update("user_settings", guard, {"value": neu, "updated_at": datetime.now(timezone.utc).isoformat()}):
+                    profile += 1
+                    break
+                row = (sb_select("user_settings", {"select": "user_id,value,updated_at", "user_id": f"eq.{row['user_id']}",
+                                                   "key": "eq.archive"}) or [{}])[0]
+                if not row.get("user_id"):
+                    break
+        _ap_archiv_merk["wert"] = None     # Delta-Filter sofort neu lesen
+        print(f"[archiv] Konto {kid[:8]} entarchiviert — Eintrag in {profile} Profil(en) entfernt", flush=True)
+        return jsonify({"ok": True, "profile": profile})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"{type(e).__name__}: {e}"}), 502
+
+
 _ap_archiv_merk = {"bis": 0.0, "wert": None}
 
 

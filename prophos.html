@@ -31956,7 +31956,7 @@
       at: new Date().toISOString(),
       ...(successorId ? { successorId } : {})
     }
-    saveArchive(arch)
+    archivSchreibenAbgeglichen(accountId, arch[accountId])
     // Geblowter Account → aus Duplikum löschen (Master läuft sonst weiter). Best-effort,
     // asynchron, blockiert das Archivieren nicht. Nur bei 'blown' (nicht bei 'passed'/'manual').
     if(reason === 'blown' && typeof dupDeleteAccountForProphos === 'function'){
@@ -32078,6 +32078,42 @@
     const arch = getArchive()
     delete arch[accountId]
     saveArchive(arch)
+    delete _archNeu[accountId]
+    archivUeberallEntfernen(accountId)
+  }
+  /* ENTARCHIVIEREN ÜBERALL (Master 09.10.2026, Hinweis Prüfer Slave 2): der Archiv-Sweep (app.py, alle 5 min) liest das Archiv ALLER
+   * Profile. Hat Finn als Admin ein fremdes Konto archiviert und holt der Besitzer es zurück, bliebe Finns Eintrag stehen und der Sweep
+   * löschte jeden neuen Plan des Kontos. Das Backend entfernt den Eintrag in allen Profilen (Recht: Besitzer, Admin, Verwalter). */
+  async function archivUeberallEntfernen(accountId){
+    try{
+      const { data: { session } } = await supabase.auth.getSession()
+      const tok = session?.access_token; if(!tok) return
+      const r = await fetch(`${WATCHER_HOME}/account/entarchivieren`, { method: 'POST', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ account_id: String(accountId) }) })
+      const d = await r.json().catch(() => ({}))
+      if(!r.ok || d.ok === false) throw new Error(d.msg || d.error || ('HTTP ' + r.status))
+    }catch(e){
+      console.warn('[archiv] entarchivieren überall', (e && e.message) || e)
+      if(typeof atToast === 'function') atToast('Entarchiviert — in anderen Profilen nicht entfernt: ' + ((e && e.message) || e), 'end')
+    }
+  }
+  /* ARCHIVIEREN MIT CLOUD-ABGLEICH (09.10.2026): jeder Schreibvorgang lädt den GANZEN lokalen Blob hoch (Write-through). Ein Tab, der seit
+   * dem Login nicht neu geladen hat, kennt einen inzwischen überall entfernten Eintrag noch — beim nächsten Archivieren käme er zurück und
+   * der Sweep löschte wieder Pläne. Deshalb: lokal sofort (ohne Upload), dann Cloud-Stand + dieser Eintrag hochladen (Cloud gewinnt wie beim
+   * Login). Cloud nicht lesbar → wie bisher der lokale Stand. _archNeu: alles, was DIESER Tab archiviert hat — zwei Archivierungen kurz
+   * hintereinander lesen sonst denselben alten Cloud-Stand und die zweite überschriebe die erste. */
+  const _archNeu = {}
+  function archivSchreibenAbgeglichen(accountId, eintrag){
+    _archNeu[accountId] = eintrag
+    const lokal = getArchive(); lokal[accountId] = eintrag
+    try{ _origLocalStorageSetItem.call(localStorage, ARCH_LS, JSON.stringify(lokal)) }catch(_){ saveArchive(lokal); return }
+    ;(async () => {
+      let cloud = null
+      try{ cloud = await fetchSetting('archive') }catch(_){}
+      if(typeof cloud === 'string'){ try{ cloud = JSON.parse(cloud) }catch(_){ cloud = null } }
+      const basis = cloud && typeof cloud === 'object' && !Array.isArray(cloud) ? cloud : getArchive()
+      saveArchive({ ...basis, ..._archNeu })   // lokal + Upload (Write-through)
+    })()
   }
   function setParent(childId, parentId){
     const par = getParents()
@@ -42407,7 +42443,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1399'
+  const OS_TAB_BUILD = '2026-09-22.1400'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

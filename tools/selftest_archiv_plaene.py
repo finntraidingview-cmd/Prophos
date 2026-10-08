@@ -76,6 +76,41 @@ def main():
     check('rest/v1/auto_plan_umplanung' in sw and '"quelle": "bot"' in sw and "Plan entfernt — " in sw,
           "Sweep protokolliert je Plan in auto_plan_umplanung (quelle bot)")
 
+    ns_e = {"json": __import__("json")}
+    exec(block(app, "\ndef archiv_ohne_konto(").lstrip("\n"), ns_e)
+    exec(block(app, "\ndef entarchivieren_darf(").lstrip("\n"), ns_e)
+    aok, darf = ns_e["archiv_ohne_konto"], ns_e["entarchivieren_darf"]
+    KF = "aaaaaaaa-0000-4000-8000-000000000001"
+    profile = [{"user_id": "u-admin", "value": {KF: {"archived": True, "reason": "blown"}, "k-x": {"archived": True}}},
+               {"user_id": "u-besitzer", "value": {"k-y": {"archived": True}}},
+               {"user_id": "u-alt", "value": '{"' + KF + '": {"archived": true}}'}]
+    nachher = []
+    for r in profile:
+        neu, weg = aok(r["value"], KF)
+        nachher.append(dict(r, value=neu))
+    check(all(KF not in (r["value"] if isinstance(r["value"], dict) else {}) for r in nachher) and nachher[0]["value"] == {"k-x": {"archived": True}},
+          "Entarchivieren: Eintrag in ALLEN Profilen weg (auch JSON-Text), andere Einträge bleiben")
+    check(aok({"k-x": {}}, KF) == ({"k-x": {}}, False) and aok("kaputt", KF) == ("kaputt", False), "kein Eintrag / kaputter Wert: unverändert")
+    ns_b = {"json": __import__("json"), "_sb_all": lambda t, q: nachher}
+    exec(block(app, "\ndef _ap_archiviert(").lstrip("\n"), ns_b)
+    plan_kf = [{"id": "q1", "status": "planned", "master_account_id": KF}]
+    check(sz(plan_kf, ns_b["_ap_archiviert"](streng=True)) == [] and sz(plan_kf, {KF}) == plan_kf,
+          "Admin archiviert fremdes Konto, Besitzer entarchiviert → Sweep lässt den Plan in Ruhe (vorher: entfernt)")
+    check(darf("u-b", False, "u-b", None) and darf(None, True, "u-b", None) and darf("u-v", False, "u-b", {"u-b", "u-c"}),
+          "Recht: Besitzer, Admin, Verwalter der Gruppe des Besitzers")
+    check(not darf("u-x", False, "u-b", None) and not darf("u-v", False, "u-b", {"u-c"}) and not darf("u-b", False, None, None),
+          "kein Recht: fremde ID, Verwalter anderer Gruppe, Konto unbekannt")
+    ep = block(app, '@app.route("/account/entarchivieren"')
+    check('guard["updated_at"] = f"eq.{row[\'updated_at\']}"' in ep and "range(2)" in ep and '_ap_archiv_merk["wert"] = None' in ep
+          and "entarchivieren_darf(uid, admin, besitzer, gruppe)" in ep,
+          "Endpunkt: Rechte geprüft, Wächter updated_at mit einem Neu-Lesen, Delta-Archiv sofort neu")
+    ua = block(html, "  function unarchiveAccount(", "\n  }\n")
+    check("archivUeberallEntfernen(accountId)" in ua and "delete _archNeu[accountId]" in ua, "unarchiveAccount ruft das Backend (alle Profile)")
+    asa = block(html, "  function archivSchreibenAbgeglichen(", "\n  }\n")
+    check("_origLocalStorageSetItem.call(localStorage, ARCH_LS" in asa and "fetchSetting('archive')" in asa and "{ ...basis, ..._archNeu }" in asa
+          and "archivSchreibenAbgeglichen(accountId, arch[accountId])" in block(html, "  function archiveAccount(", "\n  /* ARCHIVIERT"),
+          "Archivieren: lokal ohne Upload, dann Cloud-Stand + eigene neue Einträge hochladen (kein alter Tab-Stand)")
+
     d = block(app, '@app.route("/admin/auto-plan/delta"')
     check("ap_delta_ohne_archiv(antwort, _ap_archiviert_gemerkt())" in d, "GET /admin/auto-plan/delta filtert mit gemerktem Archiv")
     ids = block(app, '@app.route("/admin/auto-plan/ids"')
