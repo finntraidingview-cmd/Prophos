@@ -30030,43 +30030,10 @@
     return out
   }
 
-  // ── MetaApi: offene Positionen für jeden manuellen Account mit MA-Verknüpfung ──
-  // 08.10.2026 (Prüfer: GET /ma/positions seit 15:25 UTC 5× 500/504 nach 5–15 s vom Mac — belegt den einen Railway-Worker): die
-  // MetaApi-Verknüpfungen sind Altbestand der Mirror-Zeit (5 Fusion-Live-Konten, letzte Prüfung Juli–22.09.; Fusion läuft heute über
-  // Echo/mt5_live). Abruf nur noch, wenn die alte Live-Trades-Ansicht sichtbar ist (ltRefresh), und jede Anfrage bricht nach 4 s still ab.
-  const LT_MA_TIMEOUT_MS = 4000
-  async function ltFetchMtPositions(){
-    const maAccounts = (accounts || []).filter(a => a.ma && a.ma.token && a.ma.accountId)
-    if(!maAccounts.length) return []
-    const out = []
-    for(const acc of maAccounts){
-      const ab = new AbortController(), tm = setTimeout(() => ab.abort(), LT_MA_TIMEOUT_MS)
-      try {
-        const r = await fetch(`${TS_BACKEND}/ma/positions`, {
-          method:'GET', signal: ab.signal,
-          headers:{'ma-token': acc.ma.token, 'ma-account': acc.ma.accountId}
-        })
-        if(!r.ok) continue
-        const positions = await r.json().catch(() => [])
-        const list = Array.isArray(positions) ? positions : (positions.positions || [])
-        for(const p of list){
-          out.push({
-            src: 'mt',
-            accountId: acc.id,
-            accountName: acc.name,
-            symbol: p.symbol || '?',
-            side: /buy/i.test(String(p.type)) ? 'Buy' : 'Sell',
-            size: p.volume || p.size || 0,
-            openPrice: p.openPrice || p.price || null,
-            pnl: p.profit != null ? p.profit : (p.unrealizedProfit != null ? p.unrealizedProfit : null),
-            ccy: 'USD'
-          })
-        }
-      } catch(_){}   // Timeout/Netz: still, die Ansicht zeigt dann eben keine MT-Zeilen
-      finally { clearTimeout(tm) }
-    }
-    return out
-  }
+  // ── MetaApi-Positionen: ENTFERNT (08.10.2026, Prüfer: GET /ma/positions ~90 Anfragen je 5 min, ein Drittel 500/504 nach 5–15 s —
+  // belegt den einen Railway-Worker). Die MetaApi-Verknüpfungen sind Altbestand der Mirror-Zeit (5 aktive Fusion-Live-Konten, letzte
+  // Prüfung Juli–22.09.); Fusion läuft über Echo/mt5_live, Duplikum über dup_live. Die alte Live-Trades-Ansicht zeigt keine MT-Zeilen mehr.
+  // Backend /ma/positions antwortet seit .1367 sofort mit [] (für alte Tabs).
 
   // ── Duplikium: alle offenen Positionen aus dem dup_live-Spiegel ──
   // Fix 07.09.2026: diese View pollte alle 5s position/getOpenPositions DIREKT
@@ -30160,7 +30127,7 @@
       const ltSicht = !!document.querySelector('.view[data-view="livetrades"].active')
       const [tsx, mt, dup] = await Promise.all([
         ltFetchTsxPositions(),
-        ltSicht ? ltFetchMtPositions() : Promise.resolve(ltState.positions.mt || []),   // MetaApi nur bei sichtbarer Ansicht (08.10.2026)
+        Promise.resolve([]),   // MetaApi-Positionen entfernt (08.10.2026) — Feld bleibt leer
         ltSicht ? ltFetchDupPositions() : Promise.resolve(ltState.positions.dup || [])
       ])
       ltState.positions = { tsx, mt, dup }
@@ -30374,7 +30341,6 @@
       const t = ltState.lastUpdate ? ltState.lastUpdate.toLocaleTimeString('de-DE') : '—'
       const conns = []
       if(tsState.token) conns.push(`TopstepX (${ltState.positions.tsx.length})`)
-      if((accounts || []).some(a => a.ma)) conns.push(`MT5 (${ltState.positions.mt.length})`)
       if(dupState.token) conns.push(`Duplikium (${ltState.positions.dup.length})`)
       stat.innerHTML = conns.length
         ? `<span class="ts-dot" style="background:#22c55e"></span> ${conns.join(' · ')} · letzter Refresh ${t}`
@@ -41964,7 +41930,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1366'
+  const OS_TAB_BUILD = '2026-09-22.1367'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

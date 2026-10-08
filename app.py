@@ -449,6 +449,11 @@ def tsx_proxy(path):
 @app.route("/ma/<path:path>", methods=["GET","POST","OPTIONS"])
 def ma_proxy(path):
     if request.method == "OPTIONS": return "", 200
+    if path == "positions" and request.method == "GET":
+        # 08.10.2026 (Prüfer: ~90 GET /ma/positions je 5 min, ein Drittel 500/504 nach 5–15 s — der Proxy wartet bis 15 s auf
+        # MetaApi und belegt den einen Worker). Abruf kam nur noch aus der alten Live-Trades-Ansicht (Frontend seit .1367 entfernt),
+        # alte Tabs/lokale Stände fragen weiter → sofort leer antworten, ohne MetaApi. /ma/account + history-deals (Handknöpfe) bleiben.
+        return jsonify([])
     token      = request.headers.get("ma-token", "")
     account_id = request.headers.get("ma-account", "")
     h = {"Content-Type": "application/json", "auth-token": token}
