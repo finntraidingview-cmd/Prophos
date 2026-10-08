@@ -16420,6 +16420,77 @@ def ap_verfallen_grenze(jetzt, mitternacht, tz, start_bis_min):
     return mitternacht if jetzt >= heute0 + timedelta(minutes=float(start_bis_min)) else min(mitternacht, heute0)
 
 
+AP_NIE_GEFUELLT_GRUND = "nie_gefuellt_tagesende"
+
+
+def ap_versuche_alt_pl(baseline):
+    """REIN RECHNEND (08.10.2026, Master): Σ mt5_baseline.versuche_alt[].hedge.pl eines Orbit-V3-Plans, dessen Master nie gefüllt wurde
+    (prophos_orbit_nie_da_zurueck hängt jeden Leer-Versuch mit seinem Fusion-Hedge an). → Summe (2 Stellen) oder None, wenn es keinen
+    Versuch mit Hedge gibt ODER ein Hedge-P&L noch fehlt (dann nicht abschließen — der Spread ginge sonst verloren; Frontend hedgePlGesamt
+    zählt dieselben Werte)."""
+    va = (baseline or {}).get("versuche_alt") if isinstance(baseline, dict) else None
+    if not isinstance(va, list):
+        return None
+    summe, n = 0.0, 0
+    for v in va:
+        h = v.get("hedge") if isinstance(v, dict) else None
+        if not isinstance(h, dict):
+            continue
+        try:
+            pl = float(h.get("pl"))
+        except (TypeError, ValueError):
+            return None
+        if pl != pl or pl in (float("inf"), float("-inf")):
+            return None
+        summe, n = summe + pl, n + 1
+    return round(summe, 2) if n else None
+
+
+def _ap_leichen_abschliessen(plan_ids, jetzt):
+    """NACHTLAUF (08.10.2026, Master: „verfallene Orbit-V3-Leichen MIT versuche_alt[].hedge.pl abschließen"): eine verfallene Leiche, die
+    Fusion-Spread aus Leer-Versuchen trägt (Orbit V2/V3, ohne aktuellen Hedge), geht nach „Überprüfen" — master_pl 0 (Master nie gefüllt),
+    slave_pl = Σ versuche_alt[].hedge.pl, final {grund nie_gefuellt_tagesende, today_pnl 0, at = alte Startzeit}. today_pnl macht das Ende
+    „gelesen" (keine Puls-Endlesung), final.at am toten Tag hält den Userscript-Nachtrag (30 min) fern. Erst Status (Guard: noch planned,
+    nichts gesendet), dann final — scheitert final, steht der Plan ohne Grund in Überprüfen und blockiert (sichere Seite). Leichen ohne
+    versuche_alt bleiben unverändert. → [plan_id, …] der abgeschlossenen."""
+    if not plan_ids:
+        return []
+    rows = sb_select("trade_plans", {"select": "id,route,status,start_um,started_at,orbit_gesendet_at,result_notes,mt5_baseline",
+                                     "id": "in.(" + ",".join(str(x) for x in plan_ids) + ")"}) or []
+    zu = []
+    for r in rows:
+        b = r.get("mt5_baseline") if isinstance(r.get("mt5_baseline"), dict) else {}
+        if r.get("route") != "tvv2" or r.get("status") != "planned" or r.get("started_at") or r.get("orbit_gesendet_at") or b.get("hedge"):
+            continue
+        slave = ap_versuche_alt_pl(b)
+        if slave is None:
+            continue
+        pid = str(r["id"])
+        try:
+            n_v = len(b.get("versuche_alt") or [])
+            notiz = (f"Master nie gefüllt — Tag vorbei, nicht mehr gestartet (Nachtlauf). Kein Trade; Fusion-Spread aus {n_v} Leer-Versuch"
+                     f"{'' if n_v == 1 else 'en'}: {slave:+.2f} €.")
+            alt_n = str(r.get("result_notes") or "").strip()
+            ok = sb_update("trade_plans", {"id": f"eq.{pid}", "status": "eq.planned", "started_at": "is.null", "orbit_gesendet_at": "is.null"},
+                           {"status": "review", "ended_at": r.get("start_um") or jetzt.isoformat(), "master_pl": 0, "slave_pl": slave,   # Ende am toten Tag (Prüfer Slave 2: sonst „Heute beendet" am Folgetag)
+                            "result_notes": (alt_n + "\n" + notiz) if alt_n else notiz})
+            if not ok:
+                continue
+            fin = {"grund": AP_NIE_GEFUELLT_GRUND, "art": "nie_da", "quelle": "nie_gefuellt", "today_pnl": 0, "master_pl": 0,
+                   "slave_pl": slave, "at": r.get("start_um") or jetzt.isoformat(), "abgeschlossen_at": jetzt.isoformat(),
+                   "versuche": len(b.get("versuche_alt") or [])}
+            rr = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/rpc/mt5_baseline_patch", headers=_sb_headers(), timeout=(5, 15),
+                             json={"p_plan": pid, "p_patch": {"final": fin}, "p_status": "review"})
+            _sb_pruefen(rr)
+            zu.append(pid)
+        except Exception as e:
+            print(f"[auto-plan] ⚠️ Leiche {pid} abschließen: {type(e).__name__}: {e}", flush=True)
+    if zu:
+        print(f"[auto-plan] {len(zu)} verfallene Orbit-Leiche(n) mit Fusion-Spread nach „Überprüfen\" (nie gefüllt): {', '.join(x[:8] for x in zu)}",
+              flush=True)
+    return zu
+
+
 def ap_richtung_fest_plan(p, tag, tz):
     """REIN RECHNEND (07.10.2026, Richtungsschutz nur gleichzeitig): legt Plan p die Richtung seiner ID+Firma für den Tag `tag`
     (deutsches Datum) fest? Ja, wenn er läuft (open) oder am selben Tag geplant ist (planned_for bzw. Start in dt) — ohne
@@ -16518,6 +16589,10 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     verfallen = [{"plan_id": p.get("id"), "user_id": p.get("user_id"), "konto_id": p.get("master_account_id"), "firma": p.get("master_firm"),
                   "start_um": p.get("start_um")} for p in roh_plaene if _liegengeblieben(p)]
     plaene = [p for p in roh_plaene if not _vorschlag(p) and not _liegengeblieben(p)]
+    # Nachtlauf: Leichen mit Fusion-Spread aus Leer-Versuchen nach „Überprüfen" (_ap_leichen_abschliessen) — Probelauf/Hand/Nachplanen nicht
+    leichen_zu = _ap_leichen_abschliessen([v["plan_id"] for v in verfallen], jetzt) if (not trocken and quelle == "nacht") else []
+    for v in verfallen:
+        v["abgeschlossen"] = str(v.get("plan_id")) in leichen_zu
     archiv = _ap_archiviert()
     echo_bal, dup_bal = _ap_balance_karten()
     namen, ausgeblendet = _ap_namen()   # direkt aus der Nutzerliste — _wd_personen braucht einen Request (Nachtlauf hat keinen)
@@ -16554,7 +16629,9 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
         if any(p.get("status") in ("planned", "open") for p in eig):
             ausgelassen.append(dict(zeile, grund="hat schon einen geplanten/laufenden Plan"))
             continue
-        if any(p.get("status") == "review" for p in eig):
+        # „Überprüfen" aus „Master nie gefüllt" am Tagesende (_ap_leichen_abschliessen) blockiert nicht — es gab keinen Trade, nur den
+        # Fusion-Spread zum Bestätigen (Master 08.10.2026)
+        if any(p.get("status") == "review" and (p.get("final") if isinstance(p.get("final"), dict) else {}).get("grund") != AP_NIE_GEFUELLT_GRUND for p in eig):
             ausgelassen.append(dict(zeile, grund="letzter Trade noch nicht erledigt (Überprüfen)"))
             continue
         if any(p.get("status") == "completed" and _ap_plan_am_tag(p, tag, tz) for p in eig):

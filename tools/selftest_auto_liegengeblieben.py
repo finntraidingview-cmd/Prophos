@@ -100,8 +100,61 @@ def main():
           and not V(dict(basis, start_um="2026-10-09T08:00:00+00:00"), g) and not V(dict(basis, start_um=None), g),
           "ap_plan_verfallen: nur Auto + planned + nie gesendet + Start vor der Grenze")
 
+    # ── Orbit-Leichen mit Fusion-Spread (versuche_alt) im Nachtlauf nach „Überprüfen" (Master 08.10.2026) ──
+    S = a["ap_versuche_alt_pl"]
+    va = lambda *pls: {"versuche_alt": [{"zurueck_at": "x", "hedge": ({"status": "geschlossen", "pl": x} if x != "ohne" else None)} for x in pls]}   # noqa: E731
+    check(S({}) is None and S({"versuche_alt": []}) is None and S(va("ohne")) is None, "Σ versuche_alt: ohne Versuch mit Hedge → None")
+    check(S(va(-12.4, -3.15)) == -15.55 and S(va(-12.4, "ohne")) == -12.4, f"Σ versuche_alt: Summe der Hedge-P&L ({S(va(-12.4, -3.15))})")
+    check(S(va(-12.4, None)) is None and S(va("abc")) is None, "Σ versuche_alt: ein Hedge-P&L fehlt → None (nicht abschließen)")
+
+    rows = [
+        {"id": "o-1", "route": "tvv2", "status": "planned", "start_um": "2026-10-07T14:00:00.2+00:00", "started_at": None, "orbit_gesendet_at": None,
+         "result_notes": None, "mt5_baseline": dict(va(-12.4, -3.15), start_fehler={"status": "tagesende"})},
+        {"id": "o-2", "route": "tvv2", "status": "planned", "start_um": "2026-10-07T14:00:00+00:00", "started_at": None, "orbit_gesendet_at": None,
+         "result_notes": "alt", "mt5_baseline": {"start_fehler": {"status": "tagesende"}}},                                  # ohne versuche_alt
+        {"id": "e-1", "route": "mt5v2", "status": "planned", "start_um": "2026-10-07T14:00:00+00:00", "started_at": None, "orbit_gesendet_at": None,
+         "result_notes": None, "mt5_baseline": va(-5.0)},                                                                    # Echo
+        {"id": "o-3", "route": "tvv2", "status": "planned", "start_um": "2026-10-07T14:00:00+00:00", "started_at": None, "orbit_gesendet_at": None,
+         "result_notes": None, "mt5_baseline": dict(va(-5.0), hedge={"status": "offen"})},                                   # aktueller Hedge
+        {"id": "o-4", "route": "tvv2", "status": "planned", "start_um": "2026-10-07T14:00:00+00:00", "started_at": None, "orbit_gesendet_at": None,
+         "result_notes": "Notiz", "mt5_baseline": va(-7.0)},                                                                 # Guard greift (schon weg)
+    ]
+    upd, rpc = [], []
+
+    class R:
+        status_code = 200
+    a["sb_select"] = lambda table, params: [dict(r) for r in rows]
+    a["sb_update"] = lambda table, params, body: (upd.append((params, body)), [] if params["id"] == "eq.o-4" else [{"id": params["id"][3:]}])[1]
+    a["_sb_anfrage"] = lambda meth, url, **k: (rpc.append(k.get("json")), R())[1]
+    a["_sb_pruefen"] = lambda r: None
+    a.update({"_sb_headers": lambda *x: {}, "SUPABASE_URL": "http://test", "print": lambda *x, **k: None})
+    jetzt_n = datetime(2026, 10, 8, 21, 30, tzinfo=timezone.utc)
+    zu = a["_ap_leichen_abschliessen"](["o-1", "o-2", "e-1", "o-3", "o-4"], jetzt_n)
+    check(zu == ["o-1"], f"nur die Orbit-Leiche mit Fusion-Spread ohne aktuellen Hedge wird abgeschlossen ({zu})")
+    p1, b1 = next((p, b) for p, b in upd if p["id"] == "eq.o-1")
+    check(p1 == {"id": "eq.o-1", "status": "eq.planned", "started_at": "is.null", "orbit_gesendet_at": "is.null"},
+          "Guard: noch planned, nichts gesendet")
+    check(b1.get("ended_at") == "2026-10-07T14:00:00.2+00:00", f"ended_at = alte Startzeit (toter Tag, nicht „Heute beendet“ am Folgetag) ({b1.get('ended_at')})")
+    check(b1["status"] == "review" and b1["master_pl"] == 0 and b1["slave_pl"] == -15.55 and "Fusion-Spread aus 2 Leer-Versuchen: -15.55" in b1["result_notes"],
+          f"review, master_pl 0, slave_pl = Σ versuche_alt, Klartext-Notiz ({b1})")
+    f1 = (rpc[0] or {}).get("p_patch", {}).get("final", {})
+    check(len(rpc) == 1 and rpc[0]["p_status"] == "review" and f1.get("grund") == a["AP_NIE_GEFUELLT_GRUND"] and f1.get("today_pnl") == 0
+          and f1.get("at") == "2026-10-07T14:00:00.2+00:00" and f1.get("slave_pl") == -15.55,
+          f"final {{grund nie_gefuellt_tagesende, today_pnl 0, at = alte Startzeit}} erst NACH dem Status, Guard review ({f1})")
+    check(not any(p["id"] in ("eq.o-2", "eq.e-1", "eq.o-3") for p, b in upd), "ohne versuche_alt / Echo / mit aktuellem Hedge: unverändert")
+    check(len(rpc) == 1 and not any((x or {}).get("p_plan") == "o-4" for x in rpc), "Guard verfehlt (o-4) → kein final")
+
+    # review aus „nie gefüllt" blockiert das Konto nicht, anderes Überprüfen schon
+    rv = dict(plan("p-rev", "k-2", gestern), status="review", final={"grund": a["AP_NIE_GEFUELLT_GRUND"]})
+    erg, aus, gepl = lauf([rv])
+    check("k-2" in gepl and "noch nicht erledigt" not in str(aus.get("k-2")), f"Überprüfen „nie gefüllt“ blockiert k-2 nicht ({aus.get('k-2')})")
+    erg, aus, gepl = lauf([dict(rv, final={"grund": "master_nie_da"})])
+    check("noch nicht erledigt" in str(aus.get("k-2")), f"anderes Überprüfen blockiert weiter ({aus.get('k-2')})")
+
     src = open(sd.APP, encoding="utf-8").read()
     check("started_at,orbit_gesendet_at,mt5_baseline->final" in src, "ap_planen liest started_at/orbit_gesendet_at mit")
+    check('_ap_leichen_abschliessen([v["plan_id"] for v in verfallen], jetzt) if (not trocken and quelle == "nacht") else []' in src,
+          "abgeschlossen wird nur im echten Nachtlauf (nicht Probelauf/Hand/Nachplanen)")
     ns = src[src.index("\ndef _ap_neu_starten("):src.index("\n\n\n", src.index("\ndef _ap_neu_starten("))]
     check(ns.index("ap_plan_verfallen(alt_p") < ns.index('rows = sb_update("trade_plans"') and '"verfallen": True' in ns and "409" in ns,
           "_ap_neu_starten lehnt verfallene Auto-Pläne VOR dem Schreiben ab (409, verfallen)")
