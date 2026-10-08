@@ -115,11 +115,12 @@ def main():
     c = gepl.get("k-91") or {}
     check(c.get("balance") == 100000 and c.get("bal_quelle") == a["AP_STARTWERT_QUELLE"],
           f"CFD FN 100k Phase 1 frisch → 100.000 ({c.get('balance')}; {aus.get('k-91')})")
-    check("k-92" not in gepl and aus.get("k-92") == "keine Balance bekannt",
+    check("k-92" not in gepl and str(aus.get("k-92")).startswith("keine Balance bekannt — Konto wurde schon gehandelt"),
           f"Konto mit früherem Trade (vor > 30 Tagen) ohne Lesung → weiter „keine Balance bekannt\" ({aus.get('k-92')})")
     r = gepl.get("k-93") or {}
     check(r.get("balance") == 151234 and r.get("bal_quelle") == "TV", f"echte Lesung schlägt den Startwert ({r.get('balance')}, {r.get('bal_quelle')})")
-    check(aus.get("k-94") == "keine Balance bekannt", f"ohne erkennbare Größe → „keine Balance bekannt\" ({aus.get('k-94')})")
+    check(str(aus.get("k-94")).startswith("keine Balance bekannt — Kontogröße nicht erkennbar"),
+          f"ohne erkennbare Größe → „keine Balance bekannt — Kontogröße nicht erkennbar …\" ({aus.get('k-94')})")
     ids = " ".join(str(p.get("master_account_id") or p.get("slave_account_id")) for p in abfragen)
     check(all(k in ids for k in ("k-90", "k-91", "k-92", "k-94")) and "k-93" not in ids and "k-2," not in ids and "k-1," not in ids,
           f"Verlauf nur für Konten ohne Lesung abgefragt, Master + Slave ({len(abfragen)} Abfragen)")
@@ -127,13 +128,13 @@ def main():
           "alle anderen Konten unverändert mit ihrer gelesenen Balance")
 
     erg, gepl, aus, _ = lauf(verlauf_kaputt=True)
-    check(aus.get("k-90") == "keine Balance bekannt" and aus.get("k-91") == "keine Balance bekannt" and erg.get("ok"),
+    check(all(str(aus.get(k)).startswith("keine Balance bekannt — Trade-Verlauf gerade nicht lesbar") for k in ("k-90", "k-91")) and erg.get("ok"),
           f"Verlauf nicht lesbar → kein Startwert, Lauf läuft weiter ({aus.get('k-90')})")
 
     # 4 Quelltext: Startwert nur ohne letzten Trade, nicht als „gelesen" geschrieben
     src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "app.py"), encoding="utf-8").read()
     seg = src[src.index("\ndef ap_planen("):src.index("\n\n\n", src.index("\ndef ap_planen("))]
-    check("        if not bal and not letzt:\n" in seg and "sw = ap_startwert_frisch(a, None if _gehandelt is None else aid in _gehandelt, gelesen=" in seg,
+    check("        if not bal and not letzt:\n" in seg and "_ht, _gel = (None if _gehandelt is None else aid in _gehandelt), " in seg and "sw = ap_startwert_frisch(a, _ht, gelesen=_gel)" in seg,
           "Planer: Startwert nur ohne Lesung und ohne Trade im 30-Tage-Fenster")
     check("tv_balance_at" not in src[src.index("\ndef ap_startwert_frisch("):src.index("\nAP_KONTO_FELDER = (")].split('"""')[2],
           "Startwert schreibt nichts (kein tv_balance_at)")

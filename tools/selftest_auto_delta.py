@@ -52,7 +52,8 @@ IO = ("_ap_gehedgt_plan", "_ap_bewerten", "_ap_iso_min", "_ap_stand_laden", "_ap
       "_ap_umplanungen_heute", "_ap_bot_stand", "_ap_bot_hat_arbeit", "_ap_bot_tick", "ap_kette_tick", "ap_kette_abhaken", "_wd_erledigt_upd", "_cme_handelstag", "_ap_kette_grund", "_ap_kette_takt", "ap_delta_antwort", "_ap_aenderungen_anwenden", "pc_stand_zusammenfassen", "_ap_pc_lebt", "_ap_verpufft", "_ap_zug_nach_vorn", "ap_zuege_je_id", "_ap_dubai_versatz", "ap_ausgleichen",
       "_ap_probelauf", "ap_planen", "_ap_tz", "_ap_eur_bei", "_ap_konten_laden", "ap_einsatz_kontext", "ap_richtung_fest_plan", "ap_letzter_trade_geblasen", "_ap_rk_flag",
       "ap_richtungsschutz", "ap_startwert_frisch", "liq_konto_groesse", "_wd_konto_groesse", "_ap_konten_mit_trade",
-      "ap_richtung_bloecke", "ap_fest_am_start", "ap_id_firma_einseitig", "_ap_fest_ref", "_ap_ts", "_ap_gegen_eigen", "ap_claim_laeuft")
+      "ap_richtung_bloecke", "ap_fest_am_start", "ap_id_firma_einseitig", "_ap_fest_ref", "_ap_ts", "_ap_gegen_eigen", "ap_claim_laeuft",
+      "ap_kontowert_grund", "ap_grund_ohne_balance", "ap_startwert_kandidat")   # 09.10.2026: genauer Kontowert-/Balance-Grund
 
 
 def lade():
@@ -70,8 +71,10 @@ def lade():
                   "AP_AUSGLEICH_STANDARD", "AP_TZ_TAG", "AP_BOT_ARBEIT_VORLAUF_MIN", "AP_BOT_EXTRA_MIN", "AP_FAELLIG_MIN", "AP_BOT_SCHRITTE",
                   "AP_RICHTUNG_TXT", "AP_GEGEN_DICHT_MIN", "AP_GEGEN_WUERFE", "AP_EUR_STUFE", "AP_START_BIS_STANDARD", "AP_CFD_AB_STANDARD", "AP_CFD_ROUTEN", "AP_TRANCHE_LUECKE_MIN", "AP_ABSTAND_ID_FIRMA_MIN", "AP_ABSTAND_ID_MIN", "AP_ABSTAND_STUFEN", "AP_GROSS_NAH_MIN", "AP_FIRMA_ABSTAND_MIN", "AP_VERTEIL_VORLAUF_MIN", "AP_VERTEIL_JITTER_MIN", "AP_VERTEIL_GEGEN_MIN", "AP_VERTEIL_VERSATZ", "AP_VERTEIL_MIN_SCHRITT_MIN", "AP_SZENARIO_R", "AP_SZENARIO_SCHRITT", "AP_SZENARIO_WEIT", "AP_SZENARIO_AB_EUR", "AP_SZENARIO_MIN_GEWINN_EUR", "AP_SUCHE_ZUEGE", "AP_SUCHE_BREITE", "AP_BOT_ZUEGE_JE_ID_TAG", "AP_GEGEN_FIRMA_MIN", "AP_VERTEILUNG_BAND_TOLERANZ_EUR", "AP_VORZIEHEN_AB_MIN", "AP_VORZIEHEN_JITTER_MIN", "AP_VORZIEHEN_HYSTERESE_EUR", "AP_VORZIEHEN_RUECKFALL_MIN", "AP_MISCH_BESTAETIGT_AB_MIN", "PC_STAND_LEBT_S", "_ap_bot", "_ap_info", "WD_HEUTE_PPL", "LT_ECHO_ROUTEN", "LT_ECHO_MAX_ALTER_S",
                   "AP_RS_HORIZONT_MIN", "AP_RS_NACHLAUF_MIN", "AP_RS_ROUTEN", "AP_EINGRIFF_MAX", "AP_SICHT_ADMIN", "AP_ID_FEST_HORIZONT_MIN", "AP_RUHE_JE_PLAN_MIN", "AP_HYSTERESE_EUR", "AP_ID_MISCH_AB", "AP_ID_MISCH_MAX", "AP_FIRMA_MISCH_AB", "AP_FIRMA_MISCH_MIN", "AP_KLASSE_TXT", "AP_KIPP_JE_KLASSE", "WD_FUTURES_FIRMEN", "WD_BALANCE_FUTURES",
-                  "AP_GRUND_EXT", "AP_STARTWERT_QUELLE", "AP_LESE_FELDER", "AP_RICHTUNG_WECHSEL_MIN", "AP_RICHTUNG_LAUF_FEST_MIN", "AP_CLAIM_FRISCH_MIN", "AP_GRUND_HEUTE_GEHANDELT", "WD_KONTO_ABSTAND_S", "AP_GRUND_BAL_LIVE", "AP_NIE_GEFUELLT_GRUND", "AP_FEST_HAND", "AP_FEST_FOLGETAG", "AP_FEST_KETTE", "AP_FEST_TSV2", "AP_KETTE_STANDARD", "AP_KETTE_TXT", "AP_KETTE_DD_STANDARD", "AP_KETTE_MLL_TOLERANZ", "WD_ERLEDIGT_ROUTEN", "WD_FUSION_AM_PLAN", "AP_NACHHOL_VORLAUF_MIN", "AP_START_HAND_VORLAUF_MIN", "AP_KETTE_TAKT_S", "_ap_kette", "AP_NOTES_MAX", "LIQ_VERLAUF_CACHE_S", "_liq_verlauf_cache")
-    exec("\n".join([konst(k) for k in konstanten] + [block(f) for f in REIN + IO]), ns)
+                  "AP_GRUND_EXT", "AP_STARTWERT_QUELLE", "AP_LESE_FELDER", "AP_RICHTUNG_WECHSEL_MIN", "AP_RICHTUNG_LAUF_FEST_MIN", "AP_CLAIM_FRISCH_MIN", "AP_GRUND_HEUTE_GEHANDELT", "WD_KONTO_ABSTAND_S", "AP_GRUND_BAL_LIVE", "AP_NIE_GEFUELLT_GRUND", "AP_FEST_HAND", "AP_FEST_FOLGETAG", "AP_FEST_KETTE", "AP_FEST_TSV2", "AP_KETTE_STANDARD", "AP_KETTE_TXT", "AP_KETTE_DD_STANDARD", "AP_KETTE_MLL_TOLERANZ", "WD_ERLEDIGT_ROUTEN", "WD_FUSION_AM_PLAN", "AP_NACHHOL_VORLAUF_MIN", "AP_START_HAND_VORLAUF_MIN", "AP_KETTE_TAKT_S", "_ap_kette", "AP_NOTES_MAX", "LIQ_VERLAUF_CACHE_S", "_liq_verlauf_cache",
+                  "AP_KW_TYP_FIX", "AP_GRUND_OHNE_BAL")
+    typ_name = re.search(r"^AP_KW_TYP_NAME = \{.*?\}$", src, re.M | re.S).group(0)
+    exec("\n".join([konst(k) for k in konstanten] + [typ_name] + [block(f) for f in REIN + IO]), ns)
     return ns
 
 

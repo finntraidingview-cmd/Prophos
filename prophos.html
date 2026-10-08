@@ -28788,7 +28788,8 @@
           // PLANER BRAUCHT DICH (Master 09.10.2026): Grund des Nachtlaufs im Klartext; „keine Balance" → vorhandener Lese-Weg (eigen accBalanceLesen,
           // fremd Signal an den PC der ID wie „Braucht dich", nur mit Admin-Recht); „nur noch X $ bis zum Ziel" → Hinweis, kein Knopf
           const rest = /bis zum Ziel/i.test(z.grund || '')
-          const was = `${escapeHtml(String(z.grund || ''))}${rest ? ' · kleiner Rest-Trade oder Phase prüfen' : ''}`
+          // „So fixt du's" vom Planer (z.fix, 09.10.2026 — Finn: genauer Grund + wie genau fixen) als zweite, kleine Zeile
+          const was = `${escapeHtml(String(z.grund || ''))}${rest ? ' · kleiner Rest-Trade oder Phase prüfen' : ''}${z.fix ? `<br><span style="color:var(--sub)">So fixt du's: ${escapeHtml(String(z.fix))}</span>` : ''}`
           const eigenDa = eigen && (accounts || []).some(a => String(a.id) === String(z.konto_id))
           const knopf = z.knopf !== 'balance' ? '' : eigenDa
             ? `<button type="button" class="btn btn-ghost" data-hand-bal="${escapeHtml(z.konto_id || '')}" title="Balance dieses Kontos lesen (wie unter Accounts)">↻ Balance lesen</button>`
@@ -42447,7 +42448,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1403'
+  const OS_TAB_BUILD = '2026-09-22.1404'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -47719,6 +47720,7 @@
         sl: (p && tplNum(p.masterSl) > 0 ? Number(p.masterSl) : null) ?? (tplNum(x.sl_punkte) != null && tplNum(x.usd_pro_pkt) > 0 ? Math.round(x.sl_punkte * x.usd_pro_pkt) : null) ?? tplNum(g && g.sl),
         tp_punkte: tplNum(x.tp_punkte) ?? tplNum(g && g.tp_punkte), sl_punkte: tplNum(x.sl_punkte) ?? tplNum(g && g.sl_punkte),
         stufe: (g && g.stufe) || stufeAus(p), wert: tplNum(x.wert_eur), gehedgt: !!x.gehedgt, einsatz: ein != null ? Math.abs(ein) : null, hinweis: x.hinweis || (g && g.hinweis) || null,
+        hinweis_code: x.hinweis_code || null, hinweis_fix: x.hinweis_fix || null, ext_fehlt: !!x.ext_fehlt,   // genauer Kontowert-Grund + Fix (app.py ap_kontowert_grund, 09.10.2026)
         typ: x.typ || (g && g.typ) || (p && p.kontoTyp) || (p && ((accounts || []).find(a => String(a.id) === String(p.masterAccountId)) || {}).type) || null,
         route: x.route || (g && g.route) || (p ? p.route : null), usd: tplNum(x.usd_pro_pkt) ?? tplNum(g && g.usd_pro_pkt),
         satz: tplNum(x.satz_eur_je_usd),   // Kontowert-Satz € je $ (Delta offen[]) — Hypo-P&L (07.10.2026)
@@ -48521,6 +48523,11 @@
    * die werden oft zu Funded umgestellt.") — Braucht dich zeigt nur echte Probleme. Die Info bleibt: Accounts/Radar zeigen „bestanden"
    * (Ziel-Wache, 🎯-Chip). Gilt für Planer-Grund, Start-Fehler ziel_erreicht und eigene Konten mit zielErreichtAt. */
   const TPL_ZIEL_RE = /Ziel erreicht|bestanden/i
+  // External ID fehlt — Text + Fix je Kontoart (Futures: Unterkonto für den Bot; CFD: MT5-Login, Master 09.10.2026)
+  function tplExtText(fut){
+    return fut ? { text: 'ohne External ID — der Bot kann das Unterkonto nicht wählen', tun: 'External ID (Tradovate-/TopstepX-Unterkonto) unter Accounts eintragen — der Bot plant das Konto dann von selbst nach (alle 10 min).' }
+      : { text: 'ohne External ID — MT5-Login fehlt, Prophos kann Balance und Kontowert nicht lesen', tun: 'MT5-Login fehlt → Accounts → Konto → External ID eintragen bzw. in Echo „＋ Account hinzufügen".' }
+  }
   function tplBraucht(D, ids){   // ids = Set der sichtbaren IDs, null = alle
     const je = new Map(), jetzt = Date.now(), ich = (_ap.ich && _ap.ich.name) || ''
     // Konten in „Manuelle Arbeit" (Radar) → keine Zeile, egal welcher Fall (08.10.2026, s. tplManuellKonten) — geprüft je Quelle unten
@@ -48536,10 +48543,11 @@
         if(a.zielErreichtAt){ zielIds.add(String(a.id)); continue }   // Ziel erreicht → nie hier (Finn 08.10.2026, s. TPL_ZIEL_RE) — über die Konto-ID, nie den Namen
         // EXTERNAL ID FEHLT bei eigenen Futures-Konten (08.10.2026, Fehler-Muster 49 Orbit-Fehlstarts): vorab als Zeile mit Knopf, noch bevor
         // der Planer läuft — der Planer lässt das Konto ohnehin aus (app.py ap_ext_fehlt); die Balance-Zeile entfällt dafür
-        if(typeof tpFirmIstFutures === 'function' && tpFirmIstFutures(a.firm) && !String(a.externalId || '').trim()){
+        // CFD ebenso (Master 09.10.2026, Inas FundedNext-Nachfolger ohne Login): Echo startet ohne, aber Balance/Kontowert sind nicht lesbar
+        if(!String(a.externalId || '').trim()){
+          const fut = typeof tpFirmIstFutures === 'function' && tpFirmIstFutures(a.firm)
           konten.add(tplKk(currentUserId, a.name))
-          add(currentUserId, ich, { art: 'ausgelassen', firma: a.firm, konto: a.name, typ: a.type, balance: '', ende4: '', ext: String(a.id),
-            text: 'ohne External ID — der Bot kann das Unterkonto nicht wählen', tun: 'External ID (Tradovate-/TopstepX-Unterkonto) unter Accounts eintragen — der Bot plant das Konto dann von selbst nach (alle 10 min).' })
+          add(currentUserId, ich, { art: 'ausgelassen', firma: a.firm, konto: a.name, typ: a.type, balance: '', ende4: '', ext: String(a.id), ...tplExtText(fut) })
           continue
         }
         // BALANCE NACH ECHO-TRADE FEHLT (08.10.2026, s. ebnTick): Nachlesung nach dem Trade-Ende scheiterte 15 min lang → Grund + „was tun"
@@ -48605,11 +48613,13 @@
         continue }
       if(konten.has(k)){
         // schon als Balance-Zeile drin (eigenes Konto ohne Live-Balance): ein konkreter Planer-Grund (Haken aus, geblowt?) ist die bessere Zeile → ersetzen (08.10.2026)
-        if(!/ausgenommen/i.test(g) && !istBlow) continue
+        if(!/ausgenommen/i.test(g) && !istBlow && !x.grund_code) continue   // genauer Planer-Grund (09.10.2026) schlägt „keine Live-Balance"
         const o = je.get(String(x.user_id)); if(o) o.zeilen = o.zeilen.filter(z => !(z.art === 'balance' && z.konto === x.konto))
       }
       konten.add(k)
-      const bal = /keine Balance|nicht live|nie gelesen/.test(g), fremd = String(x.user_id) !== String(currentUserId)
+      // grund_code/fix vom Planer (09.10.2026, ap_grund_ohne_balance): ohne External ID hilft „↻ Balance lesen" nicht → Konto-Formular
+      const extG = x.grund_code === 'ext_fehlt'
+      const bal = !extG && /keine Balance|nicht live|nie gelesen/.test(g), fremd = String(x.user_id) !== String(currentUserId)
       // GEBLOWT? KLÄREN (08.10.2026, Finn: „wenn er bei geblowt nochmal die Balance liest und sieht, dass der Account wirklich geblowt
       // wurde, dann eben wegmachen"): ↻ Balance lesen (eigen accBalanceLesen, fremd Signal an den PC der ID wie bei „nicht live"); danach
       // Urteil gegen den Boden (tplBlowBoden): darüber = Konto lebt → Zeile weg (der nächste Lauf plant es wieder); auf/unter = „geblowt" +
@@ -48644,13 +48654,23 @@
       const balf = bal && fremd && x.konto_id ? String(x.konto_id) : ''
       // Haken aus (08.10.2026): eigenes Konto → Knopf „Planer-Haken setzen" direkt hier; der Nachplan-Takt nimmt es dann beim nächsten Lauf
       const hakenAus = /ausgenommen/i.test(g), accH = hakenAus && !fremd ? (accounts || []).find(q => String(q.id) === String(x.konto_id || '')) : null
-      add(x.user_id, x.user, { art: bal ? 'balance' : 'ausgelassen', firma: x.firma, konto: x.konto, typ: x.typ, balance: '', ende4: tplEnde4(x), text: g, hinweis: bal && fremd && !balf ? 'am PC der ID lesen' : (hakenAus && fremd ? `Haken unter Accounts von ${x.user || 'der ID'}` : ''),
-        balf, uid: String(x.user_id || ''), lauf: balf ? (_tplBalFremd.get(balf) || null) : null, haken: accH ? String(accH.id) : '',
-        tun: bal ? (balf ? `↻ Balance lesen — läuft am PC von ${x.user || 'der ID'} (Prophos-Tab dort offen?).` : tplBalTun(null, null, fremd, x.user))
+      const extK = extG && !fremd && x.konto_id && (accounts || []).some(q => String(q.id) === String(x.konto_id)) ? String(x.konto_id) : ''
+      add(x.user_id, x.user, { art: bal ? 'balance' : 'ausgelassen', firma: x.firma, konto: x.konto, typ: x.typ, balance: '', ende4: tplEnde4(x), text: g, code: x.grund_code || '',
+        hinweis: bal && fremd && !balf ? 'am PC der ID lesen' : (hakenAus && fremd ? `Haken unter Accounts von ${x.user || 'der ID'}` : extG && fremd ? `am PC von ${x.user || 'der ID'} eintragen` : ''),
+        balf, uid: String(x.user_id || ''), lauf: balf ? (_tplBalFremd.get(balf) || null) : null, haken: accH ? String(accH.id) : '', ext: extK,
+        tun: x.fix ? String(x.fix) : bal ? (balf ? `↻ Balance lesen — läuft am PC von ${x.user || 'der ID'} (Prophos-Tab dort offen?).` : tplBalTun(null, null, fremd, x.user))
           : hakenAus ? 'Planer-Haken am Konto setzen — der Bot plant es beim nächsten Lauf (alle 10 min) mit.' : 'Beheben — der Bot plant das Konto dann von selbst nach (alle 10 min).' })
     }
     for(const t of D.trades){
       if(tplManRaus(man, t.user_id, t.konto_id, t.konto)) continue   // Konto in Manueller Arbeit (08.10.2026)
+      // EXTERNAL ID FEHLT an geplanten/laufenden Plänen (Delta ext_fehlt, alle IDs — Master 09.10.2026): eine Zeile je Konto, eigen mit Formular-Knopf
+      if(t.ext_fehlt && (t.status === 'offen' || t.status === 'bestaetigt' || t.status === 'laeuft')){
+        const k = tplKk(t.user_id, t.konto), kid = t.konto_id ? String(t.konto_id) : '', fremd = String(t.user_id) !== String(currentUserId)
+        if(!konten.has(k) && !(kid && zielIds.has(kid))){ konten.add(k)
+          const fut = typeof tpFirmIstFutures === 'function' && tpFirmIstFutures(t.firma)
+          add(t.user_id, t.user, { art: 'ausgelassen', firma: t.firma, konto: t.konto, typ: t.typ, balance: '', ende4: t.ende4, key: t.key,
+            ext: !fremd && kid && (accounts || []).some(a => String(a.id) === kid) ? kid : '', hinweis: fremd ? `am PC von ${t.user || 'der ID'} eintragen` : '', ...tplExtText(fut) }) }
+      }
       const p = t.eigen ? (tradePlans || []).find(x => String(x.id) === t.plan_id) : null, b = (p && p.mt5Baseline) || {}
       const probleme = []
       // BALANCE NICHT LIVE (08.10.2026): geplanter/unbestätigter Plan, dessen Konto-Balance älter ist als das Ende des letzten Trades —
@@ -48692,7 +48712,18 @@
       if(b.tv && b.tv.fehler) probleme.push(`Start-Fehler: ${b.tv.msg || b.tv.fehler}${b.tv.code ? ' (' + b.tv.code + ')' : ''}`)
       if(b.tv && b.tv.warnung) probleme.push(`Puls: ${b.tv.warnung}`)
       if(b.hedge && b.hedge.status === 'fehler') probleme.push(`Fusion-Hedge: ${b.hedge.msg || 'Fehler'}`)
-      if(t.hinweis && !TPL_ZIEL_RE.test(String(t.hinweis))) probleme.push(String(t.hinweis))
+      // GENAUER GRUND (Finn 09.10.2026 ~03:10 Dubai: „Bei solchen Fehlern will ich immer den genauen Grund haben, wie ich das genau fixen
+      // kann" — vorher „kein Kontowert (Firma ohne Kernwerte, Größe passt nicht oder keine Balance)"): Code + Fix vom Backend
+      // (ap_kontowert_grund); Knopf, wo es einen Weg gibt — keine Balance → ↻ Balance lesen (eigen/fremd), keine External ID → Konto-Formular
+      // (nur eigen), Plan ohne Konto → „→ Plan" (dort löschen)
+      if(t.hinweis && !TPL_ZIEL_RE.test(String(t.hinweis)) && t.hinweis_code){
+        const kid = t.konto_id ? String(t.konto_id) : '', fremd = !t.eigen && String(t.user_id) !== String(currentUserId), c = t.hinweis_code
+        const lesen = c === 'balance_fehlt' && !!kid, ext = c === 'ext_fehlt' && !fremd && kid && (accounts || []).some(a => String(a.id) === kid)
+        add(t.user_id, t.user, { art: 'plan', firma: t.firma, konto: t.konto, typ: t.typ, ende4: t.ende4, key: t.key, code: c,
+          text: String(t.hinweis), tun: String(t.hinweis_fix || ''), bal: lesen && !fremd ? kid : '', balf: lesen && fremd ? kid : '',
+          uid: String(t.user_id || ''), ext: ext ? kid : '', hinweis: c === 'ext_fehlt' && fremd ? `am PC von ${t.user || 'der ID'} eintragen` : '',
+          lauf: lesen ? ((fremd ? _tplBalFremd.get(kid) : (typeof _accBalLauf !== 'undefined' && _accBalLauf.get(kid))) || null) : null })
+      } else if(t.hinweis && !TPL_ZIEL_RE.test(String(t.hinweis))) probleme.push(String(t.hinweis))
       for(const txt of probleme) add(t.user_id, t.user, { art: 'plan', firma: t.firma, konto: t.konto, ende4: t.ende4, text: txt, key: t.key })
     }
     // Offene Vorschläge mit nicht-live Balance aus /admin/auto-plan/ids (Admin-Reiter, auch morgen; 08.10.2026) — dieselbe Zeile wie oben
@@ -48765,12 +48796,17 @@
    * Konto („150k …0641" + Firma + Typ, volle Nummer nur im Tooltip) · Wort-Label mit Farbe · eine Zeile Klartext klein grau, was zu tun ist ·
    * Aktion rechtsbündig in fester Breite (Knopf, darunter der Stand aus tplBalBeobachten/tplBalanceFremd). Gleiche Fälle stehen zusammen
    * (Rang aus tplBdLabel). Nur Anzeige — welche Fälle es gibt, entscheidet weiter tplBraucht. */
+  // Kurzwort je Grund-Code (app.py ap_kontowert_grund, 09.10.2026) — der genaue Text + Fix steht daneben
+  const TPL_GRUND_WORT = { konto_fehlt: 'Konto gelöscht', live: 'Live-Konto', firma_fehlt: 'Kernwerte fehlen', kernwert_fehlt: 'Kernwerte fehlen',
+    phase_ohne_ziel: 'Kernwerte fehlen', ext_fehlt: 'External ID', balance_fehlt: 'keine Balance', typ_ohne_wert: 'Kontotyp', ziel_erreicht: 'Ziel erreicht',
+    groesse: 'Größe passt nicht', unbekannt: 'kein Kontowert' }
   function tplBdLabel(z){
     const t = String(z.text || '')
     if(z.art === 'balance') return /nicht live/i.test(t) ? { w: 'nicht live', ton: 'vio', r: 1 } : /nie gelesen/i.test(t) ? { w: 'nie gelesen', ton: 'vio', r: 1 }
       : /\balt$/.test(t) ? { w: 'Balance alt', ton: 'vio', r: 1 } : { w: 'Balance fehlt', ton: 'vio', r: 1 }
     if(z.art === 'neu') return { w: 'neu geplant', ton: 'gruen', r: 9 }
     if(z.art === 'fremd') return z.konflikt ? { w: '⚠ Gegenhedge', ton: 'rot', r: 0 } : { w: 'Hand-Position', ton: 'grau', r: 10 }   // Fremd-Positionen (08.10.2026)
+    if(z.art === 'plan' && z.code) return { w: TPL_GRUND_WORT[z.code] || 'kein Kontowert', ton: 'rot', r: 8 }   // genauer Grund (09.10.2026)
     if(z.art === 'plan'){
       if(/^nicht gestartet/i.test(t) && /offene Position/i.test(t)) return { w: 'Position offen', ton: 'gelb', r: 6 }   // konto_offen (09.10.2026)
       if(/^nicht gestartet/i.test(t)) return { w: 'Start-Fehler', ton: 'rot', r: 6 }
@@ -48819,6 +48855,7 @@
   // fester Satz je Label, fremd mit „am PC von …"; Ziel erreicht / geblowt? / ausgelassen: der Grund selbst ist die Information
   function tplBdGrau(z, l, wer){
     const t = String(z.text || ''), tun = String(z.tun || ''), fremd = !!(z.balf || (z.hinweis && /PC/.test(z.hinweis)))
+    if(z.code) return [t.replace(/^kein Kontowert — /, ''), tun].filter(Boolean).join(' → ')   // genauer Grund → So fixt du's (09.10.2026)
     if(z.art === 'balance'){
       const stand = z.balance && z.balance !== 'keine Balance' ? z.balance + ' · ' : ''
       if(tun && !/^↻/.test(tun)) return stand + tun

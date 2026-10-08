@@ -12312,8 +12312,10 @@ def hand_gruppen(konten_ziel, reviews, blown, letzte, accs, archiv, namen, ausge
         a = accs.get(kid) or {}
         z = basis(uid, kid, a, x.get("firma"), x.get("konto"))
         z["typ"] = z.get("typ") or x.get("typ")
-        z.update(art="planer", grund=grund, seit=(lauf or {}).get("at"),
-                 knopf="balance" if re.search(r"keine Balance|nicht live|nie gelesen", grund, re.I) else "")
+        # genauer Fix + Code vom Planer (09.10.2026) — ohne External ID hilft „↻ Balance lesen" nicht → kein Knopf
+        z.update(art="planer", grund=grund, seit=(lauf or {}).get("at"), fix=x.get("fix") or None, grund_code=x.get("grund_code") or None,
+                 knopf="balance" if (x.get("grund_code") != "ext_fehlt"
+                                     and re.search(r"keine Balance|nicht live|nie gelesen", grund, re.I)) else "")
         out["planer"].append(z)
         if kid:
             schon.add(kid)
@@ -15783,12 +15785,14 @@ def ap_regel_flex(regel, konto, balance):
         if fx.get("dd_pct"):
             neu["dd_pct"] = fx["dd_pct"]
         if g and str(int(g)) not in je:
-            je[str(int(g))] = {"keine_werte": True, "grund": f"{name} {int(g) // 1000}k Flex: Werte fehlen"}
+            je[str(int(g))] = {"keine_werte": True, "grund": f"{name} {int(g) // 1000}k Flex: Werte fehlen — "
+                                                             f"Admin → Trade-Planer → Kernwerte → {name}: Flex-Werte für {int(g) // 1000}k eintragen"}
         return neu
     je = dict(regel.get("je_groesse") or {})
     std = [int(x) for x in (regel.get("standard_groessen") or [])]
     if g and std and int(g) not in std and str(int(g)) not in je:
-        je[str(int(g))] = {"keine_werte": True, "grund": f"{name} {int(g) // 1000}k Standard: Werte fehlen"}
+        je[str(int(g))] = {"keine_werte": True, "grund": f"{name} {int(g) // 1000}k Standard: Werte fehlen — {int(g) // 1000}k ist keine "
+                                                         f"Standard-Größe; Admin → Trade-Planer → Kernwerte → {name}: Werte für {int(g) // 1000}k eintragen"}
     return dict(regel, je_groesse=je, flex_konto=False)
 
 
@@ -16043,6 +16047,44 @@ def ap_startwert_frisch(a, hatte_trade, gelesen=False):
         return None
     g = liq_konto_groesse(a or {}) or _wd_num((a or {}).get("account_size"))
     return float(g) if g and g > 0 else None
+
+
+AP_GRUND_OHNE_BAL = "keine Balance bekannt"     # Präfix bleibt: AP_BAL_FEHLT/Frontend erkennen „keine Balance"
+
+
+def ap_grund_ohne_balance(a, hatte_trade, gelesen=False):
+    """REIN RECHNEND (testbar): GENAUER Grund, warum ein Konto ohne Lesung auch keinen Startwert bekommt (Finn 09.10.2026: „Bei solchen
+    Fehlern will ich immer den genauen Grund haben, wie ich das genau fixen kann") — Reihenfolge wie ap_startwert_frisch.
+    → {code, text, fix}; text beginnt immer mit AP_GRUND_OHNE_BAL."""
+    a = a or {}
+    g = lambda code, warum, fix: {"code": code, "text": f"{AP_GRUND_OHNE_BAL} — {warum}", "fix": fix}   # noqa: E731
+    lesen = "↻ Balance lesen (läuft am PC der ID)."
+    if not str(a.get("external_id") or "").strip():
+        return g("ext_fehlt", "keine External ID (Login), Prophos kann nichts lesen",
+                 "External ID (MT5-Login bzw. Tradovate-/TopstepX-Unterkonto) unter Accounts eintragen, dann ↻ Balance lesen.")
+    if hatte_trade is None:
+        return g("verlauf_fehler", "Trade-Verlauf gerade nicht lesbar, deshalb kein Startwert", lesen)
+    if hatte_trade:
+        return g("schon_gehandelt", "Konto wurde schon gehandelt, der Startwert gilt nur für frische Konten", lesen)
+    if gelesen:
+        return g("leer_gelesen", "Echo/Duplikum kennt den Login, liefert aber keine Balance", lesen)
+    if ist_topstep_express(a):
+        return g("express", "Topstep Express (Balance ab 0) hat keinen Startwert", lesen)
+    if any(a.get(f) for f in AP_LESE_FELDER):
+        return g("leer_gelesen", "die letzte Lesung brachte keinen Wert (0 bzw. leer)", lesen)
+    return g("groesse_fehlt", "Kontogröße nicht erkennbar (kein „150k“ im Namen, keine Startbalance/Größe am Konto)",
+             "↻ Balance lesen — bzw. die Größe am Konto unter Accounts eintragen.")
+
+
+def ap_startwert_kandidat(a, echo_bal, dup_bal):
+    """REIN RECHNEND (testbar): kann das Konto überhaupt einen Startwert bekommen? Vorfilter vor _ap_konten_mit_trade (Prüfer Slave 2,
+    09.10.2026 — Supabase-Last: _ap_stand_laden läuft im Bot-Takt, geblowte Konten mit 0-Lesung fragten sonst bei jedem Stand den Verlauf ab,
+    obwohl ap_startwert_frisch sie wegen der Lesung ohnehin ablehnt). Ändert kein Ergebnis — dieselben Ausschlüsse wie ap_startwert_frisch
+    ohne den Verlauf: keine Lesung je (AP_LESE_FELDER), Login nicht bei Echo/Duplikum, kein Topstep Express."""
+    a = a or {}
+    lg = str(a.get("external_id") or "").strip()
+    return not (any(a.get(f) for f in AP_LESE_FELDER) or (lg and (lg in (echo_bal or {}) or lg in (dup_bal or {})))
+                or ist_topstep_express(a))
 
 
 def _ap_konten_mit_trade(konto_ids):
@@ -16359,6 +16401,71 @@ def ap_kw_stufe(typ, balance, p, kv):
     return f"{name} · {'+' if g > 0 else '−'}{_ap_kw_usd(g)}"
 
 
+AP_KW_TYP_FIX = "Kontotyp unter Accounts prüfen (Challenge, Phase 1, Phase 2, Funded, Funded CFD)."
+
+
+def ap_kontowert_grund(a, bal, regel):
+    """REIN RECHNEND (testbar, 09.10.2026, Finn: „Bei solchen Fehlern will ich immer den genauen Grund haben, wie ich das genau fixen
+    kann" — vorher der Sammelgrund „kein Kontowert (Firma ohne Kernwerte, Größe passt nicht oder keine Balance)"): GENAU EIN Grund,
+    warum ap_kontowert für dieses Konto nichts liefert → {code, text, fix} bzw. None, wenn ein Kontowert da ist. Reihenfolge wie
+    ap_kontowert. regel = Firmen-Regel des Kontos (ap_regel_konto), bal = Balance (Lesung bzw. Startwert eines frischen Kontos).
+    Codes: konto_fehlt (Plan ohne Konto, Konto gelöscht) · live · firma_fehlt · kernwert_fehlt (fehlende Werte beim Namen) ·
+    ext_fehlt · balance_fehlt · typ_ohne_wert · ziel_erreicht · groesse · phase_ohne_ziel · unbekannt."""
+    a = a or {}
+    g = lambda code, text, fix: {"code": code, "text": text, "fix": fix}   # noqa: E731
+    de = lambda v: f"{float(v):,.0f}".replace(",", ".")                    # noqa: E731
+    if not a.get("id"):
+        return g("konto_fehlt", "Plan ohne Konto — das Master-Konto gibt es nicht mehr (gelöscht bzw. neu angelegt)",
+                 "Diesen Plan löschen (vorher im Radar prüfen, ob schon eine Position läuft — ungestartete Waisen räumt der Sweep "
+                 "selbst ab). Ein neu angelegtes Konto bekommt beim Nachplanen (alle 10 min) seinen eigenen Plan.")
+    firma, typ = a.get("firm") or "?", a.get("account_type") or ""
+    if typ == "live":
+        return g("live", "Live-Konto — kein Kontowert", "Nichts tun: Live-Konten haben keinen Kontowert.")
+    if not regel:
+        return g("firma_fehlt", f"Firma {firma}: keine Kernwerte im Auto-Planer",
+                 f"Admin → Trade-Planer → Kernwerte: {firma} anlegen (Kaufpreis, Max-Drawdown, Ziel-% je Phase, Kontogrößen).")
+    fehlt = [n for n, ok in (("Kaufpreis", regel.get("kauf_eur") not in (None, "")),
+                             ("Max-Drawdown", bool(regel.get("dd_usd") or regel.get("dd_pct"))),
+                             ("Ziel-% je Phase", isinstance(regel.get("ziel_pct"), dict)),
+                             ("Kontogrößen", bool(regel.get("wert_groessen") or regel.get("groessen")))) if not ok]
+    if fehlt:
+        return g("kernwert_fehlt", f"Firma {firma}: {', '.join(fehlt)} {'fehlt' if len(fehlt) == 1 else 'fehlen'} in den Kernwerten",
+                 f"Admin → Trade-Planer → Kernwerte → {firma}: {', '.join(fehlt)} eintragen.")
+    if bal is None:
+        if not str(a.get("external_id") or "").strip():
+            return g("ext_fehlt", "keine Balance — das Konto hat keine External ID (Login), Prophos kann nichts lesen",
+                     "External ID (MT5-Login bzw. Tradovate-/TopstepX-Unterkonto) unter Accounts eintragen, dann ↻ Balance lesen.")
+        if any(a.get(f) for f in AP_LESE_FELDER):    # gelesen, aber 0/leer (acc_balance_wahl wirft 0 weg) — eher geblowt als nie gelesen
+            return g("balance_fehlt", "letzte Lesung ohne Wert (0 bzw. leer) — Konto evtl. geblowt",
+                     "↻ Balance lesen (läuft am PC der ID); ist sie wirklich 0, das Konto als geblowt archivieren.")
+        return g("balance_fehlt", "noch keine Balance gelesen", "↻ Balance lesen (läuft am PC der ID).")
+    p = ap_kw_param(regel)
+    if typ not in AP_KW_PHASEN + AP_KW_FUNDED:
+        return g("typ_ohne_wert", f"Kontotyp „{typ or 'leer'}“ hat keinen Kontowert", AP_KW_TYP_FIX)
+    b, gr = float(bal), [float(x) for x in p.get("groessen") or []]
+    relativ = typ in AP_KW_FUNDED and gr and b < min(gr) / 2
+    if not relativ and not ap_groesse(gr, b):
+        zp = p.get("ziel_pct") or {}
+        phasen = [x for x in AP_KW_PHASEN if x in zp]
+        ph = typ if typ in zp else (phasen[0] if phasen else None)
+        for gg in sorted(gr):
+            if ph and gg * (1 + float(zp[ph]) / 100.0) <= b <= gg * (1 + AP_GROESSE_TOLERANZ + float(zp[ph]) / 100.0):
+                return g("ziel_erreicht", f"Ziel erreicht — Balance {de(b)} ≥ Ziel {de(gg * (1 + float(zp[ph]) / 100.0))} "
+                                          f"({de(gg / 1000)}k, {AP_KW_TYP_NAME.get(ph, ph)})",
+                         "Phase umstellen: Konto als bestanden abhaken bzw. archivieren und den Nachfolger anlegen.")
+        return g("groesse", f"Balance {de(b)} passt zu keiner Kontogröße der Kernwerte {firma} "
+                            f"({' / '.join(de(x / 1000) + 'k' for x in sorted(gr))}, Toleranz ±{AP_GROESSE_TOLERANZ:.0%})",
+                 f"Prüfen, ob das Konto wirklich bei {firma} angelegt ist (Firma unter Accounts) — sonst die Größe in den Kernwerten ergänzen.")
+    zp = p.get("ziel_pct") or {}
+    if typ in AP_KW_PHASEN and not [x for x in AP_KW_PHASEN if x in zp]:
+        return g("phase_ohne_ziel", f"Firma {firma}: keine Phase mit Ziel-% in den Kernwerten",
+                 f"Admin → Trade-Planer → Kernwerte → {firma}: Ziel-% für {AP_KW_TYP_NAME.get(typ, typ)} eintragen.")
+    if not ap_kontowert(typ, b, p):
+        return g("unbekannt", f"Kontowert nicht berechenbar ({AP_KW_TYP_NAME.get(typ, typ)}, Balance {de(b)})",
+                 "Dem Master melden — die Kernwerte rechnen für diesen Fall nichts.")
+    return None
+
+
 def ap_kontowert_konto(a, bal, firmen, kauf_eur=None, archiviert=False, peak=None):
     """REIN RECHNEND: Zeile der Kontowert-Spalte → {wert_eur, stufe, satz_eur_pro_usd, quelle, hinweis, wie, kauf_eur,
     balance_usd}. Wert = ap_kontowert wie im Probelauf (echter Kauf der Kette nur, wenn plausibel — entscheidet ap_kontowert).
@@ -16371,15 +16478,13 @@ def ap_kontowert_konto(a, bal, firmen, kauf_eur=None, archiviert=False, peak=Non
         return dict(leer, hinweis="archiviert")
     if typ == "live":
         return dict(leer, hinweis="Live-Konto — kein Kontowert")
-    p = ap_kw_param(ap_regel_finden(firmen, a.get("firm")))
-    if not p:
-        return dict(leer, hinweis=f"keine Kernwerte für {a.get('firm') or 'diese Firma'} (auto_plan_regeln)")
-    if bal is None:
-        return dict(leer, hinweis="keine Live-Balance")
-    kv = ap_kontowert(typ, bal, p, kauf_eur, peak=peak)
+    regel = ap_regel_finden(firmen, a.get("firm"))
+    p = ap_kw_param(regel)
+    kv = ap_kontowert(typ, bal, p, kauf_eur, peak=peak) if (p and bal is not None) else None
     if not kv:
-        return dict(leer, hinweis=("Kontotyp ohne Kontowert" if typ not in AP_KW_FUNDED + AP_KW_PHASEN
-                                   else f"Balance {_ap_kw_usd(float(bal))} passt zu keiner Größe der Kernwerte"))
+        # genauer Grund + Fix statt Sammelgrund (Finn 09.10.2026, ap_kontowert_grund)
+        gr_ = ap_kontowert_grund(a, bal, regel) or {"code": "unbekannt", "text": "kein Kontowert", "fix": ""}
+        return dict(leer, hinweis=gr_["text"], hinweis_code=gr_["code"], hinweis_fix=gr_["fix"])
     echt = bool(kauf_eur) and round(float(kauf_eur)) == kv["kauf"]
     return {"wert_eur": kv["wert"], "stufe": ap_kw_stufe(typ, bal, p, kv), "satz_eur_pro_usd": kv["satz"],
             "quelle": "kauf_echt" if echt else "kernwerte", "hinweis": None, "wie": kv["wie"], "kauf_eur": kv["kauf"],
@@ -16404,10 +16509,18 @@ def admin_build_kontowerte(sicht=None):
     # Höchststand für die Topstep-Kette mit DLL (09.10.2026, MLL im Kontowert) — nur Kettenkonten, eine Abfrage, Fehler → ohne
     kette_ids = [a for a in konten if str(a["id"]) in aktiv and (ap_kw_param(ap_regel_finden(firmen, a.get("firm"))) or {}).get("kette_daily")]
     peaks = _ap_peaks(kette_ids) if kette_ids else {}
+    # frische Konten: Startwert wie im Planer (ap_startwert_frisch, Finn 09.10.2026) — Verlauf nur für aktive Konten ohne Lesung
+    _aktiv = set(aktiv)
+    ohne = {str(a["id"]) for a in konten if str(a["id"]) in _aktiv and acc_balance_wahl(a, echo_bal, dup_bal)[0] is None
+            and ap_startwert_kandidat(a, echo_bal, dup_bal)}
+    gehandelt = _ap_konten_mit_trade(ohne) if ohne else set()
     werte = {}
     for a in konten:
         aid = str(a["id"])
         bal = acc_balance_wahl(a, echo_bal, dup_bal)[0]
+        if bal is None and aid in ohne:
+            lg = str(a.get("external_id") or "").strip()
+            bal = ap_startwert_frisch(a, None if gehandelt is None else aid in gehandelt, gelesen=bool(lg) and (lg in echo_bal or lg in dup_bal))
         werte[aid] = ap_kontowert_konto(a, bal, firmen, kauf.get(aid), archiviert=aid in archiv, peak=peaks.get(aid))
     return werte
 
@@ -17880,13 +17993,16 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
             else:
                 ausgelassen.append(dict(zeile, grund="Balance nicht live (seit dem letzten Trade nicht nachgelesen)"))
                 continue
+        _lg = str(a.get("external_id") or "").strip()
+        _ht, _gel = (None if _gehandelt is None else aid in _gehandelt), bool(_lg) and (_lg in echo_bal or _lg in dup_bal)
         if not bal and not letzt:
-            _lg = str(a.get("external_id") or "").strip()
-            sw = ap_startwert_frisch(a, None if _gehandelt is None else aid in _gehandelt, gelesen=bool(_lg) and (_lg in echo_bal or _lg in dup_bal))
+            sw = ap_startwert_frisch(a, _ht, gelesen=_gel)
             if sw:
                 bal, quelle_b, stand = sw, AP_STARTWERT_QUELLE, ""
         if not bal:
-            ausgelassen.append(dict(zeile, grund="keine Balance bekannt"))
+            # genauer Grund statt „keine Balance bekannt" allein (Finn 09.10.2026)
+            gb_ = ap_grund_ohne_balance(a, True if letzt else _ht, gelesen=_gel)
+            ausgelassen.append(dict(zeile, grund=gb_["text"], grund_code=gb_["code"], fix=gb_["fix"]))
             continue
         gb = ap_letzter_trade_geblasen(regel, float(bal), eig, bal_stand=stand)   # stand = Zeit der Balance (08.10.2026: frische Balance über dem Boden schlägt die Schätzung)
         if gb:
@@ -20290,12 +20406,17 @@ def _ap_bewerten(ctx, a, bal, menge, route, symbol, richtung, tp, sl, gehedgt=Fa
     upp = ap_usd_pro_pkt(menge, ppe)
     g = ap_trade_gewicht(kw, p, _wd_num(tp), _wd_num(sl))
     d = 0.0 if gehedgt else ap_delta((kw or {}).get("satz"), upp, richtung)
-    hinweis = None
+    hinweis = hinweis_code = hinweis_fix = None
     if d is None:
-        hinweis = ("kein Kontowert (Firma ohne Kernwerte, Größe passt nicht oder keine Balance)" if not kw
-                   else pq if not ppe else "keine Menge am Plan" if not upp else "keine Richtung")
+        if not kw:
+            # genauer Grund + Fix statt „Firma ohne Kernwerte, Größe passt nicht oder keine Balance" (Finn 09.10.2026)
+            gr_ = ap_kontowert_grund(a, bal if bal else None, regel) or {"code": "unbekannt", "text": "Kontowert nicht berechenbar", "fix": ""}
+            hinweis, hinweis_code, hinweis_fix = f"kein Kontowert — {gr_['text']}", gr_["code"], gr_["fix"]
+        else:
+            hinweis = pq if not ppe else "keine Menge am Plan" if not upp else "keine Richtung"
     return {"kw": kw, "g": g, "delta_eur_pkt": d, "usd_pro_pkt": upp, "punktwert": ppe, "punktwert_quelle": pq if ppe else None,
-            "tp_punkte": ap_punkte(tp, upp), "sl_punkte": ap_punkte(sl, upp), "hinweis": hinweis,
+            "tp_punkte": ap_punkte(tp, upp), "sl_punkte": ap_punkte(sl, upp), "hinweis": hinweis, "hinweis_code": hinweis_code,
+            "hinweis_fix": hinweis_fix,
             "polster_usd": (kw or {}).get("polster"), "daily_usd": (p or {}).get("daily_usd")}   # Szenario-Klippe (08.10.2026)
 
 
@@ -20448,8 +20569,22 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
     def wer(p):
         return namen.get(str(p.get("user_id")), str(p.get("user_id"))[:8])
 
+    # FRISCHE KONTEN (Finn 09.10.2026, „Braucht dich" zeigte bei frischen Tradeify-150k „kein Kontowert", obwohl der Planer mit dem
+    # Startwert 150.000 geplant hatte): Kontowert/Delta nehmen den Startwert genauso wie ap_planen — dieselbe Funktion, gleiche Bedingungen
+    # (keine Lesung, nie gehandelt, Login Echo/Duplikum unbekannt). Verlauf nur für Konten ohne Lesung (meist keins → kein Read).
+    _ohne_bal = [i for i, a in konten.items() if acc_balance_wahl(a, echo_bal, dup_bal)[0] is None
+                 and ap_startwert_kandidat(a, echo_bal, dup_bal)]   # Vorfilter: meist leer → kein Read (Prüfer Slave 2)
+    _gehandelt = _ap_konten_mit_trade(_ohne_bal) if _ohne_bal else set()
+
     def bal(a):
-        return acc_balance_wahl(a, echo_bal, dup_bal)[0] if a else None
+        if not a:
+            return None
+        b = acc_balance_wahl(a, echo_bal, dup_bal)[0]
+        if b is None:
+            lg = str(a.get("external_id") or "").strip()
+            b = ap_startwert_frisch(a, None if _gehandelt is None else str(a.get("id")) in _gehandelt,
+                                    gelesen=bool(lg) and (lg in echo_bal or lg in dup_bal))
+        return b
 
     # Kurs: Reader-Minute (Orbit), mt5_live-Position (Echo) — je EIN Read, nur wenn etwas läuft
     kj = _kurs_jetzt() if any(str(p.get("route") or "") not in LT_ECHO_ROUTEN for p in offen) else {}
@@ -20475,6 +20610,9 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
                 "wert_eur": (b["kw"] or {}).get("wert"), "satz_eur_je_usd": (b["kw"] or {}).get("satz"),
                 "gewinn_eur": (b["g"] or {}).get("gewinn_eur"), "verlust_eur": (b["g"] or {}).get("verlust_eur"),
                 "gewicht_eur": (b["g"] or {}).get("gewicht_eur"), "hinweis": b["hinweis"],
+                "hinweis_code": b.get("hinweis_code"), "hinweis_fix": b.get("hinweis_fix"), "konto_id": str(p.get("master_account_id") or "") or None,
+                # External ID fehlt am Konto (Master 09.10.2026: auch CFD vorab in „Braucht dich" — MT5-Login fehlt, nichts lesbar)
+                "ext_fehlt": bool(a) and not str((a or {}).get("external_id") or "").strip(),
                 "polster_usd": b.get("polster_usd"), "daily_usd": b.get("daily_usd")}
 
     offen_rows = []
@@ -20508,7 +20646,7 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
         offen_rows.append(z)
         if b["hinweis"]:
             hinweise.append({"plan_id": z["plan_id"], "user_id": z["user_id"], "user": z["user"], "firma": z["firma"],
-                             "konto": z["konto"], "grund": b["hinweis"]})
+                             "konto": z["konto"], "grund": b["hinweis"], "code": b.get("hinweis_code"), "fix": b.get("hinweis_fix")})
     # Heutige Starts (laufend oder schon zu) — nur für den weichen Malus und die Anzeige „Pause zu …"
     for p in [q for q in offen if (_ap_iso_min(q.get("started_at"), mitternacht) or -1) >= 0] + gestartet:
         m = _ap_iso_min(p.get("started_at"), mitternacht)
@@ -20588,7 +20726,7 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
         geplant_rows.append(z)
         if b["hinweis"]:
             hinweise.append({"plan_id": z["plan_id"], "user_id": z["user_id"], "user": z["user"], "firma": z["firma"],
-                             "konto": z["konto"], "grund": b["hinweis"]})
+                             "konto": z["konto"], "grund": b["hinweis"], "code": b.get("hinweis_code"), "fix": b.get("hinweis_fix")})
     # 07.10.2026 (Finn: Richtungsschutz gilt nur GLEICHZEITIG): fest ist eine ID+Firma nur, solange dort ein Trade läuft —
     # Pläne anderer Tage überlappen nie und legen heute nichts mehr fest (vorher: andere_tage = ganzer Tag gesperrt)
     # 08.10.2026 (Finn: „nicht selbst gegeneinander hedgen"): dazu jeder Plan, der in ≤ 30 min wirklich startet (ap_id_fest)
@@ -20711,11 +20849,12 @@ def ap_delta_antwort(stand, sicht_uid=None, pc_lebt=None):
     umpl, h_umpl = _ap_umplanungen_heute(stand)
     offen = [{k: z.get(k) for k in ("plan_id", "user_id", "user", "firma", "richtung", "delta_eur_pkt", "einsatz_eur", "tp_punkte_rest", "sl_punkte_rest",
                                     "stand", "tp_punkte", "sl_punkte", "konto", "ende4", "typ", "route", "menge", "usd_pro_pkt",
-                                    "punktwert_quelle", "wert_eur", "satz_eur_je_usd", "gehedgt", "hedge", "hinweis")} for z in stand["offen"]]
+                                    "punktwert_quelle", "wert_eur", "satz_eur_je_usd", "gehedgt", "hedge", "hinweis",
+                                    "hinweis_code", "hinweis_fix", "konto_id", "ext_fehlt")} for z in stand["offen"]]
     geplant = [{k: z.get(k) for k in ("plan_id", "user_id", "user", "firma", "richtung", "start", "delta_eur_pkt", "einsatz_eur", "fest_durch", "bestaetigt",
                                       "start_txt", "start_min", "aenderbar", "auto_plan", "richtung_fest_durch", "tp_punkte", "sl_punkte",
                                       "konto", "ende4", "typ", "route", "menge", "usd_pro_pkt", "punktwert_quelle", "wert_eur", "gehedgt",
-                                      "hinweis", "richtung_konflikt",
+                                      "hinweis", "richtung_konflikt", "hinweis_code", "hinweis_fix", "ext_fehlt",   # genauer Grund + Fix (09.10.2026)
                                       # 08.10.2026: Balance live (Braucht dich/Firmen-Block) und Boden (Balance-Balken) — standen in _ap_stand_laden
                                       # schon an der Zeile, kamen aber ohne diese Liste nie im Frontend an (.1224)
                                       "balance_live", "boden", "boden_min", "boden_art",
@@ -21793,7 +21932,7 @@ def _ap_nachholen_kern(pid, alle, uid, jetzt=None, gruppe=None):
     if not alle and str(plan.get("user_id")) != str(uid) and not (gruppe and str(plan.get("user_id")) in gruppe):
         return jsonify({"ok": False, "msg": "nur eigene Pläne"}), 403
     if plan.get("status") != "planned" or plan.get("started_at") or plan.get("orbit_gesendet_at"):
-        return jsonify({"ok": False, "msg": "Plan ist nicht mehr geplant oder schon gesendet — nichts geändert"}), 409
+        return jsonify({"ok": False, "msg": ap_plan_nicht_geplant_grund(plan)}), 409
     jetzt = jetzt or datetime.now(timezone.utc)
     reg = (sb_select("auto_plan_regeln", {"select": "*", "id": "eq.1"}) or [None])[0]
     if not reg:
@@ -21812,7 +21951,7 @@ def _ap_nachholen_kern(pid, alle, uid, jetzt=None, gruppe=None):
     rows = sb_update("trade_plans", {"id": f"eq.{pid}", "status": "eq.planned", "started_at": "is.null", "orbit_gesendet_at": "is.null"},
                      {"start_um": neu.astimezone(timezone.utc).isoformat(), "start_um_gestartet_at": None})
     if not rows:
-        return jsonify({"ok": False, "msg": "Plan ist nicht mehr geplant oder schon gesendet — nichts geändert"}), 409
+        return jsonify({"ok": False, "msg": _ap_plan_nicht_geplant_msg(pid)}), 409
     dubai = neu.astimezone(_ap_tz(AP_7T_TZ)).strftime("%H:%M")
     alt = ((plan.get("mt5_baseline") or {}).get("start_fehler") or {}) if isinstance(plan.get("mt5_baseline"), dict) else {}
     flag = dict(alt if isinstance(alt, dict) else {}, status="neu", behoben=f"nachgeholt um {dubai} (Dubai) — Regeln geprüft",
@@ -22054,7 +22193,7 @@ def _ap_neu_starten(pid):
     rows = sb_update("trade_plans", {"id": f"eq.{pid}", "status": "eq.planned", "started_at": "is.null", "orbit_gesendet_at": "is.null"},
                      {"start_um": neu.isoformat(), "start_um_gestartet_at": None})
     if not rows:
-        return jsonify({"ok": False, "msg": "Plan ist nicht mehr geplant oder schon gesendet — nichts geändert"}), 409
+        return jsonify({"ok": False, "msg": _ap_plan_nicht_geplant_msg(pid)}), 409
     alt = ((rows[0].get("mt5_baseline") or {}).get("start_fehler") or {}) if isinstance(rows[0].get("mt5_baseline"), dict) else {}
     flag = dict(alt if isinstance(alt, dict) else {}, status="neu", behoben="von Hand (Admin)", neu_at=datetime.now(timezone.utc).isoformat(),
                 neu_start=neu.isoformat(), hand=True, versuche=int((alt or {}).get("versuche") or 0) + 1)
@@ -22434,6 +22573,28 @@ def ap_nachplan_naechster(jetzt, nachplan_at, zeiten, tz):
             start = max(start, letzter + n * takt)
         return start.astimezone(timezone.utc), "fenster"
     return None, "fenster"
+
+
+def ap_plan_nicht_geplant_grund(plan):
+    """REIN RECHNEND (testbar): GENAU, warum ein Plan nicht mehr änderbar ist (statt „nicht mehr geplant oder schon gesendet",
+    Finn 09.10.2026). plan = Zeile mit status/started_at/orbit_gesendet_at oder None (gelöscht)."""
+    if not plan:
+        return "Plan gibt es nicht mehr (gelöscht) — nichts geändert"
+    if plan.get("orbit_gesendet_at"):
+        return "Order ist schon gesendet — nichts geändert"
+    if plan.get("started_at"):
+        return "Plan ist schon gestartet — nichts geändert"
+    st = plan.get("status")
+    return f"Plan hat Status „{st}“ (nicht mehr geplant) — nichts geändert" if st != "planned" else "Plan hat sich gerade geändert — bitte neu laden"
+
+
+def _ap_plan_nicht_geplant_msg(pid):
+    """Nach einem leeren Update (Bedingung status=planned/ungestartet griff nicht): Plan einmal nachlesen und den genauen Grund nennen."""
+    try:
+        rows = sb_select("trade_plans", {"select": "id,status,started_at,orbit_gesendet_at", "id": f"eq.{pid}"}) or []
+    except Exception:
+        return "Plan nicht mehr änderbar (Zustand gerade nicht lesbar) — nichts geändert"
+    return ap_plan_nicht_geplant_grund(rows[0] if rows else None)
 
 
 def ap_nachplan_planungstag(heute, nacht_tag):
@@ -23224,7 +23385,10 @@ def admin_auto_plan():
         nr = sb_select("auto_plan_lauf", {"select": "tag", "ergebnis->>quelle": "eq.nacht", "order": "at.desc", "limit": "1"}) or []
         ptag = ap_nachplan_planungstag(heute, (nr[0] if nr else {}).get("tag"))
         if not ptag:
-            return jsonify({"ok": False, "msg": "Kein Planungstag — der nächste Nachtlauf plant (Wochenende oder noch kein Lauf)"}), 409
+            letzt_n = (nr[0] if nr else {}).get("tag")
+            return jsonify({"ok": False, "msg": (f"Kein Planungstag — der letzte Nachtlauf plante {letzt_n}, der Tag ist vorbei; "
+                                                 "der nächste Nachtlauf plant den nächsten Handelstag") if letzt_n
+                            else "Kein Planungstag — es gab noch keinen Nachtlauf; der nächste Nachtlauf plant"}), 409
         if not _ap_nachplan_lock.acquire(blocking=False):
             return jsonify({"ok": False, "msg": "läuft schon — Nachplanen rechnet gerade"}), 409
         try:

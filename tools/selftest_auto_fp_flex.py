@@ -64,9 +64,9 @@ def main():
     check(w and 1250 <= w["sl"] <= 1500 and 0.5 <= w["menge"] <= 0.7 and round(w["ziel"]) == 55000,
           f"Flex 50k: SL 1.250–1.500, 0,5–0,7 Lots, Ziel 10 % ({w and (w['sl'], w['menge'], round(w['ziel']))}, {g})")
     w, g = plan(konto(5000), 48916.0)
-    check(w is None and g == "FundingPips 50k Standard: Werte fehlen", f"Standard 50k → ausgelassen „{g}“")
+    check(w is None and str(g).startswith("FundingPips 50k Standard: Werte fehlen — 50k ist keine Standard-Größe"), f"Standard 50k → ausgelassen „{g}“")
     w, g = plan(konto(12000, starting_balance=100000, account_size=150000), 100500.0)
-    check(w is None and g == "FundingPips 100k Flex: Werte fehlen", f"Flex 100k (Jacob-Fall) → ausgelassen „{g}“")
+    check(w is None and str(g).startswith("FundingPips 100k Flex: Werte fehlen — Admin → Trade-Planer → Kernwerte"), f"Flex 100k (Jacob-Fall) → ausgelassen „{g}“")
     w, g = plan(konto(10000), 100500.0)
     check(w and 2500 <= w["sl"] <= 3500 and 1 <= w["menge"] <= 1.5 and round(w["ziel"]) == 108000,
           f"Standard 100k: Firmen-Werte SL 2.500–3.500, 1–1,5 Lots, Ziel 8 % ({w and (w['sl'], w['menge'], round(w['ziel']))}, {g})")

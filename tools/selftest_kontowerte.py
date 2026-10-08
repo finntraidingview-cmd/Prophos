@@ -50,9 +50,10 @@ def lade():
         return re.search(rf"^{name} = .*$", src, re.M).group(0)
     m = re.search(r"^AP_KW_TYP_NAME = \{.*?\}$", src, re.M | re.S)
     exec("\n".join([konst(k) for k in ("AP_GROESSE_TOLERANZ", "_KETTE_DLL_CACHE", "AP_KW_FUNDED", "AP_KW_PHASEN", "AP_KW_CACHE_S", "_ap_kw_cache",
-                                       "_ap_kw_cache_lock")] + [m.group(0)] + [block(f) for f in (
+                                       "_ap_kw_cache_lock", "AP_KW_TYP_FIX", "AP_LESE_FELDER")] + [m.group(0)] + [block(f) for f in (
         "_ap_norm", "ap_regel_finden", "ap_groesse", "ap_kw_param", "_ap_kw_kauf", "_ap_kw_wachsen", "_ap_kw_lock", "kette_dll_chance", "ap_kontowert",
-        "_ap_kw_usd", "ap_kw_stufe", "ap_kontowert_konto", "admin_build_kontowerte", "ap_kontowerte_gemerkt", "admin_kontowerte")]), ns)
+        "_ap_kw_usd", "ap_kw_stufe", "ap_kontowert_grund", "ap_kontowert_konto", "admin_build_kontowerte", "ap_kontowerte_gemerkt", "admin_kontowerte",
+        "ap_startwert_frisch", "ap_startwert_kandidat", "_ap_konten_mit_trade", "liq_konto_groesse", "_wd_konto_groesse", "ist_topstep_express", "_wd_num")]), ns)
     return ns
 
 
@@ -72,6 +73,7 @@ def db(ns, zaehler):
         return {i: (207.0 if i == "k-1" else 5.0 if i == "k-2" else None) for i in ids}   # k-2: Gebühr, unplausibel → Firmenwert
     ns.update({"_sb_all": _sb_all, "sb_select": sb_select, "_ap_archiviert": lambda: {"k-9"},
                "_ap_balance_karten": lambda: ({}, {}), "_ap_kauf_echt": kauf_echt, "AP_KONTO_FELDER": "x",
+               "_ap_konten_mit_trade": lambda ids: (zaehler.setdefault("verlauf", []).append(sorted(ids)), set())[1],
                "acc_balance_wahl": lambda a, e, d: (BAL.get(str(a.get("id"))), "USD", "TV", "")})
 
 
@@ -106,7 +108,10 @@ def main():
           f"Blue Guardian ohne Kernwerte → null + Hinweis ({w['k-6']['hinweis']})")
     check(w["k-10"]["wert_eur"] is None and "Kernwerte" in w["k-10"]["hinweis"], "Fusion (Phase) ohne Kernwerte → null + Hinweis")
     check(w["k-7"]["wert_eur"] is None and "Live" in w["k-7"]["hinweis"], "Live-Konto → null + Hinweis")
-    check(w["k-8"]["wert_eur"] is None and w["k-8"]["hinweis"] == "keine Live-Balance", "keine Balance → null + Hinweis")
+    # 09.10.2026: genauer Grund + Fix statt „keine Live-Balance" (ap_kontowert_grund); k-8 ohne External ID → ext_fehlt
+    check(w["k-8"]["wert_eur"] is None and w["k-8"]["hinweis_code"] == "ext_fehlt" and "External ID" in w["k-8"]["hinweis"]
+          and w["k-8"]["hinweis_fix"], f"keine Balance, keine External ID → null + genauer Grund ({w['k-8']['hinweis']})")
+    check(zaehler.get("verlauf") == [["k-8"]], f"Startwert: Trade-Verlauf nur für aktive Konten ohne Lesung ({zaehler.get('verlauf')})")
     check(w["k-9"]["wert_eur"] is None and w["k-9"]["hinweis"] == "archiviert", "archiviert → null + Hinweis")
     check("k-9" not in zaehler["kauf_ids"] and "k-7" not in zaehler["kauf_ids"], "Kauf-Kette nur für aktive Nicht-Live-Konten gelesen")
 
