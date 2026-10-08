@@ -17793,6 +17793,12 @@ class _AugenSitzung:
             self.trail.append("Meldungen über dem Ziel, aber kein Schließen-Knopf im Bild")
         return geklickt
 
+    def fremd_hinweis(self):
+        """Lag beim letzten Klick auch im 2. Versuch ein fremdes Fenster am Zielpunkt (_win_klick, 09.10.2026): Zusatz für die Meldung,
+        sonst ''."""
+        t = str(getattr(self, "_fremd_fenster", "") or "").strip()
+        return f" Fenster '{t}' liegt über dem Puls-Chrome — immer im Vordergrund?" if t else ""
+
     def _win_klick(self, rect, name, druck=True, toast_ok=False, pruef=None, doppel=False):
         """Echte Windows-Maus: Punkt im inneren Drittel → Bildschirm-Pixel (Breiten-Abgleich), Zeiger sichtbar hinfahren, :hover des
         Ziels beweisen, dann EIN SendInput-Druck. Ohne Beweis kein Druck. druck=False = nur hinfahren (Hover)."""
@@ -17812,15 +17818,39 @@ class _AugenSitzung:
         _maus_fahren(*punkt)
         # Riegel (Live 29.09.2026 15:11 UTC, Tradeify-Login: „Benutzerfeld geklickt, Hover bewiesen", auf der Seite kam nichts an):
         # am Zielpunkt muss WIRKLICH dieses Puls-Chrome-Fenster liegen — :hover allein kann ein alter Stand der Seite sein
-        try:
-            wurzel, w_titel = _win_root_am_punkt(*punkt)
-        except Exception as e_:
-            self.trail.append(f"{name}: Fenster am Zielpunkt nicht prüfbar ({type(e_).__name__}) — kein Druck")
-            return False
-        if wurzel != int(hwnd):
+        # FREMDES FENSTER → EIN ZWEITER VERSUCH (09.10.2026, Master — Ina pc-xc5c52, 01:42 Dubai, Balance lesen: am Kontextmenü neben
+        # „Tradovate" lag ihr normales Chrome „Tradeify Futures - User Dashboard", obwohl _win_vorn das Puls-Chrome kurz vorher als
+        # Vordergrund bewiesen hatte; der Lauf 1 s später traf denselben Knopf). Riegel bleibt: nie ein Druck in ein fremdes Fenster.
+        # Neu: das Puls-Chrome EINMAL neu nach vorn (derselbe Weg _win_vorn), Punkt neu rechnen, Zeiger neu hinfahren, neu prüfen.
+        # Liegt es dann immer noch davor → Abbruch wie bisher, Titel in self._fremd_fenster (fremd_hinweis() für die Meldung).
+        self._fremd_fenster = ""
+        for versuch in (1, 2):
+            try:
+                wurzel, w_titel = _win_root_am_punkt(*punkt)
+            except Exception as e_:
+                self.trail.append(f"{name}: Fenster am Zielpunkt nicht prüfbar ({type(e_).__name__}) — kein Druck")
+                return False
+            if wurzel == int(hwnd):
+                break
+            if versuch == 2:
+                self._fremd_fenster = str(w_titel or "")[:60]
+                self.trail.append(f"{name}: am Zielpunkt @{punkt[0]},{punkt[1]} liegt weiter ein anderes Fenster ({wurzel} "
+                                  f"'{w_titel[:40]}', erwartet {hwnd}) — kein Druck.{self.fremd_hinweis()}")
+                return False
             self.trail.append(f"{name}: am Zielpunkt @{punkt[0]},{punkt[1]} liegt ein anderes Fenster ({wurzel} '{w_titel[:40]}', "
-                              f"erwartet {hwnd}) — kein Druck")
-            return False
+                              f"erwartet {hwnd}) — Puls-Chrome neu nach vorn, 2. Versuch")
+            _win_nach_vorn(hwnd)                      # fremdes Fenster war evtl. selbst Vordergrund — Puls-Chrome wieder oben in der Z-Ordnung
+            _warte(0.3, 0.2)
+            hwnd, grund = self._win_vorn()
+            if not hwnd:
+                self.trail.append(f"{name}: {grund} — nichts geklickt")
+                return False
+            g = self.lese_js(WIN_GEO_JS) or {}
+            punkt, grund = tv_bildschirm_punkt([p[0] - 0.5, p[1] - 0.5, 1.0, 1.0], g, _klient_rechteck(hwnd))
+            if not punkt:
+                self.trail.append(f"{name}: {grund} — nichts geklickt")
+                return False
+            _maus_fahren(*punkt)
         hover, v = False, None
         ende = time.time() + 0.9
         gestupst = False
@@ -17916,7 +17946,20 @@ class _AugenSitzung:
         if _win_vordergrund() != int(hwnd):
             self.trail.append(f"{name}: Puls-Chrome nicht mehr vorn — kein Druck")
             return False
-        self._druck_versucht = True                   # ab hier KANN gedrückt sein (K4: Ausnahme davor = nichts gesendet)
+        # SOLL VOR DEM DRUCK (09.10.2026, Master nach Prüfer Slave 2): der Hover-Beweis dauert 0,9–2,3 s — in der Zeit kann sich ein
+        # „immer oben"-Fenster wieder davorschieben, dann hinge der Schutz nur am :hover der Seite (der veraltet sein kann). Deshalb
+        # unmittelbar vor SendInput noch einmal das Fenster am Punkt prüfen; fremd → kein Druck, Titel-Hinweis, KEIN zweites Nach-vorn.
+        try:
+            wurzel, w_titel = _win_root_am_punkt(*punkt)
+        except Exception as e_:
+            self.trail.append(f"{name}: Fenster am Zielpunkt vor dem Druck nicht prüfbar ({type(e_).__name__}) — kein Druck")
+            return False
+        if wurzel != int(hwnd):
+            self._fremd_fenster = str(w_titel or "")[:60]
+            self.trail.append(f"{name}: vor dem Druck liegt am Zielpunkt @{punkt[0]},{punkt[1]} ein anderes Fenster ({wurzel} "
+                              f"'{w_titel[:40]}', erwartet {hwnd}) — kein Druck.{self.fremd_hinweis()}")
+            return False
+        self._druck_versucht = True                  # ab hier KANN gedrückt sein (K4: Ausnahme davor = nichts gesendet)
         if not _klick_absolut(punkt[0], punkt[1], doppel=bool(doppel and pruef)):   # doppel nur mit Ziel-Beweis (K4)
             self.trail.append(f"{name}: SendInput abgelehnt")
             return False
@@ -21572,7 +21615,7 @@ def _cdp_abmelden(s, opts, trail):
     if not cdp_rect(b.get("ctx")):
         return False, f"Kontextmenü-Knopf neben 'Tradovate' nicht eindeutig ({b.get('ctx')}) — nicht abgemeldet."
     if not s.klick(cdp_rect(b.get("ctx")), "Kontextmenü neben Tradovate"):
-        return False, "Kontextmenü neben 'Tradovate' ließ sich nicht klicken — nicht abgemeldet."
+        return False, "Kontextmenü neben 'Tradovate' ließ sich nicht klicken — nicht abgemeldet." + (s.fremd_hinweis() if hasattr(s, "fremd_hinweis") else "")
     b = _cdp_menue_abwarten(ort, trail, "[Login]")
     e, n = k3_eindeutig(b.get("menue"), K3_RX_ABMELDEN)
     if not e:
