@@ -311,6 +311,89 @@ def ensure_pywinauto():
               f"von Hand: pip install pywinauto", flush=True)
 
 
+# METATRADER5-PAKET (08.10.2026, Jacob The5%ers 72c2a073 rot: „MetaTrader5-Paket fehlt" im Order-Bot auf einem PC, der morgens noch
+# platziert hatte; die Copier dort liefen mit dem Paket weiter). Der Bot läuft je Order als eigener Prozess mit dem Python des Panels
+# (sys.executable) — das Panel selbst braucht nur die Standardbibliothek und merkte nichts. Jetzt prüft das Panel beim Start und alle
+# 30 min GENAU so (eigener Prozess, gleiches Python, gleicher Ordner), installiert NUR, wenn pip das Paket nicht kennt (wie
+# ensure_pywinauto, höchstens einmal je Stunde, ohne --upgrade — Prüfer Slave 2: laufen die Copier mit demselben Python, sind ihre
+# .pyd/.dll gesperrt und ein Upgrade ließe ein halb gelöschtes Paket zurück; ist es installiert und der Import bricht trotzdem, hilft
+# pip nicht → nur melden) und meldet den Stand: Konsole + Snapshot mt5_update.paket → Prophos (mt5_live.status, Admin → PC-Tabs).
+MT5_PAKET = {"ok": None, "version": None, "fehler": None, "python": sys.executable, "at": None, "installiert_at": None, "pip_kennt": None,
+             "app_sperre": False}
+
+
+def _app_steuerung_sperre(text):
+    """Windows' Intelligente App-Steuerung / WDAC blockt eine DLL (Jacobs PC 08.10.2026: „Eine Anwendungssteuerungsrichtlinie hat diese
+    Datei blockiert", WinError 4551) — dann hilft pip nie; laufende Prozesse haben die DLL schon, jeder neue scheitert."""
+    t = str(text or "").lower()
+    return "anwendungssteuerungsrichtlinie" in t or "application control policy" in t or "winerror 4551" in t
+
+
+def _mt5_paket_pruefen():
+    try:
+        r = subprocess.run([sys.executable, "-c", "import MetaTrader5 as m; print(m.__version__)"], cwd=HERE,
+                           capture_output=True, text=True, errors="replace", timeout=90)
+        if r.returncode == 0:
+            return True, (r.stdout or "").strip()[-40:], None
+        zeilen = [z for z in (r.stderr or "").strip().splitlines() if z.strip()]
+        return False, None, (zeilen[-1] if zeilen else f"Exit {r.returncode}")[:200]
+    except Exception as e:
+        return False, None, f"{type(e).__name__}: {e}"[:200]
+
+
+def ensure_metatrader5():
+    """Einmal prüfen (+ bei Bedarf installieren) — siehe MT5_PAKET. Läuft im Hintergrund-Thread, blockiert den Start nie."""
+    if os.name != "nt":
+        return
+    ok, ver, fehler = _mt5_paket_pruefen()
+    kennt = None
+    sperre = (not ok) and _app_steuerung_sperre(fehler)
+    MT5_PAKET["app_sperre"] = sperre
+    if not ok and not sperre:
+        try:
+            kennt = subprocess.run([sys.executable, "-m", "pip", "show", "MetaTrader5"], capture_output=True, text=True,
+                                   errors="replace", timeout=60).returncode == 0
+        except Exception:
+            kennt = None                                   # pip nicht prüfbar → lieber nicht installieren
+    MT5_PAKET["pip_kennt"] = kennt
+    if not ok and kennt is False and time.time() - (MT5_PAKET.get("_inst_t") or 0) > 3600:
+        MT5_PAKET["_inst_t"] = time.time()
+        print(f"[panel] MetaTrader5-Paket fehlt im Panel-Python ({fehler}) — installiere (pip, kann ~1 min dauern) ...", flush=True)
+        try:
+            r = subprocess.run([sys.executable, "-m", "pip", "install", "MetaTrader5"],
+                               capture_output=True, text=True, errors="replace", timeout=300)
+            if r.returncode == 0:
+                MT5_PAKET["installiert_at"] = datetime.now().astimezone().isoformat()
+            else:
+                print(f"[panel] pip install MetaTrader5 fehlgeschlagen ({(r.stderr or '').strip()[-160:]})", flush=True)
+        except Exception as e:
+            print(f"[panel] pip install MetaTrader5 fehlgeschlagen ({type(e).__name__})", flush=True)
+        ok, ver, fehler = _mt5_paket_pruefen()
+    war = MT5_PAKET.get("ok")
+    MT5_PAKET.update(ok=ok, version=ver, fehler=fehler, at=datetime.now().astimezone().isoformat())
+    if sperre:
+        print(f"[panel] ⚠ Windows blockiert MetaTrader5 (Intelligente App-Steuerung): {fehler} — Echo-Starts scheitern, laufende "
+              f"Copier laufen weiter, starten aber nach einem Neustart nicht mehr. Am PC: Windows-Sicherheit → App- & Browsersteuerung → "
+              f"Intelligente App-Steuerung. NICHT neu installieren.", flush=True)
+    elif not ok and kennt:
+        print(f"[panel] ⚠ MetaTrader5 ist im Panel-Python {sys.executable} installiert, der Import bricht aber: {fehler} — "
+              f"Echo-Starts scheitern; NICHT neu installieren, Fehler melden", flush=True)
+    elif not ok:
+        print(f"[panel] ⚠ MetaTrader5-Paket fehlt im Panel-Python {sys.executable}: {fehler} — Echo-Starts scheitern, "
+              f"von Hand: \"{sys.executable}\" -m pip install MetaTrader5", flush=True)
+    elif war is False:
+        print(f"[panel] MetaTrader5-Paket wieder da ({ver}).", flush=True)
+
+
+def _mt5_paket_waechter():
+    while True:
+        try:
+            ensure_metatrader5()
+        except Exception as e:
+            print(f"[panel] MetaTrader5-Prüfung: {type(e).__name__}", flush=True)
+        time.sleep(1800)
+
+
 def _ensure_ea_compiled(fname, install_dir):
     """EA pro Terminal automatisch kompilieren (15.08.2026): MetaEditor liegt
     neben jeder terminal64.exe und kann per Kommandozeile kompilieren — der
@@ -1114,7 +1197,7 @@ def _mt5_update_stand():
     if os.name != "nt":
         return None
     if time.time() - _MT5_UPD_STAND["t"] < 300 and _MT5_UPD_STAND["wert"] is not None:
-        return _MT5_UPD_STAND["wert"]
+        return dict(_MT5_UPD_STAND["wert"], paket={k: v for k, v in MT5_PAKET.items() if not k.startswith("_")})
     try:
         aus = provision.update_ausstehend()
         w = {"aufgabe_ok": bool(provision.update_aufgabe_ok()), "ausstehend": len(aus),
@@ -1123,7 +1206,8 @@ def _mt5_update_stand():
     except Exception as e:
         w = {"fehler": f"{type(e).__name__}: {e}"[:120]}
     _MT5_UPD_STAND.update(t=time.time(), wert=w)
-    return w
+    # MetaTrader5-Paket des Panel-Pythons (08.10.2026) mitliefern — kommt so ohne Backend-Änderung bis Admin → PC-Tabs
+    return dict(w, paket={k: v for k, v in MT5_PAKET.items() if not k.startswith("_")})
 
 
 # MT5-UPDATE PER KLICK EINRICHTEN (08.10.2026, Finn: „Kannst du das vorher bei der Einrichtung einbauen?"): der Wächter fragt
@@ -4288,6 +4372,8 @@ def main():
     ensure_starter_source()
     # Klick-Bot-Abhaengigkeit (Maus-Steuerung) einmalig installieren
     threading.Thread(target=ensure_pywinauto, daemon=True).start()
+    # MetaTrader5 im Panel-Python (= Order-Bot) beim Start und alle 30 min prüfen, bei Bedarf installieren (08.10.2026)
+    threading.Thread(target=_mt5_paket_waechter, daemon=True).start()
     # Liegengebliebene Login-inis mit Klartext-Passwort aufraeumen (Review-Fund
     # 15.08.2026): der _remove_later-Thread ueberlebt das os._exit des Version-
     # Watchers nicht — beim naechsten Start hier nachziehen.

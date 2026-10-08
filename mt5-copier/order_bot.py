@@ -1314,14 +1314,27 @@ class _StempelSpur(list):
         return time.time() - self._t0
 
 
+def _app_steuerung_sperre(e):
+    """Blockt Windows' App-Steuerung (Smart App Control / WDAC, WinError 4551) eine DLL des Pakets? (08.10.2026, Jacobs PC)"""
+    t = str(e or "").lower()
+    return "anwendungssteuerungsrichtlinie" in t or "application control policy" in t or "winerror 4551" in t
+
+
 def _api_lesen(path, expected, symbol=None, timeout_ms=None):
     """Lesen ueber die (offen gehaltene) Terminal-Verbindung. Rueckgabe:
     {"login", "positionen": [...], "ref_ask", "ref_bid", "contract_size",
      "digits"} oder {"fehler": ...}."""
     try:
         import MetaTrader5 as mt5
-    except ImportError:
-        return {"fehler": "MetaTrader5-Paket fehlt (nur auf dem PC lauffaehig)."}
+    except ImportError as e:
+        # Echten Grund + Python nennen (08.10.2026, Jacob The5%ers rot: „Paket fehlt" allein liess offen, ob ein anderes Python
+        # oder ein kaputter Import (DLL/numpy) dahintersteckt) — Anfang bleibt gleich, Muster/Auswertungen greifen weiter.
+        # Ursache bei Jacob: Windows' Intelligente App-Steuerung blockte die unsignierte _core.pyd („Eine Anwendungssteuerungsrichtlinie
+        # hat diese Datei blockiert") — laufende Copier hatten sie schon geladen, jeder NEUE Prozess scheitert. Eigener Grund, pip hilft nicht.
+        if _app_steuerung_sperre(e):
+            return {"fehler": "Windows blockiert MetaTrader5 (Intelligente App-Steuerung) — am PC: Windows-Sicherheit → App- & "
+                              f"Browsersteuerung → Intelligente App-Steuerung. Neu installieren hilft nicht. {str(e)[:120]} · Python {sys.executable}"}
+        return {"fehler": f"MetaTrader5-Paket fehlt (nur auf dem PC lauffaehig). {str(e)[:160]} · Python {sys.executable}"}
     _t0 = time.time()
     try:
         for versuch in (1, 2):

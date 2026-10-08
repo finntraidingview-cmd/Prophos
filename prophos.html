@@ -20629,6 +20629,19 @@
       if(!dd || dd.copier_offline || dd._httpFail) return
       // MT5-Balance dauerhaft am Konto (29.09.2026): frische Master-Balance → accounts.tv_balance (gedrosselt, s. mt5BalanceAusInstanzen)
       try{ mt5BalanceAusInstanzen(dd.instances || []) }catch(e){ console.warn('[mt5-balance]', e) }
+      // METATRADER5-PAKET (08.10.2026, Jacob The5%ers rot: „MetaTrader5-Paket fehlt" im Order-Bot): das Panel prüft sein Python selbst
+      // (mt5_update.paket) und installiert nach; klappt das nicht, hier sichtbar am PC — höchstens alle 30 min
+      try{
+        const pk = dd.mt5_update && dd.mt5_update.paket
+        if(pk && pk.ok === false && Date.now() - (window._mt5PaketToastAt || 0) > 1800000 && typeof atToast === 'function'){
+          window._mt5PaketToastAt = Date.now()
+          atToast(pk.app_sperre
+            ? `⚠ Windows blockiert MetaTrader5 (Intelligente App-Steuerung) — Echo-Starts scheitern, Copier starten nach einem Neustart nicht mehr. Am PC: Windows-Sicherheit → App- & Browsersteuerung → Intelligente App-Steuerung. Nicht neu installieren.`
+            : pk.pip_kennt
+            ? `⚠ MetaTrader5 im Python des Copier-Panels installiert, der Import bricht aber — Echo-Starts scheitern. Nicht neu installieren, melden: ${String(pk.fehler || '').slice(0, 140)} (${pk.python || '?'})`
+            : `⚠ MetaTrader5-Paket fehlt im Python des Copier-Panels — Echo-Starts scheitern. Fix am PC: "${pk.python || 'python'}" -m pip install MetaTrader5 (${String(pk.fehler || '').slice(0, 120)})`, 'end')
+        }
+      }catch(_){}
       const pc = mt5FleetPcId()
       // Wem gehoeren die Instanzen dieses PCs? Dem eingeloggten Profil — die
       // Flotte gruppiert damit pro PERSON (25.08.2026, Finns Layout-Ansage).
@@ -28055,6 +28068,12 @@
   // Copier-Panel (stille Aufgabe „Prophos MT5-Update", .930/.1337). ✗ → am PC im Copier-Panel „MT5-Updates ohne Nachfrage einrichten" klicken.
   function admPcsMt5UpdZelle(m){
     if(!m || typeof m !== 'object') return '<td style="color:var(--sub)" title="Kein Stand — der Tab an diesem PC ist älter als .1337 oder das Copier-Panel läuft nicht">–</td>'
+    // MetaTrader5-Paket im Panel-Python (08.10.2026, Jacob The5%ers rot): fehlt es, scheitern Echo-Starts — vor dem Update-Stand zeigen
+    const pk = m.paket
+    if(pk && pk.ok === false && pk.app_sperre) return `<td title="${escapeHtml(`Windows blockiert MetaTrader5 im Python des Copier-Panels (${pk.python || '?'}) — Intelligente App-Steuerung: ${pk.fehler || ''}. Echo-Starts scheitern, Copier starten nach einem Neustart nicht mehr. Am PC: Windows-Sicherheit → App- & Browsersteuerung → Intelligente App-Steuerung. Nicht neu installieren.`)}"><span style="color:var(--danger);font-weight:600">MT5 von Windows blockiert</span></td>`
+    if(pk && pk.ok === false) return `<td title="${escapeHtml(pk.pip_kennt
+        ? `MetaTrader5 im Python des Copier-Panels (${pk.python || '?'}) installiert, der Import bricht aber: ${pk.fehler || ''} — nicht neu installieren, Fehler melden`
+        : `MetaTrader5-Paket fehlt im Python des Copier-Panels (${pk.python || '?'}): ${pk.fehler || ''} — das Panel installiert stündlich selbst nach; sonst am PC: "${pk.python || 'python'}" -m pip install MetaTrader5`)}"><span style="color:var(--danger);font-weight:600">${pk.pip_kennt ? 'MT5-Import kaputt' : 'MT5-Paket fehlt'}</span></td>`
     if(m.fehler) return `<td style="color:var(--sub)" title="${escapeHtml(String(m.fehler))}">?</td>`
     const aus = Number(m.ausstehend) || 0, warten = aus ? ` · ${aus} wartet` : ''
     if(m.aufgabe_ok) return `<td title="Stille Aufgabe eingerichtet — neue MetaTrader-Versionen kommen ohne Nachfrage${aus ? ` (${aus} Build${aus === 1 ? '' : 's'} wartet auf Leerlauf)` : ''}"><span style="color:var(--good);font-weight:600">✓</span>${warten}</td>`
@@ -41808,7 +41827,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1356'
+  const OS_TAB_BUILD = '2026-09-22.1357'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
