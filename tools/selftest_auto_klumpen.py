@@ -63,12 +63,14 @@ def main():
           "B|apex": T(None, "B", "apex", 610, 2.0, 700), "C|fundednext": T(None, "C", "fundednext", 670, 2.0, 700)}
     for s in range(4):
         r, _m, w = a["ap_richtungen_delta"](tr, 0, 0, random.Random(s), 25, einsatz=EK, mit_wert=True)
-        check(r["A|tradeify#1"] == r["A|tradeify#2"] and r["B|apex"] != r["A|tradeify#1"] and r["C|fundednext"] != r["A|tradeify#1"]
-              and w[4] == 0, f"aufgeteilte Tranche (seed {s}): beide Tradeify gleich gerichtet (60 min < 90 = ein Block), Gegengewicht dazwischen")   # w[4] = ID-Mischung (seit 09.10.2026 „ID × Firma einseitig" an Stelle 2)
+        # seit 09.10.2026 ~03:45 (Finn: Richtung je Trade frei, nur nie gleichzeitig): die beiden Tradeify-Teile dürfen gegenläufig sein —
+        # die Strafe „ID × Firma ganz einseitig" (w[2]) mischt sie; Netto bleibt ausgeglichen
+        check(r["A|tradeify#1"] != r["A|tradeify#2"] and w[2] == 0 and w[4] == 0,
+              f"aufgeteilte Tranche (seed {s}): Tradeify-Teile gemischt, keine ID-Mischungs-Strafe ({r}, {w})")   # w[4] = ID-Mischung
     tr = {"A|tradeify#1": T("sell", "A", "tradeify", 600, 3.0, 720, "A|tradeify"),
           "A|tradeify#2": T(None, "A", "tradeify", 660, 3.0, 720, "A|tradeify")}
     r, _m = a["ap_richtungen_delta"](tr, 0, 0, random.Random(2), 25, einsatz=EK)
-    check(r == {"A|tradeify#1": "sell", "A|tradeify#2": "sell"}, "Richtungsschutz: fester Teil legt die ganze Gruppe fest (nie Ablehnung)")
+    check(r["A|tradeify#1"] == "sell", f"Richtungsschutz: fester Teil bleibt fest (nie Ablehnung), der andere frei ({r})")
     # seit 08.10.2026 ~17:00 Dubai < 3 min statt < 10 min (AP_GEGEN_DICHT_MIN): 2 min auseinander
     tr = {"A|tradeify": T(None, "A", "tradeify", 600, 3.0, 300), "B|tradeify": T(None, "B", "tradeify", 602, 3.0, 300),
           "C|apex": T(None, "C", "apex", 700, 3.0, 300), "D|apex": T(None, "D", "apex", 702, 3.0, 300)}

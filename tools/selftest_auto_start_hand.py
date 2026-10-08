@@ -10,8 +10,8 @@ from datetime import datetime, timedelta, timezone
 HIER = os.path.dirname(os.path.abspath(__file__))
 APP = os.path.join(os.path.dirname(HIER), "app.py")
 PID = "11111111-2222-3333-4444-555555555555"
-KONST = ("AP_CFD_ROUTEN", "AP_7T_TZ", "AP_TZ_TAG", "AP_START_HAND_VORLAUF_MIN", "AP_VERTEIL_GEGEN_MIN", "AP_FIRMA_ABSTAND_MIN", "AP_RICHTUNG_TXT")
-FUNK = ("_wd_num", "_ap_norm", "ap_firma_key", "_ap_tz", "_ap_ts", "_ap_zahl", "_ap_hhmm_txt", "ap_start_zeit", "ap_start_hand_pruefen", "ap_werte_pruefen",
+KONST = ("AP_CFD_ROUTEN", "AP_7T_TZ", "AP_TZ_TAG", "AP_START_HAND_VORLAUF_MIN", "AP_VERTEIL_GEGEN_MIN", "AP_FIRMA_ABSTAND_MIN", "AP_RICHTUNG_TXT", "AP_RICHTUNG_LAUF_FEST_MIN")
+FUNK = ("_ap_gegen_eigen", "_wd_num", "_ap_norm", "ap_firma_key", "_ap_tz", "_ap_ts", "_ap_zahl", "_ap_hhmm_txt", "ap_start_zeit", "ap_start_hand_pruefen", "ap_werte_pruefen",
         "_ap_werte_setzen")
 
 
@@ -65,13 +65,17 @@ def main():
     g, v = P("p1", 620, plaene, starts, {}, 300)
     check(g.startswith("Firmen-Abstand: diese ID") and v == 621, f"eigener Plan derselben Firma zur selben Minute → 1 min ({g}, {v})")
     check(P("p1", 610, plaene, starts, {}, 300)[0] is None, "eigener Plan derselben Firma 10 min weiter → ok (60 min je ID × Firma weg)")
-    g, v = P("p1", 800, plaene, starts, {}, 300)
-    check(g.startswith("Richtungsschutz") and "short" in g and v == 1020, f"Gegenrichtung derselben ID × Firma um 900 (Laufzeit 120) → Vorschlag 1020 ({g}, {v})")
-    check(P("p1", 800, plaene, starts, {}, 300, laufzeit_min=60)[0] is None, "mit Laufzeit 60 min ist 800 frei")
+    # seit 09.10.2026 ~03:45 (Finn: Richtung je Trade frei, nur nie gleichzeitig): ein GEPLANTER Short derselben ID × Firma sperrt nichts,
+    # ein heute GESTARTETER sperrt AP_RICHTUNG_LAUF_FEST_MIN (90) ab seinem Start
+    check(P("p1", 800, plaene, starts, {}, 300)[0] is None and P("p1", 899, plaene, starts, {}, 300)[0] is None,
+          "geplanter Short derselben ID × Firma um 900 sperrt den Long um 800/899 nicht mehr")
+    st_g = starts + [{"user_id": U, "firma": "the5ers", "start": 700.0, "richtung": "sell"}]
+    g, v = P("p1", 750, plaene, st_g, {}, 300)
+    check(g.startswith("Richtungsschutz") and "short" in g and v == 790, f"gestarteter Short derselben ID × Firma um 700 → Vorschlag 790 ({g}, {v})")
     fest = {f"{U}|the5ers": {"richtung": "sell", "durch": "läuft gerade", "plan_id": "x"}}
     g, v = P("p1", 330, plaene, starts, fest, 300)
-    check(g.startswith("Richtungsschutz: bei dieser ID und Firma läuft gerade short") and v == 420,
-          f"Gegenrichtung läuft gerade → abgelehnt, Vorschlag nach der Laufzeit ab jetzt (300 + 120) ({g}, {v})")
+    check(g.startswith("Richtungsschutz: bei dieser ID und Firma läuft gerade short") and v == 390,
+          f"Gegenrichtung läuft gerade → abgelehnt, Vorschlag 90 min ab jetzt (300 + 90, seit 09.10.2026) ({g}, {v})")
     check(P("p1", 330, plaene, starts, {f"{U}|the5ers": {"richtung": "buy", "durch": "läuft gerade"}}, 300)[0] is None,
           "gleiche Richtung läuft → ok")
     check(P("p1", 1440, plaene, starts, {}, 300)[0].startswith("Startzeit liegt nach dem Planer-Tag"), "nach 24:00 dt → nur heute")
@@ -79,7 +83,7 @@ def main():
     fremd = plan("m1", U, "the5ers", "buy", None)                       # Plan liegt bisher an einem anderen Tag
     check(P(fremd, 330, plaene, starts, {}, 300) == (None, None) and P(fremd, 400, plaene, starts, {}, 300)[0].startswith("Firmen-Abstand"),
           "Plan aus einem anderen Tag (als Objekt) wird gegen den Ziel-Tag geprüft")
-    check(P("p1", 300 + 130, plaene, starts, fest, 300)[0] is None, "läuft gerade short, Start nach der Laufzeit (120 min ab jetzt) → ok")
+    check(P("p1", 300 + 95, plaene, starts, fest, 300)[0] is None, "läuft gerade short, Start ≥ 90 min ab jetzt → ok")
     check(P("p1", 400, plaene, starts, {}, 300, zeit=lambda m: "DUBAI")[0].endswith("um DUBAI — mindestens 1 min Abstand"),
           "Meldung mit Zeit-Formatierer (Route: Dubai)")
 

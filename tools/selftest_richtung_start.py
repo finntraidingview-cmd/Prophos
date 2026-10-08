@@ -89,15 +89,17 @@ def main():
     check(not e["drehen"] and not e["markieren"], "Plan mit Hedge (WD/Orbit V3) → unberührt")
     e = k([plan("p1", U1, "tradeify", "buy", 630)], offen + [{"user_id": U1, "firma": "tradeify", "richtung": "buy"}], 600)
     check(not e["drehen"] and not e["markieren"], "läuft long UND short (Widerspruch) → nichts entschieden")
-    # vorher geplant (Hand-Plan short 10:20), Auto-Plan long 10:30 → drehen; später geplant zählt nicht
+    # seit 09.10.2026 ~03:45 (Finn: Richtung je Trade frei, nur nie gleichzeitig): ein bloß GEPLANTER Gegen-Plan legt nichts fest —
+    # weder ein Hand-Plan davor noch danach; der Start-Wächter im PC-Tab klärt es, falls beim Start doch etwas läuft
     pl = [plan("h1", U1, "tradeify", "sell", 620, auto=False, best=True, aend=False, fest="Handplan"), plan("p1", U1, "tradeify", "buy", 630)]
     e = k(pl, [], 600)
-    check([d["plan_id"] for d in e["drehen"]] == ["p1"] and "vorher geplant short" in e["drehen"][0]["grund"] and not e["markieren"],
-          "Hand-Plan short VOR dem Auto-Plan geplant → Auto-Plan gedreht, Hand-Plan nicht markiert")
+    check(not e["drehen"] and not e["markieren"], "Hand-Plan short VOR dem Auto-Plan geplant → nichts gedreht, nichts markiert")
     pl = [plan("p1", U1, "tradeify", "buy", 620), plan("h1", U1, "tradeify", "sell", 640, auto=False, best=True, aend=False, fest="Handplan")]
     e = k(pl, [], 600)
-    check(not e["drehen"] and [m["plan_id"] for m in e["markieren"]] == ["h1"],
-          "Hand-Plan short NACH dem Auto-Plan long → Auto-Plan bleibt, der spätere Hand-Plan wird markiert")
+    check(not e["drehen"] and not e["markieren"], "Hand-Plan short NACH dem Auto-Plan long → nichts gedreht, nichts markiert")
+    pl = [plan("h1", U1, "tradeify", "sell", 610, auto=False, best=True, aend=False, fest="schon gestartet"), plan("p1", U1, "tradeify", "buy", 630)]
+    e = k(pl, [], 615)
+    check([d["plan_id"] for d in e["drehen"]] == ["p1"], "geclaimter Short (Start läuft) 10:10 → Auto-Plan long 10:30 gedreht")
     pl = [plan("p1", U1, "tradeify", "buy", 630), plan("p2", U1, "tradeify", "buy", 632)]
     e = k(pl, offen, 600)
     check(sorted(d["plan_id"] for d in e["drehen"]) == ["p1", "p2"], "Tranche (zwei Konten derselben ID+Firma) → beide gedreht")

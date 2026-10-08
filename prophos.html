@@ -40326,14 +40326,14 @@
       const meine = po ? (/sell/i.test(po.richtung) ? 'SHORT' : 'LONG') : null
       // Laufende/geplante V2-Pläne derselben Firma dieser ID, frisch aus der DB (25.09.2026 nachmittags, Finn-Fund bei Mike):
       // Echo V2 startet keinen Copier → firmLiveRichtungen (mt5_live) sah den laufenden FundedNext-Trade oft gar nicht.
-      let kPlan = null; try{ kPlan = await v2RichtungKonflikt({ firm: plan.masterFirm, ohneId: plan.id, frisch: true, start: Date.now() }) }catch(_){}
+      let kPlan = null; try{ kPlan = await v2RichtungKonflikt({ firm: plan.masterFirm, ohneId: plan.id, frisch: true }) }catch(_){}
       const dirs = await window.firmLiveRichtungen(plan.masterFirm)
       let laufDir = dirs.long.length ? 'LONG' : dirs.short.length ? 'SHORT' : null
       if(kPlan && kPlan.lauf && meine && kPlan.lauf.toUpperCase() !== meine){ rkSperre = kPlan; fail('v2dir', `${escapeHtml(kPlan.text)} — nicht gestartet (Richtungs-Schutz).`) }
       else if(laufDir && meine && laufDir !== meine){ rkSperre = { lauf: laufDir.toLowerCase(), text: `${plan.masterFirm || '—'} läuft bereits ${laufDir}` }; fail('v2dir', `${fName} läuft bereits <b>${laufDir}</b> — deine <b>${meine}</b>-Order wäre die GEGENRICHTUNG (Selbst-Hedge). Nicht gestartet.`) }
       else if(laufDir) _pfSet('v2dir', 'ok', `${fName} läuft bereits ${laufDir} — gleiche Richtung ✓`)
       else {
-        const gep = (typeof firmGeplanteRichtungen === 'function') ? firmGeplanteRichtungen(plan.masterFirm, plan.id, Date.now()) : { long: [], short: [] }
+        const gep = (typeof firmGeplanteRichtungen === 'function') ? firmGeplanteRichtungen(plan.masterFirm, plan.id) : { long: [], short: [] }
         const gepDir = (gep.long.length && gep.short.length) ? null : gep.long.length ? 'LONG' : gep.short.length ? 'SHORT' : null
         if(gepDir && meine && gepDir !== meine){ rkSperre = { lauf: gepDir.toLowerCase(), quelle: 'plan', text: `${plan.masterFirm || '—'}: gespeicherter Plan auf ${gepDir}` }; fail('v2dir', `${fName} hat einen gespeicherten Plan auf <b>${gepDir}</b> — deine <b>${meine}</b>-Order wäre die Gegenrichtung. Nicht gestartet.`) }
         else _pfSet('v2dir', 'ok', gepDir ? `Kein laufender Trade bei ${fName} — gespeicherter Plan ebenfalls ${gepDir} ✓` : `Kein laufender Trade bei ${fName} — Richtung frei.`)
@@ -40593,7 +40593,7 @@
         // Widersprechen sich die gespeicherten Pläne selbst (LONG und SHORT),
         // gibt es keine verlässliche Richtung → nur Warnung, kein Block.
         const gep = (typeof firmGeplanteRichtungen === 'function')
-          ? firmGeplanteRichtungen(plan.masterFirm, plan.id, Date.now()) : { long: [], short: [] }
+          ? firmGeplanteRichtungen(plan.masterFirm, plan.id) : { long: [], short: [] }
         const gepDir = (gep.long.length && gep.short.length) ? null
           : gep.long.length ? 'LONG' : gep.short.length ? 'SHORT' : null
         const gepArr = gepDir === 'LONG' ? gep.long : gep.short
@@ -41895,15 +41895,13 @@
    * (ohnePlanId) zählt nie: die eigene gespeicherte Richtung darf man im
    * Popup jederzeit ändern. Duplikum-Pläne tragen nie eine richtung → dort
    * greift wie bisher nur der Live-Schutz. */
-  /* RICHTUNG IN DER NÄHE (09.10.2026, Finn: „dass eine Person bei einer ID nur in eine Richtung tradet … der erste Tradeify geht long,
-   * ist beendet, eine Stunde später kann z. B. einer short gehen"): der Planer mischt je ID × Firma, wenn die Starts ≥ 90 min auseinander
-   * liegen (app.py AP_RICHTUNG_WECHSEL_MIN). Ein GEPLANTER Plan zählt in den Richtungs-Prüfungen deshalb nur, wenn er weniger als 90 min
-   * vom Bezug (Start dieses Plans bzw. jetzt) entfernt startet — sonst blockierte der Nachmittags-Short schon den Vormittags-Long.
-   * Laufende Trades zählen immer (nie Long und Short gleichzeitig); ohne Startzeit vorsichtshalber auch. */
-  const RK_WECHSEL_MIN = 90
-  const rkPlanNah = (status, startIso, bezugMs) => status !== 'planned' || bezugMs == null || !startIso
-    || !(Date.parse(startIso) > 0) || Math.abs(Date.parse(startIso) - bezugMs) < RK_WECHSEL_MIN * 60000
-  function firmGeplanteRichtungen(firmName, ohnePlanId, bezugMs){
+  /* NUR LAUFENDE ZÄHLEN (09.10.2026 ~03:45 Dubai, Finn: „Mach diese 90-Minuten-Regel weg … Das ist einfach am Ende ein Zufallsprinzip.
+   * Es darf halt nur nie gleichzeitig sein … um :51 Long, dann um :56, und um :57 geht ein Short rein — auch okay"): die Richtung ist je
+   * Trade frei (app.py AP_RICHTUNG_WECHSEL_MIN = 0). In den Richtungs-Prüfungen (Start-Wächter, Echo-V2-Check, Puls-Sperre, Order-Popup)
+   * zählen deshalb nur LAUFENDE Trades derselben ID+Firma und geplante, deren Start schon läuft (geclaimt bzw. Order gesendet — zwei
+   * Pläne in derselben Minute: der erste ist geclaimt, wenn der zweite prüft); ein bloß geplanter Plan sperrt nichts mehr. */
+  const rkZaehlt = (status, geclaimt) => status === 'open' || (status === 'planned' && !!geclaimt)
+  function firmGeplanteRichtungen(firmName, ohnePlanId){
     const norm = f => String(f || '').toLowerCase().replace(/[^a-z0-9]/g, '')
     const ziel = norm(firmName)
     const out = { long: [], short: [] }
@@ -41913,7 +41911,7 @@
       if(p.status !== 'planned' && p.status !== 'open') continue
       if(p.richtung !== 'buy' && p.richtung !== 'sell') continue
       if(norm(p.masterFirm) !== ziel) continue
-      if(!rkPlanNah(p.status, p.startUm, bezugMs)) continue
+      if(!rkZaehlt(p.status, p.startUmGestartetAt || p.orbitGesendetAt)) continue
       out[p.richtung === 'buy' ? 'long' : 'short'].push({
         wer: p.masterName || '?', quelle: 'Plan', symbol: p.masterSymbol || ''
       })
@@ -41934,13 +41932,11 @@
     const ziel = norm(o && o.firm), ohne = o && o.ohneId != null ? String(o.ohneId) : null
     let liste = null
     if(o && o.frisch){
-      try{ const { data, error } = await supabase.from('trade_plans').select('id,status,richtung,master_firm,master_name,start_um').in('status', ['open', 'planned'])
-           if(!error && Array.isArray(data)) liste = data.map(r => ({ id: r.id, status: r.status, richtung: r.richtung, firm: r.master_firm, name: r.master_name, start: r.start_um })) }catch(_){}
+      try{ const { data, error } = await supabase.from('trade_plans').select('id,status,richtung,master_firm,master_name,start_um_gestartet_at,orbit_gesendet_at').in('status', ['open', 'planned'])
+           if(!error && Array.isArray(data)) liste = data.map(r => ({ id: r.id, status: r.status, richtung: r.richtung, firm: r.master_firm, name: r.master_name, geclaimt: r.start_um_gestartet_at || r.orbit_gesendet_at })) }catch(_){}
     }
     if(!liste) liste = (tradePlans || []).filter(p => p.status === 'open' || p.status === 'planned')
-      .map(p => ({ id: p.id, status: p.status, richtung: p.richtung, firm: p.masterFirm, name: p.masterName, start: p.startUm }))
-    // o.start (ms oder ISO, 09.10.2026): geplante Pläne nur in ±RK_WECHSEL_MIN um diesen Start — ohne o.start wie bisher alle
-    const bezug = o && o.start != null ? (typeof o.start === 'number' ? o.start : Date.parse(o.start)) : null
+      .map(p => ({ id: p.id, status: p.status, richtung: p.richtung, firm: p.masterFirm, name: p.masterName, geclaimt: p.startUmGestartetAt || p.orbitGesendetAt }))
     const lauf = { long: [], short: [] }, gep = { long: [], short: [] }
     for(const p of liste){
       if(ohne && String(p.id) === ohne) continue
@@ -41950,8 +41946,9 @@
       // long ist — es gilt nur, wenn bei der gleichen ID unter der gleichen Firma schon eine Richtung läuft"). Die Koordinations-Regel
       // „laufender Plan sperrt für JEDE Firma" war falsch und ist raus; ohne gewählte Firma sperrt nichts.
       if(!ziel || norm(p.firm) !== ziel) continue
-      if(!rkPlanNah(p.status, p.start, bezug > 0 ? bezug : null)) continue
+      if(!rkZaehlt(p.status, p.geclaimt)) continue        // bloß geplant sperrt nichts (09.10.2026)
       if(p.status === 'open') lauf[seite].push({ name: p.name, firm: p.firm, verb: 'läuft gerade' })
+      else if(p.geclaimt) lauf[seite].push({ name: p.name, firm: p.firm, verb: 'startet gerade' })   // Start läuft = wie laufend
       else gep[seite].push({ name: p.name, firm: p.firm, verb: 'ist geplant' })
     }
     try{
@@ -42223,7 +42220,7 @@
       }
     }
     dirFrei()
-    const gep = firmGeplanteRichtungen(plan.masterFirm, plan.id, Date.now())
+    const gep = firmGeplanteRichtungen(plan.masterFirm, plan.id)
     const gepDir = (gep.long.length && gep.short.length) ? null
       : gep.long.length ? 'long' : gep.short.length ? 'short' : null
     if(gepDir){
@@ -42836,7 +42833,7 @@
     // RICHTUNGS-SCHUTZ Orbit V2 / Winning Days Farm (25.09.2026): frisch aus der DB, bevor irgendetwas an Puls geht — gilt für den
     // Karten-Klick, die Startzeit/den Farmer (tpStartUmTick) und den Remote-Start vom Mac/Handy (orderSignalTick → hier am PC)
     if(pv2){
-      let k = null; try{ k = await v2RichtungKonflikt({ firm: plan.masterFirm, ohneId: plan.id, frisch: true, start: Date.now() }) }catch(_){}
+      let k = null; try{ k = await v2RichtungKonflikt({ firm: plan.masterFirm, ohneId: plan.id, frisch: true }) }catch(_){}
       if(k && k.lauf && k.lauf !== (dir === 'sell' ? 'short' : 'long')){
         const t = k.text + ' — nicht gestartet (Richtungs-Schutz).'
         if(fern) return fern.melde({ ok:false, msg: t })
@@ -46384,7 +46381,7 @@
   async function rkVorStart(plan){
     if(!rkGilt(plan)) return null
     let k = null
-    try{ k = await v2RichtungKonflikt({ firm: plan.masterFirm, ohneId: plan.id, frisch: true, start: plan.startUm || Date.now() }) }catch(_){ return null }
+    try{ k = await v2RichtungKonflikt({ firm: plan.masterFirm, ohneId: plan.id, frisch: true }) }catch(_){ return null }
     const meine = plan.richtung === 'sell' ? 'short' : 'long', alt = rkFlag(plan)
     if(!k || !k.lauf || k.lauf === meine){
       if(alt && alt.status !== 'konflikt'){ try{ await baselinePatch(plan.id, { richtung_konflikt: null }, 'planned') }catch(_){} }   // aufgelöst

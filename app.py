@@ -17654,8 +17654,8 @@ def _ap_fest_ref(p, mitternacht, jetzt):
     def minute(roh):
         t = _ap_ts(roh)                # Postgres-Formen („ +00", 1–6 Nachkommastellen) sicher
         return (t - mitternacht).total_seconds() / 60.0 if t else None
-    if p.get("status") == "open":
-        m = minute(p.get("started_at"))
+    if p.get("status") == "open" or p.get("start_um_gestartet_at") or p.get("orbit_gesendet_at"):   # geclaimt/gesendet = Start läuft
+        m = minute(p.get("started_at")) if p.get("status") == "open" else minute(p.get("start_um"))
         return (m if m is not None else (jetzt - mitternacht).total_seconds() / 60.0, p.get("richtung"), True)
     return (minute(p.get("start_um")), p.get("richtung"), False)
 
@@ -18607,7 +18607,20 @@ def ap_misch_text(vor, nach, namen=None):
     return f"{wer} {wo} {v.get('long', 0)}/{v.get('short', 0)} → {n.get('long', 0)}/{n.get('short', 0)} long/short über alle IDs"
 
 
-AP_RICHTUNG_WECHSEL_MIN = 90   # Teile derselben ID × Firma mit ≥ 90 min Startabstand dürfen gegenläufig sein (Finn 09.10.2026)
+# RICHTUNG JE TRADE FREI (Finn 09.10.2026 ~03:45 Dubai, ersetzt die 90-min-Blöcke aus .1395: „Mach diese 90-Minuten-Regel weg … Das ist
+# einfach am Ende ein Zufallsprinzip. Es darf halt nur nie gleichzeitig sein … um :51 Long, dann um :56, und um :57 geht ein Short rein —
+# auch okay. Nur: die IDs dürfen sich untereinander nicht gegenhedgen"). 0 = keine Blöcke: jeder Teil derselben ID × Firma bekommt seine
+# Richtung frei aus der Mischung/dem Zufall; geplante Pläne legen nichts fest. „Nie gleichzeitig" sichern laufende/geclaimte Trades
+# (AP_RICHTUNG_LAUF_FEST_MIN) und der Start-Wächter im PC-Tab (rkVorStart: erst verschieben, dann drehen). Über IDs unverändert.
+AP_RICHTUNG_WECHSEL_MIN = 0
+AP_RICHTUNG_LAUF_FEST_MIN = 90   # ein laufender/geclaimter Trade legt Teile fest, die weniger als 90 min nach seinem Start starten
+
+
+def _ap_gegen_eigen(t, s, gestartet):
+    """Bot (Verteilen, Band-/Mischungs-Züge, 09.10.2026 — Finn: Richtung je Trade frei, nur nie gleichzeitig): sperrt ein Trade derselben
+    ID × Firma in Gegenrichtung mit Start s die Minute t? Nur ein heute gestarteter (läuft womöglich noch) für t in [s, s +
+    AP_RICHTUNG_LAUF_FEST_MIN); geplante nie — vorher hielt der Bot laufzeit_min (180) Abstand zu jeder Gegenrichtung derselben ID × Firma."""
+    return bool(gestartet) and float(s) <= float(t) < float(s) + AP_RICHTUNG_LAUF_FEST_MIN
 
 
 def ap_richtung_bloecke(tranchen, abstand_min=None):
@@ -18635,21 +18648,18 @@ def ap_richtung_bloecke(tranchen, abstand_min=None):
 
 def ap_fest_am_start(refs, start, abstand_min=None):
     """REIN RECHNEND (09.10.2026): Richtung, die ein schon laufender bzw. geplanter Trade derselben ID × Firma einem Teil mit Start `start`
-    vorgibt — nur in seiner Nähe: refs = [(minute | None, richtung, laufend)]. Laufend: Teile, die weniger als AP_RICHTUNG_WECHSEL_MIN nach
-    seinem Start (unbekannt → jetzt, vom Aufrufer) starten; geplant: |Abstand| < AP_RICHTUNG_WECHSEL_MIN; ohne Startzeit vorsichtshalber
-    immer. Spätere Teile sind frei — läuft dort beim Start doch noch die Gegenrichtung, verschiebt der Start-Wächter im PC-Tab (rkVorStart).
+    vorgibt — nur in seiner Nähe: refs = [(minute | None, richtung, laufend)]. Nur LAUFENDE bzw. geclaimte (Start läuft) zählen: Teile,
+    die weniger als AP_RICHTUNG_LAUF_FEST_MIN nach seinem Start (unbekannt → jetzt, vom Aufrufer) starten. Geplante Pläne legen seit
+    09.10.2026 ~03:45 nichts mehr fest (Finn: Richtung je Trade frei, nur nie gleichzeitig). Spätere Teile sind frei — läuft dort beim Start doch noch die Gegenrichtung, verschiebt der Start-Wächter im PC-Tab (rkVorStart).
     Mehrere Treffer: der nächstgelegene. → 'buy' | 'sell' | None"""
-    w = float(AP_RICHTUNG_WECHSEL_MIN if abstand_min is None else abstand_min)
+    w = float(AP_RICHTUNG_LAUF_FEST_MIN if abstand_min is None else abstand_min)
     best = None
     for ref, r, laufend in refs or ():
-        if r not in ("buy", "sell"):
+        if r not in ("buy", "sell") or not laufend:
+            continue                   # geplante Pläne legen nichts fest (Finn 09.10.2026 ~03:45: Richtung je Trade frei)
+        d = float(start) - float(ref) if ref is not None else 0.0
+        if d >= w:
             continue
-        if ref is None:
-            d = 0.0
-        else:
-            d = float(start) - float(ref)
-            if (d >= w) if laufend else (abs(d) >= w):
-                continue
         if best is None or abs(d) < best[0]:
             best = (abs(d), r)
     return best[1] if best else None
@@ -19110,9 +19120,9 @@ def ap_verteilung(gruppe, je, zustand, jetzt_min, zeiten, rnd, gestartet=None, l
         fen = ap_fenster_von(zeiten, s0)
         hi = int(fen[1]) - 1 if fen else None
         richtung = zustand[i]["richtung"]
-        andere = [(neu.get(k, zustand[k]["start"]), zustand[k]["richtung"], f"{je[k]['user_id']}|{je[k]['firma']}")
+        andere = [(neu.get(k, zustand[k]["start"]), zustand[k]["richtung"], f"{je[k]['user_id']}|{je[k]['firma']}", False)
                   for k in zustand if k != i and str(je[k]["user_id"]) == uid]
-        andere += [(float(x["start"]), x.get("richtung"), f"{x['user_id']}|{x['firma']}") for x in gestartet or ()
+        andere += [(float(x["start"]), x.get("richtung"), f"{x['user_id']}|{x['firma']}", True) for x in gestartet or ()
                    if str(x.get("user_id")) == uid and x.get("start") is not None]
         fremd = [(neu.get(k, zustand[k]["start"]), zustand[k]["richtung"]) for k in zustand
                  if str(je[k]["user_id"]) != uid and je[k]["firma"] == firma]
@@ -19136,11 +19146,11 @@ def ap_verteilung(gruppe, je, zustand, jetzt_min, zeiten, rnd, gestartet=None, l
             for s, r in fremd:
                 if r in ("buy", "sell") and r != richtung and abs(t - s) < AP_GEGEN_DICHT_MIN:
                     return False                                   # kein neuer Malus „dicht gegenläufig gleiche Firma"
-            for s, r, g in andere:
+            for s, r, g, gest in andere:
                 if abs(t - s) < max(abst_pc, gi_v * f):
                     return False                                   # PC + Abstand je ID
-                if g == gruppe and r in ("buy", "sell") and r != richtung and abs(t - s) < gegen:
-                    return False                                   # nie Gegenrichtung derselben ID × Firma zugleich offen
+                if g == gruppe and r in ("buy", "sell") and r != richtung and _ap_gegen_eigen(t, s, gest):
+                    return False                                   # nie gegen einen gestarteten Trade derselben ID × Firma (09.10.2026)
             return True
         ziel = None
         fk = _ap_firma_konflikt(i, je, z_jetzt, gestartet, gfirma)
@@ -19460,8 +19470,8 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                            (einsatz or {}).get("laufzeit")):
             return False                                 # gegenläufiger Start einer anderen ID derselben Firma ±3 min (geplant/gestartet)
         for k_, s_, r_, u_, f_ in firma_:
-            if u_ == uid and r_ in ("buy", "sell") and r_ != r and (s_ <= t < s_ + laufz or t <= s_ < t + laufz):
-                return False                             # nie gegen einen Trade derselben ID × Firma
+            if u_ == uid and r_ in ("buy", "sell") and r_ != r and _ap_gegen_eigen(t, s_, k_ is None):
+                return False                             # nie gegen einen gestarteten Trade derselben ID × Firma (geplante frei, 09.10.2026)
             if abs(t - s_) < gfirma:
                 return False                             # Firmen-Abstand zu jedem Start derselben Firma (seit 08.10.2026 auch eigene ID)
             if u_ != uid and r_ in ("buy", "sell") and r_ != r and abs(t - s_) < AP_GEGEN_DICHT_MIN:
@@ -19493,7 +19503,7 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                            jetzt_min, (einsatz or {}).get("laufzeit")):
             return False                                 # andere ID startet ±3 min gegenläufig (über IDs sonst erlaubt, 08.10.2026)
         for k_, s_, r_, u_, f_ in firma_:
-            if u_ == uid and k_ is None and r_ in ("buy", "sell") and r_ != r and (s_ <= t < s_ + laufz or t <= s_ < t + laufz):
+            if u_ == uid and k_ is None and r_ in ("buy", "sell") and r_ != r and _ap_gegen_eigen(t, s_, True):
                 return False                             # heute gestarteter Trade derselben ID × Firma in Gegenrichtung
             if u_ != uid and r_ in ("buy", "sell") and r_ != r and abs(t - s_) < AP_GEGEN_DICHT_MIN:
                 return False
@@ -19687,8 +19697,8 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                 for k, s, r, u, ff in alle:
                     if k == i:
                         continue
-                    if u == uid and ff == fa and r in ("buy", "sell") and r != noetig and (s <= t < s + laufz or t <= s < t + laufz):
-                        return False                         # nie gegen einen laufenden/geplanten Trade derselben ID × Firma
+                    if u == uid and ff == fa and r in ("buy", "sell") and r != noetig and _ap_gegen_eigen(t, s, k is None):
+                        return False                         # nie gegen einen gestarteten Trade derselben ID × Firma (geplante frei, 09.10.2026)
                     if ff == fa and abs(t - s) < gfirma:
                         return False                         # Firmen-Abstand zu jedem Start derselben Firma (seit 08.10.2026 auch eigene ID)
                     if u != uid and ff == fa and r in ("buy", "sell") and r != noetig and abs(t - s) < AP_GEGEN_DICHT_MIN:
@@ -20108,13 +20118,13 @@ def ap_richtung_konflikte(plaene, offen, jetzt_min, horizont_min=AP_RS_HORIZONT_
       sonst (bestätigt, Hand-Plan)        → markieren (Flag richtung_konflikt, nie still drehen).
     Pläne werden in Startreihenfolge abgearbeitet; ein gedrehter Plan zählt für spätere Pläne mit seiner neuen Richtung.
     Läuft dort long UND short (Widerspruch), wird nichts entschieden.
-    Seit 09.10.2026 (Finn: Mischung über den Tag) nur in der Nähe: ein laufender Trade (offen mit start_min; ohne Start wie bisher immer)
-    bzw. ein vorher geplanter zählt nur, wenn p weniger als AP_RICHTUNG_WECHSEL_MIN nach dessen Start startet — der Bot zwingt einen
-    späteren, bewusst gegenläufig geplanten Teil nicht zurück in eine Richtung; läuft beim Start doch noch die Gegenrichtung, verschiebt
-    der Start-Wächter im PC-Tab (rkVorStart) zuerst.
+    Seit 09.10.2026 (Finn: Richtung je Trade frei, nur nie gleichzeitig) zählen nur laufende bzw. geclaimte Trades (offen mit start_min;
+    ohne Start wie bisher immer), und nur, wenn p weniger als AP_RICHTUNG_LAUF_FEST_MIN nach deren Start startet; geplante legen nichts
+    fest. Der Bot zwingt nichts zurück in eine Richtung; läuft beim Start doch noch die Gegenrichtung, verschiebt der Start-Wächter im
+    PC-Tab (rkVorStart) zuerst.
     → {drehen [wie ap_umplanen, art 'richtung'], markieren [{plan_id, user_id, firma, gegen, durch, text}], frei [plan_id mit altem Bot-Flag]}"""
     jetzt_min = float(jetzt_min)
-    w = float(AP_RICHTUNG_WECHSEL_MIN)
+    w = float(AP_RICHTUNG_LAUF_FEST_MIN)
     lauf = []                          # (ID|Firma, Richtung, Startminute | None)
     for o in offen or ():
         if o.get("richtung") in ("buy", "sell"):
@@ -20138,14 +20148,7 @@ def ap_richtung_konflikte(plaene, offen, jetzt_min, horizont_min=AP_RS_HORIZONT_
         rs = {r2 for k2, r2, st in lauf if k2 == k and (st is None or float(p["start_min"]) - float(st) < w)}
         if len(rs) == 1:
             ziel, durch = next(iter(rs)), "läuft"
-        elif not rs:
-            vorher = {eff[q["plan_id"]] for q in reihe
-                      if q["plan_id"] != p["plan_id"] and f"{q['user_id']}|{q['firma']}" == k
-                      and (float(q["start_min"]), str(q["plan_id"])) < (float(p["start_min"]), str(p["plan_id"]))
-                      and float(p["start_min"]) - float(q["start_min"]) < w
-                      and eff.get(q["plan_id"]) in ("buy", "sell")}
-            if len(vorher) == 1:
-                ziel, durch = next(iter(vorher)), "geplant"
+        # „vorher geplant" legt seit 09.10.2026 ~03:45 nichts mehr fest (Finn: Richtung je Trade frei, nur nie gleichzeitig)
         name = p.get("firma_name") or p["firma"]
         if ziel is None or ziel == r:
             if alt_flag and alt_flag.get("quelle") == "bot":
@@ -21608,11 +21611,13 @@ def ap_start_hand_pruefen(plan_id, neu_min, plaene, starts, id_fest, jetzt_min, 
             return "Startzeit liegt nach dem Planer-Tag (00:00 deutsche Zeit)"
         # ein laufender Gegen-Trade blockiert nur innerhalb seiner Laufzeit ab jetzt (Start morgen früh: nicht mehr)
         if gegen and fest.get("richtung") == gegen and fest.get("durch") == "läuft gerade" and str(fest.get("plan_id")) != str(plan_id) \
-                and m - float(jetzt_min) < lz:
+                and m - float(jetzt_min) < AP_RICHTUNG_LAUF_FEST_MIN:     # 09.10.2026: wie der Planer (vorher laufzeit_min 180)
             return f"Richtungsschutz: bei dieser ID und Firma läuft gerade {AP_RICHTUNG_TXT[gegen]}"
-        for s, x in anders + st:
-            if str(x.get("user_id")) == u and x.get("firma") == f and gegen and x.get("richtung") == gegen and abs(s - m) < lz:
-                return f"Richtungsschutz: {AP_RICHTUNG_TXT[gegen]} derselben ID und Firma um {zt(s)} — näher als {lz:.0f} min"
+        # geplante Pläne derselben ID × Firma sperren seit 09.10.2026 nicht mehr (Finn: Richtung je Trade frei, nur nie gleichzeitig) —
+        # nur heute gestartete, solange sie laufen könnten
+        for s, x in st:
+            if str(x.get("user_id")) == u and x.get("firma") == f and gegen and x.get("richtung") == gegen and _ap_gegen_eigen(m, s, True):
+                return f"Richtungsschutz: {AP_RICHTUNG_TXT[gegen]} derselben ID und Firma seit {zt(s)} — kann noch laufen"
         for s, x in anders + st:
             if x.get("firma") == f and abs(s - m) < gap:
                 return f"Firmen-Abstand: {'andere ID' if str(x.get('user_id')) != u else 'diese ID'} bei derselben Firma um {zt(s)} — mindestens {gap:g} min Abstand"

@@ -102,16 +102,15 @@ def main():
     T = {t["key"]: {"fest": None, "user": "ina", "firma": t["gruppe"].split("|")[1], "start": m[t["key"]], "delta_abs": 1.0,
                     "gruppe": t["gruppe"]} for t in ina}
     r, netto = a["ap_richtungen_delta"](T, 0.0, 0.0, random.Random(3), 50)
-    # seit 09.10.2026: gegenläufig nur mit ≥ 90 min Startabstand derselben ID × Firma (ap_richtung_bloecke)
-    nah_gegen = [(k1, k2) for k1 in T for k2 in T if k1 < k2 and T[k1]["gruppe"] == T[k2]["gruppe"]
-                 and abs(T[k1]["start"] - T[k2]["start"]) < 90 and r[k1] != r[k2]]
-    check(not nah_gegen, f"eine Richtung je Block (< 90 min) trotz verteilter Starts ({nah_gegen})")
+    # seit 09.10.2026 ~03:45 (Finn: Richtung je Trade frei, nur nie gleichzeitig): jede ID × Firma darf gemischt sein — die Strafe
+    # „ganz einseitig" sorgt dafür, dass sie es auch ist
+    gem = [g for g in {T[k]["gruppe"] for k in T} if len({r[k] for k in T if T[k]["gruppe"] == g}) == 2]
+    check(len(gem) == 2, f"Apex und FundedNext je ID gemischt ({gem})")
     check(netto <= 2, f"Band hält (|Netto| max {netto:g} statt 6)")
     T2 = dict(T)
     T2["ina|apex#2"] = dict(T["ina|apex#2"], fest="sell")
     r2, _ = a["ap_richtungen_delta"](T2, 0.0, 0.0, random.Random(3), 50)
-    bl = a["ap_richtung_bloecke"](T2)
-    check({r2[k] for k in T2 if bl[k] == bl["ina|apex#2"]} == {"sell"}, "Richtungsschutz auf EINEM Teil legt seinen ganzen Block fest (kein Gegenhedge)")
+    check(r2["ina|apex#2"] == "sell", "Richtungsschutz auf einem Teil hält diesen Teil fest (die anderen frei)")
 
     # ── 5 Große-Folge mit Zeit-Nähe ───────────────────────────────────────────────────────────────────────────────────────
     lage = a["ap_einsatz_lage"]
@@ -163,9 +162,7 @@ def main():
     mins = [int(g["start"][:2]) * 60 + int(g["start"][3:]) for g in fn]
     check(erg.get("ok") and len(fn) == 3, f"ap_planen: drei FundedNext-Konten der ID geplant ({len(fn)}; {erg.get('msg') or 'ok'})")
     check(all(b - a_ >= PC for a_, b in zip(mins, mins[1:])), f"ap_planen: Starts ≥ {PC} min auseinander (PC) ({[g['start'] for g in fn]})")
-    check(all(g1["richtung"] == g2["richtung"] for i_, g1 in enumerate(fn) for g2 in fn[i_ + 1:]
-              if abs(int(g1["start"][:2]) * 60 + int(g1["start"][3:]) - int(g2["start"][:2]) * 60 - int(g2["start"][3:])) < 89),
-          f"ap_planen: gegenläufig nur mit ≥ 90 min Abstand je ID × Firma ({[(g['start'], g['richtung']) for g in fn]})")
+    check(len({g["richtung"] for g in fn}) == 2, f"ap_planen: drei FundedNext derselben ID gemischt ({[(g['start'], g['richtung']) for g in fn]})")
     eigen = sorted(int(g["start"][:2]) * 60 + int(g["start"][3:]) for g in erg.get("geplant", []) if g["user_id"] == sd.U1)
     check(all(b - a_ >= PC for a_, b in zip(eigen, eigen[1:])), f"ap_planen: alle Pläne der ID ≥ {PC} min auseinander (PC)")
     check(not geschrieben["post"] and not inserts, "Probelauf schreibt nichts")
@@ -305,11 +302,14 @@ def main():
              plan("h3", "u-h", "H", "apex", 602, auto_plan=False, aenderbar=False, fest_durch="Handplan")],
             0.0, 0.0, 400, Z16, 100, random.Random(1))
     check(not any(x["plan_id"] in ("h2", "h3") for x in e_h["aenderungen"]), "Werte von Hand und Handpläne werden nie verschoben")
-    # Gegenrichtung derselben ID × Firma: nie in deren Laufzeit schieben
-    e_g = U([plan("g1", "u-g", "G", "apex", 600), plan("g2", "u-g", "G", "apex", 600), plan("g3", "u-g", "G", "apex", 700, "sell")],
-            0.0, 0.0, 400, Z16, 100, random.Random(2))
-    g2 = next((x["nach_start_min"] for x in e_g["aenderungen"] if x["plan_id"] == "g2"), 600)
-    check(abs(g2 - 700) >= a["AP_VERTEIL_GEGEN_MIN"], f"nie in die Laufzeit der Gegenrichtung derselben ID × Firma (g2 → {g2:g}, Short um 700)")
+    # Gegenrichtung derselben ID × Firma: seit 09.10.2026 sperrt nur ein GESTARTETER Trade (90 min ab seinem Start), geplante nicht
+    e_g = U([plan("g1", "u-g", "G", "apex", 600), plan("g2", "u-g", "G", "apex", 600)],
+            0.0, 0.0, 400, Z16, 100, random.Random(2), gestartet=[{"user_id": "u-g", "firma": "apex", "richtung": "sell", "start": 590.0}])
+    g2 = next((x["nach_start_min"] for x in e_g["aenderungen"] if x["plan_id"] == "g2"), None)
+    check(g2 is None or g2 >= 590 + a["AP_RICHTUNG_LAUF_FEST_MIN"],
+          f"nie in die 90 min nach einem gestarteten Short derselben ID × Firma (g2 → {g2}, Short gestartet 590)")
+    check(not a["_ap_gegen_eigen"](650, 700, False) and a["_ap_gegen_eigen"](650, 600, True) and not a["_ap_gegen_eigen"](700, 600, True),
+          "_ap_gegen_eigen: geplant nie, gestartet nur [Start, Start + 90)")
     # Band: würde das Verschieben das Band der nächsten 60 min verschlechtern, bleibt es stehen
     # vorher ausgeglichen (2× Long 10 gegen Short 20 derselben Minute) — b2 nach hinten ließe den Short 60 min allein stehen
     e_b = U([plan("b1", "u-b", "B", "apex", 600, delta_abs=10.0), plan("b2", "u-b", "B", "apex", 600, delta_abs=10.0),

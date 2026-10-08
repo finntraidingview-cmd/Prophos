@@ -2,9 +2,9 @@
 """Selbsttest RICHTUNG JE ID × FIRMA GEMISCHT (app.py ap_richtung_bloecke / ap_fest_am_start / ap_id_firma_einseitig /
 ap_richtungen_delta / ap_richtung_konflikte, 09.10.2026, Slave-Terminal 4 — Finn ~03:00 Dubai zu Admin → Trade-Planer: je ID × Firma
 alle Trades des Tages in EINER Richtung, „Genau das will ich ja vermeiden … Der erste Tradeify geht long, ist beendet, eine Stunde
-später kann z. B. einer short gehen"). Regel: Teile derselben ID × Firma dürfen gegenläufig sein, wenn ihre Starts ≥ 90 min
-auseinander liegen (AP_RICHTUNG_WECHSEL_MIN); dichtere Teile = ein Block = eine Richtung. Ein laufender/geplanter Trade legt nur
-Teile in seiner Nähe fest. Platzhalter-IDs, ohne Netz. Aufruf: python3 tools/selftest_richtung_wechsel.py"""
+später kann z. B. einer short gehen"; ~03:45 nachgeschärft: „Mach diese 90-Minuten-Regel weg … Zufallsprinzip. Es darf halt nur
+nie gleichzeitig sein"). Regel: Richtung je Trade frei (AP_RICHTUNG_WECHSEL_MIN = 0), Strafe „ID × Firma ganz einseitig" mischt; nur
+laufende bzw. geclaimte Trades legen Teile in den 90 min nach ihrem Start fest; geplante nie. Platzhalter-IDs, ohne Netz. Aufruf: python3 tools/selftest_richtung_wechsel.py"""
 import os
 import random
 import sys
@@ -29,58 +29,51 @@ def hm(t):
 def main():
     a = sd.lade()
     B, F, E, R = a["ap_richtung_bloecke"], a["ap_fest_am_start"], a["ap_id_firma_einseitig"], a["ap_richtungen_delta"]
-    check(a["AP_RICHTUNG_WECHSEL_MIN"] == 90, "Wechsel-Abstand 90 min")
+    check(a["AP_RICHTUNG_WECHSEL_MIN"] == 0 and a["AP_RICHTUNG_LAUF_FEST_MIN"] == 90,
+          "keine Blöcke mehr (Finn ~03:45: 90-Minuten-Regel weg), laufende/geclaimte legen 90 min fest")
 
     def T(start, gruppe, user="c", firma="fundednext", fest=None, delta=1.0):
         return {"fest": fest, "user": user, "firma": firma, "start": start, "delta_abs": delta, "gruppe": gruppe}
 
-    # 1 Blöcke
-    chris = {f"c|fn#{i + 1}": T(hm(s), "c|fn") for i, s in enumerate(("07:11", "14:34", "17:55"))}
-    bl = B(chris)
-    check(len(set(bl.values())) == 3, f"Chris FN 07:11 / 14:34 / 17:55 → drei Blöcke ({sorted(set(bl.values()))})")
-    dicht = {"c|fn#1": T(600, "c|fn"), "c|fn#2": T(630, "c|fn")}
-    check(len(set(B(dicht).values())) == 1, "zwei Teile 30 min auseinander → ein Block")
-    kette = {"k#1": T(600, "k"), "k#2": T(680, "k"), "k#3": T(760, "k")}
-    check(len(set(B(kette).values())) == 1, "Kette 600/680/760 (je 80 min) → ein Block, auch wenn Anfang und Ende 160 min auseinander")
-    check(len(set(B({"x#1": T(600, "x"), "x#2": T(690, "x")}).values())) == 2, "genau 90 min → zwei Blöcke")
-    check(B({"a#1": T(600, "a"), "b#1": T(610, "b")})["a#1"] != B({"a#1": T(600, "a"), "b#1": T(610, "b")})["b#1"],
-          "andere ID × Firma = eigener Block")
+    # 1 jeder Teil eigener Block
+    chris = {f"c|fn#{i + 1}": T(hm(s_), "c|fn") for i, s_ in enumerate(("07:11", "14:34", "17:55"))}
+    check(len(set(B(chris).values())) == 3, "Chris FN 07:11 / 14:34 / 17:55 → drei freie Teile")
+    nah = {"c|fn#1": T(hm("10:51"), "c|fn"), "c|fn#2": T(hm("10:56"), "c|fn"), "c|fn#3": T(hm("10:57"), "c|fn")}
+    check(len(set(B(nah).values())) == 3, "10:51 / 10:56 / 10:57 (Finns Beispiel) → drei freie Teile")
 
-    # 2 ap_richtungen_delta: gemischt erlaubt / Block gleich
-    beide, gleich = 0, True
-    for s in range(12):
-        r, _m, w = R(chris, 0.0, 0.0, random.Random(s), 50, mit_wert=True)
-        beide += len({r[k] for k in chris}) == 2
-        r2, _m2 = R(dicht, 0.0, 0.0, random.Random(s), 50)
-        gleich = gleich and r2["c|fn#1"] == r2["c|fn#2"]
-    check(beide == 12, f"Chris FN (≥ 90 min): jede Zuteilung hat beide Richtungen ({beide}/12)")
-    check(gleich, "zwei Teile 30 min auseinander: immer gleich gerichtet")
+    # 2 Zuteilung: frei je Trade, Strafe „ganz einseitig" mischt
+    gem_c = gem_n = 0
+    for s_ in range(12):
+        r, _m, w = R(chris, 0.0, 0.0, random.Random(s_), 50, mit_wert=True)
+        gem_c += len({r[k] for k in chris}) == 2
+        r2, _m2 = R(nah, 0.0, 0.0, random.Random(s_), 50)
+        gem_n += len({r2[k] for k in nah}) == 2
+    check(gem_c == 12, f"Chris FN: jede Zuteilung hat beide Richtungen ({gem_c}/12)")
+    check(gem_n == 12, f"Teile 5 min / 1 min auseinander dürfen gegenläufig geplant sein ({gem_n}/12 gemischt)")
+    bl = B(chris)
     check(E({"c|fn#1": "buy", "c|fn#2": "buy", "c|fn#3": "buy"}, chris, bl) == 1
           and E({"c|fn#1": "buy", "c|fn#2": "sell", "c|fn#3": "buy"}, chris, bl) == 0
-          and E({"c|fn#1": "buy", "c|fn#2": "buy"}, dicht, B(dicht)) == 0, "Strafe nur, wenn ≥ 2 Blöcke ganz einseitig")
+          and E({"c|fn#1": "buy"}, {"c|fn#1": chris["c|fn#1"]}, bl) == 0, "Strafe nur bei ≥ 2 Teilen ganz einseitig")
 
-    # 3 fest in der Nähe
+    # 3 fest: nur laufende/geclaimte, 90 min ab ihrem Start
     lauf = [(600.0, "buy", True)]
     check(F(lauf, 645) == "buy" and F(lauf, 720) is None, "läuft BUY 10:00 → Teil 10:45 BUY, Teil 12:00 frei")
-    gep = [(600.0, "sell", False)]
-    check(F(gep, 560) == "sell" and F(gep, 650) == "sell" and F(gep, 500) is None and F(gep, 700) is None,
-          "geplanter SELL 10:00 → ±90 min fest, weiter weg frei")
-    check(F([(None, "buy", False)], 1200) == "buy", "geplant ohne Startzeit → vorsichtshalber den ganzen Tag")
-    check(F([(600.0, "buy", True), (700.0, "sell", False)], 690) == "sell", "zwei Bezüge → der nächste gilt")
+    check(F([(600.0, "sell", False)], 605) is None and F([(None, "buy", False)], 900) is None,
+          "geplante Pläne (auch ohne Startzeit) legen nichts fest")
+    check(F([(None, "buy", True)], 10) == "buy", "laufend ohne Bezugsminute → fest")
+    ref = a["_ap_fest_ref"]
+    from datetime import datetime, timezone
+    mn = datetime(2026, 10, 9, 0, 0, tzinfo=timezone.utc)
+    jetzt = datetime(2026, 10, 9, 9, 0, tzinfo=timezone.utc)
+    check(ref({"status": "planned", "richtung": "sell", "start_um": "2026-10-09T10:00:00+00:00", "start_um_gestartet_at": "2026-10-09T10:00:05+00"}, mn, jetzt)
+          == (600.0, "sell", True), "geclaimter Plan = läuft (Bezug: sein Start)")
+    check(ref({"status": "planned", "richtung": "sell", "start_um": "2026-10-09T10:00:00+00:00"}, mn, jetzt)[2] is False, "bloß geplant = legt nichts fest")
     tf = dict(chris)
     tf["c|fn#1"] = dict(tf["c|fn#1"], fest="sell")
-    nah = dict(chris, **{"c|fn#2": T(hm("08:00"), "c|fn")})          # 07:11 fest sell, 08:00 im selben Block
-    for s in range(6):
-        r, _ = R(tf, 0.0, 0.0, random.Random(s), 50)
-        r_n, _ = R(dict(nah, **{"c|fn#1": dict(nah["c|fn#1"], fest="sell")}), 0.0, 0.0, random.Random(s), 50)
-        if not (r["c|fn#1"] == "sell" and r_n["c|fn#2"] == "sell"):
-            break
-    else:
-        r = None
-    check(r is None, "fester Teil hält seinen Block (08:00 bei festem 07:11 sell), andere Blöcke frei")
-    check(len({R(tf, 0.0, 0.0, random.Random(3), 50)[0][k] for k in tf}) == 2, "trotz festem SELL am Morgen: später BUY möglich")
+    r, _ = R(tf, 0.0, 0.0, random.Random(3), 50)
+    check(r["c|fn#1"] == "sell" and len({r[k] for k in tf}) == 2, f"fester Teil bleibt, die anderen frei und gemischt ({r})")
 
-    # 4 Bot (ap_richtung_konflikte): gleiche 90-min-Regel
+    # 4 Bot (ap_richtung_konflikte): nur laufende/geclaimte, 90 min
     K = a["ap_richtung_konflikte"]
 
     def plan(pid, start, r="sell", **kw):
@@ -88,20 +81,15 @@ def main():
                      "start_min": start, "route": "mt5v2", "gehedgt": False, "auto_plan": True, "bestaetigt": False, "aenderbar": True,
                      "fest_durch": None}, **kw)
     offen = [{"user_id": "u1", "firma": "fundednext", "richtung": "buy", "start_min": 600.0}]
-    e1 = K([plan("p1", 645)], offen, 620)
+    check([x["plan_id"] for x in K([plan("p1", 645)], offen, 620)["drehen"]] == ["p1"], "läuft BUY 10:00, Auto-Plan SELL 10:45 → gedreht")
     e2 = K([plan("p2", 700)], offen, 650)
-    check([x["plan_id"] for x in e1["drehen"]] == ["p1"], "läuft BUY 10:00, Auto-Plan SELL 10:45 → gedreht (wie bisher)")
     check(not e2["drehen"] and not e2["markieren"], "läuft BUY 10:00, Auto-Plan SELL 11:40 → bleibt (Start-Wächter verschiebt, falls nötig)")
-    e3 = K([plan("p3", 645)], [{"user_id": "u1", "firma": "fundednext", "richtung": "buy"}], 620)
-    check([x["plan_id"] for x in e3["drehen"]] == ["p3"], "laufender Trade ohne Startminute → wie bisher (immer)")
-    e4 = K([plan("q", 600, "buy", bestaetigt=True), plan("p4", 650)], [], 640)
-    e5 = K([plan("q", 600, "buy", bestaetigt=True), plan("p5", 700)], [], 660)
-    check([x["plan_id"] for x in e4["drehen"]] == ["p4"] and not e5["drehen"],
-          f"vorher geplanter BUY 10:00: SELL 10:50 gedreht, SELL 11:40 bleibt ({[x['plan_id'] for x in e4['drehen'] + e5['drehen']]})")
-    e6 = K([plan("q", 600, "buy", bestaetigt=True), plan("p6", 650), plan("p7", 700)], [], 645)
-    check([x["plan_id"] for x in e6["drehen"]] == ["p6", "p7"], "Kette: gedrehter 10:50 hält 11:40 (50 min) im selben Block")
+    e4 = K([plan("q", 600, "buy", bestaetigt=True), plan("p4", 605)], [], 590)
+    check(not e4["drehen"] and not e4["markieren"], "geplanter BUY 10:00, Auto-Plan SELL 10:05 → beide bleiben (nur nie gleichzeitig)")
+    e5 = K([plan("q", 600, "buy", bestaetigt=True, fest_durch="schon gestartet"), plan("p5", 605)], [], 601)
+    check([x["plan_id"] for x in e5["drehen"]] == ["p5"], "geclaimter BUY 10:00 (Start läuft), Auto-Plan SELL 10:05 → gedreht")
 
-    # 5 Quelltext: Planer nimmt die Bezüge je Wurf, Abbruch mit dem neuen Feld
+    # 5 Quelltext
     src = open(sd.APP, encoding="utf-8").read()
     seg = src[src.index("\ndef ap_planen("):src.index("\n\n\n", src.index("\ndef ap_planen("))]
     check('"fest": ap_fest_am_start(tr_info[key]["fest_refs"], minuten_w[key])' in seg and "wert_w[:6]" in seg,
@@ -109,14 +97,16 @@ def main():
     check('"start_min": z.get("start_min")' in src and 'z["start_min"] = round((_sm - mitternacht)' in src,
           "Bot bekommt die Startminute laufender Trades")
 
-    # 6 Frontend (prophos.html): geplante Pläne nur in der Nähe, Start-Wächter verschiebt Auto-Pläne zuerst
+    # 6 Frontend: nur laufende/geclaimte zählen, Start-Wächter verschiebt Auto-Pläne zuerst
     html = open(os.path.join(os.path.dirname(sd.APP), "prophos.html"), encoding="utf-8").read()
-    check("const RK_WECHSEL_MIN = 90" in html and "if(!rkPlanNah(p.status, p.start, bezug > 0 ? bezug : null)) continue" in html
-          and "if(!rkPlanNah(p.status, p.startUm, bezugMs)) continue" in html, "Richtungs-Prüfungen: geplante Pläne nur ±90 min um den Bezug")
-    check(html.count("frisch: true, start: Date.now() })") == 2 and html.count("firmGeplanteRichtungen(plan.masterFirm, plan.id, Date.now())") == 3,
-          "harte Prüfungen vor der Order (Echo-V2-Check, Puls) mit Bezug jetzt — laufende Trades zählen weiter immer")
+    check("const rkZaehlt = (status, geclaimt) => status === 'open' || (status === 'planned' && !!geclaimt)" in html
+          and "if(!rkZaehlt(p.status, p.geclaimt)) continue" in html and "if(!rkZaehlt(p.status, p.startUmGestartetAt || p.orbitGesendetAt)) continue" in html
+          and "else if(p.geclaimt) lauf[seite].push({ name: p.name, firm: p.firm, verb: 'startet gerade' })" in html
+          and "select('id,status,richtung,master_firm,master_name,start_um_gestartet_at,orbit_gesendet_at')" in html,
+          "Richtungs-Prüfungen: nur laufende und geclaimte (= laufend) zählen, bloß geplante nie")
+    check("RK_WECHSEL_MIN" not in html and "rkPlanNah" not in html, "kein 90-min-Fenster mehr im Frontend")
     vs = html[html.index("  async function rkVorStart(plan){"):html.index("  window._rk = {")]
-    check("frisch: true, start: plan.startUm || Date.now() })" in vs and "if(plan.autoPlan && k.quelle === 'lauf'){" in vs
+    check("if(plan.autoPlan && k.quelle === 'lauf'){" in vs
           and vs.index("await rkVerschieben(plan, k, false, 'start')") < vs.index(".update({ richtung: ziel })")
           and "n < RK_VERSCHIEBEN_MAX" in vs and "const RK_VERSCHIEBEN_MAX = 3" in html,
           "Start-Wächter: Auto-Plan bei laufender Gegenrichtung erst bis 3× verschieben, dann drehen")

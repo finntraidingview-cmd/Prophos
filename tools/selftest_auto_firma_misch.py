@@ -15,7 +15,7 @@ Ohne Netz, Platzhalter-IDs, nachgebaute DB (Lader/Stubs aus selftest_auto_delta)
     gestarteter Winning-Days-Long einer 7. ID morgens, + ein Handplan-Short im Opening), FundedNext 4 IDs, The5%ers 3, Apex 2,
     Zeitfenster wie live (Morgen 00:00–14:30 / Opening 14:30–16:30 dt, je 50 %): jede Firma mit ≥ 3 Trades über ≥ 2 IDs hat beide
     Richtungen — am Tag UND je Fenster, jede Klasse je Fenster ebenso, kein Fenster kippt (CFD gegen Futures, alles eine Richtung);
-    gleiche ID × Firma gegenläufig nur mit ≥ 90 min Startabstand (seit 09.10.2026; auch zu einem schon geplanten Handplan derselben ID), keine zwei gegenläufigen Starts
+    gleiche ID × Firma darf gegenläufig sein (seit 09.10.2026, Finn: nur nie gleichzeitig — sichert der Start-Wächter), keine zwei gegenläufigen Starts
     derselben Firma binnen 3 min, über die Seeds kein starres Muster (mal long-, mal short-lastig).
 (C) Ausgleichs-Bot (ap_umplanen): Mischungs-Drehung dreht bei einseitiger Firma die ganze ID × Firma einer anderen ID gegenläufig
     („Firmen-Mischung"), nie eine ID mit laufendem Trade dort (Richtungsschutz); Band-Drehung macht eine gemischte Firma nie einseitig
@@ -323,23 +323,19 @@ def main():
                     if r1 != r2 and m2 - m1 < 3 and u1 != u2:
                         verstoss_dicht.append((seed, f, m1, m2))
         zaehl["long_mehr" if tf["buy"] > tf["sell"] else "short_mehr"] += 1 if tf["buy"] != tf["sell"] else 0
-        # Seit 09.10.2026 (Finn: nicht nur eine Richtung je ID × Firma): gegenläufig nur mit ≥ AP_RICHTUNG_WECHSEL_MIN Startabstand
-        # (HH:MM-Anzeige: < 89 min zählt als Verstoß)
+        # Seit 09.10.2026 ~03:45 (Finn: „Mach diese 90-Minuten-Regel weg … nur nie gleichzeitig"): gleiche ID × Firma darf beliebig
+        # gegenläufig geplant sein — gezählt wird, ob die Mischung ID × Firma mit ≥ 2 Teilen auch wirklich mischt
         for (uid, f) in {(g["user_id"], g["firma"]) for g in erg["geplant"]}:
-            st = [(int(g["start"][:2]) * 60 + int(g["start"][3:]), g["richtung"]) for g in erg["geplant"] if g["user_id"] == uid and g["firma"] == f]
-            if uid == U[0] and f == "Tradeify":
-                st.append((940, "sell"))                         # Handplan derselben ID × Firma am Tag (15:40 dt)
-            st.sort()
-            for i_, (m1, r1) in enumerate(st):
-                for m2, r2 in st[i_ + 1:]:
-                    if r1 != r2 and m2 - m1 < 89:
-                        verstoss_id.append((seed, NAMEN.get(uid), f, m1, m2))
+            rs = [g["richtung"] for g in erg["geplant"] if g["user_id"] == uid and g["firma"] == f]
+            if len(rs) >= 2:
+                verstoss_id.append(len(set(rs)) == 2)
         if beispiel is None:
             beispiel = (seed, {f: (e["buy"], e["sell"]) for f, e in je_f.items()}, erg.get("firma_misch"))
     n_tf = sum(gesamt.get("Tradeify", [0, 0]))
     check(n_tf > 0 and not verstoss_misch, f"{len(seeds)} Probeläufe: jede Firma mit ≥ 3 Trades über ≥ 2 IDs hat beide Richtungen "
           f"(seltenere ≥ Soll) — Verstöße {verstoss_misch[:4]}")
-    check(not verstoss_id, f"gleiche ID × Firma nie gegenläufig näher als 90 min (auch nicht gegen den Handplan derselben ID) — Verstöße {verstoss_id[:4]}")
+    check(verstoss_id and sum(verstoss_id) >= len(verstoss_id) / 2,
+          f"ID × Firma mit ≥ 2 Teilen meist gemischt (Strafe „ganz einseitig\", Richtung je Trade frei): {sum(verstoss_id)}/{len(verstoss_id)}")
     check(not verstoss_dicht, f"keine zwei gegenläufigen Starts derselben Firma binnen 3 min — Verstöße {verstoss_dicht[:4]}")
     check(not verstoss_fenster, f"{len(seeds)} Probeläufe: je Fenster × Firma, × Klasse und insgesamt beide Richtungen, kein Kippen "
           f"CFD gegen Futures — Verstöße {verstoss_fenster[:4]}")

@@ -90,8 +90,10 @@ def main():
     check([x["plan_id"] for x in mit["aenderungen"]] == ["a_long"],
           f"mit Folgetag-SELL einer anderen ID 00:05 dt: Vorziehen erlaubt (Gegenrichtung über IDs) ({[x['plan_id'] for x in mit['aenderungen']]})")
     selbe = U([a_long, dict(b_morgen, user_id="u-a", user="U-a", plan_id="a_morgen")], 0.0, 0.0, jm, Z, 25, random.Random(1), einsatz=EK)
-    check(not selbe["aenderungen"],
-          f"mit Folgetag-SELL DERSELBEN ID 00:05 dt: kein Vorziehen in dessen Laufzeit ({[x['plan_id'] for x in selbe['aenderungen']]})")
+    # seit 09.10.2026 ~03:45 (Finn: Richtung je Trade frei, nur nie gleichzeitig): auch derselben ID sperrt ein GEPLANTER Gegen-Plan nichts
+    # mehr — „nie gleichzeitig" sichert der Start-Wächter im PC-Tab (erst verschieben, dann drehen)
+    check([x["plan_id"] for x in selbe["aenderungen"]] == ["a_long"],
+          f"mit Folgetag-SELL DERSELBEN ID 00:05 dt: Vorziehen erlaubt (geplante Gegenrichtung sperrt nicht) ({[x['plan_id'] for x in selbe['aenderungen']]})")
     m2 = U([dict(a_long, user_id="u-b", user="U-b", richtung="sell", plan_id="b_heute", start_min=1350), b_morgen], 0.0, 0.0, jm, Z, 25,
            random.Random(1), einsatz=EK)
     check(not any(x["plan_id"] == "b_morgen" for x in m2["aenderungen"]), "Folgetag-Plan wird nie bewegt")

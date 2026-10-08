@@ -74,11 +74,16 @@ def main():
            {"plan_id": "b", "user_id": MIKE, "firma": "fundednext", "richtung": "sell", "start_min": 200.0}]
     m3, _ = N(pl2[1], pl2, [], {}, jetzt, Z, None, [], random.Random(3))
     check(m3 is not None and PC <= abs(m3 - 310.0) < 60, f"gleiche ID × Firma: PC-Abstand reicht, keine 60 min mehr ({m3})")
-    # Richtungsschutz: kommender SELL derselben ID × Firma 20 min später → BUY muss ≥ 120 min weg
+    # Richtungsschutz seit 09.10.2026 ~03:45 (Finn: Richtung je Trade frei, nur nie gleichzeitig): ein kommender SELL derselben
+    # ID × Firma sperrt nichts mehr; ein heute GESTARTETER SELL (kann noch laufen) sperrt AP_RICHTUNG_LAUF_FEST_MIN ab seinem Start
     pl3 = [{"plan_id": "x", "user_id": MIKE, "firma": "apex", "richtung": "buy", "start_min": 100.0},
            {"plan_id": "y", "user_id": MIKE, "firma": "apex", "richtung": "sell", "start_min": 330.0}]
     m4, _ = N(pl3[0], pl3, [], {}, jetzt, Z, 120, [], random.Random(4))
-    check(m4 is not None and abs(m4 - 330.0) >= 120, f"Richtungsschutz ID × Firma: Gegenrichtung ≥ Laufzeit 120 min weg ({m4})")
+    check(m4 is not None and m4 < 330.0, f"geplanter SELL derselben ID × Firma 05:30 sperrt den BUY nicht mehr ({m4})")
+    st5 = [{"user_id": MIKE, "firma": "apex", "richtung": "sell", "start": 295.0}]
+    m5, _ = N(pl3[0], pl3[:1], st5, {}, jetzt, Z, 120, [], random.Random(4))
+    check(m5 is not None and m5 >= 295.0 + a["AP_RICHTUNG_LAUF_FEST_MIN"],
+          f"gestarteter SELL derselben ID × Firma 04:55 → BUY erst ≥ 90 min nach dessen Start ({m5})")
     # über IDs (seit 08.10.2026 ~17:00 Dubai): Jacob läuft FundedNext SELL seit 04:50 → Mikes FundedNext BUY sofort erlaubt (keine
     # Laufzeit-Sperre mehr); startet Jacobs geplanter SELL gleich (05:03), hält Mikes BUY ±3 min Abstand zu dessen Start
     pl4 = [{"plan_id": "g", "user_id": MIKE, "firma": "fundednext", "richtung": "buy", "start_min": 250.0}]
