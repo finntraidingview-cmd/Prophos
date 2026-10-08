@@ -1,26 +1,23 @@
--- ÜBERHOLT (08.10.2026, nie eingespielt): ersetzt durch sql/2026-10-08_gegenhedge_3min.sql (Finn: Fenster 3 min statt Laufzeit-Sperre).
--- NICHT einspielen.
--- GEGENHEDGE AUCH ÜBER KONTEN DERSELBEN ID (08.10.2026, Slave-Terminal 4 — Master: Finn fragt, ob der Gegenhedge-Schutz bei JEDEM Start
--- greift; Lücke: prophos_gegenhedge_konflikt prüfte nur ANDERE IDs (p.user_id is distinct from p_user). Ein zweites Konto DERSELBEN ID bei
--- derselben Firma in Gegenrichtung (z. B. Hand-Trade) ging durch — für die Firma ist das genauso ein Hedge. Finn 08.10.2026: „bei der
--- Prop-Firm nur in eine Richtung, nicht gegenseitig hedgen".)
+-- GEGENHEDGE-RIEGEL NUR NOCH IM 3-MINUTEN-FENSTER (08.10.2026, Slave-Terminal 4 — Finn ausdrücklich: „Die Regel heißt ja einfach: Wenn eine
+-- ID z. B. Tradeify longt, können innerhalb von 20 Minuten andere IDs nur auch longen, nicht shorten. Kannst du die auf 3 Minuten
+-- runterstellen?" Anlass: Emins Hand-Trades 2ad836de (FundingPips Sell) und 8c4fe637 (FTMO Buy) wurden immer wieder um +30 min geschoben,
+-- weil Chris dort in Gegenrichtung LIEF — die Laufzeit-Regel aus sql/2026-10-08_gegenhedge_riegel.sql.)
 --
--- Ersetzt die drei Funktionen aus sql/2026-10-08_gegenhedge_riegel.sql (gleiche Signaturen und Rückgabetypen, Trigger bleibt stehen):
---   prophos_gegenhedge_konflikt: jetzt auch dieselbe ID mit ANDEREM Konto (master_account_id ≠ das des eigenen Plans; das eigene Konto wird
---     aus p_id gelesen, die Signatur bleibt). Dasselbe Konto bleibt außen vor (dort gilt der Richtungsschutz rkVorStart). Ohne Konto
---     (master_account_id NULL auf einer Seite) zählt immer als anderes Konto — lieber sperren als durchlassen (Prüfer Slave 2).
---     Grund bei derselben ID: „„<Kontoname>" läuft dort in Gegenrichtung …" bzw. „„<Kontoname>" startet dort um … in Gegenrichtung".
---   trade_plans_gegenhedge (Claim-Trigger) und prophos_gegenhedge_halten (RPC vor jedem Start): Texte „eine andere ID …" bzw. bei
---     derselben ID „dein Konto …" — die RPC liefert dann wer = 'dein Konto', der PC-Tab zeigt „wartet: dein Konto „…" läuft dort …".
---   Dazu HAND-POSITIONEN (Slave 1, Tabelle public.fremd_positionen aus sql/2026-10-08_fremd_positionen.sql — Trades, die Finn direkt in
---     TradingView/MT5 klickt): eine offene Hand-Position derselben Firma in Gegenrichtung (weg_at null, zuletzt_gesehen ≤ 3 min) sperrt
---     jede ID und jedes Konto, Ziel jetzt + 5 min (der app.py-Takt bewertet die Position dann neu). Grund „Hand-Position „<Konto>" läuft
---     dort in Gegenrichtung …", Texte „eine Hand-Position …". to_regclass-Riegel: diese Datei darf VOR der Tabelle eingespielt werden.
--- Sonst unverändert: Fenster 30 min, „der Spätere weicht", Advisory-Lock je Firma wie der Firmen-Abstand, Protokoll auto_plan_umplanung.
--- Heute live 0 Fälle (Master 08.10.2026: 0 Gegenhedges offen, 0 gleiche ID × Firma mit zwei Richtungen).
+-- Neue Regel (DB-Riegel am Claim trade_plans_gegenhedge + RPC prophos_gegenhedge_halten vor jedem Start, beide über prophos_gegenhedge_konflikt):
+--   Konflikt NUR, wenn eine andere ID — oder ein anderes Konto derselben ID — bei derselben Firma in Gegenrichtung
+--     (a) in den letzten 3 Minuten gestartet bzw. geclaimt hat (started_at / orbit_gesendet_at / start_um_gestartet_at), oder
+--     (b) in den nächsten 3 Minuten startet: bestätigter/Hand-Plan, noch nicht geclaimt, Start bis 3 min VOR unserem (der Spätere weicht;
+--         gleich: kleinere id zuerst), oder
+--     (c) eine Hand-Position (Slave 1, public.fremd_positionen) in den letzten 3 Minuten eröffnet hat.
+--   Dann Start auf deren Start + 3 min + 10–40 s Jitter, nicht mehr +30 min. Laufende Trades allein blockieren NICHT mehr.
+--   Fenster als eine Konstante: prophos_gegenhedge_fenster() = 3 min (symmetrisch).
+--   Planer und Ausgleichs-Bot (app.py, AP_GEGEN_FIRMA_MIN) bleiben unverändert — sie halten ihre Richtungsmischung je Firma wie bisher
+--   („gelegentlich ok, kein Muster"); hier geht es nur um den harten Riegel.
+-- Ohne Konto (master_account_id NULL auf einer Seite) zählt immer als anderes Konto. Dasselbe Konto bleibt außen vor (Richtungsschutz).
 --
--- VORAUSSETZUNG: sql/2026-10-08_gegenhedge_riegel.sql ist eingespielt. Wiederholbar. Rückbau: sql/2026-10-08_gegenhedge_riegel.sql erneut
--- einspielen (stellt die alten Funktionsrümpfe her).
+-- ERSETZT sql/2026-10-08_gegenhedge_gleiche_id.sql (nie eingespielt) und die Funktionsrümpfe aus sql/2026-10-08_gegenhedge_riegel.sql
+-- (gleiche Signaturen/Rückgabetypen, Trigger bleibt stehen). fremd_positionen per to_regclass + EXECUTE — darf vor Slave 1s
+-- sql/2026-10-08_fremd_positionen.sql eingespielt werden. Wiederholbar. Rückbau: sql/2026-10-08_gegenhedge_riegel.sql erneut einspielen.
 
 do $pruef$
 begin
@@ -29,12 +26,17 @@ exception when undefined_function then
   raise exception 'Erst sql/2026-10-08_gegenhedge_riegel.sql einspielen (prophos_gegenhedge_konflikt fehlt)';
 end $pruef$;
 
+-- Fenster zentral (Finn 08.10.2026: „Kannst du die auf 3 Minuten runterstellen?") — hier und nur hier ändern
+create or replace function public.prophos_gegenhedge_fenster() returns interval
+language sql immutable as $$ select interval '3 minutes' $$;
+
 create or replace function public.prophos_gegenhedge_konflikt(p_id uuid, p_user uuid, p_firma text, p_richtung text, p_ref timestamptz)
 returns table(ziel timestamptz, wer uuid, grund text)
 language plpgsql stable security definer set search_path = public as $$
 declare
   k text := public.prophos_firma_key(p_firma);
   gegen text := case p_richtung when 'buy' then 'sell' when 'sell' then 'buy' else null end;
+  f interval := public.prophos_gegenhedge_fenster();
   konto uuid;
   t timestamptz;
   u uuid;
@@ -44,38 +46,37 @@ begin
     return;
   end if;
   select master_account_id into konto from public.trade_plans where id = p_id;
-  -- (a) eine andere ID ODER ein anderes Konto derselben ID läuft gegenläufig (oder der Start ist gerade unterwegs)
-  select coalesce(p.started_at, p.orbit_gesendet_at, p.start_um_gestartet_at, now()), p.user_id, p.master_name
+  -- (a) andere ID / anderes Konto derselben ID hat in den letzten 3 min gegenläufig gestartet bzw. geclaimt
+  select greatest(p.started_at, p.orbit_gesendet_at, p.start_um_gestartet_at), p.user_id, p.master_name
     into t, u, n
     from public.trade_plans p
    where p.id <> p_id
      and (p.user_id is distinct from p_user or konto is null or p.master_account_id is null or p.master_account_id is distinct from konto)
      and p.richtung = gegen
-     and (p.status = 'open'
-          or (p.status = 'planned' and (p.orbit_gesendet_at > now() - interval '10 minutes'
-                                        or (p.start_um_gestartet_at > now() - interval '2 minutes' and p.started_at is null))))
+     and p.status in ('planned', 'open')
+     and greatest(p.started_at, p.orbit_gesendet_at, p.start_um_gestartet_at) > now() - f
      and public.prophos_firma_key(p.master_firm) = k
    order by 1 desc
    limit 1;
   if t is not null then
-    return query select now() + interval '30 minutes', u,
+    return query select t + f, u,
       case when u = p_user then '„' || coalesce(n, 'Konto') || '“ ' else '' end
-      || 'läuft dort in Gegenrichtung (seit ' || to_char(t at time zone 'Asia/Dubai', 'HH24:MI') || ' Dubai)';
+      || 'hat dort um ' || to_char(t at time zone 'Asia/Dubai', 'HH24:MI') || ' Dubai in Gegenrichtung gestartet';
     return;
   end if;
-  -- (a2) offene Hand-Position derselben Firma in Gegenrichtung (Slave 1, fremd_positionen) — jede ID, jedes Konto
+  -- (c) Hand-Position (Slave 1, fremd_positionen) in den letzten 3 min gegenläufig eröffnet — jede ID, jedes Konto
   if to_regclass('public.fremd_positionen') is not null then
     execute 'select f.seit, f.user_id, f.konto_name from public.fremd_positionen f
-              where f.firma_key = $1 and f.richtung = $2 and f.weg_at is null and f.zuletzt_gesehen > now() - interval ''3 minutes''
+              where f.firma_key = $1 and f.richtung = $2 and f.weg_at is null and f.seit > now() - $3
               order by f.seit desc limit 1'
-      into t, u, n using k, gegen;
+      into t, u, n using k, gegen, f;
     if t is not null then
-      return query select now() + interval '5 minutes', u,
-        'Hand-Position „' || coalesce(n, '?') || '“ läuft dort in Gegenrichtung (seit ' || to_char(t at time zone 'Asia/Dubai', 'HH24:MI') || ' Dubai)';
+      return query select t + f, u,
+        'Hand-Position „' || coalesce(n, '?') || '“ wurde dort um ' || to_char(t at time zone 'Asia/Dubai', 'HH24:MI') || ' Dubai in Gegenrichtung eröffnet';
       return;
     end if;
   end if;
-  -- (b) eine andere ID oder ein anderes Konto derselben ID startet gegenläufig früher (bestätigt/Hand, noch nicht geclaimt, ≤ 30 min alt)
+  -- (b) andere ID / anderes Konto startet gegenläufig in den nächsten 3 min und FRÜHER als wir (bestätigt/Hand, noch nicht geclaimt)
   select p.start_um, p.user_id, p.master_name
     into t, u, n
     from public.trade_plans p
@@ -85,13 +86,14 @@ begin
      and p.status = 'planned'
      and p.start_um_gestartet_at is null
      and (not coalesce(p.auto_plan, false) or p.auto_bestaetigt_at is not null)
-     and p.start_um >= now() - interval '30 minutes'
+     and p.start_um >= p_ref - f
+     and p.start_um >= now() - f
      and (p.start_um < p_ref or (p.start_um = p_ref and p.id < p_id))
      and public.prophos_firma_key(p.master_firm) = k
    order by p.start_um desc
    limit 1;
   if t is not null then
-    return query select greatest(t + interval '30 minutes', now() + interval '5 minutes'), u,
+    return query select greatest(t + f, now() + interval '30 seconds'), u,
       case when u = p_user then '„' || coalesce(n, 'Konto') || '“ ' else '' end
       || 'startet dort um ' || to_char(t at time zone 'Asia/Dubai', 'HH24:MI') || ' Dubai in Gegenrichtung';
   end if;
@@ -117,13 +119,13 @@ begin
   if c.ziel is null then
     return new;                                   -- frei: Claim normal schreiben
   end if;
-  ziel := c.ziel + make_interval(secs => 20 + floor(random() * 70));
-  if old.start_um is null or old.start_um < ziel - interval '2 minutes' then
+  ziel := c.ziel + make_interval(secs => 10 + floor(random() * 30));   -- kleiner Jitter (Finn: 3 min, nicht 30)
+  if old.start_um is null or old.start_um < ziel - interval '30 seconds' then
     update public.trade_plans set start_um = ziel where id = new.id;   -- Spalte start_um: kein Claim-Trigger feuert dafür
     insert into public.auto_plan_umplanung (plan_id, user_id, firma, von_richtung, nach_richtung, von_start, nach_start, grund, quelle)
     values (new.id, new.user_id, new.master_firm, new.richtung, new.richtung, old.start_um, ziel,
-            '[Gegenhedge] ' || k || ': ' || case when c.grund like 'Hand-Position%' then 'eine ' when c.wer = new.user_id then 'dein Konto '
-                                                 else 'eine andere ID ' end || c.grund
+            '[Gegenhedge 3 min] ' || k || ': ' || case when c.grund like 'Hand-Position%' then 'eine ' when c.wer = new.user_id then 'dein Konto '
+                                                       else 'eine andere ID ' end || c.grund
             || ' — Start frühestens ' || to_char(ziel at time zone 'Asia/Dubai', 'HH24:MI:SS'),
             'start');
   end if;
@@ -155,20 +157,20 @@ begin
   if c.ziel is null then
     return jsonb_build_object('frei', true);
   end if;
-  ziel := c.ziel + make_interval(secs => 20 + floor(random() * 70));
+  ziel := c.ziel + make_interval(secs => 10 + floor(random() * 30));
   if c.grund like 'Hand-Position%' then
-    name := 'eine';                                                                -- „eine Hand-Position „…" läuft dort …" (Slave 1)
+    name := 'eine';                                                                -- „eine Hand-Position „…" wurde dort … eröffnet"
   elsif c.wer = pl.user_id then
-    name := 'dein Konto';                                                          -- gleiche ID, anderes Konto (08.10.2026)
+    name := 'dein Konto';                                                          -- gleiche ID, anderes Konto
   else
     select coalesce(nullif(split_part(btrim(coalesce(u.raw_user_meta_data->>'name', '')), ' ', 1), ''), left(c.wer::text, 8))
       into name from auth.users u where u.id = c.wer;                              -- nur Vorname, nie E-Mail
   end if;
-  if pl.start_um is null or pl.start_um < ziel - interval '2 minutes' then
+  if pl.start_um is null or pl.start_um < ziel - interval '30 seconds' then
     update public.trade_plans set start_um = ziel, start_um_gestartet_at = null where id = pl.id;   -- orbit_gesendet_at nie
     insert into public.auto_plan_umplanung (plan_id, user_id, firma, von_richtung, nach_richtung, von_start, nach_start, grund, quelle)
     values (pl.id, pl.user_id, pl.master_firm, pl.richtung, pl.richtung, pl.start_um, ziel,
-            '[Gegenhedge] ' || k || ': ' || coalesce(name, 'andere ID') || ' ' || c.grund || ' — Start (Neu starten/von Hand) wartet bis '
+            '[Gegenhedge 3 min] ' || k || ': ' || coalesce(name, 'andere ID') || ' ' || c.grund || ' — Start (Neu starten/von Hand) wartet bis '
             || to_char(ziel at time zone 'Asia/Dubai', 'HH24:MI:SS'), 'start');
   else
     ziel := pl.start_um;
