@@ -19717,6 +19717,12 @@ AP_NACHPLAN_TAKT_S = 600
 AP_GRUND_HEUTE_GEHANDELT = "heute schon gehandelt — ein Trade pro Konto und Tag"
 AP_NACHPLAN_FEST_GRUENDE = ("heute schon gehandelt", "keine Regel für diese Firma", "kein freies Zeitfenster mehr",
                             "letzter Trade ", "Kontogröße", "Ziel erreicht", "bis zum Ziel")
+# Davon hängen diese an auto_plan_regeln (Firmen-Regel, Größen/je_groesse, Zeitfenster) statt am Konto — sie gelten nur, solange die
+# Regeln seit dem Lauf nicht geändert wurden (auto_plan_regeln.updated_at > Zeit des Laufs → Konto wieder Kandidat). Konto-Gründe
+# (heute gehandelt, Ziel, letzter Trade) bleiben fest. Anlass Finn 08.10.2026: FTMO bekam ~03:45 UTC Werte + planen:true,
+# FundingPips/FundedNext ~03:53/04:00 UTC je_groesse für 50k — Chris' FTMO 100k („keine Regel für diese Firma") und FundingPips/
+# FundedNext 50k („… passt zu keiner Kontogröße") blieben trotzdem bis morgen draußen und unter „Braucht dich" (Grund aus dem 03:20-Lauf).
+AP_NACHPLAN_REGEL_GRUENDE = ("keine Regel für diese Firma", "Kontogröße", "kein freies Zeitfenster mehr")
 
 
 def ap_nachplan_fenster(d, zeiten):
@@ -19760,17 +19766,33 @@ def _ap_plan_am_tag(p, tag, tz):
         return True
 
 
-def ap_nachplan_kandidaten(konten, plaene, tag, tz, letzter_erg=None, archiv=None):
+def ap_nachplan_letzter(rows):
+    """REIN RECHNEND: letzter Lauf aus auto_plan_lauf-Zeilen (tag,at,ergebnis; neueste zuerst) → ergebnis-Dict mit 'at' = Start des
+    Laufs (steht im Ergebnis); fehlt es, die Zeit der Zeile (08.10.2026, für den Vergleich mit auto_plan_regeln.updated_at)."""
+    erg = (rows[0].get("ergebnis") if rows else None) or {}
+    if erg and isinstance(erg, dict) and not erg.get("at") and rows[0].get("at"):
+        erg = dict(erg, at=rows[0].get("at"))
+    return erg
+
+
+def ap_nachplan_kandidaten(konten, plaene, tag, tz, letzter_erg=None, archiv=None, regeln_at=None):
     """REIN RECHNEND (testbar): Konto-IDs, die heute nachgeplant werden sollen — Typ in AP_TYPEN, nicht archiviert, Haken nicht aus,
     ohne Plan am Tag (planned/open/review, _ap_plan_am_tag) und im letzten Lauf des Tages nicht aus einem festen Grund ausgelassen
-    (AP_NACHPLAN_FEST_GRUENDE). Reihenfolge = Eingabe."""
+    (AP_NACHPLAN_FEST_GRUENDE). regeln_at = auto_plan_regeln.updated_at (08.10.2026): liegt es nach letzter_erg['at'], zählen die
+    Regel-Gründe (AP_NACHPLAN_REGEL_GRUENDE) nicht mehr als fest — ohne regeln_at oder ohne Laufzeit wie bisher. Reihenfolge = Eingabe."""
     archiv = archiv or set()
     belegt = {str(p.get("master_account_id")) for p in (plaene or []) if _ap_plan_am_tag(p, tag, tz)}
     fest = set()
+    regeln_neu = False
+    if regeln_at and isinstance(letzter_erg, dict):
+        neu, lauf = _ap_ts(regeln_at), _ap_ts(letzter_erg.get("at"))
+        regeln_neu = bool(neu and lauf and neu > lauf)
     if isinstance(letzter_erg, dict) and str(letzter_erg.get("tag") or "") == tag:
         for z in letzter_erg.get("ausgelassen") or []:
             g = str((z or {}).get("grund") or "")
             if any(g.startswith(f) or f in g for f in AP_NACHPLAN_FEST_GRUENDE):
+                if regeln_neu and any(f in g for f in AP_NACHPLAN_REGEL_GRUENDE):
+                    continue        # Regeln seit dem Lauf geändert → mit den neuen Regeln nachrechnen
                 fest.add(str(z.get("konto_id")))
     out = []
     for a in konten or []:
@@ -19789,7 +19811,7 @@ def ap_nachplan_tick(jetzt, zustand):
     if time.time() - (zustand.get("nachplan_at") or 0) < AP_NACHPLAN_TAKT_S:
         return None
     zustand["nachplan_at"] = time.time()
-    reg = (sb_select("auto_plan_regeln", {"select": "aktiv,user_ids,zeiten", "id": "eq.1"}) or [{}])[0]
+    reg = (sb_select("auto_plan_regeln", {"select": "aktiv,user_ids,zeiten,updated_at", "id": "eq.1"}) or [{}])[0]
     uids = [str(u) for u in (reg.get("user_ids") or [])]
     tz = _ap_tz(AP_TZ_TAG)
     d = jetzt.astimezone(tz)
@@ -19805,9 +19827,10 @@ def ap_nachplan_tick(jetzt, zustand):
                                      "user_id": in_uids,
                                      "status": "in.(planned,open,review,completed)",   # completed: ein Trade pro Konto und Tag (08.10.2026)
                                      "created_at": "gte." + (jetzt - timedelta(days=30)).isoformat()})
-    rows = sb_select("auto_plan_lauf", {"select": "tag,quelle,ergebnis", "tag": f"eq.{tag}", "order": "at.desc", "limit": "1"})
-    letzter = (rows[0].get("ergebnis") if rows else None) or {}
-    kand = ap_nachplan_kandidaten(konten, plaene, tag, tz, letzter, _ap_archiviert())
+    rows = sb_select("auto_plan_lauf", {"select": "tag,quelle,at,ergebnis", "tag": f"eq.{tag}", "order": "at.desc", "limit": "1"})
+    letzter = ap_nachplan_letzter(rows)
+    # Regeln nach dem Lauf geändert (updated_at, 08.10.2026) → Regel-Gründe nicht mehr fest, Konten werden sofort neu gerechnet
+    kand = ap_nachplan_kandidaten(konten, plaene, tag, tz, letzter, _ap_archiviert(), regeln_at=reg.get("updated_at"))
     info["kandidaten"] = len(kand)
     if not kand:
         return None

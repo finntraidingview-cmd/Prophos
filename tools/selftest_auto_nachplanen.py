@@ -5,7 +5,8 @@ der Nachtlauf war durch — bis zum nächsten hätte niemand Vorschläge bekomme
 Aufruf:  python3 tools/selftest_auto_nachplanen.py
 Lädt die Auto-Planer-Funktionen wie selftest_auto_delta (per Quelltext aus app.py). Geprüft: ap_nachplan_fenster (Mo–Fr,
 00:00 ≤ jetzt < start_bis − 15 min), ap_nachplan_kandidaten (ohne Plan heute, Haken aus / archiviert / fester Grund raus,
-Plan anderer Tage blockt nicht, open/review blocken), ap_planen(nur_konten) gegen die nachgebaute DB: nur das genannte Konto
+Plan anderer Tage blockt nicht, open/review blocken; seit 08.10.2026: Regeln nach dem Lauf geändert → Regel-Gründe nicht mehr fest,
+Konto-Gründe bleiben fest), ap_nachplan_letzter (Laufzeit aus Ergebnis/Zeile), ap_planen(nur_konten) gegen die nachgebaute DB: nur das genannte Konto
 wird angelegt, bestehender Vorschlag bleibt (kein DELETE), Protokoll quelle 'nachplanen' nur bei Treffer, Startzeit ≥ jetzt + 15 min,
 ohne nur_konten unverändert (DELETE + Protokoll). Platzhalter-IDs, keine echten Konten."""
 import os
@@ -28,8 +29,10 @@ def lade():
         i = src.index(f"\ndef {name}(") + 1
         return src[i:src.find("\n\n\n", i)]
     exec("\n".join([re.search(rf"^{k} = .*$", src, re.M).group(0) for k in ("AP_NACHPLAN_VORLAUF_MIN", "AP_NACHPLAN_TAKT_S")]
-                   + [re.search(r"^AP_NACHPLAN_FEST_GRUENDE = \([^)]*\)", src, re.M | re.S).group(0)]
-                   + [block(f) for f in ("ap_nachplan_fenster", "_ap_plan_am_tag", "ap_nachplan_kandidaten")]), a)
+                   + [re.search(rf"^{k} = \([^)]*\)", src, re.M | re.S).group(0)
+                      for k in ("AP_NACHPLAN_FEST_GRUENDE", "AP_NACHPLAN_REGEL_GRUENDE")]
+                   + [block(f) for f in ("_ap_ts", "ap_nachplan_fenster", "_ap_plan_am_tag", "ap_nachplan_letzter",
+                                         "ap_nachplan_kandidaten")]), a)
     return a
 
 
@@ -70,6 +73,40 @@ def main():
            {"tag": tag, "ausgelassen": [{"konto_id": "k-9", "grund": "vom Auto-Planer ausgenommen (Haken im Konto aus)"},
                                         {"konto_id": "k-10", "grund": "vom Auto-Planer ausgenommen (Haken im Konto aus)"}]}, set())
     check(k3 == ["k-9"], f"Haken wieder an → k-9 wird nachgeplant, k-10 (Haken aus) bleibt draußen ({k3})")
+
+    # 08.10.2026 (Finn: Chris' Konten nach Regeländerung sofort neu planen): Regeln NACH dem Lauf geändert → Regel-Gründe nicht mehr
+    # fest, Konto-Gründe bleiben fest. Zeitformen wie live: Lauf-at aus dem Ergebnis (ISO), updated_at in Postgres-Form („ +00")
+    kr = [{"id": f"r-{i}", "account_type": "phase1"} for i in range(1, 9)]
+    lauf_r = {"tag": tag, "at": "2026-10-08T03:20:26.709603+00:00", "ausgelassen": [
+        {"konto_id": "r-1", "grund": "keine Regel für diese Firma"},
+        {"konto_id": "r-2", "grund": "Balance 46.962 passt zu keiner Kontogröße der Regel — stimmt was nicht?"},
+        {"konto_id": "r-3", "grund": "kein freies Zeitfenster mehr"},
+        {"konto_id": "r-4", "grund": a["AP_GRUND_HEUTE_GEHANDELT"]},
+        {"konto_id": "r-5", "grund": "Ziel erreicht — Phase umstellen"},
+        {"konto_id": "r-6", "grund": "nur noch 120 $ bis zum Ziel — von Hand prüfen"},
+        {"konto_id": "r-7", "grund": "letzter Trade noch nicht erledigt (Überprüfen)"}]}
+    nach = K(kr, [], tag, tz, lauf_r, set(), regeln_at="2026-10-08 03:54:53.115398+00")
+    check(nach == ["r-1", "r-2", "r-3", "r-8"],
+          f"Regeln nach dem Lauf geändert: „keine Regel“/„Kontogröße“/„kein freies Zeitfenster“ wieder Kandidaten, "
+          f"heute gehandelt/Ziel erreicht/bis zum Ziel/letzter Trade bleiben fest ({nach})")
+    vor = K(kr, [], tag, tz, lauf_r, set(), regeln_at="2026-10-08T03:10:00.5+00:00")
+    check(vor == ["r-8"], f"Regeln VOR dem Lauf geändert: alle Gründe bleiben fest wie bisher ({vor})")
+    ohne = K(kr, [], tag, tz, lauf_r, set())
+    check(ohne == ["r-8"], f"ohne regeln_at (alte Aufrufe) unverändert: alle Gründe fest ({ohne})")
+    ohne_at = K(kr, [], tag, tz, {k: v for k, v in lauf_r.items() if k != "at"}, set(), regeln_at="2026-10-08T03:54:53Z")
+    check(ohne_at == ["r-8"], f"Lauf ohne Zeit: lieber wie bisher (fest) als blind neu rechnen ({ohne_at})")
+    belegt = K(kr, [{"master_account_id": "r-1", "status": "planned", "planned_for": tag}], tag, tz, lauf_r, set(),
+               regeln_at="2026-10-08T03:54:53Z")
+    check(belegt == ["r-2", "r-3", "r-8"], f"Regeln neu, aber Konto hat heute schon einen Plan → bleibt draußen ({belegt})")
+    # ap_nachplan_letzter: Laufzeit aus dem Ergebnis, sonst aus der Zeile (Nachtlauf-Claim, ältere Zeilen)
+    L = a["ap_nachplan_letzter"]
+    l1 = L([{"tag": tag, "at": "2026-10-08 03:20:28.272621+00", "ergebnis": {"tag": tag, "at": "2026-10-08T03:20:26.709603+00:00"}}])
+    l2 = L([{"tag": tag, "at": "2026-10-08 03:20:28.272621+00", "ergebnis": {"tag": tag, "ausgelassen": []}}])
+    check(l1["at"] == "2026-10-08T03:20:26.709603+00:00" and l2["at"] == "2026-10-08 03:20:28.272621+00" and L([]) == {}
+          and L([{"tag": tag, "at": "x", "ergebnis": None}]) == {},
+          "ap_nachplan_letzter: at aus dem Ergebnis, sonst Zeilen-at; ohne Zeile/Ergebnis leer")
+    nach_l2 = K(kr, [], tag, tz, dict(lauf_r, at=l2["at"]), set(), regeln_at="2026-10-08 03:54:53.115398+00")
+    check(nach_l2 == ["r-1", "r-2", "r-3", "r-8"], f"Zeilen-at (Postgres-Form) als Laufzeit reicht für den Vergleich ({nach_l2})")
 
     # ap_planen mit nur_konten gegen die nachgebaute DB
     jetzt = datetime(2026, 10, 8, 7, 0, tzinfo=timezone.utc)
