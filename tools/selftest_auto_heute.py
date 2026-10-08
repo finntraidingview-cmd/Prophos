@@ -42,7 +42,7 @@ def lade():
     teile = [konst(k) for k in ("AP_KW_FUNDED", "AP_KW_PHASEN", "AP_TYPEN", "AP_GROESSE_TOLERANZ", "LT_ECHO_ROUTEN", "AP_HB_TZ",
                                 "AP_HB_CACHE_S", "AP_HB_BLOW_ANTEIL", "AP_HB_ECHT_QUELLEN", "_ap_hb_cache", "_ap_hb_lock")]
     teile += [block(f) for f in ("_wd_num", "lt_pl_balance", "_ap_norm", "ap_regel_finden", "ap_groesse", "ap_kw_param", "_ap_kw_kauf",
-                                 "_ap_kw_wachsen", "_ap_kw_lock", "ap_kontowert", "_ap_ende4", "_ap_tz", "_ap_ts", "ap_bal_vorher_konto", "hypo_bilanz_zeile",
+                                 "_ap_kw_wachsen", "_ap_kw_lock", "ap_kontowert", "_ap_ende4", "_ap_tz", "_ap_ts", "ap_bal_vorher_konto", "ap_konto_plaene_grenze", "hypo_bilanz_zeile",
                                  "ap_hb_ende", "ap_hb_gelesen", "ap_hb_zeile", "_ap_konto_plaene", "_ap_hb_laden", "ap_heute_beendet_gemerkt")]
     exec("\n".join(teile), ns)
     return ns
@@ -251,8 +251,9 @@ def main():
     vorher = len(aufrufe["anfragen"])
     ns["ap_heute_beendet_gemerkt"](FIRMEN, jetzt)
     ns["ap_heute_beendet_gemerkt"](FIRMEN, jetzt)
-    # 5 Anfragen je Laden (seit 08.10.2026 + Pläne je Konto für ap_bal_vorher_konto), der zweite Abruf kommt aus dem Merker
-    check(len(aufrufe["anfragen"]) - vorher == 5, f"30-s-Merker: zweiter Abruf ohne DB ({len(aufrufe['anfragen']) - vorher} Anfragen)")
+    # 4 Anfragen je Laden: die Pläne je Konto (ap_bal_vorher_konto) werden nur für Konten MIT Konto-Lesung geholt — hier keine → keine
+    # Abfrage (Last-Grenze 08.10.2026); der zweite Abruf kommt aus dem Merker
+    check(len(aufrufe["anfragen"]) - vorher == 4, f"30-s-Merker: zweiter Abruf ohne DB ({len(aufrufe['anfragen']) - vorher} Anfragen)")
 
     # ── Sicht wie offen[]/geplant[]: ap_delta_antwort filtert heute_beendet je ID (nachgebaute DB aus selftest_auto_delta)
     import selftest_auto_delta as sd
@@ -298,6 +299,23 @@ def main():
     check(Z(pd, vor_offen, FIRMEN, None, None, namen)["eur"] is None, "voriger Trade ohne Ende → ohne € (nicht raten)")
     ohne_liste = {k: v for k, v in trd.items() if k != "_plaene"}
     check(Z(pd, ohne_liste, FIRMEN, None, None, namen)["eur"] is None, "Pläne des Kontos nicht gelesen → ohne € (nicht raten)")
+    # LAST-GRENZE (Prüfer 08.10.2026): Pläne nur noch ab Ende ≥ früheste Konto-Lesung (oder ohne Ende) — Ergebnis IDENTISCH zu allen Plänen
+    B = ns["ap_bal_vorher_konto"]
+    alle_pl = [("v1", "2026-10-05T10:00:00+00:00", "2026-10-05T12:00:00+00:00"), ("v2", "2026-10-07T20:00:00+00:00", "2026-10-08T06:50:00+00:00"),
+               ("v3", "2026-10-06T09:00:00+00:00", "2026-10-08T07:30:00+00:00"), ("v4", "2026-10-01T09:00:00+00:00", None),
+               ("p-d1", "2026-10-08T07:14:26+00:00", None)]
+    gleich = True
+    for les in ("2026-10-08T06:00:00+00:00", "2026-10-08T07:00:53+00:00", "2026-10-08T07:40:00+00:00", "2026-10-04T08:00:00+00:00"):
+        konto = dict(trd, tv_balance_at=les)
+        _, ab = ns["ap_konto_plaene_grenze"]({"k-t9": konto})
+        eng = [x for x in alle_pl if x[2] is None or ns["_ap_ts"](x[2]) >= ab]
+        for liste in (alle_pl, [x for x in alle_pl if x[0] != "v4"], [x for x in alle_pl if x[0] not in ("v3", "v4")]):
+            weit = B(pd, dict(konto, _plaene=liste)); knapp = B(pd, dict(konto, _plaene=[x for x in liste if x in eng]))
+            gleich = gleich and weit == knapp
+    check(gleich, "Last-Grenze über das ENDE: Rechnung mit begrenzten Plänen identisch zu allen Plänen (4 Lesezeiten × 3 Plan-Sätze)")
+    kg, abg = ns["ap_konto_plaene_grenze"]({"k-a": {"tv_balance": 150000, "tv_balance_at": "2026-10-08T07:00:00+00:00"},
+                                            "k-b": {"tv_balance": 0, "tv_balance_at": "2026-10-01T07:00:00+00:00"}, "k-c": {"tv_balance": 100000}})
+    check(kg == ["k-a"] and abg.isoformat().startswith("2026-10-08T07:00"), "nur Konten mit Lesung (>0 und Zeit) brauchen Pläne; ab = früheste Lesung")
 
     print(f"{len(f) - sum(f)}/{len(f)} ok")
     sys.exit(1 if sum(f) else 0)

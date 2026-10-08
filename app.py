@@ -15541,14 +15541,34 @@ def ap_bal_vorher_konto(p, acc):
     return dict(p, mt5_baseline=dict(base, tv=dict(tv, balance_start=kb)))
 
 
-def _ap_konto_plaene(kids):
-    """{konto_id: [(plan_id, start, ende)]} aller gestarteten Pläne der Konten (alle Wege, auch Hand) — für ap_bal_vorher_konto.
-    Fehler fliegen durch; der Aufrufer lässt _plaene dann weg (→ kein Rückfall)."""
-    out = {}
-    kids = sorted({str(k) for k in kids if k})
+def ap_konto_plaene_grenze(accs):
+    """REIN RECHNEND (testbar): welche Konten brauchen ihre Pläne und ab wann? → (kids, ab) — nur Konten MIT Konto-Lesung
+    (tv_balance > 0 und tv_balance_at; ohne Lesung greift ap_bal_vorher_konto nie), ab = früheste dieser Lesungen. LAST (Prüfer 08.10.2026):
+    ap_bal_vorher_konto schaut nur auf frühere Trades, die NACH der Lesung oder gar nicht geendet haben — Pläne mit Ende vor der frühesten
+    Lesung ändern das Ergebnis nie. Bewusst über das ENDE begrenzt, nicht über den Start (ein langer Trade startet vor, endet nach der Lesung)."""
+    kids, ab = [], None
+    for k, a in (accs or {}).items():
+        kb, at = _wd_num((a or {}).get("tv_balance")), _ap_ts((a or {}).get("tv_balance_at"))
+        if kb and kb > 0 and at is not None:
+            kids.append(str(k))
+            ab = at if ab is None or at < ab else ab
+    return sorted(set(kids)), ab
+
+
+def _ap_konto_plaene(accs):
+    """{konto_id: [(plan_id, start, ende)]} der gestarteten Pläne (alle Wege, auch Hand), die für ap_bal_vorher_konto zählen können:
+    nur Konten mit Konto-Lesung, nur Pläne mit Ende ≥ früheste Lesung oder ohne Ende (ap_konto_plaene_grenze) — das Ergebnis ist dasselbe
+    wie mit allen Plänen. Jedes dieser Konten bekommt eine Liste (auch leer). Fehler fliegen durch; der Aufrufer lässt _plaene dann weg."""
+    kids, ab = ap_konto_plaene_grenze(accs)
+    out = {k: [] for k in kids}
+    if not kids:
+        return out
+    ab_q = ab.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")      # ohne „+" (würde im or-Filter zum Leerzeichen)
     for j in range(0, len(kids), 150):
         for r in _sb_all("trade_plans", {"select": "id,master_account_id,started_at,ended_at,completed_at,mt5_baseline->final->>at",
-                                         "master_account_id": "in.(" + ",".join(kids[j:j + 150]) + ")", "started_at": "not.is.null"}):
+                                         "master_account_id": "in.(" + ",".join(kids[j:j + 150]) + ")", "started_at": "not.is.null",
+                                         "or": f"(ended_at.gte.{ab_q},and(ended_at.is.null,completed_at.gte.{ab_q}),"
+                                               f"and(ended_at.is.null,completed_at.is.null))"}):
             ende = r.get("ended_at") or r.get("completed_at") or r.get("at")
             out.setdefault(str(r.get("master_account_id")), []).append((str(r.get("id")), r.get("started_at"), ende))
     return out
@@ -15622,7 +15642,7 @@ def admin_hypo_bilanz():
             for a in sb_select("accounts", {"select": "id,name,firm,account_type,external_id,tv_balance,tv_balance_at", "id": f"in.({','.join(ids[i:i + 80])})"}):
                 accs[str(a["id"])] = a
         try:                                       # Pläne je Konto für ap_bal_vorher_konto (Lesung nach dem vorigen Trade)
-            for k, liste in _ap_konto_plaene(accs.keys()).items():
+            for k, liste in _ap_konto_plaene(accs).items():
                 if k in accs:
                     accs[k]["_plaene"] = liste
         except Exception as e:
@@ -15819,7 +15839,7 @@ def _ap_hb_laden(firmen, jetzt=None):
             rows = _sb_all("accounts", dict(q, select="id,name,firm,account_type,external_id"))   # Spalten fehlen → ohne
         accs.update({str(a["id"]): a for a in rows if a.get("id")})
     try:                                           # Pläne je Konto für „Balance vorher aus der Konto-Lesung" (ap_bal_vorher_konto)
-        for k, liste in _ap_konto_plaene(accs.keys()).items():
+        for k, liste in _ap_konto_plaene(accs).items():
             if k in accs:
                 accs[k]["_plaene"] = liste
     except Exception as e:
