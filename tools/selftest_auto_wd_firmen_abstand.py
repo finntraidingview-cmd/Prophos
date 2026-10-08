@@ -68,6 +68,15 @@ def main():
                         "konten": [{"id": f"w{i}", "firm": "Tradeify", "aktiv": True}]})
         wd_zeit.append((t - tag_dt).total_seconds() / 60.0)   # Minuten ab Mitternacht Berlin, wie geplant[].start
     a["sb_select"] = lambda table, params: [dict(r) for r in wd_rows] if table == "wd_tagesplan" else alt_sel(table, params)
+    # Feste Uhr für den Probelauf (08.10.2026, Prüfer: Test ab ~14:30 UTC rot, auch an älteren Ständen): ap_planen nahm die echte Uhr,
+    # nach start_bis des 08.10. (bzw. ab dem 09.10. für immer) gab es „0 geplant" — jetzt gilt im Lauf dasselbe jetzt wie für die Stubs
+    echt_dt = a["datetime"]
+
+    class FixDT(echt_dt):
+        @classmethod
+        def now(cls, tz=None):
+            return jetzt if tz is not None else jetzt.replace(tzinfo=None)
+    a["datetime"] = FixDT
     nah, n_tdfy, laeufe = 0, 0, 0
     for seed in (1, 7, 4711):
         erg = a["ap_planen"]("2026-10-08", trocken=True, seed=seed)
@@ -82,6 +91,7 @@ def main():
             hh, mm = (int(x) for x in str(g["start"]).split(":")[:2])   # „HH:MM" deutsche Zeit (_ap_hhmm_txt)
             nah += any(abs(hh * 60 + mm - w) < GFA - 0.5 for w in wd_zeit)
     a["sb_select"] = alt_sel
+    a["datetime"] = echt_dt
     check(laeufe == 3, "Probelauf mit wd_tagesplan läuft durch (3 Seeds)")
     check(n_tdfy > 0 and nah == 0, f"kein Tradeify-Auto-Plan < {GFA:g} min neben einem Farmer-Konto einer anderen ID ({n_tdfy} Pläne, {nah} zu nah)")
 
