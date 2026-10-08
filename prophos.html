@@ -41253,7 +41253,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1293'
+  const OS_TAB_BUILD = '2026-09-22.1294'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -41485,22 +41485,29 @@
   async function faVorStart(plan){
     if(!plan || !plan.id) return null
     if(plan.orbitGesendetAt || plan.startedAt) return null   // Order schon draußen — nie eingreifen (Prüfer 08.10.2026: kein Doppel-Kauf)
-    try{
-      const { data, error } = await supabase.rpc('prophos_firmen_abstand_halten', { p_plan: plan.id })
-      if(error) throw error
-      if(!data || data.frei !== false) return null
-      const um = data.ziel ? new Date(data.ziel).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '?'
-      const t = `„${plan.masterName || '—'}" wartet 5-min-Abstand zu ${data.wer || 'einer anderen ID'} (${plan.masterFirm || data.firma || 'gleiche Firma'}) — startet ${um}`
-      const i = tradePlans.findIndex(x => String(x.id) === String(plan.id))
-      if(i >= 0) tradePlans[i] = Object.assign({}, tradePlans[i], { startUm: data.ziel || tradePlans[i].startUm, startUmGestartetAt: null })   // orbit_gesendet_at nie
-      try{ renderTradePlans() }catch(_){}
-      if(typeof atToast === 'function') atToast('⏳ ' + t, 'end')
-      console.warn('[firmen-abstand]', t)
-      return t
-    }catch(e){
-      console.warn('[firmen-abstand] Prüfung nicht möglich — Start wie bisher (Claim-Riegel bleibt)', (e && e.message) || e)
-      return null
+    // Beide DB-Prüfungen unabhängig: fehlt eine Funktion (nicht eingespielt) oder ist offline, gilt sie als frei, die andere zählt weiter
+    const frage = async (fn, wofuer) => {
+      try{ const { data, error } = await supabase.rpc(fn, { p_plan: plan.id }); if(error) throw error; return (data && data.frei === false) ? data : null }
+      catch(e){ console.warn('[' + wofuer + '] Prüfung nicht möglich — Start wie bisher (Claim-Riegel bleibt)', (e && e.message) || e); return null }
     }
+    const fa = await frage('prophos_firmen_abstand_halten', 'firmen-abstand')
+    // GEGENHEDGE ÜBER IDs (08.10.2026, Slave-Terminal 4 — Finn: eigene Lücken schließen): der Tab sieht fremde Pläne per RLS nicht,
+    // firmLiveRichtungen verwirft fremde IDs. Darum fragt jeder Start zusätzlich die DB-Funktion prophos_gegenhedge_halten
+    // (sql/2026-10-08_gegenhedge_riegel.sql): läuft/startet eine ANDERE ID bei derselben Firma gegenläufig, legt sie den Start auf
+    // später (+30 min bzw. deren Start + 30 min) und protokolliert.
+    const gh = fa ? null : await frage('prophos_gegenhedge_halten', 'gegenhedge')
+    const d = fa || gh
+    if(!d) return null
+    const um = d.ziel ? new Date(d.ziel).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '?'
+    const t = gh
+      ? `„${plan.masterName || '—'}" wartet: ${d.wer || 'eine andere ID'} ${d.grund || 'läuft gegenläufig'} (${plan.masterFirm || d.firma || 'gleiche Firma'}) — startet ${um}`
+      : `„${plan.masterName || '—'}" wartet 5-min-Abstand zu ${d.wer || 'einer anderen ID'} (${plan.masterFirm || d.firma || 'gleiche Firma'}) — startet ${um}`
+    const i = tradePlans.findIndex(x => String(x.id) === String(plan.id))
+    if(i >= 0) tradePlans[i] = Object.assign({}, tradePlans[i], { startUm: d.ziel || tradePlans[i].startUm, startUmGestartetAt: null })   // orbit_gesendet_at nie
+    try{ renderTradePlans() }catch(_){}
+    if(typeof atToast === 'function') atToast('⏳ ' + t, 'end')
+    console.warn(gh ? '[gegenhedge]' : '[firmen-abstand]', t)
+    return t
   }
   window._faVorStart = plan => faVorStart(plan)   // Test-Haken (Stub)
   async function tpOrbitStarten(planId, fern, opts){
