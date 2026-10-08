@@ -16186,6 +16186,10 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
         if any(p.get("status") == "review" for p in eig):
             ausgelassen.append(dict(zeile, grund="letzter Trade noch nicht erledigt (Überprüfen)"))
             continue
+        if any(p.get("status") == "completed" and _ap_plan_am_tag(p, tag, tz) for p in eig):
+            # 08.10.2026 Finn: „maximal ein Trade pro Tag pro Account" — heute schon gehandelt (abgehakt) → erst morgen wieder
+            ausgelassen.append(dict(zeile, grund=AP_GRUND_HEUTE_GEHANDELT))
+            continue
         bal, _ccy, quelle_b, stand = acc_balance_wahl(a, echo_bal, dup_bal)
         letzt = max((str(p.get("ended_at") or p.get("completed_at") or "") for p in eig), default="")
         if letzt and (bal is None or not ap_balance_live(stand, letzt)):   # seit 08.10.2026 über ap_balance_live (auch Delta/ids/Guard)
@@ -19710,7 +19714,8 @@ AP_NACHPLAN_TAKT_S = 600
 # Gründe des letzten Laufs, die sich innerhalb des Tages nicht von selbst ändern — solche Konten werden nicht alle 10 min neu gerechnet
 # „vom Auto-Planer ausgenommen" ist seit 08.10.2026 KEIN fester Grund mehr: der Haken wird je Konto live geprüft (auto_planer is False) —
 # vorher blieb ein Konto, dessen Haken Finn wieder gesetzt hatte, bis zum nächsten Tag draußen (Grund aus dem letzten Lauf)
-AP_NACHPLAN_FEST_GRUENDE = ("keine Regel für diese Firma", "kein freies Zeitfenster mehr",
+AP_GRUND_HEUTE_GEHANDELT = "heute schon gehandelt — ein Trade pro Konto und Tag"
+AP_NACHPLAN_FEST_GRUENDE = ("heute schon gehandelt", "keine Regel für diese Firma", "kein freies Zeitfenster mehr",
                             "letzter Trade ", "Kontogröße", "Ziel erreicht", "bis zum Ziel")
 
 
@@ -19728,6 +19733,20 @@ def _ap_plan_am_tag(p, tag, tz):
     st = str(p.get("status") or "")
     if st in ("open", "review"):
         return True
+    if st == "completed":
+        # 08.10.2026 EIN TRADE PRO KONTO UND TAG (Finn: „Es wird immer nur maximal ein Trade pro Tag gemacht?“): ein heute schon
+        # beendeter (abgehakter) Trade belegt das Konto für den Rest des Tages. Vorfall: Inas drei Apex-Konten endeten 03:57 Dubai
+        # im Tagesstopp, das Nachplanen legte um 07:20 Dubai für dieselben Konten neue Trades für HEUTE an (08:47/17:04/18:06).
+        for k in ("started_at", "ended_at", "completed_at", "start_um"):
+            v = p.get(k)
+            if not v:
+                continue
+            try:
+                if datetime.fromisoformat(str(v).replace("Z", "+00:00")).astimezone(tz).strftime("%Y-%m-%d") == tag:
+                    return True
+            except (TypeError, ValueError):
+                continue
+        return False
     if st != "planned":
         return False
     if p.get("planned_for"):
@@ -19782,8 +19801,9 @@ def ap_nachplan_tick(jetzt, zustand):
         return None
     in_uids = "in.(" + ",".join(uids) + ")"
     konten = _ap_konten_laden({"user_id": in_uids, "order": "id.asc", "account_type": "in.(" + ",".join(AP_TYPEN) + ")"})
-    plaene = _sb_all("trade_plans", {"select": "id,master_account_id,status,start_um,planned_for", "user_id": in_uids,
-                                     "status": "in.(planned,open,review)",
+    plaene = _sb_all("trade_plans", {"select": "id,master_account_id,status,start_um,planned_for,started_at,ended_at,completed_at",
+                                     "user_id": in_uids,
+                                     "status": "in.(planned,open,review,completed)",   # completed: ein Trade pro Konto und Tag (08.10.2026)
                                      "created_at": "gte." + (jetzt - timedelta(days=30)).isoformat()})
     rows = sb_select("auto_plan_lauf", {"select": "tag,quelle,ergebnis", "tag": f"eq.{tag}", "order": "at.desc", "limit": "1"})
     letzter = (rows[0].get("ergebnis") if rows else None) or {}
