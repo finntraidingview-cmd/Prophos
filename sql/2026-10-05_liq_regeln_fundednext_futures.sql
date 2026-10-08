@@ -1,3 +1,4 @@
+-- ÜBERHOLT (08.10.2026): nie eingespielt; ersetzt durch sql/2026-10-08_liq_fundednext_futures_lock.sql (Lock 100 laut Dashboard). NICHT ausführen.
 -- 2026-10-05: liq_regeln — FundedNext Futures: Konto-Boden EOD-trailing statt statisch (Master-Auftrag LIQ-FNF).
 -- Anlass (Finn 05.10.2026, Screenshot FundedNext „Futures Flex 150K Challenge": Profit target 8.000 $, Max loss limit 4.000 $):
 -- der Radar zeigte bei zwei 150k-Challenge-Konten mit Balance ~153.200 einen Abstand von ~7.198 $ zur Liquidation. Ursache: die Zeile
