@@ -22094,6 +22094,41 @@
    * (mt5_baseline.master_balance), aber nie ans Konto geschrieben. Jetzt landet jede frische Master-Balance in denselben Feldern wie bei
    * Futures (tv_balance/tv_equity/tv_balance_at), Quelle 'mt5' (sql/2026-09-29_accounts_tv_balance_quelle_mt5.sql erweitert den Check;
    * fehlt die Erweiterung noch, wird ohne Quelle geschrieben — ein Nicht-Futures-Konto mit tv_balance ist ohnehin MT5). Nur Lesen. */
+  /* SERVERNAME WIE BEWIESEN (08.10.2026, Chris FTMO 541472738: accounts.cred_server stand auf „FTMO-Server 4", richtig „FTMO-Server4" —
+   * jeder Start mit Login-Zwang schickte MT5 per prophos-login.ini auf den falschen Server, MT5 legte ein zweites Konto an und kam nicht
+   * rein; ff8c2412 scheiterte, „Echo neu anlegen" half nicht, weil der Server aus der DB kommt). Leerzeichen NICHT pauschal entfernen:
+   * „FundedNext-Server 2" ist bei FundedNext echt (38 Konten). Regel: weicht der hinterlegte Server vom zuletzt BEWIESENEN (Snapshot des
+   * Lese-EA bei gleichem Login, sonst Server der Instanz-Config) nur in Leerzeichen/Groß-Klein ab, gilt der bewiesene. */
+  const mt5ServerNorm = x => String(x || '').replace(/\s+/g, '').toLowerCase()
+  function mt5ServerBewiesen(inst, login, server){
+    const roh = String(server || '').trim()
+    if(!roh) return roh
+    const s = (inst && inst.status) || {}
+    const kand = [String(s.master_login || '') === String(login || '') ? s.master_server : null, inst ? inst.master_server : null]
+    for(const k of kand){
+      const b = String(k || '').trim()
+      if(b && b !== roh && mt5ServerNorm(b) === mt5ServerNorm(roh)) return b
+    }
+    return roh
+  }
+  // DB heilt sich selbst: frischer Snapshot (Balance > 0, keine Notiz) mit gleichem Login und einem Server, der sich vom hinterlegten nur in
+  // Leerzeichen/Groß-Klein unterscheidet → accounts.cred_server = bewiesener Name. Einmal je Konto und Tab-Leben.
+  const _mt5ServerGeheilt = new Set()
+  async function mt5ServerHeilen(inst, f){
+    try{
+      const srv = String(((inst && inst.status) || {}).master_server || '').trim()
+      if(!f || !srv) return
+      for(const a of mt5KontenZuLogin(f.login)){
+        const alt = String((a.creds && a.creds.server) || '').trim()
+        if(!alt || alt === srv || mt5ServerNorm(alt) !== mt5ServerNorm(srv) || _mt5ServerGeheilt.has(String(a.id))) continue
+        _mt5ServerGeheilt.add(String(a.id))
+        const { error } = await supabase.from('accounts').update({ cred_server: srv }).eq('id', a.id)
+        if(error){ console.warn('[mt5-server] Konto', a.id, error.message || error); continue }
+        a.creds.server = srv
+        console.log(`[mt5-server] ${a.name || a.id}: Server „${alt}" → „${srv}" (bewiesen vom Lese-EA, Login ${f.login})`)
+      }
+    }catch(e){ console.warn('[mt5-server]', e) }
+  }
   function mt5KontoLogin(acc){
     if(!acc) return ''
     const l = (typeof mt5LoginForAccount === 'function') ? mt5LoginForAccount(acc.id) : null
@@ -22147,6 +22182,7 @@
     for(const inst of (instances || [])){
       const f = mt5InstBalanceFrisch(inst); if(!f) continue
       for(const a of mt5KontenZuLogin(f.login)) mt5KontoBalanceSchreiben(a.id, f, { drossel: true })
+      mt5ServerHeilen(inst, f)
     }
   }
   // Puls/Order am Werk? Dann kein Terminal nach vorn holen — das würde einen laufenden Klick stören
@@ -22204,7 +22240,7 @@
       window._mt5BalOeffnetBis = oeffnetBis   // Fenster kommt nach Sekunden bis zig Sekunden nach vorn — Starts warten bis zu 60 s
       try{
         ts = await window.mtcApi(`start-terminal?file=${encodeURIComponent(file)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(sendCreds ? { login: String(mc.login), password: String(mc.password), server: String(mc.server || '') } : {}) })
+          body: JSON.stringify(sendCreds ? { login: String(mc.login), password: String(mc.password), server: mt5ServerBewiesen(inst, mc.login, mc.server) } : {}) })
       }catch(e){ ts = { ok: false, msg: String((e && e.message) || e) } }
       if(!ts || !ts.ok){ if(window._mt5BalOeffnetBis === oeffnetBis) window._mt5BalOeffnetBis = 0; return { ok: false, msg: 'Terminal-Start fehlgeschlagen: ' + String((ts && (ts.msg || ts.error)) || 'Fehler') } }
       if(/FALSCHEN Konto/i.test(String(ts.msg || ''))){ if(window._mt5BalOeffnetBis === oeffnetBis) window._mt5BalOeffnetBis = 0; return { ok: false, msg: String(ts.msg) } }
@@ -32709,7 +32745,7 @@
     let ts = null
     try{
       ts = await window.mtcApi(`start-terminal?file=${encodeURIComponent(inst.file)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(sendCreds ? { login: String(mc.login), password: String(mc.password), server: String(mc.server || '') } : {}) })
+        body: JSON.stringify(sendCreds ? { login: String(mc.login), password: String(mc.password), server: mt5ServerBewiesen(inst, mc.login, mc.server) } : {}) })
     }catch(e){ ts = { ok: false, msg: String((e && e.message) || e) } }
     if(!ts || !ts.ok) return { ok: false, msg: 'Terminal-Start fehlgeschlagen: ' + String((ts && (ts.msg || ts.error)) || 'Fehler') }
     if(/FALSCHEN Konto/i.test(String(ts.msg || ''))) return { ok: false, msg: String(ts.msg) }
@@ -39576,7 +39612,7 @@
       try{
         ts = await window.mtcApi(`start-terminal?file=${encodeURIComponent(file)}`, { method:'POST',
           headers:{'Content-Type':'application/json'},
-          body: JSON.stringify(sendCreds ? { login: String(mc.login), password: String(mc.password), server: String(mc.server || '') } : {}) })
+          body: JSON.stringify(sendCreds ? { login: String(mc.login), password: String(mc.password), server: mt5ServerBewiesen(route.inst, mc.login, mc.server) } : {}) })
       }catch(e){ ts = { ok:false, msg: String(e && e.message || e) } }
       zMark('terminal')
       if(!ts || !ts.ok){ fail('v2term', 'Terminal-Start fehlgeschlagen: ' + escapeHtml(String((ts && (ts.msg || ts.error)) || 'Fehler'))); _pfSet('v2order', 'warn', 'Übersprungen.') }
@@ -39981,7 +40017,7 @@
       const ts = await window.mtcApi(`start-terminal?file=${encodeURIComponent(file)}`, { method:'POST',
         headers:{'Content-Type':'application/json'},
         body: JSON.stringify(sendCreds
-          ? { login: String(mc.login), password: String(mc.password), server: String(mc.server || '') }
+          ? { login: String(mc.login), password: String(mc.password), server: mt5ServerBewiesen(route.inst, mc.login, mc.server) }
           : {}) })
       if(!ts.ok){
         _pfSet('m5term', 'err', 'Terminal-Start fehlgeschlagen: ' + escapeHtml(String(ts.msg || ts.error || 'Fehler')))
@@ -41638,7 +41674,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1327'
+  const OS_TAB_BUILD = '2026-09-22.1328'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
