@@ -6558,7 +6558,8 @@ def test_tsx_k4():
         and q4.index("if einstieg is None and abg:") < q4.index('raus("abgelehnt"') and "offen_tab" in _i.getsource(ob.tsx_k3_vor_klick)
         and _i.getsource(ob._AugenSitzung.klick).index("self._druck_versucht = False") < _i.getsource(ob._AugenSitzung.klick).index("self._win_klick(") and "self._druck_versucht = True" in _i.getsource(ob._AugenSitzung._win_klick)
         and "self._druck_versucht = True" in _i.getsource(ob._AugenSitzung.klick) and "tsx_k4_ablehnungen(st, vorher, klick_ms)" in q4
-        and 'raus("tabelle_unklar", f"Konto {ext} hat eine offene Position' in _i.getsource(ob.modus_tsxlesen_cdp)
+        and 'raus("konto_offen", puls_konto_offen_text(offen), "konto_offen"' in _i.getsource(ob.modus_tsxlesen_cdp)   # KONTO OFFEN 08.10.2026: eigener Code statt tabelle_unklar
+        and "Ticket nicht angefasst" in _i.getsource(ob.modus_tsxlesen_cdp)
         and "offene Position gelesen" in _i.getsource(ob.tsx_k3_vor_klick),
         "Prüfer 06.10.2026: Druck-Merker vor dem Druck (je Ziel), Zeit-Schwellen 30/27 s, Antwort vor den Netz-Sendungen, Ablehnung erst am Ende, 0-Zeilen keine Position")
     if ok:

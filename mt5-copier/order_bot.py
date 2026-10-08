@@ -15830,6 +15830,33 @@ def tsx_k3_knopf(ticket, richtung):
     return k if isinstance(k, dict) else None
 
 
+def tsx_offene_positionen(stand):
+    """REIN RECHNEND (testbar): KONTO OFFEN für Topstep (08.10.2026, Block-Kopf bei cdp_konto_offen) — die offenen Positionen DIESES
+    TopstepX-Kontos aus EINEM Blick: K1-Zeilen (augen_tsx.js positionen: Tabelle unten oder Order-Karte „-6 @ 31,339.50") und Zeilen der
+    Positions-Tabelle mit Menge ≠ 0 (ticket.gitter). Jeder Contract zählt — bei Topstep sperrt schon tsx_k3_vor_klick jede gelesene
+    Position (Prüfer 06.10.2026), hier nur in Textform für Code 'konto_offen'. -> [{symbol, wurzel, seite, menge}] (doppelte entfernt)"""
+    st = stand if isinstance(stand, dict) else {}
+    g = _tsx_tk(st).get("gitter") if isinstance(_tsx_tk(st).get("gitter"), dict) else {}
+    out, gesehen = [], set()
+    roh = [(p, False) for p in (st.get("positionen") or [])]
+    if g.get("da"):
+        roh += [(z, True) for z in (g.get("zeilen") or [])]
+    for p, tabelle in roh:
+        if not isinstance(p, dict):
+            continue
+        m = cdp_zahl(p.get("menge"))
+        if tabelle and (m is None or m == 0):
+            continue                                  # Tabellenzeile mit Menge 0 ist keine Position (augen_tsx.js positionAus)
+        seite = p.get("seite") if p.get("seite") in ("buy", "sell") else ("buy" if m and m > 0 else "sell" if m and m < 0 else None)
+        sym = str(p.get("symbol") or "").strip().lstrip("/").upper()
+        e = {"symbol": sym[:16], "wurzel": tv_symbol_root(sym), "seite": seite, "menge": abs(m) if m is not None else None}
+        k = (e["wurzel"], e["seite"], e["menge"])
+        if k not in gesehen:
+            gesehen.add(k)
+            out.append(e)
+    return out
+
+
 def tsx_k3_vor_klick(stand, befehl, code, ext):
     """REIN RECHNEND (testbar): Probe-Urteil aus EINEM frischen Blick — stünde das Ticket so da, dass eine Order genau dem Plan entspräche?
     Nur lesen, klickt nichts. -> (ok, fehler[], knopf, markt_zu). Konto = ext (volle Kennung) und Liste zu · kein Dialog · flach bewiesen („No Active Position" + „Close Position" gesperrt —
@@ -16697,6 +16724,36 @@ def _tsx_k4_senden(s, st, befehl, ziel, kn, res, trail, raus, order_cmd):
     return r_
 
 
+def _tsx_positionen_vor_klick(s, st, befehl, ziel, kn, trail):
+    """KONTO OFFEN (08.10.2026, s. _tsx_k3_probe): Reiter „Positions" unten vor dem Order-Klick öffnen und aus dem frischen Blick danach
+    erneut vorprüfen (tsx_k3_vor_klick — jede Zeile der Positions-Tabelle mit Menge ≠ 0 sperrt, jeder Contract). Nur der Reiter wird
+    geklickt (_tsx_k4_reiter: höchstens EIN Klick mit Ziel-Beweis + K4-Tabu), nie etwas im Ticket. Steht die Tabelle schon im Bild: kein
+    Klick, kein zweiter Blick. Geht der Reiter nicht auf: „positionen_unklar", der bestandene Blick gilt wie bisher.
+    -> (ok, stand, knopf, code, msg) — code 'konto_offen' | 'vorpruefung' nur bei ok False"""
+    t = _tsx_tk(st)
+    rt = (t.get("reiter") or {}).get("positions") if isinstance(t.get("reiter"), dict) else None
+    g = t.get("gitter") if isinstance(t.get("gitter"), dict) else {}
+    if g.get("da") and (not isinstance(rt, dict) or rt.get("aktiv")):
+        trail.append("Positionen vor dem Senden: Positions-Tabelle im Bild, keine offene Position")
+        return True, st, kn, "", ""
+    ok_r, st2, grund = _tsx_k4_reiter(s, st, trail)
+    if not ok_r:
+        trail.append(f"positionen_unklar: {grund} — keine Sperre, Vorprüfung wie bisher (Order-Karte flach bewiesen)")
+    if st2 is st:
+        return True, st, kn, "", ""                   # nichts geklickt, nichts neu gelesen → der bestandene Blick gilt
+    ok, fehler, kn2, _mz = tsx_k3_vor_klick(st2, befehl, ziel, befehl["ext"])
+    if ok:
+        trail.append("Positionen vor dem Senden: " + ("Reiter Positions offen, keine offene Position" if ok_r
+                                                      else "Tabelle unklar, Order-Karte flach — Vorprüfung im frischen Blick bestanden"))
+        return True, st2, kn2, "", ""
+    trail.append("Vorprüfung nach dem Reiter Positions: " + "; ".join(fehler))
+    offen = tsx_offene_positionen(st2)
+    if offen:
+        return False, st2, kn2, "konto_offen", puls_konto_offen_text(offen)
+    return False, st2, kn2, "vorpruefung", ("Nach dem Öffnen des Reiters Positions passt das Ticket nicht mehr: " + "; ".join(fehler)
+                                            + " — nichts gesendet.")
+
+
 def _tsx_k3_probe(s, st, befehl, res, trail, raus, order_cmd=None):
     """K3a nach der K1/K2-Kette (Konto steht, Kopf gelesen, flach): Ticket füllen, dann aus EINEM frischen Blick prüfen
     (tsx_k3_vor_klick) und ehrlich enden — „Ticket bereit (nicht gesendet)". Klickt nie einen Order-Knopf.
@@ -16713,10 +16770,23 @@ def _tsx_k3_probe(s, st, befehl, res, trail, raus, order_cmd=None):
     ktext = str((kn or {}).get("text") or "")
     nur_markt = markt_zu and len(fehler) == 1
     if not ok and not nur_markt:
+        offen = tsx_offene_positionen(st)
+        if offen:                                     # KONTO OFFEN (08.10.2026): offene Position = eigener Code, Rest wie bisher
+            trail.append("Vorprüfung: " + "; ".join(fehler))
+            return raus("konto_offen", puls_konto_offen_text(offen), "konto_offen", positionen_offen=offen)
         return raus("vorpruefung", "Ticket gefüllt, aber es passt noch nicht: " + "; ".join(fehler), "probe")
     if befehl.get("scharf") is True and TSX_K4_AKTIV:
         if not ok:                                    # Markt zu: der Knopf trägt nicht „Buy/Sell ±n @ Market" — nie drücken
             return raus("markt_zu", f"Ticket gefüllt, aber der Markt ist zu (Knopf zeigt '{ktext[:40]}') — nichts gesendet.", "probe")
+        # KONTO OFFEN (08.10.2026): bekannte Lücke aus K4 (06.10.2026, „Reiter Positions zu + Position in anderem Contract → vor dem
+        # Klick nicht sichtbar"; die Order-Karte zeigt „No Active Position" nur für IHREN Contract, eine NQ-Hand-Position neben einem
+        # MNQ-Plan sah niemand). Jetzt vor dem Klick den Reiter „Positions" unten öffnen (derselbe Schritt wie nach dem Fill:
+        # _tsx_k4_reiter, höchstens EIN Klick mit Ziel-Beweis) und aus einem frischen Blick erneut urteilen. Geht der Reiter nicht auf
+        # (fehlt/verdeckt/Tabelle nicht im Bild): „positionen_unklar" in die Spur, Vorprüfung wie bisher (Order-Karte flach bewiesen).
+        ok, st, kn, code_p, msg_p = _tsx_positionen_vor_klick(s, st, befehl, ziel, kn, trail)
+        if not ok:
+            return raus(code_p, msg_p, "konto_offen" if code_p == "konto_offen" else "probe",
+                        **({"positionen_offen": tsx_offene_positionen(st)} if code_p == "konto_offen" else {}))
         return _tsx_k4_senden(s, st, befehl, ziel, kn, res, trail, raus, order_cmd if isinstance(order_cmd, dict) else {})
     trail.append(f"Knopf '{ktext}' — nicht geklickt (Probe)")
     try:
@@ -16870,7 +16940,12 @@ def modus_tsxlesen_cdp(cmd, order=None, order_cmd=None, frist_s=None):
             if res.get("offen") or res.get("positionen"):
                 # Prüfer 06.10.2026: seit die Augen Positionen lesen (tsx-0.6), endete K1 bei offener Position nicht mehr — die Probe
                 # hätte Contract/Menge auf ein nicht flaches Konto getippt. Wie vor K4: ehrlich bei „lesen" enden, Ticket unberührt.
-                return raus("tabelle_unklar", f"Konto {ext} hat eine offene Position — Ticket nicht angefasst, nichts gesendet.", "lesen")
+                # KONTO OFFEN (08.10.2026): eigener Code 'konto_offen' statt 'tabelle_unklar' (wie Orbit: start_fehler → sfTick plant neu),
+                # Text mit der gelesenen Position; die Sperre selbst ist unverändert (jede gelesene Position, jeder Contract)
+                offen = tsx_offene_positionen(st) or [{"symbol": p.get("symbol"), "seite": p.get("seite"), "menge": p.get("menge_zahl")}
+                                                      for p in (res.get("positionen") or []) if isinstance(p, dict)]
+                trail.append(f"Konto {ext} hat eine offene Position — Ticket nicht angefasst")
+                return raus("konto_offen", puls_konto_offen_text(offen), "konto_offen", positionen_offen=offen)
             return _tsx_k3_probe(s, st, order, res, trail, raus, order_cmd)
         if (cmd or {}).get("ende"):
             res["exit_diag"] = {"fehler": "Exit-Fill über CDP kommt mit K5"}
@@ -18810,6 +18885,137 @@ def cdp_zeilen_menge(zeilen, richtung):
     return summe
 
 
+# ═══ KONTO OFFEN (08.10.2026, Finn ~22:15 Dubai) ═════════════════════════════════════════════════════════════════════════════════
+# Anlass (Befund Slave 3): Tradeify-WD-Konto einer ID — Puls startete einen zweiten Plan, während in Prophos noch ein anderer auf „open" stand.
+# Am Broker war nichts offen, aber eine Sperre „eine Position je Konto" gab es im Startweg nicht: cdp_zeilen_menge zählt „vorher N" nur
+# in der EIGENEN Richtung und nur als Basis für den Fill-Beweis. Finn auf die Frage, ob eine offene Position (auch eine gewollte
+# Hand-Position) jeden Puls-Start blockieren soll: „Ja … nichts gegen Hedge intern, sonst passt es".
+# Regel: unmittelbar vor dem ERSTEN Sende-Klick eines neuen Starts wird die Positionsliste DIESES Kontos gelesen (das Konto ist davor per
+# cdp_konto_passt bewiesen; Fusion/MT5 und andere eigene Konten stehen nie in dieser Tabelle). Steht dort eine Position der Wurzel-Familie
+# des Plans (NQ/MNQ: eine NQ-Hand-Position sperrt auch einen MNQ-Plan), egal welche Seite → nichts senden, Code 'konto_offen'.
+# Gesperrt wird NUR, wenn sicher der Positions-Bereich gelesen wurde: augen.js setzt konto.positionen_sichtbar schon bei einem sichtbaren
+# Spaltenkopf „Avg Fill Price" — den hat auch der Orders-Reiter (Warnung Slave 2, Teil B von b004deb gestrichen). Deshalb zählt nur der
+# AKTIVE Reiter „positions": augen.js konto_summary.reiter aus demselben Blick ODER die Reiterleiste (CDP_REITER_JS) direkt danach, und
+# keine der beiden Quellen meldet einen anderen Reiter. Unklar → keine Sperre, Start läuft wie bisher, nur „positionen_unklar" in der
+# Spur (puls_diagnose): lieber einmal zu wenig sperren als jeden Start fälschlich.
+# Beleg puls_augen (art stand, 08.10.2026, 9 von 10 PCs): konto_summary.reiter 'positions'; Positions-Zeilen tragen die Spalten
+# Symbol · Side (Long/Short) · Qty · Avg Fill Price · Profit · Position ID, Order-Zeilen Order ID · Status · Type · Filled Qty — die
+# liegen bei aktivem Positions-Reiter unsichtbar im DOM (sichtbar false) und stehen in augen.js unter orders, nie unter positionen.
+# Ein PC mit Reiter 'summary' (positionen_sichtbar false) wäre hier „unklar".
+PULS_WURZEL_FAMILIE = {"MNQ": "NQ", "MES": "ES", "MYM": "YM", "M2K": "RTY", "MGC": "GC", "MCL": "CL"}
+CDP_ORDER_SPALTEN = ("Order ID", "Order Id", "Order-ID", "Auftrags-ID", "Auftragsnummer", "Status")
+CDP_RX_REITER_POS = re.compile(r"^position(s|en)?\b", re.I)
+
+
+def puls_wurzel_familie(root):
+    """REIN RECHNEND (testbar): Micro und Mini desselben Index sind EINE Familie (MNQ → NQ); unbekannte Wurzeln bleiben, wie sie sind."""
+    r = str(root or "").strip().upper()
+    return PULS_WURZEL_FAMILIE.get(r, r)
+
+
+def puls_konto_offen_text(offen):
+    """REIN RECHNEND (testbar): „Konto hat schon eine offene Position (BUY 2 MNQ) — nichts gesendet" (mehrere mit Komma)."""
+    teile = []
+    for p in offen or []:
+        if not isinstance(p, dict):
+            continue
+        m = cdp_zahl(p.get("menge"))
+        seite = str(p.get("seite") or "").upper() or "SEITE ?"
+        teile.append(f"{seite} {abs(m):g} {p.get('wurzel') or tv_symbol_root(str(p.get('symbol') or '')) or '?'}" if m is not None
+                     else f"{seite} ? {p.get('wurzel') or '?'}")
+    return f"Konto hat schon eine offene Position ({', '.join(teile[:4]) or '?'}) — nichts gesendet"
+
+
+def cdp_konto_offen(stand, reiter, root):
+    """REIN RECHNEND (testbar): Hat DIESES Konto (Puls-Chrome, TradingView/Tradovate) schon eine offene Position der Wurzel-Familie?
+    stand = augen.js stand() des frischen Blicks vor dem Sende-Klick, reiter = CDP_REITER_JS direkt danach ([] / None = nicht lesbar).
+    -> {urteil 'offen'|'flach'|'unklar', grund, offen [{symbol, wurzel, seite, menge}], text, spur}. Gesperrt wird nur bei 'offen'."""
+    st = stand if isinstance(stand, dict) else {}
+    ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+    ks = st.get("konto_summary") if isinstance(st.get("konto_summary"), dict) else {}
+    fam = puls_wurzel_familie(root)
+    fam_text = "/".join(sorted({k for k, v in PULS_WURZEL_FAMILIE.items() if v == fam} | {fam})) or "?"
+    # Zeilen der Familie vorab zählen — auch für „unklar" (Diagnose: wäre hier etwas gewesen?)
+    offen, unlesbar, order_artig, versteckt = [], 0, 0, 0
+    for p in st.get("positionen") or []:
+        if not isinstance(p, dict) or puls_wurzel_familie(tv_symbol_root(str(p.get("symbol") or ""))) != fam or not fam:
+            continue
+        if not p.get("sichtbar"):
+            versteckt += 1                          # unsichtbare Zeile = womöglich veraltet (Panel zu), nie Wahrheit
+            continue
+        sp = p.get("spalten") if isinstance(p.get("spalten"), dict) else {}
+        if any(str(sp.get(k) or "").strip() for k in CDP_ORDER_SPALTEN):
+            order_artig += 1                        # Zeile mit Order-ID/Status ist eine Order, nie eine Position
+            continue
+        m = cdp_zahl(p.get("menge"))
+        if m is None:
+            unlesbar += 1
+            continue
+        if abs(m) < 1e-9:
+            continue                                # Menge 0 = flach
+        offen.append({"symbol": str(p.get("symbol") or "")[:16], "wurzel": tv_symbol_root(str(p.get("symbol") or "")),
+                      "seite": p.get("seite") if p.get("seite") in ("buy", "sell") else None, "menge": abs(m)})
+    zeilen_info = (f"{len(offen)} sichtbare {fam_text}-Zeile(n)" + (f", {unlesbar} ohne Menge" if unlesbar else "")
+                   + (f", {order_artig} Order-artig" if order_artig else "") + (f", {versteckt} unsichtbar" if versteckt else ""))
+
+    def aus(urteil, grund):
+        if urteil == "offen":
+            text = puls_konto_offen_text(offen)
+            zeilen = ", ".join("%s %g %s" % ((o["seite"] or "?").upper(), o["menge"], o["symbol"]) for o in offen)
+            spur = f"Positionen vor dem Senden: OFFEN — {zeilen} ({grund}) — nichts gesendet"
+        elif urteil == "flach":
+            text, spur = "", f"Positionen vor dem Senden: flach ({grund}, {zeilen_info})"
+        else:
+            text, spur = "", f"positionen_unklar: {grund} ({zeilen_info} nicht gewertet) — keine Sperre, Start wie bisher"
+        return {"urteil": urteil, "grund": grund, "offen": offen if urteil == "offen" else [], "text": text, "spur": spur}
+
+    # 1) Reiter: augen.js (derselbe Blick) und Reiterleiste (direkt danach) — eine positiv „positions", keine „etwas anderes"
+    r_aug = str(ks.get("reiter") or "").strip()
+    aktiv_leiste = [e for e in (reiter or []) if isinstance(e, dict) and str(e.get("sel")).lower() == "true"]
+    leiste_pos = any(cdp_reiter_passt(e, "positions") for e in aktiv_leiste)
+    leiste_anders = [str(e.get("id") or e.get("text") or "?")[:20] for e in aktiv_leiste if not cdp_reiter_passt(e, "positions")]
+    if r_aug and not CDP_RX_REITER_POS.match(r_aug):
+        return aus("unklar", f"aktiver Reiter '{r_aug[:20]}' statt Positions (augen.js)")
+    if leiste_anders:
+        return aus("unklar", f"aktiver Reiter '{leiste_anders[0]}' statt Positions (Reiterleiste)")
+    if not (r_aug or leiste_pos):
+        return aus("unklar", "aktiver Reiter nicht lesbar (weder augen.js noch Reiterleiste)")
+    # 2) Tabelle des Bereichs sichtbar (Zeilen oder Kopf) — ohne sie ist „keine Zeile" kein Beleg, „Zeile" aber auch nicht
+    if ko.get("positionen_sichtbar") is not True:
+        return aus("unklar", "Reiter Positions aktiv, aber keine Positions-Tabelle sichtbar")
+    quelle = "Reiter positions" + (" (augen.js + Leiste)" if r_aug and leiste_pos else " (augen.js)" if r_aug else " (Leiste)")
+    if offen:
+        return aus("offen", quelle)
+    if unlesbar:
+        return aus("unklar", f"{quelle}, aber {unlesbar} {fam_text}-Zeile(n) ohne lesbare Menge")
+    return aus("flach", quelle)
+
+
+def _cdp_konto_offen_blick(s, st, root, trail, res):
+    """KONTO OFFEN: Urteil aus dem frischen Blick st + Reiterleiste direkt danach (nur lesen, nie ein Klick). Spur + res['positionen_pruefung'].
+    Eine Ausnahme beim Lesen der Leiste macht das Urteil nur unklarer (keine Sperre), bricht den Start nie ab."""
+    try:
+        reiter = s.lese_js(CDP_REITER_JS) or []
+    except Exception as e_:
+        reiter = []
+        trail.append(f"Reiterleiste nicht lesbar ({type(e_).__name__})")
+    u = cdp_konto_offen(st, reiter if isinstance(reiter, list) else [], root)
+    res["positionen_pruefung"] = {"urteil": u["urteil"], "grund": str(u["grund"])[:160]}
+    trail.append(u["spur"])
+    return u
+
+
+def _cdp_positions_reiter_sichern(s, trail):
+    """KONTO OFFEN: Reiter „Positions" vor dem frischen Blick aktiv machen (wie _cdp_today_aus_reiter/_cdp_endpruefung — nur der Reiter
+    des Account-Managers, nie etwas im Ticket; steht er schon, kein Klick). Scheitert es, prüft cdp_konto_offen ehrlich „unklar" — der
+    Start läuft dann wie bisher. -> bool"""
+    try:
+        return bool(_cdp_reiter(s, "positions", trail))
+    except Exception as e_:
+        trail.append(f"Reiter Positions nicht gesichert ({type(e_).__name__}) — Positions-Prüfung wird unklar")
+        return False
+
+
 
 def cdp_im_bild(rect, geo):
     """REIN RECHNEND (testbar): Rechteck [x, y, w, h] ganz im Viewport (innerWidth/innerHeight aus geo)? Ohne geo: nur plausibel."""
@@ -19309,7 +19515,14 @@ def modus_tvkette_cdp(cmd):
             return raus(code, msg + (" — nichts gesendet." if scharf else ""), schritt)
         tpsl = f"TP {str(plan['tp']) + ' $' if plan['tp'] else 'aus'}, SL {str(plan['sl']) + ' $' if plan['sl'] else 'aus'}"
         res["schritt_order"], res["scharf"] = True, scharf
+        root = tv_symbol_root(symbol)
+        # KONTO OFFEN (08.10.2026, Block-Kopf bei cdp_konto_offen): Reiter „Positions" sichern, BEVOR der frische Blick fällt — nur so ist
+        # der Positions-Bereich darin sicher erkannt. Der Probelauf prüft genauso (zeigt ohne jedes Senden, ob scharf gesperrt würde).
+        _cdp_positions_reiter_sichern(s, trail)
         if not scharf:
+            u = _cdp_konto_offen_blick(s, s.stand(opts), root, trail, res)
+            if u["urteil"] == "offen":
+                return raus("konto_offen", u["text"] + " (Probelauf)", "konto_offen", positionen_offen=u["offen"])
             trail.append(f"Knopf: '{str(kk.get('text'))[:50]}' — NICHT geklickt (Probelauf)")
             res["ok"] = True
             return raus("", f"PROBELAUF (CDP): Ticket steht — Knopf zeigt '{str(kk.get('text'))[:50]}', {tpsl}. NICHT gesendet.",
@@ -19325,7 +19538,6 @@ def modus_tvkette_cdp(cmd):
         kk = st.get("kauf_knopf") if isinstance(st.get("kauf_knopf"), dict) else {}
         ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
         sym_k = str(kk.get("symbol") or "").strip() or symbol
-        root = tv_symbol_root(symbol)
         if tv_symbol_root(sym_k) != root or not k3_knopf_exakt(kk.get("text"), plan["richtung"], plan["menge"], sym_k):
             return raus("knopf", f"Knopf zeigt '{kk.get('text')}', verlangt '{k3_knopf_soll(plan['richtung'], plan['menge'], sym_k)}' "
                                  "— nichts gesendet.", "knopf")
@@ -19339,6 +19551,14 @@ def modus_tvkette_cdp(cmd):
             return raus("popup", f"Dialog/Popup offen ({[p.get('titel') or p.get('text') for p in st['popups']][:2]}) — nichts gesendet.", "knopf")
         if not cdp_konto_passt(str(ko.get("aktiv") or ""), ext):
             return raus("konto", f"Konto vor dem Klick nicht mehr {ext} ('{ko.get('aktiv')}') — nichts gesendet.", "knopf")
+        # KONTO OFFEN (08.10.2026): aus DEMSELBEN frischen Blick, das Konto ist eben bewiesen. Offen = nichts senden (gesendet bleibt
+        # false, retry_ok true → das Frontend schreibt start_fehler, sfTick plant neu; ist die Hand-Position bis dahin zu, startet der
+        # Trade beim nächsten Versuch). Unklar = wie bisher weiter, „positionen_unklar" steht in der Spur, die gleich als cdp-senden in
+        # puls_diagnose geht. Nur dieser erste Sende-Klick wird geprüft — Endlesung/Nachlesung/Schließen laufen nie hier durch.
+        u_offen = _cdp_konto_offen_blick(s, st, root, trail, res)
+        if u_offen["urteil"] == "offen":
+            _puls_diagnose_senden(spur=trail, schritt="konto_offen")
+            return raus("konto_offen", u_offen["text"], "konto_offen", positionen_offen=u_offen["offen"])
         menge0 = cdp_zeilen_menge(k3_zeilen(st.get("positionen"), root), plan["richtung"])
         vorher_m = [k3_meldung_schluessel(m) for m in ((st.get("toasts") or {}).get("meldungen") or []) if isinstance(m, dict)]
         trail.append(f"Knopf EXAKT '{kk.get('text')}', nicht gesperrt, Konto {ext}, kein Popup, vorher {menge0:g} {plan['richtung']} offen — EIN Klick")
@@ -22074,8 +22294,10 @@ PULS_NEUSTART_ENDE_S = 25.0                  # so lange auf das Ende des alten P
 PULS_NEUSTART_HART_AB_S = 10.0               # antwortet Chrome auf Browser.close so lange nicht → nur die eigenen PIDs hart beenden
 # Codes, bei denen ein Neustart nichts hilft oder nicht erlaubt ist: Befehl/Sperre/Etappe fehlt/Markt zu/Zeit/Wachhund/abgelehnt
 PULS_NEUSTART_NIE_VOR_KLICK = frozenset(("ticket", "konto", "konto_nicht_erreicht"))   # Master 08.10.2026, s. neustart_entscheid
+# konto_offen (08.10.2026, KONTO OFFEN): eine offene (Hand-)Position am Konto ist kein Chrome-Problem — nie neu starten, nie ein zweiter
+# Versuch im selben Lauf; neu eingeplant wird über start_fehler/sfTick
 PULS_NEUSTART_NIE = frozenset(("befehl", "handlauf", "sperre", "cdp_folgt", "markt_zu", "zeit", "haenger", "abgelehnt",
-                               "puls_beschaeftigt", "bot_fehlt"))
+                               "puls_beschaeftigt", "bot_fehlt", "konto_offen"))
 
 
 def neustart_entscheid(res, weg, verstrichen_s, schon=False, lesung_moeglich=True, budget_s=None, min_rest_s=None,
