@@ -41192,7 +41192,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1273'
+  const OS_TAB_BUILD = '2026-09-22.1274'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -41413,6 +41413,34 @@
       return true
     }catch(e){ console.warn('[konto-weg] Status→review', (e && e.message) || e); return false }
   }
+  /* FIRMEN-ABSTAND VOR JEDEM START (08.10.2026, Slave-Terminal 3 — Finn 05:00 Dubai: „5-Minuten-Regel gleiche Prop-Firm — gefixt?
+   * Falls nicht, kümmer dich um alles!"). Der DB-Riegel am Claim (sql/2026-10-08_firmen_abstand_riegel.sql) greift nur beim Claim
+   * NULL → gesetzt; „Neu starten" (Claim bleibt gesetzt) und Hand-Starts ohne Claim liefen vorbei. Darum fragt jeder Start
+   * (tpOrbitStartenKern, tpJetztStarten) vorher die DB-Funktion prophos_firmen_abstand_halten (sql/2026-10-08_firmen_abstand_pruefen_rpc.sql,
+   * security definer — RLS zeigt fremde Pläne nicht): hat eine ANDERE ID bei derselben Firma in den letzten 5 min wirklich gestartet
+   * (bzw. vor ≤ 2 min geclaimt), legt die Funktion den Start auf deren Start + 5 min + Jitter, löst Claim/orbit_gesendet_at und
+   * protokolliert; hier: nicht starten, Hinweis „wartet 5-min-Abstand zu <ID>, startet HH:MM". Der Tick startet den Plan zur neuen Zeit.
+   * Ohne die Funktion (noch nicht eingespielt) oder offline: Start wie bisher — der Claim-Riegel bleibt. → Hinweistext oder null. */
+  async function faVorStart(plan){
+    if(!plan || !plan.id) return null
+    try{
+      const { data, error } = await supabase.rpc('prophos_firmen_abstand_halten', { p_plan: plan.id })
+      if(error) throw error
+      if(!data || data.frei !== false) return null
+      const um = data.ziel ? new Date(data.ziel).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '?'
+      const t = `„${plan.masterName || '—'}" wartet 5-min-Abstand zu ${data.wer || 'einer anderen ID'} (${plan.masterFirm || data.firma || 'gleiche Firma'}) — startet ${um}`
+      const i = tradePlans.findIndex(x => String(x.id) === String(plan.id))
+      if(i >= 0) tradePlans[i] = Object.assign({}, tradePlans[i], { startUm: data.ziel || tradePlans[i].startUm, startUmGestartetAt: null, orbitGesendetAt: null })
+      try{ renderTradePlans() }catch(_){}
+      if(typeof atToast === 'function') atToast('⏳ ' + t, 'end')
+      console.warn('[firmen-abstand]', t)
+      return t
+    }catch(e){
+      console.warn('[firmen-abstand] Prüfung nicht möglich — Start wie bisher (Claim-Riegel bleibt)', (e && e.message) || e)
+      return null
+    }
+  }
+  window._faVorStart = plan => faVorStart(plan)   // Test-Haken (Stub)
   async function tpOrbitStarten(planId, fern, opts){
     if(!fern) return tpOrbitStartenKern(planId, null, opts)
     let gemeldet = false
@@ -41444,6 +41472,8 @@
     if(plan.status !== 'planned'){ if(fern) fern.melde({ ok:false, msg: 'Plan ist nicht (mehr) „Geplant" — nichts gestartet.' }); return }
     const zielOk = planZielErreicht(plan)   // ZIEL ERREICHT (07.10.2026): auch von Hand / vom Mac kein Start
     if(zielOk){ const t = planZielText(plan, zielOk); toast('🎯 ' + t, 'end'); if(fern) fern.melde({ ok:false, msg: t }); return }
+    const fa = await faVorStart(plan)       // FIRMEN-ABSTAND (08.10.2026): andere ID bei derselben Firma eben gestartet → später
+    if(fa){ if(fern) fern.melde({ ok:false, msg: fa }); return }
     // UNKLAR-Marke (B37, 30.09.2026; Topstep V2 und Orbit V2): der letzte Start endete UNKLAR, die Order liegt vielleicht — kein zweiter
     // Klick, egal ob Karte, Startzeit oder Signal vom Mac. Gelöst wird die Marke nur bewusst über den Chip auf der Karte.
     if((plan.route === 'tsv2' || plan.route === 'tvv2') && plan.mt5Baseline && plan.mt5Baseline.puls_unklar){
@@ -42073,6 +42103,7 @@
     if(!plan || plan.status !== 'planned') return
     const zielOk = planZielErreicht(plan)   // ZIEL ERREICHT (07.10.2026): auch von Hand kein Start
     if(zielOk){ if(typeof atToast === 'function') atToast('🎯 ' + planZielText(plan, zielOk), 'end'); return }
+    if(await faVorStart(plan)) return       // FIRMEN-ABSTAND (08.10.2026): andere ID bei derselben Firma eben gestartet → später
     const { order, fehlt } = _tpOrderAusPlan(plan)
     if(fehlt.length){
       if(typeof atToast === 'function') atToast('Für „Starten" fehlt: ' + fehlt.join(', ') + ' — über „Weiter →" im Plan speichern.', 'end')
