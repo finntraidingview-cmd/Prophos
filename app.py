@@ -16495,8 +16495,83 @@ def _ap_tranche_frei(t, start, tranchen, zeiten):
     return None
 
 
+AP_VERTEIL_VORLAUF_MIN = 10            # Verteilung: nie auf einen Start vor jetzt + 10 min schieben (Master 08.10.2026)
+AP_VERTEIL_JITTER_MIN = 8              # Streuung hinter dem frühesten freien Start (kein festes Raster)
+AP_VERTEIL_GEGEN_MIN = 120             # ohne laufzeit_min: so weit muss eine Gegenrichtung derselben ID × Firma weg bleiben
+
+
+def ap_verteil_gruppen(je, zustand, abstand=None):
+    """REIN RECHNEND: ID × Firma-Gruppen mit einem Klumpen — zwei Pläne näher als `abstand` (Standard AP_ABSTAND_ID_FIRMA_MIN),
+    der spätere davon änderbar. je = {plan_id: plan}, zustand = {plan_id: {start, richtung}}. → [(erste Klumpen-Minute, "uid|firma")]
+    nach Dringlichkeit (frühester Klumpen zuerst)."""
+    gf = float(AP_ABSTAND_ID_FIRMA_MIN if abstand is None else abstand)
+    gr = {}
+    for i in zustand:
+        gr.setdefault(f"{je[i]['user_id']}|{je[i]['firma']}", []).append(i)
+    out = []
+    for g, ids in gr.items():
+        ids = sorted(ids, key=lambda i: (zustand[i]["start"], str(i)))
+        for x, y in zip(ids, ids[1:]):
+            if zustand[y]["start"] - zustand[x]["start"] < gf and je[y].get("aenderbar"):
+                out.append((zustand[x]["start"], g))
+                break
+    return sorted(out)
+
+
+def ap_verteilung(gruppe, je, zustand, jetzt_min, zeiten, rnd, gestartet=None, laufzeit_min=None):
+    """REIN RECHNEND (VERTEILUNG, 08.10.2026, Master/Finn: „Jetzt starten drei Apex-Dinger. Wenn es nur ganz kurz nicht weitergeht,
+    werden alle liquidiert. Deswegen lieber einzeln starten"): neue Startminuten für EINE Gruppe "uid|firma". Der Reihe nach: ein
+    änderbarer Plan, der näher als AP_ABSTAND_ID_FIRMA_MIN an seinem Vorgänger startet, rückt NUR nach hinten — frühestens
+    jetzt + AP_VERTEIL_VORLAUF_MIN, spätestens im eigenen Fenster (≤ start_bis), je ID ≥ AP_ABSTAND_ID_MIN + PC-Regel zu allen
+    anderen Plänen/Starts der ID, nie in die Laufzeit einer GEGENRICHTUNG derselben ID × Firma (sonst Long und Short zugleich).
+    Abstände gelockert nach AP_ABSTAND_STUFEN (ohne 0); passt nichts, bleibt der Plan stehen. Richtung nie. → {plan_id: neue Minute}
+    nur für verschobene Pläne."""
+    gf_v = float((zeiten or {}).get("abstand_id_firma_min") or AP_ABSTAND_ID_FIRMA_MIN)
+    gi_v = float((zeiten or {}).get("abstand_id_gesamt_min") or AP_ABSTAND_ID_MIN)
+    abst_pc = float((zeiten or {}).get("abstand_id_min") or 3) + 2
+    gegen = float(laufzeit_min or AP_VERTEIL_GEGEN_MIN)
+    uid, firma = gruppe.split("|", 1)
+    eigene = sorted((i for i in zustand if f"{je[i]['user_id']}|{je[i]['firma']}" == gruppe), key=lambda i: (zustand[i]["start"], str(i)))
+    neu, vorher = {}, None
+    for i in eigene:
+        s0 = zustand[i]["start"]
+        if vorher is None or not je[i].get("aenderbar") or s0 - vorher >= gf_v:
+            vorher = s0
+            continue
+        fen = ap_fenster_von(zeiten, s0)
+        hi = int(fen[1]) - 1 if fen else None
+        richtung = zustand[i]["richtung"]
+        andere = [(neu.get(k, zustand[k]["start"]), zustand[k]["richtung"], f"{je[k]['user_id']}|{je[k]['firma']}")
+                  for k in zustand if k != i and str(je[k]["user_id"]) == uid]
+        andere += [(float(x["start"]), x.get("richtung"), f"{x['user_id']}|{x['firma']}") for x in gestartet or ()
+                   if str(x.get("user_id")) == uid and x.get("start") is not None]
+
+        def ok(t, f):
+            for s, r, g in andere:
+                if abs(t - s) < max(abst_pc, gi_v * f):
+                    return False                                   # PC + Abstand je ID
+                if g == gruppe and r in ("buy", "sell") and r != richtung and abs(t - s) < gegen:
+                    return False                                   # nie Gegenrichtung derselben ID × Firma zugleich offen
+            return True
+        ziel = None
+        for f in [x for x in AP_ABSTAND_STUFEN if x > 0]:
+            lo = max(s0, float(jetzt_min) + AP_VERTEIL_VORLAUF_MIN, vorher + gf_v * f)
+            if hi is None or lo > hi:
+                continue
+            frei_ = [t for t in range(int(-(-lo // 1)), hi + 1) if ok(t, f)]
+            if frei_:
+                ziel = float(rnd.choice([t for t in frei_ if t <= frei_[0] + AP_VERTEIL_JITTER_MIN]))
+                break
+        if ziel is not None and ziel > s0:
+            neu[i] = ziel
+            vorher = ziel
+        else:
+            vorher = s0                                            # passt nicht ins Fenster — bleibt stehen
+    return neu
+
+
 def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, rnd, gestartet=None, id_fest=None,
-                schritte=AP_BOT_SCHRITTE, einsatz=None, zuletzt=None, hysterese=None):
+                schritte=AP_BOT_SCHRITTE, einsatz=None, zuletzt=None, hysterese=None, dubai_min=0):
     """REIN RECHNEND (Vertrag §3, Korrektur Finn 06.10.2026): ein Lauf des Ausgleichs-Bots. plaene = heutige geplante Pläne
     [{plan_id, user_id, user, firma, richtung, start_min, delta_abs, aenderbar}] — nicht änderbare zählen mit und sperren ihre
     Tranche. gestartet = heute schon gestartete Trades [{user_id, firma, start, richtung}] (nur für den weichen Malus),
@@ -16550,10 +16625,11 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
         return k[1] > schwelle
 
     aktuell = vorher = strafe(zustand) + (misch(zustand),)
+    klumpen = ap_verteil_gruppen(je, zustand)     # VERTEILUNG (08.10.2026): weckt den Bot auch bei gehaltenem Band
     # ID-MISCHUNG OHNE BAND-ANLASS (08.10.2026, Finn: „warum ist bei Chris immer noch alles long?" — 7 Pläne von 02:02 Dubai, also vor
     # .1220 angelegt; Nachplanen lässt bestehende stehen, der Bot drehte nur bei Band-Überschreitung): auch eine ID-Mischung > 0 weckt
     # den Bot — die Band-Schritte unten laufen trotzdem nur, wenn das Band offen ist, danach die eigene Mischungs-Phase
-    if not offen_(vorher) and not vorher[4]:
+    if not offen_(vorher) and not vorher[4] and not klumpen:
         return {"aenderungen": [], "vorher": als_dict(vorher), "nachher": als_dict(vorher), "ausloeser": None,
                 "daempfung": {"hysterese": schwelle, "ruhe_min": AP_RUHE_JE_PLAN_MIN, "ruhig": []}}
     ausloeser = None if not offen_(vorher) else (
@@ -16689,6 +16765,50 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                                           f"{AP_RICHTUNG_TXT[von['richtung']]} → {AP_RICHTUNG_TXT[nach['richtung']]} "
                                           f"({m_vor.get('long')}/{m_vor.get('short')} → {m_nach.get('long')}/{m_nach.get('short')} long/short)")})
         zustand, aktuell = z, k_neu
+
+    # ── VERTEILUNG (08.10.2026, Master/Finn: „Jetzt starten drei Apex-Dinger. Wenn es nur ganz kurz nicht weitergeht, werden alle
+    # liquidiert. Deswegen lieber einzeln starten" — auch für HEUTE schon angelegte Pläne): eine ID × Firma je Lauf, deren Pläne näher
+    # als AP_ABSTAND_ID_FIRMA_MIN liegen, rückt nach hinten auseinander (ap_verteilung). Änderbar = nicht gestartet, Auto-Plan, keine
+    # Werte von Hand, nicht fällig — BESTÄTIGTE ausdrücklich eingeschlossen, die Bestätigung bleibt (_ap_aenderungen_anwenden schreibt
+    # nur start_um). Richtung nie. Malus/Band der nächsten 60 min und über den Tag nicht schlechter als die Hysterese. Ruhe je Plan.
+    def zeiten_txt(ms):
+        return "/".join(_ap_hhmm_txt((float(m) + float(dubai_min or 0)) % 1440) for m in ms)
+    tag_vor_v = None
+    for _m0, g in ap_verteil_gruppen(je, zustand):
+        ids_g = sorted((i for i in zustand if f"{je[i]['user_id']}|{je[i]['firma']}" == g), key=lambda i: zustand[i]["start"])
+        if ruht([i for i in ids_g if je[i].get("aenderbar")]):
+            continue
+        if tag_vor_v is None:
+            tag_vor_v = ueber_tag(zustand)
+        gewaehlt = None
+        for _v in range(6):                      # Streuung neu würfeln, falls ein Zug das Band verschlechtert
+            neu = ap_verteilung(g, je, zustand, jetzt_min, zeiten, rnd, gestartet=gestartet,
+                                laufzeit_min=(einsatz or {}).get("laufzeit"))
+            if not neu:
+                break
+            z = {i: dict(v) for i, v in zustand.items()}
+            for i, m in neu.items():
+                z[i]["start"] = m
+            k_neu = strafe(z) + (misch(z),)
+            if k_neu[0] > aktuell[0] or k_neu[1] > max(schwelle, aktuell[1]) + 1e-9 or ueber_tag(z) > max(schwelle, tag_vor_v) + 1e-9:
+                continue
+            gewaehlt = (neu, z, k_neu)
+            break
+        if not gewaehlt:
+            continue
+        neu, z, k_neu = gewaehlt
+        wer = je[ids_g[0]].get("user") or str(je[ids_g[0]]["user_id"])[:8]
+        name = je[ids_g[0]].get("firma_name") or g.split("|", 1)[1]
+        grund = (f"Verteilung: {wer} {name} {zeiten_txt([zustand[i]['start'] for i in ids_g])} → "
+                 f"{zeiten_txt([z[i]['start'] for i in ids_g])}{' Dubai' if dubai_min else ''} — einzeln starten statt hintereinander")
+        if ausloeser is None:
+            ausloeser = grund
+        for i in sorted(neu, key=lambda i: neu[i]):
+            aenderungen.append({"plan_id": i, "user_id": je[i]["user_id"], "firma": je[i]["firma"], "art": "start",
+                                "von_richtung": zustand[i]["richtung"], "nach_richtung": zustand[i]["richtung"],
+                                "von_start_min": zustand[i]["start"], "nach_start_min": neu[i], "grund": grund})
+        zustand, aktuell = z, k_neu
+        break                                     # höchstens EINE ID × Firma je Lauf (wie die Mischung)
     return {"aenderungen": aenderungen, "vorher": als_dict(vorher), "nachher": als_dict(aktuell), "ausloeser": ausloeser,
             "daempfung": {"hysterese": schwelle, "ruhe_min": AP_RUHE_JE_PLAN_MIN,
                           "ruhig": sorted({i for i in je if ruht([i])})}}
@@ -17421,6 +17541,15 @@ def ap_richtungsschutz(stand, trocken=False, quelle="bot"):
     return out
 
 
+def _ap_dubai_versatz(mitternacht):
+    """Minuten, die Dubai der deutschen Zeit voraus ist (Sommerzeit 120, Winterzeit 180) — nur für Klartext im Protokoll."""
+    try:
+        from zoneinfo import ZoneInfo
+        return (mitternacht.astimezone(ZoneInfo(AP_TZ_LAUF)).utcoffset() - mitternacht.utcoffset()).total_seconds() / 60.0
+    except Exception:
+        return 0
+
+
 def ap_ausgleichen(trocken=False, quelle="bot", jetzt=None, seed=None):
     """Ausgleichs-Bot einmal (Takt, Extra-Lauf 14:00 oder POST /admin/auto-plan/ausgleichen). trocken = nur rechnen.
     Ändert nur geplante, nicht gestartete Auto-Pläne (ap_umplanen) — nie laufende Trades, nie Orders.
@@ -17451,7 +17580,8 @@ def ap_ausgleichen(trocken=False, quelle="bot", jetzt=None, seed=None):
         print(f"[auto-plan] ⚠️ Dämpfung: Protokoll nicht lesbar ({type(e).__name__}) — ohne Ruhezeit", flush=True)
     erg = ap_umplanen(_ap_stand_plaene(stand), stand["basis_netto"], stand["basis_brutto"], max(0.0, stand["jetzt_min"]),
                       stand["zeiten"], param["zielband_pct"], random.Random(seed), gestartet=stand["starts_heute"],
-                      id_fest=stand["id_fest"], einsatz=ap_einsatz_kontext(stand, param), zuletzt=zuletzt)
+                      id_fest=stand["id_fest"], einsatz=ap_einsatz_kontext(stand, param), zuletzt=zuletzt,
+                      dubai_min=_ap_dubai_versatz(stand["mitternacht"]))
     je = {z["plan_id"]: z for z in stand["geplant"]}
     if trocken:
         umpl = [{"um": None, "plan_id": a["plan_id"], "user_id": a["user_id"], "user": (je.get(a["plan_id"]) or {}).get("user"),

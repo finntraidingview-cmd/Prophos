@@ -160,6 +160,96 @@ def main():
     check(all(b - a_ >= GI for a_, b in zip(eigen, eigen[1:])), f"ap_planen: alle Pläne der ID ≥ {GI:g} min auseinander")
     check(not geschrieben["post"] and not inserts, "Probelauf schreibt nichts")
 
+    # ── 8 Bot-Phase VERTEILUNG mit den Klumpen von heute (08.10.2026, Zeiten Dubai = dt + 120 min) ────────────────────────────
+    U = a["ap_umplanen"]
+    Z16 = {"fenster": [["00:00", "16:30", 1]], "start_bis": "16:30", "abstand_id_min": 3}
+    DUBAI = 120
+
+    def dt(hhmm_dubai):
+        h_, m_ = map(int, hhmm_dubai.split(":"))
+        return h_ * 60 + m_ - DUBAI
+
+    def plan(pid, uid, user, firma, start, richtung="buy", **kw):
+        return dict({"plan_id": pid, "user_id": uid, "user": user, "firma": firma, "firma_name": firma.capitalize(), "richtung": richtung,
+                     "start_min": float(start), "delta_abs": 1.0, "einsatz_abs": 100.0, "aenderbar": True, "fest_durch": None,
+                     "auto_plan": True, "bestaetigt": True, "route": "tvv2"}, **kw)
+    heute = [plan("mike1", "u-mike", "Mike", "fundednext", dt("09:59")), plan("mike2", "u-mike", "Mike", "fundednext", dt("10:00")),
+             plan("inafn1", "u-ina", "Ina", "fundednext", dt("16:58")), plan("inafn2", "u-ina", "Ina", "fundednext", dt("16:59")),
+             plan("inafn3", "u-ina", "Ina", "fundednext", dt("17:01")),
+             plan("chrfp1", "u-chris", "Chris", "fundingpips", dt("17:02"), "sell"), plan("chrfp2", "u-chris", "Chris", "fundingpips", dt("17:03"), "sell"),
+             plan("aff1", "u-aff", "aff98e60", "the5ers", dt("17:57")), plan("aff2", "u-aff", "aff98e60", "the5ers", dt("17:58")),
+             plan("inatf1", "u-ina", "Ina", "tradeify", dt("10:54"), "sell"), plan("inatf2", "u-ina", "Ina", "tradeify", dt("11:37"), "sell")]
+    start0 = {p["plan_id"]: p["start_min"] for p in heute}
+    pl = [dict(p) for p in heute]
+    jm, zuletzt, je_lauf, alle_aend = dt("04:40"), {}, [], []
+    for _lauf in range(14):                                    # Bot-Takt alle 10 min, gut zwei Stunden
+        erg = U(pl, 0.0, 0.0, jm, Z16, 100, random.Random(_lauf), zuletzt=zuletzt, dubai_min=DUBAI)
+        v = [x for x in erg["aenderungen"] if x["art"] == "start"]
+        je_lauf.append({f"{x['user_id']}|{x['firma']}" for x in v})
+        alle_aend += erg["aenderungen"]
+        neu = {x["plan_id"]: x["nach_start_min"] for x in v}
+        pl = [dict(p, start_min=neu.get(p["plan_id"], p["start_min"])) for p in pl]
+        for x in v:
+            zuletzt[x["plan_id"]] = jm
+        jm += 10
+    st = {p["plan_id"]: p["start_min"] for p in pl}
+
+    def abst(*ids):
+        s = sorted(st[i] for i in ids)
+        return min(b - a_ for a_, b in zip(s, s[1:]))
+    check(all(len(g) <= 1 for g in je_lauf), "höchstens EINE ID × Firma je Bot-Lauf")
+    check(all(x["art"] == "start" and x["nach_richtung"] == x["von_richtung"] for x in alle_aend), "nur Startzeiten — Richtung nie geändert")
+    check(all(st[i] >= start0[i] for i in st), "nur nach hinten geschoben, nie nach vorn")
+    check(all(x["nach_start_min"] >= dt("04:40") + a["AP_VERTEIL_VORLAUF_MIN"] for x in alle_aend), "nie vor jetzt + 10 min")
+    check(all(st[i] <= 16 * 60 + 30 for i in st), "alle Starts innerhalb start_bis 16:30 dt (18:30 Dubai)")
+    check(abst("mike1", "mike2") >= GF, f"Mike FundedNext 09:59/10:00 → ≥ {GF:g} min ({abst('mike1', 'mike2'):g})")
+    check(abst("chrfp1", "chrfp2") >= GF, f"Chris FundingPips 17:02/17:03 → ≥ {GF:g} min ({abst('chrfp1', 'chrfp2'):g})")
+    check(abst("inatf1", "inatf2") >= GF, f"Ina Tradeify 10:54/11:37 (43 min) → ≥ {GF:g} min ({abst('inatf1', 'inatf2'):g})")
+    check(st["inafn1"] == start0["inafn1"] and abst("inafn1", "inafn2", "inafn3") >= GF * 0.25,
+          f"Ina FundedNext 16:58/16:59/17:01: erster bleibt, Rest so weit es bis 18:30 Dubai geht (kleinster Abstand {abst('inafn1', 'inafn2', 'inafn3'):g} min statt 1)")
+    check(abst("aff1", "aff2") >= GF * 0.5, f"aff98e60 The5%ers 17:57/17:58 → so weit es geht ({abst('aff1', 'aff2'):g} min, Fenster endet 18:30 Dubai)")
+    ina = sorted(st[i] for i in st if i.startswith("ina"))
+    check(min(b - a_ for a_, b in zip(ina, ina[1:])) >= GI * 0.25, "Ina über beide Firmen: PC-/ID-Abstand gehalten")
+    g = next((x["grund"] for x in alle_aend if x["plan_id"].startswith("inafn")), "")
+    check(g.startswith("Verteilung: Ina Fundednext 16:58/16:59/17:01 → 16:58/") and "Dubai" in g, f"Protokoll-Grund in Dubai-Zeit ({g[:90]})")
+
+    # Ruhezeit: ein eben verschobener Plan ruht 30 min
+    e_r = U([plan("m1", "u-m", "M", "apex", 600), plan("m2", "u-m", "M", "apex", 601)], 0.0, 0.0, 400, Z16, 100, random.Random(1),
+            zuletzt={"m2": 395})
+    check(not e_r["aenderungen"], "Ruhezeit: vor 5 min angefasster Plan wird nicht erneut verschoben")
+    # Werte von Hand / Handplan bleiben stehen
+    e_h = U([plan("h1", "u-h", "H", "apex", 600), plan("h2", "u-h", "H", "apex", 601, aenderbar=False, fest_durch=a["AP_FEST_HAND"]),
+             plan("h3", "u-h", "H", "apex", 602, auto_plan=False, aenderbar=False, fest_durch="Handplan")],
+            0.0, 0.0, 400, Z16, 100, random.Random(1))
+    check(not any(x["plan_id"] in ("h2", "h3") for x in e_h["aenderungen"]), "Werte von Hand und Handpläne werden nie verschoben")
+    # Gegenrichtung derselben ID × Firma: nie in deren Laufzeit schieben
+    e_g = U([plan("g1", "u-g", "G", "apex", 600), plan("g2", "u-g", "G", "apex", 601), plan("g3", "u-g", "G", "apex", 700, "sell")],
+            0.0, 0.0, 400, Z16, 100, random.Random(2))
+    g2 = next((x["nach_start_min"] for x in e_g["aenderungen"] if x["plan_id"] == "g2"), 601)
+    check(abs(g2 - 700) >= a["AP_VERTEIL_GEGEN_MIN"], f"nie in die Laufzeit der Gegenrichtung derselben ID × Firma (g2 → {g2:g}, Short um 700)")
+    # Band: würde das Verschieben das Band der nächsten 60 min verschlechtern, bleibt es stehen
+    # vorher ausgeglichen (2× Long 10 gegen Short 20 derselben Minute) — b2 nach hinten ließe den Short 60 min allein stehen
+    e_b = U([plan("b1", "u-b", "B", "apex", 600, delta_abs=10.0), plan("b2", "u-b", "B", "apex", 600, delta_abs=10.0),
+             plan("b3", "u-c", "C", "topstep", 600, "sell", delta_abs=20.0)], 0.0, 0.0, 590, Z16, 5, random.Random(1), hysterese=0)
+    check(e_b["vorher"]["ueber_band"] == 0, f"Band-Fall: vorher im Band ({e_b['vorher']['ueber_band']})")
+    check(not any(x["art"] == "start" and x["plan_id"] == "b2" for x in e_b["aenderungen"]),
+          "Band: verschlechtert das Verschieben das Netto der nächsten 60 min, bleibt der Plan stehen")
+
+    # Schreiben: nur start_um, Bestätigung bleibt (Guard lässt bestätigte nicht fällige zu)
+    patch = []
+    a["sb_select"] = lambda t, p: [{"id": 1}]
+    a["sb_update"] = lambda t, prm, body: (patch.append((prm, body)), [{"id": prm.get("id")}])[1]
+    a["sb_insert"] = lambda t, rows: rows
+    stand_w = {"geplant": [{"plan_id": "mike2", "start": "2026-10-09T06:00:00+00:00", "firma": "FundedNext", "user": "Mike"}],
+               "mitternacht": datetime(2026, 10, 8, 22, 0, tzinfo=timezone.utc)}
+    v_m = [x for x in alle_aend if x["plan_id"] == "mike2"][:1]
+    try:
+        a["_ap_aenderungen_anwenden"](stand_w, v_m, "bot")
+    except Exception as e:     # noqa: BLE001 — Protokoll-Schreiben im Stub darf scheitern, der PATCH ist schon erfasst
+        print("   (Protokoll im Stub:", type(e).__name__, ")")
+    check(patch and set(patch[0][1]) == {"start_um"} and "or" in patch[0][0] and "auto_bestaetigt_at.is.null" in patch[0][0]["or"],
+          f"PATCH ändert nur start_um, bestätigte nicht fällige Pläne erlaubt ({patch[0] if patch else '—'})")
+
     print()
     if FEHLER:
         print(f"✗ {len(FEHLER)} Fehler")

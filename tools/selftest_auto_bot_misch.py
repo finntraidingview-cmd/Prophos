@@ -43,7 +43,10 @@ def main():
         print(("✓ " if bed else "✗ ") + text)
 
     def lauf(pl, band=100.0, zuletzt=None, id_fest=None):
-        return U(pl, 0.0, 0.0, 300, ZEITEN, band, random.Random(1), einsatz=EINSATZ, zuletzt=zuletzt, id_fest=id_fest)
+        erg = U(pl, 0.0, 0.0, 300, ZEITEN, band, random.Random(1), einsatz=EINSATZ, zuletzt=zuletzt, id_fest=id_fest)
+        # nur Drehungen: die Verteilung (08.10.2026, Startzeiten dichter Pläne derselben ID × Firma) prüft selftest_auto_verteilen
+        erg["aenderungen"] = [x for x in erg["aenderungen"] if x.get("art") == "richtung"]
+        return erg
 
     def gedreht(erg):
         return sorted((x["firma"], x["plan_id"], x["nach_richtung"]) for x in erg["aenderungen"])
