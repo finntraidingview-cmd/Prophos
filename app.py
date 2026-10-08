@@ -16925,6 +16925,13 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
     je = {p["plan_id"]: p for p in plaene or () if p.get("start_min") is not None and p.get("richtung") in ("buy", "sell")}
     zustand = {i: {"richtung": p["richtung"], "start": float(p["start_min"])} for i, p in je.items()}
     jetzt_min = float(jetzt_min)
+    # PC-TAB TOT = PHANTOM (Master 08.10.2026, Slave 1 live: Mikes PC seit 05.10. tot, seine Pläne zählten im Band-Einsatz mit — „429 €
+    # über dem Band", teils Phantom — und wurden um 00:39 und 02:23 UTC verschoben): Pläne von IDs ohne lebenden PC-Tab (pc_lebt) zählen
+    # weder im Band noch in der Szenario-Kurve und werden nie bewegt — nur der Rückfall eines früheren Bot-Zugs legt sie auf ihre alte
+    # Zeit zurück. Kommt der PC zurück, zählen sie wieder (verpasste holt _ap_nachholen regelkonform nach). pc_lebt = None → kein Filter.
+    tot_je = {} if pc_lebt is None else {i: p for i, p in je.items() if str(p["user_id"]) not in pc_lebt}
+    tot_zu = {i: zustand.pop(i) for i in tot_je}
+    je = {i: p for i, p in je.items() if i not in tot_je}
     # DÄMPFUNG (Vorschlag 1, 08.10.2026): zuletzt = {plan_id: Minute des Tages der letzten Umplanung} → Tranche mit einem Plan, der vor
     # weniger als AP_RUHE_JE_PLAN_MIN min angefasst wurde, ruht; hysterese = Schwelle in € (None = AP_HYSTERESE_EUR im Einsatz-Modus,
     # 0 in der alten €/Pkt-Rechnung) — unterhalb gilt das Band als gehalten, der Bot lässt die Finger davon
@@ -17058,25 +17065,35 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
     # 09:59 → 05:13" startete deshalb nie, der Ausgleich verpuffte): Vorziehen und Verteilung nur für IDs, deren PC-Tab lebt (mt5_live-
     # Herzschlag < PC_STAND_LEBT_S, dieselbe Quelle wie /admin/pc-stand). pc_lebt = None → Quelle fehlt, kein Filter.
     lebt = (lambda uid: True) if pc_lebt is None else (lambda uid: str(uid) in pc_lebt)
+    # EIN ZUG JE PLAN UND LAUF (Master 08.10.2026, Befund Slave 2 zum Lauf 02:23:16 UTC: der Band-Schritt schob Mike Topstep 57b69317
+    # im selben Lauf zweimal, 02:43 → 02:51 → 02:59 UTC): jeder Plan, den dieser Lauf schon bewegt oder gedreht hat (Rückfall,
+    # Vorziehen, Band-Schritt, Mischung), ist für die folgenden Schritte und Phasen gesperrt
+    angefasst = set()
     # RÜCKFALL: ein heute vorgezogener Plan, der AP_VORZIEHEN_RUECKFALL_MIN nach seiner neuen Startzeit noch ungeclaimt ist (verpufft =
     # [{plan_id, alt_min}] aus ap_ausgleichen), geht zurück auf seine alte Zeit, wenn die noch ≥ jetzt + AP_VERTEIL_VORLAUF_MIN liegt —
     # sonst bleibt er stehen. Zählt nicht als „die eine Tranche": danach darf ein anderer vorgezogen werden.
     for vp in verpufft or ():
         i = str(vp.get("plan_id"))
-        if i not in zustand or vp.get("alt_min") is None:
+        p_, z_ = je.get(i) or tot_je.get(i), zustand.get(i) or tot_zu.get(i)
+        if not p_ or not z_ or vp.get("alt_min") is None:
             continue
         alt_m = float(vp["alt_min"])
-        if alt_m < float(jetzt_min) + AP_VERTEIL_VORLAUF_MIN or alt_m <= zustand[i]["start"]:
+        if alt_m < float(jetzt_min) + AP_VERTEIL_VORLAUF_MIN or alt_m <= z_["start"]:
             continue                                       # alte Zeit vorbei oder nicht später — bleibt stehen
         hm = lambda m: _ap_hhmm_txt((float(m) + float(dubai_min or 0)) % 1440)    # noqa: E731
-        wer = je[i].get("user") or str(je[i]["user_id"])[:8]
-        aenderungen.append({"plan_id": i, "user_id": je[i]["user_id"], "firma": je[i]["firma"], "art": "start", "rueckfall": True,
-                            "von_richtung": zustand[i]["richtung"], "nach_richtung": zustand[i]["richtung"],
-                            "von_start_min": zustand[i]["start"], "nach_start_min": alt_m,
-                            "grund": (f"Ausgleich: Vorziehen verpufft — {wer} {je[i].get('firma_name') or je[i]['firma']} "
-                                      f"{hm(zustand[i]['start'])} ungeclaimt (PC-Tab?) → zurück auf {hm(alt_m)}{' Dubai' if dubai_min else ''}")})
+        wer = p_.get("user") or str(p_["user_id"])[:8]
+        aenderungen.append({"plan_id": i, "user_id": p_["user_id"], "firma": p_["firma"], "art": "start", "rueckfall": True,
+                            "von_richtung": z_["richtung"], "nach_richtung": z_["richtung"],
+                            "von_start_min": z_["start"], "nach_start_min": alt_m,
+                            "grund": (f"Ausgleich: Vorziehen verpufft — {wer} {p_.get('firma_name') or p_['firma']} "
+                                      f"{hm(z_['start'])} ungeclaimt (PC-Tab{' tot' if i in tot_je else '?'}) → zurück auf {hm(alt_m)}"
+                                      f"{' Dubai' if dubai_min else ''}")})
+        if i in tot_je:                                    # Phantom: zählt weiter nicht mit, nur die Zeit geht zurück
+            angefasst.add(i)
+            continue
         zustand = {k: (dict(v, start=alt_m) if k == i else v) for k, v in zustand.items()}
         vorgezogen_heute.add(i)                            # nicht gleich wieder vorziehen
+        angefasst.add(i)
     if aenderungen:
         aktuell = strafe(zustand) + (misch(zustand),)
     if sz_an and aenderungen:
@@ -17169,6 +17186,7 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                                 "nach_start_min": ziel, "grund": grund})
             ausloeser = grund
             zustand, aktuell, vorgezogen = z, k_neu, True
+            angefasst.add(i)
             if sz_an:
                 sz_vor = sz_lage(zustand)
 
@@ -17197,6 +17215,11 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
             if ruht(ids):                        # DÄMPFUNG: eben erst angefasst — in dieser Runde nicht noch einmal
                 ruhig.extend(ids)
                 continue
+            if any(i in angefasst for i in ids):
+                continue                         # ein Zug je Plan und Lauf (s. o.)
+            if not lebt(t["user_id"]):
+                continue                         # PC-TAB TOT (Master 08.10.2026, Mikes PC): wie beim Vorziehen — Drehen/Schieben
+                                                 # einer ID, die nichts startet, gleicht nur auf dem Papier aus
             # geteilte ID+Firma (Teil-Tranchen) dreht der Bot nicht — eine Richtung je ID+Firma (Richtungsschutz)
             if f"{t['user_id']}|{t['firma']}" not in id_fest and len({zustand[i]["richtung"] for i in ids}) == 1 and t.get("teile", 1) == 1:
                 z = {i: dict(v) for i, v in zustand.items()}
@@ -17258,6 +17281,7 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                                 "von_richtung": von["richtung"], "nach_richtung": nach["richtung"],
                                 "von_start_min": von["start"], "nach_start_min": nach["start"], "grund": grund})
         zustand, aktuell = z, k_neu
+        angefasst.update(ids)
 
     # ── ID-MISCHUNG (08.10.2026, Master/Finn): Tranche ID × Firma drehen, wenn eine ID ≥ AP_ID_MISCH_AB Pläne über ≥ 2 Firmen fast nur
     # in eine Richtung hat (ap_id_misch). Nur Tranchen aus lauter UNBESTÄTIGTEN Auto-Vorschlägen (bestätigte und gestartete bleiben,
@@ -17296,7 +17320,7 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
         for k in sorted(gruppen):
             ids = sorted(gruppen[k])
             best_ = any(je[i].get("bestaetigt") for i in ids)
-            if (k in id_fest or ruht(ids) or len({zustand[i]["richtung"] for i in ids}) != 1
+            if (k in id_fest or ruht(ids) or any(i in angefasst for i in ids) or len({zustand[i]["richtung"] for i in ids}) != 1
                     or not all(je[i].get("aenderbar") and je[i].get("auto_plan") for i in ids)
                     or (best_ and min(zustand[i]["start"] for i in ids) < float(jetzt_min) + AP_MISCH_BESTAETIGT_AB_MIN)):
                 continue
@@ -17377,6 +17401,7 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                                               f"({wer} {m_vor.get('long')}/{m_vor.get('short')} → {m_nach.get('long')}/{m_nach.get('short')} long/short"
                                               f"{txt_t if t is teile[0][0] else ''})")})
         zustand, aktuell = z, k_neu
+        angefasst.update(i for _t, ids in teile for i in ids)
 
     # ── VERTEILUNG (08.10.2026, Master/Finn: „Jetzt starten drei Apex-Dinger. Wenn es nur ganz kurz nicht weitergeht, werden alle
     # liquidiert. Deswegen lieber einzeln starten" — auch für HEUTE schon angelegte Pläne): eine ID × Firma je Lauf, deren Pläne näher
@@ -17386,7 +17411,7 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
     def zeiten_txt(ms):
         return "/".join(_ap_hhmm_txt((float(m) + float(dubai_min or 0)) % 1440) for m in ms)
     tag_vor_v = None
-    je_alt, je = je, {i: (dict(p, aenderbar=False) if i in vorgezogen_heute else p) for i, p in je.items()}   # Pingpong-Bremse
+    je_alt, je = je, {i: (dict(p, aenderbar=False) if i in vorgezogen_heute or i in angefasst else p) for i, p in je.items()}   # Pingpong-Bremse, ein Zug je Plan
     for _m0, g in ([] if vorgezogen else [x for x in ap_verteil_gruppen(je, zustand, gestartet=gestartet) if lebt(x[1].split("|", 1)[0])]):
         ids_g = sorted((i for i in zustand if f"{je[i]['user_id']}|{je[i]['firma']}" == g), key=lambda i: zustand[i]["start"])
         if ruht([i for i in ids_g if je[i].get("aenderbar")]):
@@ -17993,15 +18018,18 @@ def _ap_eur_bei(ve, minute):
     return {"netto_eur": round(p["netto_delta"]), "brutto_eur": round(p["brutto_delta"]), "band_eur": round(p["band_delta"])}
 
 
-def ap_delta_antwort(stand, sicht_uid=None):
-    """GET /admin/auto-plan/delta (Vertrag §4) aus dem Stand. Nicht-Admin: Listen nur die eigene ID, Summen über alle."""
+def ap_delta_antwort(stand, sicht_uid=None, pc_lebt=None):
+    """GET /admin/auto-plan/delta (Vertrag §4) aus dem Stand. Nicht-Admin: Listen nur die eigene ID, Summen über alle.
+    pc_lebt (Set der user_ids mit lebendem PC-Tab, None = unbekannt): Pläne anderer IDs zählen im Verlauf und in der Szenario-Kurve
+    +60 nicht mit (Phantom, wie im Bot — Master 08.10.2026) und tragen pc_tot an der Zeile."""
     pct = stand["param"]["zielband_pct"]
     ab = max(0.0, stand["jetzt_min"])
+    zaehlt = [z for z in stand["geplant"] if pc_lebt is None or str(z.get("user_id")) in pc_lebt]
     v = ap_verlauf(stand["basis_netto"], stand["basis_brutto"],
-                   [(z["start_min"], z["delta_eur_pkt"]) for z in stand["geplant"] if z.get("start_min") is not None], pct, ab_min=ab)
+                   [(z["start_min"], z["delta_eur_pkt"]) for z in zaehlt if z.get("start_min") is not None], pct, ab_min=ab)
     # 07.10.2026 (Finn: EINE Kennzahl = Einsatz €): Netto/Band/Verlauf zusätzlich in € Einsatz; €/Pkt-Felder bleiben zur Info
     ve = ap_verlauf(stand.get("basis_einsatz") or 0.0, stand.get("brutto_einsatz") or 0.0,
-                    [(z["start_min"], z["einsatz_eur"]) for z in stand["geplant"]
+                    [(z["start_min"], z["einsatz_eur"]) for z in zaehlt
                      if z.get("start_min") is not None and z.get("einsatz_eur") is not None], pct, ab_min=ab,
                     laufzeit_min=stand["param"].get("laufzeit_min"))
     umpl, h_umpl = _ap_umplanungen_heute(stand)
@@ -18019,6 +18047,9 @@ def ap_delta_antwort(stand, sicht_uid=None):
                                       "konto_id", "start_fehler", "geclaimt",
                                       "notes", "balance")}
                for z in sorted(stand["geplant"], key=lambda z: (z.get("start_min") or 0, z["plan_id"]))]
+    if pc_lebt is not None:
+        for g in geplant:
+            g["pc_tot"] = str(g.get("user_id")) not in pc_lebt      # zählt nicht mit (Phantom), Bot fasst ihn nicht an
     hinweise = list(stand["hinweise"]) + ([{"grund": h_umpl}] if h_umpl else [])
     # Master 06.10.2026 (Frontend .1084 schon live): band als ZAHL in €/Pkt (± um null, jetzt), Details in band_info; je
     # Verlaufspunkt zusätzlich band (= band_delta); fenster[] aus auto_plan_regeln.zeiten für die Grenzlinien im Chart
@@ -18045,7 +18076,7 @@ def ap_delta_antwort(stand, sicht_uid=None):
     try:
         lauf_t = [ap_szenario_trade_aus_zeile(z, True) for z in stand["offen"]]
         jm_ = float(stand.get("jetzt_min") or 0)
-        plan_t = [ap_szenario_trade_aus_zeile(z, False) for z in stand["geplant"]
+        plan_t = [ap_szenario_trade_aus_zeile(z, False) for z in zaehlt
                   if z.get("start_min") is not None and jm_ <= float(z["start_min"]) <= jm_ + 60]
         l0, l60 = ap_szenario_lage(lauf_t), ap_szenario_lage(lauf_t + plan_t)
         out["delta_eur_pkt"] = l0["delta_eur_pkt"]
@@ -18205,6 +18236,36 @@ def _ap_pc_lebt():
         return None
 
 
+_ap_pc_lebt_cache = {"bis": 0.0, "ids": None}
+AP_PC_LEBT_CACHE_S = 30
+
+
+def _ap_pc_lebt_gecacht():
+    """_ap_pc_lebt für /admin/auto-plan/delta, 30 s gemerkt — jeder Admin-Tab fragt alle paar Sekunden (Supabase-Last, vgl. .1296);
+    der Bot liest frisch. Nicht lesbar (None) wird nicht gemerkt."""
+    jetzt = time.time()
+    with _kurz_cache_lock:
+        if _ap_pc_lebt_cache["ids"] is not None and _ap_pc_lebt_cache["bis"] > jetzt:
+            return _ap_pc_lebt_cache["ids"]
+    ids = _ap_pc_lebt()
+    if ids is not None:
+        with _kurz_cache_lock:
+            _ap_pc_lebt_cache.update(bis=jetzt + AP_PC_LEBT_CACHE_S, ids=ids)
+    return ids
+
+
+def _ap_zug_nach_vorn(grund, von_min, nach_min):
+    """Protokollzeile eines Bot-Zugs nach VORN? „Gegenrichtung vorziehen" („Ausgleich: … vorgezogen …") und seit 08.10.2026 auch der
+    Band-Schritt („…: Tranche X HH:MM → HH:MM im eigenen Fenster …"), wenn er früher gelegt hat (Master, Befund Slave 2: Mikes PC
+    tot — ein nach vorn geschobener Plan, den kein Tab claimt, fällt wie beim Vorziehen auf seine alte Zeit zurück). Solche Pläne
+    stehen in vorgezogen_heute (Pingpong-Bremse) und alt_start (Rückfall, _ap_verpufft)."""
+    g = str(grund or "")
+    if g.startswith("Ausgleich:") and "vorgezogen" in g:
+        return True
+    return (": Tranche " in g and " im eigenen Fenster" in g and von_min is not None and nach_min is not None
+            and float(nach_min) < float(von_min))
+
+
 def _ap_verpufft(stand, alt_start):
     """Heute vorgezogene Pläne (alt_start = {plan_id: (alt_min, neu_min)} aus dem Protokoll), die noch auf der vorgezogenen Zeit stehen,
     seit AP_VORZIEHEN_RUECKFALL_MIN überfällig und ungeclaimt sind → [{plan_id, alt_min}] für den Rückfall in ap_umplanen."""
@@ -18254,7 +18315,8 @@ def ap_ausgleichen(trocken=False, quelle="bot", jetzt=None, seed=None):
             if not um or not r.get("plan_id"):
                 continue
             g_ = str(r.get("grund") or "")
-            if g_.startswith("Ausgleich:") and "vorgezogen" in g_:
+            if _ap_zug_nach_vorn(g_, _ap_iso_min(r.get("von_start"), stand["mitternacht"]),
+                                 _ap_iso_min(r.get("nach_start"), stand["mitternacht"])):
                 vorgez_h.add(str(r["plan_id"]))       # Pingpong-Bremse (08.10.2026)
                 if str(r["plan_id"]) not in alt_start:   # Protokoll neu → alt: der erste Treffer ist der jüngste Zug
                     alt_start[str(r["plan_id"])] = (_ap_iso_min(r.get("von_start"), stand["mitternacht"]),
@@ -18369,7 +18431,7 @@ def admin_auto_plan_delta():
         return err
     try:
         # 07.10.2026 TRADE-PLANER-ALLE-IDS: ?sicht=alle → alle IDs (außer „nur eigene"), sonst wie bisher Admin alle / eigene ID
-        antwort = ap_delta_antwort(_ap_stand_laden(reg), _ap_sicht_aus_anfrage(admin, uid))
+        antwort = ap_delta_antwort(_ap_stand_laden(reg), _ap_sicht_aus_anfrage(admin, uid), pc_lebt=_ap_pc_lebt_gecacht())
         antwort.setdefault("sicht", "alle")
         # BESTÄTIGEN FÜR ALLE (07.10.2026): alle = darf dieser Login fremde Vorschläge bestätigen/zurücknehmen/löschen (ap_eingriff_sicht;
         # Nicht-Admin ist hier immer im Planer, _ap_zugang). admin_zugang nicht lesbar → vorsichtshalber false

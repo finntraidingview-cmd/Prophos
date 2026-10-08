@@ -49,7 +49,7 @@ REIN = ("ap_id_fest", "ap_id_misch", "ap_ext_fehlt", "_ap_norm", "ap_regel_finde
         "ap_richtung_konflikte", "lt_echo_live_wahl", "lt_echo_felder",
         "ap_balance_live", "ap_letzt_je_konto", "_ap_boden", "ap_boden_konto", "ap_boden_sicher", "ap_boden_zeile", "_ap_notes_kurz", "_ap_hand_spalte_fehlt", "_ap_plaene_mit_hand", "liq_peak", "_ap_peaks", "_liq_verlauf_laden")   # 08.10.2026: Balance live (Guard/Delta/ids), Boden für den Balance-Balken
 IO = ("_ap_gehedgt_plan", "_ap_bewerten", "_ap_iso_min", "_ap_stand_laden", "_ap_stand_plaene", "_ap_min_iso",
-      "_ap_umplanungen_heute", "_ap_bot_stand", "ap_delta_antwort", "_ap_aenderungen_anwenden", "pc_stand_zusammenfassen", "_ap_pc_lebt", "_ap_verpufft", "_ap_dubai_versatz", "ap_ausgleichen",
+      "_ap_umplanungen_heute", "_ap_bot_stand", "ap_delta_antwort", "_ap_aenderungen_anwenden", "pc_stand_zusammenfassen", "_ap_pc_lebt", "_ap_verpufft", "_ap_zug_nach_vorn", "_ap_dubai_versatz", "ap_ausgleichen",
       "_ap_probelauf", "ap_planen", "_ap_tz", "_ap_eur_bei", "_ap_konten_laden", "ap_einsatz_kontext", "ap_richtung_fest_plan", "ap_letzter_trade_geblasen", "_ap_rk_flag",
       "ap_richtungsschutz")
 
@@ -406,6 +406,13 @@ def main():
     check(len(dl_k["geplant"]) == len(dl["geplant"]) and all(x["boden"] is None and x["boden_art"] is None and x["plan_id"] and "delta_eur_pkt" in x
                                                               for x in dl_k["geplant"]) and dl_k["offen"] == dl["offen"],
           "kaputte Regel beim Boden → boden null, alle Zeilen und offen[] trotzdem da")
+    # PC-TAB TOT = PHANTOM (Master 08.10.2026, .1299): ohne lebenden PC zählen geplante Pläne weder im Verlauf noch in der Kurve +60
+    dl_p, dl_0 = a["ap_delta_antwort"](stand, pc_lebt=set()), a["ap_delta_antwort"](dict(stand, geplant=[]))
+    dl_u1 = a["ap_delta_antwort"](stand, pc_lebt={U1})
+    check(all(g["pc_tot"] for g in dl_p["geplant"]) and "pc_tot" not in dl["geplant"][0] and len(dl_p["geplant"]) == len(dl["geplant"])
+          and dl_p["verlauf_eur"] == dl_0["verlauf_eur"] and dl_p["szenario"]["plus60"] == dl_0["szenario"]["plus60"]
+          and {g["plan_id"]: g["pc_tot"] for g in dl_u1["geplant"]} == {g["plan_id"]: g["user_id"] != U1 for g in dl["geplant"]},
+          "PC tot: Zeilen bleiben (pc_tot), zählen aber nicht im Verlauf € und in der Szenario-Kurve +60; pc_lebt=None → wie bisher")
     check(not any(x["plan_id"] == "p-o1" for x in dl["offen"]) and all(x["typ"] in ("challenge", "phase1", "phase2") for x in dl["offen"]),
           "offen[]: Winning-Days-Trade fehlt, nur challenge/phase1/phase2 (Finn 07.10.2026)")
     check(stand["id_fest"].get(f"{U3}|tradeify", {}).get("richtung") == "sell", "Richtungsschutz sieht den laufenden WD weiter (Tradeify bei U3 short)")
@@ -452,7 +459,10 @@ def main():
     check(len(geschrieben["post"]) == (1 if erg["umplanungen"] else 0), "jede Umplanung protokolliert (auto_plan_umplanung)")
     # FundedNext-Auto-Plan short verschärft das Short-Netto der laufenden WD → Bot tauscht FundedNext auf long, der Handplan bleibt
     reg, geschrieben = db_stubs(a, jetzt, [dict(geplant[0], richtung="sell"), geplant[1]])
+    # seit .1299 nimmt der Band-Schritt nur IDs mit lebendem PC-Tab — die Fake-DB hat kein mt5_live, beide PCs gelten hier als lebendig
+    pc_echt, a["_ap_pc_lebt"] = a["_ap_pc_lebt"], (lambda: {U1, U2})
     erg = a["ap_ausgleichen"](trocken=False, seed=1, jetzt=max(jetzt, mitt + timedelta(minutes=1)))
+    a["_ap_pc_lebt"] = pc_echt
     pat = [(p[1]["id"], p[2]) for p in geschrieben["patch"]]
     check(erg["ok"] and ("eq.p-g1", {"richtung": "buy"}) in pat and all(i == "eq.p-g1" for i, _ in pat),
           f"Bot tauscht nur den Auto-Plan (FundedNext short → long), Handplan unberührt ({pat})")
