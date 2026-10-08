@@ -1598,6 +1598,10 @@
   #tradePlanModal .tp-slave-out{padding:14px 18px}
   #tradePlanModal .tp-mult-out{padding:12px 18px}
   #tradePlanModal .modal-msg{margin-top:6px;min-height:0}
+  /* Versions-Riegel (08.10.2026): neuerer Build auf pages.dev → Speichern gesperrt, erst neu laden */
+  #tradePlanModal .tp-version-riegel{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:8px;padding:9px 12px;border-radius:10px;border:1px solid color-mix(in srgb,var(--danger) 35%,var(--border));background:color-mix(in srgb,var(--danger) 8%,var(--surface));color:var(--danger);font-size:13px;font-weight:600}
+  #tradePlanModal .tp-version-riegel[hidden]{display:none}
+  #tradePlanModal .tp-version-riegel .btn{margin-left:auto;padding:4px 12px;font-size:12.5px;height:auto}
   #tradePlanModal .modal-foot{padding-top:12px;margin-top:6px}
   /* Noch ein Stueck rausgezoomt (22.09.2026, Finn: „ein bisschen kleiner, sodass ich immer direkt
      unten auf Start druecke — das Scrollen faehrt mich immer rein"): das ganze Modal auf 84 %,
@@ -8013,7 +8017,7 @@
             <div class="field">
               <label>Risiko Master ($)</label>
               <input type="number" class="input mono" id="tp-master-risk" min="0" step="10" placeholder="z.B. 1000">
-              <div class="tp-wd-hilfe" id="tp-wd-hilfe-master">nur für die Lot-Rechnung — kein Stop in TradingView</div>
+              <div class="tp-wd-hilfe" id="tp-wd-hilfe-master">bei WD: Rechengröße für den Hedge, kein Stop</div>
             </div>
             <div class="field">
               <!-- Label/step schaltet tpRouteUpdateSeg je Weg um (24.09.2026): Orbit V2 ganze Kontrakte, Echo V2 Lots 0.01 -->
@@ -8259,6 +8263,7 @@
             </div>
           </div>
 
+          <div class="tp-version-riegel" id="tp-version-riegel" hidden></div>
           <div class="modal-msg" id="tradePlanMsg"></div>
         </div>
         <div class="modal-foot" style="justify-content:center">
@@ -18058,6 +18063,10 @@
     // des lokalen Backends nach einem Update, bleibt eine Chrome-Fehlerseite ohne JS stehen — nichts heilt sich mehr). Probe = die
     // Seite selbst (no-store) mit OS_TAB_BUILD; sonst in 15 s erneut.
     const frischLaden = ziel => { window._seiteSicherLaden(() => { try{ const u = new URL(location.href); u.searchParams.set('v', ziel); location.replace(u.toString()) }catch(_){ location.reload() } }) }
+    // VERSIONS-RIEGEL fürs Trade-Plan-Formular (08.10.2026, Vorfall Jacob 04:46 Dubai: Finns Tab rechnete noch mit .1262 → 0,43 statt 3,67 Lot):
+    // das Formular fragt beim Öffnen und vor dem Speichern selbst — ein echt neuerer Build (echtNeu, nur Nummer anders zählt nicht) sperrt das Speichern
+    window._bwFormPruefen = async () => { const v = await holen(); if(!v || v === basis) return null; const b = await echtNeu(v); if(b) window._bwZielNeu = b; return b || null }
+    window._bwJetztLaden = ziel => frischLaden(ziel)
     // Ehrlicher Stand im „Mehr"-Sheet statt des statischen „v0.1 · alles live"
     const foot = document.querySelector('#dashboard-view .sb-foot')
     if(foot) foot.innerHTML = '<span class="dot"></span> Build ' + eigenBuild()   // der laufende Code, nicht die VERSION (Backend zählt die ohne neue Seite hoch)
@@ -39902,7 +39911,7 @@
    * 0,56 Lot, der Broker lehnte ab): Klick auf den Multiplikator-Kasten → Zahl eintippen; der Wert gilt, bis Risiko Master oder
    * Risiko Slave von Hand geändert werden, und rechnet Risiko Slave zurück (= ×  · Kontrakte · Stop-Distanz · 0,85 €/Pkt).
    * slaveVorbelegt/slaveHand: die Staffel füllt Risiko Slave nur EINMAL je Popup in ein leeres Feld, nie nach einer Handeingabe. */
-  const _tpWdHand = { mult: null, risk: null, slaveGeschrieben: null, slaveVorbelegt: false, slaveHand: false }
+  const _tpWdHand = { mult: null, risk: null, slaveGeschrieben: null, slaveVorbelegt: false, slaveHand: false, riskVorbelegt: false }
   function tpWdRechnung(){
     const g = id => parseFloat(document.getElementById(id)?.value) || 0
     const masterId = document.getElementById('tp-master')?.value
@@ -39933,19 +39942,28 @@
   const tpWdHedgeEurAus = r => (r && r.lots > 0 && r.tpPkt > 0) ? Math.round(r.lots * r.slavePpl * r.tpPkt * 100) / 100 : null
   // Risiko Slave vorbelegen (nur ein leeres Feld): beim Bearbeiten aus dem Plan, sonst die Farmer-Staffel des Kontos —
   // dieselbe Quelle, die der Farmer für seinen Multiplikator nutzt (tpVorplanZeile.slaveEur über tpWdHedgeEur)
-  function tpWdSlaveRiskVorbelegen(){
-    if(!tpWdAktiv() || _tpO3) return   // Orbit V3: keine Farmer-Staffel — Risiko Master/Slave tippt Finn selbst
-    // Risiko Master ($) = Stop-Distanz für die Lot-Rechnung: leer → NUR die Farmer-SL-Vorgabe des Kontos (wd_sl). Der
-    // Max-Drawdown als zweite Quelle ist raus (Koordination 25.09.2026: 4.000 $ vorbelegt ergab Multiplikator 0,059 und die
-    // Kachel „Master −4.000 $" — Finns Beispiel ist 250/100). Leer bleibt leer, Speichern bleibt erlaubt (hedge_eur aus der Staffel).
+  /* RISIKO MASTER BEI WINNING DAY (08.10.2026, Slave-Terminal 7 — Prüfung des Masters zu .1264): seit Risiko Master allein den Multiplikator
+   * bestimmt, darf dort nie der Max Drawdown/Max Loss stehen (05.10.2026 beim Bearbeiten 4.500 $ = Max DD → ×0,031, Hedge viel zu klein,
+   * Vorfall Jacob). Bei WD gibt es keinen Stop, die Zahl ist nur die Rechengröße für den Hedge. Vorbelegung: gespeichertes master_risk des
+   * Plans, wenn es von Hand gesetzt ist (≠ Max DD/Max Tages-DD/Max Loss des Kontos) → sonst einmal der TP-$ als Startwert (beim Öffnen,
+   * oder wenn der TP danach zum ersten Mal fertig eingetragen ist — change, nicht jeder Tastendruck). Spätere TP-Änderungen bewegen den
+   * Multiplikator nicht (Finns Regel). Vorher: wd_sl des Kontos. Orbit V3 (echter Stop = Risiko Master) bleibt unberührt. */
+  function tpWdMasterRiskVorbelegen(){
+    if(!tpWdAktiv() || _tpO3) return
     try{
-      const mr = document.getElementById('tp-master-risk')
-      if(mr && mr.value === ''){
-        const acc = (accounts || []).find(a => String(a.id) === String(document.getElementById('tp-master')?.value))
-        const v = (acc && acc.wdSl > 0) ? Number(acc.wdSl) : 0
-        if(v > 0) mr.value = String(Math.round(v))
+      const mr = document.getElementById('tp-master-risk'); if(!mr) return
+      const acc = (accounts || []).find(a => String(a.id) === String(document.getElementById('tp-master')?.value)) || null
+      const v = Number(mr.value)
+      if(mr.value !== '' && acc && [acc.maxDrawdown, acc.maxDailyDrawdown, acc.maxLossPerTrade].some(x => Number(x) > 0 && Math.abs(Number(x) - v) < 0.5)) mr.value = ''
+      if(mr.value === '' && !_tpWdHand.riskVorbelegt){
+        const tp = parseFloat(document.getElementById('tp-master-tp')?.value) || 0
+        if(tp > 0){ mr.value = String(Math.round(tp)); _tpWdHand.riskVorbelegt = true }
       }
     }catch(e){ console.warn('[wd-master-risk]', e) }
+  }
+  function tpWdSlaveRiskVorbelegen(){
+    if(!tpWdAktiv() || _tpO3) return   // Orbit V3: keine Farmer-Staffel — Risiko Master/Slave tippt Finn selbst
+    tpWdMasterRiskVorbelegen()
     const el = document.getElementById('tp-slave-risk'); if(!el) return
     if(_tpWdHand.slaveVorbelegt || _tpWdHand.slaveHand || _tpWdHand.mult > 0) return
     if(el.value !== ''){ _tpWdHand.slaveVorbelegt = true; return }   // vorhandener Wert wird nie überschrieben, auch nicht beim Kontowechsel
@@ -40122,7 +40140,7 @@
     document.getElementById('tp-form-grid')?.classList.toggle('tp-v2', v2)
     document.getElementById('tp-form-grid')?.classList.toggle('tp-wd', wdAn)   // WD-Farm-Raster (25.09.2026): Risiko Slave neben Kontrakte, TP volle Breite
     // Orbit V3 (01.10.2026): Risiko Master IST der Stop in TradingView (master_sl), Risiko Slave ohne Staffel — Hilfszeilen passend
-    { const hm = document.getElementById('tp-wd-hilfe-master'); if(hm) hm.textContent = _tpO3 ? 'Stop-Distanz für die Lots' : 'nur für die Lot-Rechnung — kein Stop in TradingView'
+    { const hm = document.getElementById('tp-wd-hilfe-master'); if(hm) hm.textContent = _tpO3 ? 'Stop-Distanz für die Lots' : 'bei WD: Rechengröße für den Hedge, kein Stop'
       const hs = document.getElementById('tp-wd-hilfe-slave'); if(hs) hs.textContent = _tpO3 ? 'auf Fusion' : 'auf Fusion · Staffel-Vorschlag' }
     // Kontrakte-Feld je Weg (24.09.2026, Finns Screenshot: der Browser meckerte beim Speichern „Die zwei
     // nächstliegenden gültigen Werte sind 0,91 und 1,01" — step 0.1 ab min 0.01 stammt aus der Lots-Welt):
@@ -41057,7 +41075,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1266'
+  const OS_TAB_BUILD = '2026-09-22.1267'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -48006,7 +48024,7 @@
     const isEdit = !!editId
     _tpRiskAuto.master = null; _tpRiskAuto.manuell = false   // Risiko-Box-Automatik je Popup neu (22.09.2026)
     _tpDirSperre = null   // Richtungs-Schutz: Sperre des vorigen Popups gilt nicht weiter (25.09.2026)
-    _tpWdHand.mult = null; _tpWdHand.risk = null; _tpWdHand.slaveGeschrieben = null; _tpWdHand.slaveVorbelegt = false; _tpWdHand.slaveHand = false   // WD-Farm: Hand-Multiplikator + Staffel-Sperre je Popup neu (25.09.2026)
+    _tpWdHand.mult = null; _tpWdHand.risk = null; _tpWdHand.slaveGeschrieben = null; _tpWdHand.slaveVorbelegt = false; _tpWdHand.slaveHand = false; _tpWdHand.riskVorbelegt = false   // WD-Farm: Hand-Multiplikator + Staffel-Sperre je Popup neu (25.09.2026)
 
     // Title
     document.getElementById('tradePlanTitle').textContent = isEdit ? 'Trade-Plan bearbeiten' : 'Trade planen'
@@ -48748,6 +48766,8 @@
     document.getElementById('tradePlanMsg').textContent = ''
     document.getElementById('tradePlanModal').classList.add('open')
     try{ tpLetzteOrdersRender() }catch(_){}   // Letzte Orders: Master ist jetzt gesetzt (auch beim Bearbeiten)
+    try{ tpWdMasterRiskVorbelegen() }catch(_){}   // WD: erst jetzt stehen die Plan-Werte (Max DD raus, sonst TP als Startwert, 08.10.2026)
+    tpVersionRiegel().catch(() => {})   // neuerer Build bereit → Speichern gesperrt, Zeile mit „Jetzt neu laden" (08.10.2026)
     tpNqUpdateToggle()  // initial (evtl. noch kein Slave-Value)
     tpRecompute()
     // Nochmal nach dem DOM-Paint — stellt sicher dass Toggle korrekt ist
@@ -49372,7 +49392,9 @@
   // Winning Days Farm: die Vorschau-Kacheln folgen Risiko Master/Kontrakte/Risiko Slave/TP (der Multiplikator selbst kommt aus
   // tpRecompute, das auf 'input' schon hängt); 'change' zusätzlich für programmatisch gesetzte Werte und den Konto-Wechsel
   ;['tp-master-tp', 'tp-master-risk', 'tp-master-qty', 'tp-slave-risk', 'tp-master'].forEach(id => ['input', 'change'].forEach(ev => document.getElementById(id)?.addEventListener(ev, () => {
-    try{ if(id === 'tp-master') tpWdSlaveRiskVorbelegen(); tpWdVorschau() }catch(e){ console.warn('[wd-vorschau]', e) }
+    try{ if(id === 'tp-master') tpWdSlaveRiskVorbelegen()
+      if(id === 'tp-master-tp' && ev === 'change'){ tpWdMasterRiskVorbelegen(); tpRecompute() }   // TP fertig eingetragen + Risiko Master leer → einmal Startwert (08.10.2026)
+      tpWdVorschau() }catch(e){ console.warn('[wd-vorschau]', e) }
   })))
   document.getElementById('tp-v2-instr-seg')?.addEventListener('click', () => setTimeout(() => { try{ tpWdVorschau() }catch(_){} }, 0))
   // Hand-Multiplikator (25.09.2026): Tippen in Risiko Master/Slave beendet ihn; Tippen in Risiko Slave sperrt die Staffel-Vorbelegung
@@ -49609,7 +49631,27 @@
   // startAfter=true → nach dem Speichern schließt das Modal und der Trade-Start-Preflight
   // (3 Checks: Verknüpfung, Multiplier-Push, Symbol-Mapping) läuft direkt an — alles grün
   // startet den Trade automatisch, Probleme zeigen kurzes Feedback.
+  /* Versions-Riegel (08.10.2026, Vorfall Jacob 04:46 Dubai: alter Build rechnete den Hedge noch über den TP): liegt ein echt neuerer Build
+   * bereit (Build-Wächter, window._bwFormPruefen), kann nicht gespeichert werden — Zeile + „Jetzt neu laden". Ohne Wächter (z. B. VERSION
+   * nicht lesbar) oder ohne Antwort in 4 s: nicht sperren. → true = gesperrt */
+  async function tpVersionRiegel(){
+    const el = document.getElementById('tp-version-riegel')
+    let ziel = window._bwZielNeu || null
+    if(typeof window._bwFormPruefen === 'function'){
+      try{ ziel = (await Promise.race([window._bwFormPruefen(), new Promise(r => setTimeout(() => r(undefined), 4000))])) ?? ziel }catch(_){}
+    }
+    const knoepfe = ['tradePlanSave', 'tradePlanSaveStart'].map(id => document.getElementById(id)).filter(Boolean)
+    if(!ziel){ if(el){ el.hidden = true; el.innerHTML = '' } knoepfe.forEach(b => { if(b.dataset.riegel){ b.disabled = false; delete b.dataset.riegel } }); return false }
+    if(el){
+      el.innerHTML = `⬆ Neue Version ${escapeHtml(String(ziel))} verfügbar — erst neu laden, dann speichern <button type="button" class="btn btn-primary" id="tp-version-laden">Jetzt neu laden</button>`
+      el.hidden = false
+      el.querySelector('#tp-version-laden')?.addEventListener('click', () => { if(typeof window._bwJetztLaden === 'function') window._bwJetztLaden(ziel); else location.reload() })
+    }
+    knoepfe.forEach(b => { b.disabled = true; b.dataset.riegel = '1' })
+    return true
+  }
   async function saveTradePlanFromModal(startAfter){
+    if(await tpVersionRiegel()) return
     const masterId = document.getElementById('tp-master').value
     const slaveId  = document.getElementById('tp-slave').value
     const masterRisk = parseFloat(document.getElementById('tp-master-risk').value) || 0
@@ -50571,18 +50613,23 @@
    * hedge_faktor = Multiplikator, hedge_eur = Lots × 0,85 €/Pkt × TP-Punkte. Der Copier öffnet Kontrakte × multiplier Lots.
    * Schalter AUS oder keine Staffel → kein Hedge (alles null). Ohne SL-Vorgabe kein Multiplikator: dann nur hedge_eur = Staffel
    * (alter Farmer-Weg, Copier rechnet über eur/TP-Punkte) — Hinweis am Konto. */
+  /* RISIKO-RECHNUNG WIE DAS FORMULAR (08.10.2026, Slave-Terminal 7 — Vorfall 04:46 Dubai, Jacob WD 6 MNQ, TP 2.125 $, Risiko Master 250 $,
+   * Risiko Slave 65 €: 0,43 Lot statt 3,67, Finn schloss nach 15 s; Finn: „JA FIX ES!!!"): Punkte = Risiko Master $ ÷ ($/Pkt × Kontrakte),
+   * Lots = Staffel € ÷ (0,85 €/Pkt × Punkte), Multiplikator = Lots ÷ Kontrakte — der TP wirkt nur noch auf hedge_eur (Verlust am TP).
+   * Risiko Master kommt vom Aufrufer: wd_sl des Kontos → max_risiko_trade (eigene Vorgabe je Konto), NIE Max DD/max_loss_per_trade (beim
+   * Jacob-Konto beide 4.500 $). Fehlt beides (Stand 08.10.: alle 11 WD-Konten ohne Wert), gilt wie im Formular der TP-$ als Startwert —
+   * nicht still: Hinweis am Konto („Risiko Master fehlt …"). Laufende Pläne fasst das nicht an, nur neue/neu gerechnete. */
   function wdFarmHedge(pr, riskMaster, slaveEur, an){
     const aus = () => { pr.hedge_eur = null; pr.hedge_faktor = null; pr.multiplier = null; pr.slave_risk = null; return '' }
     if(!an || !(slaveEur > 0)) return aus()
     const kt = Number(pr.master_contracts) || 0, tp = Number(pr.master_tp) || 0, ppl = tpMasterPpl(pr.master_firm) || 0
-    // Staffel-€ gegen die TP-SUMME (05.10.2026, Finn: „so wie es immer war") — Basis ist der Take Profit, nicht riskMaster (wd_sl);
-    // riskMaster bleibt nur als Wert am Plan stehen, wenn eine SL-Vorgabe da ist
-    const mult = (tp > 0 && kt > 0) ? tpCalcMultiplier(pr.master_firm, TP_WD_SLAVE_FIRM, tp, kt, slaveEur) : null
+    const risk = Number(riskMaster) > 0 ? Number(riskMaster) : tp
+    const mult = (risk > 0 && kt > 0) ? tpCalcMultiplier(pr.master_firm, TP_WD_SLAVE_FIRM, risk, kt, slaveEur) : null
     if(mult > 0 && ppl > 0 && tp > 0){
       const lots = Math.round(kt * mult * 100) / 100, tpPkt = tp / (ppl * kt)
-      pr.multiplier = mult; pr.hedge_faktor = Math.round(mult * 1000) / 1000; pr.slave_risk = slaveEur; if(riskMaster > 0) pr.master_risk = riskMaster
+      pr.multiplier = mult; pr.hedge_faktor = Math.round(mult * 1000) / 1000; pr.slave_risk = slaveEur; pr.master_risk = risk
       pr.hedge_eur = Math.round(lots * tpWdSlavePpl() * tpPkt * 100) / 100
-      return ''
+      return Number(riskMaster) > 0 ? '' : `Risiko Master fehlt am Konto (wd_sl / Max Risiko) — Startwert = TP ${Math.round(tp)} $`
     }
     pr.hedge_eur = Math.round(slaveEur * 100) / 100; pr.hedge_faktor = null; pr.multiplier = null; pr.slave_risk = slaveEur
     return 'ohne Take Profit kein Multiplikator — Hedge nur über den Staffel-Betrag'
@@ -50852,7 +50899,7 @@
         pr.master_sl = null   // Winning Days: nie ein SL (Finn 25.09.2026) — sl_vorgabe (wd_sl) ist nur noch Risiko Master im Popup
         // Fusion-Gegenhedge: Rechnung wie Popup „Winning Days Farm" (26.09.2026) — der Server dreht die Zeile auf V2, behält bei
         // hedge_eur > 0 Multiplikator + Risiko Slave. Schalter AUS → alles null = kein Hedge.
-        { const h = wdFarmHedge(pr, kd.sl_vorgabe, z.slaveEur, vp.hedge_an); if(h) k.hinweis = h }
+        { const h = wdFarmHedge(pr, Number(kd.sl_vorgabe) || Number(kd.max_risiko_trade) || 0, z.slaveEur, vp.hedge_an); if(h) k.hinweis = h }
         wdPlanAufV2(pr)   // der Server dreht ohnehin — so verlässt nie eine tvplus-Zeile den Browser (28.09.2026)
         allePlaene.push(pr); zVon.set(String(k.id), z)
       }
@@ -50945,7 +50992,7 @@
     const row = tpVorplanPlanRow(acc, slave, z, wdKontrakteFuer(acc.firm, vp), symbol, richtung, tag || new Date().toLocaleDateString('en-CA'))
     row.start_um = startIso; row.notes = 'Winning-Day-Farmer'
     row.master_sl = null   // Winning Days: nie ein SL (Finn 25.09.2026)
-    wdFarmHedge(row, Number(acc.wdSl) || 0, z.slaveEur, vp.hedge_an)   // wie der Mac: Popup-Rechnung (26.09.2026)
+    wdFarmHedge(row, Number(acc.wdSl) || Number(acc.maxRisikoTrade) || 0, z.slaveEur, vp.hedge_an)   // wie der Mac: Popup-Rechnung (26.09.2026)
     // BUG 28.09.2026 (Jacobs Pläne 2368ebe6/f644c1f8 mit route 'tvplus'): dieser Rückfall schreibt DIREKT in trade_plans — die
     // V2-Umschreibung des Servers (/admin/wd-plaene POST, _wd_plan_v2) griff hier nie. Jetzt dieselbe Umschreibung im Browser.
     wdPlanAufV2(row)
@@ -50954,7 +51001,7 @@
       if(extra.id) row.id = String(extra.id)
       if(Number(extra.master_tp) > 0) row.master_tp = Number(extra.master_tp)
       if(Number.isInteger(Number(extra.master_contracts)) && Number(extra.master_contracts) >= 1) row.master_contracts = Number(extra.master_contracts)
-      if(Number(row.hedge_eur) > 0) wdFarmHedge(row, Number(acc.wdSl) || 0, z.slaveEur, vp.hedge_an)   // Hedge zu TP/Kontrakten neu rechnen
+      if(Number(row.hedge_eur) > 0) wdFarmHedge(row, Number(acc.wdSl) || Number(acc.maxRisikoTrade) || 0, z.slaveEur, vp.hedge_an)   // Hedge zu TP/Kontrakten neu rechnen
     }
     /* RIEGEL gegen Doppel-Pläne (25.09.2026, Koordination: zwei Chrome-Profile am selben PC = zwei Tabs desselben Nutzers — beide
      * hätten beim Rückfall für ein Konto je einen Plan angelegt). (a) frisch prüfen, ob für Konto + Tag schon ein Farmer-Plan steht
@@ -51069,7 +51116,7 @@
             if(vp.hedge_an && plan.hedgeEur > 0 && z && z.live != null && z.slaveEur > 0 && Math.abs((plan.slaveRisk || 0) - z.slaveEur) > 0.5){
               const acc = (accounts || []).find(a => String(a.id) === String(k.id))
               const h = { master_firm: plan.masterFirm, master_contracts: plan.masterContracts, master_tp: plan.masterTp }
-              wdFarmHedge(h, acc ? Number(acc.wdSl) || 0 : 0, z.slaveEur, true)
+              wdFarmHedge(h, acc ? Number(acc.wdSl) || Number(acc.maxRisikoTrade) || 0 : 0, z.slaveEur, true)
               for(const f of ['hedge_eur', 'hedge_faktor', 'multiplier', 'slave_risk']) if(h[f] != null) upd[f] = h[f]
             }
           } else if(z && z.live != null && typeof z.slaveRisk === 'number' && Math.abs((plan.slaveRisk || 0) - z.slaveRisk) > 0.5){
