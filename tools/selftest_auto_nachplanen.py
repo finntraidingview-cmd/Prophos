@@ -6,7 +6,8 @@ Aufruf:  python3 tools/selftest_auto_nachplanen.py
 Lädt die Auto-Planer-Funktionen wie selftest_auto_delta (per Quelltext aus app.py). Geprüft: ap_nachplan_fenster (Mo–Fr,
 00:00 ≤ jetzt < start_bis − 15 min), ap_nachplan_kandidaten (ohne Plan heute, Haken aus / archiviert / fester Grund raus,
 Plan anderer Tage blockt nicht, open/review blocken; seit 08.10.2026: Regeln nach dem Lauf geändert → Regel-Gründe nicht mehr fest,
-Konto-Gründe bleiben fest), ap_nachplan_letzter (Laufzeit aus Ergebnis/Zeile), ap_planen(nur_konten) gegen die nachgebaute DB: nur das genannte Konto
+Konto-Gründe bleiben fest; je Tag und Regel-Stand nur EINMAL nachrechnen: ap_nachplan_regeln_at/_merken + ap_nachplan_tick mit
+nachgebauter DB), ap_nachplan_letzter (Laufzeit aus Ergebnis/Zeile), ap_planen(nur_konten) gegen die nachgebaute DB: nur das genannte Konto
 wird angelegt, bestehender Vorschlag bleibt (kein DELETE), Protokoll quelle 'nachplanen' nur bei Treffer, Startzeit ≥ jetzt + 15 min,
 ohne nur_konten unverändert (DELETE + Protokoll). Platzhalter-IDs, keine echten Konten."""
 import os
@@ -28,11 +29,12 @@ def lade():
     def block(name):
         i = src.index(f"\ndef {name}(") + 1
         return src[i:src.find("\n\n\n", i)]
-    exec("\n".join([re.search(rf"^{k} = .*$", src, re.M).group(0) for k in ("AP_NACHPLAN_VORLAUF_MIN", "AP_NACHPLAN_TAKT_S")]
+    exec("\n".join([re.search(rf"^{k} = .*$", src, re.M).group(0) for k in ("AP_NACHPLAN_VORLAUF_MIN", "AP_NACHPLAN_TAKT_S", "AP_TZ_TAG")]
                    + [re.search(rf"^{k} = \([^)]*\)", src, re.M | re.S).group(0)
                       for k in ("AP_NACHPLAN_FEST_GRUENDE", "AP_NACHPLAN_REGEL_GRUENDE")]
                    + [block(f) for f in ("_ap_ts", "ap_nachplan_fenster", "_ap_plan_am_tag", "ap_nachplan_letzter",
-                                         "ap_nachplan_kandidaten")]), a)
+                                         "ap_nachplan_kandidaten", "ap_nachplan_regeln_at", "ap_nachplan_regeln_merken",
+                                         "ap_nachplan_tick")]), a)
     return a
 
 
@@ -98,6 +100,60 @@ def main():
     belegt = K(kr, [{"master_account_id": "r-1", "status": "planned", "planned_for": tag}], tag, tz, lauf_r, set(),
                regeln_at="2026-10-08T03:54:53Z")
     check(belegt == ["r-2", "r-3", "r-8"], f"Regeln neu, aber Konto hat heute schon einen Plan → bleibt draußen ({belegt})")
+    # JE TAG UND REGEL-STAND NUR EINMAL (08.10.2026, Befund Slave 2 zu 0ca8e72): plant ap_planen für ein Konto nichts, schreibt es keine
+    # auto_plan_lauf-Zeile — ohne Merker würden r-1/r-2/r-3 jeden 10-min-Takt neu gerechnet, bis ein Lauf mit Treffer kommt
+    RA, RM = a["ap_nachplan_regeln_at"], a["ap_nachplan_regeln_merken"]
+    m = {}
+    r1 = RA(m, tag, "2026-10-08 03:54:53+00")
+    RM(m, tag, r1)
+    r2 = RA(m, tag, "2026-10-08 03:54:53+00")
+    r3 = RA(m, tag, "2026-10-08 04:30:00+00")
+    RM(m, "2026-10-09", "2026-10-08 04:30:00+00")
+    check(r1 == "2026-10-08 03:54:53+00" and r2 is None and r3 == "2026-10-08 04:30:00+00" and m == {"2026-10-09": "2026-10-08 04:30:00+00"}
+          and RA({}, tag, None) is None and RM({}, tag, None) == {},
+          f"Merker: erst regeln_at, gleicher Stand danach None, neuer Stand wieder regeln_at, alter Tag fliegt raus ({m})")
+    # ap_nachplan_tick gegen eine nachgebaute DB: vier Takte, ap_planen plant nichts (wie live bei „keine Regel“)
+    # Stubs direkt im Namensraum a (die Funktion sieht dort ihre Globals), am Ende zurück — ap_planen-Tests unten brauchen die echten
+    tick_ns = a
+    alt = {k: a.get(k) for k in ("sb_select", "_ap_konten_laden", "_sb_all", "_ap_archiviert", "ap_planen")}
+    tag_t = "2026-10-08"
+    reg_t = {"aktiv": True, "user_ids": [U1], "zeiten": {"start_bis": "16:30"}, "updated_at": "2026-10-08 03:54:53+00"}
+    tick_rows = [{"tag": tag_t, "quelle": "nacht", "at": "2026-10-08 03:20:28+00", "ergebnis": lauf_r}]
+    aufrufe = []
+    tick_ns["sb_select"] = lambda t, q: [dict(reg_t)] if t == "auto_plan_regeln" else ([r for r in tick_rows if q.get("tag") == f"eq.{r['tag']}"] if t == "auto_plan_lauf" else [])
+    tick_ns["_ap_konten_laden"] = lambda q: [dict(k, user_id=U1) for k in kr]
+    tick_ns["_sb_all"] = lambda t, q: []
+    tick_ns["_ap_archiviert"] = lambda: set()
+    tick_ns["ap_planen"] = lambda t, quelle=None, nur_konten=None: (aufrufe.append(list(nur_konten or [])), {"ok": True, "geplant": [], "ausgelassen": [
+        {"konto_id": k, "grund": "keine Regel für diese Firma"} for k in (nur_konten or [])]})[1]
+    zst = {}
+    jetzt_t = datetime(2026, 10, 8, 6, 0, tzinfo=timezone.utc)   # 08:00 dt, im Fenster
+    T = tick_ns["ap_nachplan_tick"]
+    T(jetzt_t, zst); zst["nachplan_at"] = 0
+    T(jetzt_t + timedelta(minutes=10), zst); zst["nachplan_at"] = 0
+    reg_t["updated_at"] = "2026-10-08 06:05:00+00"                 # Finn ändert die Regeln erneut
+    T(jetzt_t + timedelta(minutes=20), zst); zst["nachplan_at"] = 0
+    T(jetzt_t + timedelta(minutes=30), zst)
+    check(aufrufe == [["r-1", "r-2", "r-3", "r-8"], ["r-8"], ["r-1", "r-2", "r-3", "r-8"], ["r-8"]],
+          f"Tick: Regeländerung → einmal nachrechnen, nächster Takt nur noch r-8, neuer Regel-Stand → wieder einmal ({aufrufe})")
+    check(zst.get("nachplan_regeln") == {tag_t: "2026-10-08 06:05:00+00"}, f"Merker im Prozess-Speicher je Tag ({zst.get('nachplan_regeln')})")
+    # wirft ap_planen, wird NICHT gemerkt → der nächste Takt rechnet neu
+    zst2, aufrufe2 = {}, []
+    def wirft(t, quelle=None, nur_konten=None):
+        aufrufe2.append(list(nur_konten or []))
+        raise RuntimeError("DB weg")
+    tick_ns["ap_planen"] = wirft
+    try:
+        T(jetzt_t, zst2)
+    except RuntimeError:
+        pass
+    check(zst2.get("nachplan_regeln", {}) == {} and aufrufe2 == [["r-1", "r-2", "r-3", "r-8"]], f"Fehler in ap_planen → nichts gemerkt ({zst2.get('nachplan_regeln')})")
+    for k, v in alt.items():
+        if v is None:
+            a.pop(k, None)
+        else:
+            a[k] = v
+
     # ap_nachplan_letzter: Laufzeit aus dem Ergebnis, sonst aus der Zeile (Nachtlauf-Claim, ältere Zeilen)
     L = a["ap_nachplan_letzter"]
     l1 = L([{"tag": tag, "at": "2026-10-08 03:20:28.272621+00", "ergebnis": {"tag": tag, "at": "2026-10-08T03:20:26.709603+00:00"}}])

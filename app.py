@@ -20195,6 +20195,24 @@ def ap_nachplan_kandidaten(konten, plaene, tag, tz, letzter_erg=None, archiv=Non
     return out
 
 
+def ap_nachplan_regeln_at(merker, tag, regeln_at):
+    """REIN RECHNEND (testbar, 08.10.2026, Befund Slave 2 zu 0ca8e72): regeln_at für ap_nachplan_kandidaten — None, wenn für diesen Tag mit
+    genau diesem Regel-Stand schon einmal nachgerechnet wurde. Plant ap_planen für ein Konto nichts, schreibt es keine auto_plan_lauf-Zeile;
+    regeln_at > lauf.at bliebe dann wahr und dieselben Konten würden jeden 10-min-Takt neu gerechnet. merker = {tag: regeln_at}."""
+    if not regeln_at:
+        return None
+    return None if (merker or {}).get(tag) == regeln_at else regeln_at
+
+
+def ap_nachplan_regeln_merken(merker, tag, regeln_at):
+    """REIN RECHNEND: nach einem fertigen Nachrechnen mit regeln_at den Stand für den Tag merken (nur der aktuelle Tag bleibt im Speicher)."""
+    if regeln_at:
+        for t in [t for t in merker if t != tag]:
+            merker.pop(t, None)
+        merker[tag] = regeln_at
+    return merker
+
+
 def ap_nachplan_tick(jetzt, zustand):
     """Ein Takt (aus ap_loop, jede Minute): alle AP_NACHPLAN_TAKT_S, nur wenn auto_plan_regeln.aktiv und im Fenster. Kandidaten ohne
     Plan heute → ap_planen(nur_konten) für heute; Ergebnis im Speicher (zustand['nachplanen']) und nur bei Treffer im Protokoll/Log."""
@@ -20219,12 +20237,18 @@ def ap_nachplan_tick(jetzt, zustand):
                                      "created_at": "gte." + (jetzt - timedelta(days=30)).isoformat()})
     rows = sb_select("auto_plan_lauf", {"select": "tag,quelle,at,ergebnis", "tag": f"eq.{tag}", "order": "at.desc", "limit": "1"})
     letzter = ap_nachplan_letzter(rows)
-    # Regeln nach dem Lauf geändert (updated_at, 08.10.2026) → Regel-Gründe nicht mehr fest, Konten werden sofort neu gerechnet
-    kand = ap_nachplan_kandidaten(konten, plaene, tag, tz, letzter, _ap_archiviert(), regeln_at=reg.get("updated_at"))
+    # Regeln nach dem Lauf geändert (updated_at, 08.10.2026) → Regel-Gründe nicht mehr fest, Konten werden sofort neu gerechnet — aber
+    # je Tag und Regel-Stand nur EINMAL (ap_nachplan_regeln_at): danach gelten die Regel-Gründe wieder als fest, bis die Regeln sich erneut
+    # ändern oder ein Lauf mit Treffer eine neue auto_plan_lauf-Zeile schreibt (Prozess-Speicher, nach Neustart höchstens einmal mehr)
+    merker = zustand.setdefault("nachplan_regeln", {})
+    regeln_at = ap_nachplan_regeln_at(merker, tag, reg.get("updated_at"))
+    kand = ap_nachplan_kandidaten(konten, plaene, tag, tz, letzter, _ap_archiviert(), regeln_at=regeln_at)
     info["kandidaten"] = len(kand)
     if not kand:
+        ap_nachplan_regeln_merken(merker, tag, regeln_at)
         return None
     erg = ap_planen(tag, quelle="nachplanen", nur_konten=kand)
+    ap_nachplan_regeln_merken(merker, tag, regeln_at)      # erst nach fertigem Lauf — wirft ap_planen, rechnet der nächste Takt neu
     info["geplant"] = len(erg.get("geplant") or [])
     info["ausgelassen"] = len(erg.get("ausgelassen") or [])
     if info["geplant"]:
