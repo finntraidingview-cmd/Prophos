@@ -14721,7 +14721,33 @@ AP_GROSS_NAH_MIN = 60                 # Große-Folge (ap_einsatz_lage): zwei gro
 AP_FIRMA_ABSTAND_MIN = 5
 
 
+AP_FENSTER_WUERFE = 20     # Verteilung je Lauf so oft würfeln, die fenster-treueste gewinnt (Opening-Anteil, 08.10.2026)
+
+
 def ap_zeiten_verteilen(tranchen, zeiten, rnd, frueheste_min=0, info=None, bestehend=None):
+    """FENSTER-TREU (08.10.2026, Finn: Opening-Anteil laut Zeitfenster — der Nachtlauf legte nur 15 von 36 statt 18 ins Opening):
+    _ap_zeiten_verteilen_einmal würfelt die Plätze zufällig, eine frühe Tranche verbaut einer späteren oft den Platz im kleinen
+    Opening-Fenster, die wich dann bei vollen Abständen ins Vormittagsfenster aus (Simulation mit den 36 Plänen vom 08.10.: Ø 15,7
+    im Opening). Jetzt AP_FENSTER_WUERFE Würfe, Sieger = die meisten platzierten Tranchen, dann die meisten im zugeteilten Fenster
+    (Ø 17,6, nie unter 16; Abstände unverändert). Bei gleich vielen platzierten gewinnt der Wurf mit weniger gelockerten Abständen
+    (info.stufe < 1) vor dem fenster-treueren — volle Abstände sind Finns harte Regel (Prüfung Slave 2, 08.10.2026).
+    Gleicher rnd → gleiches Ergebnis (Probelauf = Anlegen)."""
+    best = None
+    for _w in range(AP_FENSTER_WUERFE):
+        info_w = {}
+        m = _ap_zeiten_verteilen_einmal(tranchen, zeiten, random.Random(rnd.random()), frueheste_min=frueheste_min, info=info_w,
+                                        bestehend=bestehend)
+        treu = sum(1 for v in info_w.values() if v.get("fenster") == v.get("soll"))
+        gelockert = sum(1 for v in info_w.values() if v.get("stufe", 1.0) < 1.0)   # nicht „or 1.0“: Stufe 0.0 ist die stärkste Lockerung
+        wert = (len(m), -gelockert, treu)   # volle Abstände vor Opening-Anteil (Prüfung Slave 2, 08.10.2026)
+        if best is None or wert > best[2]:
+            best = (m, info_w, wert)
+    if info is not None:
+        info.update(best[1])
+    return best[0]
+
+
+def _ap_zeiten_verteilen_einmal(tranchen, zeiten, rnd, frueheste_min=0, info=None, bestehend=None):
     """REIN RECHNEND: Startminute (ab 00:00 deutscher Zeit) je Tranche. tranchen = [{key, user, firma, dauer_min}].
     Fenster nach Anteil (größter Rest), dann reiner Zufall im Fenster. Einzige Zeitregel: dieselbe ID (= PC) nie überlappend
     (+ abstand_id_min) — Finn 06.10.2026 abends: „Kernding: nie zwei Puls-Bots gleichzeitig", keine festen Pausen zwischen
@@ -14799,7 +14825,7 @@ def ap_zeiten_verteilen(tranchen, zeiten, rnd, frueheste_min=0, info=None, beste
                         je_firma.setdefault(str(t["fkey"]), []).append((str(t["user"]), treffer))
                     out[t["key"]] = treffer
                     if info is not None:
-                        info[t["key"]] = {"fenster": fenster[j], "soll": fenster[fi]}
+                        info[t["key"]] = {"fenster": fenster[j], "soll": fenster[fi], "stufe": f}
                     break
             if treffer is not None:
                 break
