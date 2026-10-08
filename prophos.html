@@ -23901,6 +23901,17 @@
     return n === 1 || n === 2 ? n : null
   }
   window._tpKetteNr = tpKetteNr   // Test-Haken
+  // Topstep-Kette: was mit Trade 2 ist (Prüfer Slave 2, 08.10.2026: „fehlt tv.balance_start, wartet T2 still für immer — bitte zeigen").
+  // Das Backend (ap_kette_tick) schreibt den Grund bzw. „Trade 2 angelegt …" an Trade 1 (mt5_baseline.kette.t2_grund); hier nur Anzeige.
+  function tpKetteChip(p){
+    if(tpKetteNr(p) !== 1) return ''
+    const k = p.mt5Baseline.kette, g = String(k.t2_grund || '')
+    if(!g) return ''
+    const um = k.t2_grund_at ? new Date(k.t2_grund_at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : ''
+    const ok = /^Trade 2 angelegt/.test(g)
+    return `<span class="rsq-card-run" style="color:${ok ? 'var(--good)' : '#B45309'}" title="Topstep-Kette${um ? ' · ' + um : ''}: ${escapeHtml(g)}">⛓ ${escapeHtml(g.length > 70 ? g.slice(0, 69) + '…' : g)}</span>`
+  }
+  window._tpKetteChip = tpKetteChip   // Test-Haken
   // Nachlesung ab (ms) — EINE Rechnung für Live Trades, Accounts-Balance und das Konto-Popup (26.09.2026, F3)
   const tvV2NachleseAb = (id, endeIso) => { const e = Date.parse(endeIso || '') || 0; return e ? e + tvV2NachleseMs(id) : 0 }
   /* FOLGETRADE (F5, Master 26.09.2026 nach Befund F4: „Hat ein späterer Plan desselben Kontos schon tv.balance_start, gilt der als
@@ -38243,11 +38254,13 @@
                            && (!p.mt5Baseline.hedge.pc || (typeof mt5FleetPcId === 'function' && p.mt5Baseline.hedge.pc === mt5FleetPcId())))
         ? `<button class="btn btn-ghost tc2-btn" data-plan-hedge-zu="${p.id}" title="Fusion-Gegenposition schließen (Master ist schon zu)" style="color:#B45309">Hedge zu</button>` : ''
       actions = `
+        ${tpKetteChip(p)}
         <button class="btn btn-ghost tc2-btn" data-plan-reopen="${p.id}" title="Zurück zu Offen (Fehlerkennung)">↺</button>
         ${hedgeZuBtnR}
         <button class="btn btn-primary tc2-btn" data-plan-complete="${p.id}">Überprüfen</button>`
     } else if(isCompleted){
       actions = `
+        ${tpKetteChip(p)}
         <button class="btn btn-ghost icon-btn tc2-ab" data-plan-edit-completed="${p.id}" title="Bearbeiten">${svgEdit}</button>
         <button class="btn btn-ghost icon-btn tc2-ab" data-plan-del="${p.id}" title="Löschen">${svgDel}</button>`
     }
@@ -41497,7 +41510,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1322'
+  const OS_TAB_BUILD = '2026-09-22.1323'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

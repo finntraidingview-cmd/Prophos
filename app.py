@@ -14463,9 +14463,10 @@ def _ap_runden(x, schritt):
 # geblowt, aber in ZWEI Trades statt einem ohne SL bis zur Liquidation („damit es normaler aussieht"). Trade 1: Start zufällig
 # 00:00–t1_bis dt, SL und TP je zufällig in t1_sl/t1_tp ($). Trade 2 entsteht erst, wenn Trade 1 zu Ende ist und Puls die Balance
 # GENAU nachgelesen hat (ap_kette_tick), Start t2_ab–t2_bis dt: TP2 = Tagesziel − E1, SL2 = Verlustgrenze (DD + blow_puffer) + E1
-# (E1 = Balance nach Trade 1 − Tagesstart; Beispiel −2.500 → TP2 7.000 / SL2 2.200, +2.500 → TP2 2.000 / SL2 7.200). Gilt jeden Tag gleich ab dem Tagesstand (150.000 oder 154.500). Richtung frei, nie Gegenhedge über IDs. Beide 3–4 NQ.
+# (E1 = Balance nach Trade 1 − Tagesstart; Beispiel −2.500 → TP2 7.000 / SL2 2.200, +2.500 → TP2 2.000 / SL2 7.200). Gilt jeden Tag gleich ab dem Tagesstand (150.000 oder 154.500). Richtung frei, nie Gegenhedge über IDs. Trade 1 2–3 NQ (menge),
+# Trade 2 3–4 NQ (t2_menge; Finn 08.10.2026 09:00 Dubai, vorher beide 3–4).
 # Aktiv, sobald die Firmen-Regel einen Block "kette" hat (sql/2026-10-08_topstep_kette.sql); Werte darin überschreiben den Standard.
-AP_KETTE_STANDARD = {"t1_bis": "11:00", "t1_sl": [1950, 2650], "t1_tp": [1950, 2650], "t2_ab": "11:00", "t2_bis": "19:30", "tagesziel_usd": 4500, "blow_puffer_usd": 200, "menge": [3, 4], "puffer": [25, 40], "t2_abstand_min": [5, 20], "t2_streuung_min": [0, 45]}
+AP_KETTE_STANDARD = {"t1_bis": "11:00", "t1_sl": [1950, 2650], "t1_tp": [1950, 2650], "t2_ab": "11:00", "t2_bis": "19:30", "tagesziel_usd": 4500, "blow_puffer_usd": 200, "menge": [2, 3], "t2_menge": [3, 4], "puffer": [25, 40], "t2_abstand_min": [5, 20], "t2_streuung_min": [0, 45]}
 AP_KETTE_TXT = "Topstep-Kette"
 
 
@@ -14514,7 +14515,7 @@ def ap_kette_trade2(t1_kette, balance_start, balance_end, regel, kette, u_menge)
     tp2, sl2 = round(tagesziel - e1), round(verlust + e1)
     if sl2 < 100:
         return None, f"SL für Trade 2 wäre nur {sl2} $ — von Hand prüfen"
-    menge = _ap_runden(_ap_spanne(kette.get("menge"), u_menge), 1)
+    menge = _ap_runden(_ap_spanne(kette.get("t2_menge") or kette.get("menge"), u_menge), 1)   # Trade 2: 3–4 NQ (Finn 08.10.2026)
     return {"e1": e1, "tp": tp2, "sl": sl2, "menge": menge, "tagesziel": round(tagesziel), "verlust_grenze": round(verlust)}, None
 
 

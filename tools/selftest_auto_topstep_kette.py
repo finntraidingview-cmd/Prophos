@@ -4,7 +4,7 @@ Tag am Ende nur „+4.500 $" oder geblowt, aber in ZWEI Trades; Konzept als Baum
 
 Aufruf:  python3 tools/selftest_auto_topstep_kette.py
 Ohne Netz, Platzhalter-IDs. Geprüft: Trade 1 (00:00–11:00 dt, SL/TP 1.950–2.650 $, 3–4 NQ, Tagesziel 4.500, Verlustgrenze 4.700);
-Finns Beispiele für Trade 2 (−2.500 → TP 7.000 / SL 2.200; +2.500 → TP 2.000 / SL 7.200); zweiter Tag (154.500, Rest 4.500 + Puffer);
+Trade 1 2–3 NQ, Trade 2 3–4 NQ; Finns Beispiele für Trade 2 (−2.500 → TP 7.000 / SL 2.200; +2.500 → TP 2.000 / SL 7.200); zweiter Tag (154.500, Rest 4.500 + Puffer);
 Blow / Tagesziel schon erreicht → kein Trade 2; nur genaue Puls-Nachlesung in TopstepX zählt; ap_kette_tick legt Trade 2 an (Start ≥ Ende
 + 5 min und ≥ 11:00, ≤ 19:30 dt, Bestätigung geerbt, nie doppelt, ohne Nachlesung nichts), Richtung ohne Gegenhedge über IDs; Trade 1
 nur bis 11:00 in ap_zeiten_verteilen; Firmen ohne Kette unverändert."""
@@ -43,8 +43,9 @@ def main():
     ohne, _ = R(TOPSTEP, "challenge", 150000.0, {"tp": 0.5, "sl": 0.5, "menge": 0.5, "puffer": 0.5})
     check(ohne["sl"] is None and ohne["tp"] >= 4350 and "kette" not in ohne, "ohne Kette: wie bisher ein Trade ohne SL")
     werte = [R(KETTE, "challenge", 150000.0, {"tp": u, "sl": 1 - u, "menge": u, "puffer": u})[0] for u in (0.0, 0.37, 0.81, 0.999)]
-    check(all(1950 <= w["tp"] <= 2650 and 1950 <= w["sl"] <= 2650 and w["menge"] in (3, 4) for w in werte),
-          f"Trade 1: TP/SL je 1.950–2.650 $, 3–4 NQ ({[(w['tp'], w['sl'], w['menge']) for w in werte]})")
+    check(all(1950 <= w["tp"] <= 2650 and 1950 <= w["sl"] <= 2650 and w["menge"] in (2, 3) for w in werte)
+          and {w["menge"] for w in werte} == {2, 3},
+          f"Trade 1: TP/SL je 1.950–2.650 $, 2–3 NQ ({[(w['tp'], w['sl'], w['menge']) for w in werte]})")
     w1 = werte[1]
     check(w1["kette"] == {"nr": 1, "tagesziel": 4500, "verlust_grenze": 4700} and w1["risiko"] == w1["sl"] and "Topstep-Kette 1/2" in w1["stufe"],
           f"Tag 1 (150.000): Tagesziel +4.500, Verlustgrenze 4.700 ({w1['kette']})")
@@ -58,7 +59,9 @@ def main():
     T2 = lambda k, b0, b1: a["ap_kette_trade2"](k, b0, b1, KETTE, a["ap_kette_regel"](KETTE), 0.3)   # noqa: E731
     k1 = {"nr": 1, "tagesziel": 4500, "verlust_grenze": 4700}
     v, _ = T2(k1, 150000, 147500)
-    check((v["tp"], v["sl"], v["e1"]) == (7000, 2200, -2500.0) and v["menge"] in (3, 4), f"SL −2.500 → TP 7.000 / SL 2.200 ({v})")
+    check((v["tp"], v["sl"], v["e1"]) == (7000, 2200, -2500.0) and v["menge"] in (3, 4), f"SL −2.500 → TP 7.000 / SL 2.200, Trade 2 3–4 NQ ({v})")
+    check({a["ap_kette_trade2"](k1, 150000, 147500, KETTE, a["ap_kette_regel"](KETTE), u_)[0]["menge"] for u_ in (0.0, 0.99)} == {3, 4},
+          "Trade 2: 3–4 NQ (t2_menge), Trade 1 2–3 NQ (menge) — Finn 08.10.2026")
     v, _ = T2(k1, 150000, 152500)
     check((v["tp"], v["sl"]) == (2000, 7200), f"TP +2.500 → TP 2.000 / SL 7.200 ({v['tp']} / {v['sl']})")
     v, _ = T2({"nr": 1, "tagesziel": 4530, "verlust_grenze": 4700}, 154500, 152000)
