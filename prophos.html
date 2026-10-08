@@ -42323,7 +42323,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1388'
+  const OS_TAB_BUILD = '2026-09-22.1389'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -53380,6 +53380,9 @@
   function wdKarte(x, erw){
     const r = _wd.regeln || {}, de = wdDe
     const fest = !erw && (x.status === 'laeuft' || x.status === 'fertig' || x.status === 'verpasst')
+    // Verwalter (Master 09.10.2026, Entscheidung a): Zeit, Richtung, TP/SL nur Anzeige — speichern kann sie nur Hermann Technologies,
+    // ein Bearbeiten ohne Speichern-Knopf verwirrt nur. Haken bleiben (wirken sofort).
+    const nurLesen = wdVerwalter()
     const uid = escapeHtml(String(x.user_id))
     const zeiten = (!erw && x.start_um) ? wdKontoZeiten((x.konten || []).map(k => ({ ...k })), x.start_um, r) : new Map()
     const alleAn = (x.konten || []).length && (x.konten || []).every(k => k.farm && k.aktiv !== false)
@@ -53394,7 +53397,7 @@
       const kd = wdKontoDaten(k.id) || {}
       const aus = k.aktiv === false || !k.farm
       const planFest = (k.plan_id && k.status && k.status !== 'planned') || k.gestartet
-      const sperren = erw || fest || planFest || (!k.ext && !k.plan_id) || (k.archiviert && !k.plan_id)
+      const sperren = erw || fest || nurLesen || planFest || (!k.ext && !k.plan_id) || (k.archiviert && !k.plan_id)
       // Haken = DAUERHAFT (26.09.2026, Finn: „einmal live stellen, dann jeden Tag automatisch, bis ich Stopp drücke") — geht auch bei
       // IDs, die für den Tag noch nicht eingetragen sind (vorher gesperrt, bis gewürfelt war). „nur heute" ist ein eigener Knopf.
       const hakenSperre = fest || planFest || (k.archiviert && !k.plan_id)
@@ -53433,8 +53436,8 @@
       <div class="wd-karte-kopf">
         <label class="wd-id-haken" title="ganze ID rein/raus (alle Konten)"><input type="checkbox" data-wd-id-alle ${alleAn ? 'checked' : ''} ${erw || fest ? 'disabled' : ''}> <span class="kf">alle</span></label>
         <span class="kf">Start</span>
-        ${erw || fest ? `<span class="zeit">${x.start_um ? escapeHtml(wdHhmm(x.start_um)) : '—:—'}</span>` : `<input type="time" class="input mono vp-in" data-wd-zeit style="width:92px;text-align:left;font-size:15px;font-weight:600" value="${x.start_um ? escapeHtml(wdHhmm(x.start_um)) : ''}" title="Startzeit des Blocks in Dubai-Zeit">`}
-        <div class="seg"><button type="button" data-wd-dir="buy" class="${x.richtung === 'buy' ? 'active' : ''}" ${erw || fest ? 'disabled' : ''}>BUY</button><button type="button" data-wd-dir="sell" class="${x.richtung === 'sell' ? 'active' : ''}" ${erw || fest ? 'disabled' : ''}>SELL</button></div>
+        ${erw || fest || nurLesen ? `<span class="zeit">${x.start_um ? escapeHtml(wdHhmm(x.start_um)) : '—:—'}</span>` : `<input type="time" class="input mono vp-in" data-wd-zeit style="width:92px;text-align:left;font-size:15px;font-weight:600" value="${x.start_um ? escapeHtml(wdHhmm(x.start_um)) : ''}" title="Startzeit des Blocks in Dubai-Zeit">`}
+        <div class="seg"><button type="button" data-wd-dir="buy" class="${x.richtung === 'buy' ? 'active' : ''}" ${erw || fest || nurLesen ? 'disabled' : ''}>BUY</button><button type="button" data-wd-dir="sell" class="${x.richtung === 'sell' ? 'active' : ''}" ${erw || fest || nurLesen ? 'disabled' : ''}>SELL</button></div>
         <span class="kf">${nAkt} von ${(x.konten || []).length} Konten drin${x.gestartet_at ? ` · gestartet ${wdHhmm(x.gestartet_at)}` : ''}${erw ? (wdVerwalter() ? ' · noch nicht eingetragen' : ' · noch nicht eingetragen — „🎲 Würfeln" nimmt die ID mit') : ''}</span>
         <span class="kf" style="margin-left:auto">Haken wirkt sofort und dauerhaft${wdVerwalter() ? '' : ' · TP/SL, Zeit, Richtung: „Änderungen speichern"'}</span>
       </div>
@@ -53617,6 +53620,7 @@
     })
     if(!liste.length){ box.innerHTML = `<div class="wd-leer" style="padding:4px 0">${alle.length ? 'Kein Treffer.' : 'Noch keine ID — Konten aller IDs konnten nicht geladen werden, und kein PC-Tab hat sich eingetragen.'}</div>`; return }
     const now = Date.now()
+    const nurLesen = wdVerwalter()   // Verwalter: Block-Chip ohne Griff/▲▼ — Reihenfolge speichern kann nur Hermann Technologies (Master 09.10.2026)
     box.innerHTML = `<table class="wd-tab wd-ablauf-tab"><thead><tr><th></th><th>Block</th><th>Start Dubai</th><th>ID</th><th>Richtung</th><th>Konten drin</th><th title="Winning Days aller Konten der ID (gezählt)">WD</th><th>Pläne</th><th>Stand</th></tr></thead><tbody>` +
       liste.map(({ x, erw }) => {
         const uid = String(x.user_id), offen = _wd.offen === uid
@@ -53627,7 +53631,7 @@
         const gestartet = k.filter(q => wdAktiv(q) && q.status && q.status !== 'planned' && q.status !== 'verpasst' && q.status !== 'weg').length
         const wdSum = k.reduce((s, q) => { const kd = wdKontoDaten(q.id); return s + (kd && kd.winning_days != null ? kd.winning_days : 0) }, 0)
         const zeile = `<tr class="id ${jetzt ? 'jetzt' : ''} ${offen ? 'offen' : ''}" data-wd-open="${escapeHtml(uid)}" title="anklicken: Konten dieser ID">
-          <td class="pfeil">${offen ? '▾' : '▸'}</td><td>${x.reihenfolge ? (erw || wdFest(x) ? `<span class="wd-blk">${x.reihenfolge}</span>`
+          <td class="pfeil">${offen ? '▾' : '▸'}</td><td>${x.reihenfolge ? (erw || wdFest(x) || nurLesen ? `<span class="wd-blk">${x.reihenfolge}</span>`
             : `<span class="wd-blk-zelle"><span class="wd-blk wd-griff" draggable="true" data-wd-drag="${escapeHtml(uid)}" title="ziehen: Block auf einen anderen Platz — Zeiten folgen im Takt">⋮⋮ ${x.reihenfolge}</span><span class="wd-auf-ab"><button type="button" data-wd-rauf="${escapeHtml(uid)}" title="einen Platz nach vorn">▲</button><button type="button" data-wd-runter="${escapeHtml(uid)}" title="einen Platz nach hinten">▼</button></span></span>`) : '<span class="kf">—</span>'}</td>
           <td class="mono" style="font-weight:600">${x.start_um ? wdHhmm(x.start_um) : '—:—'}${x.start_um ? `<span class="kf"> – ${wdHhmm(new Date(ende).toISOString())}</span>` : ''}</td>
           <td style="font-weight:600">${escapeHtml(x.name || '?')}</td>

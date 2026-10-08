@@ -439,6 +439,14 @@ def main():
           "K4: _admNurGruppeLaden — nicht prüfbar → eingeschränkt")
     check(html0.count("wdVerwalter()") >= 8 and "const wdVerwalter = () => !!document.querySelector('#dashboard-view section.view[data-view=\"kasse\"].adm-verwalter')" in html0,
           f"K5: Hinweistexte im WD-Reiter fragen wdVerwalter() ({html0.count('wdVerwalter()')} Stellen) — gleiche Bedingung wie das Ausblenden")
+    # Verwalter read-only (Master 09.10.2026, Entscheidung a): Zeit, BUY/SELL, TP/SL ohne Eingabe, Block-Chip ohne Griff/▲▼
+    karte = html0[html0.index("  function wdKarte(x, erw){"):html0.index("  function wdSlotWaehlen(")]
+    ablauf = html0[html0.index("  function wdAblauf(rows, fehlend){"):html0.index("    box.querySelectorAll('tr[data-wd-open]')")]
+    check("const nurLesen = wdVerwalter()" in karte and "const sperren = erw || fest || nurLesen ||" in karte
+          and "${erw || fest || nurLesen ? `<span class=\"zeit\">" in karte and karte.count("${erw || fest || nurLesen ? 'disabled' : ''}") == 2,
+          "Verwalter: Zeit als Text, BUY/SELL disabled, TP/SL (sperren) als Text")
+    check("const nurLesen = wdVerwalter()" in ablauf and "(erw || wdFest(x) || nurLesen ? `<span class=\"wd-blk\">" in ablauf,
+          "Verwalter: Block-Chip ohne draggable/▲▼")
 
     # S1: verfallen im Lauf nur für die Sicht
     erg = {"geplant": [], "verfallen": [{"user_id": HT1, "plan_id": "a"}, {"user_id": MITGL, "plan_id": "b"}]}
