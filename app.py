@@ -12278,6 +12278,10 @@ def hand_gruppen(konten_ziel, reviews, blown, letzte, accs, archiv, namen, ausge
         kid, uid, grund = str(x.get("konto_id") or ""), str(x.get("user_id") or ""), str(x.get("grund") or "").strip()
         if not grund or HAND_PLANER_OHNE.search(grund) or uid in ausgeblendet or (kid and (kid in archiv or kid in schon)):
             continue
+        if x.get("balance_gelesen_at"):                # seit dem Lauf gelesen → kein Fall mehr, das Nachplanen nimmt es mit (09.10.2026)
+            out.setdefault("planer_gelesen", 0)
+            out["planer_gelesen"] += 1
+            continue
         a = accs.get(kid) or {}
         z = basis(uid, kid, a, x.get("firma"), x.get("konto"))
         z["typ"] = z.get("typ") or x.get("typ")
@@ -12330,6 +12334,10 @@ def admin_handarbeit():
             if str(l.get("trocken") or "").lower() != "true":
                 lauf = {"at": l.get("at"), "ausgelassen": [x for x in (l.get("aus") or []) if isinstance(x, dict)
                                                             and admin_in_sicht(x.get("user_id"), sicht)]}
+                try:
+                    lauf = ap_lauf_gelesen_markieren(lauf)   # seit dem Lauf gelesene „Balance fehlt"-Konten (09.10.2026)
+                except Exception as e:
+                    print(f"[handarbeit] ⚠️ gelesen-Markierung: {type(e).__name__}: {e}", flush=True)
                 break
         aktiv = lambda liste: sorted({str(p.get("master_account_id")) for p in liste or []
                                       if p.get("master_account_id") and str(p.get("master_account_id")) not in archiv})
@@ -12348,7 +12356,9 @@ def admin_handarbeit():
                 accs[str(a["id"])] = a
         namen, ausgeblendet = _wd_personen()
         gr = hand_gruppen(konten_ziel, reviews, blown, letzte, accs, archiv, namen, ausgeblendet, datetime.now(timezone.utc), lauf)
-        antwort = {"ok": True, "at": datetime.now(timezone.utc).isoformat(), "n": sum(len(v) for v in gr.values()), "gruppen": gr}
+        gelesen = gr.pop("planer_gelesen", 0)
+        antwort = {"ok": True, "at": datetime.now(timezone.utc).isoformat(), "n": sum(len(v) for v in gr.values()), "gruppen": gr,
+                   "planer_gelesen": gelesen}
     except Exception as e:
         print(f"[handarbeit] ⚠️ {type(e).__name__}: {e}", flush=True)
         return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 502
@@ -21842,6 +21852,127 @@ def ap_nachplan_regeln_merken(merker, tag, regeln_at):
     return merker
 
 
+# COUNTDOWN + „JETZT NEU BERECHNEN" (Finn 09.10.2026 ~01:55 Dubai, Admin → Trade-Planer → „Braucht dich": „Die Balance bei EzPoker wurde jetzt
+# gelesen. Ich will, dass es auch visuell verschwindet und dass hier ein Countdown ist, wann die nächste Botlesung kommt … und dass ich auf
+# ‚Jetzt neu berechnen' drücken kann"). Takt und Knopf rechnen über DIESELBE Strecke (_ap_nachplan_rechnen) unter einer Sperre — nie zwei
+# ap_planen-Nachplanungen gleichzeitig (der Takt überspringt, der Knopf meldet „läuft schon").
+_ap_nachplan_lock = threading.Lock()
+AP_BAL_FEHLT = re.compile(r"keine Balance|Balance fehlt|nicht live", re.I)     # Gründe „Balance fehlt" des Laufs (nicht „Ergebnis nie gelesen")
+
+
+def ap_nachplan_naechster(jetzt, nachplan_at, zeiten, tz):
+    """REIN RECHNEND (testbar): (zeitpunkt UTC, art) des nächsten Nachplan-Takts. art 'takt' = im Fenster alle AP_NACHPLAN_TAKT_S ab dem
+    letzten Takt (nachplan_at, Epoche; ap_loop prüft jede Minute → bis zu 60 s später); 'fenster' = das Fenster ist zu (vor 00:00 dt, nach
+    start_bis − Vorlauf, Sa/So) → der erste Takt im nächsten Fenster (00:00 dt des nächsten Werktags, auf den 10-min-Rhythmus von nachplan_at)."""
+    d = jetzt.astimezone(tz)
+    takt = timedelta(seconds=AP_NACHPLAN_TAKT_S)
+    letzter = datetime.fromtimestamp(nachplan_at, timezone.utc) if nachplan_at else None
+    if ap_nachplan_fenster(d, zeiten):
+        t = (letzter + takt) if letzter else jetzt
+        t = max(t, jetzt)
+        if ap_nachplan_fenster(t.astimezone(tz), zeiten):
+            return t, "takt"
+    tag = d.date()
+    for i in range(8):
+        k = tag + timedelta(days=i)
+        start = datetime(k.year, k.month, k.day, tzinfo=tz)
+        if start.weekday() >= 5 or start <= d:
+            continue
+        if letzter:                                   # auf den Takt-Rhythmus: erster Takt ≥ Fensterstart
+            n = max(0, -(-(start - letzter) // takt))
+            start = max(start, letzter + n * takt)
+        return start.astimezone(timezone.utc), "fenster"
+    return None, "fenster"
+
+
+def ap_nachplan_planungstag(heute, nacht_tag):
+    """REIN RECHNEND (testbar): Tag für „Jetzt neu berechnen" = der Tag des letzten Nachtlaufs (vor 00:00 dt also schon der kommende
+    Handelstag), solange er nicht vorbei ist; sonst None (Wochenende/kein Lauf → nichts zu planen). heute/nacht_tag = 'JJJJ-MM-TT'."""
+    nacht_tag = str(nacht_tag or "")
+    return nacht_tag if re.match(r"^\d{4}-\d{2}-\d{2}$", nacht_tag) and nacht_tag >= str(heute) else None
+
+
+def ap_bal_gelesen(ausgelassen, lauf_at, accs, echo_bal, dup_bal):
+    """REIN RECHNEND (testbar): {konto_id: stand} der „Balance fehlt"-Konten des Laufs, deren Balance SEIT dem Lauf gelesen wurde —
+    Stand wie der Planer (acc_balance_wahl: TSX/MT5/Echo/TV/Duplikum) jünger als lauf_at. Solche Konten verschwinden aus „Braucht dich"
+    und „Planer braucht dich"; das nächste Nachplanen nimmt sie mit („keine Balance" ist kein fester Grund)."""
+    la = _ap_ts(lauf_at)
+    if la is None:
+        return {}
+    out = {}
+    for z in ausgelassen or ():
+        if not isinstance(z, dict) or not AP_BAL_FEHLT.search(str(z.get("grund") or "")):
+            continue
+        kid = str(z.get("konto_id") or "")
+        a = (accs or {}).get(kid)
+        if not a:
+            continue
+        bal, _ccy, _q, stand = acc_balance_wahl(a, echo_bal, dup_bal)
+        st = _ap_ts(stand)
+        if bal and st is not None and st > la:
+            out[kid] = st.isoformat()
+    return out
+
+
+_ap_balk_cache = {"bis": 0.0, "wert": None}
+
+
+def ap_lauf_gelesen_markieren(letzter):
+    """letzter Lauf (Kopie) mit balance_gelesen_at an den „Balance fehlt"-Zeilen, deren Balance seit dem Lauf gelesen wurde (ap_bal_gelesen).
+    Lädt nur diese Konten + die Echo/Duplikum-Balances (30 s gemerkt). Ohne solche Zeilen unverändert."""
+    if not isinstance(letzter, dict):
+        return letzter
+    aus = [z for z in (letzter.get("ausgelassen") or []) if isinstance(z, dict) and AP_BAL_FEHLT.search(str(z.get("grund") or ""))]
+    kids = sorted({str(z.get("konto_id")) for z in aus if z.get("konto_id")})
+    if not kids:
+        return letzter
+    accs = {}
+    for j in range(0, len(kids), 150):
+        for a in _sb_all("accounts", {"select": "id,name,firm,account_type,external_id,topstep_balance,topstep_last_check,"
+                                                "meta_api_balance,meta_api_last_check,tv_balance,tv_balance_at",
+                                      "id": "in.(" + ",".join(kids[j:j + 150]) + ")"}):
+            accs[str(a["id"])] = a
+    if _ap_balk_cache["bis"] < time.time() or _ap_balk_cache["wert"] is None:
+        _ap_balk_cache.update(bis=time.time() + 30, wert=_ap_balance_karten())
+    echo_bal, dup_bal = _ap_balk_cache["wert"]
+    gelesen = ap_bal_gelesen(aus, letzter.get("at"), accs, echo_bal, dup_bal)
+    if not gelesen:
+        return letzter
+    neu = []
+    for z in letzter.get("ausgelassen") or []:
+        k = str((z or {}).get("konto_id") or "") if isinstance(z, dict) else ""
+        neu.append(dict(z, balance_gelesen_at=gelesen[k]) if k in gelesen else z)
+    return dict(letzter, ausgelassen=neu)
+
+
+def _ap_nachplan_rechnen(tag, jetzt, zustand, reg, tz):
+    """Gemeinsame Strecke von Takt und Knopf: Kandidaten ohne Plan am Tag → ap_planen(tag, quelle nachplanen, nur_konten). Aufrufer hält
+    _ap_nachplan_lock. → (erg | None, kandidaten)"""
+    uids = [str(u) for u in (reg.get("user_ids") or [])]
+    if not uids:
+        return None, []
+    in_uids = "in.(" + ",".join(uids) + ")"
+    konten = _ap_konten_laden({"user_id": in_uids, "order": "id.asc", "account_type": "in.(" + ",".join(AP_TYPEN) + ")"})
+    plaene = _sb_all("trade_plans", {"select": "id,master_account_id,status,start_um,planned_for,started_at,ended_at,completed_at",
+                                     "user_id": in_uids,
+                                     "status": "in.(planned,open,review,completed)",   # completed: ein Trade pro Konto und Tag (08.10.2026)
+                                     "created_at": "gte." + (jetzt - timedelta(days=30)).isoformat()})
+    rows = sb_select("auto_plan_lauf", {"select": "tag,quelle,at,ergebnis", "tag": f"eq.{tag}", "order": "at.desc", "limit": "1"})
+    letzter = ap_nachplan_letzter(rows)
+    # Regeln nach dem Lauf geändert (updated_at, 08.10.2026) → Regel-Gründe nicht mehr fest, Konten werden sofort neu gerechnet — aber
+    # je Tag und Regel-Stand nur EINMAL (ap_nachplan_regeln_at): danach gelten die Regel-Gründe wieder als fest, bis die Regeln sich erneut
+    # ändern oder ein Lauf mit Treffer eine neue auto_plan_lauf-Zeile schreibt (Prozess-Speicher, nach Neustart höchstens einmal mehr)
+    merker = zustand.setdefault("nachplan_regeln", {})
+    regeln_at = ap_nachplan_regeln_at(merker, tag, reg.get("updated_at"))
+    kand = ap_nachplan_kandidaten(konten, plaene, tag, tz, letzter, _ap_archiviert(), regeln_at=regeln_at)
+    if not kand:
+        ap_nachplan_regeln_merken(merker, tag, regeln_at)
+        return None, kand
+    erg = ap_planen(tag, quelle="nachplanen", nur_konten=kand)
+    ap_nachplan_regeln_merken(merker, tag, regeln_at)      # erst nach fertigem Lauf — wirft ap_planen, rechnet der nächste Takt neu
+    return erg, kand
+
+
 def ap_nachplan_tick(jetzt, zustand):
     """Ein Takt (aus ap_loop, jede Minute): alle AP_NACHPLAN_TAKT_S, nur wenn auto_plan_regeln.aktiv und im Fenster. Kandidaten ohne
     Plan heute → ap_planen(nur_konten) für heute; Ergebnis im Speicher (zustand['nachplanen']) und nur bei Treffer im Protokoll/Log."""
@@ -21858,26 +21989,16 @@ def ap_nachplan_tick(jetzt, zustand):
     zustand["nachplanen"] = info
     if not reg.get("aktiv") or not uids or not info["fenster"]:
         return None
-    in_uids = "in.(" + ",".join(uids) + ")"
-    konten = _ap_konten_laden({"user_id": in_uids, "order": "id.asc", "account_type": "in.(" + ",".join(AP_TYPEN) + ")"})
-    plaene = _sb_all("trade_plans", {"select": "id,master_account_id,status,start_um,planned_for,started_at,ended_at,completed_at",
-                                     "user_id": in_uids,
-                                     "status": "in.(planned,open,review,completed)",   # completed: ein Trade pro Konto und Tag (08.10.2026)
-                                     "created_at": "gte." + (jetzt - timedelta(days=30)).isoformat()})
-    rows = sb_select("auto_plan_lauf", {"select": "tag,quelle,at,ergebnis", "tag": f"eq.{tag}", "order": "at.desc", "limit": "1"})
-    letzter = ap_nachplan_letzter(rows)
-    # Regeln nach dem Lauf geändert (updated_at, 08.10.2026) → Regel-Gründe nicht mehr fest, Konten werden sofort neu gerechnet — aber
-    # je Tag und Regel-Stand nur EINMAL (ap_nachplan_regeln_at): danach gelten die Regel-Gründe wieder als fest, bis die Regeln sich erneut
-    # ändern oder ein Lauf mit Treffer eine neue auto_plan_lauf-Zeile schreibt (Prozess-Speicher, nach Neustart höchstens einmal mehr)
-    merker = zustand.setdefault("nachplan_regeln", {})
-    regeln_at = ap_nachplan_regeln_at(merker, tag, reg.get("updated_at"))
-    kand = ap_nachplan_kandidaten(konten, plaene, tag, tz, letzter, _ap_archiviert(), regeln_at=regeln_at)
-    info["kandidaten"] = len(kand)
-    if not kand:
-        ap_nachplan_regeln_merken(merker, tag, regeln_at)
+    if not _ap_nachplan_lock.acquire(blocking=False):
+        info["uebersprungen"] = "Knopf „Jetzt neu berechnen“ rechnet gerade"
         return None
-    erg = ap_planen(tag, quelle="nachplanen", nur_konten=kand)
-    ap_nachplan_regeln_merken(merker, tag, regeln_at)      # erst nach fertigem Lauf — wirft ap_planen, rechnet der nächste Takt neu
+    try:
+        erg, kand = _ap_nachplan_rechnen(tag, jetzt, zustand, reg, tz)
+    finally:
+        _ap_nachplan_lock.release()
+    info["kandidaten"] = len(kand)
+    if erg is None:
+        return None
     info["geplant"] = len(erg.get("geplant") or [])
     info["ausgelassen"] = len(erg.get("ausgelassen") or [])
     if info["geplant"]:
@@ -22486,7 +22607,7 @@ def admin_auto_plan():
         uid, err2 = _wd_login()
         if err2:
             return err2
-    reg = (sb_select("auto_plan_regeln", {"select": "aktiv,user_ids", "id": "eq.1"}) or [{}])[0]
+    reg = (sb_select("auto_plan_regeln", {"select": "aktiv,user_ids,zeiten,updated_at", "id": "eq.1"}) or [{}])[0]
     im_planer = str(uid) in [str(u) for u in (reg.get("user_ids") or [])]
     if not admin and not im_planer:
         # Admin-Reiter (08.10.2026): GET mit sicht=admin auch ohne Planer-Mitgliedschaft (ap_admin_reiter_ok); POST bleibt Planer-only.
@@ -22507,10 +22628,51 @@ def admin_auto_plan():
         letzter = ap_sicht(erg, sicht) if sicht is not None else erg
         if not admin and _ap_gruppe_lesen(uid)[0]:
             letzter = ap_lauf_ohne_summen(letzter)   # Nachbesserung B (08.10.2026): Eingeschränkte bekommen keine HT-Summen
+        # Seit dem Lauf gelesen (09.10.2026): „Balance fehlt"-Zeilen mit frischer Balance bekommen balance_gelesen_at — das Frontend nimmt sie
+        # aus „Braucht dich" und zeigt „n Konten gelesen ✓ · beim nächsten Nachplanen". Eigener try: fällt es aus, bleibt der Lauf wie bisher.
+        try:
+            if isinstance(letzter, dict) and not letzter.get("at") and rows:
+                letzter = dict(letzter, at=rows[0].get("at"))     # Laufzeit für den Vergleich (Zeit der Zeile, wenn das Ergebnis keine trägt)
+            letzter = ap_lauf_gelesen_markieren(letzter)
+        except Exception as e:
+            print(f"[auto-plan] ⚠️ gelesen-Markierung: {type(e).__name__}: {e}", flush=True)
+        info = dict(_ap_info)
+        try:
+            nx, art = ap_nachplan_naechster(datetime.now(timezone.utc), _ap_info.get("nachplan_at"), reg.get("zeiten"), _ap_tz(AP_TZ_TAG))
+            info.update(nachplan_naechster=nx.isoformat() if nx else None, nachplan_art=art, nachplan_takt_s=AP_NACHPLAN_TAKT_S,
+                        nachplan_laeuft=_ap_nachplan_lock.locked())
+        except Exception as e:
+            print(f"[auto-plan] ⚠️ Countdown: {type(e).__name__}: {e}", flush=True)
         return jsonify({"ok": True, "admin": admin, "aktiv": bool(reg.get("aktiv")), "ids": len(reg.get("user_ids") or []),
                         "im_planer": im_planer or admin, "letzter": letzter,
-                        "sicht": "alle" if sicht is None else "eigene" if isinstance(sicht, str) else "gruppe", "info": _ap_info})
+                        "sicht": "alle" if sicht is None else "eigene" if isinstance(sicht, str) else "gruppe", "info": info})
     body = request.get_json(silent=True) or {}
+    if body.get("nachplanen"):
+        # „JETZT NEU BERECHNEN" (Finn 09.10.2026): nur Admin (ADMIN_EMAILS, kein Verwalter) — dieselbe Strecke wie der 10-min-Takt
+        # (_ap_nachplan_rechnen) für den Planungstag des letzten Nachtlaufs; bestehende Pläne bleiben (nur_konten). Läuft schon → 409.
+        if not admin:
+            return jsonify({"ok": False, "msg": "Jetzt neu berechnen nur für Admins"}), 403
+        if not reg.get("aktiv"):
+            # Not-Aus gilt auch für den Knopf — der Takt prüft aktiv ebenfalls (Prüfer Slave 2, 09.10.2026)
+            return jsonify({"ok": False, "msg": "Auto-Planer ist aus"}), 409
+        tz = _ap_tz(AP_TZ_TAG)
+        heute = datetime.now(timezone.utc).astimezone(tz).strftime("%Y-%m-%d")
+        nr = sb_select("auto_plan_lauf", {"select": "tag", "ergebnis->>quelle": "eq.nacht", "order": "at.desc", "limit": "1"}) or []
+        ptag = ap_nachplan_planungstag(heute, (nr[0] if nr else {}).get("tag"))
+        if not ptag:
+            return jsonify({"ok": False, "msg": "Kein Planungstag — der nächste Nachtlauf plant (Wochenende oder noch kein Lauf)"}), 409
+        if not _ap_nachplan_lock.acquire(blocking=False):
+            return jsonify({"ok": False, "msg": "läuft schon — Nachplanen rechnet gerade"}), 409
+        try:
+            erg, kand = _ap_nachplan_rechnen(ptag, datetime.now(timezone.utc), _ap_info, reg, tz)
+        except Exception as e:
+            return jsonify({"ok": False, "admin": admin, "msg": f"{type(e).__name__}: {e}"}), 502
+        finally:
+            _ap_nachplan_lock.release()
+        erg = erg or {}
+        print(f"[auto-plan] Jetzt neu berechnen (Knopf) {ptag}: {len(erg.get('geplant') or [])} geplant für {len(kand)} Konten", flush=True)
+        return jsonify({"ok": True, "admin": admin, "tag": ptag, "kandidaten": len(kand), "geplant": len(erg.get("geplant") or []),
+                        "ausgelassen": len(erg.get("ausgelassen") or []), "msg": erg.get("msg")})
     tag = str(body.get("tag") or "").strip() or None
     if tag and not re.match(r"^\d{4}-\d{2}-\d{2}$", tag):
         return jsonify({"ok": False, "msg": "tag = JJJJ-MM-TT"}), 400

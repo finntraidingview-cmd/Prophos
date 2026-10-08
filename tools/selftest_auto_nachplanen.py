@@ -34,7 +34,19 @@ def lade():
                       for k in ("AP_NACHPLAN_FEST_GRUENDE", "AP_NACHPLAN_REGEL_GRUENDE")]
                    + [block(f) for f in ("_ap_ts", "ap_nachplan_fenster", "_ap_plan_am_tag", "ap_nachplan_letzter",
                                          "ap_nachplan_kandidaten", "ap_nachplan_regeln_at", "ap_nachplan_regeln_merken",
+                                         # 09.10.2026 Countdown/Knopf: gemeinsame Strecke + Sperre, reine Helfer
+                                         "ap_nachplan_naechster", "ap_nachplan_planungstag", "ap_bal_gelesen", "_ap_nachplan_rechnen",
                                          "ap_nachplan_tick")]), a)
+    exec("import threading\n" + re.search(r"^_ap_nachplan_lock = .*$", src, re.M).group(0) + "\n"
+         + re.search(r"^AP_BAL_FEHLT = .*$", src, re.M).group(0), a)
+    # echte Balance-Wahl für ap_bal_gelesen (andere Teile ersetzen acc_balance_wahl durch eine Attrappe mit Stand 2999)
+    echt = dict(a)
+    for f in ("ist_topstep_express", "acc_balance_wahl"):
+        try:
+            exec(block(f), echt)
+        except Exception:
+            pass
+    a["_abw_echt"] = echt.get("acc_balance_wahl")
     return a
 
 
@@ -213,6 +225,44 @@ def main():
     erg3 = a["ap_planen"](None, quelle="hand", seed=7)
     check(erg3.get("ok") and any(x[0][0] == "DELETE" for x in gesch["post"]) and len(protokoll) == 1 and protokoll[0][1]["quelle"] == "hand",
           "ohne nur_konten unverändert: DELETE der Vorschläge + Protokoll")
+    # ── COUNTDOWN + „JETZT NEU BERECHNEN" + „seit dem Lauf gelesen" (Finn 09.10.2026) ──
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    tzb = a["_ap_tz"](a["AP_TZ_TAG"]) if "_ap_tz" in a else __import__("zoneinfo").ZoneInfo("Europe/Berlin")
+    zeiten = {"start_bis": "18:00"}
+    N, P, G = a["ap_nachplan_naechster"], a["ap_nachplan_planungstag"], a["ap_bal_gelesen"]
+    jetzt = _dt(2026, 10, 8, 8, 3, tzinfo=tzb).astimezone(_tz.utc)                       # Do 08:03 dt, im Fenster
+    t, art = N(jetzt, (jetzt - _td(minutes=7)).timestamp(), zeiten, tzb)
+    check(art == "takt" and abs((t - jetzt).total_seconds() - 180) < 1, f"im Fenster: nächster Takt = letzter + 10 min (in 3 min) → {art} {t}")
+    abend = _dt(2026, 10, 8, 22, 15, tzinfo=tzb).astimezone(_tz.utc)                       # Do 22:15 dt, Fenster zu
+    t2, art2 = N(abend, (abend - _td(minutes=4)).timestamp(), zeiten, tzb)
+    t2d = t2.astimezone(tzb)
+    check(art2 == "fenster" and t2d.date().isoformat() == "2026-10-09" and t2d.hour == 0 and t2d.minute < 10,
+          f"abends nach dem Fenster: ab 00:00 dt des nächsten Werktags, auf den 10-min-Rhythmus → {art2} {t2d.isoformat()}")
+    sa = _dt(2026, 10, 10, 12, 0, tzinfo=tzb).astimezone(_tz.utc)                          # Sa 12:00 dt
+    t3, art3 = N(sa, None, zeiten, tzb)
+    check(art3 == "fenster" and t3.astimezone(tzb).strftime("%a %H:%M") == "Mon 00:00", f"Wochenende: Mo 00:00 dt → {t3.astimezone(tzb)}")
+    check(P("2026-10-08", "2026-10-09") == "2026-10-09", "Planungstag vor 00:00 dt: der Tag des letzten Nachtlaufs (kommender Handelstag)")
+    check(P("2026-10-09", "2026-10-09") == "2026-10-09", "Planungstag nach 00:00 dt: heute (Nachtlauf lief für heute)")
+    check(P("2026-10-10", "2026-10-09") is None and P("2026-10-10", None) is None, "Wochenende/kein Lauf: kein Planungstag (Lauf-Tag vorbei)")
+    lauf_at = "2026-10-08T21:30:15+00:00"
+    aus = [{"konto_id": "k-1", "grund": "keine Balance bekannt"}, {"konto_id": "k-2", "grund": "keine Balance bekannt"},
+           {"konto_id": "k-3", "grund": "nur noch 36 $ bis zum Ziel — von Hand prüfen"}, {"konto_id": "k-4", "grund": "Balance nicht live"}]
+    accs = {"k-1": {"id": "k-1", "firm": "Tradeify", "account_type": "challenge", "tv_balance": 150000, "tv_balance_at": "2026-10-08T21:44:00+00:00"},
+            "k-2": {"id": "k-2", "firm": "Tradeify", "account_type": "challenge", "tv_balance": 150000, "tv_balance_at": "2026-10-08T20:00:00+00:00"},
+            "k-3": {"id": "k-3", "firm": "FundedNext", "account_type": "phase1", "tv_balance": 107964, "tv_balance_at": "2026-10-08T22:00:00+00:00"},
+            "k-4": {"id": "k-4", "firm": "FundedNext", "account_type": "phase1", "external_id": "123", "tv_balance": None}}
+    echo = {"123": (101000, "USD", "2026-10-08T21:50:00+00:00")}
+    alt_abw = a.get("acc_balance_wahl")
+    a["acc_balance_wahl"] = a["_abw_echt"]
+    gl = G(aus, lauf_at, accs, echo, {})
+    check(set(gl) == {"k-1", "k-4"}, f"seit dem Lauf gelesen: TV-Lesung danach (k-1) und Echo danach (k-4); vorher gelesen (k-2) und anderer Grund (k-3) nicht → {sorted(gl)}")
+    check(G(aus, None, accs, echo, {}) == {}, "ohne Laufzeit: nichts als gelesen markiert")
+    a["acc_balance_wahl"] = alt_abw
+    _src = open(sd.APP, encoding="utf-8").read()
+    _i = _src.find('if body.get("nachplanen"):')
+    _blk = _src[_i:_src.find("_ap_nachplan_rechnen(ptag", _i)]
+    check(_i > 0 and 'reg.get("aktiv")' in _blk and "Auto-Planer ist aus" in _blk,
+          "Knopf „Jetzt neu berechnen“ prüft den Not-Aus (aktiv) vor dem Rechnen")
     print("\nNACHPLANEN:", "alles grün" if ok else "FEHLER")
     return 0 if ok else 1
 

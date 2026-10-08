@@ -2025,6 +2025,11 @@
   /* Braucht dich (Neuentwurf 08.10.2026, Finn: „nicht so clean, man erkennt nix"): ID-Karten wie „Zu bestätigen" (ap-id-karte, nicht sticky),
      je Zeile feste Spalten Konto · Label · Klartext · Aktion — alles steht in jeder Zeile an derselben x-Position */
   :is(#tpl-view,#adm-pane-planer) .tpl-bd{border-color:color-mix(in srgb,#B45309 35%,var(--border))}
+  /* Countdown + „Jetzt neu berechnen" (09.10.2026) rechts im Kopf, „n Konten gelesen ✓" als ruhige Zeile darunter */
+  :is(#tpl-view,#adm-pane-planer) .tpl-bd-cd{margin-left:auto;display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;font-weight:400;color:var(--sub);text-transform:none;letter-spacing:0}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bd-cd [data-tpl-cd]{font-variant-numeric:tabular-nums;color:var(--ink-2)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bd-np{padding:3px 10px;font-size:11.5px;min-height:0;height:auto}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bd-gel{font-size:12.5px;color:#15803d;margin:0 0 8px}
   :is(#tpl-view,#adm-pane-planer) .tpl-bd .ap-id-karte{margin:2px 0 12px} :is(#tpl-view,#adm-pane-planer) .tpl-bd .ap-id-karte:last-child{margin-bottom:0}
   :is(#tpl-view,#adm-pane-planer) .tpl-bd .ap-id-karte > .ap-adm-grp{position:static;padding:6px 0 2px} :is(#tpl-view,#adm-pane-planer) .tpl-bd .ap-id-karte > .ap-adm-grp .ap-adm-id{font-size:14px}
   :is(#tpl-view,#adm-pane-planer) .tpl-bd-z{display:grid;grid-template-columns:minmax(220px,1.1fr) 104px minmax(0,2fr) 216px;grid-template-areas:"k l t a";gap:4px 12px;align-items:center;padding:6px 0;font-size:12.5px;min-width:0;border-top:1px solid var(--border-soft)}
@@ -42323,7 +42328,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1390'
+  const OS_TAB_BUILD = '2026-09-22.1391'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -46743,7 +46748,8 @@
     _ap.laufAt = Date.now()
     // nur der JÜNGSTE Abruf schreibt (08.10.2026): ein älterer mit anderer Sicht (Accounts/Planer-Seite „eigene") darf den Admin-Stand nicht überschreiben
     const pr = apApi('GET').then(d => { if(_ap.lauf !== pr) return d
-      _ap.letzter = d.letzter || null; _ap.imPlaner = !!d.im_planer; _ap.admin = d.admin != null ? !!d.admin : null; _ap.geladenFuer = currentUserId; _ap.sicht = d.sicht || null; return d })
+      _ap.letzter = d.letzter || null; _ap.imPlaner = !!d.im_planer; _ap.admin = d.admin != null ? !!d.admin : null; _ap.geladenFuer = currentUserId; _ap.sicht = d.sicht || null
+      _ap.info = d.info || null; return d })   // info: Nachplan-Countdown (nachplan_naechster/_art, 09.10.2026)
     _ap.lauf = pr
     return _ap.lauf
   }
@@ -48425,8 +48431,15 @@
       }
     }catch(e){ console.warn('[tpl] Balance nach Trade', e) }
     const archEigen = (typeof getArchive === 'function') ? (getArchive() || {}) : {}
+    let gelesenN = 0   // seit dem Lauf gelesene „Balance fehlt"-Konten (09.10.2026) — nicht mehr hier, Zeile „n Konten gelesen ✓" im Kopf
     if(tagGleich) for(const x of roh.ausgelassen || []){
       const g = String(x.grund || '')
+      // GELESEN (Finn 09.10.2026: „Die Balance bei EzPoker wurde jetzt gelesen. Ich will, dass es auch visuell verschwindet"): das Backend markiert
+      // „Balance fehlt"-Zeilen mit frischer Balance seit dem Lauf (balance_gelesen_at, ap_bal_gelesen) — das nächste Nachplanen nimmt sie mit
+      if(x.balance_gelesen_at && /keine Balance|Balance fehlt|nicht live/i.test(g)){
+        if(!(ids && !ids.has(String(x.user_id || ''))) && !tplManRaus(man, x.user_id, x.konto_id, x.konto)) gelesenN++
+        continue
+      }
       if(/geplanten\/laufenden Plan/.test(g)) continue
       // seit dem Lauf archiviert (08.10.2026, Finn: „Den Account habe ich schon längst archiviert … soll selber weggemacht werden"): das Backend
       // filtert beim Ausliefern (app.py ap_ohne_archiv); hier zusätzlich für eigene Konten, falls noch ein alter Lauf im Zwischenspeicher steht
@@ -48570,8 +48583,32 @@
           text: gg.length ? `${was} (von Hand, seit ${uhr(z.seit)}) gegen ${gegen}` : `${was} von Hand seit ${uhr(z.seit)} — ohne Plan in Prophos` })
       }
     }catch(e){ console.warn('[tpl] Fremd-Positionen', e) }
-    return [...je.values()]
+    const liste = [...je.values()]
+    liste.gelesen = gelesenN
+    return liste
   }
+  /* COUNTDOWN „NACHPLANEN" + „JETZT NEU BERECHNEN" (Finn 09.10.2026 ~01:55 Dubai: „dass hier ein Countdown ist, wann die nächste Botlesung kommt …
+   * dass ich auf ‚Jetzt neu berechnen' drücken kann, dann tut er das gleich neu rein"). Zeitpunkt vom Backend (GET /admin/auto-plan info.
+   * nachplan_naechster/_art: im Fenster alle 10 min, sonst der erste Takt im nächsten Fenster ab 00:00 dt); Text jede Sekunde neu
+   * (tplCdTick, nur sichtbarer Tab). Knopf nur Admin (ADMIN_EMAILS → _ap.admin), POST {nachplanen:true} = dieselbe Strecke wie der Takt. */
+  function tplCdText(info){
+    const iso = info && info.nachplan_naechster; if(!iso) return ''
+    const t = Date.parse(iso); if(!isFinite(t)) return ''
+    if(info.nachplan_laeuft) return 'rechnet gerade …'
+    if(info.nachplan_art === 'fenster'){
+      const d = new Date(t), uhr = d.toLocaleTimeString('de-DE', { timeZone: 'Europe/Berlin', hour: '2-digit', minute: '2-digit' })
+      const tagD = d.toLocaleDateString('de-DE', { timeZone: 'Europe/Berlin', weekday: 'short' }), ms = t - Date.now()
+      return ms > 0 && ms < 3600000 ? `in ${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')} (ab ${uhr} dt)` : `ab ${uhr} dt${ms > 20 * 3600000 ? ' (' + tagD + ')' : ''}`
+    }
+    const ms = t - Date.now()
+    return ms <= 0 ? 'gleich' : `in ${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`
+  }
+  function tplCdTick(){
+    if(document.visibilityState !== 'visible') return
+    const txt = tplCdText(_ap.info)
+    for(const e of document.querySelectorAll('[data-tpl-cd]')) e.textContent = txt
+  }
+  setInterval(tplCdTick, 1000)
   /* BRAUCHT DICH NEU (Finn 08.10.2026, Screenshot .1227 Admin, 5 Fälle: „Bei Braucht dich finde ich nicht so clean, man erkennt nix" —
    * volle Kontonummern, springende Spalten, Problem und Anleitung zwei gleich große Zeilen, Icons ohne Bedeutung). Jetzt im Stil von
    * „Zu bestätigen": je ID eine Karte mit Rand in ID-Farbe (ap-id-karte), je Zeile feste Spalten
@@ -48649,7 +48686,8 @@
     return tun || t
   }
   function tplBrauchtHtml(liste){
-    if(!liste.length) return ''
+    const gel = Number(liste.gelesen) || 0
+    if(!liste.length && !gel) return ''
     const n = liste.reduce((a, o) => a + o.zeilen.length, 0)
     const bloecke = liste.map(o => {
       const zeilen = o.zeilen.map(z => ({ z, l: tplBdLabel(z) })).sort((a, b) => a.l.r - b.l.r || String(a.z.firma || '').localeCompare(String(b.z.firma || ''), 'de'))
@@ -48660,7 +48698,11 @@
             + `<span class="t" title="${escapeHtml(apBlowText([z.text, z.tun].filter(Boolean).join(' — ')))}">${escapeHtml(grau)}</span><span class="a">${tplBdAktion(z)}</span></div>`
         }).join('') + `</div>`
     }).join('')
-    return `<div class="tpl-karte tpl-bd"><div class="tpl-h">Braucht dich <b>${n}</b></div>${bloecke}</div>`
+    const cd = tplCdText(_ap.info)
+    const knopf = _ap.admin === true ? `<button type="button" class="btn btn-ghost tpl-bd-np" data-tpl-nachplan="1"${_tpl.nachplanLaeuft ? ' disabled' : ''} title="Nachplanen jetzt anstoßen — dieselbe Rechnung wie der 10-min-Takt, für den Tag des letzten Nachtlaufs; bestehende Pläne bleiben">${_tpl.nachplanLaeuft ? 'läuft …' : 'Jetzt neu berechnen'}</button>` : ''
+    const kopfR = (cd || knopf) ? `<span class="tpl-bd-cd">${cd ? `Nachplanen <span data-tpl-cd>${escapeHtml(cd)}</span>` : ''}${knopf}</span>` : ''
+    const gelZ = gel ? `<div class="tpl-bd-gel">✓ ${gel} ${gel === 1 ? 'Konto' : 'Konten'} gelesen · ${gel === 1 ? 'wird' : 'werden'} beim nächsten Nachplanen eingeplant${cd ? ` (<span data-tpl-cd>${escapeHtml(cd)}</span>)` : ''}</div>` : ''
+    return `<div class="tpl-karte tpl-bd"><div class="tpl-h">Braucht dich <b>${n}</b>${kopfR}</div>${gelZ}${bloecke}</div>`
   }
   /* LISTE „GEPLANT" (TPL-UEBERSICHT-2, Finn: „so Infos finde ich clean"): Zeilen im Stil der Radar-Zeile (Markup/Klassen wdl-z*,
    * wdl-sp* wiederverwendet) — ID · Typ-Chip · Konto · letzte Balance mit Alter (eigene Konten) · BUY/SELL · Menge × Symbol · Spanne
@@ -49658,6 +49700,13 @@
     if(pw){ e.stopPropagation(); pzwOeffnen(pw); return }
     // Braucht dich, geblowt (08.10.2026): vorhandener Archiv-Weg wie unter Accounts (archiveAccount 'blown' → Duplikum/Echo aufräumen,
     // user_settings.archive per Sync; der Planer liest das Archiv aller Profile). Nur per Klick, danach ist die Zeile weg.
+    const np = e.target.closest('[data-tpl-nachplan]')   // „Jetzt neu berechnen" (09.10.2026): POST {nachplanen:true}, gegen Doppelklick gesperrt
+    if(np){ if(_tpl.nachplanLaeuft) return; _tpl.nachplanLaeuft = true; np.disabled = true; np.textContent = 'läuft …'
+      apApi('POST', { nachplanen: true })
+        .then(d => { if(typeof atToast === 'function') atToast(`🤖 Nachplanen ${d.tag || ''}: ${d.geplant || 0} geplant für ${d.kandidaten || 0} ${d.kandidaten === 1 ? 'Konto' : 'Konten'} ohne Plan`, 'start') })
+        .catch(err => { if(typeof atToast === 'function') atToast('Nachplanen: ' + ((err && err.message) || err), 'end') })
+        .finally(() => { _tpl.nachplanLaeuft = false; _ap.laufAt = 0; _ap.lauf = null; tplSpaeter(); Promise.resolve(apLetztenHolen()).catch(() => {}).finally(() => { try{ apdLaden(true) }catch(_){}; tplSpaeter() }) })
+      return }
     const ba = e.target.closest('[data-tpl-blowarch]')
     if(ba){ e.stopPropagation(); ba.disabled = true; ba.textContent = 'archiviert …'
       try{ archiveAccount(ba.dataset.tplBlowarch, 'blown'); if(typeof renderAccounts === 'function') renderAccounts() }catch(err){ console.warn('[tpl] archivieren', err); ba.disabled = false; ba.textContent = 'Als geblowt archivieren' }
