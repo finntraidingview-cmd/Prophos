@@ -7,8 +7,10 @@
 -- zusammen. Er sitzt genau am Claim (trade_plans.start_um_gestartet_at NULL → gesetzt), den jeder Startweg des PC-Tabs nimmt
 -- (tpStartUmTick: Update mit Guard status=planned + start_um_gestartet_at IS NULL, „nur wer eine Zeile trifft, darf feuern").
 --
--- Hat eine ANDERE ID bei derselben Firma (Schlüssel wie app.py _firm_norm) in den letzten 5 min gestartet (Claim, started_at oder
--- orbit_gesendet_at), dann:
+-- Hat eine ANDERE ID bei derselben Firma (Schlüssel wie app.py _firm_norm) in den letzten 5 min WIRKLICH gestartet (started_at oder
+-- orbit_gesendet_at) — oder läuft dort gerade ein Start (Claim ohne Start, höchstens 2 min alt: sonst rutschte eine zweite ID in den
+-- Sekunden zwischen Claim und Kauf-Klick der ersten durch) —, dann (Prüfer 08.10.2026: ein gescheiterter Start, z. B. „Popup
+-- geschlossen", sperrt die Firma nicht 5 min; der bloße Claim zählt nur 2 min):
 --   * wird der Claim NICHT geschrieben — der Trigger gibt NULL zurück, das Update trifft keine Zeile, der Tab startet nicht
 --     (suClaimFehlgriff: kurze Pause, Plan neu lesen). Bewusst kein „Claim still auf NULL" — der Tab prüft nur, ob eine Zeile
 --     zurückkommt, und würde sonst starten;
@@ -58,16 +60,18 @@ begin
   end if;
   k := public.prophos_firma_key(new.master_firm);
   perform pg_advisory_xact_lock(hashtext('prophos_firmen_abstand:' || k));
-  select max(greatest(coalesce(p.start_um_gestartet_at, '-infinity'::timestamptz),
-                      coalesce(p.started_at, '-infinity'::timestamptz),
-                      coalesce(p.orbit_gesendet_at, '-infinity'::timestamptz)))
+  -- echter Start (started_at/orbit_gesendet_at) zählt 5 min; ein Claim ohne Start nur 2 min (Start unterwegs), danach gilt er als
+  -- gescheitert und sperrt nicht mehr
+  select max(case when p.started_at is not null or p.orbit_gesendet_at is not null
+                  then greatest(coalesce(p.started_at, '-infinity'::timestamptz), coalesce(p.orbit_gesendet_at, '-infinity'::timestamptz))
+                  else p.start_um_gestartet_at end)
     into letzter
     from public.trade_plans p
    where p.id <> new.id
      and p.user_id is distinct from new.user_id
-     and (p.start_um_gestartet_at > now() - interval '5 minutes'
-          or p.started_at > now() - interval '5 minutes'
-          or p.orbit_gesendet_at > now() - interval '5 minutes')
+     and (p.started_at > now() - interval '5 minutes'
+          or p.orbit_gesendet_at > now() - interval '5 minutes'
+          or (p.start_um_gestartet_at > now() - interval '2 minutes' and p.started_at is null and p.orbit_gesendet_at is null))
      and public.prophos_firma_key(p.master_firm) = k;
   if letzter is null or letzter <= now() - interval '5 minutes' then
     return new;                                   -- frei: Claim normal schreiben
