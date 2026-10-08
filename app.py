@@ -11633,12 +11633,20 @@ def pc_stand_zusammenfassen(rows, jetzt):
         alt = max(0, int((jetzt - at).total_seconds()))
         pc = str(r.get("pc_name") or "")
         z = out.get(uid)
+        # Je PC der jüngste Stand (08.10.2026, Admin → Übersicht → PC-Tabs): Build, Wartegrund des Neulade-Wächters, inhaltsgleich
+        je_pc = dict((z or {}).get("je_pc") or {})
+        if pc and (pc not in je_pc or alt < je_pc[pc]["alt_s"]):
+            je_pc[pc] = {"pc_name": pc, "tab_build": r.get("tab_build"), "bot_version": r.get("bot_version"), "tab_bw": r.get("tab_bw"),
+                         "tab_gleich": r.get("tab_gleich"), "zuletzt": at.isoformat(), "alt_s": alt, "lebt": alt < PC_STAND_LEBT_S}
         if z is None or alt < z["alt_s"]:
             out[uid] = {"pc_name": pc, "tab_build": r.get("tab_build"), "bot_version": r.get("bot_version"),
                         "copier_version": r.get("copier_version"), "zuletzt": at.isoformat(), "alt_s": alt,
-                        "lebt": alt < PC_STAND_LEBT_S, "pcs": sorted(set((z or {}).get("pcs", []) + ([pc] if pc else [])))}
-        elif pc and pc not in z["pcs"]:
-            z["pcs"] = sorted(z["pcs"] + [pc])
+                        "lebt": alt < PC_STAND_LEBT_S, "pcs": sorted(set((z or {}).get("pcs", []) + ([pc] if pc else []))),
+                        "je_pc": je_pc}
+        else:
+            z["je_pc"] = je_pc
+            if pc and pc not in z["pcs"]:
+                z["pcs"] = sorted(z["pcs"] + [pc])
     return out
 
 
@@ -11651,7 +11659,8 @@ def admin_pc_stand():
     if err:
         return err
     rows = sb_select("mt5_live", {"select": "id,pc_name,updated_at,user_id:status->>user_id,tab_build:status->>tab_build,"
-                                             "bot_version:status->>bot_version,copier_version:status->>copier_version",
+                                             "bot_version:status->>bot_version,copier_version:status->>copier_version,"
+                                             "tab_bw:status->tab_bw,tab_gleich:status->>tab_gleich",
                                   "order": "updated_at.desc", "limit": "400"}) or []
     jetzt = datetime.now(timezone.utc)
     stand = pc_stand_zusammenfassen(rows, jetzt)
@@ -11931,6 +11940,21 @@ def admin_wd_plaene():
                 sig = sb_insert("order_signale", zeile)
                 return jsonify({"ok": True, "plan_id": pid, "signal_id": str((sig or {}).get("id") or ""),
                                 "art": zeile["params"]["aktion"]})
+            except Exception as e:
+                return jsonify({"error": f"Signal nicht angelegt ({type(e).__name__})"}), 502
+        if daten.get("aktion") == "tab_neu_laden":
+            # „Tab neu laden" (08.10.2026, Admin → Übersicht → PC-Tabs, Finn: „dass jeder einzelne PC immer die Updates direkt bekommt"):
+            # Signal im Namen der ID, nur der genannte PC claimt es (prophos.html orderSignalTick, Zweig tab_neu_laden) und lädt im ruhigen
+            # Moment neu. Keine Order, kein Plan — plan_id 'tab:<pc>'. „Nur eigene" (admin_zugang) darf nur die eigene ID anstoßen.
+            uid_z, pc_z = str(daten.get("user_id") or "").strip(), str(daten.get("pc") or "").strip()
+            if len(uid_z) < 10 or not re.fullmatch(r"pc-[a-z0-9]{3,24}", pc_z):
+                return jsonify({"error": "user_id und pc (pc-xxxxxx) nötig"}), 400
+            if nur and uid_z != nur:
+                return jsonify({"error": "Nur die eigene ID"}), 403
+            try:
+                sig = sb_insert("order_signale", {"user_id": uid_z, "plan_id": f"tab:{pc_z}", "status": "wartet",
+                                                  "params": {"aktion": "tab_neu_laden", "pc": pc_z, "von": "admin"}})
+                return jsonify({"ok": True, "signal_id": str((sig or {}).get("id") or ""), "pc": pc_z})
             except Exception as e:
                 return jsonify({"error": f"Signal nicht angelegt ({type(e).__name__})"}), 502
         if daten.get("aktion") == "endlesung":

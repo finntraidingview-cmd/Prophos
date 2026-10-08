@@ -3604,6 +3604,14 @@
   .pcs-dot.pcs-gruen{background:#12B76A}
   .pcs-dot.pcs-grau{background:#98A2B3;opacity:.7}
   .pcs-dot.pcs-rot{background:#F04438}
+  .pcs-dot.pcs-gelb{background:var(--warn)}
+  /* Admin → Übersicht → PC-Tabs (08.10.2026) */
+  .adm-pcs{padding:12px 14px}
+  .adm-pcs-kopf{display:flex;align-items:center;gap:10px;margin:0 0 8px;font-size:13px}
+  .adm-pcs-kopf span{color:var(--sub);font-size:12px}
+  #dashboard-view .adm-pcs .t th,#dashboard-view .adm-pcs .t td{padding:6px 10px;font-size:12.5px;white-space:nowrap}
+  #dashboard-view .adm-pcs .btn{padding:3px 10px;font-size:11.5px}
+  .adm-pcs .pcs-dot{margin:0 6px 0 0}
   #dashboard-view .wdl-z-ri{grid-area:ri;color:var(--sub)}
   #dashboard-view .wdl-z-ri em{display:inline-block;min-width:34px;margin-right:6px;padding:1px 0;border-radius:4px;background:var(--surface-tint);color:var(--ink-2);font-style:normal;font-size:10.5px;font-weight:600;letter-spacing:.03em;text-align:center}
   /* BUY/SELL leicht grün/rot (30.09.2026, Finn: „in diesem Rot und Grün" von Prophos): Tint wie die BUY/SELL-Chips der Trade-Karten
@@ -10386,6 +10394,16 @@
               Firmennamen werden zusammengefasst — z.&nbsp;B. „apex" → Apex Trader, sonst wäre das Klumpenrisiko zu klein.
             </p>
           </div>
+          <!-- PC-TABS (08.10.2026, Finn: „dass in Zukunft jeder einzelne PC immer die Updates direkt bekommt"): je PC Tab-Build, Bot,
+               zuletzt gesehen, Ampel und „Tab neu laden" (Signal an genau diesen PC). Eigene Verdrahtung admPcs* — außerhalb von adm-body,
+               damit die Liste auch ohne geladene Übersicht steht. -->
+          <div class="panel adm-pcs" id="adm-pcs" style="margin:16px 0 0">
+            <div class="adm-pcs-kopf"><b>PC-Tabs</b><span id="adm-pcs-info"></span><button class="btn btn-ghost" id="adm-pcs-refresh" title="Neu laden" style="padding:4px 10px;margin-left:auto">↻</button></div>
+            <div class="table-wrap"><table class="t">
+              <thead><tr><th>PC</th><th>ID</th><th>Tab-Build</th><th>Bot</th><th>Zuletzt</th><th>Stand</th><th></th></tr></thead>
+              <tbody id="adm-pcs-rows"><tr><td colspan="7" style="color:var(--sub)">Lade …</td></tr></tbody>
+            </table></div>
+          </div>
         </div>
 
         <!-- ACC-KÄUFE (26.08.2026, Finns Wunsch nach der DB-Auswertung): wer hat
@@ -13250,6 +13268,7 @@
         admRender()
         admBuysRender()
         admFinRender()
+        window._admPcsOeffnen?.()   // PC-Tabs (08.10.2026): Namen der IDs kommen aus dieser Antwort
       }catch(e){
         msg.style.display = ''
         msg.textContent = 'Übersicht nicht verfügbar: ' + (e.message || e)
@@ -17737,7 +17756,7 @@
         if(name === 'wallet') walOpen()
         if(name === 'stat') admBuysRender()   // Acc-Käufe unter Statistik (08.10.2026); Daten kommen aus admLoad — hier nur neu zeichnen
         if(name === 'fin')  admFinRender()
-        if(name === 'overview') admVlResize()   // Verlaufs-Chart war evtl. bei 0 px Breite gebaut (23.09.2026)
+        if(name === 'overview'){ admVlResize(); window._admPcsOeffnen?.() }   // Verlaufs-Chart war evtl. bei 0 px Breite gebaut (23.09.2026); PC-Tabs (08.10.2026)
         if(name === 'rg')   rgOpen()
       }))
       document.querySelectorAll('.adm-f').forEach(el => el.addEventListener('change', admRender))
@@ -18119,6 +18138,10 @@
       if(t(() => !!_osBusy || !!_osActive)) return 'Signal in Arbeit'
       if(t(() => !!(tvV2Poll && tvV2Poll.busy))) return 'Rundgang läuft'
       if(t(() => _hedgeBusy.size > 0)) return 'Hedge-Auftrag unterwegs'
+      // Start-Fenster (08.10.2026, Sofort-Update): nie mitten in einen Start oder kurz davor neu laden — läuft gerade ein Start
+      // (tpStartUmTick/Echo-V2-Check) oder steht ein bestätigter Start in ≤ 2 min an (pulsTermine, 1 min Nachlauf)
+      if(t(() => !!_suLaeuft || !!_pfV2Laeuft)) return 'Start läuft'
+      if(t(() => { const j = Date.now(); return pulsTermine(j).some(x => x.art === 'Start' && x.t - j <= 2 * 60000 && j - x.t <= 60000) })) return 'Start in ≤ 2 min'
       // Hedge-Status am Plan ist weicher: ein hängengebliebenes 'oeffnet'
       // ohne Ticket würde sonst jedes Update für immer sperren. Zählt nur für
       // Hedges DIESES PCs und nur die ersten 30 min Wartezeit.
@@ -18132,52 +18155,53 @@
       return ''
     }
     window._bwGrund = bwGrund   // Brücken-Selbstheilung (28.09.2026) lädt nur im selben ruhigen Moment neu
-    // Schleifenschutz: je Zielversion höchstens 3 Neuladungen, frühestens
-    // 5 min nach der letzten — liefert pages.dev die neue VERSION schon, das
-    // HTML aber noch aus dem Cache, bliebe der Tab sonst im Neulade-Kreis.
-    // Danach nur noch die Pille.
-    const BW_KEY = 'prophos_bw_reload'
-    const bwVersuche = ziel => { try{ const o = JSON.parse(localStorage.getItem(BW_KEY) || 'null'); return (o && o.ziel === ziel) ? o : { ziel, n: 0, at: 0 } }catch(_){ return { ziel, n: 0, at: 0 } } }
+    /* SOFORT-UPDATE (08.10.2026, Finn: „dass in Zukunft jeder einzelne PC immer die Updates direkt bekommt"; Befund Slave 2 über
+     * mt5_live.status.tab_build: bei Pushes im 1–3-min-Takt hingen 5 von 8 PC-Tabs auf .1238/.1247, der Echo-Fix .1255 war am PC
+     * pc-usq1i6 um 00:36 UTC nicht geladen → Fehlstart). Ursache: die Streuung 0–8 min begann je NEUER Zielversion von vorn, dazu
+     * „max. 3 je Version" und 5 min Pause. Jetzt: Ziel ist immer die neueste Seite; „hinter seit" zählt ab dem ERSTEN Erkennen weiter
+     * (localStorage — überlebt Neuladen und neue Pushes); Streuung 0–60 s fest je PC (Hash der pc_id), höchstens 1 Neuladen je 2 min,
+     * im ruhigen Moment sofort. Selbstheilung: > 15 min hinter und ruhig → sofort, ohne Bremse (nur 60 s Abstand gegen einen
+     * Neulade-Kreis bei veraltetem Cache). Prüftakt 30 s (VERSION vom lokalen Backend; die 1-MB-Seite nur einmal je VERSION-Wert). */
+    const BW_TAKT_MS = 30000, BW_ABSTAND_MS = 2 * 60000, BW_HEIL_MS = 15 * 60000, BW_HEIL_ABSTAND_MS = 60000
+    const BW_KEY = 'prophos_bw_reload'          // { at, ziel } — letztes Neuladen dieses Tabs
+    const BW_HINTER_KEY = 'prophos_bw_hinter'   // { seit } — seit wann eine neuere Seite bekannt ist
+    const bwLs = k => { try{ return JSON.parse(localStorage.getItem(k) || 'null') }catch(_){ return null } }
+    const bwLsSetz = (k, v) => { try{ if(v == null) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(v)) }catch(_){} }
+    const bwStreuMs = () => { let pc = ''; try{ pc = mt5FleetPcId() || '' }catch(_){} let h = 0; for(const c of String(pc || 'pc')) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h % 60000 }
     const bwLaden = window._bwLadenHaken || (ziel => frischLaden(ziel))
-    let bwWarteSeit = 0, bwTimer = null
-    const bwStreuBis = {}   // Zielversion → frühester Neulade-Zeitpunkt dieses Tabs
+    let bwTimer = null
     const bwPruefen = async () => {
       if(bwTimer){ clearTimeout(bwTimer); bwTimer = null }
       const vRoh = await holen()
-      // nur eine wirklich neuere SEITE zählt (Backend-VERSION ohne neues prophos.html → Ruhe)
+      // nur eine wirklich neuere SEITE zählt (Backend-VERSION ohne neues prophos.html bzw. gleicher Inhalt → Ruhe)
       const v = (vRoh && bwNeuer(vRoh, bwEigen())) ? await echtNeu(vRoh) : null
-      if(!v){ bwWarteSeit = 0; return }
-      const vs = bwVersuche(v)
-      // PC-Tabs zeigen NIE die Pille (28.09.2026) — nach 3 Versuchen bzw. innerhalb von 5 min still weiter warten
-      if(vs.n >= 3 || Date.now() - vs.at < 5 * 60 * 1000){ window._bwStatus = { ziel: v, grund: vs.n >= 3 ? '3 Versuche — wartet auf nächste Version' : 'Pause nach Neuladen' }; return }
-      // Streuung (01.10.2026, s. bwKern oben): auch ein ECHTES Frontend-Update soll nicht alle PC-Tabs in derselben Minute
-      // neu laden lassen — je Tab und Zielversion ein zufälliger Zeitpunkt 0–8 min nach dem Erkennen.
-      if(!bwStreuBis[v]) bwStreuBis[v] = Date.now() + Math.round(Math.random() * 8 * 60 * 1000)
-      if(Date.now() < bwStreuBis[v]){
-        const ms = bwStreuBis[v] - Date.now()
-        window._bwStatus = { ziel: v, grund: 'Streuung', naechster: bwStreuBis[v] }
-        bwTimer = setTimeout(bwPruefen, ms)
+      if(!v){ bwLsSetz(BW_HINTER_KEY, null); window._bwStatus = { ziel: null, grund: '', hinter_seit: null }; return }
+      const jetzt = Date.now()
+      let h = bwLs(BW_HINTER_KEY); if(!h || !(h.seit > 0) || h.seit > jetzt){ h = { seit: jetzt }; bwLsSetz(BW_HINTER_KEY, h) }
+      const hinterMs = jetzt - h.seit, heil = hinterMs >= BW_HEIL_MS, streuBis = h.seit + bwStreuMs()
+      const letzt = Number((bwLs(BW_KEY) || {}).at) || 0
+      const frei = Math.max(streuBis, letzt + (heil ? BW_HEIL_ABSTAND_MS : BW_ABSTAND_MS))
+      if(jetzt < frei){
+        window._bwStatus = { ziel: v, grund: jetzt < streuBis ? 'Streuung' : heil ? 'Selbstheilung: 60 s Abstand' : 'höchstens 1× je 2 min', naechster: frei, hinter_seit: h.seit }
+        bwTimer = setTimeout(bwPruefen, Math.min(frei - jetzt + 500, BW_TAKT_MS))
         return
       }
-      if(!bwWarteSeit) bwWarteSeit = Date.now()
-      const grund = bwGrund(Date.now() - bwWarteSeit)
+      const grund = bwGrund(hinterMs)
       if(grund){
-        const ms = 20000 + Math.round(Math.random() * 40000)
-        console.info('[build] ' + v + ' bereit, warte (' + grund + ') — neuer Versuch in ' + Math.round(ms / 1000) + ' s')
-        window._bwStatus = { ziel: v, grund, naechster: Date.now() + ms }
-        bwTimer = setTimeout(bwPruefen, ms)
+        window._bwStatus = { ziel: v, grund, naechster: jetzt + 10000, hinter_seit: h.seit }
+        console.info('[build] ' + v + ' bereit, warte (' + grund + ') — neuer Versuch in 10 s')
+        bwTimer = setTimeout(bwPruefen, 10000)
         return
       }
-      try{ localStorage.setItem(BW_KEY, JSON.stringify({ ziel: v, n: vs.n + 1, at: Date.now() })) }catch(_){}
-      console.info('[build] lade neu: ' + bwEigen() + ' → ' + v)
-      window._bwStatus = { ziel: v, grund: '', geladen: Date.now() }
+      bwLsSetz(BW_KEY, { at: jetzt, ziel: v })
+      console.info('[build] lade neu: ' + bwEigen() + ' → ' + v + (heil ? ' (Selbstheilung, ' + Math.round(hinterMs / 60000) + ' min hinter)' : ''))
+      window._bwStatus = { ziel: v, grund: '', geladen: jetzt, hinter_seit: h.seit }
       bwLaden(v)
     }
     window._bwPruefen = bwPruefen   // Test-Haken (Stub)
-    // PC-Tabs laufen oft im Hintergrund oder minimiert — deshalb hier auch
-    // bei document.hidden prüfen, alle 2 min.
+    // PC-Tabs laufen oft im Hintergrund oder minimiert — deshalb auch bei document.hidden prüfen
     setTimeout(bwPruefen, 15000)
-    setInterval(() => { if(!bwTimer) bwPruefen() }, 2 * 60 * 1000)
+    setInterval(() => { if(!bwTimer) bwPruefen() }, BW_TAKT_MS)
     document.addEventListener('visibilitychange', () => { if(!document.hidden && !bwTimer) bwPruefen() })
   })()
 
@@ -20563,6 +20587,10 @@
             // Build-Stempel des TABS (28.08.2026, Remote-Close-Debug) — s.
             // OS_TAB_BUILD: beweist per SQL, welchen Build dieser PC-Tab fährt.
             tab_build: (typeof OS_TAB_BUILD !== 'undefined') ? OS_TAB_BUILD : null,
+            // Sofort-Update (08.10.2026): Wartegrund des Neulade-Wächters + seit wann eine neuere Seite bekannt ist; tab_gleich = mit
+            // welchem neueren Build dieser Tab inhaltsgleich ist (nur die Nummer anders → kein Neuladen nötig) — für Admin → PC-Tabs
+            tab_bw: window._bwStatus ? { ziel: window._bwStatus.ziel || null, grund: window._bwStatus.grund || '', hinter_seit: window._bwStatus.hinter_seit || null } : null,
+            tab_gleich: window._bwGleich || null,
             // Copier-/Bot-Stand des PCs (25.09.2026, Koordination: hedge_solo war null, Copier-Version aus der Cloud unklar) — /api/instances liefert version + bot_version
             copier_version: dd.version || null, bot_version: dd.bot_version || null,
             // Kurs-Brücke-Diagnose (25.09.2026): Kerzen vom Reader, gültige Zeilen, letzter Upsert-Fehler, Erstladung —
@@ -27608,6 +27636,93 @@
   window.pcStandPunktHtml = pcStandPunktHtml
   window.pcStandLaden = pcStandLaden
   window._pcStandUrteil = pcStandUrteil   // Test-Haken
+  /* PC-TABS IM ADMIN (08.10.2026, Finn: „Ein Terminal soll sich darum kümmern, dass in Zukunft jeder einzelne PC immer die Updates direkt
+   * bekommt"). Übersicht → je PC: Tab-Build, Bot, zuletzt gesehen, Ampel und „Tab neu laden". Daten: GET /admin/pc-stand (je ID, darin
+   * je_pc aus mt5_live — der PC-Tab schreibt tab_build, tab_bw = Wartegrund + „hinter seit" des Neulade-Wächters, tab_gleich).
+   * Maßstab „neuester Build" = der höchste bekannte (dieser Tab oder irgendein PC). Ampel: grün = aktuell bzw. inhaltsgleich, gelb =
+   * wartet (< 15 min, Grund im Tooltip), rot = hängt ≥ 15 min oder alter Wächter ohne tab_bw, grau = kein Tab. Knopf = Signal
+   * tab_neu_laden über /admin/wd-plaene (PATCH, im Namen der ID) — kein Order-Weg; der PC lädt nur im ruhigen Moment neu. */
+  const _admPcs = { daten: null, at: 0, laedt: false, gesendet: new Map() }
+  async function admPcsLaden(){
+    if(_admPcs.laedt) return
+    _admPcs.laedt = true
+    try{
+      const { data: { session } } = await supabase.auth.getSession(); const tok = session?.access_token; if(!tok) return
+      const r = await fetch(`${WATCHER_HOME}/admin/pc-stand`, { headers: { 'sb-token': tok }, cache: 'no-store' })
+      const d = r.ok ? await r.json().catch(() => null) : null
+      if(d && d.ok && d.stand){ _admPcs.daten = d.stand; _admPcs.at = Date.now() }
+    }catch(e){ console.warn('[adm-pcs]', (e && e.message) || e) }
+    finally{ _admPcs.laedt = false; admPcsRender() }
+  }
+  // REIN RECHNEND (window._admPcsUrteil): Stand eines PCs + neuester Build → { farbe, text, titel }
+  function admPcsUrteil(z, neu, jetzt){
+    if(!z) return null
+    const alt = Number(z.alt_s) || 0, nr = pcsBuildNr, b = nr(z.tab_build), n = nr(neu), g = nr(z.tab_gleich)
+    const min = ms => Math.max(1, Math.round(ms / 60000))
+    if(!z.lebt) return { farbe: 'grau', text: 'kein Tab', titel: `Seit ${alt < 3600 ? min(alt * 1000) + ' min' : Math.round(alt / 3600) + ' h'} kein Lebenszeichen vom Prophos-Tab` }
+    if(b == null || n == null || b >= n) return { farbe: 'gruen', text: 'aktuell', titel: `Build ${z.tab_build || '?'}` }
+    if(g != null && g >= n) return { farbe: 'gruen', text: 'aktuell', titel: `Build ${z.tab_build} — inhaltsgleich mit ${z.tab_gleich}, nur die Nummer ist älter` }
+    const bw = z.tab_bw && typeof z.tab_bw === 'object' ? z.tab_bw : null
+    if(!bw || !bw.hinter_seit) return { farbe: 'rot', text: `${n - b} Builds hinter`, titel: 'Alter Neulade-Wächter (vor dem Sofort-Update) — lädt erst nach seiner Streuung; „Tab neu laden" wirkt erst ab dem neuen Stand' }
+    const seit = Math.max(0, (jetzt || Date.now()) - Number(bw.hinter_seit))
+    const grund = bw.grund ? ' — wartet: ' + bw.grund : ''
+    return seit >= 15 * 60000 ? { farbe: 'rot', text: `hängt seit ${min(seit)} min`, titel: `Ziel ${bw.ziel || neu}${grund}` }
+                              : { farbe: 'gelb', text: `lädt gleich (${min(seit)} min)`, titel: `Ziel ${bw.ziel || neu}${grund}` }
+  }
+  window._admPcsUrteil = admPcsUrteil   // Test-Haken
+  function admPcsRender(){
+    const tb = document.getElementById('adm-pcs-rows'); if(!tb) return
+    const info = document.getElementById('adm-pcs-info')
+    const st = _admPcs.daten
+    if(!st){ tb.innerHTML = `<tr><td colspan="7" style="color:var(--sub)">${_admPcs.laedt ? 'Lade …' : 'Kein Stand von Railway (/admin/pc-stand).'}</td></tr>`; return }
+    const leute = new Map(((window._admData && window._admData.people) || []).map(p => [String(p.user_id), p.name]))
+    const zeilen = []
+    for(const [uid, z] of Object.entries(st)){
+      const je = (z && z.je_pc && Object.keys(z.je_pc).length) ? Object.values(z.je_pc) : [z]
+      for(const q of je) zeilen.push(Object.assign({ uid, name: leute.get(String(uid)) || String(uid).slice(0, 8) }, q))
+    }
+    let neu = (typeof OS_TAB_BUILD !== 'undefined') ? OS_TAB_BUILD : ''
+    for(const q of zeilen) if((pcsBuildNr(q.tab_build) || 0) > (pcsBuildNr(neu) || 0)) neu = q.tab_build
+    const jetzt = Date.now(), uhr = iso => { const d = new Date(iso); return isFinite(d) ? d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '–' }
+    zeilen.sort((a, b) => (Number(!!b.lebt) - Number(!!a.lebt)) || String(a.name).localeCompare(String(b.name), 'de') || String(a.pc_name).localeCompare(String(b.pc_name)))
+    let aktuell = 0, lebend = 0
+    tb.innerHTML = zeilen.map(q => {
+      const u = admPcsUrteil(q, neu, jetzt) || { farbe: 'grau', text: '–', titel: '' }
+      if(q.lebt){ lebend++; if(u.farbe === 'gruen') aktuell++ }
+      const key = `${q.uid}|${q.pc_name || ''}`, ges = _admPcs.gesendet.get(key)
+      const knopf = !q.pc_name || !q.lebt ? '' : ges && jetzt - ges < 3 * 60000
+        ? '<span style="color:var(--sub)">gesendet ✓</span>'
+        : `<button type="button" class="btn btn-ghost tc2-btn" data-adm-pcs-neu="${escapeHtml(key)}" title="Signal an ${escapeHtml(q.pc_name)}: Prophos-Tab im nächsten ruhigen Moment neu laden (kein Neuladen während Start, Puls, Hedge oder offenem Popup)">Tab neu laden</button>`
+      return `<tr><td class="mono">${escapeHtml(q.pc_name || '–')}</td><td>${escapeHtml(q.name)}</td><td class="mono">${escapeHtml(String(q.tab_build || '–').replace(/^\d{4}-\d{2}-\d{2}/, ''))}</td>`
+        + `<td class="mono">${escapeHtml(String(q.bot_version || '–').replace(/^\d{4}-\d{2}-\d{2}/, ''))}</td><td>${uhr(q.zuletzt)}</td>`
+        + `<td title="${escapeHtml(u.titel)}"><span class="pcs-dot pcs-${u.farbe}"></span>${escapeHtml(u.text)}</td><td>${knopf}</td></tr>`
+    }).join('') || '<tr><td colspan="7" style="color:var(--sub)">Kein PC-Tab bekannt.</td></tr>'
+    if(info) info.textContent = `neuester Build ${String(neu).replace(/^\d{4}-\d{2}-\d{2}/, '')} · ${aktuell}/${lebend} aktuell`
+  }
+  async function admPcsNeuLaden(key, btn){
+    const [uid, pc] = String(key).split('|')
+    if(btn){ btn.disabled = true; btn.textContent = 'sende …' }
+    try{
+      const { data: { session } } = await supabase.auth.getSession(); const tok = session?.access_token; if(!tok) throw new Error('nicht angemeldet')
+      const r = await fetch(`${WATCHER_HOME}/admin/wd-plaene`, { method: 'PATCH', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ aktion: 'tab_neu_laden', user_id: uid, pc }) })
+      const d = await r.json().catch(() => ({}))
+      if(!r.ok || !d.ok) throw new Error(d.error || ('HTTP ' + r.status))
+      _admPcs.gesendet.set(key, Date.now())
+      setTimeout(() => admPcsLaden(), 25000)   // der PC lädt im ruhigen Moment neu, das Lebenszeichen mit neuem Build kommt danach
+    }catch(e){ if(typeof toast === 'function') toast('Tab neu laden: ' + ((e && e.message) || e), 'end') }
+    admPcsRender()
+  }
+  document.getElementById('adm-pcs-rows')?.addEventListener('click', ev => {
+    const b = ev.target.closest('[data-adm-pcs-neu]'); if(b) admPcsNeuLaden(b.dataset.admPcsNeu, b)
+  })
+  document.getElementById('adm-pcs-refresh')?.addEventListener('click', () => admPcsLaden())
+  // Laden beim Öffnen der Übersicht und danach jede Minute, solange sie sichtbar ist
+  window._admPcsOeffnen = () => { if(Date.now() - _admPcs.at > 20000) admPcsLaden(); else admPcsRender() }
+  setInterval(() => {
+    const p = document.getElementById('adm-pane-overview')
+    if(!document.hidden && p && !p.hidden && p.getClientRects().length && Date.now() - _admPcs.at >= 60000) admPcsLaden()
+  }, 15000)
   function wdlIdsRender(trades){
     const bar = document.getElementById('wdl-ids'); if(!bar) return
     const je = new Map()
@@ -41077,7 +41192,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1270'
+  const OS_TAB_BUILD = '2026-09-22.1271'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -43284,6 +43399,25 @@
             .eq('id', sig.id).eq('status', 'wartet')
           _osStand = 'verfallen-beerdigt'
           continue
+        }
+        // TAB NEU LADEN AUF ZURUF (08.10.2026, Admin → Übersicht → PC-Tabs, Finn: „jeder einzelne PC immer die Updates direkt"):
+        // plan_id 'tab:<pc>', params {aktion:'tab_neu_laden', pc} — Railway legt es im Namen der ID an (/admin/wd-plaene). Nur der genannte
+        // PC claimt, und nur im ruhigen Moment (window._bwGrund; „Signal in Arbeit" ist hier dieser Tick selbst). Unruhig → liegen lassen,
+        // das Frische-Gate (3 min) beerdigt es ehrlich. Alte Builds ohne diesen Zweig finden keinen Plan 'tab:…' → 'fehler', nie eine Order.
+        if(String((sig.params || {}).aktion || '') === 'tab_neu_laden'){
+          const ich = (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : ''
+          if(!ich || String((sig.params || {}).pc || '') !== ich) continue
+          // ohne Neulade-Wächter (VERSION vom lokalen Backend beim Laden nicht lesbar) keine Ruhe-Prüfung möglich → nicht laden
+          let grundTl = ''; try{ grundTl = (typeof window._bwGrund === 'function') ? window._bwGrund(0) : 'Wächter aus' }catch(_){ grundTl = 'unbekannt' }
+          if(grundTl && grundTl !== 'Signal in Arbeit'){ _osStand = 'tab-neu-wartet: ' + grundTl; continue }
+          const { data: clL } = await supabase.from('order_signale')
+            .update({ status:'fertig', pc: ich, updated_at: new Date().toISOString(),
+                      ergebnis:{ ok:true, msg:'Tab lädt neu (Build vorher ' + ((typeof OS_TAB_BUILD !== 'undefined') ? OS_TAB_BUILD : '?') + ')' } })
+            .eq('id', sig.id).eq('status', 'wartet').select()
+          if(!clL || !clL.length){ _osStand = 'claim-verloren'; continue }
+          _osStand = 'tab-neu-laden: ' + String(sig.id).slice(0, 8)
+          window._seiteSicherLaden(() => { try{ const u = new URL(location.href); u.searchParams.set('v', String(Date.now())); location.replace(u.toString()) }catch(_){ location.reload() } })
+          return
         }
         // TopstepX-Inventar auf Zuruf (F23, Wunsch Backend B16): plan_id 'tsx:<irgendwas>', params {aktion:'tsx_inventar'} — Panel
         // POST /api/tsx-inventar {} (nur lesen), Ergebnis gekürzt (titel, tabs, inventar je Zustand max. 200) in order_signale.ergebnis.
