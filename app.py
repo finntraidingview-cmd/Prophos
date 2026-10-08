@@ -14521,16 +14521,21 @@ def _ap_runden(x, schritt):
 # Balance (ap_kette_mll). Geblowt nur am MLL, das DLL ist Tageslimit.
 # ANGEFRESSEN = WEG B (Finn 08.10.2026 ~22:15 Dubai: „Was ist hier mathematisch das Klügste?" — Rechnung Slave 1: erst zurück auf die
 # Startgröße 8,33 % gegen 8,20 % normal weiter). Liegt der Tagesstart näher als daily_usd am MLL (z. B. 147.000 nach einem −3.000-Tag):
-#  · Balance unter der Startgröße (MLL noch nicht gelockt) → REPARATUR-TAG: Tagesziel = Startgröße − Balance + Puffer (147.000 → +3.000
-#    + Puffer, Tag schließt sicher ≥ 150.000), Verlustgrenze = Abstand MLL + blow_puffer — der Tag endet am MLL (Blow), nicht am DLL;
-#  · Balance ab Startgröße (MLL bei 150.000 gelockt, z. B. 151.500) → normal (4.500, letzter Tag Rest + Puffer), Verlustgrenze ebenfalls
-#    Abstand MLL + blow_puffer (Rechnung: kein Unterschied zwischen den Wegen, also der schnellste).
+#  · Balance unter der Startgröße (MLL noch nicht gelockt) und Startgröße − MLL ≥ DLL (bei 150.000 wieder voller Abstand) →
+#    REPARATUR-TAG: Tagesziel = Startgröße − Balance + Puffer (147.000 → +3.000 + Puffer, Tag schließt sicher ≥ 150.000), Verlustgrenze
+#    = Abstand MLL + blow_puffer — der Tag endet am MLL (Blow), nicht am DLL;
+#  · sonst (Balance ab Startgröße, MLL bei 150.000 gelockt, z. B. 151.500 — oder MLL so weit nachgezogen, dass auch 150.000 den
+#    Abstand nicht zurückbringt) → normal (4.500, letzter Tag Rest + Puffer), Verlustgrenze ebenfalls Abstand MLL + blow_puffer
+#    (Rechnung: kein Unterschied zwischen den Wegen, also der schnellste).
 # In beiden Fällen T1-SL höchstens Verlustgrenze (dann ist ein T1-Verlust der Blow, Trade 2 entfällt über die MLL-Erkennung in
-# ap_kette_trade2), T1-TP höchstens Tagesziel. Der Kette-Block trägt angefressen/reparatur — das Abhaken wertet einen Tag am MLL dann
-# als blown, auch wenn der Tagesverlust unter DLL + 50 liegt. Balance ≤ MLL → geblowt, kein Plan.
+# ap_kette_trade2), T1-TP höchstens Tagesziel. Der Kette-Block trägt angefressen/reparatur — das Abhaken wertet einen Tag mit Ende
+# ≤ MLL + AP_KETTE_MLL_TOLERANZ dann als blown, auch wenn der Tagesverlust unter DLL + 50 liegt. Balance ≤ MLL → geblowt, kein Plan.
 AP_KETTE_STANDARD = {"t1_bis": "11:00", "t1_sl": [1250, 1750], "t1_tp": [1950, 2650], "t2_ab": "11:00", "t2_bis": "19:30", "tagesziel_usd": 4500, "blow_puffer_usd": 200, "daily_usd": 3000, "menge": [2, 3], "t2_menge": [3, 4], "puffer": [25, 40], "t2_abstand_min": [5, 20], "t2_streuung_min": [0, 45]}
 AP_KETTE_TXT = "Topstep-Kette"
 AP_KETTE_DD_STANDARD = 4500.0           # Rückfall für den Blow-Vergleich beim Abhaken, wenn der Plan keine verlust_grenze trägt
+# Master 08.10.2026 (Nachbesserung zu cc7a857): an einem ANGEFRESSENEN Tag ist das MLL die einzige Verlustgrenze (das DLL liegt weiter
+# weg) — Ende ≤ MLL + 50 ist dort der Blow (Gebühren/Schlupf, Topstep schließt knapp darüber). Gesunde Tage: Ende ≤ MLL ohne Toleranz
+AP_KETTE_MLL_TOLERANZ = 50.0
 
 
 def ap_kette_regel(regel):
@@ -14554,17 +14559,22 @@ def ap_kette_trade1(regel, kette, groesse, ziel, balance, u, peak=None):
     """REIN RECHNEND: Trade 1 der Kette → (werte wie ap_konto_rechnen + kette{nr, tagesziel, verlust_grenze, …}, None) | (None, grund).
     Tagesziel = Rest bis zum Phasenziel + Puffer, wenn der Rest höchstens tagesziel_usd ist (letzter Tag), sonst tagesziel_usd.
     Mit daily_usd (DLL 3.000, 08.10.2026): MLL aus ap_kette_mll; Verlustgrenze = min(daily_usd, Abstand) + blow_puffer. Abstand
-    Tagesstart − MLL < daily_usd („angefressen", Weg B, Finn 08.10.2026 ~22:15 Dubai): unter der Startgröße Reparatur-Tag (Tagesziel =
-    Startgröße − Balance + Puffer), ab der Startgröße normal; Abstand ≤ 0 → geblowt, kein Plan. T1-SL höchstens Verlustgrenze.
+    Tagesstart − MLL < daily_usd („angefressen", Weg B, Finn 08.10.2026 ~22:15 Dubai): unter der Startgröße und Startgröße − MLL ≥
+    daily_usd Reparatur-Tag (Tagesziel = Startgröße − Balance + Puffer), sonst normal; Abstand ≤ 0 → geblowt, kein Plan. T1-SL höchstens
+    Verlustgrenze.
     Ohne daily_usd wie bisher: DD + blow_puffer."""
     de = lambda v: f"{v:,.0f}".replace(",", ".")   # noqa: E731 — nur die Zahlen, das Satzkomma bleibt
     daily = float(kette.get("daily_usd") or 0)
     mll = ap_kette_mll(groesse, float(regel.get("dd_usd") or 0), peak, balance) if daily else None
     if daily and mll is not None and balance - mll <= 0:
         return None, f"Balance {de(balance)} auf/unter dem MLL {de(mll)} — geblowt?"
-    # angefressen (Weg B): der MLL beendet den Tag vor dem DLL; Reparatur nur, solange die Balance unter der Startgröße liegt
+    # angefressen (Weg B): der MLL beendet den Tag vor dem DLL; Reparatur nur, solange die Balance unter der Startgröße liegt UND die
+    # Rückkehr auf die Startgröße den Abstand wirklich zurückbringt (Master 08.10.2026, Nachbesserung zu cc7a857): Startgröße − MLL ≥ DLL,
+    # also MLL ≤ 147.000 bei 150k (Höchststand ≤ 151.500). Sonst (z. B. Höchststand 153.000, MLL 148.500, Balance 149.900) hätte das Konto
+    # auch bei 150.000 nur 1.500 Abstand — dann normal planen, Verlustgrenze Abstand + 200. Nebenbei keine Mini-Reparaturziele mehr:
+    # ohne nachgezogenen MLL ist ein Konto erst unter 148.500 angefressen, das Reparaturziel liegt also immer über 1.500
     angefressen = bool(daily and mll is not None and balance - mll < daily)
-    reparatur = angefressen and balance < float(groesse)
+    reparatur = angefressen and balance < float(groesse) and float(groesse) - mll >= daily
     rest = ziel - balance
     menge = _ap_runden(_ap_spanne(kette.get("menge"), u["menge"]), 1)
     puffer = round(_ap_spanne(kette.get("puffer"), u["puffer"]) or 0)
@@ -14617,11 +14627,12 @@ def ap_kette_trade2(t1_kette, balance_start, balance_end, regel, kette, u_menge)
     if e1 > grenze or e1 < -(float(regel.get("dd_usd") or grenze) + 1500):
         return None, f"Ergebnis von Trade 1 unplausibel ({e1:+,.0f} $, Balance-Basis prüfen) — von Hand".replace(",", ".")
     mll = _wd_num((t1_kette or {}).get("mll"))
-    if mll is not None and float(balance_end) <= mll:
+    angefressen = ap_kette_angefressen(t1_kette)
+    # angefressener Tag: Ende ≤ MLL + 50 ist der Blow (Master 08.10.2026, dieselbe Grenze wie ap_kette_abhaken); gesund ohne Toleranz
+    if mll is not None and float(balance_end) <= mll + (AP_KETTE_MLL_TOLERANZ if angefressen else 0.0):
         return None, f"Trade 1 hat das Konto am MLL geblowt ({e1:+.0f} $, Balance {float(balance_end):,.0f}) — kein Trade 2".replace(",", ".").replace(". Balance", ", Balance")
     if mll is None and regel.get("dd_usd") and e1 <= -float(regel["dd_usd"]):
         return None, f"Trade 1 hat das Konto geblowt ({e1:+.0f} $) — kein Trade 2"
-    angefressen = ap_kette_angefressen(t1_kette)
     if verlust - float(kette["blow_puffer_usd"]) + e1 <= 50:
         # angefressen (Weg B, 08.10.2026): die Grenze ist der MLL, nicht das DLL — Konto lebt knapp, aber für Trade 2 bleibt nichts
         return None, (f"MLL schon mit Trade 1 fast erreicht ({e1:+.0f} $) — kein Trade 2" if angefressen
@@ -20061,10 +20072,14 @@ def ap_kette_abhaken(jetzt=None):
             # DLL 3.000 (08.10.2026): ein Tag am Daily Loss Limit ist Tageslimit (soft, Konto lebt) — geblowt nur am MLL. Sichere Variante
             # (Prüfung Slave 2 / Master): Ende ≤ MLL (ohne Toleranz) UND Tagesverlust über DLL + 50 — ein reiner DLL-Tag ist nie geblowt.
             # Weg B (Finn 08.10.2026 ~22:15 Dubai): begann der Tag angefressen (Abstand MLL < DLL, Reparatur-Tag oder ab 150.000 mit
-            # gelocktem MLL), endet er am MLL, BEVOR das DLL greift — Tagesverlust ≤ Abstand + 200 < DLL + 50. Dann zählt nur Ende ≤ MLL;
-            # die DLL-Zusatzbedingung gilt nur für Tage, die gesund begannen (Abstand ≥ DLL)
+            # gelocktem MLL), endet er am MLL, BEVOR das DLL greift — Tagesverlust ≤ Abstand + 200 < DLL + 50. Dann zählt nur Ende am MLL,
+            # mit Toleranz: Ende ≤ MLL + 50 (Master 08.10.2026, Nachbesserung zu cc7a857 — das MLL ist dort die einzige Verlustgrenze,
+            # Gebühren/Schlupf bzw. Topstep schließt knapp darüber). Gesunde Tage (Abstand ≥ DLL): Ende ≤ MLL UND Tagesverlust > DLL + 50
             daily_k = float(k.get("daily_usd") or 0)
-            if float(bal[1]) <= float(k["mll"]) and (not daily_k or ap_kette_angefressen(k) or e_tag < -(daily_k + 50)):
+            if ap_kette_angefressen(k):
+                if float(bal[1]) <= float(k["mll"]) + AP_KETTE_MLL_TOLERANZ:
+                    upd["blown"] = True
+            elif float(bal[1]) <= float(k["mll"]) and (not daily_k or e_tag < -(daily_k + 50)):
                 upd["blown"] = True
         else:
             dd = AP_KETTE_DD_STANDARD
