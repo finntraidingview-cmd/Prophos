@@ -3846,7 +3846,7 @@ def test_cdp_konto_regression_865():
     js = open(_os.path.join(_os.path.dirname(_os.path.abspath(ob.__file__)), "augen.js"), encoding="utf-8").read()
     chk("function kontoSchalter()" in js and "r.top >= lr.top - 4" in js and "var s = kontoSchalter();" in js
         and "(eintraege.length === 1 && !!s.el && !eintraege[0].aktiv)" in js and "panel_lage: lage" in js
-        and "VERSION = '0.8.0'" in js, "augen.js 0.7.4+: Umschalter unter der Broker-Leiste (beide Lagen), panel_lage, Liste nur mit Umschalter")
+        and "VERSION = '0.8.1'" in js, "augen.js 0.7.4+: Umschalter unter der Broker-Leiste (beide Lagen), panel_lage, Liste nur mit Umschalter")
     # MAUS-MITSCHRIFT (0.7.9, 08.10.2026, Slave-Terminal 3): augen.js meldet, wo die Seite den Zeiger zuletzt sah; der Bot stupst sofort,
     # wenn die Bewegung nie ankam, und schreibt den Befund in die Spur — der Hover-Riegel bleibt (ohne :hover kein Druck)
     chk("function kontoScroll(aktion)" in js and "konto_scroll: kontoScroll" in js and "c.scrollTop = 0" in js and ".click(" not in js.split("function kontoScroll")[1].split("function mausMitschrift")[0]
