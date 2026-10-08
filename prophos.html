@@ -41192,7 +41192,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1274'
+  const OS_TAB_BUILD = '2026-09-22.1275'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -61423,6 +61423,24 @@
   // Box „Braucht dich" im Admin-Reiter (tplSpaeter/tplNachLesung, 08.10.2026): die Planer-Seite erreicht diese Funktionen sonst nicht
   window._apIdsRender = () => { if(!_apIds.laeuft) apIdsRender() }; window._apIdsLaden = () => apIdsLaden()
   window._apIdsTabOeffnen = () => { apIdsLaden(); if(typeof window.pcStandLaden === 'function') Promise.resolve(window.pcStandLaden()).then(() => { if(!_apIds.laeuft) apIdsRender() }).catch(() => {}) }   // PC-Punkt (höchstens alle 60 s) nachziehen
+  /* LIVE-P&L IM ADMIN-REITER (Finn 08.10.2026, Screenshot Admin → Trade-Planer „Läuft · 8": „Der PNL hier wird nicht immer aktualisiert. Wenn ich
+   * einmal die Seite neu lade, aktualisiert der PNL, sonst bleibt es immer stehen"). Ursache: der Reiter lud nur beim Öffnen (apIdsLaden), nur die
+   * Planer-Seite hat einen Takt (_tpl.timer, 60 s). Jetzt alle 20 s, nur bei sichtbarem Reiter und Tab: Live-Trades (P&L $, /admin/live-trades) +
+   * neue NQ-Minuten (€ und Chart, tv_kurs_1m ab der letzten Kerze), dann neu zeichnen — nicht, solange geladen wird, ein Kasten offen ist oder
+   * ein Eingabefeld im Reiter den Fokus hat. /ids und Delta bleiben wie bisher beim Öffnen und nach Eingriffen. */
+  let _apIdsLiveTimer = null
+  const apIdsLiveRuhe = () => _apIds.laeuft || !!document.querySelector('#dashboard-view .tpl-kasten:not([hidden])')
+    || !!(document.activeElement && document.activeElement.matches && document.activeElement.matches('#ap-ids-root input:not([type="checkbox"]), #ap-ids-root select, #ap-ids-root textarea'))
+  async function apIdsLiveTick(){
+    try{
+      if(document.visibilityState !== 'visible' || !(typeof window._tplSichtParam === 'function' && window._tplSichtParam() === 'admin') || apIdsLiveRuhe()) return
+      _tpl.ltAt = 0   // live-trades sonst höchstens alle 50 s
+      await Promise.allSettled([tplLiveLaden(), tplKerzenLaden(apIdsHeute())])
+      if(!apIdsLiveRuhe()) apIdsRender()
+    }catch(e){ console.warn('[ap-ids] live', (e && e.message) || e) }
+  }
+  const _apIdsTabOeffnenOhneTakt = window._apIdsTabOeffnen
+  window._apIdsTabOeffnen = () => { _apIdsTabOeffnenOhneTakt(); if(!_apIdsLiveTimer) _apIdsLiveTimer = setInterval(apIdsLiveTick, 20000) }
   /* ══ ENDE ADMIN „TRADE-PLANER" ══ */
 
   async function aufLaden(){
