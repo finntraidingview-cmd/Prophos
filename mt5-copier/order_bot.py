@@ -13920,7 +13920,11 @@ def puls_chrome_argumente(exe, profil_pfad, port=PULS_CDP_PORT, url=AUGEN_TV_URL
         raise ValueError(f"Puls-Chrome nur mit eigenem Profilordner ({PULS_CHROME_ORDNER}), nicht '{p}'")
     return [exe, f"--user-data-dir={p}", f"--remote-debugging-port={int(port)}",
             f"--remote-debugging-address={PULS_CDP_HOST}", f"--remote-allow-origins=http://{PULS_CDP_HOST}:{int(port)}",
-            "--no-first-run", "--no-default-browser-check", "--disable-features=Translate", "--new-window", url]
+            "--no-first-run", "--no-default-browser-check", "--disable-features=Translate",
+            # 08.10.2026 (Finn: „schließt alles und öffnet dann so ein ganz komisches Format"): nach Browser.close + Neustart (minimiert)
+            # stellte das erste Wiederherstellen nur die gemerkte Normalgröße her (pc-2zc2we 929×917 statt Vollbild, Klicks bei x 1322
+            # statt ~1535). Maximiert gestartet → Windows merkt sich „wiederherstellen = maximiert", Layout + Klickpunkte wie gewohnt
+            "--start-maximized", "--new-window", url]
 
 
 def ws_frame_bauen(nutzdaten, opcode=0x1, maske=None):
@@ -18488,6 +18492,23 @@ def cdp_zahl(x):
     return tv_zahl_lesen(x)
 
 
+CDP_EINHEIT_RX = re.compile(r"(?:,\s*|\s)(\$|€|%|usd|eur|ticks?|pips?|points?|punkte|price)\s*[▾▼⌄▿]?\s*$", re.I)
+
+
+def cdp_einheit(f_):
+    """REIN RECHNEND (testbar): Einheit eines TP/SL-Blocks aus augen.js (tp/sl). TP-EINHEIT (08.10.2026, Slave 1, Puls-Fehler pc-2zc2we
+    13:25 + pc-usq1i6 13:28 UTC „'Take profit' steht nicht auf $ (Einheit '?')", Lesung 13:28: beschriftung „Take profit $"): TradingView
+    rollt je Konto/Browser „Take profit $ ▾" statt „Take profit, $" aus; augen.js ≤ 0.8.0 las nur die Form mit Komma. augen.js 0.8.1
+    liest beide — fehlt die Einheit trotzdem (alte augen.js-Kopie auf dem PC), hier aus beschriftung.text nachlesen. USD → $."""
+    f_ = f_ if isinstance(f_, dict) else {}
+    e = str(f_.get("einheit") or "").strip()
+    if not e:
+        b = f_.get("beschriftung") if isinstance(f_.get("beschriftung"), dict) else {}
+        m = CDP_EINHEIT_RX.search(str(b.get("text") or ""))
+        e = m.group(1) if m else ""
+    return "$" if e.upper() == "USD" else e
+
+
 def cdp_watchlist_ziel(watchlist, symbol):
     """REIN RECHNEND (testbar): Watchlist-Zeile mit derselben Wurzel wie das Plan-Symbol (MNQZ6 → MNQZ2026, nie NQ für MNQ). -> dict|None"""
     ziel = tv_symbol_root(symbol)
@@ -18686,8 +18707,10 @@ def _cdp_ticket_fuellen(s, st, plan, symbol, opts, trail):
                     return False, "ticket", f"Schalter '{name}' ließ sich nicht AUS stellen.", "ticket", st, None
             trail.append(f"{name} AUS")
             continue
-        if "$" not in str(f_.get("einheit") or ""):
-            return False, "ticket", f"'{name}' steht nicht auf $ (Einheit '{f_.get('einheit') or '?'}') — der Wert {soll:g} wäre etwas anderes.", "ticket", st, None
+        if "$" not in cdp_einheit(f_):
+            return False, "ticket", (f"'{name}' steht nicht auf $ (Einheit '{cdp_einheit(f_) or '?'}', Beschriftung "
+                                     f"'{((f_.get('beschriftung') or {}) if isinstance(f_.get('beschriftung'), dict) else {}).get('text') or '?'}')"
+                                     f" — der Wert {soll:g} wäre etwas anderes."), "ticket", st, None
         if an is False:
             if not cdp_rect(f_.get("schalter")):
                 return False, "ticket", f"'{name}' ist AUS, Schalter nicht greifbar.", "ticket", st, None
@@ -18747,7 +18770,7 @@ def cdp_ticket_ruecklesung(st, plan):
     teile = [f"Typ {'Market' if market else '?'}", f"Seite {seite or '-'}", f"Units {k3_fmt(mg, 0) if mg is not None else '-'}"]
     for schl, name, soll in (("tp", "TP", plan["tp"]), ("sl", "SL", plan["sl"])):
         f_ = tk.get(schl) if isinstance(tk.get(schl), dict) else {}
-        w, an, einh = cdp_zahl(f_.get("wert")), f_.get("an"), str(f_.get("einheit") or "")
+        w, an, einh = cdp_zahl(f_.get("wert")), f_.get("an"), cdp_einheit(f_)
         if soll is None:
             if an is True:
                 fehler.append(f"{name}-Schalter AN, der Plan hat kein {name}")
@@ -19903,7 +19926,7 @@ def k3_ruecklesung(st, plan):
     teile = [f"Typ {'Market' if market else '?'}", f"Seite {seite or '-'}", f"Units {k3_fmt(mg, 0) if mg is not None else '-'}"]
     for schl, name, soll in (("tp", "TP", plan["tp"]), ("sl", "SL", plan["sl"])):
         f_ = tk.get(schl) if isinstance(tk.get(schl), dict) else {}
-        w, an, einh = cdp_zahl(f_.get("wert")), f_.get("an"), str(f_.get("einheit") or "")
+        w, an, einh = cdp_zahl(f_.get("wert")), f_.get("an"), cdp_einheit(f_)
         nb = f_.get("neben") if isinstance(f_.get("neben"), dict) else {}
         if an is not True:
             fehler.append(f"{name}-Schalter nicht AN")
@@ -21209,11 +21232,71 @@ def _cdp_tab_mit_link(sitz, url, trail):
         _cdp_tab_zu(alt, trail)
 
 
+PULS_FENSTER_MIN_BREITE = 1200       # px (Fensterbreite in Normalgröße); kleiner → maximieren (Master 08.10.2026)
+
+
+def puls_fenster_gross_noetig(lage):
+    """REIN RECHNEND (testbar): Muss das Puls-Chrome-Fenster vor dem Lauf maximiert werden? lage = {zoomed, iconic, restore_max,
+    normal_breite} aus GetWindowPlacement. Maximiert, oder minimiert mit „kommt maximiert zurück", oder Normalgröße ≥ 1200 px → nein.
+    -> (noetig, grund)"""
+    l = lage if isinstance(lage, dict) else {}
+    if l.get("zoomed"):
+        return False, "maximiert"
+    if l.get("iconic") and l.get("restore_max"):
+        return False, "minimiert, kommt maximiert zurück"
+    b = int(l.get("normal_breite") or 0)
+    if b >= PULS_FENSTER_MIN_BREITE:
+        return False, f"Normalgröße {b} px"
+    return True, f"{'minimiert, ' if l.get('iconic') else ''}Normalgröße {b} px < {PULS_FENSTER_MIN_BREITE} px"
+
+
+def _win_lage(hwnd):
+    """GetWindowPlacement + IsZoomed/IsIconic eines Fensters (Windows). -> dict | None"""
+    import ctypes
+    import ctypes.wintypes as wt
+
+    class _WP(ctypes.Structure):
+        _fields_ = [("length", wt.UINT), ("flags", wt.UINT), ("showCmd", wt.UINT), ("ptMin", wt.POINT), ("ptMax", wt.POINT),
+                    ("rc", wt.RECT)]
+    u32 = ctypes.windll.user32
+    wp = _WP()
+    wp.length = ctypes.sizeof(_WP)
+    if not u32.GetWindowPlacement(int(hwnd), ctypes.byref(wp)):
+        return None
+    return {"zoomed": bool(u32.IsZoomed(int(hwnd))), "iconic": bool(u32.IsIconic(int(hwnd))),
+            "restore_max": bool(wp.flags & 0x2), "normal_breite": int(wp.rc.right - wp.rc.left)}   # 0x2 = WPF_RESTORETOMAXIMIZED
+
+
+def _puls_fenster_gross(trail):
+    """PULS-FENSTER GROSS (Master 08.10.2026, Finn: „öffnet dann so ein ganz komisches Format" — nach dem minimierten Neustart stand das
+    Puls-Chrome halb da: pc-2zc2we 929×917, Login-Klick „kam dreimal nicht an", Klicks bei x 1322 statt ~1535). Vor der ERSTEN Lesung
+    eines Laufs: ist ein Puls-Chrome-Fenster kleiner als 1200 px bzw. käme es halb zurück → einmal maximiert nach vorn (SW_SHOWMAXIMIZED),
+    1–1,5 s Layout abwarten. Alle Klickpunkte werden danach frisch gelesen; zu() minimiert am Ende wie bisher (es kommt dann maximiert
+    zurück). Fehler → nur Spur, Lauf wie bisher. Nur Windows."""
+    if os.name != "nt":
+        return
+    try:
+        _dpi_bewusst()
+        for f in _puls_fenster_liste(_puls_chrome_browser_pid()):
+            if f.get("klasse") != "Chrome_WidgetWin_1" or not str(f.get("text") or "").strip() or str(f.get("text")).startswith("DevTools"):
+                continue
+            lage = _win_lage(f["hwnd"])
+            noetig, grund = puls_fenster_gross_noetig(lage)
+            if lage is None or not noetig:
+                continue
+            _win_zeigen(f["hwnd"], 3)                   # SW_SHOWMAXIMIZED
+            _warte(1.2, 0.3)
+            trail.append(f"Puls-Chrome-Fenster {f['hwnd']} maximiert ({grund}) — Klickpunkte werden danach frisch gelesen")
+    except Exception as e:
+        trail.append(f"Fenstergröße nicht prüfbar ({type(e).__name__}) — weiter wie bisher")
+
+
 def _cdp_sitzung_holen(cmd, trail):
     """Augen-Sitzung für tvlesen/tvkette. Ist im Puls-Chrome gar keine TradingView-Seite offen (Tab zu, frischer Start), wird eine
     geöffnet — mit tv_username gleich mit ?trade-now, dann steht der Connect-Dialog sofort da."""
     if not _puls_chrome_sicher(trail):
         raise RuntimeError("Puls-Chrome nicht erreichbar (Port 9333)")
+    _puls_fenster_gross(trail)                            # vor der ersten Lesung: kein halbes Fenster (08.10.2026)
     ende = time.time() + 5.0
     while not augen_target_waehlen(_cdp_http("/json/list")):
         if time.time() >= ende:
@@ -21977,6 +22060,7 @@ PULS_NEUSTART_DAUER_S = 20.0                 # geschätzte Dauer Chrome-Ende + S
 PULS_NEUSTART_ENDE_S = 25.0                  # so lange auf das Ende des alten Puls-Chrome warten (Port frei + Prozesse weg)
 PULS_NEUSTART_HART_AB_S = 10.0               # antwortet Chrome auf Browser.close so lange nicht → nur die eigenen PIDs hart beenden
 # Codes, bei denen ein Neustart nichts hilft oder nicht erlaubt ist: Befehl/Sperre/Etappe fehlt/Markt zu/Zeit/Wachhund/abgelehnt
+PULS_NEUSTART_NIE_VOR_KLICK = frozenset(("ticket", "konto", "konto_nicht_erreicht"))   # Master 08.10.2026, s. neustart_entscheid
 PULS_NEUSTART_NIE = frozenset(("befehl", "handlauf", "sperre", "cdp_folgt", "markt_zu", "zeit", "haenger", "abgelehnt",
                                "puls_beschaeftigt", "bot_fehlt"))
 
@@ -21999,6 +22083,16 @@ def neustart_entscheid(res, weg, verstrichen_s, schon=False, lesung_moeglich=Tru
     code = str(r.get("code") or "")
     if code in PULS_NEUSTART_NIE:
         return "nein", f"Code '{code}' ist kein Chrome-Problem", rest
+    # TP-EINHEIT (08.10.2026, Finn: „schließt alles und öffnet dann so ein ganz komisches Format"): „steht nicht auf $" kommt aus der
+    # TradingView-Beschriftung, nicht aus dem Chrome — der Neustart (minimiert) stellte danach nur ein halbes Fenster her (929 px breit)
+    if code == "ticket" and "steht nicht auf $" in str(r.get("msg") or ""):
+        return "nein", "Einheit im Ticket (TradingView-Beschriftung) — kein Chrome-Problem, kein Neustart", rest
+    # TICKET/KONTO/LOGIN (Master 08.10.2026, Belege pc-2zc2we 13:25–13:26 + pc-usq1i6 417121fa 13:35 UTC): nach einem Ticket- oder
+    # Login-Fehler („Klick ins Benutzerfeld kam dreimal nicht an") zerlegte der Neustart den Folgeversuch — halbes Fenster, danach
+    # ConnectionAborted beim Connect. Diese Fehler liegen an Seite/Fenster, nicht am Chrome-Prozess → kein Neustart, der Plan bleibt
+    # geplant (Start-Fehler/Neu einplanen übernimmt), das Fenster richtet _puls_fenster_gross beim nächsten Lauf
+    if code in PULS_NEUSTART_NIE_VOR_KLICK:
+        return "nein", f"Code '{code}' (Ticket/Konto/Login) — Seite/Fenster, kein Chrome-Neustart", rest
     if r.get("bestaetigt") or r.get("einstieg") not in (None, ""):
         return "nein", "Fill bewiesen — bestehender Weg", rest
     if r.get("offen") or r.get("positionen"):
@@ -22190,6 +22284,7 @@ def _puls_chrome_neustart(trail, url):
     except OSError:
         pass
     _warte(1.0, 1.0)
+    _PULS_CHROME_PID.update(geholt=False, pid=None)       # 08.10.2026: neue Browser-PID — sonst sucht _win_vorn Fenster des alten Prozesses
     if not _puls_chrome_sicher(trail, url=url):
         trail.append("Neustart: Puls-Chrome kam nicht hoch")
         return False

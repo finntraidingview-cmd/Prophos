@@ -2710,6 +2710,8 @@ def test_puls_augen_cdp():
     chk(any(a.startswith("--user-data-dir=") and "puls-chrome" in a for a in arg), "eigenes --user-data-dir puls-chrome")
     chk("--remote-debugging-port=9333" in arg and "--remote-debugging-address=127.0.0.1" in arg, "Port 9333 nur 127.0.0.1")
     chk(not any(a.startswith("--profile-directory") for a in arg), "nie --profile-directory")
+    chk("--start-maximized" in arg and arg.index("--start-maximized") < arg.index("--new-window"),
+        "Puls-Chrome startet maximiert (08.10.2026: Neustart brachte ein halbes Fenster)")
     for falsch in ("C:\\Users\\m\\AppData\\Local\\Google\\Chrome\\User Data", "", "C:\\x\\puls-chromeX"):
         try:
             ob.puls_chrome_argumente("chrome.exe", falsch)

@@ -78,7 +78,10 @@ class Attrappe:
 def main():
     # ── neustart_entscheid (rein rechnend) ────────────────────────────────────────────────────────────────────────────────────────
     e = ob.neustart_entscheid
-    check(e(erg(code="konto_nicht_erreicht", schritt="konto"), "tvv2", 30.0)[0] == "direkt", "vor dem Klick (Login/Konto) → direkt")
+    check(e(erg(code="login", schritt="login"), "tvv2", 30.0)[0] == "direkt", "vor dem Klick (anderer Fehler, z. B. login) → direkt")
+    # Master 08.10.2026: Ticket/Konto/Login-Feld → kein Neustart (zerlegte den Folgeversuch: halbes Fenster, ConnectionAborted)
+    check(all(e(erg(code=c, schritt=c), "tvv2", 30.0)[0] == "nein" for c in ("ticket", "konto", "konto_nicht_erreicht")),
+          "ticket/konto/konto_nicht_erreicht → nein (kein Chrome-Neustart)")
     check(e(erg(code="knopf", schritt="knopf", msg="nichts gesendet"), "tsv2", 20.0)[0] == "direkt", "Topstep vor dem Klick (knopf) → direkt")
     check(e(erg(code="unklar", schritt="unklar", gesendet=True, retry_ok=False), "tvv2", 60.0)[0] == "lesung",
           "nach dem Klick ohne Beweis (Orbit) → nur mit Lesung")
@@ -90,7 +93,7 @@ def main():
           "Nie-Codes (befehl/handlauf/cdp_folgt/markt_zu/zeit/haenger/abgelehnt) → nein")
     check(e(erg(code="cdp_fehler", bestaetigt=True, gesendet=True), "tvv2", 30.0)[0] == "nein", "Fill bewiesen → nein (bestehender Weg)")
     check(e(erg(code="tabelle_unklar", offen=True, positionen=[{"symbol": "MNQZ6"}]), "tsv2", 20.0)[0] == "nein", "offene Position → nein")
-    a, g, _ = e(erg(code="konto_nicht_erreicht"), "tvv2", 200.0)
+    a, g, _ = e(erg(code="login"), "tvv2", 200.0)
     check(a == "nein" and "zu wenig Zeit" in g, "Orbit: 200 s verstrichen von 250 → zu wenig Zeit")
     a, g, _ = e(erg(code="login"), "tsv2", 50.0)
     check(a == "nein" and "zu wenig Zeit" in g, "Topstep: 50 s verstrichen von 160 (Rest 90 < 100) → zu wenig Zeit")
@@ -113,11 +116,11 @@ def main():
     check(b({"ok": False, "msg": "Konto nicht erreicht"}, erst)[0] is False and b(None, erst)[0] is False, "Beleg: Lesung fehlgeschlagen/None → nicht leer")
 
     # ── Wrapper: Fehler vor dem Klick → EIN Neustart + zweiter Versuch ───────────────────────────────────────────────────────────
-    a = Attrappe(erg(code="konto_nicht_erreicht", schritt="konto", msg="Login hing"), erg(ok=True, code="", schritt="fertig", msg="Order platziert", gesendet=True, bestaetigt=True), verstrichen=30.0)
+    a = Attrappe(erg(code="login", schritt="login", msg="Login hing"), erg(ok=True, code="", schritt="fertig", msg="Order platziert", gesendet=True, bestaetigt=True), verstrichen=30.0)
     r = a.lauf("tvv2")
     check(a.neustarts == 1 and len(a.zweite) == 1 and a.lesungen == 0, "vor Klick: genau ein Neustart, ein zweiter Versuch, keine Lesung")
     check(len(a.ausgaben) == 1 and a.ausgaben[0] is r and r.get("ok") is True and r.get("msg") == "Order platziert", "vor Klick: genau EINE Ausgabe = Antwort des zweiten Versuchs")
-    check("chrome_neustart: Grund" in r["trail"] and "zweiter Versuch ja" in r["trail"] and "1. Versuch: code 'konto_nicht_erreicht'" in r["trail"],
+    check("chrome_neustart: Grund" in r["trail"] and "zweiter Versuch ja" in r["trail"] and "1. Versuch: code 'login'" in r["trail"],
           "vor Klick: Spur traegt Grund, ersten Versuch und „zweiter Versuch ja\"")
     check(r.get("chrome_neustart", {}).get("zweiter_versuch") is True and a.diagnosen and a.diagnosen[-1][0] == "chrome_neustart",
           "vor Klick: chrome_neustart-Info in der Antwort, Entscheidung nach puls_diagnose (schritt chrome_neustart)")
@@ -283,9 +286,9 @@ def main():
     r = a2.lauf()
     check(a2.sanfte == 1 and a2.neustarts == 1 and r.get("ok") and r.get("chrome_neustart", {}).get("neu_gestartet") is True,
           "Chrome/Tab weg (sanft False) → harter Neustart wie bisher")
-    a3 = Sanft(erg(code="konto_nicht_erreicht", schritt="konto"), erg(ok=True, gesendet=True, bestaetigt=True), verstrichen=30.0)
+    a3 = Sanft(erg(code="login", schritt="login"), erg(ok=True, gesendet=True, bestaetigt=True), verstrichen=30.0)
     a3.lauf()
-    check(a3.sanfte == 0 and a3.neustarts == 1, "kein Abriss (konto) → sanfter Weg nicht gefragt, Chrome-Neustart")
+    check(a3.sanfte == 0 and a3.neustarts == 1, "kein Abriss (login) → sanfter Weg nicht gefragt, Chrome-Neustart")
     a4 = Sanft(erg(code="unklar", schritt="unklar", msg=m10053, gesendet=True, retry_ok=False), erg(ok=True), verstrichen=60.0)
     a4.lesung_res = {"ok": False, "msg": "x"}
     a4.lauf()
