@@ -16610,6 +16610,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
             for k, _w in r_teil:
                 dinfo[(ukey, str(k["a"]["id"]))] = bew[str(k["a"]["id"])]
             tr_info[ukey] = {"key": ukey, "user": key.split("|")[0], "firma": firm_n, "fest": fest, "gruppe": key,
+                             "route": r_teil[0][0]["regel"].get("route") or "mt5v2",          # Klasse CFD/Futures (08.10.2026)
                              "ab_min": ap_cfd_ab(zeiten) if (r_teil[0][0]["regel"].get("route") or "mt5v2") in AP_CFD_ROUTEN else 0,
                              "bis_min": (_ap_hhmm(ap_kette_regel(r_teil[0][0]["regel"])["t1_bis"])
                                          if r_teil[0][1].get("kette") else None),          # Topstep-Kette: Trade 1 bis t1_bis dt
@@ -16640,8 +16641,11 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     # FIRMEN-MISCHUNG (08.10.2026, Finn: „nicht, dass an einem Tag eine Prop-Firm nur in einer Richtung getradet wird"): Trades des Tages
     # mit fester Richtung — schon geplante Pläne (alle IDs, Hand/WD eingeschlossen; die ersetzten Vorschläge fehlen im Stand) und heute
     # gestartete bzw. gewürfelte Winning-Days-Blöcke (starts_heute) — zählen in der Tages-Mischung je Firma mit
-    firma_fest = [{"user_id": z["user_id"], "firma": z.get("firma_key"), "richtung": z.get("richtung")} for z in stand["geplant"]]
-    firma_fest += [{"user_id": x.get("user_id"), "firma": x.get("firma"), "richtung": x.get("richtung")} for x in stand.get("starts_heute") or ()]
+    # Seit 08.10.2026 abends (Mischung je Zeitfenster × Firma/Klasse) mit Startminute und Weg (Klasse CFD/Futures, ap_klasse)
+    firma_fest = [{"user_id": z["user_id"], "firma": z.get("firma_key"), "richtung": z.get("richtung"), "start": z.get("start_min"),
+                   "route": z.get("route")} for z in stand["geplant"]]
+    firma_fest += [{"user_id": x.get("user_id"), "firma": x.get("firma"), "richtung": x.get("richtung"), "start": x.get("start"),
+                    "route": x.get("route")} for x in stand.get("starts_heute") or ()]
     bester = None
     for _wurf in range(AP_GEGEN_WUERFE):
         zinfo_w = {}
@@ -16649,24 +16653,28 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
                                         bestehend=bestehend_pc)
         tr_w = {key: {"fest": tr_info[key]["fest"], "user": tr_info[key]["user"], "firma": tr_info[key]["fkey"],
                       "start": minuten_w[key], "delta_abs": tr_info[key]["delta_abs"], "gruppe": tr_info[key]["gruppe"],
-                      "einsatz_abs": tr_info[key]["einsatz_abs"],
+                      "einsatz_abs": tr_info[key]["einsatz_abs"], "route": tr_info[key]["route"],   # Klasse CFD/Futures (08.10.2026)
                       "n_plaene": sum(1 for (kk_, _k, _w2, _v) in plan_roh if kk_ == key)} for key in minuten_w}   # ID-Mischung (08.10.2026)
         richtung_w, netto_w, wert_w = ap_richtungen_delta(tr_w, stand["basis_netto"], stand["basis_brutto"], rnd,
                                                           param["zielband_pct"], fest_ev, bestehende=stand["starts_heute"],
-                                                          einsatz=ek, mit_wert=True, firma_fest=firma_fest)
+                                                          einsatz=ek, mit_wert=True, firma_fest=firma_fest, zeiten=zeiten)
         if bester is None or (-len(minuten_w), wert_w) < (-len(bester[1]), bester[0]):
             bester = (wert_w, minuten_w, zinfo_w, richtung_w, netto_w)
         if all(x == 0 for x in wert_w[:5]):
             break                      # kein Malus, Firmen gemischt, |Netto| unter einer Stufe, ID-Mischung ok, keine Große-Folge
     _w, minuten, zinfo, richtung, netto_max = bester
     # ID-MISCHUNG für den Delta-Monitor (08.10.2026): je ID long/short-Zählung der Zuteilung dieses Laufs (nur neue Tranchen)
-    tr_best = {key: {"user": tr_info[key]["user"], "firma": tr_info[key]["fkey"], "n_plaene": sum(1 for (kk_, _k, _w2, _v) in plan_roh if kk_ == key)}
+    tr_best = {key: {"user": tr_info[key]["user"], "firma": tr_info[key]["fkey"], "n_plaene": sum(1 for (kk_, _k, _w2, _v) in plan_roh if kk_ == key),
+                     "start": minuten[key], "route": tr_info[key]["route"]}
                for key in minuten}
     id_misch = [dict(v, user_id=u, user=namen.get(u, u[:8])) for u, v in ap_id_misch(richtung, tr_best)[1].items()]
     id_misch.sort(key=lambda x: (-x["n"], x["user"]))
     # FIRMEN-MISCHUNG für Probelauf/Protokoll (08.10.2026): je Firma long/short über den ganzen Tag (neu + fest), seltenere Richtung
-    firma_misch = [dict(v, firma=f) for f, v in ap_firma_misch(richtung, tr_best, firma_fest)[1].items()]
+    _fm_st, _fm_lage = ap_misch_lage(richtung, tr_best, firma_fest, zeiten)
+    firma_misch = [dict(v, firma=f) for f, v in _fm_lage["tag_firma"].items()]
     firma_misch.sort(key=lambda x: (-x["n"], x["firma"]))
+    # MISCHUNG JE ZEITFENSTER (08.10.2026 abends): Fenster × Firma / × Klasse / gesamt / Kippen — für Probelauf und Protokoll
+    misch_fenster = [c for c in _fm_lage["zellen"] if c.get("ebene") != "tag_firma"]
     for key in [k for k in tr_info if k not in minuten]:
         for (kk, k, _w2, _v) in plan_roh:
             if kk == key:
@@ -16734,7 +16742,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     erg = {"ok": True, "tag": tag, "quelle": quelle, "trocken": bool(trocken), "at": jetzt.isoformat(), "seed": seed,
            "fingerabdruck": fp, "geplant": geplant, "ausgelassen": ausgelassen, "netto_max_abs": netto_max,
            "band_pct": param["zielband_pct"], "auto_start": param["auto_start"], "einsatz": einsatz_info, "id_misch": id_misch,
-           "firma_misch": firma_misch}
+           "firma_misch": firma_misch, "misch_fenster": misch_fenster}
     if alle_ids:
         erg["ids_benutzt"] = ap_ids_benutzt(geplant, ausgelassen, namen)     # welche IDs der Lauf über alle IDs wirklich enthält
     if nachplanen:
@@ -16794,6 +16802,15 @@ AP_ID_MISCH_MAX = 0.67
 # im Planer direkt nach dem Malus, im Bot zusammen mit der ID-Mischung (darf nie schlechter werden, weckt die Mischungs-Drehung).
 # Darüber entscheidet weiter der Zufall/das Netto — kein festes 50/50, kein Muster. Bei 1–2 Trades oder nur einer ID keine Vorgabe
 # (eine ID = eine Richtung je Firma, Richtungsschutz).
+# MISCHUNG JE ZEITFENSTER (Finn 08.10.2026 abends über den Master: „Heute vormittag Tradeify 7 Accounts long, nachmittags 4 short — es
+# war nie gemischt. Über Nacht bzw. morgens waren CFDs short und Futures eher long, nachmittags zum US-Opening CFDs long und Futures
+# short. Das ist Klumpenrisiko, nicht clean … Dass [eine ID] long und später [eine andere] short bei derselben Prop geht, ist erlaubt. Es soll
+# aber nicht ganze Gruppen gleichzeitig in eine Richtung kippen"): dieselbe Regel (≥ AP_FIRMA_MISCH_AB Trades über ≥ 2 ID × Firma,
+# seltenere Richtung grob AP_FIRMA_MISCH_MIN) zusätzlich je Startfenster (zeiten.fenster, Morgen 00:00–14:30 / Opening 14:30–16:30 dt)
+# × Firma, je Fenster × KLASSE (CFD = Echo-Wege mt5/mt5v2, Futures = TradingView/TopstepX-Wege bzw. Futures-Firmen wie
+# balance_lese_weg/tpFirmIstFutures) und je Fenster insgesamt (sonst wiche der Optimierer auf „alles in eine Richtung" aus). Dazu
+# KIPPEN: sind in einem Fenster CFDs und Futures je komplett einseitig und gegeneinander (CFD nur short, Futures nur long, je ≥ 2
+# Trades), zählt das als eigene Strafe. Alles weich, in derselben Strafe wie die Tages-Mischung (ap_firma_misch mit zeiten).
 AP_FIRMA_MISCH_AB = 3
 AP_FIRMA_MISCH_MIN = 0.30
 AP_START_BIS_STANDARD = "16:30"      # Finn 07.10.2026: alle Trades bis spätestens 16:30 dt gestartet (zeiten.start_bis)
@@ -17077,44 +17094,211 @@ def ap_id_misch(z, tranchen):
     return int(round(strafe * 100)), out
 
 
-def ap_firma_misch(z, tranchen, fest=()):
-    """REIN RECHNEND (testbar, FIRMEN-MISCHUNG 08.10.2026, Finn: „nicht, dass an einem Tag eine Prop-Firm nur in einer Richtung
-    getradet wird"): Tages-Mischung je Firma einer Zuteilung z = {tranche: 'buy'|'sell'} über tranchen = {key: {user|user_id, firma,
-    n_plaene?, folgetag?}} plus fest = [{user_id, firma, richtung}] — Trades des Tages, deren Richtung dieser Lauf nicht ändert (heute
-    gestartet/gewürfelte WD-Blöcke, schon geplante Pläne). → (strafe, je_firma); je_firma = {firma: {long, short, n, ids, anteil, regel}}
-    mit anteil = Anteil der selteneren Richtung, soll = Mindestzahl der selteneren Richtung. Für Firmen mit n ≥ AP_FIRMA_MISCH_AB
-    Trades über ≥ 2 IDs ist soll = max(1, round(AP_FIRMA_MISCH_MIN × n)) — „grob" 30 %: 3 → 1, 4 → 1, 6 → 2, 10 → 3 (nie unter 25 %,
-    nie 100 % eine Richtung); strafe = Σ (soll − seltenere) ÷ n in Hundertsteln (ganzzahlig wie ap_id_misch). 0 = jede Firma gemischt."""
-    je = {}
+def ap_klasse(route=None, firma=None):
+    """REIN RECHNEND (08.10.2026, Mischung je Klasse): 'cfd' | 'futures'. Route zuerst (AP_CFD_ROUTEN = Echo-Wege → CFD, tv…/ts… =
+    TradingView/TopstepX → Futures), sonst der Firmenname wie balance_lese_weg/tpFirmIstFutures (WD_BALANCE_FUTURES: Tradeify, Apex,
+    Topstep, Lucid, MFFU, Alpha Futures, „…Futures"); alles andere CFD (FundedNext, The5%ers, FundingPips, FTMO, Blue Guardian …)."""
+    r = str(route or "").strip().lower()
+    if r in AP_CFD_ROUTEN:
+        return "cfd"
+    if r.startswith("tv") or r.startswith("ts"):
+        return "futures"
+    f = str(firma or "").strip().lower()
+    return "futures" if f and any(k in f for k in WD_BALANCE_FUTURES) else "cfd"
 
-    def zaehle(uid, firma, r, n=1):
+
+AP_KLASSE_TXT = {"cfd": "CFD", "futures": "Futures"}
+AP_KIPP_JE_KLASSE = 2     # Kippen CFD gegen Futures erst, wenn jede Klasse im Fenster ≥ 2 Trades hat (1 CFD-Short neben 2 Futures-Longs ist Zufall)
+
+
+def _ap_misch_fenster(zeiten):
+    """[(von, bis, Text)] der Startfenster in Minuten dt (bis ≤ start_bis) — wie ap_fenster_von."""
+    out = []
+    for f in (zeiten or {}).get("fenster") or []:
+        a, b = _ap_hhmm(f[0]), min(_ap_hhmm(f[1]), ap_start_bis(zeiten))
+        if b > a:
+            out.append((a, b, f"{f[0]}–{_ap_hhmm_txt(b)} dt"))
+    return out
+
+
+def _ap_misch_zelle(e):
+    """Eine Mischungs-Zelle {long, short, n, ids:set, gruppen:set} → (strafe 0…1, Anzeige). Regel ab AP_FIRMA_MISCH_AB Trades über
+    ≥ 2 ID × Firma (gleiche ID × Firma ist immer eine Richtung — mischen kann nur, wer zwei Gruppen hat): seltenere Richtung ≥
+    max(1, round(AP_FIRMA_MISCH_MIN × n)), strafe = Fehlbetrag ÷ n."""
+    selten = min(e["long"], e["short"])
+    gilt = e["n"] >= AP_FIRMA_MISCH_AB and len(e["gruppen"]) >= 2
+    soll = max(1, int(round(AP_FIRMA_MISCH_MIN * e["n"]))) if gilt else 0
+    st = (soll - selten) / e["n"] if selten < soll else 0.0
+    return st, {"long": e["long"], "short": e["short"], "n": e["n"], "ids": len(e["ids"]), "gruppen": len(e["gruppen"]),
+                "anteil": round(selten / e["n"], 2) if e["n"] else 0.0, "soll": soll, "regel": gilt, "strafe": round(st * 100)}
+
+
+def ap_misch_lage(z, tranchen, fest=(), zeiten=None):
+    """REIN RECHNEND (FIRMEN-MISCHUNG 08.10.2026, Finn: „nicht, dass an einem Tag eine Prop-Firm nur in einer Richtung getradet wird";
+    abends: „nicht ganze Gruppen gleichzeitig in eine Richtung kippen"): Mischung einer Zuteilung z = {tranche: 'buy'|'sell'} über
+    tranchen = {key: {user|user_id, firma, n_plaene?, start?, route?, klasse?, folgetag?}} plus fest = [{user_id, firma, richtung,
+    start?, route?}] — Trades des Tages, deren Richtung dieser Lauf nicht ändert (heute gestartet/gewürfelte WD-Blöcke, geplant).
+    Ebenen: Tag × Firma; mit zeiten zusätzlich je Startfenster × Firma, × Klasse (ap_klasse), insgesamt und das Kippen (CFD und Futures
+    im Fenster je komplett einseitig gegeneinander, zusammen ≥ AP_FIRMA_MISCH_AB Trades). Start ohne Fenster (vor/nach den Fenstern,
+    Folgetag) zählt nur am Tag (Folgetag gar nicht). → (strafe in Hundertsteln, {"tag_firma": {firma: Zelle}, "zellen": [Zelle mit
+    ebene/fenster/name]}) — Zelle siehe _ap_misch_zelle (+ strafe in Hundertsteln)."""
+    fen = _ap_misch_fenster(zeiten) if zeiten else []
+    tag, fz = {}, {}
+
+    def zelle(d, key):
+        return d.setdefault(key, {"long": 0, "short": 0, "n": 0, "ids": set(), "gruppen": set()})
+
+    def zaehle(uid, firma, r, n, start, klasse):
         if not uid or not firma or r not in ("buy", "sell"):
             return
-        e = je.setdefault(str(firma), {"long": 0, "short": 0, "n": 0, "ids": set()})
-        e["long" if r == "buy" else "short"] += n
-        e["n"] += n
-        e["ids"].add(str(uid))
+        ziele = [zelle(tag, str(firma))]
+        j = next((k for k, (a, b, _t) in enumerate(fen) if start is not None and a <= float(start) < b), None)
+        if j is not None:
+            ziele += [zelle(fz, ("fenster_firma", j, str(firma))), zelle(fz, ("fenster_klasse", j, klasse)), zelle(fz, ("fenster_gesamt", j, ""))]
+        for e in ziele:
+            e["long" if r == "buy" else "short"] += n
+            e["n"] += n
+            e["ids"].add(uid)
+            e["gruppen"].add(f"{uid}|{firma}")
     for k, r in (z or {}).items():
         t = (tranchen or {}).get(k) or {}
         if t.get("folgetag"):
             continue                                       # Pläne des Folgetags gehören nicht zu diesem Tag
-        zaehle(str(t.get("user") or t.get("user_id") or ""), t.get("firma"), r, int(t.get("n_plaene") or 1))
+        f = t.get("firma")
+        zaehle(str(t.get("user") or t.get("user_id") or ""), f, r, int(t.get("n_plaene") or 1), t.get("start"),
+               t.get("klasse") or ap_klasse(t.get("route"), f))
     for x in fest or ():
-        zaehle(str(x.get("user_id") or ""), x.get("firma"), x.get("richtung"))
-    strafe, out = 0.0, {}
-    for f, e in je.items():
-        selten = min(e["long"], e["short"])
-        gilt = e["n"] >= AP_FIRMA_MISCH_AB and len(e["ids"]) >= 2
-        soll = max(1, int(round(AP_FIRMA_MISCH_MIN * e["n"]))) if gilt else 0
-        if selten < soll:
-            strafe += (soll - selten) / e["n"]
-        out[f] = {"long": e["long"], "short": e["short"], "n": e["n"], "ids": len(e["ids"]),
-                  "anteil": round(selten / e["n"], 2) if e["n"] else 0.0, "soll": soll, "regel": gilt}
-    return int(round(strafe * 100)), out
+        if x.get("start") is not None and float(x["start"]) >= 24 * 60:
+            continue
+        f = x.get("firma")
+        zaehle(str(x.get("user_id") or ""), f, x.get("richtung"), 1, x.get("start"), x.get("klasse") or ap_klasse(x.get("route"), f))
+    strafe, tag_out, zellen = 0.0, {}, []
+    for f, e in tag.items():
+        st, a = _ap_misch_zelle(e)
+        strafe += st
+        tag_out[f] = a
+        zellen.append(dict(a, ebene="tag_firma", fenster=None, name=f))
+    for (ebene, j, name), e in sorted(fz.items(), key=lambda x: (x[0][1], x[0][0], x[0][2])):
+        st, a = _ap_misch_zelle(e)
+        strafe += st
+        zellen.append(dict(a, ebene=ebene, fenster=fen[j][2], name=name))
+    for j, (_a, _b, txt) in enumerate(fen):
+        c, fu = fz.get(("fenster_klasse", j, "cfd")), fz.get(("fenster_klasse", j, "futures"))
+        if not c or not fu or c["n"] < AP_KIPP_JE_KLASSE or fu["n"] < AP_KIPP_JE_KLASSE:
+            continue                                       # ein einzelner Trade einer Klasse ist keine „Gruppe", die kippt
+        c_seite = "buy" if c["short"] == 0 else "sell" if c["long"] == 0 else None
+        f_seite = "buy" if fu["short"] == 0 else "sell" if fu["long"] == 0 else None
+        n = c["n"] + fu["n"]
+        if c_seite and f_seite and c_seite != f_seite and n >= AP_FIRMA_MISCH_AB and len(c["gruppen"] | fu["gruppen"]) >= 2:
+            strafe += 1.0 / n
+            zellen.append({"ebene": "kipp", "fenster": txt, "name": f"CFD {AP_RICHTUNG_TXT[c_seite]} / Futures {AP_RICHTUNG_TXT[f_seite]}",
+                           "long": c["long"] + fu["long"], "short": c["short"] + fu["short"], "n": n, "regel": True,
+                           "strafe": round(100.0 / n)})
+    return int(round(strafe * 100)), {"tag_firma": tag_out, "zellen": zellen}
+
+
+def ap_misch_bewerter(tranchen, fest=(), zeiten=None):
+    """REIN RECHNEND, SCHNELL (08.10.2026 abends): dieselbe Strafe wie ap_misch_lage(z, tranchen, fest, zeiten)[0] für viele Zuteilungen
+    derselben Tranchen (Optimierer ap_richtungen_delta: bis 4.096 Zuteilungen × 16 Würfe je Lauf). Welche Zellen eine Tranche trifft,
+    wie viele Trades und Gruppen (ID × Firma) eine Zelle hat und damit ihr Soll hängen nicht von der Richtung ab — einmal vorrechnen,
+    je Zuteilung nur long/short zählen. Voraussetzung: z gibt jeder Tranche eine Richtung (buy/sell). → f(z) → strafe (Hundertstel)."""
+    fen = _ap_misch_fenster(zeiten) if zeiten else []
+    n_, gr_, lo0, sh0, beitrag = {}, {}, {}, {}, {}
+
+    def schluessel(firma, start, klasse):
+        ks = [("tag_firma", None, str(firma))]
+        j = next((k for k, (a, b, _t) in enumerate(fen) if start is not None and a <= float(start) < b), None)
+        if j is not None:
+            ks += [("fenster_firma", j, str(firma)), ("fenster_klasse", j, klasse), ("fenster_gesamt", j, "")]
+        return ks
+
+    def dazu(ks, uid, firma, n):
+        for key in ks:
+            n_[key] = n_.get(key, 0) + n
+            gr_.setdefault(key, set()).add(f"{uid}|{firma}")
+            lo0.setdefault(key, 0)
+            sh0.setdefault(key, 0)
+    for k, t in (tranchen or {}).items():
+        uid, f = str(t.get("user") or t.get("user_id") or ""), t.get("firma")
+        if t.get("folgetag") or not uid or not f:
+            continue
+        n = int(t.get("n_plaene") or 1)
+        ks = schluessel(f, t.get("start"), t.get("klasse") or ap_klasse(t.get("route"), f))
+        dazu(ks, uid, f, n)
+        beitrag[k] = [(key, n) for key in ks]
+    for x in fest or ():
+        uid, f, r = str(x.get("user_id") or ""), x.get("firma"), x.get("richtung")
+        if not uid or not f or r not in ("buy", "sell") or (x.get("start") is not None and float(x["start"]) >= 24 * 60):
+            continue
+        ks = schluessel(f, x.get("start"), x.get("klasse") or ap_klasse(x.get("route"), f))
+        dazu(ks, uid, f, 1)
+        for key in ks:
+            (lo0 if r == "buy" else sh0)[key] += 1
+    soll = {key: (max(1, int(round(AP_FIRMA_MISCH_MIN * n_[key]))) if n_[key] >= AP_FIRMA_MISCH_AB and len(gr_[key]) >= 2 else 0)
+            for key in n_}
+    kipp = [(("fenster_klasse", j, "cfd"), ("fenster_klasse", j, "futures")) for j in range(len(fen))]
+    kipp = [(c, fu, n_[c] + n_[fu]) for c, fu in kipp if n_.get(c, 0) >= AP_KIPP_JE_KLASSE and n_.get(fu, 0) >= AP_KIPP_JE_KLASSE
+            and n_[c] + n_[fu] >= AP_FIRMA_MISCH_AB and len(gr_[c] | gr_[fu]) >= 2]
+
+    def f(z):
+        lo, sh = dict(lo0), dict(sh0)
+        for k, r in (z or {}).items():
+            for key, n in beitrag.get(k, ()):
+                if r == "buy":
+                    lo[key] += n
+                else:
+                    sh[key] += n
+        st = 0.0
+        for key, so in soll.items():
+            if so:
+                selten = min(lo[key], sh[key])
+                if selten < so:
+                    st += (so - selten) / n_[key]
+        for c, fu, n in kipp:
+            c_s = "buy" if sh[c] == 0 else "sell" if lo[c] == 0 else None
+            f_s = "buy" if sh[fu] == 0 else "sell" if lo[fu] == 0 else None
+            if c_s and f_s and c_s != f_s:
+                st += 1.0 / n
+        return int(round(st * 100))
+    return f
+
+
+def ap_firma_misch(z, tranchen, fest=(), zeiten=None):
+    """REIN RECHNEND (testbar, FIRMEN-MISCHUNG 08.10.2026): → (strafe, je_firma) — strafe = alle Ebenen aus ap_misch_lage (ohne zeiten
+    nur Tag × Firma, wie am 08.10. nachmittags eingeführt), je_firma = {firma: {long, short, n, ids, gruppen, anteil, soll, regel,
+    strafe}} der Tagesebene. Für Firmen mit n ≥ AP_FIRMA_MISCH_AB Trades über ≥ 2 IDs ist soll = max(1, round(AP_FIRMA_MISCH_MIN × n))
+    — „grob" 30 %: 3 → 1, 4 → 1, 6 → 2, 10 → 3 (nie unter 25 %, nie 100 % eine Richtung)."""
+    st, lage = ap_misch_lage(z, tranchen, fest, zeiten)
+    return st, lage["tag_firma"]
+
+
+def ap_misch_text(vor, nach, namen=None):
+    """Protokoll-Text der Mischungs-Drehung: die Zelle (aus ap_misch_lage, zellen[]), deren Strafe am stärksten gefallen ist →
+    „Tradeify im Fenster 14:30–16:30 dt 3/0 → 2/1 long/short" bzw. „Futures im Fenster …", „heute" für die Tagesebene.
+    namen = {Firmen-Schlüssel: Anzeigename}."""
+    def schl(c):
+        return (c.get("ebene"), c.get("fenster"), c.get("name"))
+    vz = {schl(c): c for c in (vor or {}).get("zellen") or ()}
+    nz = {schl(c): c for c in (nach or {}).get("zellen") or ()}
+    rang = {"fenster_firma": 0, "tag_firma": 1, "fenster_klasse": 2, "kipp": 3, "fenster_gesamt": 4}
+    best, gewinn = None, 0
+    for k in sorted(set(vz) | set(nz), key=lambda k: (rang.get(k[0], 9), str(k[1]), str(k[2]))):   # Gleichstand: Firma vor Klasse
+        g = (vz.get(k) or {}).get("strafe", 0) - (nz.get(k) or {}).get("strafe", 0)
+        if g > gewinn:
+            best, gewinn = k, g
+    if not best:
+        return ""
+    ebene, fenster, name = best
+    v, n = vz.get(best) or {}, nz.get(best) or {}
+    if ebene == "kipp":
+        return f"CFD und Futures im Fenster {fenster} nicht mehr gegeneinander gekippt ({name})"
+    wer = {"fenster_klasse": AP_KLASSE_TXT.get(name, name), "fenster_gesamt": "alle Trades"}.get(ebene, (namen or {}).get(name, name))
+    wo = "heute" if ebene == "tag_firma" else f"im Fenster {fenster}"
+    return f"{wer} {wo} {v.get('long', 0)}/{v.get('short', 0)} → {n.get('long', 0)}/{n.get('short', 0)} long/short über alle IDs"
 
 
 def ap_richtungen_delta(tranchen, basis_netto, basis_brutto, rnd, band_pct, fest_ereignisse=(), bestehende=(), versuche=4096,
-                        einsatz=None, mit_wert=False, firma_fest=()):
+                        einsatz=None, mit_wert=False, firma_fest=(), zeiten=None):
     """REIN RECHNEND (Vertrag §2, Korrektur Finn 06.10.2026 „nicht so fixe Minuten-Regeln, einfach Zufallsprinzip"): Richtung
     je TRANCHE (ID × Firma). Dieselbe Firma darf bei verschiedenen IDs gegenläufig sein — kein Verbot, keine Pause; nur ein
     weicher Malus, wenn zwei gegenläufige derselben Firma dichter als AP_GEGEN_DICHT_MIN starten (dann lieber anders würfeln).
@@ -17128,7 +17312,10 @@ def ap_richtungen_delta(tranchen, basis_netto, basis_brutto, rnd, band_pct, fest
     Gleichstand entscheidet der Zufall. → ({key: 'buy'|'sell'}, netto_max_abs) bzw. mit_wert: (…, …, wert-Tupel)
     FIRMEN-MISCHUNG (08.10.2026, Finn: „kein einziger Tradeify-Short bei 10–15 Trades — Fehler"): firma_fest = [{user_id, firma,
     richtung}] Trades des Tages mit fester Richtung (heute gestartet, schon geplant); ap_firma_misch zählt direkt nach dem Malus —
-    jede Firma mit ≥ AP_FIRMA_MISCH_AB Trades über ≥ 2 IDs bekommt beide Richtungen (seltenere ≥ AP_FIRMA_MISCH_MIN), sonst Netto/Zufall."""
+    jede Firma mit ≥ AP_FIRMA_MISCH_AB Trades über ≥ 2 IDs bekommt beide Richtungen (seltenere ≥ AP_FIRMA_MISCH_MIN), sonst Netto/Zufall.
+    Mit zeiten (08.10.2026 abends, Finn: „nicht ganze Gruppen gleichzeitig in eine Richtung kippen") zählt dieselbe Strafe auch je
+    Startfenster × Firma, × Klasse (CFD/Futures), insgesamt und das Kippen CFD gegen Futures (ap_misch_lage) — tranchen tragen dafür
+    start + route, firma_fest start + route."""
     namen = sorted(tranchen or {})
     gruppe = {k: str(tranchen[k].get("gruppe") or k) for k in namen}
     basis = {k: tranchen[k]["fest"] for k in namen if tranchen[k].get("fest") in ("buy", "sell")}
@@ -17139,6 +17326,7 @@ def ap_richtungen_delta(tranchen, basis_netto, basis_brutto, rnd, band_pct, fest
                 basis[k] = f
     frei = sorted({gruppe[k] for k in namen if k not in basis})
     paare = ap_dicht_paare(tranchen, bestehende)
+    misch_f = ap_misch_bewerter(tranchen, firma_fest, zeiten)          # FIRMEN-/FENSTER-MISCHUNG, einmal vorgerechnet (08.10.2026)
 
     def wert(z):
         ev = list(fest_ereignisse or ()) + [(tranchen[k]["start"], float(tranchen[k].get("delta_abs") or 0) * (1 if z[k] == "buy" else -1))
@@ -17153,9 +17341,9 @@ def ap_richtungen_delta(tranchen, basis_netto, basis_brutto, rnd, band_pct, fest
             # Malus zuerst (Finn: gleiche Firma gegenläufig kurz hintereinander nur, wenn es gar nicht anders geht); dann das
             # Gesamt-Netto in Stufen, dann die ID-Mischung (08.10.2026, Finn: keine ID komplett long/short bei ≥ 4 Plänen über ≥ 2 Firmen)
             # FIRMEN-MISCHUNG (08.10.2026) direkt nach dem Malus: eine Firma nie den ganzen Tag nur in eine Richtung
-            return (_ap_gegen_dicht(z, paare), ap_firma_misch(z, tranchen, firma_fest)[0], int(el["netto_eur_max_abs"] // AP_EUR_STUFE),
+            return (_ap_gegen_dicht(z, paare), misch_f(z), int(el["netto_eur_max_abs"] // AP_EUR_STUFE),
                     ap_id_misch(z, tranchen)[0], el["gross_folge"], el["netto_eur_max_abs"], abs(el["netto_eur_ende"])), v["netto_max_abs"]
-        return (band_ueber, _ap_gegen_dicht(z, paare), ap_firma_misch(z, tranchen, firma_fest)[0], ap_id_misch(z, tranchen)[0],
+        return (band_ueber, _ap_gegen_dicht(z, paare), misch_f(z), ap_id_misch(z, tranchen)[0],
                 round(v["netto_max_abs"], 1), round(abs(v["verlauf"][-1]["netto_delta"]), 3)), v["netto_max_abs"]
 
     def zuteilung(bits):
@@ -17648,22 +17836,28 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
     # FIRMEN-MISCHUNG (08.10.2026, Finn: „nicht, dass an einem Tag eine Prop-Firm nur in einer Richtung getradet wird"): misch = ID-Mischung
     # + Tages-Mischung je Firma (ap_firma_misch) über die Pläne des Tags im Zustand und die heutigen Starts (gestartet, inkl. Winning-Days-
     # Blöcke) — jede Drehung (Band-Schritt, Suche, Mischung) darf sie nicht verschlechtern, eine Schieflage weckt die Mischungs-Drehung
-    gest_fest = [{"user_id": x.get("user_id"), "firma": x.get("firma"), "richtung": x.get("richtung")} for x in gestartet or ()
-                 if x.get("start") is None or float(x["start"]) < 24 * 60]
+    gest_fest = [{"user_id": x.get("user_id"), "firma": x.get("firma"), "richtung": x.get("richtung"), "start": x.get("start"),
+                  "route": x.get("route")} for x in gestartet or () if x.get("start") is None or float(x["start"]) < 24 * 60]
     # gegenläufige Starts anderer IDs ±AP_GEGEN_FIRMA_MIN (08.10.2026 ~17:00 Dubai): heute gestartete zählen mit (DB-Riegel 90 s)
     gest_pl = [(float(x["start"]), x.get("richtung"), str(x.get("user_id")), x.get("firma")) for x in gestartet or ()
                if x.get("start") is not None]
 
+    # seit 08.10.2026 abends auch je Startfenster × Firma / × Klasse (CFD/Futures) / gesamt / Kippen (zeiten, ap_misch_lage) — eine
+    # Verschiebung über die Fenstergrenze ändert die Mischung damit auch
     def misch_tr(z):
         return ({i: z[i]["richtung"] for i in z},
-                {i: {"user": je[i]["user_id"], "firma": je[i]["firma"], "n_plaene": 1, "folgetag": je[i].get("folgetag")} for i in z})
+                {i: {"user": je[i]["user_id"], "firma": je[i]["firma"], "n_plaene": 1, "folgetag": je[i].get("folgetag"),
+                     "start": z[i]["start"], "route": je[i].get("route")} for i in z})
+
+    def firma_lage(z):
+        return ap_misch_lage(*misch_tr(z), gest_fest, zeiten)
 
     def firma_strafe(z):
-        return ap_firma_misch(*misch_tr(z), gest_fest)[0]
+        return firma_lage(z)[0]
 
     def misch(z):
         r_, tr_ = misch_tr(z)
-        return ap_id_misch(r_, tr_)[0] + ap_firma_misch(r_, tr_, gest_fest)[0]
+        return ap_id_misch(r_, tr_)[0] + ap_misch_lage(r_, tr_, gest_fest, zeiten)[0]
 
     def als_dict(k):
         return {"ueber_band": k[1], "netto_max_abs": k[3], "gross_folge": k[2], "malus": k[0], "id_misch": k[4] if len(k) > 4 else None}
@@ -18025,6 +18219,8 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                         continue                             # jeder Zug ≥ AP_SZENARIO_MIN_GEWINN_EUR am Minimum, sonst kein Zug
                     if art == "dreh" and (misch(z1) > max(misch0, misch(z0)) or tag_ueber(z1) > max(schwelle, tag0) + 1e-9):
                         continue                             # Drehen: ID-Mischung und Tagesband nicht schlechter
+                    if art != "dreh" and misch(z1) > max(misch0, misch(z0)):
+                        continue                             # Verschieben über die Fenstergrenze: Fenster-Mischung nicht schlechter (08.10.2026)
                     neu_b.append((z1, zuege + ((i, t, art, None if art == "dreh" else z0[i]["start"], l0, l1),), l1))
             if not neu_b:
                 break
@@ -18260,7 +18456,9 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
     # Seit 08.10.2026 ~17:00 Dubai zählt in „Mischung" auch die FIRMEN-MISCHUNG des Tages (ap_firma_misch, Finn: „kein einziger
     # Tradeify-Short bei 10–15 Trades — Fehler"): ist eine Firma heute einseitig, dreht diese Phase die ganze ID × Firma einer ANDEREN ID
     # in die Gegenrichtung (über IDs erlaubt) — mit denselben Grenzen: Deckel je ID/Tag, Bestätigte ≥ 30 min, kein Richtungsschutz,
-    # Band/Tagesband/Szenario nicht schlechter, ±3 min neben keinem gegenläufigen Start einer anderen ID.
+    # Band/Tagesband/Szenario nicht schlechter, ±3 min neben keinem gegenläufigen Start einer anderen ID. Seit 08.10.2026 abends auch je
+    # Startfenster × Firma / × Klasse / gesamt und Kippen CFD gegen Futures (ap_misch_lage, Finn: „nicht ganze Gruppen gleichzeitig in
+    # eine Richtung kippen") — dieselbe Phase, dieselben Grenzen.
     def ueber_tag(z):
         if einsatz:
             ev_e = [(z[i]["start"], float(je[i].get("einsatz_abs") or 0) * (1 if z[i]["richtung"] == "buy" else -1)) for i in z]
@@ -18355,16 +18553,14 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
         uid = str(teile[0][0]["user_id"])
         m_vor, m_nach = misch_je(zustand).get(uid) or {}, misch_je(z).get(uid) or {}
         wer = je[teile[0][1][0]].get("user") or uid[:8]
-        # FIRMEN-MISCHUNG (08.10.2026): hat die Drehung die Tages-Mischung einer Firma verbessert, sagt das Protokoll das (Firma long/short
-        # über alle IDs heute) — sonst wie bisher die ID-Mischung
-        fa_ = teile[0][0]["firma"]
-        f_vor, f_nach = (ap_firma_misch(*misch_tr(zustand), gest_fest)[1].get(fa_) or {},
-                         ap_firma_misch(*misch_tr(z), gest_fest)[1].get(fa_) or {})
-        firma_txt = firma_strafe(z) < firma_strafe(zustand)
-        fname_ = je[teile[0][1][0]].get("firma_name") or fa_
+        # FIRMEN-MISCHUNG (08.10.2026): hat die Drehung die Mischung verbessert (Firma heute, Firma/Klasse/alle im Fenster, Kippen), nennt
+        # das Protokoll die Zelle mit dem größten Gewinn (ap_misch_text) — sonst wie bisher die ID-Mischung
+        l_vor, l_nach = firma_lage(zustand), firma_lage(z)
+        firma_txt = l_nach[0] < l_vor[0]
+        f_namen = {je[i]["firma"]: je[i].get("firma_name") or je[i]["firma"] for i in je}
+        m_txt = ap_misch_text(l_vor[1], l_nach[1], f_namen) if firma_txt else ""
         if ausloeser is None:
-            ausloeser = (f"Firmen-Mischung: {fname_} heute {f_vor.get('long')} long / {f_vor.get('short')} short" if firma_txt else
-                         f"ID-Mischung: {wer} {m_vor.get('long')} long / {m_vor.get('short')} short")
+            ausloeser = f"Firmen-Mischung: {m_txt}" if firma_txt else f"ID-Mischung: {wer} {m_vor.get('long')} long / {m_vor.get('short')} short"
         txt_t = ""
         if tausch:
             t2, ids2 = teile[1]
@@ -18381,8 +18577,7 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                                               f"{' (bestätigt)' if t.get('bestaetigt') else ''}: "
                                               f"{je[i].get('firma_name') or t['firma']} bei {wer_i} "
                                               f"{AP_RICHTUNG_TXT[von['richtung']]} → {AP_RICHTUNG_TXT[nach['richtung']]} "
-                                              + (f"({fname_} heute {f_vor.get('long')}/{f_vor.get('short')} → {f_nach.get('long')}/{f_nach.get('short')} "
-                                                 f"long/short über alle IDs" if firma_txt else
+                                              + (f"({m_txt}" if firma_txt else
                                                  f"({wer} {m_vor.get('long')}/{m_vor.get('short')} → {m_nach.get('long')}/{m_nach.get('short')} long/short")
                                               + f"{txt_t if t is teile[0][0] else ''})")})
         zustand, aktuell = z, k_neu

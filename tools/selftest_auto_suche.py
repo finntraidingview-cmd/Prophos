@@ -168,7 +168,10 @@ def main():
     Lf = lambda zus: L(lauf_l + [T(dict(p, start_min=zus.get(p["plan_id"], p["start_min"])), False) for p in vm + nm  # noqa: E731
                                  if jf <= zus.get(p["plan_id"], p["start_min"]) <= jf + 60])
     # seit 08.10.2026 (Finn: Opening-Anteil laut Zeitfenster halten): im Nachmittagsfenster 4 weitere feste Pläne → Überschuss 2 über dem Soll
-    fueller = [plan(f"f{k}", f"u-f{k}", "apex", "buy", 900 + 12 * k, aenderbar=False, fest_durch="Handplan", satz_eur_je_usd=0.00001)
+    # Füller abwechselnd long/short (seit 08.10.2026 abends Mischung je Fenster: nur Long-Füller ließen das Opening nach dem Vorziehen der
+    # Shorts einseitig zurück — die Suche verschiebt nichts mehr, was die Fenster-Mischung verschlechtert)
+    fueller = [plan(f"f{k}", f"u-f{k}", "apex", "sell" if k % 2 == 0 else "buy", 900 + 12 * k, aenderbar=False, fest_durch="Handplan",
+                    satz_eur_je_usd=0.00001)
                for k in range(4)]
     aus = U(vm + nm + fueller, 0.0, 0.0, jf, Z, 25, random.Random(1), einsatz=EKf, dubai_min=120, id_fest=fest_f)
     an = U(vm + nm + fueller, 0.0, 0.0, jf, Z, 25, random.Random(1), einsatz=dict(EKf, fenster_uebergreifend=True), dubai_min=120,

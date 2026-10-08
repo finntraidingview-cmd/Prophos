@@ -24,11 +24,13 @@ def plan(pid, uid, firma, richtung, start, **kw):
 
 def chris(**fp):
     """Chris 6/1: FundedNext 4× long, FundingPips 2× long, Topstep 1× short (Live-Befund 08.10.2026). Dazu eine andere ID mit
-    5× short bei einer Firma (keine Mischungs-Regel), damit das Netto ausgeglichen ist und das Band hält."""
+    5× short bei einer Firma (keine Mischungs-Regel), damit das Netto ausgeglichen ist und das Band hält. Seit 08.10.2026 abends
+    (Mischung je Fenster × Klasse) eine CFD-Firma (FTMO): bei Apex (Futures) kippten im Morgenfenster CFD long gegen Futures short —
+    das ist jetzt selbst ein Mischungs-Anlass; hier geht es nur um die ID-Mischung."""
     pl = [plan(f"fn{i}", C, "fundednext", "buy", 600 + i * 4) for i in range(4)]
     pl += [plan(f"fp{i}", C, "fundingpips", "buy", 700 + i * 4, **fp) for i in range(2)]
     pl += [plan("ts1", C, "topstep", "sell", 760)]
-    pl += [plan(f"x{i}", A, "apex", "sell", 605 + i * 4) for i in range(5)]
+    pl += [plan(f"x{i}", A, "ftmo", "sell", 605 + i * 4) for i in range(5)]
     return pl
 
 
@@ -77,7 +79,10 @@ def main():
     nah = [dict(p, start_min=310 + i * 4) if p["firma"] == "fundingpips" else p for i, p in enumerate(chris(bestaetigt=True))]
     e3n = lauf(nah)
     check(not any(x["firma"] == "fundingpips" for x in e3n["aenderungen"]), f"bestätigt, aber Start in < 30 min → nicht gedreht ({gedreht(e3n)})")
-    check(len({x["firma"] for x in e3n["aenderungen"]}) <= 1, f"höchstens EINE Mischungs-Drehung je Lauf ({gedreht(e3n)})")
+    # ein Tausch (zwei IDs × Firma gleichzeitig, Grund „(Tausch)") ist EINE Mischungs-Drehung
+    check(len({x["firma"] for x in e3n["aenderungen"]}) <= 1
+          or (len({x["firma"] for x in e3n["aenderungen"]}) == 2 and all("(Tausch)" in x["grund"] for x in e3n["aenderungen"])),
+          f"höchstens EINE Mischungs-Drehung je Lauf (ein Tausch zählt als eine) ({gedreht(e3n)})")
     e3b = lauf(chris(aenderbar=False, fest_durch="schon gestartet"))
     check(not any(x["firma"] == "fundingpips" for x in e3b["aenderungen"]), f"FundingPips fest (gestartet) → nie gedreht ({gedreht(e3b)})")
     pl3 = [dict(p, bestaetigt=True) if p["firma"] in ("fundednext", "fundingpips") else p for p in chris()]
@@ -102,7 +107,7 @@ def main():
 
     # 4) nur 3 Pläne der ID → keine Vorgabe, keine Drehung
     pl4 = [plan("fn0", C, "fundednext", "buy", 600), plan("fp0", C, "fundingpips", "buy", 700), plan("fp1", C, "fundingpips", "buy", 704),
-           plan("x0", A, "apex", "sell", 605), plan("x1", A, "apex", "sell", 609), plan("x2", A, "apex", "sell", 613)]
+           plan("x0", A, "ftmo", "sell", 605), plan("x1", A, "ftmo", "sell", 609), plan("x2", A, "ftmo", "sell", 613)]
     check(gedreht(lauf(pl4)) == [], "Chris mit 3 Plänen → keine Drehung")
 
     # 5) Band würde schlechter: Band 60 % — vorher 80 € über dem Band (unter der Hysterese 200 €), nach der Drehung 240 € → keine Drehung
@@ -116,7 +121,7 @@ def main():
     # macht den Tag schlechter → Tausch: Chris FundingPips 2× → short gegen 2 Shorts einer anderen ID bei einer anderen Firma → long
     pl6 = chris(bestaetigt=True)
     pl6 = [p for p in pl6 if p["user_id"] == C] + [plan(f"y{i}", "u-dritte", "the5ers", "sell", 720 + i * 4, bestaetigt=True) for i in range(2)]
-    pl6 += [plan(f"z{i}", A, "apex", "sell", 605 + i * 4) for i in range(5)]
+    pl6 += [plan(f"z{i}", A, "ftmo", "sell", 605 + i * 4) for i in range(5)]
     e6 = lauf(pl6, band=25.0)
     g6 = gedreht(e6)
     check(any(f == "fundingpips" and r == "sell" for f, _p, r in g6) and any(f == "the5ers" and r == "buy" for f, _p, r in g6)
