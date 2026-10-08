@@ -42189,7 +42189,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1382'
+  const OS_TAB_BUILD = '2026-09-22.1383'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -48142,6 +48142,12 @@
       case 'master_nie': return 'Nichts tun — die Order kam in TradingView nie an (Fusion wieder zu, Konto 60 s flach bewiesen); Prophos plant 15 min später neu ein, wenn das Konto dann noch flach ist.'
       case 'ziel_erreicht': return 'Ziel ist erreicht — kein Trade nötig. Konto ansehen (Phasenwechsel/Auszahlung), Plan löschen.'
       case 'manuelle_arbeit': return 'Konto steht in Manueller Arbeit — erst im Radar erledigen, dann neu planen.'
+      // KONTO OFFEN (09.10.2026, Master: Puls sendet seit 63bd2b4 nichts, wenn DIESES Konto schon eine NQ/MNQ-Position hat — Code konto_offen,
+      // Text „Konto hat schon eine offene Position (BUY 2 MNQ) — nichts gesendet"): bisher nur der allgemeine „Check am PC war rot"-Text
+      case 'konto_offen': {
+        const pos = (m.match(/offene Position \(([^)]*)\)/) || [])[1]
+        return `Am Konto ist schon eine Position offen${pos ? ` (${pos})` : ''} — Hand-Trade? Am PC${pc} in TradingView nachsehen. Der Plan versucht es in 15 min wieder.`
+      }
       // 'puls' = Orbit-Fehler ohne Bot-Schritt (08.10.2026): die häufigsten Texte aus order_signale — External ID fehlt (49×), Tab lud neu (33×)
       case 'puls': default: return sf.unklar ? 'Erst in der Plattform nachsehen, ob die Order liegt — nie blind erneut starten.'
         : /External ID/i.test(m) ? 'Dem Konto unter Accounts die External ID (Tradovate-Unterkonto) eintragen, dann ↻ Erneut versuchen.'
@@ -48154,6 +48160,7 @@
     const bis = tplUhr(sfTagesEnde(), D.v), n = Number(sf.versuche) || 0
     if(sf.status === 'tagesende') return 'Start-Fenster heute zu — der Nachtlauf plant neu.'
     if(sf.unklar || sf.schritt === 'ziel_erreicht') return ''
+    if(sf.schritt === 'konto_offen') return n >= SF_MAX ? `${n} Neuversuche gescheitert — von Hand starten.` : n ? `(Versuch ${n + 1}/${SF_MAX})` : ''   // „in 15 min wieder" steht schon im Text
     if(n >= SF_MAX) return `${n} Neuversuche gescheitert — von Hand starten.`
     return `Danach startet der Bot ihn von selbst neu (bis ${bis}${n ? `, Versuch ${n + 1}/${SF_MAX}` : ''}).`
   }
@@ -48444,6 +48451,7 @@
     if(z.art === 'neu') return { w: 'neu geplant', ton: 'gruen', r: 9 }
     if(z.art === 'fremd') return z.konflikt ? { w: '⚠ Gegenhedge', ton: 'rot', r: 0 } : { w: 'Hand-Position', ton: 'grau', r: 10 }   // Fremd-Positionen (08.10.2026)
     if(z.art === 'plan'){
+      if(/^nicht gestartet/i.test(t) && /offene Position/i.test(t)) return { w: 'Position offen', ton: 'gelb', r: 6 }   // konto_offen (09.10.2026)
       if(/^nicht gestartet/i.test(t)) return { w: 'Start-Fehler', ton: 'rot', r: 6 }
       if(/^verpasst/i.test(t)) return { w: 'verpasst', ton: 'rot', r: 6 }
       if(/Endlesung|Ergebnis nie gelesen|Login prüfen/i.test(t)) return { w: 'Endlesung', ton: 'gelb', r: 7 }
