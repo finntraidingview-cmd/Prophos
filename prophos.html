@@ -18034,8 +18034,15 @@
         return /^\d{4}-\d{2}-\d{2}\.\d+$/.test(t) ? t : null
       }catch(_){ return null }
     }
-    const basis = await holen()
-    if(!basis) return
+    // NICHT AUFGEBEN (08.10.2026, pc-2zc2we: Tab .1274 seit 01:08 UTC, mt5_live.status.tab_bw NULL = der Wächter hat nie geprüft): war
+    // /mt5-copier/VERSION beim Laden nicht lesbar (lokales Backend bzw. Railway startet gerade neu), stieg der Wächter hier für immer
+    // aus — der Tab lud nie wieder von selbst. Jetzt alle 30 s erneut; der Grund steht in _bwStatus (→ mt5_live.status.tab_bw).
+    let basis = await holen()
+    while(!basis){
+      window._bwStatus = { ziel: null, grund: 'VERSION nicht lesbar', hinter_seit: null }
+      await new Promise(r => setTimeout(r, 30000))
+      basis = await holen()
+    }
     /* NUR ECHTE FRONTEND-UPDATES (28.09.2026, Chris' PC: „⬆ Neue Version .730" 5× in 5 min). Backend-Commits zählen VERSION hoch, ohne
      * prophos.html anzufassen (heute .730 = app.py, OS_TAB_BUILD blieb .729) — der Tab lud neu, bekam wieder .729 und fing von vorn an.
      * Weicht VERSION ab, liest der Wächter EINMAL je VERSION-Wert die frische Seite (Cache-Bust) und vergleicht deren OS_TAB_BUILD:
@@ -18057,15 +18064,19 @@
     }
     const bwSeitenKern = {}    // VERSION → Kern der frischen Seite
     let bwEigenKern = null
+    // Ergebnis je VERSION merken (die 1-MB-Seite nicht alle 30 s) — aber „nicht neuer"/nicht lesbar nur 2 min (08.10.2026, pc-40mali:
+    // .1275 meldete ziel null, obwohl .1280 da war): kam beim ersten Abruf die alte bzw. lokale Seite zurück (Railway-Deploy, Backend-
+    // Neustart), blieb der Tab sonst bei dieser VERSION für immer stehen.
+    const bwSeitenAt = {}
     const seiteBuild = async v => {
-      if(v in bwSeitenBuild) return bwSeitenBuild[v]
+      if(v in bwSeitenBuild && (bwNeuerV(bwSeitenBuild[v], eigenBuild()) || Date.now() - (bwSeitenAt[v] || 0) < 2 * 60000)) return bwSeitenBuild[v]
       let b = null
       try{
         const u = location.pathname + (location.pathname.includes('?') ? '&' : '?') + 'bwcheck=' + encodeURIComponent(v) + '.' + Date.now()
         const r = await fetch(u, { cache: 'no-store' })
         if(r.ok){ const t = await r.text(); const m = /const OS_TAB_BUILD = '([0-9.-]+)'/.exec(t); b = m ? m[1] : null; if(b) bwSeitenKern[v] = await bwKern(t) }
       }catch(_){ b = null }
-      bwSeitenBuild[v] = b
+      bwSeitenBuild[v] = b; bwSeitenAt[v] = Date.now()
       return b
     }
     const eigenBuild = () => { try{ return OS_TAB_BUILD }catch(_){ return basis } }
@@ -41230,7 +41241,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1281'
+  const OS_TAB_BUILD = '2026-09-22.1282'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -43478,7 +43489,10 @@
           const ich = (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : ''
           if(!ich || String((sig.params || {}).pc || '') !== ich) continue
           // ohne Neulade-Wächter (VERSION vom lokalen Backend beim Laden nicht lesbar) keine Ruhe-Prüfung möglich → nicht laden
-          let grundTl = ''; try{ grundTl = (typeof window._bwGrund === 'function') ? window._bwGrund(0) : 'Wächter aus' }catch(_){ grundTl = 'unbekannt' }
+          // Ohne Neulade-Wächter (VERSION beim Laden nicht lesbar) die Mindest-Prüfung: kein offenes Popup, kein Puls-/Start-Lauf — gerade
+          // dann ist „Tab neu laden" der einzige Weg, den Tab zu holen (08.10.2026, pc-2zc2we)
+          const ruheMin = () => { try{ return document.querySelector('.modal-bg.open') ? 'Popup offen' : (_tpOrbitLaeuft || _suLaeuft || _pfV2Laeuft || _rsAktiv) ? 'Puls/Start läuft' : '' }catch(_){ return 'unbekannt' } }
+          let grundTl = ''; try{ grundTl = (typeof window._bwGrund === 'function') ? window._bwGrund(0) : ruheMin() }catch(_){ grundTl = 'unbekannt' }
           if(grundTl && grundTl !== 'Signal in Arbeit'){ _osStand = 'tab-neu-wartet: ' + grundTl; continue }
           const { data: clL } = await supabase.from('order_signale')
             .update({ status:'fertig', pc: ich, updated_at: new Date().toISOString(),
