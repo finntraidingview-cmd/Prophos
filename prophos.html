@@ -41827,7 +41827,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1357'
+  const OS_TAB_BUILD = '2026-09-22.1358'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -48475,8 +48475,11 @@
   // Eigene Karte ganz unten auf der Seite (Finn 07.10.2026: „Statistik der vergangenen Tage … ganz runterpacken und nicht so hoch") — stand vorher in der Hypo-Karte
   function tplBilanzKarteHtml(D){ const b = tplBilanzHtml(D); return b ? `<div class="tpl-karte tpl-nk tpl-hk">${b}</div>` : '' }
   function tplBilanzHtml(D){
-    let b = (_tpl.bilanz || []).filter(z => z && z.hypo_eur != null)
-    if(_tpl.sicht && _tpl.sicht !== 'alle') b = b.filter(z => String(z.user_id) === String(_tpl.sicht))
+    // OHNE € SICHTBAR (Master/Finn 08.10.2026, wie Kachel „Heute"): Trades ohne Kontowert-Satz fielen hier still weg — jetzt „n ohne €" im
+    // Gesamt-Kasten, Tooltip nennt sie. Gerechnet wird nur mit Satz (hypo_bilanz_zeile: Lauf → Balance vorher → Konto-Lesung vor dem Start → heute).
+    let alle = (_tpl.bilanz || []).filter(Boolean)
+    if(_tpl.sicht && _tpl.sicht !== 'alle') alle = alle.filter(z => String(z.user_id) === String(_tpl.sicht))
+    const b = alle.filter(z => z.hypo_eur != null), ohne = alle.filter(z => z.hypo_eur == null)
     if(!b.length) return ''
     const vz = x => (x > 0 ? '+' : x < 0 ? '−' : '') + tplEur(x)
     const kl = x => x > 0 ? 'tpl-gut' : x < 0 ? 'tpl-rot' : ''
@@ -48485,7 +48488,8 @@
     const ges = summe(b), heute = summe(b.filter(z => z.tag === D.heute))
     const kachel = (lab, wert, unter, titel) => `<div class="kpi" title="${escapeHtml(titel || '')}"><div class="kpi-label">${lab}</div><div class="kpi-value ${kl(wert)}">${vz(wert)}</div><span class="kpi-delta">${unter}</span></div>`
     const kacheln = `<div class="kpis tpl-bk">
-        ${kachel('Gesamt', ges, `${b.length} Trade${b.length === 1 ? '' : 's'} · heute ${vz(heute)}`, 'Summe aller beendeten Auto-Planer-Trades, hypothetisch in €')}
+        ${kachel('Gesamt', ges, `${b.length} Trade${b.length === 1 ? '' : 's'} · heute ${vz(heute)}${ohne.length ? ` · ${ohne.length} ohne €` : ''}`, 'Summe aller beendeten Auto-Planer-Trades, hypothetisch in €'
+          + (ohne.length ? `\n${ohne.length} ohne Kontowert-Satz — zählen nicht:\n` + ohne.slice(0, 20).map(z => `${z.user || '?'} · ${z.konto || z.firma || ''} · ${z.pl_usd != null ? (z.pl_usd < 0 ? '−' : '+') + Math.abs(Math.round(z.pl_usd)).toLocaleString('de-DE') + ' $' : '–'}`).join('\n') : ''))}
         ${kachel('▲ Long', summe(lo), `${lo.length} Trade${lo.length === 1 ? '' : 's'}`, 'beendete Long-Trades')}
         ${kachel('▼ Short', summe(sh), `${sh.length} Trade${sh.length === 1 ? '' : 's'}`, 'beendete Short-Trades')}
         <div class="kpi"><div class="kpi-label">Im Plus</div><div class="kpi-value">${plus.length} / ${b.length}</div><span class="kpi-delta">${Math.round(plus.length / b.length * 100)} % · Ø ${vz(ges / b.length)}</span></div></div>`

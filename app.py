@@ -15509,10 +15509,30 @@ def admin_kontowerte():
 # Beendete Auto-Planer-Trades (auto_plan, completed/review) aller IDs: echter P&L $ × Kontowert-Satz (€ je $) = hypothetischer €.
 # Satz in fester Reihenfolge: der Planer-Lauf DIESES Tages für das Konto (satz_eur_je_usd, so hat der Rechner gewichtet) → Kontowert
 # bei der Balance VOR dem Trade (ap_kontowert, dieselbe Formel wie live) → Kontowert heute. Nur Lesen, keine Entscheidung.
+def ap_bal_vorher_konto(p, acc):
+    """REIN RECHNEND (testbar): BALANCE VORHER AUS DER KONTO-LESUNG (08.10.2026, Finn: „Die Zahl stimmt doch nie" — Kachel „Heute"
+    +14 € netto): trägt der Plan weder Start- noch Endbalance (tv.balance_start, balance_start, final.balance_end/master_balance —
+    z. B. Orbit V1 mit Duplikum-Hedge), gilt die Konto-Lesung accounts.tv_balance als Balance vor dem Trade, NUR wenn tv_balance_at vor
+    dem Start liegt. → Plan mit tv.balance_start (Kopie) oder der Plan unverändert; ohne passende Lesung bleibt er „ohne €" (nicht raten).
+    Gilt für heute_beendet (ap_hb_zeile) und die Hypo-Bilanz gleich — beide über hypo_bilanz_zeile."""
+    acc = acc or {}
+    base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+    tv = base.get("tv") if isinstance(base.get("tv"), dict) else {}
+    fin = base.get("final") if isinstance(base.get("final"), dict) else {}
+    if _wd_num(tv.get("balance_start")) is not None or _wd_num(base.get("balance_start")) is not None \
+            or _wd_num(fin.get("balance_end")) is not None or _wd_num(fin.get("master_balance")) is not None:
+        return p
+    kb, kb_at, st0 = _wd_num(acc.get("tv_balance")), _ap_ts(acc.get("tv_balance_at")), _ap_ts(p.get("started_at"))
+    if not (kb and kb > 0 and kb_at is not None and st0 is not None and kb_at <= st0):
+        return p
+    return dict(p, mt5_baseline=dict(base, tv=dict(tv, balance_start=kb)))
+
+
 def hypo_bilanz_zeile(p, acc, firmen, lauf_satz, kw_heute, disp):
     """REIN RECHNEND (testbar): ein beendeter Auto-Plan → Zeile {plan_id, user_id, user, firma, konto, ende4, typ, richtung,
     start, ende, pl_usd, satz, satz_quelle, hypo_eur} oder None (kein P&L)."""
     acc = acc or {}
+    p = ap_bal_vorher_konto(p, acc)   # Konto-Lesung vor dem Start als Balance vorher (08.10.2026), vor dem Rückfall „Satz heute"
     base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
     tv = base.get("tv") if isinstance(base.get("tv"), dict) else {}
     fin = base.get("final") if isinstance(base.get("final"), dict) else {}
@@ -15573,7 +15593,7 @@ def admin_hypo_bilanz():
         ids = sorted({str(p.get("master_account_id")) for p in plaene if p.get("master_account_id")})
         accs = {}
         for i in range(0, len(ids), 80):
-            for a in sb_select("accounts", {"select": "id,name,firm,account_type,external_id", "id": f"in.({','.join(ids[i:i + 80])})"}):
+            for a in sb_select("accounts", {"select": "id,name,firm,account_type,external_id,tv_balance,tv_balance_at", "id": f"in.({','.join(ids[i:i + 80])})"}):
                 accs[str(a["id"])] = a
         reg = (sb_select("auto_plan_regeln", {"select": "regeln", "id": "eq.1"}) or [{}])[0]
         firmen = (reg.get("regeln") or {}).get("firmen") or []
@@ -15664,17 +15684,10 @@ def ap_hb_zeile(p, acc, firmen, lauf_satz, kw_heute, namen, archiv=None, letzter
     tv = base.get("tv") if isinstance(base.get("tv"), dict) else {}
     fin = base.get("final") if isinstance(base.get("final"), dict) else {}
     gelesen = ap_hb_gelesen(p)
-    # BALANCE VORHER AUS DER KONTO-LESUNG (08.10.2026, Finn: „Die Zahl stimmt doch nie" — Kachel „Heute" +14 € netto): Orbit-V1-Trades mit
-    # Duplikum-Hedge (tvplus) tragen weder Start- noch Endbalance → kein Kontowert-Satz → sie fielen STILL aus der Summe (heute 4 Trades,
-    # +3.570/+3.600/+3.630/−4.500 $). Liegt am Konto eine Balance-Lesung VOR dem Start (accounts.tv_balance/_at), ist das die Balance vor
-    # dem Trade — wie tv.balance_start. Ohne solche Lesung bleibt es „ohne €" (nicht raten).
-    if _wd_num(tv.get("balance_start")) is None and _wd_num(base.get("balance_start")) is None \
-            and _wd_num(fin.get("balance_end")) is None and _wd_num(fin.get("master_balance")) is None:
-        kb, kb_at, st0 = _wd_num(acc.get("tv_balance")), _ap_ts(acc.get("tv_balance_at")), _ap_ts(p.get("started_at"))
-        if kb and kb > 0 and kb_at is not None and st0 is not None and kb_at <= st0:
-            tv = dict(tv, balance_start=kb)
-            base = dict(base, tv=tv)
-            p = dict(p, mt5_baseline=base)
+    # Konto-Lesung vor dem Start als Balance vorher (ap_bal_vorher_konto, 08.10.2026) — auch für Kontowert/Polster unten (geblowt/bestanden)
+    p = ap_bal_vorher_konto(p, acc)
+    base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+    tv = base.get("tv") if isinstance(base.get("tv"), dict) else {}
     # Echo meldet die Endbalance als final.master_balance — für die Satz-Kette der Hypo-Bilanz (Balance vorher = Ende − P&L) wie balance_end
     p_satz = p
     if _wd_num(fin.get("balance_end")) is None and _wd_num(fin.get("master_balance")) is not None:
