@@ -16865,7 +16865,15 @@ def _ap_plaene_mit_hand(params):
 
 AP_STAND_FELDER = ("id,user_id,master_account_id,master_firm,master_name,status,richtung,master_tp,master_sl,master_contracts,"
                    "master_symbol,master_symbol_root,route,slave_account_id,hedge_eur,start_um,started_at,start_um_gestartet_at,"
-                   "orbit_gesendet_at,auto_plan,auto_bestaetigt_at,created_at")
+                   "orbit_gesendet_at,auto_plan,auto_bestaetigt_at,created_at,notes")
+AP_NOTES_MAX = 500          # notes an Delta/ids-Zeilen (08.10.2026: Ø 79, max 108 Zeichen) — Anfang mit „Auto-Planer · …" bleibt
+
+
+def _ap_notes_kurz(n):
+    """notes für die Antwort (Slave 7, „Wartet auf Start" bei fremden IDs): höchstens AP_NOTES_MAX Zeichen, der Anfang bleibt —
+    dort steht die Auto-Planer-Zeile, „✎ Hand …"-Zeilen hängen hinten an."""
+    t = str(n or "").strip()
+    return (t[:AP_NOTES_MAX - 1].rstrip() + "…" if len(t) > AP_NOTES_MAX else t) or None
 
 
 def _ap_iso_min(iso, mitternacht):
@@ -17081,7 +17089,9 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
                                               letzt_je.get(str(p.get("master_account_id") or ""))),   # 08.10.2026
                  # BODEN (08.10.2026, Balance-Balken Slave 4): Liquidations-Level aus den Firmen-Kernwerten wie im Planer
                  **ap_boden_sicher(firmen, a, acc_balance_wahl(a, echo_bal, dup_bal)[0], peaks),
-                 konto_id=str(p.get("master_account_id") or "") or None)   # Frontend tplDaten ordnet Konto/Balance darüber zu (08.10.2026)
+                 konto_id=str(p.get("master_account_id") or "") or None,
+                 # Slave 7 (08.10.2026, „Wartet auf Start" fremder IDs): notes + die Balance, mit der der Planer rechnet — nur Anzeige
+                 notes=_ap_notes_kurz(p.get("notes")), balance=round(float(bal(a)), 2) if bal(a) is not None else None)   # Frontend tplDaten ordnet Konto/Balance darüber zu (08.10.2026)
         z["einsatz_eur"] = z["einsatz_abs"] * (1 if r == "buy" else -1) if r in ("buy", "sell") else None
         geplant_rows.append(z)
         if b["hinweis"]:
@@ -17217,7 +17227,8 @@ def ap_delta_antwort(stand, sicht_uid=None):
                                       # schon an der Zeile, kamen aber ohne diese Liste nie im Frontend an (.1224)
                                       "balance_live", "boden", "boden_min", "boden_art",
                                       # 08.10.2026: liest tplDaten (Braucht dich: Start-Fehler/geclaimt fremder Pläne, Konto-Zuordnung)
-                                      "konto_id", "start_fehler", "geclaimt")}
+                                      "konto_id", "start_fehler", "geclaimt",
+                                      "notes", "balance")}
                for z in sorted(stand["geplant"], key=lambda z: (z.get("start_min") or 0, z["plan_id"]))]
     hinweise = list(stand["hinweise"]) + ([{"grund": h_umpl}] if h_umpl else [])
     # Master 06.10.2026 (Frontend .1084 schon live): band als ZAHL in €/Pkt (± um null, jetzt), Details in band_info; je
@@ -17625,7 +17636,9 @@ def admin_auto_plan_ids():
                           "start_um": p.get("start_um"), "menge": _wd_num(p.get("master_contracts")),
                           "tp": _wd_num(p.get("master_tp")), "sl": _wd_num(p.get("master_sl")),
                           # Stufe aus den Planer-Notes („Auto-Planer · Etappe · Rest …") — Admin-Reiter Spalte „Stufe" (08.10.2026)
-                          "notes": p.get("notes"), "stufe": (re.search(r"Auto-Planer · ([^·]+)", str(p.get("notes") or "")) or [None, None])[1],
+                          "notes": _ap_notes_kurz(p.get("notes")), "stufe": (re.search(r"Auto-Planer · ([^·]+)", str(p.get("notes") or "")) or [None, None])[1],
+                          # Balance, mit der der Planer rechnet (Slave 7, 08.10.2026) — wie delta.geplant[].balance
+                          "balance": (lambda b: round(float(b), 2) if b is not None else None)(acc_balance_wahl(a, echo_bal, dup_bal)[0] if a else None),
                           "konto_id": str(p.get("master_account_id") or "") or None,
                           "balance_live": ap_balance_live(acc_balance_wahl(a, echo_bal, dup_bal)[3] if a else None,
                                                           letzt_je.get(str(p.get("master_account_id") or ""))),
