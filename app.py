@@ -14507,13 +14507,24 @@ def ap_cfd_ab(zeiten):
         return _ap_hhmm(AP_CFD_AB_STANDARD)
 
 
+# VERTEILEN STATT DURCHRATTERN (08.10.2026, Slave-Terminal 3 — Finn zu Ina: 3× Apex 150k um 03:56/03:57/03:58, 3× FundedNext 100k um
+# 16:58–17:01: „Wenn bei einer ID Trades dran sind, werden alle direkt hintereinander durchgerattert. Das muss nicht sein … über den Tag
+# verteilen. Damit weniger Klumpenrisiko. Aber auch hier aufpassen, dass man nicht aus Versehen gegenhedged"). Abstand Start zu Start:
+AP_ABSTAND_ID_FIRMA_MIN = 60          # Pläne derselben ID × Firma (gruppe) — überschreibbar per zeiten.abstand_id_firma_min
+AP_ABSTAND_ID_MIN = 20                # Pläne derselben ID überhaupt (PC) — zeiten.abstand_id_gesamt_min
+AP_ABSTAND_STUFEN = (1.0, 0.5, 0.25, 0.0)   # passt es nicht ins Fenster: Abstände stufenweise lockern, zuletzt nur die alte PC-Regel
+AP_GROSS_NAH_MIN = 60                 # Große-Folge (ap_einsatz_lage): zwei große gleich gerichtete näher als das zählen immer als Klumpen
+
+
 def ap_zeiten_verteilen(tranchen, zeiten, rnd, frueheste_min=0, info=None, bestehend=None):
     """REIN RECHNEND: Startminute (ab 00:00 deutscher Zeit) je Tranche. tranchen = [{key, user, firma, dauer_min}].
     Fenster nach Anteil (größter Rest), dann reiner Zufall im Fenster. Einzige Zeitregel: dieselbe ID (= PC) nie überlappend
     (+ abstand_id_min) — Finn 06.10.2026 abends: „Kernding: nie zwei Puls-Bots gleichzeitig", keine festen Pausen zwischen
     Firmen oder IDs mehr (zeiten.pause_firma_min wird nicht mehr gelesen). bestehend = [{user, start, dauer_min}] schon
     geplanter Pläne — belegen den PC ihrer ID. → {key: minute}; ohne freien Platz fehlt der Key.
-    info (dict, optional, 06.10.2026 für den Probelauf): je Key {fenster, soll} — ändert nichts an der Verteilung."""
+    info (dict, optional, 06.10.2026 für den Probelauf): je Key {fenster, soll} — ändert nichts an der Verteilung.
+    08.10.2026 (Verteilen): zusätzlich Mindestabstand Start zu Start je ID × Firma (tranche/bestehend[gruppe]) und je ID
+    (AP_ABSTAND_ID_FIRMA_MIN / AP_ABSTAND_ID_MIN); findet sich so kein Platz, gelockert nach AP_ABSTAND_STUFEN bis zur alten Regel."""
     # 07.10.2026: Fenster enden spätestens bei start_bis (16:30 dt); kein Rückfall mehr auf 02:00–20:00 — ist kein Fenster
     # mehr offen, bekommt keine Tranche einen Start („kein freies Zeitfenster mehr")
     bis = ap_start_bis(zeiten)
@@ -14535,35 +14546,47 @@ def ap_zeiten_verteilen(tranchen, zeiten, rnd, frueheste_min=0, info=None, beste
         zuteilung += [(t, i) for t in reihe[k:k + c]]
         k += c
     abst_id = float(zeiten.get("abstand_id_min") or 3)
-    gesetzt, out = [({"user": str(b["user"]), "dauer_min": float(b.get("dauer_min") or 2)}, float(b["start"]))
-                    for b in bestehend or () if b.get("start") is not None], {}
+    gap_f = float(zeiten.get("abstand_id_firma_min") or AP_ABSTAND_ID_FIRMA_MIN)
+    gap_i = float(zeiten.get("abstand_id_gesamt_min") or AP_ABSTAND_ID_MIN)
+    je_id, out = {}, {}               # PC je ID: [(tranche, start)] — nur die eigene ID wird geprüft
+    for b in bestehend or ():
+        if b.get("start") is not None:
+            je_id.setdefault(str(b["user"]), []).append(({"user": str(b["user"]), "dauer_min": float(b.get("dauer_min") or 2),
+                                                          "gruppe": b.get("gruppe")}, float(b["start"])))
 
-    def frei(t, start):
-        for o, s in gesetzt:
-            if str(o["user"]) == str(t["user"]) and start < s + o["dauer_min"] + abst_id and s < start + t["dauer_min"] + abst_id:
+    def frei(t, start, f=1.0):
+        for o, s in je_id.get(str(t["user"]), ()):
+            if start < s + o["dauer_min"] + abst_id and s < start + t["dauer_min"] + abst_id:
+                return False              # alte harte Regel: nie zwei Puls-Starts gleichzeitig auf demselben PC
+            if f > 0 and abs(start - s) < gap_i * f:
+                return False
+            if f > 0 and t.get("gruppe") and o.get("gruppe") == t.get("gruppe") and abs(start - s) < gap_f * f:
                 return False
         return True
 
     for t, fi in zuteilung:
         t = dict(t)
         reihenfolge = [fi] + [j for j in range(len(fenster)) if j != fi]
-        for j in reihenfolge:
-            a, b, _ = fenster[j]
-            treffer = None
-            ober = b - 1 - int(max(0.0, float(t.get("dauer_min") or 2) - 2))   # letztes Konto der Tranche startet noch im Fenster
-            a = max(a, int(t.get("ab_min") or 0))                              # CFD erst ab zeiten.cfd_ab (07.10.2026)
-            if ober < a:
-                continue
-            for _ in range(300):
-                s = rnd.randint(a, ober)
-                if frei(t, s):
-                    treffer = s
+        treffer = None
+        for f in AP_ABSTAND_STUFEN:          # erst mit vollen Abständen in allen Fenstern, dann gelockert
+            for j in reihenfolge:
+                a, b, _ = fenster[j]
+                ober = b - 1 - int(max(0.0, float(t.get("dauer_min") or 2) - 2))   # letztes Konto der Tranche startet noch im Fenster
+                a = max(a, int(t.get("ab_min") or 0))                              # CFD erst ab zeiten.cfd_ab (07.10.2026)
+                if ober < a:
+                    continue
+                for _ in range(300):
+                    s = rnd.randint(a, ober)
+                    if frei(t, s, f):
+                        treffer = s
+                        break
+                if treffer is not None:
+                    je_id.setdefault(str(t["user"]), []).append((t, treffer))
+                    out[t["key"]] = treffer
+                    if info is not None:
+                        info[t["key"]] = {"fenster": fenster[j], "soll": fenster[fi]}
                     break
             if treffer is not None:
-                gesetzt.append((t, treffer))
-                out[t["key"]] = treffer
-                if info is not None:
-                    info[t["key"]] = {"fenster": fenster[j], "soll": fenster[fi]}
                 break
     return out
 
@@ -15882,12 +15905,13 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
         roh_tr.append((key, firm_n, fest, fest_p, rechnung, bew, eins))
     # Große Trades einzeln (Finn 07.10.2026): Schwelle = gross_ab_eur bzw. oberes Viertel der Einsätze dieses Laufs; eine Tranche
     # mit einem großen Konto wird in Einzelkonten mit eigenen Startzeiten aufgeteilt (Schlüssel ID|Firma#n, gruppe ID|Firma =
-    # eine Richtung, Richtungsschutz bleibt)
+    # eine Richtung, Richtungsschutz bleibt). Seit 08.10.2026 (Verteilen, Finn zu Ina „nicht durchrattern"): JEDE Tranche mit mehr als
+    # einem Konto — ap_zeiten_verteilen hält die Teile AP_ABSTAND_ID_FIRMA_MIN auseinander, die gruppe hält die Richtung gleich
     gross_ab = ap_gross_ab([e for t in roh_tr for e in t[6].values()] + [z.get("einsatz_abs") for z in stand["geplant"]],
                            param["gross_ab_eur"])
     abst = zeiten.get("abstand_konto_s") or [60, 120]
     for key, firm_n, fest, fest_p, rechnung, bew, eins in roh_tr:
-        if len(rechnung) > 1 and max(eins.values()) >= gross_ab:
+        if len(rechnung) > 1:
             teile = [(f"{key}#{i + 1}", [(k, w)]) for i, (k, w) in enumerate(rechnung)]
         else:
             teile = [(key, rechnung)]
@@ -15913,8 +15937,9 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     # AP_GEGEN_WUERFE-mal neu gewürfelt, der beste Lauf gilt. Keine harte Grenze, nichts wird deswegen ausgelassen
     fest_ev = [(z["start_min"], z["delta_eur_pkt"]) for z in stand["geplant"]
                if z.get("start_min") is not None and z.get("delta_eur_pkt") is not None]
-    bestehend_pc = [{"user": z["user_id"], "start": z["start_min"], "dauer_min": 2} for z in stand["geplant"]
-                    if z.get("start_min") is not None]
+    bestehend_pc = [{"user": z["user_id"], "start": z["start_min"], "dauer_min": 2,
+                     "gruppe": str(z["user_id"]) + "|" + _ap_norm(z.get("firma"))}       # Abstand je ID × Firma auch zu schon geplanten
+                    for z in stand["geplant"] if z.get("start_min") is not None]
     ek = ap_einsatz_kontext(stand, param)
     ek["gross_ab"] = gross_ab
     ek["fest_ev"] = [(z["start_min"], z["einsatz_eur"]) for z in stand["geplant"]
@@ -16228,12 +16253,14 @@ def ap_verlauf(basis_netto, basis_brutto, ereignisse, band_pct, ab_min=0, bis_mi
             "ueber": ueber}
 
 
-def ap_einsatz_lage(basis_eur, ereignisse, gross_ab=None, ab_min=0, laufzeit_min=None):
+def ap_einsatz_lage(basis_eur, ereignisse, gross_ab=None, ab_min=0, laufzeit_min=None, nah_min=None):
     """REIN RECHNEND (Einsatz, Finn 07.10.2026): ereignisse = [(minute, Einsatz € signiert)] geplanter/neuer Trades, kumuliert ab
     basis_eur (laufende ungehedgte Trades; vor ab_min gestartete zählen ab ab_min). → {netto_eur_max_abs, netto_eur_ende,
     gross_folge (zwei große ≥ gross_ab gleicher Richtung zusammen oder direkt hintereinander, ohne Gegenrichtung dazwischen),
     schlimmst_vz}. Keine harte Grenze — nur Maße für das Optimierer-Ziel. laufzeit_min: ein Trade zählt nur so lange ab Start,
-    die laufenden so lange ab ab_min (Finn 07.10.2026: Long ≈ Short „zu jeder Zeit grob", nicht nur kumuliert über den Tag)."""
+    die laufenden so lange ab ab_min (Finn 07.10.2026: Long ≈ Short „zu jeder Zeit grob", nicht nur kumuliert über den Tag).
+    nah_min (08.10.2026, Verteilen; Standard AP_GROSS_NAH_MIN): zwei große gleicher Richtung, die näher als nah_min starten, zählen
+    auch MIT Gegenrichtung dazwischen als Folge (Finn: wertvolle Konten „nicht auf einmal durchrattern … weniger Klumpenrisiko")."""
     schritte = {}
     for m, e in ereignisse or ():
         if m is None or not e:
@@ -16256,7 +16283,8 @@ def ap_einsatz_lage(basis_eur, ereignisse, gross_ab=None, ab_min=0, laufzeit_min
         alle = [(float(m), float(e)) for m, e in ereignisse or () if m is not None and e]
         gross = sorted((m, e) for m, e in alle if abs(e) >= max(float(gross_ab), 1e-9))
         for (m1, e1), (m2, e2) in zip(gross, gross[1:]):
-            if e1 * e2 > 0 and not any(x * e1 < 0 and m1 <= mm <= m2 for mm, x in alle):
+            nah = AP_GROSS_NAH_MIN if nah_min is None else float(nah_min)
+            if e1 * e2 > 0 and (m2 - m1 < nah or not any(x * e1 < 0 and m1 <= mm <= m2 for mm, x in alle)):
                 folge += 1
     return {"netto_eur_max_abs": round(max_abs), "netto_eur_ende": round(netto), "gross_folge": folge, "schlimmst_vz": vz}
 
@@ -16449,6 +16477,8 @@ def _ap_tranche_frei(t, start, tranchen, zeiten):
     gleichzeitig"): je ID = PC keine Überlappung mit einer anderen Tranche, Laufdauer = Spanne der Konten + 2 min, dazu
     abstand_id_min — dieselbe Regel wie ap_zeiten_verteilen. Firma/IDs untereinander: keine Pause. → None oder Klartext."""
     abst = float((zeiten or {}).get("abstand_id_min") or 3)
+    gap_f = float((zeiten or {}).get("abstand_id_firma_min") or AP_ABSTAND_ID_FIRMA_MIN)
+    gap_i = float((zeiten or {}).get("abstand_id_gesamt_min") or AP_ABSTAND_ID_MIN)
     dauer = t["ende"] - t["start"] + 2
     for o in (tranchen or {}).values():
         if o["key"] == t["key"] or o["user_id"] != t["user_id"]:
@@ -16457,6 +16487,11 @@ def _ap_tranche_frei(t, start, tranchen, zeiten):
         if start < o["start"] + od + abst and o["start"] < start + dauer + abst:
             return (f"PC dieser ID startet um {_ap_hhmm_txt(o['start'])} schon {o.get('firma_name') or o['firma']} — "
                     f"nie zwei Puls-Starts gleichzeitig (Abstand {abst:g} min nach dem Lauf)")
+        # Verteilen (08.10.2026): der Bot schiebt nicht näher zusammen, als der Planer verteilt
+        if o["firma"] == t["firma"] and abs(start - o["start"]) < gap_f:
+            return f"dieselbe ID × Firma startet um {_ap_hhmm_txt(o['start'])} — Abstand mindestens {gap_f:g} min"
+        if abs(start - o["start"]) < gap_i:
+            return f"dieselbe ID startet um {_ap_hhmm_txt(o['start'])} — Abstand mindestens {gap_i:g} min"
     return None
 
 
