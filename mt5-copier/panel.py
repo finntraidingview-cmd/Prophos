@@ -491,7 +491,9 @@ def snapshot():
             "copier_log": clog.get("lines") or [],
             "copier_log_at": clog.get("updated_at"),
             # Echo-Not-Aus (28.08.2026): Zustand fuers Pause/Start-Chip in Prophos
-            "paused": os.path.exists(os.path.join(HERE, "echo_pause.flag"))}
+            "paused": os.path.exists(os.path.join(HERE, "echo_pause.flag")),
+            # Stilles MT5-Update (08.10.2026): Aufgabe da? Builds ausstehend? → Prophos schreibt es nach mt5_live (Ferndiagnose UAC)
+            "mt5_update": _mt5_update_stand()}
 
 
 def patch_config(fname, patch):
@@ -1057,6 +1059,71 @@ def _update_abwarten(install_dir):
     getattr(provision, "update_abwarten", lambda d: None)(install_dir)
 
 
+# UPDATE VOR JEDEM KALTSTART (08.10.2026, Finn bei Chris' Echo-Test: wieder UAC „Client Terminal AVX2" mit
+# liveupdate\terminal64.exe /updateadmin /path:C:\MT5-100kpips21002811 — „ich will die jetzt so fixen, dass die nie wieder
+# kommt"). Die stille Aufgabe (.930) erfasst jeden Instanz-Ordner dynamisch, aber _mt5_update_waechter spielt nur alle
+# 10–15 min ein (der erste Lauf 90–150 s nach dem Panel-Start) und nur bei geschlossenem Terminal. MetaQuotes legt den neuen
+# Build ab, WÄHREND das Terminal läuft; startet Echo (oder ein Klick) das Terminal wieder, bevor der Wächter dran war — nach
+# einem PC-Neustart fast immer —, ruft MT5 selbst /updateadmin auf = UAC. Jetzt prüft jeder Kaltstart zuerst: liegt für GENAU
+# diese Installation ein neuerer Build im liveupdate-Ordner und ist die Aufgabe da, wird er still eingespielt und erst danach
+# gestartet. Windows-Einstellungen bleiben unberührt (UAC an).
+UPDATE_LAEUFT = set()   # install_dir, solange vor dem Start still eingespielt wird (unter HEAL_LOCK)
+
+
+def _update_vor_start_noetig(install_dir):
+    """[(inst, alt, neu)] für DIESE Installation, wenn ein neuerer Build wartet UND die stille Aufgabe steht — sonst None."""
+    try:
+        if not getattr(provision, "update_aufgabe_ok", lambda: False)():
+            return None
+        n = os.path.normcase(os.path.abspath(install_dir))
+        aus = [x for x in provision.update_ausstehend() if os.path.normcase(os.path.abspath(x[0])) == n]
+        return aus or None
+    except Exception as e:
+        print(f"[mt5-update] Prüfung vor dem Start: {type(e).__name__}: {e}", flush=True)
+        return None
+
+
+def _update_einspielen(fname, aus):
+    try:
+        for zeile in provision.mt5_updates_einspielen(aus, max_s=300):
+            print(f"[mt5-update] {fname}: {zeile}", flush=True)
+    except Exception as e:
+        print(f"[mt5-update] {fname}: {type(e).__name__}: {e}", flush=True)
+
+
+def _update_dann_start(fname, install_dir, aus, creds):
+    """Hintergrund: still einspielen (die Instanz gilt so lange als „heilt" — master-order antwortet retry_ok/terminal_heilt,
+    der Echo-V2-Check wartet bis 180 s), danach normal kalt starten — ohne erneute Update-Prüfung (kein Kreislauf)."""
+    try:
+        _update_einspielen(fname, aus)
+    finally:
+        with HEAL_LOCK:
+            UPDATE_LAEUFT.discard(install_dir)
+            HEAL_ACTIVE.discard(install_dir)
+    ok, msg = start_terminal(fname, creds, ohne_update=True)
+    print(f"[mt5-update] {fname}: Terminal nach dem Update {'gestartet' if ok else 'NICHT gestartet'} — {msg}", flush=True)
+
+
+_MT5_UPD_STAND = {"t": 0.0, "wert": None}
+
+
+def _mt5_update_stand():
+    """Für Prophos (mt5_live): steht die stille Aufgabe, wie viele Builds warten? Höchstens alle 5 min neu ermittelt."""
+    if os.name != "nt":
+        return None
+    if time.time() - _MT5_UPD_STAND["t"] < 300 and _MT5_UPD_STAND["wert"] is not None:
+        return _MT5_UPD_STAND["wert"]
+    try:
+        aus = provision.update_ausstehend()
+        w = {"aufgabe_ok": bool(provision.update_aufgabe_ok()), "ausstehend": len(aus),
+             "ordner": [os.path.basename(x[0]) for x in aus][:20], "abgelehnt": os.path.exists(UPDATE_ABGELEHNT),
+             "laeuft": len(UPDATE_LAEUFT)}
+    except Exception as e:
+        w = {"fehler": f"{type(e).__name__}: {e}"[:120]}
+    _MT5_UPD_STAND.update(t=time.time(), wert=w)
+    return w
+
+
 def _mt5_update_waechter():
     if os.name != "nt":
         return
@@ -1302,6 +1369,9 @@ def _heal_ea_inner(fname, cfg, install_dir, started_ts, wait_s, schnell_wenn_nie
     # erneut). Terminal ist aus, die .chr liegen still. Klappt die Injektion,
     # reicht der nackte Start; [StartUp] bleibt nur als Fallback (z.B. frische
     # Installation ohne Profil-Ordner).
+    aus = _update_vor_start_noetig(install_dir)   # neuer Build? erst still einspielen (08.10.2026)
+    if aus:
+        _update_einspielen(fname, aus)
     _update_abwarten(install_dir)  # stilles MT5-Update gerade dran? (01.10.2026)
     if _inject_ea_into_profile(fname, cfg, install_dir):
         subprocess.Popen([os.path.join(install_dir, "terminal64.exe")], cwd=install_dir)
@@ -1661,7 +1731,7 @@ def _ok_dialog_watcher(install_dir, dauer_s=75):
             pass
 
 
-def start_terminal(fname, creds=None):
+def start_terminal(fname, creds=None, ohne_update=False):
     """Startet das Master-Terminal der Instanz — oder holt das LAUFENDE Fenster
     nach vorn. Ein zweiter Start derselben Installation wuerde ein frisches
     Fenster ohne die laufende Sitzung oeffnen, das nach dem Login fragt
@@ -1757,6 +1827,18 @@ def start_terminal(fname, creds=None):
             return True, (f"Terminal läuft, aber im FALSCHEN Konto ({wrong} statt {expected or '?'}) — "
                           f"im Terminal Datei → „Bei Handelskonto anmelden“ auf das richtige Konto wechseln.")
         return True, "Terminal läuft — EA wird geprüft und notfalls automatisch aufgezogen"
+    # Neuer MT5-Build wartet? Erst still einspielen, dann starten — sonst fragt MT5 selbst per UAC (08.10.2026, s. _update_vor_start_noetig)
+    aus = None if ohne_update else _update_vor_start_noetig(install_dir)
+    if aus:
+        with HEAL_LOCK:
+            schon = install_dir in UPDATE_LAEUFT
+            if not schon:
+                UPDATE_LAEUFT.add(install_dir)
+                HEAL_ACTIVE.add(install_dir)
+        if not schon:
+            print(f"[mt5-update] {fname}: neuer Build {'.'.join(map(str, aus[0][2]))} wartet — still einspielen, dann starten.", flush=True)
+            threading.Thread(target=_update_dann_start, args=(fname, install_dir, aus, creds), daemon=True).start()
+        return True, "Neuer MT5-Build wird still eingespielt (ohne Windows-Abfrage) — das Terminal startet gleich danach"
     _update_abwarten(install_dir)  # stilles MT5-Update gerade dran? (01.10.2026)
     try:
         if creds:

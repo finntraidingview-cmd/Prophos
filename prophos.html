@@ -20696,6 +20696,9 @@
             tab_gleich: window._bwGleich || null,
             // Copier-/Bot-Stand des PCs (25.09.2026, Koordination: hedge_solo war null, Copier-Version aus der Cloud unklar) — /api/instances liefert version + bot_version
             copier_version: dd.version || null, bot_version: dd.bot_version || null,
+            // Stilles MT5-Update des PCs (08.10.2026, UAC „Client Terminal AVX2" bei Chris): {aufgabe_ok, ausstehend, ordner, abgelehnt, laeuft}
+            // — per SQL je PC lesbar (mt5_live.status.mt5_update), welche PCs die Aufgabe nicht haben bzw. wo Builds warten
+            mt5_update: dd.mt5_update || null,
             // Kurs-Brücke-Diagnose (25.09.2026): Kerzen vom Reader, gültige Zeilen, letzter Upsert-Fehler, Erstladung —
             // per SQL aus der Ferne lesbar (mt5_live.status.kurs_bruecke), typeof-Guard wie oben
             kurs_bruecke: (typeof epLokal !== 'undefined' && epLokal && epLokal.diag) ? epLokal.diag : null
@@ -41721,7 +41724,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1336'
+  const OS_TAB_BUILD = '2026-09-22.1337'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
