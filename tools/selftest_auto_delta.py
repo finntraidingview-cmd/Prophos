@@ -45,7 +45,7 @@ REIN = ("ap_id_fest", "ap_id_misch", "ap_ext_fehlt", "_ap_norm", "ap_regel_finde
         "_wd_num", "_symbol_wurzel", "_wd_level", "_wd_futures_frontcode", "_ap_gehedgt", "_ap_ende4",
         "ap_ausgleich_param", "ap_firma_key", "ap_ppl_karte", "ap_punktwert", "ap_usd_pro_pkt", "ap_delta", "ap_punkte",
         "ap_rest_punkte", "ap_verlauf", "_ap_gegen_dicht", "ap_dicht_paare", "ap_richtungen_delta", "ap_fenster_von", "ap_wd_block_starts",
-        "_ap_tranchen", "_ap_tranche_frei", "ap_szenario_trade", "ap_szenario_knicke", "ap_szenario_kurve", "ap_szenario_lage", "ap_szenario_trade_aus_zeile", "_ap_gegen_firma", "_ap_id_konflikt", "_ap_firma_konflikt", "ap_verteil_gruppen", "ap_verteilung", "ap_umplanen", "ap_eingriff_pruefen", "ap_start_bis", "ap_einsatz_lage", "ap_gross_ab", "ap_consistency_etappe", "ap_regel_konto", "ist_topstep_express", "ap_cfd_ab",
+        "_ap_tranchen", "_ap_tranche_frei", "ap_szenario_trade", "ap_szenario_knicke", "ap_szenario_kurve", "ap_szenario_lage", "ap_szenario_trade_aus_zeile", "_ap_gegen_partner", "_ap_gegen_firma", "_ap_id_konflikt", "_ap_firma_konflikt", "ap_verteil_gruppen", "ap_verteilung", "ap_umplanen", "ap_eingriff_pruefen", "ap_start_bis", "ap_einsatz_lage", "ap_gross_ab", "ap_consistency_etappe", "ap_regel_konto", "ist_topstep_express", "ap_cfd_ab",
         "ap_richtung_konflikte", "lt_echo_live_wahl", "lt_echo_felder",
         "ap_balance_live", "ap_letzt_je_konto", "_ap_boden", "ap_boden_konto", "ap_boden_sicher", "ap_boden_zeile", "_ap_notes_kurz", "_ap_hand_spalte_fehlt", "_ap_plaene_mit_hand", "liq_peak", "_ap_peaks", "_liq_verlauf_laden")   # 08.10.2026: Balance live (Guard/Delta/ids), Boden für den Balance-Balken
 IO = ("_ap_gehedgt_plan", "_ap_bewerten", "_ap_iso_min", "_ap_stand_laden", "_ap_stand_plaene", "_ap_min_iso",
@@ -314,9 +314,14 @@ def main():
     hyst0 = a["ap_umplanen"](plaene, 0.0, 10.0, jm, ZEITEN, 15, random.Random(3), id_fest=fest_v, hysterese=0)
     check([x["plan_id"] for x in hyst0["aenderungen"]] == [x["plan_id"] for x in erg["aenderungen"]], "Hysterese 0 → identisch zur alten Rechnung")
     check(a["AP_RUHE_JE_PLAN_MIN"] == 30 and a["AP_HYSTERESE_EUR"] == 200.0, "Dämpfungs-Konstanten: 30 min Ruhe je Plan, 200 € Hysterese (Vorschlag 1)")
-    einzel = a["ap_umplanen"]([plaene[0], dict(plaene[1], richtung="buy")], 5.0, 5.0, jm, ZEITEN, 15, random.Random(3), schritte=1)
+    # seit .1302 sperrt ein geplanter Plan einer anderen ID derselben Firma die Gegenrichtung über seine Laufzeit (120 min) — x2 liegt
+    # deshalb 200 min hinter x1, damit die Drehung erlaubt bleibt
+    einzel = a["ap_umplanen"]([plaene[0], dict(plaene[1], richtung="buy", start_min=820)], 5.0, 5.0, jm, ZEITEN, 15, random.Random(3), schritte=1)
     check([x["plan_id"] for x in einzel["aenderungen"]] in (["x1"], ["x2"]) and einzel["aenderungen"][0]["art"] == "richtung",
-          "Bot tauscht eine Tranche — dieselbe Firma bei der anderen ID darf gegenläufig bleiben")
+          "Bot tauscht eine Tranche — dieselbe Firma bei der anderen ID darf außerhalb der Laufzeit gegenläufig bleiben")
+    eng = a["ap_umplanen"]([plaene[0], dict(plaene[1], richtung="buy")], 5.0, 5.0, jm, ZEITEN, 15, random.Random(3), schritte=1)
+    check(not [x for x in eng["aenderungen"] if x["art"] == "richtung"],
+          "x2 nur 60 min später (in der Laufzeit) → keine Drehung von x1 (Gegenhedge über IDs)")
 
     # ── A5 Manueller Eingriff: nur Richtungsschutz oder PC-Überlappung lehnen ab ─────────────────────────────────────────
     ep = a["ap_eingriff_pruefen"]

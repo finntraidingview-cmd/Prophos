@@ -118,7 +118,8 @@ def main():
     check(all(st[i] >= start0[i] for i in st) and all(x["nach_richtung"] == x["von_richtung"] for x in alle),
           "nur nach hinten, Richtung nie geändert")
     check(all(len(g) <= 1 for g in je_lauf), "höchstens eine Gruppe je Bot-Lauf")
-    # Finn (Buy) hält seit 08.10.2026 AP_GEGEN_FIRMA_MIN (30) zu den Shorts von Jacob/Pascal — Gegenhedge über IDs gesperrt
+    # Finn (Buy) hält AP_GEGEN_FIRMA_MIN (30) zu den Shorts von Jacob/Pascal. Seit .1302 sperrt zwar die ganze Laufzeit, aber Finns Buy
+    # stand schon in deren Laufzeit (Bestand) — die Verteilung zieht ihn darin auseinander, baut keinen neuen Partner und hält ±30 hart
     check(all(st[i] - start0[i] <= 45 for i in st), f"nur so weit wie nötig + Streuung (≤ 45 min: {[round(st[i] - start0[i]) for i in st]})")
     check(all(abs(st["finn"] - st[k]) > a["AP_GEGEN_FIRMA_MIN"] for k in ("jacob", "pascal")),
           "Finn (Buy) > 30 min zu den Shorts der anderen IDs derselben Firma — kein Gegenhedge über IDs")
@@ -151,8 +152,37 @@ def main():
           and not sperre(200, "jacob", "fundednext", "buy", [], lauf_g, 190, 60) and not sperre(200, "chris", "fundednext", "sell", [], lauf_g, 190, 60),
           "_ap_gegen_firma: nur andere ID + gleiche Firma + Gegenrichtung sperrt")
     check(sperre(200, "chris", "fundednext", "buy", [(225, "sell", "jacob", "fundednext")], [], 100, 60)
-          and not sperre(200, "chris", "fundednext", "buy", [(235, "sell", "jacob", "fundednext")], [], 100, 60),
-          "geplante Gegenrichtung einer anderen ID: ≤ 30 min gesperrt, 35 min frei")
+          and sperre(200, "chris", "fundednext", "buy", [(235, "sell", "jacob", "fundednext")], [], 100, 60)
+          and sperre(200, "chris", "fundednext", "buy", [(140, "sell", "jacob", "fundednext")], [], 100, 60)
+          and not sperre(200, "chris", "fundednext", "buy", [(261, "sell", "jacob", "fundednext")], [], 100, 60)
+          and not sperre(200, "chris", "fundednext", "buy", [(139, "sell", "jacob", "fundednext")], [], 100, 60)
+          and sperre(200, "chris", "fundednext", "buy", [(225, "sell", "jacob", "fundednext")], [], 100, 10),
+          "geplante Gegenrichtung einer anderen ID: über die Laufzeit (60) in beide Richtungen gesperrt, 61 min frei; Laufzeit < 30 → 30")
+    # ── 2b'' Befund Slave 2 Lauf 02:39:42 UTC: Band-Drehung Jacob The5%ers 72c2a073 sell → BUY 13:17 UTC, Moritz SELL 12:46 UTC (31 min davor)
+    U_ = a["ap_umplanen"]
+    m0 = lambda h, m: h * 60 + m + 120     # noqa: E731 — UTC → dt (Sommerzeit)
+    jm5 = m0(2, 39)
+    p5 = [dict(plan("jac_t5", "jacob", "the5ers", m0(13, 17), "sell"), delta_abs=5.0, einsatz_abs=500.0, bestaetigt=False),
+          dict(plan("mor_t5", "moritz", "the5ers", m0(12, 46), "sell"), delta_abs=1.0, einsatz_abs=400.0, aenderbar=False, fest_durch="Handplan")]
+    Z5 = {"fenster": [["00:00", "14:30", 50], ["14:30", "16:30", 50]], "start_bis": "16:30", "abstand_id_min": 3}
+
+    def drehungen():
+        n = 0
+        for seed in range(20):
+            e5 = U_(p5, -12.0, 12.0, jm5, Z5, 15, random.Random(seed), einsatz={"basis": -400.0, "brutto": 400.0, "gross_ab": 100000.0,
+                                                                             "laufzeit": 180})
+            n += sum(1 for x in e5["aenderungen"] if x["plan_id"] == "jac_t5" and x["nach_richtung"] == "buy"
+                     and abs(x["nach_start_min"] - m0(12, 46)) <= 180)
+        return n
+    gedreht = drehungen()
+    partner_neu = a["_ap_gegen_partner"]                       # Gegenprobe: Regel vor .1302 (geplante nur ±30 min um den Start)
+    a["_ap_gegen_partner"] = lambda t, u, f, r, pl, la, jm, lz=None: {x for x in partner_neu(t, u, f, r, pl, la, jm, lz)
+                                                                      if x[0] == "lauf" or abs(float(t) - x[1]) <= a["AP_GEGEN_FIRMA_MIN"]}
+    gedreht_alt = drehungen()
+    a["_ap_gegen_partner"] = partner_neu
+    check(gedreht == 0 and gedreht_alt > 0 and sperre(m0(13, 17), "jacob", "the5ers", "buy", [(m0(12, 46), "sell", "moritz", "the5ers")], [], jm5, 180),
+          f"Jacob The5%ers 13:17 UTC wird nicht auf BUY gedreht, solange Moritz' SELL 12:46 UTC (31 min davor, Laufzeit 180) steht "
+          f"({gedreht}; Gegenprobe alte ±30-Regel dreht {gedreht_alt}/20)")
 
     # ── 2b' BAND-SCHRITT (Prüfer Slave 2 zu 3d43e4e): weder Drehen noch Verschieben neben eine Gegenrichtung einer anderen ID je Firma ──
     Zb = {"fenster": [["00:00", "14:30", 50], ["14:30", "16:30", 50]], "start_bis": "16:30", "abstand_id_min": 3}

@@ -16715,24 +16715,37 @@ AP_GEGEN_FIRMA_MIN = 30                  # andere ID, gleiche Firma, Gegenrichtu
 
 
 def _ap_gegen_firma(t, uid, firma, richtung, plaene, laufend, jetzt_min, laufzeit_min=None):
+    """True = Startzeit t gesperrt (Gegenhedge über IDs je Firma), Regel siehe _ap_gegen_partner."""
+    return bool(_ap_gegen_partner(t, uid, firma, richtung, plaene, laufend, jetzt_min, laufzeit_min))
+
+
+def _ap_gegen_partner(t, uid, firma, richtung, plaene, laufend, jetzt_min, laufzeit_min=None):
     """REIN RECHNEND: GEGENHEDGE ÜBER IDs (08.10.2026, Master/Finn: „aufpassen, dass man nicht aus Versehen gegenhedged" — Trockenlauf
-    hätte Chris FundedNext BUY auf 05:57 vorgezogen, während Jacob FundedNext SELL lief). True = Startzeit t gesperrt: eine ANDERE ID bei
+    hätte Chris FundedNext BUY auf 05:57 vorgezogen, während Jacob FundedNext SELL lief). Partner, die t sperren: eine ANDERE ID bei
     derselben Firma (Schlüssel wie je[..]["firma"]) läuft in Gegenrichtung (laufend = [{user_id, firma, richtung, start?}], zählt bis
-    max(start + laufzeit, jetzt + AP_GEGEN_FIRMA_MIN)) oder startet in Gegenrichtung höchstens AP_GEGEN_FIRMA_MIN vor/nach t
+    max(start + laufzeit, jetzt + AP_GEGEN_FIRMA_MIN)) oder ist in Gegenrichtung geplant und die Laufzeiten berühren sich
+    (|t − s| ≤ max(laufzeit, AP_GEGEN_FIRMA_MIN), seit 08.10.2026 — vorher nur ±AP_GEGEN_FIRMA_MIN um den Start)
     (plaene = [(start, richtung, user_id, firma)])."""
     lz = float(laufzeit_min or AP_VERTEIL_GEGEN_MIN)
+    # LAUFZEIT AUCH BEI GEPLANTEN (Master 08.10.2026, Befund Slave 2 zum Lauf 02:39:42 UTC: Band-Drehung Jacob The5%ers 72c2a073 → BUY
+    # 13:17 UTC, Moritz The5%ers SELL d83e1d2f 12:46 — 31 min davor, knapp außerhalb ±AP_GEGEN_FIRMA_MIN und damit erlaubt, obwohl
+    # Moritz' Sell dann noch ~2 h läuft): gesperrt, wenn t in [s − 30, s + max(Laufzeit, 30)] (ich starte in seinen Lauf) ODER s in
+    # [t − 30, t + max(Laufzeit, 30)] (er startet in meinen) — zusammen |t − s| ≤ max(Laufzeit, AP_GEGEN_FIRMA_MIN)
+    # → Menge der Partner (("plan", s, u) / ("lauf", Index)), die t sperren; _ap_gegen_firma = „nicht leer"
+    fenster = max(lz, float(AP_GEGEN_FIRMA_MIN))
+    out = set()
     if richtung not in ("buy", "sell"):
-        return False
+        return out
     for s, r, u, f in plaene or ():
-        if str(u) != str(uid) and f == firma and r in ("buy", "sell") and r != richtung and abs(float(t) - float(s)) <= AP_GEGEN_FIRMA_MIN:
-            return True
-    for x in laufend or ():
+        if str(u) != str(uid) and f == firma and r in ("buy", "sell") and r != richtung and abs(float(t) - float(s)) <= fenster:
+            out.add(("plan", float(s), str(u)))
+    for n, x in enumerate(laufend or ()):
         if str(x.get("user_id")) == str(uid) or x.get("firma") != firma or x.get("richtung") not in ("buy", "sell") or x.get("richtung") == richtung:
             continue
         ende = max((float(x["start"]) + lz) if x.get("start") is not None else float(jetzt_min) + lz, float(jetzt_min) + AP_GEGEN_FIRMA_MIN)
         if float(t) < ende:
-            return True
-    return False
+            out.add(("lauf", n))
+    return out
 
 
 def _ap_firma_konflikt(i, je, zustand, gestartet=(), gap=None):
@@ -16865,10 +16878,17 @@ def ap_verteilung(gruppe, je, zustand, jetzt_min, zeiten, rnd, gestartet=None, l
                   if str(x.get("user_id")) != uid and x.get("firma") == firma and x.get("start") is not None]
 
         gegen_pl = [(neu.get(k, zustand[k]["start"]), zustand[k]["richtung"], str(je[k]["user_id"]), je[k]["firma"]) for k in zustand if k != i]
+        # BESTAND (08.10.2026, mit der Laufzeit-Sperre bei geplanten): steht der Plan schon in einer Gegenrichtung einer anderen ID, darf
+        # das Auseinanderziehen ihn innerhalb DIESER Überschneidung verschieben (keine neuen Partner) — sonst bliebe der Klumpen stehen
+        # (Live-Fall Ina FundedNext 3 Sells in 3 min neben X' Buys). Gebaut wird dabei nichts Neues.
+        bestand = _ap_gegen_partner(s0, uid, firma, richtung, gegen_pl, laufend, jetzt_min, laufzeit_min)
 
         def ok(t, f):
-            if _ap_gegen_firma(t, uid, firma, richtung, gegen_pl, laufend, jetzt_min, laufzeit_min):
-                return False                                       # Gegenhedge über IDs: andere ID läuft/startet gegenläufig
+            p_ = _ap_gegen_partner(t, uid, firma, richtung, gegen_pl, laufend, jetzt_min, laufzeit_min)
+            if p_ and not p_ <= bestand:
+                return False                                       # Gegenhedge über IDs: andere ID läuft/startet gegenläufig (neu)
+            if any(x[0] == "lauf" or abs(float(t) - x[1]) <= AP_GEGEN_FIRMA_MIN for x in p_):
+                return False                                       # hart wie vor .1302: nie in einen laufenden, nie ±30 min um einen Start
             for s, r in fremd:
                 if abs(t - s) < gfirma:
                     return False                                   # Firmen-Abstand zu anderen IDs — hart
