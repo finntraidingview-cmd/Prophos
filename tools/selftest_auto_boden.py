@@ -93,9 +93,9 @@ def main():
     check(ns["ap_boden_sicher"](None, {"id": "k-1", "account_type": "challenge"}, 149500, {"k-1": 153000}, regel=td)["boden"] == 148500.0,
           "ap_boden_sicher: Höchststand aus peaks je Konto-id")
     # _ap_peaks: Ladefehler → {} (Boden schätzt dann ab Start/Balance)
-    ns["_liq_verlauf_laden"] = lambda ids: (_ for _ in ()).throw(ConnectionError("weg"))
+    ns["_liq_verlauf_laden"] = lambda ids, **kw: (_ for _ in ()).throw(ConnectionError("weg"))
     check(ns["_ap_peaks"]([{"id": "k-1"}]) == {}, "_ap_peaks: Ladefehler → leer, kein Abbruch")
-    ns["_liq_verlauf_laden"] = lambda ids: [{"id": "p1", "master_account_id": "k-1", "konto_typ": "challenge", "ended_at": "2026-10-07T20:00:00+00:00",
+    ns["_liq_verlauf_laden"] = lambda ids, **kw: [{"id": "p1", "master_account_id": "k-1", "konto_typ": "challenge", "ended_at": "2026-10-07T20:00:00+00:00",
                                              "bal_end": 153000}, {"id": "p2", "master_account_id": "k-1", "konto_typ": "phase1",
                                              "ended_at": "2026-10-01T20:00:00+00:00", "bal_end": 160000}]
     pk = ns["_ap_peaks"]([{"id": "k-1", "account_type": "challenge"}])

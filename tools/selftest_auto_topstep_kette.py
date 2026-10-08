@@ -95,8 +95,8 @@ def main():
     check((v["tp"], v["sl"]) == (2500, 5200), f"T1 +2.000 → TP2 2.500 / SL2 5.200 (Tag endet am DLL bzw. MLL) ({v['tp']} / {v['sl']})")
     v, _ = T2(dict(kd, tagesziel=1525), 157500, 156000)
     check((v["tp"], v["sl"]) == (3025, 1700), f"letzter Tag (Rest 1.525): T1 −1.500 → TP2 3.025 / SL2 1.700 ({v['tp']} / {v['sl']})")
-    g = T2(kd, 150000, 145520)
-    check(g[0] is None and "MLL geblowt" in g[1], f"T1 bis an den MLL → geblowt, kein Trade 2 ({g[1]})")
+    g = T2(kd, 150000, 145490)
+    check(g[0] is None and "MLL geblowt" in g[1], f"T1 bis unter den MLL → geblowt, kein Trade 2 ({g[1]})")
     g = T2(kd, 150000, 147000)
     check(g[0] is None and "Tageslimit" in g[1], f"T1 −3.000 (DLL) → Tageslimit, kein Trade 2 ({g[1]})")
     fertig = a["ap_kette_t1_fertig"]
@@ -200,8 +200,12 @@ def main():
             "mt5_baseline": {"kette": {"nr": 2, "vor": "r-x1", "verlust_grenze": 3200, "daily_usd": 3000, "mll": 145500, "balance_start_tag": 150000},
                              "tv": {"balance_start": 148750}, "final": {"balance_end": 147000, "quelle": "puls", "plattform": "tsx"}}},
            {"id": "r-mll", "route": "tsv2", "status": "review", "user_id": U1, "updated_at": "m", "ended_at": None,
-            "mt5_baseline": {"kette": {"nr": 2, "vor": "r-x2", "verlust_grenze": 3200, "daily_usd": 3000, "mll": 147500, "balance_start_tag": 150000},
-                             "tv": {"balance_start": 148750}, "final": {"balance_end": 147510, "quelle": "puls", "plattform": "tsx"}}},
+            "mt5_baseline": {"kette": {"nr": 2, "vor": "r-x2", "verlust_grenze": 3200, "daily_usd": 3000, "mll": 147500, "balance_start_tag": 151000},
+                             "tv": {"balance_start": 149750}, "final": {"balance_end": 147400, "quelle": "puls", "plattform": "tsx"}}},
+           # reiner DLL-Tag genau am MLL (Abstand 3.000): −3.000 → Tageslimit, NIE blown (sichere Variante, Prüfung Slave 2)
+           {"id": "r-dllmll", "route": "tsv2", "status": "review", "user_id": U1, "updated_at": "dm", "ended_at": None,
+            "mt5_baseline": {"kette": {"nr": 2, "vor": "r-x3", "verlust_grenze": 3200, "daily_usd": 3000, "mll": 147500, "balance_start_tag": 150500},
+                             "tv": {"balance_start": 149250}, "final": {"balance_end": 147500, "quelle": "puls", "plattform": "tsx"}}},
            # Balance-Sprung (08.10.2026): Balance −2.500, RP&L des Tages ab dem Klick nur −500 (z. B. Auszahlung dazwischen)
            dict(t1, id="r-sprung", route="tsv2", status="review", updated_at="z",
                 mt5_baseline=dict(t1["mt5_baseline"], tv={"balance_start": 150000, "today_pnl_start": 0, "datum_start": "2026-10-09"},
@@ -213,7 +217,7 @@ def main():
     weg = a["ap_kette_abhaken"](jetzt)
     u1 = next((u for f, u in upds if f["id"] == "eq.r-t1"), {})
     u2 = next((u for f, u in upds if f["id"] == "eq.r-t2"), {})
-    check(sorted(weg) == ["r-dll", "r-mll", "r-t1", "r-t2", "r-t2b"] and u1.get("status") == "completed" and u1.get("master_pl") == -2500.0
+    check(sorted(weg) == ["r-dll", "r-dllmll", "r-mll", "r-t1", "r-t2", "r-t2b"] and u1.get("status") == "completed" and u1.get("master_pl") == -2500.0
           and u1.get("pl_quelle") == "tv" and u1.get("konto_typ") == "challenge" and not u1.get("blown")
           and all(f.get("status") == "eq.review" and f.get("updated_at") for f, _u in upds),
           f"Trade 1 nach genauer Lesung automatisch erledigt (P&L −2.500, pl_quelle tv, Sperre review/updated_at) — {weg}")
@@ -227,7 +231,9 @@ def main():
     um = next((u for f, u in upds if f["id"] == "eq.r-mll"), {})
     check(ud.get("status") == "completed" and ud.get("master_pl") == -1750.0 and not ud.get("blown"),
           f"DLL: Tag −3.000 (147.000, MLL 145.500) → erledigt, NICHT blown — Tageslimit ({ud})")
-    check(um.get("status") == "completed" and um.get("blown") is True, f"MLL: Tag endet bei 147.510 ≤ MLL 147.500 + 50 → blown ({um})")
+    check(um.get("status") == "completed" and um.get("blown") is True, f"MLL: Tag −3.600 endet bei 147.400 ≤ MLL 147.500 → blown ({um})")
+    udm = next((u for f, u in upds if f["id"] == "eq.r-dllmll"), {})
+    check(udm.get("status") == "completed" and not udm.get("blown"), f"reiner DLL-Tag (−3.000) genau am MLL → Tageslimit, nicht blown ({udm})")
     check("eq.r-relativ" not in [f["id"] for f, _u in upds] and any(i == "r-relativ" and "unplausibel" in g for i, g in gruende_ab),
           "Start absolut 150.000, Ende relativ 2.000 → nicht abgehakt, Grund „unplausibel — von Hand abhaken“ (Prüfer Slave 2)")
     check("eq.r-sprung" not in [f["id"] for f, _u in upds] and any(i == "r-sprung" and "Balance-Sprung" in g and "Differenz -2.000" in g for i, g in gruende_ab),

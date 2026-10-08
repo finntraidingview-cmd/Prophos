@@ -10859,9 +10859,11 @@ LIQ_VERLAUF_CACHE_S = 60
 _liq_verlauf_cache = {}
 
 
-def _liq_verlauf_laden(acc_ids):
+def _liq_verlauf_laden(acc_ids, streng=False):
     """Belegte Balances (tv.balance_start, final.balance_end) aller Orbit-/Topstep-V2-Pläne der Konten, ohne Zeitgrenze (der Höchststand
-    kann älter als 14 Tage sein) — je Konto 60 s gecacht, Fehler → [] (dann rechnet der Boden ab Kontogröße bzw. Start-Balance)."""
+    kann älter als 14 Tage sein) — je Konto 60 s gecacht, Fehler → [] (dann rechnet der Boden ab Kontogröße bzw. Start-Balance).
+    streng=True (Topstep-Kette mit DLL, Prüfung Slave 2 08.10.2026): der Fehler wird weitergereicht — dort hängt eine Handelsentscheidung
+    (MLL) daran, ein stilles [] ergäbe einen zu tiefen MLL."""
     jetzt, out, fehlt = time.time(), [], []
     for a in sorted({str(x) for x in acc_ids if x}):
         c = _liq_verlauf_cache.get(a)
@@ -10883,6 +10885,8 @@ def _liq_verlauf_laden(acc_ids):
                 out += l
     except Exception as e:
         print(f"[liq-verlauf] ⚠️ {type(e).__name__}: {e}", flush=True)
+        if streng:
+            raise
     return out
 
 
@@ -14582,7 +14586,7 @@ def ap_kette_trade2(t1_kette, balance_start, balance_end, regel, kette, u_menge)
     if e1 > grenze or e1 < -(float(regel.get("dd_usd") or grenze) + 1500):
         return None, f"Ergebnis von Trade 1 unplausibel ({e1:+,.0f} $, Balance-Basis prüfen) — von Hand".replace(",", ".")
     mll = _wd_num((t1_kette or {}).get("mll"))
-    if mll is not None and float(balance_end) <= mll + 50:
+    if mll is not None and float(balance_end) <= mll:
         return None, f"Trade 1 hat das Konto am MLL geblowt ({e1:+.0f} $, Balance {float(balance_end):,.0f}) — kein Trade 2".replace(",", ".").replace(". Balance", ", Balance")
     if mll is None and regel.get("dd_usd") and e1 <= -float(regel["dd_usd"]):
         return None, f"Trade 1 hat das Konto geblowt ({e1:+.0f} $) — kein Trade 2"
@@ -14752,16 +14756,17 @@ def ap_boden_zeile(regel, a, balance, bal_stand):
     return out
 
 
-def _ap_peaks(konten):
+def _ap_peaks(konten, streng=False):
     """konto_id → höchste belegte Balance (liq_peak, gleiche Phase) für ap_boden_konto — Daten aus _liq_verlauf_laden (60 s Cache,
-    wie der Radar). Nur Anzeige: jeder Fehler → {} (dann schätzt der Boden ab Start bzw. aktueller Balance)."""
+    wie der Radar). Anzeige: jeder Fehler → {} (dann schätzt der Boden ab Start bzw. aktueller Balance). streng=True (MLL der Topstep-
+    Kette): Fehler → None, damit der Planer „MLL nicht prüfbar" melden kann statt mit zu tiefem MLL zu planen."""
     try:
         konten = [a for a in konten or () if a and a.get("id")]
-        verlauf = _liq_verlauf_laden([a["id"] for a in konten])
+        verlauf = _liq_verlauf_laden([a["id"] for a in konten], streng=streng)
         return {str(a["id"]): liq_peak({}, a, None, verlauf) for a in konten}
     except Exception as e:
         print(f"[auto-plan] ⚠️ boden/peak: {type(e).__name__}: {e}", flush=True)
-        return {}
+        return None if streng else {}
 
 
 def _ap_hhmm(s):
@@ -16749,15 +16754,20 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     for k in kandidaten:
         tranchen.setdefault(k["tkey"], []).append(k)
     tr_info, plan_roh, roh_tr = {}, [], []
-    # Topstep-Kette mit DLL (08.10.2026): höchster belegter Tagesschluss je Konto für den MLL — nur für Kettenkonten (eine Abfrage, 60 s Cache)
-    peaks_kette = _ap_peaks([k["a"] for k in kandidaten if ap_kette_regel(k["regel"])]) if any(ap_kette_regel(k["regel"]) for k in kandidaten) else {}
+    # Topstep-Kette mit DLL (08.10.2026): höchster belegter Tagesschluss je Konto für den MLL — nur für Kettenkonten (eine Abfrage, 60 s Cache).
+    # Lesefehler (streng → None): Kettenkonten mit DLL bekommen KEINEN Plan („MLL nicht prüfbar", Prüfung Slave 2) — nie mit zu tiefem MLL
+    # planen. Ein Konto ohne jeden belegten Stand (frisch) hat peak None → MLL ab Größe/Balance, das ist richtig.
+    peaks_kette = _ap_peaks([k["a"] for k in kandidaten if ap_kette_regel(k["regel"])], streng=True) if any(ap_kette_regel(k["regel"]) for k in kandidaten) else {}
     for key, liste in tranchen.items():
         u = {x: rnd.random() for x in ("tp", "sl", "menge", "puffer")}
         rechnung = []
         for k in liste:
             # Topstep-Kette: eigener Zufall je Konto (sonst hätten alle Topstep-Konten einer ID dieselben SL/TP/Kontrakte)
             u_k = {x: rnd.random() for x in ("tp", "sl", "menge", "puffer")} if ap_kette_regel(k["regel"]) else u
-            w, grund = ap_konto_rechnen(k["regel"], k["a"]["account_type"], k["bal"], u_k, peak=peaks_kette.get(str(k["a"].get("id"))))
+            if peaks_kette is None and (ap_kette_regel(k["regel"]) or {}).get("daily_usd") and k["a"].get("account_type") == "challenge":
+                ausgelassen.append(dict(k["zeile"], grund="MLL nicht prüfbar (Verlauf nicht lesbar) — kein Kettenplan"))
+                continue
+            w, grund = ap_konto_rechnen(k["regel"], k["a"]["account_type"], k["bal"], u_k, peak=(peaks_kette or {}).get(str(k["a"].get("id"))))
             if grund and "Boden" in grund:
                 # „Balance auf/unter dem Boden — geblowt?" — Boden/Balance/Stand für die Anzeige (Slave 6, 08.10.2026); k["regel"] ist schon
                 # die Konto-Regel, ap_regel_konto darauf ändert nichts mehr
@@ -19984,8 +19994,10 @@ def ap_kette_abhaken(jetzt=None):
             continue
         upd["pl_quelle"] = "tv"
         if _wd_num(k.get("mll")) is not None:
-            # DLL 3.000 (08.10.2026): ein Tag am Daily Loss Limit ist Tageslimit (soft, Konto lebt) — geblowt nur am MLL
-            if float(bal[1]) <= float(k["mll"]) + 50:
+            # DLL 3.000 (08.10.2026): ein Tag am Daily Loss Limit ist Tageslimit (soft, Konto lebt) — geblowt nur am MLL. Sichere Variante
+            # (Prüfung Slave 2 / Master): Ende ≤ MLL (ohne Toleranz) UND Tagesverlust über DLL + 50 — ein reiner DLL-Tag ist nie geblowt
+            daily_k = float(k.get("daily_usd") or 0)
+            if float(bal[1]) <= float(k["mll"]) and (not daily_k or e_tag < -(daily_k + 50)):
                 upd["blown"] = True
         else:
             dd = AP_KETTE_DD_STANDARD
