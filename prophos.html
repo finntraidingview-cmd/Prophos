@@ -27805,6 +27805,9 @@
     // SOFORT ZU (01.10.2026 abends, Finn: „Abhaken dauert 5–6 s"): Popup zu und Zeile nach „Erledigt", das Backend speichert dahinter;
     // scheitert es, Hinweis + Liste neu laden (die Zeile springt zurück) — das Popup lässt sich dann erneut öffnen
     mklWdErledigtZu(); wdlSofortErledigt(pid)
+    // Knopf sofort wieder frei (08.10.2026, Stub-Test „mehrere abhaken"): das Popup ist zu und _mwdErlId leer — ein Doppelklick läuft ins Leere;
+    // vorher blieb „Erledigt" bis nach Buchung + mklWdLaden (3–6 s) gesperrt und das NÄCHSTE Abhaken verpuffte still
+    if(btn) btn.disabled = false
     // Sofort-Rückmeldung (02.10.2026, Finn: „hängt 3–4 s, bis unten rechts Erledigt kommt") — die Antwort ersetzt sie mit dem Buchungs-Ergebnis
     if(typeof atToast === 'function') atToast('✓ Erledigt · wird gebucht …', 'ok')
     try{
@@ -27827,6 +27830,7 @@
       mklWdRender(); mklChartZeichnen()
     }catch(e){
       if(typeof atToast === 'function') atToast('Abhaken nicht gespeichert: ' + (e && e.message || e) + ' — bitte noch einmal', 'end')
+      wdlLokalVergessen(pid)   // nicht gebucht → die Zeile kommt mit dem nächsten Stand zurück nach „Überprüfen" (08.10.2026)
       try{ if(typeof wdlLaden === 'function') wdlLaden(true) }catch(_){}
     }
     finally{ if(btn) btn.disabled = false }
@@ -28191,6 +28195,7 @@
       const d = await r.json().catch(() => ({}))
       if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
       wdl.daten = d; wdl.fehler = ''
+      wdlLokalAnwenden()   // eben abgehakte/verschobene Zeilen nie mit einem älteren Backend-Stand zurückholen (08.10.2026)
     }catch(e){ wdl.fehler = String((e && e.message) || e) }
     try{
       const { data } = await supabase.from('tv_kurse').select('wurzel,preis,updated_at,stale,modus').order('updated_at', { ascending: false }).limit(12)
@@ -28214,7 +28219,30 @@
   // Abhaken sofort sichtbar (01.10.2026, Finn: „dauert immer so 5, 6 Sekunden, bis die wirklich unten in Erledigt kommen"):
   // nach dem Speichern wartete die Liste auf ihren 15-s-Takt. Jetzt rückt die Zeile lokal nach „Erledigt", sobald der Plan in
   // der DB zu ist; der Neuabruf kurz danach holt Ergebnis/P&L vom Backend nach.
+  /* ABHAKEN OHNE ZURÜCKSPRINGEN (08.10.2026, Finn am Radar, als „Finn + Pascal": „Wenn ich Accounts abhake, wird es rechts schon gebucht, dann
+   * kommen sie visuell wieder, dann gehen sie wieder weg. Das läuft nicht clean"). Ursache: wdlSofortErledigt setzte die Zeile lokal auf
+   * completed, lud aber 1,5 s später neu — die Buchung (PATCH /admin/wd-plaene) braucht 3–6 s, der frische Abruf lieferte noch „review" und die
+   * Zeile sprang nach „Überprüfen" zurück, bis die Antwort sie wieder wegschob; ein laufender 15-s-Abruf konnte dasselbe. Jetzt merkt _wdlLokal
+   * je Plan den gewollten Zustand (completed bzw. die Manuell-Kennung) und wdlLokalAnwenden legt ihn über JEDEN neuen Stand, bis das Backend
+   * ihn selbst meldet — höchstens WDL_LOKAL_MS. Scheitert das Speichern, wird der Merker vergessen und die Zeile kommt mit Hinweis zurück. */
+  const _wdlLokal = new Map(), WDL_LOKAL_MS = 5 * 60000
+  function wdlLokalMerken(pid, was){ _wdlLokal.set(String(pid), Object.assign({}, _wdlLokal.get(String(pid)) || {}, was, { at: Date.now() })) }
+  function wdlLokalVergessen(pid){ _wdlLokal.delete(String(pid)) }
+  function wdlLokalAnwenden(){
+    if(!_wdlLokal.size || !wdl.daten) return
+    const jetzt = Date.now(), trades = wdl.daten.trades || []
+    for(const [pid, l] of [..._wdlLokal]){
+      const t = trades.find(x => wdlTid(x) === pid)
+      if(jetzt - l.at > WDL_LOKAL_MS){ _wdlLokal.delete(pid); continue }   // zu alt → Backend gilt
+      if(!t) continue                         // fehlt im Abruf ≠ bestätigt: merken, bis das Backend den Zustand selbst meldet (Stub-Test 08.10.2026)
+      let offen = false
+      if(l.status && t.status !== l.status){ t.status = l.status; offen = true }
+      if('manuell' in l && !!(t.manuell) !== !!(l.manuell)){ t.manuell = l.manuell; offen = true }
+      if(!offen) _wdlLokal.delete(pid)                                          // Backend meldet es selbst → Merker weg
+    }
+  }
   function wdlSofortErledigt(pid){
+    wdlLokalMerken(pid, { status: 'completed' })   // auch, wenn die Zeile gerade nicht in den Daten steht (Abruf läuft)
     const t = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === String(pid))
     if(!t || t.status === 'completed') return
     t.status = 'completed'
@@ -28657,6 +28685,7 @@
         neu = weg ? null : Object.assign({ at: new Date().toISOString(), notiz: String(notiz || ''), von: null }, d.manuell || {}, { schritt: String(schritt || (alt && alt.schritt) || 'sonst') })   // schritt lokal halten, bis das Backend es zurückgibt
       }
       if(t) t.manuell = neu   // sofort sichtbar, der nächste Abruf holt den Backend-Stand
+      wdlLokalMerken(pid, { manuell: neu })   // ein älterer Abruf (15-s-Takt) holt die Zeile nicht zurück (08.10.2026)
       // Trade-Planer „Braucht dich" liest das Kennzeichen aus _tpl.lt (tplManuellKonten, 08.10.2026) — dieselbe Zeile gleich mitziehen
       try{ const lt = _tpl.lt && _tpl.lt.get(pid); if(lt) lt.manuell = neu }catch(_){}
       if(typeof atToast === 'function') atToast(weg ? 'Zurück nach „Überprüfen"' : (alt ? 'Notiz gespeichert' : 'In „Manuelle Arbeit" — nichts verbucht'), weg ? 'end' : 'ok')
@@ -29116,7 +29145,8 @@
     wdl.daten = null; wdlRender(); wdlLaden(true)
   }))
   // Stub ohne Login: window._wdlStub({trades:[…]}) zeichnet die View mit Testdaten
-  window._wdlStub = d => { wdl.daten = d; wdl.fehler = ''; wdlRender() }
+  window._wdlStub = d => { wdl.daten = d; wdl.fehler = ''; wdlLokalAnwenden(); wdlRender() }   // wie ein Abruf: lokale Merker gelten (08.10.2026)
+  window._wdlLokal = () => [..._wdlLokal.keys()]   // Test-Haken
   /* ========== ENDE WINNING DAYS LIVE TRADES ========== */
 
   /* ========== DUP-ROUTE LIVE-LOTS (25.08.2026) ==========
@@ -41827,7 +41857,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1360'
+  const OS_TAB_BUILD = '2026-09-22.1361'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
