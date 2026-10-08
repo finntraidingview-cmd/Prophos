@@ -15081,7 +15081,19 @@ from datetime import timedelta
 AP_TYPEN = ("challenge", "phase1", "phase2")
 AP_NACHPLAN_VORLAUF_MIN = 15          # NACHPLANEN (08.10.2026): Startzeiten frühestens jetzt + 15 min
 AP_TZ_LAUF = "Asia/Dubai"            # Hand-Lauf ohne tag: Dubai-Datum. Nachtlauf seit 07.10.2026 nach zeiten.nachtlauf (AP_NACHT_STANDARD)
-AP_REST_MIN = 100                    # weniger Rest bis Ziel → kein Auto-Trade, Finn prüft selbst
+AP_REST_MIN = 100                    # weniger Rest bis Ziel → kein Auto-Trade, Finn prüft selbst (Futures; CFD siehe AP_REST_MIN_CFD)
+# KLEIN-TRADE KURZ VOR DEM ZIEL (CFD, Finn 09.10.2026 ~03:15 Dubai: „wenn nur noch ein paar hundert Dollar zum Ziel sind, will ich, dass
+# du die Trades trotzdem selber machst … Lots runterschrauben … Puffer runterschrauben … eine Relation zu allen"). Anlass: drei Konten
+# standen mit 36/56/62 $ Rest auf „von Hand prüfen". Der Rest wird in 20 NAS100-Punkten verdient: Lots = Rest ÷ (20 × $/Pkt je Lot),
+# abgerundet auf 0,01 (FN-Trades mit 0,04 Lots belegt), TP = Rest + Puffer 15–20 $ (Finn: „Chris 0,18 Lots ist gut", Puffer 15–20).
+# SL bleibt die normale Firmen-Spanne in $ mit Boden-Deckel (Finn: „den SL kannst du ganz groß machen, wie beim ganz normalen Trade").
+# Gilt, sobald der Rest mit den normalen Mindest-Lots in < 20 Pkt verdient wäre (FN 100k < 420 $, FP 100k < 400 $, FTMO P1 < 500 $ …).
+AP_REST_MIN_CFD = 10                 # CFD: erst unter 10 $ Rest Handarbeit
+AP_KLEIN_PKT = 20                    # Rest in so vielen Punkten verdienen
+AP_KLEIN_PUFFER = (15, 20)           # $ über dem Rest (Zufall der Tranche)
+AP_KLEIN_SCHRITT = 0.01              # Lot-Schritt des Klein-Trades bei Lot-Firmen (menge_schritt < 1); FTMO/The5ers bleiben bei 1
+AP_KLEIN_TP_PKT_HINWEIS = 60         # TP weiter als 60 Pkt (Mindest-Lot zu groß) → trotzdem planen, Hinweis in der Notiz
+AP_PUFFER_PKT = 10                   # normaler letzter CFD-Trade: Puffer = 10 Pkt × Lots × $/Pkt (statt fester Firmen-Puffer)
 AP_GROESSE_TOLERANZ = 0.15           # Balance weiter als 15 % von jeder Regel-Größe weg → „stimmt was nicht"
 # Firmen, die der Planer still auslässt (kein „keine Regel"-Eintrag). Finn 06.10.2026: Fusion-Markets-Konten sind nur
 # Gegenhedge-Konten, auf ihnen wird nie ein Trade geplant — „Echo Demo (Master)" stand als phase1 jede Nacht im Protokoll
@@ -15288,8 +15300,9 @@ def ap_kette_angefressen(k):
     return vg - float(AP_KETTE_STANDARD["blow_puffer_usd"]) < daily - 0.5
 
 
-def ap_konto_rechnen(regel, phase, balance, u, peak=None):
+def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None):
     """REIN RECHNEND (testbar): Plan-Werte EINES Kontos. u = Zufallsanteile der Tranche {tp, sl, menge, puffer} (0..1).
+    ppl = $ je NAS100-Punkt und Lot der Firma bei dieser ID (firm_specs, ap_cfd_ppl) — nur CFD: Puffer in Punkten + Klein-Trade.
     → (werte, None) oder (None, grund). werte: groesse, ziel, rest, menge, puffer, tp, sl, risiko, stufe."""
     groesse = ap_groesse(regel.get("groessen"), balance)
     # 08.10.2026 EIGENE WERTE JE KONTOGRÖSSE (Finn: FundingPips 50k mit eigenem SL/Lots/Puffer, nicht einfach halbe 100k-Werte):
@@ -15319,12 +15332,19 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None):
     rest = ziel - balance
     if rest <= 0:
         return None, "Ziel erreicht — Phase umstellen"
-    if rest < AP_REST_MIN:
+    cfd = (regel.get("route") or "mt5v2") in AP_CFD_ROUTEN and phase != "challenge"
+    if rest < (AP_REST_MIN_CFD if cfd else AP_REST_MIN):
         # 05.10.2026: ein Konto 2 $ unter dem Ziel bekäme sonst einen TP von ~20 $ ohne SL (volles Liquidationsrisiko).
         # 07.10.2026: Futures-Challenge mit Rest < 100 $ zählt als Ziel erreicht (Phase umstellen)
         if phase == "challenge":
             return None, f"Ziel erreicht — Phase umstellen (nur noch {rest:.0f} $)"
+        if cfd:
+            return None, (f"nur noch {rest:.0f} $ bis zum Ziel — unter {AP_REST_MIN_CFD} $ plant der Bot keinen Klein-Trade: "
+                          "erst im Konto prüfen, ob die Firma das Ziel schon zählt (dann Phase umstellen), sonst Mini-Trade von Hand")
         return None, f"nur noch {rest:.0f} $ bis zum Ziel — von Hand prüfen"
+    if cfd and rest < AP_REST_MIN and not ppl:
+        return None, (f"nur noch {rest:.0f} $ bis zum Ziel — kein Punktwert (Firmen-Einstellung $/Pkt je Lot) für den Klein-Trade: "
+                      "Punktwert der Firma eintragen, sonst von Hand")
     if boden_blow is not None and balance <= boden_blow:
         return None, "Balance auf/unter dem Boden — geblowt?"
     kette = ap_kette_regel(regel) if phase == "challenge" else None
@@ -15334,11 +15354,22 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None):
     pjm = ph.get("puffer_je_menge")
     psp = (pjm or {}).get(str(int(menge))) if pjm else ph.get("puffer")
     puffer = round(_ap_spanne(psp, u["puffer"], 1.0 if pjm else f) or 0)
-    final = rest + puffer
     tp_sp = ph.get("tp")
     ober = float(ph["tp_max"]) * f if ph.get("tp_max") else (float(tp_sp[1]) * f if tp_sp else None)
-    if not tp_sp or final <= ober:
-        tp, stufe = final, "letzter Trade (Rest bis Ziel)"
+    klein = None
+    if cfd and ppl:
+        # PUFFER IN PUNKTEN (Finn 09.10.2026): Spread + Kommission + Schlupf wachsen mit den Lots — der feste Firmen-Puffer (FN 100 $)
+        # reichte nicht. Beleg FN 08.10.2026: Rest 2.964 + 100 = TP 3.064 bei 2,8 Lots, Ergebnis +2.928 → 36 $ unter dem Ziel.
+        # Gemessen bei TP-Treffern der letzten 14 Tage bis 5,6 Pkt Abweichung, 10 Pkt × Lots × $/Pkt hat Luft (FN 2,8 Lots → 280 $)
+        puffer = round(AP_PUFFER_PKT * float(menge) * float(ppl))
+        lo = float((ph.get("menge") or [0])[0]) * f
+        if lo and rest < AP_KLEIN_PKT * lo * float(ppl):
+            klein = ap_klein_trade(rest, ppl, ph.get("menge_schritt"), u["puffer"], ph.get("klein_puffer"))
+    if klein:
+        menge, puffer, tp = klein["menge"], klein["puffer"], klein["tp"]
+        stufe = klein["stufe"]
+    elif not tp_sp or rest + puffer <= ober:
+        tp, stufe = rest + puffer, "letzter Trade (Rest bis Ziel)"
     elif rest < ober:
         tp, stufe = ober, "letzter Trade (auf Tageshöchstwert gedeckelt)"
     else:
@@ -15353,6 +15384,43 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None):
     risiko = sl if sl else (float(ph["dd_usd"]) * f if ph.get("dd_usd") else None)
     return {"groesse": groesse, "ziel": ziel, "rest": round(rest), "menge": menge, "puffer": puffer,
             "tp": tp, "sl": sl, "risiko": risiko, "stufe": stufe}, None
+
+
+def _ap_de(x, stellen=2):
+    """Zahl deutsch: 0.18 → „0,18“, 2.0 → „2“ (Lots in Notizen)."""
+    x = float(x)
+    return str(int(x)) if x == int(x) else f"{x:.{stellen}f}".rstrip("0").replace(".", ",")
+
+
+def ap_klein_trade(rest, ppl, schritt, u_puffer, klein_puffer=None):
+    """REIN RECHNEND: Klein-Trade kurz vor dem Ziel (CFD, Finn 09.10.2026) → {menge, puffer, tp, tp_punkte, stufe}.
+    Lots = Rest ÷ (AP_KLEIN_PKT × ppl), ABGERUNDET auf den Schritt (0,01 bei Lot-Firmen, sonst menge_schritt), mindestens ein Schritt;
+    TP = Rest + Puffer (AP_KLEIN_PUFFER bzw. klein_puffer der Phase). Mindest-Lot zu groß → TP-Punkte > 60, trotzdem geplant (Finn:
+    „der Bot soll es selbst machen"), der Hinweis steht in der Stufe."""
+    s = float(schritt or 1)
+    ks = AP_KLEIN_SCHRITT if s < 1 else s
+    n = int(float(rest) / (AP_KLEIN_PKT * float(ppl)) / ks + 1e-9)
+    menge = round(max(1, n) * ks, 4)
+    menge = int(menge) if ks >= 1 else menge
+    puffer = round(_ap_spanne(klein_puffer or AP_KLEIN_PUFFER, u_puffer))
+    tp = round(float(rest) + puffer)
+    tp_pkt = round(tp / (float(menge) * float(ppl)), 1)
+    stufe = f"Klein-Trade · Rest {float(rest):.0f} $ · {_ap_de(menge)} Lots · TP {tp} $ (Rest + Puffer {puffer} $)"
+    if tp_pkt > AP_KLEIN_TP_PKT_HINWEIS:
+        stufe += f" · TP {_ap_de(tp_pkt, 1)} Pkt weit (Lot-Schritt grob)"
+    return {"menge": menge, "puffer": puffer, "tp": tp, "tp_punkte": tp_pkt, "stufe": stufe}
+
+
+def ap_cfd_ppl(ctx, konto):
+    """$ je Punkt und Lot eines CFD-Kontos aus firm_specs (ctx des Stands: erst die ID, sonst der häufigste Wert der Firma) oder None."""
+    if not ctx or not konto:
+        return None
+    fk = _ap_norm(_firm_norm(konto.get("firm")))
+    t = (ctx.get("ppl") or {}).get((str(konto.get("user_id")), fk)) or (ctx.get("ppl_firma") or {}).get(fk)
+    if not t or str(t[2] or "Lots") != "Lots":
+        return None            # Prüfer Slave 2 (09.10.2026): „Kontrakte"/MNQ-Wert bei einer CFD-Firma → kein Punktwert, Handarbeit
+    v = _wd_num(t[0])
+    return v if v and v > 0 else None
 
 
 def _ap_boden(regel, ph, groesse, balance):
@@ -17690,7 +17758,8 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
             if peaks_kette is None and (ap_kette_regel(k["regel"]) or {}).get("daily_usd") and k["a"].get("account_type") == "challenge":
                 ausgelassen.append(dict(k["zeile"], grund="MLL nicht prüfbar (Verlauf nicht lesbar) — kein Kettenplan"))
                 continue
-            w, grund = ap_konto_rechnen(k["regel"], k["a"]["account_type"], k["bal"], u_k, peak=(peaks_kette or {}).get(str(k["a"].get("id"))))
+            w, grund = ap_konto_rechnen(k["regel"], k["a"]["account_type"], k["bal"], u_k, peak=(peaks_kette or {}).get(str(k["a"].get("id"))),
+                                        ppl=ap_cfd_ppl(stand.get("ctx"), k["a"]))   # CFD: Punkte-Puffer + Klein-Trade (09.10.2026)
             if grund and "Boden" in grund:
                 # „Balance auf/unter dem Boden — geblowt?" — Boden/Balance/Stand für die Anzeige (Slave 6, 08.10.2026); k["regel"] ist schon
                 # die Konto-Regel, ap_regel_konto darauf ändert nichts mehr
