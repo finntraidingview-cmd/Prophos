@@ -493,7 +493,9 @@ def snapshot():
             # Echo-Not-Aus (28.08.2026): Zustand fuers Pause/Start-Chip in Prophos
             "paused": os.path.exists(os.path.join(HERE, "echo_pause.flag")),
             # Stilles MT5-Update (08.10.2026): Aufgabe da? Builds ausstehend? → Prophos schreibt es nach mt5_live (Ferndiagnose UAC)
-            "mt5_update": _mt5_update_stand()}
+            "mt5_update": _mt5_update_stand(),
+            # Knopf „MT5-Updates ohne Nachfrage einrichten" (08.10.2026): Stand des letzten Klicks fürs Panel
+            "mt5_update_job": dict(MT5_UPD_JOB)}
 
 
 def patch_config(fname, patch):
@@ -1122,6 +1124,100 @@ def _mt5_update_stand():
         w = {"fehler": f"{type(e).__name__}: {e}"[:120]}
     _MT5_UPD_STAND.update(t=time.time(), wert=w)
     return w
+
+
+# MT5-UPDATE PER KLICK EINRICHTEN (08.10.2026, Finn: „Kannst du das vorher bei der Einrichtung einbauen?"): der Wächter fragt
+# aus dem Hintergrund per runas — an Aurels und EzPokers PC zeigte Windows dafür weder Dialog noch Taskleisten-Symbol, Finn musste
+# den 10.796 Zeichen langen Einrichtungsbefehl von Hand in PowerShell einfügen. Jetzt: Kasten im Panel, solange die Aufgabe fehlt;
+# der Klick holt das Panel-Fenster kurz nach vorn (Windows gibt den Vordergrund sonst nicht an einen Hintergrundprozess) und startet
+# dasselbe provision.setup_ps() per runas MIT diesem Fenster als Eltern → die Ja-Abfrage kommt im Vordergrund. UAC bleibt an,
+# keine Windows-Einstellung wird geändert. provision.py bleibt unverändert (Neustart des Copiers vermeiden).
+MT5_UPD_JOB = {"laeuft": False, "ok": None, "msg": "", "t": 0.0}
+
+
+def _konsole_nach_vorn():
+    """Panel-Konsolenfenster in den Vordergrund (Muster copier._vordergrund_geben: AttachThreadInput, Rückfall Alt). → hwnd | 0"""
+    import ctypes
+    u32, k32 = ctypes.windll.user32, ctypes.windll.kernel32
+    hwnd = int(k32.GetConsoleWindow() or 0)
+    if not hwnd:
+        return 0
+    try:
+        u32.ShowWindow(ctypes.c_void_p(hwnd), 9)   # SW_RESTORE — auch wenn minimiert
+        vorn = u32.GetForegroundWindow()
+        mein = k32.GetCurrentThreadId()
+        fremd = u32.GetWindowThreadProcessId(vorn, None) if vorn else 0
+        angehaengt = bool(fremd and fremd != mein and u32.AttachThreadInput(fremd, mein, True))
+        try:
+            u32.SetForegroundWindow(ctypes.c_void_p(hwnd))
+        finally:
+            if angehaengt:
+                u32.AttachThreadInput(fremd, mein, False)
+        if int(u32.GetForegroundWindow() or 0) != hwnd:
+            u32.keybd_event(0x12, 0, 0, 0); u32.keybd_event(0x12, 0, 2, 0)   # Alt gibt den Foreground-Lock frei
+            u32.SetForegroundWindow(ctypes.c_void_p(hwnd))
+    except Exception as e:
+        print(f"[mt5-update] Fenster nach vorn: {type(e).__name__}: {e}", flush=True)
+    return hwnd
+
+
+def _mt5_update_klick_worker():
+    try:
+        import base64
+        import ctypes
+        hwnd = _konsole_nach_vorn()
+        enc = base64.b64encode(provision.setup_ps().encode("utf-16-le")).decode("ascii")
+        print("[mt5-update] Einrichtung per Klick — jetzt am PC einmal 'Ja' klicken (Windows PowerShell).", flush=True)
+        rc = ctypes.windll.shell32.ShellExecuteW(
+            ctypes.c_void_p(hwnd) if hwnd else None, "runas", "powershell.exe",
+            f"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand {enc}", None, 0)
+        if int(rc or 0) <= 32:
+            MT5_UPD_JOB.update(laeuft=False, ok=False, msg="Nicht eingerichtet — „Nein“ geklickt oder Abfrage abgebrochen.", t=time.time())
+            return
+        ende = time.time() + 150
+        while time.time() < ende:
+            if provision.update_aufgabe_ok():
+                try:
+                    os.remove(UPDATE_ABGELEHNT)
+                except OSError:
+                    pass
+                MT5_UPD_JOB.update(laeuft=False, ok=True, msg="Eingerichtet — MT5-Updates laufen ab jetzt ohne Nachfrage.", t=time.time())
+                print("[mt5-update] Aufgabe eingerichtet (Klick im Panel).", flush=True)
+                return
+            time.sleep(3)
+        MT5_UPD_JOB.update(laeuft=False, ok=False, msg="Keine Bestätigung innerhalb von 2,5 min — nochmal versuchen.", t=time.time())
+    except Exception as e:
+        MT5_UPD_JOB.update(laeuft=False, ok=False, msg=f"Fehler: {type(e).__name__}: {e}"[:160], t=time.time())
+    finally:
+        _MT5_UPD_STAND["t"] = 0.0   # Kasten/Prophos-Status sofort neu ermitteln
+
+
+def _bot_lauf_aktiv():
+    """Läuft gerade ein Puls/Order-Lauf über dieses Panel? (Prüfer zu .1346-Entwurf: Fenster-nach-vorn + Alt-Tipp könnten einen
+    TradingView- oder MT5-Klick mitten im Ticket stören) — TV-Weg-Lock, MT5-Order-Locks, K3-Handlauf-Sperre jünger als 15 min."""
+    try:
+        if TV_ORDER_LOCK.locked() or any(l.locked() for l in list(MASTER_ORDER_LOCKS.values())):
+            return True
+        return time.time() - os.path.getmtime(os.path.join(HERE, "puls_handlauf.lock")) < 900
+    except OSError:
+        return False
+    except Exception:
+        return False
+
+
+def mt5_update_klick():
+    if os.name != "nt":
+        return False, "nur unter Windows"
+    if _bot_lauf_aktiv():
+        return False, "Gerade läuft ein Puls/Order-Lauf auf diesem PC — in ein paar Minuten nochmal klicken (das Fenster nach vorn würde den Lauf stören)."
+    if MT5_UPD_JOB.get("laeuft"):
+        return False, "läuft schon — bitte die Windows-Abfrage bestätigen"
+    if provision.update_aufgabe_ok():
+        _MT5_UPD_STAND["t"] = 0.0
+        return True, "schon eingerichtet"
+    MT5_UPD_JOB.update(laeuft=True, ok=None, msg="Windows fragt gleich — bitte „Ja“ klicken.", t=time.time())
+    threading.Thread(target=_mt5_update_klick_worker, daemon=True).start()
+    return True, "gestartet"
 
 
 def _mt5_update_waechter():
@@ -1987,6 +2083,10 @@ button{font-family:inherit;cursor:pointer}
 .jobbar .spin{width:14px;height:14px;border:2.5px solid rgba(84,71,206,.25);border-top-color:var(--violet);
   border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0}
 .jobbar.err{background:rgba(240,68,56,.08);border-color:rgba(240,68,56,.35);color:#c03128}
+.mt5upd{background:rgba(247,144,9,.08);border:1px solid rgba(247,144,9,.4);color:var(--ink);padding:12px 14px;
+  border-radius:var(--r-md);font-size:13px;margin-bottom:14px;display:flex;align-items:center;gap:14px;justify-content:space-between;flex-wrap:wrap}
+.mt5upd-sub{color:var(--sub);font-size:12.5px;margin-top:3px;max-width:640px}
+.mt5upd-msg{color:var(--ink);font-weight:500;margin-top:4px}
 @keyframes spin{to{transform:rotate(360deg)}}
 
 /* Account-Grid */
@@ -2231,8 +2331,21 @@ async function load(){
   }else if(d.job&&d.job.done&&d.job.error&&document.getElementById('add-bg').style.display!=='flex'){
     n+=`<div class="jobbar err" id=jobbar>✗ Account „${esc(d.job.name)}": ${esc(d.job.error.slice(0,140))}… (klicken für Details)</div>`;
   }
+  // MT5-Updates ohne Nachfrage (08.10.2026): Kasten, solange die stille Aufgabe fehlt — Klick → Windows-Abfrage im Vordergrund
+  const mu=d.mt5_update, mj=d.mt5_update_job||{};
+  if((mu&&mu.aufgabe_ok===false)||mj.laeuft||(mj.msg&&Date.now()/1000-(mj.t||0)<120)){
+    const fertig=mu&&mu.aufgabe_ok;
+    n+=`<div class=mt5upd><div><b>${fertig?'✓ MT5-Updates laufen ohne Nachfrage':'MT5-Updates ohne Nachfrage einrichten'}</b>`
+      +`<div class=mt5upd-sub>${fertig?'':'Einmal je PC: Windows fragt „Windows PowerShell – Änderungen zulassen?" — „Ja" klicken. Danach spielt Echo neue MetaTrader-Versionen still ein, die Update-Abfrage kommt nicht mehr.'}${mj.msg?`<div class=mt5upd-msg>${esc(mj.msg)}</div>`:''}</div></div>`
+      +(fertig?'':`<button class="btn btn-primary" id=mt5upd-btn ${mj.laeuft?'disabled':''}>${mj.laeuft?'wartet auf „Ja" …':'Jetzt einrichten'}</button>`)+`</div>`;
+  }
   document.getElementById('notice').innerHTML=n;
   const jb=document.getElementById('jobbar'); if(jb)jb.addEventListener('click',openAdd);
+  const mb=document.getElementById('mt5upd-btn');
+  if(mb)mb.addEventListener('click',async()=>{mb.disabled=true;mb.textContent='wartet auf „Ja" …';
+    try{const r=await fetch('/api/mt5-update-einrichten',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});const j=await r.json();
+      if(!j.ok){mb.disabled=false;mb.textContent='Jetzt einrichten';alert(j.msg||'Nicht gestartet');return}}catch(e){}
+    setTimeout(load,800)});
   // Karten
   if(!d.instances.length){app.innerHTML='<div class=empty>Keine Accounts. Oben rechts „＋ Account hinzufügen".</div>';}
   else{
@@ -2549,6 +2662,9 @@ class Handler(BaseHTTPRequestHandler):
             print(f"[panel] provision '{name}': {msg}", flush=True)  # bewusst ohne Zugangsdaten
             return self._send(200 if ok else 409, json.dumps({"ok": ok, "msg": msg}, ensure_ascii=False))
 
+        if u.path == "/api/mt5-update-einrichten":
+            ok, msg = mt5_update_klick()
+            return self._send(200, json.dumps({"ok": ok, "msg": msg}, ensure_ascii=False))
         if u.path == "/api/plan-delete":
             # braucht keinen file-Parameter — Plan-ID reicht
             try:

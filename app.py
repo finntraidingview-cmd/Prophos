@@ -11713,7 +11713,12 @@ def pc_stand_zusammenfassen(rows, jetzt):
         je_pc = dict((z or {}).get("je_pc") or {})
         if pc and (pc not in je_pc or alt < je_pc[pc]["alt_s"]):
             je_pc[pc] = {"pc_name": pc, "tab_build": r.get("tab_build"), "bot_version": r.get("bot_version"), "tab_bw": r.get("tab_bw"),
-                         "tab_gleich": r.get("tab_gleich"), "zuletzt": at.isoformat(), "alt_s": alt, "lebt": alt < PC_STAND_LEBT_S}
+                         "tab_gleich": r.get("tab_gleich"), "zuletzt": at.isoformat(), "alt_s": alt, "lebt": alt < PC_STAND_LEBT_S,
+                         "mt5_update": r.get("mt5_update") if isinstance(r.get("mt5_update"), dict) else None}
+        # MT5-Update-Stand je PC (08.10.2026, Admin → PC-Tabs „MT5-Update ✓/✗"): die jüngste Zeile, die ihn überhaupt hat — ein alter
+        # Tab ohne das Feld (z. B. noch .1335) löscht den Stand einer anderen Instanz desselben PCs nicht
+        if pc and pc in je_pc and je_pc[pc].get("mt5_update") is None and isinstance(r.get("mt5_update"), dict):
+            je_pc[pc]["mt5_update"] = r.get("mt5_update")
         if z is None or alt < z["alt_s"]:
             out[uid] = {"pc_name": pc, "tab_build": r.get("tab_build"), "bot_version": r.get("bot_version"),
                         "copier_version": r.get("copier_version"), "zuletzt": at.isoformat(), "alt_s": alt,
@@ -11736,7 +11741,7 @@ def admin_pc_stand():
         return err
     rows = sb_select("mt5_live", {"select": "id,pc_name,updated_at,user_id:status->>user_id,tab_build:status->>tab_build,"
                                              "bot_version:status->>bot_version,copier_version:status->>copier_version,"
-                                             "tab_bw:status->tab_bw,tab_gleich:status->>tab_gleich",
+                                             "tab_bw:status->tab_bw,tab_gleich:status->>tab_gleich,mt5_update:status->mt5_update",
                                   "order": "updated_at.desc", "limit": "400"}) or []
     jetzt = datetime.now(timezone.utc)
     stand = pc_stand_zusammenfassen(rows, jetzt)

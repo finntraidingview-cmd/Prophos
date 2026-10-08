@@ -5,6 +5,8 @@ rem Das Hedge-Terminal startet der Copier selbst, falls es nicht laeuft.
 rem NUR EINMAL klicken -- laufende Instanzen schuetzen sich selbst
 rem (Copier: Status-Sperre, Panel: Port belegt, Backend: Port-Probe).
 cd /d "%~dp0"
+set "_selbst=%~f0"
+if /i "%~1"=="mt5upd" goto mt5upd_fenster
 
 rem ── Vorpruefung (01.09.2026, Finns neuer PC) ────────────────────────────
 rem Bisher hat dieser Starter blind drei cmd-Fenster aufgemacht. Fehlt auf
@@ -65,6 +67,14 @@ if "%_frisch%"=="0" echo   (Panel/Backend laufen schon - Starter-Dateien bleiben
 start "MT5-Hedge-Copier" cmd /c start-copier.bat
 start "Copier-Panel" cmd /c start-panel.bat
 start "Prophos-Backend" cmd /c start-prophos.bat
+rem ── MT5-Updates ohne Nachfrage (08.10.2026, Finn: "Kannst du das vorher bei der Einrichtung einbauen?") ──
+rem Die stille Aufgabe "Prophos MT5-Update" braucht je PC EINMAL ein "Ja". Das Panel fragt sonst aus dem Hintergrund,
+rem und Windows zeigte das an manchen PCs gar nicht (weder Dialog noch Taskleiste). Deshalb hier beim frischen Start:
+rem kurz pruefen (ohne Warten), und nur wenn die Aufgabe fehlt und nicht in den letzten 24 h abgelehnt wurde, ein EIGENES
+rem Fenster "MT5-Update einrichten" (diese Datei mit Argument mt5upd) -- es kommt als neuestes Fenster nach vorn, die
+rem Abfrage damit sichtbar. NACH den drei Diensten und nicht blockierend (Pruefer 08.10.2026: ein Autostart ohne Mensch
+rem davor haette Copier/Panel/Backend sonst bis zu 2,5 min aufgehalten). Fehlt Python/provision.py, passiert nichts.
+if "%_frisch%"=="1" call :mt5_update_pruefen
 rem Orbit-Dateien auffrischen, BEVOR Reader/Verbinder starten (30.08.2026,
 rem Finns Ansage "kannst du nicht alle Sachen in start-alles reinmachen").
 rem Hintergrund: C:\tv-reader hatte nie ein Selbst-Update -- der Ordner lag
@@ -158,6 +168,24 @@ exit /b
 :portbelegt
 rem Antwortet auf 127.0.0.1:%1 jemand? errorlevel 0 = ja.
 python -c "import socket,sys;s=socket.socket();s.settimeout(1);sys.exit(0 if s.connect_ex(('127.0.0.1',%1))==0 else 1)" >nul 2>&1
+exit /b
+
+:mt5_update_pruefen
+python -c "import os,sys,time,provision as p; a='.mt5-update-abgelehnt'; abg=os.path.exists(a) and time.time()-os.path.getmtime(a)<86400; sys.exit(0 if (p.update_aufgabe_ok() or abg) else 3)" >nul 2>&1
+if not errorlevel 3 exit /b
+start "MT5-Update einrichten" cmd /c call "%_selbst%" mt5upd
+exit /b
+
+:mt5upd_fenster
+title MT5-Update einrichten
+echo.
+echo   MT5-Updates ohne Nachfrage einrichten (einmal je PC):
+echo   Windows fragt gleich "Windows PowerShell - Aenderungen zulassen?" -- bitte "Ja" klicken.
+echo   Danach spielt Echo neue MetaTrader-Versionen still ein, die Update-Abfrage kommt nicht mehr.
+echo   Copier, Panel und Backend laufen schon -- dieses Fenster haelt nichts auf.
+echo.
+python -c "import provision as p; ok=p.update_aufgabe_einrichten(150); print('  Eingerichtet.' if ok else '  Nicht eingerichtet -- spaeter im Copier-Panel (127.0.0.1:8770) per Knopf nachholen.'); ok or open('.mt5-update-abgelehnt','w').write('start-alles')"
+timeout /t 15 >nul
 exit /b
 
 :bat_auffrischen

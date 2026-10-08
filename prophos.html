@@ -10426,8 +10426,8 @@
           <div class="panel adm-pcs" id="adm-pcs" style="margin:16px 0 0">
             <div class="adm-pcs-kopf"><b>PC-Tabs</b><span id="adm-pcs-info"></span><button class="btn btn-ghost" id="adm-pcs-refresh" title="Neu laden" style="padding:4px 10px;margin-left:auto">↻</button></div>
             <div class="table-wrap"><table class="t">
-              <thead><tr><th>PC</th><th>ID</th><th>Tab-Build</th><th>Bot</th><th>Zuletzt</th><th>Stand</th><th></th></tr></thead>
-              <tbody id="adm-pcs-rows"><tr><td colspan="7" style="color:var(--sub)">Lade …</td></tr></tbody>
+              <thead><tr><th>PC</th><th>ID</th><th>Tab-Build</th><th>Bot</th><th>Zuletzt</th><th>Stand</th><th>MT5-Update</th><th></th></tr></thead>
+              <tbody id="adm-pcs-rows"><tr><td colspan="8" style="color:var(--sub)">Lade …</td></tr></tbody>
             </table></div>
           </div>
         </div>
@@ -28048,11 +28048,20 @@
                               : { farbe: 'gelb', text: `lädt gleich (${min(seit)} min)`, titel: `Ziel ${bw.ziel || neu}${grund}` }
   }
   window._admPcsUrteil = admPcsUrteil   // Test-Haken
+  // MT5-UPDATE JE PC (08.10.2026, Master/Finn: fehlende PCs sehen): mt5_live.status.mt5_update {aufgabe_ok, ausstehend, abgelehnt} aus dem
+  // Copier-Panel (stille Aufgabe „Prophos MT5-Update", .930/.1337). ✗ → am PC im Copier-Panel „MT5-Updates ohne Nachfrage einrichten" klicken.
+  function admPcsMt5UpdZelle(m){
+    if(!m || typeof m !== 'object') return '<td style="color:var(--sub)" title="Kein Stand — der Tab an diesem PC ist älter als .1337 oder das Copier-Panel läuft nicht">–</td>'
+    if(m.fehler) return `<td style="color:var(--sub)" title="${escapeHtml(String(m.fehler))}">?</td>`
+    const aus = Number(m.ausstehend) || 0, warten = aus ? ` · ${aus} wartet` : ''
+    if(m.aufgabe_ok) return `<td title="Stille Aufgabe eingerichtet — neue MetaTrader-Versionen kommen ohne Nachfrage${aus ? ` (${aus} Build${aus === 1 ? '' : 's'} wartet auf Leerlauf)` : ''}"><span style="color:var(--good);font-weight:600">✓</span>${warten}</td>`
+    return `<td title="Aufgabe fehlt — am PC im Copier-Panel (127.0.0.1:8770) „MT5-Updates ohne Nachfrage einrichten“ klicken und „Ja“ bestätigen${m.abgelehnt ? ' · zuletzt abgelehnt/nicht bestätigt' : ''}"><span style="color:var(--danger);font-weight:600">✗</span>${m.abgelehnt ? ' abgelehnt' : ' fehlt'}${warten}</td>`
+  }
   function admPcsRender(){
     const tb = document.getElementById('adm-pcs-rows'); if(!tb) return
     const info = document.getElementById('adm-pcs-info')
     const st = _admPcs.daten
-    if(!st){ tb.innerHTML = `<tr><td colspan="7" style="color:var(--sub)">${_admPcs.laedt ? 'Lade …' : 'Kein Stand von Railway (/admin/pc-stand).'}</td></tr>`; return }
+    if(!st){ tb.innerHTML = `<tr><td colspan="8" style="color:var(--sub)">${_admPcs.laedt ? 'Lade …' : 'Kein Stand von Railway (/admin/pc-stand).'}</td></tr>`; return }
     const leute = new Map(((window._admData && window._admData.people) || []).map(p => [String(p.user_id), p.name]))
     const zeilen = []
     for(const [uid, z] of Object.entries(st)){
@@ -28073,8 +28082,8 @@
         : `<button type="button" class="btn btn-ghost tc2-btn" data-adm-pcs-neu="${escapeHtml(key)}" title="Signal an ${escapeHtml(q.pc_name)}: Prophos-Tab im nächsten ruhigen Moment neu laden (kein Neuladen während Start, Puls, Hedge oder offenem Popup)">Tab neu laden</button>`
       return `<tr><td class="mono">${escapeHtml(q.pc_name || '–')}</td><td>${escapeHtml(q.name)}</td><td class="mono">${escapeHtml(String(q.tab_build || '–').replace(/^\d{4}-\d{2}-\d{2}/, ''))}</td>`
         + `<td class="mono">${escapeHtml(String(q.bot_version || '–').replace(/^\d{4}-\d{2}-\d{2}/, ''))}</td><td>${uhr(q.zuletzt)}</td>`
-        + `<td title="${escapeHtml(u.titel)}"><span class="pcs-dot pcs-${u.farbe}"></span>${escapeHtml(u.text)}</td><td>${knopf}</td></tr>`
-    }).join('') || '<tr><td colspan="7" style="color:var(--sub)">Kein PC-Tab bekannt.</td></tr>'
+        + `<td title="${escapeHtml(u.titel)}"><span class="pcs-dot pcs-${u.farbe}"></span>${escapeHtml(u.text)}</td>${admPcsMt5UpdZelle(q.mt5_update)}<td>${knopf}</td></tr>`
+    }).join('') || '<tr><td colspan="8" style="color:var(--sub)">Kein PC-Tab bekannt.</td></tr>'
     if(info) info.textContent = `neuester Build ${String(neu).replace(/^\d{4}-\d{2}-\d{2}/, '')} · ${aktuell}/${lebend} aktuell`
   }
   async function admPcsNeuLaden(key, btn){
@@ -41751,7 +41760,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1348'
+  const OS_TAB_BUILD = '2026-09-22.1349'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

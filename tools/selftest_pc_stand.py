@@ -39,6 +39,14 @@ def main():
           "jüngster Herzschlag je ID zählt (40 s, lebt, Build der jüngsten Zeile)")
     check(st[u2]["alt_s"] == 20 * 3600 and st[u2]["lebt"] is False and st[u2]["pc_name"] == "pc-bbbbbb", "20 h alt → lebt nicht (Mikes Fall)")
     check(a["pc_stand_zusammenfassen"]([], jetzt) == {} and a["pc_stand_zusammenfassen"](None, jetzt) == {}, "leer/None → {}")
+    # MT5-Update je PC (08.10.2026): jüngste Zeile ohne Feld (alter Tab), ältere Instanz mit → Stand der älteren bleibt sichtbar
+    mu = {"aufgabe_ok": False, "ausstehend": 1}
+    r2 = [dict(rows[0]), dict(rows[1], mt5_update=mu), dict(rows[2], mt5_update={"aufgabe_ok": True})]
+    s2 = a["pc_stand_zusammenfassen"](r2, jetzt)
+    check(s2[u1]["je_pc"]["pc-aaaaaa"]["mt5_update"] == mu and s2[u1]["je_pc"]["pc-aaaaaa"]["tab_build"] == "2026-09-22.1177",
+          "mt5_update aus der jüngsten Zeile, die es hat — Build bleibt der jüngste")
+    check(s2[u2]["je_pc"]["pc-bbbbbb"]["mt5_update"] == {"aufgabe_ok": True} and st[u1]["je_pc"]["pc-aaaaaa"]["mt5_update"] is None,
+          "eigene Zeile mit Feld → übernommen; ohne Feld nirgends → None")
     print("\nPC-STAND:", "alles grün" if ok else "FEHLER")
     return 0 if ok else 1
 
