@@ -12192,6 +12192,7 @@ def admin_pc_stand():
 # ADMIN_EMAILS steht, sieht nur sich (Master: „normale ID: nur eigene"). Nur Lesen, 30 s gemerkt je Sicht — das Frontend fragt alle 60 s.
 HAND_CACHE_S = 30
 HAND_UEBERPRUEFEN_H = 6
+HAND_BLOWN_TAGE = 60                                # Blow-Pläne nur so weit zurück (Last)
 HAND_NACH = {"challenge": "funded", "phase1": "phase2", "phase2": "funded_cfd"}
 # 5. Gruppe „Planer braucht dich" (Master 09.10.2026): Gründe des letzten Nachtlaufs, die eine Hand brauchen — ohne die, die schon eine andere
 # Gruppe zeigt (Ziel erreicht = bestanden, noch nicht erledigt = Überprüfen) und ohne „hat schon einen geplanten/laufenden Plan" (kein Fall)
@@ -12301,8 +12302,12 @@ def admin_handarbeit():
                                                            "ziel_erreicht_at,ziel_erreicht_bal,ziel_usd", ziel_erreicht_at="not.is.null"))
         reviews = _sb_all("trade_plans", dict(uq, select="id,user_id,master_account_id,master_name,master_firm,master_pl,ended_at,"
                                                          "completed_at,manuell:mt5_baseline->manuell", status="eq.review"))
+        # Blow-Pläne nur der letzten HAND_BLOWN_TAGE (Prüfer 09.10.2026: ohne Grenze wüchse die Abfrage mit jedem Blow aller Zeiten mit) —
+        # Ende = ended_at, sonst completed_at (manche Pläne haben nur das); ohne „+" im Zeitstempel (or-Filter)
+        ab_b = datetime.fromtimestamp(time.time() - HAND_BLOWN_TAGE * 86400, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         blown = _sb_all("trade_plans", dict(uq, select="id,user_id,master_account_id,master_name,master_firm,master_pl,started_at,"
-                                                       "ended_at,completed_at", blown="is.true", order="started_at.desc"))
+                                                       "ended_at,completed_at", blown="is.true", order="started_at.desc",
+                                            **{"or": f"(ended_at.gte.{ab_b},and(ended_at.is.null,completed_at.gte.{ab_b}))"}))
         archiv = _ap_archiviert()
         lauf = None                                     # letzter echter Nachtlauf (5. Gruppe „Planer braucht dich")
         for l in sb_select("auto_plan_lauf", {"select": "at,aus:ergebnis->ausgelassen,trocken:ergebnis->>trocken",
