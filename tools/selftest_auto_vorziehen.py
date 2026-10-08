@@ -135,6 +135,55 @@ def main():
     check("v2" not in nv or abs(st_v["v2"] - st_v["v1"]) >= a["AP_ABSTAND_ID_FIRMA_MIN"] * 0.5,
           f"verteilter Plan: Vorziehen nur mit ≥ ½ Abstand je ID × Firma ({[(k, round(v)) for k, v in st_v.items()]})")
 
+    # ── PC-TAB LEBT (Befund Slave 2: Mikes Tab nahm 65 min nichts auf → vorgezogener Plan startete nie) ──────────────────────
+    lebend = {"chris", "moritz", "ina", "jacob", "emin", "aurel", "simon"}            # Mike fehlt: Tab tot
+    e_pc = U([dict(p) for p in plaene], 0.0, 0.0, jetzt, Z, 25, random.Random(0), gestartet=laufend, id_fest=id_fest, einsatz=EK, pc_lebt=lebend)
+    gew = [x["user_id"] for x in e_pc["aenderungen"]]
+    check(gew and "mike" not in gew, f"PC-Tab tot (Mike): sein Long wird nicht vorgezogen, ein anderer schon ({gew})")
+    e_pc0 = U([dict(p) for p in plaene], 0.0, 0.0, jetzt, Z, 25, random.Random(0), gestartet=laufend, id_fest=id_fest, einsatz=EK, pc_lebt=set())
+    check(not e_pc0["aenderungen"], "kein PC lebt: nichts vorgezogen (verpufft sonst)")
+    e_pcn = U([dict(p) for p in plaene], 0.0, 0.0, jetzt, Z, 25, random.Random(0), gestartet=laufend, id_fest=id_fest, einsatz=EK, pc_lebt=None)
+    check(len(e_pcn["aenderungen"]) == 1, "PC-Stand nicht lesbar (None): kein Filter, wie bisher")
+    vt2 = [plan("k1", "mike", "apex", "07:00", "buy"), plan("k2", "mike", "apex", "07:01", "buy")]
+    e_vt = U(vt2, 0.0, 0.0, jetzt, Z, 25, random.Random(1), einsatz=dict(EK, basis=0.0, brutto=0.0), pc_lebt={"chris"})
+    check(not e_vt["aenderungen"], "Verteilung nur für IDs mit lebendem PC (Mike tot → Klumpen bleibt, PC startet ohnehin nichts)")
+
+    # ── RÜCKFALL: vorgezogen, 3 min nach der neuen Zeit ungeclaimt → zurück auf die alte Zeit, ein anderer wird vorgezogen ──────
+    jr = jetzt + 10
+    pr = [dict(p) for p in plaene]
+    pr = [dict(p, start_min=float(jetzt + 4), aenderbar=False, fest_durch="bestätigt und fällig") if p["plan_id"] == "mike_fn" else p for p in pr]
+    e_r = U(pr, 0.0, 0.0, jr, Z, 25, random.Random(0), gestartet=laufend, id_fest=id_fest, einsatz=EK, dubai_min=120,
+            vorgezogen_heute={"mike_fn"}, verpufft=[{"plan_id": "mike_fn", "alt_min": start0["mike_fn"]}], pc_lebt=lebend)
+    rf = [x for x in e_r["aenderungen"] if x.get("rueckfall")]
+    neu_v = [x for x in e_r["aenderungen"] if not x.get("rueckfall")]
+    check(len(rf) == 1 and rf[0]["plan_id"] == "mike_fn" and rf[0]["nach_start_min"] == start0["mike_fn"],
+          f"Rückfall: Mikes verpuffter Plan zurück auf 06:40 Dubai ({[(x['plan_id'], x['nach_start_min']) for x in rf]})")
+    check("verpufft" in (rf[0]["grund"] if rf else ""), f"Protokoll-Grund ({rf[0]['grund'] if rf else ''})")
+    check(len(neu_v) == 1 and neu_v[0]["plan_id"] != "mike_fn", f"im selben Lauf ein ANDERER Long vorgezogen ({[x['plan_id'] for x in neu_v]})")
+    # alte Zeit schon vorbei → bleibt stehen
+    e_r2 = U(pr, 0.0, 0.0, jr, Z, 25, random.Random(0), gestartet=laufend, id_fest=id_fest, einsatz=EK,
+             vorgezogen_heute={"mike_fn"}, verpufft=[{"plan_id": "mike_fn", "alt_min": float(jr + 5)}], pc_lebt=lebend)
+    check(not any(x.get("rueckfall") for x in e_r2["aenderungen"]), "alte Zeit < jetzt + 10: Plan bleibt stehen")
+    # _ap_verpufft: nur auf der vorgezogenen Zeit, überfällig ≥ 3 min, ungeclaimt
+    st_ = {"jetzt_min": 200.0, "geplant": [{"plan_id": "x", "start_min": 196.0, "geclaimt": False}, {"plan_id": "y", "start_min": 199.0, "geclaimt": False},
+                                           {"plan_id": "z", "start_min": 190.0, "geclaimt": True}, {"plan_id": "w", "start_min": 150.0, "geclaimt": False}]}
+    vp = a["_ap_verpufft"](st_, {"x": (400.0, 196.0), "y": (420.0, 199.0), "z": (430.0, 190.0), "w": (440.0, 170.0)})
+    check([v["plan_id"] for v in vp] == ["x"], f"_ap_verpufft: nur x (y erst 1 min über, z geclaimt, w anders verschoben) → {vp}")
+    # Schreiben: Rückfall ohne Fällig-Guard, aber mit Claim-Guard
+    patch = []
+    a["sb_select"] = lambda t, p_: [{"id": 1}]
+    a["sb_update"] = lambda t, prm, body: (patch.append((prm, body)), [{"id": prm.get("id")}])[1]
+    a["sb_insert"] = lambda t, rows: rows
+    from datetime import datetime as _dt, timezone as _tz
+    stand_w = {"geplant": [{"plan_id": "mike_fn", "start": "2026-10-09T01:00:00+00:00", "firma": "FundedNext", "user": "Mike"}],
+               "mitternacht": _dt(2026, 10, 8, 22, 0, tzinfo=_tz.utc)}
+    try:
+        a["_ap_aenderungen_anwenden"](stand_w, rf, "bot")
+    except Exception as e_:      # noqa: BLE001
+        print("   (Protokoll im Stub:", type(e_).__name__, ")")
+    check(patch and "or" not in patch[0][0] and patch[0][0].get("start_um_gestartet_at") == "is.null" and set(patch[0][1]) == {"start_um"},
+          f"Rückfall-PATCH: ohne Fällig-Guard, mit Claim-Guard, nur start_um ({patch[0] if patch else '—'})")
+
     print()
     if FEHLER:
         print(f"✗ {len(FEHLER)} Fehler")

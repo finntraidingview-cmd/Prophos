@@ -49,7 +49,7 @@ REIN = ("ap_id_fest", "ap_id_misch", "ap_ext_fehlt", "_ap_norm", "ap_regel_finde
         "ap_richtung_konflikte", "lt_echo_live_wahl", "lt_echo_felder",
         "ap_balance_live", "ap_letzt_je_konto", "_ap_boden", "ap_boden_konto", "ap_boden_sicher", "ap_boden_zeile", "_ap_notes_kurz", "_ap_hand_spalte_fehlt", "_ap_plaene_mit_hand", "liq_peak", "_ap_peaks", "_liq_verlauf_laden")   # 08.10.2026: Balance live (Guard/Delta/ids), Boden für den Balance-Balken
 IO = ("_ap_gehedgt_plan", "_ap_bewerten", "_ap_iso_min", "_ap_stand_laden", "_ap_stand_plaene", "_ap_min_iso",
-      "_ap_umplanungen_heute", "_ap_bot_stand", "ap_delta_antwort", "_ap_aenderungen_anwenden", "_ap_dubai_versatz", "ap_ausgleichen",
+      "_ap_umplanungen_heute", "_ap_bot_stand", "ap_delta_antwort", "_ap_aenderungen_anwenden", "pc_stand_zusammenfassen", "_ap_pc_lebt", "_ap_verpufft", "_ap_dubai_versatz", "ap_ausgleichen",
       "_ap_probelauf", "ap_planen", "_ap_tz", "_ap_eur_bei", "_ap_konten_laden", "ap_einsatz_kontext", "ap_richtung_fest_plan", "ap_letzter_trade_geblasen", "_ap_rk_flag",
       "ap_richtungsschutz")
 
@@ -67,7 +67,7 @@ def lade():
         return re.search(rf"^{name} = .*$", src, re.M).group(0)
     konstanten = ("AP_REST_MIN", "AP_GROESSE_TOLERANZ", "AP_KW_FUNDED", "AP_KW_PHASEN", "AP_TYPEN", "AP_TZ_LAUF", "AP_STILL_FIRMEN",
                   "AP_AUSGLEICH_STANDARD", "AP_TZ_TAG", "AP_BOT_ENDE_MIN", "AP_BOT_EXTRA_MIN", "AP_FAELLIG_MIN", "AP_BOT_SCHRITTE",
-                  "AP_RICHTUNG_TXT", "AP_GEGEN_DICHT_MIN", "AP_GEGEN_WUERFE", "AP_EUR_STUFE", "AP_START_BIS_STANDARD", "AP_CFD_AB_STANDARD", "AP_CFD_ROUTEN", "AP_TRANCHE_LUECKE_MIN", "AP_ABSTAND_ID_FIRMA_MIN", "AP_ABSTAND_ID_MIN", "AP_ABSTAND_STUFEN", "AP_GROSS_NAH_MIN", "AP_FIRMA_ABSTAND_MIN", "AP_VERTEIL_VORLAUF_MIN", "AP_VERTEIL_JITTER_MIN", "AP_VERTEIL_GEGEN_MIN", "AP_VERTEIL_VERSATZ", "AP_VERTEILUNG_BAND_TOLERANZ_EUR", "AP_VORZIEHEN_AB_MIN", "AP_VORZIEHEN_JITTER_MIN", "AP_VORZIEHEN_HYSTERESE_EUR", "_ap_bot", "_ap_info", "WD_HEUTE_PPL", "LT_ECHO_ROUTEN", "LT_ECHO_MAX_ALTER_S",
+                  "AP_RICHTUNG_TXT", "AP_GEGEN_DICHT_MIN", "AP_GEGEN_WUERFE", "AP_EUR_STUFE", "AP_START_BIS_STANDARD", "AP_CFD_AB_STANDARD", "AP_CFD_ROUTEN", "AP_TRANCHE_LUECKE_MIN", "AP_ABSTAND_ID_FIRMA_MIN", "AP_ABSTAND_ID_MIN", "AP_ABSTAND_STUFEN", "AP_GROSS_NAH_MIN", "AP_FIRMA_ABSTAND_MIN", "AP_VERTEIL_VORLAUF_MIN", "AP_VERTEIL_JITTER_MIN", "AP_VERTEIL_GEGEN_MIN", "AP_VERTEIL_VERSATZ", "AP_VERTEILUNG_BAND_TOLERANZ_EUR", "AP_VORZIEHEN_AB_MIN", "AP_VORZIEHEN_JITTER_MIN", "AP_VORZIEHEN_HYSTERESE_EUR", "AP_VORZIEHEN_RUECKFALL_MIN", "PC_STAND_LEBT_S", "_ap_bot", "_ap_info", "WD_HEUTE_PPL", "LT_ECHO_ROUTEN", "LT_ECHO_MAX_ALTER_S",
                   "AP_RS_HORIZONT_MIN", "AP_RS_NACHLAUF_MIN", "AP_RS_ROUTEN", "AP_EINGRIFF_MAX", "AP_SICHT_ADMIN", "AP_ID_FEST_HORIZONT_MIN", "AP_RUHE_JE_PLAN_MIN", "AP_HYSTERESE_EUR", "AP_ID_MISCH_AB", "AP_ID_MISCH_MAX",
                   "AP_GRUND_EXT", "AP_GRUND_BAL_LIVE", "AP_FEST_HAND", "AP_NOTES_MAX", "LIQ_VERLAUF_CACHE_S", "_liq_verlauf_cache")
     exec("\n".join([konst(k) for k in konstanten] + [block(f) for f in REIN + IO]), ns)

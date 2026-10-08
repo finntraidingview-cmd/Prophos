@@ -16547,6 +16547,7 @@ AP_VERTEILUNG_BAND_TOLERANZ_EUR = 200.0
 # sind nur Shorts drin, viel zu viel Short. Der Bot muss das checken und in genau solchen Phasen schnell Longs vorziehen"):
 AP_VORZIEHEN_AB_MIN = 3                # frühestens jetzt + 3 min
 AP_VORZIEHEN_JITTER_MIN = 3            # Streuung hinter dem frühesten freien Platz
+AP_VORZIEHEN_RUECKFALL_MIN = 3        # vorgezogen, aber so viele min nach der neuen Startzeit noch ungeclaimt → zurück (PC-Tab tot)
 AP_VORZIEHEN_HYSTERESE_EUR = 100.0     # Vorziehen löst schon ab 100 € über dem 60-min-Band aus (sonst Hysterese 200 €) — Master/Finn
                                        # 08.10.2026: bei reinen Shorts liegt das Über-Band ≈ 0,75 × |Netto|, 200 € erst ab ≈ 267 € Netto
 
@@ -16657,7 +16658,7 @@ def ap_verteilung(gruppe, je, zustand, jetzt_min, zeiten, rnd, gestartet=None, l
 
 def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, rnd, gestartet=None, id_fest=None,
                 schritte=AP_BOT_SCHRITTE, einsatz=None, zuletzt=None, hysterese=None, dubai_min=0, vorgezogen_heute=None,
-                verteilt_heute=None):
+                verteilt_heute=None, pc_lebt=None, verpufft=None):
     """REIN RECHNEND (Vertrag §3, Korrektur Finn 06.10.2026): ein Lauf des Ausgleichs-Bots. plaene = heutige geplante Pläne
     [{plan_id, user_id, user, firma, richtung, start_min, delta_abs, aenderbar}] — nicht änderbare zählen mit und sperren ihre
     Tranche. gestartet = heute schon gestartete Trades [{user_id, firma, start, richtung}] (nur für den weichen Malus),
@@ -16716,7 +16717,7 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
     # .1220 angelegt; Nachplanen lässt bestehende stehen, der Bot drehte nur bei Band-Überschreitung): auch eine ID-Mischung > 0 weckt
     # den Bot — die Band-Schritte unten laufen trotzdem nur, wenn das Band offen ist, danach die eigene Mischungs-Phase
     schwelle_v = min(schwelle, AP_VORZIEHEN_HYSTERESE_EUR) if einsatz else schwelle   # Vorziehen: eigene, niedrigere Schwelle
-    if not offen_(vorher) and not vorher[4] and not klumpen and not vorher[1] > schwelle_v:
+    if not offen_(vorher) and not vorher[4] and not klumpen and not vorher[1] > schwelle_v and not verpufft:
         return {"aenderungen": [], "vorher": als_dict(vorher), "nachher": als_dict(vorher), "ausloeser": None,
                 "daempfung": {"hysterese": schwelle, "ruhe_min": AP_RUHE_JE_PLAN_MIN, "ruhig": []}}
     ausloeser = None if not offen_(vorher) else (
@@ -16793,6 +16794,31 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
     # Verteilung schiebt sie nie wieder nach hinten; verteilt_heute = von der Verteilung bewegte → werden nur vorgezogen, wenn der Abstand
     # je ID × Firma danach ≥ ½ bleibt (keine ¼-Stufe). Beides aus auto_plan_umplanung (ap_ausgleichen).
     vorgezogen_heute, verteilt_heute = set(vorgezogen_heute or ()), set(verteilt_heute or ())
+    # PC-TAB LEBT (Master 08.10.2026, Befund Slave 2: Mikes PC-Tab nahm seit 65 min nichts auf — „Short vorgezogen, Mike FundedNext
+    # 09:59 → 05:13" startete deshalb nie, der Ausgleich verpuffte): Vorziehen und Verteilung nur für IDs, deren PC-Tab lebt (mt5_live-
+    # Herzschlag < PC_STAND_LEBT_S, dieselbe Quelle wie /admin/pc-stand). pc_lebt = None → Quelle fehlt, kein Filter.
+    lebt = (lambda uid: True) if pc_lebt is None else (lambda uid: str(uid) in pc_lebt)
+    # RÜCKFALL: ein heute vorgezogener Plan, der AP_VORZIEHEN_RUECKFALL_MIN nach seiner neuen Startzeit noch ungeclaimt ist (verpufft =
+    # [{plan_id, alt_min}] aus ap_ausgleichen), geht zurück auf seine alte Zeit, wenn die noch ≥ jetzt + AP_VERTEIL_VORLAUF_MIN liegt —
+    # sonst bleibt er stehen. Zählt nicht als „die eine Tranche": danach darf ein anderer vorgezogen werden.
+    for vp in verpufft or ():
+        i = str(vp.get("plan_id"))
+        if i not in zustand or vp.get("alt_min") is None:
+            continue
+        alt_m = float(vp["alt_min"])
+        if alt_m < float(jetzt_min) + AP_VERTEIL_VORLAUF_MIN or alt_m <= zustand[i]["start"]:
+            continue                                       # alte Zeit vorbei oder nicht später — bleibt stehen
+        hm = lambda m: _ap_hhmm_txt((float(m) + float(dubai_min or 0)) % 1440)    # noqa: E731
+        wer = je[i].get("user") or str(je[i]["user_id"])[:8]
+        aenderungen.append({"plan_id": i, "user_id": je[i]["user_id"], "firma": je[i]["firma"], "art": "start", "rueckfall": True,
+                            "von_richtung": zustand[i]["richtung"], "nach_richtung": zustand[i]["richtung"],
+                            "von_start_min": zustand[i]["start"], "nach_start_min": alt_m,
+                            "grund": (f"Ausgleich: Vorziehen verpufft — {wer} {je[i].get('firma_name') or je[i]['firma']} "
+                                      f"{hm(zustand[i]['start'])} ungeclaimt (PC-Tab?) → zurück auf {hm(alt_m)}{' Dubai' if dubai_min else ''}")})
+        zustand = {k: (dict(v, start=alt_m) if k == i else v) for k, v in zustand.items()}
+        vorgezogen_heute.add(i)                            # nicht gleich wieder vorziehen
+    if aenderungen:
+        aktuell = strafe(zustand) + (misch(zustand),)
     if aktuell[1] > schwelle_v:
         n_vor = netto60(zustand)
         noetig = "buy" if n_vor < 0 else "sell"
@@ -16808,8 +16834,9 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
         beste = None
         for i in sorted(zustand, key=lambda i: zustand[i]["start"]):
             p, s0 = je[i], zustand[i]["start"]
-            if (zustand[i]["richtung"] != noetig or not p.get("aenderbar") or not p.get("auto_plan") or s0 <= ab + 1 or ruht([i])):
-                continue
+            if (zustand[i]["richtung"] != noetig or not p.get("aenderbar") or not p.get("auto_plan") or s0 <= ab + 1 or ruht([i])
+                    or not lebt(p["user_id"]) or i in vorgezogen_heute):
+                continue                                     # PC-Tab der ID tot / heute schon vorgezogen → anderen nehmen
             uid, fa, g = str(p["user_id"]), p["firma"], f"{p['user_id']}|{p['firma']}"
             fest = id_fest.get(g)
             if fest and fest.get("richtung") in ("buy", "sell") and fest.get("richtung") != noetig:
@@ -17008,7 +17035,7 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
         return "/".join(_ap_hhmm_txt((float(m) + float(dubai_min or 0)) % 1440) for m in ms)
     tag_vor_v = None
     je_alt, je = je, {i: (dict(p, aenderbar=False) if i in vorgezogen_heute else p) for i, p in je.items()}   # Pingpong-Bremse
-    for _m0, g in ([] if vorgezogen else ap_verteil_gruppen(je, zustand, gestartet=gestartet)):
+    for _m0, g in ([] if vorgezogen else [x for x in ap_verteil_gruppen(je, zustand, gestartet=gestartet) if lebt(x[1].split("|", 1)[0])]):
         ids_g = sorted((i for i in zustand if f"{je[i]['user_id']}|{je[i]['firma']}" == g), key=lambda i: zustand[i]["start"])
         if ruht([i for i in ids_g if je[i].get("aenderbar")]):
             continue
@@ -17685,8 +17712,9 @@ def _ap_aenderungen_anwenden(stand, aenderungen, quelle, nur_unbestaetigt=False)
                  "richtung": f"eq.{a['von_richtung']}"}
         if nur_unbestaetigt:
             guard["auto_bestaetigt_at"] = "is.null"
-        else:
+        elif not a.get("rueckfall"):
             guard["or"] = f"(auto_bestaetigt_at.is.null,start_um.gt.{faellig})"
+        # Rückfall (08.10.2026): überfällig und ungeclaimt — start_um_gestartet_at/started_at/orbit_gesendet_at IS NULL bleibt der Schutz
         rows = sb_update("trade_plans", guard, upd)
         if not rows:
             continue                  # inzwischen gestartet/bestätigt/geändert — Guard hat gegriffen, nichts protokolliert
@@ -17777,6 +17805,34 @@ def ap_richtungsschutz(stand, trocken=False, quelle="bot"):
     return out
 
 
+def _ap_pc_lebt():
+    """Set der user_ids, deren PC-Tab lebt (mt5_live-Herzschlag < PC_STAND_LEBT_S, pc_stand_zusammenfassen wie /admin/pc-stand).
+    Nicht lesbar → None (kein Filter, der Bot arbeitet wie bisher)."""
+    try:
+        rows = sb_select("mt5_live", {"select": "id,pc_name,updated_at,user_id:status->>user_id", "order": "updated_at.desc",
+                                      "limit": "400"}) or []
+        return {u for u, v in pc_stand_zusammenfassen(rows, datetime.now(timezone.utc)).items() if v.get("lebt")}
+    except Exception as e:
+        print(f"[auto-plan] ⚠️ PC-Stand nicht lesbar ({type(e).__name__}) — Vorziehen ohne PC-Filter", flush=True)
+        return None
+
+
+def _ap_verpufft(stand, alt_start):
+    """Heute vorgezogene Pläne (alt_start = {plan_id: (alt_min, neu_min)} aus dem Protokoll), die noch auf der vorgezogenen Zeit stehen,
+    seit AP_VORZIEHEN_RUECKFALL_MIN überfällig und ungeclaimt sind → [{plan_id, alt_min}] für den Rückfall in ap_umplanen."""
+    out = []
+    for z in stand.get("geplant") or ():
+        pid = str(z.get("plan_id"))
+        if pid not in alt_start or z.get("geclaimt") or z.get("start_min") is None:
+            continue
+        alt_m, neu_m = alt_start[pid]
+        if neu_m is None or abs(float(z["start_min"]) - float(neu_m)) > 1:
+            continue                                   # inzwischen anders verschoben — nicht unser Zug
+        if float(z["start_min"]) + AP_VORZIEHEN_RUECKFALL_MIN <= float(stand["jetzt_min"]):
+            out.append({"plan_id": pid, "alt_min": alt_m})
+    return out
+
+
 def _ap_dubai_versatz(mitternacht):
     """Minuten, die Dubai der deutschen Zeit voraus ist (Sommerzeit 120, Winterzeit 180) — nur für Klartext im Protokoll."""
     try:
@@ -17803,7 +17859,7 @@ def ap_ausgleichen(trocken=False, quelle="bot", jetzt=None, seed=None):
         print(f"[auto-plan] ⚠️ Richtungsschutz: {rs['fehler']}", flush=True)
     seed = int(seed) if seed not in (None, "") else random.SystemRandom().randrange(1, 2 ** 31)
     # DÄMPFUNG (08.10.2026): letzte Umplanung je Plan heute (auto_plan_umplanung, bot UND hand) als Minute des Tages → Ruhezeit
-    zuletzt, vorgez_h, verteilt_h = {}, set(), set()
+    zuletzt, vorgez_h, verteilt_h, alt_start = {}, set(), set(), {}
     try:
         for r in (_ap_umplanungen_heute(stand)[0] or []):
             um = r.get("um")
@@ -17812,6 +17868,9 @@ def ap_ausgleichen(trocken=False, quelle="bot", jetzt=None, seed=None):
             g_ = str(r.get("grund") or "")
             if g_.startswith("Ausgleich:") and "vorgezogen" in g_:
                 vorgez_h.add(str(r["plan_id"]))       # Pingpong-Bremse (08.10.2026)
+                if str(r["plan_id"]) not in alt_start:   # Protokoll neu → alt: der erste Treffer ist der jüngste Zug
+                    alt_start[str(r["plan_id"])] = (_ap_iso_min(r.get("von_start"), stand["mitternacht"]),
+                                                    _ap_iso_min(r.get("nach_start"), stand["mitternacht"]))
             elif g_.startswith("Verteilung:"):
                 verteilt_h.add(str(r["plan_id"]))
             m = (datetime.fromisoformat(str(um).replace("Z", "+00:00")) - stand["mitternacht"]).total_seconds() / 60.0
@@ -17822,7 +17881,8 @@ def ap_ausgleichen(trocken=False, quelle="bot", jetzt=None, seed=None):
     erg = ap_umplanen(_ap_stand_plaene(stand), stand["basis_netto"], stand["basis_brutto"], max(0.0, stand["jetzt_min"]),
                       stand["zeiten"], param["zielband_pct"], random.Random(seed), gestartet=stand["starts_heute"],
                       id_fest=stand["id_fest"], einsatz=ap_einsatz_kontext(stand, param), zuletzt=zuletzt,
-                      dubai_min=_ap_dubai_versatz(stand["mitternacht"]), vorgezogen_heute=vorgez_h, verteilt_heute=verteilt_h)
+                      dubai_min=_ap_dubai_versatz(stand["mitternacht"]), vorgezogen_heute=vorgez_h, verteilt_heute=verteilt_h,
+                      pc_lebt=_ap_pc_lebt(), verpufft=_ap_verpufft(stand, alt_start))
     je = {z["plan_id"]: z for z in stand["geplant"]}
     if trocken:
         umpl = [{"um": None, "plan_id": a["plan_id"], "user_id": a["user_id"], "user": (je.get(a["plan_id"]) or {}).get("user"),
