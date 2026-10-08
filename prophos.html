@@ -1940,16 +1940,6 @@
   :is(#tpl-view,#adm-pane-planer) .tpl-nk-achse{margin-left:0;margin-top:2px}
   :is(#tpl-view,#adm-pane-planer) .tpl-h .leg .tpl-sz-l{display:inline-block;width:14px;height:0;border-top:2px solid var(--good);vertical-align:middle;margin-right:2px} :is(#tpl-view,#adm-pane-planer) .tpl-h .leg .tpl-sz-l.gestr{border-top:2px dashed color-mix(in srgb,var(--ink) 55%,var(--surface))}
   :is(#tpl-view,#adm-pane-planer) .kpi-delta.tpl-sz-k{display:block;margin-top:1px}
-  :is(#tpl-view,#adm-pane-planer) .tpl-szb-kopf{font-size:12px;color:var(--sub);margin:6px 0 4px}
-  :is(#tpl-view,#adm-pane-planer) .tpl-szb{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;max-width:640px;margin:0 0 14px}
-  :is(#tpl-view,#adm-pane-planer) .tpl-szb > div{display:flex;flex-direction:column;align-items:center;gap:3px;min-width:0}
-  :is(#tpl-view,#adm-pane-planer) .tpl-szb small{font-size:11px;color:var(--sub);white-space:nowrap;font-variant-numeric:tabular-nums} :is(#tpl-view,#adm-pane-planer) .tpl-szb small.p60{text-align:center;line-height:1.25}
-  :is(#tpl-view,#adm-pane-planer) .tpl-szb b{font-size:13px;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
-  :is(#tpl-view,#adm-pane-planer) .tpl-szb .bahn{position:relative;width:100%;max-width:52px;height:110px;border-radius:6px;background:var(--surface-tint)}
-  :is(#tpl-view,#adm-pane-planer) .tpl-szb .bahn::after{content:'';position:absolute;left:0;right:0;top:50%;border-top:1px solid var(--border)}
-  :is(#tpl-view,#adm-pane-planer) .tpl-szb .bahn i{position:absolute;left:7px;right:7px;border-radius:3px}
-  :is(#tpl-view,#adm-pane-planer) .tpl-szb .bahn i.plus{bottom:50%;background:var(--good)} :is(#tpl-view,#adm-pane-planer) .tpl-szb .bahn i.minus{top:50%;background:var(--danger)}
-  :is(#tpl-view,#adm-pane-planer) .tpl-szb .mitte small,:is(#tpl-view,#adm-pane-planer) .tpl-szb .mitte b{color:var(--ink-2)} :is(#tpl-view,#adm-pane-planer) .tpl-szb .bahn.leer{background:none;border:1px dashed var(--border)}
   /* Chart-Upgrade (08.10.2026): Skala an der Gitterlinie zentriert, Jetzt-Punkt + Wert als HTML (im gestreckten SVG würde ein Kreis zur
      Ellipse), Stufe/Minute unter der Maus leicht abgedunkelt; Legende als Flächen: Long grün, Short rot, geplant hell, Band grau gestrichelt */
   :is(#tpl-view,#adm-pane-planer) .tpl-nk-chart .skala{transform:translateY(-50%)}
@@ -2051,7 +2041,6 @@
     :is(#tpl-view,#adm-pane-planer) .tpl-m{font-size:11px;height:22px;padding:0 8px 0 6px}
     :is(#tpl-view,#adm-pane-planer) .tpl-spur{height:84px}
     /* Braucht dich am Handy: Konto oben, Label + Aktion darunter, Klartext darunter (umbrechend) */
-    :is(#tpl-view,#adm-pane-planer) .tpl-szb{gap:3px} :is(#tpl-view,#adm-pane-planer) .tpl-szb small,:is(#tpl-view,#adm-pane-planer) .tpl-szb b{white-space:normal;text-align:center;line-height:1.2;overflow-wrap:anywhere} :is(#tpl-view,#adm-pane-planer) .tpl-szb b{font-size:11.5px} :is(#tpl-view,#adm-pane-planer) .tpl-szb small{font-size:10.5px}
     :is(#tpl-view,#adm-pane-planer) .tpl-bd-z{grid-template-columns:auto minmax(0,1fr);grid-template-areas:"k k" "l a" "t t";gap:4px 8px}
     :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .t{display:block;-webkit-line-clamp:unset;line-clamp:none;overflow:visible}   /* Handy: ganz umbrechen */
     /* Läuft-Liste einzeilig (QA 08.10.2026 Punkt 8): Konto links, Richtung + Wert rechts, Zeit klein dahinter — vorher drei Zeilen je Trade */
@@ -13164,6 +13153,8 @@
       kasseReiterFuer(eigenerCode)
       // Sprung aus Trades („Winning Days") wartet hinter dem Kasse-Code (23.09.2026)
       if(window._wdTabPending){ window._wdTabPending = false; if(!eigenerCode) document.querySelector('.adm-tab[data-admtab="wd"]')?.click() }
+      // Reiter „Trade-Planer" schon offen (Admin über die Seitenleiste betreten / entsperrt): frisch laden wie beim Reiter-Klick (08.10.2026)
+      setTimeout(() => { try{ window._apIdsSichtPruefen?.(true) }catch(_){} }, 0)
     }
 
     /* ── Admin-Übersicht: Kapitalverteilung über ALLE Personen ──
@@ -41322,7 +41313,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1310'
+  const OS_TAB_BUILD = '2026-09-22.1311'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -46869,21 +46860,6 @@
     return (sz.dpkt != null ? `<span class="kpi-delta tpl-sz-k" title="€ je NQ-Punkt über alle laufenden Trades (+ = profitiert von steigendem NQ)">Delta ${tplPktVz(sz.dpkt)} €/Pkt</span>` : '')
       + (s30 != null ? `<span class="kpi-delta tpl-sz-k ${s30 < 0 ? 'tpl-rot' : ''}" title="P&L hypothetisch, wenn NQ jetzt 30 Punkte fällt bzw. steigt — der schlechtere der beiden">schlimmster Fall bei ±30 Pkt: ${vz(s30)}</span>` : '')
   }
-  /* SZENARIO ALS BALKEN (Finn 08.10.2026, Screenshot Admin: „Ich sehe da gar nichts. Der ist auch in Prophos relativ stretched. Vielleicht
-   * dazu noch eine andere Grafik"): die Linie über die volle Breite wirkt flach. Darüber sechs Balken mit fester Breite — NQ −30/−20/−10/
-   * +10/+20/+30 Punkte → € aller Trades zusammen (dieselbe Rechnung, tplSzBei), grün nach oben = Gewinn, rot nach unten = Verlust, Betrag
-   * darunter, klein der Wert in 60 min mit den geplanten. Gleiche Skala für alle sechs; nur Anzeige. */
-  function tplSzBalkenHtml(sz, vz){
-    const pkte = [-30, -20, -10, 10, 20, 30]
-    const w = pkte.map(x => ({ x, e: tplSzBei(sz, x), e6: sz.p60.length ? tplSzBei(sz, x, sz.p60) : null }))
-    const max = Math.max(1, ...w.map(v => Math.abs(v.e || 0)))
-    const spalte = v => { const e = v.e || 0, hp = Math.min(50, Math.abs(e) / max * 50)
-      return `<div title="${escapeHtml(`NQ ${tplPktVz(v.x)} Punkte: jetzt ${vz(e)}${v.e6 != null ? ' · in 60 min mit geplanten ' + vz(v.e6) : ''}`)}"><small>NQ ${tplPktVz(v.x)}</small>`
-        + `<span class="bahn">${e ? `<i class="${e > 0 ? 'plus' : 'minus'}" style="height:${hp.toFixed(1)}%"></i>` : ''}</span>`
-        + `<b class="${e > 0 ? 'tpl-gut' : e < 0 ? 'tpl-rot' : ''}">${vz(Math.round(e))}</b>${v.e6 != null ? `<small class="p60">in 60 min<br>${vz(Math.round(v.e6))}</small>` : ''}</div>` }
-    return `<div class="tpl-szb-kopf">Wenn NQ jetzt so viele Punkte fällt oder steigt — so viel € machen alle Trades zusammen</div>`
-      + `<div class="tpl-szb">${w.slice(0, 3).map(spalte).join('')}<div class="mitte"><small>NQ jetzt</small><span class="bahn leer"></span><b>0 €</b></div>${w.slice(3).map(spalte).join('')}</div>`
-  }
   function tplSzenarioHtml(D, pre){
     const sz = tplSzDaten(D.delta); if(!sz) return ''
     const W = 1000, H = 150, M = H / 2, id = (pre || 'p') + 'sz', XMAX = 100
@@ -46910,7 +46886,6 @@
     const schlimm = [seiteTxt('↓', li), seiteTxt('↑', re)].filter(Boolean).join(' · ')
     return `<div class="tpl-karte tpl-nk tpl-sz"><div class="tpl-h">P&amp;L hypothetisch bei NQ ±${XMAX} Pkt${sz.dpkt != null ? ` <b class="${sz.dpkt > 0 ? 'tpl-gut' : sz.dpkt < 0 ? 'tpl-rot' : ''}">Delta ${tplPktVz(sz.dpkt)} €/Pkt</b>` : ''}
         <span class="leg"><span><i class="tpl-sz-l"></i> jetzt</span>${P.length ? '<span><i class="tpl-sz-l gestr"></i> in 60 min mit geplanten</span>' : ''}${schlimm ? `<span title="schlimmster Fall links (NQ fällt) und rechts (NQ steigt)">${escapeHtml(schlimm)}</span>` : ''}</span></div>
-        ${tplSzBalkenHtml(sz, vz)}
         <div class="tpl-nk-chart">${svg}${tplSkalaHtml(sk, Y, H)}</div><div class="tpl-achse tpl-nk-achse">${achse}</div></div>`
   }
   // Beide Charts untereinander — Planer-Seite (tplRender) und Admin-Reiter (apIdsKopfHtml) hängen denselben Baustein ein; Szenario nur mit Backend-Feldern
@@ -48547,6 +48522,8 @@
   document.getElementById('tplNeu')?.addEventListener('click', () => { _tpl.geladen = 0; _apd.geladen = 0; tplLaden() })
   // Offen: sofort zeichnen, laden, wenn der Stand älter als 15 s ist; danach alle 60 s, nur im sichtbaren Tab
   window._tplTabOeffnen = () => {
+    // RÜCKWEG Admin → Planer-Seite (08.10.2026): Lauf/Delta mit sicht=admin (alle IDs) gelten hier nicht für Nicht-Admins — verwerfen und eigene laden
+    if(!apdAdmin() && ((_apd.d && _apd.d.sicht === 'alle') || _ap.sicht === 'alle')){ _apd.d = null; _ap.letzter = null; _ap.sicht = null; _ap.laufAt = 0; _apd.geladen = 0; _tpl.geladen = 0 }
     tplAusCache(); tplZeichnen()   // Boot-Cache sofort (08.10.2026), dann frisch
     if(Date.now() - _tpl.geladen > 15000) tplLaden()
     clearInterval(_tpl.timer)
@@ -61252,6 +61229,8 @@
       .catch(e => { _apIds.fehler = (e && e.message) || String(e) })
     const kopf = (async () => { try{ _ap.laufAt = 0; if(typeof tplLaden === 'function') await tplLaden(); if(typeof apdLaden === 'function') await apdLaden(true); await apIdsSichtAdmin() }catch(e){ console.warn('[ap-ids] Kopf', e) } })()
     await Promise.all([ids, kopf])
+    if(apIdsStandEigen() && typeof window._tplSichtParam === 'function' && window._tplSichtParam() === 'admin') _apIdsEigenBis = Date.now() + 300000   // Backend gibt nur „eigene" (Sicht-Wächter)
+    _apIdsVollAt = Date.now()   // 60-s-Nachladen im Live-Takt
     _apIds.laeuft = false; apIdsRender()
     if(_apIds.nochmal) apIdsLaden()
   }
@@ -61338,6 +61317,7 @@
     window._apSicht.uid = u
     try{ if(u) localStorage.setItem('prophos_ap_sicht', u); else localStorage.removeItem('prophos_ap_sicht') }catch(_){}
     apIdsRender()
+    try{ window._apIdsSichtPruefen?.() }catch(_){}   // stehen noch Daten der eigenen Sicht im Reiter → alle IDs nachladen (Sicht-Wächter)
   }
   window.apSichtSetzen = apSichtSetzen
   const apIdsOffenSicht = () => { const u = apSichtUid(); return u ? _apIds.offen.filter(z => String(z.user_id) === u) : _apIds.offen }
@@ -61821,10 +61801,30 @@
   async function apIdsLiveTick(){
     try{
       if(document.visibilityState !== 'visible' || !(typeof window._tplSichtParam === 'function' && window._tplSichtParam() === 'admin') || apIdsLiveRuhe()) return
+      if(window._apIdsSichtPruefen()) return   // Daten der eigenen Sicht → komplett mit sicht=admin neu (Sicht-Wächter)
+      // ALLES NACHLADEN ALLE 60 s (Finn 08.10.2026: Inas drei Apex-Vorschläge standen nach dem Löschen in der DB weiter unter „Zu bestätigen",
+      // bis F5): /ids (Zu bestätigen, Wartet), Lauf und Delta wie der 60-s-Takt der Planer-Seite — gelöschte/geänderte Pläne verschwinden so
+      // ohne Neuladen. Kein Realtime-Abo (Supabase-Kontingent, Ausfall 30.09.2026); dazwischen nur Live-P&L.
+      if(Date.now() - _apIdsVollAt > 60000){ apIdsLaden(); return }
       _tpl.ltAt = 0   // live-trades sonst höchstens alle 50 s
       await Promise.allSettled([tplLiveLaden(), tplKerzenLaden(apIdsHeute())])
       if(!apIdsLiveRuhe()) apIdsRender()
     }catch(e){ console.warn('[ap-ids] live', (e && e.message) || e) }
+  }
+  /* SICHT-WÄCHTER (Finn 08.10.2026, Admin → „IDs im Trade-Planer · Alle 5/48", als „Finn + Pascal": Zeitstrahl zeigte nur die eigenen
+   * Trades — „Wenn ich die Seite neu lade, sehe ich die Daten von allen, aber ich muss immer neu laden"). Ursache: der Reiter lud nur beim
+   * Klick auf den Unterreiter (_apIdsTabOeffnen); kam man über die Seitenleiste von der Planer-Seite zurück, war „Trade-Planer" schon offen und
+   * zeigte Lauf/Delta der Planer-Seite (sicht „eigene"); „Alle" und der 20-s-Takt zeichneten nur neu. Jetzt: Admin betreten/entsperren mit
+   * offenem Reiter → frisch laden (showContent); im sichtbaren Reiter Daten mit sicht „eigene" → einmal neu mit sicht=admin (Klick auf
+   * „Alle"/eine ID, 20-s-Takt). Ein Login, dem das Backend auch mit sicht=admin nur „eigene" gibt (admin_zugang nur eigene), wird 5 min
+   * nicht erneut gefragt — keine Schleife. Planer-Seite: _tplTabOeffnen verwirft Admin-Daten (Rückweg). */
+  let _apIdsEigenBis = 0, _apIdsVollAt = Date.now()
+  const apIdsStandEigen = () => !!document.getElementById('ap-ids-root')?.offsetParent && ((_apd.d && _apd.d.sicht === 'eigene') || _ap.sicht === 'eigene')
+  window._apIdsSichtPruefen = immer => {
+    if(!document.getElementById('ap-ids-root')?.offsetParent || _apIds.laeuft) return false
+    if(immer){ window._apIdsTabOeffnen(); return true }
+    if(apIdsStandEigen() && Date.now() > _apIdsEigenBis){ apIdsLaden(); return true }
+    return false
   }
   const _apIdsTabOeffnenOhneTakt = window._apIdsTabOeffnen
   window._apIdsTabOeffnen = () => { _apIdsTabOeffnenOhneTakt(); if(!_apIdsLiveTimer) _apIdsLiveTimer = setInterval(apIdsLiveTick, 20000) }
