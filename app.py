@@ -3177,7 +3177,9 @@ def _auth_liste_anfrage():
 
 
 def admin_zugang_nur_eigene(uid):
-    """admin_zugang.nur_eigene je uid, 60 s gemerkt. Fehler werfen wie sb_select (der Aufrufer antwortet 502)."""
+    """admin_zugang.nur_eigene je uid, 60 s gemerkt. Fehler werfen wie sb_select (der Aufrufer antwortet 502).
+    Seit den Admin-Gruppen (08.10.2026) nur noch die Tabellen-Zeile — WER im Admin eingeschränkt ist (auch Verwalter und Mitglieder einer
+    Verwalter-Gruppe), sagt admin_sicht_lesen; die Gates fragen dort."""
     jetzt = time.time()
     with _kurz_cache_lock:
         treffer = _admin_zugang_cache.get(uid)
@@ -3188,6 +3190,161 @@ def admin_zugang_nur_eigene(uid):
     with _kurz_cache_lock:
         _admin_zugang_cache[uid] = (jetzt + AUTH_LISTE_CACHE_S, nur)
     return nur
+
+
+# ── ADMIN-GRUPPEN (08.10.2026, Finn ~22:45 Dubai: „Emin bekommt seine Freunde als eigene IDs bei sich unter Admin … Ich sage in
+# Zukunft, wenn eine neue ID reinkommt: ‚die bitte zu dem oder dem', dann kommt sie entweder zu Hermann Technologies oder zu dem
+# Menschen"; Nachtrag 23:00: „eine kleine Struktur, die für die Zukunft immer sehr clean und übersichtlich ist"). Zwei Tabellen
+# (sql/2026-10-08_admin_gruppen.sql): id_gruppen (id, name, verwalter_user_id — null = Hermann Technologies, genau eine solche Gruppe)
+# und id_gruppe_mitglied (user_id → gruppe_id, jede ID genau einer Gruppe). Eine ID ohne Mitglied-Zeile zählt als Hermann Technologies.
+# VERWALTER = verwalter_user_id einer Gruppe (heute Emin): volles Admin, aber nur mit sich + seinen Mitgliedern. MITGLIED einer
+# Verwalter-Gruppe bzw. Login mit admin_zugang.nur_eigene ohne eigene Gruppe: sieht im Admin nur sich selbst (wie Emin bis .1380) —
+# nie die HT-Daten, auch nicht über eine Planer-Mitgliedschaft (Option A). Alle anderen Logins (Finn, HT) wie bisher alles, dazu
+# ?gruppe=<gruppe_id>|ht als reiner Lese-Filter. Neue ID zu einer Gruppe = ein update in id_gruppe_mitglied, keine Code-Änderung.
+_admin_gruppe_cache = {"bis": 0.0, "daten": None}
+ADMIN_GRUPPE_HT = "ht"                 # ?gruppe=ht = die Gruppe ohne Verwalter (Hermann Technologies)
+
+
+def admin_gruppen_daten():
+    """{gruppen: [{id, name, verwalter_id|None}], mitglieder: [{user_id, gruppe_id}]} aus id_gruppen + id_gruppe_mitglied, 60 s gemerkt
+    (kleine Tabellen, zwei Abfragen für alle Logins). Fehlen die Tabellen (SQL noch nicht eingespielt, PostgREST 404) → leer = keine
+    Gruppen, alles wie vor den Gruppen. Jeder andere Fehler fliegt durch — der Aufrufer antwortet 502, nie still alles ausliefern."""
+    jetzt = time.time()
+    with _kurz_cache_lock:
+        if _admin_gruppe_cache["daten"] is not None and _admin_gruppe_cache["bis"] > jetzt:
+            return _admin_gruppe_cache["daten"]
+    try:
+        gr = sb_select("id_gruppen", {"select": "id,name,verwalter_user_id"})
+        mg = sb_select("id_gruppe_mitglied", {"select": "user_id,gruppe_id"})
+    except requests.exceptions.HTTPError as e:
+        if getattr(getattr(e, "response", None), "status_code", 0) != 404:
+            raise
+        gr, mg = [], []
+    daten = {"gruppen": [{"id": str(x.get("id")), "name": str(x.get("name") or ""),
+                          "verwalter_id": str(x["verwalter_user_id"]) if x.get("verwalter_user_id") else None}
+                         for x in (gr if isinstance(gr, list) else []) if x.get("id")],
+             "mitglieder": [{"user_id": str(x.get("user_id")), "gruppe_id": str(x.get("gruppe_id"))}
+                            for x in (mg if isinstance(mg, list) else []) if x.get("user_id") and x.get("gruppe_id")]}
+    with _kurz_cache_lock:
+        _admin_gruppe_cache.update(bis=jetzt + AUTH_LISTE_CACHE_S, daten=daten)
+    return daten
+
+
+def admin_sicht_menge(uid, nur_eigene, daten):
+    """REIN RECHNEND (testbar): (sicht, verwalter) eines Logins. sicht None = alle IDs (HT wie bisher); sonst frozenset der user_ids,
+    die er im Admin sieht. Verwalter einer Gruppe = er + ihre Mitglieder (verwalter True). Sonst eingeschränkt auf sich selbst
+    (verwalter False → kein Admin): admin_zugang.nur_eigene ohne eigene Gruppe oder Mitglied einer Gruppe MIT Verwalter.
+    HT-Mitglieder und IDs ohne Zeile → None."""
+    uid = str(uid)
+    daten = daten or {}
+    gruppen, mitglieder = daten.get("gruppen") or (), daten.get("mitglieder") or ()
+    eigene = {str(x.get("id")) for x in gruppen if x.get("verwalter_id") and str(x.get("verwalter_id")) == uid}
+    if eigene:
+        return frozenset({uid} | {str(m.get("user_id")) for m in mitglieder if str(m.get("gruppe_id")) in eigene}), True
+    if nur_eigene:
+        return frozenset({uid}), False
+    mit_verwalter = {str(x.get("id")) for x in gruppen if x.get("verwalter_id")}
+    if any(str(m.get("user_id")) == uid and str(m.get("gruppe_id")) in mit_verwalter for m in mitglieder):
+        return frozenset({uid}), False
+    return None, False
+
+
+def admin_sicht_lesen(uid):
+    """(sicht, verwalter) je Login (admin_sicht_menge): admin_zugang 60 s je uid, Gruppen 60 s. Fehler werfen (Aufrufer 502).
+    sicht is not None = im Admin eingeschränkt (nie alle IDs) — die Frage, die bis .1380 admin_zugang_nur_eigene allein beantwortete."""
+    return admin_sicht_menge(uid, admin_zugang_nur_eigene(str(uid)), admin_gruppen_daten())
+
+
+def admin_in_sicht(user_id, sicht):
+    """REIN RECHNEND: gehört user_id zur Sicht? sicht None = alle IDs; str = genau diese ID; Menge = eine der IDs."""
+    if sicht is None:
+        return True
+    if isinstance(sicht, str):
+        return str(user_id or "") == sicht
+    return str(user_id or "") in sicht
+
+
+def admin_sicht_filter(sicht):
+    """REIN RECHNEND: PostgREST-Filter auf user_id für eine Sicht — None (alle) → None; str → eq.; Menge → in.(…) (sortiert).
+    Eine leere Menge filtert auf eine ID, die es nicht gibt (nie „alle")."""
+    if sicht is None:
+        return None
+    if isinstance(sicht, str):
+        return f"eq.{sicht}"
+    ids = sorted(str(u) for u in sicht)
+    return "in.(" + ",".join(ids) + ")" if ids else "eq.00000000-0000-0000-0000-000000000000"
+
+
+def _admin_verwalter_gruppen_ids(daten):
+    """REIN RECHNEND: alle IDs, die zu einer Gruppe MIT Verwalter gehören (Mitglieder + Verwalter) — der Rest ist Hermann Technologies."""
+    daten = daten or {}
+    mit_v = {str(x.get("id")): str(x.get("verwalter_id")) for x in daten.get("gruppen") or () if x.get("verwalter_id")}
+    return set(mit_v.values()) | {str(m.get("user_id")) for m in daten.get("mitglieder") or () if str(m.get("gruppe_id")) in mit_v}
+
+
+def admin_gruppen_liste(daten):
+    """REIN RECHNEND: Gruppen für Finns Filter-Chips → [{id, name, ht, ids, ausser?}] — Name aus id_gruppen.name; HT (ohne Verwalter)
+    zuerst, dann nach Name. ids = Verwalter + Mitglieder; bei HT zusätzlich ausser = alle IDs der Verwalter-Gruppen (jede andere ID,
+    auch eine neue ohne Zeile, ist HT)."""
+    daten = daten or {}
+    mitglieder = daten.get("mitglieder") or ()
+    aussen = sorted(_admin_verwalter_gruppen_ids(daten))
+    out = []
+    for x in daten.get("gruppen") or ():
+        gid, v = str(x.get("id")), x.get("verwalter_id")
+        ids = {str(m.get("user_id")) for m in mitglieder if str(m.get("gruppe_id")) == gid} | ({str(v)} if v else set())
+        z = {"id": gid, "name": str(x.get("name") or gid[:8]), "ht": not v, "ids": sorted(ids)}
+        if not v:
+            z["ausser"] = aussen
+        out.append(z)
+    return sorted(out, key=lambda z: (not z["ht"], z["name"].lower(), z["id"]))
+
+
+def admin_gruppe_filter_menge(gruppe, daten, alle_ids):
+    """REIN RECHNEND: Finns Lese-Filter ?gruppe= → frozenset oder None (kein Filter). Gruppe MIT Verwalter = Verwalter + Mitglieder;
+    Gruppe ohne Verwalter (Hermann Technologies, auch 'ht') = alle_ids ohne die IDs der Verwalter-Gruppen — eine neue ID ohne Zeile
+    zählt so automatisch dazu. Unbekannte Gruppe → leere Menge (zeigt nichts, nie alles)."""
+    gp = str(gruppe or "").strip().lower()
+    if not gp:
+        return None
+    daten = daten or {}
+    gruppen = daten.get("gruppen") or ()
+    if gp == ADMIN_GRUPPE_HT:
+        x = next((x for x in gruppen if not x.get("verwalter_id")), None)
+    else:
+        x = next((x for x in gruppen if str(x.get("id")).lower() == gp), None)
+    if not x:
+        return frozenset()
+    if not x.get("verwalter_id"):
+        aussen = _admin_verwalter_gruppen_ids(daten)
+        return frozenset(str(u) for u in (alle_ids or ()) if str(u) not in aussen)
+    gid = str(x.get("id"))
+    return frozenset({str(x["verwalter_id"])} | {str(m.get("user_id")) for m in daten.get("mitglieder") or ()
+                                                  if str(m.get("gruppe_id")) == gid})
+
+
+def admin_gruppe_ist_ht(gruppe, daten):
+    """REIN RECHNEND: meint ?gruppe= die Gruppe ohne Verwalter (braucht dann alle IDs)?"""
+    gp = str(gruppe or "").strip().lower()
+    if gp == ADMIN_GRUPPE_HT:
+        return True
+    return any(str(x.get("id")).lower() == gp and not x.get("verwalter_id") for x in (daten or {}).get("gruppen") or ())
+
+
+def _admin_filter_aus_anfrage():
+    """Finns Lese-Filter aus ?gruppe= (nur GET) → frozenset oder None. Nur für Logins OHNE Einschränkung — ein Verwalter bleibt bei
+    seiner Gruppe. HT braucht alle IDs (Auth-Liste, 60 s gemerkt); nicht lesbar → Fehler (Aufrufer 502), nie still ungefiltert."""
+    gp = str(request.args.get("gruppe") or "").strip().lower()
+    if not gp or request.method != "GET":
+        return None
+    daten = admin_gruppen_daten()
+    alle = ()
+    if admin_gruppe_ist_ht(gp, daten):
+        r = _auth_liste_anfrage()
+        if r.status_code != 200:
+            raise RuntimeError("Auth-Liste nicht lesbar — Gruppenfilter nicht möglich")
+        alle = [str(u.get("id")) for u in (r.json() or {}).get("users", []) if u.get("id")]
+    return admin_gruppe_filter_menge(gp, daten, alle)
 
 
 def dup_creds_lesen():
@@ -4764,8 +4921,34 @@ ADMIN_EMAILS = {
 # jeder AUSSER ihr. Tabelle statt E-Mail-Liste im Code, weil app.py im Repo liegt
 # (sql/2026-09-27_admin_zugang.sql).
 def _admin_nur_uid():
-    """user_id des Aufrufers, wenn er im Admin nur sich selbst sehen darf — sonst None."""
+    """user_id des Aufrufers, wenn er im Admin eingeschränkt ist (Verwalter oder Gruppen-Mitglied, 08.10.2026) — sonst None.
+    Für „nur Admin"-Sperren HT-weiter Dinge; WELCHE IDs er sieht/ändern darf, sagen _admin_sicht / _admin_darf_uid."""
     return getattr(g, "admin_nur_uid", None)
+
+
+# ADMIN-GRUPPEN (08.10.2026): die Menge statt der einen ID. _wd_login setzt je Anfrage g.admin_sicht (Einschränkung: Verwalter =
+# Gruppe, Mitglied = sich selbst) bzw. bei Finn g.admin_filter (?gruppe=, nur GET, reiner Lese-Filter).
+def _admin_sicht():
+    """sichtbare user_ids dieser Anfrage (frozenset) oder None = alle: Einschränkung des Logins, sonst Finns ?gruppe=-Filter."""
+    s = getattr(g, "admin_sicht", None)
+    return s if s is not None else getattr(g, "admin_filter", None)
+
+
+def _admin_eingeschraenkt():
+    """Einschränkung des Logins (frozenset: Verwalter = Gruppe, Mitglied = er selbst) oder None — ohne Finns Lese-Filter."""
+    return getattr(g, "admin_sicht", None)
+
+
+def _admin_darf_uid(user_id):
+    """Schreib-Schutz: darf diese Anfrage ein Objekt dieser ID ändern? Nur die Einschränkung zählt (Verwalter: eigene Gruppe,
+    Mitglied: nur sich), nie Finns Lese-Filter."""
+    s = getattr(g, "admin_sicht", None)
+    return s is None or str(user_id or "") in s
+
+
+def _admin_verwalter():
+    """Ist der Aufrufer Verwalter einer Gruppe (admin_zugang nur_eigene) — volles Admin mit seiner Gruppe?"""
+    return bool(getattr(g, "admin_verwalter", False))
 
 
 def _firm_norm(name):
@@ -4929,12 +5112,20 @@ def _admin_basis():
     # Nur eigene Daten (27.09.2026): jeder außer dem Aufrufer ist ausgeblendet. Ohne
     # Auth-API kennt der Server nicht alle Personen — dann lieber gar nichts liefern.
     # Die E-Mails der anderen gehen nie raus (excluded leer).
+    # Admin-Gruppen (08.10.2026): statt „alle außer mir" jetzt „alle außer meiner Gruppe" (Verwalter) bzw. „alle außer mir"
+    # (Mitglied) — die Ausblendung des Servers (ADMIN_EXCLUDE) gilt dann nicht, die eigene Gruppe ist immer sichtbar.
+    # Finns ?gruppe=-Filter kommt OBEN DRAUF: die ausgeblendeten Personen bleiben ausgeblendet, E-Mails wie bisher.
     nur = _admin_nur_uid()
+    sicht = _admin_sicht()
     if nur:
         if not names_ok:
             raise RuntimeError("Auth-API nicht erreichbar — eigene Daten nicht sicher trennbar.")
-        excluded_ids = (set(names) | {str(a.get("user_id")) for a in accounts}) - {nur}
+        excluded_ids = (set(names) | {str(a.get("user_id")) for a in accounts}) - set(sicht or {nur})
         excluded_names = []
+    elif sicht is not None:
+        if not names_ok:
+            raise RuntimeError("Auth-API nicht erreichbar — Gruppenfilter nicht sicher trennbar.")
+        excluded_ids = set(excluded_ids) | ((set(names) | {str(a.get("user_id")) for a in accounts}) - set(sicht))
 
     return {"accounts": accounts, "archived": archived, "preds_of": preds_of, "arch_info": arch_info, "fx": fx,
             "by_id": by_id, "live_ids": live_ids, "names": names, "disp": disp,
@@ -6278,10 +6469,22 @@ def admin_build_overview(kapitel_id=None):
          for u in {r["user_id"] for r in rows}],
         key=lambda p: p["name"].lower())
     firm_list = sorted({r["firm"] for r in rows})
+    # ADMIN-GRUPPEN (08.10.2026): Finn (ohne Einschränkung) bekommt die Gruppen für die Filter-Chips im Admin-Kopf — Name aus
+    # id_gruppen.name, nie im Code. Ein eingeschränkter Login bekommt nur seine eigene Sicht (sicht_ids), keine fremden Gruppen.
+    gruppen_info = {}
+    try:
+        if _admin_nur_uid():
+            gruppen_info = {"sicht_ids": sorted(_admin_sicht() or ()), "verwalter": _admin_verwalter(), "gruppen": []}
+        else:
+            gruppen_info = {"gruppen": admin_gruppen_liste(admin_gruppen_daten()),
+                            "gruppe_aktiv": str(request.args.get("gruppe") or "").strip().lower() or None}
+    except Exception as e:
+        print(f"[admin] ⚠️ gruppen: {type(e).__name__}: {e}", flush=True)
+        gruppen_info = {"gruppen": [], "gruppen_fehler": f"{type(e).__name__}"}
     # excluded_uids zusaetzlich zu den E-Mails (26.08.2026): die Flotte im
     # Frontend blendet diese Personen komplett aus und braucht dafuer die uid —
     # dup_live/mt5_live-Zeilen tragen nur user_id, keine E-Mail.
-    return {"accounts": rows, "people": people_list, "firms": firm_list,
+    return {**gruppen_info, "accounts": rows, "people": people_list, "firms": firm_list,
             "live_konten": live_konten,   # nur für „Accounts je Firma" (27.09.2026)
             "pending_payouts": pending_rows,
             "payouts_received": recv_rows,
@@ -6810,9 +7013,8 @@ def admin_prop_baum():
         acc = sb_select("accounts", {"select": "id,user_id", "id": f"eq.{aid}"}) or []
         if not acc:
             return jsonify({"error": "Account unbekannt"}), 404
-        nur = _admin_nur_uid()
-        if nur and str(acc[0].get("user_id")) != nur:
-            return jsonify({"error": "nur eigene Accounts"}), 403
+        if not _admin_darf_uid(acc[0].get("user_id")):   # seit 08.10.2026 Verwalter: Accounts seiner Gruppe
+            return jsonify({"error": "nur Accounts der eigenen Gruppe" if _admin_verwalter() else "nur eigene Accounts"}), 403
         tag = pb_handelstag()[0]
         if art is None:
             r = _sb_anfrage("DELETE", f"{SUPABASE_URL}/rest/v1/prop_baum_haken",
@@ -7156,9 +7358,8 @@ def admin_vorrat():
         return jsonify({"error": "firma fehlt"}), 400
     if status not in VORRAT_STATUS:
         return jsonify({"error": "status muss frei, pausiert oder gesperrt sein"}), 400
-    nur = _admin_nur_uid()
-    if nur and ziel_uid != nur:
-        return jsonify({"error": "nur eigene ID"}), 403
+    if not _admin_darf_uid(ziel_uid):   # seit 08.10.2026 Verwalter: jede ID seiner Gruppe
+        return jsonify({"error": "nur IDs der eigenen Gruppe" if _admin_verwalter() else "nur eigene ID"}), 403
     try:
         r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/vorrat_matrix", params={"on_conflict": "user_id,firma"},
                         json={"user_id": ziel_uid, "firma": firma, "status": status, "geaendert_von": uid,
@@ -8872,6 +9073,9 @@ def _vorrat_antwort(erg1):
         except requests.exceptions.HTTPError:
             out["ziele"] = []
     out.setdefault("luecke_gesamt", None)
+    if _admin_nur_uid():
+        # Admin-Gruppen (08.10.2026): der KI-Text und Finns KI-Hinweise sprechen über alle IDs (HT-weit) — nicht an Eingeschränkte
+        out["ki_text"], out["ki_hinweise"] = None, []
     return out
 
 
@@ -9026,8 +9230,8 @@ def _vorrat2_aktion(aktion, body, uid):
                 return jsonify({"error": "user_id/firma fehlt"}), 400
             if not isinstance(anzahl, int) or not (1 <= anzahl <= 20):
                 return jsonify({"error": "anzahl muss 1–20 sein"}), 400
-            if nur and ziel_uid != nur:
-                return jsonify({"error": "nur eigene ID"}), 403
+            if not _admin_darf_uid(ziel_uid):   # seit 08.10.2026 Verwalter: jede ID seiner Gruppe
+                return jsonify({"error": "nur IDs der eigenen Gruppe" if _admin_verwalter() else "nur eigene ID"}), 403
             _, prm, _, _ok = _vorrat2_tabellen()
             from datetime import timedelta as _td
             verfall = (datetime.now(timezone.utc) + _td(hours=float(prm.get("bestellt_h") or 48))).isoformat()
@@ -9045,8 +9249,8 @@ def _vorrat2_aktion(aktion, body, uid):
         if not isinstance(bid, int):
             return jsonify({"error": "id fehlt"}), 400
         params = {"id": f"eq.{bid}", "weg_at": "is.null"}
-        if nur:
-            params["user_id"] = f"eq.{nur}"
+        if nur:   # seit 08.10.2026 die ganze Sicht (Verwalter: Gruppe)
+            params["user_id"] = admin_sicht_filter(getattr(g, "admin_sicht", None) or frozenset({nur}))
         r = sb_update("vorrat_bestellt", params, {"weg_at": _wt_now_iso()})
         if not r:
             return jsonify({"error": "Bestellung nicht gefunden"}), 404
@@ -9952,8 +10156,17 @@ def _wd_login():
         # Nur eigene Daten (27.09.2026): gilt für diese eine Anfrage. Ist admin_zugang nicht
         # lesbar, greift das except unten (502) — nie still alles ausliefern.
         # admin_zugang 60 s gemerkt (01.10.2026, SUPABASE-DIÄT B) — Fehler werfen weiter ins except (502)
-        if admin_zugang_nur_eigene(str(u["id"])):
+        # Admin-Gruppen (08.10.2026): Einschränkung als MENGE (Verwalter = seine Gruppe, Mitglied = nur er); ohne Einschränkung
+        # Finns ?gruppe=-Lesefilter (nur GET). admin_gruppe 60 s gemerkt; fehlt die Tabelle noch, gibt es keine Gruppen.
+        sicht, verwalter = admin_sicht_lesen(str(u["id"]))
+        if sicht is not None:
             g.admin_nur_uid = str(u["id"])
+            g.admin_sicht = sicht
+            g.admin_verwalter = verwalter
+        else:
+            f = _admin_filter_aus_anfrage()
+            if f is not None:
+                g.admin_filter = f
         return str(u["id"]), None
     except Exception:
         return None, (jsonify({"error": "Anmeldung nicht prüfbar"}), 502)
@@ -9972,8 +10185,11 @@ def _wd_personen():
         if mail.strip().lower() in ADMIN_EXCLUDE_EMAILS:
             excluded.add(uid)
     nur = _admin_nur_uid()
-    if nur:   # nur eigene Daten (27.09.2026): alle anderen raus
-        excluded = set(disp) - {nur}
+    sicht = _admin_sicht()
+    if nur:   # nur eigene Daten (27.09.2026) — seit 08.10.2026 die eigene Gruppe (Verwalter): alle anderen raus
+        excluded = set(disp) - set(sicht or {nur})
+    elif sicht is not None:   # Finns ?gruppe=-Filter (08.10.2026) zusätzlich zur Ausblendung
+        excluded = set(excluded) | (set(disp) - set(sicht))
     return disp, excluded
 
 
@@ -11778,7 +11994,8 @@ def pc_stand_zusammenfassen(rows, jetzt):
 
 @app.route("/admin/pc-stand", methods=["GET", "OPTIONS"])
 def admin_pc_stand():
-    """GET → {ok, at, stand: {user_id: {...}}}. Gate wie /admin/wd-plaene (eingeloggt); „nur eigene" (admin_zugang) sieht nur die eigene ID."""
+    """GET → {ok, at, stand: {user_id: {...}}}. Gate wie /admin/wd-plaene (eingeloggt); eingeschränkte Logins sehen nur ihre Sicht
+    (Verwalter: Gruppe, Mitglied/„nur eigene": sich selbst), Finn mit ?gruppe= nur diese Gruppe (08.10.2026)."""
     if request.method == "OPTIONS":
         return "", 200
     me, err = _wd_login()
@@ -11790,9 +12007,9 @@ def admin_pc_stand():
                                   "order": "updated_at.desc", "limit": "400"}) or []
     jetzt = datetime.now(timezone.utc)
     stand = pc_stand_zusammenfassen(rows, jetzt)
-    nur = _admin_nur_uid()
-    if nur:
-        stand = {k: v for k, v in stand.items() if k == str(nur)}
+    sicht = _admin_sicht()   # Admin-Gruppen (08.10.2026): Verwalter = seine Gruppe, Mitglied = nur er, Finn mit ?gruppe= = diese Gruppe
+    if sicht is not None:
+        stand = {k: v for k, v in stand.items() if str(k) in sicht}
     return jsonify({"ok": True, "at": jetzt.isoformat(), "lebt_s": PC_STAND_LEBT_S, "stand": stand})
 
 
@@ -11807,26 +12024,35 @@ def admin_wd_plaene():
     # für eine ID, die im Admin nur sich selbst sieht (27.09.2026). PATCH bleibt, aber nur
     # auf EIGENE Pläne/Signale/Konten: der PC-Tab beendet, liest nach und hakt darüber
     # auch seine eigenen Trades ab (ende/endlesung/endlesung_stand/erledigt/farm/id).
+    # ADMIN-GRUPPEN (08.10.2026, Finn: „Emin bekommt das volle Admin wie Finn, aber nur mit den IDs seiner Gruppe"): ein Verwalter darf
+    # GET/POST/PATCH/DELETE, aber nur auf Pläne/Signale/Konten seiner Gruppe (Besitz-Prüfung wie bisher, nur gegen die Menge); GET
+    # liefert nur seine Gruppe (_wd_personen + Filter unten). Ein Mitglied ohne eigenen Zugang bleibt wie Emin bis .1380: nur PATCH auf
+    # Eigenes (PC-Tab). Mit DELETE kam bisher jeder Login an jeden geplanten Plan — für Eingeschränkte jetzt nur die eigene Sicht.
     nur = _admin_nur_uid()
+    sicht_fest = getattr(g, "admin_sicht", None)
     if nur:
-        if request.method != "PATCH":
+        if request.method != "PATCH" and not _admin_verwalter():
             return jsonify({"error": "Winning-Day-Farmer ist für diese ID nicht freigegeben"}), 403
-        d = request.get_json(silent=True) or {}
-        akt = d.get("aktion")
-        try:
-            if akt in ("endlesung_stand", "balance_stand"):
-                tab, key = "order_signale", str(d.get("signal_id") or "").strip()
-            elif akt in ("farm", "balance"):
-                tab, key = "accounts", str(d.get("account_id") or "").strip()
-            elif akt in ("ende", "endlesung", "erledigt", "ansehen", "manuell", "manuell_weg"):
-                tab, key = "trade_plans", str(d.get("plan_id") or "").strip()
-            else:
-                tab, key = "trade_plans", str(d.get("id") or request.args.get("id") or "").strip()
-            besitz = sb_select(tab, {"select": "user_id", "id": f"eq.{key}", "limit": "1"}) if len(key) >= 10 else []
-        except Exception as e:
-            return jsonify({"error": f"Besitz nicht prüfbar ({type(e).__name__})"}), 502
-        if not besitz or str(besitz[0].get("user_id") or "") != nur:
-            return jsonify({"error": "Nur eigene Pläne und Konten"}), 403
+        if request.method in ("PATCH", "DELETE"):
+            d = request.get_json(silent=True) or {}
+            akt = d.get("aktion") if request.method == "PATCH" else None
+            try:
+                if akt == "tab_neu_laden":     # kein Objekt, nur die ID selbst (bis .1380 fiel das hier immer auf 403)
+                    besitz = [{"user_id": str(d.get("user_id") or "").strip()}]
+                else:
+                    if akt in ("endlesung_stand", "balance_stand"):
+                        tab, key = "order_signale", str(d.get("signal_id") or "").strip()
+                    elif akt in ("farm", "balance"):
+                        tab, key = "accounts", str(d.get("account_id") or "").strip()
+                    elif akt in ("ende", "endlesung", "erledigt", "ansehen", "manuell", "manuell_weg"):
+                        tab, key = "trade_plans", str(d.get("plan_id") or "").strip()
+                    else:
+                        tab, key = "trade_plans", str(d.get("id") or request.args.get("id") or "").strip()
+                    besitz = sb_select(tab, {"select": "user_id", "id": f"eq.{key}", "limit": "1"}) if len(key) >= 10 else []
+            except Exception as e:
+                return jsonify({"error": f"Besitz nicht prüfbar ({type(e).__name__})"}), 502
+            if not besitz or not admin_in_sicht(besitz[0].get("user_id"), sicht_fest or frozenset({nur})):
+                return jsonify({"error": "Nur Pläne und Konten der eigenen Gruppe" if _admin_verwalter() else "Nur eigene Pläne und Konten"}), 403
 
     if request.method == "GET":
         tag = (request.args.get("tag") or "").strip()[:10]
@@ -11890,6 +12116,11 @@ def admin_wd_plaene():
                                   "ended_at,master_pl,master_tp,master_risk,slave_risk,multiplier,richtung,master_symbol,"
                                   "slave_name,master_name,updated_at",
                         "id": f"in.({chunk})"})
+            # Admin-Gruppen (08.10.2026): die Tagesplan-Zeilen sind nutzerübergreifend (RLS offen) — Pläne fremder IDs nicht an einen
+            # eingeschränkten Login bzw. nicht in Finns Gruppenfilter
+            sicht_get = _admin_sicht()
+            if sicht_get is not None:
+                plaene = [p for p in plaene if str(p.get("user_id")) in sicht_get]
             # 23.09.2026 (Finn: „immer noch nicht — alle Konten off"): beim LADEN tote Farmer-Plaene frueherer Tage
             # wegraeumen (planned, nie gestartet — z.B. Farmer AUS) und melden, welche Konten wirklich belegt sind
             # (belegt: Konto → Grund) bzw. welchen Farmer-Plan es fuer diesen Tag schon gibt (plaene_tag) — damit
@@ -11901,6 +12132,8 @@ def admin_wd_plaene():
                                                           "master_contracts,multiplier,richtung,master_symbol,slave_name,master_name,updated_at,"
                                                           "master_firm,auto_plan,auto_bestaetigt_at",
                                                 "status": "in.(planned,open)"})
+                if sicht_get is not None:   # Admin-Gruppen (08.10.2026): belegt/plaene_tag/richtung_fest/Aufräumen nur in der Sicht
+                    offen = [o for o in offen if str(o.get("user_id")) in sicht_get]
                 # RICHTUNG ÜBERNEHMEN (Finn 08.10.2026: „solange der Apex-Short bei Ina läuft, muss bei Ina auch nur short gemacht werden;
                 # ist er per TP/SL zu, darf wieder long"): dieselbe Quelle wie der Planer (ap_id_fest) — je ID+Firma die Richtung aus
                 # laufenden Trades aller Wege und aus Plänen, die in ≤ 30 min wirklich starten. Das Würfeln im Farmer übernimmt sie
@@ -11959,6 +12192,8 @@ def admin_wd_plaene():
                 mid, uid = str(body.get("master_account_id") or ""), str(body.get("user_id") or "")
                 if len(mid) < 10 or len(uid) < 10:
                     uebersprungen.append({"master_account_id": mid, "grund": "user_id/master_account_id fehlt"}); continue
+                if not _admin_darf_uid(uid):   # Admin-Gruppen (08.10.2026): Verwalter legt nur für IDs seiner Gruppe an
+                    uebersprungen.append({"master_account_id": mid, "grund": "ID nicht in deiner Gruppe"}); continue
                 # Konto muss dieser Person gehören — sonst landet ein Plan im falschen Profil
                 acc = sb_select("accounts", {"select": "id,user_id,firm", "id": f"eq.{mid}"})
                 if not acc or str(acc[0].get("user_id")) != uid:
@@ -12075,8 +12310,8 @@ def admin_wd_plaene():
             uid_z, pc_z = str(daten.get("user_id") or "").strip(), str(daten.get("pc") or "").strip()
             if len(uid_z) < 10 or not re.fullmatch(r"pc-[a-z0-9]{3,24}", pc_z):
                 return jsonify({"error": "user_id und pc (pc-xxxxxx) nötig"}), 400
-            if nur and uid_z != nur:
-                return jsonify({"error": "Nur die eigene ID"}), 403
+            if not _admin_darf_uid(uid_z):   # seit 08.10.2026 Verwalter: jede ID seiner Gruppe
+                return jsonify({"error": "Nur IDs der eigenen Gruppe" if _admin_verwalter() else "Nur die eigene ID"}), 403
             try:
                 sig = sb_insert("order_signale", {"user_id": uid_z, "plan_id": f"tab:{pc_z}", "status": "wartet",
                                                   "params": {"aktion": "tab_neu_laden", "pc": pc_z, "von": "admin"}})
@@ -12397,8 +12632,10 @@ def admin_wd_plaene():
     if len(pid) < 10:
         return jsonify({"error": "id fehlt"}), 400
     try:
-        r = _sb_anfrage("DELETE", f"{SUPABASE_URL}/rest/v1/trade_plans",
-                            params={"id": f"eq.{pid}", "status": "eq.planned", "start_um_gestartet_at": "is.null"},
+        del_params = {"id": f"eq.{pid}", "status": "eq.planned", "start_um_gestartet_at": "is.null"}
+        if sicht_fest is not None:   # Admin-Gruppen (08.10.2026): Guard in derselben Anfrage — nur Pläne der eigenen Sicht
+            del_params["user_id"] = admin_sicht_filter(sicht_fest)
+        r = _sb_anfrage("DELETE", f"{SUPABASE_URL}/rest/v1/trade_plans", params=del_params,
                             headers=_sb_headers("return=representation"), timeout=12)
         r.raise_for_status()
         return jsonify({"geloescht": bool(r.json())})
@@ -12421,12 +12658,28 @@ def admin_payout_calc():
     if request.method == "OPTIONS":
         return "", 200
     _, err = _admin_auth()
+    gruppe = None
     if err:
-        return err
+        # Admin-Gruppen (08.10.2026): ein Verwalter pflegt Payout-% / Betrag an Konten SEINER Gruppe (Reiter Payouts) — sonst ADMIN_EMAILS
+        if err[1] != 403:
+            return err
+        _uid, err2 = _wd_login()
+        if err2:
+            return err2
+        if not _admin_verwalter():
+            return err
+        gruppe = getattr(g, "admin_sicht", None)
     b = request.get_json(silent=True) or {}
     aid = str(b.get("account_id") or "").strip()
     if len(aid) < 10:
         return jsonify({"error": "account_id fehlt"}), 400
+    if gruppe is not None:
+        try:
+            besitz = sb_select("accounts", {"select": "user_id", "id": f"eq.{aid}", "limit": "1"}) or []
+        except Exception as e:
+            return jsonify({"error": f"Besitz nicht prüfbar ({type(e).__name__})"}), 502
+        if not besitz or str(besitz[0].get("user_id")) not in gruppe:
+            return jsonify({"error": "Nur Konten der eigenen Gruppe"}), 403
     body = {}
     for key, lo, hi in (("payout_pct", 0, 100), ("payout_override", 0, 10_000_000)):
         if key not in b:
@@ -13944,8 +14197,9 @@ def admin_konten_pruefen():
         return jsonify({"treffer": []})
     try:
         konten = _sb_all("accounts", {"select": "id,user_id,name,firm,account_type,external_id", "external_id": "not.is.null"})
-        if _admin_nur_uid():   # nur eigene Daten (27.09.2026): fremde Kontonummern nicht verraten
-            konten = [k for k in konten if str(k.get("user_id") or "") == _admin_nur_uid()]
+        sicht = _admin_sicht()   # nur eigene Daten (27.09.2026), seit 08.10.2026 die Gruppe: fremde Kontonummern nicht verraten
+        if sicht is not None:
+            konten = [k for k in konten if str(k.get("user_id") or "") in sicht]
         disp, _excluded = _wd_personen()
         return jsonify({"treffer": konten_treffer(ids, konten, disp, _acc_plan_archiviert())})
     except Exception as e:
@@ -14090,9 +14344,23 @@ def _login_uid_mail():
         return None, None, (jsonify({"error": "Anmeldung nicht prüfbar"}), 502)
 
 
-def konto_balance_darf(uid, mail, konto, admins):
-    """REIN RECHNEND (testbar): Admin oder Besitzer des Kontos."""
-    return bool(konto) and (str(konto.get("user_id") or "") == str(uid or "#") or (mail or "#") in (admins or ()))
+def konto_balance_darf(uid, mail, konto, admins, gruppe=None):
+    """REIN RECHNEND (testbar): Admin oder Besitzer des Kontos — seit den Admin-Gruppen (08.10.2026) auch der Verwalter, wenn das Konto
+    einer ID seiner Gruppe gehört (gruppe = seine Menge, sonst None)."""
+    return bool(konto) and (str(konto.get("user_id") or "") == str(uid or "#") or (mail or "#") in (admins or ())
+                            or bool(gruppe and str(konto.get("user_id") or "") in gruppe))
+
+
+def _konto_balance_gruppe(uid, mail):
+    """Gruppe des Aufrufers für konto_balance_darf (nur Verwalter, Admin-Gruppen 08.10.2026). Admin braucht sie nicht; nicht lesbar →
+    None (dann bleibt es bei Admin oder Besitzer)."""
+    if (mail or "#") in ADMIN_EMAILS:
+        return None
+    try:
+        sicht, verwalter = admin_sicht_lesen(str(uid))
+        return sicht if verwalter else None
+    except Exception:
+        return None
 
 
 def konto_balance_signal(konto, von, aktion="konto_balance", login=""):
@@ -14144,7 +14412,7 @@ def admin_konto_balance_lesen():
             konto = rows[0] if rows else None
             if not konto:
                 return jsonify({"ok": False, "error": "Konto nicht gefunden"}), 404
-            if not konto_balance_darf(uid, mail, konto, ADMIN_EMAILS):
+            if not konto_balance_darf(uid, mail, konto, ADMIN_EMAILS, _konto_balance_gruppe(uid, mail)):
                 return jsonify({"ok": False, "error": "Nur Admin oder Besitzer des Kontos"}), 403
             if not str(konto.get("external_id") or "").strip():
                 return jsonify({"ok": False, "error": "Konto ohne External ID — Puls weiß nicht, welches Konto er wählen soll"}), 409
@@ -14179,7 +14447,7 @@ def admin_konto_balance_lesen():
             sg = rows[0] if rows else None
             if not sg or (sg.get("params") or {}).get("aktion") not in ("konto_balance", "mt5_balance"):   # CFD liest über MT5 (08.10.2026)
                 return jsonify({"ok": False, "error": "Auftrag nicht gefunden"}), 404
-            if str(sg.get("user_id")) != uid and mail not in ADMIN_EMAILS:
+            if not konto_balance_darf(uid, mail, {"user_id": sg.get("user_id")}, ADMIN_EMAILS, _konto_balance_gruppe(uid, mail)):
                 return jsonify({"ok": False, "error": "Nur Admin oder Besitzer des Kontos"}), 403
             st = konto_balance_stand(sg, time.time())
             if st["verfallen"]:
@@ -15589,13 +15857,15 @@ def ap_kontowert_konto(a, bal, firmen, kauf_eur=None, archiviert=False):
 
 
 def admin_build_kontowerte(sicht=None):
-    """Kontowerte aller Konten (sicht None) bzw. nur der eigenen (sicht = user_id) → {account_id: Zeile}. Nur Lesen:
-    Kernwerte, Konten, Archiv, Balance-Spiegel (Echo/Duplikum), echte Käufe der Ketten."""
+    """Kontowerte aller Konten (sicht None) bzw. nur der eigenen (sicht = user_id) oder einer Gruppe (sicht = Menge, Admin-Gruppen
+    08.10.2026) → {account_id: Zeile}. Nur Lesen: Kernwerte, Konten, Archiv, Balance-Spiegel (Echo/Duplikum), echte Käufe der Ketten."""
     reg = (sb_select("auto_plan_regeln", {"select": "regeln", "id": "eq.1"}) or [{}])[0]
     firmen = (reg.get("regeln") or {}).get("firmen") or []
     q = {"select": AP_KONTO_FELDER}
-    if sicht:
+    if isinstance(sicht, str):
         q["user_id"] = f"eq.{sicht}"
+    elif sicht is not None:                    # Gruppe (nie leer: der Verwalter gehört dazu)
+        q["user_id"] = "in.(" + ",".join(sorted(str(u) for u in sicht) or ["00000000-0000-0000-0000-000000000000"]) + ")"
     konten = _sb_all("accounts", q)
     archiv = _ap_archiviert()
     echo_bal, dup_bal = _ap_balance_karten()
@@ -15612,7 +15882,7 @@ def admin_build_kontowerte(sicht=None):
 def ap_kontowerte_gemerkt(sicht=None):
     """admin_build_kontowerte mit dem 60-s-Merker je Sicht (None = alle). Geteilt von /admin/kontowerte und /admin/live-trades?echo=1
     (SATZ-AN-LIVE-TRADES, 07.10.2026) — beide Wege treffen denselben Merker, gerechnet wird höchstens einmal je Minute."""
-    schluessel = sicht or "*"
+    schluessel = "*" if sicht is None else sicht if isinstance(sicht, str) else ",".join(sorted(sicht))   # Gruppe = sortierte IDs
     with _ap_kw_cache_lock:            # Single-Flight: zwei Tabs gleichzeitig rechnen nicht doppelt
         treffer = _ap_kw_cache.get(schluessel)
         if treffer and treffer[0] > time.time():
@@ -15625,7 +15895,8 @@ def ap_kontowerte_gemerkt(sicht=None):
 @app.route("/admin/kontowerte", methods=["GET", "OPTIONS"])
 def admin_kontowerte():
     """GET → {ok, werte: {account_id: {wert_eur, stufe, satz_eur_pro_usd, quelle, hinweis, …}}}. Admin (ADMIN_EMAILS): alle
-    Konten; „nur eigene" (admin_zugang) und jeder andere Login: nur die eigenen. 60 s im Prozess gemerkt (je Sicht)."""
+    Konten; Verwalter einer Gruppe: die Konten seiner Gruppe (08.10.2026); „nur eigene"/Mitglied und jeder andere Login: nur die
+    eigenen. 60 s im Prozess gemerkt (je Sicht)."""
     if request.method == "OPTIONS":
         return "", 200
     _mail, err = _admin_auth()
@@ -15639,7 +15910,7 @@ def admin_kontowerte():
         uid, err2 = _wd_login()
         if err2:
             return err2
-        sicht = uid
+        sicht = getattr(g, "admin_sicht", None) or uid   # Admin-Gruppen (08.10.2026): Verwalter = seine Gruppe, sonst die eigene ID
     try:
         werte = ap_kontowerte_gemerkt(sicht)
         return jsonify({"ok": True, "werte": werte, "alle": sicht is None})
@@ -15756,7 +16027,8 @@ def hypo_bilanz_zeile(p, acc, firmen, lauf_satz, kw_heute, disp):
 
 @app.route("/admin/hypo-bilanz", methods=["GET", "OPTIONS"])
 def admin_hypo_bilanz():
-    """GET ?tage=30 → {ok, tage, trades:[hypo_bilanz_zeile …]} — Sicht wie /admin/kontowerte (Admin alle, sonst nur eigene)."""
+    """GET ?tage=30 → {ok, tage, trades:[hypo_bilanz_zeile …]} — Sicht wie /admin/kontowerte (Admin alle, Verwalter seine Gruppe,
+    sonst nur eigene)."""
     if request.method == "OPTIONS":
         return "", 200
     _mail, err = _admin_auth()
@@ -15770,15 +16042,17 @@ def admin_hypo_bilanz():
         uid, err2 = _wd_login()
         if err2:
             return err2
-        sicht = uid
+        # Admin-Gruppen (08.10.2026): Verwalter = seine Gruppe, sonst die eigene ID. Über _admin_eingeschraenkt — „g" ist in dieser
+        # Funktion weiter unten eine Schleifenvariable (lokal), flask.g wäre hier nicht erreichbar
+        sicht = _admin_eingeschraenkt() or uid
     try:
         tage = max(1, min(90, int(request.args.get("tage") or 30)))
         seit = datetime.fromtimestamp(datetime.now(timezone.utc).timestamp() - tage * 86400, timezone.utc).isoformat()
         q = {"select": "id,user_id,master_account_id,master_name,master_firm,route,richtung,status,master_pl,konto_typ,"
                        "started_at,ended_at,completed_at,mt5_baseline",
              "auto_plan": "eq.true", "status": "in.(completed,review)", "started_at": f"gte.{seit}", "order": "started_at.asc"}
-        if sicht:
-            q["user_id"] = f"eq.{sicht}"
+        if sicht is not None:
+            q["user_id"] = admin_sicht_filter(sicht)
         plaene = _sb_all("trade_plans", q)
         disp, excluded = _wd_personen()
         plaene = [p for p in plaene if str(p.get("user_id")) not in excluded]
@@ -16276,22 +16550,23 @@ def ap_ohne_archiv(erg, archiv):
 
 
 def ap_sicht(erg, uid):
-    """Antwort nur mit den Zeilen EINER ID (Nicht-Admin, Master 06.10.2026: „heute bekommt auch eine Test-ID alle IDs").
-    Summen im Ausgleich bleiben über alle IDs (Neutralität gilt übergreifend), Listen nur die eigene ID."""
-    uid = str(uid)
+    """Antwort nur mit den Zeilen EINER ID (Nicht-Admin, Master 06.10.2026: „heute bekommt auch eine Test-ID alle IDs") bzw. einer
+    GRUPPE (uid = Menge: Verwalter oder Finns ?gruppe=, Admin-Gruppen 08.10.2026 → sicht "gruppe").
+    Summen im Ausgleich bleiben über alle IDs (Neutralität gilt übergreifend), Listen nur die eigene ID/Gruppe."""
+    sicht = str(uid) if isinstance(uid, (str, int)) else frozenset(str(u) for u in uid)
+    drin = lambda x: (str((x or {}).get("user_id")) == sicht) if isinstance(sicht, str) else (str((x or {}).get("user_id")) in sicht)
     out = dict(erg or {})
     for f in ("geplant", "ausgelassen", "tranchen"):
         if isinstance(out.get(f), list):
-            out[f] = [x for x in out[f] if str((x or {}).get("user_id")) == uid]
+            out[f] = [x for x in out[f] if drin(x)]
     if isinstance(out.get("ausgleich"), dict):
-        out["ausgleich"] = dict(out["ausgleich"], offen=[x for x in out["ausgleich"].get("offen") or []
-                                                         if str((x or {}).get("user_id")) == uid],
-                                hinweise=[x for x in out["ausgleich"].get("hinweise") or [] if str((x or {}).get("user_id")) == uid])
-    out["sicht"] = "eigene"
+        out["ausgleich"] = dict(out["ausgleich"], offen=[x for x in out["ausgleich"].get("offen") or [] if drin(x)],
+                                hinweise=[x for x in out["ausgleich"].get("hinweise") or [] if drin(x)])
+    out["sicht"] = "eigene" if isinstance(sicht, str) else "gruppe"
     return out
 
 
-def ap_sicht_uid(admin, uid, nur_eigene, sicht, im_planer=False):
+def ap_sicht_uid(admin, uid, nur_eigene, sicht, im_planer=False, gruppe=None):
     """REIN RECHNEND (TRADE-PLANER-ALLE-IDS, Finn 07.10.2026 03:25 dt: „alle IDs … zusammen in diesem Zeitstrahl sehen … es ist nur
     die ID, von der ich gerade eingeloggt bin"): welche ID die GET-Antworten von /admin/auto-plan und /admin/auto-plan/delta filtern.
     None = alle IDs. Admin (ADMIN_EMAILS) immer alle; ?sicht=alle öffnet alle IDs für jeden Login im Planer — außer admin_zugang
@@ -16306,6 +16581,10 @@ def ap_sicht_uid(admin, uid, nur_eigene, sicht, im_planer=False):
     # sicht=admin ist ein Client-Parameter (Slave-2-Befund) — er gilt nur für IDs in auto_plan_regeln.user_ids (im_planer)
     if str(sicht or "").strip().lower() == AP_SICHT_ADMIN and not nur_eigene and im_planer:
         return None
+    # ADMIN-GRUPPEN (08.10.2026, Finn: „Emin bekommt das volle Admin wie Finn, aber nur mit den IDs seiner Gruppe"): ein Verwalter
+    # (gruppe = seine Menge) bekommt im Admin-Reiter (sicht=admin) seine Gruppe statt der eigenen ID — nie alle IDs
+    if str(sicht or "").strip().lower() == AP_SICHT_ADMIN and nur_eigene and gruppe:
+        return frozenset(str(u) for u in gruppe)
     return str(uid)
 
 
@@ -16358,15 +16637,34 @@ def _ap_sicht_aus_anfrage(admin, uid):
     """sicht-ID für die GET-Antwort aus ?sicht=admin (ap_sicht_uid). admin_zugang wird nur gelesen, wenn ein Nicht-Admin alle IDs
     verlangt (60-s-Cache); schlägt die Lesung fehl, bleibt es bei der eigenen Sicht — nie versehentlich alle IDs."""
     s = _ap_sicht_param()
-    nur, im_planer = False, False
+    nur, im_planer, gruppe = False, False, None
     if not admin and s == AP_SICHT_ADMIN:
-        try:
-            nur = admin_zugang_nur_eigene(str(uid))
-        except Exception as e:
-            print(f"[auto-plan] admin_zugang nicht lesbar ({type(e).__name__}: {e}) — Sicht bleibt eigene", flush=True)
-            nur = True
+        nur, gruppe = _ap_gruppe_lesen(uid)
         im_planer = _ap_im_planer(uid)
-    return ap_sicht_uid(admin, uid, nur, s, im_planer)
+    erg = ap_sicht_uid(admin, uid, nur, s, im_planer, gruppe)
+    if erg is None:
+        # Finns Gruppenfilter (?gruppe=, Admin-Gruppen 08.10.2026) — nur wer ohnehin alle IDs sieht, filtert damit; nicht lesbar →
+        # ungefiltert (für diesen Login kein Leck, er sieht sonst auch alles)
+        try:
+            f = _admin_filter_aus_anfrage()
+        except Exception as e:
+            print(f"[auto-plan] ⚠️ Gruppenfilter nicht lesbar ({type(e).__name__}: {e}) — ungefiltert", flush=True)
+            f = None
+        if f is not None:
+            return f
+    return erg
+
+
+def _ap_gruppe_lesen(uid):
+    """(eingeschränkt, gruppe) eines Nicht-Admins für die Trade-Planer-Gates (Admin-Gruppen 08.10.2026): eingeschränkt wie
+    admin_zugang_nur_eigene (inkl. Gruppen), gruppe = Menge des Verwalters, sonst None. Nicht lesbar → (True, None) = eigene Sicht,
+    nie versehentlich alle IDs."""
+    try:
+        sicht, verwalter = admin_sicht_lesen(str(uid))
+    except Exception as e:
+        print(f"[auto-plan] admin_zugang/Gruppen nicht lesbar ({type(e).__name__}: {e}) — Sicht bleibt eigene", flush=True)
+        return True, None
+    return sicht is not None, (sicht if verwalter else None)
 
 
 # ── PROBELAUF ÜBER ALLE IDS (07.10.2026, Finn 04:08 dt: „Kannst du mal zum Test alle IDs einfach als geplant reinpacken, sodass ich
@@ -16422,15 +16720,18 @@ def ap_ids_benutzt(geplant, ausgelassen, namen=None):
 AP_EINGRIFF_MAX = 200                # Pläne je Aufruf an /admin/auto-plan/bestaetigen
 
 
-def ap_eingriff_sicht(admin, uid, im_planer, nur_eigene, sicht=None):
+def ap_eingriff_sicht(admin, uid, im_planer, nur_eigene, sicht=None, gruppe=None):
     """REIN RECHNEND (BESTÄTIGEN FÜR ALLE, Finn 07.10.2026 05:16 Dubai als Jacob eingeloggt: „jeden einzelnen Trade bestätigen können.
     Fertig. Das geht ja immer noch nicht, oder?" — bis .1118 durfte nur ein Admin-Login fremde Vorschläge bestätigen; Master: Weg b):
     welche ID die Eingriffs-Routen bestaetigen/zurueck/loeschen einschränken. None = alle IDs: Admin (ADMIN_EMAILS) oder jeder
     Login, der im Planer ist (auto_plan_regeln.user_ids) — außer admin_zugang „nur eigene", der bleibt bei seiner ID. Ein Login,
     der weder Admin noch im Planer ist, bleibt ebenfalls bei der eigenen ID (die Route antwortet bei fremden Plänen 403).
     Seit 08.10.2026 (Finn: Planer-Seite nur die eigene ID): im_planer allein reicht NICHT mehr für fremde Pläne — ein Nicht-Admin
-    bekommt alle IDs nur mit sicht="admin" (Admin-Reiter „Trade-Planer", Admin-Code), weiterhin nie bei „nur eigene"."""
+    bekommt alle IDs nur mit sicht="admin" (Admin-Reiter „Trade-Planer", Admin-Code), weiterhin nie bei „nur eigene".
+    ADMIN-GRUPPEN (08.10.2026): ein Verwalter (gruppe = seine Menge) bekommt im Admin-Reiter seine Gruppe (frozenset) — nie alle IDs."""
     if nur_eigene:
+        if str(sicht or "").strip().lower() == AP_SICHT_ADMIN and gruppe:
+            return frozenset(str(u) for u in gruppe)
         return str(uid)
     if admin:
         return None
@@ -16450,19 +16751,21 @@ def ap_eingriff_admin_reiter(admin, uid, nur_eigene, sicht, im_planer=False):
     return bool(admin) or ap_eingriff_sicht(False, uid, im_planer, nur_eigene, sicht) is None
 
 
-def ap_admin_reiter_ok(admin, im_planer, nur_eigene, sicht):
+def ap_admin_reiter_ok(admin, im_planer, nur_eigene, sicht, verwalter=False):
     """REIN RECHNEND (08.10.2026): darf dieser Login die LESE-Routen des Trade-Planers (/admin/auto-plan GET, /delta) nutzen?
     Admin oder ID im Planer. Die kurze Öffnung für jeden Login mit sicht="admin" (.1248) ist seit Option A (Finn 08.10.2026) wieder zu —
-    sicht ist ein Client-Parameter; was eine Planer-ID dann sieht (alle oder eigene), entscheidet ap_sicht_uid."""
-    # seit Option A (Finn 08.10.2026): sicht=admin öffnet für Logins außerhalb des Planers nichts mehr
-    return bool(admin) or bool(im_planer)
+    sicht ist ein Client-Parameter; was eine Planer-ID dann sieht (alle oder eigene), entscheidet ap_sicht_uid.
+    ADMIN-GRUPPEN (08.10.2026): dazu ein Verwalter im Admin-Reiter (sicht="admin") — er sieht dort nur seine Gruppe (ap_sicht_uid)."""
+    # seit Option A (Finn 08.10.2026): sicht=admin öffnet für Logins außerhalb des Planers nichts mehr — außer für Verwalter (Gruppe)
+    return bool(admin) or bool(im_planer) or (bool(verwalter) and str(sicht or "").strip().lower() == AP_SICHT_ADMIN)
 
 
 def ap_eingriff_filter(aktion, plan_ids, sicht_uid=None):
     """REIN RECHNEND (BESTÄTIGEN FÜR ALLE IDS, Master 07.10.2026 03:58 Dubai, Finn: „eine Seite, wo ich alle Trades sehe UND bestätigen
     kann"): PostgREST-Filter + Body für die Routen /admin/auto-plan/bestaetigen | zurueck | loeschen. Dieselben Bedingungen wie das
     Frontend per supabase-js (apBestaetigen: planned + auto_plan + unbestätigt; apZuruecknehmen/deleteTradePlan: planned + auto_plan +
-    ungestartet) als Guard in derselben Anfrage; sicht_uid (Nicht-Admin, „nur eigene") engt auf die eigene ID ein.
+    ungestartet) als Guard in derselben Anfrage; sicht_uid (Nicht-Admin, „nur eigene") engt auf die eigene ID ein, eine Menge
+    (Verwalter, Admin-Gruppen 08.10.2026) auf die IDs seiner Gruppe.
     → (params, body, 'patch'|'delete') oder (None, None, Fehlertext)."""
     bed = {"bestaetigen": ({"status": "eq.planned", "auto_plan": "eq.true", "auto_bestaetigt_at": "is.null"}, "patch"),
            "zurueck": ({"status": "eq.planned", "auto_plan": "eq.true", "start_um_gestartet_at": "is.null"}, "patch"),
@@ -16479,8 +16782,10 @@ def ap_eingriff_filter(aktion, plan_ids, sicht_uid=None):
     if len(ids) > AP_EINGRIFF_MAX:
         return None, None, f"höchstens {AP_EINGRIFF_MAX} Pläne je Aufruf"
     params = dict(bed[0], id=("eq." + ids[0]) if len(ids) == 1 else ("in.(" + ",".join(ids) + ")"))
-    if sicht_uid:
+    if isinstance(sicht_uid, (str, int)) and str(sicht_uid):
         params["user_id"] = "eq." + str(sicht_uid)
+    elif sicht_uid is not None and not isinstance(sicht_uid, (str, int)):   # Gruppe des Verwalters (nie leer: er selbst gehört dazu)
+        params["user_id"] = "in.(" + ",".join(sorted(str(u) for u in sicht_uid) or ["00000000-0000-0000-0000-000000000000"]) + ")"
     body = {"auto_bestaetigt_at": datetime.now(timezone.utc).isoformat()} if aktion == "bestaetigen" \
         else {"auto_bestaetigt_at": None} if aktion == "zurueck" else None
     return params, body, bed[1]
@@ -17028,7 +17333,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
             print(f"[auto-plan] ⚠️ Protokoll: {type(e).__name__}: {e}", flush=True)
     if not (nachplanen and not geplant):
         print(f"[auto-plan] {tag} {quelle}: {len(geplant)} geplant, {len(ausgelassen)} ausgelassen", flush=True)
-    return ap_sicht(erg, sicht_uid) if sicht_uid else erg        # Protokoll oben vollständig, Antwort nur die eigene ID
+    return ap_sicht(erg, sicht_uid) if sicht_uid is not None else erg   # Protokoll oben vollständig, Antwort nur die eigene ID/Gruppe
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -19574,12 +19879,14 @@ def ap_delta_antwort(stand, sicht_uid=None, pc_lebt=None):
     # FREMD-POSITIONEN (08.10.2026): vom Delta-Route-Aufruf in den Stand gelegt (fp_delta_zeilen); Sicht filtert wie die Listen
     if isinstance(stand.get("fremd"), list):
         out["fremd"] = list(stand["fremd"])
-    if sicht_uid:
-        uid = str(sicht_uid)
+    if sicht_uid is not None:
+        # eine ID (str) oder eine Gruppe (Menge: Verwalter bzw. Finns ?gruppe=, Admin-Gruppen 08.10.2026) — Summen bleiben über alle IDs
+        sicht = str(sicht_uid) if isinstance(sicht_uid, (str, int)) else frozenset(str(u) for u in sicht_uid)
+        drin = (lambda u: str(u) == sicht) if isinstance(sicht, str) else (lambda u: str(u) in sicht)
         for f in ("offen", "geplant", "umplanungen", "hinweise", "heute_beendet", "fremd"):
             if isinstance(out.get(f), list):
-                out[f] = [x for x in out[f] if str(x.get("user_id")) == uid]
-        out["sicht"] = "eigene"
+                out[f] = [x for x in out[f] if drin(x.get("user_id"))]
+        out["sicht"] = "eigene" if isinstance(sicht, str) else "gruppe"
     return out
 
 
@@ -20168,7 +20475,8 @@ def _ap_bot_tick(d):
 
 def _ap_zugang(admin_reiter=False):
     """Gate wie /admin/auto-plan: Admin oder eine ID, die selbst im Auto-Planer ist (nur lesen, nur eigene Zeilen).
-    admin_reiter=True (nur Lese-Routen, 08.10.2026): auch jeder andere Login mit sicht=admin, der nicht „nur eigene" ist (ap_admin_reiter_ok).
+    admin_reiter=True (nur Lese-Routen, 08.10.2026): auch jeder andere Login mit sicht=admin, der nicht „nur eigene" ist (ap_admin_reiter_ok)
+    — seit den Admin-Gruppen (08.10.2026) dazu ein Verwalter (sieht dort nur seine Gruppe).
     → (admin, uid, reg, None) oder (…, Fehler-Antwort)."""
     mail, err = _admin_auth()
     uid = request.environ.get("prophos.admin_uid")
@@ -20185,10 +20493,8 @@ def _ap_zugang(admin_reiter=False):
     if not admin and str(uid) not in [str(u) for u in (reg.get("user_ids") or [])]:
         ok = False
         if admin_reiter and _ap_sicht_param() == AP_SICHT_ADMIN:
-            try:
-                ok = ap_admin_reiter_ok(False, False, admin_zugang_nur_eigene(str(uid)), AP_SICHT_ADMIN)
-            except Exception:
-                ok = False                    # admin_zugang nicht lesbar → nie versehentlich alle IDs
+            nur, gruppe = _ap_gruppe_lesen(uid)   # nicht lesbar → (True, None) → kein Verwalter, gesperrt
+            ok = ap_admin_reiter_ok(False, False, nur, AP_SICHT_ADMIN, verwalter=bool(gruppe))
         if not ok:
             return admin, uid, reg, (jsonify({"ok": False, "msg": "Diese ID ist nicht im Auto-Planer"}), 403)
     return admin, uid, reg, None
@@ -20215,12 +20521,11 @@ def admin_auto_plan_delta():
         antwort = ap_delta_antwort(stand, _ap_sicht_aus_anfrage(admin, uid), pc_lebt=_ap_pc_lebt_gecacht())
         antwort.setdefault("sicht", "alle")
         # BESTÄTIGEN FÜR ALLE (07.10.2026): alle = darf dieser Login fremde Vorschläge bestätigen/zurücknehmen/löschen (ap_eingriff_sicht;
-        # Nicht-Admin ist hier immer im Planer, _ap_zugang). admin_zugang nicht lesbar → vorsichtshalber false
-        try:
-            nur = admin_zugang_nur_eigene(str(uid))
-        except Exception:
-            nur = True
-        return jsonify(dict(antwort, admin=admin, alle=ap_eingriff_sicht(admin, uid, True, nur, _ap_sicht_param()) is None))
+        # Nicht-Admin ist hier immer im Planer, _ap_zugang). admin_zugang nicht lesbar → vorsichtshalber false.
+        # Admin-Gruppen (08.10.2026): ein Verwalter bekommt seine Gruppe — er darf alle Zeilen, die er sieht (alle true, Backend prüft je Plan)
+        nur, gruppe = _ap_gruppe_lesen(uid)
+        e_sicht = ap_eingriff_sicht(admin, uid, True, nur, _ap_sicht_param(), gruppe)
+        return jsonify(dict(antwort, admin=admin, alle=e_sicht is None or not isinstance(e_sicht, str)))
     except Exception as e:
         return jsonify({"ok": False, "admin": admin, "msg": f"{type(e).__name__}: {e}"}), 502
 
@@ -20257,26 +20562,35 @@ def admin_auto_plan_ids():
     # Gate wie die anderen Admin-Reiter (Finn 08.10.2026, als „Finn + Pascal" eingeloggt: „ich komm nicht rein — mach, dass man aus
     # jedem Tab reinkommt, wenn der Admin-Code stimmt"): Admin (ADMIN_EMAILS) ODER jeder eingeloggte Login, der nicht admin_zugang
     # „nur eigene" ist — den Admin-Code prüft die Oberfläche beim Entsperren, wie bei Übersicht/Auftrag/Winning Days.
+    # ADMIN-GRUPPEN (08.10.2026): ein Verwalter liest hier seine Gruppe (gruppe = Menge), schreibt aber NICHT — user_ids gehört zu
+    # auto_plan_regeln (HT-weit, der Planer gleicht alle IDs gemeinsam aus). Finn filtert mit ?gruppe= (lese_sicht).
     mail, err = _admin_auth()
+    gruppe, lese_sicht = None, None
     if err:
         if err[1] != 403:
             return err
         uid, err2 = _wd_login()
         if err2:
             return err2
-        try:
-            if admin_zugang_nur_eigene(str(uid)):
-                return jsonify({"ok": False, "msg": "Diese ID sieht im Admin nur sich selbst"}), 403
-        except Exception:
-            return jsonify({"ok": False, "msg": "Anmeldung nicht prüfbar"}), 502
+        nur, gruppe = _ap_gruppe_lesen(uid)
+        if nur and not gruppe:
+            return jsonify({"ok": False, "msg": "Diese ID sieht im Admin nur sich selbst"}), 403
+        if gruppe and request.method == "POST":
+            return jsonify({"ok": False, "msg": "Planer-Haken sind HT-weit (auto_plan_regeln) — nur Hermann Technologies"}), 403
         mail = f"uid {str(uid)[:8]}"
+        lese_sicht = gruppe if gruppe else getattr(g, "admin_filter", None)
+    else:
+        try:
+            lese_sicht = _admin_filter_aus_anfrage()
+        except Exception as e:
+            print(f"[auto-plan] ⚠️ ids: Gruppenfilter nicht lesbar ({type(e).__name__}: {e}) — ungefiltert", flush=True)
     reg = (sb_select("auto_plan_regeln", {"select": "aktiv,user_ids,firmen:regeln->firmen", "id": "eq.1"}) or [None])[0]   # firmen für boden (08.10.2026)
     if not reg:
         return jsonify({"ok": False, "msg": "auto_plan_regeln fehlt"}), 503
     drin = [str(u) for u in (reg.get("user_ids") or [])]
     # OPTION A (Finn 08.10.2026): Admin-Reiter nur für Admin oder IDs im Trade-Planer — vorher reichte jeder Login ohne „nur eigene",
-    # und per POST konnte sich jeder selbst in user_ids eintragen (= sich selbst Admin-Rechte geben)
-    if err and str(uid) not in drin:
+    # und per POST konnte sich jeder selbst in user_ids eintragen (= sich selbst Admin-Rechte geben). Verwalter: seine Gruppe (oben).
+    if err and not gruppe and str(uid) not in drin:
         return jsonify({"ok": False, "msg": AP_NUR_PLANER_TXT}), 403
     if request.method == "POST":
         body = request.get_json(silent=True) or {}
@@ -20302,7 +20616,11 @@ def admin_auto_plan_ids():
         gepl[str(z.get("user_id"))] = gepl.get(str(z.get("user_id")), 0) + 1
     for z in erg.get("ausgelassen") or []:
         ausg[str(z.get("user_id"))] = ausg.get(str(z.get("user_id")), 0) + 1
-    alle = sorted(set(ap_ids_laden(aus)) | set(drin), key=lambda u: namen.get(u, u).lower())
+    # Verwalter: seine Gruppe, auch wenn der Server sie für HT ausblendet (ADMIN_EXCLUDE); Finn mit ?gruppe=: nur diese Gruppe
+    basis = set(ap_ids_laden(() if gruppe else aus)) | set(drin)
+    if lese_sicht is not None:
+        basis &= set(lese_sicht)
+    alle = sorted(basis, key=lambda u: namen.get(u, u).lower())
     ids = [{"user_id": u, "name": namen.get(u, u[:8]), "drin": u in drin, "konten": konten.get(u, 0),
             "geplant": gepl.get(u, 0), "ausgelassen": ausg.get(u, 0)} for u in alle]
     # LETZTE 7 TAGE je ID (Master/Slave 8, 08.10.2026, ID-Detail-Karte): bestanden/geblasen/beendet — jede Quelle einzeln, Fehler → null
@@ -20317,7 +20635,8 @@ def admin_auto_plan_ids():
         pl = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_firm,master_name,richtung,route,start_um,master_contracts,master_tp,master_sl,notes",
                                      "status": "eq.planned", "auto_plan": "eq.true", "auto_bestaetigt_at": "is.null", "start_um": "gte." + seit,
                                      "order": "start_um.asc"})
-        pl = [p for p in pl if str(p.get("user_id")) not in aus]
+        pl = [p for p in pl if (str(p.get("user_id")) in gruppe if gruppe
+                                else str(p.get("user_id")) not in aus and admin_in_sicht(p.get("user_id"), lese_sicht))]
         acc_ids = sorted({str(p.get("master_account_id")) for p in pl if p.get("master_account_id")})
         accs, letzt_je = {}, {}
         for j in range(0, len(acc_ids), 150):
@@ -20500,13 +20819,13 @@ def ap_nachhol_minute(p, plaene, starts, id_fest, jetzt_min, zeiten=None, laufze
 _AP_NACHHOL_LOCK = threading.Lock()
 
 
-def _ap_nachholen(pid, alle, uid, jetzt=None):
+def _ap_nachholen(pid, alle, uid, jetzt=None, gruppe=None):
     """Serialisiert _ap_nachholen_kern (s. _AP_NACHHOL_LOCK). jetzt erst im Lock — der zweite Aufruf rechnet mit dem Stand nach dem ersten."""
     with _AP_NACHHOL_LOCK:
-        return _ap_nachholen_kern(pid, alle, uid, jetzt)
+        return _ap_nachholen_kern(pid, alle, uid, jetzt, gruppe=gruppe)
 
 
-def _ap_nachholen_kern(pid, alle, uid, jetzt=None):
+def _ap_nachholen_kern(pid, alle, uid, jetzt=None, gruppe=None):
     """aktion „nachholen" (08.10.2026): verpassten Plan regelkonform neu einplanen (ap_nachhol_minute) — der PC-Tab der ID ruft das aus
     sfTick, wenn er nach einem Ausfall wieder läuft. Admin alle Pläne, sonst nur eigene (Gate wie werte). Nur solange nichts gesendet ist
     (Guard planned, started_at/orbit_gesendet_at leer); Claim zurück, Bestätigung bleibt; start_fehler → status „neu" (Anzeige im Planer).
@@ -20516,7 +20835,8 @@ def _ap_nachholen_kern(pid, alle, uid, jetzt=None):
     plan = rows[0] if rows else None
     if not plan:
         return jsonify({"ok": False, "msg": "Plan nicht gefunden"}), 404
-    if not alle and str(plan.get("user_id")) != str(uid):
+    # gruppe (Admin-Gruppen 08.10.2026): Verwalter im Admin-Reiter — Pläne seiner Gruppe statt nur der eigenen
+    if not alle and str(plan.get("user_id")) != str(uid) and not (gruppe and str(plan.get("user_id")) in gruppe):
         return jsonify({"ok": False, "msg": "nur eigene Pläne"}), 403
     if plan.get("status") != "planned" or plan.get("started_at") or plan.get("orbit_gesendet_at"):
         return jsonify({"ok": False, "msg": "Plan ist nicht mehr geplant oder schon gesendet — nichts geändert"}), 409
@@ -20618,14 +20938,15 @@ def ap_werte_pruefen(plan, body, jetzt=None, start=None):
                  "groesse": neu["master_contracts"], "einheit": einheit, "start_um": upd.get("start_um") or plan.get("start_um")}, None
 
 
-def _ap_werte_setzen(pid, body, admin, uid):
+def _ap_werte_setzen(pid, body, admin, uid, gruppe=None):
     """aktion „werte" (08.10.2026): Admin alle Pläne, sonst nur eigene. Schreiben mit Guard in derselben Anfrage (planned, nichts
     gestartet/gesendet) — sonst 409. Bestätigung (auto_bestaetigt_at) bleibt unberührt."""
     rows = sb_select("trade_plans", {"select": "id,user_id,status,route,master_symbol,master_symbol_root,master_tp,master_sl,"
                                                "master_contracts,notes,start_um,start_um_gestartet_at,started_at,orbit_gesendet_at,"
                                                "master_firm,richtung", "id": f"eq.{pid}"})
     plan = rows[0] if rows else None
-    if plan and not admin and str(plan.get("user_id")) != str(uid):
+    # gruppe (Admin-Gruppen 08.10.2026): Verwalter im Admin-Reiter — Pläne seiner Gruppe statt nur der eigenen
+    if plan and not admin and str(plan.get("user_id")) != str(uid) and not (gruppe and str(plan.get("user_id")) in gruppe):
         return jsonify({"ok": False, "msg": "nur eigene Pläne"}), 403
     start = None
     if plan and "start_um" in body:
@@ -20694,16 +21015,17 @@ def admin_auto_plan_eingriff():
         if not re.match(r"^[0-9a-f-]{36}$", pid):
             return jsonify({"ok": False, "msg": "plan_id fehlt"}), 400
         try:
-            # Admin-Reiter (08.10.2026): sicht="admin" und nicht „nur eigene" → alle Pläne wie ein Admin (ap_eingriff_sicht)
-            alle = admin
+            # Admin-Reiter (08.10.2026): sicht="admin" und nicht „nur eigene" → alle Pläne wie ein Admin (ap_eingriff_sicht);
+            # Verwalter (Admin-Gruppen 08.10.2026) → Pläne seiner Gruppe (gruppe_e)
+            alle, gruppe_e = admin, None
             if not admin and _ap_sicht_param() == AP_SICHT_ADMIN:
-                try:
-                    alle = ap_eingriff_sicht(False, uid, _ap_im_planer(uid), admin_zugang_nur_eigene(str(uid)), AP_SICHT_ADMIN) is None
-                except Exception:
-                    alle = False
+                nur, gruppe = _ap_gruppe_lesen(uid)
+                e_sicht = ap_eingriff_sicht(False, uid, _ap_im_planer(uid), nur, AP_SICHT_ADMIN, gruppe)
+                alle = e_sicht is None
+                gruppe_e = e_sicht if isinstance(e_sicht, frozenset) else None
             if str(body.get("aktion") or "").strip() == "nachholen":
-                return _ap_nachholen(pid, alle, uid)
-            return _ap_werte_setzen(pid, body, alle, uid)
+                return _ap_nachholen(pid, alle, uid, gruppe=gruppe_e)
+            return _ap_werte_setzen(pid, body, alle, uid, gruppe=gruppe_e)
         except Exception as e:
             return jsonify({"ok": False, "msg": f"{type(e).__name__}: {e}"}), 502
     # ADMIN-REITER DARF EINGREIFEN (Finn 08.10.2026 auf die Frage des Masters, ob auch „Finn + Pascal" und Ina bei fremden IDs neu starten,
@@ -20713,17 +21035,21 @@ def admin_auto_plan_eingriff():
     admin, uid, reg, err = _ap_zugang(admin_reiter=True)
     if err:
         return err
-    if not admin:
-        try:
-            darf = ap_eingriff_admin_reiter(False, uid, admin_zugang_nur_eigene(str(uid)), _ap_sicht_param(), _ap_im_planer(uid))
-        except Exception:
-            darf = False                       # admin_zugang nicht lesbar → nie fremde Pläne
-        if not darf:
-            return jsonify({"ok": False, "msg": AP_NUR_PLANER_TXT}), 403
     body = request.get_json(silent=True) or {}
     pid, aktion = str(body.get("plan_id") or "").strip(), str(body.get("aktion") or "").strip()
     if not re.match(r"^[0-9a-f-]{36}$", pid):
         return jsonify({"ok": False, "msg": "plan_id fehlt"}), 400
+    if not admin:
+        nur, gruppe = _ap_gruppe_lesen(uid)   # nicht lesbar → (True, None) → nie fremde Pläne
+        darf = ap_eingriff_admin_reiter(False, uid, nur, _ap_sicht_param(), _ap_im_planer(uid))
+        if not darf and gruppe and _ap_sicht_param() == AP_SICHT_ADMIN:
+            # Admin-Gruppen (08.10.2026): Verwalter greift ein, aber nur in Pläne seiner Gruppe (die Tranche gehört zu genau einer ID)
+            try:
+                darf = admin_in_sicht((sb_select("trade_plans", {"select": "user_id", "id": f"eq.{pid}"}) or [{}])[0].get("user_id"), gruppe)
+            except Exception:
+                darf = False
+        if not darf:
+            return jsonify({"ok": False, "msg": AP_NUR_PLANER_TXT}), 403
     if aktion not in ("richtung_tauschen", "start", "neu_starten"):
         return jsonify({"ok": False, "msg": "aktion = richtung_tauschen | start | neu_starten | werte"}), 400
     if aktion == "neu_starten":
@@ -21680,22 +22006,23 @@ def _ap_eingriff(aktion):
         if err2:
             return err2
     try:
-        nur = admin_zugang_nur_eigene(str(uid))
+        sicht_l, verwalter = admin_sicht_lesen(str(uid))   # Admin-Gruppen (08.10.2026): eingeschränkt + Gruppe des Verwalters
+        nur, gruppe = sicht_l is not None, (sicht_l if verwalter else None)
         im_planer = False if admin else str(uid) in [str(u) for u in ((sb_select("auto_plan_regeln", {"select": "user_ids", "id": "eq.1"})
                                                                        or [{}])[0].get("user_ids") or [])]
     except Exception:
         return jsonify({"ok": False, "msg": "Anmeldung nicht prüfbar"}), 502
     body = request.get_json(silent=True) or {}
-    sicht = ap_eingriff_sicht(admin, uid, im_planer, nur, _ap_sicht_param())   # sicht:"admin" im Body = Admin-Reiter (08.10.2026)
+    sicht = ap_eingriff_sicht(admin, uid, im_planer, nur, _ap_sicht_param(), gruppe)   # sicht:"admin" im Body = Admin-Reiter (08.10.2026)
     ids = body.get("plan_ids") if isinstance(body.get("plan_ids"), list) else [body.get("plan_id")]
     params, upd, art = ap_eingriff_filter(aktion, ids, sicht)
     if params is None:
         return jsonify({"ok": False, "msg": art}), 400
     try:
-        if sicht:
-            fremd = [z for z in sb_select("trade_plans", {"select": "id,user_id", "id": params["id"]}) if str(z.get("user_id")) != sicht]
+        if sicht is not None:   # eine ID oder die Gruppe des Verwalters (Menge)
+            fremd = [z for z in sb_select("trade_plans", {"select": "id,user_id", "id": params["id"]}) if not admin_in_sicht(z.get("user_id"), sicht)]
             if fremd:
-                return jsonify({"ok": False, "msg": "nur eigene Pläne"}), 403
+                return jsonify({"ok": False, "msg": "nur eigene Pläne" if isinstance(sicht, str) else "nur Pläne der eigenen Gruppe"}), 403
         if aktion == "bestaetigen":
             # BALANCE NICHT LIVE (08.10.2026, Finn: „nur bestätigen, wenn es perfekt ist"): Konto-Balance muss jünger sein als das Ende des
             # letzten Trades dieses Kontos (ap_balance_live) — sonst 400 mit Konto-Namen, nichts geändert. Lesefehler → 503, nicht
@@ -21704,8 +22031,9 @@ def _ap_eingriff(aktion):
             if sperre:
                 return jsonify({"ok": False, "msg": sperre[1]}), sperre[0]
         zeilen = sb_delete("trade_plans", params) if art == "delete" else sb_update("trade_plans", params, upd)
-        print(f"[auto-plan] {aktion}: {len(zeilen)} Zeile(n) durch {'Admin' if not sicht else 'ID ' + str(sicht)[:8]}", flush=True)
-        return jsonify({"ok": True, "aktion": aktion, "n": len(zeilen), "zeilen": zeilen, "alle": sicht is None})
+        wer = "Admin" if sicht is None else ("ID " + sicht[:8]) if isinstance(sicht, str) else ("Verwalter " + str(uid)[:8])
+        print(f"[auto-plan] {aktion}: {len(zeilen)} Zeile(n) durch {wer}", flush=True)
+        return jsonify({"ok": True, "aktion": aktion, "n": len(zeilen), "zeilen": zeilen, "alle": sicht is None or not isinstance(sicht, str)})
     except Exception as e:
         return jsonify({"ok": False, "msg": f"{type(e).__name__}: {e}"}), 502
 
@@ -21744,11 +22072,10 @@ def admin_auto_plan():
     reg = (sb_select("auto_plan_regeln", {"select": "aktiv,user_ids", "id": "eq.1"}) or [{}])[0]
     im_planer = str(uid) in [str(u) for u in (reg.get("user_ids") or [])]
     if not admin and not im_planer:
-        # Admin-Reiter (08.10.2026): GET mit sicht=admin auch ohne Planer-Mitgliedschaft (ap_admin_reiter_ok); POST bleibt Planer-only
-        try:
-            darf = request.method == "GET" and ap_admin_reiter_ok(False, False, admin_zugang_nur_eigene(str(uid)), _ap_sicht_param())
-        except Exception:
-            darf = False
+        # Admin-Reiter (08.10.2026): GET mit sicht=admin auch ohne Planer-Mitgliedschaft (ap_admin_reiter_ok); POST bleibt Planer-only.
+        # Admin-Gruppen (08.10.2026): ein Verwalter liest hier seine Gruppe (ap_sicht_uid), „Jetzt planen" bleibt HT
+        nur, gruppe = _ap_gruppe_lesen(uid)   # nicht lesbar → (True, None) → gesperrt
+        darf = request.method == "GET" and ap_admin_reiter_ok(False, False, nur, _ap_sicht_param(), verwalter=bool(gruppe))
         if not darf:
             return jsonify({"ok": False, "msg": "Diese ID ist nicht im Auto-Planer"}), 403
     sicht = None if admin else str(uid)        # 06.10.2026: Nicht-Admin (Test-ID) sieht nur die eigenen Zeilen
@@ -21761,8 +22088,8 @@ def admin_auto_plan():
         except Exception as e:
             print(f"[auto-plan] ⚠️ Archiv-Filter: {type(e).__name__}: {e}", flush=True)
         return jsonify({"ok": True, "admin": admin, "aktiv": bool(reg.get("aktiv")), "ids": len(reg.get("user_ids") or []),
-                        "im_planer": im_planer or admin, "letzter": ap_sicht(erg, sicht) if sicht else erg,
-                        "sicht": "eigene" if sicht else "alle", "info": _ap_info})
+                        "im_planer": im_planer or admin, "letzter": ap_sicht(erg, sicht) if sicht is not None else erg,
+                        "sicht": "alle" if sicht is None else "eigene" if isinstance(sicht, str) else "gruppe", "info": _ap_info})
     body = request.get_json(silent=True) or {}
     tag = str(body.get("tag") or "").strip() or None
     if tag and not re.match(r"^\d{4}-\d{2}-\d{2}$", tag):

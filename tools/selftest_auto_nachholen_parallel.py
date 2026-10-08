@@ -124,9 +124,10 @@ def main():
     check(abs(oa - ob) < PC, f"3 Gegenprobe ohne Lock: Kollision nachgewiesen ({oa} / {ob}) — der Test misst die Serialisierung")
     # 4: Quelltext
     _, teil, src = lade()
-    check(re.search(r"def _ap_nachholen\(pid, alle, uid, jetzt=None\):\n(?:    .*\n)*?    with _AP_NACHHOL_LOCK:\n        return _ap_nachholen_kern\(", src) is not None,
+    # seit den Admin-Gruppen (08.10.2026) mit dem Schlüsselwort gruppe= (Verwalter im Admin-Reiter) — der Lock bleibt derselbe
+    check(re.search(r"def _ap_nachholen\(pid, alle, uid, jetzt=None(?:, gruppe=None)?\):\n(?:    .*\n)*?    with _AP_NACHHOL_LOCK:\n        return _ap_nachholen_kern\(", src) is not None,
           "4 _ap_nachholen hält _AP_NACHHOL_LOCK um _ap_nachholen_kern")
-    check("_ap_nachholen(pid, alle, uid)" in src, "Route ruft weiter _ap_nachholen (mit Lock)")
+    check("_ap_nachholen(pid, alle, uid" in src, "Route ruft weiter _ap_nachholen (mit Lock)")
     print("\nALLES GRÜN" if not FEHLER else f"\n{len(FEHLER)} FEHLER")
     return 0 if not FEHLER else 1
 

@@ -2289,6 +2289,15 @@
      aktiv setzt der Tab-Handler die Farbe inline (violett) — dann sehen sie normal aus */
   #dashboard-view #kasse-content > .subtabs .adm-tab-rand{font-size:12px;padding-left:10px;padding-right:10px;color:var(--sub-2)}
   #dashboard-view #kasse-content > .subtabs .adm-tab-rand-erst{margin-left:auto}
+  /* ADMIN-GRUPPEN (08.10.2026): Finns Gruppenfilter links im Kopf — die bestehende .seg, nur kleiner und am Handy wischbar.
+     Verwalter (adm-verwalter an der Admin-View): HT-weite Teile aus — Einstellungen/Würfeln/Risiko-für-alle des Farmers, Kapitel
+     bearbeiten, Planer-Haken („IDs verwalten") und Bot-Schalter. Markiert mit data-ht-global bzw. über ihre vorhandenen Klassen. */
+  #dashboard-view .adm-gruppe-seg{margin-right:auto;max-width:100%;overflow-x:auto;scrollbar-width:none}
+  #dashboard-view .adm-gruppe-seg button{padding:3px 10px;font-size:12px;white-space:nowrap;cursor:pointer}
+  #dashboard-view #kasse-sperren{white-space:nowrap;flex-shrink:0}
+  #dashboard-view section.view[data-view="kasse"].adm-verwalter [data-ht-global],
+  #dashboard-view section.view[data-view="kasse"].adm-verwalter #ap-ids-root [data-ap-menu],
+  #dashboard-view section.view[data-view="kasse"].adm-verwalter #ap-ids-root .apd-schalter{display:none !important}
   /* KOPF-KACHELN (30.09.2026, Finn am Screenshot .867: „Das Untere passt echt gut. Aber oben könnten noch mehr Infos kommen … nur
      ‚74 noch offen · 6 laufen · x erledigt', das ist ein bisschen zu mager"): statt der dünnen Summenzeile eine Reihe .kpi-Kacheln
      wie im Finanzen-Überblick — Noch offen · Läuft · Heute erledigt · Long/Short heute · Wartet auf Payout (nur wenn vorhanden).
@@ -10207,7 +10216,10 @@
       </div>
 
       <div id="kasse-content" hidden>
-        <div style="display:flex;justify-content:flex-end;margin:-6px 0 -2px">
+        <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin:-6px 0 -2px">
+          <!-- Gruppenfilter (08.10.2026, Finn: „Hermann Technologies sieht weiterhin alles, dazu ein Gruppenfilter"): Chips „Alle · <Gruppe> …",
+               Namen aus id_gruppen.name (über /admin/overview → gruppen), nur für Logins ohne Einschränkung. Eigene Verdrahtung admGruppe* im Modul. -->
+          <div class="seg adm-gruppe-seg" id="adm-gruppe-seg" role="tablist" aria-label="Gruppe" hidden></div>
           <button id="kasse-sperren" title="Admin wieder mit Code sperren"
                   style="border:0;background:none;color:var(--sub-2);cursor:pointer;font-size:11.5px;padding:4px 2px">🔒 sperren</button>
         </div>
@@ -10466,8 +10478,8 @@
             <div class="wd-status-text" id="wd-status-text"></div>
             <div class="vp-zeile" style="margin-top:10px">
               <span>Tag</span> <input type="date" class="input mono vp-in" id="wd-tag" style="width:140px;text-align:left">
-              <button class="btn btn-primary btn-mini" id="wdWuerfel" title="Alle IDs mit Funded-Futures-Konten eintragen, Blöcke würfeln (Reihenfolge, Startzeiten, Richtung) und sofort alle Pläne anlegen">🎲 Würfeln</button>
-              <button class="btn btn-ghost btn-mini" id="wdSave" title="Haken, TP/SL, Zeiten und Richtungen speichern — Pläne werden sofort nachgezogen">Änderungen speichern</button>
+              <button class="btn btn-primary btn-mini" id="wdWuerfel" data-ht-global title="Alle IDs mit Funded-Futures-Konten eintragen, Blöcke würfeln (Reihenfolge, Startzeiten, Richtung) und sofort alle Pläne anlegen">🎲 Würfeln</button>
+              <button class="btn btn-ghost btn-mini" id="wdSave" data-ht-global title="Haken, TP/SL, Zeiten und Richtungen speichern — Pläne werden sofort nachgezogen">Änderungen speichern</button>
               <button class="btn btn-ghost btn-mini" id="wdReload">Neu laden</button>
             </div>
             <div class="modal-msg" id="wdMsg"></div>
@@ -10481,9 +10493,9 @@
                 <span class="mono" id="wd-k-zeile" style="font-size:12px;color:var(--sub);margin-left:10px"></span>
                 <!-- Risiko Master für alle WD-Konten (08.10.2026): ein Wert → wd_sl jedes Winning-Days-Kontos (nur Lot-Rechnung des Fusion-Hedges,
                      nie ein SL am Plan). Keine Vorbelegung — Finn trägt den Wert selbst ein. -->
-                <span style="margin-left:auto;font-size:12px;color:var(--sub)">Risiko Master $</span>
-                <input type="number" min="1" step="1" class="input mono vp-in" id="wd-risk-alle" style="width:84px" placeholder="z. B. 1500">
-                <button class="btn btn-ghost btn-mini" id="wdRiskAlle" title="Diesen Wert als Risiko Master (wd_sl) an ALLE Winning-Days-Konten aller IDs schreiben — bestehende Werte werden überschrieben, TP bleibt">für alle WD-Konten übernehmen</button>
+                <span style="margin-left:auto;font-size:12px;color:var(--sub)" data-ht-global>Risiko Master $</span>
+                <input type="number" min="1" step="1" class="input mono vp-in" id="wd-risk-alle" style="width:84px" placeholder="z. B. 1500" data-ht-global>
+                <button class="btn btn-ghost btn-mini" id="wdRiskAlle" data-ht-global title="Diesen Wert als Risiko Master (wd_sl) an ALLE Winning-Days-Konten aller IDs schreiben — bestehende Werte werden überschrieben, TP bleibt">für alle WD-Konten übernehmen</button>
                 <span id="wd-risk-fehlt" style="font-size:12px;color:var(--danger)"></span>
               </div>
             </div>
@@ -10492,8 +10504,9 @@
           </div>
           <!-- Einstellungen als drei Karten (23.09.2026, Finn: „unten auch draufdrücken, mehr Farben, auf eine Firma
                drücken und die Werte schnell eingeben, Tabelle größer") — gleiche IDs wie zuvor, damit Laden/Speichern
-               (wdRegelnInsFormular / wdRegelnSpeichern / wdHedgeSpeichern) unverändert greifen. -->
-          <div class="panel" style="margin:0 0 12px">
+               (wdRegelnInsFormular / wdRegelnSpeichern / wdHedgeSpeichern) unverändert greifen.
+               data-ht-global (08.10.2026): wd_farmer_regeln gilt für alle IDs — für Gruppen-Verwalter ausgeblendet, wie Würfeln/Speichern oben. -->
+          <div class="panel" style="margin:0 0 12px" data-ht-global>
             <div class="wd-panel-kopf">
               <div class="panel-title">Einstellungen <span style="font-weight:400;color:var(--sub);font-size:12px">· gelten für alle PC-Tabs · Firma oder Stufe anklicken, Werte eingeben, speichern</span></div>
             </div>
@@ -10795,7 +10808,7 @@
                 <div class="adm-vl" style="border-top:none;margin-top:0;padding-top:0"><canvas id="adm-kap-chart"></canvas></div>
                 <div class="adm-vl-legend" id="adm-kap-legend"></div>
               </div>
-              <div class="panel" style="margin-top:14px">
+              <div class="panel" style="margin-top:14px" data-ht-global>
                 <div class="panel-head" style="margin-bottom:6px">
                   <div>
                     <div class="panel-title">Kapitel bearbeiten</div>
@@ -13138,17 +13151,74 @@
      * (Markierung data-nur-eigene-aus, damit ein Profilwechsel sie zurückholt); die Daten
      * grenzen Backend (_admin_nur_uid) und RLS (admin_nur_eigene) ohnehin ein. */
     const KASSE_REITER_EIGENE = new Set(['overview', 'fin', 'wallet'])
+    /* ADMIN-GRUPPEN (08.10.2026, Finn: „Emin bekommt das VOLLE Admin wie Finn, aber nur mit den IDs seiner Gruppe"): ein VERWALTER
+     * (Backend /admin/overview → verwalter: true, sicht_ids = seine Gruppe) sieht alle Reiter außer den HT-weiten (Rechnungen = HT-
+     * Rechnungen, Kasse, Auftrag); innerhalb der Reiter blendet die Klasse adm-verwalter die HT-weiten Schalter aus (CSS data-ht-global).
+     * Ein eingeschränkter Login OHNE Gruppe (admin_zugang nur_eigene) bleibt bei den drei Reitern von 27.09. Solange die Übersicht noch
+     * nicht geantwortet hat, gilt für eigene Codes die enge Auswahl — danach zeichnet admLoad die Reiter neu. */
+    const KASSE_REITER_HT = new Set(['rg', 'kasse', 'auftrag'])
+    const admEingeschraenkt = () => !!(admData && Array.isArray(admData.sicht_ids))
+    const admIstVerwalter = () => !!(admData && admData.verwalter)
+    function kasseReiterErlaubt(name, ec){
+      if(admIstVerwalter()) return !KASSE_REITER_HT.has(name)
+      if(ec || admEingeschraenkt()) return KASSE_REITER_EIGENE.has(name)
+      return true
+    }
     function kasseReiterFuer(ec){
       document.querySelectorAll('.adm-tab').forEach(b => {
-        if(!ec){
+        if(kasseReiterErlaubt(b.dataset.admtab, ec)){
           if(b.dataset.nurEigeneAus){ b.style.display = ''; delete b.dataset.nurEigeneAus }
-        } else if(!KASSE_REITER_EIGENE.has(b.dataset.admtab) && b.style.display !== 'none'){
+        } else if(b.style.display !== 'none'){
           b.style.display = 'none'; b.dataset.nurEigeneAus = '1'
         }
       })
+      document.querySelector('#dashboard-view section.view[data-view="kasse"]')?.classList.toggle('adm-verwalter', admIstVerwalter())
       const akt = document.querySelector('.adm-tab.active')
-      if(ec && akt && !KASSE_REITER_EIGENE.has(akt.dataset.admtab)) document.querySelector('.adm-tab[data-admtab="overview"]')?.click()
+      if(akt && !kasseReiterErlaubt(akt.dataset.admtab, ec)) document.querySelector('.adm-tab[data-admtab="overview"]')?.click()
     }
+    /* GRUPPENFILTER (08.10.2026, Finn: „Finn (Hermann Technologies) sieht weiterhin ALLES, dazu ein Gruppenfilter"): Chips im Admin-Kopf
+     * „Alle · <Name aus id_gruppen> …", nur ohne Einschränkung und nur, wenn es mehr als eine Gruppe gibt. Gewählt = ?gruppe=<id> an
+     * Übersicht/Kapitel/Trade-Planer (der Server filtert, wie beim Kapitel-Regler), dazu window._admGruppeOk für Listen, die direkt aus
+     * Supabase kommen (Winning-Days-Blöcke, PC-Tabs). Wahl je Gerät gemerkt (prophos_adm_gruppe), nur Komfort. */
+    const ADM_GRUPPE_LS = 'prophos_adm_gruppe'
+    let admGruppe = ''
+    try{ admGruppe = localStorage.getItem(ADM_GRUPPE_LS) || '' }catch(_){}
+    const admGruppeAktiv = () => (!admEingeschraenkt() && admGruppe && (admData?.gruppen || []).some(x => String(x.id) === admGruppe)) ? admGruppe : ''
+    // ?gruppe= für die Admin-Lader; vor der ersten Übersicht gilt die gemerkte Wahl (der Server prüft sie ohnehin)
+    window._admGruppeQ = vor => { const gp = admData ? admGruppeAktiv() : (admEingeschraenkt() ? '' : admGruppe); return gp ? `${vor}gruppe=${encodeURIComponent(gp)}` : '' }
+    window._admGruppeOk = uid => {
+      if(admEingeschraenkt()) return admData.sicht_ids.map(String).includes(String(uid))
+      if(eigenerCode && !admData) return false          // eigener Code, Übersicht noch nicht da: nichts Fremdes zeigen
+      const gp = admGruppeAktiv(); if(!gp) return true
+      const x = (admData.gruppen || []).find(y => String(y.id) === gp); if(!x) return true
+      return x.ht ? !(x.ausser || []).map(String).includes(String(uid)) : (x.ids || []).map(String).includes(String(uid))
+    }
+    // eingeschränkt (Verwalter/eigener Code): Listen aus nutzerübergreifenden Tabellen nur über _admGruppeOk (Winning Days, 08.10.2026)
+    window._admNurGruppe = () => admEingeschraenkt() || !!eigenerCode
+    function admGruppeChips(){
+      const el = $('adm-gruppe-seg'); if(!el) return
+      const liste = (!admEingeschraenkt() && admData && Array.isArray(admData.gruppen)) ? admData.gruppen : []
+      if(liste.length < 2){ el.hidden = true; el.innerHTML = ''; return }
+      const akt = admGruppeAktiv()
+      el.innerHTML = [{ id: '', name: 'Alle' }, ...liste].map(x => `<button type="button" role="tab" data-adm-gruppe="${escapeHtml(String(x.id))}" class="${String(x.id) === akt ? 'active' : ''}" aria-selected="${String(x.id) === akt}">${escapeHtml(x.name)}</button>`).join('')
+      el.hidden = false
+    }
+    document.getElementById('adm-gruppe-seg')?.addEventListener('click', ev => {   // hier noch ohne $ (const weiter unten)
+      const b = ev.target.closest('[data-adm-gruppe]'); if(!b) return
+      const neu = b.dataset.admGruppe || ''
+      if(neu === admGruppeAktiv()) return
+      admGruppe = neu
+      try{ neu ? localStorage.setItem(ADM_GRUPPE_LS, neu) : localStorage.removeItem(ADM_GRUPPE_LS) }catch(_){}
+      admGruppeChips()
+      // wie beim Kapitel-Regler: Übersicht/Payouts/Käufe neu vom Server, Statistik beim nächsten Öffnen bzw. sofort, wenn offen
+      // Meta Wallet filtert über excluded_uids der Übersicht — erst nach der neuen Antwort neu laden
+      admLoad().then(() => { if(walOpened){ walOpened = false; if(!$('adm-pane-wallet')?.hidden) walOpen() } })
+      admKapData = null
+      if(!$('adm-pane-stat')?.hidden) admKapitelLaden()
+      if(!$('adm-pane-planer')?.hidden) window._apIdsLaden?.()
+      if(!$('adm-pane-wd')?.hidden) window._wdTabOeffnen?.()
+      window._admPcsOeffnen?.()   // PC-Tabs neu zeichnen (Filter über _admGruppeOk)
+    })
     const kasseFreiFuer = ec => {
       try { return localStorage.getItem(kasseSchluessel()) === (ec ? '2' : '1') } catch(_){ return false }
     }
@@ -13174,7 +13244,7 @@
       if(!admData || Date.now() - (window._admLadeZeit || 0) > ADM_CACHE_MS) admLoad()
       kasseReiterFuer(eigenerCode)
       // Sprung aus Trades („Winning Days") wartet hinter dem Kasse-Code (23.09.2026)
-      if(window._wdTabPending){ window._wdTabPending = false; if(!eigenerCode) document.querySelector('.adm-tab[data-admtab="wd"]')?.click() }
+      if(window._wdTabPending){ window._wdTabPending = false; if(kasseReiterErlaubt('wd', eigenerCode)) document.querySelector('.adm-tab[data-admtab="wd"]')?.click() }
       // Reiter „Trade-Planer" schon offen (Admin über die Seitenleiste betreten / entsperrt): frisch laden wie beim Reiter-Klick (08.10.2026)
       setTimeout(() => { try{ window._apIdsSichtPruefen?.(true) }catch(_){} }, 0)
     }
@@ -13246,7 +13316,7 @@
 
     window._admLaden = () => admLoad()   // Farmer-Tab lädt die Übersicht selbst nach, wenn sie fehlt (23.09.2026)
     // Isoliert prüfbar mit Stub-Daten, wie _admKapitelRender (24.09.2026): Übersicht + Payouts ohne Login/Server zeichnen
-    window._admStub = d => { admData = d; window._admData = d; admPersonColorsBauen(); admRender(); admFinRender() }
+    window._admStub = d => { admData = d; window._admData = d; admPersonColorsBauen(); admRender(); admFinRender(); kasseReiterFuer(eigenerCode); admGruppeChips() }
     window._admKapStub = d => admKapitelRender(d)   // Entwickler-Haken wie _admStub: Kapitel/Statistik mit Stub-Daten zeichnen (24.09.2026)
     async function admLoad(){
       const msg = $('adm-msg'), body = $('adm-body')
@@ -13259,7 +13329,9 @@
         // Kapitel (24.09.2026): der Server filtert Kauf/Hedge/Payouts/Verlauf über kapitel_id,
         // „Alle" = ungefiltert wie bisher. Gewählt wird oben in der Topbar (window._kapitel).
         const kap = window._kapitel ? window._kapitel.aktiv : 'alle'
-        const r = await fetch(`${WATCHER_HOME}/admin/overview` + (kap !== 'alle' ? `?kapitel=${encodeURIComponent(kap)}` : ''),
+        // Gruppenfilter (08.10.2026): ?gruppe= wie ?kapitel= — der Server blendet die übrigen IDs aus (Summen stimmen mit der Liste)
+        const q = [kap !== 'alle' ? `kapitel=${encodeURIComponent(kap)}` : '', window._admGruppeQ('')].filter(Boolean).join('&')
+        const r = await fetch(`${WATCHER_HOME}/admin/overview` + (q ? '?' + q : ''),
                               { headers: { 'sb-token': tok }, cache:'no-store' })
         const d = await r.json()
         if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
@@ -13310,6 +13382,9 @@
           (d.firms || []).map(f => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join('')
         selF.value = curF
         msg.style.display = 'none'; body.hidden = false
+        kasseReiterFuer(eigenerCode)   // Admin-Gruppen (08.10.2026): Verwalter erst mit dieser Antwort erkennbar → Reiter + HT-Schalter
+        admGruppeChips()               // Finns Gruppenfilter (Namen aus id_gruppen)
+        if(eigenerCode && !$('adm-pane-wd')?.hidden) window._wdTabOeffnen?.()   // WD-Blöcke warteten auf die Gruppe (window._admGruppeOk)
         admKapChipRender()       // Hinweis-Chip „Kapitel: …" in der Toolbar (24.09.2026)
         admPersonColorsBauen()   // feste Farbe je Person für Balken-Punkte und Verlaufs-Charts (23.09.2026)
         admRender()
@@ -13617,7 +13692,7 @@
         const { data: { session } } = await supabase.auth.getSession()
         const tok = session?.access_token
         if(!tok) throw new Error('nicht angemeldet')
-        const r = await fetch(`${WATCHER_HOME}/admin/kapitel`, { headers: { 'sb-token': tok }, cache:'no-store' })
+        const r = await fetch(`${WATCHER_HOME}/admin/kapitel` + window._admGruppeQ('?'), { headers: { 'sb-token': tok }, cache:'no-store' })   // Gruppenfilter (08.10.2026)
         const d = await r.json()
         if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
         admKapGeladenAt = Date.now()   // Stempel nur nach echtem Fetch (Review 24.09.2026, F1)
@@ -28296,6 +28371,7 @@
     const leute = new Map(((window._admData && window._admData.people) || []).map(p => [String(p.user_id), p.name]))
     const zeilen = []
     for(const [uid, z] of Object.entries(st)){
+      if(typeof window._admGruppeOk === 'function' && !window._admGruppeOk(uid)) continue   // Finns Gruppen-Chip (08.10.2026); Verwalter filtert schon der Server
       const je = (z && z.je_pc && Object.keys(z.je_pc).length) ? Object.values(z.je_pc) : [z]
       for(const q of je) zeilen.push(Object.assign({ uid, name: leute.get(String(uid)) || String(uid).slice(0, 8) }, q))
     }
@@ -42098,7 +42174,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1380'
+  const OS_TAB_BUILD = '2026-09-22.1381'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -47274,7 +47350,9 @@
   // Backend nur die eigene ID, damit auch keine ID-Chips. Der Admin-Reiter „Trade-Planer" (#adm-pane-planer, Admin-Code) schickt
   // ?sicht=admin: dort bleibt die Alle-IDs-Sicht für jeden Login außer admin_zugang „nur eigene" (Gate wie /admin/auto-plan/ids).
   const tplAdminReiterSichtbar = () => { const p = document.getElementById('adm-pane-planer'); return !!(p && !p.hidden && p.offsetParent !== null) }
-  window._tplSicht = () => tplAdminReiterSichtbar() ? '?sicht=admin'
+  // Gruppenfilter (Admin-Gruppen 08.10.2026): im Admin-Reiter hängt Finns Gruppen-Chip ?gruppe= an Lauf + Delta — der Server filtert
+  // die Listen (ein Verwalter bekommt mit sicht=admin ohnehin nur seine Gruppe)
+  window._tplSicht = () => tplAdminReiterSichtbar() ? '?sicht=admin' + (typeof window._admGruppeQ === 'function' ? window._admGruppeQ('&') : '')
     : (document.querySelector('#tpl-view.active') && (typeof apdAdmin === 'function' ? apdAdmin() : _ap.admin === true)) ? '?sicht=alle' : ''
   window._tplSichtParam = () => tplAdminReiterSichtbar() ? 'admin' : ''   // für POST-Bodies (tplEingriff)
   const TPL_LAUFZEIT = 180                               // ap_ausgleich_param.laufzeit_min (Standard), wenn der Lauf keinen Wert mitschickt
@@ -53331,7 +53409,10 @@
     const r = _wd.regeln || {}, de = wdDe
     const such = String(document.getElementById('wd-such')?.value || '').trim().toLowerCase()
     const nurFarm = !!document.getElementById('wd-nur-farm')?.checked
-    const alle = [...rows.map(x => ({ x, erw: false })), ...(fehlend || []).map(e => ({ x: e, erw: true }))]
+    // Admin-Gruppen (08.10.2026): wd_tagesplan ist nutzerübergreifend lesbar — Verwalter sehen nur ihre Gruppe, Finn mit Gruppen-Chip
+    // nur diese Gruppe (window._admGruppeOk aus dem Admin-Block; ohne ihn alles wie bisher)
+    const gOk = typeof window._admGruppeOk === 'function' ? window._admGruppeOk : () => true
+    const alle = [...rows.map(x => ({ x, erw: false })), ...(fehlend || []).map(e => ({ x: e, erw: true }))].filter(({ x }) => gOk(x.user_id))
     const drin = x => (x.konten || []).filter(wdAktiv).length
     let liste = alle.filter(({ x }) => !such || String(x.name || '').toLowerCase().includes(such) || (x.konten || []).some(k => String(k.name || '').toLowerCase().includes(such) || String(k.firm || '').toLowerCase().includes(such)))
     if(nurFarm) liste = liste.filter(({ x }) => drin(x) > 0 || x.reihenfolge)   // gewürfelte Blöcke immer zeigen, auch mit 0 drin
@@ -53866,6 +53947,10 @@
       }
       let rows = (_wd.tag === tag && _wd.rows !== rowsRoh && (_wd.rows || []).length && _wd.rows[0] && _wd.rows[0].tag === tag && _wd.rows.some(x => x && x.konten)) && _wd.rowsFrisch ? _wd.rows : rowsRoh
       if(_wd.rowsFrisch){ rows = _wd.rowsFrisch; _wd.rowsFrisch = null }
+      // Admin-Gruppen (08.10.2026): ein eingeschränkter Login (Verwalter) heilt und zeigt nur Zeilen seiner Gruppe — _wd.daten (Konten) kommt
+      // vom Server schon nur für die Gruppe; ohne diesen Filter hielte wdZeilenHeilen fremde Konten für „kein Winning Days" und schriebe
+      // deren Tagesplan-Zeilen um. Die Nacht-Automatik am PC (wdTick) liest wdRowsLaden selbst und bleibt unberührt.
+      if(typeof window._admNurGruppe === 'function' && window._admNurGruppe()) rows = rows.filter(x => window._admGruppeOk(x.user_id))
       try{ rows = await wdZeilenHeilen(tag, rows) }catch(e){ console.warn('[wd] heilen', e) }
       _wd.rows = wdUmsortiertAuflegen(rows.map(wdMitLive)); wdRender(); wdCacheSchreiben(tag)
     }catch(e){ wdSay('Laden fehlgeschlagen: ' + (e.message || e), 'err') }
@@ -54091,6 +54176,7 @@
     let el = document.getElementById('ws-leiste'); if(el) return el
     const pane = document.getElementById('adm-pane-wd'); if(!pane) return null
     el = document.createElement('div'); el.id = 'ws-leiste'
+    el.dataset.htGlobal = ''   // Farmer SCHARF/AUS gilt für alle IDs (wd_farmer_regeln) — für Gruppen-Verwalter ausgeblendet (08.10.2026)
     el.innerHTML = `<button type="button" class="ws-knopf" id="ws-knopf">—</button><div class="ws-text" id="ws-text"></div>`
     pane.insertBefore(el, pane.firstChild)
     el.querySelector('#ws-knopf').addEventListener('click', async () => {
@@ -62329,7 +62415,8 @@
     // KOPF WIE DIE TRADE-PLANER-SEITE (Finn 08.10.2026: „oben ein richtig cleaner Zeitstrahl mit allen IDs, die Kacheln mit dem
     // hypothetischen Betrag und dem kleinen Graph"): dieselben Lader (tplLaden → Lauf/live-trades/Kerzen/Bilanz, apdLaden → Delta) mit
     // Sicht „alle" (window._tplSicht sieht den offenen Reiter), dieselben Bausteine tplKachelnHtml/tplZeitstrahlHtml — keine Kopie.
-    const ids = apdApi('GET', '/ids').then(d => { _apIds.rows = Array.isArray(d.ids) ? d.ids : []; _apIds.aktiv = !!d.aktiv; _apIds.tag = d.tag || null; _apIds.offen = apIdsOhneBestaetigte(Array.isArray(d.offen) ? d.offen : [], t0); apIdsNotizMerken(d.offen)
+    // Gruppenfilter (08.10.2026): Finns Gruppen-Chip hängt ?gruppe= an (Verwalter bekommt ohnehin nur seine Gruppe)
+    const ids = apdApi('GET', '/ids' + (typeof window._admGruppeQ === 'function' ? window._admGruppeQ('?') : '')).then(d => { _apIds.rows = Array.isArray(d.ids) ? d.ids : []; _apIds.aktiv = !!d.aktiv; _apIds.tag = d.tag || null; _apIds.offen = apIdsOhneBestaetigte(Array.isArray(d.offen) ? d.offen : [], t0); apIdsNotizMerken(d.offen)
       // bestätigte, noch nicht gestartete Pläne aller IDs (heute + morgen), sobald das Backend sie mitliefert — sonst null (Delta heute + warteLokal)
       if(Array.isArray(d.bestaetigt)){ _apIds.bestaetigt = d.bestaetigt.filter(z => !_apIds.zurLokal.has(String(z.plan_id))); _apIds.bestaetigtT0 = t0 } })
       .catch(e => { _apIds.fehler = (e && e.message) || String(e) })
