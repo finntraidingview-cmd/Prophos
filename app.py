@@ -10284,6 +10284,8 @@ def _wd_heute_zeile(p, acc, disp, vorher=None):
         # BESTANDEN-FLAG (07.10.2026, Finn: „sobald bei Wartet/Überprüfen der Trade geflagt ist, dass er sehr wahrscheinlich gepasst
         # ist … neue Accounts hinzufügen braucht meine Handarbeit"): Kontotyp + Ziel-Balance der Ziel-Wache (zw_tick, 5-min-Takt)
         "konto_typ": (acc or {}).get("account_type"), "ziel_usd": _zw["ziele"].get(str(p.get("master_account_id") or "")),   # 01.10.2026: Tradeify-WD über 250 $ → „Good Day" in Erledigt
+        # Blow-Grenze aus den Kernwerten (Ziel-Wache, 08.10.2026) — die Ziel-Spanne in Überprüfen/Manuelle Arbeit, v. a. für Echo ohne Liq
+        "boden_usd": (_zw.get("boeden") or {}).get(str(p.get("master_account_id") or "")),
         # P&L aus Fills + Abgleich (Koordination 25.09.2026): Einstieg/Start aus der tv-Baseline, Ende aus final — nur die Felder,
         # die die Rechnung braucht (Fill-Preise, Today's P&L, Quelle, Ende-Art), keine Zugangsdaten
         # TSV2-PNL (01.10.2026): dazu Balance vorher/nachher + Basis (TopstepX-Express 0-basiert) und der RP&L-Start
@@ -20965,22 +20967,31 @@ def ap_nachplan_tick(jetzt, zustand):
 # accounts.ziel_erreicht_at/_bal/ziel_usd setzen (Tag in Prophos, Start-Sperre im Frontend) + Push an Inhaber und Admins, je Konto
 # einmal. Wieder darunter (Phase umgestellt, neues höheres Ziel) → Tag weg. Ohne Balance oder Regel: nichts ändern. ══
 ZW_TAKT_S = 300
-_zw = {"at": 0.0, "fehler": "", "erreicht": 0, "spalte_fehlt": False, "ziele": {}}   # ziele: konto_id → Ziel-Balance (Radar-Zeilen)
+_zw = {"at": 0.0, "fehler": "", "erreicht": 0, "spalte_fehlt": False, "ziele": {}, "boeden": {}}   # ziele/boeden: konto_id → Ziel-/Blow-Balance (Radar-Zeilen)
 
 
 def zw_ziel(regel, phase, balance):
     """REIN RECHNEND (testbar): Ziel-Balance eines Kontos wie ap_konto_rechnen → (ziel, groesse) oder None (Regel/Größe unbekannt)."""
     if not regel or not balance:
         return None
-    zp = (regel.get("ziel_pct") or {}).get(phase) if isinstance(regel.get("ziel_pct"), dict) else None
-    if zp is None:
-        zp = ((regel.get("phasen") or {}).get(phase) or {}).get("ziel_pct")
-    if not zp:
-        return None
     # beide Größenlisten: FundedNext/FundingPips führen 50k nur in wert_groessen (Planer plant dort nur 100k)
     gr = sorted({float(g) for g in (regel.get("groessen") or []) + (regel.get("wert_groessen") or []) if g})
     groesse = ap_groesse(gr, float(balance))
     if groesse is None:
+        return None
+    # KERNWERTE JE GRÖSSE wie ap_konto_rechnen (Master 08.10.2026, Prüffall FP 50k Flex: Ziel-Wache sah 8 % = 54.000, der Planer 10 % =
+    # 55.000 — ein Flex-Konto wäre schon bei +8 % „Ziel erreicht" samt Start-Sperre gewesen): regel.je_groesse[Größe] (von ap_regel_flex
+    # gesetzt) geht der Firma vor, gleiche Reihenfolge wie der Planer (also auch vor ziel_pct_konto). Ohne Block oder mit keine_werte wie bisher.
+    jg = (regel.get("je_groesse") or {}).get(str(int(groesse)))
+    if jg and not jg.get("keine_werte"):
+        regel = dict(regel, **{k: v for k, v in jg.items() if k != "phasen"})
+        ph = (jg.get("phasen") or {}).get(phase) or {}
+    else:
+        ph = (regel.get("phasen") or {}).get(phase) or {}
+    zp = (regel.get("ziel_pct") or {}).get(phase) if isinstance(regel.get("ziel_pct"), dict) else None
+    if zp is None:
+        zp = ph.get("ziel_pct")
+    if not zp:
         return None
     return round(groesse * (1 + float(zp) / 100.0), 2), groesse
 
@@ -21036,6 +21047,11 @@ def zw_tick(force=False):
             continue
         ziel, _gr = zg
         _zw["ziele"][aid] = ziel
+        # BLOW-GRENZE für die Ziel-Spanne im Radar (Finn 08.10.2026, „Überprüfen": „wo stehe ich jetzt, wie viel fehlt noch"): dieselbe
+        # Kernwerte-Rechnung wie der Trade-Planer (ap_boden_sicher → ap_boden_konto, mit der Regel dieses Kontos) — Echo hat im Radar
+        # keine Liq, deshalb hier. Sicheres Level, sonst Start − DD (boden_min). Nur Anzeige, kein eigener Takt, keine Abfrage.
+        _bk = ap_boden_sicher(None, a, float(bal), regel=regel)
+        _zw["boeden"][aid] = _bk.get("boden") if _bk.get("boden") is not None else _bk.get("boden_min")
         erreicht, war = zw_erreicht(ziel, bal, a.get("account_type")), bool((flags.get(aid) or {}).get("ziel_erreicht_at"))
         if erreicht:
             n += 1

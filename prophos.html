@@ -3723,6 +3723,8 @@
   #dashboard-view .wdl-sp-bahn::before{left:-1px;background:rgba(217,45,32,.5)}
   #dashboard-view .wdl-sp-bahn::after{right:-1px;background:rgba(14,151,87,.55)}
   #dashboard-view .wdl-sp-ein{position:absolute;top:-4px;width:1px;height:12px;background:var(--sub-2);transform:translateX(-50%)}
+  /* Ziel-Spanne (08.10.2026): eigene zweite Rasterzeile, genau die 256-px-mi-Spalte (auch in „Manuelle Arbeit", wo mi zwei Spalten hat) */
+  #dashboard-view .wdl-z > .wdl-sp-ziel{grid-column:3;grid-row:2;margin-top:-3px}
   #dashboard-view .wdl-sp-punkt{position:absolute;top:50%;width:10px;height:10px;border-radius:50%;transform:translate(-50%,-50%);box-shadow:0 0 0 2px var(--surface);transition:left .6s ease}
   /* Handy: zwei Zeilen, dasselbe Raster für Kopf und Zeilen — oben wer + P&L, darunter Richtung · Spanne/Ergebnis · Zeit */
   @media (max-width:820px){
@@ -3736,6 +3738,7 @@
     #dashboard-view .wdl-z > .wdl-sp{gap:4px;padding:0 2px}   /* „−3.000 $ ●── +5.715 $" passt so in ~135 px */
     #dashboard-view .wdl-sp small{font-size:9.5px}
     #dashboard-view .wdl-sp-bahn{min-width:24px}
+    #dashboard-view .wdl-z > .wdl-sp-ziel{grid-column:2 / 4;grid-row:3;margin-top:0}   /* Handy: unter Richtung · Mitte, wie die Läuft-Spanne */
     #dashboard-view .wdl-z-wart .wdl-z-mi{white-space:normal;line-height:1.3}   /* „wird gelesen · seit 1 h 52 min" passt nicht in eine Zeile */
     #dashboard-view .wdl-z-man .wdl-z-mi{flex-wrap:wrap;justify-content:flex-start;row-gap:4px}   /* Manuelle Arbeit am Handy: Notiz oben, Knöpfe darunter (kein Drag — der Knopf „→ manuell" macht es) */
     #dashboard-view .wdl-z[draggable="true"]{cursor:pointer}
@@ -28523,14 +28526,33 @@
   }
   // Leiste als HTML — bekommt alle Werte als Parameter (sp = {links, rechts, ein, art}, kurs, Punktfarbe, Tooltip) und hängt an keinem
   // Kurs-Feed: Orbit gibt den NQ-Reader-Kurs, eine spätere Echo-Sektion (MT5/CFD) ihren eigenen Kurs (Master 30.09.2026)
-  function wdlSpanneHtml(sp, kurs, farbe, tip){
+  // opt (08.10.2026, Ziel-Spanne in Überprüfen/Manuelle Arbeit): { klasse, l, r } — andere Klasse und Labels; ohne opt Byte für Byte wie bisher
+  function wdlSpanneHtml(sp, kurs, farbe, tip, opt){
     const pE = wdlSpPos(sp, sp.ein), pK = wdlSpPos(sp, kurs)
     // blasses Rot bis zum Einstieg, blasses Grün ab dem Einstieg (wie mwd-bar); ohne Einstieg nur der graue Track
     const bahn = pE != null ? `background:linear-gradient(90deg,rgba(240,68,56,.14) 0 ${pE.toFixed(2)}%,rgba(18,183,106,.22) ${pE.toFixed(2)}% 100%)` : ''
     const betrag = v => (v != null && isFinite(v)) ? `<b>${wdlSpBetrag(v)}</b>` : ''   // fehlt der Betrag: nur das Label
-    return `<span class="wdl-z-mi wdl-sp"${tip ? ` title="${escapeHtml(tip)}"` : ''}><small class="wdl-sp-l"><i>${sp.art === 'SL' ? 'SL' : sp.art === 'Tag' ? 'Tageslimit' : 'Liq'}</i>${betrag(sp.plLinks)}</small><span class="wdl-sp-bahn" style="${bahn}">`
+    return `<span class="${opt && opt.klasse ? opt.klasse : 'wdl-z-mi wdl-sp'}"${tip ? ` title="${escapeHtml(tip)}"` : ''}><small class="wdl-sp-l"><i>${opt && opt.l != null ? opt.l : sp.art === 'SL' ? 'SL' : sp.art === 'Tag' ? 'Tageslimit' : 'Liq'}</i>${betrag(sp.plLinks)}</small><span class="wdl-sp-bahn" style="${bahn}">`
       + (pE != null ? `<i class="wdl-sp-ein" style="left:${pE.toFixed(2)}%"></i>` : '')
-      + `<b class="wdl-sp-punkt" style="left:${(pK != null ? pK : 0).toFixed(2)}%;background:${farbe || 'var(--sub)'}${pK == null ? ';display:none' : ''}"></b></span><small class="wdl-sp-r"><i>TP</i>${betrag(sp.plRechts)}</small></span>`
+      + `<b class="wdl-sp-punkt" style="left:${(pK != null ? pK : 0).toFixed(2)}%;background:${farbe || 'var(--sub)'}${pK == null ? ';display:none' : ''}"></b></span><small class="wdl-sp-r"><i>${opt && opt.r != null ? opt.r : 'TP'}</i>${betrag(sp.plRechts)}</small></span>`
+  }
+  /* ZIEL-SPANNE (Finn 08.10.2026 zum Radar „Überprüfen": „Wie bei den Lauftrades, die Spanne finde ich sehr schön klein und übersichtlich …
+   * wo stehe ich jetzt aktuell? Wie viel fehlt noch? … wo befinden sich die Accounts, nachdem der Trade sie geändert hat"). Genau die
+   * Läuft-Spanne (wdlSpanneHtml, nur andere Labels) — NICHT der Planer-Balken, nicht breit, kein Text (Rückbau c05a0aa/2944fb6):
+   * links „Blow" −Abstand $, rechts „Ziel" +fehlt $ (am Ziel „Ziel ✓"), Punkt = Balance jetzt (wie die Konto-Spalte, wdlBlowStand().bal)
+   * in der P&L-Farbe der Zeile, Strich = Balance vor dem Trade (rot bis dort, grün ab dort). Blow = Liq des Radars (wdlBlowStand().liq),
+   * sonst boden_usd aus den Kernwerten (Ziel-Wache — Echo hat keine Liq). Ohne Ziel (Funded/WD), Blow oder Balance: nichts. Eigenes
+   * Raster-Element unter der Zeile in der mi-Spalte (.wdl-sp-ziel). Nur Überprüfen und Manuelle Arbeit. */
+  function wdlZielSpanneHtml(t, farbe){
+    const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
+    const b = wdlBlowStand(t); if(!b || b.bal == null) return ''
+    const ziel = n(t.ziel_usd), blow = b.liq != null ? b.liq : n(t.boden_usd), bal = b.bal, vor = n(t.balance_start)
+    if(ziel == null || blow == null || !(ziel > blow)) return ''
+    const ok = bal >= ziel, weg = bal <= blow, de = v => Math.round(v).toLocaleString('de-DE')
+    const sp = { links: blow, rechts: ziel, ein: (vor != null && vor > blow && vor < ziel) ? vor : null, plLinks: weg ? null : blow - bal, plRechts: ok ? null : ziel - bal }
+    const tip = `Balance ${de(bal)} $ · Blow bei ${de(blow)} $ (${weg ? 'erreicht' : `noch ${de(bal - blow)} $`}) · Ziel ${de(ziel)} $ (${ok ? 'erreicht' : `fehlen ${de(ziel - bal)} $`})`
+      + (vor != null ? ` · vor dem Trade ${de(vor)} $` : '')
+    return wdlSpanneHtml(sp, bal, farbe, tip, { klasse: 'wdl-sp wdl-sp-ziel', l: 'Blow', r: ok ? 'Ziel ✓' : 'Ziel' })
   }
   /* LÄUFT-ZEILEN WIE IM RADAR — gemeinsamer Helfer (08.10.2026, Finn zur Liste unter „P&L hypothetisch heute": „nimm grob die Ansicht, wie es
    * unter Radar bei den laufenden Trades aussieht, weil es voll hässlich ist … so eine Multi-Row-Gruppe wie unter Radar, für jeden Account so
@@ -28948,7 +28970,7 @@
       const lots = v => num(v) == null ? '?' : Number(v).toLocaleString('de-DE', { maximumFractionDigits: 2 })
       const ri = echo ? zelle('ri', `<em${buy ? ' class="is-buy"' : sell ? ' class="is-sell"' : ''}>${buy ? 'BUY' : sell ? 'SELL' : '?'}</em>${lots(t.lots)} Lot${t.symbol ? `<span class="wdl-z-sym"> ${escapeHtml(t.symbol)}</span>` : ''}`, { tip: `${lots(t.lots)} Lot${t.symbol ? ' ' + t.symbol : ''}` })
         : zelle('ri', `<em${buy ? ' class="is-buy"' : sell ? ' class="is-sell"' : ''}>${buy ? 'BUY' : sell ? 'SELL' : '?'}</em>${t.kt != null ? f0(t.kt) : '?'} × ${escapeHtml(t.symbol_root || '?')}`)
-      let art, miZ, plZ, zeitZ, kontoZ = ''
+      let art, miZ, plZ, zeitZ, kontoZ = '', zielSp = ''
       if(offen){
         art = 'lauf'
         if(echo){
@@ -29021,6 +29043,7 @@
           + `<button type="button" class="btn btn-ghost el-knopf" data-wdl-man-zurueck="${escapeHtml(pid)}"${busy ? ' disabled' : ''} title="Kennzeichen entfernen — zurück nach „Überprüfen"">zurück</button>`))
         plZ = zelle('pl', sig(pb, '$', 2) + slaveZ(t) + zuWegZ(t), { f: col(pb), tip: num(t.pl_balance) != null ? (echo ? 'MT5-Balance' : 'Balance') + ' nachher − vorher' : pb != null ? 'P&L am Plan' : 'noch kein P&L — beim Abhaken eintragen' })
         zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
+        zielSp = wdlZielSpanneHtml(t, col(pb))   // Ziel-Spanne unter der Zeile (08.10.2026)
       } else if(t.status === 'review'){
         // ÜBERPRÜFEN (30.09.2026, Finn: „Läuft → Wartet → Überprüfen (P&L ist eingetragen, ich muss nur noch abhaken) → Erledigt"):
         // P&L steht (Balance nachher − vorher, sonst der P&L am Plan), „Abhaken" ruft die vorhandene Erledigt-Aktion der Winning-
@@ -29036,6 +29059,7 @@
           { tip: echo ? '' : demoTip(d) })
         plZ = zelle('pl', sig(pb, '$', 2) + slaveZ(t) + zuWegZ(t), { f: col(pb), tip: num(t.pl_balance) != null ? (echo ? 'MT5-Balance' : 'Balance') + ' nachher − vorher' : pb != null ? 'P&L am Plan' : 'noch kein P&L — beim Abhaken eintragen' })
         zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
+        zielSp = wdlZielSpanneHtml(t, col(pb))   // Ziel-Spanne unter der Zeile (08.10.2026)
       } else {
         art = 'zu'
         // Erledigt: Ergebnis (was die Demo sah), P&L = Balance nachher − vorher; fehlt sie, nur „–"
@@ -29056,7 +29080,7 @@
       // Überprüfen-Zeilen sind ziehbar (08.10.2026, HTML5-Drag nach „Manuelle Arbeit"; Handler unten am Listen-Container)
       return `<div class="wdl-z wdl-z-${art}${echo ? ' wdl-z-echo' : ''}${an ? ' is-aktiv' : ''}${extra ? ' ' + extra : ''}" style="--wdl-id:${wdlIdFarbe(t)}" data-wdl-trade="${escapeHtml(wdlTid(t))}"${art === 'pruef' ? ` draggable="true" data-wdl-drag="${escapeHtml(wdlTid(t))}"` : ''} title="${escapeHtml(tip)}">`
         + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><i class="wdl-pf">${escapeHtml(wdlWeg(t))}</i><small data-wdl-konto="${escapeHtml(wdlTid(t))}" title="Konto ansehen">${escapeHtml(konto)}</small></span>`
-        + (art === 'man' ? '' : ri) + miZ + kontoZ + plZ + zeitZ + '</div>'   // Manuelle Arbeit ohne Richtung/Menge (08.10.2026) — die Notiz bekommt den Platz
+        + (art === 'man' ? '' : ri) + miZ + kontoZ + plZ + zeitZ + zielSp + '</div>'   // Manuelle Arbeit ohne Richtung/Menge (08.10.2026) — die Notiz bekommt den Platz
     }
     // Gruppe = ein Kasten, oben einmal die Spaltenköpfe im selben Raster wie die Zeilen
     // mehr = Schlüssel für „Beendet" (30.09.2026, Finn sah die Echo-Sektion nicht — sie stand unter Orbits „Beendet · 42"): nur die
@@ -42026,7 +42050,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1376'
+  const OS_TAB_BUILD = '2026-09-22.1377'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
