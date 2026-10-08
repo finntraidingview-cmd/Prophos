@@ -16189,7 +16189,10 @@ AP_ID_MISCH_AB = 4
 AP_ID_MISCH_MAX = 0.67
 AP_START_BIS_STANDARD = "16:30"      # Finn 07.10.2026: alle Trades bis spätestens 16:30 dt gestartet (zeiten.start_bis)
 AP_TZ_TAG = "Europe/Berlin"          # Nachtlauf 00:00 und Bot-Takt in deutscher Zeit (Vertrag §2/§3)
-AP_BOT_ENDE_MIN = 19 * 60 + 30       # Bot-Takt 00:00–19:30 dt
+# Bot-Takt rund um die Uhr (08.10.2026, Finn über Master: „Der Bot soll quasi die ganze Zeit schauen — 24/7"): früher nur Mo–Fr
+# 00:00–19:30 dt (AP_BOT_ENDE_MIN). Jetzt läuft er im Takt, solange es geplante (Start ab jetzt − AP_BOT_ARBEIT_VORLAUF_MIN) oder
+# laufende Trades gibt — ohne sie kostet ein Takt eine einzige kleine Abfrage (_ap_bot_hat_arbeit), kein Stand-Laden.
+AP_BOT_ARBEIT_VORLAUF_MIN = 30
 AP_BOT_EXTRA_MIN = 14 * 60           # Extra-Lauf 14:00 dt mit frischen TP-Abständen
 AP_FAELLIG_MIN = 5                   # bestätigter Plan, der in ≤ 5 min startet = fällig — Bot und Hand fassen ihn nicht mehr an
 AP_BOT_SCHRITTE = 3                  # höchstens so viele Umplanungen (Tranche tauschen / schieben) je Bot-Lauf
@@ -16632,6 +16635,8 @@ AP_SZENARIO_WEIT = 100                   # Kurve für die Anzeige −100 … +10
 AP_SZENARIO_AB_EUR = 0.0                 # Vorziehen löst aus, sobald min P über ±R unter 0 € liegt — Finn 08.10.2026: „es gibt keine
                                          # Schwelle … einfach so, wie es sein soll" (vorher 100 €)
 AP_SZENARIO_MIN_GEWINN_EUR = 10.0        # Dämpfung: ein Zug muss das Minimum um mindestens so viel heben, sonst kein Zug (kein Flattern)
+AP_SUCHE_ZUEGE = 4                       # Strahlsuche (08.10.2026, Finn „beste Kombination"): höchstens so viele Züge je Lauf …
+AP_SUCHE_BREITE = 6                      # … über so viele beste Zwischenstände je Tiefe (Greedy wäre Breite 1)
 
 
 def ap_szenario_trade(t, d):
@@ -16927,7 +16932,7 @@ def ap_verteilung(gruppe, je, zustand, jetzt_min, zeiten, rnd, gestartet=None, l
 
 def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, rnd, gestartet=None, id_fest=None,
                 schritte=AP_BOT_SCHRITTE, einsatz=None, zuletzt=None, hysterese=None, dubai_min=0, vorgezogen_heute=None,
-                verteilt_heute=None, pc_lebt=None, verpufft=None, laufend=None):
+                verteilt_heute=None, pc_lebt=None, verpufft=None, laufend=None, hinaus_heute=None):
     """REIN RECHNEND (Vertrag §3, Korrektur Finn 06.10.2026): ein Lauf des Ausgleichs-Bots. plaene = heutige geplante Pläne
     [{plan_id, user_id, user, firma, richtung, start_min, delta_abs, aenderbar}] — nicht änderbare zählen mit und sperren ihre
     Tranche. gestartet = heute schon gestartete Trades [{user_id, firma, start, richtung}] (nur für den weichen Malus),
@@ -17119,7 +17124,209 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
     if sz_an and aenderungen:
         sz_vor = sz_lage(zustand)
         sz_offen = sz_vor["min_eur"] < -AP_SZENARIO_AB_EUR
-    if aktuell[1] > schwelle_v or sz_offen:
+    # ── SUCHE ÜBER MEHRERE ZÜGE (08.10.2026, Finn über Master: „Der Bot soll quasi die ganze Zeit schauen … und immer die beste
+    # Kombination suchen"): statt EINES Vorzieh-Zugs je Lauf eine Strahlsuche (Beam, AP_SUCHE_BREITE Zustände, bis AP_SUCHE_ZUEGE Züge)
+    # über zwei Zugarten — einen Plan von nach den nächsten 60 min in sie hinein VORZIEHEN oder einen Plan aus ihnen HINAUSSCHIEBEN
+    # (nur diese beiden ändern die Szenario-Kurve +60). Ziel: schlimmster Fall ±AP_SZENARIO_R möglichst hoch, bei Gleichstand |Delta| an
+    # null, dann weniger Züge. Jeder einzelne Zug muss das Minimum um ≥ AP_SZENARIO_MIN_GEWINN_EUR heben. Am neuen Platz alle harten
+    # Regeln wie beim Vorziehen (frei_fuer): Gegenhedge über IDs, eigene ID × Firma nie gegenläufig in der Laufzeit, Richtungsschutz,
+    # Firmen-Abstand zu anderen IDs, kein Malus „dicht gegenläufig", Abstand je ID und je ID × Firma (Stufen 1/½/¼, ¼ nicht für heute
+    # verteilte) — damit nie zwei Starts derselben Firma enger als die Regeln, auch nicht innerhalb der Kombination. Nur Auto-Pläne,
+    # änderbar (keine Hand-Werte, nicht fällig), PC-Tab lebt, nicht ruhend, je Plan höchstens ein Zug. Pingpong: heute vorgezogene werden
+    # nicht hinausgeschoben, heute hinausgeschobene nicht wieder vorgezogen. Dritte Zugart DREHEN: die ganze ID × Firma (eine Richtung je
+    # ID × Firma) mit den Grenzen der Mischung — kein Richtungsschutz, alle änderbar/Auto/PC lebt, Bestätigte erst ab
+    # AP_MISCH_BESTAETIGT_AB_MIN vor dem frühesten Start, kein Gegenhedge über IDs, ID-Mischung nicht schlechter, Tagesband nicht über
+    # max(Hysterese, vorher).
+    laufz = float((einsatz or {}).get("laufzeit") or AP_VERTEIL_GEGEN_MIN)
+    gf_v = float((zeiten or {}).get("abstand_id_firma_min") or AP_ABSTAND_ID_FIRMA_MIN)
+    gi_v = float((zeiten or {}).get("abstand_id_gesamt_min") or AP_ABSTAND_ID_MIN)
+    gfirma = float((zeiten or {}).get("abstand_firma_min") or AP_FIRMA_ABSTAND_MIN)
+    abst_pc = float((zeiten or {}).get("abstand_id_min") or 3) + 2
+    hinaus_heute = set(hinaus_heute or ())
+
+    def belegung(z):
+        # alle Starts (Pläne im Zustand z + heute gestartete) je ID und je Firma — frei_fuer prüft nur diese Teilmengen
+        je_u, je_f = {}, {}
+        for k in z:
+            row = (k, z[k]["start"], z[k]["richtung"], str(je[k]["user_id"]), je[k]["firma"])
+            je_u.setdefault(row[3], []).append(row)
+            je_f.setdefault(row[4], []).append(row)
+        for x in gestartet or ():
+            if x.get("start") is not None:
+                row = (None, float(x["start"]), x.get("richtung"), str(x.get("user_id")), x.get("firma"))
+                je_u.setdefault(row[3], []).append(row)
+                je_f.setdefault(row[4], []).append(row)
+        return je_u, je_f
+
+    def frei_fuer(i, t, f, r, bel):
+        uid, fa = str(je[i]["user_id"]), je[i]["firma"]
+        fest = id_fest.get(f"{je[i]['user_id']}|{fa}")
+        if fest and fest.get("richtung") in ("buy", "sell") and fest.get("richtung") != r:
+            return False                                 # Richtungsschutz ID × Firma
+        je_u, je_f = bel
+        firma_ = [x for x in je_f.get(fa, ()) if x[0] != i]
+        if _ap_gegen_firma(t, uid, fa, r, [(s_, r_, u_, f_) for k_, s_, r_, u_, f_ in firma_ if k_ is not None], laufend, jetzt_min,
+                           (einsatz or {}).get("laufzeit")):
+            return False                                 # Gegenhedge über IDs (andere ID läuft/startet gegenläufig, ± 30 min)
+        for k_, s_, r_, u_, f_ in firma_:
+            if u_ == uid and r_ in ("buy", "sell") and r_ != r and (s_ <= t < s_ + laufz or t <= s_ < t + laufz):
+                return False                             # nie gegen einen Trade derselben ID × Firma
+            if u_ != uid and abs(t - s_) < gfirma:
+                return False                             # Firmen-Abstand zu anderen IDs
+            if u_ != uid and r_ in ("buy", "sell") and r_ != r and abs(t - s_) < AP_GEGEN_DICHT_MIN:
+                return False                             # kein neuer Malus
+            if u_ == uid and abs(t - s_) < gf_v * f:
+                return False                             # Abstand je ID × Firma
+        for k_, s_, r_, u_, f_ in je_u.get(uid, ()):
+            if k_ != i and abs(t - s_) < max(abst_pc, gi_v * f):
+                return False                             # PC + Abstand je ID
+        return True
+
+    def platz(i, von, bis, bel):
+        # früheste freie Minute in [von, bis) über die Abstands-Stufen, Streuung bis AP_VORZIEHEN_JITTER_MIN (Jitter-Regel)
+        r = zustand_r[i]
+        for f in [x for x in AP_ABSTAND_STUFEN if x > 0 and (x >= 0.5 or i not in verteilt_heute)]:
+            erst = next((t for t in range(int(-(-von // 1)), int(bis)) if frei_fuer(i, float(t), f, r, bel)), None)
+            if erst is not None:
+                frei_ = [t for t in range(erst, min(int(bis), erst + AP_VORZIEHEN_JITTER_MIN + 1)) if frei_fuer(i, float(t), f, r, bel)]
+                return float(rnd.choice(frei_))
+        return None
+
+    def richtung_frei(i, r, bel):
+        # nur die Richtungs-Regeln am bestehenden Platz (Abstände ändern sich beim Drehen nicht)
+        uid, fa, t = str(je[i]["user_id"]), je[i]["firma"], zustand_start(i)
+        firma_ = [x for x in bel[1].get(fa, ()) if x[0] != i]
+        if _ap_gegen_firma(t, uid, fa, r, [(s_, r_, u_, f_) for k_, s_, r_, u_, f_ in firma_ if k_ is not None and u_ != uid], laufend,
+                           jetzt_min, (einsatz or {}).get("laufzeit")):
+            return False
+        for k_, s_, r_, u_, f_ in firma_:
+            if u_ == uid and k_ is None and r_ in ("buy", "sell") and r_ != r and (s_ <= t < s_ + laufz or t <= s_ < t + laufz):
+                return False                             # heute gestarteter Trade derselben ID × Firma in Gegenrichtung
+            if u_ != uid and r_ in ("buy", "sell") and r_ != r and abs(t - s_) < AP_GEGEN_DICHT_MIN:
+                return False
+        return True
+
+    def tag_ueber(z):
+        if einsatz:
+            ev_ = [(z[i]["start"], float(je[i].get("einsatz_abs") or 0) * (1 if z[i]["richtung"] == "buy" else -1)) for i in z]
+            v_ = ap_verlauf(einsatz.get("basis"), einsatz.get("brutto"), ev_, band_pct, ab_min=jetzt_min, laufzeit_min=einsatz.get("laufzeit"))
+        else:
+            ev_ = [(z[i]["start"], float(je[i].get("delta_abs") or 0) * (1 if z[i]["richtung"] == "buy" else -1)) for i in z]
+            v_ = ap_verlauf(basis_netto, basis_brutto, ev_, band_pct, ab_min=jetzt_min)
+        return max([abs(x["netto_delta"]) - x["band_delta"] for x in v_["verlauf"]] + [0.0])
+
+    def dreh_kandidaten(z, bewegt, bel):
+        gruppen, out = {}, []
+        for i in z:
+            gruppen.setdefault(f"{je[i]['user_id']}|{je[i]['firma']}", []).append(i)
+        bis60 = float(jetzt_min) + 60
+        for g in sorted(gruppen):
+            ids = sorted(gruppen[g])
+            if (g in id_fest or len({z[i]["richtung"] for i in ids}) != 1 or not any(z[i]["start"] <= bis60 for i in ids)
+                    or any(i in bewegt or i in angefasst or not je[i].get("aenderbar") or not je[i].get("auto_plan") for i in ids)
+                    or ruht(ids) or not lebt(je[ids[0]]["user_id"])
+                    or (any(je[i].get("bestaetigt") for i in ids)
+                        and min(z[i]["start"] for i in ids) < float(jetzt_min) + AP_MISCH_BESTAETIGT_AB_MIN)):
+                continue
+            r_neu = "sell" if z[ids[0]]["richtung"] == "buy" else "buy"
+            if all(richtung_frei(i, r_neu, bel) for i in ids):
+                out.append((tuple(ids), r_neu))
+        return out
+
+    def suche_kandidaten(z, bewegt):
+        bel, out = belegung(z), []
+        ab_ = float(jetzt_min) + AP_VORZIEHEN_AB_MIN
+        bis60 = float(jetzt_min) + 60
+        for i in sorted(z, key=lambda k: z[k]["start"]):
+            p, s0 = je[i], z[i]["start"]
+            if (i in bewegt or i in angefasst or not p.get("aenderbar") or not p.get("auto_plan") or ruht([i]) or not lebt(p["user_id"])):
+                continue
+            fen = ap_fenster_von(zeiten, s0)
+            if not fen:
+                continue
+            if s0 > bis60 and i not in vorgezogen_heute and i not in hinaus_heute:
+                lo = max(ab_, float(fen[0]))
+                if p.get("route") in AP_CFD_ROUTEN:
+                    lo = max(lo, float(ap_cfd_ab(zeiten)))
+                t = platz(i, lo, min(s0, bis60 + 1), bel) if lo <= bis60 else None
+                if t is not None and t < s0:
+                    out.append((i, t, "vor"))
+            elif ab_ + 1 < s0 <= bis60 and s0 > float(jetzt_min) + AP_FAELLIG_MIN and i not in vorgezogen_heute:
+                t = platz(i, bis60 + 1, float(fen[1]), bel)
+                if t is not None and t > s0:
+                    out.append((i, t, "raus"))
+        return out + [(ids, r_neu, "dreh") for ids, r_neu in dreh_kandidaten(z, bewegt, bel)]
+
+    such_zuege = []
+    if sz_offen:
+        zustand_r = {i: zustand[i]["richtung"] for i in zustand}
+
+        def wert(lage, n):
+            return (round(lage["min_eur"], 6), -round(abs(lage["delta_eur_pkt"]), 6), -n)
+        zustand_start = lambda i: zustand[i]["start"]    # noqa: E731 — Drehen ändert keine Startzeit
+        start_l = sz_lage(zustand)
+        misch0, tag0 = misch(zustand), tag_ueber(zustand)
+        beam = [(zustand, (), start_l)]
+        beste = beam[0]
+        gesehen = set()
+
+        def bewegte(zuege):
+            return {k for x in zuege for k in (x[0] if x[2] == "dreh" else (x[0],))}
+        for _tiefe in range(AP_SUCHE_ZUEGE):
+            neu_b = []
+            for z0, zuege, l0 in beam:
+                for i, t, art in suche_kandidaten(z0, bewegte(zuege)):
+                    schluessel = frozenset([(x[0], x[1]) for x in zuege] + [(i, t)])
+                    if schluessel in gesehen:
+                        continue
+                    gesehen.add(schluessel)
+                    if art == "dreh":
+                        z1 = {k: (dict(v, richtung=t) if k in i else v) for k, v in z0.items()}
+                    else:
+                        z1 = {k: (dict(v, start=t) if k == i else v) for k, v in z0.items()}
+                    l1 = sz_lage(z1)
+                    if l1["min_eur"] < l0["min_eur"] + AP_SZENARIO_MIN_GEWINN_EUR:
+                        continue                             # jeder Zug ≥ AP_SZENARIO_MIN_GEWINN_EUR am Minimum, sonst kein Zug
+                    if art == "dreh" and (misch(z1) > max(misch0, misch(z0)) or tag_ueber(z1) > max(schwelle, tag0) + 1e-9):
+                        continue                             # Drehen: ID-Mischung und Tagesband nicht schlechter
+                    neu_b.append((z1, zuege + ((i, t, art, None if art == "dreh" else z0[i]["start"], l0, l1),), l1))
+            if not neu_b:
+                break
+            neu_b.sort(key=lambda x: wert(x[2], len(x[1])), reverse=True)
+            beam = neu_b[:AP_SUCHE_BREITE]
+            if wert(beam[0][2], len(beam[0][1])) > wert(beste[2], len(beste[1])):
+                beste = beam[0]
+        such_zuege = list(beste[1])
+        hm = lambda m: _ap_hhmm_txt((float(m) + float(dubai_min or 0)) % 1440)    # noqa: E731
+        for n, (i, t, art, alt, l0, l1) in enumerate(such_zuege, 1):
+            erst = i[0] if art == "dreh" else i
+            wer = je[erst].get("user") or str(je[erst]["user_id"])[:8]
+            name = je[erst].get("firma_name") or je[erst]["firma"]
+            werte = (f"schlimmster Fall ±{AP_SZENARIO_R} Pkt {l0['min_eur']:+.0f} → {l1['min_eur']:+.0f} €, "
+                     f"Delta {l0['delta_eur_pkt']:+.1f} → {l1['delta_eur_pkt']:+.1f} €/Pkt{f'; Zug {n}/{len(such_zuege)}' if len(such_zuege) > 1 else ''}")
+            if art == "dreh":
+                grund = (f"Ausgleich: gedreht, {name} bei {wer} {AP_RICHTUNG_TXT[zustand_r[erst]]} → {AP_RICHTUNG_TXT[t]} "
+                         f"({len(i)} Plan{'' if len(i) == 1 else 'e'}; {werte})")
+                for k in i:
+                    aenderungen.append({"plan_id": k, "user_id": je[k]["user_id"], "firma": je[k]["firma"], "art": "richtung",
+                                        "von_richtung": zustand_r[k], "nach_richtung": t, "von_start_min": zustand[k]["start"],
+                                        "nach_start_min": zustand[k]["start"], "grund": grund})
+                    angefasst.add(k)
+            else:
+                seite = "Long" if zustand_r[i] == "buy" else "Short"
+                grund = (f"Ausgleich: {seite} {'vorgezogen' if art == 'vor' else 'hinausgeschoben'}, {wer} {name} "
+                         f"{hm(alt)} → {hm(t)}{' Dubai' if dubai_min else ''} ({werte})")
+                aenderungen.append({"plan_id": i, "user_id": je[i]["user_id"], "firma": je[i]["firma"], "art": "start",
+                                    "von_richtung": zustand_r[i], "nach_richtung": zustand_r[i], "von_start_min": alt,
+                                    "nach_start_min": t, "grund": grund})
+                angefasst.add(i)
+            if ausloeser is None or n == 1:
+                ausloeser = grund
+        if such_zuege:
+            zustand = beste[0]
+            aktuell, vorgezogen = strafe(zustand) + (misch(zustand),), True
+            sz_vor = beste[2]
+    if not sz_offen and aktuell[1] > schwelle_v:
         n_vor = netto60(zustand)
         noetig = "buy" if n_vor < 0 else "sell"
         if sz_offen:      # Seite der Klippe: tut steigender NQ mehr weh, braucht das Buch Longs (und umgekehrt)
@@ -18013,16 +18220,8 @@ def _ap_bot_stand(param, jetzt=None):
     letzter = _ap_bot.get("letzter_lauf")
     naechster = None
     if param.get("aktiv"):
-        d = jetzt.astimezone(_ap_tz(AP_TZ_TAG))
-        m = d.hour * 60 + d.minute
-        if d.weekday() < 5 and m <= AP_BOT_ENDE_MIN:
-            t = (datetime.fromisoformat(letzter) + timedelta(minutes=param["takt_min"])) if letzter else jetzt + timedelta(minutes=1)
-            naechster = max(t, jetzt).isoformat()
-        else:
-            n = d + timedelta(days=1)
-            while n.weekday() >= 5:
-                n += timedelta(days=1)
-            naechster = datetime(n.year, n.month, n.day, tzinfo=d.tzinfo).astimezone(timezone.utc).isoformat()
+        t = (datetime.fromisoformat(letzter) + timedelta(minutes=param["takt_min"])) if letzter else jetzt + timedelta(minutes=1)
+        naechster = max(t, jetzt).isoformat()           # rund um die Uhr (08.10.2026), ohne Arbeit nur die kleine Vorab-Abfrage
     return {"aktiv": bool(param.get("aktiv")), "takt_min": param.get("takt_min"), "zielband_pct": param.get("zielband_pct"),
             "auto_start": bool(param.get("auto_start")), "letzter_lauf": letzter, "naechster_lauf": naechster,
             "letztes": _ap_bot.get("letztes"), "fehler": _ap_bot.get("fehler") or None, "thread": bool(_ap_info.get("started"))}
@@ -18328,7 +18527,7 @@ def ap_ausgleichen(trocken=False, quelle="bot", jetzt=None, seed=None):
         print(f"[auto-plan] ⚠️ Richtungsschutz: {rs['fehler']}", flush=True)
     seed = int(seed) if seed not in (None, "") else random.SystemRandom().randrange(1, 2 ** 31)
     # DÄMPFUNG (08.10.2026): letzte Umplanung je Plan heute (auto_plan_umplanung, bot UND hand) als Minute des Tages → Ruhezeit
-    zuletzt, vorgez_h, verteilt_h, alt_start = {}, set(), set(), {}
+    zuletzt, vorgez_h, verteilt_h, alt_start, hinaus_h = {}, set(), set(), {}, set()
     try:
         for r in (_ap_umplanungen_heute(stand)[0] or []):
             um = r.get("um")
@@ -18343,6 +18542,8 @@ def ap_ausgleichen(trocken=False, quelle="bot", jetzt=None, seed=None):
                                                     _ap_iso_min(r.get("nach_start"), stand["mitternacht"]))
             elif g_.startswith("Verteilung:"):
                 verteilt_h.add(str(r["plan_id"]))
+            elif g_.startswith("Ausgleich:") and "hinausgeschoben" in g_:
+                hinaus_h.add(str(r["plan_id"]))       # Pingpong-Bremse der Suche: heute nicht wieder vorziehen
             m = (datetime.fromisoformat(str(um).replace("Z", "+00:00")) - stand["mitternacht"]).total_seconds() / 60.0
             pid = str(r["plan_id"])
             zuletzt[pid] = max(zuletzt.get(pid, -1e9), m)
@@ -18352,7 +18553,7 @@ def ap_ausgleichen(trocken=False, quelle="bot", jetzt=None, seed=None):
                       stand["zeiten"], param["zielband_pct"], random.Random(seed), gestartet=stand["starts_heute"],
                       id_fest=stand["id_fest"], einsatz=ap_einsatz_kontext(stand, param), zuletzt=zuletzt,
                       dubai_min=_ap_dubai_versatz(stand["mitternacht"]), vorgezogen_heute=vorgez_h, verteilt_heute=verteilt_h,
-                      pc_lebt=_ap_pc_lebt(), verpufft=_ap_verpufft(stand, alt_start),
+                      pc_lebt=_ap_pc_lebt(), verpufft=_ap_verpufft(stand, alt_start), hinaus_heute=hinaus_h,
                       laufend=[{"user_id": z["user_id"], "firma": z.get("firma_key"), "richtung": z.get("richtung"), "start": None}
                                for z in stand["offen"]])   # Gegenhedge über IDs (08.10.2026)
     je = {z["plan_id"]: z for z in stand["geplant"]}
@@ -18381,11 +18582,23 @@ def ap_ausgleichen(trocken=False, quelle="bot", jetzt=None, seed=None):
     return out
 
 
+def _ap_bot_hat_arbeit(jetzt=None):
+    """Gibt es etwas auszugleichen? Ein laufender Trade oder ein geplanter mit Start ab jetzt − AP_BOT_ARBEIT_VORLAUF_MIN (fällige
+    eingeschlossen). Eine Abfrage, limit 1. Nicht lesbar → True (lieber ein Lauf zu viel als einer zu wenig)."""
+    jetzt = jetzt or datetime.now(timezone.utc)
+    ab = (jetzt - timedelta(minutes=AP_BOT_ARBEIT_VORLAUF_MIN)).isoformat().replace("+00:00", "Z")
+    try:
+        return bool(sb_select("trade_plans", {"select": "id", "or": f"(status.eq.open,and(status.eq.planned,start_um.gte.{ab}))",
+                                              "limit": "1"}))
+    except Exception as e:
+        print(f"[auto-plan] ⚠️ Bot-Vorab-Abfrage: {type(e).__name__} — Lauf trotzdem", flush=True)
+        return True
+
+
 def _ap_bot_tick(d):
-    """Ein Takt-Check des Ausgleichs-Bots (aus ap_loop, jede Minute). d = jetzt in deutscher Zeit. Schalter alle 2 min frisch."""
+    """Ein Takt-Check des Ausgleichs-Bots (aus ap_loop, jede Minute). d = jetzt in deutscher Zeit. Schalter alle 2 min frisch.
+    Rund um die Uhr (08.10.2026); ein fälliger Takt ohne geplante/laufende Trades zählt als Lauf, lädt aber keinen Stand."""
     m = d.hour * 60 + d.minute
-    if d.weekday() >= 5 or m > AP_BOT_ENDE_MIN:
-        return
     if _ap_bot.get("param") is None or time.time() - _ap_bot.get("gelesen", 0) >= 120:
         reg = (sb_select("auto_plan_regeln", {"select": "regeln", "id": "eq.1"}) or [{}])[0]
         _ap_bot["param"], _ap_bot["gelesen"] = ap_ausgleich_param(reg.get("regeln")), time.time()
@@ -18401,6 +18614,10 @@ def _ap_bot_tick(d):
     if extra:
         _ap_bot["extra_tag"] = tag
     _ap_bot["letzter_lauf"] = datetime.now(timezone.utc).isoformat()
+    if not _ap_bot_hat_arbeit():
+        _ap_bot["letztes"] = {"tag": tag, "umplanungen": 0, "msg": "nichts geplant oder laufend — kein Lauf nötig", "extra": bool(extra)}
+        _ap_bot["fehler"] = ""
+        return
     try:
         erg = ap_ausgleichen(quelle="bot")
         _ap_bot["letztes"] = {k: erg.get(k) for k in ("tag", "netto_vorher", "netto_nachher", "ausloeser", "msg")}
