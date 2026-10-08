@@ -22159,7 +22159,14 @@
    * Lese-EA), aber OHNE Order und ohne master-order. Dann warten, bis der Snapshot frisch ist (max. ~90 s), Balance ans Konto.
    * -> {ok, balance?, equity?, ccy?, balance_at?, code?, msg} (nie werfen). code 'keine_instanz'/'copier_offline' = anderer PC. */
   const _mt5BalLesenLaeuft = new Set()
-  async function mt5KontoBalanceJetzt(accountId, loginHint){
+  // Öffnet eine Lesung gerade ein Terminal? Starts warten so lange (Prüfer Slave 2, 08.10.2026: das aufpoppende MT5-Fenster kann einen
+  // Puls-Klick fangen — bisher nur beim Hand-↻, mit ebnTick automatisch nach jedem Echo-Ende)
+  const mt5BalOeffnetGerade = () => Date.now() < (window._mt5BalOeffnetBis || 0)
+  async function mt5BalOeffnenAbwarten(maxMs){
+    const t0 = Date.now()
+    while(mt5BalOeffnetGerade() && Date.now() - t0 < (maxMs || 60000)) await new Promise(r => setTimeout(r, 1000 + Math.random() * 500))
+  }
+  async function mt5KontoBalanceJetzt(accountId, loginHint, opts){
     if(!MT5_LOCAL || typeof window.mtcApi !== 'function') return { ok: false, code: 'nicht_pc', msg: 'Nur am PC mit MT5 möglich' }
     let acc = null; try{ acc = (accounts || []).find(a => String(a.id) === String(accountId)) }catch(_){}
     const login = (acc && mt5KontoLogin(acc)) || String(loginHint || '').trim()
@@ -22182,6 +22189,8 @@
       }
       let f = mt5InstBalanceFrisch(inst)
       if(f && f.login === login) return await fertig(f)   // Terminal + EA laufen schon — nichts öffnen
+      // nur Snapshot (ebnTick, 08.10.2026): kein Terminal öffnen — Start steht an oder die Öffnungs-Versuche sind aufgebraucht
+      if(opts && opts.nurSnapshot) return { ok: false, code: 'nicht_offen', msg: 'Terminal zu bzw. Lese-EA ohne frischen Stand — Öffnen gerade ausgesetzt' }
       if(!inst.has_terminal) return { ok: false, msg: `Instanz ${inst.name || file} hat keinen Terminal-Pfad (master_terminal_path)` }
       const t0 = Date.now()
       while(mt5PulsBelegt()){
@@ -22191,12 +22200,14 @@
       const mc = (acc && acc.creds) || {}
       const sendCreds = !!(mc.login && mc.password && String(mc.login) === login)
       let ts = null
+      const oeffnetBis = Date.now() + 60000
+      window._mt5BalOeffnetBis = oeffnetBis   // Fenster kommt nach Sekunden bis zig Sekunden nach vorn — Starts warten bis zu 60 s
       try{
         ts = await window.mtcApi(`start-terminal?file=${encodeURIComponent(file)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(sendCreds ? { login: String(mc.login), password: String(mc.password), server: String(mc.server || '') } : {}) })
       }catch(e){ ts = { ok: false, msg: String((e && e.message) || e) } }
-      if(!ts || !ts.ok) return { ok: false, msg: 'Terminal-Start fehlgeschlagen: ' + String((ts && (ts.msg || ts.error)) || 'Fehler') }
-      if(/FALSCHEN Konto/i.test(String(ts.msg || ''))) return { ok: false, msg: String(ts.msg) }
+      if(!ts || !ts.ok){ if(window._mt5BalOeffnetBis === oeffnetBis) window._mt5BalOeffnetBis = 0; return { ok: false, msg: 'Terminal-Start fehlgeschlagen: ' + String((ts && (ts.msg || ts.error)) || 'Fehler') } }
+      if(/FALSCHEN Konto/i.test(String(ts.msg || ''))){ if(window._mt5BalOeffnetBis === oeffnetBis) window._mt5BalOeffnetBis = 0; return { ok: false, msg: String(ts.msg) } }
       // Snapshot frisch? Das Panel liefert lesen/alive nur bei ≤ 15 s alter Datei — bis 160 s nach dem Start (08.10.2026, vorher 90 s:
       // fehlt das Lese-EA, heilt das Panel bei Login-Zwang erst nach wait_s 45 + 90 s Boot-Puffer und startet dann neu — der Tab hatte
       // da schon „Nach 90 s kein frischer Stand" gemeldet, 4× in 14 Tagen; ein Fall kam nach 125 s doch noch durch)
@@ -22214,6 +22225,114 @@
       return { ok: false, code: 'kein_snapshot', msg: fremd ? `Terminal steht im Konto ${fremd}, nicht ${login}` : 'Nach 160 s kein frischer Stand vom Lese-EA — Terminal/EA am PC prüfen' }
     }finally{ _mt5BalLesenLaeuft.delete(id) }
   }
+  /* BALANCE NACH JEDEM ECHO-TRADE (08.10.2026, Finn: „Es soll nach jedem einzelnen Echo-Trade automatisch die Balance neu gelesen werden.
+   * Die Live-Balance muss immer stimmen — sonst macht es gar keinen Sinn, dass die Trades laufen. Nach jedem Trade!!!").
+   * Befund 07./08.10.: die Zahl stimmte nach jedem automatisch erkannten Ende (mt5PlanPollTick schreibt final.master_balance ans Konto),
+   * „live" war sie oft trotzdem nicht: der Schreibvorgang lag ~200 ms VOR ended_at (6b54e626: Balance 02:34:53.686, Ende .882) und
+   * ap_balance_live/planBalanceLive verlangen Lesung ≥ Ende — live wurde es erst mit dem nächsten Schreiben (gemessen 905–979 s), ohne
+   * offenes Terminal nie. Hand-Enden (ab897a64) schrieben gar keine End-Balance.
+   * Jetzt am PC-Tab, alle 20–30 s: je Konto der jüngste beendete Echo-Trade (mt5/mt5v2, review/completed, ≤ 6 h), dessen Konto-Balance
+   * älter ist als das Ende → mt5KontoBalanceJetzt (frischer Snapshot sofort, sonst Terminal öffnen + lesen ≤ 160 s), nur der PC mit der
+   * Instanz. Scheitert es: neu nach 1–1,5 / 3–4 / 5–7 min (gestreut). Ergebnis an den Plan (mt5_baseline.bal_nach: ok, balance, sek nach
+   * Ende, versuche) — nach 15 min ohne Erfolg mit Grund + „was tun" → „Braucht dich". Nur Lesen, nie eine Order. */
+  const EBN_FENSTER_MS = 6 * 3600000, EBN_FRIST_MS = 15 * 60000
+  const _ebn = new Map()   // planId → {versuche, naechster, grund}
+  let _ebnLaeuft = false
+  function ebnTun(code, msg, login, ort){
+    if(ort && ort.da === false) return mt5LoginOrtText(login, ort)
+    if(code === 'copier_offline') return 'Copier-Backend am PC nicht erreichbar — start-alles.bat ausführen, dann liest Prophos von selbst nach.'
+    if(code === 'kein_snapshot') return 'Terminal läuft, aber der Lese-EA liefert nichts — im Terminal den Chart mit ProphosHedgeReader prüfen (AutoTrading an), dann ↻ Balance lesen.'
+    if(/FALSCHEN Konto|steht im Konto/i.test(String(msg || ''))) return `Terminal steht im falschen Konto — im Terminal auf Login ${login} wechseln, dann ↻ Balance lesen.`
+    if(code === 'keine_instanz') return `Kein PC dieser ID hat das Terminal für Login ${login} geöffnet gemeldet — Prophos-Tab am PC mit dem Terminal offen lassen.`
+    return 'Am PC dieser ID ↻ Balance lesen; hilft das nicht, Terminal und Lese-EA prüfen.'
+  }
+  // Jüngster beendeter Echo-Trade je Konto (eigene Pläne) → Map accId → {p, ende}
+  function ebnLetzte(jetzt){
+    const je = new Map()
+    let plaene = []; try{ plaene = tradePlans || [] }catch(_){ return je }
+    for(const p of plaene){
+      if(!p || !routeIstEcho(p.route) || (p.status !== 'review' && p.status !== 'completed')) continue
+      const ende = Date.parse(p.endedAt || p.completedAt || '') || 0
+      const k = String(p.masterAccountId || '')
+      if(!k || !ende || jetzt - ende > EBN_FENSTER_MS) continue
+      const alt = je.get(k); if(!alt || ende > alt.ende) je.set(k, { p, ende })
+    }
+    return je
+  }
+  // Steht auf diesem PC gleich ein Start an (oder läuft einer)? Dann kein Terminal öffnen, nur frischen Snapshot lesen (Prüfer Slave 2)
+  function ebnStartNah(){
+    try{ if(_tpOrbitLaeuft || _osActive || _suLaeuft || _pfV2Laeuft) return true }catch(_){ return true }
+    const jetzt = Date.now()
+    try{
+      return (tradePlans || []).some(p => p && p.status === 'planned' && (routeIstEcho(p.route) || routeIstOrbit(p.route) || p.route === 'tsv2')
+        && !(p.autoPlan === true && !p.autoBestaetigtAt)
+        && ((p.startUmGestartetAt && !p.startedAt) || (p.startUm && (() => { const d = Date.parse(p.startUm) - jetzt; return d < 5 * 60000 && d > -15 * 60000 })())))
+    }catch(_){ return true }
+  }
+  const EBN_OEFFNEN_MAX = 2   // danach nur noch Snapshot lesen bis zur Frist (Prüfer Slave 2: Chris' PC meldete 7/10 Lese-EAs eingefroren)
+  async function ebnMerken(p, bn){
+    try{ await baselinePatch(p.id, { bal_nach: Object.assign({ at: new Date().toISOString(), pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : null }, bn) }, null) }
+    catch(e){ console.warn('[bal-nach]', (e && e.message) || e) }
+  }
+  async function ebnTick(){
+    if(!MT5_LOCAL || _ebnLaeuft || typeof window.mtcApi !== 'function') return
+    const jetzt = Date.now(), je = ebnLetzte(jetzt)
+    if(!je.size) return
+    _ebnLaeuft = true
+    try{
+      let insts = null
+      for(const [accId, { p, ende }] of je){
+        const b = p.mt5Baseline || {}
+        if(b.bal_nach && b.bal_nach.ok && (Date.parse(b.bal_nach.live_at || '') || 0) >= ende) continue   // schon erledigt
+        const acc = (accounts || []).find(a => String(a.id) === accId); if(!acc) continue
+        const login = mt5KontoLogin(acc); if(!login) continue
+        const balAt = Date.parse(acc.tvBalanceAt || '') || 0
+        if(balAt >= ende){   // schon live (Flotte, Hand-Lesung, anderer Tab) — einmal festhalten, wie lange es dauerte
+          if(!(b.bal_nach && b.bal_nach.ok)) await ebnMerken(p, { ok: true, balance: acc.tvBalance ?? null, live_at: acc.tvBalanceAt, sek: Math.round((balAt - ende) / 1000), quelle: 'schon_live', versuche: (_ebn.get(String(p.id)) || {}).versuche || 0 })
+          _ebn.delete(String(p.id)); continue
+        }
+        const st = _ebn.get(String(p.id)) || { versuche: 0, oeffnungen: 0, naechster: 0, grund: '' }
+        if(jetzt < st.naechster) continue
+        if(!insts){ try{ const dd = await window.mtcApi('instances'); insts = (!dd || dd.copier_offline || dd._httpFail) ? null : (dd.instances || []) }catch(_){ insts = null } }
+        const hier = !!insts && insts.some(x => x && String(((x.status || {}).master_login) || x.master_expected || '') === login)
+        let r = null
+        if(hier){
+          st.versuche++
+          const nah = ebnStartNah(), darfOeffnen = !nah && st.oeffnungen < EBN_OEFFNEN_MAX
+          if(darfOeffnen) st.oeffnungen++
+          r = await mt5KontoBalanceJetzt(accId, login, { nurSnapshot: !darfOeffnen })   // frischer Snapshot → sofort; sonst (wenn erlaubt) Terminal öffnen + lesen
+          if(r && r.ok){
+            const liveAt = r.balance_at || new Date().toISOString()
+            await ebnMerken(p, { ok: true, balance: r.balance, live_at: liveAt, sek: Math.round(((Date.parse(liveAt) || Date.now()) - ende) / 1000), quelle: 'nachlesung', versuche: st.versuche })
+            _ebn.delete(String(p.id)); try{ renderAccounts() }catch(_){}; continue
+          }
+          const stufen = [[60000, 30000], [180000, 60000], [300000, 120000]], s = nah ? stufen[0] : stufen[Math.min(st.versuche, stufen.length) - 1]
+          st.naechster = Date.now() + s[0] + Math.floor(Math.random() * s[1])   // Jitter-Regel: nie fester Abstand
+          if(nah) st.versuche--   // „Start steht an" ist kein Fehlversuch
+          if(r && r.code !== 'nicht_offen') st.letzter = { code: r.code || '', msg: String(r.msg || '') }   // letzter echter Grund fürs Melden
+          st.grund = String((r && r.msg) || 'keine Antwort')
+        } else {
+          st.naechster = Date.now() + 60000 + Math.floor(Math.random() * 30000)   // Instanz liegt evtl. auf einem anderen PC der ID
+          r = { ok: false, code: insts ? 'keine_instanz' : 'copier_offline', msg: insts ? `Kein Terminal für Login ${login} auf diesem PC` : 'Copier-Backend am PC nicht erreichbar' }
+        }
+        _ebn.set(String(p.id), st)
+        if(r && r.code === 'nicht_offen'){
+          if(ebnStartNah() || !st.letzter) continue   // vorübergehend (Start steht an) → nicht melden
+          r = Object.assign({}, r, st.letzter)        // Öffnungen aufgebraucht → den letzten echten Grund melden
+        }
+        // Frist vorbei und noch nicht gemeldet → Grund + „was tun" an den Plan (→ Braucht dich); bei neuem Grund aktualisieren
+        if(Date.now() - ende > EBN_FRIST_MS && !(b.bal_nach && b.bal_nach.ok === false && b.bal_nach.code === (r.code || '') && b.bal_nach.msg === String(r.msg || '').slice(0, 200))){
+          const ort = (r.code === 'keine_instanz') ? await mt5LoginOrt(login, currentUserId) : null
+          if(r.code === 'keine_instanz' && !(ort && ort.da === false)) continue   // ein anderer PC der ID hat die Instanz — der meldet selbst
+          await ebnMerken(p, { ok: false, code: r.code || '', msg: String(r.msg || '').slice(0, 200), tun: ebnTun(r.code, r.msg, login, ort), versuche: st.versuche, ende: new Date(ende).toISOString() })
+        }
+      }
+    }catch(e){ console.warn('[bal-nach]', e) }
+    finally{ _ebnLaeuft = false }
+  }
+  // Takt 20–30 s gestreut (Jitter-Regel); der erste Lauf 20 s nach dem Laden, damit Pläne und Konten da sind
+  ;(function ebnPlanen(){ setTimeout(() => { ebnTick().finally(ebnPlanen) }, 20000 + Math.floor(Math.random() * 10000)) })()
+  window._ebn = { tick: ebnTick, stand: () => [..._ebn.entries()], letzte: () => [...ebnLetzte(Date.now()).entries()].map(([k, v]) => ({ konto: k, plan: v.p.id, ende: v.ende })) }   // Diagnose/Stub
   /* BALANCE JETZT LESEN (27.09.2026, F19, Finn am Screenshot der Accounts-Liste: „neben den Balances bei den Futures ein Refresh-
    * Symbol … Puls loggt sich in den Account ein und liest ganz kurz die Balance aus. So könnt ihr auch testen, ob es funktioniert.")
    * Nur am PC (MT5_LOCAL): dieselbe Lesung wie beim Platzieren (tv-lesen mit Konto + Konto-Kontext), Balance → tv_balance mit Quelle
@@ -39439,6 +39558,7 @@
     zMark('richtung')
 
     // ── 4. Terminal starten / nach vorn (Login-Zwang wie bei Echo, wenn die Zugangsdaten zum Login passen) ──
+    if(!hardFail && mt5BalOeffnetGerade()){ _pfSet('v2term', 'warn', '⏳ Eine Balance-Lesung öffnet gerade ein Terminal — kurz warten…'); await mt5BalOeffnenAbwarten(60000) }
     let file = null
     if(hardFail){
       _pfSet('v2term', 'warn', 'Übersprungen — Zeilen oben rot.')
@@ -41510,7 +41630,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1324'
+  const OS_TAB_BUILD = '2026-09-22.1325'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -41782,6 +41902,7 @@
   const tsxCdpFolgtText = r => `Topstep-Puls wird gerade umgebaut${r && r.etappe ? ' (Etappe ' + String(r.etappe).slice(0, 12) + ')' : ''} — dieser Schritt kommt noch. Plan bleibt stehen, NICHT erneut starten; bis dahin von Hand in TopstepX.`
   window._tpOrbitStarten = (id, fern) => tpOrbitStarten(id, fern)   // Test-Haken (Stub)
   async function tpOrbitStartenKern(planId, fern, opts){
+    await mt5BalOeffnenAbwarten(60000)   // öffnet eine Balance-Lesung gerade ein MT5-Terminal, nicht mitten hinein klicken (08.10.2026)
     let plan = tradePlans.find(x => String(x.id) === String(planId))
     const toast = (t, art) => { if(typeof atToast === 'function') atToast(t, art) }
     if(!plan || plan.status !== 'planned' || _tpOrbitLaeuft){
@@ -47529,6 +47650,19 @@
             text: 'ohne External ID — der Bot kann das Unterkonto nicht wählen', tun: 'External ID (Tradovate-/TopstepX-Unterkonto) unter Accounts eintragen — der Bot plant das Konto dann von selbst nach (alle 10 min).' })
           continue
         }
+        // BALANCE NACH ECHO-TRADE FEHLT (08.10.2026, s. ebnTick): Nachlesung nach dem Trade-Ende scheiterte 15 min lang → Grund + „was tun"
+        try{
+          const l = ebnLetzte(jetzt).get(String(a.id)), bn = l && l.p.mt5Baseline && l.p.mt5Baseline.bal_nach
+          if(bn && bn.ok === false && !((Date.parse(a.tvBalanceAt || '') || 0) >= l.ende)){
+            konten.add(tplKk(currentUserId, a.name))
+            const lauf = (typeof _accBalLauf !== 'undefined' && _accBalLauf.get(String(a.id))) || null
+            const uhr = new Date(l.ende).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
+            add(currentUserId, ich, { art: 'balance', firma: a.firm, konto: a.name, typ: a.type, balance: '', ende4: String(a.externalId || '').replace(/\D/g, '').slice(-4),
+              text: `Balance nach dem Echo-Trade (Ende ${uhr}) nicht gelesen — ${String(bn.msg || bn.code || 'ohne Grund').slice(0, 140)}${bn.versuche ? ` · ${bn.versuche} Versuche` : ''}`,
+              bal: String(a.id), lauf, tun: String(bn.tun || 'Am PC ↻ Balance lesen.') + ' Prophos liest weiter von selbst nach.' })
+            continue
+          }
+        }catch(_){}
         const b = tplKontoBalance(a), at = b ? b.at : 0
         if(at && jetzt - at < 86400000) continue
         const lauf = (typeof _accBalLauf !== 'undefined' && _accBalLauf.get(String(a.id))) || null
