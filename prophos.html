@@ -1995,7 +1995,7 @@
   :is(#tpl-view,#adm-pane-planer) .tpl-hb-satz{font-size:12.5px;color:var(--sub);margin:0 0 6px;line-height:1.45} :is(#tpl-view,#adm-pane-planer) .tpl-hb-satz b{font-weight:700;font-variant-numeric:tabular-nums}
   :is(#tpl-view,#adm-pane-planer) .tpl-hb-mehr summary{cursor:pointer;padding:6px 4px;font-size:12px;color:var(--sub);list-style:none} :is(#tpl-view,#adm-pane-planer) .tpl-hb-mehr summary::before{content:'▸ ';color:var(--sub-2)} :is(#tpl-view,#adm-pane-planer) .tpl-hb-mehr[open] summary::before{content:'▾ '}
   :is(#tpl-view,#adm-pane-planer) .tpl-bot-klein{margin-top:7px;padding-top:6px;border-top:1px dashed var(--border-soft,var(--border));font-size:11px;color:var(--sub);line-height:1.35}
-  :is(#tpl-view,#adm-pane-planer) .tpl-bot-klein .apd-schalter{margin-top:4px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bot-klein .apd-schalter{margin-top:0}
   /* Geplant-Liste = Tabelle des Reiters Trades → Geplant (.pz-*, GEPLANT-WIE-TRADES-REITER 07.10.2026), hier mit ID-Spalte vorn */
   :is(#tpl-view,#adm-pane-planer) .tpl-lk{padding-bottom:6px} :is(#tpl-view,#adm-pane-planer) .tpl-lk .tpl-h{margin:4px 0 0}
   #dashboard-view .pz-tab.pz-mit-id{grid-template-columns:156px 72px minmax(150px,1.2fr) 84px minmax(220px,1fr) 92px 64px 76px 76px 160px}
@@ -41316,7 +41316,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1315'
+  const OS_TAB_BUILD = '2026-09-22.1316'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -46215,29 +46215,22 @@
    * uhr: Zeitformat der Seite (Trade-Planer = Dubai). Schalter-Klicks verdrahtet die Seite selbst (apdEinstellung). */
   // Bausteine der Bot-Kachel (08.10.2026, Finn: die KPI-Kachel mit dem Bot wird zur Kachel „Heute" — die Bot-Infos bleiben, klein darunter):
   // Zeiten, Schalter (data-apd-schalter, verdrahtet von der Seite) und Meldung einmal, genutzt von der Kachel und der kleinen Zeile
-  const apdBotZeiten = (v, uhr) => { const b = v.bot || {}, an = !!b.aktiv
-    return [b.letzter_lauf ? `↺ ${uhr(b.letzter_lauf)}` : '', b.naechster_lauf && an ? `→ ${uhr(b.naechster_lauf)}` : '', b.takt_min ? `${b.takt_min} min` : ''].filter(Boolean).join(' · ') }
+  /* EIN SCHALTER (08.10.2026, Slave-Terminal 7 — Finn zum Screenshot „Bot an · ↺ 08:02 · → 08:05 · 3 min" + Schalter Bot/Auto-Start: „das hier
+   * weg, der Text, nur ein Schalter. mit Bot an / aus"): nur noch der Bot-Schalter (regeln.ausgleich.aktiv), beschriftet nach Zustand. Statuszeile
+   * (letzter/nächster Lauf, Takt) und Auto-Start sind aus der Oberfläche raus; Auto-Start bleibt im Backend, wie es ist. */
   function apdBotSchalterHtml(v, admin){
     const an = !!(v.bot || {}).aktiv, sperre = admin ? '' : ' disabled'
     return `<div class="apd-schalter">
-          <label title="${admin ? 'Ausgleichs-Bot an/aus' : 'nur Admin'}"><span class="switch"><input type="checkbox" data-apd-schalter="aktiv"${an ? ' checked' : ''}${sperre || (_apd.busy.has('aktiv') ? ' disabled' : '')}><span class="switch-slider"></span></span>Bot</label>
-          <label title="${admin ? 'Auto-Start: Pläne starten ohne Bestätigung' : 'nur Admin'}${v.autoStart == null ? ' · Stand unbekannt' : ''}"><span class="switch"><input type="checkbox" data-apd-schalter="auto_start"${v.autoStart ? ' checked' : ''}${sperre || (_apd.busy.has('auto_start') ? ' disabled' : '')}><span class="switch-slider"></span></span>Auto-Start</label>
+          <label title="${admin ? 'Ausgleichs-Bot an/aus' : 'nur Admin'}"><span class="switch"><input type="checkbox" data-apd-schalter="aktiv"${an ? ' checked' : ''}${sperre || (_apd.busy.has('aktiv') ? ' disabled' : '')}><span class="switch-slider"></span></span>${an ? 'Bot an' : 'Bot aus'}</label>
         </div>`
   }
   const apdBotMeldungHtml = () => _apd.meldung && _apd.meldung.ort === 'bot' ? `<span class="kpi-delta apd-rot" style="white-space:normal" title="${escapeHtml(_apd.meldung.text)}">⚠ ${escapeHtml(_apd.meldung.text)}</span>` : ''
-  function apdBotKachelHtml(v, admin, uhr){
-    uhr = uhr || apdUhr
-    const an = !!(v.bot || {}).aktiv, zeiten = apdBotZeiten(v, uhr)
-    return `<div class="kpi"><div class="kpi-label">Bot</div><div class="kpi-value ${an ? 'apd-gut' : 'apd-grau'}">${an ? 'an' : 'aus'}</div>
-        <span class="kpi-delta" title="letzter Lauf · nächster Lauf · Takt">${zeiten || '—'}</span>
-        ${apdBotSchalterHtml(v, admin)}
-        ${apdBotMeldungHtml()}</div>`
+  function apdBotKachelHtml(v, admin){   // Rückfall, wenn es die Kachel „Heute" nicht gibt: nur der Schalter
+    return `<div class="kpi">${apdBotSchalterHtml(v, admin)}${apdBotMeldungHtml()}</div>`
   }
-  // Kleine Bot-Zeile unter der Kachel „Heute" (Trade-Planer + Admin-Reiter): „Bot an · ↺ 07:10 · → 07:20 · 10 min" + dieselben Schalter
-  function apdBotKleinHtml(v, admin, uhr){
-    uhr = uhr || apdUhr
-    const an = !!(v.bot || {}).aktiv, zeiten = apdBotZeiten(v, uhr)
-    return `<div class="tpl-bot-klein"><span title="Ausgleichs-Bot · letzter Lauf · nächster Lauf · Takt">Bot <b class="${an ? 'apd-gut' : 'apd-grau'}">${an ? 'an' : 'aus'}</b>${zeiten ? ' · ' + zeiten : ''}</span>${apdBotSchalterHtml(v, admin)}${apdBotMeldungHtml()}</div>`
+  // Bot unter der Kachel „Heute" (Trade-Planer + Admin-Reiter): nur der Schalter „Bot an/aus" (+ ⚠ bei 403)
+  function apdBotKleinHtml(v, admin){
+    return `<div class="tpl-bot-klein">${apdBotSchalterHtml(v, admin)}${apdBotMeldungHtml()}</div>`
   }
   /* Waage: links Long, rechts Short, je Firma gestapelt im Firmenton; offen voll, geplant hell */
   function apdWaageHtml(v){
