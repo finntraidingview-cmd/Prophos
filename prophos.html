@@ -37761,7 +37761,11 @@
     const plL = a.plL != null && isFinite(Number(a.plL)) ? Number(a.plL) : null
     // SKALA LIQ → ZIEL (Finn 08.10.2026, „100k-Account … nach links bis 90k runter, das ist maximal Drawdown, nach rechts bis 108.000"):
     // linker Rand = Liquidations-Level/Boden, Start als feiner Strich; Boden über dem Start ergibt keine Skala → Start → Ziel
-    const boden = a.boden != null && isFinite(Number(a.boden)) && Number(a.boden) > 0 && Number(a.boden) <= groesse ? Number(a.boden) : null
+    // a.frei (Radar/Heute beendet, 08.10.2026, Finn: „wie verbuggt … richtig hässlich" — Punkt am linken Rand, leerer Balken, „−80 % · Rest"):
+    // der Blow der Zeile ist dort Start-Balance des Trades − Max Drawdown bzw. die Liq-Regel und liegt nach Gewinnen ÜBER der Kontogröße — er
+    // gilt trotzdem als linker Rand (Skala Blow → Ziel, Start nur als Strich, wenn er im Bereich liegt). Trade-Planer (ohne frei) wie bisher.
+    const bodenRoh = a.boden != null && isFinite(Number(a.boden)) && Number(a.boden) > 0 ? Number(a.boden) : null
+    const boden = bodenRoh != null && (bodenRoh <= groesse || (a.frei && bodenRoh < ziel)) ? bodenRoh : null
     const lo = boden != null ? boden : groesse
     const sp = ziel - lo, pct = v => Math.max(0, Math.min(100, (v - lo) / sp * 100))
     const pIst = pct(istV), pTp = tpUsd ? pct(Math.min(ziel, istV + tpUsd)) : pIst, pStart = pct(groesse)
@@ -37771,10 +37775,11 @@
     const misch = (x, y, u) => { const h = s => [1, 3, 5].map(i => parseInt(s.slice(i, i + 2), 16)), A = h(x), B = h(y), w = Math.max(0, Math.min(1, u))
       return 'rgb(' + A.map((v, i) => Math.round(v + (B[i] - v) * w)).join(',') + ')' }
     const farbe = istV >= groesse ? misch('#3F7D58', '#12B76A', (istV - groesse) / (ziel - groesse))
-      : misch('#E8837B', '#8F1414', boden != null ? (groesse - istV) / (groesse - boden) : verlB / 12)
+      : misch('#E8837B', '#8F1414', boden != null && boden < groesse ? (groesse - istV) / (groesse - boden) : verlB / 12)
     const prozent = Math.round((istV - groesse) / (ziel - groesse) * 100)
+    const startDa = boden == null || boden <= groesse   // Start-Strich nur, wenn der Start im Bereich Blow → Ziel liegt
     const balV = a.balVal != null && isFinite(Number(a.balVal)) ? Number(a.balVal) : istV
-    const titel = `${boden != null ? 'Liq ' + de(boden) + ' · ' : ''}Start ${de(groesse)} · jetzt ${de(istV)} (${prozent} %)${plL != null ? ' = Balance ' + de(balV) + ' ' + (plL >= 0 ? '+' : '−') + ' P&L ' + de(Math.abs(plL)) : ''}${tpUsd ? ' · nach TP ' + de(istV + tpUsd) : ''}${slUsd ? ' · nach SL ' + de(istV - slUsd) : ''} · Ziel ${de(ziel)}`
+    const titel = `${boden != null ? 'Liq ' + de(boden) + ' · ' : ''}Start ${de(groesse)} · jetzt ${de(istV)}${prozent >= 0 ? ' (' + prozent + ' %)' : ''}${plL != null ? ' = Balance ' + de(balV) + ' ' + (plL >= 0 ? '+' : '−') + ' P&L ' + de(Math.abs(plL)) : ''}${tpUsd ? ' · nach TP ' + de(istV + tpUsd) : ''}${slUsd ? ' · nach SL ' + de(istV - slUsd) : ''} · Ziel ${de(ziel)}`
     const idFarb = a.uid ? idFarbe(String(a.uid)) : 'var(--ink)'
     // VORHER → NACHHER (08.10.2026, Finn zu „Heute beendet": „wo steht der Account gerade, wo ist das Ziel, wo ist der Blow, was hat dieser
     // Trade ausgemacht … kleine leuchtende Farben"): mit a.vor füllt der Sockel bis zum kleineren Stand (gedeckt), der Beitrag des Trades
@@ -37785,7 +37790,8 @@
       const html = `<i class="pz-bahn pz-bahn2 mit-vor${boden != null ? ' mit-liq' : ''}" title="${escapeHtml(titel + ' · vorher ' + de(vorV) + ' · Trade ' + (plus ? '+' : '−') + de(Math.abs(istV - vorV)))}">`
         + (lo_ > 0 ? `<i class="pz-bahn-fuell is-sockel" style="width:${lo_.toFixed(1)}%;background:${farbe}"></i>` : '')
         + (hi_ - lo_ > 0.2 ? `<i class="pz-bahn-fuell ${plus ? 'is-plus' : 'is-minus'}" style="left:${lo_.toFixed(1)}%;width:${(hi_ - lo_).toFixed(1)}%"></i>` : '')
-        + (boden != null ? `<i class="pz-bahn-start" style="left:${pStart.toFixed(1)}%"></i>` : '')
+        + (hi_ - lo_ <= 0.2 && verlB > 0 ? `<i class="pz-bahn-fuell is-minus" style="width:${verlB.toFixed(1)}%"></i>` : '')   // ohne Blow beide unter Start: roter Mini-Anteil statt leerem Balken
+        + (boden != null && startDa ? `<i class="pz-bahn-start" style="left:${pStart.toFixed(1)}%"></i>` : '')
         + `<i class="pz-bahn-vor" style="left:${pVor.toFixed(1)}%"></i>`
         + `<b class="pz-bahn-pkt" style="left:${pIst.toFixed(1)}%;background:${idFarb}"></b></i>`
       return { html, prozent, titel }
@@ -37793,7 +37799,7 @@
     const html = `<i class="pz-bahn pz-bahn2${boden != null ? ' mit-liq' : ''}" title="${escapeHtml(titel)}">`
       + (Math.max(pIst, verlB) > 0 ? `<i class="pz-bahn-fuell" style="width:${Math.max(pIst, verlB).toFixed(1)}%;background:${farbe}"></i>` : '')
       + (pTp > pIst ? `<i class="pz-bahn-fuell is-tp" style="left:${pIst.toFixed(1)}%;width:${(pTp - pIst).toFixed(1)}%;background:${farbe}"></i>` : '')
-      + (boden != null ? `<i class="pz-bahn-start" style="left:${pStart.toFixed(1)}%"></i>` : '')
+      + (boden != null && startDa ? `<i class="pz-bahn-start" style="left:${pStart.toFixed(1)}%"></i>` : '')
       + `<b class="pz-bahn-pkt" style="left:${pIst.toFixed(1)}%;background:${idFarb}"></b></i>`
     return { html, prozent, titel }
   }
@@ -37809,14 +37815,17 @@
     const gr = (typeof kontoGroesseAnzeige === 'function') ? kontoGroesseAnzeige(k.name, n(k.groesse), t.balance_start) : n(k.groesse)
     const liq = t.liq_regel_soft ? n(t.liq_boden_balance) : (n(t.liq_regel_balance) ?? n(t.liq_balance))
     const vor = n(o.vor)
-    const bz = pzBahnHtml({ groesse: gr, ziel, boden: liq, ist, vor, uid: o.uid || t.user_id }); if(!bz) return ''
+    const bz = pzBahnHtml({ groesse: gr, ziel, boden: liq, ist, vor, uid: o.uid || t.user_id, frei: true }); if(!bz) return ''
     const de = v => Math.round(v).toLocaleString('de-DE'), rest = Math.max(0, ziel - ist), unterStart = gr > 0 && ist < gr
-    const tip = `${bz.titel}${vor != null ? ' · vorher ' + de(vor) + ' → nachher ' + de(ist) : ''}${liq != null ? ' · Blow ' + de(liq) + (ist > liq ? ' (noch ' + de(ist - liq) + ' $ Abstand)' : '') : ''} · Rest bis Ziel ${de(rest)} $`
-    // unter dem Start zählt der Abstand zum Blow (Finn: „am Ziel des Accounts oder am Blow"), darüber % + Rest bis Ziel
-    const txt = rest <= 0 ? (o.kurz ? '🎯 Ziel' : '🎯 am Ziel') : liq != null && ist <= liq + 25 ? (o.kurz ? '💀 Blow' : '💀 am Blow')
-      : unterStart && liq != null ? (o.kurz ? `Blow ${de(ist - liq)}` : `Blow in ${de(ist - liq)} · Rest ${de(rest)}`)
-      : (o.kurz ? `${bz.prozent} %` : `${bz.prozent} % · Rest ${de(rest)}`)
-    return `<span class="wdl-bz" title="${escapeHtml(tip)}">${bz.html}<small${txt.startsWith('Blow') || txt.startsWith('💀') ? ' class="is-blow"' : ''}>${txt}</small></span>`
+    const blowAb = liq != null ? ist - liq : null
+    const tip = `${bz.titel}${vor != null ? ' · vorher ' + de(vor) + ' → nachher ' + de(ist) : ''}${liq != null ? ' · Blow ' + de(liq) + (blowAb > 0 ? ' (noch ' + de(blowAb) + ' $ Abstand)' : '') : ''} · Rest bis Ziel ${de(rest)} $`
+    /* TEXT OHNE PROZENT (Finn 08.10.2026: „−18 % · Rest 5.911 … richtig hässlich"): Abstände in $ — „Ziel +4.740 · Blow −3.120", am Ziel
+     * „🎯 Ziel erreicht", am Blow „💀 geblowt"; kurz (Konto-Spalte 110 px) nur der wichtigere: unter dem Start der Blow, sonst das Ziel. */
+    const zielT = rest > 0 ? `Ziel +${de(rest)}` : '🎯 Ziel erreicht', blowT = blowAb == null ? '' : blowAb <= 25 ? '💀 geblowt' : `Blow −${de(blowAb)}`
+    const txt = blowAb != null && blowAb <= 25 ? blowT : rest <= 0 ? zielT
+      : o.kurz ? (unterStart && blowT ? blowT : zielT) : [zielT, blowT].filter(Boolean).join(' · ')
+    const rot = (blowAb != null && blowAb <= 25) || (o.kurz && unterStart && blowT)
+    return `<span class="wdl-bz" title="${escapeHtml(tip)}">${bz.html}<small${rot ? ' class="is-blow"' : ''}>${txt}</small></span>`
   }
   window._balZielZeile = balZielZeile
   function planZeileBoden(p, konto, o, groesse){
@@ -41955,7 +41964,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1365'
+  const OS_TAB_BUILD = '2026-09-22.1366'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
