@@ -9520,6 +9520,136 @@ def _dialog_struktur(dlg):
     return " | ".join(teile[:40])
 
 
+# GRUND BEI „KEINE BESTAETIGUNG" (09.10.2026, Master/S5 + Finns Regel „genaue Ursache + Fix, nie A, B oder C"): 5 Fälle an 4 PCs,
+# z. B. 08.10. 23:47 UTC — alle vier Klickwege auf Buy ausgelöst, keine Position. Befund: die Konten waren serverseitig für den Handel
+# gesperrt (FundedNext 100k bei 90.002 $ = an der 10-%-Grenze gebrochen; zwei Phase-2-Konten bei 105.022 $ = Ziel erreicht). Die Meldung
+# sagte nur „Dialog geschlossen", der Dialog-Teil fiel beim Speichern (400 Zeichen) weg. Jetzt liest der Bot die Antwort des Servers
+# selbst: Journal-Zeile des Terminals (logs/JJJJMMTT.log), Texte des Order-Dialogs, Konto-/Symbol-Zustand der API — der Grund steht vorn.
+ORDER_GRUND_REGELN = (
+    (r"trad(e|ing) (is )?disabled|handel (ist )?(deaktiviert|gesperrt)|account (is )?disabled|konto (ist )?(deaktiviert|gesperrt)",
+     "Handel am Konto gesperrt (Server: Trade disabled) — Konto beendet (Ziel erreicht bzw. Verlustgrenze gerissen) oder abgelaufen",
+     "Konto im Dashboard der Firma prüfen und abschließen bzw. archivieren — nicht neu starten"),
+    (r"invalid stops|ung(ü|ue)ltige stops", "SL/TP ungültig (Server: Invalid stops)", "SL/TP-Abstand und Seite zum Kurs prüfen, dann neu starten"),
+    (r"market (is )?closed|markt (ist )?geschlossen", "Markt geschlossen (Server: Market closed)", "zur Handelszeit neu starten"),
+    (r"no money|not enough money|nicht gen(ü|ue)gend (geld|marge)|nicht genug geld",
+     "zu wenig freie Marge für dieses Volumen (Server: No money)", "Volumen senken oder Marge prüfen"),
+    (r"invalid volume|ung(ü|ue)ltiges volumen", "Volumen ungültig (Server: Invalid volume)", "Lot-Schritt/Minimum des Symbols prüfen"),
+    (r"auto ?trading|algo ?trading", "Algo Trading im Terminal aus", "im Terminal den Knopf Algo Trading einschalten"),
+    (r"requote|off quotes|price changed|preis (hat sich )?ge(ä|ae)ndert", "Kurs vom Server abgelehnt (Requote/Off quotes)",
+     "einmal neu starten"),
+    (r"trade context busy", "Terminal beschäftigt (Trade context busy)", "einmal neu starten"),
+    (r"too many (orders|requests)|zu viele", "zu viele Anfragen (Server)", "kurz warten, dann neu starten"),
+)
+
+
+def order_grund_aus_text(text):
+    """REIN RECHNEND (testbar): bekannter Order-Grund in einem Journal-/Dialog-Text → (grund, fix) oder None."""
+    t = str(text or "").lower()
+    if not t:
+        return None
+    for rx, grund, fix in ORDER_GRUND_REGELN:
+        if re.search(rx, t):
+            return grund, fix
+    return None
+
+
+def order_journal_grund(zeilen, symbol, richtung, jetzt_s, max_alter_s=180):
+    """REIN RECHNEND (testbar): neueste Order-Zeile des Terminal-Journals zu diesem Symbol + dieser Richtung aus den letzten max_alter_s
+    Sekunden (Uhrzeit HH:MM:SS.mmm der Zeile gegen jetzt_s = Sekunden seit Mitternacht, Ortszeit des PCs) mit Server-Antwort in [ ] →
+    (antwort, zeile) oder None. Beispiel: „'123': failed market buy 2.7 NDX100 sl: … tp: … [Trade disabled]"."""
+    sym, ri = str(symbol or "").lower(), str(richtung or "").lower()
+    for z in reversed(list(zeilen or ())):
+        zl = str(z or "").lower()
+        if not sym or sym not in zl or f" {ri} " not in f" {zl} " or "[" not in zl:
+            continue
+        m = re.search(r"\b(\d{2}):(\d{2}):(\d{2})\.\d{3}\b", zl)
+        if m:
+            t = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3))
+            if (float(jetzt_s) - t) % 86400 > max_alter_s:
+                continue
+        a = re.findall(r"\[([^\]]+)\]", str(z))
+        if a:
+            return a[-1].strip(), str(z).strip()
+    return None
+
+
+def order_grund_bestimmen(journal, dialog_text, api):
+    """REIN RECHNEND (testbar): EIN Grund für „keine Bestätigung" — Journal (Antwort des Servers) vor Dialog-Text vor API-Zustand.
+    journal = (antwort, zeile) | None, api = dict aus _order_api_zustand. -> (grund, fix, quelle) oder None"""
+    if journal:
+        g = order_grund_aus_text(journal[0])
+        return (g[0], g[1], f"Journal: [{journal[0]}]") if g else (f"Server antwortete „{journal[0]}“", "Antwort im Journal prüfen",
+                                                                 "Journal")
+    g = order_grund_aus_text(dialog_text)
+    if g:
+        return g[0], g[1], "Order-Dialog"
+    a = api if isinstance(api, dict) else {}
+    if a.get("verbunden") is False:
+        return "Terminal nicht mit dem Server verbunden", "Internet/Login des Terminals prüfen", "API"
+    if a.get("handel_konto") is False:
+        return ("Handel am Konto gesperrt (account_info.trade_allowed = False) — Konto beendet oder nur lesend (Investor-Passwort)",
+                "Konto im Dashboard der Firma prüfen; Login mit Master-Passwort", "API")
+    if a.get("symbol_modus") == 0:
+        return f"Symbol {a.get('symbol') or ''} für den Handel gesperrt (trade_mode DISABLED)".replace("  ", " "), "Symbol/Konto prüfen", "API"
+    if a.get("symbol_modus") == 3:
+        return f"Symbol {a.get('symbol') or ''} nur Schließen erlaubt (Close only)".replace("  ", " "), "später neu starten", "API"
+    return None
+
+
+def _order_api_zustand(path, expected, symbol):
+    """Zustand für die Diagnose (nur lesen, nie werfen): verbunden, Handel am Konto, Symbol-Modus, freie Marge, Datenordner."""
+    out = {"symbol": symbol}
+    try:
+        import MetaTrader5 as mt5
+        if not _api_verbinden(mt5, path, None):
+            return out
+        ti, ai, si = mt5.terminal_info(), mt5.account_info(), mt5.symbol_info(symbol) if symbol else None
+        if ti is not None:
+            out.update(verbunden=bool(ti.connected), data_path=str(ti.data_path or ""))
+        if ai is not None and (not expected or int(ai.login) == int(expected)):
+            out.update(handel_konto=bool(ai.trade_allowed), marge_frei=float(ai.margin_free))
+        if si is not None:
+            out["symbol_modus"] = int(si.trade_mode)
+    except Exception as e:
+        out["fehler"] = f"{type(e).__name__}: {str(e)[:80]}"
+    return out
+
+
+def _mt5_journal_zeilen(data_path, n=400):
+    """Letzte n Zeilen des Terminal-Journals (logs/JJJJMMTT.log, UTF-16) von heute, sonst gestern — nur lesen, nie werfen."""
+    if not data_path:
+        return []
+    import datetime as _dtm
+    for tage in (0, 1):
+        pfad = os.path.join(data_path, "logs", (_dtm.datetime.now() - _dtm.timedelta(days=tage)).strftime("%Y%m%d") + ".log")
+        try:
+            with open(pfad, "rb") as f:
+                f.seek(0, 2)
+                groesse = f.tell()
+                f.seek(max(0, groesse - 200000))
+                roh = f.read()
+            if len(roh) % 2:
+                roh = roh[1:]
+            text = roh.decode("utf-16-le", "replace").lstrip("﻿")
+            return text.splitlines()[-n:]
+        except Exception:
+            continue
+    return []
+
+
+def _keine_bestaetigung_grund(path, expected, symbol, richtung, dialog_text):
+    """Grund für „keine Bestätigung" einsammeln (nur lesen, nie werfen). -> (grund, fix, quelle) oder None"""
+    try:
+        import datetime as _dtm
+        api = _order_api_zustand(path, expected, symbol)
+        jetzt = _dtm.datetime.now()
+        journal = order_journal_grund(_mt5_journal_zeilen(api.get("data_path")), symbol, richtung,
+                                      jetzt.hour * 3600 + jetzt.minute * 60 + jetzt.second)
+        return order_grund_bestimmen(journal, dialog_text, api)
+    except Exception:
+        return None
+
+
 def _kind_fenster(hauptfenster, voll=False):
     """Kind-'Window'-Elemente des Hauptfensters — Standard: nur Kinder und
     Enkel, NIE der volle Baum (02.09.2026, Finns '10 Sekunden zwischen jedem
@@ -11398,11 +11528,13 @@ def run(cfg_path, cmd):
     # Kein neuer Positionsstand: entweder Markt zu (Wochenende) oder der Klick
     # kam nicht an. Dialog-Text auf 'geschlossen' pruefen, sonst Struktur mitgeben.
     markt_zu = False
+    dialog_texte = []                          # alle Texte des Dialogs — für den Grund (09.10.2026)
     try:
         for t in dlg.descendants(control_type="Text"):
-            if "geschloss" in (t.window_text() or "").lower() or "closed" in (t.window_text() or "").lower():
+            tx = t.window_text() or ""
+            dialog_texte.append(tx)
+            if "geschloss" in tx.lower() or "closed" in tx.lower():
                 markt_zu = True
-                break
     except Exception:
         pass
     struktur = _dialog_struktur(dlg)
@@ -11426,6 +11558,14 @@ def run(cfg_path, cmd):
     f9_hinweis = (" · Hinweis: SL/TP wurden direkt in den Order-Dialog getippt — "
                   "moeglich, dass dieser Broker sie in der Markt-Order ablehnt und "
                   "deshalb keine Position kam." if f9_getippt else "")
+    # GRUND VORN (09.10.2026): Server-Antwort aus Journal/Dialog/API — steht vor der Spur, damit sie nach dem Kürzen (400 Zeichen) bleibt
+    grund = _keine_bestaetigung_grund(path, expected, symbol, cmd["richtung"], " | ".join(dialog_texte))
+    if grund:
+        trail.append(f"Grund: {grund[0]} ({grund[2]})")
+        return {"ok": False, "retry_ok": False, "grund": grund[0], "grund_fix": grund[1], "grund_quelle": grund[2],
+                "msg": f"KEINE Bestaetigung binnen 12 s — Grund: {grund[0]} ({grund[2]}) → {grund[1]}. Position nicht am Konto, "
+                       "Dialog geschlossen. Spur: [" + _spur(trail) + "] · Dialog: " + struktur + f9_hinweis,
+                "trail": _spur(trail)}
     return {"ok": False, "retry_ok": False,
             "msg": "KEINE Bestaetigung binnen 12 s — Position nicht am Konto, Dialog "
                    "geschlossen. Spur: [" + _spur(trail) + "] · Dialog: " + struktur
