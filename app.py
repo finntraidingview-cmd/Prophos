@@ -14509,7 +14509,14 @@ def _ap_runden(x, schritt):
 # (E1 = Balance nach Trade 1 − Tagesstart; Beispiel −2.500 → TP2 7.000 / SL2 2.200, +2.500 → TP2 2.000 / SL2 7.200). Gilt jeden Tag gleich ab dem Tagesstand (150.000 oder 154.500). Richtung frei, nie Gegenhedge über IDs. Trade 1 2–3 NQ (menge),
 # Trade 2 3–4 NQ (t2_menge; Finn 08.10.2026 09:00 Dubai, vorher beide 3–4).
 # Aktiv, sobald die Firmen-Regel einen Block "kette" hat (sql/2026-10-08_topstep_kette.sql); Werte darin überschreiben den Standard.
-AP_KETTE_STANDARD = {"t1_bis": "11:00", "t1_sl": [1950, 2650], "t1_tp": [1950, 2650], "t2_ab": "11:00", "t2_bis": "19:30", "tagesziel_usd": 4500, "blow_puffer_usd": 200, "menge": [2, 3], "t2_menge": [3, 4], "puffer": [25, 40], "t2_abstand_min": [5, 20], "t2_streuung_min": [0, 45]}
+# DAILY LOSS LIMIT 3.000 (Finn 08.10.2026 ~21:55 Dubai: „Topstep-Konten ab jetzt immer mit dem Plan mit Daily Loss Limit 3.000" —
+# soft: Topstep schließt für den Tag, das Konto lebt; sql/2026-10-08_topstep_kette_dll3000.sql): Tagesergebnis „+4.500 oder −3.000"
+# statt „+4.500 oder geblowt". Trade 1 SL 1.250–1.750 $ (TP unverändert 1.950–2.650); Verlustgrenze = min(daily_usd, Tagesstart − MLL)
+# + blow_puffer — DLL bzw. MLL beendet den Tag, nicht unser SL (Beispiel frisch: T1 −1.250 → TP2 5.750, SL2 1.950, schlimmster Tag
+# −3.000 = 147.000). MLL (Topstep Combine, liq_regeln id 8): EOD-trailing dd_usd hinter dem höchsten Tagesschluss, Lock bei der Start-
+# Balance (ap_kette_mll). Liegt der Tagesstart näher als daily_usd am MLL („angefressen", z. B. 147.000 nach einem −3.000-Tag), legt der
+# Planer KEINEN Kettenplan an — wie es dort weitergeht, entscheidet Finn (Rechnung Slave 1). Geblowt nur am MLL, das DLL ist Tageslimit.
+AP_KETTE_STANDARD = {"t1_bis": "11:00", "t1_sl": [1250, 1750], "t1_tp": [1950, 2650], "t2_ab": "11:00", "t2_bis": "19:30", "tagesziel_usd": 4500, "blow_puffer_usd": 200, "daily_usd": 3000, "menge": [2, 3], "t2_menge": [3, 4], "puffer": [25, 40], "t2_abstand_min": [5, 20], "t2_streuung_min": [0, 45]}
 AP_KETTE_TXT = "Topstep-Kette"
 AP_KETTE_DD_STANDARD = 4500.0           # Rückfall für den Blow-Vergleich beim Abhaken, wenn der Plan keine verlust_grenze trägt
 
@@ -14522,22 +14529,44 @@ def ap_kette_regel(regel):
     return dict(AP_KETTE_STANDARD, **k)
 
 
-def ap_kette_trade1(regel, kette, groesse, ziel, balance, u):
-    """REIN RECHNEND: Trade 1 der Kette → werte wie ap_konto_rechnen + kette{nr, tagesziel, verlust_grenze}. Tagesziel = Rest bis zum
-    Phasenziel + Puffer, wenn der Rest höchstens tagesziel_usd ist (letzter Tag), sonst tagesziel_usd; Verlustgrenze = DD + blow_puffer."""
+def ap_kette_mll(groesse, dd, peak, balance, lock=0.0):
+    """REIN RECHNEND (testbar): Maximum Loss Limit (Topstep Combine) → Balance-Level. EOD-trailing dd hinter dem höchsten bekannten
+    Tagesschluss (peak = liq_peak, sonst die Balance selbst = Tagesstart), nie unter Größe − dd, Lock bei Größe + lock (Combine: 0)."""
+    if not groesse or not dd:
+        return None
+    hoch = max(float(groesse), float(peak or 0), float(balance or 0))
+    return round(min(float(groesse) + float(lock or 0), hoch - float(dd)), 2)
+
+
+def ap_kette_trade1(regel, kette, groesse, ziel, balance, u, peak=None):
+    """REIN RECHNEND: Trade 1 der Kette → (werte wie ap_konto_rechnen + kette{nr, tagesziel, verlust_grenze, …}, None) | (None, grund).
+    Tagesziel = Rest bis zum Phasenziel + Puffer, wenn der Rest höchstens tagesziel_usd ist (letzter Tag), sonst tagesziel_usd.
+    Mit daily_usd (DLL 3.000, 08.10.2026): MLL aus ap_kette_mll; Abstand Tagesstart − MLL < daily_usd → kein Plan („angefressen");
+    sonst Verlustgrenze = min(daily_usd, Abstand) + blow_puffer. Ohne daily_usd wie bisher: DD + blow_puffer."""
+    daily = float(kette.get("daily_usd") or 0)
+    mll = ap_kette_mll(groesse, float(regel.get("dd_usd") or 0), peak, balance) if daily else None
+    if daily and mll is not None and balance - mll < daily:
+        de = lambda v: f"{v:,.0f}".replace(",", ".")   # noqa: E731 — nur die Zahlen, das Satzkomma bleibt
+        return None, f"angefressen (Balance {de(balance)}, Abstand MLL {de(balance - mll)}) — Weg entscheidet Finn"
     rest = ziel - balance
     menge = _ap_runden(_ap_spanne(kette.get("menge"), u["menge"]), 1)
     puffer = round(_ap_spanne(kette.get("puffer"), u["puffer"]) or 0)
     # letzter Tag (Rest ≤ Tagesziel): Rest + Puffer, damit das Konto sicher über das Phasenziel kommt (159.000 statt 158.990)
     tagesziel = round(rest + puffer) if rest <= float(kette["tagesziel_usd"]) else round(float(kette["tagesziel_usd"]))
-    verlust = round(float(regel.get("dd_usd") or 0) + float(kette["blow_puffer_usd"]))
+    if daily and mll is not None:
+        verlust = round(min(daily, balance - mll) + float(kette["blow_puffer_usd"]))   # DLL bzw. MLL beendet den Tag, nicht unser SL
+    else:
+        verlust = round(float(regel.get("dd_usd") or 0) + float(kette["blow_puffer_usd"]))
     tp = round(_ap_spanne(kette["t1_tp"], u["tp"]))
     sl = round(_ap_spanne(kette["t1_sl"], u["sl"]))
     stufe = f"{AP_KETTE_TXT} 1/2 (Tagesziel +{tagesziel:,} $)".replace(",", ".")
     if tp >= tagesziel:                       # letzter Tag mit kleinem Rest: Trade 1 kann das Ziel schon allein holen
         tp, stufe = tagesziel, f"{AP_KETTE_TXT} 1/2 (Rest bis Ziel +{tagesziel:,} $)".replace(",", ".")
+    k1 = {"nr": 1, "tagesziel": tagesziel, "verlust_grenze": verlust}
+    if daily and mll is not None:
+        k1.update(daily_usd=round(daily), mll=mll, tagesstart_plan=round(balance, 2))
     return {"groesse": groesse, "ziel": ziel, "rest": round(rest), "menge": menge, "puffer": puffer, "tp": tp, "sl": sl, "risiko": sl,
-            "stufe": stufe, "kette": {"nr": 1, "tagesziel": tagesziel, "verlust_grenze": verlust}}
+            "stufe": stufe, "kette": k1}, None
 
 
 def ap_kette_trade2(t1_kette, balance_start, balance_end, regel, kette, u_menge):
@@ -14552,18 +14581,24 @@ def ap_kette_trade2(t1_kette, balance_start, balance_end, regel, kette, u_menge)
     grenze = max(float((kette.get("t1_sl") or [0, 0])[-1]), float((kette.get("t1_tp") or [0, 0])[-1]), tagesziel) + 1500   # letzter Tag: TP1 = Tagesziel
     if e1 > grenze or e1 < -(float(regel.get("dd_usd") or grenze) + 1500):
         return None, f"Ergebnis von Trade 1 unplausibel ({e1:+,.0f} $, Balance-Basis prüfen) — von Hand".replace(",", ".")
-    if regel.get("dd_usd") and e1 <= -float(regel["dd_usd"]):
+    mll = _wd_num((t1_kette or {}).get("mll"))
+    if mll is not None and float(balance_end) <= mll + 50:
+        return None, f"Trade 1 hat das Konto am MLL geblowt ({e1:+.0f} $, Balance {float(balance_end):,.0f}) — kein Trade 2".replace(",", ".").replace(". Balance", ", Balance")
+    if mll is None and regel.get("dd_usd") and e1 <= -float(regel["dd_usd"]):
         return None, f"Trade 1 hat das Konto geblowt ({e1:+.0f} $) — kein Trade 2"
+    if verlust - float(kette["blow_puffer_usd"]) + e1 <= 50:
+        return None, f"Tageslimit schon mit Trade 1 erreicht ({e1:+.0f} $) — kein Trade 2"
     if e1 >= tagesziel - 50:
         return None, f"Tagesziel schon mit Trade 1 erreicht ({e1:+.0f} $) — kein Trade 2"
     tp2, sl2 = round(tagesziel - e1), round(verlust + e1)
     if sl2 < 100:
         return None, f"SL für Trade 2 wäre nur {sl2} $ — von Hand prüfen"
     menge = _ap_runden(_ap_spanne(kette.get("t2_menge") or kette.get("menge"), u_menge), 1)   # Trade 2: 3–4 NQ (Finn 08.10.2026)
-    return {"e1": e1, "tp": tp2, "sl": sl2, "menge": menge, "tagesziel": round(tagesziel), "verlust_grenze": round(verlust)}, None
+    return {"e1": e1, "tp": tp2, "sl": sl2, "menge": menge, "tagesziel": round(tagesziel), "verlust_grenze": round(verlust),
+            "mll": mll, "daily_usd": (t1_kette or {}).get("daily_usd")}, None
 
 
-def ap_konto_rechnen(regel, phase, balance, u):
+def ap_konto_rechnen(regel, phase, balance, u, peak=None):
     """REIN RECHNEND (testbar): Plan-Werte EINES Kontos. u = Zufallsanteile der Tranche {tp, sl, menge, puffer} (0..1).
     → (werte, None) oder (None, grund). werte: groesse, ziel, rest, menge, puffer, tp, sl, risiko, stufe."""
     groesse = ap_groesse(regel.get("groessen"), balance)
@@ -14604,7 +14639,7 @@ def ap_konto_rechnen(regel, phase, balance, u):
         return None, "Balance auf/unter dem Boden — geblowt?"
     kette = ap_kette_regel(regel) if phase == "challenge" else None
     if kette:                                 # TOPSTEP-KETTE: Trade 1 statt eines Trades ohne SL (Finn 08.10.2026)
-        return ap_kette_trade1(regel, kette, groesse, ziel, balance, u), None
+        return ap_kette_trade1(regel, kette, groesse, ziel, balance, u, peak=peak)   # peak: MLL der Kette (DLL 3.000, 08.10.2026)
     menge = _ap_runden(_ap_spanne(ph.get("menge"), u["menge"], f), ph.get("menge_schritt") or 1)
     pjm = ph.get("puffer_je_menge")
     psp = (pjm or {}).get(str(int(menge))) if pjm else ph.get("puffer")
@@ -16714,13 +16749,15 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     for k in kandidaten:
         tranchen.setdefault(k["tkey"], []).append(k)
     tr_info, plan_roh, roh_tr = {}, [], []
+    # Topstep-Kette mit DLL (08.10.2026): höchster belegter Tagesschluss je Konto für den MLL — nur für Kettenkonten (eine Abfrage, 60 s Cache)
+    peaks_kette = _ap_peaks([k["a"] for k in kandidaten if ap_kette_regel(k["regel"])]) if any(ap_kette_regel(k["regel"]) for k in kandidaten) else {}
     for key, liste in tranchen.items():
         u = {x: rnd.random() for x in ("tp", "sl", "menge", "puffer")}
         rechnung = []
         for k in liste:
             # Topstep-Kette: eigener Zufall je Konto (sonst hätten alle Topstep-Konten einer ID dieselben SL/TP/Kontrakte)
             u_k = {x: rnd.random() for x in ("tp", "sl", "menge", "puffer")} if ap_kette_regel(k["regel"]) else u
-            w, grund = ap_konto_rechnen(k["regel"], k["a"]["account_type"], k["bal"], u_k)
+            w, grund = ap_konto_rechnen(k["regel"], k["a"]["account_type"], k["bal"], u_k, peak=peaks_kette.get(str(k["a"].get("id"))))
             if grund and "Boden" in grund:
                 # „Balance auf/unter dem Boden — geblowt?" — Boden/Balance/Stand für die Anzeige (Slave 6, 08.10.2026); k["regel"] ist schon
                 # die Konto-Regel, ap_regel_konto darauf ändert nichts mehr
@@ -19871,6 +19908,8 @@ def ap_kette_tick(jetzt=None, rnd=None):
         start = stand["mitternacht"] + timedelta(minutes=m)
         k2 = {"nr": 2, "vor": pid, "e1": werte["e1"], "tagesziel": werte["tagesziel"], "verlust_grenze": werte["verlust_grenze"],
               "balance_start_tag": bal[0], "balance_nach_t1": bal[1]}
+        if werte.get("mll") is not None:
+            k2.update(mll=werte["mll"], daily_usd=werte.get("daily_usd"))   # Abhaken: geblowt nur am MLL (DLL 3.000, 08.10.2026)
         zeile = {"user_id": t1["user_id"], "master_account_id": t1["master_account_id"], "master_name": t1.get("master_name"),
                  "master_firm": t1.get("master_firm"), "master_contracts": werte["menge"], "master_risk": werte["sl"],
                  "master_tp": werte["tp"], "master_sl": werte["sl"], "richtung": r, "route": "tsv2", "master_symbol": t1.get("master_symbol"),
@@ -19879,7 +19918,8 @@ def ap_kette_tick(jetzt=None, rnd=None):
                  "auto_bestaetigt_at": jetzt.isoformat() if t1.get("auto_bestaetigt_at") else None,
                  "mt5_baseline": {"kette": k2},
                  "notes": (f"Auto-Planer · {AP_KETTE_TXT} 2/2 · Trade 1 {werte['e1']:+,.0f} $ → TP {werte['tp']:,} / SL {werte['sl']:,} $ "
-                           f"(Tag +{werte['tagesziel']:,} $ oder geblowt) · Balance {bal[1]:,.0f} (Nachlesung)").replace(",", ".")}
+                           f"(Tag +{werte['tagesziel']:,} $ oder {('Tageslimit −' + format(int(werte['daily_usd']), ',') + ' $') if werte.get('daily_usd') else 'geblowt'}) · "
+                           f"Balance {bal[1]:,.0f} (Nachlesung)").replace(",", ".")}
         if (sb_select("trade_plans", {"select": "id", "mt5_baseline->kette->>vor": f"eq.{pid}"}) or []):
             continue                              # inzwischen angelegt (zweiter Takt) — nie doppelt
         try:
@@ -19943,11 +19983,16 @@ def ap_kette_abhaken(jetzt=None):
         if fehler:
             continue
         upd["pl_quelle"] = "tv"
-        dd = AP_KETTE_DD_STANDARD
-        if k.get("verlust_grenze"):
-            dd = float(k["verlust_grenze"]) - float(AP_KETTE_STANDARD["blow_puffer_usd"])
-        if e_tag <= -(dd - 50):                   # Trade 2: der TAG zählt (Tagesstart), nicht sein eigener P&L
-            upd["blown"] = True
+        if _wd_num(k.get("mll")) is not None:
+            # DLL 3.000 (08.10.2026): ein Tag am Daily Loss Limit ist Tageslimit (soft, Konto lebt) — geblowt nur am MLL
+            if float(bal[1]) <= float(k["mll"]) + 50:
+                upd["blown"] = True
+        else:
+            dd = AP_KETTE_DD_STANDARD
+            if k.get("verlust_grenze"):
+                dd = float(k["verlust_grenze"]) - float(AP_KETTE_STANDARD["blow_puffer_usd"])
+            if e_tag <= -(dd - 50):                   # Trade 2: der TAG zählt (Tagesstart), nicht sein eigener P&L
+                upd["blown"] = True
         if not p.get("konto_typ"):
             upd["konto_typ"] = "challenge"            # Kette gibt es nur in der Challenge (Topstep Combine)
         filt = {"id": f"eq.{p['id']}", "status": "eq.review"}

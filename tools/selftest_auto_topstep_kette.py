@@ -3,7 +3,10 @@
 Tag am Ende nur „+4.500 $" oder geblowt, aber in ZWEI Trades; Konzept als Baum bestätigt).
 
 Aufruf:  python3 tools/selftest_auto_topstep_kette.py
-Ohne Netz, Platzhalter-IDs. Geprüft: Trade 1 (00:00–11:00 dt, SL/TP 1.950–2.650 $, 3–4 NQ, Tagesziel 4.500, Verlustgrenze 4.700);
+Ohne Netz, Platzhalter-IDs. Seit DLL 3.000 (Finn 08.10.2026 ~21:55 Dubai): Trade 1 SL 1.250–1.750 / TP 1.950–2.650 $, Verlustgrenze
+min(3.000, Tagesstart − MLL) + 200 = 3.200; MLL EOD-trailing 4.500, Lock 150.000 (ap_kette_mll); angefressen (Abstand MLL < 3.000) → kein
+Plan + Grund; Finns Beispiel −1.250 → TP2 5.750 / SL2 1.950; Abhaken: −3.000 = Tageslimit (nicht blown), MLL = blown; Kette ohne
+daily_usd rechnet wie bisher (DD + 200). Vorher: Trade 1 (00:00–11:00 dt, SL/TP 1.950–2.650 $, 3–4 NQ, Tagesziel 4.500, Verlustgrenze 4.700);
 Trade 1 2–3 NQ, Trade 2 3–4 NQ; Finns Beispiele für Trade 2 (−2.500 → TP 7.000 / SL 2.200; +2.500 → TP 2.000 / SL 7.200); zweiter Tag (154.500, Rest 4.500 + Puffer);
 Blow / Tagesziel schon erreicht → kein Trade 2; nur genaue Puls-Nachlesung in TopstepX zählt; ap_kette_tick legt Trade 2 an (Start ≥ Ende
 + 5 min und ≥ 11:00, ≤ 19:30 dt, Bestätigung geerbt, nie doppelt, ohne Nachlesung nichts), Richtung ohne Gegenhedge über IDs; Trade 1
@@ -43,15 +46,30 @@ def main():
     ohne, _ = R(TOPSTEP, "challenge", 150000.0, {"tp": 0.5, "sl": 0.5, "menge": 0.5, "puffer": 0.5})
     check(ohne["sl"] is None and ohne["tp"] >= 4350 and "kette" not in ohne, "ohne Kette: wie bisher ein Trade ohne SL")
     werte = [R(KETTE, "challenge", 150000.0, {"tp": u, "sl": 1 - u, "menge": u, "puffer": u})[0] for u in (0.0, 0.37, 0.81, 0.999)]
-    check(all(1950 <= w["tp"] <= 2650 and 1950 <= w["sl"] <= 2650 and w["menge"] in (2, 3) for w in werte)
+    check(all(1950 <= w["tp"] <= 2650 and 1250 <= w["sl"] <= 1750 and w["menge"] in (2, 3) for w in werte)
           and {w["menge"] for w in werte} == {2, 3},
-          f"Trade 1: TP/SL je 1.950–2.650 $, 2–3 NQ ({[(w['tp'], w['sl'], w['menge']) for w in werte]})")
+          f"Trade 1 (DLL 3.000): TP 1.950–2.650 $, SL 1.250–1.750 $, 2–3 NQ ({[(w['tp'], w['sl'], w['menge']) for w in werte]})")
     w1 = werte[1]
-    check(w1["kette"] == {"nr": 1, "tagesziel": 4500, "verlust_grenze": 4700} and w1["risiko"] == w1["sl"] and "Topstep-Kette 1/2" in w1["stufe"],
-          f"Tag 1 (150.000): Tagesziel +4.500, Verlustgrenze 4.700 ({w1['kette']})")
-    w2, _ = R(KETTE, "challenge", 154500.0, {"tp": 0.5, "sl": 0.5, "menge": 0.0, "puffer": 0.5})
-    check(4525 <= w2["kette"]["tagesziel"] <= 4540 and w2["kette"]["verlust_grenze"] == 4700,
-          f"Tag 2 (154.500): Tagesziel = Rest 4.500 + Puffer ({w2['kette']['tagesziel']}), gleiche Verlustgrenze")
+    check(w1["kette"] == {"nr": 1, "tagesziel": 4500, "verlust_grenze": 3200, "daily_usd": 3000, "mll": 145500.0, "tagesstart_plan": 150000.0}
+          and w1["risiko"] == w1["sl"] and "Topstep-Kette 1/2" in w1["stufe"],
+          f"Tag 1 frisch (150.000): Tagesziel +4.500, Verlustgrenze 3.200 (DLL + 200), MLL 145.500 ({w1['kette']})")
+    w2, _ = R(KETTE, "challenge", 154500.0, {"tp": 0.5, "sl": 0.5, "menge": 0.0, "puffer": 0.5}, peak=154500.0)
+    check(4525 <= w2["kette"]["tagesziel"] <= 4540 and w2["kette"]["verlust_grenze"] == 3200 and w2["kette"]["mll"] == 150000.0,
+          f"Tag 2 nach T1-Gewinn (154.500): Tagesziel = Rest + Puffer ({w2['kette']['tagesziel']}), Verlustgrenze 3.200, MLL gelockt 150.000")
+    wv, _ = R(KETTE, "challenge", 148750.0, {"tp": 0.5, "sl": 0.5, "menge": 0.0, "puffer": 0.5}, peak=150000.0)
+    check(wv and wv["kette"]["verlust_grenze"] == 3200 and wv["kette"]["mll"] == 145500.0,
+          f"nach Verlusttag 148.750 (Abstand MLL 3.250 ≥ 3.000): Plan mit Verlustgrenze 3.200 ({wv and wv['kette']})")
+    wa, ga = R(KETTE, "challenge", 147000.0, {"tp": 0.5, "sl": 0.5, "menge": 0.0, "puffer": 0.5}, peak=150000.0)
+    check(wa is None and ga == "angefressen (Balance 147.000, Abstand MLL 1.500) — Weg entscheidet Finn",
+          f"angefressen 147.000 nach −3.000-Tag → kein Plan, Grund „{ga}“")
+    wb, gb = R(KETTE, "challenge", 150000.0, {"tp": 0.5, "sl": 0.5, "menge": 0.0, "puffer": 0.5}, peak=152000.0)
+    check(wb is None and "Abstand MLL 2.500" in (gb or ""), f"Höchststand 152.000, jetzt 150.000 → MLL 147.500, angefressen ({gb})")
+    check(a["ap_kette_mll"](150000, 4500, None, 150000) == 145500.0 and a["ap_kette_mll"](150000, 4500, 156000, 151000) == 150000.0
+          and a["ap_kette_mll"](150000, 4500, 152000, 150000) == 147500.0, "MLL: frisch 145.500, gelockt 150.000, nachgezogen 147.500")
+    ALT = dict(TOPSTEP, kette={"daily_usd": 0, "t1_sl": [1950, 2650]})
+    wo, _ = R(ALT, "challenge", 147000.0, {"tp": 0.5, "sl": 0.5, "menge": 0.0, "puffer": 0.5}, peak=150000.0)
+    check(wo and wo["kette"] == {"nr": 1, "tagesziel": 4500, "verlust_grenze": 4700} and 1950 <= wo["sl"] <= 2650,
+          f"Kette ohne daily_usd: wie bisher (Verlustgrenze 4.700, kein angefressen) ({wo and wo['kette']})")
     w3, _ = R(KETTE, "challenge", 157500.0, {"tp": 0.9, "sl": 0.5, "menge": 0.0, "puffer": 0.0})
     check(w3["tp"] == w3["kette"]["tagesziel"] == 1525, f"Rest kleiner als TP von Trade 1: Trade 1 holt das Ziel allein (TP {w3['tp']})")
 
@@ -69,6 +87,18 @@ def main():
     check(T2(k1, 150000, 145400)[0] is None and "geblowt" in T2(k1, 150000, 145400)[1], "Trade 1 geblowt → kein Trade 2")
     check(T2(k1, 150000, 154480)[0] is None and "Tagesziel" in T2(k1, 150000, 154480)[1], "Tagesziel schon erreicht → kein Trade 2")
     check(T2(k1, 0, 147500)[0] is None and "unplausibel" in T2(k1, 0, 147500)[1], "Start relativ, Ende absolut → unplausibel, kein Trade 2")
+    # DLL 3.000 (Finn 08.10.2026): Trade 1 aus dem Planer trägt mll/daily_usd
+    kd = {"nr": 1, "tagesziel": 4500, "verlust_grenze": 3200, "daily_usd": 3000, "mll": 145500.0}
+    v, _ = T2(kd, 150000, 148750)
+    check((v["tp"], v["sl"]) == (5750, 1950) and v["mll"] == 145500.0, f"Finns Beispiel: T1 −1.250 → TP2 5.750 / SL2 1.950, schlimmster Tag −3.000 ({v['tp']} / {v['sl']})")
+    v, _ = T2(kd, 150000, 152000)
+    check((v["tp"], v["sl"]) == (2500, 5200), f"T1 +2.000 → TP2 2.500 / SL2 5.200 (Tag endet am DLL bzw. MLL) ({v['tp']} / {v['sl']})")
+    v, _ = T2(dict(kd, tagesziel=1525), 157500, 156000)
+    check((v["tp"], v["sl"]) == (3025, 1700), f"letzter Tag (Rest 1.525): T1 −1.500 → TP2 3.025 / SL2 1.700 ({v['tp']} / {v['sl']})")
+    g = T2(kd, 150000, 145520)
+    check(g[0] is None and "MLL geblowt" in g[1], f"T1 bis an den MLL → geblowt, kein Trade 2 ({g[1]})")
+    g = T2(kd, 150000, 147000)
+    check(g[0] is None and "Tageslimit" in g[1], f"T1 −3.000 (DLL) → Tageslimit, kein Trade 2 ({g[1]})")
     fertig = a["ap_kette_t1_fertig"]
     gut = {"mt5_baseline": {"tv": {"balance_start": 150000}, "final": {"balance_end": 147500, "quelle": "puls", "plattform": "tsx"}}}
     check(fertig(gut) == ((150000.0, 147500.0), None), "genaue Puls-Nachlesung in TopstepX → fertig")
@@ -165,6 +195,13 @@ def main():
                              "tv": {"balance_start": 152650}, "final": {"balance_end": 145480, "quelle": "puls", "plattform": "tsx"}}},
            dict(t1, id="r-relativ", route="tsv2", status="review", updated_at="x",
                 mt5_baseline=dict(t1["mt5_baseline"], final={"quelle": "puls", "plattform": "tsx", "balance_end": 2000})),
+           # DLL 3.000: Tag endet bei −3.000 (Konto über dem MLL) → Tageslimit, nicht blown; Tag endet am MLL → blown
+           {"id": "r-dll", "route": "tsv2", "status": "review", "user_id": U1, "updated_at": "d", "ended_at": None,
+            "mt5_baseline": {"kette": {"nr": 2, "vor": "r-x1", "verlust_grenze": 3200, "daily_usd": 3000, "mll": 145500, "balance_start_tag": 150000},
+                             "tv": {"balance_start": 148750}, "final": {"balance_end": 147000, "quelle": "puls", "plattform": "tsx"}}},
+           {"id": "r-mll", "route": "tsv2", "status": "review", "user_id": U1, "updated_at": "m", "ended_at": None,
+            "mt5_baseline": {"kette": {"nr": 2, "vor": "r-x2", "verlust_grenze": 3200, "daily_usd": 3000, "mll": 147500, "balance_start_tag": 150000},
+                             "tv": {"balance_start": 148750}, "final": {"balance_end": 147510, "quelle": "puls", "plattform": "tsx"}}},
            # Balance-Sprung (08.10.2026): Balance −2.500, RP&L des Tages ab dem Klick nur −500 (z. B. Auszahlung dazwischen)
            dict(t1, id="r-sprung", route="tsv2", status="review", updated_at="z",
                 mt5_baseline=dict(t1["mt5_baseline"], tv={"balance_start": 150000, "today_pnl_start": 0, "datum_start": "2026-10-09"},
@@ -176,7 +213,7 @@ def main():
     weg = a["ap_kette_abhaken"](jetzt)
     u1 = next((u for f, u in upds if f["id"] == "eq.r-t1"), {})
     u2 = next((u for f, u in upds if f["id"] == "eq.r-t2"), {})
-    check(sorted(weg) == ["r-t1", "r-t2", "r-t2b"] and u1.get("status") == "completed" and u1.get("master_pl") == -2500.0
+    check(sorted(weg) == ["r-dll", "r-mll", "r-t1", "r-t2", "r-t2b"] and u1.get("status") == "completed" and u1.get("master_pl") == -2500.0
           and u1.get("pl_quelle") == "tv" and u1.get("konto_typ") == "challenge" and not u1.get("blown")
           and all(f.get("status") == "eq.review" and f.get("updated_at") for f, _u in upds),
           f"Trade 1 nach genauer Lesung automatisch erledigt (P&L −2.500, pl_quelle tv, Sperre review/updated_at) — {weg}")
@@ -186,6 +223,11 @@ def main():
     check(u2b.get("master_pl") == -7170.0 and u2b.get("blown") is True,
           f"Trade 2 nach +2.650 blowt mit −7.170 eigenem P&L → trotzdem plausibel, abgehakt + blown ({u2b.get('master_pl')})")
     check("eq.r-warte" not in [f["id"] for f, _u in upds], "ohne genaue Puls-Lesung bleibt der Trade in Überprüfen")
+    ud = next((u for f, u in upds if f["id"] == "eq.r-dll"), {})
+    um = next((u for f, u in upds if f["id"] == "eq.r-mll"), {})
+    check(ud.get("status") == "completed" and ud.get("master_pl") == -1750.0 and not ud.get("blown"),
+          f"DLL: Tag −3.000 (147.000, MLL 145.500) → erledigt, NICHT blown — Tageslimit ({ud})")
+    check(um.get("status") == "completed" and um.get("blown") is True, f"MLL: Tag endet bei 147.510 ≤ MLL 147.500 + 50 → blown ({um})")
     check("eq.r-relativ" not in [f["id"] for f, _u in upds] and any(i == "r-relativ" and "unplausibel" in g for i, g in gruende_ab),
           "Start absolut 150.000, Ende relativ 2.000 → nicht abgehakt, Grund „unplausibel — von Hand abhaken“ (Prüfer Slave 2)")
     check("eq.r-sprung" not in [f["id"] for f, _u in upds] and any(i == "r-sprung" and "Balance-Sprung" in g and "Differenz -2.000" in g for i, g in gruende_ab),
