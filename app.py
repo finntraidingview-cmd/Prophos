@@ -15565,7 +15565,7 @@ def ap_sicht(erg, uid):
     return out
 
 
-def ap_sicht_uid(admin, uid, nur_eigene, sicht):
+def ap_sicht_uid(admin, uid, nur_eigene, sicht, im_planer=False):
     """REIN RECHNEND (TRADE-PLANER-ALLE-IDS, Finn 07.10.2026 03:25 dt: „alle IDs … zusammen in diesem Zeitstrahl sehen … es ist nur
     die ID, von der ich gerade eingeloggt bin"): welche ID die GET-Antworten von /admin/auto-plan und /admin/auto-plan/delta filtern.
     None = alle IDs. Admin (ADMIN_EMAILS) immer alle; ?sicht=alle öffnet alle IDs für jeden Login im Planer — außer admin_zugang
@@ -15576,12 +15576,26 @@ def ap_sicht_uid(admin, uid, nur_eigene, sicht):
     # bei Moritz eingeloggt bin, dann immer nur die Trades von Moritz."): ?sicht=alle öffnet für Nicht-Admins NICHTS mehr; alle IDs
     # bekommt ein Nicht-Admin nur noch mit ?sicht=admin — das schickt allein der Admin-Reiter „Trade-Planer" (Admin-Code, Gate wie
     # /admin/auto-plan/ids seit .1167: nicht admin_zugang „nur eigene").
-    if str(sicht or "").strip().lower() == AP_SICHT_ADMIN and not nur_eigene:
+    # SERVERSEITIG NUR ADMIN-LOGINS (Finn 08.10.2026, Option A: „Alle IDs im Trade-Planer: Aurel, Chris, Finn + Pascal, Ina, Jacob, Moritz"):
+    # sicht=admin ist ein Client-Parameter (Slave-2-Befund) — er gilt nur für IDs in auto_plan_regeln.user_ids (im_planer)
+    if str(sicht or "").strip().lower() == AP_SICHT_ADMIN and not nur_eigene and im_planer:
         return None
     return str(uid)
 
 
-AP_SICHT_ADMIN = "admin"           # ?sicht=admin bzw. Body {sicht:"admin"}: Alle-IDs-Sicht des Admin-Reiters (08.10.2026)
+AP_SICHT_ADMIN = "admin"
+AP_NUR_PLANER_TXT = "Nur für IDs im Trade-Planer (oder Admin) — dieser Login darf fremde Pläne nicht sehen oder ändern"
+
+
+def _ap_im_planer(uid):
+    """Steht dieser Login in auto_plan_regeln.user_ids (= Admin-Login im Sinne des Admin-Reiters, Finn 08.10.2026 Option A)?
+    Nicht lesbar → False (gesperrt, nie versehentlich alle IDs)."""
+    try:
+        reg = (sb_select("auto_plan_regeln", {"select": "user_ids", "id": "eq.1"}) or [{}])[0]
+        return str(uid) in [str(u) for u in (reg.get("user_ids") or [])]
+    except Exception as e:
+        print(f"[auto-plan] ⚠️ user_ids nicht lesbar ({type(e).__name__}) — Admin-Reiter gesperrt", flush=True)
+        return False           # ?sicht=admin bzw. Body {sicht:"admin"}: Alle-IDs-Sicht des Admin-Reiters (08.10.2026)
 
 
 def _ap_sicht_param():
@@ -15597,14 +15611,15 @@ def _ap_sicht_aus_anfrage(admin, uid):
     """sicht-ID für die GET-Antwort aus ?sicht=admin (ap_sicht_uid). admin_zugang wird nur gelesen, wenn ein Nicht-Admin alle IDs
     verlangt (60-s-Cache); schlägt die Lesung fehl, bleibt es bei der eigenen Sicht — nie versehentlich alle IDs."""
     s = _ap_sicht_param()
-    nur = False
+    nur, im_planer = False, False
     if not admin and s == AP_SICHT_ADMIN:
         try:
             nur = admin_zugang_nur_eigene(str(uid))
         except Exception as e:
             print(f"[auto-plan] admin_zugang nicht lesbar ({type(e).__name__}: {e}) — Sicht bleibt eigene", flush=True)
             nur = True
-    return ap_sicht_uid(admin, uid, nur, s)
+        im_planer = _ap_im_planer(uid)
+    return ap_sicht_uid(admin, uid, nur, s, im_planer)
 
 
 # ── PROBELAUF ÜBER ALLE IDS (07.10.2026, Finn 04:08 dt: „Kannst du mal zum Test alle IDs einfach als geplant reinpacken, sodass ich
@@ -15672,28 +15687,28 @@ def ap_eingriff_sicht(admin, uid, im_planer, nur_eigene, sicht=None):
         return str(uid)
     if admin:
         return None
-    # ADMIN-REITER FÜR JEDEN ADMIN-LOGIN (Finn 08.10.2026, als „Finn + Pascal": „Im Admin soll jeder die Trades von allen sehen. Im normalen
-    # Trade-Planer sieht jeder nur die eigenen, aber im Admin jeder von jedem."): sicht="admin" reicht — im_planer ist nicht mehr nötig
-    # (vorbereitete Lockerung _ap_planer_voll, Finns Go); admin_zugang „nur eigene" (Emin) bleibt oben bei der eigenen ID
-    if str(sicht or "").strip().lower() == AP_SICHT_ADMIN:
+    # ADMIN-REITER (Finn 08.10.2026, als „Finn + Pascal": „Im Admin soll jeder die Trades von allen sehen …"): sicht="admin" öffnet alle IDs —
+    # seit Option A (Finn 08.10.2026: „Alle IDs im Trade-Planer: Aurel, Chris, Finn + Pascal, Ina, Jacob, Moritz") aber NUR für IDs in
+    # auto_plan_regeln.user_ids; sicht ist ein Client-Parameter (Slave-2-Befund), jeder andere Login bleibt bei der eigenen ID.
+    # admin_zugang „nur eigene" (Emin) bleibt oben bei der eigenen ID
+    if str(sicht or "").strip().lower() == AP_SICHT_ADMIN and im_planer:
         return None
     return str(uid)
 
 
-def ap_eingriff_admin_reiter(admin, uid, nur_eigene, sicht):
+def ap_eingriff_admin_reiter(admin, uid, nur_eigene, sicht, im_planer=False):
     """REIN RECHNEND (08.10.2026, Finn: „Ja, sollen alle dies machen können."): darf dieser Login richtung_tauschen/start/neu_starten an
     BELIEBIGEN Plänen? Admin (ADMIN_EMAILS) immer; sonst nur im Admin-Reiter (sicht="admin") und nicht admin_zugang „nur eigene" —
     dieselbe Regel wie Bestätigen/werte (ap_eingriff_sicht → alle IDs). Die normale Planer-Seite (ohne sicht=admin) bleibt gesperrt."""
-    return bool(admin) or ap_eingriff_sicht(False, uid, False, nur_eigene, sicht) is None
+    return bool(admin) or ap_eingriff_sicht(False, uid, im_planer, nur_eigene, sicht) is None
 
 
 def ap_admin_reiter_ok(admin, im_planer, nur_eigene, sicht):
     """REIN RECHNEND (08.10.2026): darf dieser Login die LESE-Routen des Trade-Planers (/admin/auto-plan GET, /delta) nutzen?
-    Admin, jede ID im Planer (wie bisher) — und seit 08.10.2026 jeder Login mit sicht="admin" (Admin-Reiter, Admin-Code entsperrt),
-    der nicht admin_zugang „nur eigene" ist. Planer-Lauf (POST) und Bot-Einstellungen bleiben davon unberührt."""
-    if admin or im_planer:
-        return True
-    return str(sicht or "").strip().lower() == AP_SICHT_ADMIN and not nur_eigene
+    Admin oder ID im Planer. Die kurze Öffnung für jeden Login mit sicht="admin" (.1248) ist seit Option A (Finn 08.10.2026) wieder zu —
+    sicht ist ein Client-Parameter; was eine Planer-ID dann sieht (alle oder eigene), entscheidet ap_sicht_uid."""
+    # seit Option A (Finn 08.10.2026): sicht=admin öffnet für Logins außerhalb des Planers nichts mehr
+    return bool(admin) or bool(im_planer)
 
 
 def ap_eingriff_filter(aktion, plan_ids, sicht_uid=None):
@@ -18395,6 +18410,10 @@ def admin_auto_plan_ids():
     if not reg:
         return jsonify({"ok": False, "msg": "auto_plan_regeln fehlt"}), 503
     drin = [str(u) for u in (reg.get("user_ids") or [])]
+    # OPTION A (Finn 08.10.2026): Admin-Reiter nur für Admin oder IDs im Trade-Planer — vorher reichte jeder Login ohne „nur eigene",
+    # und per POST konnte sich jeder selbst in user_ids eintragen (= sich selbst Admin-Rechte geben)
+    if err and str(uid) not in drin:
+        return jsonify({"ok": False, "msg": AP_NUR_PLANER_TXT}), 403
     if request.method == "POST":
         body = request.get_json(silent=True) or {}
         uid = str(body.get("user_id") or "").strip()
@@ -18794,7 +18813,7 @@ def admin_auto_plan_eingriff():
             alle = admin
             if not admin and _ap_sicht_param() == AP_SICHT_ADMIN:
                 try:
-                    alle = ap_eingriff_sicht(False, uid, False, admin_zugang_nur_eigene(str(uid)), AP_SICHT_ADMIN) is None
+                    alle = ap_eingriff_sicht(False, uid, _ap_im_planer(uid), admin_zugang_nur_eigene(str(uid)), AP_SICHT_ADMIN) is None
                 except Exception:
                     alle = False
             if str(body.get("aktion") or "").strip() == "nachholen":
@@ -18811,11 +18830,11 @@ def admin_auto_plan_eingriff():
         return err
     if not admin:
         try:
-            darf = ap_eingriff_admin_reiter(False, uid, admin_zugang_nur_eigene(str(uid)), _ap_sicht_param())
+            darf = ap_eingriff_admin_reiter(False, uid, admin_zugang_nur_eigene(str(uid)), _ap_sicht_param(), _ap_im_planer(uid))
         except Exception:
             darf = False                       # admin_zugang nicht lesbar → nie fremde Pläne
         if not darf:
-            return jsonify({"ok": False, "msg": "Nur im Admin-Reiter (Admin-Code) — dort darf jeder Admin-Login eingreifen"}), 403
+            return jsonify({"ok": False, "msg": AP_NUR_PLANER_TXT}), 403
     body = request.get_json(silent=True) or {}
     pid, aktion = str(body.get("plan_id") or "").strip(), str(body.get("aktion") or "").strip()
     if not re.match(r"^[0-9a-f-]{36}$", pid):

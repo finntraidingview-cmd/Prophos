@@ -423,7 +423,9 @@ def main():
     check(su(True, U1, True, None) is None and su(True, U1, False, "eigene") is None, "sicht: Admin immer alle IDs")
     # seit 08.10.2026 (Finn als Moritz: „immer nur die jeweilige ID"): ?sicht=alle öffnet für Nicht-Admins nichts mehr, nur ?sicht=admin (Admin-Reiter)
     check(su(False, U1, False, "alle") == U1 and su(False, U1, False, " Alle ") == U1, "sicht: Planer-ID mit ?sicht=alle → nur eigene ID (08.10.2026)")
-    check(su(False, U1, False, "admin") is None and su(False, U1, False, " Admin ") is None, "sicht: Nicht-Admin mit ?sicht=admin (Admin-Reiter) → alle IDs")
+    check(su(False, U1, False, "admin", True) is None and su(False, U1, False, " Admin ", True) is None,
+          "sicht: Planer-ID mit ?sicht=admin (Admin-Reiter) → alle IDs")
+    check(su(False, U1, False, "admin", False) == U1, "sicht: Login außerhalb des Planers mit ?sicht=admin → nur eigene ID (Option A, 08.10.2026)")
     check(su(False, U1, True, "admin") == U1 and su(False, U1, True, "alle") == U1, "sicht: nur-eigene (admin_zugang) bleibt bei der eigenen ID")
     check(su(False, U1, False, None) == U1 and su(False, U1, False, "") == U1 and su(False, U1, False, "eigene") == U1,
           "sicht: ohne Parameter / anderer Wert → eigene ID wie bisher")
