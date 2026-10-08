@@ -220,6 +220,30 @@ def main():
             z_ = {k: rz.choice(["buy", "sell"]) for k in tr_}
             abw += bw(z_) != L(z_, tr_, fe_, ZEITEN_LIVE)[0]
     check(abw == 0, f"ap_misch_bewerter rechnet wie ap_misch_lage (1.500 Zufalls-Zuteilungen, Abweichungen {abw})")
+    # SCHRANKE im Optimierer (08.10.2026 abends, Master: Planer-Lauf blockierte ~5–7 s CPU): mit und ohne Schranke dasselbe Ergebnis
+    # (Zuteilung, Netto, Wert-Tupel) — 40 Zufalls-Fälle, mit und ohne Einsatz-Kontext, bis 18 Tranchen (> 12 = Würfe + Einzeltausch)
+    RD = a["ap_richtungen_delta"]
+    rs_ = random.Random(23)
+    abw_s = 0
+    for _ in range(40):
+        tr_, fe_ = {}, []
+        for n in range(rs_.randint(2, 18)):
+            f_, r_ = rs_.choice(firmen_)
+            u_ = f"u{rs_.randint(1, 7)}"
+            tr_[f"{u_}|{f_}#{n}"] = {"fest": rs_.choice([None] * 6 + ["buy", "sell"]), "user": u_, "firma": f_, "route": r_,
+                                     "start": rs_.randint(0, 985), "delta_abs": rs_.random() * 5, "einsatz_abs": rs_.random() * 900,
+                                     "gruppe": f"{u_}|{f_}", "n_plaene": rs_.randint(1, 2)}
+        for _k in range(rs_.randint(0, 4)):
+            fe_.append({"user_id": f"u{rs_.randint(1, 8)}", "firma": rs_.choice(firmen_)[0], "richtung": rs_.choice(["buy", "sell"]),
+                        "start": rs_.randint(0, 985)})
+        ek_ = rs_.choice([None, {"basis": rs_.uniform(-500, 500), "brutto": 800.0, "fest_ev": [], "gross_ab": 300.0, "laufzeit": 180}])
+        sd_ = rs_.randint(1, 10 ** 6)
+        mit = RD(tr_, 0.0, 10.0, random.Random(sd_), 25, (), fe_, versuche=512, einsatz=ek_, mit_wert=True, firma_fest=fe_,
+                 zeiten=ZEITEN_LIVE)
+        ohne = RD(tr_, 0.0, 10.0, random.Random(sd_), 25, (), fe_, versuche=512, einsatz=ek_, mit_wert=True, firma_fest=fe_,
+                  zeiten=ZEITEN_LIVE, ohne_schranke=True)
+        abw_s += mit != ohne
+    check(abw_s == 0, f"Schranke im Optimierer ändert nie das Ergebnis (40 Zufalls-Fälle, Abweichungen {abw_s})")
     txt = a["ap_misch_text"](lage(tf)[1], lage(tf2)[1], {"tradeify": "Tradeify"})
     check(txt.startswith("Tradeify im Fenster ") and "long/short" in txt, f"ap_misch_text nennt die Zelle mit dem größten Gewinn ({txt})")
 

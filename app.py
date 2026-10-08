@@ -17303,7 +17303,7 @@ def ap_misch_text(vor, nach, namen=None):
 
 
 def ap_richtungen_delta(tranchen, basis_netto, basis_brutto, rnd, band_pct, fest_ereignisse=(), bestehende=(), versuche=4096,
-                        einsatz=None, mit_wert=False, firma_fest=(), zeiten=None):
+                        einsatz=None, mit_wert=False, firma_fest=(), zeiten=None, ohne_schranke=False):
     """REIN RECHNEND (Vertrag §2, Korrektur Finn 06.10.2026 „nicht so fixe Minuten-Regeln, einfach Zufallsprinzip"): Richtung
     je TRANCHE (ID × Firma). Dieselbe Firma darf bei verschiedenen IDs gegenläufig sein — kein Verbot, keine Pause; nur ein
     weicher Malus, wenn zwei gegenläufige derselben Firma dichter als AP_GEGEN_DICHT_MIN starten (dann lieber anders würfeln).
@@ -17320,7 +17320,8 @@ def ap_richtungen_delta(tranchen, basis_netto, basis_brutto, rnd, band_pct, fest
     jede Firma mit ≥ AP_FIRMA_MISCH_AB Trades über ≥ 2 IDs bekommt beide Richtungen (seltenere ≥ AP_FIRMA_MISCH_MIN), sonst Netto/Zufall.
     Mit zeiten (08.10.2026 abends, Finn: „nicht ganze Gruppen gleichzeitig in eine Richtung kippen") zählt dieselbe Strafe auch je
     Startfenster × Firma, × Klasse (CFD/Futures), insgesamt und das Kippen CFD gegen Futures (ap_misch_lage) — tranchen tragen dafür
-    start + route, firma_fest start + route."""
+    start + route, firma_fest start + route.
+    ohne_schranke (nur Selbsttest): jedes z voll bewerten — Gegenprobe, dass die Schranke (s. wert) das Ergebnis nie ändert."""
     namen = sorted(tranchen or {})
     gruppe = {k: str(tranchen[k].get("gruppe") or k) for k in namen}
     basis = {k: tranchen[k]["fest"] for k in namen if tranchen[k].get("fest") in ("buy", "sell")}
@@ -17333,23 +17334,35 @@ def ap_richtungen_delta(tranchen, basis_netto, basis_brutto, rnd, band_pct, fest
     paare = ap_dicht_paare(tranchen, bestehende)
     misch_f = ap_misch_bewerter(tranchen, firma_fest, zeiten)          # FIRMEN-/FENSTER-MISCHUNG, einmal vorgerechnet (08.10.2026)
 
-    def wert(z):
+    def verlauf(z):
         ev = list(fest_ereignisse or ()) + [(tranchen[k]["start"], float(tranchen[k].get("delta_abs") or 0) * (1 if z[k] == "buy" else -1))
                                             for k in namen]
-        v = ap_verlauf(basis_netto, basis_brutto, ev, band_pct)
-        band_ueber = round(max([abs(x["netto_delta"]) - x["band_delta"] for x in v["verlauf"]] + [0.0]), 1)
+        return ap_verlauf(basis_netto, basis_brutto, ev, band_pct)
+
+    def wert(z, schranke=None):
+        # SCHRANKE (08.10.2026 abends, Master: Planer-Lauf blockiert ~5–7 s CPU im Railway-Worker): das Wert-Tupel wird lexikografisch
+        # verglichen — ist schon sein Anfang (Malus, Mischung bzw. + Netto-Stufe) schlechter als der beste bisher (schranke), kann dieses
+        # z nie gewinnen → None, ohne den teuren Rest (Einsatz-Lage, ID-Mischung) zu rechnen. Verlustfrei: dasselbe Ergebnis wie ohne.
+        # Das €/Pkt-Netto (verlauf) rechnet der Aufrufer nur noch für den Sieger.
         if einsatz:
+            # Malus zuerst (Finn: gleiche Firma gegenläufig kurz hintereinander nur, wenn es gar nicht anders geht); dann die
+            # FIRMEN-MISCHUNG (08.10.2026: eine Firma nie den ganzen Tag/kein Fenster nur in eine Richtung), dann das Gesamt-Netto in
+            # Stufen, dann die ID-Mischung (08.10.2026, Finn: keine ID komplett long/short bei ≥ 4 Plänen über ≥ 2 Firmen)
+            kopf = (_ap_gegen_dicht(z, paare), misch_f(z))
+            if schranke is not None and kopf > schranke[:2]:
+                return None
             # Finn 07.10.2026 (Präzisierung): EINE Kennzahl = Einsatz in € — €/Pkt gleicht nicht mehr aus (nur Info)
             el = ap_einsatz_lage(einsatz.get("basis"), list(einsatz.get("fest_ev") or ()) + [
                 (tranchen[k]["start"], float(tranchen[k].get("einsatz_abs") or 0) * (1 if z[k] == "buy" else -1)) for k in namen],
                 einsatz.get("gross_ab"), laufzeit_min=einsatz.get("laufzeit"))
-            # Malus zuerst (Finn: gleiche Firma gegenläufig kurz hintereinander nur, wenn es gar nicht anders geht); dann das
-            # Gesamt-Netto in Stufen, dann die ID-Mischung (08.10.2026, Finn: keine ID komplett long/short bei ≥ 4 Plänen über ≥ 2 Firmen)
-            # FIRMEN-MISCHUNG (08.10.2026) direkt nach dem Malus: eine Firma nie den ganzen Tag nur in eine Richtung
-            return (_ap_gegen_dicht(z, paare), misch_f(z), int(el["netto_eur_max_abs"] // AP_EUR_STUFE),
-                    ap_id_misch(z, tranchen)[0], el["gross_folge"], el["netto_eur_max_abs"], abs(el["netto_eur_ende"])), v["netto_max_abs"]
+            kopf += (int(el["netto_eur_max_abs"] // AP_EUR_STUFE),)
+            if schranke is not None and kopf > schranke[:3]:
+                return None
+            return kopf + (ap_id_misch(z, tranchen)[0], el["gross_folge"], el["netto_eur_max_abs"], abs(el["netto_eur_ende"]))
+        v = verlauf(z)
+        band_ueber = round(max([abs(x["netto_delta"]) - x["band_delta"] for x in v["verlauf"]] + [0.0]), 1)
         return (band_ueber, _ap_gegen_dicht(z, paare), misch_f(z), ap_id_misch(z, tranchen)[0],
-                round(v["netto_max_abs"], 1), round(abs(v["verlauf"][-1]["netto_delta"]), 3)), v["netto_max_abs"]
+                round(v["netto_max_abs"], 1), round(abs(v["verlauf"][-1]["netto_delta"]), 3))
 
     def zuteilung(bits):
         z = dict(basis)
@@ -17361,12 +17374,12 @@ def ap_richtungen_delta(tranchen, basis_netto, basis_brutto, rnd, band_pct, fest
         rnd.shuffle(reihe)
     else:
         reihe = [rnd.getrandbits(len(frei)) for _ in range(max(1, int(versuche)))]
-    best, best_k, best_m = dict(basis), None, None
+    best, best_k = dict(basis), None
     for bits in reihe:
         z = zuteilung(bits)
-        k, m = wert(z)
-        if best_k is None or k < best_k:
-            best, best_k, best_m = z, k, m
+        k = wert(z, None if ohne_schranke else best_k)
+        if k is not None and (best_k is None or k < best_k):
+            best, best_k = z, k
     if len(frei) > 12:                     # Einzeltausch je Gruppe, bis keiner mehr verbessert
         besser = True
         while besser:
@@ -17376,11 +17389,12 @@ def ap_richtungen_delta(tranchen, basis_netto, basis_brutto, rnd, band_pct, fest
                 for k in namen:
                     if k not in basis and gruppe[k] == g:
                         z[k] = "sell" if z[k] == "buy" else "buy"
-                k, m = wert(z)
-                if k < best_k:
-                    best, best_k, best_m, besser = z, k, m, True
+                k = wert(z, None if ohne_schranke else best_k)
+                if k is not None and k < best_k:
+                    best, best_k, besser = z, k, True
     if best_k is None:
-        best_k, best_m = wert(best)
+        best_k = wert(best)
+    best_m = verlauf(best)["netto_max_abs"]
     return (best, best_m, best_k) if mit_wert else (best, best_m)
 
 
