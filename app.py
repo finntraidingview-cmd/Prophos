@@ -16547,6 +16547,8 @@ AP_VERTEILUNG_BAND_TOLERANZ_EUR = 200.0
 # sind nur Shorts drin, viel zu viel Short. Der Bot muss das checken und in genau solchen Phasen schnell Longs vorziehen"):
 AP_VORZIEHEN_AB_MIN = 3                # frühestens jetzt + 3 min
 AP_VORZIEHEN_JITTER_MIN = 3            # Streuung hinter dem frühesten freien Platz
+AP_VORZIEHEN_HYSTERESE_EUR = 100.0     # Vorziehen löst schon ab 100 € über dem 60-min-Band aus (sonst Hysterese 200 €) — Master/Finn
+                                       # 08.10.2026: bei reinen Shorts liegt das Über-Band ≈ 0,75 × |Netto|, 200 € erst ab ≈ 267 € Netto
 
 
 def _ap_firma_konflikt(i, je, zustand, gestartet=(), gap=None):
@@ -16654,7 +16656,8 @@ def ap_verteilung(gruppe, je, zustand, jetzt_min, zeiten, rnd, gestartet=None, l
 
 
 def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, rnd, gestartet=None, id_fest=None,
-                schritte=AP_BOT_SCHRITTE, einsatz=None, zuletzt=None, hysterese=None, dubai_min=0):
+                schritte=AP_BOT_SCHRITTE, einsatz=None, zuletzt=None, hysterese=None, dubai_min=0, vorgezogen_heute=None,
+                verteilt_heute=None):
     """REIN RECHNEND (Vertrag §3, Korrektur Finn 06.10.2026): ein Lauf des Ausgleichs-Bots. plaene = heutige geplante Pläne
     [{plan_id, user_id, user, firma, richtung, start_min, delta_abs, aenderbar}] — nicht änderbare zählen mit und sperren ihre
     Tranche. gestartet = heute schon gestartete Trades [{user_id, firma, start, richtung}] (nur für den weichen Malus),
@@ -16712,7 +16715,8 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
     # ID-MISCHUNG OHNE BAND-ANLASS (08.10.2026, Finn: „warum ist bei Chris immer noch alles long?" — 7 Pläne von 02:02 Dubai, also vor
     # .1220 angelegt; Nachplanen lässt bestehende stehen, der Bot drehte nur bei Band-Überschreitung): auch eine ID-Mischung > 0 weckt
     # den Bot — die Band-Schritte unten laufen trotzdem nur, wenn das Band offen ist, danach die eigene Mischungs-Phase
-    if not offen_(vorher) and not vorher[4] and not klumpen:
+    schwelle_v = min(schwelle, AP_VORZIEHEN_HYSTERESE_EUR) if einsatz else schwelle   # Vorziehen: eigene, niedrigere Schwelle
+    if not offen_(vorher) and not vorher[4] and not klumpen and not vorher[1] > schwelle_v:
         return {"aenderungen": [], "vorher": als_dict(vorher), "nachher": als_dict(vorher), "ausloeser": None,
                 "daempfung": {"hysterese": schwelle, "ruhe_min": AP_RUHE_JE_PLAN_MIN, "ruhig": []}}
     ausloeser = None if not offen_(vorher) else (
@@ -16752,6 +16756,27 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
         vor_ab = [] if any(abs(float(x.get("min", 0)) - ab_m) < 1e-9 for x in vl) else \
             [x for x in vl if float(x.get("min", 0)) < ab_m - 1e-9][-1:]                # gilt noch über ab_m hinaus (ohne eigenen Schritt dort)
         return max([abs(x["netto_delta"]) - x["band_delta"] for x in vor_ab + [x for x in vl if float(x.get("min", 0)) >= ab_m - 1e-9]] + [0.0])
+    def flaeche_ab(z, ab_m):
+        # Über-Band-FLÄCHE (€ × min) von ab_m bis jetzt + 60. Der Spitzenwert taugt fürs Vorziehen nicht: die laufenden Trades zählen
+        # im Modell genau laufzeit ab jetzt — ein Long, der 4 min später startet, „überlebt" sie um 4 min und steht dort allein; der
+        # Spitzenwert sinkt dann nie, obwohl der Long die Shorts eine Stunde lang ausgleicht (Selftest-Befund 08.10.2026)
+        bis_m = float(jetzt_min) + 60
+        if einsatz:
+            ev_ = [(z[i]["start"], float(je[i].get("einsatz_abs") or 0) * (1 if z[i]["richtung"] == "buy" else -1)) for i in z]
+            v_ = ap_verlauf(einsatz.get("basis"), einsatz.get("brutto"), ev_, band_pct, ab_min=jetzt_min, bis_min=bis_m,
+                            laufzeit_min=einsatz.get("laufzeit"))
+        else:
+            ev_ = [(z[i]["start"], float(je[i].get("delta_abs") or 0) * (1 if z[i]["richtung"] == "buy" else -1)) for i in z]
+            v_ = ap_verlauf(basis_netto, basis_brutto, ev_, band_pct, ab_min=jetzt_min, bis_min=bis_m)
+        vl = sorted(v_["verlauf"], key=lambda x: float(x.get("min", 0)))
+        summe = 0.0
+        for k_, x in enumerate(vl):
+            a_ = max(float(x.get("min", 0)), float(ab_m))
+            b_ = min(float(vl[k_ + 1].get("min", bis_m)) if k_ + 1 < len(vl) else bis_m, bis_m)
+            if b_ > a_:
+                summe += max(0.0, abs(x["netto_delta"]) - x["band_delta"]) * (b_ - a_)
+        return summe
+
     def netto_bei(z, m):
         # Netto-Einsatz (bzw. -Delta) zur Minute m — für den Protokoll-Text „Netto vorher → nachher" am neuen Start
         if einsatz:
@@ -16764,7 +16789,11 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
         vor = [x for x in sorted(v_["verlauf"], key=lambda x: float(x.get("min", 0))) if float(x.get("min", 0)) <= float(m) + 1e-9]
         return float(vor[-1]["netto_delta"]) if vor else 0.0
     vorgezogen = False
-    if offen_(aktuell):
+    # PINGPONG-BREMSE (Prüfer 08.10.2026 zu 6211801): vorgezogen_heute = Pläne, die „Gegenrichtung vorziehen" heute bewegt hat → die
+    # Verteilung schiebt sie nie wieder nach hinten; verteilt_heute = von der Verteilung bewegte → werden nur vorgezogen, wenn der Abstand
+    # je ID × Firma danach ≥ ½ bleibt (keine ¼-Stufe). Beides aus auto_plan_umplanung (ap_ausgleichen).
+    vorgezogen_heute, verteilt_heute = set(vorgezogen_heute or ()), set(verteilt_heute or ())
+    if aktuell[1] > schwelle_v:
         n_vor = netto60(zustand)
         noetig = "buy" if n_vor < 0 else "sell"
         laufz = float((einsatz or {}).get("laufzeit") or AP_VERTEIL_GEGEN_MIN)
@@ -16808,7 +16837,7 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                         return False                         # Abstand je ID × Firma
                 return True
             ziel = None
-            for f in [x for x in AP_ABSTAND_STUFEN if x > 0]:
+            for f in [x for x in AP_ABSTAND_STUFEN if x > 0 and (x >= 0.5 or i not in verteilt_heute)]:
                 frei_ = [t for t in range(int(-(-lo // 1)), int(min(s0, fen[1])) ) if ok(t, f)]
                 if frei_:
                     ziel = float(rnd.choice([t for t in frei_ if t <= frei_[0] + AP_VORZIEHEN_JITTER_MIN]))
@@ -16818,9 +16847,9 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
             z = {k: dict(v) for k, v in zustand.items()}
             z[i]["start"] = ziel
             k_neu = strafe(z) + (misch(z),)
-            u_vor, u_neu = ueber_ab(zustand, ziel), ueber_ab(z, ziel)   # ab dem neuen Start: vorher gegen nachher
+            u_vor, u_neu = flaeche_ab(zustand, ziel), flaeche_ab(z, ziel)   # Über-Band-Fläche ab dem neuen Start: vorher gegen nachher
             if k_neu[0] > aktuell[0] or k_neu[1] > aktuell[1] + 1e-9 or u_neu >= u_vor - 1e-9:
-                continue                                     # muss das Band ab dem neuen Start verbessern, 60 min nicht schlechter, kein Malus
+                continue                                     # muss das Band ab dem neuen Start verbessern, 60-min-Spitze nicht schlechter, kein Malus
             gewinn = u_vor - u_neu
             if beste is None or (-gewinn, ziel) < (-beste[4], beste[3]):
                 beste = (k_neu, i, z, ziel, gewinn)          # die größte Verbesserung, bei Gleichstand der frühere Start
@@ -16873,6 +16902,8 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                 continue
             for _v in range(12):
                 neu = float(rnd.randint(lo, hi))
+                if neu > t["start"] and any(i_ in vorgezogen_heute for i_ in ids):
+                    continue                     # PINGPONG-BREMSE: vorgezogene Pläne schiebt auch der Band-Schritt heute nie nach hinten
                 if abs(neu - t["start"]) < 1 or t["ende"] + (neu - t["start"]) >= fen[1] or _ap_tranche_frei(t, neu, tr, zeiten):
                     continue                     # auch das letzte Konto der Tranche bleibt im Fenster (nie auf den Folgetag)
                 z = {i: dict(v) for i, v in zustand.items()}
@@ -16976,6 +17007,7 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
     def zeiten_txt(ms):
         return "/".join(_ap_hhmm_txt((float(m) + float(dubai_min or 0)) % 1440) for m in ms)
     tag_vor_v = None
+    je_alt, je = je, {i: (dict(p, aenderbar=False) if i in vorgezogen_heute else p) for i, p in je.items()}   # Pingpong-Bremse
     for _m0, g in ([] if vorgezogen else ap_verteil_gruppen(je, zustand, gestartet=gestartet)):
         ids_g = sorted((i for i in zustand if f"{je[i]['user_id']}|{je[i]['firma']}" == g), key=lambda i: zustand[i]["start"])
         if ruht([i for i in ids_g if je[i].get("aenderbar")]):
@@ -17012,6 +17044,7 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                                 "von_start_min": zustand[i]["start"], "nach_start_min": neu[i], "grund": grund})
         zustand, aktuell = z, k_neu
         break                                     # höchstens EINE ID × Firma je Lauf (wie die Mischung)
+    je = je_alt
     return {"aenderungen": aenderungen, "vorher": als_dict(vorher), "nachher": als_dict(aktuell), "ausloeser": ausloeser,
             "daempfung": {"hysterese": schwelle, "ruhe_min": AP_RUHE_JE_PLAN_MIN,
                           "ruhig": sorted({i for i in je if ruht([i])})}}
@@ -17770,12 +17803,17 @@ def ap_ausgleichen(trocken=False, quelle="bot", jetzt=None, seed=None):
         print(f"[auto-plan] ⚠️ Richtungsschutz: {rs['fehler']}", flush=True)
     seed = int(seed) if seed not in (None, "") else random.SystemRandom().randrange(1, 2 ** 31)
     # DÄMPFUNG (08.10.2026): letzte Umplanung je Plan heute (auto_plan_umplanung, bot UND hand) als Minute des Tages → Ruhezeit
-    zuletzt = {}
+    zuletzt, vorgez_h, verteilt_h = {}, set(), set()
     try:
         for r in (_ap_umplanungen_heute(stand)[0] or []):
             um = r.get("um")
             if not um or not r.get("plan_id"):
                 continue
+            g_ = str(r.get("grund") or "")
+            if g_.startswith("Ausgleich:") and "vorgezogen" in g_:
+                vorgez_h.add(str(r["plan_id"]))       # Pingpong-Bremse (08.10.2026)
+            elif g_.startswith("Verteilung:"):
+                verteilt_h.add(str(r["plan_id"]))
             m = (datetime.fromisoformat(str(um).replace("Z", "+00:00")) - stand["mitternacht"]).total_seconds() / 60.0
             pid = str(r["plan_id"])
             zuletzt[pid] = max(zuletzt.get(pid, -1e9), m)
@@ -17784,7 +17822,7 @@ def ap_ausgleichen(trocken=False, quelle="bot", jetzt=None, seed=None):
     erg = ap_umplanen(_ap_stand_plaene(stand), stand["basis_netto"], stand["basis_brutto"], max(0.0, stand["jetzt_min"]),
                       stand["zeiten"], param["zielband_pct"], random.Random(seed), gestartet=stand["starts_heute"],
                       id_fest=stand["id_fest"], einsatz=ap_einsatz_kontext(stand, param), zuletzt=zuletzt,
-                      dubai_min=_ap_dubai_versatz(stand["mitternacht"]))
+                      dubai_min=_ap_dubai_versatz(stand["mitternacht"]), vorgezogen_heute=vorgez_h, verteilt_heute=verteilt_h)
     je = {z["plan_id"]: z for z in stand["geplant"]}
     if trocken:
         umpl = [{"um": None, "plan_id": a["plan_id"], "user_id": a["user_id"], "user": (je.get(a["plan_id"]) or {}).get("user"),

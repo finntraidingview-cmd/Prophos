@@ -95,6 +95,46 @@ def main():
            id_fest={k: dict(v, richtung="buy") for k, v in id_fest.items()}, einsatz=dict(EK, basis=1000.0))
     check(len(sp["aenderungen"]) == 1 and sp["aenderungen"][0]["nach_richtung"] == "sell", f"zu viel Long → ein Short vorgezogen ({[x['plan_id'] for x in sp['aenderungen']]})")
 
+    # ── Hysterese 100 € nur fürs Vorziehen: Über-Band 150 € (unter 200, über 100) löst aus ──────────────────────────────────────
+    # nur Shorts laufend: Über-Band = |Netto| − 25 % × Brutto = 0,75 × |Netto| → Netto −200 € ergibt 150 €
+    e_h = U([plan("chris_fp", "chris", "fundingpips", "07:30", "buy")], 0.0, 0.0, jetzt, Z, 25, random.Random(1),
+            einsatz=dict(EK, basis=-200.0, brutto=200.0))
+    check(e_h["vorher"]["ueber_band"] < 200 and len(e_h["aenderungen"]) == 1,
+          f"Über-Band {e_h['vorher']['ueber_band']} € (< 200 Hysterese, > {a['AP_VORZIEHEN_HYSTERESE_EUR']:g}): Long wird vorgezogen")
+    e_h0 = U([plan("chris_fp", "chris", "fundingpips", "07:30", "buy")], 0.0, 0.0, jetzt, Z, 25, random.Random(1),
+             einsatz=dict(EK, basis=-120.0, brutto=120.0))
+    check(not e_h0["aenderungen"], f"Über-Band {e_h0['vorher']['ueber_band']} € (< 100): nichts")
+
+    # ── PINGPONG-BREMSE über 6 Läufe: vorgezogen → nie wieder nach hinten verteilt ───────────────────────────────────────────
+    # Moritz hat zwei FundedNext-Longs 09:10/10:30; Netto short → 09:10 wird vorgezogen; die Verteilung darf ihn danach nicht zurück-
+    # schieben (sie würde sonst den Klumpen gegen den laufenden Plan auflösen), auch nicht, wenn das Band wieder hält
+    pp = [plan("m1", "moritz", "fundednext", "09:10", "buy"), plan("m2", "moritz", "fundednext", "05:20", "buy")]
+    pl6, jm6, zul6, vorg6, vert6, verlauf = [dict(p) for p in pp], jetzt, {}, set(), set(), []
+    for lauf in range(6):
+        ek6 = dict(EK, basis=-600.0 if lauf < 2 else 0.0, brutto=600.0 if lauf < 2 else 0.0)   # ab Lauf 3 ausgeglichen
+        e6 = U(pl6, 0.0, 0.0, jm6, Z, 25, random.Random(lauf), einsatz=ek6, zuletzt=zul6, dubai_min=120,
+               vorgezogen_heute=vorg6, verteilt_heute=vert6)
+        for x in e6["aenderungen"]:
+            (vorg6 if x["grund"].startswith("Ausgleich:") else vert6).add(x["plan_id"])
+            zul6[x["plan_id"]] = jm6
+            verlauf.append((lauf, x["plan_id"], round(x["von_start_min"]), round(x["nach_start_min"]), x["grund"][:20]))
+        neu6 = {x["plan_id"]: x["nach_start_min"] for x in e6["aenderungen"]}
+        pl6 = [dict(p, start_min=neu6.get(p["plan_id"], p["start_min"])) for p in pl6]
+        jm6 += 31                                                        # nach der Ruhezeit
+    rueck = [v for v in verlauf if v[1] in vorg6 and v[4].startswith("Verteilung") and v[3] > v[2]]
+    check(vorg6 and not rueck, f"6 Läufe: vorgezogener Plan wird nie wieder nach hinten verteilt ({verlauf})")
+    hin_her = {}
+    for v in verlauf:
+        hin_her.setdefault(v[1], []).append(v[3] - v[2])
+    check(all(not (any(d < 0 for d in ds) and any(d > 0 for d in ds)) for ds in hin_her.values()), "kein Plan wandert vor UND zurück")
+    # verteilter Plan wird nur vorgezogen, wenn ≥ ½ Abstand bleibt (keine ¼-Stufe = 15 min)
+    vt = [plan("v1", "ina", "tradeify", "05:20", "buy"), plan("v2", "ina", "tradeify", "07:00", "buy")]
+    e_v = U(vt, 0.0, 0.0, jetzt, Z, 25, random.Random(1), einsatz=EK, verteilt_heute={"v2"})
+    nv = {x["plan_id"]: x["nach_start_min"] for x in e_v["aenderungen"]}
+    st_v = {p["plan_id"]: nv.get(p["plan_id"], p["start_min"]) for p in vt}
+    check("v2" not in nv or abs(st_v["v2"] - st_v["v1"]) >= a["AP_ABSTAND_ID_FIRMA_MIN"] * 0.5,
+          f"verteilter Plan: Vorziehen nur mit ≥ ½ Abstand je ID × Firma ({[(k, round(v)) for k, v in st_v.items()]})")
+
     print()
     if FEHLER:
         print(f"✗ {len(FEHLER)} Fehler")
