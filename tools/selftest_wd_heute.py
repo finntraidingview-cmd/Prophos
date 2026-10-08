@@ -83,6 +83,9 @@ def main():
           and z["konto"]["groesse"] == 150000 and z["konto"]["kontonr_ende"] == "0025" and z["farbe_key"] == "u1"
           and z["id"] == "p1" and z["kt"] == 1.0 and z["handelstag"] == "2026-09-24" and z["grund"] is None,
           "Zeile: Wurzel aus master_symbol, Level aus hedge.einstieg_nq, Rundgang-P&L, Hedge komplett, kontonr_ende, farbe_key, farmer, verknuepft")
+    # konto_id (08.10.2026): „Braucht dich" blendet Konten in Manueller Arbeit über die Konto-ID aus (gleichnamige Konten je ID)
+    check(z["konto_id"] == "a1" and a["_wd_heute_zeile"](dict(p, master_account_id=None), None, {})["konto_id"] is None,
+          "Zeile: konto_id = master_account_id, ohne Konto None")
     p2 = dict(p, id="p2", notes=None, hedge_eur=None, status="review", master_sl="100", started_at="2026-09-24T22:30:00Z", ended_at="2026-09-24T23:00:00Z",
               mt5_baseline={"tv": {"today_pnl_start": 10.0, "datum_start": "2026-09-25"}, "final": {"today_pnl": 40.0, "datum": "2026-09-25", "at": "x"}})
     z2 = a["_wd_heute_zeile"](p2, None, {})

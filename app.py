@@ -10242,6 +10242,9 @@ def _wd_heute_zeile(p, acc, disp, vorher=None):
     slz = wd_sl_zeile(p, acc, hedge, tv, einstieg, richtung, ppl, kt, sl_usd, vorher)
     zeile = {
         "id": str(p.get("id")), "plan_id": str(p.get("id")), "user_id": uid, "person": disp.get(uid, uid[:8]),
+        # konto_id = master_account_id (08.10.2026, Prüfer zu „Manuelle Arbeit" aus „Braucht dich"): viele IDs haben mehrere
+        # gleichnamige Konten — der Trade-Planer blendet deshalb über die Konto-ID aus, nicht über den Namen
+        "konto_id": str(p.get("master_account_id") or "") or None,
         # farbe_key: derselbe Schluessel, mit dem die Flotte Personen faerbt (merken(w.uid) → mt5FleetFarbe(uid)) —
         # die user_id; das Frontend hasht wie gehabt
         "farbe_key": uid,
@@ -10444,7 +10447,7 @@ def admin_wd_heute():
     über alle IDs (route tvv2 UND (Farmer-Notiz ODER hedge_eur > 0)) plus alle laufenden (status
     open) und alle zu prüfenden (status review), egal welcher Tag. Zusätzlich je Plan (25.09.2026, Abhak-Liste):
     master_pl_plan, slave_pl, pl_quelle, final_quelle, master_pl_schaetzung, completed_at. Auth wie /admin/wd-plaene (sb-token, Service-Key liest).
-    Je Plan: {id (= plan_id), user_id, person, farbe_key, konto{name, firma, groesse, kontonr_ende,
+    Je Plan: {id (= plan_id), user_id, person, konto_id (= master_account_id, 08.10.2026), farbe_key, konto{name, firma, groesse, kontonr_ende,
     external_id}, route, richtung, kt (= kontrakte), symbol_root, master_tp, master_sl, status, start_um,
     started_at, ended_at, einstieg_nq, einstieg_quelle ('hedge'|'tv'|null), tp_level_nq, sl_level_nq (eingefroren am Hedge, sonst gerechnet),
     schliesst_bei_nq (Wächter-Level)|null, level_quelle 'hedge'|'einstieg'|null, master_pl{wert, at, quelle}|null,

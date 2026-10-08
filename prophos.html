@@ -28316,6 +28316,8 @@
         neu = weg ? null : Object.assign({ at: new Date().toISOString(), notiz: String(notiz || ''), von: null }, d.manuell || {}, { schritt: String(schritt || (alt && alt.schritt) || 'sonst') })   // schritt lokal halten, bis das Backend es zurückgibt
       }
       if(t) t.manuell = neu   // sofort sichtbar, der nächste Abruf holt den Backend-Stand
+      // Trade-Planer „Braucht dich" liest das Kennzeichen aus _tpl.lt (tplManuellKonten, 08.10.2026) — dieselbe Zeile gleich mitziehen
+      try{ const lt = _tpl.lt && _tpl.lt.get(pid); if(lt) lt.manuell = neu }catch(_){}
       if(typeof atToast === 'function') atToast(weg ? 'Zurück nach „Überprüfen"' : (alt ? 'Notiz gespeichert' : 'In „Manuelle Arbeit" — nichts verbucht'), weg ? 'end' : 'ok')
       return true
     }catch(e){
@@ -41313,7 +41315,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1313'
+  const OS_TAB_BUILD = '2026-09-22.1314'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -47242,8 +47244,49 @@
     const b = acc ? tplKontoBalance(acc) : null
     return b && b.at > seit && isFinite(Number(b.bal)) ? { val: Number(b.bal), at: b.at } : null
   }
+  /* MANUELLE ARBEIT RAUS AUS „BRAUCHT DICH" (08.10.2026, Finn: „Wenn Accounts bei manueller Arbeit sind, sollen sie mir nicht angezeigt
+   * werden" — The5%ers 200k stand im Radar unter „Manuelle Arbeit" (Warten, bis The5ers den Acc freigibt) und zugleich hier als „Endlesung —
+   * Ergebnis nie gelesen … Trade steht in Überprüfen"). Kennzeichen wie im Radar (wdlManuell): mt5_baseline.manuell mit at, nur an Plänen
+   * in „review". Quelle je Plan: die /admin/live-trades-Zeile aller IDs (_tpl.lt, Feld manuell — Planer-Seite 60 s, Admin-Reiter 20 s),
+   * fehlt sie, der eigene Plan aus tradePlans. tplBraucht lässt für diese Konten JEDE Zeile weg (Endlesung, ausgelassen, Balance,
+   * Start-Fehler …). Im Radar bleibt alles sichtbar; „zurück"/Abhaken nimmt das Kennzeichen weg, dann erscheinen die Fälle wieder.
+   * Nur Anzeige — Planer, Nachlesung und Endlesung laufen unverändert.
+   * ÜBER DIE KONTO-ID (Prüfer-Befund zu .1311, 08.10.2026: viele IDs haben mehrere GLEICHNAMIGE Konten — Finn + Pascal und Moritz je zwei
+   * Challenge/Phase-Konten mit demselben Namen, andere 8–10; über den Namen verschwanden alle gleichnamigen mit). Konto-ID aus der Live-Zeile
+   * (konto_id, app.py seit diesem Stand), sonst aus dem eigenen Plan (masterAccountId). Der Name zählt nur als Rückfall, wenn eine Seite
+   * wirklich keine Konto-ID hat (Live-Zeile vom alten Backend-Stand, Braucht-Zeile ohne konto_id). */
+  function tplManuellKonten(){
+    const istM = (status, m) => status === 'review' && !!(m && typeof m === 'object' && m.at)
+    const je = new Map()   // plan_id → { m: in Manueller Arbeit?, kid: Konto-ID | '', k: [Namen-Schlüssel tplKk] }
+    if(currentUserId) for(const p of tradePlans || []){
+      if(!p || p.status !== 'review') continue
+      je.set(String(p.id), { m: istM(p.status, p.mt5Baseline && p.mt5Baseline.manuell), kid: p.masterAccountId ? String(p.masterAccountId) : '', k: [tplKk(currentUserId, p.masterName)] })
+    }
+    // Live-Zeile schlägt den eigenen Plan (tradePlans lädt am Mac nur beim Login — ein „zurück" am Handy käme sonst nie an)
+    for(const t of (_tpl.lt && _tpl.lt.values()) || []){
+      if(!t || !t.plan_id) continue
+      const alt = je.get(String(t.plan_id)), kn = t.konto && typeof t.konto === 'object' ? t.konto.name : t.konto
+      const kid = t.konto_id || (t.konto && typeof t.konto === 'object' && t.konto.id) || (alt && alt.kid) || ''
+      je.set(String(t.plan_id), { m: istM(t.status, t.manuell), kid: kid ? String(kid) : '', k: [tplKk(t.user_id, kn), ...((alt && alt.k) || [])] })
+    }
+    const kids = new Set(), namen = new Set(), namenOhneId = new Set()
+    for(const v of je.values()){
+      if(!v.m) continue
+      if(v.kid) kids.add(v.kid)
+      for(const k of v.k) if(k && !/\|$/.test(k)){ namen.add(k); if(!v.kid) namenOhneId.add(k) }
+    }
+    return { kids, namen, namenOhneId }
+  }
+  // Braucht-Zeile weglassen? kid = Konto-ID der Zeile, falls bekannt — dann zählt nur die ID (Name nur für Pläne ohne bekannte Konto-ID)
+  function tplManRaus(man, uid, kid, konto){
+    if(!man) return false
+    const k = tplKk(uid, konto)
+    return kid ? (man.kids.has(String(kid)) || man.namenOhneId.has(k)) : man.namen.has(k)
+  }
   function tplBraucht(D, ids){   // ids = Set der sichtbaren IDs, null = alle
     const je = new Map(), jetzt = Date.now(), ich = (_ap.ich && _ap.ich.name) || ''
+    // Konten in „Manuelle Arbeit" (Radar) → keine Zeile, egal welcher Fall (08.10.2026, s. tplManuellKonten) — geprüft je Quelle unten
+    let man = null; try{ man = tplManuellKonten() }catch(e){ console.warn('[tpl] Manuelle Arbeit', e) }
     const add = (uid, name, z) => { const k = String(uid || ''); if(!k || (ids && !ids.has(k))) return
       if(!je.has(k)) je.set(k, { uid: k, name: name || '', zeilen: [] }); const o = je.get(k); if(!o.name && name) o.name = name; o.zeilen.push(z) }
     const roh = D.roh, tagGleich = roh && String(roh.tag || '') === D.tag, konten = new Set()
@@ -47251,6 +47294,7 @@
       const arch = typeof getArchive === 'function' ? (getArchive() || {}) : {}
       for(const a of accounts || []){
         if(!a || !TPL_TYPEN.includes(a.type) || /fusion/i.test(String(a.firm || '')) || (arch[a.id] && arch[a.id].archived)) continue
+        if(tplManRaus(man, currentUserId, a.id, a.name)) continue   // Konto in Manueller Arbeit (08.10.2026)
         // EXTERNAL ID FEHLT bei eigenen Futures-Konten (08.10.2026, Fehler-Muster 49 Orbit-Fehlstarts): vorab als Zeile mit Knopf, noch bevor
         // der Planer läuft — der Planer lässt das Konto ohnehin aus (app.py ap_ext_fehlt); die Balance-Zeile entfällt dafür
         if(typeof tpFirmIstFutures === 'function' && tpFirmIstFutures(a.firm) && !String(a.externalId || '').trim()){
@@ -47271,6 +47315,7 @@
       const g = String(x.grund || '')
       if(/geplanten\/laufenden Plan/.test(g)) continue
       if(x.typ && !TPL_TYPEN.includes(String(x.typ))) continue   // WD-RAUS-AUS-PLANER
+      if(tplManRaus(man, x.user_id, x.konto_id, x.konto)) continue   // Konto in Manueller Arbeit (08.10.2026)
       const k = tplKk(x.user_id, x.konto), istBlow = /geblasen|geblowt|Polster aufgebraucht/i.test(g)
       if(konten.has(k)){
         // schon als Balance-Zeile drin (eigenes Konto ohne Live-Balance): ein konkreter Planer-Grund (Haken aus, geblowt?) ist die bessere Zeile → ersetzen (08.10.2026)
@@ -47319,6 +47364,7 @@
           : hakenAus ? 'Planer-Haken am Konto setzen — der Bot plant es beim nächsten Lauf (alle 10 min) mit.' : 'Beheben — der Bot plant das Konto dann von selbst nach (alle 10 min).' })
     }
     for(const t of D.trades){
+      if(tplManRaus(man, t.user_id, t.konto_id, t.konto)) continue   // Konto in Manueller Arbeit (08.10.2026)
       const p = t.eigen ? (tradePlans || []).find(x => String(x.id) === t.plan_id) : null, b = (p && p.mt5Baseline) || {}
       const probleme = []
       // BALANCE NICHT LIVE (08.10.2026): geplanter/unbestätigter Plan, dessen Konto-Balance älter ist als das Ende des letzten Trades —
@@ -47363,6 +47409,7 @@
     }
     // Offene Vorschläge mit nicht-live Balance aus /admin/auto-plan/ids (Admin-Reiter, auch morgen; 08.10.2026) — dieselbe Zeile wie oben
     for(const z of (window._apOffenNichtLive || [])){
+      if(tplManRaus(man, z.user_id, z.konto_id, z.konto)) continue   // Konto in Manueller Arbeit (08.10.2026)
       const k = tplKk(z.user_id, z.konto); if(konten.has(k) || (ids && !ids.has(String(z.user_id)))) continue; konten.add(k)
       const kid = z.konto_id ? String(z.konto_id) : '', fremd = String(z.user_id) !== String(currentUserId)
       add(z.user_id, z.user, { art: 'balance', firma: z.firma, konto: z.konto, typ: z.typ, balance: '', ende4: z.ende4 || '',
@@ -47372,6 +47419,7 @@
     }
     if(currentUserId) for(const p of tradePlans || []){
       if(!p || p.status !== 'review' || !p.mt5Baseline) continue
+      if(tplManRaus(man, currentUserId, p.masterAccountId, p.masterName)) continue   // Konto in Manueller Arbeit (08.10.2026)
       const fin = p.mt5Baseline.final, b = p.mt5Baseline
       let txt = ''
       if(fin && fin.puls_aufgegeben) txt = 'Endlesung aufgegeben — ' + String(fin.puls_fehler || 'ohne Grund')
