@@ -73,7 +73,7 @@ def lade():
              "_ap_gruppe_lesen", "_ap_sicht_param", "konto_balance_darf", "ap_stand_sicht", "ap_lauf_ohne_summen",
              "admin_pc_stand", "admin_prop_baum", "admin_wd_plaene", "admin_auto_plan_ids"]
     teile = [konst(k) for k in ("AP_SICHT_ADMIN", "AP_EINGRIFF_MAX", "AUTH_LISTE_CACHE_S", "ADMIN_GRUPPE_HT", "AP_NUR_PLANER_TXT",
-                                "ADMIN_ANSICHT", "AP_LAUF_SUMMEN")]
+                                "ADMIN_ANSICHT", "AP_LAUF_SUMMEN", "ADMIN_RUECKFALL_S")]
     teile += ["_admin_zugang_cache = {}", '_admin_gruppe_cache = {"bis": 0.0, "daten": None, "letzte": None}']
     teile += [block(n) for n in namen]
     ns = {"re": re, "time": time, "threading": threading, "requests": requests, "request": request, "jsonify": jsonify, "g": g,
@@ -381,6 +381,64 @@ def main():
     err = lambda st, txt: requests.exceptions.HTTPError(response=Antwort(st, {}, txt))
     check(tf(err(404, '{"code":"PGRST205"}')) and tf(err(404, 'relation "x" does not exist 42P01')) and not tf(err(404, '{"code":"PGRST116"}'))
           and not tf(err(503, "PGRST205 maybe")), "K1: nur PGRST205/42P01 zählt als „Tabelle fehlt“")
+
+    # K1-Nachtrag (09.10.2026): Rückzug — im Rückfall ADMIN_RUECKFALL_S lang keine neuen Abfragen
+    fake_db(ns)
+    ns["_admin_gruppe_cache"].update(bis=0.0, daten=None, letzte=None)
+    ns["admin_gruppen_daten"]()
+    log = fake_db(ns, tabellen_fehlen="kaputt")
+    ns["admin_gruppen_daten"]()
+    n1 = sum(1 for tb, _p in log["select"] if tb in ("id_gruppen", "id_gruppe_mitglied"))
+    for _ in range(5):
+        ns["admin_gruppen_daten"]()
+    n2 = sum(1 for tb, _p in log["select"] if tb in ("id_gruppen", "id_gruppe_mitglied"))
+    bis = ns["_admin_gruppe_cache"]["bis"] - time.time()
+    check(n1 == 1 and n2 == 1 and 0 < bis <= ns["ADMIN_RUECKFALL_S"] + 0.5,
+          f"K1: nach dem Rückfall {ns['ADMIN_RUECKFALL_S']} s keine neuen Abfragen (1 Versuch, dann {n2 - n1} weitere; bis +{bis:.1f} s)")
+    ns["_admin_gruppe_cache"]["bis"] = 0.0
+    ns["admin_gruppen_daten"]()
+    n3 = sum(1 for tb, _p in log["select"] if tb in ("id_gruppen", "id_gruppe_mitglied"))
+    check(n3 == 2, "K1: nach Ablauf des Rückzugs wird wieder gefragt")
+
+    # K2 (09.10.2026): admin_zugang — Lesefehler → letzter Stand je Nutzer (auch abgelaufen), ADMIN_RUECKFALL_S lang; nie ein Stand → Fehler
+    fake_db(ns)
+    zf = {"n": 0}
+
+    def zugang_kaputt(table, params):
+        zf["n"] += 1
+        raise requests.exceptions.HTTPError(response=Antwort(503, {}, '{"code":"PGRST003"}'))
+    ns["_admin_zugang_cache"].clear()
+    ns["_admin_zugang_cache"][SOLO] = (0.0, True)                # abgelaufener, aber bekannter Stand
+    ns["sb_select"] = zugang_kaputt
+    erg1 = ns["admin_zugang_nur_eigene"](SOLO)
+    erg2 = ns["admin_zugang_nur_eigene"](SOLO)
+    bis = ns["_admin_zugang_cache"][SOLO][0] - time.time()
+    check(erg1 is True and erg2 is True and zf["n"] == 1 and 0 < bis <= ns["ADMIN_RUECKFALL_S"] + 0.5,
+          f"K2: admin_zugang nicht lesbar → letzter Stand (nur_eigene bleibt), {ns['ADMIN_RUECKFALL_S']} s ohne neue Abfrage ({zf['n']} Versuch)")
+    ns["_admin_zugang_cache"].clear()
+    try:
+        ns["admin_zugang_nur_eigene"](SOLO)
+        check(False, "K2: nie ein Stand + Lesefehler muss werfen (502)")
+    except requests.exceptions.HTTPError:
+        check(True, "K2: nie ein Stand + Lesefehler → Fehler wie bisher (Aufrufer 502)")
+    fake_db(ns)
+
+    # K3–K5 (09.10.2026): Quelltext-Proben prophos.html
+    html0 = open(os.path.join(os.path.dirname(HIER), "prophos.html"), encoding="utf-8").read()
+    i = html0.index("async function wdSpeichern(")
+    blk = html0[i:i + 6000]
+    j = blk.index("for(const [uid, e] of _wd.umsortiert){")
+    check("if(!(await wdDarf(uid))) continue" in blk[j:j + 300], "K3: wdSpeichern — Riegel wdDarf auch in der Schleife über umsortierte Blöcke")
+    i = html0.index("async function wdZeilenHeilen(")
+    check("if(!(await wdDarf(x.user_id))) continue" in html0[i:i + 700], "K3: wdZeilenHeilen — Riegel wdDarf je Zeile")
+    i = html0.index("async function eigenerCodeLaden(")
+    blk = html0[i:i + 900]
+    check("if(!gelesen){ eigenerCodeUnklar = true; return null }" in blk and blk.index("if(!gelesen)") < blk.index("eigenerCodeUid = uid; eigenerCode = c"),
+          "K4: eigenerCodeLaden merkt bei Lesefehler nichts (nächstes Mal neu fragen)")
+    check("return eigenerCodeUnklar || admEingeschraenkt() || !!eigenerCode" in html0 and "catch(_){ return true } return eigenerCodeUnklar" in html0,
+          "K4: _admNurGruppeLaden — nicht prüfbar → eingeschränkt")
+    check(html0.count("wdVerwalter()") >= 8 and "const wdVerwalter = () => !!document.querySelector('#dashboard-view section.view[data-view=\"kasse\"].adm-verwalter')" in html0,
+          f"K5: Hinweistexte im WD-Reiter fragen wdVerwalter() ({html0.count('wdVerwalter()')} Stellen) — gleiche Bedingung wie das Ausblenden")
 
     # S1: verfallen im Lauf nur für die Sicht
     erg = {"geplant": [], "verfallen": [{"user_id": HT1, "plan_id": "a"}, {"user_id": MITGL, "plan_id": "b"}]}

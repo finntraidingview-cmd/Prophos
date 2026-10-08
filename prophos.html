@@ -13163,17 +13163,20 @@
      * admin_zugang (sql/2026-09-27_admin_zugang.sql, RLS: nur die eigene Zeile lesbar), gilt NUR
      * deren Code — und das Backend liefert ihr im Admin nur sich selbst (_admin_nur_uid). Flag
      * '2' statt '1': eine ältere Freischaltung mit dem Standard-Code zählt dort nicht mehr.
-     * Tabelle nicht lesbar → Standard-Code (die Datengrenze zieht ohnehin das Backend). */
-    let eigenerCode, eigenerCodeUid = null   // eigenerCode: undefined = nicht geladen, null = keiner
+     * Tabelle nicht lesbar → für das Entsperren der Standard-Code (die Datengrenze zieht ohnehin das Backend), aber NICHT gemerkt
+     * (Prüfer K4, 09.10.2026: vorher blieb „kein Code" bis zum Neuladen stehen — der Login galt still als HT): beim nächsten Mal wird
+     * neu gefragt, und bis dahin antworten die Schreib-Wächter (window._admNurGruppeLaden → wdDarf) wie eingeschränkt. */
+    let eigenerCode, eigenerCodeUid = null, eigenerCodeUnklar = false   // eigenerCode: undefined = nicht geladen, null = keiner
     async function eigenerCodeLaden(){
       const uid = currentUserId
       if(uid && eigenerCodeUid === uid && eigenerCode !== undefined) return eigenerCode
-      let c = null
+      let c = null, gelesen = false
       try {
         const { data, error } = await supabase.from('admin_zugang').select('code').eq('user_id', uid).maybeSingle()
-        if(!error && data && data.code) c = String(data.code)
+        if(!error){ gelesen = true; if(data && data.code) c = String(data.code) }
       } catch(_){}
-      eigenerCodeUid = uid; eigenerCode = c
+      if(!gelesen){ eigenerCodeUnklar = true; return null }   // nicht prüfbar: nichts merken, nächstes Mal neu fragen
+      eigenerCodeUid = uid; eigenerCode = c; eigenerCodeUnklar = false
       return c
     }
     /* Reiter für IDs mit eigenem Code (27.09.2026, Finn: „Emin sollte bei sich nur Übersicht,
@@ -13229,7 +13232,8 @@
     window._admNurGruppe = () => admEingeschraenkt() || !!eigenerCode
     // dasselbe, aber ohne vorher den Admin betreten zu haben: admin_zugang (eigene Zeile, RLS) einmal je Login nachladen (Prüfer M1,
     // 08.10.2026) — die Schreib-Wächter im Farmer/Markt (wdDarf) fragen das, bevor sie Tagesplan-Zeilen anderer IDs anfassen
-    window._admNurGruppeLaden = async () => { try{ await eigenerCodeLaden() }catch(_){} return admEingeschraenkt() || !!eigenerCode }
+    // nicht prüfbar (admin_zugang nicht lesbar, Prüfer K4) → im Zweifel eingeschränkt, wie der Kommentar an wdNurGruppe sagt
+    window._admNurGruppeLaden = async () => { try{ await eigenerCodeLaden() }catch(_){ return true } return eigenerCodeUnklar || admEingeschraenkt() || !!eigenerCode }
     function admGruppeChips(){
       const el = $('adm-gruppe-seg'); if(!el) return
       const liste = (!admEingeschraenkt() && admData && Array.isArray(admData.gruppen)) ? admData.gruppen : []
@@ -42319,7 +42323,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1387'
+  const OS_TAB_BUILD = '2026-09-22.1388'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -52406,7 +52410,8 @@
     _wd.umsortiert = _wd.umsortiert || new Map()
     for(const [uid, e] of m){ const x = (_wd.rows || []).find(q => String(q.user_id) === uid); if(x){ x.reihenfolge = e.reihenfolge; x.start_um = e.start_um } _wd.umsortiert.set(uid, e) }
     wdAblauf(_wd.rows || [], wdFehlend()); try{ wsRender() }catch(_){}
-    wdSay(`Reihenfolge geändert — ${m.size} Blöcke neu getaktet. „Änderungen speichern" schreibt Blöcke und Zeiten.`, 'ok')
+    wdSay(wdVerwalter() ? `Reihenfolge geändert — ${m.size} Blöcke neu getaktet, nur in dieser Ansicht (speichern kann sie Hermann Technologies).`
+      : `Reihenfolge geändert — ${m.size} Blöcke neu getaktet. „Änderungen speichern" schreibt Blöcke und Zeiten.`, 'ok')
   }
   // Nach einem Neuladen (30-s-Takt, Haken) die ungespeicherte Umsortierung wieder auflegen, sonst spränge die Tabelle zurück
   function wdUmsortiertAuflegen(rows){
@@ -52582,6 +52587,9 @@
    * auch Zeilen/Konten seiner Gruppe (window._admGruppeOk, Admin-Ansicht), mit streng (Automatik am PC) nur die eigene; wd_farmer_regeln nie.
    * HT-Logins wie bisher alles. Nicht prüfbar → wie eingeschränkt (nur eigene). */
   async function wdNurGruppe(){ try{ return typeof window._admNurGruppeLaden === 'function' ? !!(await window._admNurGruppeLaden()) : false }catch(_){ return true } }
+  // Gruppen-Verwalter (09.10.2026, Prüfer K5): „🎲 Würfeln" und „Änderungen speichern" sind für ihn ausgeblendet (CSS .adm-verwalter
+  // [data-ht-global]) — die Hinweistexte des Reiters verweisen dann nicht darauf. Dieselbe Bedingung wie das Ausblenden.
+  const wdVerwalter = () => !!document.querySelector('#dashboard-view section.view[data-view="kasse"].adm-verwalter')
   async function wdDarf(uid, streng){
     if(String(uid || '') === String((typeof currentUserId !== 'undefined' && currentUserId) || '#')) return true
     if(!(await wdNurGruppe())) return true
@@ -53298,8 +53306,10 @@
     const konten = rows.flatMap(x => (x.konten || []).filter(wdAktiv)), ohnePlan = konten.filter(k => !k.plan_id).length
     let satz
     if(laeuft) satz = `▶ Block ${laeuft.reihenfolge || ''} ${laeuft.name || ''} läuft gerade.`
-    else if(!rows.length) satz = 'Noch keine Blöcke für diesen Tag — „🎲 Würfeln" trägt alle IDs ein, verteilt die Zeiten und legt die Pläne an. Eine ID anklicken zeigt ihre Konten.'
-    else if(!mitZeit.length) satz = aktivRows.length ? (r.aktiv ? 'Zeiten kommen um 00:10 von allein — oder jetzt „🎲 Würfeln".' : 'Noch nicht gewürfelt — „🎲 Würfeln" verteilt die Zeiten und legt sofort alle Pläne an.') : 'Kein Konto im Farm — Haken in den Blöcken setzen, dann „Änderungen speichern".'
+    else if(!rows.length) satz = wdVerwalter() ? 'Noch keine Blöcke für diesen Tag. Eine ID anklicken zeigt ihre Konten.'
+      : 'Noch keine Blöcke für diesen Tag — „🎲 Würfeln" trägt alle IDs ein, verteilt die Zeiten und legt die Pläne an. Eine ID anklicken zeigt ihre Konten.'
+    else if(!mitZeit.length) satz = wdVerwalter() ? (aktivRows.length ? (r.aktiv ? 'Zeiten kommen um 00:10 von allein.' : 'Noch nicht gewürfelt — die Zeiten verteilt Hermann Technologies.') : 'Kein Konto im Farm — Haken in den Blöcken setzen (wirkt sofort).')
+      : aktivRows.length ? (r.aktiv ? 'Zeiten kommen um 00:10 von allein — oder jetzt „🎲 Würfeln".' : 'Noch nicht gewürfelt — „🎲 Würfeln" verteilt die Zeiten und legt sofort alle Pläne an.') : 'Kein Konto im Farm — Haken in den Blöcken setzen, dann „Änderungen speichern".'
     else if(geplant.length) satz = `Nächster Start ${wdHhmm(geplant[0].start_um)} Dubai: ${geplant[0].name || '?'}${ohnePlan ? (r.scharf ? ` · ⚠ ${ohnePlan} Konten ohne Plan (Grund steht in der Tabelle)` : ` · Farmer AUS — ${ohnePlan} Konten bereit, Pläne kommen beim Scharfstellen`) : ' · alle Pläne liegen bereit, die PC-Tabs starten sie zur Zeit'}.`
     else satz = aktivRows.every(x => x.status === 'fertig') ? 'Alle Blöcke durch.' : aktivRows.some(x => x.status === 'verpasst') ? 'Blöcke verpasst — PC-Tab war zu?' : 'Alles durch.'
     txt.textContent = (j ? `Jetzt ${j.hhmm} Dubai · ` : '') + satz
@@ -53355,7 +53365,7 @@
     if(k.archiviert && !k.plan_id) return `<span style="color:var(--sub)">archiviert — im Konto-Archiv, fährt nicht mit</span>`
     if(!k.farm && !k.plan_id) return `<span style="color:var(--sub)">aus — Klick auf die Zeile nimmt es rein</span>`
     if(k.hinweis && !k.plan_id) return `<span style="color:var(--danger)">${escapeHtml(k.hinweis)}</span>`
-    if(!k.plan_id) return k.aktiv === false ? '<span style="color:var(--sub)">heute abgewählt</span>' : (_wd.regeln && _wd.regeln.scharf) ? '<span style="color:var(--sub)">noch kein Plan — „Würfeln"</span>' : '<span style="color:var(--sub)">bereit — Plan kommt beim Scharfstellen</span>'
+    if(!k.plan_id) return k.aktiv === false ? '<span style="color:var(--sub)">heute abgewählt</span>' : (_wd.regeln && _wd.regeln.scharf) ? `<span style="color:var(--sub)">noch kein Plan${wdVerwalter() ? '' : ' — „Würfeln"'}</span>` : '<span style="color:var(--sub)">bereit — Plan kommt beim Scharfstellen</span>'
     const um = k.um ? ` · ${wdHhmm(k.um)}` : ''
     if(k.vorcheck === 'slave_nicht_bereit') return `<span style="color:var(--danger)">⚠ Slave-Terminal nicht bereit — Puls wartet</span>`
     if(k.vorcheck === 'verpasst_slave') return `<span style="color:var(--danger)">✗ nicht gestartet — Slave-Terminal war nicht bereit</span>`
@@ -53425,8 +53435,8 @@
         <span class="kf">Start</span>
         ${erw || fest ? `<span class="zeit">${x.start_um ? escapeHtml(wdHhmm(x.start_um)) : '—:—'}</span>` : `<input type="time" class="input mono vp-in" data-wd-zeit style="width:92px;text-align:left;font-size:15px;font-weight:600" value="${x.start_um ? escapeHtml(wdHhmm(x.start_um)) : ''}" title="Startzeit des Blocks in Dubai-Zeit">`}
         <div class="seg"><button type="button" data-wd-dir="buy" class="${x.richtung === 'buy' ? 'active' : ''}" ${erw || fest ? 'disabled' : ''}>BUY</button><button type="button" data-wd-dir="sell" class="${x.richtung === 'sell' ? 'active' : ''}" ${erw || fest ? 'disabled' : ''}>SELL</button></div>
-        <span class="kf">${nAkt} von ${(x.konten || []).length} Konten drin${x.gestartet_at ? ` · gestartet ${wdHhmm(x.gestartet_at)}` : ''}${erw ? ' · noch nicht eingetragen — „🎲 Würfeln" nimmt die ID mit' : ''}</span>
-        <span class="kf" style="margin-left:auto">Haken wirkt sofort und dauerhaft · TP/SL, Zeit, Richtung: „Änderungen speichern"</span>
+        <span class="kf">${nAkt} von ${(x.konten || []).length} Konten drin${x.gestartet_at ? ` · gestartet ${wdHhmm(x.gestartet_at)}` : ''}${erw ? (wdVerwalter() ? ' · noch nicht eingetragen' : ' · noch nicht eingetragen — „🎲 Würfeln" nimmt die ID mit') : ''}</span>
+        <span class="kf" style="margin-left:auto">Haken wirkt sofort und dauerhaft${wdVerwalter() ? '' : ' · TP/SL, Zeit, Richtung: „Änderungen speichern"'}</span>
       </div>
       <table class="wd-konten"><thead><tr><th></th><th>Konto</th><th title="Winning Days (gezählt / Ziel)">WD</th><th>Balance</th><th>Start</th><th>TP $</th><th title="Risiko Master für die Lot-Rechnung des Fusion-Hedges (hedgeMultAusRisiko) — kein Stop Loss in TradingView (Winning Days laufen ohne SL)">Risiko Master $</th><th>Risiko (DD)</th><th>Slave</th><th>Stand</th></tr></thead><tbody>${zeilen}${ohneZeile}</tbody></table>${hinweis}</div>`
   }
@@ -53730,7 +53740,7 @@
     const fEl = document.getElementById('wd-fehlend')
     if(fEl) fEl.innerHTML = erwartet === null ? `<span style="color:var(--danger)">Konten nicht ladbar${_wd.datenFehler ? ' (' + escapeHtml(_wd.datenFehler) + ')' : ''} — ich zeige nur IDs, deren PC-Tab sich selbst eingetragen hat.</span>`
       : (_wd.daten && !_wd.daten.rail ? `<span style="color:var(--danger)">Railway nicht erreichbar${_wd.railFehler ? ' (' + escapeHtml(_wd.railFehler) + ')' : ''} — Pläne kann ich von hier nicht anlegen, das machen dann die PC-Tabs; Zustand der Pläne fehlt.</span> ` : '')
-      + (fehlend.length && rows.length ? `⚠ Noch nicht eingetragen: <b>${escapeHtml(fehlend.map(e => e.name).join(', '))}</b> — „🎲 Würfeln" trägt sie mit ein.` : '')
+      + (fehlend.length && rows.length ? `⚠ Noch nicht eingetragen: <b>${escapeHtml(fehlend.map(e => e.name).join(', '))}</b>${wdVerwalter() ? '.' : ' — „🎲 Würfeln" trägt sie mit ein.'}` : '')
     const uhr = document.getElementById('wd-uhr'); if(uhr) uhr.textContent = 'Anzeige alle 30 s frisch'
     const konten = rows.flatMap(x => (x.konten || []).filter(wdAktiv))
     const kz = document.getElementById('wd-k-zeile'); if(kz) kz.textContent = rows.length ? `${rows.filter(x => x.status !== 'leer').length} Blöcke · ${konten.length} Konten drin · ${konten.filter(k => k.plan_id).length} Pläne · ${konten.filter(k => k.status && k.status !== 'planned' && k.status !== 'verpasst' && k.status !== 'weg').length} gestartet` : (erwartet ? `${erwartet.length} IDs · ${erwartet.reduce((n, e) => n + e.konten.length, 0)} Konten gefunden` : '')
@@ -54156,6 +54166,7 @@
     const belegt = d.belegt || {}, ptag = Array.isArray(d.plaene_tag) ? d.plaene_tag : [], jobs = []
     for(const x of rows){
       if(!x || x.status === 'laeuft' || x.status === 'fertig' || x.status === 'verpasst') continue
+      if(!(await wdDarf(x.user_id))) continue   // Riegel (Prüfer K3, 09.10.2026): Aufrufer filtern heute schon, das bleibt so, falls einer sich ändert
       const konten = (x.konten || []).map(k => ({ ...k })); let ge = false
       for(let i = konten.length - 1; i >= 0; i--){ const kd = wdKontoDaten(konten[i].id); if(kd && kd.archiviert && !konten[i].plan_id){ konten.splice(i, 1); ge = true } }   // archiviert = weg
       // Nur Typ Winning Days (26.09.2026, Finn: „ich will nur die Konten dastehen haben, die als Typ Winning Days haben"): Zeilen, die
@@ -54236,6 +54247,7 @@
     let verschoben = 0
     if(_wd.umsortiert && _wd.umsortiert.size){
       for(const [uid, e] of _wd.umsortiert){
+        if(!(await wdDarf(uid))) continue   // Riegel auch hier (Prüfer K3, 09.10.2026) — falls ein Aufrufer sich später ändert
         const x = (_wd.rows || []).find(q => String(q.user_id) === uid); if(!x || wdFest(x)) continue
         const { error } = await supabase.from('wd_tagesplan').update({ reihenfolge: e.reihenfolge, start_um: e.start_um, updated_at: new Date().toISOString() }).eq('tag', tag).eq('user_id', uid).neq('status', 'laeuft')
         if(error) return wdSay('Reihenfolge nicht gespeichert: ' + error.message, 'err')
@@ -54447,7 +54459,7 @@
     const p = wzPanel(); if(!p) return
     const body = p.querySelector('#wz-body'), r = _wd.regeln || {}
     const rows = (_wd.rows || []).filter(x => x && x.start_um && (x.status !== 'leer' || x.reihenfolge))
-    if(!rows.length){ body.innerHTML = `<div style="padding:6px 0;color:var(--sub);font-size:13px">Noch keine Startzeiten — „🎲 Würfeln" verteilt die Blöcke zwischen ${escapeHtml(r.start_hhmm || WD_VON_STD)} und ${escapeHtml(wdBisHhmm(r))} Dubai.</div>`; return }
+    if(!rows.length){ body.innerHTML = `<div style="padding:6px 0;color:var(--sub);font-size:13px">Noch keine Startzeiten${wdVerwalter() ? '.' : ` — „🎲 Würfeln" verteilt die Blöcke zwischen ${escapeHtml(r.start_hhmm || WD_VON_STD)} und ${escapeHtml(wdBisHhmm(r))} Dubai.`}</div>`; return }
     const dauer = x => (typeof wdDauerMs === 'function') ? wdDauerMs(x, r) : 10 * 60000
     const H = 3600000
     const t0 = Math.floor((Math.min(...rows.map(x => +new Date(x.start_um))) - 10 * 60000) / H) * H

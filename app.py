@@ -3177,7 +3177,9 @@ def _auth_liste_anfrage():
 
 
 def admin_zugang_nur_eigene(uid):
-    """admin_zugang.nur_eigene je uid, 60 s gemerkt. Fehler werfen wie sb_select (der Aufrufer antwortet 502).
+    """admin_zugang.nur_eigene je uid, 60 s gemerkt. Lesefehler (Prüfer K2, 09.10.2026): gab es für diese uid schon einen Stand (auch
+    abgelaufen), gilt der ADMIN_RUECKFALL_S lang weiter — wie admin_gruppen_daten; nie ein Stand → Fehler werfen wie sb_select (der
+    Aufrufer antwortet 502, nie still unbeschränkt).
     Seit den Admin-Gruppen (08.10.2026) nur noch die Tabellen-Zeile — WER im Admin eingeschränkt ist (auch Verwalter und Mitglieder einer
     Verwalter-Gruppe), sagt admin_sicht_lesen; die Gates fragen dort."""
     jetzt = time.time()
@@ -3185,7 +3187,15 @@ def admin_zugang_nur_eigene(uid):
         treffer = _admin_zugang_cache.get(uid)
         if treffer and treffer[0] > jetzt:
             return treffer[1]
-    z = sb_select("admin_zugang", {"select": "nur_eigene", "user_id": f"eq.{uid}"})
+    try:
+        z = sb_select("admin_zugang", {"select": "nur_eigene", "user_id": f"eq.{uid}"})
+    except Exception as e:
+        if treffer is None:
+            raise
+        print(f"[admin-zugang] ⚠️ nicht lesbar ({type(e).__name__}: {e}) — letzter bekannter Stand für {str(uid)[:8]}", flush=True)
+        with _kurz_cache_lock:
+            _admin_zugang_cache[uid] = (jetzt + ADMIN_RUECKFALL_S, treffer[1])
+        return treffer[1]
     nur = bool(isinstance(z, list) and z and z[0].get("nur_eigene"))
     with _kurz_cache_lock:
         _admin_zugang_cache[uid] = (jetzt + AUTH_LISTE_CACHE_S, nur)
@@ -3203,6 +3213,7 @@ def admin_zugang_nur_eigene(uid):
 # ?gruppe=<gruppe_id>|ht als reiner Lese-Filter. Neue ID zu einer Gruppe = ein update in id_gruppe_mitglied, keine Code-Änderung.
 _admin_gruppe_cache = {"bis": 0.0, "daten": None, "letzte": None}   # letzte: zuletzt gelesener Stand (Rückfall K1)
 ADMIN_GRUPPE_HT = "ht"                 # ?gruppe=ht = die Gruppe ohne Verwalter (Hermann Technologies)
+ADMIN_RUECKFALL_S = 10                 # Rückfall auf den letzten Stand: so lange nicht neu fragen (Prüfer K1/K2, 09.10.2026 — Supabase-Ausfall)
 
 
 def admin_gruppen_daten():
@@ -3227,6 +3238,10 @@ def admin_gruppen_daten():
             print(f"[admin-gruppen] ⚠️ nicht lesbar ({type(e).__name__}: {e}) — "
                   f"{'letzter bekannter Stand' if alt is not None else 'kein bekannter Stand, Anfrage scheitert'}", flush=True)
             if alt is not None:
+                # Rückzug (Prüfer, 09.10.2026): den letzten Stand ADMIN_RUECKFALL_S lang ausliefern, statt bei einem Supabase-Ausfall
+                # in jeder Anfrage beide Abfragen erneut zu versuchen (jede wartet bis zum Timeout)
+                with _kurz_cache_lock:
+                    _admin_gruppe_cache.update(bis=jetzt + ADMIN_RUECKFALL_S, daten=alt)
                 return alt
             raise
     daten = {"gruppen": [{"id": str(x.get("id")), "name": str(x.get("name") or ""),

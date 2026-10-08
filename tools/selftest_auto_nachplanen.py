@@ -166,9 +166,12 @@ def main():
 
     # ap_planen mit nur_konten gegen die nachgebaute DB
     jetzt = datetime(2026, 10, 8, 7, 0, tzinfo=timezone.utc)
+    # Start relativ zur ECHTEN Uhr: ap_planen rechnet mit datetime.now — ein fester 08.10.-Vorschlag ist ab dem Folgetag eine verfallene
+    # Leiche (ap_plan_verfallen, .1373) und blockiert zu Recht nicht mehr (Test war am 09.10.2026 rot, Slave-Terminal 4)
+    vs_start = datetime.now(timezone.utc).replace(microsecond=0) + timedelta(hours=3)
     vorschlag = {"id": "p-alt", "user_id": U1, "master_account_id": "k-2", "master_firm": "FundedNext", "status": "planned", "richtung": "buy",
                  "master_tp": 1000, "master_sl": 500, "master_contracts": 1, "auto_plan": True, "auto_bestaetigt_at": None,
-                 "start_um_gestartet_at": None, "start_um": "2026-10-08T12:00:00+00:00", "planned_for": "2026-10-08", "route": "mt5v2",
+                 "start_um_gestartet_at": None, "start_um": vs_start.isoformat(), "planned_for": vs_start.astimezone(tz).date().isoformat(), "route": "mt5v2",
                  "mt5_baseline": {}}
     reg, gesch = sd.db_stubs(a, jetzt, geplant_extra=[vorschlag])
     protokoll = []
