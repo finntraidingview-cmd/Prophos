@@ -39618,7 +39618,12 @@
           body: JSON.stringify({ symbol: po.symbol, richtung: po.richtung, volumen: po.volumen, sl_usd: po.sl_usd, tp_usd: po.tp_usd, ohne_hedge: true }) })
       }catch(e){ r = { ok:false, retry_ok:false, msg: 'Order-Abschuss gestört: ' + String(e && e.message || e) } }
       const wartbar = !!(r && !r.ok && r.retry_ok && (r.grund === 'terminal_heilt' || /Verbindung|initialize|IPC|Terminal nicht/i.test(String(r.msg || ''))))
-      if(!wartbar || Date.now() - t0 > 90000) break
+      // Heilung 180 s statt 90 s (08.10.2026, Chris FTMO ff8c2412 04:49 UTC: Kaltstart mit Login-Zwang, das Panel wartet bis 45 + 90 s auf den
+      // Snapshot und startet das Terminal dann mit EA neu — der Start gab nach 90 s „Terminal wird gerade geprüft" auf, das Terminal lief
+      // kurz danach sauber). Solange retry_ok wahr ist, hat der Bot beweisbar nichts gesendet.
+      // Gesamtdeckel 200 s ab Check-Beginn (_zt0, Prüfer Slave 2): bei 240 s greifen Ketten-Riegel (tpV2Nacheinander 4 min), Absender-
+      // Zeitgrenze und Aufräumer — ein Check muss sicher darunter bleiben
+      if(!wartbar || Date.now() - t0 > (r && r.grund === 'terminal_heilt' ? 180000 : 90000) || Date.now() - _zt0 > 200000) break
       if(!offenUndMeiner()){ r = { ok:false, retry_ok:true, msg:'Popup geschlossen — nichts platziert.' }; break }
       _pfSet('v2order', 'warn', `⏳ Terminal noch nicht bereit — neuer Versuch in 6 s (${Math.round((Date.now() - t0) / 1000)}s): ${escapeHtml(String(r.msg || ''))}`)
       await new Promise(res => setTimeout(res, 6000))
@@ -41633,7 +41638,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1326'
+  const OS_TAB_BUILD = '2026-09-22.1327'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -45644,7 +45649,9 @@
     // Orbit V2 / Topstep V2 (08.10.2026): Puls-Schritte (pc, login, konto, asset, ticket, knopf, ruecklesung, popup, werte, zeitlimit …)
     // — keine Prüfung möglich, ob die Ursache weg ist (Puls-Chrome/TradingView sieht nur der Bot): wie bisher 15 min später neuer
     // Versuch, höchstens SF_MAX (sfTick). 'unklar' kommt hier nie an (oben). Gilt auch für Echo-Schritte v2term/v2hedge/v2dir/v2order.
-    return Date.now() - (Date.parse(f.at) || 0) >= SF_WARTE_MS ? `${Math.round(SF_WARTE_MS / 60000)} min später neuer Versuch` : null
+    // EA-Selbstheilung lief noch (08.10.2026, ff8c2412): nichts gesendet, das Terminal ist meist Sekunden später gesund → 3 statt 15 min
+    const warte = /Selbstheilung|terminal_heilt/i.test(String(f.msg || '')) ? 3 * 60000 : SF_WARTE_MS
+    return Date.now() - (Date.parse(f.at) || 0) >= warte ? `${Math.round(warte / 60000)} min später neuer Versuch` : null
   }
   /* Neu einplanen: Startzeit jetzt + 2–6 min (von Hand: + 1 min), Claim zurück. Guard: noch geplant, nichts gesendet.
    * → 'neu' | 'tagesende' | false */
