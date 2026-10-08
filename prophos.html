@@ -41736,7 +41736,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1342'
+  const OS_TAB_BUILD = '2026-09-22.1344'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -47930,6 +47930,22 @@
       if(!txt && b.hedge && b.hedge.status === 'fehler') txt = `Fusion-Hedge: ${b.hedge.msg || 'Fehler'}`
       if(txt) add(currentUserId, ich, { art: 'plan', firma: p.masterFirm, konto: p.masterName, ende4: '', text: txt })
     }
+    // FREMD-POSITIONEN (08.10.2026, Finn über Master: „alle Sicherheitssachen einbauen" — auch Trades direkt in TradingView/MT5 ohne Plan):
+    // delta.fremd[] (app.py fp_tick, heute nur MT5). Gegenläufiger Start derselben Firma binnen 3 min um das erste Erscheinen (andere ID
+    // oder anderes Konto) → rote Zeile „⚠ Gegenhedge" (den Push schickt das Backend); allein → dezente Info-Zeile „Hand-Position".
+    // Nur Anzeige — den Start-Riegel macht prophos_gegenhedge_konflikt.
+    try{
+      const fr = (typeof _apd !== 'undefined' && _apd.d && Array.isArray(_apd.d.fremd)) ? _apd.d.fremd : []
+      const uhr = v => { const d = new Date(v || ''); return isNaN(d) ? '?' : d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) }
+      const rw = r => r === 'buy' ? 'Buy' : r === 'sell' ? 'Sell' : String(r || '?')
+      for(const z of fr){
+        const gg = Array.isArray(z.gegen) ? z.gegen : [], menge = z.menge != null ? ' ' + String(z.menge).replace('.', ',') : ''
+        const was = `${rw(z.richtung)}${menge} ${z.symbol || ''}`.trim()
+        const gegen = gg.map(g => `${g.konto || '?'}${g.user ? ' (' + g.user + ')' : ''} ${rw(g.richtung)}${g.art === 'hand' ? ' (von Hand)' : ''}`).join(' · ')
+        add(z.user_id, z.user, { art: 'fremd', konflikt: gg.length > 0, firma: z.firma, konto: z.konto, typ: z.typ, ende4: z.ende4 || '',
+          text: gg.length ? `${was} (von Hand, seit ${uhr(z.seit)}) gegen ${gegen}` : `${was} von Hand seit ${uhr(z.seit)} — ohne Plan in Prophos` })
+      }
+    }catch(e){ console.warn('[tpl] Fremd-Positionen', e) }
     return [...je.values()]
   }
   /* BRAUCHT DICH NEU (Finn 08.10.2026, Screenshot .1227 Admin, 5 Fälle: „Bei Braucht dich finde ich nicht so clean, man erkennt nix" —
@@ -47943,6 +47959,7 @@
     if(z.art === 'balance') return /nicht live/i.test(t) ? { w: 'nicht live', ton: 'vio', r: 1 } : /nie gelesen/i.test(t) ? { w: 'nie gelesen', ton: 'vio', r: 1 }
       : /\balt$/.test(t) ? { w: 'Balance alt', ton: 'vio', r: 1 } : { w: 'Balance fehlt', ton: 'vio', r: 1 }
     if(z.art === 'neu') return { w: 'neu geplant', ton: 'gruen', r: 9 }
+    if(z.art === 'fremd') return z.konflikt ? { w: '⚠ Gegenhedge', ton: 'rot', r: 0 } : { w: 'Hand-Position', ton: 'grau', r: 10 }   // Fremd-Positionen (08.10.2026)
     if(z.art === 'plan'){
       if(/^nicht gestartet/i.test(t)) return { w: 'Start-Fehler', ton: 'rot', r: 6 }
       if(/^verpasst/i.test(t)) return { w: 'verpasst', ton: 'rot', r: 6 }

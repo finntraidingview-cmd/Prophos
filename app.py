@@ -18880,9 +18880,12 @@ def ap_delta_antwort(stand, sicht_uid=None, pc_lebt=None):
         out["heute_beendet"], out["heute_ab"] = list(stand["heute_beendet"]), stand.get("heute_ab")
     elif stand.get("heute_beendet_fehler"):
         out["heute_beendet"], out["heute_beendet_fehler"] = None, stand["heute_beendet_fehler"]
+    # FREMD-POSITIONEN (08.10.2026): vom Delta-Route-Aufruf in den Stand gelegt (fp_delta_zeilen); Sicht filtert wie die Listen
+    if isinstance(stand.get("fremd"), list):
+        out["fremd"] = list(stand["fremd"])
     if sicht_uid:
         uid = str(sicht_uid)
-        for f in ("offen", "geplant", "umplanungen", "hinweise", "heute_beendet"):
+        for f in ("offen", "geplant", "umplanungen", "hinweise", "heute_beendet", "fremd"):
             if isinstance(out.get(f), list):
                 out[f] = [x for x in out[f] if str(x.get("user_id")) == uid]
         out["sicht"] = "eigene"
@@ -19480,6 +19483,7 @@ def admin_auto_plan_delta():
         except Exception as e:
             stand["heute_beendet_fehler"] = f"{type(e).__name__}: {e}"
             print(f"[auto-plan] ⚠️ heute beendet: {stand['heute_beendet_fehler']}", flush=True)
+        stand["fremd"] = fp_delta_zeilen()        # FREMD-POSITIONEN (08.10.2026): Hand-Positionen ohne Plan, „Braucht dich"
         antwort = ap_delta_antwort(stand, _ap_sicht_aus_anfrage(admin, uid), pc_lebt=_ap_pc_lebt_gecacht())
         antwort.setdefault("sicht", "alle")
         # BESTÄTIGEN FÜR ALLE (07.10.2026): alle = darf dieser Login fremde Vorschläge bestätigen/zurücknehmen/löschen (ap_eingriff_sicht;
@@ -20500,6 +20504,328 @@ def zw_tick(force=False):
     _zw["erreicht"] = n
 
 
+# ══ FREMD-POSITIONEN (Slave 1, 08.10.2026, Finn über Master: „alle Sicherheitssachen einbauen" — auch für Trades, die er direkt in
+# TradingView oder MT5 klickt, ohne Plan in Prophos). Prophos kann sie nicht verhindern, also: ERKENNEN (Tabelle fremd_positionen,
+# sql/2026-10-08_fremd_positionen.sql), MELDEN (Gegenhedge → Push + rote Zeile in „Braucht dich", allein → dezente Info-Zeile) und
+# BERÜCKSICHTIGEN (prophos_gegenhedge_konflikt zählt sie als „läuft dort in Gegenrichtung", Slave 4).
+# Quelle MT5: mt5_live.status.master_positions = alle offenen Positionen des Prop-Kontos aus dem Lese-EA (also auch Hand-Trades),
+# gültig nur frisch (FP_FRISCH_S) und ohne note („Snapshot eingefroren" = Terminal/EA aus — Probe 08.10.2026: 9 von 94 Logins gültig).
+# Fremd = Ticket keines Plans der letzten 3 Tage. Konten mit laufendem/startendem Plan OHNE Ticket (klassisches Echo führt keins, Echo V2
+# schreibt es erst nach dem Fill) und Gegenkonten laufender Pläne (slave_account_id) bleiben unbewertet statt falsch. Nie bewertet
+# (Slave-2-Prüfung: eine Fremd-Zeile sperrt Starts derselben Firma in Gegenrichtung — Kopien und Hedges dürfen das nie): Fusion-Konten
+# (Hedge-Broker, 7 mit eigener MT5-Zeile), Hedge-Logins der Copier, Duplikum-verknüpfte Konten (accounts.duplikum_linked = Kopie eines
+# anderen Kontos, kein Hand-Trade). Probe: 8 offene MT5-Positionen, alle Plan-Positionen → 0 Fremde.
+# GEGENHEDGE-FENSTER (Finn 08.10.2026 über Master: erst 3 min, dann „stellt das Ganze bitte auf 90 Sekunden"): Gegenhedge = gegenläufiger
+# Start derselben Firma binnen ± prophos_gegenhedge_fenster() (90 s, Slave 4) — andere ID oder anderes Konto; ein laufender Trade allein ist
+# kein Konflikt. Das erste Erscheinen einer Fremd-Position (seit) gilt als ihr Start — rot + Push nur dann (prophos_fremd_konflikte), sonst
+# dezente Info-Zeile. Der Lese-EA (wie der TV-Reader) liefert keine Öffnungszeit (P-Zeile: Ticket/Symbol/Typ/Lots/Preis/SL/TP), seit = erste Lesung hier:
+# mt5_live kommt bei laufendem Terminal sekündlich, also seit ≈ Klick + Takt (FP_TAKT_S 15 s statt 30 s, Slave-2-Prüfung: bei 90 s
+# Fenster wäre ein 30-s-Versatz zu viel). Ein leerer Takt kostet vier Lesungen (mt5_live, echoplus_live, accounts, trade_plans).
+# TRADINGVIEW/TRADOVATE (Master-Hinweis 08.10.2026, Userscript „Prophos TV-Reader" 0.9.9): echoplus_live je PC = das GERADE AKTIVE
+# Tradovate-Konto in TV (konto = accounts.external_id, Probe: 8 von 8 Treffer) mit seinen offenen Positionen, alle 1–5 s; nur Zeilen mit
+# positionen_ok (vollständige Lesung, nicht blind). Orbit-Pläne führen kein Ticket → ein Konto mit laufendem/eben beendetem Plan (Master
+# oder Gegenkonto) bleibt unbewertet; ident = Symbol:Richtung:Einstieg (neuer Einstieg = neue Position, neues seit). Andere Unterkonten
+# als das aktive sieht TV nicht. Probe: 3 offene TV-Positionen, alle auf Konten mit laufendem Orbit-V2-Plan → 0 Fremde.
+# TopstepX (tsv2) läuft nicht über TV, puls_augen nur als Schnappschuss im Puls-Lauf → nicht erkannt.
+# Eigener 15-s-Takt (fp_loop, nur Railway), ein Read auf mt5_live je Takt, keine Realtime. Zwei Container gleichzeitig (Rollout): Upsert
+# idempotent, Push nur vom Lauf, dessen Guard-PATCH (alarm_keys enthält den Schlüssel noch nicht) wirklich eine Zeile geändert hat. ══
+FP_TAKT_S = 15
+FP_FRISCH_S = 90          # mt5_live-Zeile älter → Konto unbekannt; die Fremd-Zeile verfällt dann nach 3 min still (Aktiv-Merkmal)
+FP_DELTA_CACHE_S = 15
+_fp = {"at": 0.0, "fehler": "", "aktiv": -1, "logins": 0, "tabelle_fehlt": False, "started": False}   # aktiv -1 = unbekannt (Start)
+_fp_delta_cache = {"bis": 0.0, "zeilen": None}
+
+
+def _fp_ts(v):
+    try:
+        return datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+
+
+def fp_plan_aktiv(p, jetzt):
+    """REIN: läuft/startet der Plan gerade oder ist er eben zu Ende (Position schließt noch)? jetzt = datetime (UTC)."""
+    def binnen(k, sek):
+        t = _fp_ts(p.get(k))
+        return t is not None and (jetzt - t).total_seconds() <= sek
+    st = str(p.get("status") or "")
+    if st == "open":
+        return True
+    return (st == "planned" and (binnen("start_um_gestartet_at", 900) or binnen("orbit_gesendet_at", 900))) or binnen("ended_at", 600)
+
+
+def fp_erkennen(live_rows, konten, plaene, jetzt):
+    """REIN RECHNEND (testbar): → (fremde, bewertet). live_rows: mt5_live-Auszug {master_login, hedge_login, updated_at, note, pos};
+    konten: {login: accounts-Zeile}; plaene: {master_account_id, slave_account_id, status, ticket, start_um_gestartet_at,
+    orbit_gesendet_at, ended_at}.
+    fremde = [{master_login, ident, konto_id, user_id, firma, konto_name, account_type, richtung, symbol, menge}]; bewertet = Logins mit
+    gültiger Lesung, deren Konto wirklich bewertet wurde — nur dort gilt eine nicht mehr gesehene Fremd-Position als geschlossen."""
+    hedge = {str(z.get("hedge_login") or "").strip() for z in live_rows or ()} - {""}   # Fusion-Hedgekonten sind keine Prop-Konten
+    frisch = []
+    for z in live_rows or ():
+        t = _fp_ts(z.get("updated_at"))
+        if t is not None and (jetzt - t).total_seconds() <= FP_FRISCH_S and not z.get("note") and isinstance(z.get("pos"), list):
+            frisch.append(z)
+    tickets, ohne = set(), set()
+    for p in plaene or ():
+        t = str(p.get("ticket") or "").strip()
+        aktiv = fp_plan_aktiv(p, jetzt)
+        if t:
+            tickets.add(t)
+        elif aktiv:
+            ohne.add(str(p.get("master_account_id") or ""))
+        if aktiv and p.get("slave_account_id"):
+            ohne.add(str(p["slave_account_id"]))          # Gegenkonto (Duplikum/Echo-Slave): dessen Position hat kein Plan-Ticket
+    fremde, bewertet = [], set()
+    for login, z in lt_echo_live_wahl(frisch).items():
+        a = konten.get(login)
+        if (login in hedge or not a or str(a.get("id")) in ohne or a.get("duplikum_linked")
+                or "fusion" in str(a.get("firm") or "").lower()):
+            continue
+        bewertet.add(login)
+        for x in z.get("pos") or ():
+            if not isinstance(x, dict):
+                continue
+            ident, typ = str(x.get("ident") or "").strip(), x.get("type")
+            if not ident or ident in tickets or typ not in (0, 1):        # MT5: 0 = Buy, 1 = Sell
+                continue
+            fremde.append({"master_login": login, "ident": ident, "konto_id": str(a["id"]), "user_id": a.get("user_id"),
+                           "firma": a.get("firm"), "konto_name": a.get("name"), "account_type": a.get("account_type"),
+                           "richtung": "buy" if typ == 0 else "sell", "symbol": x.get("symbol"), "menge": x.get("volume")})
+    return fremde, bewertet
+
+
+def fp_konto_norm(v):
+    """REIN: Kontonummer vergleichbar machen (nur Buchstaben/Ziffern, groß) — TV zeigt sie ohne Trenner, accounts mal mit."""
+    return re.sub(r"[^A-Za-z0-9]", "", str(v or "")).upper()
+
+
+def fp_preis_norm(v, symbol=""):
+    """REIN: Einstieg für den TV-ident in EINER Schreibweise (Slave-2-Prüfung: 30801 / 30801.0 / „30,801.00" ergäben sonst je Lesung eine
+    neue Zeile mit neuem seit = ständig „frische Hand-Starts" für den 90-s-Riegel). Zahl oder Text → float, Tausender-Komma raus,
+    NQ/MNQ auf den Tick 0,25, sonst 2 Nachkommastellen; nicht lesbar → „?"."""
+    try:
+        x = float(v) if isinstance(v, (int, float)) else float(str(v).replace("\u2212", "-").replace(",", "").strip())
+    except (TypeError, ValueError):
+        return "?"
+    if re.match(r"^M?NQ", str(symbol or "").upper()):
+        x = round(x * 4) / 4
+    return f"{x:.2f}"
+
+
+def fp_erkennen_tv(tv_rows, konten, plaene, jetzt):
+    """REIN RECHNEND (testbar): TradingView/Tradovate-Quelle (echoplus_live {konto, positionen, positionen_ok, updated_at}) →
+    (fremde, bewertet) wie fp_erkennen; master_login = normierte Kontonummer, konten = {fp_konto_norm(external_id): account}.
+    Je Konto die frischeste vollständige Lesung; ein Konto mit aktivem Plan (Master oder Gegenkonto, fp_plan_aktiv) bleibt unbewertet."""
+    beste = {}
+    for z in tv_rows or ():
+        t, k = _fp_ts(z.get("updated_at")), fp_konto_norm(z.get("konto"))
+        if (t is None or not k or (jetzt - t).total_seconds() > FP_FRISCH_S or not z.get("positionen_ok")
+                or not isinstance(z.get("positionen"), list)):
+            continue
+        if k not in beste or t > beste[k][0]:
+            beste[k] = (t, z)
+    belegt = set()
+    for p in plaene or ():
+        if fp_plan_aktiv(p, jetzt):
+            belegt |= {str(p.get("master_account_id") or ""), str(p.get("slave_account_id") or "")}
+    fremde, bewertet = [], set()
+    for k, (_t, z) in beste.items():
+        a = konten.get(k)
+        if not a or str(a.get("id")) in belegt or a.get("duplikum_linked") or "fusion" in str(a.get("firm") or "").lower():
+            continue
+        bewertet.add(k)
+        for x in z["positionen"]:
+            if not isinstance(x, dict):
+                continue
+            r, sym = str(x.get("richtung") or "").lower(), str(x.get("symbol") or "").strip()
+            if r not in ("buy", "sell") or not sym:
+                continue
+            menge = x.get("menge_zahl")
+            fremde.append({"master_login": k, "ident": f"{sym}:{r}:{fp_preis_norm(x.get('avg_fill'), sym)}", "konto_id": str(a["id"]),
+                           "user_id": a.get("user_id"), "firma": a.get("firm"), "konto_name": a.get("name"),
+                           "account_type": a.get("account_type"), "richtung": r, "symbol": sym,
+                           "menge": menge if isinstance(menge, (int, float)) else None})
+    return fremde, bewertet
+
+
+def fp_alarme(aktive, konflikte):
+    """REIN: neue Alarme → [(zeilen_id, schluessel, fremd_zeile, konflikt)]. Je Paar ein Schlüssel: „plan:<plan_id>" an der Fremd-Zeile,
+    Hand gegen Hand „hand:<klein>-<groß>" nur an der kleineren id (sonst käme derselbe Alarm zweimal). Schon gemeldete (alarm_keys) raus."""
+    je = {int(r["id"]): r for r in aktive or ()}
+    out = []
+    for k in konflikte or ():
+        try:
+            fid = int(k.get("fremd_id"))
+        except (TypeError, ValueError):
+            continue
+        f = je.get(fid)
+        if not f:
+            continue
+        if k.get("art") == "hand":
+            try:
+                gid = int(k.get("gegen_id"))
+            except (TypeError, ValueError):
+                continue
+            if fid > gid:
+                continue
+            key = f"hand:{fid}-{gid}"
+        else:
+            key = f"plan:{k.get('gegen_id')}"
+        if key not in (f.get("alarm_keys") or []) and key not in {x[1] for x in out}:
+            out.append((fid, key, f, k))
+    return out
+
+
+def _fp_richtung(r):
+    return "Buy" if r == "buy" else "Sell" if r == "sell" else str(r or "?")
+
+
+def _fp_tabelle_fehlt(e):
+    t = str(getattr(getattr(e, "response", None), "text", "") or e)
+    return "fremd_positionen" in t or "prophos_fremd_konflikte" in t
+
+
+def fp_tick(force=False):
+    if not force and time.time() - _fp["at"] < FP_TAKT_S:
+        return
+    _fp["at"] = time.time()
+    jetzt = datetime.now(timezone.utc)
+    jetzt_iso = jetzt.isoformat()
+    ab = datetime.fromtimestamp(time.time() - FP_FRISCH_S, timezone.utc).isoformat()
+    live = sb_select("mt5_live", {"select": "master_login,hedge_login,updated_at,note:status->>note,pos:status->master_positions",
+                                  "updated_at": f"gte.{ab}", "master_login": "not.is.null"}) or []
+    tv = sb_select("echoplus_live", {"select": "konto,positionen,positionen_ok,updated_at", "updated_at": f"gte.{ab}",
+                                     "positionen_ok": "is.true", "konto": "not.is.null"}) or []
+    logins = sorted({str(z.get("master_login") or "").strip() for z in live} - {""})
+    tv_konten = sorted({fp_konto_norm(z.get("konto")) for z in tv} - {""})
+    tv_roh = sorted({str(z.get("konto") or "").strip() for z in tv} - {""} - set(tv_konten))   # Schreibweise wie in TV, falls anders
+    konten, konten_tv, plaene = {}, {}, []
+    if logins or tv_konten:
+        archiv = _ap_archiviert()
+        def nimm(d, k, a):
+            if k not in d or (str(d[k]["id"]) in archiv and str(a["id"]) not in archiv):
+                d[k] = a                                          # doppelte External ID: das nicht archivierte Konto gewinnt
+        for a in sb_select("accounts", {"select": "id,user_id,firm,name,account_type,external_id,duplikum_linked",
+                                        "external_id": f"in.({','.join(logins + tv_konten + tv_roh)})"}) or []:
+            lg = str(a.get("external_id") or "").strip()
+            if lg in logins:
+                nimm(konten, lg, a)
+            if fp_konto_norm(lg) in tv_konten:
+                nimm(konten_tv, fp_konto_norm(lg), a)
+        ids = sorted({str(a["id"]) for a in list(konten.values()) + list(konten_tv.values())})
+        if ids:
+            seit3 = datetime.fromtimestamp(time.time() - 3 * 86400, timezone.utc).isoformat()
+            plaene = sb_select("trade_plans", {
+                "select": "id,master_account_id,slave_account_id,status,start_um_gestartet_at,orbit_gesendet_at,ended_at,"
+                          "ticket:mt5_baseline->>ticket",
+                "and": f"(or(master_account_id.in.({','.join(ids)}),slave_account_id.in.({','.join(ids)})),"
+                       f"or(status.in.(open,planned,review),ended_at.gte.{seit3},completed_at.gte.{seit3}))"}) or []
+    fremde, bewertet = fp_erkennen(live, konten, plaene, jetzt)
+    fremde_tv, bewertet_tv = fp_erkennen_tv(tv, konten_tv, plaene, jetzt)
+    fremde = [dict(f, quelle="mt5") for f in fremde] + [dict(f, quelle="tv") for f in fremde_tv]
+    _fp["logins"], _fp["tv_konten"] = len(bewertet), len(bewertet_tv)
+    if not fremde and _fp["aktiv"] == 0:
+        return                                   # nichts gesehen, nichts offen → kein Schreiben, keine Konflikt-Abfrage
+    try:
+        if fremde:
+            # Upsert ohne seit → bei vorhandener Zeile bleibt seit, weg_at wieder null (Position wieder da), zuletzt_gesehen = jetzt
+            r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/fremd_positionen", params={"on_conflict": "quelle,master_login,ident"},
+                            json=[dict(f, zuletzt_gesehen=jetzt_iso, weg_at=None) for f in fremde],
+                            headers=_sb_headers("resolution=merge-duplicates,return=minimal"), timeout=(5, 15))
+            _sb_pruefen(r)
+        for quelle, bw in (("mt5", bewertet), ("tv", bewertet_tv)):
+            if bw:
+                # gültig gelesen, aber nicht mehr dabei → geschlossen
+                sb_update("fremd_positionen", {"quelle": f"eq.{quelle}", "weg_at": "is.null", "zuletzt_gesehen": f"lt.{jetzt_iso}",
+                                               "master_login": f"in.({','.join(sorted(bw))})"}, {"weg_at": jetzt_iso})
+        frist = datetime.fromtimestamp(time.time() - 180, timezone.utc).isoformat()
+        aktive = sb_select("fremd_positionen", {"select": "id,user_id,konto_name,firma,richtung,symbol,menge,seit,alarm_keys,gegen",
+                                                "weg_at": "is.null", "zuletzt_gesehen": f"gt.{frist}"}) or []
+        _fp["aktiv"], _fp["tabelle_fehlt"] = len(aktive), False
+        if not aktive:
+            return
+        r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/rpc/prophos_fremd_konflikte", headers=_sb_headers(), json={}, timeout=(5, 15))
+        _sb_pruefen(r)
+        konflikte = r.json() or []
+    except requests.exceptions.HTTPError as e:
+        if _fp_tabelle_fehlt(e):
+            _fp["tabelle_fehlt"] = True          # sql/2026-10-08_fremd_positionen.sql noch nicht eingespielt
+            return
+        raise
+    # Konflikt-Stand je Zeile (für „Braucht dich") — nur schreiben, wenn er sich geändert hat
+    je = {}
+    for k in konflikte:
+        je.setdefault(int(k["fremd_id"]), []).append({"art": k.get("art"), "id": k.get("gegen_id"), "user_id": k.get("gegen_user"),
+                                                      "konto": k.get("gegen_konto"), "richtung": k.get("gegen_richtung"),
+                                                      "seit": k.get("gegen_seit")})
+    for f in aktive:
+        neu = sorted(je.get(int(f["id"]), []), key=lambda x: (str(x["art"]), str(x["id"])))
+        if (f.get("gegen") or []) != neu:
+            sb_update("fremd_positionen", {"id": f"eq.{f['id']}"}, {"gegen": neu})
+    alarme = fp_alarme(aktive, konflikte)
+    if not alarme:
+        return
+    namen, _aus = _ap_namen()
+    admins = _zw_admin_uids()
+    for fid, key, f, k in alarme:
+        # Guard: nur der Lauf, der den Schlüssel wirklich einträgt, meldet (zwei Container beim Rollout)
+        if not sb_update("fremd_positionen", {"id": f"eq.{fid}", "alarm_keys": f"not.cs.{{{key}}}"},
+                         {"alarm_keys": list(f.get("alarm_keys") or []) + [key]}):
+            continue
+        f.setdefault("alarm_keys", []).append(key)
+        wer, gwer = namen.get(str(f.get("user_id")), ""), namen.get(str(k.get("gegen_user")), "")
+        menge = f.get("menge")
+        text = (f"{f.get('konto_name') or 'Konto'} ({f.get('firma') or '–'}{' · ' + wer if wer else ''}): {_fp_richtung(f.get('richtung'))}"
+                f"{' ' + str(menge) if menge is not None else ''} {f.get('symbol') or ''} von Hand gegen {k.get('gegen_konto') or '?'}"
+                f"{' (' + gwer + ')' if gwer else ''} {_fp_richtung(k.get('gegen_richtung'))}"
+                f"{' (von Hand)' if k.get('art') == 'hand' else ''}").replace("  ", " ")
+        for uid in {str(f.get("user_id")), str(k.get("gegen_user"))} | (admins or set()):
+            if uid and uid != "None":
+                push_an_user(uid, "⚠ Gegenhedge", text, "https://prophos.pages.dev/prophos#tplaner", "fremd-" + key[:40], renotify=True)
+        print(f"[fremd] ⚠ Gegenhedge {key}: {text}", flush=True)
+
+
+def fp_loop():
+    """Fremd-Positionen-Wache alle FP_TAKT_S (Railway). Schutzfunktion, idempotent — keine Anlaufsperre nötig (s. o.)."""
+    print(f"[fremd] 👁 Fremd-Positionen-Wache bereit (MT5 + TradingView/Tradovate, alle {FP_TAKT_S} s)", flush=True)
+    while True:
+        try:
+            fp_tick()
+            _fp["fehler"] = ""
+        except Exception as e:
+            _fp["fehler"] = f"{type(e).__name__}: {e}"
+            print(f"[fremd] ⚠️ {e}", flush=True)
+        _schleife_schlafen(FP_TAKT_S)
+
+
+def fp_delta_zeilen():
+    """fremd[] für GET /admin/auto-plan/delta: aktive Fremd-Positionen mit Konflikten, Namen statt user_ids, 15 s gemerkt (Admin-Tabs
+    fragen alle paar Sekunden). Tabelle fehlt / nicht lesbar → [] (Braucht dich zeigt dann einfach nichts)."""
+    jetzt = time.time()
+    with _kurz_cache_lock:
+        if _fp_delta_cache["zeilen"] is not None and _fp_delta_cache["bis"] > jetzt:
+            return _fp_delta_cache["zeilen"]
+    try:
+        frist = datetime.fromtimestamp(jetzt - 180, timezone.utc).isoformat()
+        rows = sb_select("fremd_positionen", {"select": "id,user_id,konto_id,konto_name,firma,account_type,master_login,richtung,symbol,"
+                                                        "menge,seit,gegen", "weg_at": "is.null", "zuletzt_gesehen": f"gt.{frist}",
+                                              "order": "seit.desc"}) or []
+    except Exception as e:
+        print(f"[fremd] ⚠️ Delta: {type(e).__name__}: {e}", flush=True)
+        return []
+    namen = _ap_namen()[0] if rows else {}
+    zeilen = [{"id": r["id"], "user_id": r.get("user_id"), "user": namen.get(str(r.get("user_id")), ""), "konto_id": r.get("konto_id"),
+               "konto": r.get("konto_name"), "firma": r.get("firma"), "typ": r.get("account_type"),
+               "ende4": re.sub(r"\D", "", str(r.get("master_login") or ""))[-4:], "richtung": r.get("richtung"),
+               "symbol": r.get("symbol"), "menge": r.get("menge"), "seit": r.get("seit"),
+               "gegen": [dict(g, user=namen.get(str(g.get("user_id")), "")) for g in (r.get("gegen") or []) if isinstance(g, dict)]}
+              for r in rows]
+    with _kurz_cache_lock:
+        _fp_delta_cache.update(bis=jetzt + FP_DELTA_CACHE_S, zeilen=zeilen)
+    return zeilen
+
+
 # ANLAUFSPERRE (Slave 1, 08.10.2026, Railway-Logs): bei schnell aufeinanderfolgenden Pushes laufen kurz zwei Container — 05:12:18 und
 # 05:12:20 UTC „Starting Container", beide ließen den Ausgleichs-Bot 4 s nach dem Start laufen (05:12:22 und 05:12:23, je „Ausgleich
 # bot: …"), erst 05:12:24 kam SIGTERM. Zwei Bots im selben Takt können denselben Plan doppelt verschieben. Darum laufen alle
@@ -20572,6 +20898,9 @@ def start_auto_planer():
     _ap_started = True
     _ap_info["started"] = True
     threading.Thread(target=ap_loop, daemon=True).start()
+    if not _fp["started"]:                    # Fremd-Positionen-Wache (08.10.2026) — eigener Takt, nur Railway wie der Planer
+        _fp["started"] = True
+        threading.Thread(target=fp_loop, daemon=True).start()
 
 
 def _ap_eingriff(aktion):
