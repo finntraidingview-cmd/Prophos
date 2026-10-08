@@ -40,7 +40,7 @@ FIRMEN = [
 ZEITEN = {"tz": "Europe/Berlin", "fenster": [["00:00", "14:30", 40], ["14:30", "17:30", 40], ["17:30", "19:30", 20]],
           "abstand_id_min": 3, "abstand_konto_s": [60, 120], "pause_firma_min": [25, 45]}
 
-REIN = ("_ap_plan_am_tag", "ap_ist_waise", "ap_id_fest", "ap_id_misch", "ap_klasse", "_ap_misch_fenster", "_ap_misch_zelle", "ap_misch_lage", "ap_misch_bewerter", "ap_firma_misch", "ap_misch_text", "ap_ext_fehlt", "_ap_norm", "ap_regel_finden", "ap_groesse", "_ap_spanne", "_ap_runden", "ap_konto_rechnen", "ap_klein_trade", "_ap_de", "_ap_hhmm", "_ap_hhmm_txt",
+REIN = ("_ap_plan_am_tag", "ap_ist_waise", "ap_id_fest", "ap_id_misch", "ap_klasse", "_ap_misch_fenster", "_ap_misch_zelle", "ap_misch_lage", "ap_misch_bewerter", "ap_firma_misch", "ap_misch_text", "ap_ext_fehlt", "_ap_norm", "ap_regel_finden", "ap_groesse", "_ap_spanne", "_ap_runden", "ap_konto_rechnen", "ap_klein_trade", "_ap_de", "ap_notiz", "_ap_hhmm", "_ap_hhmm_txt",
         "ap_zeiten_verteilen", "_ap_zeiten_verteilen_einmal", "ap_kw_param", "_ap_kw_kauf", "_ap_kw_wachsen", "kette_dll_chance", "ap_kontowert", "ap_trade_gewicht", "ap_sicht", "ap_sicht_uid", "ap_eingriff_filter",
         "_wd_num", "_symbol_wurzel", "_wd_level", "_wd_futures_frontcode", "_ap_gehedgt", "_ap_ende4",
         "ap_ausgleich_param", "ap_firma_key", "ap_ppl_karte", "ap_cfd_ppl", "ap_punktwert", "ap_usd_pro_pkt", "ap_delta", "ap_punkte",

@@ -15419,6 +15419,13 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None):
             "tp": tp, "sl": sl, "risiko": risiko, "stufe": stufe}, None
 
 
+def ap_notiz(stufe, rest_txt, bal, bal_quelle):
+    """REIN: notes eines Auto-Plans — „Auto-Planer · <stufe> · Rest 9.039 $ bis Ziel · Balance 149.961 (TV)". Die Stufe bleibt, wie sie ist
+    (Lots mit Komma), Rest/Balance mit Tausender-Punkt (Frontend planAutoNotiz/apIdsAusNotes lesen [\d.]+)."""
+    bal_txt = f"{float(bal):,.0f}".replace(",", ".")
+    return f"Auto-Planer · {stufe} · Rest {rest_txt} $ bis Ziel · Balance {bal_txt} ({bal_quelle})"
+
+
 def _ap_de(x, stellen=2):
     """Zahl deutsch: 0.18 → „0,18“, 2.0 → „2“ (Lots in Notizen)."""
     x = float(x)
@@ -18016,7 +18023,9 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
             "start_um": start.astimezone(timezone.utc).isoformat(), "status": "planned", "priority": "medium",
             "planned_for": tag, "auto_plan": True,
             "mt5_baseline": {"kette": dict(w["kette"], tag=tag)} if w.get("kette") else None,   # Topstep-Kette Trade 1 (08.10.2026)
-            "notes": f"Auto-Planer · {w['stufe']} · Rest {rest_txt} $ bis Ziel · Balance {k['bal']:,.0f} ({k['bal_quelle']})".replace(",", ".")})
+            # Tausender-Punkt nur für Rest und Balance (09.10.2026): das alte .replace(",", ".") über die ganze Notiz machte aus der
+            # Klein-Trade-Stufe „0,18 Lots" ein „0.18 Lots" (Stufen mit Tausendern formatieren sich selbst, z. B. Topstep-Kette)
+            "notes": ap_notiz(w["stufe"], rest_txt, k["bal"], k["bal_quelle"])})
         if param["auto_start"]:      # regeln.ausgleich.auto_start (Standard aus): Plan gilt sofort als bestätigt
             zeilen[-1]["auto_bestaetigt_at"] = jetzt.isoformat()
         d = dinfo.get((key, str(a["id"]))) or {}

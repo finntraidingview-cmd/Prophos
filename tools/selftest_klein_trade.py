@@ -12,7 +12,7 @@ import sys
 HIER = os.path.dirname(os.path.abspath(__file__))
 APP = os.path.join(os.path.dirname(HIER), "app.py")
 FUNKTIONEN = ("_wd_num", "_ap_norm", "ap_groesse", "_ap_spanne", "_ap_runden", "_ap_boden", "ap_kette_regel", "ap_kette_mll",
-              "ap_kette_trade1", "ap_konto_rechnen", "ap_klein_trade", "_ap_de", "ap_cfd_ppl")
+              "ap_kette_trade1", "ap_konto_rechnen", "ap_klein_trade", "_ap_de", "ap_cfd_ppl", "ap_notiz")
 KONSTANTEN = ("AP_REST_MIN", "AP_REST_MIN_CFD", "AP_KLEIN_PKT", "AP_KLEIN_PUFFER", "AP_KLEIN_SCHRITT", "AP_KLEIN_TP_PKT_HINWEIS",
               "AP_PUFFER_PKT", "AP_CFD_ROUTEN", "AP_GROESSE_TOLERANZ", "AP_KETTE_STANDARD", "AP_KETTE_TXT")
 FEHLER = []
@@ -129,6 +129,17 @@ def main():
     ctx_k = {"ppl": {("u1", "fundednext"): (2.0, "MNQ", "Kontrakte")}, "ppl_firma": {"ftmo": (1.0, None, None)}}
     check(P(ctx_k, {"user_id": "u1", "firm": "FundedNext"}) is None and P(ctx_k, {"user_id": "u9", "firm": "FTMO"}) == 1.0,
           "ap_cfd_ppl: Einheit „Kontrakte“ → None (Handarbeit), Einheit leer → Lots")
+
+    # 11) Notiz (09.10.2026, live stand „0.18 Lots"): Lots mit Komma, Rest/Balance mit Tausender-Punkt, Frontend-Muster greift weiter
+    N = a["ap_notiz"]
+    st = K(36, 10, 0.1, 0.8)["stufe"]
+    n = N(st, f"{36:,}".replace(",", "."), 107963.98, "Echo")
+    check(n == "Auto-Planer · Klein-Trade · Rest 36 $ · 0,18 Lots · TP 55 $ (Rest + Puffer 19 $) · Rest 36 $ bis Ziel · Balance 107.964 (Echo)",
+          f"Notiz Klein-Trade mit Komma-Lots ({n})")
+    m = re.search(r"Auto-Planer · (.+?) · Rest ([\d.]+) \$ bis Ziel · Balance ([\d.]+)", n)
+    check(bool(m) and m.group(1) == st and m.group(2) == "36" and m.group(3) == "107.964", "Frontend-Muster planAutoNotiz liest Stufe/Rest/Balance")
+    n2 = N("letzter Trade (Rest bis Ziel)", f"{3964:,}".replace(",", "."), 105036, "TV")
+    check(n2 == "Auto-Planer · letzter Trade (Rest bis Ziel) · Rest 3.964 $ bis Ziel · Balance 105.036 (TV)", f"Tausender bleiben ({n2})")
 
     print(f"\n{'ALLES OK' if not FEHLER else f'{len(FEHLER)} FEHLER'}")
     sys.exit(1 if FEHLER else 0)
