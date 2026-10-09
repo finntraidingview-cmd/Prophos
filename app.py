@@ -23464,6 +23464,375 @@ def admin_auto_plan():
         return jsonify({"ok": False, "admin": admin, "msg": f"{type(e).__name__}: {e}"}), 502
 
 
+# ══ LIQUIDE MITTEL (09.10.2026, Slave-Terminal 4 — Auftrag Pascal über Finn, Vertrag .claude/master/auftraege/liquide-vertrag.md) ══
+# Kunden-Töpfe aus Google Sheets: je Kunde ein Sheet „Transaktion, Betrag EUR, Datum", Zeile 2 Spalte B = Kontostand (Summenformel).
+# Das Backend holt den CSV-Export ohne Key (Freigabe „Jeder mit dem Link"), rechnet wie lqParseSheet aus dem Kompass/Lifeplanner und
+# schreibt je Sheet und Dubai-Tag eine Zeile in bank_staende. Fehler stehen als Text in `fehler`, nie stumm 0 (kontostand dann null).
+# Tabellen nur über diese Routen (RLS ohne Policies, sql/2026-10-09_liquide_mittel.sql); Gate: Voll-Admin (Verwalter/eingeschränkt 403).
+LQ_NICHT_FREI = "nicht freigegeben (Link-Freigabe „Jeder mit dem Link“ fehlt)"
+LQ_TOLERANZ_EUR = 1.0           # Prüfung grün, wenn |Summe Buchungen − Kontostand| ≤ 1 € (Sheets runden auf ganze Euro)
+LQ_TAKT_S = 6 * 3600            # Abruf im Backend alle 6 h (dazu der Knopf „↻ Abrufen")
+LQ_ERSTER_ABRUF_S = 180         # nach dem Start einmal nach 3 min (der Stand ist dann ohne Knopfdruck da)
+LQ_VERLAUF_TAGE = 120
+_lq_lock = threading.Lock()
+_lq_info = {"started": False, "letzter": None, "fehler": ""}
+
+
+def lq_csv(text):
+    """REIN RECHNEND: CSV (Google-Export) → Zeilen als Listen; Anführungszeichen, "" und Zeilenumbrüche in Zellen wie lqCsv."""
+    import csv
+    import io
+    return [list(r) for r in csv.reader(io.StringIO(str(text or "")))]
+
+
+def lq_num(s):
+    """REIN RECHNEND: deutsche Zahl („1.234,56", „-235") → float, leer/unlesbar → None (wie lqNum: Punkte weg, Komma = Dezimal)."""
+    s = str(s if s is not None else "").strip()
+    if not s:
+        return None
+    try:
+        f = float(s.replace(".", "").replace(",", "."))
+    except ValueError:
+        return None
+    return f if f == f and f not in (float("inf"), float("-inf")) else None
+
+
+def lq_datum(s):
+    """REIN RECHNEND: „06.10.2026" / „24.9.2026" / „ 14.09.2026" → 'JJJJ-MM-TT', sonst None."""
+    m = re.match(r"^\s*(\d{1,2})\.(\d{1,2})\.(\d{4})\s*$", str(s or ""))
+    if not m:
+        return None
+    try:
+        return datetime(int(m.group(3)), int(m.group(2)), int(m.group(1))).strftime("%Y-%m-%d")
+    except ValueError:
+        return None
+
+
+def lq_parse_sheet(text):
+    """REIN RECHNEND (Vertrag „Abruf/Parse"): CSV-Text eines Kunden-Sheets → {kontostand, einzahlungen, kaeufe, payouts, an_uns,
+    letzte_buchung, diff, pruefung_ok, n, fehler}. Zeile 2 Spalte B = Kontostand, ab Zeile 3 Buchungen (Transaktion, Betrag EUR, Datum).
+    Betrag > 0 ohne „Payout" = Einzahlung · > 0 mit „Payout" = Payout · < 0 mit „Abhebung"/„an uns" = an uns · sonst < 0 = Kauf/Reset.
+    diff = Summe Buchungen − Kontostand, Prüfung grün bei |diff| ≤ LQ_TOLERANZ_EUR. Letzte Buchung = Datum der letzten Buchung in
+    Sheet-Reihenfolge (wie lqParseSheet). HTML statt CSV (Google-Login) = nicht freigegeben. Bei Fehler kontostand None, nie 0."""
+    leer = {"kontostand": None, "einzahlungen": None, "kaeufe": None, "payouts": None, "an_uns": None, "letzte_buchung": None,
+            "diff": None, "pruefung_ok": False, "n": 0}
+    t = str(text or "")
+    if re.match(r"^\s*<", t) or re.search(r"<html|<!doctype", t[:2000], re.I):
+        return dict(leer, fehler=LQ_NICHT_FREI)
+    zeilen = lq_csv(t)
+    if len(zeilen) < 2:
+        return dict(leer, fehler="Sheet leer")
+    roh_b2 = zeilen[1][1] if len(zeilen[1]) > 1 else ""
+    bal = lq_num(roh_b2)
+    if bal is None:
+        return dict(leer, fehler=f"Zeile 2 Spalte B (Kontostand) nicht lesbar: {str(roh_b2).strip()[:40] or 'leer'}")
+    ein = kauf = pay = uns = summe = 0.0
+    n, letzte = 0, None
+    for z in zeilen[2:]:
+        betrag = lq_num(z[1] if len(z) > 1 else "")
+        if betrag is None:
+            continue
+        text_z = str(z[0] if z else "")
+        n += 1
+        summe += betrag
+        if betrag > 0:
+            if re.search(r"payout", text_z, re.I):
+                pay += betrag
+            else:
+                ein += betrag
+        elif re.search(r"abhebung|an uns", text_z, re.I):
+            uns += betrag
+        else:
+            kauf += betrag
+        d = lq_datum(z[2] if len(z) > 2 else "")
+        if d:
+            letzte = d
+    diff = round(summe - bal, 2)
+    return {"kontostand": round(bal, 2), "einzahlungen": round(ein, 2), "kaeufe": round(kauf, 2), "payouts": round(pay, 2),
+            "an_uns": round(uns, 2), "letzte_buchung": letzte, "diff": diff, "pruefung_ok": abs(diff) <= LQ_TOLERANZ_EUR, "n": n,
+            "fehler": None}
+
+
+def lq_sheet_id(link):
+    """REIN RECHNEND: Sheet-ID aus einem Link (…/d/<ID>/…) oder die nackte ID; sonst None."""
+    s = str(link or "").strip()
+    m = re.search(r"/d/([A-Za-z0-9_-]{20,})", s)
+    if m:
+        return m.group(1)
+    return s if re.fullmatch(r"[A-Za-z0-9_-]{20,}", s) else None
+
+
+def _lq_holen(sheet_id):
+    """CSV-Export eines Sheets holen und parsen → lq_parse_sheet-Ergebnis (mit fehler bei HTTP-/Netzfehler)."""
+    url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
+    try:
+        r = requests.get(url, timeout=(5, 20), allow_redirects=True)
+    except requests.exceptions.RequestException as e:
+        return dict(lq_parse_sheet(""), fehler=f"Abruf fehlgeschlagen: {type(e).__name__}")
+    if r.status_code in (401, 403):
+        return dict(lq_parse_sheet(""), fehler=LQ_NICHT_FREI)
+    if r.status_code == 404:
+        return dict(lq_parse_sheet(""), fehler="Sheet nicht gefunden (HTTP 404) — Link prüfen")
+    if r.status_code != 200:
+        return dict(lq_parse_sheet(""), fehler=f"HTTP {r.status_code}")
+    if "text/html" in str(r.headers.get("content-type") or "").lower():
+        return dict(lq_parse_sheet(""), fehler=LQ_NICHT_FREI)
+    r.encoding = "utf-8"
+    return lq_parse_sheet(r.text)
+
+
+def _lq_tag():
+    return datetime.now(timezone.utc).astimezone(_ap_tz("Asia/Dubai")).strftime("%Y-%m-%d")
+
+
+def _lq_abrufen(sheet_ids=None):
+    """Aktive Sheets (bzw. nur sheet_ids) jetzt holen und je Sheet + Dubai-Tag in bank_staende schreiben (Upsert). Ein Lauf auf einmal."""
+    with _lq_lock:
+        rows = _sb_all("kunden_sheets", {"select": "id,person_uid,sheet_id,aktiv", "aktiv": "eq.true"})
+        if sheet_ids is not None:
+            rows = [r for r in rows if r.get("sheet_id") in set(sheet_ids)]
+        tag, jetzt = _lq_tag(), datetime.now(timezone.utc).isoformat()
+        for r in rows:
+            erg = _lq_holen(r["sheet_id"])
+            sb_upsert("bank_staende", {"person_uid": r.get("person_uid"), "sheet_id": r["sheet_id"], "day": tag,
+                                       "kontostand": erg["kontostand"], "einzahlungen": erg["einzahlungen"], "kaeufe": erg["kaeufe"],
+                                       "payouts": erg["payouts"], "an_uns": erg["an_uns"], "letzte_buchung": erg["letzte_buchung"],
+                                       "diff": erg["diff"], "fehler": erg["fehler"], "geholt_at": jetzt})
+            if erg["fehler"]:
+                print(f"[liquide] ⚠️ Sheet {str(r['sheet_id'])[:6]}…: {erg['fehler']}", flush=True)
+        _lq_info["letzter"] = jetzt
+        return len(rows)
+
+
+def _lq_fx():
+    fx = 0.85                                                      # wie _admin_basis
+    for r in _sb_all("user_settings", {"select": "value", "key": "eq.fx_usd_eur"}):
+        try:
+            v = r.get("value")
+            v = json.loads(v) if isinstance(v, str) else v
+            f = float(v if not isinstance(v, dict) else v.get("rate"))
+            if 0.5 < f < 1.5:
+                return f
+        except (TypeError, ValueError):
+            continue
+    return fx
+
+
+def lq_kunde_flags(nutzer, zeilen, admin_mails):
+    """REIN RECHNEND: effektives Kunden-Flag je Person. nutzer = [(user_id, email)], zeilen = liq_personen. Fehlt die Zeile:
+    Kunde = True, außer Admins (ADMIN_EMAILS: Finn, Pascal) = False."""
+    gesetzt = {str(z.get("user_id")): bool(z.get("ist_kunde")) for z in zeilen or ()}
+    return {uid: gesetzt.get(uid, str(mail or "").strip().lower() not in admin_mails) for uid, mail in nutzer}
+
+
+def lq_antwort(sheets, staende, nutzer, personen, pending, fx, admin_mails, aus=frozenset()):
+    """REIN RECHNEND: Antwort von GET /admin/liquide (Vertrag) aus den gelesenen Zeilen. staende = bank_staende (alle Tage, beliebige
+    Reihenfolge); je Sheet gilt der jüngste Tag. summe_kunden_eur und verlauf_bank zählen nur aktive Sheets mit Kontostand.
+    Ausgeblendete Personen (aus, ADMIN_EXCLUDE_EMAILS — Emin) kommen gar nicht erst vor: weder Sheet noch Summe, pending oder Flag."""
+    sheets = [sh for sh in sheets or () if str(sh.get("person_uid")) not in aus]
+    juengst = {}
+    for s in staende or ():
+        k = str(s.get("sheet_id"))
+        if k not in juengst or str(s.get("day")) > str(juengst[k].get("day")):
+            juengst[k] = s
+    out_sheets, summe = [], 0.0
+    for sh in sorted(sheets or (), key=lambda x: (str(x.get("person_name") or "").lower(), str(x.get("sheet_id")))):
+        st = juengst.get(str(sh.get("sheet_id")))
+        stand = None
+        if st:
+            d = st.get("diff")
+            stand = {"day": st.get("day"), "kontostand": _wd_num(st.get("kontostand")) if st.get("kontostand") is not None else None,
+                     "einzahlungen": _wd_num(st.get("einzahlungen")), "kaeufe": _wd_num(st.get("kaeufe")), "payouts": _wd_num(st.get("payouts")),
+                     "an_uns": _wd_num(st.get("an_uns")), "letzte_buchung": st.get("letzte_buchung"),
+                     "diff": float(d) if d is not None else None,
+                     "pruefung_ok": (not st.get("fehler")) and d is not None and abs(float(d)) <= LQ_TOLERANZ_EUR,
+                     "fehler": st.get("fehler"), "geholt_at": st.get("geholt_at")}
+            if sh.get("aktiv") and stand["kontostand"] is not None:
+                summe += float(stand["kontostand"])
+        out_sheets.append({"id": sh.get("id"), "person_uid": sh.get("person_uid"), "person_name": sh.get("person_name"),
+                           "sheet_id": sh.get("sheet_id"), "aktiv": bool(sh.get("aktiv")), "stand": stand})
+    aktive = {str(sh.get("sheet_id")) for sh in sheets or () if sh.get("aktiv")}
+    je_tag = {}
+    for s in staende or ():
+        if str(s.get("sheet_id")) in aktive and s.get("kontostand") is not None:
+            je_tag[str(s.get("day"))] = je_tag.get(str(s.get("day")), 0.0) + float(s["kontostand"])
+    verlauf = [{"day": d, "summe": round(v, 2)} for d, v in sorted(je_tag.items())]
+    pend = []
+    for p in pending or ():
+        uid = str(p.get("user_id"))
+        if uid in aus:
+            continue
+        try:
+            betrag = float(p.get("amount") or 0)
+        except (TypeError, ValueError):
+            continue
+        ccy = str(p.get("currency") or "EUR").upper()
+        pend.append({"user_id": uid, "betrag_eur": round(betrag * (fx if ccy == "USD" else 1.0), 2), "betrag": round(betrag, 2),
+                     "waehrung": ccy, "account_name": p.get("account_name") or "", "account_firm": p.get("account_firm") or "",
+                     "liegt_bei": p.get("liegt_bei") or "", "requested_at": p.get("requested_at") or ""})
+    pend.sort(key=lambda x: x["requested_at"])
+    kunde = lq_kunde_flags([(u, m) for u, m in nutzer if u not in aus], personen, admin_mails)
+    return {"ok": True, "sheets": out_sheets, "summe_kunden_eur": round(summe, 2), "verlauf_bank": verlauf, "kunde": kunde,
+            "pending": pend, "fx_usd_eur": fx, "generated": datetime.now(timezone.utc).isoformat()}
+
+
+def _lq_antwort_laden():
+    seit = (datetime.now(timezone.utc).astimezone(_ap_tz("Asia/Dubai")).date().toordinal() - LQ_VERLAUF_TAGE)
+    seit_iso = datetime.fromordinal(seit).strftime("%Y-%m-%d")
+    sheets = _sb_all("kunden_sheets", {"select": "id,person_uid,person_name,sheet_id,aktiv", "order": "person_name.asc"})
+    staende = _sb_all("bank_staende", {"select": "sheet_id,day,kontostand,einzahlungen,kaeufe,payouts,an_uns,letzte_buchung,diff,fehler,geholt_at",
+                                       "day": f"gte.{seit_iso}"})
+    personen = _sb_all("liq_personen", {"select": "user_id,ist_kunde"})
+    nutzer, aus = [], set()
+    for u in (_auth_liste_anfrage().json() or {}).get("users", []):
+        mail = str(u.get("email") or "").strip().lower()
+        if mail in ADMIN_EXCLUDE_EMAILS:
+            aus.add(str(u.get("id")))
+        nutzer.append((str(u.get("id")), mail))
+    try:
+        pending = _sb_all("pending_payouts", {"select": "user_id,amount,currency,liegt_bei,requested_at,account_name,account_firm",
+                                              "status": "eq.pending"})
+    except Exception as e:
+        print(f"[liquide] ⚠️ pending_payouts: {type(e).__name__}: {e}", flush=True)   # Übersicht trotzdem, hörbar
+        pending = []
+    return lq_antwort(sheets, staende, nutzer, personen, pending, _lq_fx(), ADMIN_EMAILS, frozenset(aus))
+
+
+def _lq_gate():
+    """Gate wie /admin/overview + Rechnungen (_admin_auth: eingeloggt, ADMIN_EMAILS), dazu NUR Voll-Admins: ein eingeschränkter Login
+    (Verwalter einer Gruppe, „nur eigene") bekommt 403 — Kundengeld ist HT-weit."""
+    _mail, err = _admin_auth()
+    if err:
+        return err
+    try:
+        sicht, _verw = admin_sicht_lesen(request.environ.get("prophos.admin_uid"))
+    except Exception:
+        return jsonify({"error": "Admin-Zugang nicht prüfbar"}), 502
+    if sicht is not None:
+        return jsonify({"error": "Nur für Voll-Admins"}), 403
+    return None
+
+
+def _lq_json_antwort():
+    try:
+        return jsonify(_lq_antwort_laden())
+    except Exception as e:
+        print(f"[liquide] ⚠️ Antwort: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 502
+
+
+@app.route("/admin/liquide", methods=["GET", "OPTIONS"])
+def admin_liquide():
+    if request.method == "OPTIONS":
+        return "", 200
+    err = _lq_gate()
+    return err if err else _lq_json_antwort()
+
+
+@app.route("/admin/liquide/abruf", methods=["POST", "OPTIONS"])
+def admin_liquide_abruf():
+    if request.method == "OPTIONS":
+        return "", 200
+    err = _lq_gate()
+    if err:
+        return err
+    try:
+        _lq_abrufen()
+    except Exception as e:
+        print(f"[liquide] ⚠️ Abruf: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"ok": False, "error": f"Abruf fehlgeschlagen: {type(e).__name__}: {e}"}), 502
+    return _lq_json_antwort()
+
+
+@app.route("/admin/liquide/sheet", methods=["POST", "OPTIONS"])
+def admin_liquide_sheet():
+    if request.method == "OPTIONS":
+        return "", 200
+    err = _lq_gate()
+    if err:
+        return err
+    body = request.get_json(silent=True) or {}
+    name, sid = str(body.get("person_name") or "").strip(), lq_sheet_id(body.get("link"))
+    if not name:
+        return jsonify({"ok": False, "error": "Kunde (Name) fehlt"}), 400
+    if not sid:
+        return jsonify({"ok": False, "error": "Link nicht erkannt — erwartet …/spreadsheets/d/<ID>/…"}), 400
+    puid = str(body.get("person_uid") or "").strip() or None
+    if puid and not re.fullmatch(r"[0-9a-fA-F-]{36}", puid):
+        return jsonify({"ok": False, "error": "person_uid ist keine ID"}), 400
+    if _sb_all("kunden_sheets", {"select": "id", "sheet_id": f"eq.{sid}"}):
+        return jsonify({"ok": False, "error": "Dieses Sheet ist schon eingetragen"}), 409
+    try:
+        sb_insert("kunden_sheets", {"person_uid": puid, "person_name": name[:80], "sheet_id": sid})
+        _lq_abrufen([sid])
+    except Exception as e:
+        print(f"[liquide] ⚠️ Sheet anlegen: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 502
+    return _lq_json_antwort()
+
+
+@app.route("/admin/liquide/sheet/aktiv", methods=["POST", "OPTIONS"])
+def admin_liquide_sheet_aktiv():
+    if request.method == "OPTIONS":
+        return "", 200
+    err = _lq_gate()
+    if err:
+        return err
+    body = request.get_json(silent=True) or {}
+    sid = str(body.get("id") or "").strip()
+    if not re.fullmatch(r"[0-9a-fA-F-]{36}", sid) or not isinstance(body.get("aktiv"), bool):
+        return jsonify({"ok": False, "error": "id (Zeile) und aktiv (true/false) nötig"}), 400
+    try:
+        if not sb_update("kunden_sheets", {"id": f"eq.{sid}"}, {"aktiv": body["aktiv"]}):
+            return jsonify({"ok": False, "error": "Sheet nicht gefunden"}), 404
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 502
+    return _lq_json_antwort()
+
+
+@app.route("/admin/liquide/kunde", methods=["POST", "OPTIONS"])
+def admin_liquide_kunde():
+    if request.method == "OPTIONS":
+        return "", 200
+    err = _lq_gate()
+    if err:
+        return err
+    body = request.get_json(silent=True) or {}
+    uid = str(body.get("user_id") or "").strip()
+    if not re.fullmatch(r"[0-9a-fA-F-]{36}", uid) or not isinstance(body.get("ist_kunde"), bool):
+        return jsonify({"ok": False, "error": "user_id und ist_kunde (true/false) nötig"}), 400
+    try:
+        sb_upsert("liq_personen", {"user_id": uid, "ist_kunde": body["ist_kunde"], "updated_at": datetime.now(timezone.utc).isoformat()})
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 502
+    return _lq_json_antwort()
+
+
+def lq_loop():
+    _schleife_schlafen(LQ_ERSTER_ABRUF_S)
+    while True:
+        try:
+            n = _lq_abrufen()
+            _lq_info["fehler"] = ""
+            print(f"[liquide] {n} Kunden-Sheet(s) abgerufen", flush=True)
+        except Exception as e:
+            _lq_info["fehler"] = f"{type(e).__name__}: {e}"
+            print(f"[liquide] ⚠️ Takt: {type(e).__name__}: {e}", flush=True)
+        _schleife_schlafen(LQ_TAKT_S)
+
+
+def start_liquide():
+    if _lq_info["started"] or not SUPABASE_SERVICE_KEY:
+        return
+    if (os.environ.get("PROPHOS_FRONTEND") or "").strip():
+        return          # PC-Backend: kein Takt (nur Railway holt die Sheets)
+    _lq_info["started"] = True
+    threading.Thread(target=lq_loop, daemon=True).start()
+
+
+start_liquide()
+
+
 start_kompass()
 
 # Auto-Planer (05.10.2026) — nur Railway, siehe AUTO-PLANER oben
