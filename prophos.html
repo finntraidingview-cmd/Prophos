@@ -25528,14 +25528,28 @@
       e.dbAt = Date.now()
       try{
         const verz = await hedgeVerzoegertePcs()
-        const { data } = await supabase.from('tv_kurs_1m').select('wurzel,minute,h,l,c,quelle,pc,symbol').in('wurzel', ['NQ', 'MNQ'])
-          .gt('minute', new Date(abSec * 1000).toISOString()).order('minute', { ascending: false }).limit(1000)
-        if(Array.isArray(data)) e.je = hedgeExtremRechnen(e.je, data.filter(r => r && !verz.has(r.pc)), abSec, pruef)
+        /* BLÄTTERN STATT limit 1000 (09.10.2026, Befund T2/Master zu befd8bb9: seit Open ~1.010 Zeilen NQ+MNQ — nach einem Neuladen
+         * des Tabs hätte der absteigende Abruf mit limit 1000 die ältesten Minuten nie geholt → falsche Lücke ab Open und ein für
+         * diese Zeit blindes Hoch/Tief). Voll ab der Open-Minute in Seiten zu 1000: beim ersten Abruf, alle 5 min (holt auch
+         * nachgefüllte Minuten der Brücke) und solange eine Lücke steht alle 60 s; dazwischen nur die letzten 15 min (eine Seite). */
+        const voll = !e.vollAt || Date.now() - e.vollAt >= 300000 || (e.luecke && Date.now() - e.vollAt >= 60000)
+        const abIso = new Date((voll ? abSec : Math.max(abSec, Math.floor(Date.now() / 1000) - 900)) * 1000).toISOString()
+        let alle = [], ok = true
+        for(let seite = 0; seite < (voll ? 20 : 1); seite++){
+          const { data, error } = await supabase.from('tv_kurs_1m').select('wurzel,minute,h,l,c,quelle,pc,symbol').in('wurzel', ['NQ', 'MNQ'])
+            .gt('minute', abIso).order('minute', { ascending: false }).order('wurzel', { ascending: true }).range(seite * 1000, seite * 1000 + 999)
+          if(error || !Array.isArray(data)){ ok = false; break }
+          alle = alle.concat(data)
+          if(data.length < 1000) break
+        }
+        if(alle.length) e.je = hedgeExtremRechnen(e.je, alle.filter(r => r && !verz.has(r.pc)), abSec, pruef)
+        if(voll && ok) e.vollAt = Date.now()
       }catch(_){}
     }
     const w = wurzel === 'MNQ' ? 'MNQ' : 'NQ'
     const x = hedgeExtremWahl(e.je, w, hedgeBasisFuer(w))
     if(x) x.luecke_seit = hedgeKerzenLuecke(x.minuten, abSec, Date.now())
+    e.luecke = !!(x && x.luecke_seit)
     return x
   }
   /* FEED-PUFFER FÜR DEN KLICKZEITPUNKT (28.09.2026, Finn 02:20 Dubai, Vorfall Jacob c28a7639: ohne Puls-Fill nahm der Hedge den Feed-Kurs
@@ -43062,7 +43076,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1437'
+  const OS_TAB_BUILD = '2026-09-22.1438'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -62997,6 +63011,40 @@
             epLokal.diag = Object.assign(epLokal.diag || {}, { erstladung: epLokal.kerzenErstladung, erstladung_bars: bars.length, erstladung_http: r.status, erstladung_warnung: (kd && kd.aufloesung_warnung) || null, erstladung_at: new Date().toISOString() })
             if(kd && kd.aufloesung_warnung) console.warn('[bruecke] Kerzen-Erstladung:', kd.aufloesung_warnung)
           }catch(e){ epLokal.kerzenErstladung = 'fehler'; epLokal.diag = Object.assign(epLokal.diag || {}, { erstladung: 'fehler', erstladung_fehler: String(e && e.message || e), erstladung_at: new Date().toISOString() }); console.warn('[bruecke] Kerzen-Erstladung', e && e.message || e) }
+        }
+        /* LÜCKEN NACHFÜLLEN (09.10.2026, Befund Master/T2: Reader pc-xxxxxx 07:17:44–07:59 UTC ohne Feed — tv_kurs_1m hat 42 Minuten
+         * Lücke, beide offenen Fusion-Wächter melden seitdem „Kerzen-Lücke seit 07:18", ihr Hoch/Tief seit Open ist für die Zeit blind).
+         * Die Erstladung läuft nur einmal je Tab-Sitzung, kurs_1m trägt nur die letzten 2 Minuten — kommt der Feed zurück und hat
+         * TradingView die Serie neu geladen, lägen die fehlenden Minuten im Ring des Readers, gingen aber nie in die Cloud.
+         * Alle 5 min (nur mit frischem, nicht verzögertem Kurs): Ring der letzten 10 h lokal holen (/kerzen?seit), vorhandene Minuten
+         * aus tv_kurs_1m lesen und NUR fehlende, abgeschlossene Minuten einfügen (ignoreDuplicates — überschreibt nie eine Kerze des
+         * Direktfeeds/der Brücke). Ticks 0 = nachgefüllt (wie die Erstladung). Hat der Ring die Minuten nicht, bleibt die Lücke ehrlich. */
+        if(ks && epLokal.kerzenErstladung === 'fertig' && !/^delayed/.test(String(d.modus || '')) && Date.now() - (epLokal.lueckeAt || 0) > 300000){
+          epLokal.lueckeAt = Date.now()
+          try{
+            const seitSec = Math.floor(Date.now() / 60000) * 60 - 10 * 3600, bisSec = Math.floor(Date.now() / 60000) * 60 - 120   // laufende + letzte Minute schreibt der Feed
+            const r = await fetch(EP_READER + '/kerzen?seit=' + seitSec, { cache: 'no-store', signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(4000) : undefined })
+            const kd = r.ok ? await r.json() : null
+            const bars = (kd && Array.isArray(kd.bars) && !/^delayed/.test(String(kd.modus || ''))) ? kd.bars.filter(b => b && b.wurzel && b.minute >= seitSec && b.minute <= bisSec && b.c > 0) : []
+            let neu = []
+            if(bars.length){
+              // vorhandene Minuten in Seiten zu 1000 (PostgREST kappt auf max-rows 1000 — Hinweis T3), stabil sortiert
+              const hat = new Set()
+              for(let seite = 0; seite < 10; seite++){
+                const { data: da, error: fe } = await supabase.from('tv_kurs_1m').select('wurzel,minute').gte('minute', new Date(seitSec * 1000).toISOString())
+                  .order('minute', { ascending: true }).order('wurzel', { ascending: true }).range(seite * 1000, seite * 1000 + 999)
+                if(fe) throw fe
+                for(const x of (da || [])) hat.add(String(x.wurzel) + '|' + Math.floor((Date.parse(x.minute) || 0) / 1000))
+                if(!da || da.length < 1000) break
+              }
+              neu = bars.filter(b => !hat.has(String(b.wurzel).slice(0, 8) + '|' + Number(b.minute))).map(b => ({
+                wurzel: String(b.wurzel).slice(0, 8), minute: new Date(Number(b.minute) * 1000).toISOString(), symbol: String(b.symbol || b.wurzel).slice(0, 32),
+                o: b.o, h: b.h, l: b.l, c: b.c, ticks: 0, pc, updated_at: new Date().toISOString(), quelle: String(b.quelle || '').slice(0, 12) || null }))
+              for(let i = 0; i < neu.length; i += 500){ const { error } = await supabase.from('tv_kurs_1m').upsert(neu.slice(i, i + 500), { onConflict: 'wurzel,minute', ignoreDuplicates: true }); if(error) throw error }
+            }
+            epLokal.diag = Object.assign(epLokal.diag || {}, { luecke_at: new Date().toISOString(), luecke_bars: bars.length, luecke_neu: neu.length, luecke_fehler: null })
+            if(neu.length) console.info('[bruecke] Kerzen-Lücke nachgefüllt:', neu.length, 'Minuten')
+          }catch(e){ epLokal.diag = Object.assign(epLokal.diag || {}, { luecke_at: new Date().toISOString(), luecke_fehler: String(e && e.message || e) }) }
         }
     }catch(_){ /* still — naechster Tick */ }
     finally{ if(nr === _epTickNr) _epPushBusy = false; epHeilPruefen() }
