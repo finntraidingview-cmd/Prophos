@@ -15110,9 +15110,9 @@ def puls_augen_schreiben(pc_id):
 # den nächsten Trade plant — ich gehe nur noch hin und drücke Bestätigen"). Stufe 1: nur challenge/phase1/phase2, immer
 # ohne Hedge (Futures = Orbit V2, CFD = Echo V2), nur die IDs aus auto_plan_regeln.user_ids (Test: zwei IDs).
 # Grundsatz: der TP wird immer RÜCKWÄRTS von der Zielbalance gerechnet (Rest = Ziel − Balance), nie aus festen Etappen.
-# Eine Tranche = alle Konten EINER Firma bei EINER ID: gleiche Richtung (Richtungsschutz), gleiche Zufallswerte (alle
-# laufen gemeinsam in TP oder SL) — außer das Konto steht kurz vor dem Ziel (TP auf den Rest gekappt) oder kurz vor dem
-# Boden (SL auf den Abstand gekappt). Ein Trade pro Konto und Tag. Regeln + Zeiten stehen in der DB
+# Eine Tranche = alle Konten EINER Firma bei EINER ID: gleiche Richtung (Richtungsschutz); TP, SL, Menge und Puffer zieht seit
+# 09.10.2026 jedes Konto selbst in der Regel-Spanne (vorher gleiche Zufallswerte je Tranche — Finn: „alle TP 3.450, alle 2 NQ"),
+# gekappt wie bisher kurz vor dem Ziel (TP auf den Rest) bzw. am Boden. Ein Trade pro Konto und Tag. Regeln + Zeiten stehen in der DB
 # (sql/2026-10-05_auto_planer.sql), hier nur die Rechnung. Pläne entstehen als Vorschlag (auto_plan, ohne
 # auto_bestaetigt_at) — der PC-Tab startet sie erst nach Finns Bestätigung (tpStartUmTick).
 # ════════════════════════════════════════════════════════════════════════════
@@ -18164,16 +18164,30 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     # planen. Ein Konto ohne jeden belegten Stand (frisch) hat peak None → MLL ab Größe/Balance, das ist richtig.
     peaks_kette = _ap_peaks([k["a"] for k in kandidaten if ap_kette_regel(k["regel"])], streng=True) if any(ap_kette_regel(k["regel"]) for k in kandidaten) else {}
     for key, liste in tranchen.items():
-        u = {x: rnd.random() for x in ("tp", "sl", "menge", "puffer")}
-        rechnung = []
+        rechnung, tps_tranche = [], set()
         for k in liste:
-            # Topstep-Kette: eigener Zufall je Konto (sonst hätten alle Topstep-Konten einer ID dieselben SL/TP/Kontrakte)
-            u_k = {x: rnd.random() for x in ("tp", "sl", "menge", "puffer")} if ap_kette_regel(k["regel"]) else u
+            # EIGENER ZUFALL JE KONTO (Finn 09.10.2026 ~07:45 Dubai, „Zu bestätigen" Finn+Pascal: vier Tradeify-150k-Challenges einer
+            # ID alle TP 3.450 $ und 2 NQ). Ursache: u wurde EINMAL je Tranche (ID × Firma) gezogen und für jedes Konto wiederverwendet —
+            # so gewollt seit 05.10.2026 („alle laufen gemeinsam in TP oder SL"), nur die Topstep-Kette zog schon je Konto. Jetzt zieht
+            # jedes Konto TP, SL, Menge und Puffer selbst innerhalb der Regel-Spanne; Richtung und Richtungsschutz bleiben je Tranche,
+            # Rest-/Klein-Trade und Ziel-/Boden-Kappung wirken wie bisher in ap_konto_rechnen.
+            u_k = {x: rnd.random() for x in ("tp", "sl", "menge", "puffer")}
             if peaks_kette is None and (ap_kette_regel(k["regel"]) or {}).get("daily_usd") and k["a"].get("account_type") == "challenge":
                 ausgelassen.append(dict(k["zeile"], grund="MLL nicht prüfbar (Verlauf nicht lesbar) — kein Kettenplan"))
                 continue
             w, grund = ap_konto_rechnen(k["regel"], k["a"]["account_type"], k["bal"], u_k, peak=(peaks_kette or {}).get(str(k["a"].get("id"))),
                                         ppl=ap_cfd_ppl(stand.get("ctx"), k["a"]))   # CFD: Punkte-Puffer + Klein-Trade (09.10.2026)
+            # KEINE ZWEI GLEICHEN TP je ID×Firma (Finn 09.10.2026): eine Spanne wie 3.450–3.550 hat nur ~100 ganze Werte — zwei Konten
+            # treffen sich bei 10 Konten in gut jedem dritten Lauf. Bei Gleichstand neu ziehen (höchstens 20×); gekappte TP (Rest bis
+            # Ziel) bleiben, wie sie sind
+            for _ in range(20):
+                if grund or not w or w.get("tp") not in tps_tranche or re.search(r"letzter Trade|Rest bis Ziel", str(w.get("stufe") or "")):
+                    break
+                u_k = {x: rnd.random() for x in ("tp", "sl", "menge", "puffer")}
+                w, grund = ap_konto_rechnen(k["regel"], k["a"]["account_type"], k["bal"], u_k, peak=(peaks_kette or {}).get(str(k["a"].get("id"))),
+                                            ppl=ap_cfd_ppl(stand.get("ctx"), k["a"]))
+            if w and not grund:
+                tps_tranche.add(w.get("tp"))
             if grund and "Boden" in grund:
                 # „Balance auf/unter dem Boden — geblowt?" — Boden/Balance/Stand für die Anzeige (Slave 6, 08.10.2026); k["regel"] ist schon
                 # die Konto-Regel, ap_regel_konto darauf ändert nichts mehr
