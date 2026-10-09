@@ -10960,7 +10960,10 @@ def _wd_endlesung_zeile(final):
             # Konto weg (05.10.2026): der PC-Tab setzt final.konto_weg + konto_weg_at, wenn das Konto im frisch angemeldeten
             # Tradovate-Login nicht mehr steht. Ohne die Felder erkannte der Radar einer fremden ID den Fall nur am Anfang
             # des Textes in puls_fehler.
-            "konto_weg", "konto_weg_at")
+            "konto_weg", "konto_weg_at",
+            # Konto nicht mehr in der Liste — liquidiert? (09.10.2026, Demo-Ende bei gescheitertem Login, Fall 0e344d8e): Radar-Abhaken belegt
+            # dann „geblowt" vor wie bei konto_weg
+            "konto_weg_vermutet", "grund")
     out = {k: final.get(k) for k in keys if final.get(k) is not None}
     return out or None
 

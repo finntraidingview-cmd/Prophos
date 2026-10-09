@@ -24665,6 +24665,22 @@
   function tvV2KontoWeg(fin){
     return !!(fin && typeof fin === 'object' && (fin.konto_weg === true || (fin.puls_aufgegeben && /^konto_weg(:|$)/.test(String(fin.puls_fehler || '')))))
   }
+  /* KONTO NICHT ERREICHBAR (09.10.2026, Fall 0e344d8e FundedNext …9055): das Konto war liquidiert, die Endlesung scheiterte an „TradingView
+   * bricht den Login zweimal ab (Session restore failed)", danach wertete die Demo-Ende-Erkennung einen Kurs-Durchlauf als demo_tp +1.564 $
+   * → „bestanden" (falsch, von Hand auf blown −6.356 gesetzt). Finns Regel: ist das Konto nicht mehr in der Kontoliste, gilt es als
+   * liquidiert. Belege hier: konto_weg (Bot hat die Kontoliste geprüft) oder ein gescheiterter Login der Endlesung, nach dem keine Liste
+   * zu sehen war (puls_login_code abgebrochen/login_fehler/konto_nicht_erreicht). fin = mt5_baseline.final, endl = Endlesungs-Auszug von
+   * /admin/live-trades. → { weg (Liste belegt), code, n } | null */
+  const TV_KONTO_UNKLAR_CODES = ['abgebrochen', 'login_fehler', 'konto_nicht_erreicht']
+  function tvV2KontoUnerreichbar(fin, endl){
+    for(const f of [fin, endl]) if(tvV2KontoWeg(f)) return { weg: true, code: 'konto_weg', n: Number(f.puls_login_fehler) || 0 }
+    for(const f of [fin, endl]){
+      const n = Number(f && f.puls_login_fehler) || 0, c = String((f && f.puls_login_code) || '')
+      if(n >= 1 && TV_KONTO_UNKLAR_CODES.includes(c)) return { weg: false, code: c, n }
+    }
+    return null
+  }
+  window._tvV2KontoUnerreichbar = tvV2KontoUnerreichbar   // Test-Haken
   const _tvEndlesungLaeuft = new Set()
   // REIN RECHNEND: alle offenen G&V-Felder („Unrealized P&L" / „Nicht realisiert") der Zusammenfassung sind genau 0 — und es gibt eins
   function tvUnrealNull(summary){
@@ -25294,7 +25310,17 @@
         // trotzdem nach „Überprüfen", damit die Balance-Nachlesung läuft — die liest erst, wenn die Position laut Puls weg ist
         // (tvV2EndlesungAuswerten: „Master-Position laut Puls noch offen"), und P&L = Balance nachher − vorher ist dann die Wahrheit.
         const unbestaetigt = tvV2EinstiegUnbestaetigt(frisch, t)
-        const extra = unbestaetigt
+        // KONTO NICHT ERREICHBAR (09.10.2026, s. tvV2KontoUnerreichbar): kein TP-Ende aus der Demo — das Konto war beim letzten Lesen nicht
+        // in der Liste bzw. der Login kam nie bis zur Liste. Überprüfen ohne Preis/P&L, Grund „Konto nicht mehr in der Liste — liquidiert?",
+        // die Login-Belege wandern mit (tvV2EndeSetzen ersetzt final), Abhaken belegt „geblowt" vor. Demo-Liquidation bleibt wie bisher.
+        const _finAlt = (frisch.mt5Baseline && frisch.mt5Baseline.final) || null
+        const ku = dm.status !== 'liquidiert' ? tvV2KontoUnerreichbar(_finAlt, t.endlesung) : null
+        const extra = ku
+          ? { grund: 'demo_konto_weg', demo_status: dm.status, at: dm.at || new Date().toISOString(), preis: null, master_pl_schaetzung: null,
+              konto_weg_vermutet: true, ...(ku.weg ? { konto_weg: true, konto_weg_at: ((_finAlt && _finAlt.konto_weg_at) || (t.endlesung && t.endlesung.konto_weg_at) || new Date().toISOString()) } : {}),
+              puls_login_fehler: ku.n || null, puls_login_code: ku.code,
+              hinweis: `Konto nicht mehr in der Liste — liquidiert? Demo meldet ${dm.status === 'tp' ? 'TP' : 'TP + Liquidation'}, aber ${ku.weg ? 'das Konto stand beim letzten Lesen nicht mehr in der Tradovate-Kontoliste' : `der Login der Endlesung scheiterte (${ku.code}${ku.n > 1 ? ', ' + ku.n + '×' : ''}) — die Kontoliste kam nie`}. Kein TP gewertet.` }
+          : unbestaetigt
           ? { grund: 'demo_unklar', demo_status: dm.status, at: dm.at || new Date().toISOString(), preis: null, master_pl_schaetzung: null,
               hinweis: `Demo meldet ${dm.status === 'tp' ? 'TP' : dm.status === 'liquidiert' ? (dm.stop === 'sl' ? 'SL' : 'Liquidation') : 'TP + Liquidation'}, der Einstieg ist aber nur geschätzt (${String((t && t.einstieg_quelle) || 'ohne Einstieg')}) — kein Ergebnis, Balance-Lesung abwarten` }
           : { grund: dm.status === 'tp' ? 'demo_tp' : dm.status === 'liquidiert' ? 'demo_liq' : 'demo_beide', at: dm.at || new Date().toISOString(),
@@ -25306,7 +25332,9 @@
         try{ const pf = tradePlans.find(x => String(x.id) === pid); if(pf && pf.status === 'open' && typeof atMoveToReview === 'function') await atMoveToReview(pf) }catch(e){ console.warn('[demo-ende] Überprüfen', e) }
         // Trade-Ende = Demo-Treffer (atMoveToReview stempelt „jetzt") — Live Trades rechnet die Nachlese-Zeit ab ended_at
         try{ await supabase.from('trade_plans').update({ ended_at: extra.at }).eq('id', pid).eq('status', 'review'); const pf = tradePlans.find(x => String(x.id) === pid); if(pf) pf.endedAt = extra.at }catch(_){}
-        if(typeof atToast === 'function') atToast(unbestaetigt
+        if(typeof atToast === 'function') atToast(ku
+          ? `⚠ ${frisch.masterName || 'Plan'}: Konto nicht mehr in der Liste — liquidiert? Demo-TP NICHT gewertet → Überprüfen (geblowt vorbelegt)`
+          : unbestaetigt
           ? `⚠ ${frisch.masterName || 'Plan'}: Demo meldet ein Ende, der Einstieg ist aber nur geschätzt → Überprüfen ohne P&L · Balance-Lesung abwarten`
           : `✓ ${frisch.masterName || 'Plan'}: Demo ${dm.status === 'tp' ? 'TP' : dm.status === 'liquidiert' ? (dm.stop === 'sl' ? 'SL' : 'Liquidation') : 'TP + Liquidation'} erreicht → Überprüfen · Warte auf Puls`, 'end')   // stop 'sl' seit 29.09.2026 (Backend _lt_demo)
       }
@@ -29464,7 +29492,7 @@
   }
   // Konto weg (05.10.2026): Ergebnis-Wort für Überprüfen/Erledigt — kurz, der ganze Satz im Tooltip; die Konto-Spalte daneben
   // sagt „vermutl. geblowt" (wdlKontoZ). Erkennung am endlesung-Auszug der Zeile (tvV2KontoWeg).
-  const wdlKontoWeg = t => !!(t && typeof tvV2KontoWeg === 'function' && tvV2KontoWeg(t.endlesung))
+  const wdlKontoWeg = t => !!(t && typeof tvV2KontoWeg === 'function' && (tvV2KontoWeg(t.endlesung) || !!(t.endlesung && t.endlesung.konto_weg_vermutet)))   // + vermutet (09.10.2026)
   const WDL_KONTO_WEG_ERG = '<span style="color:#b45309" title="Konto bei Tradovate nicht mehr vorhanden — vermutlich geblowt. Nichts mehr lesbar.">Konto weg</span>'
   /* Schätzung für den Abhak-Dialog bei „Konto weg": Verlust von der Start-Balance des Trades bis zur Liquidation — dieselbe
    * Liq-Balance wie wdlBlowStand (Regel/Konto-Boden; beim Tageslimit der Konto-Boden). Nur wenn beide Werte an der Zeile stehen
@@ -56073,7 +56101,8 @@
     // Konto weg (05.10.2026): „geblowt" vorbelegen (Finn kann umstellen). Steht kein Master-P&L am Plan, Vorschlag ≈ Start-Balance bis
     // Liquidation aus der Radar-Zeile dieses Plans (nur wenn der Radar sie geladen hat) — sonst bleibt das Feld leer.
     { const finKw = (planIstPuls(p) && p.mt5Baseline && p.mt5Baseline.final) || null
-      if(p.status === 'review' && typeof tvV2KontoWeg === 'function' && tvV2KontoWeg(finKw)){
+      const _kwVerm = !!(finKw && finKw.konto_weg_vermutet)   // 09.10.2026: Konto nicht mehr in der Liste — liquidiert? (Demo-Ende, s. tvV2KontoUnerreichbar)
+      if(p.status === 'review' && ((typeof tvV2KontoWeg === 'function' && tvV2KontoWeg(finKw)) || _kwVerm)){
         const rb = document.querySelector('input[name="tc-status"][value="blown"]')
         if(rb){ rb.checked = true; if(typeof tcUpdateStatusUI === 'function') tcUpdateStatusUI() }
         if(p.masterPl == null){
@@ -56081,8 +56110,8 @@
           try{ const tr = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === String(p.id)); sch = tr ? wdlKontoWegSchaetzung(tr) : null }catch(_){}
           const feld = document.getElementById('tc-master-pl'), msgEl = document.getElementById('tradeCompleteMsg')
           if(sch != null && feld && !feld.value) feld.value = plFeldText(sch)
-          if(msgEl){ msgEl.textContent = sch != null ? '≈ Master-P&L geschätzt: Start-Balance bis Liquidation (Konto weg, nichts mehr lesbar) — bitte prüfen'
-                                                     : 'Konto weg · vermutlich geblowt — Master-P&L nicht mehr lesbar, bitte eintragen'
+          if(msgEl){ msgEl.textContent = sch != null ? `≈ Master-P&L geschätzt: Start-Balance bis Liquidation (${_kwVerm && !tvV2KontoWeg(finKw) ? 'Konto nicht mehr in der Liste — liquidiert?' : 'Konto weg, nichts mehr lesbar'}) — bitte prüfen`
+                                                     : (_kwVerm && !tvV2KontoWeg(finKw) ? 'Konto nicht mehr in der Liste — liquidiert? Master-P&L nicht lesbar, bitte eintragen' : 'Konto weg · vermutlich geblowt — Master-P&L nicht mehr lesbar, bitte eintragen')
                      msgEl.className = 'modal-msg' }
         }
       } }
