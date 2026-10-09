@@ -3786,6 +3786,15 @@
   #dashboard-view .tc-zl-gruppe{padding:7px 13px 6px;font-size:10.5px;font-weight:700;letter-spacing:.06em;color:var(--sub);text-transform:uppercase;border-top:1px solid var(--border-soft)}
   #dashboard-view .tc-zl > .tc-zl-gruppe:first-child{border-top:0}
   #dashboard-view .tc-zl-gruppe + .wdl-mb{border-top:1px solid var(--border-soft)}
+  /* Puls-Zeile unter jeder Zeile (Warte auf Puls / Überprüfen / Erledigt, 09.10.2026) */
+  #dashboard-view .tc-zl .tc-puls{padding:0 16px 7px 35px;margin-top:-4px;background:var(--surface);font-size:11.5px;color:var(--sub);line-height:1.4}
+  #dashboard-view .tc-zl .tc-puls summary{list-style:none;cursor:pointer;display:flex;gap:8px;align-items:baseline;min-width:0}
+  #dashboard-view .tc-zl .tc-puls summary::-webkit-details-marker{display:none}
+  #dashboard-view .tc-zl .tc-puls-k{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #dashboard-view .tc-zl .tc-puls-mehr{flex:none;font-size:10.5px;font-weight:600;color:var(--violet)}
+  #dashboard-view .tc-zl .tc-puls-mehr::after{content:' ▾'}
+  #dashboard-view .tc-zl .tc-puls[open] .tc-puls-mehr::after{content:' ▴'}
+  #dashboard-view .tc-zl .tc-puls-spur{margin-top:5px;padding:7px 9px;border:1px solid var(--border-soft);border-radius:6px;background:var(--bg);font-family:var(--mono);font-size:10.5px;color:var(--ink-2);white-space:pre-wrap;word-break:break-word;max-height:220px;overflow:auto}
   #dashboard-view .tc-zl .tc-zl-alarm{padding:6px 13px;background:var(--surface);border-top:1px solid var(--border-soft)}
   #dashboard-view .wdl-modelle{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;margin:0 0 12px}
   #dashboard-view .wdl-modelle .wdl-mg{display:flex;align-items:center;gap:6px}
@@ -3882,6 +3891,8 @@
     #dashboard-view .tc-zl .tc2-actions{min-width:0;padding-top:6px;border-top:0}
     #dashboard-view .tc-zl .tc2-actions .tc2-btn{padding:7px 12px;font-size:12.5px}
     #dashboard-view .tc-zl-kopf{padding:8px 12px 7px 9px}
+    #dashboard-view .tc-zl .tc-puls{padding:0 12px 8px 28px}
+    #dashboard-view .tc-zl .tc-puls-k{white-space:normal}   /* Handy: Puls-Zeile darf umbrechen */
     /* Personen-Chips am Handy: eigene dritte Zeile unter den Spaltenköpfen, waagrecht wischbar statt Umbruch */
     #dashboard-view .wdl-kp{grid-row:3;flex-wrap:nowrap;margin:0 -4px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
     #dashboard-view .wdl-kp::-webkit-scrollbar{display:none}
@@ -39279,8 +39290,9 @@
       }else{
         if(empty) empty.style.display = 'none'
         // Geplant in Firmen-Blöcken mit Kopf (05.10.2026, Finn: „erst Firma A alle Trades, dann Firma B, mehr drauf eingehen")
+        // Warte auf Puls / Überprüfen / Erledigt wie Radar (09.10.2026, Finn ~20:36 Dubai): Modell-Blöcke + Puls-Zeile je Trade
         target.innerHTML = lane.status === 'planned' ? planFirmenBloecke(list) : lane.status === 'open' ? offenModellBloecke(list)
-          : list.map(p => renderTradePlanCard(p)).join('')
+          : offenModellBloecke(list, { puls: true })
       }
 
       // Filter-Count-Hinweis
@@ -39454,13 +39466,60 @@
    * wie im Radar „Läuft" (wdl-mb, Reihenfolge WDL_LISTE_REIHE, Farbe WDL_MODELL_FARBE), darin die unveränderten Karten als Zeilen (CSS .tc-zl).
    * Modell aus planSysKey — dieselben Namen wie die Sticker; Duplikum/Mirror/Orbit (Duplikum) unter „Weitere" mit Sticker in der Zeile. */
   const OFFEN_MODELL = { mt5: 'Echo', mt5v2: 'Echo V2', wd: 'Winning Day', tvv3: 'Orbit', tvv2: 'Orbit V2', tsv2: 'Topstep V2' }
-  function offenModellBloecke(list){
+  /* PULS-ZEILE JE TRADE (Finn 09.10.2026 ~20:36 Dubai zu „Überprüfen": „dass ich hier die ganzen Puls- und was passiert ist sehe"): unter
+   * jeder Zeile in Warte auf Puls / Überprüfen / Erledigt eine kurze Zeile aus dem, was am Plan schon steht (mt5_baseline: tv Start/Einstieg,
+   * start_fehler, final Endlesung/Fehler/Konto weg, Grund der Nachlesung) — aufklappbar mit der Bot-Spur (final.lesen_trail, tv.lesen_trail,
+   * puls_spur). Kein Abruf, nur Anzeige; offen/zu bleibt über das Neuzeichnen erhalten (_tcPulsOffen, eigener toggle-Lauscher). */
+  const _tcPulsOffen = new Set()
+  function planPulsZeile(p){
+    const b = (p && p.mt5Baseline) || {}, tv = b.tv || {}, fin = b.final || {}, sf = b.start_fehler || null, sp = b.puls_spur || null
+    const uhr = x => { const d = new Date(x || ''); return isNaN(d) ? '' : d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) }
+    const preis = v => (typeof v === 'number' && isFinite(v)) ? v.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ''
+    const kurz = (t, n) => { t = String(t || '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t }
+    const teile = []
+    if(tv.at) teile.push(`Start ${uhr(tv.at)}${tv.puls === 'tsx' ? ' (TopstepX)' : ''}`)
+    const ein = typeof tv.einstieg_nq === 'number' ? tv.einstieg_nq : null
+    if(ein) teile.push(`Einstieg ${preis(ein)}${tv.einstieg_quelle ? ' · ' + kurz(tv.einstieg_quelle, 18) : ''}`)
+    if(sf && sf.status !== 'behoben' && (sf.msg || sf.schritt)) teile.push(`⚠ Start-Fehler${sf.at ? ' ' + uhr(sf.at) : ''}: ${kurz(sf.msg || sf.schritt, 70)}`)
+    else if(sf && sf.status === 'behoben') teile.push(`Start-Fehler behoben${sf.behoben ? ': ' + kurz(sf.behoben, 50) : ''}`)
+    if(fin.puls_at || fin.konto_weg){
+      const v = Number(fin.puls_versuche) || 0
+      let erg = ''
+      if(fin.konto_weg) erg = 'Konto weg (nicht mehr in der Liste)'
+      else if(typeof fin.balance_end === 'number' && isFinite(fin.balance_end)) erg = `Balance ${preis(fin.balance_end)} gelesen`
+      else if(typeof fin.today_pnl === 'number' && isFinite(fin.today_pnl)) erg = `Today's P&L ${preis(fin.today_pnl)} gelesen`
+      else if(fin.puls_login_code) erg = `Login: ${kurz(fin.puls_login_code, 30)}`
+      else if(fin.puls_fehler) erg = kurz(fin.puls_fehler, 70)
+      teile.push(`Endlesung ${uhr(fin.puls_at || fin.konto_weg_at)}${v > 1 ? ` · Versuch ${v}` : ''}${erg ? ' · ' + erg : ''}`)
+    }
+    if(p.status === 'review' && typeof tvV2EndlesungGrund === 'function' && typeof planIstPuls === 'function' && planIstPuls(p)){
+      let g = ''; try{ g = tvV2EndlesungGrund(p, Date.now(), false) }catch(_){}
+      if(g && g !== 'Ende ist schon gelesen') teile.push(kurz(g, 80))
+      else if(!g) teile.push('Nachlesung fällig')
+    }
+    const spur = [fin.lesen_trail ? 'Endlesung: ' + fin.lesen_trail : '', tv.lesen_trail ? 'Start-Lesung: ' + tv.lesen_trail : '',
+      sp && (sp.trail || sp.msg) ? `Puls ${uhr(sp.at)}${sp.pc ? ' · ' + sp.pc : ''}${sp.s != null ? ' · ' + sp.s + ' s' : ''}: ${sp.msg ? sp.msg + ' ' : ''}${sp.trail || ''}` : '',
+      sf && sf.msg ? 'Start-Fehler: ' + sf.msg : ''].filter(Boolean).join('\n\n')
+    if(!teile.length && !spur) return ''
+    const txt = escapeHtml(teile.join(' · ') || 'Puls-Spur')
+    if(!spur) return `<div class="tc-puls"><span class="tc-puls-k">${txt}</span></div>`
+    const id = String(p.id)
+    return `<details class="tc-puls" data-tc-puls="${escapeHtml(id)}"${_tcPulsOffen.has(id) ? ' open' : ''}><summary><span class="tc-puls-k">${txt}</span><span class="tc-puls-mehr">Spur</span></summary>`
+      + `<div class="tc-puls-spur">${escapeHtml(spur.slice(0, 4000))}</div></details>`
+  }
+  window._planPulsZeile = planPulsZeile   // Test-Haken (Stub)
+  document.addEventListener('toggle', ev => {
+    const d = ev.target; if(!(d instanceof HTMLElement) || !d.matches('details.tc-puls[data-tc-puls]')) return
+    const id = d.getAttribute('data-tc-puls'); if(d.open) _tcPulsOffen.add(id); else _tcPulsOffen.delete(id)
+  }, true)
+  // opt.puls (09.10.2026): Warte auf Puls / Überprüfen / Erledigt — dieselben Blöcke wie „Offen", je Zeile darunter die Puls-Zeile
+  function offenModellBloecke(list, opt){
     const reihe = (typeof WDL_LISTE_REIHE !== 'undefined' && WDL_LISTE_REIHE) || ['Orbit', 'Echo', 'Winning Day', 'Orbit V2', 'Echo V2', 'Topstep V2']
     const farbe = (typeof WDL_MODELL_FARBE !== 'undefined' && WDL_MODELL_FARBE) || {}
     const modell = p => OFFEN_MODELL[planSysKey(p)] || 'Weitere'
     const bloecke = [...reihe, 'Weitere'].map(k => [k, list.filter(p => modell(p) === k)]).filter(([, b]) => b.length)
     const block = (k, b) => `<div class="wdl-mb${k === 'Weitere' ? ' tc-mb-weitere' : ''}" style="--wdl-m:${farbe[k] || 'var(--sub)'}">`
-      + `<div class="wdl-mb-kopf"><b>${escapeHtml(k)}</b><span>${b.length}</span></div>${b.map(p => renderTradePlanCard(p)).join('')}</div>`
+      + `<div class="wdl-mb-kopf"><b>${escapeHtml(k)}</b><span>${b.length}</span></div>${b.map(p => renderTradePlanCard(p) + (opt && opt.puls ? planPulsZeile(p) : '')).join('')}</div>`
     // Obergruppen „Mit Hedge" / „Ohne Hedge" wie im Radar (09.10.2026)
     const og = typeof window._wdlObergruppenHtml === 'function' ? window._wdlObergruppenHtml : null
     return `<div class="tc-zl">` + (og ? og(bloecke, block) : bloecke.map(([k, b]) => block(k, b)).join('')) + `</div>`
@@ -43120,7 +43179,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1440'
+  const OS_TAB_BUILD = '2026-09-22.1441'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
