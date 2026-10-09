@@ -15380,6 +15380,12 @@ TSX_K0_BLICK_JS = r"""(function () {
     }
   }
   o.bracket = gear.slice(0, 6).map(K);
+  // Layout-Wähler (09.10.2026, Ina: rechts DOM statt Order-Karte): Knopf „Layout options" im [data-testid=layout-selector-container]
+  var lw = Q('[data-testid="layout-selector-container"]').filter(sb);
+  var lk_ = Q('button,[role="button"],[aria-haspopup]', lw[0] || document.createElement('div')).filter(sb);
+  var lkA = lk_.filter(function (e) { return /layout options/i.test(A(e, 'aria-label')); });
+  o.layout = innen(lkA.length ? lkA : lk_).slice(0, 4).map(K);   // genau „Layout options", sonst alle Knöpfe (dann meist nicht eindeutig)
+  o.layout_name = lw.length ? T(lw[0]).slice(0, 60) : null;
   o.dialoge = Q('[role="dialog"],[role="alertdialog"],[aria-modal="true"]').filter(sb).slice(0, 4).map(function (d) {
     var x = innen(Q('button,[role="button"]', d).filter(sb).filter(function (e) {
       var w = A(e, 'aria-label') + ' ' + A(e, 'title') + ' ' + T(e); return /\bclose\b|schlie|dismiss|^\s*[×✕✖]\s*$/i.test(w) && T(e).length <= 12; }));
@@ -15691,7 +15697,7 @@ def _tsx_k0_zustand(s, trail, pc, art, res):
     Inventar, wieder zu (X nur im Bracket-Dialog, sonst Esc ohne fremde Dialoge) und das Schließen beweisen. -> True, wenn inventarisiert
     Prüfer K0 (30.09.2026): das Rechteck erst NACH dem Nach-vorn-Holen lesen (ein Hintergrund-Tab holt beim bringToFront Änderungen nach,
     z. B. fällt der „Weekend Hours"-Banner weg und alles rutscht 43 px) — und beim Druck beweisen, dass dort genau der Kandidat liegt."""
-    name = "Konto-Auslöser" if art == "konto" else "Bracket-Zahnrad"
+    name = {"konto": "Konto-Auslöser", "bracket": "Bracket-Zahnrad", "layout": "Layout-Wähler"}.get(art, art)
     if _WIN_EINGABE:
         hw, gr = s._win_vorn()
         if not hw:
@@ -15710,6 +15716,7 @@ def _tsx_k0_zustand(s, trail, pc, art, res):
         res.setdefault("offen", []).append(f"{art}: {grund}")
         return False
     vorher_z, vorher_d = int(bl.get("konto_zeilen") or 0), bool(bl.get("bracket_dialog"))
+    vorher_m = len(bl.get("menues") or [])                  # Layout-Liste: neues Menü/Listbox (09.10.2026)
     if not s.klick(el["rect"], f"{name} ('{str(el.get('text') or el.get('aria') or '')[:40]}')", pruef=tsx_k0_pruef(el)):
         res.setdefault("offen", []).append(f"{art}: Klick ohne Beweis")
         return False
@@ -15717,7 +15724,8 @@ def _tsx_k0_zustand(s, trail, pc, art, res):
     for _ in range(5):                                      # Treffer ≠ Wirkung (Regel .835)
         _warte(0.6, 0.3)
         b2 = s.lese_js(TSX_K0_BLICK_JS) or {}
-        if (art == "konto" and int(b2.get("konto_zeilen") or 0) > vorher_z) or (art == "bracket" and b2.get("bracket_dialog") and not vorher_d):
+        if (art == "konto" and int(b2.get("konto_zeilen") or 0) > vorher_z) or (art == "bracket" and b2.get("bracket_dialog") and not vorher_d) \
+                or (art == "layout" and len(b2.get("menues") or []) > vorher_m):
             break
     else:
         trail.append(f"{name} geklickt, Wirkung nicht erkannt (Zeilen {vorher_z}→{b2.get('konto_zeilen')}, Dialog {b2.get('bracket_dialog')}) "
@@ -15734,10 +15742,12 @@ def _tsx_k0_zustand(s, trail, pc, art, res):
         x = dlg[0]["x"]
     if not (x and s.klick(x["rect"], "Bracket-Dialog schließen (X)", pruef={"rect": x.get("rect"), "text": "", "aria": str(x.get("aria") or "")[:40],
                                                                        "tabu": r"\b(buy|sell|flatten|cancel|order|market|limit|all)\b"})):
-        _tsx_k0_esc(s, b_x, trail, "Konto-Liste" if art == "konto" else "Bracket-Dialog", erlaubt_dialog=(art == "bracket"))
+        _tsx_k0_esc(s, b_x, trail, {"konto": "Konto-Liste", "bracket": "Bracket-Dialog", "layout": "Layout-Liste"}.get(art, art),
+                    erlaubt_dialog=(art == "bracket"))
     _warte(0.6, 0.3)
     b3 = s.lese_js(TSX_K0_BLICK_JS) or {}
-    zu = (int(b3.get("konto_zeilen") or 0) <= vorher_z) if art == "konto" else not b3.get("bracket_dialog")
+    zu = ((int(b3.get("konto_zeilen") or 0) <= vorher_z) if art == "konto" else (len(b3.get("menues") or []) <= vorher_m)
+          if art == "layout" else not b3.get("bracket_dialog"))
     trail.append(f"{name}: wieder zu {'(bewiesen)' if zu else '— NICHT bewiesen, bitte im Puls-Chrome ansehen'}")
     if not zu:
         res.setdefault("offen", []).append(f"{art}: nach dem Inventar noch offen")
@@ -17292,6 +17302,11 @@ def modus_tsxinventar_cdp(cmd):
                 res.setdefault("offen", []).append("bracket: ausgelassen (Konto-Liste nicht bewiesen zu)")
             else:
                 _tsx_k0_zustand(s, trail, pc, "bracket", res)
+                # Layout-Liste (09.10.2026, Ina DOM statt Order-Karte): einmal öffnen, Namen/testids inventarisieren, mit Esc zu — nichts wählen
+                if res.pop("_nicht_zu", False):
+                    res.setdefault("offen", []).append("layout: ausgelassen (Bracket-Dialog nicht bewiesen zu)")
+                else:
+                    _tsx_k0_zustand(s, trail, pc, "layout", res)
         msg = f"Inventar TopstepX gelesen ({', '.join(res['arts']) or 'nur lokal'}) — keine Order."
         if res.get("offen"):
             msg += " Offen: " + "; ".join(res["offen"])

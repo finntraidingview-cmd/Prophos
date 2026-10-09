@@ -5244,7 +5244,7 @@ def test_tsx_k1_vorbau():
         _th.Timer = alt_timer
     chk(r0a["ok"] and s0a == ["lesen:grund"] and any("nicht bereit" in o_ for o_ in r0a.get("offen") or []) and sz0a.gelesen >= 1 and not sz0a.klicks,
         f"K0: Seite nach dem Login nicht bereit → nur Grund-Inventar, keine Klick-Schritte ({s0a}, {r0a.get('offen')})")
-    chk(r0b["ok"] and s0b == ["lesen:grund", "zustand:konto", "zustand:bracket"], f"K0: bereit → Grund, Konto, Bracket wie bisher ({s0b})")
+    chk(r0b["ok"] and s0b == ["lesen:grund", "zustand:konto", "zustand:bracket", "zustand:layout"], f"K0: bereit → Grund, Konto, Bracket, Layout (seit 09.10.2026) ({s0b})")
     chk("MuiDataGrid" in ob.TSX_K0_CHART_JS, "Chart-Probe: Tabellen-Spaltenköpfe (MUI DataGrid) zählen nicht als Linien")
     # Stapel-Prüfer: genau EINE Antwort — der Verlierer wartet, bis der Gewinner geschrieben hat (nie 0 Antworten)
     import threading as _th2
