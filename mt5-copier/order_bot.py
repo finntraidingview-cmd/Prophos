@@ -11397,6 +11397,19 @@ def run(cfg_path, cmd):
         ausgeloest = weg
         if _schnell_bestaetigt():
             break
+        # ABLEHNUNG IM DIALOG → KEIN WEITERER WEG (Puls-Fehler 08.10.2026 23:48 UTC, pc-xxxxxx, FundedNext 1c3f7ecd, NDX100: der
+        # Buy-Knopf wurde auf allen vier Wegen gedrueckt, je ~4 s, keine Position, Dialog blieb offen). Steht nach einem Weg bereits
+        # eine Server-Antwort rot im Dialog (ORDER_GRUND_REGELN: Invalid stops, Not enough money, Trade disabled …), ist der Druck
+        # angekommen — jeder weitere Weg schickte dieselbe abgelehnte Order noch einmal. Nur lesen; den Grund fuer die Meldung
+        # bestimmt am Ende wie bisher _keine_bestaetigung_grund (Journal vor Dialog vor API).
+        try:
+            dlg_text = " | ".join((t.window_text() or "") for t in dlg.descendants(control_type="Text"))
+        except Exception:
+            dlg_text = ""
+        g_dlg = order_grund_aus_text(dlg_text)
+        if g_dlg:
+            trail.append(f"Dialog zeigt die Antwort des Servers ({g_dlg[0]}) — kein weiterer Ausloese-Weg")
+            break
     if ausgeloest is None:
         try:
             dlg.type_keys("{ESC}", set_foreground=False)
@@ -17514,6 +17527,9 @@ def _cdp_kachel_weg(s, trail):
 CDP_WERBUNG_JS = r"""(function () {
   var MERKMALE = [/\bsale\b/i, /\d+\s*%\s*off|up to \d+\s*%/i, /don.?t miss/i, /\bends in\b|offer ends/i, /explore offers?/i,
                   /special offer/i, /black friday|cyber monday/i, /\bdiscount\b/i, /\bupgrade\b/i, /\bsubscription\b/i];
+  // „Go ad-free. Everywhere" (Puls-Fehler 09.10.2026 01:05 UTC, pc-xxxxxx: das Modal lag über Konto-Umschalter UND Kontextmenü —
+  // 3 Lesungen „keine Liste (Dialog ['Go ad-free. Everywhere'])", danach „Kontextmenü leer" 3×): allein schon Werbung (zählt doppelt)
+  var ADFREE = /\bad.?free\b|werbefrei/i;
   var HART = /take profit|stop loss|tradovate|\bconnect\b|\blog ?in\b|password|passwort|quantity|\bcontracts?\b|\b(buy|sell) \d/i;
   var NIE = /explore|offer|angebot|upgrade|\bbuy\b|kauf|trial|\bget\b|\bstart|subscri|abonn|premium|\bplan|claim/i;
   function sb(e) { try { var s = getComputedStyle(e); if (s.visibility === 'hidden' || s.display === 'none' || s.opacity === '0') return false;
@@ -17530,7 +17546,7 @@ CDP_WERBUNG_JS = r"""(function () {
   kand.forEach(function (k) {
     if (out.length >= 3 || genommen.some(function (g) { return k.b.contains(g) || g.contains(k.b); })) return;
     var t = (k.b.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 400);
-    var n = MERKMALE.filter(function (rx) { return rx.test(t); }).length;
+    var n = MERKMALE.filter(function (rx) { return rx.test(t); }).length + (ADFREE.test(t) ? 2 : 0);
     if (n < 2 || HART.test(t)) return;
     var xs = Array.prototype.slice.call(k.b.querySelectorAll('button,[role="button"],[aria-label],[data-name*="close"],[class*="close"]')).filter(function (e) {
       if (!sb(e)) return false;
@@ -18459,6 +18475,15 @@ def _cdp_konto_sichern(s, ext, opts, trail):
     cdp_liste_beleg ein Login-Beleg (extra liste_aktiv, sonst konto_treffer None); Konto-Abgleich streng (cdp_konto_passt)."""
     _cdp_kachel_weg(s, trail)                             # kleine Werbe-Kachel unten links zuerst weg (05.10.2026) — dann erst lesen
     st = s.stand(opts)
+    # WERBE-MODAL VOR DEM KONTO-SCHRITT (Puls-Fehler 09.10.2026 01:05 UTC, pc-xxxxxx, Plan 1f131da5: TradingViews „Go ad-free.
+    # Everywhere" lag über der Seite — der Umschalter öffnete 3× keine Liste, _cdp_esc drückte wegen des Dialogs richtig kein Esc, der
+    # Login-Weg fand danach ein leeres Kontextmenü; 2 min später lief derselbe Plan sauber durch). Ein offener Dialog wird EINMAL
+    # über werbung_weg geprüft: nur ein erkanntes Werbe-Modal (CDP_WERBUNG_JS) geht über sein eigenes X zu, alles andere bleibt stehen.
+    werbung_versucht = False
+    if st.get("popups") and hasattr(s, "werbung_weg"):
+        werbung_versucht = True
+        if s.werbung_weg(zwang=True):
+            st = s.stand(opts)
     geklickt_umschalter = False
     wiederholt = False
     fremd_esc = False
@@ -18589,6 +18614,15 @@ def _cdp_konto_sichern(s, ext, opts, trail):
                                           f"{str(ko.get('hinweis') or '')[:80]}) — Tradovate im Puls-Chrome verbunden?"), st, {}
         # Umschalter höchstens EINMAL (erster Live-Lauf 00:44 UTC: 4 Klicks hintereinander — ein zweiter Klick schließt ein
         # offenes Dropdown wieder). Danach zweimal lesen; bleibt es zu, ehrlich raus MIT dem Stand für T1.
+        if geklickt_umschalter and st.get("popups") and not werbung_versucht and hasattr(s, "werbung_weg"):
+            # Dialog erst NACH dem Umschalter-Klick aufgegangen (Werbe-Modal, 09.10.2026): einmal weg, dann den Umschalter EINMAL neu
+            werbung_versucht = True
+            if s.werbung_weg(zwang=True):
+                geklickt_umschalter = False
+                trail.append("Konto-Schritt nach dem Werbe-Modal einmal wiederholt")
+                _warte(0.6, 0.3)
+                st = s.stand(opts)
+                continue
         if geklickt_umschalter:
             _cdp_esc(s, st, trail, "Dropdown nicht erkannt")   # was auch immer aufging: nicht offen stehen lassen (Prüfer 30.09.2026)
             # LOGIN MIT NUR EINEM KONTO (02.10.2026, Moritz, Balance-Lesen: aktiv TDFYSL…, Umschalter-Klick öffnet keine Liste): ist das
@@ -21770,6 +21804,8 @@ def _cdp_menue_abwarten(ort, trail, praefix, lesungen=3):
 def _cdp_abmelden(s, opts, trail):
     """[2] Log out über das Kontextmenü neben „Tradovate" (K3-Weg, live 29.09.2026 12:27 UTC: „Log out ok"). -> (ok, text)"""
     ort = _K3Ort("TradingView-Seite", s.ws, s, "")
+    if hasattr(s, "werbung_weg"):
+        s.werbung_weg(zwang=True)                    # Werbe-Modal über dem Kontextmenü (09.10.2026 01:05 UTC: „Kontextmenü leer" 3×)
     b = ort.blick()
     if not cdp_rect(b.get("ctx")):
         return False, f"Kontextmenü-Knopf neben 'Tradovate' nicht eindeutig ({b.get('ctx')}) — nicht abgemeldet."
@@ -22128,20 +22164,29 @@ def _cdp_anmelden(s, ort, benutzer, opts, trail, vorher=None, sitz=None):
                 ort.eingabe.tippen(benutzer)       # letzter Versuch: die Liste auf genau diesen Login filtern (kein Enter)
                 trail.append(f"[Login] '{benutzer}' getippt, um die Liste zu filtern")
             _warte(0.8, 0.4)
-            if _cdp_autofill_klick(ort.eingabe, benutzer, cdp_rect(u), trail, diag=(versuch == 1)):
+            if not _cdp_autofill_klick(ort.eingabe, benutzer, cdp_rect(u), trail, diag=(versuch == 1)):
+                continue
+            # BEWEIS IN DER SCHLEIFE (Puls-Fehler 08.10.2026 21:45 UTC, pc-xxxxxx, FundedNext-Wechsel, dazu 05.10.: „Nach dem Klick auf
+            # den Vorschlag nicht bewiesen (Benutzer LEER, Passwort LEER)" — der UIA-Klick traf die Liste, Chrome füllte nichts (Liste
+            # gerade zugegangen/neu gezeichnet); 11 min später derselbe Weg sauber). Bleibt das Formular leer, wird die Liste über den
+            # nächsten Versuch (Feld leeren → Pfeil runter bzw. Username tippen) neu geöffnet und der Vorschlag EINMAL neu geklickt.
+            # Riegel unverändert: ohne vollständigen Beweis kein Anmelden, nie Enter.
+            _warte(0.8, 0.4)
+            lb = ort.blick().get("login") or {}
+            ok_b, txt_b = cdp_login_bereit(lb)
+            trail.append(f"[Login] nach dem Vorschlag: {txt_b}" + ("" if ok_b or versuch >= 3 else " — Liste neu öffnen, Vorschlag neu"))
+            if ok_b:
                 gewaehlt = True
                 break
+            if versuch >= 3:
+                return "autofill", f"Nach dem Klick auf den Vorschlag nicht bewiesen ({txt_b}) — Anmelden NICHT geklickt."
+            if not ort.eingabe.klick(cdp_rect(u), "Benutzerfeld"):   # Fokus zurück ins Feld, sonst gingen Strg+A/Tippen woanders hin
+                return "autofill", f"Nach dem Klick auf den Vorschlag nicht bewiesen ({txt_b}), Benutzerfeld danach nicht klickbar — Anmelden NICHT geklickt."
         if not gewaehlt:
             if ort.eigen:
                 ort.eingabe.taste("Escape")          # nur im eigenen Tradovate-Tab — in TradingView schlösse Esc den Dialog
             return "autofill", (f"Chrome zeigt keinen gespeicherten Login '{benutzer}' in der Vorschlagsliste — ist er im Puls-Chrome "
                                 "(eigenes Profil) gespeichert? Nichts abgeschickt.")
-        _warte(0.8, 0.4)
-        lb = ort.blick().get("login") or {}
-        ok_b, txt_b = cdp_login_bereit(lb)
-        trail.append(f"[Login] nach dem Vorschlag: {txt_b}")
-        if not ok_b:
-            return "autofill", f"Nach dem Klick auf den Vorschlag nicht bewiesen ({txt_b}) — Anmelden NICHT geklickt."
     k, nk = k3_eindeutig(lb.get("knoepfe"), K3_RX_CONNECT)
     if not k:
         return "login_knopf", f"Kein eindeutiger Login-Knopf ({nk}; Knöpfe {[k3_label(x) for x in lb.get('knoepfe') or []][:8]}) — nicht angemeldet."
