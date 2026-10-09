@@ -3719,6 +3719,30 @@
   #dashboard-view .wdl-mb-kopf b{font-size:14px;font-weight:700;color:var(--ink)}
   #dashboard-view .wdl-mb-kopf span{font-size:12px;font-weight:600;color:var(--sub);font-variant-numeric:tabular-nums}
   #dashboard-view .wdl-mb + .wdl-mehr, #dashboard-view .wdl-tab-mb > .wdl-mehr{background:var(--surface)}
+  /* Trades → Offen + Flotte wie das Radar „Läuft" (Finn 09.10.2026 ~07:27 Dubai: „richtig hässlich und unübersichtlich, bitte so clean wie
+     Radar"): dieselben Modell-Blöcke (.wdl-mb, Farbe --wdl-m), darin die Trade-Karten als schlanke Zeilen — die Karte selbst (Handler, 5-s-
+     Ticker, Live-Chips) bleibt unverändert, nur die Hülle. Spalten: Punkt · Name/Unterzeile · Live (rechtsbündig, feste Breite) · Aktionen. */
+  #dashboard-view .tc-zl{border:1px solid var(--border-soft);border-radius:10px;background:var(--bg);overflow:hidden}
+  #dashboard-view .tc-zl + .tc-zl{margin-top:14px}
+  #dashboard-view .tc-zl > .wdl-mb:first-child{border-top:0}
+  #dashboard-view .tc-zl .tc2{border:0;border-radius:0;border-top:1px solid var(--border-soft);box-shadow:none;padding:8px 16px 8px 13px;gap:12px;background:var(--surface)}
+  #dashboard-view .tc-zl .wdl-mb-kopf + .tc2{border-top:0}
+  #dashboard-view .tc-zl .tc2.tc2-has-sys{padding-top:8px}
+  #dashboard-view .tc-zl .wdl-mb:not(.tc-mb-weitere) .tc2-sys{display:none}   /* Modell steht im Block-Kopf */
+  #dashboard-view .tc-zl .tc-mb-weitere .tc2-sys{position:static;border-radius:5px;flex-shrink:0;order:2;min-width:84px;justify-content:center}   /* Modell-Spalte hinter dem Namen — Namen bündig */
+  #dashboard-view .tc-zl .tc2-dot{order:0} #dashboard-view .tc-zl .tc2-main{order:1} #dashboard-view .tc-zl .tc2-metric{order:3} #dashboard-view .tc-zl .tc2-actions{order:4}
+  #dashboard-view .tc-zl .tc2-name{font-size:13px}
+  #dashboard-view .tc-zl .tc2-sub{font-size:11.5px}
+  #dashboard-view .tc-zl .tc2-metric{min-width:300px;justify-content:flex-end;flex-wrap:wrap;row-gap:4px}
+  #dashboard-view .tc-zl .tc2-actions{min-width:150px;justify-content:flex-end}
+  #dashboard-view .tc-zl .tc2-actions .tc2-btn{padding:3px 10px;font-size:11.5px}
+  #dashboard-view .tc-zl-kopf{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;padding:9px 16px 8px 13px;background:var(--surface);border-bottom:1px solid var(--border-soft);font-size:12px;color:var(--sub)}
+  #dashboard-view .tc-zl-kopf b{font-size:14px;font-weight:700;color:var(--ink)}
+  #dashboard-view .tc-zl-kopf .tc2-chip{background:var(--bg)}
+  #dashboard-view .tc-zl-gruppe{padding:7px 13px 6px;font-size:10.5px;font-weight:700;letter-spacing:.06em;color:var(--sub);text-transform:uppercase;border-top:1px solid var(--border-soft)}
+  #dashboard-view .tc-zl > .tc-zl-gruppe:first-child{border-top:0}
+  #dashboard-view .tc-zl-gruppe + .wdl-mb{border-top:1px solid var(--border-soft)}
+  #dashboard-view .tc-zl .tc-zl-alarm{padding:6px 13px;background:var(--surface);border-top:1px solid var(--border-soft)}
   #dashboard-view .wdl-modelle{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;margin:0 0 12px}
   #dashboard-view .wdl-modelle .wdl-mg{display:flex;align-items:center;gap:6px}
   #dashboard-view .wdl-modelle .wdl-mg > span{font-size:11px;color:var(--sub)}
@@ -3803,6 +3827,14 @@
     #dashboard-view .wdl-mb > .wdl-z{padding-left:9px}   /* Handy: 12 px Zeilen-Rand minus 3 px Modell-Rand */
     #dashboard-view .wdl-mb-kopf{padding:8px 12px 7px 9px}
     #dashboard-view .wdl-mb-kopf b{font-size:13.5px}
+    /* Trades → Offen/Flotte am Handy: Zeile zweistöckig (Name oben, Live + Aktionen darunter), ohne Kartenhülle im Block */
+    #dashboard-view .tc-zl{border:none;border-radius:var(--m-r-card,16px);box-shadow:var(--shadow-mob-card,0 1px 2px rgba(16,24,40,.05))}
+    #dashboard-view .tc-zl .tc2{border-radius:0;box-shadow:none;padding:10px 12px 10px 9px;row-gap:6px;contain:layout paint}
+    #dashboard-view .tc-zl .tc2.tc2-has-sys{padding-top:10px}
+    #dashboard-view .tc-zl .tc2-metric{min-width:0;justify-content:flex-start;padding-left:19px}
+    #dashboard-view .tc-zl .tc2-actions{min-width:0;padding-top:6px;border-top:0}
+    #dashboard-view .tc-zl .tc2-actions .tc2-btn{padding:7px 12px;font-size:12.5px}
+    #dashboard-view .tc-zl-kopf{padding:8px 12px 7px 9px}
     /* Personen-Chips am Handy: eigene dritte Zeile unter den Spaltenköpfen, waagrecht wischbar statt Umbruch */
     #dashboard-view .wdl-kp{grid-row:3;flex-wrap:nowrap;margin:0 -4px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
     #dashboard-view .wdl-kp::-webkit-scrollbar{display:none}
@@ -21994,13 +22026,13 @@
       // Ausgabe: Zaehler-Zeile, dann pro Person eine kleine Ueberschrift in
       // ihrer Farbe (mit ihrer Live-Zahl), darunter Karten wie oben
       // (.trade-cards-Huelle = Abstaende der Plan-Tabs).
-      let html = `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:11px;color:var(--sub);margin-bottom:8px">`
-          + `<span style="font-weight:600;letter-spacing:.04em">LIVE GESAMT <b style="color:var(--ink);font-size:12px">${liveGesamt}</b></span>`
+      // Radar-Optik (09.10.2026, Finn: „so clean wie Radar"): ein Rahmen wie die Radar-Gruppe, Kopf „Live gesamt" mit den Zählern,
+      // je Person ein Block (wdl-mb in ihrer ID-Farbe), Karten darin als Zeilen (.tc-zl) — Inhalt und Ticker unverändert
+      let html = `<div class="tc-zl"><div class="tc-zl-kopf"><b>Live gesamt ${liveGesamt}</b>`
           + (eigeneLive ? zChip(eigenerName, eigeneLive, 'var(--ink)') : '')
           + proPerson.map(([pers, n]) => zChip(pers.name, n, pers.farbe)).join('')
-        + `</div>`
-        + `<div style="font-size:11px;font-weight:600;color:var(--sub);letter-spacing:.04em">FLOTTE — ANDERE PERSONEN</div>`
-        + eigeneAlarme
+          + `<span style="margin-left:auto;font-size:11px;font-weight:600;letter-spacing:.04em">FLOTTE — ANDERE PERSONEN</span></div>`
+        + (eigeneAlarme ? `<div class="tc-zl-alarm">${eigeneAlarme}</div>` : '')
       let letzteGruppe = -1
       for(const k of reihenfolge){
         const pers = personen.get(k)
@@ -22009,19 +22041,17 @@
         const g = gruppeVon(k)[0]
         if(g !== letzteGruppe){
           const titel = g < FLOTTE_GRUPPEN.length ? FLOTTE_GRUPPEN[g].titel : 'Weitere'
-          html += `<div style="display:flex;align-items:center;gap:8px;margin:${letzteGruppe < 0 ? '10px' : '18px'} 0 2px;font-size:10.5px;font-weight:700;letter-spacing:.06em;color:var(--sub)">`
-            + `<span>${esc(titel.toUpperCase())}</span><span style="flex:1;height:1px;background:var(--border)"></span></div>`
+          html += `<div class="tc-zl-gruppe">${esc(titel)}</div>`
           letzteGruppe = g
         }
-        html += `<div style="font-size:11.5px;font-weight:700;color:${pers.farbe};margin:10px 0 6px">${esc(pers.name)}`
-          + (n ? ` <span style="font-weight:500;color:var(--sub)">· ${n} live</span>` : '') + `</div>`
-          + `<div class="trade-cards">${(karten.get(k) || []).join('')}</div>`
-          + (alarme.get(k) || []).join('')
+        const al = (alarme.get(k) || []).join('')
+        html += `<div class="wdl-mb tc-mb-weitere" style="--wdl-m:${pers.farbe}"><div class="wdl-mb-kopf"><b style="color:${pers.farbe}">${esc(pers.name)}</b>`
+          + `<span>${n ? `${n} live` : ''}</span></div>${(karten.get(k) || []).join('')}${al ? `<div class="tc-zl-alarm">${al}</div>` : ''}</div>`
       }
       // Kopien ohne (sichtbaren) Master: das geteilte Hedge-Konto einmal
       // statt fuenfmal — plus alles, was von Hand auf dem Slave liegt.
       if(uebrig.length){
-        html += `<div style="font-size:11.5px;font-weight:700;color:var(--sub);margin:10px 0 6px">Hedge (geteilt / ohne Master)</div><div class="trade-cards">`
+        html += `<div class="wdl-mb tc-mb-weitere" style="--wdl-m:var(--sub)"><div class="wdl-mb-kopf"><b>Hedge (geteilt / ohne Master)</b><span>${uebrig.length}</span></div>`
         for(const k of uebrig){
           html += tc2Karte('var(--sub-2)', k.accName, null,
             `<b>${seite(k.side)}</b> ${esc(String(k.symbol))}`,
@@ -22029,6 +22059,7 @@
         }
         html += '</div>'
       }
+      html += '</div>'   // .tc-zl
       box.innerHTML = html
       box.style.display = ''
     }catch(e){
@@ -39137,7 +39168,8 @@
       }else{
         if(empty) empty.style.display = 'none'
         // Geplant in Firmen-Blöcken mit Kopf (05.10.2026, Finn: „erst Firma A alle Trades, dann Firma B, mehr drauf eingehen")
-        target.innerHTML = lane.status === 'planned' ? planFirmenBloecke(list) : list.map(p => renderTradePlanCard(p)).join('')
+        target.innerHTML = lane.status === 'planned' ? planFirmenBloecke(list) : lane.status === 'open' ? offenModellBloecke(list)
+          : list.map(p => renderTradePlanCard(p)).join('')
       }
 
       // Filter-Count-Hinweis
@@ -39307,6 +39339,19 @@
   // ✎/🗑 der Plan-Karten und der Geplant-Tabelle — auch im Trade-Planer (GEPLANT-WIE-TRADES-REITER, 07.10.2026)
   const PLAN_SVG_EDIT = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`
   const PLAN_SVG_DEL = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>`
+  /* OFFEN WIE DAS RADAR (Finn 09.10.2026 ~07:27 Dubai: „richtig hässlich und unübersichtlich, bitte so clean wie Radar"): je Modell ein Block
+   * wie im Radar „Läuft" (wdl-mb, Reihenfolge WDL_LISTE_REIHE, Farbe WDL_MODELL_FARBE), darin die unveränderten Karten als Zeilen (CSS .tc-zl).
+   * Modell aus planSysKey — dieselben Namen wie die Sticker; Duplikum/Mirror/Orbit (Duplikum) unter „Weitere" mit Sticker in der Zeile. */
+  const OFFEN_MODELL = { mt5: 'Echo', mt5v2: 'Echo V2', wd: 'Winning Day', tvv3: 'Orbit', tvv2: 'Orbit V2', tsv2: 'Topstep V2' }
+  function offenModellBloecke(list){
+    const reihe = (typeof WDL_LISTE_REIHE !== 'undefined' && WDL_LISTE_REIHE) || ['Orbit', 'Orbit V2', 'Winning Day', 'Echo', 'Echo V2', 'Topstep V2']
+    const farbe = (typeof WDL_MODELL_FARBE !== 'undefined' && WDL_MODELL_FARBE) || {}
+    const modell = p => OFFEN_MODELL[planSysKey(p)] || 'Weitere'
+    const bloecke = [...reihe, 'Weitere'].map(k => [k, list.filter(p => modell(p) === k)]).filter(([, b]) => b.length)
+    return `<div class="tc-zl">` + bloecke.map(([k, b]) => `<div class="wdl-mb${k === 'Weitere' ? ' tc-mb-weitere' : ''}" style="--wdl-m:${farbe[k] || 'var(--sub)'}">`
+      + `<div class="wdl-mb-kopf"><b>${escapeHtml(k)}</b><span>${b.length}</span></div>${b.map(p => renderTradePlanCard(p)).join('')}</div>`).join('') + `</div>`
+  }
+
   function renderTradePlanCard(p){
     const isPlanned   = p.status === 'planned'
     const isOpen      = p.status === 'open'
@@ -42915,7 +42960,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1421'
+  const OS_TAB_BUILD = '2026-09-22.1422'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
