@@ -20657,17 +20657,17 @@
         const route = mt5RouteResolve(plan, (dd && dd.instances) || [])
         s = (route && route.inst.status) || {}
       }catch(_){ }
-      const upd = { status: 'open', started_at: new Date().toISOString() }
-      upd.mt5_baseline = (s.master_balance != null && s.hedge_balance != null)
-        ? { master_balance: Number(s.master_balance),
-            hedge_balance:  Number(s.hedge_balance),
-            at: new Date().toISOString() }
-        : null
-      const { data, error } = await supabase.from('trade_plans').update(upd)
+      // Merge statt Ersetzen wie im 5-s-Wächter (09.10.2026, Amir pc-i8vyq8): Status mit Guard, danach nur die Baseline-Felder (neu/null)
+      const jetztIso = new Date().toISOString()
+      const { data, error } = await supabase.from('trade_plans').update({ status: 'open', started_at: jetztIso })
         .eq('id', plan.id).eq('status', 'planned').select('*')
       if(error || !data || !data.length) return
       const idx = tradePlans.findIndex(x => String(x.id) === String(plan.id))
       if(idx >= 0) tradePlans[idx] = rowToPlan(data[0])
+      const basis = (s.master_balance != null && s.hedge_balance != null)
+        ? { master_balance: Number(s.master_balance), hedge_balance: Number(s.hedge_balance), at: jetztIso }
+        : { master_balance: null, hedge_balance: null, at: null }
+      try{ await baselinePatch(plan.id, basis) }catch(e){ console.warn('[mt5PlanAufOpen] Baseline (Merge):', (e && e.message) || e) }
       mt5PlanPoll.wasOpen.add(String(plan.id))
       if(typeof renderTradePlans === 'function') renderTradePlans()
     }catch(e){ console.warn('[mt5PlanAufOpen]', e) }
@@ -20884,13 +20884,13 @@
           // ein wiederverwendeter Plan (zurück zu Geplant → erneut gestartet)
           // würde sonst mit der Baseline des VORIGEN Laufs rechnen: plausible
           // falsche Zahl statt leer (Review-Fund 15.08.2026).
-          const upd = { status: 'open', started_at: new Date().toISOString() }
-          upd.mt5_baseline = (s.master_balance != null && s.hedge_balance != null)
-            ? { master_balance: Number(s.master_balance),
-                hedge_balance:  Number(s.hedge_balance),
-                at: new Date().toISOString() }
-            : null
-          const { data, error } = await supabase.from('trade_plans').update(upd)
+          // MERGE STATT ERSETZEN (09.10.2026, Amir pc-i8vyq8): vorher schrieb dieser Übergang mt5_baseline komplett neu ({master_balance,
+          // hedge_balance, at} bzw. null) — puls_spur, Ticket, v2_vorher, kette/tage_mini und andere Belege am Plan waren danach weg. Jetzt
+          // erst Status + Startzeit mit Status-Guard; nur der Tab, der den Übergang gewonnen hat, setzt danach die drei Baseline-Felder per
+          // Merge (mt5_baseline_patch) — neu oder ausdrücklich null, damit ein wiederverwendeter Plan nie mit der Baseline des vorigen Laufs
+          // rechnet (Review-Fund 15.08.2026). Alle anderen Schlüssel bleiben.
+          const jetztIso = new Date().toISOString()
+          const { data, error } = await supabase.from('trade_plans').update({ status: 'open', started_at: jetztIso })
             .eq('id', plan.id).eq('status', 'planned').select('*')
           if(error){ console.warn('[mt5Poll] open:', error.message || error); continue }
           if(!data || !data.length){
@@ -20900,6 +20900,10 @@
           }
           const idx = tradePlans.findIndex(x => String(x.id) === String(plan.id))
           if(idx >= 0) tradePlans[idx] = rowToPlan(data[0])
+          const basis = (s.master_balance != null && s.hedge_balance != null)
+            ? { master_balance: Number(s.master_balance), hedge_balance: Number(s.hedge_balance), at: jetztIso }
+            : { master_balance: null, hedge_balance: null, at: null }
+          try{ await baselinePatch(plan.id, basis) }catch(e){ console.warn('[mt5Poll] Baseline (Merge):', (e && e.message) || e) }
           // Auto-Start = Positionen wurden gesehen → Ende-Erkennung ist scharf.
           mt5PlanPoll.wasOpen.add(String(plan.id))
           if(typeof renderTradePlans === 'function') renderTradePlans()
