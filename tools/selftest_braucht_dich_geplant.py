@@ -21,7 +21,7 @@ def lade():
     src = open(APP, encoding="utf-8").read()
     ns = {"re": re, "datetime": datetime, "timedelta": timedelta, "timezone": timezone}
     teile = [re.search(r"^AP_AUS_PLAN_INFO = .*$", src, re.M).group(0), re.search(r"^AP_TZ_TAG = .*$", src, re.M).group(0)]
-    for name in ("_ap_plan_am_tag", "ap_aus_ohne_plan", "ap_aus_ohne_plan_laden"):
+    for name in ("_ap_plan_am_tag", "ap_aus_ohne_plan", "ap_aus_ohne_plan_laden", "ap_ids_zaehlen", "ap_ohne_archiv"):
         i = src.index(f"\ndef {name}(") + 1
         teile.append(src[i:src.find("\n\n\n", i)])
     exec("\n".join(teile), ns)
@@ -60,6 +60,17 @@ def main():
     check(out["geplant"] == erg["geplant"] and out["summe"] == 7 and len(erg["ausgelassen"]) == 7, "geplant[], Summen und Original unberührt")
     check(F(dict(erg, tag=None), plaene, tz) == dict(erg, tag=None) and F(erg, [], tz) is erg and F(None, plaene, tz) is None,
           "ohne tag / ohne Pläne / ohne Ergebnis → unverändert")
+
+    # ID-Leiste /admin/auto-plan/ids (Master 09.10.2026, Folge zu .1402): dieselbe Zahl wie die Zeilen in Braucht dich
+    for x, u in zip(erg["ausgelassen"], ["u-a", "u-a", "u-b", "u-b", "u-c", "u-c", "u-c"]):
+        x["user_id"] = u
+    erg["geplant"] = [{"konto_id": "g-1", "user_id": "u-a"}]
+    Z = a["ap_ids_zaehlen"]
+    g0, a0 = Z(erg)
+    g1, a1 = Z(F(a["ap_ohne_archiv"](erg, {"k-4"}), plaene, tz))
+    check(a0 == {"u-a": 2, "u-b": 2, "u-c": 3} and a1 == {"u-b": 1, "u-c": 2} and g0 == g1 == {"u-a": 1},
+          f"ID-Leiste: ausgelassen ohne geplante (k-1, k-2, k-7) und archivierte (k-4) Konten ({a0} → {a1}), geplant gleich")
+    check(Z({}) == ({}, {}) and Z(None) == ({}, {}), "ID-Leiste: ohne Lauf → keine Zahlen")
 
     # Laden: Abfrage-Parameter + Fehlerweg
     L = a["ap_aus_ohne_plan_laden"]

@@ -17108,6 +17108,16 @@ def ap_aus_ohne_plan_laden(erg):
         return erg
 
 
+def ap_ids_zaehlen(erg):
+    """REIN: ({user_id: geplant}, {user_id: ausgelassen}) eines Lauf-Ergebnisses — die Zahlen der ID-Leiste (/admin/auto-plan/ids)."""
+    gepl, ausg = {}, {}
+    for z in (erg or {}).get("geplant") or []:
+        gepl[str(z.get("user_id"))] = gepl.get(str(z.get("user_id")), 0) + 1
+    for z in (erg or {}).get("ausgelassen") or []:
+        ausg[str(z.get("user_id"))] = ausg.get(str(z.get("user_id")), 0) + 1
+    return gepl, ausg
+
+
 def ap_ohne_archiv(erg, archiv):
     """REIN RECHNEND (testbar): gespeichertes Lauf-Ergebnis ohne Zeilen archivierter Konten in ausgelassen[] (08.10.2026, Finn am
     Screenshot „Braucht dich" — EzPoker „100k …7021 The5%ers Phase 1 · Balance fehlt": „Den Account habe ich schon längst archiviert,
@@ -21546,11 +21556,15 @@ def admin_auto_plan_ids():
             konten[str(r.get("user_id"))] = konten.get(str(r.get("user_id")), 0) + 1
     rows = sb_select("auto_plan_lauf", {"select": "tag,ergebnis", "order": "at.desc", "limit": "1"})
     erg, tag = ((rows[0].get("ergebnis") or {}), rows[0].get("tag")) if rows else ({}, None)
-    gepl, ausg = {}, {}
-    for z in erg.get("geplant") or []:
-        gepl[str(z.get("user_id"))] = gepl.get(str(z.get("user_id")), 0) + 1
-    for z in erg.get("ausgelassen") or []:
-        ausg[str(z.get("user_id"))] = ausg.get(str(z.get("user_id")), 0) + 1
+    # Zahl „ausgelassen" wie die Zeilen in Braucht dich (Master 09.10.2026, Folge zu .1402): ohne seit dem Lauf archivierte Konten und ohne
+    # Konten, die für den Lauftag inzwischen einen Plan haben — sonst zeigte die ID-Leiste eine Zahl, zu der unten keine Zeile steht
+    try:
+        erg = ap_ohne_archiv(erg, archiv)
+    except Exception as e:
+        print(f"[auto-plan] ⚠️ ids: Archiv-Filter: {type(e).__name__}: {e}", flush=True)
+    if isinstance(erg, dict) and erg and not erg.get("tag") and tag:
+        erg = dict(erg, tag=tag)
+    gepl, ausg = ap_ids_zaehlen(ap_aus_ohne_plan_laden(erg) or {})
     # Verwalter: seine Gruppe, auch wenn der Server sie für HT ausblendet (ADMIN_EXCLUDE); Finn mit ?gruppe=: nur diese Gruppe — bei einer
     # Verwalter-Gruppe ebenfalls ohne die Ausblendung (Master 08.10.2026 C), bei HT mit
     ohne_aus = bool(gruppe) or (lese_sicht is not None and not _admin_filter_ist_ht())
