@@ -14232,6 +14232,26 @@ class _CdpVerbindung:
             pass
 
 
+def _cdp_tabs_spur(e, trail):
+    """Nur Lesen (09.10.2026, Master — K0-Abbruch „CDP-Verbindung zu" auf pc-xxxxxx 05:18 UTC ohne erkennbaren zweiten Lauf, vermutlich
+    Layout-Umbau/Neuladen am TopstepX-Tab): nach einem ConnectionError einmal /json/list lesen und die Tabs des Puls-Chrome als EINE
+    Spurzeile schreiben — Typ · Host · Titel (gekürzt) · ID (8 Zeichen). Neue/fehlende Target-ID = Tab neu geladen bzw. ersetzt.
+    Andere Fehler: nichts. Fehler hier: still (darf den Abbruch nie überdecken)."""
+    if not isinstance(e, ConnectionError) or trail is None:
+        return
+    try:
+        liste = _cdp_http("/json/list", timeout=1.5) or []
+        teile = []
+        for t in (liste if isinstance(liste, list) else [])[:8]:
+            if not isinstance(t, dict):
+                continue
+            host = re.sub(r"^[a-z]+://", "", str(t.get("url") or "")).split("/")[0][:30]
+            teile.append(f"{str(t.get('type') or '?')[:6]} {host} '{str(t.get('title') or '')[:24]}' {str(t.get('id') or '')[:8]}")
+        trail.append("Tabs nach Verbindungsabbruch: " + (" | ".join(teile) if teile else "keine (Puls-Chrome antwortet nicht)"))
+    except Exception:
+        pass
+
+
 def _cdp_http(pfad, methode="GET", timeout=2.0):
     """JSON vom DevTools-HTTP-Endpunkt des Puls-Chrome (nur 127.0.0.1:9333). None = nicht erreichbar."""
     import urllib.request
@@ -17220,6 +17240,7 @@ def modus_tsxlesen_cdp(cmd, order=None, order_cmd=None, frist_s=None):
             msg += f" — Konto „{res['konto_hinweis']}“ (nur gelesen)"
         return raus("", msg + ("" if frisch else " — Seite nicht frisch bewiesen"), "fertig", ok=True)
     except Exception as e:
+        _cdp_tabs_spur(e, trail)   # nur Lesen: welche Tabs leben noch (09.10.2026)
         return raus("cdp_fehler", f"TopstepX-Lesen abgebrochen: {type(e).__name__}: {str(e)[:160]}", "absturz")
     finally:
         wh.cancel()
@@ -17312,6 +17333,7 @@ def modus_tsxinventar_cdp(cmd):
             msg += " Offen: " + "; ".join(res["offen"])
         return raus("", msg, "fertig", ok=True)
     except Exception as e:
+        _cdp_tabs_spur(e, trail)   # nur Lesen: welche Tabs leben noch (09.10.2026)
         return raus("cdp_fehler", f"K0-Inventar abgebrochen: {type(e).__name__}: {str(e)[:160]}", "absturz")
     finally:
         wh.cancel()
@@ -18939,6 +18961,7 @@ def modus_tvlesen_cdp(cmd):
                     + (f", Today's P&L {today:g} ({today_label})" if today is not None else ", Tages-G&V nicht gefunden"),
                     "fertig")
     except Exception as e:
+        _cdp_tabs_spur(e, trail)   # nur Lesen: welche Tabs leben noch (09.10.2026)
         return raus("cdp_fehler", f"Puls-Chrome/CDP: {type(e).__name__}: {str(e)[:160]}", "cdp")
 
 
@@ -20116,6 +20139,7 @@ def modus_tvkette_cdp(cmd):
         if res.get("gesendet"):
             return raus("unklar", (f"Ergebnis UNKLAR: der Senden-Klick ging raus, danach brach der Bot ab ({type(e).__name__}: "
                                    f"{str(e)[:100]}). Erst in TradingView nachsehen — NICHT blind erneut starten."), "unklar")
+        _cdp_tabs_spur(e, trail)   # nur Lesen: welche Tabs leben noch (09.10.2026)
         return raus("cdp_fehler", f"Puls-Chrome/CDP: {type(e).__name__}: {str(e)[:160]} — nichts gesendet.", "cdp")
 
 
@@ -20353,6 +20377,7 @@ def modus_tvclose_cdp(cmd):
     except Exception as e:
         if res.get("geklickt"):
             return raus("ende_unklar", f"Schließen geklickt, danach brach der Bot ab ({type(e).__name__}: {str(e)[:100]}) — in TradingView nachsehen.", "absturz")
+        _cdp_tabs_spur(e, trail)   # nur Lesen: welche Tabs leben noch (09.10.2026)
         return raus("cdp_fehler", f"Puls-Chrome/CDP: {type(e).__name__}: {str(e)[:160]} — nichts geklickt.", "cdp")
 
 class _LiveSpur(_StempelSpur):
@@ -21254,6 +21279,7 @@ def modus_k3(cmd):
     except Exception as e:
         wo = ("NACH dem Senden-Klick — Stand UNKLAR, erst in TradingView nachsehen" if res.get("gesendet") and not res.get("flach")
               else "vor dem Senden — nichts gesendet" if not res.get("gesendet") else "nach dem Flach-Beweis")
+        _cdp_tabs_spur(e, trail)   # nur Lesen: welche Tabs leben noch (09.10.2026)
         return raus("cdp_fehler", f"Puls-Chrome/CDP: {type(e).__name__}: {str(e)[:140]} ({wo})", res.get("schritt") or "cdp")
 
 
