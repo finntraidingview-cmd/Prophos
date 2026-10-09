@@ -19683,6 +19683,36 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                 return float(rnd.choice(frei_))
         return None
 
+    def anker_gegen(i, z):
+        # GLEICHZEITIG STATT FRÜH (Finn 09.10.2026 ~03:50 Dubai: die ersten Trades des Tages waren 4 Longs, der Short kam erst 04:40 —
+        # „man kann die Trades ja gleichzeitig starten, wenn es verschiedene IDs und verschiedene Profile sind"): ein vorgezogener Plan
+        # gleicht die GEGENRICHTUNG aus — er gehört an deren Start, nicht an die früheste freie Minute. Anker = jetzt, wenn eine
+        # Gegenrichtung schon läuft (szenario_laufend, heute gestartet in der Laufzeit), sonst der früheste geplante Start der Gegenrichtung
+        # in den nächsten 60 min; None = keine Gegenrichtung (dann früheste freie Minute wie bisher)
+        r = zustand_r[i]
+        if any(x.get("richtung") in ("buy", "sell") and x.get("richtung") != r for x in (einsatz or {}).get("szenario_laufend") or ()):
+            return float(jetzt_min)
+        if any(x.get("start") is not None and x.get("richtung") in ("buy", "sell") and x.get("richtung") != r
+               and float(x["start"]) <= float(jetzt_min) < float(x["start"]) + laufz for x in gestartet or ()):
+            return float(jetzt_min)
+        st = [z[k]["start"] for k in z if k != i and z[k]["richtung"] in ("buy", "sell") and z[k]["richtung"] != r
+              and float(jetzt_min) <= z[k]["start"] <= float(jetzt_min) + 60]
+        return min(st) if st else None
+
+    def platz_nah(i, von, bis, anker, bel):
+        # freie Minute in [von, bis) so nah wie möglich am Anker (volle Abstände wie platz), Streuung bis AP_VORZIEHEN_JITTER_MIN
+        # vom Anker weg (Jitter-Regel); ohne Anker bzw. Anker vor von = platz (früheste freie Minute)
+        if anker is None or anker <= von:
+            return platz(i, von, bis, bel)
+        r = zustand_r[i]
+        frei_ = [t for t in range(int(-(-von // 1)), int(bis)) if frei_fuer(i, float(t), 1.0, r, bel)]
+        if not frei_:
+            return None
+        best = min(frei_, key=lambda t: (abs(t - anker), t))
+        nah = [t for t in frei_ if ((best <= t <= best + AP_VORZIEHEN_JITTER_MIN) if best >= anker
+                                    else (best - AP_VORZIEHEN_JITTER_MIN <= t <= best))]
+        return float(rnd.choice(nah))
+
     def richtung_frei(i, r, bel):
         # nur die Richtungs-Regeln am bestehenden Platz (Abstände ändern sich beim Drehen nicht)
         uid, fa, t = str(je[i]["user_id"]), je[i]["firma"], zustand_start(i)
@@ -19724,7 +19754,7 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                 out.append((tuple(ids), r_neu))
         return out
 
-    def suche_kandidaten(z, bewegt, seq_ids=None):
+    def suche_kandidaten(z, bewegt, seq_ids=None, mit_raus=True):
         bel, out = belegung(z), []
         ab_ = float(jetzt_min) + AP_VORZIEHEN_AB_MIN
         bis60 = float(jetzt_min) + 60
@@ -19745,16 +19775,20 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                 if p.get("route") in AP_CFD_ROUTEN:
                     lo = max(lo, float(ap_cfd_ab(zeiten)))
                 bis_v = min(s0, bis60 + 1, float(ap_start_bis(zeiten)))
-                t = platz(i, lo, bis_v, bel) if lo <= bis60 else None
+                t = platz_nah(i, lo, bis_v, anker_gegen(i, z), bel) if lo <= bis60 else None
                 if t is not None and t < s0 and ap_fenster_von(zeiten, t) and fenster_frei(z, i, t):
                     out.append((i, t, "vor"))
-            elif (ab_ + 1 < s0 <= bis60 and s0 > float(jetzt_min) + AP_FAELLIG_MIN and i not in vorgezogen_heute
+            elif (mit_raus and ab_ + 1 < s0 <= bis60 and s0 > float(jetzt_min) + AP_FAELLIG_MIN and i not in vorgezogen_heute
                   and i not in hinaus_heute):
                 # KEIN KRIECHEN (Beobachtung Slave 3, 08.10.2026: Lauf 03:44 UTC schob Ina Apex 08:43 → 08:47 Dubai — der früheste
                 # freie Platz liegt knapp hinter jetzt + 60; nach der Ruhezeit stünde er wieder in den 60 min und würde erneut ein paar
                 # Minuten geschoben, Lauf für Lauf): je Plan und Tag höchstens EIN Hinausschieben
                 # Ende (Start + Laufzeit) im Fenster (Master 08.10.2026): nichts Richtung Auto-Close 23:45 Dubai hinausschieben
-                t = platz(i, bis60 + 1, float(fen[1]) - laufz + 1, bel)
+                # WEIT GENUG (Master 09.10.2026, Befund S5: 23:36 UTC Short 04:36 → 04:40 Dubai „-57 → 0 €" — im nächsten Takt war er
+                # wieder in den 60 min, dieselben −57 € zogen zwei bestätigte Longs vor, einen um 7,5 h; die Bremse oben greift nicht, weil
+                # ANDERE Pläne bewegt werden): Ziel ≥ jetzt + 60 + Laufzeit — wenn er wieder in den Horizont rutscht, sind die Trades, die ihn
+                # heute zur Klippe machten, durch. Knapp hinter den Horizont = kein Gewinn, nur Aufschub um einen Takt.
+                t = platz(i, max(bis60 + 1, bis60 + laufz), float(fen[1]) - laufz + 1, bel)
                 if t is not None and t > s0 and t + laufz <= float(fen[1]):
                     out.append((i, t, "raus"))
         return out + [(ids, r_neu, "dreh") for ids, r_neu in dreh_kandidaten(z, bewegt, bel)
@@ -19781,38 +19815,48 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
         zustand_start = lambda i: zustand[i]["start"]    # noqa: E731 — Drehen ändert keine Startzeit
         start_l = sz_lage(zustand)
         misch0, tag0 = misch(zustand), tag_ueber(zustand)
-        beam = [(zustand, (), start_l)]
-        beste = beam[0]
-        gesehen = set()
 
         def bewegte(zuege):
             return {k for x in zuege for k in (x[0] if x[2] == "dreh" else (x[0],))}
-        for _tiefe in range(AP_SUCHE_ZUEGE):
-            neu_b = []
-            for z0, zuege, l0 in beam:
-                for i, t, art in suche_kandidaten(z0, bewegte(zuege), seq_ids_von(zuege)):
-                    schluessel = frozenset([(x[0], x[1]) for x in zuege] + [(i, t)])
-                    if schluessel in gesehen:
-                        continue
-                    gesehen.add(schluessel)
-                    if art == "dreh":
-                        z1 = {k: (dict(v, richtung=t) if k in i else v) for k, v in z0.items()}
-                    else:
-                        z1 = {k: (dict(v, start=t) if k == i else v) for k, v in z0.items()}
-                    l1 = sz_lage(z1)
-                    if l1["min_eur"] < l0["min_eur"] + AP_SZENARIO_MIN_GEWINN_EUR:
-                        continue                             # jeder Zug ≥ AP_SZENARIO_MIN_GEWINN_EUR am Minimum, sonst kein Zug
-                    if art == "dreh" and (misch(z1) > max(misch0, misch(z0)) or tag_ueber(z1) > max(schwelle, tag0) + 1e-9):
-                        continue                             # Drehen: ID-Mischung und Tagesband nicht schlechter
-                    if art != "dreh" and misch(z1) > max(misch0, misch(z0)):
-                        continue                             # Verschieben über die Fenstergrenze: Fenster-Mischung nicht schlechter (08.10.2026)
-                    neu_b.append((z1, zuege + ((i, t, art, None if art == "dreh" else z0[i]["start"], l0, l1),), l1))
-            if not neu_b:
-                break
-            neu_b.sort(key=lambda x: wert(x[2], len(x[1]), ueber_n(x[1])), reverse=True)
-            beam = neu_b[:AP_SUCHE_BREITE]
-            if wert(beam[0][2], len(beam[0][1]), ueber_n(beam[0][1])) > wert(beste[2], len(beste[1]), ueber_n(beste[1])):
-                beste = beam[0]
+
+        def strahl(mit_raus):
+            beam = [(zustand, (), start_l)]
+            beste = beam[0]
+            gesehen = set()
+            for _tiefe in range(AP_SUCHE_ZUEGE):
+                neu_b = []
+                for z0, zuege, l0 in beam:
+                    for i, t, art in suche_kandidaten(z0, bewegte(zuege), seq_ids_von(zuege), mit_raus):
+                        schluessel = frozenset([(x[0], x[1]) for x in zuege] + [(i, t)])
+                        if schluessel in gesehen:
+                            continue
+                        gesehen.add(schluessel)
+                        if art == "dreh":
+                            z1 = {k: (dict(v, richtung=t) if k in i else v) for k, v in z0.items()}
+                        else:
+                            z1 = {k: (dict(v, start=t) if k == i else v) for k, v in z0.items()}
+                        l1 = sz_lage(z1)
+                        if l1["min_eur"] < l0["min_eur"] + AP_SZENARIO_MIN_GEWINN_EUR:
+                            continue                             # jeder Zug ≥ AP_SZENARIO_MIN_GEWINN_EUR am Minimum, sonst kein Zug
+                        if art == "dreh" and (misch(z1) > max(misch0, misch(z0)) or tag_ueber(z1) > max(schwelle, tag0) + 1e-9):
+                            continue                             # Drehen: ID-Mischung und Tagesband nicht schlechter
+                        if art != "dreh" and misch(z1) > max(misch0, misch(z0)):
+                            continue                             # Verschieben über die Fenstergrenze: Fenster-Mischung nicht schlechter (08.10.2026)
+                        neu_b.append((z1, zuege + ((i, t, art, None if art == "dreh" else z0[i]["start"], l0, l1),), l1))
+                if not neu_b:
+                    break
+                neu_b.sort(key=lambda x: wert(x[2], len(x[1]), ueber_n(x[1])), reverse=True)
+                beam = neu_b[:AP_SUCHE_BREITE]
+                if wert(beam[0][2], len(beam[0][1]), ueber_n(beam[0][1])) > wert(beste[2], len(beste[1]), ueber_n(beste[1])):
+                    beste = beam[0]
+            return beste
+        # VORZIEHEN VOR HINAUSSCHIEBEN (Finn 09.10.2026 ~03:50 Dubai: „Ich will den Saldo schon ausgleichen … am Anfang so viele Accounts
+        # zur Verfügung, wie es nur geht"): erst nur Vorziehen + Drehen — die Gegenrichtung kommt an den Trade heran. Hinausschieben (die eigene
+        # Richtung weg, der Horizont wird nur leer) nur, wenn ohne es kein Zug das Minimum hebt. Ein Tupel-Vorrang reichte nicht: ein
+        # leerer Horizont ist immer die beste Stufe (0 €), ein schwerer Short gegen leichte Longs erreicht sie durch Vorziehen nie.
+        beste = strahl(False)
+        if not beste[1]:
+            beste = strahl(True)
         such_zuege = list(beste[1])
         hm = lambda m: _ap_hhmm_txt((float(m) + float(dubai_min or 0)) % 1440)    # noqa: E731
         for n, (i, t, art, alt, l0, l1) in enumerate(such_zuege, 1):
