@@ -42738,7 +42738,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1410'
+  const OS_TAB_BUILD = '2026-09-22.1411'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -47162,6 +47162,20 @@
    * Konten aller IDs: „das oben mies hässlich kann weg und es soll immer nur für die eigene ID planen"): „4 geplant · 7 ausgelassen",
    * die Gründe gezählt statt je Konto. Gefiltert wird hier, auch wenn das Backend noch alle IDs liefert. */
   const _ap = { letzter: null, geladenFuer: null, laeuft: false, imPlaner: false, ich: null, admin: null }
+  /* LADEFEHLER SICHTBAR (09.10.2026, Master — Vorfall: GET /admin/auto-plan lief ab ~23:37 UTC bei allen auf HTTP 500, der Planer fiel STILL
+   * auf den Zwischenspeicher prophos_tpl_cache zurück und zeigte Finn über eine Stunde einen alten Lauf: „Braucht dich" mit längst geplanten
+   * Konten). Jetzt: _ap.geholtAt = Zeit des letzten ERFOLGREICHEN Abrufs (auch aus dem Zwischenspeicher), _ap.ladeFehler = {status, msg, at}
+   * des letzten fehlgeschlagenen — sichtbar als EINE Zeile mit genau einer Ursache (HTTP-Status bzw. „keine Verbindung"). Gleiches für das
+   * Delta (_apd.fehlerStatus). Der Zwischenspeicher trägt einen fehlgeschlagenen Abruf nie als frisch weiter (tplCacheSchreiben). */
+  function apLadeFehlerSatz(was, f, standMs){
+    if(!f) return ''
+    const grund = f.status && f.status !== 200 ? `HTTP ${f.status}` : f.status === 200 ? String(f.msg || 'Antwort ok:false').slice(0, 80) : `keine Verbindung: ${String(f.msg || 'Netzfehler').slice(0, 60)}`
+    const stand = standMs ? new Date(standMs).toLocaleTimeString('de-DE', { timeZone: 'Asia/Dubai', hour: '2-digit', minute: '2-digit' }) : ''
+    return `⚠ ${was} nicht geladen (${grund}) — ${stand ? `Anzeige = Zwischenspeicher von ${stand} Dubai` : 'keine Daten'}. Seite neu laden; hält es an, Backend prüfen.`
+  }
+  const apLadeFehlerText = () => apLadeFehlerSatz('Planer-Daten', _ap.ladeFehler, _ap.geholtAt)
+  const apdLadeFehlerText = () => (_apd.fehler && _apd.fehlerInfo) ? apLadeFehlerSatz('Delta-Daten', _apd.fehlerInfo, _apd.d && _apd.d.um ? Date.parse(_apd.d.um) : 0) : ''
+  window._apLadeFehler = { planer: () => apLadeFehlerText(), delta: () => apdLadeFehlerText() }   // Test-Haken (Stub)
   async function apApi(method, body){
     const { data: { session } } = await supabase.auth.getSession()
     const tok = session?.access_token; if(!tok) throw new Error('nicht angemeldet')
@@ -47172,7 +47186,7 @@
     const sicht = (method === 'GET' && typeof window._tplSicht === 'function') ? window._tplSicht() : ''
     const r = await fetch(`${WATCHER_HOME}/admin/auto-plan${sicht}`, { method, headers: { 'sb-token': tok, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
     const d = await r.json().catch(() => ({}))
-    if(!r.ok || d.ok === false){ const f = new Error(d.msg || d.error || ('HTTP ' + r.status)); f.daten = d; throw f }   // daten: z. B. abweichung (Probelauf)
+    if(!r.ok || d.ok === false){ const f = new Error(d.msg || d.error || ('HTTP ' + r.status)); f.status = r.status; f.daten = d; throw f }   // daten: z. B. abweichung (Probelauf)
     return d
   }
   // EIN Abruf je Öffnen (TRADE-PLANER LÄDT EWIG, Finn 08.10.2026 — Messung Railway-Logs 22:16 UTC: GET /admin/auto-plan lief beim Öffnen
@@ -47182,9 +47196,11 @@
     _ap.laufAt = Date.now()
     // nur der JÜNGSTE Abruf schreibt (08.10.2026): ein älterer mit anderer Sicht (Accounts/Planer-Seite „eigene") darf den Admin-Stand nicht überschreiben
     const pr = apApi('GET').then(d => { if(_ap.lauf !== pr) return d
+      _ap.geholtAt = Date.now(); _ap.ladeFehler = null; _ap.ausCache = false                     // erfolgreicher Abruf (09.10.2026)
       _ap.letzter = d.letzter || null; _ap.imPlaner = !!d.im_planer; _ap.admin = d.admin != null ? !!d.admin : null; _ap.geladenFuer = currentUserId; _ap.sicht = d.sicht || null
       _ap.info = d.info || null; _ap.aktiv = d.aktiv != null ? !!d.aktiv : null; return d })   // info: Nachplan-Countdown (nachplan_naechster/_art, 09.10.2026); aktiv: Not-Aus
     _ap.lauf = pr
+    pr.catch(e => { if(_ap.lauf === pr) _ap.ladeFehler = { status: (e && e.status) || 0, msg: (e && e.message) || String(e), at: Date.now() } })
     return _ap.lauf
   }
   async function apLetztenLaden(){
@@ -47263,7 +47279,7 @@
     if(currentUserId && _ap.geladenFuer !== currentUserId){ _ap.geladenFuer = currentUserId; apLetztenLaden(); return }
     const vorschlaege = (tradePlans || []).filter(p => p && p.status === 'planned' && p.autoPlan && !p.autoBestaetigtAt)
     const bestaetigt = (tradePlans || []).filter(p => p && p.status === 'planned' && p.autoPlan && p.autoBestaetigtAt).length
-    if(!_ap.imPlaner && !vorschlaege.length && !bestaetigt){ el.style.display = 'none'; return }
+    if(!_ap.imPlaner && !vorschlaege.length && !bestaetigt && !_ap.ladeFehler){ el.style.display = 'none'; return }   // Ladefehler: Karte bleibt, mit Zeile
     // Trade-Planer-Seite zeichnet Lauf + Knöpfe in ihrer Kopfzeile (QA 08.10.2026 Punkt 1) — die Karte hier nur, wo es die Kopfzeile nicht gibt
     if(_tpl.kopfInChips && el.closest('#tpl-view')){ el.style.display = 'none'; return }
     const l = _ap.letzter || {}, e = apEigenes(l)
@@ -47273,7 +47289,8 @@
       : `${l.trocken ? 'Probelauf' : l.quelle === 'nachplanen' ? 'Nachplanen' : 'Letzter Lauf'}${l.at ? ' ' + new Date(l.at).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}: ${e.geplant.length} geplant · ${e.ausgelassen.length} ausgelassen`
         + (gruende.size ? ` (${[...gruende].sort((a, b) => b[1] - a[1]).map(([k, n]) => `${n} ${escapeHtml(k)}`).join(' · ')})` : '')
     el.style.display = ''
-    el.innerHTML = `<div style="display:flex;align-items:center;gap:6px 10px;flex-wrap:wrap">
+    const fzAp = apLadeFehlerText()   // Ladefehler sichtbar (09.10.2026)
+    el.innerHTML = (fzAp ? `<div style="color:var(--danger);font-size:12.5px;margin-bottom:6px">${escapeHtml(fzAp)}</div>` : '') + `<div style="display:flex;align-items:center;gap:6px 10px;flex-wrap:wrap">
         <b>🤖 Auto-Planer</b>
         <span style="color:var(--sub)">${vorschlaege.length ? `${vorschlaege.length} ${vorschlaege.length === 1 ? 'Vorschlag wartet' : 'Vorschläge warten'} auf Bestätigung` : 'keine offenen Vorschläge'}${bestaetigt ? ` · ${bestaetigt} bestätigt` : ''}</span>
         <span style="flex:1"></span>
@@ -47627,10 +47644,10 @@
     _apd.laeuft = true
     try{
       const d = await apdApi('GET', '/delta' + (typeof window._tplSicht === 'function' ? window._tplSicht() : ''))   // Trade-Planer-Seite: alle IDs (07.10.2026)
-      _apd.d = d; _apd.fehler = ''; _apd.weg = 0
+      _apd.d = d; _apd.fehler = ''; _apd.fehlerInfo = null; _apd.weg = 0
     }catch(e){
       if(e && (e.status === 404 || e.status === 405)){ _apd.d = null; _apd.weg = Date.now() }   // Route fehlt: alte Anzeige, Karte aus
-      else _apd.fehler = (e && e.message) || String(e)                                         // alter Stand bleibt sichtbar, ⚠ im Kopf
+      else { _apd.fehler = (e && e.message) || String(e); _apd.fehlerInfo = { status: (e && e.status) || 0, msg: _apd.fehler, at: Date.now() } }   // alter Stand bleibt, Zeile im Planer
     }finally{ _apd.laeuft = false; _apd.geladen = Date.now(); apdZeichnen() }
   }
   function apdTick(){
@@ -49653,7 +49670,8 @@
     const kopfRechts = _ap.imPlaner ? `<span class="tpl-kopf-r">${lzTxt ? `<span class="tpl-lauf" title="${escapeHtml(lzTxt)}">${escapeHtml(lzTxt)}</span>` : ''}${_ap.admin === true ? `<label class="ap-alle" title="Probelauf über alle IDs"><input type="checkbox" data-tpl-probe-alle${_apPr.alle ? ' checked' : ''}> alle IDs</label>` : ''}<button type="button" class="btn btn-ghost tc2-btn" data-tpl-probe${_ap.laeuft ? ' disabled' : ''} title="Nur rechnen, nichts anlegen">Probelauf</button><button type="button" class="btn btn-ghost tc2-btn" data-tpl-jetzt${_ap.laeuft ? ' disabled' : ''} title="Jetzt planen (ersetzt unbestätigte Vorschläge)">${_ap.laeuft ? 'plant…' : 'Jetzt planen'}</button></span>` : ''
     _tpl.kopfInChips = !!kopfRechts
     const chips = (alleIds.length > 1 || alleBest || kopfRechts) ? `<div class="adm-vl-legend tpl-ids">${chipsIds}${alleBest}${kopfRechts}</div>` : ''
-    const html = (_tpl.fehler ? `<div class="tpl-fehler">⚠ ${escapeHtml(_tpl.fehler)}</div>` : '')
+    const fz = [apLadeFehlerText(), apdLadeFehlerText()].filter(Boolean)   // Ladefehler sichtbar, je Quelle eine Zeile (09.10.2026)
+    const html = fz.map(t => `<div class="tpl-fehler">${escapeHtml(t)}</div>`).join('') + (_tpl.fehler ? `<div class="tpl-fehler">⚠ ${escapeHtml(_tpl.fehler)}</div>` : '')
       + (ohne ? `<div class="tpl-karte"><div class="tpl-leer">— nicht im Auto-Planer</div></div>`
         : chips + tplKachelnHtml(F) + tplZeitstrahlHtml(F, zeilen) + tplChartsUmschalterHtml(F, 'p') + tplLaeuftKarteHtml(F) + tplBrauchtHtml(tplBraucht(D, sichtIds)) + tplDetailHtml(D) + tplListeHtml(F) + tplHeuteKarteHtml(F) + tplBilanzKarteHtml(F))   // Reihenfolge wie Admin (Finn 08.10.2026, Läuft seit ~11:45 Dubai direkt unter den Charts): Charts-Umschalter · Läuft · Braucht dich · Geplant · Heute beendet   // Heute beendet unter dem Hypo-Chart mit „Läuft" (Finn 08.10.2026)   // Konten-Abdeckung ausgeblendet (Finn 08.10.2026: „mies unnötig, kann visuell weg“) — tplAbdeckungHtml bleibt   // Detail direkt unter dem Zeitstrahl (Finn 07.10.2026)
     // FINGERABDRUCK (08.10.2026): gleiches Markup → nichts anfassen (60-s-Takt, Delta-Takt, Balance-Stände zeichnen sonst alles neu
@@ -50038,9 +50056,16 @@
   function tplCacheSchreiben(){
     try{
       const k = (a, n) => Array.isArray(a) ? a.slice(0, n) : []
-      const l = _ap.letzter && !_ap.letzter.trocken ? { ...(_ap.letzter), geplant: k(_ap.letzter.geplant, 200), ausgelassen: k(_ap.letzter.ausgelassen, 200), verlauf: undefined } : null
-      const d = _apd.d ? { ...(_apd.d), offen: k(_apd.d.offen, 200), geplant: k(_apd.d.geplant, 200), bot: undefined, verlauf: undefined } : null
-      const c = { uid: String(currentUserId || ''), at: Date.now(), letzter: l, imPlaner: !!_ap.imPlaner, admin: _ap.admin, delta: d,
+      // Fehlgeschlagener Abruf (09.10.2026): Lauf bzw. Delta des vorigen Zwischenspeichers samt seiner Zeit bleiben — nie den alten Stand
+      // mit „jetzt" neu stempeln (sonst galt ein seit Stunden altes „Braucht dich" beim nächsten Öffnen als frisch)
+      const alt = (_ap.ladeFehler || _apd.fehler) ? tplCacheLesen() : null
+      const l = _ap.ladeFehler ? (alt && alt.letzter) || null
+        : _ap.letzter && !_ap.letzter.trocken ? { ...(_ap.letzter), geplant: k(_ap.letzter.geplant, 200), ausgelassen: k(_ap.letzter.ausgelassen, 200), verlauf: undefined } : null
+      const d = _apd.fehler ? (alt && alt.delta) || null
+        : _apd.d ? { ...(_apd.d), offen: k(_apd.d.offen, 200), geplant: k(_apd.d.geplant, 200), bot: undefined, verlauf: undefined } : null
+      const apAt = _ap.ladeFehler ? (alt && (alt.apAt || alt.at)) || 0 : (_ap.geholtAt || 0)
+      if(_ap.ladeFehler && !apAt) return                 // nie erfolgreich geladen: nichts zu merken
+      const c = { uid: String(currentUserId || ''), at: apAt || Date.now(), apAt, letzter: l, imPlaner: !!_ap.imPlaner, admin: _ap.admin, delta: d,
         lt: k([..._tpl.lt.values()], 200), bilanz: k(_tpl.bilanz, 300) }
       localStorage.setItem(TPL_CACHE_KEY, JSON.stringify(c))
     }catch(_){ try{ localStorage.removeItem(TPL_CACHE_KEY) }catch(__){} }
@@ -50049,7 +50074,8 @@
     if(_tpl.cacheGelesen || _tpl.stub) return
     _tpl.cacheGelesen = true
     const c = tplCacheLesen(); if(!c) return
-    if(!_ap.letzter && c.letzter){ _ap.letzter = c.letzter; _ap.imPlaner = !!c.imPlaner; _ap.admin = c.admin != null ? !!c.admin : _ap.admin; _ap.geladenFuer = currentUserId; _ap.ausCache = true }
+    if(!_ap.letzter && c.letzter){ _ap.letzter = c.letzter; _ap.imPlaner = !!c.imPlaner; _ap.admin = c.admin != null ? !!c.admin : _ap.admin; _ap.geladenFuer = currentUserId; _ap.ausCache = true
+      _ap.geholtAt = c.apAt || c.at }   // „Zwischenspeicher von HH:MM" = letzter erfolgreicher Abruf (09.10.2026)
     if(!_apd.d && c.delta) _apd.d = c.delta           // trägt um → Kopf „Stand HH:MM" des Caches
     if(!_tpl.lt.size && Array.isArray(c.lt)) _tpl.lt = new Map(c.lt.filter(t => t && t.plan_id).map(t => [String(t.plan_id), t]))
     if(!(_tpl.bilanz && _tpl.bilanz.length) && Array.isArray(c.bilanz)) _tpl.bilanz = c.bilanz
@@ -50060,13 +50086,13 @@
     try{
       // Kontowerte (Satz € je $ je Konto) für beendete eigene Trades im Hypo-P&L — kwLaden aus der Accounts-Ansicht, höchstens alle 10 min
       const jobs = [tplLiveLaden(), tplBilanzLaden(), tplKerzenLaden(tplDaten()).catch(() => {}),
-        apLetztenHolen().then(() => { _tpl.fehler = '' }, e => { _tpl.fehler = (e && e.message) || String(e) })]
+        apLetztenHolen().then(() => { _tpl.fehler = '' }, () => { _tpl.fehler = '' })]   // Fehler zeigt apLadeFehlerText (Status + Stand)
       if(typeof kwLaden === 'function' && Date.now() - _tpl.kwAt > 600000){ _tpl.kwAt = Date.now(); jobs.push(kwLaden().catch(() => {})) }
       // Delta nur, wenn der Delta-Takt nicht gerade selbst geladen hat; offene Eingabe/Vorschau im Delta-Monitor nicht zerschießen
       if(!_apd.edit && !_apd.vorschau && Date.now() - _apd.geladen > 20000) jobs.push(apdLaden(true))
       await Promise.allSettled(jobs)
     }catch(e){ _tpl.fehler = (e && e.message) || String(e) }
-    finally{ _tpl.laeuft = false; _tpl.geladen = Date.now(); _ap.ausCache = false }
+    finally{ _tpl.laeuft = false; _tpl.geladen = Date.now(); if(!_ap.ladeFehler) _ap.ausCache = false }
     try{ apLeisteZeichnen() }catch(_){}
     tplZeichnen()
     tplCacheSchreiben()
@@ -63691,7 +63717,9 @@
     const leisteX = root.querySelector('.ap-idr')?.scrollLeft || 0   // Handy: Wisch-Position der Leiste über das Neuzeichnen (Klick, Takt) halten
     let heuteHb = ''; try{ heuteHb = tplHeuteKarteHtml(apIdsHeute()) }catch(e){ console.warn('[ap-ids] Heute beendet', e) }   // gefiltert nach der gewählten ID
     let ow = { laeuft: '', rest: '' }; try{ ow = apIdsOffenHtml() }catch(e){ console.warn('[ap-ids] Vorschläge/Läuft', e) }
-    root.innerHTML = leiste + apIdsKopfHtml(ow.laeuft) + ow.rest + heuteHb
+    // Ladefehler Planer/Delta sichtbar über allem (09.10.2026) — der Kopf darunter zeigt sonst still den Zwischenspeicher
+    const fz = [typeof apLadeFehlerText === 'function' ? apLadeFehlerText() : '', typeof apdLadeFehlerText === 'function' ? apdLadeFehlerText() : ''].filter(Boolean)
+    root.innerHTML = fz.map(t => `<div class="tpl-fehler">${escapeHtml(t)}</div>`).join('') + leiste + apIdsKopfHtml(ow.laeuft) + ow.rest + heuteHb
     if(leisteX && root.querySelector('.ap-idr')) root.querySelector('.ap-idr').scrollLeft = leisteX
     const det = root.querySelector('#ap-id-detail'), detFn = typeof window.apIdDetailRender === 'function' ? window.apIdDetailRender : typeof apIdDetailRender === 'function' ? apIdDetailRender : null
     if(u && det && detFn){ try{ detFn(u, det) }catch(e){ console.warn('[ap-ids] ID-Details', e) } }
