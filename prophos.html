@@ -25719,9 +25719,15 @@
       const info = { at: new Date().toISOString(), verhaeltnis: vh, tp_nq: Number(h.tp_level_nq), sl_nq: slE ? slE.sl : null, sl_quelle: slE ? slE.quelle : null, tp_quelle: h.tp_quelle || null }
       if(res && res.ok){
         st.key = key; st.versuche = 0
-        await hedgeAmPlanSchreiben(p.id, { sl: res.sl, tp: res.tp, sl_fusion_fill: (h.sl_fusion_fill != null) ? h.sl_fusion_fill : (Number(h.sl) || 0), tp_fusion_fill: (h.tp_fusion_fill != null) ? h.tp_fusion_fill : (Number(h.tp) || 0),
+        // FEHLER VOM OPEN ABRÄUMEN (09.10.2026, Fall befd8bb9: SL/TP beim Open mit 10013 abgelehnt, 10 s später hier gesetzt — sl_fehler/
+        // tp_fehler standen danach weiter am Hedge und täuschten in DB, Spur und Diagnose). Jetzt stehen die Level im Terminal: Fehler weg,
+        // der Wortlaut vom Open bleibt als *_fehler_open. tp_fehler bleibt nur, wenn auch jetzt kein TP-Level gesetzt ist.
+        const fehlerWeg = (h.sl_fehler || h.tp_fehler) ? { sl_fehler: null, tp_fehler: Number(res.tp) > 0 ? null : (h.tp_fehler || null),
+          sl_fehler_open: (h.sl_fehler_open != null) ? h.sl_fehler_open : (h.sl_fehler || null),
+          tp_fehler_open: (h.tp_fehler_open != null) ? h.tp_fehler_open : (h.tp_fehler || null) } : {}
+        await hedgeAmPlanSchreiben(p.id, Object.assign({ sl: res.sl, tp: res.tp, sl_fusion_fill: (h.sl_fusion_fill != null) ? h.sl_fusion_fill : (Number(h.sl) || 0), tp_fusion_fill: (h.tp_fusion_fill != null) ? h.tp_fusion_fill : (Number(h.tp) || 0),
           notfall_faktor: hedgeNotfallFaktorFuer(Number(h.punkte)), level_vorlaeufig: !(slE || !(Number(h.sl_punkte) > 0)),
-          level_abgleich: Object.assign(info, { ok: true, sl: res.sl, tp: res.tp, sl_alt: res.sl_alt, tp_alt: res.tp_alt }) })
+          level_abgleich: Object.assign(info, { ok: true, sl: res.sl, tp: res.tp, sl_alt: res.sl_alt, tp_alt: res.tp_alt }) }, fehlerWeg))
       } else {
         // KEINE ANTWORT ≠ ABGELEHNT (08.10.2026, Slave 2: nach jedem Push scheiterte der Abgleich 3× mit „keine Antwort", weil das
         // lokale Backend neu startete, und gab bis zum nächsten Neuladen auf): Verbindungsfehler zählen nicht, nach 2 min erneut.

@@ -759,6 +759,60 @@ def solo_level_tp(fill, richtung, sl_punkte, *, puffer, point, digits):
     return max(round(lvl, int(digits)), float(point))
 
 
+# SLTP NACH DEM SOLO-OPEN (09.10.2026, Fall befd8bb9 auf pc-2zc2we): SL und TP direkt nach dem DEAL beide mit retcode 10013
+# „Invalid request" abgelehnt — beide Requests zusammen in 5 ms, also vom Terminal selbst ohne Broker-Weg (bei den 46 übrigen
+# Solo-Hedges der 7 Tage brauchte der Schritt 98–106 ms). Das Terminal führte die frische Position noch nicht; erst der
+# Level-Abgleich des PC-Tabs setzte die Level 10 s später. Darum erst auf die Position warten, dann SLTP, und eine lokale
+# Ablehnung einmal wiederholen. Feste kurze Abstände statt Jitter: hier wartet ein ungesicherter Hedge, kein Mensch-Muster.
+SOLO_POS_WARTE_S = 1.0      # höchstens so lange auf die Position warten (Normalfall: sofort da)
+SOLO_POS_SCHRITT_S = 0.05
+SOLO_SLTP_LOKAL_MS = 20     # schnellere Ablehnung = vom Terminal, nicht vom Broker (Broker-Weg ~100 ms)
+SOLO_SLTP_WIEDER_S = 0.3
+
+
+def solo_position_abwarten(positions_get, ticket, plan_id, symbol, *, schlafe, jetzt,
+                           max_s=SOLO_POS_WARTE_S, schritt_s=SOLO_POS_SCHRITT_S):
+    """TESTBAR (positions_get/schlafe/jetzt eingespielt): wartet, bis die Solo-Position im Terminal steht — zuerst über das
+    Ticket, sonst über Symbol + Plan-Kennung (solo_schon_offen), falls Order- und Positions-Ticket auseinanderfallen.
+    -> (ticket der Position bzw. das alte, gefunden, gewartet_ms). Nur Lesen, nie ein Trade-Request."""
+    t0 = jetzt()
+    while True:
+        p = None
+        try:
+            pos = positions_get(ticket=int(ticket)) if ticket else None
+            p = pos[0] if pos else None
+            if p is None and plan_id and symbol:
+                p = solo_schon_offen(positions_get(symbol=symbol), plan_id)
+        except Exception:
+            p = None
+        ms = int(round((jetzt() - t0) * 1000))
+        if p is not None:
+            return int(_pos_feld(p, "ticket", 0) or ticket or 0), True, ms
+        if jetzt() - t0 >= max_s:
+            return int(ticket or 0), False, ms
+        schlafe(schritt_s)
+
+
+def solo_sltp_setzen(senden, letzter_fehler, ticket, symbol, sl, tp, *, aktion, magic, text, schlafe, jetzt,
+                     lokal_ms=SOLO_SLTP_LOKAL_MS, wieder_s=SOLO_SLTP_WIEDER_S):
+    """TESTBAR: EIN SLTP-Request mit höchstens EINER Wiederholung nach wieder_s, wenn die Ablehnung lokal war (10013 oder
+    schneller als lokal_ms). Der Request entsteht nur hier — action = aktion (TRADE_ACTION_SLTP) mit position, nie ein
+    DEAL: eine Wiederholung kann keine zweite Order öffnen. senden(req, text) → truthy/None wie send();
+    letzter_fehler() → Text der letzten Ablehnung. -> (ok, fehler oder None, versuche)"""
+    req = {"action": aktion, "symbol": symbol, "position": int(ticket), "sl": sl, "tp": tp, "magic": magic}
+    t0 = jetzt()
+    if senden(dict(req), text):
+        return True, None, 1
+    dauer_ms = (jetzt() - t0) * 1000
+    f = str(letzter_fehler() or "")
+    if not ("10013" in f or dauer_ms < lokal_ms):
+        return False, f, 1      # Broker hat geantwortet (z. B. Level zu nah) — Wiederholen ändert nichts
+    schlafe(wieder_s)
+    if senden(dict(req), f"{text} · 2. Versuch nach lokaler Ablehnung ({f or 'ohne Text'})"):
+        return True, None, 2
+    return False, str(letzter_fehler() or f), 2
+
+
 def kerze_fortschreiben(k1m, k1m_vor, wurzel, symbol, preis, jetzt_s):
     """REIN RECHNEND (testbar): (laufende Kerze, letzte abgeschlossene) nach einem
     Tick — dieselbe Form wie kurs_1m im reader-server (o/h/l/c/n, minute = Anfang
@@ -1974,28 +2028,46 @@ def main():
         # SLTP-Request fuer beide; ein Fehler hier ist kein Abbruch, die Antwort traegt sl/tp 0 + *_fehler.
         try:
             if tp_punkte > 0 and ticket:
+                # Erst warten, bis das Terminal die Position führt (Fall befd8bb9, 09.10.2026 — s. solo_position_abwarten)
+                ticket_pos, pos_da, warte_ms = solo_position_abwarten(mt5.positions_get, ticket, a.get("plan_id"), sym,
+                                                                      schlafe=time.sleep, jetzt=time.time)
+                erg["pos_warte_ms"] = warte_ms
+                if not pos_da:
+                    log(f"[solo] Position {ticket} nach {warte_ms} ms noch nicht im Terminal — SLTP trotzdem (Wiederholung bei lokaler Ablehnung)")
+                elif ticket_pos and ticket_pos != ticket:
+                    # Positions-Ticket ≠ Order-Ticket: Zuordnung und Antwort auf die Position umhängen
+                    log(f"[solo] Ticket {ticket} → Position {ticket_pos} (über Plan-Kennung gefunden)")
+                    if a.get("plan_id"):
+                        hedge_acc.setdefault("solo_plan", {}).pop(int(ticket), None)
+                        hedge_acc["solo_plan"][int(ticket_pos)] = str(a.get("plan_id"))[:64]
+                    ticket = ticket_pos
+                    erg["ticket"] = ticket
                 sl = solo_notfall_sl(fill, richtung, tp_punkte, faktor=notfall_faktor, point=si["point"], digits=si["digits"])
                 erg["sl_distanz_punkte"] = round(abs(sl - fill), 2) if sl > 0 else None
                 tp = solo_level_tp(fill, richtung, sl_punkte, puffer=puffer, point=si["point"], digits=si["digits"]) if sl_punkte > 0 else 0.0
                 if sl > 0:
-                    ok = send(m, {"action": mt5.TRADE_ACTION_SLTP, "symbol": sym, "position": ticket,
-                                  "sl": sl, "tp": tp, "magic": SOLO_MAGIC},
-                              f"SOLO LEVEL SL {sl} / TP {tp or '—'} {sym} (Ticket {ticket})")
+                    senden = lambda req, txt: send(m, req, txt)
+                    fehler_text = lambda: getattr(m, "letzter_fehler", None) or mt5.last_error()
+                    ok, f1, v1 = solo_sltp_setzen(senden, fehler_text, ticket, sym, sl, tp, aktion=mt5.TRADE_ACTION_SLTP,
+                                                  magic=SOLO_MAGIC, schlafe=time.sleep, jetzt=time.time,
+                                                  text=f"SOLO LEVEL SL {sl} / TP {tp or '—'} {sym} (Ticket {ticket})")
+                    erg["sltp_versuche"] = v1
                     if ok:
                         erg["sl"], erg["tp"] = sl, tp
                     elif tp > 0:
                         # Beide zusammen abgelehnt (z. B. TP zu nah am Kurs): das Master-TP-Level ist das
                         # wichtigere — noch einmal nur mit SL, damit der Hedge nie ohne Schliess-Level bleibt
-                        erg["tp_fehler"] = str(getattr(m, "letzter_fehler", None) or mt5.last_error())
-                        ok2 = send(m, {"action": mt5.TRADE_ACTION_SLTP, "symbol": sym, "position": ticket,
-                                       "sl": sl, "tp": 0.0, "magic": SOLO_MAGIC},
-                                   f"SOLO LEVEL nur SL {sl} {sym} (Ticket {ticket})")
+                        erg["tp_fehler"] = f1
+                        ok2, f2, v2 = solo_sltp_setzen(senden, fehler_text, ticket, sym, sl, 0.0, aktion=mt5.TRADE_ACTION_SLTP,
+                                                       magic=SOLO_MAGIC, schlafe=time.sleep, jetzt=time.time,
+                                                       text=f"SOLO LEVEL nur SL {sl} {sym} (Ticket {ticket})")
+                        erg["sltp_versuche"] = v1 + v2
                         if ok2:
                             erg["sl"] = sl
                         else:
-                            erg["sl_fehler"] = str(getattr(m, "letzter_fehler", None) or mt5.last_error())
+                            erg["sl_fehler"] = f2
                     else:
-                        erg["sl_fehler"] = str(getattr(m, "letzter_fehler", None) or mt5.last_error())
+                        erg["sl_fehler"] = f1
         except Exception as e:
             erg["sl_fehler"] = erg.get("sl_fehler") or f"{type(e).__name__}: {e}"
         erg["_z"] = {"send_vor": round(_t_send * 1000), "gefuellt": round(_t_gefuellt * 1000), "level_fertig": round(time.time() * 1000)}

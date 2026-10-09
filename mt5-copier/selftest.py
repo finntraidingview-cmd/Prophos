@@ -1902,6 +1902,7 @@ def main():
     results.append(test_solo_zu_ring())
     results.append(test_solo_plan_kennung())
     results.append(test_solo_riegel())
+    results.append(test_solo_sltp_rennen())
     results.append(test_pc_id())
     results.append(test_lese_instanz())
     results.append(test_endlesung_bausteine())
@@ -2300,6 +2301,81 @@ def test_solo_riegel():
         print("✗ None-Liste"); ok = False
     if ok:
         print("✓ Solo-Riegel: zweiter Auftrag gleicher plan8 → 'schon_offen' mit Ticket/Lots/Fill; fremder Plan, Copier-magic, ohne plan_id frei; Zuordnung auch ueber Ticket→plan_id")
+    return ok
+
+
+def test_solo_sltp_rennen():
+    """SLTP nach dem Solo-Open (09.10.2026, Fall befd8bb9): Position erst nach ~120 ms im Terminal → warten statt sofort
+    senden; lokale Ablehnung (10013 / < 20 ms) genau EINMAL wiederholen, Broker-Ablehnung nicht; nie ein DEAL."""
+    import copier
+    ok = True
+    SLTP, DEAL = 6, 1
+    uhr = {"t": 1000.0}
+    jetzt = lambda: uhr["t"]
+    def schlafe(s):
+        uhr["t"] += s
+    pid = "befd8bb9-b0c1-44c5-9707-000000000000"
+    pos = {"ticket": 233760903, "magic": copier.SOLO_MAGIC, "comment": copier.solo_kommentar(pid), "symbol": "NAS100"}
+    # 1) Rennen: Position taucht erst nach 0,12 s auf → gefunden, gewartet ≥ 100 ms, Ticket unverändert
+    da_ab = uhr["t"] + 0.12
+    def pg(ticket=None, symbol=None):
+        if uhr["t"] < da_ab:
+            return ()
+        return (pos,) if (ticket in (None, 233760903)) else ()
+    t, gef, ms = copier.solo_position_abwarten(pg, 233760903, pid, "NAS100", schlafe=schlafe, jetzt=jetzt)
+    if (t, gef) != (233760903, True) or not (100 <= ms <= 200):
+        print(f"✗ Position abwarten (Rennen): {(t, gef, ms)}"); ok = False
+    # 2) Order-Ticket ≠ Positions-Ticket → über Symbol + Plan-Kennung gefunden, Ticket der Position zurück
+    def pg2(ticket=None, symbol=None):
+        return (pos,) if symbol == "NAS100" else ()
+    t, gef, ms = copier.solo_position_abwarten(pg2, 111, pid, "NAS100", schlafe=schlafe, jetzt=jetzt)
+    if (t, gef, ms) != (233760903, True, 0):
+        print(f"✗ Position über Plan-Kennung: {(t, gef, ms)}"); ok = False
+    # 3) Nie da → nach max_s aufgeben (altes Ticket, gefunden False), kein Endlos-Warten
+    t0 = uhr["t"]
+    t, gef, ms = copier.solo_position_abwarten(lambda **k: (), 777, pid, "NAS100", schlafe=schlafe, jetzt=jetzt)
+    if (t, gef) != (777, False) or not (1000 <= ms <= 1100) or uhr["t"] - t0 > 1.2:
+        print(f"✗ Position nie da: {(t, gef, ms)}"); ok = False
+
+    def senderlein(antworten, dauer_s):
+        """antworten: Liste (ok, fehler); jede Antwort kostet dauer_s Uhrzeit."""
+        log, stand = [], {"f": None}
+        def senden(req, text):
+            log.append(dict(req)); uhr["t"] += dauer_s
+            a_ok, a_f = antworten[len(log) - 1]
+            stand["f"] = a_f
+            return object() if a_ok else None
+        return senden, (lambda: stand["f"]), log
+    # 4) lokal abgelehnt (10013, 5 ms) → nach 0,3 s genau ein 2. Versuch, der klappt
+    senden, lf, log = senderlein([(False, "retcode 10013 Invalid request"), (True, None)], 0.005)
+    t0 = uhr["t"]
+    r = copier.solo_sltp_setzen(senden, lf, 233760903, "NAS100", 31002.13, 30722.47, aktion=SLTP, magic=copier.SOLO_MAGIC,
+                                text="t", schlafe=schlafe, jetzt=jetzt)
+    if r != (True, None, 2) or len(log) != 2 or uhr["t"] - t0 < 0.3:
+        print(f"✗ lokale Ablehnung → 1 Wiederholung: {r}, {len(log)} Requests"); ok = False
+    if any(q.get("action") != SLTP or q.get("position") != 233760903 or q.get("action") == DEAL for q in log):
+        print(f"✗ Wiederholung darf nur SLTP mit position senden: {log}"); ok = False
+    # 5) lokal abgelehnt, auch der 2. Versuch → genau 2 Requests, Fehlertext des 2.
+    senden, lf, log = senderlein([(False, "retcode 10013 Invalid request"), (False, "retcode 10013 Invalid request (2)")], 0.004)
+    r = copier.solo_sltp_setzen(senden, lf, 1, "NAS100", 1.0, 0.0, aktion=SLTP, magic=1, text="t", schlafe=schlafe, jetzt=jetzt)
+    if r != (False, "retcode 10013 Invalid request (2)", 2) or len(log) != 2:
+        print(f"✗ zwei lokale Ablehnungen: {r}, {len(log)} Requests"); ok = False
+    # 6) Broker lehnt ab (10016 nach 100 ms) → KEINE Wiederholung
+    senden, lf, log = senderlein([(False, "retcode 10016 Invalid stops")], 0.1)
+    r = copier.solo_sltp_setzen(senden, lf, 1, "NAS100", 1.0, 2.0, aktion=SLTP, magic=1, text="t", schlafe=schlafe, jetzt=jetzt)
+    if r != (False, "retcode 10016 Invalid stops", 1) or len(log) != 1:
+        print(f"✗ Broker-Ablehnung darf nicht wiederholt werden: {r}, {len(log)} Requests"); ok = False
+    # 7) schnelle Ablehnung ohne 10013 (< 20 ms, z. B. order_send None) → zählt als lokal, 1 Wiederholung
+    senden, lf, log = senderlein([(False, "order_send None ((-2, 'Invalid params'))"), (True, None)], 0.002)
+    r = copier.solo_sltp_setzen(senden, lf, 1, "NAS100", 1.0, 0.0, aktion=SLTP, magic=1, text="t", schlafe=schlafe, jetzt=jetzt)
+    if r != (True, None, 2):
+        print(f"✗ schnelle Ablehnung ohne Retcode: {r}"); ok = False
+    # 8) Erfolg beim 1. Mal → 1 Request
+    senden, lf, log = senderlein([(True, None)], 0.1)
+    if copier.solo_sltp_setzen(senden, lf, 1, "NAS100", 1.0, 0.0, aktion=SLTP, magic=1, text="t", schlafe=schlafe, jetzt=jetzt) != (True, None, 1) or len(log) != 1:
+        print("✗ Erfolg beim ersten Versuch"); ok = False
+    if ok:
+        print("✓ Solo-SLTP: wartet auf die Position (Rennen 120 ms, Plan-Kennung, Abbruch nach 1 s), lokale Ablehnung genau 1× wiederholt, Broker-Ablehnung nie, nur SLTP")
     return ok
 
 
