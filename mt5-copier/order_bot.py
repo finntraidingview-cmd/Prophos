@@ -21764,10 +21764,22 @@ def _cdp_login_ort(s, vorher, benutzer, opts, trail, warten_s=25.0):
                 trail.append(f"[Login] Tradovate-Tab nicht erreichbar ({type(e_).__name__})")
                 continue
             o2 = _K3Ort("Tradovate-Tab", ws2, _k3_eingabe(ws2, trail), benutzer, eigen=True)
-            if not cdp_tab_frisch(str(t.get("id")) not in ids, o2.eingabe.lese_js("performance.timeOrigin", timeout=4), klick_ms):
+            # ABRISS AM TRADOVATE-TAB (09.10.2026, Muster „cdp: ConnectionAbortedError [WinError 10053]", Lauf 08.10. 13:26 UTC): Connect
+            # geklickt, 7,6 s später brach der ganze Lauf mit 10053 ab — genau dann, wenn die Tradovate-Anmeldung als eigener Tab auftaucht
+            # (im Lauf eine Minute davor am selben PC nach 6,2 s). Dieser Tab lädt bzw. leitet in den ersten Sekunden weiter; nur der Aufbau
+            # der Verbindung war abgefangen, Lesen darauf nicht → die Ausnahme riss den Login samt Order-Lauf mit. Jetzt: Abriss beim Lesen
+            # dieses Tabs = Tab beim nächsten Blick (0,5–1,1 s) neu anhängen. Nur Lesen, nichts geklickt, nichts getippt.
+            try:
+                frisch = cdp_tab_frisch(str(t.get("id")) not in ids, o2.eingabe.lese_js("performance.timeOrigin", timeout=4), klick_ms)
+                login_da = bool(frisch and o2.blick().get("login"))
+            except (ConnectionError, OSError, TimeoutError, RuntimeError) as e_:   # RuntimeError: „Execution context destroyed" beim Weiterleiten
+                trail.append(f"[Login] Tradovate-Tab riss beim Lesen ab ({type(e_).__name__}) — Tab lädt noch, nächster Blick")
+                o2.zu()
+                continue
+            if not frisch:
                 o2.zu()                               # alter Tab (z. B. vom gescheiterten Lauf), seit dem Klick nicht neu geladen
                 continue
-            if o2.blick().get("login"):
+            if login_da:
                 o2.target_id = t.get("id")
                 trail.append(f"[Login] Tradovate-Anmeldeseite offen ({str(t.get('url') or '')[:60]})")
                 return o2, ""
