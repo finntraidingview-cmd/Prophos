@@ -888,6 +888,16 @@
      auto-fit statt fester Spaltenzahl: 7 Karten à 150px passen ab ~1.150px Inhaltsbreite
      nebeneinander, darunter bricht die letzte Karte um statt die Beträge abzuschneiden. */
   #adm-pane-wallet .kpis{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+  /* Liquide Mittel (09.10.2026): Fehlerzeile, Verlaufsbalken, Trenner zum Wallet-Teil */
+  #adm-pane-wallet .liq-err{margin-bottom:14px;padding:11px 14px;border-radius:10px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);font-size:12.5px;color:var(--sub)}
+  #adm-pane-wallet .liq-verlauf{display:flex;gap:4px;align-items:flex-end;height:120px;padding:8px 2px 0}
+  #adm-pane-wallet .liq-verlauf .liq-bar{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;min-width:0}
+  #adm-pane-wallet .liq-verlauf .liq-bar i{display:block;width:100%;border-radius:3px 3px 0 0;background:var(--violet)}
+  #adm-pane-wallet .liq-verlauf .liq-bar span{font-size:10px;color:var(--sub);white-space:nowrap}
+  #adm-pane-wallet .liq-wal-titel{margin:22px 2px 10px}
+  #adm-pane-wallet .liq-grid > .panel{min-width:0}   /* Tabelle scrollt im Panel statt das Raster aufzuweiten (Handy) */
+  #adm-pane-wallet :is(#liq-pers-rows,#liq-sheet-rows) .switch{display:inline-block;vertical-align:middle}   /* in der Tabellenzelle sonst inline ohne Breite */
+  #adm-pane-wallet .liq-fehler{color:var(--danger)}
   /* „Mehr anzeigen" blieb trotz hidden sichtbar und zeigte „(4 von 4)" — .btn setzt
      display:flex und schlägt damit das hidden-Attribut (18.09.2026 beim Transfer-Feed
      gesehen). Bewusst nur dieser Knopf, nicht alle .btn[hidden] global. */
@@ -10272,7 +10282,7 @@
           <button class="subtab adm-tab" data-admtab="fin">Payouts</button>
           <!-- Kasse ausgeblendet (Finn 24.09.2026: „mach Kasse mal weg, das nutzen wir aktuell nicht mehr") — Pane + JS bleiben, nur der Reiter ist weg -->
           <button class="subtab adm-tab" data-admtab="kasse" style="display:none">Kasse</button>
-          <button class="subtab adm-tab" data-admtab="wallet">Meta Wallet</button>
+          <button class="subtab adm-tab" data-admtab="wallet">Liquide Mittel</button>
           <!-- Kompass + Rechnungen ganz rechts unter „sperren", klein und gedämpft (Finn 30.09.2026: „ganz nach rechts, unter das
                ‚sperren', wo man sie quasi nicht sieht. Braucht man eh nicht, fast ganz weg, aber behalten") — Pane/Umschaltung unverändert -->
           <button class="subtab adm-tab adm-tab-rand adm-tab-rand-erst" data-admtab="kompass">Kompass</button>
@@ -11199,6 +11209,85 @@
           <div id="wal-excl-warn" style="display:none;margin-bottom:14px;padding:11px 14px;border-radius:10px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);font-size:12.5px;color:var(--sub)">
             Liste der ausgeblendeten IDs gerade nicht ladbar — es werden alle Wallets gezeigt. Tab gleich noch einmal öffnen, dann fallen ausgeblendete IDs wieder raus.
           </div>
+
+          <!-- LIQUIDE MITTEL (Auftrag Pascal über Finn, 09.10.2026; Vertrag .claude/master/auftraege/liquide-vertrag.md): alles, was sofort
+               verfügbar ist, in Euro — Wallets (Live-Balances unten) + Kunden-Töpfe aus Google Sheets (GET /admin/liquide, Railway).
+               Geld unterwegs steht getrennt und zählt nie in eine Summe. Keine Testzahlen, nichts im Browser gespeichert. JS liq* im Modul. -->
+          <div id="liq-err" class="liq-err" hidden></div>
+          <div class="kpis liq-kpis">
+            <div class="kpi">
+              <div class="kpi-label">Liquide gesamt</div>
+              <div class="kpi-value" id="liq-k-gesamt">–</div>
+              <div class="kpi-delta delta-neutral" id="liq-k-gesamt-sub">Wallets + Kunden-Töpfe</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-label">Eigene Mittel</div>
+              <div class="kpi-value" id="liq-k-eigen">–</div>
+              <div class="kpi-delta delta-neutral" id="liq-k-eigen-sub">gesamt − Kundengeld</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-label">Kundengeld verwaltet</div>
+              <div class="kpi-value" id="liq-k-kunde">–</div>
+              <div class="kpi-delta delta-neutral" id="liq-k-kunde-sub">Töpfe + Wallets von Kunden</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-label">Geld unterwegs</div>
+              <div class="kpi-value" id="liq-k-weg">–</div>
+              <div class="kpi-delta delta-neutral" id="liq-k-weg-sub">angefragte Payouts · nicht in den Summen</div>
+            </div>
+          </div>
+
+          <div class="grid-2 liq-grid">
+            <div class="panel">
+              <div class="panel-head">
+                <div>
+                  <div class="panel-title">Je Person</div>
+                  <div class="panel-sub">Kunde an = Wallet zählt als Kundengeld · Kunden-Töpfe sind immer Kundengeld</div>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table class="t">
+                  <thead><tr><th>Person</th><th>Kunde</th><th class="adm-num">eigene Mittel</th><th class="adm-num">Kundengeld</th><th class="adm-num">gesamt</th></tr></thead>
+                  <tbody id="liq-pers-rows"></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="panel-head">
+                <div>
+                  <div class="panel-title">Verlauf gesamt</div>
+                  <div class="panel-sub">Wallets (Tages-Snapshot) + Kunden-Töpfe je Tag, in €</div>
+                </div>
+              </div>
+              <div class="liq-verlauf" id="liq-verlauf"></div>
+            </div>
+          </div>
+
+          <div class="panel" style="margin-top:14px">
+            <div class="panel-head">
+              <div>
+                <div class="panel-title">Kunden-Töpfe aus Google Sheets</div>
+                <div class="panel-sub" id="liq-sheets-sub">Kontostand aus Zeile 2 Spalte B · Prüfung = Summe der Buchungen gegen den Kontostand</div>
+              </div>
+              <button class="btn btn-ghost" id="liq-abruf" title="Alle aktiven Sheets jetzt neu laden" style="padding:7px 12px">↻ Abrufen</button>
+            </div>
+            <div class="table-wrap">
+              <table class="t">
+                <thead><tr><th>Kunde</th><th class="adm-num">Kontostand</th><th class="adm-num">Einzahlungen</th><th class="adm-num">Käufe / Resets</th>
+                  <th class="adm-num">Payouts</th><th class="adm-num">an uns</th><th>letzte Buchung</th><th>Prüfung</th><th>aktiv</th></tr></thead>
+                <tbody id="liq-sheet-rows"></tbody>
+              </table>
+            </div>
+            <div class="adm-empty" id="liq-sheet-empty" hidden>Noch kein Sheet verbunden — unten Kunde und Link eintragen.</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+              <input id="liq-add-person" list="wal-person-names" placeholder="Kunde" autocomplete="off" style="flex:1;min-width:120px;padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink)">
+              <input id="liq-add-link" placeholder="Google-Sheet-Link (Freigabe: Jeder mit dem Link)" autocomplete="off" spellcheck="false" style="flex:2;min-width:220px;padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink)">
+              <button class="btn btn-primary" id="liq-add">Sheet verbinden</button>
+            </div>
+            <div id="liq-add-msg" style="font-size:12.5px;color:var(--sub);min-height:16px;margin-top:6px"></div>
+          </div>
+
+          <div class="panel-title liq-wal-titel">Wallets</div>
 
           <div class="adm-toolbar">
             <select id="wal-person" class="adm-f"><option value="">Alle Personen</option></select>
@@ -16192,6 +16281,7 @@
                   hint:'T… (34 Zeichen)' }
     }
     let wallets = [], walSnaps = [], walOpened = false
+    let walExcl = null   // ausgeblendete IDs (Emin) aus walLoad — gilt auch für Liquide Mittel (09.10.2026)
     /* Gegenseiten-Labels (15.09.2026, Finn: „CoinPayments-Dinge validieren … Anzeige
      * für Account-Käufe"). Tabelle wallet_labels, Schlüssel chain:adresse (klein).
      * kind: coinpayments_hot (Sammel-/Auszahlungs-Wallet 0x2dF9b935…, Seed per SQL),
@@ -16245,11 +16335,186 @@
     const walNf = new Intl.NumberFormat('de-DE', { minimumFractionDigits:2, maximumFractionDigits:2 })
     const coinNf = new Intl.NumberFormat('de-DE', { maximumFractionDigits:4 })   // Coin-Mengen: „0,0042" ETH
 
+    /* ── LIQUIDE MITTEL (Auftrag Pascal über Finn, 09.10.2026; Vertrag .claude/master/auftraege/liquide-vertrag.md) ──
+     * Alles, was sofort verfügbar ist, in Euro: Wallets (Live-Balances oben, walBal, USD × fx_usd_eur) + Kunden-Töpfe aus Google Sheets
+     * (Backend liest die CSVs, GET /admin/liquide). Kundengeld = alle Töpfe + Wallets von Personen mit kunde[uid] = true; Geld unterwegs
+     * (pending) steht getrennt und zählt nie mit. Fehlt das Backend, zeigt die Karte den Fehler — nie 0. Keine Werte im Browser gespeichert. */
+    let liqDaten = null, liqFehler = '', liqLaeuft = false, liqNachTimer = 0
+    const liqEurF = n => n == null || !isFinite(n) ? '–' : (n < -0.5 ? '−' : '') + '€ ' + Math.abs(Math.round(n)).toLocaleString('de-DE')
+    // Datum wie im Sheet, nur deutsch geschrieben (2026-10-06 → 06.10.2026) — ein Tippfehler im Sheet (Jahr 2025) bleibt sichtbar
+    const liqDatum = d => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d)); return m ? `${m[3]}.${m[2]}.${m[1]}` : String(d) }
+    const liqZahl = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
+    async function liqAnfrage(pfad, body){
+      const { data: { session } } = await supabase.auth.getSession()
+      const tok = session?.access_token
+      if(!tok) throw new Error('nicht angemeldet')
+      const r = await fetch(`${WATCHER_HOME}${pfad}`, body ? { method:'POST', headers:{ 'sb-token': tok, 'Content-Type':'application/json' },
+        body: JSON.stringify(body), cache:'no-store' } : { headers:{ 'sb-token': tok }, cache:'no-store' })
+      let d = null
+      try{ d = await r.json() }catch(_){ d = null }
+      if(!r.ok || !d || d.ok === false){
+        // Text des Backends zuerst (POST-Fehler {ok:false, error} auch mit 404); 404 ohne JSON = Route fehlt (Railway-Stand zu alt)
+        const grund = (d && (d.error || d.msg)) || (r.status === 404 ? 'Backend kennt /admin/liquide noch nicht (Railway-Stand zu alt)' : 'HTTP ' + r.status)
+        throw new Error(grund)
+      }
+      return d
+    }
+    async function liqLaden(pfad, body){
+      if(liqLaeuft) return
+      liqLaeuft = true
+      try{ liqDaten = await liqAnfrage(pfad || '/admin/liquide', body); liqFehler = '' }
+      catch(e){ liqFehler = e.message || String(e) }
+      finally{ liqLaeuft = false; liqRender() }
+      // abruf_laeuft (Backend .1407): ein Abruf (6-h-Takt oder Knopf) läuft noch — der POST wartet nicht, also in 25 s per GET nachladen,
+      // solange der Reiter offen ist und der Abruf weiterläuft
+      clearTimeout(liqNachTimer)
+      if(liqDaten && liqDaten.abruf_laeuft && !liqFehler)
+        liqNachTimer = setTimeout(() => { if(!$('adm-pane-wallet')?.hidden) liqLaden() }, 25000)
+    }
+    const liqSichtbar = uid => !(walExcl && uid && walExcl.has(String(uid)))   // Emin raus wie im Wallet-Teil
+    function liqRender(){
+      if(!$('liq-k-gesamt')) return
+      const d = liqDaten, fx = liqZahl(d && d.fx_usd_eur)
+      const err = $('liq-err')
+      err.hidden = !liqFehler
+      err.textContent = liqFehler ? 'Liquide Mittel nicht verfügbar: ' + liqFehler + ' — Wallets unten laufen weiter.' : ''
+      // Wallets je Person (alle sichtbaren Wallets, nicht der Personen-Filter des Wallet-Teils) in USD
+      const wUsd = w => { const b = walBal.get(w.id); return b?.usdt != null ? b.usdt + (b.coinUsdt || 0) : null }
+      const walGeladen = wallets.filter(w => wUsd(w) != null).length
+      const pers = new Map()   // key → { uid, name, walUsd, topf }
+      const key = (uid, name) => uid ? 'u:' + uid : 'n:' + String(name || '').toLowerCase()
+      for(const w of wallets){
+        const k = key(w.person_uid, w.person_name), p = pers.get(k) || { uid: w.person_uid || null, name: w.person_name, walUsd: 0, topf: 0 }
+        p.walUsd += wUsd(w) ?? 0
+        pers.set(k, p)
+      }
+      const sheets = ((d && d.sheets) || []).filter(x => liqSichtbar(x.person_uid))
+      for(const sh of sheets){
+        if(!sh.aktiv) continue
+        const kst = liqZahl(sh.stand && sh.stand.kontostand)
+        const k = key(sh.person_uid, sh.person_name), p = pers.get(k) || { uid: sh.person_uid || null, name: sh.person_name, walUsd: 0, topf: 0 }
+        p.topf += kst ?? 0
+        if(kst == null) p.fehlt = true   // Sheet ohne Kontostand (nicht freigegeben …) → in der Zeile „–" statt einer stummen 0
+        else p.hatTopf = true
+        pers.set(k, p)
+      }
+      const kunde = uid => !!(d && d.kunde && uid && d.kunde[String(uid)])
+      const zeilen = [...pers.values()].map(p => {
+        const walEur = fx != null ? p.walUsd * fx : null
+        const istK = kunde(p.uid)
+        const kg = p.topf + (istK ? (walEur ?? 0) : 0)
+        const gesamt = (walEur ?? 0) + p.topf
+        return { ...p, walEur, istK, kundengeld: kg, eigen: gesamt - kg, gesamt }
+      }).sort((a, b) => b.gesamt - a.gesamt)
+      // Kopf: nur mit Backend-Daten (Kurs + Töpfe) — sonst „–", nie 0
+      const bereit = !!d && fx != null && walGeladen > 0
+      const topfSumme = liqZahl(d && d.summe_kunden_eur)
+      const walEurSumme = zeilen.reduce((a, z) => a + (z.walEur ?? 0), 0)
+      const gesamt = bereit ? walEurSumme + (topfSumme ?? 0) : null
+      const kundengeld = bereit ? zeilen.reduce((a, z) => a + z.kundengeld, 0) : null
+      const unterwegs = d ? ((d.pending || []).filter(x => liqSichtbar(x.user_id) && (!x.status || x.status === 'pending'))
+        .reduce((a, x) => a + (liqZahl(x.betrag_eur) ?? 0), 0)) : null
+      $('liq-k-gesamt').textContent = liqEurF(gesamt)
+      $('liq-k-gesamt-sub').textContent = bereit ? `Wallets ${liqEurF(walEurSumme)} + Töpfe ${liqEurF(topfSumme ?? 0)}`
+        : (liqFehler ? 'Backend fehlt' : walGeladen ? 'lädt Kunden-Töpfe…' : 'lädt Wallets…')
+      $('liq-k-eigen').textContent = liqEurF(bereit ? gesamt - kundengeld : null)
+      $('liq-k-eigen-sub').textContent = bereit && gesamt ? `${Math.round((gesamt - kundengeld) / gesamt * 100)} % vom Gesamt` : 'gesamt − Kundengeld'
+      $('liq-k-kunde').textContent = liqEurF(kundengeld)
+      $('liq-k-weg').textContent = liqEurF(unterwegs)
+      $('liq-k-weg-sub').textContent = d ? `${((d.pending || []).filter(x => liqSichtbar(x.user_id))).length} angefragte Payouts · nicht in den Summen` : 'angefragte Payouts · nicht in den Summen'
+      // Je Person
+      const tb = $('liq-pers-rows')
+      tb.innerHTML = ''
+      for(const z of zeilen){
+        const tr = document.createElement('tr')
+        const leer = !bereit || (z.fehlt && !z.hatTopf && !z.walUsd)
+        tr.innerHTML = '<td></td><td></td>' + [z.eigen, z.kundengeld, z.gesamt].map(v => `<td class="adm-num">${leer ? '–' : liqEurF(v)}</td>`).join('')
+        if(z.fehlt) tr.title = 'Ein Kunden-Topf dieser Person hat keinen Kontostand (siehe Kunden-Töpfe) — zählt nicht mit'
+        tr.children[0].textContent = z.name || '—'
+        if(z.uid && d){
+          const sw = document.createElement('span'); sw.className = 'switch'
+          sw.innerHTML = '<input type="checkbox"><span class="switch-slider"></span>'
+          const cb = sw.querySelector('input'); cb.checked = z.istK
+          cb.title = z.istK ? 'Kunde: Wallet zählt als Kundengeld' : 'eigene Mittel'
+          cb.addEventListener('change', () => { cb.disabled = true; liqLaden('/admin/liquide/kunde', { user_id: z.uid, ist_kunde: cb.checked }) })
+          tr.children[1].appendChild(sw)
+        }else tr.children[1].textContent = '—'
+        tb.appendChild(tr)
+      }
+      // Verlauf gesamt je Tag: Wallet-Snapshots (USD → €) + Kontostände der Töpfe (verlauf_bank)
+      const vl = $('liq-verlauf')
+      if(fx == null){ vl.innerHTML = '<div class="adm-empty">Verlauf kommt mit den Daten vom Backend.</div>' }
+      else{
+        const tage = new Map()
+        const erlaubt = new Set(wallets.map(w => String(w.id)))
+        for(const sn of walSnaps) if(erlaubt.has(String(sn.wallet_id))){
+          const t = String(sn.day); tage.set(t, (tage.get(t) || 0) + ((Number(sn.usdt) || 0) + (Number(sn.coin_usdt) || 0)) * fx)
+        }
+        // heute: Live-Balances statt des (evtl. noch fehlenden) Tages-Snapshots
+        const heute = new Date().toISOString().slice(0, 10)
+        if(walGeladen) tage.set(heute, walEurSumme)
+        for(const b of (d.verlauf_bank || [])){ const t = String(b.day); tage.set(t, (tage.get(t) || 0) + (liqZahl(b.summe) ?? 0)) }
+        const reihe = [...tage.entries()].sort((a, b) => a[0] < b[0] ? -1 : 1).slice(-14)
+        const max = Math.max(1, ...reihe.map(r => r[1]))
+        vl.innerHTML = reihe.length ? reihe.map(([t, v]) => `<div class="liq-bar" title="${t.slice(8, 10)}.${t.slice(5, 7)}.: ${liqEurF(v)}">`
+          + `<i style="height:${Math.max(3, Math.round(v / max * 90))}px"></i><span>${t.slice(8, 10)}.${t.slice(5, 7)}.</span></div>`).join('')
+          : '<div class="adm-empty">Noch kein Tag im Verlauf.</div>'
+      }
+      // Kunden-Töpfe
+      const sb = $('liq-sheet-rows')
+      sb.innerHTML = ''
+      $('liq-sheet-empty').hidden = !d || sheets.length > 0
+      const ok = sheets.filter(x => x.aktiv && x.stand && liqZahl(x.stand.kontostand) != null)
+      for(const sh of sheets){
+        const st = sh.stand || null, tr = document.createElement('tr')
+        if(!sh.aktiv) tr.style.opacity = '.55'
+        const zellen = st && liqZahl(st.kontostand) != null
+          ? ['kontostand', 'einzahlungen', 'kaeufe', 'payouts', 'an_uns'].map(f => `<td class="adm-num">${liqEurF(liqZahl(st[f]))}</td>`).join('')
+            + `<td>${st.letzte_buchung ? escapeHtml(liqDatum(st.letzte_buchung)) : '—'}</td>`
+            + `<td>${st.pruefung_ok ? '✓' : `<span class="liq-fehler">Δ ${liqEurF(liqZahl(st.diff))}</span>`}</td>`
+          : `<td colspan="7" class="liq-fehler">${escapeHtml(st && st.fehler ? st.fehler : st ? 'Kontostand fehlt' : 'noch nicht abgerufen')}</td>`
+        tr.innerHTML = '<td></td>' + zellen + '<td></td>'
+        tr.children[0].textContent = sh.person_name || '—'
+        if(st && st.geholt_at) tr.children[0].title = 'abgerufen ' + new Date(st.geholt_at).toLocaleString('de-DE')
+        const sw = document.createElement('span'); sw.className = 'switch'
+        sw.innerHTML = '<input type="checkbox"><span class="switch-slider"></span>'
+        const cb = sw.querySelector('input'); cb.checked = !!sh.aktiv
+        cb.addEventListener('change', () => { cb.disabled = true; liqLaden('/admin/liquide/sheet/aktiv', { id: sh.id, aktiv: cb.checked }) })
+        tr.lastElementChild.appendChild(sw)
+        sb.appendChild(tr)
+      }
+      if(ok.length > 1){
+        const s = f => ok.reduce((a, x) => a + (liqZahl(x.stand[f]) ?? 0), 0)
+        const tr = document.createElement('tr'); tr.style.fontWeight = '600'
+        tr.innerHTML = '<td>Summe</td>' + ['kontostand', 'einzahlungen', 'kaeufe', 'payouts', 'an_uns'].map(f => `<td class="adm-num">${liqEurF(s(f))}</td>`).join('')
+          + '<td></td><td></td><td></td>'
+        sb.appendChild(tr)
+      }
+      const geholt = sheets.map(x => x.stand && x.stand.geholt_at).filter(Boolean).sort().pop()
+      const laeuft = !!(d && d.abruf_laeuft)
+      $('liq-sheets-sub').textContent = 'Kontostand aus Zeile 2 Spalte B · Prüfung = Summe der Buchungen gegen den Kontostand'
+        + (laeuft ? ' · Abruf läuft …' : geholt ? ' · abgerufen ' + new Date(geholt).toLocaleString('de-DE', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : '')
+      $('liq-abruf').disabled = liqLaeuft || laeuft
+    }
+    // Knöpfe: eigene Verdrahtung (kein Sammel-Handler)
+    $('liq-abruf')?.addEventListener('click', () => { $('liq-add-msg').textContent = 'Rufe alle aktiven Sheets ab…'
+      liqLaden('/admin/liquide/abruf', {}).then(() => { $('liq-add-msg').textContent = liqFehler ? '' : (liqDaten && liqDaten.abruf_laeuft) ? 'Abruf läuft — die Werte kommen in ~25 s.' : 'Abgerufen.' }) })
+    $('liq-add')?.addEventListener('click', async () => {
+      const name = ($('liq-add-person').value || '').trim(), link = ($('liq-add-link').value || '').trim(), msg = $('liq-add-msg')
+      if(!name || !/\/d\/[a-zA-Z0-9_-]{20,}/.test(link)){ msg.textContent = 'Kunde und einen Google-Sheet-Link (…/d/<ID>/…) eintragen.'; return }
+      const uid = (admData?.people || []).find(p => p.name?.toLowerCase() === name.toLowerCase())?.user_id || null
+      msg.textContent = 'Verbinde und rufe ab…'
+      await liqLaden('/admin/liquide/sheet', { person_uid: uid, person_name: name, link })
+      if(liqFehler) msg.textContent = 'Nicht verbunden: ' + liqFehler
+      else{ msg.textContent = 'Verbunden.'; $('liq-add-person').value = ''; $('liq-add-link').value = '' }
+    })
+
     function walOpen(){
       if(walOpened){ return }
       walOpened = true
       // Feed erst nach den Balances — beide reden mit TronGrid (1 Req/s keyless)
       walLoad().then(walRefreshBalances).then(() => walFeedLoad(false))
+      liqLaden()   // Liquide Mittel (09.10.2026): Kunden-Töpfe + Kunden-Flags vom Backend, parallel zu den Chains
     }
 
     async function walLoad(){
@@ -16273,6 +16538,7 @@
         if(!excl){ try{ const fp = await fleetPersonen(); if(fp && fp.exclUids && (fp.exclFrisch || fp.exclUids.size)) excl = fp.exclUids }catch(_){} }
         if(!excl){ try{ const m = JSON.parse(localStorage.getItem('prophos_fleet_excl') || 'null'); if(Array.isArray(m) && m.length) excl = new Set(m.map(String)) }catch(_){} }
         $('wal-excl-warn').style.display = excl ? 'none' : ''
+        walExcl = excl
         wallets = excl ? (w.data || []).filter(x => !excl.has(String(x.person_uid || ''))) : (w.data || [])
         walErlaubt = new Set(wallets.map(x => String(x.id)))
         walSnaps = (s.data || []).filter(x => walErlaubt.has(String(x.wallet_id)))
@@ -16586,6 +16852,7 @@
       }
 
       walDrawHistory(rows)
+      liqRender()   // Liquide Mittel rechnet mit denselben Balances (alle Wallets, nicht der Personen-Filter)
 
       // Wallet-Tabelle
       const tb = $('wal-rows')
@@ -17906,7 +18173,7 @@
       $('kasse-date').value = new Date().toISOString().slice(0,10)
       // Admin-Tabs (Übersicht / Kasse)
       // Untertitel je Reiter (Finn 08.10.2026: „Kapitalverteilung über alle Personen" stand auch im Trade-Planer-Reiter) — nur Anzeige
-      const ADM_SUB = { overview: 'Kapitalverteilung über alle Personen', planer: 'Trade-Planer · alle IDs', wd: 'Winning-Day-Farmer · alle IDs', stat: 'Statistik · Kapitel · Acc-Käufe', fin: 'Payouts · alle IDs', wallet: 'Meta Wallet', kompass: 'Kompass · Pascals Bot', rg: 'Rechnungen', kasse: 'Kasse', auftrag: 'Auftrag', kapitel: 'Kapitel', buys: 'Acc-Käufe' }
+      const ADM_SUB = { overview: 'Kapitalverteilung über alle Personen', planer: 'Trade-Planer · alle IDs', wd: 'Winning-Day-Farmer · alle IDs', stat: 'Statistik · Kapitel · Acc-Käufe', fin: 'Payouts · alle IDs', wallet: 'Liquide Mittel · Wallets + Kunden-Töpfe', kompass: 'Kompass · Pascals Bot', rg: 'Rechnungen', kasse: 'Kasse', auftrag: 'Auftrag', kapitel: 'Kapitel', buys: 'Acc-Käufe' }
       const admSubSetzen = name => { const s = ADM_SUB[name] || ''; const v = document.querySelector('.view[data-view="kasse"] .view-sub'); if(v) v.textContent = s; const t = document.getElementById('topbarSub'); if(t && document.querySelector('.view[data-view="kasse"].active')) t.textContent = s }
       document.querySelectorAll('.adm-tab').forEach(t => t.addEventListener('click', () => {
         const name = t.dataset.admtab
@@ -42448,7 +42715,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1408'
+  const OS_TAB_BUILD = '2026-09-22.1409'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
