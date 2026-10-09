@@ -21401,10 +21401,22 @@ def ap_kette_startwert_neu(jetzt=None):
     except Exception as e:
         print(f"[kette] ⚠️ Startwert-Prüfung nicht lesbar ({type(e).__name__}: {e})", flush=True)
         return []
-    weg = []
+    weg, fenster = [], None
     for p in plaene:
         ja, grund = ap_kette_startwert_veraltet(p, konten.get(str(p.get("master_account_id"))))
         if not ja:
+            continue
+        # NUR SOLANGE NACHGEPLANT WERDEN KANN (Vorprüfung Terminal 3, 09.10.2026): nach start_bis − Vorlauf plant der Nachplan-Takt heute
+        # nicht mehr — dann bliebe das Konto ohne Plan, statt dass Finn den unbestätigten Plan sieht und von Hand korrigiert. Dann nur der
+        # Grund am ⛓ von Trade 1 (kette.t2_grund), der Plan bleibt. Regeln nicht lesbar → wie Fenster zu (nie blind löschen).
+        if fenster is None:
+            try:
+                zeiten = ((sb_select("auto_plan_regeln", {"select": "zeiten", "id": "eq.1"}) or [{}])[0]).get("zeiten")
+                fenster = ap_nachplan_fenster((jetzt or datetime.now(timezone.utc)).astimezone(_ap_tz(AP_TZ_TAG)), zeiten)
+            except Exception:
+                fenster = False
+        if not fenster:
+            _ap_kette_grund(p, f"⚠ {grund.replace(' — neu planen', '')} — heute kein Nachplanen mehr: Plan prüfen/von Hand anpassen")
             continue
         try:
             if sb_delete("trade_plans", {"id": f"eq.{p['id']}", "status": "eq.planned", "auto_bestaetigt_at": "is.null",

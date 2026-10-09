@@ -425,16 +425,30 @@ def main():
              "keine Lesung": (planv, {"id": "k-sw"})}
     nein = [n for n, (pl, ko) in falle.items() if V(pl, ko)[0]]
     check(not nein, f"(ii) nie bei bestätigt/geclaimt/gestartet/ohne Startwert/alter Lesung/≤ 50 $/Trade 2/ohne Lesung ({nein})")
-    geloescht = []
-    c["sb_select"] = lambda t, prm: [dict(planv, master_account_id="k-sw")] if t == "trade_plans" else [kontov] if t == "accounts" else []
+    geloescht, gruende_sw = [], []
+    ZEITEN = {"tz": "Europe/Berlin", "fenster": [["00:00", "16:30", 100]], "start_bis": "16:30"}
+    c["sb_select"] = lambda t, prm: ([dict(planv, master_account_id="k-sw")] if t == "trade_plans" else [kontov] if t == "accounts"
+                                     else [{"zeiten": ZEITEN}] if t == "auto_plan_regeln" else [])
     c["sb_delete"] = lambda t, prm: geloescht.append(dict(prm)) or [{"id": prm["id"][3:]}]
-    weg = c["ap_kette_startwert_neu"]()
+    c["_ap_kette_grund"] = lambda t1_, g: gruende_sw.append((t1_["id"], g))
+    BER6 = ZoneInfo("Europe/Berlin")
+    im_fenster = datetime(2026, 10, 9, 5, 0, tzinfo=BER6).astimezone(timezone.utc)      # Fr 05:00 dt
+    nach_fenster = datetime(2026, 10, 9, 16, 20, tzinfo=BER6).astimezone(timezone.utc)  # Fr 16:20 dt > 16:30 − 15 min
+    weg_spaet = c["ap_kette_startwert_neu"](nach_fenster)
+    check(weg_spaet == [] and not geloescht and gruende_sw and "heute kein Nachplanen mehr" in gruende_sw[0][1] and "147.093,66" in gruende_sw[0][1],
+          f"(ii) nach dem Nachplan-Fenster: NICHT löschen, Warnung am ⛓ von Trade 1 ({weg_spaet}, {gruende_sw})")
+    c["sb_select"] = lambda t, prm: ([dict(planv, master_account_id="k-sw")] if t == "trade_plans" else [kontov] if t == "accounts"
+                                     else (_ for _ in ()).throw(RuntimeError("weg")) if t == "auto_plan_regeln" else [])
+    check(c["ap_kette_startwert_neu"](im_fenster) == [] and not geloescht, "(ii) Regeln nicht lesbar → wie Fenster zu, nichts gelöscht")
+    c["sb_select"] = lambda t, prm: ([dict(planv, master_account_id="k-sw")] if t == "trade_plans" else [kontov] if t == "accounts"
+                                     else [{"zeiten": ZEITEN}] if t == "auto_plan_regeln" else [])
+    weg = c["ap_kette_startwert_neu"](im_fenster)
     g0 = geloescht[0] if geloescht else {}
     check(weg == ["p-sw"] and g0.get("status") == "eq.planned" and g0.get("auto_bestaetigt_at") == "is.null"
           and g0.get("start_um_gestartet_at") == "is.null" and g0.get("started_at") == "is.null" and g0.get("orbit_gesendet_at") == "is.null",
           f"(ii) Takt löscht genau diesen Plan, Guard im Filter (Rennen mit Bestätigen/Claim) ({weg}, {g0})")
     c["sb_delete"] = lambda t, prm: []                  # Guard griff (inzwischen bestätigt) → nicht als gelöscht melden
-    check(c["ap_kette_startwert_neu"]() == [], "(ii) Guard greift → nichts gemeldet")
+    check(c["ap_kette_startwert_neu"](im_fenster) == [], "(ii) Guard greift → nichts gemeldet")
 
     print()
     if FEHLER:
