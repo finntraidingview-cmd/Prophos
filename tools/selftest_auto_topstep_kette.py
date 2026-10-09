@@ -387,6 +387,55 @@ def main():
     check(st5["p-ts"]["fest_durch"] == b["AP_FEST_TSV2"] and st5["p-kt"]["fest_durch"] == b["AP_FEST_KETTE"] and st5["p-mt"]["aenderbar"],
           f"Stand: Topstep V2 ohne Kette fest „von Hand“, Kette fest, Echo änderbar ({ {k: v['fest_durch'] for k, v in st5.items()} })")
 
+    # ── 6 Startwert ≠ erste Lesung (09.10.2026, Vorfall Ina Topstep …3822: Plan mit 150.000 gerechnet, echt 147.093,66) ─────────
+    c = sd.lade()
+    T2c = lambda k, b0, b1: c["ap_kette_trade2"](k, b0, b1, KETTE, c["ap_kette_regel"](KETTE), 0.3)   # noqa: E731
+    kst = {"nr": 1, "tagesziel": 4500, "verlust_grenze": 3200, "daily_usd": 3000, "mll": 145500.0, "tagesstart_plan": 150000.0}
+    wi, gi = T2c(kst, 147093.66, 146593.66)            # T1 −500 auf dem angefressenen Konto
+    check(wi and wi["verlust_grenze"] == 1794 and wi["sl"] == 1294 and wi.get("angefressen") is True and wi.get("abstand_mll") == 1593.66
+          and wi.get("verlust_aus_start") is True,
+          f"(i) echte Start-Balance 147.093,66: Verlustgrenze 1.794 (Abstand 1.593,66 + 200) statt 3.200 → SL2 1.294 statt 2.700, angefressen ({gi or wi})")
+    wj, gj = T2c(kst, 147093.66, 148093.66)            # T1 +1.000
+    check(wj and wj["sl"] == 2794 and wj["tp"] == 3500, f"(i) T1 +1.000: SL2 = 1.794 + 1.000 = 2.794 (vorher 4.200), TP2 3.500 ({gj or wj})")
+    wn2, gn2 = T2c(kst, 150000.0, 148750.0)
+    check(wn2 and wn2["verlust_grenze"] == 3200 and wn2["sl"] == 1950 and not wn2.get("verlust_aus_start"),
+          f"(i) echte Start-Balance = Startwert: unverändert (Verlustgrenze 3.200, SL2 1.950) ({gn2 or wn2})")
+    wx, gx = T2c(kst, 145400.0, 145300.0)
+    check(wx is None and "auf/unter dem MLL" in (gx or ""), f"(i) Start schon unter dem MLL → kein Trade 2 ({gx})")
+    wg2, _ = T2c(dict(kst, verlust_grenze=1700, angefressen=True, abstand_mll=1500, reparatur=True, tagesziel=3030), 147000.0, 146000.0)
+    check(wg2 and wg2["verlust_grenze"] == 1700 and wg2["sl"] == 700, f"(i) Block schon kleiner (Reparatur-Plan): bleibt 1.700 ({wg2})")
+
+    # Balance-Wahl wie im Backend für ein Topstep-Konto ohne Sync: tv_balance (Puls) mit Zeitstempel; ohne Lesung None
+    c["acc_balance_wahl"] = lambda a, e, d: ((float(a["tv_balance"]), "USD", "TV", a.get("tv_balance_at") or "") if (a or {}).get("tv_balance")
+                                             else (None, None, None, ""))
+    V = c["ap_kette_startwert_veraltet"]
+    planv = {"id": "p-sw", "status": "planned", "auto_plan": True, "auto_bestaetigt_at": None, "start_um_gestartet_at": None, "started_at": None,
+             "orbit_gesendet_at": None, "created_at": "2026-10-09T02:39:40+00:00", "mt5_baseline": {"kette": kst},
+             "notes": "Auto-Planer · Topstep-Kette 1/2 (Tagesziel +4.500 $) · Rest 9.000 $ bis Ziel · Balance 150.000 (Startwert (frisches Konto))"}
+    kontov = {"id": "k-sw", "tv_balance": 147093.66, "tv_balance_at": "2026-10-09T02:44:57+00:00", "external_id": "x"}
+    ja, grund = V(planv, kontov)
+    check(ja and grund == "Kettenplan mit Startwert 150.000 gerechnet, erste Lesung 147.093,66 (TV) — neu planen", f"(ii) Startwert-Plan, erste Lesung 147.093,66 → neu planen ({grund})")
+    falle = {"bestätigt": (dict(planv, auto_bestaetigt_at="2026-10-09T03:00:00Z"), kontov),
+             "geclaimt": (dict(planv, start_um_gestartet_at="2026-10-09T03:00:00Z"), kontov),
+             "gestartet": (dict(planv, started_at="2026-10-09T03:00:00Z"), kontov),
+             "ohne Startwert-Notiz": (dict(planv, notes="Auto-Planer · Topstep-Kette 1/2 (Tagesziel +4.500 $) · Balance 150.000 (TV)"), kontov),
+             "Lesung vor dem Anlegen": (planv, dict(kontov, tv_balance_at="2026-10-09T02:30:00+00:00")),
+             "Abweichung ≤ 50": (planv, dict(kontov, tv_balance=149960)),
+             "Trade 2": (dict(planv, mt5_baseline={"kette": dict(kst, nr=2)}), kontov),
+             "keine Lesung": (planv, {"id": "k-sw"})}
+    nein = [n for n, (pl, ko) in falle.items() if V(pl, ko)[0]]
+    check(not nein, f"(ii) nie bei bestätigt/geclaimt/gestartet/ohne Startwert/alter Lesung/≤ 50 $/Trade 2/ohne Lesung ({nein})")
+    geloescht = []
+    c["sb_select"] = lambda t, prm: [dict(planv, master_account_id="k-sw")] if t == "trade_plans" else [kontov] if t == "accounts" else []
+    c["sb_delete"] = lambda t, prm: geloescht.append(dict(prm)) or [{"id": prm["id"][3:]}]
+    weg = c["ap_kette_startwert_neu"]()
+    g0 = geloescht[0] if geloescht else {}
+    check(weg == ["p-sw"] and g0.get("status") == "eq.planned" and g0.get("auto_bestaetigt_at") == "is.null"
+          and g0.get("start_um_gestartet_at") == "is.null" and g0.get("started_at") == "is.null" and g0.get("orbit_gesendet_at") == "is.null",
+          f"(ii) Takt löscht genau diesen Plan, Guard im Filter (Rennen mit Bestätigen/Claim) ({weg}, {g0})")
+    c["sb_delete"] = lambda t, prm: []                  # Guard griff (inzwischen bestätigt) → nicht als gelöscht melden
+    check(c["ap_kette_startwert_neu"]() == [], "(ii) Guard greift → nichts gemeldet")
+
     print()
     if FEHLER:
         print(f"✗ {len(FEHLER)} Fehler")

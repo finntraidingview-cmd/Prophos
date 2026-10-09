@@ -15311,6 +15311,19 @@ def ap_kette_trade2(t1_kette, balance_start, balance_end, regel, kette, u_menge)
         return None, f"Ergebnis von Trade 1 unplausibel ({e1:+,.0f} $, Balance-Basis prüfen) — von Hand".replace(",", ".")
     mll = _wd_num((t1_kette or {}).get("mll"))
     angefressen = ap_kette_angefressen(t1_kette)
+    # ECHTE START-BALANCE (09.10.2026, Vorfall Ina Topstep …3822): Trade 1 war mit dem Startwert 150.000 gerechnet (Verlustgrenze 3.200),
+    # die erste echte Lesung ergab 147.093,66 — SL2 = 3.200 + E1 hätte hinter dem MLL 145.500 gelegen. Deshalb die Verlustgrenze zusätzlich
+    # aus balance_start (genaue Lesung beim Start von Trade 1): min(DLL, Start − MLL) + blow_puffer; die kleinere gilt, nie eine größere.
+    daily_b, abstand_echt, korrigiert = _wd_num((t1_kette or {}).get("daily_usd")), None, False
+    if mll is not None and daily_b:
+        abstand_echt = round(float(balance_start) - mll, 2)
+        if abstand_echt <= 0:
+            return None, f"Konto lag schon beim Start von Trade 1 auf/unter dem MLL ({float(balance_start):,.0f} ≤ {mll:,.0f}) — kein Trade 2".replace(",", ".")
+        verlust_echt = round(min(daily_b, abstand_echt) + float(kette["blow_puffer_usd"]))
+        if verlust_echt < verlust - 0.5:
+            verlust, korrigiert = float(verlust_echt), True
+            if abstand_echt < daily_b:
+                angefressen = True            # der MLL beendet den Tag — Abhaken wertet Ende am MLL als blown
     # angefressener Tag: Ende ≤ MLL + 50 ist der Blow (Master 08.10.2026, dieselbe Grenze wie ap_kette_abhaken); gesund ohne Toleranz
     if mll is not None and float(balance_end) <= mll + (AP_KETTE_MLL_TOLERANZ if angefressen else 0.0):
         return None, f"Trade 1 hat das Konto am MLL geblowt ({e1:+.0f} $, Balance {float(balance_end):,.0f}) — kein Trade 2".replace(",", ".").replace(". Balance", ", Balance")
@@ -15331,6 +15344,8 @@ def ap_kette_trade2(t1_kette, balance_start, balance_end, regel, kette, u_menge)
     if angefressen:                           # Weg B (08.10.2026): Trade 2 erbt die Einstufung des Tages fürs Abhaken
         out.update({x: (t1_kette or {}).get(x) for x in ("angefressen", "abstand_mll", "reparatur") if (t1_kette or {}).get(x) is not None},
                    angefressen=True)
+    if korrigiert:                            # Verlustgrenze aus der echten Start-Balance (09.10.2026) — Abstand von dort
+        out.update(verlust_aus_start=True, abstand_mll=abstand_echt)
     return out, None
 
 
@@ -21343,6 +21358,64 @@ def ap_kette_t1_fertig(t1):
     return (b0, b1), None
 
 
+AP_KETTE_STARTWERT_TOLERANZ = 50.0      # $ Abweichung der ersten echten Lesung vom Startwert, ab der ein Kettenplan neu gerechnet wird
+AP_KETTE_SW_FELDER = "id,name,firm,external_id,account_size,starting_balance,topstep_balance,topstep_last_check,meta_api_balance,meta_api_last_check,tv_balance,tv_balance_at"   # Felder für acc_balance_wahl
+
+
+def ap_kette_startwert_veraltet(plan, konto):
+    """REIN RECHNEND (testbar): Ist ein Ketten-Trade-1 aus dem STARTWERT gerechnet (ap_startwert_frisch, Notiz „Startwert") und weicht die
+    erste echte Lesung jetzt um mehr als AP_KETTE_STARTWERT_TOLERANZ davon ab? Nur unbestätigte, ungestartete Auto-Pläne (planned, ohne
+    auto_bestaetigt_at / start_um_gestartet_at / started_at / orbit_gesendet_at) — bestätigte oder gestartete fasst das nie an.
+    Anlass 09.10.2026 (Ina Topstep …3822): Plan 06:39 Dubai mit 150.000 gerechnet, Puls las 06:44 147.093,66 → angefressen, hätte ein
+    Reparatur-Tag sein müssen. → (True, grund) | (False, None)"""
+    p, a = plan or {}, konto or {}
+    k = (p.get("mt5_baseline") or {}).get("kette") or {}
+    if (p.get("status") != "planned" or not p.get("auto_plan") or p.get("auto_bestaetigt_at") or p.get("start_um_gestartet_at")
+            or p.get("started_at") or p.get("orbit_gesendet_at") or str(k.get("nr")) != "1" or AP_STARTWERT_QUELLE not in str(p.get("notes") or "")):
+        return False, None
+    soll = _wd_num(k.get("tagesstart_plan"))
+    bal, _ccy, quelle, stand = acc_balance_wahl(a, {}, {})
+    # nur eine Lesung NACH dem Anlegen zählt (sonst wäre sie schon im Plan) — ohne Zeitstempel kein Eingriff
+    if soll is None or bal is None or not stand or str(stand) <= str(p.get("created_at") or ""):
+        return False, None
+    if abs(float(bal) - soll) <= AP_KETTE_STARTWERT_TOLERANZ:
+        return False, None
+    de = lambda v, n: f"{v:,.{n}f}".replace(",", "X").replace(".", ",").replace("X", ".")   # noqa: E731 — nur die Zahl, das Satzkomma bleibt
+    return True, f"Kettenplan mit Startwert {de(soll, 0)} gerechnet, erste Lesung {de(float(bal), 2)} ({quelle}) — neu planen"
+
+
+def ap_kette_startwert_neu(jetzt=None):
+    """Takt (aus ap_kette_tick): löscht unbestätigte, ungestartete Ketten-Trade-1, die aus dem Startwert gerechnet sind und deren erste
+    echte Lesung abweicht (ap_kette_startwert_veraltet) — das Konto hat dann keinen Plan mehr, der Nachplan-Takt rechnet es aus der echten
+    Balance neu (z. B. Reparatur-Tag). Löschen nur mit denselben Bedingungen im Filter (Rennen mit Bestätigen/Claim). → [plan_id, …]"""
+    try:
+        plaene = sb_select("trade_plans", {
+            "select": "id,user_id,master_account_id,status,auto_plan,auto_bestaetigt_at,start_um_gestartet_at,started_at,orbit_gesendet_at,"
+                      "created_at,notes,mt5_baseline", "route": "eq.tsv2", "status": "eq.planned", "auto_plan": "is.true",
+            "auto_bestaetigt_at": "is.null", "start_um_gestartet_at": "is.null", "mt5_baseline->kette->>nr": "eq.1",
+            "notes": "ilike.*Startwert*"}) or []
+        if not plaene:
+            return []
+        ids = sorted({str(p["master_account_id"]) for p in plaene if p.get("master_account_id")})
+        konten = {str(a["id"]): a for a in (sb_select("accounts", {"select": AP_KETTE_SW_FELDER, "id": "in.(" + ",".join(ids) + ")"}) or [])} if ids else {}
+    except Exception as e:
+        print(f"[kette] ⚠️ Startwert-Prüfung nicht lesbar ({type(e).__name__}: {e})", flush=True)
+        return []
+    weg = []
+    for p in plaene:
+        ja, grund = ap_kette_startwert_veraltet(p, konten.get(str(p.get("master_account_id"))))
+        if not ja:
+            continue
+        try:
+            if sb_delete("trade_plans", {"id": f"eq.{p['id']}", "status": "eq.planned", "auto_bestaetigt_at": "is.null",
+                                         "start_um_gestartet_at": "is.null", "started_at": "is.null", "orbit_gesendet_at": "is.null"}):
+                weg.append(str(p["id"]))
+                print(f"[kette] ↻ {str(p['id'])[:8]} gelöscht: {grund}", flush=True)
+        except Exception as e:
+            print(f"[kette] ⚠️ {str(p['id'])[:8]} nicht gelöscht ({type(e).__name__}: {e})", flush=True)
+    return weg
+
+
 def ap_kette_tick(jetzt=None, rnd=None):
     """TOPSTEP-KETTE Trade 2 (08.10.2026, s. AP_KETTE_STANDARD): jede Minute aus ap_loop. Sucht heute beendete Ketten-Trade-1 (tsv2,
     review/completed, mt5_baseline.kette.nr 1) ohne Trade 2, rechnet aus der genau nachgelesenen Balance TP2/SL2 und legt Trade 2 an:
@@ -21355,6 +21428,7 @@ def ap_kette_tick(jetzt=None, rnd=None):
     d = jetzt.astimezone(tz)
     mitternacht = datetime(d.year, d.month, d.day, tzinfo=tz)
     abgehakt = ap_kette_abhaken(jetzt)
+    startwert_neu = ap_kette_startwert_neu(jetzt)   # Startwert-Pläne mit abweichender erster Lesung neu planen lassen (09.10.2026)
     t1s = [p for p in (sb_select("trade_plans", {
         "select": "id,user_id,master_account_id,master_firm,master_name,master_symbol,richtung,auto_plan,auto_bestaetigt_at,ended_at,"
                   "planned_for,status,mt5_baseline", "route": "eq.tsv2", "status": "in.(review,completed)",
