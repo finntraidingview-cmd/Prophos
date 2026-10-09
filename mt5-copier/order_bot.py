@@ -17535,7 +17535,13 @@ WIN_HOVER_ELTERN_JS = (
     "var unter=d?(d.tagName.toLowerCase()+' '+String(d.getAttribute('data-testid')||d.getAttribute('aria-label')||T(d)).slice(0,30)"
     "+' @'+Math.round(dr.left)+','+Math.round(dr.top)):'nichts';"
     "var hv=e.matches(':hover'),el=false;"
-    "if(!hv&&d&&d!==e&&d.contains(e)&&dr.height<=64&&dr.width<=600){hv=true;el=true;}"
+    # NUR INNERHALB DES EIGENEN KNOPFS (Prüfer T3 09.10.2026 zu .1442): ein kleiner Vorfahr allein war zu weit — Werbe-Kachel mit X, Konto-
+    # Zeile mit ⋮, Toast mit „Show more": :hover am BEHÄLTER hätte als Beweis für den Knopf darin gezählt, der Druck träfe den Behälter.
+    # Jetzt muss der :hover-Knoten im nächsten klickbaren Vorfahren des Blatts liegen (k = e.closest(…), d ⊆ k) — span/svg im Knopf bleibt ok;
+    # Konto-Zeilen wie augen.js kontoZeilen ([role=row]/[data-role=list-item]/[tabindex]) zählen als klickbar.
+    # [data-testid] bewusst NICHT (Prüfer T3): ein Test-Haken, TradingView hängt ihn an ganze Wrapper (Kacheln, Panels, Toast-Hüllen).
+    "var k=e.closest('button,a,[role=button],[role=tab],[role=menuitem],[role=option],[role=row],[data-role=list-item],[tabindex]');"
+    "if(!hv&&d&&d!==e&&k&&k.contains(d)&&d.contains(e)&&dr.height<=64&&dr.width<=600){hv=true;el=true;}"
     "return {hover:hv,eltern:el,unter:unter};})(e)")
 
 
