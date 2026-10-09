@@ -12097,7 +12097,7 @@
       <div id="ac-goal-section">
       <div class="modal-divider">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--violet)"><circle cx="12" cy="8" r="7"/><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/></svg>
-        Fortschritts-Ziel <span style="font-weight:400;color:var(--sub);font-size:11.5px">(Phase · optional)</span>
+        Mindesttage <span style="font-weight:400;color:var(--sub);font-size:11.5px">(Phase · optional)</span>
       </div>
       <div class="form-grid">
         <div class="field">
@@ -12108,7 +12108,7 @@
           </select>
         </div>
         <div class="field">
-          <label>Ziel (Tage)</label>
+          <label>Mindesttage</label>
           <input class="input mono" id="ac-goal-target" type="number" step="1" min="1" placeholder="5" autocomplete="off">
         </div>
         <!-- Min-Gewinn pro Tag + Schon erledigt raus (Finn 10.09.2026, "das da weg") —
@@ -12118,7 +12118,7 @@
         <div class="field" style="grid-column:1/-1">
           <label>Zählt ab (optional)</label>
           <input class="input mono" id="ac-goal-since" type="date" autocomplete="off">
-          <div style="font-size:11px;color:var(--sub);margin-top:4px">Winning Day = Tag mit positivem Tages-P&L. Trading Day = jeder Tag mit mindestens einem abgeschlossenen Trade — auch 0,01-Evertrades. Zählt automatisch aus den abgeschlossenen Trades.</div>
+          <div style="font-size:11px;color:var(--sub);margin-top:4px">Zählt automatisch: jeder Tag (Berlin), an dem auf diesem Konto ein Trade gestartet wurde — auch ohne eingetragenes P&L.</div>
         </div>
       </div>
       </div>
@@ -34483,7 +34483,7 @@
     const istFunded  = typ === 'funded' || typ === 'funded_cfd' || typ === 'winning_days'   // Winning Days (25.09.2026): bestandenes Funded-Konto, gleiche Blöcke
     // Funded CFD (29.09.2026) ist ausdrücklich CFD — Payout-Block auch dann, wenn die Firma in der Futures-Liste steht
     const istCfd = typ === 'funded_cfd'
-    if(accEls.goalSec)   accEls.goalSec.hidden   = !(istPhase && !istFutures)
+    if(accEls.goalSec)   accEls.goalSec.hidden   = !istPhase   // Mindesttage auch für Futures-Challenges/Phasen (09.10.2026, Finn: Feld „Mindesttage“, zählt automatisch)
     if(accEls.wdSec)     accEls.wdSec.hidden     = !(istFunded && istFutures && !istCfd)
     if(accEls.payoutSec) accEls.payoutSec.hidden = !((istFunded && !istFutures) || istCfd)
     if(accEls.wartetPayoutRow) accEls.wartetPayoutRow.hidden = !istCfd
@@ -38704,6 +38704,11 @@
       // Quelle für die Balance fehlt (Nachtrag 08.10.2026): nicht stumm „–", sondern zeigen, was da ist
       balHtml = `<span class="pz-bal-t">${typChipHandy}<span class="pz-rest">Balance ?</span>${notiz.ziel ? `<em>→</em>${de(notiz.ziel)}` : notiz.rest ? `<span class="pz-rest"> · Rest ${de(notiz.rest)}</span>` : ''}</span>`
     }
+    // Mindesttage in der Balance-Zelle (09.10.2026, Finn): „Tage 3/5", grün wenn erfüllt — nur bei Konten mit Ziel trading_days
+    try{
+      const tf = konto && typeof zielFortschritt === 'function' ? zielFortschritt(konto) : null
+      if(tf && tf.kind === 'trading_days') balHtml += `<span class="pz-rest pz-tage" style="display:block;${tf.done ? 'color:var(--good);font-weight:600' : ''}" title="Mindesttage: Tage mit gestartetem Trade auf diesem Konto (Berlin)">Tage ${Math.min(tf.count, tf.target)}/${tf.target}</span>`
+    }catch(_){}
     // RISIKO-BALKEN — seit 08.10.2026 ~03:30 Dubai NICHT mehr in der Zeile (Finn: „voll hässlich, sieht spielerisch aus, lieber so wie es
     // bei Trades → Geplant war"); der Helfer bleibt für den Fall, dass er an anderer Stelle gebraucht wird. Ursprung: WD-Karte, SL rot links, TP grün rechts, Punkt = Einstieg;
     // laufend (o.pl) = Live-P&L zwischen −SL und +TP. Nur die $-Beträge am Plan, keine neue Rechnung. Ohne SL: „ohne" grau, Balken grün.
@@ -42783,7 +42788,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1417'
+  const OS_TAB_BUILD = '2026-09-22.1418'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -55224,7 +55229,22 @@
       return { count, target: k.target, done: count >= k.target, kind: k.kind,
                heuteAbgehakt: !!a.goalManualLast && String(a.goalManualLast).slice(0,10) === _deTodayStr(), manual: true }
     }
-    const proTag = {}   // 'YYYY-MM-DD' (Berlin) → realisierte Tagessumme
+    // MINDESTTAGE (09.10.2026, Finn: „jeder Tag, an dem auf dem Konto ein Trade lief, zählt automatisch"): trading_days zählt jeden
+    // Berlin-Tag mit GESTARTETEM Plan (started_at) dieses Kontos als Master — auch laufend, auch ohne P&L. Tagesgrenze wie app.py
+    // _ap_plan_am_tag (.1309, zeiten.tz Europe/Berlin). Vorher: erst mit abgeschlossenem Trade + P&L, Master ODER Slave.
+    if(k.kind === 'trading_days'){
+      const tage = new Set(), heute = _deTodayStr()
+      for(const p of (tradePlans || [])){
+        if(String(p.masterAccountId) !== String(a.id) || !p.startedAt) continue
+        let tag = null
+        try{ tag = new Date(p.startedAt).toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' }) }catch(_){ continue }
+        if(!tag || (a.goalSince && tag < String(a.goalSince).slice(0,10))) continue
+        tage.add(tag)
+      }
+      const count = Math.max(0, tage.size + (Number(a.goalDoneOffset) || 0))
+      return { count, target: k.target, done: count >= k.target, kind: k.kind, heuteAbgehakt: tage.has(heute), manual: false }
+    }
+    const proTag = {}   // 'YYYY-MM-DD' (Berlin) → realisierte Tagessumme (winning_days automatisch)
     for(const p of (tradePlans || [])){
       if(p.status !== 'completed' && p.status !== 'review') continue
       const istMaster = String(p.masterAccountId) === String(a.id)
@@ -55279,6 +55299,8 @@
     const fertig = f.done ? (f.kind === 'winning_days' ? ' ✓ · Payout anfragbar' : ' ✓') : ''
     // klickbar (Accounts-Tabelle): öffnet den Account zum Bearbeiten des Stands
     const attr = klickbar ? ` data-acc-wd="${escapeHtml(String(a.id))}" title="Klicken zum Bearbeiten" style="cursor:pointer"` : ''
+    if(f.kind === 'trading_days')   // Mindesttage kompakt (09.10.2026): „Tage 3/5", grün wenn erfüllt
+      return `<span${attr}><span style="color:${farbe};font-weight:600">Tage ${stand}${f.done ? ' ✓' : ''}${!f.done && f.heuteAbgehakt ? ' · heute gehandelt' : ''}</span>${zielDotsHtml(f)}</span>`
     return `<span${attr}><span style="color:${farbe};font-weight:600">🏆 ${stand} ${zielLabel(a)}${fertig}${!f.done && f.heuteAbgehakt ? ' · heute abgehakt' : ''}</span>${zielDotsHtml(f)}</span>`
   }
 
@@ -61687,8 +61709,12 @@
     const gruppen = []
     for(const a of liste){
       const k = fKey(a)
-      if(!gruppen.length || gruppen[gruppen.length - 1].k !== k) gruppen.push({ k, g: String(a.firm || '').trim() || 'ohne Firma', l: [] })
+      if(!gruppen.length || gruppen[gruppen.length - 1].k !== k) gruppen.push({ k, g: '', l: [] })
       gruppen[gruppen.length - 1].l.push(a)
+    }
+    for(const x of gruppen){   // Überschrift = häufigste Schreibweise der Gruppe (Hinweis Prüfer T3, 09.10.2026), sonst „ohne Firma"
+      const n = {}; for(const a of x.l){ const f = String(a.firm || '').trim(); if(f) n[f] = (n[f] || 0) + 1 }
+      x.g = Object.keys(n).sort((u, v) => n[v] - n[u] || u.localeCompare(v, 'de'))[0] || 'ohne Firma'
     }
     sel.innerHTML = '<option value="">— manuell eingeben —</option>' +
       gruppen.map(x => `<optgroup label="${esc(x.g)}">${x.l.map(opt).join('')}</optgroup>`).join('')
