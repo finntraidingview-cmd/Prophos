@@ -3427,6 +3427,10 @@
   #dashboard-view .pz-bahn > i:first-child:not(:last-child){border-radius:2px 0 0 2px}
   #dashboard-view .pz-bahn > .pz-bahn-tp{border-radius:0 2px 2px 0;background:rgba(21,128,61,.42)}
   #dashboard-view .pz-z:not(.pz-z-kopf) > .pz-art{font-size:12px;color:var(--sub)}
+  /* Topstep-Kette (09.10.2026): „Trade 1" oben, Tag-Typ klein darunter — einzeilig passte „Trade 1 · Reparatur-Tag" nicht in 92 px */
+  #dashboard-view .pz-art-kette{display:flex;flex-direction:column;line-height:1.25;white-space:nowrap;min-width:0}
+  #dashboard-view .pz-art-kette b{font-weight:600;color:var(--ink-2)}
+  #dashboard-view .pz-art-kette small{font-size:11px;overflow:hidden;text-overflow:ellipsis}
   #dashboard-view .pz-gr,#dashboard-view .pz-z > .pz-tp,#dashboard-view .pz-z > .pz-sl{text-align:right}
   #dashboard-view .pz-z:not(.pz-z-kopf) > .pz-tp{font-weight:600;color:#15803d}
   #dashboard-view .pz-z:not(.pz-z-kopf) > .pz-sl{font-weight:600;color:#b91c1c}
@@ -24748,6 +24752,40 @@
     return `<span class="rsq-card-run" style="color:${ok ? 'var(--good)' : '#B45309'}" title="Topstep-Kette${um ? ' · ' + um : ''}: ${escapeHtml(g)}">⛓ ${escapeHtml(g.length > 70 ? g.slice(0, 69) + '…' : g)}</span>`
   }
   window._tpKetteChip = tpKetteChip   // Test-Haken
+  /* SCHRITT DER TOPSTEP-KETTE (09.10.2026, Finn kauft neue Topstep-Konten und will heute im Trade Plan sehen, ob alles klappt): statt
+   * „Topstep-Kette 1/2" steht in der Spalte „Schritt" „Trade 1 · Erster Tag" usw. Quelle mt5_baseline.kette: tag_typ aus app.py
+   * ap_kette_trade1 (Trade 2 erbt ihn). Pläne von vor dem Feld: Reparatur aus kette.reparatur, final aus der Notiz „Rest bis Ziel" bzw.
+   * einem Tagesziel unter 4.500, sonst normal. Tooltip: Ziel des Tages + Verlustgrenze (DLL bzw. Abstand MLL, je + 200 Puffer).
+   * An Trade 1 ein ⛓: grau „Trade 2 folgt nach Balance-Nachlesung", sonst Farbe + Text wie tpKetteChip (kette.t2_grund). → {text, tip, kette} | null */
+  const KETTE_TAG = { erster: 'Erster Tag', reparatur: 'Reparatur-Tag', final: 'Finaler Tag', normal: 'Normaler Tag' }
+  function tpKetteSchritt(p){
+    const nr = tpKetteNr(p)
+    if(!nr) return null
+    const k = p.mt5Baseline.kette || {}, de = v => Math.round(Math.abs(Number(v))).toLocaleString('de-DE')
+    const zz = Number(k.tagesziel) > 0 ? Number(k.tagesziel) : null
+    const typ = KETTE_TAG[k.tag_typ] ? k.tag_typ : k.reparatur ? 'reparatur'
+      : (/Rest bis Ziel/.test(String(p.notes || '')) || (zz != null && zz < 4499.5)) ? 'final' : 'normal'
+    const tip = []
+    if(zz != null) tip.push(typ === 'reparatur' ? `Ziel heute: +${de(zz)} $ — zurück auf die Startgröße (Reparatur, Weg B)`
+      : typ === 'final' ? `Ziel heute: Rest bis zum Phasenziel +${de(zz)} $ — Bestehen heute möglich` : `Ziel heute: +${de(zz)} $`)
+    const vg = Number(k.verlust_grenze) > 0 ? Number(k.verlust_grenze) : null, dll = Number(k.daily_usd) > 0 ? Number(k.daily_usd) : null
+    // angefressen wie app.py ap_kette_angefressen: Flag, sonst Verlustgrenze − 200 unter dem DLL (dann beendet der MLL den Tag)
+    const angefressen = k.angefressen != null ? !!k.angefressen : (vg != null && dll != null && Number(k.mll) > 0 && vg - 200 < dll - 0.5)
+    const abstand = Number(k.abstand_mll) > 0 ? Number(k.abstand_mll) : vg != null ? vg - 200 : null
+    if(vg != null) tip.push(angefressen && abstand > 0
+      ? `Verlustgrenze: −${de(vg)} $ (Abstand zum MLL ${de(abstand)} + 200${Number(k.mll) > 0 ? ` · MLL ${de(k.mll)}` : ''})`
+      : dll != null ? `Verlustgrenze: −${de(vg)} $ (DLL ${de(dll)} + 200)` : `Verlustgrenze: −${de(vg)} $`)
+    if(nr === 2 && k.e1 != null) tip.push(`Trade 1: ${Number(k.e1) >= 0 ? '+' : '−'}${de(k.e1)} $ — Trade 2 holt den Rest zum Tagesziel`)
+    let kette = ''
+    if(nr === 1){
+      const g = String(k.t2_grund || '')
+      const t = g || 'Trade 2 folgt nach Balance-Nachlesung'
+      tip.push(t)
+      kette = ` <span class="pz-kette" style="color:${!g ? 'var(--sub)' : /^Trade 2 angelegt/.test(g) ? 'var(--good)' : '#B45309'}" title="${escapeHtml(t)}">⛓</span>`
+    }
+    return { text: `Trade ${nr} · ${KETTE_TAG[typ]}`, nr, tag: KETTE_TAG[typ], tip: tip.join(' · '), kette }
+  }
+  window._tpKetteSchritt = tpKetteSchritt   // Test-Haken
   // Nachlesung ab (ms) — EINE Rechnung für Live Trades, Accounts-Balance und das Konto-Popup (26.09.2026, F3)
   const tvV2NachleseAb = (id, endeIso) => { const e = Date.parse(endeIso || '') || 0; return e ? e + tvV2NachleseMs(id) : 0 }
   /* FOLGETRADE (F5, Master 26.09.2026 nach Befund F4: „Hat ein späterer Plan desselben Kontos schon tv.balance_start, gilt der als
@@ -38687,6 +38725,11 @@
     // wo ich das anpassen kann"): nur mit o.werte (Aufrufer: noch nicht gestartet + Recht) — Kasten pzwOeffnen, Klick über tplKlick
     const pzw = o.werte ? ` data-pzw-plan="${escapeHtml(String(p.id))}" data-pzw-tp="${Number(p.masterTp) > 0 ? Number(p.masterTp) : ''}" data-pzw-sl="${Number(p.masterSl) > 0 ? Number(p.masterSl) : ''}" data-pzw-gr="${menge || ''}" data-pzw-lot="${p.route === 'mt5v2' ? '1' : ''}" data-pzw-sym="${escapeHtml(String(p.masterSymbol || '').replace(/[FGHJKMNQUVXZ]\d{1,2}$/, ''))}" data-pzw-ppp="${o.werte.ppp > 0 ? o.werte.ppp : ''}" data-pzw-start="${escapeHtml(String(p.startUm || ''))}"` : ''
     const pzwZ = art => pzw ? ` pz-w"${pzw} data-pzw="${art}" title="Klicken zum Ändern"` : '"'
+    // Topstep-Kette (09.10.2026): „Trade 1 · Reparatur-Tag" + Tooltip statt „Topstep-Kette 1/2" (tpKetteSchritt); sonst Schritt wie bisher
+    const ks = tpKetteSchritt(p)
+    const artZelle = ks
+      ? `<span class="pz-art pz-art-kette" title="${escapeHtml(ks.tip)}"><span><b>Trade ${ks.nr}</b>${ks.kette}</span><small>${escapeHtml(ks.tag)}</small></span>`   // zweizeilig: Spalte nur 92 px
+      : `<span class="pz-art" title="${notiz ? escapeHtml(planSchrittTip(notiz, Number(p.masterTp))) : ''}">${notiz ? escapeHtml(notiz.art) + (notiz.gekappt ? ' · SL gekappt' : '') : ''}</span>`
     // RADAR-OPTIK (o.stil 'radar', 08.10.2026, Finn: „im Admin die geplanten Trades etwas anpassen" — wie die Läuft-Zeilen im Radar): Konto
     // zweizeilig (Firma + Typ-Chip oben, „150k …0530" darunter), Richtung als BUY/SELL-Chip mit „3 × NQ" / „1,5 × Lot" (Mini-Popup der Größe
     // bleibt an der Menge), keine eigene Größe-Spalte. Kopf + Raster liefert planFirmenBloecke mit opt.stil 'radar'. Ohne o.stil unverändert.
@@ -38702,7 +38745,7 @@
         <span class="pz-konto pz-konto2" title="${escapeHtml(kontoTitel)}" data-ak-konto="${escapeHtml(String(p.id || ''))}"><span class="pz-k1"><b>${firmaR}</b>${typChip}</span><small class="pz-k2">${k2}</small></span>
         <span class="pz-ri">${em}<span class="pz-gr${pzwZ('gr')}>${grR}</span></span>
         <span class="pz-bal">${balHtml}</span>
-        <span class="pz-art" title="${notiz ? escapeHtml(planSchrittTip(notiz, Number(p.masterTp))) : ''}">${notiz ? escapeHtml(notiz.art) + (notiz.gekappt ? ' · SL gekappt' : '') : ''}</span>
+        ${artZelle}
         <span class="pz-tp${p.masterTp > 0 ? '' : ' is-leer'}${pzwZ('tp')}>${p.masterTp > 0 ? de(p.masterTp) + ' $' : '–'}</span>
         <span class="pz-sl${p.masterSl > 0 ? '' : ' is-leer'}${pzwZ('sl')}>${p.masterSl > 0 ? de(p.masterSl) + ' $' : '–'}</span>
         <span class="pz-akt">${o.chips || ''}${o.akt || ''}</span>
@@ -38715,7 +38758,7 @@
         <span class="pz-konto" title="${escapeHtml(kontoTitel)}" data-ak-konto="${escapeHtml(String(p.id || ''))}">${kontoKurz}${typChip}</span>
         <span class="pz-ri ${p.richtung === 'buy' ? 'is-buy' : p.richtung === 'sell' ? 'is-sell' : ''}">${p.richtung === 'buy' ? '▲ Long' : p.richtung === 'sell' ? '▼ Short' : '–'}</span>
         <span class="pz-bal">${balHtml}</span>
-        <span class="pz-art" title="${notiz ? escapeHtml(planSchrittTip(notiz, Number(p.masterTp))) : ''}">${notiz ? escapeHtml(notiz.art) + (notiz.gekappt ? ' · SL gekappt' : '') : ''}</span>
+        ${artZelle}
         <span class="pz-gr${pzwZ('gr')}>${gr}</span>
         <span class="pz-tp${p.masterTp > 0 ? '' : ' is-leer'}${pzwZ('tp')}>${p.masterTp > 0 ? de(p.masterTp) + ' $' : '–'}</span>
         <span class="pz-sl${p.masterSl > 0 ? '' : ' is-leer'}${pzwZ('sl')}>${p.masterSl > 0 ? de(p.masterSl) + ' $' : '–'}</span>
@@ -39462,6 +39505,7 @@
             ${(p.route === 'tsv2' && (p.status === 'open' || p.status === 'review') && p.mt5Baseline && p.mt5Baseline.tv && p.mt5Baseline.tv.warnung)
               ? `<span class="tc2-chip" style="background:rgba(245,158,11,.12);color:#B45309" title="${escapeHtml(String(p.mt5Baseline.tv.warnung))}">⚠ Brackets in TopstepX prüfen</span>`
               : ''}
+            ${(() => { const ks = tpKetteSchritt(p); return ks ? `<span class="tc2-chip" title="${escapeHtml(ks.tip)}">${escapeHtml(ks.text)}${ks.kette}</span>` : '' })()}
             ${(routeIstEcho(p.route) && (p.richtung === 'buy' || p.richtung === 'sell'))
               ? `<span class="tc2-chip" style="font-family:var(--mono);font-weight:700;${p.richtung === 'buy' ? 'background:rgba(18,183,106,.12);color:#0E9757' : 'background:rgba(240,68,56,.10);color:#D92D20'}" title="Gespeicherte Order-Richtung">${p.richtung === 'buy' ? 'BUY' : 'SELL'}</span>`
               : ''}
@@ -42739,7 +42783,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1416'
+  const OS_TAB_BUILD = '2026-09-22.1417'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -48065,6 +48109,7 @@
       if(x.bestaetigt) _tpl.okLokal.delete(String(x.plan_id))
       neu(x, g, p, { plan_id: String(x.plan_id), status: (x.bestaetigt || _tpl.okLokal.has(String(x.plan_id))) ? 'bestaetigt' : 'offen', start: s, aenderbar: x.aenderbar !== false,
         fest: x.fest_durch || null, richtungFest: x.richtung_fest_durch || null, sf: x.start_fehler || null, geclaimt: !!x.geclaimt,
+        kette: (x.kette && typeof x.kette === 'object') ? x.kette : null,   // Topstep-Kette (Delta geplant[], 09.10.2026) — Schritt-Spalte
         balLive: x.balance_live == null ? null : !!x.balance_live, konto_id: (g && g.konto_id) || (p && p.masterAccountId) || x.konto_id || null })   // balance_live aus dem Delta (08.10.2026)
     }
     // eigene Auto-Pläne: beendete immer (nur hier steht das Ergebnis), geplante/laufende nur ohne Delta (z. B. morgen)
@@ -49257,7 +49302,9 @@
         masterTp: t.tp != null ? t.tp : (t.tp_punkte != null && t.usd != null ? t.tp_punkte * t.usd : 0),
         masterSl: t.sl != null ? t.sl : (t.sl_punkte != null && t.usd != null ? t.sl_punkte * t.usd : 0),
         masterContracts: t.menge, masterSymbol: (echt && echt.masterSymbol) || (Number(t.usd) === 2 ? 'MNQ' : 'NQ'),
-        autoPlan: t.auto, autoBestaetigtAt: t.status === 'bestaetigt' ? ((echt && echt.autoBestaetigtAt) || 'ja') : null, kontoTyp: t.typ || (echt && echt.kontoTyp) || null })
+        autoPlan: t.auto, autoBestaetigtAt: t.status === 'bestaetigt' ? ((echt && echt.autoBestaetigtAt) || 'ja') : null, kontoTyp: t.typ || (echt && echt.kontoTyp) || null,
+        // Topstep-Kette fremder IDs (09.10.2026): kette-Block aus dem Delta, damit tpKetteSchritt „Trade 1 · …" zeigt; eigene Pläne haben ihn schon
+        ...(!(echt && echt.mt5Baseline) && t.kette ? { mt5Baseline: { kette: t.kette } } : {}) })
       jeKey.set(String(p.id), t)
       return p
     }).sort((a, b) => String(a.masterFirm).toLowerCase().localeCompare(String(b.masterFirm).toLowerCase()) || Date.parse(a.startUm) - Date.parse(b.startUm))

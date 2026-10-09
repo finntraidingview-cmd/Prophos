@@ -52,7 +52,8 @@ def main():
           and {w["menge"] for w in werte} == {2, 3},
           f"Trade 1 (DLL 3.000): TP 1.950–2.650 $, SL 1.250–1.750 $, 2–3 NQ ({[(w['tp'], w['sl'], w['menge']) for w in werte]})")
     w1 = werte[1]
-    check(w1["kette"] == {"nr": 1, "tagesziel": 4500, "verlust_grenze": 3200, "daily_usd": 3000, "mll": 145500.0, "tagesstart_plan": 150000.0}
+    check(w1["kette"] == {"nr": 1, "tagesziel": 4500, "verlust_grenze": 3200, "daily_usd": 3000, "mll": 145500.0, "tagesstart_plan": 150000.0,
+                          "tag_typ": "erster"}
           and w1["risiko"] == w1["sl"] and "Topstep-Kette 1/2" in w1["stufe"],
           f"Tag 1 frisch (150.000): Tagesziel +4.500, Verlustgrenze 3.200 (DLL + 200), MLL 145.500 ({w1['kette']})")
     w2, _ = R(KETTE, "challenge", 154500.0, {"tp": 0.5, "sl": 0.5, "menge": 0.0, "puffer": 0.5}, peak=154500.0)
@@ -103,9 +104,14 @@ def main():
           and a["ap_kette_mll"](150000, 4500, 152000, 150000) == 147500.0, "MLL: frisch 145.500, gelockt 150.000, nachgezogen 147.500")
     ALT = dict(TOPSTEP, kette={"daily_usd": 0, "t1_sl": [1950, 2650]})
     wo, _ = R(ALT, "challenge", 147000.0, {"tp": 0.5, "sl": 0.5, "menge": 0.0, "puffer": 0.5}, peak=150000.0)
-    check(wo and wo["kette"] == {"nr": 1, "tagesziel": 4500, "verlust_grenze": 4700} and 1950 <= wo["sl"] <= 2650,
+    check(wo and wo["kette"] == {"nr": 1, "tagesziel": 4500, "verlust_grenze": 4700, "tag_typ": "normal"} and 1950 <= wo["sl"] <= 2650,
           f"Kette ohne daily_usd: wie bisher (Verlustgrenze 4.700, kein angefressen) ({wo and wo['kette']})")
     w3, _ = R(KETTE, "challenge", 157500.0, {"tp": 0.9, "sl": 0.5, "menge": 0.0, "puffer": 0.0})
+    # TAG-TYP für die Spalte „Schritt" im Trade Plan (09.10.2026): erster / reparatur / final / normal — nur Anzeige
+    check([x and x["kette"].get("tag_typ") for x in (w1, wa, w2, w3, wv, wb, wn, wm)]
+          == ["erster", "reparatur", "final", "final", "normal", "normal", "normal", "normal"],
+          f"Tag-Typ: frisch erster, 147.000 Reparatur, 154.500/157.500 final (Rest ≤ 4.500), 148.750/150.000 nach Höchststand/151.500/149.900 normal "
+          f"({[x and x['kette'].get('tag_typ') for x in (w1, wa, w2, w3, wv, wb, wn, wm)]})")
     check(w3["tp"] == w3["kette"]["tagesziel"] == 1525, f"Rest kleiner als TP von Trade 1: Trade 1 holt das Ziel allein (TP {w3['tp']})")
 
     # ── 2 Trade 2 aus dem Ergebnis von Trade 1 (Finns Beispiele) ──────────────────────────────────────────────────────────────
@@ -173,7 +179,7 @@ def main():
     t1 = {"id": "00000000-0000-0000-0000-00000000k001", "user_id": U1, "master_account_id": "k-ts", "master_firm": "Topstep",
           "master_name": "TS-000000", "master_symbol": "NQZ6", "richtung": "buy", "auto_plan": True, "auto_bestaetigt_at": "2026-10-08T22:00:00Z",
           "ended_at": (mitt + timedelta(hours=9, minutes=58)).isoformat(), "planned_for": "2026-10-09", "status": "review",
-          "mt5_baseline": {"kette": k1, "tv": {"balance_start": 150000}, "final": {"balance_end": 147500, "quelle": "puls", "plattform": "tsx"}}}
+          "mt5_baseline": {"kette": dict(k1, tag_typ="normal"), "tv": {"balance_start": 150000}, "final": {"balance_end": 147500, "quelle": "puls", "plattform": "tsx"}}}
     zustand = {"t1": [t1], "t2": [], "ins": []}
     andere = []
 
@@ -208,6 +214,8 @@ def main():
     check(bool(z.get("auto_bestaetigt_at")) and z.get("auto_plan") is True and "Topstep-Kette 2/2" in z.get("notes", ""),
           "Bestätigung von Trade 1 geerbt, Notiz „Topstep-Kette 2/2“")
     check(any("Trade 2 angelegt" in g for _i, g in gruende_db), "Ergebnis an Trade 1 sichtbar (kette.t2_grund)")
+    check(z and z["mt5_baseline"]["kette"].get("tag_typ") == "normal",
+          f"Trade 2 erbt den Tag-Typ von Trade 1 ({z and z['mt5_baseline']['kette'].get('tag_typ')})")
     a["ap_kette_tick"](jetzt, random.Random(4))
     check(len(zustand["ins"]) == 1, "zweiter Takt: nie doppelt")
     # Unique-Index meldet 409 (zweiter Container war schneller) → still „schon da", kein Fehler

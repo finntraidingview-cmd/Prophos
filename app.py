@@ -15274,7 +15274,18 @@ def ap_kette_trade1(regel, kette, groesse, ziel, balance, u, peak=None):
         tp = tagesziel
         if not reparatur:
             stufe = f"{AP_KETTE_TXT} 1/2 (Rest bis Ziel +{tagesziel:,} $)".replace(",", ".")
-    k1 = {"nr": 1, "tagesziel": tagesziel, "verlust_grenze": verlust}
+    # TAG-TYP (09.10.2026, Finn kauft neue Topstep-Konten und will im Trade Plan sehen, was die Kette heute tut — Spalte „Schritt"):
+    # reparatur = Weg B zurück auf die Startgröße; final = Rest bis Phasenziel ≤ Tagesziel (Bestehen heute möglich); erster = frisches
+    # Konto (Balance = Startgröße, kein höherer Tagesschluss belegt); sonst normal. Nur Anzeige — keine Rechnung hängt daran.
+    if reparatur:
+        tag_typ = "reparatur"
+    elif rest <= float(kette["tagesziel_usd"]):
+        tag_typ = "final"
+    elif abs(float(balance) - float(groesse)) < 1 and float(peak or 0) <= float(groesse) + 1:
+        tag_typ = "erster"
+    else:
+        tag_typ = "normal"
+    k1 = {"nr": 1, "tagesziel": tagesziel, "verlust_grenze": verlust, "tag_typ": tag_typ}
     if daily and mll is not None:
         k1.update(daily_usd=round(daily), mll=mll, tagesstart_plan=round(balance, 2))
     if angefressen:
@@ -20755,6 +20766,9 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
                  # START-FEHLER (Finn 07.10.2026 15:07: „woher soll ich wissen, was ich bei The5ers machen muss?"): Grund eines roten
                  # Auto-Starts, den der PC-Tab in mt5_baseline.start_fehler schreibt — der Planer zeigt ihn auch für fremde IDs
                  start_fehler=p.get("sf") if isinstance(p.get("sf"), dict) else None, geclaimt=bool(p.get("start_um_gestartet_at")),
+                 # TOPSTEP-KETTE (09.10.2026): Block mt5_baseline.kette (nr, tag_typ, tagesziel, verlust_grenze, t2_grund …) — die Planer-
+                 # Seite beschriftet damit „Trade 1 · Reparatur-Tag" auch für fremde IDs (nur Anzeige)
+                 kette=p.get("kt") if isinstance(p.get("kt"), dict) else None,
                  balance_live=ap_balance_live(acc_balance_wahl(a, echo_bal, dup_bal)[3] if a else None,
                                               letzt_je.get(str(p.get("master_account_id") or ""))),   # 08.10.2026
                  # BODEN (08.10.2026, Balance-Balken Slave 4): Liquidations-Level aus den Firmen-Kernwerten wie im Planer
@@ -21401,6 +21415,9 @@ def ap_kette_tick(jetzt=None, rnd=None):
         start = stand["mitternacht"] + timedelta(minutes=m)
         k2 = {"nr": 2, "vor": pid, "e1": werte["e1"], "tagesziel": werte["tagesziel"], "verlust_grenze": werte["verlust_grenze"],
               "balance_start_tag": bal[0], "balance_nach_t1": bal[1]}
+        _tt = ((t1.get("mt5_baseline") or {}).get("kette") or {}).get("tag_typ")
+        if _tt:
+            k2["tag_typ"] = _tt                                          # Trade 2 erbt den Tag-Typ von Trade 1 (Anzeige, 09.10.2026)
         if werte.get("mll") is not None:
             k2.update(mll=werte["mll"], daily_usd=werte.get("daily_usd"))   # Abhaken: geblowt nur am MLL (DLL 3.000, 08.10.2026)
         for x in ("angefressen", "abstand_mll", "reparatur"):          # Weg B (08.10.2026): Ende am MLL = blown, auch unter DLL + 50
