@@ -185,7 +185,9 @@ def ensure_starter_source():
 # Kennung geladen: deren Inhalt kann sich nie aendern, ein Zwischenspeicher
 # kann also nichts Falsches liefern.
 _REPO = "finntraidingview-cmd/Prophos"
-BOT_STAND = {"sha": None, "version": None, "geholt_sha": None}   # geholt_sha: order_bot.py liegt nachweislich in diesem Stand vor
+# geholt_sha: order_bot.py liegt nachweislich in diesem Stand vor; kaputt_sha: Inhalt dieses Stands unbrauchbar (Größe/run/compile) —
+# der Inhalt zu einem sha ist unveränderlich, Wiederholen hilft dort nie (Prüfer T3 09.10.2026)
+BOT_STAND = {"sha": None, "version": None, "geholt_sha": None, "kaputt_sha": None}
 
 
 # ── CODE-QUELLE RAILWAY (07.10.2026, Repo privat — Finn: „Code-Auslieferung über Railway mit PC-Schlüssel bauen"). Zuerst
@@ -261,9 +263,16 @@ def ensure_bot_source(sha=None):
     try:
         sha = sha or repo_sha()
         data = repo_datei("mt5-copier/order_bot.py", sha)
-        if len(data) < 500 or b"def run(" not in data:
+        try:
+            if len(data) < 500 or b"def run(" not in data:
+                raise ValueError(f"nur {len(data)} Bytes bzw. ohne run()")
+            compile(data, "order_bot.py", "exec")      # kaputte Datei ersetzt nie eine laufende
+        except (ValueError, SyntaxError) as e_:
+            if sha and BOT_STAND.get("kaputt_sha") != sha:
+                print(f"[panel] order_bot.py im Stand {sha[:7]} unbrauchbar ({type(e_).__name__}: {str(e_)[:80]}) — alter Bot bleibt, "
+                      "kein neuer Versuch für diesen Stand.", flush=True)
+            BOT_STAND["kaputt_sha"] = sha
             return False
-        compile(data, "order_bot.py", "exec")      # kaputte Datei ersetzt nie eine laufende
         old = b""
         if os.path.exists(dst):
             with open(dst, "rb") as f:
@@ -4237,11 +4246,17 @@ def _version_watcher(my_version):
     Neustart vorher bekaeme den alten Stand aus dem Zwischenspeicher und
     startete im Kreis, bis der abgelaufen ist."""
     letzter = BOT_STAND.get("geholt_sha")      # nicht "sha": der Start-Abruf kann gescheitert sein (09.10.2026)
+    # neuester = jüngster gemeldeter Stand, unabhängig vom Bot-Abruf — NUR er geht an _panel_code_geaendert (Prüfer T3 09.10.2026: mit
+    # dem alten `letzter` sah der Neustart-Check das neue panel.py nie, übernahm aber die VERSION → das Update ging still verloren)
+    neuester = BOT_STAND.get("sha")
+    fehl_n = 0
     runde = 0
     while True:
         time.sleep(15)
         runde += 1
         sha = repo_sha()
+        if sha:
+            neuester = sha
         if sha and sha != letzter:
             # ERST NACH DEM ABRUF MERKEN (09.10.2026, Push e621d2b: ein Panel bekam beim Umschalten von Railway den neuen Stand über den
             # GitHub-Rückfall, der Abruf von order_bot.py kam nie in Railway an — `letzter` stand trotzdem schon auf dem neuen Stand,
@@ -4249,11 +4264,13 @@ def _version_watcher(my_version):
             # erledigt, wenn order_bot.py in genau diesem Stand vorliegt; sonst holt der nächste Takt nach — mit Zufalls-Versatz, damit
             # nach einer Umschaltung nicht alle Panels im selben Takt nachfragen.
             ensure_bot_source(sha)
-            if BOT_STAND.get("geholt_sha") == sha:
-                letzter = sha
+            if BOT_STAND.get("geholt_sha") == sha or BOT_STAND.get("kaputt_sha") == sha:
+                letzter, fehl_n = sha, 0            # kaputter Inhalt: nie wiederholen (alter Bot bleibt, Zeile steht in der Konsole)
             else:
-                print(f"[panel] order_bot.py für Stand {sha[:7]} nicht geholt — nächster Takt versucht es erneut.", flush=True)
-                time.sleep(random.uniform(2, 10))
+                fehl_n += 1                         # Netz/HTTP: nachholen, Abstand wächst (bis ~2 min), gestreut
+                print(f"[panel] order_bot.py für Stand {sha[:7]} nicht geholt ({fehl_n}. Mal) — nächster Takt versucht es erneut.",
+                      flush=True)
+                time.sleep(random.uniform(2, 10) + min(fehl_n - 1, 6) * random.uniform(12, 18))
         if runde % 2:                 # 'main' reicht alle 30 s
             continue
         try:
@@ -4275,11 +4292,11 @@ def _version_watcher(my_version):
             # Panel-Neustart — und in jedem Neustart-Fenster stand der Signal-Empfaenger
             # im Prophos-Tab auf 'copier-offline'. Finns Orbit-Start vom Mac um 03:20:53
             # fiel genau ins Fenster des Bumps von 03:17 und wurde 17 s lang nicht
-            # geclaimt: "warum ist Puls so langsam"). Der Stand `letzter` (repo_sha) ist
+            # geclaimt: "warum ist Puls so langsam"). Der Stand `neuester` (repo_sha) ist
             # der neueste Commit; ist panel.py/provision.py dort gleich dem laufenden
             # Code, bringt ein Neustart nichts — nur die VERSION-Datei nachziehen, damit
             # der Chip stimmt. order_bot.py ist ohnehin schon per Hot-Swap frisch.
-            if not _panel_code_geaendert(letzter):
+            if not _panel_code_geaendert(neuester):
                 _version_uebernehmen(remote)
                 print(f"[panel] Update {my_version} → {remote}: Panel-Code unveraendert — kein Neustart.", flush=True)
                 my_version = remote

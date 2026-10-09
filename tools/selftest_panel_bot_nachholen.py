@@ -39,14 +39,18 @@ class Stopp(Exception):
     pass
 
 
-def umgebung(ordner, dateien, shas, sleep_log, runden):
+class Exit(Exception):
+    pass
+
+
+def umgebung(ordner, dateien, shas, sleep_log, runden, version=b"2026-09-22.9999\n", panel_neu=None, log=None):
     """Namensraum mit Attrappen: repo_datei liefert je Aufruf den nächsten Eintrag aus `dateien` (Exception = Abruf scheitert)."""
     folge, sha_folge = list(dateien), list(shas)
     abrufe = []
 
     def repo_datei(pfad, sha=None, timeout=15):
         if pfad.endswith("VERSION"):
-            return b"2026-09-22.9999\n"
+            return version
         abrufe.append(sha)
         x = folge.pop(0) if folge else GUT
         if isinstance(x, Exception):
@@ -59,10 +63,22 @@ def umgebung(ordner, dateien, shas, sleep_log, runden):
             raise Stopp()
 
     zeit = type("Zeit", (), {"sleep": staticmethod(schlafen), "time": staticmethod(time.time)})
-    ns = {"os": os, "re": re, "random": random, "time": zeit, "print": lambda *a, **k: None, "HERE": ordner,
+    log = log if log is not None else {}
+    log.setdefault("geaendert", []); log.setdefault("uebernommen", []); log.setdefault("print", [])
+
+    def geaendert(sha):
+        log["geaendert"].append(sha)
+        return sha == panel_neu
+
+    def raus(code):
+        raise Exit()
+
+    os_attrappe = type("OsA", (), {"path": os.path, "replace": staticmethod(os.replace), "_exit": staticmethod(raus)})
+    ns = {"_panel_code_geaendert": geaendert, "_version_uebernehmen": lambda v: log["uebernommen"].append(v),
+          "os": os_attrappe, "re": re, "random": random, "time": zeit, "print": lambda *a, **k: log["print"].append(" ".join(map(str, a))), "HERE": ordner,
           "BOT_STAND": {"sha": None, "version": None, "geholt_sha": None}, "repo_datei": repo_datei,
           "repo_sha": lambda timeout=8: sha_folge.pop(0) if sha_folge else "b" * 40,
-          "PROV_JOB": None, "TV_ORDER_LOCK": None, "MASTER_ORDER_LOCKS": {}}
+          "PROV_JOB": None, "TV_ORDER_LOCK": __import__("threading").Lock(), "MASTER_ORDER_LOCKS": {}}
     exec(compile(CODE, "panel_ausschnitt", "exec"), ns)
     return ns, abrufe
 
@@ -118,6 +134,54 @@ with tempfile.TemporaryDirectory() as d:
     except Stopp:
         pass
     check(abrufe == ["e" * 40], "Start-Abruf gescheitert (sha gesetzt, geholt_sha leer) → erster Takt holt nach")
+
+    # (6) Prüfer T3: Abruf scheitert, VERSION neu, panel.py im NEUEN Stand anders → Neustart, VERSION nicht still übernommen
+    log = {}
+    ns, abrufe = umgebung(d, [ConnectionResetError("weg"), ConnectionResetError("weg")], ["f" * 40, "f" * 40], [], 3,
+                          version=b"2026-09-22.9999\n", panel_neu="f" * 40, log=log)
+    ns["BOT_STAND"].update(sha="a" * 40, geholt_sha="a" * 40)
+    raus = False
+    try:
+        ns["_version_watcher"]("2026-09-22.9998")
+    except Exit:
+        raus = True
+    except Stopp:
+        pass
+    check(log["geaendert"] and log["geaendert"][-1] == "f" * 40, "Neustart-Check bekommt den NEUESTEN Stand, nicht den alten `letzter`")
+    check(raus and not log["uebernommen"], "panel.py im neuen Stand anders → Neustart, VERSION nicht still übernommen")
+
+    # (7) Inhaltsfehler (zu klein) → einmal melden, kaputt_sha, nie wiederholen
+    log = {}
+    ns, abrufe = umgebung(d, [b"kaputt", b"kaputt", b"kaputt"], ["g" * 40] * 4, [], 4, log=log)
+    ns["BOT_STAND"]["geholt_sha"] = "a" * 40
+    try:
+        ns["_version_watcher"]("2026-09-22.9999")
+    except Stopp:
+        pass
+    check(abrufe == ["g" * 40], f"zu kleine Datei: genau EIN Abruf, kein Wiederholen ({len(abrufe)} Abrufe)")
+    check(ns["BOT_STAND"]["kaputt_sha"] == "g" * 40 and ns["BOT_STAND"]["geholt_sha"] == "a" * 40, "kaputt_sha gemerkt, geholt_sha unverändert")
+    check(sum("unbrauchbar" in z for z in log["print"]) == 1, "Inhaltsfehler steht genau einmal in der Konsole")
+    check(open(datei, "rb").read() != b"kaputt", "alter Bot bleibt liegen")
+
+    # (8) Syntaxfehler im Stand → ebenso nie wiederholen
+    kaputt = b"def run(:\n" + b"#" * 700
+    ns, abrufe = umgebung(d, [kaputt, kaputt], ["h" * 40] * 3, [], 3)
+    try:
+        ns["_version_watcher"]("2026-09-22.9999")
+    except Stopp:
+        pass
+    check(abrufe == ["h" * 40] and ns["BOT_STAND"]["kaputt_sha"] == "h" * 40, "compile-Fehler: ein Abruf, kaputt_sha, kein Wiederholen")
+
+    # (9) Netzfehler wiederholt → Abstand wächst
+    schlaf = []
+    ns, abrufe = umgebung(d, [OSError("weg")] * 4, ["i" * 40] * 4, schlaf, 4)
+    try:
+        ns["_version_watcher"]("2026-09-22.9999")
+    except Stopp:
+        pass
+    v = [x for x in schlaf if x != 15]
+    check(len(v) == 4 and v[0] <= 10 and v[2] >= 2 + 2 * 12 and v[3] >= 2 + 3 * 12, f"Netzfehler: Abstand wächst je Fehlschlag ({[round(x) for x in v]})")
+    check(len(abrufe) == 4, "Netzfehler: jeder Takt versucht es erneut")
 
 print("\nALLES GRÜN" if not FEHLER else f"\nFEHLER: {FEHLER}")
 raise SystemExit(1 if FEHLER else 0)
