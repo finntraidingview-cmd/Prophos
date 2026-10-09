@@ -44,6 +44,11 @@ check(g is not None and g[0].startswith("Handel am Konto gesperrt") and g[2] == 
       "Grund = Handel am Konto gesperrt, Quelle Journal")
 check(g is not None and "nicht neu starten" in g[1], "Handgriff: Konto prüfen, nicht neu starten")
 
+g2 = ob.order_grund_bestimmen(j, "", {"balance": 90002.0})
+check(g2[0] == "Handel am Konto gesperrt (Server: Trade disabled) — Kontostand 90 002.00",
+      "EINE Ursache ohne Aufzählung, mit Kontostand (Prüfer T3)")
+g3 = ob.order_grund_bestimmen(None, "", {"handel_konto": False})
+check(g3[0] == "Handel am Konto gesperrt (account_info.trade_allowed = False)", "API-Grund ohne Sammelgrund")
 check(ob.order_journal_grund(ZEILEN, "NDX100", "sell", jetzt) is None, "Sell-Zeile von 03:40 ist älter als 3 min → zählt nicht")
 check(ob.order_journal_grund(ZEILEN, "US30", "buy", jetzt) is None, "anderes Symbol → nichts")
 check(ob.order_journal_grund(ZEILEN[:2], "NDX100", "buy", jetzt) is None, "Anfrage ohne Antwort in [ ] → kein Grund (alte Meldung)")

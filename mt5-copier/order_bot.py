@@ -9527,7 +9527,7 @@ def _dialog_struktur(dlg):
 # selbst: Journal-Zeile des Terminals (logs/JJJJMMTT.log), Texte des Order-Dialogs, Konto-/Symbol-Zustand der API — der Grund steht vorn.
 ORDER_GRUND_REGELN = (
     (r"trad(e|ing) (is )?disabled|handel (ist )?(deaktiviert|gesperrt)|account (is )?disabled|konto (ist )?(deaktiviert|gesperrt)",
-     "Handel am Konto gesperrt (Server: Trade disabled) — Konto beendet (Ziel erreicht bzw. Verlustgrenze gerissen) oder abgelaufen",
+     "Handel am Konto gesperrt (Server: Trade disabled)",
      "Konto im Dashboard der Firma prüfen und abschließen bzw. archivieren — nicht neu starten"),
     (r"invalid stops|ung(ü|ue)ltige stops", "SL/TP ungültig (Server: Invalid stops)", "SL/TP-Abstand und Seite zum Kurs prüfen, dann neu starten"),
     (r"market (is )?closed|markt (ist )?geschlossen", "Markt geschlossen (Server: Market closed)", "zur Handelszeit neu starten"),
@@ -9576,19 +9576,22 @@ def order_journal_grund(zeilen, symbol, richtung, jetzt_s, max_alter_s=180):
 def order_grund_bestimmen(journal, dialog_text, api):
     """REIN RECHNEND (testbar): EIN Grund für „keine Bestätigung" — Journal (Antwort des Servers) vor Dialog-Text vor API-Zustand.
     journal = (antwort, zeile) | None, api = dict aus _order_api_zustand. -> (grund, fix, quelle) oder None"""
+    # Nur die EINE belegte Ursache, keine Aufzählung möglicher Hintergründe (Prüfer T3 09.10.2026, Finns Regel „nie A, B oder C");
+    # ist der Kontostand lesbar, steht die Zahl dabei — Finn sieht daran selbst Ziel bzw. Grenze
+    a = api if isinstance(api, dict) else {}
+    stand = f" — Kontostand {a['balance']:,.2f}".replace(",", " ") if isinstance(a.get("balance"), (int, float)) else ""
     if journal:
         g = order_grund_aus_text(journal[0])
-        return (g[0], g[1], f"Journal: [{journal[0]}]") if g else (f"Server antwortete „{journal[0]}“", "Antwort im Journal prüfen",
-                                                                 "Journal")
+        return (g[0] + stand, g[1], f"Journal: [{journal[0]}]") if g else (f"Server antwortete „{journal[0]}“" + stand,
+                                                                          "Antwort im Journal prüfen", "Journal")
     g = order_grund_aus_text(dialog_text)
     if g:
-        return g[0], g[1], "Order-Dialog"
-    a = api if isinstance(api, dict) else {}
+        return g[0] + stand, g[1], "Order-Dialog"
     if a.get("verbunden") is False:
         return "Terminal nicht mit dem Server verbunden", "Internet/Login des Terminals prüfen", "API"
     if a.get("handel_konto") is False:
-        return ("Handel am Konto gesperrt (account_info.trade_allowed = False) — Konto beendet oder nur lesend (Investor-Passwort)",
-                "Konto im Dashboard der Firma prüfen; Login mit Master-Passwort", "API")
+        return ("Handel am Konto gesperrt (account_info.trade_allowed = False)" + stand,
+                "Konto im Dashboard der Firma prüfen und abschließen bzw. archivieren — nicht neu starten", "API")
     if a.get("symbol_modus") == 0:
         return f"Symbol {a.get('symbol') or ''} für den Handel gesperrt (trade_mode DISABLED)".replace("  ", " "), "Symbol/Konto prüfen", "API"
     if a.get("symbol_modus") == 3:
@@ -9607,7 +9610,7 @@ def _order_api_zustand(path, expected, symbol):
         if ti is not None:
             out.update(verbunden=bool(ti.connected), data_path=str(ti.data_path or ""))
         if ai is not None and (not expected or int(ai.login) == int(expected)):
-            out.update(handel_konto=bool(ai.trade_allowed), marge_frei=float(ai.margin_free))
+            out.update(handel_konto=bool(ai.trade_allowed), marge_frei=float(ai.margin_free), balance=float(ai.balance))
         if si is not None:
             out["symbol_modus"] = int(si.trade_mode)
     except Exception as e:
