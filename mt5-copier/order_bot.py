@@ -18691,6 +18691,63 @@ def _cdp_esc(s, st, trail, grund):
     return True
 
 
+# SEITE NEU LADEN IM KONTO-SCHRITT (09.10.2026, Finn über Master, Fall Mike Tradeify …1443: „Balance lesen" endete mit „Konto-Liste
+# steht ohne eigenen Klick offen und bleibt es nach Esc" — nach dem eigenen Formular-Login stand das Ziel 0× in der Liste (4 Konten),
+# der zweite Blick fand die Liste aus dem ersten noch offen, Esc schloss sie nicht, also kein zweiter gleicher Befund und kein
+# konto_weg. Befund T4: Mikes Puls-Chrome hing nach langer Pause in einem Konto-Dropdown). Finns Regel für alle Lese-/Order-Wege:
+# fehlt das Ziel in einer gelesenen Liste, EINMAL die TradingView-Seite neu laden (neu gekaufte Konten erscheinen manchmal erst danach)
+# und neu lesen. Neu laden schließt auch eine hängende Liste. Liest/lädt nur — kein Klick auf Konto oder Order.
+def _cdp_seite_neu_laden(s, opts, trail, grund):
+    """TradingView-Seite im Puls-Chrome neu laden (Page.reload), warten bis sie steht, augen.js neu, Werbe-Kachel weg, dann bis ~20 s auf
+    ein lesbares aktives Konto warten (Broker verbindet nach dem Laden). -> neuer Stand (dict) | None (Neuladen nicht möglich). Wirft nie."""
+    ws = getattr(s, "ws", None)
+    try:
+        if ws is not None:
+            ws.rufe("Page.reload", {"ignoreCache": False}, timeout=8)
+        elif hasattr(s, "neu_laden"):
+            s.neu_laden()                                # nachgebaute Sitzung (Selbsttests)
+        else:
+            trail.append(f"{grund}: Seite nicht neu ladbar (keine CDP-Verbindung)")
+            return None
+    except Exception as e_:
+        trail.append(f"{grund}: Neuladen nicht möglich ({type(e_).__name__})")
+        return None
+    trail.append(f"{grund} → TradingView-Seite neu geladen")
+    _warte(2.0, 1.0)                                     # das alte Dokument meldet sonst noch 'complete'
+    try:
+        if hasattr(s, "_seite_abwarten"):
+            s._seite_abwarten(25.0)
+        if hasattr(s, "_augen_laden"):
+            s._augen_laden()
+    except Exception as e_:
+        trail.append(f"nach dem Neuladen: augen.js nicht geladen ({type(e_).__name__})")
+    _cdp_kachel_weg(s, trail)
+    st = {}
+    for _ in range(10):
+        try:
+            st = s.stand(opts) or {}
+        except Exception:
+            st = {}
+        if str(((st.get("konto") or {}) if isinstance(st.get("konto"), dict) else {}).get("aktiv") or ""):
+            break
+        _warte(1.5, 0.5)
+    return st
+
+
+def _cdp_liste_zu(s, opts):
+    """Nach dem Esc der eigenen Liste: ist sie wirklich zu? -> True | False | None (nicht lesbar). Eine Liste, die nach Esc offen bleibt,
+    hängt (09.10.2026, Mike) — ihr Inhalt zählt nie als Beleg für ein fehlendes Konto."""
+    _warte(0.5, 0.2)
+    try:
+        st = s.stand(opts) or {}
+    except Exception:
+        return None
+    ko = st.get("konto") if isinstance(st.get("konto"), dict) else None
+    if ko is None:
+        return None
+    return not ko.get("liste_offen")
+
+
 def _cdp_konto_sichern(s, ext, opts, trail):
     """Konto im Puls-Chrome sicherstellen (Panel auf → Umschalter höchstens EINMAL → genau ein Eintrag), je Schritt neu gelesen.
     -> (ok, code, msg, stand, extra). Steht das Konto nicht im Dropdown (anderer Tradovate-Login), Esc — die Liste bleibt nie offen
@@ -18714,6 +18771,7 @@ def _cdp_konto_sichern(s, ext, opts, trail):
     geklickt_umschalter = False
     wiederholt = False
     fremd_esc = False
+    neu_geladen = False
 
     def _eintr(ko_):
         return [str(x.get("text"))[:40] for x in (ko_.get("eintraege") or []) if isinstance(x, dict)][:20]
@@ -18752,6 +18810,13 @@ def _cdp_konto_sichern(s, ext, opts, trail):
             # '…0007' stand darin 0× → Login-Weg → „Log out" einer richtigen Sitzung. Eine Liste, die dieser Lauf NICHT selbst geöffnet
             # hat, ist deshalb nie ein Beleg: nichts daraus wählen, keinen Login daraus ableiten — EINMAL Esc und neu lesen.
             eintr = _eintr(ko)
+            if fremd_esc and not neu_geladen:
+                # hängende Liste (09.10.2026, Mike): Esc schließt sie nicht → EINMAL die Seite neu laden und von vorn lesen — nie aus ihr urteilen
+                neu_geladen = True
+                st2 = _cdp_seite_neu_laden(s, opts, trail, f"Konto-Liste bleibt nach Esc offen ({len(eintr)} Zeilen)")
+                if st2 is not None:
+                    st, fremd_esc, geklickt_umschalter = st2, False, False
+                    continue
             if fremd_esc:
                 return False, "konto_nicht_erreicht", (f"Konto-Liste steht ohne eigenen Klick offen und bleibt es nach Esc "
                                                        f"(aktiv '{aktiv[:40] or '-'}', Zeilen {eintr[:4]}) — nichts gewählt, kein Login."), st, \
@@ -18773,6 +18838,11 @@ def _cdp_konto_sichern(s, ext, opts, trail):
                 im_text = _cdp_ziel_im_text(s, ext) if n == 0 else None   # VOR dem Esc, solange die Liste offen ist (cdp_konto_weg)
                 _cdp_esc(s, st, trail, "Konto-Liste schließen")
                 ex = {"konto_eintraege": _eintr(ko), "konto_treffer": n}
+                if n == 0:
+                    # Beleg für konto_weg (09.10.2026): nur eine Liste, die nach Esc wirklich zugeht, ist eine frische, lebende Liste
+                    ex["liste_zu"] = _cdp_liste_zu(s, opts)
+                    if ex["liste_zu"] is not True:
+                        trail.append("Konto-Liste nach Esc noch offen bzw. nicht lesbar — kein Beleg für ein fehlendes Konto")
                 grund = ""
                 if n == 0:
                     # Beleg für „anderer Tradovate-Login" nur mit lesbarem aktivem Konto, vollständiger Liste und dem aktiven Konto
@@ -21425,6 +21495,9 @@ def cdp_konto_weg(extra, formular, ext):
         return nein
     if extra.get("ziel_im_text") is not False:
         return nein
+    # 09.10.2026 (Mike, hängende Liste): eine Liste zählt nur, wenn sie nach Esc wirklich zuging (frisch, lebend)
+    if extra.get("ein_konto") is not True and extra.get("liste_zu") is not True:
+        return nein
     fa, fz = cdp_konto_familie(cdp_kontonr(extra.get("liste_aktiv"))), cdp_konto_familie(ext)
     if not fa or fa != fz:
         return nein
@@ -21597,6 +21670,8 @@ def cdp_konto_weg_gleicher_login(extra, ext):
         return nein
     gl = extra.get("gleicher_login")
     if not isinstance(gl, dict) or extra.get("ziel_im_text") is not False or extra.get("konto_treffer_roh") != 0:
+        return nein
+    if extra.get("liste_zu") is not True:             # 09.10.2026: hängende Liste ist nie ein Beleg
         return nein
     fz = cdp_konto_familie(ext)
     if not (fz.startswith("apex:") and str(gl.get("user") or "") == fz[5:]):
@@ -22668,17 +22743,32 @@ def _cdp_konto_weg_gleicher_login(sitz, ext, opts, trail, res, erg):
     -> (ok, code, msg, stand, extra): bei zwei gleichen Befunden code 'konto_weg' (retry_ok False); findet der zweite Blick das Konto,
     läuft der Lauf normal weiter; sonst der zweite Befund als 'konto_nicht_erreicht'. erg = Ergebnis des ersten Konto-Schritts."""
     ok, code, msg, st, extra = erg
-    erst = cdp_konto_weg_gleicher_login(extra, ext)
+    # Anstoß wie im Formular-Weg: liste_zu zählt erst beim Befund nach dem Neuladen (09.10.2026)
+    erst = cdp_konto_weg_gleicher_login(dict(extra, liste_zu=True) if isinstance(extra, dict) else extra, ext)
     if ok or not erst[0]:
         return erg
     gl = extra.get("gleicher_login") or {}
     trail.append(f"[Login] Ziel {ext} fehlt im richtigen Login (Apex-User {gl.get('user')}, Liste vollständig, {erst[1]} Konten) — zweiter Blick")
-    _warte(2.5, 1.0)
+    # zweiter Blick nach Seiten-Neuladen (Finns Regel 09.10.2026) — ohne Neuladen kein konto_weg
+    if _cdp_seite_neu_laden(sitz[0], opts, trail, "[Login] vor dem zweiten Blick") is None:
+        trail.append("[Login] Seite nicht neu geladen — kein Beleg für ein fehlendes Konto")
+        return erg
     ok2, code2, msg2, st2, extra2 = _cdp_konto_sichern(sitz[0], ext, opts, trail)
     if ok2:
         return ok2, code2, msg2, st2, extra2
     zweit = cdp_konto_weg_gleicher_login(extra2, ext)
-    if not (zweit[0] and zweit[1] == erst[1]):
+    if zweit[0]:
+        # zwei frische Blicke nach dem Neuladen mit gleicher Kontenzahl (Vorprüfung T3 09.10.2026 — die Liste baut nach dem Laden auf)
+        trail.append(f"[Login] nach dem Neuladen Ziel 0× ({zweit[1]} Konten) — dritter Blick zur Bestätigung")
+        _warte(3.5, 1.5)
+        ok2, code2, msg2, st2, extra2 = _cdp_konto_sichern(sitz[0], ext, opts, trail)
+        if ok2:
+            return ok2, code2, msg2, st2, extra2
+        dritt = cdp_konto_weg_gleicher_login(extra2, ext)
+        if not (dritt[0] and dritt[1] == zweit[1]):
+            trail.append("[Login] Bestätigung nach dem Neuladen anders (Liste baute noch auf?) — kein Beleg für ein fehlendes Konto")
+            return ok2, code2, msg2, st2, extra2
+    if not zweit[0]:
         trail.append("[Login] zweiter Blick anders als der erste — kein Beleg für ein fehlendes Konto")
         return ok2, code2, msg2, st2, extra2
     n = zweit[1]
@@ -22746,13 +22836,29 @@ def _cdp_konto_mit_login(sitz, ext, opts, cmd, trail, res):
     # läuft der Lauf normal weiter; nur zwei gleiche Befunde ergeben 'konto_weg'. Danach kein weiterer Abmelde-/Login-Versuch.
     weg = (False, None, False)
     if not ok and merk.get("formular") is True and wege and wege[-1] == "login":
-        erst = cdp_konto_weg(extra, True, ext)
+        # Anstoß: Ziel fehlt (die Liste darf hier noch hängen — liste_zu zählt erst beim Befund NACH dem Neuladen, 09.10.2026)
+        erst = cdp_konto_weg(dict(extra, liste_zu=True) if isinstance(extra, dict) else extra, True, ext)
         if erst[0]:
             trail.append(f"[Login] Ziel {ext} steht nach dem eigenen Login nicht im Login ({erst[1]} Konto/Konten) — zweiter Blick")
-            _warte(2.5, 1.0)
-            ok, code, msg, st, extra = _cdp_konto_sichern(sitz[0], ext, opts, trail)
-            zweit = (False, None, False) if ok else cdp_konto_weg(extra, True, ext)
-            if zweit[0] and zweit[1:] == erst[1:]:
+            # zweiter Blick nach Seiten-Neuladen (Finns Regel 09.10.2026: neue Konten erscheinen manchmal erst danach; schließt auch eine
+            # hängende Liste) — ohne Neuladen kein konto_weg
+            if _cdp_seite_neu_laden(sitz[0], opts, trail, "[Login] vor dem zweiten Blick") is None:
+                zweit = (False, None, False)
+            else:
+                ok, code, msg, st, extra = _cdp_konto_sichern(sitz[0], ext, opts, trail)
+                zweit = (False, None, False) if ok else cdp_konto_weg(extra, True, ext)
+                # ZWEI FRISCHE BLICKE NACH DEM NEULADEN (Vorprüfung T3 09.10.2026): direkt nach Page.reload baut TradingView die Liste
+                # erst auf (Konten kommen nacheinander) — ein Blick könnte 3 von 4 Konten sehen. Blick A ohne Ziel → Pause → Blick B
+                # ohne Ziel mit GLEICHER Kontenzahl, sonst kein konto_weg. Der Befund VOR dem Neuladen (evtl. hängende Liste) zählt nicht.
+                if zweit[0]:
+                    trail.append(f"[Login] nach dem Neuladen Ziel 0× ({zweit[1]} Konto/Konten) — dritter Blick zur Bestätigung")
+                    _warte(3.5, 1.5)
+                    ok, code, msg, st, extra = _cdp_konto_sichern(sitz[0], ext, opts, trail)
+                    dritt = (False, None, False) if ok else cdp_konto_weg(extra, True, ext)
+                    if not (dritt[0] and dritt[1:] == zweit[1:]):
+                        trail.append("[Login] Bestätigung nach dem Neuladen anders (Liste baute noch auf?) — kein konto_weg")
+                        zweit = (False, None, False)
+            if zweit[0]:
                 weg = zweit
     # NACH DEM LOGIN-WECHSEL (08.10.2026, Finns Regel: „erst in Apex einloggen, dann prüfen, dann erst geblasen"): steht das Ziel im
     # jetzt richtigen Apex-Login nicht, greift dieselbe Regel wie ohne Wechsel — zweiter Blick, zwei gleiche Befunde = konto_weg

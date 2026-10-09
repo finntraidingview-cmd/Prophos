@@ -4208,10 +4208,12 @@ def test_cdp_konto_weg_gleicher_login():
     chk(G(ko([A2]), A1 + "USD", A6)[1] == f"aktives Konto {A1} steht nicht in der Liste" and not G(ko([A1]), B1 + "USD", A6)[0]
         and not G(ko([T1]), T1 + "USD", "TDFYSL150300000001")[0] and G(ko([A1]), "Konto wählen", A6)[1].startswith("aktives Konto nicht lesbar"),
         "aktives Konto fehlt / anderer Apex-User / Tradeify / unlesbar → nie")
-    gl = {"konto_treffer": None, "konto_treffer_roh": 0, "gleicher_login": {"user": "123456", "konten": 2}, "ziel_im_text": False}
+    gl = {"konto_treffer": None, "konto_treffer_roh": 0, "gleicher_login": {"user": "123456", "konten": 2}, "ziel_im_text": False, "liste_zu": True}
     chk(K(gl, A6) == (True, 2) and K(dict(gl, ziel_im_text=True), A6) == (False, None) and K(dict(gl, ziel_im_text=None), A6) == (False, None)
         and K(dict(gl, konto_treffer_roh=None), A6) == (False, None) and K(gl, B1) == (False, None) and K({k: v for k, v in gl.items() if k != "gleicher_login"}, A6) == (False, None)
         and K(dict(gl, gleicher_login={"user": "123456", "konten": 0}), A6) == (False, None) and K(None, A6) == (False, None), "Befund nur mit Beleg, Ziel 0×, Ziel nicht im Text, gleicher User")
+    chk(K(dict(gl, liste_zu=False), A6) == (False, None) and K(dict(gl, liste_zu=None), A6) == (False, None),
+        "Liste nach Esc offen/nicht lesbar (hängend, 09.10.2026) → nie")
 
     # Konto-Schritt mit Attrappe (Liste vollständig, Ziel fehlt, gleicher Apex-User) → extra.gleicher_login, kein Login-Beleg
     MAX = {"leiste": [56, 0, 1194, 38], "unter_leiste": 735, "max_knopf": {"rect": [1212, 0, 38, 38], "aria": "Restore panel"}}
@@ -4243,7 +4245,8 @@ def test_cdp_konto_weg_gleicher_login():
             if n == "Konto-Umschalter":
                 self.offen = True
             return True
-    alt = {n: getattr(ob, n) for n in ("_warte", "_cdp_konto_sichern", "_cdp_tradovate_verbinden", "_cdp_login_sichern", "_cdp_sitzung_zurueck")}
+    alt = {n: getattr(ob, n) for n in ("_warte", "_cdp_konto_sichern", "_cdp_tradovate_verbinden", "_cdp_login_sichern", "_cdp_sitzung_zurueck",
+                                       "_cdp_seite_neu_laden")}
     ob._warte = lambda a_, b_: None
     try:
         s1 = _S([A1, A2])
@@ -4254,8 +4257,9 @@ def test_cdp_konto_weg_gleicher_login():
         def kn(extra, msg="Ziel fehlt"):
             return (False, "konto_nicht_erreicht", msg, {}, dict(extra))
 
-        def lauf(folge, wie="login"):
+        def lauf(folge, wie="login", neu_ok=True):
             n = {"k": 0, "v": 0}
+            ob._cdp_seite_neu_laden = (lambda s_, o_, t_, g_: {"konto": {}}) if neu_ok else (lambda s_, o_, t_, g_: None)
 
             def _ks(s, ext, opts, trail):
                 n["k"] += 1
@@ -4275,6 +4279,10 @@ def test_cdp_konto_weg_gleicher_login():
         c, res_c, tr_c, n_c = lauf([kn(gl), kn(dict(gl, gleicher_login={"user": "123456", "konten": 3}))])   # anders → alte Meldung
         d, res_d, tr_d, n_d = lauf([kn(fremd), kn(gl), kn(gl)])                        # Tradeify aktiv → Login-Wechsel → dann konto_weg
         e, res_e, tr_e, n_e = lauf([kn(dict(gl, ziel_im_text=True)), kn(gl)])          # Ziel im Text → nie, kein zweiter Blick
+        f, res_f, tr_f, n_f = lauf([kn(dict(gl, liste_zu=False)), kn(gl)])             # 09.10.2026: hängende Liste stößt Neuladen an → frisch → konto_weg
+        g, res_g, tr_g, n_g = lauf([kn(gl), kn(dict(gl, liste_zu=False))])             # nach dem Neuladen hängt die Liste → nie
+        h, res_h, tr_h, n_h = lauf([kn(gl), kn(gl)], neu_ok=False)                     # Seite nicht neu ladbar → nie, kein zweiter Blick
+        m, res_m, tr_m, n_m = lauf([kn(gl), kn(gl), kn(dict(gl, gleicher_login={"user": "123456", "konten": 3}))])   # Liste baut auf → nie
     finally:
         for n_, f_ in alt.items():
             setattr(ob, n_, f_)
@@ -4286,13 +4294,19 @@ def test_cdp_konto_weg_gleicher_login():
         f"abgeschnittene Liste: kein Beleg, Grund in der Meldung ({r2[2]})")
     chk(a[1] == "konto_weg" and a[4].get("retry_ok") is False and a[4].get("konten_im_login") == 2 and a[4].get("login_beleg") == "gleicher_apex_user"
         and "stehen 2 Konten" in a[2] and "vermutlich geblowt" in a[2] and "Konto …0006 bei" in a[2] and A6 not in a[2]
-        and n_a == {"k": 2, "v": 0} and res_a["login"].get("code") == "konto_weg"
+        and n_a == {"k": 3, "v": 0} and res_a["login"].get("code") == "konto_weg"
         and any("Login-Beleg gleicher Apex-User 123456, Liste 2× vollständig gelesen (2 Konten), Ziel 0×" in x for x in tr_a),
         f"richtiger Login, zweimal gleich → konto_weg ohne Login-Wechsel, Beweis in der Spur ({a[1]}, {a[2]}, {n_a})")
     chk(b[0] is True and n_b == {"k": 2, "v": 0}, f"zweiter Blick findet das Konto → normal weiter ({b[:3]}, {n_b})")
-    chk(c[1] == "konto_nicht_erreicht" and "retry_ok" not in c[4] and n_c == {"k": 2, "v": 0} and any("anders als der erste" in x for x in tr_c),
-        f"zweiter Blick anders → kein konto_weg ({c[1]}, {n_c})")
-    chk(d[1] == "konto_weg" and n_d == {"k": 3, "v": 1} and d[4].get("konten_im_login") == 2,
+    chk(c[1] == "konto_weg" and c[4].get("konten_im_login") == 3 and n_c == {"k": 3, "v": 0},
+        f"Befund nach dem Neuladen entscheidet (3 Konten), Zahl davor zählt nicht ({c[1]}, {n_c})")
+    chk(f[1] == "konto_weg" and n_f == {"k": 3, "v": 0}, f"hängende Liste stößt Neuladen an, frische Liste danach → konto_weg ({f[1]}, {n_f})")
+    chk(g[1] == "konto_nicht_erreicht" and "retry_ok" not in g[4] and any("anders als der erste" in x or "kein Beleg" in x for x in tr_g),
+        f"Liste nach dem Neuladen hängt → nie konto_weg ({g[1]})")
+    chk(h[1] == "konto_nicht_erreicht" and n_h == {"k": 1, "v": 0}, f"Seite nicht neu ladbar → nie konto_weg, kein zweiter Blick ({h[1]}, {n_h})")
+    chk(m[1] == "konto_nicht_erreicht" and "retry_ok" not in m[4] and any("Bestätigung nach dem Neuladen anders" in x for x in tr_m),
+        f"nach Neuladen 2 Konten, Bestätigung 3 (Liste baut auf) → nie konto_weg ({m[1]})")
+    chk(d[1] == "konto_weg" and n_d == {"k": 4, "v": 1} and d[4].get("konten_im_login") == 2,
         f"fremder Login zuerst → Login-Wechsel, dann richtiger Login zweimal ohne Ziel → konto_weg ({d[1]}, {n_d}, {d[2]})")
     chk(e[1] == "konto_nicht_erreicht" and n_e == {"k": 1, "v": 0}, f"Ziel im sichtbaren Text → nie, kein zweiter Blick ({e[1]}, {n_e})")
     # LISTE SCROLLEN (08.10.2026, Auftrag Master): Abschnitte zusammenführen (Überlappung), Scroll-Urteil, Konto-Schritt mit scrollender Liste
@@ -4378,8 +4392,11 @@ def test_cdp_konto_weg():
     FN1, FN2, FN3, TD1 = "FNFTCHMUSTERMANNMAX10001", "FNFTCHMUSTERMANNMAX20002", "FNFTCHMUSTERMANNMAX3003", "TDFYSL150300000000"
     W, S = ob.cdp_konto_weg, ob.cdp_ziel_schluessel
     ein = {"konto_treffer": 0, "liste_aktiv": FN1 + "USD", "ein_konto": True, "ziel_im_text": False}
-    lst = {"konto_treffer": 0, "liste_aktiv": FN1 + "USD", "konto_eintraege": [FN1 + "USD", FN3 + "USD"], "ziel_im_text": False}
+    lst = {"konto_treffer": 0, "liste_aktiv": FN1 + "USD", "konto_eintraege": [FN1 + "USD", FN3 + "USD"], "ziel_im_text": False, "liste_zu": True}
     chk(W(ein, True, FN2) == (True, 1, True) and W(lst, True, FN2) == (True, 2, False), "Einzelkonto und vollständige Liste zählen")
+    # 09.10.2026 (Mike, hängende Liste): eine Liste zählt nur, wenn sie nach Esc wirklich zuging
+    chk(not W(dict(lst, liste_zu=False), True, FN2)[0] and not W(dict(lst, liste_zu=None), True, FN2)[0]
+        and not W({k: v for k, v in lst.items() if k != "liste_zu"}, True, FN2)[0], "Liste nach Esc offen/nicht lesbar → nie")
     chk(not W(ein, False, FN2)[0] and not W(ein, None, FN2)[0] and not W(ein, 1, FN2)[0], "ohne eigenen Formular-Login nie")
     chk(not W(dict(ein, ziel_im_text=True), True, FN2)[0] and not W(dict(ein, ziel_im_text=None), True, FN2)[0]
         and not W({k: v for k, v in ein.items() if k != "ziel_im_text"}, True, FN2)[0], "Ziel im sichtbaren Text oder nicht prüfbar → nie")
@@ -4439,7 +4456,8 @@ def test_cdp_konto_weg():
                 z = n.split(" ", 1)[1]
                 self.zeilen, self.offen = [z] + [x for x in self.zeilen if x != z], False
             return True
-    alt = {n: getattr(ob, n) for n in ("_warte", "_cdp_konto_sichern", "_cdp_tradovate_verbinden", "_cdp_login_sichern", "_cdp_sitzung_zurueck")}
+    alt = {n: getattr(ob, n) for n in ("_warte", "_cdp_konto_sichern", "_cdp_tradovate_verbinden", "_cdp_login_sichern", "_cdp_sitzung_zurueck",
+                                       "_cdp_seite_neu_laden")}
     ob._warte = lambda a_, b_: None
     try:
         s1 = _S([FN1, FN3])
@@ -4455,8 +4473,9 @@ def test_cdp_konto_weg():
         def kn(extra, msg="Ziel fehlt"):
             return (False, "konto_nicht_erreicht", msg, {}, dict(extra))
 
-        def lauf(folge, formular=True, wie="login"):
+        def lauf(folge, formular=True, wie="login", neu_ok=True):
             n = {"k": 0, "v": 0}
+            ob._cdp_seite_neu_laden = (lambda s_, o_, t_, g_: n.__setitem__("r", n.get("r", 0) + 1) or {"konto": {}}) if neu_ok else (lambda s_, o_, t_, g_: None)
 
             def _ks(s, ext, opts, trail):
                 n["k"] += 1
@@ -4480,6 +4499,13 @@ def test_cdp_konto_weg():
         f, res_f, tr_f, n_f = lauf([kn(ein), kn(dict(ein, ziel_im_text=True)), kn(dict(ein, ziel_im_text=True))])
         g, res_g, tr_g, n_g = lauf([kn(ein), kn(dict(ein, liste_aktiv=TD1 + "USD")), kn(dict(ein, liste_aktiv=TD1 + "USD"))])
         h, res_h, tr_h, n_h = lauf([kn(ein), kn(ein), kn(ein), kn(ein)], wie="selbst")
+        # 09.10.2026: erster Befund aus einer hängenden Liste stößt das Neuladen an; entscheidend ist der Befund danach
+        i_, res_i, tr_i, n_i = lauf([kn(ein), kn(dict(lst, liste_zu=False)), kn(lst)])
+        j_, res_j, tr_j, n_j = lauf([kn(ein), kn(lst), kn(dict(lst, liste_zu=False))])
+        k_, res_k, tr_k, n_k = lauf([kn(ein), kn(lst), kn(lst)], neu_ok=False)
+        # Vorprüfung T3: nach dem Neuladen baut die Liste auf — zwei frische Blicke mit gleicher Zahl, sonst nie
+        m_, res_m, tr_m, n_m = lauf([kn(ein), kn(ein), kn(lst), (True, "", "", {"x": 1}, {"konto_aktiv": FN2 + "USD"})])
+        o_, res_o, tr_o, n_o = lauf([kn(ein), kn(ein), kn(lst), kn(dict(lst, konto_eintraege=[FN1, FN3, TD1]))])
     finally:
         for n_, f_ in alt.items():
             setattr(ob, n_, f_)
@@ -4493,23 +4519,30 @@ def test_cdp_konto_weg():
     chk(a[1] == "konto_weg" and a[4].get("retry_ok") is False and a[4].get("konten_im_login") == 1 and a[4].get("einzelkonto") is True
         and "nicht mehr vorhanden" in a[2] and "steht 1 Konto" in a[2] and "vermutlich geblowt" in a[2] and "Gehört der Username" not in a[2]
         and FN2 not in a[2] and "Konto …0002 bei" in a[2]
-        and res_a["login"].get("code") == "konto_weg" and res_a["login"].get("ok") is False and n_a == {"k": 3, "v": 1}
+        and res_a["login"].get("code") == "konto_weg" and res_a["login"].get("ok") is False and n_a == {"k": 4, "v": 1, "r": 1}
         and any("Konto weg" in x for x in tr_a), f"Einzelkonto nach eigenem Login, zweimal gleich → konto_weg, EIN Login ({a[1]}, {a[2]}, {n_a})")
-    chk(b[1] == "konto_weg" and b[4].get("konten_im_login") == 3 and b[4].get("einzelkonto") is False and "stehen 3 Konten" in b[2] and n_b == {"k": 3, "v": 1},
+    chk(b[1] == "konto_weg" and b[4].get("konten_im_login") == 3 and b[4].get("einzelkonto") is False and "stehen 3 Konten" in b[2] and n_b == {"k": 4, "v": 1, "r": 1},
         f"vollständige Liste ohne Ziel → konto_weg mit Anzahl ({b[1]}, {b[2]})")
     chk(c[1] == "konto_nicht_erreicht" and "auch nach dem Tradovate-Login" in c[2] and "retry_ok" not in c[4] and n_c == {"k": 2, "v": 1},
         f"ohne Formular-Login (Tradovate war noch angemeldet) → alte Meldung, kein zweiter Blick ({c[1]}, {n_c})")
-    chk(d[0] is True and d[1] == "" and res_d["login"].get("ok") is True and n_d == {"k": 3, "v": 1}, f"zweiter Blick findet das Konto → Lauf geht normal weiter ({d[:3]})")
-    chk(e[1] == "konto_nicht_erreicht" and "auch nach dem Tradovate-Login" in e[2] and "retry_ok" not in e[4], f"zweiter Blick anders als der erste → alte Meldung ({e[1]}, {e[2]})")
+    chk(d[0] is True and d[1] == "" and res_d["login"].get("ok") is True and n_d == {"k": 3, "v": 1, "r": 1}, f"zweiter Blick (nach Neuladen) findet das Konto → Lauf geht normal weiter ({d[:3]})")
+    chk(e[1] == "konto_weg" and e[4].get("konten_im_login") == 2 and "stehen 2 Konten" in e[2],
+        f"Befund nach dem Neuladen entscheidet (frische Liste, 2 Konten), Kontenzahl davor zählt nicht ({e[1]}, {e[2]})")
+    chk(i_[1] == "konto_weg" and n_i.get("r") == 1, f"erster Befund aus hängender Liste stößt Neuladen an, frische Liste danach → konto_weg ({i_[1]}, {n_i})")
+    chk(j_[1] == "konto_nicht_erreicht" and "retry_ok" not in j_[4], f"Liste nach dem Neuladen geht mit Esc nicht zu → nie konto_weg ({j_[1]})")
+    chk(k_[1] == "konto_nicht_erreicht" and "retry_ok" not in k_[4] and n_k["k"] == 2, f"Seite nicht neu ladbar → nie konto_weg, kein zweiter Blick ({k_[1]}, {n_k})")
+    chk(m_[0] is True and n_m["k"] == 4, f"nach Neuladen 2 Konten ohne Ziel, Bestätigung findet das Ziel → normal weiter, nie konto_weg ({m_[:3]}, {n_m})")
+    chk(o_[1] == "konto_nicht_erreicht" and "retry_ok" not in o_[4] and any("Bestätigung nach dem Neuladen anders" in x for x in tr_o),
+        f"nach Neuladen 2 Konten, dann 3 (Liste baut auf) → nie konto_weg ({o_[1]})")
     chk(f[1] == "konto_nicht_erreicht" and n_f == {"k": 2, "v": 1} and g[1] == "konto_nicht_erreicht" and "Gehört der Username" in g[2] and n_g == {"k": 2, "v": 1},
         "Ziel im Text sichtbar bzw. Login einer anderen Firma → alte Meldung, kein zweiter Blick")
     chk(h[1] == "konto_nicht_erreicht" and "gemerkte Tradovate-Sitzung" in h[2] and "retry_ok" not in h[4], f"gemerkte Sitzung → nie konto_weg ({h[2]})")
     q_tv, q_km, q_ks = _i.getsource(ob._cdp_tradovate_verbinden), _i.getsource(ob._cdp_konto_mit_login), _i.getsource(ob._cdp_konto_sichern)
     chk(q_tv.count('merk["formular"] = True') == 1 and q_tv.index("_cdp_anmelden(") < q_tv.index('merk["formular"] = True')
         and "if not code and isinstance(merk, dict):" in q_tv, "Formular-Beweis nur nach _cdp_anmelden ohne Fehler")
-    chk(q_km.index('code = "konto_weg"') > q_km.index("zweit[1:] == erst[1:]") and 'wege[-1] == "login"' in q_km
+    chk(q_km.index('code = "konto_weg"') > q_km.index("_cdp_seite_neu_laden(sitz[0]") and 'wege[-1] == "login"' in q_km
         and q_km.count("_cdp_tradovate_verbinden(") == 1 and q_ks.index("_cdp_ziel_im_text(s, ext) if n == 0") < q_ks.index('"Konto-Liste schließen"'),
-        "konto_weg nur nach zwei gleichen Befunden; Probe vor dem Esc")
+        "konto_weg nur nach Seiten-Neuladen und frischem Befund; Probe vor dem Esc")
     for m in (ob.modus_tvlesen_cdp, ob.modus_tvkette_cdp, ob.modus_tvclose_cdp):
         chk("**cdp_konto_ergebnis_extra(extra, st)" in _i.getsource(m) and 'k != "konto_aktiv"' not in _i.getsource(m), f"{m.__name__}: Code, retry_ok, Zähler und Konto-Befund reisen ins Ergebnis")
     # KONTO-BEFUND INS ERGEBNIS (08.10.2026): gekürzt, konto_stand/konto_aktiv raus, login_aktiv/liste_voll_grund/gescrollt dabei

@@ -3721,6 +3721,56 @@ def push_send():
     return jsonify({"ok": True, "zugestellt": ok_n, "geraete": n})
 
 
+# KONTO WEG → PUSH AN INHABER + ADMINS (09.10.2026, Finn über Master, Fall Mike Tradeify …1443): der PC-Tab des Inhabers hat das Konto nach
+# einem Bot-Befund 'konto_weg' (Seiten-Neuladen + frische Liste ohne Ziel) als geblowt archiviert (kontoWegFolge) und meldet es hier.
+# Der Text entsteht aus der DB (Konto des Aufrufers), nie aus dem Request — der Kanal kann niemandem etwas Fremdes schreiben.
+# Je Konto höchstens einmal in KONTO_WEG_PUSH_SPERRE_S (mehrere Tabs/Wege melden dasselbe).
+KONTO_WEG_PUSH_SPERRE_S = 3600
+_konto_weg_push = {}     # account_id → epoch der letzten Meldung
+
+
+@app.route("/konto-weg/melden", methods=["POST", "OPTIONS"])
+def konto_weg_melden():
+    if request.method == "OPTIONS":
+        return "", 200
+    uid = push_uid(request)
+    if not uid:
+        return jsonify({"ok": False, "error": "Nicht angemeldet"}), 401
+    d = request.get_json(silent=True) or {}
+    aid = str(d.get("account_id") or "").strip()
+    if not re.fullmatch(r"[0-9a-fA-F-]{36}", aid):
+        return jsonify({"ok": False, "error": "account_id fehlt"}), 400
+    try:
+        acc = (sb_select("accounts", {"select": "id,user_id,name,firm,external_id", "id": f"eq.{aid}"}) or [None])[0]
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 502
+    if not acc or str(acc.get("user_id")) != uid:
+        return jsonify({"ok": False, "error": "nicht dein Konto"}), 403
+    jetzt = time.time()
+    if jetzt - _konto_weg_push.get(aid, 0) < KONTO_WEG_PUSH_SPERRE_S:
+        return jsonify({"ok": True, "gesperrt": True})
+    _konto_weg_push[aid] = jetzt
+    e4 = re.sub(r"[^A-Za-z0-9]", "", str(acc.get("external_id") or ""))[-4:]
+    try:
+        namen, _aus = _ap_namen()
+    except Exception:
+        namen = {}
+    wer = namen.get(uid, "")
+    n = int(d.get("laufende") or 0) if str(d.get("laufende") or "0").isdigit() else 0
+    text = (f"{acc.get('firm') or 'Konto'}{' …' + e4 if e4 else ''}{' · ' + wer if wer else ''}: nicht mehr in der TradingView-Kontoliste → "
+            + ("als geblowt archiviert" if d.get("archiviert") else "war schon archiviert")
+            + (f" · {n} laufende{'r Trade' if n == 1 else ' Trades'} unter „Überprüfen“" if n else ""))
+    zu = 0
+    for ziel in {uid} | (_zw_admin_uids() or set()):
+        try:
+            a_, _b = push_an_user(ziel, "🗄 Konto weg", text, "https://prophos.pages.dev/prophos#accounts", "konto-weg-" + aid[:8])
+            zu += a_
+        except Exception as e:
+            print(f"[konto-weg] ⚠️ Push {ziel[:8]}: {type(e).__name__}: {e}", flush=True)
+    print(f"[konto-weg] 🗄 {text} (Quelle {str(d.get('quelle') or '-')[:12]}, {zu} Geräte)", flush=True)
+    return jsonify({"ok": True, "zugestellt": zu})
+
+
 @app.route("/sw.js", methods=["GET"])
 def push_service_worker():
     """Service Worker fuer die LOKALEN PCs durchreichen.

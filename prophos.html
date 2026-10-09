@@ -22991,6 +22991,11 @@
       }
       // Bot-Zeitspur (F20, Backend B13 schlüsselt die Lesung zeitlich auf): immer mit ins Ergebnis, bei fertig UND fehler
       const trail = String((r && r.trail) || '').slice(0, 2000)
+      // KONTO WEG BEIM BALANCE-LESEN (09.10.2026, Fall Mike …1443): Bot belegt nach Seiten-Neuladen, dass das Konto nicht mehr in der Liste steht
+      if(r && !r.ok && tvV2KontoWegAntwort(r)){
+        await kontoWegFolge(acc.id, r, 'balance')
+        return { ok: false, konto_weg: true, trail, msg: 'Konto nicht mehr in der TradingView-Kontoliste — als geblowt archiviert. ' + String(r.msg || '').slice(0, 200) }
+      }
       const b = tvBalanceAus(r && r.summary)
       if(b.balance == null) return { ok: false, trail, msg: (r && (r.msg || r.code)) ? String(r.msg || r.code).slice(0, 200) : 'keine Account Balance im Panel' }
       if(r.konto_aktiv && !String(r.konto_aktiv).includes(konto)) return { ok: false, trail, msg: `Puls stand auf einem anderen Konto (${String(r.konto_aktiv).slice(0, 40)})` }
@@ -25153,6 +25158,7 @@
       if(!erg.ok){
         if(kontoWeg){
           if(typeof atToast === 'function') atToast(`${name}: Konto bei Tradovate nicht mehr vorhanden — vermutlich geblowt. Der Trade steht unter „Überprüfen".`, 'end')
+          kontoWegFolge(p0.masterAccountId, r, 'endlesung')   // 09.10.2026: Konto als geblowt archivieren
           try{ renderTradePlans() }catch(_){}
           return { ok: false, konto_weg: true, msg: 'Konto weg · vermutlich geblowt — der Trade steht unter „Überprüfen"' }
         }
@@ -43114,7 +43120,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1439'
+  const OS_TAB_BUILD = '2026-09-22.1440'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -43335,6 +43341,50 @@
       return true
     }catch(e){ console.warn('[konto-weg] Status→review', (e && e.message) || e); return false }
   }
+  /* KONTO WEG → ALS GEBLOWT ARCHIVIEREN (09.10.2026, Finn über Master, Fall Mike Tradeify …1443: „Das Konto gibt es nicht mehr = geblowt").
+   * Der Bot meldet code 'konto_weg' NUR nach Seiten-Neuladen und frisch selbst geöffneter, normal schließbarer Liste im richtigen Login
+   * (order_bot _cdp_konto_mit_login — nie bei Login-Fehler, leerer/unvollständiger/hängender Liste oder fremdem Login). Folge, je Konto
+   * einmal, nur für eigene Konten (dieser Tab ist der PC-Tab des Inhabers — archiviert wird in seinem Profil):
+   *   1) archiveAccount(id, 'blown') — vorhandener Weg: Duplikum-/Echo-Löschauftrag, geplante Trades weg (archivPlaeneEntfernen)
+   *   2) laufende Pläne des Kontos → „Überprüfen" mit final.konto_weg (zeigt „Konto nicht mehr in der Liste — liquidiert?", .1439)
+   *   3) Toast hier + Push an Inhaber und Admins (POST /konto-weg/melden, Backend prüft den Besitz)
+   * quelle: 'balance' | 'endlesung' | 'start'. Wirft nie. */
+  const _kontoWegErledigt = new Set()
+  async function kontoWegFolge(accountId, r, quelle){
+    const id = String(accountId || ''); if(!id || _kontoWegErledigt.has(id)) return false
+    const acc = (accounts || []).find(a => String(a.id) === id); if(!acc) return false
+    _kontoWegErledigt.add(id)
+    const e4 = String(acc.externalId || '').replace(/[^A-Za-z0-9]/g, '').slice(-4)
+    const name = `${acc.firm || 'Konto'}${e4 ? ' …' + e4 : ''}`
+    let archiviert = false
+    try{
+      if(!(typeof isAccountArchived === 'function' && isAccountArchived(id))){ archiveAccount(id, 'blown'); archiviert = true }
+    }catch(e){ console.warn('[konto-weg] archivieren', (e && e.message) || e) }
+    let n = 0
+    const nowIso = new Date().toISOString()
+    for(const p of (tradePlans || []).filter(x => x && String(x.masterAccountId) === id && x.status === 'open')){
+      try{
+        const { data, error } = await supabase.from('trade_plans').update({ status: 'review', ended_at: nowIso }).eq('id', p.id).eq('status', 'open').select('*')
+        if(error) throw error
+        const row = Array.isArray(data) ? data[0] : data; if(!row || !row.id) continue
+        const i = tradePlans.findIndex(x => String(x.id) === String(p.id)); if(i >= 0) tradePlans[i] = rowToPlan(row)
+        await baselinePatchIn(p.id, 'final', { at: nowIso, grund: 'konto_weg', konto_weg: true, konto_weg_at: nowIso, konto_weg_vermutet: true, puls_aufgegeben: true,
+          puls_at: nowIso, puls_fehler: 'konto_weg: ' + String((r && (r.msg || r.error)) || '').slice(0, 300), konto_weg_quelle: quelle }, 'review')
+        n++
+      }catch(e){ console.warn('[konto-weg] laufender Plan → review', p.id, (e && e.message) || e) }
+    }
+    try{ renderTradePlans() }catch(_){}
+    try{ renderAccounts() }catch(_){}
+    const t = `${name} nicht mehr in der TradingView-Kontoliste → ${archiviert ? 'als geblowt archiviert' : 'war schon archiviert'}${n ? ` · ${n} laufende${n === 1 ? 'r Trade' : ' Trades'} unter „Überprüfen"` : ''}`
+    if(typeof atToast === 'function') atToast('🗄 ' + t, 'end')
+    try{
+      const tok = typeof _pushTok === 'function' ? await _pushTok() : ''
+      if(tok) await fetch(`${WATCHER_HOME}/konto-weg/melden`, { method: 'POST', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ account_id: id, quelle, archiviert, laufende: n }) })
+    }catch(e){ console.warn('[konto-weg] Push', (e && e.message) || e) }
+    return true
+  }
+  window._kontoWegFolge = kontoWegFolge   // Test-Haken (Stub)
   /* FIRMEN-ABSTAND VOR JEDEM START (08.10.2026, Slave-Terminal 3 — Finn 05:00 Dubai: „5-Minuten-Regel gleiche Prop-Firm — gefixt?
    * Falls nicht, kümmer dich um alles!"). Der DB-Riegel am Claim (sql/2026-10-08_firmen_abstand_riegel.sql) greift nur beim Claim
    * NULL → gesetzt; „Neu starten" (Claim bleibt gesetzt) und Hand-Starts ohne Claim liefen vorbei. Darum fragt jeder Start
@@ -43823,6 +43873,7 @@
         // KONTO WEG (06.10.2026): nichts platziert, Konto nicht mehr im Login → wie bei der Endlesung nach „Überprüfen", keine UNKLAR-Marke,
         // kein zweiter Versuch (s. v2KontoWegBeimStart). Nur code 'konto_weg' — jeder andere Fehler läuft unverändert in die Zweige darunter.
         const kw = await v2KontoWegBeimStart(plan, r)
+        kontoWegFolge(plan.masterAccountId, r, 'start')   // 09.10.2026: Konto als geblowt archivieren (nicht awaiten — Meldung zuerst)
         const t = `Konto bei Tradovate nicht mehr vorhanden — vermutlich geblowt, nichts platziert. ${kw ? 'Der Plan steht unter „Überprüfen".' : 'Der Plan ließ sich nicht nach „Überprüfen" setzen — bitte von Hand „Erledigt".'} · ${r.msg || ''}`
         if(fern) return fern.melde({ ok:false, konto_weg: true, msg: t, trail: r.trail || null })
         if(imPopup){ _pfSet('ob-order', 'err', escapeHtml(t)); pfEnde(false, '✕ Konto weg · vermutlich geblowt — nichts platziert' + (kw ? ', Plan steht unter „Überprüfen".' : '.')); return }
