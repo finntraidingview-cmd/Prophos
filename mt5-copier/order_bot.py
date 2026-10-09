@@ -17553,9 +17553,9 @@ CDP_WERBUNG_JS = r"""(function () {
   var basis = Array.prototype.slice.call(document.querySelectorAll(sel));
   // Werbe-Karten IN der Seite (Trading-Panel): vom Werbetext bzw. der „AD"-Marke aufwärts bis zum ersten Kasten ≥ 200×80 px
   Array.prototype.slice.call(document.querySelectorAll('body *')).forEach(function (e) {
-    if (e.children.length || !sb(e)) return;
-    var t0 = (e.textContent || '').trim();
-    if (!(KARTE.test(t0) || /^ad$/i.test(t0))) return;
+    if (e.children.length) return;
+    var t0 = (e.textContent || '').trim();                 // erst der billige Texttest, Layout-Abfrage nur für Treffer (Prüfer T3)
+    if (!(KARTE.test(t0) || /^ad$/i.test(t0)) || !sb(e)) return;
     for (var a = e.parentElement, i = 0; a && a !== document.body && i < 12; a = a.parentElement, i++) {
       var q = a.getBoundingClientRect();
       if (q.width >= 200 && q.height >= 80) { if (basis.indexOf(a) < 0) basis.push(a); break; }
@@ -17571,8 +17571,8 @@ CDP_WERBUNG_JS = r"""(function () {
   kand.forEach(function (k) {
     if (out.length >= 3 || genommen.some(function (g) { return k.b.contains(g) || g.contains(k.b); })) return;
     var t = (k.b.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 400);
-    var n = MERKMALE.filter(function (rx) { return rx.test(t); }).length + (ADFREE.test(t) ? 2 : 0) + (KARTE.test(t) ? 2 : 0) +
-            (n0(k.b) ? 2 : 0);
+    var n = MERKMALE.filter(function (rx) { return rx.test(t); }).length + (ADFREE.test(t) ? 2 : 0) + (KARTE.test(t) ? 2 : 0);
+    if (n >= 1 && n0(k.b)) n += 2;                         // „AD" nur MIT Werbetext (Prüfer T3: Spaltenkürzel „AD" allein ist keine Werbung)
     if (n < 2 || HART.test(t)) return;
     var xs = Array.prototype.slice.call(k.b.querySelectorAll('button,[role="button"],[aria-label],[data-name*="close"],[class*="close"],' +
                                                             '[class*="Close"],[data-qa-id*="close"],[data-role*="close"]')).filter(function (e) {
@@ -17790,10 +17790,6 @@ class _AugenSitzung:
             raise RuntimeError("augen.js wirft beim Laden: " + cdp_fehlertext(r))
 
     def stand(self, opts=None):
-        # WERBUNG VOR JEDEM LESEN (Finn 09.10.2026: „Time to upgrade?"-Karte verdeckte im Trading-Panel die Positions-/Orders-Liste):
-        # erkannte Werbung geht über ihr eigenes X zu, höchstens alle 3 s eine Prüfung (~50 ms); TopstepX-Tab (tv_riegel False) nie
-        if _WIN_EINGABE and getattr(self, "tv_riegel", True) and not getattr(self, "_in_werbung", False):
-            self.werbung_weg()
         a = "globalThis.prophosAugen.stand(" + json.dumps(opts or {}) + ")"
         for versuch in (1, 2):
             r = self.ws.rufe("Runtime.evaluate", {"expression": a, "returnByValue": True, "awaitPromise": True}, timeout=10)
@@ -17976,7 +17972,6 @@ class _AugenSitzung:
         # Ein Druck auf das Werbe-X ist nie ein Order-Druck: K4-Merker sichern und zurücksetzen (09.10.2026 — seit der Prüfung in stand()
         # kann das X zwischen zwei Schritten fallen; ein danach geworfener Fehler hieß sonst „vielleicht gedrückt" statt „nichts gesendet")
         druck_vorher = getattr(self, "_druck_versucht", False)
-        self._in_werbung = True
         try:
             return self._werbung_weg_kern()
         except Exception as e_:                        # darf keinen Klick verhindern — schlimmstenfalls bleibt die Werbung stehen
@@ -17984,7 +17979,6 @@ class _AugenSitzung:
             return weg
         finally:
             self._druck_versucht = druck_vorher
-            self._in_werbung = False
 
     def _werbung_weg_kern(self):
         weg = 0
@@ -19477,6 +19471,9 @@ def _cdp_endpruefung(s, opts, plan, root, trail):
     Nur Reiter-Klicks. Live 29.09.2026 14:58 UTC (.807): Reiter Orders geklickt, aber augen.js lieferte keine Order-Zeile
     (liest nur td[data-label]) — dann liest Puls die sichtbaren Tabellen selbst (CDP_TABELLEN_JS: data-label, sonst Spaltenkopf)
     und schreibt kompakt in die Spur, was dort steht. -> (avg|None, tp|None, sl|None, diag|None)"""
+    # Werbung vor der Endlesung (Finn 09.10.2026: „Time to upgrade?"-Karte über Positions/Orders) — nach dem Senden, kein Feld im Fokus
+    if hasattr(s, "werbung_weg"):
+        s.werbung_weg(zwang=True)
     st = s.stand(opts)
     zeile = next((z for z in k3_zeilen(st.get("positionen"), root) if z.get("seite") == plan["richtung"]), None)
     avg = cdp_zahl((zeile or {}).get("avg"))
@@ -19552,6 +19549,9 @@ def cdp_reiter_kurz(reiter):
 
 def _cdp_reiter(s, name, trail):
     """Reiter des Account-Managers aktiv machen und den Wechsel beweisen (aria-selected). Höchstens 2 Klicks. -> bool"""
+    # Werbekarte über Positions/Orders (Finn 09.10.2026) vor dem Lesen der Reiter weg — feste Stelle, nie mitten in einer Eingabe
+    if hasattr(s, "werbung_weg"):
+        s.werbung_weg(zwang=True)
     reiter = []
     for versuch in (1, 2):
         reiter = s.lese_js(CDP_REITER_JS) or []

@@ -51,13 +51,16 @@ MERKMALE, ADFREE, KARTE, HART, NIE = (js_rx(n) for n in ("MERKMALE", "ADFREE", "
 
 def punkte(text, ad=False):
     n = sum(1 for rx in MERKMALE if rx.search(text)) + (2 if ADFREE[0].search(text) else 0) + (2 if KARTE[0].search(text) else 0)
-    return n + (2 if ad else 0)
+    return n + (2 if ad and n >= 1 else 0)
 
 
 # (2) Textmuster der Karte (Finns Screenshot) und Gegenproben
 KARTE_TEXT = "Time to upgrade? Unlock more charts, indicators and alerts. Explore our plans ESSENTIAL PLUS PREMIUM AD"
 check(punkte(KARTE_TEXT) >= 2 and not HART[0].search(KARTE_TEXT), "Karte „Time to upgrade? … Explore our plans“ wird Werbung, kein HART-Treffer")
 check(punkte("Explore our plans", ad=True) >= 2, "auch nur „Explore our plans“ + AD-Marke reicht")
+check(punkte("Symbol AD Last Chg", ad=True) < 2 and "if (n >= 1 && n0(k.b)) n += 2" in JS,
+      "„AD“ allein (Spaltenkürzel/Symbolzeile) ist keine Werbung — nur zusammen mit Werbetext (Prüfer T3)")
+check(JS.index("/^ad$/i.test(t0)) || !sb(e)") > 0, "Blatt-Durchlauf: erst Texttest, Layout-Abfrage nur für Treffer")
 check(punkte("ESSENTIAL PLUS PREMIUM") >= 2, "Bildtext ESSENTIAL/PLUS/PREMIUM allein reicht")
 check(punkte("Time to upgrade?") >= 2, "„Time to upgrade?“ allein reicht (vorher nur 1 Merkmal)")
 for normal in ("Positions Orders Account summary Notifications log Symbol Side Qty Avg Fill Price",
@@ -105,20 +108,23 @@ try:
           "Karte über eigenes X geschlossen, Spur mit (AD)")
     check(s2._druck_versucht is False, "Werbe-X setzt den K4-Druckmerker nicht (vorher False → danach False)")
 
-    # (6) stand() prüft vorher auf Werbung — nur TradingView, nicht im TopstepX-Tab
+    # (6) Prüfer T3: KEIN Werbe-Klick in stand() (nie zwischen Feld-Fokus und Tippen) — nur an festen Stellen vor dem Lesen
     alt_win = ob._WIN_EINGABE
     ob._WIN_EINGABE = True
     try:
-        for riegel, soll in ((True, 1), (False, 0)):
-            s3 = object.__new__(ob._AugenSitzung)
-            s3.trail, s3.tv_riegel = [], riegel
-            aufrufe = []
-            s3.werbung_weg = lambda zwang=False: aufrufe.append(zwang) or 0
-            s3.ws = type("W", (), {"rufe": staticmethod(lambda *a, **k: {"result": {"value": {"ok": 1}}})})
-            st = s3.stand({})
-            check(st == {"ok": 1} and len(aufrufe) == soll, f"stand(): Werbe-Prüfung {'ja' if soll else 'nein'} (tv_riegel={riegel})")
+        s3 = object.__new__(ob._AugenSitzung)
+        s3.trail, s3.tv_riegel = [], True
+        aufrufe = []
+        s3.werbung_weg = lambda zwang=False: aufrufe.append(zwang) or 0
+        s3.ws = type("W", (), {"rufe": staticmethod(lambda *a, **k: {"result": {"value": {"ok": 1}}})})
+        check(s3.stand({}) == {"ok": 1} and not aufrufe, "stand() klickt nie auf Werbung (Eingaben bleiben im Fokus)")
     finally:
         ob._WIN_EINGABE = alt_win
+    import inspect
+    check("werbung_weg(zwang=True)" in inspect.getsource(ob._cdp_endpruefung).split("s.stand(")[0],
+          "Endlesung nach der Order: Werbung zuerst weg, dann lesen")
+    check("werbung_weg(zwang=True)" in inspect.getsource(ob._cdp_reiter).split("CDP_REITER_JS")[0],
+          "Reiter Positions/Orders: Werbung zuerst weg, dann lesen")
 finally:
     ob._warte = alt_w
 
