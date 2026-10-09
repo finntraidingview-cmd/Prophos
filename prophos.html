@@ -3751,6 +3751,12 @@
   #dashboard-view .wdl-tab-sek-manuell{--wdl-sek:#dc2626}
   #dashboard-view .wdl-tab-sek-erledigt{--wdl-sek:var(--sub-2)}
   #dashboard-view .wdl-tab-sek-bestanden{--wdl-sek:#15803d}
+  /* Phase im Abschnitt „Bestanden" als Klartext „Phase 1 → Phase 2" (09.10.2026) + fremde Konten „im Login von …" */
+  #dashboard-view .wdl-bst-phase{display:inline-block;padding:1px 7px;border-radius:999px;background:var(--bg);border:1px solid var(--border-soft);font-size:11px;font-weight:600;color:var(--ink-2);white-space:nowrap}
+  #dashboard-view .wdl-bst-fremd{font-size:11px;color:var(--sub);white-space:nowrap}
+  /* „🎯 bestanden · Phase 1 → Phase 2" (09.10.2026) ist länger: in der Ergebnis-Zelle eigene Zeile, Knöpfe darunter */
+  #dashboard-view .wdl-z-akt:has(.wdl-bestanden){flex-wrap:wrap;row-gap:4px}
+  #dashboard-view .wdl-z-akt > span:has(> .wdl-bestanden){flex-basis:100%;text-align:right}
   /* Radar-Abschnitt „Bestanden" (09.10.2026): Phase-Chip in der ri-Spalte, Balance → Ziel in mi, Tage in konto, Status in pl, Knopf in zeit */
   #dashboard-view .wdl-z-bst .wdl-z-ri .type-badge{font-size:11px;padding:1px 7px}
   #dashboard-view .wdl-z-bst .wdl-z-mi{color:var(--ink-2);font-variant-numeric:tabular-nums}
@@ -3791,6 +3797,7 @@
   #dashboard-view .tc-zl .tc-puls summary{list-style:none;cursor:pointer;display:flex;gap:8px;align-items:baseline;min-width:0}
   #dashboard-view .tc-zl .tc-puls summary::-webkit-details-marker{display:none}
   #dashboard-view .tc-zl .tc-puls-k{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #dashboard-view .tc-zl .tc-puls-chip{margin-right:8px;font-size:11px}
   #dashboard-view .tc-zl .tc-puls-mehr{flex:none;font-size:10.5px;font-weight:600;color:var(--violet)}
   #dashboard-view .tc-zl .tc-puls-mehr::after{content:' ▾'}
   #dashboard-view .tc-zl .tc-puls[open] .tc-puls-mehr::after{content:' ▴'}
@@ -29230,7 +29237,7 @@
       const gq = typeof window._admGruppeQ === 'function' ? window._admGruppeQ('&') : ''
       const r = await fetch(`${WATCHER_HOME}/admin/handarbeit?ansicht=admin${gq}`, { headers: { 'sb-token': tok }, cache: 'no-store' })
       const d = await r.json().catch(() => null)
-      if(r.ok && d && d.ok){ _hand.d = d; _hand.at = Date.now(); _hand.fehler = '' } else _hand.fehler = (d && d.error) || ('HTTP ' + r.status)
+      if(r.ok && d && d.ok){ _hand.d = d; _hand.at = Date.now(); _hand.fehler = ''; try{ if(typeof wdlAktiv === 'function' && wdlAktiv()) wdlRender() }catch(_){} }   // Radar-Abschnitt Bestanden nutzt _hand.d (09.10.2026) else _hand.fehler = (d && d.error) || ('HTTP ' + r.status)
     }catch(e){ _hand.fehler = (e && e.message) || String(e) }
     finally{ _hand.laedt = false; handKnopf(); if(document.getElementById('handModal')?.classList.contains('open')) handRender() }
   }
@@ -29492,13 +29499,18 @@
     // vergleichen — −300 (ab 0) gegen 148.000 hieße sonst „geblowt". Dann keine Blow-Aussage; die Balance bleibt in der Konto-Spalte.
     const _ra = t.tv && t.tv.balance_relativ, _rb = t.final && t.final.balance_relativ
     const basisVerschieden = n(t.balance_end) != null && t.route === 'tsv2' && typeof _ra === 'boolean' && typeof _rb === 'boolean' && _ra !== _rb
-    const liq = basisVerschieden ? null : soft ? n(t.liq_boden_balance) : (n(t.liq_regel_balance) ?? n(t.liq_balance))
+    const liqNq = basisVerschieden ? null : soft ? n(t.liq_boden_balance) : (n(t.liq_regel_balance) ?? n(t.liq_balance))
+    // BODEN ALS RÜCKFALL (Master 09.10.2026 ~20:45 Dubai, Chris FundedNext …0909: Echo V2, Balance 89.942 bei Boden 90.000, aber kein
+    // „geblowt"): Echo-Zeilen haben keine Liq (lt_echo_felder setzt sie bewusst null) — die Grenze war nur in der Ziel-Spanne (boden_usd der
+    // Ziel-Wache), die .1434 entfernt wurde. Jetzt gilt ohne Liq der Boden der Kernwerte; dort exakt ≤ Boden (wie app.py ap_ende_unter_boden).
+    const vonBoden = liqNq == null && !basisVerschieden && n(t.boden_usd) != null
+    const liq = vonBoden ? n(t.boden_usd) : liqNq
     const tagLiq = basisVerschieden ? null : soft ? n(t.liq_regel_nur_balance) : null
-    const geblowt = liq != null && bal <= liq + 25
+    const geblowt = liq != null && bal <= liq + (vonBoden ? 0 : 25)
     // Tagesstopp erreicht (APEX-EVAL-SOFTBREACH 07.10.2026): bis 10 % des Tageslimits darüber zählt noch — der $-SL der Order wird
     // von TradingView auf Ticks gerundet (Apex-150k-Eval: SL 2.000 $ → −1.884,30 $, Balance 148.097 bei Tagesstopp 147.981)
     const bs = n(t.balance_start), tagTol = (tagLiq != null && bs != null && bs > tagLiq) ? Math.max(25, (bs - tagLiq) * 0.1) : 25
-    return { bal, quelle, liq, tagLiq, geblowt, softBreach: !geblowt && tagLiq != null && bal <= tagLiq + tagTol }
+    return { bal, quelle, liq, tagLiq, geblowt, vonBoden, softBreach: !geblowt && tagLiq != null && bal <= tagLiq + tagTol }
   }
   /* APEX-EVAL-SOFTBREACH (07.10.2026, Finn: „Apex 150k Evaluation: Daily Loss 2.000 $ ist ein SOFT BREACH. Der Tag stoppt, das Konto
    * lebt weiter. Geblowt ist es erst beim Gesamt-Drawdown 4.000 $, also Balance ≤ 146.000"). Liegt das Liq-Level des Radars am weichen
@@ -29548,7 +29560,7 @@
     const de = v => Math.round(v).toLocaleString('de-DE')
     // seit .1141 Ergebnis-Wort in der Ergebnis-Spalte (Finn 07.10.2026: „links von Ereignis, da wo geblowt/Tageslimit steht …
     // nicht in den Namen reinpacken") — Stil wie wdlBlowErg, der Übergang steht im Tooltip
-    return `<b class="wdl-bestanden" style="color:#15803d;white-space:nowrap" title="${WDL_UEBERGANG[typ]} · Balance ${de(bal)} ≥ Ziel ${de(ziel)} — sehr wahrscheinlich bestanden. Phase umstellen und neues Konto anlegen.">🎯 bestanden → ${WDL_ZIEL[typ]}</b>`
+    return `<b class="wdl-bestanden" style="color:#15803d;white-space:nowrap" title="${WDL_UEBERGANG[typ]} · Balance ${de(bal)} ≥ Ziel ${de(ziel)} — sehr wahrscheinlich bestanden. Phase umstellen und neues Konto anlegen.">🎯 bestanden · ${WDL_UEBERGANG[typ]}</b>`
   }
   function wdlKontoZ(t){
     const b = wdlBlowStand(t)
@@ -29916,30 +29928,50 @@
     // Ziel-Kontotyp wie im Reiter (Klick unten am #wdl-liste-Handler, data-wdl-bst-um) — kein eigenes Schreiben. Ein bestandener, noch
     // nicht abgehakter Trade bleibt davon unberührt in „Überprüfen".
     const bstZeilen = () => {
-      const ich = String(currentUserId || ''); if(!ich || (wdl.person && wdl.person !== ich)) return []
-      // BST_ZIEL/bstStand stehen weiter unten im Modul — zeichnet der Radar vor deren Auswertung (TDZ), lieber nichts als ein toter Radar
+      const ich = String(currentUserId || ''); if(!ich) return []
+      // BST_ZIEL/bstStand stehen weiter unten im Modul — zeichnet der Radar vor deren Auswertung (TDZ), lieber nichts
       let ks = []; try{ ks = bstKonten(); void BST_ZIEL }catch(_){ return [] }
-      const name = (typeof _ap !== 'undefined' && _ap && _ap.ich && _ap.ich.name) || 'Ich'
+      const ichName = (typeof _ap !== 'undefined' && _ap && _ap.ich && _ap.ich.name) || 'Ich'
       const de = v => Math.round(Number(v)).toLocaleString('de-DE')
-      return ks.sort((x, y) => String(x.firm || '').localeCompare(String(y.firm || ''), 'de') || String(x.zielErreichtAt).localeCompare(String(y.zielErreichtAt)))
-        .map(a => {
-          let gr = 0; try{ gr = Number(kontoGroesseAnzeige(a.name, a.startingBalance, null)) || 0 }catch(_){}
-          const e4 = String(a.externalId || '').replace(/[^A-Za-z0-9]/g, '').slice(-4)
-          const konto = `${a.firm || '?'}${gr >= 1000 ? ' ' + Math.round(gr / 1000) + 'k' : ''}${e4 ? ' …' + e4 : ''}`
-          const typ = String(a.type || ''), typName = typ ? ((typeof typeLabel === 'function' && typeLabel(typ)) || typ) : ''
-          const { bal, ziel, mt, fehlt, mini, miniUhr } = bstStand(a)
-          const neu = bstNaechsterTyp(a), zielName = BST_ZIEL[typ] || ((typeof typeLabel === 'function' && neu && typeLabel(neu)) || neu)
-          const d = new Date(a.zielErreichtAt), seit = isNaN(d) ? '' : d.toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+      const typW = x => (typeof typeLabel === 'function' && typeLabel(x)) || x
+      // ALLE IDs (Master 09.10.2026 ~20:41 Dubai: Überprüfen zeigte 7× „bestanden", der Abschnitt nur Finns eigenes Konto — bstKonten kennt
+      // per RLS nur eigene Konten). Fremde Konten kommen aus /admin/handarbeit (Gruppe bestanden = accounts.ziel_erreicht_at aller IDs,
+      // dieselbe Markierung der Ziel-Wache; _hand lädt ohnehin alle 60 s) — dort ohne Mindesttage, Knopf nur für eigene Konten
+      // (der Nachfolger-Assistent legt nur im eigenen Login an), sonst „im Login von …".
+      const eigen = ks.map(a => {
+        let gr = 0; try{ gr = Number(kontoGroesseAnzeige(a.name, a.startingBalance, null)) || 0 }catch(_){}
+        const st = bstStand(a)
+        return { eigen: true, a, uid: ich, user: ichName, firma: a.firm, e4: String(a.externalId || '').replace(/[^A-Za-z0-9]/g, '').slice(-4), gr,
+          typ: String(a.type || ''), name: a.name, seit: a.zielErreichtAt, ...st }
+      })
+      const eigeneIds = new Set(ks.map(a => String(a.id)))
+      const fremd = (((typeof _hand !== 'undefined' && _hand.d && _hand.d.bestanden) || [])).filter(z => z && String(z.user_id) !== ich && !eigeneIds.has(String(z.konto_id)))
+        .map(z => {
+          let gr = 0; try{ gr = Number(kontoGroesseAnzeige(z.konto, z.start_balance, null)) || 0 }catch(_){}
+          return { eigen: false, uid: String(z.user_id), user: z.user || '?', firma: z.firma, e4: String(z.ende4 || '').replace(/[^A-Za-z0-9]/g, '').slice(-4), gr,
+            typ: String(z.typ || ''), name: z.konto, seit: z.seit, bal: num(z.bal), ziel: num(z.ziel), mt: null, fehlt: false, mini: null, miniUhr: '' }
+        })
+      return [...eigen, ...fremd].filter(x => !wdl.person || x.uid === wdl.person)
+        .sort((x, y) => String(x.firma || '').localeCompare(String(y.firma || ''), 'de') || String(x.seit).localeCompare(String(y.seit)))
+        .map(x => {
+          const konto = `${x.firma || '?'}${x.gr >= 1000 ? ' ' + Math.round(x.gr / 1000) + 'k' : ''}${x.e4 ? ' …' + x.e4 : ''}`
+          const typ = x.typ, ueb = WDL_UEBERGANG[typ] || (typ ? typW(typ) : '')
+          const neu = x.eigen ? bstNaechsterTyp(x.a) : null, zielName = BST_ZIEL[typ] || (neu ? typW(neu) : '')
+          const d = new Date(x.seit), seit = isNaN(d) ? '' : d.toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+          const { bal, ziel, mt, fehlt, mini, miniUhr } = x
           const status = fehlt ? 'Tage sammeln' + (mini ? (mini.status === 'open' ? ' · Mini läuft' : ' · Mini ' + miniUhr) : '') : 'Bereit'
           const statusTip = fehlt ? `Noch ${mt.target - mt.count} Tag(e) mit Trade nötig, bevor die Phase wechselt${mini ? (mini.status === 'open' ? ' — Mini-Trade läuft gerade' : ` — nächster Mini-Trade ${miniUhr} Dubai`) : ' — der Auto-Planer plant je Handelstag einen Mini-Trade'}`
-            : 'Ziel und Mindesttage erfüllt — Phase umstellen'
-          return `<div class="wdl-z wdl-z-bst" style="--wdl-id:${idFarbe(ich)}">`
-            + `<span class="wdl-z-wer" title="${escapeHtml(String(a.name || konto))}"><span class="wdl-z-punkt"></span><b>${escapeHtml(name)}</b><small>${escapeHtml(konto)}</small></span>`
-            + `<span class="wdl-z-ri">${typ ? `<span class="type-badge type-${escapeHtml(typ)}">${escapeHtml(typName)}</span>` : ''}</span>`
+            : x.eigen ? 'Ziel und Mindesttage erfüllt — Phase umstellen' : `Ziel erreicht (Ziel-Wache) — Mindesttage sieht nur ${x.user}`
+          const knopf = x.eigen
+            ? (neu ? `<button type="button" class="btn btn-ghost el-knopf" data-wdl-bst-um="${escapeHtml(String(x.a.id))}" title="Nachfolger anlegen (${escapeHtml(zielName)}): neues Konto + Login, Echo-Instanz, External ID — das alte Konto wird danach archiviert">→ ${escapeHtml(zielName)}</button>` : '')
+            : `<span class="wdl-bst-fremd" title="Der Nachfolger-Assistent legt nur im eigenen Login an — ${escapeHtml(x.user)} stellt um">im Login von ${escapeHtml(x.user)}</span>`
+          return `<div class="wdl-z wdl-z-bst" style="--wdl-id:${idFarbe(x.uid)}">`
+            + `<span class="wdl-z-wer" title="${escapeHtml(String(x.name || konto))}"><span class="wdl-z-punkt"></span><b>${escapeHtml(x.user)}</b><small>${escapeHtml(konto)}</small></span>`
+            + `<span class="wdl-z-ri">${ueb ? `<span class="wdl-bst-phase type-${escapeHtml(typ)}" title="aktueller Kontotyp → nächster">${escapeHtml(ueb)}</span>` : ''}</span>`
             + zelle('mi', `${bal != null ? de(bal) : '–'}${ziel ? ` → <b class="wdl-bst-ziel">${de(ziel)} ✓</b>` : ''}`, { tip: `Balance → Ziel${seit ? ' · Ziel erreicht seit ' + seit : ''}` })
-            + zelle('konto', mt ? `${mt.count}/${mt.target}` : '–', { tip: mt ? `Mindesttage: ${mt.count} von ${mt.target} Tagen mit Trade` : 'keine Mindesttage hinterlegt' })
+            + zelle('konto', mt ? `${mt.count}/${mt.target}` : '–', { tip: mt ? `Mindesttage: ${mt.count} von ${mt.target} Tagen mit Trade` : (x.eigen ? 'keine Mindesttage hinterlegt' : 'Mindesttage nur im Login des Kontos sichtbar') })
             + `<span class="wdl-z-pl ${fehlt ? 'wdl-bst-warte' : 'wdl-bst-ok'}" title="${escapeHtml(statusTip)}">${escapeHtml(status)}</span>`
-            + `<span class="wdl-z-zeit">${neu ? `<button type="button" class="btn btn-ghost el-knopf" data-wdl-bst-um="${escapeHtml(String(a.id))}" title="Nachfolger anlegen (${escapeHtml(zielName)}): neues Konto + Login, Echo-Instanz, External ID — das alte Konto wird danach archiviert">→ ${escapeHtml(zielName)}</button>` : ''}</span>`
+            + `<span class="wdl-z-zeit">${knopf}</span>`
             + '</div>'
         })
     }
@@ -39500,8 +39532,19 @@
     const spur = [fin.lesen_trail ? 'Endlesung: ' + fin.lesen_trail : '', tv.lesen_trail ? 'Start-Lesung: ' + tv.lesen_trail : '',
       sp && (sp.trail || sp.msg) ? `Puls ${uhr(sp.at)}${sp.pc ? ' · ' + sp.pc : ''}${sp.s != null ? ' · ' + sp.s + ' s' : ''}: ${sp.msg ? sp.msg + ' ' : ''}${sp.trail || ''}` : '',
       sf && sf.msg ? 'Start-Fehler: ' + sf.msg : ''].filter(Boolean).join('\n\n')
-    if(!teile.length && !spur) return ''
-    const txt = escapeHtml(teile.join(' · ') || 'Puls-Spur')
+    // „🎯 bestanden · Phase 1 → Phase 2" auch hier (Master 09.10.2026 ~20:41): eigenes Konto mit Ziel-Wache-Markierung, Plan noch nicht erledigt
+    const acc = (accounts || []).find(a => String(a.id) === String(p.masterAccountId))
+    const ueb = acc && acc.zielErreichtAt && p.status !== 'completed' && typeof WDL_UEBERGANG !== 'undefined' ? WDL_UEBERGANG[String(acc.type || '')] : ''
+    // Chip wie im Radar (09.10.2026): liegt die Radar-Zeile dieses Plans schon vor (Trade-Planer _tpl.lt bzw. Radar wdl.daten — kein Abruf),
+    // dieselben Wörter „💀 geblowt" (≤ Liq bzw. Boden) / „🎯 bestanden · Phase 1 → Phase 2"; sonst die Ziel-Wache-Markierung des eigenen Kontos
+    let lt = null
+    try{ lt = (typeof _tpl !== 'undefined' && _tpl.lt && _tpl.lt.get(String(p.id))) || (((typeof wdl !== 'undefined' && wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === String(p.id))) || null }catch(_){ lt = null }
+    let ltChip = ''
+    try{ ltChip = lt && p.status !== 'completed' ? (wdlBlowErg(lt) || wdlBestandenChip(lt)) : '' }catch(_){ ltChip = '' }
+    const chip = ltChip ? `<span class="tc-puls-chip">${ltChip}</span>`
+      : ueb ? `<b class="wdl-bestanden tc-puls-chip" title="Ziel erreicht (Ziel-Wache) — Phase umstellen: Reiter „Bestanden" bzw. Radar">🎯 bestanden · ${escapeHtml(ueb)}</b>` : ''
+    if(!teile.length && !spur && !chip) return ''
+    const txt = chip + escapeHtml(teile.join(' · ') || (chip ? '' : 'Puls-Spur'))
     if(!spur) return `<div class="tc-puls"><span class="tc-puls-k">${txt}</span></div>`
     const id = String(p.id)
     return `<details class="tc-puls" data-tc-puls="${escapeHtml(id)}"${_tcPulsOffen.has(id) ? ' open' : ''}><summary><span class="tc-puls-k">${txt}</span><span class="tc-puls-mehr">Spur</span></summary>`
@@ -43179,7 +43222,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1442'
+  const OS_TAB_BUILD = '2026-09-22.1443'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
