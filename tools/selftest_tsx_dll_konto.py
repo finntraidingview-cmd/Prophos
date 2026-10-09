@@ -40,7 +40,13 @@ def main():
     check(bool(m) and m.group(1).upper().startswith("150KTC-SKU-V2-DLL-68869") and m.group(2), "JS RX_AUSLOESER: gekürzter DLL-Auslöser erkannt")
     check(bool(ohne.match("150K DLL COMBINE |")), "JS RX_OHNE_ID: DLL-Auslöser ohne Kennung erkannt")
 
+    # Negativfälle (Prüfer T3, 09.10.2026): eine nackte Menge ohne „$“ und ohne Wort nach dem K ist kein Konto
+    for t in ("5K", "12.5K", "1K", "5K |", "12.5K|ABCDEF-123"):
+        check(not ausl.search(t) and not ohne.match(t) and not liste.match(t), f"JS: „{t}“ ist kein Konto-Auslöser/keine Kontozeile")
     import order_bot as ob
+    for t in ("5K", "12.5K", "1K"):
+        check(ob.tsx_konto_sichtbar(t) == ("", False) and not ob.TSX_RX_OHNE_ID.match(t) and ob.tsx_konto_steht(t, "ABCDEF-123") == "nein",
+              f"Python: „{t}“ ist kein Konto-Auslöser")
     k, kurz = ob.tsx_konto_sichtbar(f"150K DLL Combine|{dll1}")
     check(k == dll1 and not kurz, "tsx_konto_sichtbar: volle DLL-Kennung ohne „$“")
     check(ob.tsx_konto_steht(f"150K DLL Combine|{dll1}", dll1) == "ja", "tsx_konto_steht: DLL-Konto 'ja'")
