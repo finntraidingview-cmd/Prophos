@@ -41677,13 +41677,22 @@
 
   // Startzeit eines Farmer-Plans im WD-Tagesplan nachziehen (09.10.2026, Prüfer T3/Master: rkVerschieben schob nur trade_plans.start_um —
   // „Plan heute Nacht" und die WD-Reihenfolge lesen den Tagesplan und zeigten die alte Zeit). Nur start_um des einen Eintrags, Status bleibt.
+  // Optimistische Sperre (Prüfer T3 09.10.2026): wdAbgleich & Co. schreiben die GANZE konten-Liste auch am laufenden Tag — geschrieben wird
+  // nur, wenn updated_at noch derselbe ist; sonst einmal frisch lesen und neu versuchen, danach still auslassen (start_um ist nur Anzeige)
   async function tpWdTagesplanStartSetzen(planId, startIso){
     try{
-      const { data: rows } = await supabase.from('wd_tagesplan').select('tag,user_id,konten').eq('user_id', currentUserId).gte('tag', new Date(Date.now() - 2 * 86400000).toISOString().slice(0, 10))
-      for(const x of (rows || [])){
-        if(!(x.konten || []).some(k => k && String(k.plan_id) === String(planId))) continue
-        const konten = x.konten.map(k => (k && String(k.plan_id) === String(planId)) ? { ...k, start_um: startIso } : k)
-        await supabase.from('wd_tagesplan').update({ konten, updated_at: new Date().toISOString() }).eq('tag', x.tag).eq('user_id', x.user_id)
+      for(let versuch = 0; versuch < 2; versuch++){
+        const { data: rows } = await supabase.from('wd_tagesplan').select('tag,user_id,konten,updated_at').eq('user_id', currentUserId).gte('tag', new Date(Date.now() - 2 * 86400000).toISOString().slice(0, 10))
+        let offen = false
+        for(const x of (rows || [])){
+          if(!(x.konten || []).some(k => k && String(k.plan_id) === String(planId))) continue
+          const konten = x.konten.map(k => (k && String(k.plan_id) === String(planId)) ? { ...k, start_um: startIso } : k)
+          let q = supabase.from('wd_tagesplan').update({ konten, updated_at: new Date().toISOString() }).eq('tag', x.tag).eq('user_id', x.user_id)
+          q = x.updated_at ? q.eq('updated_at', x.updated_at) : q.is('updated_at', null)
+          const { data: ok } = await q.select('tag')
+          if(!ok || !ok.length) offen = true          // jemand hat dazwischen geschrieben → frisch lesen
+        }
+        if(!offen) return
       }
     }catch(e){ console.warn('[wd] Tagesplan-Startzeit', e) }
   }
@@ -42980,7 +42989,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1431'
+  const OS_TAB_BUILD = '2026-09-22.1432'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

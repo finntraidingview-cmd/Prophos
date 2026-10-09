@@ -74,6 +74,10 @@ i = HTML.index("  async function rkVerschieben(")
 rvs = HTML[i:HTML.index("\n  }\n", i)]
 check("if(!aufgeben && tpIstWdPlan(neu)) await tpWdTagesplanStartSetzen(neu.id, neu.startUm)" in rvs and "async function tpWdTagesplanStartSetzen(" in HTML,
       "WD-Plan geschoben → Startzeit im wd_tagesplan mitgezogen (Prüfer T3)")
+i = HTML.index("  async function tpWdTagesplanStartSetzen(")
+ts = HTML[i:HTML.index("\n  }\n", i)]
+check("q.eq('updated_at', x.updated_at)" in ts and "versuch < 2" in ts and ".select('tag')" in ts,
+      "Tagesplan-Startzeit mit optimistischer Sperre (updated_at), höchstens 2 Versuche — überschreibt nie eine fremde Änderung")
 
 # (3) SQL-Datei
 k = SQL[SQL.index("create or replace function public.prophos_gegenhedge_konflikt"):SQL.index("create or replace function public.trade_plans_gegenhedge")]
