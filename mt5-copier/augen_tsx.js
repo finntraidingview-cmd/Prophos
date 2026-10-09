@@ -558,7 +558,7 @@ var PROPHOS_AUGEN_TSX = (function () {
     if (keine && RX_KEINE_POS.test(txt(keine))) {
       var g0 = gitterLesen();
       var inKarte = !!(keine.closest && keine.closest('[data-testid^="order-card"]'));   // nie der seitenweite Text-Rückfall
-      var pz = 0; try { pz = positionsZeilen().length; } catch (_) {}
+      var pz = 1; try { var pzL = positionsZeilen(); pz = Array.isArray(pzL) ? pzL.length : 1; } catch (_) { pz = 1; }   // nicht lesbar/kein Array = unklar → nie flach (Prüfer T3)
       return { sichtbar: true, zeilen: [], flach: flachBeweis({ keine: true, inKarte: inKarte, posZeilen: pz, zu: knopfInfo(closeKnopf()),
                                                                 grid: g0.da ? { da: true, zeilen: g0.zeilen.length } : null }) };
     }

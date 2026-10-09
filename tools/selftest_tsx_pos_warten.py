@@ -45,6 +45,7 @@ def main():
     check("var keine = ankerPositionen() || keinePosPerText();" in js, "positionenLesen: Text-Rückfall ohne data-testid")
     check("if (g.da && !g.zeilen.length && zuK && zustand(zuK).disabled) return { sichtbar: true, zeilen: [], flach: true };" in js,
           "leeres Positions-Grid + Close Position gesperrt = flach (zwei Belege)")
+    check("catch (_) { pz = 1; }" in js and "Array.isArray(pzL) ? pzL.length : 1" in js, "positionsZeilen wirft/kein Array → pz 1 (unklar → nie flach)")
     check("keine.closest('[data-testid^=\"order-card\"]')" in js and "inKarte: inKarte" in js, "inKarte nur aus der Order-Karte, nie Seiten-Text")
     check('res["diagnose"] = {"tsx_positionen_inventar": inv}' in bot and "o.close = { quelle: kq" in bot and "o.keine_pos" in bot,
           "Inventar mit Close-Knopf-Details + „No Active Position“-Quelle")
