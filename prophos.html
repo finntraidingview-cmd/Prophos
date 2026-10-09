@@ -33429,9 +33429,9 @@
   const accTypRang = a => ACC_TYPE_RANG[a && a.type === 'funded_cfd' && a.waitingPayoutSince ? 'waiting_payout' : a?.type] ?? 9
   // Dieselbe Reihenfolge überall, wo Konten flach aufgelistet werden (06.10.2026, Finn am Echo-Popup „Account hinzufügen":
   // „auch nach Prophos sortieren, wie es überall ist"): Kontoart-Rang, dann Firma (ohne Firma ans Ende), dann stabil.
-  // Nutzer: Accounts-Liste (renderAccounts) und das Prefill-Dropdown im Echo-Popup (mtcPrefillFill).
+  // Nutzer: Accounts-Liste (renderAccounts). Das Prefill-Dropdown (mtcPrefillFill) sortiert seit 09.10.2026 nach Firma (eigene Sortierung).
   // Gruppen-Name einer Kontoart wie in der Accounts-Liste (typeLabel, „Waiting for Payout" wie accTypChipHtml) — für Listen mit Überschriften
-  // je Kontoart (08.10.2026, Echo-Popup „Account hinzufügen": <optgroup> im Prefill-Dropdown)
+  // je Kontoart; im Prefill-Dropdown seit 09.10.2026 als Zusatz im Eintrag („· Phase 1“), Gruppen dort je Firma
   const accTypGruppe = a => (a && a.type === 'funded_cfd' && a.waitingPayoutSince) ? 'Waiting for Payout' : (typeof typeLabel === 'function' ? typeLabel(a && a.type) : String((a && a.type) || '–'))
   function accSortiert(list){
     return (list || []).map((a, i) => [a, i]).sort((x, y) => accTypRang(x[0]) - accTypRang(y[0])
@@ -42739,7 +42739,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1415'
+  const OS_TAB_BUILD = '2026-09-22.1416'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -61625,20 +61625,26 @@
   function mtcPrefillFill(){
     const sel = $('mtc-add-prefill'); if(!sel) return
     const keep = sel.value
-    // Reihenfolge wie die Accounts-Liste (06.10.2026, Finn: „auch nach Prophos sortieren, wie es überall ist") — vorher Ladereihenfolge.
-    // Gruppen je Kontoart mit den Namen der Accounts-Liste (08.10.2026, Finn am Screenshot: „Hier bitte auch nach Prophos-Kategorien
-    // einfügen"): <optgroup> Phase 1 / Phase 2 / Funded Futures / Winning Days / Funded CFD / Waiting for Payout …, leere fallen weg,
+    // Reihenfolge wie die Accounts-Liste (06.10.2026), Gruppen je Kontoart (08.10.2026) — seit 09.10.2026 je Firma, s. u.;
     // der Wert bleibt die Konto-ID (Prefill und Auto-Link unverändert)
-    const liste = typeof accSortiert === 'function' ? accSortiert(mtcPrefillCandidates()) : mtcPrefillCandidates()
-    const opt = a => `<option value="${esc(a.id)}">${esc(a.name)} — ${esc(a.creds.login)} @ ${esc(a.creds.server)}</option>`
+    // NACH PROP-FIRMA (09.10.2026, Finn: „bitte auch nach Prop-Firm sortieren" — „Phase 1" mischte FTMO, FundedNext, FundingPips):
+    // <optgroup> = Firma (alphabetisch, Schreibweisen über firmNormRichtung zusammengeführt, ohne Firma ans Ende), darin Kontoart in der
+    // Reihenfolge der Accounts-Liste (accTypRang), dann Name. Die Kontoart steht jetzt im Eintrag.
+    const fKey = a => (typeof firmNormRichtung === 'function' ? firmNormRichtung(a.firm) : String(a.firm || '').toLowerCase().trim())
+    const rang = a => (typeof accTypRang === 'function' ? accTypRang(a) : 0)
+    const typ = a => (typeof accTypGruppe === 'function' ? accTypGruppe(a) : '')
+    const liste = mtcPrefillCandidates().slice().sort((x, y) => (!fKey(x) - !fKey(y))
+      || fKey(x).localeCompare(fKey(y), 'de') || rang(x) - rang(y)
+      || String(x.name || '').localeCompare(String(y.name || ''), 'de', { numeric: true, sensitivity: 'base' }))
+    const opt = a => `<option value="${esc(a.id)}">${esc(a.name)}${typ(a) ? ` · ${esc(typ(a))}` : ''} — ${esc(a.creds.login)} @ ${esc(a.creds.server)}</option>`
     const gruppen = []
     for(const a of liste){
-      const g = typeof accTypGruppe === 'function' ? accTypGruppe(a) : ''
-      if(!gruppen.length || gruppen[gruppen.length - 1].g !== g) gruppen.push({ g, l: [] })
+      const k = fKey(a)
+      if(!gruppen.length || gruppen[gruppen.length - 1].k !== k) gruppen.push({ k, g: String(a.firm || '').trim() || 'ohne Firma', l: [] })
       gruppen[gruppen.length - 1].l.push(a)
     }
     sel.innerHTML = '<option value="">— manuell eingeben —</option>' +
-      gruppen.map(x => x.g ? `<optgroup label="${esc(x.g)}">${x.l.map(opt).join('')}</optgroup>` : x.l.map(opt).join('')).join('')
+      gruppen.map(x => `<optgroup label="${esc(x.g)}">${x.l.map(opt).join('')}</optgroup>`).join('')
     sel.value = keep
     if(sel.value !== keep) sel.value = ''
   }
