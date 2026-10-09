@@ -16175,6 +16175,34 @@ class _EineAntwort:
             self._fertig.set()
 
 
+def tsx_rect_gleich(a, b, tol=2.0):
+    """REIN RECHNEND (testbar): zwei Rechtecke [x, y, w, h] gleich (je Wert höchstens tol px Abstand)? Ungültig → False."""
+    try:
+        return len(a) >= 4 and len(b) >= 4 and all(abs(float(a[i]) - float(b[i])) <= tol for i in range(4))
+    except (TypeError, ValueError):
+        return False
+
+
+def _tsx_ausloeser_stabil(s, st, ko, r, trail, lesungen=4):
+    """Konto-Auslöser vor dem Hover auf STABILE Position warten (09.10.2026, Ina 333d4791 e944cde2: Seite 1,5 s vorher frisch geöffnet,
+    TopstepX baute nach — „nach der Hover-Pause liegt am Zielpunkt nicht mehr das Ziel"). Bis zu `lesungen` Mal neu lesen (_warte-Jitter),
+    fertig, sobald zwei aufeinanderfolgende Rechtecke gleich sind. -> (stand, konto, rect, stabil)"""
+    r_alt = list(r)[:4]
+    for _ in range(lesungen):
+        _warte(0.5, 0.3)
+        st_n = s.stand()
+        ko_n = st_n.get("konto") if isinstance(st_n, dict) and isinstance(st_n.get("konto"), dict) else {}
+        r_n = cdp_rect(ko_n.get("rect"))
+        if not (isinstance(r_n, (list, tuple)) and len(r_n) >= 4):
+            return st, ko, r_alt, False
+        gleich = tsx_rect_gleich(r_alt, r_n)
+        st, ko, r_alt = st_n, ko_n, list(r_n)[:4]
+        if gleich:
+            return st, ko, r_alt, True
+    trail.append("K2: Konto-Auslöser blieb nicht ruhig (Position wechselt noch) — Klick trotzdem nur mit Ziel-Beweis")
+    return st, ko, r_alt, False
+
+
 def _tsx_konto_sichern(s, ext, st, trail):
     """K2 (01.10.2026, „das mit dem Dropdown"): steht in TopstepX nicht das Konto ext, per Windows-Maus wechseln — NUR Konto, keine
     Order, kein Order-Ticket. -> (ok, code, msg, stand, extra); extra.konto_gewechselt = {von, zu} nach einem Wechsel.
@@ -16286,8 +16314,29 @@ def _tsx_konto_sichern(s, ext, st, trail):
         r = list(r)[:4]
         # Ziel-Beweis mit dem Auslöser-TEXT ('$150K … | KENNUNG' → volle Kennung), nicht der nackten kontonr (tsx_k0_pruef erkennt die
         # Kennung nur im Auslöser-Format, sonst nähme es die ersten 24 Zeichen)
-        _tsx_pause()                                      # menschliches Tempo vor dem Auslöser (Finn 01.10.2026)
-        if not s.klick(r, "Konto-Auslöser", pruef=tsx_k0_pruef({"rect": r, "text": str(ko.get("aktiv") or aktiv), "aria": ""})):
+        # STABIL + EIN ZWEITER VERSUCH (09.10.2026, e944cde2): erst auf ruhige Position warten; meldet der Klick „kein Druck" (Ziel nach
+        # der Hover-Pause verschoben — es wurde NICHT gedrückt), Ziel neu lesen und genau einmal neu hovern. Ziel-Beweis bleibt.
+        st, ko, r, _stabil = _tsx_ausloeser_stabil(s, st, ko, r, trail)
+        gedrueckt = False
+        for _versuch in range(2):
+            n_spur = len(trail)
+            _tsx_pause()                                  # menschliches Tempo vor dem Auslöser (Finn 01.10.2026)
+            if not s.klick(r, "Konto-Auslöser", pruef=tsx_k0_pruef({"rect": r, "text": str(ko.get("aktiv") or aktiv), "aria": ""})):
+                pass
+            else:
+                gedrueckt = True
+                break
+            neu_spur = " ".join(str(x) for x in list(trail)[n_spur:])
+            if _versuch or "kein Druck" not in neu_spur or "nicht mehr das Ziel" not in neu_spur:
+                break                                     # anderer Grund oder schon zweiter Versuch: ehrlich raus wie bisher
+            trail.append("K2: Konto-Auslöser hat sich verschoben — Ziel neu lesen, ein zweiter Versuch")
+            st, ko, r, _stabil = _tsx_ausloeser_stabil(s, s.stand(), {}, r, trail)
+            if tsx_konto_urteil(ko, ext) == "ja" or ko.get("liste_offen"):
+                break                                     # inzwischen steht das Konto bzw. eine Liste — die Runde entscheidet neu
+        if not gedrueckt:
+            if tsx_konto_urteil(ko, ext) == "ja" or ko.get("liste_offen"):
+                geklickt = False
+                continue
             return _raus("konto_nicht_erreicht", "Konto-Auslöser nicht gedrückt (Klick ohne Beweis) — nichts gewechselt.", st)
         _warte(0.9, 0.4)
         st = s.stand()
