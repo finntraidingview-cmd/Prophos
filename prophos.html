@@ -32605,7 +32605,8 @@
   let _successorParentAccId = null
   let _afterSuccessorCallback = null
 
-  function openSuccessorWizard(parentAccountId, callback){
+  // zielTyp (optional, 09.10.2026): Kontoart des Nachfolgers vorwählen — der Reiter „Bestanden" übergibt seinen Übergang (bstNaechsterTyp)
+  function openSuccessorWizard(parentAccountId, callback, zielTyp){
     const acc = accounts.find(a => String(a.id) === String(parentAccountId))
     if(!acc) return
     _successorParentAccId = parentAccountId
@@ -32670,6 +32671,7 @@
     else if(acc.type === 'challenge') sucType.value = sucFunded  // Legacy
     else if(acc.type === 'funded' || acc.type === 'funded_cfd' || acc.type === 'winning_days') sucType.value = 'live'
     else sucType.value = 'phase1'
+    if(zielTyp && [...sucType.options].some(o => o.value === zielTyp)) sucType.value = zielTyp
     // Übergang Funded ⇄ Winning Days (25.09.2026, Finns vierte Kontoart): kein neues Konto, dieselbe Zeile wechselt die Art
     sucWdBlockRender(acc)
 
@@ -32908,8 +32910,11 @@
       if(typeof updateSidebarBadges === 'function') updateSidebarBadges()
       if(typeof renderPairs === 'function') renderPairs()
 
+      // Callback VOR dem Schließen sichern (09.10.2026): closeSuccessorWizard setzt _afterSuccessorCallback auf null — der Aufruf
+      // danach lief deshalb nie (der „Später eintragen"-Weg sicherte ihn schon so)
+      const cb = _afterSuccessorCallback
       closeSuccessorWizard()
-      if(_afterSuccessorCallback) _afterSuccessorCallback(created)
+      if(cb) cb(created)
     } catch(e){
       msgEl.textContent = 'Fehler: ' + (e.message || e)
       msgEl.className = 'modal-msg err'
@@ -38995,8 +39000,11 @@
   /* REITER „BESTANDEN" (09.10.2026, Finn über Master — Korb „Bestanden" Teil 1, nur Anzeige + Umstell-Knopf): je aktivem (nicht
    * archiviertem) Konto mit Markierung der Ziel-Wache (app.py zw_tick → ziel_erreicht_at/_bal, ziel_usd) eine Zeile, je Firma ein Kopf wie
    * in „Geplant". Tage x/y aus den Mindesttagen (zielFortschritt, goal_kind trading_days), ohne Mindesttage „–". Status „Tage sammeln"
-   * (Tage fehlen) bzw. „Bereit". Knopf „→ Phase 2 / → Funded" (Übergang wie wdlBestandenChip): account_type umstellen und die Markierung
-   * zurücksetzen (wie der Rückweg in zw_tick), damit der Planer wieder plant — mit Rückfrage, eigene Verdrahtung am Container. */
+   * (Tage fehlen) bzw. „Bereit". Knopf „→ Phase 2 / → Funded" (Übergang wie wdlBestandenChip) öffnet seit 09.10.2026 den Nachfolger-
+   * Assistenten (openSuccessorWizard, derselbe wie unter Accounts und im Radar „Nächste Phase →") mit vorgewähltem Ziel-Kontotyp — neues
+   * Konto + Login, Echo-Instanz des Nachfolgers, External ID; das alte Konto wird wie dort archiviert ('passed' → Echo-Löschauftrag der
+   * alten Instanz). Vorher (.1420) stellte der Knopf nur account_type um und setzte ziel_erreicht_* zurück — Finn 09.10.2026 ~10:00
+   * Dubai: „das ist falsch" (Jacobs The5ers Summerplan …1619 stand danach als Phase 2 ohne neues Konto/Echo). Eigene Verdrahtung am Container. */
   const BST_ZIEL = { challenge: 'Funded', phase1: 'Phase 2', phase2: 'Funded' }
   function bstNaechsterTyp(a){
     const t = String((a && a.type) || '')
@@ -39039,7 +39047,7 @@
           const miniUhr = mini && mini.startUm ? new Date(mini.startUm).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' }) : ''
           const seit = new Date(a.zielErreichtAt).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
           const neu = bstNaechsterTyp(a)
-          const knopf = neu ? `<button type="button" class="btn btn-ghost tc2-btn" data-bst-um="${escapeHtml(String(a.id))}" title="Kontoart auf ${escapeHtml(BST_ZIEL[typ] || neu)} umstellen und die Ziel-Markierung zurücksetzen — danach plant der Auto-Planer das Konto wieder">→ ${escapeHtml(BST_ZIEL[typ] || neu)}</button>` : ''
+          const knopf = neu ? `<button type="button" class="btn btn-ghost tc2-btn" data-bst-um="${escapeHtml(String(a.id))}" title="Nachfolger anlegen (${escapeHtml(BST_ZIEL[typ] || neu)}): neues Konto + Login, Echo-Instanz, External ID — das alte Konto wird danach archiviert">→ ${escapeHtml(BST_ZIEL[typ] || neu)}</button>` : ''
           return `<div class="pz-z" data-bst-konto="${escapeHtml(String(a.id))}">
             <span class="pz-konto" title="${escapeHtml(String(a.name || ''))}">${konto}${typ ? `<span class="type-badge type-${escapeHtml(typ)} pz-typ">${escapeHtml(typName)}</span>` : ''}</span>
             <span class="pz-bal"><span class="pz-bal-t">${bal != null ? de(bal) : '–'}${ziel ? `<em>→</em><span class="bst-ziel" title="Ziel erreicht">${de(ziel)} ✓</span>` : ''}</span></span>
@@ -39052,28 +39060,17 @@
       </div>`).join('')
   }
   window._bestandenRender = bestandenRender   // Test-Haken
-  // „→ Phase 2 / → Funded" — eigene Verdrahtung am Container (keine Sammel-Handler); Rückfrage mit Konto + Übergang
-  document.getElementById('tradeBestanden')?.addEventListener('click', async ev => {
+  // „→ Phase 2 / → Funded" — eigene Verdrahtung am Container (keine Sammel-Handler): öffnet den Nachfolger-Assistenten mit Konto + Ziel-
+  // Kontotyp. Kein eigenes Schreiben mehr — anlegen, Echo, External ID und Archivieren des alten Kontos macht allein der Assistent;
+  // nach „Anlegen" bzw. „Später eintragen" wird der Reiter neu gezeichnet (das archivierte Konto fällt aus bstKonten heraus).
+  document.getElementById('tradeBestanden')?.addEventListener('click', ev => {
     const btn = ev.target.closest('[data-bst-um]'); if(!btn) return
     const a = (accounts || []).find(x => String(x.id) === String(btn.dataset.bstUm)); if(!a) return
     const neu = bstNaechsterTyp(a); if(!neu) return
-    const alt = (typeof typeLabel === 'function' && typeLabel(a.type)) || a.type, ziel = (typeof typeLabel === 'function' && typeLabel(neu)) || neu
-    const zf = typeof zielFortschritt === 'function' ? zielFortschritt(a) : null
-    const tageHinweis = zf && zf.kind === 'trading_days' && !zf.done ? `\n\nAchtung: Mindesttage erst ${zf.count}/${zf.target}.` : ''
-    if(!confirm(`${a.name || 'Konto'} von ${alt} auf ${ziel} umstellen?\n\nDie Ziel-Markierung wird zurückgesetzt — danach plant der Auto-Planer das Konto wieder.${tageHinweis}`)) return
-    btn.disabled = true; btn.textContent = 'stellt um …'
-    try{
-      const { data, error } = await supabase.from('accounts').update({ account_type: neu, ziel_erreicht_at: null, ziel_erreicht_bal: null, ziel_usd: null }).eq('id', a.id).select('id')
-      if(error) throw error
-      if(!(data || []).length) throw new Error('keine Zeile geändert — das Konto gehört zu einer anderen ID (nur im Profil dieser ID umstellbar)')
-      a.type = neu; a.zielErreichtAt = null; a.zielErreichtBal = null; a.zielUsd = null
+    openSuccessorWizard(a.id, () => {
       try{ renderAccounts() }catch(_){}
-      renderTradePlans()
-      if(typeof atToast === 'function') atToast(`✓ ${a.name || 'Konto'}: jetzt ${ziel} — der Auto-Planer plant es wieder`, 'ok')
-    }catch(e){
-      btn.disabled = false; btn.textContent = '→ ' + (BST_ZIEL[a.type] || neu)
-      if(typeof atToast === 'function') atToast(`Nicht umgestellt: ${(e && e.message) || e}`, 'end'); else alert('Nicht umgestellt: ' + ((e && e.message) || e))
-    }
+      try{ renderTradePlans() }catch(e){ console.warn('[bestanden] neu zeichnen', e) }
+    }, neu)
   })
 
   function renderTradePlans(){
