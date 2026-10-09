@@ -3719,6 +3719,12 @@
   #dashboard-view .wdl-mb-kopf b{font-size:14px;font-weight:700;color:var(--ink)}
   #dashboard-view .wdl-mb-kopf span{font-size:12px;font-weight:600;color:var(--sub);font-variant-numeric:tabular-nums}
   #dashboard-view .wdl-mb + .wdl-mehr, #dashboard-view .wdl-tab-mb > .wdl-mehr{background:var(--surface)}
+  /* Obergruppen „Mit Hedge" / „Ohne Hedge" über den Modell-Blöcken (09.10.2026) — Ton der Filterleiste oben, dezent getrennt */
+  #dashboard-view .wdl-og{display:flex;align-items:baseline;gap:6px;padding:11px 16px 6px 13px;background:var(--bg);font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--sub)}
+  #dashboard-view .wdl-og b{font-weight:700;color:var(--ink-2,var(--ink))}
+  #dashboard-view .wdl-og span{font-weight:600;font-variant-numeric:tabular-nums}
+  #dashboard-view .wdl-mb + .wdl-og{margin-top:8px;border-top:1px solid var(--border-soft)}
+  #dashboard-view .wdl-og + .wdl-mb{margin-top:0}
   /* Trades → Offen + Flotte wie das Radar „Läuft" (Finn 09.10.2026 ~07:27 Dubai: „richtig hässlich und unübersichtlich, bitte so clean wie
      Radar"): dieselben Modell-Blöcke (.wdl-mb, Farbe --wdl-m), darin die Trade-Karten als schlanke Zeilen — die Karte selbst (Handler, 5-s-
      Ticker, Live-Chips) bleibt unverändert, nur die Hülle. Spalten: Punkt · Name/Unterzeile · Live (rechtsbündig, feste Breite) · Aktionen. */
@@ -3827,6 +3833,7 @@
     #dashboard-view .wdl-mb > .wdl-z{padding-left:9px}   /* Handy: 12 px Zeilen-Rand minus 3 px Modell-Rand */
     #dashboard-view .wdl-mb-kopf{padding:8px 12px 7px 9px}
     #dashboard-view .wdl-mb-kopf b{font-size:13.5px}
+    #dashboard-view .wdl-og{padding:9px 12px 5px 9px}
     /* Trades → Offen/Flotte am Handy: Zeile zweistöckig (Name oben, Live + Aktionen darunter), ohne Kartenhülle im Block */
     #dashboard-view .tc-zl{border:none;border-radius:var(--m-r-card,16px);box-shadow:var(--shadow-mob-card,0 1px 2px rgba(16,24,40,.05))}
     #dashboard-view .tc-zl .tc2{border-radius:0;box-shadow:none;padding:10px 12px 10px 9px;row-gap:6px;contain:layout paint}
@@ -28673,7 +28680,27 @@
   // das Backend nicht — sie fehlen hier bewusst statt als ewig leere Reiter.
   const WDL_MODELLE = [['Mit Hedge', ['Echo', 'Orbit', 'Winning Day']], ['Ohne Hedge', ['Echo V2', 'Orbit V2', 'Topstep V2']]]
   // Liste im Radar (09.10.2026): feste Reihenfolge und Akzentfarbe je Modell — „Orbit" ist Orbit V3 (heißt wie im Plan-Popup)
-  const WDL_LISTE_REIHE = ['Orbit', 'Orbit V2', 'Winning Day', 'Echo', 'Echo V2', 'Topstep V2']
+  // Seit 09.10.2026 ~07:45 Dubai (Finn) in zwei Obergruppen wie die Filterleiste oben: „Mit Hedge" (Orbit vor Echo, dann Winning Day),
+  // „Ohne Hedge" (Orbit V2, Echo V2, Topstep V2) — Kopf je Obergruppe (wdlObergruppenHtml), gilt für Radar und Trades → Offen
+  const WDL_HEDGE_GRUPPEN = [['Mit Hedge', ['Orbit', 'Echo', 'Winning Day']], ['Ohne Hedge', ['Orbit V2', 'Echo V2', 'Topstep V2']]]
+  const WDL_LISTE_REIHE = WDL_HEDGE_GRUPPEN.flatMap(([, l]) => l)
+  // bloecke = [[Modell, Einträge]] in WDL_LISTE_REIHE-Reihenfolge (+ „Weitere"); blockHtml(k, b) zeichnet einen Modell-Block.
+  // Vor dem ersten Block jeder Obergruppe ihr Kopf „Mit Hedge · n" (n = Einträge der Gruppe); „Weitere" ohne Obergruppe am Ende.
+  function wdlObergruppenHtml(bloecke, blockHtml){
+    let html = '', zuletzt = null
+    for(const [k, b] of bloecke){
+      const g = WDL_HEDGE_GRUPPEN.find(([, l]) => l.includes(k))
+      const gName = g ? g[0] : null
+      if(gName && gName !== zuletzt){
+        const n = bloecke.filter(([k2]) => g[1].includes(k2)).reduce((s2, [, b2]) => s2 + b2.length, 0)
+        html += `<div class="wdl-og"><b>${escapeHtml(gName)}</b><span>${n}</span></div>`
+      }
+      zuletzt = gName
+      html += blockHtml(k, b)
+    }
+    return html
+  }
+  window._wdlObergruppenHtml = wdlObergruppenHtml   // Trades → Offen (anderer Abschnitt) nutzt dieselbe Gruppierung
   const WDL_MODELL_FARBE = { 'Orbit': 'var(--violet)', 'Orbit V2': 'var(--violet-soft)', 'Winning Day': 'var(--good)', 'Echo': 'var(--teal)',
                              'Echo V2': 'var(--blue)', 'Topstep V2': 'var(--warn)', 'Weitere': 'var(--sub)' }
   const wdlModellPasst = t => !wdl.modell || wdlWeg(t) === wdl.modell
@@ -29786,8 +29813,8 @@
       const alle = !mehr || (wdl.alleZu || {})[mehr] || !lang
       const zeilenVon = b => (alle ? b : b.slice(0, WDL_BEENDET_KURZ)).map(t => zeile(t, '')).join('')
       const zeilen = wdl.modell ? bloecke.map(([, b]) => zeilenVon(b)).join('')
-        : bloecke.map(([k, b]) => `<div class="wdl-mb" style="--wdl-m:${WDL_MODELL_FARBE[k] || 'var(--sub)'}"><div class="wdl-mb-kopf"><b>${escapeHtml(k)}</b>`
-          + `<span>${b.length}</span></div>${zeilenVon(b)}</div>`).join('')
+        : wdlObergruppenHtml(bloecke, (k, b) => `<div class="wdl-mb" style="--wdl-m:${WDL_MODELL_FARBE[k] || 'var(--sub)'}"><div class="wdl-mb-kopf"><b>${escapeHtml(k)}</b>`
+          + `<span>${b.length}</span></div>${zeilenVon(b)}</div>`)
       const fuss = mehr && lang ? `<button type="button" class="wdl-mehr" data-wdl-mehr="${mehr}">${alle ? 'weniger' : `alle ${arr.length} zeigen`}</button>` : ''
       // Kopf mit Personen-Chips (05.10.2026): Titel + Chips teilen sich die Namens- und die (im Kopf leere) Richtungs-Spalte und
       // brechen dort um; die Spaltenköpfe rechts bleiben über ihren Spalten. Ohne Chips das alte Markup.
@@ -39344,12 +39371,15 @@
    * Modell aus planSysKey — dieselben Namen wie die Sticker; Duplikum/Mirror/Orbit (Duplikum) unter „Weitere" mit Sticker in der Zeile. */
   const OFFEN_MODELL = { mt5: 'Echo', mt5v2: 'Echo V2', wd: 'Winning Day', tvv3: 'Orbit', tvv2: 'Orbit V2', tsv2: 'Topstep V2' }
   function offenModellBloecke(list){
-    const reihe = (typeof WDL_LISTE_REIHE !== 'undefined' && WDL_LISTE_REIHE) || ['Orbit', 'Orbit V2', 'Winning Day', 'Echo', 'Echo V2', 'Topstep V2']
+    const reihe = (typeof WDL_LISTE_REIHE !== 'undefined' && WDL_LISTE_REIHE) || ['Orbit', 'Echo', 'Winning Day', 'Orbit V2', 'Echo V2', 'Topstep V2']
     const farbe = (typeof WDL_MODELL_FARBE !== 'undefined' && WDL_MODELL_FARBE) || {}
     const modell = p => OFFEN_MODELL[planSysKey(p)] || 'Weitere'
     const bloecke = [...reihe, 'Weitere'].map(k => [k, list.filter(p => modell(p) === k)]).filter(([, b]) => b.length)
-    return `<div class="tc-zl">` + bloecke.map(([k, b]) => `<div class="wdl-mb${k === 'Weitere' ? ' tc-mb-weitere' : ''}" style="--wdl-m:${farbe[k] || 'var(--sub)'}">`
-      + `<div class="wdl-mb-kopf"><b>${escapeHtml(k)}</b><span>${b.length}</span></div>${b.map(p => renderTradePlanCard(p)).join('')}</div>`).join('') + `</div>`
+    const block = (k, b) => `<div class="wdl-mb${k === 'Weitere' ? ' tc-mb-weitere' : ''}" style="--wdl-m:${farbe[k] || 'var(--sub)'}">`
+      + `<div class="wdl-mb-kopf"><b>${escapeHtml(k)}</b><span>${b.length}</span></div>${b.map(p => renderTradePlanCard(p)).join('')}</div>`
+    // Obergruppen „Mit Hedge" / „Ohne Hedge" wie im Radar (09.10.2026)
+    const og = typeof window._wdlObergruppenHtml === 'function' ? window._wdlObergruppenHtml : null
+    return `<div class="tc-zl">` + (og ? og(bloecke, block) : bloecke.map(([k, b]) => block(k, b)).join('')) + `</div>`
   }
 
   function renderTradePlanCard(p){
@@ -42960,7 +42990,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1422'
+  const OS_TAB_BUILD = '2026-09-22.1423'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
