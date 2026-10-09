@@ -15879,6 +15879,27 @@ def tsx_kopf_gleich(a, b):
     return wa[0] is not None and wa == wb
 
 
+TSX_POS_INVENTAR_JS = r"""(function () {
+  var o = { tids: [], grids: [], tabs: [] };
+  document.querySelectorAll('[data-testid]').forEach(function (e) {
+    var t = e.getAttribute('data-testid') || '';
+    if (o.tids.length >= 60 || /account/i.test(t) || !/order-card|position|grid|tab|card|pnl|flat/i.test(t)) return;
+    var r = e.getBoundingClientRect(); if (r.width < 2 || r.height < 2) return;
+    var x = (e.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+    o.tids.push(t + (x ? ' = ' + x : ''));
+  });
+  document.querySelectorAll('[role="grid"]').forEach(function (g) {
+    if (o.grids.length >= 6) return;
+    var h = [].map.call(g.querySelectorAll('[role="columnheader"]'), function (c) { return (c.getAttribute('aria-label') || c.innerText || '').trim().slice(0, 20); }).slice(0, 12);
+    o.grids.push({ koepfe: h, zeilen: g.querySelectorAll('[role="row"]').length });
+  });
+  document.querySelectorAll('[role="tab"]').forEach(function (t) {
+    if (o.tabs.length < 20) o.tabs.push((t.innerText || t.id || '').trim().slice(0, 30) + (t.getAttribute('aria-selected') === 'true' ? ' *' : ''));
+  });
+  return o;
+})()"""
+
+
 def tsx_cdp_lesung(stand, ext):
     """REIN RECHNEND (testbar): stand_tsx (augen_tsx.js) → Antwortfelder im tv-lesen-Vertrag. -> (felder, code, msg)
     code '' = gelesen; 'anker_fehlt' (augen_tsx.js liefert Konto/Kopf/Positionen noch nicht); 'konto' (ein anderes Konto steht — der
@@ -17121,6 +17142,16 @@ def modus_tsxlesen_cdp(cmd, order=None, order_cmd=None, frist_s=None):
                 st = st_n
                 felder, code, msg = tsx_cdp_lesung(st, ext)
             trail.append("Positions-Bereich " + ("nach Nachlesen da" if code != "tabelle_unklar" else "auch nach ~9 s nicht da"))
+            if code == "tabelle_unklar":
+                # INVENTAR (Master 09.10.2026): die echte Struktur der Order-Karte/Positions-Region sehen — sichtbare data-testid
+                # (order-card/position/grid/tab, Text gekürzt, ohne Konto-Auslöser), Grid-Köpfe + Zeilenzahl, Reiter. Nur Lesen.
+                try:
+                    inv = s.lese_js(TSX_POS_INVENTAR_JS, timeout=5)
+                except Exception as e_:
+                    inv = {"fehler": type(e_).__name__}
+                if isinstance(inv, dict):
+                    res["diagnose"] = {"tsx_positionen_inventar": inv}
+                    trail.append("Inventar Positions-Region: " + " · ".join(str(x) for x in (inv.get("tids") or [])[:12])[:600])
         res.update(felder)
         if code:
             return raus(code, msg, "lesen")
