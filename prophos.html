@@ -41675,6 +41675,18 @@
   window.addEventListener('pagehide', tpLoeschenAlleJetzt)
   document.addEventListener('visibilitychange', () => { if(document.hidden) tpLoeschenAlleJetzt() })
 
+  // Startzeit eines Farmer-Plans im WD-Tagesplan nachziehen (09.10.2026, Prüfer T3/Master: rkVerschieben schob nur trade_plans.start_um —
+  // „Plan heute Nacht" und die WD-Reihenfolge lesen den Tagesplan und zeigten die alte Zeit). Nur start_um des einen Eintrags, Status bleibt.
+  async function tpWdTagesplanStartSetzen(planId, startIso){
+    try{
+      const { data: rows } = await supabase.from('wd_tagesplan').select('tag,user_id,konten').eq('user_id', currentUserId).gte('tag', new Date(Date.now() - 2 * 86400000).toISOString().slice(0, 10))
+      for(const x of (rows || [])){
+        if(!(x.konten || []).some(k => k && String(k.plan_id) === String(planId))) continue
+        const konten = x.konten.map(k => (k && String(k.plan_id) === String(planId)) ? { ...k, start_um: startIso } : k)
+        await supabase.from('wd_tagesplan').update({ konten, updated_at: new Date().toISOString() }).eq('tag', x.tag).eq('user_id', x.user_id)
+      }
+    }catch(e){ console.warn('[wd] Tagesplan-Startzeit', e) }
+  }
   // Farmer-Plan aus dem WD-Tagesplan austragen (aus tpLoeschenAusfuehren herausgezogen, 09.10.2026 — auch archivPlaeneEntfernen braucht es)
   async function tpWdTagesplanAustragen(planId, hinweis){
     try{
@@ -42174,7 +42186,7 @@
     const lauf = ++_tpDirSchutzLauf
     const masterId = document.getElementById('tp-master')?.value
     const master = (accounts || []).find(a => String(a.id) === String(masterId)) || null
-    let k = null; try{ k = await v2RichtungKonflikt({ firm: master ? master.firm : '', ohneId: _editingPlanId }) }catch(_){}
+    let k = null; try{ k = await v2RichtungKonflikt({ firm: master ? master.firm : '', ohneId: _editingPlanId, geplanteHand: true }) }catch(_){}
     if(lauf !== _tpDirSchutzLauf || !V2_SCHUTZ.includes(_tpRoute)) return
     frei()
     if(!k) return
@@ -42403,6 +42415,16 @@
   const RK_CLAIM_FRISCH_MS = 15 * 60000
   const rkZaehlt = (status, geclaimt, sf) => status === 'open' || (status === 'planned' && !!geclaimt
     && Date.now() - Date.parse(geclaimt) <= RK_CLAIM_FRISCH_MS && !(sf && sf.status !== 'behoben'))
+  // „von heute" für das Plan-Popup (09.10.2026): Startzeit in [jetzt − 12 h, jetzt + 24 h]; ohne Startzeit planned_for = heute (Dubai oder
+  // Berlin) bzw. ohne beides in den letzten 24 h angelegt
+  function rkPlanHeute(p){
+    const jetzt = Date.now(), su = p && p.startUm ? Date.parse(p.startUm) : NaN
+    if(isFinite(su)) return su >= jetzt - 12 * 3600000 && su <= jetzt + 24 * 3600000
+    const tage = ['Asia/Dubai', 'Europe/Berlin'].map(tz => new Date().toLocaleDateString('en-CA', { timeZone: tz }))
+    if(p && p.plannedFor) return tage.includes(String(p.plannedFor).slice(0, 10))
+    const ca = p && p.createdAt ? Date.parse(p.createdAt) : NaN
+    return isFinite(ca) && jetzt - ca <= 24 * 3600000
+  }
   const rkClaimAt = (a, b) => [a, b].filter(x => x && Date.parse(x) > 0).sort((x, y) => Date.parse(y) - Date.parse(x))[0] || null
   function firmGeplanteRichtungen(firmName, ohnePlanId){
     const norm = f => String(f || '').toLowerCase().replace(/[^a-z0-9]/g, '')
@@ -42435,13 +42457,20 @@
     const ziel = norm(o && o.firm), ohne = o && o.ohneId != null ? String(o.ohneId) : null
     let liste = null
     if(o && o.frisch){
-      try{ const { data, error } = await supabase.from('trade_plans').select('id,status,richtung,master_firm,master_name,start_um_gestartet_at,orbit_gesendet_at,start_fehler:mt5_baseline->start_fehler').in('status', ['open', 'planned'])
-           if(!error && Array.isArray(data)) liste = data.map(r => ({ id: r.id, status: r.status, richtung: r.richtung, firm: r.master_firm, name: r.master_name,
-             geclaimt: rkClaimAt(r.start_um_gestartet_at, r.orbit_gesendet_at), sf: r.start_fehler || null })) }catch(_){}
+      try{ const { data, error } = await supabase.from('trade_plans').select('id,status,richtung,master_firm,master_name,start_um_gestartet_at,orbit_gesendet_at,start_fehler:mt5_baseline->start_fehler'
+             + (o.geplanteHand ? ',route,auto_plan,orbit_v3,hedge_eur,notes,master_account_id,start_um,planned_for,created_at' : '')).in('status', ['open', 'planned'])
+           if(!error && Array.isArray(data)) liste = data.map(r => {
+             // Plan-Popup (geplanteHand): Hand/WD/Orbit V3 + „von heute" wie aus tradePlans (09.10.2026)
+             const pl = o.geplanteHand ? { route: r.route, orbitV3: r.orbit_v3 === true, hedgeEur: r.hedge_eur != null ? Number(r.hedge_eur) : null, notes: r.notes,
+               masterAccountId: r.master_account_id, startUm: r.start_um || null, plannedFor: r.planned_for, createdAt: r.created_at } : null
+             return { id: r.id, status: r.status, richtung: r.richtung, firm: r.master_firm, name: r.master_name,
+               geclaimt: rkClaimAt(r.start_um_gestartet_at, r.orbit_gesendet_at), sf: r.start_fehler || null,
+               hand: pl ? (r.auto_plan !== true || tpIstWdPlan(pl) || tpIstOrbitV3(pl)) : false, heute: pl ? rkPlanHeute(pl) : false } }) }catch(_){}
     }
     if(!liste) liste = (tradePlans || []).filter(p => p.status === 'open' || p.status === 'planned')
       .map(p => ({ id: p.id, status: p.status, richtung: p.richtung, firm: p.masterFirm, name: p.masterName,
-        geclaimt: rkClaimAt(p.startUmGestartetAt, p.orbitGesendetAt), sf: (p.mt5Baseline && p.mt5Baseline.start_fehler) || null }))
+        geclaimt: rkClaimAt(p.startUmGestartetAt, p.orbitGesendetAt), sf: (p.mt5Baseline && p.mt5Baseline.start_fehler) || null,
+        hand: !p.autoPlan || tpIstWdPlan(p) || tpIstOrbitV3(p), heute: rkPlanHeute(p) }))
     const lauf = { long: [], short: [] }, gep = { long: [], short: [] }
     for(const p of liste){
       if(ohne && String(p.id) === ohne) continue
@@ -42451,9 +42480,15 @@
       // long ist — es gilt nur, wenn bei der gleichen ID unter der gleichen Firma schon eine Richtung läuft"). Die Koordinations-Regel
       // „laufender Plan sperrt für JEDE Firma" war falsch und ist raus; ohne gewählte Firma sperrt nichts.
       if(!ziel || norm(p.firm) !== ziel) continue
-      if(!rkZaehlt(p.status, p.geclaimt, p.sf)) continue   // bloß geplant / alter Claim / Start-Fehler sperrt nichts (09.10.2026)
+      const zaehlt = rkZaehlt(p.status, p.geclaimt, p.sf)
+      // PLAN-POPUP (o.geplanteHand, 09.10.2026 — Finn über Master, Jacob: zweiter Winning Day derselben ID × Firma gegenläufig geplant,
+      // ohne Hinweis): dort zählen auch GEPLANTE Hand-Pläne bzw. Winning Day/Orbit V3 von heute mit (laufen stundenlang = praktisch
+      // gleichzeitig) — Auto-Vorschläge nicht (deren Mischung über den Tag bleibt, Finn 03:45). Start-Wächter/DB: weiter nur laufend.
+      const geplantHand = !zaehlt && !!(o && o.geplanteHand) && p.status === 'planned' && p.hand && p.heute && !(p.sf && p.sf.status !== 'behoben')
+      if(!zaehlt && !geplantHand) continue   // bloß geplant / alter Claim / Start-Fehler sperrt nichts (09.10.2026)
       if(p.status === 'open') lauf[seite].push({ name: p.name, firm: p.firm, verb: 'läuft gerade' })
-      else if(p.geclaimt) lauf[seite].push({ name: p.name, firm: p.firm, verb: 'startet gerade' })   // Start läuft = wie laufend
+      else if(zaehlt && p.geclaimt) lauf[seite].push({ name: p.name, firm: p.firm, verb: 'startet gerade' })   // Start läuft = wie laufend
+      else if(geplantHand) lauf[seite].push({ name: p.name, firm: p.firm, verb: 'ist schon geplant', geplant: true })
       else gep[seite].push({ name: p.name, firm: p.firm, verb: 'ist geplant' })
     }
     try{
@@ -42469,7 +42504,7 @@
     if(L && S) return { lauf: null, widerspruch: true, text: `Laufende/geplante Trades widersprechen sich (LONG und SHORT) — Richtung selbst prüfen.` }
     const seite = L ? 'long' : 'short', b0 = quelle[seite][0]
     return { lauf: seite, widerspruch: false, quelle: quelle === lauf ? 'lauf' : 'plan',   // quelle: Richtung am Start (07.10.2026)
-      text: `Achtung: ${b0.name || '?'}${b0.firm ? ` (${b0.firm})` : ''} ${b0.verb} ${seite.toUpperCase()} — ${seite === 'long' ? 'SELL' : 'BUY'} wäre gegen den ${quelle === lauf ? 'laufenden' : 'geplanten'} Trade` }
+      text: `Achtung: ${b0.name || '?'}${b0.firm ? ` (${b0.firm})` : ''} ${b0.verb} ${seite.toUpperCase()} — ${seite === 'long' ? 'SELL' : 'BUY'} wäre gegen den ${quelle === lauf && !b0.geplant ? 'laufenden' : 'geplanten'} Trade` }
   }
   window._v2RichtungKonflikt = v2RichtungKonflikt   // Entwickler-Haken wie _mklStub: Regel ohne Popup prüfbar
 
@@ -42945,7 +42980,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1429'
+  const OS_TAB_BUILD = '2026-09-22.1430'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -46831,8 +46866,10 @@
   const _rkTickStart = new Set()   // Echo V2: Plan-IDs, die tpStartUmTick gestartet hat — die Sperre im Check-Popup meldet sich so zurück
   // TOPSTEP V2 MIT (09.10.2026, Finn: „Gegenrichtung ist verboten"): tsv2 fehlte hier — Topstep-Kette 1/2 auf zwei Konten derselben ID,
   // d369e8d5 SELL lief, 333d4791 BUY wurde ohne Richtungsprüfung am Start nur vom DB-Riegel 90 s geschoben und dann geclaimt
+  // WINNING DAY + ORBIT V3 MIT (09.10.2026, Finn über Master: Jacob plante zwei WDs derselben ID × Firma gegenläufig) — sie laufen als tvv2
+  // mit Fusion-Hedge; am Start nur verschieben/sperren, nie drehen (Hand-Pläne — rkVorStart dreht ohnehin nur Auto-Pläne ohne Hand-Werte)
   function rkGilt(p){
-    return !!p && (p.route === 'tvv2' || p.route === 'mt5v2' || p.route === 'tsv2') && !tpIstWdPlan(p) && !tpIstOrbitV3(p) && (p.richtung === 'buy' || p.richtung === 'sell')
+    return !!p && (p.route === 'tvv2' || p.route === 'mt5v2' || p.route === 'tsv2') && (p.richtung === 'buy' || p.richtung === 'sell')
   }
   const rkFlag = p => (p && p.mt5Baseline && p.mt5Baseline.richtung_konflikt) || null
   // aufgegeben gilt nur für genau die Startzeit, bei der aufgegeben wurde — eine neue Uhrzeit von Hand startet wieder normal
@@ -46872,6 +46909,7 @@
     const { data, error } = await q.select('*')
     if(error || !data || !data.length){ console.warn('[richtung-start] Plan nicht mehr verschiebbar', plan.id, error); return false }
     const neu = rkPlanErsetzen(data[0])
+    if(!aufgeben && tpIstWdPlan(neu)) await tpWdTagesplanStartSetzen(neu.id, neu.startUm)   // Tagesplan mitziehen (09.10.2026)
     const flag = { quelle, status: aufgeben ? 'aufgegeben' : 'wartet', um: jetzt, erst_start: erst, versuche, gegen: (k && k.lauf) || null,
       text: grundTxt + (quelle === 'puls' ? ' (letzte Prüfung vor der Order)' : ''), start: neu.startUm, pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : null }
     try{ await baselinePatch(plan.id, { richtung_konflikt: flag }, 'planned') }catch(e){ console.warn('[richtung-start] Flag', (e && e.message) || e) }
@@ -52348,7 +52386,7 @@
     // Richtungs-Schutz auch für Echo V2 und Topstep V2 (25.09.2026 nachmittags, Finn-Fund bei Mike: zweiter FundedNext-Plan in
     // Gegenrichtung ließ sich speichern) — dieselbe Prüfung wie für Orbit V2 direkt darunter.
     if((_tpRoute === 'mt5v2' || _tpRoute === 'tsv2') && (_tpDir === 'buy' || _tpDir === 'sell')){
-      let k = null; try{ k = await v2RichtungKonflikt({ firm: master.firm, ohneId: _editingPlanId, frisch: true }) }catch(_){}
+      let k = null; try{ k = await v2RichtungKonflikt({ firm: master.firm, ohneId: _editingPlanId, frisch: true, geplanteHand: true }) }catch(_){}
       if(k && k.lauf && k.lauf !== (_tpDir === 'sell' ? 'short' : 'long')){ msg(k.text + ' — nicht gespeichert (Richtungs-Schutz).', 'err'); return }
     }
     // Winning Day (24.09.2026 abends): Fusion-Gegenhedge aus der Staffel am Plan; „Orbit V2" ohne Winning Day nullt ihn
@@ -52359,7 +52397,7 @@
       const _editPlan = _editingPlanId ? tradePlans.find(x => String(x.id) === String(_editingPlanId)) : null
       // Richtungs-Schutz (25.09.2026): Pläne frisch aus der DB — Gegenrichtung zu einem laufenden/geplanten Trade wird nicht gespeichert
       if(_tpDir === 'buy' || _tpDir === 'sell'){
-        let k = null; try{ k = await v2RichtungKonflikt({ firm: master.firm, ohneId: _editingPlanId, frisch: true }) }catch(_){}
+        let k = null; try{ k = await v2RichtungKonflikt({ firm: master.firm, ohneId: _editingPlanId, frisch: true, geplanteHand: true }) }catch(_){}
         if(k && k.lauf && k.lauf !== (_tpDir === 'sell' ? 'short' : 'long')){ msg(k.text + ' — nicht gespeichert (Richtungs-Schutz).', 'err'); return }
       }
       if(_tpWd || _tpO3){

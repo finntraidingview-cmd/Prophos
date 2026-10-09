@@ -116,11 +116,12 @@ def main():
     html = open(os.path.join(os.path.dirname(sd.APP), "prophos.html"), encoding="utf-8").read()
     check("const RK_CLAIM_FRISCH_MS = 15 * 60000" in html
           and "Date.now() - Date.parse(geclaimt) <= RK_CLAIM_FRISCH_MS && !(sf && sf.status !== 'behoben'))" in html
-          and "if(!rkZaehlt(p.status, p.geclaimt, p.sf)) continue" in html
+          and "const zaehlt = rkZaehlt(p.status, p.geclaimt, p.sf)" in html and "if(!zaehlt && !geplantHand) continue" in html
+          and "!!(o && o.geplanteHand)" in html   # 09.10.2026: geplante Hand-/WD-Pläne zählen NUR im Plan-Popup (geplanteHand)
           and "if(!rkZaehlt(p.status, rkClaimAt(p.startUmGestartetAt, p.orbitGesendetAt), p.mt5Baseline && p.mt5Baseline.start_fehler)) continue" in html
-          and "else if(p.geclaimt) lauf[seite].push({ name: p.name, firm: p.firm, verb: 'startet gerade' })" in html
-          and "select('id,status,richtung,master_firm,master_name,start_um_gestartet_at,orbit_gesendet_at,start_fehler:mt5_baseline->start_fehler')" in html,
-          "Richtungs-Prüfungen: nur laufende und FRISCH geclaimte ohne Start-Fehler zählen, bloß geplante und Leichen nie")
+          and "else if(zaehlt && p.geclaimt) lauf[seite].push({ name: p.name, firm: p.firm, verb: 'startet gerade' })" in html
+          and "select('id,status,richtung,master_firm,master_name,start_um_gestartet_at,orbit_gesendet_at,start_fehler:mt5_baseline->start_fehler'" in html,
+          "Richtungs-Prüfungen: nur laufende und FRISCH geclaimte ohne Start-Fehler zählen, bloß geplante und Leichen nie (außer Plan-Popup: Hand/WD/V3 von heute)")
     check("RK_WECHSEL_MIN" not in html and "rkPlanNah" not in html, "kein 90-min-Fenster mehr im Frontend")
     vs = html[html.index("  async function rkVorStart(plan){"):html.index("  window._rk = {")]
     check("if(plan.autoPlan && k.quelle === 'lauf'){" in vs
