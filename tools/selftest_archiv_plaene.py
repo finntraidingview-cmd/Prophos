@@ -53,8 +53,26 @@ def main():
     check("and not ap_ist_waise(p)]" in block(app, "\ndef ap_planen(") and "not ersetzt(p) and not ap_ist_waise(p)]" in block(app, "\ndef _ap_stand_laden("),
           "Planer (plaene) und Stand (Delta/Bot) zählen Waisen nicht")
 
+    from datetime import datetime as _dt, timezone as _tz
+    ns.update(datetime=_dt, timezone=_tz, AP_CLAIM_HAENGT_MIN=10)
+    exec(block(app, "\ndef ap_claim_haengt(").lstrip("\n"), ns)
     exec(block(app, "\ndef ap_archiv_sweep_ziele(").lstrip("\n"), ns)
     sz = ns["ap_archiv_sweep_ziele"]
+    # Hängender Claim (Finn 09.10.2026, FN …0296 1c3f7ecd: geclaimt, start_fehler rot, nie gestartet — Konto geblowt + archiviert)
+    J = _dt(2026, 10, 9, 3, 0, tzinfo=_tz.utc)
+    rot = {"status": "rot", "unklar": True}
+    hc = [{"id": "h1", "status": "planned", "master_account_id": "k-arch", "start_um_gestartet_at": "2026-10-08T23:47:02.822+00:00", "start_fehler": rot},
+          {"id": "h2", "status": "planned", "master_account_id": "k-arch", "start_um_gestartet_at": "2026-10-09T02:55:00+00:00", "start_fehler": rot},
+          {"id": "h3", "status": "planned", "master_account_id": "k-arch", "start_um_gestartet_at": "2026-10-08T23:47:02Z"},
+          {"id": "h4", "status": "planned", "master_account_id": "k-arch", "start_um_gestartet_at": "2026-10-08T23:47:02Z", "start_fehler": rot,
+           "orbit_gesendet_at": "x"},
+          {"id": "h5", "status": "planned", "master_account_id": "k-aktiv", "start_um_gestartet_at": "2026-10-08T23:47:02Z", "start_fehler": rot},
+          {"id": "h6", "status": "planned", "master_account_id": None, "start_um_gestartet_at": "2026-10-08T23:47:02Z", "start_fehler": rot},
+          {"id": "h7", "status": "planned", "master_account_id": "k-arch", "start_um_gestartet_at": "2026-10-08T23:47:02Z",
+           "mt5_baseline": {"start_fehler": {"status": "gelb"}}}]
+    check([p["id"] for p in sz(hc, {"k-arch"}, J)] == ["h1"],
+          "hängender Claim (rot, ≥ 10 min, ohne Order) eines archivierten Kontos raus; jung/ohne Fehler/gesendet/aktiv/Waise/nicht rot bleiben")
+    check(ns["ap_claim_haengt"](dict(hc[0], start_fehler=None, mt5_baseline={"start_fehler": rot}), J), "start_fehler auch aus mt5_baseline")
     pl = [{"id": "s1", "status": "planned", "master_account_id": "k-arch"},
           {"id": "s2", "status": "planned", "master_account_id": None},
           {"id": "s3", "status": "planned", "master_account_id": "k-aktiv"},
@@ -72,6 +90,9 @@ def main():
     check(all(x in sw for x in ('_ap_archiviert(streng=True)', '"status": "eq.planned", "start_um_gestartet_at": "is.null", "started_at": "is.null",',
                                 '"orbit_gesendet_at": "is.null", "master_account_id": f"eq.{kid}" if kid else "is.null"', "sb_delete(")),
           "Sweep-DELETE trägt den Wächter in der Anfrage selbst")
+    check('"start_um_gestartet_at": f"eq.{p[\'start_um_gestartet_at\']}", "mt5_baseline->start_fehler->>status": "eq.rot"' in sw
+          and "start_fehler:mt5_baseline->start_fehler" in sw and '"status": "eq.planned", "started_at": "is.null"})' in sw,
+          "Sweep liest Claims mit start_fehler; DELETE eines hängenden Claims nur mit genau diesem Claim + start_fehler rot im Wächter")
     check("ap_archiv_sweep()" in block(app, "\ndef ap_loop("), "Sweep läuft in der Auto-Planer-Schleife")
     check('rest/v1/auto_plan_umplanung' in sw and '"quelle": "bot"' in sw and "Plan entfernt — " in sw,
           "Sweep protokolliert je Plan in auto_plan_umplanung (quelle bot)")

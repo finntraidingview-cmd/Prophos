@@ -17312,14 +17312,43 @@ AP_ARCHIV_SWEEP_S = 300
 _ap_sweep = {"at": 0.0, "letzt": None}
 
 
-def ap_archiv_sweep_ziele(plaene, archiv):
-    """REIN RECHNEND (testbar): Pläne, die der Sweep entfernt — geplant, nie geclaimt/gestartet/gesendet, Konto archiviert oder Waise."""
+AP_CLAIM_HAENGT_MIN = 10        # Minuten nach dem Claim — der Echo-Check läuft höchstens ~5 min (master-order bis 320 s)
+
+
+def ap_claim_haengt(p, jetzt=None):
+    """REIN RECHNEND (testbar): geclaimter Plan, dessen Start nachweislich ohne Order geendet hat (Finn 09.10.2026, FN …0296 1c3f7ecd:
+    Konto von Hand geblowt + archiviert, der Plan blieb „planned" — Claim gesetzt, start_fehler rot, nie gestartet; das Archivieren und
+    der Sweep ließen jeden geclaimten Plan stehen, weil dort ein Start laufen könnte). Hängend = Claim älter als AP_CLAIM_HAENGT_MIN,
+    start_fehler mit status rot, kein started_at, kein orbit_gesendet_at. Ein laufender Check (Claim jünger) zählt nie."""
+    p = p or {}
+    if p.get("status") != "planned" or not p.get("start_um_gestartet_at") or p.get("started_at") or p.get("orbit_gesendet_at"):
+        return False
+    sf = p.get("start_fehler")
+    if sf is None and isinstance(p.get("mt5_baseline"), dict):
+        sf = p["mt5_baseline"].get("start_fehler")
+    if not isinstance(sf, dict) or sf.get("status") != "rot":
+        return False
+    try:
+        claim = datetime.fromisoformat(str(p["start_um_gestartet_at"]).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    jetzt = jetzt or datetime.now(timezone.utc)
+    return (jetzt - claim).total_seconds() >= AP_CLAIM_HAENGT_MIN * 60
+
+
+def ap_archiv_sweep_ziele(plaene, archiv, jetzt=None):
+    """REIN RECHNEND (testbar): Pläne, die der Sweep entfernt — geplant, nie gestartet/gesendet, Konto archiviert oder Waise. Geclaimte
+    nur bei archiviertem Konto UND hängendem Claim (ap_claim_haengt: rot, ohne Order, ≥ 10 min) — Waisen mit Claim bleiben."""
     out = []
     for p in plaene or ():
         p = p or {}
-        if p.get("status") != "planned" or p.get("start_um_gestartet_at") or p.get("started_at") or p.get("orbit_gesendet_at"):
+        if p.get("status") != "planned" or p.get("started_at") or p.get("orbit_gesendet_at"):
             continue
         kid = p.get("master_account_id")
+        if p.get("start_um_gestartet_at"):
+            if kid and str(kid) in (archiv or ()) and ap_claim_haengt(p, jetzt):
+                out.append(p)
+            continue
         if not kid or str(kid) in (archiv or ()):
             out.append(p)
     return out
@@ -17346,13 +17375,15 @@ def ap_archiv_sweep(force=False):
     _ap_sweep["at"] = time.time()
     archiv = _ap_archiviert(streng=True)
     plaene = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_name,master_firm,richtung,status,start_um,"
-                                               "start_um_gestartet_at,started_at,orbit_gesendet_at,notes",
-                                     "status": "eq.planned", "start_um_gestartet_at": "is.null", "started_at": "is.null"})
+                                               "start_um_gestartet_at,started_at,orbit_gesendet_at,notes,start_fehler:mt5_baseline->start_fehler",
+                                     "status": "eq.planned", "started_at": "is.null"})
     weg, protokoll = [], []
     for p in ap_archiv_sweep_ziele(plaene, archiv):
         kid = p.get("master_account_id")
         guard = {"id": f"eq.{p['id']}", "status": "eq.planned", "start_um_gestartet_at": "is.null", "started_at": "is.null",
                  "orbit_gesendet_at": "is.null", "master_account_id": f"eq.{kid}" if kid else "is.null"}
+        if p.get("start_um_gestartet_at"):         # hängender Claim (ap_claim_haengt): genau dieser Claim, start_fehler weiter rot
+            guard.update({"start_um_gestartet_at": f"eq.{p['start_um_gestartet_at']}", "mt5_baseline->start_fehler->>status": "eq.rot"})
         try:
             if not sb_delete("trade_plans", guard):
                 continue
@@ -17360,7 +17391,7 @@ def ap_archiv_sweep(force=False):
             print(f"[archiv-sweep] ⚠️ {str(p['id'])[:8]}: {type(e).__name__}: {e}", flush=True)
             continue
         weg.append(str(p["id"]))
-        grund = "archiviert" if kid else "Konto gelöscht"
+        grund = ("archiviert, Start ohne Order hängengeblieben" if p.get("start_um_gestartet_at") else "archiviert") if kid else "Konto gelöscht"
         protokoll.append({"plan_id": p["id"], "user_id": p.get("user_id"), "firma": p.get("master_firm"), "von_richtung": p.get("richtung"),
                           "von_start": p.get("start_um"), "grund": f"Plan entfernt — {'Konto archiviert' if kid else 'Konto gelöscht'}",
                           "quelle": "bot"})
