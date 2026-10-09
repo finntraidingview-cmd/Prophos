@@ -32,10 +32,12 @@ def main():
           and "at: apAt || Date.now(), apAt," in h and "_ap.geholtAt = c.apAt || c.at }" in h,
           "Zwischenspeicher: Fehlschlag behält Lauf/Delta und Zeit des alten Stands, Lesen setzt den Stand")
     check(h.count("[apLadeFehlerText(), apdLadeFehlerText()].filter(Boolean)") == 1
-          and "typeof apLadeFehlerText === 'function' ? apLadeFehlerText() : ''" in h and "const fzAp = apLadeFehlerText()" in h,
+          and "typeof apLadeFehlerText === 'function' ? apLadeFehlerText() : ''" in h and "const fzAp = fzHier ? apLadeFehlerText() : ''" in h,
           "Zeile im Trade-Planer, im Admin-Trade-Planer und in der Planer-Leiste")
-    check("if(!_ap.imPlaner && !vorschlaege.length && !bestaetigt && !_ap.ladeFehler){ el.style.display = 'none'; return }" in h,
-          "Planer-Leiste bleibt bei Ladefehler sichtbar")
+    # 09.10.2026 (Befund Prüfer S2): Leiste steht auf der Trade-Planer-Seite über #tpl-root → dort keine zweite Zeile
+    check("const fzHier = !el.closest('#tpl-view') && !!_ap.ladeFehler" in h
+          and "if(!_ap.imPlaner && !vorschlaege.length && !bestaetigt && !fzHier){ el.style.display = 'none'; return }" in h,
+          "Planer-Leiste: Ladefehler-Zeile nur außerhalb der Trade-Planer-Seite (dort einmal in #tpl-root)")
     check("apLetztenHolen().then(() => { _tpl.fehler = '' }, () => { _tpl.fehler = '' })" in h, "kein zweiter, roher Fehlertext für denselben Abruf")
     print("\nALLES GRÜN" if not FEHLER else f"\n{len(FEHLER)} FEHLER")
     return 0 if not FEHLER else 1

@@ -42738,7 +42738,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1411'
+  const OS_TAB_BUILD = '2026-09-22.1412'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -47279,7 +47279,10 @@
     if(currentUserId && _ap.geladenFuer !== currentUserId){ _ap.geladenFuer = currentUserId; apLetztenLaden(); return }
     const vorschlaege = (tradePlans || []).filter(p => p && p.status === 'planned' && p.autoPlan && !p.autoBestaetigtAt)
     const bestaetigt = (tradePlans || []).filter(p => p && p.status === 'planned' && p.autoPlan && p.autoBestaetigtAt).length
-    if(!_ap.imPlaner && !vorschlaege.length && !bestaetigt && !_ap.ladeFehler){ el.style.display = 'none'; return }   // Ladefehler: Karte bleibt, mit Zeile
+    // Ladefehler-Zeile nur außerhalb der Trade-Planer-Seite (09.10.2026, Befund Prüfer S2: die Seite zeichnet sie in #tpl-root direkt
+    // darunter selbst — Leiste + Kopf zeigten denselben Satz zweimal untereinander)
+    const fzHier = !el.closest('#tpl-view') && !!_ap.ladeFehler
+    if(!_ap.imPlaner && !vorschlaege.length && !bestaetigt && !fzHier){ el.style.display = 'none'; return }   // Ladefehler: Karte bleibt, mit Zeile
     // Trade-Planer-Seite zeichnet Lauf + Knöpfe in ihrer Kopfzeile (QA 08.10.2026 Punkt 1) — die Karte hier nur, wo es die Kopfzeile nicht gibt
     if(_tpl.kopfInChips && el.closest('#tpl-view')){ el.style.display = 'none'; return }
     const l = _ap.letzter || {}, e = apEigenes(l)
@@ -47289,7 +47292,7 @@
       : `${l.trocken ? 'Probelauf' : l.quelle === 'nachplanen' ? 'Nachplanen' : 'Letzter Lauf'}${l.at ? ' ' + new Date(l.at).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}: ${e.geplant.length} geplant · ${e.ausgelassen.length} ausgelassen`
         + (gruende.size ? ` (${[...gruende].sort((a, b) => b[1] - a[1]).map(([k, n]) => `${n} ${escapeHtml(k)}`).join(' · ')})` : '')
     el.style.display = ''
-    const fzAp = apLadeFehlerText()   // Ladefehler sichtbar (09.10.2026)
+    const fzAp = fzHier ? apLadeFehlerText() : ''   // Ladefehler sichtbar (09.10.2026), auf der Trade-Planer-Seite steht er in #tpl-root
     el.innerHTML = (fzAp ? `<div style="color:var(--danger);font-size:12.5px;margin-bottom:6px">${escapeHtml(fzAp)}</div>` : '') + `<div style="display:flex;align-items:center;gap:6px 10px;flex-wrap:wrap">
         <b>🤖 Auto-Planer</b>
         <span style="color:var(--sub)">${vorschlaege.length ? `${vorschlaege.length} ${vorschlaege.length === 1 ? 'Vorschlag wartet' : 'Vorschläge warten'} auf Bestätigung` : 'keine offenen Vorschläge'}${bestaetigt ? ` · ${bestaetigt} bestätigt` : ''}</span>
