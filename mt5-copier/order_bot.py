@@ -17520,6 +17520,25 @@ def win_hover_js(x, y):
             ");return !!(e&&e.matches(':hover'));})()")
 
 
+# HOVER-BEWEIS AM ZIEL-KASTEN (09.10.2026, Routine „Puls-Fehler", Muster „… nicht gedrückt (Klick ohne Beweis)" / „knopf: senden-knopf
+# nicht gedrückt": 7 Spuren in 2 Tagen auf 4 PCs mit „Seite sah den Zeiger am Ziel, :hover trotzdem woanders" — Konto-Zeile, Kontextmenü,
+# Reiter Positions/Account summary, Show more, Werbe-Kachel-X; in der Werbe-Kachel-Spur stand es wörtlich: „am Punkt 'close ad', Zeiger
+# laut Seite über 'svg @497,680'" = das Kind-Element IM selben Knopf). Ursache: elementFromPoint am gerechneten Punkt trifft ein BLATT
+# (Text-span, svg-Pfad), der echte Zeiger steht einen Bildpunkt daneben noch im selben Knopf — Chrome hängt :hover dann am Knopf, nicht
+# am Blatt, und e.matches(':hover') war falsch, obwohl der Zeiger auf dem Ziel liegt. Der Beweis gilt jetzt auch, wenn der TIEFSTE
+# :hover-Knoten ein kleiner Vorfahr des Blatts am Punkt ist (≤ 64 px hoch, ≤ 600 px breit — nie ein Menü, eine Liste oder der Chart):
+# ein Druck trifft dann genau diesen Kasten. Ohne :hover am Ziel weiter kein Druck; fremdes Fenster und Maus-Mitschrift unverändert.
+# Nur lesen. -> {hover, eltern (Beweis über den Vorfahren), unter (tiefster :hover-Knoten für die Spur)}
+WIN_HOVER_ELTERN_JS = (
+    "(function(e){function T(n){return String((n&&n.textContent)||'').replace(/\\s+/g,' ').trim();}"
+    "var hs=document.querySelectorAll(':hover'),d=hs.length?hs[hs.length-1]:null,dr=d?d.getBoundingClientRect():null;"
+    "var unter=d?(d.tagName.toLowerCase()+' '+String(d.getAttribute('data-testid')||d.getAttribute('aria-label')||T(d)).slice(0,30)"
+    "+' @'+Math.round(dr.left)+','+Math.round(dr.top)):'nichts';"
+    "var hv=e.matches(':hover'),el=false;"
+    "if(!hv&&d&&d!==e&&d.contains(e)&&dr.height<=64&&dr.width<=600){hv=true;el=true;}"
+    "return {hover:hv,eltern:el,unter:unter};})(e)")
+
+
 def win_ziel_js(x, y):
     """Am Viewport-Punkt: liegt das Element unter dem Mauszeiger (:hover) — und gehört es zu einer TradingView-Meldung (Toast)?
     Live 29.09.2026 16:13 UTC: der aufgeklappte Meldungsstapel lag über dem Konto-Umschalter, der Klick traf die Meldung. Liest nur."""
@@ -17533,7 +17552,8 @@ def win_ziel_js(x, y):
             # am Ziel", die Seite hatte die Bewegung aber nie bekommen bzw. :hover blieb beim alten Element (Werbe-Kachel 06./07.10.:
             # „am Punkt 'close ad', Zeiger laut Seite über 'svg'"). Nur lesen; ohne augen.js null.
             "var m=(globalThis.prophosAugen&&globalThis.prophosAugen.maus)?globalThis.prophosAugen.maus():null;"
-            "return {hover:e.matches(':hover'),toast:!!t,was:w,maus:m};})()")
+            "var h=win_hover_eltern(e);"
+            "return {hover:h.hover,eltern:h.eltern,unter:h.unter,toast:!!t,was:w,maus:m};})()").replace("win_hover_eltern(e)", WIN_HOVER_ELTERN_JS)
 
 
 def maus_stups_befund(v, p, toleranz=3.0):
@@ -17580,12 +17600,10 @@ def win_ziel_pruef_js(x, y, pruef):
             "var t=(p.text||'').toLowerCase(),a=(p.aria||'').toLowerCase(),kt=T(k),ka=A(k);"
             "var text_ok=(!t&&!a)||(t&&(kt.indexOf(t)>=0||T(e).indexOf(t)>=0))||(a&&(ka.indexOf(a)>=0||A(e).indexOf(a)>=0));"
             "var tabu=p.tabu?new RegExp(p.tabu,'i').test(kt+' '+ka):false,w=String(p.wort||'').toLowerCase(),wort_ok=!w||T(e)===w;"
-            "var hs=document.querySelectorAll(':hover'),d=hs.length?hs[hs.length-1]:null,dr=d?d.getBoundingClientRect():null;"
-            "var unter=d?(d.tagName.toLowerCase()+' '+String(d.getAttribute('data-testid')||d.getAttribute('aria-label')||T(d)).slice(0,30)"
-            "+' @'+Math.round(dr.left)+','+Math.round(dr.top)):'nichts';"
+            "var h=win_hover_eltern(e);"
             "var m=(globalThis.prophosAugen&&globalThis.prophosAugen.maus)?globalThis.prophosAugen.maus():null;"   # s. win_ziel_js (08.10.2026)
-            "return {hover:e.matches(':hover'),passt:!!(drin&&klein&&text_ok&&!tabu&&wort_ok),was:(kt||ka||k.tagName.toLowerCase()).slice(0,40),tabu:tabu,wort:wort_ok,unter:unter,maus:m};})("
-            + json.dumps(pruef, ensure_ascii=False) + ")")
+            "return {hover:h.hover,eltern:h.eltern,passt:!!(drin&&klein&&text_ok&&!tabu&&wort_ok),was:(kt||ka||k.tagName.toLowerCase()).slice(0,40),tabu:tabu,wort:wort_ok,unter:h.unter,maus:m};})("
+            + json.dumps(pruef, ensure_ascii=False) + ")").replace("win_hover_eltern(e)", WIN_HOVER_ELTERN_JS)
 
 
 # Schließen-Knöpfe der Meldungen, die GANZ im Bild liegen: erst das X der Gruppe (toast-group-close-button-*), sonst das X einzelner
@@ -18317,7 +18335,8 @@ class _AugenSitzung:
                 _stups()
                 ende = time.time() + 0.7
         if not hover:
-            zus = (f" — am Punkt '{v.get('was')}', Zeiger laut Seite über '{v.get('unter')}'" if pruef and isinstance(v, dict)
+            # unter auch ohne pruef (09.10.2026, Routine „Puls-Fehler"): WO :hover wirklich hängt, sonst bleibt „woanders" unlesbar
+            zus = (f" — am Punkt '{v.get('was')}', Zeiger laut Seite über '{v.get('unter')}'" if isinstance(v, dict) and v.get("unter")
                    else (f" — am Punkt '{v.get('was')}'" if isinstance(v, dict) and v.get("was") else ""))
             # Befund der Seite zur Zeigerposition (08.10.2026): stand sie am Ziel, hat sich das ZIEL unter dem Zeiger bewegt
             _s, bef = maus_stups_befund(v, p)
@@ -18365,7 +18384,8 @@ class _AugenSitzung:
         if not _klick_absolut(punkt[0], punkt[1], doppel=bool(doppel and pruef)):   # doppel nur mit Ziel-Beweis (K4)
             self.trail.append(f"{name}: SendInput abgelehnt")
             return False
-        self.trail.append(f"{name} geklickt @{punkt[0]},{punkt[1]} (Windows-Maus, Hover bewiesen)")
+        kasten = ", am Ziel-Kasten" if isinstance(v, dict) and v.get("eltern") else ""   # Beweis über den kleinen Vorfahren (09.10.2026)
+        self.trail.append(f"{name} geklickt @{punkt[0]},{punkt[1]} (Windows-Maus, Hover bewiesen{kasten})")
         return True
 
     def _win_key(self, text_sk):

@@ -25,6 +25,7 @@ Status: erledigt
 Was passiert: Am pc-c19p2l scheiterte der Echo-Start des FundingPips-Plans 840c8097… zweimal (13:42 und 14:16 UTC) mit „Terminal-Verbindung fehlgeschlagen (-10005, 'IPC timeout')“ — der Bot vermutet die Windows-Abfrage „Client Terminal …“ (MT5-Update / Benutzerkontensteuerung), die er nicht abnehmen darf. Der Plan steht noch auf „geplant“. Nur dieser PC. In mt5_live steht für diesen PC mt5_update.abgelehnt = true: die stille MT5-Update-Aufgabe (6ab30b9/4eeb949 von heute) wurde dort mit „Nein“ oder durch Zeitablauf nicht eingerichtet; dasselbe gilt für pc-auzre5, pc-pw1put und pc-xc5c52.
 Was ich brauche: Am pc-c19p2l einmal nachsehen, ob eine Windows-Abfrage offen steht („Ja“), und im Echo-Panel „MT5-Update einrichten“ klicken bzw. die Windows-PowerShell-Abfrage einmal mit „Ja“ bestätigen — danach kommt die Abfrage nicht mehr und der Echo-Start läuft. Gelegentlich dasselbe auf pc-auzre5, pc-pw1put, pc-xc5c52 (dort bisher kein Fehlstart deswegen, aber „abgelehnt“). Danach Plan 840c8097… neu starten.
 Stand 09.10. 05:45 (Routine): mt5_live zeigt mt5_update.abgelehnt = true weiterhin auf pc-c19p2l, pc-auzre5, pc-pw1put, pc-xc5c52; kein neuer IPC-Fall seit 14:16 UTC gestern, Plan 840c8097… steht noch „planned“.
+Stand 09.10. 20:45 (Routine): weiter „abgelehnt“ auf pc-c19p2l, pc-auzre5, pc-xc5c52 (pc-pw1put seit > 3 h ohne Meldung); kein neuer IPC-Fall; Plan 840c8097… steht noch „planned“ (zuletzt 16:20 UTC bearbeitet).
 Status: offen
 
 ## 2026-10-08 20:39 — orbit: slave-terminal (fusion-copier) nicht bereit — 'Algo Trading' im Hedge-Terminal nicht aktiv
@@ -35,4 +36,5 @@ Status: offen
 ## 2026-10-09 05:45 — drei Echo-Pläne stehen „planned“ mit verstrichener Startzeit
 Was passiert: Drei Echo-Pläne haben gestern ihren Start nicht geschafft und stehen noch auf „planned“, ohne neuen Versuch: 72c2a073… (pc-auzre5, Start 13:57 UTC, Grund damals „MetaTrader5-Paket fehlt“ — seit 8032557 behoben), 840c8097… (pc-c19p2l, Start 14:12 UTC, IPC-Timeout / Windows-Abfrage, siehe Frage oben) und 1c3f7ecd… (pc-40mali, Start 23:47 UTC, FundedNext: Server „Trade disabled“, laut deiner Analyse ist das Konto serverseitig gesperrt — Kontostand an der Grenze). Puls hat überall richtig nichts weiter gemacht.
 Was ich brauche: Eine Entscheidung je Plan — neu starten (72c2a073… sollte jetzt durchgehen), umplanen, oder löschen (1c3f7ecd…, wenn das Konto wirklich zu ist). Das kann ich nicht selbst: Pläne anfassen ist Finanz-/Planer-Logik.
+Stand 09.10. 20:45 (Routine): 1c3f7ecd… ist aus trade_plans weg (erledigt); 72c2a073… (pc-auzre5) steht unverändert „planned“ seit 08.10. 13:57 UTC; 840c8097… siehe Frage oben.
 Status: offen

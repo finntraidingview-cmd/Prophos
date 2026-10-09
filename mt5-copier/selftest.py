@@ -3983,6 +3983,12 @@ def test_cdp_konto_regression_865():
         "beide Abmelde-Wege lesen das Menü über _cdp_menue_abwarten; Knopf einmal, Esc bei leerem Menü bleibt")
     chk("maus:m" in ob.win_ziel_js(1, 2) and "prophosAugen.maus()" in ob.win_ziel_js(1, 2) and "toast:!!t" in ob.win_ziel_js(1, 2)
         and "maus:m" in ob.win_ziel_pruef_js(1, 2, {"rect": [0, 0, 10, 10]}), "Ziel-Proben (mit/ohne Kandidat) tragen die Maus-Mitschrift der Seite")
+    # Hover-Beweis am Ziel-Kasten (09.10.2026, Routine „Puls-Fehler": „Seite sah den Zeiger am Ziel, :hover trotzdem woanders")
+    q_hz, q_hp, q_wk = ob.win_ziel_js(1, 2), ob.win_ziel_pruef_js(1, 2, {"rect": [0, 0, 10, 10]}), _im.getsource(ob._AugenSitzung._win_klick)
+    chk(all(("d.contains(e)" in q and "dr.height<=64&&dr.width<=600" in q and "eltern:h.eltern" in q and "unter:h.unter" in q
+             and "win_hover_eltern" not in q and "e.matches(':hover')" in q) for q in (q_hz, q_hp))
+        and 'v.get("eltern")' in q_wk and "Zeiger laut Seite über" in q_wk and "if not hover:" in q_wk,
+        "Hover-Beweis gilt auch am kleinen Vorfahren des Blatts (Ziel-Kasten), nie an Menü/Liste/Chart; ohne :hover weiter kein Druck")
     B_ = ob.maus_stups_befund
     chk(B_({"hover": False}, (10, 20)) == (False, "") and B_(None, (10, 20)) == (False, "") and B_({"maus": {"x": 10, "y": 20, "n": 0}}, (10, 20))[0]
         and B_({"maus": {"x": 11, "y": 19, "vor_ms": 40, "n": 5}}, (10, 20)) == (False, "")
