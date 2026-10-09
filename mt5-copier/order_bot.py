@@ -17640,6 +17640,31 @@ def _win_root_am_punkt(x, y):
     return int(r or 0), b.value or ""
 
 
+def _win_fenster_steckbrief(hwnd):
+    """Fensterklasse, Prozess und Lage eines fremden Fensters für die Spur — '' wenn nicht lesbar (kein Windows, Attrappe im Test).
+    ANLASS (09.10.2026, Routine „Puls-Fehler", Muster „knopf: senden-knopf nicht gedrückt (maus nicht bewiesen über dem knopf)",
+    5× in 7 Tagen auf 4 PCs; zuletzt 09.10. 01:09 UTC am Senden-Knopf, 08.10. 00:46 UTC am X der Werbe-Kachel): am Zielpunkt lag
+    zweimal ein Fenster OHNE Titel — in der Spur stand nur seine Kennung, nicht, welches Programm es ist (Chromes eigene Status-/
+    Tooltip-Fenster haben keinen Titel, ebenso Taskleiste und Overlays). Der Riegel bleibt (nie ein Druck in ein fremdes Fenster);
+    die Spur nennt jetzt Klasse, Prozess (das Puls-Chrome selbst oder fremd) und das Rechteck, damit die Ursache lesbar wird."""
+    try:
+        import ctypes
+        import ctypes.wintypes as wt
+        u32 = ctypes.windll.user32
+        h = wt.HWND(int(hwnd))
+        kl = ctypes.create_unicode_buffer(128)
+        u32.GetClassNameW(h, kl, 128)
+        pid = wt.DWORD(0)
+        u32.GetWindowThreadProcessId(h, ctypes.byref(pid))
+        r = wt.RECT()
+        u32.GetWindowRect(h, ctypes.byref(r))
+        eig = _puls_chrome_browser_pid()
+        wer = "Puls-Chrome selbst" if eig and int(pid.value) == int(eig) else f"PID {int(pid.value)}"
+        return f", Klasse '{kl.value}', {wer}, Lage {r.left},{r.top}–{r.right},{r.bottom}"
+    except Exception:
+        return ""
+
+
 def win_fokus_js(rect):
     """Hat das Feld an diesem Rechteck (CSS-px) den Tastatur-Fokus UND die Seite selbst den Fokus? Liest nur."""
     x, y, w, h = [float(v) for v in rect[:4]]
@@ -18010,10 +18035,10 @@ class _AugenSitzung:
             if versuch == 2:
                 self._fremd_fenster = str(w_titel or "")[:60]
                 self.trail.append(f"{name}: am Zielpunkt @{punkt[0]},{punkt[1]} liegt weiter ein anderes Fenster ({wurzel} "
-                                  f"'{w_titel[:40]}', erwartet {hwnd}) — kein Druck.{self.fremd_hinweis()}")
+                                  f"'{w_titel[:40]}'{_win_fenster_steckbrief(wurzel)}, erwartet {hwnd}) — kein Druck.{self.fremd_hinweis()}")
                 return False
-            self.trail.append(f"{name}: am Zielpunkt @{punkt[0]},{punkt[1]} liegt ein anderes Fenster ({wurzel} '{w_titel[:40]}', "
-                              f"erwartet {hwnd}) — Puls-Chrome neu nach vorn, 2. Versuch")
+            self.trail.append(f"{name}: am Zielpunkt @{punkt[0]},{punkt[1]} liegt ein anderes Fenster ({wurzel} '{w_titel[:40]}'"
+                              f"{_win_fenster_steckbrief(wurzel)}, erwartet {hwnd}) — Puls-Chrome neu nach vorn, 2. Versuch")
             _win_nach_vorn(hwnd)                      # fremdes Fenster war evtl. selbst Vordergrund — Puls-Chrome wieder oben in der Z-Ordnung
             _warte(0.3, 0.2)
             hwnd, grund = self._win_vorn()
@@ -18132,7 +18157,7 @@ class _AugenSitzung:
         if wurzel != int(hwnd):
             self._fremd_fenster = str(w_titel or "")[:60]
             self.trail.append(f"{name}: vor dem Druck liegt am Zielpunkt @{punkt[0]},{punkt[1]} ein anderes Fenster ({wurzel} "
-                              f"'{w_titel[:40]}', erwartet {hwnd}) — kein Druck.{self.fremd_hinweis()}")
+                              f"'{w_titel[:40]}'{_win_fenster_steckbrief(wurzel)}, erwartet {hwnd}) — kein Druck.{self.fremd_hinweis()}")
             return False
         self._druck_versucht = True                  # ab hier KANN gedrückt sein (K4: Ausnahme davor = nichts gesendet)
         if not _klick_absolut(punkt[0], punkt[1], doppel=bool(doppel and pruef)):   # doppel nur mit Ziel-Beweis (K4)
