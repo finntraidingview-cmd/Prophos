@@ -185,7 +185,7 @@ def ensure_starter_source():
 # Kennung geladen: deren Inhalt kann sich nie aendern, ein Zwischenspeicher
 # kann also nichts Falsches liefern.
 _REPO = "finntraidingview-cmd/Prophos"
-BOT_STAND = {"sha": None, "version": None}
+BOT_STAND = {"sha": None, "version": None, "geholt_sha": None}   # geholt_sha: order_bot.py liegt nachweislich in diesem Stand vor
 
 
 # ── CODE-QUELLE RAILWAY (07.10.2026, Repo privat — Finn: „Code-Auslieferung über Railway mit PC-Schlüssel bauen"). Zuerst
@@ -279,9 +279,11 @@ def ensure_bot_source(sha=None):
             with open(tmp, "wb") as f:
                 f.write(data)
             os.replace(tmp, dst)
+            BOT_STAND["geholt_sha"] = sha
             print(f"[panel] order_bot.py aktualisiert ({len(data)} Bytes, Stand "
                   f"{(sha or 'main')[:7]}, {BOT_STAND.get('version') or '?'}).", flush=True)
             return True
+        BOT_STAND["geholt_sha"] = sha                  # Inhalt schon gleich — auch das ist „liegt vor"
     except Exception as e:
         print(f"[panel] order_bot.py-Download fehlgeschlagen ({type(e).__name__}) — "
               f"Order-Schritt meldet das klar, wenn er gebraucht wird.", flush=True)
@@ -4234,15 +4236,24 @@ def _version_watcher(my_version):
     neue VERSION zeigt: die start-panel.bat laedt panel.py von dort. Ein
     Neustart vorher bekaeme den alten Stand aus dem Zwischenspeicher und
     startete im Kreis, bis der abgelaufen ist."""
-    letzter = BOT_STAND.get("sha")
+    letzter = BOT_STAND.get("geholt_sha")      # nicht "sha": der Start-Abruf kann gescheitert sein (09.10.2026)
     runde = 0
     while True:
         time.sleep(15)
         runde += 1
         sha = repo_sha()
         if sha and sha != letzter:
-            letzter = sha
+            # ERST NACH DEM ABRUF MERKEN (09.10.2026, Push e621d2b: ein Panel bekam beim Umschalten von Railway den neuen Stand über den
+            # GitHub-Rückfall, der Abruf von order_bot.py kam nie in Railway an — `letzter` stand trotzdem schon auf dem neuen Stand,
+            # das Panel fragte danach 15-s-weise /code/stand und holte die Datei bis zum nächsten Push nie). Jetzt gilt ein Stand erst als
+            # erledigt, wenn order_bot.py in genau diesem Stand vorliegt; sonst holt der nächste Takt nach — mit Zufalls-Versatz, damit
+            # nach einer Umschaltung nicht alle Panels im selben Takt nachfragen.
             ensure_bot_source(sha)
+            if BOT_STAND.get("geholt_sha") == sha:
+                letzter = sha
+            else:
+                print(f"[panel] order_bot.py für Stand {sha[:7]} nicht geholt — nächster Takt versucht es erneut.", flush=True)
+                time.sleep(random.uniform(2, 10))
         if runde % 2:                 # 'main' reicht alle 30 s
             continue
         try:
