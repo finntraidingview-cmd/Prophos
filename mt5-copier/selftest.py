@@ -2782,7 +2782,7 @@ def test_puls_augen_cdp():
         _n2 = _ws.werbung_weg()            # innerhalb von 3 s: gedrosselt, kein Lesen
     finally:
         ob._warte = _alt_w
-    chk(_n == 1 and _n2 == 0 and any("Werbung weg (bewiesen)" in z for z in _ws.trail), "werbung_weg: X geklickt, weg bewiesen, danach 3 s gedrosselt")
+    chk(_n == 1 and _n2 == 0 and any("[Werbung]" in z and "über eigenes X geschlossen" in z for z in _ws.trail), "werbung_weg: X geklickt, weg bewiesen, danach 3 s gedrosselt")
     pt = ob.cdp_klickpunkt([100, 200, 60, 30], rnd=_rnd.Random(3))
     chk(pt and 110 <= pt[0] <= 150 and 205 <= pt[1] <= 225 and ob.cdp_klickpunkt([1, 1, 1, 1]) is None, "Klickpunkt im inneren Drittel, Mini-Rect → None")
     kps_ = [ob.cdp_klickpunkt([0, 0, 200, 40], rnd=_rnd.Random(i_)) for i_ in range(100)]

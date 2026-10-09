@@ -17533,6 +17533,15 @@ CDP_WERBUNG_JS = r"""(function () {
   // „Go ad-free. Everywhere" (Puls-Fehler 09.10.2026 01:05 UTC, pc-xxxxxx: das Modal lag über Konto-Umschalter UND Kontextmenü —
   // 3 Lesungen „keine Liste (Dialog ['Go ad-free. Everywhere'])", danach „Kontextmenü leer" 3×): allein schon Werbung (zählt doppelt)
   var ADFREE = /\bad.?free\b|werbefrei/i;
+  // „Time to upgrade? … Explore our plans" (Finn 09.10.2026 ~06:25 Dubai, Screenshot: Karte IM Trading-Panel über „Positions", Bild
+  // ESSENTIAL/PLUS/PREMIUM, Marke „AD" unten rechts, X oben rechts) — hatte nur EIN Merkmal („upgrade") und saß in keinem Dialog-
+  // Container, wurde also nie erkannt. Eigene Texte zählen doppelt, die Marke „AD" (eigenes kleines Element) ebenfalls.
+  // Panel-Knöpfe sind nie ein Werbe-X — die Karte sitzt IM Trading-Panel, dessen „Close account manager"/„Collapse panel" oben rechts
+  // läge sonst im 70-px-Fenster eines zu großen Kastens (09.10.2026)
+  var XTABU = /account manager|panel|maximi|minimi|collapse|chart|layout|watchlist|tab\b/i;
+  var KARTE = /time to upgrade|explore (our )?plans|\bessential\b[\s\S]{0,40}\bplus\b[\s\S]{0,40}\bpremium\b/i;
+  function adMarke(b) { try { return Array.prototype.slice.call(b.querySelectorAll('*')).some(function (e) {
+    return e.children.length === 0 && /^\s*ad\s*$/i.test(e.textContent || '') && sb(e); }); } catch (_) { return false; } }
   var HART = /take profit|stop loss|tradovate|\bconnect\b|\blog ?in\b|password|passwort|quantity|\bcontracts?\b|\b(buy|sell) \d/i;
   var NIE = /explore|offer|angebot|upgrade|\bbuy\b|kauf|trial|\bget\b|\bstart|subscri|abonn|premium|\bplan|claim/i;
   function sb(e) { try { var s = getComputedStyle(e); if (s.visibility === 'hidden' || s.display === 'none' || s.opacity === '0') return false;
@@ -17541,17 +17550,32 @@ CDP_WERBUNG_JS = r"""(function () {
   function R(e) { var r = e.getBoundingClientRect(); return [r.left, r.top, r.width, r.height]; }
   var sel = '[role="dialog"],[role="alertdialog"],[aria-modal="true"],[data-dialog-name],body > div,body > section,body > aside,' +
             '[class*="toast"],[class*="popup"],[class*="dialog"],[class*="modal"]';
-  var kand = Array.prototype.slice.call(document.querySelectorAll(sel)).filter(sb).map(function (b) {
+  var basis = Array.prototype.slice.call(document.querySelectorAll(sel));
+  // Werbe-Karten IN der Seite (Trading-Panel): vom Werbetext bzw. der „AD"-Marke aufwärts bis zum ersten Kasten ≥ 200×80 px
+  Array.prototype.slice.call(document.querySelectorAll('body *')).forEach(function (e) {
+    if (e.children.length || !sb(e)) return;
+    var t0 = (e.textContent || '').trim();
+    if (!(KARTE.test(t0) || /^ad$/i.test(t0))) return;
+    for (var a = e.parentElement, i = 0; a && a !== document.body && i < 12; a = a.parentElement, i++) {
+      var q = a.getBoundingClientRect();
+      if (q.width >= 200 && q.height >= 80) { if (basis.indexOf(a) < 0) basis.push(a); break; }
+    }
+  });
+  var kand = basis.filter(sb).map(function (b) {
     var r = b.getBoundingClientRect(); return { b: b, r: r, f: r.width * r.height }; })
     .filter(function (k) { return k.r.width >= 200 && k.r.height >= 80 && k.f <= 0.8 * innerWidth * innerHeight; })
     .sort(function (a, c) { return a.f - c.f; });
-  var out = [], genommen = [];
+  var out = [], genommen = [], adCache = [];
+  function n0(b) { for (var i = 0; i < adCache.length; i++) if (adCache[i][0] === b) return adCache[i][1];
+    var v = adMarke(b); adCache.push([b, v]); return v; }
   kand.forEach(function (k) {
     if (out.length >= 3 || genommen.some(function (g) { return k.b.contains(g) || g.contains(k.b); })) return;
     var t = (k.b.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 400);
-    var n = MERKMALE.filter(function (rx) { return rx.test(t); }).length + (ADFREE.test(t) ? 2 : 0);
+    var n = MERKMALE.filter(function (rx) { return rx.test(t); }).length + (ADFREE.test(t) ? 2 : 0) + (KARTE.test(t) ? 2 : 0) +
+            (n0(k.b) ? 2 : 0);
     if (n < 2 || HART.test(t)) return;
-    var xs = Array.prototype.slice.call(k.b.querySelectorAll('button,[role="button"],[aria-label],[data-name*="close"],[class*="close"]')).filter(function (e) {
+    var xs = Array.prototype.slice.call(k.b.querySelectorAll('button,[role="button"],[aria-label],[data-name*="close"],[class*="close"],' +
+                                                            '[class*="Close"],[data-qa-id*="close"],[data-role*="close"]')).filter(function (e) {
       if (!sb(e)) return false;
       var q = e.getBoundingClientRect();
       if (q.width > 60 || q.height > 60 || q.width < 6 || q.height < 6 || !drin(q)) return false;
@@ -17559,13 +17583,13 @@ CDP_WERBUNG_JS = r"""(function () {
       var oben = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2);   // verdecktes X (Karte unter dem Modal) erst später
       if (!oben || !(oben === e || e.contains(oben))) return false;
       var w = (e.getAttribute('aria-label') || '') + ' ' + (e.getAttribute('title') || '') + ' ' + (e.getAttribute('data-name') || '') + ' ' + (e.textContent || '').trim();
-      if (NIE.test(w)) return false;
+      if (NIE.test(w) || XTABU.test(w)) return false;
       return /close|schlie|dismiss/i.test(w) || /^\s*[×✕✖xX]?\s*$/.test(e.textContent || '');
     });
     xs = xs.filter(function (e) { return !xs.some(function (f) { return f !== e && e.contains(f); }); });
     if (xs.length !== 1) return;
     genommen.push(k.b);
-    out.push({ text: t.slice(0, 120), box: R(k.b), x: R(xs[0]) });
+    out.push({ text: t.slice(0, 120), box: R(k.b), x: R(xs[0]), ad: n0(k.b) });
   });
   return out;
 })()"""
@@ -17766,6 +17790,10 @@ class _AugenSitzung:
             raise RuntimeError("augen.js wirft beim Laden: " + cdp_fehlertext(r))
 
     def stand(self, opts=None):
+        # WERBUNG VOR JEDEM LESEN (Finn 09.10.2026: „Time to upgrade?"-Karte verdeckte im Trading-Panel die Positions-/Orders-Liste):
+        # erkannte Werbung geht über ihr eigenes X zu, höchstens alle 3 s eine Prüfung (~50 ms); TopstepX-Tab (tv_riegel False) nie
+        if _WIN_EINGABE and getattr(self, "tv_riegel", True) and not getattr(self, "_in_werbung", False):
+            self.werbung_weg()
         a = "globalThis.prophosAugen.stand(" + json.dumps(opts or {}) + ")"
         for versuch in (1, 2):
             r = self.ws.rufe("Runtime.evaluate", {"expression": a, "returnByValue": True, "awaitPromise": True}, timeout=10)
@@ -17945,11 +17973,18 @@ class _AugenSitzung:
             return 0
         self._werbung_at = jetzt
         weg = 0
+        # Ein Druck auf das Werbe-X ist nie ein Order-Druck: K4-Merker sichern und zurücksetzen (09.10.2026 — seit der Prüfung in stand()
+        # kann das X zwischen zwei Schritten fallen; ein danach geworfener Fehler hieß sonst „vielleicht gedrückt" statt „nichts gesendet")
+        druck_vorher = getattr(self, "_druck_versucht", False)
+        self._in_werbung = True
         try:
             return self._werbung_weg_kern()
         except Exception as e_:                        # darf keinen Klick verhindern — schlimmstenfalls bleibt die Werbung stehen
             self.trail.append(f"Werbung-Prüfung übersprungen ({type(e_).__name__})")
             return weg
+        finally:
+            self._druck_versucht = druck_vorher
+            self._in_werbung = False
 
     def _werbung_weg_kern(self):
         weg = 0
@@ -17960,21 +17995,17 @@ class _AugenSitzung:
                 break
             k = kand[0]
             text = str(k.get("text") or "")[:60]
-            if self._win_klick(k.get("x"), f"Werbung schließen (X) '{text}'", toast_ok=True):
-                _warte(0.6, 0.3)
-            else:
-                try:
-                    self.taste("Escape")
-                    self.trail.append(f"Werbung '{text}': X nicht klickbar — Esc gedrückt")
-                except Exception:
-                    pass
-                _warte(0.5, 0.3)
+            # NUR das eigene X (Finn 09.10.2026): nie Esc — Esc ginge an das, was gerade den Fokus hat (Ticket, Dropdown, Login-Dialog)
+            if not self._win_klick(k.get("x"), f"Werbung schließen (X) '{text}'", toast_ok=True):
+                self.trail.append(f"[Werbung] '{text}': eigenes X nicht klickbar — bleibt stehen, kein Esc")
+                break
+            _warte(0.6, 0.3)
             nach = self.lese_js(CDP_WERBUNG_JS)
             noch = [x for x in (nach if isinstance(nach, list) else []) if isinstance(x, dict) and str(x.get("text") or "")[:60] == text]
             if noch:
                 self.trail.append(f"Werbung '{text}' bleibt — weiter ohne")
                 break
-            self.trail.append(f"Werbung weg (bewiesen): '{text}'")
+            self.trail.append(f"[Werbung] '{text}'{' (AD)' if k.get('ad') else ''} über eigenes X geschlossen (bewiesen)")
             weg += 1
         return weg
 
