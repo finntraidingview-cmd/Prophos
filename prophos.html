@@ -3725,6 +3725,31 @@
   #dashboard-view .wdl-og span{font-weight:600;font-variant-numeric:tabular-nums}
   #dashboard-view .wdl-mb + .wdl-og{margin-top:8px;border-top:1px solid var(--border-soft)}
   #dashboard-view .wdl-og + .wdl-mb{margin-top:0}
+  /* RADAR KOMPAKTER + ABSCHNITTE UNTERSCHEIDBAR (Finn 09.10.2026 ~10:28 Dubai: „schwemmt alles ein") — Köpfe schmaler, Zeilen enger;
+     je Abschnitt eine dezente Akzentfarbe als 3-px-Oberkante + leicht getönter Kopf, Titel als echte Überschrift (Titel + Zähler),
+     mehr Abstand zwischen den Abschnitten. Modell-Farben (--wdl-m) und ID-Punkte bleiben. Nur Optik. */
+  #dashboard-view .wdl-z{padding-top:8px;padding-bottom:8px}
+  #dashboard-view .wdl-og{padding:7px 16px 4px 13px;font-size:10px}
+  #dashboard-view .wdl-mb-kopf{padding:5px 16px 5px 13px}
+  #dashboard-view .wdl-mb-kopf b{font-size:12.5px}
+  #dashboard-view .wdl-mb-kopf span{font-size:11px}
+  #dashboard-view .wdl-mb + .wdl-mb{margin-top:6px}
+  #dashboard-view .wdl-tab + .wdl-tab{margin-top:22px}
+  #dashboard-view .wdl-tab[class*="wdl-tab-sek-"]{border-top:3px solid var(--wdl-sek)}
+  #dashboard-view .wdl-tab[class*="wdl-tab-sek-"] > .wdl-z-kopf:first-child{background:color-mix(in srgb, var(--wdl-sek) 8%, var(--surface))}
+  #dashboard-view .wdl-tab[class*="wdl-tab-sek-"] > .wdl-z-kopf:first-child > .wdl-z-wer,
+  #dashboard-view .wdl-tab[class*="wdl-tab-sek-"] > .wdl-z-kopf:first-child .wdl-kp-t{font-size:13.5px;font-weight:700;letter-spacing:0;text-transform:none;color:var(--ink)}
+  #dashboard-view .wdl-tab-sek-lauf{--wdl-sek:var(--ink-2)}
+  #dashboard-view .wdl-tab-sek-wartet{--wdl-sek:#d97706}
+  #dashboard-view .wdl-tab-sek-pruef{--wdl-sek:#ea580c}
+  #dashboard-view .wdl-tab-sek-manuell{--wdl-sek:#dc2626}
+  #dashboard-view .wdl-tab-sek-erledigt{--wdl-sek:var(--sub-2)}
+  #dashboard-view .wdl-tab-sek-erledigt .wdl-z:not(.wdl-z-kopf){color:var(--sub)}   /* Erledigt gedämpft */
+  /* Bestanden/Ziel erreicht als kleiner Chip (09.10.2026) — nur Optik, Knopf „Nächste Phase →" und Handler unverändert */
+  #dashboard-view .wdl-bestanden{display:inline-flex;align-items:center;gap:4px;padding:1px 7px;border-radius:999px;background:rgba(21,128,61,.10);font-size:11.5px;font-weight:600;line-height:1.5}
+  #dashboard-view .wdl-z-akt > .wdl-ziel-txt{flex-direction:row;align-items:center;gap:8px;min-width:0}
+  #dashboard-view .wdl-ziel-txt b{display:inline-flex;flex:none;padding:1px 7px;border-radius:999px;background:rgba(21,128,61,.10);font-size:11.5px;line-height:1.5}
+  #dashboard-view .wdl-ziel-ph{font-size:11.5px;min-width:0}
   /* Trades → Offen + Flotte wie das Radar „Läuft" (Finn 09.10.2026 ~07:27 Dubai: „richtig hässlich und unübersichtlich, bitte so clean wie
      Radar"): dieselben Modell-Blöcke (.wdl-mb, Farbe --wdl-m), darin die Trade-Karten als schlanke Zeilen — die Karte selbst (Handler, 5-s-
      Ticker, Live-Chips) bleibt unverändert, nur die Hülle. Spalten: Punkt · Name/Unterzeile · Live (rechtsbündig, feste Breite) · Aktionen. */
@@ -3833,7 +3858,12 @@
     #dashboard-view .wdl-mb > .wdl-z{padding-left:9px}   /* Handy: 12 px Zeilen-Rand minus 3 px Modell-Rand */
     #dashboard-view .wdl-mb-kopf{padding:8px 12px 7px 9px}
     #dashboard-view .wdl-mb-kopf b{font-size:13.5px}
-    #dashboard-view .wdl-og{padding:9px 12px 5px 9px}
+    #dashboard-view .wdl-og{padding:6px 12px 3px 9px}
+    #dashboard-view .wdl-mb-kopf{padding:5px 12px 4px 9px}
+    #dashboard-view .wdl-tab + .wdl-tab{margin-top:18px}
+    #dashboard-view .wdl-tab[class*="wdl-tab-sek-"] > .wdl-z-kopf:first-child > .wdl-z-wer,
+    #dashboard-view .wdl-tab[class*="wdl-tab-sek-"] > .wdl-z-kopf:first-child .wdl-kp-t{font-size:13px}
+    #dashboard-view .wdl-z-akt > .wdl-ziel-txt{flex-wrap:wrap;row-gap:2px}
     /* Trades → Offen/Flotte am Handy: Zeile zweistöckig (Name oben, Live + Aktionen darunter), ohne Kartenhülle im Block */
     #dashboard-view .tc-zl{border:none;border-radius:var(--m-r-card,16px);box-shadow:var(--shadow-mob-card,0 1px 2px rgba(16,24,40,.05))}
     #dashboard-view .tc-zl .tc2{border-radius:0;box-shadow:none;padding:10px 12px 10px 9px;row-gap:6px;contain:layout paint}
@@ -29823,22 +29853,23 @@
       const zz = zielZeilen(g.ma), ziel = zz.length && !wdl.modell ? [`<div class="wdl-z-modell">Ziel erreicht · ${zz.length}</div>`, ...zz] : zz
       const nZiel = zz.length
       if(g.ma.length){
-        const h = gruppe('Manuelle Arbeit', nachAblage(g.ma), ['Notiz', 'Konto', 'P&amp;L', 'Zu'], 'wdl-tab-konto wdl-tab-manuell', null, a.ma)
+        const h = gruppe('Manuelle Arbeit', nachAblage(g.ma), ['Notiz', 'Konto', 'P&amp;L', 'Zu'], 'wdl-tab-konto wdl-tab-manuell wdl-tab-sek-manuell', null, a.ma)
         return ziel.length ? h.replace(`Manuelle Arbeit · ${g.ma.length}<`, `Manuelle Arbeit · ${g.ma.length + nZiel}<`).replace(/<\/div>$/, ziel.join('') + '</div>') : h
       }
-      if(ziel.length) return `<div class="wdl-tab wdl-tab-konto wdl-tab-manuell"><div class="wdl-z wdl-z-kopf"><span class="wdl-z-wer">Manuelle Arbeit · ${nZiel}</span><span class="wdl-z-ri"></span>`
+      if(ziel.length) return `<div class="wdl-tab wdl-tab-konto wdl-tab-manuell wdl-tab-sek-manuell"><div class="wdl-z wdl-z-kopf"><span class="wdl-z-wer">Manuelle Arbeit · ${nZiel}</span><span class="wdl-z-ri"></span>`
         + ['Notiz', 'Konto', 'P&amp;L', 'Zu'].map((x, i) => `<span class="wdl-z-${['mi', 'konto', 'pl', 'zeit'][i]}">${x}</span>`).join('') + `</div>${ziel.join('')}</div>`
       if(!g.pr.length) return ''
-      return `<div class="wdl-tab wdl-tab-konto wdl-tab-manuell wdl-tab-leer"><div class="wdl-z wdl-z-kopf"><span class="wdl-z-wer">Manuelle Arbeit · 0</span><span class="wdl-z-ri"></span><span class="wdl-man-hinweis">Zeile aus „Überprüfen" hierher ziehen oder „→ manuell"</span></div></div>`
+      return `<div class="wdl-tab wdl-tab-konto wdl-tab-manuell wdl-tab-sek-manuell wdl-tab-leer"><div class="wdl-z wdl-z-kopf"><span class="wdl-z-wer">Manuelle Arbeit · 0</span><span class="wdl-z-ri"></span><span class="wdl-man-hinweis">Zeile aus „Überprüfen" hierher ziehen oder „→ manuell"</span></div></div>`
     }
     // arr = was gezeigt wird (Modell + Person), alleArr = dieselbe Liste ohne Personen-Filter — nur für die Chips im Kopf
     const gruppen = (arr, alleArr) => {
       const g = teile(arr), a = teile(alleArr)
-      return gruppe('Läuft', nachStart(g.la), ['Spanne', 'P&amp;L', 'Seit'], 'wdl-tab-lauf', null, a.la)
-        + gruppe('Wartet', nachEnde(g.wa), ['Nachlesung', 'P&amp;L', 'Zu'], '', null, a.wa)
-        + gruppe('Überprüfen', nachEnde(g.pr), ['Ergebnis', 'Konto', 'P&amp;L', 'Zu'], 'wdl-tab-konto', null, a.pr)
+      // Abschnitts-Klassen (09.10.2026, Finn: „schwemmt alles ein") — je Abschnitt eigener Akzent über --wdl-sek (CSS .wdl-tab-sek-*)
+      return gruppe('Läuft', nachStart(g.la), ['Spanne', 'P&amp;L', 'Seit'], 'wdl-tab-lauf wdl-tab-sek-lauf', null, a.la)
+        + gruppe('Wartet', nachEnde(g.wa), ['Nachlesung', 'P&amp;L', 'Zu'], 'wdl-tab-sek-wartet', null, a.wa)
+        + gruppe('Überprüfen', nachEnde(g.pr), ['Ergebnis', 'Konto', 'P&amp;L', 'Zu'], 'wdl-tab-konto wdl-tab-sek-pruef', null, a.pr)
         + manuell(g, a)
-        + gruppe('Erledigt', nachEnde(g.er), ['Ergebnis', 'Konto', 'P&amp;L', 'Zu'], 'wdl-tab-konto', 'erledigt', a.er)
+        + gruppe('Erledigt', nachEnde(g.er), ['Ergebnis', 'Konto', 'P&amp;L', 'Zu'], 'wdl-tab-konto wdl-tab-sek-erledigt', 'erledigt', a.er)
     }
     // Wischstand der Chip-Reihen (Handy) über den Neuaufbau retten — die Liste wird im Lade-Takt komplett neu gezeichnet
     const kpScroll = new Map([...liste.querySelectorAll('[data-wdl-kp]')].map(e => [e.getAttribute('data-wdl-kp'), e.scrollLeft]))
@@ -42989,7 +43020,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1432'
+  const OS_TAB_BUILD = '2026-09-22.1433'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
