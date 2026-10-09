@@ -15896,6 +15896,14 @@ TSX_POS_INVENTAR_JS = r"""(function () {
   document.querySelectorAll('[role="tab"]').forEach(function (t) {
     if (o.tabs.length < 20) o.tabs.push((t.innerText || t.id || '').trim().slice(0, 30) + (t.getAttribute('aria-selected') === 'true' ? ' *' : ''));
   });
+  // Close-Knopf + „No Active Position" im Detail (09.10.2026): gefunden? testid, Text, disabled/aria/Klasse/pointer-events/opacity
+  var k = document.querySelector('[data-testid="order-card-click-button-close-position"]'), kq = k ? 'testid' : null;
+  if (!k) [].some.call(document.querySelectorAll('button,[role="button"]'), function (e) { if (/^close position$/i.test((e.innerText || '').trim())) { k = e; kq = 'text'; return true; } return false; });
+  if (k) { var cs = getComputedStyle(k); o.close = { quelle: kq, tid: k.getAttribute('data-testid'), text: (k.innerText || '').trim().slice(0, 30), disabled: !!k.disabled,
+      aria: k.getAttribute('aria-disabled'), klasse: String(k.getAttribute('class') || '').slice(0, 160), pe: cs.pointerEvents, opacity: cs.opacity }; }
+  else o.close = { quelle: null };
+  var n = document.querySelector('[data-testid="order-card-display-value-no-position"]');
+  o.keine_pos = n ? { quelle: 'testid', text: (n.innerText || '').trim().slice(0, 40) } : { quelle: null };
   return o;
 })()"""
 
@@ -17142,7 +17150,8 @@ def modus_tsxlesen_cdp(cmd, order=None, order_cmd=None, frist_s=None):
                 st = st_n
                 felder, code, msg = tsx_cdp_lesung(st, ext)
             trail.append("Positions-Bereich " + ("nach Nachlesen da" if code != "tabelle_unklar" else "auch nach ~9 s nicht da"))
-            if code == "tabelle_unklar":
+        if code == "tabelle_unklar":
+            if True:   # Inventar in JEDEM tabelle_unklar-Zweig (09.10.2026, Versuch 2: „No Active Position" da, Close nicht gesperrt)
                 # INVENTAR (Master 09.10.2026): die echte Struktur der Order-Karte/Positions-Region sehen — sichtbare data-testid
                 # (order-card/position/grid/tab, Text gekürzt, ohne Konto-Auslöser), Grid-Köpfe + Zeilenzahl, Reiter. Nur Lesen.
                 try:

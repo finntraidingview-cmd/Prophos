@@ -518,12 +518,49 @@ var PROPHOS_AUGEN_TSX = (function () {
     });
     return treffer;
   }
+  /* FLACH-BEWEIS MIT ZWEI BELEGEN (09.10.2026, Ina DLL-Konto 333d4791 Versuch 2: „No Active Position" stand da, „Close Position" galt nicht
+   * als gesperrt → kein Start). REIN (testbar): b = {keine: „No Active Position" gesehen, zu: null (Close-Knopf fehlt) | {disabled, aria,
+   * klasse, pe, opacity}, grid: null | {da, zeilen}, inKarte}. flach true NUR mit „No Active Position" UND einem zweiten Beleg: Close-Knopf
+   * per disabled, aria-disabled, Klasse *disabled*, pointer-events none oder Deckkraft < 0,6 gesperrt / Positions-Grid da mit 0 Zeilen /
+   * Close-Knopf fehlt ganz — Letzteres NUR, wenn „No Active Position" IN der Order-Karte stand (inKarte). Positionszeile sichtbar oder
+   * Close-Knopf aktiv → nie flach (null). Nie aus einem Beleg allein. */
+  function flachBeweis(b) {
+    if (!b || !b.keine) return null;
+    if (b.grid && b.grid.da && b.grid.zeilen > 0) return null;                 // Positionszeile sichtbar → nie flach
+    if (b.posZeilen > 0) return null;                                           // Positionszeile außerhalb eines Grids (Prüfer T3)
+    var z = b.zu;
+    // weiche Merkmale (Klasse, pointer-events, Deckkraft) nur mit „No Active Position" IN der Karte — beim Einblenden der Karte sind sie
+    // kurz auch bei offener Position so (Prüfer T3); seitenweiter Rückfall: nur echtes disabled/aria-disabled
+    var weich = !!z && b.inKarte && (/(^|[\s_-])disabled($|[\s_-])/i.test(String(z.klasse || '')) || z.pe === 'none'
+                                    || (typeof z.opacity === 'number' && z.opacity < 0.6));
+    var gesperrt = !!z && !!(z.disabled || z.aria || weich);
+    if (z && !gesperrt) return null;                                            // aktiver Close-Knopf → nie flach
+    if (gesperrt) return true;
+    if (b.grid && b.grid.da && b.grid.zeilen === 0) return true;               // Grid mit Kopfzeile, 0 Zeilen
+    return b.inKarte ? true : null;   // Close fehlt ganz: zählt NUR, wenn „No Active Position" IN der Order-Karte stand (Einwand T3)
+  }
+  function closeKnopf() {
+    var k = q1(tid('order-card-click-button-close-position'));
+    if (k) return k;
+    var t = null;
+    alle('button,[role="button"]').some(function (e) { if (sichtbar(e) && /^close position$/i.test(txt(e))) { t = e; return true; } return false; });
+    return t;
+  }
+  function knopfInfo(el) {
+    if (!el) return null;
+    var cs = null; try { cs = getComputedStyle(el); } catch (_) {}
+    return { disabled: zustand(el).disabled, aria: attr(el, 'aria-disabled') === 'true', klasse: String(el.getAttribute('class') || '').slice(0, 160),
+             pe: cs ? cs.pointerEvents : null, opacity: cs ? parseFloat(cs.opacity) : null };
+  }
   function positionenLesen() {
     if (!K1_ANKER) return { sichtbar: null, zeilen: [], flach: null };
     var keine = ankerPositionen() || keinePosPerText();
     if (keine && RX_KEINE_POS.test(txt(keine))) {
-      var zu = q1(tid('order-card-click-button-close-position'));
-      return { sichtbar: true, zeilen: [], flach: zu && zustand(zu).disabled ? true : null };
+      var g0 = gitterLesen();
+      var inKarte = !!(keine.closest && keine.closest('[data-testid^="order-card"]'));   // nie der seitenweite Text-Rückfall
+      var pz = 0; try { pz = positionsZeilen().length; } catch (_) {}
+      return { sichtbar: true, zeilen: [], flach: flachBeweis({ keine: true, inKarte: inKarte, posZeilen: pz, zu: knopfInfo(closeKnopf()),
+                                                                grid: g0.da ? { da: true, zeilen: g0.zeilen.length } : null }) };
     }
     var zeilen = [];
     positionsZeilen().forEach(function (z) { var p = positionAus(z); if (p) zeilen.push(p); });
