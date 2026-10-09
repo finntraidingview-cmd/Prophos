@@ -11990,7 +11990,9 @@ def modus_inspect(cfg_path):
 # Brackets, Contract, Menge, Knopf „BUY +n @ MARKET") erst nach dem Inventar am PC.
 # ═══════════════════════════════════════════════════════════════════════════
 TSX_URL = "https://topstepx.com/trade"
-TSX_RX_KONTO = re.compile(r"\$\s*\d+(?:[.,]\d+)?\s*K\b.*\|\s*([A-Z0-9][A-Z0-9-]{5,})", re.I)
+# „$“ OPTIONAL (09.10.2026, Inas DLL-Konten: TopstepX zeigt „150K DLL Combine|150KTC-SKU-V2-DLL-…“ OHNE „$“ — vorher passte keine
+# Zeile, Balance-Lesen meldete „Konto nicht in der Liste (0×)“). Gilt für alle TopstepX-Konto-Muster hier und in augen_tsx.js.
+TSX_RX_KONTO = re.compile(r"\$?\s*\d+(?:[.,]\d+)?\s*K\b.*\|\s*([A-Z0-9][A-Z0-9-]{5,})", re.I)
 TSX_RX_LOGIN = re.compile(r"^(log ?in|sign ?in|connect|anmelden|verbinden|einloggen)$", re.I)
 TSX_RX_SCHLIESSEN = re.compile(r"^(close|schlie(ß|ss)en|dismiss|×|✕|x)$", re.I)
 TSX_RX_KEINE_POS = re.compile(r"no active position|keine aktive position", re.I)
@@ -12068,7 +12070,7 @@ def tsx_konto_aus_text(text):
     return m.group(1).upper() if m else ""
 
 
-TSX_RX_AUSLOESER = re.compile(r"\$\s*\d+(?:[.,]\d+)?\s*K\b[^|]*\|\s*([A-Z0-9][A-Z0-9-]*)\s*(…|\.\.\.)?", re.I)
+TSX_RX_AUSLOESER = re.compile(r"\$?\s*\d+(?:[.,]\d+)?\s*K\b[^|]*\|\s*([A-Z0-9][A-Z0-9-]*)\s*(…|\.\.\.)?", re.I)
 
 
 def tsx_konto_sichtbar(text):
@@ -12080,13 +12082,13 @@ def tsx_konto_sichtbar(text):
     return m.group(1).upper().rstrip("-") if m.group(2) else m.group(1).upper(), bool(m.group(2))
 
 
-TSX_RX_OHNE_ID = re.compile(r"^\s*(\$\s*\d+(?:[.,]\d+)?\s*K\b[^|$]*?)\s*\|?\s*(…|\.\.\.)?\s*$", re.I)
+TSX_RX_OHNE_ID = re.compile(r"^\s*(\$?\s*\d+(?:[.,]\d+)?\s*K\b[^|$]*?)\s*\|?\s*(…|\.\.\.)?\s*$", re.I)
 
 
 def tsx_label(text):
     """REIN RECHNEND (testbar, B22): Produkt-Label vor dem '|' („$150K TRADING COMBINE"), normalisiert; '' ohne Label."""
     # B23: ohne Anker am Textanfang — Listeneinträge tragen vorne womöglich Haken/Symbole oder die Kennung
-    m = re.search(r"(\$\s*\d+(?:[.,]\d+)?\s*K\b[^|$]*)", str(text or ""), re.I)
+    m = re.search(r"(\$?\s*\d+(?:[.,]\d+)?\s*K\b[^|$]*)", str(text or ""), re.I)
     return re.sub(r"\s+", " ", m.group(1)).strip().upper() if m else ""
 
 
@@ -12471,13 +12473,13 @@ def tsx_zeilen_voll(roh, tol=8, luecke=40):
                 if n not in stueck["t"].split(" | ") and n not in stueck["t"]:
                     stueck["t"] = stueck["t"] + " " + n
                 stueck["r"] = (min(stueck["r"][0], r[0]), min(stueck["r"][1], r[1]), max(stueck["r"][2], r[2]), max(stueck["r"][3], r[3]))
-                if not stueck["label"] and re.search(r"\$\s*\d+(?:[.,]\d+)?\s*K\b", n, re.I):
+                if not stueck["label"] and re.search(r"\$?\s*\d+(?:[.,]\d+)?\s*K\b", n, re.I):
                     stueck["erst"], stueck["label"] = r, True
             else:
                 if stueck:
                     out.append((stueck["t"], stueck["r"], stueck["erst"]))
                 # erst = Rechteck des Label-Knotens („$150K …") bzw. des ersten Knotens — Klickpunkt (B24)
-                stueck = {"t": n, "r": r, "erst": r, "label": bool(re.search(r"\$\s*\d+(?:[.,]\d+)?\s*K\b", n, re.I))}
+                stueck = {"t": n, "r": r, "erst": r, "label": bool(re.search(r"\$?\s*\d+(?:[.,]\d+)?\s*K\b", n, re.I))}
         if stueck:
             out.append((stueck["t"], stueck["r"], stueck["erst"]))
     return out
@@ -12878,11 +12880,11 @@ def modus_tsxinventar(cmd):
     res["inventar"]["grund"] = tsx_inventar_kurz(roh, fr)
     res["inventar"]["seite_150"] = tsx_inventar_kurz(seiten_filter(roh, seite0), fr, 150)
     res["ausloeser_kandidaten"] = tsx_inventar_kurz([e for e in seiten_filter(roh, seite0)
-                                                     if re.search(r"\$\s*\d+(?:[.,]\d+)?\s*K\b|\|", str(e[0] or ""))], fr, 30)
+                                                     if re.search(r"\$?\s*\d+(?:[.,]\d+)?\s*K\b|\|", str(e[0] or ""))], fr, 30)
     res["edits"] = list(_EDIT_NAMEN)
     res["inventar"]["felder_grund"] = tsx_felder_kurz(_tsx_felder(w))         # B26: auch unbenannte Felder, Wert + Haken
     res["zeilen_kandidaten"] = [[t[:120], list(r)] for t, r in tsx_zeilen(seiten_filter(roh, seite0))
-                                if re.search(r"\$\s*\d+(?:[.,]\d+)?\s*K\b|\|", t)][:20]
+                                if re.search(r"\$?\s*\d+(?:[.,]\d+)?\s*K\b|\|", t)][:20]
     trail.append(f"Grundzustand: {len(res['inventar']['grund'])} Elemente, Seite {len(res['inventar']['seite_150'])}, "
                  f"Auslöser-Kandidaten {len(res['ausloeser_kandidaten'])}, Zeilen {len(res['zeilen_kandidaten'])}, URL {res['url'][:40] or '—'}")
     _puls_diagnose_senden(trail, "tsx_inventar")
@@ -15330,7 +15332,7 @@ TSX_K0_BLICK_JS = r"""(function () {
     role: A(e, 'role'), testid: A(e, 'data-testid').slice(0, 40), rect: R(e), aus: !!(e.disabled || A(e, 'aria-disabled') === 'true'),
     popup: A(e, 'aria-haspopup'), offen: A(e, 'aria-expanded') }; }
   var KLICKBAR = 'button,[role="button"],[role="combobox"],[aria-haspopup],a[href],[tabindex]';
-  var RX_KONTO = /\$\s*\d+(?:[.,]\d+)?\s*K\b[^|]*\|/i;
+  var RX_KONTO = /\$?\s*\d+(?:[.,]\d+)?\s*K\b[^|]*\|/i;
   var o = { url: String(location.href).slice(0, 160), titel: String(document.title).slice(0, 80), fokus: document.hasFocus() };
   // Login-Seite (B27: topstepx.com/login, gelber Knopf „PLATFORM LOGIN", Felder von Chrome vorausgefüllt)
   var pws = Q('input[type="password"]').filter(sb);

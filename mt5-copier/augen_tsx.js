@@ -272,8 +272,8 @@ var PROPHOS_AUGEN_TSX = (function () {
   var KOPF_LABELS = { 'BAL': 'balance', 'MLL': 'mll', 'RP&L': 'rpl', 'UP&L': 'upl' };
   var RX_KOPF = /^(BAL|MLL|RP&L|UP&L)\s*:?\s*(.*)$/i;
   var RX_VORSATZ = /^[-−(]?\s*\$?\s*[-−]?$/;   // Knoten nur aus Vorzeichen/Klammer/„$" (Teil eines zerlegten Werts)
-  var RX_AUSLOESER = /\$\s*\d+(?:[.,]\d+)?\s*K\b[^|]*\|\s*([A-Z0-9][A-Z0-9-]*)\s*(…|\.\.\.)?/i;
-  var RX_OHNE_ID = /^\s*(\$\s*\d+(?:[.,]\d+)?\s*K\b[^|$]*?)\s*\|?\s*(…|\.\.\.)?\s*$/i;
+  var RX_AUSLOESER = /\$?\s*\d+(?:[.,]\d+)?\s*K\b[^|]*\|\s*([A-Z0-9][A-Z0-9-]*)\s*(…|\.\.\.)?/i;
+  var RX_OHNE_ID = /^\s*(\$?\s*\d+(?:[.,]\d+)?\s*K\b[^|$]*?)\s*\|?\s*(…|\.\.\.)?\s*$/i;
   var RX_KEINE_POS = /no active position|keine aktive position/i;
 
   // US-Geldformat wie tsx_geld: '$11,079.66', '-$1,234.50', '$-7.00', '($12.50)' → Zahl | null. Komma ist hier IMMER Tausender
@@ -364,7 +364,8 @@ var PROPHOS_AUGEN_TSX = (function () {
   function q1(sel, wurzel) { var a = alle(sel, wurzel).filter(sichtbar); return a.length ? a[0] : null; }
   var KOPF_TID = { balance: 'balance-display-value-amount', mll: 'max-loss-display-value-amount',
                    rpl: 'realized-pnl-display-value-amount', upl: 'unrealized-pnl-display-value-amount' };
-  var RX_LISTE = /^\s*(\$\s*\d+(?:[.,]\d+)?\s*K\b[^|]*?)\s*\|\s*([A-Z0-9][A-Z0-9-]{5,})\s*(?:\(([^)]*)\))?\s*$/i;
+  // „$“ optional (09.10.2026): DLL-Konten heißen „150K DLL Combine|150KTC-SKU-V2-DLL-…“ ohne „$“ — vorher 0 Listenzeilen
+  var RX_LISTE = /^\s*(\$?\s*\d+(?:[.,]\d+)?\s*K\b[^|]*?)\s*\|\s*([A-Z0-9][A-Z0-9-]{5,})\s*(?:\(([^)]*)\))?\s*$/i;
 
   function ankerKonto() {                            // Konto-Auslöser oben links
     var w = q1(tid('account-selector-input-select-account')) || q1(tid('account-selector-container'));
