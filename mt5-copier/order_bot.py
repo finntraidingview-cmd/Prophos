@@ -21826,6 +21826,18 @@ def _cdp_menue_abwarten(ort, trail, praefix, lesungen=3):
     return b
 
 
+def _cdp_abmelden_dialog(s, opts):
+    """Offener Dialog über der Seite beim gescheiterten Abmelden (nur im Fehlerpfad gelesen). -> Titel/Text (≤ 50) oder ''"""
+    try:
+        st = s.stand(opts)
+    except Exception:
+        return ""
+    po = st.get("popups") if isinstance(st, dict) else None
+    if not po:
+        return ""
+    return str((po[0] or {}).get("titel") or (po[0] or {}).get("text") or "ohne Titel")[:50]
+
+
 def _cdp_abmelden(s, opts, trail):
     """[2] Log out über das Kontextmenü neben „Tradovate" (K3-Weg, live 29.09.2026 12:27 UTC: „Log out ok"). -> (ok, text)"""
     ort = _K3Ort("TradingView-Seite", s.ws, s, "")
@@ -21834,11 +21846,26 @@ def _cdp_abmelden(s, opts, trail):
     b = ort.blick()
     if not cdp_rect(b.get("ctx")):
         return False, f"Kontextmenü-Knopf neben 'Tradovate' nicht eindeutig ({b.get('ctx')}) — nicht abgemeldet."
+    # GENAUE URSACHE STATT „0 TREFFER" (09.10.2026, Master — Muster „Tradovate-Login … nicht geschafft (abmelden)", ~13× in 7 Tagen
+    # auf 4 PCs): in den Spuren vom 06.10. 14:26 und 09.10. 01:05/01:39 UTC lag ein Dialog („Go ad-free. Everywhere") über der Seite,
+    # das Menü blieb dahinter leer, die Meldung sprach aber nur von „kein eindeutiges 'Log out'". .1413 schließt erkannte Werbung vorher;
+    # bleibt trotzdem ein Dialog stehen (keine erkannte Werbung, kein eindeutiges X), nennt die Meldung ihn mit Handgriff — und es gibt
+    # kein Esc in einen offenen Dialog (wie _cdp_esc, Prüfer 30.09.2026). Nur Fehlerpfad: der Erfolgsweg liest nichts zusätzlich.
     if not s.klick(cdp_rect(b.get("ctx")), "Kontextmenü neben Tradovate"):
-        return False, "Kontextmenü neben 'Tradovate' ließ sich nicht klicken — nicht abgemeldet." + (s.fremd_hinweis() if hasattr(s, "fremd_hinweis") else "")
+        fremd = s.fremd_hinweis() if hasattr(s, "fremd_hinweis") else ""
+        dlg = "" if fremd else _cdp_abmelden_dialog(s, opts)
+        if dlg:
+            return False, (f"Kontextmenü neben 'Tradovate' ließ sich nicht klicken: Dialog '{dlg}' liegt über der Seite — nicht abgemeldet. "
+                           "→ im Puls-Chrome den Dialog schließen.")
+        return False, "Kontextmenü neben 'Tradovate' ließ sich nicht klicken — nicht abgemeldet." + fremd
     b = _cdp_menue_abwarten(ort, trail, "[Login]")
     e, n = k3_eindeutig(b.get("menue"), K3_RX_ABMELDEN)
     if not e:
+        dlg = _cdp_abmelden_dialog(s, opts) if not (b.get("menue") or []) else ""
+        if dlg:
+            trail.append(f"[Login] Kontextmenü leer, Dialog '{dlg}' offen — kein Esc")
+            return False, (f"Kontextmenü neben 'Tradovate' blieb leer: Dialog '{dlg}' liegt über der Seite — nicht abgemeldet. "
+                           "→ im Puls-Chrome den Dialog schließen.")
         s.taste("Escape")
         return False, f"Im Kontextmenü kein eindeutiges 'Log out' ({n} Treffer) — Menü mit Esc zu, nicht abgemeldet."
     s.klick(cdp_rect(e), f"Menü '{k3_label(e)}'")
