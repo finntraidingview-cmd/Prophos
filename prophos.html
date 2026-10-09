@@ -21552,7 +21552,6 @@
   // Personen-Chips samt Auswahl sind seit der kompakten Ansicht (25.08.2026
   // nachts) raus — eine Zeile pro Person braucht keinen Umschalter mehr.
   let _fleetRenderBusy = false, _fleetRenderAt = 0
-  let _fleetFpCache = { at: 0, res: null }   // flotte_offene_plaene, 20 s (01.10.2026)
   async function mt5FleetRenderTick(force){
     const box = document.getElementById('lt-fleet')
     if(!box || _fleetRenderBusy) return
@@ -21586,16 +21585,11 @@
       // Mike live sind") — trade_plans ist per RLS nur für die eigene ID lesbar; Orbit V2, Winning Days und Topstep V2 stehen
       // in keiner anderen Quelle. Die RPC liefert nur lesend offene mt5v2/tvv2/tsv2-Pläne fremder IDs. Fehler oder Timeout
       // hier darf den Block nie kippen — dann fehlen nur diese Karten, der Rest steht wie bisher.
-      const [ml, dl, fp] = await Promise.all([
-        mitTimeout(supabase.from('mt5_live').select('*').gte('updated_at', grenze), 8000),
-        mitTimeout(supabase.from('dup_live').select('*').gte('updated_at', grenze), 8000),
-        // 20 s gecacht (01.10.2026, Supabase-Diät, ~1.000 RPC/h): nur Anzeige fremder offener V2-Pläne, ein neuer fremder Plan
-        // erscheint höchstens 20 s später. Fehler werden nicht gecacht.
-        (_fleetFpCache.res && Date.now() - _fleetFpCache.at < 20000) ? Promise.resolve(_fleetFpCache.res)
-          : mitTimeout(Promise.resolve().then(() => supabase.rpc('flotte_offene_plaene')), 8000)
-              .then(r => { if(r && !r.error) _fleetFpCache = { at: Date.now(), res: r }; return r })
-              .catch(e => ({ data: null, error: e }))
-      ])
+      // FLOTTE WEG (Finn 09.10.2026 ~10:27 Dubai: „Offen" zeigt nur die eigene ID, alle IDs stehen im Radar): dup_live und die RPC
+      // flotte_offene_plaene speisten nur die Karten anderer Personen — beide Abrufe entfallen. mt5_live bleibt: daraus leben die
+      // Live-P&L-Chips der EIGENEN Karten (window._mt5CloudRows), die FUSION-Chips und der Balance-Cache, dazu die roten Hinweise der eigenen ID.
+      const ml = await mitTimeout(supabase.from('mt5_live').select('*').gte('updated_at', grenze), 8000)
+      const dl = { data: [], error: null }, fp = { data: [], error: null }
       const rows = (!ml.error && Array.isArray(ml.data))
         ? ml.data.sort((a, b) => String(a.instance).localeCompare(String(b.instance))) : []
       // Cloud-Cache für die Live-P&L-Chips der Plan-Karten (29.08.2026, Finns
@@ -22001,73 +21995,11 @@
       // die ausgeschlossenen gilt dann dieselbe Regel wie für ihre Karten.
       const uebrig = ohneMaster.filter(e => !(e.mails.size === 1 && (e.pKey === meUid || excl.has(String(e.pKey)))))
       const eigeneAlarme = (alarme.get(meUid) || []).join('')
-      // Gruppen (25.09.2026, Finn: „mach die Anordnung so, dass ich und Pascal visuell ein bisschen getrennt sind — oben zuerst
-      // Pascals IDs: Chris, Mike, Pascal, EzPoker, Aurel; drunter Jacob, Moritz und Finn + Pascal"). Reihenfolge innerhalb der
-      // Gruppe genau so; Personen ohne Gruppe (neue IDs) danach alphabetisch unter „Weitere". Schlüssel = user_id (Besitzer).
-      const FLOTTE_GRUPPEN = [
-        { titel: 'Pascal', uids: ['7b1bc9a3-94d3-4603-a232-c10fc2df3262', '32b854d1-866f-4e7e-ba0b-9bf63df2d993', '728b4d23-ff5c-45f9-b6de-9b75c1f9a78a', '8ad6a2f1-816e-4229-85cd-03a9c693bb71', '13905525-69d0-4949-b081-efdbc397e888'] },
-        { titel: 'Finn', uids: ['368076fd-67c1-460c-aa86-38d81ae69350', 'aff98e60-e9a0-4821-9d1d-31634571a2f4', '48f272b4-913e-4598-a06a-1dcc3d5679fb'] }
-      ]
-      const gruppeVon = k => { for(let g = 0; g < FLOTTE_GRUPPEN.length; g++){ const i = FLOTTE_GRUPPEN[g].uids.indexOf(String(k)); if(i >= 0) return [g, i] } return [FLOTTE_GRUPPEN.length, 0] }
-      const reihenfolge = [...new Set([...karten.keys(), ...alarme.keys()])]
-        .filter(k => k !== meUid && !excl.has(String(k)))
-        .sort((a, b) => { const ga = gruppeVon(a), gb = gruppeVon(b)
-          return (ga[0] - gb[0]) || (ga[1] - gb[1]) || personen.get(a).name.localeCompare(personen.get(b).name, 'de') })
-      if(!reihenfolge.length && !uebrig.length && !eigeneAlarme){ box.style.display = 'none'; return }
-
-      // Zaehler-Zeile (16.09.2026, Finn am Screenshot: „wie viele Orders
-      // insgesamt live sind, wie viele pro ID — bessere Uebersicht"):
-      // eigene = offene Plaene (die Karten direkt darueber, gleiche Zahl wie
-      // der Offen-Reiter), Flotte = Karten je Person. „Hedge (geteilt / ohne
-      // Master)" zaehlt bewusst NICHT mit — das sind Kopien, keine Orders
-      // einer ID. Reine Anzeige, keine Bewertung.
-      const eigeneLive = ((typeof tradePlans !== 'undefined' && Array.isArray(tradePlans)) ? tradePlans : [])
-        .filter(p => p && p.status === 'open').length
-      const eigenerName = (meUid && profName.get(meUid)) || 'Dieses Profil'
-      const proPerson = reihenfolge
-        .map(k => [personen.get(k), (karten.get(k) || []).length])
-        .filter(([, n]) => n > 0)
-      const liveGesamt = eigeneLive + proPerson.reduce((sum, [, n]) => sum + n, 0)
-      const zChip = (name, n, farbe) =>
-        `<span class="tc2-chip" style="color:${farbe}">${esc(name)} <b>${n}</b></span>`
-      // Ausgabe: Zaehler-Zeile, dann pro Person eine kleine Ueberschrift in
-      // ihrer Farbe (mit ihrer Live-Zahl), darunter Karten wie oben
-      // (.trade-cards-Huelle = Abstaende der Plan-Tabs).
-      // Radar-Optik (09.10.2026, Finn: „so clean wie Radar"): ein Rahmen wie die Radar-Gruppe, Kopf „Live gesamt" mit den Zählern,
-      // je Person ein Block (wdl-mb in ihrer ID-Farbe), Karten darin als Zeilen (.tc-zl) — Inhalt und Ticker unverändert
-      let html = `<div class="tc-zl"><div class="tc-zl-kopf"><b>Live gesamt ${liveGesamt}</b>`
-          + (eigeneLive ? zChip(eigenerName, eigeneLive, 'var(--ink)') : '')
-          + proPerson.map(([pers, n]) => zChip(pers.name, n, pers.farbe)).join('')
-          + `<span style="margin-left:auto;font-size:11px;font-weight:600;letter-spacing:.04em">FLOTTE — ANDERE PERSONEN</span></div>`
-        + (eigeneAlarme ? `<div class="tc-zl-alarm">${eigeneAlarme}</div>` : '')
-      let letzteGruppe = -1
-      for(const k of reihenfolge){
-        const pers = personen.get(k)
-        const n = (karten.get(k) || []).length
-        // Gruppen-Trenner: dünne Linie + kleine Überschrift, sobald eine neue Gruppe beginnt
-        const g = gruppeVon(k)[0]
-        if(g !== letzteGruppe){
-          const titel = g < FLOTTE_GRUPPEN.length ? FLOTTE_GRUPPEN[g].titel : 'Weitere'
-          html += `<div class="tc-zl-gruppe">${esc(titel)}</div>`
-          letzteGruppe = g
-        }
-        const al = (alarme.get(k) || []).join('')
-        html += `<div class="wdl-mb tc-mb-weitere" style="--wdl-m:${pers.farbe}"><div class="wdl-mb-kopf"><b style="color:${pers.farbe}">${esc(pers.name)}</b>`
-          + `<span>${n ? `${n} live` : ''}</span></div>${(karten.get(k) || []).join('')}${al ? `<div class="tc-zl-alarm">${al}</div>` : ''}</div>`
-      }
-      // Kopien ohne (sichtbaren) Master: das geteilte Hedge-Konto einmal
-      // statt fuenfmal — plus alles, was von Hand auf dem Slave liegt.
-      if(uebrig.length){
-        html += `<div class="wdl-mb tc-mb-weitere" style="--wdl-m:var(--sub)"><div class="wdl-mb-kopf"><b>Hedge (geteilt / ohne Master)</b><span>${uebrig.length}</span></div>`
-        for(const k of uebrig){
-          html += tc2Karte('var(--sub-2)', k.accName, null,
-            `<b>${seite(k.side)}</b> ${esc(String(k.symbol))}`,
-            lotChip('SLAVE', k.lots, dirVon(k.side)) + zeitChip(k.openEpoch, k.frisch, k.alterS), k.frisch, 'dup')
-        }
-        html += '</div>'
-      }
-      html += '</div>'   // .tc-zl
-      box.innerHTML = html
+      // Nur noch die roten Hinweise der EIGENEN ID (Hedge ohne Master, fremde Position auf dem Hedge) — keine „Live gesamt"-Zeile, keine
+      // Personen-Blöcke, kein „Hedge (geteilt / ohne Master)" mehr (Finn 09.10.2026: alle IDs → Radar)
+      void uebrig
+      if(!eigeneAlarme){ box.style.display = 'none'; return }
+      box.innerHTML = `<div class="tc-zl"><div class="tc-zl-alarm">${eigeneAlarme}</div></div>`
       box.style.display = ''
     }catch(e){
       // Fehler SICHTBAR machen statt schlucken: der Block war am 25.08. im
@@ -43016,7 +42948,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1427'
+  const OS_TAB_BUILD = '2026-09-22.1428'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
