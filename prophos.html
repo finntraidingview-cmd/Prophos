@@ -23820,6 +23820,15 @@
     if(data) baselineLokal(planId, data)
     return data || null
   }
+  /* KEINE MESS-BASELINE (09.10.2026, Vorprüfung Terminal 3 zum Merge beim Übergang planned → open): seit dem Merge bleibt mt5_baseline als
+   * Objekt stehen (puls_spur, ticket, start_fehler, kette … und master_balance/hedge_balance/at = null) — „kein Objekt" heißt nicht mehr
+   * „keine Baseline". Leer = keine Quelle für den P&L: weder Balance beim Start (master_balance, v2_vorher, tv, balance_start) noch Endlesung
+   * (final) noch Fusion-Hedge. Genutzt vom Erledigt-Popup (kein ⏳ Auto-PnL bei V2 von Hand) und von „Braucht dich" (Überprüfen). */
+  function mt5BaselineLeer(b){
+    if(!b || typeof b !== 'object') return true
+    return b.master_balance == null && b.balance_start == null && !b.v2_vorher && !b.tv && !b.final && !b.hedge
+  }
+  window._mt5BaselineLeer = mt5BaselineLeer   // Test-Haken
   async function baselinePatchIn(planId, key, patch, status){
     const { data, error } = await supabase.rpc('mt5_baseline_patch_in', { p_plan: String(planId), p_key: key, p_patch: patch || {}, p_status: status || null })
     if(error) throw error
@@ -43043,7 +43052,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1435'
+  const OS_TAB_BUILD = '2026-09-22.1436'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -49376,7 +49385,7 @@
         hinweis: kid ? '' : 'am PC der ID lesen', tun: fremd ? `↻ Balance lesen — läuft am PC von ${z.user || 'der ID'}; danach rutscht der Plan von selbst nach „Zu bestätigen".` : '↻ Balance lesen — danach rutscht der Plan von selbst nach „Zu bestätigen".' })
     }
     if(currentUserId) for(const p of tradePlans || []){
-      if(!p || p.status !== 'review' || !p.mt5Baseline) continue
+      if(!p || p.status !== 'review' || mt5BaselineLeer(p.mt5Baseline)) continue   // keine Messquelle = nichts nachzulesen (09.10.2026)
       if(tplManRaus(man, currentUserId, p.masterAccountId, p.masterName)) continue   // Konto in Manueller Arbeit (08.10.2026)
       const fin = p.mt5Baseline.final, b = p.mt5Baseline
       let txt = ''
@@ -56345,7 +56354,8 @@
         // V2 ohne Baseline (von Hand gestartet oder direkt aus Geplant erledigt, 24.09.2026 abends): es gibt nichts
         // nachzuladen — kein „⏳ Auto-PnL…", P&L von Hand.
         // 07.10.2026: eine Baseline, die nur das Richtungskonflikt-Flag trägt (RICHTUNG AM START), zählt als keine
-        if(routeIstV2(plan.route) && (!plan.mt5Baseline || Object.keys(plan.mt5Baseline).every(k => k === 'richtung_konflikt'))) return
+        // 09.10.2026: über mt5BaselineLeer — seit dem Merge beim Start bleibt ein Objekt ohne Messquelle stehen (richtung_konflikt-Fall inklusive)
+        if(routeIstV2(plan.route) && mt5BaselineLeer(plan.mt5Baseline)) return
         const isMirrorPlan = (typeof planMirrorRoute === 'function') && !!planMirrorRoute(plan)
         // MT5-Route (15.08.2026): braucht weder Duplikum-Token noch Mirror — die
         // Werte kommen aus der eingefrorenen Baseline (_autoPnlFetchMt5).
