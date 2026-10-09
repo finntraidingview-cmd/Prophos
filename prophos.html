@@ -1492,6 +1492,12 @@
      Modal — die anderen behalten das normale Spacing. */
   #tradePlanModal .modal{padding:18px 24px 16px}
   #tradePlanModal .modal-head{padding-bottom:12px}
+  /* Schalter „Challenges mit Hedge" (09.10.2026): rechts im Kopf vor dem X, kleine Variante wie .apd-schalter */
+  #tradePlanModal .tp-ch-hedge{display:inline-flex;align-items:center;gap:6px;margin-left:auto;margin-right:8px;font-size:11.5px;color:var(--sub);cursor:pointer;user-select:none;white-space:nowrap}
+  #tradePlanModal .tp-ch-hedge .switch{width:28px;height:16px}
+  #tradePlanModal .tp-ch-hedge .switch-slider::before{width:12px;height:12px}
+  #tradePlanModal .tp-ch-hedge .switch input:checked + .switch-slider::before{transform:translateX(12px)}
+  #tradePlanModal .tp-ch-hedge:has(input:checked){color:var(--ink)}
   #tradePlanModal .modal-body{padding:12px 0 2px}
   #tradePlanModal .form-grid{gap:10px 14px !important}
   /* V2-Raster (24.09.2026, Finn zum Orbit-V2-Popup: „Wenn man NQ oder MNQ drückt, muss es farbig werden.
@@ -8108,6 +8114,13 @@
       <div class="modal" style="max-width:580px">
         <div class="modal-head">
           <h3 id="tradePlanTitle">Trade planen</h3>
+          <!-- Challenges mit Hedge (09.10.2026, Finn für Amir/Emin-Gruppe: Echo-Instanzen auf Phase-1/2-Konten mit Hedge-Login):
+               an = die Hedge-Wege (Echo · Orbit · Topstep) bieten im Master-Dropdown auch Challenge/Phase 1/Phase 2 an,
+               aus = Zielbild .1082 (nur Funded/Funded CFD/Winning Days). Zustand je ID in user_settings 'tp_challenges_mit_hedge'. -->
+          <label class="tp-ch-hedge" title="An: Echo, Orbit und Topstep zeigen im Master-Dropdown auch Challenge-, Phase-1- und Phase-2-Konten">
+            <span class="switch"><input type="checkbox" id="tp-ch-hedge"><span class="switch-slider"></span></span>
+            <span>Challenges mit Hedge</span>
+          </label>
           <button class="modal-x" id="tradePlanCancel" aria-label="Schließen">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
@@ -41780,6 +41793,7 @@
   const TP_ROUTE_LS = 'prophos_tp_route'
   let _tpRoute = 'dup'            // wird bei jedem Modal-Open gesetzt (Edit: aus plan.route)
   let _tpWd = false               // Winning Day (24.09.2026 abends): tvv2 + hedge_eur aus der Staffel, nur Funded-Futures
+  let _tpChHedge = false          // „Challenges mit Hedge" (09.10.2026): Schalter im Popup-Kopf, je ID, s. tpChHedgeLaden
   let _tpO3 = false               // Orbit V3 (01.10.2026): tvv2 + Fusion-Hedge mit der Farm-Rechnung, jedes Futures-Konto, Master-SL = Risiko Master
   let _tpMt5HedgeAccId = null     // Prophos-Account-ID des fixen Hedge — async aufgelöst
   // Hedge-Betrag für einen Winning-Day-Plan: bestehender Wert bleibt, sonst Staffel (Live-Balance − Kontogröße),
@@ -50733,6 +50747,8 @@
     // Orbit V3 (01.10.2026): beim Bearbeiten aus der Kennung am Plan, neu = letzte Wahl; schließt Winning Day aus
     _tpO3 = _editPlan ? tpIstOrbitV3(_editPlan) : (_tpRoute === 'tvv2' && localStorage.getItem('prophos_tp_o3') === '1')
     if(_tpO3) _tpWd = false
+    // Schalter „Challenges mit Hedge" (09.10.2026): sofort aus dem Komfort-Speicher, danach frisch aus user_settings
+    tpChHedgeLaden()
     // Kapitel „Ohne Hedge" (24.09.2026, Finn: „Ab jetzt wird es nicht mehr
     // gegengehedgt mit Realmoney"): beim ersten neuen Plan im hedgefreien
     // Kapitel dreht die gespeicherte Vorwahl einmalig auf den V2-Weg —
@@ -51172,7 +51188,8 @@
           ? (_dupSlaveIds ? '<option value="" disabled>(Kein Duplikum-Slave — Accounts → Duplikum verknüpfen)</option>'
                           : '<option value="" disabled>(Duplikum-Kontoliste nicht geladen — Accounts → Duplikum verbinden)</option>')
           : _tpRoute === 'tsv2' ? '<option value="" disabled>(Kein aktives Topstep-Challenge-Konto (Phase 1/2) — Fundeds laufen mit Hedge über „Topstep")</option>'
-          : role === 'master' && tpWegMitHedge() ? '<option value="" disabled>(Kein Funded-/Winning-Days-Konto für diesen Weg — Challenges laufen ohne Hedge)</option>'
+          : role === 'master' && tpWegMitHedge() ? (_tpChHedge ? '<option value="" disabled>(Kein aktives Konto für diesen Weg)</option>'
+                                                               : '<option value="" disabled>(Kein Funded-/Winning-Days-Konto für diesen Weg — Challenges: Schalter „Challenges mit Hedge" oben rechts)</option>')
           : role === 'master' && routeIstV2(_tpRoute) ? '<option value="" disabled>(Kein Challenge-Konto (Phase 1/2) für diesen Weg — Fundeds laufen mit Hedge)</option>'
           : '<option value="" disabled>(Keine Accounts mit diesen Filtern)</option>'
       } else if(groups.length === 1){
@@ -52526,6 +52543,44 @@
     }
   }
   document.getElementById('tradePlanSave')?.addEventListener('click', () => saveTradePlanFromModal(false))
+
+  /* ══ CHALLENGES MIT HEDGE (09.10.2026) ══
+   * Finn ~16:55 Dubai: Amir (Emin-Gruppe) hat Echo-Instanzen auf Phase-1/2-Konten (FundedNext, The5ers, FTMO, alle mit Hedge-Login) und
+   * will sie MIT Hedge traden — seit .1082 zeigten die Hedge-Wege aber nur Fundeds („Kein Funded-/Winning-Days-Konto …"). Schalter im
+   * Popup-Kopf, aus = Zielbild .1082. Zustand je ID (= je Nutzer) in user_settings 'tp_challenges_mit_hedge' {an}; localStorage nur als
+   * Komfort, damit der Schalter beim Öffnen nicht erst nach der Antwort umspringt. Wirkt nur auf das Master-Dropdown (tpKontoartPasstZumWeg):
+   * Speichern, Start, Copier und DB kennen keine Kontoart-Sperre — ein Phase-Konto läuft danach wie ein Funded mit Hedge
+   * (Risiko Slave aus der normalen Rechnung; die feste Funded-Vorgabe je Firma greift nur bei funded/funded_cfd). */
+  const TP_CH_HEDGE_KEY = 'tp_challenges_mit_hedge'
+  const tpChHedgeLsKey = () => 'prophos_tp_ch_hedge:' + (currentUserId || '-')
+  function tpChHedgeSetzen(an, neuZeichnen){
+    const alt = _tpChHedge
+    _tpChHedge = !!an
+    const cb = document.getElementById('tp-ch-hedge'); if(cb) cb.checked = _tpChHedge
+    try{ localStorage.setItem(tpChHedgeLsKey(), _tpChHedge ? '1' : '0') }catch(_){}
+    // tpRenderAccountSelect lebt in openTradePlanModal — neu zeichnen über deren Haken (prüft selbst, ob das Popup offen ist)
+    if(neuZeichnen && alt !== _tpChHedge && typeof window._tpAccountSelectsRefresh === 'function') window._tpAccountSelectsRefresh()
+  }
+  async function tpChHedgeLaden(){
+    let lokal = false
+    try{ lokal = localStorage.getItem(tpChHedgeLsKey()) === '1' }catch(_){}
+    tpChHedgeSetzen(lokal, false)
+    if(!currentUserId) return
+    try{
+      const { data, error } = await supabase.from('user_settings').select('value').eq('user_id', currentUserId).eq('key', TP_CH_HEDGE_KEY).maybeSingle()
+      if(error) throw error
+      if(data && data.value) tpChHedgeSetzen(!!data.value.an, true)
+    }catch(e){ console.warn('[ch-hedge] laden:', e.message || e) }
+  }
+  document.getElementById('tp-ch-hedge')?.addEventListener('change', async ev => {
+    tpChHedgeSetzen(ev.target.checked, false)
+    if(typeof window._tpAccountSelectsRefresh === 'function') window._tpAccountSelectsRefresh()
+    if(!currentUserId) return
+    try{
+      const { error } = await supabase.from('user_settings').upsert({ user_id: currentUserId, key: TP_CH_HEDGE_KEY, value: { an: _tpChHedge }, updated_at: new Date().toISOString() }, { onConflict: 'user_id,key' })
+      if(error) throw error
+    }catch(e){ if(typeof atToast === 'function') atToast('„Challenges mit Hedge" nicht gespeichert: ' + (e.message || e)); else console.warn('[ch-hedge] speichern:', e.message || e) }
+  })
   document.getElementById('tradePlanSaveStart')?.addEventListener('click', () => saveTradePlanFromModal(true))
 
   /* ══ FUTURES VORPLANEN (22.09.2026, Finn: „bei Futures ist der Trade-Plan immer dasselbe:
@@ -52653,7 +52708,10 @@
     // Duplikum (Puls) wieder ohne Kontoart-Filter (07.10.2026, Finn am Screenshot „Kein Funded-/Winning-Days-Konto"):
     // „alles anzeigen, was mit Duplikum verknüpft ist — wie es immer war bei Duplikum", egal ob Challenge oder Funded
     if(_tpRoute === 'tvplus') return true
+    // Schalter „Challenges mit Hedge" (09.10.2026, Amir/Emin-Gruppe: Phase-1/2-Konten mit Hedge-Login über Echo): an = auch
+    // Challenge/Phase 1/Phase 2. Live bleibt draußen (nie Master). Winning Day filtert weiter selbst auf 'winning_days'.
     if(tpWegMitHedge()) return t === 'funded' || t === 'funded_cfd' || t === 'winning_days'
+                               || (_tpChHedge && (t === 'phase1' || t === 'phase2' || t === 'challenge'))
     if(routeIstV2(_tpRoute)) return t === 'phase1' || t === 'phase2' || t === 'challenge'
     return true
   }
