@@ -15373,7 +15373,89 @@ def ap_kette_angefressen(k):
     return vg - float(AP_KETTE_STANDARD["blow_puffer_usd"]) < daily - 0.5
 
 
-def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None):
+# TAGE SAMMELN (Finn über Master 09.10.2026, Korb „Bestanden" Teil 2): Ziel erreicht, aber Mindesttage (goal_kind trading_days) fehlen →
+# statt Sperre genau EIN Mini-Trade je Handelstag, der die Balance nie unter Ziel + Puffer bringt. TP/SL in PUNKTEN (Vorprüfung Terminal 3:
+# feste 1–2 $ wären bei 1 Lot FTMO/The5ers nur 1–2 NAS100-Punkte, also im Spread → „Invalid stops" bzw. sofortiger SL), $ = Pkt × Lots ×
+# Punktwert wie beim Klein-Trade. CFD/Echo V2: kleinste erlaubte Stufe der Firma (max(menge_schritt, 0,01)), 5–10 Pkt, ohne Punktwert kein
+# Mini. Futures: 1 Kontrakt AP_MINI_FUTURES_SYMBOL (MNQ bis Finns Antwort — Umstellen auf NQ = diese eine Zeile), 3–5 Pkt. SL höchstens
+# Balance − Ziel − Puffer (in $); reicht das nicht für die kleinste Punkt-Spanne → kein Plan, genauer Grund. Topstep (tsv2 ohne Kette
+# startet nur von Hand) bekommt keinen Mini, sondern den Grund. Start-Sperre „Ziel erreicht" lässt nur mt5_baseline.tage_mini durch.
+AP_TAGE_CFD_PKT = (20, 40)                # Variante A (Master 09.10.2026): sicher über Spread + stops_level
+AP_TAGE_FUT_PKT = (3, 5)
+AP_TAGE_PUFFER = {"cfd": 5.0, "futures": 20.0}   # $ über dem Ziel, die ein Mini-Verlust nie unterschreitet
+AP_MINI_FUTURES_SYMBOL = "MNQ"
+AP_MINI_PUNKTWERT = {"MNQ": 2.0, "NQ": 20.0}       # $ je Punkt und Kontrakt
+
+
+def ap_tage_mini(regel, phase, groesse, ziel, balance, u, tage, schritt=None, ppl=None):
+    """REIN RECHNEND (testbar): Mini-Trade zum Tage sammeln → (werte wie ap_konto_rechnen + tage_mini{ist, soll, ziel, puffer, tp_pkt,
+    sl_pkt}, None) | (None, grund). tage = (ist, soll); schritt = menge_schritt der Phase; ppl = $ je Punkt und Lot (nur CFD)."""
+    ist, soll = int(tage[0]), int(tage[1])
+    route = regel.get("route") or "mt5v2"
+    cfd = route in AP_CFD_ROUTEN and phase != "challenge"
+    vor = f"Tage sammeln {ist}/{soll}"
+    if route == "tsv2":
+        return None, f"{vor}: Topstep — Mini-Trade von Hand (Topstep V2 ohne Kette startet nicht automatisch)"
+    art = "cfd" if cfd else "futures"
+    puffer = AP_TAGE_PUFFER[art]
+    if cfd:
+        if not ppl:
+            return None, f"{vor}: kein Punktwert (Firmen-Einstellung $/Pkt je Lot) für den Mini-Trade — Punktwert eintragen, sonst von Hand"
+        menge = max(float(schritt or 0), AP_KLEIN_SCHRITT)
+        menge = int(menge) if menge >= 1 and menge == int(menge) else round(menge, 4)
+        je_pkt, sp, raster = float(menge) * float(ppl), AP_TAGE_CFD_PKT, 1.0
+        einheit = f"{_ap_de(menge)} Lot{'s' if float(menge) > 1 else ''}"
+    else:
+        menge, je_pkt, sp = 1, AP_MINI_PUNKTWERT[AP_MINI_FUTURES_SYMBOL], AP_TAGE_FUT_PKT
+        # Raster = kleinstes Vielfaches des Ticks 0,25, das GANZE Dollar ergibt (MNQ 0,5 Pkt = 1 $, NQ 0,25 = 5 $) — Puls tippt TP/SL in
+        # TradingView als $-Zahl mit deutschem Komma; ob „6,5" dort 6,5 oder 65 heißt, ist nicht belegt (Vorprüfung Terminal 3, 09.10.2026)
+        raster = 0.25
+        while abs(raster * je_pkt - round(raster * je_pkt)) > 1e-9:
+            raster += 0.25
+        einheit = f"1 {AP_MINI_FUTURES_SYMBOL}"
+    runde = lambda x: round(round(float(x) / raster) * raster, 2)   # noqa: E731 — CFD ganze Punkte, Futures Ticks 0,25
+    luft = round(float(balance) - float(ziel) - puffer, 2)    # auf Cent: Ziel 100.000 × 1,1 ist intern 110000,00000000001
+    sl_pkt = runde(_ap_spanne(list(sp), u["sl"]))
+    if sl_pkt * je_pkt > luft:
+        sl_pkt = (int(luft / je_pkt / raster) * raster if luft > 0 and je_pkt > 0 else 0)   # auf die Luft kürzen (abgerundet)
+    if sl_pkt < sp[0]:
+        ueber = f"{max(0.0, float(balance) - float(ziel)):,.0f}".replace(",", ".")      # nur die Zahl, das Satzkomma bleibt
+        return None, (f"{vor}: Balance nur {ueber} $ über dem Ziel — der kleinste Mini-SL ({sp[0]} Pkt = {sp[0] * je_pkt:.2f} $ bei {einheit}) "
+                      f"brächte sie unter Ziel + {puffer:.0f} $, von Hand").replace(".00 $", " $")
+    tp_pkt = runde(_ap_spanne(list(sp), u["tp"]))
+    tp, sl = round(tp_pkt * je_pkt, 2), round(sl_pkt * je_pkt, 2)
+    geld = lambda v: (f"{v:.2f}".rstrip("0").rstrip(".") if v < 10 else f"{v:.0f}").replace(".", ",")   # noqa: E731
+    stufe = (f"{vor} · Mini-Trade {einheit} · TP {_ap_de(tp_pkt)} Pkt ({geld(tp)} $) / SL {_ap_de(sl_pkt)} Pkt ({geld(sl)} $) "
+             f"(Balance bleibt über Ziel + {puffer:.0f} $)")
+    out = {"groesse": groesse, "ziel": ziel, "rest": 0, "menge": menge, "puffer": 0, "tp": tp, "sl": sl, "risiko": sl, "stufe": stufe,
+           "tage_mini": {"ist": ist, "soll": soll, "ziel": round(float(ziel)), "puffer": puffer, "tp_pkt": tp_pkt, "sl_pkt": sl_pkt}}
+    if not cfd:
+        out["symbol"] = AP_MINI_FUTURES_SYMBOL
+    return out, None
+
+
+def ap_tage_ist(konto, plaene, tz=None):
+    """REIN RECHNEND (testbar): (ist, soll) der Mindesttage eines Kontos oder None (kein goal_kind trading_days). Zählweise wie das Frontend
+    zielFortschritt: jeder Berlin-Tag mit GESTARTETEM Plan dieses Kontos als Master (ab goal_since) + goal_done_offset."""
+    a = konto or {}
+    if a.get("goal_kind") != "trading_days" or not _wd_num(a.get("goal_target")):
+        return None
+    tz = tz or _ap_tz("Europe/Berlin")
+    seit = str(a.get("goal_since") or "")[:10]
+    tage = set()
+    for p in plaene or ():
+        if str(p.get("master_account_id")) != str(a.get("id")) or not p.get("started_at"):
+            continue
+        t = _ap_ts(p.get("started_at"))
+        if t is None:
+            continue
+        d = t.astimezone(tz).date().isoformat()
+        if not seit or d >= seit:
+            tage.add(d)
+    return max(0, len(tage) + int(_wd_num(a.get("goal_done_offset")) or 0)), int(_wd_num(a.get("goal_target")))
+
+
+def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None):
     """REIN RECHNEND (testbar): Plan-Werte EINES Kontos. u = Zufallsanteile der Tranche {tp, sl, menge, puffer} (0..1).
     ppl = $ je NAS100-Punkt und Lot der Firma bei dieser ID (firm_specs, ap_cfd_ppl) — nur CFD: Puffer in Punkten + Klein-Trade.
     → (werte, None) oder (None, grund). werte: groesse, ziel, rest, menge, puffer, tp, sl, risiko, stufe."""
@@ -15403,13 +15485,16 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None):
     ziel = groesse * (1 + float(zp if zp is not None else (ph.get("ziel_pct") or 0)) / 100.0)
     boden, boden_blow = _ap_boden(regel, ph, groesse, balance)
     rest = ziel - balance
+    tage_offen = bool(tage) and int(tage[0]) < int(tage[1])   # Mindesttage fehlen noch → Mini-Trade statt „Ziel erreicht" (09.10.2026)
     if rest <= 0:
-        return None, "Ziel erreicht — Phase umstellen"
+        return ap_tage_mini(regel, phase, groesse, ziel, balance, u, tage, ph.get("menge_schritt"), ppl) if tage_offen else (None, "Ziel erreicht — Phase umstellen")
     cfd = (regel.get("route") or "mt5v2") in AP_CFD_ROUTEN and phase != "challenge"
     if rest < (AP_REST_MIN_CFD if cfd else AP_REST_MIN):
         # 05.10.2026: ein Konto 2 $ unter dem Ziel bekäme sonst einen TP von ~20 $ ohne SL (volles Liquidationsrisiko).
         # 07.10.2026: Futures-Challenge mit Rest < 100 $ zählt als Ziel erreicht (Phase umstellen)
         if phase == "challenge":
+            if tage_offen:                 # Challenge zählt ab < 100 $ Rest als erreicht — Mini nur mit Luft über dem Ziel (sonst Grund)
+                return ap_tage_mini(regel, phase, groesse, ziel, balance, u, tage, ph.get("menge_schritt"), ppl)
             return None, f"Ziel erreicht — Phase umstellen (nur noch {rest:.0f} $)"
         if cfd:
             return None, (f"nur noch {rest:.0f} $ bis zum Ziel — unter {AP_REST_MIN_CFD} $ plant der Bot keinen Klein-Trade: "
@@ -16149,7 +16234,8 @@ def _ap_konten_mit_trade(konto_ids):
 
 
 AP_KONTO_FELDER = ("id,user_id,name,firm,account_type,external_id,max_drawdown,starting_balance,account_size,topstep_balance,topstep_last_check,"
-                   "meta_api_balance,meta_api_last_check,tv_balance,tv_balance_at,consistency_pct,ziel_pct_konto,auto_planer")
+                   "meta_api_balance,meta_api_last_check,tv_balance,tv_balance_at,consistency_pct,ziel_pct_konto,auto_planer,"
+                   "goal_kind,goal_target,goal_done_offset,goal_since")   # Mindesttage → Tage sammeln (09.10.2026)
 AP_KONTO_FELDER_OHNE_CONS = AP_KONTO_FELDER.replace(",consistency_pct", "")
 
 
@@ -18143,6 +18229,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
             ausgelassen.append(dict(zeile, grund=gb, **ap_boden_zeile(regel, a, float(bal), stand if quelle_b != "Nachlesung" else letzt)))
             continue
         kandidaten.append({"a": a, "regel": ap_regel_konto(regel, a, float(bal)), "bal": float(bal), "bal_quelle": quelle_b, "zeile": zeile,
+                           "tage": ap_tage_ist(a, eig),          # Mindesttage (ist, soll) oder None — Mini-Trade bei Ziel erreicht (09.10.2026)
                            "bal_stand": stand if quelle_b != "Nachlesung" else letzt,
                            "tkey": str(a["user_id"]) + "|" + _ap_norm(a.get("firm"))})
 
@@ -18176,16 +18263,16 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
                 ausgelassen.append(dict(k["zeile"], grund="MLL nicht prüfbar (Verlauf nicht lesbar) — kein Kettenplan"))
                 continue
             w, grund = ap_konto_rechnen(k["regel"], k["a"]["account_type"], k["bal"], u_k, peak=(peaks_kette or {}).get(str(k["a"].get("id"))),
-                                        ppl=ap_cfd_ppl(stand.get("ctx"), k["a"]))   # CFD: Punkte-Puffer + Klein-Trade (09.10.2026)
+                                        ppl=ap_cfd_ppl(stand.get("ctx"), k["a"]), tage=k.get("tage"))   # CFD: Punkte-Puffer + Klein-Trade; Tage sammeln (09.10.2026)
             # KEINE ZWEI GLEICHEN TP je ID×Firma (Finn 09.10.2026): eine Spanne wie 3.450–3.550 hat nur ~100 ganze Werte — zwei Konten
             # treffen sich bei 10 Konten in gut jedem dritten Lauf. Bei Gleichstand neu ziehen (höchstens 20×); gekappte TP (Rest bis
             # Ziel) bleiben, wie sie sind
             for _ in range(20):
-                if grund or not w or w.get("tp") not in tps_tranche or re.search(r"letzter Trade|Rest bis Ziel", str(w.get("stufe") or "")):
+                if grund or not w or w.get("tp") not in tps_tranche or re.search(r"letzter Trade|Rest bis Ziel|Tage sammeln", str(w.get("stufe") or "")):
                     break
                 u_k = {x: rnd.random() for x in ("tp", "sl", "menge", "puffer")}
                 w, grund = ap_konto_rechnen(k["regel"], k["a"]["account_type"], k["bal"], u_k, peak=(peaks_kette or {}).get(str(k["a"].get("id"))),
-                                            ppl=ap_cfd_ppl(stand.get("ctx"), k["a"]))
+                                            ppl=ap_cfd_ppl(stand.get("ctx"), k["a"]), tage=k.get("tage"))
             if w and not grund:
                 tps_tranche.add(w.get("tp"))
             if grund and "Boden" in grund:
@@ -18213,7 +18300,8 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
         sym_t = str(rechnung[0][0]["regel"].get("symbol") or "NQ") if route_t in ("tvv2", "tsv2") else None
         bew = {}
         for k, w in rechnung:      # Delta + Einsatz je Konto (Betrag; das Vorzeichen kommt mit der Richtung)
-            bew[str(k["a"]["id"])] = _ap_bewerten(stand["ctx"], k["a"], k["bal"], w["menge"], route_t, sym_t, "buy", w["tp"], w["sl"])
+            # Mini-Trade (Tage sammeln) läuft auf MNQ statt NQ — Einsatz/Delta mit dem Symbol des Plans, sonst ×10 zu schwer (Master 09.10.2026)
+            bew[str(k["a"]["id"])] = _ap_bewerten(stand["ctx"], k["a"], k["bal"], w["menge"], route_t, w.get("symbol") or sym_t, "buy", w["tp"], w["sl"])
         eins = {aid: float(((b or {}).get("g") or {}).get("verlust_eur") or 0) for aid, b in bew.items()}
         roh_tr.append((key, firm_n, fest, fest_p, rechnung, bew, eins))
     # Große Trades einzeln (Finn 07.10.2026): Schwelle = gross_ab_eur bzw. oberes Viertel der Einsätze dieses Laufs; eine Tranche
@@ -18332,10 +18420,11 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
             "user_id": a["user_id"], "master_account_id": a["id"], "master_name": a.get("name"), "master_firm": a.get("firm"),
             "master_contracts": w["menge"], "master_risk": w["risiko"] if w["risiko"] is not None else _wd_num(a.get("max_drawdown")),
             "master_tp": w["tp"], "master_sl": w["sl"], "richtung": richtung[key], "route": route,
-            "master_symbol": (str(regel.get("symbol") or "NQ") + frontcode) if route in ("tvv2", "tsv2") else None,   # tsv2 = Topstep V2 (07.10.2026)
+            "master_symbol": (str(w.get("symbol") or regel.get("symbol") or "NQ") + frontcode) if route in ("tvv2", "tsv2") else None,   # tsv2 = Topstep V2 (07.10.2026); Mini: MNQ
             "start_um": start.astimezone(timezone.utc).isoformat(), "status": "planned", "priority": "medium",
             "planned_for": tag, "auto_plan": True,
-            "mt5_baseline": {"kette": dict(w["kette"], tag=tag)} if w.get("kette") else None,   # Topstep-Kette Trade 1 (08.10.2026)
+            "mt5_baseline": ({"kette": dict(w["kette"], tag=tag)} if w.get("kette")                       # Topstep-Kette Trade 1 (08.10.2026)
+                             else {"tage_mini": dict(w["tage_mini"], tag=tag)} if w.get("tage_mini") else None),   # Tage sammeln (09.10.2026)
             # Tausender-Punkt nur für Rest und Balance (09.10.2026): das alte .replace(",", ".") über die ganze Notiz machte aus der
             # Klein-Trade-Stufe „0,18 Lots" ein „0.18 Lots" (Stufen mit Tausendern formatieren sich selbst, z. B. Topstep-Kette)
             "notes": ap_notiz(w["stufe"], rest_txt, k["bal"], k["bal_quelle"])})

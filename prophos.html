@@ -38601,8 +38601,12 @@
    * überhaupt gar kein Trade mehr gestartet, wenn das Ziel schon erreicht wird"). Vorfall FundedNext Phase 2 …4830 (Moritz): Balance
    * 105.068 → Ziel 105.000 · Rest 0, Auto-Plan startete um 16:41 Dubai trotzdem. Ziel und Balance genau wie in der Zeile
    * (planAutoNotiz + planKontoBalance) — ohne lesbares Ziel oder ohne Balance → null, dann gilt der alte Weg. → { bal, ziel } | null */
+  // TAGE SAMMELN (09.10.2026, Korb „Bestanden" Teil 2): Mini-Trade des Auto-Planers (mt5_baseline.tage_mini, app.py ap_tage_mini) darf trotz
+  // erreichtem Ziel starten — er holt nur einen Mindest-Handelstag, die Balance bleibt über Ziel + Puffer. Alle anderen bleiben gesperrt.
+  const planIstTageMini = plan => !!(plan && plan.mt5Baseline && plan.mt5Baseline.tage_mini && typeof plan.mt5Baseline.tage_mini === 'object')
   function planZielErreicht(plan){
     try{
+      if(planIstTageMini(plan)) return null
       const konto = plan ? accounts.find(a => String(a.id) === String(plan.masterAccountId)) : null
       // Markierung der Ziel-Wache (app.py zw_tick, 07.10.2026) — gilt auch für Pläne ohne Auto-Planer-Ziel
       if(konto && konto.zielErreichtAt) return { bal: konto.zielErreichtBal || 0, ziel: konto.zielUsd || 0 }
@@ -38641,7 +38645,7 @@
           supabase.from('user_settings').select('value').eq('user_id', currentUserId).eq('key', 'archive').maybeSingle()]),
           new Promise((_, nein) => { uhr = setTimeout(() => nein(new Error('Timeout 5 s — Rückfall auf Cache')), 5000) })])
         if(rs && !rs.error && rs.data && imArchiv(rs.data.value)) return { art: 'archiv', text: archivText }
-        if(!ra.error && ra.data && ra.data.ziel_erreicht_at){
+        if(!ra.error && ra.data && ra.data.ziel_erreicht_at && !planIstTageMini(plan)){
           const konto = (accounts || []).find(a => String(a.id) === kid)
           if(konto){ konto.zielErreichtAt = ra.data.ziel_erreicht_at; konto.zielErreichtBal = ra.data.ziel_erreicht_bal != null ? Number(ra.data.ziel_erreicht_bal) : konto.zielErreichtBal }
           const z = { bal: Number(ra.data.ziel_erreicht_bal) || 0, ziel: Number(ra.data.ziel_usd) || 0 }
@@ -38835,8 +38839,12 @@
     const pzw = o.werte ? ` data-pzw-plan="${escapeHtml(String(p.id))}" data-pzw-tp="${Number(p.masterTp) > 0 ? Number(p.masterTp) : ''}" data-pzw-sl="${Number(p.masterSl) > 0 ? Number(p.masterSl) : ''}" data-pzw-gr="${menge || ''}" data-pzw-lot="${p.route === 'mt5v2' ? '1' : ''}" data-pzw-sym="${escapeHtml(String(p.masterSymbol || '').replace(/[FGHJKMNQUVXZ]\d{1,2}$/, ''))}" data-pzw-ppp="${o.werte.ppp > 0 ? o.werte.ppp : ''}" data-pzw-start="${escapeHtml(String(p.startUm || ''))}"` : ''
     const pzwZ = art => pzw ? ` pz-w"${pzw} data-pzw="${art}" title="Klicken zum Ändern"` : '"'
     // Topstep-Kette (09.10.2026): „Trade 1 · Reparatur-Tag" + Tooltip statt „Topstep-Kette 1/2" (tpKetteSchritt); sonst Schritt wie bisher
-    const ks = tpKetteSchritt(p)
-    const artZelle = ks
+    const ks = tpKetteSchritt(p), tm = planIstTageMini(p) ? p.mt5Baseline.tage_mini : null
+    // Mini-Trade (Tage sammeln): TP/SL sind Cent-Beträge (0,01 Lot × 30 Pkt = 0,30 $) — sonst stünde „0 $" da
+    const geldZ = v => tm ? Number(v).toLocaleString('de-DE', { maximumFractionDigits: 2 }) : de(v)
+    const artZelle = tm
+      ? `<span class="pz-art pz-art-kette" title="${escapeHtml(`Tage sammeln: Mini-Trade für die Mindesttage (${tm.ist} von ${tm.soll} Tagen mit Trade). Ziel ${Math.round(Number(tm.ziel) || 0).toLocaleString('de-DE')} $ ist erreicht — der SL hält die Balance über Ziel + ${Math.round(Number(tm.puffer) || 0)} $.`)}"><span><b>Tage sammeln</b></span><small>${Number(tm.ist) + 1}. von ${tm.soll} Tagen</small></span>`
+      : ks
       ? `<span class="pz-art pz-art-kette" title="${escapeHtml(ks.tip)}"><span><b>Trade ${ks.nr}</b>${ks.kette}</span><small>${escapeHtml(ks.tag)}</small></span>`   // zweizeilig: Spalte nur 92 px
       : `<span class="pz-art" title="${notiz ? escapeHtml(planSchrittTip(notiz, Number(p.masterTp))) : ''}">${notiz ? escapeHtml(notiz.art) + (notiz.gekappt ? ' · SL gekappt' : '') : ''}</span>`
     // RADAR-OPTIK (o.stil 'radar', 08.10.2026, Finn: „im Admin die geplanten Trades etwas anpassen" — wie die Läuft-Zeilen im Radar): Konto
@@ -38855,8 +38863,8 @@
         <span class="pz-ri">${em}<span class="pz-gr${pzwZ('gr')}>${grR}</span></span>
         <span class="pz-bal">${balHtml}</span>
         ${artZelle}
-        <span class="pz-tp${p.masterTp > 0 ? '' : ' is-leer'}${pzwZ('tp')}>${p.masterTp > 0 ? de(p.masterTp) + ' $' : '–'}</span>
-        <span class="pz-sl${p.masterSl > 0 ? '' : ' is-leer'}${pzwZ('sl')}>${p.masterSl > 0 ? de(p.masterSl) + ' $' : '–'}</span>
+        <span class="pz-tp${p.masterTp > 0 ? '' : ' is-leer'}${pzwZ('tp')}>${p.masterTp > 0 ? geldZ(p.masterTp) + ' $' : '–'}</span>
+        <span class="pz-sl${p.masterSl > 0 ? '' : ' is-leer'}${pzwZ('sl')}>${p.masterSl > 0 ? geldZ(p.masterSl) + ' $' : '–'}</span>
         <span class="pz-akt">${o.chips || ''}${o.akt || ''}</span>
       </div>`
     }
@@ -38869,8 +38877,8 @@
         <span class="pz-bal">${balHtml}</span>
         ${artZelle}
         <span class="pz-gr${pzwZ('gr')}>${gr}</span>
-        <span class="pz-tp${p.masterTp > 0 ? '' : ' is-leer'}${pzwZ('tp')}>${p.masterTp > 0 ? de(p.masterTp) + ' $' : '–'}</span>
-        <span class="pz-sl${p.masterSl > 0 ? '' : ' is-leer'}${pzwZ('sl')}>${p.masterSl > 0 ? de(p.masterSl) + ' $' : '–'}</span>
+        <span class="pz-tp${p.masterTp > 0 ? '' : ' is-leer'}${pzwZ('tp')}>${p.masterTp > 0 ? geldZ(p.masterTp) + ' $' : '–'}</span>
+        <span class="pz-sl${p.masterSl > 0 ? '' : ' is-leer'}${pzwZ('sl')}>${p.masterSl > 0 ? geldZ(p.masterSl) + ' $' : '–'}</span>
         <span class="pz-akt">${o.chips || ''}${o.akt || ''}</span>
       </div>`
   }
@@ -39080,6 +39088,10 @@
           const zf = typeof zielFortschritt === 'function' ? zielFortschritt(a) : null
           const mt = zf && zf.kind === 'trading_days' ? zf : null
           const fehlt = mt && !mt.done
+          // nächster Mini-Trade des Auto-Planers (mt5_baseline.tage_mini) für dieses Konto — Uhrzeit Dubai wie überall im Plan
+          const mini = fehlt ? (tradePlans || []).filter(p => String(p.masterAccountId) === String(a.id) && (p.status === 'planned' || p.status === 'open') && planIstTageMini(p))
+            .sort((x, y) => String(x.startUm || '').localeCompare(String(y.startUm || '')))[0] : null
+          const miniUhr = mini && mini.startUm ? new Date(mini.startUm).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' }) : ''
           const seit = new Date(a.zielErreichtAt).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
           const neu = bstNaechsterTyp(a)
           const knopf = neu ? `<button type="button" class="btn btn-ghost tc2-btn" data-bst-um="${escapeHtml(String(a.id))}" title="Kontoart auf ${escapeHtml(BST_ZIEL[typ] || neu)} umstellen und die Ziel-Markierung zurücksetzen — danach plant der Auto-Planer das Konto wieder">→ ${escapeHtml(BST_ZIEL[typ] || neu)}</button>` : ''
@@ -39087,7 +39099,7 @@
             <span class="pz-konto" title="${escapeHtml(String(a.name || ''))}">${konto}${typ ? `<span class="type-badge type-${escapeHtml(typ)} pz-typ">${escapeHtml(typName)}</span>` : ''}</span>
             <span class="pz-bal"><span class="pz-bal-t">${bal != null ? de(bal) : '–'}${ziel ? `<em>→</em><span class="bst-ziel" title="Ziel erreicht">${de(ziel)} ✓</span>` : ''}</span></span>
             <span title="${mt ? `Mindesttage: ${mt.count} von ${mt.target} Tagen mit Trade` : 'keine Mindesttage hinterlegt'}">${mt ? `${mt.count}/${mt.target}` : '–'}</span>
-            <span class="${fehlt ? 'bst-warte' : 'bst-ok'}" title="${fehlt ? `Noch ${mt.target - mt.count} Tag(e) mit Trade nötig, bevor die Phase wechselt` : 'Ziel und Mindesttage erfüllt — Phase umstellen'}">${fehlt ? 'Tage sammeln' : 'Bereit'}</span>
+            <span class="${fehlt ? 'bst-warte' : 'bst-ok'}" title="${fehlt ? `Noch ${mt.target - mt.count} Tag(e) mit Trade nötig, bevor die Phase wechselt${mini ? (mini.status === 'open' ? ' — Mini-Trade läuft gerade' : ` — nächster Mini-Trade ${miniUhr} Dubai (${mini.autoBestaetigtAt ? 'bestätigt' : 'noch nicht bestätigt'})`) : ' — der Auto-Planer plant je Handelstag einen Mini-Trade'}` : 'Ziel und Mindesttage erfüllt — Phase umstellen'}">${fehlt ? 'Tage sammeln' : 'Bereit'}${fehlt && mini ? `<small style="display:block;font-weight:400;color:var(--sub)">${mini.status === 'open' ? 'Mini läuft' : 'Mini ' + escapeHtml(miniUhr)}</small>` : ''}</span>
             <span class="pz-rest" title="Ziel erreicht seit ${seit}${a.zielErreichtBal ? ' · Balance ' + de(a.zielErreichtBal) : ''}">${seit}</span>
             <span class="pz-akt">${knopf}</span>
           </div>`
@@ -39713,6 +39725,7 @@
               ? `<span class="tc2-chip" style="background:rgba(245,158,11,.12);color:#B45309" title="${escapeHtml(String(p.mt5Baseline.tv.warnung))}">⚠ Brackets in TopstepX prüfen</span>`
               : ''}
             ${(() => { const ks = tpKetteSchritt(p); return ks ? `<span class="tc2-chip" title="${escapeHtml(ks.tip)}">${escapeHtml(ks.text)}${ks.kette}</span>` : '' })()}
+            ${planIstTageMini(p) ? `<span class="tc2-chip" style="background:rgba(21,128,61,.10);color:#15803d" title="Mini-Trade für die Mindesttage — Ziel erreicht, Balance bleibt über Ziel + Puffer">Tage sammeln ${Number(p.mt5Baseline.tage_mini.ist) + 1}/${escapeHtml(String(p.mt5Baseline.tage_mini.soll))}</span>` : ''}
             ${(routeIstEcho(p.route) && (p.richtung === 'buy' || p.richtung === 'sell'))
               ? `<span class="tc2-chip" style="font-family:var(--mono);font-weight:700;${p.richtung === 'buy' ? 'background:rgba(18,183,106,.12);color:#0E9757' : 'background:rgba(240,68,56,.10);color:#D92D20'}" title="Gespeicherte Order-Richtung">${p.richtung === 'buy' ? 'BUY' : 'SELL'}</span>`
               : ''}
@@ -42990,7 +43003,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1423'
+  const OS_TAB_BUILD = '2026-09-22.1424'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
