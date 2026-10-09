@@ -23585,23 +23585,31 @@ def _lq_tag():
     return datetime.now(timezone.utc).astimezone(_ap_tz("Asia/Dubai")).strftime("%Y-%m-%d")
 
 
-def _lq_abrufen(sheet_ids=None):
-    """Aktive Sheets (bzw. nur sheet_ids) jetzt holen und je Sheet + Dubai-Tag in bank_staende schreiben (Upsert). Ein Lauf auf einmal."""
-    with _lq_lock:
+def _lq_sheet_abrufen(r):
+    """Ein Sheet holen und seine Zeile (Sheet + Dubai-Tag) in bank_staende schreiben (Upsert)."""
+    erg = _lq_holen(r["sheet_id"])
+    sb_upsert("bank_staende", {"person_uid": r.get("person_uid"), "sheet_id": r["sheet_id"], "day": _lq_tag(),
+                               "kontostand": erg["kontostand"], "einzahlungen": erg["einzahlungen"], "kaeufe": erg["kaeufe"],
+                               "payouts": erg["payouts"], "an_uns": erg["an_uns"], "letzte_buchung": erg["letzte_buchung"],
+                               "diff": erg["diff"], "fehler": erg["fehler"], "geholt_at": datetime.now(timezone.utc).isoformat()})
+    if erg["fehler"]:
+        print(f"[liquide] ⚠️ Sheet {str(r['sheet_id'])[:6]}…: {erg['fehler']}", flush=True)
+
+
+def _lq_abrufen(warten=True):
+    """Alle aktiven Sheets jetzt holen (_lq_sheet_abrufen je Sheet). Ein Lauf auf einmal (_lq_lock). warten=False (Knopf „↻ Abrufen",
+    Master 09.10.2026: die Railway-Threads sind knapp — ein Knopf-Abruf während des 6-h-Laufs hätte bis ~75 s am Lock gewartet):
+    läuft schon einer → sofort None, der Aufrufer antwortet mit dem letzten Stand und abruf_laeuft. → Anzahl Sheets oder None"""
+    if not _lq_lock.acquire(blocking=warten):
+        return None
+    try:
         rows = _sb_all("kunden_sheets", {"select": "id,person_uid,sheet_id,aktiv", "aktiv": "eq.true"})
-        if sheet_ids is not None:
-            rows = [r for r in rows if r.get("sheet_id") in set(sheet_ids)]
-        tag, jetzt = _lq_tag(), datetime.now(timezone.utc).isoformat()
         for r in rows:
-            erg = _lq_holen(r["sheet_id"])
-            sb_upsert("bank_staende", {"person_uid": r.get("person_uid"), "sheet_id": r["sheet_id"], "day": tag,
-                                       "kontostand": erg["kontostand"], "einzahlungen": erg["einzahlungen"], "kaeufe": erg["kaeufe"],
-                                       "payouts": erg["payouts"], "an_uns": erg["an_uns"], "letzte_buchung": erg["letzte_buchung"],
-                                       "diff": erg["diff"], "fehler": erg["fehler"], "geholt_at": jetzt})
-            if erg["fehler"]:
-                print(f"[liquide] ⚠️ Sheet {str(r['sheet_id'])[:6]}…: {erg['fehler']}", flush=True)
-        _lq_info["letzter"] = jetzt
+            _lq_sheet_abrufen(r)
+        _lq_info["letzter"] = datetime.now(timezone.utc).isoformat()
         return len(rows)
+    finally:
+        _lq_lock.release()
 
 
 def _lq_fx():
@@ -23715,7 +23723,8 @@ def _lq_gate():
 
 def _lq_json_antwort():
     try:
-        return jsonify(_lq_antwort_laden())
+        # abruf_laeuft (Master 09.10.2026): ein Abruf (Takt oder Knopf) läuft gerade — das Frontend zeigt „Abruf läuft …"
+        return jsonify(dict(_lq_antwort_laden(), abruf_laeuft=_lq_lock.locked()))
     except Exception as e:
         print(f"[liquide] ⚠️ Antwort: {type(e).__name__}: {e}", flush=True)
         return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 502
@@ -23737,7 +23746,7 @@ def admin_liquide_abruf():
     if err:
         return err
     try:
-        _lq_abrufen()
+        _lq_abrufen(warten=False)      # läuft schon einer: nicht warten, letzter Stand mit abruf_laeuft true
     except Exception as e:
         print(f"[liquide] ⚠️ Abruf: {type(e).__name__}: {e}", flush=True)
         return jsonify({"ok": False, "error": f"Abruf fehlgeschlagen: {type(e).__name__}: {e}"}), 502
@@ -23763,8 +23772,8 @@ def admin_liquide_sheet():
     if _sb_all("kunden_sheets", {"select": "id", "sheet_id": f"eq.{sid}"}):
         return jsonify({"ok": False, "error": "Dieses Sheet ist schon eingetragen"}), 409
     try:
-        sb_insert("kunden_sheets", {"person_uid": puid, "person_name": name[:80], "sheet_id": sid})
-        _lq_abrufen([sid])
+        neu = sb_insert("kunden_sheets", {"person_uid": puid, "person_name": name[:80], "sheet_id": sid})
+        _lq_sheet_abrufen(neu if isinstance(neu, dict) and neu.get("sheet_id") else {"person_uid": puid, "sheet_id": sid})   # nur dieses, ohne Lock
     except Exception as e:
         print(f"[liquide] ⚠️ Sheet anlegen: {type(e).__name__}: {e}", flush=True)
         return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 502

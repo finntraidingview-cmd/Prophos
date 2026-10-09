@@ -126,6 +126,19 @@ def main():
     check([x["person_name"] for x in A["sheets"]] == ["A", "B", "C"] and set(s1) == {"id", "person_uid", "person_name", "sheet_id", "aktiv", "stand"},
           "Sheets nach Name, Felder wie im Vertrag")
 
+    # 5b Knopf-Abruf wartet nicht am Lock (Master 09.10.2026: Railway-Threads knapp) — läuft schon einer: None, sonst Anzahl
+    blk = src[src.index("\ndef _lq_abrufen("):src.index("\n\n\n", src.index("\ndef _lq_abrufen("))]
+    geholt = []
+    ns2 = {"_lq_lock": threading.Lock(), "_lq_info": {}, "datetime": datetime, "timezone": timezone,
+           "_sb_all": lambda t, p: [{"sheet_id": "S1"}, {"sheet_id": "S2"}], "_lq_sheet_abrufen": lambda r: geholt.append(r["sheet_id"])}
+    exec(blk, ns2)
+    check(ns2["_lq_abrufen"](warten=False) == 2 and geholt == ["S1", "S2"] and not ns2["_lq_lock"].locked(), "Abruf holt alle aktiven Sheets, Lock danach frei")
+    ns2["_lq_lock"].acquire()
+    check(ns2["_lq_abrufen"](warten=False) is None and geholt == ["S1", "S2"], "läuft schon ein Abruf: Knopf wartet nicht, holt nichts (None)")
+    ns2["_lq_lock"].release()
+    check("_lq_abrufen(warten=False)" in src and "abruf_laeuft=_lq_lock.locked()" in src and "n = _lq_abrufen()" in src,
+          "Knopf ohne Warten, Antwort mit abruf_laeuft, Takt wartet wie bisher")
+
     # 6 Quelltext: Gate, Routen, Takt
     for r_ in ('"/admin/liquide"', '"/admin/liquide/abruf"', '"/admin/liquide/sheet"', '"/admin/liquide/sheet/aktiv"', '"/admin/liquide/kunde"'):
         check(f"@app.route({r_}, methods=" in src, f"Route {r_}")
