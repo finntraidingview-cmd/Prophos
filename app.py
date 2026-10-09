@@ -15744,6 +15744,9 @@ AP_GROSS_NAH_MIN = 60                 # Große-Folge (ap_einsatz_lage): zwei gro
 # Sekunde"; dazu: „wenn Jacob Tradeify long geht, kann er auch 5 min später wieder Tradeify long gehen"). DB: sql/2026-10-08_firmen_abstand_1min.sql
 # (prophos_firmen_abstand_fenster = 60 s) — gleiche Zahl.
 AP_FIRMA_ABSTAND_MIN = 1
+# Seit 09.10.2026 ~10:35 Dubai (Finn über Master, Jacob: zweiter Tradeify-SELL ~70 s geschoben) gilt der Firmen-Abstand NUR NOCH zwischen
+# VERSCHIEDENEN IDs (Tarnung über IDs) — Konten derselben ID dürfen bei derselben Firma direkt nacheinander starten (Gegenrichtung sperrt
+# der Gegenrichtungs-Riegel .1427, gleichzeitige Puls-Starts auf einem PC die PC-Regel). DB: sql/2026-10-09_firmen_abstand_nicht_gleiche_id.sql
 
 
 AP_FENSTER_WUERFE = 20     # Verteilung je Lauf so oft würfeln, die fenster-treueste gewinnt (Opening-Anteil, 08.10.2026)
@@ -15821,8 +15824,8 @@ def _ap_zeiten_verteilen_einmal(tranchen, zeiten, rnd, frueheste_min=0, info=Non
                 return False
             if f > 0 and t.get("gruppe") and o.get("gruppe") == t.get("gruppe") and abs(start - s) < gap_f * f:
                 return False
-        for u, s in je_firma.get(str(t.get("fkey") or ""), ()):   # Firmen-Abstand zu JEDEM Start derselben Firma (seit 08.10.2026 auch eigene ID) — hart, jede Stufe
-            if abs(start - s) < gap_firma:
+        for u, s in je_firma.get(str(t.get("fkey") or ""), ()):   # Firmen-Abstand zu Starts ANDERER IDs derselben Firma (seit 09.10.2026 nicht mehr eigene ID) — hart, jede Stufe
+            if u != str(t["user"]) and abs(start - s) < gap_firma:
                 return False
         return True
 
@@ -19439,18 +19442,19 @@ def _ap_gegen_partner(t, uid, firma, richtung, plaene, laufend, jetzt_min, laufz
 
 
 def _ap_firma_konflikt(i, je, zustand, gestartet=(), gap=None):
-    """Muss Plan i wegen des FIRMEN-ABSTANDS weichen? Ja, wenn ein anderer Plan/Start bei derselben Firma (seit 08.10.2026 jede ID,
-    auch die eigene) weniger als AP_FIRMA_ABSTAND_MIN entfernt startet und Plan i der „spätere" ist: der andere startet früher,
+    """Muss Plan i wegen des FIRMEN-ABSTANDS weichen? Ja, wenn ein Plan/Start einer ANDEREN ID bei derselben Firma (seit 09.10.2026 nicht
+    mehr die eigene ID) weniger als AP_FIRMA_ABSTAND_MIN entfernt startet und Plan i der „spätere" ist: der andere startet früher,
     gleichzeitig mit kleinerer plan_id, ist nicht änderbar oder schon gestartet (gestartet = [{user_id, firma, start}])."""
     g = float(AP_FIRMA_ABSTAND_MIN if gap is None else gap)
-    s0, f = zustand[i]["start"], je[i]["firma"]
+    s0, f, u0 = zustand[i]["start"], je[i]["firma"], str(je[i].get("user_id"))
     for k in zustand:
-        if k == i or je[k]["firma"] != f:
+        if k == i or je[k]["firma"] != f or str(je[k].get("user_id")) == u0:
             continue
         s = zustand[k]["start"]
         if abs(s - s0) < g and (s < s0 or (s == s0 and str(k) < str(i)) or not je[k].get("aenderbar")):
             return True
-    return any(x.get("firma") == f and x.get("start") is not None and abs(float(x["start"]) - s0) < g for x in gestartet or ())
+    return any(x.get("firma") == f and str(x.get("user_id")) != u0 and x.get("start") is not None and abs(float(x["start"]) - s0) < g
+               for x in gestartet or ())
 
 
 def _ap_id_konflikt(i, je, zustand, gestartet=(), gap=None):
@@ -19910,8 +19914,8 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
         for k_, s_, r_, u_, f_ in firma_:
             if u_ == uid and r_ in ("buy", "sell") and r_ != r and _ap_gegen_eigen(t, s_, k_ is None):
                 return False                             # nie gegen einen gestarteten Trade derselben ID × Firma (geplante frei, 09.10.2026)
-            if abs(t - s_) < gfirma:
-                return False                             # Firmen-Abstand zu jedem Start derselben Firma (seit 08.10.2026 auch eigene ID)
+            if u_ != uid and abs(t - s_) < gfirma:
+                return False                             # Firmen-Abstand zu Starts anderer IDs derselben Firma (eigene ID frei seit 09.10.2026)
             if u_ != uid and r_ in ("buy", "sell") and r_ != r and abs(t - s_) < AP_GEGEN_DICHT_MIN:
                 return False                             # kein neuer Malus
             if u_ == uid and abs(t - s_) < gf_v * f:
@@ -20181,8 +20185,8 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                         continue
                     if u == uid and ff == fa and r in ("buy", "sell") and r != noetig and _ap_gegen_eigen(t, s, k is None):
                         return False                         # nie gegen einen gestarteten Trade derselben ID × Firma (geplante frei, 09.10.2026)
-                    if ff == fa and abs(t - s) < gfirma:
-                        return False                         # Firmen-Abstand zu jedem Start derselben Firma (seit 08.10.2026 auch eigene ID)
+                    if ff == fa and u != uid and abs(t - s) < gfirma:
+                        return False                         # Firmen-Abstand zu Starts anderer IDs derselben Firma (eigene ID frei seit 09.10.2026)
                     if u != uid and ff == fa and r in ("buy", "sell") and r != noetig and abs(t - s) < AP_GEGEN_DICHT_MIN:
                         return False                         # kein neuer Malus
                     if u == uid and abs(t - s) < max(abst_pc, gi_v * f):
@@ -22209,8 +22213,8 @@ def ap_start_hand_pruefen(plan_id, neu_min, plaene, starts, id_fest, jetzt_min, 
             if str(x.get("user_id")) == u and x.get("firma") == f and gegen and x.get("richtung") == gegen and _ap_gegen_eigen(m, s, True):
                 return f"Richtungsschutz: {AP_RICHTUNG_TXT[gegen]} derselben ID und Firma seit {zt(s)} — kann noch laufen"
         for s, x in anders + st:
-            if x.get("firma") == f and abs(s - m) < gap:
-                return f"Firmen-Abstand: {'andere ID' if str(x.get('user_id')) != u else 'diese ID'} bei derselben Firma um {zt(s)} — mindestens {gap:g} min Abstand"
+            if x.get("firma") == f and str(x.get("user_id")) != u and abs(s - m) < gap:   # eigene ID frei seit 09.10.2026
+                return f"Firmen-Abstand: andere ID bei derselben Firma um {zt(s)} — mindestens {gap:g} min Abstand"
         return None
     g = grund(float(neu_min))
     if not g:

@@ -183,10 +183,11 @@ def main():
     # seit 08.10.2026 (1 min je Firma, 60/20 weg): Konflikt = gleiche Minute derselben Firma; 1 min nacheinander bleibt stehen.
     # Mike FundedNext short (seit 08.10.2026 ~17:00 Dubai FIRMEN-MISCHUNG: 5× FundedNext über 2 IDs nur long weckte sonst die
     # Mischungs-Drehung — hier geht es nur um die Verteilung, der Test übernimmt keine Drehungen)
-    heute = [plan("mike1", "u-mike", "Mike", "fundednext", dt("09:59"), "sell"), plan("mike2", "u-mike", "Mike", "fundednext", dt("09:59"), "sell"),
-             plan("inafn1", "u-ina", "Ina", "fundednext", dt("16:58")), plan("inafn2", "u-ina", "Ina", "fundednext", dt("16:58")),
-             plan("inafn3", "u-ina", "Ina", "fundednext", dt("16:58")),
-             plan("chrfp1", "u-chris", "Chris", "fundingpips", dt("17:02"), "sell"), plan("chrfp2", "u-chris", "Chris", "fundingpips", dt("17:02"), "sell"),
+    heute = [plan("mike1", "u-mike", "Mike", "fundednext", dt("09:59"), "sell"), plan("mike2", "u-mo", "Mo", "fundednext", dt("09:59"), "sell"),
+             plan("inafn1", "u-ina", "Ina", "fundednext", dt("16:58")), plan("inafn2", "u-jac", "Jac", "fundednext", dt("16:58")),
+             plan("inafn3", "u-emi", "Emi", "fundednext", dt("16:58")),
+             plan("same1", "u-sam", "Sam", "apex", dt("12:10")), plan("same2", "u-sam", "Sam", "apex", dt("12:10")),
+             plan("chrfp1", "u-chris", "Chris", "fundingpips", dt("17:02"), "sell"), plan("chrfp2", "u-pas", "Pas", "fundingpips", dt("17:02"), "sell"),
              plan("aff1", "u-aff", "aff98e60", "the5ers", dt("17:57")), plan("aff2", "u-aff", "aff98e60", "the5ers", dt("17:58")),
              plan("inatf1", "u-ina", "Ina", "tradeify", dt("10:54"), "sell"), plan("inatf2", "u-ina", "Ina", "tradeify", dt("11:37"), "sell")]
     start0 = {p["plan_id"]: p["start_min"] for p in heute}
@@ -212,19 +213,22 @@ def main():
     check(all(st[i] >= start0[i] for i in st), "nur nach hinten geschoben, nie nach vorn")
     check(all(x["nach_start_min"] >= dt("04:40") + a["AP_VERTEIL_VORLAUF_MIN"] for x in alle_aend), "nie vor jetzt + 10 min")
     check(all(st[i] <= 16 * 60 + 30 for i in st), "alle Starts innerhalb start_bis 16:30 dt (18:30 Dubai)")
-    check(abst("mike1", "mike2") >= GFA, f"Mike FundedNext 2× 09:59 → ≥ {GFA:g} min ({abst('mike1', 'mike2'):g})")
-    check(abst("chrfp1", "chrfp2") >= GFA, f"Chris FundingPips 2× 17:02 → ≥ {GFA:g} min ({abst('chrfp1', 'chrfp2'):g})")
+    # seit 09.10.2026 (Finn über Master): Firmen-Abstand nur noch zwischen VERSCHIEDENEN IDs — die Paare hier sind zwei IDs
+    check(abst("mike1", "mike2") >= GFA, f"FundedNext 2× 09:59 (zwei IDs) → ≥ {GFA:g} min ({abst('mike1', 'mike2'):g})")
+    check(abst("chrfp1", "chrfp2") >= GFA, f"FundingPips 2× 17:02 (zwei IDs) → ≥ {GFA:g} min ({abst('chrfp1', 'chrfp2'):g})")
+    check(st["same1"] == start0["same1"] and st["same2"] == start0["same2"],
+          "dieselbe ID, zwei Apex-Konten zur selben Minute → bleiben stehen (kein Firmen-Abstand innerhalb einer ID, 09.10.2026)")
     check(st["inatf1"] == start0["inatf1"] and st["inatf2"] == start0["inatf2"], "Ina Tradeify 10:54/11:37 (43 min) bleibt stehen (60 min weg)")
     check(st["inafn1"] == start0["inafn1"] and abst("inafn1", "inafn2", "inafn3") >= GFA,
-          f"Ina FundedNext 3× 16:58: erster bleibt, Rest ≥ {GFA:g} min (kleinster Abstand {abst('inafn1', 'inafn2', 'inafn3'):g} min)")
+          f"FundedNext 3× 16:58 (drei IDs): erster bleibt, Rest ≥ {GFA:g} min (kleinster Abstand {abst('inafn1', 'inafn2', 'inafn3'):g} min)")
     check(st["aff1"] == start0["aff1"] and st["aff2"] == start0["aff2"], "aff98e60 The5%ers 17:57/17:58 (1 min nacheinander) bleibt stehen")
-    g = next((x["grund"] for x in alle_aend if x["plan_id"].startswith("inafn")), "")
-    check(g.startswith("Verteilung: Ina Fundednext 16:58/16:58/16:58 → 16:58/") and "Dubai" in g, f"Protokoll-Grund in Dubai-Zeit ({g[:90]})")
+    g = next((x["grund"] for x in alle_aend if x["plan_id"] in ("inafn2", "inafn3")), "")
+    check(g.startswith("Verteilung: ") and "Fundednext 16:58 → " in g and "Dubai" in g, f"Protokoll-Grund in Dubai-Zeit ({g[:90]})")
 
     # Live-Befund 00:30 UTC: Ina FundedNext hing — frühester Platz 18:06 lag auf dem FundedNext-Buy einer anderen ID (Malus)
     Z2 = {"fenster": [["00:00", "14:30", 50], ["14:30", "16:30", 50]], "start_bis": "16:30", "abstand_id_min": 3}
-    live = [plan("ifn1", "u-ina", "Ina", "fundednext", dt("16:58"), "sell"), plan("ifn2", "u-ina", "Ina", "fundednext", dt("16:58"), "sell"),
-            plan("ifn3", "u-ina", "Ina", "fundednext", dt("17:00"), "sell"), plan("ifp", "u-ina", "Ina", "fundingpips", dt("17:46")),
+    live = [plan("ifn1", "u-ina", "Ina", "fundednext", dt("16:58"), "sell"), plan("ifn2", "u-jac", "Jac", "fundednext", dt("16:58"), "sell"),
+            plan("ifn3", "u-emi", "Emi", "fundednext", dt("17:00"), "sell"), plan("ifp", "u-ina", "Ina", "fundingpips", dt("17:46")),
             plan("x1", "u-x", "X", "fundednext", dt("16:14")), plan("x2", "u-x", "X", "fundednext", dt("18:06")),
             plan("y1", "u-y", "Y", "fundednext", dt("17:00"), "sell")]
     pl, jm, zul = [dict(p) for p in live], dt("04:45"), {}
@@ -238,10 +242,10 @@ def main():
     s2 = {p["plan_id"]: p["start_min"] for p in pl}
     ifn = sorted(s2[k] for k in ("ifn1", "ifn2", "ifn3"))
     txt = ["%02d:%02d" % divmod(int(x + DUBAI), 60) for x in ifn]
-    check(min(b - a_ for a_, b in zip(ifn, ifn[1:])) >= GFA, f"Live-Fall Ina FundedNext: auseinander ({txt} Dubai, vorher 16:58/16:58/17:00)")
+    check(min(b - a_ for a_, b in zip(ifn, ifn[1:])) >= GFA, f"Live-Fall FundedNext (drei IDs): auseinander ({txt} Dubai, vorher 16:58/16:58/17:00)")
     check(all(abs(s2[k] - s2["x2"]) >= a["AP_GEGEN_DICHT_MIN"] for k in ("ifn2", "ifn3") if s2[k] != dt("16:58") and s2[k] != dt("17:00")),
           "Live-Fall: kein Platz im Malus-Abstand zum FundedNext-Buy der anderen ID (18:06)")
-    check(all(abs(s2[k] - s2["ifp"]) >= PC for k in ("ifn1", "ifn2", "ifn3")), f"Live-Fall: ≥ {PC} min zu Inas FundingPips 17:46 (PC)")
+    check(abs(s2["ifn1"] - s2["ifp"]) >= PC, f"Live-Fall: ≥ {PC} min zu Inas FundingPips 17:46 (PC)")
     check(all(abs(s2[k] - s2["y1"]) >= a["AP_FIRMA_ABSTAND_MIN"] for k in ("ifn1", "ifn2", "ifn3")),
           f"Live-Fall: ≥ {GFA:g} min zum FundedNext-Plan der dritten ID (Firmen-Abstand)")
     check(all(s2[k] <= 16 * 60 + 30 for k in s2), "Live-Fall: alles bis 18:30 Dubai")
@@ -252,7 +256,7 @@ def main():
     EK = {"basis": 0.0, "brutto": 0.0, "gross_ab": 10000.0, "laufzeit": 60}
 
     def tol_fall(s):
-        pl_t = [plan("t1", "u-t", "T", "apex", 700, "sell", einsatz_abs=s), plan("t2", "u-t", "T", "apex", 700, "sell", einsatz_abs=s),
+        pl_t = [plan("t1", "u-t", "T", "apex", 700, "sell", einsatz_abs=s), plan("t2", "u-t2", "T2", "apex", 700, "sell", einsatz_abs=s),
                 plan("l1", "u-l", "L", "topstep", 700, "buy", einsatz_abs=2 * s)]
         return U(pl_t, 0.0, 0.0, 300, Z16, 0, random.Random(1), einsatz=EK)
     alt_tol = a["AP_VERTEILUNG_BAND_TOLERANZ_EUR"]
@@ -323,7 +327,7 @@ def main():
     a["sb_select"] = lambda t, p: [{"id": 1}]
     a["sb_update"] = lambda t, prm, body: (patch.append((prm, body)), [{"id": prm.get("id")}])[1]
     a["sb_insert"] = lambda t, rows: rows
-    stand_w = {"geplant": [{"plan_id": "mike2", "start": "2026-10-09T06:00:00+00:00", "firma": "FundedNext", "user": "Mike"}],
+    stand_w = {"geplant": [{"plan_id": "mike2", "start": "2026-10-09T06:00:00+00:00", "firma": "FundedNext", "user": "Mo"}],
                "mitternacht": datetime(2026, 10, 8, 22, 0, tzinfo=timezone.utc)}
     v_m = [x for x in alle_aend if x["plan_id"] == "mike2"][:1]
     try:

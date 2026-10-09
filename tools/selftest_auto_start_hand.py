@@ -63,7 +63,7 @@ def main():
     check(P("p1", 399, plaene, starts, {}, 300)[0] is None and P("p1", 398, plaene, starts, {}, 300)[0] is None, "genau 1 min davor → ok (5 min gelten nicht mehr)")
     check(P("r1", 450, plaene, starts, {}, 300)[0].startswith("Firmen-Abstand"), "Start einer anderen ID (gestartet heute) zählt beim Abstand")
     g, v = P("p1", 620, plaene, starts, {}, 300)
-    check(g.startswith("Firmen-Abstand: diese ID") and v == 621, f"eigener Plan derselben Firma zur selben Minute → 1 min ({g}, {v})")
+    check(g is None, f"eigener Plan derselben Firma zur selben Minute → frei, kein Firmen-Abstand innerhalb einer ID (09.10.2026) ({g}, {v})")
     check(P("p1", 610, plaene, starts, {}, 300)[0] is None, "eigener Plan derselben Firma 10 min weiter → ok (60 min je ID × Firma weg)")
     # seit 09.10.2026 ~03:45 (Finn: Richtung je Trade frei, nur nie gleichzeitig): ein GEPLANTER Short derselben ID × Firma sperrt nichts,
     # ein heute GESTARTETER sperrt AP_RICHTUNG_LAUF_FEST_MIN (90) ab seinem Start

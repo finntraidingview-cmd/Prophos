@@ -139,7 +139,8 @@ def main():
     e = U([plan("finn", "finn", "the5ers", d(4, 24))], 0.0, 0.0, d(4, 5), Z, 100, random.Random(1),
           gestartet=[{"user_id": "finn", "firma": "the5ers", "start": float(d(4, 24)), "richtung": "buy"}])
     n_ = next((x["nach_start_min"] for x in e["aenderungen"] if x["plan_id"] == "finn"), None)
-    check(n_ is not None and n_ - d(4, 24) >= GFA, "auch gegen einen gestarteten Trade DERSELBEN ID bei derselben Firma (gleiche Minute)")
+    # seit 09.10.2026 (Finn über Master, Jacob: zwei Tradeify direkt nacheinander): kein Firmen-Abstand mehr innerhalb derselben ID
+    check(n_ is None, "gegen einen gestarteten Trade DERSELBEN ID bei derselben Firma (gleiche Minute): KEIN Firmen-Abstand mehr (09.10.2026)")
     e = U([plan("finn", "finn", "the5ers", d(4, 24))], 0.0, 0.0, d(4, 5), Z, 100, random.Random(1),
           gestartet=[{"user_id": "finn", "firma": "the5ers", "start": float(d(4, 19)), "richtung": "buy"}])
     check(not e["aenderungen"], "gleiche ID, gleiche Firma, 5 min davor: kein Eingriff mehr (60-min-Regel weg)")
