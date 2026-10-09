@@ -24851,6 +24851,12 @@
       : dll != null ? `Verlustgrenze: −${de(vg)} $ (DLL ${de(dll)} + 200)` : `Verlustgrenze: −${de(vg)} $`)
     if(nr === 2 && k.e1 != null) tip.push(`Trade 1: ${Number(k.e1) >= 0 ? '+' : '−'}${de(k.e1)} $ — Trade 2 holt den Rest zum Tagesziel`)
     let kette = ''
+    // REPARATUR-TAG = EIN TRADE (Finn 09.10.2026 ~09:20 Dubai): kein Trade 2 (Riegel in app.py ap_kette_trade2) → kein ⛓-Hinweis, Schritt
+    // „Reparatur-Tag · 1 Trade" (auch für Reparatur-Pläne von vor der Regel, Flag kette.reparatur)
+    if(k.reparatur){
+      tip.push('Ein Trade: TP = zurück auf die Startgröße, SL = Blow am MLL — kein Trade 2')
+      return { text: 'Reparatur-Tag · 1 Trade', nr: 'Reparatur-Tag', tag: '1 Trade', tip: tip.join(' · '), kette: '' }
+    }
     if(nr === 1){
       const g = String(k.t2_grund || '')
       const t = g || 'Trade 2 folgt nach Balance-Nachlesung'
@@ -38845,7 +38851,7 @@
     const artZelle = tm
       ? `<span class="pz-art pz-art-kette" title="${escapeHtml(`Tage sammeln: Mini-Trade für die Mindesttage (${tm.ist} von ${tm.soll} Tagen mit Trade). Ziel ${Math.round(Number(tm.ziel) || 0).toLocaleString('de-DE')} $ ist erreicht — der SL hält die Balance über Ziel + ${Math.round(Number(tm.puffer) || 0)} $.`)}"><span><b>Tage sammeln</b></span><small>${Number(tm.ist) + 1}. von ${tm.soll} Tagen</small></span>`
       : ks
-      ? `<span class="pz-art pz-art-kette" title="${escapeHtml(ks.tip)}"><span><b>Trade ${ks.nr}</b>${ks.kette}</span><small>${escapeHtml(ks.tag)}</small></span>`   // zweizeilig: Spalte nur 92 px
+      ? `<span class="pz-art pz-art-kette" title="${escapeHtml(ks.tip)}"><span><b>${typeof ks.nr === 'number' ? 'Trade ' + ks.nr : escapeHtml(String(ks.nr))}</b>${ks.kette}</span><small>${escapeHtml(ks.tag)}</small></span>`   // zweizeilig: Spalte nur 92 px
       : `<span class="pz-art" title="${notiz ? escapeHtml(planSchrittTip(notiz, Number(p.masterTp))) : ''}">${notiz ? escapeHtml(notiz.art) + (notiz.gekappt ? ' · SL gekappt' : '') : ''}</span>`
     // RADAR-OPTIK (o.stil 'radar', 08.10.2026, Finn: „im Admin die geplanten Trades etwas anpassen" — wie die Läuft-Zeilen im Radar): Konto
     // zweizeilig (Firma + Typ-Chip oben, „150k …0530" darunter), Richtung als BUY/SELL-Chip mit „3 × NQ" / „1,5 × Lot" (Mini-Popup der Größe

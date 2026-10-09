@@ -67,15 +67,15 @@ def main():
     ka = (wa or {}).get("kette") or {}
     check(wa and ka.get("tagesziel") == 3000 + wa["puffer"] and 25 <= wa["puffer"] <= 40 and ka.get("verlust_grenze") == 1700
           and ka.get("mll") == 145500.0 and ka.get("reparatur") is True and ka.get("angefressen") is True and ka.get("abstand_mll") == 1500.0
-          and wa["sl"] <= 1700 and wa["tp"] <= ka["tagesziel"] and wa["risiko"] == wa["sl"],
-          f"Reparatur 147.000 / MLL 145.500: Tagesziel 3.000 + Puffer, Verlustgrenze 1.700 (Abstand + 200), T1-SL ≤ 1.700, T1-TP ≤ Tagesziel ({ga or ka})")
-    check(wa and wa["stufe"] == f"Topstep-Kette 1/2 (Reparatur auf 150.000: +{ka['tagesziel']:,} $)".replace(",", "."),
+          and wa["sl"] == 1700 and wa["tp"] == ka["tagesziel"] and wa["risiko"] == wa["sl"] and ka.get("ein_trade") is True,
+          f"Reparatur 147.000 / MLL 145.500 = EIN Trade (Finn 09.10.2026): TP = Tagesziel 3.000 + Puffer, SL = Verlustgrenze 1.700 (Abstand + 200 = Blow) ({ga or (wa['tp'], wa['sl'], ka)})")
+    check(wa and wa["stufe"] == f"Topstep-Kette Reparatur-Tag · 1 Trade (zurück auf 150.000: +{ka['tagesziel']:,} $ oder Blow −1.700 $)".replace(",", "."),
           f"Stufe erkennbar im Planer: „{wa and wa['stufe']}“")
     ws, _ = R(KETTE, "challenge", 147000.0, {"tp": 0.5, "sl": 0.999, "menge": 0.0, "puffer": 0.5}, peak=150000.0)
     check(ws and ws["sl"] == 1700 and ws["risiko"] == 1700, f"T1-SL 1.750 > Verlustgrenze 1.700 → SL = 1.700 ({ws and ws['sl']})")
     wk, _ = R(KETTE, "challenge", 149000.0, {"tp": 0.5, "sl": 0.5, "menge": 0.0, "puffer": 0.0}, peak=151500.0)
-    check(wk and wk["kette"]["tagesziel"] == 1025 and wk["tp"] == 1025 and wk["kette"]["verlust_grenze"] == 2200
-          and "Reparatur auf 150.000: +1.025 $" in wk["stufe"],
+    check(wk and wk["kette"]["tagesziel"] == 1025 and wk["tp"] == 1025 and wk["kette"]["verlust_grenze"] == 2200 and wk["sl"] == 2200
+          and "zurück auf 150.000: +1.025 $ oder Blow −2.200 $" in wk["stufe"],
           f"Reparatur 149.000 / MLL 147.000 (Grenzfall 150k − MLL = 3.000): Tagesziel 1.025 < T1-TP 2.300 → T1-TP = Tagesziel ({wk and (wk['tp'], wk['kette'], wk['stufe'])})")
     # Master 08.10.2026 (Nachbesserung zu cc7a857): Reparatur nur, wenn 150.000 den Abstand zurückbringt (Startgröße − MLL ≥ DLL)
     wm, gm = R(KETTE, "challenge", 149900.0, {"tp": 0.5, "sl": 0.5, "menge": 0.0, "puffer": 0.5}, peak=153000.0)
@@ -86,7 +86,7 @@ def main():
     wr, gr = R(KETTE, "challenge", 148000.0, {"tp": 0.5, "sl": 0.5, "menge": 0.0, "puffer": 0.5}, peak=151000.0)
     kr_ = (wr or {}).get("kette") or {}
     check(wr and kr_.get("reparatur") is True and kr_.get("mll") == 146500.0 and kr_.get("tagesziel") == 2000 + wr["puffer"]
-          and kr_.get("verlust_grenze") == 1700 and "Reparatur auf 150.000" in wr["stufe"],
+          and kr_.get("verlust_grenze") == 1700 and "Reparatur-Tag · 1 Trade (zurück auf 150.000" in wr["stufe"] and wr["sl"] == 1700,
           f"148.000 / Höchststand 151.000 (MLL 146.500, 150k − MLL 3.500 ≥ 3.000) → Reparatur +2.000 + Puffer ({gr or (wr['stufe'], kr_)})")
     # ab der Startgröße (MLL gelockt bei 150.000): normal weiter, Verlustgrenze = Abstand + 200
     wn, gn = R(KETTE, "challenge", 151500.0, {"tp": 0.5, "sl": 0.999, "menge": 0.0, "puffer": 0.5}, peak=154500.0)
@@ -143,19 +143,10 @@ def main():
     # Weg B: Trade 2 eines Reparatur-Tags (Tagesziel 3.030, Verlustgrenze 1.700) aus dem Kette-Block von Trade 1
     kr = {"nr": 1, "tagesziel": 3030, "verlust_grenze": 1700, "daily_usd": 3000, "mll": 145500.0, "tagesstart_plan": 147000.0,
           "angefressen": True, "abstand_mll": 1500.0, "reparatur": True}
-    v, g = T2(kr, 147000, 146000)
-    check(v and (v["tp"], v["sl"]) == (4030, 700) and v.get("angefressen") is True and v.get("reparatur") is True and v.get("mll") == 145500.0,
-          f"Reparatur: T1 −1.000 → TP2 = Tagesziel + 1.000 = 4.030, SL2 700, Einstufung geerbt ({g or v})")
-    v, g = T2(kr, 147000, 148500)
-    check(v and (v["tp"], v["sl"]) == (1530, 3200), f"Reparatur: T1 +1.500 → TP2 1.530 / SL2 3.200 ({g or (v['tp'], v['sl'])})")
-    g = T2(kr, 147000, 145500)
-    check(g[0] is None and "MLL geblowt" in g[1], f"Reparatur: T1 am MLL (145.500) → blown, kein Trade 2 ({g[1]})")
-    g = T2(kr, 147000, 145300)
-    check(g[0] is None and "MLL geblowt" in g[1], f"Reparatur: T1 am SL 1.700 (hinter dem MLL) → blown, kein Trade 2 ({g[1]})")
-    g = T2(kr, 147000, 145520)
-    check(g[0] is None and "MLL geblowt" in g[1], f"Reparatur: T1 −1.480 (20 $ über MLL, Toleranz 50) → blown, kein Trade 2 ({g[1]})")
-    v, g = T2(kr, 147000, 145560)
-    check(v and (v["tp"], v["sl"]) == (4470, 260), f"Reparatur: T1 −1.440 (60 $ über MLL) → lebt, TP2 4.470 / SL2 260 ({g or v})")
+    # REPARATUR-TAG = EIN TRADE (Finn 09.10.2026 ~09:20 Dubai): egal wie Trade 1 endet — nie ein Trade 2
+    for b1 in (146000, 148500, 145500, 145300, 145520, 145560):
+        g = T2(kr, 147000, b1)
+        check(g[0] is None and "Reparatur-Tag: ein Trade" in g[1], f"Reparatur-Tag, T1-Ende {b1}: kein Trade 2 ({g[1]})")
     v, g = T2(kd, 150000, 145530)
     check(g and "MLL" not in g and "Tageslimit" in g, f"gesund: T1 30 $ über dem MLL → keine Toleranz, Tageslimit statt Blow ({g})")
     ang = a["ap_kette_angefressen"]
@@ -256,9 +247,8 @@ def main():
     a["ap_kette_tick"](jetzt, random.Random(7))
     zr = zustand["ins"][0] if zustand["ins"] else {}
     k2r = (zr.get("mt5_baseline") or {}).get("kette") or {}
-    check((zr.get("master_tp"), zr.get("master_sl")) == (4030, 700) and k2r.get("angefressen") is True and k2r.get("reparatur") is True
-          and k2r.get("mll") == 145500.0 and k2r.get("verlust_grenze") == 1700 and "oder MLL 145.500 (Blow)" in zr.get("notes", ""),
-          f"Reparatur-Trade 2 angelegt: TP 4.030 / SL 700, Kette-Block mit angefressen/reparatur/MLL, Notiz „oder MLL … (Blow)“ ({k2r}, {zr.get('notes')})")
+    check(not zustand["ins"] and any("Reparatur-Tag: ein Trade" in g for _i, g in gruende_db),
+          f"Reparatur-Tag (auch alter Plan ohne ein_trade, nur reparatur=true): ap_kette_tick legt KEINEN Trade 2 an, Grund an Trade 1 ({zustand['ins']})")
     zustand.update(t1=[t1], ins=[])
 
     # ── 3b automatisch abhaken (Finn 08.10.2026: nach der Prüfung direkt erledigt, nicht mehr im Radar abhaken) ───────────────
@@ -402,8 +392,8 @@ def main():
           f"(i) echte Start-Balance = Startwert: unverändert (Verlustgrenze 3.200, SL2 1.950) ({gn2 or wn2})")
     wx, gx = T2c(kst, 145400.0, 145300.0)
     check(wx is None and "auf/unter dem MLL" in (gx or ""), f"(i) Start schon unter dem MLL → kein Trade 2 ({gx})")
-    wg2, _ = T2c(dict(kst, verlust_grenze=1700, angefressen=True, abstand_mll=1500, reparatur=True, tagesziel=3030), 147000.0, 146000.0)
-    check(wg2 and wg2["verlust_grenze"] == 1700 and wg2["sl"] == 700, f"(i) Block schon kleiner (Reparatur-Plan): bleibt 1.700 ({wg2})")
+    wg2, _ = T2c(dict(kst, verlust_grenze=1700, angefressen=True, abstand_mll=1500, tagesziel=3030), 147000.0, 146000.0)
+    check(wg2 and wg2["verlust_grenze"] == 1700 and wg2["sl"] == 700, f"(i) Block schon kleiner (angefressen ohne Reparatur): bleibt 1.700 ({wg2})")
 
     # Balance-Wahl wie im Backend für ein Topstep-Konto ohne Sync: tv_balance (Puls) mit Zeitstempel; ohne Lesung None
     c["acc_balance_wahl"] = lambda a, e, d: ((float(a["tv_balance"]), "USD", "TV", a.get("tv_balance_at") or "") if (a or {}).get("tv_balance")

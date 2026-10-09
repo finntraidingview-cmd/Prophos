@@ -15273,12 +15273,16 @@ def ap_kette_trade1(regel, kette, groesse, ziel, balance, u, peak=None):
         verlust = round(float(regel.get("dd_usd") or 0) + float(kette["blow_puffer_usd"]))
     tp = round(_ap_spanne(kette["t1_tp"], u["tp"]))
     sl = round(_ap_spanne(kette["t1_sl"], u["sl"]))
+    if reparatur:
+        # REPARATUR-TAG = EIN TRADE (Finn 09.10.2026 ~09:20 Dubai): TP = Reparatur-Ziel (zurück auf die Startgröße + Puffer), SL = Verlust-
+        # grenze (Abstand MLL + blow_puffer = Blow) — statt der T1-Spannen und eines Trade 2
+        tp, sl = tagesziel, verlust
     if sl > verlust:
         # angefressen (z. B. SL 1.750, Abstand 1.500 → Verlustgrenze 1.700): SL nie hinter der Verlustgrenze — ein T1-Verlust ist dann
         # der Blow am MLL, Trade 2 entfällt (ap_kette_trade2). Gesunde Konten (Verlustgrenze 3.200, SL ≤ 1.750) trifft das nie
         sl = verlust
     if reparatur:
-        stufe = f"{AP_KETTE_TXT} 1/2 (Reparatur auf {de(groesse)}: +{de(tagesziel)} $)"
+        stufe = f"{AP_KETTE_TXT} Reparatur-Tag · 1 Trade (zurück auf {de(groesse)}: +{de(tagesziel)} $ oder Blow −{de(verlust)} $)"
     else:
         stufe = f"{AP_KETTE_TXT} 1/2 (Tagesziel +{tagesziel:,} $)".replace(",", ".")
     if tp >= tagesziel:                       # letzter Tag oder Reparatur mit kleinem Rest: Trade 1 kann das Ziel schon allein holen
@@ -15304,6 +15308,7 @@ def ap_kette_trade1(regel, kette, groesse, ziel, balance, u, peak=None):
         k1.update(angefressen=True, abstand_mll=round(balance - mll, 2))
         if reparatur:
             k1["reparatur"] = True
+            k1["ein_trade"] = True               # Reparatur-Tag = ein Trade (09.10.2026) — Anzeige ohne „Trade 2 folgt"
     return {"groesse": groesse, "ziel": ziel, "rest": round(rest), "menge": menge, "puffer": puffer, "tp": tp, "sl": sl, "risiko": sl,
             "stufe": stufe, "kette": k1}, None
 
@@ -15311,6 +15316,11 @@ def ap_kette_trade1(regel, kette, groesse, ziel, balance, u, peak=None):
 def ap_kette_trade2(t1_kette, balance_start, balance_end, regel, kette, u_menge):
     """REIN RECHNEND: Werte von Trade 2 aus dem GENAU gelesenen Ergebnis von Trade 1 → (werte, None) | (None, grund).
     E1 = balance_end − balance_start; TP2 = Tagesziel − E1; SL2 = Verlustgrenze + E1."""
+    # REPARATUR-TAG = EIN TRADE (Finn 09.10.2026 ~09:20 Dubai): TP = Reparatur-Ziel, SL = Blow am MLL — Ausgang geblowt oder wieder
+    # ~150.000, ab dem nächsten Tag normal. Kein Trade 2, auch für Reparatur-Pläne von vor dieser Regel (Ina …3822, d369e8d5 lief noch
+    # mit T1-Spannen) — der Riegel hängt deshalb am Block-Flag reparatur, nicht an ein_trade.
+    if (t1_kette or {}).get("reparatur"):
+        return None, "Reparatur-Tag: ein Trade (TP = zurück auf die Startgröße, SL = Blow am MLL) — kein Trade 2"
     tagesziel = float((t1_kette or {}).get("tagesziel") or kette["tagesziel_usd"])
     verlust = float((t1_kette or {}).get("verlust_grenze") or (float(regel.get("dd_usd") or 0) + float(kette["blow_puffer_usd"])))
     e1 = round(float(balance_end) - float(balance_start), 2)

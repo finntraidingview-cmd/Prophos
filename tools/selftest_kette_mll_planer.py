@@ -90,10 +90,11 @@ def main():
     # Weg B (Finn 08.10.2026 ~22:15 Dubai): angefressen unter der Startgröße → Reparatur-Tag zurück auf 150.000 + Puffer
     a, erg, aus, plan = lauf(balance=147000.0)
     p0 = plan[0] if plan else {}
-    m = re.search(r"Reparatur auf 150\.000: \+([\d.]+) \$", str(p0.get("stufe")))
+    # seit 09.10.2026 ~09:20 Dubai (Finn): Reparatur-Tag = EIN Trade — TP = Reparatur-Ziel, SL = Verlustgrenze 1.700 (Blow)
+    m = re.search(r"Reparatur-Tag · 1 Trade \(zurück auf 150\.000: \+([\d.]+) \$ oder Blow −1\.700 \$\)", str(p0.get("stufe")))
     tz = int(m.group(1).replace(".", "")) if m else None
-    check(plan and not aus and tz is not None and 3025 <= tz <= 3040 and float(p0.get("sl") or 0) <= 1700 and float(p0.get("tp") or 0) <= tz,
-          f"Balance 147.000 (MLL 145.500) → Reparatur-Tag +{tz} $ (3.000 + Puffer), SL {p0.get('sl')} ≤ 1.700, TP {p0.get('tp')} ≤ Tagesziel ({p0 or aus})")
+    check(plan and not aus and tz is not None and 3025 <= tz <= 3040 and float(p0.get("sl") or 0) == 1700 and float(p0.get("tp") or 0) == tz,
+          f"Balance 147.000 (MLL 145.500) → Reparatur-Tag · 1 Trade: TP {p0.get('tp')} = +{tz} $ (3.000 + Puffer), SL {p0.get('sl')} = 1.700 ({p0 or aus})")
 
     a["_liq_verlauf_cache"].clear()
     a["_sb_all"] = lambda t, p: (_ for _ in ()).throw(RuntimeError("weg"))
