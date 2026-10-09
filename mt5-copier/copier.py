@@ -770,11 +770,34 @@ SOLO_SLTP_LOKAL_MS = 20     # schnellere Ablehnung = vom Terminal, nicht vom Bro
 SOLO_SLTP_WIEDER_S = 0.3
 
 
-def solo_position_abwarten(positions_get, ticket, plan_id, symbol, *, schlafe, jetzt,
+def solo_kandidat_plan8(positionen, plan_id, bekannte_tickets):
+    """REIN RECHNEND (testbar): DIE Solo-Position dieses Plans für den Rückgriff, wenn das Order-Ticket nicht greift — nur bei
+    genau EINEM Kandidaten (SOLO_MAGIC + plan8 aus dem Kommentar), dessen Ticket dieser Copier noch keinem Plan zugeordnet hat.
+    Sonst None (Vorprüfung Terminal 3, 09.10.2026: öffnen zwei PCs denselben Plan im geteilten Fusion-Konto, bevor die erste
+    Position sichtbar ist, würde ein „erster Treffer" das Ticket des ANDEREN PCs liefern — die eigene Position stünde als Waise da)."""
+    pid = str(plan_id or "").strip()
+    p8 = solo_plan8(solo_kommentar(pid)) if pid else None
+    if not p8:
+        return None
+    bek = {str(t) for t in (bekannte_tickets or ())}
+    treffer = []
+    for p in (positionen or []):
+        try:
+            if int(_pos_feld(p, "magic", 0) or 0) == SOLO_MAGIC and solo_plan8(_pos_feld(p, "comment", "")) == p8:
+                treffer.append(p)
+        except (TypeError, ValueError):
+            continue
+    if len(treffer) != 1 or str(_pos_feld(treffer[0], "ticket", "")) in bek:
+        return None
+    return treffer[0]
+
+
+def solo_position_abwarten(positions_get, ticket, plan_id, symbol, *, schlafe, jetzt, bekannte_tickets=(),
                            max_s=SOLO_POS_WARTE_S, schritt_s=SOLO_POS_SCHRITT_S):
     """TESTBAR (positions_get/schlafe/jetzt eingespielt): wartet, bis die Solo-Position im Terminal steht — zuerst über das
-    Ticket, sonst über Symbol + Plan-Kennung (solo_schon_offen), falls Order- und Positions-Ticket auseinanderfallen.
-    -> (ticket der Position bzw. das alte, gefunden, gewartet_ms). Nur Lesen, nie ein Trade-Request."""
+    Ticket, sonst über Symbol + Plan-Kennung (solo_kandidat_plan8: genau ein noch unbekannter Kandidat), falls Order- und
+    Positions-Ticket auseinanderfallen. -> (ticket der Position bzw. das alte, gefunden, gewartet_ms). Nur Lesen, nie ein
+    Trade-Request."""
     t0 = jetzt()
     while True:
         p = None
@@ -782,7 +805,7 @@ def solo_position_abwarten(positions_get, ticket, plan_id, symbol, *, schlafe, j
             pos = positions_get(ticket=int(ticket)) if ticket else None
             p = pos[0] if pos else None
             if p is None and plan_id and symbol:
-                p = solo_schon_offen(positions_get(symbol=symbol), plan_id)
+                p = solo_kandidat_plan8(positions_get(symbol=symbol), plan_id, bekannte_tickets)
         except Exception:
             p = None
         ms = int(round((jetzt() - t0) * 1000))
@@ -2029,8 +2052,11 @@ def main():
         try:
             if tp_punkte > 0 and ticket:
                 # Erst warten, bis das Terminal die Position führt (Fall befd8bb9, 09.10.2026 — s. solo_position_abwarten)
+                # bekannt = Tickets, die dieser Copier schon einem Plan zugeordnet hat (ohne das eigene Order-Ticket)
+                bekannt_ = {str(t_) for t_ in list((hedge_acc.get("solo_plan") or {}).keys()) + list((hedge_acc.get("solo_bekannt") or {}).keys())
+                            if str(t_) != str(ticket)}
                 ticket_pos, pos_da, warte_ms = solo_position_abwarten(mt5.positions_get, ticket, a.get("plan_id"), sym,
-                                                                      schlafe=time.sleep, jetzt=time.time)
+                                                                      schlafe=time.sleep, jetzt=time.time, bekannte_tickets=bekannt_)
                 erg["pos_warte_ms"] = warte_ms
                 if not pos_da:
                     log(f"[solo] Position {ticket} nach {warte_ms} ms noch nicht im Terminal — SLTP trotzdem (Wiederholung bei lokaler Ablehnung)")

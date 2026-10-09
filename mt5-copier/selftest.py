@@ -2331,6 +2331,20 @@ def test_solo_sltp_rennen():
     t, gef, ms = copier.solo_position_abwarten(pg2, 111, pid, "NAS100", schlafe=schlafe, jetzt=jetzt)
     if (t, gef, ms) != (233760903, True, 0):
         print(f"✗ Position über Plan-Kennung: {(t, gef, ms)}"); ok = False
+    # 2b) Rückgriff nur bei genau EINEM unbekannten Kandidaten (Vorprüfung T3): zwei Positionen derselben plan8 (Doppel-Open
+    # zweier PCs) → keiner; einziger Kandidat schon einem Plan zugeordnet → keiner; dann bleibt das Order-Ticket (gefunden False)
+    pos_b = dict(pos, ticket=233760999)
+    t, gef, ms = copier.solo_position_abwarten(lambda ticket=None, symbol=None: (pos, pos_b) if symbol else (), 111, pid, "NAS100",
+                                               schlafe=schlafe, jetzt=jetzt)
+    if (t, gef) != (111, False):
+        print(f"✗ zwei Kandidaten derselben plan8 dürfen nicht umhängen: {(t, gef)}"); ok = False
+    t, gef, ms = copier.solo_position_abwarten(pg2, 111, pid, "NAS100", schlafe=schlafe, jetzt=jetzt, bekannte_tickets={"233760903"})
+    if (t, gef) != (111, False):
+        print(f"✗ schon bekanntes Ticket darf nicht übernommen werden: {(t, gef)}"); ok = False
+    if copier.solo_kandidat_plan8([pos, dict(pos, comment="PXsolo:andere1")], pid, ()) is not pos \
+            or copier.solo_kandidat_plan8([dict(pos, magic=760001)], pid, ()) is not None \
+            or copier.solo_kandidat_plan8([pos], None, ()) is not None:
+        print("✗ solo_kandidat_plan8 (fremde plan8 zählt nicht, Copier-magic nie, ohne plan_id None)"); ok = False
     # 3) Nie da → nach max_s aufgeben (altes Ticket, gefunden False), kein Endlos-Warten
     t0 = uhr["t"]
     t, gef, ms = copier.solo_position_abwarten(lambda **k: (), 777, pid, "NAS100", schlafe=schlafe, jetzt=jetzt)
@@ -2375,7 +2389,7 @@ def test_solo_sltp_rennen():
     if copier.solo_sltp_setzen(senden, lf, 1, "NAS100", 1.0, 0.0, aktion=SLTP, magic=1, text="t", schlafe=schlafe, jetzt=jetzt) != (True, None, 1) or len(log) != 1:
         print("✗ Erfolg beim ersten Versuch"); ok = False
     if ok:
-        print("✓ Solo-SLTP: wartet auf die Position (Rennen 120 ms, Plan-Kennung, Abbruch nach 1 s), lokale Ablehnung genau 1× wiederholt, Broker-Ablehnung nie, nur SLTP")
+        print("✓ Solo-SLTP: wartet auf die Position (Rennen 120 ms, Plan-Kennung nur bei genau einem unbekannten Kandidaten, Abbruch nach 1 s), lokale Ablehnung genau 1× wiederholt, Broker-Ablehnung nie, nur SLTP")
     return ok
 
 
