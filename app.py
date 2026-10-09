@@ -11764,7 +11764,9 @@ def _lt_zeile(p, acc, disp, kerzen_je_wurzel, vorher=None, regeln=None, fruehere
               "balance_sprung": lt_balance_sprung(p.get("route"), tv, fin),   # Auszahlung o. Ä. zwischen Start und Ende (08.10.2026)
               "liq_balance": liq_bal, "liq_regel": liq_regel, "liq_level_nq": liq_level, "demo": demo,
               "liq_quelle": liq_quelle if liq_level is not None else None,
-              "konto_balance": _wd_num((acc or {}).get("tv_balance")), "konto_balance_at": (acc or {}).get("tv_balance_at")})
+              "konto_balance": _wd_num((acc or {}).get("tv_balance")), "konto_balance_at": (acc or {}).get("tv_balance_at"),
+              # blown am Plan (09.10.2026): Echo-Zeilen haben keine Liq im Radar — der Chip „geblowt" kommt dort nur von hier
+              "blown": bool(p.get("blown"))})
     z.update(regel_f)   # liq_regel_* nur zusätzlich — liq_level_nq/Hedge bleiben wie oben gerechnet
     return z
 
@@ -11995,7 +11997,7 @@ def admin_live_trades():
         seit = datetime.fromtimestamp(datetime.now(timezone.utc).timestamp() - tage * 86400, timezone.utc).isoformat()
         felder = ("id,user_id,master_account_id,master_name,master_firm,route,notes,status,richtung,master_contracts,master_symbol,"
                   "master_symbol_root,master_tp,master_sl,master_pl,hedge_eur,hedge_faktor,start_um,start_um_gestartet_at,orbit_gesendet_at,orbit_v3,"
-                  "started_at,ended_at,completed_at,planned_for,created_at,mt5_baseline,slave_pl,pl_quelle,konto_typ,orbit_v3")
+                  "started_at,ended_at,completed_at,planned_for,created_at,mt5_baseline,slave_pl,pl_quelle,konto_typ,orbit_v3,blown")
         # B16: Topstep V2 wie Orbit V2. Seit 01.10.2026 abends (Finn: „ein Tab je Modell im Radar") mit ?echo=1 auch das klassische
         # Echo mit Fusion-Hedge (route mt5) — gleiche Felder wie Echo V2 aus mt5_live, dazu der Fusion-P&L (slave_pl_live)
         basis_f = {"select": felder, "route": "in.(tvv2,tsv2,mt5v2,mt5)" if mit_echo else "in.(tvv2,tsv2)"}
@@ -13091,27 +13093,8 @@ def admin_wd_plaene():
                         if not aid or not uid:
                             return {"fehler": "Konto nicht archiviert (Plan ohne Master-Konto) — im Account von Hand archivieren"}
                         try:
-                            z = sb_select("user_settings", {"select": "value", "user_id": f"eq.{uid}", "key": "eq.archive", "limit": "1"})
-                            v = (z[0] if z else {}).get("value")
-                            if isinstance(v, str):
-                                v = json.loads(v)
-                            arch = v if isinstance(v, dict) else {}
-                            if not (isinstance(arch.get(aid), dict) and arch[aid].get("archived")):
-                                arch[aid] = {"archived": True, "reason": "blown" if blown else "passed_pending", "at": jetzt_iso}
-                                _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/user_settings", params={"on_conflict": "user_id,key"},
-                                            json={"user_id": uid, "key": "archive", "value": arch, "updated_at": jetzt_iso},
-                                            headers=_sb_headers("resolution=merge-duplicates,return=minimal"), timeout=12).raise_for_status()
-                            # Echo-Konto: Terminal-Löschauftrag wie archiveAccount() im Frontend (07.09.2026) — still, falls keins verknüpft
-                            try:
-                                ml = sb_select("mt5_links", {"select": "mt5_login", "account_id": f"eq.{aid}", "limit": "1"})
-                                if ml and ml[0].get("mt5_login"):
-                                    _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/echo_loesch_auftraege", params={"on_conflict": "mt5_login"},
-                                                json={"mt5_login": str(ml[0]["mt5_login"]), "grund": "blown" if blown else "passed_pending",
-                                                      "account_name": plan.get("master_name"), "angelegt_am": jetzt_iso,
-                                                      "erledigt_am": None, "erledigt_info": None},
-                                                headers=_sb_headers("resolution=merge-duplicates,return=minimal"), timeout=12).raise_for_status()
-                            except Exception as e:
-                                print(f"[erledigt] ⚠️ Echo-Löschauftrag {aid}: {type(e).__name__}: {e}", flush=True)
+                            # seit 09.10.2026 gemeinsamer Helfer mit dem automatischen Abhaken (ap_blow_auto_tick)
+                            _konto_archiv_eintragen(uid, aid, "blown" if blown else "passed_pending", jetzt_iso, plan.get("master_name"))
                             return {"archiviert": True, "konto_id": aid, "grund": konto_status}
                         except Exception as e:
                             return {"fehler": f"Konto nicht archiviert ({type(e).__name__}) — im Account von Hand archivieren"}
@@ -18035,6 +18018,12 @@ def _ap_blow_beim_abhaken(plan, master_pl):
         fin = bl.get("final") if isinstance(bl.get("final"), dict) else {}
         bs = _wd_num(tv.get("balance_start")) or _wd_num(bl.get("balance_start"))
         be = _wd_num(fin.get("balance_end"))
+        # Echo V2 (09.10.2026, Fall FundedNext 100k Phase 2): vorher/nachher stehen dort in master_balance / bal_nach — vorher las
+        # dieser Weg nur die Orbit-Felder und sagte bei Echo nie „geblowt"
+        echt = ap_echte_balancen(plan)
+        if echt:
+            bs = bs if bs is not None else echt[0]
+            be = be if be is not None else echt[1]
         if be is None and bs is not None and master_pl is not None:
             be = float(bs) + float(master_pl)
         if bs is None or be is None or not plan.get("master_account_id"):
@@ -18052,6 +18041,171 @@ def _ap_blow_beim_abhaken(plan, master_pl):
     except Exception as e:
         print(f"[erledigt] Boden-Prüfung übersprungen ({type(e).__name__}: {e})", flush=True)
         return False
+
+
+# ══ GEBLOWT AUTOMATISCH ABHAKEN (09.10.2026, Finn über Master ~20:45 Dubai, Fall FundedNext 100k Phase 2, Plan 4d43a7a5: Echo V2
+# SELL 2,4 Lot, Ende 14:38 Dubai, MT5-Balance danach 89.942 $ unter dem Boden 90.000 — stand trotzdem in „Überprüfen", ohne Chip, Konto
+# aktiv). Zwei Lücken: _ap_blow_beim_abhaken las nur die Orbit-Felder (tv.balance_start / final.balance_end) — Echo V2 schreibt
+# mt5_baseline.master_balance (vorher) und bal_nach / final.master_balance (nachher); und die Prüfung lief nur beim Klick auf „Erledigt".
+# Finns Regel: echte gelesene Balance nach dem Trade auf/unter dem Boden = geblowt → automatisch. ap_loop prüft alle AP_BLOW_AUTO_S die
+# Pläne in „Überprüfen": Plan completed + blown mit P&L = nachher − vorher, Konto im Archiv des Besitzers als „blown" (+ Echo-Löschauftrag;
+# die geplanten Trades räumt ap_archiv_sweep), Push an Inhaber + Admins. Nur echte Lesungen, nie Demo/Schätzung/Hand. Topstep-Kette
+# (Route tsv2, Firmen mit regel.kette) hat ihre eigene MLL-Logik; Pläne mit Hedge bleiben beim Abhaken von Hand (Hedge-P&L gehört dazu).
+AP_BLOW_AUTO_S = 300
+AP_BLOW_AUTO_ROUTEN = ("mt5v2", "tvv2")
+_ap_blow_auto = {"at": 0.0, "n": 0, "fehler": ""}
+
+
+def ap_echte_balancen(plan):
+    """REIN RECHNEND (testbar): (vorher, nachher, quelle) aus ECHTEN Lesungen, sonst None.
+    Echo V2 (mt5v2): vorher = mt5_baseline.master_balance (Copier beim Start), nachher = bal_nach.balance (Nachlesung, ok) bzw.
+    final.master_balance. Orbit V2 (tvv2): vorher = tv.balance_start, nachher = final.balance_end nur mit final.quelle 'puls'
+    (Puls-Endlesung) — Demo-, Hand-, Level- und Reader-Werte zählen nie."""
+    bl = plan.get("mt5_baseline") if isinstance((plan or {}).get("mt5_baseline"), dict) else {}
+    fin = bl.get("final") if isinstance(bl.get("final"), dict) else {}
+    route = str((plan or {}).get("route") or "")
+    if route == "mt5v2":
+        bn = bl.get("bal_nach") if isinstance(bl.get("bal_nach"), dict) else {}
+        vorher = _wd_num(bl.get("master_balance"))
+        nachher, q = (_wd_num(bn.get("balance")), "mt5_nachlesung") if bn.get("ok") is True else (None, None)
+        if nachher is None:
+            nachher, q = _wd_num(fin.get("master_balance")), "mt5_final"
+    elif route == "tvv2":
+        tv = bl.get("tv") if isinstance(bl.get("tv"), dict) else {}
+        vorher = _wd_num(tv.get("balance_start"))
+        nachher, q = (_wd_num(fin.get("balance_end")), "puls") if fin.get("quelle") == "puls" else (None, None)
+    else:
+        return None
+    if not vorher or vorher <= 0 or not nachher or nachher <= 0:
+        return None
+    return float(vorher), float(nachher), q
+
+
+def ap_blow_auto_pruefen(plan, acc, regel):
+    """REIN RECHNEND (testbar): geblowt laut echter Lesung? → {vorher, nachher, pl, boden, quelle} oder None.
+    Nur status 'review', noch nicht blown, Route AP_BLOW_AUTO_ROUTEN, Phase in AP_TYPEN (konto_typ des Plans, sonst des Kontos), Firmen-Regel
+    ohne Kette, kein Hedge am Plan, Boden bekannt (ap_boden_konto mit der Balance VOR dem Trade wie ap_ende_unter_boden)."""
+    p = plan or {}
+    if p.get("status") != "review" or p.get("blown") is True or str(p.get("route") or "") not in AP_BLOW_AUTO_ROUTEN:
+        return None
+    if not acc or not regel or ap_kette_regel(regel):
+        return None
+    phase = str(p.get("konto_typ") or acc.get("account_type") or "")
+    if phase not in AP_TYPEN:
+        return None
+    bl = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+    if bl.get("hedge"):
+        return None
+    echt = ap_echte_balancen(p)
+    if not echt:
+        return None
+    vorher, nachher, q = echt
+    try:
+        bo = (ap_boden_konto(ap_regel_konto(regel, acc, vorher), phase, vorher) or {}).get("boden")
+    except Exception:
+        return None
+    if bo is None or nachher > float(bo):
+        return None
+    return {"vorher": vorher, "nachher": nachher, "pl": round(nachher - vorher, 2), "boden": float(bo), "quelle": q}
+
+
+def _konto_archiv_eintragen(uid, aid, grund, jetzt_iso, name=None):
+    """Konto im Archiv des Besitzers eintragen (user_settings key 'archive' {konto_id: {archived, reason, at}}: lesen → ergänzen →
+    upsert; ein schon archiviertes Konto bleibt unverändert) + Echo-Löschauftrag wie archiveAccount() im Frontend (07.09.2026), still,
+    falls keins verknüpft. grund 'blown' | 'passed_pending'. → True (neu archiviert) | False (war schon). Wirft bei DB-Fehlern."""
+    z = sb_select("user_settings", {"select": "value", "user_id": f"eq.{uid}", "key": "eq.archive", "limit": "1"})
+    v = (z[0] if z else {}).get("value")
+    if isinstance(v, str):
+        v = json.loads(v)
+    arch = v if isinstance(v, dict) else {}
+    neu = not (isinstance(arch.get(aid), dict) and arch[aid].get("archived"))
+    if neu:
+        arch[aid] = {"archived": True, "reason": grund, "at": jetzt_iso}
+        _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/user_settings", params={"on_conflict": "user_id,key"},
+                    json={"user_id": uid, "key": "archive", "value": arch, "updated_at": jetzt_iso},
+                    headers=_sb_headers("resolution=merge-duplicates,return=minimal"), timeout=12).raise_for_status()
+    try:
+        ml = sb_select("mt5_links", {"select": "mt5_login", "account_id": f"eq.{aid}", "limit": "1"})
+        if ml and ml[0].get("mt5_login"):
+            _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/echo_loesch_auftraege", params={"on_conflict": "mt5_login"},
+                        json={"mt5_login": str(ml[0]["mt5_login"]), "grund": grund, "account_name": name, "angelegt_am": jetzt_iso,
+                              "erledigt_am": None, "erledigt_info": None},
+                        headers=_sb_headers("resolution=merge-duplicates,return=minimal"), timeout=12).raise_for_status()
+    except Exception as e:
+        print(f"[archiv] ⚠️ Echo-Löschauftrag {aid}: {type(e).__name__}: {e}", flush=True)
+    return neu
+
+
+def _ap_blow_auto_abhaken(plan, acc, k):
+    """Einen geblowten Plan abhaken (completed + blown, P&L aus der Lesung), Konto archivieren, Push. Optimistische Sperre: nur solange
+    der Plan noch in 'review' und nicht blown steht — hat ihn inzwischen jemand abgehakt, passiert nichts. → True, wenn abgehakt."""
+    pid = str(plan["id"])
+    jetzt_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    upd, fehler = _wd_erledigt_upd(plan, k["pl"], None, jetzt_iso, _cme_handelstag())
+    if fehler:
+        print(f"[blow-auto] {pid[:8]} nicht abgehakt: {fehler[1]}", flush=True)
+        return False
+    upd["blown"] = True
+    if not sb_update("trade_plans", {"id": f"eq.{pid}", "status": "eq.review", "blown": "not.is.true"}, upd):
+        return False
+    uid, aid = str(plan.get("user_id") or acc.get("user_id") or ""), str(acc.get("id") or "")
+    try:
+        neu = _konto_archiv_eintragen(uid, aid, "blown", jetzt_iso, plan.get("master_name")) if uid and aid else False
+    except Exception as e:
+        neu = None
+        print(f"[blow-auto] ⚠️ {pid[:8]} abgehakt, Konto NICHT archiviert ({type(e).__name__}: {e}) — im Account von Hand archivieren", flush=True)
+    e4 = re.sub(r"[^A-Za-z0-9]", "", str(acc.get("external_id") or ""))[-4:]
+    try:
+        namen, _aus = _ap_namen()
+    except Exception:
+        namen = {}
+    de = lambda v: f"{v:,.0f}".replace(",", ".")
+    text = (f"{acc.get('firm') or 'Konto'}{' …' + e4 if e4 else ''}{' · ' + namen.get(uid, '') if namen.get(uid) else ''}: Balance "
+            f"{de(k['nachher'])} $ ≤ Boden {de(k['boden'])} $ → geblowt, abgehakt ({'−' if k['pl'] < 0 else '+'}{de(abs(k['pl']))} $) · "
+            + ("als geblowt archiviert" if neu else "war schon archiviert" if neu is False else "Archivieren fehlgeschlagen — von Hand"))
+    zu = 0
+    for ziel in ({uid} if uid else set()) | (_zw_admin_uids() or set()):
+        try:
+            a_, _b = push_an_user(ziel, "💀 Geblowt", text, "https://prophos.pages.dev/prophos#accounts", "blow-" + aid[:8])
+            zu += a_
+        except Exception as e:
+            print(f"[blow-auto] ⚠️ Push {ziel[:8]}: {type(e).__name__}: {e}", flush=True)
+    print(f"[blow-auto] 💀 Plan {pid[:8]} · {text} (Quelle {k['quelle']}, {zu} Geräte)", flush=True)
+    return True
+
+
+def ap_blow_auto_tick(force=False):
+    """Alle AP_BLOW_AUTO_S: Pläne in 'review' gegen den Boden prüfen (ap_blow_auto_pruefen) und geblowte abhaken. → Anzahl | None."""
+    if not force and time.time() - _ap_blow_auto["at"] < AP_BLOW_AUTO_S:
+        return None
+    _ap_blow_auto["at"] = time.time()
+    plaene = _sb_all("trade_plans", {"select": "id,user_id,route,status,blown,master_account_id,master_name,konto_typ,mt5_baseline,"
+                                               "ended_at,completed_at,started_at,updated_at",
+                                     "status": "eq.review", "blown": "not.is.true", "route": f"in.({','.join(AP_BLOW_AUTO_ROUTEN)})"})
+    plaene = [p for p in plaene or [] if p.get("master_account_id")]
+    if not plaene:
+        return 0
+    ids = sorted({str(p["master_account_id"]) for p in plaene})
+    konten = {str(a["id"]): a for a in sb_select("accounts", {
+        "select": "id,user_id,name,firm,account_type,consistency_pct,ziel_pct_konto,max_drawdown,external_id",
+        "id": f"in.({','.join(ids)})"}) or []}
+    firmen = ((sb_select("auto_plan_regeln", {"select": "regeln", "id": "eq.1"}) or [{}])[0].get("regeln") or {}).get("firmen") or []
+    n = 0
+    for p in plaene:
+        acc = konten.get(str(p["master_account_id"]))
+        try:
+            k = ap_blow_auto_pruefen(p, acc, ap_regel_finden(firmen, (acc or {}).get("firm")) if acc else None)
+            if k and _ap_blow_auto_abhaken(p, acc, k):
+                n += 1
+        except Exception as e:
+            print(f"[blow-auto] ⚠️ {str(p['id'])[:8]}: {type(e).__name__}: {e}", flush=True)
+    if n:
+        try:
+            ap_archiv_sweep(force=True)          # geplante Trades der eben archivierten Konten sofort weg
+        except Exception as e:
+            print(f"[archiv-sweep] ⚠️ {type(e).__name__}: {e}", flush=True)
+    _ap_blow_auto["n"] = n
+    return n
 
 
 def ap_letzter_trade_geblasen(regel, balance, plaene_konto, bal_stand=None):
@@ -23753,6 +23907,12 @@ def ap_loop():
             ap_archiv_sweep()                 # Pläne archivierter Konten / Waisen alle 5 min (09.10.2026)
         except Exception as e:
             print(f"[archiv-sweep] ⚠️ {type(e).__name__}: {e}", flush=True)
+        try:
+            ap_blow_auto_tick()               # geblowt (echte Balance ≤ Boden) automatisch abhaken + archivieren alle 5 min (09.10.2026)
+            _ap_blow_auto["fehler"] = ""
+        except Exception as e:
+            _ap_blow_auto["fehler"] = f"{type(e).__name__}: {e}"
+            print(f"[blow-auto] ⚠️ {type(e).__name__}: {e}", flush=True)
         _ap_kette_takt()                      # Topstep-Kette: Trade 2 nach genauer Nachlesung von Trade 1 (08.10.2026)
         try:
             _ap_bot_tick(datetime.now(_ap_tz(AP_TZ_TAG)))

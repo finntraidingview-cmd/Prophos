@@ -29526,6 +29526,8 @@
   // Eigene Spalten (02.10.2026, Finn: „eine eigene Spalte für den Kontostand und eine für geblowt/Take Profit"): Ergebnis-Wort
   // („💀 geblowt" / „⏸ Tageslimit" schlägt SL/Liq der Demo) und Konto-Zelle
   function wdlBlowErg(t){
+    // Plan als geblowt abgehakt (09.10.2026, auch automatisch: echte Balance ≤ Boden, ap_blow_auto_tick) — gilt auch für Echo ohne Liq
+    if(t && t.blown === true) return '<b style="color:#b91c1c">💀 geblowt</b>'
     const b = wdlBlowStand(t); if(!b) return ''
     return b.geblowt ? '<b style="color:#b91c1c">💀 geblowt</b>' : b.softBreach ? WDL_TAGESLIMIT_ERG : ''
   }
