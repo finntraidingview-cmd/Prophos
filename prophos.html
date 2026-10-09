@@ -29237,7 +29237,8 @@
       const gq = typeof window._admGruppeQ === 'function' ? window._admGruppeQ('&') : ''
       const r = await fetch(`${WATCHER_HOME}/admin/handarbeit?ansicht=admin${gq}`, { headers: { 'sb-token': tok }, cache: 'no-store' })
       const d = await r.json().catch(() => null)
-      if(r.ok && d && d.ok){ _hand.d = d; _hand.at = Date.now(); _hand.fehler = ''; try{ if(typeof wdlAktiv === 'function' && wdlAktiv()) wdlRender() }catch(_){} }   // Radar-Abschnitt Bestanden nutzt _hand.d (09.10.2026) else _hand.fehler = (d && d.error) || ('HTTP ' + r.status)
+      // Radar-Abschnitt Bestanden nutzt _hand.d (09.10.2026) — nach dem Laden neu zeichnen, wenn der Radar offen ist
+      if(r.ok && d && d.ok){ _hand.d = d; _hand.at = Date.now(); _hand.fehler = ''; try{ if(typeof wdlAktiv === 'function' && wdlAktiv()) wdlRender() }catch(_){} } else _hand.fehler = (d && d.error) || ('HTTP ' + r.status)
     }catch(e){ _hand.fehler = (e && e.message) || String(e) }
     finally{ _hand.laedt = false; handKnopf(); if(document.getElementById('handModal')?.classList.contains('open')) handRender() }
   }
@@ -43224,7 +43225,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1444'
+  const OS_TAB_BUILD = '2026-09-22.1445'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
