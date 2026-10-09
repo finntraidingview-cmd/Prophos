@@ -716,6 +716,7 @@
   .puls-cd.is-laeuft .puls-cd-karte{border-color:rgba(16,185,129,.45)}
   .puls-cd.is-laeuft .puls-cd-lbl,.puls-cd.is-laeuft .puls-cd-zahl{color:#047857}
   .puls-cd.is-laeuft .puls-cd-zahl{font-size:56px}
+  .puls-cd-zahl:empty{display:none}   /* „Puls läuft" ohne Sekundenzählung (09.10.2026, Finn) — Karte kompakt */
   /* ✕ an der Karte (07.10.2026, Finn: „Meldung wegklicken … ich bediene vor dem MacBook oft andere IDs") — nur der Knopf fängt Klicks */
   .puls-cd-karte{position:relative}
   .puls-cd-zu{position:absolute;top:8px;right:8px;width:26px;height:26px;border:0;border-radius:50%;background:transparent;
@@ -42738,7 +42739,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1414'
+  const OS_TAB_BUILD = '2026-09-22.1415'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -46379,7 +46380,8 @@
     if(MT5_LOCAL && !document.hidden && el.getClientRects().length){
       if(zaehlt) cd = { lbl: 'Puls startet in', zahl: String(Math.ceil(rest / 1000)), was: _pulsCd.text }
       else if(_pulsCd && jetzt - _pulsCd.ziel <= PULS_CD_NACH_MS){
-        if(aktiv && !aktiv.wartet) cd = { lbl: 'Puls läuft', zahl: dauer, was: [aktiv.art, aktiv.name].filter(Boolean).join(' · '), laeuft: true }
+        // ohne Sekundenzählung (09.10.2026, Finn: „mit der Sekundenzählung nervt es nur") — Phase + Hinweis bleiben, die Pille oben zählt weiter
+        if(aktiv && !aktiv.wartet) cd = { lbl: 'Puls läuft', zahl: '', was: [aktiv.art, aktiv.name].filter(Boolean).join(' · '), laeuft: true }
         else if(jetzt - _pulsCd.ziel <= 15000) cd = { lbl: 'Puls startet', zahl: '0', was: _pulsCd.text }
       }
     }
