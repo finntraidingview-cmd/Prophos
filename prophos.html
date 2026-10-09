@@ -43270,7 +43270,10 @@
     _faFrei.delete(String(plan.id))
     // Startzeit immer in Dubai-Zeit wie der Grund aus der DB (08.10.2026: Emins Toast mischte „seit 10:08 Dubai" mit „startet 09:11" PC-Ortszeit)
     const um = d.ziel ? new Date(d.ziel).toLocaleTimeString('de-DE', { timeZone: 'Asia/Dubai', hour: '2-digit', minute: '2-digit' }) + ' Dubai' : '?'
-    const t = gh
+    // Gegen einen LAUFENDEN Trade derselben ID (sql/2026-10-09_gegenhedge_nur_gegenrichtung.sql, d.laeuft): gesperrt, bis er zu ist — kein „90 s"
+    const t = gh && d.laeuft
+      ? `„${plan.masterName || '—'}" gegen laufenden Trade gesperrt: ${d.grund || 'dein Konto läuft dort in Gegenrichtung'} (${plan.masterFirm || d.firma || 'gleiche Firma'}) — neue Prüfung ${um}`
+      : gh
       ? `„${plan.masterName || '—'}" wartet 90-s-Abstand: ${d.wer || 'eine andere ID'} ${d.grund || 'startet gegenläufig'} (${plan.masterFirm || d.firma || 'gleiche Firma'}) — startet ${um}`
       : `„${plan.masterName || '—'}" wartet 1-min-Abstand zu ${d.wer || 'einer anderen ID'} (${plan.masterFirm || d.firma || 'gleiche Firma'}) — startet ${um}`
     const i = tradePlans.findIndex(x => String(x.id) === String(plan.id))
@@ -46896,8 +46899,10 @@
    * Nur Orbit V2 / Echo V2 ohne Hedge (keine Winning Days, kein Orbit V3). Zustand in mt5_baseline.richtung_konflikt
    * { quelle 'start'|'puls'|'bot', status 'wartet'|'aufgegeben'|'gedreht'|'konflikt', erst_start, versuche, gegen, text, … }. */
   const _rkTickStart = new Set()   // Echo V2: Plan-IDs, die tpStartUmTick gestartet hat — die Sperre im Check-Popup meldet sich so zurück
+  // TOPSTEP V2 MIT (09.10.2026, Finn: „Gegenrichtung ist verboten"): tsv2 fehlte hier — Topstep-Kette 1/2 auf zwei Konten derselben ID,
+  // d369e8d5 SELL lief, 333d4791 BUY wurde ohne Richtungsprüfung am Start nur vom DB-Riegel 90 s geschoben und dann geclaimt
   function rkGilt(p){
-    return !!p && (p.route === 'tvv2' || p.route === 'mt5v2') && !tpIstWdPlan(p) && !tpIstOrbitV3(p) && (p.richtung === 'buy' || p.richtung === 'sell')
+    return !!p && (p.route === 'tvv2' || p.route === 'mt5v2' || p.route === 'tsv2') && !tpIstWdPlan(p) && !tpIstOrbitV3(p) && (p.richtung === 'buy' || p.richtung === 'sell')
   }
   const rkFlag = p => (p && p.mt5Baseline && p.mt5Baseline.richtung_konflikt) || null
   // aufgegeben gilt nur für genau die Startzeit, bei der aufgegeben wurde — eine neue Uhrzeit von Hand startet wieder normal

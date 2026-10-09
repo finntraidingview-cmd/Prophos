@@ -76,6 +76,10 @@ def main():
           and a["ap_claim_laeuft"](dict(gc, start_fehler={"status": "behoben"}), jetzt), "frischer Claim mit offenem Start-Fehler zählt nicht, behoben schon")
     check(a["ap_claim_laeuft"]({"orbit_gesendet_at": "2026-10-09T10:01:00+00:00"}, jetzt), "gesendet (orbit_gesendet_at) frisch = läuft")
     check(ref({"status": "planned", "richtung": "sell", "start_um": "2026-10-09T10:00:00+00:00"}, mn, jetzt)[2] is False, "bloß geplant = legt nichts fest")
+    # 09.10.2026 ~09:25 (Finn: „Gegenrichtung ist verboten", Topstep 333d4791 BUY gegen d369e8d5 SELL derselben ID): LÄUFT = fest ohne Fenster
+    lf = ref({"status": "open", "richtung": "sell", "started_at": "2026-10-09T05:19:32+00:00"}, mn, jetzt)
+    check(lf == (None, "sell", True) and F([lf], 1400) == "sell" and F([lf], 330) == "sell",
+          "laufender Trade (open) legt die Richtung für den ganzen Tag fest, solange er läuft (kein 90-min-Fenster)")
     tf = dict(chris)
     tf["c|fn#1"] = dict(tf["c|fn#1"], fest="sell")
     r, _ = R(tf, 0.0, 0.0, random.Random(3), 50)
@@ -91,7 +95,8 @@ def main():
     offen = [{"user_id": "u1", "firma": "fundednext", "richtung": "buy", "start_min": 600.0}]
     check([x["plan_id"] for x in K([plan("p1", 645)], offen, 620)["drehen"]] == ["p1"], "läuft BUY 10:00, Auto-Plan SELL 10:45 → gedreht")
     e2 = K([plan("p2", 700)], offen, 650)
-    check(not e2["drehen"] and not e2["markieren"], "läuft BUY 10:00, Auto-Plan SELL 11:40 → bleibt (Start-Wächter verschiebt, falls nötig)")
+    # seit 09.10.2026 ~09:25 (Finn: „Gegenrichtung ist verboten"): ein LAUFENDER Trade legt fest, solange er läuft — kein 90-min-Fenster mehr
+    check([x["plan_id"] for x in e2["drehen"]] == ["p2"], "läuft BUY 10:00 (noch offen), Auto-Plan SELL 11:40 → gedreht (solange er läuft)")
     e4 = K([plan("q", 600, "buy", bestaetigt=True), plan("p4", 605)], [], 590)
     check(not e4["drehen"] and not e4["markieren"], "geplanter BUY 10:00, Auto-Plan SELL 10:05 → beide bleiben (nur nie gleichzeitig)")
     e5 = K([plan("q", 600, "buy", bestaetigt=True, fest_durch="schon gestartet"), plan("p5", 605)], [], 601)

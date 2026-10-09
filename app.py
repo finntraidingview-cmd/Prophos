@@ -18047,8 +18047,12 @@ def _ap_fest_ref(p, mitternacht, jetzt):
     def minute(roh):
         t = _ap_ts(roh)                # Postgres-Formen („ +00", 1–6 Nachkommastellen) sicher
         return (t - mitternacht).total_seconds() / 60.0 if t else None
-    if p.get("status") == "open" or ap_claim_laeuft(p, jetzt):   # frisch geclaimt/gesendet ohne Start-Fehler = Start läuft
-        m = minute(p.get("started_at")) if p.get("status") == "open" else minute(p.get("start_um"))
+    if p.get("status") == "open":
+        # LÄUFT = legt die Richtung fest, solange er läuft (Finn 09.10.2026 ~09:25 Dubai: „Gegenrichtung ist verboten"; Anlass Topstep-Kette
+        # 333d4791 BUY gegen d369e8d5 SELL derselben ID) — das Ende ist unbekannt, also ohne 90-min-Fenster: Minute None = ganzer Tag
+        return (None, p.get("richtung"), True)
+    if ap_claim_laeuft(p, jetzt):   # frisch geclaimt/gesendet ohne Start-Fehler = Start läuft
+        m = minute(p.get("start_um"))
         return (m if m is not None else (jetzt - mitternacht).total_seconds() / 60.0, p.get("richtung"), True)
     return (minute(p.get("start_um")), p.get("richtung"), False)
 
@@ -20606,7 +20610,8 @@ def ap_richtung_konflikte(plaene, offen, jetzt_min, horizont_min=AP_RS_HORIZONT_
     lauf = []                          # (ID|Firma, Richtung, Startminute | None)
     for o in offen or ():
         if o.get("richtung") in ("buy", "sell"):
-            lauf.append((f"{o['user_id']}|{o['firma']}", o["richtung"], o.get("start_min")))
+            # offen = läuft: legt fest, solange er läuft (Finn 09.10.2026 ~09:25: „Gegenrichtung ist verboten") — Startminute None, kein 90-min-Fenster
+            lauf.append((f"{o['user_id']}|{o['firma']}", o["richtung"], None))
     # geplant, aber vom PC-Tab schon geclaimt (Start läuft) = läuft
     for p in plaene or ():
         sf = p.get("start_fehler")
