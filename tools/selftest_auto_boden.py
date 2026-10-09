@@ -10,7 +10,7 @@ HIER = os.path.dirname(os.path.abspath(__file__))
 APP = os.path.join(os.path.dirname(HIER), "app.py")
 FUNKTIONEN = ("_wd_num", "ap_groesse", "_ap_spanne", "_ap_runden", "ap_kw_param", "_ap_boden", "ap_boden_konto", "ap_kette_regel", "ap_kette_mll", "ap_kette_trade1", "ap_konto_rechnen", "ap_klein_trade", "_ap_de",
               "liq_peak", "_ap_peaks", "ap_boden_sicher")
-KONSTANTEN = ("AP_REST_MIN", "AP_REST_MIN_CFD", "AP_KLEIN_PKT", "AP_KLEIN_PUFFER", "AP_KLEIN_SCHRITT", "AP_KLEIN_TP_PKT_HINWEIS", "AP_PUFFER_PKT", "AP_CFD_ROUTEN", "AP_GROESSE_TOLERANZ", "AP_KETTE_STANDARD", "AP_KETTE_TXT")
+KONSTANTEN = ("AP_REST_MIN", "AP_REST_MIN_CFD", "AP_KLEIN_PKT", "AP_KLEIN_PUFFER", "AP_KLEIN_SCHRITT", "AP_KLEIN_TP_PKT_HINWEIS", "AP_PUFFER_PKT", "AP_CFD_ROUTEN", "AP_GROESSE_TOLERANZ", "AP_KETTE_STANDARD", "AP_KETTE_TXT", "AP_SL_HINTER_BODEN")
 
 
 def lade():
@@ -73,14 +73,22 @@ def main():
           "ohne Regel / ohne Balance → null")
     check(bk(regel(boden="statisch", dd_pct=10), "phase1", 40000) == leer, "Balance passt zu keiner Größe → null")
 
-    # gleiche Rechnung wie der Planer: SL wird auf Balance − Boden gekappt (3.000 → 2.000 bei 92.000 über 90.000)
+    # gleiche Rechnung wie der Planer: SL wird auf Balance − Boden gekappt (3.000 → 2.000 bei 92.000 über 90.000) — seit 09.10.2026
+    # + AP_SL_HINTER_BODEN dahinter (Finn: auch nur kurz unter dem Boden = geblowt; Ende TP oder geblowt, kein Rest-Konto)
     u = {"tp": 0.5, "sl": 0.5, "menge": 0.5, "puffer": 0.5}
     w, grund = rechnen(regel(boden="statisch", dd_pct=10), "phase1", 92000, u)
-    check(w is not None and w["sl"] == 92000 - bk(regel(boden="statisch", dd_pct=10), "phase1", 92000)["boden"],
-          f"SL-Deckel im Planer = Balance − boden ({(w or {}).get('sl')}, {grund})")
+    check(w is not None and w["sl"] == 92000 - bk(regel(boden="statisch", dd_pct=10), "phase1", 92000)["boden"] + ns["AP_SL_HINTER_BODEN"]
+          and ns["AP_SL_HINTER_BODEN"] == 50 and "hinter den Boden" in w["stufe"],
+          f"SL-Deckel im Planer = Balance − boden + 50 ({(w or {}).get('sl')}, {(w or {}).get('stufe')}, {grund})")
+    # Rest-Konto FN …0296 (90.002 über Boden 90.000): SL 2 + 50 = 52 → Ende sicher unter dem Boden
+    wr, _ = rechnen(regel(boden="statisch", dd_pct=10), "phase1", 90002, u)
+    check(wr is not None and wr["sl"] == 52, f"Rest-Konto 90.002 → SL 52 (hinter den Boden) ({(wr or {}).get('sl')})")
+    # ungekappt bleibt ungekappt (Balance weit über dem Boden)
+    wu, _ = rechnen(regel(boden="statisch", dd_pct=10), "phase1", 99000, u)
+    check(wu is not None and wu["sl"] == 3000 and "Boden" not in wu["stufe"], f"weit über dem Boden: SL 3.000 unverändert ({(wu or {}).get('sl')})")
     w2, _ = rechnen(lk, "challenge", 148000, u)
-    check(w2 is not None and w2["sl"] == 148000 - bk(lk, "challenge", 148000)["boden"] == 2000,
-          f"Lock: SL-Deckel im Planer = Balance − boden ({(w2 or {}).get('sl')})")
+    check(w2 is not None and w2["sl"] - ns["AP_SL_HINTER_BODEN"] == 148000 - bk(lk, "challenge", 148000)["boden"] == 2000,
+          f"Lock: SL-Deckel im Planer = Balance − boden + 50 ({(w2 or {}).get('sl')})")
 
     # Nur Anzeige: der Planer kappt den SL bei Tradeify weiter nicht (kein Boden im Planer ohne Lock)
     w3, _ = rechnen(td, "challenge", 149000, u)

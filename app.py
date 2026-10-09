@@ -12810,7 +12810,7 @@ def admin_wd_plaene():
                 # _wd_personen bleibt im Request-Thread (liest g über _admin_nur_uid), die Pool-Threads fassen g nie an.
                 pool = concurrent.futures.ThreadPoolExecutor(max_workers=6)
                 try:
-                    plan_sel = {"select": "id,route,status,user_id,master_account_id,master_name,mt5_baseline,"
+                    plan_sel = {"select": "id,route,status,user_id,master_account_id,master_name,mt5_baseline,konto_typ,"
                                           "updated_at,ended_at,completed_at", "id": f"eq.{pid}", "limit": "1"}
                     # Welle 1: nur die plan_id nötig
                     f_plan = pool.submit(sb_select, "trade_plans", plan_sel)
@@ -12822,6 +12822,8 @@ def admin_wd_plaene():
                     konto_quelle = login_quelle = None
                     f_kk = None
                     rows = f_plan.result()
+                    # Boden-Prüfung EINMAL vor der Retry-Schleife (Hinweis Prüfer T3, 09.10.2026: die Route ist seit 02.10. auf Wellen getrimmt)
+                    blow_auto = (not blown) and bool(rows) and _ap_blow_beim_abhaken(rows[0], mpl)
                     for _versuch in range(3):
                         if _versuch:
                             rows = sb_select("trade_plans", plan_sel)
@@ -12832,6 +12834,9 @@ def admin_wd_plaene():
                         if fehler:
                             return jsonify({"error": fehler[1], "plan_id": pid}), fehler[0]
                         if blown:
+                            upd["blown"] = True
+                        elif blow_auto:
+                            # Ende auf/unter dem Boden = geblowt (Finn 09.10.2026) — Plan blown, Konto-Archiv bleibt Finns Sache
                             upd["blown"] = True
                         if daten.get("pl_quelle") == "hand":
                             upd["pl_quelle"] = "hand"   # Hand-Betrag im Erledigt-Popup (08.10.2026, Fall ea91e359: −600 ohne Herkunft)
@@ -15125,6 +15130,12 @@ AP_REST_MIN = 100                    # weniger Rest bis Ziel → kein Auto-Trade
 # SL bleibt die normale Firmen-Spanne in $ mit Boden-Deckel (Finn: „den SL kannst du ganz groß machen, wie beim ganz normalen Trade").
 # Gilt, sobald der Rest mit den normalen Mindest-Lots in < 20 Pkt verdient wäre (FN 100k < 420 $, FP 100k < 400 $, FTMO P1 < 500 $ …).
 AP_REST_MIN_CFD = 10                 # CFD: erst unter 10 $ Rest Handarbeit
+# SL HINTER DEN BODEN (Finn 09.10.2026 ~07:00 Dubai, feste Regel: „ein Konto, das auch nur kurz unter der Max-Loss-Grenze war, ist
+# geblowt" — Anlass FN …0296 mit 90.002 $ nach SL-Kappung auf GENAU den Boden): wird der SL auf den Boden gekappt, liegt er so viele $
+# DAHINTER — das Ende ist sicher unter dem Boden (Broker liquidiert oder der SL schließt darunter), die Etappe endet TP oder geblowt,
+# nie als Rest-Konto ein paar $ über dem Boden. Greift nur, wo die Phase einen SL hat (heute CFD/Echo Phase 1/2; Futures-Challenges
+# ohne SL, die Topstep-Kette rechnet ihre Verlustgrenze selbst mit +200). Finn kann den Wert ändern.
+AP_SL_HINTER_BODEN = 50
 AP_KLEIN_PKT = 20                    # Rest in so vielen Punkten verdienen
 AP_KLEIN_PUFFER = (15, 20)           # $ über dem Rest (Zufall der Tranche)
 AP_KLEIN_SCHRITT = 0.01              # Lot-Schritt des Klein-Trades bei Lot-Firmen (menge_schritt < 1); FTMO/The5ers bleiben bei 1
@@ -15441,8 +15452,9 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None):
     if ph.get("sl"):
         sl = round(_ap_spanne(ph["sl"], u["sl"], f))
         if boden is not None and balance - boden < sl:
-            sl = int(balance - boden)          # Finn: „bei 92.000 ist der SL eben nur 2.000"
-            stufe += ", SL auf Boden gekappt"
+            # Finn: „bei 92.000 ist der SL eben nur 2.000" — seit 09.10.2026 + AP_SL_HINTER_BODEN dahinter (TP oder geblowt, kein Rest-Konto)
+            sl = int(balance - boden) + AP_SL_HINTER_BODEN
+            stufe += f", SL hinter den Boden (+{AP_SL_HINTER_BODEN} $)"
     risiko = sl if sl else (float(ph["dd_usd"]) * f if ph.get("dd_usd") else None)
     return {"groesse": groesse, "ziel": ziel, "rest": round(rest), "menge": menge, "puffer": puffer,
             "tp": tp, "sl": sl, "risiko": risiko, "stufe": stufe}, None
@@ -17698,6 +17710,64 @@ def ap_eingriff_filter(aktion, plan_ids, sicht_uid=None):
     return params, body, bed[1]
 
 
+def ap_ende_unter_boden(regel, phase, balance_start, balance_end):
+    """REIN RECHNEND (testbar, Finn 09.10.2026: „auch nur kurz unter der Max-Loss-Grenze = geblowt"): liegt die Balance NACH dem
+    Trade auf/unter dem Boden des Kontos (Boden aus ap_boden_konto mit der Balance VOR dem Trade, dieselbe Quelle wie Planer-Kappung und
+    Balken)? Eine gemessene Mindest-Equity je Plan gibt es nicht (weder mt5_live noch Copier/Panel) — die End-Balance entscheidet.
+    Ohne Boden (unbekannt, Futures ohne Kernwerte) oder ohne Balancen → False (nie geraten)."""
+    if not regel or balance_start is None or balance_end is None:
+        return False
+    try:
+        b = ap_boden_konto(regel, phase, float(balance_start)) or {}
+    except Exception:
+        return False
+    bo = b.get("boden")
+    return bo is not None and float(balance_end) <= float(bo)
+
+
+def ap_blow_ausschluss(plaene_konto, bal, stand):
+    """REIN RECHNEND (testbar): Planer-Ausschluss „geblowt" (Finn 09.10.2026) → True, solange der LETZTE beendete Plan des Kontos blown ist
+    UND seitdem keine neue Balance-Lesung vorliegt (ap_balance_live). Kommt nach dem Blow eine frische Lesung (Reset gekauft, neue Phase auf
+    derselben accounts-Zeile — Hinweis Prüfer T3), entscheidet wieder der normale Weg: Balance ≤ Boden → „geblowt?" in ap_konto_rechnen,
+    sonst wird geplant."""
+    fertig = [p for p in plaene_konto or () if p.get("ended_at") or p.get("completed_at")]
+    if not fertig:
+        return False
+    p = max(fertig, key=lambda x: str(x.get("ended_at") or x.get("completed_at") or ""))
+    if p.get("blown") is not True:
+        return False
+    return not (bal and ap_balance_live(stand, str(p.get("ended_at") or p.get("completed_at") or "")))
+
+
+def _ap_blow_beim_abhaken(plan, master_pl):
+    """Beim „Erledigt" (Radar/Abschluss-Popup): Ende auf/unter dem Boden → True (Plan blown). Nur Challenge/Phasen (AP_TYPEN), nur mit
+    Firmen-Regel. End-Balance = final.balance_end, sonst Start + master_pl; Start = tv.balance_start bzw. balance_start der Baseline.
+    Fehler beim Lesen → False (das Abhaken selbst darf daran nie scheitern). Archiviert NICHT — das macht Finn."""
+    try:
+        bl = plan.get("mt5_baseline") if isinstance(plan.get("mt5_baseline"), dict) else {}
+        tv = bl.get("tv") if isinstance(bl.get("tv"), dict) else {}
+        fin = bl.get("final") if isinstance(bl.get("final"), dict) else {}
+        bs = _wd_num(tv.get("balance_start")) or _wd_num(bl.get("balance_start"))
+        be = _wd_num(fin.get("balance_end"))
+        if be is None and bs is not None and master_pl is not None:
+            be = float(bs) + float(master_pl)
+        if bs is None or be is None or not plan.get("master_account_id"):
+            return False
+        acc = (sb_select("accounts", {"select": "id,firm,account_type,consistency_pct,ziel_pct_konto,max_drawdown",
+                                      "id": f"eq.{plan['master_account_id']}", "limit": "1"}) or [None])[0]
+        phase = str(plan.get("konto_typ") or (acc or {}).get("account_type") or "")
+        if not acc or phase not in AP_TYPEN:
+            return False
+        reg = (sb_select("auto_plan_regeln", {"select": "regeln", "id": "eq.1"}) or [{}])[0]
+        regel = ap_regel_finden(((reg.get("regeln") or {}).get("firmen") or []), acc.get("firm"))
+        if not regel:
+            return False
+        return ap_ende_unter_boden(ap_regel_konto(regel, acc, float(bs)), phase, bs, be)
+    except Exception as e:
+        print(f"[erledigt] Boden-Prüfung übersprungen ({type(e).__name__}: {e})", flush=True)
+        return False
+
+
 def ap_letzter_trade_geblasen(regel, balance, plaene_konto, bal_stand=None):
     """REIN RECHNEND (Master 07.10.2026, Anlass Tradeify-Challenge 149.046 nach −4.521 $ = Liquidation, Boden aber nicht
     bekannt): hat der LETZTE beendete Trade des Kontos mindestens 95 % des Drawdowns verloren (final.today_pnl, sonst
@@ -17947,7 +18017,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
 
     def _liegengeblieben(p):
         return ap_plan_verfallen(p, _grenze, jetzt)
-    roh_plaene = _ap_plaene_mit_hand({"select": "id,user_id,master_account_id,master_firm,status,richtung,master_tp,"
+    roh_plaene = _ap_plaene_mit_hand({"select": "id,user_id,master_account_id,master_firm,status,richtung,master_tp,blown,"
                                                 "ended_at,completed_at,auto_plan,auto_bestaetigt_at,start_um_gestartet_at,"
                                                 "start_um,planned_for,started_at,orbit_gesendet_at,mt5_baseline->final,mt5_baseline->start_fehler", "order": "id.asc",
                                       "user_id": in_uids, "created_at": "gte." + (jetzt - timedelta(days=30)).isoformat()})
@@ -18002,6 +18072,12 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
         # Fusion-Spread zum Bestätigen (Master 08.10.2026)
         if any(p.get("status") == "review" and (p.get("final") if isinstance(p.get("final"), dict) else {}).get("grund") != AP_NIE_GEFUELLT_GRUND for p in eig):
             ausgelassen.append(dict(zeile, grund="letzter Trade noch nicht erledigt (Überprüfen)"))
+            continue
+        _bw = acc_balance_wahl(a, echo_bal, dup_bal)
+        if ap_blow_ausschluss(eig, _bw[0], _bw[3]):
+            # Finn 09.10.2026: auch nur kurz unter dem Boden = geblowt — der letzte Trade ist als geblowt abgehakt, kein Rest-Plan mehr;
+            # eine frische Lesung danach (Reset/neue Phase) hebt den Ausschluss auf (ap_blow_ausschluss)
+            ausgelassen.append(dict(zeile, grund="geblowt (letzter Trade als geblowt abgehakt) — Reset gekauft? → Balance lesen, dann plant der Bot wieder"))
             continue
         if any(p.get("status") == "completed" and _ap_plan_am_tag(p, tag, tz) for p in eig):
             # 08.10.2026 Finn: „maximal ein Trade pro Tag pro Account" — heute schon gehandelt (abgehakt) → erst morgen wieder

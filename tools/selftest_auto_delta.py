@@ -50,7 +50,7 @@ REIN = ("_ap_plan_am_tag", "ap_ist_waise", "ap_id_fest", "ap_id_misch", "ap_klas
         "ap_balance_live", "ap_letzt_je_konto", "_ap_boden", "ap_boden_konto", "ap_boden_sicher", "ap_boden_zeile", "_ap_notes_kurz", "_ap_hand_spalte_fehlt", "_ap_plaene_mit_hand", "liq_peak", "_ap_peaks", "_liq_verlauf_laden")   # 08.10.2026: Balance live (Guard/Delta/ids), Boden für den Balance-Balken
 IO = ("_ap_gehedgt_plan", "_ap_bewerten", "_ap_iso_min", "_ap_stand_laden", "_ap_stand_plaene", "_ap_min_iso",
       "_ap_umplanungen_heute", "_ap_bot_stand", "_ap_bot_hat_arbeit", "_ap_bot_tick", "ap_kette_tick", "ap_kette_startwert_neu", "ap_kette_abhaken", "_wd_erledigt_upd", "_cme_handelstag", "_ap_kette_grund", "_ap_kette_takt", "ap_delta_antwort", "_ap_aenderungen_anwenden", "pc_stand_zusammenfassen", "_ap_pc_lebt", "_ap_verpufft", "_ap_zug_nach_vorn", "ap_zuege_je_id", "_ap_dubai_versatz", "ap_ausgleichen",
-      "_ap_probelauf", "ap_planen", "_ap_tz", "_ap_eur_bei", "_ap_konten_laden", "ap_einsatz_kontext", "ap_richtung_fest_plan", "ap_letzter_trade_geblasen", "_ap_rk_flag",
+      "_ap_probelauf", "ap_planen", "_ap_tz", "_ap_eur_bei", "_ap_konten_laden", "ap_einsatz_kontext", "ap_richtung_fest_plan", "ap_letzter_trade_geblasen", "ap_blow_ausschluss", "_ap_rk_flag",
       "ap_richtungsschutz", "ap_startwert_frisch", "liq_konto_groesse", "_wd_konto_groesse", "_ap_konten_mit_trade",
       "ap_richtung_bloecke", "ap_fest_am_start", "ap_id_firma_einseitig", "_ap_fest_ref", "_ap_ts", "_ap_gegen_eigen", "ap_claim_laeuft",
       "ap_kontowert_grund", "ap_grund_ohne_balance", "ap_startwert_kandidat")   # 09.10.2026: genauer Kontowert-/Balance-Grund

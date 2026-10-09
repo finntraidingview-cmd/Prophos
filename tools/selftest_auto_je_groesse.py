@@ -10,7 +10,7 @@ import sys
 HIER = os.path.dirname(os.path.abspath(__file__))
 APP = os.path.join(os.path.dirname(HIER), "app.py")
 FUNKTIONEN = ("_wd_num", "ap_groesse", "_ap_spanne", "_ap_runden", "_ap_boden", "ap_konto_rechnen", "ap_klein_trade", "_ap_de", "ap_kw_param", "ap_boden_konto")
-KONSTANTEN = ("AP_REST_MIN", "AP_REST_MIN_CFD", "AP_KLEIN_PKT", "AP_KLEIN_PUFFER", "AP_KLEIN_SCHRITT", "AP_KLEIN_TP_PKT_HINWEIS", "AP_PUFFER_PKT", "AP_CFD_ROUTEN", "AP_GROESSE_TOLERANZ")
+KONSTANTEN = ("AP_REST_MIN", "AP_REST_MIN_CFD", "AP_KLEIN_PKT", "AP_KLEIN_PUFFER", "AP_KLEIN_SCHRITT", "AP_KLEIN_TP_PKT_HINWEIS", "AP_PUFFER_PKT", "AP_CFD_ROUTEN", "AP_GROESSE_TOLERANZ", "AP_SL_HINTER_BODEN")
 
 
 def lade():
@@ -59,7 +59,8 @@ def main():
     ok(w1 and w1["sl"] == 1500 and abs(w1["menge"] - 0.7) < 1e-9 and w1["tp"] == 3000, f"Obergrenze: {w1}")
     # SL-Deckel am Flex-Boden 44.000: Balance 45.000 → SL höchstens 1.000 (mit 10 % wäre der Boden 45.000 → geblowt)
     wb, gb = rechnen(FP, "phase1", 45000.0, mitte)
-    ok(gb is None and wb and wb["sl"] == 1000, f"SL auf Flex-Boden gekappt erwartet (1.000): {wb} {gb}")
+    # seit 09.10.2026 (Finn: unter dem Boden = geblowt) liegt der gekappte SL AP_SL_HINTER_BODEN (50 $) hinter dem Boden: 1.000 + 50
+    ok(gb is None and wb and wb["sl"] == 1050, f"SL hinter den Flex-Boden erwartet (1.000 + 50): {wb} {gb}")
     # letzter Trade: Rest < TP-Obergrenze → TP = Rest + Puffer
     wl, _ = rechnen(FP, "phase1", 53000.0, mitte)
     ok(wl and wl["tp"] == 2000 + 88, f"letzter Trade Rest + Puffer erwartet: {wl}")
