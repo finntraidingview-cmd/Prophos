@@ -18081,11 +18081,33 @@ def ap_echte_balancen(plan):
     return float(vorher), float(nachher), q
 
 
-def ap_blow_auto_pruefen(plan, acc, regel):
+def ap_blow_lesung_at(plan):
+    """REIN RECHNEND: Zeitpunkt der End-Lesung (bal_nach.live_at/at, sonst final.at, sonst ended_at) als ISO-Text oder ''."""
+    bl = plan.get("mt5_baseline") if isinstance((plan or {}).get("mt5_baseline"), dict) else {}
+    bn = bl.get("bal_nach") if isinstance(bl.get("bal_nach"), dict) else {}
+    fin = bl.get("final") if isinstance(bl.get("final"), dict) else {}
+    return str(bn.get("live_at") or bn.get("at") or fin.get("at") or (plan or {}).get("ended_at") or "")
+
+
+def _ap_iso_ts(v):
+    try:
+        return datetime.fromisoformat(str(v).replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
+def ap_blow_auto_pruefen(plan, acc, regel, neuer_plan=False):
     """REIN RECHNEND (testbar): geblowt laut echter Lesung? → {vorher, nachher, pl, boden, quelle} oder None.
     Nur status 'review', noch nicht blown, Route AP_BLOW_AUTO_ROUTEN, Phase in AP_TYPEN (konto_typ des Plans, sonst des Kontos), Firmen-Regel
-    ohne Kette, kein Hedge am Plan, Boden bekannt (ap_boden_konto mit der Balance VOR dem Trade wie ap_ende_unter_boden)."""
+    ohne Kette, kein Hedge am Plan, Boden bekannt (ap_boden_konto mit der Balance VOR dem Trade wie ap_ende_unter_boden).
+    RESET-RIEGEL (Vorprüfung Terminal 3, 09.10.2026): ein alter geblowter Plan in „Überprüfen" darf nie ein Konto archivieren, das auf
+    derselben accounts-Zeile neu angefangen hat (Reset gekauft, nächste Phase) — dann bliebe ein gesundes Konto archiviert und Echo bekäme
+    den Terminal-Löschauftrag. Kein Automatik-Blow, wenn (a) konto_typ des Plans ≠ account_type des Kontos, (b) die Konto-Balance
+    (tv_balance) NACH der End-Lesung gelesen wurde und über dem Boden liegt, (c) es einen neueren Plan auf dem Konto gibt (neuer_plan).
+    Diese Fälle bleiben beim Abhaken von Hand."""
     p = plan or {}
+    if neuer_plan:
+        return None
     if p.get("status") != "review" or p.get("blown") is True or str(p.get("route") or "") not in AP_BLOW_AUTO_ROUTEN:
         return None
     if not acc or not regel or ap_kette_regel(regel):
@@ -18093,6 +18115,8 @@ def ap_blow_auto_pruefen(plan, acc, regel):
     phase = str(p.get("konto_typ") or acc.get("account_type") or "")
     if phase not in AP_TYPEN:
         return None
+    if p.get("konto_typ") and acc.get("account_type") and str(p.get("konto_typ")) != str(acc.get("account_type")):
+        return None                                # (a) Konto ist inzwischen in einer anderen Phase
     bl = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
     if bl.get("hedge"):
         return None
@@ -18106,6 +18130,9 @@ def ap_blow_auto_pruefen(plan, acc, regel):
         return None
     if bo is None or nachher > float(bo):
         return None
+    kb, kb_ts, les_ts = _wd_num(acc.get("tv_balance")), _ap_iso_ts(acc.get("tv_balance_at")), _ap_iso_ts(ap_blow_lesung_at(p))
+    if kb is not None and kb > float(bo) and kb_ts is not None and (les_ts is None or kb_ts > les_ts):
+        return None                                # (b) neuere gesunde Lesung am Konto
     return {"vorher": vorher, "nachher": nachher, "pl": round(nachher - vorher, 2), "boden": float(bo), "quelle": q}
 
 
@@ -18187,14 +18214,19 @@ def ap_blow_auto_tick(force=False):
         return 0
     ids = sorted({str(p["master_account_id"]) for p in plaene})
     konten = {str(a["id"]): a for a in sb_select("accounts", {
-        "select": "id,user_id,name,firm,account_type,consistency_pct,ziel_pct_konto,max_drawdown,external_id",
+        "select": "id,user_id,name,firm,account_type,consistency_pct,ziel_pct_konto,max_drawdown,external_id,tv_balance,tv_balance_at",
         "id": f"in.({','.join(ids)})"}) or []}
+    # (c) neuere Pläne je Konto (Reset-Riegel): jeder Plan desselben Kontos, der nach dem Ende dieses Plans angelegt wurde
+    alle = _sb_all("trade_plans", {"select": "id,master_account_id,created_at", "master_account_id": f"in.({','.join(ids)})"}) or []
     firmen = ((sb_select("auto_plan_regeln", {"select": "regeln", "id": "eq.1"}) or [{}])[0].get("regeln") or {}).get("firmen") or []
     n = 0
     for p in plaene:
         acc = konten.get(str(p["master_account_id"]))
         try:
-            k = ap_blow_auto_pruefen(p, acc, ap_regel_finden(firmen, (acc or {}).get("firm")) if acc else None)
+            ende = _ap_iso_ts(p.get("ended_at") or p.get("completed_at"))
+            neuer = ende is None or any(str(q.get("master_account_id")) == str(p["master_account_id"]) and str(q.get("id")) != str(p["id"])
+                                        and (_ap_iso_ts(q.get("created_at")) or 0) > ende for q in alle)
+            k = ap_blow_auto_pruefen(p, acc, ap_regel_finden(firmen, (acc or {}).get("firm")) if acc else None, neuer)
             if k and _ap_blow_auto_abhaken(p, acc, k):
                 n += 1
         except Exception as e:

@@ -10,7 +10,7 @@ import sys
 HIER = os.path.dirname(os.path.abspath(__file__))
 APP = os.path.join(os.path.dirname(HIER), "app.py")
 FUNKTIONEN = ("_wd_num", "ap_groesse", "_ap_spanne", "_ap_runden", "ap_kw_param", "_ap_boden", "ap_boden_konto", "ap_kette_regel",
-              "ap_regel_konto", "ap_ende_unter_boden", "ap_echte_balancen", "ap_blow_auto_pruefen", "_ap_blow_beim_abhaken")
+              "ap_regel_konto", "ap_ende_unter_boden", "ap_echte_balancen", "ap_blow_lesung_at", "_ap_iso_ts", "ap_blow_auto_pruefen", "_ap_blow_beim_abhaken")
 KONSTANTEN = ("AP_TYPEN", "AP_KETTE_STANDARD", "AP_GROESSE_TOLERANZ", "AP_BLOW_AUTO_ROUTEN")
 FEHLER = []
 
@@ -34,6 +34,8 @@ def lade():
 
 def main():
     ns, src = lade()
+    from datetime import datetime
+    ns["datetime"] = datetime
     # CFD-Firma, statischer Boden 10 % (100k → 90.000)
     regel = {"kauf_eur": 100, "route": "mt5v2", "boden": "statisch", "dd_pct": 10, "groessen": [100000],
              "ziel_pct": {"phase1": 10, "phase2": 5},
@@ -67,13 +69,30 @@ def main():
     check(pr(echo(status="completed"), acc, regel) is None and pr(echo(status="open"), acc, regel) is None, "nur Überprüfen (review)")
     check(pr(echo(blown=True), acc, regel) is None, "schon blown → nichts")
     check(pr(echo(), dict(acc, account_type="funded"), regel) is None, "Funded (nicht AP_TYPEN) → nichts")
-    check(pr(echo(konto_typ="phase1"), dict(acc, account_type="funded"), regel) is not None, "konto_typ des Plans geht vor dem Kontotyp")
+    check(pr(echo(konto_typ="phase1"), dict(acc, account_type="funded"), regel) is None, "Plan phase1, Konto inzwischen funded → nicht auto (Riegel a)")
+    check(pr(echo(), dict(acc, account_type="phase1"), regel) is not None, "ohne konto_typ am Plan zählt der Kontotyp")
     check(pr(echo(), acc, None) is None and pr(echo(), None, regel) is None, "ohne Regel/Konto → nie geraten")
     check(pr(echo(), acc, dict(regel, kette={"tagesziel": 4500})) is None, "Firma mit Topstep-Kette → nichts (eigene MLL-Logik)")
     p = echo(); p["mt5_baseline"] = dict(p["mt5_baseline"], hedge={"status": "zu"})
     check(pr(p, acc, regel) is None, "Plan mit Hedge → bleibt beim Abhaken von Hand")
     check(pr(dict(orbit("demo"), master_account_id="k1"), acc, regel) is None, "Orbit mit Demo-Ende → nie automatisch")
     check(pr(dict(orbit("puls"), master_account_id="k1"), acc, regel) is not None, "Orbit mit Puls-Endlesung unter dem Boden → geblowt")
+
+    # Reset-Riegel (Vorprüfung T3): ein alter geblowter Plan darf ein neu angefangenes Konto auf derselben Zeile nie archivieren
+    les = lambda **kw: echo(ended_at="2026-10-09T10:38:08+00:00", mt5_baseline={"master_balance": 90180.0,
+                            "bal_nach": {"ok": True, "balance": 89940.0, "live_at": "2026-10-09T10:38:14+00:00"}}, **kw)
+    check(pr(les(konto_typ="phase1"), dict(acc, account_type="phase2"), regel) is None, "(a) Plan phase1, Konto jetzt phase2 → nicht auto")
+    check(pr(les(konto_typ="phase2"), dict(acc, account_type="phase2"), regel) is not None, "(a) gleiche Phase → auto")
+    check(pr(les(), dict(acc, tv_balance=100000.0, tv_balance_at="2026-10-09T12:00:00+00:00"), regel) is None,
+          "(b) Konto-Balance 100.000 NACH der Lesung → nicht auto (Reset)")
+    check(pr(les(), dict(acc, tv_balance=89940.0, tv_balance_at="2026-10-09T10:53:00+00:00"), regel) is not None,
+          "(b) Konto-Balance danach gleich (unter dem Boden) → auto (Ausgangsfall)")
+    check(pr(les(), dict(acc, tv_balance=100000.0, tv_balance_at="2026-10-09T09:00:00+00:00"), regel) is not None,
+          "(b) gesunde Konto-Balance VOR der Lesung zählt nicht")
+    check(pr(les(), acc, regel, True) is None, "(c) neuerer Plan auf dem Konto → nicht auto")
+    t = src[src.index("\ndef ap_blow_auto_tick("):]
+    check("neuer = ende is None or any(" in t and "ap_blow_auto_pruefen(p, acc," in t and ", neuer)" in t and "tv_balance,tv_balance_at" in t,
+          "(c)/(b) Tick liest neuere Pläne + Konto-Balance und gibt sie weiter")
 
     # Klick-Weg „Erledigt" liest jetzt auch Echo V2 (vorher nur tv.balance_start / final.balance_end)
     db = {"accounts": [dict(acc)], "auto_plan_regeln": [{"regeln": {"firmen": [regel]}}]}
