@@ -38,6 +38,7 @@ VOR dem Buy/Sell-Klick). Nach dem Klick ist jede Unsicherheit retry_ok=False —
 """
 
 import json
+import traceback
 import math
 import os
 import random
@@ -11029,6 +11030,19 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
     return {"ok": False, "msg": "Aendern-Knopf reagiert auf keinen Weg"}
 
 
+def pywinauto_import_fehler(e):
+    """REIN (testbar): Klartext zu einem fehlgeschlagenen `import pywinauto` (Amir pc-i8vyq8, 09.10.2026: Meldung „pywinauto fehlt —
+    Alles neu starten", obwohl pywinauto installiert war — der Import scheiterte an einer fehlenden DLL von pywin32, win32ui). Nur wenn
+    das Paket selbst fehlt (ModuleNotFoundError für pywinauto) bleibt der alte Satz; sonst die echte letzte Fehlerzeile + der Handgriff."""
+    if isinstance(e, ModuleNotFoundError) and str(getattr(e, "name", "") or "").split(".")[0] == "pywinauto":
+        return "pywinauto fehlt — einmal 'Alles neu starten' klicken (das Panel installiert es dann selbst)."
+    zeile = (traceback.format_exception_only(type(e), e) or [repr(e)])[-1].strip()[:240]
+    return (f"pywinauto ist da, lässt sich aber nicht laden: {zeile} — fehlt meist die Microsoft-VC++-Runtime "
+            "(PowerShell als Admin: winget install -e --id Microsoft.VCRedist.2015+.x64, danach PC neu starten) "
+            "oder Windows „Intelligente App-Steuerung“ blockt die DLL (Einstellungen → Datenschutz & Sicherheit → Windows-Sicherheit → "
+            "App- & Browsersteuerung → Intelligente App-Steuerung aus).")
+
+
 def run(cfg_path, cmd):
     try:
         with open(cfg_path, encoding="utf-8") as f:
@@ -11046,10 +11060,8 @@ def run(cfg_path, cmd):
 
     try:
         import pywinauto  # noqa: F401
-    except ImportError:
-        return {"ok": False, "retry_ok": True,
-                "msg": "pywinauto fehlt — einmal 'Alles neu starten' klicken "
-                       "(das Panel installiert es dann selbst)."}
+    except ImportError as e:
+        return {"ok": False, "retry_ok": True, "msg": pywinauto_import_fehler(e)}
     # Flotte UIA-Timings (25.08.2026, Finns '3-5 s Pause zwischen den Steps'):
     # pywinautos Default wartet bei jedem ins Leere laufenden Element-Lookup
     # volle 5 s (window_find_timeout) — in einer Abfolge mit try/except-Pfaden
@@ -11840,10 +11852,8 @@ def run_close(cfg_path, cmd):
                 "msg": "master_expected_login fehlt in der Config — kein Close ohne Login-Guard."}
     try:
         import pywinauto  # noqa: F401
-    except ImportError:
-        return {"ok": False, "retry_ok": True,
-                "msg": "pywinauto fehlt — einmal 'Alles neu starten' klicken "
-                       "(das Panel installiert es dann selbst)."}
+    except ImportError as e:
+        return {"ok": False, "retry_ok": True, "msg": pywinauto_import_fehler(e)}
     try:
         from pywinauto.timings import Timings
         Timings.window_find_timeout = 1.0
