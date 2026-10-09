@@ -42448,7 +42448,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1407'
+  const OS_TAB_BUILD = '2026-09-22.1408'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -47793,7 +47793,19 @@
       if(tplAktiv(t) && !t.gehedgt){ if(t.long) L += t.einsatz || 0; else S += t.einsatz || 0 }
     }
     trades.sort((a, b) => a.start - b.start || String(a.key).localeCompare(String(b.key)))
-    return { tag, heute, v, roh, lauf, delta, jetzt, laufzeit, trades, L, S }
+    // AUSGELASSEN OHNE INZWISCHEN GEPLANTE KONTEN (Finn 09.10.2026, Screenshot „Braucht dich" .1405: Chris/Moritz/Ina „nur noch … bis zum Ziel"
+    // aus einem alten Lauf, obwohl ihre Klein-Trades geplant und bestätigt waren). Hat ein Konto am Tag einen echten Trade (offen, bestätigt,
+    // läuft, beendet — keine Lauf-Zeile ohne Plan), fällt seine ausgelassen-Zeile hier weg — für Braucht dich, ID-Leiste und ID-Detail. Das
+    // Backend filtert genauso (ap_aus_ohne_plan); hier zusätzlich, weil ein alter Lauf aus dem Zwischenspeicher (tplAusCache) kommen kann.
+    // Zeilen, die den Plan selbst beschreiben („geplanten/laufenden Plan", „heute schon gehandelt"), bleiben.
+    // Abgleich über die Konto-ID und — wie tplBraucht — über ID + Kontoname (fremde Delta-Zeilen tragen nicht immer eine konto_id)
+    const echt = trades.filter(t => !t.ohnePlan && ['offen', 'bestaetigt', 'laeuft', 'beendet'].includes(t.status))
+    const mitPlan = new Set(echt.filter(t => t.konto_id).map(t => String(t.konto_id))), mitPlanKk = new Set(echt.map(t => tplKk(t.user_id, t.konto)))
+    const geplantX = x => (x.konto_id && mitPlan.has(String(x.konto_id))) || (x.konto && mitPlanKk.has(tplKk(x.user_id, x.konto)))
+    const ohneGeplante = l => !l || !Array.isArray(l.ausgelassen) || !echt.length ? l
+      : { ...l, ausgelassen: l.ausgelassen.filter(x => !(x && geplantX(x) && !/geplanten\/laufenden Plan|heute schon gehandelt|noch nicht erledigt/.test(String(x.grund || '')))) }
+    const rohF = roh && String(roh.tag || '') === tag ? ohneGeplante(roh) : roh
+    return { tag, heute, v, roh: rohF, lauf: lauf ? (lauf === roh ? rohF : ohneGeplante(lauf)) : lauf, delta, jetzt, laufzeit, trades, L, S }
   }
 
   /* Netto-/Brutto-Einsatz als Treppe über den Tag (Minuten dt) */

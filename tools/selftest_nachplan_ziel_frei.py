@@ -5,6 +5,7 @@ Update mit „nur noch X $ bis zum Ziel — von Hand prüfen" im Protokoll; „b
 Geprüft: (1) CFD phase1/phase2 mit Rest ≥ 10 $ → frei, Rest < 10 $ / Challenge / ohne typ / anderer Tag → fest; (2) Kandidaten mit ziel_frei;
 (3) Takt: das Konto wird genau EINMAL je Tag neu gerechnet — kommt der Grund wieder (z. B. „kein Punktwert"), bleibt es danach fest.
 Konten frei erfunden. Aufruf: python3 tools/selftest_nachplan_ziel_frei.py"""
+import json
 import os
 import sys
 from datetime import datetime, timedelta, timezone
@@ -71,7 +72,26 @@ def main():
     zst["nachplan_at"] = 0
     T(jetzt + timedelta(minutes=10), zst)
     check(aufrufe == [["c-1", "c-2", "c-3"]], f"Takt: einmal nachrechnen, danach fest (kein 10-min-Kreisel) ({aufrufe})")
-    check(zst.get("nachplan_ziel") == {tag: {"c-1", "c-2", "c-3"}}, f"Merker je Tag im Prozess-Speicher ({zst.get('nachplan_ziel')})")
+    check(zst.get("nachplan_ziel") == {tag: ["c-1", "c-2", "c-3"]}, f"Merker je Tag im Prozess-Speicher, als Liste ({zst.get('nachplan_ziel')})")
+    # Hotfix 09.10.2026: der Zustand ist _ap_info und geht per GET /admin/auto-plan als JSON raus — ein set darin war HTTP 500
+    try:
+        json.dumps(zst)
+        js = True
+    except TypeError:
+        js = False
+    check(js, "Takt-Zustand bleibt JSON-fähig (GET /admin/auto-plan gibt _ap_info aus)")
+    # GET-Zweig wie in app.py: info aus _ap_info, auch mit einem set (Altlast) JSON-fest und ohne nachplan_ziel
+    src = open(np_.sd.APP, encoding="utf-8").read()
+    zeile = next(z for z in src.splitlines() if "info = json.loads(json.dumps(" in z)
+    folge = src.splitlines()[src.splitlines().index(zeile) + 1]
+    ns = {"json": json, "_ap_info": dict(zst, nachplan_ziel={tag: {"c-1"}}, kaputt={"x"})}
+    exec((zeile + "\n" + folge).strip(), ns)
+    try:
+        json.dumps(ns["info"])
+        ok_info = "nachplan_ziel" not in ns["info"] and ns["info"]["kaputt"] == ["x"]
+    except TypeError:
+        ok_info = False
+    check(ok_info, f"GET-info: set → Liste, nachplan_ziel nicht in der Antwort ({sorted(ns.get('info', {}))})")
     # neuer Handelstag: Merker des alten Tags fliegt raus
     zst["nachplan_at"] = 0
     rows[:] = []

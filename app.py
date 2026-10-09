@@ -22731,7 +22731,10 @@ def _ap_nachplan_rechnen(tag, jetzt, zustand, reg, tz):
         return None, kand
     erg = ap_planen(tag, quelle="nachplanen", nur_konten=kand)
     ap_nachplan_regeln_merken(merker, tag, regeln_at)      # erst nach fertigem Lauf — wirft ap_planen, rechnet der nächste Takt neu
-    ziel_m.setdefault(tag, set()).update(ziel_frei & set(kand))
+    # als sortierte LISTE (09.10.2026, Hotfix): ziel_m liegt in _ap_info, und GET /admin/auto-plan gibt dict(_ap_info) als JSON aus — ein set
+    # dort machte seit dem ersten freigegebenen Konto (23:37 UTC) jeden GET zu HTTP 500; der Trade-Planer zeigte darauf den alten Lauf aus
+    # dem Browser-Zwischenspeicher (Chris/Moritz/Ina „nur noch … bis zum Ziel" in Braucht dich, obwohl längst geplant)
+    ziel_m[tag] = sorted(set(ziel_m.get(tag) or ()) | (ziel_frei & set(kand)))
     return erg, kand
 
 
@@ -23405,7 +23408,9 @@ def admin_auto_plan():
             letzter = ap_lauf_gelesen_markieren(letzter)
         except Exception as e:
             print(f"[auto-plan] ⚠️ gelesen-Markierung: {type(e).__name__}: {e}", flush=True)
-        info = dict(_ap_info)
+        # JSON-fest (09.10.2026, Hotfix): _ap_info ist Prozess-Speicher mehrerer Takte — ein set darin machte jeden GET zu HTTP 500
+        info = json.loads(json.dumps({k: v for k, v in _ap_info.items() if k != "nachplan_ziel"},   # Merker gehört nicht in die Antwort
+                                     default=lambda o: sorted(o) if isinstance(o, (set, frozenset)) else str(o)))
         try:
             nx, art = ap_nachplan_naechster(datetime.now(timezone.utc), _ap_info.get("nachplan_at"), reg.get("zeiten"), _ap_tz(AP_TZ_TAG))
             info.update(nachplan_naechster=nx.isoformat() if nx else None, nachplan_art=art, nachplan_takt_s=AP_NACHPLAN_TAKT_S,
