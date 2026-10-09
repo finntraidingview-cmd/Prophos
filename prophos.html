@@ -37962,6 +37962,7 @@
       // von selbst (tpStartUmTick). Wie hedge_eur bewusst nicht in planToRow — ein Modal-Edit darf die Kennung nicht löschen.
       autoPlan: row.auto_plan === true,
       autoBestaetigtAt: row.auto_bestaetigt_at || null,   // Orbit V3 (01.10.2026, sql/2026-10-01_trade_plans_orbit_v3.sql) — wie hedge_eur nur vom Plan-Popup geschrieben
+      handWerteAt: row.hand_werte_at || null,   // TP/SL/Größe von Hand (08.10.2026) — der Start-Wächter dreht solche Pläne nie (09.10.2026)
       // Buy/Sell am Plan (Migration 2026-08-28): Teil von Finns
       // Jetzt-starten-Flow — Order komplett beim Planen erfasst.
       richtung:    (row.richtung === 'buy' || row.richtung === 'sell') ? row.richtung : null,
@@ -43015,7 +43016,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1426'
+  const OS_TAB_BUILD = '2026-09-22.1427'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -46980,7 +46981,9 @@
         if(w) return 'verschoben'
       }
     }
-    if(plan.autoPlan){
+    // HAND-WERTE NIE DREHEN (Master 09.10.2026: Finn hatte Tradeify-Pläne um 07:41 von Hand geändert): wie der Bot (AP_FEST_HAND) nur
+    // verschieben, bis die Gegenrichtung zu ist — Richtung bleibt Finns Wahl
+    if(plan.autoPlan && !plan.handWerteAt){
       const { data, error } = await supabase.from('trade_plans').update({ richtung: ziel })
         .eq('id', plan.id).eq('status', 'planned').eq('auto_plan', true).eq('richtung', plan.richtung).is('start_um_gestartet_at', null).select('*')
       if(!error && data && data.length){

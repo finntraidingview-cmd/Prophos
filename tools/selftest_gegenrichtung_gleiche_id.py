@@ -51,6 +51,13 @@ fa = HTML[i:HTML.index("\n  }\n", i)]
 check("gh && d.laeuft" in fa and "gegen laufenden Trade gesperrt" in fa and "wartet 90-s-Abstand" in fa,
       "faVorStart: laufender Gegen-Trade → „gegen laufenden Trade gesperrt“, sonst wie bisher „90-s-Abstand“")
 
+# (2b) Hand-Werte nie drehen (Master 09.10.2026) — nur verschieben, wie der Bot (AP_FEST_HAND)
+i = HTML.index("  async function rkVorStart(plan){")
+rv = HTML[i:HTML.index("\n  }\n", i)]
+check("if(plan.autoPlan && !plan.handWerteAt){" in rv and "update({ richtung: ziel })" in rv.split("if(plan.autoPlan && !plan.handWerteAt){")[1],
+      "rkVorStart: Plan mit Hand-Werten wird nie gedreht (nur verschoben)")
+check("handWerteAt: row.hand_werte_at || null," in HTML, "rowToPlan liest hand_werte_at")
+
 # (3) SQL-Datei
 k = SQL[SQL.index("create or replace function public.prophos_gegenhedge_konflikt"):SQL.index("create or replace function public.trade_plans_gegenhedge")]
 neu = k.index("p.user_id = p_user")
