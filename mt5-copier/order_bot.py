@@ -17106,6 +17106,21 @@ def modus_tsxlesen_cdp(cmd, order=None, order_cmd=None, frist_s=None):
         elif isinstance(st, dict) and ko.get("liste_offen"):
             trail.append("Konto-Liste steht offen (nicht von diesem Lauf) — nur gelesen, nichts geklickt")
         felder, code, msg = tsx_cdp_lesung(st, ext)
+        # POSITIONS-BEREICH NOCH NICHT DA (09.10.2026, Ina DLL-Konto 333d4791, pc-xxxxxx 08:19 Dubai: Konto + BAL korrekt gelesen, die
+        # Order-Karte rechts bzw. „No Active Position" kam erst nach der Bereit-Probe — beide Versuche endeten in 'tabelle_unklar').
+        # Nur LESEN vor jedem Klick: bis ~9 s gedrosselt nachlesen, solange der Positions-Bereich fehlt. Danach ehrlich wie bisher.
+        if code == "tabelle_unklar" and isinstance(st, dict) and st.get("positionen_sichtbar") is not True:
+            for _n in range(8):                                # 8 × ~0,9–1,3 s ≈ 9 s (feste Anzahl, nicht an der Uhr)
+                if code != "tabelle_unklar":
+                    break
+                _warte(0.9, 0.4)
+                try:
+                    st_n = s.stand()
+                except Exception:
+                    break                                      # Lesefehler beim Nachlesen: der letzte ehrliche Befund bleibt
+                st = st_n
+                felder, code, msg = tsx_cdp_lesung(st, ext)
+            trail.append("Positions-Bereich " + ("nach Nachlesen da" if code != "tabelle_unklar" else "auch nach ~9 s nicht da"))
         res.update(felder)
         if code:
             return raus(code, msg, "lesen")

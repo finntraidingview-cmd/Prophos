@@ -274,7 +274,7 @@ var PROPHOS_AUGEN_TSX = (function () {
   var RX_VORSATZ = /^[-−(]?\s*\$?\s*[-−]?$/;   // Knoten nur aus Vorzeichen/Klammer/„$" (Teil eines zerlegten Werts)
   var RX_AUSLOESER = /(?:\$\s*\d+(?:[.,]\d+)?\s*K\b|\d+(?:[.,]\d+)?\s*K\s+[A-Z])[^|]*\|\s*([A-Z0-9][A-Z0-9-]*)\s*(…|\.\.\.)?/i;
   var RX_OHNE_ID = /^\s*((?:\$\s*\d+(?:[.,]\d+)?\s*K\b|\d+(?:[.,]\d+)?\s*K\s+[A-Z])[^|$]*?)\s*\|?\s*(…|\.\.\.)?\s*$/i;
-  var RX_KEINE_POS = /no active position|keine aktive position/i;
+  var RX_KEINE_POS = /no active position|keine aktive position|no open position|no positions?\b/i;   // Varianten (09.10.2026)
 
   // US-Geldformat wie tsx_geld: '$11,079.66', '-$1,234.50', '$-7.00', '($12.50)' → Zahl | null. Komma ist hier IMMER Tausender
   // (nicht zahl(): die liest „12,5" deutsch — TopstepX schreibt US). Minus zählt überall VOR der ersten Ziffer („$" · „-7.00"
@@ -504,15 +504,34 @@ var PROPHOS_AUGEN_TSX = (function () {
   // -> {sichtbar, zeilen, flach}. Gerüst: alles null. „No Active Position" zu sehen = sichtbar true; flach true NUR, wenn dazu
   // „Close Position" disabled ist (belegt: bei flachem Konto disabled) — widersprechen sich die beiden oder fehlt der Knopf, bleibt
   // flach null. Sonst (Position offen ODER Order-Karte nicht zu sehen): sichtbar/flach false nur mit gelesenen Zeilen, sonst null.
+  // „No Active Position" auch ohne data-testid (09.10.2026, Ina DLL-Konto: weder Anker noch Zeile gefunden): ein sichtbares Element der
+  // Order-Karte (data-testid^=order-card) bzw. ein kurzer Blatt-Text, der GANZ „No Active Position" (o. Ä.) ist
+  function keinePosPerText() {
+    var kand = alle('[data-testid^="order-card"]').filter(sichtbar).filter(function (e) { return RX_KEINE_POS.test(txt(e)) && txt(e).length <= 40; });
+    if (kand.length) return kand[0];
+    var treffer = null;
+    alle('span,div,p').some(function (e) {
+      if (e.children.length || !sichtbar(e)) return false;
+      var t = txt(e);
+      if (t.length <= 30 && /^(no active position|no open position|no positions?)$/i.test(t)) { treffer = e; return true; }
+      return false;
+    });
+    return treffer;
+  }
   function positionenLesen() {
     if (!K1_ANKER) return { sichtbar: null, zeilen: [], flach: null };
-    var keine = ankerPositionen();
+    var keine = ankerPositionen() || keinePosPerText();
     if (keine && RX_KEINE_POS.test(txt(keine))) {
       var zu = q1(tid('order-card-click-button-close-position'));
       return { sichtbar: true, zeilen: [], flach: zu && zustand(zu).disabled ? true : null };
     }
     var zeilen = [];
     positionsZeilen().forEach(function (z) { var p = positionAus(z); if (p) zeilen.push(p); });
+    if (!zeilen.length) {
+      // Positions-Grid offen, mit Kopfzeile (Risk/To Make), OHNE Zeile UND „Close Position" gesperrt = flach (zwei Belege wie Regel T3)
+      var g = gitterLesen(), zuK = q1(tid('order-card-click-button-close-position'));
+      if (g.da && !g.zeilen.length && zuK && zustand(zuK).disabled) return { sichtbar: true, zeilen: [], flach: true };
+    }
     return { sichtbar: zeilen.length > 0, zeilen: zeilen, flach: zeilen.length ? false : null };
   }
   // Express-Konten zeigen die Balance RELATIV (K0 30.09.2026: „$150K Express" mit BAL $0.00 und MLL $-4,500.00), Combine-Konten
