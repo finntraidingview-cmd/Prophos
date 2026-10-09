@@ -3708,6 +3708,17 @@
   #vcModal .vc-final-ok{background:rgba(18,183,106,.10);color:#15803d}
   #vcModal .vc-final-err{background:rgba(240,68,56,.08);color:#b91c1c}
   #dashboard-view .wdl-z-modell{padding:8px 16px 4px;font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--sub);border-top:1px solid var(--border-soft)}
+  /* Modell-Blöcke (Finn 09.10.2026: „ich erkenne die Modelle nicht"): Gruppe = heller Rahmen, je Modell ein weißer Kasten mit 8 px
+     Abstand, linker Rand in der Modellfarbe (--wdl-m), Kopf leicht getönt; Zeilen rücken um den Rand ein (Spalten bleiben bündig) */
+  #dashboard-view .wdl-tab-mb{background:var(--bg)}
+  #dashboard-view .wdl-tab-mb > .wdl-z-kopf{background:var(--surface)}
+  #dashboard-view .wdl-mb{background:var(--surface);border-left:3px solid var(--wdl-m);border-top:1px solid var(--border-soft)}
+  #dashboard-view .wdl-mb + .wdl-mb{margin-top:8px;border-top-color:var(--border)}
+  #dashboard-view .wdl-mb > .wdl-z{padding-left:13px}
+  #dashboard-view .wdl-mb-kopf{display:flex;align-items:baseline;gap:8px;padding:9px 16px 8px 13px;background:color-mix(in srgb, var(--wdl-m) 9%, var(--surface));border-bottom:1px solid var(--border-soft)}
+  #dashboard-view .wdl-mb-kopf b{font-size:14px;font-weight:700;color:var(--ink)}
+  #dashboard-view .wdl-mb-kopf span{font-size:12px;font-weight:600;color:var(--sub);font-variant-numeric:tabular-nums}
+  #dashboard-view .wdl-mb + .wdl-mehr, #dashboard-view .wdl-tab-mb > .wdl-mehr{background:var(--surface)}
   #dashboard-view .wdl-modelle{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;margin:0 0 12px}
   #dashboard-view .wdl-modelle .wdl-mg{display:flex;align-items:center;gap:6px}
   #dashboard-view .wdl-modelle .wdl-mg > span{font-size:11px;color:var(--sub)}
@@ -3789,6 +3800,9 @@
     #dashboard-view .wdl-z-man .wdl-z-mi{flex-wrap:wrap;justify-content:flex-start;row-gap:4px}   /* Manuelle Arbeit am Handy: Notiz oben, Knöpfe darunter (kein Drag — der Knopf „→ manuell" macht es) */
     #dashboard-view .wdl-z[draggable="true"]{cursor:pointer}
     #dashboard-view .wdl-z-kopf{padding-top:8px;padding-bottom:7px}
+    #dashboard-view .wdl-mb > .wdl-z{padding-left:9px}   /* Handy: 12 px Zeilen-Rand minus 3 px Modell-Rand */
+    #dashboard-view .wdl-mb-kopf{padding:8px 12px 7px 9px}
+    #dashboard-view .wdl-mb-kopf b{font-size:13.5px}
     /* Personen-Chips am Handy: eigene dritte Zeile unter den Spaltenköpfen, waagrecht wischbar statt Umbruch */
     #dashboard-view .wdl-kp{grid-row:3;flex-wrap:nowrap;margin:0 -4px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
     #dashboard-view .wdl-kp::-webkit-scrollbar{display:none}
@@ -28627,6 +28641,10 @@
   // MODELLE (01.10.2026 abends): Schlüssel = Weg-Label (wdlWeg), Gruppen wie im Plan-Popup. Topstep (klassisch) und Duplikum liefert
   // das Backend nicht — sie fehlen hier bewusst statt als ewig leere Reiter.
   const WDL_MODELLE = [['Mit Hedge', ['Echo', 'Orbit', 'Winning Day']], ['Ohne Hedge', ['Echo V2', 'Orbit V2', 'Topstep V2']]]
+  // Liste im Radar (09.10.2026): feste Reihenfolge und Akzentfarbe je Modell — „Orbit" ist Orbit V3 (heißt wie im Plan-Popup)
+  const WDL_LISTE_REIHE = ['Orbit', 'Orbit V2', 'Winning Day', 'Echo', 'Echo V2', 'Topstep V2']
+  const WDL_MODELL_FARBE = { 'Orbit': 'var(--violet)', 'Orbit V2': 'var(--violet-soft)', 'Winning Day': 'var(--good)', 'Echo': 'var(--teal)',
+                             'Echo V2': 'var(--blue)', 'Topstep V2': 'var(--warn)', 'Weitere': 'var(--sub)' }
   const wdlModellPasst = t => !wdl.modell || wdlWeg(t) === wdl.modell
   try{ const m = localStorage.getItem('prophos_wdl_modell'); if(m && WDL_MODELLE.some(([, l]) => l.includes(m))) wdl.modell = m }catch(_){}
   function wdlModelleRender(trades){
@@ -29727,12 +29745,18 @@
       if(!arr.length) return ''
       // Blöcke je MODELL (01.10.2026 abends, Finn: „die Modelle hier unten in der Liste separieren"): Reihenfolge wie die Leiste oben
       // (Echo · Orbit · Winning Day · Echo V2 · Orbit V2 · Topstep V2), je Block eine kleine Überschrift „Orbit · 2" — nur in „Alle"
-      const reihe = WDL_MODELLE.flatMap(([, l]) => l), modellVon = t => reihe.includes(wdlWeg(t)) ? wdlWeg(t) : 'Weitere'
+      // MODELL-BLÖCKE (Finn 09.10.2026 ~07:22 Dubai, Radar „Läuft": „alles sieht gleich aus, ich erkenne die Modelle nicht" — die graue
+      // Zwischenzeile „ECHO · 1" ging unter): je Modell ein eigener Kasten mit Abstand zum nächsten, Kopf mit Name fett + Anzahl,
+      // feste Akzentfarbe je Modell als linker Rand + leicht getönter Kopf (Design-Tokens; die ID-Farben bleiben am Namen-Punkt).
+      // Reihenfolge fest (WDL_LISTE_REIHE). Zeilen unverändert; mit Modell-Filter oben wie bisher ohne Kopf.
+      const reihe = WDL_LISTE_REIHE, modellVon = t => reihe.includes(wdlWeg(t)) ? wdlWeg(t) : 'Weitere'
       const bloecke = [...reihe, 'Weitere'].map(k => [k, arr.filter(t => modellVon(t) === k)]).filter(([, b]) => b.length)
       const lang = bloecke.some(([, b]) => b.length > WDL_BEENDET_KURZ)
       const alle = !mehr || (wdl.alleZu || {})[mehr] || !lang
-      const kopfZ = (k, b) => wdl.modell ? '' : `<div class="wdl-z-modell">${escapeHtml(k)} · ${b.length}</div>`
-      const zeilen = bloecke.map(([k, b]) => kopfZ(k, b) + (alle ? b : b.slice(0, WDL_BEENDET_KURZ)).map(t => zeile(t, '')).join('')).join('')
+      const zeilenVon = b => (alle ? b : b.slice(0, WDL_BEENDET_KURZ)).map(t => zeile(t, '')).join('')
+      const zeilen = wdl.modell ? bloecke.map(([, b]) => zeilenVon(b)).join('')
+        : bloecke.map(([k, b]) => `<div class="wdl-mb" style="--wdl-m:${WDL_MODELL_FARBE[k] || 'var(--sub)'}"><div class="wdl-mb-kopf"><b>${escapeHtml(k)}</b>`
+          + `<span>${b.length}</span></div>${zeilenVon(b)}</div>`).join('')
       const fuss = mehr && lang ? `<button type="button" class="wdl-mehr" data-wdl-mehr="${mehr}">${alle ? 'weniger' : `alle ${arr.length} zeigen`}</button>` : ''
       // Kopf mit Personen-Chips (05.10.2026): Titel + Chips teilen sich die Namens- und die (im Kopf leere) Richtungs-Spalte und
       // brechen dort um; die Spaltenköpfe rechts bleiben über ihren Spalten. Ohne Chips das alte Markup.
@@ -29740,7 +29764,7 @@
       const kopfLinks = chips
         ? `<span class="wdl-z-wer wdl-z-wer-kp"><span class="wdl-kp-t">${titel} · ${arr.length}</span><span class="wdl-kp" data-wdl-kp="${escapeHtml(titel)}">${chips}</span></span>`
         : `<span class="wdl-z-wer">${titel} · ${arr.length}</span><span class="wdl-z-ri"></span>`
-      return `<div class="wdl-tab${cls ? ' ' + cls : ''}"><div class="wdl-z wdl-z-kopf${chips ? ' wdl-z-kopf-kp' : ''}">${kopfLinks}`
+      return `<div class="wdl-tab${cls ? ' ' + cls : ''}${wdl.modell ? '' : ' wdl-tab-mb'}"><div class="wdl-z wdl-z-kopf${chips ? ' wdl-z-kopf-kp' : ''}">${kopfLinks}`
         + sp.map((x, i) => `<span class="wdl-z-${(sp.length === 4 ? ['mi', 'konto', 'pl', 'zeit'] : ['mi', 'pl', 'zeit'])[i]}">${x}</span>`).join('') + `</div>${zeilen}${fuss}</div>`
     }
     const nachEnde = arr => arr.sort((a, b) => String(b.ended_at || '').localeCompare(String(a.ended_at || '')))
@@ -42891,7 +42915,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1420'
+  const OS_TAB_BUILD = '2026-09-22.1421'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
