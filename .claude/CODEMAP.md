@@ -9,61 +9,61 @@ nach Aenderungen neu erzeugen: `bash .claude/codemap.sh`
 
 ---
 
-## prophos.html — Grobstruktur (64239 Zeilen)
+## prophos.html — Grobstruktur (65166 Zeilen)
 
 | Bereich | Zeilen | Umfang |
 |---|---|---|
-| CSS (Hauptblock) | 25–6355 | 6331 |
-| HTML-Markup (Views + Modals) | 6356–12362 | 6007 |
-| **JS-Modul** (ein `<script type="module">`) | **12363–63943** | **51581** |
-| Rest (CSS-/JS-Nachtrag) | 63944–64239 | 296 |
+| CSS (Hauptblock) | 25–6367 | 6343 |
+| HTML-Markup (Views + Modals) | 6368–12474 | 6107 |
+| **JS-Modul** (ein `<script type="module">`) | **12475–64870** | **52396** |
+| Rest (CSS-/JS-Nachtrag) | 64871–65166 | 296 |
 
-## prophos.html — JS-Sektionen (12363–63943)
+## prophos.html — JS-Sektionen (12475–64870)
 
 Sortiert nach Zeilennummer. "bis" ist der Beginn der naechsten Sektion.
 
 | Zeilen | Umfang | Sektion |
 |---|---|---|
-| 12398–12427 | 30 | VIEW SWITCHER |
-| 12428–12465 | 38 | BOOT |
-| 12466–12762 | 297 | USER HYDRATION |
-| 12763–12782 | 20 | LOGIN SCREEN SWITCHING (login / signup / reset) |
-| 12783–12808 | 26 | BANNERS |
-| 12809–12831 | 23 | LOGIN |
-| 12832–12864 | 33 | SIGNUP |
-| 12865–12889 | 25 | RESET |
-| 12890–12909 | 20 | LOGOUT |
-| 12910–12925 | 16 | USER DROPDOWN |
-| 12926–17946 | 5021 | DASHBOARD TABS |
-| 17947–18000 | 54 | HEDGE COSMOS SCROLL (Overview-Hero) |
-| 18001–18298 | 298 | MOBILE SIDEBAR |
-| 18299–18306 | 8 | DASHBOARD MOUNT |
-| 18307–18575 | 269 | TOPSTEP MIRROR — TSX CONNECTION |
-| 18576–18869 | 294 | DUPLIKUM CONNECTION |
-| 18870–19134 | 265 | LOT RECHNER ⇢ DUPLIKIUM PUSH |
-| 19135–19618 | 484 | TRADE-PLAN MODAL ⇢ DUPLIKIUM PUSH |
-| 19619–20014 | 396 | DUPLIKUM LINKING (lokal) |
-| 20015–22022 | 2008 | ENDE MT5-COPIER LINKING |
-| 22023–23172 | 1150 | ENDE MT5-ROUTE |
-| 23173–25723 | 2551 | ENDE ORBIT V2 |
-| 25724–27927 | 2204 | ENDE FUSION-GEGENHEDGE |
-| 27928–29251 | 1324 | ENDE MARKT LIVE |
-| 29252–29382 | 131 | ENDE WINNING DAYS LIVE TRADES |
-| 29383–29832 | 450 | ENDE DUP-ROUTE LIVE-LOTS |
-| 29833–31696 | 1864 | DUPLIKUM AUTO-REFRESH |
-| 31697–31783 | 87 | TRADE-COMPLETE: Status-Optionen |
-| 31784–32098 | 315 | NACHFOLGER-WIZARD |
-| 32099–32106 | 8 | ARCHIV-FILTER |
-| 32107–34522 | 2416 | ACCOUNTS — SUPABASE CRUD |
-| 34523–35275 | 753 | BULK ADD ACCOUNTS |
-| 35276–35279 | 4 | END BULK ADD |
-| 35280–36097 | 818 | TOPSTEP MIRROR — PAIR MAPPING |
-| 36098–36157 | 60 | OVERVIEW & SIDEBAR HELPERS |
-| 36158–36853 | 696 | ACCOUNTS — SUB-TABS, TSX-LISTE, VERLINKEN, SYNC |
-| 36854–37001 | 148 | LOT RECHNER |
-| 37002–55731 | 18730 | TRADE PLANS |
-| 55732–56977 | 1246 | FINANZEN |
-| 56978–63943 | 6966 | INITIAL LOAD: Accounts aus Supabase nach Login |
+| 12510–12539 | 30 | VIEW SWITCHER |
+| 12540–12577 | 38 | BOOT |
+| 12578–12874 | 297 | USER HYDRATION |
+| 12875–12894 | 20 | LOGIN SCREEN SWITCHING (login / signup / reset) |
+| 12895–12920 | 26 | BANNERS |
+| 12921–12943 | 23 | LOGIN |
+| 12944–12976 | 33 | SIGNUP |
+| 12977–13001 | 25 | RESET |
+| 13002–13021 | 20 | LOGOUT |
+| 13022–13037 | 16 | USER DROPDOWN |
+| 13038–18316 | 5279 | DASHBOARD TABS |
+| 18317–18370 | 54 | HEDGE COSMOS SCROLL (Overview-Hero) |
+| 18371–18668 | 298 | MOBILE SIDEBAR |
+| 18669–18676 | 8 | DASHBOARD MOUNT |
+| 18677–18945 | 269 | TOPSTEP MIRROR — TSX CONNECTION |
+| 18946–19239 | 294 | DUPLIKUM CONNECTION |
+| 19240–19504 | 265 | LOT RECHNER ⇢ DUPLIKIUM PUSH |
+| 19505–19988 | 484 | TRADE-PLAN MODAL ⇢ DUPLIKIUM PUSH |
+| 19989–20384 | 396 | DUPLIKUM LINKING (lokal) |
+| 20385–22394 | 2010 | ENDE MT5-COPIER LINKING |
+| 22395–23575 | 1181 | ENDE MT5-ROUTE |
+| 23576–26250 | 2675 | ENDE ORBIT V2 |
+| 26251–28467 | 2217 | ENDE FUSION-GEGENHEDGE |
+| 28468–29885 | 1418 | ENDE MARKT LIVE |
+| 29886–30016 | 131 | ENDE WINNING DAYS LIVE TRADES |
+| 30017–30466 | 450 | ENDE DUP-ROUTE LIVE-LOTS |
+| 30467–32406 | 1940 | DUPLIKUM AUTO-REFRESH |
+| 32407–32493 | 87 | TRADE-COMPLETE: Status-Optionen |
+| 32494–32808 | 315 | NACHFOLGER-WIZARD |
+| 32809–32816 | 8 | ARCHIV-FILTER |
+| 32817–35236 | 2420 | ACCOUNTS — SUPABASE CRUD |
+| 35237–35989 | 753 | BULK ADD ACCOUNTS |
+| 35990–35993 | 4 | END BULK ADD |
+| 35994–36811 | 818 | TOPSTEP MIRROR — PAIR MAPPING |
+| 36812–36871 | 60 | OVERVIEW & SIDEBAR HELPERS |
+| 36872–37567 | 696 | ACCOUNTS — SUB-TABS, TSX-LISTE, VERLINKEN, SYNC |
+| 37568–37715 | 148 | LOT RECHNER |
+| 37716–56655 | 18940 | TRADE PLANS |
+| 56656–57901 | 1246 | FINANZEN |
+| 57902–64870 | 6969 | INITIAL LOAD: Accounts aus Supabase nach Login |
 
 ### Benannte Bloecke (Kopfzeilen `/* ══ TITEL … ══ */` und `/* TITEL (Datum …`)
 
@@ -72,39 +72,178 @@ z.B. START-FEHLER & NEU EINPLANEN, TRADE-PLANER-SEITE, MANUELLE ARBEIT. "bis" = 
 
 | Zeilen | Block |
 |---|---|
-| 23022–28358 | P&L NACH DEM TRADE — DREI QUELLEN |
-| 28359–28533 | SPANNE |
-| 28534–32629 | WARTET |
-| 32630–39820 | „Was noch geparkt werden soll" — die eigene Sicht auf den Kaufplan |
-| 39821–41948 | ECHO V2 — Trade-Start ohne Hedge |
-| 41949–42990 | REMOTE-TRADE-SIGNALE |
-| 42991–43623 | AUTO-START-WARTESCHLANGE |
-| 43624–44037 | V2 SCHLIESSEN |
-| 44038 | ENDE V2 SCHLIESSEN |
-| 44754 | ENDE REMOTE-TRADE-SIGNALE |
-| 44756–45000 | BENACHRICHTIGUNGEN AUFS HANDY |
-| 45001 | ENDE BENACHRICHTIGUNGEN AUFS HANDY |
-| 45003–45207 | AUTO-CLOSE VOR MARKET CLOSE |
-| 45208–45882 | GEPLANTE STARTZEIT |
-| 45883–45979 | RICHTUNG AM START |
-| 45980–46127 | START-FEHLER & NEU EINPLANEN |
-| 46128 | ENDE START-FEHLER |
-| 46387 | ENDE GEPLANTE STARTZEIT |
-| 46389–47142 | AUTO-PLANER |
-| 47143 | ENDE AUTO-PLANER |
-| 47145–48508 | TRADE-PLANER-SEITE |
-| 48509–49482 | HEUTE BEENDET |
-| 49483 | ENDE TRADE-PLANER-SEITE |
-| 49491 | ENDE AUTO-CLOSE |
-| 51326–51842 | FUTURES VORPLANEN |
-| 51843 | ENDE FUTURES VORPLANEN |
-| 51845–53981 | WINNING-DAY-FARMER |
-| 53982 | ENDE WINNING-DAY-FARMER |
-| 53984–54100 | WD-ANBAU |
-| 54101 | ENDE WD-ANBAU |
-| 62191–62571 | ADMIN „TRADE-PLANER" |
-| 62572–62840 | ID-DETAIL |
-| 62841 | ENDE ADMIN „TRADE-PLANER" |
+| 12648–20612 | SPEICHER VOLL |
+| 20613–20860 | UNTERBROCHENEN ECHO-V2-START ÜBERNEHMEN |
+| 20861–20870 | V2-WEGE |
+| 20871–20997 | PULS FÜR TOPSTEP |
+| 20998–21338 | PC-KENNUNG VOM PANEL |
+| 21339–22194 | FIRMEN-SCHLÜSSEL FÜR DEN RICHTUNGSSCHUTZ |
+| 22195–22559 | ECHO V2 |
+| 22560–22565 | MT5-BALANCE DAUERHAFT AM KONTO |
+| 22566–22661 | SERVERNAME WIE BEWIESEN |
+| 22662–22735 | MT5-BALANCE JETZT LESEN |
+| 22736–22843 | BALANCE NACH JEDEM ECHO-TRADE |
+| 22844–22849 | BALANCE JETZT LESEN |
+| 22850–22973 | WARTESCHLANGE FÜR BALANCE-LESUNGEN |
+| 22974–23018 | TOPSTEP V2 START-BASELINE AUS DER ORDER-ANTWORT |
+| 23019–23336 | ORBIT V2 START-BASELINE AUS DER ORDER-ANTWORT |
+| 23337–23423 | BALANCE-SPRUNG |
+| 23424–23639 | P&L NACH DEM TRADE — DREI QUELLEN |
+| 23640–23798 | P/L-EINGABE |
+| 23799–24064 | LIQUIDATIONS-LEVEL STATT MASTER-SL |
+| 24065–24131 | FUSION-P&L ÜBER ALLE VERSUCHE |
+| 24132–24199 | PUFFER OHNE ECHTEN FILL |
+| 24200–24398 | NACHZÜGLER NACH READER-ENDE |
+| 24399–24437 | EINSTIEG AUS DEM PULS-FILL NACHTRAGEN |
+| 24438–24504 | FRÜHER FUSION-HEDGE |
+| 24505–24520 | PULS-ENDLESUNG |
+| 24521–24557 | LOGIN-BREMSE |
+| 24558–24728 | KONTO WEG |
+| 24729–24782 | FOLGETRADE |
+| 24783–25076 | KONTO-BEFUND PERSISTIEREN |
+| 25077–25082 | DEMO-ENDE |
+| 25083–25212 | HANDSTART-EINSTIEG |
+| 25213–25403 | AUSSCHLAG-SCHUTZ |
+| 25404–25443 | FEED-PUFFER FÜR DEN KLICKZEITPUNKT |
+| 25444–25498 | TERMINAL-LEVEL AM ECHTEN TRADINGVIEW-FILL |
+| 25499–25628 | HEDGE-REGELN VOR DEM RECHNEN |
+| 25629–25699 | READER-STAND FÜR DEN HEDGE-WÄCHTER |
+| 25700–25757 | SCHNELL-WÄCHTER |
+| 25758–25815 | MASTER LAUT READER |
+| 25816–26088 | END-BALANCE AUS DEM USERSCRIPT |
+| 26089–26755 | MASTER-WEG-SCHUTZ SICHTBAR |
+| 26756–26783 | EINSTIEGS-MARKER JE LAUFENDEM WINNING DAY |
+| 26784–26932 | POSITIONS-ZONEN WIE IN TRADINGVIEW |
+| 26933–27018 | BETRETEN |
+| 27019–27034 | KANÄLE NUR, WO SIE GEBRAUCHT WERDEN |
+| 27035–27152 | PC-TAB BRAUCHT DEN LIVE-KURS |
+| 27153–27213 | FEED-DIAGNOSE |
+| 27214–27352 | PLAN HEUTE NACHT |
+| 27353–27432 | INLINE-BEARBEITUNG |
+| 27433–27455 | PLAN NEU ANLEGEN |
+| 27456–27478 | BALANCE JE KONTO |
+| 27479–27774 | ZEITSTRAHL |
+| 27775–27781 | ZUM ABHAKEN |
+| 27782–28196 | ENDLESUNG SICHTBAR |
+| 28197–28199 | ECHTER TP AUS TV |
+| 28200–28487 | ECHTER ENTRY AUS TV |
+| 28488–28596 | ECHO IM RADAR |
+| 28597–28641 | PC-TAB-LEBENSZEICHEN JE ID |
+| 28642–28827 | PC-TABS IM ADMIN |
+| 28828–28861 | ABHAKEN OHNE ZURÜCKSPRINGEN |
+| 28862–28899 | LIVE-P&L DES MASTER-KONTOS |
+| 28900–28979 | SPANNE |
+| 28980–28997 | ZIEL-SPANNE |
+| 28998–29142 | HANDARBEIT |
+| 29143–29193 | LÄUFT LIVE |
+| 29194–29210 | WARTET |
+| 29211–29251 | LESUNG VERLOREN |
+| 29252–29280 | BLOW ERKENNEN |
+| 29281–29310 | APEX-EVAL-SOFTBREACH |
+| 29311–29338 | BESTANDEN-FLAG |
+| 29339–29368 | ANSEHEN |
+| 29369–31210 | MANUELLE ARBEIT |
+| 31211–32351 | SUPABASE-DIÄT |
+| 32352–32367 | ENTARCHIVIEREN ÜBERALL |
+| 32368–33339 | ARCHIVIEREN MIT CLOUD-ABGLEICH |
+| 33340–33477 | „Was noch geparkt werden soll" — die eigene Sicht auf den Kaufplan |
+| 33478–33490 | AUTO-PLANER-CHIP |
+| 33491–33598 | GRUND KURZ |
+| 33599–33801 | LOGIN-ORT VOR DEM SIGNAL |
+| 33802–35098 | KONTOWERT-SPALTE |
+| 35099–38414 | ECHO NACH DER BULK-ANLAGE |
+| 38415–38449 | SCHRITT STATT ART |
+| 38450–40500 | KONTO-SPERRE VOR JEDEM START |
+| 40501–41561 | ECHO V2 — Trade-Start ohne Hedge |
+| 41562–42165 | RISIKO MASTER BEI WINNING DAY |
+| 42166–42646 | NUR LAUFENDE ZÄHLEN |
+| 42647–42913 | REMOTE-TRADE-SIGNALE |
+| 42914–42938 | KONTO WEG BEIM START |
+| 42939–43661 | FIRMEN-ABSTAND VOR JEDEM START |
+| 43662–43688 | ECHO-V2-CHECKS NACHEINANDER |
+| 43689–44321 | AUTO-START-WARTESCHLANGE |
+| 44322–44480 | V2 SCHLIESSEN |
+| 44481–44741 | PULS-ERGEBNISSE ÜBERNEHMEN |
+| 44742 | ENDE V2 SCHLIESSEN |
+| 44854–45358 | CLAIMS DIESES TABS MERKEN |
+| 45359–45368 | LEERLAUF-TAKT DES EMPFÄNGERS |
+| 45369–45457 | SUPABASE-DIÄT |
+| 45458 | ENDE REMOTE-TRADE-SIGNALE |
+| 45460–45704 | BENACHRICHTIGUNGEN AUFS HANDY |
+| 45705 | ENDE BENACHRICHTIGUNGEN AUFS HANDY |
+| 45707–45911 | AUTO-CLOSE VOR MARKET CLOSE |
+| 45912–46086 | GEPLANTE STARTZEIT |
+| 46087–46094 | NÄCHSTER PULS-EINSATZ |
+| 46095–46278 | PULS LÄUFT GERADE |
+| 46279–46382 | COUNTDOWN |
+| 46383–46390 | SLAVE-VORPRÜFUNG VOR DEM WD-START |
+| 46391–46448 | FUSION-MARGE |
+| 46449–46586 | VORPRÜFLISTE |
+| 46587–46695 | RICHTUNG AM START |
+| 46696–46846 | START-FEHLER & NEU EINPLANEN |
+| 46847–46860 | PULS-SPUR AM PLAN |
+| 46861 | ENDE START-FEHLER |
+| 46863–47131 | STARTZEIT-WARTESCHLANGE |
+| 47132 | ENDE GEPLANTE STARTZEIT |
+| 47134–47692 | AUTO-PLANER |
+| 47693–47888 | EIN SCHALTER |
+| 47889 | ENDE AUTO-PLANER |
+| 47891–48108 | TRADE-PLANER-SEITE |
+| 48109–48118 | ZEITSTRAHL V2 |
+| 48119–48245 | PILLEN STATT KÜRZEL |
+| 48246–48320 | NETTO-CHART |
+| 48321–48382 | RISIKO NACH PUNKTEN |
+| 48383–48446 | CHART-UMSCHALTER |
+| 48447–48632 | KASTEN AM TRADE |
+| 48633–48674 | BRAUCHT DICH |
+| 48675–48799 | WAS TUN |
+| 48800–49071 | ZIEL ERREICHT RAUS |
+| 49072–49176 | BRAUCHT DICH NEU |
+| 49177–49267 | RECHTE FÜR FREMDE VORSCHLÄGE |
+| 49268–49357 | HYPO-P&L |
+| 49358–49462 | HEUTE BEENDET |
+| 49463–49523 | HYPO-P&L-CHART |
+| 49524–49775 | BEENDET · BILANZ DES RECHNERS |
+| 49776–49888 | MINI-POPUP TP · SL · GRÖSSE |
+| 49889–49965 | STARTZEIT ÄNDERN |
+| 49966–49980 | HYPO-BILANZ |
+| 49981–49997 | KERZEN FÜR DEN HYPO-P&L-VERLAUF |
+| 49998–50334 | BOOT-CACHE DER PLANER-SEITE |
+| 50335 | ENDE TRADE-PLANER-SEITE |
+| 50343 | ENDE AUTO-CLOSE |
+| 51139–52177 | WINNING-DAY-FUSION-HEDGE IN DEN GESAMTKOSTEN |
+| 52178–52334 | FUTURES VORPLANEN |
+| 52335–52362 | TOPSTEP EXPRESS |
+| 52363–52694 | KONTOGRÖSSE FÜR DIE ANZEIGE |
+| 52695 | ENDE FUTURES VORPLANEN |
+| 52697–52785 | WINNING-DAY-FARMER |
+| 52786–52837 | ZEITFENSTER STATT TAKT |
+| 52838–52897 | RICHTUNG ÜBERNEHMEN |
+| 52898–52987 | BLÖCKE PER DRAG & DROP |
+| 52988–53101 | RISIKO-RECHNUNG WIE DAS FORMULAR |
+| 53102–53963 | SCHREIB-WÄCHTER FÜR OFFENE TABELLEN |
+| 53964–54082 | ID OHNE NEU-WÜRFELN EINPLANEN |
+| 54083–54834 | RICHTUNG PER KLICK |
+| 54835–54899 | RISIKO MASTER FÜR ALLE WD-KONTEN |
+| 54900 | ENDE WINNING-DAY-FARMER |
+| 54902–55020 | WD-ANBAU |
+| 55021 | ENDE WD-ANBAU |
+| 57444–62252 | KONTO-AUSWAHL NACH PROP-FIRMA |
+| 62253–62293 | BRÜCKEN-SCHUTZ |
+| 62294–62314 | READER-DIREKTFEED |
+| 62315–63114 | CODE-SCHLÜSSEL FÜRS PANEL |
+| 63115–63121 | ADMIN „TRADE-PLANER" |
+| 63122–63131 | NOTES-GEDÄCHTNIS |
+| 63132–63165 | ADMIN-SICHT ERZWINGEN |
+| 63166–63234 | BESTÄTIGEN OHNE WARTEN |
+| 63235–63304 | ID-SICHT |
+| 63305–63309 | ZU BESTÄTIGEN IM FIRMEN-BLOCK-DESIGN |
+| 63310–63498 | DREI GRUPPEN |
+| 63499–63717 | ID-DETAIL |
+| 63718–63729 | BOT-SCHALTER IM ADMIN-REITER |
+| 63730–63750 | LIVE-P&L IM ADMIN-REITER |
+| 63751–63767 | SICHT-WÄCHTER |
+| 63768 | ENDE ADMIN „TRADE-PLANER" |
 
 ### Untersektionen in den grossen Bloecken
 
@@ -112,81 +251,82 @@ Die Sektion "INITIAL LOAD" ist ein Sammelblock — hier stecken mehrere eigensta
 
 | ab Zeile | Block |
 |---|---|
-| 30027 | LIVE TRADES — Aggregator für TopstepX + MetaApi + Duplikium |
-| 30536 | AUTO TRADE TRACKER — simpel via getSlaveOrders |
-| 31023 | MULTI-PROFIL-WÄCHTER — Trade-Ende auch für die NICHT aktiven Profile |
-| 31445 | DASHBOARD — TODO-LISTE + RECENT TRADES |
-| 31550 | ACCOUNT-ARCHIV & NACHFOLGER-CHAIN |
-| 57090 | SUPABASE-SYNC für localStorage-Daten |
-| 57313 | LOT-KALIBRIERUNG — Vergleichs-Trades zur Referenz-Firma |
-| 57796 | FX-Kurs USD/EUR |
-| 57964 | JOURNAL — Tägliche Trading-Notizen |
-| 58258 | AI ADVISOR v2 — Chat-basierter Advisor mit Knowledge-Editor |
-| 58622 | AI ADVISOR v5 — Conversations + Persistent Memory |
-| 58884 | AI ADVISOR — TABS & FIRM RULES MANAGEMENT |
+| 30661 | LIVE TRADES — Aggregator für TopstepX + MetaApi + Duplikium |
+| 31170 | AUTO TRADE TRACKER — simpel via getSlaveOrders |
+| 31657 | MULTI-PROFIL-WÄCHTER — Trade-Ende auch für die NICHT aktiven Profile |
+| 32079 | DASHBOARD — TODO-LISTE + RECENT TRADES |
+| 32184 | ACCOUNT-ARCHIV & NACHFOLGER-CHAIN |
+| 58014 | SUPABASE-SYNC für localStorage-Daten |
+| 58237 | LOT-KALIBRIERUNG — Vergleichs-Trades zur Referenz-Firma |
+| 58720 | FX-Kurs USD/EUR |
+| 58888 | JOURNAL — Tägliche Trading-Notizen |
+| 59182 | AI ADVISOR v2 — Chat-basierter Advisor mit Knowledge-Editor |
+| 59546 | AI ADVISOR v5 — Conversations + Persistent Memory |
+| 59808 | AI ADVISOR — TABS & FIRM RULES MANAGEMENT |
 
-## prophos.html — Views und Modals (6356–12362)
+## prophos.html — Views und Modals (6368–12474)
 
 Jede `section.view` ist ein Tab im Dashboard. `modal-bg` sind die Overlays.
 
 | Zeile | Element |
 |---|---|
-| 6862 | view: **overview** |
-| 6975 | view: **accounts** |
-| 7308 | modal: linkTopstepModal |
-| 7349 | view: **topstep** |
-| 7446 | view: **calc** |
-| 7574 | view: **trades** |
-| 7743 | modal: tpVorplanModal |
-| 7835 | modal: tplBestModal |
-| 7851 | modal: apKontoModal |
-| 7860 | modal: apProbeModal |
-| 7882 | modal: tpOrderModal |
-| 7964 | modal: tradePlanModal |
-| 8353 | modal: tradeCompleteModal |
-| 8461 | modal: successorModal |
-| 8605 | modal: blownSummaryModal |
-| 8642 | modal: tpPreflightModal |
-| 8674 | modal: vcModal |
-| 8710 | view: **risk** |
-| 8728 | view: **advisor** |
-| 8841 | modal: advisor-firm-modal |
-| 8904 | modal: advisor-kb-modal |
-| 8918 | modal: advisor-memory-modal |
-| 8932 | modal: advisor-extract-modal |
-| 8946 | view: **payouts** |
-| 9185 | modal: finModal |
-| 9272 | modal: finReceiveModal |
-| 9303 | modal: finSettleModal |
-| 9351 | view: **analytics** |
-| 9369 | view: **journal** |
-| 9457 | view: **account-detail** |
-| 9506 | view: **livetrades** |
-| 9539 | modal: linkDupModal |
-| 9580 | modal: linkMt5Modal |
-| 9621 | view: **managed** |
-| 9712 | modal: mgSettleModal |
-| 9759 | view: **notes** |
-| 9779 | view: **news** |
-| 9819 | view: **propbaum** |
-| 9850 | view: **tplaner** |
-| 9872 | view: **vorrat** |
-| 9892 | view: **wdlive** |
-| 9923 | view: **firmen** |
-| 9969 | view: **markt** |
-| 10039 | view: **mt5copier** |
-| 10118 | view: **echoplus** |
-| 10161 | modal: mtcAddModal |
-| 10215 | view: **kasse** |
-| 11490 | modal: walKommModal |
-| 11536 | view: **settings** |
-| 11667 | modal: customFirmModal |
-| 11817 | modal: mwdErledigtModal |
-| 11877 | modal: addAccountModal |
-| 12184 | modal: credModal |
-| 12201 | modal: bulkAddModal |
+| 6880 | view: **overview** |
+| 6993 | view: **accounts** |
+| 7326 | modal: linkTopstepModal |
+| 7367 | view: **topstep** |
+| 7464 | view: **calc** |
+| 7592 | view: **trades** |
+| 7761 | modal: tpVorplanModal |
+| 7853 | modal: tplBestModal |
+| 7869 | modal: apKontoModal |
+| 7880 | modal: handModal |
+| 7889 | modal: apProbeModal |
+| 7911 | modal: tpOrderModal |
+| 7993 | modal: tradePlanModal |
+| 8382 | modal: tradeCompleteModal |
+| 8490 | modal: successorModal |
+| 8634 | modal: blownSummaryModal |
+| 8671 | modal: tpPreflightModal |
+| 8703 | modal: vcModal |
+| 8739 | view: **risk** |
+| 8757 | view: **advisor** |
+| 8870 | modal: advisor-firm-modal |
+| 8933 | modal: advisor-kb-modal |
+| 8947 | modal: advisor-memory-modal |
+| 8961 | modal: advisor-extract-modal |
+| 8975 | view: **payouts** |
+| 9214 | modal: finModal |
+| 9301 | modal: finReceiveModal |
+| 9332 | modal: finSettleModal |
+| 9380 | view: **analytics** |
+| 9398 | view: **journal** |
+| 9486 | view: **account-detail** |
+| 9535 | view: **livetrades** |
+| 9568 | modal: linkDupModal |
+| 9609 | modal: linkMt5Modal |
+| 9650 | view: **managed** |
+| 9741 | modal: mgSettleModal |
+| 9788 | view: **notes** |
+| 9808 | view: **news** |
+| 9848 | view: **propbaum** |
+| 9879 | view: **tplaner** |
+| 9901 | view: **vorrat** |
+| 9921 | view: **wdlive** |
+| 9952 | view: **firmen** |
+| 9998 | view: **markt** |
+| 10068 | view: **mt5copier** |
+| 10147 | view: **echoplus** |
+| 10190 | modal: mtcAddModal |
+| 10244 | view: **kasse** |
+| 11602 | modal: walKommModal |
+| 11648 | view: **settings** |
+| 11779 | modal: customFirmModal |
+| 11929 | modal: mwdErledigtModal |
+| 11989 | modal: addAccountModal |
+| 12296 | modal: credModal |
+| 12313 | modal: bulkAddModal |
 
-## app.py — Routen (21675 Zeilen)
+## app.py — Routen (24060 Zeilen)
 
 | Zeile | Route |
 |---|---|
@@ -209,58 +349,65 @@ Jede `section.view` ist ein Tab im Dashboard. `modal-bg` sind die Overlays.
 | 1211 | `"/mirror/status", methods=["GET"]` |
 | 1310 | `"/mirror/diagnose", methods=["POST", "OPTIONS", "GET"]` |
 | 2634 | `"/debug/account", methods=["POST","OPTIONS"]` |
-| 3342 | `"/push/vapid-public", methods=["GET", "OPTIONS"]` |
-| 3356 | `"/push/subscribe", methods=["POST", "OPTIONS"]` |
-| 3388 | `"/push/unsubscribe", methods=["POST", "OPTIONS"]` |
-| 3412 | `"/push/geraete", methods=["GET", "OPTIONS"]` |
-| 3430 | `"/push/send", methods=["POST", "OPTIONS"]` |
-| 3447 | `"/sw.js", methods=["GET"]` |
-| 6303 | `"/admin/overview", methods=["GET", "OPTIONS"]` |
-| 6599 | `"/admin/kapitel", methods=["GET", "OPTIONS"]` |
-| 6786 | `"/admin/prop-baum", methods=["GET", "POST", "OPTIONS"]` |
-| 6924 | `"/admin/auftrag", methods=["GET", "OPTIONS"]` |
-| 7119 | `"/admin/vorrat", methods=["GET", "POST", "OPTIONS"]` |
-| 9071 | `"/admin/vorrat/lauf", methods=["GET", "OPTIONS"]` |
-| 9100 | `"/admin/vorrat/ki", methods=["POST", "OPTIONS"]` |
-| 9479 | `"/admin/rechnung-daten", methods=["GET", "OPTIONS"]` |
-| 9499 | `"/admin/rechnung", methods=["POST", "OPTIONS"]` |
-| 9560 | `"/admin/rechnungen", methods=["GET", "OPTIONS"]` |
-| 9576 | `"/admin/rechnung-pdf", methods=["GET", "OPTIONS"]` |
-| 9705 | `"/admin/acc-plan", methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"]` |
-| 10508 | `"/admin/wd-heute", methods=["GET", "OPTIONS"]` |
-| 11367 | `"/admin/live-trades", methods=["GET", "OPTIONS"]` |
-| 11739 | `"/admin/pc-stand", methods=["GET", "OPTIONS"]` |
-| 11759 | `"/admin/wd-plaene", methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"]` |
-| 12377 | `"/admin/payout-calc", methods=["PATCH", "OPTIONS"]` |
-| 12415 | `"/watcher/status", methods=["GET", "OPTIONS"]` |
-| 12449 | `"/health", methods=["GET", "OPTIONS"]` |
-| 12795 | `"/admin/kompass", methods=["GET", "OPTIONS"]` |
-| 13440 | `"/reader-wacht/status", methods=["GET", "OPTIONS"]` |
-| 13527 | `"/puls-diagnose/<pc_id>", methods=["POST", "OPTIONS"]` |
-| 13586 | `"/reader-diagnose/<kennung>", methods=["POST", "OPTIONS"]` |
-| 13720 | `"/reader-feed-token", methods=["POST", "OPTIONS"]` |
-| 13763 | `"/code/stand", methods=["GET"]` |
-| 13781 | `"/code/datei/<path:pfad>", methods=["GET"]` |
-| 13806 | `"/reader-kurs", methods=["POST", "OPTIONS"]` |
-| 13889 | `"/admin/konten-pruefen", methods=["POST", "OPTIONS"]` |
-| 13971 | `"/admin/bulk-vorlagen", methods=["POST", "OPTIONS"]` |
-| 14086 | `"/admin/konto-balance-lesen", methods=["POST", "OPTIONS"]` |
-| 14197 | `"/puls-inventar/<pc_id>", methods=["POST", "OPTIONS"]` |
-| 14294 | `"/puls-regel/<pc_id>", methods=["GET", "OPTIONS"]` |
-| 14364 | `"/puls-ergebnis/<pc_id>", methods=["POST", "OPTIONS"]` |
-| 14383 | `"/puls-augen/<pc_id>", methods=["POST", "OPTIONS"]` |
-| 15485 | `"/admin/kontowerte", methods=["GET", "OPTIONS"]` |
-| 15616 | `"/admin/hypo-bilanz", methods=["GET", "OPTIONS"]` |
-| 19900 | `"/admin/auto-plan/delta", methods=["GET", "OPTIONS"]` |
-| 19931 | `"/admin/auto-plan/ausgleichen", methods=["POST", "OPTIONS"]` |
-| 19951 | `"/admin/auto-plan/ids", methods=["GET", "POST", "OPTIONS"]` |
-| 20376 | `"/admin/auto-plan/plan", methods=["POST", "OPTIONS"]` |
-| 20512 | `"/admin/auto-plan/start-protokoll", methods=["POST", "OPTIONS"]` |
-| 20547 | `"/admin/auto-plan/ausgleich-einstellung", methods=["POST", "OPTIONS"]` |
-| 21394 | `"/admin/auto-plan/bestaetigen", methods=["POST", "OPTIONS"]` |
-| 21399 | `"/admin/auto-plan/zurueck", methods=["POST", "OPTIONS"]` |
-| 21404 | `"/admin/auto-plan/loeschen", methods=["POST", "OPTIONS"]` |
-| 21409 | `"/admin/auto-plan", methods=["GET", "POST", "OPTIONS"]` |
+| 3560 | `"/push/vapid-public", methods=["GET", "OPTIONS"]` |
+| 3574 | `"/push/subscribe", methods=["POST", "OPTIONS"]` |
+| 3606 | `"/push/unsubscribe", methods=["POST", "OPTIONS"]` |
+| 3630 | `"/push/geraete", methods=["GET", "OPTIONS"]` |
+| 3648 | `"/push/send", methods=["POST", "OPTIONS"]` |
+| 3665 | `"/sw.js", methods=["GET"]` |
+| 6595 | `"/admin/overview", methods=["GET", "OPTIONS"]` |
+| 6891 | `"/admin/kapitel", methods=["GET", "OPTIONS"]` |
+| 7078 | `"/admin/prop-baum", methods=["GET", "POST", "OPTIONS"]` |
+| 7218 | `"/admin/auftrag", methods=["GET", "OPTIONS"]` |
+| 7413 | `"/admin/vorrat", methods=["GET", "POST", "OPTIONS"]` |
+| 9475 | `"/admin/vorrat/lauf", methods=["GET", "OPTIONS"]` |
+| 9504 | `"/admin/vorrat/ki", methods=["POST", "OPTIONS"]` |
+| 9883 | `"/admin/rechnung-daten", methods=["GET", "OPTIONS"]` |
+| 9903 | `"/admin/rechnung", methods=["POST", "OPTIONS"]` |
+| 9964 | `"/admin/rechnungen", methods=["GET", "OPTIONS"]` |
+| 9980 | `"/admin/rechnung-pdf", methods=["GET", "OPTIONS"]` |
+| 10110 | `"/admin/acc-plan", methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"]` |
+| 10934 | `"/admin/wd-heute", methods=["GET", "OPTIONS"]` |
+| 11831 | `"/admin/live-trades", methods=["GET", "OPTIONS"]` |
+| 12203 | `"/admin/pc-stand", methods=["GET", "OPTIONS"]` |
+| 12325 | `"/admin/handarbeit", methods=["GET", "OPTIONS"]` |
+| 12406 | `"/admin/wd-plaene", methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"]` |
+| 13048 | `"/admin/payout-calc", methods=["PATCH", "OPTIONS"]` |
+| 13102 | `"/watcher/status", methods=["GET", "OPTIONS"]` |
+| 13136 | `"/health", methods=["GET", "OPTIONS"]` |
+| 13482 | `"/admin/kompass", methods=["GET", "OPTIONS"]` |
+| 14127 | `"/reader-wacht/status", methods=["GET", "OPTIONS"]` |
+| 14214 | `"/puls-diagnose/<pc_id>", methods=["POST", "OPTIONS"]` |
+| 14273 | `"/reader-diagnose/<kennung>", methods=["POST", "OPTIONS"]` |
+| 14407 | `"/reader-feed-token", methods=["POST", "OPTIONS"]` |
+| 14450 | `"/code/stand", methods=["GET"]` |
+| 14468 | `"/code/datei/<path:pfad>", methods=["GET"]` |
+| 14493 | `"/reader-kurs", methods=["POST", "OPTIONS"]` |
+| 14576 | `"/admin/konten-pruefen", methods=["POST", "OPTIONS"]` |
+| 14659 | `"/admin/bulk-vorlagen", methods=["POST", "OPTIONS"]` |
+| 14788 | `"/admin/konto-balance-lesen", methods=["POST", "OPTIONS"]` |
+| 14899 | `"/puls-inventar/<pc_id>", methods=["POST", "OPTIONS"]` |
+| 14996 | `"/puls-regel/<pc_id>", methods=["GET", "OPTIONS"]` |
+| 15066 | `"/puls-ergebnis/<pc_id>", methods=["POST", "OPTIONS"]` |
+| 15085 | `"/puls-augen/<pc_id>", methods=["POST", "OPTIONS"]` |
+| 16541 | `"/admin/kontowerte", methods=["GET", "OPTIONS"]` |
+| 16674 | `"/admin/hypo-bilanz", methods=["GET", "OPTIONS"]` |
+| 17374 | `"/account/entarchivieren", methods=["POST", "OPTIONS"]` |
+| 21617 | `"/admin/auto-plan/delta", methods=["GET", "OPTIONS"]` |
+| 21659 | `"/admin/auto-plan/ausgleichen", methods=["POST", "OPTIONS"]` |
+| 21679 | `"/admin/auto-plan/ids", methods=["GET", "POST", "OPTIONS"]` |
+| 22131 | `"/admin/auto-plan/plan", methods=["POST", "OPTIONS"]` |
+| 22280 | `"/admin/auto-plan/start-protokoll", methods=["POST", "OPTIONS"]` |
+| 22315 | `"/admin/auto-plan/ausgleich-einstellung", methods=["POST", "OPTIONS"]` |
+| 23348 | `"/admin/auto-plan/bestaetigen", methods=["POST", "OPTIONS"]` |
+| 23353 | `"/admin/auto-plan/zurueck", methods=["POST", "OPTIONS"]` |
+| 23358 | `"/admin/auto-plan/loeschen", methods=["POST", "OPTIONS"]` |
+| 23363 | `"/admin/auto-plan", methods=["GET", "POST", "OPTIONS"]` |
+| 23738 | `"/admin/liquide", methods=["GET", "OPTIONS"]` |
+| 23746 | `"/admin/liquide/abruf", methods=["POST", "OPTIONS"]` |
+| 23761 | `"/admin/liquide/sheet", methods=["POST", "OPTIONS"]` |
+| 23788 | `"/admin/liquide/sheet/aktiv", methods=["POST", "OPTIONS"]` |
+| 23807 | `"/admin/liquide/kunde", methods=["POST", "OPTIONS"]` |
 
 ## app.py — Sektionen
 
@@ -288,22 +435,23 @@ Jede `section.view` ist ein Tab im Dashboard. `modal-bg` sind die Overlays.
 | 2407 | MT5 → TopstepX Mirror |
 | 2721 | Duplikum-Rate-Budget (06.08.2026) |
 | 3091 | Kurz-Caches für Login-Prüfung & Co. (01.10.2026, SUPABASE-DIÄT B) |
-| 4067 | Statuswechsel-Wache fuer die Handy-Meldungen (23.09.2026) |
-| 4968 | Gemessene Hedge-Quote aus der Hedge-Ära (24.09.2026, Finn zum Kontrafakt-Panel: „Es macht |
-| 9863 | Farmer auf V2 (24.09.2026, Vollumstieg auf Kapitel „Ohne Hedge") |
-| 10000 | Winning Days des Tages — Übersicht unter dem Markt-Chart (25.09.2026, Koordinations-Runde) |
-| 12442 | /health (01.10.2026, AUSFALL-BREMSE): Railway hing am 30.09. mit, weil jeder Aufruf auf Supabase wartete; /version liest alle |
-| 12582 | Auswertung (23.09.2026, Finn: „pack die Daten mal in Prophos, is der Bot von meinem Bruder, will |
-| 13734 | CODE-QUELLE (07.10.2026, Finn: „man kann Prophos ja jetzt klauen" → Repo privat; Finn im Chat: „Code-Auslieferung über |
-| 14215 | PULS-AUGEN über CDP (29.09.2026, Etappe E0, Finns Go) |
-| 14309 | PULS-ERGEBNISSE (29.09.2026, Finns Live-Test 15:49–15:50 UTC, Plan 5ab15b24) |
-| 14852 | KONTOWERT (06.10.2026, Finn: „das ist eins zu eins, wie es mit Gegenhedgen ist, und das ist eins zu eins der Betrag, |
-| 15387 | KONTOWERT-SPALTE (07.10.2026, Finn: Kontowert ist seine neue Kennzahl — jedes Konto zeigt ihn in der normalen |
-| 16231 | PROBELAUF ÜBER ALLE IDS (07.10.2026, Finn 04:08 dt: „Kannst du mal zum Test alle IDs einfach als geplant reinpacken, sodass ich |
-| 17488 | SZENARIO-KURVE (08.10.2026, Finn 05:26 Dubai, Admin „Long 202 € · Short 376 € · Netto −174 € short", kurz davor +333: „Der Bot muss |
-| 21476 | Duplikum Auto-Connect + proaktiver Refresh (überlebt Restarts) |
-| 21511 | Lokaler Selbst-Update-Watcher (15.08.2026, Etappe 3 MT5-Route) |
+| 3205 | ADMIN-GRUPPEN (08.10.2026, Finn ~22:45 Dubai: „Emin bekommt seine Freunde als eigene IDs bei sich unter Admin … Ich sage in |
+| 4285 | Statuswechsel-Wache fuer die Handy-Meldungen (23.09.2026) |
+| 5248 | Gemessene Hedge-Quote aus der Hedge-Ära (24.09.2026, Finn zum Kontrafakt-Panel: „Es macht |
+| 10268 | Farmer auf V2 (24.09.2026, Vollumstieg auf Kapitel „Ohne Hedge") |
+| 10424 | Winning Days des Tages — Übersicht unter dem Markt-Chart (25.09.2026, Koordinations-Runde) |
+| 13129 | /health (01.10.2026, AUSFALL-BREMSE): Railway hing am 30.09. mit, weil jeder Aufruf auf Supabase wartete; /version liest alle |
+| 13269 | Auswertung (23.09.2026, Finn: „pack die Daten mal in Prophos, is der Bot von meinem Bruder, will |
+| 14421 | CODE-QUELLE (07.10.2026, Finn: „man kann Prophos ja jetzt klauen" → Repo privat; Finn im Chat: „Code-Auslieferung über |
+| 14917 | PULS-AUGEN über CDP (29.09.2026, Etappe E0, Finns Go) |
+| 15011 | PULS-ERGEBNISSE (29.09.2026, Finns Live-Test 15:49–15:50 UTC, Plan 5ab15b24) |
+| 15727 | KONTOWERT (06.10.2026, Finn: „das ist eins zu eins, wie es mit Gegenhedgen ist, und das ist eins zu eins der Betrag, |
+| 16367 | KONTOWERT-SPALTE (07.10.2026, Finn: Kontowert ist seine neue Kennzahl — jedes Konto zeigt ihn in der normalen |
+| 17551 | PROBELAUF ÜBER ALLE IDS (07.10.2026, Finn 04:08 dt: „Kannst du mal zum Test alle IDs einfach als geplant reinpacken, sodass ich |
+| 19054 | SZENARIO-KURVE (08.10.2026, Finn 05:26 Dubai, Admin „Long 202 € · Short 376 € · Netto −174 € short", kurz davor +333: „Der Bot muss |
+| 23861 | Duplikum Auto-Connect + proaktiver Refresh (überlebt Restarts) |
+| 23896 | Lokaler Selbst-Update-Watcher (15.08.2026, Etappe 3 MT5-Route) |
 
 ---
 
-_Erzeugt aus prophos.html (64239 Zeilen) und app.py._
+_Erzeugt aus prophos.html (65166 Zeilen) und app.py._
