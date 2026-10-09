@@ -15259,6 +15259,10 @@ def _tsx_sitzung_waehlen(trail, sitz=None):
     Puls-Chrome angemeldet. Deshalb bei einer Login-Seite: alle Tabs in die Spur, einen anderen TopstepX-Tab OHNE Login-Seite nehmen
     (den toten Login-Tab nur schließen, wenn der Bot ihn selbst geöffnet hat), sonst _tsx_cdp_login (Autofill abwarten, EINMAL neu
     laden, Klick nur mit Beweis)."""
+    # FENSTER GROSS AUCH FÜR TOPSTEPX (09.10.2026, Ina DLL-Konto 333d4791 Versuch 3: nach dem harten Neustart startet das Puls-Chrome
+    # minimiert/klein — TopstepX zeigt dann ein schmales Layout OHNE rechte Order-Spalte, order-card-container fehlte, Ticket „anker_fehlt").
+    # Bisher nur im TradingView-Weg (_cdp_sitzung_holen); jetzt auch hier vor der ersten Lesung. Fehler → nur Spur.
+    _puls_fenster_gross(trail)
     ziel = _tsx_tab_sicher(trail)
     if not ziel:
         return None, "TopstepX-Tab im Puls-Chrome nicht erreichbar."
@@ -15883,7 +15887,7 @@ TSX_POS_INVENTAR_JS = r"""(function () {
   var o = { tids: [], grids: [], tabs: [] };
   document.querySelectorAll('[data-testid]').forEach(function (e) {
     var t = e.getAttribute('data-testid') || '';
-    if (o.tids.length >= 60 || /account/i.test(t) || !/order-card|position|grid|tab|card|pnl|flat/i.test(t)) return;
+    if (o.tids.length >= 60 || /account/i.test(t) || !/order-card|order-container|^dom-|position|grid|tab|card|pnl|flat/i.test(t)) return;
     var r = e.getBoundingClientRect(); if (r.width < 2 || r.height < 2) return;
     var x = (e.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 60);
     o.tids.push(t + (x ? ' = ' + x : ''));
@@ -15902,6 +15906,9 @@ TSX_POS_INVENTAR_JS = r"""(function () {
   if (k) { var cs = getComputedStyle(k); o.close = { quelle: kq, tid: k.getAttribute('data-testid'), text: (k.innerText || '').trim().slice(0, 30), disabled: !!k.disabled,
       aria: k.getAttribute('aria-disabled'), klasse: String(k.getAttribute('class') || '').slice(0, 160), pe: cs.pointerEvents, opacity: cs.opacity }; }
   else o.close = { quelle: null };
+  o.fenster = { w: window.innerWidth, h: window.innerHeight, ow: window.outerWidth, oh: window.outerHeight };   // Fenstergröße (09.10.2026)
+  o.order_card = !!document.querySelector('[data-testid="order-card-container"]');
+  o.dom = !!document.querySelector('[data-testid^="dom-"]');   // Preisleiter (DOM) statt Order-Karte (Ina 09.10.2026)
   var n = document.querySelector('[data-testid="order-card-display-value-no-position"]');
   o.keine_pos = n ? { quelle: 'testid', text: (n.innerText || '').trim().slice(0, 40) } : { quelle: null };
   return o;
@@ -16431,8 +16438,24 @@ def _tsx_k3_ticket(s, st, befehl, trail):
     """K3a: Ticket füllen (Contract, Menge). -> (ok, code, msg, stand, contract-code | None)"""
     t = _tsx_tk(st)
     if not t.get("k3"):
-        return False, "anker_fehlt", ("Das TopstepX-Ticket liest das Puls-Chrome noch nicht (augen_tsx.js ohne K3-Felder — Stand "
-                                      f"{str(st.get('v') if isinstance(st, dict) else '-')[:12]}). Nichts getan."), st, None
+        # GENAUE URSACHE (09.10.2026, Versuch 3 333d4791: „augen_tsx.js ohne K3-Felder" war irreführend — ticketLesen liefert null, wenn
+        # [data-testid=order-card-container] fehlt): Fenstergröße nennen + Inventar der Order-/Positions-Region in die Spur. Nur Lesen.
+        g = st.get("geo") if isinstance(st, dict) and isinstance(st.get("geo"), dict) else {}
+        fen = f"{g.get('innerWidth', '?')}×{g.get('innerHeight', '?')}"
+        try:
+            inv = s.lese_js(TSX_POS_INVENTAR_JS, timeout=5)
+        except Exception as e_:
+            inv = {"fehler": type(e_).__name__}
+        if isinstance(inv, dict):
+            trail.append(f"Inventar Ticket: Fenster {inv.get('fenster')} · order-card-container {inv.get('order_card')} · "
+                         + " · ".join(str(x) for x in (inv.get("tids") or [])[:14])[:700])
+        if isinstance(inv, dict) and inv.get("dom") and not inv.get("order_card"):
+            # Beleg Ina pc-xxxxxx 09.10.2026 05:00 UTC: rechts „dom-empty-order-container"/„dom-bid-display-cell-…", keine order-card-*
+            return False, "anker_fehlt", ("TopstepX zeigt rechts das DOM (Preisleiter) statt der Order-Karte — Puls bedient nur die "
+                                          "Order-Karte. → In TopstepX rechts auf die Order-Karte (Buy/Sell, # of Contracts) umstellen. "
+                                          "Nichts getan."), st, None
+        return False, "anker_fehlt", (f"Order-Karte (order-card-container) nicht im Fenster — Fenster {fen} px. → In TopstepX rechts die "
+                                      "Order-Karte einblenden. Nichts getan."), st, None
     ot = str((t.get("ordertyp") or {}).get("text") or "").strip() if isinstance(t.get("ordertyp"), dict) else ""
     if ot.lower() != "market":
         return False, "ordertyp", f"Order-Typ steht auf '{ot or '-'}', nicht Market — nichts getan (Prophos stellt ihn nicht um).", st, None

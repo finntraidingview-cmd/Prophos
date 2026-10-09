@@ -50,6 +50,13 @@ def main():
     check('res["diagnose"] = {"tsx_positionen_inventar": inv}' in bot and "o.close = { quelle: kq" in bot and "o.keine_pos" in bot,
           "Inventar mit Close-Knopf-Details + „No Active Position“-Quelle")
 
+    i_s = bot.index("def _tsx_sitzung_waehlen(")
+    check("_puls_fenster_gross(trail)" in bot[i_s:i_s + 1800], "TopstepX-Sitzung: Puls-Chrome vor der ersten Lesung maximiert (wie TradingView)")
+    check('inv.get("dom") and not inv.get("order_card")' in bot and "TopstepX zeigt rechts das DOM (Preisleiter) statt der Order-Karte" in bot
+          and "liest das Puls-Chrome noch nicht (augen_tsx.js ohne K3-Felder" not in bot, "Ticket ohne Order-Karte: genaue Ursache (DOM) statt „ohne K3-Felder“")
+    check("o.dom = !!document.querySelector('[data-testid^=\"dom-\"]')" in bot and "o.fenster = { w: window.innerWidth" in bot,
+          "Inventar: DOM-Erkennung + Fenstergröße")
+
     # flachBeweis per JXA ausführen (macOS) — Positiv- und Negativfälle
     i = js.index("  function flachBeweis(b) {")
     fsrc = js[i:js.index("\n  }\n", i) + 4]
