@@ -11214,6 +11214,7 @@
                verfügbar ist, in Euro — Wallets (Live-Balances unten) + Kunden-Töpfe aus Google Sheets (GET /admin/liquide, Railway).
                Geld unterwegs steht getrennt und zählt nie in eine Summe. Keine Testzahlen, nichts im Browser gespeichert. JS liq* im Modul. -->
           <div id="liq-err" class="liq-err" hidden></div>
+          <div id="liq-wal-warn" class="liq-err" hidden></div>
           <div class="kpis liq-kpis">
             <div class="kpi">
               <div class="kpi-label">Liquide gesamt</div>
@@ -16339,7 +16340,10 @@
      * Alles, was sofort verfügbar ist, in Euro: Wallets (Live-Balances oben, walBal, USD × fx_usd_eur) + Kunden-Töpfe aus Google Sheets
      * (Backend liest die CSVs, GET /admin/liquide). Kundengeld = alle Töpfe + Wallets von Personen mit kunde[uid] = true; Geld unterwegs
      * (pending) steht getrennt und zählt nie mit. Fehlt das Backend, zeigt die Karte den Fehler — nie 0. Keine Werte im Browser gespeichert. */
-    let liqDaten = null, liqFehler = '', liqLaeuft = false, liqNachTimer = 0
+    let liqDaten = null, liqFehler = '', liqLaeuft = false, liqNachTimer = 0, liqStart = 0
+    // NIE STILL (Prüfer Slave 2, 09.10.2026): fallen TronGrid/RPCs aus, stand der Kopf für immer auf „lädt Wallets…", obwohl die Töpfe
+    // bekannt waren. Nach dieser Grenze bzw. wenn jede Wallet geantwortet hat (Balance oder Fehler) wird mit dem gerechnet, was da ist
+    const LIQ_WAL_GRENZE_MS = 20000
     const liqEurF = n => n == null || !isFinite(n) ? '–' : (n < -0.5 ? '−' : '') + '€ ' + Math.abs(Math.round(n)).toLocaleString('de-DE')
     // Datum wie im Sheet, nur deutsch geschrieben (2026-10-06 → 06.10.2026) — ein Tippfehler im Sheet (Jahr 2025) bleibt sichtbar
     const liqDatum = d => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d)); return m ? `${m[3]}.${m[2]}.${m[1]}` : String(d) }
@@ -16406,8 +16410,26 @@
         const gesamt = (walEur ?? 0) + p.topf
         return { ...p, walEur, istK, kundengeld: kg, eigen: gesamt - kg, gesamt }
       }).sort((a, b) => b.gesamt - a.gesamt)
-      // Kopf: nur mit Backend-Daten (Kurs + Töpfe) — sonst „–", nie 0
-      const bereit = !!d && fx != null && walGeladen > 0
+      // Kopf: nur mit Backend-Daten (Kurs + Töpfe) — sonst „–", nie 0. Wallets: sobald eine geladen ist, alle geantwortet haben oder die
+      // Zeitgrenze um ist; fehlende Wallets zählen dann nicht und stehen mit EINER Ursache in der Warnzeile
+      const walFertig = wallets.every(w => walBal.has(w.id)), zeitAb = !!liqStart && Date.now() - liqStart >= LIQ_WAL_GRENZE_MS
+      const fehlend = wallets.filter(w => wUsd(w) == null), walEnde = walFertig || zeitAb
+      const bereit = !!d && fx != null && (walGeladen > 0 || walEnde || !wallets.length)
+      const ww = $('liq-wal-warn')
+      if(ww){
+        let txt = ''
+        if(walEnde && fehlend.length){
+          // eine Ursache: die häufigste Chain + Fehler der fehlenden Wallets; ohne Antwort = Zeitgrenze
+          const je = new Map()
+          // Browser-Fehlertexte in Klartext (die Wallet-Zeile unten zeigt weiter den Originaltext)
+          const klar = e => /Unexpected token|JSON|json/.test(e) ? 'Endpunkt liefert keine Daten (Fehlerseite)' : /Failed to fetch|NetworkError|Load failed/i.test(e) ? 'Endpunkt nicht erreichbar'
+            : /429|rate|Too Many/i.test(e) ? 'Endpunkt drosselt (429)' : String(e).slice(0, 90)
+          for(const w of fehlend){ const e = walBal.get(w.id)?.err; const k = (WAL_CHAINS[w.chain]?.label || w.chain) + ': ' + (e ? klar(String(e)) : `keine Antwort nach ${LIQ_WAL_GRENZE_MS / 1000} s`); je.set(k, (je.get(k) || 0) + 1) }
+          const top = [...je.entries()].sort((a, b) => b[1] - a[1])
+          txt = `Wallets nicht erreichbar: ${top[0][0]}${top.length > 1 ? ` (+ ${top.length - 1} weitere Ursache${top.length > 2 ? 'n' : ''})` : ''} — Summe ohne ${fehlend.length} Wallet${fehlend.length === 1 ? '' : 's'}`
+        }
+        ww.hidden = !txt; ww.textContent = txt
+      }
       const topfSumme = liqZahl(d && d.summe_kunden_eur)
       const walEurSumme = zeilen.reduce((a, z) => a + (z.walEur ?? 0), 0)
       const gesamt = bereit ? walEurSumme + (topfSumme ?? 0) : null
@@ -16415,7 +16437,7 @@
       const unterwegs = d ? ((d.pending || []).filter(x => liqSichtbar(x.user_id) && (!x.status || x.status === 'pending'))
         .reduce((a, x) => a + (liqZahl(x.betrag_eur) ?? 0), 0)) : null
       $('liq-k-gesamt').textContent = liqEurF(gesamt)
-      $('liq-k-gesamt-sub').textContent = bereit ? `Wallets ${liqEurF(walEurSumme)} + Töpfe ${liqEurF(topfSumme ?? 0)}`
+      $('liq-k-gesamt-sub').textContent = bereit ? `Wallets ${liqEurF(walEurSumme)} + Töpfe ${liqEurF(topfSumme ?? 0)}` + (fehlend.length ? (walEnde ? ` · ohne ${fehlend.length} Wallet${fehlend.length === 1 ? '' : 's'}` : ` · lädt noch ${fehlend.length}`) : '')
         : (liqFehler ? 'Backend fehlt' : walGeladen ? 'lädt Kunden-Töpfe…' : 'lädt Wallets…')
       $('liq-k-eigen').textContent = liqEurF(bereit ? gesamt - kundengeld : null)
       $('liq-k-eigen-sub').textContent = bereit && gesamt ? `${Math.round((gesamt - kundengeld) / gesamt * 100)} % vom Gesamt` : 'gesamt − Kundengeld'
@@ -16515,6 +16537,7 @@
       // Feed erst nach den Balances — beide reden mit TronGrid (1 Req/s keyless)
       walLoad().then(walRefreshBalances).then(() => walFeedLoad(false))
       liqLaden()   // Liquide Mittel (09.10.2026): Kunden-Töpfe + Kunden-Flags vom Backend, parallel zu den Chains
+      liqStart = Date.now(); setTimeout(() => liqRender(), LIQ_WAL_GRENZE_MS + 100)   // Zeitgrenze für die Wallets (s. LIQ_WAL_GRENZE_MS)
     }
 
     async function walLoad(){
@@ -42715,7 +42738,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1409'
+  const OS_TAB_BUILD = '2026-09-22.1410'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
