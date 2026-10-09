@@ -33,9 +33,11 @@ def lade(fake_requests):
     i = src.index("class SupabaseGesperrt(")
     klasse = src[i:src.find("\n\n\n", i)]
     ns = {"requests": fake_requests, "threading": threading, "time": time, "SUPABASE_URL": "https://beispiel.invalid",
-          "SUPABASE_SERVICE_KEY": "x", "_sb_headers": lambda prefer=None: {}}
-    code = "\n".join([zuweisung(n) for n in ("SB_BREMSE_N", "SB_BREMSE_STUFEN", "SB_BREMSE_HALB_S", "SB_TIMEOUT", "SB_PROBE_TIMEOUT")]
-                     + [klasse] + [block(n) for n in ("sb_bremse_neu", "sb_bremse_vorher", "sb_bremse_nach")]
+          "SUPABASE_SERVICE_KEY": "x", "_sb_headers": lambda prefer=None: {},
+          "_SB_SESSION": fake_requests}   # seit 09.10.2026 geht alles über die Pool-Session — hier das gestellte requests
+    code = "\n".join([zuweisung(n) for n in ("SB_BREMSE_N", "SB_BREMSE_STUFEN", "SB_BREMSE_HALB_S", "SB_TIMEOUT", "SB_PROBE_TIMEOUT",
+                                                      "SB_CONNECT_S", "SB_GET_PAUSE_S")]
+                     + [klasse, block("sb_timeout"), block("sb_wiederholbar")] + [block(n) for n in ("sb_bremse_neu", "sb_bremse_vorher", "sb_bremse_nach")]
                      + ['_SB_BREMSE = {"rest": sb_bremse_neu(), "auth": sb_bremse_neu()}', "_SB_BREMSE_LOCK = threading.Lock()",
                         '_SB_GEHEILT_AT = {"rest": 0.0, "auth": 0.0}']
                      + [block(n) for n in ("_sb_bremse_melden", "schleifen_pause", "_ist_db_fehler", "sb_bremse_stand",

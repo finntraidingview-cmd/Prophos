@@ -25269,6 +25269,9 @@
       const ctrl = new AbortController(), tm = setTimeout(() => ctrl.abort(), 20000)
       const r = await fetch(`${WATCHER_HOME}/admin/live-trades?tage=1&nur_eigene=1&status=open`, { headers: { 'sb-token': tok }, cache: 'no-store', signal: ctrl.signal }).finally(() => clearTimeout(tm))
       const d = r.ok ? await r.json().catch(() => null) : null
+      // STAND ALT (09.10.2026, Netz-Aussetzer im Railway-Container): das Backend liefert bei Supabase-Ausfall den letzten guten Stand
+      // (stand_alt) — der ist nur zum Anschauen, hier würde er Pläne beenden/patchen. Diese Runde auslassen, der nächste Takt liest frisch.
+      if(d && d.stand_alt) return
       for(const t of ((d && d.trades) || [])){
         const pid = String(t.id || t.plan_id || ''), dm = t.demo || {}
         const p = offen.find(x => String(x.id) === pid); if(!p) continue
@@ -28978,7 +28981,7 @@
     // wdlLiveTick alle 2 s nach; die Minuten-Texte („Nachlesung in n min") hält der Neuaufbau spätestens alle 60 s frisch.
     // Echo-Live-Werte (Kurs ≈, P&L, Alter) ändern sich bei jedem Abruf — sie zählen nicht zur Signatur, wdlEchoLive schreibt sie nach
     const ohneEchoLive = t => Object.assign({}, t, wdlIstEcho(t) ? { kurs_jetzt: null, pl_live: null, mt5_alter_s: null, konto_balance: null, konto_balance_at: null } : {}, { slave_pl_live: null })
-    const sig = JSON.stringify([((wdl.daten && wdl.daten.trades) || []).map(ohneEchoLive), wdl.fehler])
+    const sig = JSON.stringify([((wdl.daten && wdl.daten.trades) || []).map(ohneEchoLive), wdl.fehler, (wdl.daten && wdl.daten.stand_alt) ? wdl.daten.stand_at : ''])
     if(!voll && sig === wdl.sig && Date.now() - (wdl.renderAt || 0) < 60000){ wdlEchoLive(); wdlFusionLive(); return }
     // Offenes Notiz-Feld (Manuelle Arbeit, 08.10.2026): der Takt baut die Liste nicht neu, sonst ginge das Getippte verloren
     if(!voll && _wdlManNotiz && document.querySelector('#wdl-liste [data-wdl-man-notiz]')){ wdlEchoLive(); wdlFusionLive(); return }
@@ -29172,6 +29175,9 @@
     const d = _hand.d, ich = String(currentUserId || ''), adm = typeof apdAdmin === 'function' && apdAdmin()
     if(!d){ body.innerHTML = `<div class="hand-leer">${_hand.fehler ? 'Nicht ladbar: ' + escapeHtml(_hand.fehler) : 'Lade …'}</div>`; return }
     if(kopf) kopf.textContent = d.n ? `· ${d.n}` : ''
+    // Letzter guter Stand (09.10.2026: Server erreichte Supabase kurz nicht → stand_alt + stand_at statt 502) — kleine Zeile, nur Anzeige
+    const standAt = d.stand_alt ? new Date(d.stand_at || '') : null
+    const standZeile = standAt && !isNaN(standAt) ? `<div style="font-size:12px;color:#B45309;margin-bottom:6px">Stand ${standAt.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} (Server konnte Datenbank kurz nicht erreichen)</div>` : ''
     const typW = x => (typeof typeLabel === 'function' && typeLabel(x)) || String(x || '')
     const de = v => Math.round(Number(v)).toLocaleString('de-DE')
     const tagTxt = iso => { const t = new Date(iso); return isNaN(t) ? '' : t.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) }
@@ -29215,7 +29221,7 @@
       }).join('')
       return `<div class="hand-gr"><h4>${titel} · ${liste.length}</h4>${zeilen}</div>`
     }).join('')
-    body.innerHTML = teile || '<div class="hand-leer">Nichts zu tun.</div>'
+    body.innerHTML = standZeile + (teile || '<div class="hand-leer">Nichts zu tun.</div>')
   }
   function handZu(){ document.getElementById('handModal')?.classList.remove('open') }
   document.getElementById('tb-hand')?.addEventListener('click', () => {
@@ -29617,8 +29623,12 @@
     // nichts"): Statistik-Zeile und Legende entfallen, die Gruppen zählen selbst. Der Kopf erscheint nur noch, wenn das Neuladen
     // scheitert, während alte Zeilen stehen (sonst sähe ein eingefrorener Stand frisch aus); ohne Zeilen sagt es die Liste.
     const kopfFehler = !!(wdl.fehler && alleTrades.length)
-    kopf.style.display = kopfFehler ? '' : 'none'
-    kopf.innerHTML = kopfFehler ? `<span style="font-size:12px;color:#B45309">Nicht aktualisiert: ${escapeHtml(wdl.fehler)}</span>` : ''
+    // Letzter guter Stand vom Backend (09.10.2026: Server erreichte Supabase kurz nicht → stand_alt + stand_at statt 502) — nur Anzeige
+    const standAlt = !kopfFehler && wdl.daten && wdl.daten.stand_alt ? new Date(wdl.daten.stand_at || '') : null
+    const standTxt = standAlt && !isNaN(standAlt) ? `Stand ${standAlt.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} (Server konnte Datenbank kurz nicht erreichen)` : ''
+    kopf.style.display = (kopfFehler || standTxt) ? '' : 'none'
+    kopf.innerHTML = kopfFehler ? `<span style="font-size:12px;color:#B45309">Nicht aktualisiert: ${escapeHtml(wdl.fehler)}</span>`
+      : standTxt ? `<span style="font-size:12px;color:#B45309">${escapeHtml(standTxt)}</span>` : ''
     // ZEILE (30.09.2026, Finn: „Warum Balance vorher, live, Liquidation, Kontogröße unbekannt …? So viele unnötige Sachen"): nur, was
     // man zum Handeln braucht, je Wert EINE Angabe, die Spaltenköpfe einmal je Gruppe. Raus aus der Anzeige: Balance vorher/live/
     // nachher, „beim Start nicht gelesen", Kontogröße, „noch X Pkt", TP in $, Demo-Sätze, Nachlesungs-Zeile. Seit der zweiten Runde

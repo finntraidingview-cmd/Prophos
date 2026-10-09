@@ -2893,8 +2893,58 @@ def _sb_headers(prefer=None):
 SB_BREMSE_N = 4
 SB_BREMSE_STUFEN = (30, 60, 120)
 SB_BREMSE_HALB_S = 5               # Rückmeldung an Wartende, während die Probe läuft (Retry-After nie 0)
-SB_TIMEOUT = (5, 12)               # Verbindungsaufbau / Lesen — vorher 12 s je Phase
+SB_TIMEOUT = (3, 12)               # Verbindungsaufbau / Lesen — vorher 12 s je Phase, seit 09.10.2026 Aufbau 3 s (s. u.)
 SB_PROBE_TIMEOUT = (3, 5)
+# ══ SUPABASE-VERBINDUNGEN (09.10.2026, Befund Prüfer T3: Railway-Container hatte heute drei Aussetzer — 09:01, 12:13, 13:11 UTC —,
+# in denen JEDER ausgehende Verkehr 6–13 s stand, auch DNS; Supabase selbst war schnell. Folge: ReadTimeout → 502 auf
+# /admin/live-trades und /admin/handarbeit, Auto-Planer „Trade-Verlauf nicht lesbar"). Bis dahin machte jeder Aufruf eine neue
+# DNS-Abfrage + TLS-Verbindung (requests.request ohne Session) — genau das, was im Aussetzer hängt. Jetzt:
+#   - EINE Session je Prozess mit Pool (Keep-Alive): die meisten Aufrufe brauchen weder DNS noch TLS-Aufbau. Cookies aus (geteilter
+#     Jar über 48 Threads wäre gemeinsamer Zustand ohne Nutzen — PostgREST/Auth brauchen keine). max_retries 0: urllib3 wiederholt nie
+#     selbst, auch nicht beim Verbindungsaufbau.
+#   - Verbindungsaufbau höchstens SB_CONNECT_S, Lesen wie bisher (je Aufrufer).
+#   - Nur GET (reine Lesung) wird nach Timeout/Verbindungsfehler GENAU EINMAL nach SB_GET_PAUSE_S wiederholt. POST/PATCH/DELETE und
+#     jede RPC (immer POST) NIE — eine Schreibung, die nur beim Lesen der Antwort hing, wäre sonst doppelt.
+SB_CONNECT_S = 3.0
+SB_GET_PAUSE_S = 0.7
+SB_POOL_N = 20
+
+
+def sb_session_neu():
+    """requests.Session mit Pool für Supabase (REST, RPC, Auth) — eine je Prozess (gunicorn --workers 1 --threads 48)."""
+    import http.cookiejar
+    s = requests.Session()
+    s.cookies.set_policy(http.cookiejar.DefaultCookiePolicy(allowed_domains=[]))
+    adapter = requests.adapters.HTTPAdapter(pool_connections=4, pool_maxsize=SB_POOL_N, max_retries=0)
+    s.mount("https://", adapter)
+    s.mount("http://", adapter)
+    return s
+
+
+class _PoolVollFilter(logging.Filter):
+    # Mehr als SB_POOL_N gleichzeitige Aufrufe (48 Threads) sind normal: die überzähligen Verbindungen werden danach geschlossen —
+    # wie vor dem Pool. Die urllib3-Warnung dazu würde das Log in jeder Lastspitze fluten.
+    def filter(self, record):
+        return "Connection pool is full" not in str(record.msg)
+
+
+logging.getLogger("urllib3.connectionpool").addFilter(_PoolVollFilter())
+_SB_SESSION = sb_session_neu()
+
+
+def sb_timeout(timeout):
+    """Zeitlimit des Aufrufers → (Aufbau ≤ SB_CONNECT_S, Lesen wie übergeben). Zahl = Lesen; Tupel = (Aufbau, Lesen)."""
+    t = timeout or SB_TIMEOUT
+    if isinstance(t, (tuple, list)):
+        return (min(float(t[0]), SB_CONNECT_S), t[1])
+    return (SB_CONNECT_S, t)
+
+
+def sb_wiederholbar(methode, e):
+    """True nur für GET nach Timeout/Verbindungsfehler — nie für Schreibungen/RPC, nie für die offene Sicherung."""
+    if str(methode or "").upper() != "GET" or isinstance(e, SupabaseGesperrt):
+        return False
+    return isinstance(e, (requests.exceptions.Timeout, requests.exceptions.ConnectionError))
 
 
 class SupabaseGesperrt(requests.exceptions.ConnectionError):
@@ -3007,10 +3057,10 @@ def _sb_probe(dienst):
     """Mini-Probe mit kurzem Zeitlimit — True, wenn der Dienst überhaupt antwortet (< 500). Wirft nie."""
     try:
         if dienst == "auth":
-            r = requests.get(f"{SUPABASE_URL}/auth/v1/health", headers={"apikey": SUPABASE_SERVICE_KEY}, timeout=SB_PROBE_TIMEOUT)
+            r = _SB_SESSION.get(f"{SUPABASE_URL}/auth/v1/health", headers={"apikey": SUPABASE_SERVICE_KEY}, timeout=SB_PROBE_TIMEOUT)
         else:
-            r = requests.get(f"{SUPABASE_URL}/rest/v1/wd_farmer_regeln", params={"select": "id", "limit": "1"},
-                             headers=_sb_headers(), timeout=SB_PROBE_TIMEOUT)
+            r = _SB_SESSION.get(f"{SUPABASE_URL}/rest/v1/wd_farmer_regeln", params={"select": "id", "limit": "1"},
+                                headers=_sb_headers(), timeout=SB_PROBE_TIMEOUT)
         return r.status_code < 500
     except Exception:
         return False
@@ -3036,12 +3086,21 @@ def _sb_anfrage(methode, url, dienst="rest", kritisch=False, timeout=None, **kw)
             _sb_bremse_melden(dienst, ok, probe=True, fehler="" if ok else "probe")
         if not ok:
             raise SupabaseGesperrt(sb_bremse_rest_s(dienst), dienst)
-    try:
-        r = requests.request(methode, url, timeout=timeout or SB_TIMEOUT, **kw)
-    except requests.exceptions.RequestException as e:
-        _sb_bremse_melden(dienst, False, fehler=type(e).__name__)
-        e.sb_netz = True
-        raise
+    # Nur GET bekommt einen zweiten Versuch (09.10.2026, Container-Aussetzer 6–13 s) — und nicht, wenn die Sicherung inzwischen
+    # offen ist (dann wartet niemand doppelt). Der Bremse wird nur das Endergebnis gemeldet: ein gelungener 2. Versuch ist kein Fehler.
+    versuche = 2 if str(methode or "").upper() == "GET" else 1
+    for n in range(versuche):
+        try:
+            r = _SB_SESSION.request(methode, url, timeout=sb_timeout(timeout), **kw)
+            break
+        except requests.exceptions.RequestException as e:
+            if n + 1 < versuche and sb_wiederholbar(methode, e) and (kritisch or sb_bremse_rest_s(dienst) <= 0):
+                print(f"[supabase] GET {type(e).__name__} — zweiter Versuch in {SB_GET_PAUSE_S} s: {url.split('?')[0][-60:]}", flush=True)
+                time.sleep(SB_GET_PAUSE_S)
+                continue
+            _sb_bremse_melden(dienst, False, fehler=type(e).__name__)
+            e.sb_netz = True
+            raise
     _sb_bremse_melden(dienst, r.status_code < 500, fehler=f"http {r.status_code}")
     return r
 
@@ -11828,6 +11887,37 @@ def _lt_echo_zeile(p, acc, disp, live_je_login, firm_sym, jetzt_ts, vorher=None)
     return z
 
 
+# LETZTER GUTER STAND (09.10.2026, Befund Prüfer T3: drei Netz-Aussetzer im Railway-Container, 6–13 s ohne ausgehenden Verkehr →
+# 502 auf /admin/live-trades und /admin/handarbeit, Radar und Handarbeit-Popup leer bzw. „Nicht ladbar"). Jede erfolgreiche Antwort
+# dieser zwei Routen wird je Schlüssel (Login/Sicht + Parameter) gemerkt; scheitert eine Lesung an Supabase (sb_netz: Timeout nach dem
+# GET-Wiederholer, Verbindungsfehler, 5xx, offene Sicherung), kommt der gemerkte Stand mit HTTP 200 und stand_alt: true + stand_at —
+# höchstens STAND_ALT_MAX_S alt, sonst wie bisher 502. Andere Fehler (Code) nie: die sollen sichtbar bleiben.
+STAND_ALT_MAX_S = 30 * 60
+STAND_ALT_MAX_N = 120
+_STAND_ALT = {}
+_STAND_ALT_LOCK = threading.Lock()
+
+
+def stand_alt_merken(schluessel, antwort, jetzt=None):
+    jetzt = time.time() if jetzt is None else jetzt
+    with _STAND_ALT_LOCK:
+        _STAND_ALT[schluessel] = (jetzt, antwort)
+        if len(_STAND_ALT) > STAND_ALT_MAX_N:   # ältesten Eintrag verwerfen (Schlüssel je Login × Parameter)
+            del _STAND_ALT[min(_STAND_ALT, key=lambda k: _STAND_ALT[k][0])]
+
+
+def stand_alt_holen(schluessel, fehler, jetzt=None):
+    """→ Kopie des letzten guten Stands mit stand_alt/stand_at, oder None (kein DB-Fehler, nichts gemerkt oder zu alt)."""
+    if not getattr(fehler, "sb_netz", False):
+        return None
+    jetzt = time.time() if jetzt is None else jetzt
+    with _STAND_ALT_LOCK:
+        e = _STAND_ALT.get(schluessel)
+    if not e or jetzt - e[0] > STAND_ALT_MAX_S:
+        return None
+    return dict(e[1], stand_alt=True, stand_at=datetime.fromtimestamp(e[0], timezone.utc).isoformat())
+
+
 @app.route("/admin/live-trades", methods=["GET", "OPTIONS"])
 def admin_live_trades():
     """GET /admin/live-trades?tage=2 → {jetzt, trades:[…]} — alle Orbit-V2-Pläne (route tvv2) aller IDs: laufend, geplant, in
@@ -11840,6 +11930,8 @@ def admin_live_trades():
     me, err = _wd_login()
     if err:
         return err
+    # Schlüssel für den letzten guten Stand: Login + alle Parameter (nur_eigene, ansicht, gruppe … ändern die Antwort)
+    lt_schluessel = ("live-trades", str(me), tuple(sorted((k, str(v)) for k, v in request.args.items(multi=True))))
     try:
         tage = max(1, min(14, int(request.args.get("tage") or 2)))
         # F21 (27.09.2026): jeder PC-Tab fragt alle 55–70 s ?tage=1&nur_eigene=1&status=open — Last klein halten
@@ -11972,9 +12064,15 @@ def admin_live_trades():
         for z in trades:
             if z.get("plattform") != "echo":     # Echo trägt seinen eigenen (CFD-)Kurs aus lt_echo_felder
                 z["kurs_jetzt"] = kj.get(z.get("symbol_root") or "")
-        return jsonify({"jetzt": datetime.now(timezone.utc).isoformat(), "tage": tage, "kurs_jetzt": kj, "trades": trades})
+        antwort = {"jetzt": datetime.now(timezone.utc).isoformat(), "tage": tage, "kurs_jetzt": kj, "trades": trades}
+        stand_alt_merken(lt_schluessel, antwort)
+        return jsonify(antwort)
     except Exception as e:
         print(f"[live-trades] ⚠️ {type(e).__name__}: {e}", flush=True)
+        alt = stand_alt_holen(lt_schluessel, e)
+        if alt is not None:
+            print(f"[live-trades] ↺ letzter guter Stand von {alt['stand_at']} geliefert", flush=True)
+            return jsonify(alt)
         return jsonify({"error": f"Live Trades nicht ladbar ({type(e).__name__}: {e})"}), 502
 
 
@@ -12397,9 +12495,14 @@ def admin_handarbeit():
                    "planer_gelesen": gelesen}
     except Exception as e:
         print(f"[handarbeit] ⚠️ {type(e).__name__}: {e}", flush=True)
+        alt = stand_alt_holen(("handarbeit", schluessel), e)    # Supabase kurz weg (09.10.2026) → letzter guter Stand dieser Sicht
+        if alt is not None:
+            print(f"[handarbeit] ↺ letzter guter Stand von {alt['stand_at']} geliefert", flush=True)
+            return jsonify(alt)
         return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 502
     with _hand_lock:
         _hand_cache[schluessel] = (time.time() + HAND_CACHE_S, antwort)
+    stand_alt_merken(("handarbeit", schluessel), antwort)
     return jsonify(antwort)
 
 
