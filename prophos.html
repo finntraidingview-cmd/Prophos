@@ -43225,7 +43225,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1445'
+  const OS_TAB_BUILD = '2026-09-22.1446'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -44723,6 +44723,36 @@
              beschr: `${p.symbol || ''} ${Number(p.type) === 0 ? 'buy' : 'sell'} ${p.volume || ''}`.trim() }
   }
 
+  /* Nachzügler-Riegel vor dem Close-Signal (Routine „Puls-Fehler" 10.10.2026; Muster „close: keine offene
+   * master-position gefunden (copier-daten frisch? trade evtl. schon zu)" + „plan läuft nicht (status: review)":
+   * 3 Fälle am 09.10. auf 2 PCs, je 3–22 s nach einem schon fertigen Close desselben Plans). Ursache: die Karte
+   * zeigt bis zur Ende-Erkennung weiter „Läuft" mit „Schließen", das Popup geht nach dem Erfolg von selbst zu —
+   * ein zweiter Klick schickte ein neues Signal, das der PC richtig ablehnte (nichts zu schließen) und das als
+   * Fehlstart zählte. Sieht VOR dem Senden das letzte close-Signal des Plans an: läuft es noch ('wartet'/'laeuft'),
+   * hängt sich das Popup daran statt ein zweites zu schicken; war es binnen 10 min erfolgreich ('fertig', ok),
+   * zeigt das Popup dieses Ergebnis und schickt nichts. Sonst null → Signal wie bisher. Kein Riegel am PC wird
+   * dadurch lockerer — der PC prüft weiterhin lesend. fertigUi = Abschluss-Zeile des aufrufenden Popups. */
+  async function osCloseNachzuegler(planId, fertigUi){
+    let letzt = null
+    try{
+      const { data } = await supabase.from('order_signale').select('*')
+        .eq('plan_id', String(planId)).order('created_at', { ascending:false }).limit(6)
+      letzt = (data || []).find(r => String((r.params || {}).aktion || '') === 'close') || null
+    }catch(_){ return null }
+    if(!letzt) return null
+    if(letzt.status === 'wartet' || letzt.status === 'laeuft') return { laeuft:true, sig: letzt }
+    const erg = letzt.ergebnis || {}
+    const alter = Date.now() - (Date.parse(letzt.updated_at || letzt.created_at) || 0)
+    if(letzt.status !== 'fertig' || !erg.ok || alter > 10 * 60 * 1000) return null
+    const um = new Date(letzt.updated_at || letzt.created_at).toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' })
+    _pfSet('cs-sig', 'ok', `kein neues Signal — Close <span class="mono">#${escapeHtml(String(letzt.id).slice(0, 8))}</span> war um ${um} schon fertig`)
+    _pfSet('cs-claim', 'ok', `PC <span class="mono">${escapeHtml(String(letzt.pc || '?'))}</span>`)
+    _pfSet('cs-close', 'ok', escapeHtml(String(erg.msg || 'Position geschlossen.')))
+    if(typeof fertigUi === 'function') fertigUi(true, `✓ Puls hat die Position um ${um} schon geschlossen — nichts erneut gesendet, die Ende-Erkennung übernimmt.`)
+    try{ loadTradePlansFromSupabase() }catch(_){}
+    return { fertig:true, sig: letzt }
+  }
+
   async function tpPlanSchliessen(planId){
     const plan = tradePlans.find(x => String(x.id) === String(planId))
     if(!plan || plan.status !== 'open' || plan.route !== 'mt5') return
@@ -44806,7 +44836,10 @@
     _pfAddRow('cs-close', 'Puls schließt die Position')
     const zu = () => !document.getElementById('tpPreflightModal')?.classList.contains('open')
     let sig = null
-    try{
+    const nz = await osCloseNachzuegler(plan.id, fertigUi)   // Nachzügler-Riegel (10.10.2026), siehe osCloseNachzuegler
+    if(nz && nz.fertig) return
+    if(nz && nz.laeuft) sig = nz.sig
+    else try{
       const { data, error } = await supabase.from('order_signale')
         .insert({ plan_id: String(plan.id), params: { aktion: 'close', symbol } })
         .select('*').single()
@@ -44817,8 +44850,10 @@
       fertigUi(false, '✗ Nichts gesendet — Verbindung prüfen, dann erneut „Schließen".')
       return
     }
-    _pfSet('cs-sig', 'ok', `Close-Signal in der Cloud <span class="mono">#${escapeHtml(String(sig.id).slice(0, 8))}</span>`)
-    _rsAktiv = { sigId: sig.id, timer: null, t0: Date.now() }
+    _pfSet('cs-sig', 'ok', nz && nz.laeuft
+      ? `Close-Signal läuft schon <span class="mono">#${escapeHtml(String(sig.id).slice(0, 8))}</span> — kein zweites gesendet`
+      : `Close-Signal in der Cloud <span class="mono">#${escapeHtml(String(sig.id).slice(0, 8))}</span>`)
+    _rsAktiv = { sigId: sig.id, timer: null, t0: (nz && nz.laeuft && Date.parse(sig.created_at)) || Date.now() }
     const stornoFallsWartet = () => {
       supabase.from('order_signale')
         .update({ status:'verworfen', updated_at: new Date().toISOString(),
@@ -45232,7 +45267,10 @@
     _pfAddRow('cs-close', istEcho ? 'Puls schließt im Terminal' : 'Puls schließt in TradingView')
     const zu = () => !document.getElementById('tpPreflightModal')?.classList.contains('open')
     let sig = null
-    try{
+    const nz = await osCloseNachzuegler(plan.id, fertigUi)   // Nachzügler-Riegel (10.10.2026), siehe osCloseNachzuegler
+    if(nz && nz.fertig) return
+    if(nz && nz.laeuft) sig = nz.sig
+    else try{
       const { data, error } = await supabase.from('order_signale')
         .insert({ plan_id: String(plan.id), params: { aktion: 'close', v2: plan.route, symbol, konto: istEcho ? null : tvV2Konto(plan) } })
         .select('*').single()
@@ -45243,8 +45281,10 @@
       fertigUi(false, '✗ Nichts gesendet — Verbindung prüfen, dann erneut „Schließen".')
       return
     }
-    _pfSet('cs-sig', 'ok', `Close-Signal in der Cloud <span class="mono">#${escapeHtml(String(sig.id).slice(0, 8))}</span>`)
-    _rsAktiv = { sigId: sig.id, timer: null, t0: Date.now() }
+    _pfSet('cs-sig', 'ok', nz && nz.laeuft
+      ? `Close-Signal läuft schon <span class="mono">#${escapeHtml(String(sig.id).slice(0, 8))}</span> — kein zweites gesendet`
+      : `Close-Signal in der Cloud <span class="mono">#${escapeHtml(String(sig.id).slice(0, 8))}</span>`)
+    _rsAktiv = { sigId: sig.id, timer: null, t0: (nz && nz.laeuft && Date.parse(sig.created_at)) || Date.now() }
     const stornoFallsWartet = () => {
       supabase.from('order_signale')
         .update({ status:'verworfen', updated_at: new Date().toISOString(),
