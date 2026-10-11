@@ -22437,11 +22437,15 @@ def admin_auto_plan_ids():
         e.update(sieben.get(e["user_id"]) or {k: (0 if sieben.get("_ok", {}).get(k) else None) for k in ("bestanden_7t", "geblasen_7t", "beendet_7t")})
     # ZU BESTÄTIGEN (Finn 08.10.2026): alle unbestätigten Auto-Vorschläge aller IDs, egal welcher Tag (heute/morgen) — das Delta kennt
     # nur den heutigen Tag, die Nacht plant aber schon den nächsten. Bestätigt wird über /admin/auto-plan/bestaetigen (alle IDs).
-    offen = []
+    # WARTET AUF START (12.10.2026, Finn-Screenshot .1446 um 01:54 Dubai: 45 Pläne bestätigt, Block zeigte „Wartet auf Start · 0"): das
+    # Frontend wartet seit 08.10. auf bestaetigt[] (apIdsLaden) — ohne die Liste kannte es bestätigte Pläne nur aus dem Delta (heute deutscher
+    # Zeit) und dem lokalen Merker, der beim Neuladen weg ist. Nach Mitternacht Dubai starten alle Pläne „morgen" → Block leer. Jetzt dieselbe
+    # Abfrage für bestätigte, noch nicht gestartete Auto-Pläne, gleiche Zeilenform; bei Fehler null (Frontend behält dann den alten Stand).
+    offen, bestaetigt = [], []
     try:
         seit = (datetime.now(timezone.utc) - timedelta(hours=12)).isoformat()
-        pl = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_firm,master_name,richtung,route,start_um,master_contracts,master_tp,master_sl,notes",
-                                     "status": "eq.planned", "auto_plan": "eq.true", "auto_bestaetigt_at": "is.null", "start_um": "gte." + seit,
+        pl = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_firm,master_name,richtung,route,start_um,master_contracts,master_tp,master_sl,notes,auto_bestaetigt_at",
+                                     "status": "eq.planned", "auto_plan": "eq.true", "start_um_gestartet_at": "is.null", "start_um": "gte." + seit,
                                      "order": "start_um.asc"})
         pl = [p for p in pl if (str(p.get("user_id")) in gruppe if gruppe
                                 else (ohne_aus or str(p.get("user_id")) not in aus) and admin_in_sicht(p.get("user_id"), lese_sicht))
@@ -22462,7 +22466,7 @@ def admin_auto_plan_ids():
         peaks = _ap_peaks(list(accs.values()))   # Höchststand für den geschätzten Boden (08.10.2026)
         for p in pl:
             a = accs.get(str(p.get("master_account_id")))
-            offen.append({"plan_id": str(p.get("id")), "user_id": str(p.get("user_id")), "user": namen.get(str(p.get("user_id")), str(p.get("user_id"))[:8]),
+            (bestaetigt if p.get("auto_bestaetigt_at") else offen).append({"plan_id": str(p.get("id")), "user_id": str(p.get("user_id")), "user": namen.get(str(p.get("user_id")), str(p.get("user_id"))[:8]),
                           "firma": (a or {}).get("firm") or p.get("master_firm"), "konto": (a or {}).get("name") or p.get("master_name"),
                           "ende4": _ap_ende4(a), "typ": (a or {}).get("account_type"), "richtung": p.get("richtung"), "route": p.get("route"),
                           "start_um": p.get("start_um"), "menge": _wd_num(p.get("master_contracts")),
@@ -22478,7 +22482,8 @@ def admin_auto_plan_ids():
                           **ap_boden_sicher(reg.get("firmen"), a, acc_balance_wahl(a, echo_bal, dup_bal)[0], peaks)})
     except Exception as e:
         print(f"[auto-plan] ⚠️ ids/offen: {type(e).__name__}: {e}", flush=True)
-    return jsonify({"ok": True, "ids": ids, "aktiv": bool(reg.get("aktiv")), "tag": tag, "offen": offen, "sieben_tage_ab": sieben_ab})
+        bestaetigt = None
+    return jsonify({"ok": True, "ids": ids, "aktiv": bool(reg.get("aktiv")), "tag": tag, "offen": offen, "bestaetigt": bestaetigt, "sieben_tage_ab": sieben_ab})
 
 
 def _ap_zahl(x):
