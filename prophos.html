@@ -13478,6 +13478,8 @@
     // dasselbe, aber ohne vorher den Admin betreten zu haben: admin_zugang (eigene Zeile, RLS) einmal je Login nachladen (Prüfer M1,
     // 08.10.2026) — die Schreib-Wächter im Farmer/Markt (wdDarf) fragen das, bevor sie Tagesplan-Zeilen anderer IDs anfassen
     // nicht prüfbar (admin_zugang nicht lesbar, Prüfer K4) → im Zweifel eingeschränkt, wie der Kommentar an wdNurGruppe sagt
+    // Kapitel je Login (12.10.2026): hat dieser Login einen eigenen Admin-Code (Emin)? — der Kapitel-Block stellt danach „Neue Ära" fest
+    window._admEigenerCode = async () => { try{ return !!(await eigenerCodeLaden()) }catch(_){ return false } }
     window._admNurGruppeLaden = async () => { try{ await eigenerCodeLaden() }catch(_){ return true } return eigenerCodeUnklar || admEingeschraenkt() || !!eigenerCode }
     function admGruppeChips(){
       const el = $('adm-gruppe-seg'); if(!el) return
@@ -43225,7 +43227,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1450'
+  const OS_TAB_BUILD = '2026-09-22.1451'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -57308,10 +57310,18 @@
   // Seit 06.10.2026 fest auf „Alle" (Finn: der Kapitel-Filter „bringt sehr viel Verwirrung rein" — Moritz'
   // Payout-Anfragen auf Hedge-Ära-Konten fehlten unter „Neue Ära"). Umschalter ist ausgeblendet; auch ein
   // Klick auf eine Kapitel-Karte im Admin darf den Filter nicht mehr unsichtbar umstellen.
-  function kapitelSetzen(_idOderAlle){ kapitelAnwenden('alle', false) }
+  // AUSNAHME EIGENER ADMIN-CODE (12.10.2026, Finn: Emin zeigte „Realisiert −12.000", Payouts im Minus): Emins Finanz-Neustart vom
+  // 27.09. (sql/2026-09-27_emin_neue_aera.sql) ist das Archiv Kapitel 1 — seit „fest auf Alle" zählte die alte Zeit wieder mit.
+  // Logins mit eigenem Admin-Code stehen deshalb fest auf „Neue Ära" (2); alle anderen bleiben auf „Alle". Nicht prüfbar → „Alle".
+  async function kapitelFuerLogin(){
+    let eigen = false
+    try{ eigen = typeof window._admEigenerCode === 'function' && await window._admEigenerCode() }catch(_){}
+    kapitelAnwenden(eigen && kapitelObj(2) ? 2 : 'alle', false)
+  }
+  function kapitelSetzen(_idOderAlle){ kapitelFuerLogin() }
   // Nach initialSyncFromSupabase (Cloud gewinnt) Umschalter + Renderer nachziehen
   function kapitelNachSync(){
-    kapitelAnwenden('alle', false)   // gespeicherter Wert zählt seit 06.10.2026 nicht mehr
+    kapitelFuerLogin()   // gespeicherter Wert zählt seit 06.10.2026 nicht mehr
   }
   // Tabelle kapitel laden — beim Login. Fehler oder leer → Fallback bleibt stehen.
   async function kapitelLaden(){
