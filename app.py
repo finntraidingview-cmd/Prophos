@@ -15279,7 +15279,7 @@ AP_KLEIN_PKT = 20                    # Rest in so vielen Punkten verdienen
 AP_KLEIN_PUFFER = (15, 20)           # $ über dem Rest (Zufall der Tranche)
 AP_KLEIN_SCHRITT = 0.01              # Lot-Schritt des Klein-Trades bei Lot-Firmen (menge_schritt < 1); FTMO/The5ers bleiben bei 1
 AP_KLEIN_TP_PKT_HINWEIS = 60         # TP weiter als 60 Pkt (Mindest-Lot zu groß) → trotzdem planen, Hinweis in der Notiz
-AP_PUFFER_PKT = 10                   # normaler letzter CFD-Trade: Puffer = 10 Pkt × Lots × $/Pkt (statt fester Firmen-Puffer)
+AP_PUFFER_PKT = 10                   # normaler letzter CFD-Trade: Puffer = 10 Pkt × Lots × $/Pkt ÷ 3 (statt fester Firmen-Puffer, ÷ 3 seit 12.10.2026)
 AP_GROESSE_TOLERANZ = 0.15           # Balance weiter als 15 % von jeder Regel-Größe weg → „stimmt was nicht"
 # Firmen, die der Planer still auslässt (kein „keine Regel"-Eintrag). Finn 06.10.2026: Fusion-Markets-Konten sind nur
 # Gegenhedge-Konten, auf ihnen wird nie ein Trade geplant — „Echo Demo (Master)" stand als phase1 jede Nacht im Protokoll
@@ -15668,9 +15668,9 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None):
         # PUFFER IN PUNKTEN (Finn 09.10.2026): Spread + Kommission + Schlupf wachsen mit den Lots — der feste Firmen-Puffer (FN 100 $)
         # reichte nicht. Beleg FN 08.10.2026: Rest 2.964 + 100 = TP 3.064 bei 2,8 Lots, Ergebnis +2.928 → 36 $ unter dem Ziel.
         # Gemessen bei TP-Treffern der letzten 14 Tage bis 5,6 Pkt Abweichung, 10 Pkt × Lots × $/Pkt hat Luft (FN 2,8 Lots → 280 $)
-        # ZURÜCK AUF DEN FIRMEN-PUFFER (Finn 12.10.2026, Admin „Zu bestätigen": FN 2,1 Lot → TP Rest + 210 $, The5ers 42 Lot → Rest + 420 $
-        # — „viel zu viel Puffer", The5ers soll 55–75 haben): der Puffer kommt wieder allein aus phasen.puffer der Firma (Kernwerte),
-        # die Punkte-Formel ist aus. AP_PUFFER_PKT bleibt nur als Konstante stehen (Selbsttests laden sie).
+        # ÷ 3 (Finn 12.10.2026, Admin „Zu bestätigen": FN 2,1 Lot → TP Rest + 210 $, The5ers 42 Lot → Rest + 420 $ — „viel zu hart berechnet …
+        # mach die Formel, nur das Ergebnis durch 3"; .1449 hatte kurz den Firmen-Puffer): FN 2,1 Lot → 70 $, The5ers 42 Lot → 140 $
+        puffer = round(AP_PUFFER_PKT * float(menge) * float(ppl) / 3)
         lo = float((ph.get("menge") or [0])[0]) * f
         if lo and rest < AP_KLEIN_PKT * lo * float(ppl):
             klein = ap_klein_trade(rest, ppl, ph.get("menge_schritt"), u["puffer"], ph.get("klein_puffer"))
