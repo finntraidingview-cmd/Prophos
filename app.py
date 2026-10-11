@@ -16362,6 +16362,32 @@ def ap_startwert_kandidat(a, echo_bal, dup_bal):
                 or ist_topstep_express(a))
 
 
+def _ap_login_zwillinge(konten):
+    """Konto-IDs aus `konten`, deren Login (external_id) schon an einem ÄLTEREN Konto-Eintrag hängt — kein frisches Konto, auch wenn der
+    neue Eintrag selbst weder Lesung noch Trade hat (Ina …4124, 12.10.2026; siehe ZWILLING-LOGIN in ap_planen). Lesefehler → None."""
+    je = {}
+    for a in konten or ():
+        lg = str(a.get("external_id") or "").strip()
+        if lg:
+            je.setdefault(lg, []).append(a)
+    if not je:
+        return set()
+    out = set()
+    try:
+        logins = sorted(je)
+        for i in range(0, len(logins), 100):
+            teil = logins[i:i + 100]
+            liste = "(" + ",".join('"' + x.replace('"', '') + '"' for x in teil) + ")"
+            for r in _sb_all("accounts", {"select": "id,external_id,created_at", "external_id": "in." + liste}):
+                for a in je.get(str(r.get("external_id") or "").strip(), ()):
+                    if str(r.get("id")) != str(a.get("id")) and str(r.get("created_at") or "") < str(a.get("created_at") or "9"):
+                        out.add(str(a.get("id")))
+    except Exception as e:
+        print(f"[auto-plan] ⚠️ Login-Zwillinge: {type(e).__name__}: {e}", flush=True)
+        return None
+    return out
+
+
 def _ap_konten_mit_trade(konto_ids):
     """Konto-IDs (Teilmenge von konto_ids), die je gehandelt wurden — in einem Plan als Master oder Slave, ohne Zeitgrenze
     (ap_planen liest nur 30 Tage; gestartet, Order gesendet, beendet oder Status open/review/completed), oder von Hand ohne Plan
@@ -16387,7 +16413,7 @@ def _ap_konten_mit_trade(konto_ids):
 
 AP_KONTO_FELDER = ("id,user_id,name,firm,account_type,external_id,max_drawdown,starting_balance,account_size,topstep_balance,topstep_last_check,"
                    "meta_api_balance,meta_api_last_check,tv_balance,tv_balance_at,consistency_pct,ziel_pct_konto,auto_planer,"
-                   "goal_kind,goal_target,goal_done_offset,goal_since")   # Mindesttage → Tage sammeln (09.10.2026)
+                   "goal_kind,goal_target,goal_done_offset,goal_since,ziel_erreicht_at,created_at")   # Mindesttage → Tage sammeln (09.10.2026); Ziel-Wache-Riegel (12.10.2026)
 AP_KONTO_FELDER_OHNE_CONS = AP_KONTO_FELDER.replace(",consistency_pct", "")
 
 
@@ -18517,6 +18543,14 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     _ohne_bal = [a["id"] for a in konten if str(a["id"]) not in archiv and (not nachplanen or str(a["id"]) in nur_set)
                  and acc_balance_wahl(a, echo_bal, dup_bal)[0] is None]
     _gehandelt = _ap_konten_mit_trade(_ohne_bal) if _ohne_bal else set()
+    # ZWILLING-LOGIN (12.10.2026, Finn-Screenshot Ina FundedNext …4124 „Ziel erreicht" mit Plan 12:03): Konto 1e0903e6 „100k funded next
+    # 14314124" hatte das Ziel am 08.10. erreicht, 21:16 UTC wurde für denselben Login ein zweiter Eintrag „100k bestanden (Trading tage
+    # sammeln) 14314124" angelegt — ohne eigene Lesung und ohne eigenen Trade galt er als frisch, der Nachtlauf 22:45 UTC rechnete mit dem
+    # Startwert 100.000 („Rest 5.000") statt der echten 108.055 und plante einen vollen Trade (die Start-Sperre hielt ihn 09.10. auf).
+    # Frisch heißt: der Login gehört keinem älteren Konto-Eintrag. Lesefehler → None (kein Startwert, wie _ap_konten_mit_trade).
+    if _gehandelt is not None and _ohne_bal:
+        _zwillinge = _ap_login_zwillinge([a for a in konten if str(a["id"]) in set(map(str, _ohne_bal))])
+        _gehandelt = None if _zwillinge is None else (_gehandelt | _zwillinge)
     ausgelassen, kandidaten = [], []
     for a in konten:
         aid, wer = str(a["id"]), namen.get(str(a["user_id"]), str(a["user_id"])[:8])
@@ -18533,6 +18567,14 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
         if a.get("auto_planer") is False:              # Haken im Konto aus (Finn 08.10.2026, accounts.auto_planer) — sichtbar ausgelassen
             ausgelassen.append(dict(zeile, grund="vom Auto-Planer ausgenommen (Haken im Konto aus)"))
             continue
+        # ZIEL ERREICHT = NIE PLANEN (Finn 12.10.2026: „Wenn ein Account als Ziel erreicht ist, dann soll dort nie im Leben ein Trade geplant
+        # werden"): Markierung der Ziel-Wache zählt vor jeder Balance-Rechnung — ein falscher Startwert oder eine alte Lesung kann sie nicht
+        # mehr überstimmen. Einzige Ausnahme bleibt der Mini-Trade „Tage sammeln" (Mindesttage fehlen, Finn über Master 09.10.2026).
+        if a.get("ziel_erreicht_at"):
+            _tg = ap_tage_ist(a, je_konto.get(aid, []))
+            if not (_tg and int(_tg[0]) < int(_tg[1])):
+                ausgelassen.append(dict(zeile, grund="Ziel erreicht (Ziel-Wache) — Phase umstellen, der Bot plant hier nie"))
+                continue
         regel = ap_regel_finden(firmen, a.get("firm"))
         if not regel or regel.get("planen") is False:      # planen:false = nur Kernwerte (Kontowert/Vorrat), z. B. Topstep, FTMO
             ausgelassen.append(dict(zeile, grund="keine Regel für diese Firma"))

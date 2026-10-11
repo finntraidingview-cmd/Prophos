@@ -27,6 +27,11 @@ FRISCH = {"id": "k-90", "user_id": sd.U1, "name": "Tradeify 150k", "firm": "Trad
 CFD = {"id": "k-91", "user_id": sd.U1, "name": "FN 100k Phase 1", "firm": "FundedNext", "account_type": "phase1", "external_id": "000091"}
 ALT = {"id": "k-92", "user_id": sd.U1, "name": "Tradeify 150k", "firm": "Tradeify", "account_type": "challenge", "external_id": "TDFY-000092"}
 GELESEN = {"id": "k-93", "user_id": sd.U1, "name": "Tradeify 150k", "firm": "Tradeify", "account_type": "challenge", "external_id": "TDFY-000093"}
+# Ina …4124 (12.10.2026): alter Eintrag mit Ziel erreicht + jüngerer Eintrag desselben Logins ohne Lesung/Trade
+ZW_ALT = {"id": "k-98", "user_id": sd.U1, "name": "FN 100k Phase 1", "firm": "FundedNext", "account_type": "phase1", "external_id": "000098",
+          "created_at": "2026-10-06T15:59:49+00:00", "ziel_erreicht_at": "2026-10-09T02:26:16+00:00"}
+ZW_NEU = {"id": "k-99", "user_id": sd.U1, "name": "FN 100k bestanden (Tage sammeln)", "firm": "FundedNext", "account_type": "phase1",
+          "external_id": "000098", "created_at": "2026-10-08T21:16:58+00:00"}
 OHNE = {"id": "k-94", "user_id": sd.U1, "name": "Tradeify Konto", "firm": "Tradeify", "account_type": "challenge", "external_id": "TDFY-X"}
 
 
@@ -84,7 +89,7 @@ def main():
 
         def _sb_all(table, params):
             if table == "accounts":
-                return basis_all(table, params) + [dict(k) for k in (FRISCH, CFD, ALT, GELESEN, OHNE)]
+                return basis_all(table, params) + [dict(k) for k in (FRISCH, CFD, ALT, GELESEN, OHNE, ZW_ALT, ZW_NEU)]
             if table == "trade_plans" and str(params.get("select") or "").endswith(",status,started_at,ended_at,orbit_gesendet_at"):   # nur _ap_konten_mit_trade
                 abfragen.append(params)
                 if verlauf_kaputt:
@@ -100,6 +105,10 @@ def main():
                 return None, None, None, ""
             if aid == "k-93":
                 return 151234.0, "USD", "TV", "2999-01-01"
+            if aid == "k-98":
+                return 108055.0, "USD", "TV", "2999-01-01"
+            if aid == "k-99":
+                return None, None, None, ""
             return basis_bal(acc, e, d)
         b.update(_sb_all=_sb_all, acc_balance_wahl=bal)
         erg = b["ap_planen"](tag_s, trocken=True, seed=4711)
@@ -121,6 +130,10 @@ def main():
     check(r.get("balance") == 151234 and r.get("bal_quelle") == "TV", f"echte Lesung schlägt den Startwert ({r.get('balance')}, {r.get('bal_quelle')})")
     check(str(aus.get("k-94")).startswith("keine Balance bekannt — Kontogröße nicht erkennbar"),
           f"ohne erkennbare Größe → „keine Balance bekannt — Kontogröße nicht erkennbar …\" ({aus.get('k-94')})")
+    check("k-98" not in gepl and str(aus.get("k-98")).startswith("Ziel erreicht (Ziel-Wache)"),
+          f"ziel_erreicht_at gesetzt → nie geplant, auch mit liver Balance ({aus.get('k-98')})")
+    check("k-99" not in gepl and str(aus.get("k-99")).startswith("keine Balance bekannt — Konto wurde schon gehandelt"),
+          f"jüngerer Eintrag eines schon benutzten Logins → kein Startwert (Ina …4124) ({aus.get('k-99')})")
     ids = " ".join(str(p.get("master_account_id") or p.get("slave_account_id")) for p in abfragen)
     check(all(k in ids for k in ("k-90", "k-91", "k-92", "k-94")) and "k-93" not in ids and "k-2," not in ids and "k-1," not in ids,
           f"Verlauf nur für Konten ohne Lesung abgefragt, Master + Slave ({len(abfragen)} Abfragen)")
