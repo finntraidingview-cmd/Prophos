@@ -12799,6 +12799,20 @@
     renderProfileMenu()
   }
 
+  /* NUR LOKAL ABMELDEN (12.10.2026, Finn: „ich werde fast täglich bei IDs ausgeloggt, die ich schon fünf-, sechsmal angemeldet habe"):
+   * signOut({ scope: 'local' }) schickt POST /logout?scope=local — Supabase LÖSCHT damit die aktuelle Sitzung auch auf dem Server. Beim
+   * ID-Wechsel hält der Client in dem Moment aber noch die Sitzung der ID, von der man KOMMT (eben in prophos_psession_ gesichert) → die war
+   * danach tot, der Wechsel zurück fragte wieder nach dem Passwort und löschte dabei die nächste (Auth-Log 11.10. 23:07:40 UTC logout Moritz,
+   * 23:08:01 logout Finn, je mit Passwort-Login dazwischen). Jetzt: Sitzung nur aus diesem Browser nehmen (_removeSession der gepinnten
+   * supabase-js 2.112.1: Speicher leeren + SIGNED_OUT → showLogin), der Token auf dem Server bleibt gültig. Bewusstes „Abmelden" unverändert. */
+  async function profNurLokalAbmelden(){
+    const a = supabase.auth
+    if(typeof a._removeSession === 'function'){ await a._removeSession(); return }
+    // Rückfall (andere supabase-js-Version ohne _removeSession): Auth-Speicher selbst leeren und neu laden — nie /logout
+    try{ for(const k of Object.keys(localStorage)) if(/^sb-.+-auth-token/.test(k)) localStorage.removeItem(k) }catch(_){}
+    location.reload()
+  }
+
   /* ID-WECHSEL MIT RIEGEL + RÜCKMELDUNG (29.09.2026, Finn am Handy: „ID wechseln hängt/buggt"): der Wechsel wartet auf zwei
    * Supabase-Aufrufe und lädt dann die ganze Seite neu — sekundenlang sah man nichts und tippte nochmal. Ein zweiter Lauf hätte
    * profSnapshotAndClear(alte ID) mit dem schon eingespielten Bucket der ZIEL-ID gemacht → Daten zweier IDs vermischt. Jetzt:
@@ -12849,7 +12863,7 @@
     if(!sess?.refresh_token){
       // Keine Session gespeichert → einmalig Passwort abfragen (Login-Maske vorbefüllt)
       localStorage.removeItem(PROF_ACTIVE)
-      await supabase.auth.signOut({ scope: 'local' })
+      await profNurLokalAbmelden()   // nie /logout — die Sitzung der bisherigen ID bleibt gültig (12.10.2026)
       const em = document.getElementById('loginEmail'); if(em) em.value = target.email
       showBanner('loginBanner', `Bitte einmal das Passwort für ${target.email} eingeben.`)
       return
@@ -12867,7 +12881,7 @@
       // Refresh-Token abgelaufen/ungültig → sauber auf Login zurück, Mail vorbefüllt
       localStorage.removeItem(PROF_SESSION + userId)
       localStorage.removeItem(PROF_ACTIVE)
-      await supabase.auth.signOut({ scope: 'local' })
+      await profNurLokalAbmelden()   // nie /logout — sonst stirbt die Sitzung der ID, von der man kam (12.10.2026)
       const em = document.getElementById('loginEmail'); if(em) em.value = target.email
       showBanner('loginBanner', `Sitzung abgelaufen — bitte einmal das Passwort für ${target.email} eingeben.`)
     }
@@ -12881,7 +12895,8 @@
     // Refresh-Tokens dieses Users serverseitig — dadurch wurde beim Hinzufügen eines
     // weiteren Accounts die gespeicherte Sitzung des vorherigen still entwertet und
     // man flog nach Ablauf des Access-Tokens aus allen Profilen (Bug 01./02.08.2026).
-    await supabase.auth.signOut({ scope: 'local' })
+    // Seit 12.10.2026 gar kein /logout mehr: auch scope 'local' löschte die gerade gesicherte Sitzung auf dem Server (profNurLokalAbmelden)
+    await profNurLokalAbmelden()
     const em = document.getElementById('loginEmail'); if(em) em.value = ''
     const pw = document.getElementById('loginPassword'); if(pw) pw.value = ''
   }
@@ -42951,7 +42966,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1455'
+  const OS_TAB_BUILD = '2026-09-22.1456'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
