@@ -15668,7 +15668,9 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None):
         # PUFFER IN PUNKTEN (Finn 09.10.2026): Spread + Kommission + Schlupf wachsen mit den Lots — der feste Firmen-Puffer (FN 100 $)
         # reichte nicht. Beleg FN 08.10.2026: Rest 2.964 + 100 = TP 3.064 bei 2,8 Lots, Ergebnis +2.928 → 36 $ unter dem Ziel.
         # Gemessen bei TP-Treffern der letzten 14 Tage bis 5,6 Pkt Abweichung, 10 Pkt × Lots × $/Pkt hat Luft (FN 2,8 Lots → 280 $)
-        puffer = round(AP_PUFFER_PKT * float(menge) * float(ppl))
+        # ZURÜCK AUF DEN FIRMEN-PUFFER (Finn 12.10.2026, Admin „Zu bestätigen": FN 2,1 Lot → TP Rest + 210 $, The5ers 42 Lot → Rest + 420 $
+        # — „viel zu viel Puffer", The5ers soll 55–75 haben): der Puffer kommt wieder allein aus phasen.puffer der Firma (Kernwerte),
+        # die Punkte-Formel ist aus. AP_PUFFER_PKT bleibt nur als Konstante stehen (Selbsttests laden sie).
         lo = float((ph.get("menge") or [0])[0]) * f
         if lo and rest < AP_KLEIN_PKT * lo * float(ppl):
             klein = ap_klein_trade(rest, ppl, ph.get("menge_schritt"), u["puffer"], ph.get("klein_puffer"))

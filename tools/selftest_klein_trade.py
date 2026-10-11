@@ -80,11 +80,11 @@ def main():
     p0, p1 = K(36, 10, 0.1, 0.0)["puffer"], K(36, 10, 0.1, 1.0)["puffer"]
     check((p0, p1) == (15, 20), f"Klein-Puffer Zufall 0 → 15 $, 1 → 20 $ ({p0}, {p1})")
 
-    # 5) Normaler letzter Trade FN 2,8 Lots, Rest 2.964 → Puffer 10 Pkt × 2,8 × 10 = 280 $, TP 3.244
+    # 5) Normaler letzter Trade FN 2,8 Lots, Rest 2.964 → seit 12.10.2026 wieder Firmen-Puffer 100 $ (Finn: Punkte-Puffer zu viel), TP 3.064
     u28 = dict(u, menge=(2.8 - 2.1) / 1.1)
     w, g = R(FN, "phase1", 105036, u28, ppl=10)
-    check(g is None and w["menge"] == 2.8 and w["puffer"] == 280 and w["tp"] == 3244 and w["stufe"].startswith("letzter Trade"),
-          f"FN letzter Trade 2,8 Lots → Puffer 280 $, TP 3.244 ({w and (w['menge'], w['puffer'], w['tp'], w['stufe'])}, {g})")
+    check(g is None and w["menge"] == 2.8 and w["puffer"] == 100 and w["tp"] == 3064 and w["stufe"].startswith("letzter Trade"),
+          f"FN letzter Trade 2,8 Lots → Firmen-Puffer 100 $, TP 3.064 ({w and (w['menge'], w['puffer'], w['tp'], w['stufe'])}, {g})")
     # ohne Punktwert: wie bisher fester Firmen-Puffer 100
     w, g = R(FN, "phase1", 105036, u28)
     check(g is None and w["puffer"] == 100 and w["tp"] == 3064, f"ohne Punktwert → alter Puffer 100 $ ({w and (w['puffer'], w['tp'])})")
@@ -96,7 +96,7 @@ def main():
     w, _g = R(FN, "phase1", 108000 - 419, u, ppl=10)
     check("Klein-Trade" in w["stufe"] and w["menge"] == 2.09, f"FN Rest 419 → Klein-Trade 2,09 Lots ({w['stufe']})")
     w, _g = R(FN, "phase1", 108000 - 421, u, ppl=10)
-    check(w["stufe"].startswith("letzter Trade") and 2.1 <= w["menge"] <= 3.2 and w["puffer"] == round(100 * w["menge"]), f"FN Rest 421 → normaler letzter Trade, Punkte-Puffer ({w['stufe']}, {w['menge']}, {w['puffer']})")
+    check(w["stufe"].startswith("letzter Trade") and 2.1 <= w["menge"] <= 3.2 and w["puffer"] == 100, f"FN Rest 421 → normaler letzter Trade, Firmen-Puffer 100 $ ({w['stufe']}, {w['menge']}, {w['puffer']})")
 
     # 7) grober Lot-Schritt (FTMO, Schritt 1, 0,85 $/Pkt): Rest 33 → 1 Lot, TP 53 $ = 62 Pkt → trotzdem geplant, mit Hinweis
     w, g = R(FTMO, "phase1", 110000 - 33, dict(u, puffer=1.0), ppl=0.85)
