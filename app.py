@@ -6658,13 +6658,21 @@ def admin_build_overview(kapitel_id=None):
     except Exception as e:
         print(f"[admin] ⚠️ trades_start: {type(e).__name__}: {e}", flush=True)
 
+    # GRUPPE OHNE KONTO (12.10.2026, Finn: Ahmad fehlte in Emins Übersicht — neue ID, noch 0 Konten): in einer Gruppen-Sicht (Verwalter
+    # bzw. Finns ?gruppe=) stehen ALLE Mitglieder in people[], auch ohne Konto (Werte 0); „Nach Person" holt sie daraus nach. Standard-Sicht
+    # (HT, sicht None) unverändert: nur Personen mit Konten.
+    try:
+        _sicht_p = _admin_sicht()
+    except Exception as e:
+        print(f"[admin] ⚠️ people/sicht: {type(e).__name__}: {e}", flush=True)
+        _sicht_p = None
     people_list = sorted(
         [{"user_id": u, "name": disp.get(u) or names.get(u, u[:8]),
           "mail": names.get(u, ""),
           # Master-P&L/Trades/Blows je Person im Kapitel (24.09.2026, USD).
           "master_pl": round(mpl_p.get(u, 0.0), 2),
           "trades": trades_p.get(u, 0), "blown": blown_p.get(u, 0)}
-         for u in {r["user_id"] for r in rows}],
+         for u in {r["user_id"] for r in rows} | {str(x) for x in (_sicht_p or ())}],
         key=lambda p: p["name"].lower())
     firm_list = sorted({r["firm"] for r in rows})
     # ADMIN-GRUPPEN (08.10.2026): Finn (ohne Einschränkung) bekommt die Gruppen für die Filter-Chips im Admin-Kopf — Name aus

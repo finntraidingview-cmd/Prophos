@@ -14984,6 +14984,14 @@
 
       const byFirm   = admGroup(rows, 'firm', 'firm')
       const byPerson = admGroup(rows, 'user_id', 'person')
+      // Gruppenmitglied ohne Konto (12.10.2026, Ahmad bei Emin): steht in people[] (Backend, nur Gruppen-Sicht) → Zeile mit 0, solange
+      // kein Firmen-/Such-/Personenfilter die Liste einschränkt
+      if(!$('adm-firm')?.value && !$('adm-search')?.value && !$('adm-person')?.value){
+        const da = new Set(byPerson.map(g => String(g.key)))
+        for(const p of (admData?.people || [])) if(!da.has(String(p.user_id)))
+          byPerson.push({ key: p.user_id, label: p.name || String(p.user_id).slice(0, 8), accounts:0, buy:0, hedge:0, payouts:0, parked:0, net:0, mpl:0, mplDa:false,
+                          plusN:0, gpWert:0, gpGez:0, gpN:0 })
+      }
 
       const posTotal = admPosTotal(byFirm)
       const top = byFirm[0]
@@ -42941,7 +42949,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1453'
+  const OS_TAB_BUILD = '2026-09-22.1454'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
