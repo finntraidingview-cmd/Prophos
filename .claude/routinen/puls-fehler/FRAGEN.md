@@ -9,6 +9,7 @@ Stand 08.10. 20:39 (Routine): seit 07.10. 11:00 UTC kein neuer Fall auf diesem P
 Stand 10.10. 05:35 (Routine): weiterhin kein neuer Fall seit 07.10. 11:00 UTC.
 Stand 10.10. 20:37 (Routine): weiterhin kein neuer Fall seit 07.10. 11:00 UTC.
 Stand 11.10. 05:36 (Routine): weiterhin kein neuer Fall seit 07.10. 11:00 UTC.
+Stand 11.10. 20:37 (Routine): weiterhin kein neuer Fall seit 07.10. 11:00 UTC.
 Status: offen
 
 ## 2026-10-07 20:43 — konto: konto # steht im dropdown 0× (nicht genau einmal) — anderer tradovate-login?
@@ -18,6 +19,7 @@ Stand 08.10. 20:39 (Routine): für Apex durch 6fd5a52 (Login-Beleg über die Kon
 Stand 10.10. 05:35 (Routine): kein neuer 0×-Fall. Verwandt, einmal: 09.10. 09:48 UTC pc-2zc2we, Plan d667b45e… — „Kein Konto-Umschalter zu sehen (aktiv '-') — auch nach dem Tradovate-Login“ (Tradeify-Username der Firma); nur zur Kenntnis, kein Code-Muster.
 Stand 10.10. 20:37 (Routine): kein neuer Fall (heute Samstag, keine Orbit-Starts).
 Stand 11.10. 05:36 (Routine): kein neuer Fall (Wochenende, keine Orbit-Starts seit 09.10. abends).
+Stand 11.10. 20:37 (Routine): kein neuer Fall (Sonntag, keine Signale seit 10.10. 09:16 UTC).
 Status: offen
 
 ## 2026-10-08 05:40 — konto_balance: kein Tradovate-Username für die Firma (The5%ers)
@@ -35,6 +37,7 @@ Stand 09.10. 20:45 (Routine): weiter „abgelehnt“ auf pc-c19p2l, pc-auzre5, p
 Stand 10.10. 05:35 (Routine): mt5_live 01:36 UTC weiter „abgelehnt“ auf pc-auzre5, pc-c19p2l, pc-xc5c52 (pc-pw1put seit > 6 h ohne Meldung); kein neuer IPC-Fall; Plan 840c8097… steht noch „planned“.
 Stand 10.10. 20:37 (Routine): mt5_live 16:36 UTC weiter „abgelehnt“ auf pc-auzre5, pc-c19p2l, pc-xc5c52; pc-pw1put meldet seit 09.10. 00:08 UTC gar nicht mehr (> 40 h, PC aus?); kein neuer IPC-Fall; Plan 840c8097… steht noch „planned“.
 Stand 11.10. 05:36 (Routine): mt5_live 01:35 UTC weiter „abgelehnt“ auf pc-auzre5, pc-c19p2l, pc-xc5c52; pc-pw1put meldet seit 09.10. 00:08 UTC nicht (> 49 h, PC aus?); kein neuer IPC-Fall; Plan 840c8097… steht noch „planned“.
+Stand 11.10. 20:37 (Routine): mt5_live 16:35 UTC weiter „abgelehnt“ auf pc-auzre5, pc-c19p2l, pc-xc5c52; pc-pw1put meldet seit 09.10. 00:08 UTC nicht (> 64 h, PC aus?); kein neuer IPC-Fall; Plan 840c8097… steht noch „planned“.
 Status: offen
 
 ## 2026-10-08 20:39 — orbit: slave-terminal (fusion-copier) nicht bereit — 'Algo Trading' im Hedge-Terminal nicht aktiv
@@ -43,6 +46,7 @@ Was ich brauche: Am pc-2zc2we im Hedge-Terminal den Knopf „Algo Trading“ in 
 Stand 10.10. 05:35 (Routine): kein neuer Fall.
 Stand 10.10. 20:37 (Routine): kein neuer Fall.
 Stand 11.10. 05:36 (Routine): kein neuer Fall.
+Stand 11.10. 20:37 (Routine): kein neuer Fall.
 Status: offen
 
 ## 2026-10-09 05:45 — drei Echo-Pläne stehen „planned“ mit verstrichener Startzeit
@@ -52,4 +56,5 @@ Stand 09.10. 20:45 (Routine): 1c3f7ecd… ist aus trade_plans weg (erledigt); 72
 Stand 10.10. 05:35 (Routine): 72c2a073… (pc-auzre5) unverändert „planned“ seit 08.10. 13:57 UTC; 840c8097… siehe oben.
 Stand 10.10. 20:37 (Routine): 72c2a073… (pc-auzre5) unverändert „planned“ seit 08.10. 13:57 UTC; 840c8097… siehe oben.
 Stand 11.10. 05:36 (Routine): 72c2a073… (pc-auzre5) unverändert „planned“ seit 08.10. 13:57 UTC; 840c8097… siehe oben.
+Stand 11.10. 20:37 (Routine): 72c2a073… (pc-auzre5) unverändert „planned“ seit 08.10. 13:57 UTC; 840c8097… siehe oben.
 Status: offen
