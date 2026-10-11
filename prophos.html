@@ -13614,7 +13614,11 @@
         if(!tok) throw new Error('nicht angemeldet')
         // Kapitel (24.09.2026): der Server filtert Kauf/Hedge/Payouts/Verlauf über kapitel_id,
         // „Alle" = ungefiltert wie bisher. Gewählt wird oben in der Topbar (window._kapitel).
-        const kap = window._kapitel ? window._kapitel.aktiv : 'alle'
+        let kap = window._kapitel ? window._kapitel.aktiv : 'alle'
+        // VERWALTER-GRUPPE = NUR SEIT DEM NEUSTART (12.10.2026, Finn: „immer nur die Daten nach dem Neustart" — Chip „Emin" zeigte
+        // unter „Alle" auch Emins archivierte 111 Konten, 23.900 € Kauf → Payouts-Saldo ≈ −26.000): eine gewählte Verwalter-Gruppe
+        // lädt wie Emins eigener Login (kapitelFuerLogin) nur die Neue Ära (2)
+        if(kap === 'alle' && window._admGruppeQ('')) kap = 2
         // Gruppenfilter (08.10.2026): ?gruppe= wie ?kapitel= — der Server blendet die übrigen IDs aus (Summen stimmen mit der Liste)
         // ansicht=admin (Nachbesserung A, 08.10.2026): nur Admin-Reiter schicken es — ein Verwalter bekommt seine Gruppe NUR hier, sein
         // PC-Tab (Start, Endlesung, Hedge …) ohne den Marker wie bisher nur die eigene ID
@@ -43227,7 +43231,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1451'
+  const OS_TAB_BUILD = '2026-09-22.1452'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
