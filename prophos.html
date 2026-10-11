@@ -13460,7 +13460,9 @@
      * (adm-v2: Master-P&L in USD, Trades · Blows) da. Bei „Alle" und Hedge-Ära bleibt alles wie heute.
      * Die Zahlen liefert /admin/overview je Konto-Zeile als master_pl_k / trades_k / blown_k —
      * fehlen die Felder noch (altes Backend), zeigen die Kacheln „—" statt einer falschen 0. */
-    const admOhneHedge = () => !!(window._kapitel && window._kapitel.aktiv !== 'alle' && window._kapitel.obj(window._kapitel.aktiv)?.hedge === false)
+    // Seit 12.10.2026 immer aus (Finn: Emins Admin ohne Live-P&L/Fusion-P&L): Kapitel 2 laden nur noch Emins Gruppe (Neustart, .1451/.1452),
+    // und dort wird gehedgt — Hedge-Spalten, Live-P&L und Geparkt mit Hedge wie unter „Alle"; Backend hedge_aus ebenso aus
+    const admOhneHedge = () => false
     function admHedgeModus(){
       const an = admOhneHedge()
       const v = document.querySelector('#dashboard-view section.view[data-view="kasse"]')
@@ -42949,7 +42951,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1454'
+  const OS_TAB_BUILD = '2026-09-22.1455'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -57715,7 +57717,8 @@
     // Trades + Blow-Quote. Bei Hedge-Ära und „Alle" bleibt Live P/L wie gehabt.
     const elLiveplLbl = document.getElementById('fin-kpi-livepl-label')
     const elLiveplSub = document.getElementById('fin-kpi-livepl-sub')
-    if(kapitelAktiv !== 'alle' && kapitelObj(kapitelAktiv)?.hedge === false){
+    // Seit 12.10.2026 nicht mehr (Emins Neustart-Sicht steht auf Kapitel 2, hedgt aber): Live P/L bleibt Live P/L wie unter „Alle"
+    if(false){
       const fertig = (Array.isArray(tradePlans) ? tradePlans : []).filter(p => p.status === 'completed' && kapitelPasst(p.kapitelId, p.completedAt || p.createdAt))
       const mitPl = fertig.filter(p => p.masterPl != null)
       const mpl = mitPl.reduce((sum, p) => sum + p.masterPl, 0)

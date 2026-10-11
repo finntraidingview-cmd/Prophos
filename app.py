@@ -6048,7 +6048,10 @@ def admin_build_overview(kapitel_id=None):
     kapitel_liste = _kapitel_liste()
     kap = next((k for k in kapitel_liste if kapitel_id is not None
                 and _kapitel_int(k.get("id")) == int(kapitel_id)), None)
-    hedge_aus = bool(kap is not None and not kap.get("hedge"))
+    # HEDGE IMMER RECHNEN (12.10.2026, Finn: in Emins Admin fehlten die Live-P&L/Fusion-P&L): seit .1451/.1452 laden nur noch Emins Gruppe
+    # (Neustart) das Kapitel 2 — und dort wird weiter gegen Fusion gehedgt (Kapitel 2 heißt seit 30.09. „Neue Ära", „es gibt sehr wohl
+    # Hedges"). kapitel.hedge = false schaltet die Hedge-Rechnung deshalb nicht mehr ab.
+    hedge_aus = False
     # completed_at seit 23.09.2026 mit: der Personen-Verlauf (unten) braucht
     # das Datum jedes Hedge-Verlusts, die Summen-Aggregation braucht es nicht.
     # master_pl/blown/user_id seit 24.09.2026: ohne Hedge-Spalten braucht der
