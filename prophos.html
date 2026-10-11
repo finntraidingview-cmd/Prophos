@@ -42966,7 +42966,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1456'
+  const OS_TAB_BUILD = '2026-09-22.1457'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -49175,6 +49175,15 @@
     return fut ? { text: 'ohne External ID — der Bot kann das Unterkonto nicht wählen', tun: 'External ID (Tradovate-/TopstepX-Unterkonto) unter Accounts eintragen — der Bot plant das Konto dann von selbst nach (alle 10 min).' }
       : { text: 'ohne External ID — MT5-Login fehlt, Prophos kann Balance und Kontowert nicht lesen', tun: 'MT5-Login fehlt → Accounts → Konto → External ID eintragen bzw. in Echo „＋ Account hinzufügen".' }
   }
+  // Ende des letzten beendeten Trades (review/completed, jede Route) auf dem Konto, ms — 0 ohne (12.10.2026, s. Balance-alt-Regel in tplBraucht)
+  function tplLetztesTradeEnde(kontoId){
+    let ende = 0; const k = String(kontoId || '')
+    try{ for(const p of tradePlans || []){
+      if(!p || String(p.masterAccountId || '') !== k || (p.status !== 'review' && p.status !== 'completed')) continue
+      const e = Date.parse(p.endedAt || p.completedAt || '') || 0; if(e > ende) ende = e
+    } }catch(_){}
+    return ende
+  }
   function tplBraucht(D, ids){   // ids = Set der sichtbaren IDs, null = alle
     const je = new Map(), jetzt = Date.now(), ich = (_ap.ich && _ap.ich.name) || ''
     // Konten in „Manuelle Arbeit" (Radar) → keine Zeile, egal welcher Fall (08.10.2026, s. tplManuellKonten) — geprüft je Quelle unten
@@ -49211,11 +49220,17 @@
           }
         }catch(_){}
         const b = tplKontoBalance(a), at = b ? b.at : 0
-        if(at && jetzt - at < 86400000) continue
+        // BALANCE ALT nur noch, wenn seit der Lesung ein Trade auf dem Konto zu Ende ging (Finn 12.10.2026, Screenshot .1455: fünf Tradeify-
+        // Konten „Balance alt · 2 T" nach dem Wochenende ohne einen einzigen Trade). Vorher galt starr „älter als 24 h". Auf den Konten
+        // handelt nur Prophos: die Lesung nach dem letzten Trade bleibt gültig, bis der nächste Trade läuft — ein Kalender-Alter sagt nichts.
+        // Nicht abgehakte Trades (review, „Ergebnis nie gelesen") stehen ohnehin als eigene Endlesung-Zeile da.
+        const letztesEnde = at ? tplLetztesTradeEnde(a.id) : 0
+        if(at && !(letztesEnde > at)) continue
         const lauf = (typeof _accBalLauf !== 'undefined' && _accBalLauf.get(String(a.id))) || null
         konten.add(tplKk(currentUserId, a.name))
+        const endeUhr = letztesEnde ? new Date(letztesEnde).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''
         add(currentUserId, ich, { art: 'balance', firma: a.firm, konto: a.name, typ: a.type, balance: tplBalText(b, jetzt), ende4: String(a.externalId || '').replace(/\D/g, '').slice(-4),
-          text: !b ? 'keine Live-Balance' : !at ? 'Balance ohne Zeitstempel' : `Balance ${tplAlter(jetzt - at)} alt`, bal: String(a.id), lauf, tun: tplBalTun(a, b, false) })
+          text: !b ? 'keine Live-Balance' : !at ? 'Balance ohne Zeitstempel' : `Balance von vor dem letzten Trade (Ende ${endeUhr}) — ${tplAlter(jetzt - at)} alt`, bal: String(a.id), lauf, tun: tplBalTun(a, b, false) })
       }
     }
     // BALANCE NACH ECHO-TRADE FEHLT — FREMDE IDs (08.10.2026, Master): delta.heute_beendet[].bal_nach (app.py _ap_hb_laden) meldet, wenn der
