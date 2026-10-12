@@ -29775,7 +29775,9 @@
           return { eigen: false, uid: String(z.user_id), user: z.user || '?', firma: z.firma, e4: String(z.ende4 || '').replace(/[^A-Za-z0-9]/g, '').slice(-4), gr,
             typ: String(z.typ || ''), name: z.konto, seit: z.seit, bal: num(z.bal), ziel: num(z.ziel), mt: null, fehlt: false, mini: null, miniUhr: '' }
         })
-      return [...eigen, ...fremd].filter(x => !wdl.person || x.uid === wdl.person)
+      // NICHT DOPPELT (12.10.2026): steht der bestandene Trade noch in Überprüfen → Bestanden, kommt das Konto hier erst nach dem Abhaken
+      const offen = new Set(((wdl.daten && wdl.daten.trades) || []).filter(t => t.status === 'review' && !!wdlBestandenChip(t)).map(t => wdlUid(t) + '|' + String((t.konto || {}).kontonr_ende || '').replace(/[^A-Za-z0-9]/g, '').slice(-4)))
+      return [...eigen, ...fremd].filter(x => !wdl.person || x.uid === wdl.person).filter(x => !x.e4 || !offen.has(x.uid + '|' + x.e4))
         .sort((x, y) => String(x.firma || '').localeCompare(String(y.firma || ''), 'de') || String(x.seit).localeCompare(String(y.seit)))
         .map(x => {
           const konto = `${x.firma || '?'}${x.gr >= 1000 ? ' ' + Math.round(x.gr / 1000) + 'k' : ''}${x.e4 ? ' …' + x.e4 : ''}`
@@ -29818,8 +29820,10 @@
       // NUR NOCH ZWEI (Finn 12.10.2026 ~17:49: „Bestanden, Manuelle Arbeit und nochmal Bestanden — alles dreimal das Gleiche"): die
       // Untergruppe „Bestanden" ist weg, bestandene Trades stehen mit dem grünen Wort in „Normal" (abhaken); Phase umstellen gibt es
       // genau einmal, im Abschnitt „Bestanden · Phase umstellen" unten (Konten der Ziel-Wache mit Knopf).
-      const blow = pr.filter(istGeblowt), norm = pr.filter(t => !blow.includes(t))
-      return [['Normal', norm, 'wdl-ug-normal', 'abhaken — bestandene stehen mit 🎯, Phase umstellen unten bei „Bestanden"'], ['Geblowt', blow, 'wdl-ug-geblowt', 'Konto geblowt oder weg — abhaken, dann archivieren']]
+      // Seit .1465 wieder DREI (Finn 12.10.2026 ~18:00: „die bestandenen in ein eigenes Ding, die geblowten in ein eigenes, die normalen
+      // auch") — das Doppelte löst der Abschnitt „Bestanden · Phase umstellen" unten: er zeigt ein Konto erst, wenn der Trade abgehakt ist.
+      const best = pr.filter(t => !!wdlBestandenChip(t)), blow = pr.filter(t => !best.includes(t) && istGeblowt(t)), norm = pr.filter(t => !best.includes(t) && !blow.includes(t))
+      return [['Normal', norm, 'wdl-ug-normal', 'nichts passiert — abhaken'], ['Bestanden', best, 'wdl-ug-bestanden', 'abhaken — danach unten bei „Bestanden" die Phase umstellen'], ['Geblowt', blow, 'wdl-ug-geblowt', 'Konto geblowt oder weg — abhaken, dann archivieren']]
     }
     // arr = was gezeigt wird (Modell + Person), alleArr = dieselbe Liste ohne Personen-Filter — nur für die Chips im Kopf
     const gruppen = (arr, alleArr) => {
@@ -43058,7 +43062,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1464'
+  const OS_TAB_BUILD = '2026-09-22.1465'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
