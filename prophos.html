@@ -12510,7 +12510,7 @@
         <!-- Consistency (07.10.2026) wie im Konto-Popup — nur sichtbar, wenn Futures-Challenges im Batch sind, und nur auf die
              geschrieben (bulkConsWert in saveBulkAccounts). Leer = Standard 40 %. -->
         <div class="field" style="grid-column:1/-1" id="bulk-cons-row" hidden>
-          <label>Consistency <span style="font-weight:400;color:var(--sub)">(Futures-Challenges · optional)</span></label>
+          <label>Consistency <span style="font-weight:400;color:var(--sub)">(Tradeify-Challenges · optional)</span></label>
           <div style="display:flex;gap:8px;align-items:center">
             <select class="input" id="bulk-cons" style="flex:1">
               <option value="">Standard (40 %)</option>
@@ -33637,7 +33637,12 @@
   const accConsFehlt = error => /consistency_pct/.test(String((error && (error.message || error.details)) || ''))
   const accConsZahl = v => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 2 }) + ' %'
   function accConsSichtbar(firm, typ){
-    return (typeof tpFirmIstFutures === 'function') && tpFirmIstFutures(firm) && (typ === 'challenge' || typ === 'phase1' || typ === 'phase2')
+    // Seit 12.10.2026 (Finn, Bulk „Apex 150k Challenge" zeigte „Standard (40 %)": „bei Apex gibt es ja keine Consistency Rule") nur
+    // noch Firmen, deren Challenge wirklich eine Consistency hat — das ist heute allein Tradeify (40 %, mit Addon 50 %). Andere
+    // Futures-Firmen sehen das Feld nicht; der Planer rechnet dort ohne Etappe (ap_regel_konto greift nur bei gesetztem Wert).
+    const CONS_FIRMEN = ['tradeify']
+    const n = String(firm || '').trim().toLowerCase()
+    return CONS_FIRMEN.includes(n) && (typ === 'challenge' || typ === 'phase1' || typ === 'phase2')
   }
   // Auswahl „Standard / 50 % / Andere Zahl" lesen: { ok, wert } — wert null = Standard
   function accConsLesen(sel, frei){
@@ -43136,7 +43141,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1469'
+  const OS_TAB_BUILD = '2026-09-22.1470'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
