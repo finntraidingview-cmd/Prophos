@@ -3770,6 +3770,7 @@
   #dashboard-view .wdl-tab-sek-manuell{--wdl-sek:#dc2626}
   #dashboard-view .wdl-tab-sek-erledigt{--wdl-sek:var(--sub-2)}
   #dashboard-view .wdl-tab-sek-bestanden{--wdl-sek:#15803d}
+  #dashboard-view .wdl-tab-sek-tage{--wdl-sek:#B45309}   /* Tage farmen (13.10.2026): amber wie der Status „Tage sammeln" */
   /* ÜBERGRUPPEN DEUTLICH (Finn 12.10.2026 am Radar .1458: „sieht alles so ein bisschen gleich aus — man erkennt nicht, wo es läuft,
      wo es wartet"): die 3-px-Oberkante ging neben den Modell-Rändern unter. Jetzt je Abschnitt ein 5-px-Band links in der Akzentfarbe,
      ein kräftig getönter Kopf mit farbigem Etikett (Punkt + Titel in der Akzentfarbe, größer) und 28 px Luft zwischen den Abschnitten.
@@ -29872,20 +29873,25 @@
           const knopf = x.eigen
             ? (neu ? `<button type="button" class="btn btn-ghost el-knopf" data-wdl-bst-um="${escapeHtml(String(x.a.id))}" title="Nachfolger anlegen (${escapeHtml(zielName)}): neues Konto + Login, Echo-Instanz, External ID — das alte Konto wird danach archiviert">→ ${escapeHtml(zielName)}</button>` : '')
             : `<span class="wdl-bst-fremd" title="Der Nachfolger-Assistent legt nur im eigenen Login an — ${escapeHtml(x.user)} stellt um">im Login von ${escapeHtml(x.user)}</span>`
-          return `<div class="wdl-z wdl-z-bst" style="--wdl-id:${idFarbe(x.uid)}">`
+          return { fehlt: !!fehlt, html: `<div class="wdl-z wdl-z-bst" style="--wdl-id:${idFarbe(x.uid)}">`
             + `<span class="wdl-z-wer" title="${escapeHtml(String(x.name || konto))}"><span class="wdl-z-punkt"></span><b>${escapeHtml(x.user)}</b><small>${escapeHtml(konto)}</small></span>`
             + `<span class="wdl-z-ri">${ueb ? `<span class="wdl-bst-phase type-${escapeHtml(typ)}" title="aktueller Kontotyp → nächster">${escapeHtml(ueb)}</span>` : ''}</span>`
             + zelle('mi', `${bal != null ? de(bal) : '–'}${ziel ? ` → <b class="wdl-bst-ziel">${de(ziel)} ✓</b>` : ''}`, { tip: `Balance → Ziel${seit ? ' · Ziel erreicht seit ' + seit : ''}` })
             + zelle('konto', mt ? `${mt.count}/${mt.target}` : '–', { tip: mt ? `Mindesttage: ${mt.count} von ${mt.target} Tagen mit Trade` : (x.eigen ? 'keine Mindesttage hinterlegt' : 'Mindesttage nur im Login des Kontos sichtbar') })
             + `<span class="wdl-z-pl ${fehlt ? 'wdl-bst-warte' : 'wdl-bst-ok'}" title="${escapeHtml(statusTip)}">${escapeHtml(status)}</span>`
             + `<span class="wdl-z-zeit">${knopf}</span>`
-            + '</div>'
+            + '</div>' }
         })
     }
+    // ZWEI ABSCHNITTE (13.10.2026, Finn: „unter Radar eine neue Übersicht, wo einfach nur Trading-Tage farmen … und zu Bestanden einfach
+    // die komplett Ready"): Ziel erreicht, Mindesttage fehlen → „Tage farmen" (amber, der Auto-Planer legt je Handelstag einen Mini);
+    // Ziel + Tage voll → „Bestanden · Phase umstellen" mit dem Nachfolger-Knopf. Dieselben Zeilen (bstZeilen), nur getrennt nach fehlt.
+    const bstTab = (zz, titel, tip, klasse) => !zz.length ? '' : `<div class="wdl-tab wdl-tab-konto wdl-tab-bst ${klasse}"><div class="wdl-z wdl-z-kopf"><span class="wdl-z-wer" title="${tip}">${titel} · ${zz.length}</span><span class="wdl-z-ri">Phase</span>`
+        + ['Balance → Ziel', 'Tage', 'Status', ''].map((x, i) => `<span class="wdl-z-${['mi', 'konto', 'pl', 'zeit'][i]}">${x}</span>`).join('') + `</div>${zz.map(z => z.html).join('')}</div>`
     const bestanden = () => {
       const zz = bstZeilen(); if(!zz.length) return ''
-      return `<div class="wdl-tab wdl-tab-konto wdl-tab-bst wdl-tab-sek-bestanden"><div class="wdl-z wdl-z-kopf"><span class="wdl-z-wer" title="Konten, deren Ziel die Ziel-Wache erreicht sah — hier die Phase umstellen">Bestanden · Phase umstellen · ${zz.length}</span><span class="wdl-z-ri">Phase</span>`
-        + ['Balance → Ziel', 'Tage', 'Status', ''].map((x, i) => `<span class="wdl-z-${['mi', 'konto', 'pl', 'zeit'][i]}">${x}</span>`).join('') + `</div>${zz.join('')}</div>`
+      return bstTab(zz.filter(z => z.fehlt), 'Tage farmen', 'Ziel erreicht, Mindesttage fehlen noch — der Auto-Planer legt je Handelstag einen Mini-Trade, danach wandert das Konto nach Bestanden', 'wdl-tab-sek-tage')
+        + bstTab(zz.filter(z => !z.fehlt), 'Bestanden · Phase umstellen', 'Ziel und Mindesttage erfüllt — hier die Phase umstellen', 'wdl-tab-sek-bestanden')
     }
     const manuell = (g, a) => {
       if(g.ma.length) return gruppe('Manuelle Arbeit', nachAblage(g.ma), ['Notiz', 'Konto', 'P&amp;L', 'Zu'], 'wdl-tab-konto wdl-tab-manuell wdl-tab-sek-manuell', null, a.ma)
@@ -39006,10 +39012,16 @@
     const pzwZ = art => pzw ? ` pz-w"${pzw} data-pzw="${art}" title="Klicken zum Ändern"` : '"'
     // Topstep-Kette (09.10.2026): „Trade 1 · Reparatur-Tag" + Tooltip statt „Topstep-Kette 1/2" (tpKetteSchritt); sonst Schritt wie bisher
     const ks = tpKetteSchritt(p), tm = planIstTageMini(p) ? p.mt5Baseline.tage_mini : null
+    // TAGE-STAND LIVE (13.10.2026, Finn: „in der Übersicht sehen, wie viele Tage man schon hat, 2 von 5 oder 4 von 5"): Zahl aus
+    // zielFortschritt des Kontos (zählt goal_done_offset + Tage seit goal_since), nicht aus tage_mini.ist — der steht fest, seit der Bot
+    // den Plan gerechnet hat, und kennt rückwirkend nachgetragene Tage (sql/2026-10-13_mindesttage_rueckwirkend.sql) nicht
+    let tmZf = null
+    if(tm){ try{ const _ak = (accounts || []).find(x => x && String(x.id) === String(p.masterAccountId)); tmZf = _ak ? zielFortschritt(_ak) : null }catch(_){ tmZf = null } }
+    const tmIst = tmZf && tmZf.kind === 'trading_days' ? tmZf.count : (tm ? Number(tm.ist) : 0), tmSoll = tmZf && tmZf.kind === 'trading_days' ? tmZf.target : (tm ? Number(tm.soll) : 0)
     // Mini-Trade (Tage sammeln): TP/SL sind Cent-Beträge (0,01 Lot × 30 Pkt = 0,30 $) — sonst stünde „0 $" da
     const geldZ = v => tm ? Number(v).toLocaleString('de-DE', { maximumFractionDigits: 2 }) : de(v)
     const artZelle = tm
-      ? `<span class="pz-art pz-art-kette" title="${escapeHtml(`Tage sammeln: Mini-Trade für die Mindesttage (${tm.ist} von ${tm.soll} Tagen mit Trade)${tm.sofort_zu ? ' — wird nach dem Start sofort wieder geschlossen' : ''}. ${tm.unter_ziel ? 'Konto noch unter dem Ziel' : `Ziel ${Math.round(Number(tm.ziel) || 0).toLocaleString('de-DE')} $ ist erreicht`} — der SL hält die Balance über ${tm.unter_ziel ? 'Boden' : 'Ziel'} + ${Math.round(Number(tm.puffer) || 0)} $.`)}"><span><b>Tage sammeln</b></span><small>${Number(tm.ist) + 1}. von ${tm.soll} Tagen</small></span>`
+      ? `<span class="pz-art pz-art-kette" title="${escapeHtml(`Tage sammeln: Mini-Trade für die Mindesttage (${tmIst} von ${tmSoll} Tagen mit Trade)${tm.sofort_zu ? ' — wird nach dem Start sofort wieder geschlossen' : ''}. ${tm.unter_ziel ? 'Konto noch unter dem Ziel' : `Ziel ${Math.round(Number(tm.ziel) || 0).toLocaleString('de-DE')} $ ist erreicht`} — der SL hält die Balance über ${tm.unter_ziel ? 'Boden' : 'Ziel'} + ${Math.round(Number(tm.puffer) || 0)} $.`)}"><span><b>Tage ${Math.min(tmIst, tmSoll)}/${tmSoll}</b></span><small>${tmIst >= tmSoll ? 'voll · Mini' : `${tmIst + 1}. Tag · Mini`}</small></span>`
       : ks
       ? `<span class="pz-art pz-art-kette" title="${escapeHtml(ks.tip)}"><span><b>${typeof ks.nr === 'number' ? 'Trade ' + ks.nr : escapeHtml(String(ks.nr))}</b>${ks.kette}</span><small>${escapeHtml(ks.tag)}</small></span>`   // zweizeilig: Spalte nur 92 px
       : `<span class="pz-art" title="${notiz ? escapeHtml(planSchrittTip(notiz, Number(p.masterTp))) : ''}">${notiz ? escapeHtml(notiz.art) + (notiz.gekappt ? ' · SL gekappt' : '') : ''}</span>`
@@ -43270,7 +43282,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1476'
+  const OS_TAB_BUILD = '2026-09-22.1477'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
