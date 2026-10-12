@@ -8757,7 +8757,7 @@
               <div style="font-size:11px;color:var(--sub);margin-top:4px">Vorbelegt mit dem Wert des Vorgängers — anpassen falls die neue Phase abweicht.</div>
             </div>
             <div class="field" style="grid-column:span 2">
-              <label>External ID (optional)</label>
+              <label>External ID (neue Nummer, Pflicht)</label>
               <input class="input" id="suc-extid" placeholder="z.B. neue Broker-Account-Nummer">
             </div>
           </div>
@@ -32614,6 +32614,29 @@
   let _afterSuccessorCallback = null
 
   // zielTyp (optional, 09.10.2026): Kontoart des Nachfolgers vorwählen — der Reiter „Bestanden" übergibt seinen Übergang (bstNaechsterTyp)
+  // NAMENSREGEL (Finn 12.10.2026): jedes Konto heißt „<Größe> <External ID> → <Phase>", optional „ · <Zusatz>" (z. B. 1% Rule).
+  // Größe aus dem alten Namen („100k"), External ID = die NEUE Nummer des Nachfolgers, Phase aus dem Typ, Zusatz bleibt.
+  const SUC_PHASE_LABEL = { challenge: 'Challenge', phase1: 'Phase 1', phase2: 'Phase 2', funded: 'Funded', funded_cfd: 'Funded', winning_days: 'Winning Days', live: 'Live' }
+  function kontoNameBauen(altName, typ, ext){
+    const alt = String(altName || '')
+    const groesse = (alt.match(/\b\d+(?:[.,]\d+)?\s?k\b/i) || [''])[0].replace(/\s+/, '').toLowerCase()
+    // Zusatz: hinter „ · " oder eine Klammer am Ende („(1% RULE)" bleibt als Zusatz erhalten)
+    const zusatz = alt.includes(' · ') ? alt.slice(alt.indexOf(' · ') + 3).trim() : ((alt.match(/\(([^()]+)\)\s*$/) || ['', ''])[1]).trim()
+    const phase = SUC_PHASE_LABEL[typ] || ''
+    const kopf = [groesse, String(ext || '').trim()].filter(Boolean).join(' ')
+    return `${kopf}${kopf ? ' ' : ''}→ ${phase}${zusatz ? ' · ' + zusatz : ''}`.trim()
+  }
+  let _sucNameHand = false, _sucVorgaenger = null
+  // Vorschlag ins Namensfeld, solange Finn den Namen nicht selbst angefasst hat
+  function sucNameVorschlag(){
+    if(_sucNameHand || !_sucVorgaenger) return
+    const typ = document.getElementById('suc-type')?.value || ''
+    const ext = document.getElementById('suc-extid')?.value || ''
+    const el = document.getElementById('suc-name'); if(el) el.value = kontoNameBauen(_sucVorgaenger.name, typ, ext)
+  }
+  document.getElementById('suc-extid')?.addEventListener('input', sucNameVorschlag)
+  document.getElementById('suc-type')?.addEventListener('change', sucNameVorschlag)
+  document.getElementById('suc-name')?.addEventListener('input', () => { _sucNameHand = true })
   function openSuccessorWizard(parentAccountId, callback, zielTyp){
     const acc = accounts.find(a => String(a.id) === String(parentAccountId))
     if(!acc) return
@@ -32659,16 +32682,13 @@
     const sucHint = document.getElementById('suc-paste-hint')
     if(sucHint) sucHint.style.display = 'none'
 
-    // Name-Vorschlag basierend auf aktuellem Typ
-    let suggested = acc.name
-    if(/phase\s*1/i.test(acc.name)) suggested = acc.name.replace(/phase\s*1/i, 'Phase 2')
-    else if(/phase\s*2/i.test(acc.name)) suggested = acc.name.replace(/phase\s*2/i, 'Funded')
-    else if(acc.type === 'phase1') suggested = `${acc.name} → Phase 2`
-    else if(acc.type === 'phase2') suggested = `${acc.name} → Funded`
-    else if(acc.type === 'challenge') suggested = `${acc.name} → Funded`  // Legacy
-    else if(acc.type === 'funded' || acc.type === 'funded_cfd') suggested = `${acc.name} → Live`
-    else if(acc.type === 'winning_days') suggested = `${acc.name} → Live`
-    document.getElementById('suc-name').value = suggested
+    // Name-Vorschlag nach der Namensregel (Finn 12.10.2026): „<Größe> <External ID> → <Phase> · <Zusatz>".
+    // Vorfall: Nachfolger hießen weiter „100k 14192655 → Funded", obwohl die Firma dem Funded eine NEUE Nummer gab —
+    // die alte ID stand im Namen, die neue nur im Feld. Jetzt wird die neue ID in den Namen gesetzt, sobald sie im
+    // Feld steht (sucNameVorschlag), und ist Pflicht. Hand-Eingabe im Namensfeld gewinnt (_sucNameHand).
+    _sucNameHand = false
+    _sucVorgaenger = acc
+    sucNameVorschlag()
 
     // Default-Typ vorschlagen
     const sucType = document.getElementById('suc-type')
@@ -32680,6 +32700,7 @@
     else if(acc.type === 'funded' || acc.type === 'funded_cfd' || acc.type === 'winning_days') sucType.value = 'live'
     else sucType.value = 'phase1'
     if(zielTyp && [...sucType.options].some(o => o.value === zielTyp)) sucType.value = zielTyp
+    sucNameVorschlag()
     // Übergang Funded ⇄ Winning Days (25.09.2026, Finns vierte Kontoart): kein neues Konto, dieselbe Zeile wechselt die Art
     sucWdBlockRender(acc)
 
@@ -32709,7 +32730,7 @@
     }
     setVal('suc-cred-login', parsed.login, 'Login')
     const extEl = document.getElementById('suc-extid')
-    if(parsed.login && extEl && !extEl.value.trim()){ extEl.value = parsed.login; found.push('External ID') }
+    if(parsed.login && extEl && !extEl.value.trim()){ extEl.value = parsed.login; found.push('External ID'); sucNameVorschlag() }
     setVal('suc-cred-password', parsed.password, 'Passwort')
     setVal('suc-cred-server', parsed.server, 'Server')
     if(parsed.platform){ const p = document.getElementById('suc-cred-platform'); if(p){ p.value = parsed.platform; found.push('Plattform: ' + parsed.platform) } }
@@ -32788,6 +32809,12 @@
 
     if(!name || !firm){
       msgEl.textContent = 'Name und Firma sind nötig.'
+      msgEl.className = 'modal-msg err'
+      return
+    }
+    // External ID Pflicht (Namensregel 12.10.2026): ohne sie trüge der Nachfolger die alte Nummer im Namen
+    if(!externalId){
+      msgEl.textContent = 'External ID des neuen Kontos ist nötig — sie gehört in den Namen.'
       msgEl.className = 'modal-msg err'
       return
     }
@@ -43069,7 +43096,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1466'
+  const OS_TAB_BUILD = '2026-09-22.1467'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
