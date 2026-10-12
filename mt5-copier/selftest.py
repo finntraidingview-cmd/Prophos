@@ -3251,8 +3251,9 @@ def test_puls_cdp_login():
         and ob.cdp_connect_fehler({"dialoge": [dict(dlg, text="Error! Network error occurred. Please check")]}).startswith("Error!")
         and ob.cdp_connect_fehler(None) == "", "Fehlermeldung im Connect-Dialog erkannt (Abbruch, Netzfehler), sonst leer")
     q_tv = _i.getsource(ob._cdp_tradovate_verbinden)
-    chk("for versuch in (1, 2):" in q_tv and "Connect noch einmal" in q_tv and '"abgebrochen"' in _i.getsource(ob._cdp_anmelden)
-        and "f_neu != fehler_alt" in _i.getsource(ob._cdp_login_ort), "Login-Abbruch: sofort erkannt, genau ein zweiter Connect")
+    chk("for versuch in (1, 2, 3):" in q_tv and "Connect noch einmal" in q_tv and '"abgebrochen"' in _i.getsource(ob._cdp_anmelden)
+        and "f_neu != fehler_alt" in _i.getsource(ob._cdp_login_ort) and "(8.0, 4.0)" in q_tv and "dreimal ab" in q_tv,
+        "Login-Abbruch: sofort erkannt, zweiter Connect gleich, dritter nach Pause (Routine 12.10.2026)")
     roh_t = {"reiter": "orders", "tabellen": [{"koepfe": ["Symbol", "Side", "Type", "Qty", "Limit Price", "Stop Price", "Status"],
              "zeilen": [[["", "MNQZ6"], ["", "Buy"], ["", "Limit"], ["", "1"], ["", "30,679.50"], ["", ""], ["", "Working"]],
                         [["", "MNQZ6"], ["", "Buy"], ["", "Stop"], ["", "1"], ["", "—"], ["", "30,806.50"], ["", "Working"]],

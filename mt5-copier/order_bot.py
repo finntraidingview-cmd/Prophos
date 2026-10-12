@@ -22686,7 +22686,12 @@ def _cdp_tradovate_verbinden(sitz, cmd, opts, trail, beleg=None, merk=None):
                                                                         for d_ in bl2.get("dialoge") or [] if isinstance(d_, dict)][:3],
                                                            "leiste": bl2.get("leiste"), "url": bl2.get("url")}, ensure_ascii=False)[:500])
             return "dialog", "TradingView ist mit ?trade-now=TRADOVATE neu offen, aber der Tradovate-Dialog erscheint nicht (40 s).", ""
-    for versuch in (1, 2):
+    # Muster „tradovate-login nicht geschafft (abgebrochen): tradingview bricht den login zweimal ab" (Routine 12.10.2026, 4 Fälle seit
+    # 01.10., davon 3× 09.–11.10. auf einem PC): TradingView/Tradovate melden nach „Anmelden" erst „An error has occurred while logging
+    # in", der zweite Connect 1 s später „The login operation has been canceled" — und das NÄCHSTE Signal 25 s danach verband sich mit
+    # demselben Username ohne Fehler (11.10. 23:44 UTC). Der Fehler ist vorübergehend (Abmelden kurz davor), nicht der Username. Darum
+    # ein dritter Versuch nach längerer Pause; Riegel (Demo, Beleg fürs Abmelden, Hover-Beweis, Werte nie lesen) unverändert.
+    for versuch in (1, 2, 3):
         code, text, vorher = _cdp_dialog_verbinden(s, bool(cmd.get("sitzung_merken")), trail)
         if code:
             return code, text, ""
@@ -22713,13 +22718,15 @@ def _cdp_tradovate_verbinden(sitz, cmd, opts, trail, beleg=None, merk=None):
                 if not code and isinstance(merk, dict):
                     merk["formular"] = True
                 return code, text, "login"
-        if versuch == 1:
+        if versuch < 3:
             # TradingView hat den Login abgebrochen („Error! The login operation has been canceled") — Dialog steht mit Connect
-            # wieder da: EINMAL neu verbinden; Tradovate ist dann meist schon angemeldet (Connect ohne Anmeldeseite)
-            trail.append(f"[Login] TradingView meldet '{text[:90]}' — Connect noch einmal")
-            _warte(1.0, 0.8)
+            # wieder da: neu verbinden; Tradovate ist dann meist schon angemeldet (Connect ohne Anmeldeseite). 1. Abbruch: gleich
+            # (wie bisher); 2. Abbruch: erst 8–12 s Pause (12.10.2026, s. o.), dann der dritte und letzte Connect.
+            trail.append(f"[Login] TradingView meldet '{text[:90]}' — Connect noch einmal"
+                         + (" (3. Versuch nach Pause)" if versuch == 2 else ""))
+            _warte(*((1.0, 0.8) if versuch == 1 else (8.0, 4.0)))
             continue
-        return "abgebrochen", f"TradingView bricht den Login zweimal ab ('{text[:90]}') — Tradovate ist NICHT verbunden.", ""
+        return "abgebrochen", f"TradingView bricht den Login dreimal ab ('{text[:90]}') — Tradovate ist NICHT verbunden.", ""
     return "abgebrochen", "Login nicht abgeschlossen.", ""
 
 
