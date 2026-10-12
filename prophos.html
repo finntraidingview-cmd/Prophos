@@ -43282,7 +43282,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1478'
+  const OS_TAB_BUILD = '2026-09-22.1479'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -56169,6 +56169,9 @@
       const idx = accounts.findIndex(x => String(x.id) === String(a.id))
       if(idx >= 0) accounts[idx] = rowToAccount(data)
       if(typeof renderAccounts === 'function') renderAccounts()
+      // Karte „Payout-Status je Account" sofort nachziehen (13.10.2026, Finn: Chris …4657 nach der Anfrage „immer noch 5/5 Winning Days" —
+      // DB stand längst auf 0, nur die Finanzen-Karte wurde nicht neu gezeichnet; renderAccounts zeichnet nur die Accounts-Liste)
+      if(typeof renderFinPayoutStatus === 'function') try{ renderFinPayoutStatus() }catch(_){}
       if(typeof atToast === 'function')
         atToast(`🔄 Winning Days zurückgesetzt — 0/${k.target} · ${a.name}`, 'end')
     }catch(e){
