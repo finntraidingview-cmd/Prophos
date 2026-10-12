@@ -43282,7 +43282,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1477'
+  const OS_TAB_BUILD = '2026-09-22.1478'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -58230,6 +58230,9 @@
     const finLiveBalStr = (a) => {
       if(a.topstep && a.topstep.balance != null) return fmtMoney(Number(a.topstep.balance))
       if(a.ma && a.ma.balance != null)           return fmtMoney(Number(a.ma.balance))
+      // Live · TradingView / gespeicherter MT5-Stand (13.10.2026, Finn: „hinzufügen, dass man noch immer die Live-Balance sieht" — im Payout-
+      // Popup stand die Balance nur bei Topstep/MetaApi, Apex/Tradeify/FundedNext ohne): accounts.tv_balance wie in der Accounts-Spalte
+      if(a.tvBalance != null && isFinite(Number(a.tvBalance))) return fmtMoney(Number(a.tvBalance))
       const dl = (typeof dupGetLinks === 'function') ? dupGetLinks() : {}
       const dupId = Object.entries(dl).find(([_, mId]) => String(mId) === String(a.id))?.[0]
       const dupAcc = (dupId && dupState?.accounts) ? dupState.accounts.find(x => x.account_id === dupId) : null
