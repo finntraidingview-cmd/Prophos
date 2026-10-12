@@ -11,6 +11,7 @@ Stand 10.10. 20:37 (Routine): weiterhin kein neuer Fall seit 07.10. 11:00 UTC.
 Stand 11.10. 05:36 (Routine): weiterhin kein neuer Fall seit 07.10. 11:00 UTC.
 Stand 11.10. 20:37 (Routine): weiterhin kein neuer Fall seit 07.10. 11:00 UTC.
 Stand 12.10. 05:35 (Routine): weiterhin kein neuer Fall seit 07.10. 11:00 UTC.
+Stand 12.10. 20:35 (Routine): weiterhin kein neuer Fall seit 07.10. 11:00 UTC.
 Status: offen
 
 ## 2026-10-07 20:43 — konto: konto # steht im dropdown 0× (nicht genau einmal) — anderer tradovate-login?
@@ -22,6 +23,7 @@ Stand 10.10. 20:37 (Routine): kein neuer Fall (heute Samstag, keine Orbit-Starts
 Stand 11.10. 05:36 (Routine): kein neuer Fall (Wochenende, keine Orbit-Starts seit 09.10. abends).
 Stand 11.10. 20:37 (Routine): kein neuer Fall (Sonntag, keine Signale seit 10.10. 09:16 UTC).
 Stand 12.10. 05:35 (Routine): kein neuer 0×-Fall (Montag 23:43 UTC lief die FundedNext-Lesung auf pc-2zc2we nach einem dritten Anlauf durch — Login-Abbruch, nicht 0×; dazu Fix .1458).
+Stand 12.10. 20:35 (Routine): kein neuer 0×-Fall. Heute blockierte stattdessen 19× der TradingView-Dialog „Go ad-free. Everywhere“ das Abmelden (pc-2zc2we 09:51–13:02 UTC, pc-auzre5 14:40 UTC) — Fix .1468 (81a2a72) schließt ihn über sein X.
 Status: offen
 
 ## 2026-10-08 05:40 — konto_balance: kein Tradovate-Username für die Firma (The5%ers)
@@ -41,6 +43,7 @@ Stand 10.10. 20:37 (Routine): mt5_live 16:36 UTC weiter „abgelehnt“ auf pc-a
 Stand 11.10. 05:36 (Routine): mt5_live 01:35 UTC weiter „abgelehnt“ auf pc-auzre5, pc-c19p2l, pc-xc5c52; pc-pw1put meldet seit 09.10. 00:08 UTC nicht (> 49 h, PC aus?); kein neuer IPC-Fall; Plan 840c8097… steht noch „planned“.
 Stand 11.10. 20:37 (Routine): mt5_live 16:35 UTC weiter „abgelehnt“ auf pc-auzre5, pc-c19p2l, pc-xc5c52; pc-pw1put meldet seit 09.10. 00:08 UTC nicht (> 64 h, PC aus?); kein neuer IPC-Fall; Plan 840c8097… steht noch „planned“.
 Stand 12.10. 05:35 (Routine): mt5_live 01:36 UTC weiter „abgelehnt“ auf pc-auzre5, pc-c19p2l, pc-xc5c52; pc-pw1put meldet seit 09.10. 00:08 UTC nicht (> 73 h, PC aus?); kein neuer IPC-Fall; Plan 840c8097… steht noch „planned“.
+Stand 12.10. 20:35 (Routine): **5 neue IPC-Fälle heute** auf pc-c19p2l (08:12, 08:34, 08:55, 09:16, 13:26 UTC, alle Plan 2aaec4c9…) — der Plan ging dann 13:51 UTC doch auf „open“ (Start von Hand?). mt5_live 16:36 UTC weiter „abgelehnt“ auf pc-auzre5, pc-c19p2l, pc-xc5c52 und pc-pw1put (wieder da seit ~13:47 UTC). Plan 840c8097… steht noch „planned“. Die Windows-Abfrage auf pc-c19p2l kostet jetzt jeden Echo-Start dort — bitte einmal „Ja“ klicken bzw. die MT5-Update-Aufgabe einrichten.
 Status: offen
 
 ## 2026-10-08 20:39 — orbit: slave-terminal (fusion-copier) nicht bereit — 'Algo Trading' im Hedge-Terminal nicht aktiv
@@ -51,6 +54,7 @@ Stand 10.10. 20:37 (Routine): kein neuer Fall.
 Stand 11.10. 05:36 (Routine): kein neuer Fall.
 Stand 11.10. 20:37 (Routine): kein neuer Fall.
 Stand 12.10. 05:35 (Routine): kein neuer Fall.
+Stand 12.10. 20:35 (Routine): kein neuer Fall.
 Status: offen
 
 ## 2026-10-09 05:45 — drei Echo-Pläne stehen „planned“ mit verstrichener Startzeit
@@ -62,4 +66,20 @@ Stand 10.10. 20:37 (Routine): 72c2a073… (pc-auzre5) unverändert „planned“
 Stand 11.10. 05:36 (Routine): 72c2a073… (pc-auzre5) unverändert „planned“ seit 08.10. 13:57 UTC; 840c8097… siehe oben.
 Stand 11.10. 20:37 (Routine): 72c2a073… (pc-auzre5) unverändert „planned“ seit 08.10. 13:57 UTC; 840c8097… siehe oben.
 Stand 12.10. 05:35 (Routine): 72c2a073… (pc-auzre5) unverändert „planned“ seit 08.10. 13:57 UTC; 840c8097… siehe oben.
+Stand 12.10. 20:35 (Routine): 72c2a073… (pc-auzre5) unverändert „planned“ seit 08.10. 13:57 UTC; 840c8097… siehe oben.
+Status: offen
+
+## 2026-10-12 20:35 — close: Position #287105476 (Plan eff62815…, pc-onkrbk) — zwei Close-Versuche ohne Erfolg, Plan steht noch „open“
+Was passiert: Am pc-onkrbk scheiterte das Schließen der NDX100-Position des Plans eff62815… zweimal: 13:34 UTC „Close-Bot Timeout (300 s)“ (kein Trail), 14:07 UTC „Positions-Zeile #287105476 nicht gefunden (Zeilen-Scan ohne Treffer, 46 Punkte, 2× ausgegraut) — nichts geklickt“. Der Plan steht seit 08:53 UTC „open“ ohne Ende; in order_signale gibt es keinen dritten Versuch. Puls hat richtigerweise nichts blind geklickt — aber ich kann aus der Cloud nicht sehen, ob die Position noch offen ist oder schon (per TP/SL) zu war.
+Was ich brauche: Im Master-Terminal auf pc-onkrbk nachsehen, ob #287105476 noch offen ist — wenn ja, von Hand schließen bzw. „Position schließen“ neu anstoßen; wenn nein, den Plan beenden. Danach sag mir bitte, ob die Position zum Zeitpunkt 14:07 UTC noch offen war: dann wäre der Zeilen-Scan das Problem (Code), sonst war es ein Nachzügler-Close und der Riegel hat richtig gehalten.
+Status: offen
+
+## 2026-10-12 20:35 — pc-na1q6b: pywinauto lädt nicht (win32ui-DLL) — vermutlich schon behoben, bitte bestätigen
+Was passiert: Um 11:59 UTC brach ein Echo-Start auf pc-na1q6b (Plan eea942d0…) ab: „pywinauto ist da, lässt sich aber nicht laden: ImportError: DLL load failed while importing win32ui“ (Hinweis des Bots: VC++-Runtime fehlt oder Windows „Intelligente App-Steuerung“ blockt die DLL). Ab 13:25 UTC liefen auf demselben PC Echo-Orders durch (eea942d0… von Hand gestartet, abeac9f8… 14:13 UTC per Signal platziert) — also wurde dazwischen etwas gemacht. Nur dieser PC, kein Code-Muster.
+Was ich brauche: Kurz bestätigen, dass die VC++-Runtime installiert bzw. die App-Steuerung aus ist (sonst kommt die Meldung nach dem nächsten Windows-Update wieder). Falls du nichts gemacht hast, sag es mir — dann beobachte ich den PC.
+Status: offen
+
+## 2026-10-12 20:35 — Entscheidung: Tab lud während einer Echo-Order neu (pc-i8vyq8, 14:32 UTC) — Neulade-Wächter liegt außerhalb der Puls-Pfade
+Was passiert: Plan 0c41fc25… (pc-i8vyq8) kam 14:32:35 UTC als Signal an; um 14:34 schloss der neu geladene Tab das Signal mit „⚠ Stand UNBEKANNT: Der Tab lud während einer Order neu“ ab (unklar). Der Plan startete trotzdem 14:33:39 UTC (Order lag, Plan heute von dir beendet, −968 $). Zeitlich passt das zum Sofort-Update auf .1466 (dein Push 14:17 UTC). Der Neulade-Wächter (bwGrund) soll bei „Signal in Arbeit“ / „Popup offen“ / „Start läuft“ warten — warum er hier doch lud (klassischer Echo-Weg route mt5 aus einem Signal?), kann ich nur im Wächter selbst prüfen, und der gehört nicht zu den Puls-Sektionen, die ich anfassen darf. Dazu am Morgen 08:50 UTC auf pc-onkrbk drei Balance-Lesungen „Tab neu geladen — Lesung abgebrochen“ ohne Push zu der Zeit.
+Was ich brauche: Deine Entscheidung, ob ich den Neulade-Wächter (Sofort-Update, Brücken-Selbstheilung) für diesen Fall analysieren und ggf. den Ruhe-Check um den laufenden Echo-Preflight erweitern darf — oder ob du das selbst machst.
 Status: offen
