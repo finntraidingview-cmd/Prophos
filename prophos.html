@@ -3761,21 +3761,23 @@
      Läuft blau statt grau (Grau = Erledigt). Nur Optik, Raster und Handler unverändert. */
   #dashboard-view .wdl-tab-sek-lauf{--wdl-sek:var(--blue,#2563eb)}
   #dashboard-view .wdl-tab + .wdl-tab{margin-top:28px}
-  #dashboard-view .wdl-tab[class*="wdl-tab-sek-"]{border-top:1px solid var(--border-soft);border-left:5px solid var(--wdl-sek)}
-  #dashboard-view .wdl-tab[class*="wdl-tab-sek-"] > .wdl-z-kopf:first-child{background:color-mix(in srgb, var(--wdl-sek) 14%, var(--surface));border-bottom:1px solid color-mix(in srgb, var(--wdl-sek) 30%, var(--border-soft));padding-top:10px;padding-bottom:9px}
+  /* Zurückgenommen (Finn 12.10.2026 ~17:30: "zu hart, die Farben sind so dick"): 3-px-Band, Kopf kaum getönt, Titel in Schriftfarbe, nur der Punkt farbig */
+  #dashboard-view .wdl-tab[class*="wdl-tab-sek-"]{border-top:1px solid var(--border-soft);border-left:3px solid var(--wdl-sek)}
+  #dashboard-view .wdl-tab[class*="wdl-tab-sek-"] > .wdl-z-kopf:first-child{background:color-mix(in srgb, var(--wdl-sek) 5%, var(--surface));border-bottom:1px solid var(--border-soft);padding-top:10px;padding-bottom:9px}
   #dashboard-view .wdl-tab[class*="wdl-tab-sek-"] > .wdl-z-kopf:first-child > .wdl-z-wer,
-  #dashboard-view .wdl-tab[class*="wdl-tab-sek-"] > .wdl-z-kopf:first-child .wdl-kp-t{font-size:15px;color:var(--wdl-sek)}
+  #dashboard-view .wdl-tab[class*="wdl-tab-sek-"] > .wdl-z-kopf:first-child .wdl-kp-t{font-size:14px;color:var(--ink)}
   #dashboard-view .wdl-tab[class*="wdl-tab-sek-"] > .wdl-z-kopf:first-child > .wdl-z-wer::before,
-  #dashboard-view .wdl-tab[class*="wdl-tab-sek-"] > .wdl-z-kopf:first-child .wdl-kp-t::before{content:'';display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--wdl-sek);margin-right:8px;vertical-align:1px}
-  #dashboard-view .wdl-tab-sek-erledigt{opacity:.8}
+  #dashboard-view .wdl-tab[class*="wdl-tab-sek-"] > .wdl-z-kopf:first-child .wdl-kp-t::before{content:'';display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--wdl-sek);margin-right:8px;vertical-align:1px}
+  #dashboard-view .wdl-tab-sek-erledigt{opacity:.85}
   #dashboard-view .wdl-tab-sek-erledigt > .wdl-z-kopf:first-child > .wdl-z-wer::before{background:transparent;border:2px solid var(--wdl-sek);width:7px;height:7px}
   /* UNTERGRUPPEN IN „ÜBERPRÜFEN" (Finn 12.10.2026: „eine Gruppe mit normalen Trades, wo nichts passiert ist, eine mit bestandenen,
      eine mit geblownen — wie ein übergeordneter Filter"): je Untergruppe ein Streifen mit eigenem Kopf (Etikett in der Farbe des
      Ereignisses), darin die Modell-Blöcke wie bisher. Zeilen bleiben ziehbar nach „Manuelle Arbeit". */
   #dashboard-view .wdl-ug{border-top:1px solid var(--border-soft)}
   #dashboard-view .wdl-ug + .wdl-ug{margin-top:10px;border-top:2px solid var(--border)}
-  #dashboard-view .wdl-ug-kopf{display:flex;align-items:center;gap:8px;padding:8px 16px 7px 13px;background:color-mix(in srgb, var(--wdl-ug) 10%, var(--surface));border-left:4px solid var(--wdl-ug)}
-  #dashboard-view .wdl-ug-kopf b{font-size:12.5px;font-weight:700;color:var(--wdl-ug)}
+  #dashboard-view .wdl-ug-kopf{display:flex;align-items:center;gap:8px;padding:7px 16px 6px 13px;background:var(--bg)}
+  #dashboard-view .wdl-ug-kopf b{font-size:12px;font-weight:700;color:var(--ink-2)}
+  #dashboard-view .wdl-ug-kopf b::before{content:'';display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--wdl-ug);margin-right:7px;vertical-align:1px}
   #dashboard-view .wdl-ug-kopf span{font-size:11.5px;font-weight:600;color:var(--sub);font-variant-numeric:tabular-nums}
   #dashboard-view .wdl-ug-kopf small{margin-left:auto;font-size:11px;font-weight:400;color:var(--sub)}
   #dashboard-view .wdl-ug-normal{--wdl-ug:var(--ink-2)}
@@ -43024,7 +43026,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1460'
+  const OS_TAB_BUILD = '2026-09-22.1461'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
