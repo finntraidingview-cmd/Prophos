@@ -11844,11 +11844,11 @@
         </div>
         <p style="font-size:12.5px;color:var(--sub);margin:-4px 0 12px;line-height:1.55">
           Im Zeitfenster schließt Puls alle noch offenen Trades der gewählten Wege — in zufälligen Abständen, bis nichts mehr offen ist.
-          Läuft nur am PC-Tab. <span id="acStatus" class="mono" style="color:var(--ink)"></span>
+          Läuft nur am PC-Tab. Ohne eigene Regel gilt für jeden Login der Standard: Echo / Echo V2, 23:30–23:50 Dubai (seit 12.10.2026). <span id="acStatus" class="mono" style="color:var(--ink)"></span>
         </p>
         <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
-          <div class="field" style="flex:0 0 110px"><label>Von</label><input type="time" class="input mono" id="acStart" value="23:45"></div>
-          <div class="field" style="flex:0 0 110px"><label>Bis</label><input type="time" class="input mono" id="acEnde" value="00:00"></div>
+          <div class="field" style="flex:0 0 110px"><label>Von</label><input type="time" class="input mono" id="acStart" value="23:30"></div>
+          <div class="field" style="flex:0 0 110px"><label>Bis</label><input type="time" class="input mono" id="acEnde" value="23:50"></div>
           <div class="field" style="flex:0 0 170px"><label>Zeitzone</label>
             <select class="input" id="acTz"><option value="Asia/Dubai">Dubai (GMT+4)</option><option value="Europe/Berlin">Berlin</option><option value="America/New_York">New York</option></select></div>
           <div class="field" style="flex:0 0 120px"><label>Abstand min (s)</label><input type="number" class="input mono" id="acMin" min="10" step="5" value="45"></div>
@@ -43270,7 +43270,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1475'
+  const OS_TAB_BUILD = '2026-09-22.1476'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -46389,7 +46389,11 @@
     if(typeof currentUserId === 'undefined' || !currentUserId) return null
     try{
       const { data } = await supabase.from('auto_close_regeln').select('*').eq('user_id', currentUserId).maybeSingle()
-      _ac.regel = data || { aktiv: false, start_hhmm: '23:45', ende_hhmm: '00:00', tz: 'Asia/Dubai', routen: ['mt5'], min_s: 45, max_s: 150 }
+      // Standard ohne gespeicherte Regel (.1476, Finn 12.10.2026: „sollten noch Echo-Trades offen sein zwischen
+      // 23:30 und 23:50 Dubai, schließt Puls automatisch alle offenen Echo-Trades"). Befund: auto_close_regeln
+      // war seit 22.09. bei allen 13 Logins leer — Opt-in hieß „nie an". Jetzt gilt Echo/Echo V2 für jeden Login
+      // von selbst; Orbit bleibt Opt-in über das Panel (Speichern legt die eigene Zeile an).
+      _ac.regel = data || { aktiv: true, standard: true, start_hhmm: '23:30', ende_hhmm: '23:50', tz: 'Asia/Dubai', routen: ['mt5'], min_s: 45, max_s: 150 }
       _ac.geladen = true
     }catch(e){ console.warn('[auto-close] laden', e) }
     return _ac.regel
@@ -46412,7 +46416,7 @@
     const r = _ac.regel; if(!r){ el.textContent = ''; return }
     const jetzt = acJetztHhmm(r.tz)
     const im = jetzt && acImFenster(r, jetzt)
-    el.textContent = !r.aktiv ? '· aus' : im ? `· AKTIV — Fenster läuft (${jetzt} ${r.tz})` : `· an — Fenster ${r.start_hhmm}–${r.ende_hhmm} ${r.tz}, jetzt ${jetzt || '?'}`
+    el.textContent = !r.aktiv ? '· aus' : im ? `· AKTIV — Fenster läuft (${jetzt} ${r.tz})` : `· an${r.standard ? ' (Standard: Echo)' : ''} — Fenster ${r.start_hhmm}–${r.ende_hhmm} ${r.tz}, jetzt ${jetzt || '?'}`
       + (MT5_LOCAL ? '' : ' · dieser Tab führt nicht aus (kein PC)')
   }
   async function acSpeichern(){
