@@ -43284,7 +43284,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1480'
+  const OS_TAB_BUILD = '2026-09-22.1481'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -53823,7 +53823,9 @@
       const lots = Math.round(kt * mult * 100) / 100, tpPkt = tp / (ppl * kt)
       pr.multiplier = mult; pr.hedge_faktor = Math.round(mult * 1000) / 1000; pr.slave_risk = slaveEur; pr.master_risk = risk
       pr.hedge_eur = Math.round(lots * tpWdSlavePpl() * tpPkt * 100) / 100
-      return (planWert > 0 || Number(riskMaster) > 0) ? '' : `Risiko Master fehlt am Konto (wd_sl / Max Risiko) — Startwert = TP ${Math.round(tp)} $`
+      // .1481 (Finn 13.10.2026, Farmer: „warum Risiko Master fehlt — Winning Days im Admin: TP je Firma, SL = Liquidation, Hedge nach
+      // Staffel, wie tausendmal besprochen“): ohne Handwert ist Risiko Master = Firmen-TP — das ist die Regel, kein Fehler, kein Hinweis.
+      return ''
     }
     pr.hedge_eur = Math.round(slaveEur * 100) / 100; pr.hedge_faktor = null; pr.multiplier = null; pr.slave_risk = slaveEur
     return 'ohne Take Profit kein Multiplikator — Hedge nur über den Staffel-Betrag'
@@ -54749,7 +54751,8 @@
       // RISIKO MASTER FEHLT (08.10.2026, Master: alle 11 WD-Konten ohne wd_sl/max_risiko_trade → hedgeMultAusRisiko fällt auf den TP zurück =
       // Mini-Hedge): rot direkt am Feld. max_risiko_trade liefert die RPC wd_konten_alle nicht — zählt nur, wenn sie es einmal tut
       const riskFehlt = !(Number(slWert) > 0) && !(Number(kd.max_risiko_trade) > 0)
-      const riskHinweis = riskFehlt ? '<div class="kf" style="color:var(--danger);white-space:nowrap">Risiko Master fehlt, Hedge nach TP</div>' : ''
+      // .1481: kein roter Hinweis mehr — ohne Handwert rechnet der Hedge mit dem Firmen-TP (Finns Regel), leise „= TP“ am Feld
+      const riskHinweis = riskFehlt ? '<div class="kf" style="white-space:nowrap">= TP (Firma)</div>' : ''
       const tpFeld = sperren ? `<span class="mono">${tpWert ? '$' + de(tpWert) : '—'}</span>` : `<input type="number" class="input mono vp-in wd-in" data-wd-tp="${escapeHtml(String(k.id))}" value="${tpWert ? escapeHtml(String(tpWert)) : ''}" placeholder="${k.tpVon != null ? escapeHtml(de(k.tpVon) + '–' + de(k.tpBis)) : ''}" title="TP in $ — leer = zufällig aus der Firmen-Spanne">`
       const slFeld = sperren ? `<span class="mono">${slWert ? '$' + de(slWert) : '—'}</span>` : `<input type="number" class="input mono vp-in wd-in" data-wd-sl="${escapeHtml(String(k.id))}" value="${slWert ? escapeHtml(String(slWert)) : ''}" placeholder="—" title="SL in $ — leer = kein SL">`
       const live = kd.live_balance != null ? kd.live_balance : (k.live != null ? k.live : null)
@@ -55658,7 +55661,7 @@
   function wdRiskZaehlen(){
     const el = document.getElementById('wd-risk-fehlt'); if(!el) return
     const alle = wdWdKonten(), ohne = alle.filter(k => !(Number(k.sl_vorgabe) > 0) && !(Number(k.max_risiko_trade) > 0)).length
-    el.textContent = alle.length && ohne ? `${ohne} von ${alle.length} ohne Risiko Master` : ''
+    el.textContent = ''   // .1481: „n von m ohne Risiko Master“ weg — ohne Handwert gilt der Firmen-TP, kein Fehlstand (Finn 13.10.2026)
   }
   document.getElementById('wdRiskAlle')?.addEventListener('click', async () => {
     if(await wdNurGruppe()) return wdSay('Risiko für alle WD-Konten gilt für alle IDs — nur Hermann Technologies.', 'err')   // Prüfer M1 (08.10.2026)
@@ -58352,6 +58355,10 @@
     if(typeof accBalanceLesen !== 'function'){ if(typeof atToast === 'function') atToast(`Balance von ${a.name} am PC der ID lesen`, 'end'); return }
     if(typeof atToast === 'function') atToast(`Balance wird nach dem Payout neu gelesen … (${a.name})`, 'start')
     accBalanceLesen(accountId).catch(e => { if(typeof atToast === 'function') atToast('Balance-Lesung nicht gestartet: ' + String((e && e.message) || e), 'end') })
+    // .1481 (Finn 13.10.2026, Chris …4657: Anfrage 22:19:35 UTC, Lesung 22 s später zeigte noch 165.278 — die Firma bucht den Abzug
+    // erst, wenn die Anfrage dort durch ist; Finn trägt in Prophos oft VOR dem Klick bei der Firma ein): zwei weitere Lesungen nach
+    // 5 und 30 min, solange dieser Tab offen ist — derselbe Weg, nur anstoßen.
+    for(const min of [5, 30]) setTimeout(() => { try{ accBalanceLesen(accountId).catch(() => {}) }catch(_){} }, min * 60000)
   }
   async function payoutReadySetzen(accountId, nextVal){
     if(!accountId) return
