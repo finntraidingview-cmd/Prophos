@@ -43284,7 +43284,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1481'
+  const OS_TAB_BUILD = '2026-09-22.1482'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -49450,6 +49450,18 @@
     if(n >= SF_MAX) return `${n} Neuversuche gescheitert — von Hand starten.`
     return `Danach startet der Bot ihn von selbst neu (bis ${bis}${n ? `, Versuch ${n + 1}/${SF_MAX}` : ''}).`
   }
+  // BOT LIEST VON SELBST (13.10.2026, Finn: „der Bot soll eigenständig die Balance aktualisieren und dann den Handel starten"): das Backend
+  // (app.py ap_bal_auto_tick, alle 10 min im Nachplan-Fenster) schickt für „Balance fehlt / nicht live"-Konten denselben Auftrag wie
+  // ↻ Balance lesen an den PC der ID — hier steht, wie oft heute (Deckel 3/Tag) und warum er ein Konto gerade auslässt.
+  function tplBalAutoText(kid){
+    const ba = _ap.info && _ap.info.balance_auto; if(!ba || !kid) return ''
+    const v = (ba.versuche || {})[String(kid)] || [], max = ba.max_tag || 3
+    const ue = (ba.uebersprungen || []).find(z => String(z.konto_id) === String(kid))
+    const uhr = ms => new Date(ms * 1000).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
+    if(v.length) return ` Der Bot liest von selbst — heute ${v.length}/${max}, zuletzt ${uhr(v[v.length - 1])}${ue ? ` · jetzt übersprungen: ${ue.warum}` : ''}.`
+    if(ue) return ` Der Bot liest von selbst, übersprungen: ${ue.warum}.`
+    return ' Der Bot liest von selbst nach (alle 10 min, höchstens 3×/Tag).'
+  }
   function tplBalTun(a, b, fremd, wer){
     if(fremd) return `Am PC von ${wer || 'der ID'}: Prophos → Accounts → ↻ Balance.`
     if(b && b.src === 'MT5-Konto') return 'Am PC das MT5-Terminal dieses Kontos öffnen und einloggen, dann ↻ Balance lesen.'
@@ -49668,8 +49680,9 @@
       add(x.user_id, x.user, { art: bal ? 'balance' : 'ausgelassen', firma: x.firma, konto: x.konto, typ: x.typ, balance: '', ende4: tplEnde4(x), text: g, code: x.grund_code || '',
         hinweis: bal && fremd && !balf ? 'am PC der ID lesen' : (hakenAus && fremd ? `Haken unter Accounts von ${x.user || 'der ID'}` : extG && fremd ? `am PC von ${x.user || 'der ID'} eintragen` : ''),
         balf, uid: String(x.user_id || ''), lauf: balf ? (_tplBalFremd.get(balf) || null) : null, haken: accH ? String(accH.id) : '', ext: extK,
-        tun: x.fix ? String(x.fix) : bal ? (balf ? `↻ Balance lesen — läuft am PC von ${x.user || 'der ID'} (Prophos-Tab dort offen?).` : tplBalTun(null, null, fremd, x.user))
-          : hakenAus ? 'Planer-Haken am Konto setzen — der Bot plant es beim nächsten Lauf (alle 10 min) mit.' : 'Beheben — der Bot plant das Konto dann von selbst nach (alle 10 min).' })
+        tun: (x.fix ? String(x.fix) : bal ? (balf ? `↻ Balance lesen — läuft am PC von ${x.user || 'der ID'} (Prophos-Tab dort offen?).` : tplBalTun(null, null, fremd, x.user))
+          : hakenAus ? 'Planer-Haken am Konto setzen — der Bot plant es beim nächsten Lauf (alle 10 min) mit.' : 'Beheben — der Bot plant das Konto dann von selbst nach (alle 10 min).')
+          + (bal ? tplBalAutoText(x.konto_id) : '') })
     }
     for(const t of D.trades){
       if(tplManRaus(man, t.user_id, t.konto_id, t.konto)) continue   // Konto in Manueller Arbeit (08.10.2026)
@@ -49691,7 +49704,7 @@
           add(t.user_id, t.user, { art: 'balance', firma: t.firma, konto: t.konto, typ: t.typ, balance: '', ende4: t.ende4, key: t.key,
             text: 'Balance nicht live — seit dem letzten Trade nicht gelesen; der Plan wird erst bestätigbar, wenn sie frisch ist',
             bal: (!fremd && kid) ? kid : '', balf: (fremd && kid) ? kid : '', uid: String(t.user_id || ''), lauf: kid ? ((fremd ? _tplBalFremd.get(kid) : (typeof _accBalLauf !== 'undefined' && _accBalLauf.get(kid))) || null) : null,
-            hinweis: kid ? '' : 'am PC der ID lesen', tun: fremd ? `↻ Balance lesen — läuft am PC von ${t.user || 'der ID'}; danach rutscht der Plan von selbst nach „Zu bestätigen".` : '↻ Balance lesen — danach rutscht der Plan von selbst nach „Zu bestätigen".' }) }
+            hinweis: kid ? '' : 'am PC der ID lesen', tun: (fremd ? `↻ Balance lesen — läuft am PC von ${t.user || 'der ID'}; danach rutscht der Plan von selbst nach „Zu bestätigen".` : '↻ Balance lesen — danach rutscht der Plan von selbst nach „Zu bestätigen".') + tplBalAutoText(kid) }) }
       }
       // START-FEHLER (07.10.2026): eigener Plan frisch aus dem Tab, fremder aus dem Delta (app.py start_fehler)
       const sf = (p && p.mt5Baseline && p.mt5Baseline.start_fehler) || t.sf || null, geclaimt = p ? !!p.startUmGestartetAt : !!t.geclaimt

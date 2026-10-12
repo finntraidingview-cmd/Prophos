@@ -23551,6 +23551,159 @@ def ap_nachplan_tick(jetzt, zustand):
     return erg
 
 
+# ══ BALANCE VON SELBST NACHLESEN (13.10.2026, Finn am Accounts-Tab: „Wenn in Zukunft irgendwo keine Balance aktualisiert wurde und dadurch
+# kein Trade-Planer gestartet werden kann, soll der Bot eigenständig die Balance aktualisieren und dann den Handel mit der neuen Balance
+# starten"). Bis dahin blieb ein Konto mit „Balance nicht live" / „keine Balance bekannt" unter „Braucht dich", bis jemand ↻ Balance lesen
+# drückte. Jetzt schickt dieser Takt (alle 10 min, nur im Nachplan-Fenster, nur Railway) denselben Auftrag wie der Knopf — order_signale
+# konto:<id> über _wd_balance_signal (Futures → Puls in TradingView/TopstepX, CFD → Echo-Terminal), von 'auto_planer' — an den PC der ID.
+# Liegt die frische Lesung vor, plant der Nachplan-Takt das Konto von selbst (die Gründe sind nicht „fest", ap_nachplan_kandidaten) und
+# ein schon geplanter Plan wird bestätigbar/startbar (ap_bal_guard). Zwei Quellen: (A) „Balance fehlt"-Zeilen des letzten Laufs des Tages,
+# (B) geplante Pläne (planned, heute) mit nicht-lebender Balance. Bremse je Konto: höchstens AP_BAL_AUTO_MAX_TAG Aufträge am Tag, Abstand
+# AP_BAL_AUTO_ABSTAND_S — sonst würde ein PC, der die Lesung nicht schafft, alle 10 min Tradovate aufmachen. Kein Auftrag, wenn der PC der
+# ID nicht lebt (der Auftrag verfiele nur), wenn schon einer offen ist, ohne External ID (ext_fehlt) oder ohne MT5-Instanz am PC. ══
+AP_BAL_AUTO_TAKT_S = 600
+AP_BAL_AUTO_MAX_TAG = 3
+AP_BAL_AUTO_ABSTAND_S = 5400          # 90 min zwischen zwei Aufträgen desselben Kontos
+AP_BAL_AUTO_OHNE_LESUNG = ("ext_fehlt", "express")   # Gründe, bei denen eine Lesung nichts bringt
+_ap_bal_auto = {"at": 0.0, "tag": "", "versuche": {}, "gesendet": [], "uebersprungen": [], "fehler": ""}
+
+
+def ap_bal_auto_kandidaten(letzter_erg, tag, plaene, accs, letzt, echo_bal, dup_bal, archiv=None):
+    """REIN RECHNEND (testbar): {konto_id: grund} der Konten, deren Balance der Bot jetzt von selbst lesen soll.
+    (A) ausgelassen des letzten Laufs DES TAGES mit Balance-Grund (AP_BAL_FEHLT), ohne grund_code in AP_BAL_AUTO_OHNE_LESUNG, und die
+    Balance ist seit dem Lauf NICHT gelesen (Stand ≤ Laufzeit; wie ap_bal_gelesen, nur andersherum).
+    (B) geplante Pläne (status planned) mit Konto, dessen Balance nicht live ist (ap_balance_live gegen das Ende des letzten Trades).
+    archiv = archivierte Konto-IDs. accs = {konto_id: accounts-Zeile}; fehlt das Konto, keine Lesung (Konto weg)."""
+    archiv = archiv or set()
+    out = {}
+    lauf_at = _ap_ts((letzter_erg or {}).get("at")) if isinstance(letzter_erg, dict) else None
+    if isinstance(letzter_erg, dict) and str(letzter_erg.get("tag") or "") == str(tag):
+        for z in letzter_erg.get("ausgelassen") or []:
+            if not isinstance(z, dict) or not AP_BAL_FEHLT.search(str(z.get("grund") or "")):
+                continue
+            if str(z.get("grund_code") or "") in AP_BAL_AUTO_OHNE_LESUNG:
+                continue
+            kid = str(z.get("konto_id") or "")
+            a = accs.get(kid)
+            if not kid or kid in archiv or not a or a.get("auto_planer") is False:
+                continue
+            stand = _ap_ts(acc_balance_wahl(a, echo_bal, dup_bal)[3])
+            if lauf_at and stand and stand > lauf_at:
+                continue                                   # seit dem Lauf gelesen → der Nachplan-Takt nimmt das Konto mit
+            out[kid] = "Lauf: " + str(z.get("grund") or "")[:80]
+    for p in plaene or []:
+        if str(p.get("status") or "") != "planned":
+            continue
+        kid = str(p.get("master_account_id") or "")
+        a = accs.get(kid)
+        if not kid or kid in out or kid in archiv or not a:
+            continue
+        if not ap_balance_live(acc_balance_wahl(a, echo_bal, dup_bal)[3], letzt.get(kid)):
+            out[kid] = "Plan geplant, Balance seit dem letzten Trade nicht gelesen"
+    return out
+
+
+def ap_bal_auto_darf(versuche, jetzt_s, max_tag=AP_BAL_AUTO_MAX_TAG, abstand_s=AP_BAL_AUTO_ABSTAND_S):
+    """REIN RECHNEND (testbar): darf jetzt ein weiterer Auftrag für das Konto raus? versuche = Epochen der heutigen Aufträge des Kontos.
+    → (True, '') oder (False, Grund)."""
+    v = [float(x) for x in (versuche or ()) if x]
+    if len(v) >= max_tag:
+        return False, f"heute schon {len(v)}× gelesen (Deckel {max_tag}/Tag)"
+    if v and jetzt_s - max(v) < abstand_s:
+        rest = int((abstand_s - (jetzt_s - max(v))) // 60) + 1
+        return False, f"letzter Auftrag vor {int((jetzt_s - max(v)) // 60)} min — nächster frühestens in {rest} min"
+    return True, ""
+
+
+def ap_bal_auto_tick(jetzt, reg=None):
+    """Ein Takt (aus ap_loop, jede Minute): alle AP_BAL_AUTO_TAKT_S, nur wenn auto_plan_regeln.aktiv und im Nachplan-Fenster.
+    Ergebnis im Speicher (_ap_bal_auto, GET /admin/auto-plan info.balance_auto) und im Log."""
+    if time.time() - (_ap_bal_auto.get("at") or 0) < AP_BAL_AUTO_TAKT_S:
+        return None
+    _ap_bal_auto["at"] = time.time()
+    reg = reg or (sb_select("auto_plan_regeln", {"select": "aktiv,user_ids,zeiten", "id": "eq.1"}) or [{}])[0]
+    uids = [str(u) for u in (reg.get("user_ids") or [])]
+    tz = _ap_tz(AP_TZ_TAG)
+    d = jetzt.astimezone(tz)
+    tag = d.strftime("%Y-%m-%d")
+    if _ap_bal_auto.get("tag") != tag:
+        _ap_bal_auto.update(tag=tag, versuche={}, gesendet=[], uebersprungen=[])
+    if not reg.get("aktiv") or not uids or not ap_nachplan_fenster(d, reg.get("zeiten")):
+        return None
+    in_uids = "in.(" + ",".join(uids) + ")"
+    rows = sb_select("auto_plan_lauf", {"select": "tag,quelle,at,ergebnis", "tag": f"eq.{tag}", "order": "at.desc", "limit": "1"})
+    letzter = ap_nachplan_letzter(rows)
+    plaene = _sb_all("trade_plans", {"select": "id,master_account_id,status,ended_at,completed_at", "user_id": in_uids,
+                                     "status": "in.(planned,review,completed)",
+                                     "created_at": "gte." + (jetzt - timedelta(days=30)).isoformat()})
+    kids = sorted({str(z.get("konto_id") or "") for z in ((letzter or {}).get("ausgelassen") or []) if isinstance(z, dict)}
+                  | {str(p.get("master_account_id") or "") for p in plaene if p.get("status") == "planned"})
+    kids = [k for k in kids if re.fullmatch(r"[0-9a-fA-F-]{36}", k)]
+    if not kids:
+        return None
+    accs = {}
+    for i in range(0, len(kids), 150):
+        for a in _ap_konten_laden({"id": "in.(" + ",".join(kids[i:i + 150]) + ")"}):
+            accs[str(a.get("id"))] = a
+    letzt = ap_letzt_je_konto(plaene)
+    echo_bal, dup_bal = _ap_balance_karten()
+    kand = ap_bal_auto_kandidaten(letzter, tag, plaene, accs, letzt, echo_bal, dup_bal, _ap_archiviert())
+    if not kand:
+        return None
+    lebt = _ap_pc_lebt()
+    jetzt_s = time.time()
+    gesendet, ueber = [], []
+    for kid, grund in kand.items():
+        a = accs[kid]
+        zeile = {"konto_id": kid, "konto": a.get("name"), "user_id": str(a.get("user_id") or ""), "grund": grund}
+        ok, warum = ap_bal_auto_darf(_ap_bal_auto["versuche"].get(kid), jetzt_s)
+        if not ok:
+            ueber.append(dict(zeile, warum=warum))
+            continue
+        if lebt is not None and str(a.get("user_id")) not in lebt:
+            ueber.append(dict(zeile, warum="kein lebender PC-Tab der ID — Auftrag würde nur verfallen"))
+            continue
+        try:
+            offen = sb_select("order_signale", {"select": "id,status,created_at,updated_at,pc,ergebnis,params", "plan_id": f"eq.konto:{kid}",
+                                                "status": "in.(wartet,laeuft)", "order": "created_at.desc", "limit": "5"}) or []
+            laeuft = False
+            for sg in offen:
+                st = konto_balance_stand(sg, jetzt_s)
+                if st["verfallen"]:
+                    sb_update("order_signale", {"id": f"eq.{sg['id']}", "status": f"eq.{sg['status']}"},
+                              {"status": "fehler", "updated_at": datetime.now(timezone.utc).isoformat(),
+                               "ergebnis": {"ok": False, "verfallen": True, "msg": st["grund"]}})
+                else:
+                    laeuft = True
+            if laeuft:
+                ueber.append(dict(zeile, warum="Auftrag läuft schon"))
+                continue
+            ml = sb_select("mt5_links", {"select": "mt5_login", "account_id": f"eq.{kid}", "limit": "1"}) or []
+            sig, fehler = _wd_balance_signal(a, (ml[0] if ml else {}).get("mt5_login") or "")
+            if fehler:
+                ueber.append(dict(zeile, warum=str(fehler[1])[:160]))
+                continue
+            if sig["params"]["aktion"] == "mt5_balance":
+                ort = _mt5_ort_fehler(sig["user_id"], sig["params"]["login"])
+                if ort:
+                    ueber.append(dict(zeile, warum=str(ort)[:160]))
+                    continue
+            sig["params"]["von"] = "auto_planer"
+            neu = sb_insert("order_signale", sig)
+            _ap_bal_auto["versuche"].setdefault(kid, []).append(jetzt_s)
+            gesendet.append(dict(zeile, art=sig["params"]["aktion"], signal_id=str((neu or {}).get("id") or ""),
+                                 at=datetime.now(timezone.utc).isoformat(), nr=len(_ap_bal_auto["versuche"][kid])))
+        except Exception as e:
+            ueber.append(dict(zeile, warum=f"{type(e).__name__}: {e}"[:160]))
+    _ap_bal_auto["gesendet"] = (gesendet + _ap_bal_auto.get("gesendet", []))[:60]
+    _ap_bal_auto["uebersprungen"] = ueber
+    if gesendet:
+        print(f"[balance-auto] {tag} {d.strftime('%H:%M')} dt: {len(gesendet)} Balance-Auftrag/-Aufträge von selbst — "
+              + ", ".join(f"{g['konto']} ({g['art']}, {g['nr']}/{AP_BAL_AUTO_MAX_TAG})" for g in gesendet)
+              + (f" · {len(ueber)} übersprungen" if ueber else ""), flush=True)
+    return gesendet
+
+
 # ══ ZIEL-WACHE (07.10.2026, Finn: „dass ich eine Benachrichtigung kriege, wenn irgendwo ein Account sein Ziel erreicht hat, dass der
 # irgendwie dann getaggt wird"). Anlass: FundedNext Phase 2 …4830 stand bei 105.068 → Ziel 105.000 und bekam trotzdem einen Trade.
 # Alle 5 min (im ap_loop, nur Railway): jedes Challenge/Phase-1/Phase-2-Konto aller IDs mit Firmen-Regel — Ziel wie der Planer
@@ -24041,6 +24194,12 @@ def ap_loop():
             _ap_info["nachplan_fehler"] = f"{type(e).__name__}: {e}"
             print(f"[auto-plan] ⚠️ Nachplanen: {e}", flush=True)
         try:
+            ap_bal_auto_tick(datetime.now(timezone.utc))   # Balance von selbst nachlesen, wo der Planer sonst wartet (13.10.2026)
+            _ap_bal_auto["fehler"] = ""
+        except Exception as e:
+            _ap_bal_auto["fehler"] = f"{type(e).__name__}: {e}"
+            print(f"[balance-auto] ⚠️ {type(e).__name__}: {e}", flush=True)
+        try:
             ap_archiv_sweep()                 # Pläne archivierter Konten / Waisen alle 5 min (09.10.2026)
         except Exception as e:
             print(f"[archiv-sweep] ⚠️ {type(e).__name__}: {e}", flush=True)
@@ -24196,6 +24355,11 @@ def admin_auto_plan():
         # JSON-fest (09.10.2026, Hotfix): _ap_info ist Prozess-Speicher mehrerer Takte — ein set darin machte jeden GET zu HTTP 500
         info = json.loads(json.dumps({k: v for k, v in _ap_info.items() if k != "nachplan_ziel"},   # Merker gehört nicht in die Antwort
                                      default=lambda o: sorted(o) if isinstance(o, (set, frozenset)) else str(o)))
+        # Balance von selbst (13.10.2026): heutige Aufträge je Konto, Übersprungene mit Grund — „Braucht dich" zeigt „Bot liest … n/3"
+        info["balance_auto"] = json.loads(json.dumps({"tag": _ap_bal_auto.get("tag"), "at": _ap_bal_auto.get("at"), "fehler": _ap_bal_auto.get("fehler"),
+                                                      "max_tag": AP_BAL_AUTO_MAX_TAG, "versuche": _ap_bal_auto.get("versuche"),
+                                                      "gesendet": _ap_bal_auto.get("gesendet"), "uebersprungen": _ap_bal_auto.get("uebersprungen")},
+                                                     default=str))
         try:
             nx, art = ap_nachplan_naechster(datetime.now(timezone.utc), _ap_info.get("nachplan_at"), reg.get("zeiten"), _ap_tz(AP_TZ_TAG))
             info.update(nachplan_naechster=nx.isoformat() if nx else None, nachplan_art=art, nachplan_takt_s=AP_NACHPLAN_TAKT_S,
