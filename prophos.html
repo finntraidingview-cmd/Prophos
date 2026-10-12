@@ -3230,6 +3230,8 @@
   /* Max-Risiko-Chip (07.10.2026): nur bei gesetztem accounts.max_risiko_trade, Amber wie der Trade-Limits-Block im Bulk-Add */
   /* Ziel-Chip (07.10.2026): accounts.ziel_erreicht_at, gesetzt von der Ziel-Wache (app.py zw_tick) — Grün wie ein erreichtes Ziel */
   .type-badge.acc-ziel-chip{margin-left:6px;background:#ECFDF5;border-color:#A7F3D0;color:#047857;vertical-align:middle}
+  #accountsTable .acc-ziel-chip[data-acc-ziel]{cursor:pointer}   /* .1474: Klick öffnet den Nachfolger-Wizard */
+  #accountsTable .acc-ziel-chip[data-acc-ziel]:hover{background:#D1FAE5}
   #dashboard-view .type-badge.acc-risk-chip{margin-left:6px;background:#fff;border-color:#f3c98b;color:#b45309;vertical-align:middle}
   /* Planer-Spalte (08.10.2026, Finn: „mies hässlich" zum Chip in der Typ-Spalte): eigene schmale Spalte — Haken (accounts.auto_planer)
    * + kleine Zeile daneben: Startzeit grün (geplant), „ausgelassen" amber, „aus"/„–" grau. Klein, keine Pillen. */
@@ -33727,7 +33729,10 @@
     if(!a || !a.zielErreichtAt) return ''
     const de = v => Math.round(Number(v)).toLocaleString('de-DE')
     const seit = new Date(a.zielErreichtAt).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
-    return ` <span class="type-badge acc-ziel-chip" title="Ziel erreicht seit ${seit}${a.zielErreichtBal ? ' · Balance ' + de(a.zielErreichtBal) : ''}${a.zielUsd ? ' ≥ Ziel ' + de(a.zielUsd) : ''} — Phase umstellen / auszahlen. Kein Trade mehr.">🎯 Ziel erreicht</span>`
+    // Klickbar (.1474, Finn 12.10.2026: „wenn ich auf ‚Ziel erreicht' draufdrücke, zu dem Popup gleich kommen und den nachfolgenden Account
+    // hinzufügen") — data-acc-ziel verdrahtet die Accounts-Tabelle in renderAccounts; im Planer (pz-typ) bleibt der Chip reine Anzeige.
+    const weiter = (typeof bstNaechsterTyp === 'function') ? bstNaechsterTyp(a) : null
+    return ` <span class="type-badge acc-ziel-chip" data-acc-ziel="${escapeHtml(String(a.id))}" title="Ziel erreicht seit ${seit}${a.zielErreichtBal ? ' · Balance ' + de(a.zielErreichtBal) : ''}${a.zielUsd ? ' ≥ Ziel ' + de(a.zielUsd) : ''} — ${weiter ? 'Klick: Nachfolger anlegen (' + (typeof typeLabel === 'function' ? typeLabel(weiter) : weiter) + ')' : 'Phase umstellen / auszahlen'}. Kein Trade mehr.">🎯 Ziel erreicht${weiter ? ' →' : ''}</span>`
   }
   // Max-Risiko-Chip (07.10.2026): Konto mit eigener Vorgabe je Trade (z. B. 1-%-Regel) — reine Markierung, keine Prüfung
   function accRisikoChipHtml(a){
@@ -34463,6 +34468,14 @@
           }, 100)
         })
       })
+      // 🎯 Ziel erreicht → Nachfolger-Wizard (.1474): Konto + Folgetyp (Phase 1 → Phase 2, Phase 2/Challenge → Funded), wie im Reiter „Bestanden";
+      // der Wizard legt an, archiviert den Vorgänger und zeichnet die Liste danach neu. Ohne Folgetyp (Funded/WD) passiert nichts.
+      accEls.table.querySelectorAll('[data-acc-ziel]').forEach(chip => chip.addEventListener('click', ev => {
+        ev.stopPropagation()
+        const a = (accounts || []).find(x => String(x.id) === String(chip.dataset.accZiel)); if(!a) return
+        const neu = (typeof bstNaechsterTyp === 'function') ? bstNaechsterTyp(a) : null; if(!neu) return
+        openSuccessorWizard(a.id, () => { try{ renderAccounts() }catch(_){} try{ renderTradePlans() }catch(_){} }, neu)
+      }))
       // Edit-Buttons
       // ↻ Balance lesen (F19) — eigener Handler je Knopf
       accEls.table.querySelectorAll('[data-acc-balref]').forEach(btn => btn.addEventListener('click', ev => { ev.stopPropagation(); accBalanceLesen(btn.dataset.accBalref) }))
@@ -43254,7 +43267,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1473'
+  const OS_TAB_BUILD = '2026-09-22.1474'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
