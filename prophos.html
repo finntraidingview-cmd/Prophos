@@ -3741,6 +3741,33 @@
   #dashboard-view .wdl-tab-sek-manuell{--wdl-sek:#dc2626}
   #dashboard-view .wdl-tab-sek-erledigt{--wdl-sek:var(--sub-2)}
   #dashboard-view .wdl-tab-sek-bestanden{--wdl-sek:#15803d}
+  /* ÜBERGRUPPEN DEUTLICH (Finn 12.10.2026 am Radar .1458: „sieht alles so ein bisschen gleich aus — man erkennt nicht, wo es läuft,
+     wo es wartet"): die 3-px-Oberkante ging neben den Modell-Rändern unter. Jetzt je Abschnitt ein 5-px-Band links in der Akzentfarbe,
+     ein kräftig getönter Kopf mit farbigem Etikett (Punkt + Titel in der Akzentfarbe, größer) und 28 px Luft zwischen den Abschnitten.
+     Läuft blau statt grau (Grau = Erledigt). Nur Optik, Raster und Handler unverändert. */
+  #dashboard-view .wdl-tab-sek-lauf{--wdl-sek:var(--blue,#2563eb)}
+  #dashboard-view .wdl-tab + .wdl-tab{margin-top:28px}
+  #dashboard-view .wdl-tab[class*="wdl-tab-sek-"]{border-top:1px solid var(--border-soft);border-left:5px solid var(--wdl-sek)}
+  #dashboard-view .wdl-tab[class*="wdl-tab-sek-"] > .wdl-z-kopf:first-child{background:color-mix(in srgb, var(--wdl-sek) 14%, var(--surface));border-bottom:1px solid color-mix(in srgb, var(--wdl-sek) 30%, var(--border-soft));padding-top:10px;padding-bottom:9px}
+  #dashboard-view .wdl-tab[class*="wdl-tab-sek-"] > .wdl-z-kopf:first-child > .wdl-z-wer,
+  #dashboard-view .wdl-tab[class*="wdl-tab-sek-"] > .wdl-z-kopf:first-child .wdl-kp-t{font-size:15px;color:var(--wdl-sek)}
+  #dashboard-view .wdl-tab[class*="wdl-tab-sek-"] > .wdl-z-kopf:first-child > .wdl-z-wer::before,
+  #dashboard-view .wdl-tab[class*="wdl-tab-sek-"] > .wdl-z-kopf:first-child .wdl-kp-t::before{content:'';display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--wdl-sek);margin-right:8px;vertical-align:1px}
+  #dashboard-view .wdl-tab-sek-erledigt{opacity:.8}
+  #dashboard-view .wdl-tab-sek-erledigt > .wdl-z-kopf:first-child > .wdl-z-wer::before{background:transparent;border:2px solid var(--wdl-sek);width:7px;height:7px}
+  /* UNTERGRUPPEN IN „ÜBERPRÜFEN" (Finn 12.10.2026: „eine Gruppe mit normalen Trades, wo nichts passiert ist, eine mit bestandenen,
+     eine mit geblownen — wie ein übergeordneter Filter"): je Untergruppe ein Streifen mit eigenem Kopf (Etikett in der Farbe des
+     Ereignisses), darin die Modell-Blöcke wie bisher. Zeilen bleiben ziehbar nach „Manuelle Arbeit". */
+  #dashboard-view .wdl-ug{border-top:1px solid var(--border-soft)}
+  #dashboard-view .wdl-ug + .wdl-ug{margin-top:10px;border-top:2px solid var(--border)}
+  #dashboard-view .wdl-ug-kopf{display:flex;align-items:center;gap:8px;padding:8px 16px 7px 13px;background:color-mix(in srgb, var(--wdl-ug) 10%, var(--surface));border-left:4px solid var(--wdl-ug)}
+  #dashboard-view .wdl-ug-kopf b{font-size:12.5px;font-weight:700;color:var(--wdl-ug)}
+  #dashboard-view .wdl-ug-kopf span{font-size:11.5px;font-weight:600;color:var(--sub);font-variant-numeric:tabular-nums}
+  #dashboard-view .wdl-ug-kopf small{margin-left:auto;font-size:11px;font-weight:400;color:var(--sub)}
+  #dashboard-view .wdl-ug-normal{--wdl-ug:var(--ink-2)}
+  #dashboard-view .wdl-ug-bestanden{--wdl-ug:#15803d}
+  #dashboard-view .wdl-ug-geblowt{--wdl-ug:#b91c1c}
+  #dashboard-view .wdl-ug > .wdl-og:first-of-type{padding-top:9px}
   /* Phase im Abschnitt „Bestanden" als Klartext „Phase 1 → Phase 2" (09.10.2026) + fremde Konten „im Login von …" */
   #dashboard-view .wdl-bst-phase{display:inline-block;padding:1px 7px;border-radius:999px;background:var(--bg);border:1px solid var(--border-soft);font-size:11px;font-weight:600;color:var(--ink-2);white-space:nowrap}
   #dashboard-view .wdl-bst-fremd{font-size:11px;color:var(--sub);white-space:nowrap}
@@ -29619,7 +29646,8 @@
     // durcheinander. Sonst erkennen wir gar nichts"): je Gruppe zwei Blöcke in der bisherigen Reihenfolge (Läuft nach Start,
     // Beendet nach Ende), zwischen ihnen eine etwas kräftigere Linie (wdl-z-pfneu). Gekürzt wird JE BLOCK — sonst belegten bei
     // „Beendet" die 5 neuesten Orbit-Zeilen alle Plätze und Echo wäre wieder versteckt (der Anlass für die Kürzung).
-    const gruppe = (titel, arr, sp, cls, mehr, alleArr) => {
+    // unter (12.10.2026): optionale Untergruppen [[Titel, Zeilen, Klasse, Hinweis]] — Überprüfen teilt sich in normal · bestanden · geblowt
+    const gruppe = (titel, arr, sp, cls, mehr, alleArr, unter) => {
       if(!arr.length) return ''
       // Blöcke je MODELL (01.10.2026 abends, Finn: „die Modelle hier unten in der Liste separieren"): Reihenfolge wie die Leiste oben
       // (Echo · Orbit · Winning Day · Echo V2 · Orbit V2 · Topstep V2), je Block eine kleine Überschrift „Orbit · 2" — nur in „Alle"
@@ -29632,9 +29660,16 @@
       const lang = bloecke.some(([, b]) => b.length > WDL_BEENDET_KURZ)
       const alle = !mehr || (wdl.alleZu || {})[mehr] || !lang
       const zeilenVon = b => (alle ? b : b.slice(0, WDL_BEENDET_KURZ)).map(t => zeile(t, '')).join('')
-      const zeilen = wdl.modell ? bloecke.map(([, b]) => zeilenVon(b)).join('')
-        : wdlObergruppenHtml(bloecke, (k, b) => `<div class="wdl-mb" style="--wdl-m:${WDL_MODELL_FARBE[k] || 'var(--sub)'}"><div class="wdl-mb-kopf"><b>${escapeHtml(k)}</b>`
-          + `<span>${b.length}</span></div>${zeilenVon(b)}</div>`)
+      // Körper = Modell-Blöcke einer Zeilenmenge; mit Untergruppen (unter, 12.10.2026) je Untergruppe ein Streifen mit eigenem Kopf
+      const koerper = a => {
+        const bl = a === arr ? bloecke : [...reihe, 'Weitere'].map(k => [k, a.filter(t => modellVon(t) === k)]).filter(([, b]) => b.length)
+        return wdl.modell ? bl.map(([, b]) => zeilenVon(b)).join('')
+          : wdlObergruppenHtml(bl, (k, b) => `<div class="wdl-mb" style="--wdl-m:${WDL_MODELL_FARBE[k] || 'var(--sub)'}"><div class="wdl-mb-kopf"><b>${escapeHtml(k)}</b>`
+            + `<span>${b.length}</span></div>${zeilenVon(b)}</div>`)
+      }
+      const zeilen = unter
+        ? unter.filter(([, a]) => a.length).map(([ut, a, ucls, hinweis]) => `<div class="wdl-ug ${ucls}"><div class="wdl-ug-kopf"><b>${ut}</b><span>${a.length}</span>${hinweis ? `<small>${hinweis}</small>` : ''}</div>${koerper(a)}</div>`).join('')
+        : koerper(arr)
       const fuss = mehr && lang ? `<button type="button" class="wdl-mehr" data-wdl-mehr="${mehr}">${alle ? 'weniger' : `alle ${arr.length} zeigen`}</button>` : ''
       // Kopf mit Personen-Chips (05.10.2026): Titel + Chips teilen sich die Namens- und die (im Kopf leere) Richtungs-Spalte und
       // brechen dort um; die Spaltenköpfe rechts bleiben über ihren Spalten. Ohne Chips das alte Markup.
@@ -29729,13 +29764,22 @@
       if(!g.pr.length) return ''
       return `<div class="wdl-tab wdl-tab-konto wdl-tab-manuell wdl-tab-sek-manuell wdl-tab-leer"><div class="wdl-z wdl-z-kopf"><span class="wdl-z-wer">Manuelle Arbeit · 0</span><span class="wdl-z-ri"></span><span class="wdl-man-hinweis">Zeile aus „Überprüfen" hierher ziehen oder „→ manuell"</span></div></div>`
     }
+    // ÜBERPRÜFEN IN DREI UNTERGRUPPEN (Finn 12.10.2026, Radar .1458: „eine Gruppe mit normalen Trades, wo nichts passiert ist, eine
+    // mit bestandenen, eine mit geblownen — wie ein übergeordneter Filter"): Bestanden = Ergebnis-Wort der Ziel-Wache (wdlBestandenChip),
+    // Geblowt = abgehakt/erkannt geblowt oder Konto weg (nicht das Tageslimit — das ist kein Blow), Normal = der Rest zum schnellen
+    // Abhaken. Reihenfolge: normal · bestanden · geblowt. Nur Anzeige — Abhaken/→ manuell/Drag unverändert.
+    const istGeblowt = t => !!(t && (t.blown === true || (wdlBlowStand(t) || {}).geblowt || wdlKontoWeg(t)))
+    const pruefTeile = pr => {
+      const best = pr.filter(t => !!wdlBestandenChip(t)), blow = pr.filter(t => !best.includes(t) && istGeblowt(t)), norm = pr.filter(t => !best.includes(t) && !blow.includes(t))
+      return [['Normal', norm, 'wdl-ug-normal', 'nichts passiert — abhaken'], ['Bestanden', best, 'wdl-ug-bestanden', 'Phase bestanden — abhaken, dann Phase umstellen'], ['Geblowt', blow, 'wdl-ug-geblowt', 'Konto geblowt oder weg — abhaken, dann archivieren']]
+    }
     // arr = was gezeigt wird (Modell + Person), alleArr = dieselbe Liste ohne Personen-Filter — nur für die Chips im Kopf
     const gruppen = (arr, alleArr) => {
       const g = teile(arr), a = teile(alleArr)
       // Abschnitts-Klassen (09.10.2026, Finn: „schwemmt alles ein") — je Abschnitt eigener Akzent über --wdl-sek (CSS .wdl-tab-sek-*)
       return gruppe('Läuft', nachStart(g.la), ['Spanne', 'P&amp;L', 'Seit'], 'wdl-tab-lauf wdl-tab-sek-lauf', null, a.la)
         + gruppe('Wartet', nachEnde(g.wa), ['Nachlesung', 'P&amp;L', 'Zu'], 'wdl-tab-sek-wartet', null, a.wa)
-        + gruppe('Überprüfen', nachEnde(g.pr), ['Ergebnis', 'Konto', 'P&amp;L', 'Zu'], 'wdl-tab-konto wdl-tab-sek-pruef', null, a.pr)
+        + gruppe('Überprüfen', nachEnde(g.pr), ['Ergebnis', 'Konto', 'P&amp;L', 'Zu'], 'wdl-tab-konto wdl-tab-sek-pruef', null, a.pr, pruefTeile(g.pr))
         + manuell(g, a)
         + bestanden()
         + gruppe('Erledigt', nachEnde(g.er), ['Ergebnis', 'Konto', 'P&amp;L', 'Zu'], 'wdl-tab-konto wdl-tab-sek-erledigt', 'erledigt', a.er)
@@ -42966,7 +43010,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1458'
+  const OS_TAB_BUILD = '2026-09-22.1459'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
