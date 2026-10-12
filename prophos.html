@@ -3797,6 +3797,22 @@
   #dashboard-view .wdl-ug-bestanden{--wdl-ug:#15803d}
   #dashboard-view .wdl-ug-geblowt{--wdl-ug:#b91c1c}
   #dashboard-view .wdl-ug > .wdl-og:first-of-type{padding-top:9px}
+  /* RUHIGER (Finn 12.10.2026 ~17:48, Radar .1462: „immer noch sehr unübersichtlich, die Farben sind so stark"): die getönten Modell-
+     Köpfe (Winning Day grün, Orbit V2/Echo V2 violett) und der farbige Modell-Rand links sind weg — Modellname grau-schwarz mit kleinem
+     Farbpunkt, weiß hinterlegt, dünne Linie. Abschnitts-Kopf nur noch der Punkt in der Akzentfarbe, Band links 2 px. Raster unverändert. */
+  #dashboard-view .wdl-mb{border-left:none}
+  #dashboard-view .wdl-mb > .wdl-z{padding-left:16px}
+  #dashboard-view .wdl-mb-kopf{background:var(--surface);padding-left:16px;border-bottom:1px solid var(--border-soft)}
+  #dashboard-view .wdl-mb-kopf b{font-size:12px;color:var(--ink-2)}
+  #dashboard-view .wdl-mb-kopf b::before{content:'';display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--wdl-m);margin-right:7px;vertical-align:1px}
+  #dashboard-view .wdl-mb + .wdl-mb{margin-top:0;border-top:1px solid var(--border)}
+  #dashboard-view .wdl-tab-mb{background:var(--surface)}
+  #dashboard-view .wdl-og{background:var(--surface);color:var(--sub-2)}
+  #dashboard-view .wdl-mb + .wdl-og{margin-top:0}
+  #dashboard-view .wdl-tab[class*="wdl-tab-sek-"]{border-left-width:2px}
+  #dashboard-view .wdl-tab[class*="wdl-tab-sek-"] > .wdl-z-kopf:first-child{background:var(--surface)}
+  #dashboard-view .wdl-ug-kopf{background:var(--surface);border-top:1px solid var(--border-soft)}
+  #dashboard-view .wdl-ug + .wdl-ug{margin-top:0;border-top:none}
   /* Phase im Abschnitt „Bestanden" als Klartext „Phase 1 → Phase 2" (09.10.2026) + fremde Konten „im Login von …" */
   #dashboard-view .wdl-bst-phase{display:inline-block;padding:1px 7px;border-radius:999px;background:var(--bg);border:1px solid var(--border-soft);font-size:11px;font-weight:600;color:var(--ink-2);white-space:nowrap}
   #dashboard-view .wdl-bst-fremd{font-size:11px;color:var(--sub);white-space:nowrap}
@@ -43039,7 +43055,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1462'
+  const OS_TAB_BUILD = '2026-09-22.1463'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
