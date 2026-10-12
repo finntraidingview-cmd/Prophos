@@ -22417,6 +22417,7 @@
       await new Promise(res => setTimeout(res, 12000 + Math.random() * 10000))
     }
     if(!r || r._httpFail || r.copier_offline) return { ok:false, code:'reader_fehlt', msg: (r && r.error) || 'keine Antwort' }
+    try{ bigTradeHeimPlanen(konto, 'Lesung ' + String(konto).slice(-4)) }catch(_){}   // Rück-Login ins Big-Trade-Konto (12.10.2026)
     return r
   }
   // External ID des Master-Kontos (Tradovate-Unterkonto) — dieselbe Quelle wie extId in tpOrbitStarten
@@ -22424,6 +22425,45 @@
     const acc = (accounts || []).find(a => String(a.id) === String(plan.masterAccountId))
     return (acc && acc.externalId) ? String(acc.externalId).trim() : ''
   }
+  /* ══ RÜCK-LOGIN INS BIG-TRADE-KONTO (12.10.2026, Finn: „läuft ein Big Trade mit Orbit-Hedge, kann Puls zwar noch Orders für andere
+   * Konten platzieren — sobald die Order platziert ist, soll er sich direkt wieder in den gehedgten Account einloggen, damit das
+   * Tampermonkey-Script dort die ganze Zeit die Order ausliest. Das ist Priorität 1."). Rückfall für die Lese-Lücke: Radar-Spiegel +
+   * Notfall-SL. Big Trade = laufender Plan (status open) auf tvv2/tsv2 MIT Hedge (Orbit V3, Winning Day, Fusion-Hedge, Topstep mit
+   * Hedge) — dieselbe Definition wie prophos_big_trade in der DB. Echo (MT5) hat kein Fenster-Problem, dort läuft nichts hiervon.
+   * Ablauf: jede Puls-Lesung/Order auf einem ANDEREN Konto (tvV2Lesen, tpOrbitStartenKern) stößt bigTradeHeimPlanen an — 20 s
+   * Ruhe nach der letzten fremden Aktion (ein Rundgang über mehrere Konten löst so nur EINEN Heimweg aus), dann loggt Puls über
+   * dieselbe Lesung (tv-lesen / tsx-lesen, nur Konto + Balance, keine Order) ins Big-Trade-Konto zurück. Läuft gerade eine Order
+   * (_tpOrbitLaeuft) oder der Rundgang (tvV2Poll.busy), wartet der Heimweg 10 s weiter. Nur am PC-Tab (mtcApi). ══ */
+  const BTH_RUHE_MS = 20000, BTH_WARTE_MS = 10000
+  let _bthTimer = null, _bthLaeuft = false, _bthSelbst = false
+  function bigTradePlan(){
+    const hedge = p => (p.route === 'tvv2' || p.route === 'tsv2') && (Number(p.hedgeEur) > 0 || p.orbitV3 === true || p.winningDay === true)
+    return (tradePlans || []).filter(p => p.status === 'open' && hedge(p) && tvV2Konto(p))
+      .sort((a, b) => String(b.startedAt || '').localeCompare(String(a.startedAt || '')))[0] || null
+  }
+  function bigTradeHeimPlanen(konto, grund){
+    if(typeof window.mtcApi !== 'function' || _bthSelbst) return
+    const bt = bigTradePlan(); if(!bt) return
+    if(konto && String(konto).trim() === tvV2Konto(bt)) return   // war schon das Big-Trade-Konto: nichts zu tun
+    if(_bthTimer) clearTimeout(_bthTimer)
+    _bthTimer = setTimeout(() => bigTradeHeim(grund || 'fremdes Konto'), BTH_RUHE_MS)
+  }
+  async function bigTradeHeim(grund){
+    _bthTimer = null
+    if(_bthLaeuft) return
+    const bt = bigTradePlan(); if(!bt) return
+    if(_tpOrbitLaeuft || (typeof tvV2Poll !== 'undefined' && tvV2Poll.busy)){ _bthTimer = setTimeout(() => bigTradeHeim(grund), BTH_WARTE_MS); return }
+    const konto = tvV2Konto(bt)
+    _bthLaeuft = true; _bthSelbst = true
+    try{
+      const r = await tvV2Lesen(konto, 45, bt)
+      const ok = !!(r && r.ok && (!r.konto_aktiv || String(r.konto_aktiv).includes(konto)))
+      console.info(`[big-trade] Heimweg nach ${grund}: Puls ${ok ? 'wieder' : 'NICHT'} auf „${bt.masterName || konto}"`, ok ? '' : (r && (r.msg || r.code)) || '')
+      if(!ok && typeof atToast === 'function') atToast(`Puls nicht zurück im Big-Trade-Konto „${bt.masterName || konto}": ${(r && (r.msg || r.code)) || 'keine Antwort'} — Reader sieht den Hedge-Trade gerade nicht, nächster Versuch nach der nächsten Puls-Aktion.`, 'end')
+    }catch(e){ console.warn('[big-trade] Heimweg', (e && e.message) || e) }
+    finally{ _bthLaeuft = false; _bthSelbst = false }
+  }
+  window._bigTradeHeim = { planen: bigTradeHeimPlanen, plan: bigTradePlan }   // Test-Haken (Stub)
   /* BALANCE STATT TODAY'S P&L (26.09.2026, Finn: „bei jeder Order holen wir uns den Wert Balance … 1–30 min [seit 26.09.2026 spät: 1–150 min] nach dem Trade loggt Puls sich
    * noch mal ein und liest die neue Live-Balance — daraus Take Profit und P&L"). Befund: das Tradovate-Panel in TradingView zeigt in der
    * Kopfzeile nur „Account Balance · Equity · Profit" — ein „Today's P&L" gibt es dort nicht, deshalb scheiterte jede Endlesung
@@ -43096,7 +43136,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1468'
+  const OS_TAB_BUILD = '2026-09-22.1469'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -43390,13 +43430,19 @@
     // später und protokolliert. Seit sql/2026-10-08_gegenhedge_90s.sql (Finn 08.10.2026: „stellt das Ganze bitte auf 90 Sekunden")
     // nur noch Starts/Hand-Positionen der letzten 90 s → deren Start + 90 s + 20–40 s, laufende Trades sperren nicht mehr.
     const gh = fa ? null : await frage('prophos_gegenhedge_halten', 'gegenhedge')
-    const d = fa || gh
+    // EIN BIG TRADE JE FENSTER (12.10.2026, Finn: „bei Orbit maximal einer gleichzeitig, Topstep zählt zu Orbit"; Echo unbegrenzt):
+    // läuft in diesem Fenster schon ein Orbit-V3-/Winning-Day-/Topstep-Hedge-Trade, legt prophos_big_trade_halten
+    // (sql/2026-10-12_hedge_kategorien_regel.sql) den Start 15 min nach hinten. Trades ohne Hedge und Echo prüft sie gar nicht.
+    const bt = (fa || gh) ? null : await frage('prophos_big_trade_halten', 'big-trade')
+    const d = fa || gh || bt
     if(!d){ _faFrei.set(String(plan.id), Date.now()); return null }
     _faFrei.delete(String(plan.id))
     // Startzeit immer in Dubai-Zeit wie der Grund aus der DB (08.10.2026: Emins Toast mischte „seit 10:08 Dubai" mit „startet 09:11" PC-Ortszeit)
     const um = d.ziel ? new Date(d.ziel).toLocaleTimeString('de-DE', { timeZone: 'Asia/Dubai', hour: '2-digit', minute: '2-digit' }) + ' Dubai' : '?'
     // Gegen einen LAUFENDEN Trade derselben ID (sql/2026-10-09_gegenhedge_nur_gegenrichtung.sql, d.laeuft): gesperrt, bis er zu ist — kein „90 s"
-    const t = gh && d.laeuft
+    const t = bt
+      ? `„${plan.masterName || '—'}" wartet: Big Trade „${d.wer || '?'}" läuft noch in diesem Fenster (Orbit/Topstep: nur einer gleichzeitig) — neue Prüfung ${um}`
+      : gh && d.laeuft
       ? `„${plan.masterName || '—'}" gegen laufenden Trade gesperrt: ${d.grund || 'dein Konto läuft dort in Gegenrichtung'} (${plan.masterFirm || d.firma || 'gleiche Firma'}) — neue Prüfung ${um}`
       : gh
       ? `„${plan.masterName || '—'}" wartet 90-s-Abstand: ${d.wer || 'eine andere ID'} ${d.grund || 'startet gegenläufig'} (${plan.masterFirm || d.firma || 'gleiche Firma'}) — startet ${um}`
@@ -43405,7 +43451,7 @@
     if(i >= 0) tradePlans[i] = Object.assign({}, tradePlans[i], { startUm: d.ziel || tradePlans[i].startUm, startUmGestartetAt: null })   // orbit_gesendet_at nie
     try{ renderTradePlans() }catch(_){}
     if(typeof atToast === 'function') atToast('⏳ ' + t, 'end')
-    console.warn(gh ? '[gegenhedge]' : '[firmen-abstand]', t)
+    console.warn(bt ? '[big-trade]' : gh ? '[gegenhedge]' : '[firmen-abstand]', t)
     return t
   }
   window._faVorStart = plan => faVorStart(plan)   // Test-Haken (Stub)
@@ -43869,6 +43915,7 @@
       await fehler('⚠ Ergebnis UNKLAR — Verbindung zum Puls abgerissen: ' + (e && e.message || e) + ' · Erst in TradingView nachsehen, ob die Order liegt.')
     }finally{
       _tpOrbitLaeuft = false
+      try{ bigTradeHeimPlanen(extId, 'Order ' + String(extId).slice(-4)) }catch(_){}   // Rück-Login ins Big-Trade-Konto (12.10.2026, Prio 1)
     }
   }
 
@@ -52599,6 +52646,16 @@
 
     const master = accounts.find(a => String(a.id) === String(masterId))
     const slave  = v2 ? null : accounts.find(a => String(a.id) === String(slaveId))
+    // HEDGE-KATEGORIEN-REGEL (12.10.2026, Finn: „ganz klar zwischen mit Hedge und ohne Hedge unterscheiden"): Funded/Funded CFD/
+    // Winning Days nur mit Hedge, Challenge/Phase 1/Phase 2 nur ohne (Ausnahme: Schalter „Challenges mit Hedge" oben im Popup).
+    // Dieselbe Regel sitzt als Riegel in der DB (sql/2026-10-12_hedge_kategorien_regel.sql, Trigger trade_plans_kontoart_weg) —
+    // hier nur die klare Meldung, bevor der Plan überhaupt geschrieben wird. Duplikum-Wege (tvplus/dup) bleiben ungefiltert (07.10.2026).
+    { const kt = String((master && master.type) || '').toLowerCase()
+      const mitH = tpWegMitHedge(), ohneH = routeIstV2(_tpRoute) && !mitH
+      if(ohneH && (kt === 'funded' || kt === 'funded_cfd' || kt === 'winning_days')){
+        msg(`Funded-Konto „${master.name}" nur mit Hedge — Weg Echo, Orbit V3, Winning Day oder Topstep (mit Hedge) wählen; ${_tpRoute === 'mt5v2' ? 'Echo V2' : _tpRoute === 'tsv2' ? 'Topstep V2' : 'Orbit V2'} ohne Hedge ist für Challenges.`, 'err'); return }
+      if(mitH && routeIstV2(_tpRoute) && (kt === 'challenge' || kt === 'phase1' || kt === 'phase2') && !_tpChHedge){
+        msg(`Challenge-/Phase-Konto „${master.name}" nur ohne Hedge — Echo V2, Orbit V2 oder Topstep V2 wählen, oder oben „Challenges mit Hedge" einschalten.`, 'err'); return } }
     const mult = mitHedge ? (_tpWdHand.mult > 0 ? _tpWdHand.mult : tpCalcMultiplier(master.firm, TP_WD_SLAVE_FIRM, (wd && !o3) ? masterTp : masterRisk, masterQty, slaveRisk))   // Hand-Multiplikator gewinnt (25.09.2026); WD: Basis = TP (05.10.2026)
                : v2 ? null : tpCalcMultiplier(master.firm, slave.firm, masterRisk, masterQty, slaveRisk)
 
