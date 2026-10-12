@@ -52,16 +52,22 @@ def main():
           and {w["menge"] for w in werte} == {2, 3},
           f"Trade 1 (DLL 3.000): TP 1.950–2.650 $, SL 1.250–1.750 $, 2–3 NQ ({[(w['tp'], w['sl'], w['menge']) for w in werte]})")
     w1 = werte[1]
-    check(w1["kette"] == {"nr": 1, "tagesziel": 4500, "verlust_grenze": 3200, "daily_usd": 3000, "mll": 145500.0, "tagesstart_plan": 150000.0,
-                          "tag_typ": "erster"}
+    # 12.10.2026 (Finn): gesunder Tag endet an UNSEREM SL 150–300 $ vor dem DLL → Verlustgrenze 2.700–2.850 = 3.000 − dll_puffer
+    k1_ = dict(w1["kette"])
+    dp_ = k1_.pop("dll_puffer", None)
+    check(k1_ == {"nr": 1, "tagesziel": 4500, "verlust_grenze": 3000 - dp_, "daily_usd": 3000, "mll": 145500.0, "tagesstart_plan": 150000.0,
+                  "tag_typ": "erster", "angefressen": False} and dp_ is not None and 150 <= dp_ <= 300
           and w1["risiko"] == w1["sl"] and "Topstep-Kette 1/2" in w1["stufe"],
-          f"Tag 1 frisch (150.000): Tagesziel +4.500, Verlustgrenze 3.200 (DLL + 200), MLL 145.500 ({w1['kette']})")
+          f"Tag 1 frisch (150.000): Tagesziel +4.500, Verlustgrenze 2.700–2.850 (DLL − dll_puffer {dp_}), MLL 145.500 ({w1['kette']})")
+    vgs = [w["kette"]["verlust_grenze"] for w in werte]
+    check(vgs == [2700, 2756, 2822, 2850] and all(w["kette"]["dll_puffer"] == 3000 - v for w, v in zip(werte, vgs)) and all(w["sl"] < w["kette"]["verlust_grenze"] for w in werte),
+          f"Verlustgrenze gesund über die Spanne (dll_puffer aus u.sl = 1/0,63/0,19/0,001): 2.700/2.756/2.822/2.850 — nie 3.000 ({vgs})")
     w2, _ = R(KETTE, "challenge", 154500.0, {"tp": 0.5, "sl": 0.5, "menge": 0.0, "puffer": 0.5}, peak=154500.0)
-    check(4525 <= w2["kette"]["tagesziel"] <= 4540 and w2["kette"]["verlust_grenze"] == 3200 and w2["kette"]["mll"] == 150000.0,
-          f"Tag 2 nach T1-Gewinn (154.500): Tagesziel = Rest + Puffer ({w2['kette']['tagesziel']}), Verlustgrenze 3.200, MLL gelockt 150.000")
+    check(4525 <= w2["kette"]["tagesziel"] <= 4540 and w2["kette"]["verlust_grenze"] == 2775 and w2["kette"]["mll"] == 150000.0,
+          f"Tag 2 nach T1-Gewinn (154.500): Tagesziel = Rest + Puffer ({w2['kette']['tagesziel']}), Verlustgrenze 2.775 (u 0,5), MLL gelockt 150.000")
     wv, _ = R(KETTE, "challenge", 148750.0, {"tp": 0.5, "sl": 0.5, "menge": 0.0, "puffer": 0.5}, peak=150000.0)
-    check(wv and wv["kette"]["verlust_grenze"] == 3200 and wv["kette"]["mll"] == 145500.0,
-          f"nach Verlusttag 148.750 (Abstand MLL 3.250 ≥ 3.000): Plan mit Verlustgrenze 3.200 ({wv and wv['kette']})")
+    check(wv and wv["kette"]["verlust_grenze"] == 2775 and wv["kette"]["mll"] == 145500.0 and wv["kette"].get("angefressen") is False,
+          f"nach Verlusttag 148.750 (Abstand MLL 3.250 ≥ 3.000): gesund, Plan mit Verlustgrenze 2.775 ({wv and wv['kette']})")
     # Weg B (Finn 08.10.2026 ~22:15 Dubai): angefressen unter der Startgröße → Reparatur-Tag zurück auf 150.000 + Puffer, Tag endet am MLL
     wa, ga = R(KETTE, "challenge", 147000.0, {"tp": 0.5, "sl": 0.5, "menge": 0.0, "puffer": 0.5}, peak=150000.0)
     ka = (wa or {}).get("kette") or {}
@@ -134,6 +140,18 @@ def main():
     check((v["tp"], v["sl"]) == (5750, 1950) and v["mll"] == 145500.0, f"Finns Beispiel: T1 −1.250 → TP2 5.750 / SL2 1.950, schlimmster Tag −3.000 ({v['tp']} / {v['sl']})")
     v, _ = T2(kd, 150000, 152000)
     check((v["tp"], v["sl"]) == (2500, 5200), f"T1 +2.000 → TP2 2.500 / SL2 5.200 (Tag endet am DLL bzw. MLL) ({v['tp']} / {v['sl']})")
+    # 12.10.2026 (Finn): neuer Plan mit dll_puffer → SL2 endet den Tag VOR dem DLL (−2.775), Trade 2 erbt dll_puffer
+    kp = {"nr": 1, "tagesziel": 4500, "verlust_grenze": 2775, "daily_usd": 3000, "mll": 145500.0, "angefressen": False, "dll_puffer": 225}
+    v, _ = T2(kp, 150000, 148750)
+    check(v and (v["tp"], v["sl"]) == (5750, 1525) and v["dll_puffer"] == 225 and not v.get("angefressen") and not v.get("verlust_aus_start"),
+          f"dll_puffer: T1 −1.250 → TP2 5.750 / SL2 1.525 (Tag endet −2.775, nie am DLL) ({v})")
+    v, g = T2(kp, 150000, 147250)
+    check(v is None and "Tageslimit schon" in (g or ""), f"dll_puffer: T1 −2.750 → Rest bis zur Grenze 25 $ → kein Trade 2 ({g})")
+    v, _ = T2(kp, 150000.0, 149000.0)
+    check(v and v["sl"] == 1775 and v["verlust_grenze"] == 2775, f"dll_puffer: echte Start-Balance = Plan → Grenze bleibt 2.775, SL2 1.775 ({v})")
+    v, _ = T2(kp, 148000.0, 147000.0)                 # echte Start-Balance angefressen (Abstand 2.500 < 3.000) → Weg B greift: 2.700, Blow am MLL
+    check(v and v["verlust_grenze"] == 2700 and v.get("angefressen") is True and v["sl"] == 1700 and "dll_puffer" not in v,
+          f"dll_puffer, echter Start angefressen (148.000): Verlustgrenze Abstand 2.500 + 200 = 2.700, angefressen, kein dll_puffer ({v})")
     v, _ = T2(dict(kd, tagesziel=1525), 157500, 156000)
     check((v["tp"], v["sl"]) == (3025, 1700), f"letzter Tag (Rest 1.525): T1 −1.500 → TP2 3.025 / SL2 1.700 ({v['tp']} / {v['sl']})")
     g = T2(kd, 150000, 145490)

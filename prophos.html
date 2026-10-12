@@ -24760,11 +24760,14 @@
     if(zz != null) tip.push(typ === 'reparatur' ? `Ziel heute: +${de(zz)} $ — zurück auf die Startgröße (Reparatur, Weg B)`
       : typ === 'final' ? `Ziel heute: Rest bis zum Phasenziel +${de(zz)} $ — Bestehen heute möglich` : `Ziel heute: +${de(zz)} $`)
     const vg = Number(k.verlust_grenze) > 0 ? Number(k.verlust_grenze) : null, dll = Number(k.daily_usd) > 0 ? Number(k.daily_usd) : null
-    // angefressen wie app.py ap_kette_angefressen: Flag, sonst Verlustgrenze − 200 unter dem DLL (dann beendet der MLL den Tag)
-    const angefressen = k.angefressen != null ? !!k.angefressen : (vg != null && dll != null && Number(k.mll) > 0 && vg - 200 < dll - 0.5)
+    // angefressen wie app.py ap_kette_angefressen: Flag, sonst Verlustgrenze − 200 unter dem DLL (dann beendet der MLL den Tag);
+    // dll_puffer (.1475, Finn 12.10.2026 „DLL nie hitten"): gesunder Tag, Verlustgrenze = DLL − 150…300 = unser eigener SL vor dem Tageslimit
+    const dllPuffer = Number(k.dll_puffer) > 0 ? Number(k.dll_puffer) : null
+    const angefressen = k.angefressen != null ? !!k.angefressen : (dllPuffer == null && vg != null && dll != null && Number(k.mll) > 0 && vg - 200 < dll - 0.5)
     const abstand = Number(k.abstand_mll) > 0 ? Number(k.abstand_mll) : vg != null ? vg - 200 : null
     if(vg != null) tip.push(angefressen && abstand > 0
       ? `Verlustgrenze: −${de(vg)} $ (Abstand zum MLL ${de(abstand)} + 200${Number(k.mll) > 0 ? ` · MLL ${de(k.mll)}` : ''})`
+      : dllPuffer != null && dll != null ? `Verlustgrenze: −${de(vg)} $ (eigener SL ${de(dllPuffer)} $ vor dem Tageslimit −${de(dll)})`
       : dll != null ? `Verlustgrenze: −${de(vg)} $ (DLL ${de(dll)} + 200)` : `Verlustgrenze: −${de(vg)} $`)
     if(nr === 2 && k.e1 != null) tip.push(`Trade 1: ${Number(k.e1) >= 0 ? '+' : '−'}${de(k.e1)} $ — Trade 2 holt den Rest zum Tagesziel`)
     let kette = ''
@@ -43267,7 +43270,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1474'
+  const OS_TAB_BUILD = '2026-09-22.1475'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
