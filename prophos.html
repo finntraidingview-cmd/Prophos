@@ -3796,6 +3796,12 @@
   #dashboard-view .wdl-ug-normal{--wdl-ug:var(--ink-2)}
   #dashboard-view .wdl-ug-bestanden{--wdl-ug:#15803d}
   #dashboard-view .wdl-ug-geblowt{--wdl-ug:#b91c1c}
+  /* GEPARKT (12.10.2026, Finn: „Accounts, die man per Drag & Drop hinziehen kann … in der Warteschlange pausiert, bis sie freigegeben
+     sind und abgehakt werden" — bisher lagen sie mit Notiz „Warten bis Acc freigegeben" in Manuelle Arbeit): vierte Untergruppe in
+     Überprüfen, immer da (auch leer, als Drop-Ziel, dann gestrichelt), Hover amber wie der Kasten Manuelle Arbeit violett. */
+  #dashboard-view .wdl-ug-geparkt{--wdl-ug:#d97706}
+  #dashboard-view .wdl-ug-geparkt.wdl-ug-leer .wdl-ug-kopf{border:1px dashed var(--border);margin:6px 10px;border-radius:8px}
+  #dashboard-view .wdl-ug-geparkt.is-ziel{box-shadow:0 0 0 2px #d97706 inset;background:var(--surface-tint)}
   #dashboard-view .wdl-ug > .wdl-og:first-of-type{padding-top:9px}
   /* RUHIGER (Finn 12.10.2026 ~17:48, Radar .1462: „immer noch sehr unübersichtlich, die Farben sind so stark"): die getönten Modell-
      Köpfe (Winning Day grün, Orbit V2/Echo V2 violett) und der farbige Modell-Rand links sind weg — Modellname grau-schwarz mit kleinem
@@ -29465,7 +29471,18 @@
    * (oberste Ebene, RLS, Status-Guard review; weg = manuell:null), fremder Plan → PATCH /admin/wd-plaene {aktion:'manuell'|
    * 'manuell_weg'} — EIN Weg für alle IDs wie 'ende'; antwortet das Backend noch nicht, sagt es der Toast ehrlich. */
   // Nächster Schritt (Nachbesserung 08.10.2026): kleine Auswahl vor der Notiz, gespeichert als manuell.schritt (String)
-  const WDL_MAN_SCHRITTE = [['funded', '→ Funded'], ['phase2', '→ Phase 2'], ['payout', '→ Payout'], ['winning_days', '→ Winning Days'], ['sonst', 'sonst']]
+  const WDL_MAN_SCHRITTE = [['funded', '→ Funded'], ['phase2', '→ Phase 2'], ['payout', '→ Payout'], ['winning_days', '→ Winning Days'], ['sonst', 'sonst'], ['geparkt', 'Geparkt']]
+  // GEPARKT (12.10.2026, Finn: „geparkte Accounts … dauert oft 1–2 Tage, bis die freigegeben werden"): dasselbe Kennzeichen manuell
+  // mit schritt 'geparkt' — kein neuer Backend-Weg (das Backend speichert schritt als freien Text). Die Zeile steht dann in
+  // Überprüfen → Geparkt statt in Manuelle Arbeit; Abhaken/zurück wie dort.
+  const wdlGeparkt = t => { const m = wdlManuell(t); return !!(m && !m.neu && m.schritt === 'geparkt') }
+  function wdlParken(pid){
+    pid = String(pid || ''); if(!pid || _wdlManBusy.has(pid)) return
+    const t = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === pid)
+    if(!t || t.status !== 'review' || wdlGeparkt(t)) return
+    if(_wdlManNotiz && _wdlManNotiz.pid === pid) _wdlManNotiz = null
+    wdlManuellSchreiben(pid, String(((wdlManuell(t) || {}).notiz) || ''), 'geparkt')
+  }
   const wdlManSchrittText = k => { const x = WDL_MAN_SCHRITTE.find(([v]) => v === String(k || '')); return x ? x[1] : '' }
   // Vorbelegung je Kontotyp: Phase 1 → Phase 2, Challenge/Phase 2 → Funded, Funded → Payout, Winning Days → Winning Days, sonst „sonst"
   function wdlManSchrittStd(kontoTyp){
@@ -29510,7 +29527,7 @@
       wdlLokalMerken(pid, { manuell: neu })   // ein älterer Abruf (15-s-Takt) holt die Zeile nicht zurück (08.10.2026)
       // Trade-Planer „Braucht dich" liest das Kennzeichen aus _tpl.lt (tplManuellKonten, 08.10.2026) — dieselbe Zeile gleich mitziehen
       try{ const lt = _tpl.lt && _tpl.lt.get(pid); if(lt) lt.manuell = neu }catch(_){}
-      if(typeof atToast === 'function') atToast(weg ? 'Zurück nach „Überprüfen"' : (alt ? 'Notiz gespeichert' : 'In „Manuelle Arbeit" — nichts verbucht'), weg ? 'end' : 'ok')
+      if(typeof atToast === 'function') atToast(weg ? 'Zurück nach „Überprüfen"' : schritt === 'geparkt' ? 'Geparkt — nichts verbucht, abhaken sobald freigegeben' : (alt ? 'Notiz gespeichert' : 'In „Manuelle Arbeit" — nichts verbucht'), weg ? 'end' : 'ok')
       return true
     }catch(e){
       if(typeof atToast === 'function') atToast('Nicht gespeichert: ' + String((e && e.message) || e), 'end')
@@ -29680,7 +29697,7 @@
           ? `<select class="wdl-man-schritt" data-wdl-man-schritt="${escapeHtml(pid)}" title="Nächster Schritt">${WDL_MAN_SCHRITTE.map(([v, l]) => `<option value="${v}"${v === schritt ? ' selected' : ''}>${l}</option>`).join('')}</select>`
             + `<input type="text" class="wdl-man-notiz" data-wdl-man-notiz="${escapeHtml(pid)}" value="${escapeHtml(String(m.notiz || ''))}" maxlength="140" placeholder="Notiz · Enter oder Klick daneben speichert, Esc verwirft" autocomplete="off">`
           : `<button type="button" class="wdl-man-text" data-wdl-man-edit="${escapeHtml(pid)}" title="${escapeHtml((m.notiz ? m.notiz + ' — ' : '') + 'klicken: Schritt/Notiz bearbeiten')}">${schrittTxt ? `<b>${escapeHtml(schrittTxt)}</b>` : ''}${schrittTxt && m.notiz ? ' · ' : ''}${m.notiz ? escapeHtml(String(m.notiz)) : (schrittTxt ? '' : '<i>Notiz …</i>')}</button>`
-        miZ = zelle('mi wdl-z-akt', `${notizHtml}${seit ? `<small class="wdl-man-seit" title="${escapeHtml('in Manuelle Arbeit seit ' + zeit(m.at))}">${seit}</small>` : ''}`
+        miZ = zelle('mi wdl-z-akt', `${notizHtml}${seit ? `<small class="wdl-man-seit" title="${escapeHtml((wdlGeparkt(t) ? 'geparkt seit ' : 'in Manuelle Arbeit seit ') + zeit(m.at))}">${seit}</small>` : ''}`
           + (edit ? '' : `<button type="button" class="btn btn-ghost el-knopf" data-wdl-abhaken="${escapeHtml(pid)}"${(sperre || busy) ? ' disabled' : ''} title="${escapeHtml(sperre || 'Abhaken — P&L prüfen, verbuchen und Nachfolger anlegen')}">Abhaken</button>`
           + `<button type="button" class="btn btn-ghost el-knopf" data-wdl-man-zurueck="${escapeHtml(pid)}"${busy ? ' disabled' : ''} title="Kennzeichen entfernen — zurück nach „Überprüfen"">zurück</button>`))
         plZ = zelle('pl', sig(pb, '$', 2) + slaveZ(t) + zuWegZ(t), { f: col(pb), tip: wdlPlTip(t, echo, pb) })
@@ -29696,7 +29713,8 @@
         kontoZ = wdlKontoZ(t)
         // „→ manuell" (08.10.2026): Handy/Touch hat kein Drag — derselbe Weg wie das Ablegen in „Manuelle Arbeit"
         miZ = zelle('mi wdl-z-akt', `${erg ? `<span>${erg}</span>` : ''}<button type="button" class="btn btn-ghost el-knopf" data-wdl-abhaken="${escapeHtml(pid)}"${sperre ? ' disabled' : ''} title="${escapeHtml(sperre || 'Abhaken — P&L prüfen und Trade erledigen')}">Abhaken</button>`
-          + `<button type="button" class="btn btn-ghost el-knopf" data-wdl-manuell="${escapeHtml(pid)}"${_wdlManBusy.has(pid) ? ' disabled' : ''} title="Nach „Manuelle Arbeit" — Notiz dazu, nichts wird verbucht (oder die Zeile dorthin ziehen)">→ manuell</button>`,
+          + `<button type="button" class="btn btn-ghost el-knopf" data-wdl-manuell="${escapeHtml(pid)}"${_wdlManBusy.has(pid) ? ' disabled' : ''} title="Nach „Manuelle Arbeit" — Notiz dazu, nichts wird verbucht (oder die Zeile dorthin ziehen)">→ manuell</button>`
+          + `<button type="button" class="btn btn-ghost el-knopf" data-wdl-parken="${escapeHtml(pid)}"${_wdlManBusy.has(pid) ? ' disabled' : ''} title="Parken — wartet auf Freigabe der Firma, nichts wird verbucht (oder die Zeile nach „Geparkt" ziehen)">→ parken</button>`,
           { tip: echo ? '' : demoTip(d) })
         plZ = zelle('pl', sig(pb, '$', 2) + slaveZ(t) + zuWegZ(t), { f: col(pb), tip: wdlPlTip(t, echo, pb) })
         zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
@@ -29753,7 +29771,7 @@
             + `<span>${b.length}</span></div>${zeilenVon(b)}</div>`)
       }
       const zeilen = unter
-        ? unter.filter(([, a]) => a.length).map(([ut, a, ucls, hinweis]) => `<div class="wdl-ug ${ucls}"><div class="wdl-ug-kopf"><b>${ut}</b><span>${a.length}</span>${hinweis ? `<small>${hinweis}</small>` : ''}</div>${koerper(a)}</div>`).join('')
+        ? unter.filter(([, a, , , immer]) => a.length || immer).map(([ut, a, ucls, hinweis]) => `<div class="wdl-ug ${ucls}${a.length ? '' : ' wdl-ug-leer'}"><div class="wdl-ug-kopf"><b>${ut}</b><span>${a.length}</span>${hinweis ? `<small>${hinweis}</small>` : ''}</div>${a.length ? koerper(a) : ''}</div>`).join('')
         : koerper(arr)
       const fuss = mehr && lang ? `<button type="button" class="wdl-mehr" data-wdl-mehr="${mehr}">${alle ? 'weniger' : `alle ${arr.length} zeigen`}</button>` : ''
       // Kopf mit Personen-Chips (05.10.2026): Titel + Chips teilen sich die Namens- und die (im Kopf leere) Richtungs-Spalte und
@@ -29778,8 +29796,9 @@
     const teile = arr => {
       const la = arr.filter(t => t.status === 'open'), rv = arr.filter(t => t.status === 'review'), er = arr.filter(t => t.status === 'completed')
       // Manuelle Arbeit (08.10.2026) geht vor Wartet/Überprüfen — das Kennzeichen zieht die Zeile aus beiden heraus (Zähler mit)
-      const ma = rv.filter(t => !!wdlManuell(t)), rest = rv.filter(t => !ma.includes(t))
-      const wa = rest.filter(t => !wdlIstEcho(t) && wdlWartet(t)), pr = rest.filter(t => !wa.includes(t))
+      // Geparkt (12.10.2026) bleibt in Überprüfen (eigene Untergruppe) und fällt nie nach Wartet
+      const ma = rv.filter(t => !!wdlManuell(t) && !wdlGeparkt(t)), rest = rv.filter(t => !ma.includes(t))
+      const wa = rest.filter(t => !wdlGeparkt(t) && !wdlIstEcho(t) && wdlWartet(t)), pr = rest.filter(t => !wa.includes(t))
       return { la, wa, pr, ma, er }
     }
     // MANUELLE ARBEIT (08.10.2026): zwischen Überprüfen und Erledigt, neueste Ablage oben. Leer, aber Überprüfen hat Zeilen → ein
@@ -29862,8 +29881,12 @@
       // genau einmal, im Abschnitt „Bestanden · Phase umstellen" unten (Konten der Ziel-Wache mit Knopf).
       // Seit .1465 wieder DREI (Finn 12.10.2026 ~18:00: „die bestandenen in ein eigenes Ding, die geblowten in ein eigenes, die normalen
       // auch") — das Doppelte löst der Abschnitt „Bestanden · Phase umstellen" unten: er zeigt ein Konto erst, wenn der Trade abgehakt ist.
-      const best = pr.filter(t => !!wdlBestandenChip(t)), blow = pr.filter(t => !best.includes(t) && istGeblowt(t)), norm = pr.filter(t => !best.includes(t) && !blow.includes(t))
-      return [['Normal', norm, 'wdl-ug-normal', 'nichts passiert — abhaken'], ['Bestanden', best, 'wdl-ug-bestanden', 'abhaken — danach unten bei „Bestanden" die Phase umstellen'], ['Geblowt', blow, 'wdl-ug-geblowt', 'Konto geblowt oder weg — abhaken, dann archivieren']]
+      // Seit .1471 VIER (Finn 12.10.2026 ~21:50: „Geparkte Accounts … per Drag & Drop hinziehen … pausiert, bis sie abgehakt werden"):
+      // Geparkt = Kennzeichen manuell.schritt 'geparkt', immer sichtbar als Drop-Ziel (fünftes Feld: immer), auch leer.
+      const gep = pr.filter(wdlGeparkt), ohne = pr.filter(t => !gep.includes(t))
+      const best = ohne.filter(t => !!wdlBestandenChip(t)), blow = ohne.filter(t => !best.includes(t) && istGeblowt(t)), norm = ohne.filter(t => !best.includes(t) && !blow.includes(t))
+      return [['Normal', norm, 'wdl-ug-normal', 'nichts passiert — abhaken'], ['Bestanden', best, 'wdl-ug-bestanden', 'abhaken — danach unten bei „Bestanden" die Phase umstellen'], ['Geblowt', blow, 'wdl-ug-geblowt', 'Konto geblowt oder weg — abhaken, dann archivieren'],
+        ['Geparkt', nachAblage(gep), 'wdl-ug-geparkt', gep.length ? 'wartet auf Freigabe der Firma — abhaken, sobald frei' : 'Zeile hierher ziehen oder „→ parken" — wartet auf Freigabe der Firma', true]]
     }
     // arr = was gezeigt wird (Modell + Person), alleArr = dieselbe Liste ohne Personen-Filter — nur für die Chips im Kopf
     const gruppen = (arr, alleArr) => {
@@ -29946,6 +29969,8 @@
     if(ev.target.closest('[data-wdl-man-notiz]')) return
     const mn = ev.target.closest('[data-wdl-manuell]')
     if(mn){ if(!mn.disabled) wdlManuellStart(mn.getAttribute('data-wdl-manuell')); return }
+    const pk = ev.target.closest('[data-wdl-parken]')
+    if(pk){ if(!pk.disabled) wdlParken(pk.getAttribute('data-wdl-parken')); return }
     const me = ev.target.closest('[data-wdl-man-edit]')
     if(me){ const pid = me.getAttribute('data-wdl-man-edit'); if(!_wdlManBusy.has(pid)){ _wdlManNotiz = { pid, neu: false }; wdlRender() } return }
     const mz = ev.target.closest('[data-wdl-man-zurueck]')
@@ -30001,24 +30026,27 @@
     _wdlDrag = null
     const l = document.getElementById('wdl-liste'); if(!l) return
     l.querySelectorAll('.is-drag').forEach(e => e.classList.remove('is-drag'))
-    l.querySelectorAll('.wdl-tab-manuell.is-ziel').forEach(e => e.classList.remove('is-ziel'))
+    l.querySelectorAll('.wdl-tab-manuell.is-ziel, .wdl-ug-geparkt.is-ziel').forEach(e => e.classList.remove('is-ziel'))
   })
+  // Drop-Ziele (12.10.2026): Kasten „Manuelle Arbeit" ODER Untergruppe „Geparkt" in Überprüfen — Geparkt gewinnt, weil sie innen liegt
+  const wdlDropZiel = ev => ev.target.closest && (ev.target.closest('.wdl-ug-geparkt') || ev.target.closest('.wdl-tab-manuell'))
   document.getElementById('wdl-liste')?.addEventListener('dragover', ev => {
-    const k = ev.target.closest && ev.target.closest('.wdl-tab-manuell'); if(!k || !_wdlDrag) return
+    const k = wdlDropZiel(ev); if(!k || !_wdlDrag) return
     ev.preventDefault(); try{ ev.dataTransfer.dropEffect = 'move' }catch(_){}
     k.classList.add('is-ziel')
   })
   document.getElementById('wdl-liste')?.addEventListener('dragleave', ev => {
-    const k = ev.target.closest && ev.target.closest('.wdl-tab-manuell'); if(!k) return
+    const k = wdlDropZiel(ev); if(!k) return
     if(ev.relatedTarget && k.contains(ev.relatedTarget)) return
     k.classList.remove('is-ziel')
   })
   document.getElementById('wdl-liste')?.addEventListener('drop', ev => {
-    const k = ev.target.closest && ev.target.closest('.wdl-tab-manuell'); if(!k) return
+    const k = wdlDropZiel(ev); if(!k) return
     ev.preventDefault(); k.classList.remove('is-ziel')
     let pid = _wdlDrag; try{ pid = pid || ev.dataTransfer.getData('text/plain') }catch(_){}
     _wdlDrag = null
-    if(pid) wdlManuellStart(pid)
+    if(!pid) return
+    if(k.classList.contains('wdl-ug-geparkt')) wdlParken(pid); else wdlManuellStart(pid)
   })
   // Chart umhängen: #mkl-wrap wohnt in „Markt live"; Live Trades leiht ihn aus (kein zweiter Chart). Heimat = Platz vor #mkl-wd.
   const _mklHeimat = (() => { const w = document.getElementById('mkl-wrap'); return w ? { parent: w.parentNode, next: w.nextElementSibling } : null })()
@@ -43141,7 +43169,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1470'
+  const OS_TAB_BUILD = '2026-09-22.1471'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
