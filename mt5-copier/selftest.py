@@ -2873,6 +2873,31 @@ def test_puls_augen_cdp():
     finally:
         ob._warte = _alt_w
     chk(_n == 1 and _n2 == 0 and any("[Werbung]" in z and "über eigenes X geschlossen" in z for z in _ws.trail), "werbung_weg: X geklickt, weg bewiesen, danach 3 s gedrosselt")
+    # 12.10.2026 (Routine Puls-Fehler, „Go ad-free. Everywhere" 19× auf 2 PCs): findet der Werbe-Blick nichts, schließt werbung_weg(zwang=True) einen von
+    # augen.js gemeldeten Werbe-Dialog über sein eines X (Dialog-Lesung); Sitzungs-/Handels-Dialoge und Dialoge ohne eindeutiges X nie, ohne zwang keine Lesung
+    _wd = object.__new__(ob._AugenSitzung)
+    _wd.trail, _wd._werbung_at, _wd.klicks = [], 0.0, []
+    _wx = {"tag": "button", "dn": "close", "aria": "Close", "text": "", "rect": [1180, 212, 28, 28]}
+    _wp = [[{"role": "dialog", "titel": "Go ad-free. Everywhere", "text": "Go ad-free. Everywhere Upgrade now", "x": _wx}], [],
+           [{"role": "dialog", "titel": "Session disconnected", "text": "Session disconnected ad-free", "x": _wx}],
+           [{"role": "dialog", "titel": "Go ad-free. Everywhere", "text": "Go ad-free. Everywhere", "x": {"mehrdeutig": 2}}]]
+    _wd.stand = lambda opts=None: {"popups": _wp.pop(0) if _wp else []}
+    _wd.lese_js = lambda ausdruck, timeout=8: [] if "MERKMALE" in ausdruck else None
+    _wd._win_klick = lambda rect, name, druck=True, toast_ok=False, pruef=None, doppel=False: _wd.klicks.append(rect) or True
+    ob._warte = lambda a, b: None
+    try:
+        _w1 = _wd.werbung_weg(zwang=True)      # ad-free mit X → geklickt, weg bewiesen
+        _wd._werbung_at = 0.0
+        _w2 = _wd.werbung_weg(zwang=True)      # Sitzungs-Dialog → nie
+        _wd._werbung_at = 0.0
+        _w3 = _wd.werbung_weg(zwang=True)      # ad-free ohne eindeutiges X → stehen lassen
+        _wd._werbung_at = 0.0
+        _w4 = _wd.werbung_weg()                # ohne zwang: keine Dialog-Lesung
+    finally:
+        ob._warte = _alt_w
+    chk(_w1 == 1 and _wd.klicks == [[1180, 212, 28, 28]] and _w2 == 0 and _w3 == 0 and _w4 == 0
+        and any("über eigenes X geschlossen (bewiesen, Dialog-Lesung)" in z for z in _wd.trail) and any("kein eindeutiges X" in z for z in _wd.trail),
+        f"werbung_weg (12.10.2026): Werbe-Dialog aus der Dialog-Lesung über sein X zu, Sitzungs-Dialog/ohne X nie, ohne zwang keine Lesung ({_wd.trail})")
     pt = ob.cdp_klickpunkt([100, 200, 60, 30], rnd=_rnd.Random(3))
     chk(pt and 110 <= pt[0] <= 150 and 205 <= pt[1] <= 225 and ob.cdp_klickpunkt([1, 1, 1, 1]) is None, "Klickpunkt im inneren Drittel, Mini-Rect → None")
     kps_ = [ob.cdp_klickpunkt([0, 0, 200, 40], rnd=_rnd.Random(i_)) for i_ in range(100)]

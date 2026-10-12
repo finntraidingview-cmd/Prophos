@@ -17792,6 +17792,21 @@ CDP_WERBUNG_JS = r"""(function () {
   return out;
 })()"""
 
+# WERBE-DIALOG AUS DER DIALOG-LESUNG (Routine „Puls-Fehler" 12.10.2026, Muster „konto: tradovate-login '#' nicht geschafft (abmelden):
+# kontextmenü neben 'tradovate' blieb leer: dialog 'Go ad-free. Everywhere' liegt über der seite" — 19 Fälle 09:51–14:40 UTC auf 2 PCs,
+# je 20 min ein Fehlstart, 3 Stunden lang): .1413 (09.10.) sollte genau dieses Modal über CDP_WERBUNG_JS schließen, die Spuren von heute
+# zeigen aber keine einzige [Werbung]-Zeile — der Werbe-Blick fand den Kasten nicht (Kasten > 80 % des Bilds, X außerhalb seines
+# 70-px-Fensters oder nicht oberstes Element), während augen.js (dialoge) den Dialog mit Titel bei JEDER Lesung meldete, samt seinem
+# einen X (xIn). Darum zweiter Weg nur mit zwang: Titel/Text muss ein bekannter Werbe-Titel sein (TITEL_RX) und darf kein Handels-/
+# Login-/Sitzungs-Wort tragen (HART_RX); geklickt wird nur das EINE X aus der Dialog-Lesung, dessen Beschriftung kein Kauf-/Angebots-
+# Wort hat (X_TABU_RX); nie Esc, Verschwinden bewiesen. Nur lesen + ein Klick, wie der erste Weg.
+CDP_WERBUNG_TITEL_RX = re.compile(r"\bad.?free\b|werbefrei|\bsale\b|\d+\s*%\s*off|up to \d+\s*%|don.?t miss|explore offers?|special offer"
+                                  r"|black friday|cyber monday|time to upgrade|explore (our )?plans", re.I)
+CDP_WERBUNG_HART_RX = re.compile(r"take profit|stop loss|tradovate|\bconnect\b|\blog ?in\b|\blog ?out\b|password|passwort|quantity|\bcontracts?\b"
+                                 r"|\b(buy|sell) \d|session|disconnect|close position|flatten|cancel order", re.I)
+CDP_WERBUNG_X_TABU_RX = re.compile(r"explore|offer|angebot|upgrade|\bbuy\b|kauf|trial|\bget\b|\bstart|subscri|abonn|premium|\bplan|claim"
+                                   r"|account manager|panel|maximi|minimi|collapse|chart|layout|watchlist|\btab\b", re.I)
+
 
 def _puls_fenster_liste(pid):
     """Sichtbare Top-Level-Fenster des Puls-Chrome-Browserprozesses (Windows). -> [{hwnd, text, klasse, sichtbar, minimiert}]"""
@@ -18171,20 +18186,22 @@ class _AugenSitzung:
         # kann das X zwischen zwei Schritten fallen; ein danach geworfener Fehler hieß sonst „vielleicht gedrückt" statt „nichts gesendet")
         druck_vorher = getattr(self, "_druck_versucht", False)
         try:
-            return self._werbung_weg_kern()
+            return self._werbung_weg_kern(zwang)
         except Exception as e_:                        # darf keinen Klick verhindern — schlimmstenfalls bleibt die Werbung stehen
             self.trail.append(f"Werbung-Prüfung übersprungen ({type(e_).__name__})")
             return weg
         finally:
             self._druck_versucht = druck_vorher
 
-    def _werbung_weg_kern(self):
+    def _werbung_weg_kern(self, zwang=False):
         weg = 0
+        gefunden = False
         for _ in range(3):
             kand = self.lese_js(CDP_WERBUNG_JS)
             kand = [x for x in kand if isinstance(x, dict)] if isinstance(kand, list) else []
             if not kand:
                 break
+            gefunden = True
             k = kand[0]
             text = str(k.get("text") or "")[:60]
             # NUR das eigene X (Finn 09.10.2026): nie Esc — Esc ginge an das, was gerade den Fokus hat (Ticket, Dropdown, Login-Dialog)
@@ -18199,7 +18216,52 @@ class _AugenSitzung:
                 break
             self.trail.append(f"[Werbung] '{text}'{' (AD)' if k.get('ad') else ''} über eigenes X geschlossen (bewiesen)")
             weg += 1
+        if zwang and not gefunden:
+            # Werbe-Blick leer, aber ein Dialog im Weg (12.10.2026, „Go ad-free. Everywhere" 19×): die Dialog-Lesung von augen.js fragen
+            weg += self._werbung_dialog_weg()
         return weg
+
+    def _werbung_dialog_weg(self):
+        """Zweiter Weg (12.10.2026, s. CDP_WERBUNG_TITEL_RX): einen von augen.js gemeldeten Dialog (stand().popups: titel/text, x = sein
+        eines X oben rechts) schließen, wenn er ein bekannter Werbe-Titel ohne Handels-/Login-Wort ist. Nur das eigene X, nie Esc,
+        Verschwinden bewiesen; jede Entscheidung steht in der Spur. -> Anzahl geschlossener Dialoge (0 oder 1)"""
+        try:
+            st = self.stand()
+        except Exception as e_:
+            self.trail.append(f"[Werbung] Dialog-Lesung nicht möglich ({type(e_).__name__})")
+            return 0
+        pops = [p for p in (st.get("popups") or []) if isinstance(p, dict)] if isinstance(st, dict) else []
+        for p in pops[:3]:
+            titel = str(p.get("titel") or "")[:60]
+            text = str(p.get("text") or "")[:120]
+            wort = (titel + " " + text).strip()
+            if not CDP_WERBUNG_TITEL_RX.search(wort) or CDP_WERBUNG_HART_RX.search(wort):
+                continue
+            name = titel or text[:40]
+            x = p.get("x") if isinstance(p.get("x"), dict) else None
+            if not x or not cdp_rect(x.get("rect")):
+                self.trail.append(f"[Werbung] Dialog '{name}' erkannt, aber kein eindeutiges X ({p.get('x') or 'keins'}) — bleibt stehen, kein Esc")
+                return 0
+            x_wort = " ".join(str(x.get(k_) or "") for k_ in ("text", "aria", "dn", "title"))
+            if CDP_WERBUNG_X_TABU_RX.search(x_wort):
+                self.trail.append(f"[Werbung] Dialog '{name}': X '{x_wort.strip()[:40]}' ist kein Schließen-Knopf — bleibt stehen, kein Esc")
+                return 0
+            if not self._win_klick(cdp_rect(x.get("rect")), f"Werbung schließen (X) Dialog '{name}'", toast_ok=True):
+                self.trail.append(f"[Werbung] Dialog '{name}': X nicht gedrückt (kein Beweis) — bleibt stehen, kein Esc")
+                return 0
+            _warte(0.6, 0.3)
+            try:
+                st2 = self.stand()
+            except Exception:
+                st2 = {}
+            noch = [q for q in ((st2.get("popups") or []) if isinstance(st2, dict) else [])
+                    if isinstance(q, dict) and str(q.get("titel") or "")[:60] == titel and str(q.get("text") or "")[:120] == text]
+            if noch:
+                self.trail.append(f"[Werbung] Dialog '{name}' bleibt nach dem Klick auf sein X — weiter ohne")
+                return 0
+            self.trail.append(f"[Werbung] Dialog '{name}' über eigenes X geschlossen (bewiesen, Dialog-Lesung)")
+            return 1
+        return 0
 
     def _toasts_weg(self):
         """TradingView-Meldungen über dem Ziel schließen (X der Gruppe, sonst X einzelner Meldungen). -> True, wenn geklickt"""
