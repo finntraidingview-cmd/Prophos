@@ -15545,11 +15545,16 @@ AP_TAGE_FUT_PKT = (3, 5)
 AP_TAGE_PUFFER = {"cfd": 5.0, "futures": 20.0}   # $ über dem Ziel, die ein Mini-Verlust nie unterschreitet
 AP_MINI_FUTURES_SYMBOL = "MNQ"
 AP_MINI_PUNKTWERT = {"MNQ": 2.0, "NQ": 20.0}       # $ je Punkt und Kontrakt
+# 12.10.2026 (Finn, Wochenplan Mo): Mindesttage ab jetzt JEDEN Tag farmen — Mini auch UNTER dem Ziel, wenn der Bot sonst nichts plant
+# (Rest unter der Klein-Trade-Grenze, Handarbeit); 0,01 Lot; TP/SL „einfach 1, 2, 3 Dollar" als Untergrenze in $ (die Punkt-Spanne bleibt
+# der Boden gegen Spread/stops_level); der PC-Tab schließt den Mini direkt nach dem Start (tage_mini.sofort_zu, prophos.html tageMiniSofortZu).
+AP_TAGE_USD = (1.0, 3.0)
 
 
-def ap_tage_mini(regel, phase, groesse, ziel, balance, u, tage, schritt=None, ppl=None):
+def ap_tage_mini(regel, phase, groesse, ziel, balance, u, tage, schritt=None, ppl=None, boden=None):
     """REIN RECHNEND (testbar): Mini-Trade zum Tage sammeln → (werte wie ap_konto_rechnen + tage_mini{ist, soll, ziel, puffer, tp_pkt,
-    sl_pkt}, None) | (None, grund). tage = (ist, soll); schritt = menge_schritt der Phase; ppl = $ je Punkt und Lot (nur CFD)."""
+    sl_pkt, sofort_zu, unter_ziel}, None) | (None, grund). tage = (ist, soll); schritt = menge_schritt der Phase; ppl = $ je Punkt und Lot
+    (nur CFD); boden = sicheres Level der Phase — unter dem Ziel hält der SL die Balance über Boden + Puffer statt über Ziel + Puffer."""
     ist, soll = int(tage[0]), int(tage[1])
     route = regel.get("route") or "mt5v2"
     cfd = route in AP_CFD_ROUTEN and phase != "challenge"
@@ -15561,8 +15566,10 @@ def ap_tage_mini(regel, phase, groesse, ziel, balance, u, tage, schritt=None, pp
     if cfd:
         if not ppl:
             return None, f"{vor}: kein Punktwert (Firmen-Einstellung $/Pkt je Lot) für den Mini-Trade — Punktwert eintragen, sonst von Hand"
-        menge = max(float(schritt or 0), AP_KLEIN_SCHRITT)
-        menge = int(menge) if menge >= 1 and menge == int(menge) else round(menge, 4)
+        # 0,01 Lot (Finn 12.10.2026: „einfach 0,01 Lots kaufen") statt des Lot-Schritts der Phase (FundedNext 0,1 hätte 0,1 Lot ergeben);
+        # Firmen mit ganzen Lots (menge_schritt ≥ 1, FTMO/The5ers) bleiben bei ihrer kleinsten Stufe
+        s_ = float(schritt or 0)
+        menge = int(s_) if s_ >= 1 and s_ == int(s_) else AP_KLEIN_SCHRITT
         je_pkt, sp, raster = float(menge) * float(ppl), AP_TAGE_CFD_PKT, 1.0
         einheit = f"{_ap_de(menge)} Lot{'s' if float(menge) > 1 else ''}"
     else:
@@ -15574,21 +15581,30 @@ def ap_tage_mini(regel, phase, groesse, ziel, balance, u, tage, schritt=None, pp
             raster += 0.25
         einheit = f"1 {AP_MINI_FUTURES_SYMBOL}"
     runde = lambda x: round(round(float(x) / raster) * raster, 2)   # noqa: E731 — CFD ganze Punkte, Futures Ticks 0,25
-    luft = round(float(balance) - float(ziel) - puffer, 2)    # auf Cent: Ziel 100.000 × 1,1 ist intern 110000,00000000001
-    sl_pkt = runde(_ap_spanne(list(sp), u["sl"]))
+    # Unter dem Ziel (12.10.2026) hält der SL die Balance über dem BODEN + Puffer; ohne bekannten Boden keine Kappung (Mini riskiert 1–3 $)
+    unter_ziel = float(balance) < float(ziel)
+    basis = float(ziel) if not unter_ziel else (float(boden) if boden is not None else None)
+    halt = "Ziel" if not unter_ziel else "Boden"
+    luft = round(float(balance) - basis - puffer, 2) if basis is not None else float("inf")   # auf Cent: Ziel 100.000 × 1,1 ist intern 110000,00000000001
+    # TP/SL mindestens 1–3 $ (Finn 12.10.2026), in Punkten aufgerundet: 0,01 Lot × 1 $/Pkt → 2 $ = 200 Pkt; bei 1 Lot FTMO wären 1–3 $
+    # nur 1–3 Pkt (im Spread → „Invalid stops"), da bleibt die Punkt-Spanne
+    usd_pkt = lambda uu: float(-(-_ap_spanne(list(AP_TAGE_USD), uu) // je_pkt)) if je_pkt > 0 else 0.0   # noqa: E731
+    sl_pkt = runde(max(_ap_spanne(list(sp), u["sl"]), usd_pkt(u["sl"])))
     if sl_pkt * je_pkt > luft:
         sl_pkt = (int(luft / je_pkt / raster) * raster if luft > 0 and je_pkt > 0 else 0)   # auf die Luft kürzen (abgerundet)
     if sl_pkt < sp[0]:
-        ueber = f"{max(0.0, float(balance) - float(ziel)):,.0f}".replace(",", ".")      # nur die Zahl, das Satzkomma bleibt
-        return None, (f"{vor}: Balance nur {ueber} $ über dem Ziel — der kleinste Mini-SL ({sp[0]} Pkt = {sp[0] * je_pkt:.2f} $ bei {einheit}) "
-                      f"brächte sie unter Ziel + {puffer:.0f} $, von Hand").replace(".00 $", " $")
-    tp_pkt = runde(_ap_spanne(list(sp), u["tp"]))
+        ueber = f"{max(0.0, float(balance) - float(basis)):,.0f}".replace(",", ".")      # nur die Zahl, das Satzkomma bleibt
+        return None, (f"{vor}: Balance nur {ueber} $ über dem {halt} — der kleinste Mini-SL ({sp[0]} Pkt = {sp[0] * je_pkt:.2f} $ bei {einheit}) "
+                      f"brächte sie unter {halt} + {puffer:.0f} $, von Hand").replace(".00 $", " $")
+    tp_pkt = runde(max(_ap_spanne(list(sp), u["tp"]), usd_pkt(u["tp"])))
     tp, sl = round(tp_pkt * je_pkt, 2), round(sl_pkt * je_pkt, 2)
     geld = lambda v: (f"{v:.2f}".rstrip("0").rstrip(".") if v < 10 else f"{v:.0f}").replace(".", ",")   # noqa: E731
-    stufe = (f"{vor} · Mini-Trade {einheit} · TP {_ap_de(tp_pkt)} Pkt ({geld(tp)} $) / SL {_ap_de(sl_pkt)} Pkt ({geld(sl)} $) "
-             f"(Balance bleibt über Ziel + {puffer:.0f} $)")
-    out = {"groesse": groesse, "ziel": ziel, "rest": 0, "menge": menge, "puffer": 0, "tp": tp, "sl": sl, "risiko": sl, "stufe": stufe,
-           "tage_mini": {"ist": ist, "soll": soll, "ziel": round(float(ziel)), "puffer": puffer, "tp_pkt": tp_pkt, "sl_pkt": sl_pkt}}
+    stufe = (f"{vor} · Mini-Trade {einheit} · TP {_ap_de(tp_pkt)} Pkt ({geld(tp)} $) / SL {_ap_de(sl_pkt)} Pkt ({geld(sl)} $) · sofort wieder zu"
+             + (f" (Balance bleibt über {halt} + {puffer:.0f} $)" if basis is not None else ""))
+    out = {"groesse": groesse, "ziel": ziel, "rest": max(0, round(float(ziel) - float(balance))), "menge": menge, "puffer": 0, "tp": tp, "sl": sl,
+           "risiko": sl, "stufe": stufe,
+           "tage_mini": {"ist": ist, "soll": soll, "ziel": round(float(ziel)), "puffer": puffer, "tp_pkt": tp_pkt, "sl_pkt": sl_pkt,
+                         "sofort_zu": True, "unter_ziel": unter_ziel}}
     if not cfd:
         out["symbol"] = AP_MINI_FUTURES_SYMBOL
     return out, None
@@ -15647,15 +15663,17 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None):
     rest = ziel - balance
     tage_offen = bool(tage) and int(tage[0]) < int(tage[1])   # Mindesttage fehlen noch → Mini-Trade statt „Ziel erreicht" (09.10.2026)
     if rest <= 0:
-        return ap_tage_mini(regel, phase, groesse, ziel, balance, u, tage, ph.get("menge_schritt"), ppl) if tage_offen else (None, "Ziel erreicht — Phase umstellen")
+        return ap_tage_mini(regel, phase, groesse, ziel, balance, u, tage, ph.get("menge_schritt"), ppl, boden=boden) if tage_offen else (None, "Ziel erreicht — Phase umstellen")
     cfd = (regel.get("route") or "mt5v2") in AP_CFD_ROUTEN and phase != "challenge"
     if rest < (AP_REST_MIN_CFD if cfd else AP_REST_MIN):
         # 05.10.2026: ein Konto 2 $ unter dem Ziel bekäme sonst einen TP von ~20 $ ohne SL (volles Liquidationsrisiko).
         # 07.10.2026: Futures-Challenge mit Rest < 100 $ zählt als Ziel erreicht (Phase umstellen)
         if phase == "challenge":
             if tage_offen:                 # Challenge zählt ab < 100 $ Rest als erreicht — Mini nur mit Luft über dem Ziel (sonst Grund)
-                return ap_tage_mini(regel, phase, groesse, ziel, balance, u, tage, ph.get("menge_schritt"), ppl)
+                return ap_tage_mini(regel, phase, groesse, ziel, balance, u, tage, ph.get("menge_schritt"), ppl, boden=boden)
             return None, f"Ziel erreicht — Phase umstellen (nur noch {rest:.0f} $)"
+        if tage_offen:                     # 12.10.2026 (Finn): Tage fehlen → Mini statt Handarbeit, die Tage laufen jeden Tag weiter
+            return ap_tage_mini(regel, phase, groesse, ziel, balance, u, tage, ph.get("menge_schritt"), ppl, boden=boden)
         if cfd:
             return None, (f"nur noch {rest:.0f} $ bis zum Ziel — unter {AP_REST_MIN_CFD} $ plant der Bot keinen Klein-Trade: "
                           "erst im Konto prüfen, ob die Firma das Ziel schon zählt (dann Phase umstellen), sonst Mini-Trade von Hand")

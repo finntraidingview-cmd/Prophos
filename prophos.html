@@ -20769,6 +20769,10 @@
         // (v2PlanAufOpen) — schließt die Position vor dem ersten frischen Tick (schneller TP/SL), hätte
         // wasOpen sie nie gesehen und der Plan bliebe ewig „Läuft". Baseline = Beweis → Ende-Erkennung scharf.
         if(istV2 && plan.mt5Baseline && plan.mt5Baseline.master_balance != null) mt5PlanPoll.wasOpen.add(String(plan.id))
+        // TAGE SAMMELN · SOFORT ZU (12.10.2026, Finn: „den Trade, sobald er gestartet wurde, auch direkt eigenständig beenden"): der Mini-Trade
+        // des Auto-Planers (mt5_baseline.tage_mini.sofort_zu) wird geschlossen, sobald dieser PC-Tab seine Position frisch sieht — derselbe
+        // Weg wie „Schließen" auf der Karte (v2SchliessenAmPc); die Ende-Erkennung darunter läuft danach wie bei jedem Echo-V2-Trade
+        if(istV2 && posCount > 0 && typeof tageMiniSofortZu === 'function') tageMiniSofortZu(plan)
         if(posCount > 0){
           mt5PlanPoll.wasOpen.add(String(plan.id))
           mt5PlanPoll.streak.set(String(plan.id), 0)
@@ -38727,6 +38731,29 @@
   // TAGE SAMMELN (09.10.2026, Korb „Bestanden" Teil 2): Mini-Trade des Auto-Planers (mt5_baseline.tage_mini, app.py ap_tage_mini) darf trotz
   // erreichtem Ziel starten — er holt nur einen Mindest-Handelstag, die Balance bleibt über Ziel + Puffer. Alle anderen bleiben gesperrt.
   const planIstTageMini = plan => !!(plan && plan.mt5Baseline && plan.mt5Baseline.tage_mini && typeof plan.mt5Baseline.tage_mini === 'object')
+  // SOFORT ZU des Mini-Trades (12.10.2026): aus mt5PlanPollTick ohne await, je Plan ein Versuch zur Zeit, Wiederholung nach 40–70 s (höchstens
+  // 6×, endgültige Fehler stoppen sofort), nie während Echo-Check (_pfV2Laeuft), Remote-Lauf (_rsAktiv) oder Orbit-Lauf (_tpOrbitLaeuft) —
+  // eine Maus. Beleg am Plan: mt5_baseline.tage_mini.zu {at, ok, msg, versuche}. Nach ok übernimmt die Ende-Erkennung (Master flach, 2 Messungen).
+  const _tmZu = new Map()   // planId → {naechster, versuche, laeuft}
+  async function tageMiniSofortZu(plan){
+    if(!plan || plan.status !== 'open' || plan.route !== 'mt5v2' || !planIstTageMini(plan)) return
+    const tm = plan.mt5Baseline.tage_mini
+    if(!tm.sofort_zu || (tm.zu && tm.zu.ok)) return
+    const pid = String(plan.id), st = _tmZu.get(pid) || { naechster: 0, versuche: 0, laeuft: false }
+    if(st.laeuft || st.naechster > Date.now() || st.versuche >= 6) return
+    if(_pfV2Laeuft === pid || (typeof _rsAktiv !== 'undefined' && _rsAktiv) || (typeof _tpOrbitLaeuft !== 'undefined' && _tpOrbitLaeuft)) return
+    st.laeuft = true; st.versuche++; _tmZu.set(pid, st)
+    let erg
+    try{ erg = await v2SchliessenAmPc(plan) }catch(e){ erg = { ok:false, retry:true, msg: String(e && e.message || e) } }
+    finally{ st.laeuft = false }
+    st.naechster = Date.now() + (40 + Math.random() * 30) * 1000
+    if(!erg.ok && !erg.retry) st.versuche = 6   // endgültig (z. B. Instanz unbekannt, Ergebnis unklar) — nicht blind weiterklicken
+    const zu = { at: new Date().toISOString(), ok: !!erg.ok, msg: String(erg.msg || '').slice(0, 160), versuche: st.versuche }
+    try{ await baselinePatch(plan.id, { tage_mini: Object.assign({}, tm, { zu }) }, 'open') }catch(_){}
+    console.log(`[tage-mini] ${plan.masterName || pid}: ${erg.ok ? 'sofort geschlossen' : 'nicht geschlossen'} — ${erg.msg || ''}`)
+    if(typeof atToast === 'function') atToast(erg.ok ? `✓ Mini-Trade „${plan.masterName || pid}" sofort wieder geschlossen (Tage sammeln)`
+      : `⚠ Mini-Trade „${plan.masterName || pid}" nicht geschlossen: ${erg.msg || ''}${st.versuche < 6 ? ' — neuer Versuch gleich' : ' — bitte von Hand schließen'}`, 'end')
+  }
   function planZielErreicht(plan){
     try{
       if(planIstTageMini(plan)) return null
@@ -38966,7 +38993,7 @@
     // Mini-Trade (Tage sammeln): TP/SL sind Cent-Beträge (0,01 Lot × 30 Pkt = 0,30 $) — sonst stünde „0 $" da
     const geldZ = v => tm ? Number(v).toLocaleString('de-DE', { maximumFractionDigits: 2 }) : de(v)
     const artZelle = tm
-      ? `<span class="pz-art pz-art-kette" title="${escapeHtml(`Tage sammeln: Mini-Trade für die Mindesttage (${tm.ist} von ${tm.soll} Tagen mit Trade). Ziel ${Math.round(Number(tm.ziel) || 0).toLocaleString('de-DE')} $ ist erreicht — der SL hält die Balance über Ziel + ${Math.round(Number(tm.puffer) || 0)} $.`)}"><span><b>Tage sammeln</b></span><small>${Number(tm.ist) + 1}. von ${tm.soll} Tagen</small></span>`
+      ? `<span class="pz-art pz-art-kette" title="${escapeHtml(`Tage sammeln: Mini-Trade für die Mindesttage (${tm.ist} von ${tm.soll} Tagen mit Trade)${tm.sofort_zu ? ' — wird nach dem Start sofort wieder geschlossen' : ''}. ${tm.unter_ziel ? 'Konto noch unter dem Ziel' : `Ziel ${Math.round(Number(tm.ziel) || 0).toLocaleString('de-DE')} $ ist erreicht`} — der SL hält die Balance über ${tm.unter_ziel ? 'Boden' : 'Ziel'} + ${Math.round(Number(tm.puffer) || 0)} $.`)}"><span><b>Tage sammeln</b></span><small>${Number(tm.ist) + 1}. von ${tm.soll} Tagen</small></span>`
       : ks
       ? `<span class="pz-art pz-art-kette" title="${escapeHtml(ks.tip)}"><span><b>${typeof ks.nr === 'number' ? 'Trade ' + ks.nr : escapeHtml(String(ks.nr))}</b>${ks.kette}</span><small>${escapeHtml(ks.tag)}</small></span>`   // zweizeilig: Spalte nur 92 px
       : `<span class="pz-art" title="${notiz ? escapeHtml(planSchrittTip(notiz, Number(p.masterTp))) : ''}">${notiz ? escapeHtml(notiz.art) + (notiz.gekappt ? ' · SL gekappt' : '') : ''}</span>`
@@ -39904,7 +39931,7 @@
               ? `<span class="tc2-chip" style="background:rgba(245,158,11,.12);color:#B45309" title="${escapeHtml(String(p.mt5Baseline.tv.warnung))}">⚠ Brackets in TopstepX prüfen</span>`
               : ''}
             ${(() => { const ks = tpKetteSchritt(p); return ks ? `<span class="tc2-chip" title="${escapeHtml(ks.tip)}">${escapeHtml(ks.text)}${ks.kette}</span>` : '' })()}
-            ${planIstTageMini(p) ? `<span class="tc2-chip" style="background:rgba(21,128,61,.10);color:#15803d" title="Mini-Trade für die Mindesttage — Ziel erreicht, Balance bleibt über Ziel + Puffer">Tage sammeln ${Number(p.mt5Baseline.tage_mini.ist) + 1}/${escapeHtml(String(p.mt5Baseline.tage_mini.soll))}</span>` : ''}
+            ${planIstTageMini(p) ? `<span class="tc2-chip" style="background:rgba(21,128,61,.10);color:#15803d" title="Mini-Trade für die Mindesttage — kleinste Lot-Stufe, wird nach dem Start sofort wieder geschlossen (Tag zählt)">Tage sammeln ${Number(p.mt5Baseline.tage_mini.ist) + 1}/${escapeHtml(String(p.mt5Baseline.tage_mini.soll))}</span>` : ''}
             ${(routeIstEcho(p.route) && (p.richtung === 'buy' || p.richtung === 'sell'))
               ? `<span class="tc2-chip" style="font-family:var(--mono);font-weight:700;${p.richtung === 'buy' ? 'background:rgba(18,183,106,.12);color:#0E9757' : 'background:rgba(240,68,56,.10);color:#D92D20'}" title="Gespeicherte Order-Richtung">${p.richtung === 'buy' ? 'BUY' : 'SELL'}</span>`
               : ''}

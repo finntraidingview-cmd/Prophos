@@ -3,9 +3,10 @@
 Master): Ziel erreicht, Mindesttage fehlen → EIN Mini-Trade je Handelstag statt Sperre, Balance bleibt über Ziel + Puffer.
 
 Aufruf:  python3 tools/selftest_tage_sammeln.py
-Ohne Netz. Geprüft: CFD 0,01 Lot TP 1–2 / SL ≤ 2 $; Futures 1 MNQ TP/SL 5–10 $; SL gedeckelt auf Balance − Ziel − Puffer; zu wenig Luft →
-Grund statt Plan; Tage voll → wieder „Ziel erreicht"; ohne Mindesttage unverändert; Zählung wie zielFortschritt (Berlin-Tage mit Start ab
-goal_since + goal_done_offset)."""
+Ohne Netz. Geprüft: CFD 0,01 Lot, TP/SL 1–3 $ (in Punkten aufgerundet, Punkt-Spanne als Boden); Futures 1 MNQ TP/SL 6–10 $; SL gedeckelt
+auf Balance − Ziel − Puffer; zu wenig Luft → Grund statt Plan; Tage voll → wieder „Ziel erreicht"; ohne Mindesttage unverändert; seit
+12.10.2026 (Finn: jeden Tag farmen) Mini auch UNTER dem Ziel, wenn der Bot sonst nichts plant (Rest < Klein-Trade-Grenze, Handarbeit) — SL
+dann über Boden + Puffer, sofort_zu am Plan; Zählung wie zielFortschritt (Berlin-Tage mit Start ab goal_since + goal_done_offset)."""
 import os
 import sys
 
@@ -35,12 +36,14 @@ def main():
     # CFD Phase 1 100k (menge_schritt 0,01), Ziel 110.000, Balance 110.420, Tage 2/4, Punktwert 1 $/Pkt/Lot
     w, g = R(CFD, "phase1", 110420.0, U, ppl=1.0, tage=(2, 4))
     tm = (w or {}).get("tage_mini") or {}
-    check(w and w["menge"] == 0.01 and tm.get("sl_pkt") == 30 and tm.get("tp_pkt") == 30 and w["sl"] == 0.3 and w["tp"] == 0.3
+    # 12.10.2026: TP/SL mindestens 1–3 $ → bei 0,01 Lot × 1 $/Pkt sind 2 $ = 200 Pkt (u 0,5); Punkt-Spanne 20–40 nur noch der Boden
+    check(w and w["menge"] == 0.01 and tm.get("sl_pkt") == 200 and tm.get("tp_pkt") == 200 and w["sl"] == 2.0 and w["tp"] == 2.0
           and w["risiko"] == w["sl"] and "symbol" not in w and tm.get("ziel") == 110000 and tm.get("puffer") == 5.0
-          and w["stufe"] == "Tage sammeln 2/4 · Mini-Trade 0,01 Lot · TP 30 Pkt (0,3 $) / SL 30 Pkt (0,3 $) (Balance bleibt über Ziel + 5 $)",
-          f"CFD 0,01 Lot: TP/SL 30 Pkt = 0,30 $ ({g or w})")
+          and tm.get("sofort_zu") is True and tm.get("unter_ziel") is False
+          and w["stufe"] == "Tage sammeln 2/4 · Mini-Trade 0,01 Lot · TP 200 Pkt (2 $) / SL 200 Pkt (2 $) · sofort wieder zu (Balance bleibt über Ziel + 5 $)",
+          f"CFD 0,01 Lot: TP/SL 200 Pkt = 2 $, sofort_zu ({g or w})")
     wr, _ = R(CFD, "phase1", 110420.0, {"tp": 0.0, "sl": 0.999, "menge": 0.5, "puffer": 0.5}, ppl=1.0, tage=(2, 4))
-    check(wr["tage_mini"]["tp_pkt"] == 20 and wr["tage_mini"]["sl_pkt"] == 40, f"CFD Spanne 20–40 Pkt ({wr['tage_mini']})")
+    check(wr["tage_mini"]["tp_pkt"] == 100 and wr["tage_mini"]["sl_pkt"] == 300, f"CFD $-Spanne 1–3 $ → 100–300 Pkt bei 0,01 Lot ({wr['tage_mini']})")
     # kleinste Stufe der Firma: menge_schritt 1 (FTMO/The5ers) → 1 Lot, 30 Pkt = 30 $
     CFD1 = dict(CFD, phasen={"phase1": dict(CFD["phasen"]["phase1"], menge_schritt=1)})
     w1, g1 = R(CFD1, "phase1", 110420.0, U, ppl=1.0, tage=(2, 4))
@@ -52,7 +55,7 @@ def main():
     check(wn1 is None and "kleinste Mini-SL (20 Pkt = 20 $ bei 1 Lot)" in (gn1 or "") and ", von Hand" in (gn1 or ""),
           f"1 Lot, Luft 15 $ < 20 Pkt → kein Mini, genauer Grund ({gn1})")
     w01, _ = R(dict(CFD, phasen={"phase1": dict(CFD["phasen"]["phase1"], menge_schritt=0.1)}), "phase1", 110420.0, U, ppl=1.0, tage=(2, 4))
-    check(w01 and w01["menge"] == 0.1 and w01["sl"] == 3.0, f"menge_schritt 0,1 → 0,1 Lot, 30 Pkt = 3 $ ({w01 and (w01['menge'], w01['sl'])})")
+    check(w01 and w01["menge"] == 0.01 and w01["sl"] == 2.0, f"menge_schritt 0,1 (FundedNext) → trotzdem 0,01 Lot, 2 $ ({w01 and (w01['menge'], w01['sl'])})")
     wp, gp = R(CFD, "phase1", 110420.0, U, ppl=None, tage=(2, 4))
     check(wp is None and "kein Punktwert" in (gp or ""), f"ohne Punktwert kein Mini ({gp})")
     # Tage voll / ohne Mindesttage → wie bisher; unter dem Ziel normal
@@ -72,8 +75,21 @@ def main():
     ganz = [R(FUT, "challenge", 159120.0, {"tp": x, "sl": y, "menge": 0.5, "puffer": 0.5}, tage=(1, 3))[0] for x in (0.0, 0.13, 0.37, 0.61, 0.99) for y in (0.07, 0.5, 0.93)]
     check(all(float(v["tp"]).is_integer() and float(v["sl"]).is_integer() and (v["tage_mini"]["tp_pkt"] * 2) % 1 == 0 for v in ganz),
           f"Futures MNQ: TP/SL immer ganze Dollar (Raster 0,5 Pkt) ({sorted({(v['tp'], v['sl']) for v in ganz})})")
+    # 12.10.2026: unter dem Ziel (Rest 60 $ < 100 → früher Handarbeit) jetzt Mini; ohne bekannten Boden keine SL-Kappung, 'rest' bleibt ehrlich
     wu, gu = R(FUT, "challenge", 158940.0, U, tage=(1, 3))
-    check(wu is None and "Tage sammeln 1/3" in (gu or ""), f"Futures Challenge 60 $ unter dem Ziel → kein Mini ({gu})")
+    check(wu and wu["tage_mini"]["unter_ziel"] is True and wu["sl"] == 8.0 and wu["rest"] == 60 and wu["stufe"].endswith("· sofort wieder zu"),
+          f"Futures Challenge 60 $ unter dem Ziel → Mini ohne Kappung ({gu or wu and wu['stufe']})")
+    # CFD unter dem Ziel mit statischem Boden (FundedNext: dd_pct 10): Rest 5 $ < 10 (AP_REST_MIN_CFD) → Mini, SL über Boden + 5 $
+    FN = dict(CFD, namen=["fundednext"], boden="statisch", dd_pct=10, phasen={"phase1": dict(CFD["phasen"]["phase1"], menge_schritt=0.1)})
+    wb, gb = R(FN, "phase1", 109995.0, U, ppl=1.0, tage=(0, 5))
+    check(wb and wb["menge"] == 0.01 and wb["tage_mini"]["unter_ziel"] is True and wb["rest"] == 5 and "über Boden + 5 $" in wb["stufe"],
+          f"FundedNext Rest 5 $, Tage 0/5 → Mini 0,01 Lot, Boden-Kappung ({gb or wb and wb['stufe']})")
+    # Boden-Kappung greift: Ziel +0,01 % (100.010), Boden −0,002 % (99.998), Balance 100.004 → Rest 6 $ (Mini), Luft 1 $ < 20 Pkt × 1 Lot → Grund
+    FNk = dict(FN, dd_pct=0.002, ziel_pct={"phase1": 0.01}, phasen={"phase1": dict(FN["phasen"]["phase1"], menge_schritt=1)})
+    wb1, gb1 = R(FNk, "phase1", 100004.0, U, ppl=1.0, tage=(0, 5))
+    check(wb1 is None and "Balance nur 6 $ über dem Boden" in (gb1 or "") and "unter Boden + 5 $" in (gb1 or ""), f"1 Lot, 6 $ über dem Boden → kein Mini, Grund ({gb1})")
+    wb2, gb2 = R(FN, "phase1", 104000.0, U, ppl=1.0, tage=(0, 5))
+    check(wb2 and "tage_mini" not in wb2, f"FundedNext Rest 6.000 $: normaler Trade, kein Mini ({gb2 or wb2 and wb2['stufe']})")
     wt, gt = R(dict(FUT, route="tsv2"), "challenge", 159120.0, U, tage=(1, 3))
     check(wt is None and "Topstep — Mini-Trade von Hand" in (gt or ""), f"Topstep (tsv2) → kein Mini, Grund ({gt})")
     # Zählung
