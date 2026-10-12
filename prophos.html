@@ -32897,6 +32897,13 @@
             }else if(mc.error){
               showSyncBanner(`Nachfolger gespeichert, aber Echo-Einrichtung fehlgeschlagen: ${mc.error}`, 'err')
               if(typeof hideSyncBannerSoon === 'function') hideSyncBannerSoon(8000)
+            }else if(mc.skipped === 'nichtlokal' && (created.creds?.platform || '').toLowerCase() === 'mt5'){
+              // 12.10.2026 (Finn, Moritz' The5ers Phase 2 aus dem Radar heraus angelegt): der Wizard lief
+              // auf pages.dev → mt5CreateAccountInCopier kann hier nur still überspringen, Echo liegt auf
+              // dem PC der ID. Seit heute holt der PC-Tab das selbst nach (mtcNachzueglerEinrichten) —
+              // hier nur noch sagen, dass es kommt, statt zu schweigen.
+              showSyncBanner(`🖥 „${created.name}" wird in Echo eingerichtet, sobald der PC-Tab der ID es sieht (≤ 1 min)`, 'ok')
+              if(typeof hideSyncBannerSoon === 'function') hideSyncBannerSoon(8000)
             }
           }
         }catch(e){ console.warn('[mtc] Auto-Einrichtung (Nachfolger) übersprungen:', e && e.message) }
@@ -43062,7 +43069,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1465'
+  const OS_TAB_BUILD = '2026-09-22.1466'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -62673,6 +62680,64 @@
   window.mtcApi = mtcApi
   window.mtcInstances = () => mtcState
   window.mtcReload = mtcLoad
+
+  /* ── Echo-Nachzügler: neue MT5-Konten selbst einrichten (12.10.2026) ──────
+   * Vorfall: Finn hakt im Radar Moritz' The5ers-Konto als bestanden ab, legt im
+   * Nachfolger-Wizard das Phase-2-Konto mit MT5-Zugangsdaten an, drückt
+   * „Anlegen" — und in Echo erscheint nichts. Grund: Wizard und saveAccount()
+   * rufen mt5CreateAccountInCopier nur auf dem Gerät auf, auf dem sie laufen,
+   * und das darf nur localhost (der Copier ist eine PC-Sache). Finn sitzt am
+   * Mac auf pages.dev, Echo läuft auf Moritz' PC → stiller Skip 'nichtlokal'.
+   * Jetzt schaut der PC-TAB (MT5_LOCAL, eingeloggt als die ID) jede Minute
+   * selbst nach: nicht archivierte Konten dieser ID mit Plattform MT5 und
+   * vollständigen Zugangsdaten, nicht live, in den letzten 7 Tagen angelegt
+   * (kein Nachholen alter Bestände auf allen PCs beim ersten Rollout), für die
+   * KEINE Instanz mit diesem Master-Login existiert → genau dieselbe Funktion
+   * wie beim Anlegen (mt5CreateAccountInCopier: prüft offline/vorhanden/live
+   * selbst, verlinkt über den Merker nach Job-Ende). Eine Einrichtung je Takt,
+   * nie neben einem laufenden Job, je Login höchstens alle 6 h ein Versuch
+   * (localStorage), damit ein Fehler kein Dauerfeuer wird. */
+  const MTC_NACHZ_KEY = 'prophos_echo_nachzuegler'
+  let _mtcNachzLaeuft = false
+  async function mtcNachzueglerEinrichten(){
+    if(typeof MT5_LOCAL === 'undefined' || !MT5_LOCAL || _mtcNachzLaeuft) return
+    if(typeof mt5CreateAccountInCopier !== 'function') return
+    _mtcNachzLaeuft = true
+    try{
+      const accs = (typeof accounts !== 'undefined' && accounts) || []
+      const seit = Date.now() - 7 * 24 * 3600 * 1000
+      const kand = accs.filter(a => a && a.creds && a.creds.login && a.creds.password && a.creds.server
+        && String(a.creds.platform || '').toLowerCase() === 'mt5'
+        && a.type !== 'live'
+        && a.createdAt && new Date(a.createdAt).getTime() > seit
+        && !(typeof isAccountArchived === 'function' && isAccountArchived(a.id)))
+      if(!kand.length) return
+      const d = await mtcApi('instances')
+      if(!d || d.copier_offline || d._httpFail) return
+      if(d.job && !d.job.done) return          // nie neben einer laufenden Einrichtung
+      const logins = new Set((d.instances || []).map(x =>
+        String((x.status || {}).master_login || x.master_expected || '')))
+      let merk = {}
+      try{ merk = JSON.parse(localStorage.getItem(MTC_NACHZ_KEY) || '{}') || {} }catch(_){ merk = {} }
+      const acc = kand.find(a => !logins.has(String(a.creds.login))
+        && !(merk[String(a.creds.login)] && Date.now() - merk[String(a.creds.login)] < 6 * 3600 * 1000))
+      if(!acc) return
+      merk[String(acc.creds.login)] = Date.now()
+      try{ localStorage.setItem(MTC_NACHZ_KEY, JSON.stringify(merk)) }catch(_){}
+      const mc = await mt5CreateAccountInCopier(acc)
+      if(mc && mc.ok){
+        console.info('[mtc] Nachzügler: „' + acc.name + '" wird in Echo eingerichtet' + (mc.existing ? ' (verknüpft)' : ''))
+        if(typeof atToast === 'function') atToast(`🖥 „${acc.name}" wird in Echo eingerichtet`, 'start')
+      }else if(mc && mc.error){
+        console.warn('[mtc] Nachzügler: Echo-Einrichtung fehlgeschlagen für', acc.name, mc.error)
+      }
+    }catch(e){ console.warn('[mtc] Nachzügler übersprungen:', e && e.message) }
+    finally{ _mtcNachzLaeuft = false }
+  }
+  if(typeof MT5_LOCAL !== 'undefined' && MT5_LOCAL){
+    setTimeout(mtcNachzueglerEinrichten, 20000)       // erst wenn Konten geladen sind
+    setInterval(mtcNachzueglerEinrichten, 60000)
+  }
   /* ── Symbol-Mapping halten, nicht erinnern (31.08.2026) ──────────────────
    * Finns Ansage nach dem dritten „im Mapping fehlt NDX100": „Das Mapping ist
    * bei jedem Profil immer das Gleiche. Bei FundedNext wird sich das nie
