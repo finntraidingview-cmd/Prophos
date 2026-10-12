@@ -12126,9 +12126,21 @@
       <p class="modal-sub">Prop-Firm-Account oder Live-Broker. Live-Accounts werden direkt mit MetaApi verbunden.</p>
 
       <div class="form-grid">
+        <!-- NAMENSREGEL (.1472, Finn 12.10.2026): neue Prop-Firm-Konten heißen automatisch „<Größe> <External ID> → <Phase> · <Zusatz>",
+             genau wie die 125 Bestandskonten (sql/2026-10-12_konto_namensregel.sql). Größe + Zusatz hier, External ID weiter unten,
+             Phase = Typ. Das Namensfeld ist beim Anlegen nur Vorschau; beim Bearbeiten und bei Live-Konten (Fusion) bleibt es frei. -->
+        <div class="field" id="ac-groesse-row">
+          <label>Größe <span style="font-weight:400;color:var(--sub)">(k)</span></label>
+          <input class="input mono" id="ac-groesse" type="number" step="25" min="1" placeholder="z.B. 150" autocomplete="off">
+        </div>
+        <div class="field" id="ac-zusatz-row">
+          <label>Zusatz <span style="font-weight:400;color:var(--sub)">(optional)</span></label>
+          <input class="input" id="ac-zusatz" placeholder="z.B. 1% Rule, Bogo" autocomplete="off">
+        </div>
         <div class="field" style="grid-column:1/-1">
           <label>Name</label>
-          <input class="input" id="ac-name" placeholder="z.B. Topstep 50K · #312" autocomplete="off">
+          <input class="input" id="ac-name" placeholder="wird aus Größe · External ID · Typ gebaut" autocomplete="off">
+          <div id="ac-name-hint" style="font-size:11px;color:var(--sub);margin-top:4px">Automatisch nach der Namensregel: „150k FNFT…27926 → Challenge · Zusatz"</div>
         </div>
         <div class="field">
           <label>Firm</label>
@@ -12201,7 +12213,7 @@
           <div style="font-size:11px;color:var(--sub);margin-top:4px">Größter Tag ≤ so viel % des Ziels. 50 % z. B. bei Konten mit Addon.</div>
         </div>
         <div class="field" style="grid-column:1/-1" id="ac-ext-id-row">
-          <label>External ID <span style="font-weight:400;color:var(--sub)">(optional)</span></label>
+          <label>External ID <span style="font-weight:400;color:var(--sub)">(Pflicht bei Prop-Firm-Konten — Teil des Namens)</span></label>
           <input class="input mono" id="ac-ext-id" placeholder="z.B. TDFYSL150305023594" autocomplete="off">
           <div style="font-size:11px;color:var(--sub);margin-top:4px">Broker-Account-Nummer. Wird als #ID-Badge in Trade-Plänen angezeigt.</div>
         </div>
@@ -12532,7 +12544,8 @@
         <!-- „Anzahl Accounts" und „Startnummer" entfallen (F16): Anzahl = neue Kennungen aus „External IDs", {n} zählt einfach durch.
              Unsichtbar weiter da, weil ältere Verdrahtung (updatePreview) die Elemente anspricht. -->
         <input type="hidden" id="bulk-count" value=""><input type="hidden" id="bulk-startnum" value="1">
-        <div class="field" style="grid-column:1/-1">
+        <!-- Name-Vorlage seit .1472 ohne Wirkung (Namensregel, Finn 12.10.2026) — Feld bleibt unsichtbar da, weil Vorlagen-Code bEl.template anspricht -->
+        <div class="field" style="grid-column:1/-1" hidden>
           <label>Name-Vorlage</label>
           <input class="input" id="bulk-nametemplate" placeholder="z.B. AlphaFutures 50K · #{n}" autocomplete="off">
           <div style="font-size:11px;color:var(--sub);margin-top:4px"><code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{n}</code> = laufende Nummer &nbsp;·&nbsp; <code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{firm}</code> = Firm &nbsp;·&nbsp; <code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{size}</code> = Account-Größe in K &nbsp;·&nbsp; <code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{ex}</code> = External ID</div>
@@ -32685,14 +32698,24 @@
   // NAMENSREGEL (Finn 12.10.2026): jedes Konto heißt „<Größe> <External ID> → <Phase>", optional „ · <Zusatz>" (z. B. 1% Rule).
   // Größe aus dem alten Namen („100k"), External ID = die NEUE Nummer des Nachfolgers, Phase aus dem Typ, Zusatz bleibt.
   const SUC_PHASE_LABEL = { challenge: 'Challenge', phase1: 'Phase 1', phase2: 'Phase 2', funded: 'Funded', funded_cfd: 'Funded', winning_days: 'Winning Days', live: 'Live' }
-  function kontoNameBauen(altName, typ, ext){
+  // EINE Stelle für die Regel (.1472, Finn 12.10.2026: „wenn ich Accounts hinzufüge, immer nach der Struktur") — Konto-Popup,
+  // Bulk-Add und Nachfolger-Wizard bauen den Namen alle hierüber. groesse = Text wie „150k" (leer erlaubt), typ = account_type.
+  function kontoNameRegel(groesse, ext, typ, zusatz){
+    const phase = SUC_PHASE_LABEL[typ] || ''
+    const kopf = [String(groesse || '').trim(), String(ext || '').trim()].filter(Boolean).join(' ')
+    const z = String(zusatz || '').trim()
+    return `${kopf}${kopf ? ' ' : ''}→ ${phase}${z ? ' · ' + z : ''}`.trim()
+  }
+  // Teile eines bestehenden Namens zurückholen (Größe „100k", Zusatz hinter „ · " oder Klammer am Ende)
+  function kontoNameTeile(altName){
     const alt = String(altName || '')
     const groesse = (alt.match(/\b\d+(?:[.,]\d+)?\s?k\b/i) || [''])[0].replace(/\s+/, '').toLowerCase()
-    // Zusatz: hinter „ · " oder eine Klammer am Ende („(1% RULE)" bleibt als Zusatz erhalten)
     const zusatz = alt.includes(' · ') ? alt.slice(alt.indexOf(' · ') + 3).trim() : ((alt.match(/\(([^()]+)\)\s*$/) || ['', ''])[1]).trim()
-    const phase = SUC_PHASE_LABEL[typ] || ''
-    const kopf = [groesse, String(ext || '').trim()].filter(Boolean).join(' ')
-    return `${kopf}${kopf ? ' ' : ''}→ ${phase}${zusatz ? ' · ' + zusatz : ''}`.trim()
+    return { groesse, zusatz }
+  }
+  function kontoNameBauen(altName, typ, ext){
+    const t = kontoNameTeile(altName)
+    return kontoNameRegel(t.groesse, ext, typ, t.zusatz)
   }
   let _sucNameHand = false, _sucVorgaenger = null
   // Vorschlag ins Namensfeld, solange Finn den Namen nicht selbst angefasst hat
@@ -33193,6 +33216,9 @@
     addBtn:   document.getElementById('addAccountBtn'),
     modal:    document.getElementById('addAccountModal'),
     name:     document.getElementById('ac-name'),
+    groesse:  document.getElementById('ac-groesse'),   // Namensregel .1472
+    zusatz:   document.getElementById('ac-zusatz'),
+    nameHint: document.getElementById('ac-name-hint'),
     firm:     document.getElementById('ac-firm'),
     type:     document.getElementById('ac-type'),
     // Anfangs-Balance, Trade-Limits und Notiz sind seit 02.09.2026 aus dem
@@ -34542,6 +34568,7 @@
     if(editAccount){
       // Pre-fill mit bestehenden Werten
       accEls.name.value = editAccount.name || ''
+      { const t = kontoNameTeile(editAccount.name); if(accEls.groesse) accEls.groesse.value = t.groesse ? parseFloat(t.groesse) || '' : ''; if(accEls.zusatz) accEls.zusatz.value = t.zusatz }
       accEls.firm.value = editAccount.firm || ''
       accEls.type.value = editAccount.type || 'phase1'
       accEls.purchase.value = editAccount.purchaseCost != null ? editAccount.purchaseCost : ''
@@ -34570,6 +34597,8 @@
       if(accEls.credPlatform) accEls.credPlatform.value = editAccount.creds?.platform || ''
     }else{
       accEls.name.value = ''
+      if(accEls.groesse) accEls.groesse.value = ''
+      if(accEls.zusatz) accEls.zusatz.value = ''
       accEls.firm.value = ''
       accEls.type.value = prefillType || 'phase1'
       accEls.purchase.value = ''
@@ -34606,10 +34635,31 @@
     accEls.msg.className = 'modal-msg'
     toggleMaSection()
     toggleAcBloecke()
+    acNameVorschlag()
     acTvLiveRender(editAccount || null)
     if(typeof acMaybeFillServer === 'function') acMaybeFillServer()
     accEls.modal.classList.add('open')
-    setTimeout(() => accEls.name.focus(), 50)
+    setTimeout(() => (accEls.name.readOnly && accEls.groesse ? accEls.groesse : accEls.name).focus(), 50)
+  }
+
+  // NAMENSREGEL im Konto-Popup (.1472): beim ANLEGEN eines Prop-Firm-Kontos ist der Name reine Vorschau aus Größe · External ID · Typ
+  // · Zusatz (readonly, getönt). Live-Konten (Fusion-Hedge) behalten den freien Namen. Beim BEARBEITEN bleibt der gespeicherte Name
+  // editierbar; ändert Finn den Typ, wird nur der Teil hinter „→" ersetzt (Phase 1 → Phase 2), ändert er Größe/Zusatz, nur die.
+  function acNameVorschlag(){
+    if(!accEls.name) return
+    const typ = accEls.type?.value || '', neu = !_editingAccountId, auto = neu && typ !== 'live'
+    accEls.name.readOnly = auto
+    accEls.name.style.background = auto ? 'var(--surface-tint)' : ''
+    if(accEls.nameHint) accEls.nameHint.hidden = typ === 'live'
+    const gr = parseFloat(accEls.groesse?.value), grTxt = gr > 0 ? (Math.round(gr * 10) / 10) + 'k' : ''
+    if(auto){
+      accEls.name.value = kontoNameRegel(grTxt, accEls.extId?.value, typ, accEls.zusatz?.value)
+    }else if(!neu && /→/.test(accEls.name.value)){
+      const t = kontoNameTeile(accEls.name.value)
+      const vorher = (accounts || []).find(x => String(x.id) === String(_editingAccountId))
+      const ext = (accEls.extId?.value || '').trim() || (vorher && vorher.externalId) || accEls.name.value.replace(/^\S+k\s+/i, '').split('→')[0].trim()
+      accEls.name.value = kontoNameRegel(grTxt || t.groesse, ext, typ, accEls.zusatz?.value)
+    }
   }
   function closeAccountModal(){
     accEls.modal.classList.remove('open')
@@ -34796,6 +34846,9 @@
 
     if(!name){ setModalMsg('Name ist Pflicht.', 'err'); return }
     if(!firm){ setModalMsg('Firm ist Pflicht.', 'err'); return }
+    // Namensregel .1472: ohne External ID gibt es keinen regelkonformen Namen — beim Anlegen eines Prop-Firm-Kontos Pflicht
+    if(!isEdit && type !== 'live' && !(accEls.extId?.value || '').trim()){ setModalMsg('External ID ist Pflicht — der Name wird daraus gebaut (Größe · External ID → Phase).', 'err'); accEls.extId?.focus(); return }
+    if(!isEdit && type !== 'live' && !(parseFloat(accEls.groesse?.value) > 0)){ setModalMsg('Größe (k) ist Pflicht — z. B. 150.', 'err'); accEls.groesse?.focus(); return }
     if(!currentUserId){ setModalMsg('Nicht eingeloggt — bitte Seite neu laden.', 'err'); return }
 
     // Consistency (07.10.2026): nur wenn das Feld sichtbar ist — ausgeblendet bleibt der Bestand unangetastet (Muster Blöcke 15.09.)
@@ -35113,6 +35166,11 @@
   if(accEls.save)    accEls.save.addEventListener('click', saveAccount)
   if(accEls.type)    accEls.type.addEventListener('change', toggleMaSection)
   if(accEls.type)    accEls.type.addEventListener('change', toggleAcBloecke)
+  // Namensregel .1472: Größe / External ID / Typ / Zusatz → Name neu bauen (eigene Verdrahtung, nur dieses Popup)
+  if(accEls.type)    accEls.type.addEventListener('change', acNameVorschlag)
+  accEls.groesse?.addEventListener('input', acNameVorschlag)
+  accEls.zusatz?.addEventListener('input', acNameVorschlag)
+  accEls.extId?.addEventListener('input', acNameVorschlag)
   // Consistency (07.10.2026): „Andere Zahl …" blendet das Zahlenfeld ein (eigene Verdrahtung, nur dieses Popup)
   accEls.cons?.addEventListener('change', () => {
     if(!accEls.consFrei) return
@@ -36061,7 +36119,7 @@
         return `<label class="bpv ${an ? '' : 'aus'}"><input type="checkbox" data-bp="${escapeHtml(x.id)}" ${an ? 'checked' : ''} ${sperre ? 'disabled' : ''}>
           <span style="min-width:0"><span class="id">${escapeHtml(x.id)}</span>
           ${(x.titel || x.status) ? `<span class="m">${escapeHtml(x.titel || '–')}${x.status ? ' · ' + escapeHtml(x.status) : ''}</span>` : ''}
-          <span class="m">${sperre ? escapeHtml(sperre) : `${escapeHtml(firma)} · ${bulkTypLabel(typ)} · ${Number(gr).toLocaleString('de-DE')}${x.plattform ? ' · ' + escapeHtml(x.plattform) : ''}`}</span>
+          <span class="m">${sperre ? escapeHtml(sperre) : `${escapeHtml(kontoNameRegel(Math.round(gr / 1000) + 'k', x.id, typ, ''))} · ${escapeHtml(firma)}${x.plattform ? ' · ' + escapeHtml(x.plattform) : ''}`}</span>
           ${sperre || !bulkZentral.length ? '' : `<select class="input" data-bpv="${escapeHtml(x.id)}" style="margin-top:4px;padding:3px 8px;font-size:11.5px;height:auto;width:auto;max-width:100%"><option value="">ohne Vorlage</option>${bulkVorlagenGruppiert(z => `<option value="${escapeHtml(String(z.id))}" ${v && String(v.id) === String(z.id) ? 'selected' : ''}>${escapeHtml(z.name)}</option>`)}</select>`}</span>
           <span class="bal">${x.balance != null ? '$' + de(x.balance) : ''}</span></label>`
       }).join('')
@@ -36115,7 +36173,6 @@
       if(!wahl.length){ bEl.saveBtn.classList.remove('ts-btn-loading'); bulkPasteRender(); setBulkMsg('Alle Kennungen gibt es schon in Prophos — nichts angelegt.', 'err'); return }
       const zugang = bulkZeigtZugang()   // F13/F17: Zugangsdaten + Duplikum nur bei CFD — und nur auf die CFD-Kennungen verteilt
       const credList = zugang ? getBulkCreds() : [], cfdIdx = new Map(bulkCfdBloecke(wahl).map((x, k) => [x.id, k]))
-      const tmplForm = bEl.template.value.trim()
       let created = 0, errors = 0, anyExtId = false, ohneQuelle = false
       const dupCandidates = []  // { acc } für Accounts mit vollständigen Zugangsdaten
       for(let i = 0; i < wahl.length; i++){
@@ -36123,11 +36180,12 @@
         // Werte: zentrale Vorlage des Blocks (F12) > Erkennung aus dem Text > Formular; Größe Text > Vorlage > 150.000 (F14)
         const v = bulkPasteVorlage(x), vv = (k, sonst) => (v && v[k] != null) ? v[k] : sonst
         const firm = vv('firm', x.firma || firmaForm), gr = x.groesse || vv('starting_balance', null) || vv('account_size', null) || BULK_STD_GROESSE
-        const tmpl = (v && v.name_template) || tmplForm
-        const name = tmpl ? String(tmpl).replace(/\{ex\}/g, x.id).replace(/\{firm\}/g, firm).replace(/\{size\}/g, Math.round(gr / 1000) + 'K').replace(/\{n\}/g, String(i + 1)).trim()
-                          : (x.titel ? `${x.titel} · ${x.id}` : `${firm} ${Math.round(gr / 1000)}K · ${x.id}`)
+        // Namensregel .1472 (Finn 12.10.2026): immer „<Größe> <External ID> → <Phase>" — Vorlagen-Text und Dashboard-Titel zählen nicht mehr
+        // (vorher ergab „{size} {firm} {ex}" Namen wie „150k FundedNext Futures FNFT…88778" neben „150k FNFT…27926 → Challenge")
+        const typRow = vv('account_type', x.typ || typForm)
+        const name = kontoNameRegel(Math.round(gr / 1000) + 'k', x.id, typRow, '')
         const row = {
-          user_id: currentUserId, name, firm, account_type: vv('account_type', x.typ || typForm),
+          user_id: currentUserId, name, firm, account_type: typRow,
           external_id: x.id, account_size: gr, starting_balance: gr,
           purchase_cost: vv('purchase_cost', pos(costRaw)), max_drawdown: vv('max_drawdown', pos(maxddRaw)),
           max_daily_drawdown: vv('max_daily_drawdown', pos(dailyRaw)), max_loss_per_trade: vv('max_loss_per_trade', pos(lossRaw)), max_profit_per_trade: vv('max_profit_per_trade', pos(profitRaw)),
@@ -43169,7 +43227,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1471'
+  const OS_TAB_BUILD = '2026-09-22.1472'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
