@@ -43284,7 +43284,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1482'
+  const OS_TAB_BUILD = '2026-09-22.1483'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -47340,7 +47340,10 @@
     // ERST VERSCHIEBEN, DANN DREHEN (09.10.2026, Master zu Finns Mischung je ID × Firma): läuft die Gegenrichtung noch, wartet ein Auto-Plan
     // zuerst 10–20 min (höchstens RK_VERSCHIEBEN_MAX-mal, nur solange das Startfenster danach noch offen ist) — der laufende Trade ist oft
     // gleich zu, und die Mischung des Tages bleibt. Erst danach wird gedreht wie bisher. Hand-Pläne: unverändert (verschieben).
-    if(plan.autoPlan && k.quelle === 'lauf'){
+    // SOFORT DREHEN, NICHT WARTEN (.1482, Finn 13.10.2026: „läuft schon Tradeify long, wird der Winning Day einfach auch long gestartet,
+    // auch wenn er short sein sollte — und andersrum; beide Trades kommen durch, man hedgt sich nur nicht gegenseitig“): das
+    // Warten 10–20 min (bis 3×) vom 09.10. ist aus — ein laufender Trade derselben ID × Firma gibt die Richtung sofort vor.
+    if(false && plan.autoPlan && k.quelle === 'lauf'){
       const n = (alt && alt.status === 'wartet' && Number(alt.versuche)) || 0
       const erst = (alt && alt.status === 'wartet' && alt.erst_start) ? alt.erst_start : plan.startUm
       if(n < RK_VERSCHIEBEN_MAX && Date.now() + 20 * 60000 <= rkFensterEnde(erst)){
@@ -47350,16 +47353,17 @@
     }
     // HAND-WERTE NIE DREHEN (Master 09.10.2026: Finn hatte Tradeify-Pläne um 07:41 von Hand geändert): wie der Bot (AP_FEST_HAND) nur
     // verschieben, bis die Gegenrichtung zu ist — Richtung bleibt Finns Wahl
-    if(plan.autoPlan && !plan.handWerteAt){
+    // .1482: auch Winning-Day-Pläne des Farmers drehen (vorher nur Auto-Pläne; WD wurde nur verschoben) — Hand-Werte weiter nie
+    if((plan.autoPlan || tpIstWdPlan(plan)) && !plan.handWerteAt){
       const { data, error } = await supabase.from('trade_plans').update({ richtung: ziel })
-        .eq('id', plan.id).eq('status', 'planned').eq('auto_plan', true).eq('richtung', plan.richtung).is('start_um_gestartet_at', null).select('*')
+        .eq('id', plan.id).eq('status', 'planned').eq('richtung', plan.richtung).is('start_um_gestartet_at', null).select('*')
       if(!error && data && data.length){
         rkPlanErsetzen(data[0])
         const durch = k.quelle === 'plan' ? 'vorher geplant' : 'läuft schon'
         try{ await baselinePatch(plan.id, { richtung_konflikt: { quelle: 'start', status: 'gedreht', um: new Date().toISOString(), von: plan.richtung, nach: ziel, text: k.text } }, 'planned') }catch(_){}
-        if(typeof atToast === 'function') atToast(`⇅ Richtungsschutz — „${plan.masterName || 'Plan'}": bei dieser ID+Firma ${durch} ${k.lauf.toUpperCase()} → Auto-Plan auf ${ziel.toUpperCase()} gedreht und gestartet (TP/SL in $ unverändert).`, 'start')
+        if(typeof atToast === 'function') atToast(`⇅ Richtungsschutz — „${plan.masterName || 'Plan'}": bei dieser ID+Firma ${durch} ${k.lauf.toUpperCase()} → ${tpIstWdPlan(plan) ? 'Winning Day' : 'Auto-Plan'} auf ${ziel.toUpperCase()} gedreht und gestartet (TP/SL in $ unverändert).`, 'start')
         rkProtokoll(plan, { von_richtung: plan.richtung, nach_richtung: ziel, von_start: plan.startUm, nach_start: plan.startUm,
-          grund: `Richtungsschutz am Start: ${durch} ${k.lauf} — Auto-Plan gedreht` })
+          grund: `Richtungsschutz am Start: ${durch} ${k.lauf} — ${tpIstWdPlan(plan) ? 'Winning Day' : 'Auto-Plan'} gedreht` })
         try{ renderTradePlans() }catch(_){}
         return { plan: tradePlans.find(x => String(x.id) === String(plan.id)) || rowToPlan(data[0]) }
       }
