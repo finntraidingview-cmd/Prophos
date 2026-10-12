@@ -29851,7 +29851,9 @@
           typ: String(a.type || ''), name: a.name, seit: a.zielErreichtAt, ...st }
       })
       const eigeneIds = new Set(ks.map(a => String(a.id)))
-      const fremd = (((typeof _hand !== 'undefined' && _hand.d && _hand.d.bestanden) || [])).filter(z => z && String(z.user_id) !== ich && !eigeneIds.has(String(z.konto_id)))
+      // .1480 (13.10.2026, Finn in Moritz' Login: FundingPips 20429722 Phase 1 hatte seit 09.10. das Ziel, stand aber in keinem Radar):
+      // /admin/handarbeit liefert {gruppen:{bestanden:[…]}} — hier stand _hand.d.bestanden, also immer leer → fremde Konten fehlten seit 09.10.
+      const fremd = (((typeof _hand !== 'undefined' && _hand.d && _hand.d.gruppen && _hand.d.gruppen.bestanden) || [])).filter(z => z && String(z.user_id) !== ich && !eigeneIds.has(String(z.konto_id)))
         .map(z => {
           let gr = 0; try{ gr = Number(kontoGroesseAnzeige(z.konto, z.start_balance, null)) || 0 }catch(_){}
           return { eigen: false, uid: String(z.user_id), user: z.user || '?', firma: z.firma, e4: String(z.ende4 || '').replace(/[^A-Za-z0-9]/g, '').slice(-4), gr,
@@ -30087,7 +30089,7 @@
     pcStandLaden()   // PC-Tab-Lebenszeichen je ID, höchstens alle 60 s (08.10.2026)
     wdl.timer = setTimeout(wdlTakt, 15000)
   }
-  window.wdlOnEnter = () => { wdlChartHolen(); wdlRender(); wdlTakt(); try{ setTimeout(() => mklTick(true), 80) }catch(_){} }
+  window.wdlOnEnter = () => { wdlChartHolen(); wdlRender(); wdlTakt(); try{ if(!_hand.d && typeof handLaden === 'function') handLaden() }catch(_){}   /* .1480: Bestanden-Abschnitt braucht _hand sofort, nicht erst nach 60 s */ try{ setTimeout(() => mklTick(true), 80) }catch(_){} }
   document.getElementById('wdl-refresh')?.addEventListener('click', () => wdlLaden(true))
   document.querySelectorAll('#wdl-tage [data-wdl-tage]').forEach(b => b.addEventListener('click', () => {
     wdl.tage = Number(b.dataset.wdlTage) || 2
@@ -43282,7 +43284,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1479'
+  const OS_TAB_BUILD = '2026-09-22.1480'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
