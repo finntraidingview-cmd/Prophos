@@ -29801,7 +29801,7 @@
     }
     const bestanden = () => {
       const zz = bstZeilen(); if(!zz.length) return ''
-      return `<div class="wdl-tab wdl-tab-konto wdl-tab-bst wdl-tab-sek-bestanden"><div class="wdl-z wdl-z-kopf"><span class="wdl-z-wer">Bestanden · ${zz.length}</span><span class="wdl-z-ri">Phase</span>`
+      return `<div class="wdl-tab wdl-tab-konto wdl-tab-bst wdl-tab-sek-bestanden"><div class="wdl-z wdl-z-kopf"><span class="wdl-z-wer" title="Konten, deren Ziel die Ziel-Wache erreicht sah — hier die Phase umstellen">Bestanden · Phase umstellen · ${zz.length}</span><span class="wdl-z-ri">Phase</span>`
         + ['Balance → Ziel', 'Tage', 'Status', ''].map((x, i) => `<span class="wdl-z-${['mi', 'konto', 'pl', 'zeit'][i]}">${x}</span>`).join('') + `</div>${zz.join('')}</div>`
     }
     const manuell = (g, a) => {
@@ -29815,8 +29815,11 @@
     // Abhaken. Reihenfolge: normal · bestanden · geblowt. Nur Anzeige — Abhaken/→ manuell/Drag unverändert.
     const istGeblowt = t => !!(t && (t.blown === true || (wdlBlowStand(t) || {}).geblowt || wdlKontoWeg(t)))
     const pruefTeile = pr => {
-      const best = pr.filter(t => !!wdlBestandenChip(t)), blow = pr.filter(t => !best.includes(t) && istGeblowt(t)), norm = pr.filter(t => !best.includes(t) && !blow.includes(t))
-      return [['Normal', norm, 'wdl-ug-normal', 'nichts passiert — abhaken'], ['Bestanden', best, 'wdl-ug-bestanden', 'Phase bestanden — abhaken, dann Phase umstellen'], ['Geblowt', blow, 'wdl-ug-geblowt', 'Konto geblowt oder weg — abhaken, dann archivieren']]
+      // NUR NOCH ZWEI (Finn 12.10.2026 ~17:49: „Bestanden, Manuelle Arbeit und nochmal Bestanden — alles dreimal das Gleiche"): die
+      // Untergruppe „Bestanden" ist weg, bestandene Trades stehen mit dem grünen Wort in „Normal" (abhaken); Phase umstellen gibt es
+      // genau einmal, im Abschnitt „Bestanden · Phase umstellen" unten (Konten der Ziel-Wache mit Knopf).
+      const blow = pr.filter(istGeblowt), norm = pr.filter(t => !blow.includes(t))
+      return [['Normal', norm, 'wdl-ug-normal', 'abhaken — bestandene stehen mit 🎯, Phase umstellen unten bei „Bestanden"'], ['Geblowt', blow, 'wdl-ug-geblowt', 'Konto geblowt oder weg — abhaken, dann archivieren']]
     }
     // arr = was gezeigt wird (Modell + Person), alleArr = dieselbe Liste ohne Personen-Filter — nur für die Chips im Kopf
     const gruppen = (arr, alleArr) => {
@@ -43055,7 +43058,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1463'
+  const OS_TAB_BUILD = '2026-09-22.1464'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
