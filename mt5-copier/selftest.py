@@ -6710,8 +6710,10 @@ def test_tsx_k4():
         and q4.index("s.klick(") < q4.index("res.update(gesendet=False, retry_ok=True)") < q4.index('_puls_ergebnis_senden("order", "geklickt"'),
         "K4: genau EIN Order-Klick; gesendet/retry_ok davor gesetzt, nur ohne Druck zurückgenommen")
     qk = "".join(_i.getsource(f) for f in (ob._tsx_k4_senden, ob._tsx_k4_feld, ob._tsx_k4_reiter, ob._tsx_k4_feld_aus))
-    chk("close_rect" not in qk and qk.count("TSX_K4_TABU") == 3 and qk.count("pruef=") == 3 and "doppel=True" in _i.getsource(ob._tsx_k4_feld)
-        and "time.sleep" not in qk, "K4-Schritte: jeder Klick mit Ziel-Beweis + Tabu, Close-Zelle nie benutzt, keine festen Pausen")
+    # .1494: vier Klicks — Order-Knopf, Reiter Positions, Zelle (Doppelklick), Eingabefeld (Fokus-Nachgriff nach dem Tippen, Mike 13.10.2026)
+    chk("close_rect" not in qk and qk.count("TSX_K4_TABU") == 4 and qk.count("pruef=") == 4 and "doppel=True" in _i.getsource(ob._tsx_k4_feld)
+        and "Eingabefeld (Fokus)" in _i.getsource(ob._tsx_k4_feld) and "time.sleep" not in qk,
+        "K4-Schritte: jeder Klick mit Ziel-Beweis + Tabu (auch der Fokus-Nachgriff), Close-Zelle nie benutzt, keine festen Pausen")
     sig = _i.signature(ob._AugenSitzung.klick)
     chk(sig.parameters["doppel"].default is False and "doppel=bool(doppel and pruef)" in _i.getsource(ob._AugenSitzung._win_klick),
         "Hand: Doppelklick nur als Zusatz mit Ziel-Beweis, Standard unverändert ein Klick")

@@ -16881,8 +16881,22 @@ def _tsx_k4_feld(s, st, befehl, feld, usd, name, trail):
         st = s.stand()
         f, _g = _tsx_k4_feld_aus(st, befehl, feld)
         e = f.get("edit") if isinstance(f, dict) and isinstance(f.get("edit"), dict) else {}
+        # FOKUS WEG NACH DEM TIPPEN (.1493, Mike 13.10.2026 01:06 UTC, Winning Day EXPRESS …57131691, To Make als ERSTE Zelle ohne Risk):
+        # im Feld stand '160' (richtig), aber document.activeElement war nicht mehr das Feld — TopstepX baut die Zelle beim Tippen neu.
+        # Alle zehn Ketten-Läufe davor (Risk zuerst) hatten den Fokus. Einmal ins Eingabefeld klicken (sein Rechteck, nie die Zelle,
+        # sonst ginge der Doppelklick-Zustand verloren) und neu lesen; der Wert bleibt stehen. Erst dann Enter — nie Enter ohne Fokus.
+        if e.get("offen") and e.get("fokus") is not True and tsx_k4_wert_gleich(e.get("wert"), usd):
+            ri = cdp_rect(e.get("rect"))
+            if ri and ri[2] >= 10:
+                trail.append(f"{name}: Wert {text} steht, Fokus weg — einmal ins Eingabefeld klicken")
+                s.klick(list(ri)[:4], f"{name}-Eingabefeld (Fokus)", pruef={"rect": list(ri)[:4], "text": "", "aria": "", "tabu": TSX_K4_TABU})
+                _warte(0.4, 0.2)
+                st = s.stand()
+                f, _g = _tsx_k4_feld_aus(st, befehl, feld)
+                e = f.get("edit") if isinstance(f, dict) and isinstance(f.get("edit"), dict) else {}
         if not (e.get("offen") and e.get("fokus") is True and tsx_k4_wert_gleich(e.get("wert"), usd)):
-            letzter = f"{name}: im Eingabefeld steht '{e.get('wert')}', erwartet {text} — nicht bestätigt"
+            letzter = (f"{name}: im Eingabefeld steht '{e.get('wert')}', erwartet {text} — nicht bestätigt"
+                       f" (Feld {'offen' if e.get('offen') else 'zu'}, Fokus {'ja' if e.get('fokus') is True else 'nein'})")
             trail.append(letzter + (" — zweiter Versuch" if versuch == 0 else ""))
             if e.get("offen"):
                 _cdp_esc(s, st, trail, f"{name}-Feld mit falschem Wert")

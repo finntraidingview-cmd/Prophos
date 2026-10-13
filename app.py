@@ -10455,7 +10455,7 @@ def _wd_plan_v2(body, firm=None, jetzt=None):
     # (hedgeSoloOeffnenKern); ohne ihn fiele er auf die nie live gefahrene eur/tp_punkte-Rechnung zurück.
     hedge = False
     try:
-        hedge = body["route"] == "tvv2" and float(body.get("hedge_eur") or 0) > 0
+        hedge = body["route"] in ("tvv2", "tsv2") and float(body.get("hedge_eur") or 0) > 0   # tsv2 seit .1493: Winning Day auf Topstep mit Fusion-Hedge
     except (TypeError, ValueError):
         hedge = False
     for k in WD_V2_NULL_FELDER:
@@ -18197,7 +18197,7 @@ def ap_echte_balancen(plan):
         nachher, q = (_wd_num(bn.get("balance")), "mt5_nachlesung") if bn.get("ok") is True else (None, None)
         if nachher is None:
             nachher, q = _wd_num(fin.get("master_balance")), "mt5_final"
-    elif route == "tvv2":
+    elif route in ("tvv2", "tsv2"):   # tsv2 (.1493): Puls-Endlesung in TopstepX schreibt dasselbe final (quelle 'puls')
         tv = bl.get("tv") if isinstance(bl.get("tv"), dict) else {}
         vorher = _wd_num(tv.get("balance_start"))
         nachher, q = (_wd_num(fin.get("balance_end")), "puls") if fin.get("quelle") == "puls" else (None, None)

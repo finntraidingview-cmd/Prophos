@@ -23785,7 +23785,10 @@
   // hedge_eur > 0 hinterlässt eine Spur am Plan — Guard → status 'uebersprungen' + Grund + roter Toast, Exception → 'fehler'.
   async function hedgeSoloOeffnen(plan, r){
     if(!plan || !(plan.hedgeEur > 0)) return null   // kein Hedge verlangt — nichts zu tun
-    const grund = plan.route !== 'tvv2' ? `Weg ${plan.route || '?'} statt Orbit V2` : !MT5_LOCAL ? 'nicht am PC (kein lokales Copier-Backend)'
+    // Topstep V2 (.1493, Finn 13.10.2026 nach dem ersten Winning Day auf Topstep: „die Order soll gespiegelt werden"): derselbe Fusion-Hedge wie
+    // bei Orbit — Einstieg/Symbol kommen aus der tsx-konto-Antwort (Fill-Toast), das Level aus Einstieg ± TP-Distanz, Schließen über das
+    // Terminal-Level (Copier) oder das Plan-Ende (Puls-Nachlesung); Reader-Enden gibt es für TopstepX nicht
+    const grund = (plan.route !== 'tvv2' && plan.route !== 'tsv2') ? `Weg ${plan.route || '?'} statt Orbit V2 / Topstep V2` : !MT5_LOCAL ? 'nicht am PC (kein lokales Copier-Backend)'
                 : typeof window.mtcApi !== 'function' ? 'Copier-API im Tab nicht geladen' : null
     if(grund){
       try{ await hedgeAmPlanSchreiben(plan.id, { status: 'uebersprungen', grund_code: 'guard', msg: grund, eur: plan.hedgeEur, pc: hedgePcId(), at: new Date().toISOString() }) }catch(_){}
@@ -26044,7 +26047,7 @@
           try{ _tp = tradePlans }catch(_){}
         }
       }
-      const meine = (_tp || []).filter(p => p && p.route === 'tvv2' && p.mt5Baseline && p.mt5Baseline.hedge && (!amPc || p.mt5Baseline.hedge.pc === hedgePcId()))
+      const meine = (_tp || []).filter(p => p && (p.route === 'tvv2' || p.route === 'tsv2') && p.mt5Baseline && p.mt5Baseline.hedge && (!amPc || p.mt5Baseline.hedge.pc === hedgePcId()))   // tsv2 seit .1493
       if(!meine.length) return
       const liste = amPc ? hedgeSoloListeFrisch() : null
       for(const p of meine){
@@ -43389,7 +43392,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1493'
+  const OS_TAB_BUILD = '2026-09-22.1494'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -44002,7 +44005,7 @@
         if(typeof atToast === 'function') atToast('↻ Plan auf Topstep V2 umgestellt (war Orbit V2) — Puls startet in TopstepX, TP als „To Make"', 'end')
         try{ renderTradePlans() }catch(_){}
       }
-      const _hedgeFrueh = (plan.route === 'tvv2' && plan.hedgeEur > 0 && MT5_LOCAL && typeof hedgeFruehWache === 'function') ? hedgeFruehWache(plan, _tvT0) : null
+      const _hedgeFrueh = ((plan.route === 'tvv2' || plan.route === 'tsv2') && plan.hedgeEur > 0 && MT5_LOCAL && typeof hedgeFruehWache === 'function') ? hedgeFruehWache(plan, _tvT0) : null   // tsv2 seit .1493 (K4 schreibt letzt_order.json wie Orbit)
       for(;;){
         // Topstep V2 (F23): TopstepX-Order über /api/tsx-konto (Vertrag B16, Etappe 2), sonst TradingView wie bisher.
         // Kennt das Panel die Route noch nicht (404 vor jedem Klick), ehrlich „kommt mit Etappe 2" — nichts gesendet.
@@ -47185,7 +47188,7 @@
    * Klick, mt5_baseline.vorcheck am Plan (Vertrag an Backend: status/seit/letzte_pruefung/versuche/pc/grund/bereit_at/verpasst_at/push_at),
    * Alarm höchstens alle 10 min, neuer Versuch in 20–40 s; nach dem Start-Fenster 'verpasst_slave' — NIE ohne Hedge starten. */
   const _vorcheckNaechst = new Map()   // planId → frühester nächster Versuch (ms)
-  const vorcheckNoetig = p => !!p && p.route === 'tvv2' && Number(p.hedgeEur) > 0
+  const vorcheckNoetig = p => !!p && (p.route === 'tvv2' || p.route === 'tsv2') && Number(p.hedgeEur) > 0   // tsv2 seit .1493 (Finn 13.10.2026: kein PreCheck, ob Fusion erreichbar ist)
   /* FUSION-MARGE (06.10.2026, Finn: vor jedem Trade mit Fusion-Gegenhedge prüfen, ob die freie Marge auf dem Fusion-Konto für die
    * Hedge-Lots reicht — im Start-Check und im Plan-Popup). Vertrag mit dem Copier: status.hedge_konto = {balance, equity, margin,
    * margin_free, margin_level, marge_je_lot: {NAS100: Marge für 1,0 Lot}, waehrung, at}. Fehlt das Feld (älterer Copier-Stand), heißt
@@ -52941,11 +52944,11 @@
     // „To Make", kein Fusion-Hedge (Wächter hängt am TV-Reader), winning_day = true (DB-Riegel Hedge-Kategorien). Kein Multiplikator nötig.
     const wdTs = wd && /topstep/i.test(String(((accounts || []).find(a => String(a.id) === String(masterId)) || {}).firm || ''))
     // Orbit V3 (01.10.2026): dieselbe Multiplikator-Rechnung wie die Farm, aber Risiko Master = echter Stop Loss in TradingView
-    const o3 = tpO3Aktiv(), mitHedge = (wd && !wdTs) || o3
-    if(wdTs && !(masterTp > 0)){ msg('Winning Day auf Topstep braucht einen Take Profit in $ der ganzen Position (wird „To Make" in TopstepX).', 'err'); return }
+    // .1493: Winning Day auf Topstep MIT Fusion-Hedge wie jeder Winning Day (Multiplikator, Risiko Slave) — nur der Weg wird tsv2
+    const o3 = tpO3Aktiv(), mitHedge = wd || o3
     // Winning Day (05.10.2026): Staffel-€ gegen die TP-Summe — Risiko Master ist dafür kein Pflichtfeld und keine Rechengröße
     if(wd && !o3 && slaveRisk && masterQty && !(masterTp > 0)){ msg('Winning Day braucht einen Take Profit in $ — der Gegenhedge rechnet sich gegen die TP-Summe.', 'err'); return }
-    if(((!(wd && !o3 ? masterTp : masterRisk) || !slaveRisk) && (!v2 || mitHedge) && !wdTs) || !masterQty){
+    if(((!(wd && !o3 ? masterTp : masterRisk) || !slaveRisk) && (!v2 || mitHedge)) || !masterQty){
       msg(mitHedge ? 'Risiko Master ($), Kontrakte und Risiko Slave (€) ausfüllen — daraus rechnet sich der Multiplikator.' : 'Risiko und Anzahl ausfüllen.', 'err'); return
     }
 
@@ -53022,10 +53025,8 @@
         let k = null; try{ k = await v2RichtungKonflikt({ firm: master.firm, ohneId: _editingPlanId, frisch: true, geplanteHand: true }) }catch(_){}
         if(k && k.lauf && k.lauf !== (_tpDir === 'sell' ? 'short' : 'long')){ msg(k.text + ' — nicht gespeichert (Richtungs-Schutz).', 'err'); return }
       }
-      if(wdTs){
-        // Topstep: Weg tsv2 mitschreiben (v2Extra liegt in insertRow/updateRow hinter route), Hedge-Felder leer, Winning-Day-Marke
-        Object.assign(v2Extra, { route: 'tsv2', hedge_eur: null, hedge_faktor: null, winning_day: true, orbit_v3: false })
-      } else if(_tpWd || _tpO3){
+      if(wdTs) Object.assign(v2Extra, { route: 'tsv2', winning_day: true })   // Topstep: Weg tsv2 mitschreiben (v2Extra liegt hinter route), Hedge-Felder wie Winning Day
+      if(_tpWd || _tpO3){
         if(!masterTp){ msg(`${_tpO3 ? 'Orbit' : 'Winning Day'} braucht einen Take Profit in $ (die Fusion-Gegenposition schließt an dieser Distanz).`, 'err'); return }
         if(!(mult > 0)){ msg('Multiplikator nicht rechenbar — Risiko Master ($), Kontrakte und Risiko Slave (€) prüfen.', 'err'); return }
         // Multiplikator-Logik wie bisher (Finn 24.09.2026 spät): hedge_faktor = Multiplikator (Chip/Bearbeiten), hedge_eur =
@@ -53037,7 +53038,7 @@
       } else v2Extra.hedge_faktor = null
       // Orbit V3 → hedge_eur MUSS weg, wenn derselbe Plan auf Orbit V2 zurückgestellt wird: sonst wäre er ab jetzt ein Winning Day
       if(!_tpWd && !_tpO3 && _editPlan && _editPlan.orbitV3) v2Extra.hedge_eur = null
-      if(!wdTs) v2Extra.orbit_v3 = !!_tpO3
+      v2Extra.orbit_v3 = !!_tpO3
     } else if(v2){ v2Extra.hedge_eur = null; v2Extra.hedge_faktor = null; v2Extra.orbit_v3 = false }
     try{
       let savedPlanId = null
@@ -54329,7 +54330,7 @@
         // hedge_eur > 0 Multiplikator + Risiko Slave. Schalter AUS → alles null = kein Hedge.
         { const h = wdFarmHedge(pr, Number(kd.sl_vorgabe) || Number(kd.max_risiko_trade) || 0, z.slaveEur, vp.hedge_an, [kd.max_drawdown, kd.max_daily_drawdown, kd.max_loss_per_trade, z.masterRisk]); if(h) k.hinweis = h }
         wdPlanAufV2(pr)   // der Server dreht ohnehin — so verlässt nie eine tvplus-Zeile den Browser (28.09.2026)
-        if(pr.route === 'tsv2') k.hinweis = 'Topstep V2 — Puls in TopstepX, TP als „To Make", ohne Fusion-Hedge'   // .1488
+        if(pr.route === 'tsv2' && !(Number(pr.hedge_eur) > 0)) k.hinweis = 'Topstep V2 — Puls in TopstepX, TP als „To Make", ohne Fusion-Hedge (Schalter aus)'   // .1488/.1493
         allePlaene.push(pr); zVon.set(String(k.id), z)
       }
       bloecke.push({ row, konten, ge, sPreset, zVon })
@@ -54397,9 +54398,8 @@
     if(!row) return row
     // Topstep → tsv2 (.1488, 13.10.2026): Topstep läuft seit 24.09.2026 nicht mehr über TradingView; Puls in TopstepX, master_tp = „To Make"
     if(row.route !== 'tvv2' && row.route !== 'mt5v2' && row.route !== 'tsv2') row.route = /topstep/i.test(String(row.master_firm || '')) ? 'tsv2' : WD_FUTURES_RX.test(String(row.master_firm || '')) ? 'tvv2' : 'mt5v2'
-    // tsv2 ohne Fusion-Hedge: der Hedge-Wächter (master_nie_da / master_ende_reader) hängt am TradingView-Reader, den es für TopstepX nicht gibt
-    if(row.route === 'tsv2'){ row.hedge_eur = null; row.hedge_faktor = null }
-    const hedge = row.route === 'tvv2' && Number(row.hedge_eur) > 0
+    // tsv2 MIT Fusion-Hedge seit .1493 (Finn 13.10.2026 nach dem ersten Topstep-Winning-Day: „die Order soll gespiegelt werden"); .1488–.1492 war er aus
+    const hedge = (row.route === 'tvv2' || row.route === 'tsv2') && Number(row.hedge_eur) > 0
     for(const k of ['slave_account_id', 'slave_name', 'slave_firm', 'slave_risk', 'multiplier']){
       if(hedge && (k === 'slave_risk' || k === 'multiplier')) continue
       row[k] = null
