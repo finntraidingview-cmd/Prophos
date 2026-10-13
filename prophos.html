@@ -9462,6 +9462,16 @@
 
       <!-- Zeitraum-Auswertung: Account-Kosten + Live-P/L im gewählten Zeitraum (id seit 29.09.2026 — die Handy-Regeln hingen an
            „.kpis + div" und trafen seit der Kapitel-Zeile vom 24.09. die falsche Box) -->
+      <!-- Dauerbuchungen (14.10.2026): was jeden Monat automatisch gebucht wird (z. B. Monatszahlung an den Kunden). Unsichtbar ohne Zeilen. -->
+      <div id="fin-wh-box" class="panel" hidden style="margin:0 0 16px">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">Monatlich</div>
+            <div class="panel-sub">Wird jeden Monat am Zahltag automatisch gebucht</div>
+          </div>
+        </div>
+        <div id="fin-wh-list"></div>
+      </div>
       <div id="fin-range-box" style="margin:0 0 16px;padding:12px 16px;background:var(--card);border:1px solid var(--border);border-radius:10px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
         <div style="display:flex;gap:4px;background:var(--bg2);border-radius:7px;padding:3px">
           <button class="fin-range-pill active" data-finrange="today" style="padding:5px 11px;border-radius:5px;border:none;background:var(--card);color:var(--ink);font-size:11.5px;font-weight:600;cursor:pointer">Heute</button>
@@ -9612,6 +9622,15 @@
             <div class="field" style="grid-column:span 2">
               <label>Notiz (optional)</label>
               <textarea class="input" id="fin-notes" rows="2" placeholder="z.B. Wire-Transfer Topstep KW 17"></textarea>
+            </div>
+            <!-- Monatlich wiederholen (14.10.2026, Finn: „unter Finanzen manuell einbuchen und recurring auswählen — jeden Monat am 2.
+                 zieht Finanzen 500 € ab"). Nicht bei Payouts. Die Buchung wird heute wie gewohnt gebucht, dazu entsteht eine Zeile in
+                 wiederkehrende_buchungen; Railway bucht ab dann jeden Monat am selben Tag (Monatsende abgefangen). -->
+            <div class="field" id="fin-wiederholen-row" style="grid-column:span 2;display:none">
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:500">
+                <input type="checkbox" id="fin-wiederholen" style="width:16px;height:16px;margin:0">
+                <span>Monatlich wiederholen <span id="fin-wiederholen-hint" style="color:var(--sub);font-weight:400"></span></span>
+              </label>
             </div>
           </div>
           <div class="modal-msg" id="finModalMsg"></div>
@@ -11817,6 +11836,35 @@
         <!-- RECHNUNGEN (Umbau 28.08.2026 nach Finns Design-Urteil: exakt die
              Struktur der Geschwister-Tabs — adm-toolbar, kpis, grid-2-Panels). -->
         <div id="adm-pane-rg" hidden>
+          <!-- MONATSZAHLUNGEN AN KUNDEN (14.10.2026, Finn: „ein Dokument, wo ich immer sehe, wann die nächste monatliche Zahlung für die
+               Leute ansteht"). Liest die Dauerbuchungen aller IDs (wiederkehrende_buchungen, Railway /admin/kunden-zahlungen, nur
+               Voll-Admin). Angelegt wird je ID in deren Finanzen („Monatlich wiederholen"), hier nur: nächste Fälligkeit sehen,
+               „✓ gezahlt" (bucht jetzt in die Finanzen der ID und schiebt einen Monat weiter), Beenden. Zahltage: Chris 16., Mike 21., Ina 2. -->
+          <div class="panel" style="margin-bottom:14px">
+            <div class="panel-head">
+              <div>
+                <div class="panel-title">Monatszahlungen an Kunden</div>
+                <div class="panel-sub" id="kz-sub">Nächste Fälligkeit je ID — Railway bucht am Zahltag automatisch in die Finanzen der ID</div>
+              </div>
+              <button class="btn btn-ghost" id="kz-refresh" style="padding:7px 12px">↻</button>
+            </div>
+            <div id="kz-msg" style="color:var(--sub);font-size:13px;padding:14px 2px">Lade…</div>
+            <div class="table-wrap">
+              <table class="t">
+                <thead><tr>
+                  <th>ID</th>
+                  <th>Zahltag</th>
+                  <th>Nächste Zahlung</th>
+                  <th class="adm-num">Betrag</th>
+                  <th>Zuletzt gebucht</th>
+                  <th></th>
+                </tr></thead>
+                <tbody id="kz-rows"></tbody>
+              </table>
+            </div>
+            <div id="kz-form-msg" style="font-size:12.5px;color:var(--sub);margin-top:8px"></div>
+          </div>
+
           <div class="adm-toolbar">
             <select id="rg-person" class="adm-f" style="flex:1;min-width:170px"><option value="">Person wählen…</option></select>
             <input id="rg-von" type="date" title="Zeitraum von">
@@ -18178,6 +18226,66 @@
      * komplett rauslöschen"). Die Tabelle acc_plan und /admin/acc-plan in app.py
      * bleiben unangetastet — nur die Oberfläche ist weg. */
 
+    /* ── Monatszahlungen an Kunden (14.10.2026, Finn: „wo ich immer sehe, wann die nächste Zahlung für die Leute ansteht") ──
+     * Zeilen = Dauerbuchungen aller IDs (wiederkehrende_buchungen) über Railway /admin/kunden-zahlungen (Gate Voll-Admin).
+     * Name der ID aus admData.people (sonst E-Mail). „✓ gezahlt" bucht die angezeigte Fälligkeit jetzt in die Finanzen der ID
+     * und schiebt naechste_am einen Monat weiter; der Railway-Takt macht dasselbe von allein am Zahltag. */
+    let kzList = []
+    const kzTageBis = iso => {
+      const [y, m, t] = String(iso).slice(0, 10).split('-').map(Number)
+      const heute = new Date(); heute.setHours(0, 0, 0, 0)
+      return Math.round((new Date(y, m - 1, t) - heute) / 86400000)
+    }
+    const kzName = z => ((admData?.people) || []).find(p => String(p.user_id) === String(z.user_id))?.name || z.email || String(z.user_id).slice(0, 8)
+    function kzRender(){
+      const msg = $('kz-msg'), rows = $('kz-rows'); if(!msg || !rows) return
+      const aktiv = kzList.filter(z => z.aktiv !== false).slice().sort((a, b) => String(a.naechste_am).localeCompare(String(b.naechste_am)))
+      rows.innerHTML = aktiv.map(z => {
+        const tage = kzTageBis(z.naechste_am)
+        const wann = tage < 0 ? `überfällig seit ${-tage} Tag${tage === -1 ? '' : 'en'}` : tage === 0 ? 'heute' : tage === 1 ? 'morgen' : `in ${tage} Tagen`
+        const farbe = tage < 0 ? 'var(--danger)' : tage <= 7 ? 'var(--warn)' : 'var(--sub)'
+        return `<tr>
+          <td style="font-weight:600">${escapeHtml(kzName(z))}${z.notes ? `<div style="font-size:11px;color:var(--sub);font-weight:400">${escapeHtml(z.notes)}</div>` : ''}</td>
+          <td class="mono">${Number(z.tag_im_monat)}.</td>
+          <td><span class="mono" style="font-weight:600">${rgDatum(z.naechste_am)}</span> <span style="font-size:12px;color:${farbe}">· ${wann}</span></td>
+          <td class="adm-num" style="font-weight:700">${rgEur.format(Math.abs(Number(z.amount || 0)))}</td>
+          <td style="color:var(--sub)">${z.letzte_am ? rgDatum(z.letzte_am) : '–'}</td>
+          <td style="text-align:right;white-space:nowrap">
+            <button class="btn btn-primary kz-buchen" data-id="${escapeHtml(z.id)}" style="padding:5px 10px;font-size:12px" title="Zahlung vom ${rgDatum(z.naechste_am)} jetzt in die Finanzen der ID buchen">✓ gezahlt</button>
+            <button class="btn btn-ghost kz-ende" data-id="${escapeHtml(z.id)}" style="padding:5px 10px;font-size:12px" title="Beenden — gebuchte Monate bleiben">Beenden</button>
+          </td>
+        </tr>`
+      }).join('')
+      msg.style.display = aktiv.length ? 'none' : ''
+      if(!aktiv.length) msg.textContent = 'Noch keine Dauerbuchungen — in den Finanzen der ID beim Einbuchen „Monatlich wiederholen" anhaken.'
+      const summe = aktiv.reduce((a, z) => a + Math.abs(Number(z.amount || 0)), 0)
+      const sub = $('kz-sub')
+      if(sub && aktiv.length) sub.textContent = `${aktiv.length} ID${aktiv.length === 1 ? '' : 's'} · ${rgEur.format(summe)} je Monat · Railway bucht am Zahltag automatisch in die Finanzen der ID`
+    }
+    async function kzLoad(){
+      const msg = $('kz-msg'); if(!msg) return
+      msg.style.display = ''; msg.textContent = 'Lade…'
+      try{
+        const d = await rgApi('/admin/kunden-zahlungen')
+        kzList = d.zahlungen || []
+        kzRender()
+      }catch(e){
+        msg.textContent = 'Kunden-Zahlungen nicht verfügbar: ' + (e.message || e)
+        console.warn('[kunden-zahlungen] laden:', e)
+      }
+    }
+    async function kzAktion(pfad, id, btn, text){
+      const m = $('kz-form-msg'); m.style.color = ''; m.textContent = ''
+      if(btn){ btn.disabled = true; btn.textContent = '…' }
+      try{
+        const d = await rgApi(pfad, { method: 'POST', body: JSON.stringify(id) })
+        kzList = d.zahlungen || []; kzRender()
+      }catch(e){
+        if(btn){ btn.disabled = false; btn.textContent = text }
+        m.style.color = 'var(--danger)'; m.textContent = 'Fehler: ' + (e.message || e)
+      }
+    }
+
     function rgOpen(){
       if(!rgOpened){
         rgOpened = true
@@ -18190,6 +18298,7 @@
       }
       rgFillPersons()
       rgLoad()
+      kzLoad()   // Kunden-Zahlungen (14.10.2026)
     }
 
     function rgFillPersons(){
@@ -18538,6 +18647,13 @@
       $('rg-preview-btn')?.addEventListener('click', rgPreview)
       $('rg-create-btn')?.addEventListener('click', rgCreate)
       $('rg-refresh')?.addEventListener('click', rgLoad)
+      // Kunden-Zahlungen (14.10.2026) — eigene Verdrahtung, kein Sammel-Handler
+      $('kz-refresh')?.addEventListener('click', kzLoad)
+      $('kz-rows')?.addEventListener('click', ev => {
+        const b = ev.target.closest('.kz-buchen'); if(b){ kzAktion('/admin/kunden-zahlungen/buchen', { id: b.dataset.id }, b, '✓ gezahlt'); return }
+        const e = ev.target.closest('.kz-ende')
+        if(e && confirm('Monatszahlung beenden? Gebuchte Monate bleiben.')) kzAktion('/admin/kunden-zahlungen/aktiv', { id: e.dataset.id, aktiv: false }, e, 'Beenden')
+      })
       $('rg-rows')?.addEventListener('click', ev => {
         const b = ev.target.closest('.rg-pdf'); if(b) rgOpenPdf(b.dataset.id, b)
       })
@@ -43819,7 +43935,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1541'
+  const OS_TAB_BUILD = '2026-09-22.1542'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -58671,8 +58787,46 @@
     })
   }
 
+  // ── Dauerbuchungen je ID (14.10.2026): eigene Tabelle wiederkehrende_buchungen (RLS: nur eigene Zeilen). Getrennt von den
+  // Buchungen geladen — ein Fehler hier lässt die Finanzen stehen und steht nur in der Konsole. ──
+  let finWiederholungen = []
+  async function finWiederholungenLaden(){
+    if(!currentUserId) return
+    try{
+      const { data, error } = await supabase.from('wiederkehrende_buchungen').select('*').eq('user_id', currentUserId).eq('aktiv', true).order('naechste_am', { ascending: true })
+      if(error){ console.error('wiederkehrende_buchungen:', error); return }
+      finWiederholungen = data || []
+      finWiederholungenRender()
+    }catch(e){ console.error('finWiederholungenLaden:', e) }
+  }
+  function finWiederholungenRender(){
+    const box = document.getElementById('fin-wh-box'), list = document.getElementById('fin-wh-list')
+    if(!box || !list) return
+    box.hidden = !finWiederholungen.length
+    const datum = iso => iso ? String(iso).slice(0, 10).split('-').reverse().join('.') : '–'
+    list.innerHTML = finWiederholungen.map(w => {
+      const betrag = Number(w.amount || 0), sym = { EUR: '€', USD: '$', GBP: '£' }[w.currency] || w.currency
+      const txt = (betrag < 0 ? '−' : '+') + Math.abs(betrag).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ' + sym
+      return `<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border-soft);font-size:13px">
+        <div style="flex:1;min-width:0"><b>${escapeHtml(w.notes || 'Dauerbuchung')}</b><div style="font-size:12px;color:var(--sub)">jeden Monat am ${Number(w.tag_im_monat)}. · nächste ${datum(w.naechste_am)}${w.letzte_am ? ' · zuletzt ' + datum(w.letzte_am) : ''}</div></div>
+        <div class="mono" style="font-weight:700;color:${betrag < 0 ? 'var(--danger)' : 'var(--good)'}">${txt}</div>
+        <button class="btn btn-ghost fin-wh-ende" data-id="${escapeHtml(w.id)}" style="padding:5px 10px;font-size:12px" title="Wiederholung beenden — gebuchte Monate bleiben">Beenden</button>
+      </div>`
+    }).join('')
+  }
+  document.getElementById('fin-wh-list')?.addEventListener('click', async ev => {
+    const b = ev.target.closest('.fin-wh-ende'); if(!b) return
+    if(!confirm('Monatliche Buchung beenden? Schon gebuchte Monate bleiben.')) return
+    b.disabled = true
+    const { error } = await supabase.from('wiederkehrende_buchungen').update({ aktiv: false }).eq('id', b.dataset.id)
+    if(error){ b.disabled = false; alert('Beenden fehlgeschlagen: ' + (error.message || error)); return }
+    finWiederholungen = finWiederholungen.filter(w => w.id !== b.dataset.id)
+    finWiederholungenRender()
+  })
+
   async function loadTransactionsFromSupabase(){
     if(!currentUserId) return
+    finWiederholungenLaden()   // Dauerbuchungen (14.10.2026) parallel, nicht blockierend
     try{
       const [{ data, error }, { data: setts, error: e2 }, { data: pend, error: e3 }] = await Promise.all([
         supabase.from('transactions').select('*')
@@ -59264,6 +59418,7 @@
   function openFinModal(prefilledKind){
     const kindSelect = document.getElementById('fin-kind')
     kindSelect.value = prefilledKind || 'payout'
+    const wh = document.getElementById('fin-wiederholen'); if(wh) wh.checked = false   // Monatlich wiederholen (14.10.2026) immer frisch aus
 
     // Account-Dropdown füllen — nur aktive Funded-Accounts (Payouts kommen nur von denen;
     // Challenge/Phase1/Phase2/Live und archivierte Accounts würden hier nur die Liste
@@ -59313,6 +59468,7 @@
     updateFinSignHint()
     updateFinTitle()
     updateFinPayoutFields()
+    updateFinWiederholen()   // Monatlich wiederholen (14.10.2026)
     document.getElementById('finModal').classList.add('open')
   }
   function closeFinModal(){
@@ -59378,7 +59534,23 @@
     if(nextEl && isPayout && accId && nextEl.dataset.fuer !== accId){ nextEl.value = finNextPayoutVorschlag((accounts || []).find(a => String(a.id) === accId)); nextEl.dataset.fuer = accId }
     if(nextEl && !accId) nextEl.dataset.fuer = ''
   }
-  document.getElementById('fin-kind')?.addEventListener('change', () => { updateFinTitle(); updateFinSignHint(); updateFinPayoutFields() })
+  // Monatlich wiederholen (14.10.2026): nur ohne Payout sichtbar, Hinweis nennt den Zahltag aus dem Datum
+  function updateFinWiederholen(){
+    const row = document.getElementById('fin-wiederholen-row'), hint = document.getElementById('fin-wiederholen-hint')
+    const kind = document.getElementById('fin-kind').value, d = document.getElementById('fin-date').value
+    if(row) row.style.display = kind === 'payout' ? 'none' : ''
+    if(hint) hint.textContent = /^\d{4}-\d{2}-\d{2}$/.test(d) ? `· jeden Monat am ${Number(d.slice(8, 10))}.` : ''
+  }
+  // Nächste Fälligkeit einen Monat weiter am Zahltag; 31. → letzter Tag des Monats (gleiche Regel wie _wb_plus_monat in app.py)
+  function finPlusMonat(iso, tag){
+    const [j, m] = iso.slice(0, 10).split('-').map(Number)
+    const ziel = new Date(j, m, 1)   // m ist schon +1 (0-basiert)
+    const tage = new Date(ziel.getFullYear(), ziel.getMonth() + 1, 0).getDate()
+    ziel.setDate(Math.min(Number(tag), tage))
+    return `${ziel.getFullYear()}-${String(ziel.getMonth() + 1).padStart(2, '0')}-${String(ziel.getDate()).padStart(2, '0')}`
+  }
+  document.getElementById('fin-kind')?.addEventListener('change', () => { updateFinTitle(); updateFinSignHint(); updateFinPayoutFields(); updateFinWiederholen() })
+  document.getElementById('fin-date')?.addEventListener('change', updateFinWiederholen)
   document.getElementById('fin-po-status')?.addEventListener('change', updateFinPayoutFields)
   document.getElementById('fin-account')?.addEventListener('change', updateFinPayoutFields)
   // Payout-Termin am Konto nach einer Payout-Buchung/-Anfrage (08.10.2026): mit Datum aus „Nächster Payout ab" → setzen (EIN Update),
@@ -59498,6 +59670,17 @@
         .from('transactions').insert(row).select('*').single()
       if(error) throw error
       transactions.unshift(rowToTransaction(data))
+      // Monatlich wiederholen (14.10.2026): Dauerbuchung anlegen — nächste Fälligkeit einen Monat nach diesem Datum, am selben Tag.
+      // Fehler hier stoppt die Buchung nicht (sie ist schon drin), bleibt aber sichtbar im Modal.
+      if(kind !== 'payout' && document.getElementById('fin-wiederholen')?.checked){
+        const tag = Number(occurredAt.slice(8, 10))
+        const { error: we } = await supabase.from('wiederkehrende_buchungen').insert({
+          user_id: currentUserId, kind, amount, currency, notes, tag_im_monat: tag,
+          naechste_am: finPlusMonat(occurredAt, tag), letzte_am: occurredAt
+        })
+        if(we){ msgEl.textContent = 'Gebucht, aber Wiederholung nicht angelegt: ' + (we.message || we); msgEl.className = 'modal-msg err'; renderFinanzen(); finWiederholungenLaden(); return }
+        finWiederholungenLaden()
+      }
       renderFinanzen()
       closeFinModal()
       // Payout DIREKT gebucht (ohne Anfrage-Umweg) = derselbe Zyklus-Moment →

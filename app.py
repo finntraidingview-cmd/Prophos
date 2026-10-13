@@ -25699,6 +25699,160 @@ def admin_liquide_kunde():
     return _lq_json_antwort()
 
 
+# ── WIEDERKEHRENDE BUCHUNGEN (14.10.2026, Finn: „unter Finanzen manuell einbuchen und recurring auswählen — jeden Monat am 2. zieht
+# Finanzen 500 € ab, das geht vom Gesamt-P&L runter; so sehe ich, wann ich dem Kunden Geld schicken muss") ─────────────────────
+# Tabelle wiederkehrende_buchungen (sql/2026-10-14_wiederkehrende_buchungen.sql): eine Zeile je Dauerbuchung an einer ID, Betrag mit
+# Vorzeichen, tag_im_monat, naechste_am. Dieser Takt bucht fällige Zeilen als transactions (auto_generated, kind wie hinterlegt,
+# occurred_at = Fälligkeit) und schiebt naechste_am einen Monat weiter (31. → letzter Tag des Monats). Guard: naechste_am muss beim
+# PATCH noch stimmen — zwei Takte (Railway + Knopf) buchen nie doppelt. Die Admin-Karte „Monatszahlungen an Kunden" (Rechnungen-
+# Reiter) liest dieselben Zeilen; Anlegen/Beenden macht jede ID selbst in ihren Finanzen (RLS), hier nur Buchen + Aktiv-Schalter.
+WB_TAKT_S = 3600
+WB_ERSTER_S = 120
+_wb_info = {"started": False, "fehler": "", "zuletzt": ""}
+
+
+def _wb_plus_monat(iso, tag):
+    """Fälligkeit einen Monat weiter, am Zahltag; Monatsende abgefangen (31. → 30./28./29.)."""
+    j, m, _t = (int(x) for x in str(iso)[:10].split("-"))
+    m += 1
+    if m > 12:
+        m, j = 1, j + 1
+    import calendar
+    return f"{j:04d}-{m:02d}-{min(int(tag), calendar.monthrange(j, m)[1]):02d}"
+
+
+def wb_zeile_buchen(z, heute=None):
+    """Eine Dauerbuchung ausführen: Buchung in transactions, dann die Zeile weiterschieben. Nachholen, wenn mehrere Monate fällig
+    sind (höchstens 24). Mit heute=None wird genau EINE Fälligkeit gebucht (Knopf „jetzt buchen")."""
+    n = 0
+    while n < 24:
+        faellig = str(z.get("naechste_am") or "")[:10]
+        if not faellig or (heute is not None and faellig > heute):
+            break
+        notiz = (str(z.get("notes") or "").strip() or "Dauerbuchung")
+        sb_insert("transactions", {
+            "user_id": z["user_id"], "kind": z.get("kind") or "manual", "amount": float(z["amount"]),
+            "currency": z.get("currency") or "EUR", "occurred_at": faellig,
+            "notes": f"{notiz} · monatlich am {int(z['tag_im_monat'])}.", "auto_generated": True,
+        })
+        naechste = _wb_plus_monat(faellig, z["tag_im_monat"])
+        ok = sb_update("wiederkehrende_buchungen", {"id": f"eq.{z['id']}", "naechste_am": f"eq.{faellig}"},
+                       {"letzte_am": faellig, "naechste_am": naechste})
+        if not ok:
+            break                                   # jemand anders hat die Zeile schon weitergeschoben
+        z = dict(z, letzte_am=faellig, naechste_am=naechste)
+        n += 1
+        if heute is None:
+            break
+    return n
+
+
+def wb_faellige_buchen():
+    heute = datetime.now(timezone.utc).astimezone(_ap_tz("Asia/Dubai")).strftime("%Y-%m-%d")
+    rows = _sb_all("wiederkehrende_buchungen", {"select": "id,user_id,kind,amount,currency,notes,tag_im_monat,naechste_am,letzte_am,aktiv",
+                                                "aktiv": "eq.true", "naechste_am": f"lte.{heute}"})
+    n = 0
+    for z in rows:
+        try:
+            n += wb_zeile_buchen(z, heute)
+        except Exception as e:
+            print(f"[dauerbuchung] ⚠️ {z.get('id')}: {type(e).__name__}: {e}", flush=True)
+    return n
+
+
+def wb_loop():
+    _schleife_schlafen(WB_ERSTER_S)
+    while True:
+        try:
+            n = wb_faellige_buchen()
+            _wb_info["fehler"] = ""
+            _wb_info["zuletzt"] = datetime.now(timezone.utc).isoformat()
+            if n:
+                print(f"[dauerbuchung] {n} Buchung(en) ausgeführt", flush=True)
+        except Exception as e:
+            _wb_info["fehler"] = f"{type(e).__name__}: {e}"
+            print(f"[dauerbuchung] ⚠️ Takt: {type(e).__name__}: {e}", flush=True)
+        _schleife_schlafen(WB_TAKT_S)
+
+
+def start_dauerbuchungen():
+    if _wb_info["started"] or not SUPABASE_SERVICE_KEY:
+        return
+    if (os.environ.get("PROPHOS_FRONTEND") or "").strip():
+        return          # PC-Backend: kein Takt (nur Railway bucht)
+    _wb_info["started"] = True
+    threading.Thread(target=wb_loop, daemon=True).start()
+
+
+def _wb_antwort():
+    try:
+        rows = _sb_all("wiederkehrende_buchungen", {"select": "id,user_id,kind,amount,currency,notes,tag_im_monat,naechste_am,letzte_am,aktiv,created_at",
+                                                    "order": "naechste_am.asc"})
+        mails = {}
+        try:
+            for u in (_auth_liste_anfrage().json() or {}).get("users", []):
+                mails[str(u.get("id"))] = str(u.get("email") or "")
+        except Exception as e:
+            print(f"[dauerbuchung] ⚠️ Nutzerliste: {type(e).__name__}: {e}", flush=True)
+        for z in rows:
+            z["email"] = mails.get(str(z.get("user_id")), "")
+        return jsonify({"ok": True, "zahlungen": rows, "takt": _wb_info})
+    except Exception as e:
+        print(f"[dauerbuchung] ⚠️ lesen: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 502
+
+
+@app.route("/admin/kunden-zahlungen", methods=["GET", "OPTIONS"])
+def admin_kunden_zahlungen():
+    if request.method == "OPTIONS":
+        return "", 200
+    err = _lq_gate()
+    return err if err else _wb_antwort()
+
+
+@app.route("/admin/kunden-zahlungen/buchen", methods=["POST", "OPTIONS"])
+def admin_kunden_zahlungen_buchen():
+    """Knopf „✓ gezahlt": die angezeigte Fälligkeit jetzt buchen (auch vor dem Termin) und die Zeile einen Monat weiterschieben."""
+    if request.method == "OPTIONS":
+        return "", 200
+    err = _lq_gate()
+    if err:
+        return err
+    body = request.get_json(silent=True) or {}
+    rid = str(body.get("id") or "").strip()
+    if not re.fullmatch(r"[0-9a-fA-F-]{36}", rid):
+        return jsonify({"ok": False, "error": "id (Zeile) nötig"}), 400
+    try:
+        rows = _sb_all("wiederkehrende_buchungen", {"select": "id,user_id,kind,amount,currency,notes,tag_im_monat,naechste_am,letzte_am,aktiv", "id": f"eq.{rid}"})
+        if not rows:
+            return jsonify({"ok": False, "error": "Zeile nicht gefunden"}), 404
+        if not wb_zeile_buchen(rows[0]):
+            return jsonify({"ok": False, "error": "Schon gebucht — Liste neu laden"}), 409
+    except Exception as e:
+        print(f"[dauerbuchung] ⚠️ buchen: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 502
+    return _wb_antwort()
+
+
+@app.route("/admin/kunden-zahlungen/aktiv", methods=["POST", "OPTIONS"])
+def admin_kunden_zahlungen_aktiv():
+    if request.method == "OPTIONS":
+        return "", 200
+    err = _lq_gate()
+    if err:
+        return err
+    body = request.get_json(silent=True) or {}
+    rid = str(body.get("id") or "").strip()
+    if not re.fullmatch(r"[0-9a-fA-F-]{36}", rid) or not isinstance(body.get("aktiv"), bool):
+        return jsonify({"ok": False, "error": "id und aktiv (true/false) nötig"}), 400
+    try:
+        if not sb_update("wiederkehrende_buchungen", {"id": f"eq.{rid}"}, {"aktiv": body["aktiv"]}):
+            return jsonify({"ok": False, "error": "Zeile nicht gefunden"}), 404
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 502
+    return _wb_antwort()
+
+
 def lq_loop():
     _schleife_schlafen(LQ_ERSTER_ABRUF_S)
     while True:
@@ -25722,6 +25876,7 @@ def start_liquide():
 
 
 start_liquide()
+start_dauerbuchungen()   # Dauerbuchungen in den Finanzen (14.10.2026)
 
 
 start_kompass()
