@@ -30011,7 +30011,8 @@
             typ: String(z.typ || ''), name: z.konto, seit: z.seit, bal: num(z.bal), ziel: num(z.ziel), mt, fehlt: !!(mt && !mt.done), mini: null, miniUhr: '' }
         })
       // NICHT DOPPELT (12.10.2026): steht der bestandene Trade noch in Überprüfen → Bestanden, kommt das Konto hier erst nach dem Abhaken
-      const offen = new Set(((wdl.daten && wdl.daten.trades) || []).filter(t => t.status === 'review' && !!wdlBestandenChip(t)).map(t => wdlUid(t) + '|' + String((t.konto || {}).kontonr_ende || '').replace(/[^A-Za-z0-9]/g, '').slice(-4)))
+      // Mini-Trades zählen nicht (13.10.2026): der Mini, der Tag 5 bringt, stünde sonst bis zum Abhaken vor dem Konto — es verschwände aus Review
+      const offen = new Set(((wdl.daten && wdl.daten.trades) || []).filter(t => t.status === 'review' && !t.tage_mini && !!wdlBestandenChip(t)).map(t => wdlUid(t) + '|' + String((t.konto || {}).kontonr_ende || '').replace(/[^A-Za-z0-9]/g, '').slice(-4)))
       // Tage sammeln bleibt IMMER stehen (13.10.2026, Finn: „die Accounts sollen nicht für ein paar Stunden verschwinden, weil ich den Mini-Trade
       // abgehakt habe") — „nicht doppelt" gilt nur noch für Review
       return [...eigen, ...fremd].filter(x => !wdl.person || x.uid === wdl.person).filter(x => x.fehlt || !x.e4 || !offen.has(x.uid + '|' + x.e4))
@@ -43479,7 +43480,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1518'
+  const OS_TAB_BUILD = '2026-09-22.1519'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
