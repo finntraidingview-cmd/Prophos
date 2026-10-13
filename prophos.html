@@ -3931,6 +3931,7 @@
   #dashboard-view .wdl-tab-manuell.is-ziel{border-color:var(--violet);box-shadow:0 0 0 1px var(--violet) inset;background:var(--surface-tint)}
   #dashboard-view .wdl-tab-manuell.wdl-tab-leer .wdl-z-kopf{border-style:dashed}
   #dashboard-view .wdl-ug-geparkt.wdl-tab-leer .wdl-z-kopf{border-style:dashed}
+  #wdl-liste:not(.is-ziehen) .wdl-tab-leer{display:none}   /* leere Drop-Ziele nur beim Ziehen (13.10.2026); am Handy „→ manuell/→ parken" */
   #dashboard-view .wdl-ug-geparkt .wdl-man-hinweis,
   #dashboard-view .wdl-tab-manuell .wdl-man-hinweis{grid-column:mi-start / zeit-end;text-align:right;font-weight:400;letter-spacing:0;text-transform:none;color:var(--sub)}
   #dashboard-view .wdl-z[draggable="true"]{cursor:grab}
@@ -30204,11 +30205,14 @@
   document.getElementById('wdl-liste')?.addEventListener('dragstart', ev => {
     const z = ev.target.closest && ev.target.closest('[data-wdl-drag]'); if(!z){ ev.preventDefault(); return }
     _wdlDrag = z.getAttribute('data-wdl-drag'); z.classList.add('is-drag')
+    // Leere Drop-Ziele nur beim Ziehen (Finn 13.10.2026: „Manuelle Arbeit · 0" / „Geparkt · 0" stören) — einen Takt später, sonst bricht Chrome das Ziehen ab
+    setTimeout(() => { if(_wdlDrag) document.getElementById('wdl-liste')?.classList.add('is-ziehen') }, 0)
     try{ ev.dataTransfer.setData('text/plain', _wdlDrag); ev.dataTransfer.effectAllowed = 'move' }catch(_){}
   })
   document.getElementById('wdl-liste')?.addEventListener('dragend', ev => {
     _wdlDrag = null
     const l = document.getElementById('wdl-liste'); if(!l) return
+    l.classList.remove('is-ziehen')
     l.querySelectorAll('.is-drag').forEach(e => e.classList.remove('is-drag'))
     l.querySelectorAll('.wdl-tab-manuell.is-ziel, .wdl-ug-geparkt.is-ziel').forEach(e => e.classList.remove('is-ziel'))
   })
@@ -30228,7 +30232,7 @@
     const k = wdlDropZiel(ev); if(!k) return
     ev.preventDefault(); k.classList.remove('is-ziel')
     let pid = _wdlDrag; try{ pid = pid || ev.dataTransfer.getData('text/plain') }catch(_){}
-    _wdlDrag = null
+    _wdlDrag = null; document.getElementById('wdl-liste')?.classList.remove('is-ziehen')
     if(!pid) return
     if(k.classList.contains('wdl-ug-geparkt')) wdlParken(pid); else wdlManuellStart(pid)
   })
@@ -43450,7 +43454,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1511'
+  const OS_TAB_BUILD = '2026-09-22.1512'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
