@@ -38774,10 +38774,12 @@
     return { live: !ende || (!!balAt && balAt >= ende), ende }
   }
   /* Zeile statt Karte (05.10.2026, AP-DESIGN): geplanter V2-Plan ohne Hedge — Orbit V2/Echo V2, vom Auto-Planer und von Hand.
-   * Topstep V2, Winning Days und Orbit (V3, Fusion-Hedge) behalten ihre Karte. */
+   * Seit .1492 (Finn 13.10.2026, Screenshot Trades-Tab: „die Topstep-Trades in der Ansicht anzeigen wie die oberen Trades alle"): auch
+   * Topstep V2 (Kette, Hand, Winning Day auf tsv2) — Schritt zeigt „Trade 1 · Normaler Tag" (tpKetteSchritt) bzw. Aufbau/Finale.
+   * Nur Pläne mit Fusion-Hedge (Winning Day auf tvv2, Orbit V3) behalten ihre Karte — dort laufen Hedge-Chips mit. */
   function planIstZeile(p){
-    return !!p && p.status === 'planned' && (p.route === 'tvv2' || p.route === 'mt5v2') && !(Number(p.hedgeEur) > 0)
-      && !(typeof tpIstWdPlan === 'function' && tpIstWdPlan(p))
+    return !!p && p.status === 'planned' && (p.route === 'tvv2' || p.route === 'mt5v2' || p.route === 'tsv2') && !(Number(p.hedgeEur) > 0)
+      && !(p.route === 'tvv2' && typeof tpIstWdPlan === 'function' && tpIstWdPlan(p))
   }
   /* Was der Auto-Planer in die notes schreibt (app.py ap_planen): „Auto-Planer · <stufe> · Rest 9.039 $ bis Ziel · Balance 149.961 (…)".
    * Daraus die Art (Etappe / letzter Trade) und das Ziel (= Balance + Rest von damals). Nicht lesbar → null: die Zeile lässt Art
@@ -39149,7 +39151,7 @@
     const hhmm = t => new Date(t).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
     return gruppen.map(g => {
       const ps = g.plaene
-      const wege = [...new Set(ps.map(p => p.route === 'tvv2' ? 'Orbit V2' : p.route === 'mt5v2' ? 'Echo V2' : (p.route || 'Duplikum')))].join(' + ')
+      const wege = [...new Set(ps.map(p => p.route === 'tvv2' ? 'Orbit V2' : p.route === 'mt5v2' ? 'Echo V2' : p.route === 'tsv2' ? 'Topstep V2' : (p.route || 'Duplikum')))].join(' + ')
       const buy = ps.filter(p => p.richtung === 'buy').length, sell = ps.filter(p => p.richtung === 'sell').length
       const chip = planRichtungChip
       const richtung = (buy ? chip(sell ? `BUY ${buy}` : 'BUY', true) : '') + (sell ? chip(buy ? `SELL ${sell}` : 'SELL', false) : '')
@@ -43353,7 +43355,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1491'
+  const OS_TAB_BUILD = '2026-09-22.1492'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
