@@ -29996,7 +29996,7 @@
       const eigen = ks.map(a => {
         let gr = 0; try{ gr = Number(kontoGroesseAnzeige(a.name, a.startingBalance, null)) || 0 }catch(_){}
         const st = bstStand(a)
-        return { eigen: true, a, uid: ich, user: ichName, firma: a.firm, e4: String(a.externalId || '').replace(/[^A-Za-z0-9]/g, '').slice(-4), gr,
+        return { eigen: true, a, kid: String(a.id), uid: ich, user: ichName, firma: a.firm, e4: String(a.externalId || '').replace(/[^A-Za-z0-9]/g, '').slice(-4), gr,
           typ: String(a.type || ''), name: a.name, seit: a.zielErreichtAt, ...st }
       })
       const eigeneIds = new Set(ks.map(a => String(a.id)))
@@ -30005,12 +30005,16 @@
       const fremd = (((typeof _hand !== 'undefined' && _hand.d && _hand.d.gruppen && _hand.d.gruppen.bestanden) || [])).filter(z => z && String(z.user_id) !== ich && !eigeneIds.has(String(z.konto_id)))
         .map(z => {
           let gr = 0; try{ gr = Number(kontoGroesseAnzeige(z.konto, z.start_balance, null)) || 0 }catch(_){}
-          return { eigen: false, uid: String(z.user_id), user: z.user || '?', firma: z.firma, e4: String(z.ende4 || '').replace(/[^A-Za-z0-9]/g, '').slice(-4), gr,
-            typ: String(z.typ || ''), name: z.konto, seit: z.seit, bal: num(z.bal), ziel: num(z.ziel), mt: null, fehlt: false, mini: null, miniUhr: '' }
+          // Mindesttage fremder Konten kommen seit 13.10.2026 aus /admin/handarbeit (tage_ist/tage_soll, ap_tage_ist) — vorher fehlt immer false
+          const mt = num(z.tage_soll) > 0 ? { count: num(z.tage_ist) || 0, target: num(z.tage_soll), done: (num(z.tage_ist) || 0) >= num(z.tage_soll), kind: 'trading_days' } : null
+          return { eigen: false, kid: String(z.konto_id || ''), uid: String(z.user_id), user: z.user || '?', firma: z.firma, e4: String(z.ende4 || '').replace(/[^A-Za-z0-9]/g, '').slice(-4), gr,
+            typ: String(z.typ || ''), name: z.konto, seit: z.seit, bal: num(z.bal), ziel: num(z.ziel), mt, fehlt: !!(mt && !mt.done), mini: null, miniUhr: '' }
         })
       // NICHT DOPPELT (12.10.2026): steht der bestandene Trade noch in Überprüfen → Bestanden, kommt das Konto hier erst nach dem Abhaken
       const offen = new Set(((wdl.daten && wdl.daten.trades) || []).filter(t => t.status === 'review' && !!wdlBestandenChip(t)).map(t => wdlUid(t) + '|' + String((t.konto || {}).kontonr_ende || '').replace(/[^A-Za-z0-9]/g, '').slice(-4)))
-      return [...eigen, ...fremd].filter(x => !wdl.person || x.uid === wdl.person).filter(x => !x.e4 || !offen.has(x.uid + '|' + x.e4))
+      // Tage sammeln bleibt IMMER stehen (13.10.2026, Finn: „die Accounts sollen nicht für ein paar Stunden verschwinden, weil ich den Mini-Trade
+      // abgehakt habe") — „nicht doppelt" gilt nur noch für Review
+      return [...eigen, ...fremd].filter(x => !wdl.person || x.uid === wdl.person).filter(x => x.fehlt || !x.e4 || !offen.has(x.uid + '|' + x.e4))
         .sort((x, y) => String(x.firma || '').localeCompare(String(y.firma || ''), 'de') || String(x.seit).localeCompare(String(y.seit)))
         .map(x => {
           const konto = `${x.firma || '?'}${x.gr >= 1000 ? ' ' + Math.round(x.gr / 1000) + 'k' : ''}${x.e4 ? ' …' + x.e4 : ''}`
@@ -30024,12 +30028,12 @@
           const knopf = x.eigen
             ? ((neu && !fehlt) ? `<button type="button" class="btn btn-ghost el-knopf" data-wdl-bst-um="${escapeHtml(String(x.a.id))}" title="Nachfolger anlegen (${escapeHtml(zielName)}): neues Konto + Login, Echo-Instanz, External ID — das alte Konto wird danach archiviert">→ ${escapeHtml(zielName)}</button>` : '')
             : `<span class="wdl-bst-fremd" title="Der Nachfolger-Assistent legt nur im eigenen Login an — ${escapeHtml(x.user)} stellt um">im Login von ${escapeHtml(x.user)}</span>`
-          return { fehlt: !!fehlt, html: `<div class="wdl-z wdl-z-bst" style="--wdl-id:${idFarbe(x.uid)}">`
+          return { fehlt: !!fehlt, kid: x.kid, html: `<div class="wdl-z wdl-z-bst" style="--wdl-id:${idFarbe(x.uid)}">`
             + `<span class="wdl-z-wer" title="${escapeHtml(String(x.name || konto))}"><span class="wdl-z-punkt"></span><b>${escapeHtml(x.user)}</b><small>${escapeHtml(konto)}</small></span>`
             + `<span class="wdl-z-ri">${ueb ? `<span class="wdl-bst-phase type-${escapeHtml(typ)}" title="aktueller Kontotyp → nächster">${escapeHtml(ueb)}</span>` : ''}</span>`
             + zelle('mi', `${bal != null ? de(bal) : '–'}${ziel ? ` → <b class="wdl-bst-ziel">${de(ziel)} ✓</b>` : ''}`, { tip: `Balance → Ziel${seit ? ' · Ziel erreicht seit ' + seit : ''}` })
             + zelle('konto', mt ? `${mt.count}/${mt.target}` : '–', { tip: mt ? `Mindesttage: ${mt.count} von ${mt.target} Tagen mit Trade` : (x.eigen ? 'keine Mindesttage hinterlegt' : 'Mindesttage nur im Login des Kontos sichtbar') })
-            + `<span class="wdl-z-pl ${fehlt ? 'wdl-bst-warte' : 'wdl-bst-ok'}" title="${escapeHtml(statusTip)}">${x.eigen ? zielStationChipHtml(x.a) : `<span class="type-badge acc-ziel-chip">Review</span>`}${mini ? `<small class="wdl-bst-mini">${escapeHtml(mini.status === 'open' ? 'Mini läuft' : 'Mini ' + miniUhr)}</small>` : ''}</span>`
+            + `<span class="wdl-z-pl ${fehlt ? 'wdl-bst-warte' : 'wdl-bst-ok'}" title="${escapeHtml(statusTip)}">${x.eigen ? zielStationChipHtml(x.a) : fehlt ? `<span class="type-badge acc-ziel-chip acc-tage-chip">Tage sammeln ${Math.min(mt.count, mt.target)}/${mt.target}</span>` : `<span class="type-badge acc-ziel-chip">Review</span>`}${mini ? `<small class="wdl-bst-mini">${escapeHtml(mini.status === 'open' ? 'Mini läuft' : 'Mini ' + miniUhr)}</small>` : ''}</span>`
             + `<span class="wdl-z-zeit">${knopf}</span>`
             + '</div>' }
         })
@@ -30064,7 +30068,11 @@
     // Geblowt = abgehakt/erkannt geblowt oder Konto weg (nicht das Tageslimit — das ist kein Blow); seit 13.10.2026 eigener Kasten in „Erledigt"
     const istGeblowt = t => !!(t && (t.blown === true || (wdlBlowStand(t) || {}).geblowt || wdlKontoWeg(t)))
     // arr = was gezeigt wird (Modell + Person), alleArr = dieselbe Liste ohne Personen-Filter — nur für die Chips im Kopf
-    const istBest = t => !wdlGeparkt(t) && !!wdlBestandenChip(t), ohneBest = arr => arr.filter(t => !istBest(t))   // .1509: Bestanden = eine Gruppe
+    // Mini-Trades und Trades auf Konten in „Tage sammeln" sind KEIN „Trade abhaken" (13.10.2026, Finn: „nicht mischen") — sie stehen als normaler
+    // Trade in Erledigt → Abhaken, das Konto selbst bleibt in Bestanden → Tage sammeln
+    let _tageKonten = null
+    const tageKonten = () => _tageKonten || (_tageKonten = new Set(bstZeilen().filter(z => z.fehlt && z.kid).map(z => z.kid)))
+    const istBest = t => !wdlGeparkt(t) && !!wdlBestandenChip(t) && !t.tage_mini && !tageKonten().has(String(t.konto_id || '')), ohneBest = arr => arr.filter(t => !istBest(t))   // .1509: Bestanden = eine Gruppe
     // DREI ÜBERGRUPPEN (Finn 13.10.2026 abends, Radar .1510: „zu unübersichtlich, alles auf eine Seite geklatscht"): Läuft (Trades am
     // Markt) · Erledigt (zu, braucht noch einen Handgriff: Abhaken oben, darunter Wartet, Geblowt, Manuelle Arbeit, Geparkt) · Bestanden
     // (Trade abhaken · Tage sammeln · Review). Die abgehakten Trades (früher „Erledigt · 137") sind aus dem Blick — nur noch ein
@@ -43472,7 +43480,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1514'
+  const OS_TAB_BUILD = '2026-09-22.1515'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
