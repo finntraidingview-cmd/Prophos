@@ -15989,7 +15989,7 @@ def tsx_cdp_lesung(stand, ext):
     if st.get("positionen_sichtbar") is not True:
         return felder, "tabelle_unklar", ("Positions-Bereich in TopstepX nicht sichtbar (eine offene Position kann das Puls-Chrome noch "
                                           "nicht lesen) — kein Stand ohne Positionen.")
-    pos = cdp_positionen_vertrag(st.get("positionen"))
+    pos = tsx_positionen_level(st, cdp_positionen_vertrag(st.get("positionen")))   # .1488: Level aus Entry + Risk / To Make
     flach = st.get("flach")
     if not pos and flach is not True:
         return felder, "tabelle_unklar", "„No Active Position“ steht da, aber „Close Position“ ist nicht gesperrt — flach nicht bewiesen."
@@ -16619,6 +16619,47 @@ def tsx_k4_level(einstieg, richtung, usd, wurzel, menge, art):
         return None
 
 
+def tsx_positionen_level(stand, pos):
+    """REIN RECHNEND (testbar, .1488 — Finn 13.10.2026, Winning Days für Topstep: „wir haben den Entry, wir wissen die Kontrakte, damit kann
+    man den Wert ausrechnen"): der RÜCKWEG aus der Positions-Tabelle. Jede Vertrags-Position (cdp_positionen_vertrag) bekommt aus der
+    passenden Gitter-Zeile (Wurzel + Seite + Menge) die Dollar-Zellen risk_usd / to_make_usd und daraus die Level:
+      TP = Entry ± To Make ÷ (Kontrakte × Punktwert), SL = Entry ∓ Risk ÷ (Kontrakte × Punktwert), auf den Tick gerundet (tsx_k4_level).
+    Belegt durch Finns Bild 13.10.2026: 3 NQ long @ 30.780,25, Risk 1.725 $ → 30.751,50, To Make 2.250 $ → 30.817,75 — exakt die
+    TopstepX-Linien. Quelle 'tsx_tabelle'. Ohne Gitter, ohne Entry oder ohne Zellenwert bleibt die Position unverändert. -> neue Liste"""
+    try:
+        g = _tsx_tk(stand).get("gitter") if isinstance(_tsx_tk(stand).get("gitter"), dict) else {}
+    except Exception:
+        g = {}
+    zeilen = [z for z in (g.get("zeilen") or []) if isinstance(z, dict)] if g.get("da") else []
+    out = []
+    for p in (pos or []):
+        p = dict(p) if isinstance(p, dict) else p
+        if not isinstance(p, dict) or not zeilen:
+            out.append(p)
+            continue
+        w = tv_symbol_root(str(p.get("symbol") or ""))
+        seite = str(p.get("seite") or "").lower()
+        menge = p.get("menge_zahl")
+        tr = [z for z in zeilen if tv_symbol_root(str(z.get("symbol") or "")) == w and str(z.get("seite") or "").lower() == seite
+              and isinstance(z.get("menge"), (int, float)) and isinstance(menge, (int, float)) and abs(abs(z["menge"]) - abs(menge)) < 0.5]
+        if len(tr) != 1:
+            out.append(p)
+            continue
+        z = tr[0]
+        ein = p.get("einstieg_zahl") if isinstance(p.get("einstieg_zahl"), (int, float)) else z.get("avg")
+        for feld, key, art in (("risk", "sl", "sl"), ("to_make", "tp", "tp")):
+            c = z.get(feld) if isinstance(z.get(feld), dict) else {}
+            usd = c.get("wert")
+            if not isinstance(usd, (int, float)) or usd <= 0:
+                continue
+            p[key + "_usd"] = float(usd)
+            lv = tsx_k4_level(ein, seite, usd, w, int(abs(menge)), art) if isinstance(ein, (int, float)) and ein > 0 else None
+            if lv:
+                p[key + "_level"], p[key + "_level_quelle"] = lv, "tsx_tabelle"
+        out.append(p)
+    return out
+
+
 def _tsx_k4_key(m):
     return "|".join(str(m.get(k)) for k in ("art", "status", "seite", "menge", "symbol", "typ", "preis"))
 
@@ -16966,7 +17007,7 @@ def _tsx_k4_senden(s, st, befehl, ziel, kn, res, trail, raus, order_cmd):
                                + (" — TopstepX zeigt „No Active Position“." if flach is True else
                                   " — ⚠ Ergebnis UNKLAR: in TopstepX nachsehen, NICHT erneut starten.")),
                     "beweis", unklar=(flach is not True))
-    pos = cdp_positionen_vertrag(st.get("positionen"))
+    pos = cdp_positionen_vertrag(st.get("positionen"))   # nach den Zellen (unten) noch einmal mit Level aus der Zeile (.1488)
     res.update(einstieg=einstieg, einstieg_quelle=quelle, positionen=pos, offen=True, position="offen")
     trail.append(f"Fill bewiesen ({quelle}): {befehl['richtung'].upper()} {befehl['menge']} {ziel} @ {einstieg:g}")
     warn, ist, abbruch = [], {}, False
@@ -17022,6 +17063,17 @@ def _tsx_k4_senden(s, st, befehl, ziel, kn, res, trail, raus, order_cmd):
             if lv:
                 res[key], res[key + "_quelle"] = lv, "tsx_rechnung"
             res[("sl" if art == "sl" else "tp") + "_usd_ist"] = ist[feld]
+        elif isinstance(z, dict) and isinstance((z.get(feld) or {}).get("wert"), (int, float)) and z[feld]["wert"] > 0:
+            # .1488 (Finn 13.10.2026): die Zelle wurde nicht getippt (kein Plan-Wert oder Tipp-Fehler), TopstepX zeigt aber einen Betrag
+            # (Position-Bracket) → Level trotzdem aus Entry + Dollar der Zeile rechnen, Quelle tsx_tabelle — der Radar zeichnet die Linie
+            lv = tsx_k4_level(einstieg, befehl["richtung"], z[feld]["wert"], befehl["wurzel"], befehl["menge"], art)
+            if lv:
+                res[key], res[key + "_quelle"] = lv, "tsx_tabelle"
+            res[("sl" if art == "sl" else "tp") + "_usd_ist"] = float(z[feld]["wert"])
+    try:
+        res["positionen"] = tsx_positionen_level(st, res.get("positionen"))   # Rückweg je Position (.1488)
+    except Exception as e_:
+        trail.append(f"Positions-Level: {type(e_).__name__}")
     # balance/mll/rpl/upl bleiben die Werte der Lesung VOR dem Klick (flach, UP&L 0) — das Frontend nimmt rpl + upl als Start des
     # Tages-P&L (tsxBaselineAusOrder); ein Wert nach dem Fill trüge schon den laufenden Trade
     if warn:

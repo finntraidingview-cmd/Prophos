@@ -10405,7 +10405,7 @@ def _wd_ohne_master_sl(d):
 # gesetzt (kein Slave = nichts zu hedgen), master_symbol wie das Frontend
 # (MNQ + Frontmonat), falls es fehlt.
 WD_V2_NULL_FELDER = ("slave_account_id", "slave_name", "slave_firm", "slave_risk", "multiplier")
-WD_V2_ROUTEN = ("tvv2", "mt5v2")
+WD_V2_ROUTEN = ("tvv2", "mt5v2", "tsv2")   # tsv2 seit .1488 (13.10.2026): Topstep-Winning-Days über Puls in TopstepX
 
 
 def _wd_futures_frontcode(jetzt=None):
@@ -10432,8 +10432,12 @@ def _wd_futures_frontcode(jetzt=None):
 
 
 def _wd_v2_route(firm):
-    """Weg je Konto: Futures-Firma → Orbit V2 (tvv2), alles andere → Echo V2 (mt5v2)."""
+    """Weg je Konto: Topstep → Topstep V2 (tsv2), sonstige Futures-Firma → Orbit V2 (tvv2), alles andere → Echo V2 (mt5v2).
+    Topstep seit .1488 (Finn 13.10.2026, Winning Days Farm für Topstep): Topstep hängt seit 24.09.2026 nicht mehr an TradingView —
+    ein tvv2-Plan wäre zur Startzeit rot. Puls platziert in TopstepX, TP/SL als Dollar der ganzen Position in „To Make" / „Risk"."""
     f = (firm or "").strip().lower()
+    if "topstep" in f:
+        return "tsv2"
     return "tvv2" if any(k in f for k in WD_FUTURES_FIRMEN) else "mt5v2"
 
 
@@ -10461,8 +10465,8 @@ def _wd_plan_v2(body, firm=None, jetzt=None):
         # Review-Finding 24.09.2026 (W12): das Frontend schickt MNQ+Frontcode für JEDE Zeile —
         # bei einer MT5-Firma bliebe „MNQZ6" als MT5-Symbol stehen. Leer = Firmen-Standard.
         body["master_symbol"] = None
-    elif not str(body.get("master_symbol") or "").strip() and body["route"] == "tvv2":
-        body["master_symbol"] = "MNQ" + _wd_futures_frontcode(jetzt)
+    elif not str(body.get("master_symbol") or "").strip() and body["route"] in ("tvv2", "tsv2"):
+        body["master_symbol"] = "MNQ" + _wd_futures_frontcode(jetzt)   # tsv2: TopstepX-Contract MNQ/NQ + Frontmonat (.1488)
     return body
 
 

@@ -20953,8 +20953,10 @@
   // P&L aus dem Userscript statt Puls-Nachlesung (01.10.2026 abends, Finn: „bei Winning Days dieselbe Logik wie bei Orbit") —
   // Orbit V3 UND Winning Day (tvv2 + Fusion-Hedge): bis 6 s auf die Reader-Balance warten, Nachtrag, Puls erst nach 10 min
   const planPlUserscript = p => !!(p && p.route === 'tvv2' && (p.orbitV3 || Number(p.hedgeEur) > 0))
+  // Topstep (.1488, Finn 13.10.2026): Winning Days auch auf tsv2 — Puls in TopstepX, Entry aus dem Fill, TP/SL als Dollar der ganzen
+  // Position in „To Make" / „Risk" (Level = Entry ± $ ÷ (Kontrakte × Punktwert)); Farmer-Notiz oder Kontoart winning_days kennzeichnen
   function tpIstWdPlan(p){
-    if(!p || p.route !== 'tvv2') return false
+    if(!p || (p.route !== 'tvv2' && p.route !== 'tsv2')) return false
     if(p.orbitV3) return false
     if(Number(p.hedgeEur) > 0) return true
     if(/Winning-Day-Farmer/i.test(String(p.notes || ''))) return true
@@ -22974,6 +22976,12 @@
     // Folgetag). balance_relativ: TopstepX-Express zeigt die Balance 0-basiert (wie F27), nur zum Abgleich von Start und Ende.
     const rplStart = zahl(r.rpl) != null ? zahl(r.rpl) + (zahl(r.upl) || 0) : null
     const rel = tsxBalanceRelativ(r)
+    // Rückweg aus der Positions-Zeile (.1488, Finn 13.10.2026: „Entry, Kontrakte, Dollar — damit kann man den Wert ausrechnen"): meldet der
+    // Bot kein tp_level/sl_level (Zelle nicht gesetzt, Bracket schon von TopstepX), nimmt die Baseline das Level, das der Bot aus Entry
+    // Price + Risk / To Make der Positions-Tabelle gerechnet hat (positionen[].tp_level/sl_level, Quelle tsx_tabelle)
+    const pz = (Array.isArray(r.positionen) ? r.positionen : []).find(x => x && (zahl(x.tp_level) > 1000 || zahl(x.sl_level) > 1000)) || null
+    if(pz && !(zahl(r.tp_level) > 1000) && zahl(pz.tp_level) > 1000){ r = Object.assign({}, r, { tp_level: pz.tp_level, tp_level_quelle: pz.tp_level_quelle || 'tsx_tabelle' }) }
+    if(pz && !(zahl(r.sl_level) > 1000) && zahl(pz.sl_level) > 1000){ r = Object.assign({}, r, { sl_level: pz.sl_level, sl_level_quelle: pz.sl_level_quelle || 'tsx_tabelle' }) }
     const tv = { konto: tvV2Konto(plan) || (r && r.konto) || null, today_pnl_start: rplStart, today_pnl_start_quelle: rplStart != null ? 'rpl' : null,
                  datum_start: tvV2Handelstag(at), at, puls: 'tsx',
                  pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : null, quelle: 'tsx_order', klick_at: (r && r.klick_at) || null,
@@ -43344,7 +43352,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1487'
+  const OS_TAB_BUILD = '2026-09-22.1488'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -47658,8 +47666,9 @@
     if(!scharf && tpIstFarmerPlan(p)) return 'Farmer nicht scharf'
     // Topstep-Kette (08.10.2026, Finn: „die starten per Topstep-Puls"): Trade 1 und 2 starten zur Zeit über Puls in TopstepX, sobald der
     // Schalter scharf steht; sonstige Topstep-V2-Pläne bleiben Handarbeit
-    if(p.route === 'tsv2' && !tpKetteNr(p)) return 'Topstep V2 — startet nur von Hand'
-    if(p.route === 'tsv2' && tsPulsModus() !== 'scharf') return 'Topstep-Kette — Puls für Topstep nicht scharf'
+    // Winning-Days-Farmer auf Topstep (.1488, 13.10.2026): startet wie die Kette über Puls in TopstepX, sobald der Schalter scharf steht
+    if(p.route === 'tsv2' && !tpKetteNr(p) && !tpIstFarmerPlan(p)) return 'Topstep V2 — startet nur von Hand'
+    if(p.route === 'tsv2' && tsPulsModus() !== 'scharf') return (tpKetteNr(p) ? 'Topstep-Kette' : 'Topstep-Winning-Day') + ' — Puls für Topstep nicht scharf'
     if(suUnbestaetigt(p)) return 'startet erst nach Bestätigung'
     if(rkAufgegeben(p)) return 'Richtungskonflikt — startet nur von Hand oder mit neuer Uhrzeit'
     return ''
@@ -47721,7 +47730,7 @@
     const heute = new Date(now).toISOString().slice(0, 10), m = suVorschlagGemeldetLaden()
     let neu = false
     for(const p of (plaene || [])){
-      if(!suUnbestaetigt(p) || !suNichtGestartet(p) || !p.startUm || (p.route === 'tsv2' && !tpKetteNr(p)) || !(routeIstOrbit(p.route) || routeIstEcho(p.route))) continue
+      if(!suUnbestaetigt(p) || !suNichtGestartet(p) || !p.startUm || (p.route === 'tsv2' && !tpKetteNr(p) && !tpIstFarmerPlan(p)) || !(routeIstOrbit(p.route) || routeIstEcho(p.route))) continue
       if(new Date(p.startUm).getTime() > now || m.get(String(p.id)) === heute) continue
       m.set(String(p.id), heute); neu = true
       if(typeof atToast === 'function') atToast(`🤖 Vorschlag „${p.masterName || '—'}" (${tpStartUmText(p.startUm)}) ist unbestätigt — nicht gestartet, nicht geclaimt. Im Trade-Planer bestätigen oder löschen.`, 'end')
@@ -54253,6 +54262,7 @@
         // hedge_eur > 0 Multiplikator + Risiko Slave. Schalter AUS → alles null = kein Hedge.
         { const h = wdFarmHedge(pr, Number(kd.sl_vorgabe) || Number(kd.max_risiko_trade) || 0, z.slaveEur, vp.hedge_an, [kd.max_drawdown, kd.max_daily_drawdown, kd.max_loss_per_trade, z.masterRisk]); if(h) k.hinweis = h }
         wdPlanAufV2(pr)   // der Server dreht ohnehin — so verlässt nie eine tvplus-Zeile den Browser (28.09.2026)
+        if(pr.route === 'tsv2') k.hinweis = 'Topstep V2 — Puls in TopstepX, TP als „To Make", ohne Fusion-Hedge'   // .1488
         allePlaene.push(pr); zVon.set(String(k.id), z)
       }
       bloecke.push({ row, konten, ge, sPreset, zVon })
@@ -54318,7 +54328,10 @@
    * Standard statt „MNQZ6"). Duplikum ist tot (24.09.2026) — kein Farmer-Plan darf auf tvplus landen. */
   function wdPlanAufV2(row){
     if(!row) return row
-    if(row.route !== 'tvv2' && row.route !== 'mt5v2') row.route = WD_FUTURES_RX.test(String(row.master_firm || '')) ? 'tvv2' : 'mt5v2'
+    // Topstep → tsv2 (.1488, 13.10.2026): Topstep läuft seit 24.09.2026 nicht mehr über TradingView; Puls in TopstepX, master_tp = „To Make"
+    if(row.route !== 'tvv2' && row.route !== 'mt5v2' && row.route !== 'tsv2') row.route = /topstep/i.test(String(row.master_firm || '')) ? 'tsv2' : WD_FUTURES_RX.test(String(row.master_firm || '')) ? 'tvv2' : 'mt5v2'
+    // tsv2 ohne Fusion-Hedge: der Hedge-Wächter (master_nie_da / master_ende_reader) hängt am TradingView-Reader, den es für TopstepX nicht gibt
+    if(row.route === 'tsv2'){ row.hedge_eur = null; row.hedge_faktor = null }
     const hedge = row.route === 'tvv2' && Number(row.hedge_eur) > 0
     for(const k of ['slave_account_id', 'slave_name', 'slave_firm', 'slave_risk', 'multiplier']){
       if(hedge && (k === 'slave_risk' || k === 'multiplier')) continue

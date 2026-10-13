@@ -6305,6 +6305,19 @@ def test_tsx_k4():
         and L(31000, "buy", 10, "ES", 1, "tp") is None and L(None, "buy", 10, "MNQ", 1, "tp") is None,
         "Level aus Einstieg und Dollar der ganzen Position (MNQ 2 $/Pkt, NQ 20 $/Pkt), unbekannte Wurzel → None")
     chk(abs(TOL("MNQ", 6) - 3.01) < 1e-9 and abs(TOL("NQ", 2) - 10.01) < 1e-9, "Spiel der Rücklesung = ein Tick der ganzen Position")
+    # .1488 Rückweg aus der Positions-Tabelle — Finns Bild 13.10.2026: 3 NQ long @ 30.780,25, Risk 1.725 $, To Make 2.250 $
+    PL = ob.tsx_positionen_level
+    st_ = {"ticket": {"k4": True, "gitter": {"da": True, "zeilen": [
+        {"symbol": "NQZ26", "menge": 3, "seite": "buy", "avg": 30780.25, "risk": {"text": "$1,725.00", "wert": 1725.0}, "to_make": {"text": "$2,250.00", "wert": 2250.0}},
+        {"symbol": "MNQZ26", "menge": -2, "seite": "sell", "avg": 30800.0, "risk": {"text": "", "wert": None}, "to_make": {"text": "$40.00", "wert": 40.0}}]}}}
+    pos_ = ob.cdp_positionen_vertrag([{"symbol": "NQZ26", "seite": "buy", "menge": 3, "avg": 30780.25, "pl_text": "-$1,245.00"},
+                                      {"symbol": "MNQZ26", "seite": "sell", "menge": 2, "avg": None, "pl_text": None},
+                                      {"symbol": "ESZ26", "seite": "buy", "menge": 1, "avg": 5000.0, "pl_text": None}])
+    e_ = PL(st_, pos_)
+    chk(e_[0].get("tp_level") == 30817.75 and e_[0].get("sl_level") == 30751.5 and e_[0].get("tp_usd") == 2250.0 and e_[0].get("sl_usd") == 1725.0
+        and e_[0].get("tp_level_quelle") == "tsx_tabelle", "Rückweg: 3 NQ long @ 30.780,25 → TP 30.817,75 (To Make 2.250 $), SL 30.751,50 (Risk 1.725 $)")
+    chk(e_[1].get("tp_level") == 30790.0 and "sl_level" not in e_[1] and "sl_usd" not in e_[1], "Rückweg: Entry aus der Zeile, wenn der Vertrag keinen trägt; leere Risk-Zelle → kein SL")
+    chk("tp_level" not in e_[2] and PL({}, pos_) == pos_ and PL(st_, None) == [], "Rückweg: fremde Zeile / kein Gitter → unverändert")
     bf = {"richtung": "sell", "menge": 6, "wurzel": "MNQ", "ext": E, "scharf": True}
     fill = {"art": "fill", "status": "ausgefuehrt", "aktiv": True, "seite": "sell", "menge": 6, "symbol": "MNQZ26", "typ": "market",
             "preis": 31339.5, "erst_gesehen": 10_000}
