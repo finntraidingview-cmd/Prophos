@@ -24361,7 +24361,9 @@
     const h = p.mt5Baseline && p.mt5Baseline.hedge
     const spaet = !!(h && !HEDGE_REVIEW_GRUENDE[h.grund] && HEDGE_REVIEW_SPAET[h.grund])   // Nachzügler nach Reader-Ende (08.10.2026)
     const art = h ? (HEDGE_REVIEW_GRUENDE[h.grund] || HEDGE_REVIEW_SPAET[h.grund]) : null
-    if(!art || h.status !== 'geschlossen' || p.route !== 'tvv2' || p.status !== 'open' || (h.pc && h.pc !== hedgePcId())) return false
+    // tsv2 seit .1498 (Mike 13.10.2026, Plan 3350f53a: Fusion am Level zu, Master im TP, Radar zeigte 7 min „Läuft"): derselbe Weg —
+    // Ende mit Schätzung (master_pl = TP), dann Puls-Nachlesung in TopstepX (tvV2EndeSetzen stößt sie für tsv2 selbst an)
+    if(!art || h.status !== 'geschlossen' || (p.route !== 'tvv2' && p.route !== 'tsv2') || p.status !== 'open' || (h.pc && h.pc !== hedgePcId())) return false
     if(spaet && !hedgeReviewSpaetFaellig(h, Date.now())) return false
     if(spaet && p.mt5Baseline.final){   // Ende stand schon, nur „Überprüfen" fehlte
       try{ const pf = tradePlans.find(x => String(x.id) === pid) || p; if(typeof atMoveToReview === 'function') await atMoveToReview(pf) }catch(e){ console.warn('[hedgeReview] Überprüfen (nachgeholt)', e); return false }
@@ -43396,7 +43398,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1497'
+  const OS_TAB_BUILD = '2026-09-22.1498'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
