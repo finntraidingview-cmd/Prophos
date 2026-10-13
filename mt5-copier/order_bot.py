@@ -17023,6 +17023,9 @@ def _tsx_k4_senden(s, st, befehl, ziel, kn, res, trail, raus, order_cmd):
                     "beweis", unklar=(flach is not True))
     pos = cdp_positionen_vertrag(st.get("positionen"))   # nach den Zellen (unten) noch einmal mit Level aus der Zeile (.1488)
     res.update(einstieg=einstieg, einstieg_quelle=quelle, positionen=pos, offen=True, position="offen")
+    # .1500: Bracket aus den Meldungen SOFORT nach dem Fill merken — nach den Zellen (~10 s) ist die Fill-Meldung unten links oft schon
+    # weg (Mike 02:02 UTC: Spur ohne „Bracket-Meldungen", obwohl der Fill gelesen war). Das jüngste nicht-leere Bracket zählt.
+    tb_merk = (st.get("toasts") or {}).get("bracket") if isinstance(st, dict) and isinstance(st.get("toasts"), dict) else None
     trail.append(f"Fill bewiesen ({quelle}): {befehl['richtung'].upper()} {befehl['menge']} {ziel} @ {einstieg:g}")
     warn, ist, abbruch = [], {}, False
     for a_ in tsx_k4_ablehnungen(st, vorher, klick_ms):   # abgelehntes Bracket-Bein neben dem Fill (B37) → Warnung, kein Urteil
@@ -17089,6 +17092,8 @@ def _tsx_k4_senden(s, st, befehl, ziel, kn, res, trail, raus, order_cmd):
     # gleiches Symbol). Immer in die Spur; als Level nur, wenn die Zellen-Rechnung nichts geliefert hat (Quelle tsx_toast).
     try:
         tb = (st.get("toasts") or {}).get("bracket") if isinstance(st, dict) and isinstance(st.get("toasts"), dict) else None
+        if not (isinstance(tb, dict) and isinstance(tb.get("fill"), dict)):
+            tb = tb_merk                                       # Ende-Stand ohne Meldungen → der Stand direkt nach dem Fill (.1500)
         if isinstance(tb, dict) and isinstance(tb.get("fill"), dict):
             tf, ttp, tsl = tb["fill"], tb.get("tp") if isinstance(tb.get("tp"), dict) else {}, tb.get("sl") if isinstance(tb.get("sl"), dict) else {}
             passt = (str(tf.get("seite") or "").lower() == str(befehl["richtung"]).lower()
