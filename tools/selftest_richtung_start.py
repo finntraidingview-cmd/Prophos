@@ -48,6 +48,31 @@ def stubs(a, jetzt, geplant):
     return reg, geschrieben
 
 
+def stubs_long(a, jetzt, geplant):
+    """Wie stubs, dazu zwei laufende LONGS anderer IDs (U2 Apex k-4, U2 The5%ers k-5), damit alle IDs zusammen LONG-Überhang haben:
+    seit .1501 (Saldo-Riegel, Finn 13.10.2026) dreht der Bot einen Plan nur auf die laufende Richtung, wenn das den Gesamt-Saldo
+    nicht weiter kippt — mit der reinen Fixture (nur Shorts laufen) bliebe p-a1 long, siehe Abschnitt D."""
+    reg, geschrieben = stubs(a, jetzt, geplant)
+    alt = a["_sb_all"]          # _ap_stand_laden liest über _sb_all
+    def lauf(i, uid, konto, firma, symbol, route):
+        return {"id": f"p-o-l{i}", "user_id": uid, "master_account_id": konto, "master_firm": firma, "status": "open", "richtung": "buy",
+                "master_tp": 3000, "master_sl": None, "master_contracts": 3, "master_symbol": symbol, "route": route,
+                "mt5_baseline": {"hedge": {"status": "fehler", "einstieg_nq": 20000}}, "start_um": None, "started_at": jetzt.isoformat()}
+    # je Trade zählt der Kontowert (ohne SL = ganzer Wert) — mehrere Longs, damit die Summe die 975 € der Shorts übersteigt
+    extra = [lauf(1, basis.U2, "k-4", "Apex Trader", "NQZ6", "tvv2"), lauf(2, basis.U2, "k-5", "The5%ers", "NAS100", "mt5v2"),
+             lauf(3, basis.U1, "k-2", "FundedNext", "NAS100", "mt5v2"), lauf(4, basis.U2, "k-3", "Tradeify", "NQZ6", "tvv2"),
+             lauf(5, basis.U2, "k-4", "Apex Trader", "NQZ6", "tvv2"), lauf(6, basis.U1, "k-2", "FundedNext", "NAS100", "mt5v2"),
+             lauf(7, basis.U2, "k-3", "Tradeify", "NQZ6", "tvv2"), lauf(8, basis.U2, "k-5", "The5%ers", "NAS100", "mt5v2")]
+
+    def _sb_all(table, params):
+        rows = alt(table, params)
+        if table == "trade_plans" and params.get("status") in (None, "eq.open") and isinstance(rows, list):
+            rows = rows + [dict(x) for x in extra]
+        return rows
+    a["_sb_all"] = _sb_all
+    return reg, geschrieben
+
+
 def main():
     a = lade()
     ok = True
@@ -132,12 +157,14 @@ def main():
          "start_um": (t_plan + timedelta(minutes=30)).isoformat(), "auto_plan": True, "auto_bestaetigt_at": jetzt.isoformat(),
          "created_at": jetzt.isoformat()},
     ]
-    reg, geschrieben = stubs(a, jetzt, geplant)
+    reg, geschrieben = stubs_long(a, jetzt, geplant)
+    st0 = a["_ap_stand_laden"](reg, jetzt=t_jetzt)
+    check((st0.get("basis_einsatz") or 0) > 0, f"Fixture: alle IDs zusammen LONG-Überhang ({st0.get('basis_einsatz')} €)")
     erg = a["ap_ausgleichen"](trocken=True, seed=1, jetzt=t_jetzt)
     rs = erg.get("richtungsschutz") or {}
     check([g["plan_id"] for g in rs.get("gedreht", [])] == ["p-a1"] and rs.get("markiert") == ["p-a2"] and not geschrieben["patch"]
           and not geschrieben["post"], f"trocken: würde p-a1 drehen, p-a2 markieren, schreibt nichts ({rs})")
-    reg, geschrieben = stubs(a, jetzt, geplant)
+    reg, geschrieben = stubs_long(a, jetzt, geplant)
     erg = a["ap_ausgleichen"](trocken=False, seed=1, jetzt=t_jetzt)
     rs = erg.get("richtungsschutz") or {}
     pat = [(p[1].get("id"), p[1].get("auto_bestaetigt_at"), "or" in p[1], p[2]) for p in geschrieben["patch"] if p[0] == "trade_plans"]
@@ -156,7 +183,7 @@ def main():
     # Delta-Monitor zeigt das Flag (Spalte aus mt5_baseline->richtung_konflikt)
     g2 = [dict(geplant[0], richtung="sell"), dict(geplant[1], rk={"quelle": "bot", "status": "konflikt", "gegen": "sell", "durch": "läuft",
                                                                  "text": "Richtungskonflikt"})]
-    reg, geschrieben = stubs(a, jetzt, g2)
+    reg, geschrieben = stubs_long(a, jetzt, g2)
     st = a["_ap_stand_laden"](reg, jetzt=t_jetzt)
     dl = a["ap_delta_antwort"](st)
     gp = {x["plan_id"]: x for x in dl["geplant"]}
@@ -166,6 +193,16 @@ def main():
     rpc = [x[1].get("json") for x in geschrieben["post"] if x[0][1].endswith("/rpc/mt5_baseline_patch")]
     check(not rpc, "schon so markiert → kein zweiter Schreibvorgang")
 
+    print("D) Saldo-Riegel (.1501, Finn 13.10.2026): SHORT-Überhang → unbestätigter Long wird NICHT auf short gedreht")
+    reg, geschrieben = stubs(a, jetzt, geplant)          # reine Fixture: nur Shorts laufen (−975 €)
+    st0 = a["_ap_stand_laden"](reg, jetzt=t_jetzt)
+    check((st0.get("basis_einsatz") or 0) < 0, f"Fixture: alle IDs zusammen SHORT-Überhang ({st0.get('basis_einsatz')} €)")
+    erg = a["ap_ausgleichen"](trocken=False, seed=1, jetzt=t_jetzt)
+    rs = erg.get("richtungsschutz") or {}
+    pat = [(p[1].get("id"), p[2]) for p in geschrieben["patch"] if p[0] == "trade_plans"]
+    check(not rs.get("gedreht") and all(not (i == "eq.p-a1" and "richtung" in body) for i, body in pat),
+          f"p-a1 bleibt long — Drehen auf short hätte den Saldo weiter gekippt ({rs.get('gedreht')})")
+    check(not rs.get("markiert"), "p-a2 wird dafür auch nicht markiert (der Start-Wächter verschiebt, bis der Short zu ist)")
     print("C) Protokollzeile des PC-Tabs")
     z, f = a["ap_start_protokoll_zeile"]({"id": "x", "user_id": U1, "master_firm": "Tradeify"},
                                         {"von_richtung": "buy", "nach_richtung": "sell", "von_start": "2026-10-07T10:00:00Z",

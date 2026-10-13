@@ -21079,7 +21079,7 @@ AP_RS_NACHLAUF_MIN = 10     # … und fällige, die der PC-Tab noch nicht gestar
 AP_RS_ROUTEN = ("tvv2", "mt5v2")   # nur V2-Wege ohne Hedge — Hedge-Wege (WD/Orbit V3/Echo klassisch) bleiben unberührt
 
 
-def ap_richtung_konflikte(plaene, offen, jetzt_min, horizont_min=AP_RS_HORIZONT_MIN):
+def ap_richtung_konflikte(plaene, offen, jetzt_min, horizont_min=AP_RS_HORIZONT_MIN, netto_eur=None):
     """REIN RECHNEND (RICHTUNG AM START, Finn 07.10.2026). plaene = heutige geplante Pläne [{plan_id, user_id, user, firma (Schlüssel),
     firma_name, richtung, start_min, route, gehedgt, auto_plan, bestaetigt, aenderbar, fest_durch, richtung_konflikt}], offen = laufende
     Trades [{user_id, firma (Schlüssel), richtung}]. Für jeden V2-Plan ohne Hedge, der in [jetzt − 10, jetzt + horizont] startet: läuft
@@ -21129,6 +21129,11 @@ def ap_richtung_konflikte(plaene, offen, jetzt_min, horizont_min=AP_RS_HORIZONT_
                 frei.append(p["plan_id"])
             continue
         txt_durch = "läuft schon" if durch == "läuft" else "vorher geplant"
+        # NIE IN DIE SCHIEFLAGE DREHEN (.1501, Finn 13.10.2026 16:50 Dubai — derselbe Riegel wie rkVorStart im PC-Tab): netto_eur = laufender
+        # Einsatz aller IDs (+ long / − short). Würde die Ziel-Richtung den Saldo weiter auf dieselbe Seite treiben, dreht der Bot nicht —
+        # der Plan behält seine Richtung, der Start-Wächter verschiebt ihn dann, bis der Gegen-Trade zu ist. netto_eur None → wie bisher.
+        if netto_eur is not None and ((ziel == "buy" and float(netto_eur) > 0) or (ziel == "sell" and float(netto_eur) < 0)):
+            continue
         if p.get("auto_plan") and not p.get("bestaetigt") and p.get("aenderbar"):
             drehen.append({"plan_id": p["plan_id"], "user_id": p["user_id"], "firma": p["firma"], "art": "richtung",
                            "von_richtung": r, "nach_richtung": ziel, "von_start_min": p["start_min"], "nach_start_min": p["start_min"],
@@ -21824,7 +21829,8 @@ def ap_richtungsschutz(stand, trocken=False, quelle="bot"):
     → {gedreht [Umplanungen], markiert [plan_id …], frei [plan_id …], fehler}"""
     offen = [{"user_id": z["user_id"], "firma": z["firma_key"], "richtung": z.get("richtung"), "start_min": z.get("start_min")}
              for z in stand["offen"]]
-    erg = ap_richtung_konflikte([x for x in _ap_stand_plaene(stand) if not x["folgetag"]], offen, max(0.0, stand["jetzt_min"]))
+    erg = ap_richtung_konflikte([x for x in _ap_stand_plaene(stand) if not x["folgetag"]], offen, max(0.0, stand["jetzt_min"]),
+                                netto_eur=stand.get("basis_einsatz"))   # Saldo-Riegel (.1501)
     je = {z["plan_id"]: z for z in stand["geplant"]}
     out = {"gedreht": [], "markiert": [], "frei": [], "fehler": None, "konflikte": erg}
     if trocken:
