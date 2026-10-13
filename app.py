@@ -3584,6 +3584,8 @@ def push_an_user(uid, titel, text, url=None, tag=None, renotify=False):
     bewegt Geld, die Meldung ist nur Beiwerk."""
     if not push_bereit() or not uid:
         return 0, 0
+    # Verwalter zuerst — auch wenn die ID selbst kein Gerät angemeldet hat (13.10.2026)
+    _push_an_verwalter(uid, {"titel": str(titel or "Prophos")[:80], "text": str(text or "")[:220], "url": url, "tag": tag, "renotify": renotify})
     try:
         rows = sb_select("push_geraete", {"select": "*", "user_id": f"eq.{uid}"})
     except Exception as e:
@@ -3614,6 +3616,28 @@ def push_an_user(uid, titel, text, url=None, tag=None, renotify=False):
         if ok:
             ok_n += 1
     return ok_n, len(rows)
+
+
+# AN DEN VERWALTER WEITER (13.10.2026, Finn: „Emin bekommt alle Meldungen für alle seine IDs ans Handy"): jede Meldung an eine ID einer
+# Gruppe mit Gruppen-Planer (auto_plan_gruppe) geht zusätzlich an die Geräte des Verwalters, mit dem Namen der ID davor. Nicht weiter:
+# Meldungen an den Verwalter selbst und die, die gp_push_tick ohnehin an ihn schickt (gestartet / nicht gestartet / Richtungsschutz).
+_push_verwalter_cache = {"bis": 0.0, "karte": {}}
+PUSH_VERWALTER_OHNE = ("Trade gestartet", "Trade nicht gestartet", "Richtungsschutz")
+
+
+def _push_an_verwalter(uid, payload):
+    try:
+        if time.time() > _push_verwalter_cache["bis"]:
+            _push_verwalter_cache.update(karte=gp_verwalter_karte(), bis=time.time() + 300)
+        verw = _push_verwalter_cache["karte"].get(str(uid))
+        if not verw or verw == str(uid) or any(w in str(payload.get("titel") or "") for w in PUSH_VERWALTER_OHNE):
+            return
+        namen, _aus = _ap_namen()
+        wer = namen.get(str(uid), str(uid)[:8])
+        push_an_user(verw, f"{wer}: {payload.get('titel') or 'Prophos'}", payload.get("text"), url=payload.get("url"),
+                     tag=f"v-{payload.get('tag') or 'prophos'}", renotify=bool(payload.get("renotify")))
+    except Exception as e:
+        print(f"[push] ⚠️ an Verwalter: {type(e).__name__}: {e}", flush=True)
 
 
 @app.route("/push/vapid-public", methods=["GET", "OPTIONS"])
