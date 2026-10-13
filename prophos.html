@@ -43353,7 +43353,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1490'
+  const OS_TAB_BUILD = '2026-09-22.1491'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -43953,9 +43953,18 @@
       // FALSCHER WEG (.1490, 13.10.2026, Mike EXPRESS …57131691): ein Orbit-V2-Plan auf einem Topstep-Konto (alter Tab-Build vor .1489)
       // schickte Puls in TradingView — dort gibt es kein Topstep-Konto („Kein Konto-Umschalter zu sehen"). Vor jedem Klick stoppen:
       // nichts gesendet, Plan bleibt Geplant; Bearbeiten → Speichern dreht ihn auf Topstep V2.
+      // SELBSTHEILUNG (.1491, Finn: „ich möchte einfach auf Starten drücken, dass das dann funktioniert"): der Plan wird hier auf Topstep V2
+      // gedreht (ohne Hedge, winning_day = true für den Hedge-Kategorien-Riegel) und läuft dann unten über tsx-konto in TopstepX.
       if(plan.route === 'tvv2' && /topstep/i.test(firmName)){
-        await fehler('⛔ Weg Orbit V2 passt nicht zu Topstep (TradingView hat kein Topstep-Konto) — Plan bearbeiten und erneut speichern, er wird dann Topstep V2. Nichts gesendet, Plan bleibt Geplant.', { ok: false, code: 'falscher_weg', retry_ok: true, _nichtGesendet: true })
-        return
+        const upd = { route: 'tsv2', hedge_eur: null, hedge_faktor: null, multiplier: null, slave_risk: null, winning_day: true, orbit_v3: false }
+        const { data: dh, error: eh } = await supabase.from('trade_plans').update(upd).eq('id', plan.id).eq('route', 'tvv2').select('*')
+        if(eh || !dh || !dh.length){
+          await fehler('⛔ Orbit-V2-Plan auf Topstep-Konto: Umstellen auf Topstep V2 fehlgeschlagen (' + String((eh && eh.message) || 'Zeile nicht getroffen') + ') — nichts gesendet, Plan bleibt Geplant.', { ok: false, code: 'falscher_weg', retry_ok: true, _nichtGesendet: true })
+          return
+        }
+        const frisch = rowToPlan(dh[0]); const ih = tradePlans.findIndex(x => String(x.id) === String(plan.id)); if(ih >= 0) tradePlans[ih] = frisch; plan = frisch
+        if(typeof atToast === 'function') atToast('↻ Plan auf Topstep V2 umgestellt (war Orbit V2) — Puls startet in TopstepX, TP als „To Make"', 'end')
+        try{ renderTradePlans() }catch(_){}
       }
       const _hedgeFrueh = (plan.route === 'tvv2' && plan.hedgeEur > 0 && MT5_LOCAL && typeof hedgeFruehWache === 'function') ? hedgeFruehWache(plan, _tvT0) : null
       for(;;){
