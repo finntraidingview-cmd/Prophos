@@ -3996,7 +3996,6 @@
   #dashboard-view .mwj-kopf span{font-weight:400;font-size:12px;color:var(--sub)}
   #dashboard-view .mwj-liste{display:grid;gap:4px;margin-top:8px}
   #dashboard-view .mwj-zeile{display:grid;grid-template-columns:minmax(0,1.6fr) 58px repeat(4,minmax(0,1fr));align-items:center;gap:8px;padding:7px 10px 7px 12px;border:1px solid var(--border-soft);border-left:4px solid var(--mwd-farbe,#667085);border-radius:8px;background:var(--surface);font:inherit;font-size:12.5px;color:inherit;cursor:pointer;text-align:left;width:100%}
-  #dashboard-view .mwj-zeile.mwj-z5{grid-template-columns:minmax(0,1.6fr) 58px repeat(5,minmax(0,1fr))}   /* Plan heute Nacht (.1484): Start · TP · Fusion · Liq · Stand */
   #dashboard-view .mwj-zeile:hover{border-color:#d1d5db}
   #dashboard-view .mwj-zeile.is-aktiv{box-shadow:0 0 0 2px var(--mwd-farbe,#667085)}
   #dashboard-view .mwj-wer{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -27403,36 +27402,42 @@
     return out
   }
   /* HEDGE-SICHT JE ZEILE (.1484, Finn 13.10.2026 am „Plan heute Nacht“: „wie viel Lots auf dem Master gekauft werden, wie viel auf dem Slave,
-   * was der Take Profit auf dem Master ist, wo der Liquidationspreis wäre — weil es in der Vergangenheit mit dem Multiplikator Probleme
-   * gab, damit ich genau sehe, ob das hinkommt“). REIN RECHNEND, nur Anzeige.
-   * Mit Plan: Felder des Plans (master_contracts, master_tp, hedge_faktor → Lots = Kontrakte × Faktor, hedge_eur = Verlust am TP,
-   * liq_regel_level_nq/liq_level_nq + liq_balance aus live-trades). Ohne Plan (SCHARF aus, Pläne kommen erst beim Scharfstellen): die
-   * Vorschau, wie der Farmer rechnen würde — Kontrakte aus der Firmen-Spanne, TP = Vorgabe oder Firmen-Spanne, Risiko Master = TP (Regel
-   * .1481), Lots = Staffel € ÷ (0,85 €/Pkt × TP-Punkte), Liquidation = Live − (Größe + 100) (dort schließt der Fusion-Hedge, 27.09.2026)
-   * als Preis am Kurs jetzt. Ohne Farmer-Sicht (P.konten) bleibt es „–“. */
+   * was der Take Profit auf dem Master ist — weil es in der Vergangenheit mit dem Multiplikator Probleme gab, damit ich genau sehe, ob das
+   * hinkommt“). REIN RECHNEND, nur Anzeige.
+   * Mit Plan: Felder des Plans (master_contracts, master_tp, hedge_faktor → Lots = Kontrakte × Faktor, hedge_eur = Verlust am TP).
+   * Ohne Plan (SCHARF aus, Pläne kommen erst beim Scharfstellen): seit .1487 der Würfel aus der Tagesplan-Zeile (k.wuerfel: TP + Kontrakte
+   * einmal gewürfelt, k.vor: Lots/Multiplikator/€ am TP aus wdFarmHedge) — genau die Werte, mit denen der Plan angelegt wird. Nur wenn noch
+   * kein Tab gewürfelt hat, die Spanne wie der Farmer rechnen würde. Die Liq-Spalte („von wo bis wo“, Preisspanne am Kurs jetzt) ist seit
+   * .1487 weg (Finn: „das weiß man natürlich noch, das kannst du weglassen“). */
   function mklWdPlanHedge(P, t){
     const r = (P && P.regeln) || {}, v = r.vorplan || {}, kd = (P.konten && t.konto && P.konten[String(t.konto.id)]) || null, p = t.plan
     const num = x => (x == null || x === '' || !isFinite(Number(x))) ? null : Number(x)
-    const out = { ktTxt: '–', tpTxt: '–', lotsTxt: '–', lotsSub: '', liqTxt: '–', liqSub: '', hedgeAn: !!v.hedge_an }
+    const out = { ktTxt: '–', tpTxt: '–', lotsTxt: '–', lotsSub: '', hedgeAn: !!v.hedge_an, quelle: '' }
     const f0 = x => Number(x).toLocaleString('de-DE', { maximumFractionDigits: 0 })
     const f2 = x => Number(x).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    const kurs = (() => { try{ const k = wdKursJetzt('NQ', 120000); return k && k.preis > 0 ? k.preis : null }catch(_){ return null } })()
-    const buy = t.richtung === 'buy'
+    const f3 = x => Number(x).toLocaleString('de-DE', { minimumFractionDigits: 3, maximumFractionDigits: 3 })
+    const rootVp = v.instr === 'nq' ? 'NQ' : 'MNQ'
     try{
       if(p){
-        const kt = num(t.kt), tp = num(t.tp), fak = num(p.hedge_faktor), eur = num(p.hedge_eur), root = t.root || (v.instr === 'nq' ? 'NQ' : 'MNQ')
+        const kt = num(t.kt), tp = num(t.tp), fak = num(p.hedge_faktor), eur = num(p.hedge_eur), root = t.root || rootVp
         out.ktTxt = kt != null ? `${f0(kt)} × ${root}` : '–'
         out.tpTxt = tp != null ? f0(tp) + ' $' : '–'
-        if(fak != null && kt != null){ out.lotsTxt = f2(Math.round(kt * fak * 100) / 100) + ' Lot'; out.lotsSub = eur != null ? `−${f0(eur)} € am TP` : 'Fusion' }
+        if(fak != null && kt != null){ out.lotsTxt = f2(Math.round(kt * fak * 100) / 100) + ' Lot'; out.lotsSub = `×${f3(fak)}${eur != null ? ` · −${f0(eur)} € am TP` : ''}` }
         else if(eur != null){ out.lotsTxt = f0(eur) + ' €'; out.lotsSub = 'Staffel · Lots rechnet der Copier' }
         else out.lotsSub = out.hedgeAn ? 'kein Hedge am Plan' : 'Gegenhedge aus'
-        const lv = num(p.liq_regel_level_nq) ?? num(p.liq_level_nq), lb = num(p.liq_balance)
-        if(lv != null){ out.liqTxt = f2(lv); out.liqSub = lb != null ? `bei ${f0(lb)} $` : 'Liquidation' }
-        else if(lb != null){ out.liqTxt = f0(lb) + ' $'; out.liqSub = 'Preis erst nach dem Fill' }
-        else out.liqSub = 'Liq'
         return out
       }
-      if(!kd){ out.lotsSub = 'Farmer-Sicht nötig'; out.liqSub = 'Liq'; return out }
+      // Würfel aus der Zeile (.1487): steht in wd_tagesplan, braucht keine Farmer-Sicht
+      const k = t.konto || {}, w = (k.wuerfel && num(k.wuerfel.tp) > 0 && num(k.wuerfel.kt) >= 1) ? k.wuerfel : null, vor = k.vor || null
+      if(w){
+        out.ktTxt = `${f0(w.kt)} × ${rootVp}`; out.tpTxt = f0(w.tp) + ' $'; out.quelle = w.quelle === 'vorgabe' ? 'TP-Vorgabe' : 'gewürfelt'
+        if(!out.hedgeAn) out.lotsSub = 'Gegenhedge aus'
+        else if(vor && num(vor.lots) > 0){ out.lotsTxt = f2(vor.lots) + ' Lot'; out.lotsSub = `×${num(vor.mult) != null ? f3(vor.mult) : '–'}${num(vor.eur) != null ? ` · −${f0(vor.eur)} € am TP` : ''}` }
+        else if(vor && num(vor.staffel) > 0){ out.lotsTxt = f0(vor.staffel) + ' €'; out.lotsSub = 'Staffel · Lots rechnet der Copier' }
+        else out.lotsSub = (vor && vor.hinweis) || 'Staffel unbekannt'
+        return out
+      }
+      if(!kd){ out.lotsSub = 'noch nicht gewürfelt'; return out }
       const vp = { instr: v.instr === 'nq' ? 'nq' : 'mnq', kt: Math.max(1, Math.round(+v.kt || 1)), regeln: v.regeln || TP_VP_VORGABE }
       const [ka, kb] = wdKtSpanne(tpVorplanFirmaKey(kd.firm), vp), root = vp.instr === 'nq' ? 'NQ' : 'MNQ', ppl = mklPpl(root)
       const sp = (a, b, f) => a === b ? f(a) : `${f(a)}–${f(b)}`
@@ -27441,6 +27446,7 @@
       const ok = z && !z.fehler, tpFix = num(kd.tp_vorgabe) || num(t.tp)
       const tp = tpFix != null ? tpFix : (ok ? Math.round((z.tpVon + z.tpBis) / 2) : null)
       out.tpTxt = tpFix != null ? f0(tpFix) + ' $' : (ok ? `${f0(z.tpVon)}–${f0(z.tpBis)} $` : '–')
+      out.quelle = 'Spanne'
       const staffel = ok ? num(z.slaveEur) : null
       if(!out.hedgeAn) out.lotsSub = 'Gegenhedge aus'
       else if(staffel != null && tp > 0 && ppl > 0){
@@ -27449,20 +27455,6 @@
         out.lotsTxt = sp(lots(ka), lots(kb), f2) + ' Lot'
         out.lotsSub = `Staffel ${f0(staffel)} €${z.hinweis ? ' · ' + z.hinweis : ''}`
       } else out.lotsSub = (z && z.fehler) ? z.fehler : 'Staffel unbekannt'
-      const express = kontoIstTopstepExpress({ firm: kd.firm, ext: kd.ext, name: kd.name, type: kd.type })
-      const live = num(kd.live_balance), groesse = express ? 0 : (kontoGroesseAnzeige(kd.name, kd.starting_balance, null) || 0)
-      if(express) out.liqSub = 'Express: MLL beim Start'
-      else if(live == null) out.liqSub = 'Balance noch nicht gelesen'
-      else if(!(groesse > 0)) out.liqSub = 'Kontogröße unbekannt'
-      else {
-        const liqUsd = live - (groesse + 100)
-        if(liqUsd > 0 && ppl > 0){
-          const pkt = k => liqUsd / (ppl * k), preis = k => buy ? kurs - pkt(k) : kurs + pkt(k)
-          const lo = Math.min(preis(ka), preis(kb)), hi = Math.max(preis(ka), preis(kb))   // aufsteigend, egal ob BUY/SELL
-          out.liqTxt = kurs != null ? sp(lo, hi, f2) : sp(pkt(kb), pkt(ka), f0) + ' Pkt'
-          out.liqSub = `−${f0(liqUsd)} $ bis ${f0(groesse + 100)}${kurs != null ? ' · am Kurs jetzt' : ''}`
-        } else out.liqSub = `schon unter ${f0(groesse + 100)} $`
-      }
     }catch(e){ out.lotsSub = 'Rechnung: ' + String((e && e.message) || e) }
     return out
   }
@@ -27500,16 +27492,15 @@
       const pid = String(k.plan_id || ''), darf = t.status === 'planned' && !t.gestartet
       if(admin && P.edit && P.edit.id === pid) return mklWdPlanEditHtml(t, farbe, wer)
       // Plan fehlt (28.09.2026, Chris 92dd21d0 von Hand gelöscht, Verweis blieb stehen): Farmer-Admins legen ihn hier neu an
-      const H = mklWdPlanHedge(P, t)   // .1484: Kontrakte · Fusion-Lots · TP · Liq je Zeile
+      const H = mklWdPlanHedge(P, t)   // .1484: Kontrakte · Fusion-Lots · TP je Zeile; seit .1487 der Würfel statt der Spanne, ohne Liq
       const neuKnopf = ''   // „Plan neu anlegen" entfällt (28.09.2026): der PC-Tab der ID legt einen fehlenden Plan selbst neu an (wdAbgleich, Selbstheilung)
       const stift = (admin && pid) ? `<button type="button" class="btn btn-ghost" data-mwp-edit="${escapeHtml(pid)}" style="padding:0 6px;margin-left:6px;font-size:12px;line-height:18px;height:auto;vertical-align:1px"${darf ? ' title="TP, Kontrakte, MNQ/NQ, Richtung bearbeiten"' : ` disabled title="${escapeHtml(t.gestartet ? 'Puls hat den Plan schon gestartet — nicht mehr bearbeitbar' : 'nur geplante Trades sind bearbeitbar')}"`}>✎</button>` : ''
-      return `<div class="mwj-zeile mwj-z5" style="--mwd-farbe:${farbe};cursor:default${t.nr > 1 ? ';margin-top:-2px' : ''}" title="${escapeHtml(t.name + ' · ' + (k.name || kurz) + (t.n > 1 ? ` · Konto ${t.nr} von ${t.n} — läuft über die Warteschlange des PCs nacheinander` : ''))}">
+      return `<div class="mwj-zeile" style="--mwd-farbe:${farbe};cursor:default${t.nr > 1 ? ';margin-top:-2px' : ''}" title="${escapeHtml(t.name + ' · ' + (k.name || kurz) + (t.n > 1 ? ` · Konto ${t.nr} von ${t.n} — läuft über die Warteschlange des PCs nacheinander` : ''))}">
           <span class="mwj-wer">${wer}</span>
           <span class="mwd-chip ${buy ? 'mwd-buy' : sell ? 'mwd-sell' : ''}">${buy ? 'BUY' : sell ? 'SELL' : '?'}</span>
           <span class="mwj-zelle">${a ? escapeHtml(wdHhmm(t.start_um)) : '—:—'}<small>${escapeHtml((cd[0] === 'läuft' || cd[0] === 'fällig') ? cd[0] + ' ' + cd[1] : cd[0] === '✓' ? 'durch' : cd[0] === '–' ? 'ohne Zeit' : cd[0] + ' ' + cd[1])}${startSub !== 'Dubai' ? ' · ' + escapeHtml(startSub) : ''}</small></span>
-          <span class="mwj-zelle" title="Take Profit am Master · Kontrakte, die Puls kauft">${H.tpTxt}<small>${escapeHtml(H.ktTxt)} Master</small></span>
-          <span class="mwj-zelle" title="Fusion-Gegenhedge: Lots, die der Copier öffnet (Staffel € ÷ (0,85 €/Pkt × TP-Punkte))">${escapeHtml(H.lotsTxt)}<small>${escapeHtml(H.lotsSub || 'Fusion')}</small></span>
-          <span class="mwj-zelle" title="Liquidation: dort schließt der Fusion-Hedge (Größe + 100 $) — Preis am aktuellen NQ-Kurs">${escapeHtml(H.liqTxt)}<small>${escapeHtml(H.liqSub || 'Liq')}</small></span>
+          <span class="mwj-zelle" title="Take Profit am Master · Kontrakte, die Puls kauft${H.quelle ? ' · ' + escapeHtml(H.quelle) : ''}">${H.tpTxt}<small>${escapeHtml(H.ktTxt)} Master${H.quelle === 'Spanne' ? ' · Spanne' : ''}</small></span>
+          <span class="mwj-zelle" title="Fusion-Gegenhedge: Lots, die der Copier öffnet = Kontrakte × Multiplikator (Risiko Slave aus der Staffel gegen Risiko Master)">${escapeHtml(H.lotsTxt)}<small>${escapeHtml(H.lotsSub || 'Fusion')}</small></span>
           <span class="mwj-zelle" style="color:${st[1]}">${escapeHtml(st[0])}${neuKnopf || stift}<small>${P.neuMsg && P.neuMsg.id === pid ? escapeHtml(P.neuMsg.text) : 'Plan'}</small></span>
         </div>`
     }).join('')
@@ -43353,7 +43344,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1486'
+  const OS_TAB_BUILD = '2026-09-22.1487'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -53886,6 +53877,38 @@
   }
   // Zufällig aus der Spanne, je Konto neu (Jitter-Doktrin: nicht auf allen IDs dieselbe Größe)
   function wdKontrakteFuer(firma, vp){ const [a, b] = wdKtSpanne(tpVorplanFirmaKey(firma), vp); return a + Math.floor(Math.random() * (b - a + 1)) }
+  /* WÜRFEL JE KONTO (.1487, Finn 13.10.2026 am „Plan heute Nacht“: „ich will hier schon den fertig geplanten Trade sehen — genau, was
+   * Take Profit, genau, was die Lots sind, mit Multiplikator“): TP und Kontrakte werden EINMAL je Konto und Tag gewürfelt und am
+   * Tagesplan-Eintrag gemerkt (k.wuerfel = {tp, kt}) — wie die Startzeit (wdKontoZeiten). Mac (wdPlaeneAnlegen) und PC-Tab
+   * (wdPlanAnlegen) legen den Plan dann mit GENAU diesen Werten an. Bis .1486 stand vor dem Scharfstellen nur die Spanne
+   * (268–280 $, 3–4 Kt, 2,06–2,75 Lot), und erst das Anlegen würfelte. TP-Vorgabe am Konto schlägt den Würfel; fällt ein alter
+   * Würfel aus einer geänderten Spanne, wird neu gewürfelt. k.vor = die Hedge-Rechnung dazu (Lots, Multiplikator, € am TP, Staffel),
+   * exakt wdFarmHedge — wird bei jedem Abgleich nachgezogen (Staffel hängt an der Live-Balance), der Würfel selbst nie.
+   * kd: Konto wie _wd.daten.konten (firm, tp_vorgabe, sl_vorgabe, max_risiko_trade, max_drawdown …); z: tpVorplanZeile (für die
+   * Staffel) oder null. REIN RECHNEND, schreibt nur in k; true = etwas geändert (Aufrufer speichert die Zeile). */
+  function wdKontoWuerfel(k, kd, vp, z){
+    let ge = false
+    const sp = wdTpSpanne(kd.firm), [ka, kb] = wdKtSpanne(tpVorplanFirmaKey(kd.firm), vp)
+    const w = (k.wuerfel && Number(k.wuerfel.tp) > 0 && Number(k.wuerfel.kt) >= 1) ? { tp: Number(k.wuerfel.tp), kt: Number(k.wuerfel.kt) } : null
+    const tpVor = Number(kd.tp_vorgabe) > 0 ? Number(kd.tp_vorgabe) : null
+    const tp = tpVor != null ? tpVor : (w && w.tp >= sp[0] && w.tp <= sp[1]) ? w.tp : Math.round(sp[0] + Math.random() * (sp[1] - sp[0]))
+    const kt = (w && w.kt >= ka && w.kt <= kb) ? w.kt : wdKontrakteFuer(kd.firm, vp)
+    const quelle = tpVor != null ? 'vorgabe' : 'wuerfel'
+    if(!w || w.tp !== tp || w.kt !== kt || (k.wuerfel || {}).quelle !== quelle){ k.wuerfel = { tp, kt, quelle, at: new Date().toISOString() }; ge = true }
+    let vor = null
+    if(z && !z.fehler){
+      const h = { master_firm: kd.firm, master_contracts: kt, master_tp: tp, master_risk: null }
+      const hin = wdFarmHedge(h, Number(kd.sl_vorgabe) || Number(kd.max_risiko_trade) || 0, z.slaveEur, !!vp.hedge_an, [kd.max_drawdown, kd.max_daily_drawdown, kd.max_loss_per_trade, z.masterRisk])
+      vor = { lots: h.multiplier > 0 ? Math.round(kt * h.multiplier * 100) / 100 : null, mult: h.hedge_faktor ?? null, eur: h.hedge_eur ?? null,
+              staffel: z.slaveEur > 0 ? z.slaveEur : null, hinweis: hin || z.hinweis || '' }
+    }
+    if(JSON.stringify(vor) !== JSON.stringify(k.vor ?? null)){ k.vor = vor; ge = true }
+    return ge
+  }
+  // Konto aus dem Profil (accounts[]) in die Form von _wd.daten.konten — für den Würfel am PC-Tab (wdAbgleich)
+  const wdKdAusAcc = acc => ({ firm: acc.firm, tp_vorgabe: Number(acc.wdTp) > 0 ? Number(acc.wdTp) : null, sl_vorgabe: Number(acc.wdSl) > 0 ? Number(acc.wdSl) : null,
+                               max_risiko_trade: acc.maxRisikoTrade, max_drawdown: acc.maxDrawdown, max_daily_drawdown: acc.maxDailyDrawdown, max_loss_per_trade: acc.maxLossPerTrade })
+  window._wdKontoWuerfel = wdKontoWuerfel   // Prüf-Haken (REIN RECHNEND)
   /* Farmer ohne Duplikum (26.09.2026, Finn: „die Winning Days werden gewürfelt wie im Admin-Terminal … und unter Winning Days mit der
    * Logik ausgeführt, die wir da entwickelt haben"): Gegenstück ist fest Fusion (wie Popup „Winning Days Farm", TP_WD_SLAVE_FIRM) — ein
    * reines Rechen-Gegenstück ohne Konto-ID; der Server dreht die Zeile auf Orbit V2 und nullt die Slave-Felder. Vorher hing jeder
@@ -54068,9 +54091,15 @@
     const rows = await wdRowsLaden(tag), byUid = new Map(rows.map(x => [String(x.user_id), x]))
     let neu = 0, aktualisiert = 0, fehler = null
     const jobs = []   // alle Schreibzugriffe parallel (23.09.2026, Finn: „warum dauert das Würfeln so lange?")
+    // .1487: Würfel je Konto (TP + Kontrakte, Hedge-Rechnung) — Staffel aus der Live-Balance der RPC, sonst kleinste Stufe
+    const vpW = wdVorplanRegeln(), fxW = (_wd.daten && _wd.daten.fx) || window._fxUsdEur || 0.85
+    const wuerfeln = k => { const kd = wdKontoDaten(k.id); if(!kd || !wdAktiv(k)) return false
+      let z = null; try{ z = tpVorplanZeile(wdAccLike(kd), { live: kd.live_balance, slaveCurrency: '€', fx: fxW, regeln: vpW.regeln, zufall: 0.5 }) }catch(_){}
+      return wdKontoWuerfel(k, kd, vpW, z) }
     for(const e of await wdNurErlaubte(erw)){   // eingeschränkt: nur IDs der eigenen Sicht (Prüfer M1, 08.10.2026)
       const jetzt = new Date().toISOString(), x = byUid.get(e.user_id)
       if(!x){
+        for(const k of e.konten) wuerfeln(k)
         jobs.push(supabase.from('wd_tagesplan').insert({ tag, user_id: e.user_id, name: e.name, konten: e.konten,
           status: e.konten.some(wdAktiv) ? 'geplant' : 'leer', ergebnis: { quelle: 'admin' }, registriert_at: jetzt, updated_at: jetzt })
           .then(({ error }) => { if(!error) neu++; else if(String(error.code) !== '23505') fehler = error.message }))
@@ -54078,11 +54107,13 @@
       }
       if(x.status === 'laeuft' || x.status === 'fertig' || x.status === 'verpasst') continue
       const konten = (x.konten || []).map(k => ({ ...k })); let ge = false
+      // .1487: TP + Kontrakte je Konto ohne Plan würfeln/nachziehen — „Plan heute Nacht“ zeigt dann den fertigen Trade
+      for(const k of konten){ if(!k.plan_id && wuerfeln(k)) ge = true }
       // Archivierte Konten aus bestehenden Zeilen entfernen (Finn 23.09.2026: „die sind weg, die nutze ich nicht") — nur ohne Plan
       for(let i = konten.length - 1; i >= 0; i--){ const kd = wdKontoDaten(konten[i].id); if(kd && kd.archiviert && !konten[i].plan_id){ konten.splice(i, 1); ge = true } }
       for(const k of e.konten){
         const v = konten.find(q => String(q.id) === k.id)
-        if(!v){ konten.push(k); ge = true; continue }
+        if(!v){ wuerfeln(k); konten.push(k); ge = true; continue }
         if(v.plan_id) continue
         if(v.farm !== k.farm || (v.ext || '') !== k.ext || !!v.archiviert !== !!k.archiviert){
           v.farm = k.farm; v.ext = k.ext; v.archiviert = k.archiviert; v.aktiv = !!(k.farm && k.ext); v.hinweis = k.hinweis; ge = true
@@ -54212,7 +54243,10 @@
         if(z.fehler){ k.aktiv = false; k.hinweis = z.fehler; ge = true; continue }
         if(kd.live_balance == null && k.pc && typeof k.slave === 'number' && k.slave > 0){ z.slaveRisk = k.slave; z.live = k.live; z.plus = k.plus; z.hinweis = '' }
         if(kd.tp_vorgabe > 0) z.tp = kd.tp_vorgabe
-        const pr = tpVorplanPlanRow(accLike, slave, z, wdKontrakteFuer(kd.firm, vp), symbol, row.richtung, tag)
+        // .1487: Würfel aus der Zeile (oder jetzt würfeln und merken) — der Plan trägt genau die Werte, die „Plan heute Nacht“ zeigt
+        if(wdKontoWuerfel(k, kd, vp, z)) ge = true
+        if(k.wuerfel && Number(k.wuerfel.tp) > 0) z.tp = Number(k.wuerfel.tp)
+        const pr = tpVorplanPlanRow(accLike, slave, z, (k.wuerfel && Number(k.wuerfel.kt) >= 1) ? Number(k.wuerfel.kt) : wdKontrakteFuer(kd.firm, vp), symbol, row.richtung, tag)
         pr.user_id = String(row.user_id); pr.start_um = zeiten.get(String(k.id)); pr.notes = 'Winning-Day-Farmer'
         pr.master_sl = null   // Winning Days: nie ein SL (Finn 25.09.2026) — sl_vorgabe (wd_sl) ist nur noch Risiko Master im Popup
         // Fusion-Gegenhedge: Rechnung wie Popup „Winning Days Farm" (26.09.2026) — der Server dreht die Zeile auf V2, behält bei
@@ -54392,6 +54426,7 @@
         const z = tpVorplanZeile(acc, { live: tpVorplanLive(acc), slaveCurrency: sPreset.currency, fx, regeln: vp.regeln, zufall: 0.5 })
         if(z.fehler){ if(!k.plan_id){ set(k, 'aktiv', false); set(k, 'hinweis', z.fehler) } continue }
         zVon.set(String(k.id), z)
+        if(!k.plan_id && wdKontoWuerfel(k, wdKdAusAcc(acc), vp, z)) geaendert = true   // .1487: TP + Kontrakte einmal würfeln, Hedge-Rechnung nachziehen
         set(k, 'tpVon', z.tpVon); set(k, 'tpBis', z.tpBis); set(k, 'waehrung', sPreset.currency); set(k, 'pc', true)
         if(z.live != null){ set(k, 'live', z.live); set(k, 'plus', z.plus); set(k, 'live_hinweis', '') }
         if(!k.plan_id) set(k, 'slave', z.slaveRisk)
@@ -54418,7 +54453,9 @@
         if(!plan && !k.plan_id){
           if(frisch) continue
           const acc = (accounts || []).find(a => String(a.id) === String(k.id)); if(!acc) continue
-          const p = await wdPlanAnlegen(acc, row.richtung, vp, startIso, row.tag)
+          // .1487: genau der gewürfelte TP + die gewürfelten Kontrakte aus der Zeile — das, was „Plan heute Nacht“ schon zeigt
+          const wf = (k.wuerfel && Number(k.wuerfel.tp) > 0 && Number(k.wuerfel.kt) >= 1) ? { master_tp: Number(k.wuerfel.tp), master_contracts: Number(k.wuerfel.kt) } : undefined
+          const p = await wdPlanAnlegen(acc, row.richtung, vp, startIso, row.tag, wf)
           if(p.warten) continue   // Claim verloren: der andere Tab legt an (25.09.2026)
           if(p.fehler){ set(k, 'aktiv', false); set(k, 'hinweis', p.fehler); continue }
           set(k, 'plan_id', String(p.plan.id)); set(k, 'start_um', startIso); set(k, 'tp', p.plan.masterTp); set(k, 'sl', p.plan.masterSl); set(k, 'slave', p.plan.slaveRisk); set(k, 'live', p.z.live); set(k, 'plus', p.z.plus); set(k, 'status', 'planned')
