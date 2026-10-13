@@ -43794,7 +43794,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1537'
+  const OS_TAB_BUILD = '2026-09-22.1538'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -54144,9 +54144,19 @@
 
   // Reine Rechnung je Konto (testbar). opt = {gkEur, live, slaveCurrency, fx, regeln, zufall}
   //  -> {phase, firma, tpVon, tpBis, tp, masterRisk, live, groesse, plus, puffer(=plus, alt), slaveEur, slaveRisk, basis, hinweis} oder {fehler}
+  /* Topstep ohne Max-Drawdown am Konto (14.10.2026, Finn: „alle Accounts als Winning Days für heute selektieren" — Mikes und Chris' Express
+   * standen mit „kein Max-Drawdown am Konto" aus, accounts.max_drawdown war leer): Topsteps Max Loss Limit hängt an der Kontogröße
+   * (50k 2.000 $, 100k 3.000 $, 150k 4.500 $), für Express wie Combine. Größe aus dem Namen; Express-Namen tragen keine Größe und die
+   * Balance ist dort relativ (ab 0) — dann 150k, die Größe, die HT bei Topstep kauft. Ein eingetragener Wert am Konto geht immer vor. */
+  function tpTopstepMll(acc){
+    if(!/topstep/i.test(String((acc && acc.firm) || ''))) return 0
+    const m = /(\d{2,3})\s*k/i.exec(String((acc && acc.name) || '')), g = m ? (+m[1]) * 1000 : (Number(acc && acc.startingBalance) || 150000)
+    return { 50000: 2000, 100000: 3000, 150000: 4500 }[g] || 4500
+  }
+  window._tpTopstepMll = tpTopstepMll   // Test-Haken
   function tpVorplanZeile(acc, opt){
     const o = opt || {}
-    const dd = Number(acc && acc.maxDrawdown) || 0
+    const dd = Number(acc && acc.maxDrawdown) || tpTopstepMll(acc) || 0
     if(!(dd > 0)) return { fehler: 'kein Max-Drawdown am Konto' }
     const regeln = o.regeln || TP_VP_VORGABE
     const funded = tpVorplanIstFunded(acc)
@@ -55296,7 +55306,9 @@
         set(k, 'tpVon', z.tpVon); set(k, 'tpBis', z.tpBis); set(k, 'waehrung', sPreset.currency); set(k, 'pc', true)
         if(z.live != null){ set(k, 'live', z.live); set(k, 'plus', z.plus); set(k, 'live_hinweis', '') }
         if(!k.plan_id) set(k, 'slave', z.slaveRisk)
-        if(!k.plan_id && (['Konto nicht in diesem Profil', 'Ziel schon voll', 'hat schon einen geplanten/laufenden Plan', WD_HINWEIS_FARM].includes(k.hinweis) || /External ID|Drawdown|Gesamtkosten|Duplikum-Slave/.test(k.hinweis || ''))) set(k, 'hinweis', '')
+        // Automatik-Hinweis weg = Konto wieder AKTIV (14.10.2026): alle Riegel oben sind durch (Haken, External ID, Ziel, fremder Plan, Würfel) —
+        // bisher blieb aktiv=false stehen, nachdem z. B. „kein Max-Drawdown am Konto" einmal gegriffen hatte (Mike/Chris Express)
+        if(!k.plan_id && (['Konto nicht in diesem Profil', 'Ziel schon voll', 'hat schon einen geplanten/laufenden Plan', WD_HINWEIS_FARM].includes(k.hinweis) || /External ID|Drawdown|Gesamtkosten|Duplikum-Slave/.test(k.hinweis || ''))){ set(k, 'hinweis', ''); set(k, 'aktiv', true) }
       }
     }
     // (2) Pläne anlegen (Rückfall) / nachziehen / löschen — erst wenn gewürfelt; ohne Duplikum-Slave warten.
@@ -56539,7 +56551,7 @@
           ge = true; continue
         }
         if(belegt[String(k.id)]){ if(wdAktiv(k)){ k.aktiv = false; k.hinweis = belegt[String(k.id)]; ge = true } continue }
-        if(!wdAktiv(k) && k.farm && k.ext && !k.archiviert && (WD_AUTO_HINWEISE.includes(k.hinweis) || k.hinweis === WD_HINWEIS_FARM)){ k.aktiv = true; k.hinweis = ''; ge = true }   // „Haken aus" bei farm=true = Altlast des Cache-Rückdrehers (14.10.2026)
+        if(!wdAktiv(k) && k.farm && k.ext && !k.archiviert && (WD_AUTO_HINWEISE.includes(k.hinweis) || k.hinweis === WD_HINWEIS_FARM || /Drawdown/.test(k.hinweis || ''))){ k.aktiv = true; k.hinweis = ''; ge = true }   // „Haken aus"/„kein Max-Drawdown" bei farm=true = Altlast (14.10.2026; Topstep-Rückfall tpTopstepMll)
       }
       if(!ge) continue
       const st = konten.some(wdAktiv) ? (x.status === 'leer' ? 'geplant' : x.status) : 'leer'
