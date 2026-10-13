@@ -28706,7 +28706,8 @@
   function wdlWeg(t){
     if(!t) return 'Orbit V2'
     if(wdlIstEcho(t)) return t.route === 'mt5' ? 'Echo' : 'Echo V2'   // route mt5 = Echo mit Fusion-Hedge (seit 01.10.2026 abends im Radar)
-    if(t.route === 'tsv2') return 'Topstep V2'
+    // Winning Day auf Topstep (.1496, Finn 13.10.2026: „Winning Day ist der Knopf, Topstep V2 der Weg"): die Pille sagt Winning Day
+    if(t.route === 'tsv2') return (Number(t.hedge_eur) > 0 || t.quelle === 'farmer' || String(t.konto_typ || '').toLowerCase() === 'winning_days' || t.winning_day === true) ? 'Winning Day' : 'Topstep V2'
     let eigen = null; try{ eigen = (tradePlans || []).find(x => String(x.id) === String(wdlTid(t))) }catch(_){}
     if(t.orbit_v3 || (eigen && eigen.orbitV3)) return 'Orbit'   // früher „Orbit V3" — heißt wie im Plan-Popup (01.10.2026)
     if(Number(t.hedge_eur) > 0 || t.quelle === 'farmer' || String(t.konto_typ || '').toLowerCase() === 'winning_days') return 'Winning Day'
@@ -39188,7 +39189,7 @@
     const hhmm = t => new Date(t).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
     return gruppen.map(g => {
       const ps = g.plaene
-      const wege = [...new Set(ps.map(p => p.route === 'tvv2' ? 'Orbit V2' : p.route === 'mt5v2' ? 'Echo V2' : p.route === 'tsv2' ? 'Topstep V2' : (p.route || 'Duplikum')))].join(' + ')
+      const wege = [...new Set(ps.map(p => routeIstV2(p.route) ? wegLabel(p) : (p.route || 'Duplikum')))].join(' + ')   // .1496: Winning Day (auch auf tsv2) heißt Winning Day
       const buy = ps.filter(p => p.richtung === 'buy').length, sell = ps.filter(p => p.richtung === 'sell').length
       const chip = planRichtungChip
       const richtung = (buy ? chip(sell ? `BUY ${buy}` : 'BUY', true) : '') + (sell ? chip(buy ? `SELL ${sell}` : 'SELL', false) : '')
@@ -43392,7 +43393,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1495'
+  const OS_TAB_BUILD = '2026-09-22.1496'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -46589,7 +46590,7 @@
       if(!rows.length){ box.innerHTML = '<span style="color:var(--sub)">Noch keine Schließ-Versuche.</span>'; return }
       box.innerHTML = '<div style="font-weight:600;margin-bottom:6px">Letzte Schließ-Versuche</div>' + rows.map(r => {
         const t = new Date(r.created_at).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
-        const weg = r.route === 'tvplus' ? 'Orbit' : r.route === 'mt5' ? 'Echo' : r.route === 'tvv2' ? (Number(r.hedge_eur) > 0 ? 'Winning Day' : 'Orbit V2') : r.route === 'mt5v2' ? 'Echo V2' : r.route === 'tsv2' ? 'Topstep V2' : (r.route || '—')
+        const weg = r.route === 'tvplus' ? 'Orbit' : r.route === 'mt5' ? 'Echo' : r.route === 'tvv2' ? (Number(r.hedge_eur) > 0 ? 'Winning Day' : 'Orbit V2') : r.route === 'mt5v2' ? 'Echo V2' : r.route === 'tsv2' ? (Number(r.hedge_eur) > 0 ? 'Winning Day' : 'Topstep V2') : (r.route || '—')
         return `<div style="display:flex;gap:10px;padding:5px 0;border-top:1px solid var(--line);align-items:baseline">
           <span class="mono" style="color:var(--sub);flex:0 0 92px">${t}</span>
           <span style="flex:0 0 46px">${weg}</span>
@@ -49242,7 +49243,7 @@
     const acc1 = t.konto_id ? (accounts || []).find(x => String(x.id) === String(t.konto_id)) : null, b1 = acc1 ? tplKontoBalance(acc1) : null
     const menge1 = t.menge == null ? '—' : Number(t.menge).toLocaleString('de-DE', { maximumFractionDigits: 2 })
     const symbol1 = /^(mt5|mt5v2)$/.test(String(t.route || '')) ? `${menge1} Lot` : `${menge1} × ${(r1 && r1.symbol_root) || (Number(t.usd) === 20 ? 'NQ' : Number(t.usd) === 2 ? 'MNQ' : 'NQ')}`
-    const weg1 = (r1 && typeof wdlWeg === 'function') ? wdlWeg(r1) : t.route === 'mt5v2' ? 'Echo V2' : t.route === 'mt5' ? 'Echo' : t.route === 'tsv2' ? 'Topstep V2' : t.wd ? 'Winning Day' : (p1 && p1.orbitV3) ? 'Orbit V3' : 'Orbit V2'
+    const weg1 = (r1 && typeof wdlWeg === 'function') ? wdlWeg(r1) : t.route === 'mt5v2' ? 'Echo V2' : t.route === 'mt5' ? 'Echo' : t.wd ? 'Winning Day' : t.route === 'tsv2' ? 'Topstep V2' : (p1 && p1.orbitV3) ? 'Orbit V3' : 'Orbit V2'
     const einstieg1 = (r1 && Number(r1.einstieg_nq) > 1000) ? Number(r1.einstieg_nq).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'
     const quelle1 = (r1 && r1.einstieg_quelle) || (t.auto ? 'Auto-Planer' : 'Hand')
     const zeit1 = t.status === 'laeuft' ? `${tplUhr(t.start, v)} · läuft` : (t.status === 'beendet' || t.status === 'vorbei') ? `${tplUhr(t.start, v)} – ${t.ende != null ? tplUhr(t.ende, v) : '?'}` : `Start ${tplUhr(t.start, v)}`
@@ -49285,8 +49286,8 @@
    * seine Trades. Bestätigen nur mit Recht (wie im Detail) UND liver Balance (tplPlanLive). Planer-Seite: „Bearbeiten ▸" öffnet das alte
    * Detail darunter (Richtung/Start/Löschen). Schließen: ✕, Klick daneben, Esc, Scrollen, Größe ändern. Eigene Verdrahtung, kein Modal-Handler. */
   const _tk = { el: null, anker: null, root: null, key: null, gruppe: null, busy: false, meldung: '' }
-  const tkWeg = (t, r1, p1) => (r1 && typeof wdlWeg === 'function') ? wdlWeg(r1) : t.route === 'mt5v2' ? 'Echo V2' : t.route === 'mt5' ? 'Echo' : t.route === 'tsv2' ? 'Topstep V2'
-    : t.wd ? 'Winning Day' : (p1 && p1.orbitV3) ? 'Orbit V3' : 'Orbit V2'
+  const tkWeg = (t, r1, p1) => (r1 && typeof wdlWeg === 'function') ? wdlWeg(r1) : t.route === 'mt5v2' ? 'Echo V2' : t.route === 'mt5' ? 'Echo' : t.wd ? 'Winning Day' : t.route === 'tsv2' ? 'Topstep V2'
+    : (p1 && p1.orbitV3) ? 'Orbit V3' : 'Orbit V2'
   function tkStand(){ const zs = _tk.root && _tpl.zs && _tpl.zs[_tk.root.id]; return zs || { trades: new Map(), v: 0 } }
   function tkEinzelHtml(t, v){
     const r1 = (_tpl.lt && _tpl.lt.get(String(t.plan_id))) || null, p1 = t.eigen ? (tradePlans || []).find(x => String(x.id) === t.plan_id) : null
