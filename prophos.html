@@ -23593,7 +23593,7 @@
   const HEDGE_KURS_MAX_ALTER_MS = 30000     // Kurs älter als 30 s zählt nicht (Feed weg, Tab verdeckt)
   const HEDGE_PUFFER_STD = 2               // 8 Ticks à 0,25 (Finn 25.09.2026: „8 Ticks über dem Master-TP, TP 31.000 → bei 31.002"); vorher 3 Pkt
   const HEDGE_TICK = 0.25                  // NQ/MNQ-Tick
-  const HEDGE_NOTFALL_STD = 1.10           // Notfall-SL am Fusion-Hedge = 110 % der Master-TP-Distanz (alte Logik, Finns „110 %")
+  const HEDGE_NOTFALL_STD = 1.05           // Notfall-SL am Fusion-Hedge = 105 % der Master-TP-Distanz (Finn 13.10.2026, .1497; vorher 110 %)
   const hedgePufferTicks = () => Math.round(hedgePuffer() / HEDGE_TICK)
   function hedgeNotfallFaktor(){ try{ const v = wdVorplanRegeln().hedge_notfall; return (typeof v === 'number' && isFinite(v) && v >= 1 && v <= 2) ? v : HEDGE_NOTFALL_STD }catch(_){ return HEDGE_NOTFALL_STD } }
   // Notfall-SL mit Mindestabstand (25.09.2026, Finn nach der Nacht: „der Notfall-SL hat gegriffen anstatt wie geplant, sobald die Order im
@@ -23603,7 +23603,10 @@
   // 2–4 s später → bei jeder schnellen Bewegung gewinnt der Notfall, und schon ein Basis-Wackler NAS100↔NQ kann ihn VOR dem Master-TP
   // auslösen. Jetzt: Notfall mindestens HEDGE_NOTFALL_MIN_PUNKTE hinter dem Master-TP (also 8 Pkt hinter dem Feed-Level); der Prozentwert
   // aus dem Farmer bleibt die Untergrenze, Deckel 2,0 wie im Copier.
-  const HEDGE_NOTFALL_MIN_PUNKTE = 10
+  // .1497 (Finn 13.10.2026, erster Topstep-Winning-Day: Notfall stand bei 121 € statt ~85 €): KEIN Mindestabstand mehr — die Regel aus dem
+  // Farmer (105 %) gilt genau, auch bei 25 Pkt TP-Distanz. Finn: „sobald er platziert wird, dieses Level einfach 105 %". Der Copier hält
+  // nur noch TP + 1 Pkt als Untergrenze (solo_notfall_sl). Vorher 10 Pkt → bei 25 Pkt TP wurden daraus 140 %.
+  const HEDGE_NOTFALL_MIN_PUNKTE = 0
   function hedgeNotfallFaktorFuer(punkte){
     const basis = hedgeNotfallFaktor(), p = Number(punkte)
     if(!(p > 0)) return basis
@@ -23982,7 +23985,7 @@
     // der Copier beide Level bewusst weiter weg — Notfall-SL mindestens 120 % (+10 % über dem normalen), Level am Master-SL 20 % der
     // SL-Distanz hinter dem SL. hedgeTerminalLevelAbgleich zieht sie auf die exakten Werte, sobald TradingViews Werte da sind.
     const levelVorlaeufig = !echterTp
-    const notfallOpen = levelVorlaeufig ? Math.min(2, Math.max(1.2, hedgeNotfallFaktorFuer(punkte) + 0.1)) : hedgeNotfallFaktorFuer(punkte)
+    const notfallOpen = hedgeNotfallFaktorFuer(punkte)   // .1497: kein Klick-Zuschlag mehr (war +10 %, mind. 120 %) — Finn: ab dem Öffnen 105 %
     const pufferOpen = (levelVorlaeufig && slPunkte > 0) ? Math.max(hedgePuffer(), Math.round(slPunkte * 0.2 * 100) / 100) : hedgePuffer()
     const openBody = JSON.stringify({ aktion: 'open', richtung: gegen, eur: plan.hedgeEur, lots: lotsSoll, tp_punkte: punkte, sl_punkte: slPunkte, punkte, puffer: pufferOpen, notfall_faktor: notfallOpen, symbol: 'NAS100', plan_id: String(plan.id) })
     // WIEDERHOLUNG (25.09.2026): bei sicher nicht gesendeten Fehlern (HEDGE_SICHER) bis 90 s nach dem ersten Versuch alle 10–15 s
@@ -43393,7 +43396,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1496'
+  const OS_TAB_BUILD = '2026-09-22.1497'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -53941,7 +53944,7 @@
     // NQ-Punkten über dem TP-Level, bevor der Wächter schließt. Steht bewusst AUS, bis Finn ihn einschaltet.
     return { instr: v.instr === 'nq' ? 'nq' : 'mnq', kt: Math.max(1, Math.round(+v.kt || 1)), regeln: v.regeln || TP_VP_VORGABE,
              hedge_an: !!v.hedge_an, hedge_puffer: (typeof v.hedge_puffer === 'number' && isFinite(v.hedge_puffer) && v.hedge_puffer >= 0) ? v.hedge_puffer : 2,   // Standard 8 Ticks = 2 Pkt (25.09.2026); gespeicherte 3 bleiben (12 Ticks)
-             hedge_notfall: (typeof v.hedge_notfall === 'number' && isFinite(v.hedge_notfall) && v.hedge_notfall >= 1 && v.hedge_notfall <= 2) ? v.hedge_notfall : 1.10 }
+             hedge_notfall: (typeof v.hedge_notfall === 'number' && isFinite(v.hedge_notfall) && v.hedge_notfall >= 1 && v.hedge_notfall <= 2) ? v.hedge_notfall : 1.05 }   // Standard 105 % (.1497)
   }
   // Kontrakte je Firma als Spanne (Finn 23.09.2026: „bei jeder Prop unterschiedlich, von 3 bis 5 — genau wie
   // den TP"): regeln.kt = { tradeify: [von, bis], … }; fehlt die Firma, gilt die Standard-Zahl (Ablauf → Kontrakte).
