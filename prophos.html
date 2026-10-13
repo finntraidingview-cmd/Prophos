@@ -20959,6 +20959,7 @@
     if(!p || (p.route !== 'tvv2' && p.route !== 'tsv2')) return false
     if(p.orbitV3) return false
     if(Number(p.hedgeEur) > 0) return true
+    if(p.winningDay === true) return true   // .1489: Marke trade_plans.winning_day (Hand-Plan Winning Day auf Topstep, Farmer)
     if(/Winning-Day-Farmer/i.test(String(p.notes || ''))) return true
     try{ const a = (accounts || []).find(x => String(x.id) === String(p.masterAccountId)); if(a && String(a.type || '').toLowerCase() === 'winning_days') return true }catch(_){}
     return false
@@ -43352,7 +43353,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1488'
+  const OS_TAB_BUILD = '2026-09-22.1489'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -47667,7 +47668,7 @@
     // Topstep-Kette (08.10.2026, Finn: „die starten per Topstep-Puls"): Trade 1 und 2 starten zur Zeit über Puls in TopstepX, sobald der
     // Schalter scharf steht; sonstige Topstep-V2-Pläne bleiben Handarbeit
     // Winning-Days-Farmer auf Topstep (.1488, 13.10.2026): startet wie die Kette über Puls in TopstepX, sobald der Schalter scharf steht
-    if(p.route === 'tsv2' && !tpKetteNr(p) && !tpIstFarmerPlan(p)) return 'Topstep V2 — startet nur von Hand'
+    if(p.route === 'tsv2' && !tpKetteNr(p) && !tpIstFarmerPlan(p) && !tpIstWdPlan(p)) return 'Topstep V2 — startet nur von Hand'
     if(p.route === 'tsv2' && tsPulsModus() !== 'scharf') return (tpKetteNr(p) ? 'Topstep-Kette' : 'Topstep-Winning-Day') + ' — Puls für Topstep nicht scharf'
     if(suUnbestaetigt(p)) return 'startet erst nach Bestätigung'
     if(rkAufgegeben(p)) return 'Richtungskonflikt — startet nur von Hand oder mit neuer Uhrzeit'
@@ -47730,7 +47731,7 @@
     const heute = new Date(now).toISOString().slice(0, 10), m = suVorschlagGemeldetLaden()
     let neu = false
     for(const p of (plaene || [])){
-      if(!suUnbestaetigt(p) || !suNichtGestartet(p) || !p.startUm || (p.route === 'tsv2' && !tpKetteNr(p) && !tpIstFarmerPlan(p)) || !(routeIstOrbit(p.route) || routeIstEcho(p.route))) continue
+      if(!suUnbestaetigt(p) || !suNichtGestartet(p) || !p.startUm || (p.route === 'tsv2' && !tpKetteNr(p) && !tpIstFarmerPlan(p) && !tpIstWdPlan(p)) || !(routeIstOrbit(p.route) || routeIstEcho(p.route))) continue
       if(new Date(p.startUm).getTime() > now || m.get(String(p.id)) === heute) continue
       m.set(String(p.id), heute); neu = true
       if(typeof atToast === 'function') atToast(`🤖 Vorschlag „${p.masterName || '—'}" (${tpStartUmText(p.startUm)}) ist unbestätigt — nicht gestartet, nicht geclaimt. Im Trade-Planer bestätigen oder löschen.`, 'end')
@@ -51567,8 +51568,10 @@
             // fallen schon oben raus; Planung ist Handarbeit, es gibt keinen Bot, der eine Kennung bräuchte.
             if(_tpRoute === 'tsv2' && role === 'master' && !/topstep/i.test(String(a.firm || ''))) return false
             // Winning Days Farm (25.09.2026): NUR Konten der Kontoart 'winning_days' mit External ID (vorher Funded/Live bei Futures-Firmen)
+            // Topstep (.1489, Finn 13.10.2026: „auf Winning Days Trade plan auch die Topstep-Accounts sehen und auswählen"): Kontoart
+            // winning_days ODER funded (Topstep farmt Winning Days auf dem Funded), External ID bleibt Pflicht (Puls wählt damit das Konto)
             if(_tpRoute === 'tvv2' && _tpWd && role === 'master'
-               && !(typeof tpIstWinningDays === 'function' && tpIstWinningDays(a) && String(a.externalId || '').trim())) return false
+               && !(typeof tpIstWinningDays === 'function' && (tpIstWinningDays(a) || (/topstep/i.test(String(a.firm || '')) && String(a.type || '').toLowerCase() === 'funded')) && String(a.externalId || '').trim())) return false
             // Orbit (= Orbit V3, 01.10.2026 abends, Finn): keine Topstep-Konten im Master-Dropdown — Topstep läuft über TopstepX
             // (eigene Wege Topstep / Topstep V2), nicht über TradingView, wo Puls für Orbit platziert
             if(_tpRoute === 'tvv2' && _tpO3 && role === 'master' && /topstep/i.test(String(a.firm || ''))) return false
@@ -52882,11 +52885,15 @@
     // Winning Days Farm (24.09.2026 spät): V2-Weg MIT klassischer Multiplikator-Rechnung — Risiko Master/Slave sind Pflicht,
     // Slave fix Fusion (kein Dropdown, kein Slave-Konto am Plan)
     const wd = _tpRoute === 'tvv2' && _tpWd
+    // Winning Day auf Topstep (.1489, Finn 13.10.2026): derselbe Knopf, aber der Plan wird Topstep V2 (tsv2) — Puls in TopstepX, TP als
+    // „To Make", kein Fusion-Hedge (Wächter hängt am TV-Reader), winning_day = true (DB-Riegel Hedge-Kategorien). Kein Multiplikator nötig.
+    const wdTs = wd && /topstep/i.test(String(((accounts || []).find(a => String(a.id) === String(masterId)) || {}).firm || ''))
     // Orbit V3 (01.10.2026): dieselbe Multiplikator-Rechnung wie die Farm, aber Risiko Master = echter Stop Loss in TradingView
-    const o3 = tpO3Aktiv(), mitHedge = wd || o3
+    const o3 = tpO3Aktiv(), mitHedge = (wd && !wdTs) || o3
+    if(wdTs && !(masterTp > 0)){ msg('Winning Day auf Topstep braucht einen Take Profit in $ der ganzen Position (wird „To Make" in TopstepX).', 'err'); return }
     // Winning Day (05.10.2026): Staffel-€ gegen die TP-Summe — Risiko Master ist dafür kein Pflichtfeld und keine Rechengröße
     if(wd && !o3 && slaveRisk && masterQty && !(masterTp > 0)){ msg('Winning Day braucht einen Take Profit in $ — der Gegenhedge rechnet sich gegen die TP-Summe.', 'err'); return }
-    if(((!(wd && !o3 ? masterTp : masterRisk) || !slaveRisk) && (!v2 || mitHedge)) || !masterQty){
+    if(((!(wd && !o3 ? masterTp : masterRisk) || !slaveRisk) && (!v2 || mitHedge) && !wdTs) || !masterQty){
       msg(mitHedge ? 'Risiko Master ($), Kontrakte und Risiko Slave (€) ausfüllen — daraus rechnet sich der Multiplikator.' : 'Risiko und Anzahl ausfüllen.', 'err'); return
     }
 
@@ -52963,7 +52970,10 @@
         let k = null; try{ k = await v2RichtungKonflikt({ firm: master.firm, ohneId: _editingPlanId, frisch: true, geplanteHand: true }) }catch(_){}
         if(k && k.lauf && k.lauf !== (_tpDir === 'sell' ? 'short' : 'long')){ msg(k.text + ' — nicht gespeichert (Richtungs-Schutz).', 'err'); return }
       }
-      if(_tpWd || _tpO3){
+      if(wdTs){
+        // Topstep: Weg tsv2 mitschreiben (v2Extra liegt in insertRow/updateRow hinter route), Hedge-Felder leer, Winning-Day-Marke
+        Object.assign(v2Extra, { route: 'tsv2', hedge_eur: null, hedge_faktor: null, winning_day: true, orbit_v3: false })
+      } else if(_tpWd || _tpO3){
         if(!masterTp){ msg(`${_tpO3 ? 'Orbit' : 'Winning Day'} braucht einen Take Profit in $ (die Fusion-Gegenposition schließt an dieser Distanz).`, 'err'); return }
         if(!(mult > 0)){ msg('Multiplikator nicht rechenbar — Risiko Master ($), Kontrakte und Risiko Slave (€) prüfen.', 'err'); return }
         // Multiplikator-Logik wie bisher (Finn 24.09.2026 spät): hedge_faktor = Multiplikator (Chip/Bearbeiten), hedge_eur =
@@ -52975,7 +52985,7 @@
       } else v2Extra.hedge_faktor = null
       // Orbit V3 → hedge_eur MUSS weg, wenn derselbe Plan auf Orbit V2 zurückgestellt wird: sonst wäre er ab jetzt ein Winning Day
       if(!_tpWd && !_tpO3 && _editPlan && _editPlan.orbitV3) v2Extra.hedge_eur = null
-      v2Extra.orbit_v3 = !!_tpO3
+      if(!wdTs) v2Extra.orbit_v3 = !!_tpO3
     } else if(v2){ v2Extra.hedge_eur = null; v2Extra.hedge_faktor = null; v2Extra.orbit_v3 = false }
     try{
       let savedPlanId = null
