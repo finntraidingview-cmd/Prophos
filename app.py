@@ -6553,8 +6553,15 @@ def admin_build_overview(kapitel_id=None):
         print(f"[admin] ⚠️ geplante Pläne: {type(e).__name__}: {e}", flush=True)
 
     def _firma_felder(a, aid):
+        # Live-Balance je Konto (14.10.2026, Finn im Polar-Popup: „immer die Balance von dem jeweiligen Account hinschreiben") —
+        # dieselbe Rangfolge wie die Firmen-Ansicht (acc_balance_wahl: TSX → MT5 → Echo → TV/Duplikum); None = unbekannt
+        try:
+            _bal = _acc_balance(a)[0] if a else None
+        except Exception:
+            _bal = None
         return {"size": _pnum(a.get("account_size")),
                 "start": _pnum(a.get("starting_balance")),
+                "balance": round(_bal, 2) if _bal is not None else None,
                 "payout_at": str(a.get("payout_ready_at") or "")[:10],
                 "arch_grund": (arch_info.get(aid) or {}).get("reason") or "",
                 "im_trade": offen.get(aid),

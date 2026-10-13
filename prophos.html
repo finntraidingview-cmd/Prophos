@@ -43762,7 +43762,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1532'
+  const OS_TAB_BUILD = '2026-09-22.1533'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -52551,7 +52551,8 @@
       const d = await r.json()
       if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
       _polarKonten = (d.accounts || []).filter(a => !a.archived && (a.type === 'funded' || a.type === 'funded_cfd'))
-        .map(a => ({ id: a.id, name: a.name || a.ext || '', firm: a.firm_raw || a.firm || '', type: a.type, person: a.person || 'ohne Namen', user_id: a.user_id }))
+        .map(a => ({ id: a.id, name: a.name || a.ext || '', firm: a.firm_raw || a.firm || '', type: a.type, person: a.person || 'ohne Namen', user_id: a.user_id,
+                     balance: (typeof a.balance === 'number' && isFinite(a.balance)) ? a.balance : null }))
       return ''
     }catch(e){
       // Rückfall: nur die Konten dieses Logins (Overview nicht erreichbar) — die Vorschau rechnet trotzdem
@@ -52566,7 +52567,8 @@
     const ids = [...new Set(l.map(k => k.person))].sort((a, b) => a.localeCompare(b, 'de'))
     sel.innerHTML = ids.length ? ids.map(p => `<optgroup label="${esc(p)}">${l.filter(k => k.person === p)
       .sort((a, b) => (a.firm + a.name).localeCompare(b.firm + b.name, 'de'))
-      .map(k => `<option value="${esc(k.id)}">${esc(k.firm)} · ${esc(k.name)}</option>`).join('')}</optgroup>`).join('')
+      // Balance je Konto im Eintrag (14.10.2026, Finn): Live-Balance aus /admin/overview (balance), sonst „Balance ?"
+      .map(k => `<option value="${esc(k.id)}">${esc(k.firm)} · ${esc(k.name)} · ${k.balance != null ? Number(k.balance).toLocaleString('de-DE', { maximumFractionDigits: 0 }) + ' $' : 'Balance ?'}</option>`).join('')}</optgroup>`).join('')
       : '<option value="">— kein Konto —</option>'
   }
   const polarKonto = id => _polarKonten.find(k => String(k.id) === String(polarEl(id)?.value))
