@@ -43398,7 +43398,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1501'
+  const OS_TAB_BUILD = '2026-09-22.1503'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -43832,8 +43832,8 @@
         msg.appendChild(kb)
       }
     }
-    const w = tpOrbitWerte(plan, fern && fern.werte)
-    const { dir, lots, tp, sl, symbol } = w
+    let w = tpOrbitWerte(plan, fern && fern.werte)
+    let { dir, lots, tp, sl, symbol } = w
     if(w.fehlt.length){
       if(fern) return fern.melde({ ok:false, msg:'Für den Start fehlt: ' + w.fehlt.join(', ') + ' — nichts gestartet.' })
       if(pv2 && opts && opts.vonStartUm){ try{ await sfMelden(plan, { schritt: 'werte', msg: 'Für den Start fehlt: ' + w.fehlt.join(', ') }) }catch(_){} }   // START-FEHLER (08.10.2026)
@@ -43845,6 +43845,27 @@
     // Karten-Klick, die Startzeit/den Farmer (tpStartUmTick) und den Remote-Start vom Mac/Handy (orderSignalTick → hier am PC)
     if(pv2){
       let k = null; try{ k = await v2RichtungKonflikt({ firm: plan.masterFirm, ohneId: plan.id, frisch: true }) }catch(_){}
+      // WINNING DAY: IMMER DREHEN, NIE SPERREN (.1503, Finn 13.10.2026 17:10 Dubai, Jacob Tradeify: WD BUY stand gegen einen bestätigten
+      // SELL derselben ID × Firma, die Karte meldete nur „nicht gestartet (Richtungs-Schutz)" — „Winning Days müssen immer gemacht
+      // werden … dann einfach so umdrehen, dass es keinen Richtungskonflikt mehr gibt, und in die andere Richtung starten. Das ist auch
+      // in Zukunft okay."): ein WD-Plan wird hier auf die laufende bzw. geplante Richtung gedreht (TP/SL bleiben $-Beträge, Puls rechnet
+      // die Levels aus der Richtung) und startet im selben Lauf — Karten-Klick, Farmer-Start (tpStartUmTick) und Fern-Start vom Mac.
+      // Der WD ist über Fusion gehedgt und zählt im Saldo nicht, der Saldo-Riegel (.1501) gilt für ihn deshalb nicht.
+      if(k && k.lauf && k.lauf !== (dir === 'sell' ? 'short' : 'long') && tpIstWdPlan(plan)){
+        const ziel = k.lauf === 'short' ? 'sell' : 'buy', von = plan.richtung
+        const { data: dz, error: ez } = await supabase.from('trade_plans').update({ richtung: ziel })
+          .eq('id', plan.id).eq('status', 'planned').eq('richtung', von).select('*')
+        if(!ez && dz && dz.length){
+          plan = rowToPlan(dz[0]); const iz = tradePlans.findIndex(x => String(x.id) === String(plan.id)); if(iz >= 0) tradePlans[iz] = plan
+          try{ await baselinePatch(plan.id, { richtung_konflikt: { quelle: 'start', status: 'gedreht', um: new Date().toISOString(), von, nach: ziel, text: k.text } }, 'planned') }catch(_){}
+          rkProtokoll(plan, { von_richtung: von, nach_richtung: ziel, von_start: plan.startUm, nach_start: plan.startUm,
+            grund: `Richtungsschutz am Start: ${k.quelle === 'plan' ? 'vorher geplant' : 'läuft schon'} ${k.lauf} — Winning Day gedreht (WD läuft immer)` })
+          toast(`⇅ Winning Day „${plan.masterName || 'Plan'}": bei dieser ID+Firma ${k.quelle === 'plan' ? 'ist' : 'läuft'} ${k.lauf.toUpperCase()} → auf ${ziel.toUpperCase()} gedreht und gestartet (TP/SL in $ unverändert).`, 'start')
+          w = tpOrbitWerte(plan, (fern && fern.werte) ? { ...fern.werte, richtung: ziel } : null); ({ dir, lots, tp, sl, symbol } = w)
+          try{ renderTradePlans() }catch(_){}
+          k = null
+        } else console.warn('[richtung-start] Winning Day nicht drehbar', plan.id, ez)
+      }
       if(k && k.lauf && k.lauf !== (dir === 'sell' ? 'short' : 'long')){
         const t = k.text + ' — nicht gestartet (Richtungs-Schutz).'
         if(fern) return fern.melde({ ok:false, msg: t })
@@ -47512,12 +47533,13 @@
         }
       }
     }catch(e){ console.warn('[richtung-start] Saldo nicht lesbar — drehen wie bisher', (e && e.message) || e) }
-    if(saldoSperrt != null){
+    if(saldoSperrt != null && !tpIstWdPlan(plan)){   // WD: gehedgt, zählt im Saldo nicht, läuft immer (.1503)
       const kS = { ...k, text: `${k.text} — NICHT auf ${ziel.toUpperCase()} gedreht: alle IDs sind schon ${saldoSperrt > 0 ? 'long' : 'short'} (${Math.round(saldoSperrt).toLocaleString('de-DE')} € netto), ${plan.richtung.toUpperCase()} bleibt und wartet, bis der Gegen-Trade zu ist` }
       await rkVerschieben(plan, kS, false, 'start')
       return 'verschoben'
     }
-    if((plan.autoPlan || tpIstWdPlan(plan)) && !plan.handWerteAt){
+    // .1503: Winning Day immer drehen, auch mit Hand-Werten (Finn 13.10.2026: „Winning Days müssen immer gemacht werden")
+    if((plan.autoPlan && !plan.handWerteAt) || tpIstWdPlan(plan)){
       const { data, error } = await supabase.from('trade_plans').update({ richtung: ziel })
         .eq('id', plan.id).eq('status', 'planned').eq('richtung', plan.richtung).is('start_um_gestartet_at', null).select('*')
       if(!error && data && data.length){
