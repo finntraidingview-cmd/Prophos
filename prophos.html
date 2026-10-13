@@ -29881,7 +29881,10 @@
         const pb = wdlPlTrade(t) != null ? wdlPlTrade(t) : num(t.master_pl && t.master_pl.wert)   // Balance-Sprung → Tages-P&L (08.10.2026)
         let erg = wdlSprungErg(t) || wdlBestandenChip(t) || wdlBlowErg(t) || (wdlKontoWeg(t) ? WDL_KONTO_WEG_ERG : echo ? '' : d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : wdlLiqIstTag(t) ? WDL_TAGESLIMIT_ERG : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : '')
         // Bestanden: wohin das Konto nach dem Abhaken geht (13.10.2026) — „→ Tage sammeln 3/5" oder „→ Review", wie der Typ-Chip in Accounts
-        if(erg && !wdlSprungErg(t) && wdlBestandenChip(t)){ const ka = (accounts || []).find(x => x && String(x.id) === String(t.konto_id || '')); if(ka) erg += ' ' + zielStationChipHtml(ka, '→ ') }
+        // Mini-Trade (13.10.2026, Finn: „da steht bestanden — kommt der nicht zu Trade abhaken?"): eigenes Etikett „Tage-Mini" statt „🎯 bestanden"
+        // — er bringt nur einen Handelstag, das Konto steht schon in Bestanden → Tage sammeln und bleibt dort
+        if(t.tage_mini && !wdlSprungErg(t) && !wdlBlowErg(t)) erg = `<b class="wdl-bestanden" style="color:#B45309;background:#FFFBEB;white-space:nowrap" title="Mini-Trade zum Tage sammeln (0,01 Lot) — Abhaken verbucht nur den Mini; das Konto bleibt in Bestanden → Tage sammeln, bis die Mindesttage voll sind">Tage-Mini</b>`
+        else if(erg && !wdlSprungErg(t) && wdlBestandenChip(t)){ const ka = (accounts || []).find(x => x && String(x.id) === String(t.konto_id || '')); if(ka) erg += ' ' + zielStationChipHtml(ka, '→ ') }
         kontoZ = wdlKontoZ(t)
         // „→ manuell" (08.10.2026): Handy/Touch hat kein Drag — derselbe Weg wie das Ablegen in „Manuelle Arbeit"
         miZ = zelle('mi wdl-z-akt', `${erg ? `<span>${erg}</span>` : ''}<button type="button" class="btn btn-ghost el-knopf" data-wdl-abhaken="${escapeHtml(pid)}"${sperre ? ' disabled' : ''} title="${escapeHtml(sperre || 'Abhaken — P&L prüfen und Trade erledigen')}">Abhaken</button>`
@@ -43481,7 +43484,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1520'
+  const OS_TAB_BUILD = '2026-09-22.1521'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
