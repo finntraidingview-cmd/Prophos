@@ -6457,6 +6457,32 @@ def admin_build_overview(kapitel_id=None):
             "payouts_n": payout_n.get(r["id"], 0),
         })
 
+    # ALLE ACCOUNTS (13.10.2026, Finn: „im Admin einen Tab, wo man alle Accounts von allen IDs auf einem Bündel sieht — 1:1 wie unter
+    # Accounts, nur mit Filter nach Zielen und Typen"): je Zeile die Felder, die die Accounts-Tabelle für Typ-, Ziel- und Planer-Chips
+    # liest (rowToAccount-Namen als Spalten), dazu der Archiv-Grund und die Mindesttage (ap_tage_ist = zielFortschritt — das Frontend
+    # kennt die Pläne fremder IDs nicht). Eigene Abfrage + eigenes try: fehlt eine Spalte, bleibt die Übersicht heil, alle_fehler sagt es.
+    alle_fehler = None
+    try:
+        ai_info = b.get("arch_info") or {}
+        extra = {str(a["id"]): a for a in _sb_all("accounts", {"select": (
+            "id,goal_kind,goal_target,goal_min_profit,goal_done_offset,goal_since,goal_manual,goal_manual_last,payout_ready_at,"
+            "waiting_payout_since,auto_planer,ziel_erreicht_at,ziel_erreicht_bal,ziel_usd,max_risiko_trade,tv_balance_quelle")})}
+        kids_tage = [r["id"] for r in rows if not r["archived"] and (extra.get(r["id"]) or {}).get("goal_kind") == "trading_days"]
+        kids_set, je_plan = set(kids_tage), {}
+        for j in range(0, len(kids_tage), 150):
+            for p in _sb_all("trade_plans", {"select": "master_account_id,started_at", "started_at": "not.is.null",
+                                             "master_account_id": "in.(" + ",".join(kids_tage[j:j + 150]) + ")"}):
+                je_plan.setdefault(str(p.get("master_account_id")), []).append(p)
+        for r in rows:
+            x = extra.get(r["id"]) or {}
+            t = ap_tage_ist(x, je_plan.get(r["id"], [])) if r["id"] in kids_set else None
+            r.update({k: x.get(k) for k in x if k != "id"})
+            r["arch_reason"] = (ai_info.get(r["id"]) or {}).get("reason") or ""
+            r["tage_ist"] = t[0] if t else None
+    except Exception as e:
+        alle_fehler = f"{type(e).__name__}: {e}"
+        print(f"[admin] ⚠️ alle-accounts: {alle_fehler}", flush=True)
+
     # ACCOUNTS JE FIRMA (27.09.2026, Finn: „pro Prop-Firma ALLE Accounts von ALLEN
     # IDs auf einen Blick … und falls ein Account gerade schon im Trade ist, soll
     # das leuchten"). Reine Anzeige, zählt in keine Summe: Größe, Start-Balance,
@@ -6723,6 +6749,7 @@ def admin_build_overview(kapitel_id=None):
             "payouts_received": recv_rows,
             "verlauf": verlauf,
             "payout_ready": payout_ready,
+            "alle_fehler": alle_fehler,   # Reiter „Alle Accounts" (13.10.2026): Zusatzfelder nicht lesbar → Hinweis statt still leer
             "trades_heute": trades_heute,
             "trades_start": trades_start,   # Tages-Überblick „Accounts je Firma" (28.09.2026)
             "fx_usd_eur": fx, "generated": _wt_now_iso(),
