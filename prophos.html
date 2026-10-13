@@ -1509,6 +1509,11 @@
   #tradePlanModal .tp-v2 .tp-v2-instr button{padding:7px 12px;font-size:14px}
   #tradePlanModal .tp-v2 #tp-master-row{grid-column:1 / -1}
   #tradePlanModal .tp-v2 #tp-nq-toggle-slave-placeholder{display:none !important}
+  /* Polar-Vorschau (13.10.2026): zwei Spalten, Handy eine — minmax(0,…), damit lange Kontonamen das Raster nicht über den Rand schieben */
+  #polarModal .pol-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}
+  #polarModal .pol-gruppe{grid-column:1 / -1;font-size:12px;font-weight:600;color:var(--sub);margin-top:4px}
+  #polarModal .pol-tab{overflow-x:auto}
+  @media (max-width:640px){ #polarModal .pol-grid{grid-template-columns:minmax(0,1fr)} }
   /* Winning Days Farm (25.09.2026, Design-Rundgang): das Raster hatte Löcher — Kontrakte halb + leer, Risiko Slave
      volle Breite, TP halb + leer. Jetzt Kontrakte | Risiko Slave, darunter TP volle Breite (der SL-Platz ist auf
      diesem Weg leer, Risiko Master IST der Stop Loss). Klasse tp-wd setzt tpRouteUpdateSeg nur auf diesem Weg. */
@@ -8274,6 +8279,10 @@
                 <!-- Orbit (= Orbit V3, 01.10.2026): tvv2 + Fusion-Gegenhedge mit der Farm-Rechnung, jedes Futures-Konto, KEIN Winning Day
                      (trade_plans.orbit_v3); Userscript im Puls-Chrome schließt, Radar als Backup. -->
                 <button type="button" id="tp-route-o3" title="Orbit — Puls platziert in TradingView, Fusion-Gegenhedge; schließt, sobald das Userscript im Puls-Chrome die Position nicht mehr sieht, Radar (TP/SL) als Backup">Orbit</button>
+                <!-- Polar (13.10.2026, Finn): Funded-Futures gegen Funded-CFD einer ANDEREN ID als Airbag statt Fusion-Live. Eigener
+                     Knopf + eigenes Popup (#polarModal) — hängt NICHT an _tpRoute, schließt dieses Popup und öffnet die Vorschau.
+                     Erst Frontend zum Verstehen, Start-Logik folgt. -->
+                <button type="button" id="tp-route-polar" title="Polar — Funded-Futures gegen Funded-CFD einer anderen ID, Level gespiegelt beim Broker (Vorschau, noch nicht startbar)">Polar</button>
                 <!-- Winning Day (24.09.2026 abends): technisch Orbit V2 (route tvv2) + Fusion-Gegenhedge; nur Funded-Futures-Konten. -->
                 <button type="button" id="tp-route-wd" title="Winning Day: Orbit V2 + Fusion-Gegenhedge (Faktor, TP- und SL-Level in MetaTrader) — Dropdown zeigt nur Funded-Futures-Konten">Winning Day</button>
                 <button type="button" id="tp-route-topstep">Topstep</button>
@@ -8632,6 +8641,57 @@
           <button class="btn btn-ghost" id="tradePlanCancel2" style="display:none">Abbrechen</button>
           <button class="btn btn-ghost" id="tradePlanSave" style="display:none">Nur speichern</button>
           <button class="btn btn-primary" id="tradePlanSaveStart" style="min-width:220px">Speichern &amp; Starten →</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- POLAR-MODAL (13.10.2026, Finn: „ein bisschen Frontend zu Polar, damit wir es leichter verstehen"). Funded-Futures (ID A,
+         TradingView) gegen Funded-CFD (ID B, MT5) als Airbag statt Fusion-Live. Variante B: Level gespiegelt beim Broker (beide
+         schließen selbst, Grund SL/TP), Puls räumt nur auf; nie per EA schließen (FundedNext ≥ 50k = nur manuell). Reine Vorschau:
+         rechnet und zeigt, speichert und startet nichts. Konten aller sichtbaren IDs aus /admin/overview. -->
+    <div class="modal-bg" id="polarModal">
+      <div class="modal" style="max-width:620px">
+        <div class="modal-head">
+          <h3>Polar planen <span style="font-size:11px;font-weight:600;color:var(--sub);margin-left:6px">Vorschau</span></h3>
+          <button class="modal-x" id="polarClose" aria-label="Schließen">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="pol-grid">
+            <div class="pol-gruppe">Futures · Master (TradingView)</div>
+            <div class="field"><label>ID</label><select class="input" id="pol-fu-id"></select></div>
+            <div class="field"><label>Funded-Futures-Konto</label><select class="input" id="pol-fu-konto"></select></div>
+            <div class="pol-gruppe">Airbag · Funded CFD (MetaTrader)</div>
+            <div class="field"><label>ID</label><select class="input" id="pol-cfd-id"></select></div>
+            <div class="field"><label>Funded-CFD-Konto</label><select class="input" id="pol-cfd-konto"></select></div>
+            <div class="pol-gruppe">Trade</div>
+            <div class="field">
+              <label>Richtung Futures</label>
+              <div class="seg" id="pol-dir">
+                <button type="button" data-dir="long" class="active">Long</button>
+                <button type="button" data-dir="short">Short</button>
+              </div>
+            </div>
+            <div class="field">
+              <label>Symbol</label>
+              <div class="seg" id="pol-sym">
+                <button type="button" data-ppl="20" class="active">NQ</button>
+                <button type="button" data-ppl="2">MNQ</button>
+              </div>
+            </div>
+            <div class="field"><label>Kontrakte</label><input type="number" class="input" id="pol-kt" min="1" step="1" value="1"></div>
+            <div class="field"><label>Take Profit Futures ($)</label><input type="number" class="input" id="pol-tp" min="0" step="50" value="12000"></div>
+            <div class="field"><label>Bis Liquidation ($)</label><input type="number" class="input" id="pol-liq" min="0" step="50" value="4500"></div>
+            <div class="field"><label>Airbag ($ je 4.500 $ DD)</label><input type="number" class="input" id="pol-satz" min="0" step="50" value="1000"></div>
+            <div class="field"><label>CFD $/Pkt je Lot</label><input type="number" class="input" id="pol-cfd-ppl" min="0.01" step="0.01" value="1"></div>
+            <div class="field"><label>Puffer (Pkt)</label><input type="number" class="input" id="pol-puffer" min="0" step="0.5" value="4"></div>
+            <div style="grid-column:1 / -1" id="pol-ergebnis"></div>
+          </div>
+          <div class="modal-msg" id="polarMsg"></div>
+        </div>
+        <div class="modal-foot" style="justify-content:center">
+          <button class="btn btn-primary" id="polarStart" style="min-width:220px;opacity:.55;cursor:not-allowed" disabled title="Start-Logik folgt">Polar starten · Logik folgt</button>
         </div>
       </div>
     </div>
@@ -43511,7 +43571,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1524'
+  const OS_TAB_BUILD = '2026-09-22.1525'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -52258,6 +52318,113 @@
     _editingPlanId = null
     document.getElementById('tradePlanModal').classList.remove('open')
   }
+
+  /* POLAR — VORSCHAU (13.10.2026, Finn: „ein bisschen Frontend zu Polar, wie das mit Tradeplan, Polar, den Accounts je ID aussieht").
+   * Funded-Futures (ID A) gegen Funded-CFD (ID B) als Airbag statt Fusion-Live: Futures-Gewinn kostet dort nur Prop-Drawdown statt
+   * ~3.000 € echtes Geld. Variante B: CFD-Level werden beim Öffnen per Puls-Klick GESPIEGELT gesetzt (Abstand vom eigenen Fill, der
+   * Kursabstand NQ ↔ NAS100 fällt so raus) und schließen selbst beim Broker — nie per EA (FundedNext ≥ 50k: nur manuell, Deal-Grund
+   * sichtbar). Puffer mit Richtung: CFD-SL ein paar Punkte HINTER dem Futures-TP (Futures nimmt den Gewinn zuerst), CFD-TP ein paar
+   * Punkte VOR der Futures-Liquidation (Airbag-Gewinn sicher). Lots: Futures blowt → Airbag gewinnt genau den Satz.
+   * Nur Rechnung + Anzeige: kein Speichern, kein Start, kein trade_plans-Feld. Eigene Verdrahtung, hängt nicht an _tpRoute. */
+  let _polarKonten = []   // [{id, name, firm, type, person, user_id}] — Funded/Funded CFD aller sichtbaren IDs, nicht archiviert
+  const polarEl = id => document.getElementById(id)
+  async function polarKontenLaden(){
+    try{
+      const { data: { session } } = await supabase.auth.getSession()
+      const tok = session?.access_token
+      if(!tok) throw new Error('nicht angemeldet')
+      const r = await fetch(`${WATCHER_HOME}/admin/overview?ansicht=admin`, { headers: { 'sb-token': tok }, cache: 'no-store' })
+      const d = await r.json()
+      if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
+      _polarKonten = (d.accounts || []).filter(a => !a.archived && (a.type === 'funded' || a.type === 'funded_cfd'))
+        .map(a => ({ id: a.id, name: a.name || a.ext || '', firm: a.firm_raw || a.firm || '', type: a.type, person: a.person || 'ohne Namen', user_id: a.user_id }))
+      return ''
+    }catch(e){
+      // Rückfall: nur die Konten dieses Logins (Overview nicht erreichbar) — die Vorschau rechnet trotzdem
+      _polarKonten = (accounts || []).filter(a => a.type === 'funded' || a.type === 'funded_cfd')
+        .map(a => ({ id: a.id, name: a.name || '', firm: a.firm || '', type: a.type, person: 'Diese ID', user_id: currentUserId }))
+      return `Konten anderer IDs nicht geladen (${e.message}) — zeige nur diese ID.`
+    }
+  }
+  function polarIdOptionen(sel, typ, vorher){
+    const ids = [...new Set(_polarKonten.filter(k => k.type === typ).map(k => k.person))].sort((a, b) => a.localeCompare(b, 'de'))
+    sel.innerHTML = ids.length ? ids.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('') : '<option value="">— keine ID mit diesem Konto —</option>'
+    if(vorher && ids.includes(vorher)) sel.value = vorher
+  }
+  function polarKontoOptionen(sel, typ, person){
+    const l = _polarKonten.filter(k => k.type === typ && k.person === person).sort((a, b) => (a.firm + a.name).localeCompare(b.firm + b.name, 'de'))
+    sel.innerHTML = l.length ? l.map(k => `<option value="${esc(k.id)}">${esc(k.firm)} · ${esc(k.name)}</option>`).join('') : '<option value="">— kein Konto —</option>'
+  }
+  function polarSeg(id){ return polarEl(id)?.querySelector('button.active') }
+  function polarRechnen(){
+    const n = id => Number(polarEl(id)?.value) || 0
+    const de = (v, d = 0) => Number(v).toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d })
+    const long = (polarSeg('pol-dir')?.dataset.dir || 'long') === 'long'
+    const ppl = Number(polarSeg('pol-sym')?.dataset.ppl) || 20
+    const kt = Math.max(1, Math.round(n('pol-kt'))), tp = n('pol-tp'), liq = n('pol-liq'), satz = n('pol-satz')
+    const cfdPpl = n('pol-cfd-ppl') || 1, puffer = n('pol-puffer')
+    const tpPkt = tp / (ppl * kt), liqPkt = liq / (ppl * kt)
+    // Airbag gewinnt beim Futures-Blow genau den Satz je 4.500 $ DD (Finns Kurs ~1.000 $ : 4.500 $)
+    const airbagGewinn = satz * liq / 4500
+    const lots = liqPkt > 0 ? airbagGewinn / (cfdPpl * liqPkt) : 0
+    const lotsR = Math.max(0.01, Math.round(lots * 100) / 100)
+    const airbagVerlust = lotsR * cfdPpl * (tpPkt + puffer)
+    const fuKonto = _polarKonten.find(k => String(k.id) === String(polarEl('pol-fu-konto')?.value))
+    const cfdKonto = _polarKonten.find(k => String(k.id) === String(polarEl('pol-cfd-konto')?.value))
+    const gleicheId = fuKonto && cfdKonto && fuKonto.person === cfdKonto.person
+    const vz = (up, p) => `${up ? '+' : '−'}${de(p, 1)} Pkt`
+    // Futures long: TP oben, Liq unten → CFD short: SL oben (TP + Puffer), TP unten (Liq − Puffer)
+    const zeile = (links, rechts, hinweis) => `<tr><td style="padding:6px 8px">${links}</td><td style="padding:6px 4px;color:var(--sub)">↔</td><td style="padding:6px 8px">${rechts}</td><td style="padding:6px 8px;color:var(--sub);font-size:11px">${hinweis}</td></tr>`
+    polarEl('pol-ergebnis').innerHTML = `
+      ${gleicheId ? `<div style="padding:8px 10px;margin-bottom:10px;border-radius:var(--r-sm);background:var(--surface-tint);color:var(--warn);font-size:12px">Futures und Airbag liegen bei derselben ID — Polar ist für zwei verschiedene IDs gedacht.</div>` : ''}
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:12px">
+        <div style="padding:10px;border:1px solid var(--border-soft);border-radius:var(--r-sm)"><div style="font-size:11px;color:var(--sub)">Airbag-Größe</div><div style="font-weight:700;font-size:16px">${de(lotsR, 2)} Lot</div><div style="font-size:11px;color:var(--sub)">${long ? 'Short' : 'Long'} NAS100</div></div>
+        <div style="padding:10px;border:1px solid var(--border-soft);border-radius:var(--r-sm)"><div style="font-size:11px;color:var(--sub)">Futures am TP</div><div style="font-weight:700;font-size:16px;color:var(--good)">+${de(tp)} $</div><div style="font-size:11px;color:var(--danger)">Airbag −${de(airbagVerlust)} $ (Drawdown)</div></div>
+        <div style="padding:10px;border:1px solid var(--border-soft);border-radius:var(--r-sm)"><div style="font-size:11px;color:var(--sub)">Futures geblowt</div><div style="font-weight:700;font-size:16px;color:var(--danger)">−${de(liq)} $</div><div style="font-size:11px;color:var(--good)">Airbag +${de(airbagGewinn)} $ → Payout</div></div>
+      </div>
+      <div style="font-size:12px;font-weight:600;margin-bottom:4px">Level-Spiegel · Abstand vom eigenen Fill</div>
+      <div class="pol-tab"><table style="width:100%;border-collapse:collapse;font-size:12px;border:1px solid var(--border-soft);border-radius:var(--r-sm)">
+        <tr style="color:var(--sub);font-size:11px"><td style="padding:6px 8px">Futures (TradingView)</td><td></td><td style="padding:6px 8px">Airbag (MetaTrader)</td><td style="padding:6px 8px">Puffer</td></tr>
+        ${zeile(`TP ${vz(long, tpPkt)}`, `SL ${vz(long, tpPkt + puffer)}`, `${de(puffer, 1)} Pkt dahinter — Futures nimmt den Gewinn zuerst`)}
+        ${zeile(`Liq ${vz(!long, liqPkt)}`, `TP ${vz(!long, Math.max(0, liqPkt - puffer))}`, `${de(puffer, 1)} Pkt davor — Airbag-Gewinn sicher`)}
+      </table></div>
+      <ol style="margin:12px 0 0;padding-left:18px;font-size:12px;color:var(--ink-2);line-height:1.6">
+        <li>Puls öffnet Futures in TradingView (${fuKonto ? esc(fuKonto.person) : 'ID A'}).</li>
+        <li>Puls öffnet den Airbag per Klick in MT5 (${cfdKonto ? esc(cfdKonto.person) : 'ID B'}), sobald der Futures-Fill bewiesen ist, und trägt die gespiegelten Level per Klick ein.</li>
+        <li>Beide schließen selbst beim Broker (Grund SL/TP) — kein EA.</li>
+        <li>Bleibt eine Seite übrig, räumt Puls per Klick auf.</li>
+      </ol>`
+  }
+  function polarSeiteFuellen(seite){
+    const typ = seite === 'fu' ? 'funded' : 'funded_cfd'
+    polarKontoOptionen(polarEl(`pol-${seite}-konto`), typ, polarEl(`pol-${seite}-id`).value)
+  }
+  async function polarOeffnen(){
+    polarEl('polarMsg').textContent = 'Lade Konten aller IDs…'
+    polarEl('polarModal').classList.add('open')
+    const hinweis = await polarKontenLaden()
+    polarIdOptionen(polarEl('pol-fu-id'), 'funded')
+    polarIdOptionen(polarEl('pol-cfd-id'), 'funded_cfd')
+    // Airbag-ID: standardmäßig eine ANDERE ID als die Futures-Seite
+    const cfdSel = polarEl('pol-cfd-id'), fuId = polarEl('pol-fu-id').value
+    const andere = [...cfdSel.options].map(o => o.value).find(v => v && v !== fuId)
+    if(andere) cfdSel.value = andere
+    polarSeiteFuellen('fu'); polarSeiteFuellen('cfd')
+    polarEl('polarMsg').textContent = hinweis
+    polarRechnen()
+  }
+  polarEl('tp-route-polar')?.addEventListener('click', () => { closeTradePlanModal(); polarOeffnen() })
+  polarEl('polarClose')?.addEventListener('click', () => polarEl('polarModal').classList.remove('open'))
+  polarEl('pol-fu-id')?.addEventListener('change', () => { polarSeiteFuellen('fu'); polarRechnen() })
+  polarEl('pol-cfd-id')?.addEventListener('change', () => { polarSeiteFuellen('cfd'); polarRechnen() })
+  ;['pol-fu-konto', 'pol-cfd-konto'].forEach(id => polarEl(id)?.addEventListener('change', polarRechnen))
+  ;['pol-kt', 'pol-tp', 'pol-liq', 'pol-satz', 'pol-cfd-ppl', 'pol-puffer'].forEach(id => polarEl(id)?.addEventListener('input', polarRechnen))
+  ;['pol-dir', 'pol-sym'].forEach(id => polarEl(id)?.addEventListener('click', e => {
+    const b = e.target.closest('button'); if(!b) return
+    polarEl(id).querySelectorAll('button').forEach(x => x.classList.toggle('active', x === b))
+    polarRechnen()
+  }))
+  window._polarOeffnen = polarOeffnen   // Test-Haken (Stub)
 
   // Live Multiplier-Berechnung im Modal
   // ── Reingesteckt / Gesamtkosten: läuft die GESAMTE Vorgänger-Kette ab
