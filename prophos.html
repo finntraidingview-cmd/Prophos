@@ -3996,6 +3996,7 @@
   #dashboard-view .mwj-kopf span{font-weight:400;font-size:12px;color:var(--sub)}
   #dashboard-view .mwj-liste{display:grid;gap:4px;margin-top:8px}
   #dashboard-view .mwj-zeile{display:grid;grid-template-columns:minmax(0,1.6fr) 58px repeat(4,minmax(0,1fr));align-items:center;gap:8px;padding:7px 10px 7px 12px;border:1px solid var(--border-soft);border-left:4px solid var(--mwd-farbe,#667085);border-radius:8px;background:var(--surface);font:inherit;font-size:12.5px;color:inherit;cursor:pointer;text-align:left;width:100%}
+  #dashboard-view .mwj-zeile.mwj-z5{grid-template-columns:minmax(0,1.6fr) 58px repeat(5,minmax(0,1fr))}   /* Plan heute Nacht (.1484): Start · TP · Fusion · Liq · Stand */
   #dashboard-view .mwj-zeile:hover{border-color:#d1d5db}
   #dashboard-view .mwj-zeile.is-aktiv{box-shadow:0 0 0 2px var(--mwd-farbe,#667085)}
   #dashboard-view .mwj-wer{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -27401,6 +27402,70 @@
     }
     return out
   }
+  /* HEDGE-SICHT JE ZEILE (.1484, Finn 13.10.2026 am „Plan heute Nacht“: „wie viel Lots auf dem Master gekauft werden, wie viel auf dem Slave,
+   * was der Take Profit auf dem Master ist, wo der Liquidationspreis wäre — weil es in der Vergangenheit mit dem Multiplikator Probleme
+   * gab, damit ich genau sehe, ob das hinkommt“). REIN RECHNEND, nur Anzeige.
+   * Mit Plan: Felder des Plans (master_contracts, master_tp, hedge_faktor → Lots = Kontrakte × Faktor, hedge_eur = Verlust am TP,
+   * liq_regel_level_nq/liq_level_nq + liq_balance aus live-trades). Ohne Plan (SCHARF aus, Pläne kommen erst beim Scharfstellen): die
+   * Vorschau, wie der Farmer rechnen würde — Kontrakte aus der Firmen-Spanne, TP = Vorgabe oder Firmen-Spanne, Risiko Master = TP (Regel
+   * .1481), Lots = Staffel € ÷ (0,85 €/Pkt × TP-Punkte), Liquidation = Live − (Größe + 100) (dort schließt der Fusion-Hedge, 27.09.2026)
+   * als Preis am Kurs jetzt. Ohne Farmer-Sicht (P.konten) bleibt es „–“. */
+  function mklWdPlanHedge(P, t){
+    const r = (P && P.regeln) || {}, v = r.vorplan || {}, kd = (P.konten && t.konto && P.konten[String(t.konto.id)]) || null, p = t.plan
+    const num = x => (x == null || x === '' || !isFinite(Number(x))) ? null : Number(x)
+    const out = { ktTxt: '–', tpTxt: '–', lotsTxt: '–', lotsSub: '', liqTxt: '–', liqSub: '', hedgeAn: !!v.hedge_an }
+    const f0 = x => Number(x).toLocaleString('de-DE', { maximumFractionDigits: 0 })
+    const f2 = x => Number(x).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    const kurs = (() => { try{ const k = wdKursJetzt('NQ', 120000); return k && k.preis > 0 ? k.preis : null }catch(_){ return null } })()
+    const buy = t.richtung === 'buy'
+    try{
+      if(p){
+        const kt = num(t.kt), tp = num(t.tp), fak = num(p.hedge_faktor), eur = num(p.hedge_eur), root = t.root || (v.instr === 'nq' ? 'NQ' : 'MNQ')
+        out.ktTxt = kt != null ? `${f0(kt)} × ${root}` : '–'
+        out.tpTxt = tp != null ? f0(tp) + ' $' : '–'
+        if(fak != null && kt != null){ out.lotsTxt = f2(Math.round(kt * fak * 100) / 100) + ' Lot'; out.lotsSub = eur != null ? `−${f0(eur)} € am TP` : 'Fusion' }
+        else if(eur != null){ out.lotsTxt = f0(eur) + ' €'; out.lotsSub = 'Staffel · Lots rechnet der Copier' }
+        else out.lotsSub = out.hedgeAn ? 'kein Hedge am Plan' : 'Gegenhedge aus'
+        const lv = num(p.liq_regel_level_nq) ?? num(p.liq_level_nq), lb = num(p.liq_balance)
+        if(lv != null){ out.liqTxt = f2(lv); out.liqSub = lb != null ? `bei ${f0(lb)} $` : 'Liquidation' }
+        else if(lb != null){ out.liqTxt = f0(lb) + ' $'; out.liqSub = 'Preis erst nach dem Fill' }
+        else out.liqSub = 'Liq'
+        return out
+      }
+      if(!kd){ out.lotsSub = 'Farmer-Sicht nötig'; out.liqSub = 'Liq'; return out }
+      const vp = { instr: v.instr === 'nq' ? 'nq' : 'mnq', kt: Math.max(1, Math.round(+v.kt || 1)), regeln: v.regeln || TP_VP_VORGABE }
+      const [ka, kb] = wdKtSpanne(tpVorplanFirmaKey(kd.firm), vp), root = vp.instr === 'nq' ? 'NQ' : 'MNQ', ppl = mklPpl(root)
+      const sp = (a, b, f) => a === b ? f(a) : `${f(a)}–${f(b)}`
+      out.ktTxt = `${sp(ka, kb, f0)} × ${root}`
+      let z = null; try{ z = tpVorplanZeile(wdAccLike(kd), { live: num(kd.live_balance), regeln: vp.regeln, zufall: 0.5 }) }catch(_){}
+      const ok = z && !z.fehler, tpFix = num(kd.tp_vorgabe) || num(t.tp)
+      const tp = tpFix != null ? tpFix : (ok ? Math.round((z.tpVon + z.tpBis) / 2) : null)
+      out.tpTxt = tpFix != null ? f0(tpFix) + ' $' : (ok ? `${f0(z.tpVon)}–${f0(z.tpBis)} $` : '–')
+      const staffel = ok ? num(z.slaveEur) : null
+      if(!out.hedgeAn) out.lotsSub = 'Gegenhedge aus'
+      else if(staffel != null && tp > 0 && ppl > 0){
+        // Lots = Staffel € ÷ (0,85 €/Pkt × TP-Punkte), TP-Punkte = TP $ ÷ ($/Pkt × Kontrakte) → mehr Kontrakte = mehr Lots
+        const lots = k => Math.round(staffel * ppl * k / (tpWdSlavePpl() * tp) * 100) / 100
+        out.lotsTxt = sp(lots(ka), lots(kb), f2) + ' Lot'
+        out.lotsSub = `Staffel ${f0(staffel)} €${z.hinweis ? ' · ' + z.hinweis : ''}`
+      } else out.lotsSub = (z && z.fehler) ? z.fehler : 'Staffel unbekannt'
+      const express = kontoIstTopstepExpress({ firm: kd.firm, ext: kd.ext, name: kd.name, type: kd.type })
+      const live = num(kd.live_balance), groesse = express ? 0 : (kontoGroesseAnzeige(kd.name, kd.starting_balance, null) || 0)
+      if(express) out.liqSub = 'Express: MLL beim Start'
+      else if(live == null) out.liqSub = 'Balance noch nicht gelesen'
+      else if(!(groesse > 0)) out.liqSub = 'Kontogröße unbekannt'
+      else {
+        const liqUsd = live - (groesse + 100)
+        if(liqUsd > 0 && ppl > 0){
+          const pkt = k => liqUsd / (ppl * k), preis = k => buy ? kurs - pkt(k) : kurs + pkt(k)
+          const lo = Math.min(preis(ka), preis(kb)), hi = Math.max(preis(ka), preis(kb))   // aufsteigend, egal ob BUY/SELL
+          out.liqTxt = kurs != null ? sp(lo, hi, f2) : sp(pkt(kb), pkt(ka), f0) + ' Pkt'
+          out.liqSub = `−${f0(liqUsd)} $ bis ${f0(groesse + 100)}${kurs != null ? ' · am Kurs jetzt' : ''}`
+        } else out.liqSub = `schon unter ${f0(groesse + 100)} $`
+      }
+    }catch(e){ out.lotsSub = 'Rechnung: ' + String((e && e.message) || e) }
+    return out
+  }
   function mklWdPlanHtml(){
     const P = mkl.wd.plan
     if(!P || !P.tag) return P && P.fehler ? `<div class="mwj-naechste" style="color:#B45309">Plan nicht ladbar: ${escapeHtml(P.fehler)}</div>` : ''
@@ -27435,14 +27500,16 @@
       const pid = String(k.plan_id || ''), darf = t.status === 'planned' && !t.gestartet
       if(admin && P.edit && P.edit.id === pid) return mklWdPlanEditHtml(t, farbe, wer)
       // Plan fehlt (28.09.2026, Chris 92dd21d0 von Hand gelöscht, Verweis blieb stehen): Farmer-Admins legen ihn hier neu an
+      const H = mklWdPlanHedge(P, t)   // .1484: Kontrakte · Fusion-Lots · TP · Liq je Zeile
       const neuKnopf = ''   // „Plan neu anlegen" entfällt (28.09.2026): der PC-Tab der ID legt einen fehlenden Plan selbst neu an (wdAbgleich, Selbstheilung)
       const stift = (admin && pid) ? `<button type="button" class="btn btn-ghost" data-mwp-edit="${escapeHtml(pid)}" style="padding:0 6px;margin-left:6px;font-size:12px;line-height:18px;height:auto;vertical-align:1px"${darf ? ' title="TP, Kontrakte, MNQ/NQ, Richtung bearbeiten"' : ` disabled title="${escapeHtml(t.gestartet ? 'Puls hat den Plan schon gestartet — nicht mehr bearbeitbar' : 'nur geplante Trades sind bearbeitbar')}"`}>✎</button>` : ''
-      return `<div class="mwj-zeile" style="--mwd-farbe:${farbe};cursor:default${t.nr > 1 ? ';margin-top:-2px' : ''}" title="${escapeHtml(t.name + ' · ' + (k.name || kurz) + (t.n > 1 ? ` · Konto ${t.nr} von ${t.n} — läuft über die Warteschlange des PCs nacheinander` : ''))}">
+      return `<div class="mwj-zeile mwj-z5" style="--mwd-farbe:${farbe};cursor:default${t.nr > 1 ? ';margin-top:-2px' : ''}" title="${escapeHtml(t.name + ' · ' + (k.name || kurz) + (t.n > 1 ? ` · Konto ${t.nr} von ${t.n} — läuft über die Warteschlange des PCs nacheinander` : ''))}">
           <span class="mwj-wer">${wer}</span>
           <span class="mwd-chip ${buy ? 'mwd-buy' : sell ? 'mwd-sell' : ''}">${buy ? 'BUY' : sell ? 'SELL' : '?'}</span>
-          <span class="mwj-zelle">${a ? escapeHtml(wdHhmm(t.start_um)) : '—:—'}<small>${escapeHtml(startSub)}</small></span>
-          <span class="mwj-zelle">${escapeHtml(cd[0])}<small>${escapeHtml(cd[1])}</small></span>
-          <span class="mwj-zelle">${t.tp != null ? f0(t.tp) + ' $' : '–'}<small>${t.kt != null ? f0(t.kt) + ' × ' + escapeHtml(t.root || 'Kt.') : 'TP'}</small></span>
+          <span class="mwj-zelle">${a ? escapeHtml(wdHhmm(t.start_um)) : '—:—'}<small>${escapeHtml((cd[0] === 'läuft' || cd[0] === 'fällig') ? cd[0] + ' ' + cd[1] : cd[0] === '✓' ? 'durch' : cd[0] === '–' ? 'ohne Zeit' : cd[0] + ' ' + cd[1])}${startSub !== 'Dubai' ? ' · ' + escapeHtml(startSub) : ''}</small></span>
+          <span class="mwj-zelle" title="Take Profit am Master · Kontrakte, die Puls kauft">${H.tpTxt}<small>${escapeHtml(H.ktTxt)} Master</small></span>
+          <span class="mwj-zelle" title="Fusion-Gegenhedge: Lots, die der Copier öffnet (Staffel € ÷ (0,85 €/Pkt × TP-Punkte))">${escapeHtml(H.lotsTxt)}<small>${escapeHtml(H.lotsSub || 'Fusion')}</small></span>
+          <span class="mwj-zelle" title="Liquidation: dort schließt der Fusion-Hedge (Größe + 100 $) — Preis am aktuellen NQ-Kurs">${escapeHtml(H.liqTxt)}<small>${escapeHtml(H.liqSub || 'Liq')}</small></span>
           <span class="mwj-zelle" style="color:${st[1]}">${escapeHtml(st[0])}${neuKnopf || stift}<small>${P.neuMsg && P.neuMsg.id === pid ? escapeHtml(P.neuMsg.text) : 'Plan'}</small></span>
         </div>`
     }).join('')
@@ -43284,7 +43351,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1483'
+  const OS_TAB_BUILD = '2026-09-22.1484'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
