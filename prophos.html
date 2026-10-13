@@ -30002,7 +30002,8 @@
       const eigeneIds = new Set(ks.map(a => String(a.id)))
       // .1480 (13.10.2026, Finn in Moritz' Login: FundingPips 20429722 Phase 1 hatte seit 09.10. das Ziel, stand aber in keinem Radar):
       // /admin/handarbeit liefert {gruppen:{bestanden:[…]}} — hier stand _hand.d.bestanden, also immer leer → fremde Konten fehlten seit 09.10.
-      const fremd = (((typeof _hand !== 'undefined' && _hand.d && _hand.d.gruppen && _hand.d.gruppen.bestanden) || [])).filter(z => z && String(z.user_id) !== ich && !eigeneIds.has(String(z.konto_id)))
+      // .1520: radar_bestanden = bestandene Konten ALLER IDs (auch im Login ohne Admin-E-Mail); ältere Backends → gruppen.bestanden
+      const fremd = (((typeof _hand !== 'undefined' && _hand.d && (_hand.d.radar_bestanden || (_hand.d.gruppen && _hand.d.gruppen.bestanden))) || [])).filter(z => z && String(z.user_id) !== ich && !eigeneIds.has(String(z.konto_id)))
         .map(z => {
           let gr = 0; try{ gr = Number(kontoGroesseAnzeige(z.konto, z.start_balance, null)) || 0 }catch(_){}
           // Mindesttage fremder Konten kommen seit 13.10.2026 aus /admin/handarbeit (tage_ist/tage_soll, ap_tage_ist) — vorher fehlt immer false
@@ -43480,7 +43481,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1519'
+  const OS_TAB_BUILD = '2026-09-22.1520'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

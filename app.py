@@ -12536,10 +12536,16 @@ def admin_handarbeit():
         # BESTANDEN VON ALLEN IDs (13.10.2026, Finn: „im Radar alle Accounts von allen, die Tage sammeln müssen oder auf Accountdaten warten"):
         # die Standard-Sicht blendet Gruppen mit Verwalter (std_aus) sonst aus — für die bestandenen Konten nicht mehr; eine echte
         # Einschränkung des Logins (sicht) gilt weiter. Überprüfen/Geblowt/Manuell/Planer bleiben in der Standard-Sicht.
-        uq_ziel = {"user_id": admin_sicht_filter(sicht)} if admin_sicht_filter(sicht) else {}
-        konten_ziel = _sb_all("accounts", dict(uq_ziel, select="id,user_id,name,firm,account_type,external_id,starting_balance,"
-                                                           "ziel_erreicht_at,ziel_erreicht_bal,ziel_usd,goal_kind,goal_target,"
-                                                           "goal_done_offset,goal_since", ziel_erreicht_at="not.is.null"))
+        # RADAR = ALLE IDs (13.10.2026 abends, Finn im Login „Finn + Pascal": unter Bestanden fehlten ALLE Konten): ein Login ohne Admin-
+        # E-Mail sieht in /admin/handarbeit nur sich selbst (sicht = {me}, s. oben) — der Radar zeigt aber Trades aller IDs. Gelesen wird
+        # deshalb mit der echten Login-Einschränkung (Verwalter/Mitglied, _admin_eingeschraenkt); die Gruppe „bestanden" des Popups bleibt
+        # auf die Sicht gefiltert, der Radar bekommt die volle Liste als radar_bestanden.
+        ein = _admin_eingeschraenkt()
+        uq_ziel = {"user_id": admin_sicht_filter(ein)} if (ein is not None and admin_sicht_filter(ein)) else {}
+        ziel_alle = _sb_all("accounts", dict(uq_ziel, select="id,user_id,name,firm,account_type,external_id,starting_balance,"
+                                                          "ziel_erreicht_at,ziel_erreicht_bal,ziel_usd,goal_kind,goal_target,"
+                                                          "goal_done_offset,goal_since", ziel_erreicht_at="not.is.null"))
+        konten_ziel = [a for a in ziel_alle if sicht is None or str(a.get("user_id") or "") in sicht]
         reviews = _sb_all("trade_plans", dict(uq, select="id,user_id,master_account_id,master_name,master_firm,master_pl,ended_at,"
                                                          "completed_at,manuell:mt5_baseline->manuell", status="eq.review"))
         # Blow-Pläne nur der letzten HAND_BLOWN_TAGE (Prüfer 09.10.2026: ohne Grenze wüchse die Abfrage mit jedem Blow aller Zeiten mit) —
@@ -12578,13 +12584,13 @@ def admin_handarbeit():
                                           "id": "in.(" + ",".join(kids[j:j + 150]) + ")"}):
                 accs[str(a["id"])] = a
         # Mindesttage der bestandenen Konten (13.10.2026): gestartete Pläne nur dieser Konten, Zählweise ap_tage_ist (= zielFortschritt)
-        kids_tage = sorted({str(a.get("id")) for a in konten_ziel or [] if a.get("goal_kind") == "trading_days" and str(a.get("id")) not in archiv})
+        kids_tage = sorted({str(a.get("id")) for a in ziel_alle or [] if a.get("goal_kind") == "trading_days" and str(a.get("id")) not in archiv})
         tage_je, je_plan = {}, {}
         for j in range(0, len(kids_tage), 150):
             for r in _sb_all("trade_plans", {"select": "master_account_id,started_at", "started_at": "not.is.null",
                                              "master_account_id": "in.(" + ",".join(kids_tage[j:j + 150]) + ")"}):
                 je_plan.setdefault(str(r.get("master_account_id")), []).append(r)
-        for a in konten_ziel or []:
+        for a in ziel_alle or []:
             if str(a.get("id")) in kids_tage:
                 t = ap_tage_ist(a, je_plan.get(str(a.get("id")), []))
                 if t:
@@ -12592,8 +12598,9 @@ def admin_handarbeit():
         namen, ausgeblendet = _wd_personen()
         gr = hand_gruppen(konten_ziel, reviews, blown, letzte, accs, archiv, namen, ausgeblendet, datetime.now(timezone.utc), lauf, tage_je)
         gelesen = gr.pop("planer_gelesen", 0)
+        radar_best = hand_gruppen(ziel_alle, reviews, [], {}, {}, archiv, namen, ausgeblendet, datetime.now(timezone.utc), None, tage_je)["bestanden"]
         antwort = {"ok": True, "at": datetime.now(timezone.utc).isoformat(), "n": sum(len(v) for v in gr.values()), "gruppen": gr,
-                   "planer_gelesen": gelesen}
+                   "planer_gelesen": gelesen, "radar_bestanden": radar_best}
     except Exception as e:
         print(f"[handarbeit] ⚠️ {type(e).__name__}: {e}", flush=True)
         alt = stand_alt_holen(("handarbeit", schluessel), e)    # Supabase kurz weg (09.10.2026) → letzter guter Stand dieser Sicht
