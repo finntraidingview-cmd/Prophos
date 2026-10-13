@@ -30068,11 +30068,10 @@
     // Geblowt = abgehakt/erkannt geblowt oder Konto weg (nicht das Tageslimit — das ist kein Blow); seit 13.10.2026 eigener Kasten in „Erledigt"
     const istGeblowt = t => !!(t && (t.blown === true || (wdlBlowStand(t) || {}).geblowt || wdlKontoWeg(t)))
     // arr = was gezeigt wird (Modell + Person), alleArr = dieselbe Liste ohne Personen-Filter — nur für die Chips im Kopf
-    // Mini-Trades und Trades auf Konten in „Tage sammeln" sind KEIN „Trade abhaken" (13.10.2026, Finn: „nicht mischen") — sie stehen als normaler
-    // Trade in Erledigt → Abhaken, das Konto selbst bleibt in Bestanden → Tage sammeln
-    let _tageKonten = null
-    const tageKonten = () => _tageKonten || (_tageKonten = new Set(bstZeilen().filter(z => z.fehlt && z.kid).map(z => z.kid)))
-    const istBest = t => !wdlGeparkt(t) && !!wdlBestandenChip(t) && !t.tage_mini && !tageKonten().has(String(t.konto_id || '')), ohneBest = arr => arr.filter(t => !istBest(t))   // .1509: Bestanden = eine Gruppe
+    // Mini-Trades sind KEIN „Trade abhaken" (13.10.2026, Finn: „nicht mischen") — sie stehen als normaler Trade in Erledigt → Abhaken. Der Trade,
+    // der das Ziel erreicht hat, steht in „Trade abhaken" (Finns Ablauf .1518: abhaken → Konto nach Tage sammeln bzw. Review); das Konto mit
+    // fehlenden Tagen steht trotzdem schon in „Tage sammeln" und verschwindet dort nie (nach dem Ziel startet der Planer nur noch Minis)
+    const istBest = t => !wdlGeparkt(t) && !!wdlBestandenChip(t) && !t.tage_mini, ohneBest = arr => arr.filter(t => !istBest(t))   // .1509: Bestanden = eine Gruppe
     // DREI ÜBERGRUPPEN (Finn 13.10.2026 abends, Radar .1510: „zu unübersichtlich, alles auf eine Seite geklatscht"): Läuft (Trades am
     // Markt) · Erledigt (zu, braucht noch einen Handgriff: Abhaken oben, darunter Wartet, Geblowt, Manuelle Arbeit, Geparkt) · Bestanden
     // (Trade abhaken · Tage sammeln · Review). Die abgehakten Trades (früher „Erledigt · 137") sind aus dem Blick — nur noch ein
@@ -43480,7 +43479,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1517'
+  const OS_TAB_BUILD = '2026-09-22.1518'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
