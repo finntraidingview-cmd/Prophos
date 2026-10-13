@@ -4268,15 +4268,56 @@ def test_cdp_konto_regression_865():
         and any("übersprungen" in z for z in t6b) and n7 == 2 and len(k7.klicks) == 2 and n10 == 2 and len(k10.klicks) == 2,
         "Lese-Fehler (vor und nach dem Klick) wirft nicht; höchstens zwei Kacheln und zwei Klicks je Aufruf")
     q_ks, q_tv, q_kl = _i.getsource(ob._cdp_konto_sichern), _i.getsource(ob._cdp_tradovate_verbinden), _i.getsource(ob._AugenSitzung.klick)
+    q_ww, q_tl = _i.getsource(ob._AugenSitzung.werbung_weg), _i.getsource(ob.modus_tvlesen_cdp)
     chk(q_ks.count("_cdp_kachel_weg(s, trail)") == 1 and q_ks.index("_cdp_kachel_weg(s, trail)") < q_ks.index("s.stand(opts)")
         and q_tv.count("_cdp_kachel_weg(s, trail)") == 1 and q_tv.index("_cdp_kachel_weg(s, trail)") < q_tv.index(".blick()")
-        and "kachel" not in q_kl and "charting-ad" not in ob.CDP_WERBUNG_JS and "charting-ad" not in ob.CDP_TOAST_ZU_JS,
-        "Kachel nur VOR Konto- und Login-Schritt (vor dem ersten Lesen); klick(), Sale-Modal- und Meldungs-Logik unverändert")
+        and "charting-ad" not in ob.CDP_WERBUNG_JS and "charting-ad" not in ob.CDP_TOAST_ZU_JS,
+        "Kachel VOR Konto- und Login-Schritt (vor dem ersten Lesen); Sale-Modal- und Meldungs-Logik unverändert")
+    # 14.10.2026 (.1533, Finn: „die Ad verdeckt auch beim Balance-Lesen"): Kachel in der Störer-Räumung werbung_weg (vor jedem klick()
+    # und vor der Lesung in modus_tvlesen_cdp); der Kachel-Blick meldet bei offener Liste/Menü nichts (ersetzt den alten klick()-Verzicht)
+    chk("self.werbung_weg()" in q_kl and q_ww.count("_cdp_kachel_weg(self, self.trail)") == 1
+        and q_ww.index("_cdp_kachel_weg(self, self.trail)") < q_ww.index("_werbung_weg_kern(zwang)")
+        and "s.werbung_weg(zwang=True)" in q_tl and q_tl.index("s.werbung_weg(zwang=True)") < q_tl.index("st = s.stand(opts)\n        summary"),
+        "Störer-Räumung: Kachel zuerst in werbung_weg (jeder Klick), und vor der Lesung in modus_tvlesen_cdp")
     kj = ob.CDP_KACHEL_JS
     chk("getElementById('charting-ad')" in kj and "xs.length !== 1" in kj and "elementFromPoint" in kj and "q.width > 44" in kj
         and "click(" not in kj and "dispatchEvent" not in kj and ".remove(" not in kj and "style." not in kj
+        and "querySelectorAll(MENU)).some(sb)) return [];" in kj and '[role="listbox"]' in kj and '[data-name="popup-menu-container"]' in kj
         and "werbung: werbung" in js and "getElementById('charting-ad')" in js,
-        "Kachel-Blick: nur der Kasten #charting-ad, genau EIN unverdecktes kleines X, liest nur; augen.js meldet toasts.werbung")
+        "Kachel-Blick: nur der Kasten #charting-ad, genau EIN unverdecktes kleines X, liest nur, bei offener Liste/Menü nichts; augen.js meldet toasts.werbung")
+
+    class _WS:
+        """werbung_weg mit Kachel: Kachel-Blick liefert erst die Kachel, dann leer; Werbe-Modal-Blick immer leer; zwang=False → kein stand()."""
+        def __init__(self):
+            self.trail, self.tv_riegel, self.klicks, self._druck_versucht, self.stand_n = [], True, [], True, 0
+            self.folgen = [[kach], []]
+
+        def lese_js(self, ausdruck, timeout=8):
+            if ausdruck == ob.CDP_KACHEL_JS:
+                return self.folgen.pop(0) if self.folgen else []
+            return []
+
+        def _win_klick(self, rect, name, druck=True, toast_ok=False, pruef=None):
+            self.klicks.append(name)
+            return True
+
+        def stand(self, opts=None):
+            self.stand_n += 1
+            return {"popups": []}
+        _werbung_weg_kern, _werbung_dialog_weg = ob._AugenSitzung._werbung_weg_kern, ob._AugenSitzung._werbung_dialog_weg
+    alt_kw, alt_kwin = ob._warte, ob._WIN_EINGABE
+    ob._warte = lambda a, b: None
+    try:
+        ob._WIN_EINGABE = True
+        w1 = _WS()
+        n_w1 = ob._AugenSitzung.werbung_weg(w1, zwang=False)
+        w2 = _WS()
+        n_w2 = ob._AugenSitzung.werbung_weg(w2, zwang=True)
+    finally:
+        ob._warte, ob._WIN_EINGABE = alt_kw, alt_kwin
+    chk(n_w1 == 1 and w1.klicks == ["Werbe-Kachel schließen (X)"] and w1._druck_versucht is True and w1.stand_n == 0
+        and any("weg bewiesen" in z for z in w1.trail) and n_w2 == 1 and w2.klicks == ["Werbe-Kachel schließen (X)"] and w2.stand_n == 1,
+        f"werbung_weg schließt die Kachel (ein Klick, K4-Merker unberührt), ohne zwang kein stand(), mit zwang Dialog-Blick ({w1.trail})")
     q_tk = _i.getsource(ob._cdp_ticket_fuellen) if hasattr(ob, "_cdp_ticket_fuellen") else ""
     chk(not q_tk or ("chart_frei and bw > 200" in q_tk and "s._panel_max_versucht, s._panel_open_versucht = True, False" in q_tk
                      and "chart_frei = restored" in q_tk and "Treffer ≠ Wirkung" in q_tk and "for _b in range(6):" in q_tk),

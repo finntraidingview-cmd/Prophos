@@ -17729,6 +17729,12 @@ CDP_TOAST_ZU_JS = r"""(function () {
 # Knopf ≤ 44 px mit der Beschriftung „Close ad" (bzw. „Anzeige/Werbung schließen"). Nie ein anderes X. Nur lesen.
 CDP_KACHEL_JS = r"""(function () {
   var RX = /\bclose ad\b|(?:anzeige|werbung) schlie(?:ß|ss)en/i;
+  // 14.10.2026 (Finn, Screenshot Tradovate-Panel: Google-Anzeige „Daily Options on EURO STOXX 50" über „There are no open positions"
+  // — „ganz oft bei einer Lesung, die Ad verdeckt irgendwas"): der Kachel-Blick läuft jetzt vor JEDEM Klick und vor jeder Lesung
+  // (werbung_weg), nicht mehr nur vor dem Konto-/Login-Schritt. Darum hier der Riegel, der ihn bis .1532 aus klick() fernhielt:
+  // steht eine Liste/ein Menü offen (Konto-Dropdown, Kontextmenü), nichts melden — der Klick auf das X würde sie schließen.
+  var MENU = '[role="listbox"],[role="menu"],[data-name="menu-inner"],[data-name="popup-menu-container"]';
+  if (Array.prototype.slice.call(document.querySelectorAll(MENU)).some(sb)) return [];
   function sb(e) { try { var s = getComputedStyle(e); if (s.visibility === 'hidden' || s.display === 'none' || s.opacity === '0') return false;
     var r = e.getBoundingClientRect(); return r.width > 2 && r.height > 2 && r.bottom > 0 && r.right > 0 && r.left < innerWidth && r.top < innerHeight; } catch (_) { return false; } }
   function R(e) { var r = e.getBoundingClientRect(); return [r.left, r.top, r.width, r.height]; }
@@ -17785,8 +17791,10 @@ def cdp_kachel_wahl(roh):
 def _cdp_kachel_weg(s, trail):
     """Kleine TradingView-Werbe-Kachel (CDP_KACHEL_JS) über genau IHR X schließen — echte Maus, Ziel-Beweis auf den Knopftext
     („Close ad", win_ziel_pruef_js), danach „Kachel weg" bewiesen. Aufgerufen VOR dem Konto-Schritt und VOR dem Login-Schritt, also
-    bevor ein Rechteck gelesen wird, das der Klick auf das X verschieben oder schließen könnte (bewusst nicht in klick(): dort stünde
-    womöglich schon die Kontoliste offen). Wirft nie; ohne Windows-Maus und im TopstepX-Tab nichts. -> Anzahl geschlossener Kacheln"""
+    bevor ein Rechteck gelesen wird, das der Klick auf das X verschieben oder schließen könnte. Seit 14.10.2026 (.1533, Finn: die Anzeige
+    verdeckt auch beim Balance-Lesen) zusätzlich in werbung_weg, also vor jedem klick() und vor jeder Lesung — bei offener Liste/Menü
+    meldet CDP_KACHEL_JS nichts (der frühere Grund, klick() auszusparen). Wirft nie; ohne Windows-Maus und im TopstepX-Tab nichts.
+    -> Anzahl geschlossener Kacheln"""
     if not _WIN_EINGABE or not getattr(s, "tv_riegel", True):
         return 0
     weg = 0
@@ -18276,7 +18284,13 @@ class _AugenSitzung:
         # kann das X zwischen zwei Schritten fallen; ein danach geworfener Fehler hieß sonst „vielleicht gedrückt" statt „nichts gesendet")
         druck_vorher = getattr(self, "_druck_versucht", False)
         try:
-            return self._werbung_weg_kern(zwang)
+            # STÖRER-RÄUMUNG AN EINER STELLE (14.10.2026, Finn: „ganz oft bei einer Lesung sehe ich eine Ad, die verdeckt irgendwas —
+            # beim Trade-Platzieren klickt Puls sie weg, beim Balance-Lesen nicht"): die kleine Google-Kachel (#charting-ad, über den
+            # Reitern Positions/Orders/Account summary) wurde bis .1532 nur vor dem Konto-/Login-Schritt geschlossen; kam sie danach
+            # neu (Google lädt nach), lag sie beim Reiter-Klick und beim Lesen im Weg. Jetzt zuerst die Kachel, dann das Werbe-Modal —
+            # vor jedem klick() und vor jeder Lesung (modus_tvlesen_cdp, Endprüfung, Reiter). Wirft nie, klickt nur ihr eigenes X.
+            weg = _cdp_kachel_weg(self, self.trail)
+            return weg + self._werbung_weg_kern(zwang)
         except Exception as e_:                        # darf keinen Klick verhindern — schlimmstenfalls bleibt die Werbung stehen
             self.trail.append(f"Werbung-Prüfung übersprungen ({type(e_).__name__})")
             return weg
@@ -19276,6 +19290,11 @@ def modus_tvlesen_cdp(cmd):
         if not ok:
             return raus(code, msg, "konto", **cdp_konto_ergebnis_extra(extra, st))   # Konto-Befund gekürzt ins Ergebnis (08.10.2026)
         _warte(0.6, 0.3)
+        # Störer vor der eigentlichen Lesung weg (14.10.2026, Finn: Google-Anzeige über dem Positions-Bereich beim Balance-Lesen):
+        # Kachel + Werbe-Modal + erkannter Werbe-Dialog — der Konto-Schritt räumte nur zu SEINEM Beginn, eine danach nachgeladene
+        # Anzeige lag beim Reiter-Klick „Account summary" im Weg (Hover-Beweis scheitert → „Tages-G&V nicht gefunden")
+        if hasattr(s, "werbung_weg"):
+            s.werbung_weg(zwang=True)
         st = s.stand(opts)
         summary = cdp_summary(st.get("konto_summary"))
         today, today_label, today_text = tv_today_pnl(summary)
