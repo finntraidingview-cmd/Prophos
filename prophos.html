@@ -39174,7 +39174,8 @@
     if(o.zeit){ /* Trade-Planer: eigene Start-Zelle */ }
     else if(p.startUm && !p.startUmGestartetAt){
       const z = zeitTeile(p.startUm)
-      const klein = z.verpasst ? `<small class="is-verpasst">verpasst</small>` : z.tag ? `<small>${z.tag}</small>` : ''
+      const _ss = tpStartSperre(p)   // Richtungsschutz (13.10.2026): Grund klein unter der Uhrzeit, voller Text im Tooltip
+      const klein = _ss ? `<small class="is-verpasst" title="${escapeHtml(_ss.voll)}">⛔ Richtungsschutz</small>` : z.verpasst ? `<small class="is-verpasst">verpasst</small>` : z.tag ? `<small>${z.tag}</small>` : ''
       zeit = `<button class="pz-zeit-k" data-plan-start-um-edit="${p.id}" title="${escapeHtml(z.voll)}${z.verpasst ? ' — verpasst, nicht gestartet' : ''} · ${p.autoPlan && !p.autoBestaetigtAt ? 'Startet erst nach Bestätigung. ' : 'Der PC-Tab startet zu dieser Zeit von selbst. '}Klick: Uhrzeit ändern">${z.uhr}${klein}</button><button class="pz-zeit-x" data-plan-start-um-x="${p.id}" title="Startzeit entfernen">✕</button>`
     } else if(p.startUm){
       const z = zeitTeile(p.startUmGestartetAt)
@@ -40058,7 +40059,9 @@
         : (_vc && _vc.status === 'verpasst_slave') ? `<span class="rsq-card-run" style="color:var(--danger)" title="${escapeHtml(String(_vc.grund || ''))}">✗ nicht gestartet — Slave-Terminal war nicht bereit</span>` : ''
       // Richtungskonflikt am Start (07.10.2026): wartet auf Neuversuch · aufgegeben · vom Ausgleichs-Bot markiert (bestätigt/Hand)
       const _rk = p.status === 'planned' ? rkFlag(p) : null
-      const rkChip = !_rk ? ''
+      const _ss = tpStartSperre(p)
+      const sperreChip = _ss ? `<span class="rsq-card-run" style="color:var(--danger)" title="${escapeHtml(_ss.voll)}">${escapeHtml(_ss.kurz)}</span>` : ''
+      const rkChip = !_rk ? sperreChip
         : _rk.status === 'wartet' ? `<span class="rsq-card-run" style="color:#B45309" title="${escapeHtml(String(_rk.text || ''))}">⇅ Richtungskonflikt · neuer Versuch ${tpStartUmText(p.startUm)} · Versuch ${Number(_rk.versuche) || 1}</span>`
         : rkAufgegeben(p) ? `<span class="rsq-card-run" style="color:var(--danger)" title="${escapeHtml(String(_rk.text || ''))}">✗ nicht gestartet: Richtungskonflikt — von Hand starten oder Uhrzeit ändern</span>`
         : _rk.status === 'konflikt' ? `<span class="rsq-card-run" style="color:var(--danger)" title="${escapeHtml(String(_rk.text || ''))}">⇅ Richtungskonflikt: ${escapeHtml(String(_rk.gegen === 'sell' ? 'SHORT' : _rk.gegen === 'buy' ? 'LONG' : '?'))} ${_rk.durch === 'geplant' ? 'vorher geplant' : 'läuft'}</span>`
@@ -47543,6 +47546,19 @@
   const rkFlag = p => (p && p.mt5Baseline && p.mt5Baseline.richtung_konflikt) || null
   // aufgegeben gilt nur für genau die Startzeit, bei der aufgegeben wurde — eine neue Uhrzeit von Hand startet wieder normal
   const rkAufgegeben = p => { const f = rkFlag(p); return !!(f && f.status === 'aufgegeben' && p.startUm && Date.parse(f.start) === Date.parse(p.startUm)) }
+  /* START-SPERRE SICHTBAR (13.10.2026, Finn nach Emins Tradeify-Longs, die 7× geschoben wurden und nie starteten: „Bitte in Zukunft hinschreiben
+   * als Feedback-Meldung: die Order ging nicht durch wegen dem Richtungsschutz"). Die DB-Sperre (trade_plans_gegenhedge, sql/2026-10-13_
+   * start_sperre_meldung.sql) legt ihren Grund an den Plan: mt5_baseline.start_sperre {art, text, at, naechster, versuche}. Gilt, solange
+   * der Plan geplant und ungestartet ist und der letzte Versuch höchstens 30 min her ist. → { kurz, voll, versuche, naechster } | null */
+  function tpStartSperre(p){
+    const s = p && p.status === 'planned' && !p.startUmGestartetAt && p.mt5Baseline && p.mt5Baseline.start_sperre
+    if(!s || s.art !== 'richtung' || !(Date.now() - (Date.parse(s.at) || 0) < 30 * 60000)) return null
+    const um = s.naechster ? tpStartUmText(s.naechster) : ''
+    const text = String(s.text || '').replace(/\s+—\s+Start.*$/, '')
+    return { kurz: `⛔ Order ging nicht durch wegen Richtungsschutz${um ? ` · neuer Versuch ${um}` : ''}${Number(s.versuche) > 1 ? ` · Versuch ${Number(s.versuche)}` : ''}`,
+      voll: `Order ging nicht durch wegen Richtungsschutz: ${text}. Abhaken/Nachlesen des Gegen-Trades löst die Sperre; bis dahin versucht der PC-Tab es alle ~10 min neu.`,
+      versuche: Number(s.versuche) || 1, at: s.at }
+  }
   /* Ende des Startfensters (deutsche Zeit, auto_plan_regeln.zeiten.fenster aus dem Delta-Monitor, sonst 00:00–14:30 · 14:30–17:30 ·
    * 17:30–19:30), in dem der ursprüngliche Start lag → ms. Außerhalb aller Fenster: ursprünglicher Start + 60 min. */
   function rkFensterEnde(erstIso){
@@ -47895,6 +47911,7 @@
    *       localStorage, kein Toast-Spam). */
   const SU_PAUSE_MIN_MS = 5000, SU_PAUSE_STREU_MS = 25000, SU_CLAIM_PAUSE_MS = 30000, SU_HAENGER_MS = 10 * 60000
   let _suPauseBis = 0, _suLetzterLauf = 0, _suLauf = 0, _suLaufSeit = 0
+  const _suSperreGemeldet = new Map()   // planId → start_sperre.at, schon als Toast gemeldet (13.10.2026)
   const _suClaimPause = new Map()   // planId → frühester nächster Claim-Versuch (ms) nach einem Fehlgriff
   const suKettenTag = p => String((p && p.plannedFor) || '') || (p && p.startUm ? String(p.startUm).slice(0, 10) : '')
   const suNichtGestartet = p => !!p && p.status === 'planned' && !p.startUmGestartetAt
@@ -47958,6 +47975,10 @@
         if(i >= 0) tradePlans.splice(i, 1)
         console.warn('[start-um] Plan gibt es nicht mehr — aus der lokalen Liste genommen', plan.id, plan.masterName || '')
       } else if(i >= 0) tradePlans[i] = rowToPlan(data[0])
+      // Richtungsschutz (13.10.2026): einmal je Sperr-Versuch melden — Toast auf diesem PC, Chip auf der Karte überall
+      if(data && data.length){ const ss = tpStartSperre(rowToPlan(data[0]))
+        if(ss && _suSperreGemeldet.get(String(plan.id)) !== ss.at){ _suSperreGemeldet.set(String(plan.id), ss.at)
+          if(typeof atToast === 'function') atToast(`⛔ „${plan.masterName || '—'}" — ${ss.voll}`, 'end') } }
       try{ renderTradePlans() }catch(_){}
     }catch(e){ console.warn('[start-um] Plan nach Fehlgriff nicht lesbar', plan.id, (e && e.message) || e) }
   }
