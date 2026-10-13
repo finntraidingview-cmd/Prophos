@@ -68,46 +68,48 @@ def main():
     wv, _ = R(KETTE, "challenge", 148750.0, {"tp": 0.5, "sl": 0.5, "menge": 0.0, "puffer": 0.5}, peak=150000.0)
     check(wv and wv["kette"]["verlust_grenze"] == 2775 and wv["kette"]["mll"] == 145500.0 and wv["kette"].get("angefressen") is False,
           f"nach Verlusttag 148.750 (Abstand MLL 3.250 ≥ 3.000): gesund, Plan mit Verlustgrenze 2.775 ({wv and wv['kette']})")
-    # Weg B (Finn 08.10.2026 ~22:15 Dubai): angefressen unter der Startgröße → Reparatur-Tag zurück auf 150.000 + Puffer, Tag endet am MLL
+    # Reparatur-Tag = JEDER angefressene Tag (Finn 13.10.2026, Szenarienbaum): ein Trade, TP = Tagesziel 4.500, SL = Luft bis zum MLL + 200 (Blow).
+    # Kein Ziel „zurück auf 150.000" mehr (08.10.2026) — laut Chance-Modell bringt ein kleineres Reparaturziel nichts (Martingal).
     wa, ga = R(KETTE, "challenge", 147000.0, {"tp": 0.5, "sl": 0.5, "menge": 0.0, "puffer": 0.5}, peak=150000.0)
     ka = (wa or {}).get("kette") or {}
-    check(wa and ka.get("tagesziel") == 3000 + wa["puffer"] and 25 <= wa["puffer"] <= 40 and ka.get("verlust_grenze") == 1700
+    check(wa and ka.get("tagesziel") == 4500 and ka.get("verlust_grenze") == 1700
           and ka.get("mll") == 145500.0 and ka.get("reparatur") is True and ka.get("angefressen") is True and ka.get("abstand_mll") == 1500.0
-          and wa["sl"] == 1700 and wa["tp"] == ka["tagesziel"] and wa["risiko"] == wa["sl"] and ka.get("ein_trade") is True,
-          f"Reparatur 147.000 / MLL 145.500 = EIN Trade (Finn 09.10.2026): TP = Tagesziel 3.000 + Puffer, SL = Verlustgrenze 1.700 (Abstand + 200 = Blow) ({ga or (wa['tp'], wa['sl'], ka)})")
-    check(wa and wa["stufe"] == f"Topstep-Kette Reparatur-Tag · 1 Trade (zurück auf 150.000: +{ka['tagesziel']:,} $ oder Blow −1.700 $)".replace(",", "."),
+          and wa["sl"] == 1700 and wa["tp"] == 4500 and wa["risiko"] == wa["sl"] and ka.get("ein_trade") is True,
+          f"Reparatur 147.000 / MLL 145.500 = EIN Trade: TP = Tagesziel 4.500, SL = Verlustgrenze 1.700 (Luft + 200 = Blow) ({ga or (wa['tp'], wa['sl'], ka)})")
+    check(wa and wa["stufe"] == "Topstep-Kette Reparatur-Tag · 1 Trade (+4.500 $ oder Blow −1.700 $ am MLL 145.500)",
           f"Stufe erkennbar im Planer: „{wa and wa['stufe']}“")
     ws, _ = R(KETTE, "challenge", 147000.0, {"tp": 0.5, "sl": 0.999, "menge": 0.0, "puffer": 0.5}, peak=150000.0)
     check(ws and ws["sl"] == 1700 and ws["risiko"] == 1700, f"T1-SL 1.750 > Verlustgrenze 1.700 → SL = 1.700 ({ws and ws['sl']})")
     wk, _ = R(KETTE, "challenge", 149000.0, {"tp": 0.5, "sl": 0.5, "menge": 0.0, "puffer": 0.0}, peak=151500.0)
-    check(wk and wk["kette"]["tagesziel"] == 1025 and wk["tp"] == 1025 and wk["kette"]["verlust_grenze"] == 2200 and wk["sl"] == 2200
-          and "zurück auf 150.000: +1.025 $ oder Blow −2.200 $" in wk["stufe"],
-          f"Reparatur 149.000 / MLL 147.000 (Grenzfall 150k − MLL = 3.000): Tagesziel 1.025 < T1-TP 2.300 → T1-TP = Tagesziel ({wk and (wk['tp'], wk['kette'], wk['stufe'])})")
-    # Master 08.10.2026 (Nachbesserung zu cc7a857): Reparatur nur, wenn 150.000 den Abstand zurückbringt (Startgröße − MLL ≥ DLL)
+    check(wk and wk["kette"]["tagesziel"] == 4500 and wk["tp"] == 4500 and wk["kette"]["verlust_grenze"] == 2200 and wk["sl"] == 2200
+          and "+4.500 $ oder Blow −2.200 $ am MLL 147.000" in wk["stufe"],
+          f"Reparatur 149.000 / MLL 147.000 (Luft 2.000): TP 4.500, SL 2.200 ({wk and (wk['tp'], wk['kette'], wk['stufe'])})")
+    # seit 13.10.2026 auch ÜBER/AN der Startgröße (Mike …37040641, 151.227 bei MLL 149.936): angefressen = Reparatur-Tag, ein Trade
     wm, gm = R(KETTE, "challenge", 149900.0, {"tp": 0.5, "sl": 0.5, "menge": 0.0, "puffer": 0.5}, peak=153000.0)
     km = (wm or {}).get("kette") or {}
     check(wm and km.get("tagesziel") == 4500 and km.get("verlust_grenze") == 1600 and km.get("mll") == 148500.0 and km.get("angefressen") is True
-          and "reparatur" not in km and wm["stufe"] == "Topstep-Kette 1/2 (Tagesziel +4.500 $)" and wm["sl"] <= 1600,
-          f"149.900 / Höchststand 153.000 (MLL 148.500, 150k − MLL 1.500 < 3.000) → keine Reparatur, normal 4.500, Verlustgrenze 1.600 ({gm or (wm['stufe'], km)})")
+          and km.get("reparatur") is True and km.get("ein_trade") is True and wm["sl"] == 1600 and wm["tp"] == 4500,
+          f"149.900 / Höchststand 153.000 (MLL 148.500, Luft 1.400) → Reparatur-Tag, TP 4.500, SL 1.600 ({gm or (wm['stufe'], km)})")
     wr, gr = R(KETTE, "challenge", 148000.0, {"tp": 0.5, "sl": 0.5, "menge": 0.0, "puffer": 0.5}, peak=151000.0)
     kr_ = (wr or {}).get("kette") or {}
-    check(wr and kr_.get("reparatur") is True and kr_.get("mll") == 146500.0 and kr_.get("tagesziel") == 2000 + wr["puffer"]
-          and kr_.get("verlust_grenze") == 1700 and "Reparatur-Tag · 1 Trade (zurück auf 150.000" in wr["stufe"] and wr["sl"] == 1700,
-          f"148.000 / Höchststand 151.000 (MLL 146.500, 150k − MLL 3.500 ≥ 3.000) → Reparatur +2.000 + Puffer ({gr or (wr['stufe'], kr_)})")
-    # ab der Startgröße (MLL gelockt bei 150.000): normal weiter, Verlustgrenze = Abstand + 200
+    check(wr and kr_.get("reparatur") is True and kr_.get("mll") == 146500.0 and kr_.get("tagesziel") == 4500
+          and kr_.get("verlust_grenze") == 1700 and "Reparatur-Tag · 1 Trade (+4.500 $" in wr["stufe"] and wr["sl"] == 1700,
+          f"148.000 / Höchststand 151.000 (MLL 146.500, Luft 1.500) → Reparatur-Tag TP 4.500, SL 1.700 ({gr or (wr['stufe'], kr_)})")
+    # über der Startgröße, Luft 1.500 (wie Mike 13.10.2026): Reparatur-Tag, SL = Luft + 200, kein T1-Würfel
     wn, gn = R(KETTE, "challenge", 151500.0, {"tp": 0.5, "sl": 0.999, "menge": 0.0, "puffer": 0.5}, peak=154500.0)
     kn = (wn or {}).get("kette") or {}
     check(wn and kn.get("tagesziel") == 4500 and kn.get("verlust_grenze") == 1700 and kn.get("mll") == 150000.0 and wn["sl"] == 1700
-          and kn.get("angefressen") is True and "reparatur" not in kn and wn["stufe"] == "Topstep-Kette 1/2 (Tagesziel +4.500 $)",
-          f"151.500 / MLL 150.000 (gelockt): normal 4.500, Verlustgrenze 1.700, T1-SL gedeckelt ({gn or (wn['sl'], kn, wn['stufe'])})")
+          and kn.get("angefressen") is True and kn.get("reparatur") is True and wn["tp"] == 4500,
+          f"151.500 / MLL 150.000 (Luft 1.500, über der Startgröße): Reparatur-Tag TP 4.500, SL 1.700 ({gn or (wn['sl'], kn, wn['stufe'])})")
     wb, gb = R(KETTE, "challenge", 150000.0, {"tp": 0.5, "sl": 0.5, "menge": 0.0, "puffer": 0.5}, peak=152000.0)
     check(wb and wb["kette"]["tagesziel"] == 4500 and wb["kette"]["verlust_grenze"] == 2700 and wb["kette"]["mll"] == 147500.0
-          and not wb["kette"].get("reparatur"),
-          f"Höchststand 152.000, jetzt 150.000 (= Startgröße) → MLL 147.500, normal mit Verlustgrenze 2.700 ({gb or wb['kette']})")
+          and wb["kette"].get("reparatur") is True and wb["sl"] == 2700,
+          f"Höchststand 152.000, jetzt 150.000 (MLL 147.500, Luft 2.500) → Reparatur-Tag, SL 2.700 ({gb or wb['kette']})")
     wg, gg = R(KETTE, "challenge", 147400.0, {"tp": 0.5, "sl": 0.5, "menge": 0.0, "puffer": 0.5}, peak=152000.0)
     check(wg is None and gg == "Balance 147.400 auf/unter dem MLL 147.500 — geblowt?", f"Balance unter dem nachgezogenen MLL → geblowt, kein Plan ({gg})")
-    check(a["ap_kette_mll"](150000, 4500, None, 150000) == 145500.0 and a["ap_kette_mll"](150000, 4500, 156000, 151000) == 150000.0
-          and a["ap_kette_mll"](150000, 4500, 152000, 150000) == 147500.0, "MLL: frisch 145.500, gelockt 150.000, nachgezogen 147.500")
+    # KEIN Lock mehr (Finn 13.10.2026: „Das lockt nie, immer 4,5k"): Höchststand 156.000 → MLL 151.500 (vorher 150.000)
+    check(a["ap_kette_mll"](150000, 4500, None, 150000) == 145500.0 and a["ap_kette_mll"](150000, 4500, 156000, 151000) == 151500.0
+          and a["ap_kette_mll"](150000, 4500, 152000, 150000) == 147500.0, "MLL: frisch 145.500, Höchststand 156.000 → 151.500 (kein Lock), nachgezogen 147.500")
     ALT = dict(TOPSTEP, kette={"daily_usd": 0, "t1_sl": [1950, 2650]})
     wo, _ = R(ALT, "challenge", 147000.0, {"tp": 0.5, "sl": 0.5, "menge": 0.0, "puffer": 0.5}, peak=150000.0)
     check(wo and wo["kette"] == {"nr": 1, "tagesziel": 4500, "verlust_grenze": 4700, "tag_typ": "normal"} and 1950 <= wo["sl"] <= 2650,
@@ -115,8 +117,8 @@ def main():
     w3, _ = R(KETTE, "challenge", 157500.0, {"tp": 0.9, "sl": 0.5, "menge": 0.0, "puffer": 0.0})
     # TAG-TYP für die Spalte „Schritt" im Trade Plan (09.10.2026): erster / reparatur / final / normal — nur Anzeige
     check([x and x["kette"].get("tag_typ") for x in (w1, wa, w2, w3, wv, wb, wn, wm)]
-          == ["erster", "reparatur", "final", "final", "normal", "normal", "normal", "normal"],
-          f"Tag-Typ: frisch erster, 147.000 Reparatur, 154.500/157.500 final (Rest ≤ 4.500), 148.750/150.000 nach Höchststand/151.500/149.900 normal "
+          == ["erster", "reparatur", "final", "final", "normal", "reparatur", "reparatur", "reparatur"],
+          f"Tag-Typ: frisch erster, 147.000 Reparatur, 154.500/157.500 final (Rest ≤ 4.500), 148.750 normal, 150.000 nach Höchststand/151.500/149.900 Reparatur (angefressen) "
           f"({[x and x['kette'].get('tag_typ') for x in (w1, wa, w2, w3, wv, wb, wn, wm)]})")
     check(w3["tp"] == w3["kette"]["tagesziel"] == 1525, f"Rest kleiner als TP von Trade 1: Trade 1 holt das Ziel allein (TP {w3['tp']})")
 

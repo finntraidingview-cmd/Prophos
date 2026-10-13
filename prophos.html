@@ -24766,7 +24766,7 @@
     const typ = KETTE_TAG[k.tag_typ] ? k.tag_typ : k.reparatur ? 'reparatur'
       : (/Rest bis Ziel/.test(String(p.notes || '')) || (zz != null && zz < 4499.5)) ? 'final' : 'normal'
     const tip = []
-    if(zz != null) tip.push(typ === 'reparatur' ? `Ziel heute: +${de(zz)} $ — zurück auf die Startgröße (Reparatur, Weg B)`
+    if(zz != null) tip.push(typ === 'reparatur' ? `Ziel heute: +${de(zz)} $ — Reparatur-Tag (angefressen: ein Trade, SL am MLL)`
       : typ === 'final' ? `Ziel heute: Rest bis zum Phasenziel +${de(zz)} $ — Bestehen heute möglich` : `Ziel heute: +${de(zz)} $`)
     const vg = Number(k.verlust_grenze) > 0 ? Number(k.verlust_grenze) : null, dll = Number(k.daily_usd) > 0 ? Number(k.daily_usd) : null
     // angefressen wie app.py ap_kette_angefressen: Flag, sonst Verlustgrenze − 200 unter dem DLL (dann beendet der MLL den Tag);
@@ -24783,7 +24783,7 @@
     // REPARATUR-TAG = EIN TRADE (Finn 09.10.2026 ~09:20 Dubai): kein Trade 2 (Riegel in app.py ap_kette_trade2) → kein ⛓-Hinweis, Schritt
     // „Reparatur-Tag · 1 Trade" (auch für Reparatur-Pläne von vor der Regel, Flag kette.reparatur)
     if(k.reparatur){
-      tip.push('Ein Trade: TP = zurück auf die Startgröße, SL = Blow am MLL — kein Trade 2')
+      tip.push('Ein Trade: TP = Tagesziel, SL = Blow am MLL — kein Trade 2 (seit 13.10.2026 bei jedem angefressenen Tag, auch über 150k)')
       return { text: 'Reparatur-Tag · 1 Trade', nr: 'Reparatur-Tag', tag: '1 Trade', tip: tip.join(' · '), kette: '' }
     }
     if(nr === 1){

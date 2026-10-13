@@ -39,8 +39,9 @@ def main():
                             ("nach Gewinn 151.500, MLL 150.000", T(151500, 154500), 0.167)):
         check(abs(ist - soll) <= 0.005, f"Slave 1 {name}: {ist:.2%} (Referenz {soll:.1%})")
     k = K(147000, 150000, 150000, 4500, 3000, 9000, 4500)
-    check(k["reparatur"] and k["win"] == 3000 and k["loss"] == 1500 and k["mll"] == 145500,
-          f"147.000: Reparatur-Tag +3.000 / −1.500 (MLL 145.500) ({k['win']}/{k['loss']})")
+    # 13.10.2026: Reparatur-Tag = angefressen, Gewinn wie ein normaler Tag (4.500), Verlust = Luft bis zum MLL
+    check(k["reparatur"] and k["win"] == 4500 and k["loss"] == 1500 and k["mll"] == 145500,
+          f"147.000: Reparatur-Tag +4.500 / −1.500 (MLL 145.500) ({k['win']}/{k['loss']})")
     check(T(145500, 150000) == 0.0 and T(159000, 159000) == 1.0, "am MLL 0 %, am Ziel 100 %")
 
     st_ = ns["vorrat_stufen_aus_kernwerten"](TOPSTEP)
@@ -64,9 +65,10 @@ def main():
     check(w0["wert"] == 237 and abs(w1["wert"] - 237 / 3) <= 2 and abs(w2["wert"] - 237 * 2 / 3) <= 2 and w1["polster"] == 1500,
           f"Kontowert: frisch {w0['wert']} = Kauf, 147.000 {w1['wert']} ≈ ⅓, 151.500 (MLL 150.000) {w2['wert']} ≈ ⅔, Polster {w1['polster']}")
     alt0, alt2, altf = W("challenge", 150000, r=OHNE), W("challenge", 151500, r=OHNE), W("funded", 150000, r=OHNE)
-    check(alt0["wert"] == 237 and alt2["wert"] == 316 and abs(wf["wert"] - altf["wert"]) <= 1,
+    # ohne MLL-Lock (13.10.2026) ist die Chance frisch 24,9 % statt 25,0 % → Funded-Startwert 952 statt 948 (Toleranz 6 €)
+    check(alt0["wert"] == 237 and alt2["wert"] == 316 and abs(wf["wert"] - altf["wert"]) <= 6,
           f"ohne daily_usd unverändert (151.500 alt {alt2['wert']} €); Funded-Startwert mit Kette {wf['wert']} = alt {altf['wert']} (4 × Kauf)")
-    check(w0["satz"] > 0 and w0["wie"] == "Kauf 237 × Chance 25,0 % ÷ frisch 25,0 % (Topstep-Kette DLL, MLL 145.500)", f"Satz je $ aus dem Tagesausgang ({w0['satz']} €/$, {w0['wie']})")
+    check(w0["satz"] > 0 and w0["wie"] == "Kauf 237 × Chance 24,9 % ÷ frisch 24,9 % (Topstep-Kette DLL, MLL 145.500)", f"Satz je $ aus dem Tagesausgang ({w0['satz']} €/$, {w0['wie']})")
 
     print()
     if FEHLER:

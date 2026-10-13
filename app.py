@@ -7694,7 +7694,7 @@ def kette_dll_chance(balance, peak, start, dd, daily, ziel_usd, tagesziel, repar
     def kanon(b, pk):
         b = round(b, 2)
         pk = round(max(float(pk or 0), b, st), 2)
-        return (b, round(st + dd, 2) if pk - dd >= st else pk)    # ab dem Lock zählt der Höchststand nicht mehr
+        return (b, pk)    # kein Lock mehr (13.10.2026): der Höchststand zählt immer, MLL = Höchststand − dd
 
     def zug(z):
         b, pk = z
@@ -7705,8 +7705,9 @@ def kette_dll_chance(balance, peak, start, dd, daily, ziel_usd, tagesziel, repar
         if ab <= 0.005:
             return None
         angef = ab < daily - 0.005
-        rep_ = bool(reparatur and angef and b < st - 0.005 and st - mll >= daily - 0.005)
-        win, loss = ((st - b, ab) if rep_ else (min(tz, ziel - b), ab if angef else tag_verlust))
+        # 13.10.2026: Reparatur-Tag = angefressen (ein Trade, TP wie normal, Verlust = Luft bis zum MLL); kein Ziel „zurück auf den Start"
+        rep_ = bool(reparatur and angef)
+        win, loss = min(tz, ziel - b), (ab if angef else tag_verlust)
         return loss / (win + loss), kanon(b + win, max(pk, b + win)), kanon(b - loss, pk), win, loss, mll, angef, rep_
 
     s0 = kanon(b0, peak)
@@ -7891,7 +7892,7 @@ def vorrat_chance_stufe(regel, balance, groesse, start=None, max_dd=None, peak=N
         out["trades"] = ([{"polster": k["loss"], "tp": k["win"], "p": k["p_tag"]}]
                          + [{"polster": daily_f, "tp": tz, "p": daily_f / (daily_f + tz)}] * (n_tage - 1))
         out["chance"] = k["chance"]
-        out["hinweis"] = ("angefressen — Reparatur-Tag auf den Start (Weg B)" if k["reparatur"] else
+        out["hinweis"] = ("angefressen — Reparatur-Tag, ein Trade bis zum MLL" if k["reparatur"] else
                           "angefressen — Verlust bis zum MLL" if k["angefressen"] else "")
         return out
     if modell == "bestand":
@@ -15429,42 +15430,42 @@ def ap_kette_regel(regel):
 
 def ap_kette_mll(groesse, dd, peak, balance, lock=0.0):
     """REIN RECHNEND (testbar): Maximum Loss Limit (Topstep Combine) → Balance-Level. EOD-trailing dd hinter dem höchsten bekannten
-    Tagesschluss (peak = liq_peak, sonst die Balance selbst = Tagesstart), nie unter Größe − dd, Lock bei Größe + lock (Combine: 0)."""
+    Tagesschluss (peak = liq_peak, sonst die Balance selbst = Tagesstart), nie unter Größe − dd, nie nach unten.
+    KEIN Festfrieren mehr (Finn 13.10.2026: „Das lockt nie, immer 4,5k" — vorher Lock bei Größe + lock; der Parameter lock bleibt
+    nur für alte Aufrufer stehen und wird ignoriert). Ohne Lock liegt das gerechnete MLL höher = die sichere Seite: SL2 endet nie
+    hinter dem echten MLL."""
     if not groesse or not dd:
         return None
     hoch = max(float(groesse), float(peak or 0), float(balance or 0))
-    return round(min(float(groesse) + float(lock or 0), hoch - float(dd)), 2)
+    return round(hoch - float(dd), 2)
 
 
 def ap_kette_trade1(regel, kette, groesse, ziel, balance, u, peak=None):
     """REIN RECHNEND: Trade 1 der Kette → (werte wie ap_konto_rechnen + kette{nr, tagesziel, verlust_grenze, …}, None) | (None, grund).
     Tagesziel = Rest bis zum Phasenziel + Puffer, wenn der Rest höchstens tagesziel_usd ist (letzter Tag), sonst tagesziel_usd.
     Mit daily_usd (DLL 3.000, 08.10.2026): MLL aus ap_kette_mll; Verlustgrenze = min(daily_usd, Abstand) + blow_puffer. Abstand
-    Tagesstart − MLL < daily_usd („angefressen", Weg B, Finn 08.10.2026 ~22:15 Dubai): unter der Startgröße und Startgröße − MLL ≥
-    daily_usd Reparatur-Tag (Tagesziel = Startgröße − Balance + Puffer), sonst normal; Abstand ≤ 0 → geblowt, kein Plan. T1-SL höchstens
-    Verlustgrenze.
+    Tagesstart − MLL < daily_usd („angefressen", Finn 13.10.2026 nach Mike …37040641, 151.227 bei MLL 149.936 — vorher nur unter der
+    Startgröße ein Reparatur-Tag, darüber zwei Trades mit kleinem T1-SL): IMMER Reparatur-Tag = EIN Trade, TP = Tagesziel (4.500 bzw.
+    Rest bis zum Phasenziel + Puffer am letzten Tag), SL = Abstand MLL + blow_puffer (Blow am MLL). Kein Ziel „zurück auf 150.000" mehr.
+    Abstand ≤ 0 → geblowt, kein Plan. T1-SL höchstens Verlustgrenze.
     Ohne daily_usd wie bisher: DD + blow_puffer."""
     de = lambda v: f"{v:,.0f}".replace(",", ".")   # noqa: E731 — nur die Zahlen, das Satzkomma bleibt
     daily = float(kette.get("daily_usd") or 0)
     mll = ap_kette_mll(groesse, float(regel.get("dd_usd") or 0), peak, balance) if daily else None
     if daily and mll is not None and balance - mll <= 0:
         return None, f"Balance {de(balance)} auf/unter dem MLL {de(mll)} — geblowt?"
-    # angefressen (Weg B): der MLL beendet den Tag vor dem DLL; Reparatur nur, solange die Balance unter der Startgröße liegt UND die
-    # Rückkehr auf die Startgröße den Abstand wirklich zurückbringt (Master 08.10.2026, Nachbesserung zu cc7a857): Startgröße − MLL ≥ DLL,
-    # also MLL ≤ 147.000 bei 150k (Höchststand ≤ 151.500). Sonst (z. B. Höchststand 153.000, MLL 148.500, Balance 149.900) hätte das Konto
-    # auch bei 150.000 nur 1.500 Abstand — dann normal planen, Verlustgrenze Abstand + 200. Nebenbei keine Mini-Reparaturziele mehr:
-    # ohne nachgezogenen MLL ist ein Konto erst unter 148.500 angefressen, das Reparaturziel liegt also immer über 1.500
+    # angefressen = Reparatur-Tag (Finn 13.10.2026, Szenarienbaum bestätigt): nach jedem Verlusttag bleibt nur die Luft bis zum MLL
+    # (≈ 1.725, bei Mike 1.291) — egal ob die Balance über oder unter der Startgröße liegt. Ein Trade, TP wie ein normaler Tag, SL am MLL.
+    # Die alte Bedingung „nur unter der Startgröße + Ziel zurück auf 150.000" (08.10.2026) ist raus: über 150.000 lief sonst ein
+    # Zwei-Trade-Tag mit SL1 ≤ Luft, und ein Reparaturziel kleiner als 4.500 bringt laut Chance-Modell nichts (Martingal).
     angefressen = bool(daily and mll is not None and balance - mll < daily)
-    reparatur = angefressen and balance < float(groesse) and float(groesse) - mll >= daily
+    reparatur = angefressen
     rest = ziel - balance
     menge = _ap_runden(_ap_spanne(kette.get("menge"), u["menge"]), 1)
     puffer = round(_ap_spanne(kette.get("puffer"), u["puffer"]) or 0)
-    if reparatur:
-        # Reparatur-Tag: zurück auf die Startgröße + Puffer, damit der Tag sicher ≥ 150.000 schließt (147.000 → +3.000 + Puffer)
-        tagesziel = round(float(groesse) - balance + puffer)
-    else:
-        # letzter Tag (Rest ≤ Tagesziel): Rest + Puffer, damit das Konto sicher über das Phasenziel kommt (159.000 statt 158.990)
-        tagesziel = round(rest + puffer) if rest <= float(kette["tagesziel_usd"]) else round(float(kette["tagesziel_usd"]))
+    # letzter Tag (Rest ≤ Tagesziel): Rest + Puffer, damit das Konto sicher über das Phasenziel kommt (159.000 statt 158.990) —
+    # gilt auch am Reparatur-Tag (Finn 13.10.2026: „bei 156k den Take Profit so anpassen, dass sie bei 9.000 rauskommen")
+    tagesziel = round(rest + puffer) if rest <= float(kette["tagesziel_usd"]) else round(float(kette["tagesziel_usd"]))
     dll_puffer = None
     if daily and mll is not None:
         if angefressen:
@@ -15478,15 +15479,15 @@ def ap_kette_trade1(regel, kette, groesse, ziel, balance, u, peak=None):
     tp = round(_ap_spanne(kette["t1_tp"], u["tp"]))
     sl = round(_ap_spanne(kette["t1_sl"], u["sl"]))
     if reparatur:
-        # REPARATUR-TAG = EIN TRADE (Finn 09.10.2026 ~09:20 Dubai): TP = Reparatur-Ziel (zurück auf die Startgröße + Puffer), SL = Verlust-
-        # grenze (Abstand MLL + blow_puffer = Blow) — statt der T1-Spannen und eines Trade 2
+        # REPARATUR-TAG = EIN TRADE (Finn 09.10.2026 ~09:20 Dubai; seit 13.10.2026 bei jedem angefressenen Tag): TP = Tagesziel,
+        # SL = Verlustgrenze (Abstand MLL + blow_puffer = Blow) — statt der T1-Spannen und eines Trade 2
         tp, sl = tagesziel, verlust
     if sl > verlust:
         # angefressen (z. B. SL 1.750, Abstand 1.500 → Verlustgrenze 1.700): SL nie hinter der Verlustgrenze — ein T1-Verlust ist dann
         # der Blow am MLL, Trade 2 entfällt (ap_kette_trade2). Gesunde Konten (Verlustgrenze 3.200, SL ≤ 1.750) trifft das nie
         sl = verlust
     if reparatur:
-        stufe = f"{AP_KETTE_TXT} Reparatur-Tag · 1 Trade (zurück auf {de(groesse)}: +{de(tagesziel)} $ oder Blow −{de(verlust)} $)"
+        stufe = f"{AP_KETTE_TXT} Reparatur-Tag · 1 Trade (+{de(tagesziel)} $ oder Blow −{de(verlust)} $ am MLL {de(mll)})"
     else:
         stufe = f"{AP_KETTE_TXT} 1/2 (Tagesziel +{tagesziel:,} $)".replace(",", ".")
     if tp >= tagesziel:                       # letzter Tag oder Reparatur mit kleinem Rest: Trade 1 kann das Ziel schon allein holen
@@ -15526,7 +15527,7 @@ def ap_kette_trade2(t1_kette, balance_start, balance_end, regel, kette, u_menge)
     # ~150.000, ab dem nächsten Tag normal. Kein Trade 2, auch für Reparatur-Pläne von vor dieser Regel (Ina …3822, d369e8d5 lief noch
     # mit T1-Spannen) — der Riegel hängt deshalb am Block-Flag reparatur, nicht an ein_trade.
     if (t1_kette or {}).get("reparatur"):
-        return None, "Reparatur-Tag: ein Trade (TP = zurück auf die Startgröße, SL = Blow am MLL) — kein Trade 2"
+        return None, "Reparatur-Tag: ein Trade (TP = Tagesziel, SL = Blow am MLL) — kein Trade 2"
     tagesziel = float((t1_kette or {}).get("tagesziel") or kette["tagesziel_usd"])
     verlust = float((t1_kette or {}).get("verlust_grenze") or (float(regel.get("dd_usd") or 0) + float(kette["blow_puffer_usd"])))
     e1 = round(float(balance_end) - float(balance_start), 2)
