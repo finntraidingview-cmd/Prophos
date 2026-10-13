@@ -12533,7 +12533,11 @@ def admin_handarbeit():
     try:
         f = admin_sicht_filter(sicht) or (("not.in.(" + ",".join(sorted(std_aus)) + ")") if std_aus else None)
         uq = {"user_id": f} if f else {}
-        konten_ziel = _sb_all("accounts", dict(uq, select="id,user_id,name,firm,account_type,external_id,starting_balance,"
+        # BESTANDEN VON ALLEN IDs (13.10.2026, Finn: „im Radar alle Accounts von allen, die Tage sammeln müssen oder auf Accountdaten warten"):
+        # die Standard-Sicht blendet Gruppen mit Verwalter (std_aus) sonst aus — für die bestandenen Konten nicht mehr; eine echte
+        # Einschränkung des Logins (sicht) gilt weiter. Überprüfen/Geblowt/Manuell/Planer bleiben in der Standard-Sicht.
+        uq_ziel = {"user_id": admin_sicht_filter(sicht)} if admin_sicht_filter(sicht) else {}
+        konten_ziel = _sb_all("accounts", dict(uq_ziel, select="id,user_id,name,firm,account_type,external_id,starting_balance,"
                                                            "ziel_erreicht_at,ziel_erreicht_bal,ziel_usd,goal_kind,goal_target,"
                                                            "goal_done_offset,goal_since", ziel_erreicht_at="not.is.null"))
         reviews = _sb_all("trade_plans", dict(uq, select="id,user_id,master_account_id,master_name,master_firm,master_pl,ended_at,"
