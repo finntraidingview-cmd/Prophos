@@ -23,6 +23,8 @@
  * STAND 0.3 (30.09.2026, TSX-ANKER-K1): echte Anker aus dem K0-Inventar (puls_augen, 30.09.2026) für Konto-Auslöser, Kopfzeile,
  * „No Active Position" und die Konto-Liste (konto.liste für K2); ticket.anzeigen als Rohtext. Die Anzeige einer OFFENEN Position
  * ist noch nicht belegt (Inventar war flach). inventar(): Overlays (Liste/Dialog) zuerst, SVG-Innereien raus.
+ * STAND 0.6.2 (14.10.2026, GEBLOWT-AUGE): dialoge() gibt für Loss-Limit-/Ineligible-Meldungen text_voll (400 Zeichen) mit — der Bot
+ * liest daraus die Kennung des geblowten Kontos; konto.liste[].hinweis (Klammertext „MAXIMUM_LOSS Violation" / „Ineligible") gab es schon.
  * STAND 0.6 (05.10.2026, K4 — Finn: „unten auf Position gehen, Doppelklick auf Risk und da eine Zahl eingeben; das ist so viel
  * einfacher"): SL/TP NICHT mehr über das Ziehen im Chart, sondern über die Positions-Tabelle unten. Neu, nur lesend: ticket.reiter
  * (Reiter „Positions"), ticket.gitter (Tabelle mit Symbol, Position, Entry Price, Risk, To Make samt Bearbeiten-Zustand der Zellen),
@@ -30,7 +32,7 @@
  */
 var PROPHOS_AUGEN_TSX = (function () {
   'use strict';
-  var VERSION = 'tsx-0.6.1';
+  var VERSION = 'tsx-0.6.2';
 
   // ── Grundwerkzeuge (wie augen.js) ──────────────────────────────────────────
   function sichtbar(el) {
@@ -252,7 +254,11 @@ var PROPHOS_AUGEN_TSX = (function () {
     alle('[role="dialog"],[role="alertdialog"],[aria-modal="true"]').filter(sichtbar).forEach(function (d) {
       if (out.some(function (o) { return o._el.contains(d); })) return;
       var kn = alle('button,[role="button"]', d).filter(sichtbar).slice(0, 10).map(function (b) { return kurz(b); });
-      out.push({ _el: d, role: attr(d, 'role'), rect: rect(d), titel: txt(d.querySelector('h1,h2,h3,h4')).slice(0, 60), text: txt(d).slice(0, 160), knoepfe: kn });
+      var o = { _el: d, role: attr(d, 'role'), rect: rect(d), titel: txt(d.querySelector('h1,h2,h3,h4')).slice(0, 60), text: txt(d).slice(0, 160), knoepfe: kn };
+      // GEBLOWT-MELDUNG (tsx-0.6.2, 14.10.2026): „You Hit Your Maximum Loss Limit. Account: KENNUNG …" — die Kennung steht hinter den
+      // 160 Zeichen; der Bot (tsx_blow_dialog) liest sie aus text_voll
+      if (/loss limit|ineligible|violation/i.test(o.text)) o.text_voll = txt(d).slice(0, 400);
+      out.push(o);
     });
     out.forEach(function (o) { delete o._el; });
     return out;

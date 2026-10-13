@@ -23189,6 +23189,9 @@
         await kontoWegFolge(acc.id, r, 'balance')
         return { ok: false, konto_weg: true, trail, msg: 'Konto nicht mehr in der TradingView-Kontoliste — als geblowt archiviert. ' + String(r.msg || '').slice(0, 200) }
       }
+      // TOPSTEPX GEBLOWT-AUGE (14.10.2026): Dropdown-Hinweis / Loss-Limit-Meldung → dieses und jedes genannte Konto als geblowt archivieren
+      if(r && (r.konto_geblowt || r.konto_verletzungen || r.code === 'konto_geblowt')){ try{ await tsxGeblowtFolge(acc.id, r, 'balance') }catch(_){} }
+      if(r && !r.ok && r.code === 'konto_geblowt') return { ok: false, konto_geblowt: true, trail, msg: String(r.msg || 'TopstepX: Konto geblowt').slice(0, 200) }
       const b = tvBalanceAus(r && r.summary)
       if(b.balance == null) return { ok: false, trail, msg: (r && (r.msg || r.code)) ? String(r.msg || r.code).slice(0, 200) : 'keine Account Balance im Panel' }
       if(r.konto_aktiv && !String(r.konto_aktiv).includes(konto)) return { ok: false, trail, msg: `Puls stand auf einem anderen Konto (${String(r.konto_aktiv).slice(0, 40)})` }
@@ -25353,6 +25356,11 @@
         balance_end: erg.balance, equity_end: erg.equity })   // Balance nach dem Trade (26.09.2026) — P&L = balance_end − tv.balance_start
       if(erg.ok && p0.route === 'tsv2'){ const rel = tsxBalanceRelativ(r); if(rel != null) patch.balance_relativ = rel; patch.plattform = 'tsx' }   // TSV2-PNL
       else Object.assign(patch, { puls_fehler: erg.fehler, puls_diagnose: tvJsonKurz((r && r.befund) || null, 2200) })
+      // TOPSTEPX GEBLOWT-AUGE (14.10.2026): Beweis am Plan, Konto archivieren + blown; endete die Lesung an der Meldung, die dieses Konto
+      // nennt (code konto_geblowt), ist die Nachlesung vorbei — kein 8-facher Anlauf gegen den Dialog mehr (Mike 13.10.)
+      if(p0.route === 'tsv2' && r && r.konto_geblowt && typeof r.konto_geblowt === 'object') patch.konto_geblowt = Object.assign({}, r.konto_geblowt, { at: nowIso, lesung: 'endlesung' })
+      if(p0.route === 'tsv2' && r && !r.ok && r.code === 'konto_geblowt') patch.puls_aufgegeben = true
+      if(p0.route === 'tsv2' && r && (r.konto_geblowt || r.konto_verletzungen || r.code === 'konto_geblowt')){ try{ await tsxGeblowtFolge(p0.masterAccountId, r, 'endlesung') }catch(_){} }
       // Login-Bremse: Login-/Verbindungsfehler zählen (auch beim Knopf „Jetzt lesen" — jeder Lauf ist ein Login)
       // Konto weg (05.10.2026): kein Login-Fehler und kein weiterer Versuch — die Lesung ist für diesen Plan beendet (s. tvV2KontoWeg)
       const kontoWeg = !erg.ok && tvV2KontoWegAntwort(r)
@@ -43762,7 +43770,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1534'
+  const OS_TAB_BUILD = '2026-09-22.1535'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -44027,6 +44035,70 @@
     return true
   }
   window._kontoWegFolge = kontoWegFolge   // Test-Haken (Stub)
+  /* TOPSTEPX GEBLOWT-AUGE → ALS GEBLOWT ARCHIVIEREN (14.10.2026, Finn am Bild von Mikes TopstepX-Dropdown: „…37040641 (MAXIMUM_LOSS
+   * Violation)", „…72341888 (MAXIMUM_LOSS Violation)", „…21889193 (Ineligible)" — „wenn Puls den Trade liest, auch erkennen, ob der Account
+   * ineligible ist oder Maximum Loss; dann wird der Account als geblowt angezeigt"). Vorfall 13.10.: beide Konten geblowt, der Blow-Takt
+   * kennt nur Orbit V2/Echo V2 ohne Kette, und die Endlesungen scheiterten 8× an der Meldung „You Hit Your Maximum Loss Limit".
+   * Der Bot (order_bot tsx_geblowt_urteil) liefert bei jeder TopstepX-Lesung (Balance, Endlesung, Start):
+   *   r.konto_geblowt {art, quelle: 'liste'|'dialog', text}  — das ZIELKONTO ist laut Dropdown-Hinweis oder TopstepX-Meldung geblowt
+   *   r.konto_verletzungen {KENNUNG: {art, text}}            — alle Konten der Liste mit Hinweis (auch andere Konten derselben ID)
+   *   code 'konto_geblowt'                                    — Lesung endete an der Meldung, die das Zielkonto nennt (kein weiterer Versuch)
+   * Folge je Konto einmal, nur eigene Konten (dieser Tab ist der PC-Tab des Inhabers): archiveAccount(id, 'blown') (vorhandener Weg —
+   * Duplikum-/Echo-Löschauftrag, geplante Trades weg), laufende Pläne → „Überprüfen", jeder nicht erledigte Plan des Kontos blown=true +
+   * final.konto_geblowt (Radar „💀 geblowt", Finn sieht ihn einmal unter Abhaken, der Blow-/Normal-Takt lässt blown-Pläne in Ruhe),
+   * Toast + Push an Inhaber und Admins (/konto-weg/melden, grund 'tsx'). Wirft nie. */
+  const _tsxGeblowtErledigt = new Set()
+  async function tsxGeblowtFolge(accountId, r, quelle){
+    if(!r || typeof r !== 'object') return 0
+    const alnum = s => String(s || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase()
+    const faelle = []
+    if(r.konto_geblowt && typeof r.konto_geblowt === 'object' && accountId) faelle.push({ id: String(accountId), beweis: r.konto_geblowt })
+    const verl = (r.konto_verletzungen && typeof r.konto_verletzungen === 'object') ? r.konto_verletzungen : {}
+    for(const [kenn, v] of Object.entries(verl)){
+      const acc = (accounts || []).find(a => a && a.externalId && alnum(a.externalId) === alnum(kenn))
+      if(acc && !faelle.some(f => f.id === String(acc.id))) faelle.push({ id: String(acc.id), beweis: { art: (v && v.art) || 'violation', quelle: 'liste', text: (v && v.text) || '' } })
+    }
+    let n = 0
+    for(const f of faelle){ try{ if(await tsxGeblowtKonto(f.id, f.beweis, quelle)) n++ }catch(e){ console.warn('[tsx-geblowt]', f.id, (e && e.message) || e) } }
+    return n
+  }
+  async function tsxGeblowtKonto(id, beweis, quelle){
+    if(!id || _tsxGeblowtErledigt.has(id)) return false
+    const acc = (accounts || []).find(a => String(a.id) === id); if(!acc) return false
+    _tsxGeblowtErledigt.add(id)
+    const e4 = String(acc.externalId || '').replace(/[^A-Za-z0-9]/g, '').slice(-4)
+    const name = `${acc.firm || 'Konto'}${e4 ? ' …' + e4 : ''}`
+    const grundTxt = String((beweis && (beweis.text || beweis.art)) || 'Violation').slice(0, 80)
+    let archiviert = false
+    try{ if(!(typeof isAccountArchived === 'function' && isAccountArchived(id))){ archiveAccount(id, 'blown'); archiviert = true } }
+    catch(e){ console.warn('[tsx-geblowt] archivieren', (e && e.message) || e) }
+    const nowIso = new Date().toISOString()
+    const konto_geblowt = { art: (beweis && beweis.art) || 'violation', quelle: (beweis && beweis.quelle) || 'liste', text: grundTxt, at: nowIso, lesung: quelle }
+    let n = 0
+    for(const p of (tradePlans || []).filter(x => x && String(x.masterAccountId) === id && (x.status === 'open' || x.status === 'review') && x.blown !== true)){
+      try{
+        const warOffen = p.status === 'open'
+        const upd = warOffen ? { status: 'review', ended_at: nowIso, blown: true } : { blown: true }
+        const { data, error } = await supabase.from('trade_plans').update(upd).eq('id', p.id).eq('status', p.status).select('*')
+        if(error) throw error
+        const row = Array.isArray(data) ? data[0] : data; if(!row || !row.id) continue
+        const i = tradePlans.findIndex(x => String(x.id) === String(p.id)); if(i >= 0) tradePlans[i] = rowToPlan(row)
+        await baselinePatchIn(p.id, 'final', Object.assign({ konto_geblowt }, warOffen ? { at: nowIso, grund: 'tsx_geblowt', puls_aufgegeben: true, puls_at: nowIso, puls_fehler: 'konto_geblowt: ' + grundTxt } : {}), 'review')
+        n++
+      }catch(e){ console.warn('[tsx-geblowt] Plan', p.id, (e && e.message) || e) }
+    }
+    try{ renderTradePlans() }catch(_){}
+    try{ renderAccounts() }catch(_){}
+    const t = `${name}: TopstepX meldet „${grundTxt}“ → ${archiviert ? 'als geblowt archiviert' : 'war schon archiviert'}${n ? ` · ${n} Trade${n === 1 ? '' : 's'} als geblowt markiert` : ''}`
+    if(typeof atToast === 'function') atToast('💀 ' + t, 'end')
+    try{
+      const tok = typeof _pushTok === 'function' ? await _pushTok() : ''
+      if(tok) await fetch(`${WATCHER_HOME}/konto-weg/melden`, { method: 'POST', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ account_id: id, quelle, archiviert, laufende: n, grund: 'tsx', text: grundTxt }) })
+    }catch(e){ console.warn('[tsx-geblowt] Push', (e && e.message) || e) }
+    return true
+  }
+  window._tsxGeblowtFolge = tsxGeblowtFolge   // Test-Haken (Stub)
   /* FIRMEN-ABSTAND VOR JEDEM START (08.10.2026, Slave-Terminal 3 — Finn 05:00 Dubai: „5-Minuten-Regel gleiche Prop-Firm — gefixt?
    * Falls nicht, kümmer dich um alles!"). Der DB-Riegel am Claim (sql/2026-10-08_firmen_abstand_riegel.sql) greift nur beim Claim
    * NULL → gesetzt; „Neu starten" (Claim bleibt gesetzt) und Hand-Starts ohne Claim liefen vorbei. Darum fragt jeder Start

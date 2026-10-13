@@ -3781,7 +3781,10 @@ def konto_weg_melden():
         namen = {}
     wer = namen.get(uid, "")
     n = int(d.get("laufende") or 0) if str(d.get("laufende") or "0").isdigit() else 0
-    text = (f"{acc.get('firm') or 'Konto'}{' …' + e4 if e4 else ''}{' · ' + wer if wer else ''}: nicht mehr in der TradingView-Kontoliste → "
+    # grund 'tsx' (14.10.2026): TopstepX-Geblowt-Auge — Dropdown-Hinweis / Loss-Limit-Meldung statt „nicht mehr in der Liste"
+    anlass = (f"TopstepX meldet „{str(d.get('text') or 'Violation')[:80]}“ → " if str(d.get("grund") or "") == "tsx"
+              else "nicht mehr in der TradingView-Kontoliste → ")
+    text = (f"{acc.get('firm') or 'Konto'}{' …' + e4 if e4 else ''}{' · ' + wer if wer else ''}: " + anlass
             + ("als geblowt archiviert" if d.get("archiviert") else "war schon archiviert")
             + (f" · {n} laufende{'r Trade' if n == 1 else ' Trades'} unter „Überprüfen“" if n else ""))
     zu = 0
@@ -11094,7 +11097,10 @@ def _wd_endlesung_zeile(final):
             "konto_weg", "konto_weg_at",
             # Konto nicht mehr in der Liste — liquidiert? (09.10.2026, Demo-Ende bei gescheitertem Login, Fall 0e344d8e): Radar-Abhaken belegt
             # dann „geblowt" vor wie bei konto_weg
-            "konto_weg_vermutet", "grund")
+            "konto_weg_vermutet", "grund",
+            # TopstepX-Geblowt-Auge (14.10.2026): Dropdown-Hinweis „(MAXIMUM_LOSS Violation)"/„(Ineligible)" oder Meldung „You Hit Your
+            # Maximum Loss Limit" — der PC-Tab archiviert und setzt blown; der Radar fremder IDs sieht den Beweis hier
+            "konto_geblowt")
     out = {k: final.get(k) for k in keys if final.get(k) is not None}
     return out or None
 

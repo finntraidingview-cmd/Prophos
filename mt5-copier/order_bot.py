@@ -12199,6 +12199,161 @@ def tsx_konto_treffer(texte, ext_id):
     return None, f"Konto {len(treffer)}× in der Liste — nicht eindeutig"
 
 
+# TOPSTEPX GEBLOWT-AUGE (14.10.2026, Finn am Bild von Mikes TopstepX: „…37040641 (MAXIMUM_LOSS Violation)", „…72341888 (MAXIMUM_LOSS
+# Violation)", „…21889193 (Ineligible)" im Konto-Dropdown oben links — „wenn es den Trade liest, auch erkennen, ob der Account ineligible
+# ist oder Maximum Loss, dann wird der Account als geblowt angezeigt"). Vorfall 13.10.2026: beide Konten waren geblowt, Prophos sah es
+# nicht — der Blow-Takt (ap_blow_auto_tick) kennt nur mt5v2/tvv2 ohne Kette, und die Endlesungen scheiterten 8× an der TopstepX-Meldung
+# „You Hit Your Maximum Loss Limit. Account: …", die über dem Konto-Auslöser lag („Konto-Auslöser verdeckt — Dialog offen? Nichts
+# geklickt"). Zwei Beweise, beide nur gelesen:
+#   (1) Listen-Hinweis: der Klammertext hinter der Kennung im Dropdown (augen_tsx.js konto.liste[].hinweis) — für JEDES Konto der Liste
+#       (konto_verletzungen {Kennung: {art, text}}), nicht nur das Ziel; Prophos archiviert damit auch die anderen Konten der ID.
+#   (2) Meldung: „You Hit Your Maximum/Daily Loss Limit … Account: KENNUNG" (stand.popups) — nennt das geblowte Konto selbst.
+# Die Meldung wird EINMAL geschlossen (genau ein sichtbarer Knopf mit reinem Schließ-Wort, Druck mit Ziel-Beweis) — sonst blockiert sie
+# jede Lesung aller Konten dieses Logins, bis jemand am PC klickt. Nie ein Knopf mit Order-/Positions-Wort.
+TSX_RX_VERLETZUNG = re.compile(r"(maximum[_ \-]?loss|daily[_ \-]?loss|ineligible|violation|liquidat)", re.I)
+TSX_RX_BLOW_DIALOG = re.compile(r"you (have )?hit your (maximum|daily|max\.?) ?loss limit|(maximum|daily) loss limit (hit|reached|violat)", re.I)
+TSX_RX_DIALOG_KONTO = re.compile(r"account\s*:?\s*([A-Z0-9][A-Z0-9-]{5,})", re.I)
+TSX_RX_DIALOG_ZU = re.compile(r"^\s*(ok|okay|close|dismiss|got it|continue|i understand|understood|schlie(?:ß|ss)en|verstanden|[×✕✖])\s*$", re.I)
+TSX_DIALOG_TABU = r"\b(buy|sell|flatten|reverse|submit|place|order|position|cancel|kauf|verkauf)\b"
+
+
+def tsx_konto_verletzung(hinweis):
+    """REIN RECHNEND (testbar): Klammertext eines Dropdown-Eintrags → 'maximum_loss' | 'daily_loss' | 'ineligible' | 'violation' | ''.
+    „MAXIMUM_LOSS Violation" → maximum_loss, „DAILY_LOSS Violation" → daily_loss, „Ineligible" → ineligible, sonstige „… Violation" →
+    violation. Alles davon gilt als geblowt (Finn 14.10.2026)."""
+    t = str(hinweis or "").strip()
+    if not t:
+        return ""
+    tl = t.lower()
+    if re.search(r"maximum[_ \-]?loss|max[_ \-]?loss|\bmll\b", tl):
+        return "maximum_loss"
+    if re.search(r"daily[_ \-]?loss|\bdll\b", tl):
+        return "daily_loss"
+    if "ineligible" in tl:
+        return "ineligible"
+    if TSX_RX_VERLETZUNG.search(tl):
+        return "violation"
+    return ""
+
+
+def tsx_verletzungen_aus_liste(liste):
+    """REIN RECHNEND (testbar): Zeilen der OFFENEN Konto-Liste (augen_tsx.js konto.liste: {id, hinweis, ineligible, …}) → {Kennung:
+    {art, text}} für jede Zeile mit Verletzungs-Hinweis. Zeilen ohne Hinweis fehlen (gesund). Kennung in Großbuchstaben."""
+    out = {}
+    for x in (liste or []):
+        if not isinstance(x, dict):
+            continue
+        k = str(x.get("id") or "").strip().upper()
+        hw = str(x.get("hinweis") or ("Ineligible" if x.get("ineligible") else "")).strip()
+        art = tsx_konto_verletzung(hw)
+        if k and art:
+            out[k] = {"art": art, "text": hw[:60]}
+    return out
+
+
+def tsx_blow_dialog(popups):
+    """REIN RECHNEND (testbar): stand.popups → {art, konto, text, popup} der TopstepX-Meldung „You Hit Your Maximum Loss Limit.
+    Account: KENNUNG" | None. konto '' wenn die Meldung keine Kennung trägt (dann zählt sie nur für das AKTIVE Konto)."""
+    for p in (popups or []):
+        if not isinstance(p, dict):
+            continue
+        t = " ".join(str(p.get(k) or "") for k in ("titel", "text_voll", "text"))
+        if not TSX_RX_BLOW_DIALOG.search(t):
+            continue
+        art = "daily_loss" if re.search(r"daily", t, re.I) else "maximum_loss"
+        m = TSX_RX_DIALOG_KONTO.search(t)
+        return {"art": art, "konto": (m.group(1).upper() if m else ""), "text": re.sub(r"\s+", " ", t).strip()[:160], "popup": p}
+    return None
+
+
+def tsx_blow_dialog_knopf(popup):
+    """REIN RECHNEND (testbar): der EINE Schließ-Knopf der Meldung (knoepfe aus augen_tsx.js dialoge(): {text, aria, rect}) — genau ein
+    sichtbarer Knopf, Beschriftung NUR ein Schließ-Wort (TSX_RX_DIALOG_ZU), Rechteck ≥ 2 px. Mehrere Kandidaten oder einer mit
+    Order-/Positions-Wort → None (nichts drücken)."""
+    kn = [b for b in ((popup or {}).get("knoepfe") or []) if isinstance(b, dict)]
+    kand = []
+    for b in kn:
+        t = str(b.get("text") or "").strip() or str(b.get("aria") or "").strip()
+        r = b.get("rect")
+        if not TSX_RX_DIALOG_ZU.match(t) or re.search(TSX_DIALOG_TABU, t + " " + str(b.get("aria") or ""), re.I):
+            continue
+        if not (isinstance(r, (list, tuple)) and len(r) >= 4 and r[2] >= 2 and r[3] >= 2):
+            continue
+        kand.append(dict(b, text=t, aus_aria=not str(b.get("text") or "").strip()))
+    return kand[0] if len(kand) == 1 else None
+
+
+def tsx_geblowt_urteil(res, ext, aktiv=""):
+    """REIN RECHNEND (testbar): ist das Zielkonto ext laut Lesung geblowt? → {art, quelle, text} | None.
+    quelle 'liste': Hinweis am Ziel-Eintrag (res.konto_hinweis oder res.konto_verletzungen[ext]);
+    quelle 'dialog': res.blow_dialog nennt ext — oder nennt kein Konto, während ext das aktive Konto ist (aktiv)."""
+    r = res if isinstance(res, dict) else {}
+    ziel = _nur_alnum(ext)
+    if len(ziel) < 5:
+        return None
+    art = tsx_konto_verletzung(r.get("konto_hinweis"))
+    if art:
+        return {"art": art, "quelle": "liste", "text": str(r.get("konto_hinweis") or "")[:60]}
+    verl = r.get("konto_verletzungen") if isinstance(r.get("konto_verletzungen"), dict) else {}
+    for k, v in verl.items():
+        if _nur_alnum(k) == ziel and isinstance(v, dict) and v.get("art"):
+            return {"art": str(v["art"]), "quelle": "liste", "text": str(v.get("text") or "")[:60]}
+    bd = r.get("blow_dialog") if isinstance(r.get("blow_dialog"), dict) else None
+    if bd:
+        k = _nur_alnum(bd.get("konto"))
+        if (k and k == ziel) or (not k and aktiv and _nur_alnum(aktiv) == ziel):
+            return {"art": str(bd.get("art") or "maximum_loss"), "quelle": "dialog", "text": str(bd.get("text") or "")[:160]}
+    return None
+
+
+def _tsx_blow_dialog_weg(s, st, trail, res):
+    """TopstepX-Meldung „You Hit Your Maximum Loss Limit" lesen (→ res.blow_dialog) und EINMAL je Lauf schließen (tsx_blow_dialog_knopf,
+    Druck mit Ziel-Beweis: am Punkt liegt genau dieser Knopf). -> (stand, meldung | None). Nie bei fremden Dialogen, nie ein zweiter Druck."""
+    bd = tsx_blow_dialog((st or {}).get("popups") if isinstance(st, dict) else None)
+    if not bd:
+        return st, None
+    res["blow_dialog"] = {k: bd[k] for k in ("art", "konto", "text")}
+    if res.get("_blow_dialog_versucht"):
+        return st, bd
+    res["_blow_dialog_versucht"] = True
+    trail.append(f"TopstepX-Meldung: '{bd['text'][:70]}'" + (f" — Konto {bd['konto']} geblowt" if bd["konto"] else ""))
+    kn = tsx_blow_dialog_knopf(bd["popup"])
+    if not kn:
+        trail.append("Meldung: kein eindeutiger Schließ-Knopf — nichts gedrückt")
+        return st, bd
+    r = list(kn["rect"])[:4]
+    try:
+        _tsx_pause()
+        ok = s.klick(r, f"Meldung schließen ('{kn['text'][:20]}')",
+                     pruef=dict({"rect": r, "text": "" if kn.get("aus_aria") else kn["text"][:40], "aria": kn["text"][:40] if kn.get("aus_aria") else "",
+                                 "tabu": TSX_DIALOG_TABU}, **({} if kn.get("aus_aria") else {"wort": kn["text"].lower()[:40]})))
+    except Exception as e_:
+        trail.append(f"Meldung schließen: {type(e_).__name__}: {str(e_)[:80]}")
+        return st, bd
+    if not ok:
+        return st, bd
+    _warte(0.8, 0.5)
+    try:
+        st2 = s.stand()
+    except Exception:
+        return st, bd
+    if isinstance(st2, dict) and tsx_blow_dialog(st2.get("popups")):
+        trail.append("Meldung steht nach dem Druck noch — nichts weiter")
+        return st2, bd
+    trail.append("Meldung geschlossen — weiter")
+    return st2, bd
+
+
+def _tsx_geblowt_merken(res, ext, st=None):
+    """res.konto_geblowt = tsx_geblowt_urteil(…) setzen, falls bewiesen (aktives Konto aus dem Stand). Nur Felder, kein Klick."""
+    ko = st.get("konto") if isinstance(st, dict) and isinstance(st.get("konto"), dict) else {}
+    g = tsx_geblowt_urteil(res, ext, str(ko.get("kontonr") or ko.get("aktiv") or ""))
+    if g:
+        res["konto_geblowt"] = g
+    res.pop("_blow_dialog_versucht", None)
+    return g
+
+
 def tsx_contract_wahl(texte, wurzel):
     """REIN RECHNEND (testbar): Vorschlagsliste ('MNQZ26 · Micro Nasdaq (Dec 2026)') → Index des Eintrags, dessen CODE genau
     die Wurzel + Monatsbuchstabe + Jahr ist (MNQ ≠ NQ, Roll-Monat nie hart). Genau einer, sonst None."""
@@ -16233,11 +16388,25 @@ def _tsx_konto_sichern(s, ext, st, trail):
     def _zeilen(ko_):
         return [str(x.get("text"))[:60] for x in (ko_.get("liste") or []) if isinstance(x, dict)][:12]
 
+    # GEBLOWT-AUGE (14.10.2026): Verletzungs-Hinweise ALLER Zeilen jeder gelesenen Liste (auch einer fremd offenen — lesen ist erlaubt)
+    # und die TopstepX-Meldung „You Hit Your Maximum Loss Limit" gehen in jede Antwort (konto_verletzungen / blow_dialog)
+    verletzungen = {}
+    bd_res = {}
+
     def _raus(code, msg, st_, **ex):
+        if verletzungen:
+            ex["konto_verletzungen"] = dict(verletzungen)
+        if bd_res.get("blow_dialog"):
+            ex["blow_dialog"] = bd_res["blow_dialog"]
         return False, code, msg, st_, ex
     for _runde in range(6):
         ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
         aktiv = str(ko.get("kontonr") or ko.get("aktiv") or "")
+        if ko.get("liste_offen"):
+            neu_v = tsx_verletzungen_aus_liste(ko.get("liste"))
+            if neu_v and neu_v != {k: verletzungen.get(k) for k in neu_v}:
+                trail.append("K2: Liste meldet " + ", ".join(f"{k[-8:]} ({v['text']})" for k, v in list(neu_v.items())[:6]))
+            verletzungen.update(neu_v)
         if tsx_konto_urteil(ko, ext) == "ja":
             if ko.get("liste_offen"):
                 _cdp_esc(s, st, trail, "Konto-Liste nach dem Wechsel noch offen")
@@ -16247,10 +16416,16 @@ def _tsx_konto_sichern(s, ext, st, trail):
                     return _raus("konto_nicht_erreicht", f"Konto {ext} steht, aber die Konto-Liste geht mit Esc nicht zu — nichts gelesen.",
                                  st, konto_zeilen=_zeilen(ko))
             ex = {"konto_aktiv": aktiv[:80]}
+            if verletzungen:
+                ex["konto_verletzungen"] = dict(verletzungen)
+            if bd_res.get("blow_dialog"):
+                ex["blow_dialog"] = bd_res["blow_dialog"]
             if gewaehlt is not None:
                 ex["konto_gewechselt"] = {"von": von, "zu": str(gewaehlt.get("id") or ext)[:80]}
-                if gewaehlt.get("ineligible"):
-                    ex["konto_hinweis"] = "Ineligible"
+                # Hinweis des gewählten Eintrags („Ineligible", „MAXIMUM_LOSS Violation" …) — Lesen ist erlaubt, der PC-Tab archiviert
+                hw = str(gewaehlt.get("hinweis") or ("Ineligible" if gewaehlt.get("ineligible") else "")).strip()
+                if hw:
+                    ex["konto_hinweis"] = hw[:60]
                 trail.append(f"K2: Konto gewechselt '{von[:40]}' → '{aktiv[:40]}' (Liste zu, volle Kennung bewiesen)")
             return True, "", "", st, ex
         if ko.get("liste_offen") and not geklickt:
@@ -16317,6 +16492,17 @@ def _tsx_konto_sichern(s, ext, st, trail):
             continue
         if zu.get("disabled") or zu.get("verdeckt"):
             oben = zu.get("oben") if isinstance(zu.get("oben"), dict) else {}
+            # GEBLOWT-MELDUNG über dem Auslöser (14.10.2026, Mike 13.10.: 8 Versuche je Konto scheiterten an „You Hit Your Maximum Loss
+            # Limit. Account: …"): Meldung ist der Beweis (blow_dialog) — einmal schließen, neu lesen, Runde von vorn. Nennt sie das
+            # Zielkonto, ist der Lauf fertig: 'konto_geblowt' (der PC-Tab archiviert, keine weiteren Versuche).
+            if zu.get("verdeckt") and not bd_res.get("_blow_dialog_versucht"):
+                st, bd = _tsx_blow_dialog_weg(s, st, trail, bd_res)
+                if bd:
+                    if bd.get("konto") and _nur_alnum(bd["konto"]) == _nur_alnum(ext):
+                        return _raus("konto_geblowt", f"TopstepX meldet „{bd['text'][:90]}“ — Konto {ext} geblowt, nichts gelesen.", st,
+                                     popups=st.get("popups"))
+                    if not tsx_blow_dialog(st.get("popups") if isinstance(st, dict) else None):
+                        continue                       # Meldung zu → Konto-Auslöser neu lesen
             return _raus("konto_nicht_erreicht", (f"Konto-Auslöser {'gesperrt' if zu.get('disabled') else 'verdeckt'} "
                                                   f"('{str(oben.get('text') or oben.get('tag') or '')[:40]}') — Dialog offen? Nichts geklickt."),
                          st, popups=st.get("popups"))
@@ -17324,8 +17510,10 @@ def modus_tsxlesen_cdp(cmd, order=None, order_cmd=None, frist_s=None):
             res["schritt"] = "konto"
             trail.append(f"K2: im Puls-Chrome steht '{str(ko.get('kontonr') or ko.get('aktiv') or '-')[:40]}', Ziel {ext} — Konto wechseln")
             ok2, c2, m2, st, ex2 = _tsx_konto_sichern(s, ext, st, trail)
-            res.update({k: v for k, v in ex2.items() if k in ("konto_gewechselt", "konto_hinweis", "konto_zeilen", "konto_treffer", "popups")})
+            res.update({k: v for k, v in ex2.items() if k in ("konto_gewechselt", "konto_hinweis", "konto_zeilen", "konto_treffer", "popups",
+                                                             "konto_verletzungen", "blow_dialog")})   # Geblowt-Auge (14.10.2026)
             if not ok2:
+                _tsx_geblowt_merken(res, ext, st)          # Beweis (Meldung/Liste) auch bei gescheitertem Wechsel mitgeben
                 return raus(c2, m2, "konto")
             if ex2.get("konto_gewechselt"):
                 res["schritt"] = "lesen"
@@ -17336,6 +17524,11 @@ def modus_tsxlesen_cdp(cmd, order=None, order_cmd=None, frist_s=None):
                                                  "gleich erneut (das Konto steht jetzt)."), "lesen")
         elif isinstance(st, dict) and ko.get("liste_offen"):
             trail.append("Konto-Liste steht offen (nicht von diesem Lauf) — nur gelesen, nichts geklickt")
+            res["konto_verletzungen"] = tsx_verletzungen_aus_liste(ko.get("liste")) or None   # Geblowt-Auge: Hinweise auch so lesen
+        elif isinstance(st, dict) and tsx_blow_dialog(st.get("popups")):
+            # GEBLOWT-MELDUNG am aktiven Konto (14.10.2026): Beweis mitnehmen, einmal schließen, dann normal lesen (die Kopfzeile darunter
+            # zeigt die Balance nach der Liquidation)
+            st, _bd = _tsx_blow_dialog_weg(s, st, trail, res)
         felder, code, msg = tsx_cdp_lesung(st, ext)
         # POSITIONS-BEREICH NOCH NICHT DA (09.10.2026, Ina DLL-Konto 333d4791, pc-xxxxxx 08:19 Dubai: Konto + BAL korrekt gelesen, die
         # Order-Karte rechts bzw. „No Active Position" kam erst nach der Bereit-Probe — beide Versuche endeten in 'tabelle_unklar').
@@ -17364,6 +17557,9 @@ def modus_tsxlesen_cdp(cmd, order=None, order_cmd=None, frist_s=None):
                     res["diagnose"] = {"tsx_positionen_inventar": inv}
                     trail.append("Inventar Positions-Region: " + " · ".join(str(x) for x in (inv.get("tids") or [])[:12])[:600])
         res.update(felder)
+        geblowt = _tsx_geblowt_merken(res, ext, st)        # Geblowt-Auge (14.10.2026): Ziel laut Liste/Meldung geblowt → konto_geblowt
+        if geblowt:
+            trail.append(f"GEBLOWT laut {'Konto-Liste' if geblowt['quelle'] == 'liste' else 'TopstepX-Meldung'}: {geblowt['text'][:60]}")
         if code:
             return raus(code, msg, "lesen")
         res.update(alter_s=0.0, gelesen_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -17387,6 +17583,8 @@ def modus_tsxlesen_cdp(cmd, order=None, order_cmd=None, frist_s=None):
             msg += f" — Konto gewechselt (von {str(res['konto_gewechselt'].get('von') or '-')[:40]})"
         if res.get("konto_hinweis"):
             msg += f" — Konto „{res['konto_hinweis']}“ (nur gelesen)"
+        if res.get("konto_geblowt"):
+            msg += f" — GEBLOWT ({res['konto_geblowt'].get('text') or res['konto_geblowt'].get('art')})"
         return raus("", msg + ("" if frisch else " — Seite nicht frisch bewiesen"), "fertig", ok=True)
     except Exception as e:
         _cdp_tabs_spur(e, trail)   # nur Lesen: welche Tabs leben noch (09.10.2026)
