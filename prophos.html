@@ -43819,7 +43819,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1540'
+  const OS_TAB_BUILD = '2026-09-22.1541'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -57061,7 +57061,9 @@
    * Live-Broker haben keinen Termin. Kein Urteil, keine Empfehlung — nur die
    * Frage „ab wann geht's" beantwortet. */
   function payoutReadyInfo(a){
-    if(!a || !a.payoutReadyAt || a.type === 'live') return null
+    // Winning Days nie (14.10.2026, Finn an Chris' Tradeify …4657 „💸 Payout ab 27.10. · in 13 Tagen": „macht gar keinen Sinn") — bei dem
+    // Typ entscheidet die Zahl der Winning Days über den Payout, nicht ein Datum; ein alter Termin aus der Funded-Phase bleibt stumm
+    if(!a || !a.payoutReadyAt || a.type === 'live' || a.type === 'winning_days') return null
     const tag = String(a.payoutReadyAt).slice(0,10)
     if(!/^\d{4}-\d{2}-\d{2}$/.test(tag)) return null
     const heute = _deTodayStr()
