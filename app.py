@@ -18451,6 +18451,111 @@ def ap_blow_auto_tick(force=False):
     return n
 
 
+
+# ══ NORMALE TRADES AUTOMATISCH ABHAKEN (14.10.2026, Finn am Radar „Erledigt · Abhaken 8": „die ganz normalen Trades, bei denen einfach
+# nichts passiert — kein Blow, nicht bestanden — müsst ihr mir nicht jedes Mal zeigen, die können insta selber abgehakt werden. Bestanden
+# oder geblowt will ich einmal sehen, und wenn irgendwas nicht klar ist, erledige ich sie"). Das Gegenstück zum Blow-Takt, im selben
+# ap_loop-Takt (AP_BLOW_AUTO_S) und mit denselben Riegeln: nur echte Lesungen vorher/nachher (ap_echte_balancen, nie Demo/Hand/Schätzung),
+# Routen Orbit V2 / Echo V2 ohne Hedge, Phase des Plans = Phase des Kontos (Challenge/Phase 1/Phase 2), Firmen-Regel ohne Kette. „Normal" =
+# Ende ÜBER dem Boden und UNTER dem Ziel der Phase (zw_ziel, dieselbe Rechnung wie die Ziel-Wache), Konto ohne Ziel-Tag, kein Balance-Sprung
+# (Auszahlung o. Ä.), kein Kennzeichen „Manuelle Arbeit"/Review. Tage-Mini (Konto steht schon in Bestanden → Tage sammeln) zählt als normal,
+# solange es über dem Boden endet. Abhaken = dasselbe Update wie der Knopf (_wd_erledigt_upd, P&L = nachher − vorher), Kennzeichen
+# mt5_baseline.auto_abgehakt. Alles andere bleibt in „Abhaken" für Finn. Kein Push — es ist ja nichts passiert.
+AP_NORMAL_AUTO_ROUTEN = AP_BLOW_AUTO_ROUTEN
+_ap_normal_auto = {"n": 0, "fehler": ""}
+
+
+def ap_normal_auto_pruefen(plan, acc, regel):
+    """REIN RECHNEND (testbar): normaler Trade laut echter Lesung? → {vorher, nachher, pl, boden, ziel, quelle} oder None (s. o.)."""
+    p = plan or {}
+    if p.get("status") != "review" or p.get("blown") is True or str(p.get("route") or "") not in AP_NORMAL_AUTO_ROUTEN:
+        return None
+    if not acc or not regel or ap_kette_regel(regel):
+        return None
+    phase = str(p.get("konto_typ") or acc.get("account_type") or "")
+    if phase not in AP_TYPEN:
+        return None
+    if p.get("konto_typ") and acc.get("account_type") and str(p.get("konto_typ")) != str(acc.get("account_type")):
+        return None                                # Konto ist inzwischen in einer anderen Phase
+    bl = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+    if bl.get("hedge") or (_wd_num(p.get("hedge_eur")) or 0) > 0:
+        return None                                # Hedge-P&L gehört dazu → von Hand
+    m = bl.get("manuell")
+    if isinstance(m, dict) and m.get("at"):
+        return None                                # Finn hat ihn nach „Manuelle Arbeit"/Review gelegt
+    mini = bool(bl.get("tage_mini"))
+    if acc.get("ziel_erreicht_at") and not mini:
+        return None                                # bestanden → Finn will es sehen
+    tv = bl.get("tv") if isinstance(bl.get("tv"), dict) else {}
+    fin = bl.get("final") if isinstance(bl.get("final"), dict) else {}
+    if lt_balance_sprung(str(p.get("route") or ""), tv, fin):
+        return None                                # Balance-Differenz ≠ Tages-P&L
+    echt = ap_echte_balancen(p)
+    if not echt:
+        return None
+    vorher, nachher, q = echt
+    try:
+        rk = ap_regel_konto(regel, acc, vorher)
+        bo = (ap_boden_konto(rk, phase, vorher) or {}).get("boden")
+        zg = zw_ziel(rk, phase, vorher)
+    except Exception:
+        return None
+    if bo is None or nachher <= float(bo):
+        return None                                # Blow (macht der Blow-Takt) oder Boden unbekannt
+    if not mini and (not zg or zw_erreicht(zg[0], nachher, phase)):
+        return None                                # bestanden oder Ziel unbekannt
+    return {"vorher": vorher, "nachher": nachher, "pl": round(nachher - vorher, 2), "boden": float(bo),
+            "ziel": zg[0] if zg else None, "quelle": q, "mini": mini}
+
+
+def _ap_normal_auto_abhaken(plan, k):
+    """Einen normalen Plan abhaken (completed, P&L aus der Lesung). Optimistische Sperre: nur solange er unverändert in 'review' steht."""
+    pid = str(plan["id"])
+    jetzt_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    upd, fehler = _wd_erledigt_upd(plan, k["pl"], None, jetzt_iso, _cme_handelstag())
+    if fehler:
+        print(f"[normal-auto] {pid[:8]} nicht abgehakt: {fehler[1]}", flush=True)
+        return False
+    base = upd.get("mt5_baseline") or (plan.get("mt5_baseline") if isinstance(plan.get("mt5_baseline"), dict) else {})
+    upd["mt5_baseline"] = dict(base, auto_abgehakt={"at": jetzt_iso, "quelle": k["quelle"], "vorher": k["vorher"], "nachher": k["nachher"]})
+    filt = {"id": f"eq.{pid}", "status": "eq.review", "blown": "not.is.true"}
+    if plan.get("updated_at"):
+        filt["updated_at"] = f"eq.{plan['updated_at']}"
+    if not sb_update("trade_plans", filt, upd):
+        return False
+    print(f"[normal-auto] ✓ Plan {pid[:8]} · {plan.get('master_name') or ''} · {k['pl']:+.2f} $ ({k['vorher']:.2f} → {k['nachher']:.2f}, "
+          f"Boden {k['boden']:.0f}, Ziel {k['ziel'] if k['ziel'] is not None else '–'}{', Tage-Mini' if k['mini'] else ''}) abgehakt", flush=True)
+    return True
+
+
+def ap_normal_auto_tick():
+    """Pläne in 'review' ohne Blow/Ziel automatisch abhaken (läuft direkt nach ap_blow_auto_tick, dessen Takt). → Anzahl."""
+    plaene = _sb_all("trade_plans", {"select": "id,user_id,route,status,blown,master_account_id,master_name,konto_typ,mt5_baseline,"
+                                               "hedge_eur,ended_at,completed_at,started_at,updated_at",
+                                     "status": "eq.review", "blown": "not.is.true", "route": f"in.({','.join(AP_NORMAL_AUTO_ROUTEN)})"})
+    plaene = [p for p in plaene or [] if p.get("master_account_id")]
+    if not plaene:
+        return 0
+    ids = sorted({str(p["master_account_id"]) for p in plaene})
+    konten = {str(a["id"]): a for a in sb_select("accounts", {
+        "select": "id,user_id,name,firm,account_type,consistency_pct,ziel_pct_konto,max_drawdown,external_id,ziel_erreicht_at",
+        "id": f"in.({','.join(ids)})"}) or []}
+    archiv = _ap_archiviert()
+    firmen = ((sb_select("auto_plan_regeln", {"select": "regeln", "id": "eq.1"}) or [{}])[0].get("regeln") or {}).get("firmen") or []
+    n = 0
+    for p in plaene:
+        acc = konten.get(str(p["master_account_id"]))
+        if not acc or str(acc["id"]) in archiv:
+            continue
+        try:
+            k = ap_normal_auto_pruefen(p, acc, ap_regel_finden(firmen, acc.get("firm")))
+            if k and _ap_normal_auto_abhaken(p, k):
+                n += 1
+        except Exception as e:
+            print(f"[normal-auto] ⚠️ {str(p['id'])[:8]}: {type(e).__name__}: {e}", flush=True)
+    _ap_normal_auto["n"] = n
+    return n
+
 def ap_letzter_trade_geblasen(regel, balance, plaene_konto, bal_stand=None):
     """REIN RECHNEND (Master 07.10.2026, Anlass Tradeify-Challenge 149.046 nach −4.521 $ = Liquidation, Boden aber nicht
     bekannt): hat der LETZTE beendete Trade des Kontos mindestens 95 % des Drawdowns verloren (final.today_pnl, sonst
@@ -25013,11 +25118,12 @@ def ap_loop():
         except Exception as e:
             print(f"[archiv-sweep] ⚠️ {type(e).__name__}: {e}", flush=True)
         try:
-            ap_blow_auto_tick()               # geblowt (echte Balance ≤ Boden) automatisch abhaken + archivieren alle 5 min (09.10.2026)
+            if ap_blow_auto_tick() is not None:   # geblowt (echte Balance ≤ Boden) automatisch abhaken + archivieren alle 5 min (09.10.2026)
+                ap_normal_auto_tick()             # danach im selben Takt: normale Trades (kein Blow, kein Ziel) abhaken (14.10.2026)
             _ap_blow_auto["fehler"] = ""
         except Exception as e:
             _ap_blow_auto["fehler"] = f"{type(e).__name__}: {e}"
-            print(f"[blow-auto] ⚠️ {type(e).__name__}: {e}", flush=True)
+            print(f"[blow-auto/normal-auto] ⚠️ {type(e).__name__}: {e}", flush=True)
         _ap_kette_takt()                      # Topstep-Kette: Trade 2 nach genauer Nachlesung von Trade 1 (08.10.2026)
         try:
             _ap_bot_tick(datetime.now(_ap_tz(AP_TZ_TAG)))
