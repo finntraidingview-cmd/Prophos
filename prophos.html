@@ -39797,7 +39797,7 @@
       + (istV2Karte
           // Winning Days Farm (24.09.2026 spät): tvv2 mit hedge_eur ist GEHEDGT — der gestrichelte V2-Rand meint „ohne Hedge",
           // der Untertitel sagt es deshalb ausdrücklich (der 🛡-Chip trägt Betrag und Zustand)
-          ? ((p.route === 'tvv2' && p.hedgeEur > 0) ? ` <span style="color:var(--sub-2)">·</span> <span title="Fusion-Gegenhedge: ${Number(p.hedgeEur).toLocaleString('de-DE')} € Verlust am Master-TP${p.multiplier > 0 ? ` · Multiplikator ${Number(p.multiplier).toFixed(3)}` : ''} — beide Schließ-Level in MetaTrader">${tpIstOrbitV3(p) ? 'Orbit' : 'Winning Days Farm'} · Fusion-Gegenhedge</span>` : '')   // Orbit (V3) ist kein Winning Day (01.10.2026)
+          ? (((p.route === 'tvv2' || p.route === 'tsv2') && p.hedgeEur > 0) ? ` <span style="color:var(--sub-2)">·</span> <span title="Fusion-Gegenhedge: ${Number(p.hedgeEur).toLocaleString('de-DE')} € Verlust am Master-TP${p.multiplier > 0 ? ` · Multiplikator ${Number(p.multiplier).toFixed(3)}` : ''} — beide Schließ-Level in MetaTrader">${tpIstOrbitV3(p) ? 'Orbit' : 'Winning Days Farm'} · Fusion-Gegenhedge</span>` : '')   // Orbit (V3) ist kein Winning Day (01.10.2026)
           : ` <span style="color:var(--sub-2)">→</span> ${escapeHtml(p.slaveFirm||'–')}`
             + ` · ×<b style="color:var(--violet)">${mult}</b>`
             + ` · <b>$${(p.masterRisk||0).toLocaleString('de-DE')}</b>/<b>${sCur}${(p.slaveRisk||0).toLocaleString('de-DE')}</b>`)
@@ -40059,7 +40059,7 @@
             <span class="tc2-name" title="${escapeHtml(masterName)}">${escapeHtml(masterName)}</span>
             ${!istV2Karte
               ? `<i class="tc2-arrow">→</i><span class="tc2-name" title="${escapeHtml(slaveName)}">${escapeHtml(slaveName)}</span>`
-              : (p.route === 'tvv2' && p.hedgeEur > 0)
+              : ((p.route === 'tvv2' || p.route === 'tsv2') && p.hedgeEur > 0)   // tsv2 seit .1495: Winning Day auf Topstep mit Fusion-Hedge
                 // Winning Days Farm (25.09.2026, Design-Rundgang): „ohne Hedge" stand direkt neben „Fusion-Gegenhedge"
                 ? `<span class="tc2-chip" title="Winning Day: Fusion-Gegenhedge, beide Schließ-Level in MetaTrader" style="background:rgba(124,58,237,.10);color:#6D28D9">Fusion-Hedge</span>`
                 : `<span class="tc2-chip" title="V2-Weg: kein Slave, nichts wird kopiert" style="opacity:.75">ohne Hedge</span>`}
@@ -43392,7 +43392,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1494'
+  const OS_TAB_BUILD = '2026-09-22.1495'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -51289,8 +51289,11 @@
                          : (['mt5', 'tvplus', 'topstep', 'mt5v2', 'tvv2', 'tsv2'].includes(localStorage.getItem(TP_ROUTE_LS))
                             ? localStorage.getItem(TP_ROUTE_LS) : 'dup')
     // Winning Day (24.09.2026 abends): beim Bearbeiten = tvv2-Plan mit hedge_eur; neu = letzte Wahl
-    _tpWd = _editPlan ? (_editPlan.route === 'tvv2' && _editPlan.hedgeEur > 0)
+    _tpWd = _editPlan ? ((_editPlan.route === 'tvv2' || _editPlan.route === 'tsv2') && _editPlan.hedgeEur > 0)
                       : (_tpRoute === 'tvv2' && localStorage.getItem('prophos_tp_wd') === '1')
+    // Winning Day auf Topstep (.1495, Finn 13.10.2026: „Bearbeiten schlug ‚Topstep V2 ohne Hedge' vor"): ein tsv2-Plan mit Hedge oder
+    // Winning-Day-Marke öffnet als Weg „Winning Day" (intern tvv2 + _tpWd); Speichern dreht ihn über wdTs wieder auf tsv2
+    if(_editPlan && _editPlan.route === 'tsv2' && (_editPlan.hedgeEur > 0 || _editPlan.winningDay === true)){ _tpRoute = 'tvv2'; _tpWd = true }
     // Orbit V3 (01.10.2026): beim Bearbeiten aus der Kennung am Plan, neu = letzte Wahl; schließt Winning Day aus
     _tpO3 = _editPlan ? tpIstOrbitV3(_editPlan) : (_tpRoute === 'tvv2' && localStorage.getItem('prophos_tp_o3') === '1')
     if(_tpO3) _tpWd = false
