@@ -43398,7 +43398,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1499'
+  const OS_TAB_BUILD = '2026-09-22.1501'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -47492,6 +47492,31 @@
     // HAND-WERTE NIE DREHEN (Master 09.10.2026: Finn hatte Tradeify-Pläne um 07:41 von Hand geändert): wie der Bot (AP_FEST_HAND) nur
     // verschieben, bis die Gegenrichtung zu ist — Richtung bleibt Finns Wahl
     // .1482: auch Winning-Day-Pläne des Farmers drehen (vorher nur Auto-Pläne; WD wurde nur verschoben) — Hand-Werte weiter nie
+    // NIE IN DIE SCHIEFLAGE DREHEN (.1501, Finn 13.10.2026 16:50 Dubai: „11 zu 3 Trades, 1,3k zu 450 — das ist 0,0 ausgeglichen … die
+    // nächsten Trades müssen die Gegenrichtung werden"): das Sofort-Drehen aus .1482 hatte heute 9 geplante Shorts in Longs gedreht
+    // (sell→buy), weil bei derselben ID × Firma schon ein Long lief — der Ausgleichs-Bot zog Shorts vor, der Start-Wächter machte Longs
+    // daraus (16:56: 14 Long / 4 Short, +1.391 € netto). Jetzt: vor dem Drehen den Gesamt-Saldo aller IDs holen (GET /admin/auto-plan/delta,
+    // netto_eur = laufender Einsatz, + long / − short). Würde die Ziel-Richtung den Saldo weiter in dieselbe Richtung treiben, wird NICHT
+    // gedreht, sondern verschoben (rkVerschieben, 10–20 min), bis der Gegen-Trade derselben ID × Firma zu ist — der Plan behält seine
+    // Richtung. Saldo nicht lesbar (Railway weg, älter als 15 min) → drehen wie bisher, damit kein Start stumm hängen bleibt.
+    let saldoSperrt = null
+    try{
+      const { data: { session } } = await supabase.auth.getSession()
+      const tok = session?.access_token
+      if(tok){
+        const r = await fetch(`${WATCHER_HOME}/admin/auto-plan/delta`, { headers: { 'sb-token': tok } })
+        const d = await r.json().catch(() => ({}))
+        const netto = Number(d && d.netto_eur), um = d && d.um ? Date.parse(d.um) : NaN
+        if(r.ok && isFinite(netto) && isFinite(um) && Date.now() - um <= 15 * 60000){
+          if((ziel === 'buy' && netto > 0) || (ziel === 'sell' && netto < 0)) saldoSperrt = netto
+        }
+      }
+    }catch(e){ console.warn('[richtung-start] Saldo nicht lesbar — drehen wie bisher', (e && e.message) || e) }
+    if(saldoSperrt != null){
+      const kS = { ...k, text: `${k.text} — NICHT auf ${ziel.toUpperCase()} gedreht: alle IDs sind schon ${saldoSperrt > 0 ? 'long' : 'short'} (${Math.round(saldoSperrt).toLocaleString('de-DE')} € netto), ${plan.richtung.toUpperCase()} bleibt und wartet, bis der Gegen-Trade zu ist` }
+      await rkVerschieben(plan, kS, false, 'start')
+      return 'verschoben'
+    }
     if((plan.autoPlan || tpIstWdPlan(plan)) && !plan.handWerteAt){
       const { data, error } = await supabase.from('trade_plans').update({ richtung: ziel })
         .eq('id', plan.id).eq('status', 'planned').eq('richtung', plan.richtung).is('start_um_gestartet_at', null).select('*')
