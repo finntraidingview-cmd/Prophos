@@ -29809,7 +29809,14 @@
         // Zum Abhaken und Trade-Popup — endlesungJetzt → window._tvV2EndlesungJetzt (am PC des Plans direkt, sonst Signal über
         // /admin/wd-plaene), Sperre _elBusy gegen Mehrfachklicks; „liest…" solange sie läuft
         const pid = wdlTid(t), busy = _elBusy.has(pid), sperre = wdlLesenSperre(t)
-        miZ = zelle('mi wdl-z-akt', `${wdlBestandenChip(t) ? `<span>${wdlBestandenChip(t)}</span>` : ''}<span>${txt}</span><button type="button" class="btn btn-ghost el-knopf" data-wdl-lesen="${escapeHtml(pid)}"${(busy || sperre) ? ' disabled' : ''} title="${escapeHtml(sperre || 'Balance jetzt nachlesen — am PC des Plans (vom Mac/Handy per Signal)')}">${busy ? 'liest…' : 'Jetzt lesen'}</button>`,
+        // „JETZT ABHAKEN" IN WARTET (.1505, Finn 13.10.2026 18:20 Dubai, Finn + Pascal · Tradeify …1267 bestanden → Funded, „Login-Fehler ·
+        // ab 18:14 · Jetzt lesen"): ein bestandenes Challenge-Konto nimmt Tradeify sofort aus dem TradingView-Dropdown, Puls findet es nicht
+        // mehr, die Zeile hing in „Wartet" ohne Ausweg. Jetzt steht neben „Jetzt lesen" der Abhaken-Knopf (derselbe Weg wie in Überprüfen,
+        // mklWdErledigtOeffnen → Erledigt-Popup mit P&L von Hand), sobald das Konto bestanden ist, Puls am Login scheitert (Login prüfen /
+        // Login-Fehler) oder die Lesung verloren ist. Solange Puls normal liest, bleibt die Zeile wie bisher.
+        const abhakenZeigen = !!(wdlBestandenChip(t) || wt.login || wdlLesungVerloren(wt, jetzt)), abSperre = wdlAbhakenSperre(t)
+        const abKnopf = abhakenZeigen ? `<button type="button" class="btn btn-ghost el-knopf" data-wdl-abhaken="${escapeHtml(pid)}"${abSperre ? ' disabled' : ''} title="${escapeHtml(abSperre || (wdlBestandenChip(t) ? 'Konto bestanden — bei Tradeify nicht mehr im Dropdown, Puls kann es nicht lesen: ohne Lesung abhaken, P&L von Hand' : 'Ohne Lesung abhaken — P&L von Hand eintragen'))}">Jetzt abhaken</button>` : ''
+        miZ = zelle('mi wdl-z-akt', `${wdlBestandenChip(t) ? `<span>${wdlBestandenChip(t)}</span>` : ''}<span>${txt}</span><button type="button" class="btn btn-ghost el-knopf" data-wdl-lesen="${escapeHtml(pid)}"${(busy || sperre) ? ' disabled' : ''} title="${escapeHtml(sperre || 'Balance jetzt nachlesen — am PC des Plans (vom Mac/Handy per Signal)')}">${busy ? 'liest…' : 'Jetzt lesen'}</button>${abKnopf}`,
           { tip: wt.login === 'pruefen' ? `Puls kam ${wt.loginN}× nicht durch den Login/die Verbindung${wt.loginCode ? ' (' + wt.loginCode + ')' : ''} und liest nicht mehr von selbst — Login am PC prüfen, dann „Jetzt lesen"`
               : wt.login === 'pause' ? `Login-/Verbindungsfehler${wt.loginCode ? ' (' + wt.loginCode + ')' : ''} — nächster automatischer Versuch frühestens ${zeit(wt.bis)} (kein schneller neuer Login)`
               : wdlLesungVerloren(wt, jetzt) ? `Seit ${minTxt(wdlLesungVerloren(wt, jetzt))} kein Leseversuch (${wt.letzte ? 'letzter ' + zeit(wt.letzte) : 'noch keiner'}) — der PC-Tab dieser ID (Puls) antwortet nicht. „Jetzt lesen" stößt neu an; hilft das nicht, Prophos am PC der ID öffnen`
@@ -43398,7 +43405,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1504'
+  const OS_TAB_BUILD = '2026-09-22.1505'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
