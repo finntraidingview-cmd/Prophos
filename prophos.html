@@ -24636,7 +24636,17 @@
   const tvV2KontoVermutet = ku => !!(ku && (ku.weg || ku.n >= 2))
   // „liquidiert?" gilt nur, solange die Endlesung danach keine Balance gelesen hat — sonst entscheidet die Balance (kein geblowt-Haken
   // über einem gelesenen Gewinn; „blown" setzt das Konto für den Planer aus)
-  const tvV2KontoVermutetOffen = f => !!(f && f.konto_weg_vermutet && f.balance_end == null && f.today_pnl == null)
+  /* LIQUIDIERT + KONTO NICHT DA (.1522, Finn 13.10.2026 20:11 Dubai, Aurel Tradeify …8877: Demo sah um 17:41 die Liquidation (demo_liq,
+   * −4.500 $ = Max Drawdown), danach fand Puls das Konto 8× nicht — „Konto nicht aktiv (steht: '-')", Tradeify nimmt geblowte Konten
+   * wie bestandene aus dem TradingView-Dropdown; der Radar zeigte nur „Liq" ohne Blow): „Wenn Puls im Dropdown der richtigen Prop-Firm
+   * sieht, dass es das Konto nicht mehr gibt, dann ist es geblowt." Belege zusammen: Ende der Demo an der Liquidation (grund demo_liq),
+   * Puls-Fehler konto_nicht_erreicht/konto_weg in mindestens TV_LIQ_WEG_MIN Versuchen, nie eine Balance gelesen. Dann gilt der Trade wie
+   * „Konto weg" als vermutlich geblowt (Radar Geblowt, Abhaken mit „geblowt" vorbelegt, P&L ≈ Start bis Liquidation). */
+  const TV_LIQ_WEG_MIN = 3
+  const tvV2LiqUndWeg = f => !!(f && f.grund === 'demo_liq' && f.balance_end == null && f.today_pnl == null
+    && /^konto_(nicht_erreicht|weg)\b/.test(String(f.puls_fehler || '')) && (Number(f.puls_versuche) || 0) >= TV_LIQ_WEG_MIN)
+  window._tvV2LiqUndWeg = tvV2LiqUndWeg   // Test-Haken
+  const tvV2KontoVermutetOffen = f => !!(f && ((f.konto_weg_vermutet && f.balance_end == null && f.today_pnl == null) || tvV2LiqUndWeg(f)))
   window._tvV2KontoVermutetOffen = tvV2KontoVermutetOffen
   const _tvEndlesungLaeuft = new Set()
   // REIN RECHNEND: alle offenen G&V-Felder („Unrealized P&L" / „Nicht realisiert") der Zusammenfassung sind genau 0 — und es gibt eins
@@ -29551,6 +29561,8 @@
   function wdlBlowErg(t){
     // Plan als geblowt abgehakt (09.10.2026, auch automatisch: echte Balance ≤ Boden, ap_blow_auto_tick) — gilt auch für Echo ohne Liq
     if(t && t.blown === true) return '<b style="color:#b91c1c">💀 geblowt</b>'
+    // .1522: Demo an der Liquidation + Konto bei der Firma nicht mehr da (tvV2LiqUndWeg) → geblowt, auch ohne gelesene Balance
+    if(t && typeof tvV2LiqUndWeg === 'function' && tvV2LiqUndWeg(t.endlesung)) return `<b style="color:#b91c1c" title="Liquidation erreicht und das Konto ist bei ${escapeHtml(String((t.konto || {}).firma || 'der Firma'))} nicht mehr da (${Number((t.endlesung || {}).puls_versuche) || 0} Leseversuche) — geblowt. Beim Abhaken ist „geblowt" vorbelegt.">💀 geblowt</b>`
     const b = wdlBlowStand(t); if(!b) return ''
     return b.geblowt ? '<b style="color:#b91c1c">💀 geblowt</b>' : b.softBreach ? WDL_TAGESLIMIT_ERG : ''
   }
@@ -43484,7 +43496,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1521'
+  const OS_TAB_BUILD = '2026-09-22.1522'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
