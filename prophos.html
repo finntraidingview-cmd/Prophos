@@ -30007,10 +30007,22 @@
     // Ziel + Tage voll → „Bestanden · Phase umstellen" mit dem Nachfolger-Knopf. Dieselben Zeilen (bstZeilen), nur getrennt nach fehlt.
     const bstTab = (zz, titel, tip, klasse) => !zz.length ? '' : `<div class="wdl-tab wdl-tab-konto wdl-tab-bst ${klasse}"><div class="wdl-z wdl-z-kopf"><span class="wdl-z-wer" title="${tip}">${titel} · ${zz.length}</span><span class="wdl-z-ri">Phase</span>`
         + ['Balance → Ziel', 'Tage', 'Status', ''].map((x, i) => `<span class="wdl-z-${['mi', 'konto', 'pl', 'zeit'][i]}">${x}</span>`).join('') + `</div>${zz.map(z => z.html).join('')}</div>`
-    const bestanden = () => {
-      const zz = bstZeilen(); if(!zz.length) return ''
-      return bstTab(zz.filter(z => z.fehlt), 'Tage farmen', 'Ziel erreicht, Mindesttage fehlen noch — der Auto-Planer legt je Handelstag einen Mini-Trade, danach wandert das Konto nach Bestanden', 'wdl-tab-sek-tage')
-        + bstTab(zz.filter(z => !z.fehlt), 'Bestanden · Phase umstellen', 'Ziel und Mindesttage erfüllt — hier die Phase umstellen', 'wdl-tab-sek-bestanden')
+    // EINE GRUPPE „BESTANDEN" (.1509, Finn 13.10.2026 18:42 Dubai, Radar in Moritz' Login: „es gibt ‚Bestanden · Phase umstellen' und
+    // darüber nochmal eine Gruppe für bestandene Trades — beide in eine Gruppe, nicht zwei, die genau das Gleiche sind"): die
+    // Untergruppe „Bestanden" in Überprüfen ist weg. Hier stehen jetzt beide Schritte untereinander: oben die bestandenen Trades zum
+    // Abhaken (Zeilen wie in Überprüfen, Abhaken/→ manuell/→ parken unverändert), darunter die Konten zum Umstellen (Nachfolger-Knopf).
+    // Ein Konto steht nie doppelt (bstZeilen zeigt es erst nach dem Abhaken). „Tage farmen" bleibt eigener Abschnitt.
+    const bestanden = bestTr => {
+      const zz = bstZeilen(), bereit = zz.filter(z => !z.fehlt), tr = nachEnde(bestTr || [])
+      let out = bstTab(zz.filter(z => z.fehlt), 'Tage farmen', 'Ziel erreicht, Mindesttage fehlen noch — der Auto-Planer legt je Handelstag einen Mini-Trade, danach wandert das Konto nach Bestanden', 'wdl-tab-sek-tage')
+      const n = tr.length + bereit.length; if(!n) return out
+      const streifen = (titel, anz, hinweis, cls, inhalt) => `<div class="wdl-ug ${cls}"><div class="wdl-ug-kopf"><b>${titel}</b><span>${anz}</span><small>${hinweis}</small></div>${inhalt}</div>`
+      out += `<div class="wdl-tab wdl-tab-konto wdl-tab-bst wdl-tab-sek-bestanden"><div class="wdl-z wdl-z-kopf"><span class="wdl-z-wer" title="Ziel erreicht: erst den Trade abhaken, dann die Phase umstellen">Bestanden · ${n}</span><span class="wdl-z-ri"></span>`
+        + ['Ergebnis · Balance → Ziel', 'Konto · Tage', 'P&amp;L · Status', ''].map((x, i) => `<span class="wdl-z-${['mi', 'konto', 'pl', 'zeit'][i]}">${x}</span>`).join('') + '</div>'
+        + (tr.length ? streifen('Trade abhaken', tr.length, 'bestanden — erst abhaken, dann darunter die Phase umstellen', 'wdl-ug-bestanden', tr.map(t => zeile(t, '')).join('')) : '')
+        + (bereit.length ? streifen('Phase umstellen', bereit.length, 'Ziel und Mindesttage erfüllt — Nachfolger anlegen', 'wdl-ug-normal', bereit.map(z => z.html).join('')) : '')
+        + '</div>'
+      return out
     }
     const manuell = (g, a) => {
       if(g.ma.length) return gruppe('Manuelle Arbeit', nachAblage(g.ma), ['Notiz', 'Konto', 'P&amp;L', 'Zu'], 'wdl-tab-konto wdl-tab-manuell wdl-tab-sek-manuell', null, a.ma)
@@ -30031,19 +30043,21 @@
       // Seit .1471 VIER (Finn 12.10.2026 ~21:50: „Geparkte Accounts … per Drag & Drop hinziehen … pausiert, bis sie abgehakt werden"):
       // Geparkt = Kennzeichen manuell.schritt 'geparkt', immer sichtbar als Drop-Ziel (fünftes Feld: immer), auch leer.
       const gep = pr.filter(wdlGeparkt), ohne = pr.filter(t => !gep.includes(t))
-      const best = ohne.filter(t => !!wdlBestandenChip(t)), blow = ohne.filter(t => !best.includes(t) && istGeblowt(t)), norm = ohne.filter(t => !best.includes(t) && !blow.includes(t))
-      return [['Normal', norm, 'wdl-ug-normal', 'nichts passiert — abhaken'], ['Bestanden', best, 'wdl-ug-bestanden', 'abhaken — danach unten bei „Bestanden" die Phase umstellen'], ['Geblowt', blow, 'wdl-ug-geblowt', 'Konto geblowt oder weg — abhaken, dann archivieren'],
+      // .1509: bestandene Trades stehen nicht mehr hier, sondern in der einen Gruppe „Bestanden" (s. bestanden) — gruppen() reicht sie nicht durch
+      const blow = ohne.filter(t => istGeblowt(t)), norm = ohne.filter(t => !blow.includes(t))
+      return [['Normal', norm, 'wdl-ug-normal', 'nichts passiert — abhaken'], ['Geblowt', blow, 'wdl-ug-geblowt', 'Konto geblowt oder weg — abhaken, dann archivieren'],
         ['Geparkt', nachAblage(gep), 'wdl-ug-geparkt', gep.length ? 'wartet auf Freigabe der Firma — abhaken, sobald frei' : 'Zeile hierher ziehen oder „→ parken" — wartet auf Freigabe der Firma', true]]
     }
     // arr = was gezeigt wird (Modell + Person), alleArr = dieselbe Liste ohne Personen-Filter — nur für die Chips im Kopf
+    const istBest = t => !wdlGeparkt(t) && !!wdlBestandenChip(t), ohneBest = arr => arr.filter(t => !istBest(t))   // .1509: Bestanden = eine Gruppe
     const gruppen = (arr, alleArr) => {
       const g = teile(arr), a = teile(alleArr)
       // Abschnitts-Klassen (09.10.2026, Finn: „schwemmt alles ein") — je Abschnitt eigener Akzent über --wdl-sek (CSS .wdl-tab-sek-*)
       return gruppe('Läuft', nachStart(g.la), ['Spanne', 'P&amp;L', 'Seit'], 'wdl-tab-lauf wdl-tab-sek-lauf', null, a.la)
         + gruppe('Wartet', nachEnde(g.wa), ['Nachlesung', 'P&amp;L', 'Zu'], 'wdl-tab-sek-wartet', null, a.wa)
-        + gruppe('Überprüfen', nachEnde(g.pr), ['Ergebnis', 'Konto', 'P&amp;L', 'Zu'], 'wdl-tab-konto wdl-tab-sek-pruef', null, a.pr, pruefTeile(g.pr))
+        + gruppe('Überprüfen', nachEnde(ohneBest(g.pr)), ['Ergebnis', 'Konto', 'P&amp;L', 'Zu'], 'wdl-tab-konto wdl-tab-sek-pruef', null, ohneBest(a.pr), pruefTeile(ohneBest(g.pr)))
         + manuell(g, a)
-        + bestanden()
+        + bestanden(g.pr.filter(istBest))
         + gruppe('Erledigt', nachEnde(g.er), ['Ergebnis', 'Konto', 'P&amp;L', 'Zu'], 'wdl-tab-konto wdl-tab-sek-erledigt', 'erledigt', a.er)
     }
     // Wischstand der Chip-Reihen (Handy) über den Neuaufbau retten — die Liste wird im Lade-Takt komplett neu gezeichnet
@@ -43405,7 +43419,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1507'
+  const OS_TAB_BUILD = '2026-09-22.1509'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
