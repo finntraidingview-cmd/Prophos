@@ -3771,6 +3771,9 @@
   #dashboard-view .wdl-tab-sek-manuell{--wdl-sek:#dc2626}
   #dashboard-view .wdl-tab-sek-erledigt{--wdl-sek:var(--sub-2)}
   #dashboard-view .wdl-tab-sek-bestanden{--wdl-sek:#15803d}
+  #dashboard-view .wdl-tab-sek-review{--wdl-sek:#15803d}
+  #dashboard-view .wdl-tab-sek-geblowt{--wdl-sek:#b91c1c}
+  #dashboard-view .wdl-tab-sek-geparkt{--wdl-sek:#d97706}
   #dashboard-view .wdl-tab-sek-tage{--wdl-sek:#B45309}   /* Tage farmen (13.10.2026): amber wie der Status „Tage sammeln" */
   /* ÜBERGRUPPEN DEUTLICH (Finn 12.10.2026 am Radar .1458: „sieht alles so ein bisschen gleich aus — man erkennt nicht, wo es läuft,
      wo es wartet"): die 3-px-Oberkante ging neben den Modell-Rändern unter. Jetzt je Abschnitt ein 5-px-Band links in der Akzentfarbe,
@@ -3836,6 +3839,23 @@
   #dashboard-view .wdl-z-bst .wdl-z-pl.wdl-bst-ok{color:#15803d} #dashboard-view .wdl-z-bst .wdl-z-pl.wdl-bst-warte{color:#B45309;font-weight:600}
   #dashboard-view .wdl-z-bst .wdl-z-zeit{display:flex;justify-content:flex-end}
   #dashboard-view .wdl-tab-sek-erledigt .wdl-z:not(.wdl-z-kopf){color:var(--sub)}   /* Erledigt gedämpft */
+  /* DREI ÜBERGRUPPEN (13.10.2026 abends): Läuft · Erledigt · Bestanden je ein großer Block mit kräftiger Überschrift; die Kästen darin
+     rücken eng zusammen. Farbe nur als Punkt + 3-px-Linie oben (Finn 12.10.: Tints „zu hart"). */
+  #dashboard-view .wdl-og3{padding:16px 16px 18px;border-radius:14px;background:var(--bg);border:1px solid var(--border-soft);border-top:3px solid var(--wdl-og)}
+  #dashboard-view .wdl-og3 + .wdl-og3{margin-top:30px}
+  #dashboard-view .wdl-og3-kopf{display:flex;align-items:center;gap:10px;margin:0 2px 14px}
+  #dashboard-view .wdl-og3-kopf b{font-size:20px;font-weight:800;letter-spacing:-.01em;color:var(--ink)}
+  #dashboard-view .wdl-og3-kopf b::before{content:'';display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--wdl-og);margin-right:10px;vertical-align:2px}
+  #dashboard-view .wdl-og3-kopf span{font-size:13px;font-weight:700;padding:1px 9px;border-radius:999px;background:var(--surface);border:1px solid var(--border-soft);color:var(--ink-2);font-variant-numeric:tabular-nums}
+  #dashboard-view .wdl-og3-kopf small{margin-left:auto;font-size:12px;color:var(--sub)}
+  #dashboard-view .wdl-og3 > .wdl-tab + .wdl-tab{margin-top:12px}
+  #dashboard-view .wdl-og3-lauf{--wdl-og:var(--blue,#2563eb)}
+  #dashboard-view .wdl-og3-erledigt{--wdl-og:#ea580c}
+  #dashboard-view .wdl-og3-bestanden{--wdl-og:#15803d}
+  #dashboard-view .wdl-og3-leer{padding:10px 4px;font-size:12.5px;color:var(--sub)}
+  #dashboard-view .wdl-verlauf{display:block;width:100%;margin-top:12px;padding:8px;border:1px dashed var(--border);border-radius:10px;background:none;font:inherit;font-size:12px;color:var(--sub);cursor:pointer}
+  #dashboard-view .wdl-verlauf:hover{color:var(--ink-2);border-color:var(--sub)}
+  @media (max-width: 767px){ #dashboard-view .wdl-og3{padding:12px 10px 14px} #dashboard-view .wdl-og3-kopf b{font-size:17px} #dashboard-view .wdl-og3-kopf small{display:none} }
   /* Bestanden/Ziel erreicht als kleiner Chip (09.10.2026) — nur Optik, Knopf „Nächste Phase →" und Handler unverändert */
   #dashboard-view .wdl-bestanden{display:inline-flex;align-items:center;gap:4px;padding:1px 7px;border-radius:999px;background:rgba(21,128,61,.10);font-size:11.5px;font-weight:600;line-height:1.5}
   #dashboard-view .wdl-z-akt > .wdl-ziel-txt{flex-direction:row;align-items:center;gap:8px;min-width:0}
@@ -3910,6 +3930,8 @@
      „seit TT.MM.", Abhaken und zurück. Alles im Raster der Zeile, Knöpfe el-knopf wie Wartet/Überprüfen. */
   #dashboard-view .wdl-tab-manuell.is-ziel{border-color:var(--violet);box-shadow:0 0 0 1px var(--violet) inset;background:var(--surface-tint)}
   #dashboard-view .wdl-tab-manuell.wdl-tab-leer .wdl-z-kopf{border-style:dashed}
+  #dashboard-view .wdl-ug-geparkt.wdl-tab-leer .wdl-z-kopf{border-style:dashed}
+  #dashboard-view .wdl-ug-geparkt .wdl-man-hinweis,
   #dashboard-view .wdl-tab-manuell .wdl-man-hinweis{grid-column:mi-start / zeit-end;text-align:right;font-weight:400;letter-spacing:0;text-transform:none;color:var(--sub)}
   #dashboard-view .wdl-z[draggable="true"]{cursor:grab}
   #dashboard-view .wdl-z.is-drag{opacity:.45}
@@ -29987,11 +30009,11 @@
           const neu = x.eigen ? bstNaechsterTyp(x.a) : null, zielName = BST_ZIEL[typ] || (neu ? typW(neu) : '')
           const d = new Date(x.seit), seit = isNaN(d) ? '' : d.toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
           const { bal, ziel, mt, fehlt, mini, miniUhr } = x
-          const status = fehlt ? 'Tage sammeln' + (mini ? (mini.status === 'open' ? ' · Mini läuft' : ' · Mini ' + miniUhr) : '') : 'Bereit'
+          const status = fehlt ? 'Tage sammeln' + (mini ? (mini.status === 'open' ? ' · Mini läuft' : ' · Mini ' + miniUhr) : '') : 'Review'
           const statusTip = fehlt ? `Noch ${mt.target - mt.count} Tag(e) mit Trade nötig, bevor die Phase wechselt${mini ? (mini.status === 'open' ? ' — Mini-Trade läuft gerade' : ` — nächster Mini-Trade ${miniUhr} Dubai`) : ' — der Auto-Planer plant je Handelstag einen Mini-Trade'}`
             : x.eigen ? 'Ziel und Mindesttage erfüllt — Phase umstellen' : `Ziel erreicht (Ziel-Wache) — Mindesttage sieht nur ${x.user}`
           const knopf = x.eigen
-            ? (neu ? `<button type="button" class="btn btn-ghost el-knopf" data-wdl-bst-um="${escapeHtml(String(x.a.id))}" title="Nachfolger anlegen (${escapeHtml(zielName)}): neues Konto + Login, Echo-Instanz, External ID — das alte Konto wird danach archiviert">→ ${escapeHtml(zielName)}</button>` : '')
+            ? ((neu && !fehlt) ? `<button type="button" class="btn btn-ghost el-knopf" data-wdl-bst-um="${escapeHtml(String(x.a.id))}" title="Nachfolger anlegen (${escapeHtml(zielName)}): neues Konto + Login, Echo-Instanz, External ID — das alte Konto wird danach archiviert">→ ${escapeHtml(zielName)}</button>` : '')
             : `<span class="wdl-bst-fremd" title="Der Nachfolger-Assistent legt nur im eigenen Login an — ${escapeHtml(x.user)} stellt um">im Login von ${escapeHtml(x.user)}</span>`
           return { fehlt: !!fehlt, html: `<div class="wdl-z wdl-z-bst" style="--wdl-id:${idFarbe(x.uid)}">`
             + `<span class="wdl-z-wer" title="${escapeHtml(String(x.name || konto))}"><span class="wdl-z-punkt"></span><b>${escapeHtml(x.user)}</b><small>${escapeHtml(konto)}</small></span>`
@@ -30013,53 +30035,53 @@
     // Untergruppe „Bestanden" in Überprüfen ist weg. Hier stehen jetzt beide Schritte untereinander: oben die bestandenen Trades zum
     // Abhaken (Zeilen wie in Überprüfen, Abhaken/→ manuell/→ parken unverändert), darunter die Konten zum Umstellen (Nachfolger-Knopf).
     // Ein Konto steht nie doppelt (bstZeilen zeigt es erst nach dem Abhaken). „Tage farmen" bleibt eigener Abschnitt.
-    const bestanden = bestTr => {
-      const zz = bstZeilen(), bereit = zz.filter(z => !z.fehlt), tr = nachEnde(bestTr || [])
-      let out = bstTab(zz.filter(z => z.fehlt), 'Tage farmen', 'Ziel erreicht, Mindesttage fehlen noch — der Auto-Planer legt je Handelstag einen Mini-Trade, danach wandert das Konto nach Bestanden', 'wdl-tab-sek-tage')
-      const n = tr.length + bereit.length; if(!n) return out
-      const streifen = (titel, anz, hinweis, cls, inhalt) => `<div class="wdl-ug ${cls}"><div class="wdl-ug-kopf"><b>${titel}</b><span>${anz}</span><small>${hinweis}</small></div>${inhalt}</div>`
-      out += `<div class="wdl-tab wdl-tab-konto wdl-tab-bst wdl-tab-sek-bestanden"><div class="wdl-z wdl-z-kopf"><span class="wdl-z-wer" title="Ziel erreicht: erst den Trade abhaken, dann die Phase umstellen">Bestanden · ${n}</span><span class="wdl-z-ri"></span>`
-        + ['Ergebnis · Balance → Ziel', 'Konto · Tage', 'P&amp;L · Status', ''].map((x, i) => `<span class="wdl-z-${['mi', 'konto', 'pl', 'zeit'][i]}">${x}</span>`).join('') + '</div>'
-        + (tr.length ? streifen('Trade abhaken', tr.length, 'bestanden — erst abhaken, dann darunter die Phase umstellen', 'wdl-ug-bestanden', tr.map(t => zeile(t, '')).join('')) : '')
-        + (bereit.length ? streifen('Phase umstellen', bereit.length, 'Ziel und Mindesttage erfüllt — Nachfolger anlegen', 'wdl-ug-normal', bereit.map(z => z.html).join('')) : '')
-        + '</div>'
-      return out
+    // DREI SCHRITTE (Finn 13.10.2026 abends, Radar .1510: „zu unübersichtlich … bei den gepassten Accounts die drei Schritte mit den Typen
+    // ‚Tage sammeln' und ‚Review'"): in der Übergruppe „Bestanden" je Schritt ein eigener Kasten — Trade abhaken (bestandener Trade, Zeilen
+    // wie in Überprüfen) · Tage sammeln (Ziel erreicht, Mindesttage fehlen) · Review (Ziel + Tage voll, bis der Nachfolger angelegt ist).
+    // Gleiche Namen wie der Typ-Chip in Accounts/Planer (accZielChipHtml). Ein Konto steht nie doppelt (bstZeilen erst nach dem Abhaken).
+    const bestanden = (bestTr, bestAlle) => {
+      const zz = bstZeilen()
+      const kaesten = gruppe('Trade abhaken', nachEnde(bestTr || []), ['Ergebnis', 'Konto', 'P&amp;L', 'Zu'], 'wdl-tab-konto wdl-tab-sek-bestanden', null, bestAlle || [])
+        + bstTab(zz.filter(z => z.fehlt), 'Tage sammeln', 'Ziel erreicht, Mindesttage fehlen noch — der Auto-Planer legt je Handelstag einen Mini-Trade, danach wandert das Konto nach Review', 'wdl-tab-sek-tage')
+        + bstTab(zz.filter(z => !z.fehlt), 'Review', 'Ziel und Mindesttage erfüllt — liegt hier, bis die neuen Daten der Firma da sind und der Nachfolger angelegt ist', 'wdl-tab-sek-review')
+      return { html: kaesten, n: (bestTr || []).length + zz.length }
     }
     const manuell = (g, a) => {
       if(g.ma.length) return gruppe('Manuelle Arbeit', nachAblage(g.ma), ['Notiz', 'Konto', 'P&amp;L', 'Zu'], 'wdl-tab-konto wdl-tab-manuell wdl-tab-sek-manuell', null, a.ma)
       if(!g.pr.length) return ''
-      return `<div class="wdl-tab wdl-tab-konto wdl-tab-manuell wdl-tab-sek-manuell wdl-tab-leer"><div class="wdl-z wdl-z-kopf"><span class="wdl-z-wer">Manuelle Arbeit · 0</span><span class="wdl-z-ri"></span><span class="wdl-man-hinweis">Zeile aus „Überprüfen" hierher ziehen oder „→ manuell"</span></div></div>`
+      return `<div class="wdl-tab wdl-tab-konto wdl-tab-manuell wdl-tab-sek-manuell wdl-tab-leer"><div class="wdl-z wdl-z-kopf"><span class="wdl-z-wer">Manuelle Arbeit · 0</span><span class="wdl-z-ri"></span><span class="wdl-man-hinweis">Zeile aus „Abhaken" hierher ziehen oder „→ manuell"</span></div></div>`
     }
-    // ÜBERPRÜFEN IN DREI UNTERGRUPPEN (Finn 12.10.2026, Radar .1458: „eine Gruppe mit normalen Trades, wo nichts passiert ist, eine
-    // mit bestandenen, eine mit geblownen — wie ein übergeordneter Filter"): Bestanden = Ergebnis-Wort der Ziel-Wache (wdlBestandenChip),
-    // Geblowt = abgehakt/erkannt geblowt oder Konto weg (nicht das Tageslimit — das ist kein Blow), Normal = der Rest zum schnellen
-    // Abhaken. Reihenfolge: normal · bestanden · geblowt. Nur Anzeige — Abhaken/→ manuell/Drag unverändert.
+    // Geblowt = abgehakt/erkannt geblowt oder Konto weg (nicht das Tageslimit — das ist kein Blow); seit 13.10.2026 eigener Kasten in „Erledigt"
     const istGeblowt = t => !!(t && (t.blown === true || (wdlBlowStand(t) || {}).geblowt || wdlKontoWeg(t)))
-    const pruefTeile = pr => {
-      // NUR NOCH ZWEI (Finn 12.10.2026 ~17:49: „Bestanden, Manuelle Arbeit und nochmal Bestanden — alles dreimal das Gleiche"): die
-      // Untergruppe „Bestanden" ist weg, bestandene Trades stehen mit dem grünen Wort in „Normal" (abhaken); Phase umstellen gibt es
-      // genau einmal, im Abschnitt „Bestanden · Phase umstellen" unten (Konten der Ziel-Wache mit Knopf).
-      // Seit .1465 wieder DREI (Finn 12.10.2026 ~18:00: „die bestandenen in ein eigenes Ding, die geblowten in ein eigenes, die normalen
-      // auch") — das Doppelte löst der Abschnitt „Bestanden · Phase umstellen" unten: er zeigt ein Konto erst, wenn der Trade abgehakt ist.
-      // Seit .1471 VIER (Finn 12.10.2026 ~21:50: „Geparkte Accounts … per Drag & Drop hinziehen … pausiert, bis sie abgehakt werden"):
-      // Geparkt = Kennzeichen manuell.schritt 'geparkt', immer sichtbar als Drop-Ziel (fünftes Feld: immer), auch leer.
-      const gep = pr.filter(wdlGeparkt), ohne = pr.filter(t => !gep.includes(t))
-      // .1509: bestandene Trades stehen nicht mehr hier, sondern in der einen Gruppe „Bestanden" (s. bestanden) — gruppen() reicht sie nicht durch
-      const blow = ohne.filter(t => istGeblowt(t)), norm = ohne.filter(t => !blow.includes(t))
-      return [['Normal', norm, 'wdl-ug-normal', 'nichts passiert — abhaken'], ['Geblowt', blow, 'wdl-ug-geblowt', 'Konto geblowt oder weg — abhaken, dann archivieren'],
-        ['Geparkt', nachAblage(gep), 'wdl-ug-geparkt', gep.length ? 'wartet auf Freigabe der Firma — abhaken, sobald frei' : 'Zeile hierher ziehen oder „→ parken" — wartet auf Freigabe der Firma', true]]
-    }
     // arr = was gezeigt wird (Modell + Person), alleArr = dieselbe Liste ohne Personen-Filter — nur für die Chips im Kopf
     const istBest = t => !wdlGeparkt(t) && !!wdlBestandenChip(t), ohneBest = arr => arr.filter(t => !istBest(t))   // .1509: Bestanden = eine Gruppe
+    // DREI ÜBERGRUPPEN (Finn 13.10.2026 abends, Radar .1510: „zu unübersichtlich, alles auf eine Seite geklatscht"): Läuft (Trades am
+    // Markt) · Erledigt (zu, braucht noch einen Handgriff: Abhaken oben, darunter Wartet, Geblowt, Manuelle Arbeit, Geparkt) · Bestanden
+    // (Trade abhaken · Tage sammeln · Review). Die abgehakten Trades (früher „Erledigt · 137") sind aus dem Blick — nur noch ein
+    // zugeklappter „Verlauf" am Ende von Erledigt (wdl.alleZu.verlauf). Zeilen, Knöpfe, Drag-Ziele unverändert.
+    const og3 = (titel, anz, hinweis, cls, inhalt) => !inhalt ? '' : `<section class="wdl-og3 ${cls}"><div class="wdl-og3-kopf"><b>${titel}</b><span>${anz}</span><small>${hinweis}</small></div>${inhalt}</section>`
     const gruppen = (arr, alleArr) => {
       const g = teile(arr), a = teile(alleArr)
-      // Abschnitts-Klassen (09.10.2026, Finn: „schwemmt alles ein") — je Abschnitt eigener Akzent über --wdl-sek (CSS .wdl-tab-sek-*)
-      return gruppe('Läuft', nachStart(g.la), ['Spanne', 'P&amp;L', 'Seit'], 'wdl-tab-lauf wdl-tab-sek-lauf', null, a.la)
-        + gruppe('Wartet', nachEnde(g.wa), ['Nachlesung', 'P&amp;L', 'Zu'], 'wdl-tab-sek-wartet', null, a.wa)
-        + gruppe('Überprüfen', nachEnde(ohneBest(g.pr)), ['Ergebnis', 'Konto', 'P&amp;L', 'Zu'], 'wdl-tab-konto wdl-tab-sek-pruef', null, ohneBest(a.pr), pruefTeile(ohneBest(g.pr)))
-        + manuell(g, a)
-        + bestanden(g.pr.filter(istBest))
-        + gruppe('Erledigt', nachEnde(g.er), ['Ergebnis', 'Konto', 'P&amp;L', 'Zu'], 'wdl-tab-konto wdl-tab-sek-erledigt', 'erledigt', a.er)
+      const pr = ohneBest(g.pr), prA = ohneBest(a.pr)
+      const gep = pr.filter(wdlGeparkt), blow = pr.filter(t => !wdlGeparkt(t) && istGeblowt(t)), norm = pr.filter(t => !wdlGeparkt(t) && !istGeblowt(t))
+      const gepA = prA.filter(wdlGeparkt), blowA = prA.filter(t => !wdlGeparkt(t) && istGeblowt(t)), normA = prA.filter(t => !wdlGeparkt(t) && !istGeblowt(t))
+      const kopf4 = ['Ergebnis', 'Konto', 'P&amp;L', 'Zu']
+      // Geparkt bleibt Drop-Ziel (.wdl-ug-geparkt, wdlDropZiel) — leer als gestrichelter Kopf, sobald es etwas abzuhaken gibt
+      const geparkt = gep.length ? gruppe('Geparkt', nachAblage(gep), kopf4, 'wdl-tab-konto wdl-tab-sek-geparkt wdl-ug-geparkt', null, gepA)
+        : pr.length ? `<div class="wdl-tab wdl-tab-konto wdl-tab-sek-geparkt wdl-ug-geparkt wdl-tab-leer"><div class="wdl-z wdl-z-kopf"><span class="wdl-z-wer">Geparkt · 0</span><span class="wdl-z-ri"></span><span class="wdl-man-hinweis">Zeile hierher ziehen oder „→ parken" — wartet auf Freigabe der Firma</span></div></div>` : ''
+      const verlaufAuf = !!(wdl.alleZu || {}).verlauf
+      const verlauf = !g.er.length ? '' : verlaufAuf
+        ? gruppe('Verlauf · abgehakt', nachEnde(g.er), kopf4, 'wdl-tab-konto wdl-tab-sek-erledigt', 'erledigt', a.er) + `<button type="button" class="wdl-verlauf" data-wdl-mehr="verlauf">Verlauf zuklappen</button>`
+        : `<button type="button" class="wdl-verlauf" data-wdl-mehr="verlauf">Verlauf · ${g.er.length} abgehakte Trades zeigen</button>`
+      const erledigtN = norm.length + g.wa.length + blow.length + g.ma.length + gep.length
+      const erledigt = gruppe('Abhaken', nachEnde(norm), kopf4, 'wdl-tab-konto wdl-tab-sek-pruef', null, normA)
+        + gruppe('Wartet auf Balance', nachEnde(g.wa), ['Nachlesung', 'P&amp;L', 'Zu'], 'wdl-tab-sek-wartet', null, a.wa)
+        + gruppe('Geblowt · archivieren', nachEnde(blow), kopf4, 'wdl-tab-konto wdl-tab-sek-geblowt', null, blowA)
+        + manuell(g, a) + geparkt
+      const best = bestanden(g.pr.filter(istBest), a.pr.filter(istBest))
+      return og3('Läuft', g.la.length, 'Trades am Markt', 'wdl-og3-lauf', gruppe('Am Markt', nachStart(g.la), ['Spanne', 'P&amp;L', 'Seit'], 'wdl-tab-lauf wdl-tab-sek-lauf', null, a.la) || '<div class="wdl-og3-leer">Gerade läuft nichts.</div>')
+        + og3('Erledigt', erledigtN, erledigtN ? 'zu — oben abhaken, was normal lief' : 'alles abgehakt', 'wdl-og3-erledigt', (erledigt || '<div class="wdl-og3-leer">Nichts abzuhaken.</div>') + verlauf)
+        + og3('Bestanden', best.n, 'Trade abhaken → Tage sammeln → Review', 'wdl-og3-bestanden', best.html)
     }
     // Wischstand der Chip-Reihen (Handy) über den Neuaufbau retten — die Liste wird im Lade-Takt komplett neu gezeichnet
     const kpScroll = new Map([...liste.querySelectorAll('[data-wdl-kp]')].map(e => [e.getAttribute('data-wdl-kp'), e.scrollLeft]))
@@ -43428,7 +43450,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1510'
+  const OS_TAB_BUILD = '2026-09-22.1511'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
