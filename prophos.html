@@ -1513,7 +1513,15 @@
   #polarModal .pol-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}
   #polarModal .pol-gruppe{grid-column:1 / -1;font-size:12px;font-weight:600;color:var(--sub);margin-top:4px}
   #polarModal .pol-tab{overflow-x:auto}
-  @media (max-width:640px){ #polarModal .pol-grid{grid-template-columns:minmax(0,1fr)} }
+  /* Zeile Richtung · Symbol · Kontrakte, Multiplikator-Kacheln, Level-Tabelle (Umbau 13.10.2026) */
+  #polarModal .pol-reihe3{grid-column:1 / -1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+  #polarModal .pol-box{grid-column:1 / -1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+  #polarModal .pol-kachel{padding:10px 12px;border:1px solid var(--border-soft);border-radius:var(--r-sm)}
+  #polarModal .pol-kachel small{display:block;font-size:11px;color:var(--sub)}
+  #polarModal .pol-kachel b{font-size:17px}
+  #polarModal .pol-lv td{padding:7px 10px;border-top:1px solid var(--border-soft)}
+  #polarModal .pol-lv tr:first-child td{border-top:0;font-size:11px;color:var(--sub)}
+  @media (max-width:640px){ #polarModal .pol-grid{grid-template-columns:minmax(0,1fr)} #polarModal .pol-reihe3,#polarModal .pol-box{grid-template-columns:minmax(0,1fr)} }
   /* Winning Days Farm (25.09.2026, Design-Rundgang): das Raster hatte Löcher — Kontrakte halb + leer, Risiko Slave
      volle Breite, TP halb + leer. Jetzt Kontrakte | Risiko Slave, darunter TP volle Breite (der SL-Platz ist auf
      diesem Weg leer, Risiko Master IST der Stop Loss). Klasse tp-wd setzt tpRouteUpdateSeg nur auf diesem Weg. */
@@ -8659,34 +8667,36 @@
         </div>
         <div class="modal-body">
           <div class="pol-grid">
-            <div class="pol-gruppe">Futures · Master (TradingView)</div>
-            <div class="field"><label>ID</label><select class="input" id="pol-fu-id"></select></div>
-            <div class="field"><label>Funded-Futures-Konto</label><select class="input" id="pol-fu-konto"></select></div>
-            <div class="pol-gruppe">Airbag · Funded CFD (MetaTrader)</div>
-            <div class="field"><label>ID</label><select class="input" id="pol-cfd-id"></select></div>
-            <div class="field"><label>Funded-CFD-Konto</label><select class="input" id="pol-cfd-konto"></select></div>
-            <div class="pol-gruppe">Trade</div>
-            <div class="field">
-              <label>Richtung Futures</label>
-              <div class="seg" id="pol-dir">
-                <button type="button" data-dir="long" class="active">Long</button>
-                <button type="button" data-dir="short">Short</button>
+            <div class="field"><label>Master · Funded Futures</label><select class="input" id="pol-fu-konto"></select></div>
+            <div class="field"><label>Slave · Funded CFD</label><select class="input" id="pol-cfd-konto"></select></div>
+            <div class="pol-reihe3">
+              <div class="field">
+                <label>Richtung</label>
+                <div class="seg" id="pol-dir">
+                  <button type="button" data-dir="long" class="active">Long</button>
+                  <button type="button" data-dir="short">Short</button>
+                </div>
               </div>
-            </div>
-            <div class="field">
-              <label>Symbol</label>
-              <div class="seg" id="pol-sym">
-                <button type="button" data-ppl="20" class="active">NQ</button>
-                <button type="button" data-ppl="2">MNQ</button>
+              <div class="field">
+                <label>Symbol</label>
+                <div class="seg" id="pol-sym">
+                  <button type="button" data-ppl="20" class="active">NQ</button>
+                  <button type="button" data-ppl="2">MNQ</button>
+                </div>
               </div>
+              <div class="field"><label>Kontrakte</label><input type="number" class="input" id="pol-kt" min="1" step="1" value="3"></div>
             </div>
-            <div class="field"><label>Kontrakte</label><input type="number" class="input" id="pol-kt" min="1" step="1" value="1"></div>
-            <div class="field"><label>Take Profit Futures ($)</label><input type="number" class="input" id="pol-tp" min="0" step="50" value="12000"></div>
-            <div class="field"><label>Bis Liquidation ($)</label><input type="number" class="input" id="pol-liq" min="0" step="50" value="4500"></div>
-            <div class="field"><label>Airbag ($ je 4.500 $ DD)</label><input type="number" class="input" id="pol-satz" min="0" step="50" value="1000"></div>
-            <div class="field"><label>CFD $/Pkt je Lot</label><input type="number" class="input" id="pol-cfd-ppl" min="0.01" step="0.01" value="1"></div>
-            <div class="field"><label>Puffer (Pkt)</label><input type="number" class="input" id="pol-puffer" min="0" step="0.5" value="4"></div>
-            <div style="grid-column:1 / -1" id="pol-ergebnis"></div>
+            <div class="pol-gruppe">Multiplikator</div>
+            <div class="field"><label>Risiko Master ($)</label><input type="number" class="input" id="pol-risk-m" min="0" step="50" value="4500"></div>
+            <div class="field"><label>Risiko Slave ($)</label><input type="number" class="input" id="pol-risk-s" min="0" step="50" value="1000"></div>
+            <div class="pol-box" id="pol-mult"></div>
+            <div class="pol-gruppe">Take Profit · Stop Loss</div>
+            <div class="pol-reihe3">
+              <div class="field"><label>Take Profit Master ($)</label><input type="number" class="input" id="pol-tp-m" min="0" step="50" value="7500"></div>
+              <div class="field"><label>Stop Loss Master ($)</label><input type="number" class="input" id="pol-sl-m" min="0" step="50" placeholder="= Risiko Master"></div>
+              <div class="field"><label>Puffer Slave (Pkt)</label><input type="number" class="input" id="pol-puffer" min="0" step="0.5" value="4"></div>
+            </div>
+            <div style="grid-column:1 / -1" class="pol-tab" id="pol-level"></div>
           </div>
           <div class="modal-msg" id="polarMsg"></div>
         </div>
@@ -43572,7 +43582,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1526'
+  const OS_TAB_BUILD = '2026-09-22.1527'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -52325,7 +52335,8 @@
    * ~3.000 € echtes Geld. Variante B: CFD-Level werden beim Öffnen per Puls-Klick GESPIEGELT gesetzt (Abstand vom eigenen Fill, der
    * Kursabstand NQ ↔ NAS100 fällt so raus) und schließen selbst beim Broker — nie per EA (FundedNext ≥ 50k: nur manuell, Deal-Grund
    * sichtbar). Puffer mit Richtung: CFD-SL ein paar Punkte HINTER dem Futures-TP (Futures nimmt den Gewinn zuerst), CFD-TP ein paar
-   * Punkte VOR der Futures-Liquidation (Airbag-Gewinn sicher). Lots: Futures blowt → Airbag gewinnt genau den Satz.
+   * Punkte VOR der Futures-Liquidation (Airbag-Gewinn sicher). Lots seit dem Umbau 13.10.2026 (Finn: „erst den Multiplikator
+   * rausholen — Master, Slave, Risiko, Kontrakte“) über Risiko Master/Slave mit tpMultiplierAusRisiko, wie im Plan-Popup.
    * Nur Rechnung + Anzeige: kein Speichern, kein Start, kein trade_plans-Feld. Eigene Verdrahtung, hängt nicht an _tpRoute. */
   let _polarKonten = []   // [{id, name, firm, type, person, user_id}] — Funded/Funded CFD aller sichtbaren IDs, nicht archiviert
   const polarEl = id => document.getElementById(id)
@@ -52347,79 +52358,72 @@
       return `Konten anderer IDs nicht geladen (${e.message}) — zeige nur diese ID.`
     }
   }
-  function polarIdOptionen(sel, typ, vorher){
-    const ids = [...new Set(_polarKonten.filter(k => k.type === typ).map(k => k.person))].sort((a, b) => a.localeCompare(b, 'de'))
-    sel.innerHTML = ids.length ? ids.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('') : '<option value="">— keine ID mit diesem Konto —</option>'
-    if(vorher && ids.includes(vorher)) sel.value = vorher
+  // Ein Dropdown je Seite, Konten nach ID gruppiert (Finn 13.10.2026: erst ID, dann Konto war „zu viel“)
+  function polarKontoOptionen(sel, typ){
+    const l = _polarKonten.filter(k => k.type === typ)
+    const ids = [...new Set(l.map(k => k.person))].sort((a, b) => a.localeCompare(b, 'de'))
+    sel.innerHTML = ids.length ? ids.map(p => `<optgroup label="${esc(p)}">${l.filter(k => k.person === p)
+      .sort((a, b) => (a.firm + a.name).localeCompare(b.firm + b.name, 'de'))
+      .map(k => `<option value="${esc(k.id)}">${esc(k.firm)} · ${esc(k.name)}</option>`).join('')}</optgroup>`).join('')
+      : '<option value="">— kein Konto —</option>'
   }
-  function polarKontoOptionen(sel, typ, person){
-    const l = _polarKonten.filter(k => k.type === typ && k.person === person).sort((a, b) => (a.firm + a.name).localeCompare(b.firm + b.name, 'de'))
-    sel.innerHTML = l.length ? l.map(k => `<option value="${esc(k.id)}">${esc(k.firm)} · ${esc(k.name)}</option>`).join('') : '<option value="">— kein Konto —</option>'
-  }
+  const polarKonto = id => _polarKonten.find(k => String(k.id) === String(polarEl(id)?.value))
   function polarSeg(id){ return polarEl(id)?.querySelector('button.active') }
   function polarRechnen(){
     const n = id => Number(polarEl(id)?.value) || 0
     const de = (v, d = 0) => Number(v).toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d })
     const long = (polarSeg('pol-dir')?.dataset.dir || 'long') === 'long'
     const ppl = Number(polarSeg('pol-sym')?.dataset.ppl) || 20
-    const kt = Math.max(1, Math.round(n('pol-kt'))), tp = n('pol-tp'), liq = n('pol-liq'), satz = n('pol-satz')
-    const cfdPpl = n('pol-cfd-ppl') || 1, puffer = n('pol-puffer')
-    const tpPkt = tp / (ppl * kt), liqPkt = liq / (ppl * kt)
-    // Airbag gewinnt beim Futures-Blow genau den Satz je 4.500 $ DD (Finns Kurs ~1.000 $ : 4.500 $)
-    const airbagGewinn = satz * liq / 4500
-    const lots = liqPkt > 0 ? airbagGewinn / (cfdPpl * liqPkt) : 0
-    const lotsR = Math.max(0.01, Math.round(lots * 100) / 100)
-    const airbagVerlust = lotsR * cfdPpl * (tpPkt + puffer)
-    const fuKonto = _polarKonten.find(k => String(k.id) === String(polarEl('pol-fu-konto')?.value))
-    const cfdKonto = _polarKonten.find(k => String(k.id) === String(polarEl('pol-cfd-konto')?.value))
-    const gleicheId = fuKonto && cfdKonto && fuKonto.person === cfdKonto.person
-    const vz = (up, p) => `${up ? '+' : '−'}${de(p, 1)} Pkt`
-    // Futures long: TP oben, Liq unten → CFD short: SL oben (TP + Puffer), TP unten (Liq − Puffer)
-    const zeile = (links, rechts, hinweis) => `<tr><td style="padding:6px 8px">${links}</td><td style="padding:6px 4px;color:var(--sub)">↔</td><td style="padding:6px 8px">${rechts}</td><td style="padding:6px 8px;color:var(--sub);font-size:11px">${hinweis}</td></tr>`
-    polarEl('pol-ergebnis').innerHTML = `
-      ${gleicheId ? `<div style="padding:8px 10px;margin-bottom:10px;border-radius:var(--r-sm);background:var(--surface-tint);color:var(--warn);font-size:12px">Futures und Airbag liegen bei derselben ID — Polar ist für zwei verschiedene IDs gedacht.</div>` : ''}
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:12px">
-        <div style="padding:10px;border:1px solid var(--border-soft);border-radius:var(--r-sm)"><div style="font-size:11px;color:var(--sub)">Airbag-Größe</div><div style="font-weight:700;font-size:16px">${de(lotsR, 2)} Lot</div><div style="font-size:11px;color:var(--sub)">${long ? 'Short' : 'Long'} NAS100</div></div>
-        <div style="padding:10px;border:1px solid var(--border-soft);border-radius:var(--r-sm)"><div style="font-size:11px;color:var(--sub)">Futures am TP</div><div style="font-weight:700;font-size:16px;color:var(--good)">+${de(tp)} $</div><div style="font-size:11px;color:var(--danger)">Airbag −${de(airbagVerlust)} $ (Drawdown)</div></div>
-        <div style="padding:10px;border:1px solid var(--border-soft);border-radius:var(--r-sm)"><div style="font-size:11px;color:var(--sub)">Futures geblowt</div><div style="font-weight:700;font-size:16px;color:var(--danger)">−${de(liq)} $</div><div style="font-size:11px;color:var(--good)">Airbag +${de(airbagGewinn)} $ → Payout</div></div>
-      </div>
-      <div style="font-size:12px;font-weight:600;margin-bottom:4px">Level-Spiegel · Abstand vom eigenen Fill</div>
-      <div class="pol-tab"><table style="width:100%;border-collapse:collapse;font-size:12px;border:1px solid var(--border-soft);border-radius:var(--r-sm)">
-        <tr style="color:var(--sub);font-size:11px"><td style="padding:6px 8px">Futures (TradingView)</td><td></td><td style="padding:6px 8px">Airbag (MetaTrader)</td><td style="padding:6px 8px">Puffer</td></tr>
-        ${zeile(`TP ${vz(long, tpPkt)}`, `SL ${vz(long, tpPkt + puffer)}`, `${de(puffer, 1)} Pkt dahinter — Futures nimmt den Gewinn zuerst`)}
-        ${zeile(`Liq ${vz(!long, liqPkt)}`, `TP ${vz(!long, Math.max(0, liqPkt - puffer))}`, `${de(puffer, 1)} Pkt davor — Airbag-Gewinn sicher`)}
-      </table></div>
-      <ol style="margin:12px 0 0;padding-left:18px;font-size:12px;color:var(--ink-2);line-height:1.6">
-        <li>Puls öffnet Futures in TradingView (${fuKonto ? esc(fuKonto.person) : 'ID A'}).</li>
-        <li>Puls öffnet den Airbag per Klick in MT5 (${cfdKonto ? esc(cfdKonto.person) : 'ID B'}), sobald der Futures-Fill bewiesen ist, und trägt die gespiegelten Level per Klick ein.</li>
-        <li>Beide schließen selbst beim Broker (Grund SL/TP) — kein EA.</li>
-        <li>Bleibt eine Seite übrig, räumt Puls per Klick auf.</li>
-      </ol>`
-  }
-  function polarSeiteFuellen(seite){
-    const typ = seite === 'fu' ? 'funded' : 'funded_cfd'
-    polarKontoOptionen(polarEl(`pol-${seite}-konto`), typ, polarEl(`pol-${seite}-id`).value)
+    const kt = Math.max(1, Math.round(n('pol-kt')))
+    const riskM = n('pol-risk-m'), riskS = n('pol-risk-s')
+    const master = polarKonto('pol-fu-konto'), slave = polarKonto('pol-cfd-konto')
+    // Slave-Punktwert aus den Firmen-Presets wie im Trade-Plan-Popup (tpFirmPpl), sonst 1 $/Pkt je Lot
+    const sPpl = (slave && typeof window.tpFirmPpl === 'function' && window.tpFirmPpl(slave.firm)) || 1
+    // DIESELBE Formel wie das Plan-Popup: Stop-Distanz = Risiko Master ÷ ($/Pkt × Kontrakte); der Slave trifft bei derselben
+    // Distanz sein Risiko → Lots = Risiko Slave ÷ ($/Pkt Slave × Distanz), Multiplikator = Lots ÷ Kontrakte
+    const mult = tpMultiplierAusRisiko(riskM, kt, riskS, ppl, sPpl)
+    const distM = riskM > 0 ? riskM / (ppl * kt) : 0
+    const lots = mult ? Math.max(0.01, Math.round(mult * kt * 100) / 100) : 0
+    const gleicheId = master && slave && master.person === slave.person
+    polarEl('pol-mult').innerHTML = `
+      <div class="pol-kachel"><small>Lots Slave</small><b>${lots ? de(lots, 2) : '–'}</b><small>${long ? 'Short' : 'Long'} · ${de(sPpl, 2)} $/Pkt je Lot</small></div>
+      <div class="pol-kachel"><small>Multiplikator</small><b>${mult ? de(mult, 2) : '–'}</b><small>Lots je Kontrakt</small></div>
+      <div class="pol-kachel"><small>Stop-Distanz</small><b>${distM ? de(distM, 1) + ' Pkt' : '–'}</b><small>Risiko Master ÷ (${ppl} $ × ${kt})</small></div>
+      ${gleicheId ? `<div style="grid-column:1 / -1;font-size:12px;color:var(--warn)">Master und Slave liegen bei derselben ID — Polar ist für zwei verschiedene IDs gedacht.</div>` : ''}`
+    // Level: Master in $ → Punkte; Slave gespiegelt vom eigenen Fill, Puffer mit Richtung (SL hinter dem Master-TP, TP vor dem Master-SL)
+    const tpM = n('pol-tp-m'), slM = n('pol-sl-m') || riskM, puffer = n('pol-puffer')
+    const tpPkt = tpM / (ppl * kt), slPkt = slM / (ppl * kt)
+    const sSlPkt = tpPkt > 0 ? tpPkt + puffer : 0, sTpPkt = Math.max(0, slPkt - puffer)
+    const pkt = (up, p) => p > 0 ? `${up ? '+' : '−'}${de(p, 1)} Pkt` : '–'
+    const usd = (v, plus) => v > 0 ? `${plus ? '+' : '−'}${de(v)} $` : ''
+    polarEl('pol-level').innerHTML = `
+      <table class="pol-lv" style="width:100%;border-collapse:collapse;font-size:13px;border:1px solid var(--border-soft);border-radius:var(--r-sm)">
+        <tr><td></td><td>Take Profit</td><td>Stop Loss</td></tr>
+        <tr><td><b>Master</b> <span style="color:var(--sub)">${long ? 'Long' : 'Short'} ${kt} × ${ppl === 20 ? 'NQ' : 'MNQ'}</span></td>
+          <td>${pkt(long, tpPkt)} <span style="color:var(--good)">${usd(tpM, true)}</span></td>
+          <td>${pkt(!long, slPkt)} <span style="color:var(--danger)">${usd(slM, false)}</span></td></tr>
+        <tr><td><b>Slave</b> <span style="color:var(--sub)">${long ? 'Short' : 'Long'} ${lots ? de(lots, 2) : '–'} Lot</span></td>
+          <td>${pkt(!long, sTpPkt)} <span style="color:var(--good)">${usd(lots * sPpl * sTpPkt, true)}</span></td>
+          <td>${pkt(long, sSlPkt)} <span style="color:var(--danger)">${usd(lots * sPpl * sSlPkt, false)}</span></td></tr>
+      </table>`
   }
   async function polarOeffnen(){
     polarEl('polarMsg').textContent = 'Lade Konten aller IDs…'
     polarEl('polarModal').classList.add('open')
     const hinweis = await polarKontenLaden()
-    polarIdOptionen(polarEl('pol-fu-id'), 'funded')
-    polarIdOptionen(polarEl('pol-cfd-id'), 'funded_cfd')
-    // Airbag-ID: standardmäßig eine ANDERE ID als die Futures-Seite
-    const cfdSel = polarEl('pol-cfd-id'), fuId = polarEl('pol-fu-id').value
-    const andere = [...cfdSel.options].map(o => o.value).find(v => v && v !== fuId)
-    if(andere) cfdSel.value = andere
-    polarSeiteFuellen('fu'); polarSeiteFuellen('cfd')
+    polarKontoOptionen(polarEl('pol-fu-konto'), 'funded')
+    polarKontoOptionen(polarEl('pol-cfd-konto'), 'funded_cfd')
+    // Slave standardmäßig bei einer ANDEREN ID als der Master
+    const m = polarKonto('pol-fu-konto')
+    const anders = _polarKonten.find(k => k.type === 'funded_cfd' && (!m || k.person !== m.person))
+    if(anders) polarEl('pol-cfd-konto').value = String(anders.id)
     polarEl('polarMsg').textContent = hinweis
     polarRechnen()
   }
   polarEl('tp-route-polar')?.addEventListener('click', () => { closeTradePlanModal(); polarOeffnen() })
   polarEl('polarClose')?.addEventListener('click', () => polarEl('polarModal').classList.remove('open'))
-  polarEl('pol-fu-id')?.addEventListener('change', () => { polarSeiteFuellen('fu'); polarRechnen() })
-  polarEl('pol-cfd-id')?.addEventListener('change', () => { polarSeiteFuellen('cfd'); polarRechnen() })
   ;['pol-fu-konto', 'pol-cfd-konto'].forEach(id => polarEl(id)?.addEventListener('change', polarRechnen))
-  ;['pol-kt', 'pol-tp', 'pol-liq', 'pol-satz', 'pol-cfd-ppl', 'pol-puffer'].forEach(id => polarEl(id)?.addEventListener('input', polarRechnen))
+  ;['pol-kt', 'pol-risk-m', 'pol-risk-s', 'pol-tp-m', 'pol-sl-m', 'pol-puffer'].forEach(id => polarEl(id)?.addEventListener('input', polarRechnen))
   ;['pol-dir', 'pol-sym'].forEach(id => polarEl(id)?.addEventListener('click', e => {
     const b = e.target.closest('button'); if(!b) return
     polarEl(id).querySelectorAll('button').forEach(x => x.classList.toggle('active', x === b))
