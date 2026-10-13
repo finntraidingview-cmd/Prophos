@@ -31,8 +31,8 @@ def lade():
     def konst(name):
         return re.search(rf"^{name} = .*$", src, re.M).group(0)
 
-    teile = [konst(k) for k in ("GP_SLAVE_PPL", "GP_MIN_LOT", "GP_VORLAUF_MIN", "GP_DD_PLAUSIBEL")]
-    teile += [block(n) for n in ("_ap_hhmm", "gp_multiplikator", "gp_dd", "gp_hedge", "gp_richtungen", "gp_zeiten", "gp_takt_faellig")]
+    teile = [konst(k) for k in ("GP_SLAVE_PPL", "GP_MIN_LOT", "GP_VORLAUF_MIN", "GP_DD_PLAUSIBEL", "GP_MARGE_RESERVE")]
+    teile += [block(n) for n in ("_ap_hhmm", "gp_multiplikator", "gp_dd", "gp_hedge", "gp_richtungen", "gp_zeiten", "gp_takt_faellig", "gp_marge_verteilen")]
 
     def _wd_num(v):
         try:
@@ -88,6 +88,18 @@ def main():
     ok(ns["gp_zeiten"]([(0, "u1")], 420, 1040, 1100, 3, {}, random.Random(1)) == {}, "Fenster vorbei → nichts")
     voll = ns["gp_zeiten"]([(i, "u1") for i in range(5)], 420, 426, 0, 3, {}, random.Random(1))
     ok(2 <= len(voll) <= 3, "Fenster 6 min, Abstand 3 → höchstens 3 Starts, Rest fehlt")
+
+    print("Marge")
+    mv = ns["gp_marge_verteilen"]
+    # frei 1.200 € → Grenze 1.000 €; je Plan 400 € Marge, 180 min gebunden
+    st, raus = mv([("a", "u1", 420, 400), ("b", "u2", 430, 400), ("c", "u3", 440, 400)], 1200, 180, 1040, 3, {})
+    ok(st["a"] == 420 and st["b"] == 430 and raus == [] and st["c"] >= 600, "3. Hedge rückt hinter das Ende des 1. (≥ 10:00), keiner fällt raus")
+    st, raus = mv([("a", "u1", 420, 1100)], 1200, 180, 1040, 3, {})
+    ok(raus == ["a"] and st == {}, "ein Hedge größer als frei − Reserve → raus")
+    st, raus = mv([("a", "u1", 900, 600), ("b", "u1", 910, 600)], 1200, 180, 1040, 3, {})
+    ok(st == {"a": 900} and raus == ["b"], "kein Platz mehr bis 17:20 → raus")
+    st, raus = mv([("a", "u1", 420, 600), ("b", "u1", 423, 600)], 1200, 180, 1040, 3, {"u1": [420, 423, 603]})
+    ok(st["a"] == 420 and st["b"] == 608, "rückt wegen Marge auf 10:08 — 10:03 ist von derselben ID belegt (Abstand bleibt)")
 
     print("Takt")
     t = ns["gp_takt_faellig"]

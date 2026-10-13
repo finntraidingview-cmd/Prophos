@@ -43508,7 +43508,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1522'
+  const OS_TAB_BUILD = '2026-09-22.1523'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -65037,8 +65037,10 @@
         liste = `<div class="gp-liste">${a.length ? a.map(x => `<div><span class="k">${escapeHtml(x.user || '')} · ${escapeHtml(x.konto || '')}</span><span class="g">${escapeHtml(x.grund || '')}</span></div>`).join('') : '<div class="g">nichts ausgelassen</div>'}</div>`
       } else if(_gp.auf === 'probe:' + g.gruppe_id && P){
         const gp = P.geplant || [], au = P.ausgelassen || []
-        liste = `<div class="gp-liste"><div class="g">Probelauf ${escapeHtml(gpUhr(P.at))} — ${gp.length} würde er planen · Long ${gpDe(P.long_usd)} $ · Short ${gpDe(P.short_usd)} $ (Risiko)</div>`
-          + gp.map(x => `<div><span class="k">${escapeHtml(x.start)} · ${escapeHtml(x.user || '')} · ${escapeHtml(x.konto || '')}</span><span>${gpRichtung(x.richtung)} · TP ${gpDe(x.tp)} $ · SL ${gpDe(x.sl)} $ · ${gpDe(x.menge, 2)} Lot · Hedge ${gpDe(x.hedge_lots, 2)} Lot (${gpDe(x.slave_risk)} €)</span></div>`).join('')
+        // Fusion-Marge je Hedge-Konto (13.10.2026): frei laut Copier, Summe der geplanten Hedges (zeitlich gestaffelt, 20 % Reserve)
+        const mg = Object.values(P.marge || {}).map(m => `Fusion frei ${gpDe(m.frei)} € · geplant ≈ ${gpDe(m.summe)} € Marge (${gpDe(m.je_lot)} €/Lot)`).join(' · ') || 'Fusion-Marge: keine frische Lesung — prüft der Start-Check am PC'
+        liste = `<div class="gp-liste"><div class="g">Probelauf ${escapeHtml(gpUhr(P.at))} — ${gp.length} würde er planen · Long ${gpDe(P.long_usd)} $ · Short ${gpDe(P.short_usd)} $ (Risiko) · ${escapeHtml(mg)}</div>`
+          + gp.map(x => `<div><span class="k">${escapeHtml(x.start)} · ${escapeHtml(x.user || '')} · ${escapeHtml(x.konto || '')}</span><span>${gpRichtung(x.richtung)} · TP ${gpDe(x.tp)} $ · SL ${gpDe(x.sl)} $ · ${gpDe(x.menge, 2)} Lot · Hedge ${gpDe(x.hedge_lots, 2)} Lot (${gpDe(x.slave_risk)} €)${x.marge != null ? ` · Marge ≈ ${gpDe(x.marge)} €` : ''}</span></div>`).join('')
           + au.map(x => `<div><span class="k">${escapeHtml(x.user || '')} · ${escapeHtml(x.konto || '')}</span><span class="g">${escapeHtml(x.grund || '')}</span></div>`).join('') + '</div>'
       }
       return zeile + msg + liste

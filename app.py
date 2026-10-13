@@ -19125,6 +19125,64 @@ def gp_zeiten(plaene, von, bis, frueh, abstand, belegt, rnd):
     return out
 
 
+GP_MARGE_RESERVE = 0.20       # wie FUSION_MARGE_RESERVE im Frontend — 20 % Luft über der nötigen Marge
+GP_MARGE_LAUFZEIT_MIN = 180   # so lange bindet ein Echo-Hedge seine Marge in der Planung (Annahme, Echo-Trades laufen meist Stunden)
+GP_MARGE_LESUNG_MAX_S = 6 * 3600   # ältere Fusion-Lesung zählt beim Planen nicht (PC aus) — dann nur der Start-Check am PC
+
+
+def gp_marge_verteilen(plaene, frei, laufzeit, bis, abstand, belegt, schritt=5):
+    """REIN RECHNEND (testbar, Finn 13.10.2026: „Marge mit einberechnen"): plaene [(key, user, start_min, marge)] eines Fusion-Kontos,
+    frei = freie Marge jetzt (enthält schon alle offenen Hedges). Ein Plan bindet seine Marge laufzeit min ab Start. Reicht die Summe der
+    gleichzeitig gebundenen Marge × (1 + Reserve) nicht, rückt der Plan in schritt-min-Stufen nach hinten (je ID ≥ abstand, belegt wie
+    gp_zeiten) bis bis; passt er nirgends → raus. → ({key: start_min}, [keys raus])."""
+    grenze = float(frei) / (1 + GP_MARGE_RESERVE)
+    fest, raus, starts = [], [], {}
+
+    def gebunden(t):
+        return sum(m for s, m in fest if s <= t < s + laufzeit)
+
+    def passt(t, m):
+        # an jedem Start, den der neue Plan überlappt, darf die Summe die Grenze nicht reißen
+        return all(gebunden(x) + m <= grenze + 1e-9 for x in [t] + [s for s, _ in fest if t <= s < t + laufzeit])
+
+    for key, user, start, m in sorted(plaene, key=lambda z: z[2]):
+        bel = belegt.setdefault(user, [])
+        andere = [b for b in bel if abs(b - start) > 1e-9]
+        t = float(start)
+        while t <= bis and not (passt(t, m) and all(abs(t - b) >= abstand for b in andere)):
+            t += schritt
+        if t > bis:
+            raus.append(key)
+            continue
+        if abs(t - start) > 1e-9:
+            if start in bel:
+                bel.remove(start)
+            bel.append(t)
+        fest.append((t, m))
+        starts[key] = t
+    return starts, raus
+
+
+def gp_fusion_lesungen(uids, jetzt):
+    """Frischeste Fusion-Lesung (status.hedge_konto aus mt5_live, Copier seit .1523) je Hedge-Login der IDs → {login: {frei, je_lot, w, at}}.
+    Älter als GP_MARGE_LESUNG_MAX_S oder ohne Marge je Lot → fehlt (der Planer rechnet dann ohne Marge, der Start-Check am PC prüft)."""
+    out = {}
+    for r in _sb_all("mt5_live", {"select": "hedge_login,status,updated_at"}):
+        st = r.get("status") if isinstance(r.get("status"), dict) else {}
+        hk = st.get("hedge_konto") if isinstance(st.get("hedge_konto"), dict) else None
+        if not hk or str(st.get("user_id") or "") not in uids:
+            continue
+        frei, je = _wd_num(hk.get("margin_free")), _wd_num((hk.get("marge_je_lot") or {}).get("NAS100"))
+        at = _wd_num(hk.get("at"))
+        at_s = at / 1000.0 if at and at > 1e12 else at
+        login = str(hk.get("login") or r.get("hedge_login") or "")
+        if frei is None or not je or not at_s or not login or jetzt.timestamp() - at_s > GP_MARGE_LESUNG_MAX_S:
+            continue
+        if login not in out or at_s > out[login]["at"]:
+            out[login] = {"frei": frei, "je_lot": je, "w": hk.get("waehrung") or "EUR", "at": at_s}
+    return out
+
+
 def gp_gruppe_lesen(gruppe_id):
     """(zeile auto_plan_gruppe | None, gruppe {id, name, verwalter_id} | None, user_ids [])."""
     zeile = (sb_select("auto_plan_gruppe", {"select": "*", "gruppe_id": f"eq.{gruppe_id}"}) or [None])[0]
@@ -19179,11 +19237,12 @@ def gp_planen(gruppe_id, trocken=False, quelle="hand", seed=None):
     ppl, ppl_firma = ap_ppl_karte(_sb_all("firm_specs", {"select": "user_id,name,symbol,ppl,unit", "user_id": in_uids}),
                                   norm=lambda n: _ap_norm(_firm_norm(n)))
     ctx_ppl = {"ppl": ppl, "ppl_firma": ppl_firma}
-    hedge_ids = {}
+    hedge_ids, hedge_login = {}, {}
     for r in _sb_all("user_settings", {"select": "user_id,value", "key": f"eq.{GP_HEDGE_KEY}", "user_id": in_uids}):
         v = r.get("value") if isinstance(r.get("value"), dict) else {}
         if v.get("accountId"):
             hedge_ids[str(r.get("user_id"))] = str(v["accountId"])
+            hedge_login[str(r.get("user_id"))] = str(v.get("hedgeLogin") or "")
     hedge_acc = {str(x["id"]): x for x in (_sb_all("accounts", {"select": "id,name,firm", "id": "in.(" + ",".join(sorted(set(hedge_ids.values()))) + ")"})
                                            if hedge_ids else [])}
     seed = int(seed) if seed not in (None, "") else random.SystemRandom().randrange(1, 2 ** 31)
@@ -19306,9 +19365,39 @@ def gp_planen(gruppe_id, trocken=False, quelle="hand", seed=None):
     rnd.shuffle(reihe)
     minuten = gp_zeiten([(i, str(kandidaten[i]["a"]["user_id"])) for i in reihe], von, bis, frueh,
                         float(zeiten.get("abstand_id_min") or 3), belegt, rnd)
+    # FUSION-MARGE (Finn 13.10.2026: „Marge mit einberechnen"): je Fusion-Konto (geteilt von allen IDs mit demselben Hedge-Login) die
+    # frische freie Marge aus dem Copier; gleichzeitig gebundene Hedge-Marge (Laufzeit-Annahme) bleibt mit 20 % Reserve darunter —
+    # sonst rückt der Plan später, passt er nirgends, wird er ausgelassen. Ohne frische Lesung: planen wie bisher, Start-Check am PC sperrt.
+    marge_raus, marge_info = {}, {}
+    try:
+        lesungen = gp_fusion_lesungen(set(uids), jetzt)
+    except Exception as e:
+        print(f"[gruppen-plan] ⚠️ Fusion-Marge nicht lesbar: {type(e).__name__}: {e}", flush=True)
+        lesungen = {}
+    je_login = {}
+    for i, k in enumerate(kandidaten):
+        lg = hedge_login.get(str(k["a"]["user_id"])) or ""
+        if i in minuten and lg in lesungen:
+            k["marge"] = round(k["h"]["lots"] * lesungen[lg]["je_lot"], 2)
+            je_login.setdefault(lg, []).append((i, str(k["a"]["user_id"]), minuten[i], k["marge"]))
+    for lg, liste in je_login.items():
+        L = lesungen[lg]
+        neu, raus = gp_marge_verteilen(liste, L["frei"], GP_MARGE_LAUFZEIT_MIN, bis, float(zeiten.get("abstand_id_min") or 3), belegt)
+        minuten.update(neu)
+        for i in raus:
+            minuten.pop(i, None)
+            marge_raus[i] = (f"Fusion-Marge reicht heute nicht: frei {L['frei']:,.0f} {L['w']}, dieser Hedge braucht ≈ "
+                             f"{kandidaten[i]['marge']:,.0f} {L['w']} ({kandidaten[i]['h']['lots']:.2f} Lot) neben den anderen — "
+                             "Fusion aufladen oder weniger Konten").replace(",", ".")
+        marge_info[lg] = {"frei": round(L["frei"]), "je_lot": round(L["je_lot"], 2), "waehrung": L["w"],
+                          "lesung": datetime.fromtimestamp(L["at"], timezone.utc).isoformat(), "plaene": len(liste) - len(raus),
+                          "summe": round(sum(m for i, _u, _s, m in liste if i not in raus))}
     long_usd = short_usd = 0.0
     zeilen = []
     for i, k in enumerate(kandidaten):
+        if i in marge_raus:
+            ausgelassen.append(dict(k["zeile"], grund=marge_raus[i]))
+            continue
         if i not in minuten:
             ausgelassen.append(dict(k["zeile"], grund="kein freies Zeitfenster mehr" if frueh <= bis else f"Fenster bis {zeiten['bis']} vorbei — morgen"))
             continue
@@ -19343,9 +19432,10 @@ def gp_planen(gruppe_id, trocken=False, quelle="hand", seed=None):
         erg["geplant"].append(dict(k["zeile"], start=datetime.fromisoformat(row["start_um"]).astimezone(tz).strftime("%H:%M"),
                                    richtung=row["richtung"], tp=row["master_tp"], sl=row["master_sl"], menge=row["master_contracts"],
                                    stufe=k["w"]["stufe"], rest=k["w"]["rest"], balance=round(k["bal"]), bal_quelle=k["bal_quelle"],
-                                   hedge_lots=k["h"]["lots"], slave_risk=k["h"]["slave_risk"], master_risk=k["h"]["master_risk"]))
+                                   hedge_lots=k["h"]["lots"], slave_risk=k["h"]["slave_risk"], master_risk=k["h"]["master_risk"],
+                                   marge=k.get("marge")))
     erg["geplant"].sort(key=lambda z: (z["start"], z["konto_id"]))
-    erg.update(ausgelassen=ausgelassen, long_usd=round(long_usd), short_usd=round(short_usd), basis_usd=round(basis), seed=seed,
+    erg.update(ausgelassen=ausgelassen, long_usd=round(long_usd), short_usd=round(short_usd), basis_usd=round(basis), seed=seed, marge=marge_info,
                alt_geloescht=0 if trocken else len(weg_alt))
     if not trocken and (erg["geplant"] or quelle != "takt"):
         try:

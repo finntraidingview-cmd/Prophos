@@ -2265,6 +2265,9 @@ def main():
             "hedge_equity": hedge_acc["equity"],
             "hedge_currency": hedge_acc["currency"],
             "hedge_usd_rate": hedge_acc.get("usd_rate"),
+            # Fusion-Marge (13.10.2026): {balance, equity, margin, margin_free, margin_level, marge_je_lot: {NAS100}, waehrung, login, at}
+            # — Vertrag mit dem Frontend (fusionMargeLesung) seit 06.10.2026; None = nicht lesbar
+            "hedge_konto": hedge_acc.get("konto"),
             # Zweiter Kurs-Feed (24.09.2026 spaet): NAS100-Tick + Minutenkerzen des Fusion-Terminals.
             # null = Symbol fehlt / kein Tick. CFD, nicht NQ — siehe kerze_fortschreiben.
             "kurs_nas100": hedge_acc.get("kurs_nas100"),
@@ -2461,6 +2464,33 @@ def main():
                             float(_tn.bid), time.time())
                 except Exception:
                     hedge_acc["kurs_nas100"] = None
+
+            # ── FUSION-MARGE (13.10.2026, Finn: „beim Trade-Start gucken, ob die Marge vom Fusion Market reicht — das hat bisher
+            # noch nie funktioniert"). Das Frontend wartet seit 06.10.2026 auf status.hedge_konto (Start-Check Echo, Fusion-Vorprüfung
+            # Orbit V3/Winning Day), der Copier hat es nie geschrieben → immer „Marge unbekannt". Jetzt: margin/margin_free/margin_level
+            # aus derselben account_info wie oben (jeder Tick), Marge für 1,0 Lot NAS100 per order_calc_margin am Ask — höchstens alle
+            # 30 s (IPC ins Terminal; die Marge je Lot ändert sich nur mit dem Kurs). margin_free enthält alle offenen Hedges aller PCs am
+            # Konto. Fehlt etwas, bleibt das Feld None — nie 0 („Beweis oder leer").
+            try:
+                if hai is not None:
+                    if hedge_acc.get("nas_sym") and now - (hedge_acc.get("marge_lot_at") or 0) > 30:
+                        hedge_acc["marge_lot_at"] = now
+                        _tm = mt5.symbol_info_tick(hedge_acc["nas_sym"])
+                        _ml = mt5.order_calc_margin(mt5.ORDER_TYPE_BUY, hedge_acc["nas_sym"], 1.0, float(_tm.ask)) \
+                            if (_tm is not None and _tm.ask) else None
+                        hedge_acc["marge_je_lot"] = float(_ml) if _ml else None
+                    hedge_acc["konto"] = {
+                        "balance": float(hai.balance), "equity": float(hai.equity), "margin": float(hai.margin),
+                        "margin_free": float(hai.margin_free), "margin_level": float(hai.margin_level or 0) or None,
+                        "marge_je_lot": {"NAS100": hedge_acc.get("marge_je_lot")} if hedge_acc.get("marge_je_lot") else {},
+                        "waehrung": str(hai.currency) or None, "login": int(hai.login), "at": int(now * 1000)}
+                else:
+                    hedge_acc["konto"] = None
+            except Exception as e_m:
+                hedge_acc["konto"] = None
+                if now - (hedge_acc.get("marge_fehler_at") or 0) > 300:
+                    hedge_acc["marge_fehler_at"] = now
+                    log(f"⚠ Fusion-Marge nicht lesbar ({type(e_m).__name__}: {e_m}) — Start-Check zeigt „Marge unbekannt“")
 
             # ── Trade-Fenster aus dem Panel-Plan-Store lesen (25.08.2026) ──────
             # plans.json pflegt das Panel: Prophos-Trade-Start legt 'geplant' an,
