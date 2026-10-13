@@ -3520,6 +3520,35 @@ def test_puls_cdp_login():
     chk(not rl3_[0] and rl3_[1] == "konto_nicht_erreicht" and kl3_.klicks == ["Konto-Umschalter", "Taste Escape"] and "Dropdown nicht erkannt" in rl3_[2]
         and sum(1 for x in tl3_ if "keine Liste (0 Zeilen)" in x) == 3,
         f"Umschalter: nie eine Liste → drei Blicke in der Spur, dann Esc + Meldung wie bisher ({kl3_.klicks}, {tl3_})")
+    # UMSCHALTER NICHT GEDRÜCKT (Puls-Fehler-Routine 13.10.2026, 3 Fälle 12.10. auf einem PC: Puls-Chrome nicht vorn / Windows-Leiste
+    # über dem Punkt / :hover woanders): klick() False ohne Druck → KEINE drei Blicke, kein „Login mit einem Konto", nach Pause EINMAL
+    # neu; zweimal nicht gedrückt → ehrlich raus ohne Login-Beleg (kein Abmelden); „vielleicht gedrückt" (_druck_versucht) → Weg wie bisher
+    class _SN(_SL):
+        def __init__(self, fehl=1, versucht=False, **kw):
+            _SL.__init__(self, ab_lesung=1, **kw); self.fehl, self._druck_versucht = fehl, versucht
+        def klick(self, r, n, toast_ok=False):
+            if n == "Konto-Umschalter" and self.klicks.count(n) < self.fehl:
+                self.klicks.append(n); return False
+            return _SL.klick(self, r, n, toast_ok)
+    ob._warte = lambda a_, b_: None
+    try:
+        kn1_, tn1_ = _SN(fehl=1), []
+        rn1_ = ob._cdp_konto_sichern(kn1_, "PAAPEX0000000000008", {}, tn1_)
+        kn2_, tn2_ = _SN(fehl=2), []
+        rn2_ = ob._cdp_konto_sichern(kn2_, "PAAPEX0000000000008", {}, tn2_)
+        kn3_, tn3_ = _SN(fehl=9, versucht=True), []
+        rn3_ = ob._cdp_konto_sichern(kn3_, "PAAPEX0000000000008", {}, tn3_)
+    finally:
+        ob._warte = alt_w
+    chk(rn1_[0] and kn1_.klicks == ["Konto-Umschalter", "Konto-Umschalter", "Konto PAAPEX0000000000008"]
+        and sum(1 for x in tn1_ if "nicht gedrückt (kein Druck, bewiesen)" in x) == 1 and not any("keine Liste" in x for x in tn1_),
+        f"Umschalter nicht gedrückt → kein Blick, nach Pause einmal neu → Konto gewechselt ({kn1_.klicks}, {tn1_})")
+    chk(not rn2_[0] and rn2_[1] == "konto_nicht_erreicht" and kn2_.klicks == ["Konto-Umschalter", "Konto-Umschalter"]
+        and "nicht gedrückt (Klick ohne Beweis, zweimal" in rn2_[2] and not ob.cdp_login_noetig(rn2_[1], rn2_[4])
+        and not any("Login mit einem Konto" in x or "keine Liste" in x for x in tn2_),
+        f"Umschalter zweimal nicht gedrückt → ehrlich raus, kein Esc, kein Blick, kein Login-Beleg ({kn2_.klicks}, {rn2_[2]})")
+    chk(not rn3_[0] and kn3_.klicks == ["Konto-Umschalter", "Taste Escape"] and sum(1 for x in tn3_ if "keine Liste (0 Zeilen)" in x) == 3,
+        f"Umschalter: Klick ohne Beweis, aber vielleicht gedrückt → Weg wie bisher (drei Blicke, Esc) ({kn3_.klicks})")
     chk(r4_[0] and k4_.klicks == [] and not k4_.gross,
         f"Konto steht, Panel eingeklappt → NIE maximieren (Finn 01.10.2026: Chart sichtbar), nie deshalb scheitern ({k4_.klicks})")
     chk("_cdp_panel_aufklappen(s, trail, ohne_max=True)" in _i.getsource(ob._cdp_konto_sichern)

@@ -18945,6 +18945,7 @@ def _cdp_konto_sichern(s, ext, opts, trail):
     wiederholt = False
     fremd_esc = False
     neu_geladen = False
+    nicht_gedrueckt = False
 
     def _eintr(ko_):
         return [str(x.get("text"))[:40] for x in (ko_.get("eintraege") or []) if isinstance(x, dict)][:20]
@@ -19108,7 +19109,24 @@ def _cdp_konto_sichern(s, ext, opts, trail):
                                                    + " — Esc, nichts gewählt."), st, \
                 {"konto_stand": ko, "popups": st.get("popups"), "panel_lage": pd}
         geklickt_umschalter = True
-        s.klick(cdp_rect(ko.get("schalter")), "Konto-Umschalter")
+        if not s.klick(cdp_rect(ko.get("schalter")), "Konto-Umschalter") and not getattr(s, "_druck_versucht", False):
+            # UMSCHALTER NICHT GEDRÜCKT (Puls-Fehler-Routine 13.10.2026, Muster „konto: tradovate-login '#' nicht geschafft (abmelden):
+            # kontextmenü … ließ sich nicht klicken" / „knopf: … nach 'Log out' zeigt TradingView weiter ein Konto", 3 Fälle am 12.10.
+            # auf einem PC, 13:53 + 23:54 UTC): der Klick kam bewiesen NICHT an (Puls-Chrome nicht vorn, Windows-Leiste über dem Punkt,
+            # :hover woanders) — die drei Blicke liefen trotzdem, „keine Liste" galt als Beleg „Login mit einem Konto", und der Login-Weg
+            # meldete eine richtige Sitzung ab bzw. scheiterte am selben Hindernis. Ein Nicht-Druck öffnet nichts: nach kurzer Pause
+            # EINMAL neu (kein zweiter Klick auf eine offene Liste — es wurde nichts gedrückt), sonst ehrlich raus OHNE Login-Beleg
+            # (cdp_login_noetig → nein, nichts abgemeldet). _druck_versucht True = vielleicht doch gedrückt → Weg wie bisher.
+            geklickt_umschalter = False
+            if not nicht_gedrueckt:
+                nicht_gedrueckt = True
+                trail.append("Konto-Umschalter nicht gedrückt (kein Druck, bewiesen) — nach kurzer Pause einmal neu")
+                _warte(1.5, 0.8)
+                st = s.stand(opts)
+                continue
+            return False, "konto_nicht_erreicht", (f"Konto-Umschalter nicht gedrückt (Klick ohne Beweis, zweimal; aktiv "
+                                                   f"'{aktiv[:40] or '-'}') — keine Liste gelesen, kein Login-Beleg, nichts gewählt."), st, \
+                {"konto_stand": ko, "umschalter_nicht_gedrueckt": True}
         # BIS ZU DREI LESUNGEN (08.10.2026, Slave-Terminal 3, Muster „konto: konto-umschalter geklickt, dropdown nicht erkannt" 4× in
         # 7 Tagen auf 3 PCs / 3 IDs): bisher entschied EINE Lesung ~1 s nach dem bewiesenen Klick. Beleg pc-xxxxxx 06.10. 16:16:09:
         # Login mit 6 Konten, Liste nicht da → Fehlstart; 16 s später derselbe PC, derselbe Umschalter: Liste sofort da, Konto gewechselt.
