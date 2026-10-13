@@ -18336,7 +18336,9 @@ class _AugenSitzung:
             if CDP_WERBUNG_X_TABU_RX.search(x_wort):
                 self.trail.append(f"[Werbung] Dialog '{name}': X '{x_wort.strip()[:40]}' ist kein Schließen-Knopf — bleibt stehen, kein Esc")
                 return 0
-            if not self._win_klick(cdp_rect(x.get("rect")), f"Werbung schließen (X) Dialog '{name}'", toast_ok=True):
+            # 13.10.2026 (Routine „Puls-Fehler", 34 Fälle in 24 h „erkannt, aber kein eindeutiges X (keins)"): augen.js 0.8.2 liefert das X
+            # jetzt auch an der Karte eines Vollbild-Dialogs und als namenlosen Symbol-Knopf (x.namenlos) — in der Spur sichtbar
+            if not self._win_klick(cdp_rect(x.get("rect")), f"Werbung schließen (X) Dialog '{name}'" + (" (namenloses X)" if x.get("namenlos") else ""), toast_ok=True):
                 self.trail.append(f"[Werbung] Dialog '{name}': X nicht gedrückt (kein Beweis) — bleibt stehen, kein Esc")
                 return 0
             _warte(0.6, 0.3)
@@ -18951,6 +18953,8 @@ def _cdp_konto_sichern(s, ext, opts, trail):
     fremd_esc = False
     neu_geladen = False
     nicht_gedrueckt = False
+    konto_geklickt = False                                # ein Konto-Eintrag wurde in DIESEM Lauf bewiesen gedrückt (13.10.2026)
+    umbau_blick = 0
 
     def _eintr(ko_):
         return [str(x.get("text"))[:40] for x in (ko_.get("eintraege") or []) if isinstance(x, dict)][:20]
@@ -19065,6 +19069,7 @@ def _cdp_konto_sichern(s, ext, opts, trail):
                 _cdp_esc(s, st, trail, "Konto-Eintrag nicht gedrückt")
                 return False, "konto_nicht_erreicht", f"Konto-Eintrag {ext} nicht gedrückt (Klick ohne Beweis) — Liste mit Esc zu, nichts gewechselt.", \
                     st, {"konto_eintraege": _eintr(ko)}
+            konto_geklickt = True
             _warte(1.2, 0.6)
             st = s.stand(opts)
             continue
@@ -19086,8 +19091,21 @@ def _cdp_konto_sichern(s, ext, opts, trail):
                                           + ("kein Aufklapp-Symbol „Maximize panel“" if lage == "ohne_knopf" else "nicht aufklappbar")
                                           + f" (aktiv '{aktiv[:40] or '-'}') → wie kein Broker: Login-Weg"), st, {"panel_lage": pd}
         if not cdp_rect(ko.get("schalter")):
+            # UMSCHALTER NACH DEM KONTO-KLICK KURZ WEG (Routine „Puls-Fehler" 13.10.2026, Muster „konto: kein konto-umschalter zu sehen
+            # (aktiv '-', ) — tradovate im puls-chrome verbunden?" — 4 Fälle in 24 h auf 3 PCs; Spur jedes Mal „Konto … geklickt
+            # (Windows-Maus, Hover bewiesen)" und ~1,5 s später dieser Satz): Tradovate baut das Panel beim Kontowechsel neu auf, Umschalter
+            # und aktives Konto sind dabei kurz nicht lesbar — EINE Lesung entschied und der Lauf endete als „kein Broker" (bzw. nach dem
+            # Login-Weg als „Gehört der Username wirklich zu dieser Firma?"). Nach einem bewiesenen Konto-Klick darum bis zu drei weitere
+            # Blicke (je 1,0–1,5 s, gestreut, jeder in der Spur), bevor „kein Broker" gilt. Ohne eigenen Konto-Klick wie bisher sofort.
+            if konto_geklickt and umbau_blick < 3:
+                umbau_blick += 1
+                trail.append(f"Konto-Umschalter nach dem Konto-Klick nicht lesbar (aktiv '{aktiv[:40] or '-'}') — Panel baut um? Blick {umbau_blick}/3")
+                _warte(1.0, 0.5)
+                st = s.stand(opts)
+                continue
             return False, "kein_broker", (f"Kein Konto-Umschalter zu sehen (aktiv '{aktiv[:40] or '-'}', "
-                                          f"{str(ko.get('hinweis') or '')[:80]}) — Tradovate im Puls-Chrome verbunden?"), st, {}
+                                          f"{str(ko.get('hinweis') or '')[:80]}) — Tradovate im Puls-Chrome verbunden?"
+                                          + (f" — auch {umbau_blick} Blicke nach dem Konto-Klick nicht" if umbau_blick else "")), st, {}
         # Umschalter höchstens EINMAL (erster Live-Lauf 00:44 UTC: 4 Klicks hintereinander — ein zweiter Klick schließt ein
         # offenes Dropdown wieder). Danach zweimal lesen; bleibt es zu, ehrlich raus MIT dem Stand für T1.
         if geklickt_umschalter and st.get("popups") and not werbung_versucht and hasattr(s, "werbung_weg"):

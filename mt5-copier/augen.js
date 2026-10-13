@@ -23,7 +23,8 @@
  */
 var PROPHOS_AUGEN = (function () {
   'use strict';
-  var VERSION = '0.8.1';   // 0.8.1 (08.10.2026, Slave 1, Puls-Fehler pc-2zc2we 13:25 + pc-usq1i6 13:28 UTC „'Take profit' steht nicht auf $ (Einheit '?')"): TradingView rollt je Konto/Browser eine neue Beschriftung aus — „Take profit $" / „Stop loss $" (mit ▾-Wähler) statt „Take profit, $"; tp/sl.einheit liest jetzt beide Formen (Komma ODER Leerzeichen vor der Einheit, ▾ weg, USD → $)   // 0.8.0 (08.10.2026, Slave-Terminal 3, Auftrag Master: Apex-Logins mit vielen Konten, Liste scrollbar): konto_scroll(aktion) — die offene Konto-Liste abschnittsweise lesen: 'anfang' scrollt den Container nach oben, 'schritt' liest die sichtbaren Zeilen und scrollt dann einen Schritt weiter, mit Mitschrift der Scrollposition (vorher/nachher/hoehe/sicht/ende). Scrollt nur den Listen-Container, klickt nie; der Bot führt Abschnitte zusammen und schließt die Liste wie heute mit Esc   // 0.7.9 (08.10.2026, Slave-Terminal 3, Muster „knopf: senden-knopf nicht gedrückt (maus nicht bewiesen über dem knopf)" 4× auf 4 PCs): maus() — wo die Seite den Zeiger zuletzt sah (mousemove-Mitschrift, einmal je Seite installiert), damit der Bot vor dem Hover-Riegel unterscheiden kann „Bewegung kam nie an" (sofort frisch bewegen) und „Ziel bewegt sich unter dem Zeiger"   // 0.7.8 (05.10.2026, Finn: „auch diese kleinen Ads unten links automatisch wegklicken"): toasts.werbung — kleine Werbe-Kachel #charting-ad mit ihrem Knopf „Close ad" (nur Diagnose, geschlossen wird sie im Bot)
+  var VERSION = '0.8.2';   // 0.8.2 (13.10.2026, Routine „Puls-Fehler", „Go ad-free. Everywhere" 34× in 24 h auf 3 PCs): xIn findet das X eines Vollbild-Dialogs an seiner Karte und auch ein namenloses X (nur Symbol) — s. Kommentar an xIn
+    // 0.8.1 (08.10.2026, Slave 1, Puls-Fehler pc-2zc2we 13:25 + pc-usq1i6 13:28 UTC „'Take profit' steht nicht auf $ (Einheit '?')"): TradingView rollt je Konto/Browser eine neue Beschriftung aus — „Take profit $" / „Stop loss $" (mit ▾-Wähler) statt „Take profit, $"; tp/sl.einheit liest jetzt beide Formen (Komma ODER Leerzeichen vor der Einheit, ▾ weg, USD → $)   // 0.8.0 (08.10.2026, Slave-Terminal 3, Auftrag Master: Apex-Logins mit vielen Konten, Liste scrollbar): konto_scroll(aktion) — die offene Konto-Liste abschnittsweise lesen: 'anfang' scrollt den Container nach oben, 'schritt' liest die sichtbaren Zeilen und scrollt dann einen Schritt weiter, mit Mitschrift der Scrollposition (vorher/nachher/hoehe/sicht/ende). Scrollt nur den Listen-Container, klickt nie; der Bot führt Abschnitte zusammen und schließt die Liste wie heute mit Esc   // 0.7.9 (08.10.2026, Slave-Terminal 3, Muster „knopf: senden-knopf nicht gedrückt (maus nicht bewiesen über dem knopf)" 4× auf 4 PCs): maus() — wo die Seite den Zeiger zuletzt sah (mousemove-Mitschrift, einmal je Seite installiert), damit der Bot vor dem Hover-Riegel unterscheiden kann „Bewegung kam nie an" (sofort frisch bewegen) und „Ziel bewegt sich unter dem Zeiger"   // 0.7.8 (05.10.2026, Finn: „auch diese kleinen Ads unten links automatisch wegklicken"): toasts.werbung — kleine Werbe-Kachel #charting-ad mit ihrem Knopf „Close ad" (nur Diagnose, geschlossen wird sie im Bot)
     // 0.7.7 (05.10.2026): Kontonummern mit nur 4 Endziffern (mindestens 10 Buchstaben davor) zählen als Konto-Zeile und Umschalter (kontoNrAus, RX_KONTO) — vorher „0x im Dropdown“. 0.7.6 (05.10.2026, Finn: „erkennt das falsche Tradovate-Konto und bricht einfach ab"): konto.liste_kurz — eine kurze Liste (≤ 8 Zeilen) mit Platz darüber und darunter ist ganz zu sehen, auch wenn listeVoll am Container scheitert; konto.liste_voll_grund nennt, woran
     // 0.7.5 (02.10.2026, Finn + Pascal): Kontonummern mit 5 End-Ziffern (FundedNext Futures) — Umschalter nach dem Login sonst „kein Konto“
     // 0.7.4 (30.09.2026, Regression .865): Konto-Umschalter relativ zur Broker-Leiste (auch maximiert oben), konto.panel_lage, keine Ein-Zeilen-Liste ohne Umschalter, konto.liste_voll (ganze Liste im Bild)   // 0.7.3 (29.09.2026, K3): kurz() gibt geheime Felder (Passwort, Login-Formular) nie mit Wert zurück   // 0.7.2 (29.09.2026): Aufnahme stoppt nach 10 min von selbst   // 0.7.1 (29.09.2026, K2 für T3): kauf_knopf.disabled, tp/sl.einheit/wert/neben, summary_reiter   // 0.7.0 (29.09.2026, Aufnahme 00:52): Kontoliste ohne Rollen, Meldungs-Status, Watchlist, Dialog-Knöpfe   // 0.6.1 (29.09.2026): aufnahme_letzte() als Rettungskopie, T3-Banner 'prophos-aufnahme' ausgeblendet   // 0.6.0 (29.09.2026, Aufnahme 00:36 leer): window-capture, roh-Zähler, tab_id, Sichtbarkeit   // 0.5.3 (29.09.2026, Lesung 00:22:50): Konto-Anker Kontonummer zuerst, Summary Total P/L = today   // 0.5.2 (29.09.2026, Lesung 00:22): Panel 'Collapse panel'/Manager-Knopf, Konto entdoppelt + kontonr   // 0.5.1 (29.09.2026, Lesung 00:17 pc-cccccc): Schalter-Rechteck, ticket.seite/bereit, Legende, veraltete Zeilen   // 0.5.0 (29.09.2026): Aufnahme-Modus (Finn klickt den Ablauf einmal selbst, jede Aktion wird mitgeschrieben)   // 0.4.0 (29.09.2026, K1–K4 für T3): positionen, orders, konto_summary, symbolsuche, toasts.meldungen   // 0.3.0 (29.09.2026, erste echte Lesung pc-cccccc): TP/SL-Zustand, Konto-Leiste, Toast-Rückfall   // 0.2.0 (29.09.2026): Vertrag mit T3 — globalThis.prophosAugen, Schlüssel-Whitelist, popups, kauf_knopf
@@ -305,16 +306,59 @@ var PROPHOS_AUGEN = (function () {
   }
 
   // ── Dialoge / Popups / Overlays mit ihrem X ────────────────────────────────
+  // 0.8.2 (13.10.2026, Routine „Puls-Fehler", Muster „konto/konto_balance: tradovate-login '#' nicht geschafft (abmelden): kontextmenü
+  // neben 'tradovate' blieb leer: dialog 'Go ad-free. Everywhere' liegt über der seite" — 34 Fehlstarts in 24 h auf 3 PCs, Spur jedes
+  // Mal „[Werbung] Dialog 'Go ad-free. Everywhere' erkannt, aber kein eindeutiges X (keins)"): xIn maß die Ecke am [role=dialog]-Kasten
+  // und verlangte ein Schließen-Wort. Bei diesem Modal ist der Kasten der Vollbild-Schleier, die Karte mit dem X sitzt mittig darin,
+  // und TradingViews X trägt dort keinen Namen (nur ein Symbol — s. Kopf: „ihr X hat weder data-name noch aria-label"). Jetzt:
+  // (1) die Ecke gilt am Dialog-Kasten ODER an seiner KARTE (größter sichtbarer Kasten darin, der nicht den ganzen Schirm füllt);
+  // (2) findet sich kein benanntes X, zählt ein NAMENLOSER kleiner Knopf (button/[role=button], kein Text außer höchstens einem
+  //     ×-Zeichen, kein aria-label/title/data-name) in dieser Ecke — nur wenn er der EINZIGE ist und an seinem Mittelpunkt oberstes
+  //     Element (nicht verdeckt). Zwei Kandidaten → { mehrdeutig } wie bisher, der Bot klickt dann nichts. Ob das X benannt war,
+  //     steht im Ergebnis (namenlos: true) und damit in der Spur. Ein benanntes X gewinnt bitgleich wie vor 0.8.2.
+  function karteIn(box) {
+    var r = box.getBoundingClientRect(), vw = window.innerWidth || 1, vh = window.innerHeight || 1;
+    if (r.width * r.height < 0.6 * vw * vh) return box;          // normaler Dialog: der Kasten selbst ist die Karte
+    var best = null, bf = 0;
+    alle('*', box).forEach(function (e) {
+      if (!sichtbar(e)) return;
+      var q = e.getBoundingClientRect(), f = q.width * q.height;
+      if (q.width < 200 || q.height < 80 || f > 0.8 * vw * vh || f <= bf) return;
+      best = e; bf = f;
+    });
+    return best || box;
+  }
+  function obenAn(e) {
+    try {
+      var q = e.getBoundingClientRect(), o = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2);
+      return !!o && (o === e || e.contains(o));
+    } catch (_) { return false; }
+  }
   function xIn(box) {
-    var r = box.getBoundingClientRect();
-    var kand = alle('button,[role="button"],[data-name*="close"],[aria-label]', box).filter(sichtbar).filter(function (e) {
-      var q = e.getBoundingClientRect();
-      var eck = (r.right - q.right) <= 70 && (q.top - r.top) <= 70 && q.width <= 60 && q.height <= 60;
+    var r = box.getBoundingClientRect(), k = karteIn(box).getBoundingClientRect();
+    function eck(q) {
+      return q.width <= 60 && q.height <= 60 &&
+        (((r.right - q.right) <= 70 && (q.top - r.top) <= 70) || ((k.right - q.right) <= 70 && (q.top - k.top) <= 70));
+    }
+    var sicht = alle('button,[role="button"],[data-name*="close"],[aria-label]', box).filter(sichtbar);
+    var kand = sicht.filter(function (e) {
       var wort = RX_SCHLIESSEN.test(txt(e) + ' ' + attr(e, 'aria-label') + ' ' + attr(e, 'data-name') + ' ' + attr(e, 'title'));
-      return eck && (wort || /close/i.test(attr(e, 'data-name')));
+      return eck(e.getBoundingClientRect()) && (wort || /close/i.test(attr(e, 'data-name')));
     });
     kand = kand.filter(function (e) { return !kand.some(function (f) { return f !== e && e.contains(f); }); });
-    return kand.length === 1 ? kurz(kand[0]) : (kand.length ? { mehrdeutig: kand.length } : null);
+    var namenlos = false;
+    if (!kand.length) {
+      kand = sicht.filter(function (e) {
+        if (!/^button$/i.test(e.tagName) && attr(e, 'role') !== 'button') return false;
+        if ((attr(e, 'aria-label') + attr(e, 'title') + attr(e, 'data-name')).trim()) return false;
+        if (!/^[×✕✖xX]?$/.test(txt(e))) return false;
+        var q = e.getBoundingClientRect();
+        return q.width >= 6 && q.height >= 6 && eck(q) && obenAn(e);
+      });
+      kand = kand.filter(function (e) { return !kand.some(function (f) { return f !== e && e.contains(f); }); });
+      namenlos = kand.length > 0;
+    }
+    return kand.length === 1 ? kurz(kand[0], namenlos ? { namenlos: true } : null) : (kand.length ? { mehrdeutig: kand.length } : null);
   }
   function dialoge() {
     var gesehen = [];

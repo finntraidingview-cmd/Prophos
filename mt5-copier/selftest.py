@@ -3520,6 +3520,44 @@ def test_puls_cdp_login():
     chk(not rl3_[0] and rl3_[1] == "konto_nicht_erreicht" and kl3_.klicks == ["Konto-Umschalter", "Taste Escape"] and "Dropdown nicht erkannt" in rl3_[2]
         and sum(1 for x in tl3_ if "keine Liste (0 Zeilen)" in x) == 3,
         f"Umschalter: nie eine Liste → drei Blicke in der Spur, dann Esc + Meldung wie bisher ({kl3_.klicks}, {tl3_})")
+    # UMSCHALTER NACH DEM KONTO-KLICK KURZ WEG (Puls-Fehler-Routine 13.10.2026 abends, Muster „konto: kein konto-umschalter zu sehen
+    # (aktiv '-')" 4× in 24 h auf 3 PCs, jeweils ~1,5 s nach „Konto … geklickt (Hover bewiesen)"): Tradovate baut das Panel beim
+    # Kontowechsel um — Umschalter/aktiv kurz nicht lesbar → nach dem eigenen Konto-Klick bis zu drei Blicke (jeder in der Spur), dann
+    # erst „kein Broker"; kommt das Konto beim 2. oder 4. Blick → gewechselt, kein weiterer Klick; ohne eigenen Konto-Klick wie bisher
+    class _SU(_SK):
+        def __init__(self, zurueck_ab=2, **kw):
+            _SK.__init__(self, gross=True, **kw); self.zurueck_ab, self.umbau, self.gewechselt = zurueck_ab, 0, False
+        def klick(self, r, n, toast_ok=False):
+            ok_ = _SK.klick(self, r, n, toast_ok)
+            if n.startswith("Konto "):
+                self.gewechselt = True
+            return ok_
+        def stand(self, opts=None):
+            st_ = _SK.stand(self, opts)
+            if self.gewechselt:
+                self.umbau += 1
+                if not self.zurueck_ab or self.umbau < self.zurueck_ab:
+                    st_["konto"] = {"panel": "offen", "schalter": None, "aktiv": "", "liste_offen": False, "eintraege": []}
+            return st_
+    ob._warte = lambda a_, b_: None
+    try:
+        ku1_, tu1_ = _SU(zurueck_ab=2), []
+        ru1_ = ob._cdp_konto_sichern(ku1_, "PAAPEX0000000000008", {}, tu1_)
+        ku2_, tu2_ = _SU(zurueck_ab=4), []
+        ru2_ = ob._cdp_konto_sichern(ku2_, "PAAPEX0000000000008", {}, tu2_)
+        ku3_, tu3_ = _SU(zurueck_ab=0), []
+        ru3_ = ob._cdp_konto_sichern(ku3_, "PAAPEX0000000000008", {}, tu3_)
+    finally:
+        ob._warte = alt_w
+    chk(ru1_[0] and ku1_.klicks == ["Konto-Umschalter", "Konto PAAPEX0000000000008"] and sum(1 for x in tu1_ if "Panel baut um? Blick 1/3" in x) == 1
+        and not any("Blick 2/3" in x for x in tu1_) and "Konto steht: 'PAAPEX0000000000008USD'" in tu1_,
+        f"Konto-Klick, Umschalter beim 1. Blick weg, beim 2. da → gewechselt, ein Blick in der Spur ({ku1_.klicks}, {tu1_})")
+    chk(ru2_[0] and ku2_.klicks == ["Konto-Umschalter", "Konto PAAPEX0000000000008"] and sum(1 for x in tu2_ if "Panel baut um?" in x) == 3
+        and any("Blick 3/3" in x for x in tu2_), f"Konto-Klick, Umschalter erst nach drei Blicken da → trotzdem gewechselt ({tu2_})")
+    chk(not ru3_[0] and ru3_[1] == "kein_broker" and "auch 3 Blicke nach dem Konto-Klick nicht" in ru3_[2] and ku3_.klicks == ["Konto-Umschalter", "Konto PAAPEX0000000000008"]
+        and sum(1 for x in tu3_ if "Panel baut um?" in x) == 3 and ob.cdp_login_noetig(ru3_[1], ru3_[4]),
+        f"Konto-Klick, Umschalter kommt nie zurück → drei Blicke, dann kein_broker mit Hinweis ({ru3_[1]}, {ru3_[2]}, {tu3_})")
+    chk(r2_[1] == "kein_broker" and "Blicke nach dem Konto-Klick" not in r2_[2], f"ohne eigenen Konto-Klick: kein_broker sofort wie bisher ({r2_[2]})")
     # UMSCHALTER NICHT GEDRÜCKT (Puls-Fehler-Routine 13.10.2026, 3 Fälle 12.10. auf einem PC: Puls-Chrome nicht vorn / Windows-Leiste
     # über dem Punkt / :hover woanders): klick() False ohne Druck → KEINE drei Blicke, kein „Login mit einem Konto", nach Pause EINMAL
     # neu; zweimal nicht gedrückt → ehrlich raus ohne Login-Beleg (kein Abmelden); „vielleicht gedrückt" (_druck_versucht) → Weg wie bisher
@@ -3993,7 +4031,12 @@ def test_cdp_konto_regression_865():
     js = open(_os.path.join(_os.path.dirname(_os.path.abspath(ob.__file__)), "augen.js"), encoding="utf-8").read()
     chk("function kontoSchalter()" in js and "r.top >= lr.top - 4" in js and "var s = kontoSchalter();" in js
         and "(eintraege.length === 1 && !!s.el && !eintraege[0].aktiv)" in js and "panel_lage: lage" in js
-        and "VERSION = '0.8.1'" in js, "augen.js 0.7.4+: Umschalter unter der Broker-Leiste (beide Lagen), panel_lage, Liste nur mit Umschalter")
+        and "VERSION = '0.8.2'" in js, "augen.js 0.7.4+: Umschalter unter der Broker-Leiste (beide Lagen), panel_lage, Liste nur mit Umschalter")
+    # augen.js 0.8.2 (13.10.2026, Routine Puls-Fehler, „Go ad-free. Everywhere" 34× in 24 h: „kein eindeutiges X (keins)"): Dialog-X an der Karte
+    # eines Vollbild-Dialogs und namenloses Symbol-X (nur wenn einziges, unverdeckt) — Browser-Probe: node tools/selftest_augen_dialog_x.js
+    chk("function karteIn(box)" in js and "function obenAn(e)" in js and "namenlos: true" in js and "{ mehrdeutig: kand.length }" in js
+        and js.count("function xIn(box)") == 1 and "0.6 * vw * vh" in js and "0.8 * vw * vh" in js,
+        "augen.js 0.8.2: Dialog-X an der Karte + namenloses X nur eindeutig und unverdeckt, mehrdeutig bleibt mehrdeutig")
     # MAUS-MITSCHRIFT (0.7.9, 08.10.2026, Slave-Terminal 3): augen.js meldet, wo die Seite den Zeiger zuletzt sah; der Bot stupst sofort,
     # wenn die Bewegung nie ankam, und schreibt den Befund in die Spur — der Hover-Riegel bleibt (ohne :hover kein Druck)
     chk("function kontoScroll(aktion)" in js and "konto_scroll: kontoScroll" in js and "c.scrollTop = 0" in js and ".click(" not in js.split("function kontoScroll")[1].split("function mausMitschrift")[0]
