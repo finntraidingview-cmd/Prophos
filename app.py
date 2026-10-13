@@ -19611,6 +19611,22 @@ def gp_takt_faellig(lokal, zeiten):
     return _ap_hhmm(zeiten.get("lauf") or "06:00") <= m < _ap_hhmm(zeiten.get("bis") or "17:20") - GP_VORLAUF_MIN
 
 
+def gp_auftrag_tick():
+    """EINMAL-AUFTRAG per DB (13.10.2026, Finn: „plan die Trades für morgen zum Testen"): auto_plan_gruppe.zeiten.auftrag = 'morgen' |
+    'heute' | 'JJJJ-MM-TT' → einmal gp_planen(tag=…), unabhängig vom Takt-Fenster. Der Auftrag wird vorher per bedingtem Update
+    weggenommen (Claim) — zwei Container planen nie doppelt. Läuft im 60-s-Takt mit den Handy-Meldungen."""
+    for z in sb_select("auto_plan_gruppe", {"select": "gruppe_id,zeiten", "zeiten->>auftrag": "not.is.null"}) or []:
+        zeiten = dict(z.get("zeiten") or {})
+        auftrag = str(zeiten.pop("auftrag", "") or "").strip()
+        r = _sb_anfrage("PATCH", f"{SUPABASE_URL}/rest/v1/auto_plan_gruppe", headers=_sb_headers("return=representation"),
+                        params={"gruppe_id": f"eq.{z['gruppe_id']}", "zeiten->>auftrag": f"eq.{auftrag}"}, json={"zeiten": zeiten})
+        _sb_pruefen(r)
+        if not r.json():
+            continue                                  # ein anderer Container hat ihn schon
+        erg = gp_planen(z["gruppe_id"], quelle="auftrag", tag=auftrag or None)
+        print(f"[gruppen-plan] Auftrag {auftrag}: {erg.get('msg') or str(len(erg.get('geplant') or [])) + ' geplant'}", flush=True)
+
+
 def gp_tick(jetzt=None):
     """Railway-Takt (ap_loop): alle GP_TAKT_S je aktiver Gruppe gp_planen(quelle='takt') — plant nur Konten ohne Plan für heute."""
     if time.time() - (_gp_info.get("letzter_takt") or 0) < GP_TAKT_S:
@@ -24947,6 +24963,13 @@ def ap_loop():
         except Exception as e:
             _gp_info["fehler"] = f"{type(e).__name__}: {e}"
             print(f"[gruppen-plan] ⚠️ {e}", flush=True)
+        try:
+            if time.time() - (_gp_info.get("auftrag_at") or 0) >= 60:
+                _gp_info["auftrag_at"] = time.time()
+                gp_auftrag_tick()             # Einmal-Auftrag aus der DB (zeiten.auftrag), 13.10.2026
+        except Exception as e:
+            _gp_info["fehler"] = f"Auftrag: {type(e).__name__}: {e}"
+            print(f"[gruppen-plan] ⚠️ Auftrag: {e}", flush=True)
         try:
             gp_push_tick()                    # Handy-Meldungen an den Verwalter (gestartet / nicht gestartet), 13.10.2026
         except Exception as e:
