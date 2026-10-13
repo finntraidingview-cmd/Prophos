@@ -2946,6 +2946,18 @@
      eine Kachel in ID-Farbe (--id aus idFarbe), Klick = nur diese ID. Haken oben rechts = Planer-Haken. Handy: eine Reihe zum Wischen. */
   #adm-pane-planer .ap-ids-kopf{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 8px}
   #adm-pane-planer .ap-ids-kopf b{font-size:14px;color:var(--ink)} #adm-pane-planer .ap-ids-kopf span{font-size:12px;color:var(--sub);font-variant-numeric:tabular-nums}
+  /* GRUPPEN-PLANER (13.10.2026, Emin-Gruppe): eine schlichte Zeile unter der ID-Leiste — Stand, Probelauf, Jetzt planen, an/aus; Klick auf
+     „ausgelassen"/„Probelauf" klappt eine kleine Liste auf. Nur für Verwalter (und Admin), keine eigenen Farben. */
+  #adm-pane-planer .gp-leiste{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap;font-size:12.5px;color:var(--sub);padding:8px 0 10px;border-bottom:1px solid var(--border);margin-bottom:12px}
+  #adm-pane-planer .gp-leiste b{color:var(--ink);font-size:13px} #adm-pane-planer .gp-leiste .btn{padding:3px 9px;font-size:12px}
+  #adm-pane-planer .gp-leiste .gp-an{color:var(--ink)} #adm-pane-planer .gp-leiste .gp-an::before{content:'●';color:#12b76a;margin-right:4px}
+  #adm-pane-planer .gp-leiste .gp-aus::before{content:'○';margin-right:4px}
+  #adm-pane-planer .gp-leiste .gp-r{margin-left:auto;display:flex;gap:6px}
+  #adm-pane-planer .gp-leiste button.gp-link{background:none;border:0;padding:0;font:inherit;color:var(--sub);text-decoration:underline dotted;cursor:pointer}
+  #adm-pane-planer .gp-liste{font-size:12px;margin:-4px 0 12px;max-height:280px;overflow:auto}
+  #adm-pane-planer .gp-liste div{display:flex;gap:10px;padding:3px 0;border-bottom:1px solid var(--border);font-variant-numeric:tabular-nums}
+  #adm-pane-planer .gp-liste .k{flex:0 0 auto;min-width:210px;color:var(--ink)} #adm-pane-planer .gp-liste .g{color:var(--sub)}
+  #adm-pane-planer .gp-msg{font-size:12px;color:var(--sub);margin:-4px 0 10px}
   /* REITER STATT KACHELN (08.10.2026, Slave-Terminal 3 — Finn, Screenshot .1238 auf 2000 px: „Oben jetzt mal ein bisschen schöner. Das mit
      den IDs im Planer sieht nicht so geil aus. Auch vom Mapping gefällt es mir nicht" — zwei Reihen getönter Kacheln, die gedimmten „nicht im
      Planer" so groß wie die anderen): eine Zeile wie die Admin-Reiter darüber (.subtab: Text, 2-px-Unterstrich, Linie unten), je ID Punkt +
@@ -64516,6 +64528,7 @@
     if(_apIds.laeuft){ _apIds.nochmal = true; return }   // läuft schon: danach genau einmal nachladen, statt den Wunsch zu verschlucken (Bestätigen-Serie, 08.10.2026)
     _apIds.laeuft = true; _apIds.nochmal = false; _apIds.fehler = ''; _apIds.offenFehler = ''
     const t0 = Date.now()
+    gpLaden()   // Gruppen-Planer-Zeile (13.10.2026) — eigener Abruf, zeichnet selbst nach
     // ZU BESTÄTIGEN (Finn 08.10.2026: „unter Admin eine richtig cleane Übersicht über alle Trades, die ich bestätigen muss"): offene
     // Vorschläge aller IDs kommen mit aus /ids (heute UND morgen — das Delta kennt nur heute), Bestätigen über tplEingriff (Admin-Route)
     // KOPF WIE DIE TRADE-PLANER-SEITE (Finn 08.10.2026: „oben ein richtig cleaner Zeitstrahl mit allen IDs, die Kacheln mit dem
@@ -64980,10 +64993,77 @@
     }))
   }
   window.apIdDetailRender = apIdDetailRender   // Stub-/Brücken-Haken wie window._apKontoOeffnen (Slave 7 ruft im selben Block direkt)
+  /* ══ GRUPPEN-PLANER (13.10.2026, Finn: „für Emin so eine kleinere Variante … alle Echo-Trades mit Gegenhedge … von 7:00 bis 17:20 …
+   * er muss die Trades erst noch mal bestätigen"). Railway plant für Verwalter-Gruppen (app.py gp_planen) Echo MIT Fusion-Hedge, eigenes
+   * Fenster, eigener Long/Short-Ausgleich; die Vorschläge stehen danach ganz normal unter „Zu bestätigen". Diese Zeile zeigt nur den Stand
+   * (GET /admin/gruppen-plan) und hat drei Knöpfe: Probelauf (rechnet, legt nichts an), Jetzt planen (Konten ohne Plan für heute), an/aus. ══ */
+  const _gp = { gruppen: [], fehler: '', laeuft: false, auf: '', probe: null, msg: '' }
+  async function gpApi(method, body){
+    const { data: { session } } = await supabase.auth.getSession()
+    const tok = session?.access_token; if(!tok) throw new Error('nicht angemeldet')
+    const r = await fetch(`${WATCHER_HOME}/admin/gruppen-plan`, { method, headers: { 'sb-token': tok, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined, cache: 'no-store' })
+    const d = await r.json().catch(() => ({}))
+    if(!r.ok || d.ok === false) throw new Error(d.msg || d.error || ('HTTP ' + r.status))
+    return d
+  }
+  async function gpLaden(){
+    if(_gp.laeuft) return
+    _gp.laeuft = true
+    try{ const d = await gpApi('GET'); _gp.gruppen = Array.isArray(d.gruppen) ? d.gruppen : []; _gp.fehler = '' }
+    catch(e){ _gp.fehler = String((e && e.message) || e) }
+    finally{ _gp.laeuft = false }
+    if(document.getElementById('ap-ids-root') && !_apIds.laeuft) apIdsRender()
+  }
+  const gpUhr = iso => { try{ return new Date(iso).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) }catch(_){ return '' } }
+  const gpRichtung = r => r === 'buy' ? 'Long' : r === 'sell' ? 'Short' : '—'
+  const gpDe = (v, d = 0) => (v == null || !isFinite(Number(v))) ? '—' : Number(v).toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d })
+  function gpLeisteHtml(){
+    if(_gp.fehler && !_gp.gruppen.length) return ''          // Route noch nicht da / kein Verwalter: nichts zeigen
+    return _gp.gruppen.map(g => {
+      const L = g.letzter_lauf || {}, z = g.zeiten || {}, gid = escapeHtml(String(g.gruppe_id))
+      const lauf = L.at ? `letzter Lauf ${escapeHtml(gpUhr(L.at))}: ${(L.geplant || []).length} geplant · <button type="button" class="gp-link" data-gp-auf="aus:${gid}">${(L.ausgelassen || []).length} ausgelassen</button>` : 'noch kein Lauf'
+      const P = _gp.probe && String(_gp.probe.gruppe_id) === String(g.gruppe_id) ? _gp.probe : null
+      const zeile = `<div class="gp-leiste"><b>🤖 Gruppen-Planer ${escapeHtml(g.name || '')}</b>
+        <span class="${g.aktiv ? 'gp-an' : 'gp-aus'}">${g.aktiv ? 'an' : 'aus'}</span>
+        <span>Echo mit Hedge · CFD · Start ${escapeHtml(z.von || '07:00')}–${escapeHtml(z.bis || '17:20')} dt · bestätigen unten</span>
+        <span>${lauf}</span>
+        <span class="gp-r"><button type="button" class="btn btn-ghost" data-gp="probe:${gid}"${_gp.laeuft ? ' disabled' : ''} title="Rechnet, wie er jetzt planen würde — legt nichts an">Probelauf</button>
+          <button type="button" class="btn btn-ghost" data-gp="planen:${gid}"${_gp.laeuft ? ' disabled' : ''} title="Plant jetzt alle Konten ohne Plan für heute (unbestätigt)">Jetzt planen</button>
+          <button type="button" class="btn btn-ghost" data-gp="aktiv:${gid}" title="Automatisch ab ${escapeHtml(z.lauf || '06:00')} dt alle 15 min">${g.aktiv ? 'Ausschalten' : 'Einschalten'}</button></span></div>`
+      const msg = _gp.msg ? `<div class="gp-msg">${escapeHtml(_gp.msg)}</div>` : ''
+      let liste = ''
+      if(_gp.auf === 'aus:' + g.gruppe_id){
+        const a = L.ausgelassen || []
+        liste = `<div class="gp-liste">${a.length ? a.map(x => `<div><span class="k">${escapeHtml(x.user || '')} · ${escapeHtml(x.konto || '')}</span><span class="g">${escapeHtml(x.grund || '')}</span></div>`).join('') : '<div class="g">nichts ausgelassen</div>'}</div>`
+      } else if(_gp.auf === 'probe:' + g.gruppe_id && P){
+        const gp = P.geplant || [], au = P.ausgelassen || []
+        liste = `<div class="gp-liste"><div class="g">Probelauf ${escapeHtml(gpUhr(P.at))} — ${gp.length} würde er planen · Long ${gpDe(P.long_usd)} $ · Short ${gpDe(P.short_usd)} $ (Risiko)</div>`
+          + gp.map(x => `<div><span class="k">${escapeHtml(x.start)} · ${escapeHtml(x.user || '')} · ${escapeHtml(x.konto || '')}</span><span>${gpRichtung(x.richtung)} · TP ${gpDe(x.tp)} $ · SL ${gpDe(x.sl)} $ · ${gpDe(x.menge, 2)} Lot · Hedge ${gpDe(x.hedge_lots, 2)} Lot (${gpDe(x.slave_risk)} €)</span></div>`).join('')
+          + au.map(x => `<div><span class="k">${escapeHtml(x.user || '')} · ${escapeHtml(x.konto || '')}</span><span class="g">${escapeHtml(x.grund || '')}</span></div>`).join('') + '</div>'
+      }
+      return zeile + msg + liste
+    }).join('')
+  }
+  function gpVerdrahten(root){
+    root.querySelectorAll('[data-gp-auf]').forEach(b => b.addEventListener('click', () => { _gp.auf = _gp.auf === b.dataset.gpAuf ? '' : b.dataset.gpAuf; apIdsRender() }))
+    root.querySelectorAll('[data-gp]').forEach(b => b.addEventListener('click', async () => {
+      const [aktion, gid] = b.dataset.gp.split(':'), g = _gp.gruppen.find(x => String(x.gruppe_id) === gid); if(!g || _gp.laeuft) return
+      _gp.laeuft = true; _gp.msg = aktion === 'probe' ? 'Probelauf rechnet …' : aktion === 'planen' ? 'plant …' : ''; apIdsRender()
+      try{
+        const d = await gpApi('POST', aktion === 'aktiv' ? { gruppe_id: gid, aktion, an: !g.aktiv } : { gruppe_id: gid, aktion })
+        if(aktion === 'probe'){ _gp.probe = d; _gp.auf = 'probe:' + gid; _gp.msg = d.msg || '' }
+        else if(aktion === 'planen'){ _gp.msg = d.msg || `${(d.geplant || []).length} Vorschläge angelegt — unten unter „Zu bestätigen"`; _gp.probe = null; _gp.auf = '' }
+        else _gp.msg = d.aktiv ? 'Gruppen-Planer an' : 'Gruppen-Planer aus'
+      }catch(e){ _gp.msg = '⚠ ' + ((e && e.message) || e) }
+      finally{ _gp.laeuft = false }
+      await gpLaden()
+      if(aktion === 'planen') apIdsLaden()
+    }))
+  }
   function apIdsRender(){
     const root = document.getElementById('ap-ids-root'); if(!root) return
     if(_apIds.fehler){ root.innerHTML = `<div style="color:var(--danger)">⚠ ${escapeHtml(_apIds.fehler)}</div>`; return }
-    const rows = _apIds.rows, drin = rows.filter(r => r.drin), u = apSichtUid()
+    const rows = _apIds.rows, drin = rows.filter(r => r.drin || r.gruppen_planer), u = apSichtUid()   // Gruppen-Planer-IDs zählen wie im Planer (13.10.2026)
     const lzAt = _ap.letzter && _ap.letzter.at && !_ap.letzter.trocken ? tplUhrIso(_ap.letzter.at) : ''
     // PC-Tab-Lebenszeichen je ID (Slave 2, .1180: pcStandPunktHtml → grün/grau/rot, '' solange nichts geladen) rechts neben dem Namen
     const pcs = uid => (typeof window.pcStandPunktHtml === 'function') ? (window.pcStandPunktHtml(String(uid)) || '') : ''
@@ -65001,7 +65081,7 @@
       const geplant = tr.filter(t => t.status === 'offen' || t.status === 'bestaetigt' || t.status === 'laeuft' || t.status === 'beendet').length   // „vorbei" = Lauf-Zeile ohne echten Plan, nie gelaufen → nicht mitzählen
       const aus = ((lauf && lauf.ausgelassen) || []).filter(x => String(x.user_id) === uid && !/geplanten\/laufenden Plan/.test(String(x.grund || '')))
       const gruende = new Map(); for(const x of aus){ const k = (typeof tplGrund === 'function') ? tplGrund(x.grund) : String(x.grund || ''); gruende.set(k, (gruende.get(k) || 0) + 1) }
-      return { uid, name: String(r.name || ''), drin: !!r.drin, geplant, laeuft: tr.filter(t => t.status === 'laeuft').length, aus: aus.length,
+      return { uid, name: String(r.name || ''), drin: !!r.drin || !!r.gruppen_planer, geplant, laeuft: tr.filter(t => t.status === 'laeuft').length, aus: aus.length,
         konten: Math.max(Number(r.konten) || 0, geplant + aus.length), ausTip: [...gruende].map(([k, n]) => `${n} ${k}`).join(' · ') }
     }
     const Z = rows.map(zahlen).sort((a, b) => b.drin - a.drin)   // ohne Haken ans Ende, sonst Reihenfolge des Backends
@@ -65042,8 +65122,10 @@
     let ow = { laeuft: '', rest: '' }; try{ ow = apIdsOffenHtml() }catch(e){ console.warn('[ap-ids] Vorschläge/Läuft', e) }
     // Ladefehler Planer/Delta sichtbar über allem (09.10.2026) — der Kopf darunter zeigt sonst still den Zwischenspeicher
     const fz = [typeof apLadeFehlerText === 'function' ? apLadeFehlerText() : '', typeof apdLadeFehlerText === 'function' ? apdLadeFehlerText() : ''].filter(Boolean)
-    root.innerHTML = fz.map(t => `<div class="tpl-fehler">${escapeHtml(t)}</div>`).join('') + leiste + apIdsKopfHtml(ow.laeuft) + ow.rest + heuteHb
+    let gpHtml = ''; try{ gpHtml = gpLeisteHtml() }catch(e){ console.warn('[gruppen-plan] Leiste', e) }
+    root.innerHTML = fz.map(t => `<div class="tpl-fehler">${escapeHtml(t)}</div>`).join('') + leiste + gpHtml + apIdsKopfHtml(ow.laeuft) + ow.rest + heuteHb
     if(leisteX && root.querySelector('.ap-idr')) root.querySelector('.ap-idr').scrollLeft = leisteX
+    try{ gpVerdrahten(root) }catch(e){ console.warn('[gruppen-plan] Knöpfe', e) }
     const det = root.querySelector('#ap-id-detail'), detFn = typeof window.apIdDetailRender === 'function' ? window.apIdDetailRender : typeof apIdDetailRender === 'function' ? apIdDetailRender : null
     if(u && det && detFn){ try{ detFn(u, det) }catch(e){ console.warn('[ap-ids] ID-Details', e) } }
     // Reiter-Klick (auch Name im Menü): Sicht auf diese ID, nochmal = alle; Reiter sind <button>, Enter/Leertaste kommen als click

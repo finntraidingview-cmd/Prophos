@@ -19022,6 +19022,372 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     return ap_sicht(erg, sicht_uid) if sicht_uid is not None else erg   # Protokoll oben vollständig, Antwort nur die eigene ID/Gruppe
 
 
+# ══ GRUPPEN-PLANER (13.10.2026, Finn: „für Emin so eine kleinere Variante … für seine drei IDs … alle Echo-Trades mit Gegenhedge bei
+# allen seinen CFD-Dingern … von 7:00 bis 17:20 deutscher Zeit automatisch gestartet … er muss die Trades erst noch mal bestätigen und
+# TP/SL anpassen können … Werte mit der gleichen Logik wie bei mir … das System komplett separat betrachten"). Eigener, kleiner Planer
+# je Verwalter-Gruppe (id_gruppen mit verwalter_user_id, eine Zeile in auto_plan_gruppe, sql/2026-10-13_gruppen_planer.sql).
+# Gleich wie ap_planen: Firmen-Regeln aus auto_plan_regeln.regeln.firmen, TP/SL/Lots über ap_konto_rechnen, dieselben Auslass-Gründe
+# (Archiv, Haken aus, Ziel-Wache, Überprüfen, geblowt, heute gehandelt, Balance nicht live). Anders:
+#  • Weg Echo MIT Fusion-Hedge (route mt5) — Slave = echo_hedge_account der ID, Risiko Master = Max-DD, Risiko Slave = Kaufpreis,
+#    Multiplikator wie tpCalcMultiplier (Emins „Auto-Vorschlag" im Popup: Kaufpreis × Risiko Master ÷ Max-DD, hier Anteil 1)
+#  • nur CFD-Firmen (Regel-Weg mt5v2/mt5) — Futures/Topstep bleiben Handarbeit, still ausgelassen
+#  • Startzeiten zufällig im Fenster der Gruppe (Standard 07:00–17:20 dt), je ID ≥ abstand_id_min (ein PC je ID)
+#  • Long/Short nur innerhalb der Gruppe; HT-Delta/Bot/Saldo sehen die Pläne nicht (Gruppe ausgeblendet, klassisches Echo zählt 0)
+#  • nie bestätigt — der Verwalter bestätigt im Admin-Reiter „Trade-Planer"; erst dann startet der PC-Tab (suStartetNichtWeil)
+# Kein Ersetzen: jeder Lauf plant nur Konten ohne Plan für heute; unbestätigte/nie gestartete Vorschläge früherer Tage löscht er.
+GP_ZEITEN_STANDARD = {"tz": "Europe/Berlin", "von": "07:00", "bis": "17:20", "lauf": "06:00", "abstand_id_min": 3}
+GP_SLAVE_PPL = 0.85          # € je NAS100-Punkt und Lot bei Fusion (FIRM_PRESETS.fusion), wenn firm_specs der ID nichts sagt
+GP_MIN_LOT = 0.01            # kleinster Fusion-Auftrag — darunter gäbe es keinen Hedge
+GP_VORLAUF_MIN = 15          # Startzeiten frühestens jetzt + 15 min (wie Nachplanen)
+GP_TAKT_S = 900              # Takt auf Railway: alle 15 min Konten ohne Plan nachplanen (ab zeiten.lauf bis bis − Vorlauf)
+GP_DD_PLAUSIBEL = 0.3        # Max-DD am Konto über 30 % der Größe (Tippfehler wie 100.000 auf 100k) → Kernwert der Firma
+GP_HEDGE_KEY = "echo_hedge_account"
+
+
+def gp_multiplikator(master_risk, menge, slave_risk, master_ppl, slave_ppl):
+    """REIN RECHNEND (testbar): wie tpMultiplierAusRisiko im Frontend — Stop-Distanz = Risiko Master ÷ ($/Pkt × Lots), Slave-Lots =
+    Risiko Slave ÷ (€/Pkt × Distanz), Multiplikator = Slave-Lots ÷ Master-Lots. Fehlt etwas oder ≤ 0 → None."""
+    try:
+        mr, q, sr, mp, sp = (float(x) for x in (master_risk, menge, slave_risk, master_ppl, slave_ppl))
+    except (TypeError, ValueError):
+        return None
+    if min(mr, q, sr, mp, sp) <= 0:
+        return None
+    stop = mr / (mp * q)
+    m = sr / (sp * stop) / q
+    return m if m == m and m > 0 else None
+
+
+def gp_dd(a, regel, groesse):
+    """REIN RECHNEND: Risiko Master = Max-DD des Kontos ($). Fehlt er oder ist unplausibel (> GP_DD_PLAUSIBEL × Größe) → Kernwert der Firma
+    (dd_pct × Größe, sonst dd_usd). Nichts davon → None."""
+    dd = _wd_num((a or {}).get("max_drawdown"))
+    if dd and dd > 0 and not (groesse and dd > GP_DD_PLAUSIBEL * float(groesse)):
+        return float(dd)
+    r = regel or {}
+    if r.get("dd_pct") and groesse:
+        return float(groesse) * float(r["dd_pct"]) / 100.0
+    v = _wd_num(r.get("dd_usd"))
+    return float(v) if v else None
+
+
+def gp_hedge(dd, kauf, menge, master_ppl, slave_ppl):
+    """REIN RECHNEND (testbar): Fusion-Hedge eines Gruppen-Plans → ({master_risk, slave_risk, multiplier, lots}, None) | (None, grund)."""
+    if not dd:
+        return None, "Max Drawdown fehlt am Konto (Risiko Master für den Hedge) — unter Accounts eintragen"
+    if not kauf or kauf <= 0:
+        return None, "Kaufpreis fehlt am Konto (Risiko Slave = Kaufpreis) — unter Accounts eintragen"
+    if not master_ppl:
+        return None, "kein Punktwert der Firma ($/Pkt je Lot in den Firmen-Einstellungen dieser ID)"
+    m = gp_multiplikator(dd, menge, kauf, master_ppl, slave_ppl)
+    if not m:
+        return None, "Hedge nicht berechenbar"
+    m = round(m, 4)
+    lots = round(m * float(menge), 2)
+    if lots < GP_MIN_LOT:
+        return None, f"Hedge unter {GP_MIN_LOT:.2f} Lot ({m * float(menge):.4f}) — von Hand planen"
+    return {"master_risk": round(float(dd), 2), "slave_risk": round(float(kauf), 2), "multiplier": m, "lots": lots}, None
+
+
+def gp_richtungen(tranchen, basis, rnd):
+    """REIN RECHNEND (testbar): tranchen [(key, gewicht $, fest buy|sell|None)] → {key: buy|sell}. basis = Long − Short der laufenden und
+    heute geplanten Trades der GRUPPE (riskierte $). Feste Tranchen (laufender/geplanter Plan derselben ID × Firma = Richtungsschutz)
+    zuerst, dann die großen zuerst jeweils auf die leichtere Seite; Gleichstand würfelt. Nur innerhalb der Gruppe — nie HT."""
+    netto, out = float(basis or 0), {}
+    for key, gew, fest in sorted(tranchen, key=lambda t: (t[2] not in ("buy", "sell"), -float(t[1] or 0), str(t[0]))):
+        if fest in ("buy", "sell"):
+            r = fest
+        elif abs(netto) < 1e-9:
+            r = rnd.choice(("buy", "sell"))
+        else:
+            r = "sell" if netto > 0 else "buy"
+        out[key] = r
+        netto += float(gew or 0) * (1 if r == "buy" else -1)
+    return out
+
+
+def gp_zeiten(plaene, von, bis, frueh, abstand, belegt, rnd):
+    """REIN RECHNEND (testbar): plaene [(plan_key, user_id)] → {plan_key: Minute ab Mitternacht}. Gleichverteilt in [max(von, frueh), bis],
+    je ID ≥ abstand min zu jedem anderen Start dieser ID (belegt {user: [Minuten]} = schon geplante Starts, wird ergänzt). 60 Würfe, dann
+    der früheste freie Platz im Minutenraster; nichts frei → Plan fehlt in der Antwort („kein freies Zeitfenster mehr")."""
+    lo, out = max(float(von), float(frueh)), {}
+    if lo > bis:
+        return out
+    for key, user in plaene:
+        bel = belegt.setdefault(user, [])
+        frei = lambda x: all(abs(x - b) >= abstand for b in bel)   # noqa: E731
+        m = next((x for x in (rnd.uniform(lo, bis) for _ in range(60)) if frei(x)), None)
+        if m is None:
+            m = next((x for x in (lo + i for i in range(int(bis - lo) + 1)) if frei(x)), None)
+        if m is not None:
+            bel.append(m)
+            out[key] = m
+    return out
+
+
+def gp_gruppe_lesen(gruppe_id):
+    """(zeile auto_plan_gruppe | None, gruppe {id, name, verwalter_id} | None, user_ids [])."""
+    zeile = (sb_select("auto_plan_gruppe", {"select": "*", "gruppe_id": f"eq.{gruppe_id}"}) or [None])[0]
+    daten = admin_gruppen_daten()
+    gr = next((x for x in daten.get("gruppen") or () if str(x.get("id")) == str(gruppe_id)), None)
+    uids = sorted({str(m.get("user_id")) for m in daten.get("mitglieder") or () if str(m.get("gruppe_id")) == str(gruppe_id)})
+    return zeile, gr, uids
+
+
+def gp_planen(gruppe_id, trocken=False, quelle="hand", seed=None):
+    """Plant den heutigen Tag (deutsche Zeit) für eine Verwalter-Gruppe. trocken = nur rechnen. → Ergebnis-Dict
+    {ok, tag, geplant[], ausgelassen[], long_usd, short_usd, …}; mit trocken False auch in auto_plan_gruppe.letzter_lauf."""
+    zeile, gr, uids = gp_gruppe_lesen(gruppe_id)
+    if not zeile:
+        return {"ok": False, "msg": "Diese Gruppe hat keinen Gruppen-Planer (auto_plan_gruppe)"}
+    if not gr or not gr.get("verwalter_id"):
+        return {"ok": False, "msg": "Gruppe unbekannt oder ohne Verwalter — der Gruppen-Planer ist nur für Verwalter-Gruppen"}
+    if not uids:
+        return {"ok": False, "msg": "Gruppe ohne Mitglieder"}
+    zeiten = dict(GP_ZEITEN_STANDARD, **(zeile.get("zeiten") or {}))
+    tz = _ap_tz(zeiten["tz"])
+    jetzt = datetime.now(timezone.utc)
+    lokal = jetzt.astimezone(tz)
+    tag = lokal.strftime("%Y-%m-%d")
+    erg = {"ok": True, "gruppe_id": str(gruppe_id), "gruppe": gr.get("name"), "tag": tag, "quelle": quelle, "trocken": bool(trocken),
+           "at": jetzt.isoformat(), "fenster": [zeiten["von"], zeiten["bis"]], "geplant": [], "ausgelassen": []}
+    if lokal.weekday() >= 5:
+        return dict(erg, msg="Wochenende — nichts geplant")
+    mitternacht = datetime(lokal.year, lokal.month, lokal.day, tzinfo=tz)
+    von, bis = _ap_hhmm(zeiten["von"]), _ap_hhmm(zeiten["bis"])
+    frueh = ((jetzt + timedelta(minutes=GP_VORLAUF_MIN)) - mitternacht).total_seconds() / 60.0
+    in_uids = "in.(" + ",".join(uids) + ")"
+    firmen = ((sb_select("auto_plan_regeln", {"select": "regeln", "id": "eq.1"}) or [{}])[0].get("regeln") or {}).get("firmen") or []
+    konten = _sb_all("accounts", {"select": AP_KONTO_FELDER + ",purchase_cost", "user_id": in_uids, "order": "id.asc",
+                                  "account_type": "in.(" + ",".join(AP_TYPEN) + ")"})
+    roh = _ap_plaene_mit_hand({"select": "id,user_id,master_account_id,master_firm,status,richtung,master_tp,master_sl,blown,route,"
+                                         "ended_at,completed_at,auto_plan,auto_bestaetigt_at,start_um_gestartet_at,start_um,planned_for,"
+                                         "started_at,orbit_gesendet_at,mt5_baseline->final", "order": "id.asc",
+                               "user_id": in_uids, "created_at": "gte." + (jetzt - timedelta(days=30)).isoformat()})
+
+    # Vorschläge früherer Tage, die nie gestartet wurden (Finn 05.10.2026: „Unbestätigte verfallen um 0:00") — blockieren das Konto nicht
+    # und werden gelöscht; ein geclaimter, verpasster Plan bleibt stehen (Start-Fehler-Spur), blockt aber auch nicht
+    def _alt(p):
+        su = p.get("start_um")
+        return p.get("status") == "planned" and p.get("auto_plan") is True and not p.get("started_at") and not p.get("orbit_gesendet_at") \
+            and bool(su) and (_ap_iso_min(su, mitternacht) or 0) < 0
+    weg_alt = [p for p in roh if _alt(p) and not p.get("start_um_gestartet_at")]
+    plaene = [p for p in roh if not _alt(p) and not ap_ist_waise(p)]
+    archiv = _ap_archiviert()
+    echo_bal, dup_bal = _ap_balance_karten()
+    namen, _aus = _ap_namen()
+    ppl, ppl_firma = ap_ppl_karte(_sb_all("firm_specs", {"select": "user_id,name,symbol,ppl,unit", "user_id": in_uids}),
+                                  norm=lambda n: _ap_norm(_firm_norm(n)))
+    ctx_ppl = {"ppl": ppl, "ppl_firma": ppl_firma}
+    hedge_ids = {}
+    for r in _sb_all("user_settings", {"select": "user_id,value", "key": f"eq.{GP_HEDGE_KEY}", "user_id": in_uids}):
+        v = r.get("value") if isinstance(r.get("value"), dict) else {}
+        if v.get("accountId"):
+            hedge_ids[str(r.get("user_id"))] = str(v["accountId"])
+    hedge_acc = {str(x["id"]): x for x in (_sb_all("accounts", {"select": "id,name,firm", "id": "in.(" + ",".join(sorted(set(hedge_ids.values()))) + ")"})
+                                           if hedge_ids else [])}
+    seed = int(seed) if seed not in (None, "") else random.SystemRandom().randrange(1, 2 ** 31)
+    rnd = random.Random(seed)
+    je_konto = {}
+    for p in plaene:
+        je_konto.setdefault(str(p.get("master_account_id")), []).append(p)
+    _ohne_bal = [a["id"] for a in konten if str(a["id"]) not in archiv and acc_balance_wahl(a, echo_bal, dup_bal)[0] is None]
+    _gehandelt = _ap_konten_mit_trade(_ohne_bal) if _ohne_bal else set()
+    if _gehandelt is not None and _ohne_bal:
+        _zw = _ap_login_zwillinge([a for a in konten if str(a["id"]) in set(map(str, _ohne_bal))])
+        _gehandelt = None if _zw is None else (_gehandelt | _zw)
+    kauf_kette = None
+    ausgelassen, kandidaten = [], []
+    for a in konten:
+        aid, uid = str(a["id"]), str(a["user_id"])
+        zeile_k = {"user": namen.get(uid, uid[:8]), "user_id": uid, "konto_id": aid, "konto": a.get("name"), "firma": a.get("firm"),
+                   "typ": a.get("account_type")}
+        regel = ap_regel_finden(firmen, a.get("firm"))
+        if aid in archiv or _ap_norm(a.get("firm")) in AP_STILL_FIRMEN or ist_topstep_express(a):
+            continue
+        if not regel or str(regel.get("route") or "mt5v2") not in AP_CFD_ROUTEN:
+            continue                                   # Futures/Topstep/ohne Regel: nicht Sache des Gruppen-Planers (Echo = CFD)
+        aus = lambda grund, **x: ausgelassen.append(dict(zeile_k, grund=grund, **x))   # noqa: E731
+        if a.get("auto_planer") is False:
+            aus("vom Auto-Planer ausgenommen (Haken im Konto aus)")
+            continue
+        if a.get("ziel_erreicht_at"):
+            aus("Ziel erreicht (Ziel-Wache) — Phase umstellen, der Bot plant hier nie")
+            continue
+        if regel.get("planen") is False:
+            aus("keine Regel für diese Firma")
+            continue
+        if not hedge_ids.get(uid) or hedge_ids[uid] not in hedge_acc:
+            aus("kein Echo-Hedge-Konto (Fusion) bei dieser ID — im Echo-Popup das Hedge-Konto wählen")
+            continue
+        eig = je_konto.get(aid, [])
+        if any(p.get("status") in ("planned", "open") for p in eig):
+            aus("hat schon einen geplanten/laufenden Plan")
+            continue
+        if any(p.get("status") == "review" and (p.get("final") if isinstance(p.get("final"), dict) else {}).get("grund") != AP_NIE_GEFUELLT_GRUND for p in eig):
+            aus("letzter Trade noch nicht erledigt (Überprüfen)")
+            continue
+        bal, _ccy, quelle_b, stand = acc_balance_wahl(a, echo_bal, dup_bal)
+        if ap_blow_ausschluss(eig, bal, stand):
+            aus("geblowt (letzter Trade als geblowt abgehakt) — Reset gekauft? → Balance lesen, dann plant der Bot wieder")
+            continue
+        if any(p.get("status") == "completed" and _ap_plan_am_tag(p, tag, tz) for p in eig):
+            aus(AP_GRUND_HEUTE_GEHANDELT)
+            continue
+        letzt = max((str(p.get("ended_at") or p.get("completed_at") or "") for p in eig), default="")
+        if letzt and (bal is None or not ap_balance_live(stand, letzt)):
+            fin = next((p.get("final") for p in sorted(eig, key=lambda p: str(p.get("ended_at") or p.get("completed_at") or ""),
+                                                        reverse=True) if isinstance(p.get("final"), dict)), None)
+            be = _wd_num((fin or {}).get("balance_end"))
+            if not be:
+                aus("Balance nicht live (seit dem letzten Trade nicht nachgelesen)")
+                continue
+            bal, quelle_b, stand = be, "Nachlesung", letzt
+        _lg = str(a.get("external_id") or "").strip()
+        _ht, _gel = (None if _gehandelt is None else aid in _gehandelt), bool(_lg) and (_lg in echo_bal or _lg in dup_bal)
+        if not bal and not letzt:
+            sw = ap_startwert_frisch(a, _ht, gelesen=_gel)
+            if sw:
+                bal, quelle_b, stand = sw, AP_STARTWERT_QUELLE, ""
+        if not bal:
+            gb_ = ap_grund_ohne_balance(a, True if letzt else _ht, gelesen=_gel)
+            aus(gb_["text"], grund_code=gb_["code"], fix=gb_["fix"])
+            continue
+        gb = ap_letzter_trade_geblasen(regel, float(bal), eig, bal_stand=stand)
+        if gb:
+            aus(gb)
+            continue
+        regel_k = dict(ap_regel_konto(regel, a, float(bal)), route="mt5")
+        mppl = ap_cfd_ppl(ctx_ppl, a)
+        u = {x: rnd.random() for x in ("tp", "sl", "menge", "puffer")}
+        w, grund = ap_konto_rechnen(regel_k, a["account_type"], float(bal), u, ppl=mppl)
+        if grund:
+            aus(grund)
+            continue
+        kauf = _wd_num(a.get("purchase_cost"))
+        if not kauf or kauf <= 0:
+            if kauf_kette is None:                     # Phase 2 ohne eigenen Kaufpreis → Kauf an der Wurzel der Kette (einmal für alle)
+                try:
+                    kauf_kette = _ap_kauf_echt([str(x["id"]) for x in konten])
+                except Exception as e:
+                    print(f"[gruppen-plan] ⚠️ Kaufpreis-Kette: {type(e).__name__}: {e}", flush=True)
+                    kauf_kette = {}
+            kauf = kauf_kette.get(aid)
+        sppl = ((ppl.get((uid, _ap_norm(_firm_norm("Fusion Markets")))) or (None,))[0]) or GP_SLAVE_PPL
+        h, grund = gp_hedge(gp_dd(a, regel_k, w.get("groesse")), kauf, w["menge"], mppl, sppl)
+        if grund:
+            aus(grund)
+            continue
+        kandidaten.append({"a": a, "w": w, "h": h, "bal": float(bal), "bal_quelle": quelle_b, "zeile": zeile_k,
+                           "tkey": uid + "|" + _ap_norm(_firm_norm(a.get("firm")))})
+
+    # RICHTUNG je ID × Firma (Richtungsschutz: laufende/geplante/ungelesene Pläne derselben ID × Firma geben sie vor), Ausgleich nur Gruppe
+    def _gew(p):
+        return _wd_num(p.get("master_sl")) or _wd_num(p.get("master_tp")) or 0.0
+    lebend = [p for p in plaene if p.get("richtung") in ("buy", "sell") and (p.get("status") in ("open", "review")
+              or (p.get("status") == "planned" and _ap_plan_am_tag(p, tag, tz)))]
+    basis = sum(_gew(p) * (1 if p["richtung"] == "buy" else -1) for p in lebend)
+    fest_je = {}
+    for p in lebend:
+        fest_je.setdefault(str(p.get("user_id")) + "|" + _ap_norm(_firm_norm(p.get("master_firm"))), p["richtung"])
+    tr = {}
+    for k in kandidaten:
+        tr.setdefault(k["tkey"], []).append(k)
+    richtung = gp_richtungen([(key, sum(float(k["w"].get("sl") or k["w"]["tp"] or 0) for k in ks), fest_je.get(key))
+                              for key, ks in tr.items()], basis, rnd)
+    # STARTZEITEN je Plan, je ID ein PC → Abstand zu allen heute geplanten Starts dieser ID
+    belegt = {}
+    for p in plaene:
+        if p.get("status") == "planned" and p.get("start_um"):
+            m = _ap_iso_min(p.get("start_um"), mitternacht)
+            if m is not None and 0 <= m < 24 * 60:
+                belegt.setdefault(str(p.get("user_id")), []).append(m)
+    reihe = list(range(len(kandidaten)))
+    rnd.shuffle(reihe)
+    minuten = gp_zeiten([(i, str(kandidaten[i]["a"]["user_id"])) for i in reihe], von, bis, frueh,
+                        float(zeiten.get("abstand_id_min") or 3), belegt, rnd)
+    long_usd = short_usd = 0.0
+    zeilen = []
+    for i, k in enumerate(kandidaten):
+        if i not in minuten:
+            ausgelassen.append(dict(k["zeile"], grund="kein freies Zeitfenster mehr" if frueh <= bis else f"Fenster bis {zeiten['bis']} vorbei — morgen"))
+            continue
+        a, w, h, r = k["a"], k["w"], k["h"], richtung[k["tkey"]]
+        start = mitternacht + timedelta(minutes=minuten[i])
+        hid = hedge_ids[str(a["user_id"])]
+        rest_txt = f"{w['rest']:,}".replace(",", ".")
+        zeilen.append((k, {
+            "user_id": a["user_id"], "master_account_id": a["id"], "master_name": a.get("name"), "master_firm": a.get("firm"),
+            "slave_account_id": hid, "slave_name": hedge_acc[hid].get("name"), "slave_firm": hedge_acc[hid].get("firm"),
+            "master_contracts": w["menge"], "master_risk": h["master_risk"], "slave_risk": h["slave_risk"], "multiplier": h["multiplier"],
+            "master_tp": w["tp"], "master_sl": w["sl"], "richtung": r, "route": "mt5", "konto_typ": a.get("account_type"),
+            "start_um": start.astimezone(timezone.utc).isoformat(), "status": "planned", "priority": "medium",
+            "planned_for": tag, "auto_plan": True, "notes": ap_notiz(w["stufe"], rest_txt, k["bal"], k["bal_quelle"])}))
+        gew = float(w.get("sl") or w["tp"] or 0)
+        long_usd, short_usd = (long_usd + gew, short_usd) if r == "buy" else (long_usd, short_usd + gew)
+    if not trocken:
+        for p in weg_alt:
+            try:
+                sb_delete("trade_plans", {"id": f"eq.{p['id']}", "status": "eq.planned", "auto_plan": "eq.true",
+                                          "start_um_gestartet_at": "is.null", "started_at": "is.null"})
+            except Exception as e:
+                print(f"[gruppen-plan] ⚠️ alter Vorschlag {str(p.get('id'))[:8]}: {type(e).__name__}: {e}", flush=True)
+    for k, row in zeilen:
+        if not trocken:
+            try:          # je Plan einzeln: ein DB-Riegel (z. B. Hedge-Kategorien) trifft nur dieses Konto
+                _sb_pruefen(_sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/trade_plans", json=row,
+                                        headers=_sb_headers("return=minimal"), timeout=(5, 30)))
+            except Exception as e:
+                ausgelassen.append(dict(k["zeile"], grund=f"nicht angelegt: {type(e).__name__}: {str(e)[:200]}"))
+                continue
+        erg["geplant"].append(dict(k["zeile"], start=datetime.fromisoformat(row["start_um"]).astimezone(tz).strftime("%H:%M"),
+                                   richtung=row["richtung"], tp=row["master_tp"], sl=row["master_sl"], menge=row["master_contracts"],
+                                   stufe=k["w"]["stufe"], rest=k["w"]["rest"], balance=round(k["bal"]), bal_quelle=k["bal_quelle"],
+                                   hedge_lots=k["h"]["lots"], slave_risk=k["h"]["slave_risk"], master_risk=k["h"]["master_risk"]))
+    erg["geplant"].sort(key=lambda z: (z["start"], z["konto_id"]))
+    erg.update(ausgelassen=ausgelassen, long_usd=round(long_usd), short_usd=round(short_usd), basis_usd=round(basis), seed=seed,
+               alt_geloescht=0 if trocken else len(weg_alt))
+    if not trocken and (erg["geplant"] or quelle != "takt"):
+        try:
+            sb_update("auto_plan_gruppe", {"gruppe_id": f"eq.{gruppe_id}"}, {"letzter_lauf": erg, "updated_at": jetzt.isoformat()})
+        except Exception as e:
+            print(f"[gruppen-plan] ⚠️ Protokoll: {type(e).__name__}: {e}", flush=True)
+    if erg["geplant"] or quelle != "takt":
+        print(f"[gruppen-plan] {gr.get('name')} {tag} {quelle}{' (trocken)' if trocken else ''}: {len(erg['geplant'])} geplant, "
+              f"{len(ausgelassen)} ausgelassen", flush=True)
+    return erg
+
+
+_gp_info = {"letzter_takt": 0.0, "fehler": "", "laeufe": 0}
+
+
+def gp_takt_faellig(lokal, zeiten):
+    """REIN RECHNEND (testbar): darf der Gruppen-Planer jetzt (lokal = deutsche Zeit) laufen? Mo–Fr, ab zeiten.lauf bis bis − Vorlauf."""
+    if lokal.weekday() >= 5:
+        return False
+    m = lokal.hour * 60 + lokal.minute
+    return _ap_hhmm(zeiten.get("lauf") or "06:00") <= m < _ap_hhmm(zeiten.get("bis") or "17:20") - GP_VORLAUF_MIN
+
+
+def gp_tick(jetzt=None):
+    """Railway-Takt (ap_loop): alle GP_TAKT_S je aktiver Gruppe gp_planen(quelle='takt') — plant nur Konten ohne Plan für heute."""
+    if time.time() - (_gp_info.get("letzter_takt") or 0) < GP_TAKT_S:
+        return
+    _gp_info["letzter_takt"] = time.time()
+    jetzt = jetzt or datetime.now(timezone.utc)
+    for z in sb_select("auto_plan_gruppe", {"select": "gruppe_id,aktiv,zeiten", "aktiv": "is.true"}) or []:
+        zeiten = dict(GP_ZEITEN_STANDARD, **(z.get("zeiten") or {}))
+        if not gp_takt_faellig(jetzt.astimezone(_ap_tz(zeiten["tz"])), zeiten):
+            continue
+        try:
+            gp_planen(z["gruppe_id"], quelle="takt")
+            _gp_info["laeufe"] = (_gp_info.get("laeufe") or 0) + 1
+            _gp_info["fehler"] = ""
+        except Exception as e:
+            _gp_info["fehler"] = f"{type(e).__name__}: {e}"
+            print(f"[gruppen-plan] ⚠️ {str(z.get('gruppe_id'))[:8]}: {_gp_info['fehler']}", flush=True)
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # DELTA-NEUTRAL (06.10.2026, Vertrag .claude/master/autoplan-delta-vertrag.md; Finn: „über alle IDs den ganzen Tag möglichst
 # delta-neutral im Markt — Long ≈ Short"). Maß je Trade = delta_eur_pkt: was das Konto in € seines Werts je NQ-Punkt gewinnt
@@ -22613,7 +22979,16 @@ def admin_auto_plan_ids():
     if lese_sicht is not None:
         basis &= set(lese_sicht)
     alle = sorted(basis, key=lambda u: namen.get(u, u).lower())
-    ids = [{"user_id": u, "name": namen.get(u, u[:8]), "drin": u in drin, "konten": konten.get(u, 0),
+    # GRUPPEN-PLANER (13.10.2026): IDs einer Gruppe mit eigenem Planer (auto_plan_gruppe) zählen in der ID-Leiste wie „im Planer" —
+    # drin bleibt Finns user_ids (der Haken schreibt nur dorthin); Lesefehler → kein Flag
+    gp_ids = set()
+    try:
+        gdat = admin_gruppen_daten()
+        gp_gr = {str(z.get("gruppe_id")) for z in sb_select("auto_plan_gruppe", {"select": "gruppe_id", "aktiv": "is.true"}) or []}
+        gp_ids = {str(m.get("user_id")) for m in gdat.get("mitglieder") or () if str(m.get("gruppe_id")) in gp_gr}
+    except Exception as e:
+        print(f"[auto-plan] ⚠️ ids: Gruppen-Planer nicht lesbar ({type(e).__name__})", flush=True)
+    ids = [{"user_id": u, "name": namen.get(u, u[:8]), "drin": u in drin, "konten": konten.get(u, 0), "gruppen_planer": u in gp_ids,
             "geplant": gepl.get(u, 0), "ausgelassen": ausg.get(u, 0)} for u in alle]
     # LETZTE 7 TAGE je ID (Master/Slave 8, 08.10.2026, ID-Detail-Karte): bestanden/geblasen/beendet — jede Quelle einzeln, Fehler → null
     sieben, sieben_ab = _ap_sieben_tage_laden()
@@ -22668,6 +23043,54 @@ def admin_auto_plan_ids():
         print(f"[auto-plan] ⚠️ ids/offen: {type(e).__name__}: {e}", flush=True)
         bestaetigt = None
     return jsonify({"ok": True, "ids": ids, "aktiv": bool(reg.get("aktiv")), "tag": tag, "offen": offen, "bestaetigt": bestaetigt, "sieben_tage_ab": sieben_ab})
+
+
+@app.route("/admin/gruppen-plan", methods=["GET", "POST", "OPTIONS"])
+def admin_gruppen_plan():
+    """GRUPPEN-PLANER (13.10.2026, Emin-Gruppe). GET → {ok, gruppen: [{gruppe_id, name, aktiv, zeiten, letzter_lauf}], takt{}} —
+    Admin (ADMIN_EMAILS) alle Gruppen mit Planer-Zeile, ein Verwalter nur seine. POST {gruppe_id, aktion: planen|probe|aktiv, an?} →
+    planen = jetzt Konten ohne Plan einplanen, probe = nur rechnen, aktiv = Takt an/aus. Fremde Gruppen → 403."""
+    if request.method == "OPTIONS":
+        return "", 200
+    _mail, err = _admin_auth()
+    admin, uid = err is None, None
+    if not admin:
+        if err[1] != 403:
+            return err
+        uid, err2 = _wd_login()
+        if err2:
+            return err2
+    try:
+        daten = admin_gruppen_daten()
+        eigene = {str(x["id"]) for x in daten.get("gruppen") or () if x.get("verwalter_id") and (admin or str(x["verwalter_id"]) == str(uid))}
+        if not eigene:
+            return jsonify({"ok": True, "gruppen": []})
+        if request.method == "POST":
+            body = request.get_json(silent=True) or {}
+            gid, aktion = str(body.get("gruppe_id") or "").strip(), str(body.get("aktion") or "").strip()
+            if gid not in eigene:
+                return jsonify({"ok": False, "msg": "Nur der Verwalter dieser Gruppe (oder Admin)"}), 403
+            if aktion == "aktiv":
+                sb_update("auto_plan_gruppe", {"gruppe_id": f"eq.{gid}"}, {"aktiv": bool(body.get("an")),
+                                                                           "updated_at": datetime.now(timezone.utc).isoformat()})
+                print(f"[gruppen-plan] {gid[:8]} Takt {'an' if body.get('an') else 'aus'} ({'Admin' if admin else 'uid ' + str(uid)[:8]})", flush=True)
+                return jsonify({"ok": True, "aktiv": bool(body.get("an"))})
+            if aktion not in ("planen", "probe"):
+                return jsonify({"ok": False, "msg": "aktion = planen | probe | aktiv"}), 400
+            return jsonify(gp_planen(gid, trocken=aktion == "probe", quelle="hand"))
+        # Finn 13.10.2026: „nur bei Emin ändern, bei meinem Hermann-Technologies-Account bitte nix" — die Zeile im Admin-Reiter sieht nur
+        # der Verwalter; ein Admin-Login bekommt sie nur ausdrücklich mit ?alle=1 (POST bleibt für Admin offen)
+        if admin and str(request.args.get("alle") or "") != "1":
+            return jsonify({"ok": True, "gruppen": []})
+        rows = sb_select("auto_plan_gruppe", {"select": "gruppe_id,aktiv,zeiten,letzter_lauf,updated_at"}) or []
+        namen = {str(x["id"]): x.get("name") for x in daten.get("gruppen") or ()}
+        out = [dict(r, gruppe_id=str(r.get("gruppe_id")), name=namen.get(str(r.get("gruppe_id"))),
+                    zeiten=dict(GP_ZEITEN_STANDARD, **(r.get("zeiten") or {}))) for r in rows if str(r.get("gruppe_id")) in eigene]
+        return jsonify({"ok": True, "gruppen": out, "takt": {"takt_s": GP_TAKT_S, "fehler": _gp_info.get("fehler") or "",
+                                                           "letzter": datetime.fromtimestamp(_gp_info["letzter_takt"], timezone.utc).isoformat()
+                                                           if _gp_info.get("letzter_takt") else None}})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"{type(e).__name__}: {e}"}), 502
 
 
 def _ap_zahl(x):
@@ -24277,6 +24700,11 @@ def ap_loop():
         except Exception as e:
             _ap_info["nachplan_fehler"] = f"{type(e).__name__}: {e}"
             print(f"[auto-plan] ⚠️ Nachplanen: {e}", flush=True)
+        try:
+            gp_tick()                         # GRUPPEN-PLANER (Emin-Gruppe, 13.10.2026) — eigener try, HT-Planer bleibt unberührt
+        except Exception as e:
+            _gp_info["fehler"] = f"{type(e).__name__}: {e}"
+            print(f"[gruppen-plan] ⚠️ {e}", flush=True)
         try:
             ap_bal_auto_tick(datetime.now(timezone.utc))   # Balance von selbst nachlesen, wo der Planer sonst wartet (13.10.2026)
             _ap_bal_auto["fehler"] = ""
