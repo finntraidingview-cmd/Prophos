@@ -7975,6 +7975,8 @@
               <button class="trade-filter-date-pill" data-range="7d" style="padding:5px 10px;border-radius:5px;border:none;background:transparent;color:var(--sub);font-size:11.5px;font-weight:500;cursor:pointer">7 Tage</button>
               <button class="trade-filter-date-pill" data-range="30d" style="padding:5px 10px;border-radius:5px;border:none;background:transparent;color:var(--sub);font-size:11.5px;font-weight:500;cursor:pointer">30 Tage</button>
             </div>
+            <!-- Einzelner Tag (Finn 14.10.2026: „dass man nach Datum filtern kann") — Tag des Trade-Endes, nicht des Abhakens -->
+            <input type="date" id="trade-filter-day" class="input" title="Nur Trades von diesem Tag" style="padding:5px 8px;font-size:12px;height:auto;width:auto">
 
             <!-- Account-Dropdown -->
             <select id="trade-filter-account" class="input" style="padding:6px 24px 6px 10px;font-size:12px;height:auto;width:auto;min-width:140px">
@@ -39611,6 +39613,7 @@
   const tradeFilter = {
     search: '',
     dateRange: 'all',  // 'all' | 'today' | '7d' | '30d'
+    day: '',           // 'JJJJ-MM-TT' — ein einzelner Tag, hat Vorrang vor dateRange (14.10.2026)
     accountId: '',
     sym: ''
   }
@@ -39654,8 +39657,18 @@
   }
   function applyTradeFilter(list){
     let filtered = kapitelFilterPlaene(list)
+    // Einzelner Tag: Trade-ENDE (ended_at) zählt, nicht der Abhak-Zeitpunkt — Nachttrades enden 23:5x
+    // und werden erst nach Mitternacht abgehakt, sie gehören zum Vortag (Chris 13.10.2026). Lokale Zeit.
+    if(tradeFilter.day){
+      const [jj, mm, tt] = tradeFilter.day.split('-').map(Number)
+      const von = new Date(jj, mm - 1, tt).getTime(), bis = von + 24*60*60*1000
+      filtered = filtered.filter(p => {
+        const t = Date.parse(p.endedAt || p.completedAt || '') || 0
+        return t >= von && t < bis
+      })
+    }
     // Datum
-    if(tradeFilter.dateRange !== 'all'){
+    else if(tradeFilter.dateRange !== 'all'){
       const now = new Date()
       let cutoff
       if(tradeFilter.dateRange === 'today'){
@@ -39875,7 +39888,7 @@
       if(lane.status === 'completed'){
         const fcount = document.getElementById('trade-filter-count')
         if(fcount){
-          const hasFilter = tradeFilter.dateRange !== 'all' || tradeFilter.accountId || tradeFilter.sym || tradeFilter.search.trim()
+          const hasFilter = tradeFilter.dateRange !== 'all' || tradeFilter.day || tradeFilter.accountId || tradeFilter.sym || tradeFilter.search.trim()
           // Zusatz „· Kapitel …", solange nicht „Alle" gewählt ist (24.09.2026)
           const kZusatz = kapitelAktiv === 'alle' ? '' : ` · Kapitel ${kapitelName(kapitelAktiv)}`
           if(hasFilter && totalForLane > 0){
@@ -40001,12 +40014,22 @@
     const symSel = document.getElementById('trade-filter-sym')
     const reset  = document.getElementById('trade-filter-reset')
     const datePills = document.querySelectorAll('.trade-filter-date-pill')
+    const dayInp = document.getElementById('trade-filter-day')
+    const pillsMalen = () => datePills.forEach(p => {
+      const active = !tradeFilter.day && p.dataset.range === tradeFilter.dateRange
+      p.classList.toggle('active', active)
+      p.style.background = active ? 'var(--card)' : 'transparent'
+      p.style.color = active ? 'var(--ink)' : 'var(--sub)'
+      p.style.fontWeight = active ? '600' : '500'
+    })
     if(search) search.addEventListener('input', e => { tradeFilter.search = e.target.value; renderTradePlans() })
+    if(dayInp) dayInp.addEventListener('change', e => { tradeFilter.day = e.target.value || ''; pillsMalen(); renderTradePlans() })
     if(accSel) accSel.addEventListener('change', e => { tradeFilter.accountId = e.target.value; renderTradePlans() })
     if(symSel) symSel.addEventListener('change', e => { tradeFilter.sym = e.target.value; renderTradePlans() })
     if(reset)  reset.addEventListener('click', () => {
-      tradeFilter.search = ''; tradeFilter.dateRange = 'all'; tradeFilter.accountId = ''; tradeFilter.sym = ''
+      tradeFilter.search = ''; tradeFilter.dateRange = 'all'; tradeFilter.day = ''; tradeFilter.accountId = ''; tradeFilter.sym = ''
       if(search) search.value = ''
+      if(dayInp) dayInp.value = ''
       if(accSel) accSel.value = ''
       if(symSel) symSel.value = ''
       datePills.forEach(p => {
@@ -40021,6 +40044,7 @@
     datePills.forEach(pill => {
       pill.addEventListener('click', () => {
         tradeFilter.dateRange = pill.dataset.range
+        tradeFilter.day = ''; if(dayInp) dayInp.value = ''   // Pill schlägt Einzeltag
         datePills.forEach(p => {
           const active = p === pill
           p.classList.toggle('active', active)
@@ -43770,7 +43794,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1536'
+  const OS_TAB_BUILD = '2026-09-22.1537'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
