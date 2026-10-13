@@ -10608,6 +10608,8 @@
           <button class="subtab adm-tab" data-admtab="stat">Statistik</button>
           <button class="subtab adm-tab" data-admtab="buys" style="display:none">Acc-Käufe</button>
           <button class="subtab adm-tab" data-admtab="fin">Payouts</button>
+          <!-- Alle Accounts (13.10.2026, Finn: „alle Accounts von allen IDs auf einem Bündel, 1:1 wie unter Accounts, nur mit Filter nach Zielen und Typen") -->
+          <button class="subtab adm-tab" data-admtab="konten">Alle Accounts</button>
           <!-- Kasse ausgeblendet (Finn 24.09.2026: „mach Kasse mal weg, das nutzen wir aktuell nicht mehr") — Pane + JS bleiben, nur der Reiter ist weg -->
           <button class="subtab adm-tab" data-admtab="kasse" style="display:none">Kasse</button>
           <button class="subtab adm-tab" data-admtab="wallet">Meta Wallet</button>
@@ -11293,6 +11295,81 @@
              gebündelt an einem Ort. Bewusst ETWAS ANDERES als „Geparkt" in
              der Übersicht: Geparkt fragt nach gebundenem Kapital und kappt je
              Account bei 0; hier wird ehrlich saldiert, Plus rechnet gegen. -->
+        <!-- ALLE ACCOUNTS (13.10.2026, Finn: „einen Tab, wo man alle Accounts von allen IDs auf einem Bündel sieht, von der Struktur her ganz
+             genau wie unter Accounts — nur dass man filtern kann nach Zielen und Typen"). Tabelle im Design der Accounts-Tabelle (panel/table.t,
+             dieselben Typ-/Ziel-/Planer-Chips), Daten aus /admin/overview (gleiche Sicht + Gruppenfilter wie die Übersicht). Reine Anzeige:
+             Bearbeiten/Archivieren bleibt bei der jeweiligen ID. Eigene Verdrahtung admKontenRender im Modul. -->
+        <div id="adm-pane-konten" hidden>
+          <div id="adm-konten-msg" style="color:var(--sub);font-size:13px;padding:22px 2px">Lade Übersicht…</div>
+          <div id="adm-konten-body" hidden>
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:0 4px 12px;gap:14px;flex-wrap:wrap">
+              <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+                <label style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--sub)">
+                  <span>ID:</span>
+                  <select id="adm-k-person" class="input adm-k-f" style="padding:5px 28px 5px 10px;font-size:12.5px;height:auto;width:auto;min-width:120px"><option value="">Alle</option></select>
+                </label>
+                <label style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--sub)">
+                  <span>Firma:</span>
+                  <select id="adm-k-firm" class="input adm-k-f" style="padding:5px 28px 5px 10px;font-size:12.5px;height:auto;width:auto;min-width:140px"><option value="">Alle</option></select>
+                </label>
+                <label style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--sub)">
+                  <span>Typ:</span>
+                  <select id="adm-k-type" class="input adm-k-f" style="padding:5px 28px 5px 10px;font-size:12.5px;height:auto;width:auto;min-width:120px">
+                    <option value="">Alle</option>
+                    <option value="challenge">Challenge</option>
+                    <option value="phase1">Phase 1</option>
+                    <option value="phase2">Phase 2</option>
+                    <option value="funded">Funded Futures</option>
+                    <option value="funded_cfd">Funded CFD</option>
+                    <option value="waiting_payout">Waiting for Payout</option>
+                    <option value="winning_days">Winning Days</option>
+                  </select>
+                </label>
+                <label style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--sub)">
+                  <span>Ziel:</span>
+                  <select id="adm-k-ziel" class="input adm-k-f" style="padding:5px 28px 5px 10px;font-size:12.5px;height:auto;width:auto;min-width:120px">
+                    <option value="">Alle</option>
+                    <option value="offen">Ziel offen</option>
+                    <option value="tage">Tage sammeln</option>
+                    <option value="review">Review (Ziel erreicht)</option>
+                    <option value="payout">Payout anfragbar</option>
+                    <option value="wartet">Waiting for Payout</option>
+                  </select>
+                </label>
+                <input id="adm-k-search" class="input" type="search" placeholder="Name, External ID, Firma, ID …" style="padding:5px 10px;font-size:12.5px;height:auto;width:200px">
+              </div>
+              <div style="display:flex;align-items:center;gap:14px">
+                <span id="adm-k-count" style="font-size:12px;color:var(--sub)"></span>
+                <label style="display:inline-flex;align-items:center;gap:8px;font-size:12.5px;color:var(--sub);cursor:pointer">
+                  <input type="checkbox" id="adm-k-archived" class="adm-k-f" style="margin:0">
+                  <span>Archivierte anzeigen</span>
+                </label>
+              </div>
+            </div>
+            <div class="panel" style="padding:0">
+              <div class="table-wrap">
+                <table class="t">
+                  <thead>
+                    <tr>
+                      <th style="padding-left:20px">Account</th>
+                      <th>ID</th>
+                      <th>Firm</th>
+                      <th>Typ</th>
+                      <th>Balance</th>
+                      <th style="padding-right:20px" title="Auto-Planer: Stand des letzten Laufs (Dubai) oder der Grund, warum nicht — umschalten bei der jeweiligen ID unter Accounts">Planer</th>
+                    </tr>
+                  </thead>
+                  <tbody id="adm-k-table"></tbody>
+                </table>
+              </div>
+              <div class="empty" id="adm-k-empty" style="display:none;border:none;background:transparent">
+                <h3>Keine Accounts</h3>
+                <p>Für diese Filter gibt es keine Accounts.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div id="adm-pane-fin" hidden>
           <div id="adm-fin-msg" style="color:var(--sub);font-size:13px;padding:22px 2px">Lade Übersicht…</div>
           <div id="adm-fin-body" hidden>
@@ -13554,7 +13631,7 @@
      * Payouts und Meta Wallet sehen, den Rest nicht"). Die übrigen Reiter nur ausblenden
      * (Markierung data-nur-eigene-aus, damit ein Profilwechsel sie zurückholt); die Daten
      * grenzen Backend (_admin_nur_uid) und RLS (admin_nur_eigene) ohnehin ein. */
-    const KASSE_REITER_EIGENE = new Set(['overview', 'fin', 'wallet'])
+    const KASSE_REITER_EIGENE = new Set(['overview', 'fin', 'konten', 'wallet'])   // konten = Alle Accounts (13.10.2026), Server liefert nur die eigene Sicht
     /* ADMIN-GRUPPEN (08.10.2026, Finn: „Emin bekommt das VOLLE Admin wie Finn, aber nur mit den IDs seiner Gruppe"): ein VERWALTER
      * (Backend /admin/overview → verwalter: true, sicht_ids = seine Gruppe) sieht alle Reiter außer den HT-weiten (Rechnungen = HT-
      * Rechnungen, Kasse, Auftrag); innerhalb der Reiter blendet die Klasse adm-verwalter die HT-weiten Schalter aus (CSS data-ht-global).
@@ -13816,13 +13893,14 @@
         admRender()
         admBuysRender()
         admFinRender()
+        admKontenRender()   // Alle Accounts (13.10.2026)
         window._admPcsOeffnen?.()   // PC-Tabs (08.10.2026): Namen der IDs kommen aus dieser Antwort
       }catch(e){
         msg.style.display = ''
         msg.textContent = 'Übersicht nicht verfügbar: ' + (e.message || e)
         // Käufe- und Finanzen-Tab hängen an denselben Daten — dort denselben
         // Fehler zeigen, sonst steht da für immer „Lade Übersicht…".
-        for(const [mid, bid] of [['adm-buys-msg', 'adm-buys-body'], ['adm-fin-msg', 'adm-fin-body']]){
+        for(const [mid, bid] of [['adm-buys-msg', 'adm-buys-body'], ['adm-fin-msg', 'adm-fin-body'], ['adm-konten-msg', 'adm-konten-body']]){
           const bm = $(mid)
           if(bm){ bm.style.display = ''; bm.textContent = msg.textContent; $(bid).hidden = true }
         }
@@ -15834,6 +15912,106 @@
       $('adm-buys-msg').style.display = 'none'
       $('adm-buys-body').hidden = false
     }
+
+    /* ALLE ACCOUNTS (13.10.2026, Finn: „alle Accounts von allen IDs auf einem Bündel … 1:1 mit dem gleichen Design wie unter Accounts, nur
+     * filtern nach Zielen und Typen"). Zeilen = admData.accounts (/admin/overview, gleiche Sicht und Gruppenfilter wie die Übersicht; der
+     * Server hängt seit diesem Tag die Ziel-/Planer-Felder + Mindesttage an). Je Zeile ein Konto-Objekt in rowToAccount-Form, damit genau
+     * dieselben Chip-Helfer wie renderAccounts zeichnen. Konten der angemeldeten ID kommen aus `accounts` (dort zählt zielFortschritt
+     * aus den eigenen Plänen); fremde IDs: Mindesttage = Server-Zählung (ap_tage_ist) als manueller Stand, automatische WD-Zählung
+     * weggelassen — das Frontend kennt fremde Pläne nicht, lieber kein Abzeichen als ein falsches „0/5". Reine Anzeige, keine Aktionen. */
+    const admK = { person: '', firm: '', type: '', ziel: '', q: '', arch: false }
+    function admKontoAusZeile(r){
+      const eigen = String(r.user_id) === String(currentUserId) ? (accounts || []).find(x => String(x.id) === String(r.id)) : null
+      if(eigen) return eigen
+      const n = v => v != null && v !== '' && isFinite(Number(v)) ? Number(v) : null
+      const tage = r.goal_kind === 'trading_days'
+      const autoWd = r.goal_kind && !r.goal_manual && !tage
+      return {
+        id: r.id, name: r.name, firm: r.firm_raw || r.firm, type: r.type, externalId: r.ext || null,
+        goalKind: autoWd ? null : (r.goal_kind || null), goalTarget: n(r.goal_target), goalMinProfit: n(r.goal_min_profit),
+        goalDoneOffset: tage ? (r.tage_ist != null ? r.tage_ist : n(r.goal_done_offset)) : n(r.goal_done_offset),
+        goalSince: r.goal_since || null, goalManual: tage ? true : !!r.goal_manual, goalManualLast: tage ? null : (r.goal_manual_last || null),
+        payoutReadyAt: r.payout_ready_at || null, waitingPayoutSince: r.waiting_payout_since || null,
+        autoPlaner: r.auto_planer !== false, zielErreichtAt: r.ziel_erreicht_at || null, zielErreichtBal: n(r.ziel_erreicht_bal),
+        zielUsd: n(r.ziel_usd), maxRisikoTrade: n(r.max_risiko_trade), tvBalanceQuelle: r.tv_balance_quelle || null
+      }
+    }
+    // Ziel-Stufe eines Kontos für den Filter — dieselben Zustände, die die Typ-Spalte als Chip zeigt
+    function admKontoZiel(a){
+      if(a.type === 'funded_cfd' && a.waitingPayoutSince) return 'wartet'
+      let tf = null; try{ tf = zielFortschritt(a) }catch(_){ tf = null }
+      if(a.zielErreichtAt) return (tf && tf.kind === 'trading_days' && !tf.done) ? 'tage' : 'review'
+      let pr = null; try{ pr = payoutReadyInfo(a) }catch(_){ pr = null }
+      if((pr && pr.faellig) || (tf && tf.done && tf.kind === 'winning_days')) return 'payout'
+      return 'offen'
+    }
+    function admKontenRender(){
+      const msg = $('adm-konten-msg'), body = $('adm-konten-body'), tb = $('adm-k-table')
+      if(!msg || !tb) return
+      if(!admData){ msg.style.display = ''; body.hidden = true; return }
+      msg.style.display = 'none'; body.hidden = false
+      if(admData.alle_fehler){ msg.style.display = ''; msg.textContent = 'Ziel-/Planer-Felder nicht lesbar: ' + admData.alle_fehler + ' — Liste ohne diese Chips.' }
+      // Filter-Auswahl aus derselben Antwort (Personen/Firmen) — Wahl bleibt beim Neuladen stehen
+      const fuell = (id, opts) => { const el = $(id); if(!el) return; const cur = el.value
+        el.innerHTML = '<option value="">Alle</option>' + opts.map(([v, t]) => `<option value="${escapeHtml(v)}">${escapeHtml(t)}</option>`).join('')
+        el.value = cur; if(el.value !== cur) el.value = '' }
+      fuell('adm-k-person', (admData.people || []).map(p => [String(p.user_id), p.name]))
+      fuell('adm-k-firm', (admData.firms || []).map(f => [f, f]))
+      admK.person = $('adm-k-person').value; admK.firm = $('adm-k-firm').value; admK.type = $('adm-k-type').value
+      admK.ziel = $('adm-k-ziel').value; admK.q = ($('adm-k-search').value || '').trim(); admK.arch = !!$('adm-k-archived').checked
+      const norm = s => String(s || '').toLowerCase().replace(/[\s\-_.\/]/g, '')
+      const qn = norm(admK.q)
+      const zeilen = []
+      for(const r of (admData.accounts || [])){
+        if(!admK.arch && r.archived) continue
+        if(admK.person && String(r.user_id) !== admK.person) continue
+        if(admK.firm && r.firm !== admK.firm) continue
+        const a = admKontoAusZeile(r)
+        const typ = (a.type === 'funded_cfd' && a.waitingPayoutSince) ? 'waiting_payout' : a.type
+        if(admK.type && typ !== admK.type) continue
+        if(admK.ziel && admKontoZiel(a) !== admK.ziel) continue
+        if(qn && !norm([r.name, r.ext, r.firm, r.person].join(' ')).includes(qn)) continue
+        zeilen.push({ r, a })
+      }
+      // Reihenfolge wie Accounts (accSortiert: Kontoart → Firma), innerhalb gleicher Art/Firma nach ID
+      zeilen.sort((x, y) => String(x.r.person || '').localeCompare(String(y.r.person || ''), 'de'))
+      const sortiert = accSortiert(zeilen.map(z => z.a)), zu = new Map(zeilen.map(z => [z.a, z.r]))
+      $('adm-k-count').textContent = `${sortiert.length} Account${sortiert.length === 1 ? '' : 's'}`
+      $('adm-k-empty').style.display = sortiert.length ? 'none' : 'block'
+      const QUELLE = { TSX: 'TopstepX', MT5: 'MT5', Echo: 'MT5', TV: 'TradingView', Duplikum: 'Duplikum' }
+      const reasonMap = { blown: '💀 Geblowt', passed: '✅ Bestanden', passed_pending: '🎉 Bestanden · Daten fehlen', manual: '📦 Archiviert' }
+      tb.innerHTML = sortiert.map(a => {
+        const r = zu.get(a)
+        const metaParts = []
+        try{ const z = zielBadgeHtml(a, false); if(z) metaParts.push(z) }catch(_){}
+        try{ const p = payoutReadyBadgeHtml(a); if(p) metaParts.push(p) }catch(_){}
+        const meta = metaParts.length
+          ? `<div style="font-size:11px;color:var(--sub);margin-top:2px;display:flex;flex-direction:column;gap:1px">${metaParts.map(p => `<div>${p}</div>`).join('')}</div>` : ''
+        const archBadge = r.archived
+          ? `<span style="display:inline-block;padding:2px 8px;border-radius:6px;font-size:10.5px;font-weight:600;background:#94a3b822;color:#475569;margin-left:8px;vertical-align:middle">${reasonMap[r.arch_reason] || '📦 Archiviert'}</span>` : ''
+        const quelle = r.balance_src === 'TV' && /topstep/i.test(String(r.firm || '')) ? 'TopstepX' : (QUELLE[r.balance_src] || r.balance_src || '')
+        const balCell = r.balance != null
+          ? `<div style="font-weight:600;color:var(--ink);font-family:var(--mono)">${(r.balance_ccy && r.balance_ccy !== 'USD') ? dupFmtMoney(r.balance, r.balance_ccy) : fmtMoney(r.balance)}</div>
+             <div style="font-size:11px;color:var(--sub);margin-top:2px"><span style="font-weight:500">Stand · ${escapeHtml(quelle)}</span>${r.balance_at ? `<span style="margin-left:6px">${escapeHtml(timeAgo(r.balance_at))}</span>` : ''}</div>`
+          : '<span class="mono" style="color:var(--sub-2)">—</span>'
+        let typ = ''; try{ typ = accTypChipHtml(a) + accZielChipHtml(a) + accRisikoChipHtml(a) }catch(_){ typ = escapeHtml(a.type || '–') }
+        let planer = ''; try{ planer = accPlanerZelleHtml(a, true) }catch(_){ planer = '<span style="color:var(--sub-2)">—</span>' }
+        return `
+          <tr style="${r.archived ? 'opacity:.55' : ''}">
+            <td style="padding-left:20px">
+              <div style="font-weight:600;color:var(--ink)">${escapeHtml(a.name || '')}${archBadge}</div>
+              ${meta}
+            </td>
+            <td style="white-space:nowrap"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${idFarbe(r.user_id)};margin-right:6px;vertical-align:middle"></span>${escapeHtml(r.person || '–')}</td>
+            <td>${escapeHtml(a.firm || '–')}</td>
+            <td>${typ}</td>
+            <td>${balCell}</td>
+            <td style="padding-right:20px">${planer}</td>
+          </tr>`
+      }).join('')
+    }
+    document.querySelectorAll('.adm-k-f').forEach(el => el.addEventListener('change', admKontenRender))
+    $('adm-k-search')?.addEventListener('input', admKontenRender)
 
     /* ── Finanzen je ID: wie viel ist jede Person aktuell im Minus ──
      * (27.08.2026, Finns Wunsch) Geldfluss-Sicht über ALLE Accounts einer
@@ -18289,7 +18467,7 @@
       $('kasse-date').value = new Date().toISOString().slice(0,10)
       // Admin-Tabs (Übersicht / Kasse)
       // Untertitel je Reiter (Finn 08.10.2026: „Kapitalverteilung über alle Personen" stand auch im Trade-Planer-Reiter) — nur Anzeige
-      const ADM_SUB = { overview: 'Kapitalverteilung über alle Personen', planer: 'Trade-Planer · alle IDs', wd: 'Winning-Day-Farmer · alle IDs', stat: 'Statistik · Kapitel · Acc-Käufe', fin: 'Payouts · alle IDs', wallet: 'Meta Wallet', kompass: 'Kompass · Pascals Bot', rg: 'Rechnungen', kasse: 'Kasse', auftrag: 'Auftrag', kapitel: 'Kapitel', buys: 'Acc-Käufe' }
+      const ADM_SUB = { overview: 'Kapitalverteilung über alle Personen', planer: 'Trade-Planer · alle IDs', wd: 'Winning-Day-Farmer · alle IDs', stat: 'Statistik · Kapitel · Acc-Käufe', fin: 'Payouts · alle IDs', konten: 'Alle Accounts · alle IDs', wallet: 'Meta Wallet', kompass: 'Kompass · Pascals Bot', rg: 'Rechnungen', kasse: 'Kasse', auftrag: 'Auftrag', kapitel: 'Kapitel', buys: 'Acc-Käufe' }
       const admSubSetzen = name => { const s = ADM_SUB[name] || ''; const v = document.querySelector('.view[data-view="kasse"] .view-sub'); if(v) v.textContent = s; const t = document.getElementById('topbarSub'); if(t && document.querySelector('.view[data-view="kasse"].active')) t.textContent = s }
       document.querySelectorAll('.adm-tab').forEach(t => t.addEventListener('click', () => {
         const name = t.dataset.admtab
@@ -18303,6 +18481,7 @@
         admSubSetzen(name)
         $('adm-pane-buys').hidden     = name !== 'stat'   // seit 08.10.2026 Abschnitt unter Statistik
         $('adm-pane-fin').hidden      = name !== 'fin'
+        $('adm-pane-konten').hidden   = name !== 'konten'   // Alle Accounts (13.10.2026)
         $('adm-pane-kasse').hidden    = name !== 'kasse'
         $('adm-pane-wallet').hidden   = name !== 'wallet'
         $('adm-pane-rg').hidden       = name !== 'rg'
@@ -18322,6 +18501,7 @@
         if(name === 'wallet') walOpen()
         if(name === 'stat') admBuysRender()   // Acc-Käufe unter Statistik (08.10.2026); Daten kommen aus admLoad — hier nur neu zeichnen
         if(name === 'fin')  admFinRender()
+        if(name === 'konten') admKontenRender()
         if(name === 'overview'){ admVlResize(); window._admPcsOeffnen?.() }   // Verlaufs-Chart war evtl. bei 0 px Breite gebaut (23.09.2026); PC-Tabs (08.10.2026)
         if(name === 'rg')   rgOpen()
       }))
@@ -43582,7 +43762,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1527'
+  const OS_TAB_BUILD = '2026-09-22.1528'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
