@@ -29543,9 +29543,27 @@
       const r = await fetch(`${WATCHER_HOME}/admin/handarbeit?ansicht=admin${gq}`, { headers: { 'sb-token': tok }, cache: 'no-store' })
       const d = await r.json().catch(() => null)
       // Radar-Abschnitt Bestanden nutzt _hand.d (09.10.2026) — nach dem Laden neu zeichnen, wenn der Radar offen ist
-      if(r.ok && d && d.ok){ _hand.d = d; _hand.at = Date.now(); _hand.fehler = ''; try{ if(typeof wdlAktiv === 'function' && wdlAktiv()) wdlRender() }catch(_){} } else _hand.fehler = (d && d.error) || ('HTTP ' + r.status)
+      if(r.ok && d && d.ok){ _hand.d = d; _hand.at = Date.now(); _hand.fehler = ''; handZielAbgleich(d); try{ if(typeof wdlAktiv === 'function' && wdlAktiv()) wdlRender() }catch(_){} } else _hand.fehler = (d && d.error) || ('HTTP ' + r.status)
     }catch(e){ _hand.fehler = (e && e.message) || String(e) }
     finally{ _hand.laedt = false; handKnopf(); if(document.getElementById('handModal')?.classList.contains('open')) handRender() }
+  }
+  /* ZIEL-TAG FÜR EIGENE KONTEN NACHZIEHEN (14.10.2026, Finn im Login „Finn + Pascal": FundedNext Futures 150k …7926 abgehakt, 157.999,68 →
+   * Ziel 158.000 — das Konto tauchte weder unter Erledigt noch unter Bestanden → Review auf). Die Ziel-Wache (Railway, 5-min-Takt) setzte
+   * ziel_erreicht_at 30 s NACH dem Abhaken; eigene Konten liest der Radar aus `accounts` (beim Login geladen, kein Realtime), fremde aus
+   * /admin/handarbeit — eigene filtert er dort bewusst heraus. Also fiel das Konto bis zum Neuladen durch beide. Jetzt übernimmt jeder
+   * handarbeit-Abruf (alle 60 s) den Ziel-Tag der Ziel-Wache in die eigenen Konten, wenn er lokal fehlt; nur diese drei Felder, nie löschen. */
+  function handZielAbgleich(d){
+    let neu = 0
+    for(const z of ((d && (d.radar_bestanden || (d.gruppen && d.gruppen.bestanden))) || [])){
+      if(!z || !z.konto_id || !z.seit || String(z.user_id) !== String(currentUserId || '')) continue
+      const a = (accounts || []).find(x => x && String(x.id) === String(z.konto_id))
+      if(!a || a.zielErreichtAt) continue
+      a.zielErreichtAt = z.seit
+      if(z.bal != null && isFinite(Number(z.bal))) a.zielErreichtBal = Number(z.bal)
+      if(z.ziel != null && isFinite(Number(z.ziel))) a.zielUsd = Number(z.ziel)
+      neu++
+    }
+    if(neu){ try{ if(typeof renderAccounts === 'function') renderAccounts() }catch(_){} }
   }
   function handKnopf(){
     const b = document.getElementById('tb-hand'), z = document.getElementById('tb-hand-n'); if(!b || !z) return
@@ -43794,7 +43812,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1538'
+  const OS_TAB_BUILD = '2026-09-22.1539'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
