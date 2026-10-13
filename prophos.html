@@ -3230,6 +3230,7 @@
   /* Max-Risiko-Chip (07.10.2026): nur bei gesetztem accounts.max_risiko_trade, Amber wie der Trade-Limits-Block im Bulk-Add */
   /* Ziel-Chip (07.10.2026): accounts.ziel_erreicht_at, gesetzt von der Ziel-Wache (app.py zw_tick) — Grün wie ein erreichtes Ziel */
   .type-badge.acc-ziel-chip{margin-left:6px;background:#ECFDF5;border-color:#A7F3D0;color:#047857;vertical-align:middle}
+  .type-badge.acc-tage-chip{background:#FFFBEB;border-color:#FDE68A;color:#B45309;white-space:nowrap}   /* Tage sammeln (13.10.2026): amber wie Radar „Tage farmen" */
   #accountsTable .acc-ziel-chip[data-acc-ziel]{cursor:pointer}   /* .1474: Klick öffnet den Nachfolger-Wizard */
   #accountsTable .acc-ziel-chip[data-acc-ziel]:hover{background:#D1FAE5}
   #dashboard-view .type-badge.acc-risk-chip{margin-left:6px;background:#fff;border-color:#f3c98b;color:#b45309;vertical-align:middle}
@@ -33873,8 +33874,16 @@
     const seit = new Date(a.zielErreichtAt).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
     // Klickbar (.1474, Finn 12.10.2026: „wenn ich auf ‚Ziel erreicht' draufdrücke, zu dem Popup gleich kommen und den nachfolgenden Account
     // hinzufügen") — data-acc-ziel verdrahtet die Accounts-Tabelle in renderAccounts; im Planer (pz-typ) bleibt der Chip reine Anzeige.
+    // Typ „Tage sammeln" (13.10.2026, Finn — Ina 14314123/14314124, Ziel erreicht, Tage 3/5): fehlen noch Mindesttage
+    // (goal_kind trading_days, zielFortschritt), ist das Konto kein „Ziel erreicht →", sondern eigener Typ „Phase 1 · Tage sammeln" —
+    // vorher von Hand in den Namen geschrieben. Kein Klick: der Nachfolger kommt erst, wenn die Tage voll sind (wie Radar „Tage farmen").
+    let tf = null; try{ tf = (typeof zielFortschritt === 'function') ? zielFortschritt(a) : null }catch(_){ tf = null }
+    if(tf && tf.kind === 'trading_days' && !tf.done)
+      return ` <span class="type-badge acc-ziel-chip acc-tage-chip" title="Ziel erreicht seit ${seit}${a.zielErreichtBal ? ' · Balance ' + de(a.zielErreichtBal) : ''} — es fehlen noch ${tf.target - tf.count} von ${tf.target} Trading Days; der Auto-Planer legt je Handelstag einen Mini-Trade.">Tage sammeln ${Math.min(tf.count, tf.target)}/${tf.target}</span>`
+    // Typ „Review" (13.10.2026, Finn — Ina FundingPips …044): Ziel erreicht und Mindesttage voll (oder keine) → das Konto liegt in Review,
+    // bis die neuen Daten der Prop-Firm da sind und der Nachfolger per Klick angelegt ist. Vorher hieß der Chip „🎯 Ziel erreicht →".
     const weiter = (typeof bstNaechsterTyp === 'function') ? bstNaechsterTyp(a) : null
-    return ` <span class="type-badge acc-ziel-chip" data-acc-ziel="${escapeHtml(String(a.id))}" title="Ziel erreicht seit ${seit}${a.zielErreichtBal ? ' · Balance ' + de(a.zielErreichtBal) : ''}${a.zielUsd ? ' ≥ Ziel ' + de(a.zielUsd) : ''} — ${weiter ? 'Klick: Nachfolger anlegen (' + (typeof typeLabel === 'function' ? typeLabel(weiter) : weiter) + ')' : 'Phase umstellen / auszahlen'}. Kein Trade mehr.">🎯 Ziel erreicht${weiter ? ' →' : ''}</span>`
+    return ` <span class="type-badge acc-ziel-chip" data-acc-ziel="${escapeHtml(String(a.id))}" title="Ziel erreicht seit ${seit}${a.zielErreichtBal ? ' · Balance ' + de(a.zielErreichtBal) : ''}${a.zielUsd ? ' ≥ Ziel ' + de(a.zielUsd) : ''} — ${weiter ? 'Klick: Nachfolger anlegen (' + (typeof typeLabel === 'function' ? typeLabel(weiter) : weiter) + ')' : 'Phase umstellen / auszahlen'}. Kein Trade mehr.">Review${weiter ? ' →' : ''}</span>`
   }
   // Max-Risiko-Chip (07.10.2026): Konto mit eigener Vorgabe je Trade (z. B. 1-%-Regel) — reine Markierung, keine Prüfung
   function accRisikoChipHtml(a){
@@ -43419,7 +43428,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1509'
+  const OS_TAB_BUILD = '2026-09-22.1510'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
