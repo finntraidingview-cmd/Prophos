@@ -221,6 +221,41 @@ def code_holen(pfad_url, timeout=15):
         return None
 
 
+def richtung_frei(plan_id, richtung, timeout=6):
+    """HARTE LINIE VOR JEDEM SCHARFEN KLICK (13.10.2026, Finn: „wenn der Wächter ausfällt … dass da nie was passieren kann"):
+    fragt Railway POST /richtung/frei (X-Code-Token wie /code/stand; dort service role -> DB-Funktion prophos_gegenrichtung_frei):
+    läuft bei derselben ID × Firma auf einem anderen Konto ein Trade in Gegenrichtung? -> (frei, msg, code).
+    FAIL-CLOSED: kein Token, kein Netz, 5xx, unklare Antwort = NICHT frei (code riegel_unerreichbar) — der Bot wird dann nicht
+    gestartet, es ist beweisbar nichts gesendet, der Tab versucht es später erneut. Ohne Plan-UUID/Richtung (Probe, Konto-Check)
+    gibt es nichts zu prüfen -> frei."""
+    import urllib.request
+    pid = str(plan_id or "").strip().lower()
+    r = str(richtung or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f-]{36}", pid) or r not in ("buy", "sell"):
+        return True, "", ""
+    tok = code_token()
+    if not tok:
+        return False, ("Riegel-Prüfung (Gegenrichtung) nicht möglich: code_token.txt fehlt — den Prophos-Tab an diesem PC einmal "
+                       "neu laden (legt den Schlüssel ab). Nichts gesendet."), "riegel_unerreichbar"
+    fehler = ""
+    for _ in range(2):
+        try:
+            req = urllib.request.Request(CODE_QUELLE + "/richtung/frei",
+                                         data=json.dumps({"plan_id": pid, "richtung": r}).encode("utf-8"),
+                                         headers={"X-Code-Token": tok, "User-Agent": "prophos-panel", "Content-Type": "application/json"},
+                                         method="POST")
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                d = json.loads(resp.read().decode("utf-8") or "{}")
+            if isinstance(d, dict) and d.get("ok") is True:
+                if d.get("frei") is True:
+                    return True, "", ""
+                return False, "Gegenrichtung gesperrt: " + str(d.get("grund") or "bei dieser ID läuft dort ein Trade in Gegenrichtung"), "gegenrichtung"
+            fehler = str((d or {}).get("msg") or "unklare Antwort")[:160]
+        except Exception as e:
+            fehler = str(e)[:160]
+    return False, f"Riegel-Prüfung (Gegenrichtung) nicht erreichbar: {fehler} — nichts gesendet, der Start wird später erneut versucht.", "riegel_unerreichbar"
+
+
 def repo_sha(timeout=8):
     """Kennung des neuesten Commits auf main — oder None (kein Netz o.ae.). Zuerst Railway, sonst GitHub."""
     roh = code_holen("/code/stand", timeout)
@@ -3001,6 +3036,14 @@ class Handler(BaseHTTPRequestHandler):
             # Tradovate-Login und der Bot wechselt nur im Dropdown.
             g = body.get("geschwister")
             cmd["geschwister"] = [str(x).strip()[:60] for x in g][:60] if isinstance(g, list) else []
+            # HARTE LINIE (13.10.2026): nur beim scharfen Klick (scharf oder Bruecken-Marke @scharf=1) — Plan-ID kommt als
+            # Marke @plan_id= mit. Nicht frei / nicht pruefbar -> kein Bot-Start, beweisbar nichts gesendet (richtung_frei).
+            if cmd["scharf"] or "@scharf=1" in cmd["geschwister"]:
+                _pid = next((x[9:] for x in cmd["geschwister"] if x.startswith("@plan_id=")), body.get("plan_id"))
+                _frei, _msg, _code = richtung_frei(_pid, cmd["richtung"])
+                if not _frei:
+                    print(f"[panel] tv-konto RIEGEL {_code} @{cmd['ext_id']} {cmd['richtung']}: {_msg[:160]}", flush=True)
+                    return self._send(200, json.dumps({"ok": False, "code": _code, "retry_ok": True, "gesendet": False, "msg": _msg}, ensure_ascii=False))
             if not TV_ORDER_LOCK.acquire(blocking=False):
                 # code + retry_ok (Cross-Check 24.09.2026): der Orbit-Start im Frontend wartet bei
                 # puls_beschaeftigt (Rundgang/tv-close halten den Lock minutenlang) statt abzubrechen —
@@ -3046,6 +3089,13 @@ class Handler(BaseHTTPRequestHandler):
             felder = ("ext_id", "firma", "symbol", "richtung", "volumen", "tp_usd", "sl_usd", "plan_id")
             cmd = {k: body.get(k) for k in felder}
             cmd["scharf"] = body.get("scharf") is True
+            # HARTE LINIE (13.10.2026, Anlass Mike: Topstep-Short laeuft, zwei Longs geplant): vor dem scharfen Klick fragt das Panel
+            # Railway/DB selbst (richtung_frei) — unabhaengig vom Waechter im Tab. Nicht frei / nicht pruefbar -> nichts gesendet.
+            if cmd["scharf"]:
+                _frei, _msg, _code = richtung_frei(cmd.get("plan_id"), cmd.get("richtung"))
+                if not _frei:
+                    print(f"[panel] tsxorder RIEGEL {_code} @{cmd.get('ext_id')} {cmd.get('richtung')}: {_msg[:160]}", flush=True)
+                    return self._send(200, json.dumps({"ok": False, "code": _code, "retry_ok": True, "gesendet": False, "msg": _msg}, ensure_ascii=False))
             if len(re.sub(r"[^A-Za-z0-9]", "", str(cmd.get("ext_id") or ""))) < 5:
                 return self._send(400, json.dumps({"ok": False, "code": "befehl", "retry_ok": True, "gesendet": False,
                     "msg": "Feld 'ext_id' (External ID) fehlt oder ist zu kurz"}, ensure_ascii=False))

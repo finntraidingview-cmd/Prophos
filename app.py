@@ -14624,6 +14624,42 @@ def code_stand():
     return resp
 
 
+@app.route("/richtung/frei", methods=["POST"])
+def richtung_frei():
+    """HARTE LINIE FÜR DEN PULS-KLICK (13.10.2026, Finn nach Mikes Topstep-Short + zwei geplanten Longs: „wenn aus irgendeinem Grund
+    der Wächter ausfällt … dass da nie was passieren kann"): das Panel am PC fragt VOR jedem scharfen Klick hier nach — läuft bei
+    derselben ID × Firma auf einem anderen Konto ein Trade in Gegenrichtung? Antwort aus der DB-Funktion prophos_gegenrichtung_frei
+    (sql/2026-10-13_gegenrichtung_hart.sql, service role — RLS zeigt dem PC fremde Zeilen nicht). Ohne „ok+frei" klickt das Panel
+    nicht (fail-closed). Nur Railway, Header X-Code-Token (derselbe Schlüssel wie /code/stand), Body {plan_id, richtung}."""
+    if not _code_stand_sha():
+        return jsonify({"ok": False, "msg": "nur auf Railway"}), 404
+    wer = _code_zugang()
+    if not wer:
+        return jsonify({"ok": False, "msg": "kein gültiger Schlüssel"}), 403
+    d = request.get_json(silent=True) or {}
+    pid = str(d.get("plan_id") or "").strip().lower()
+    r = str(d.get("richtung") or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f-]{36}", pid) or r not in ("buy", "sell"):
+        return jsonify({"ok": False, "msg": "plan_id/richtung fehlt"}), 400
+    try:
+        resp = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/rpc/prophos_gegenrichtung_frei", headers=_sb_headers(),
+                           timeout=(5, 15), json={"p_plan": pid, "p_richtung": r})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"DB nicht erreichbar: {str(e)[:120]}"}), 503
+    if resp.status_code != 200:
+        return jsonify({"ok": False, "msg": f"DB-Antwort {resp.status_code}: {(resp.text or '')[:160]}"}), 503
+    try:
+        erg = resp.json()
+    except ValueError:
+        return jsonify({"ok": False, "msg": "DB-Antwort kein JSON"}), 503
+    if not isinstance(erg, dict):
+        return jsonify({"ok": False, "msg": "DB-Antwort unerwartet"}), 503
+    out = jsonify({"ok": True, "frei": erg.get("frei") is True, "grund": erg.get("grund"), "firma": erg.get("firma"),
+                   "plan": erg.get("plan"), "uid": wer[0], "pc": wer[1]})
+    out.headers["Cache-Control"] = "no-store"
+    return out
+
+
 @app.route("/code/datei/<path:pfad>", methods=["GET"])
 def code_datei(pfad):
     """Eine Repo-Datei aus genau dem deployten Stand. ?sha=… muss (falls angegeben) dieser Stand sein, sonst 409 mit dem

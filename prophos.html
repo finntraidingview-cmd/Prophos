@@ -43963,6 +43963,14 @@
         await new Promise(res => setTimeout(res, 8000 + Math.random() * 6000))
       }
       if(_hedgeFrueh) _hedgeFrueh.stop = true   // Lauf zu Ende: nicht mehr schauen (ein schon ausgelöster Open läuft zu Ende)
+      // HARTE LINIE AM PC (13.10.2026, Finn nach Mikes Topstep-Short + zwei geplanten Longs: „wenn aus irgendeinem Grund der Wächter
+      // ausfällt … dass da nie was passieren kann"): das Panel fragt vor jedem scharfen Klick selbst Railway/DB (prophos_gegenrichtung_frei)
+      // und klickt ohne „frei" nicht — auch bei Funkstille (riegel_unerreichbar). Beides kommt VOR jedem Bot-Aufruf, also beweisbar
+      // nichts gesendet: Plan bleibt Geplant, der Tick/Finn startet später erneut.
+      if(r && !r.ok && !r.gesendet && (r.code === 'gegenrichtung' || r.code === 'riegel_unerreichbar')){
+        await fehler((r.code === 'gegenrichtung' ? '⛔ ' : '⚠ ') + String(r.msg || 'Riegel am PC: nichts gesendet') + ' — Plan bleibt Geplant.', Object.assign({}, r, { retry_ok: true }))
+        return
+      }
       // „nichts gesendet" NUR, wenn es beweisbar ist (30.09.2026, Topstep-Paket S — vorher meldete jeder Proxy-502/Zeitabbruch
       // „nichts gesendet, bleibt Geplant", während der Bot unter dem Lock weiterklickte; ein neuer Start hätte doppelt platziert):
       //  · fetch warf (TypeError, Backend weg) oder das Panel kennt die Route nicht (404 vor jedem Klick) → nichts gesendet
