@@ -43405,7 +43405,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1505'
+  const OS_TAB_BUILD = '2026-09-22.1506'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -49741,6 +49741,15 @@
     } }catch(_){}
     return ende
   }
+  // Steht für den jüngsten beendeten Puls-Trade des Kontos die automatische Nachlesung noch an? (.1506) → true = kein Fall für „Braucht dich"
+  function tplNachlesungLaeuft(kontoId){
+    try{
+      const k = String(kontoId || '')
+      const p = (tradePlans || []).filter(x => x && String(x.masterAccountId || '') === k && x.status === 'review')
+        .sort((a, b) => (Date.parse(b.endedAt || b.completedAt || '') || 0) - (Date.parse(a.endedAt || a.completedAt || '') || 0))[0]
+      return !!(p && typeof planWartetAufPuls === 'function' && planWartetAufPuls(p))
+    }catch(_){ return false }
+  }
   function tplBraucht(D, ids){   // ids = Set der sichtbaren IDs, null = alle
     const je = new Map(), jetzt = Date.now(), ich = (_ap.ich && _ap.ich.name) || ''
     // Konten in „Manuelle Arbeit" (Radar) → keine Zeile, egal welcher Fall (08.10.2026, s. tplManuellKonten) — geprüft je Quelle unten
@@ -49783,6 +49792,12 @@
         // Nicht abgehakte Trades (review, „Ergebnis nie gelesen") stehen ohnehin als eigene Endlesung-Zeile da.
         const letztesEnde = at ? tplLetztesTradeEnde(a.id) : 0
         if(at && !(letztesEnde > at)) continue
+        // NACHLESUNG STEHT NOCH AN → KEINE ZEILE (.1506, Finn 13.10.2026 17:51 Dubai, Screenshot „Braucht dich 16": sechs Konten „Balance alt ·
+        // 55 min" von Finn + Pascal, deren Trade heute sauber lief und im Radar unter „Wartet · ab 18:16" auf die automatische Endlesung wartet —
+        // „Braucht dich sind nur Accounts, die mit dem Starten Probleme haben"): solange Puls den jüngsten Trade des Kontos noch von selbst
+        // nachliest (planWartetAufPuls: fällig, geplant oder zwischen zwei Versuchen), schweigt die Zeile. Aufgegeben, Login prüfen oder alle
+        // Versuche verbraucht → Zeile wie bisher.
+        if(tplNachlesungLaeuft(a.id)) continue
         const lauf = (typeof _accBalLauf !== 'undefined' && _accBalLauf.get(String(a.id))) || null
         konten.add(tplKk(currentUserId, a.name))
         const endeUhr = letztesEnde ? new Date(letztesEnde).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''
@@ -49962,7 +49977,10 @@
       const fin = p.mt5Baseline.final, b = p.mt5Baseline
       let txt = ''
       if(fin && fin.puls_aufgegeben) txt = 'Endlesung aufgegeben — ' + String(fin.puls_fehler || 'ohne Grund')
-      else if(!fin || (fin.balance_end == null && fin.pnl == null && fin.pl == null)) txt = 'Ergebnis nie gelesen — Endlesung fehlt (Balance nachher), Trade steht in Überprüfen'   // 08.10.2026
+      else if(!fin || (fin.balance_end == null && fin.pnl == null && fin.pl == null)){
+        // .1506: nur, wenn Puls nicht mehr von selbst liest — eine anstehende Nachlesung ist kein Fall für „Braucht dich" (s. tplNachlesungLaeuft)
+        if(!planWartetAufPuls(p)) txt = 'Ergebnis nie gelesen — Endlesung fehlt (Balance nachher), Trade steht in Überprüfen'   // 08.10.2026
+      }
       else if(fin && typeof tvV2LoginBremse === 'function'){ try{ const lb = tvV2LoginBremse(fin, jetzt); if(lb && lb.pruefen) txt = `Wartet · Login prüfen — ${lb.n} Lesungen scheiterten` }catch(_){} }
       if(!txt && b.hedge && b.hedge.status === 'fehler') txt = `Fusion-Hedge: ${b.hedge.msg || 'Fehler'}`
       if(txt) add(currentUserId, ich, { art: 'plan', firma: p.masterFirm, konto: p.masterName, ende4: '', text: txt })
