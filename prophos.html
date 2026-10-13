@@ -29634,7 +29634,7 @@
    * (oberste Ebene, RLS, Status-Guard review; weg = manuell:null), fremder Plan → PATCH /admin/wd-plaene {aktion:'manuell'|
    * 'manuell_weg'} — EIN Weg für alle IDs wie 'ende'; antwortet das Backend noch nicht, sagt es der Toast ehrlich. */
   // Nächster Schritt (Nachbesserung 08.10.2026): kleine Auswahl vor der Notiz, gespeichert als manuell.schritt (String)
-  const WDL_MAN_SCHRITTE = [['funded', '→ Funded'], ['phase2', '→ Phase 2'], ['payout', '→ Payout'], ['winning_days', '→ Winning Days'], ['sonst', 'sonst'], ['geparkt', 'Geparkt']]
+  const WDL_MAN_SCHRITTE = [['funded', '→ Funded'], ['phase2', '→ Phase 2'], ['payout', '→ Payout'], ['winning_days', '→ Winning Days'], ['sonst', 'sonst'], ['geparkt', 'Review']]   // .1514: „Geparkt" heißt Review (Finn 13.10.2026)
   // GEPARKT (12.10.2026, Finn: „geparkte Accounts … dauert oft 1–2 Tage, bis die freigegeben werden"): dasselbe Kennzeichen manuell
   // mit schritt 'geparkt' — kein neuer Backend-Weg (das Backend speichert schritt als freien Text). Die Zeile steht dann in
   // Überprüfen → Geparkt statt in Manuelle Arbeit; Abhaken/zurück wie dort.
@@ -29886,7 +29886,7 @@
         // „→ manuell" (08.10.2026): Handy/Touch hat kein Drag — derselbe Weg wie das Ablegen in „Manuelle Arbeit"
         miZ = zelle('mi wdl-z-akt', `${erg ? `<span>${erg}</span>` : ''}<button type="button" class="btn btn-ghost el-knopf" data-wdl-abhaken="${escapeHtml(pid)}"${sperre ? ' disabled' : ''} title="${escapeHtml(sperre || 'Abhaken — P&L prüfen und Trade erledigen')}">Abhaken</button>`
           + `<button type="button" class="btn btn-ghost el-knopf" data-wdl-manuell="${escapeHtml(pid)}"${_wdlManBusy.has(pid) ? ' disabled' : ''} title="Nach „Manuelle Arbeit" — Notiz dazu, nichts wird verbucht (oder die Zeile dorthin ziehen)">→ manuell</button>`
-          + `<button type="button" class="btn btn-ghost el-knopf" data-wdl-parken="${escapeHtml(pid)}"${_wdlManBusy.has(pid) ? ' disabled' : ''} title="Parken — wartet auf Freigabe der Firma, nichts wird verbucht (oder die Zeile nach „Geparkt" ziehen)">→ parken</button>`,
+          + `<button type="button" class="btn btn-ghost el-knopf" data-wdl-parken="${escapeHtml(pid)}"${_wdlManBusy.has(pid) ? ' disabled' : ''} title="Nach Review — wartet auf die neuen Kontodaten der Firma, nichts wird verbucht (früher „parken\")">→ Review</button>`,
           { tip: echo ? '' : demoTip(d) })
         plZ = zelle('pl', sig(pb, '$', 2) + slaveZ(t) + zuWegZ(t), { f: col(pb), tip: wdlPlTip(t, echo, pb) })
         zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
@@ -30048,12 +30048,13 @@
     // ‚Tage sammeln' und ‚Review'"): in der Übergruppe „Bestanden" je Schritt ein eigener Kasten — Trade abhaken (bestandener Trade, Zeilen
     // wie in Überprüfen) · Tage sammeln (Ziel erreicht, Mindesttage fehlen) · Review (Ziel + Tage voll, bis der Nachfolger angelegt ist).
     // Gleiche Namen wie der Typ-Chip in Accounts/Planer (accZielChipHtml). Ein Konto steht nie doppelt (bstZeilen erst nach dem Abhaken).
-    const bestanden = (bestTr, bestAlle) => {
-      const zz = bstZeilen()
+    const bestanden = (bestTr, bestAlle, revTr) => {
+      // revTr (.1514): Trades „→ Review" (früher Geparkt) — Zeile wie in Abhaken, im selben Kasten über den Konten mit Nachfolger-Knopf
+      const zz = bstZeilen(), rev = (revTr || []).map(t => ({ fehlt: false, html: zeile(t, '') }))
       const kaesten = gruppe('Trade abhaken', nachEnde(bestTr || []), ['Ergebnis', 'Konto', 'P&amp;L', 'Zu'], 'wdl-tab-konto wdl-tab-sek-bestanden', null, bestAlle || [])
         + bstTab(zz.filter(z => z.fehlt), 'Tage sammeln', 'Ziel erreicht, Mindesttage fehlen noch — der Auto-Planer legt je Handelstag einen Mini-Trade, danach wandert das Konto nach Review', 'wdl-tab-sek-tage')
-        + bstTab(zz.filter(z => !z.fehlt), 'Review', 'Ziel und Mindesttage erfüllt — liegt hier, bis die neuen Daten der Firma da sind und der Nachfolger angelegt ist', 'wdl-tab-sek-review')
-      return { html: kaesten, n: (bestTr || []).length + zz.length }
+        + bstTab([...rev, ...zz.filter(z => !z.fehlt)], 'Review', 'Ziel und Mindesttage erfüllt — liegt hier, bis die neuen Daten der Firma da sind und der Nachfolger angelegt ist', 'wdl-tab-sek-review')
+      return { html: kaesten, n: (bestTr || []).length + zz.length + rev.length }
     }
     const manuell = (g, a) => {
       if(g.ma.length) return gruppe('Manuelle Arbeit', nachAblage(g.ma), ['Notiz', 'Konto', 'P&amp;L', 'Zu'], 'wdl-tab-konto wdl-tab-manuell wdl-tab-sek-manuell', null, a.ma)
@@ -30075,19 +30076,19 @@
       const gep = pr.filter(wdlGeparkt), blow = pr.filter(t => !wdlGeparkt(t) && istGeblowt(t)), norm = pr.filter(t => !wdlGeparkt(t) && !istGeblowt(t))
       const gepA = prA.filter(wdlGeparkt), blowA = prA.filter(t => !wdlGeparkt(t) && istGeblowt(t)), normA = prA.filter(t => !wdlGeparkt(t) && !istGeblowt(t))
       const kopf4 = ['Ergebnis', 'Konto', 'P&amp;L', 'Zu']
-      // Geparkt bleibt Drop-Ziel (.wdl-ug-geparkt, wdlDropZiel) — leer als gestrichelter Kopf, sobald es etwas abzuhaken gibt
-      const geparkt = gep.length ? gruppe('Geparkt', nachAblage(gep), kopf4, 'wdl-tab-konto wdl-tab-sek-geparkt wdl-ug-geparkt', null, gepA)
-        : pr.length ? `<div class="wdl-tab wdl-tab-konto wdl-tab-sek-geparkt wdl-ug-geparkt wdl-tab-leer"><div class="wdl-z wdl-z-kopf"><span class="wdl-z-wer">Geparkt · 0</span><span class="wdl-z-ri"></span><span class="wdl-man-hinweis">Zeile hierher ziehen oder „→ parken" — wartet auf Freigabe der Firma</span></div></div>` : ''
+      // GEPARKT IST WEG (.1514, Finn 13.10.2026: „das Geparkt brauchen wir nicht mehr, wurde ersetzt"): geparkte Trades (manuell.schritt
+      // 'geparkt', Knopf heißt jetzt „→ Review") stehen in Bestanden → Review — dort warten sie auf die neuen Kontodaten der Firma.
+      void gepA
       const verlaufAuf = !!(wdl.alleZu || {}).verlauf
       const verlauf = !g.er.length ? '' : verlaufAuf
         ? gruppe('Verlauf · abgehakt', nachEnde(g.er), kopf4, 'wdl-tab-konto wdl-tab-sek-erledigt', 'erledigt', a.er) + `<button type="button" class="wdl-verlauf" data-wdl-mehr="verlauf">Verlauf zuklappen</button>`
         : `<button type="button" class="wdl-verlauf" data-wdl-mehr="verlauf">Verlauf · ${g.er.length} abgehakte Trades zeigen</button>`
-      const erledigtN = norm.length + g.wa.length + blow.length + g.ma.length + gep.length
+      const erledigtN = norm.length + g.wa.length + blow.length + g.ma.length
       const erledigt = gruppe('Abhaken', nachEnde(norm), kopf4, 'wdl-tab-konto wdl-tab-sek-pruef', null, normA)
         + gruppe('Wartet auf Balance', nachEnde(g.wa), ['Nachlesung', 'P&amp;L', 'Zu'], 'wdl-tab-sek-wartet', null, a.wa)
         + gruppe('Geblowt · archivieren', nachEnde(blow), kopf4, 'wdl-tab-konto wdl-tab-sek-geblowt', null, blowA)
-        + manuell(g, a) + geparkt
-      const best = bestanden(g.pr.filter(istBest), a.pr.filter(istBest))
+        + manuell(g, a)
+      const best = bestanden(g.pr.filter(istBest), a.pr.filter(istBest), nachAblage(gep))
       return og3('Läuft', g.la.length, 'Trades am Markt', 'wdl-og3-lauf', gruppe('Am Markt', nachStart(g.la), ['Spanne', 'P&amp;L', 'Seit'], 'wdl-tab-lauf wdl-tab-sek-lauf', null, a.la) || '<div class="wdl-og3-leer">Gerade läuft nichts.</div>')
         + og3('Erledigt', erledigtN, erledigtN ? 'zu — oben abhaken, was normal lief' : 'alles abgehakt', 'wdl-og3-erledigt', (erledigt || '<div class="wdl-og3-leer">Nichts abzuhaken.</div>') + verlauf)
         + og3('Bestanden', best.n, 'Trade abhaken → Tage sammeln → Review', 'wdl-og3-bestanden', best.html)
@@ -43471,7 +43472,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1513'
+  const OS_TAB_BUILD = '2026-09-22.1514'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
