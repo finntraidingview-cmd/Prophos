@@ -19442,6 +19442,18 @@ def gp_planen(gruppe_id, trocken=False, quelle="hand", seed=None):
             sb_update("auto_plan_gruppe", {"gruppe_id": f"eq.{gruppe_id}"}, {"letzter_lauf": erg, "updated_at": jetzt.isoformat()})
         except Exception as e:
             print(f"[gruppen-plan] ⚠️ Protokoll: {type(e).__name__}: {e}", flush=True)
+    if not trocken and erg["geplant"]:
+        # „Neue Trades bestätigen" aufs Handy des Verwalters (13.10.2026) — je ID gezählt
+        try:
+            je_id = {}
+            for z in erg["geplant"]:
+                je_id[z["user"]] = je_id.get(z["user"], 0) + 1
+            erst = min(z["start"] for z in erg["geplant"])
+            gp_push_senden(gr["verwalter_id"], [("🤖 Neue Trades bestätigen",
+                           f"{len(erg['geplant'])} neue Echo-Trades geplant ({' · '.join(f'{u} {n}' for u, n in sorted(je_id.items()))}), "
+                           f"erster um {erst} — im Admin → Trade-Planer bestätigen, sonst startet nichts")])
+        except Exception as e:
+            print(f"[gruppen-plan] ⚠️ Push: {type(e).__name__}: {e}", flush=True)
     if erg["geplant"] or quelle != "takt":
         print(f"[gruppen-plan] {gr.get('name')} {tag} {quelle}{' (trocken)' if trocken else ''}: {len(erg['geplant'])} geplant, "
               f"{len(ausgelassen)} ausgelassen", flush=True)
@@ -19449,6 +19461,90 @@ def gp_planen(gruppe_id, trocken=False, quelle="hand", seed=None):
 
 
 _gp_info = {"letzter_takt": 0.0, "fehler": "", "laeufe": 0}
+
+# ══ HANDY-MELDUNGEN AN DEN VERWALTER (13.10.2026, Finn: „dass bei Emin am Handy immer Benachrichtigungen ankommen … Trade gestartet, hat
+# alles geklappt oder Neue Trades bestätigen … an allen IDs, die er managt"). Railway erkennt es selbst aus trade_plans (egal welcher PC
+# startet) und schickt an die Geräte des VERWALTERS der Gruppe (push_an_user) — nur Gruppen mit Gruppen-Planer-Zeile, HT unberührt.
+# „Neue Trades bestätigen" schickt gp_planen direkt nach dem Anlegen. Je Ereignis genau eine Meldung (Merker im Speicher; nach einem
+# Neustart zählt nur, was danach passiert).
+GP_PUSH_TAKT_S = 60
+GP_PUSH_FENSTER_MIN = 20
+GP_PUSH_LINK = "https://prophos.pages.dev/prophos#wdlive"
+GP_PUSH_LINK_BESTAETIGEN = "https://prophos.pages.dev/prophos#kasse"
+_gp_push = {"start": time.time(), "letzt": 0.0, "gemeldet": {}, "fehler": ""}
+
+
+def gp_push_ereignisse(plaene, namen, seit_iso):
+    """REIN RECHNEND (testbar): Plan-Zeilen {id,user_id,master_name,master_firm,richtung,master_contracts,started_at,sf,ss} → Ereignisse
+    [(schluessel, titel, text)] seit seit_iso. Gestartet (started_at) = „Trade gestartet — hat alles geklappt"; Start-Fehler (sf rot) und
+    Richtungsschutz (ss, nur der erste Versuch je Plan) = „nicht gestartet" mit Grund."""
+    out = []
+    for p in plaene or ():
+        pid = str(p.get("id"))
+        wer = namen.get(str(p.get("user_id")), str(p.get("user_id"))[:8])
+        konto = f"{p.get('master_firm') or ''} {p.get('master_name') or ''}".strip()
+        if str(p.get("started_at") or "") > seit_iso:
+            r = "Long" if p.get("richtung") == "buy" else "Short" if p.get("richtung") == "sell" else ""
+            m = _wd_num(p.get("master_contracts"))
+            out.append((pid + "|start", "✅ Trade gestartet",
+                        f"{wer} · {konto}: {r} {m:g} — hat alles geklappt".replace("  ", " ") if m else f"{wer} · {konto}: hat alles geklappt"))
+        sf = p.get("sf") if isinstance(p.get("sf"), dict) else None
+        if sf and sf.get("status") == "rot" and str(sf.get("at") or "") > seit_iso and sf.get("schritt") != "ziel_erreicht":
+            out.append((f"{pid}|sf|{sf.get('at')}", "⚠ Trade nicht gestartet", f"{wer} · {konto}: {str(sf.get('msg') or 'Start-Check rot')[:150]}"))
+        ss = p.get("ss") if isinstance(p.get("ss"), dict) else None
+        if ss and str(ss.get("at") or "") > seit_iso:
+            out.append((pid + "|ss", "⛔ Order ging nicht durch — Richtungsschutz",
+                         f"{wer} · {konto}: {str(ss.get('text') or '')[:150]} — neuer Versuch alle ~10 min, Gegen-Trade abhaken löst es"))
+    return out
+
+
+def gp_verwalter_karte():
+    """{mitglied_uid: verwalter_uid} aller Gruppen mit Verwalter UND Zeile in auto_plan_gruppe."""
+    daten = admin_gruppen_daten()
+    zeilen = {str(z.get("gruppe_id")) for z in sb_select("auto_plan_gruppe", {"select": "gruppe_id"}) or []}
+    verw = {str(x["id"]): str(x["verwalter_id"]) for x in daten.get("gruppen") or () if x.get("verwalter_id") and str(x["id"]) in zeilen}
+    return {str(m.get("user_id")): verw[str(m.get("gruppe_id"))] for m in daten.get("mitglieder") or () if str(m.get("gruppe_id")) in verw}
+
+
+def gp_push_senden(verwalter, meldungen):
+    """meldungen [(titel, text)] an die Geräte des Verwalters — mehr als 3 in einem Takt als EINE Sammelmeldung."""
+    if not meldungen:
+        return
+    if len(meldungen) > 3:
+        meldungen = [(f"Prophos · {len(meldungen)} Meldungen", " · ".join(t for _ti, t in meldungen)[:220])]
+    for titel, text in meldungen:
+        link = GP_PUSH_LINK_BESTAETIGEN if "bestätigen" in titel else GP_PUSH_LINK
+        push_an_user(verwalter, titel, text, url=link, tag="gp-" + hashlib.sha1(text.encode()).hexdigest()[:10], renotify=True)
+
+
+def gp_push_tick():
+    """Railway-Takt (ap_loop): jede Minute Starts/Fehler der Gruppen-IDs der letzten GP_PUSH_FENSTER_MIN an den Verwalter."""
+    if time.time() - _gp_push["letzt"] < GP_PUSH_TAKT_S or not push_bereit():
+        return
+    _gp_push["letzt"] = time.time()
+    karte = gp_verwalter_karte()
+    if not karte:
+        return
+    jetzt = datetime.now(timezone.utc)
+    seit = max(datetime.fromtimestamp(_gp_push["start"], timezone.utc), jetzt - timedelta(minutes=GP_PUSH_FENSTER_MIN)).isoformat()
+    rows = _sb_all("trade_plans", {"select": "id,user_id,master_name,master_firm,richtung,master_contracts,started_at,"
+                                             "sf:mt5_baseline->start_fehler,ss:mt5_baseline->start_sperre",
+                                   "user_id": "in.(" + ",".join(sorted(karte)) + ")", "updated_at": f"gte.{seit}"})
+    namen, _aus = _ap_namen()
+    je = {}
+    for key, titel, text in gp_push_ereignisse(rows, namen, seit):
+        if key in _gp_push["gemeldet"]:
+            continue
+        _gp_push["gemeldet"][key] = time.time()
+        uid = key.split("|", 1)[0]
+        user = next((str(r.get("user_id")) for r in rows if str(r.get("id")) == uid), None)
+        if user in karte:
+            je.setdefault(karte[user], []).append((titel, text))
+    for verwalter, meldungen in je.items():
+        gp_push_senden(verwalter, meldungen)
+        print(f"[gruppen-push] {len(meldungen)} Meldung(en) an Verwalter {verwalter[:8]}", flush=True)
+    alt = time.time() - 86400
+    _gp_push["gemeldet"] = {k: v for k, v in _gp_push["gemeldet"].items() if v > alt}
 
 
 def gp_takt_faellig(lokal, zeiten):
@@ -24795,6 +24891,11 @@ def ap_loop():
         except Exception as e:
             _gp_info["fehler"] = f"{type(e).__name__}: {e}"
             print(f"[gruppen-plan] ⚠️ {e}", flush=True)
+        try:
+            gp_push_tick()                    # Handy-Meldungen an den Verwalter (gestartet / nicht gestartet), 13.10.2026
+        except Exception as e:
+            _gp_push["fehler"] = f"{type(e).__name__}: {e}"
+            print(f"[gruppen-push] ⚠️ {e}", flush=True)
         try:
             ap_bal_auto_tick(datetime.now(timezone.utc))   # Balance von selbst nachlesen, wo der Planer sonst wartet (13.10.2026)
             _ap_bal_auto["fehler"] = ""

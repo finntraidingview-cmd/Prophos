@@ -32,7 +32,7 @@ def lade():
         return re.search(rf"^{name} = .*$", src, re.M).group(0)
 
     teile = [konst(k) for k in ("GP_SLAVE_PPL", "GP_MIN_LOT", "GP_VORLAUF_MIN", "GP_DD_PLAUSIBEL", "GP_MARGE_RESERVE")]
-    teile += [block(n) for n in ("_ap_hhmm", "gp_multiplikator", "gp_dd", "gp_hedge", "gp_richtungen", "gp_zeiten", "gp_takt_faellig", "gp_marge_verteilen")]
+    teile += [block(n) for n in ("_ap_hhmm", "gp_multiplikator", "gp_dd", "gp_hedge", "gp_richtungen", "gp_zeiten", "gp_takt_faellig", "gp_marge_verteilen", "gp_push_ereignisse")]
 
     def _wd_num(v):
         try:
@@ -100,6 +100,24 @@ def main():
     ok(st == {"a": 900} and raus == ["b"], "kein Platz mehr bis 17:20 → raus")
     st, raus = mv([("a", "u1", 420, 600), ("b", "u1", 423, 600)], 1200, 180, 1040, 3, {"u1": [420, 423, 603]})
     ok(st["a"] == 420 and st["b"] == 608, "rückt wegen Marge auf 10:08 — 10:03 ist von derselben ID belegt (Abstand bleibt)")
+
+    print("Handy-Meldungen")
+    pe = ns["gp_push_ereignisse"]
+    seit = "2026-10-13T16:00:00+00:00"
+    namen = {"u1": "Ahmad"}
+    rows = [{"id": "p1", "user_id": "u1", "master_firm": "FTMO", "master_name": "100k …1896", "richtung": "buy", "master_contracts": 2.5,
+             "started_at": "2026-10-13T16:05:00+00:00"},
+            {"id": "p2", "user_id": "u1", "master_firm": "The5%ers", "master_name": "…5070", "started_at": "2026-10-13T15:00:00+00:00"},
+            {"id": "p3", "user_id": "u1", "master_firm": "FundingPips", "master_name": "…0874",
+             "sf": {"status": "rot", "at": "2026-10-13T16:10:00.000Z", "msg": "Fusion-Marge zu wenig"}},
+            {"id": "p4", "user_id": "u1", "master_firm": "Tradeify", "master_name": "…6825",
+             "ss": {"text": "tradeify: dein Konto läuft dort in Gegenrichtung", "at": "2026-10-13T16:12:00+00:00"}},
+            {"id": "p5", "user_id": "u1", "sf": {"status": "rot", "schritt": "ziel_erreicht", "at": "2026-10-13T16:10:00Z"}}]
+    e = pe(rows, namen, seit)
+    keys = [k for k, _t, _x in e]
+    ok(keys == ["p1|start", "p3|sf|2026-10-13T16:10:00.000Z", "p4|ss"], "gestartet + Start-Fehler + Richtungsschutz; alter Start und Ziel erreicht nicht")
+    ok("Ahmad · FTMO 100k …1896: Long 2.5 — hat alles geklappt" == e[0][2], "Text Trade gestartet, hat alles geklappt, mit ID, Konto, Richtung, Lots")
+    ok(e[2][1].startswith("⛔") and "Richtungsschutz" in e[2][1], "Richtungsschutz-Titel")
 
     print("Takt")
     t = ns["gp_takt_faellig"]
