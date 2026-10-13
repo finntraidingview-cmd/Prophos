@@ -10851,6 +10851,9 @@ def _wd_heute_zeile(p, acc, disp, vorher=None):
         # MANUELLE ARBEIT (08.10.2026, Finn: Plan aus „Überprüfen" parken — „noch ein paar Winning Days mit 0,01 fahren, Notiz dran,
         # in zwei Tagen abhaken"): mt5_baseline.manuell {at, notiz, von} komplett oder null — das Radar baut daraus die Gruppe
         "manuell": base.get("manuell") if isinstance(base.get("manuell"), dict) else None,
+        # Mini-Trade zum Tage sammeln (13.10.2026, Finn: „Mini-Trades nicht mit den bestandenen mischen"): das Radar zeigt ihn als normalen
+        # Trade in Erledigt → Abhaken, das Konto bleibt in „Tage sammeln" stehen
+        "tage_mini": bool(base.get("tage_mini")),
     }
     # Puls-Merker NUR für Topstep V2 (05.10.2026, Topstep V2 im Radar): tv.puls 'tsx' = Puls hat den Plan in TopstepX gestartet;
     # ein von Hand gestarteter tsv2-Plan trägt das Feld nicht. Das Frontend braucht den Unterschied für die Radar-Zeile. Bewusst
@@ -12416,11 +12419,12 @@ _hand_cache = {}
 _hand_lock = threading.Lock()
 
 
-def hand_gruppen(konten_ziel, reviews, blown, letzte, accs, archiv, namen, ausgeblendet, jetzt, lauf=None):
+def hand_gruppen(konten_ziel, reviews, blown, letzte, accs, archiv, namen, ausgeblendet, jetzt, lauf=None, tage_je=None):
     """REIN RECHNEND (testbar): die vier Handarbeit-Gruppen. konten_ziel = accounts mit ziel_erreicht_at; reviews = trade_plans review
     (mit manuell); blown = trade_plans blown=true; letzte = {konto_id: (plan_id, started_at)} jüngster gestarteter Plan je Konto;
     accs = {konto_id: account} (Name/Firma/External ID/Typ der Plan-Konten); archiv = archivierte Konto-IDs; namen = user_id → Name.
     lauf = {at, ausgelassen[]} des letzten echten Nachtlaufs (schon auf die Sicht gefiltert) oder None → Gruppe planer.
+    tage_je = {konto_id: (ist, soll)} Mindesttage (ap_tage_ist) — bestanden-Zeilen tragen dann tage_ist/tage_soll (13.10.2026).
     → {bestanden, geblowt, ueberpruefen, manuell, planer} — Listen von Zeilen, neueste zuerst (planer in Lauf-Reihenfolge)."""
     def ende4(a):
         return str((a or {}).get("external_id") or "").strip()[-4:]
@@ -12441,6 +12445,11 @@ def hand_gruppen(konten_ziel, reviews, blown, letzte, accs, archiv, namen, ausge
         z = basis(uid, kid, a)
         z.update(art="bestanden", seit=a.get("ziel_erreicht_at"), nach=HAND_NACH[a["account_type"]],
                  bal=_wd_num(a.get("ziel_erreicht_bal")), ziel=_wd_num(a.get("ziel_usd")))
+        # MINDESTTAGE AUCH FÜR FREMDE IDs (13.10.2026, Finn: „im Radar alle bestandenen Accounts sehen, die gerade Tage sammeln") — vorher
+        # kannte das Radar die Tage nur im eigenen Login und stellte fremde Konten mit fehlenden Tagen fälschlich nach Review
+        t = (tage_je or {}).get(kid)
+        if t:
+            z.update(tage_ist=int(t[0]), tage_soll=int(t[1]))
         out["bestanden"].append(z)
     gesehen = set()
     for p in blown or ():
@@ -12525,7 +12534,8 @@ def admin_handarbeit():
         f = admin_sicht_filter(sicht) or (("not.in.(" + ",".join(sorted(std_aus)) + ")") if std_aus else None)
         uq = {"user_id": f} if f else {}
         konten_ziel = _sb_all("accounts", dict(uq, select="id,user_id,name,firm,account_type,external_id,starting_balance,"
-                                                           "ziel_erreicht_at,ziel_erreicht_bal,ziel_usd", ziel_erreicht_at="not.is.null"))
+                                                           "ziel_erreicht_at,ziel_erreicht_bal,ziel_usd,goal_kind,goal_target,"
+                                                           "goal_done_offset,goal_since", ziel_erreicht_at="not.is.null"))
         reviews = _sb_all("trade_plans", dict(uq, select="id,user_id,master_account_id,master_name,master_firm,master_pl,ended_at,"
                                                          "completed_at,manuell:mt5_baseline->manuell", status="eq.review"))
         # Blow-Pläne nur der letzten HAND_BLOWN_TAGE (Prüfer 09.10.2026: ohne Grenze wüchse die Abfrage mit jedem Blow aller Zeiten mit) —
@@ -12563,8 +12573,20 @@ def admin_handarbeit():
             for a in _sb_all("accounts", {"select": "id,name,firm,account_type,external_id,starting_balance",
                                           "id": "in.(" + ",".join(kids[j:j + 150]) + ")"}):
                 accs[str(a["id"])] = a
+        # Mindesttage der bestandenen Konten (13.10.2026): gestartete Pläne nur dieser Konten, Zählweise ap_tage_ist (= zielFortschritt)
+        kids_tage = sorted({str(a.get("id")) for a in konten_ziel or [] if a.get("goal_kind") == "trading_days" and str(a.get("id")) not in archiv})
+        tage_je, je_plan = {}, {}
+        for j in range(0, len(kids_tage), 150):
+            for r in _sb_all("trade_plans", {"select": "master_account_id,started_at", "started_at": "not.is.null",
+                                             "master_account_id": "in.(" + ",".join(kids_tage[j:j + 150]) + ")"}):
+                je_plan.setdefault(str(r.get("master_account_id")), []).append(r)
+        for a in konten_ziel or []:
+            if str(a.get("id")) in kids_tage:
+                t = ap_tage_ist(a, je_plan.get(str(a.get("id")), []))
+                if t:
+                    tage_je[str(a.get("id"))] = t
         namen, ausgeblendet = _wd_personen()
-        gr = hand_gruppen(konten_ziel, reviews, blown, letzte, accs, archiv, namen, ausgeblendet, datetime.now(timezone.utc), lauf)
+        gr = hand_gruppen(konten_ziel, reviews, blown, letzte, accs, archiv, namen, ausgeblendet, datetime.now(timezone.utc), lauf, tage_je)
         gelesen = gr.pop("planer_gelesen", 0)
         antwort = {"ok": True, "at": datetime.now(timezone.utc).isoformat(), "n": sum(len(v) for v in gr.values()), "gruppen": gr,
                    "planer_gelesen": gelesen}

@@ -82,6 +82,10 @@ def main():
     check(pl[0]["knopf"] == "balance" and pl[1]["knopf"] == "" and pl[1]["grund"].startswith("nur noch 36 $") and pl[0]["seit"] == lauf["at"],
           "Knopf „Balance lesen“ nur bei keine Balance; Grund im Klartext; seit = Lauf")
     check(ns["hand_gruppen"](konten_ziel, reviews, blown, letzte, accs, {"k3"}, {}, {UX}, jetzt)["planer"] == [], "ohne Lauf → Gruppe leer")
+    # Mindesttage (13.10.2026): tage_je → tage_ist/tage_soll an der bestanden-Zeile, ohne Eintrag keine Felder
+    gt = ns["hand_gruppen"](konten_ziel, reviews, blown, letzte, accs, {"k3"}, {}, {UX}, jetzt, None, {"k2": (3, 5)})["bestanden"]
+    z2 = next((z for z in gt if z["konto_id"] == "k2"), {}); z1 = next((z for z in gt if z["konto_id"] == "k1"), {})
+    check(z2.get("tage_ist") == 3 and z2.get("tage_soll") == 5 and "tage_ist" not in z1, "Mindesttage an bestanden-Zeilen (k2 3/5, k1 ohne)")
     print(f"{len(f) - sum(f)}/{len(f)} ok")
     sys.exit(1 if sum(f) else 0)
 
