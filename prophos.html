@@ -65050,6 +65050,7 @@
         <span>${lauf}</span>
         <span class="gp-r"><button type="button" class="btn btn-ghost" data-gp="probe:${gid}"${_gp.laeuft ? ' disabled' : ''} title="Rechnet, wie er jetzt planen würde — legt nichts an">Probelauf</button>
           <button type="button" class="btn btn-ghost" data-gp="planen:${gid}"${_gp.laeuft ? ' disabled' : ''} title="Plant jetzt alle Konten ohne Plan für heute (unbestätigt)">Jetzt planen</button>
+          <button type="button" class="btn btn-ghost" data-gp="morgen:${gid}"${_gp.laeuft ? ' disabled' : ''} title="Plant schon jetzt den nächsten Handelstag (unbestätigt) — Konten mit laufendem Trade bleiben draußen">Morgen vorplanen</button>
           <button type="button" class="btn btn-ghost" data-gp="aktiv:${gid}" title="Automatisch ab ${escapeHtml(z.lauf || '06:00')} dt alle 15 min">${g.aktiv ? 'Ausschalten' : 'Einschalten'}</button></span></div>`
       const msg = _gp.msg ? `<div class="gp-msg">${escapeHtml(_gp.msg)}</div>` : ''
       let liste = ''
@@ -65071,16 +65072,16 @@
     root.querySelectorAll('[data-gp-auf]').forEach(b => b.addEventListener('click', () => { _gp.auf = _gp.auf === b.dataset.gpAuf ? '' : b.dataset.gpAuf; apIdsRender() }))
     root.querySelectorAll('[data-gp]').forEach(b => b.addEventListener('click', async () => {
       const [aktion, gid] = b.dataset.gp.split(':'), g = _gp.gruppen.find(x => String(x.gruppe_id) === gid); if(!g || _gp.laeuft) return
-      _gp.laeuft = true; _gp.msg = aktion === 'probe' ? 'Probelauf rechnet …' : aktion === 'planen' ? 'plant …' : ''; apIdsRender()
+      _gp.laeuft = true; _gp.msg = aktion === 'probe' ? 'Probelauf rechnet …' : (aktion === 'planen' || aktion === 'morgen') ? 'plant …' : ''; apIdsRender()
       try{
-        const d = await gpApi('POST', aktion === 'aktiv' ? { gruppe_id: gid, aktion, an: !g.aktiv } : { gruppe_id: gid, aktion })
+        const d = await gpApi('POST', aktion === 'aktiv' ? { gruppe_id: gid, aktion, an: !g.aktiv } : aktion === 'morgen' ? { gruppe_id: gid, aktion: 'planen', tag: 'morgen' } : { gruppe_id: gid, aktion })
         if(aktion === 'probe'){ _gp.probe = d; _gp.auf = 'probe:' + gid; _gp.msg = d.msg || '' }
-        else if(aktion === 'planen'){ _gp.msg = d.msg || `${(d.geplant || []).length} Vorschläge angelegt — unten unter „Zu bestätigen"`; _gp.probe = null; _gp.auf = '' }
+        else if(aktion === 'planen' || aktion === 'morgen'){ _gp.msg = d.msg || `${(d.geplant || []).length} Vorschläge angelegt — unten unter „Zu bestätigen"`; _gp.probe = null; _gp.auf = '' }
         else _gp.msg = d.aktiv ? 'Gruppen-Planer an' : 'Gruppen-Planer aus'
       }catch(e){ _gp.msg = '⚠ ' + ((e && e.message) || e) }
       finally{ _gp.laeuft = false }
       await gpLaden()
-      if(aktion === 'planen') apIdsLaden()
+      if(aktion === 'planen' || aktion === 'morgen') apIdsLaden()
     }))
   }
   function apIdsRender(){

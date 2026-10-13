@@ -19216,9 +19216,25 @@ def gp_gruppe_lesen(gruppe_id):
     return zeile, gr, uids
 
 
-def gp_planen(gruppe_id, trocken=False, quelle="hand", seed=None):
-    """Plant den heutigen Tag (deutsche Zeit) für eine Verwalter-Gruppe. trocken = nur rechnen. → Ergebnis-Dict
-    {ok, tag, geplant[], ausgelassen[], long_usd, short_usd, …}; mit trocken False auch in auto_plan_gruppe.letzter_lauf."""
+def gp_tag_wahl(tag, lokal):
+    """REIN RECHNEND (testbar): Ziel-Datum (deutsche Zeit) → date. None/'heute' = heute, 'morgen' = nächster Handelstag Mo–Fr
+    (Finn 13.10.2026 abends: „alle Trades bei Emin schon mal für morgen vorplanen"), 'JJJJ-MM-TT' = dieser Tag (nie in der Vergangenheit)."""
+    heute = lokal.date()
+    t = str(tag or "heute").strip().lower()
+    if t == "heute":
+        return heute
+    if t == "morgen":
+        d = heute + timedelta(days=1)
+        while d.weekday() >= 5:
+            d += timedelta(days=1)
+        return d
+    d = datetime.strptime(t, "%Y-%m-%d").date()
+    return d if d >= heute else heute
+
+
+def gp_planen(gruppe_id, trocken=False, quelle="hand", seed=None, tag=None):
+    """Plant einen Tag (deutsche Zeit, Standard heute; tag='morgen' = nächster Handelstag) für eine Verwalter-Gruppe. trocken = nur
+    rechnen. → Ergebnis-Dict {ok, tag, geplant[], ausgelassen[], long_usd, short_usd, …}; mit trocken False auch in letzter_lauf."""
     zeile, gr, uids = gp_gruppe_lesen(gruppe_id)
     if not zeile:
         return {"ok": False, "msg": "Diese Gruppe hat keinen Gruppen-Planer (auto_plan_gruppe)"}
@@ -19229,8 +19245,13 @@ def gp_planen(gruppe_id, trocken=False, quelle="hand", seed=None):
     zeiten = dict(GP_ZEITEN_STANDARD, **(zeile.get("zeiten") or {}))
     tz = _ap_tz(zeiten["tz"])
     jetzt = datetime.now(timezone.utc)
-    lokal = jetzt.astimezone(tz)
-    tag = lokal.strftime("%Y-%m-%d")
+    lokal_jetzt = jetzt.astimezone(tz)
+    try:
+        ziel_d = gp_tag_wahl(tag, lokal_jetzt)
+    except ValueError:
+        return {"ok": False, "msg": "tag = heute | morgen | JJJJ-MM-TT"}
+    lokal = datetime(ziel_d.year, ziel_d.month, ziel_d.day, tzinfo=tz)
+    tag = ziel_d.isoformat()
     erg = {"ok": True, "gruppe_id": str(gruppe_id), "gruppe": gr.get("name"), "tag": tag, "quelle": quelle, "trocken": bool(trocken),
            "at": jetzt.isoformat(), "fenster": [zeiten["von"], zeiten["bis"]], "geplant": [], "ausgelassen": []}
     if lokal.weekday() >= 5:
@@ -19247,12 +19268,13 @@ def gp_planen(gruppe_id, trocken=False, quelle="hand", seed=None):
                                          "started_at,orbit_gesendet_at,mt5_baseline->final", "order": "id.asc",
                                "user_id": in_uids, "created_at": "gte." + (jetzt - timedelta(days=30)).isoformat()})
 
+    heute_mn = datetime(lokal_jetzt.year, lokal_jetzt.month, lokal_jetzt.day, tzinfo=tz)   # „früher" = vor HEUTE, auch beim Vorplanen
     # Vorschläge früherer Tage, die nie gestartet wurden (Finn 05.10.2026: „Unbestätigte verfallen um 0:00") — blockieren das Konto nicht
     # und werden gelöscht; ein geclaimter, verpasster Plan bleibt stehen (Start-Fehler-Spur), blockt aber auch nicht
     def _alt(p):
         su = p.get("start_um")
         return p.get("status") == "planned" and p.get("auto_plan") is True and not p.get("started_at") and not p.get("orbit_gesendet_at") \
-            and bool(su) and (_ap_iso_min(su, mitternacht) or 0) < 0
+            and bool(su) and (_ap_iso_min(su, heute_mn) or 0) < 0
     weg_alt = [p for p in roh if _alt(p) and not p.get("start_um_gestartet_at")]
     plaene = [p for p in roh if not _alt(p) and not ap_ist_waise(p)]
     archiv = _ap_archiviert()
@@ -23297,7 +23319,7 @@ def admin_gruppen_plan():
                 return jsonify({"ok": True, "aktiv": bool(body.get("an"))})
             if aktion not in ("planen", "probe"):
                 return jsonify({"ok": False, "msg": "aktion = planen | probe | aktiv"}), 400
-            return jsonify(gp_planen(gid, trocken=aktion == "probe", quelle="hand"))
+            return jsonify(gp_planen(gid, trocken=aktion == "probe", quelle="hand", tag=body.get("tag")))   # tag: heute | morgen (13.10.2026)
         # Finn 13.10.2026: „nur bei Emin ändern, bei meinem Hermann-Technologies-Account bitte nix" — die Zeile im Admin-Reiter sieht nur
         # der Verwalter; ein Admin-Login bekommt sie nur ausdrücklich mit ?alle=1 (POST bleibt für Admin offen)
         if admin and str(request.args.get("alle") or "") != "1":

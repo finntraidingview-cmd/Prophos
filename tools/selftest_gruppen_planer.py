@@ -32,7 +32,7 @@ def lade():
         return re.search(rf"^{name} = .*$", src, re.M).group(0)
 
     teile = [konst(k) for k in ("GP_SLAVE_PPL", "GP_MIN_LOT", "GP_VORLAUF_MIN", "GP_DD_PLAUSIBEL", "GP_MARGE_RESERVE")]
-    teile += [block(n) for n in ("_ap_hhmm", "gp_multiplikator", "gp_dd", "gp_hedge", "gp_richtungen", "gp_zeiten", "gp_takt_faellig", "gp_marge_verteilen", "gp_push_ereignisse")]
+    teile += [block(n) for n in ("_ap_hhmm", "gp_multiplikator", "gp_dd", "gp_hedge", "gp_richtungen", "gp_zeiten", "gp_takt_faellig", "gp_marge_verteilen", "gp_push_ereignisse", "gp_tag_wahl")]
 
     def _wd_num(v):
         try:
@@ -40,7 +40,8 @@ def lade():
             return f if f == f else None
         except (TypeError, ValueError):
             return None
-    ns = {"_wd_num": _wd_num, "random": random}
+    from datetime import timedelta
+    ns = {"_wd_num": _wd_num, "random": random, "datetime": datetime, "timedelta": timedelta}
     exec("\n".join(teile), ns)
     return ns
 
@@ -118,6 +119,12 @@ def main():
     ok(keys == ["p1|start", "p3|sf|2026-10-13T16:10:00.000Z", "p4|ss"], "gestartet + Start-Fehler + Richtungsschutz; alter Start und Ziel erreicht nicht")
     ok("Ahmad · FTMO 100k …1896: Long 2.5 — hat alles geklappt" == e[0][2], "Text Trade gestartet, hat alles geklappt, mit ID, Konto, Richtung, Lots")
     ok(e[2][1].startswith("⛔") and "Richtungsschutz" in e[2][1], "Richtungsschutz-Titel")
+
+    print("Tag-Wahl")
+    tw = ns["gp_tag_wahl"]
+    ok(str(tw("morgen", datetime(2026, 10, 13, 21, 0))) == "2026-10-14", "Di abends → morgen = Mi 14.10.")
+    ok(str(tw("morgen", datetime(2026, 10, 16, 21, 0))) == "2026-10-19", "Fr → morgen = Mo 19.10.")
+    ok(str(tw(None, datetime(2026, 10, 13, 9, 0))) == "2026-10-13", "ohne tag = heute")
 
     print("Takt")
     t = ns["gp_takt_faellig"]
