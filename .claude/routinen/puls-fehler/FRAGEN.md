@@ -13,6 +13,7 @@ Stand 11.10. 20:37 (Routine): weiterhin kein neuer Fall seit 07.10. 11:00 UTC.
 Stand 12.10. 05:35 (Routine): weiterhin kein neuer Fall seit 07.10. 11:00 UTC.
 Stand 12.10. 20:35 (Routine): weiterhin kein neuer Fall seit 07.10. 11:00 UTC.
 Stand 13.10. 05:45 (Routine): weiterhin kein neuer Fall seit 07.10. 11:00 UTC.
+Stand 13.10. 23:07 (Routine): weiterhin kein neuer Fall seit 07.10. 11:00 UTC.
 Status: offen
 
 ## 2026-10-07 20:43 — konto: konto # steht im dropdown 0× (nicht genau einmal) — anderer tradovate-login?
@@ -26,6 +27,7 @@ Stand 11.10. 20:37 (Routine): kein neuer Fall (Sonntag, keine Signale seit 10.10
 Stand 12.10. 05:35 (Routine): kein neuer 0×-Fall (Montag 23:43 UTC lief die FundedNext-Lesung auf pc-2zc2we nach einem dritten Anlauf durch — Login-Abbruch, nicht 0×; dazu Fix .1458).
 Stand 12.10. 20:35 (Routine): kein neuer 0×-Fall. Heute blockierte stattdessen 19× der TradingView-Dialog „Go ad-free. Everywhere“ das Abmelden (pc-2zc2we 09:51–13:02 UTC, pc-auzre5 14:40 UTC) — Fix .1468 (81a2a72) schließt ihn über sein X.
 Stand 13.10. 05:45 (Routine): kein neuer 0×-Fall. Seit Fix .1468 (12.10. ~17:00 UTC) 0× „Go ad-free“ in 72 Signalen (ruhige Nacht, Orbit nur einmal auf pc-c19p2l).
+Stand 13.10. 23:07 (Routine): 1 neuer Fall 13.10. 13:43 UTC auf pc-2zc2we (Endlesung: Ziel 0× auch nach dem Login mit dem Firmen-Username) — Einzelfall, bleibt offen.
 Status: offen
 
 ## 2026-10-08 05:40 — konto_balance: kein Tradovate-Username für die Firma (The5%ers)
@@ -47,6 +49,7 @@ Stand 11.10. 20:37 (Routine): mt5_live 16:35 UTC weiter „abgelehnt“ auf pc-a
 Stand 12.10. 05:35 (Routine): mt5_live 01:36 UTC weiter „abgelehnt“ auf pc-auzre5, pc-c19p2l, pc-xc5c52; pc-pw1put meldet seit 09.10. 00:08 UTC nicht (> 73 h, PC aus?); kein neuer IPC-Fall; Plan 840c8097… steht noch „planned“.
 Stand 12.10. 20:35 (Routine): **5 neue IPC-Fälle heute** auf pc-c19p2l (08:12, 08:34, 08:55, 09:16, 13:26 UTC, alle Plan 2aaec4c9…) — der Plan ging dann 13:51 UTC doch auf „open“ (Start von Hand?). mt5_live 16:36 UTC weiter „abgelehnt“ auf pc-auzre5, pc-c19p2l, pc-xc5c52 und pc-pw1put (wieder da seit ~13:47 UTC). Plan 840c8097… steht noch „planned“. Die Windows-Abfrage auf pc-c19p2l kostet jetzt jeden Echo-Start dort — bitte einmal „Ja“ klicken bzw. die MT5-Update-Aufgabe einrichten.
 Stand 13.10. 05:45 (Routine): kein neuer IPC-Fall seit 12.10. 13:26 UTC (nachts keine Echo-Starts auf pc-c19p2l). mt5_live 01:36 UTC weiter „abgelehnt“ auf pc-auzre5, pc-c19p2l, pc-pw1put, pc-xc5c52. Plan 840c8097… steht noch „planned“.
+Stand 13.10. 23:07 (Routine): IPC 13.10. 12:13 UTC auf pc-l5o8bv (dazu „IPC send failed“ 12:40 UTC dort), auf pc-c19p2l kein neuer IPC-Fall, aber 5× „F9-Dialog nicht gefunden“ (Plan 2070a993…, 10:35–12:58 UTC) — vermutlich dieselbe Ursache (offene Abfrage am Terminal), eigener Block unten. mt5_live 19:23 UTC weiter „abgelehnt“ auf pc-auzre5, pc-c19p2l, pc-pw1put, pc-xc5c52. Plan 840c8097… steht noch „planned“.
 Status: offen
 
 ## 2026-10-08 20:39 — orbit: slave-terminal (fusion-copier) nicht bereit — 'Algo Trading' im Hedge-Terminal nicht aktiv
@@ -59,6 +62,7 @@ Stand 11.10. 20:37 (Routine): kein neuer Fall.
 Stand 12.10. 05:35 (Routine): kein neuer Fall.
 Stand 12.10. 20:35 (Routine): kein neuer Fall.
 Stand 13.10. 05:45 (Routine): kein neuer Fall (seit .1494 prüft auch der Winning-Day-Weg auf Topstep vor dem Fusion-Hedge Algo Trading — dort heute Nacht kein Fehlstart).
+Stand 13.10. 23:07 (Routine): kein neuer Fall.
 Status: offen
 
 ## 2026-10-09 05:45 — drei Echo-Pläne stehen „planned“ mit verstrichener Startzeit
@@ -72,32 +76,53 @@ Stand 11.10. 20:37 (Routine): 72c2a073… (pc-auzre5) unverändert „planned“
 Stand 12.10. 05:35 (Routine): 72c2a073… (pc-auzre5) unverändert „planned“ seit 08.10. 13:57 UTC; 840c8097… siehe oben.
 Stand 12.10. 20:35 (Routine): 72c2a073… (pc-auzre5) unverändert „planned“ seit 08.10. 13:57 UTC; 840c8097… siehe oben.
 Stand 13.10. 05:45 (Routine): 72c2a073… (pc-auzre5) unverändert „planned“ seit 08.10. 13:57 UTC; 840c8097… siehe oben. Dazu neu 72f456a4… (pc-xc5c52), siehe Frage vom 13.10.
+Stand 13.10. 23:07 (Routine): 72c2a073… (pc-auzre5) unverändert „planned“ seit 08.10. 13:57 UTC; 840c8097… siehe oben; 72f456a4… (pc-xc5c52) heute 3× gescheitert (01:19 … 12:50 UTC), „planned“; neu dazu 2070a993… (pc-c19p2l, F9-Dialog, 5×), „planned“.
 Status: offen
 
 ## 2026-10-12 20:35 — close: Position #287105476 (Plan eff62815…, pc-onkrbk) — zwei Close-Versuche ohne Erfolg, Plan steht noch „open“
 Was passiert: Am pc-onkrbk scheiterte das Schließen der NDX100-Position des Plans eff62815… zweimal: 13:34 UTC „Close-Bot Timeout (300 s)“ (kein Trail), 14:07 UTC „Positions-Zeile #287105476 nicht gefunden (Zeilen-Scan ohne Treffer, 46 Punkte, 2× ausgegraut) — nichts geklickt“. Der Plan steht seit 08:53 UTC „open“ ohne Ende; in order_signale gibt es keinen dritten Versuch. Puls hat richtigerweise nichts blind geklickt — aber ich kann aus der Cloud nicht sehen, ob die Position noch offen ist oder schon (per TP/SL) zu war.
 Was ich brauche: Im Master-Terminal auf pc-onkrbk nachsehen, ob #287105476 noch offen ist — wenn ja, von Hand schließen bzw. „Position schließen“ neu anstoßen; wenn nein, den Plan beenden. Danach sag mir bitte, ob die Position zum Zeitpunkt 14:07 UTC noch offen war: dann wäre der Zeilen-Scan das Problem (Code), sonst war es ein Nachzügler-Close und der Riegel hat richtig gehalten.
 Stand 13.10. 05:45 (Routine): der Plan eff62815… steht seit 12.10. 17:15 UTC „completed“ (von dir beendet). Offen bleibt nur die Antwort: war die Position um 14:07 UTC noch offen (→ Zeilen-Scan des Close-Bots prüfen) oder schon zu (→ Riegel hat richtig gehalten)?
+Stand 13.10. 23:07 (Routine): Antwort fehlt weiterhin (war die Position um 14:07 UTC noch offen?).
 Status: offen
 
 ## 2026-10-12 20:35 — pc-na1q6b: pywinauto lädt nicht (win32ui-DLL) — vermutlich schon behoben, bitte bestätigen
 Was passiert: Um 11:59 UTC brach ein Echo-Start auf pc-na1q6b (Plan eea942d0…) ab: „pywinauto ist da, lässt sich aber nicht laden: ImportError: DLL load failed while importing win32ui“ (Hinweis des Bots: VC++-Runtime fehlt oder Windows „Intelligente App-Steuerung“ blockt die DLL). Ab 13:25 UTC liefen auf demselben PC Echo-Orders durch (eea942d0… von Hand gestartet, abeac9f8… 14:13 UTC per Signal platziert) — also wurde dazwischen etwas gemacht. Nur dieser PC, kein Code-Muster.
 Was ich brauche: Kurz bestätigen, dass die VC++-Runtime installiert bzw. die App-Steuerung aus ist (sonst kommt die Meldung nach dem nächsten Windows-Update wieder). Falls du nichts gemacht hast, sag es mir — dann beobachte ich den PC.
 Stand 13.10. 05:45 (Routine): kein neuer Fall (nachts kein Echo-Start auf diesem PC).
+Stand 13.10. 23:07 (Routine): kein neuer Fall.
 Status: offen
 
 ## 2026-10-12 20:35 — Entscheidung: Tab lud während einer Echo-Order neu (pc-i8vyq8, 14:32 UTC) — Neulade-Wächter liegt außerhalb der Puls-Pfade
 Was passiert: Plan 0c41fc25… (pc-i8vyq8) kam 14:32:35 UTC als Signal an; um 14:34 schloss der neu geladene Tab das Signal mit „⚠ Stand UNBEKANNT: Der Tab lud während einer Order neu“ ab (unklar). Der Plan startete trotzdem 14:33:39 UTC (Order lag, Plan heute von dir beendet, −968 $). Zeitlich passt das zum Sofort-Update auf .1466 (dein Push 14:17 UTC). Der Neulade-Wächter (bwGrund) soll bei „Signal in Arbeit“ / „Popup offen“ / „Start läuft“ warten — warum er hier doch lud (klassischer Echo-Weg route mt5 aus einem Signal?), kann ich nur im Wächter selbst prüfen, und der gehört nicht zu den Puls-Sektionen, die ich anfassen darf. Dazu am Morgen 08:50 UTC auf pc-onkrbk drei Balance-Lesungen „Tab neu geladen — Lesung abgebrochen“ ohne Push zu der Zeit.
 Was ich brauche: Deine Entscheidung, ob ich den Neulade-Wächter (Sofort-Update, Brücken-Selbstheilung) für diesen Fall analysieren und ggf. den Ruhe-Check um den laufenden Echo-Preflight erweitern darf — oder ob du das selbst machst.
 Stand 13.10. 05:45 (Routine): kein neuer Fall; deine Pushes .1469–.1497 (00:24–01:29 UTC) fielen in eine Phase ohne laufende Order — die Orders 00:26–01:26 UTC liefen alle durch.
+Stand 13.10. 23:07 (Routine): kein neuer Fall (12.10. 14:32 UTC bleibt der einzige).
 Status: offen
 
 ## 2026-10-13 05:45 — v2link: Kein Master-Terminal für das FundedNext-100k-Konto auf pc-xc5c52 (Plan 72f456a4…)
 Was passiert: Der Auto-Planer-Plan 72f456a4… (FundedNext 100k, „Phase 1 · Trading tage sammeln“, Mini-Trade 0,01 Lot) sollte 13.10. 01:19 UTC auf pc-xc5c52 starten. Der Start-Tick fand dort kein Master-Terminal für das Konto: „der Account braucht eine MT5-Verlinkung und eine Echo-Instanz mit Terminal-Pfad (Echo-Ansicht → Neue Instanz)“. Puls hat richtig nichts gemacht; der Plan steht „planned“ mit verstrichener Startzeit. Einrichtung, kein Code-Muster.
 Was ich brauche: Auf pc-xc5c52 in der Echo-Ansicht eine Instanz mit Terminal-Pfad für dieses Konto anlegen und das Konto in MT5-Links verlinken — oder den Plan auf den PC legen, auf dem das Terminal dieses Kontos läuft. Danach den Plan neu starten (oder löschen, wenn das Konto dort nicht laufen soll).
+Stand 13.10. 23:07 (Routine): 3 Fälle heute (01:19 … 12:50 UTC), Plan 72f456a4… weiter „planned“ — braucht deine Hand auf pc-xc5c52.
 Status: offen
 
 ## 2026-10-13 05:45 — close: Schließen in TopstepX gibt es noch nicht (Etappe K5) — Plan b7e026d4…, pc-l5o8bv
 Was passiert: Um 01:23 UTC kam ein close-Signal für den Winning-Day-Plan b7e026d4… (TopstepX, pc-l5o8bv). Der Bot antwortet ehrlich: „Schließen in TopstepX kommt mit Etappe K5 — bitte in TopstepX von Hand schließen.“ Der Plan wurde 01:23:43 UTC beendet (von Hand). Jedes Schließen auf TopstepX landet so als Fehlstart in puls_fehler_muster, solange K5 fehlt — mit den Winning-Day-Plänen auf Topstep (seit .1488) werden das täglich mehrere.
 Was ich brauche: Eine Entscheidung: Baust du K5 (Schließen über die Positions-Zeile in TopstepX, mit Beweis wie bei K4) selbst, oder soll die Routine es als Puls-Fix anfassen? Bis dahin führe ich diese Fälle nur im Bericht, nicht als Fehler.
+Stand 13.10. 23:07 (Routine): 2 Fälle (01:23 + 02:04 UTC, Plan b7e026d4…, seit 01:23 „completed“) — weiter nur geführt, bis du entschieden hast.
+Status: offen
+
+## 2026-10-13 23:07 — v2order: F9-Dialog nicht gefunden — Abbruch, nichts gesendet (pc-c19p2l 5×, pc-l5o8bv 1×)
+Was passiert: Auf pc-c19p2l brach der Echo-Start des Plans 2070a993… fünfmal ab (10:35, 10:58, 11:17, 11:40, 12:58 UTC): „Login/Lesen ok → Terminal betreten → F9-Dialog nicht gefunden“ — das Order-Fenster geht nach F9 nicht auf, Puls bricht richtig ab und sendet nichts. Derselbe PC hat seit dem 08.10. die offene Windows-/MT5-Abfrage (Frage oben, „abgelehnt“ in mt5_live); ein Terminal mit offener Systemabfrage nimmt keine Tastatur an. Einmal auch pc-l5o8bv (12:50 UTC, Plan 5065e12d…, Login/Lesen dort 33 s statt 1 s — Terminal war wohl gerade beschäftigt). Kein Code-Muster: ein PC wiederholt, der zweite einmal.
+Was ich brauche: Am pc-c19p2l das Master-Terminal ansehen — steht eine Windows-/MT5-Abfrage offen („Ja“ klicken), ist das Terminal eingeloggt, geht F9 im Chart von Hand auf? Danach Plan 2070a993… neu starten oder umplanen.
+Status: offen
+
+## 2026-10-13 23:07 — Google-Anzeige im Tradovate-Panel (dein Screenshot) — ohne „Close ad“ hat Puls kein X
+Was passiert: Dein Screenshot zeigt unten links im Tradovate-Panel eine Google-Anzeige („Daily Options on EURO STOXX 50“) über der Positions-Tabelle. Puls schließt solche Kacheln nur über TradingViews eigenen Knopf „Close ad“ (heute 27× bewiesen weggeklickt, Order- und Balance-Weg, weil beide vor dem Konto-Schritt die Kachel prüfen). Zeigt die Kachel nur Googles Dreieck/X oben rechts, liegt das in Googles iframe — für Puls nicht lesbar, und ein blinder Klick dort öffnet eher „Stop seeing this ad“ als dass er schließt. Die Lesung selbst liest das DOM, die Anzeige verdeckt also keine Zahl; sie stört nur, wenn sie über dem Konto-Umschalter oder dem Kontextmenü liegt. Die Fehlstarts von heute kamen vom großen „Go ad-free. Everywhere“-Dialog — der ist mit .1530 gefixt (augen.js findet jetzt sein X).
+Was ich brauche: Beim nächsten Mal mit der Maus über die Kachel fahren — erscheint ein kleines „Close ad“ (TradingViews X, nicht Googles Dreieck)? Wenn ja: Screenshot, dann prüfe ich, warum Puls es dort nicht findet. Wenn nein: kurz Bescheid — dann bleibt die Kachel stehen und ich sorge nur dafür, dass Puls darunter sauber weiterkommt.
+Status: offen
+
+## 2026-10-13 23:07 — zu_spaet: 35 verpasste Starts in 24 h, weil der Prophos-Tab am PC nicht lief (5 PCs)
+Was passiert: 35 Ereignisse „Startzeit um # min verpasst — der Prophos-Tab am PC lief nicht“ (bis 167 min) auf pc-40mali, pc-auzre5, pc-c19p2l, pc-l5o8bv und pc-pw1put, letzter 14:53 UTC. Das ist kein Puls-Fehler — der Start-Tick läuft im Tab, und der Tab war zu bzw. der PC/Browser aus. Jeder dieser Starts wurde ohne Order nachgeholt oder verfiel.
+Was ich brauche: Sollen auf diesen fünf PCs die Prophos-Tabs dauerhaft laufen (Autostart/Tab prüfen), oder ist es gewollt, dass dort tagsüber kein Tab läuft? Im zweiten Fall führe ich das Muster nur noch, ohne es zu zählen.
 Status: offen
