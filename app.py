@@ -12627,7 +12627,7 @@ def admin_wd_plaene():
         try:
             disp, excluded = _wd_personen()
             archiv = _acc_plan_archiviert()
-            accs = _sb_all("accounts", {"select": "id,user_id,name,firm,account_type,external_id,starting_balance,max_drawdown,wd_farm,tv_balance,tv_balance_at"})
+            accs = _sb_all("accounts", {"select": "id,user_id,name,firm,account_type,external_id,starting_balance,max_drawdown,wd_farm,tv_balance,tv_balance_at,wd_tp,wd_sl,max_risiko_trade"})
             konten = []
             for a in accs:
                 typ = (a.get("account_type") or "").lower()
@@ -12651,6 +12651,10 @@ def admin_wd_plaene():
                                                                       or (_wd_num(a.get("tv_balance")) is not None and ist_topstep_express(a))) else None,
                     "live_at": a.get("tv_balance_at"),
                     "wd_farm": bool(a.get("wd_farm")),
+                    # .1493 (13.10.2026): der Markt-Reiter würfelt TP + Kontrakte selbst nach (mklWdWuerfelNachziehen) und braucht
+                    # dafür die Vorgaben des Kontos — bis dahin kannte nur die RPC wd_konten_alle wd_tp/wd_sl
+                    "tp_vorgabe": _wd_num(a.get("wd_tp")), "sl_vorgabe": _wd_num(a.get("wd_sl")),
+                    "max_risiko_trade": _wd_num(a.get("max_risiko_trade")),
                 })
             # Duplikum-Slave je Person = Slave des jüngsten dup/tvplus-Plans (Echo-Pläne
             # laufen über route=mt5 und haben einen anderen Slave — die zählen hier nicht)

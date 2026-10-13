@@ -27379,8 +27379,42 @@
              for(const p of (data || [])) plaene[String(p.id)] = Object.assign({ kt: p.master_contracts }, p) }catch(_){}
       }
       mkl.wd.plan = Object.assign({}, mkl.wd.plan, { tag, heute: j.tag, rows: je(tag), regeln: r || {}, plaene, konten, farmerAdmin, at: mkl.wd.plan.at, fehler: '' })
+      mklWdWuerfelNachziehen(mkl.wd.plan).catch(e => console.warn('[wd-plan] würfeln', (e && e.message) || e))   // .1493
     }catch(e){ mkl.wd.plan.fehler = String((e && e.message) || e) }
   }
+  /* WÜRFEL VOM MAC NACHZIEHEN (.1493, Finn 13.10.2026: „ich will hier doch schon den fertig geplanten Trade sehen … die Daten sollen ja
+   * schon geplant sein"): .1487 würfelte nur, wenn ein PC-Tab oder der Farmer die Zeile anfasste — Jacobs Zeilen standen deshalb um
+   * 05:08 noch auf „Spanne". Jetzt würfelt der Markt-Reiter selbst für jedes aktive Konto ohne Plan und ohne Würfel (Konto-Daten aus
+   * /admin/wd-plaene: Firma, DD, Live-Balance, TP-/SL-Vorgabe) und schreibt die Zeile — nur Farmer-Admins, nur eigene/erlaubte Zeilen
+   * (wdDarf), nie eine laufende Zeile. Einmal je Zeile und Ladung (P.gewuerfelt), damit kein Tab-Takt die Tabelle dauernd beschreibt. */
+  async function mklWdWuerfelNachziehen(P){
+    if(!P || !P.farmerAdmin || !P.konten || !P.tag) return
+    const v = (P.regeln && P.regeln.vorplan) || {}, vp = { instr: v.instr === 'nq' ? 'nq' : 'mnq', kt: Math.max(1, Math.round(+v.kt || 1)), regeln: v.regeln || TP_VP_VORGABE, hedge_an: !!v.hedge_an }
+    const fx = window._fxUsdEur || 0.85
+    P.gewuerfelt = P.gewuerfelt || new Set()
+    let neu = false
+    for(const row of (P.rows || [])){
+      if(!row || row.status === 'laeuft' || row.status === 'fertig' || row.status === 'verpasst') continue
+      const key = `${row.tag}|${row.user_id}`; if(P.gewuerfelt.has(key)) continue
+      const offen = (row.konten || []).filter(k => k && k.aktiv !== false && !k.plan_id && !(k.wuerfel && Number(k.wuerfel.tp) > 0 && Number(k.wuerfel.kt) >= 1) && P.konten[String(k.id)])
+      if(!offen.length) continue
+      P.gewuerfelt.add(key)
+      if(!(await wdDarf(row.user_id))) continue
+      const konten = (row.konten || []).map(k => ({ ...k })); let ge = false
+      for(const k of konten){
+        if(!offen.some(o => String(o.id) === String(k.id))) continue
+        const kd = P.konten[String(k.id)]
+        let z = null; try{ z = tpVorplanZeile(wdAccLike(kd), { live: kd.live_balance != null ? Number(kd.live_balance) : null, slaveCurrency: '€', fx, regeln: vp.regeln, zufall: 0.5 }) }catch(_){}
+        if(wdKontoWuerfel(k, kd, vp, z)) ge = true
+      }
+      if(!ge) continue
+      const { error } = await supabase.from('wd_tagesplan').update({ konten, updated_at: new Date().toISOString() }).eq('tag', row.tag).eq('user_id', row.user_id).neq('status', 'laeuft')
+      if(error){ console.warn('[wd-plan] würfeln', error.message); continue }
+      row.konten = konten; neu = true
+    }
+    if(neu) mklWdRender()
+  }
+  window._mklWdWuerfelNachziehen = () => mklWdWuerfelNachziehen(mkl.wd.plan)   // Prüf-Haken (Stub ohne Login)
   // Farmer-Admin je Nutzer merken (F34, Finn: „Der Edit-Button braucht ewig"): der Stift steht sofort, geprüft wird beim Speichern
   const MKL_WD_ADMIN_LS = 'prophos_wd_farmer_admin'
   function mklWdAdminGemerkt(){ try{ const v = JSON.parse(localStorage.getItem(MKL_WD_ADMIN_LS) || 'null'); return (v && v.uid === String(currentUserId || '')) ? !!v.admin : undefined }catch(_){ return undefined } }
@@ -43355,7 +43389,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1492'
+  const OS_TAB_BUILD = '2026-09-22.1493'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -53935,7 +53969,12 @@
     let vor = null
     if(z && !z.fehler){
       const h = { master_firm: kd.firm, master_contracts: kt, master_tp: tp, master_risk: null }
-      const hin = wdFarmHedge(h, Number(kd.sl_vorgabe) || Number(kd.max_risiko_trade) || 0, z.slaveEur, !!vp.hedge_an, [kd.max_drawdown, kd.max_daily_drawdown, kd.max_loss_per_trade, z.masterRisk])
+      // .1493 (Vorfall Aurel 13.10.2026, „23,19 Lot ×7,729"): tpMasterPpl liest den Instrument-Modus aus _tpNqMode (Pillen MNQ/NQ,
+      // localStorage) — stand der PC-Tab auf NQ, rechnete der Würfel mit 20 $/Pkt statt 2. Wie wdPlanAnlegen: Modus aus den Farmer-Regeln.
+      const modusAlt = _tpNqMode; _tpNqMode = vp.instr === 'nq' ? 'nq' : 'mnq'
+      let hin = ''
+      try{ hin = wdFarmHedge(h, Number(kd.sl_vorgabe) || Number(kd.max_risiko_trade) || 0, z.slaveEur, !!vp.hedge_an, [kd.max_drawdown, kd.max_daily_drawdown, kd.max_loss_per_trade, z.masterRisk]) }
+      finally{ _tpNqMode = modusAlt }
       vor = { lots: h.multiplier > 0 ? Math.round(kt * h.multiplier * 100) / 100 : null, mult: h.hedge_faktor ?? null, eur: h.hedge_eur ?? null,
               staffel: z.slaveEur > 0 ? z.slaveEur : null, hinweis: hin || z.hinweis || '' }
     }
@@ -54045,7 +54084,7 @@
       const ok = new Set(rail.konten.map(k => String(k.id)))
       for(const k of konten){ k.archiviert = !ok.has(k.id); if(k.archiviert) k.wd_farm = false }
     }
-    if(!konten && rail && Array.isArray(rail.konten)) konten = rail.konten.map(k => ({ ...k, id: String(k.id), user_id: String(k.user_id), tp_vorgabe: null, sl_vorgabe: null, winning_days: null,
+    if(!konten && rail && Array.isArray(rail.konten)) konten = rail.konten.map(k => ({ ...k, id: String(k.id), user_id: String(k.user_id), tp_vorgabe: k.tp_vorgabe > 0 ? Number(k.tp_vorgabe) : null, sl_vorgabe: k.sl_vorgabe > 0 ? Number(k.sl_vorgabe) : null, winning_days: null,
       // live_balance/starting_balance aus Railway übernehmen, falls geliefert (Backend B8, F10 26.09.2026) — vorher hart null
       live_balance: k.live_balance != null ? Number(k.live_balance) : null, live_at: k.live_at || null, starting_balance: k.starting_balance != null ? Number(k.starting_balance) : null }))
     if(!konten && !rail){ _wd.daten = null; return null }
