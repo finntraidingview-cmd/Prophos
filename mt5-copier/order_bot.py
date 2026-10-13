@@ -17084,6 +17084,25 @@ def _tsx_k4_senden(s, st, befehl, ziel, kn, res, trail, raus, order_cmd):
             if lv:
                 res[key], res[key + "_quelle"] = lv, "tsx_tabelle"
             res[("sl" if art == "sl" else "tp") + "_usd_ist"] = float(z[feld]["wert"])
+    # BRACKET-MELDUNGEN UNTEN LINKS (.1498, Finn 13.10.2026: „ob das Auge die Meldung nach dem Bearbeiten auslesen und TP/SL der Order
+    # zuordnen kann"): augen_tsx.js baut aus den Toasts das Bracket zur jüngsten Ausführung (Fill + Gegenseite Limit = TP, Stop = SL,
+    # gleiches Symbol). Immer in die Spur; als Level nur, wenn die Zellen-Rechnung nichts geliefert hat (Quelle tsx_toast).
+    try:
+        tb = (st.get("toasts") or {}).get("bracket") if isinstance(st, dict) and isinstance(st.get("toasts"), dict) else None
+        if isinstance(tb, dict) and isinstance(tb.get("fill"), dict):
+            tf, ttp, tsl = tb["fill"], tb.get("tp") if isinstance(tb.get("tp"), dict) else {}, tb.get("sl") if isinstance(tb.get("sl"), dict) else {}
+            passt = (str(tf.get("seite") or "").lower() == str(befehl["richtung"]).lower()
+                     and tv_symbol_root(str(tf.get("symbol") or "")) == str(befehl["wurzel"]).upper())
+            trail.append(f"Bracket-Meldungen: Fill {tf.get('seite')} {tf.get('menge')} {tf.get('symbol')} @ {tf.get('preis')}"
+                         f" · TP {ttp.get('preis') if ttp else '-'} (Limit) · SL {tsl.get('preis') if tsl else '-'} (Stop)"
+                         + ("" if passt else " — passt nicht zum Plan, nicht verwendet"))
+            if passt:
+                for key, m_ in (("tp_level", ttp), ("sl_level", tsl)):
+                    pr = m_.get("preis") if m_ else None
+                    if isinstance(pr, (int, float)) and pr > 1000 and not res.get(key):
+                        res[key], res[key + "_quelle"] = float(pr), "tsx_toast"
+    except Exception as e_:
+        trail.append(f"Bracket-Meldungen: {type(e_).__name__}")
     try:
         res["positionen"] = tsx_positionen_level(st, res.get("positionen"))   # Rückweg je Position (.1488)
     except Exception as e_:
