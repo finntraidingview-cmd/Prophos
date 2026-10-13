@@ -43353,7 +43353,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1489'
+  const OS_TAB_BUILD = '2026-09-22.1490'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -43950,6 +43950,13 @@
       const _tvT0 = Date.now()
       // FRÜHER FUSION-HEDGE (01.10.2026, Finn nach einem WD-Trade): schon während des Laufs auf den ersten Fill-Beweis des Bots
       // schauen (puls_ergebnisse 'geklickt' mit bestaetigt + Einstieg) und Fusion sofort öffnen — nicht erst nach Endprüfung.
+      // FALSCHER WEG (.1490, 13.10.2026, Mike EXPRESS …57131691): ein Orbit-V2-Plan auf einem Topstep-Konto (alter Tab-Build vor .1489)
+      // schickte Puls in TradingView — dort gibt es kein Topstep-Konto („Kein Konto-Umschalter zu sehen"). Vor jedem Klick stoppen:
+      // nichts gesendet, Plan bleibt Geplant; Bearbeiten → Speichern dreht ihn auf Topstep V2.
+      if(plan.route === 'tvv2' && /topstep/i.test(firmName)){
+        await fehler('⛔ Weg Orbit V2 passt nicht zu Topstep (TradingView hat kein Topstep-Konto) — Plan bearbeiten und erneut speichern, er wird dann Topstep V2. Nichts gesendet, Plan bleibt Geplant.', { ok: false, code: 'falscher_weg', retry_ok: true, _nichtGesendet: true })
+        return
+      }
       const _hedgeFrueh = (plan.route === 'tvv2' && plan.hedgeEur > 0 && MT5_LOCAL && typeof hedgeFruehWache === 'function') ? hedgeFruehWache(plan, _tvT0) : null
       for(;;){
         // Topstep V2 (F23): TopstepX-Order über /api/tsx-konto (Vertrag B16, Etappe 2), sonst TradingView wie bisher.
