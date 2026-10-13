@@ -3838,6 +3838,12 @@
   #dashboard-view .wdl-bst-ziel{font-weight:600;color:#15803d}
   #dashboard-view .wdl-z-bst .wdl-z-pl.wdl-bst-ok{color:#15803d} #dashboard-view .wdl-z-bst .wdl-z-pl.wdl-bst-warte{color:#B45309;font-weight:600}
   #dashboard-view .wdl-z-bst .wdl-z-zeit{display:flex;justify-content:flex-end}
+  #dashboard-view .wdl-z-bst .wdl-z-pl .type-badge{margin-left:0;font-size:11.5px}   /* Station-Chip (13.10.2026) */
+  #dashboard-view .wdl-bst-mini{display:block;font-size:10.5px;font-weight:400;color:var(--sub);margin-top:2px}
+  #dashboard-view .wdl-z-akt .acc-ziel-chip{font-size:11px;padding:1px 7px;vertical-align:middle}
+  #dashboard-view .wdl-z-akt > span:has(> .acc-ziel-chip){white-space:normal;overflow:visible;line-height:1.9}
+  #dashboard-view .type-badge.acc-ziel-chip{background:#ECFDF5;border-color:#A7F3D0;color:#047857}
+  #dashboard-view .type-badge.acc-tage-chip{background:#FFFBEB;border-color:#FDE68A;color:#B45309}
   #dashboard-view .wdl-tab-sek-erledigt .wdl-z:not(.wdl-z-kopf){color:var(--sub)}   /* Erledigt gedämpft */
   /* DREI ÜBERGRUPPEN (13.10.2026 abends): Läuft · Erledigt · Bestanden je ein großer Block mit kräftiger Überschrift; die Kästen darin
      rücken eng zusammen. Farbe nur als Punkt + 3-px-Linie oben (Finn 12.10.: Tints „zu hart"). */
@@ -29873,7 +29879,9 @@
         art = 'pruef'
         const pid = wdlTid(t), sperre = wdlAbhakenSperre(t)
         const pb = wdlPlTrade(t) != null ? wdlPlTrade(t) : num(t.master_pl && t.master_pl.wert)   // Balance-Sprung → Tages-P&L (08.10.2026)
-        const erg = wdlSprungErg(t) || wdlBestandenChip(t) || wdlBlowErg(t) || (wdlKontoWeg(t) ? WDL_KONTO_WEG_ERG : echo ? '' : d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : wdlLiqIstTag(t) ? WDL_TAGESLIMIT_ERG : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : '')
+        let erg = wdlSprungErg(t) || wdlBestandenChip(t) || wdlBlowErg(t) || (wdlKontoWeg(t) ? WDL_KONTO_WEG_ERG : echo ? '' : d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : wdlLiqIstTag(t) ? WDL_TAGESLIMIT_ERG : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : '')
+        // Bestanden: wohin das Konto nach dem Abhaken geht (13.10.2026) — „→ Tage sammeln 3/5" oder „→ Review", wie der Typ-Chip in Accounts
+        if(erg && !wdlSprungErg(t) && wdlBestandenChip(t)){ const ka = (accounts || []).find(x => x && String(x.id) === String(t.konto_id || '')); if(ka) erg += ' ' + zielStationChipHtml(ka, '→ ') }
         kontoZ = wdlKontoZ(t)
         // „→ manuell" (08.10.2026): Handy/Touch hat kein Drag — derselbe Weg wie das Ablegen in „Manuelle Arbeit"
         miZ = zelle('mi wdl-z-akt', `${erg ? `<span>${erg}</span>` : ''}<button type="button" class="btn btn-ghost el-knopf" data-wdl-abhaken="${escapeHtml(pid)}"${sperre ? ' disabled' : ''} title="${escapeHtml(sperre || 'Abhaken — P&L prüfen und Trade erledigen')}">Abhaken</button>`
@@ -30021,7 +30029,7 @@
             + `<span class="wdl-z-ri">${ueb ? `<span class="wdl-bst-phase type-${escapeHtml(typ)}" title="aktueller Kontotyp → nächster">${escapeHtml(ueb)}</span>` : ''}</span>`
             + zelle('mi', `${bal != null ? de(bal) : '–'}${ziel ? ` → <b class="wdl-bst-ziel">${de(ziel)} ✓</b>` : ''}`, { tip: `Balance → Ziel${seit ? ' · Ziel erreicht seit ' + seit : ''}` })
             + zelle('konto', mt ? `${mt.count}/${mt.target}` : '–', { tip: mt ? `Mindesttage: ${mt.count} von ${mt.target} Tagen mit Trade` : (x.eigen ? 'keine Mindesttage hinterlegt' : 'Mindesttage nur im Login des Kontos sichtbar') })
-            + `<span class="wdl-z-pl ${fehlt ? 'wdl-bst-warte' : 'wdl-bst-ok'}" title="${escapeHtml(statusTip)}">${escapeHtml(status)}</span>`
+            + `<span class="wdl-z-pl ${fehlt ? 'wdl-bst-warte' : 'wdl-bst-ok'}" title="${escapeHtml(statusTip)}">${x.eigen ? zielStationChipHtml(x.a) : `<span class="type-badge acc-ziel-chip">Review</span>`}${mini ? `<small class="wdl-bst-mini">${escapeHtml(mini.status === 'open' ? 'Mini läuft' : 'Mini ' + miniUhr)}</small>` : ''}</span>`
             + `<span class="wdl-z-zeit">${knopf}</span>`
             + '</div>' }
         })
@@ -33910,6 +33918,15 @@
     // bis die neuen Daten der Prop-Firm da sind und der Nachfolger per Klick angelegt ist. Vorher hieß der Chip „🎯 Ziel erreicht →".
     const weiter = (typeof bstNaechsterTyp === 'function') ? bstNaechsterTyp(a) : null
     return ` <span class="type-badge acc-ziel-chip" data-acc-ziel="${escapeHtml(String(a.id))}" title="Ziel erreicht seit ${seit}${a.zielErreichtBal ? ' · Balance ' + de(a.zielErreichtBal) : ''}${a.zielUsd ? ' ≥ Ziel ' + de(a.zielUsd) : ''} — ${weiter ? 'Klick: Nachfolger anlegen (' + (typeof typeLabel === 'function' ? typeLabel(weiter) : weiter) + ')' : 'Phase umstellen / auszahlen'}. Kein Trade mehr.">Review${weiter ? ' →' : ''}</span>`
+  }
+  // Station-Chip für den Radar (13.10.2026, Finn: „das in der Account-Übersicht mit Review und Tage sammeln gefällt mir — visuell in den
+  // Radar einbauen"): derselbe Chip wie in der Typ-Spalte, ohne Klick. vor = Vorsatz („→ " = Vorschau, wohin das Konto nach dem Abhaken geht).
+  function zielStationChipHtml(a, vor){
+    let tf = null; try{ tf = a ? zielFortschritt(a) : null }catch(_){ tf = null }
+    const p = vor || ''
+    if(tf && tf.kind === 'trading_days' && !tf.done)
+      return `<span class="type-badge acc-ziel-chip acc-tage-chip" title="Mindesttage: ${tf.count} von ${tf.target} — der Auto-Planer legt je Handelstag einen Mini-Trade, danach Review">${p}Tage sammeln ${Math.min(tf.count, tf.target)}/${tf.target}</span>`
+    return `<span class="type-badge acc-ziel-chip" title="Ziel${tf && tf.kind === 'trading_days' ? ' und Mindesttage' : ''} erfüllt — liegt in Review, bis der Nachfolger angelegt ist">${p}Review</span>`
   }
   // Max-Risiko-Chip (07.10.2026): Konto mit eigener Vorgabe je Trade (z. B. 1-%-Regel) — reine Markierung, keine Prüfung
   function accRisikoChipHtml(a){
@@ -43454,7 +43471,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1512'
+  const OS_TAB_BUILD = '2026-09-22.1513'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
