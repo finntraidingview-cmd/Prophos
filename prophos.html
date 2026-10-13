@@ -30309,8 +30309,15 @@
       // .1480 (13.10.2026, Finn in Moritz' Login: FundingPips 20429722 Phase 1 hatte seit 09.10. das Ziel, stand aber in keinem Radar):
       // /admin/handarbeit liefert {gruppen:{bestanden:[…]}} — hier stand _hand.d.bestanden, also immer leer → fremde Konten fehlten seit 09.10.
       // .1520: radar_bestanden = bestandene Konten ALLER IDs (auch im Login ohne Admin-E-Mail); ältere Backends → gruppen.bestanden
-      const fremd = (((typeof _hand !== 'undefined' && _hand.d && (_hand.d.radar_bestanden || (_hand.d.gruppen && _hand.d.gruppen.bestanden))) || [])).filter(z => z && String(z.user_id) !== ich && !eigeneIds.has(String(z.konto_id)))
+      const fremd = (((typeof _hand !== 'undefined' && _hand.d && (_hand.d.radar_bestanden || (_hand.d.gruppen && _hand.d.gruppen.bestanden))) || [])).filter(z => z && !eigeneIds.has(String(z.konto_id)))   // EIGENE ID AUCH (14.10.2026, Finn: „dass ich immer alles auch von meiner eigenen ID sehe" — FundedNext …7926 fiel durch, weil `accounts` den Ziel-Tag noch nicht kannte): ein eigenes Konto, das bstKonten (lokal) nicht hat, kommt aus der Server-Liste — mit lokalem Konto als volle eigene Zeile samt Knopf (unten), ohne lokales Konto als Lese-Zeile
         .map(z => {
+          const lok = String(z.user_id) === ich ? (accounts || []).find(a => a && String(a.id) === String(z.konto_id)) : null
+          if(lok){   // eigenes Konto, lokal ohne Ziel-Tag → Tag der Ziel-Wache übernehmen und wie bstKonten zeichnen (Knopf → Phase/Funded)
+            const a = Object.assign({}, lok, { zielErreichtAt: lok.zielErreichtAt || z.seit, zielErreichtBal: lok.zielErreichtBal ?? num(z.bal), zielUsd: lok.zielUsd ?? num(z.ziel) })
+            let g2 = 0; try{ g2 = Number(kontoGroesseAnzeige(a.name, a.startingBalance, null)) || 0 }catch(_){}
+            return { eigen: true, a, kid: String(a.id), uid: ich, user: ichName, firma: a.firm, e4: String(a.externalId || '').replace(/[^A-Za-z0-9]/g, '').slice(-4), gr: g2,
+              typ: String(a.type || ''), name: a.name, seit: a.zielErreichtAt, ...bstStand(a) }
+          }
           let gr = 0; try{ gr = Number(kontoGroesseAnzeige(z.konto, z.start_balance, null)) || 0 }catch(_){}
           // Mindesttage fremder Konten kommen seit 13.10.2026 aus /admin/handarbeit (tage_ist/tage_soll, ap_tage_ist) — vorher fehlt immer false
           const mt = num(z.tage_soll) > 0 ? { count: num(z.tage_ist) || 0, target: num(z.tage_soll), done: (num(z.tage_ist) || 0) >= num(z.tage_soll), kind: 'trading_days' } : null
@@ -43812,7 +43819,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1539'
+  const OS_TAB_BUILD = '2026-09-22.1540'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
