@@ -19280,6 +19280,7 @@ def gp_planen(gruppe_id, trocken=False, quelle="hand", seed=None):
         _zw = _ap_login_zwillinge([a for a in konten if str(a["id"]) in set(map(str, _ohne_bal))])
         _gehandelt = None if _zw is None else (_gehandelt | _zw)
     kauf_kette = None
+    tps_je = {}
     ausgelassen, kandidaten = [], []
     for a in konten:
         aid, uid = str(a["id"]), str(a["user_id"])
@@ -19344,6 +19345,15 @@ def gp_planen(gruppe_id, trocken=False, quelle="hand", seed=None):
         mppl = ap_cfd_ppl(ctx_ppl, a)
         u = {x: rnd.random() for x in ("tp", "sl", "menge", "puffer")}
         w, grund = ap_konto_rechnen(regel_k, a["account_type"], float(bal), u, ppl=mppl)
+        # KEINE ZWEI GLEICHEN TP je ID × Firma — 1:1 wie ap_planen (Finn 09.10.2026); gekappte TP (Rest bis Ziel) bleiben
+        _tk = uid + "|" + _ap_norm(_firm_norm(a.get("firm")))
+        for _ in range(20):
+            if grund or not w or w.get("tp") not in tps_je.get(_tk, ()) or re.search(r"letzter Trade|Rest bis Ziel|Tage sammeln", str(w.get("stufe") or "")):
+                break
+            u = {x: rnd.random() for x in ("tp", "sl", "menge", "puffer")}
+            w, grund = ap_konto_rechnen(regel_k, a["account_type"], float(bal), u, ppl=mppl)
+        if w and not grund:
+            tps_je.setdefault(_tk, set()).add(w.get("tp"))
         if grund:
             aus(grund)
             continue
