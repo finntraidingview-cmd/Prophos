@@ -8701,7 +8701,7 @@
           <div class="modal-msg" id="polarMsg"></div>
         </div>
         <div class="modal-foot" style="justify-content:center">
-          <button class="btn btn-primary" id="polarStart" style="min-width:220px;opacity:.55;cursor:not-allowed" disabled title="Start-Logik folgt">Polar starten · Logik folgt</button>
+          <button class="btn btn-primary" id="polarStart" style="min-width:220px" title="Plan anlegen — der Master-PC startet ihn sofort, der Slave-PC nimmt den Airbag an">Polar planen &amp; starten →</button>
         </div>
       </div>
     </div>
@@ -43762,7 +43762,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1530'
+  const OS_TAB_BUILD = '2026-09-22.1531'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -46273,6 +46273,27 @@
             .catch(e => supabase.from('order_signale').update({ status: 'fehler', updated_at: new Date().toISOString(), ergebnis: { ok: false, msg: String((e && e.message) || e) } }).eq('id', sig.id))
           continue
         }
+        // POLAR-Slave (13.10.2026): Railway legt das Signal im Namen der Slave-ID an (plan_id 'polar:<lauf>', kein Plan dieser ID);
+        // claimen darf NUR der PC, dessen Panel eine Instanz mit diesem MT5-Login hat. Das Panel startet polar_bot.py als eigenen
+        // Prozess (kein Echo-Weg, order_bot unverändert). NICHT awaiten — die Antwort kommt sofort (Prozess gestartet), der Lauf dauert.
+        if(String((sig.params || {}).aktion || '') === 'polar_slave'){
+          const pm = sig.params || {}, lg = String(pm.login || '').trim()
+          const instP = lg ? (dd.instances || []).find(x => x && String(((x.status || {}).master_login) || x.master_expected || '') === lg) : null
+          if(!instP) continue
+          const { data: clP } = await supabase.from('order_signale')
+            .update({ status:'laeuft', pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : '', updated_at: new Date().toISOString() })
+            .eq('id', sig.id).eq('status', 'wartet').select()
+          if(!clP || !clP.length){ _osStand = 'claim-verloren'; continue }
+          osClaimMerken(sig)
+          _osStand = 'claim-polar: ' + String(sig.id).slice(0, 8)
+          const specP = FIRM_PRESETS[firmToPreset(String(pm.firm || ''))] || {}
+          const bodyP = { seite: 'slave', lauf_id: pm.lauf_id, plan_id: pm.plan_id, config_file: instP.config_file, symbol: specP.symbol || 'NAS100',
+            richtung: pm.richtung, volumen: pm.volumen, sl_pkt: pm.sl_pkt, tp_pkt: pm.tp_pkt }
+          window.mtcApi('polar-start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(bodyP), timeoutMs: 20000 })
+            .then(er => supabase.from('order_signale').update({ status: er && er.ok ? 'fertig' : 'fehler', updated_at: new Date().toISOString(), ergebnis: er || { ok: false, msg: 'keine Antwort' } }).eq('id', sig.id))
+            .catch(e => supabase.from('order_signale').update({ status: 'fehler', updated_at: new Date().toISOString(), ergebnis: { ok: false, msg: String((e && e.message) || e) } }).eq('id', sig.id))
+          continue
+        }
         // Plan: lokale Liste, sonst frisch aus der DB (am Handy eben erst
         // erstellte Pläne sind im PC-Tab noch nicht geladen).
         let _tp; try{ _tp = tradePlans }catch(_){ _tp = [] }
@@ -48175,7 +48196,7 @@
    * EIN Prädikat für Start-Kandidaten (suKandidaten) und Ankündigung (pulsTermine): Orbit/Echo, Farmer nur scharf, nie Topstep V2
    * (startet nur von Hand), nie unbestätigt, nie nach aufgegebenem Richtungskonflikt. -> '' = startet von selbst, sonst der Grund. */
   function suStartetNichtWeil(p, scharf){
-    if(!p || !(routeIstOrbit(p.route) || routeIstEcho(p.route))) return 'kein Puls-Weg'
+    if(!p || !(routeIstOrbit(p.route) || routeIstEcho(p.route) || p.route === 'polar')) return 'kein Puls-Weg'   // polar (13.10.2026): startet am Master-PC
     if(!scharf && tpIstFarmerPlan(p)) return 'Farmer nicht scharf'
     // Topstep-Kette (08.10.2026, Finn: „die starten per Topstep-Puls"): Trade 1 und 2 starten zur Zeit über Puls in TopstepX, sobald der
     // Schalter scharf steht; sonstige Topstep-V2-Pläne bleiben Handarbeit
@@ -48388,7 +48409,8 @@
         : `⏰ ${verspaetet > 0 ? 'Geplante Startzeit erreicht' : 'Nächster Winning Day der Kette'} — „${plan.masterName || '—'}" startet jetzt${rest > 0 ? ` (danach noch ${rest} in der Warteschlange)` : ''}.`, 'start')
       if(jitter) await new Promise(r => setTimeout(r, jitter))
       gelaufen = true
-      if(routeIstOrbit(plan.route) && typeof tpOrbitStarten === 'function') await tpOrbitStarten(plan.id, null, { vonStartUm: true })
+      if(plan.route === 'polar' && typeof polarStartenAmPc === 'function') await polarStartenAmPc(plan)   // POLAR (13.10.2026): Master-PC
+      else if(routeIstOrbit(plan.route) && typeof tpOrbitStarten === 'function') await tpOrbitStarten(plan.id, null, { vonStartUm: true })
       else if(routeIstEcho(plan.route) && typeof tpJetztStarten === 'function'){ _rkTickStart.add(String(plan.id)); await tpJetztStarten(plan.id) }
     }catch(e){ console.warn('[start-um]', e) }
     finally{
@@ -52610,6 +52632,77 @@
     polarRechnen()
   }))
   window._polarOeffnen = polarOeffnen   // Test-Haken (Stub)
+  /* POLAR STARTEN (13.10.2026, Finn): Knopf legt den Plan über Railway POST /polar/plan im Namen der Master-ID an (start_um = jetzt);
+   * der Start-Wächter am Master-PC (tpStartUmTick) ruft dann polarStartenAmPc: Railway /polar/start (Lauf + Auftrag an die Slave-ID als
+   * order_signale polar_slave) → lokales Panel /api/polar-start startet polar_bot.py master. Der Slave-PC nimmt sein Signal im
+   * orderSignalTick an. Alles neue Dateien/Pfade — Echo/Orbit unverändert. */
+  async function polarPlanAnlegen(){
+    const n = id => Number(polarEl(id)?.value) || 0
+    const msg = t => { polarEl('polarMsg').textContent = t }
+    const master = polarKonto('pol-fu-konto'), slave = polarKonto('pol-cfd-konto')
+    if(!master || !slave) return msg('Master- und Slave-Konto wählen.')
+    if(master.person === slave.person) return msg('Master und Slave müssen zwei verschiedene IDs sein.')
+    const long = (polarSeg('pol-dir')?.dataset.dir || 'long') === 'long'
+    const ppl = Number(polarSeg('pol-sym')?.dataset.ppl) || 20
+    const kt = Math.max(1, Math.round(n('pol-kt'))), riskM = n('pol-risk-m'), riskS = n('pol-risk-s')
+    const sPpl = (typeof window.tpFirmPpl === 'function' && window.tpFirmPpl(slave.firm)) || 1
+    const mult = tpMultiplierAusRisiko(riskM, kt, riskS, ppl, sPpl)
+    const lots = mult ? Math.max(0.01, Math.round(mult * kt * 100) / 100) : 0
+    const tpM = n('pol-tp-m'), slM = n('pol-sl-m') || riskM, puffer = n('pol-puffer')
+    const tpPkt = tpM / (ppl * kt), slPkt = slM / (ppl * kt)
+    if(!lots || !(tpPkt > 0) || !(slPkt > 0)) return msg('Lots, Take Profit und Stop Loss müssen > 0 sein.')
+    const root = ppl === 20 ? 'NQ' : 'MNQ'
+    let sym = root
+    try{ if(typeof tpFuturesFrontcode === 'function') sym = tpFuturesFrontcode(root) || root }catch(_){ sym = root }
+    const body = { master_account_id: master.id, slave_account_id: slave.id, richtung: long ? 'buy' : 'sell', symbol: sym, kontrakte: kt,
+      master_risk: riskM, slave_risk: riskS, lots, master_tp: tpM, master_sl: slM,
+      polar_pct: Math.round((1 + puffer / Math.max(1, tpPkt)) * 1000) / 10,
+      // Slave gespiegelt vom eigenen Fill: SL hinter dem Master-TP, TP vor dem Master-SL (Puffer mit Richtung)
+      sl_pkt: tpPkt + puffer, tp_pkt: Math.max(0.5, slPkt - puffer), master_sl_pkt: slPkt, master_tp_pkt: tpPkt }
+    const knopf = polarEl('polarStart'); if(knopf) knopf.disabled = true
+    try{
+      const { data: { session } } = await supabase.auth.getSession()
+      const tok = session?.access_token
+      if(!tok) throw new Error('nicht angemeldet')
+      msg('Lege Polar-Plan an…')
+      const r = await fetch(`${WATCHER_HOME}/polar/plan`, { method: 'POST', headers: { 'sb-token': tok, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      const d = await r.json().catch(() => ({}))
+      if(!r.ok || !d.ok) throw new Error(d.msg || ('HTTP ' + r.status))
+      msg(`✓ Polar-Plan angelegt (${String(d.plan_id).slice(0, 8)}) — der PC von ${esc(master.person)} startet ihn jetzt, der PC von ${esc(slave.person)} nimmt den Slave an.`)
+      if(typeof atToast === 'function') atToast(`🧭 Polar geplant: ${master.firm} ${long ? 'Long' : 'Short'} ${kt} × ${root} gegen ${slave.firm} ${lots} Lot`, 'start')
+      try{ if(typeof loadTradePlans === 'function') await loadTradePlans() }catch(_){}
+    }catch(e){
+      msg('⛔ ' + ((e && e.message) || e))
+    }finally{
+      if(knopf) knopf.disabled = false
+    }
+  }
+  async function polarStartenAmPc(plan){
+    let d = {}
+    try{
+      const { data: { session } } = await supabase.auth.getSession()
+      const tok = session?.access_token
+      const r = await fetch(`${WATCHER_HOME}/polar/start`, { method: 'POST', headers: { 'sb-token': tok, 'Content-Type': 'application/json' }, body: JSON.stringify({ plan_id: String(plan.id) }) })
+      d = await r.json().catch(() => ({}))
+      if(!r.ok || !d.ok) throw new Error(d.msg || ('HTTP ' + r.status))
+    }catch(e){
+      if(typeof atToast === 'function') atToast('⛔ Polar: ' + ((e && e.message) || e), 'end')
+      return
+    }
+    const acc = (accounts || []).find(a => String(a.id) === String(plan.masterAccountId)) || {}
+    const kx = tvV2KontoKontext(plan) || {}
+    const m = d.master || {}
+    const body = { seite: 'master', lauf_id: d.lauf_id, plan_id: String(plan.id), ext_id: String(acc.externalId || ''), tv_username: kx.tv_username || '',
+      firma: kx.firma || '', symbol: m.symbol, richtung: m.richtung, volumen: m.kontrakte, tp_usd: m.tp_usd || '', sl_usd: m.sl_usd || '',
+      sl_pkt: m.sl_pkt, tp_pkt: m.tp_pkt, scharf: true,
+      geschwister: ['@scharf=1', '@plan_id=' + String(plan.id), '@symbol=' + m.symbol, '@richtung=' + m.richtung, '@volumen=' + m.kontrakte,
+        '@tp_usd=' + (m.tp_usd || ''), '@sl_usd=' + (m.sl_usd || ''), ...(kx.geschwister || [])] }
+    const p = await window.mtcApi('polar-start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), timeoutMs: 20000 })
+    if(typeof atToast === 'function') atToast(p && p.ok ? `🧭 Polar-Master gestartet (Lauf ${String(d.lauf_id).slice(0, 8)}, PID ${p.pid}) — HÄNDE WEG von beiden PCs!`
+      : '⛔ Polar-Master nicht gestartet: ' + ((p && p.msg) || 'Panel nicht erreichbar'), p && p.ok ? 'start' : 'end')
+  }
+  window.polarStartenAmPc = polarStartenAmPc
+  polarEl('polarStart')?.addEventListener('click', polarPlanAnlegen)
 
   // Live Multiplier-Berechnung im Modal
   // ── Reingesteckt / Gesamtkosten: läuft die GESAMTE Vorgänger-Kette ab

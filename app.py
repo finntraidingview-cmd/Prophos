@@ -25800,6 +25800,12 @@ def _local_port_taken(port):
     except OSError:
         return False
 
+try:
+    import polar_app            # Polar (13.10.2026): eigenes Modul mit den /polar/*-Routen; app.py bekommt nur diese Zeilen
+    polar_app.registrieren(app, globals())
+except Exception as _pe:
+    print(f"[polar] Modul nicht geladen: {type(_pe).__name__}: {_pe}", flush=True)
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     if os.environ.get("PROPHOS_FRONTEND"):

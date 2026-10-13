@@ -34,6 +34,11 @@ from datetime import datetime
 
 import provision
 
+try:
+    import polar_panel          # Polar (13.10.2026): eigenes Modul; fehlt es auf einem alten PC-Stand, bleibt alles wie bisher
+except Exception:
+    polar_panel = None
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.environ.get("PANEL_PORT", "8770"))
 
@@ -1326,6 +1331,8 @@ def _bot_lauf_aktiv():
     """Läuft gerade ein Puls/Order-Lauf über dieses Panel? (Prüfer zu .1346-Entwurf: Fenster-nach-vorn + Alt-Tipp könnten einen
     TradingView- oder MT5-Klick mitten im Ticket stören) — TV-Weg-Lock, MT5-Order-Locks, K3-Handlauf-Sperre jünger als 15 min."""
     try:
+        if polar_panel and polar_panel.aktiv():      # Polar hält die Maus (13.10.2026)
+            return True
         if TV_ORDER_LOCK.locked() or any(l.locked() for l in list(MASTER_ORDER_LOCKS.values())):
             return True
         return time.time() - os.path.getmtime(os.path.join(HERE, "puls_handlauf.lock")) < 900
@@ -2716,6 +2723,9 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path in ("/", "/index.html"):
             return self._send(200, PAGE, "text/html; charset=utf-8")
+        if polar_panel and path == "/api/polar-stand":   # POLAR (13.10.2026): Zustand des Polar-Prozesses dieses PCs
+            code, antwort = polar_panel.behandle_get(path, parse_qs(urlparse(self.path).query))
+            return self._send(code, json.dumps(antwort, ensure_ascii=False, default=str))
         if path == "/api/instances":
             return self._send(200, json.dumps(snapshot(), ensure_ascii=False))
         if path == "/api/puls-klick":
@@ -2744,6 +2754,19 @@ class Handler(BaseHTTPRequestHandler):
         ctype = (self.headers.get("Content-Type") or "")
         if "application/json" not in ctype:
             return self._send(400, json.dumps({"ok": False, "msg": "Content-Type muss application/json sein"}))
+        # POLAR (13.10.2026, Finn: „Priorität 1 — kein anderer Puls-Bot darf diesen PC bedienen"): läuft Polar, bekommt jeder andere
+        # Puls-/Maus-Weg 409 puls_beschaeftigt (der Tab wartet wie bei einem laufenden Rundgang). Die Polar-Routen gehen ans Modul.
+        if polar_panel and polar_panel.gesperrt(u.path):
+            return self._send(409, json.dumps({"ok": False, "retry_ok": True, "code": "puls_beschaeftigt", "gesendet": False,
+                                               "msg": "Polar läuft auf diesem PC — kein anderer Puls-Weg, bis der Polar-Trade zu ist."}, ensure_ascii=False))
+        if polar_panel and u.path in ("/api/polar-start", "/api/polar-abbruch"):
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(n) or b"{}") if n else {}
+            except Exception as e:
+                return self._send(400, json.dumps({"ok": False, "msg": f"ungueltige Daten: {e}"}))
+            code, antwort = polar_panel.behandle_post(u.path, body, beschaeftigt=_bot_lauf_aktiv())
+            return self._send(code, json.dumps(antwort, ensure_ascii=False, default=str))
         if u.path == "/api/provision":
             try:
                 n = int(self.headers.get("Content-Length") or 0)
@@ -4314,6 +4337,8 @@ def _version_watcher(my_version):
             # erledigt, wenn order_bot.py in genau diesem Stand vorliegt; sonst holt der nächste Takt nach — mit Zufalls-Versatz, damit
             # nach einer Umschaltung nicht alle Panels im selben Takt nachfragen.
             ensure_bot_source(sha)
+            if polar_panel:                                 # POLAR (13.10.2026): polar_bot.py/polar_panel.py aus demselben Stand
+                polar_panel.ensure_source(repo_datei, sha)
             if BOT_STAND.get("geholt_sha") == sha or BOT_STAND.get("kaputt_sha") == sha:
                 letzter, fehl_n = sha, 0            # kaputter Inhalt: nie wiederholen (alter Bot bleibt, Zeile steht in der Konsole)
             else:
@@ -4336,6 +4361,8 @@ def _version_watcher(my_version):
             # verloren, der Bot lief verwaist weiter). Solange der TradingView-Lauf
             # oder eine Master-Order ihre Sperre haelt, wird der Neustart vertagt.
             if TV_ORDER_LOCK.locked() or any(l.locked() for l in list(MASTER_ORDER_LOCKS.values())):
+                continue
+            if polar_panel and polar_panel.aktiv():   # POLAR (13.10.2026): nie mitten im Polar-Trade neu starten (Kindprozess bliebe verwaist)
                 continue
             # NUR neu starten, wenn sich das PANEL selbst geaendert hat (23.09.2026, Finns
             # Nacht: 12 Frontend-Commits in 100 min, jeder mit VERSION-Bump, jeder ein
@@ -4446,6 +4473,19 @@ def main():
     ensure_ea_source()
     # Order-Bot aktuell halten (die .bat-Loops kennen die Datei nicht)
     ensure_bot_source()
+    # POLAR (13.10.2026): polar_bot.py + polar_panel.py holen; das Modul selbst greift erst nach dem nächsten Panel-Start
+    try:
+        if polar_panel:
+            polar_panel.ensure_source(repo_datei, BOT_STAND.get("sha"))
+        else:
+            _d = repo_datei("mt5-copier/polar_panel.py", BOT_STAND.get("sha"))
+            if _d and len(_d) > 500:
+                compile(_d, "polar_panel.py", "exec")
+                with open(os.path.join(HERE, "polar_panel.py"), "wb") as _f:
+                    _f.write(_d)
+                print("[polar] polar_panel.py geholt — aktiv ab dem nächsten Panel-Start", flush=True)
+    except Exception as _e:
+        print(f"[polar] Dateien nicht geholt ({type(_e).__name__})", flush=True)
     # Starter aktuell halten — verzoegert, s. Funktionskommentar
     ensure_starter_source()
     # Klick-Bot-Abhaengigkeit (Maus-Steuerung) einmalig installieren
