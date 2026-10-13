@@ -43770,7 +43770,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1535'
+  const OS_TAB_BUILD = '2026-09-22.1536'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -55226,6 +55226,18 @@
       if(acc && !konten[i].plan_id && !wdIstWdKonto(acc)){ konten.splice(i, 1); geaendert = true }
     }
     const farmVon = acc => (acc.wdFarm === undefined) ? true : !!acc.wdFarm
+    /* HAKEN NIE AUS DEM CACHE ZURÜCKDREHEN (14.10.2026, Finn: „Mike rein → ganz kurz drin → wieder raus; Chris 4/4 → zu → wieder 1/4 —
+     * rein, raus, rein, raus"): der Admin-Haken setzt accounts.wd_farm per RPC und die Tageszeile; dieser PC-Tab (Mike/Chris) kennt
+     * accounts nur aus seinem Lade-Stand (kein Realtime auf accounts) und schrieb alle 30–90 s farm=false + „Haken aus" zurück. Nach dem
+     * nächsten Neuladen stand farm wieder true, aktiv blieb false — DB-Befund 22:27 UTC: farm=true aktiv=false hinweis „Haken aus".
+     * Jetzt: weicht der Zeilen-Haken vom Cache ab, wird accounts.wd_farm dieser Konten FRISCH gelesen und der Cache nachgezogen. */
+    try{
+      const abw = konten.filter(k => { const a = (accounts || []).find(q => String(q.id) === String(k.id)); return a && k.farm !== undefined && !!k.farm !== farmVon(a) }).map(k => String(k.id))
+      if(abw.length){
+        const { data: fr } = await supabase.from('accounts').select('id,wd_farm').in('id', abw)
+        for(const z of (fr || [])){ const a = (accounts || []).find(q => String(q.id) === String(z.id)); if(a) a.wdFarm = !!z.wd_farm }
+      }
+    }catch(e){ console.warn('[wd] wd_farm frisch', (e && e.message) || e) }
     // (1a) Neue Konten in die Zeile — sonst käme ein frisch angelegtes Funded erst am nächsten Tag an
     if(offenFuer){
       for(const c of tpVorplanKandidaten()){
@@ -56489,6 +56501,8 @@
           if(!!k.farm !== farm || !!k.archiviert !== !!kd.archiviert){
             k.farm = farm; k.archiviert = !!kd.archiviert; ge = true
             if(!farm && !k.plan_id){ k.aktiv = false; k.hinweis = kd.archiviert ? WD_HINWEIS_ARCHIV : WD_HINWEIS_FARM }
+            // Haken rein (14.10.2026): bisher blieb aktiv=false mit „Haken aus" stehen — das Konto war „drin" und zählte doch nicht
+            else if(farm && !k.plan_id && (!k.hinweis || k.hinweis === WD_HINWEIS_FARM || k.hinweis === WD_HINWEIS_ARCHIV)){ k.aktiv = !!(k.ext || kd.ext); k.hinweis = (k.ext || kd.ext) ? '' : WD_HINWEIS_EXT }
           }
           if(!k.ext && kd.ext){ k.ext = kd.ext; ge = true }
         }
@@ -56501,7 +56515,7 @@
           ge = true; continue
         }
         if(belegt[String(k.id)]){ if(wdAktiv(k)){ k.aktiv = false; k.hinweis = belegt[String(k.id)]; ge = true } continue }
-        if(!wdAktiv(k) && k.farm && k.ext && !k.archiviert && WD_AUTO_HINWEISE.includes(k.hinweis)){ k.aktiv = true; k.hinweis = ''; ge = true }
+        if(!wdAktiv(k) && k.farm && k.ext && !k.archiviert && (WD_AUTO_HINWEISE.includes(k.hinweis) || k.hinweis === WD_HINWEIS_FARM)){ k.aktiv = true; k.hinweis = ''; ge = true }   // „Haken aus" bei farm=true = Altlast des Cache-Rückdrehers (14.10.2026)
       }
       if(!ge) continue
       const st = konten.some(wdAktiv) ? (x.status === 'leer' ? 'geplant' : x.status) : 'leer'
