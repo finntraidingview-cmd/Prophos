@@ -42829,7 +42829,7 @@
     let liste = null
     if(o && o.frisch){
       try{ const { data, error } = await supabase.from('trade_plans').select('id,status,richtung,master_firm,master_name,start_um_gestartet_at,orbit_gesendet_at,start_fehler:mt5_baseline->start_fehler'
-             + (o.geplanteHand ? ',route,auto_plan,orbit_v3,hedge_eur,notes,master_account_id,start_um,planned_for,created_at' : '')).in('status', ['open', 'planned'])
+             + (o.geplanteHand ? ',route,auto_plan,orbit_v3,hedge_eur,notes,master_account_id,start_um,planned_for,created_at' : '')).in('status', ['open', 'review', 'planned'])
            if(!error && Array.isArray(data)) liste = data.map(r => {
              // Plan-Popup (geplanteHand): Hand/WD/Orbit V3 + „von heute" wie aus tradePlans (09.10.2026)
              const pl = o.geplanteHand ? { route: r.route, orbitV3: r.orbit_v3 === true, hedgeEur: r.hedge_eur != null ? Number(r.hedge_eur) : null, notes: r.notes,
@@ -42838,7 +42838,7 @@
                geclaimt: rkClaimAt(r.start_um_gestartet_at, r.orbit_gesendet_at), sf: r.start_fehler || null,
                hand: pl ? (r.auto_plan !== true || tpIstWdPlan(pl) || tpIstOrbitV3(pl)) : false, heute: pl ? rkPlanHeute(pl) : false } }) }catch(_){}
     }
-    if(!liste) liste = (tradePlans || []).filter(p => p.status === 'open' || p.status === 'planned')
+    if(!liste) liste = (tradePlans || []).filter(p => p.status === 'open' || p.status === 'review' || p.status === 'planned')
       .map(p => ({ id: p.id, status: p.status, richtung: p.richtung, firm: p.masterFirm, name: p.masterName,
         geclaimt: rkClaimAt(p.startUmGestartetAt, p.orbitGesendetAt), sf: (p.mt5Baseline && p.mt5Baseline.start_fehler) || null,
         hand: !p.autoPlan || tpIstWdPlan(p) || tpIstOrbitV3(p), heute: rkPlanHeute(p) }))
@@ -42857,7 +42857,9 @@
       // gleichzeitig) — Auto-Vorschläge nicht (deren Mischung über den Tag bleibt, Finn 03:45). Start-Wächter/DB: weiter nur laufend.
       const geplantHand = !zaehlt && !!(o && o.geplanteHand) && p.status === 'planned' && p.hand && p.heute && !(p.sf && p.sf.status !== 'behoben')
       if(!zaehlt && !geplantHand) continue   // bloß geplant / alter Claim / Start-Fehler sperrt nichts (09.10.2026)
-      if(p.status === 'open') lauf[seite].push({ name: p.name, firm: p.firm, verb: 'läuft gerade' })
+      // 'review' zählt als LAUFEND (Finn 13.10.2026, Mike: Topstep-Short war zu Ende, aber noch nicht nachgelesen — der Long wurde trotzdem
+      // gestartet): erst die Nachlesung (completed) gibt die Gegenrichtung frei. Dieselbe Regel in der DB (sql/2026-10-13_gegenrichtung_review.sql).
+      if(p.status === 'open' || p.status === 'review') lauf[seite].push({ name: p.name, firm: p.firm, verb: p.status === 'review' ? 'ist zu Ende, aber noch nicht nachgelesen —' : 'läuft gerade' })
       else if(zaehlt && p.geclaimt) lauf[seite].push({ name: p.name, firm: p.firm, verb: 'startet gerade' })   // Start läuft = wie laufend
       else if(geplantHand) lauf[seite].push({ name: p.name, firm: p.firm, verb: 'ist schon geplant', geplant: true })
       else gep[seite].push({ name: p.name, firm: p.firm, verb: 'ist geplant' })
@@ -43351,7 +43353,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1485'
+  const OS_TAB_BUILD = '2026-09-22.1486'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
