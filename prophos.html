@@ -43966,7 +43966,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1544'
+  const OS_TAB_BUILD = '2026-09-22.1545'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -48163,7 +48163,11 @@
       const d = await r.json().catch(() => ({}))
       const netto = Number(d && d.netto_eur), um = d && d.um ? Date.parse(d.um) : NaN
       if(!r.ok || !isFinite(netto) || !isFinite(um) || Date.now() - um > 15 * 60000) return null
-      return { netto, band: Math.max(0, Number(d.band_eur) || 0), geplant: Array.isArray(d.geplant) ? d.geplant : [], um }
+      // .1545: brutto + Band-% (Band NACH dem eigenen Start rechnen) und die Frei-Schwelle des Saldo-Riegels (AP_SALDO_FREI_EUR, 400 €)
+      return { netto, band: Math.max(0, Number(d.band_eur) || 0), geplant: Array.isArray(d.geplant) ? d.geplant : [], um,
+        offen: Array.isArray(d.offen) ? d.offen : [],   // laufende Trades (status open, einsatz_eur signiert, gehedgt = 0)
+        brutto: Math.max(0, Number(d.brutto_eur) || 0), pct: Math.max(0, Number(d.zielband_pct) || 0),
+        frei: isFinite(Number(d.saldo_frei_eur)) ? Number(d.saldo_frei_eur) : RK_SALDO_FREI_EUR }
     }catch(e){ console.warn('[richtung-start] Saldo nicht lesbar', (e && e.message) || e); return null }
   }
   // Gegenrichtungs-Pläne (ungehedgt, PC lebt, nicht dieser Plan) irgendeiner ID, die in den nächsten 60 min starten → Anzahl
@@ -48172,6 +48176,7 @@
     return (sd.geplant || []).filter(x => x && String(x.plan_id) !== String(planId) && x.richtung === gegen && !x.gehedgt && !x.pc_tot
       && isFinite(Date.parse(x.start)) && Date.parse(x.start) <= jetzt + 60 * 60000).length
   }
+  const RK_SALDO_FREI_EUR = 400   // Rückfall, wenn /delta keine saldo_frei_eur liefert (app.py AP_SALDO_FREI_EUR, .1545)
   async function rkVorStart(plan){
     if(!rkGilt(plan)) return null
     let k = null
@@ -48183,15 +48188,37 @@
     // keine Hand-Werte), dessen Richtung den Saldo über das Band hinaus weiter kippt, wartet 10–20 min, solange in den nächsten 60 min
     // irgendwo ein Plan der Gegenrichtung ansteht — die Gegenrichtung kommt dann zuerst in den Markt. Kein Gegenplan in Sicht oder Saldo
     // im Band → startet wie bisher. Fensterende → wie beim Richtungskonflikt: Plan bleibt Geplant, Toast + Handy.
+    // SALDO-RIEGEL HART (.1545, Finn 14.10.2026 ~04:40 Dubai: „Wie kann es sein, dass 700 € an Short starten und einfach nichts an Long?
+    // … DAS SOLL NIE WIEDER PASSIEREN"): 03:24/03:30/03:36 Dubai starteten drei Tradeify-Shorts in ein Buch, das nur noch Shorts hatte
+    // (die Futures-Longs waren in 3–27 min am SL gestorben) — die Regel oben ließ sie durch, weil kein Gegen-Plan in 60 min anstand.
+    // Jetzt zählt nur, was WIRKLICH läuft: netto_eur (offene, ungehedgte Trades) + der eigene Einsatz. Kippt der Start den Saldo weiter
+    // und liegt |netto danach| über dem Band NACH dem Start und über der Frei-Schwelle (400 €), wartet der Plan 10–20 min — ob ein
+    // Gegen-Plan ansteht oder nicht. Der Bot holt die Gegenrichtung nach vorn (nur noch bei laufender Schieflage, app.py vor_erlaubt);
+    // läuft sie, geht der Start durch. Fensterende → Plan bleibt Geplant, Toast + Handy. Geplante Trades sind nie Deckung.
+    // Unverändert davor/danach: der Richtungsschutz derselben ID × Firma (v2RichtungKonflikt, unten) — Finn 14.10.: „nie vergessen".
     if(sd && plan.autoPlan && !tpIstWdPlan(plan) && !plan.handWerteAt){
-      const r = plan.richtung, kippt = (r === 'buy' && sd.netto > 0) || (r === 'sell' && sd.netto < 0)
-      if(kippt && Math.abs(sd.netto) > sd.band){
+      const r = plan.richtung, eig = (sd.geplant || []).find(x => x && String(x.plan_id) === String(plan.id))
+      const e = Math.abs(Number(eig && eig.einsatz_eur) || 0)                      // eigener Einsatz € (0, wenn /delta ihn nicht kennt)
+      const nach = sd.netto + (r === 'buy' ? e : -e)
+      const bandNach = sd.pct > 0 ? sd.pct / 100 * (sd.brutto + e) : sd.band
+      const kippt = (r === 'buy' && nach > 0) || (r === 'sell' && nach < 0)
+      // OHNE LAUFENDEN GEGEN-TRADE STARTET NICHTS (Finn 14.10.2026, Option „hart"): läuft schon ein ungehedgter Trade meiner Richtung
+      // und KEINER der Gegenrichtung, wartet der Plan — egal wie klein die Beträge sind (03:24 Dubai: 3 Echo-Shorts liefen, 0 Longs,
+      // die Summe lag unter 400 € und wäre durch die Frei-Schwelle gerutscht). Leeres Buch = erster Trade des Tages → startet.
+      const vz = x => Number(x && x.einsatz_eur) || 0
+      const gleich = (sd.offen || []).filter(x => (r === 'buy' ? vz(x) > 0 : vz(x) < 0)).length
+      const gegen = (sd.offen || []).filter(x => (r === 'buy' ? vz(x) < 0 : vz(x) > 0)).length
+      if(gleich > 0 && gegen === 0){
         const n = rkGegenInKuerze(sd, r, plan.id)
-        if(n > 0){
-          const kS = { lauf: null, saldo: true, text: `alle IDs sind ${Math.round(Math.abs(sd.netto)).toLocaleString('de-DE')} € ${sd.netto > 0 ? 'long' : 'short'} (Band ${Math.round(sd.band).toLocaleString('de-DE')} €) — ${r.toUpperCase()} wartet, ${n} ${r === 'buy' ? 'Short' : 'Long'}-Plan${n === 1 ? '' : 'e'} in den nächsten 60 min zuerst` }
-          await rkVerschieben(plan, kS, false, 'start')
-          return 'verschoben'
-        }
+        const kS = { lauf: null, saldo: true, text: `${gleich} ${r === 'buy' ? 'Long' : 'Short'}${gleich === 1 ? '' : 's'} laufen, kein ${r === 'buy' ? 'Short' : 'Long'} — ${r.toUpperCase()} wartet, bis ein ${r === 'buy' ? 'Short' : 'Long'} läuft${n > 0 ? ` (${n} in den nächsten 60 min geplant)` : ' (kein Gegen-Plan in Sicht — der Bot holt einen nach vorn)'}` }
+        await rkVerschieben(plan, kS, false, 'start')
+        return 'verschoben'
+      }
+      if(kippt && Math.abs(nach) > Math.max(bandNach, sd.frei)){
+        const n = rkGegenInKuerze(sd, r, plan.id)
+        const kS = { lauf: null, saldo: true, text: `laufende Trades aller IDs wären danach ${Math.round(Math.abs(nach)).toLocaleString('de-DE')} € ${nach > 0 ? 'long' : 'short'} (Band ${Math.round(Math.max(bandNach, sd.frei)).toLocaleString('de-DE')} €) — ${r.toUpperCase()} wartet, bis ein ${r === 'buy' ? 'Short' : 'Long'} läuft${n > 0 ? ` (${n} ${r === 'buy' ? 'Short' : 'Long'}-Plan${n === 1 ? '' : 'e'} in den nächsten 60 min)` : ' (kein Gegen-Plan in Sicht — der Bot holt einen nach vorn)'}` }
+        await rkVerschieben(plan, kS, false, 'start')
+        return 'verschoben'
       }
     }
     if(!k || !k.lauf || k.lauf === meine){

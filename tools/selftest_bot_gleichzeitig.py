@@ -45,6 +45,7 @@ def plan(pid, uid, firma, richtung, start, **kw):
 
 LONG_LAUF = {"richtung": "buy", "satz": 0.03, "usd_pro_pkt": 40.0, "wert": 300.0, "polster_usd": 3000.0, "daily_usd": None,
              "tp_punkte": 40.0, "sl_punkte": None}
+SHORT_LAUF = dict(LONG_LAUF, richtung="sell")   # .1545: nur ein LAUFENDES Buch rechtfertigt ein Vorziehen — geplante Trades nie
 
 
 def main():
@@ -62,17 +63,20 @@ def main():
 
     schwer = dict(usd_pro_pkt=60.0, satz_eur_je_usd=0.07, wert_eur=1200.0)
 
-    # (A) Pingpong 23:36 UTC
+    # (A) Pingpong 23:36 UTC — seit .1545 (14.10.2026) mit LAUFENDEM Short: nur dann darf ein Long nach vorn
     pl = [plan("s1", "ezpoker", "tradeify", "sell", JETZT + 58, **schwer),
           plan("l1", "jacob", "the5ers", "buy", JETZT + 140), plan("l2", "chris", "fundingpips", "buy", JETZT + 420),
           plan("l3", "moritz", "fundednext", "buy", JETZT + 300)]
-    e1 = lauf(pl)
+    e0 = lauf(pl)
+    check(not [x for x in e0["aenderungen"] if "vorgezogen" in x["grund"]],
+          f"A0 (.1545): leeres laufendes Buch → trotz geplantem Short kein Long vorgezogen ({[x['grund'][:60] for x in e0['aenderungen']]})")
+    e1 = lauf(pl, laufend=[dict(SHORT_LAUF), dict(SHORT_LAUF)])
     z1 = e1["aenderungen"]
     raus = [x for x in z1 if "hinausgeschoben" in x["grund"]]
     vor = [x for x in z1 if "vorgezogen" in x["grund"]]
     check(vor and not raus, f"A Takt 1: Long vorgezogen statt Short hinausgeschoben ({[(x['plan_id'], x['nach_start_min']) for x in z1]})")
-    check(all(abs(x["nach_start_min"] - (JETZT + 58)) <= a["AP_VORZIEHEN_JITTER_MIN"] + 1 for x in vor),
-          f"A: vorgezogene Longs stehen am Short (Start {JETZT + 58} ± Streuung) — {[x['nach_start_min'] for x in vor]}")
+    check(all(JETZT + a["AP_VORZIEHEN_AB_MIN"] <= x["nach_start_min"] <= JETZT + a["AP_VORZIEHEN_AB_MIN"] + a["AP_VORZIEHEN_JITTER_MIN"] + 3 for x in vor),
+          f"A (.1545): Shorts LAUFEN → die Longs kommen sofort (jetzt + {a['AP_VORZIEHEN_AB_MIN']} min), nicht erst zum geplanten Short — {[x['nach_start_min'] for x in vor]}")
     pl2 = anwenden(pl, e1)
     e2 = lauf(pl2, jetzt=JETZT + 3.5, vorgezogen_heute={x["plan_id"] for x in vor}, hinaus_heute={x["plan_id"] for x in raus})
     check(not [x for x in e2["aenderungen"] if "vorgezogen" in x["grund"] or "hinausgeschoben" in x["grund"]],
@@ -94,20 +98,26 @@ def main():
     pl = [plan("l1", "jacob", "the5ers", "buy", JETZT + 5, **fest_l), plan("l2", "ezpoker", "fundednext", "buy", JETZT + 6, **fest_l),
           plan("l3", "chris", "fundingpips", "buy", JETZT + 8, **fest_l), plan("l4", "aurel", "ftmo", "buy", JETZT + 10, **fest_l),
           plan("s1", "ina", "tradeify", "sell", JETZT + 160, **schwer)]
-    e1 = lauf(pl)
+    e0 = lauf(pl)
+    check(not [x for x in e0["aenderungen"] if x["plan_id"] == "s1"],
+          "C0 (.1545): vier GEPLANTE Longs sind keine Deckung — Short bleibt bei +160 (Vorfall 14.10.2026: Longs starben in Minuten)")
+    e1 = lauf(pl, laufend=[dict(LONG_LAUF), dict(LONG_LAUF), dict(LONG_LAUF)])
     s = [x for x in e1["aenderungen"] if x["plan_id"] == "s1"]
     check(s and "vorgezogen" in s[0]["grund"] and abs(s[0]["nach_start_min"] - (JETZT + 5)) <= a["AP_VORZIEHEN_JITTER_MIN"],
-          f"C: Short von +160 an den ersten Long (+5 ± {a['AP_VORZIEHEN_JITTER_MIN']}) gezogen ({s[0]['nach_start_min'] if s else None})")
+          f"C: Longs LAUFEN → Short von +160 an den ersten geplanten Long (+5 ± {a['AP_VORZIEHEN_JITTER_MIN']}) gezogen ({s[0]['nach_start_min'] if s else None})")
 
     # (D) 23:49 UTC: zwei leichte Longs laufen, schwerer Hand-Short in 8 min → Long von später an den Short
     pl = [plan("s1", "ezpoker", "tradeify", "sell", JETZT + 8, aenderbar=False, fest_durch="Werte von Hand geändert", **schwer),
           plan("l5", "jacob", "the5ers", "buy", JETZT + 290), plan("l6", "chris", "fundingpips", "buy", JETZT + 400)]
     e1 = lauf(pl, laufend=[dict(LONG_LAUF), dict(LONG_LAUF)])
     v = [x for x in e1["aenderungen"] if "vorgezogen" in x["grund"]]
-    check(v and all(abs(x["nach_start_min"] - (JETZT + 8)) <= a["AP_VORZIEHEN_JITTER_MIN"] for x in v),
-          f"D: Long an den schweren Short (+8) gezogen, nicht an die früheste Minute ({[(x['plan_id'], x['nach_start_min']) for x in v]})")
+    check(not v, f"D (.1545): Longs laufen, der schwere Short ist nur GEPLANT → kein Long nach vorn ({[(x['plan_id'], x['nach_start_min']) for x in v]})")
     check(not [x for x in e1["aenderungen"] if x["plan_id"] == "s1"], "D/E: Hand-Short bleibt")
-    check(all("schlimmster Fall" in x["grund"] for x in v), f"D: Grund nennt den schlimmsten Fall ({v[0]['grund'] if v else ''})")
+    # D2: läuft der schwere Short wirklich, kommt der Long an ihn heran — mit dem schlimmsten Fall im Grund
+    e2 = lauf(pl, laufend=[dict(SHORT_LAUF, usd_pro_pkt=60.0, satz=0.07, wert=1200.0)])
+    v2 = [x for x in e2["aenderungen"] if "vorgezogen" in x["grund"]]
+    check(v2 and all(x["nach_richtung"] == "buy" for x in v2), f"D2: schwerer Short LÄUFT → Long vorgezogen ({[(x['plan_id'], x['nach_start_min']) for x in v2]})")
+    check(all("schlimmster Fall" in x["grund"] for x in v2), f"D2: Grund nennt den schlimmsten Fall ({v2[0]['grund'] if v2 else ''})")
 
     print()
     if FEHLER:

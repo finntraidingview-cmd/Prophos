@@ -20589,6 +20589,21 @@ AP_MISCH_BESTAETIGT_AB_MIN = 30         # ID-Mischung darf BESTÄTIGTE drehen, w
 AP_VORZIEHEN_RUECKFALL_MIN = 3        # vorgezogen, aber so viele min nach der neuen Startzeit noch ungeclaimt → zurück (PC-Tab tot)
 AP_VORZIEHEN_HYSTERESE_EUR = 100.0     # Vorziehen löst schon ab 100 € über dem 60-min-Band aus (sonst Hysterese 200 €) — Master/Finn
                                        # 08.10.2026: bei reinen Shorts liegt das Über-Band ≈ 0,75 × |Netto|, 200 € erst ab ≈ 267 € Netto
+# NUR LAUFENDE TRADES SIND DECKUNG (.1545, Finn 14.10.2026 ~04:40 Dubai: „Wie kann es sein, dass 700 € an Short starten und einfach nichts
+# an Long? … DAS SOLL NIE WIEDER PASSIEREN"). Vorfall 02:00–03:40 Dubai: der Bot zog 7 Shorts um Stunden vor und drehte einen Long, weil
+# die GEPLANTEN Futures-Longs der nächsten 60 min (FNF 02:20, Apex 02:37, Topstep 02:45, Apex 03:03) im Verlauf wie laufende zählten —
+# „alle IDs 634 € long", obwohl kein Long lief. Die Longs starben in 3–27 min am SL, die Echo-Shorts liefen Stunden: 03:36 Dubai
+# 700 € short, 0 long, Markt drehte, −12 k offen. Deshalb: ein Zug, der einen Plan in die nächsten 60 min NACH VORN holt, ist nur
+# erlaubt, wenn das LAUFENDE Buch (basis_einsatz, + long / − short, nur status open, ungehedgt) auf der Gegenseite über der Schwelle
+# liegt — geplante Trades sind nie Deckung, egal wie sicher sie scheinen. Die Schwelle trennt nur „läuft wirklich auf der Gegenseite"
+# von Rauschen (Einsatz-Modus; im Szenario-Modus gilt AP_SZENARIO_MIN_GEWINN_EUR auf links/rechts der laufenden Kurve) — die Toleranz
+# für die Schieflage selbst (Finn: „200–400 € kein Problem") sitzt im Start-Riegel AP_SALDO_FREI_EUR.
+AP_VORZIEHEN_LAUFEND_AB_EUR = 50.0
+# SALDO-RIEGEL AM START (.1545, hart): derselbe Gedanke im PC-Tab (rkVorStart, GET /admin/auto-plan/delta saldo_frei_eur): ein ungehedgter
+# Auto-Plan startet nur, wenn der Netto-Einsatz der LAUFENDEN Trades danach im Band bleibt oder unter dieser Schwelle liegt — sonst wartet
+# er (10–20 min, bis Fensterende), bis ein Trade der Gegenrichtung wirklich läuft. Vorher (.1507) wartete er nur, wenn in 60 min ein
+# Gegen-Plan anstand; stand keiner an, startete er in die Schieflage hinein — genau das war 03:24/03:30/03:36 Dubai.
+AP_SALDO_FREI_EUR = 400.0
 
 
 # ── SZENARIO-KURVE (08.10.2026, Finn 05:26 Dubai, Admin „Long 202 € · Short 376 € · Netto −174 € short", kurz davor +333: „Der Bot muss
@@ -21295,6 +21310,25 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                 out.append((tuple(ids), r_neu))
         return out
 
+    # NUR LAUFENDE ZÄHLEN ALS DECKUNG (.1545): die Lage des laufenden Buchs ALLEIN (ohne geplante) — Szenario-Modus: Kurve nur aus
+    # einsatz.szenario_laufend, Seite = wo ±R mehr wehtut; Einsatz-Modus: einsatz.basis (€ netto der offenen ungehedgten Trades)
+    _lauf_sz = ap_szenario_lage(list((einsatz or {}).get("szenario_laufend") or [])) if sz_an else None
+
+    def vor_erlaubt(richtung):
+        """Darf ein Plan dieser Richtung in die nächsten 60 min nach vorn? Nur wenn das LAUFENDE Buch wirklich auf der Gegenseite liegt:
+        Szenario: rechts (NQ steigt) tut mehr weh als links → Buch ist short → nur Longs nach vorn (und umgekehrt), Unterschied mindestens
+        AP_SZENARIO_MIN_GEWINN_EUR; Einsatz: basis jenseits ±AP_VORZIEHEN_LAUFEND_AB_EUR. Leeres Buch → nichts nach vorn, egal was geplant
+        ist. Ohne Einsatz-Kontext (reiner €/Pkt-Modus) wie bisher."""
+        if not einsatz:
+            return True
+        if _lauf_sz is not None:
+            d = float(_lauf_sz["rechts"]["eur"]) - float(_lauf_sz["links"]["eur"])    # < 0: steigender NQ tut mehr weh = Buch short
+            return (richtung == "buy" and d < -AP_SZENARIO_MIN_GEWINN_EUR) or (richtung == "sell" and d > AP_SZENARIO_MIN_GEWINN_EUR)
+        if einsatz.get("basis") is None:
+            return True
+        b = float(einsatz.get("basis") or 0.0)
+        return (richtung == "sell" and b > AP_VORZIEHEN_LAUFEND_AB_EUR) or (richtung == "buy" and b < -AP_VORZIEHEN_LAUFEND_AB_EUR)
+
     def suche_kandidaten(z, bewegt, seq_ids=None, mit_raus=True):
         bel, out = belegung(z), []
         ab_ = float(jetzt_min) + AP_VORZIEHEN_AB_MIN
@@ -21317,8 +21351,8 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                     lo = max(lo, float(ap_cfd_ab(zeiten)))
                 bis_v = min(s0, bis60 + 1, float(ap_start_bis(zeiten)))
                 t = platz_nah(i, lo, bis_v, anker_gegen(i, z), bel) if lo <= bis60 else None
-                if t is not None and t < s0 and ap_fenster_von(zeiten, t) and fenster_frei(z, i, t):
-                    out.append((i, t, "vor"))
+                if t is not None and t < s0 and ap_fenster_von(zeiten, t) and fenster_frei(z, i, t) and vor_erlaubt(z[i]["richtung"]):
+                    out.append((i, t, "vor"))                # .1545: nur, wenn das LAUFENDE Buch diese Seite braucht
             elif (mit_raus and ab_ + 1 < s0 <= bis60 and s0 > float(jetzt_min) + AP_FAELLIG_MIN and i not in vorgezogen_heute
                   and i not in hinaus_heute):
                 # KEIN KRIECHEN (Beobachtung Slave 3, 08.10.2026: Lauf 03:44 UTC schob Ina Apex 08:43 → 08:47 Dubai — der früheste
@@ -21450,7 +21484,7 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
         for i in sorted(zustand, key=lambda i: zustand[i]["start"]):
             p, s0 = je[i], zustand[i]["start"]
             if (zustand[i]["richtung"] != noetig or not p.get("aenderbar") or not p.get("auto_plan") or s0 <= ab + 1 or ruht([i])
-                    or not lebt(p["user_id"]) or i in vorgezogen_heute or id_voll(p["user_id"])):
+                    or not lebt(p["user_id"]) or i in vorgezogen_heute or id_voll(p["user_id"]) or not vor_erlaubt(noetig)):
                 continue                                     # PC-Tab der ID tot / heute schon vorgezogen / Deckel je ID → anderen nehmen
             uid, fa, g = str(p["user_id"]), p["firma"], f"{p['user_id']}|{p['firma']}"
             fest = id_fest.get(g)
@@ -21580,6 +21614,8 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
                 neu = float(rnd.randint(lo, hi))
                 if neu > t["start"] and any(i_ in vorgezogen_heute for i_ in ids):
                     continue                     # PINGPONG-BREMSE: vorgezogene Pläne schiebt auch der Band-Schritt heute nie nach hinten
+                if neu < t["start"] and neu <= float(jetzt_min) + 60 and not vor_erlaubt(zustand[ids[0]]["richtung"]):
+                    continue                     # .1545: nach vorn in die nächsten 60 min nur, wenn das LAUFENDE Buch diese Seite braucht
                 if abs(neu - t["start"]) < 1 or t["ende"] + (neu - t["start"]) >= fen[1] or _ap_tranche_frei(t, neu, tr, zeiten):
                     continue                     # auch das letzte Konto der Tranche bleibt im Fenster (nie auf den Folgetag)
                 z = {i: dict(v) for i, v in zustand.items()}
@@ -22472,6 +22508,7 @@ def ap_delta_antwort(stand, sicht_uid=None, pc_lebt=None):
            "long_eur": round(sum(max(z.get("einsatz_eur") or 0, 0) for z in stand["offen"] + stand["geplant"])),
            "short_eur": round(sum(max(-(z.get("einsatz_eur") or 0), 0) for z in stand["offen"] + stand["geplant"])),
            "band_eur": round(pct / 100.0 * (stand.get("brutto_einsatz") or 0.0)),
+           "brutto_eur": round(stand.get("brutto_einsatz") or 0.0), "saldo_frei_eur": AP_SALDO_FREI_EUR,   # Saldo-Riegel im PC-Tab (.1545)
            "netto_eur_max_abs": round(ve["netto_max_abs"]), "gross_ab_eur": stand["param"].get("gross_ab_eur"),
            "verlauf_eur": [{"min": x["min"], "netto_eur": round(x["netto_delta"]), "brutto_eur": round(x["brutto_delta"]),
                             "band_eur": round(x["band_delta"])} for x in ve["verlauf"]],
