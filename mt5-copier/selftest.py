@@ -3758,6 +3758,39 @@ def test_puls_cdp_login():
         ob._warte = alt_w
     chk("Seite BUY (nach dem Symbol)" in sw_.klicks and any(x.startswith("Symbol steht: NQZ6") for x in tw_) and rw_[1] != "asset",
         f"Symbolwechsel → Ticket ohne Seite → Seite nachgewählt → Symbol lesbar ({sw_.klicks}, {rw_[1]}, {[x for x in tw_ if 'Symbol' in x]})")
+    # Units: nach beiden Tipps steht genau soll + 1 im Feld (14.10.2026, pc-xc5c52 „'3' statt 2", pc-c19p2l „'5' statt 4") → ein Pfeil
+    # runter im fokussierten Feld, Tab, neu lesen = Ziel; Vorher-Wert und Pfeil-Korrektur in der Spur
+    class _SU(_SS):
+        def __init__(self): _SS.__init__(self); self.seite, self.n, self.wert, self.tasten = "buy", 2, "1", []
+        def stand(self, opts=None):
+            d = _SS.stand(self, opts); d["ticket"]["menge"] = {"wert": self.wert, "rect": [1400, 300, 120, 30]}
+            d["ticket"]["typen"] = [{"id": "Market", "aria-selected": "true", "rect": [952, 209, 68, 28]}]; return d
+        def feld_setzen(self, r, w, n, versuch=0): self.wert = str(int(float(w)) + 1); return True   # Stepper-Fehler: immer +1
+        def fokus_im(self, r, n, versuche=3): return True
+        def taste(self, k, modifiers=0):
+            self.tasten.append(k)
+            if k == "ArrowDown": self.wert = str(int(float(self.wert)) - 1)
+            if k == "ArrowUp": self.wert = str(int(float(self.wert)) + 1)
+    ob._warte = lambda a_, b_: None
+    try:
+        su_, tu_ = _SU(), []
+        ru_ = ob._cdp_ticket_fuellen(su_, su_.stand(), {"richtung": "buy", "menge": 2, "tp": None, "sl": None}, "MNQZ6", {}, tu_)
+    finally:
+        ob._warte = alt_w
+    chk(su_.wert == "2" and su_.tasten.count("ArrowDown") == 1 and "Units vorher: '1'" in tu_ and any(x.startswith("Units per Pfeil runter korrigiert: '2'") for x in tu_)
+        and "Units = 2" in tu_ and "Units stehen nicht" not in str(ru_[2]),
+        f"Units soll + 1 nach beiden Tipps → ein Pfeil runter → 2 ({su_.wert}, {su_.tasten}, {[x for x in tu_ if 'Units' in x]}, {ru_[2][:60]})")
+    # und: steht nach den Tipps etwas anderes als ±1 (z. B. 12 statt 2), KEIN Pfeil — die alte Fehlermeldung bleibt
+    class _SU2(_SU):
+        def feld_setzen(self, r, w, n, versuch=0): self.wert = "12"; return True
+    ob._warte = lambda a_, b_: None
+    try:
+        su2_, tu2_ = _SU2(), []
+        ru2_ = ob._cdp_ticket_fuellen(su2_, su2_.stand(), {"richtung": "buy", "menge": 2, "tp": None, "sl": None}, "MNQZ6", {}, tu2_)
+    finally:
+        ob._warte = alt_w
+    chk("ArrowDown" not in su2_.tasten and "ArrowUp" not in su2_.tasten and ru2_[0] is False and "Units stehen nicht auf 2" in str(ru2_[2]),
+        f"Units 12 statt 2 → kein Pfeil, Fehler wie bisher ({su2_.tasten}, {ru2_[2][:60]})")
     fj_ = ob.cdp_panel_frei_js([1482, 907, 38, 38])
     chk("elementFromPoint(1501.0,926.0)" in fj_ and "toggle-visibility-button" in fj_ and "#overlap-manager-root" in fj_ and "toastGroup-" in fj_,
         "Frei-Probe: Knopfmitte, Dialog/Overlay verdeckt, Meldungen frei")

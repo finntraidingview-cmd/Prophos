@@ -19739,6 +19739,7 @@ def _cdp_ticket_fuellen(s, st, plan, symbol, opts, trail):
             return True
         if not cdp_rect(mg):
             return False
+        trail.append(f"Units vorher: '{mg.get('wert')}'")   # 14.10.2026: Ausgangswert in die Spur (Ursache „soll + 1" finden)
         for _v in range(2):
             s.feld_setzen(cdp_rect(mg), str(plan["menge"]), "Units", versuch=_v)
             _warte(0.4, 0.2)
@@ -19747,6 +19748,22 @@ def _cdp_ticket_fuellen(s, st, plan, symbol, opts, trail):
             if cdp_zahl(mg.get("wert")) == float(plan["menge"]):
                 return True
             trail.append(f"Units: '{mg.get('wert')}' statt {plan['menge']} — tippe einmal neu" + (" (Pos1+Shift+Ende)" if _v == 0 else ""))
+        # GENAU ±1 → EIN PFEIL (14.10.2026, pc-xc5c52 17:10 Plan e0bb2e9c „'3' statt 2", pc-c19p2l 09:46 „'5' statt 4", pc-40mali/pw1put):
+        # nach beiden Tipps stand exakt soll + 1 im Feld — am Bildschirm ungeklärt (Stepper-Klick? TradingView-Rundung?). Bis die Ursache
+        # bewiesen ist: steht genau ±1 drin, einmal Pfeil runter/rauf im fokussierten Feld (TradingView-Stepper, Schritt 1), Tab, neu lesen.
+        # Nie mehr als ein Pfeil, nie ohne Fokus-Beweis — eine falsche Menge darf hier nicht entstehen.
+        ist, soll = cdp_zahl(mg.get("wert")), float(plan["menge"])
+        if ist is not None and abs(ist - soll) == 1 and cdp_rect(mg):
+            if s.klick(cdp_rect(mg), "Feld Units (Pfeil)") and s.fokus_im(cdp_rect(mg), "Feld Units (Pfeil)"):
+                s.taste("ArrowDown" if ist > soll else "ArrowUp")
+                _warte(0.15, 0.1)
+                s.taste("Tab")
+                _warte(0.4, 0.2)
+                st = s.stand(opts)
+                mg = ticket().get("menge") if isinstance(ticket().get("menge"), dict) else {}
+                trail.append(f"Units per Pfeil {'runter' if ist > soll else 'rauf'} korrigiert: '{mg.get('wert')}' (Ziel {plan['menge']})")
+                if cdp_zahl(mg.get("wert")) == soll:
+                    return True
         return False
 
     if not units_setzen():
