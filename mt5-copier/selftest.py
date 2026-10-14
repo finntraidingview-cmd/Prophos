@@ -3324,7 +3324,40 @@ def test_puls_cdp_login():
         and erg_f[2][1][:3] == ["a", "Home", "End"] and "Backspace" not in erg_f[2][1] and "Delete" not in erg_f[2][1]
         and erg_f[2][1][-1] == "Tab" and any("Pos1+Shift+Ende markiert" in z for z in erg_f[2][2]),
         f"feld_setzen Versuch 2: Strg+A, dann Pos1 + Shift+Ende, nie löschen, Spur nennt es ({erg_f[2][1]})")
+    # 14.10.2026 (Routine „Puls-Fehler", Muster „ticket: seite steht nicht auf sell" / „ticket: units stehen nicht auf #", 4 PCs/24 h):
+    # taubes Ticket → EINE Diagnose-Zeile (nur lesen), Urteil unverändert; Helfer wirft nie, auch ohne Rechteck/ohne lese_js
+    class _SLese:
+        def __init__(self, antwort, werfen=False):
+            self.antwort, self.werfen, self.ausdruecke = antwort, werfen, []
+
+        def lese_js(self, a, timeout=8):
+            self.ausdruecke.append(a)
+            if self.werfen:
+                raise RuntimeError("kein Browser")
+            return self.antwort
+    js_taub = ob.cdp_ticket_taub_js([10, 20, 100, 30])
+    chk("elementFromPoint(60.0,35.0)" in js_taub and "aria-busy" in js_taub and "hasFocus" in js_taub
+        and "dispatch" not in js_taub and ".click(" not in js_taub and "focus(" not in js_taub, "Ticket-taub-Blick: liest an der Mitte, klickt/fokussiert nie")
+    sl1, tr1 = _SLese({"oben": "button \"Sell\"", "sperre": "div:aria-busy=true", "fokus": True, "aktiv": "body", "sichtbar": "visible", "zeiger": "auto", "dialoge": 0}), []
+    ob._cdp_ticket_taub_spur(sl1, {"rect": [1, 2, 3, 4]}, "Seite SELL", tr1)
+    sl2, tr2 = _SLese(None, werfen=True), []
+    ob._cdp_ticket_taub_spur(sl2, {"rect": [1, 2, 3, 4]}, "Units", tr2)
+    sl3, tr3 = _SLese(None), []
+    ob._cdp_ticket_taub_spur(sl3, None, "Units", tr3)
+    chk(len(tr1) == 1 and "Seite SELL: Ticket nimmt die Eingabe nicht an" in tr1[0] and "Sperren div:aria-busy=true" in tr1[0] and "Seite hat Fokus True" in tr1[0]
+        and len(sl1.ausdruecke) == 1 and len(tr2) == 1 and "nicht lesbar (RuntimeError)" in tr2[0]
+        and len(tr3) == 1 and "kein Rechteck" in tr3[0] and not sl3.ausdruecke,
+        f"Ticket-taub-Spur: eine Zeile mit Zustand; ohne Browser/Rechteck trotzdem eine Zeile, nie ein Wurf ({tr1[0][:60]})")
     q_tf = _i.getsource(ob._cdp_ticket_fuellen)
+    chk(q_tf.count("_cdp_ticket_taub_spur(") == 2 and q_tf.index("_cdp_ticket_taub_spur(s, ticket().get(\"kaufen\"") < q_tf.index("Seite steht nicht auf {plan['richtung'].upper()} ('{knopf().get('text')")
+        and q_tf.index("_cdp_ticket_taub_spur(s, ticket().get(\"menge\")") < q_tf.index("Units stehen nicht auf {plan['menge']}"),
+        "Ticket: Seite- und Units-Abbruch schreiben vorher die Diagnose-Zeile, Meldungstext unverändert")
+    # 14.10.2026 (Muster „konto: konto-umschalter nicht gedrückt (klick ohne beweis, zweimal)" — „Puls-Chrome kommt nicht in den Vordergrund",
+    # 3 PCs/14 Tage): die Spur nennt jetzt das Fenster, das vorn liegt; ohne Windows folgenlos
+    q_vorn = _i.getsource(ob._AugenSitzung._win_vorn)
+    chk('"Puls-Chrome kommt nicht in den Vordergrund" + _vorn_fremd_hinweis(hwnd)' in q_vorn and ob._vorn_fremd_hinweis(7) == ""
+        and "_win_fenster_steckbrief(h)" in _i.getsource(ob._vorn_fremd_hinweis),
+        "Vordergrund: Grund nennt Titel/Klasse/Prozess des Fensters davor; ohne Windows leer, nie ein Wurf")
     chk(q_tf.count("versuch=_v") == 2 and "markiere per Pos1+Shift+Ende, tippe einmal neu" in q_tf
         and ob.win_taste_text("End", 8) == "+{END}" and ob.win_taste_text("Home") == "{HOME}" and ob._AugenSitzung._VK.get("End") == 35,
         "Ticket: Units und TP/SL geben den Versuch an feld_setzen weiter; Pos1/Ende als Windows- und CDP-Taste bekannt")

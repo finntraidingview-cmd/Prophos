@@ -18146,6 +18146,22 @@ def _win_zeigen(hwnd, befehl):
     ctypes.windll.user32.ShowWindow(int(hwnd), int(befehl))
 
 
+def _vorn_fremd_hinweis(hwnd):
+    """Welches Fenster steht stattdessen vorn? — Zusatz für die Spur, wenn das Puls-Chrome nicht nach vorn kommt. Liest nur, wirft nie.
+    ANLASS (Routine „Puls-Fehler" 14.10.2026, Muster „konto: konto-umschalter nicht gedrückt (klick ohne beweis, zweimal)" — in 14 Tagen
+    3 PCs mit „Puls-Chrome kommt nicht in den Vordergrund" (14.10. 14:28 UTC zweimal hintereinander, 13.10. 23:05, 12.10. 23:54): die Spur
+    sagte nie, WER davor lag — eine Windows-/MT5-Abfrage (am selben PC 3 min vorher „IPC timeout"), das Reader-Chrome oder Prophos
+    selbst. Ohne den Namen ist kein Handgriff ableitbar. Jetzt: Titel, Kennung, Klasse, Prozess und Lage wie bei _win_fenster_steckbrief."""
+    try:
+        h = _win_vordergrund()
+        if not h:
+            return " (vorn: kein Fenster)"
+        t = str(_vordergrund_titel() or "")[:40]
+        return f" (vorn: '{t or '?'}' {h}{_win_fenster_steckbrief(h)}, erwartet {int(hwnd)})"
+    except Exception:
+        return ""
+
+
 def _win_nach_vorn(hwnd):
     """Fenster in den Vordergrund (pywinautos set_focus wie beim UIA-Puls, sonst SetForegroundWindow)."""
     try:
@@ -18474,7 +18490,7 @@ class _AugenSitzung:
         ende = time.time() + 3.0
         while _win_vordergrund() != int(hwnd):
             if time.time() >= ende:
-                return None, "Puls-Chrome kommt nicht in den Vordergrund"
+                return None, "Puls-Chrome kommt nicht in den Vordergrund" + _vorn_fremd_hinweis(hwnd)
             _win_nach_vorn(hwnd)
             _warte(0.25, 0.15)
         return hwnd, ""
@@ -19633,6 +19649,44 @@ def cdp_ticket_typ_market(typen):
     return None, False
 
 
+def cdp_ticket_taub_js(rect):
+    """Warum nimmt das Ticket eine BEWIESENE Eingabe nicht an? Liest an der Mitte dieses Rechtecks: oberstes Element, Sperr-Attribute
+    (disabled/aria-disabled/aria-busy/readonly/inert) auf dem Weg nach oben, Fokus der Seite, aktives Element, Sichtbarkeit, pointer-events,
+    Zahl offener Dialoge. Nur lesen — kein Klick, keine Taste.
+    ANLASS (Routine „Puls-Fehler" 14.10.2026, Muster „ticket: seite steht nicht auf sell ('buy # nqz6 market', # versuche)" und „ticket: units
+    stehen nicht auf # (feld: '#')" — 4 Fälle in 24 h auf 4 PCs: 13.10. 23:11, 14.10. 05:46, 12:41, 13:10 UTC): jedes Mal direkt nach einem
+    Konto-Wechsel im Panel, jedes Mal stand im Ticket GENAU die Menge der vorigen Order dieses PCs (5 → „'5' statt 4", 3 → „'3' statt 2",
+    „Buy 3" zweimal); Hover, Fenster am Punkt und Feld-Fokus waren bewiesen, Klick und Getipptes kamen trotzdem nicht an, Minuten später
+    (bzw. nach Shift+T, 23:31) lief derselbe Plan durch. Der Pfeil-Weg .1550 ging von „soll ± 1" aus — das war der Vorgänger-Wert. Diese
+    Zeile liefert beim nächsten Fall den Zustand der Kachel/des Felds, damit die Ursache (gesperrtes Ticket? fremdes Element? Fokus weg?)
+    aus der Spur lesbar wird, statt geraten."""
+    x, y, w, h = [float(v) for v in rect[:4]]
+    return ("(function(){var e=document.elementFromPoint(" + f"{x + w / 2:.1f},{y + h / 2:.1f}" + ");if(!e)return {oben:'nichts'};"
+            "function N(n){return (n.tagName||'').toLowerCase()+(n.id?'#'+n.id:'')+((n.getAttribute&&n.getAttribute('data-name'))?'['+n.getAttribute('data-name')+']':'');}"
+            "var sperre=[],n=e;while(n&&n!==document.body&&sperre.length<4){var s=[];"
+            "['disabled','aria-disabled','aria-busy','readonly','inert'].forEach(function(a){if(n.hasAttribute&&n.hasAttribute(a)&&n.getAttribute(a)!=='false')s.push(a+'='+(n.getAttribute(a)||'1'));});"
+            "if(s.length)sperre.push(N(n)+':'+s.join(','));n=n.parentElement;}"
+            "var a=document.activeElement,st=null;try{st=getComputedStyle(e);}catch(_){}"
+            "return {oben:N(e)+' \"'+String(e.textContent||'').replace(/\\s+/g,' ').trim().slice(0,30)+'\"',sperre:sperre.join(' | '),"
+            "fokus:document.hasFocus(),aktiv:a?N(a):'-',sichtbar:document.visibilityState,zeiger:st?st.pointerEvents:'?',"
+            "dialoge:document.querySelectorAll('[role=\"dialog\"],[aria-modal=\"true\"]').length};})()")
+
+
+def _cdp_ticket_taub_spur(s, el, name, trail):
+    """EINE Diagnose-Zeile in die Spur, wenn eine Kachel/ein Feld des Tickets die bewiesene Eingabe nicht annimmt (cdp_ticket_taub_js).
+    Wirft nie, klickt nie, ändert nichts am Urteil — der Abbruch danach bleibt wie er ist."""
+    r = cdp_rect(el)
+    try:
+        d = s.lese_js(cdp_ticket_taub_js(r), timeout=4) if r and len(r) >= 4 else {"oben": "kein Rechteck"}
+    except Exception as e_:
+        d = {"oben": f"nicht lesbar ({type(e_).__name__})"}
+    if not isinstance(d, dict):
+        d = {"oben": "nicht lesbar"}
+    trail.append(f"{name}: Ticket nimmt die Eingabe nicht an — oben am Punkt {d.get('oben')}, Sperren {d.get('sperre') or 'keine'}, "
+                 f"Seite hat Fokus {d.get('fokus')}, aktiv {d.get('aktiv')}, sichtbar {d.get('sichtbar')}, pointer-events {d.get('zeiger')}, "
+                 f"Dialoge {d.get('dialoge')}")
+
+
 def _cdp_ticket_fuellen(s, st, plan, symbol, opts, trail):
     """Ticket im Puls-Chrome füllen und jeden Wert zurücklesen — K2 und K3 gemeinsam (29.09.2026 unverändert aus
     modus_tvkette_cdp herausgezogen). KEIN Klick auf den Senden-Knopf. -> (ok, code, msg, schritt, st, knopf)"""
@@ -19765,6 +19819,7 @@ def _cdp_ticket_fuellen(s, st, plan, symbol, opts, trail):
         _warte(0.6, 0.3)
         st = s.stand(opts)
     if str(knopf().get("seite") or ticket().get("seite") or "") != plan["richtung"]:
+        _cdp_ticket_taub_spur(s, ticket().get("kaufen" if plan["richtung"] == "buy" else "verkaufen"), f"Seite {plan['richtung'].upper()}", trail)
         return False, "ticket", f"Seite steht nicht auf {plan['richtung'].upper()} ('{knopf().get('text') or '-'}', 3 Versuche).", "ticket", st, None
     trail.append(f"Seite = {plan['richtung'].upper()}")
     # --- Order-Typ Market
@@ -19814,6 +19869,7 @@ def _cdp_ticket_fuellen(s, st, plan, symbol, opts, trail):
         return False
 
     if not units_setzen():
+        _cdp_ticket_taub_spur(s, ticket().get("menge"), "Units", trail)
         return False, "ticket", f"Units stehen nicht auf {plan['menge']} (Feld: '{(ticket().get('menge') or {}).get('wert')}').", "ticket", st, None
     trail.append(f"Units = {plan['menge']}")
     # --- TP / SL: Schalter + Wert (Einheit $)
