@@ -43968,7 +43968,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1552'
+  const OS_TAB_BUILD = '2026-09-22.1553'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -49764,18 +49764,19 @@
     const k1 = `<div class="kpi"><div class="kpi-label">Long im Spiel</div><div class="kpi-value tpl-gut">▲ ${tplEur(Ll)}</div><span class="kpi-delta" title="laufende Long-Trades (Einsatz €) · darunter die geplanten">${unter(true)}</span></div>`
     const k2 = `<div class="kpi"><div class="kpi-label">Short im Spiel</div><div class="kpi-value tpl-rot">▼ ${tplEur(Sl)}</div><span class="kpi-delta" title="laufende Short-Trades (Einsatz €) · darunter die geplanten">${unter(false)}</span></div>`
     const d = D.delta, band = d && d.band_eur != null ? ` · Band ±${tplEur(d.band_eur)}` : ''
-    // TAGES-SALDO (.1552, Finn 14.10.2026 nach 28 Blows: „Long und Short ausgeglichen, am Ende vom Tag gleich viel Gewinn und gleich viel
-    // Verlust"): das Backend wiegt seit .1552 den ganzen Tag — laufender Einsatz + heute beendete Trades mit ihrem € (Blow = Kontowert),
-    // long +, short −. Diese Zahl steuert Bot und Start-Riegel; hier ist sie die Hauptzahl, laufend und beendet stehen darunter.
-    // Altes Backend (kein lauf_netto_eur) → wie bisher nur laufend.
+    // TAGES-WAAGE (.1552/.1553, Finn 14.10.2026 nach 28 Blows: „Long und Short ausgeglichen, am Ende vom Tag gleich viel Gewinn und
+    // gleich viel Verlust … jeder heute gestartete Trade behält sein Gewicht, 10 Long / 10 Short bleiben ausgeglichen, auch wenn 5 Longs
+    // im TP oder am SL sind"): das Backend wiegt seit .1553 das ERÖFFNUNGS-Gewicht jedes heute gestarteten Trades (laufend voll + beendet,
+    // app.py ap_tages_saldo), long +, short −. Diese Zahl steuert Bot und Start-Riegel; hier ist sie die Hauptzahl, laufend (mit SL-Rest)
+    // und beendet stehen darunter. Altes Backend (kein lauf_netto_eur) → wie bisher nur laufend.
     const tag = d && d.lauf_netto_eur != null && isFinite(Number(d.netto_eur))
-    const Lt = tag ? Ll + (Number(d.beendet_long_eur) || 0) : Ll, St = tag ? Sl + (Number(d.beendet_short_eur) || 0) : Sl
+    const Lt = tag ? (Number(d.tag_long_eur) || 0) : Ll, St = tag ? (Number(d.tag_short_eur) || 0) : Sl
     const sumL = Lt + St, anteil = sumL > 0 ? Lt / sumL * 100 : 50, N = tag ? Number(d.netto_eur) : Ll - Sl, NT = N + Lp - Sp
     const unterN = tag ? `laufend ${vz(Ll - Sl)} · heute beendet ${vz(Number(d.beendet_netto_eur) || 0)}${plan.length ? ` · mit geplanten ${vz(NT)}` : ''}`
       : (plan.length ? `bis Tagesende mit geplanten ${vz(NT)}` : 'keine geplanten')
-    const k3 = `<div class="kpi"><div class="kpi-label">${tag ? 'Netto heute' : 'Netto'}</div><div class="kpi-value ${N > 0 ? 'tpl-gut' : N < 0 ? 'tpl-rot' : ''}" title="${tag ? 'Tages-Saldo: laufender Einsatz + heute beendete Trades (Blow = Kontowert, sonst |P&L × Satz|), long + / short − — Ziel ±0, steuert Bot und Start-Riegel' : 'Netto jetzt (laufende Trades)'}">${vz(N)}<small>${N > 0 ? 'long' : N < 0 ? 'short' : ''}</small></div>
+    const k3 = `<div class="kpi"><div class="kpi-label">${tag ? 'Netto heute' : 'Netto'}</div><div class="kpi-value ${N > 0 ? 'tpl-gut' : N < 0 ? 'tpl-rot' : ''}" title="${tag ? 'Tages-Waage: Eröffnungs-Gewicht aller heute gestarteten Trades (laufend + beendet, was jeder beim Start verlieren konnte), long + / short − — Ziel ±0, steuert Bot und Start-Riegel' : 'Netto jetzt (laufende Trades)'}">${vz(N)}<small>${N > 0 ? 'long' : N < 0 ? 'short' : ''}</small></div>
         <div class="tpl-ls"><i style="width:${anteil.toFixed(1)}%;background:var(--good)"></i><i style="flex:1;background:var(--danger)"></i></div>
-        <span class="kpi-delta umbruch" title="${tag ? `Long heute ${tplEur(Lt)} · Short heute ${tplEur(St)} (laufend + beendet)` : 'Netto der laufenden Trades · darunter mit den geplanten bis Tagesende'}${band}">${unterN}</span>${tplSzKachelHtml(D)}</div>`
+        <span class="kpi-delta umbruch" title="${tag ? `Long heute ${tplEur(Lt)} · Short heute ${tplEur(St)} (Eröffnungs-Gewicht, laufend + beendet)` : 'Netto der laufenden Trades · darunter mit den geplanten bis Tagesende'}${band}">${unterN}</span>${tplSzKachelHtml(D)}</div>`
     const hy = tplHypo(D)
     // Kachel „Heute" statt der Bot-Kachel (Finn 08.10.2026); altes Backend ohne delta.heute_beendet → Bot-Kachel wie bisher
     return `<div class="kpis tpl-kpis5">${k1}${k2}${k3}${tplHypoKachelHtml(hy)}${tplHeuteKachelHtml(D) || apdBotKachelHtml(apdDaten(), apdAdmin(), tplUhrIso)}</div>`

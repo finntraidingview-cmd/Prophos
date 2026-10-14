@@ -17317,7 +17317,9 @@ def ap_hb_zeile(p, acc, firmen, lauf_satz, kw_heute, namen, archiv=None, letzter
            "firma": p.get("master_firm") or acc.get("firm") or "", "konto": p.get("master_name") or acc.get("name") or "",
            "ende4": _ap_ende4(acc), "typ": typ, "richtung": p.get("richtung"), "route": p.get("route"), "auto": bool(p.get("auto_plan")),
            "status": p.get("status"), "start": start, "ende": ap_hb_ende(p), "ergebnis_usd": None, "eur": None, "satz": None,
-           "satz_quelle": None, "kontowert_eur": None, "art": "offen", "grund": None}
+           "satz_quelle": None, "kontowert_eur": None, "art": "offen", "grund": None,
+           # .1553 Tages-Waage: Eröffnungs-Gewicht wie ap_trade_gewicht (min(Satz × SL, Kontowert), ohne SL = Kontowert)
+           "sl_usd": _wd_num(p.get("master_sl")), "tp_usd": _wd_num(p.get("master_tp")), "satz_kw": None}
     # Kontowert + Polster VOR dem Trade (ap_kontowert, dieselbe Formel wie live): Balance vorher = Start-Lesung, sonst Ende − P&L
     pl = z["pl_usd"] if z else None
     kp = ap_kw_param(ap_regel_finden(firmen, acc.get("firm") or p.get("master_firm")))
@@ -17333,7 +17335,7 @@ def ap_hb_zeile(p, acc, firmen, lauf_satz, kw_heute, namen, archiv=None, letzter
         be = bs + pl
     kv = ap_kontowert(typ, bs, kp) if (kp and bs is not None) else None
     if kv:
-        out["kontowert_eur"] = kv["wert"]
+        out["kontowert_eur"], out["satz_kw"] = kv["wert"], kv["satz"]
     st = _ap_ts(start)
     a_at, a_grund = archiv if archiv else (None, None)
     nach = bool(letzter and a_at is not None and (st is None or a_at >= st))
@@ -17384,7 +17386,7 @@ def _ap_hb_laden(firmen, jetzt=None):
     ab_q = ab.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")      # ohne „+" (würde im or-Filter zum Leerzeichen)
     namen, aus = _ap_namen()
     roh = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_name,master_firm,route,richtung,status,auto_plan,master_pl,"
-                                            "pl_quelle,konto_typ,started_at,ended_at,completed_at,"
+                                            "pl_quelle,konto_typ,started_at,ended_at,completed_at,master_sl,master_tp,"   # .1553: Eröffnungs-Gewicht
                                             "tv:mt5_baseline->tv,final:mt5_baseline->final,bstart:mt5_baseline->balance_start,bn:mt5_baseline->bal_nach",
                                   "status": "in.(completed,review)", "or": f"(ended_at.gte.{ab_q},completed_at.gte.{ab_q})",
                                   "order": "started_at.asc"})
@@ -22408,43 +22410,66 @@ def ap_einsatz_kontext(stand, param):
             "szenario_laufend": [ap_szenario_trade_aus_zeile(z, True) for z in stand.get("offen") or ()]}   # Szenario (08.10.2026)
 
 
-# TAGES-SALDO (.1552, Finn 14.10.2026 ~19:30 Dubai nach 28 Blows an einem Tag, Kasse −3,5 k €: „Mein einziges Ziel ist es, dass Long und
+# TAGES-WAAGE (.1552/.1553, Finn 14.10.2026 abends nach 28 Blows an einem Tag, Kasse −3,5 k €: „Mein einziges Ziel ist es, dass Long und
 # Short ausgeglichen sind, dass ich am Ende vom Tag gleich viel Gewinn und gleich viel Verlust habe"). Befund des Tages: die Waage
-# (basis_einsatz) wog nur LAUFENDE Trades. Ein geblowter Long fiel in der Sekunde aus ihr, die Waage sagte wieder „zu viel Short", der
-# Bot und der Start-Riegel ließen den nächsten Long durch — von 05 bis 15 Uhr Dubai 28 Longs gegen 7 Shorts, die Longs starben in 1–20 min,
-# die Shorts liefen Stunden (dasselbe Muster am 07.10. und 12.10.). Deshalb wiegt die Waage jetzt den TAG: der laufende Netto-Einsatz
-# (+ long / − short, wie bisher) PLUS jeder heute (Dubai) beendete Trade mit seinem € aus der Kachel „Heute" (Blow = Kontowert, sonst
-# |P&L $ × Kontowert-Satz|; nicht gelesen/ohne € zählt nicht), long +, short −. Ein toter Long bleibt damit den ganzen Tag „long" in der
-# Waage, und die nächste Seite, die der Bot nach vorn holt bzw. der Start-Riegel durchlässt, ist die Gegenseite — nicht mehr Nachschub für
-# die Seite, die heute schon gestorben ist. Geplante Trades sind weiterhin nie Deckung (.1545). Wirkt überall, wo basis_einsatz gelesen
-# wird: Saldo-Riegel (.1501, ap_richtungsschutz), vor_erlaubt (.1545), Band-Verlauf des Bots, GET /delta netto_eur (PC-Tab rkVorStart,
-# Kachel „Netto"). Die alten Werte stehen daneben (lauf_einsatz/lauf_brutto, beendet_*). Ohne heute_beendet (altes Backend, Selbsttests,
-# Lesefehler) bleibt alles wie bisher.
+# (basis_einsatz) wog nur LAUFENDE Trades, mit SL-Rest. Ein geblowter Long fiel in der Sekunde aus ihr, die Waage sagte wieder „zu viel
+# Short", Bot und Start-Riegel ließen den nächsten Long durch — 05–15 Uhr Dubai 28 Longs gegen 7 Shorts, die Longs starben in 1–20 min,
+# die Shorts liefen Stunden (dasselbe Muster am 07.10. und 12.10.).
+# .1553 (Finn, zweite Runde): „Jeder heute gestartete Trade behält sein Gewicht — 10 Long / 10 Short bleiben ausgeglichen, auch wenn
+# 5 Longs im TP sind oder 5 Longs am SL gestorben sind. Die 10 Shorts nahe am SL sind immer noch von den Longs gedeckt, die schon
+# realisiert haben." Deshalb zählt NICHT das P&L-€ (das hätte tote Longs als Kontowert und Shorts nahe am SL als fast nichts gewogen und
+# wieder Shorts nachgedrückt — .1552 war so, nie scharf), sondern das ERÖFFNUNGS-GEWICHT jedes Trades: was er beim Start verlieren konnte
+# (verlust_eur = min(Satz × SL, Kontowert), ohne SL = Kontowert; dieselbe Formel wie ap_trade_gewicht), laufend VOLL (kein SL-Rest) und
+# heute beendet (Kachel „Heute": Kontowert + Satz vor dem Trade, SL $ des Plans), long +, short −. Geplante Trades sind weiterhin nie
+# Deckung (.1545). Wirkt überall, wo basis_einsatz gelesen wird: Saldo-Riegel (.1501, ap_richtungsschutz), vor_erlaubt (.1545),
+# Band-Verlauf des Bots, GET /delta netto_eur (PC-Tab rkVorStart, Kachel „Netto heute"). brutto_einsatz bleibt das LAUFENDE Brutto mit
+# SL-Rest: das Band (zielband_pct × Brutto) ist die erlaubte Schieflage und darf nicht mit jedem Blow wachsen. Die alten Werte stehen
+# daneben (lauf_einsatz/lauf_brutto). Ohne heute_beendet-Liste (altes Backend, Selbsttests, Lesefehler) bleibt alles wie bisher.
+def ap_hb_gewicht(z):
+    """REIN RECHNEND (testbar): Eröffnungs-Gewicht € eines heute beendeten Trades aus der Kachel-Zeile (kontowert_eur, satz_kw, sl_usd);
+    ohne Kontowert/Satz: |eur| (Blow = Kontowert, sonst |P&L × Satz|) als Rückfall; nichts davon → None (zählt nicht)."""
+    kw, satz, sl = _wd_num(z.get("kontowert_eur")), _wd_num(z.get("satz_kw")), _wd_num(z.get("sl_usd"))
+    if kw is not None and kw > 0:
+        return round(min(satz * sl, kw) if (satz and sl and sl > 0) else kw, 1)
+    e = _wd_num(z.get("eur"))
+    return None if e is None else round(abs(e), 1)
+
+
 def ap_tages_saldo(stand):
-    """REIN RECHNEND (testbar): Waage des Tages in den Stand — basis_einsatz = laufender Netto-Einsatz + Σ heute beendet (long +|eur|,
-    short −|eur|), brutto_einsatz bleibt laufend (Band); lauf_einsatz/lauf_brutto = die laufenden allein, beendet_long_eur/beendet_short_eur/
-    beendet_einsatz = die beendeten allein. Ohne heute_beendet-Liste unverändert. Idempotent (rechnet immer von lauf_* aus)."""
+    """REIN RECHNEND (testbar): Tages-Waage in den Stand — basis_einsatz = Σ Eröffnungs-Gewicht aller laufenden ungehedgten Trades
+    (verlust_eur voll, long +, short −) + Σ Eröffnungs-Gewicht der heute beendeten (ap_hb_gewicht); brutto_einsatz bleibt laufend (Band).
+    Daneben: lauf_einsatz/lauf_brutto (laufend mit SL-Rest, wie bisher), tag_long_eur/tag_short_eur (laufend voll + beendet je Seite),
+    beendet_long_eur/beendet_short_eur/beendet_einsatz (nur beendete). Ohne heute_beendet-Liste unverändert. Idempotent."""
     zeilen = stand.get("heute_beendet")
     if not isinstance(zeilen, list):
         return stand
     if "lauf_einsatz" not in stand:
         stand["lauf_einsatz"], stand["lauf_brutto"] = round(float(stand.get("basis_einsatz") or 0.0), 1), round(float(stand.get("brutto_einsatz") or 0.0), 1)
-    lauf, brutto = float(stand["lauf_einsatz"]), float(stand["lauf_brutto"])
+    lauf_l = lauf_s = 0.0
+    for z in stand.get("offen") or ():
+        if z.get("gehedgt") or z.get("einsatz_eur") is None:
+            continue                                   # gehedgt / ohne Richtung: wie basis_einsatz
+        v = _wd_num(z.get("verlust_eur"))
+        v = abs(float(z["einsatz_eur"])) if v is None else abs(v)
+        if z.get("richtung") == "buy":
+            lauf_l += v
+        elif z.get("richtung") == "sell":
+            lauf_s += v
     plus = minus = 0.0
     for z in zeilen:
-        if not isinstance(z, dict) or z.get("art") == "offen":
+        if not isinstance(z, dict):
             continue
-        e = _wd_num(z.get("eur"))
-        if e is None:
+        g = ap_hb_gewicht(z)
+        if g is None:
             continue
         if z.get("richtung") == "buy":
-            plus += abs(e)
+            plus += g
         elif z.get("richtung") == "sell":
-            minus += abs(e)
-    # brutto_einsatz bleibt das LAUFENDE Brutto: das Band (zielband_pct × Brutto) ist die erlaubte Schieflage — zählte es die beendeten
-    # mit, würde die Toleranz mit jedem Blow wachsen (28 Blows ≈ 4 k € Brutto → 1 k € Band), genau das Gegenteil von ±0.
+            minus += g
     stand.update(beendet_long_eur=round(plus), beendet_short_eur=round(minus), beendet_einsatz=round(plus - minus, 1),
-                 basis_einsatz=round(lauf + plus - minus, 1), brutto_einsatz=round(brutto, 1), tag_brutto_eur=round(brutto + plus + minus))
+                 tag_long_eur=round(lauf_l + plus), tag_short_eur=round(lauf_s + minus),
+                 basis_einsatz=round(lauf_l + plus - lauf_s - minus, 1), brutto_einsatz=round(float(stand["lauf_brutto"]), 1),
+                 tag_brutto_eur=round(lauf_l + lauf_s + plus + minus))
     return stand
 
 
@@ -22551,6 +22576,7 @@ def ap_delta_antwort(stand, sicht_uid=None, pc_lebt=None):
            "lauf_netto_eur": None if stand.get("lauf_einsatz") is None else round(stand["lauf_einsatz"]),
            "beendet_netto_eur": None if stand.get("beendet_einsatz") is None else round(stand["beendet_einsatz"]),
            "beendet_long_eur": stand.get("beendet_long_eur"), "beendet_short_eur": stand.get("beendet_short_eur"),
+           "tag_long_eur": stand.get("tag_long_eur"), "tag_short_eur": stand.get("tag_short_eur"),   # .1553: Eröffnungs-Gewicht je Seite
            "long_eur": round(sum(max(z.get("einsatz_eur") or 0, 0) for z in stand["offen"] + stand["geplant"])),
            "short_eur": round(sum(max(-(z.get("einsatz_eur") or 0), 0) for z in stand["offen"] + stand["geplant"])),
            "band_eur": round(pct / 100.0 * (stand.get("brutto_einsatz") or 0.0)),
@@ -22616,7 +22642,7 @@ def ap_stand_sicht(stand, sicht):
     offen = out.get("offen") or []
     ds = [z["delta_eur_pkt"] for z in offen if z.get("delta_eur_pkt") is not None]
     ein = [z["einsatz_eur"] for z in offen if z.get("einsatz_eur") is not None]
-    for k in ("lauf_einsatz", "lauf_brutto", "beendet_long_eur", "beendet_short_eur", "beendet_einsatz", "tag_brutto_eur"):
+    for k in ("lauf_einsatz", "lauf_brutto", "beendet_long_eur", "beendet_short_eur", "beendet_einsatz", "tag_brutto_eur", "tag_long_eur", "tag_short_eur"):
         out.pop(k, None)                      # .1552: Tages-Waage aus den gefilterten Zeilen neu
     out.update(basis_netto=round(sum(ds), 3), basis_brutto=round(sum(abs(d) for d in ds), 3),
                basis_einsatz=round(sum(ein), 1), brutto_einsatz=round(sum(abs(e) for e in ein), 1))
