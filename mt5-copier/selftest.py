@@ -3312,9 +3312,21 @@ def test_puls_cdp_login():
             sf = ob._AugenSitzung.__new__(ob._AugenSitzung)
             sf.trail, sf.ws, sf.maus = [], _WsF(fok), (0.0, 0.0)
             erg_f.append((sf.feld_setzen([10, 10, 100, 20], "12", "Units"), list(sf.ws.keys)))
+        # 14.10.2026 (Muster „ticket: take profit: im feld steht '#' statt #"): 2. Versuch markiert zusätzlich Pos1 + Shift+Ende, nie löschen
+        sf2 = ob._AugenSitzung.__new__(ob._AugenSitzung)
+        sf2.trail, sf2.ws, sf2.maus = [], _WsF(True), (0.0, 0.0)
+        erg_f.append((sf2.feld_setzen([10, 10, 100, 20], "3508", "Take profit", versuch=1), list(sf2.ws.keys), list(sf2.trail)))
     finally:
         ob._warte, ob._WIN_EINGABE = alt_w, alt_e
-    chk(erg_f[0] == (False, []) and erg_f[1][0] is True and "1" in erg_f[1][1], f"feld_setzen: ohne Fokus keine einzige Taste, mit Fokus getippt ({erg_f})")
+    chk(erg_f[0] == (False, []) and erg_f[1][0] is True and "1" in erg_f[1][1], f"feld_setzen: ohne Fokus keine einzige Taste, mit Fokus getippt ({erg_f[:2]})")
+    chk("Home" not in erg_f[1][1] and "End" not in erg_f[1][1] and erg_f[2][0] is True
+        and erg_f[2][1][:3] == ["a", "Home", "End"] and "Backspace" not in erg_f[2][1] and "Delete" not in erg_f[2][1]
+        and erg_f[2][1][-1] == "Tab" and any("Pos1+Shift+Ende markiert" in z for z in erg_f[2][2]),
+        f"feld_setzen Versuch 2: Strg+A, dann Pos1 + Shift+Ende, nie löschen, Spur nennt es ({erg_f[2][1]})")
+    q_tf = _i.getsource(ob._cdp_ticket_fuellen)
+    chk(q_tf.count("versuch=_v") == 2 and "markiere per Pos1+Shift+Ende, tippe einmal neu" in q_tf
+        and ob.win_taste_text("End", 8) == "+{END}" and ob.win_taste_text("Home") == "{HOME}" and ob._AugenSitzung._VK.get("End") == 35,
+        "Ticket: Units und TP/SL geben den Versuch an feld_setzen weiter; Pos1/Ende als Windows- und CDP-Taste bekannt")
     q_an2 = _i.getsource(ob._cdp_anmelden)
     chk(q_an2.index("fokus_im(cdp_rect(u)") < q_an2.index('taste("a", modifiers=2)') and "_win_root_am_punkt(" in _i.getsource(ob._AugenSitzung._win_klick),
         "Login: Fokus vor Strg+A/Tippen bewiesen; jeder Windows-Klick prüft das Fenster am Zielpunkt")

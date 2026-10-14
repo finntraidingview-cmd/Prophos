@@ -17773,7 +17773,7 @@ def cdp_klickpunkt(rect, rnd=None, hand=None):
 # ═══════════════════════════════════════════════════════════════════════════
 _WIN_EINGABE = (os.name == "nt")
 PULS_WIN_TASTEN = {"Tab": "{TAB}", "Enter": "{ENTER}", "Escape": "{ESC}", "Backspace": "{BACKSPACE}", "Delete": "{DELETE}",
-                   "ArrowDown": "{DOWN}", "ArrowUp": "{UP}"}
+                   "ArrowDown": "{DOWN}", "ArrowUp": "{UP}", "Home": "{HOME}", "End": "{END}"}
 WIN_GEO_JS = "({innerWidth: innerWidth, innerHeight: innerHeight, dpr: devicePixelRatio, titel: String(document.title || '')})"
 
 
@@ -18367,7 +18367,7 @@ class _AugenSitzung:
 
     # Tasten (Master-Klicktest 29.09.2026): keyDown(text)/keyUp je Zeichen — NIE Input.insertText (kein keydown/keypress);
     # Sondertasten mit windowsVirtualKeyCode, alle Abstände über _warte mit Streuung.
-    _VK = {"Tab": 9, "Enter": 13, "Escape": 27, "Backspace": 8, "Delete": 46, "a": 65, "ArrowDown": 40, "ArrowUp": 38}
+    _VK = {"Tab": 9, "Enter": 13, "Escape": 27, "Backspace": 8, "Delete": 46, "a": 65, "ArrowDown": 40, "ArrowUp": 38, "Home": 36, "End": 35}
 
     def taste(self, key, modifiers=0):
         if _WIN_EINGABE:
@@ -18414,8 +18414,12 @@ class _AugenSitzung:
         self.trail.append(f"{name}: Feld hat nach dem Klick keinen Fokus — nichts getippt")
         return False
 
-    def feld_setzen(self, rect, wert, name):
-        """Feld anklicken, Fokus beweisen, alles markieren (Strg+A), Wert Zeichen für Zeichen tippen, Tab. -> bool (getippt)"""
+    def feld_setzen(self, rect, wert, name, versuch=0):
+        """Feld anklicken, Fokus beweisen, alles markieren (Strg+A), Wert Zeichen für Zeichen tippen, Tab. -> bool (getippt)
+        versuch ≥ 1 (Puls-Fehler „ticket: take profit: im feld steht '#' statt #", 3 PCs in 30 Tagen, zuletzt 13.10.2026 23:05 UTC
+        Plan 20e4a5a0…: Feld stand auf '3540.0', Strg+A griff zweimal nicht, beide Tipps hingen hinten dran → '3540.035083508'): der
+        Wiederholungsversuch markiert zusätzlich per Pos1 + Shift+Ende — je nach Eingabefeld greift nur eines von beiden (wie der
+        UIA-Weg seit 18.08.2026). Nie löschen: das Tippen ersetzt die Markierung, das Feld ist nie leer (kein Auto-Mindestwert)."""
         if not self.klick(rect, f"Feld {name}"):
             return False
         _warte(0.15, 0.1)
@@ -18423,10 +18427,15 @@ class _AugenSitzung:
             return False
         self.taste("a", modifiers=2)          # Strg+A (Windows)
         _warte(0.1, 0.08)
+        if versuch:
+            self.taste("Home")
+            _warte(0.08, 0.06)
+            self.taste("End", modifiers=8)    # Shift+Ende: vom Anfang bis zum Ende markiert
+            _warte(0.1, 0.08)
         self.tippen(wert)
         _warte(0.12, 0.1)
         self.taste("Tab")
-        self.trail.append(f"{name} getippt: {wert}")
+        self.trail.append(f"{name} getippt: {wert}" + (" (Pos1+Shift+Ende markiert)" if versuch else ""))
         return True
 
     def hin(self, rect, name):
@@ -19731,13 +19740,13 @@ def _cdp_ticket_fuellen(s, st, plan, symbol, opts, trail):
         if not cdp_rect(mg):
             return False
         for _v in range(2):
-            s.feld_setzen(cdp_rect(mg), str(plan["menge"]), "Units")
+            s.feld_setzen(cdp_rect(mg), str(plan["menge"]), "Units", versuch=_v)
             _warte(0.4, 0.2)
             st = s.stand(opts)
             mg = ticket().get("menge") if isinstance(ticket().get("menge"), dict) else {}
             if cdp_zahl(mg.get("wert")) == float(plan["menge"]):
                 return True
-            trail.append(f"Units: '{mg.get('wert')}' statt {plan['menge']} — tippe einmal neu")
+            trail.append(f"Units: '{mg.get('wert')}' statt {plan['menge']} — tippe einmal neu" + (" (Pos1+Shift+Ende)" if _v == 0 else ""))
         return False
 
     if not units_setzen():
@@ -19776,13 +19785,15 @@ def _cdp_ticket_fuellen(s, st, plan, symbol, opts, trail):
             for _v in range(2):
                 if not cdp_rect(f_.get("feld")):
                     break
-                s.feld_setzen(cdp_rect(f_.get("feld")), f"{soll:g}", name)
+                s.feld_setzen(cdp_rect(f_.get("feld")), f"{soll:g}", name, versuch=_v)
                 _warte(0.4, 0.2)
                 st = s.stand(opts)
                 f_ = ticket().get(schl) if isinstance(ticket().get(schl), dict) else {}
                 if cdp_zahl(f_.get("wert")) == float(soll):
                     ok_w = True
                     break
+                if _v == 0:   # 14.10.2026: der alte Wert blieb stehen (Strg+A griff nicht) — in der Spur sichtbar, bevor es anders weitergeht
+                    trail.append(f"{name}: im Feld steht '{f_.get('wert')}' statt {soll:g} — markiere per Pos1+Shift+Ende, tippe einmal neu")
             if not ok_w:
                 return False, "ticket", f"{name}: im Feld steht '{f_.get('wert')}' statt {soll:g}.", "ticket", st, None
         if f_.get("an") is False:
