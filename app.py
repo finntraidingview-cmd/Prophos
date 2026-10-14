@@ -22408,6 +22408,46 @@ def ap_einsatz_kontext(stand, param):
             "szenario_laufend": [ap_szenario_trade_aus_zeile(z, True) for z in stand.get("offen") or ()]}   # Szenario (08.10.2026)
 
 
+# TAGES-SALDO (.1552, Finn 14.10.2026 ~19:30 Dubai nach 28 Blows an einem Tag, Kasse −3,5 k €: „Mein einziges Ziel ist es, dass Long und
+# Short ausgeglichen sind, dass ich am Ende vom Tag gleich viel Gewinn und gleich viel Verlust habe"). Befund des Tages: die Waage
+# (basis_einsatz) wog nur LAUFENDE Trades. Ein geblowter Long fiel in der Sekunde aus ihr, die Waage sagte wieder „zu viel Short", der
+# Bot und der Start-Riegel ließen den nächsten Long durch — von 05 bis 15 Uhr Dubai 28 Longs gegen 7 Shorts, die Longs starben in 1–20 min,
+# die Shorts liefen Stunden (dasselbe Muster am 07.10. und 12.10.). Deshalb wiegt die Waage jetzt den TAG: der laufende Netto-Einsatz
+# (+ long / − short, wie bisher) PLUS jeder heute (Dubai) beendete Trade mit seinem € aus der Kachel „Heute" (Blow = Kontowert, sonst
+# |P&L $ × Kontowert-Satz|; nicht gelesen/ohne € zählt nicht), long +, short −. Ein toter Long bleibt damit den ganzen Tag „long" in der
+# Waage, und die nächste Seite, die der Bot nach vorn holt bzw. der Start-Riegel durchlässt, ist die Gegenseite — nicht mehr Nachschub für
+# die Seite, die heute schon gestorben ist. Geplante Trades sind weiterhin nie Deckung (.1545). Wirkt überall, wo basis_einsatz gelesen
+# wird: Saldo-Riegel (.1501, ap_richtungsschutz), vor_erlaubt (.1545), Band-Verlauf des Bots, GET /delta netto_eur (PC-Tab rkVorStart,
+# Kachel „Netto"). Die alten Werte stehen daneben (lauf_einsatz/lauf_brutto, beendet_*). Ohne heute_beendet (altes Backend, Selbsttests,
+# Lesefehler) bleibt alles wie bisher.
+def ap_tages_saldo(stand):
+    """REIN RECHNEND (testbar): Waage des Tages in den Stand — basis_einsatz = laufender Netto-Einsatz + Σ heute beendet (long +|eur|,
+    short −|eur|), brutto_einsatz bleibt laufend (Band); lauf_einsatz/lauf_brutto = die laufenden allein, beendet_long_eur/beendet_short_eur/
+    beendet_einsatz = die beendeten allein. Ohne heute_beendet-Liste unverändert. Idempotent (rechnet immer von lauf_* aus)."""
+    zeilen = stand.get("heute_beendet")
+    if not isinstance(zeilen, list):
+        return stand
+    if "lauf_einsatz" not in stand:
+        stand["lauf_einsatz"], stand["lauf_brutto"] = round(float(stand.get("basis_einsatz") or 0.0), 1), round(float(stand.get("brutto_einsatz") or 0.0), 1)
+    lauf, brutto = float(stand["lauf_einsatz"]), float(stand["lauf_brutto"])
+    plus = minus = 0.0
+    for z in zeilen:
+        if not isinstance(z, dict) or z.get("art") == "offen":
+            continue
+        e = _wd_num(z.get("eur"))
+        if e is None:
+            continue
+        if z.get("richtung") == "buy":
+            plus += abs(e)
+        elif z.get("richtung") == "sell":
+            minus += abs(e)
+    # brutto_einsatz bleibt das LAUFENDE Brutto: das Band (zielband_pct × Brutto) ist die erlaubte Schieflage — zählte es die beendeten
+    # mit, würde die Toleranz mit jedem Blow wachsen (28 Blows ≈ 4 k € Brutto → 1 k € Band), genau das Gegenteil von ±0.
+    stand.update(beendet_long_eur=round(plus), beendet_short_eur=round(minus), beendet_einsatz=round(plus - minus, 1),
+                 basis_einsatz=round(lauf + plus - minus, 1), brutto_einsatz=round(brutto, 1), tag_brutto_eur=round(brutto + plus + minus))
+    return stand
+
+
 def _ap_stand_plaene(stand):
     """Geplante Pläne des Stands in der Form für ap_umplanen/ap_eingriff_pruefen (Firma = Schlüssel)."""
     return [{"plan_id": z["plan_id"], "user_id": z["user_id"], "user": z["user"], "firma": z["firma_key"], "firma_name": z["firma"],
@@ -22507,7 +22547,10 @@ def ap_delta_antwort(stand, sicht_uid=None, pc_lebt=None):
            "band_info": {"pct": pct, "eur_pkt": round(pct / 100.0 * stand["basis_brutto"], 2), "gehalten": v["gehalten"],
                          "netto_max_abs": v["netto_max_abs"], "ueber": v["ueber"][:20]},
            "netto_jetzt": round(stand["basis_netto"], 2), "brutto_jetzt": round(stand["basis_brutto"], 2),
-           "netto_eur": round(stand.get("basis_einsatz") or 0.0),
+           "netto_eur": round(stand.get("basis_einsatz") or 0.0),   # .1552: Tages-Saldo (laufend + heute beendet), wenn lauf_netto_eur da ist
+           "lauf_netto_eur": None if stand.get("lauf_einsatz") is None else round(stand["lauf_einsatz"]),
+           "beendet_netto_eur": None if stand.get("beendet_einsatz") is None else round(stand["beendet_einsatz"]),
+           "beendet_long_eur": stand.get("beendet_long_eur"), "beendet_short_eur": stand.get("beendet_short_eur"),
            "long_eur": round(sum(max(z.get("einsatz_eur") or 0, 0) for z in stand["offen"] + stand["geplant"])),
            "short_eur": round(sum(max(-(z.get("einsatz_eur") or 0), 0) for z in stand["offen"] + stand["geplant"])),
            "band_eur": round(pct / 100.0 * (stand.get("brutto_einsatz") or 0.0)),
@@ -22573,9 +22616,11 @@ def ap_stand_sicht(stand, sicht):
     offen = out.get("offen") or []
     ds = [z["delta_eur_pkt"] for z in offen if z.get("delta_eur_pkt") is not None]
     ein = [z["einsatz_eur"] for z in offen if z.get("einsatz_eur") is not None]
+    for k in ("lauf_einsatz", "lauf_brutto", "beendet_long_eur", "beendet_short_eur", "beendet_einsatz", "tag_brutto_eur"):
+        out.pop(k, None)                      # .1552: Tages-Waage aus den gefilterten Zeilen neu
     out.update(basis_netto=round(sum(ds), 3), basis_brutto=round(sum(abs(d) for d in ds), 3),
                basis_einsatz=round(sum(ein), 1), brutto_einsatz=round(sum(abs(e) for e in ein), 1))
-    return out
+    return ap_tages_saldo(out)
 
 
 AP_LAUF_SUMMEN = ("netto_max_abs", "id_misch", "firma_misch", "misch_fenster", "ids_benutzt", "nur_konten")   # nur_konten: Konto-IDs aller IDs
@@ -22815,6 +22860,13 @@ def ap_ausgleichen(trocken=False, quelle="bot", jetzt=None, seed=None):
         return {"ok": False, "msg": "auto_plan_regeln fehlt"}
     stand = _ap_stand_laden(reg, jetzt)
     param = stand["param"]
+    # TAGES-SALDO (.1552): der Bot wiegt den Tag (laufend + heute beendet), nicht nur das laufende Buch — Lesefehler → wie bisher
+    try:
+        stand["heute_beendet"], stand["heute_ab"] = ap_heute_beendet_gemerkt((reg.get("regeln") or {}).get("firmen") or [], jetzt)
+        ap_tages_saldo(stand)
+    except Exception as e:
+        stand["heute_beendet_fehler"] = f"{type(e).__name__}: {e}"
+        print(f"[auto-plan] ⚠️ Tages-Saldo (Bot): {stand['heute_beendet_fehler']}", flush=True)
     # RICHTUNG AM START (07.10.2026): erst der Richtungsschutz der nächsten 60 min — läuft bei jedem Takt, auch wenn das Band hält
     try:
         rs = ap_richtungsschutz(stand, trocken=trocken, quelle="bot")
@@ -23298,6 +23350,7 @@ def admin_auto_plan_delta():
         except Exception as e:
             stand["heute_beendet_fehler"] = f"{type(e).__name__}: {e}"
             print(f"[auto-plan] ⚠️ heute beendet: {stand['heute_beendet_fehler']}", flush=True)
+        ap_tages_saldo(stand)                     # TAGES-SALDO (.1552): netto_eur/Band für PC-Tab und Kachel wiegen den ganzen Tag
         stand["fremd"] = fp_delta_zeilen()        # FREMD-POSITIONEN (08.10.2026): Hand-Positionen ohne Plan, „Braucht dich"
         sicht_d = _ap_sicht_aus_anfrage(admin, uid)
         nur, gruppe = _ap_gruppe_lesen(uid)
