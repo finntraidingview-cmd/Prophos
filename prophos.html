@@ -43972,7 +43972,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1557'
+  const OS_TAB_BUILD = '2026-09-22.1558'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -48700,6 +48700,32 @@
         const rk = await rkVorStart(plan)
         if(rk === 'verschoben') return
         if(rk && rk.plan) plan = rk.plan
+      }
+      // STARTZEIT FRISCH LESEN VOR JEDEM „VERPASST" (.1558, 14.10.2026 — Muster zu_spaet 57× in 7 Tagen, 19× am 14.10., fast alle falsch:
+      // 11:20 Dubai „60 min verpasst" für Winning Days mit Start 16:30, 18:22 „72 min verpasst" für einen Plan mit DB-Start 18:27 (vom Bot
+      // vorgezogen), „77 min verpasst" für einen in die Puls-Pause geparkten Plan (Start 2027). Der Tab rechnete mit seinem alten start_um —
+      // Pläne kommen ohne Realtime, der Bot/Planer/Puls-Pause hatte den Start längst verschoben. Folge: falscher Claim, Toast + Handy, Eintrag
+      // in puls_fehlstarts, Start erst über sfTick nachgeholt. Jetzt: ist der Start laut Tab verpasst, einmal die DB fragen; weicht start_um
+      // um mehr als 1 min ab, liegt er in der Zukunft, ist der Plan nicht mehr planned oder schon geclaimt → lokalen Plan nachziehen, nichts
+      // claimen, nichts melden — der nächste Tick rechnet mit dem echten Start. Nur das echte „verpasst" (DB-Start stimmt) läuft weiter.
+      if(verspaetet > fenster){
+        let frisch = null
+        try{ const { data: fr } = await supabase.from('trade_plans').select('start_um,status,start_um_gestartet_at').eq('id', plan.id).maybeSingle(); frisch = fr || null }catch(_){ frisch = null }
+        if(frisch){
+          const dbMs = Date.parse(frisch.start_um || ''), lokMs = new Date(plan.startUm).getTime()
+          const anders = frisch.status !== 'planned' || !!frisch.start_um_gestartet_at || (isFinite(dbMs) && (Math.abs(dbMs - lokMs) > 60000 || dbMs > Date.now()))
+          if(anders){
+            const iF = tradePlans.findIndex(x => String(x.id) === String(plan.id))
+            if(iF >= 0){
+              if(isFinite(dbMs)) tradePlans[iF].startUm = frisch.start_um
+              if(frisch.start_um_gestartet_at) tradePlans[iF].startUmGestartetAt = frisch.start_um_gestartet_at
+              if(frisch.status && frisch.status !== 'planned') tradePlans[iF].status = frisch.status
+            }
+            console.warn('[start-um] Start laut DB anders als im Tab — kein „verpasst"', String(plan.id).slice(0, 8), { tab: plan.startUm, db: frisch.start_um, status: frisch.status, geclaimt: !!frisch.start_um_gestartet_at })
+            try{ renderTradePlans() }catch(_){}
+            return
+          }
+        }
       }
       // SLAVE-VORPRÜFUNG VOR dem Claim — der Claim verbraucht den Plan (start_um_gestartet_at), ein späterer Riegel ließe ihn nie wieder zu
       if(vorcheckNoetig(plan)){
