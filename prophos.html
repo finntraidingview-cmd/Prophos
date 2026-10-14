@@ -44020,7 +44020,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1561'
+  const OS_TAB_BUILD = '2026-09-22.1562'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -49770,10 +49770,9 @@
     // ADMIN-REITER OHNE DELTA (15.10.2026, Folge zum leeren Zeitstrahl oben bei apIdsTag): „morgen" kennt das Delta nicht, und der
     // letzte Lauf trägt oft noch den heutigen Tag — dann stand der Zeitstrahl leer, obwohl „Zu bestätigen" die Vorschläge zeigte. Die
     // Zeilen aus /ids (offen[] + bestaetigt[], alle IDs, heute UND morgen, gleiche Form wie delta.geplant[]) kommen hier als geplante
-    // Trades des angezeigten Tags dazu — nur im Admin-Reiter (apIdsDaten setzt _tpl.idsRueckfall), nie mit Delta, nie doppelt.
+    // Trades des angezeigten Tags dazu — nur im Admin-Reiter (apIdsDaten gibt sie in _tpl.idsRueckfall mit), nie mit Delta, nie doppelt.
     if(!delta && _tpl.idsRueckfall){
-      let quelle = []
-      try{ quelle = [...(_apIds.bestaetigt || []).map(x => ({ ...x, _ok: true })), ...(_apIds.offen || [])] }catch(_){ quelle = [] }
+      const q = _tpl.idsRueckfall, quelle = [...(q.bestaetigt || []).map(x => ({ ...x, _ok: true })), ...(q.offen || [])]
       for(const x of quelle){
         if(!x || gesehen.has(String(x.plan_id))) continue
         const s = tplMinDt(x.start_um, tag)
@@ -65669,8 +65668,10 @@
   window.apSichtSetzen = apSichtSetzen
   const apIdsOffenSicht = () => { const u = apSichtUid(); return u ? _apIds.offen.filter(z => String(z.user_id) === u) : _apIds.offen }
   function apIdsDaten(){
-    const alt = _tpl.tag; _tpl.tag = apIdsTag(); _tpl.idsRueckfall = true   // Tag ohne Delta (morgen): Zeilen aus /ids offen[]+bestaetigt[] (15.10.2026)
-    let D; try{ D = tplDaten() } finally{ _tpl.tag = alt; _tpl.idsRueckfall = false }
+    // Tag ohne Delta (morgen): Zeilen aus /ids offen[]+bestaetigt[] (15.10.2026) — als Objekt mitgegeben, weil _apIds in einem eigenen
+    // Block lebt und aus tplDaten nicht sichtbar ist (Stub-Befund: „_apIds is not defined“, vom stillen catch geschluckt)
+    const alt = _tpl.tag; _tpl.tag = apIdsTag(); _tpl.idsRueckfall = { offen: _apIds.offen || [], bestaetigt: _apIds.bestaetigt || [] }
+    let D; try{ D = tplDaten() } finally{ _tpl.tag = alt; _tpl.idsRueckfall = null }
     const u = apSichtUid()
     return u && typeof tplSichtFilter === 'function' ? tplSichtFilter(D, new Set([u])) : D
   }
