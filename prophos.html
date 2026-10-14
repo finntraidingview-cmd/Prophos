@@ -36590,10 +36590,12 @@
       const std = (typeof serverForFirm === 'function') ? (serverForFirm(bEl.firm?.value.trim()) || '') : ''
       box.innerHTML = ids.map(id => {
         const a = alt[id] || {}
+        // Passwort/Server aus dem eingefügten Text (FundedNext-Zugangskarte, 14.10.2026) vorfüllen — eigene Eingabe geht vor
+        const zg = ((typeof bulkPaste !== 'undefined' && bulkPaste.bloecke) || []).find(x => String(x.id) === id)?.zugang || {}
         return `<div data-bcr="${escapeHtml(id)}" style="display:grid;grid-template-columns:110px 1fr 1fr;gap:6px;align-items:center">`
           + `<span class="mono" style="font-size:12.5px;color:var(--ink)">${escapeHtml(id)}</span>`
-          + `<input class="input mono" data-bcr-pw type="text" placeholder="Passwort" autocomplete="off" style="font-size:12.5px" value="${escapeHtml(a.pw || '')}">`
-          + `<input class="input mono" data-bcr-srv type="text" placeholder="Server" autocomplete="off" style="font-size:12.5px" value="${escapeHtml(a.srv != null ? a.srv : std)}">`
+          + `<input class="input mono" data-bcr-pw type="text" placeholder="Passwort" autocomplete="off" style="font-size:12.5px" value="${escapeHtml(a.pw || zg.password || '')}">`
+          + `<input class="input mono" data-bcr-srv type="text" placeholder="Server" autocomplete="off" style="font-size:12.5px" value="${escapeHtml(a.srv || zg.server || std)}">`
           + `</div>`
       }).join('')
       box.style.display = ids.length ? 'flex' : 'none'
@@ -36644,6 +36646,22 @@
     const BULK_STATUS = /^(active|failed|passed|inactive|breached|disabled|closed)$/i
     const BULK_TOPSTEP_RX = /\b(\d+KTC-SKU-V2-\d+-\d+|EXPRESS-V2-\d+-\d+)\b/g
     function bulkGeld(t){ const m = /-?\$?\s*([\d,]+(?:\.\d+)?)/.exec(String(t || '')); if(!m) return null; const v = parseFloat(m[1].replace(/,/g, '')); return isFinite(v) ? v : null }
+    // Zugangsdaten hinter einem Login (14.10.2026): nur mit Label — „Password: x" / „Password" + nächste Zeile, „Server: y" / „Server" +
+    // nächste Zeile; Investor-Passwort wird übersprungen; „Change Investor Password" / „Generate Password" sind Knöpfe, keine Werte.
+    // Bewusst kein Struktur-Raten wie in acParseCredBlob: der Abschnitt bis zum nächsten Login enthält schon den Kopf des nächsten Kontos.
+    const BULK_ZUGANG_LABEL = /^(?:(?:master|trading|main|haupt|investor|read-?only)?\s*(?:password|passwort|kennwort)|server(?:\s*name)?|change\s+investor\s+password|generate\s+password)\b/i
+    function bulkZugangLesen(teil){
+      const zl = String(teil || '').split(/\r?\n/).map(x => x.trim()).filter(Boolean), z = {}
+      const wert = (rest, j) => { const v = (rest || '').trim(); if(v) return v; const nx = zl[j + 1] || ''; return (nx && !BULK_ZUGANG_LABEL.test(nx) && !/^login\b/i.test(nx)) ? nx : '' }
+      zl.forEach((x, j) => {
+        if(/investor|read-?only|change\s+investor|generate\s+password/i.test(x)) return
+        let m = !z.password && /^(?:master|trading|main|haupt)?\s*(?:password|passwort|kennwort)\s*[:#=]?\s*(.*)$/i.exec(x)
+        if(m){ const v = wert(m[1], j); if(v) z.password = v.split(/\s+/)[0]; return }
+        m = !z.server && /^server(?:\s*name)?\s*[:#=]?\s*(.*)$/i.exec(x)
+        if(m){ const v = wert(m[1], j), sm = /^([A-Za-z0-9][A-Za-z0-9._\-]{2,40}(?:[ ][0-9]{1,4})?)/.exec(v); if(sm) z.server = sm[1] }
+      })
+      return (z.password || z.server) ? z : null
+    }
     function bulkDashboardParsen(text){
       const roh = String(text || ''), out = [], gesehen = new Set()
       const firmaVon = id => { const pr = BULK_PRAEFIX.find(([rx]) => rx.test(id)); return pr ? pr[1] : '' }
@@ -36665,9 +36683,14 @@
       // (1b) FundedNext (CFD/MT5, F16-Ergänzung): Kennung = Zahl nach „Login:"; die Angaben zum Konto stehen DAVOR (seit dem vorigen
       //      Login): Programm („Stellar 2-Step") = Titel, „$50K" = Größe, „CHALLENGE • P1/P2" bzw. „FUNDED" = Typ, „Current Balance".
       //      Balance nur zur Anzeige (MT5-Live-Stand kommt über Echo/MT5-Cloud), deshalb tvUebernehmen false.
-      const fnTreffer = [...roh.matchAll(/Login:\s*(\d{5,})/gi)]
+      //      14.10.2026 (Finn, FundedNext-Zugangskarte „Login / Password / Change Investor Password / Server"): „Login" auch OHNE
+      //      Doppelpunkt bzw. mit der Zahl auf der nächsten Zeile — vorher griff der Rückfall (3) und machte aus Passwort und Server
+      //      zwei weitere „Konten". Passwort + Server hinter dem Login werden mitgelesen (zugang) und füllen die Zugangsdaten-Zeile vor.
+      const fnTreffer = [...roh.matchAll(/\bLogin\b\s*[:#=]?\s*(\d{5,})/gi)]
       fnTreffer.forEach((m, k) => {
         const von = k > 0 ? fnTreffer[k - 1].index + fnTreffer[k - 1][0].length : 0
+        const bisNaechster = k + 1 < fnTreffer.length ? fnTreffer[k + 1].index : roh.length
+        const zugang = bulkZugangLesen(roh.slice(m.index + m[0].length, bisNaechster))
         // Anker = letzte Größen-Zeile („$50K") vor dem Login, Titel = Zeile davor — so stört Text anderer Firmen davor nicht (Mischtext)
         const zlAlle = roh.slice(von, m.index).split(/\r?\n/).map(x => x.trim()).filter(Boolean)
         let si = -1; zlAlle.forEach((x, j) => { if(/^\$\s*\d+(?:[.,]\d+)?\s*K$/i.test(x)) si = j })
@@ -36679,7 +36702,7 @@
         const bi = zl.findIndex(x => /^current balance$/i.test(x)), bal = bi >= 0 && bi + 1 < zl.length ? bulkGeld(zl[bi + 1]) : null
         const nachher = roh.slice(m.index + m[0].length, m.index + m[0].length + 20), plat = (/\b(MT[45])\b/i.exec(nachher) || [])[1] || 'MT5'
         dazu(m.index, { id: m[1], titel, status: '', plattform: plat.toUpperCase(), firma: 'FundedNext', groesse: gm ? Math.round(parseFloat(gm[1].replace(',', '.')) * 1000) : null,
-                        typ, balance: bal, trailing: null, tvUebernehmen: false })
+                        typ, balance: bal, trailing: null, tvUebernehmen: false, zugang })
       })
       // (1c) Apex (27.09.2026, Master): Kennung APEX + Ziffern = Challenge, PAAPEX + Ziffern = Performance Account (funded). Ein Apex-
       //      Dashboard-Format ist noch nicht bekannt — nur die Kennung, keine Balance/Größe aus dem Text.
@@ -36701,8 +36724,16 @@
                               firma: 'Tradeify', groesse: gm ? Math.round(parseFloat(gm[1].replace(',', '.')) * 1000) : null,
                               typ: (/funded/i.test(titel) || /^F/.test(id)) ? 'funded' : 'challenge', balance: nach(/^account balance$/i), trailing: nach(/^trailing max drawdown$/i) })
       })
-      // (3) reine Liste
-      if(!out.length) for(const x of zeilen){ const w = (x.t.split(/[\s,;]+/).find(t => /\d/.test(t)) || '').replace(/^[#"']+|["']+$/g, ''); if(w.length >= 4) dazu(x.pos, { id: w, titel: '', status: '', plattform: '', firma: firmaVon(w), groesse: null, typ: '', balance: null, trailing: null }) }
+      // (3) reine Liste — Passwort-/Server-Zeilen (Label in der Zeile oder auf der Zeile davor) sind keine Kennungen (14.10.2026)
+      if(!out.length){
+        let labelDavor = false
+        for(const x of zeilen){
+          const istLabel = BULK_ZUGANG_LABEL.test(x.t), nurLabel = istLabel && !x.t.replace(BULK_ZUGANG_LABEL, '').replace(/^\s*[:#=]?\s*/, '')
+          if(istLabel || labelDavor){ labelDavor = nurLabel; continue }
+          const w = (x.t.split(/[\s,;]+/).find(t => /\d/.test(t)) || '').replace(/^[#"']+|["']+$/g, '')
+          if(w.length >= 4) dazu(x.pos, { id: w, titel: '', status: '', plattform: '', firma: firmaVon(w), groesse: null, typ: '', balance: null, trailing: null })
+        }
+      }
       return out.sort((a, b) => a.pos - b.pos).map(({ pos, ...b }) => b)
     }
     window._bulkDashboardParsen = bulkDashboardParsen   // Test-Haken
@@ -43935,7 +43966,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1543'
+  const OS_TAB_BUILD = '2026-09-22.1544'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
