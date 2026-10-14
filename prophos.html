@@ -22877,11 +22877,15 @@
   const BTH_RUHE_MS = 20000, BTH_WARTE_MS = 10000
   let _bthTimer = null, _bthLaeuft = false, _bthSelbst = false
   function bigTradePlan(){
-    // WINNING DAYS SIND KEINE BIG TRADES (14.10.2026, Finn: „kleine Mini-Trades, nicht die Priorität von echten Dingern") — dieselbe
-    // Definition wie prophos_big_trade (sql/2026-10-14_winning_days_kein_big_trade.sql): winning_day = true → kein Rück-Login, kein Riegel
-    const hedge = p => (p.route === 'tvv2' || p.route === 'tsv2') && p.winningDay !== true && (Number(p.hedgeEur) > 0 || p.orbitV3 === true)
-    return (tradePlans || []).filter(p => p.status === 'open' && hedge(p) && tvV2Konto(p))
-      .sort((a, b) => String(b.startedAt || '').localeCompare(String(a.startedAt || '')))[0] || null
+    // HEIMKONTO MIT RANGFOLGE (14.10.2026 abends, Finn: „läuft ein Weg mit Hedge bei Orbit oder ein Winning Day, platziert Puls die Order
+    // und geht danach IMMER zurück zu dem Konto, wo der Trade läuft — laufen Orbit-Big-Trade und Winning Day zugleich, immer zurück zum
+    // Orbit-Trade, Orbit hat mehr Positionen und mehr Größe, Prio 1"). Prio 1 = laufender Orbit/Topstep-Trade MIT Hedge (kein Winning
+    // Day), Prio 2 = laufender Winning Day (Mini-Trade mit Fusion-Hedge, der Reader liest ihn genauso mit). Für den Riegel bleibt ein
+    // Winning Day KEIN Big Trade (prophos_big_trade, .1548) — er blockiert nichts und wird nicht blockiert; hier geht es nur ums Heimkommen.
+    const offen = (tradePlans || []).filter(p => p.status === 'open' && (p.route === 'tvv2' || p.route === 'tsv2') && tvV2Konto(p))
+    const juengster = l => l.sort((a, b) => String(b.startedAt || '').localeCompare(String(a.startedAt || '')))[0] || null
+    const big = juengster(offen.filter(p => p.winningDay !== true && (Number(p.hedgeEur) > 0 || p.orbitV3 === true)))
+    return big || juengster(offen.filter(p => p.winningDay === true || (typeof tpIstWdPlan === 'function' && tpIstWdPlan(p))))
   }
   function bigTradeHeimPlanen(konto, grund){
     if(typeof window.mtcApi !== 'function' || _bthSelbst) return
@@ -43968,7 +43972,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1553'
+  const OS_TAB_BUILD = '2026-09-22.1554'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
