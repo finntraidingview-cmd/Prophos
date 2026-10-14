@@ -18968,6 +18968,17 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     stand = _ap_stand_laden(reg, jetzt, tag, ersetzt=lambda p: str(p.get("user_id")) in uids and _vorschlag(p),
                             extra_konten=[k["a"]["id"] for k in kandidaten], echo_bal=echo_bal, dup_bal=dup_bal,
                             namen=namen, ausgeblendet=ausgeblendet)
+    # TAGES-WAAGE AUCH BEIM PLANEN (.1556, Finn 14.10.2026: „nicht nur am Ende vom Tag, auch die ganze Zeit ein gutes Long-Short-
+    # Verhältnis"): plant dieser Lauf den HEUTIGEN Tag (Nachplan-Takt, „Plan heute", Gruppen-Planer), verteilt ap_richtungen_delta die neuen
+    # Tranchen gegen das Eröffnungs-Gewicht aller heute gestarteten Trades (ap_tages_saldo), nicht nur gegen das laufende Buch — sonst
+    # hätte der Nachplan-Takt nach toten Longs wieder Longs „zum Ausgleich" verteilt. Nachtlauf für den Folgetag: Tag frisch, nichts beendet.
+    if tag == jetzt.astimezone(_ap_tz(AP_HB_TZ)).strftime("%Y-%m-%d"):
+        try:
+            stand["heute_beendet"], stand["heute_ab"] = ap_heute_beendet_gemerkt((reg.get("regeln") or {}).get("firmen") or [], jetzt)
+            ap_tages_saldo(stand)
+        except Exception as e:
+            stand["heute_beendet_fehler"] = f"{type(e).__name__}: {e}"
+            print(f"[auto-plan] ⚠️ Tages-Waage (Planen): {stand['heute_beendet_fehler']}", flush=True)
     dinfo = {}
 
     # Tranchen + Zufall je Tranche
