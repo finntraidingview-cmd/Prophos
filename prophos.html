@@ -43966,7 +43966,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1545'
+  const OS_TAB_BUILD = '2026-09-22.1546'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -48177,6 +48177,25 @@
       && isFinite(Date.parse(x.start)) && Date.parse(x.start) <= jetzt + 60 * 60000).length
   }
   const RK_SALDO_FREI_EUR = 400   // Rückfall, wenn /delta keine saldo_frei_eur liefert (app.py AP_SALDO_FREI_EUR, .1545)
+  /* SALDO: DREHEN STATT WARTEN (.1546, Finn 14.10.2026 ~05:10 Dubai: „wir sind gerade mehr short … der nächste ist ein FTMO-Short — den kann
+   * ich einfach long umdrehen, weil der Richtungsschutz eh nichts dagegen hat"): kippt ein Auto-Plan den Saldo der LAUFENDEN Trades weiter,
+   * wird er auf die Gegenseite gedreht und startet — sofern bei derselben ID × Firma nichts in seiner alten Richtung läuft (k.lauf). Läuft
+   * dort etwas in der alten Richtung, wäre das Drehen ein Selbst-Hedge → wie bisher warten. Hand-Werte nie, WD nicht (gehedgt).
+   * → { plan } (gedreht, frische Zeile) | null (nicht drehbar: Richtungsschutz / Plan weg / schon geclaimt) */
+  async function rkSaldoDrehen(plan, k, grundTxt){
+    const alt = plan.richtung, ziel = alt === 'buy' ? 'sell' : 'buy', altSeite = alt === 'buy' ? 'long' : 'short'
+    if(k && k.lauf === altSeite) return null                       // Richtungsschutz: bei dieser ID+Firma läuft meine alte Richtung
+    const { data, error } = await supabase.from('trade_plans').update({ richtung: ziel })
+      .eq('id', plan.id).eq('status', 'planned').eq('richtung', alt).is('start_um_gestartet_at', null).select('*')
+    if(error || !data || !data.length){ console.warn('[richtung-start] Saldo-Drehen nicht möglich', plan.id, error); return null }
+    rkPlanErsetzen(data[0])
+    try{ await baselinePatch(plan.id, { richtung_konflikt: { quelle: 'start', status: 'gedreht', um: new Date().toISOString(), von: alt, nach: ziel, saldo: true, text: grundTxt } }, 'planned') }catch(_){}
+    if(typeof atToast === 'function') atToast(`⇅ Saldo — „${plan.masterName || 'Plan'}": ${grundTxt} → Auto-Plan auf ${ziel.toUpperCase()} gedreht und gestartet (TP/SL in $ unverändert).`, 'start')
+    rkProtokoll(plan, { von_richtung: alt, nach_richtung: ziel, von_start: plan.startUm, nach_start: plan.startUm,
+      grund: `Saldo am Start: ${grundTxt} — Auto-Plan ${alt} → ${ziel} gedreht` })
+    try{ renderTradePlans() }catch(_){}
+    return { plan: tradePlans.find(x => String(x.id) === String(plan.id)) || rowToPlan(data[0]) }
+  }
   async function rkVorStart(plan){
     if(!rkGilt(plan)) return null
     let k = null
@@ -48208,15 +48227,15 @@
       const vz = x => Number(x && x.einsatz_eur) || 0
       const gleich = (sd.offen || []).filter(x => (r === 'buy' ? vz(x) > 0 : vz(x) < 0)).length
       const gegen = (sd.offen || []).filter(x => (r === 'buy' ? vz(x) < 0 : vz(x) > 0)).length
-      if(gleich > 0 && gegen === 0){
+      const schief = (gleich > 0 && gegen === 0) ? `${gleich} ${r === 'buy' ? 'Long' : 'Short'}${gleich === 1 ? '' : 's'} laufen, kein ${r === 'buy' ? 'Short' : 'Long'}`
+        : (kippt && Math.abs(nach) > Math.max(bandNach, sd.frei)) ? `laufende Trades aller IDs wären danach ${Math.round(Math.abs(nach)).toLocaleString('de-DE')} € ${nach > 0 ? 'long' : 'short'} (Band ${Math.round(Math.max(bandNach, sd.frei)).toLocaleString('de-DE')} €)`
+        : null
+      if(schief){
+        // .1546: erst drehen (Richtungsschutz frei → Gegenseite startet sofort), sonst warten wie .1545
+        const gedreht = await rkSaldoDrehen(plan, k, schief)
+        if(gedreht) return gedreht
         const n = rkGegenInKuerze(sd, r, plan.id)
-        const kS = { lauf: null, saldo: true, text: `${gleich} ${r === 'buy' ? 'Long' : 'Short'}${gleich === 1 ? '' : 's'} laufen, kein ${r === 'buy' ? 'Short' : 'Long'} — ${r.toUpperCase()} wartet, bis ein ${r === 'buy' ? 'Short' : 'Long'} läuft${n > 0 ? ` (${n} in den nächsten 60 min geplant)` : ' (kein Gegen-Plan in Sicht — der Bot holt einen nach vorn)'}` }
-        await rkVerschieben(plan, kS, false, 'start')
-        return 'verschoben'
-      }
-      if(kippt && Math.abs(nach) > Math.max(bandNach, sd.frei)){
-        const n = rkGegenInKuerze(sd, r, plan.id)
-        const kS = { lauf: null, saldo: true, text: `laufende Trades aller IDs wären danach ${Math.round(Math.abs(nach)).toLocaleString('de-DE')} € ${nach > 0 ? 'long' : 'short'} (Band ${Math.round(Math.max(bandNach, sd.frei)).toLocaleString('de-DE')} €) — ${r.toUpperCase()} wartet, bis ein ${r === 'buy' ? 'Short' : 'Long'} läuft${n > 0 ? ` (${n} ${r === 'buy' ? 'Short' : 'Long'}-Plan${n === 1 ? '' : 'e'} in den nächsten 60 min)` : ' (kein Gegen-Plan in Sicht — der Bot holt einen nach vorn)'}` }
+        const kS = { lauf: null, saldo: true, text: `${schief} — ${r.toUpperCase()} nicht drehbar (bei dieser ID+Firma läuft ${r === 'buy' ? 'LONG' : 'SHORT'}), wartet, bis ein ${r === 'buy' ? 'Short' : 'Long'} läuft${n > 0 ? ` (${n} ${r === 'buy' ? 'Short' : 'Long'}-Plan${n === 1 ? '' : 'e'} in den nächsten 60 min)` : ' (kein Gegen-Plan in Sicht — der Bot holt einen nach vorn)'}` }
         await rkVerschieben(plan, kS, false, 'start')
         return 'verschoben'
       }
