@@ -22877,7 +22877,9 @@
   const BTH_RUHE_MS = 20000, BTH_WARTE_MS = 10000
   let _bthTimer = null, _bthLaeuft = false, _bthSelbst = false
   function bigTradePlan(){
-    const hedge = p => (p.route === 'tvv2' || p.route === 'tsv2') && (Number(p.hedgeEur) > 0 || p.orbitV3 === true || p.winningDay === true)
+    // WINNING DAYS SIND KEINE BIG TRADES (14.10.2026, Finn: „kleine Mini-Trades, nicht die Priorität von echten Dingern") — dieselbe
+    // Definition wie prophos_big_trade (sql/2026-10-14_winning_days_kein_big_trade.sql): winning_day = true → kein Rück-Login, kein Riegel
+    const hedge = p => (p.route === 'tvv2' || p.route === 'tsv2') && p.winningDay !== true && (Number(p.hedgeEur) > 0 || p.orbitV3 === true)
     return (tradePlans || []).filter(p => p.status === 'open' && hedge(p) && tvV2Konto(p))
       .sort((a, b) => String(b.startedAt || '').localeCompare(String(a.startedAt || '')))[0] || null
   }
@@ -43966,7 +43968,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1547'
+  const OS_TAB_BUILD = '2026-09-22.1548'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
