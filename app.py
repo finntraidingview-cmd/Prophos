@@ -18838,6 +18838,26 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     leichen_zu = _ap_leichen_abschliessen([v["plan_id"] for v in verfallen], jetzt) if (not trocken and quelle == "nacht") else []
     for v in verfallen:
         v["abgeschlossen"] = str(v.get("plan_id")) in leichen_zu
+    # TOTE AUTO-PLÄNE FRÜHERER TAGE WEGRÄUMEN (14.10.2026 abends, Finn: „diese ganzen Fehler unter Admin … damit die Trades sauber durchlaufen"):
+    # neun Leichen vom 07.–13.10. standen mit rotem Start-Fehler in „Braucht dich", weil dieser Lauf sie nur als tot zählte und liegen ließ.
+    # Nur im Nachtlauf, nur Auto-Pläne, nie gestartet/gesendet, Start vor dem heutigen Tag (Dubai), nie mit Puls-Pause-Marke, nie die eben
+    # auf „Überprüfen" gesetzten Leichen (leichen_zu). Heutige Leichen bleiben bis morgen stehen — Finn soll den Fehler des Tages noch sehen.
+    if not trocken and quelle == "nacht":
+        _h0 = jetzt.astimezone(tz)
+        _heute0 = datetime(_h0.year, _h0.month, _h0.day, tzinfo=tz)
+        _weg = 0
+        for v in verfallen:
+            _t, _pid = _ap_ts(v.get("start_um")), str(v.get("plan_id") or "")
+            if not _t or _t >= _heute0 or not _pid or _pid in leichen_zu:
+                continue
+            try:
+                sb_delete("trade_plans", {"id": f"eq.{_pid}", "status": "eq.planned", "auto_plan": "eq.true", "started_at": "is.null",
+                                          "orbit_gesendet_at": "is.null", "mt5_baseline->puls_pause": "is.null"})
+                _weg += 1
+            except Exception as e:
+                print(f"[auto-plan] ⚠️ Leiche {_pid[:8]} nicht gelöscht: {type(e).__name__}: {e}", flush=True)
+        if _weg:
+            print(f"[auto-plan] 🧹 {_weg} tote Auto-Pläne früherer Tage weggeräumt", flush=True)
     archiv = _ap_archiviert()
     echo_bal, dup_bal = _ap_balance_karten()
     namen, ausgeblendet = _ap_namen()   # direkt aus der Nutzerliste — _wd_personen braucht einen Request (Nachtlauf hat keinen)
