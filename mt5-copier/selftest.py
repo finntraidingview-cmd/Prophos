@@ -1914,6 +1914,7 @@ def main():
     results.append(test_puls_k3())
     results.append(test_puls_cdp_login())
     results.append(test_cdp_konto_regression_865())
+    results.append(test_panel_open_zweites_auge())
     results.append(test_cdp_konto_weg())
     results.append(test_cdp_konto_weg_gleicher_login())
     results.append(test_cdp_connect_zweiter_versuch())
@@ -3601,7 +3602,7 @@ def test_puls_cdp_login():
         f"Umschalter: Klick ohne Beweis, aber vielleicht gedrückt → Weg wie bisher (drei Blicke, Esc) ({kn3_.klicks})")
     chk(r4_[0] and k4_.klicks == [] and not k4_.gross,
         f"Konto steht, Panel eingeklappt → NIE maximieren (Finn 01.10.2026: Chart sichtbar), nie deshalb scheitern ({k4_.klicks})")
-    chk("_cdp_panel_aufklappen(s, trail, ohne_max=True)" in _i.getsource(ob._cdp_konto_sichern)
+    chk("_cdp_panel_aufklappen(s, trail, ohne_max=True, stand=st)" in _i.getsource(ob._cdp_konto_sichern)
         and "if _cdp_panel_zurueck(s, trail):" in _i.getsource(ob._cdp_konto_sichern),
         "Konto steht → höchstens Open panel, kurz Maximiertes sofort zurück (Restore) vor Ticket/Order")
     # Open panel zuerst (Finn 01.10.2026, Live-Befund Moritz 23:08 UTC: Maximize versteckte den Chart → Symbol nicht einstellbar)
@@ -3818,6 +3819,102 @@ def test_puls_cdp_login():
     chk("ziel=None" in _i.getsource(ob._AugenSitzung.__init__), "_AugenSitzung nimmt einen bestimmten Tab")
     if ok:
         print("✓ CDP-Login: nur bei kein Broker/0 Treffern, Connect-Dialog + Demo + Don't remember me, Username exakt, nie Passwort/Allow")
+    return ok
+
+
+def test_panel_open_zweites_auge():
+    """Marc pc-7ftp5l (14.10.2026, Balance-Lesung nach dem Tradovate-Login): Handelspanel zu („Open panel"), Konto-Schritt sagte
+    „Konto steht" und drückte nicht — die Höhen-Probe allein entschied (ok/unklar/verbraucht → still). Jetzt zählt auch augen.js
+    (konto.panel 'zu' + panel_knopf) bzw. der Kopf-Knopf-Name; verdeckt verbraucht den Versuch nicht; jeder Nicht-Klick mit Grund."""
+    import order_bot as ob
+    ok = True
+
+    def chk(bed, text):
+        nonlocal ok
+        if not bed:
+            print("  ✗ Panel zweites Auge: " + text)
+            ok = False
+
+    class _S:
+        """Attrappe: Höhen-Probe findet KEINE Broker-Leiste (unklar) bzw. sagt 'ok'; augen.js sagt 'zu' mit panel_knopf."""
+        def __init__(self, probe=None, panel="zu", knopf=True, frei=True, druck=True, wirkt=True):
+            self.probe = probe if probe is not None else {}
+            self.panel, self.knopf, self.frei, self.druck, self.wirkt, self.klicks, self.ww = panel, knopf, frei, druck, wirkt, [], 0
+
+        def stand(self, opts=None):
+            return {"konto": {"panel": self.panel, "aktiv": "TDFYSL150763219733USD", "schalter": {"rect": [72, 745, 199, 28]},
+                              "panel_knopf": {"rect": [1500, 900, 30, 30], "aria": "Open panel"} if self.knopf else None,
+                              "positionen_sichtbar": self.panel != "zu"}}
+
+        def lese_js(self, a, timeout=8):
+            if "elementFromPoint" in a:
+                return {"frei": self.frei, "was": "" if self.frei else "div.dialog-xyz"}
+            return dict(self.probe)
+
+        def werbung_weg(self, zwang=False):
+            self.ww += 1
+            return 0
+
+        def klick(self, r, n, toast_ok=False):
+            self.klicks.append(n)
+            if not self.druck:
+                return False
+            if "Open panel" in n and self.wirkt:
+                self.panel = "offen"
+                self.probe = {"leiste": [56, 587, 1199, 38], "unter_leiste": 320,
+                              "vis_knopf": {"rect": [860, 587, 38, 38], "aria": "Collapse panel"}}
+            return True
+
+    alt_w = ob._warte
+    ob._warte = lambda a_, b_: None
+    try:
+        # 1) Probe unklar (keine Leiste), augen.js zu → Klick über panel_knopf → offen
+        s1, t1 = _S(), []
+        r1 = ob._cdp_panel_aufklappen(s1, t1, ohne_max=True, stand=s1.stand())
+        # 2) Probe sagt 'ok' (320 px), Kopf-Knopf heißt aber „Open panel" → Knopf gewinnt → Klick
+        s2, t2 = _S(probe={"leiste": [56, 587, 1199, 38], "unter_leiste": 320, "vis_knopf": {"rect": [860, 587, 38, 38], "aria": "Open panel"}}, panel="offen"), []
+        r2 = ob._cdp_panel_aufklappen(s2, t2, ohne_max=True, stand=s2.stand())
+        # 3) Kopf-Knopf „Collapse panel" → offen, auch wenn augen.js (veraltet) „zu" sagt → kein Klick
+        s3, t3 = _S(probe={"leiste": [56, 686, 879, 38], "unter_leiste": 49, "vis_knopf": {"rect": [860, 686, 38, 38], "aria": "Collapse panel"}}), []
+        r3 = ob._cdp_panel_aufklappen(s3, t3, ohne_max=True, stand=s3.stand())
+        # 4) verdeckt → kein Klick, Versuch zählt nicht → zweiter Aufruf (frei) klickt
+        s4, t4 = _S(frei=False), []
+        r4a = ob._cdp_panel_aufklappen(s4, t4, ohne_max=True, stand=s4.stand())
+        s4.frei = True
+        r4b = ob._cdp_panel_aufklappen(s4, t4, ohne_max=True, stand=s4.stand())
+        # 5) schon gedrückt → kein zweiter Klick, Grund in der Spur
+        s5, t5 = _S(wirkt=False), []
+        r5a = ob._cdp_panel_aufklappen(s5, t5, ohne_max=True, stand=s5.stand())
+        r5b = ob._cdp_panel_aufklappen(s5, t5, ohne_max=True, stand=s5.stand())
+        # 6) zu, aber nirgends ein Knopf → Grund in der Spur, kein Klick
+        s6, t6 = _S(knopf=False), []
+        r6 = ob._cdp_panel_aufklappen(s6, t6, ohne_max=True, stand=s6.stand())
+        # 7) Panel offen, Probe ok → liest nur
+        s7, t7 = _S(probe={"leiste": [56, 587, 1199, 38], "unter_leiste": 320, "vis_knopf": {"rect": [860, 587, 38, 38], "aria": "Collapse panel"}}, panel="offen"), []
+        r7 = ob._cdp_panel_aufklappen(s7, t7, ohne_max=True, stand=s7.stand())
+        # 8) ohne stand (alte Aufrufer): Höhen-Probe wie bisher
+        s8, t8 = _S(probe={"leiste": [56, 686, 879, 38], "unter_leiste": 49, "vis_knopf": {"rect": [860, 686, 38, 38], "aria": "Open panel"}}), []
+        r8 = ob._cdp_panel_aufklappen(s8, t8, ohne_max=True)
+    finally:
+        ob._warte = alt_w
+    chk(r1[0] == "aufgeklappt" and s1.klicks == ["Order-Panel öffnen (Open panel)"] and any("augen.js: Handelspanel zu" in x for x in t1),
+        f"Probe ohne Leiste, augen.js zu → Klick über panel_knopf → offen ({r1[0]}, {s1.klicks}, {t1})")
+    chk(r2[0] == "aufgeklappt" and s2.klicks == ["Order-Panel öffnen (Open panel)"], f"Probe 320 px, Kopf-Knopf „Open panel“ → Knopf gewinnt → Klick ({r2[0]}, {s2.klicks})")
+    chk(r3[0] == "ok" and s3.klicks == [] and t3 == [], f"Kopf-Knopf „Collapse panel“ = offen → kein Klick, auch wenn augen.js zu sagt ({r3[0]}, {s3.klicks})")
+    chk(r4a[0] == "bleibt_eingeklappt" and r4b[0] == "aufgeklappt" and s4.klicks == ["Order-Panel öffnen (Open panel)"]
+        and any("zählt nicht" in x for x in t4), f"verdeckt → kein Klick, zählt nicht → danach Klick ({r4a[0]}, {r4b[0]}, {s4.klicks}, {t4})")
+    chk(r5a[0] == "bleibt_eingeklappt" and r5b[0] == "bleibt_eingeklappt" and s5.klicks == ["Order-Panel öffnen (Open panel)"]
+        and any("schon gedrückt, kein zweiter Klick" in x for x in t5), f"schon gedrückt → kein zweiter Klick, Grund in der Spur ({s5.klicks}, {t5})")
+    chk(r6[0] == "bleibt_eingeklappt" and s6.klicks == [] and any("kein „Open panel“-Knopf greifbar" in x for x in t6), f"zu ohne Knopf → Grund ({t6})")
+    chk(r7[0] == "ok" and s7.klicks == [] and t7 == [], f"offen → liest nur ({r7[0]}, {s7.klicks})")
+    chk(r8[0] == "aufgeklappt" and s8.klicks == ["Order-Panel öffnen (Open panel)"], f"ohne stand: Höhen-Probe wie bisher ({r8[0]}, {s8.klicks})")
+    # tvlesen: Panel zu nach dem Konto-Schritt → Lauf drückt einmal selbst (Zähler zurück), Meldung mit Grund
+    import inspect as _i
+    q = _i.getsource(ob.modus_tvlesen_cdp)
+    chk("s._panel_open_versucht = False" in q and "_cdp_panel_aufklappen(s, trail, ohne_max=True, stand=st)" in q
+        and 'raus("panel_zu"' in q and "Handelspanel unten ist zugeklappt" in q,
+        "tvlesen: Panel zu → EINMAL selbst „Open panel“, sonst Code panel_zu mit Grund")
+    print(("  ✓" if ok else "  ✗") + " Panel zweites Auge (augen.js + Kopf-Knopf, Marc 14.10.2026)")
     return ok
 
 

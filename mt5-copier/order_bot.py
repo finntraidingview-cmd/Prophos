@@ -18969,51 +18969,84 @@ def cdp_panel_lage(d, min_h=CDP_PANEL_MIN_H):
     return "ok" if h >= min_h else "eingeklappt"
 
 
-def _cdp_panel_aufklappen(s, trail, ohne_max=False):
-    """Order-Panel eingeklappt? Dann „Maximize panel" EINMAL je Sitzung (Windows-Maus über s.klick: Werbung weg, Hover-/Fenster-/
-    Overlay-Riegel), Wirkung beweisen (≤ 5 Blicke). Liest sonst nur. -> (lage, daten)
+CDP_PANEL_OFFEN_RX = re.compile(r"collapse|close|schlie|hide|ausblenden|einklappen|zuklappen", re.I)   # Kopf-Knopf heißt so, wenn das Panel OFFEN ist
+CDP_PANEL_ZU_RX = re.compile(r"open|öffnen|oeffnen|show|expand|einblenden", re.I)                          # … und so, wenn es ZU ist
+
+
+def _cdp_panel_aufklappen(s, trail, ohne_max=False, stand=None):
+    """Order-Panel eingeklappt? Dann „Open panel" EINMAL je Lauf (Windows-Maus über s.klick: Werbung weg, Hover-/Fenster-/
+    Overlay-Riegel), Wirkung beweisen (≤ 5 Blicke); „Maximize panel" nur noch als alter Rückfall (CDP_NIE_MAXIMIEREN). Liest sonst nur.
+    stand = letzter augen.js-Stand (konto.panel 'zu' + panel_knopf) — zweites Auge neben der Höhen-Probe. -> (lage, daten)
     lage: 'ok' | 'unklar' | 'aufgeklappt' | 'ohne_knopf' (Symbol fehlt) | 'bleibt_eingeklappt' (verdeckt, ohne Wirkung, schon versucht)"""
     if not hasattr(s, "lese_js"):
         return "unklar", None
     d = s.lese_js(CDP_PANEL_LAGE_JS)
+    if not isinstance(d, dict):
+        d = {}
     lage = cdp_panel_lage(d)
-    if lage != "eingeklappt":
+    vk = d.get("vis_knopf") if isinstance(d.get("vis_knopf"), dict) else None
+    va0 = str((vk or {}).get("aria") or "")
+    knopf_sagt_offen = bool(CDP_PANEL_OFFEN_RX.search(va0))
+    knopf_sagt_zu = bool(CDP_PANEL_ZU_RX.search(va0)) and not knopf_sagt_offen
+    # ZWEITES AUGE (14.10.2026, Marc pc-7ftp5l, Balance-Lesung direkt nach dem Tradovate-Login): das Handelspanel stand zu („Open panel"
+    # unten rechts), der Konto-Schritt meldete „Konto steht" (die Kontonummer steht auch bei zugeklapptem Panel in der Broker-Leiste) und
+    # drückte NICHT auf „Open panel" — die Lesung scheiterte dann ohne Positions-Tabelle. Bisher entschied allein die Höhen-Probe
+    # (#footer-chart-panel) und schwieg, wenn sie „ok"/„unklar" sagte oder der Open-Versuch schon verbraucht war. Jetzt zählt auch das
+    # Urteil von augen.js (konto.panel 'zu' aus dem Kopf-Knopf bzw. „Open account manager") und der Kopf-Knopf-Name selbst; jeder
+    # Nicht-Klick steht mit Grund in der Spur. Sagt der Kopf-Knopf „Collapse panel", ist das Panel offen — egal, was die Höhe sagt.
+    ko = stand.get("konto") if isinstance(stand, dict) and isinstance(stand.get("konto"), dict) else {}
+    augen_zu = ko.get("panel") == "zu" and not knopf_sagt_offen
+    if lage != "eingeklappt" and not knopf_sagt_zu and not augen_zu:
         return lage, d
     h = d.get("unter_leiste")
     # NIE MAXIMIEREN (Finn 01.10.2026 11:29 UTC, Orbit V3 bei Moritz: „nie wieder Maximize, immer nur Open panel" — Puls maximierte, weil
     # das OFFENE Panel dort nur 113 px hoch ist (< CDP_PANEL_MIN_H), und scheiterte dann am Kontextmenü „Tradovate ▾" oben in der
     # maximierten Ansicht → Login-Wechsel nicht geschafft). Offenes Panel (Kopf-Knopf „Collapse panel") zählt jetzt als ok, egal wie hoch.
-    va0 = str(((d.get("vis_knopf") if isinstance(d.get("vis_knopf"), dict) else {}) or {}).get("aria") or "")
-    if CDP_NIE_MAXIMIEREN and re.search(r"collapse|close|schlie|hide|ausblenden|einklappen|zuklappen", va0, re.I):
+    if CDP_NIE_MAXIMIEREN and knopf_sagt_offen:
         return "ok", d
     # ERST „Open panel" (Finn 01.10.2026, Live-Befund Moritz 23:08 UTC, Orbit V3: nach „Maximize panel" war der Chart weg, das Symbol
     # ließ sich nicht einstellen — „nur auf Open Panel, das Dropdown sieht man da perfekt"). Normale Höhe, Chart bleibt sichtbar;
     # „Maximize panel" nur noch als Rückfall, wenn das offene Panel zu niedrig bleibt (Vorfall pc-cccccc 30.09.: 49 px trotz „offen").
-    vk = d.get("vis_knopf") if isinstance(d.get("vis_knopf"), dict) else None
-    va = str((vk or {}).get("aria") or "")
-    if (not getattr(s, "_panel_open_versucht", False) and vk and cdp_rect(vk)
-            and re.search(r"open|öffnen|oeffnen|show|expand|einblenden", va, re.I) and not re.search(r"collapse|close|schlie|hide", va, re.I)):
-        s._panel_open_versucht = True
-        if hasattr(s, "werbung_weg"):
-            s.werbung_weg()
-        frei_o = s.lese_js(cdp_panel_frei_js(cdp_rect(vk)))
-        if isinstance(frei_o, dict) and not frei_o.get("frei"):
-            trail.append(f"„Open panel“ verdeckt ('{frei_o.get('was')}' liegt darüber) — kein Klick")
+    # Open-Knopf: der Kopf-Knopf der Probe, wenn er „Open panel" heißt (oder namenlos ist und augen.js „zu" sagt); sonst der Knopf,
+    # den augen.js selbst gefunden hat (panel_knopf — kann auch „Open account manager" sein).
+    kn_open = None
+    if vk and cdp_rect(vk) and (knopf_sagt_zu or (augen_zu and not va0)):
+        kn_open = vk
+    elif augen_zu and cdp_rect(ko.get("panel_knopf")):
+        kn_open = ko.get("panel_knopf")
+    zu_text = (f"{h} px unter der Broker-Leiste" if isinstance(h, (int, float)) and not isinstance(h, bool)
+               else (f"Kopf-Knopf „{va0[:30]}“" if va0 else "augen.js: Handelspanel zu"))
+    if kn_open:
+        if getattr(s, "_panel_open_versucht", False):
+            trail.append(f"Order-Panel weiter zu ({zu_text}) — „Open panel“ in diesem Lauf schon gedrückt, kein zweiter Klick")
         else:
-            trail.append(f"Order-Panel eingeklappt ({h} px unter der Broker-Leiste) → „Open panel“")
-            if s.klick(cdp_rect(vk), "Order-Panel öffnen (Open panel)"):
-                for _ in range(5):                        # Treffer ≠ Wirkung (Regel .835)
-                    _warte(0.6, 0.3)
-                    d2 = s.lese_js(CDP_PANEL_LAGE_JS)
-                    va2 = str(((d2.get("vis_knopf") if isinstance(d2, dict) and isinstance(d2.get("vis_knopf"), dict) else {}) or {}).get("aria") or "")
-                    if cdp_panel_lage(d2) == "ok" or (CDP_NIE_MAXIMIEREN and re.search(r"collapse|close|schlie|hide|ausblenden|einklappen", va2, re.I)):
-                        s._panel_aufgeklappt = True
-                        trail.append(f"Order-Panel offen ({(d2 or {}).get('unter_leiste')} px, Chart bleibt sichtbar)")
-                        return "aufgeklappt", d2
-                    if isinstance(d2, dict):
-                        d = d2
-                trail.append(f"Order-Panel nach „Open panel“ zu niedrig ({(d or {}).get('unter_leiste')} px) → Rückfall „Maximize panel“")
-                h = (d or {}).get("unter_leiste")
+            if hasattr(s, "werbung_weg"):
+                s.werbung_weg()
+            frei_o = s.lese_js(cdp_panel_frei_js(cdp_rect(kn_open)))
+            if isinstance(frei_o, dict) and not frei_o.get("frei"):
+                # Versuch zählt NICHT (wie _cdp_verbunden_lesen seit 29.09.2026): der Aufrufer fragt wieder, dann ist der Dialog meist weg
+                trail.append(f"„Open panel“ verdeckt ('{frei_o.get('was')}' liegt darüber) — kein Klick, zählt nicht")
+            else:
+                s._panel_open_versucht = True
+                trail.append(f"Order-Panel eingeklappt ({zu_text}) → „Open panel“")
+                if s.klick(cdp_rect(kn_open), "Order-Panel öffnen (Open panel)"):
+                    for _ in range(5):                        # Treffer ≠ Wirkung (Regel .835)
+                        _warte(0.6, 0.3)
+                        d2 = s.lese_js(CDP_PANEL_LAGE_JS)
+                        va2 = str(((d2.get("vis_knopf") if isinstance(d2, dict) and isinstance(d2.get("vis_knopf"), dict) else {}) or {}).get("aria") or "")
+                        if cdp_panel_lage(d2) == "ok" or (CDP_NIE_MAXIMIEREN and CDP_PANEL_OFFEN_RX.search(va2)):
+                            s._panel_aufgeklappt = True
+                            trail.append(f"Order-Panel offen ({(d2 or {}).get('unter_leiste')} px, Chart bleibt sichtbar)")
+                            return "aufgeklappt", d2
+                        if isinstance(d2, dict):
+                            d = d2
+                    trail.append(f"Order-Panel nach „Open panel“ zu niedrig ({(d or {}).get('unter_leiste')} px) → Rückfall „Maximize panel“")
+                    h = (d or {}).get("unter_leiste")
+                else:
+                    trail.append("„Open panel“ nicht gedrückt (kein Druck, bewiesen) — Panel bleibt zu")
+    elif augen_zu or knopf_sagt_zu:
+        trail.append(f"Order-Panel zu ({zu_text}), aber kein „Open panel“-Knopf greifbar (Kopf-Knopf '{va0 or '-'}', "
+                     f"augen.js panel_knopf {'da' if cdp_rect(ko.get('panel_knopf')) else 'fehlt'})")
     if ohne_max or CDP_NIE_MAXIMIEREN:   # 01.10.2026 (Finn): nie maximieren, der Chart bleibt sichtbar
         return "bleibt_eingeklappt", d
     if getattr(s, "_panel_max_versucht", False):
@@ -19195,7 +19228,7 @@ def _cdp_konto_sichern(s, ext, opts, trail):
                                                            "gelesen/geklickt (die Reiter lägen darunter)."), st, {"konto_eintraege": _eintr(ko)}
             # Konto passt, Panel aber eingeklappt: höchstens „Open panel“, NIE maximieren (Finn 01.10.2026, Orbit V3 bei Moritz: „ich will
             # den Chart sehen, wenn die Order platziert wird — alles in der normalen Ansicht, Maximize nur ganz kurz, wenn nötig").
-            if _cdp_panel_aufklappen(s, trail, ohne_max=True)[0] == "aufgeklappt":
+            if _cdp_panel_aufklappen(s, trail, ohne_max=True, stand=st)[0] == "aufgeklappt":
                 st = s.stand(opts)
             # War für den Kontowechsel kurz maximiert → sofort zurück, BEVOR Ticket/Order drankommen
             if _cdp_panel_zurueck(s, trail):
@@ -19503,10 +19536,24 @@ def modus_tvlesen_cdp(cmd):
         if hasattr(s, "werbung_weg"):
             s.werbung_weg(zwang=True)
         st = s.stand(opts)
+        ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+        # HANDELSPANEL ZU VOR DER LESUNG (14.10.2026, Marc pc-7ftp5l, erste Balance-Lesung nach dem Tradovate-Login): Konto-Schritt
+        # „Konto steht", Panel aber zugeklappt („Open panel") → keine Positions-Tabelle → bisher „Positions-Tabelle nicht sichtbar" ohne
+        # Grund. Jetzt: sagt augen.js „zu" (oder sieht keine Tabelle), drückt DIESER Lauf einmal selbst „Open panel" (Zähler des
+        # Konto-Schritts zählt hier nicht) und liest neu; bleibt es zu, steht der Grund in Meldung und Spur.
+        if ko.get("panel") == "zu" or ko.get("positionen_sichtbar") is False:
+            s._panel_open_versucht = False
+            if _cdp_panel_aufklappen(s, trail, ohne_max=True, stand=st)[0] == "aufgeklappt":
+                _warte(0.6, 0.3)
+                st = s.stand(opts)
         summary = cdp_summary(st.get("konto_summary"))
         today, today_label, today_text = tv_today_pnl(summary)
         ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
         if ko.get("positionen_sichtbar") is False:
+            if ko.get("panel") == "zu":
+                return raus("panel_zu", "Handelspanel unten ist zugeklappt („Open panel“) und ging nicht auf — kein Stand ohne "
+                            "Positions-Tabelle (Grund in der Spur).", "lesen",
+                            summary=summary, today_pnl=today, today_label=today_label, today_pnl_text=today_text)
             return raus("tabelle_unklar", "Positions-Tabelle im Puls-Chrome nicht sichtbar — kein Stand ohne Tabelle.", "lesen",
                         summary=summary, today_pnl=today, today_label=today_label, today_pnl_text=today_text)
         positionen = cdp_positionen_vertrag(st.get("positionen"))
