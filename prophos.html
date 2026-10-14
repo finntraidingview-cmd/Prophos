@@ -28637,7 +28637,7 @@
       const summe = (m != null ? m * fx : 0) + (f != null ? f : 0)
       return `<div class="mwd-abh-erl-zeile"><span class="mwd-person">${escapeHtml(String(x.person || '?'))}</span><span class="mwd-konto">${escapeHtml(String(k.firma || '?'))}${k.kontonr_ende ? ' …' + escapeHtml(String(k.kontonr_ende)) : ''}</span>`
         // Good Day (01.10.2026, Finn): Tradeify-WD über 250 $ — Backend hat ihn beim Abhaken als Winning Day gezählt (good_day)
-        + (x.good_day ? `<span class="mwd-chip mwd-buy" title="Master-P&L über 250 $ — als Winning Day gezählt">🏆 Good Day</span>` : '')
+        + (x.good_day ? `<span class="mwd-chip mwd-buy" title="Master-P&L über der Winning-Day-Linie der Firma (Tradeify 250 $, Topstep 150 $) — als Winning Day gezählt">🏆 Good Day</span>` : '')
         + `<span>Master <b style="color:${col(m)}">${sig(m, '$')}</b></span><span>Fusion <b style="color:${col(f)}">${sig(f, '€')}</b></span><span class="mono" style="color:${col(summe)}">≈ ${sig(summe, '€')}</span></div>` })
     // Gebühren je Firma (Round Turn je Kontrakt): gelernt / von Hand / ohne — Feld leer lassen = zurück auf gelernt
     const firmen = [...new Set([...offen, ...erl].map(x => String((x.konto || {}).firma || '').trim()).filter(Boolean))]
@@ -43972,7 +43972,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1558'
+  const OS_TAB_BUILD = '2026-09-22.1559'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -57585,7 +57585,7 @@
   /* Good Day (01.10.2026, Finn: „wenn der P&L bei Tradeify über 250 ist und der Account Winning Day ist, automatisch als
    * Winning Day anhaken"): gleiche Regel wie _wd_good_day im Backend. tcRecompute ruft das bei jeder P&L-Änderung (Hand,
    * Vorbelegung, Auto-Nachlader); hat Finn den Haken selbst angefasst, bleibt er, wie er ist. */
-  const TC_GOOD_DAY_MIN = { tradeify: 250 }
+  const TC_GOOD_DAY_MIN = { tradeify: 250, topstep: 150 }   // Topstep 150 $ (Finn 14.10.2026), gleiche Tabelle wie WD_GOOD_DAY_MIN im Backend
   let _tcGoodDayHand = false
   function tcGoodDayAuto(p, mPl){
     const cb = document.getElementById('tc-winning-day'), wrap = document.getElementById('tc-winning-day-wrap'), hint = document.getElementById('tc-winning-day-hint')
@@ -57596,7 +57596,8 @@
     const good = isFinite(mPl) && Object.keys(TC_GOOD_DAY_MIN).some(k => firma.includes(k) && mPl > TC_GOOD_DAY_MIN[k])
     if(good === cb.checked) return
     cb.checked = good
-    if(hint) hint.textContent = good ? '🏆 Good Day — Master-P&L über 250 $, automatisch angehakt.' : 'Zählt +1 auf den Stand des Accounts (einmal pro Tag).'
+    const grenze = Object.keys(TC_GOOD_DAY_MIN).find(k => firma.includes(k))
+    if(hint) hint.textContent = good ? `🏆 Good Day — Master-P&L über ${grenze ? TC_GOOD_DAY_MIN[grenze] : 250} $, automatisch angehakt.` : 'Zählt +1 auf den Stand des Accounts (einmal pro Tag).'
   }
   document.getElementById('tc-winning-day')?.addEventListener('change', () => { _tcGoodDayHand = true })
 

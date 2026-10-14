@@ -12306,7 +12306,7 @@ def _wd_zahl(v):
 # Good Day (01.10.2026, Finn: „wenn der Winning Day abgehakt wird und der P&L bei Tradeify über 250 ist, automatisch als
 # Winning Day anhaken"): Firma (Teilstring, klein) → Master-P&L in $, AB dem (echt darüber) der Tag als Winning Day zählt.
 # Nur Konten vom Typ 'winning_days'; andere Firmen zählen weiter von Hand über das 🏆-Häkchen.
-WD_GOOD_DAY_MIN = {"tradeify": 250.0}
+WD_GOOD_DAY_MIN = {"tradeify": 250.0, "topstep": 150.0}   # Topstep 150 $ (Finn 14.10.2026 ~23:50 Dubai: „bei Topstep ist Winning Day nur 150, Tradeify 250")
 
 
 def _wd_good_day(konto, master_pl):
