@@ -18179,7 +18179,10 @@ def ap_eingriff_filter(aktion, plan_ids, sicht_uid=None):
     ungestartet) als Guard in derselben Anfrage; sicht_uid (Nicht-Admin, „nur eigene") engt auf die eigene ID ein, eine Menge
     (Verwalter, Admin-Gruppen 08.10.2026) auf die IDs seiner Gruppe.
     → (params, body, 'patch'|'delete') oder (None, None, Fehlertext)."""
-    bed = {"bestaetigen": ({"status": "eq.planned", "auto_plan": "eq.true", "auto_bestaetigt_at": "is.null"}, "patch"),
+    # PULS-PAUSE (14.10.2026 18:28 Dubai, Mike c3fffac0: trotz Pause-Marke um 12:45 UTC wieder bestätigt — Echo-Order platziert, während Finn
+    # den Polar-Trade von Hand machte): ein Plan mit mt5_baseline.puls_pause wird über „bestätigen" nie wieder scharf — Rückweg nur über die
+    # SQL-Datei (Marke entfernen), nicht über den Knopf
+    bed = {"bestaetigen": ({"status": "eq.planned", "auto_plan": "eq.true", "auto_bestaetigt_at": "is.null", "mt5_baseline->puls_pause": "is.null"}, "patch"),
            "zurueck": ({"status": "eq.planned", "auto_plan": "eq.true", "start_um_gestartet_at": "is.null"}, "patch"),
            "loeschen": ({"status": "eq.planned", "auto_plan": "eq.true", "start_um_gestartet_at": "is.null"}, "delete")}.get(str(aktion or ""))
     if not bed:
