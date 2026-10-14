@@ -26213,7 +26213,7 @@
     // der Master lief weiter (Reader 02:42: Long 3 NQZ6, −1.785 $), Pascal musste von Hand nachhedgen. TradingViews Panel baut die
     // Positionstabelle nach einem Login/Konto-Wechsel neu auf und zeigt dabei kurz „no open positions". Deshalb gilt die 1-s-Regel erst,
     // wenn der Reader das Plan-Konto ≥ 60 s ununterbrochen zeigt; davor muss die Liste ≥ 10 s leer sein (wie die langsame Regel).
-    const ruhig = o.kontoStabilMs >= 60000
+    const ruhig = o.kontoStabilMs >= 90000   // .1563: 90 s statt 60
     const w = o.wurzel === 'MNQ' ? 'MNQ' : 'NQ'
     const zeilen = o.liste.filter(x => { if(!x) return false; const xw = x.wurzel || ((typeof tvSymbolWurzel === 'function') ? tvSymbolWurzel(x.symbol || '') : String(x.symbol || '')); return xw === w })
     // Position im Plan-Symbol MIT Plan-Richtung (Tradovate nettet je Symbol): Menge 0 = weg, Teilmenge = nur Hinweis, nie schließen
@@ -26224,7 +26224,9 @@
       return true
     })
     if(offen) return false
-    return o.leerSeitMs >= ((o.schnell && ruhig) ? 1000 : 10000)
+    // .1563 (Finn 15.10.2026 ~03:00 Dubai, zwei Big Trades laufen: „da darf es nicht schiefgehen, wenn Puls nachher Orders platziert"): im
+    // Wechsel-Fenster 30 s leer statt 10 — ein Tradovate-Login auf einem langsamen PC baut die Tabelle bis zu 30 s auf (pc-l5o8bv: Logins 30 s)
+    return o.leerSeitMs >= ((o.schnell && ruhig) ? 1000 : 30000)
   }
   // Teilschluss (nur Hinweis am Chip, nie schließen): Menge in der Plan-Wurzel/-Richtung kleiner als die Kontrakte des Plans
   function hedgeMasterTeilweise(liste, wurzel, richtung, kontrakte){
@@ -44020,7 +44022,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1562'
+  const OS_TAB_BUILD = '2026-09-22.1563'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
