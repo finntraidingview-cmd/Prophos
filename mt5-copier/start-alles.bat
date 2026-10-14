@@ -87,6 +87,12 @@ rem gelesen, ein Austausch ist gefahrlos. Die .bat dort werden hier NICHT
 rem angefasst -- sie koennten in diesem Moment selbst laufen, und eine
 rem laufende Batchdatei zu ueberschreiben ist unter Windows undefiniert.
 rem Sie halten sich seit .190 selbst aktuell (Update in ihrem eigenen Start).
+rem Reader fehlt ganz (14.10.2026, Marcos PC pc-t8wg97: nur drei Fenster, TradingView-Abzeichen "Reader startet ..." fuer
+rem immer): dann EINMAL start-reader.bat + reader-server.py von pages.dev nach C:\Prophos\tv-reader holen. Seit dem 01.10. laeuft
+rem das Userscript auf allen PCs, kein PC soll mehr ohne Reader sein. Nichts sonst geaendert: Update und Start darunter wie bisher.
+if not exist "C:\tv-reader\start-reader.bat" if not exist "C:\Prophos\tv-reader\start-reader.bat" (
+  powershell -NoProfile -Command "$ProgressPreference='SilentlyContinue';$d='C:\Prophos\tv-reader';New-Item -ItemType Directory -Force $d|Out-Null;foreach($f in @('start-reader.bat','reader-server.py')){try{Invoke-WebRequest ('https://prophos.pages.dev/tv-reader/'+$f) -OutFile (Join-Path $d $f) -TimeoutSec 25 -UseBasicParsing}catch{}}"
+)
 rem Reader-Ordner (01.10.2026): alt C:\tv-reader, seit der Userscript-Einrichtung per PowerShell C:\Prophos\tv-reader
 set "_tvr=C:\tv-reader"
 if not exist "C:\tv-reader\start-reader.bat" if exist "C:\Prophos\tv-reader\start-reader.bat" set "_tvr=C:\Prophos\tv-reader"
